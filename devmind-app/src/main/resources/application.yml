@@ -1,0 +1,40 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: devmind
+  datasource:
+    url: jdbc:h2:file:./data/devmind;AUTO_SERVER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+devmind:
+  session:
+    claude-path: ""               # 空=自动探测全局命令（where claude）
+    model: ""
+    permission-mode: acceptEdits   # 放手模式；会话级可覆盖
+    input-timeout: 300
+    idle-timeout: 0
+    ring-buffer: 1000
+    event-flush-ms: 200
+    max-concurrent: 4
+  worktree:
+    root: ""                       # 空=项目内 .devmind/worktrees
+    base-branch: master
+  knowledge:
+    repo-path: ""                  # 填 knowledge-repo 本地路径后可启用注入
+    enabled: true
+  project:
+    default-path: ""               # MVP：填一个本地 git 仓库绝对路径即可开始试用
+    default-name: "default"
+    default-tags: []
