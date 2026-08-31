@@ -8,7 +8,7 @@
 
 ## 2. 功能需求
 
-- **FR-01 文档分类与归属**：kind = `requirement | design | api-suite | report`；可关联 `requirementId` / `projectId`（设计文档按项目拆分，故挂 requirementId + projectId）。
+- **FR-01 文档分类与归属**：kind = `requirement | design | api-suite | report`；可关联 `taskId` / `projectId`（设计文档按项目拆分，故挂 taskId + projectId）。
 - **FR-02 版本化**：每次保存生成新版本（v1、v2…），保留全部历史与 diff，支持回退到任意历史版本。
 - **FR-03 编辑与渲染**：前端 Markdown 编辑器（实时预览）；只读渲染模式。
 - **FR-04 状态机**：`draft → pending_confirm → frozen`；`frozen` 为基线，变更须生成新版本并标注变更说明。
@@ -29,12 +29,12 @@
 ## 5. 数据模型
 
 ```
-documents(id, kind, requirement_id, project_id, title, current_version,
+documents(id, kind, task_id, project_id, title, current_version,
           status, template, created_by, created_at)
 document_versions(id, document_id, version_no, content_md, commit_sha,
                   change_note, created_by, created_at)
   # docs-repo 文件结构：
-  #   requirements/<reqId>/…    designs/<reqId>/<project>/…
+  #   tasks/<taskId>/…          designs/<taskId>/<project>/…
   #   api-suite/<project>/…     reports/…
 ```
 

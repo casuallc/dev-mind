@@ -11,7 +11,7 @@
 - **FR-01 部署计划**：由项目预定义的部署脚本模板 + 参数（产物引用、目标服务器、环境）渲染生成；计划在执行前**可见**（步骤列表）。
 - **FR-02 执行步骤**：`拉取产物 → 备份当前版本 → 部署/滚动更新 → 启动 → 健康检查`；逐步状态实时展示（WebSocket）。
 - **FR-03 回滚**：任一步失败 → 自动回滚到备份版本 → 记录 `ROLLED_BACK` + P0 告警；支持手动触发回滚。
-- **FR-04 部署记录**：deployment 关联 build、server、requirementId；幂等（同 build 重复部署可识别）。
+- **FR-04 部署记录**：deployment 关联 build、server、taskId；幂等（同 build 重复部署可识别）。
 - **FR-05 状态机**：`PLANNED / RUNNING / SUCCESS / FAILED / ROLLED_BACK`。
 - **FR-06 通知**：部署完成/失败按分级通知（CAP-06）。
 - **FR-07 部署确认门**：执行前可要求确认（流程层使用；直接调用本能力时可不强制，由上层决定）。
@@ -29,7 +29,7 @@
 ## 5. 数据模型
 
 ```
-deployments(id, project_id, requirement_id?, server_id, build_id, env,
+deployments(id, project_id, task_id?, server_id, build_id, env,
             plan(json), status, current_step, logs_ref,
             backup_ref, rollback_of?, started_at, finished_at, created_by)
 deployment_steps(id, deployment_id, seq, name, type[artifact|backup|deploy|start|health],
