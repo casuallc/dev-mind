@@ -70,7 +70,7 @@ export interface CaseResult {
 export interface TestRun {
   id: number
   projectId: string
-  requirementId: string | null
+  taskId: string | null
   suiteIds: number[]
   deploymentId: number | null
   serverId: number | null
@@ -89,7 +89,7 @@ export interface TestRun {
 
 export interface CreateTestRunInput {
   projectId: string
-  requirementId?: string
+  taskId?: string
   suiteIds: number[]
   deploymentId?: number
   serverId?: number

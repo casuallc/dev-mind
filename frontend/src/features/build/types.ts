@@ -14,13 +14,13 @@ export interface TriggerInput {
   branch?: string
   executor?: BuildExecutor
   remoteServerId?: number
-  requirementId?: string
+  taskId?: string
 }
 
 export interface BuildRecord {
   id: number
   projectId: string
-  requirementId: string | null
+  taskId: string | null
   commit: string | null
   branch: string | null
   executor: BuildExecutor

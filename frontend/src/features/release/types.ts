@@ -25,7 +25,7 @@ export interface ReleaseConfigInput {
 export interface ReleaseRecord {
   id: number
   projectId: string
-  requirementId?: string
+  taskId?: string
   buildId?: number
   version: string
   status: ReleaseStatus
@@ -44,7 +44,7 @@ export interface ReleaseRecord {
 
 export interface CreateReleaseInput {
   projectId: string
-  requirementId?: string
+  taskId?: string
   buildId?: number
   version?: string
   executor?: string

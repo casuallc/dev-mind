@@ -31,7 +31,7 @@ export interface DeployStep {
 export interface DeploymentRecord {
   id: number
   projectId: string
-  requirementId: string | null
+  taskId: string | null
   serverId: number
   environmentId: number | null
   buildId: number | null

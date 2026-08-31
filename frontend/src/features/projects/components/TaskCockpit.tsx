@@ -1,5 +1,5 @@
-// 需求驾驶舱：左侧需求列表（按状态分组），右侧选中需求的主线视图（P0-6 步骤 4）。
-// 自包含组件：内部管理需求列表 + 选中 + 聚合数据 + 新建/编辑/删除/状态推进。
+// 任务驾驶舱：左侧任务列表（按状态分组），右侧选中任务的主线视图（P0-6 步骤 4）。
+// 自包含组件：内部管理任务列表 + 选中 + 聚合数据（含 CAP-11 发版）+ 新建/编辑/删除/状态推进。
 import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
@@ -25,24 +25,24 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import { EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import {
-  createRequirement,
-  deleteRequirement,
-  getRequirementOverview,
-  listRequirements,
-  updateRequirement,
-  updateRequirementStatus,
+  createTask,
+  deleteTask,
+  getTaskOverview,
+  listTasks,
+  updateTask,
+  updateTaskStatus,
 } from '../api'
 import type {
-  Requirement,
-  RequirementInput,
-  RequirementOverview,
-  RequirementStatus,
+  Task,
+  TaskInput,
+  TaskOverview,
+  TaskStatus,
 } from '../types'
 
-const STATUS_FLOW: RequirementStatus[] = ['DRAFT', 'DESIGNING', 'DEVELOPING', 'TESTING', 'ACCEPTANCE', 'DONE']
-const ALL_STATUSES: RequirementStatus[] = [...STATUS_FLOW, 'CANCELLED']
+const STATUS_FLOW: TaskStatus[] = ['DRAFT', 'DESIGNING', 'DEVELOPING', 'TESTING', 'ACCEPTANCE', 'DONE']
+const ALL_STATUSES: TaskStatus[] = [...STATUS_FLOW, 'CANCELLED']
 
-export function reqStatusColor(s: RequirementStatus | string): string {
+export function taskStatusColor(s: TaskStatus | string): string {
   switch (s) {
     case 'DRAFT': return 'default'
     case 'DESIGNING': return 'cyan'
@@ -55,19 +55,19 @@ export function reqStatusColor(s: RequirementStatus | string): string {
   }
 }
 
-export default function RequirementCockpit({ projectId }: { projectId: string }) {
-  const [requirements, setRequirements] = useState<Requirement[]>([])
+export default function TaskCockpit({ projectId }: { projectId: string }) {
+  const [tasks, setTasks] = useState<Task[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [overview, setOverview] = useState<RequirementOverview | null>(null)
+  const [overview, setOverview] = useState<TaskOverview | null>(null)
   const [overviewLoading, setOverviewLoading] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
-  const [editing, setEditing] = useState<Requirement | null>(null)
+  const [editing, setEditing] = useState<Task | null>(null)
   const [form] = Form.useForm()
 
   const reload = useCallback(async (keepSelection?: string | null) => {
     try {
-      const rs = await listRequirements(projectId)
-      setRequirements(rs)
+      const rs = await listTasks(projectId)
+      setTasks(rs)
       const keep = keepSelection !== undefined ? keepSelection : selectedId
       if (keep && rs.some((r) => r.id === keep)) {
         setSelectedId(keep)
@@ -75,7 +75,7 @@ export default function RequirementCockpit({ projectId }: { projectId: string })
         setSelectedId(rs.length > 0 ? rs[0].id : null)
       }
     } catch (e) {
-      message.error(`加载需求失败：${(e as Error).message}`)
+      message.error(`加载任务失败：${(e as Error).message}`)
     }
   }, [projectId, selectedId])
 
@@ -84,12 +84,12 @@ export default function RequirementCockpit({ projectId }: { projectId: string })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId])
 
-  const loadOverview = useCallback(async (reqId: string) => {
+  const loadOverview = useCallback(async (taskId: string) => {
     setOverviewLoading(true)
     try {
-      setOverview(await getRequirementOverview(projectId, reqId))
+      setOverview(await getTaskOverview(projectId, taskId))
     } catch (e) {
-      message.error(`加载需求主线失败：${(e as Error).message}`)
+      message.error(`加载任务主线失败：${(e as Error).message}`)
       setOverview(null)
     } finally {
       setOverviewLoading(false)
@@ -104,17 +104,17 @@ export default function RequirementCockpit({ projectId }: { projectId: string })
     }
   }, [selectedId, loadOverview])
 
-  const openEdit = (r: Requirement | null) => {
+  const openEdit = (r: Task | null) => {
     setEditing(r)
     form.setFieldsValue(r ?? { title: '', description: '', ownerId: '', branchSlug: '' })
     setEditOpen(true)
   }
 
-  const onSave = async (v: RequirementInput) => {
+  const onSave = async (v: TaskInput) => {
     try {
       const saved = editing
-        ? await updateRequirement(projectId, editing.id, v)
-        : await createRequirement(projectId, v)
+        ? await updateTask(projectId, editing.id, v)
+        : await createTask(projectId, v)
       setEditOpen(false)
       await reload(saved.id)
       message.success('已保存')
@@ -123,9 +123,9 @@ export default function RequirementCockpit({ projectId }: { projectId: string })
     }
   }
 
-  const advance = async (r: Requirement, status: RequirementStatus) => {
+  const advance = async (r: Task, status: TaskStatus) => {
     try {
-      await updateRequirementStatus(projectId, r.id, status)
+      await updateTaskStatus(projectId, r.id, status)
       await reload(r.id)
       message.success(`${r.code} → ${status}`)
     } catch (e) {
@@ -133,16 +133,16 @@ export default function RequirementCockpit({ projectId }: { projectId: string })
     }
   }
 
-  const confirmDelete = (r: Requirement) => {
+  const confirmDelete = (r: Task) => {
     Modal.confirm({
       centered: true,
-      title: '删除需求？',
-      content: `将删除需求「${r.code} ${r.title}」（关联的文档/构建/部署记录保留，仅解除主线）。`,
+      title: '删除任务？',
+      content: `将删除任务「${r.code} ${r.title}」（关联的文档/构建/部署记录保留，仅解除主线）。`,
       okText: '删除',
       okButtonProps: { danger: true },
       cancelText: '取消',
       onOk: async () => {
-        await deleteRequirement(projectId, r.id)
+        await deleteTask(projectId, r.id)
         await reload(null)
         message.success('已删除')
       },
@@ -151,7 +151,7 @@ export default function RequirementCockpit({ projectId }: { projectId: string })
 
   // 左侧列表按状态分组（流程顺序），组内按 seq 倒序
   const groups = ALL_STATUSES
-    .map((s) => ({ status: s, items: requirements.filter((r) => r.status === s) }))
+    .map((s) => ({ status: s, items: tasks.filter((r) => r.status === s) }))
     .filter((g) => g.items.length > 0)
 
   return (
@@ -160,16 +160,16 @@ export default function RequirementCockpit({ projectId }: { projectId: string })
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
           <Space>
             <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-              新建需求
+              新建任务
             </Button>
             <Button size="small" icon={<ReloadOutlined />} onClick={() => reload()} />
           </Space>
-          {requirements.length === 0 ? (
-            <Empty description="暂无需求，点击「新建需求」开始一条主线" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          {tasks.length === 0 ? (
+            <Empty description="暂无任务，点击「新建任务」开始一条主线" image={Empty.PRESENTED_IMAGE_SIMPLE} />
           ) : (
             groups.map((g) => (
               <div key={g.status}>
-                <Tag color={reqStatusColor(g.status)} style={{ marginBottom: 4 }}>
+                <Tag color={taskStatusColor(g.status)} style={{ marginBottom: 4 }}>
                   {g.status}（{g.items.length}）
                 </Tag>
                 <List
@@ -206,31 +206,31 @@ export default function RequirementCockpit({ projectId }: { projectId: string })
         {overviewLoading ? (
           <Spin />
         ) : !overview ? (
-          <Empty description="选择左侧需求查看主线视图" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          <Empty description="选择左侧任务查看主线视图" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         ) : (
           <Mainline
             overview={overview}
-            onAdvance={(s) => advance(overview.requirement, s)}
-            onEdit={() => openEdit(overview.requirement)}
-            onDelete={() => confirmDelete(overview.requirement)}
-            onRefresh={() => loadOverview(overview.requirement.id)}
+            onAdvance={(s) => advance(overview.task, s)}
+            onEdit={() => openEdit(overview.task)}
+            onDelete={() => confirmDelete(overview.task)}
+            onRefresh={() => loadOverview(overview.task.id)}
           />
         )}
       </Col>
 
-      <Modal title={editing ? `编辑需求 ${editing.code}` : '新建需求'} open={editOpen} onCancel={() => setEditOpen(false)}
+      <Modal title={editing ? `编辑任务 ${editing.code}` : '新建任务'} open={editOpen} onCancel={() => setEditOpen(false)}
         onOk={() => form.submit()} okText="保存" width={560}>
         <Form form={form} layout="vertical" onFinish={onSave}>
           <Form.Item label="标题" name="title" rules={[{ required: true, message: '请输入标题' }]}>
             <Input placeholder="如 用户登录支持扫码" />
           </Form.Item>
-          <Form.Item label="描述" name="description">
+          <Form.Item label="描述（需求内容）" name="description">
             <Input.TextArea rows={3} />
           </Form.Item>
           <Form.Item label="负责人" name="ownerId">
             <Input placeholder="可选" />
           </Form.Item>
-          <Form.Item label="分支 slug" name="branchSlug" extra="需求分支 req/<seq>-<slug>，缺省由标题生成">
+          <Form.Item label="分支 slug" name="branchSlug" extra="任务分支 task/<seq>-<slug>，缺省由标题生成">
             <Input placeholder="如 login-qrcode" />
           </Form.Item>
         </Form>
@@ -242,36 +242,36 @@ export default function RequirementCockpit({ projectId }: { projectId: string })
 // ---------------- 右侧主线视图 ----------------
 
 function Mainline({ overview, onAdvance, onEdit, onDelete, onRefresh }: {
-  overview: RequirementOverview
-  onAdvance: (s: RequirementStatus) => void
+  overview: TaskOverview
+  onAdvance: (s: TaskStatus) => void
   onEdit: () => void
   onDelete: () => void
   onRefresh: () => void
 }) {
-  const r = overview.requirement
+  const r = overview.task
   const flowIndex = STATUS_FLOW.indexOf(r.status)
 
-  const docColumns: ColumnsType<RequirementOverview['docs'][number]> = [
+  const docColumns: ColumnsType<TaskOverview['docs'][number]> = [
     { title: 'ID', dataIndex: 'id', width: 60 },
     { title: '类型', dataIndex: 'kind', width: 90, render: (k: string) => <Tag>{k}</Tag> },
     { title: '标题', dataIndex: 'title', ellipsis: true },
     { title: '状态', dataIndex: 'status', width: 90 },
     { title: '版本', dataIndex: 'currentVersion', width: 60, render: (v: number) => `v${v}` },
   ]
-  const sessionColumns: ColumnsType<RequirementOverview['sessions'][number]> = [
+  const sessionColumns: ColumnsType<TaskOverview['sessions'][number]> = [
     { title: 'ID', dataIndex: 'id', width: 100, render: (v: string) => <Typography.Text code style={{ fontSize: 12 }}>{v}</Typography.Text> },
     { title: '任务', dataIndex: 'taskSpec', ellipsis: true },
     { title: '状态', dataIndex: 'status', width: 110, render: (s: string) => <Tag color={s === 'DONE' ? 'green' : s === 'FAILED' ? 'red' : 'blue'}>{s}</Tag> },
     { title: '创建', dataIndex: 'createdAt', width: 150, render: (v: string) => <span style={{ fontSize: 12 }}>{new Date(v).toLocaleString()}</span> },
   ]
-  const buildColumns: ColumnsType<RequirementOverview['builds'][number]> = [
+  const buildColumns: ColumnsType<TaskOverview['builds'][number]> = [
     { title: 'ID', dataIndex: 'id', width: 60, render: (v: number) => `#${v}` },
     { title: '分支', dataIndex: 'branch', width: 140, ellipsis: true, render: (v?: string) => v || '-' },
     { title: 'Commit', dataIndex: 'commit', width: 100, render: (v?: string) => v ? <Typography.Text code style={{ fontSize: 12 }}>{v.slice(0, 8)}</Typography.Text> : '-' },
     { title: '状态', dataIndex: 'status', width: 100, render: (s: string) => <Tag color={s === 'SUCCESS' ? 'green' : s === 'FAILED' ? 'red' : 'blue'}>{s}</Tag> },
     { title: '创建', dataIndex: 'createdAt', width: 150, render: (v: string) => <span style={{ fontSize: 12 }}>{new Date(v).toLocaleString()}</span> },
   ]
-  const testColumns: ColumnsType<RequirementOverview['testRuns'][number]> = [
+  const testColumns: ColumnsType<TaskOverview['testRuns'][number]> = [
     { title: 'ID', dataIndex: 'id', width: 60, render: (v: number) => `#${v}` },
     { title: '触发', dataIndex: 'triggeredBy', width: 80 },
     { title: '状态', dataIndex: 'status', width: 100, render: (s: string) => <Tag color={s === 'SUCCESS' ? 'green' : s === 'FAILED' ? 'red' : 'blue'}>{s}</Tag> },
@@ -287,11 +287,19 @@ function Mainline({ overview, onAdvance, onEdit, onDelete, onRefresh }: {
     },
     { title: '创建', dataIndex: 'createdAt', width: 150, render: (v: string) => <span style={{ fontSize: 12 }}>{new Date(v).toLocaleString()}</span> },
   ]
-  const deployColumns: ColumnsType<RequirementOverview['deployments'][number]> = [
+  const deployColumns: ColumnsType<TaskOverview['deployments'][number]> = [
     { title: 'ID', dataIndex: 'id', width: 60, render: (v: number) => `#${v}` },
     { title: '环境', dataIndex: 'env', width: 80, render: (v?: string) => v || '-' },
     { title: '构建', dataIndex: 'buildId', width: 80, render: (v?: number) => v ? `#${v}` : '-' },
     { title: '状态', dataIndex: 'status', width: 110, render: (s: string) => <Tag color={s === 'SUCCESS' ? 'green' : s.includes('FAIL') ? 'red' : 'blue'}>{s}</Tag> },
+    { title: '创建', dataIndex: 'createdAt', width: 150, render: (v: string) => <span style={{ fontSize: 12 }}>{new Date(v).toLocaleString()}</span> },
+  ]
+  const releaseColumns: ColumnsType<TaskOverview['releases'][number]> = [
+    { title: 'ID', dataIndex: 'id', width: 60, render: (v: number) => `#${v}` },
+    { title: '版本', dataIndex: 'version', width: 120, render: (v?: string) => v ? <Typography.Text code style={{ fontSize: 12 }}>{v}</Typography.Text> : '-' },
+    { title: '状态', dataIndex: 'status', width: 110, render: (s: string) => <Tag color={s === 'SUCCESS' ? 'green' : s.includes('FAIL') || s === 'ROLLED_BACK' ? 'red' : 'blue'}>{s}</Tag> },
+    { title: '执行', dataIndex: 'executor', width: 80, render: (v?: string) => v || '-' },
+    { title: '回滚', dataIndex: 'rollbackOf', width: 70, render: (v?: number) => v ? `#${v}` : '-' },
     { title: '创建', dataIndex: 'createdAt', width: 150, render: (v: string) => <span style={{ fontSize: 12 }}>{new Date(v).toLocaleString()}</span> },
   ]
 
@@ -301,7 +309,7 @@ function Mainline({ overview, onAdvance, onEdit, onDelete, onRefresh }: {
         <Space wrap>
           <Typography.Text code>{r.code}</Typography.Text>
           <Typography.Text strong style={{ fontSize: 15 }}>{r.title}</Typography.Text>
-          <Tag color={reqStatusColor(r.status)}>{r.status}</Tag>
+          <Tag color={taskStatusColor(r.status)}>{r.status}</Tag>
           <Select
             size="small"
             value={r.status}
@@ -323,14 +331,14 @@ function Mainline({ overview, onAdvance, onEdit, onDelete, onRefresh }: {
         )}
         <Descriptions size="small" column={{ xs: 1, sm: 3 }}>
           <Descriptions.Item label="负责人">{r.ownerId || '-'}</Descriptions.Item>
-          <Descriptions.Item label="需求分支">
+          <Descriptions.Item label="任务分支">
             <Typography.Text code style={{ fontSize: 12 }}>
-              req/{r.seq}{r.branchSlug ? `-${r.branchSlug}` : ''}
+              task/{r.seq}{r.branchSlug ? `-${r.branchSlug}` : ''}
             </Typography.Text>
           </Descriptions.Item>
           <Descriptions.Item label="创建">{new Date(r.createdAt).toLocaleString()}</Descriptions.Item>
           {r.description && (
-            <Descriptions.Item label="描述" span={3}>{r.description}</Descriptions.Item>
+            <Descriptions.Item label="描述（需求内容）" span={3}>{r.description}</Descriptions.Item>
           )}
         </Descriptions>
       </Space>
@@ -385,6 +393,11 @@ function Mainline({ overview, onAdvance, onEdit, onDelete, onRefresh }: {
             label: `部署（${overview.deployments.length}）`,
             children: <Table rowKey="id" size="small" columns={deployColumns} dataSource={overview.deployments} pagination={false} />,
           },
+          {
+            key: 'releases',
+            label: `发版（${overview.releases.length}）`,
+            children: <Table rowKey="id" size="small" columns={releaseColumns} dataSource={overview.releases} pagination={false} />,
+          },
         ]}
       />
     </Space>
@@ -393,12 +406,13 @@ function Mainline({ overview, onAdvance, onEdit, onDelete, onRefresh }: {
 
 function timelineColor(type: string): string {
   switch (type) {
-    case 'REQUIREMENT': return 'purple'
+    case 'TASK': return 'purple'
     case 'DOC': return 'green'
     case 'SESSION': return 'blue'
     case 'BUILD': return 'orange'
     case 'TEST_RUN': return 'cyan'
     case 'DEPLOYMENT': return 'red'
+    case 'RELEASE': return 'magenta'
     default: return 'gray'
   }
 }

@@ -151,18 +151,18 @@ export interface WorktreeInfo {
   sessionId: string
 }
 
-// P0-5 需求（项目内主线）
-export type RequirementStatus =
+// P0-5 任务（项目内主线；Task 内嵌 Requirement，title/description 即需求内容）
+export type TaskStatus =
   | 'DRAFT' | 'DESIGNING' | 'DEVELOPING' | 'TESTING' | 'ACCEPTANCE' | 'DONE' | 'CANCELLED'
 
-export interface Requirement {
+export interface Task {
   id: string
   projectId: string
   seq: number
-  code: string // REQ-<seq>
+  code: string // TASK-<seq>
   title: string
   description?: string
-  status: RequirementStatus
+  status: TaskStatus
   ownerId?: string
   branchSlug?: string
   docId?: number
@@ -171,7 +171,7 @@ export interface Requirement {
   updatedAt: string
 }
 
-export interface RequirementInput {
+export interface TaskInput {
   title: string
   description?: string
   ownerId?: string
@@ -179,14 +179,14 @@ export interface RequirementInput {
   docId?: number
 }
 
-// 需求主线聚合视图（app 组装层 /overview）
-export interface RequirementOverview {
-  requirement: Requirement
+// 任务主线聚合视图（app 组装层 /tasks/{taskId}/overview）
+export interface TaskOverview {
+  task: Task
   docs: { id: number; kind: string; title: string; status: string; currentVersion: number; updatedAt: string }[]
   sessions: { id: string; status: string; taskSpec: string; model?: string; createdAt: string; finishedAt?: string }[]
   builds: { id: number; status: string; branch?: string; commit?: string; artifactRef?: string; createdAt: string; finishedAt?: string }[]
   testRuns: { id: number; status: string; summaryJson?: string; reportDocId?: number; triggeredBy?: string; createdAt: string; finishedAt?: string }[]
   deployments: { id: number; status: string; env?: string; serverId?: number; buildId?: number; createdBy?: string; createdAt: string; finishedAt?: string }[]
+  releases: { id: number; version?: string; status: string; executor?: string; rollbackOf?: number; createdAt: string; finishedAt?: string }[]
   timeline: { time: string; type: string; label: string; refId: string }[]
 }
-

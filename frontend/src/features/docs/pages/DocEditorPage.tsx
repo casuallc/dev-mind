@@ -293,7 +293,7 @@ export default function DocEditorPage() {
           >
             <Space style={{ marginBottom: 8 }}>
               {doc.projectId && <Tag>项目: {doc.projectId}</Tag>}
-              {doc.requirementId && <Tag>需求: {doc.requirementId}</Tag>}
+              {doc.taskId && <Tag>任务: {doc.taskId}</Tag>}
               {doc.tags.map((t) => <Tag key={t}>{t}</Tag>)}
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>{doc.filePath}</Typography.Text>
             </Space>

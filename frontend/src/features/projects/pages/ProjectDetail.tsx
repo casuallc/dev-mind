@@ -34,7 +34,7 @@ import BuildCenterTab from '../../build/BuildTab'
 import DeployTab from '../../deploy/DeployTab'
 import TestTab from '../../test/TestTab'
 import ReleaseTab from '../../release/ReleaseTab'
-import RequirementCockpit from '../components/RequirementCockpit'
+import TaskCockpit from '../components/TaskCockpit'
 import {
   addBuildStep,
   addEnvironment,
@@ -211,12 +211,12 @@ export default function ProjectDetail() {
         </Descriptions>
       </Card>
 
-      <Card size="small" title="需求主线" extra={
+      <Card size="small" title="任务主线" extra={
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          项目内每个需求一条独立流程：文档 → 会话 → 构建 → 测试 → 部署 → 时间线
+          项目内每个任务一条独立流程：文档 → 会话 → 构建 → 测试 → 部署 → 发版 → 时间线
         </Typography.Text>
       }>
-        <RequirementCockpit projectId={project.id} />
+        <TaskCockpit projectId={project.id} />
       </Card>
 
       <Card size="small" title="项目级资产">

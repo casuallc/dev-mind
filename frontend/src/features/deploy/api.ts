@@ -24,7 +24,7 @@ export interface CreateDeploymentInput {
   /** P1-1 环境：提供服务器组与变量注入，env 名以环境名为准 */
   environmentId?: number
   buildId?: number
-  requirementId?: string
+  taskId?: string
   env?: string
   confirmRequired?: boolean
   force?: boolean

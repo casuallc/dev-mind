@@ -12,7 +12,7 @@ export type SessionState =
 export interface SessionSummary {
   id: string
   projectId: string
-  requirementId?: string
+  taskId?: string
   taskSpec: string
   status: string
   state: SessionState

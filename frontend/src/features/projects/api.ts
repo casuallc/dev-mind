@@ -14,11 +14,11 @@ import type {
   ProjectServer,
   ReleaseConfig,
   ReleaseConfigInput,
-  Requirement,
-  RequirementInput,
-  RequirementOverview,
-  RequirementStatus,
   ServerInput,
+  Task,
+  TaskInput,
+  TaskOverview,
+  TaskStatus,
   WorktreeInfo,
 } from './types'
 
@@ -165,36 +165,36 @@ export function releaseWrite(id: string): Promise<ProjectLock> {
   return api.post<ProjectLock>(`/projects/${id}/lock/release`)
 }
 
-// ---------------- 需求（P0-5 项目内主线） ----------------
+// ---------------- 任务（P0-5 项目内主线，内嵌需求） ----------------
 
-export function listRequirements(projectId: string, status?: string): Promise<Requirement[]> {
+export function listTasks(projectId: string, status?: string): Promise<Task[]> {
   const q = status && status !== 'ALL' ? `?status=${status}` : ''
-  return api.get<Requirement[]>(`/projects/${projectId}/requirements${q}`)
+  return api.get<Task[]>(`/projects/${projectId}/tasks${q}`)
 }
 
-export function createRequirement(projectId: string, input: RequirementInput): Promise<Requirement> {
-  return api.post<Requirement>(`/projects/${projectId}/requirements`, input)
+export function createTask(projectId: string, input: TaskInput): Promise<Task> {
+  return api.post<Task>(`/projects/${projectId}/tasks`, input)
 }
 
-export function updateRequirement(projectId: string, reqId: string, input: RequirementInput): Promise<Requirement> {
-  return api.put<Requirement>(`/projects/${projectId}/requirements/${reqId}`, input)
+export function updateTask(projectId: string, taskId: string, input: TaskInput): Promise<Task> {
+  return api.put<Task>(`/projects/${projectId}/tasks/${taskId}`, input)
 }
 
-export function updateRequirementStatus(
+export function updateTaskStatus(
   projectId: string,
-  reqId: string,
-  status: RequirementStatus,
-): Promise<Requirement> {
-  return api.put<Requirement>(`/projects/${projectId}/requirements/${reqId}/status`, { status })
+  taskId: string,
+  status: TaskStatus,
+): Promise<Task> {
+  return api.put<Task>(`/projects/${projectId}/tasks/${taskId}/status`, { status })
 }
 
-export function deleteRequirement(projectId: string, reqId: string): Promise<void> {
-  return api.del(`/projects/${projectId}/requirements/${reqId}`)
+export function deleteTask(projectId: string, taskId: string): Promise<void> {
+  return api.del(`/projects/${projectId}/tasks/${taskId}`)
 }
 
-/** 需求主线聚合（P0-6 步骤 4）：文档/会话/构建/测试/部署 + 时间线 */
-export function getRequirementOverview(projectId: string, reqId: string): Promise<RequirementOverview> {
-  return api.get<RequirementOverview>(`/projects/${projectId}/requirements/${reqId}/overview`)
+/** 任务主线聚合（P0-6 步骤 4）：文档/会话/构建/测试/部署/发版 + 时间线 */
+export function getTaskOverview(projectId: string, taskId: string): Promise<TaskOverview> {
+  return api.get<TaskOverview>(`/projects/${projectId}/tasks/${taskId}/overview`)
 }
 
 // ---------------- worktree ----------------
