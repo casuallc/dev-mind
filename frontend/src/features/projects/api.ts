@@ -4,7 +4,9 @@ import type {
   BuildStep,
   BuildStepInput,
   ContextSummary,
+  EnvironmentInput,
   Project,
+  ProjectEnvironment,
   ProjectInput,
   ProjectLock,
   ProjectRepo,
@@ -61,6 +63,24 @@ export function deleteRepo(id: string, repoId: number): Promise<void> {
 
 export function setPrimaryRepo(id: string, repoId: number): Promise<ProjectRepo> {
   return api.post<ProjectRepo>(`/projects/${id}/repos/${repoId}/primary`)
+}
+
+// ---------------- 环境（P1-1） ----------------
+
+export function listEnvironments(id: string): Promise<ProjectEnvironment[]> {
+  return api.get<ProjectEnvironment[]>(`/projects/${id}/environments`)
+}
+
+export function addEnvironment(id: string, input: EnvironmentInput): Promise<ProjectEnvironment> {
+  return api.post<ProjectEnvironment>(`/projects/${id}/environments`, input)
+}
+
+export function updateEnvironment(id: string, envId: number, input: EnvironmentInput): Promise<ProjectEnvironment> {
+  return api.put<ProjectEnvironment>(`/projects/${id}/environments/${envId}`, input)
+}
+
+export function deleteEnvironment(id: string, envId: number): Promise<void> {
+  return api.del(`/projects/${id}/environments/${envId}`)
 }
 
 // ---------------- 上下文摘要 ----------------

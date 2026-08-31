@@ -73,6 +73,27 @@ export interface ServerInput {
   enabled: boolean
 }
 
+// P1-1 环境模型（部署/测试目标）
+export interface ProjectEnvironment {
+  id: number
+  projectId: string
+  name: string // DEV / TEST / STAGING / PROD
+  description?: string
+  serverIds: number[]
+  variables: Record<string, string>
+  secrets: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface EnvironmentInput {
+  name: string
+  description?: string
+  serverIds: number[]
+  variables: Record<string, string>
+  secrets: string[]
+}
+
 export interface BuildStep {
   id: number
   projectId: string

@@ -35,10 +35,12 @@ import DeployTab from '../../deploy/DeployTab'
 import RequirementCockpit from '../components/RequirementCockpit'
 import {
   addBuildStep,
+  addEnvironment,
   addRepo,
   addServer,
   claimWrite,
   deleteBuildStep,
+  deleteEnvironment,
   deleteRepo,
   deleteServer,
   getLock,
@@ -46,6 +48,7 @@ import {
   getReleaseConfig,
   getSummary,
   listBuildSteps,
+  listEnvironments,
   listRepos,
   listServers,
   listWorktrees,
@@ -56,6 +59,7 @@ import {
   saveSummary,
   setPrimaryRepo,
   updateBuildStep,
+  updateEnvironment,
   updateLock,
   updateProject,
   updateRepo,
@@ -65,6 +69,8 @@ import type {
   BuildStep,
   BuildStepInput,
   ContextSummary,
+  EnvironmentInput,
+  ProjectEnvironment,
   Project,
   ProjectInput,
   ProjectLock,
@@ -87,6 +93,7 @@ export default function ProjectDetail() {
   const [project, setProject] = useState<Project | null>(null)
   const [loading, setLoading] = useState(true)
   const [servers, setServers] = useState<ProjectServer[]>([])
+  const [environments, setEnvironments] = useState<ProjectEnvironment[]>([])
   const [repos, setRepos] = useState<ProjectRepo[]>([])
   const [steps, setSteps] = useState<BuildStep[]>([])
   const [release, setRelease] = useState<ReleaseConfig | null>(null)
@@ -99,10 +106,11 @@ export default function ProjectDetail() {
   const loadAll = useCallback(async () => {
     if (!id) return
     try {
-      const [p, rp, s, b, r, sm, wt, lk] = await Promise.all([
+      const [p, rp, s, env, b, r, sm, wt, lk] = await Promise.all([
         getProject(id),
         listRepos(id).catch(() => []),
         listServers(id),
+        listEnvironments(id).catch(() => []),
         listBuildSteps(id),
         getReleaseConfig(id).catch(() => null),
         getSummary(id).catch(() => ({ projectId: id, summary: '' })),
@@ -112,6 +120,7 @@ export default function ProjectDetail() {
       setProject(p)
       setRepos(rp)
       setServers(s)
+      setEnvironments(env)
       setSteps(b)
       setRelease(r)
       setSummary(sm)
@@ -240,6 +249,14 @@ export default function ProjectDetail() {
               key: 'servers',
               label: '服务器',
               children: <ServersTab id={project.id} servers={servers} onChanged={setServers} />,
+            },
+            {
+              key: 'environments',
+              label: '环境',
+              children: (
+                <EnvironmentsTab id={project.id} environments={environments} servers={servers}
+                  onChanged={setEnvironments} />
+              ),
             },
             {
               key: 'build',
@@ -634,6 +651,161 @@ function ServersTab({ id, servers, onChanged }: {
           </Form.Item>
           <Form.Item label="启用" name="enabled" valuePropName="checked">
             <Switch />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </Space>
+  )
+}
+
+// ---------------- 环境（P1-1） ----------------
+
+const ENV_NAME_OPTIONS = ['DEV', 'TEST', 'STAGING', 'PROD']
+
+/** 变量按 KEY=VALUE 逐行编辑，与 Record<string,string> 互转 */
+function varsToText(vars: Record<string, string>): string {
+  return Object.entries(vars ?? {}).map(([k, v]) => `${k}=${v}`).join('\n')
+}
+
+function textToVars(text: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const line of (text ?? '').split('\n')) {
+    const t = line.trim()
+    if (!t || t.startsWith('#')) continue
+    const eq = t.indexOf('=')
+    if (eq <= 0) continue
+    out[t.slice(0, eq).trim()] = t.slice(eq + 1).trim()
+  }
+  return out
+}
+
+function EnvironmentsTab({ id, environments, servers, onChanged }: {
+  id: string
+  environments: ProjectEnvironment[]
+  servers: ProjectServer[]
+  onChanged: (e: ProjectEnvironment[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState<ProjectEnvironment | null>(null)
+  const [form] = Form.useForm()
+
+  const serverOptions = servers.map((sv) => ({ value: sv.id, label: `${sv.name}（#${sv.id}）` }))
+
+  const openEdit = (e: ProjectEnvironment | null) => {
+    setEditing(e)
+    form.setFieldsValue(
+      e
+        ? { name: e.name, description: e.description, serverIds: e.serverIds, varsText: varsToText(e.variables), secrets: e.secrets }
+        : { name: 'DEV', description: '', serverIds: [], varsText: '', secrets: [] },
+    )
+    setOpen(true)
+  }
+
+  const onSave = async (v: { name: string; description?: string; serverIds: number[]; varsText: string; secrets: string[] }) => {
+    const input: EnvironmentInput = {
+      name: v.name,
+      description: v.description,
+      serverIds: v.serverIds ?? [],
+      variables: textToVars(v.varsText),
+      secrets: v.secrets ?? [],
+    }
+    try {
+      if (editing) {
+        await updateEnvironment(id, editing.id, input)
+      } else {
+        await addEnvironment(id, input)
+      }
+      setOpen(false)
+      onChanged(await listEnvironments(id))
+      message.success('已保存')
+    } catch (e) {
+      message.error(`保存失败：${(e as Error).message}`)
+    }
+  }
+
+  const confirmDelete = (e: ProjectEnvironment) => {
+    Modal.confirm({
+      centered: true,
+      title: '删除环境？',
+      content: `将删除环境「${e.name}」（不影响其引用的服务器）。`,
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        await deleteEnvironment(id, e.id)
+        onChanged(await listEnvironments(id))
+        message.success('已删除')
+      },
+    })
+  }
+
+  const serverName = (sid: number) => servers.find((sv) => sv.id === sid)?.name ?? `#${sid}`
+
+  const columns: ColumnsType<ProjectEnvironment> = [
+    { title: '环境', dataIndex: 'name', width: 110, render: (v: string) => <Tag color={envColor(v.toLowerCase() === 'dev' ? 'test' : v.toLowerCase())}>{v}</Tag> },
+    {
+      title: '服务器',
+      dataIndex: 'serverIds',
+      render: (ids: number[]) => ids?.length ? ids.map((sid) => <Tag key={sid}>{serverName(sid)}</Tag>) : '-',
+    },
+    {
+      title: '变量',
+      dataIndex: 'variables',
+      width: 220,
+      ellipsis: true,
+      render: (vars: Record<string, string>) => {
+        const n = Object.keys(vars ?? {}).length
+        return n > 0 ? <span style={{ fontSize: 12 }}>{n} 个变量</span> : '-'
+      },
+    },
+    {
+      title: '密钥引用',
+      dataIndex: 'secrets',
+      width: 160,
+      render: (sec: string[]) => sec?.length ? sec.map((x) => <Tag key={x} color="purple">{x}</Tag>) : '-',
+    },
+    { title: '描述', dataIndex: 'description', ellipsis: true, render: (d?: string) => d || '-' },
+    {
+      title: '操作',
+      key: 'action',
+      width: 120,
+      render: (_, r) => (
+        <Space size={4}>
+          <Button size="small" onClick={() => openEdit(r)}>编辑</Button>
+          <Button size="small" danger onClick={() => confirmDelete(r)}>删除</Button>
+        </Space>
+      ),
+    },
+  ]
+
+  return (
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Space>
+        <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
+          添加环境
+        </Button>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          部署/测试目标从服务器升级为环境（DEV/TEST/STAGING/PROD），环境聚合服务器 + 变量 + 密钥引用
+        </Typography.Text>
+      </Space>
+      <Table rowKey="id" size="small" columns={columns} dataSource={environments} pagination={false} />
+      <Modal title={editing ? `编辑环境 ${editing.name}` : '添加环境'} open={open} onCancel={() => setOpen(false)}
+        onOk={() => form.submit()} okText="保存" width={560}>
+        <Form form={form} layout="vertical" onFinish={onSave}>
+          <Form.Item label="名称" name="name" rules={[{ required: true }]}>
+            <Select options={ENV_NAME_OPTIONS.map((v) => ({ value: v, label: v }))} />
+          </Form.Item>
+          <Form.Item label="服务器" name="serverIds" extra="从「服务器」页已登记的服务器中选择">
+            <Select mode="multiple" options={serverOptions} placeholder="选择服务器" />
+          </Form.Item>
+          <Form.Item label="环境变量" name="varsText" extra="每行一条 KEY=VALUE，# 开头为注释">
+            <Input.TextArea rows={4} placeholder="APP_PROFILE=dev（每行一条 KEY=VALUE）" />
+          </Form.Item>
+          <Form.Item label="密钥引用" name="secrets" extra="只存名称引用，密钥值由服务器凭证体系保管，永不落库">
+            <Select mode="tags" placeholder="如 NEXUS_PASSWORD" open={false} suffixIcon={null} />
+          </Form.Item>
+          <Form.Item label="描述" name="description">
+            <Input />
           </Form.Item>
         </Form>
       </Modal>
