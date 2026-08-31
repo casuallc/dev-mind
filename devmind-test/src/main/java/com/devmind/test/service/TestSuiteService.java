@@ -111,6 +111,7 @@ public class TestSuiteService {
 
     // ---------------- 用例整体保存（FR-02 人工编辑） ----------------
 
+    @Transactional
     public TestSuiteView saveCases(Long suiteId, List<TestCaseInput> inputs) {
         require(suiteId);
         List<TestCaseEntity> existing = caseRepo.findBySuiteIdOrderBySortAsc(suiteId);
