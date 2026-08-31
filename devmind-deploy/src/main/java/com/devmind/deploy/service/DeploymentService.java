@@ -14,7 +14,6 @@ import java.util.regex.Pattern;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -26,6 +25,7 @@ import com.devmind.deploy.dto.CreateDeploymentRequest;
 import com.devmind.deploy.dto.DeployStepRequest;
 import com.devmind.deploy.dto.DeploymentView;
 import com.devmind.deploy.dto.StepView;
+import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.deploy.event.DeploymentCompletedEvent;
 import com.devmind.deploy.model.DeploymentEntity;
 import com.devmind.deploy.model.DeploymentStepEntity;
@@ -64,7 +64,7 @@ public class DeploymentService {
     private final NotificationService notificationService;
     private final DeployHub hub;
     private final ObjectMapper mapper;
-    private final ApplicationEventPublisher eventPublisher;
+    private final DomainEventPublisher eventPublisher;
 
     public DeploymentService(DeploymentRepository repo,
                              DeploymentStepRepository stepRepo,
@@ -75,7 +75,7 @@ public class DeploymentService {
                              NotificationService notificationService,
                              DeployHub hub,
                              ObjectMapper mapper,
-                             ApplicationEventPublisher eventPublisher) {
+                             DomainEventPublisher eventPublisher) {
         this.repo = repo;
         this.stepRepo = stepRepo;
         this.configService = configService;
@@ -346,7 +346,7 @@ public class DeploymentService {
             hub.done(deploymentId, d.getStatus());
             try {
                 // CAP-10 FR-05：发布终态事件，供自动回归监听（异常不影响主流程）
-                eventPublisher.publishEvent(new DeploymentCompletedEvent(
+                eventPublisher.publish(new DeploymentCompletedEvent(
                         d.getId(), d.getProjectId(), d.getServerId(), DeploymentEntity.SUCCESS.equals(d.getStatus())));
             } catch (Exception ex) {
                 log.warn("发布部署完成事件失败: {}", ex.getMessage());
