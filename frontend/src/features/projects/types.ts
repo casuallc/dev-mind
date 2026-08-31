@@ -151,3 +151,14 @@ export interface RequirementInput {
   docId?: number
 }
 
+// 需求主线聚合视图（app 组装层 /overview）
+export interface RequirementOverview {
+  requirement: Requirement
+  docs: { id: number; kind: string; title: string; status: string; currentVersion: number; updatedAt: string }[]
+  sessions: { id: string; status: string; taskSpec: string; model?: string; createdAt: string; finishedAt?: string }[]
+  builds: { id: number; status: string; branch?: string; commit?: string; artifactRef?: string; createdAt: string; finishedAt?: string }[]
+  testRuns: { id: number; status: string; summaryJson?: string; reportDocId?: number; triggeredBy?: string; createdAt: string; finishedAt?: string }[]
+  deployments: { id: number; status: string; env?: string; serverId?: number; buildId?: number; createdBy?: string; createdAt: string; finishedAt?: string }[]
+  timeline: { time: string; type: string; label: string; refId: string }[]
+}
+

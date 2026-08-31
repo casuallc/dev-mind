@@ -14,6 +14,7 @@ import type {
   ReleaseConfigInput,
   Requirement,
   RequirementInput,
+  RequirementOverview,
   RequirementStatus,
   ServerInput,
   WorktreeInfo,
@@ -169,6 +170,11 @@ export function updateRequirementStatus(
 
 export function deleteRequirement(projectId: string, reqId: string): Promise<void> {
   return api.del(`/projects/${projectId}/requirements/${reqId}`)
+}
+
+/** 需求主线聚合（P0-6 步骤 4）：文档/会话/构建/测试/部署 + 时间线 */
+export function getRequirementOverview(projectId: string, reqId: string): Promise<RequirementOverview> {
+  return api.get<RequirementOverview>(`/projects/${projectId}/requirements/${reqId}/overview`)
 }
 
 // ---------------- worktree ----------------

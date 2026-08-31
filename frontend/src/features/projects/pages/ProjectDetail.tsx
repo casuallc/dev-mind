@@ -32,15 +32,14 @@ import {
 import { useNavigate, useParams } from 'react-router-dom'
 import BuildCenterTab from '../../build/BuildTab'
 import DeployTab from '../../deploy/DeployTab'
+import RequirementCockpit from '../components/RequirementCockpit'
 import {
   addBuildStep,
   addRepo,
   addServer,
   claimWrite,
-  createRequirement,
   deleteBuildStep,
   deleteRepo,
-  deleteRequirement,
   deleteServer,
   getLock,
   getProject,
@@ -48,7 +47,6 @@ import {
   getSummary,
   listBuildSteps,
   listRepos,
-  listRequirements,
   listServers,
   listWorktrees,
   reorderBuildSteps,
@@ -61,8 +59,6 @@ import {
   updateLock,
   updateProject,
   updateRepo,
-  updateRequirement,
-  updateRequirementStatus,
   updateServer,
 } from '../api'
 import type {
@@ -76,9 +72,6 @@ import type {
   ProjectRepoInput,
   ProjectServer,
   ReleaseConfig,
-  Requirement,
-  RequirementInput,
-  RequirementStatus,
   ServerInput,
   WorktreeInfo,
 } from '../types'
@@ -87,9 +80,6 @@ const ENV_OPTIONS = ['test', 'staging', 'prod']
 const ACCESS_OPTIONS = ['ssh', 'http']
 const LOCATION_OPTIONS = ['LOCAL', 'REMOTE']
 const ROLE_OPTIONS = ['CODE', 'DOCS', 'CONFIG']
-const REQ_STATUS_OPTIONS: RequirementStatus[] = [
-  'DRAFT', 'DESIGNING', 'DEVELOPING', 'TESTING', 'ACCEPTANCE', 'DONE', 'CANCELLED',
-]
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
@@ -98,7 +88,6 @@ export default function ProjectDetail() {
   const [loading, setLoading] = useState(true)
   const [servers, setServers] = useState<ProjectServer[]>([])
   const [repos, setRepos] = useState<ProjectRepo[]>([])
-  const [requirements, setRequirements] = useState<Requirement[]>([])
   const [steps, setSteps] = useState<BuildStep[]>([])
   const [release, setRelease] = useState<ReleaseConfig | null>(null)
   const [summary, setSummary] = useState<ContextSummary>({ projectId: id ?? '', summary: '' })
@@ -110,10 +99,9 @@ export default function ProjectDetail() {
   const loadAll = useCallback(async () => {
     if (!id) return
     try {
-      const [p, rp, rq, s, b, r, sm, wt, lk] = await Promise.all([
+      const [p, rp, s, b, r, sm, wt, lk] = await Promise.all([
         getProject(id),
         listRepos(id).catch(() => []),
-        listRequirements(id).catch(() => []),
         listServers(id),
         listBuildSteps(id),
         getReleaseConfig(id).catch(() => null),
@@ -123,7 +111,6 @@ export default function ProjectDetail() {
       ])
       setProject(p)
       setRepos(rp)
-      setRequirements(rq)
       setServers(s)
       setSteps(b)
       setRelease(r)
@@ -218,16 +205,17 @@ export default function ProjectDetail() {
         </Descriptions>
       </Card>
 
-      <Card size="small">
+      <Card size="small" title="需求主线" extra={
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          项目内每个需求一条独立流程：文档 → 会话 → 构建 → 测试 → 部署 → 时间线
+        </Typography.Text>
+      }>
+        <RequirementCockpit projectId={project.id} />
+      </Card>
+
+      <Card size="small" title="项目级资产">
         <Tabs
           items={[
-            {
-              key: 'requirements',
-              label: '需求',
-              children: (
-                <RequirementsTab id={project.id} requirements={requirements} onChanged={setRequirements} />
-              ),
-            },
             {
               key: 'repos',
               label: '仓库',
@@ -322,164 +310,6 @@ export default function ProjectDetail() {
       </Modal>
     </Space>
   )
-}
-
-// ---------------- 需求（P0-5 项目内主线） ----------------
-
-function RequirementsTab({ id, requirements, onChanged }: {
-  id: string
-  requirements: Requirement[]
-  onChanged: (r: Requirement[]) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [editing, setEditing] = useState<Requirement | null>(null)
-  const [statusFilter, setStatusFilter] = useState<string>('ALL')
-  const [form] = Form.useForm()
-
-  const openEdit = (r: Requirement | null) => {
-    setEditing(r)
-    form.setFieldsValue(r ?? { title: '', description: '', ownerId: '', branchSlug: '' })
-    setOpen(true)
-  }
-
-  const reload = async () => onChanged(await listRequirements(id))
-
-  const onSave = async (v: RequirementInput) => {
-    try {
-      if (editing) {
-        await updateRequirement(id, editing.id, v)
-      } else {
-        await createRequirement(id, v)
-      }
-      setOpen(false)
-      await reload()
-      message.success('已保存')
-    } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
-    }
-  }
-
-  const advance = async (r: Requirement, status: RequirementStatus) => {
-    try {
-      await updateRequirementStatus(id, r.id, status)
-      await reload()
-      message.success(`${r.code} → ${status}`)
-    } catch (e) {
-      message.error((e as Error).message)
-    }
-  }
-
-  const confirmDelete = (r: Requirement) => {
-    Modal.confirm({
-      centered: true,
-      title: '删除需求？',
-      content: `将删除需求「${r.code} ${r.title}」（关联的文档/构建/部署记录保留，仅解除主线）。`,
-      okText: '删除',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: async () => {
-        await deleteRequirement(id, r.id)
-        await reload()
-        message.success('已删除')
-      },
-    })
-  }
-
-  const filtered = statusFilter === 'ALL' ? requirements : requirements.filter((r) => r.status === statusFilter)
-
-  const columns: ColumnsType<Requirement> = [
-    { title: '编号', dataIndex: 'code', width: 90, render: (c: string) => <Typography.Text code>{c}</Typography.Text> },
-    { title: '标题', dataIndex: 'title', ellipsis: true },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      width: 130,
-      render: (s: RequirementStatus) => <Tag color={reqStatusColor(s)}>{s}</Tag>,
-    },
-    { title: '负责人', dataIndex: 'ownerId', width: 100, render: (v?: string) => v || '-' },
-    {
-      title: '需求分支',
-      dataIndex: 'branchSlug',
-      width: 180,
-      ellipsis: true,
-      render: (slug: string, r) => <Typography.Text code style={{ fontSize: 12 }}>req/{r.seq}{slug ? `-${slug}` : ''}</Typography.Text>,
-    },
-    {
-      title: '更新',
-      dataIndex: 'updatedAt',
-      width: 150,
-      render: (v: string) => <span style={{ fontSize: 12 }}>{new Date(v).toLocaleString()}</span>,
-    },
-    {
-      title: '操作',
-      key: 'action',
-      width: 240,
-      render: (_, r) => (
-        <Space size={4}>
-          <Select
-            size="small"
-            value={r.status}
-            style={{ width: 118 }}
-            options={REQ_STATUS_OPTIONS.map((s) => ({ value: s, label: s }))}
-            onChange={(s) => advance(r, s)}
-          />
-          <Button size="small" onClick={() => openEdit(r)}>编辑</Button>
-          <Button size="small" danger onClick={() => confirmDelete(r)}>删除</Button>
-        </Space>
-      ),
-    },
-  ]
-
-  return (
-    <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Space>
-        <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-          新建需求
-        </Button>
-        <Select
-          size="small"
-          value={statusFilter}
-          style={{ width: 130 }}
-          options={[{ value: 'ALL', label: '全部状态' }, ...REQ_STATUS_OPTIONS.map((s) => ({ value: s, label: s }))]}
-          onChange={setStatusFilter}
-        />
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          需求为项目内主线：文档/会话/构建/测试/部署按需求关联，状态人工或 API 推进。
-        </Typography.Text>
-      </Space>
-      <Table rowKey="id" size="small" columns={columns} dataSource={filtered} pagination={false}
-        locale={{ emptyText: '暂无需求，点击「新建需求」开始一条主线' }} />
-      <Modal title={editing ? `编辑需求 ${editing.code}` : '新建需求'} open={open} onCancel={() => setOpen(false)}
-        onOk={() => form.submit()} okText="保存" width={560}>
-        <Form form={form} layout="vertical" onFinish={onSave}>
-          <Form.Item label="标题" name="title" rules={[{ required: true, message: '请输入标题' }]}>
-            <Input placeholder="如 用户登录支持扫码" />
-          </Form.Item>
-          <Form.Item label="描述" name="description">
-            <Input.TextArea rows={3} />
-          </Form.Item>
-          <Form.Item label="负责人" name="ownerId">
-            <Input placeholder="可选" />
-          </Form.Item>
-          <Form.Item label="分支 slug" name="branchSlug" extra="需求分支 req/<seq>-<slug>，缺省由标题生成">
-            <Input placeholder="如 login-qrcode" />
-          </Form.Item>
-        </Form>
-      </Modal>
-    </Space>
-  )
-}
-
-function reqStatusColor(s: RequirementStatus): string {
-  switch (s) {
-    case 'DRAFT': return 'default'
-    case 'DESIGNING': return 'cyan'
-    case 'DEVELOPING': return 'blue'
-    case 'TESTING': return 'orange'
-    case 'ACCEPTANCE': return 'purple'
-    case 'DONE': return 'green'
-    case 'CANCELLED': return 'red'
-  }
 }
 
 // ---------------- 项目仓库（P0-4 多库模型） ----------------
