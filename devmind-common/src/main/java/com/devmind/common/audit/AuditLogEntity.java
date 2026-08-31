@@ -13,7 +13,7 @@ import java.time.Instant;
 /**
  * audit_logs 表——全局审计（P0-3 自 server-adapter 提升）：各域操作全量留痕。
  * server-adapter 的连接/执行/传输/健康检查是 domain=server 的一类；
- * 其他域（build/deploy/requirement/…）经 {@link AuditService} 写入。
+ * 其他域（build/deploy/task/…）经 {@link AuditService} 写入。
  * 只记操作与结果摘要，绝不记录凭证。
  */
 @Entity
@@ -24,7 +24,7 @@ public class AuditLogEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** 域：server / build / deploy / test / requirement / … */
+    /** 域：server / build / deploy / test / task / … */
     @Column(length = 24)
     private String domain;
 

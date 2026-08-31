@@ -31,8 +31,8 @@ public class BuildEntity {
     @Column(name = "project_id", nullable = false, length = 32)
     private String projectId;
 
-    @Column(name = "requirement_id", length = 32)
-    private String requirementId;
+    @Column(name = "task_id", length = 32)
+    private String taskId;
 
     /** commit 是 H2 保留字，列名用 commit_sha */
     @Column(name = "commit_sha", length = 128)
@@ -89,8 +89,8 @@ public class BuildEntity {
     public void setId(Long id) { this.id = id; }
     public String getProjectId() { return projectId; }
     public void setProjectId(String projectId) { this.projectId = projectId; }
-    public String getRequirementId() { return requirementId; }
-    public void setRequirementId(String requirementId) { this.requirementId = requirementId; }
+    public String getTaskId() { return taskId; }
+    public void setTaskId(String taskId) { this.taskId = taskId; }
     public String getCommit() { return commit; }
     public void setCommit(String commit) { this.commit = commit; }
     public String getBranch() { return branch; }

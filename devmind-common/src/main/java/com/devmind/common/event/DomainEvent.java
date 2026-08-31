@@ -10,7 +10,7 @@ import java.time.Instant;
  */
 public interface DomainEvent {
 
-    /** 事件类型，约定 <域>.<动作>，如 build.completed / deploy.completed / requirement.advanced */
+    /** 事件类型，约定 <域>.<动作>，如 build.completed / deploy.completed / task.advanced */
     String type();
 
     Instant occurredAt();

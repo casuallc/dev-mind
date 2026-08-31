@@ -22,7 +22,7 @@ public class AuditService {
     }
 
     /**
-     * @param domain  域（server/build/deploy/test/requirement/…）
+     * @param domain  域（server/build/deploy/test/task/…）
      * @param action  动作（trigger/confirm/execute/…）
      * @param actor   操作者；null 记为 system
      * @param detail  结果摘要（截断留存）

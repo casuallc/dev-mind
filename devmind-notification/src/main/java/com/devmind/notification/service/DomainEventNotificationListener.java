@@ -70,7 +70,6 @@ public class DomainEventNotificationListener {
             case "test" -> "测试";
             case "release" -> "发版";
             case "session" -> "会话";
-            case "requirement" -> "需求";
             default -> "任务";
         };
     }

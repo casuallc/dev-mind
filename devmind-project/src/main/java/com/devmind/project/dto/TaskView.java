@@ -3,9 +3,9 @@ package com.devmind.project.dto;
 import java.time.Instant;
 
 /**
- * 需求视图（P0-5）：code = REQ-<seq> 项目内编号。
+ * 任务视图（Task 主线）：code = TASK-<seq> 项目内编号。
  */
-public record RequirementView(
+public record TaskView(
         String id,
         String projectId,
         Long seq,

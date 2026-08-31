@@ -32,8 +32,8 @@ public class ArtifactEntity {
     private String projectId;
 
     /** P0-6 关联约定：可空 = 项目级产物 */
-    @Column(name = "requirement_id", length = 32)
-    private String requirementId;
+    @Column(name = "task_id", length = 32)
+    private String taskId;
 
     /** FILE / MAVEN / IMAGE / PACKAGE */
     @Column(nullable = false, length = 32)
@@ -76,8 +76,8 @@ public class ArtifactEntity {
     public void setId(Long id) { this.id = id; }
     public String getProjectId() { return projectId; }
     public void setProjectId(String projectId) { this.projectId = projectId; }
-    public String getRequirementId() { return requirementId; }
-    public void setRequirementId(String requirementId) { this.requirementId = requirementId; }
+    public String getTaskId() { return taskId; }
+    public void setTaskId(String taskId) { this.taskId = taskId; }
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }
     public String getName() { return name; }

@@ -5,7 +5,7 @@ import java.time.Instant;
 public record BuildView(
         Long id,
         String projectId,
-        String requirementId,
+        String taskId,
         String commit,
         String branch,
         String executor,

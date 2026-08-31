@@ -32,8 +32,8 @@ public class TestRunEntity {
     private String projectId;
 
     /** P0-6 关联约定：需求 id（可空 = 项目级回归） */
-    @Column(name = "requirement_id", length = 32)
-    private String requirementId;
+    @Column(name = "task_id", length = 32)
+    private String taskId;
 
     @Lob
     @Column(name = "suite_ids_json")
@@ -88,8 +88,8 @@ public class TestRunEntity {
     public void setId(Long id) { this.id = id; }
     public String getProjectId() { return projectId; }
     public void setProjectId(String projectId) { this.projectId = projectId; }
-    public String getRequirementId() { return requirementId; }
-    public void setRequirementId(String requirementId) { this.requirementId = requirementId; }
+    public String getTaskId() { return taskId; }
+    public void setTaskId(String taskId) { this.taskId = taskId; }
     public String getSuiteIdsJson() { return suiteIdsJson; }
     public void setSuiteIdsJson(String suiteIdsJson) { this.suiteIdsJson = suiteIdsJson; }
     public Long getDeploymentId() { return deploymentId; }

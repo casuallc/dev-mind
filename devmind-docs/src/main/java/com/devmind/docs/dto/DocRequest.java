@@ -6,7 +6,7 @@ import java.util.List;
  * 文档创建请求（FR-01/FR-07）。
  *
  * @param kind        requirement | design | api-suite | report
- * @param requirementId 关联需求（可为空）
+ * @param taskId      关联任务（可为空）
  * @param projectId   归属项目（可为空，存在时校验）
  * @param title       标题
  * @param tags        标签
@@ -15,7 +15,7 @@ import java.util.List;
  */
 public record DocRequest(
         String kind,
-        String requirementId,
+        String taskId,
         String projectId,
         String title,
         List<String> tags,

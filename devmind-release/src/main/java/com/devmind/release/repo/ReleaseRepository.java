@@ -14,5 +14,8 @@ public interface ReleaseRepository extends JpaRepository<ReleaseEntity, Long> {
 
     Optional<ReleaseEntity> findByProjectIdAndReleaseVersion(String projectId, String version);
 
+    /** P0-6：按任务聚合发版记录（任务主线视图） */
+    List<ReleaseEntity> findByTaskIdOrderByCreatedAtDesc(String taskId);
+
     Optional<ReleaseEntity> findFirstByProjectIdOrderByCreatedAtDesc(String projectId);
 }

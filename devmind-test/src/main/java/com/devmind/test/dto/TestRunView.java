@@ -6,7 +6,7 @@ import java.util.List;
 public record TestRunView(
         Long id,
         String projectId,
-        String requirementId,
+        String taskId,
         List<Long> suiteIds,
         Long deploymentId,
         Long serverId,

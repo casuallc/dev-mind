@@ -24,9 +24,9 @@ public class DocumentEntity {
     @Column(length = 20)
     private String kind;
 
-    /** 关联需求 ID（design/requirement 用，可为空） */
-    @Column(length = 64)
-    private String requirementId;
+    /** 关联任务 ID（design/requirement 用，可为空） */
+    @Column(name = "task_id", length = 64)
+    private String taskId;
 
     /** 归属项目（design/api-suite 建议填；可为空） */
     @Column(length = 64)
@@ -56,8 +56,8 @@ public class DocumentEntity {
     public void setId(Long id) { this.id = id; }
     public String getKind() { return kind; }
     public void setKind(String kind) { this.kind = kind; }
-    public String getRequirementId() { return requirementId; }
-    public void setRequirementId(String requirementId) { this.requirementId = requirementId; }
+    public String getTaskId() { return taskId; }
+    public void setTaskId(String taskId) { this.taskId = taskId; }
     public String getProjectId() { return projectId; }
     public void setProjectId(String projectId) { this.projectId = projectId; }
     public String getTitle() { return title; }

@@ -41,8 +41,8 @@ public class SessionController {
     @GetMapping
     public List<SessionView> list(@RequestParam(required = false) String status,
                                   @RequestParam(required = false) String projectId,
-                                  @RequestParam(required = false) String requirementId) {
-        return service.list(status, projectId, requirementId);
+                                  @RequestParam(required = false) String taskId) {
+        return service.list(status, projectId, taskId);
     }
 
     @GetMapping("/{id}")

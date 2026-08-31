@@ -10,13 +10,13 @@ import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 
 /**
- * requirements 表（P0-5 需求实体）：项目内主线，每个需求一条独立流程。
+ * tasks 表（Task 主线）：项目内主线工作项，Task 内嵌 Requirement（title/description 即需求内容），每个 Task 一条独立流程。
  * 只做"身份 + 状态 + 关联"，不含流程引擎（流程属易变上层，后续作为组合层叠加）。
- * seq 为项目内自增序号（展示为 REQ-&lt;seq&gt;），(project_id, seq) 唯一。
+ * seq 为项目内自增序号（展示为 TASK-&lt;seq&gt;），(project_id, seq) 唯一。
  */
 @Entity
-@Table(name = "requirements", uniqueConstraints = @UniqueConstraint(columnNames = {"project_id", "seq"}))
-public class RequirementEntity {
+@Table(name = "tasks", uniqueConstraints = @UniqueConstraint(columnNames = {"project_id", "seq"}))
+public class TaskEntity {
 
     // 状态最小集：DRAFT → DESIGNING → DEVELOPING → TESTING → ACCEPTANCE → DONE（+CANCELLED），转换规则不写死
     public static final String STATUS_DRAFT = "DRAFT";
@@ -34,7 +34,7 @@ public class RequirementEntity {
     @Column(name = "project_id", nullable = false, length = 32)
     private String projectId;
 
-    /** 项目内自增序号（展示 REQ-<seq>） */
+    /** 项目内自增序号（展示 TASK-<seq>） */
     @Column(nullable = false)
     private Long seq;
 
@@ -51,11 +51,11 @@ public class RequirementEntity {
     @Column(name = "owner_id", length = 64)
     private String ownerId;
 
-    /** 需求分支 slug（分支 req/<seq>-<slug>，每 repo 一条） */
+    /** 任务分支 slug（分支 task/<seq>-<slug>，每 repo 一条） */
     @Column(name = "branch_slug", length = 64)
     private String branchSlug;
 
-    /** 需求文档（docs 模块文档 id，可空后补） */
+    /** 任务需求文档（docs 模块文档 id，可空后补） */
     @Column(name = "doc_id")
     private Long docId;
 

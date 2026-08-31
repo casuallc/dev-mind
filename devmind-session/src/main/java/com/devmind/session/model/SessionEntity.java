@@ -22,9 +22,9 @@ public class SessionEntity {
     @Column(name = "project_id", length = 64)
     private String projectId;
 
-    /** P0-6 关联约定：需求 id（可空 = 项目级会话） */
-    @Column(name = "requirement_id", length = 32)
-    private String requirementId;
+    /** P0-6 关联约定：任务 id（可空 = 项目级会话） */
+    @Column(name = "task_id", length = 32)
+    private String taskId;
 
     @Lob
     @Column(name = "task_spec")
@@ -63,8 +63,8 @@ public class SessionEntity {
     public void setId(String id) { this.id = id; }
     public String getProjectId() { return projectId; }
     public void setProjectId(String projectId) { this.projectId = projectId; }
-    public String getRequirementId() { return requirementId; }
-    public void setRequirementId(String requirementId) { this.requirementId = requirementId; }
+    public String getTaskId() { return taskId; }
+    public void setTaskId(String taskId) { this.taskId = taskId; }
     public String getTaskSpec() { return taskSpec; }
     public void setTaskSpec(String taskSpec) { this.taskSpec = taskSpec; }
     public String getBaseBranch() { return baseBranch; }

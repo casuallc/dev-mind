@@ -34,7 +34,7 @@ import com.devmind.project.repo.ProjectRepoRepository;
 import com.devmind.project.repo.ProjectRepository;
 import com.devmind.project.repo.ProjectServerRepository;
 import com.devmind.project.repo.ReleaseConfigRepository;
-import com.devmind.project.repo.RequirementRepository;
+import com.devmind.project.repo.TaskRepository;
 import com.devmind.project.scan.RepoScanner;
 import jakarta.annotation.PostConstruct;
 import jakarta.transaction.Transactional;
@@ -78,7 +78,7 @@ public class ProjectService {
     private final BuildStepRepository stepRepo;
     private final ReleaseConfigRepository releaseRepo;
     private final ProjectLockRepository lockRepo;
-    private final RequirementRepository requirementRepo;
+    private final TaskRepository taskRepo;
     private final EnvironmentRepository environmentRepo;
     private final RepoScanner repoScanner;
     /** CAP-07 提供凭证加密实现（可选）；缺省时 accessConfig 明文存储（无 server-adapter 模块时兼容） */
@@ -93,7 +93,7 @@ public class ProjectService {
                           BuildStepRepository stepRepo,
                           ReleaseConfigRepository releaseRepo,
                           ProjectLockRepository lockRepo,
-                          RequirementRepository requirementRepo,
+                          TaskRepository taskRepo,
                           EnvironmentRepository environmentRepo,
                           RepoScanner repoScanner,
                           ObjectProvider<ServerCredentialCipher> cipherProvider) {
@@ -106,7 +106,7 @@ public class ProjectService {
         this.stepRepo = stepRepo;
         this.releaseRepo = releaseRepo;
         this.lockRepo = lockRepo;
-        this.requirementRepo = requirementRepo;
+        this.taskRepo = taskRepo;
         this.environmentRepo = environmentRepo;
         this.repoScanner = repoScanner;
         this.cipherProvider = cipherProvider;
@@ -249,7 +249,7 @@ public class ProjectService {
     public void delete(String id) {
         ProjectEntity e = requireEntity(id);
         repoRepo.deleteByProjectId(id);
-        requirementRepo.deleteByProjectId(id);
+        taskRepo.deleteByProjectId(id);
         environmentRepo.deleteByProjectId(id);
         serverRepo.deleteByProjectId(id);
         stepRepo.deleteByProjectId(id);

@@ -29,7 +29,7 @@ public class ArtifactService {
     }
 
     /** 登记产物（同一生产者重复登记时先清旧，保证一构建一产物集的幂等） */
-    public ArtifactView register(String projectId, String requirementId, String path,
+    public ArtifactView register(String projectId, String taskId, String path,
                                  String producerType, Long producerId) {
         if (path == null || path.isBlank()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "产物路径不能为空");
@@ -40,7 +40,7 @@ public class ArtifactService {
         }
         ArtifactEntity a = new ArtifactEntity();
         a.setProjectId(projectId);
-        a.setRequirementId(requirementId);
+        a.setTaskId(taskId);
         a.setType(ArtifactEntity.TYPE_FILE);
         a.setName(nameOf(path));
         a.setStorage(ArtifactEntity.STORAGE_LOCAL);
@@ -61,10 +61,10 @@ public class ArtifactService {
         return toView(requireArtifact(id));
     }
 
-    public List<ArtifactView> list(String projectId, String requirementId) {
-        List<ArtifactEntity> list = requirementId == null || requirementId.isBlank()
+    public List<ArtifactView> list(String projectId, String taskId) {
+        List<ArtifactEntity> list = taskId == null || taskId.isBlank()
                 ? repo.findByProjectIdOrderByIdDesc(projectId)
-                : repo.findByProjectIdAndRequirementIdOrderByIdDesc(projectId, requirementId);
+                : repo.findByProjectIdAndTaskIdOrderByIdDesc(projectId, taskId);
         return list.stream().map(this::toView).toList();
     }
 
@@ -81,7 +81,7 @@ public class ArtifactService {
     }
 
     public ArtifactView toView(ArtifactEntity a) {
-        return new ArtifactView(a.getId(), a.getProjectId(), a.getRequirementId(), a.getType(), a.getName(),
+        return new ArtifactView(a.getId(), a.getProjectId(), a.getTaskId(), a.getType(), a.getName(),
                 a.getVersion(), a.getChecksum(), a.getStorage(), a.getPath(), a.getProducerType(),
                 a.getProducerId(), a.getCreatedBy(), a.getCreatedAt());
     }

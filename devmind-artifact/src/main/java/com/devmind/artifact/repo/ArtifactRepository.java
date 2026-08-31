@@ -9,7 +9,7 @@ public interface ArtifactRepository extends JpaRepository<ArtifactEntity, Long> 
 
     List<ArtifactEntity> findByProjectIdOrderByIdDesc(String projectId);
 
-    List<ArtifactEntity> findByProjectIdAndRequirementIdOrderByIdDesc(String projectId, String requirementId);
+    List<ArtifactEntity> findByProjectIdAndTaskIdOrderByIdDesc(String projectId, String taskId);
 
     /** 按生产者反查（如某次构建登记的产物） */
     List<ArtifactEntity> findByProducerTypeAndProducerId(String producerType, Long producerId);

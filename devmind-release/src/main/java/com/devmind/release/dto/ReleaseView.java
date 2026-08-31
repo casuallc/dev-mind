@@ -9,7 +9,7 @@ import java.time.Instant;
 public record ReleaseView(
         Long id,
         String projectId,
-        String requirementId,
+        String taskId,
         Long buildId,
         String version,
         String status,

@@ -14,14 +14,14 @@ public final class DocViews {
 
     public static DocView doc(DocumentEntity e, String filePath) {
         return new DocView(
-                e.getId(), e.getKind(), e.getRequirementId(), e.getProjectId(), e.getTitle(),
+                e.getId(), e.getKind(), e.getTaskId(), e.getProjectId(), e.getTitle(),
                 e.getCurrentVersion(), e.getStatus(), splitTags(e.getTags()),
                 filePath, e.getCreatedBy(), e.getCreatedAt(), e.getUpdatedAt());
     }
 
     public static DocDetail detail(DocumentEntity e, DocumentVersionEntity v, String filePath) {
         return new DocDetail(
-                e.getId(), e.getKind(), e.getRequirementId(), e.getProjectId(), e.getTitle(),
+                e.getId(), e.getKind(), e.getTaskId(), e.getProjectId(), e.getTitle(),
                 v.getVersionNo(), e.getStatus(), splitTags(e.getTags()),
                 v.getContentMd(), v.getChangeNote(), v.getCommitSha(), filePath,
                 e.getCreatedBy(), e.getCreatedAt(), e.getUpdatedAt());

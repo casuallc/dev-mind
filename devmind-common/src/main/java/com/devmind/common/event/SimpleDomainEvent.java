@@ -7,7 +7,7 @@ import java.time.Instant;
  *
  * @param type          事件类型（域.动作），如 build.completed
  * @param projectId     所属项目（P0-6 关联约定）
- * @param requirementId 所属需求（可空 = 项目级）
+ * @param taskId        所属任务（可空 = 项目级）
  * @param actor         操作者（P0-2 Identity；系统触发填 system/触发来源）
  * @param summary       一句话描述（通知正文/审计摘要直接用）
  * @param entityType    关联实体类型（BUILD/DEPLOYMENT/TEST_RUN/…），通知动作定位用
@@ -16,7 +16,7 @@ import java.time.Instant;
  */
 public record SimpleDomainEvent(String type,
                                 String projectId,
-                                String requirementId,
+                                String taskId,
                                 String actor,
                                 String summary,
                                 String entityType,
@@ -24,9 +24,9 @@ public record SimpleDomainEvent(String type,
                                 Boolean success,
                                 Instant occurredAt) implements DomainEvent {
 
-    public static SimpleDomainEvent of(String type, String projectId, String requirementId, String actor,
+    public static SimpleDomainEvent of(String type, String projectId, String taskId, String actor,
                                        String summary, String entityType, String entityId, Boolean success) {
-        return new SimpleDomainEvent(type, projectId, requirementId, actor, summary, entityType, entityId,
+        return new SimpleDomainEvent(type, projectId, taskId, actor, summary, entityType, entityId,
                 success, Instant.now());
     }
 }

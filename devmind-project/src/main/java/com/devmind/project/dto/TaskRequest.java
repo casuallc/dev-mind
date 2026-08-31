@@ -3,9 +3,9 @@ package com.devmind.project.dto;
 import jakarta.validation.constraints.NotBlank;
 
 /**
- * 需求创建/更新请求。branchSlug 缺省时由 title 生成（需求分支 req/<seq>-<slug>）。
+ * 任务创建/更新请求。branchSlug 缺省时由 title 生成（任务分支 task/<seq>-<slug>）。
  */
-public record RequirementRequest(
+public record TaskRequest(
         @NotBlank String title,
         String description,
         String ownerId,
