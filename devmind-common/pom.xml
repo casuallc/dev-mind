@@ -11,6 +11,7 @@
     </parent>
     <artifactId>devmind-common</artifactId>
     <name>devmind-common</name>
+    <description>公共契约：异常/错误码/通知事件（零依赖）</description>
     <dependencies>
     </dependencies>
 </project>

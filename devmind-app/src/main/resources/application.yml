@@ -4,6 +4,8 @@ server:
 spring:
   application:
     name: devmind
+  profiles:
+    default: local          # 默认激活 local：本机专属配置放 application-local.yml（已 gitignore），未建则用仓库默认值
   datasource:
     url: jdbc:h2:file:./data/devmind;AUTO_SERVER=TRUE
     driver-class-name: org.h2.Driver
@@ -20,6 +22,7 @@ spring:
 
 devmind:
   session:
+    executor: claude              # 执行器：fake=内置假进程(自测) / claude=真实 Claude Code
     claude-path: ""               # 空=自动探测全局命令（where claude）
     model: ""
     permission-mode: acceptEdits   # 放手模式；会话级可覆盖
@@ -34,7 +37,10 @@ devmind:
   knowledge:
     repo-path: ""                  # 填 knowledge-repo 本地路径后可启用注入
     enabled: true
+  docs:
+    repo-path: ""                  # 填 docs-repo 本地 git 仓库路径（本机路径写 application-local.yml）
+    enabled: true
   project:
-    default-path: ""               # MVP：填一个本地 git 仓库绝对路径即可开始试用
+    default-path: ""               # 留空：本机路径写在 application-local.yml（DEVMIND_PROJECT_DEFAULT_PATH 亦可覆盖）
     default-name: "default"
     default-tags: []

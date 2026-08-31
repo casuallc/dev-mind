@@ -10,7 +10,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const text = await res.text().catch(() => '')
     throw new Error(`${res.status} ${text || res.statusText}`)
   }
-  return res.json() as Promise<T>
+  // void 端点返回空 body，res.json() 会抛 "Unexpected end of JSON input"
+  if (res.status === 204) return undefined as T
+  const text = await res.text()
+  if (!text) return undefined as T
+  return JSON.parse(text) as T
 }
 
 export const api = {

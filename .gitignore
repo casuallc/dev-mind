@@ -2,6 +2,9 @@
 target/
 data/
 
+# 本机专属配置（devmind.project.default-path 等机器相关路径）
+devmind-app/src/main/resources/application-local.yml
+
 # Node / Vite
 frontend/node_modules/
 
