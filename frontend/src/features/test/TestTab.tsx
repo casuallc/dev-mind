@@ -37,6 +37,7 @@ import {
   getRun,
   getRunLogs,
   getRunReport,
+  getSuite,
   listRuns,
   listSuites,
   publishSuite,
@@ -200,6 +201,15 @@ export default function TestTab({ id }: { id: string }) {
     }
   }
 
+  // 列表接口 cases 为空，编辑前拉全量套件（含用例明细）
+  const openEditor = async (s: TestSuite) => {
+    try {
+      setEditSuite(await getSuite(s.id))
+    } catch (e) {
+      message.error(`加载套件失败：${(e as Error).message}`)
+    }
+  }
+
   const onCreate = async () => {
     if (!suiteIds.length) {
       message.warning('请选择测试套件')
@@ -240,7 +250,7 @@ export default function TestTab({ id }: { id: string }) {
       width: 220,
       render: (_, s) => (
         <Space size={4}>
-          <Button size="small" icon={<SyncOutlined />} onClick={() => setEditSuite(s)}>编辑用例</Button>
+          <Button size="small" icon={<SyncOutlined />} onClick={() => openEditor(s)}>编辑用例</Button>
           <Button size="small" icon={<ExportOutlined />} disabled={!s.caseCount} onClick={() => onPublish(s)}>沉淀</Button>
           <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDeleteSuite(s)}>删除</Button>
         </Space>
@@ -257,11 +267,13 @@ export default function TestTab({ id }: { id: string }) {
     {
       title: '结果', dataIndex: 'summary', width: 130,
       render: (s: TestRun['summary']) => (
-        <span style={{ fontSize: 12 }}>
-          {s.total} 项 · <span style={{ color: '#52c41a' }}>{s.passed} 过</span>{' '}
-          <span style={{ color: s.failed ? '#ff4d4f' : undefined }}>{s.failed} 败</span>{' '}
-          <span style={{ color: '#fa8c16' }}>{s.skipped} 跳</span>
-        </span>
+        s ? (
+          <span style={{ fontSize: 12 }}>
+            {s.total} 项 · <span style={{ color: '#52c41a' }}>{s.passed} 过</span>{' '}
+            <span style={{ color: s.failed ? '#ff4d4f' : undefined }}>{s.failed} 败</span>{' '}
+            <span style={{ color: '#fa8c16' }}>{s.skipped} 跳</span>
+          </span>
+        ) : <span>-</span>
       ),
     },
     { title: '目标', dataIndex: 'baseUrl', width: 160, ellipsis: true, render: (v: string | null) => (v ? <Typography.Text code style={{ fontSize: 12 }}>{v}</Typography.Text> : <span>-</span>) },
