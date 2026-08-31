@@ -58,6 +58,9 @@ public class BuildEntity {
     @Column(name = "artifact_ref", length = 512)
     private String artifactRef;
 
+    @Column(name = "created_by", length = 64)
+    private String createdBy;
+
     /** QUEUED / RUNNING / SUCCESS / FAILED */
     @Column(length = 16)
     private String status;
@@ -98,6 +101,8 @@ public class BuildEntity {
     public void setRemoteServerId(Long remoteServerId) { this.remoteServerId = remoteServerId; }
     public String getStepsSnapshot() { return stepsSnapshot; }
     public void setStepsSnapshot(String stepsSnapshot) { this.stepsSnapshot = stepsSnapshot; }
+    public String getCreatedBy() { return createdBy; }
+    public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public String getArtifactRef() { return artifactRef; }
     public void setArtifactRef(String artifactRef) { this.artifactRef = artifactRef; }
     public String getStatus() { return status; }

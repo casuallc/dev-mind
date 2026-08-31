@@ -19,6 +19,10 @@
         </dependency>
         <dependency>
             <groupId>com.devmind</groupId>
+            <artifactId>devmind-auth</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
             <artifactId>devmind-project</artifactId>
         </dependency>
         <dependency>

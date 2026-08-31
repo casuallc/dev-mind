@@ -61,6 +61,9 @@ public class ProjectEntity {
     @Column(name = "owner_id", length = 64)
     private String ownerId;
 
+    @Column(name = "created_by", length = 64)
+    private String createdBy;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -89,6 +92,8 @@ public class ProjectEntity {
     public void setContextSummary(String contextSummary) { this.contextSummary = contextSummary; }
     public Instant getSummaryGeneratedAt() { return summaryGeneratedAt; }
     public void setSummaryGeneratedAt(Instant summaryGeneratedAt) { this.summaryGeneratedAt = summaryGeneratedAt; }
+    public String getCreatedBy() { return createdBy; }
+    public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public String getOwnerId() { return ownerId; }
     public void setOwnerId(String ownerId) { this.ownerId = ownerId; }
     public Instant getCreatedAt() { return createdAt; }

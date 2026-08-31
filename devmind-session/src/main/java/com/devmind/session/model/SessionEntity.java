@@ -44,6 +44,9 @@ public class SessionEntity {
     @Column(length = 64)
     private String model;
 
+    @Column(name = "created_by", length = 64)
+    private String createdBy;
+
     @Lob
     private String summary;
 
@@ -72,6 +75,8 @@ public class SessionEntity {
     public void setWorktreePath(String worktreePath) { this.worktreePath = worktreePath; }
     public Long getPid() { return pid; }
     public void setPid(Long pid) { this.pid = pid; }
+    public String getCreatedBy() { return createdBy; }
+    public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public String getModel() { return model; }
     public void setModel(String model) { this.model = model; }
     public String getSummary() { return summary; }

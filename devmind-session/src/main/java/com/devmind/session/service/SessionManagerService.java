@@ -2,6 +2,7 @@ package com.devmind.session.service;
 
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.auth.IdentityService;
 import com.devmind.common.notification.NotificationEvent;
 import com.devmind.knowledge.KnowledgeInjector;
 import com.devmind.notification.NotificationPublisher;
@@ -55,6 +56,7 @@ public class SessionManagerService {
 
     private static final Logger log = LoggerFactory.getLogger(SessionManagerService.class);
 
+    private final IdentityService identityService;
     private final ProjectService projectService;
     private final RequirementService requirementService;
     private final WorktreeManager worktreeManager;
@@ -72,7 +74,8 @@ public class SessionManagerService {
     /** 运行中会话注册表。 */
     private final Map<String, SessionRuntime> runtimes = new ConcurrentHashMap<>();
 
-    public SessionManagerService(ProjectService projectService,
+    public SessionManagerService(IdentityService identityService,
+                                 ProjectService projectService,
                                  RequirementService requirementService,
                                  WorktreeManager worktreeManager,
                                  KnowledgeInjector knowledgeInjector,
@@ -85,6 +88,7 @@ public class SessionManagerService {
                                  ObjectMapper mapper,
                                  CliEventParser parser,
                                  Collection<SessionExecutor> executors) {
+        this.identityService = identityService;
         this.projectService = projectService;
         this.requirementService = requirementService;
         this.worktreeManager = worktreeManager;
@@ -194,6 +198,7 @@ public class SessionManagerService {
         ent.setWorktreePath(worktree != null ? worktree.toString() : null);
         ent.setPid(proc.pid());
         ent.setModel(model);
+        ent.setCreatedBy(identityService.currentActor());
         ent.setCreatedAt(now);
         ent.setUpdatedAt(now);
         sessionRepo.save(ent);

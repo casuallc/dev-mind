@@ -4,6 +4,9 @@ import com.devmind.build.dto.BuildView;
 import com.devmind.build.dto.TriggerRequest;
 import com.devmind.build.model.BuildEntity;
 import com.devmind.build.repo.BuildRepository;
+import com.devmind.auth.IdentityService;
+import com.devmind.common.event.DomainEventPublisher;
+import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.execution.engine.StepChainRunner;
@@ -54,6 +57,8 @@ public class BuildService {
 
     private final ExecutorService buildExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
+    private final IdentityService identityService;
+    private final DomainEventPublisher eventPublisher;
     private final BuildRepository repo;
     private final BuildConfigService configService;
     private final BuildStepRepository stepRepo;
@@ -66,7 +71,9 @@ public class BuildService {
     private final ExecutionLogHub hub;
     private final ObjectMapper mapper;
 
-    public BuildService(BuildRepository repo,
+    public BuildService(IdentityService identityService,
+                        DomainEventPublisher eventPublisher,
+                        BuildRepository repo,
                         BuildConfigService configService,
                         BuildStepRepository stepRepo,
                         ProjectService projectService,
@@ -77,6 +84,8 @@ public class BuildService {
                         RemoteStepRunner remoteRunner,
                         ExecutionLogHub hub,
                         ObjectMapper mapper) {
+        this.identityService = identityService;
+        this.eventPublisher = eventPublisher;
         this.repo = repo;
         this.configService = configService;
         this.stepRepo = stepRepo;
@@ -142,6 +151,7 @@ public class BuildService {
         b.setExecutor(executor);
         b.setRemoteServerId(serverId);
         b.setStepsSnapshot(snapshotJson(steps));
+        b.setCreatedBy(identityService.currentActor());
         b.setStatus(BuildEntity.QUEUED);
         b.setCreatedAt(Instant.now());
         BuildEntity saved = repo.save(b);
@@ -223,6 +233,12 @@ public class BuildService {
             b.setFinishedAt(Instant.now());
             repo.save(b);
             hub.done(topic, b.getStatus());
+            // P0-3 统一事件总线：构建结果广播（通知订阅，成功 P1 / 失败 P0）
+            eventPublisher.publish(SimpleDomainEvent.of("build.completed", b.getProjectId(),
+                    b.getRequirementId(), b.getCreatedBy(),
+                    "构建 #" + b.getId() + " " + b.getStatus()
+                            + (b.getBranch() == null ? "" : "（" + b.getBranch() + "）"),
+                    "BUILD", String.valueOf(b.getId()), BuildEntity.SUCCESS.equals(b.getStatus())));
         }
     }
 

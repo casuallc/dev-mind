@@ -1,5 +1,6 @@
 package com.devmind.project;
 
+import com.devmind.auth.IdentityService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.security.ServerCredentialCipher;
@@ -67,6 +68,7 @@ public class ProjectService {
     private static final String STATUS_ACTIVE = "ACTIVE";
     private static final String STATUS_ARCHIVED = "ARCHIVED";
 
+    private final IdentityService identityService;
     private final ProjectProperties props;
     private final WorktreeProperties worktreeProps;
     private final ProjectRepository projectRepo;
@@ -80,7 +82,8 @@ public class ProjectService {
     /** CAP-07 提供凭证加密实现（可选）；缺省时 accessConfig 明文存储（无 server-adapter 模块时兼容） */
     private final ObjectProvider<ServerCredentialCipher> cipherProvider;
 
-    public ProjectService(ProjectProperties props,
+    public ProjectService(IdentityService identityService,
+                            ProjectProperties props,
                           WorktreeProperties worktreeProps,
                           ProjectRepository projectRepo,
                           ProjectRepoRepository repoRepo,
@@ -91,6 +94,7 @@ public class ProjectService {
                           RequirementRepository requirementRepo,
                           RepoScanner repoScanner,
                           ObjectProvider<ServerCredentialCipher> cipherProvider) {
+        this.identityService = identityService;
         this.props = props;
         this.worktreeProps = worktreeProps;
         this.projectRepo = projectRepo;
@@ -117,7 +121,8 @@ public class ProjectService {
                 e.setDefaultBranch(worktreeProps.getBaseBranch());
                 e.setTags(joinTags(props.getDefaultTags()));
                 e.setStatus(STATUS_ACTIVE);
-                e.setOwnerId("local");
+                e.setOwnerId(identityService.currentActor());
+                e.setCreatedBy(identityService.currentActor());
                 Instant now = Instant.now();
                 e.setCreatedAt(now);
                 e.setUpdatedAt(now);
@@ -181,7 +186,8 @@ public class ProjectService {
         e.setStatus(req.status() == null || req.status().isBlank() ? STATUS_ACTIVE : req.status().toUpperCase());
         e.setApiDocSource(blankToNull(req.apiDocSource()));
         e.setAutoRegressionOnDeploy(req.autoRegressionOnDeploy() != null && req.autoRegressionOnDeploy());
-        e.setOwnerId("local");
+        e.setOwnerId(identityService.currentActor());
+                e.setCreatedBy(identityService.currentActor());
         Instant now = Instant.now();
         e.setCreatedAt(now);
         e.setUpdatedAt(now);
