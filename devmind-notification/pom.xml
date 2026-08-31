@@ -11,14 +11,31 @@
     </parent>
     <artifactId>devmind-notification</artifactId>
     <name>devmind-notification</name>
+    <description>CAP-06 通知中心：事件路由/分级/通道 SPI/免打扰/通知中心</description>
     <dependencies>
         <dependency>
             <groupId>com.devmind</groupId>
             <artifactId>devmind-common</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.devmind</groupId>
-            <artifactId>devmind-auth</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
     </dependencies>
 </project>
