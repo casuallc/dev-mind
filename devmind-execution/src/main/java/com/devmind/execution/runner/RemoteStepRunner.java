@@ -1,38 +1,32 @@
-package com.devmind.build.runner;
+package com.devmind.execution.runner;
 
-import com.devmind.build.model.BuildStep;
+import com.devmind.execution.model.StepResult;
+import com.devmind.execution.model.StepSpec;
 import com.devmind.serveradapter.service.ServerOperationService;
 import com.devmind.serveradapter.spi.ExecResult;
 import org.springframework.stereotype.Component;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * CAP-08 FR-02 远程执行器：委托 CAP-07 ServerOperationService，每步骤的 command 是
- * 目标服务器项目下的脚本模板 code（白名单，capability=build），commit/branch 作模板参数传入。
+ * 远程执行器（P0-1 统一执行底座，自 CAP-08 RemoteBuildRunner 泛化）：
+ * 委托 CAP-07 ServerOperationService，step.command 是目标服务器上的脚本模板 code（白名单），
+ * 模板参数与能力域（capability=build/deploy/test/…）由调用方传入。
  */
 @Component
-public class RemoteBuildRunner {
+public class RemoteStepRunner {
 
     private final ServerOperationService serverOpService;
 
-    public RemoteBuildRunner(ServerOperationService serverOpService) {
+    public RemoteStepRunner(ServerOperationService serverOpService) {
         this.serverOpService = serverOpService;
     }
 
-    public StepResult runStep(Long serverId, BuildStep step, String commit, String branch,
-                              Consumer<String> sink) {
-        Map<String, String> params = new HashMap<>();
-        if (commit != null && !commit.isBlank()) {
-            params.put("commit", commit);
-        }
-        if (branch != null && !branch.isBlank()) {
-            params.put("branch", branch);
-        }
+    public StepResult runStep(Long serverId, StepSpec step, Map<String, String> params,
+                              String capability, Consumer<String> sink) {
         try {
-            ExecResult r = serverOpService.execute(serverId, step.command(), params, "build");
+            ExecResult r = serverOpService.execute(serverId, step.command(), params, capability);
             if (r.stdout() != null && !r.stdout().isBlank()) {
                 sink.accept(r.stdout().stripTrailing());
             }
@@ -44,7 +38,7 @@ public class RemoteBuildRunner {
         } catch (Exception e) {
             String msg = rootMessage(e);
             sink.accept("[stderr] " + msg);
-            return new StepResult(false, -1, msg);
+            return StepResult.failed(-1, msg);
         }
     }
 

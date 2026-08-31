@@ -48,7 +48,8 @@ devmind:
     crypto-key: ""                 # 凭证加密密钥；空=自动生成存 data/server-crypto.key（gitignored）
     connect-timeout-ms: 15000
     audit-enabled: true
-  build:
+  execution:                     # P0-1 统一执行底座（build/deploy/test/release 共用）
     shell: bash                    # 本地执行 shell（Windows 下为 Git Bash）
     step-timeout-ms: 1800000       # 单步超时 30 分钟，超时 kill
+  build:
     default-concurrency: 1         # 新建构建配置的默认并发上限

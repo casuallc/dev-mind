@@ -3,14 +3,15 @@ package com.devmind.build.service;
 import com.devmind.build.dto.BuildView;
 import com.devmind.build.dto.TriggerRequest;
 import com.devmind.build.model.BuildEntity;
-import com.devmind.build.model.BuildStep;
 import com.devmind.build.repo.BuildRepository;
-import com.devmind.build.runner.LocalBuildRunner;
-import com.devmind.build.runner.RemoteBuildRunner;
-import com.devmind.build.runner.StepResult;
-import com.devmind.build.ws.BuildLogHub;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.execution.engine.StepChainRunner;
+import com.devmind.execution.model.StepResult;
+import com.devmind.execution.model.StepSpec;
+import com.devmind.execution.runner.LocalStepRunner;
+import com.devmind.execution.runner.RemoteStepRunner;
+import com.devmind.execution.ws.ExecutionLogHub;
 import com.devmind.project.ProjectService;
 import com.devmind.project.RequirementService;
 import com.devmind.project.model.BuildStepEntity;
@@ -28,7 +29,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
@@ -37,8 +40,11 @@ import java.util.regex.Pattern;
 
 /**
  * CAP-08 构建编排：触发（并发限制/commit branch 解析/步骤快照）→ 虚拟线程异步执行 →
- * 本地 bash 或远程模板执行 → 产物登记（FR-04）→ 状态机 QUEUED/RUNNING/SUCCESS/FAILED（FR-06）。
- * 日志行实时经 {@link BuildLogHub} 广播（FR-05），步骤边界与结束时持久化全量留存。
+ * 产物登记（FR-04）→ 状态机 QUEUED/RUNNING/SUCCESS/FAILED（FR-06）。
+ * 执行层自 P0-1 起委托统一执行底座：步骤链由 {@link StepChainRunner} 调度，
+ * 本地/远程执行由 {@link LocalStepRunner}/{@link RemoteStepRunner} 承担，
+ * 日志实时经统一 {@link ExecutionLogHub} 广播（FR-05），步骤边界与结束时持久化全量留存。
+ * 本类只保留构建业务语义：配置、并发上限、commit/branch 解析、产物登记、历史查询。
  */
 @Service
 public class BuildService {
@@ -54,9 +60,10 @@ public class BuildService {
     private final ProjectService projectService;
     private final RequirementService requirementService;
     private final ServerOperationService serverOpService;
-    private final LocalBuildRunner localRunner;
-    private final RemoteBuildRunner remoteRunner;
-    private final BuildLogHub hub;
+    private final StepChainRunner chainRunner;
+    private final LocalStepRunner localRunner;
+    private final RemoteStepRunner remoteRunner;
+    private final ExecutionLogHub hub;
     private final ObjectMapper mapper;
 
     public BuildService(BuildRepository repo,
@@ -65,9 +72,10 @@ public class BuildService {
                         ProjectService projectService,
                         RequirementService requirementService,
                         ServerOperationService serverOpService,
-                        LocalBuildRunner localRunner,
-                        RemoteBuildRunner remoteRunner,
-                        BuildLogHub hub,
+                        StepChainRunner chainRunner,
+                        LocalStepRunner localRunner,
+                        RemoteStepRunner remoteRunner,
+                        ExecutionLogHub hub,
                         ObjectMapper mapper) {
         this.repo = repo;
         this.configService = configService;
@@ -75,6 +83,7 @@ public class BuildService {
         this.projectService = projectService;
         this.requirementService = requirementService;
         this.serverOpService = serverOpService;
+        this.chainRunner = chainRunner;
         this.localRunner = localRunner;
         this.remoteRunner = remoteRunner;
         this.hub = hub;
@@ -151,12 +160,13 @@ public class BuildService {
         b.setStartedAt(Instant.now());
         repo.save(b);
 
+        String topic = String.valueOf(buildId);
         StringBuilder logs = new StringBuilder();
         Consumer<String> sink = line -> {
             synchronized (logs) {
                 logs.append(line).append('\n');
             }
-            hub.publish(buildId, line);
+            hub.publishLog(topic, line);
         };
         Project project = null;
         try {
@@ -164,33 +174,32 @@ public class BuildService {
         } catch (Exception e) {
             // 项目可能已删除：远程执行仍可用，本地执行报错
         }
-        List<BuildStep> steps = parseSteps(b.getStepsSnapshot());
-        boolean ok = true;
-        String err = null;
-        int exit = 0;
+        List<StepSpec> steps = parseSteps(b.getStepsSnapshot());
         try {
-            for (int i = 0; i < steps.size(); i++) {
-                BuildStep s = steps.get(i);
-                String label = s.name() == null || s.name().isBlank() ? String.valueOf(i + 1) : s.name();
-                sink.accept("===== 步骤 " + (i + 1) + "/" + steps.size() + " · " + label + " =====");
-                StepResult r;
+            Project finalProject = project;
+            StepChainRunner.ChainResult result = chainRunner.run(steps, (i, step, stepSink) -> {
                 if ("REMOTE".equals(b.getExecutor())) {
-                    r = remoteRunner.runStep(b.getRemoteServerId(), s, b.getCommit(), b.getBranch(), sink);
-                } else {
-                    r = project == null
-                            ? new StepResult(false, -1, "项目不存在，无法本地构建")
-                            : localRunner.runStep(Path.of(project.repoPath()), s, b.getCommit(), b.getBranch(), b.getProjectId(), sink);
+                    Map<String, String> params = new HashMap<>();
+                    if (b.getCommit() != null && !b.getCommit().isBlank()) {
+                        params.put("commit", b.getCommit());
+                    }
+                    if (b.getBranch() != null && !b.getBranch().isBlank()) {
+                        params.put("branch", b.getBranch());
+                    }
+                    return remoteRunner.runStep(b.getRemoteServerId(), step, params, "build", stepSink);
                 }
-                if (!r.ok()) {
-                    ok = false;
-                    err = r.error() != null ? r.error() : "exit=" + r.exitCode();
-                    exit = r.exitCode();
-                    sink.accept("[构建失败] " + err);
-                    break;
+                if (finalProject == null) {
+                    return StepResult.failed(-1, "项目不存在，无法本地构建");
                 }
-                flushLogs(b, logs); // 步骤边界持久化
-            }
-            if (ok) {
+                Map<String, String> env = new HashMap<>();
+                env.put("BUILD_PROJECT_ID", b.getProjectId() == null ? "" : b.getProjectId());
+                env.put("BUILD_COMMIT", b.getCommit() == null ? "" : b.getCommit());
+                env.put("BUILD_BRANCH", b.getBranch() == null ? "" : b.getBranch());
+                env.put("BUILD_STEP", step.name() == null ? "" : step.name());
+                return localRunner.runStep(Path.of(finalProject.repoPath()), step, env, stepSink);
+            }, sink, i -> flushLogs(b, logs)); // 步骤边界持久化
+
+            if (result.ok()) {
                 b.setStatus(BuildEntity.SUCCESS);
                 b.setExitCode(0);
                 b.setArtifactRef(captureArtifact(logs.toString()));
@@ -199,8 +208,8 @@ public class BuildService {
                 }
             } else {
                 b.setStatus(BuildEntity.FAILED);
-                b.setExitCode(exit);
-                b.setErrorSummary(truncate(err, 2000));
+                b.setExitCode(result.exitCode());
+                b.setErrorSummary(truncate(result.error(), 2000));
             }
         } catch (Exception e) {
             log.warn("构建 {} 异常: {}", buildId, e.toString());
@@ -208,10 +217,12 @@ public class BuildService {
             b.setExitCode(-1);
             b.setErrorSummary("构建异常: " + rootMessage(e));
         } finally {
-            b.setLogsText(logs.toString());
+            synchronized (logs) {
+                b.setLogsText(logs.toString());
+            }
             b.setFinishedAt(Instant.now());
             repo.save(b);
-            hub.done(buildId, b.getStatus());
+            hub.done(topic, b.getStatus());
         }
     }
 
@@ -250,8 +261,8 @@ public class BuildService {
 
     private String snapshotJson(List<BuildStepEntity> steps) {
         try {
-            List<BuildStep> list = steps.stream()
-                    .map(e -> new BuildStep(e.getName(), e.getCommand(), e.getWorkingDir(), e.getLocation()))
+            List<StepSpec> list = steps.stream()
+                    .map(e -> new StepSpec(e.getName(), e.getCommand(), e.getWorkingDir(), e.getLocation()))
                     .toList();
             return mapper.writeValueAsString(list);
         } catch (Exception e) {
@@ -259,16 +270,16 @@ public class BuildService {
         }
     }
 
-    private List<BuildStep> parseSteps(String json) {
+    private List<StepSpec> parseSteps(String json) {
         if (json == null || json.isBlank()) {
             return List.of();
         }
         try {
             JsonNode arr = mapper.readTree(json);
-            List<BuildStep> out = new ArrayList<>();
+            List<StepSpec> out = new ArrayList<>();
             if (arr.isArray()) {
                 for (JsonNode n : arr) {
-                    out.add(new BuildStep(text(n, "name"), text(n, "command"), text(n, "workingDir"), text(n, "location")));
+                    out.add(new StepSpec(text(n, "name"), text(n, "command"), text(n, "workingDir"), text(n, "location")));
                 }
             }
             return out;

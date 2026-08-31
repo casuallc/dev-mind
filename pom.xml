@@ -29,6 +29,7 @@
         <module>devmind-session</module>
         <module>devmind-notification</module>
         <module>devmind-server-adapter</module>
+        <module>devmind-execution</module>
         <module>devmind-build</module>
         <module>devmind-deploy</module>
         <module>devmind-test</module>
@@ -82,6 +83,11 @@
             <dependency>
                 <groupId>com.devmind</groupId>
                 <artifactId>devmind-server-adapter</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.devmind</groupId>
+                <artifactId>devmind-execution</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
