@@ -11,7 +11,17 @@
     </parent>
     <artifactId>devmind-common</artifactId>
     <name>devmind-common</name>
-    <description>公共契约：异常/错误码/通知事件（零依赖）</description>
+    <description>公共契约：异常/错误码/通知事件 + 领域事件总线 + 全局审计（P0-3）</description>
     <dependencies>
+        <!-- P0-3：DomainEventPublisher（ApplicationEventPublisher 包装）需要 spring-context -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+        </dependency>
+        <!-- P0-3：全局审计实体/仓库从 server-adapter 提升至此 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
     </dependencies>
 </project>

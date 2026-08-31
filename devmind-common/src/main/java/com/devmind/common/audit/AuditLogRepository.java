@@ -1,6 +1,5 @@
-package com.devmind.serveradapter.repo;
+package com.devmind.common.audit;
 
-import com.devmind.serveradapter.model.AuditLogEntity;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -15,4 +14,6 @@ public interface AuditLogRepository extends JpaRepository<AuditLogEntity, Long> 
     List<AuditLogEntity> findByServerId(Long serverId);
 
     List<AuditLogEntity> findByProjectId(Long projectId);
+
+    List<AuditLogEntity> findByDomainOrderByIdDesc(String domain, Pageable pageable);
 }

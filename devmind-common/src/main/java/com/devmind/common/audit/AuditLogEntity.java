@@ -1,4 +1,4 @@
-package com.devmind.serveradapter.model;
+package com.devmind.common.audit;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -11,8 +11,10 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 
 /**
- * audit_logs 表（CAP-07 FR-06 执行审计）：所有经适配器的连接/执行/传输/健康检查全量留痕。
- * 只记命令与输出摘要，绝不记录凭证配置（FR-07）。
+ * audit_logs 表——全局审计（P0-3 自 server-adapter 提升）：各域操作全量留痕。
+ * server-adapter 的连接/执行/传输/健康检查是 domain=server 的一类；
+ * 其他域（build/deploy/requirement/…）经 {@link AuditService} 写入。
+ * 只记操作与结果摘要，绝不记录凭证。
  */
 @Entity
 @Table(name = "audit_logs")
@@ -21,6 +23,14 @@ public class AuditLogEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    /** 域：server / build / deploy / test / requirement / … */
+    @Column(length = 24)
+    private String domain;
+
+    /** 操作者（P0-2 Identity；系统触发填 system） */
+    @Column(length = 64)
+    private String actor;
 
     @Column(name = "project_id", length = 32)
     private String projectId;
@@ -35,7 +45,7 @@ public class AuditLogEntity {
     @Column(name = "access_type", length = 16)
     private String accessType;
 
-    /** connect_test / execute / upload / download / health_check */
+    /** connect_test / execute / upload / download / health_check / trigger / confirm / … */
     @Column(nullable = false, length = 24)
     private String action;
 
@@ -71,6 +81,10 @@ public class AuditLogEntity {
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+    public String getDomain() { return domain; }
+    public void setDomain(String domain) { this.domain = domain; }
+    public String getActor() { return actor; }
+    public void setActor(String actor) { this.actor = actor; }
     public String getProjectId() { return projectId; }
     public void setProjectId(String projectId) { this.projectId = projectId; }
     public Long getServerId() { return serverId; }

@@ -6,9 +6,9 @@ import com.devmind.project.model.ProjectServerEntity;
 import com.devmind.project.repo.ProjectServerRepository;
 import com.devmind.serveradapter.config.CredentialCrypto;
 import com.devmind.serveradapter.config.ServerAdapterProperties;
-import com.devmind.serveradapter.model.AuditLogEntity;
+import com.devmind.common.audit.AuditLogEntity;
 import com.devmind.serveradapter.model.ScriptTemplateEntity;
-import com.devmind.serveradapter.repo.AuditLogRepository;
+import com.devmind.common.audit.AuditLogRepository;
 import com.devmind.serveradapter.repo.ScriptTemplateRepository;
 import com.devmind.serveradapter.registry.ServerAdapterRegistry;
 import com.devmind.serveradapter.spi.ConnectResult;
@@ -265,6 +265,7 @@ public class ServerOperationService {
             return;
         }
         AuditLogEntity a = new AuditLogEntity();
+        a.setDomain("server");
         a.setProjectId(server.getProjectId());
         a.setServerId(server.getId());
         a.setServerName(server.getName());

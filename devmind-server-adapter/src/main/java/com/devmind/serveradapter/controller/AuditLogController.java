@@ -1,8 +1,8 @@
 package com.devmind.serveradapter.controller;
 
 import com.devmind.serveradapter.dto.AuditView;
-import com.devmind.serveradapter.model.AuditLogEntity;
-import com.devmind.serveradapter.repo.AuditLogRepository;
+import com.devmind.common.audit.AuditLogEntity;
+import com.devmind.common.audit.AuditLogRepository;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.web.bind.annotation.GetMapping;
