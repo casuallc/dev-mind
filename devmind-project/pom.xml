@@ -11,14 +11,27 @@
     </parent>
     <artifactId>devmind-project</artifactId>
     <name>devmind-project</name>
+    <description>CAP-02 项目管理：项目注册（CRUD/标签/服务器/构建发版配置/上下文摘要/锁定）+ WorktreeManager</description>
     <dependencies>
         <dependency>
             <groupId>com.devmind</groupId>
             <artifactId>devmind-common</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.devmind</groupId>
-            <artifactId>devmind-auth</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
     </dependencies>
 </project>
