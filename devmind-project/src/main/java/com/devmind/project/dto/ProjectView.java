@@ -12,6 +12,7 @@ public record ProjectView(
         String description,
         String status,
         String apiDocSource,
+        Boolean autoRegressionOnDeploy,
         String contextSummary,
         Instant summaryGeneratedAt,
         String ownerId,

@@ -14,6 +14,8 @@ import com.devmind.project.dto.ProjectRequest;
 import com.devmind.project.dto.ProjectView;
 import com.devmind.project.dto.ReleaseConfigRequest;
 import com.devmind.project.dto.ReleaseConfigView;
+import com.devmind.project.dto.RepoRequest;
+import com.devmind.project.dto.RepoView;
 import com.devmind.project.dto.ServerRequest;
 import com.devmind.project.dto.ServerView;
 import com.devmind.project.dto.WorktreeView;
@@ -21,10 +23,12 @@ import com.devmind.project.model.BuildStepEntity;
 import com.devmind.project.model.ProjectEntity;
 import com.devmind.project.model.Project;
 import com.devmind.project.model.ProjectLockEntity;
+import com.devmind.project.model.ProjectRepoEntity;
 import com.devmind.project.model.ProjectServerEntity;
 import com.devmind.project.model.ReleaseConfigEntity;
 import com.devmind.project.repo.BuildStepRepository;
 import com.devmind.project.repo.ProjectLockRepository;
+import com.devmind.project.repo.ProjectRepoRepository;
 import com.devmind.project.repo.ProjectRepository;
 import com.devmind.project.repo.ProjectServerRepository;
 import com.devmind.project.repo.ReleaseConfigRepository;
@@ -65,6 +69,7 @@ public class ProjectService {
     private final ProjectProperties props;
     private final WorktreeProperties worktreeProps;
     private final ProjectRepository projectRepo;
+    private final ProjectRepoRepository repoRepo;
     private final ProjectServerRepository serverRepo;
     private final BuildStepRepository stepRepo;
     private final ReleaseConfigRepository releaseRepo;
@@ -76,6 +81,7 @@ public class ProjectService {
     public ProjectService(ProjectProperties props,
                           WorktreeProperties worktreeProps,
                           ProjectRepository projectRepo,
+                          ProjectRepoRepository repoRepo,
                           ProjectServerRepository serverRepo,
                           BuildStepRepository stepRepo,
                           ReleaseConfigRepository releaseRepo,
@@ -85,6 +91,7 @@ public class ProjectService {
         this.props = props;
         this.worktreeProps = worktreeProps;
         this.projectRepo = projectRepo;
+        this.repoRepo = repoRepo;
         this.serverRepo = serverRepo;
         this.stepRepo = stepRepo;
         this.releaseRepo = releaseRepo;
@@ -96,26 +103,50 @@ public class ProjectService {
     /** 启动种子：projects 表为空且配置了 default-path 时，把 yml 预置仓库注册为 id=default 的项目（MVP 平滑迁移）。 */
     @PostConstruct
     public void seedFromConfig() {
-        if (projectRepo.count() > 0) {
-            return;
+        if (projectRepo.count() == 0) {
+            String path = props.getDefaultPath();
+            if (path != null && !path.isBlank() && isGitRepo(Path.of(path))) {
+                ProjectEntity e = new ProjectEntity();
+                e.setId("default");
+                e.setName(props.getDefaultName());
+                e.setPath(Path.of(path).toAbsolutePath().normalize().toString());
+                e.setDefaultBranch(worktreeProps.getBaseBranch());
+                e.setTags(joinTags(props.getDefaultTags()));
+                e.setStatus(STATUS_ACTIVE);
+                e.setOwnerId("local");
+                Instant now = Instant.now();
+                e.setCreatedAt(now);
+                e.setUpdatedAt(now);
+                projectRepo.save(e);
+                log.info("CAP-02 种子项目已注册: id=default name={} path={}", props.getDefaultName(), path);
+            }
         }
-        String path = props.getDefaultPath();
-        if (path == null || path.isBlank() || !isGitRepo(Path.of(path))) {
-            return;
+        migrateProjectRepos();
+    }
+
+    /**
+     * P0-4 多库模型迁移：projects.path → project_repos 主库记录。
+     * 对每个尚无仓库记录的项目补一条 is_primary=1 的 CODE 库；projects.path 此后作为主库镜像列维护。
+     */
+    private void migrateProjectRepos() {
+        for (ProjectEntity p : projectRepo.findAll()) {
+            if (p.getPath() == null || p.getPath().isBlank() || repoRepo.countByProjectId(p.getId()) > 0) {
+                continue;
+            }
+            ProjectRepoEntity r = new ProjectRepoEntity();
+            r.setProjectId(p.getId());
+            r.setName(repoDirName(p.getPath()));
+            r.setPath(p.getPath());
+            r.setDefaultBranch(p.getDefaultBranch());
+            r.setRole(ProjectRepoEntity.ROLE_CODE);
+            r.setIsPrimary(true);
+            r.setSortOrder(0);
+            Instant now = Instant.now();
+            r.setCreatedAt(now);
+            r.setUpdatedAt(now);
+            repoRepo.save(r);
+            log.info("P0-4 项目仓库已迁移: projectId={} primary={}", p.getId(), p.getPath());
         }
-        ProjectEntity e = new ProjectEntity();
-        e.setId("default");
-        e.setName(props.getDefaultName());
-        e.setPath(Path.of(path).toAbsolutePath().normalize().toString());
-        e.setDefaultBranch(worktreeProps.getBaseBranch());
-        e.setTags(joinTags(props.getDefaultTags()));
-        e.setStatus(STATUS_ACTIVE);
-        e.setOwnerId("local");
-        Instant now = Instant.now();
-        e.setCreatedAt(now);
-        e.setUpdatedAt(now);
-        projectRepo.save(e);
-        log.info("CAP-02 种子项目已注册: id=default name={} path={}", props.getDefaultName(), path);
     }
 
     // ---------------- 项目 CRUD ----------------
@@ -145,11 +176,16 @@ public class ProjectService {
         e.setDescription(blankToNull(req.description()));
         e.setStatus(req.status() == null || req.status().isBlank() ? STATUS_ACTIVE : req.status().toUpperCase());
         e.setApiDocSource(blankToNull(req.apiDocSource()));
+        e.setAutoRegressionOnDeploy(req.autoRegressionOnDeploy() != null && req.autoRegressionOnDeploy());
         e.setOwnerId("local");
         Instant now = Instant.now();
         e.setCreatedAt(now);
         e.setUpdatedAt(now);
         projectRepo.save(e);
+        // P0-4：注册主库记录（projects.path 为主库镜像）
+        ProjectRepoEntity primary = newRepoRow(e.getId(), repoDirName(e.getPath()), e.getPath(), null,
+                e.getDefaultBranch(), ProjectRepoEntity.ROLE_CODE, true, 0);
+        repoRepo.save(primary);
         log.info("项目已创建: id={} name={} path={}", e.getId(), e.getName(), e.getPath());
         return toView(e);
     }
@@ -162,24 +198,43 @@ public class ProjectService {
                 throw new DevMindException(ErrorCode.CONFLICT, "该仓库路径已被其他项目注册");
             }
             e.setPath(repoPath.toString());
+            // 同步主库记录路径
+            repoRepo.findByProjectIdAndIsPrimaryTrue(id).ifPresentOrElse(
+                    r -> {
+                        r.setPath(e.getPath());
+                        r.setUpdatedAt(Instant.now());
+                        repoRepo.save(r);
+                    },
+                    () -> repoRepo.save(newRepoRow(id, repoDirName(e.getPath()), e.getPath(), null,
+                            e.getDefaultBranch(), ProjectRepoEntity.ROLE_CODE, true, 0)));
         }
         if (req.name() != null && !req.name().isBlank()) e.setName(req.name().trim());
-        if (req.defaultBranch() != null) e.setDefaultBranch(blankToNull(req.defaultBranch()));
+        if (req.defaultBranch() != null) {
+            e.setDefaultBranch(blankToNull(req.defaultBranch()));
+            // 默认分支镜像同步到主库记录
+            repoRepo.findByProjectIdAndIsPrimaryTrue(id).ifPresent(r -> {
+                r.setDefaultBranch(e.getDefaultBranch());
+                r.setUpdatedAt(Instant.now());
+                repoRepo.save(r);
+            });
+        }
         if (req.tags() != null) e.setTags(joinTags(req.tags()));
         if (req.description() != null) e.setDescription(blankToNull(req.description()));
         if (req.status() != null && !req.status().isBlank()) {
             e.setStatus(req.status().toUpperCase());
         }
         if (req.apiDocSource() != null) e.setApiDocSource(blankToNull(req.apiDocSource()));
+        if (req.autoRegressionOnDeploy() != null) e.setAutoRegressionOnDeploy(req.autoRegressionOnDeploy());
         e.setUpdatedAt(Instant.now());
         projectRepo.save(e);
         return toView(e);
     }
 
-    /** 删除项目：级联清理服务器/构建步骤/发版配置/锁。 */
+    /** 删除项目：级联清理仓库/服务器/构建步骤/发版配置/锁。 */
     @Transactional
     public void delete(String id) {
         ProjectEntity e = requireEntity(id);
+        repoRepo.deleteByProjectId(id);
         serverRepo.deleteByProjectId(id);
         stepRepo.deleteByProjectId(id);
         releaseRepo.deleteByProjectId(id);
@@ -200,6 +255,154 @@ public class ProjectService {
         return projectRepo.findById("default")
                 .or(() -> projectRepo.findAllByOrderByUpdatedAtDesc().stream().findFirst())
                 .map(this::toRecord).orElse(null);
+    }
+
+    // ---------------- 项目仓库（P0-4 多库模型） ----------------
+
+    public List<RepoView> listRepos(String projectId) {
+        requireEntity(projectId);
+        return repoRepo.findByProjectIdOrderBySortOrderAscIdAsc(projectId).stream().map(this::toRepoView).toList();
+    }
+
+    /** 项目主库记录；无仓库记录时抛 NOT_FOUND。 */
+    public ProjectRepoEntity primaryRepo(String projectId) {
+        return repoRepo.findByProjectIdAndIsPrimaryTrue(projectId)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "项目无主库: " + projectId));
+    }
+
+    public RepoView addRepo(String projectId, RepoRequest req) {
+        requireEntity(projectId);
+        Path repoPath = validateRepo(req.path());
+        if (repoRepo.countByProjectIdAndPath(projectId, repoPath.toString()) > 0) {
+            throw new DevMindException(ErrorCode.CONFLICT, "该仓库已在项目仓库列表中");
+        }
+        boolean makePrimary = Boolean.TRUE.equals(req.primary()) || repoRepo.countByProjectId(projectId) == 0;
+        ProjectRepoEntity r = newRepoRow(projectId, req.name().trim(), repoPath.toString(),
+                blankToNull(req.remoteUrl()), blankToNull(req.defaultBranch()),
+                normalizeRole(req.role()), makePrimary, req.sortOrder() == null ? 0 : req.sortOrder());
+        if (makePrimary) {
+            clearPrimary(projectId);
+        }
+        RepoView view = toRepoView(repoRepo.save(r));
+        if (makePrimary) {
+            syncPrimaryMirror(projectId);
+        }
+        log.info("项目仓库已添加: projectId={} name={} path={} primary={}", projectId, r.getName(), r.getPath(), makePrimary);
+        return view;
+    }
+
+    public RepoView updateRepo(String projectId, Long repoId, RepoRequest req) {
+        ProjectRepoEntity r = requireRepo(projectId, repoId);
+        if (req.path() != null && !req.path().isBlank()) {
+            Path repoPath = validateRepo(req.path());
+            if (!repoPath.toString().equals(r.getPath())
+                    && repoRepo.countByProjectIdAndPath(projectId, repoPath.toString()) > 0) {
+                throw new DevMindException(ErrorCode.CONFLICT, "该仓库已在项目仓库列表中");
+            }
+            r.setPath(repoPath.toString());
+        }
+        if (req.name() != null && !req.name().isBlank()) r.setName(req.name().trim());
+        if (req.remoteUrl() != null) r.setRemoteUrl(blankToNull(req.remoteUrl()));
+        if (req.defaultBranch() != null) r.setDefaultBranch(blankToNull(req.defaultBranch()));
+        if (req.role() != null && !req.role().isBlank()) r.setRole(normalizeRole(req.role()));
+        if (req.sortOrder() != null) r.setSortOrder(req.sortOrder());
+        r.setUpdatedAt(Instant.now());
+        if (Boolean.TRUE.equals(req.primary()) && !Boolean.TRUE.equals(r.getIsPrimary())) {
+            clearPrimary(projectId);
+            r.setIsPrimary(true);
+        }
+        RepoView view = toRepoView(repoRepo.save(r));
+        if (Boolean.TRUE.equals(r.getIsPrimary())) {
+            syncPrimaryMirror(projectId);
+        }
+        return view;
+    }
+
+    /** 删除仓库：项目至少保留一个仓库；主库不能删（先把其他仓库设为主库）。 */
+    public void deleteRepo(String projectId, Long repoId) {
+        ProjectRepoEntity r = requireRepo(projectId, repoId);
+        if (repoRepo.countByProjectId(projectId) <= 1) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "项目至少保留一个仓库");
+        }
+        if (Boolean.TRUE.equals(r.getIsPrimary())) {
+            throw new DevMindException(ErrorCode.CONFLICT, "主库不能直接删除，请先将其他仓库设为主库");
+        }
+        repoRepo.delete(r);
+        log.info("项目仓库已删除: projectId={} repoId={} path={}", projectId, repoId, r.getPath());
+    }
+
+    /** 指定主库：清除其他主库标记并同步 projects.path/default_branch 镜像。 */
+    public RepoView setPrimaryRepo(String projectId, Long repoId) {
+        ProjectRepoEntity r = requireRepo(projectId, repoId);
+        clearPrimary(projectId);
+        r.setIsPrimary(true);
+        r.setUpdatedAt(Instant.now());
+        RepoView view = toRepoView(repoRepo.save(r));
+        syncPrimaryMirror(projectId);
+        log.info("项目主库已切换: projectId={} repoId={} path={}", projectId, repoId, r.getPath());
+        return view;
+    }
+
+    private ProjectRepoEntity requireRepo(String projectId, Long repoId) {
+        return repoRepo.findById(repoId)
+                .filter(x -> x.getProjectId().equals(projectId))
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "项目仓库不存在: " + repoId));
+    }
+
+    private void clearPrimary(String projectId) {
+        for (ProjectRepoEntity x : repoRepo.findByProjectIdOrderBySortOrderAscIdAsc(projectId)) {
+            if (Boolean.TRUE.equals(x.getIsPrimary())) {
+                x.setIsPrimary(false);
+                x.setUpdatedAt(Instant.now());
+                repoRepo.save(x);
+            }
+        }
+    }
+
+    /** projects.path / default_branch 作为主库镜像列，供既有消费方（会话/构建/摘要扫描）无感使用。 */
+    private void syncPrimaryMirror(String projectId) {
+        ProjectEntity p = requireEntity(projectId);
+        repoRepo.findByProjectIdAndIsPrimaryTrue(projectId).ifPresent(r -> {
+            p.setPath(r.getPath());
+            p.setDefaultBranch(r.getDefaultBranch());
+            p.setUpdatedAt(Instant.now());
+            projectRepo.save(p);
+        });
+    }
+
+    private ProjectRepoEntity newRepoRow(String projectId, String name, String path, String remoteUrl,
+                                         String defaultBranch, String role, boolean primary, int sortOrder) {
+        ProjectRepoEntity r = new ProjectRepoEntity();
+        r.setProjectId(projectId);
+        r.setName(name);
+        r.setPath(path);
+        r.setRemoteUrl(remoteUrl);
+        r.setDefaultBranch(defaultBranch);
+        r.setRole(role);
+        r.setIsPrimary(primary);
+        r.setSortOrder(sortOrder);
+        Instant now = Instant.now();
+        r.setCreatedAt(now);
+        r.setUpdatedAt(now);
+        return r;
+    }
+
+    private String normalizeRole(String role) {
+        if (role == null || role.isBlank()) {
+            return ProjectRepoEntity.ROLE_CODE;
+        }
+        String r = role.trim().toUpperCase();
+        if (!r.equals(ProjectRepoEntity.ROLE_CODE) && !r.equals(ProjectRepoEntity.ROLE_DOCS)
+                && !r.equals(ProjectRepoEntity.ROLE_CONFIG)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "仓库角色仅支持 CODE/DOCS/CONFIG: " + role);
+        }
+        return r;
+    }
+
+    private String repoDirName(String path) {
+        Path p = Path.of(path);
+        Path fileName = p.getFileName();
+        return fileName == null ? path : fileName.toString();
     }
 
     // ---------------- 上下文摘要（FR-07） ----------------
@@ -488,8 +691,14 @@ public class ProjectService {
     private ProjectView toView(ProjectEntity e) {
         return new ProjectView(e.getId(), e.getName(), e.getPath(), e.getDefaultBranch(),
                 splitTags(e.getTags()), e.getDescription(), e.getStatus(), e.getApiDocSource(),
-                e.getContextSummary(), e.getSummaryGeneratedAt(), e.getOwnerId(),
-                e.getCreatedAt(), e.getUpdatedAt());
+                e.getAutoRegressionOnDeploy(), e.getContextSummary(), e.getSummaryGeneratedAt(),
+                e.getOwnerId(), e.getCreatedAt(), e.getUpdatedAt());
+    }
+
+    private RepoView toRepoView(ProjectRepoEntity r) {
+        return new RepoView(r.getId(), r.getProjectId(), r.getName(), r.getPath(), r.getRemoteUrl(),
+                r.getDefaultBranch(), r.getRole(), Boolean.TRUE.equals(r.getIsPrimary()), r.getSortOrder(),
+                r.getCreatedAt(), r.getUpdatedAt());
     }
 
     private ServerView toServerView(ProjectServerEntity s) {

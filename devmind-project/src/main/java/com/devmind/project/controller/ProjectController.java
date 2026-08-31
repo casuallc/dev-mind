@@ -10,6 +10,8 @@ import com.devmind.project.dto.ProjectRequest;
 import com.devmind.project.dto.ProjectView;
 import com.devmind.project.dto.ReleaseConfigRequest;
 import com.devmind.project.dto.ReleaseConfigView;
+import com.devmind.project.dto.RepoRequest;
+import com.devmind.project.dto.RepoView;
 import com.devmind.project.dto.ServerRequest;
 import com.devmind.project.dto.ServerView;
 import com.devmind.project.dto.SummaryRequest;
@@ -65,6 +67,35 @@ public class ProjectController {
     @DeleteMapping("/{id}")
     public void delete(@PathVariable String id) {
         service.delete(id);
+    }
+
+    // ---------------- 项目仓库（P0-4 多库模型） ----------------
+
+    @GetMapping("/{id}/repos")
+    public List<RepoView> repos(@PathVariable String id) {
+        return service.listRepos(id);
+    }
+
+    @PostMapping("/{id}/repos")
+    public RepoView addRepo(@PathVariable String id, @Valid @RequestBody RepoRequest req) {
+        return service.addRepo(id, req);
+    }
+
+    @PutMapping("/{id}/repos/{repoId}")
+    public RepoView updateRepo(@PathVariable String id, @PathVariable Long repoId,
+                               @Valid @RequestBody RepoRequest req) {
+        return service.updateRepo(id, repoId, req);
+    }
+
+    @DeleteMapping("/{id}/repos/{repoId}")
+    public void deleteRepo(@PathVariable String id, @PathVariable Long repoId) {
+        service.deleteRepo(id, repoId);
+    }
+
+    /** 设为主库（项目内唯一，同步 projects.path 镜像） */
+    @PostMapping("/{id}/repos/{repoId}/primary")
+    public RepoView setPrimaryRepo(@PathVariable String id, @PathVariable Long repoId) {
+        return service.setPrimaryRepo(id, repoId);
     }
 
     // ---------------- 上下文摘要 ----------------

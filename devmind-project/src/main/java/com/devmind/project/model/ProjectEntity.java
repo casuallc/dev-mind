@@ -46,6 +46,10 @@ public class ProjectEntity {
     @Column(name = "api_doc_source", length = 512)
     private String apiDocSource;
 
+    /** CAP-10 FR-05：部署成功后自动触发测试回归 */
+    @Column(name = "auto_regression_on_deploy")
+    private Boolean autoRegressionOnDeploy;
+
     /** 项目上下文摘要（FR-07，可人工修正） */
     @Lob
     @Column(name = "context_summary")
@@ -79,6 +83,8 @@ public class ProjectEntity {
     public void setStatus(String status) { this.status = status; }
     public String getApiDocSource() { return apiDocSource; }
     public void setApiDocSource(String apiDocSource) { this.apiDocSource = apiDocSource; }
+    public Boolean getAutoRegressionOnDeploy() { return autoRegressionOnDeploy; }
+    public void setAutoRegressionOnDeploy(Boolean autoRegressionOnDeploy) { this.autoRegressionOnDeploy = autoRegressionOnDeploy; }
     public String getContextSummary() { return contextSummary; }
     public void setContextSummary(String contextSummary) { this.contextSummary = contextSummary; }
     public Instant getSummaryGeneratedAt() { return summaryGeneratedAt; }

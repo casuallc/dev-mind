@@ -11,5 +11,6 @@ public record ProjectRequest(
         List<String> tags,
         String description,
         String status,
-        String apiDocSource) {
+        String apiDocSource,
+        Boolean autoRegressionOnDeploy) {
 }
