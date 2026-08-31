@@ -30,6 +30,7 @@
 | [CAP-11](CAP-11-release-executor.md) | 发版执行器 | 执行器 | Nexus 脚本模板推送 + 打 tag |
 | [CAP-12](CAP-12-execution-platform.md) | 统一执行底座 | 底座 | 步骤链引擎 + 本地/远程 Runner + 统一 WS 日志枢纽 |
 | [CAP-13](CAP-13-requirement-workitem.md) | 研发主线 | 管理 | Requirement/Design/Work Item 模型 + Relation 追溯网 |
+| [CAP-14](CAP-14-requirement-flow.md) | 需求流程引擎 | 流程层 | 需求主流程半自动推进：阶段动作 + 产出登记 + 人工确认门禁 |
 
 ## 依赖关系
 
@@ -39,7 +40,8 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
               │               ├─ CAP-07 服务器适配器 ─┬─ CAP-08 构建
               │               │                       ├─ CAP-09 部署 ─▶ CAP-10 测试
               │               │                       └─ CAP-11 发版
-              └─ CAP-06 通知（被所有"等待人"的场景依赖）
+              ├─ CAP-06 通知（被所有"等待人"的场景依赖）
+              └─ CAP-14 流程层（消费 CAP-03/05/06/13，推进需求主流程）
 ```
 
 - CAP-01 无依赖，被全部能力依赖；
@@ -47,6 +49,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-13 研发主线定义 Requirement/Design/Work Item/Relation 模型，被会话与各执行器关联（workItemId）；
 - CAP-05 依赖 CAP-04（知识注入）与 CAP-06（等待输入/授权通知）；
 - CAP-08/09/10/11 依赖 CAP-07（远程执行时）与 CAP-02；执行层共用 CAP-12 统一执行底座（步骤链引擎/Runner/WS 日志枢纽）。
+- CAP-14 流程层依赖 CAP-03/05/06/13：消费 `session.completed` 事件推进需求主流程，后续 CAP-15 自动编排器复用其阶段动作。
 
 ## 组装方式（后续流程层）
 
