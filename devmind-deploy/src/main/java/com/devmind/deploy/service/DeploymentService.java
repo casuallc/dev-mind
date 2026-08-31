@@ -32,7 +32,7 @@ import com.devmind.deploy.model.DeploymentStepEntity;
 import com.devmind.deploy.model.DeployStep;
 import com.devmind.deploy.repo.DeploymentRepository;
 import com.devmind.deploy.repo.DeploymentStepRepository;
-import com.devmind.deploy.ws.DeployHub;
+import com.devmind.execution.ws.ExecutionLogHub;
 import com.devmind.notification.dto.NotificationDraft;
 import com.devmind.notification.model.NotificationLevel;
 import com.devmind.notification.service.NotificationService;
@@ -62,7 +62,7 @@ public class DeploymentService {
     private final ServerOperationService serverOpService;
     private final BuildService buildService;
     private final NotificationService notificationService;
-    private final DeployHub hub;
+    private final ExecutionLogHub hub;
     private final ObjectMapper mapper;
     private final DomainEventPublisher eventPublisher;
 
@@ -73,7 +73,7 @@ public class DeploymentService {
                              ServerOperationService serverOpService,
                              BuildService buildService,
                              NotificationService notificationService,
-                             DeployHub hub,
+                             ExecutionLogHub hub,
                              ObjectMapper mapper,
                              DomainEventPublisher eventPublisher) {
         this.repo = repo;
@@ -235,7 +235,7 @@ public class DeploymentService {
             synchronized (logs) {
                 logs.append(line).append('\n');
             }
-            hub.publishLog(deploymentId, line);
+            hub.publishLog(topic(deploymentId), line);
         };
         String artifact = resolveArtifact(d);
         // 手动回滚部署单使用原始部署的备份引用
@@ -259,7 +259,7 @@ public class DeploymentService {
                 d.setCurrentStep(seq);
                 repo.save(d);
                 stepRepo.save(se);
-                hub.publishStep(deploymentId, toStepView(se));
+                hub.publishEvent(topic(deploymentId), "step", toStepView(se));
                 sink.accept("===== 步骤 " + seq + "/" + plan.size() + " · " + label(s) + " =====");
 
                 ExecResult r = execStep(d, s, backupRef, artifact);
@@ -285,7 +285,7 @@ public class DeploymentService {
                     sink.accept("[部署失败] " + err);
                 }
                 stepRepo.save(se);
-                hub.publishStep(deploymentId, toStepView(se));
+                hub.publishEvent(topic(deploymentId), "step", toStepView(se));
                 flushLogs(d, logs);
                 if (!ok) {
                     break;
@@ -343,7 +343,7 @@ public class DeploymentService {
             d.setLogsText(logs.toString());
             d.setFinishedAt(Instant.now());
             repo.save(d);
-            hub.done(deploymentId, d.getStatus());
+            hub.done(topic(deploymentId), d.getStatus());
             try {
                 // CAP-10 FR-05：发布终态事件，供自动回归监听（异常不影响主流程）
                 eventPublisher.publish(new DeploymentCompletedEvent(
@@ -368,7 +368,7 @@ public class DeploymentService {
             se.setStatus(DeploymentStepEntity.RUNNING);
             se.setStartedAt(Instant.now());
             stepRepo.save(se);
-            hub.publishStep(d.getId(), toStepView(se));
+            hub.publishEvent(topic(d.getId()), "step", toStepView(se));
             sink.accept("===== 回滚步骤 " + (i + 1) + "/" + rb.size() + " · " + label(s) + " =====");
             ExecResult r = execStep(d, s, backupRef, artifact);
             streamOut(sink, r.stdout(), r.stderr());
@@ -384,7 +384,7 @@ public class DeploymentService {
                 sink.accept("[回滚失败] " + e);
             }
             stepRepo.save(se);
-            hub.publishStep(d.getId(), toStepView(se));
+            hub.publishEvent(topic(d.getId()), "step", toStepView(se));
             if (!allOk) {
                 break;
             }
@@ -556,6 +556,11 @@ public class DeploymentService {
         se.setType(s.type());
         se.setStatus(DeploymentStepEntity.PENDING);
         return se;
+    }
+
+    /** 执行底座 WS topic：部署用 deploymentId 字符串（与 /ws/deployments/{id}/stream 对应） */
+    private String topic(Long deploymentId) {
+        return String.valueOf(deploymentId);
     }
 
     private StepView toStepView(DeploymentStepEntity e) {
