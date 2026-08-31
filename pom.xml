@@ -42,6 +42,9 @@
     <properties>
         <java.version>21</java.version>
         <maven.compiler.release>21</maven.compiler.release>
+        <!-- 源码/报告固定 UTF-8：Windows 平台默认 GBK 会把中文文案（通知/错误消息）编译成乱码 -->
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.build.reporting.outputEncoding>UTF-8</project.build.reporting.outputEncoding>
     </properties>
 
     <!-- 内部模块版本统一由父 POM 管理，子模块相互依赖无需写版本 -->
