@@ -9,6 +9,8 @@ export interface Project {
   description?: string
   status: string // ACTIVE / ARCHIVED
   apiDocSource?: string
+  /** CAP-10 FR-05：部署成功后自动对该项目全部套件做回归 */
+  autoRegressionOnDeploy?: boolean
   contextSummary?: string
   summaryGeneratedAt?: string
   ownerId?: string
@@ -24,6 +26,7 @@ export interface ProjectInput {
   description?: string
   status?: string
   apiDocSource?: string
+  autoRegressionOnDeploy?: boolean
 }
 
 // P0-4 项目多库模型

@@ -32,6 +32,7 @@ import {
 import { useNavigate, useParams } from 'react-router-dom'
 import BuildCenterTab from '../../build/BuildTab'
 import DeployTab from '../../deploy/DeployTab'
+import TestTab from '../../test/TestTab'
 import RequirementCockpit from '../components/RequirementCockpit'
 import {
   addBuildStep,
@@ -154,6 +155,7 @@ export default function ProjectDetail() {
       description: project.description,
       status: project.status,
       apiDocSource: project.apiDocSource,
+      autoRegressionOnDeploy: project.autoRegressionOnDeploy,
     })
     setEditOpen(true)
   }
@@ -274,6 +276,11 @@ export default function ProjectDetail() {
               children: <DeployTab id={project.id} />,
             },
             {
+              key: 'test',
+              label: '测试',
+              children: <TestTab id={project.id} />,
+            },
+            {
               key: 'release',
               label: '发版配置',
               children: <ReleaseTab id={project.id} release={release} onChanged={setRelease} />,
@@ -322,6 +329,9 @@ export default function ProjectDetail() {
           </Form.Item>
           <Form.Item label="API 文档源" name="apiDocSource">
             <Input />
+          </Form.Item>
+          <Form.Item label="部署成功后自动回归" name="autoRegressionOnDeploy" valuePropName="checked" extra="CAP-10 FR-05：部署单成功后自动对该项目全部套件跑一次回归">
+            <Switch />
           </Form.Item>
         </Form>
       </Modal>
