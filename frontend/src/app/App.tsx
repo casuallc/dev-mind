@@ -11,13 +11,16 @@ import KnowledgeBase from '../features/knowledge/pages/KnowledgeBase'
 import DocsPage from '../features/docs/pages/DocsPage'
 import DocEditorPage from '../features/docs/pages/DocEditorPage'
 import ServersPage from '../features/server-adapter/pages/ServersPage'
+import DashboardPage from '../features/dashboard/pages/DashboardPage'
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route element={<AppLayout />}>
-          <Route path="/" element={<Navigate to="/sessions" replace />} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          {/* CAP-16 指挥中心 */}
+          <Route path="/dashboard" element={<DashboardPage />} />
           {/* CAP-02 项目 */}
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />

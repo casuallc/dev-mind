@@ -8,6 +8,7 @@ import {
   ReadOutlined,
   FileTextOutlined,
   CloudServerOutlined,
+  DashboardOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
@@ -64,6 +65,7 @@ export default function AppLayout() {
           selectedKeys={[selectedKey]}
           onClick={({ key }) => navigate(key)}
           items={[
+            { key: '/dashboard', icon: <DashboardOutlined />, label: '指挥中心' },
             { key: '/projects', icon: <FolderOutlined />, label: '项目管理' },
             { key: '/sessions', icon: <RobotOutlined />, label: '会话看板' },
             { key: '/notifications', icon: <BellOutlined />, label: '通知中心' },
