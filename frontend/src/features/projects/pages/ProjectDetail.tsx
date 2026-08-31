@@ -30,6 +30,7 @@ import {
   StopOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
+import BuildCenterTab from '../../build/BuildTab'
 import {
   addBuildStep,
   addServer,
@@ -208,6 +209,11 @@ export default function ProjectDetail() {
               key: 'build',
               label: '构建配置',
               children: <BuildTab id={project.id} steps={steps} onChanged={setSteps} />,
+            },
+            {
+              key: 'builds',
+              label: '构建',
+              children: <BuildCenterTab id={project.id} />,
             },
             {
               key: 'release',
