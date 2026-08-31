@@ -33,6 +33,7 @@
 | [CAP-14](CAP-14-requirement-flow.md) | 需求流程引擎 | 流程层 | 需求主流程半自动推进：阶段动作 + 产出登记 + 人工确认门禁 |
 | [CAP-15](CAP-15-orchestrator.md) | 自动编排器 | 流程层 | WI DONE 触发 depends_on 依赖就绪自动派发会话 |
 | [CAP-16](CAP-16-command-center.md) | 指挥中心 | 组装层 | 全局聚合首页：状态分布/活跃会话/待办确认/最近失败 |
+| [CAP-17](CAP-17-pipeline-orchestrator.md) | 执行链编排 | 流程层 | WI DONE → 自动构建 → 测试环境自动部署；生产/发版人工门禁 |
 
 ## 依赖关系
 
@@ -44,7 +45,8 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
               │               │                       └─ CAP-11 发版
               ├─ CAP-06 通知（被所有"等待人"的场景依赖）
               ├─ CAP-14 流程层（消费 CAP-03/05/06/13，推进需求主流程）
-              │               └─ CAP-15 编排器（消费 workitem.status.changed，自动派发）
+              │               ├─ CAP-15 编排器（消费 workitem.status.changed，自动派发）
+              │               └─ CAP-17 执行链（消费 build/deploy 事件，WI DONE→构建→部署）
               └─ CAP-16 指挥中心（只读聚合各能力仓库，组装层首页）
 ```
 
@@ -56,6 +58,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-14 流程层依赖 CAP-03/05/06/13：消费 `session.completed` 事件推进需求主流程，后续 CAP-15 自动编排器复用其阶段动作。
 - CAP-15 编排器在 CAP-14 之上：订阅 CAP-13 发布的 `workitem.status.changed` 事件，depends_on 依赖就绪自动派发会话。
 - CAP-16 指挥中心只读依赖各能力仓库（findAll 内存聚合），不改任何被聚合模块。
+- CAP-17 执行链编排依赖 CAP-08/09/13：WI DONE 自动构建、build.completed 自动部署 TEST 环境；生产部署与发版保持人工（确认门通知动作远程可确认）。
 
 ## 组装方式（后续流程层）
 
