@@ -12,6 +12,9 @@ import type {
   ProjectServer,
   ReleaseConfig,
   ReleaseConfigInput,
+  Requirement,
+  RequirementInput,
+  RequirementStatus,
   ServerInput,
   WorktreeInfo,
 } from './types'
@@ -139,6 +142,33 @@ export function claimWrite(id: string): Promise<ProjectLock> {
 
 export function releaseWrite(id: string): Promise<ProjectLock> {
   return api.post<ProjectLock>(`/projects/${id}/lock/release`)
+}
+
+// ---------------- 需求（P0-5 项目内主线） ----------------
+
+export function listRequirements(projectId: string, status?: string): Promise<Requirement[]> {
+  const q = status && status !== 'ALL' ? `?status=${status}` : ''
+  return api.get<Requirement[]>(`/projects/${projectId}/requirements${q}`)
+}
+
+export function createRequirement(projectId: string, input: RequirementInput): Promise<Requirement> {
+  return api.post<Requirement>(`/projects/${projectId}/requirements`, input)
+}
+
+export function updateRequirement(projectId: string, reqId: string, input: RequirementInput): Promise<Requirement> {
+  return api.put<Requirement>(`/projects/${projectId}/requirements/${reqId}`, input)
+}
+
+export function updateRequirementStatus(
+  projectId: string,
+  reqId: string,
+  status: RequirementStatus,
+): Promise<Requirement> {
+  return api.put<Requirement>(`/projects/${projectId}/requirements/${reqId}/status`, { status })
+}
+
+export function deleteRequirement(projectId: string, reqId: string): Promise<void> {
+  return api.del(`/projects/${projectId}/requirements/${reqId}`)
 }
 
 // ---------------- worktree ----------------

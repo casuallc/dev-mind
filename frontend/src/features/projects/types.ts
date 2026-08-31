@@ -122,3 +122,32 @@ export interface WorktreeInfo {
   branch: string
   sessionId: string
 }
+
+// P0-5 需求（项目内主线）
+export type RequirementStatus =
+  | 'DRAFT' | 'DESIGNING' | 'DEVELOPING' | 'TESTING' | 'ACCEPTANCE' | 'DONE' | 'CANCELLED'
+
+export interface Requirement {
+  id: string
+  projectId: string
+  seq: number
+  code: string // REQ-<seq>
+  title: string
+  description?: string
+  status: RequirementStatus
+  ownerId?: string
+  branchSlug?: string
+  docId?: number
+  createdBy?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RequirementInput {
+  title: string
+  description?: string
+  ownerId?: string
+  branchSlug?: string
+  docId?: number
+}
+
