@@ -7,6 +7,8 @@ import com.devmind.common.notification.NotificationEvent;
 import com.devmind.knowledge.KnowledgeInjector;
 import com.devmind.notification.NotificationPublisher;
 import com.devmind.project.WorktreeManager;
+import com.devmind.project.workspace.Workspace;
+import com.devmind.project.workspace.WorkspaceService;
 import com.devmind.project.RequirementService;
 import com.devmind.project.model.Project;
 import com.devmind.project.model.RequirementEntity;
@@ -60,6 +62,7 @@ public class SessionManagerService {
     private final ProjectService projectService;
     private final RequirementService requirementService;
     private final WorktreeManager worktreeManager;
+    private final WorkspaceService workspaceService;
     private final KnowledgeInjector knowledgeInjector;
     private final NotificationPublisher notificationPublisher;
     private final SessionRepository sessionRepo;
@@ -78,6 +81,7 @@ public class SessionManagerService {
                                  ProjectService projectService,
                                  RequirementService requirementService,
                                  WorktreeManager worktreeManager,
+                                 WorkspaceService workspaceService,
                                  KnowledgeInjector knowledgeInjector,
                                  NotificationPublisher notificationPublisher,
                                  SessionRepository sessionRepo,
@@ -92,6 +96,7 @@ public class SessionManagerService {
         this.projectService = projectService;
         this.requirementService = requirementService;
         this.worktreeManager = worktreeManager;
+        this.workspaceService = workspaceService;
         this.knowledgeInjector = knowledgeInjector;
         this.notificationPublisher = notificationPublisher;
         this.sessionRepo = sessionRepo;
@@ -160,10 +165,12 @@ public class SessionManagerService {
             task = renderTemplate(req.templateCode(), req.taskSpec(), project);
         }
 
-        Path worktree = null;
+        // P1-3：会话只面向 Workspace 接口，本地实现为 git worktree（远程/容器预留）
+        Workspace workspace = null;
         if (project != null) {
-            worktree = worktreeManager.create(project, id);
+            workspace = workspaceService.prepareSessionWorkspace(project, id);
         }
+        Path worktree = workspace != null ? workspace.path() : null;
         if (project != null && worktree != null) {
             try {
                 knowledgeInjector.apply(worktree.toString(), project, task);
@@ -181,8 +188,8 @@ public class SessionManagerService {
         try {
             proc = executor.launch(new SessionExecutor.LaunchContext(id, worktree, task, model, pm));
         } catch (IOException e) {
-            if (project != null && worktree != null) {
-                worktreeManager.remove(project, id, worktree);
+            if (workspace != null) {
+                workspace.cleanup();
             }
             throw new DevMindException(ErrorCode.INTERNAL, "启动执行器失败: " + e.getMessage(), e);
         }
@@ -348,7 +355,7 @@ public class SessionManagerService {
         if (project == null) {
             return;
         }
-        worktreeManager.remove(project, id, Path.of(ent.getWorktreePath()));
+        workspaceService.cleanupSessionWorkspace(project, id, Path.of(ent.getWorktreePath()));
         ent.setWorktreePath(null);
         ent.setUpdatedAt(Instant.now());
         sessionRepo.save(ent);
@@ -369,7 +376,7 @@ public class SessionManagerService {
             try {
                 Project project = resolveProject(ent.getProjectId());
                 if (project != null) {
-                    worktreeManager.remove(project, id, Path.of(ent.getWorktreePath()));
+                    workspaceService.cleanupSessionWorkspace(project, id, Path.of(ent.getWorktreePath()));
                 }
             } catch (Exception e) {
                 log.warn("删除会话时清理 worktree 失败: {} err={}", id, e.getMessage());
