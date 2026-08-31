@@ -28,6 +28,7 @@ import com.devmind.project.model.ProjectRepoEntity;
 import com.devmind.project.model.ProjectServerEntity;
 import com.devmind.project.model.ReleaseConfigEntity;
 import com.devmind.project.repo.BuildStepRepository;
+import com.devmind.project.repo.EnvironmentRepository;
 import com.devmind.project.repo.ProjectLockRepository;
 import com.devmind.project.repo.ProjectRepoRepository;
 import com.devmind.project.repo.ProjectRepository;
@@ -78,6 +79,7 @@ public class ProjectService {
     private final ReleaseConfigRepository releaseRepo;
     private final ProjectLockRepository lockRepo;
     private final RequirementRepository requirementRepo;
+    private final EnvironmentRepository environmentRepo;
     private final RepoScanner repoScanner;
     /** CAP-07 提供凭证加密实现（可选）；缺省时 accessConfig 明文存储（无 server-adapter 模块时兼容） */
     private final ObjectProvider<ServerCredentialCipher> cipherProvider;
@@ -92,6 +94,7 @@ public class ProjectService {
                           ReleaseConfigRepository releaseRepo,
                           ProjectLockRepository lockRepo,
                           RequirementRepository requirementRepo,
+                          EnvironmentRepository environmentRepo,
                           RepoScanner repoScanner,
                           ObjectProvider<ServerCredentialCipher> cipherProvider) {
         this.identityService = identityService;
@@ -104,6 +107,7 @@ public class ProjectService {
         this.releaseRepo = releaseRepo;
         this.lockRepo = lockRepo;
         this.requirementRepo = requirementRepo;
+        this.environmentRepo = environmentRepo;
         this.repoScanner = repoScanner;
         this.cipherProvider = cipherProvider;
     }
@@ -246,6 +250,7 @@ public class ProjectService {
         ProjectEntity e = requireEntity(id);
         repoRepo.deleteByProjectId(id);
         requirementRepo.deleteByProjectId(id);
+        environmentRepo.deleteByProjectId(id);
         serverRepo.deleteByProjectId(id);
         stepRepo.deleteByProjectId(id);
         releaseRepo.deleteByProjectId(id);
