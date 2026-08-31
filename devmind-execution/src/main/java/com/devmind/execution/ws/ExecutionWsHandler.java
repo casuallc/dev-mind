@@ -8,6 +8,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 import tools.jackson.databind.ObjectMapper;
 
 import java.net.URI;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -50,8 +51,18 @@ public class ExecutionWsHandler extends TextWebSocketHandler {
         }
         topicBySession.put(session, topic);
         hub.subscribe(topic, session);
-        if (snapshot.logsText() != null && !snapshot.logsText().isBlank()) {
-            send(session, mapper.writeValueAsString(Map.of("type", "snapshot", "logs", snapshot.logsText())));
+        boolean hasLogs = snapshot.logsText() != null && !snapshot.logsText().isBlank();
+        boolean hasExtra = snapshot.extra() != null && !snapshot.extra().isEmpty();
+        if (hasLogs || hasExtra) {
+            Map<String, Object> frame = new LinkedHashMap<>();
+            frame.put("type", "snapshot");
+            if (hasLogs) {
+                frame.put("logs", snapshot.logsText());
+            }
+            if (hasExtra) {
+                frame.putAll(snapshot.extra());
+            }
+            send(session, mapper.writeValueAsString(frame));
         }
         if (snapshot.terminal()) {
             send(session, mapper.writeValueAsString(Map.of("type", "done", "status",

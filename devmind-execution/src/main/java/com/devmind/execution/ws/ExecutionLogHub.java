@@ -16,7 +16,7 @@ import tools.jackson.databind.ObjectMapper;
  * 帧协议（各业务前端共用）：
  * <ul>
  *   <li>{@code {"type":"log","line":…}} 实时日志行</li>
- *   <li>{@code {"type":<event>,"payload":…}} 业务事件（步骤状态/用例结果等，见 {@link #publishEvent}）</li>
+ *   <li>{@code {"type":<event>,<event>:…}} 业务事件（步骤状态/用例结果等，字段名=事件类型，见 {@link #publishEvent}）</li>
  *   <li>{@code {"type":"done","status":…}} 终态收尾</li>
  * </ul>
  * 替代原 BuildLogHub / DeployHub / TestHub 三份拷贝。
@@ -52,10 +52,11 @@ public class ExecutionLogHub {
         send(topic, "{\"type\":\"log\",\"line\":" + jsonStr(line) + "}");
     }
 
-    /** 业务事件帧：{@code {"type":<type>,"payload":<json>}}（如 step 状态变化、测试用例结果） */
+    /** 业务事件帧：{@code {"type":<type>,<type>:<json>}}（如 step 状态变化、测试用例结果；字段名=类型名，前端按 f[f.type] 取） */
     public void publishEvent(String topic, String type, Object payload) {
         try {
-            send(topic, "{\"type\":" + jsonStr(type) + ",\"payload\":" + mapper.writeValueAsString(payload) + "}");
+            send(topic, "{\"type\":" + jsonStr(type) + "," + mapper.writeValueAsString(type) + ":"
+                    + mapper.writeValueAsString(payload) + "}");
         } catch (Exception e) {
             log.debug("事件帧序列化失败: {}", e.getMessage());
         }
