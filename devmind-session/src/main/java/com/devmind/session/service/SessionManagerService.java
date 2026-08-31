@@ -1,5 +1,7 @@
 package com.devmind.session.service;
 
+import com.devmind.common.event.DomainEventPublisher;
+import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.auth.IdentityService;
@@ -68,6 +70,7 @@ public class SessionManagerService {
     private final WorkspaceService workspaceService;
     private final KnowledgeInjector knowledgeInjector;
     private final NotificationPublisher notificationPublisher;
+    private final DomainEventPublisher eventPublisher;
     private final SessionRepository sessionRepo;
     private final SessionEventRepository eventRepo;
     private final SessionTemplateRepository templateRepo;
@@ -88,6 +91,7 @@ public class SessionManagerService {
                                  WorkspaceService workspaceService,
                                  KnowledgeInjector knowledgeInjector,
                                  NotificationPublisher notificationPublisher,
+                                 DomainEventPublisher eventPublisher,
                                  SessionRepository sessionRepo,
                                  SessionEventRepository eventRepo,
                                  SessionTemplateRepository templateRepo,
@@ -104,6 +108,7 @@ public class SessionManagerService {
         this.workspaceService = workspaceService;
         this.knowledgeInjector = knowledgeInjector;
         this.notificationPublisher = notificationPublisher;
+        this.eventPublisher = eventPublisher;
         this.sessionRepo = sessionRepo;
         this.eventRepo = eventRepo;
         this.templateRepo = templateRepo;
@@ -117,15 +122,12 @@ public class SessionManagerService {
     private final RuntimeListener listener = new RuntimeListener() {
         @Override
         public void onStateChange(String sessionId, SessionState state, SessionEvent stateEvent) {
+            // DONE/FAILED 不再走旧通知通道：onExit 发布 session.completed 领域事件，由统一监听器分级路由
             switch (state) {
                 case WAITING_AUTH -> notificationPublisher.publish(NotificationEvent.of(
                         "WAITING_AUTH", sessionId, "会话需要授权", stateEvent.content()));
                 case WAITING_INPUT -> notificationPublisher.publish(NotificationEvent.of(
                         "WAITING_INPUT", sessionId, "会话在等待你的输入", stateEvent.content()));
-                case DONE -> notificationPublisher.publish(NotificationEvent.of(
-                        "SESSION_DONE", sessionId, "会话完成", "可查看 diff"));
-                case FAILED -> notificationPublisher.publish(NotificationEvent.of(
-                        "SESSION_FAILED", sessionId, "会话失败", stateEvent.content()));
                 default -> { }
             }
         }
@@ -139,6 +141,12 @@ public class SessionManagerService {
                 ent.setFinishedAt(Instant.now());
                 ent.setUpdatedAt(Instant.now());
                 sessionRepo.save(ent);
+                // 统一事件总线：会话结束广播（CAP-14 流程引擎据此推进需求主流程；通知走 DomainEventNotificationListener）
+                eventPublisher.publish(SimpleDomainEvent.of("session.completed", ent.getProjectId(),
+                        ent.getWorkItemId(), ent.getCreatedBy(),
+                        "会话 " + sessionId + (success ? " 完成" : " 失败")
+                                + (ent.getRequirementId() != null ? "（需求 " + ent.getRequirementId() + "）" : ""),
+                        "SESSION", sessionId, success));
             });
         }
     };
