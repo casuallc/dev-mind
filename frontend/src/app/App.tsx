@@ -10,6 +10,7 @@ import NotificationCenter from '../features/notifications/pages/NotificationCent
 import KnowledgeBase from '../features/knowledge/pages/KnowledgeBase'
 import DocsPage from '../features/docs/pages/DocsPage'
 import DocEditorPage from '../features/docs/pages/DocEditorPage'
+import ServersPage from '../features/server-adapter/pages/ServersPage'
 
 export default function App() {
   return (
@@ -27,6 +28,8 @@ export default function App() {
           {/* CAP-03 文档 */}
           <Route path="/docs" element={<DocsPage />} />
           <Route path="/docs/:id" element={<DocEditorPage />} />
+          {/* CAP-07 服务器适配器 */}
+          <Route path="/servers" element={<ServersPage />} />
           {/* CAP-05 会话 */}
           <Route path="/sessions" element={<SessionsBoard />} />
           <Route path="/sessions/:id" element={<SessionDetail />} />

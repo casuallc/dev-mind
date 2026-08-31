@@ -7,6 +7,7 @@ import {
   BellOutlined,
   ReadOutlined,
   FileTextOutlined,
+  CloudServerOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
@@ -47,7 +48,9 @@ export default function AppLayout() {
       ? '/projects'
       : location.pathname.startsWith('/docs/')
         ? '/docs'
-        : location.pathname
+        : location.pathname.startsWith('/servers')
+          ? '/servers'
+          : location.pathname
 
   return (
     <Layout style={{ height: '100vh' }}>
@@ -66,6 +69,7 @@ export default function AppLayout() {
             { key: '/notifications', icon: <BellOutlined />, label: '通知中心' },
             { key: '/knowledge', icon: <ReadOutlined />, label: '知识库' },
             { key: '/docs', icon: <FileTextOutlined />, label: '文档管理' },
+            { key: '/servers', icon: <CloudServerOutlined />, label: '服务器运维' },
             { key: '/templates', icon: <DeploymentUnitOutlined />, label: '会话模板' },
             { key: '/settings', icon: <SafetyCertificateOutlined />, label: '设置' },
           ]}
