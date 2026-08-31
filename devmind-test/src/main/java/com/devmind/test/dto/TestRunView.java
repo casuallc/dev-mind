@@ -10,6 +10,7 @@ public record TestRunView(
         List<Long> suiteIds,
         Long deploymentId,
         Long serverId,
+        Long environmentId,
         String baseUrl,
         String status,
         RunSummary summary,

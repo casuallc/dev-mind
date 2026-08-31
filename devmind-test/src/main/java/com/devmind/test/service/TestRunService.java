@@ -37,8 +37,10 @@ import com.devmind.notification.dto.NotificationDraft;
 import com.devmind.notification.model.NotificationLevel;
 import com.devmind.notification.service.NotificationService;
 import com.devmind.project.ProjectService;
+import com.devmind.project.EnvironmentService;
 import com.devmind.project.RequirementService;
 import com.devmind.project.dto.ProjectView;
+import com.devmind.project.model.EnvironmentEntity;
 import com.devmind.project.model.ProjectServerEntity;
 import com.devmind.project.repo.ProjectServerRepository;
 import com.devmind.serveradapter.config.CredentialCrypto;
@@ -87,6 +89,7 @@ public class TestRunService {
     private final CredentialCrypto crypto;
     private final ExecutionLogHub hub;
     private final ObjectMapper mapper;
+    private final EnvironmentService environmentService;
 
     public TestRunService(TestRunRepository repo,
                           TestCaseResultRepository resultRepo,
@@ -101,7 +104,8 @@ public class TestRunService {
                           NotificationService notificationService,
                           CredentialCrypto crypto,
                           ExecutionLogHub hub,
-                          ObjectMapper mapper) {
+                          ObjectMapper mapper,
+                          EnvironmentService environmentService) {
         this.repo = repo;
         this.resultRepo = resultRepo;
         this.caseRepo = caseRepo;
@@ -116,6 +120,7 @@ public class TestRunService {
         this.crypto = crypto;
         this.hub = hub;
         this.mapper = mapper;
+        this.environmentService = environmentService;
     }
 
     @PreDestroy
@@ -127,11 +132,12 @@ public class TestRunService {
 
     public TestRunView create(CreateTestRunRequest req) {
         return createInternal(req.projectId(), req.requirementId(), req.suiteIds(), req.deploymentId(),
-                req.serverId(), req.baseUrl(), "user");
+                req.serverId(), req.environmentId(), req.baseUrl(), "user");
     }
 
     private TestRunView createInternal(String projectId, String requirementId, List<Long> suiteIds,
-                                       Long deploymentId, Long serverId, String baseUrl, String triggeredBy) {
+                                       Long deploymentId, Long serverId, Long environmentId,
+                                       String baseUrl, String triggeredBy) {
         projectService.requireProject(projectId);
         if (requirementId != null && !requirementId.isBlank()) {
             // P0-6 关联约定：需求须属于该项目
@@ -147,7 +153,21 @@ public class TestRunService {
                 throw new DevMindException(ErrorCode.BAD_REQUEST, "套件 " + sid + " 不属于该项目");
             }
         }
+        // 收尾3：环境补全——缺省 serverId 取环境首台服务器，缺省 baseUrl 取环境变量 baseUrl/BASE_URL
+        String envBaseUrl = null;
+        if (environmentId != null) {
+            EnvironmentEntity environment = environmentService.requireEnvironment(projectId, environmentId);
+            List<Long> envServers = environmentService.serverIdsOf(environment);
+            if (serverId == null && !envServers.isEmpty()) {
+                serverId = envServers.get(0);
+            }
+            Map<String, String> vars = environmentService.variablesOf(environment);
+            envBaseUrl = vars.getOrDefault("baseUrl", vars.get("BASE_URL"));
+        }
         String resolvedBaseUrl = resolveBaseUrl(baseUrl, serverId, deploymentId);
+        if ((resolvedBaseUrl == null || resolvedBaseUrl.isBlank()) && envBaseUrl != null && !envBaseUrl.isBlank()) {
+            resolvedBaseUrl = envBaseUrl.strip();
+        }
 
         TestRunEntity r = new TestRunEntity();
         r.setProjectId(projectId);
@@ -155,6 +175,7 @@ public class TestRunService {
         r.setSuiteIdsJson(writeIds(suiteIds));
         r.setDeploymentId(deploymentId);
         r.setServerId(serverId);
+        r.setEnvironmentId(environmentId);
         r.setBaseUrl(resolvedBaseUrl);
         r.setStatus(TestRunEntity.RUNNING);
         r.setTriggeredBy(triggeredBy);
@@ -364,7 +385,8 @@ public class TestRunService {
             String requirementId = deploymentRepo.findById(evt.deploymentId())
                     .map(d -> d.getRequirementId()).orElse(null);
             log.info("部署 #{} 成功，自动回归触发（项目 {}，套件 {}）", evt.deploymentId(), evt.projectId(), ids);
-            createInternal(evt.projectId(), requirementId, ids, evt.deploymentId(), evt.serverId(), null, "deploy");
+            createInternal(evt.projectId(), requirementId, ids, evt.deploymentId(), evt.serverId(), null, null,
+                    "deploy");
         } catch (Exception e) {
             log.warn("自动回归触发失败: {}", e.getMessage());
         }
@@ -439,7 +461,8 @@ public class TestRunService {
         List<CaseResultView> results = resultRepo.findByRunIdOrderBySortAsc(r.getId()).stream()
                 .map(this::toResultView).toList();
         return new TestRunView(r.getId(), r.getProjectId(), r.getRequirementId(), suiteIds, r.getDeploymentId(),
-                r.getServerId(), r.getBaseUrl(), r.getStatus(), summary, r.getReportDocId(), r.getErrorSummary(),
+                r.getServerId(), r.getEnvironmentId(), r.getBaseUrl(), r.getStatus(), summary, r.getReportDocId(),
+                r.getErrorSummary(),
                 r.getTriggeredBy(), r.getStartedAt(), r.getFinishedAt(), r.getCreatedAt(), results);
     }
 
