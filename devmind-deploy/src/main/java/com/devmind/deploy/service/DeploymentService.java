@@ -33,6 +33,7 @@ import com.devmind.deploy.model.DeployStep;
 import com.devmind.deploy.repo.DeploymentRepository;
 import com.devmind.deploy.repo.DeploymentStepRepository;
 import com.devmind.execution.ws.ExecutionLogHub;
+import com.devmind.notification.dto.ActionDef;
 import com.devmind.notification.dto.NotificationDraft;
 import com.devmind.notification.model.NotificationLevel;
 import com.devmind.notification.service.NotificationService;
@@ -183,6 +184,18 @@ public class DeploymentService {
         int seq = 1;
         for (DeployStep s : plan) {
             stepRepo.save(newStep(saved.getId(), seq++, s));
+        }
+        // CAP-17 FR-04：确认门部署创建即告警，通知中心可一键 confirm（确认+执行）
+        if (confirmRequired) {
+            try {
+                notificationService.emit(new NotificationDraft(NotificationLevel.P0, "deploy.confirm.required",
+                        "部署 #" + saved.getId() + " 待确认",
+                        "环境 " + saved.getEnv() + " 的部署需人工确认后执行（构建 #" + saved.getBuildId() + "）",
+                        "deployment", String.valueOf(saved.getId()),
+                        List.of(new ActionDef("confirm", "确认并执行"))));
+            } catch (Exception e) {
+                log.warn("部署待确认通知发送失败: {}", e.getMessage());
+            }
         }
         return toView(saved);
     }

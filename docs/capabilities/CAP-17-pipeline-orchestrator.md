@@ -23,8 +23,8 @@
   （confirmRequired=false）。前置不齐 → P1 降级通知「构建完成，请人工部署验证」。
 - **FR-3 并发补扫**：构建并发满（409）时本轮跳过；每次 `build.completed` 后补扫该项目
   「DONE 且无构建记录」的 WI 补触发，不排队不丢失。
-- **FR-04 部署确认门通知动作**：confirmRequired 部署创建时发 P0 通知（actions=[confirm, view]），
-  通知中心一键 confirm（确认+执行）/rollback。生产部署由此实现"人工门禁但远程可操作"。
+- **FR-04 部署确认门通知动作**：confirmRequired 部署创建时发 P0 通知（actions=[confirm]），
+  通知中心一键 confirm（确认+执行）。生产部署由此实现"人工门禁但远程可操作"。
 - **FR-05 链路完成通知**：测试环境部署成功 → P1「WI-x 构建+部署链路完成，可验收/发版」。
   回归测试由项目 `autoRegressionOnDeploy` 开关触发（test 模块既有能力，编排层不重复触发）。
 - **FR-06 失败降级**：构建/部署失败走各执行器既有 P0 通知，编排器不做自动重试/补偿
