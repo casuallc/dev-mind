@@ -33,6 +33,7 @@ export interface DeploymentRecord {
   projectId: string
   requirementId: string | null
   serverId: number
+  environmentId: number | null
   buildId: number | null
   env: string
   status: DeployStatus

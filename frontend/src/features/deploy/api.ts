@@ -19,7 +19,10 @@ export function deleteDeployConfig(projectId: string): Promise<void> {
 
 export interface CreateDeploymentInput {
   projectId: string
-  serverId: number
+  /** 与 environmentId 至少传一个；同传时后端校验服务器属于环境 */
+  serverId?: number
+  /** P1-1 环境：提供服务器组与变量注入，env 名以环境名为准 */
+  environmentId?: number
   buildId?: number
   requirementId?: string
   env?: string

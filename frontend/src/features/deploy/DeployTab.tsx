@@ -32,9 +32,9 @@ import {
 } from './api'
 import type { DeployConfig, DeployStatus, DeployStep, DeployStepInput, DeploymentRecord } from './types'
 import type { BuildRecord } from '../build/types'
-import type { ProjectServer } from '../projects/types'
+import type { ProjectEnvironment, ProjectServer } from '../projects/types'
 import { listBuilds } from '../build/api'
-import { listServers } from '../projects/api'
+import { listEnvironments, listServers } from '../projects/api'
 
 const STATUS_COLOR: Record<DeployStatus, string> = {
   PLANNED: 'blue',
@@ -88,6 +88,7 @@ function durationMs(a: string | null, b: string | null): string {
 export default function DeployTab({ id }: { id: string }) {
   const [cfg, setCfg] = useState<DeployConfig | null>(null)
   const [servers, setServers] = useState<ProjectServer[]>([])
+  const [environments, setEnvironments] = useState<ProjectEnvironment[]>([])
   const [builds, setBuilds] = useState<BuildRecord[]>([])
   const [deploys, setDeploys] = useState<DeploymentRecord[]>([])
   const [creating, setCreating] = useState(false)
@@ -95,6 +96,7 @@ export default function DeployTab({ id }: { id: string }) {
 
   // 创建表单
   const [serverId, setServerId] = useState<number | undefined>()
+  const [environmentId, setEnvironmentId] = useState<number | undefined>()
   const [buildId, setBuildId] = useState<number | undefined>()
   const [env, setEnv] = useState('test')
   const [confirmRequired, setConfirmRequired] = useState(false)
@@ -104,6 +106,7 @@ export default function DeployTab({ id }: { id: string }) {
   useEffect(() => {
     getDeployConfig(id).then(setCfg).catch(() => {})
     listServers(id).then(setServers).catch(() => {})
+    listEnvironments(id).then(setEnvironments).catch(() => {})
     listBuilds(id).then(setBuilds).catch(() => {})
     refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -124,17 +127,18 @@ export default function DeployTab({ id }: { id: string }) {
   }
 
   const onCreate = async () => {
-    if (!serverId) {
-      message.warning('请选择目标服务器')
+    if (!serverId && !environmentId) {
+      message.warning('请选择目标服务器或环境')
       return
     }
     setCreating(true)
     try {
       const d = await createDeployment({
         projectId: id,
-        serverId,
+        serverId: serverId || undefined,
+        environmentId: environmentId || undefined,
         buildId: buildId || undefined,
-        env: env || 'test',
+        env: environmentId ? undefined : env || 'test',
         confirmRequired,
       })
       setDetail(d)
@@ -196,10 +200,23 @@ export default function DeployTab({ id }: { id: string }) {
       <Card size="small" title="创建部署">
         <Space wrap>
           <Select<number>
+            style={{ width: 180 }}
+            placeholder="选择环境（可选）"
+            value={environmentId}
+            onChange={setEnvironmentId}
+            allowClear
+            options={environments.map((e) => ({ value: e.id, label: `${e.name}${e.description ? ` · ${e.description}` : ''}` }))}
+          />
+          <Select<number>
             style={{ width: 200 }}
-            placeholder={deployCaps.length ? '选择目标服务器' : '无可用服务器（需 deploy 能力）'}
+            placeholder={
+              deployCaps.length
+                ? environmentId ? '目标服务器（缺省取环境首台）' : '选择目标服务器'
+                : '无可用服务器（需 deploy 能力）'
+            }
             value={serverId}
             onChange={setServerId}
+            allowClear={!!environmentId}
             options={deployCaps.map((s) => ({ value: s.id, label: `${s.name}（${s.accessType} · ${s.env || '?'}）` }))}
           />
           <Select<number>
@@ -210,7 +227,9 @@ export default function DeployTab({ id }: { id: string }) {
             allowClear
             options={artifactBuilds.map((b) => ({ value: b.id, label: `#${b.id} · ${b.artifactRef}` }))}
           />
-          <Input placeholder="环境" value={env} onChange={(e) => setEnv(e.target.value)} style={{ width: 120 }} />
+          {environmentId == null && (
+            <Input placeholder="环境" value={env} onChange={(e) => setEnv(e.target.value)} style={{ width: 120 }} />
+          )}
           <Space size={4}>
             <span style={{ fontSize: 12 }}>需确认</span>
             <Switch checked={confirmRequired} onChange={setConfirmRequired} size="small" />
