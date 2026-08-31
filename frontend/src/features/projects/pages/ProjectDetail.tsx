@@ -31,6 +31,7 @@ import {
 } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import BuildCenterTab from '../../build/BuildTab'
+import DeployTab from '../../deploy/DeployTab'
 import {
   addBuildStep,
   addServer,
@@ -214,6 +215,11 @@ export default function ProjectDetail() {
               key: 'builds',
               label: '构建',
               children: <BuildCenterTab id={project.id} />,
+            },
+            {
+              key: 'deploy',
+              label: '部署',
+              children: <DeployTab id={project.id} />,
             },
             {
               key: 'release',
