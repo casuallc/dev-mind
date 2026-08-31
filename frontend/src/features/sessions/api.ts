@@ -2,9 +2,12 @@
 import { api } from '../../shared/api/client'
 import type { DiffView, SessionSummary, SessionEvent, SessionTemplate } from './types'
 
-export function listSessions(status?: string): Promise<SessionSummary[]> {
-  const q = status && status !== 'ALL' ? `?status=${status}` : ''
-  return api.get<SessionSummary[]>(`/sessions${q}`)
+export function listSessions(status?: string, requirementId?: string): Promise<SessionSummary[]> {
+  const params = new URLSearchParams()
+  if (status && status !== 'ALL') params.set('status', status)
+  if (requirementId) params.set('requirementId', requirementId)
+  const q = params.toString()
+  return api.get<SessionSummary[]>(`/sessions${q ? `?${q}` : ''}`)
 }
 
 export function getSession(id: string): Promise<SessionSummary> {
@@ -14,6 +17,7 @@ export function getSession(id: string): Promise<SessionSummary> {
 export function createSession(body: {
   templateCode?: string
   projectId?: string
+  requirementId?: string
   taskSpec: string
   baseBranch?: string
   model?: string

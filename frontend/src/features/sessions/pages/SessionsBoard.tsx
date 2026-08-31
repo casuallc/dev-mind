@@ -22,8 +22,8 @@ import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { createSession, deleteSession, listSessions, listTemplates } from '../api'
 import type { SessionSummary, SessionTemplate } from '../types'
-import { listProjects } from '../../projects/api'
-import type { Project } from '../../projects/types'
+import { listProjects, listRequirements } from '../../projects/api'
+import type { Project, Requirement } from '../../projects/types'
 import AgentPanel from '../components/AgentPanel'
 
 const stateColor: Record<string, string> = {
@@ -50,8 +50,10 @@ export default function SessionsBoard() {
   const [keyword, setKeyword] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [requirements, setRequirements] = useState<Requirement[]>([])
   const [form] = Form.useForm()
   const timerRef = useRef<number | undefined>(undefined)
+  const watchProjectId = Form.useWatch('projectId', form)
 
   const load = useCallback(async (st?: string) => {
     setLoading(true)
@@ -89,6 +91,18 @@ export default function SessionsBoard() {
 
   const onStateChange = useCallback(() => load(), [load])
 
+  // 项目变化时加载其需求列表（会话可挂到需求主线上）；切换项目清空已选需求
+  useEffect(() => {
+    form.setFieldsValue({ requirementId: undefined })
+    if (!watchProjectId) {
+      setRequirements([])
+      return
+    }
+    listRequirements(watchProjectId)
+      .then((rs) => setRequirements(rs.filter((r) => !['DONE', 'CANCELLED'].includes(r.status))))
+      .catch(() => setRequirements([]))
+  }, [watchProjectId, form])
+
   const filtered = useMemo(() => {
     const kw = keyword.trim().toLowerCase()
     const list = status === 'ALL' ? sessions : sessions.filter((s) => s.state === status)
@@ -116,6 +130,7 @@ export default function SessionsBoard() {
     model?: string
     permissionMode?: string
     projectId?: string
+    requirementId?: string
   }) => {
     setCreating(true)
     try {
@@ -125,6 +140,7 @@ export default function SessionsBoard() {
         model: values.model || undefined,
         permissionMode: values.permissionMode || undefined,
         projectId: values.projectId || undefined,
+        requirementId: values.requirementId || undefined,
       })
       setCreateOpen(false)
       form.resetFields()
@@ -306,6 +322,16 @@ export default function SessionsBoard() {
               options={projects.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))}
               placeholder="选择项目（无项目时可留空裸跑）"
               allowClear
+            />
+          </Form.Item>
+          <Form.Item label="关联需求" name="requirementId" extra="挂到需求主线后，会话将出现在需求详情聚合中">
+            <Select
+              options={requirements.map((r) => ({ value: r.id, label: `${r.code} ${r.title}` }))}
+              placeholder="（可选）选择需求"
+              allowClear
+              disabled={!watchProjectId}
+              showSearch
+              optionFilterProp="label"
             />
           </Form.Item>
           <Form.Item label="任务说明" name="taskSpec" rules={[{ required: true, message: '请输入任务说明' }]}>
