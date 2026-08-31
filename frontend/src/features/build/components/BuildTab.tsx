@@ -6,6 +6,7 @@ import { getBuild, getBuildConfig, getBuildLogs, listBuilds, saveBuildConfig, tr
 import type { BuildConfig, BuildExecutor, BuildRecord, BuildStatus } from '../types'
 import type { ProjectServer } from '../../projects/types'
 import { listServers } from '../../projects/api'
+import { durationMs, fmtTime } from '../../../shared/utils/format'
 
 const STATUS_COLOR: Record<BuildStatus, string> = {
   QUEUED: 'blue',
@@ -14,21 +15,6 @@ const STATUS_COLOR: Record<BuildStatus, string> = {
   FAILED: 'red',
 }
 
-function fmtTime(s: string | null): string {
-  if (!s) return '-'
-  const d = new Date(s)
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
-}
-
-function durationMs(a: string | null, b: string | null): string {
-  if (!a || !b) return '-'
-  const ms = new Date(b).getTime() - new Date(a).getTime()
-  if (ms < 1000) return `${ms}ms`
-  const s = Math.floor(ms / 1000)
-  if (s < 60) return `${s}s`
-  return `${Math.floor(s / 60)}m ${s % 60}s`
-}
 
 export default function BuildTab({ id }: { id: string }) {
   const [cfg, setCfg] = useState<BuildConfig | null>(null)
