@@ -6,6 +6,7 @@ package com.devmind.common.exception;
 public enum ErrorCode {
 
     BAD_REQUEST(400, "DEV-400", "请求参数错误"),
+    FORBIDDEN(403, "DEV-403", "无权限执行"),
     NOT_FOUND(404, "DEV-404", "资源不存在"),
     CONFLICT(409, "DEV-409", "状态冲突"),
     TOO_MANY_SESSIONS(429, "DEV-429", "并发会话数已达上限，请稍后再试"),
