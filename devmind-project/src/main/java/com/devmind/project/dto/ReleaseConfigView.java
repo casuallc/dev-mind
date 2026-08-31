@@ -5,5 +5,7 @@ public record ReleaseConfigView(
         String projectId,
         String nexusRepo,
         String scriptTemplateRef,
-        String versionRule) {
+        String versionRule,
+        String executor,
+        Long remoteServerId) {
 }

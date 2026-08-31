@@ -550,6 +550,10 @@ public class ProjectService {
         e.setNexusRepo(blankToNull(req.nexusRepo()));
         e.setScriptTemplateRef(blankToNull(req.scriptTemplateRef()));
         e.setVersionRule(blankToNull(req.versionRule()));
+        String executor = req.executor() == null || req.executor().isBlank()
+                ? "LOCAL" : req.executor().trim().toUpperCase();
+        e.setExecutor("REMOTE".equals(executor) ? "REMOTE" : "LOCAL");
+        e.setRemoteServerId(req.remoteServerId());
         e.setUpdatedAt(Instant.now());
         return toReleaseView(releaseRepo.save(e));
     }
@@ -734,7 +738,7 @@ public class ProjectService {
 
     private ReleaseConfigView toReleaseView(ReleaseConfigEntity e) {
         return new ReleaseConfigView(e.getId(), e.getProjectId(), e.getNexusRepo(),
-                e.getScriptTemplateRef(), e.getVersionRule());
+                e.getScriptTemplateRef(), e.getVersionRule(), e.getExecutor(), e.getRemoteServerId());
     }
 
     private ProjectLockView toLockView(ProjectLockEntity l) {

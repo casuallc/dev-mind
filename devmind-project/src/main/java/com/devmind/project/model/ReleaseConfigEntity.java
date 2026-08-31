@@ -35,6 +35,14 @@ public class ReleaseConfigEntity {
     @Column(name = "version_rule", length = 512)
     private String versionRule;
 
+    /** CAP-11 执行方式：LOCAL（本机渲染模板正文执行）/ REMOTE（经 CAP-07 远程）；默认 LOCAL */
+    @Column(name = "executor", length = 16)
+    private String executor = "LOCAL";
+
+    /** CAP-11 远程执行目标服务器 id（executor=REMOTE 时必填） */
+    @Column(name = "remote_server_id")
+    private Long remoteServerId;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -51,6 +59,10 @@ public class ReleaseConfigEntity {
     public void setScriptTemplateRef(String scriptTemplateRef) { this.scriptTemplateRef = scriptTemplateRef; }
     public String getVersionRule() { return versionRule; }
     public void setVersionRule(String versionRule) { this.versionRule = versionRule; }
+    public String getExecutor() { return executor; }
+    public void setExecutor(String executor) { this.executor = executor; }
+    public Long getRemoteServerId() { return remoteServerId; }
+    public void setRemoteServerId(Long remoteServerId) { this.remoteServerId = remoteServerId; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
