@@ -11,6 +11,7 @@
     </parent>
     <artifactId>devmind-knowledge</artifactId>
     <name>devmind-knowledge</name>
+    <description>CAP-04 知识库：三层经验管理（全局/项目/提案）+ 会话注入器</description>
     <dependencies>
         <dependency>
             <groupId>com.devmind</groupId>
@@ -18,11 +19,27 @@
         </dependency>
         <dependency>
             <groupId>com.devmind</groupId>
-            <artifactId>devmind-auth</artifactId>
+            <artifactId>devmind-project</artifactId>
         </dependency>
         <dependency>
             <groupId>com.devmind</groupId>
-            <artifactId>devmind-project</artifactId>
+            <artifactId>devmind-notification</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
     </dependencies>
 </project>
