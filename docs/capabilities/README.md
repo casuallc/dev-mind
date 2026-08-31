@@ -31,6 +31,8 @@
 | [CAP-12](CAP-12-execution-platform.md) | 统一执行底座 | 底座 | 步骤链引擎 + 本地/远程 Runner + 统一 WS 日志枢纽 |
 | [CAP-13](CAP-13-requirement-workitem.md) | 研发主线 | 管理 | Requirement/Design/Work Item 模型 + Relation 追溯网 |
 | [CAP-14](CAP-14-requirement-flow.md) | 需求流程引擎 | 流程层 | 需求主流程半自动推进：阶段动作 + 产出登记 + 人工确认门禁 |
+| [CAP-15](CAP-15-orchestrator.md) | 自动编排器 | 流程层 | WI DONE 触发 depends_on 依赖就绪自动派发会话 |
+| [CAP-16](CAP-16-command-center.md) | 指挥中心 | 组装层 | 全局聚合首页：状态分布/活跃会话/待办确认/最近失败 |
 
 ## 依赖关系
 
@@ -41,7 +43,9 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
               │               │                       ├─ CAP-09 部署 ─▶ CAP-10 测试
               │               │                       └─ CAP-11 发版
               ├─ CAP-06 通知（被所有"等待人"的场景依赖）
-              └─ CAP-14 流程层（消费 CAP-03/05/06/13，推进需求主流程）
+              ├─ CAP-14 流程层（消费 CAP-03/05/06/13，推进需求主流程）
+              │               └─ CAP-15 编排器（消费 workitem.status.changed，自动派发）
+              └─ CAP-16 指挥中心（只读聚合各能力仓库，组装层首页）
 ```
 
 - CAP-01 无依赖，被全部能力依赖；
@@ -50,6 +54,8 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-05 依赖 CAP-04（知识注入）与 CAP-06（等待输入/授权通知）；
 - CAP-08/09/10/11 依赖 CAP-07（远程执行时）与 CAP-02；执行层共用 CAP-12 统一执行底座（步骤链引擎/Runner/WS 日志枢纽）。
 - CAP-14 流程层依赖 CAP-03/05/06/13：消费 `session.completed` 事件推进需求主流程，后续 CAP-15 自动编排器复用其阶段动作。
+- CAP-15 编排器在 CAP-14 之上：订阅 CAP-13 发布的 `workitem.status.changed` 事件，depends_on 依赖就绪自动派发会话。
+- CAP-16 指挥中心只读依赖各能力仓库（findAll 内存聚合），不改任何被聚合模块。
 
 ## 组装方式（后续流程层）
 
