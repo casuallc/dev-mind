@@ -11,6 +11,7 @@
     </parent>
     <artifactId>devmind-docs</artifactId>
     <name>devmind-docs</name>
+    <description>CAP-03 文档管理：git 版本化文档库（需求/方案/API 套件/报告）</description>
     <dependencies>
         <dependency>
             <groupId>com.devmind</groupId>
@@ -18,11 +19,23 @@
         </dependency>
         <dependency>
             <groupId>com.devmind</groupId>
-            <artifactId>devmind-auth</artifactId>
+            <artifactId>devmind-project</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.devmind</groupId>
-            <artifactId>devmind-project</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
     </dependencies>
 </project>
