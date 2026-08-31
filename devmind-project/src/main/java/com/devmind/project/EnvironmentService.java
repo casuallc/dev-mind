@@ -150,6 +150,19 @@ public class EnvironmentService {
         }
     }
 
+    /** 环境的目标服务器 id 列表（deploy/test 按环境定位执行目标） */
+    @SuppressWarnings("unchecked")
+    public List<Long> serverIdsOf(EnvironmentEntity e) {
+        List<Object> ids = parse(e.getServerIdsJson(), List.class, List.of());
+        return ids.stream().map(n -> ((Number) n).longValue()).toList();
+    }
+
+    /** 环境变量（注入执行参数；secret 仅为名字引用，此处不取值） */
+    @SuppressWarnings("unchecked")
+    public Map<String, String> variablesOf(EnvironmentEntity e) {
+        return parse(e.getVariablesJson(), Map.class, Map.of());
+    }
+
     public EnvironmentView toView(EnvironmentEntity e) {
         List<Object> ids = parse(e.getServerIdsJson(), List.class, List.of());
         Map<String, String> vars = parse(e.getVariablesJson(), Map.class, Map.of());
