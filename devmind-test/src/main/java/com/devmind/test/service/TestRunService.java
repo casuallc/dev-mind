@@ -37,6 +37,7 @@ import com.devmind.notification.dto.NotificationDraft;
 import com.devmind.notification.model.NotificationLevel;
 import com.devmind.notification.service.NotificationService;
 import com.devmind.project.ProjectService;
+import com.devmind.project.RequirementService;
 import com.devmind.project.dto.ProjectView;
 import com.devmind.project.model.ProjectServerEntity;
 import com.devmind.project.repo.ProjectServerRepository;
@@ -77,6 +78,7 @@ public class TestRunService {
     private final TestCaseRepository caseRepo;
     private final TestSuiteRepository suiteRepo;
     private final ProjectService projectService;
+    private final RequirementService requirementService;
     private final ProjectServerRepository serverRepo;
     private final DeploymentRepository deploymentRepo;
     private final ServerOperationService serverOpService;
@@ -91,6 +93,7 @@ public class TestRunService {
                           TestCaseRepository caseRepo,
                           TestSuiteRepository suiteRepo,
                           ProjectService projectService,
+                          RequirementService requirementService,
                           ProjectServerRepository serverRepo,
                           DeploymentRepository deploymentRepo,
                           ServerOperationService serverOpService,
@@ -104,6 +107,7 @@ public class TestRunService {
         this.caseRepo = caseRepo;
         this.suiteRepo = suiteRepo;
         this.projectService = projectService;
+        this.requirementService = requirementService;
         this.serverRepo = serverRepo;
         this.deploymentRepo = deploymentRepo;
         this.serverOpService = serverOpService;
@@ -122,13 +126,17 @@ public class TestRunService {
     // ---------------- 创建 / 执行 ----------------
 
     public TestRunView create(CreateTestRunRequest req) {
-        return createInternal(req.projectId(), req.suiteIds(), req.deploymentId(), req.serverId(),
-                req.baseUrl(), "user");
+        return createInternal(req.projectId(), req.requirementId(), req.suiteIds(), req.deploymentId(),
+                req.serverId(), req.baseUrl(), "user");
     }
 
-    private TestRunView createInternal(String projectId, List<Long> suiteIds, Long deploymentId,
-                                       Long serverId, String baseUrl, String triggeredBy) {
+    private TestRunView createInternal(String projectId, String requirementId, List<Long> suiteIds,
+                                       Long deploymentId, Long serverId, String baseUrl, String triggeredBy) {
         projectService.requireProject(projectId);
+        if (requirementId != null && !requirementId.isBlank()) {
+            // P0-6 关联约定：需求须属于该项目
+            requirementService.requireEntity(projectId, requirementId);
+        }
         if (suiteIds == null || suiteIds.isEmpty()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "至少选择 1 个测试套件");
         }
@@ -143,6 +151,7 @@ public class TestRunService {
 
         TestRunEntity r = new TestRunEntity();
         r.setProjectId(projectId);
+        r.setRequirementId(requirementId == null || requirementId.isBlank() ? null : requirementId);
         r.setSuiteIdsJson(writeIds(suiteIds));
         r.setDeploymentId(deploymentId);
         r.setServerId(serverId);
@@ -351,8 +360,11 @@ public class TestRunService {
                 return;
             }
             List<Long> ids = suites.stream().map(TestSuiteEntity::getId).toList();
+            // P0-6：继承部署的需求关联，回归结果挂到同一主线
+            String requirementId = deploymentRepo.findById(evt.deploymentId())
+                    .map(d -> d.getRequirementId()).orElse(null);
             log.info("部署 #{} 成功，自动回归触发（项目 {}，套件 {}）", evt.deploymentId(), evt.projectId(), ids);
-            createInternal(evt.projectId(), ids, evt.deploymentId(), evt.serverId(), null, "deploy");
+            createInternal(evt.projectId(), requirementId, ids, evt.deploymentId(), evt.serverId(), null, "deploy");
         } catch (Exception e) {
             log.warn("自动回归触发失败: {}", e.getMessage());
         }
@@ -426,8 +438,8 @@ public class TestRunService {
         RunSummary summary = parseSummary(r.getSummaryJson());
         List<CaseResultView> results = resultRepo.findByRunIdOrderBySortAsc(r.getId()).stream()
                 .map(this::toResultView).toList();
-        return new TestRunView(r.getId(), r.getProjectId(), suiteIds, r.getDeploymentId(), r.getServerId(),
-                r.getBaseUrl(), r.getStatus(), summary, r.getReportDocId(), r.getErrorSummary(),
+        return new TestRunView(r.getId(), r.getProjectId(), r.getRequirementId(), suiteIds, r.getDeploymentId(),
+                r.getServerId(), r.getBaseUrl(), r.getStatus(), summary, r.getReportDocId(), r.getErrorSummary(),
                 r.getTriggeredBy(), r.getStartedAt(), r.getFinishedAt(), r.getCreatedAt(), results);
     }
 

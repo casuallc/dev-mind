@@ -19,6 +19,8 @@ import com.devmind.docs.store.DocPaths;
 import com.devmind.docs.store.DocStore;
 import com.devmind.docs.store.TextDiff;
 import com.devmind.project.ProjectService;
+import com.devmind.project.RequirementService;
+import com.devmind.project.model.RequirementEntity;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -43,17 +45,20 @@ public class DocumentService {
     private final DocumentRepository docRepo;
     private final DocumentVersionRepository verRepo;
     private final ProjectService projectService;
+    private final RequirementService requirementService;
     private final DocStore store;
     private final DocsProperties props;
 
     public DocumentService(DocumentRepository docRepo,
                            DocumentVersionRepository verRepo,
                            ProjectService projectService,
+                           RequirementService requirementService,
                            DocStore store,
                            DocsProperties props) {
         this.docRepo = docRepo;
         this.verRepo = verRepo;
         this.projectService = projectService;
+        this.requirementService = requirementService;
         this.store = store;
         this.props = props;
     }
@@ -103,6 +108,17 @@ public class DocumentService {
         if (req.projectId() != null && !req.projectId().isBlank()) {
             projectService.requireProject(req.projectId()); // 存在性校验（FR-01 归属）
         }
+        // P0-6 关联约定：requirementId 升级为外键语义；projectId 空时由需求反推，不一致时报错
+        String projectId = blankToNull(req.projectId());
+        if (req.requirementId() != null && !req.requirementId().isBlank()) {
+            RequirementEntity requirement = requirementService.requireById(req.requirementId());
+            if (projectId == null) {
+                projectId = requirement.getProjectId();
+            } else if (!projectId.equals(requirement.getProjectId())) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "需求 " + req.requirementId() + " 不属于项目 " + projectId);
+            }
+        }
         String content = resolveContent(req);
         if (content == null || content.isBlank()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "文档内容必填");
@@ -111,7 +127,7 @@ public class DocumentService {
         DocumentEntity e = new DocumentEntity();
         e.setKind(kind);
         e.setRequirementId(blankToNull(req.requirementId()));
-        e.setProjectId(blankToNull(req.projectId()));
+        e.setProjectId(projectId);
         e.setTitle(req.title().strip());
         e.setCurrentVersion(1);
         e.setStatus("draft");

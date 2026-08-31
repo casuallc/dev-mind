@@ -6,7 +6,9 @@ import com.devmind.common.notification.NotificationEvent;
 import com.devmind.knowledge.KnowledgeInjector;
 import com.devmind.notification.NotificationPublisher;
 import com.devmind.project.WorktreeManager;
+import com.devmind.project.RequirementService;
 import com.devmind.project.model.Project;
+import com.devmind.project.model.RequirementEntity;
 import com.devmind.project.ProjectService;import com.devmind.session.config.SessionProperties;
 import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.SessionView;
@@ -54,6 +56,7 @@ public class SessionManagerService {
     private static final Logger log = LoggerFactory.getLogger(SessionManagerService.class);
 
     private final ProjectService projectService;
+    private final RequirementService requirementService;
     private final WorktreeManager worktreeManager;
     private final KnowledgeInjector knowledgeInjector;
     private final NotificationPublisher notificationPublisher;
@@ -70,6 +73,7 @@ public class SessionManagerService {
     private final Map<String, SessionRuntime> runtimes = new ConcurrentHashMap<>();
 
     public SessionManagerService(ProjectService projectService,
+                                 RequirementService requirementService,
                                  WorktreeManager worktreeManager,
                                  KnowledgeInjector knowledgeInjector,
                                  NotificationPublisher notificationPublisher,
@@ -82,6 +86,7 @@ public class SessionManagerService {
                                  CliEventParser parser,
                                  Collection<SessionExecutor> executors) {
         this.projectService = projectService;
+        this.requirementService = requirementService;
         this.worktreeManager = worktreeManager;
         this.knowledgeInjector = knowledgeInjector;
         this.notificationPublisher = notificationPublisher;
@@ -127,7 +132,19 @@ public class SessionManagerService {
     // ---------------- 创建 / 生命周期 ----------------
 
     public SessionView create(CreateSessionRequest req) {
-        Project project = resolveProject(req.projectId());
+        // P0-6 关联约定：requirementId 与 projectId 不一致时报错；projectId 空时由需求反推
+        RequirementEntity requirement = null;
+        String projectId = req.projectId();
+        if (req.requirementId() != null && !req.requirementId().isBlank()) {
+            requirement = requirementService.requireById(req.requirementId());
+            if (projectId == null || projectId.isBlank()) {
+                projectId = requirement.getProjectId();
+            } else if (!projectId.equals(requirement.getProjectId())) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "需求 " + req.requirementId() + " 不属于项目 " + projectId);
+            }
+        }
+        Project project = resolveProject(projectId);
         String id = shortId();
         String baseBranch = req.baseBranch() != null && !req.baseBranch().isBlank()
                 ? req.baseBranch()
@@ -170,6 +187,7 @@ public class SessionManagerService {
         SessionEntity ent = new SessionEntity();
         ent.setId(id);
         ent.setProjectId(project != null ? project.id() : null);
+        ent.setRequirementId(requirement != null ? requirement.getId() : null);
         ent.setTaskSpec(req.taskSpec());
         ent.setBaseBranch(baseBranch);
         ent.setStatus(SessionState.RUNNING.name());
@@ -189,9 +207,11 @@ public class SessionManagerService {
         return toView(ent, rt.state());
     }
 
-    public List<SessionView> list(String status, String projectId) {
+    public List<SessionView> list(String status, String projectId, String requirementId) {
         List<SessionEntity> entities;
-        if (projectId != null && !projectId.isBlank()) {
+        if (requirementId != null && !requirementId.isBlank()) {
+            entities = sessionRepo.findByRequirementIdOrderByCreatedAtDesc(requirementId);
+        } else if (projectId != null && !projectId.isBlank()) {
             entities = sessionRepo.findByProjectIdOrderByCreatedAtDesc(projectId);
         } else if (status != null && !status.isBlank()) {
             entities = sessionRepo.findByStatusOrderByCreatedAtDesc(status);
@@ -480,7 +500,7 @@ public class SessionManagerService {
 
     private SessionView toView(SessionEntity ent, SessionState state) {
         return new SessionView(
-                ent.getId(), ent.getProjectId(), ent.getTaskSpec(),
+                ent.getId(), ent.getProjectId(), ent.getRequirementId(), ent.getTaskSpec(),
                 state.name(), state, ent.getWorktreePath(), ent.getPid(),
                 ent.getModel(), ent.getSummary(),
                 ent.getCreatedAt(), ent.getUpdatedAt(), ent.getFinishedAt());

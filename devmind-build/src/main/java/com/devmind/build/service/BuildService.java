@@ -12,6 +12,7 @@ import com.devmind.build.ws.BuildLogHub;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.project.ProjectService;
+import com.devmind.project.RequirementService;
 import com.devmind.project.model.BuildStepEntity;
 import com.devmind.project.model.Project;
 import com.devmind.project.repo.BuildStepRepository;
@@ -51,6 +52,7 @@ public class BuildService {
     private final BuildConfigService configService;
     private final BuildStepRepository stepRepo;
     private final ProjectService projectService;
+    private final RequirementService requirementService;
     private final ServerOperationService serverOpService;
     private final LocalBuildRunner localRunner;
     private final RemoteBuildRunner remoteRunner;
@@ -61,6 +63,7 @@ public class BuildService {
                         BuildConfigService configService,
                         BuildStepRepository stepRepo,
                         ProjectService projectService,
+                        RequirementService requirementService,
                         ServerOperationService serverOpService,
                         LocalBuildRunner localRunner,
                         RemoteBuildRunner remoteRunner,
@@ -70,6 +73,7 @@ public class BuildService {
         this.configService = configService;
         this.stepRepo = stepRepo;
         this.projectService = projectService;
+        this.requirementService = requirementService;
         this.serverOpService = serverOpService;
         this.localRunner = localRunner;
         this.remoteRunner = remoteRunner;
@@ -87,6 +91,10 @@ public class BuildService {
     /** 不用 @Transactional：save() 自身事务立即提交，否则异步 run() 在另一连接看不到未提交行 */
     public BuildView trigger(String projectId, TriggerRequest req) {
         Project project = projectService.requireProject(projectId);
+        if (req.requirementId() != null && !req.requirementId().isBlank()) {
+            // P0-6 关联约定：requirementId 升级为外键语义，须属于该项目
+            requirementService.requireEntity(projectId, req.requirementId());
+        }
         com.devmind.build.dto.BuildConfigView cfg = configService.get(projectId);
         String executor = req.executor() != null && !req.executor().isBlank() ? req.executor().trim().toUpperCase() : cfg.executor();
         if (!"LOCAL".equals(executor) && !"REMOTE".equals(executor)) {

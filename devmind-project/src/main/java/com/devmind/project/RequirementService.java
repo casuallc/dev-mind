@@ -122,6 +122,12 @@ public class RequirementService {
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "需求不存在: " + reqId));
     }
 
+    /** 按 id 直查（不要求项目上下文），供会话等用 requirementId 反推 projectId。 */
+    public RequirementEntity requireById(String reqId) {
+        return requirementRepo.findById(reqId)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "需求不存在: " + reqId));
+    }
+
     private void requireProject(String projectId) {
         projectRepo.findById(projectId)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "项目不存在: " + projectId));
