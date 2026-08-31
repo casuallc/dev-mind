@@ -29,6 +29,7 @@
 | [CAP-10](CAP-10-test-executor.md) | 测试执行器 | 执行器 | 冒烟 + API 测试，套件沉淀自动回归 |
 | [CAP-11](CAP-11-release-executor.md) | 发版执行器 | 执行器 | Nexus 脚本模板推送 + 打 tag |
 | [CAP-12](CAP-12-execution-platform.md) | 统一执行底座 | 底座 | 步骤链引擎 + 本地/远程 Runner + 统一 WS 日志枢纽 |
+| [CAP-13](CAP-13-requirement-workitem.md) | 研发主线 | 管理 | Requirement/Design/Work Item 模型 + Relation 追溯网 |
 
 ## 依赖关系
 
@@ -43,6 +44,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 
 - CAP-01 无依赖，被全部能力依赖；
 - CAP-02 被文档/知识库/会话/服务器/执行器依赖；
+- CAP-13 研发主线定义 Requirement/Design/Work Item/Relation 模型，被会话与各执行器关联（workItemId）；
 - CAP-05 依赖 CAP-04（知识注入）与 CAP-06（等待输入/授权通知）；
 - CAP-08/09/10/11 依赖 CAP-07（远程执行时）与 CAP-02；执行层共用 CAP-12 统一执行底座（步骤链引擎/Runner/WS 日志枢纽）。
 
@@ -51,7 +53,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 流程层（如「需求 → 方案 → 开发 → 构建 → 部署 → 验证 → 发版」）将通过编排这些能力实现：
 
 - **需求流程引擎**：需求状态机 + 每阶段"产出就绪 → 等确认"语义，调用各执行器；
-- **任务编排 Orchestrator**：方案 → 任务 DAG → 并发调度 CAP-05 会话，门禁把关；
+- **任务编排 Orchestrator**：方案（Design）→ Work Item DAG（CAP-13 depends_on 边）→ 并发调度 CAP-05 会话，门禁把关；
 - **需求对话打磨**：AI 对话面板 + CAP-03 文档生成。
 
 这些属流程层设计，不在此批基础能力文档内，待基础能力稳定后另行编写。

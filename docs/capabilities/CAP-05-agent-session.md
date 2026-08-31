@@ -19,7 +19,7 @@
 - **FR-05 worktree 隔离与回收**：会话完成→看板展示 diff→可发起合并；删除会话时清理 worktree。
 - **FR-06 生命周期管理**：空闲超时自动挂起；一键强杀；进程退出码监控；异常进程回收。
 - **FR-07 会话列表/详情**：看板（项目维度/任务维度分组），每会话卡片含状态、耗时、最近输出摘要、快捷操作。
-- **FR-08 会话元数据**：关联 taskId（供 Orchestrator 使用），记录 token/耗时统计。
+- **FR-08 会话元数据**：关联 workItemId（CAP-13 主线工作单元，供 Orchestrator 使用）或 requirementId（分析型会话直挂需求，不算 Work Item），记录 token/耗时统计。
 
 ## 3. 插件化接口
 
@@ -34,7 +34,7 @@
 ## 5. 数据模型
 
 ```
-sessions(id, project_id, task_id?, agent_kind, status,
+sessions(id, project_id, work_item_id?, requirement_id?, agent_kind, status,
          branch, worktree_path, pid, waiting_reason?,
          started_at, updated_at, finished_at, token_cost, summary)
 session_events(id, session_id, type[output|state|input], payload, created_at)
@@ -43,8 +43,8 @@ session_events(id, session_id, type[output|state|input], payload, created_at)
 ## 6. API 概要
 
 ```
-POST   /sessions                      起会话 {projectId, taskSpec, branch?}
-GET    /sessions?projectId=&taskId=&status=   看板列表
+POST   /sessions                      起会话 {projectId, taskSpec, branch?, workItemId? | requirementId?}
+GET    /sessions?projectId=&workItemId=&requirementId=&status=   看板列表
 GET    /sessions/{id}                 详情（含摘要）
 WS     /sessions/{id}/stream          实时输出 + 状态事件
 POST   /sessions/{id}/input           发送输入 {text} | {quickReply}

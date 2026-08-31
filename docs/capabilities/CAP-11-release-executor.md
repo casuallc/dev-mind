@@ -12,7 +12,7 @@
 - **FR-02 版本管理**：版本号生成/递增（依据规则从已发版本推算，或手工指定）；版本号贯穿发版记录。
 - **FR-03 执行**：渲染模板（产物引用 + 版本号 + 目标仓库）→ 本机或经 CAP-07 远程执行 → Nexus 推送成功即成功。
 - **FR-04 打 tag**：给项目 git 仓库打版本 tag（`v<version>`）；tag 前可做实现与方案一致性校验（可选，流程层触发）。
-- **FR-05 发版记录**：release 关联 taskId / projectId / build（制品来源），可追溯"哪个任务、哪个构建、什么版本、何时发"。
+- **FR-05 发版记录**：release 关联 workItemId / projectId / build（制品来源），可追溯"哪个工作单元、哪个构建、什么版本、何时发"。
 - **FR-06 状态机**：`PLANNED / RUNNING / SUCCESS / FAILED / ROLLED_BACK`（回滚=移除 Nexus 制品引用 + 删除 tag，作为一次回滚记录）。
 - **FR-07 通知**：发版完成/失败分级通知（CAP-06）。
 
@@ -29,7 +29,7 @@
 
 ```
 release_configs(project_id, template_ref, repository, version_rule)
-releases(id, project_id, task_id?, build_id, version, status,
+releases(id, project_id, work_item_id?, build_id, version, status,
          artifact_ref, nexus_ref, tag_name, rollback_of?,
          started_at, finished_at, created_by)
 ```
@@ -38,7 +38,7 @@ releases(id, project_id, task_id?, build_id, version, status,
 
 ```
 GET    /projects/{id}/release-config        查看/编辑发版配置
-POST   /releases                           创建发版单 {projectId, buildId?, version?, taskId?}
+POST   /releases                           创建发版单 {projectId, buildId?, version?, workItemId?}
 POST   /releases/{id}/execute              执行（渲染模板→推送→打 tag）
 POST   /releases/{id}/rollback             回滚（移除制品引用 + 删 tag）
 GET    /releases?projectId=&status=        发版历史
@@ -48,7 +48,7 @@ GET    /releases?projectId=&status=        发版历史
 
 - 配置 Nexus 推送模板的项目能成功发版，制品在 Nexus 可见；
 - 版本号按规则生成/递增，git tag 正确打上；
-- 发版记录关联 task/build，可追溯；
+- 发版记录关联 workItem/build，可追溯；
 - 发版失败可回滚并留痕。
 
 ## 8. MVP 范围（暂不做）

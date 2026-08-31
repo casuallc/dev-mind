@@ -10,7 +10,7 @@
 
 - **FR-01 构建配置**：每项目一份有序构建步骤列表，每步 `{name, command|script, workDir, env, params}`；支持"调用多个脚本"组合（如先 build.sh 再 package.sh）。
 - **FR-02 执行位置可配置**：`executor = local | remote`（remote 需指定目标 server + 用其白名单脚本模板方式执行）；每项目可选，构建时可临时指定。
-- **FR-03 构建上下文**：触发时携带 `(projectId, commit, branch, taskId?)`，写请求头/工作目录。
+- **FR-03 构建上下文**：触发时携带 `(projectId, commit, branch, workItemId?)`，写请求头/工作目录。
 - **FR-04 产物登记**：构建成功后登记 `artifactRef`（制品路径 / 镜像 tag / 版本号），供部署/发版引用。
 - **FR-05 日志实时流**：stdout/stderr 经 WebSocket 实时推前端；日志全量留存。
 - **FR-06 状态机**：`QUEUED / RUNNING / SUCCESS / FAILED`；失败保留退出码与错误摘要。
@@ -30,7 +30,7 @@
 
 ```
 build_configs(project_id, steps(json), executor, remote_server_id)
-builds(id, project_id, task_id?, commit, branch, executor,
+builds(id, project_id, work_item_id?, commit, branch, executor,
        steps, artifact_ref, status, exit_code, error_summary,
        logs_ref, started_at, finished_at, created_by)
 ```
