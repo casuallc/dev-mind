@@ -33,8 +33,8 @@ public class DeploymentEntity {
     @Column(name = "project_id", nullable = false, length = 32)
     private String projectId;
 
-    @Column(name = "task_id", length = 32)
-    private String taskId;
+    @Column(name = "work_item_id", length = 32)
+    private String workItemId;
 
     @Column(name = "server_id", nullable = false)
     private Long serverId;
@@ -100,8 +100,8 @@ public class DeploymentEntity {
     public void setId(Long id) { this.id = id; }
     public String getProjectId() { return projectId; }
     public void setProjectId(String projectId) { this.projectId = projectId; }
-    public String getTaskId() { return taskId; }
-    public void setTaskId(String taskId) { this.taskId = taskId; }
+    public String getWorkItemId() { return workItemId; }
+    public void setWorkItemId(String workItemId) { this.workItemId = workItemId; }
     public Long getServerId() { return serverId; }
     public void setServerId(Long serverId) { this.serverId = serverId; }
     public Long getBuildId() { return buildId; }

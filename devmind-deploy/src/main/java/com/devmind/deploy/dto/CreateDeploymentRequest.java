@@ -14,7 +14,7 @@ public record CreateDeploymentRequest(
         /** 目标环境 id（与 serverId 可同时传：校验服务器属于环境；缺省 serverId 取环境首台） */
         Long environmentId,
         Long buildId,
-        String taskId,
+        String workItemId,
         String env,
         Boolean confirmRequired,
         Boolean force,

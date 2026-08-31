@@ -19,8 +19,10 @@ import com.devmind.docs.store.DocPaths;
 import com.devmind.docs.store.DocStore;
 import com.devmind.docs.store.TextDiff;
 import com.devmind.project.ProjectService;
-import com.devmind.project.TaskService;
-import com.devmind.project.model.TaskEntity;
+import com.devmind.project.RequirementService;
+import com.devmind.project.WorkItemService;
+import com.devmind.project.model.RequirementEntity;
+import com.devmind.project.model.WorkItemEntity;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -45,20 +47,23 @@ public class DocumentService {
     private final DocumentRepository docRepo;
     private final DocumentVersionRepository verRepo;
     private final ProjectService projectService;
-    private final TaskService taskService;
+    private final RequirementService requirementService;
+    private final WorkItemService workItemService;
     private final DocStore store;
     private final DocsProperties props;
 
     public DocumentService(DocumentRepository docRepo,
                            DocumentVersionRepository verRepo,
                            ProjectService projectService,
-                           TaskService taskService,
+                           RequirementService requirementService,
+                           WorkItemService workItemService,
                            DocStore store,
                            DocsProperties props) {
         this.docRepo = docRepo;
         this.verRepo = verRepo;
         this.projectService = projectService;
-        this.taskService = taskService;
+        this.requirementService = requirementService;
+        this.workItemService = workItemService;
         this.store = store;
         this.props = props;
     }
@@ -108,15 +113,31 @@ public class DocumentService {
         if (req.projectId() != null && !req.projectId().isBlank()) {
             projectService.requireProject(req.projectId()); // 存在性校验（FR-01 归属）
         }
-        // P0-6 关联约定：taskId 升级为外键语义；projectId 空时由任务反推，不一致时报错
+        // CAP-13 关联约定：workItemId/requirementId 升级为外键语义；projectId 空时反推，不一致时报错
         String projectId = blankToNull(req.projectId());
-        if (req.taskId() != null && !req.taskId().isBlank()) {
-            TaskEntity task = taskService.requireById(req.taskId());
-            if (projectId == null) {
-                projectId = task.getProjectId();
-            } else if (!projectId.equals(task.getProjectId())) {
+        String requirementId = blankToNull(req.requirementId());
+        if (req.workItemId() != null && !req.workItemId().isBlank()) {
+            WorkItemEntity workItem = workItemService.requireById(req.workItemId());
+            if (requirementId == null) {
+                requirementId = workItem.getRequirementId();
+            } else if (!requirementId.equals(workItem.getRequirementId())) {
                 throw new DevMindException(ErrorCode.BAD_REQUEST,
-                        "任务 " + req.taskId() + " 不属于项目 " + projectId);
+                        "工作单元 " + req.workItemId() + " 不属于需求 " + requirementId);
+            }
+            if (projectId == null) {
+                projectId = workItem.getProjectId();
+            } else if (!projectId.equals(workItem.getProjectId())) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "工作单元 " + req.workItemId() + " 不属于项目 " + projectId);
+            }
+        }
+        if (requirementId != null) {
+            RequirementEntity requirement = requirementService.requireById(requirementId);
+            if (projectId == null) {
+                projectId = requirement.getProjectId();
+            } else if (!projectId.equals(requirement.getProjectId())) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "需求 " + requirementId + " 不属于项目 " + projectId);
             }
         }
         String content = resolveContent(req);
@@ -126,7 +147,8 @@ public class DocumentService {
 
         DocumentEntity e = new DocumentEntity();
         e.setKind(kind);
-        e.setTaskId(blankToNull(req.taskId()));
+        e.setRequirementId(requirementId);
+        e.setWorkItemId(blankToNull(req.workItemId()));
         e.setProjectId(projectId);
         e.setTitle(req.title().strip());
         e.setCurrentVersion(1);

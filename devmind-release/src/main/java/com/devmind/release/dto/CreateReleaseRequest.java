@@ -7,7 +7,7 @@ package com.devmind.release.dto;
  */
 public record CreateReleaseRequest(
         String projectId,
-        String taskId,
+        String workItemId,
         Long buildId,
         String version,
         String executor,

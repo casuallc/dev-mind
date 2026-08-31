@@ -15,5 +15,7 @@ public interface DocumentRepository extends JpaRepository<DocumentEntity, Long> 
     List<DocumentEntity> findByProjectIdOrderByUpdatedAtDesc(String projectId);
 
     /** P0-6：按任务聚合文档（任务主线视图） */
-    List<DocumentEntity> findByTaskIdOrderByUpdatedAtDesc(String taskId);
+    List<DocumentEntity> findByRequirementIdOrderByUpdatedAtDesc(String requirementId);
+
+    List<DocumentEntity> findByWorkItemIdOrderByUpdatedAtDesc(String workItemId);
 }

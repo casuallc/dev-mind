@@ -27,10 +27,10 @@ public class WorkspaceService {
         return new LocalWorktreeWorkspace(worktreeManager, project.repoPath(), project.baseBranch(), branch, dir);
     }
 
-    /** 任务工作区（P0-6 约定）：指定仓库 + task/<seq>-<slug> 分支，每 repo 一个 */
-    public Workspace prepareTaskWorkspace(String repoPath, String baseBranch,
-                                          long seq, String slug, String name) {
-        String branch = worktreeManager.branchForTask(seq, slug);
+    /** 工作单元工作区（CAP-13 约定）：指定仓库 + wi/<seq>-<slug> 分支，每 repo 一个 */
+    public Workspace prepareWorkItemWorkspace(String repoPath, String baseBranch,
+                                              long seq, String slug, String name) {
+        String branch = worktreeManager.branchForWorkItem(seq, slug);
         Path dir = worktreeManager.worktreeDir(repoPath, name);
         worktreeManager.create(repoPath, baseBranch, branch, dir);
         return new LocalWorktreeWorkspace(worktreeManager, repoPath, baseBranch, branch, dir);

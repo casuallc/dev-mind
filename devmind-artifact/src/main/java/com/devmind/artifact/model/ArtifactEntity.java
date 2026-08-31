@@ -10,18 +10,27 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 
 /**
- * artifacts 表（P1-2 Artifact 服务）：构建产物的一等实体，替代 build 记录里的
- * artifactRef 字符串（该字段保留作兼容展示，本表为准）。
- * 由 build 登记，deploy/test/release 消费（按 id 或 producerJob 反查）。
+ * artifacts 表（CAP-13 工作产物一等实体）：覆盖构建产物与信息类产物。
+ * type = PACKAGE / DOC / CODE_DIFF / TEST_REPORT / REVIEW / ANALYSIS（FILE 保留兼容历史数据）；
+ * producer_type = BUILD / SESSION / TEST_RUN / DOC / MANUAL；
+ * 归属挂 work_item_id 或 requirement_id（分析产物直挂需求）；信息类产物无存储实体，
+ * storage/path 可空，path 存引用（如 docId / sessionId）。
+ * build 登记的 artifactRef 字符串字段保留作兼容展示，本表为准。
  */
 @Entity
 @Table(name = "artifacts")
 public class ArtifactEntity {
 
-    /** FILE / MAVEN / IMAGE / PACKAGE */
+    /** FILE（历史兼容）/ PACKAGE / DOC / CODE_DIFF / TEST_REPORT / REVIEW / ANALYSIS */
     public static final String TYPE_FILE = "FILE";
+    public static final String TYPE_PACKAGE = "PACKAGE";
+    public static final String TYPE_DOC = "DOC";
+    public static final String TYPE_CODE_DIFF = "CODE_DIFF";
+    public static final String TYPE_TEST_REPORT = "TEST_REPORT";
+    public static final String TYPE_REVIEW = "REVIEW";
+    public static final String TYPE_ANALYSIS = "ANALYSIS";
 
-    /** LOCAL / S3（存储 SPI 类型，见 ArtifactStorage） */
+    /** LOCAL / S3（存储 SPI 类型，见 ArtifactStorage）；信息类产物可空 */
     public static final String STORAGE_LOCAL = "LOCAL";
 
     @Id
@@ -31,11 +40,15 @@ public class ArtifactEntity {
     @Column(name = "project_id", nullable = false, length = 32)
     private String projectId;
 
-    /** P0-6 关联约定：可空 = 项目级产物 */
-    @Column(name = "task_id", length = 32)
-    private String taskId;
+    /** CAP-13 关联约定：工作单元 id（可空 = 项目级或需求级产物） */
+    @Column(name = "work_item_id", length = 32)
+    private String workItemId;
 
-    /** FILE / MAVEN / IMAGE / PACKAGE */
+    /** CAP-13 关联约定：需求 id（分析产物直挂需求，可空） */
+    @Column(name = "requirement_id", length = 32)
+    private String requirementId;
+
+    /** FILE / PACKAGE / DOC / CODE_DIFF / TEST_REPORT / REVIEW / ANALYSIS */
     @Column(nullable = false, length = 32)
     private String type;
 
@@ -50,15 +63,15 @@ public class ArtifactEntity {
     @Column(length = 128)
     private String checksum;
 
-    /** LOCAL / S3 */
-    @Column(nullable = false, length = 16)
+    /** LOCAL / S3；信息类产物（DOC/REVIEW/ANALYSIS 等）可空 */
+    @Column(length = 16)
     private String storage;
 
-    /** 存储内定位：本地路径 / 对象 key / 镜像 tag */
-    @Column(nullable = false, length = 512)
+    /** 存储内定位：本地路径 / 对象 key / 镜像 tag；信息类产物存引用（docId/sessionId 等） */
+    @Column(length = 512)
     private String path;
 
-    /** 生产者类型：BUILD（后续 RELEASE 等） */
+    /** 生产者类型：BUILD / SESSION / TEST_RUN / DOC / MANUAL */
     @Column(name = "producer_type", length = 24)
     private String producerType;
 
@@ -76,8 +89,10 @@ public class ArtifactEntity {
     public void setId(Long id) { this.id = id; }
     public String getProjectId() { return projectId; }
     public void setProjectId(String projectId) { this.projectId = projectId; }
-    public String getTaskId() { return taskId; }
-    public void setTaskId(String taskId) { this.taskId = taskId; }
+    public String getWorkItemId() { return workItemId; }
+    public void setWorkItemId(String workItemId) { this.workItemId = workItemId; }
+    public String getRequirementId() { return requirementId; }
+    public void setRequirementId(String requirementId) { this.requirementId = requirementId; }
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }
     public String getName() { return name; }

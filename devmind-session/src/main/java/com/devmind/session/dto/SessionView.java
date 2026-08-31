@@ -10,7 +10,8 @@ import java.time.Instant;
 public record SessionView(
         String id,
         String projectId,
-        String taskId,
+        String workItemId,
+        String requirementId,
         String taskSpec,
         String status,
         SessionState state,

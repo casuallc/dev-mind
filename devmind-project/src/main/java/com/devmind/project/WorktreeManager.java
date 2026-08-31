@@ -39,9 +39,9 @@ public class WorktreeManager {
         return "feature/" + sessionId;
     }
 
-    /** 任务分支名（P0-6 约定）：task/<seq>-<slug>，每个 repo 一条 */
-    public String branchForTask(long seq, String slug) {
-        return "task/" + seq + (slug == null || slug.isBlank() ? "" : "-" + slug);
+    /** 工作单元分支名（CAP-13 约定）：wi/<seq>-<slug>，每个 repo 一条 */
+    public String branchForWorkItem(long seq, String slug) {
+        return "wi/" + seq + (slug == null || slug.isBlank() ? "" : "-" + slug);
     }
 
     /** worktree 目录：root 配置优先，否则仓库内 .devmind/worktrees/<name> */

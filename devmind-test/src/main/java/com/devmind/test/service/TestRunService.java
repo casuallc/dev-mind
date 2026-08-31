@@ -38,7 +38,7 @@ import com.devmind.notification.model.NotificationLevel;
 import com.devmind.notification.service.NotificationService;
 import com.devmind.project.ProjectService;
 import com.devmind.project.EnvironmentService;
-import com.devmind.project.TaskService;
+import com.devmind.project.WorkItemService;
 import com.devmind.project.dto.ProjectView;
 import com.devmind.project.model.EnvironmentEntity;
 import com.devmind.project.model.ProjectServerEntity;
@@ -80,7 +80,7 @@ public class TestRunService {
     private final TestCaseRepository caseRepo;
     private final TestSuiteRepository suiteRepo;
     private final ProjectService projectService;
-    private final TaskService taskService;
+    private final WorkItemService workItemService;
     private final ProjectServerRepository serverRepo;
     private final DeploymentRepository deploymentRepo;
     private final ServerOperationService serverOpService;
@@ -96,7 +96,7 @@ public class TestRunService {
                           TestCaseRepository caseRepo,
                           TestSuiteRepository suiteRepo,
                           ProjectService projectService,
-                          TaskService taskService,
+                          WorkItemService workItemService,
                           ProjectServerRepository serverRepo,
                           DeploymentRepository deploymentRepo,
                           ServerOperationService serverOpService,
@@ -111,7 +111,7 @@ public class TestRunService {
         this.caseRepo = caseRepo;
         this.suiteRepo = suiteRepo;
         this.projectService = projectService;
-        this.taskService = taskService;
+        this.workItemService = workItemService;
         this.serverRepo = serverRepo;
         this.deploymentRepo = deploymentRepo;
         this.serverOpService = serverOpService;
@@ -131,17 +131,17 @@ public class TestRunService {
     // ---------------- 创建 / 执行 ----------------
 
     public TestRunView create(CreateTestRunRequest req) {
-        return createInternal(req.projectId(), req.taskId(), req.suiteIds(), req.deploymentId(),
+        return createInternal(req.projectId(), req.workItemId(), req.suiteIds(), req.deploymentId(),
                 req.serverId(), req.environmentId(), req.baseUrl(), "user");
     }
 
-    private TestRunView createInternal(String projectId, String taskId, List<Long> suiteIds,
+    private TestRunView createInternal(String projectId, String workItemId, List<Long> suiteIds,
                                        Long deploymentId, Long serverId, Long environmentId,
                                        String baseUrl, String triggeredBy) {
         projectService.requireProject(projectId);
-        if (taskId != null && !taskId.isBlank()) {
+        if (workItemId != null && !workItemId.isBlank()) {
             // P0-6 关联约定：任务须属于该项目
-            taskService.requireEntity(projectId, taskId);
+            workItemService.requireEntity(projectId, workItemId);
         }
         if (suiteIds == null || suiteIds.isEmpty()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "至少选择 1 个测试套件");
@@ -171,7 +171,7 @@ public class TestRunService {
 
         TestRunEntity r = new TestRunEntity();
         r.setProjectId(projectId);
-        r.setTaskId(taskId == null || taskId.isBlank() ? null : taskId);
+        r.setWorkItemId(workItemId == null || workItemId.isBlank() ? null : workItemId);
         r.setSuiteIdsJson(writeIds(suiteIds));
         r.setDeploymentId(deploymentId);
         r.setServerId(serverId);
@@ -382,10 +382,10 @@ public class TestRunService {
             }
             List<Long> ids = suites.stream().map(TestSuiteEntity::getId).toList();
             // P0-6：继承部署的任务关联，回归结果挂到同一主线
-            String taskId = deploymentRepo.findById(evt.deploymentId())
-                    .map(d -> d.getTaskId()).orElse(null);
+            String workItemId = deploymentRepo.findById(evt.deploymentId())
+                    .map(d -> d.getWorkItemId()).orElse(null);
             log.info("部署 #{} 成功，自动回归触发（项目 {}，套件 {}）", evt.deploymentId(), evt.projectId(), ids);
-            createInternal(evt.projectId(), taskId, ids, evt.deploymentId(), evt.serverId(), null, null,
+            createInternal(evt.projectId(), workItemId, ids, evt.deploymentId(), evt.serverId(), null, null,
                     "deploy");
         } catch (Exception e) {
             log.warn("自动回归触发失败: {}", e.getMessage());
@@ -460,7 +460,7 @@ public class TestRunService {
         RunSummary summary = parseSummary(r.getSummaryJson());
         List<CaseResultView> results = resultRepo.findByRunIdOrderBySortAsc(r.getId()).stream()
                 .map(this::toResultView).toList();
-        return new TestRunView(r.getId(), r.getProjectId(), r.getTaskId(), suiteIds, r.getDeploymentId(),
+        return new TestRunView(r.getId(), r.getProjectId(), r.getWorkItemId(), suiteIds, r.getDeploymentId(),
                 r.getServerId(), r.getEnvironmentId(), r.getBaseUrl(), r.getStatus(), summary, r.getReportDocId(),
                 r.getErrorSummary(),
                 r.getTriggeredBy(), r.getStartedAt(), r.getFinishedAt(), r.getCreatedAt(), results);
@@ -550,7 +550,7 @@ public class TestRunService {
 
     private Long createReportDoc(TestRunEntity r) {
         String md = renderReport(r, resultRepo.findByRunIdOrderBySortAsc(r.getId()));
-        DocDetail doc = documentService.create(new DocRequest("report", null, r.getProjectId(),
+        DocDetail doc = documentService.create(new DocRequest("report", null, r.getWorkItemId(), r.getProjectId(),
                 "测试报告 #" + r.getId() + " " + LocalDateTime.now().toString().replace("T", " ").substring(0, 16),
                 List.of("test-report"), null, md));
         return doc.id();

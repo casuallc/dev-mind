@@ -17,7 +17,7 @@ import com.devmind.execution.runner.LocalStepRunner;
 import com.devmind.execution.runner.RemoteStepRunner;
 import com.devmind.execution.ws.ExecutionLogHub;
 import com.devmind.project.ProjectService;
-import com.devmind.project.TaskService;
+import com.devmind.project.WorkItemService;
 import com.devmind.project.model.BuildStepEntity;
 import com.devmind.project.model.Project;
 import com.devmind.project.repo.BuildStepRepository;
@@ -65,7 +65,7 @@ public class BuildService {
     private final BuildConfigService configService;
     private final BuildStepRepository stepRepo;
     private final ProjectService projectService;
-    private final TaskService taskService;
+    private final WorkItemService workItemService;
     private final ServerOperationService serverOpService;
     private final StepChainRunner chainRunner;
     private final LocalStepRunner localRunner;
@@ -80,7 +80,7 @@ public class BuildService {
                         BuildConfigService configService,
                         BuildStepRepository stepRepo,
                         ProjectService projectService,
-                        TaskService taskService,
+                        WorkItemService workItemService,
                         ServerOperationService serverOpService,
                         StepChainRunner chainRunner,
                         LocalStepRunner localRunner,
@@ -94,7 +94,7 @@ public class BuildService {
         this.configService = configService;
         this.stepRepo = stepRepo;
         this.projectService = projectService;
-        this.taskService = taskService;
+        this.workItemService = workItemService;
         this.serverOpService = serverOpService;
         this.chainRunner = chainRunner;
         this.localRunner = localRunner;
@@ -113,9 +113,9 @@ public class BuildService {
     /** 不用 @Transactional：save() 自身事务立即提交，否则异步 run() 在另一连接看不到未提交行 */
     public BuildView trigger(String projectId, TriggerRequest req) {
         Project project = projectService.requireProject(projectId);
-        if (req.taskId() != null && !req.taskId().isBlank()) {
-            // P0-6 关联约定：taskId 升级为外键语义，须属于该项目
-            taskService.requireEntity(projectId, req.taskId());
+        if (req.workItemId() != null && !req.workItemId().isBlank()) {
+            // CAP-13 关联约定：workItemId 升级为外键语义，须属于该项目
+            workItemService.requireEntity(projectId, req.workItemId());
         }
         com.devmind.build.dto.BuildConfigView cfg = configService.get(projectId);
         String executor = req.executor() != null && !req.executor().isBlank() ? req.executor().trim().toUpperCase() : cfg.executor();
@@ -149,7 +149,7 @@ public class BuildService {
         }
         BuildEntity b = new BuildEntity();
         b.setProjectId(projectId);
-        b.setTaskId(req.taskId());
+        b.setWorkItemId(req.workItemId());
         b.setCommit(commit);
         b.setBranch(branch);
         b.setExecutor(executor);
@@ -219,8 +219,10 @@ public class BuildService {
                 b.setArtifactRef(captureArtifact(logs.toString()));
                 if (b.getArtifactRef() != null) {
                     sink.accept("[产物登记] " + b.getArtifactRef());
-                    // P1-2：登记为 artifacts 表一等实体（artifactRef 字符串保留作兼容展示）
-                    artifactService.register(b.getProjectId(), b.getTaskId(),
+                    // CAP-13：登记为 artifacts 表一等实体（artifactRef 字符串保留作兼容展示）
+                    String requirementId = b.getWorkItemId() == null || b.getWorkItemId().isBlank() ? null
+                            : workItemService.requireById(b.getWorkItemId()).getRequirementId();
+                    artifactService.register(b.getProjectId(), b.getWorkItemId(), requirementId,
                             b.getArtifactRef(), ArtifactService.PRODUCER_BUILD, b.getId());
                 }
             } else {
@@ -242,7 +244,7 @@ public class BuildService {
             hub.done(topic, b.getStatus());
             // P0-3 统一事件总线：构建结果广播（通知订阅，成功 P1 / 失败 P0）
             eventPublisher.publish(SimpleDomainEvent.of("build.completed", b.getProjectId(),
-                    b.getTaskId(), b.getCreatedBy(),
+                    b.getWorkItemId(), b.getCreatedBy(),
                     "构建 #" + b.getId() + " " + b.getStatus()
                             + (b.getBranch() == null ? "" : "（" + b.getBranch() + "）"),
                     "BUILD", String.valueOf(b.getId()), BuildEntity.SUCCESS.equals(b.getStatus())));
@@ -355,7 +357,7 @@ public class BuildService {
     }
 
     public BuildView toView(BuildEntity b) {
-        return new BuildView(b.getId(), b.getProjectId(), b.getTaskId(), b.getCommit(), b.getBranch(),
+        return new BuildView(b.getId(), b.getProjectId(), b.getWorkItemId(), b.getCommit(), b.getBranch(),
                 b.getExecutor(), b.getArtifactRef(), b.getStatus(), b.getExitCode(), b.getErrorSummary(),
                 b.getStartedAt(), b.getFinishedAt(), b.getCreatedAt());
     }

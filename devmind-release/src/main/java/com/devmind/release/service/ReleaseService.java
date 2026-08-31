@@ -140,7 +140,7 @@ public class ReleaseService {
 
         ReleaseEntity r = new ReleaseEntity();
         r.setProjectId(req.projectId());
-        r.setTaskId(blankToNull(req.taskId()));
+        r.setWorkItemId(blankToNull(req.workItemId()));
         r.setBuildId(req.buildId());
         r.setReleaseVersion(version);
         r.setStatus(ReleaseEntity.PLANNED);
@@ -320,8 +320,8 @@ public class ReleaseService {
         if (r.getBuildId() != null) {
             p.put("buildId", String.valueOf(r.getBuildId()));
         }
-        if (r.getTaskId() != null) {
-            p.put("taskId", r.getTaskId());
+        if (r.getWorkItemId() != null) {
+            p.put("workItemId", r.getWorkItemId());
         }
         return p;
     }
@@ -448,7 +448,7 @@ public class ReleaseService {
     }
 
     private ReleaseView toView(ReleaseEntity r) {
-        return new ReleaseView(r.getId(), r.getProjectId(), r.getTaskId(), r.getBuildId(),
+        return new ReleaseView(r.getId(), r.getProjectId(), r.getWorkItemId(), r.getBuildId(),
                 r.getReleaseVersion(), r.getStatus(), r.getArtifactRef(), r.getNexusRef(), r.getTagName(),
                 r.getExecutor(), r.getServerId(), r.getRollbackOf(), r.getErrorSummary(), r.getCreatedBy(),
                 r.getStartedAt(), r.getFinishedAt(), r.getCreatedAt());

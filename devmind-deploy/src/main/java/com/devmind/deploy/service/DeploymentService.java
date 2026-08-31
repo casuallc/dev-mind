@@ -166,7 +166,7 @@ public class DeploymentService {
 
         DeploymentEntity d = new DeploymentEntity();
         d.setProjectId(projectId);
-        d.setTaskId(req.taskId());
+        d.setWorkItemId(req.workItemId());
         d.setServerId(serverId);
         d.setEnvironmentId(req.environmentId());
         d.setBuildId(req.buildId());
@@ -229,7 +229,7 @@ public class DeploymentService {
         }
         DeploymentEntity nd = new DeploymentEntity();
         nd.setProjectId(d.getProjectId());
-        nd.setTaskId(d.getTaskId());
+        nd.setWorkItemId(d.getWorkItemId());
         nd.setServerId(d.getServerId());
         nd.setBuildId(d.getBuildId());
         nd.setEnv(d.getEnv());
@@ -486,7 +486,7 @@ public class DeploymentService {
                 .toList();
         List<StepView> steps = stepRepo.findByDeploymentIdOrderBySeqAsc(d.getId()).stream()
                 .map(this::toStepView).toList();
-        return new DeploymentView(d.getId(), d.getProjectId(), d.getTaskId(), d.getServerId(),
+        return new DeploymentView(d.getId(), d.getProjectId(), d.getWorkItemId(), d.getServerId(),
                 d.getEnvironmentId(), d.getBuildId(),
                 d.getEnv(), d.getStatus(), d.getCurrentStep(), d.getBackupRef(), d.getRollbackOf(),
                 d.isConfirmRequired(), d.isConfirmed(), d.getErrorSummary(), d.getCreatedBy(),

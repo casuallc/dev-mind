@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-/** P1-2 制品查询：/api/projects/{projectId}/artifacts */
+/** CAP-13 工作产物查询：/api/projects/{projectId}/artifacts */
 @RestController
 @RequestMapping("/api/projects/{projectId}/artifacts")
 public class ArtifactController {
@@ -23,8 +23,9 @@ public class ArtifactController {
 
     @GetMapping
     public List<ArtifactView> list(@PathVariable String projectId,
-                                   @RequestParam(required = false) String taskId) {
-        return service.list(projectId, taskId);
+                                   @RequestParam(required = false) String workItemId,
+                                   @RequestParam(required = false) String requirementId) {
+        return service.list(projectId, workItemId, requirementId);
     }
 
     @GetMapping("/{id}")

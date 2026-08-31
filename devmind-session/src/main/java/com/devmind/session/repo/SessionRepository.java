@@ -11,6 +11,9 @@ public interface SessionRepository extends JpaRepository<SessionEntity, String> 
 
     List<SessionEntity> findByProjectIdOrderByCreatedAtDesc(String projectId);
 
-    /** P0-6：按需求聚合会话（需求主线视图） */
-    List<SessionEntity> findByTaskIdOrderByCreatedAtDesc(String taskId);
+    /** CAP-13：按工作单元聚合会话（需求主线视图） */
+    List<SessionEntity> findByWorkItemIdOrderByCreatedAtDesc(String workItemId);
+
+    /** CAP-13：按需求聚合会话（含分析型会话） */
+    List<SessionEntity> findByRequirementIdOrderByCreatedAtDesc(String requirementId);
 }

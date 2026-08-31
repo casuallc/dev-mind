@@ -5,7 +5,8 @@ import java.time.Instant;
 public record ArtifactView(
         Long id,
         String projectId,
-        String taskId,
+        String workItemId,
+        String requirementId,
         String type,
         String name,
         String version,

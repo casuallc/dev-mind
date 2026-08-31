@@ -9,7 +9,8 @@ import java.util.List;
 public record DocView(
         Long id,
         String kind,
-        String taskId,
+        String requirementId,
+        String workItemId,
         String projectId,
         String title,
         int currentVersion,

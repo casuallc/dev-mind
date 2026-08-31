@@ -7,7 +7,8 @@ import jakarta.validation.constraints.NotBlank;
  *
  * @param templateCode   会话模板 code（可选，命中后渲染 prompt 骨架）
  * @param projectId      项目 ID（MVP 只有一个预置项目；空=无项目裸跑，fake 模式）
- * @param taskId         任务 ID（可选，P0-6 关联约定；与 projectId 不一致时报错，projectId 空时反推）
+ * @param workItemId     工作单元 ID（可选，CAP-13 关联约定；与 projectId 不一致时报错，projectId 空时反推）
+ * @param requirementId  需求 ID（可选，分析型会话直挂需求；与 workItemId 同传时校验一致）
  * @param taskSpec       任务说明（富文本）
  * @param baseBranch     基准分支（可选，默认项目/配置）
  * @param model          模型（可选，覆盖全局）
@@ -16,7 +17,8 @@ import jakarta.validation.constraints.NotBlank;
 public record CreateSessionRequest(
         String templateCode,
         String projectId,
-        String taskId,
+        String workItemId,
+        String requirementId,
         @NotBlank(message = "taskSpec 不能为空") String taskSpec,
         String baseBranch,
         String model,

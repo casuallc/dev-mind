@@ -13,7 +13,10 @@ public interface BuildRepository extends JpaRepository<BuildEntity, Long> {
     List<BuildEntity> findByProjectIdAndStatusOrderByCreatedAtDesc(String projectId, String status);
 
     /** P0-6：按需求聚合构建（需求主线视图） */
-    List<BuildEntity> findByTaskIdOrderByCreatedAtDesc(String taskId);
+    List<BuildEntity> findByWorkItemIdOrderByCreatedAtDesc(String workItemId);
+
+    /** CAP-13：需求概览按工作单元集合聚合 */
+    List<BuildEntity> findByWorkItemIdInOrderByCreatedAtDesc(java.util.Collection<String> workItemIds);
 
     /** 并发限制：统计该项目的活动构建数 */
     long countByProjectIdAndStatusIn(String projectId, Collection<String> statuses);

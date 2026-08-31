@@ -28,13 +28,16 @@ import com.devmind.project.model.ProjectRepoEntity;
 import com.devmind.project.model.ProjectServerEntity;
 import com.devmind.project.model.ReleaseConfigEntity;
 import com.devmind.project.repo.BuildStepRepository;
+import com.devmind.project.repo.DesignRepository;
 import com.devmind.project.repo.EnvironmentRepository;
 import com.devmind.project.repo.ProjectLockRepository;
 import com.devmind.project.repo.ProjectRepoRepository;
 import com.devmind.project.repo.ProjectRepository;
 import com.devmind.project.repo.ProjectServerRepository;
+import com.devmind.project.repo.RelationRepository;
 import com.devmind.project.repo.ReleaseConfigRepository;
-import com.devmind.project.repo.TaskRepository;
+import com.devmind.project.repo.RequirementRepository;
+import com.devmind.project.repo.WorkItemRepository;
 import com.devmind.project.scan.RepoScanner;
 import jakarta.annotation.PostConstruct;
 import jakarta.transaction.Transactional;
@@ -78,7 +81,10 @@ public class ProjectService {
     private final BuildStepRepository stepRepo;
     private final ReleaseConfigRepository releaseRepo;
     private final ProjectLockRepository lockRepo;
-    private final TaskRepository taskRepo;
+    private final RequirementRepository requirementRepo;
+    private final WorkItemRepository workItemRepo;
+    private final DesignRepository designRepo;
+    private final RelationRepository relationRepo;
     private final EnvironmentRepository environmentRepo;
     private final RepoScanner repoScanner;
     /** CAP-07 提供凭证加密实现（可选）；缺省时 accessConfig 明文存储（无 server-adapter 模块时兼容） */
@@ -93,7 +99,10 @@ public class ProjectService {
                           BuildStepRepository stepRepo,
                           ReleaseConfigRepository releaseRepo,
                           ProjectLockRepository lockRepo,
-                          TaskRepository taskRepo,
+                          RequirementRepository requirementRepo,
+                          WorkItemRepository workItemRepo,
+                          DesignRepository designRepo,
+                          RelationRepository relationRepo,
                           EnvironmentRepository environmentRepo,
                           RepoScanner repoScanner,
                           ObjectProvider<ServerCredentialCipher> cipherProvider) {
@@ -106,7 +115,10 @@ public class ProjectService {
         this.stepRepo = stepRepo;
         this.releaseRepo = releaseRepo;
         this.lockRepo = lockRepo;
-        this.taskRepo = taskRepo;
+        this.requirementRepo = requirementRepo;
+        this.workItemRepo = workItemRepo;
+        this.designRepo = designRepo;
+        this.relationRepo = relationRepo;
         this.environmentRepo = environmentRepo;
         this.repoScanner = repoScanner;
         this.cipherProvider = cipherProvider;
@@ -244,12 +256,15 @@ public class ProjectService {
         return toView(e);
     }
 
-    /** 删除项目：级联清理仓库/需求/服务器/构建步骤/发版配置/锁。 */
+    /** 删除项目：级联清理仓库/研发主线（需求/工作单元/方案/关系）/服务器/构建步骤/发版配置/锁。 */
     @Transactional
     public void delete(String id) {
         ProjectEntity e = requireEntity(id);
         repoRepo.deleteByProjectId(id);
-        taskRepo.deleteByProjectId(id);
+        relationRepo.deleteByProjectId(id);
+        workItemRepo.deleteByProjectId(id);
+        designRepo.deleteByProjectId(id);
+        requirementRepo.deleteByProjectId(id);
         environmentRepo.deleteByProjectId(id);
         serverRepo.deleteByProjectId(id);
         stepRepo.deleteByProjectId(id);

@@ -3,8 +3,8 @@ package com.devmind.docs.store;
 import com.devmind.docs.model.DocumentEntity;
 
 /**
- * docs-repo 文件路径映射（CAP-03 §5）：
- * tasks/&lt;taskId&gt;/…、designs/&lt;taskId&gt;/&lt;project&gt;/…、api-suite/&lt;project&gt;/…、reports/…
+ * docs-repo 文件路径映射（CAP-03 §5 / CAP-13）：
+ * requirements/&lt;requirementId&gt;/…、designs/&lt;requirementId&gt;/&lt;project&gt;/…、api-suite/&lt;project&gt;/…、reports/…
  */
 public final class DocPaths {
 
@@ -14,11 +14,11 @@ public final class DocPaths {
     /** 相对 docs-repo 根的文件路径（始终使用 '/' 分隔，入库展示用）。 */
     public static String filePath(DocumentEntity e) {
         String title = slug(e.getTitle() == null ? "untitled" : e.getTitle());
-        String task = blank(e.getTaskId()) ? "_" : slug(e.getTaskId());
+        String req = blank(e.getRequirementId()) ? "_" : slug(e.getRequirementId());
         String proj = blank(e.getProjectId()) ? "general" : slug(e.getProjectId());
         return switch (e.getKind() == null ? "" : e.getKind()) {
-            case "requirement" -> "tasks/" + task + "/" + title + ".md";
-            case "design" -> "designs/" + task + "/" + proj + "/" + title + ".md";
+            case "requirement" -> "requirements/" + req + "/" + title + ".md";
+            case "design" -> "designs/" + req + "/" + proj + "/" + title + ".md";
             case "api-suite" -> "api-suite/" + proj + "/" + title + ".md";
             case "report" -> "reports/" + title + ".md";
             default -> "docs/" + title + ".md";

@@ -32,8 +32,8 @@ public class ReleaseEntity {
     @Column(name = "project_id", nullable = false, length = 32)
     private String projectId;
 
-    @Column(name = "task_id", length = 32)
-    private String taskId;
+    @Column(name = "work_item_id", length = 32)
+    private String workItemId;
 
     /** 发版产物来源构建；artifacts 表登记过（artifactRef 不为空）才能发版 */
     @Column(name = "build_id")
@@ -92,8 +92,8 @@ public class ReleaseEntity {
     public void setId(Long id) { this.id = id; }
     public String getProjectId() { return projectId; }
     public void setProjectId(String projectId) { this.projectId = projectId; }
-    public String getTaskId() { return taskId; }
-    public void setTaskId(String taskId) { this.taskId = taskId; }
+    public String getWorkItemId() { return workItemId; }
+    public void setWorkItemId(String workItemId) { this.workItemId = workItemId; }
     public Long getBuildId() { return buildId; }
     public void setBuildId(Long buildId) { this.buildId = buildId; }
     public String getReleaseVersion() { return releaseVersion; }

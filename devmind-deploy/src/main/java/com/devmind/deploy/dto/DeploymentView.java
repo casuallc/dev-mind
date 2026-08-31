@@ -7,7 +7,7 @@ import java.util.List;
 public record DeploymentView(
         Long id,
         String projectId,
-        String taskId,
+        String workItemId,
         Long serverId,
         Long environmentId,
         Long buildId,

@@ -390,7 +390,7 @@ public class TestSuiteService {
             }
         }
         DocDetail doc = documentService.create(new DocRequest(
-                "api-suite", null, s.getProjectId(), title, List.of("api-suite"), null, md));
+                "api-suite", null, null, s.getProjectId(), title, List.of("api-suite"), null, md));
         s.setDocId(doc.id());
         s.setCreatedAt(s.getCreatedAt());
         suiteRepo.save(s);
