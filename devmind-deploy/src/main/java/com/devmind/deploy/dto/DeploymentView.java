@@ -9,6 +9,7 @@ public record DeploymentView(
         String projectId,
         String requirementId,
         Long serverId,
+        Long environmentId,
         Long buildId,
         String env,
         String status,

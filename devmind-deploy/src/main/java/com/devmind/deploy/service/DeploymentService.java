@@ -36,7 +36,9 @@ import com.devmind.execution.ws.ExecutionLogHub;
 import com.devmind.notification.dto.NotificationDraft;
 import com.devmind.notification.model.NotificationLevel;
 import com.devmind.notification.service.NotificationService;
+import com.devmind.project.EnvironmentService;
 import com.devmind.project.ProjectService;
+import com.devmind.project.model.EnvironmentEntity;
 import com.devmind.project.model.ProjectServerEntity;
 import com.devmind.serveradapter.service.ServerOperationService;
 import com.devmind.serveradapter.spi.ExecResult;
@@ -65,6 +67,7 @@ public class DeploymentService {
     private final ExecutionLogHub hub;
     private final ObjectMapper mapper;
     private final DomainEventPublisher eventPublisher;
+    private final EnvironmentService environmentService;
 
     public DeploymentService(DeploymentRepository repo,
                              DeploymentStepRepository stepRepo,
@@ -75,7 +78,8 @@ public class DeploymentService {
                              NotificationService notificationService,
                              ExecutionLogHub hub,
                              ObjectMapper mapper,
-                             DomainEventPublisher eventPublisher) {
+                             DomainEventPublisher eventPublisher,
+                             EnvironmentService environmentService) {
         this.repo = repo;
         this.stepRepo = stepRepo;
         this.configService = configService;
@@ -86,6 +90,7 @@ public class DeploymentService {
         this.hub = hub;
         this.mapper = mapper;
         this.eventPublisher = eventPublisher;
+        this.environmentService = environmentService;
     }
 
     @PreDestroy
@@ -97,10 +102,32 @@ public class DeploymentService {
 
     public DeploymentView create(CreateDeploymentRequest req) {
         projectService.requireProject(req.projectId());
-        serverOpService.requireServer(req.serverId());
         String projectId = req.projectId();
         boolean confirmRequired = req.confirmRequired() != null && req.confirmRequired();
         boolean force = req.force() != null && req.force();
+
+        // 收尾3：目标解析——environmentId（环境：服务器组+变量）优先补全 serverId/env 名；serverId 直指兼容旧用法
+        Long serverId = req.serverId();
+        String envName = req.env();
+        if (req.environmentId() != null) {
+            EnvironmentEntity environment = environmentService.requireEnvironment(projectId, req.environmentId());
+            envName = environment.getName();
+            List<Long> envServers = environmentService.serverIdsOf(environment);
+            if (serverId == null) {
+                if (envServers.isEmpty()) {
+                    throw new DevMindException(ErrorCode.BAD_REQUEST,
+                            "环境 " + environment.getName() + " 未绑定服务器，请传 serverId 或在环境中配置");
+                }
+                serverId = envServers.get(0);
+            } else if (!envServers.isEmpty() && !envServers.contains(serverId)) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "服务器 " + serverId + " 不属于环境 " + environment.getName() + " 的服务器组");
+            }
+        }
+        if (serverId == null) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "serverId 与 environmentId 至少传一个");
+        }
+        serverOpService.requireServer(serverId);
 
         String artifact = null;
         if (req.buildId() != null) {
@@ -115,7 +142,7 @@ public class DeploymentService {
         // FR-04 幂等：同 project+server+build 的 PLANNED/RUNNING/SUCCESS 视为重复部署
         if (!force && req.buildId() != null) {
             List<DeploymentEntity> dup = repo.findByProjectIdAndServerIdAndBuildIdAndStatusIn(
-                    projectId, req.serverId(), req.buildId(),
+                    projectId, serverId, req.buildId(),
                     List.of(DeploymentEntity.PLANNED, DeploymentEntity.RUNNING, DeploymentEntity.SUCCESS));
             if (!dup.isEmpty()) {
                 DeploymentEntity first = dup.get(0);
@@ -140,9 +167,10 @@ public class DeploymentService {
         DeploymentEntity d = new DeploymentEntity();
         d.setProjectId(projectId);
         d.setRequirementId(req.requirementId());
-        d.setServerId(req.serverId());
+        d.setServerId(serverId);
+        d.setEnvironmentId(req.environmentId());
         d.setBuildId(req.buildId());
-        d.setEnv(req.env() == null || req.env().isBlank() ? "test" : req.env());
+        d.setEnv(envName == null || envName.isBlank() ? "test" : envName);
         d.setPlanJson(writeJson(plan));
         d.setStatus(DeploymentEntity.PLANNED);
         d.setCurrentStep(0);
@@ -394,6 +422,16 @@ public class DeploymentService {
 
     private ExecResult execStep(DeploymentEntity d, DeployStep s, String backupRef, String artifact) {
         Map<String, String> p = new LinkedHashMap<>();
+        // 环境变量作为基底参数注入（步骤 params 与内置变量可覆盖同名项）
+        if (d.getEnvironmentId() != null) {
+            try {
+                p.putAll(environmentService.variablesOf(
+                        environmentService.requireEnvironment(d.getProjectId(), d.getEnvironmentId())));
+            } catch (DevMindException e) {
+                // 环境创建后被删除：跳过注入，不阻断执行
+                log.debug("部署 {} 的环境 {} 已不可用，跳过变量注入", d.getId(), d.getEnvironmentId());
+            }
+        }
         if (s.params() != null) {
             p.putAll(s.params());
         }
@@ -448,7 +486,8 @@ public class DeploymentService {
                 .toList();
         List<StepView> steps = stepRepo.findByDeploymentIdOrderBySeqAsc(d.getId()).stream()
                 .map(this::toStepView).toList();
-        return new DeploymentView(d.getId(), d.getProjectId(), d.getRequirementId(), d.getServerId(), d.getBuildId(),
+        return new DeploymentView(d.getId(), d.getProjectId(), d.getRequirementId(), d.getServerId(),
+                d.getEnvironmentId(), d.getBuildId(),
                 d.getEnv(), d.getStatus(), d.getCurrentStep(), d.getBackupRef(), d.getRollbackOf(),
                 d.isConfirmRequired(), d.isConfirmed(), d.getErrorSummary(), d.getCreatedBy(),
                 d.getStartedAt(), d.getFinishedAt(), d.getCreatedAt(), planView, steps);

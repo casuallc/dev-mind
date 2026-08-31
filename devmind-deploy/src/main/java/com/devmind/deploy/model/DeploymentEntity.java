@@ -45,6 +45,10 @@ public class DeploymentEntity {
     @Column(length = 64)
     private String env;
 
+    /** 目标环境（P1-1 environments 表 id；与 env 名字冗余，便于追溯变量/服务器组来源） */
+    @Column(name = "environment_id")
+    private Long environmentId;
+
     /** 创建时渲染好的计划（JSON: [{name,type,templateCode,params}]） */
     @Lob
     @Column(name = "plan_json")
@@ -104,7 +108,8 @@ public class DeploymentEntity {
     public void setBuildId(Long buildId) { this.buildId = buildId; }
     public String getEnv() { return env; }
     public void setEnv(String env) { this.env = env; }
-    public String getPlanJson() { return planJson; }
+    public Long getEnvironmentId() { return environmentId; }
+    public void setEnvironmentId(Long environmentId) { this.environmentId = environmentId; }    public String getPlanJson() { return planJson; }
     public void setPlanJson(String planJson) { this.planJson = planJson; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }

@@ -1,14 +1,18 @@
 package com.devmind.deploy.dto;
 
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 
 import java.util.List;
 
-/** 创建部署单（CAP-09 FR-01/04）：projectId+serverId 必填，buildId 可选（可手动回滚/无产物来源）。 */
+/**
+ * 创建部署单（CAP-09 FR-01/04）：projectId 必填；目标二选一——serverId（直指服务器，兼容旧用法）
+ * 或 environmentId（P1-1 环境：取其服务器组与变量注入，env 名以环境名为准）。
+ */
 public record CreateDeploymentRequest(
         @NotBlank String projectId,
-        @NotNull Long serverId,
+        Long serverId,
+        /** 目标环境 id（与 serverId 可同时传：校验服务器属于环境；缺省 serverId 取环境首台） */
+        Long environmentId,
         Long buildId,
         String requirementId,
         String env,
