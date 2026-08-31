@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.devmind</groupId>
+        <artifactId>devmind</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <artifactId>devmind-flow</artifactId>
+    <name>devmind-flow</name>
+    <description>需求流程引擎（CAP-14）：需求主流程半自动推进——阶段动作 + 产出登记 + 人工确认门禁</description>
+    <dependencies>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-project</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-docs</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-session</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-artifact</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-notification</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

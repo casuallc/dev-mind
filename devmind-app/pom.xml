@@ -73,6 +73,10 @@
             <groupId>com.devmind</groupId>
             <artifactId>devmind-release</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-flow</artifactId>
+        </dependency>
 
         <!-- Spring Boot 基础 -->
         <dependency>
