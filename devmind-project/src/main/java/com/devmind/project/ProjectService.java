@@ -2,6 +2,7 @@ package com.devmind.project;
 
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.common.security.ServerCredentialCipher;
 import com.devmind.project.config.ProjectProperties;
 import com.devmind.project.config.WorktreeProperties;
 import com.devmind.project.dto.BuildStepRequest;
@@ -32,6 +33,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.transaction.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -68,6 +70,8 @@ public class ProjectService {
     private final ReleaseConfigRepository releaseRepo;
     private final ProjectLockRepository lockRepo;
     private final RepoScanner repoScanner;
+    /** CAP-07 提供凭证加密实现（可选）；缺省时 accessConfig 明文存储（无 server-adapter 模块时兼容） */
+    private final ObjectProvider<ServerCredentialCipher> cipherProvider;
 
     public ProjectService(ProjectProperties props,
                           WorktreeProperties worktreeProps,
@@ -76,7 +80,8 @@ public class ProjectService {
                           BuildStepRepository stepRepo,
                           ReleaseConfigRepository releaseRepo,
                           ProjectLockRepository lockRepo,
-                          RepoScanner repoScanner) {
+                          RepoScanner repoScanner,
+                          ObjectProvider<ServerCredentialCipher> cipherProvider) {
         this.props = props;
         this.worktreeProps = worktreeProps;
         this.projectRepo = projectRepo;
@@ -85,6 +90,7 @@ public class ProjectService {
         this.releaseRepo = releaseRepo;
         this.lockRepo = lockRepo;
         this.repoScanner = repoScanner;
+        this.cipherProvider = cipherProvider;
     }
 
     /** 启动种子：projects 表为空且配置了 default-path 时，把 yml 预置仓库注册为 id=default 的项目（MVP 平滑迁移）。 */
@@ -439,7 +445,10 @@ public class ProjectService {
         s.setName(req.name().trim());
         s.setEnv(blankToNull(req.env()));
         s.setAccessType(req.accessType());
-        s.setAccessConfig(blankToNull(req.accessConfig()));
+        // CAP-07 FR-07：有凭证加密实现时敏感字段密文落库（幂等：已是密文不再加密）
+        ServerCredentialCipher cipher = cipherProvider.getIfAvailable();
+        String config = blankToNull(req.accessConfig());
+        s.setAccessConfig(cipher != null && config != null ? cipher.encryptConfigJson(config) : config);
         s.setCapabilities(joinTags(req.capabilities()));
         s.setEnabled(req.enabled() == null || req.enabled());
     }
@@ -484,8 +493,12 @@ public class ProjectService {
     }
 
     private ServerView toServerView(ProjectServerEntity s) {
+        // 读取时解密，保证前端编辑回显是明文（重新保存会再加密）
+        ServerCredentialCipher cipher = cipherProvider.getIfAvailable();
+        String config = s.getAccessConfig();
         return new ServerView(s.getId(), s.getProjectId(), s.getName(), s.getEnv(), s.getAccessType(),
-                s.getAccessConfig(), splitTags(s.getCapabilities()),
+                cipher != null && config != null ? cipher.decryptConfigJson(config) : config,
+                splitTags(s.getCapabilities()),
                 Boolean.TRUE.equals(s.getEnabled()), s.getCreatedAt(), s.getUpdatedAt());
     }
 
