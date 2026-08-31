@@ -1,5 +1,7 @@
 package com.devmind.project;
 
+import com.devmind.common.event.DomainEventPublisher;
+import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.project.dto.WorkItemRequest;
@@ -47,15 +49,18 @@ public class WorkItemService {
     private final WorkItemRepository workItemRepo;
     private final DesignRepository designRepo;
     private final RelationRepository relationRepo;
+    private final DomainEventPublisher eventPublisher;
 
     public WorkItemService(@Lazy RequirementService requirementService,
                            WorkItemRepository workItemRepo,
                            DesignRepository designRepo,
-                           RelationRepository relationRepo) {
+                           RelationRepository relationRepo,
+                           DomainEventPublisher eventPublisher) {
         this.requirementService = requirementService;
         this.workItemRepo = workItemRepo;
         this.designRepo = designRepo;
         this.relationRepo = relationRepo;
+        this.eventPublisher = eventPublisher;
     }
 
     public List<WorkItemView> list(String projectId, String requirementId) {
@@ -107,7 +112,7 @@ public class WorkItemService {
         return toView(workItemRepo.save(e));
     }
 
-    /** 状态推进：只校验状态值合法，不限制转换路径；推进后触发需求 rollup。 */
+    /** 状态推进：只校验状态值合法，不限制转换路径；推进后触发需求 rollup，并发布领域事件（CAP-15 编排器订阅）。 */
     public WorkItemView updateStatus(String projectId, String requirementId, String workItemId, String status) {
         WorkItemEntity e = requireUnder(projectId, requirementId, workItemId);
         String next = normalizeStatus(status);
@@ -117,6 +122,12 @@ public class WorkItemService {
         WorkItemView view = toView(workItemRepo.save(e));
         log.info("工作单元状态推进: {} {} -> {}", code(e.getSeq()), prev, next);
         requirementService.recomputeStatus(requirementId);
+        if (!prev.equals(next)) {
+            // success=null：状态翻转是中性事件，通知监听器已将其列入忽略清单，不转通知
+            eventPublisher.publish(SimpleDomainEvent.of("workitem.status.changed", projectId, workItemId,
+                    e.getCreatedBy(), "工作单元 " + code(e.getSeq()) + " 状态 " + prev + " -> " + next,
+                    "WORK_ITEM", workItemId, null));
+        }
         return view;
     }
 

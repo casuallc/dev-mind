@@ -11,6 +11,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * 领域事件 → 通知（P0-3 统一事件总线订阅方）：各业务模块只向总线发 {@link DomainEvent}，
@@ -23,6 +24,9 @@ public class DomainEventNotificationListener {
 
     private static final Logger log = LoggerFactory.getLogger(DomainEventNotificationListener.class);
 
+    /** 忽略清单：高频中性事件不转通知（workitem 状态翻转由 CAP-15 编排器自行发"已自动派发"通知，信息更明确）。 */
+    private static final Set<String> IGNORED_TYPES = Set.of("workitem.status.changed");
+
     private final NotificationService notificationService;
 
     public DomainEventNotificationListener(NotificationService notificationService) {
@@ -32,6 +36,9 @@ public class DomainEventNotificationListener {
     @EventListener
     public void on(DomainEvent event) {
         try {
+            if (IGNORED_TYPES.contains(event.type())) {
+                return;
+            }
             if (event instanceof SimpleDomainEvent e) {
                 notificationService.emit(draft(e));
             }
