@@ -33,6 +33,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import BuildCenterTab from '../../build/BuildTab'
 import DeployTab from '../../deploy/DeployTab'
 import TestTab from '../../test/TestTab'
+import ReleaseTab from '../../release/ReleaseTab'
 import RequirementCockpit from '../components/RequirementCockpit'
 import {
   addBuildStep,
@@ -46,7 +47,6 @@ import {
   deleteServer,
   getLock,
   getProject,
-  getReleaseConfig,
   getSummary,
   listBuildSteps,
   listEnvironments,
@@ -56,7 +56,6 @@ import {
   reorderBuildSteps,
   refreshSummary,
   releaseWrite,
-  saveReleaseConfig,
   saveSummary,
   setPrimaryRepo,
   updateBuildStep,
@@ -78,7 +77,6 @@ import type {
   ProjectRepo,
   ProjectRepoInput,
   ProjectServer,
-  ReleaseConfig,
   ServerInput,
   WorktreeInfo,
 } from '../types'
@@ -97,7 +95,6 @@ export default function ProjectDetail() {
   const [environments, setEnvironments] = useState<ProjectEnvironment[]>([])
   const [repos, setRepos] = useState<ProjectRepo[]>([])
   const [steps, setSteps] = useState<BuildStep[]>([])
-  const [release, setRelease] = useState<ReleaseConfig | null>(null)
   const [summary, setSummary] = useState<ContextSummary>({ projectId: id ?? '', summary: '' })
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([])
   const [lock, setLock] = useState<ProjectLock | null>(null)
@@ -107,13 +104,12 @@ export default function ProjectDetail() {
   const loadAll = useCallback(async () => {
     if (!id) return
     try {
-      const [p, rp, s, env, b, r, sm, wt, lk] = await Promise.all([
+      const [p, rp, s, env, b, sm, wt, lk] = await Promise.all([
         getProject(id),
         listRepos(id).catch(() => []),
         listServers(id),
         listEnvironments(id).catch(() => []),
         listBuildSteps(id),
-        getReleaseConfig(id).catch(() => null),
         getSummary(id).catch(() => ({ projectId: id, summary: '' })),
         listWorktrees(id).catch(() => []),
         getLock(id).catch(() => null),
@@ -123,7 +119,6 @@ export default function ProjectDetail() {
       setServers(s)
       setEnvironments(env)
       setSteps(b)
-      setRelease(r)
       setSummary(sm)
       setWorktrees(wt)
       setLock(lk)
@@ -283,7 +278,7 @@ export default function ProjectDetail() {
             {
               key: 'release',
               label: '发版配置',
-              children: <ReleaseTab id={project.id} release={release} onChanged={setRelease} />,
+              children: <ReleaseTab id={project.id} />,
             },
             {
               key: 'worktrees',
@@ -944,55 +939,6 @@ function BuildTab({ id, steps, onChanged }: {
 }
 
 // ---------------- 发版配置 ----------------
-
-function ReleaseTab({ id, release, onChanged }: {
-  id: string
-  release: ReleaseConfig | null
-  onChanged: (r: ReleaseConfig) => void
-}) {
-  const [form] = Form.useForm()
-  const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    form.setFieldsValue({
-      nexusRepo: release?.nexusRepo ?? '',
-      scriptTemplateRef: release?.scriptTemplateRef ?? '',
-      versionRule: release?.versionRule ?? '',
-    })
-  }, [release, form])
-
-  const onSave = async (v: { nexusRepo?: string; scriptTemplateRef?: string; versionRule?: string }) => {
-    setBusy(true)
-    try {
-      const r = await saveReleaseConfig(id, v)
-      onChanged(r)
-      message.success('已保存')
-    } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Space direction="vertical" size={8} style={{ width: '100%', maxWidth: 560 }}>
-      <Form form={form} layout="vertical" onFinish={onSave}>
-        <Form.Item label="Nexus 目标仓库" name="nexusRepo" extra="如 snapshots / releases">
-          <Input placeholder="snapshots" />
-        </Form.Item>
-        <Form.Item label="推送脚本模板引用" name="scriptTemplateRef" extra="docs-repo 中模板 id 或路径（委托 CAP-11）">
-          <Input placeholder="如 nexus-push-template" />
-        </Form.Item>
-        <Form.Item label="版本规则" name="versionRule" extra="如 semver 递增策略描述">
-          <Input placeholder="如 patch 版本 +1，仅 master 发版" />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" loading={busy}>
-          保存发版配置
-        </Button>
-      </Form>
-    </Space>
-  )
-}
 
 // ---------------- Worktree ----------------
 
