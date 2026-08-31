@@ -24,7 +24,8 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { EditOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import {
   createRequirement,
   createWorkItem,
@@ -32,11 +33,14 @@ import {
   deleteWorkItem,
   getRequirementOverview,
   listRequirements,
+  startWorkItemSession,
   updateRequirement,
   updateRequirementStatus,
   updateWorkItem,
   updateWorkItemStatus,
 } from '../api'
+import FlowActions from './flow/FlowActions'
+import DesignsTab from './flow/DesignsTab'
 import type {
   Requirement,
   RequirementInput,
@@ -282,6 +286,10 @@ export default function RequirementCockpit({ projectId }: { projectId: string })
             onEdit={() => openEdit(overview.requirement)}
             onDelete={() => confirmDelete(overview.requirement)}
             onRefresh={() => loadOverview(overview.requirement.id)}
+            onChanged={async () => {
+              await loadOverview(overview.requirement.id)
+              await reload(overview.requirement.id)
+            }}
             onSaveWorkItem={saveWorkItem}
             onAdvanceWorkItem={advanceWorkItem}
             onRemoveWorkItem={removeWorkItem}
@@ -309,19 +317,21 @@ export default function RequirementCockpit({ projectId }: { projectId: string })
 
 // ---------------- 右侧主线视图 ----------------
 
-function Mainline({ overview, onAdvance, onEdit, onDelete, onRefresh,
+function Mainline({ overview, onAdvance, onEdit, onDelete, onRefresh, onChanged,
   onSaveWorkItem, onAdvanceWorkItem, onRemoveWorkItem }: {
   overview: RequirementOverview
   onAdvance: (s: RequirementStatus) => void
   onEdit: () => void
   onDelete: () => void
   onRefresh: () => void
+  onChanged: () => void
   onSaveWorkItem: (workItemId: string | null, v: WorkItemInput) => Promise<void>
   onAdvanceWorkItem: (w: WorkItem, s: WorkItemStatus) => void
   onRemoveWorkItem: (w: WorkItem) => void
 }) {
   const r = overview.requirement
   const flowIndex = STATUS_FLOW.indexOf(r.status)
+  const navigate = useNavigate()
   const [wiEditOpen, setWiEditOpen] = useState(false)
   const [wiEditing, setWiEditing] = useState<WorkItem | null>(null)
   const [wiForm] = Form.useForm()
@@ -354,6 +364,18 @@ function Mainline({ overview, onAdvance, onEdit, onDelete, onRefresh,
     })
   }
 
+  // CAP-14：工作单元一键起会话（spec 由后端自动带入 taskSpec），成功后跳会话详情
+  const startWiSession = async (w: WorkItem) => {
+    try {
+      const s = await startWorkItemSession(r.projectId, w.id)
+      message.success(`${w.code} 会话已启动`)
+      onChanged()
+      navigate(`/sessions/${s.id}`)
+    } catch (e) {
+      message.error((e as Error).message)
+    }
+  }
+
   const wiColumns: ColumnsType<WorkItem> = [
     { title: '编号', dataIndex: 'code', width: 80, render: (v: string) => <Typography.Text code style={{ fontSize: 12 }}>{v}</Typography.Text> },
     { title: '类型', dataIndex: 'type', width: 110, render: (t: string) => <Tag color={workItemTypeColor(t)}>{t}</Tag> },
@@ -375,9 +397,14 @@ function Mainline({ overview, onAdvance, onEdit, onDelete, onRefresh,
       ),
     },
     {
-      title: '操作', key: 'ops', width: 120,
+      title: '操作', key: 'ops', width: 170,
       render: (_, w) => (
         <Space size={4}>
+          {(w.status === 'TODO' || w.status === 'IN_PROGRESS') && (
+            <Button size="small" type="link" icon={<PlayCircleOutlined />} onClick={() => startWiSession(w)}>
+              起会话
+            </Button>
+          )}
           <Button size="small" type="link" onClick={() => openWiEdit(w)}>编辑</Button>
           <Button size="small" type="link" danger onClick={() => confirmWiDelete(w)}>删除</Button>
         </Space>
@@ -470,6 +497,7 @@ function Mainline({ overview, onAdvance, onEdit, onDelete, onRefresh,
             style={{ maxWidth: 820 }}
           />
         )}
+        <FlowActions requirement={r} onChanged={onChanged} />
         <Descriptions size="small" column={{ xs: 1, sm: 3 }}>
           <Descriptions.Item label="负责人">{r.ownerId || '-'}</Descriptions.Item>
           <Descriptions.Item label="工作单元">{overview.workItems.length} 个</Descriptions.Item>
@@ -494,6 +522,11 @@ function Mainline({ overview, onAdvance, onEdit, onDelete, onRefresh,
                 <Table rowKey="id" size="small" columns={wiColumns} dataSource={overview.workItems} pagination={false} />
               </Space>
             ),
+          },
+          {
+            key: 'designs',
+            label: '方案',
+            children: <DesignsTab projectId={r.projectId} requirementId={r.id} />,
           },
           {
             key: 'timeline',
