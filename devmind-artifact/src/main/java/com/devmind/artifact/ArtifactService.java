@@ -57,6 +57,35 @@ public class ArtifactService {
         return toView(repo.save(a));
     }
 
+    /**
+     * 登记信息类产物（CAP-14 流程层用）：type 为 DOC/ANALYSIS/REVIEW 等，无存储实体，
+     * storage 留空，path 存引用（docId / sessionId / 文件路径）。
+     * 幂等：同一 (type, path) 重复登记时先清旧（同一会话重复产出只留最新）。
+     */
+    public ArtifactView registerInfo(String projectId, String requirementId, String workItemId,
+                                     String type, String name, String path,
+                                     String producerType) {
+        if (type == null || type.isBlank()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "产物类型不能为空");
+        }
+        if (path == null || path.isBlank()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "产物引用(path)不能为空");
+        }
+        repo.findByProjectIdAndTypeAndPath(projectId, type, path.trim()).forEach(repo::delete);
+        ArtifactEntity a = new ArtifactEntity();
+        a.setProjectId(projectId);
+        a.setRequirementId(requirementId);
+        a.setWorkItemId(workItemId);
+        a.setType(type);
+        a.setName(name != null && !name.isBlank() ? name : nameOf(path));
+        a.setPath(path.trim());
+        a.setProducerType(producerType);
+        // producer_id 是 Long 列（buildId），session 等字符串型生产者引用并入 path，producerId 留空
+        a.setCreatedBy(identityService.currentActor());
+        a.setCreatedAt(Instant.now());
+        return toView(repo.save(a));
+    }
+
     public ArtifactEntity requireArtifact(Long id) {
         return repo.findById(id)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "制品不存在: " + id));

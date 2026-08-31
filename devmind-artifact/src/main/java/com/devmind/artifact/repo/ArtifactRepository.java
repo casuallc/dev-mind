@@ -15,4 +15,7 @@ public interface ArtifactRepository extends JpaRepository<ArtifactEntity, Long> 
 
     /** 按生产者反查（如某次构建登记的产物） */
     List<ArtifactEntity> findByProducerTypeAndProducerId(String producerType, Long producerId);
+
+    /** 信息类产物幂等清理：同一 (type, path 引用) 只留最新 */
+    List<ArtifactEntity> findByProjectIdAndTypeAndPath(String projectId, String type, String path);
 }
