@@ -22,8 +22,8 @@ import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { createSession, deleteSession, listSessions, listTemplates } from '../api'
 import type { SessionSummary, SessionTemplate } from '../types'
-import { listProjects, listTasks } from '../../projects/api'
-import type { Project, Task } from '../../projects/types'
+import { listProjects, listRequirements, listWorkItems } from '../../projects/api'
+import type { Project, Requirement, WorkItem } from '../../projects/types'
 import AgentPanel from '../components/AgentPanel'
 
 const stateColor: Record<string, string> = {
@@ -50,10 +50,12 @@ export default function SessionsBoard() {
   const [keyword, setKeyword] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
-  const [tasks, setTasks] = useState<Task[]>([])
+  const [requirements, setRequirements] = useState<Requirement[]>([])
+  const [workItems, setWorkItems] = useState<WorkItem[]>([])
   const [form] = Form.useForm()
   const timerRef = useRef<number | undefined>(undefined)
   const watchProjectId = Form.useWatch('projectId', form)
+  const watchRequirementId = Form.useWatch('requirementId', form)
 
   const load = useCallback(async (st?: string) => {
     setLoading(true)
@@ -91,17 +93,30 @@ export default function SessionsBoard() {
 
   const onStateChange = useCallback(() => load(), [load])
 
-  // 项目变化时加载其任务列表（会话可挂到任务主线上）；切换项目清空已选任务
+  // 项目变化时加载其需求列表（会话可挂到工作单元/需求主线上）；切换项目清空已选关联
   useEffect(() => {
-    form.setFieldsValue({ taskId: undefined })
+    form.setFieldsValue({ requirementId: undefined, workItemId: undefined })
+    setWorkItems([])
     if (!watchProjectId) {
-      setTasks([])
+      setRequirements([])
       return
     }
-    listTasks(watchProjectId)
-      .then((rs) => setTasks(rs.filter((r) => !['DONE', 'CANCELLED'].includes(r.status))))
-      .catch(() => setTasks([]))
+    listRequirements(watchProjectId)
+      .then((rs) => setRequirements(rs.filter((r) => !['DONE', 'CANCELLED'].includes(r.status))))
+      .catch(() => setRequirements([]))
   }, [watchProjectId, form])
+
+  // 需求变化时加载其工作单元；切需求清空已选工作单元
+  useEffect(() => {
+    form.setFieldsValue({ workItemId: undefined })
+    if (!watchProjectId || !watchRequirementId) {
+      setWorkItems([])
+      return
+    }
+    listWorkItems(watchProjectId, watchRequirementId)
+      .then((ws) => setWorkItems(ws.filter((w) => !['DONE', 'CANCELLED'].includes(w.status))))
+      .catch(() => setWorkItems([]))
+  }, [watchProjectId, watchRequirementId, form])
 
   const filtered = useMemo(() => {
     const kw = keyword.trim().toLowerCase()
@@ -130,7 +145,8 @@ export default function SessionsBoard() {
     model?: string
     permissionMode?: string
     projectId?: string
-    taskId?: string
+    requirementId?: string
+    workItemId?: string
   }) => {
     setCreating(true)
     try {
@@ -140,7 +156,8 @@ export default function SessionsBoard() {
         model: values.model || undefined,
         permissionMode: values.permissionMode || undefined,
         projectId: values.projectId || undefined,
-        taskId: values.taskId || undefined,
+        requirementId: values.requirementId || undefined,
+        workItemId: values.workItemId || undefined,
       })
       setCreateOpen(false)
       form.resetFields()
@@ -324,12 +341,22 @@ export default function SessionsBoard() {
               allowClear
             />
           </Form.Item>
-          <Form.Item label="关联任务" name="taskId" extra="挂到任务主线后，会话将出现在任务详情聚合中">
+          <Form.Item label="关联需求" name="requirementId" extra="不选工作单元时直挂需求（分析型会话）">
             <Select
-              options={tasks.map((r) => ({ value: r.id, label: `${r.code} ${r.title}` }))}
-              placeholder="（可选）选择任务"
+              options={requirements.map((r) => ({ value: r.id, label: `${r.code} ${r.title}` }))}
+              placeholder="（可选）选择需求"
               allowClear
               disabled={!watchProjectId}
+              showSearch
+              optionFilterProp="label"
+            />
+          </Form.Item>
+          <Form.Item label="关联工作单元" name="workItemId" extra="挂到工作单元后，会话将出现在需求详情聚合中">
+            <Select
+              options={workItems.map((w) => ({ value: w.id, label: `${w.code} ${w.title}` }))}
+              placeholder="（可选）选择工作单元"
+              allowClear
+              disabled={!watchRequirementId}
               showSearch
               optionFilterProp="label"
             />

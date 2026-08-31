@@ -6,7 +6,8 @@ export type DocStatus = 'draft' | 'pending_confirm' | 'frozen'
 export interface DocMeta {
   id: number
   kind: DocKind
-  taskId: string | null
+  requirementId: string | null
+  workItemId: string | null
   projectId: string | null
   title: string
   currentVersion: number
@@ -36,7 +37,8 @@ export interface DocVersion {
 
 export interface DocInput {
   kind: DocKind
-  taskId?: string
+  requirementId?: string
+  workItemId?: string
   projectId?: string
   title: string
   tags?: string[]

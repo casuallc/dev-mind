@@ -4,6 +4,7 @@ import type {
   BuildStep,
   BuildStepInput,
   ContextSummary,
+  Design,
   EnvironmentInput,
   Project,
   ProjectEnvironment,
@@ -14,11 +15,14 @@ import type {
   ProjectServer,
   ReleaseConfig,
   ReleaseConfigInput,
+  Requirement,
+  RequirementInput,
+  RequirementOverview,
+  RequirementStatus,
   ServerInput,
-  Task,
-  TaskInput,
-  TaskOverview,
-  TaskStatus,
+  WorkItem,
+  WorkItemInput,
+  WorkItemStatus,
   WorktreeInfo,
 } from './types'
 
@@ -165,36 +169,119 @@ export function releaseWrite(id: string): Promise<ProjectLock> {
   return api.post<ProjectLock>(`/projects/${id}/lock/release`)
 }
 
-// ---------------- 任务（P0-5 项目内主线，内嵌需求） ----------------
+// ---------------- 研发主线（CAP-13：Requirement / Design / WorkItem） ----------------
 
-export function listTasks(projectId: string, status?: string): Promise<Task[]> {
+export function listRequirements(projectId: string, status?: string): Promise<Requirement[]> {
   const q = status && status !== 'ALL' ? `?status=${status}` : ''
-  return api.get<Task[]>(`/projects/${projectId}/tasks${q}`)
+  return api.get<Requirement[]>(`/projects/${projectId}/requirements${q}`)
 }
 
-export function createTask(projectId: string, input: TaskInput): Promise<Task> {
-  return api.post<Task>(`/projects/${projectId}/tasks`, input)
+export function createRequirement(projectId: string, input: RequirementInput): Promise<Requirement> {
+  return api.post<Requirement>(`/projects/${projectId}/requirements`, input)
 }
 
-export function updateTask(projectId: string, taskId: string, input: TaskInput): Promise<Task> {
-  return api.put<Task>(`/projects/${projectId}/tasks/${taskId}`, input)
-}
-
-export function updateTaskStatus(
+export function updateRequirement(
   projectId: string,
-  taskId: string,
-  status: TaskStatus,
-): Promise<Task> {
-  return api.put<Task>(`/projects/${projectId}/tasks/${taskId}/status`, { status })
+  requirementId: string,
+  input: RequirementInput,
+): Promise<Requirement> {
+  return api.put<Requirement>(`/projects/${projectId}/requirements/${requirementId}`, input)
 }
 
-export function deleteTask(projectId: string, taskId: string): Promise<void> {
-  return api.del(`/projects/${projectId}/tasks/${taskId}`)
+export function updateRequirementStatus(
+  projectId: string,
+  requirementId: string,
+  status: RequirementStatus,
+): Promise<Requirement> {
+  return api.put<Requirement>(`/projects/${projectId}/requirements/${requirementId}/status`, { status })
 }
 
-/** 任务主线聚合（P0-6 步骤 4）：文档/会话/构建/测试/部署/发版 + 时间线 */
-export function getTaskOverview(projectId: string, taskId: string): Promise<TaskOverview> {
-  return api.get<TaskOverview>(`/projects/${projectId}/tasks/${taskId}/overview`)
+export function deleteRequirement(projectId: string, requirementId: string): Promise<void> {
+  return api.del(`/projects/${projectId}/requirements/${requirementId}`)
+}
+
+/** 需求主线聚合（CAP-13）：工作单元 + 文档/会话/构建/测试/部署/发版/产物 + 时间线 */
+export function getRequirementOverview(
+  projectId: string,
+  requirementId: string,
+): Promise<RequirementOverview> {
+  return api.get<RequirementOverview>(`/projects/${projectId}/requirements/${requirementId}/overview`)
+}
+
+// ---- Work Item ----
+
+export function listWorkItems(projectId: string, requirementId: string): Promise<WorkItem[]> {
+  return api.get<WorkItem[]>(`/projects/${projectId}/requirements/${requirementId}/work-items`)
+}
+
+export function createWorkItem(
+  projectId: string,
+  requirementId: string,
+  input: WorkItemInput,
+): Promise<WorkItem> {
+  return api.post<WorkItem>(`/projects/${projectId}/requirements/${requirementId}/work-items`, input)
+}
+
+export function updateWorkItem(
+  projectId: string,
+  requirementId: string,
+  workItemId: string,
+  input: WorkItemInput,
+): Promise<WorkItem> {
+  return api.put<WorkItem>(
+    `/projects/${projectId}/requirements/${requirementId}/work-items/${workItemId}`,
+    input,
+  )
+}
+
+export function updateWorkItemStatus(
+  projectId: string,
+  requirementId: string,
+  workItemId: string,
+  status: WorkItemStatus,
+): Promise<WorkItem> {
+  return api.put<WorkItem>(
+    `/projects/${projectId}/requirements/${requirementId}/work-items/${workItemId}/status`,
+    { status },
+  )
+}
+
+export function deleteWorkItem(
+  projectId: string,
+  requirementId: string,
+  workItemId: string,
+): Promise<void> {
+  return api.del(`/projects/${projectId}/requirements/${requirementId}/work-items/${workItemId}`)
+}
+
+// ---- Design ----
+
+export function listDesigns(projectId: string, requirementId: string): Promise<Design[]> {
+  return api.get<Design[]>(`/projects/${projectId}/requirements/${requirementId}/designs`)
+}
+
+export function createDesign(
+  projectId: string,
+  requirementId: string,
+  docId?: number,
+): Promise<Design> {
+  return api.post<Design>(`/projects/${projectId}/requirements/${requirementId}/designs`, { docId })
+}
+
+export function updateDesignStatus(
+  projectId: string,
+  requirementId: string,
+  designId: string,
+  status: Design['status'],
+): Promise<Design> {
+  return api.put<Design>(
+    `/projects/${projectId}/requirements/${requirementId}/designs/${designId}/status`,
+    { status },
+  )
+}
+
+export function deleteDesign(projectId: string, requirementId: string, designId: string): Promise<void> {
+  return api.del(`/projects/${projectId}/requirements/${requirementId}/designs/${designId}`)
 }
 
 // ---------------- worktree ----------------

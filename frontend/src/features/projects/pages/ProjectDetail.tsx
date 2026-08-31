@@ -1,4 +1,4 @@
-// CAP-02 项目详情：头部信息 + 任务主线 + 项目级资产 Tabs（各 Tab 拆至 components/detail/）。
+// CAP-02 项目详情：头部信息 + 需求研发主线（CAP-13）+ 项目级资产 Tabs（各 Tab 拆至 components/detail/）。
 import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
@@ -23,7 +23,7 @@ import BuildCenterTab from '../../build/components/BuildTab'
 import DeployTab from '../../deploy/components/DeployTab'
 import TestTab from '../../test/components/TestTab'
 import ReleaseTab from '../../release/components/ReleaseTab'
-import TaskCockpit from '../components/TaskCockpit'
+import RequirementCockpit from '../components/RequirementCockpit'
 import ReposTab from '../components/detail/ReposTab'
 import SummaryTab from '../components/detail/SummaryTab'
 import ServersTab from '../components/detail/ServersTab'
@@ -179,12 +179,12 @@ export default function ProjectDetail() {
         </Descriptions>
       </Card>
 
-      <Card size="small" title="任务主线" extra={
+      <Card size="small" title="研发主线（需求）" extra={
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          项目内每个任务一条独立流程：文档 → 会话 → 构建 → 测试 → 部署 → 发版 → 时间线
+          需求 → 分析/方案 → 工作单元 → 会话 → 构建 → 测试 → 部署 → 发版 → 时间线
         </Typography.Text>
       }>
-        <TaskCockpit projectId={project.id} />
+        <RequirementCockpit projectId={project.id} />
       </Card>
 
       <Card size="small" title="项目级资产">
