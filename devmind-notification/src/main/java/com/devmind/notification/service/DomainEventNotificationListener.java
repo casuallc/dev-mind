@@ -24,8 +24,8 @@ public class DomainEventNotificationListener {
 
     private static final Logger log = LoggerFactory.getLogger(DomainEventNotificationListener.class);
 
-    /** 忽略清单：高频中性事件不转通知（workitem 状态翻转由 CAP-15 编排器自行发"已自动派发"通知，信息更明确）。 */
-    private static final Set<String> IGNORED_TYPES = Set.of("workitem.status.changed");
+    /** 忽略清单：高频中性事件不转通知（workitem 状态翻转/拆分固化由 CAP-15 编排器自行发"已自动派发"通知，信息更明确）。 */
+    private static final Set<String> IGNORED_TYPES = Set.of("workitem.status.changed", "flow.split.confirmed");
 
     private final NotificationService notificationService;
 

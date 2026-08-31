@@ -1,6 +1,7 @@
 package com.devmind.flow;
 
 import com.devmind.artifact.ArtifactService;
+import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
@@ -65,6 +66,7 @@ public class RequirementFlowService {
     private final DocumentService documentService;
     private final ArtifactService artifactService;
     private final NotificationService notificationService;
+    private final DomainEventPublisher eventPublisher;
     private final ObjectMapper mapper;
 
     public RequirementFlowService(RequirementService requirementService,
@@ -76,6 +78,7 @@ public class RequirementFlowService {
                                   DocumentService documentService,
                                   ArtifactService artifactService,
                                   NotificationService notificationService,
+                                  DomainEventPublisher eventPublisher,
                                   ObjectMapper mapper) {
         this.requirementService = requirementService;
         this.workItemService = workItemService;
@@ -86,6 +89,7 @@ public class RequirementFlowService {
         this.documentService = documentService;
         this.artifactService = artifactService;
         this.notificationService = notificationService;
+        this.eventPublisher = eventPublisher;
         this.mapper = mapper;
     }
 
@@ -230,6 +234,10 @@ public class RequirementFlowService {
             }
         }
         log.info("拆分已固化: req={} workItems={}", requirementId, wiIds.size());
+        // CAP-15：发布固化事件，编排器订阅后对无依赖的首批 WI 自动派发会话（不转通知，编排器自发派发通知）
+        eventPublisher.publish(SimpleDomainEvent.of("flow.split.confirmed", projectId, null,
+                "local", "需求拆分已固化，工作单元 " + wiIds.size() + " 个",
+                "REQUIREMENT", requirementId, null));
         return workItemService.list(projectId, requirementId);
     }
 
