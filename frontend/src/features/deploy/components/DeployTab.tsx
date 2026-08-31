@@ -29,12 +29,12 @@ import {
   listDeployments,
   rollbackDeployment,
   saveDeployConfig,
-} from './api'
-import type { DeployConfig, DeployStatus, DeployStep, DeployStepInput, DeploymentRecord } from './types'
-import type { BuildRecord } from '../build/types'
-import type { ProjectEnvironment, ProjectServer } from '../projects/types'
-import { listBuilds } from '../build/api'
-import { listEnvironments, listServers } from '../projects/api'
+} from '../api'
+import type { DeployConfig, DeployStatus, DeployStep, DeployStepInput, DeploymentRecord } from '../types'
+import type { BuildRecord } from '../../build/types'
+import type { ProjectEnvironment, ProjectServer } from '../../projects/types'
+import { listBuilds } from '../../build/api'
+import { listEnvironments, listServers } from '../../projects/api'
 
 const STATUS_COLOR: Record<DeployStatus, string> = {
   PLANNED: 'blue',

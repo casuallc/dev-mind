@@ -29,8 +29,8 @@ import {
   listReleases,
   rollbackRelease,
   saveReleaseConfig,
-} from './api'
-import type { CreateReleaseInput, ReleaseConfig, ReleaseRecord, ReleaseStatus } from './types'
+} from '../api'
+import type { CreateReleaseInput, ReleaseConfig, ReleaseRecord, ReleaseStatus } from '../types'
 
 const STATUS_COLOR: Record<ReleaseStatus, string> = {
   PLANNED: 'blue',

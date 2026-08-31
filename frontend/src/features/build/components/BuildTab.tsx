@@ -2,10 +2,10 @@
 import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Select, Space, Table, Tag, Typography, message } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import type { ColumnsType } from 'antd/es/table'
-import { getBuild, getBuildConfig, getBuildLogs, listBuilds, saveBuildConfig, triggerBuild } from './api'
-import type { BuildConfig, BuildExecutor, BuildRecord, BuildStatus } from './types'
-import type { ProjectServer } from '../projects/types'
-import { listServers } from '../projects/api'
+import { getBuild, getBuildConfig, getBuildLogs, listBuilds, saveBuildConfig, triggerBuild } from '../api'
+import type { BuildConfig, BuildExecutor, BuildRecord, BuildStatus } from '../types'
+import type { ProjectServer } from '../../projects/types'
+import { listServers } from '../../projects/api'
 
 const STATUS_COLOR: Record<BuildStatus, string> = {
   QUEUED: 'blue',

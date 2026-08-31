@@ -42,7 +42,7 @@ import {
   listSuites,
   publishSuite,
   saveCases,
-} from './api'
+} from '../api'
 import type {
   CaseResult,
   CaseResultStatus,
@@ -52,9 +52,9 @@ import type {
   TestRun,
   TestRunStatus,
   TestSuite,
-} from './types'
-import type { ProjectEnvironment, ProjectServer } from '../projects/types'
-import { listEnvironments, listServers } from '../projects/api'
+} from '../types'
+import type { ProjectEnvironment, ProjectServer } from '../../projects/types'
+import { listEnvironments, listServers } from '../../projects/api'
 
 const STATUS_COLOR: Record<TestRunStatus, string> = {
   QUEUED: 'default',
