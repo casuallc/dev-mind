@@ -7,6 +7,8 @@ import type {
   Project,
   ProjectInput,
   ProjectLock,
+  ProjectRepo,
+  ProjectRepoInput,
   ProjectServer,
   ReleaseConfig,
   ReleaseConfigInput,
@@ -33,6 +35,28 @@ export function updateProject(id: string, input: ProjectInput): Promise<Project>
 
 export function deleteProject(id: string): Promise<void> {
   return api.del(`/projects/${id}`)
+}
+
+// ---------------- 项目仓库（P0-4 多库模型） ----------------
+
+export function listRepos(id: string): Promise<ProjectRepo[]> {
+  return api.get<ProjectRepo[]>(`/projects/${id}/repos`)
+}
+
+export function addRepo(id: string, input: ProjectRepoInput): Promise<ProjectRepo> {
+  return api.post<ProjectRepo>(`/projects/${id}/repos`, input)
+}
+
+export function updateRepo(id: string, repoId: number, input: ProjectRepoInput): Promise<ProjectRepo> {
+  return api.put<ProjectRepo>(`/projects/${id}/repos/${repoId}`, input)
+}
+
+export function deleteRepo(id: string, repoId: number): Promise<void> {
+  return api.del(`/projects/${id}/repos/${repoId}`)
+}
+
+export function setPrimaryRepo(id: string, repoId: number): Promise<ProjectRepo> {
+  return api.post<ProjectRepo>(`/projects/${id}/repos/${repoId}/primary`)
 }
 
 // ---------------- 上下文摘要 ----------------

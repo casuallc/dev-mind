@@ -26,6 +26,31 @@ export interface ProjectInput {
   apiDocSource?: string
 }
 
+// P0-4 项目多库模型
+export interface ProjectRepo {
+  id: number
+  projectId: string
+  name: string
+  path: string
+  remoteUrl?: string
+  defaultBranch?: string
+  role: string // CODE / DOCS / CONFIG
+  primary: boolean
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ProjectRepoInput {
+  name: string
+  path: string
+  remoteUrl?: string
+  defaultBranch?: string
+  role?: string
+  primary?: boolean
+  sortOrder?: number
+}
+
 export interface ProjectServer {
   id: number
   projectId: string
