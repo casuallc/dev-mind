@@ -38,6 +38,14 @@
             <artifactId>devmind-notification</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-build</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-deploy</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
