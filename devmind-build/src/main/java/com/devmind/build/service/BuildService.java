@@ -4,6 +4,7 @@ import com.devmind.build.dto.BuildView;
 import com.devmind.build.dto.TriggerRequest;
 import com.devmind.build.model.BuildEntity;
 import com.devmind.build.repo.BuildRepository;
+import com.devmind.artifact.ArtifactService;
 import com.devmind.auth.IdentityService;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
@@ -57,6 +58,7 @@ public class BuildService {
 
     private final ExecutorService buildExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
+    private final ArtifactService artifactService;
     private final IdentityService identityService;
     private final DomainEventPublisher eventPublisher;
     private final BuildRepository repo;
@@ -71,7 +73,8 @@ public class BuildService {
     private final ExecutionLogHub hub;
     private final ObjectMapper mapper;
 
-    public BuildService(IdentityService identityService,
+    public BuildService(ArtifactService artifactService,
+                        IdentityService identityService,
                         DomainEventPublisher eventPublisher,
                         BuildRepository repo,
                         BuildConfigService configService,
@@ -84,6 +87,7 @@ public class BuildService {
                         RemoteStepRunner remoteRunner,
                         ExecutionLogHub hub,
                         ObjectMapper mapper) {
+        this.artifactService = artifactService;
         this.identityService = identityService;
         this.eventPublisher = eventPublisher;
         this.repo = repo;
@@ -215,6 +219,9 @@ public class BuildService {
                 b.setArtifactRef(captureArtifact(logs.toString()));
                 if (b.getArtifactRef() != null) {
                     sink.accept("[产物登记] " + b.getArtifactRef());
+                    // P1-2：登记为 artifacts 表一等实体（artifactRef 字符串保留作兼容展示）
+                    artifactService.register(b.getProjectId(), b.getRequirementId(),
+                            b.getArtifactRef(), ArtifactService.PRODUCER_BUILD, b.getId());
                 }
             } else {
                 b.setStatus(BuildEntity.FAILED);
