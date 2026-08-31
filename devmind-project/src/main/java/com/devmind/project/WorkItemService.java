@@ -131,6 +131,8 @@ public class WorkItemService {
         return view;
     }
 
+    /** 删除工作单元：清理双向 Relation 边后删除。派生 deleteBy 查询需事务上下文。 */
+    @org.springframework.transaction.annotation.Transactional
     public void delete(String projectId, String requirementId, String workItemId) {
         WorkItemEntity e = requireUnder(projectId, requirementId, workItemId);
         relationRepo.deleteByFromTypeAndFromId("work_item", workItemId);

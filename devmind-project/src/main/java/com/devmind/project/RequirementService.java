@@ -115,7 +115,8 @@ public class RequirementService {
         return view;
     }
 
-    /** 删除需求：级联清理其 Work Item / Design / 相关 Relation。 */
+    /** 删除需求：级联清理其 Work Item / Design / 相关 Relation。派生 deleteBy 查询需事务上下文。 */
+    @org.springframework.transaction.annotation.Transactional
     public void delete(String projectId, String requirementId) {
         RequirementEntity e = requireEntity(projectId, requirementId);
         workItemRepo.deleteByRequirementId(requirementId);
