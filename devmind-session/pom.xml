@@ -11,14 +11,11 @@
     </parent>
     <artifactId>devmind-session</artifactId>
     <name>devmind-session</name>
+    <description>CAP-05 Agent 会话管理：进程生命周期/状态机/事件解析/WebSocket 实时流</description>
     <dependencies>
         <dependency>
             <groupId>com.devmind</groupId>
             <artifactId>devmind-common</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.devmind</groupId>
-            <artifactId>devmind-auth</artifactId>
         </dependency>
         <dependency>
             <groupId>com.devmind</groupId>
@@ -31,6 +28,27 @@
         <dependency>
             <groupId>com.devmind</groupId>
             <artifactId>devmind-notification</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <!-- Spring Boot 4 默认 Jackson 3：tools.jackson.*（版本由父 BOM 管理） -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
     </dependencies>
 </project>
