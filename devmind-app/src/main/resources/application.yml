@@ -44,3 +44,7 @@ devmind:
     default-path: ""               # 留空：本机路径写在 application-local.yml（DEVMIND_PROJECT_DEFAULT_PATH 亦可覆盖）
     default-name: "default"
     default-tags: []
+  server-adapter:
+    crypto-key: ""                 # 凭证加密密钥；空=自动生成存 data/server-crypto.key（gitignored）
+    connect-timeout-ms: 15000
+    audit-enabled: true
