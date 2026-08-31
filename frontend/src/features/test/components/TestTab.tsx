@@ -1,23 +1,19 @@
 // CAP-10 测试中心：套件管理（OpenAPI 生成/新建/用例编辑/沉淀文档）→ 新建测试运行（选套件+目标环境/服务器/baseUrl）→
 // 运行历史 → 详情 Drawer（WS 实时结果流）；失败运行可一键生成缺陷线索（FR-06）。
 import {
-  Alert,
   Button,
   Card,
-  Drawer,
   Form,
   Input,
   Modal,
   Select,
   Space,
-  Switch,
   Table,
   Tag,
   Typography,
   message,
 } from 'antd'
-import type { FormInstance } from 'antd'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ColumnsType } from 'antd/es/table'
 import {
   BugOutlined,
@@ -34,69 +30,21 @@ import {
   deleteSuite,
   generateSuite,
   getIssues,
-  getRun,
   getRunLogs,
   getRunReport,
   getSuite,
   listRuns,
   listSuites,
   publishSuite,
-  saveCases,
 } from '../api'
-import type {
-  CaseResult,
-  CaseResultStatus,
-  IssueDraft,
-  TestCase,
-  TestCaseInput,
-  TestRun,
-  TestRunStatus,
-  TestSuite,
-} from '../types'
+import type { IssueDraft, TestRun, TestRunStatus, TestSuite } from '../types'
 import type { ProjectEnvironment, ProjectServer } from '../../projects/types'
 import { listEnvironments, listServers } from '../../projects/api'
-
-const STATUS_COLOR: Record<TestRunStatus, string> = {
-  QUEUED: 'default',
-  RUNNING: 'processing',
-  SUCCESS: 'green',
-  FAILED: 'red',
-}
-const RESULT_COLOR: Record<CaseResultStatus, string> = {
-  pass: 'green',
-  fail: 'red',
-  skip: 'orange',
-}
-const SUITE_KIND_COLOR: Record<string, string> = { api: 'blue', smoke: 'purple' }
-const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
-
-function fmtTime(s: string | null): string {
-  if (!s) return '-'
-  const d = new Date(s)
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
-}
-
-function durationMs(a: string | null, b: string | null): string {
-  if (!a || !b) return '-'
-  const ms = new Date(b).getTime() - new Date(a).getTime()
-  if (ms < 1000) return `${ms}ms`
-  const s = Math.floor(ms / 1000)
-  if (s < 60) return `${s}s`
-  return `${Math.floor(s / 60)}m ${s % 60}s`
-}
-
-const paramsToText = (p: Record<string, string> | undefined): string =>
-  Object.entries(p ?? {}).map(([k, v]) => `${k}=${v}`).join('\n')
-
-const textToParams = (t: string): Record<string, string> => {
-  const out: Record<string, string> = {}
-  t.split('\n').map((l) => l.trim()).filter(Boolean).forEach((l) => {
-    const i = l.indexOf('=')
-    if (i > 0) out[l.slice(0, i).trim()] = l.slice(i + 1).trim()
-  })
-  return out
-}
+import { durationMs, fmtTime } from '../../../shared/utils/format'
+import { STATUS_COLOR, SUITE_KIND_COLOR } from '../constants'
+import CaseEditorDrawer from './CaseEditorDrawer'
+import RunDetailDrawer from './RunDetailDrawer'
+import IssuesTable from './IssuesTable'
 
 export default function TestTab({ id }: { id: string }) {
   const [suites, setSuites] = useState<TestSuite[]>([])
@@ -424,7 +372,7 @@ export default function TestTab({ id }: { id: string }) {
         }}
       />
 
-      <DetailDrawer
+      <RunDetailDrawer
         record={detail}
         onClose={() => setDetail(null)}
         onChanged={(r) => {
@@ -446,421 +394,6 @@ export default function TestTab({ id }: { id: string }) {
         onCancel={() => setIssuesModal(null)}>
         <IssuesTable issues={issuesModal ?? []} />
       </Modal>
-    </Space>
-  )
-}
-
-// ---------------- 用例编辑器（整体替换） ----------------
-
-interface CaseFormValues {
-  name: string
-  kind: 'http' | 'health'
-  method: string
-  path: string
-  paramsText: string
-  headersText: string
-  body: string
-  expectedStatus: string
-  expectedContains: string
-  healthMode: 'http' | 'command'
-  healthUrl: string
-  healthCommand: string
-  enabled: boolean
-}
-
-function caseToForm(c: TestCaseInput): CaseFormValues {
-  const e = (c.expected ?? {}) as Record<string, unknown>
-  const healthMode = e.type === 'command' ? 'command' : 'http'
-  return {
-    name: c.name ?? '',
-    kind: (c.kind === 'health' ? 'health' : 'http'),
-    method: c.method || 'GET',
-    path: c.path ?? '',
-    paramsText: paramsToText(c.params),
-    headersText: paramsToText(c.headers),
-    body: c.body ?? '',
-    expectedStatus: String(e.status ?? ''),
-    expectedContains: String(e.contains ?? ''),
-    healthMode,
-    healthUrl: String(e.url ?? ''),
-    healthCommand: String(e.command ?? ''),
-    enabled: c.enabled !== false,
-  }
-}
-
-function formToCase(id: number | undefined, v: CaseFormValues): TestCaseInput {
-  const expected: Record<string, unknown> = {}
-  if (v.kind === 'health') {
-    if (v.healthMode === 'command') {
-      expected.type = 'command'
-      expected.command = v.healthCommand.trim()
-    } else {
-      expected.type = 'http'
-      if (v.healthUrl.trim()) expected.url = v.healthUrl.trim()
-      const st = statusValue(v.expectedStatus)
-      if (st !== undefined) expected.status = st
-    }
-  } else {
-    const st = statusValue(v.expectedStatus)
-    if (st !== undefined) expected.status = st
-    if (v.expectedContains.trim()) expected.contains = v.expectedContains.trim()
-  }
-  return {
-    id,
-    name: v.name.trim(),
-    kind: v.kind,
-    method: v.method || 'GET',
-    path: v.path.trim(),
-    params: textToParams(v.paramsText),
-    headers: textToParams(v.headersText),
-    body: v.body || null,
-    expected,
-    enabled: v.enabled,
-  }
-}
-
-/** status 支持整数或 "2XX" 前缀通配 */
-function statusValue(s: string): number | string | undefined {
-  const t = s.trim()
-  if (!t) return undefined
-  if (/^[1-5][0-9][0-9]$/.test(t)) return Number(t)
-  return t.toUpperCase()
-}
-
-function CaseEditorDrawer({ suite, onClose, onChanged }: {
-  suite: TestSuite | null
-  onClose: () => void
-  onChanged: (s: TestSuite) => void
-}) {
-  const [cases, setCases] = useState<TestCaseInput[]>([])
-  const [saving, setSaving] = useState(false)
-  const [editing, setEditing] = useState<TestCaseInput | null>(null)
-  const [isNew, setIsNew] = useState(false)
-  const [form] = Form.useForm<CaseFormValues>()
-
-  useEffect(() => {
-    if (!suite) return
-    setCases(suite.cases.map((c) => fromView(c)))
-  }, [suite])
-
-  const openEdit = (c: TestCaseInput | null) => {
-    setIsNew(!c)
-    setEditing(c)
-    form.setFieldsValue(c ? caseToForm(c) : { kind: 'http', method: 'GET', enabled: true, healthMode: 'command' })
-  }
-
-  const saveCase = async (v: CaseFormValues) => {
-    const next = formToCase(editing?.id, v)
-    if (editing) {
-      setCases(cases.map((c) => (c === editing ? next : c)))
-    } else {
-      setCases([...cases, next])
-    }
-    setEditing(null)
-  }
-
-  const onSaveAll = async () => {
-    if (!suite) return
-    setSaving(true)
-    try {
-      const updated = await saveCases(suite.id, cases)
-      onChanged(updated)
-      message.success(`已保存 ${cases.length} 个用例`)
-      onClose()
-    } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const columns: ColumnsType<TestCaseInput> = [
-    { title: '#', dataIndex: 'sort', width: 44, render: (_, __, i) => i + 1 },
-    { title: '名称', dataIndex: 'name', ellipsis: true, render: (n: string) => n || '-' },
-    { title: '类型', dataIndex: 'kind', width: 70, render: (k: string) => <Tag color={k === 'health' ? 'purple' : 'blue'}>{k}</Tag> },
-    { title: '方法', dataIndex: 'method', width: 70, render: (m: string) => <Tag>{m}</Tag> },
-    { title: '路径', dataIndex: 'path', ellipsis: true, render: (p: string) => <code style={{ fontSize: 12 }}>{p}</code> },
-    { title: '期望', dataIndex: 'expected', width: 160, render: (e: Record<string, unknown>) => <span style={{ fontSize: 12 }}>{JSON.stringify(e ?? {})}</span> },
-    { title: '启用', dataIndex: 'enabled', width: 60, render: (v: boolean) => (v ? <Tag color="green">是</Tag> : <Tag>否</Tag>) },
-    {
-      title: '',
-      key: 'act',
-      width: 110,
-      render: (_, c) => (
-        <Space size={4}>
-          <Button size="small" onClick={() => openEdit(c)}>编辑</Button>
-          <Button size="small" danger onClick={() => setCases(cases.filter((x) => x !== c))}>删除</Button>
-        </Space>
-      ),
-    },
-  ]
-
-  return (
-    <Drawer
-      title={suite ? `编辑用例 · ${suite.name}（${suite.caseCount}）` : '编辑用例'}
-      width={900}
-      open={!!suite}
-      onClose={onClose}
-      extra={
-        <Space>
-          <Button size="small" onClick={onClose}>取消</Button>
-          <Button size="small" type="primary" loading={saving} onClick={onSaveAll}>保存全部</Button>
-        </Space>
-      }
-    >
-      {suite && (
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Space wrap>
-            <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>添加用例</Button>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              整体替换保存：不在列表中的现有用例将被删除；http 用例直请求 baseUrl，health 用例走目标服务器健康检查。
-            </Typography.Text>
-          </Space>
-          <Table<TestCaseInput> rowKey={(c) => c.id ?? c.name + c.path} size="small" columns={columns}
-            dataSource={cases} pagination={false} locale={{ emptyText: '暂无用例' }} />
-
-          <Modal title={isNew ? '添加用例' : '编辑用例'} open={!!editing} onCancel={() => setEditing(null)}
-            onOk={() => form.submit()} okText="保存" width={640} destroyOnClose>
-            <CaseForm form={form} onFinish={saveCase} />
-          </Modal>
-        </Space>
-      )}
-    </Drawer>
-  )
-}
-
-function fromView(c: TestCase): TestCaseInput {
-  return {
-    id: c.id,
-    name: c.name,
-    kind: c.kind,
-    method: c.method,
-    path: c.path,
-    params: c.params,
-    headers: c.headers,
-    body: c.body,
-    expected: c.expected,
-    enabled: c.enabled,
-  }
-}
-
-function CaseForm({ form, onFinish }: { form: FormInstance<CaseFormValues>; onFinish: (v: CaseFormValues) => void }) {
-  const kind = Form.useWatch('kind', form)
-  const healthMode = Form.useWatch('healthMode', form)
-  return (
-    <Form form={form} layout="vertical" onFinish={onFinish}>
-      <Space size={8} style={{ display: 'flex' }} align="start">
-        <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入用例名' }]} style={{ flex: 1 }}>
-          <Input placeholder="如 健康检查 / 登录接口" />
-        </Form.Item>
-        <Form.Item label="类型" name="kind" style={{ width: 110 }}>
-          <Select options={[{ value: 'http', label: 'http' }, { value: 'health', label: 'health' }]} />
-        </Form.Item>
-        <Form.Item label="启用" name="enabled" valuePropName="checked">
-          <Switch />
-        </Form.Item>
-      </Space>
-      {kind === 'health' ? (
-        <Space size={8} style={{ display: 'flex' }} align="start">
-          <Form.Item label="检查方式" name="healthMode" style={{ width: 130 }}>
-            <Select options={[{ value: 'command', label: '命令' }, { value: 'http', label: 'HTTP' }]} />
-          </Form.Item>
-          {healthMode === 'command' ? (
-            <Form.Item label="命令（CAP-07 模板）" name="healthCommand" rules={[{ required: true, message: '请输入命令' }]} style={{ flex: 1 }}>
-              <Input placeholder="如 echo ok 或模板 code（走服务器命令模板白名单）" />
-            </Form.Item>
-          ) : (
-            <Space size={8} style={{ display: 'flex' }}>
-              <Form.Item label="URL" name="healthUrl" style={{ width: 260 }}>
-                <Input placeholder="留空用运行 baseUrl+path" />
-              </Form.Item>
-              <Form.Item label="期望状态" name="expectedStatus" style={{ width: 130 }}>
-                <Input placeholder="如 200 或 2XX" />
-              </Form.Item>
-            </Space>
-          )}
-        </Space>
-      ) : (
-        <Space size={8} style={{ display: 'flex' }} align="start">
-          <Form.Item label="方法" name="method" style={{ width: 110 }}>
-            <Select options={METHODS.map((m) => ({ value: m, label: m }))} />
-          </Form.Item>
-          <Form.Item label="路径" name="path" rules={[{ required: true, message: '请输入路径' }]} style={{ flex: 1 }}>
-            <Input placeholder="如 /api/users/{id}" />
-          </Form.Item>
-        </Space>
-      )}
-      {kind !== 'health' && (
-        <>
-          <Space size={8} style={{ display: 'flex' }}>
-            <Form.Item label="Query 参数（每行 k=v）" name="paramsText" style={{ flex: 1 }}>
-              <Input.TextArea rows={2} placeholder="name=test" />
-            </Form.Item>
-            <Form.Item label="Header（每行 k=v）" name="headersText" style={{ flex: 1 }}>
-              <Input.TextArea rows={2} placeholder="X-Api-Key=xxx" />
-            </Form.Item>
-          </Space>
-          <Form.Item label="请求体（JSON）" name="body">
-            <Input.TextArea rows={2} placeholder='{"name":"carol"}' />
-          </Form.Item>
-          <Space size={8} style={{ display: 'flex' }}>
-            <Form.Item label="期望状态" name="expectedStatus" style={{ width: 130 }}>
-              <Input placeholder="如 200 或 2XX" />
-            </Form.Item>
-            <Form.Item label="期望包含（可选）" name="expectedContains" style={{ flex: 1 }}>
-              <Input placeholder="响应体包含的子串" />
-            </Form.Item>
-          </Space>
-        </>
-      )}
-    </Form>
-  )
-}
-
-// ---------------- 详情 Drawer（WS 实时） ----------------
-
-function DetailDrawer({ record, onClose, onChanged, onOpenText, onIssues }: {
-  record: TestRun | null
-  onClose: () => void
-  onChanged: (r: TestRun) => void
-  onOpenText: (runId: number, title: string) => void
-  onIssues: (runId: number) => void
-}) {
-  const [d, setD] = useState<TestRun | null>(record)
-  const [connected, setConnected] = useState(false)
-  const latestRef = useRef<TestRun | null>(record)
-
-  useEffect(() => {
-    latestRef.current = d
-  }, [d])
-
-  useEffect(() => {
-    setD(record)
-    setConnected(false)
-    if (!record) return
-    latestRef.current = record
-
-    const active = record.status === 'QUEUED' || record.status === 'RUNNING'
-    if (active) {
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-      const ws = new WebSocket(`${proto}://${location.host}/ws/test-runs/${record.id}/stream`)
-      ws.onopen = () => setConnected(true)
-      ws.onmessage = (msg) => {
-        try {
-          const f = JSON.parse(msg.data)
-          if (f.type === 'snapshot') {
-            setD((cur) => (cur ? { ...cur, status: f.status, baseUrl: f.baseUrl ?? cur.baseUrl, results: f.results ?? cur.results } : cur))
-          } else if (f.type === 'result') {
-            setD((cur) => (cur ? { ...cur, results: [...cur.results, f.result] } : cur))
-          } else if (f.type === 'done') {
-            setConnected(false)
-            setD((cur) => (cur ? { ...cur, status: f.status } : cur))
-            ws.close()
-          }
-        } catch {
-          /* 忽略坏帧 */
-        }
-      }
-      ws.onclose = () => setConnected(false)
-      return () => ws.close()
-    }
-
-    // 终态：先拉一次完整结果，再定时刷新最终 summary/时间
-    getRun(record.id).then((latest) => {
-      if (latest.results?.length) {
-        setD(latest)
-        latestRef.current = latest
-      }
-    }).catch(() => {})
-    const timer = setInterval(() => {
-      getRun(record.id).then((latest) => {
-        const cur = latestRef.current
-        if (!cur || JSON.stringify(latest) !== JSON.stringify(cur)) {
-          setD(latest)
-          latestRef.current = latest
-          onChanged(latest)
-        }
-      }).catch(() => {})
-    }, 4000)
-    return () => clearInterval(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [record])
-
-  const resultColumns: ColumnsType<CaseResult> = [
-    { title: '#', dataIndex: 'sort', width: 44 },
-    { title: '用例', dataIndex: 'name', ellipsis: true },
-    {
-      title: '状态', dataIndex: 'status', width: 80,
-      render: (v: CaseResultStatus) => <Tag color={RESULT_COLOR[v]}>{v}</Tag>,
-    },
-    { title: '请求', dataIndex: 'requestSummary', width: 220, ellipsis: true, render: (v: string | null) => v || '-' },
-    { title: '响应', dataIndex: 'responseSummary', width: 220, ellipsis: true, render: (v: string | null) => v || '-' },
-    { title: '耗时', dataIndex: 'duration', width: 80, render: (v: number | null) => (v != null ? `${v}ms` : '-') },
-  ]
-
-  return (
-    <Drawer
-      title={d ? (
-        <Space>
-          <span>测试运行 #{d.id}</span>
-          <Tag color={STATUS_COLOR[d.status]}>{d.status}</Tag>
-          {d.triggeredBy === 'deploy' && <Tag color="purple">自动回归</Tag>}
-          {connected && <Tag color="cyan">实时</Tag>}
-        </Space>
-      ) : '测试详情'}
-      width={820}
-      open={!!record}
-      onClose={onClose}
-    >
-      {d && (
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          {d.errorSummary && <Alert type="error" showIcon message={d.errorSummary} />}
-          <Space wrap>
-            <Button size="small" onClick={() => onOpenText(d.id, '报告')}>报告</Button>
-            <Button size="small" onClick={() => onOpenText(d.id, '日志')}>日志</Button>
-            {d.status === 'FAILED' && (
-              <Button size="small" danger icon={<BugOutlined />} onClick={() => onIssues(d.id)}>缺陷线索</Button>
-            )}
-          </Space>
-          <Space wrap size={8}>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              目标 {d.baseUrl || '-'} · 服务器 # {d.serverId ?? '-'} · 环境 {d.environmentId ? `#${d.environmentId}` : '-'} · 部署 #{d.deploymentId ?? '-'}
-            </Typography.Text>
-            {d.summary && (
-              <span style={{ fontSize: 12 }}>
-                {d.summary.total} 项 · <span style={{ color: '#52c41a' }}>{d.summary.passed} 过</span>{' '}
-                <span style={{ color: d.summary.failed ? '#ff4d4f' : undefined }}>{d.summary.failed} 败</span>{' '}
-                <span style={{ color: '#fa8c16' }}>{d.summary.skipped} 跳</span>
-              </span>
-            )}
-            {d.reportDocId && <Tag color="geekblue">报告文档 #{d.reportDocId}</Tag>}
-          </Space>
-          <Typography.Text strong style={{ fontSize: 13 }}>用例结果（{d.results?.length ?? 0}）</Typography.Text>
-          <Table<CaseResult> rowKey="id" size="small" columns={resultColumns} dataSource={d.results ?? []}
-            pagination={false} locale={{ emptyText: '暂无结果（运行中或未配置目标）' }} />
-        </Space>
-      )}
-    </Drawer>
-  )
-}
-
-// ---------------- 缺陷线索表格 ----------------
-
-function IssuesTable({ issues }: { issues: IssueDraft[] }) {
-  const columns: ColumnsType<IssueDraft> = [
-    { title: '缺陷标题', dataIndex: 'title', ellipsis: true },
-    { title: '期望', dataIndex: 'expected', width: 240, ellipsis: true, render: (v: string) => <span style={{ fontSize: 12 }}>{v || '-'}</span> },
-    { title: '实际', dataIndex: 'actual', width: 240, ellipsis: true, render: (v: string) => <span style={{ fontSize: 12, color: '#ff4d4f' }}>{v || '-'}</span> },
-  ]
-  if (!issues.length) {
-    return <Typography.Text type="secondary">无失败用例可转。</Typography.Text>
-  }
-  return (
-    <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-        失败用例已汇总为缺陷线索，可直接作为缺陷单标题与复现信息派发修复 Agent。
-      </Typography.Text>
-      <Table<IssueDraft> rowKey="caseId" size="small" columns={columns} dataSource={issues} pagination={false} />
     </Space>
   )
 }
