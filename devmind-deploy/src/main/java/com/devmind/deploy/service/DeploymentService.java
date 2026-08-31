@@ -15,6 +15,8 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.databind.ObjectMapper;
 
 import com.devmind.common.exception.DevMindException;
@@ -223,8 +225,25 @@ public class DeploymentService {
         d.setStatus(DeploymentEntity.RUNNING);
         d.setStartedAt(Instant.now());
         repo.save(d);
-        deployExecutor.submit(() -> run(d.getId()));
+        submitRun(d.getId());
         return toView(d);
+    }
+
+    /**
+     * 提交异步执行。若调用方处于外层事务中（如通知动作 confirm+execute），
+     * 必须等事务提交后再跑——否则 run() 读到提交前快照，后续 save 会用旧值覆盖已提交字段。
+     */
+    private void submitRun(Long deploymentId) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    deployExecutor.submit(() -> run(deploymentId));
+                }
+            });
+        } else {
+            deployExecutor.submit(() -> run(deploymentId));
+        }
     }
 
     /** 手动回滚（FR-03）：生成 rollback_of 指向原部署的新部署单（计划=配置的回滚步骤），并立即执行 */
