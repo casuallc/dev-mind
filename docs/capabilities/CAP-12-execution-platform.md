@@ -20,20 +20,22 @@
 - **FR-04 远程 Runner**：`RemoteStepRunner` 委托 CAP-07 `ServerOperationService`，
   模板参数与 capability 域（build/deploy/test/…）由业务方传入。
 - **FR-05 统一日志枢纽**：`ExecutionLogHub` 按 topic 分组 WS 会话，帧协议统一：
-  `log`（日志行）/ 业务事件帧 `{"type":<t>,"payload":…}` / `done`（终态）。
-  `ExecutionWsHandler` 通用处理器：连接先推 `snapshot`（历史日志），终态立即补 `done`；
-  由各业务 `WebSocketConfigurer` 按路径前缀注册 + 提供 `ExecutionSnapshotProvider` 快照查询。
+  `log`（日志行）/ 业务事件帧 `{"type":<t>,<t>:…}`（字段名=事件类型，前端按 `f[f.type]` 取）/ `done`（终态）。
+  `ExecutionWsHandler` 通用处理器：连接先推 `snapshot`（历史日志 + `extra` 业务快照字段合并入帧），
+  终态立即补 `done`；由各业务 `WebSocketConfigurer` 按路径前缀注册 + 提供 `ExecutionSnapshotProvider` 快照查询。
 
 ## 3. 插件化接口
 
 - `StepChainRunner.StepInvoker`：单步执行策略（本地/远程/自定义），按步骤 location 或业务上下文选择。
-- `ExecutionSnapshotProvider`：`lookup(topic) → ExecutionSnapshot{logsText, status, terminal}`，
-  业务模块从各自 Repository 提供（如 build 查 BuildRepository）。
+- `ExecutionSnapshotProvider`：`lookup(topic) → ExecutionSnapshot{logsText, status, terminal, extra}`，
+  业务模块从各自 Repository 提供（如 build 查 BuildRepository；deploy/test 以 `extra` 捎带
+  步骤列表/用例结果等业务快照字段，合并进 snapshot 帧）。
 
 ## 4. 依赖关系
 
 - 依赖：CAP-07（远程执行）。
-- 被依赖：CAP-08 构建（已迁移）、CAP-09 部署 / CAP-10 测试（待迁移）、CAP-11 发版（直接使用）。
+- 被依赖：CAP-08 构建（已迁移）、CAP-09 部署 / CAP-10 测试（已迁移，帧协议不变前端零改动）、
+  CAP-11 发版（直接使用）。
 
 ## 5. 迁移约定
 

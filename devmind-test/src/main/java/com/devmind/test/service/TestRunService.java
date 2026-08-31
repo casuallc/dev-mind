@@ -58,7 +58,7 @@ import com.devmind.test.repo.TestCaseRepository;
 import com.devmind.test.repo.TestCaseResultRepository;
 import com.devmind.test.repo.TestRunRepository;
 import com.devmind.test.repo.TestSuiteRepository;
-import com.devmind.test.ws.TestHub;
+import com.devmind.execution.ws.ExecutionLogHub;
 
 /**
  * CAP-10 测试执行：创建并异步执行 test_run（http 用例直请求 baseUrl 匹配 expected；health 用例走 CAP-07
@@ -85,7 +85,7 @@ public class TestRunService {
     private final DocumentService documentService;
     private final NotificationService notificationService;
     private final CredentialCrypto crypto;
-    private final TestHub hub;
+    private final ExecutionLogHub hub;
     private final ObjectMapper mapper;
 
     public TestRunService(TestRunRepository repo,
@@ -100,7 +100,7 @@ public class TestRunService {
                           DocumentService documentService,
                           NotificationService notificationService,
                           CredentialCrypto crypto,
-                          TestHub hub,
+                          ExecutionLogHub hub,
                           ObjectMapper mapper) {
         this.repo = repo;
         this.resultRepo = resultRepo;
@@ -201,7 +201,7 @@ public class TestRunService {
                     re.setDuration(dur);
                     re.setCreatedAt(Instant.now());
                     resultRepo.save(re);
-                    hub.publishResult(runId, toResultView(re));
+                    hub.publishEvent(topic(runId), "result", toResultView(re));
                     logs.append("[").append(out.status().toUpperCase()).append("] ")
                             .append(re.getName()).append(" (").append(dur).append("ms)");
                     if (out.error() != null && !out.error().isBlank()) {
@@ -242,7 +242,7 @@ public class TestRunService {
             log.warn("测试报告文档创建失败: {}", e.getMessage());
         }
 
-        hub.done(runId, r.getStatus());
+        hub.done(topic(runId), r.getStatus());
         notify(r, failed > 0 ? NotificationLevel.P1 : NotificationLevel.P2,
                 "测试" + (failed > 0 ? "失败" : "通过") + " #" + runId,
                 passed + " 通过 / " + failed + " 失败 / " + skipped + " 跳过"
@@ -576,6 +576,11 @@ public class TestRunService {
         } catch (Exception e) {
             log.warn("测试通知发送失败: {}", e.getMessage());
         }
+    }
+
+    /** 执行底座 WS topic：测试运行用 runId 字符串（与 /ws/test-runs/{id}/stream 对应） */
+    private String topic(Long runId) {
+        return String.valueOf(runId);
     }
 
     private CaseResultView toResultView(TestCaseResultEntity e) {
