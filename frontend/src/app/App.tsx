@@ -13,6 +13,7 @@ import DocEditorPage from '../features/docs/pages/DocEditorPage'
 import ServersPage from '../features/server-adapter/pages/ServersPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
 import LoginPage from '../features/auth/pages/LoginPage'
+import UserManagementPage from '../features/auth/pages/UserManagementPage'
 import RequireAuth from '../features/auth/RequireAuth'
 
 export default function App() {
@@ -47,6 +48,8 @@ export default function App() {
           <Route path="/sessions" element={<SessionsBoard />} />
           <Route path="/sessions/:id" element={<SessionDetail />} />
           <Route path="/templates" element={<SessionTemplates />} />
+          {/* CAP-01 设置（用户管理，仅 ADMIN） */}
+          <Route path="/settings" element={<UserManagementPage />} />
           {/* 后续能力在此追加路由，如 CAP-04 知识库 */}
         </Route>
       </Routes>

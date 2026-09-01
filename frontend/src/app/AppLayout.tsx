@@ -11,10 +11,12 @@ import {
   DashboardOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { api } from '../shared/api/client'
 import NotificationBell from '../features/notifications/components/NotificationBell'
 import { startNotificationStream, stopNotificationStream } from '../features/notifications/store'
+import { getUserSnapshot, isAdmin, subscribeAuth } from '../features/auth/authStore'
+import UserMenu from '../features/auth/components/UserMenu'
 
 const { Sider, Content, Header } = Layout
 
@@ -29,6 +31,8 @@ export default function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const [health, setHealth] = useState<HealthInfo | null>(null)
+  // 认证态变化（登录/退出/刷新轮换）时重渲染菜单与用户区
+  useSyncExternalStore(subscribeAuth, getUserSnapshot)
 
   useEffect(() => {
     api
@@ -73,7 +77,10 @@ export default function AppLayout() {
             { key: '/docs', icon: <FileTextOutlined />, label: '文档管理' },
             { key: '/servers', icon: <CloudServerOutlined />, label: '服务器运维' },
             { key: '/templates', icon: <DeploymentUnitOutlined />, label: '会话模板' },
-            { key: '/settings', icon: <SafetyCertificateOutlined />, label: '设置' },
+            // CAP-01：用户管理仅 ADMIN 可见
+            ...(isAdmin()
+              ? [{ key: '/settings', icon: <SafetyCertificateOutlined />, label: '设置' }]
+              : []),
           ]}
         />
       </Sider>
@@ -94,7 +101,10 @@ export default function AppLayout() {
               后端 {health ? `${health.status} · v${health.version}` : '未连接'}
             </Tag>
           </Space>
-          <NotificationBell />
+          <Space size={12}>
+            <NotificationBell />
+            <UserMenu />
+          </Space>
         </Header>
         <Content style={{ padding: 24, overflow: 'auto' }}>
           <Outlet />
