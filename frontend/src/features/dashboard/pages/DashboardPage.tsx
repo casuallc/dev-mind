@@ -4,6 +4,7 @@ import { Badge, Button, Card, Col, Empty, List, Row, Space, Statistic, Tag, Typo
 import { ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { getDashboard } from '../api'
+import { setCurrentProject } from '../../projects/currentProjectStore'
 import type { DashboardView, FailureItem } from '../types'
 
 const REQ_STATUS: { key: string; label: string; color: string }[] = [
@@ -127,7 +128,7 @@ export default function DashboardPage() {
               dataSource={data?.pendingAcceptance ?? []}
               locale={{ emptyText: <Empty description="无待验收需求" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
               renderItem={(r) => (
-                <List.Item style={{ cursor: 'pointer' }} onClick={() => navigate(`/projects/${r.projectId}`)}>
+                <List.Item style={{ cursor: 'pointer' }} onClick={() => { setCurrentProject(r.projectId); navigate('/requirements') }}>
                   <Space size={8}>
                     <Tag color="warning">{r.code}</Tag>
                     <span>{r.title}</span>
@@ -141,7 +142,7 @@ export default function DashboardPage() {
               dataSource={data?.pendingDesigns ?? []}
               locale={{ emptyText: <Empty description="无待确认方案" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
               renderItem={(d) => (
-                <List.Item style={{ cursor: 'pointer' }} onClick={() => navigate(`/projects/${d.projectId}`)}>
+                <List.Item style={{ cursor: 'pointer' }} onClick={() => { setCurrentProject(d.projectId); navigate('/requirements') }}>
                   <Space size={8}>
                     <Tag color="gold">方案 v{d.version}</Tag>
                     <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -163,7 +164,7 @@ export default function DashboardPage() {
           renderItem={(f) => (
             <List.Item
               style={{ cursor: 'pointer' }}
-              onClick={() => navigate(`/projects/${f.projectId}`)}
+              onClick={() => { setCurrentProject(f.projectId); navigate('/overview') }}
               extra={
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   {f.time ? new Date(f.time).toLocaleString() : '-'}

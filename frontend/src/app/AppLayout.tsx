@@ -2,19 +2,50 @@ import { Layout, Menu } from 'antd'
 import {
   RobotOutlined,
   SafetyCertificateOutlined,
-  FolderOutlined,
   BellOutlined,
   ReadOutlined,
   FileTextOutlined,
   DashboardOutlined,
+  HomeOutlined,
+  BulbOutlined,
+  ToolOutlined,
+  DeploymentUnitOutlined,
+  ExperimentOutlined,
+  BranchesOutlined,
+  SettingOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useSyncExternalStore } from 'react'
 import AppHeader from './AppHeader'
+import ProjectSwitcher from '../features/projects/components/ProjectSwitcher'
 import { startNotificationStream, stopNotificationStream } from '../features/notifications/store'
 import { getUserSnapshot, isAdmin, subscribeAuth } from '../features/auth/authStore'
 
 const { Sider, Content } = Layout
+
+// 菜单选中态：前缀匹配（长的在前），需求详情页高亮「需求」
+const SELECT_PREFIXES: Array<[string, string]> = [
+  ['/projects/', '/requirements'], // /projects/:id/requirements/:rid → 需求
+  ['/sessions/', '/sessions'],
+  ['/docs/', '/docs'],
+  ['/overview', '/overview'],
+  ['/requirements', '/requirements'],
+  ['/builds', '/builds'],
+  ['/deployments', '/deployments'],
+  ['/tests', '/tests'],
+  ['/worktrees', '/worktrees'],
+  ['/settings', '/settings'],
+  ['/dashboard', '/dashboard'],
+  ['/knowledge', '/knowledge'],
+  ['/notifications', '/notifications'],
+]
+
+function selectedKeyOf(pathname: string): string {
+  for (const [prefix, key] of SELECT_PREFIXES) {
+    if (pathname.startsWith(prefix)) return key
+  }
+  return pathname
+}
 
 export default function AppLayout() {
   const navigate = useNavigate()
@@ -28,28 +59,32 @@ export default function AppLayout() {
     return () => stopNotificationStream()
   }, [])
 
-  const selectedKey = location.pathname.startsWith('/sessions/')
-    ? '/sessions'
-    : location.pathname.startsWith('/projects/')
-      ? '/projects'
-      : location.pathname.startsWith('/docs/')
-        ? '/docs'
-        : location.pathname
+  const selectedKey = selectedKeyOf(location.pathname)
 
   return (
     <Layout style={{ height: '100vh' }}>
       <Sider theme="dark" width={200}>
-        <div style={{ padding: '16px', color: '#fff', fontWeight: 600 }}>
+        <div style={{ padding: '16px 16px 8px', color: '#fff', fontWeight: 600 }}>
           Dev-Mind
         </div>
+        <ProjectSwitcher />
         <Menu
           theme="dark"
           mode="inline"
           selectedKeys={[selectedKey]}
           onClick={({ key }) => navigate(key)}
           items={[
+            // 当前项目区：以某个具体项目为主线，切换项目在侧边栏顶部
+            { key: '/overview', icon: <HomeOutlined />, label: '项目概览' },
+            { key: '/requirements', icon: <BulbOutlined />, label: '需求' },
+            { key: '/builds', icon: <ToolOutlined />, label: '构建' },
+            { key: '/deployments', icon: <DeploymentUnitOutlined />, label: '部署' },
+            { key: '/tests', icon: <ExperimentOutlined />, label: '测试' },
+            { key: '/worktrees', icon: <BranchesOutlined />, label: 'Worktree' },
+            { key: '/settings', icon: <SettingOutlined />, label: '项目设置' },
+            { type: 'divider' as const },
+            // 平台区
             { key: '/dashboard', icon: <DashboardOutlined />, label: '指挥中心' },
-            { key: '/projects', icon: <FolderOutlined />, label: '项目' },
             { key: '/sessions', icon: <RobotOutlined />, label: '会话看板' },
             { key: '/notifications', icon: <BellOutlined />, label: '通知中心' },
             { key: '/knowledge', icon: <ReadOutlined />, label: '知识库' },

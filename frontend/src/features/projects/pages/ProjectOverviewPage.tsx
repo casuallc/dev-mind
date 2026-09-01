@@ -1,31 +1,24 @@
-// CAP-02 项目详情（业务视图，全角色）：头部信息 + 需求研发主线（CAP-13）+ 执行记录 Tabs。
-// 配置类功能（仓库/服务器/环境/构建/发版/锁）在后台 /admin/projects/:id（仅 ADMIN）。
+// 项目概览（/overview）：当前项目的信息卡 + 活跃 Worktree。原 ProjectDetail 头部平移。
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Card, Descriptions, Empty, Space, Spin, Tabs, Tag, Typography } from 'antd'
+import { Button, Card, Descriptions, Empty, Space, Spin, Tag, Typography } from 'antd'
 import { ReloadOutlined, SettingOutlined } from '@ant-design/icons'
-import { useNavigate, useParams } from 'react-router-dom'
-import BuildCenterTab from '../../build/components/BuildTab'
-import DeployTab from '../../deploy/components/DeployTab'
-import TestTab from '../../test/components/TestTab'
-import RequirementListCard from '../components/RequirementListCard'
+import { useNavigate } from 'react-router-dom'
 import WorktreesTab from '../components/detail/WorktreesTab'
-import { useProject } from '../hooks/useProject'
 import { listWorktrees } from '../api'
-import { isAdmin } from '../../auth/authStore'
+import { useCurrentProject } from '../hooks/useCurrentProject'
 import type { WorktreeInfo } from '../types'
 
-export default function ProjectDetail() {
-  const { id } = useParams<{ id: string }>()
+export default function ProjectOverviewPage() {
   const navigate = useNavigate()
-  const { project, loading, reload } = useProject(id)
+  const { projectId, project, loading, reload } = useCurrentProject()
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([])
 
   const loadWorktrees = useCallback(() => {
-    if (!id) return
-    listWorktrees(id)
+    if (!projectId) return
+    listWorktrees(projectId)
       .then(setWorktrees)
       .catch(() => setWorktrees([]))
-  }, [id])
+  }, [projectId])
 
   useEffect(loadWorktrees, [loadWorktrees])
 
@@ -33,7 +26,7 @@ export default function ProjectDetail() {
     return <Card><Spin /></Card>
   }
   if (!project) {
-    return <Card><Empty description="项目不存在" /></Card>
+    return <Card><Empty description="项目不存在或已删除" /></Card>
   }
 
   return (
@@ -49,20 +42,15 @@ export default function ProjectDetail() {
         }
         extra={
           <Space>
-            {isAdmin() && (
-              <Button
-                size="small"
-                icon={<SettingOutlined />}
-                onClick={() => navigate(`/admin/projects/${project.id}`)}
-              >
-                项目设置
-              </Button>
-            )}
+            <Button
+              size="small"
+              icon={<SettingOutlined />}
+              onClick={() => navigate('/settings')}
+            >
+              项目设置
+            </Button>
             <Button size="small" icon={<ReloadOutlined />} onClick={reload}>
               刷新
-            </Button>
-            <Button size="small" onClick={() => navigate('/projects')}>
-              返回列表
             </Button>
           </Space>
         }
@@ -88,35 +76,8 @@ export default function ProjectDetail() {
         </Descriptions>
       </Card>
 
-      <Card size="small" title="需求">
-        <RequirementListCard projectId={project.id} />
-      </Card>
-
-      <Card size="small" title="执行记录">
-        <Tabs
-          items={[
-            {
-              key: 'builds',
-              label: '构建',
-              children: <BuildCenterTab id={project.id} />,
-            },
-            {
-              key: 'deploy',
-              label: '部署',
-              children: <DeployTab id={project.id} />,
-            },
-            {
-              key: 'test',
-              label: '测试',
-              children: <TestTab id={project.id} />,
-            },
-            {
-              key: 'worktrees',
-              label: 'Worktree',
-              children: <WorktreesTab worktrees={worktrees} onRefresh={loadWorktrees} />,
-            },
-          ]}
-        />
+      <Card size="small" title={`活跃 Worktree（${worktrees.length}）`}>
+        <WorktreesTab worktrees={worktrees} onRefresh={loadWorktrees} />
       </Card>
     </Space>
   )

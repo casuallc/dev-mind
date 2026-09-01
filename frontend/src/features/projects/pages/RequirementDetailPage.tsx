@@ -27,6 +27,7 @@ import RelatedRecordsTab from '../components/RelatedRecordsTab'
 import RequirementFormModal from '../components/RequirementFormModal'
 import WorkItemsTab from '../components/WorkItemsTab'
 import { useProject } from '../hooks/useProject'
+import { getCurrentProjectId, setCurrentProject } from '../currentProjectStore'
 import { requirementStatusColor, STATUS_FLOW } from '../components/requirementMeta'
 import type { RequirementOverview } from '../types'
 
@@ -37,6 +38,13 @@ export default function RequirementDetailPage() {
   const [overview, setOverview] = useState<RequirementOverview | null>(null)
   const [loading, setLoading] = useState(true)
   const [editOpen, setEditOpen] = useState(false)
+
+  // URL 自含项目身份：从分享链接进入时把当前项目切到该需求所属项目
+  useEffect(() => {
+    if (projectId && projectId !== getCurrentProjectId()) {
+      setCurrentProject(projectId)
+    }
+  }, [projectId])
 
   const reloadOverview = useCallback(async () => {
     if (!projectId || !rid) return
@@ -99,7 +107,7 @@ export default function RequirementDetailPage() {
         if (!projectId) return
         await deleteRequirement(projectId, r.id)
         message.success('已删除')
-        navigate(`/projects/${projectId}`, { replace: true })
+        navigate('/requirements', { replace: true })
       },
     })
   }
@@ -108,8 +116,8 @@ export default function RequirementDetailPage() {
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
       <Breadcrumb
         items={[
-          { title: <a onClick={() => navigate('/projects')}>项目</a> },
-          { title: <a onClick={() => navigate(`/projects/${projectId}`)}>{project?.name ?? projectId}</a> },
+          { title: <a onClick={() => navigate('/overview')}>{project?.name ?? projectId}</a> },
+          { title: <a onClick={() => navigate('/requirements')}>需求</a> },
           { title: r.code },
         ]}
       />

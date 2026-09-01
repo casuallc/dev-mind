@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
+import { useEffect } from 'react'
 import AppLayout from './AppLayout'
 import AdminLayout from './AdminLayout'
 // 各能力 feature 在此注册路由（积木式组装点）
@@ -6,10 +7,17 @@ import SessionsBoard from '../features/sessions/pages/SessionsBoard'
 import SessionDetail from '../features/sessions/pages/SessionDetail'
 import SessionTemplates from '../features/sessions/pages/SessionTemplates'
 import ProjectsPage from '../features/projects/pages/ProjectsPage'
-import ProjectDetail from '../features/projects/pages/ProjectDetail'
+import ProjectOverviewPage from '../features/projects/pages/ProjectOverviewPage'
+import RequirementsPage from '../features/projects/pages/RequirementsPage'
+import WorktreesPage from '../features/projects/pages/WorktreesPage'
+import ProjectSettingsPage from '../features/projects/pages/ProjectSettingsPage'
+import ProjectContextGate from '../features/projects/components/ProjectContextGate'
 import RequirementDetailPage from '../features/projects/pages/RequirementDetailPage'
 import AdminProjectsPage from '../features/projects/pages/AdminProjectsPage'
 import AdminProjectDetail from '../features/projects/pages/AdminProjectDetail'
+import BuildsPage from '../features/build/pages/BuildsPage'
+import DeploymentsPage from '../features/deploy/pages/DeploymentsPage'
+import TestsPage from '../features/test/pages/TestsPage'
 import NotificationCenter from '../features/notifications/pages/NotificationCenter'
 import KnowledgeBase from '../features/knowledge/pages/KnowledgeBase'
 import DocsPage from '../features/docs/pages/DocsPage'
@@ -21,6 +29,16 @@ import LoginPage from '../features/auth/pages/LoginPage'
 import UserManagementPage from '../features/auth/pages/UserManagementPage'
 import RequireAuth from '../features/auth/RequireAuth'
 import RequireAdmin from '../features/auth/RequireAdmin'
+import { setCurrentProject } from '../features/projects/currentProjectStore'
+
+/** 旧链接兼容：/projects/:id → 同步当前项目后回概览（原 ProjectDetail 已拆成项目上下文菜单页） */
+function LegacyProjectRedirect() {
+  const { id } = useParams<{ id: string }>()
+  useEffect(() => {
+    if (id) setCurrentProject(id)
+  }, [id])
+  return <Navigate to="/overview" replace />
+}
 
 export default function App() {
   return (
@@ -35,12 +53,22 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/" element={<Navigate to="/overview" replace />} />
           {/* CAP-16 指挥中心 */}
           <Route path="/dashboard" element={<DashboardPage />} />
-          {/* CAP-02 项目 */}
+          {/* 项目上下文页面（当前项目为主线，无项目时由 Gate 统一空态） */}
+          <Route element={<ProjectContextGate />}>
+            <Route path="/overview" element={<ProjectOverviewPage />} />
+            <Route path="/requirements" element={<RequirementsPage />} />
+            <Route path="/builds" element={<BuildsPage />} />
+            <Route path="/deployments" element={<DeploymentsPage />} />
+            <Route path="/tests" element={<TestsPage />} />
+            <Route path="/worktrees" element={<WorktreesPage />} />
+            <Route path="/settings" element={<ProjectSettingsPage />} />
+          </Route>
+          {/* CAP-02 项目：列表仅切换器底部入口；详情页保留双参数 URL（可分享，进入时同步当前项目） */}
           <Route path="/projects" element={<ProjectsPage />} />
-          <Route path="/projects/:id" element={<ProjectDetail />} />
+          <Route path="/projects/:id" element={<LegacyProjectRedirect />} />
           <Route path="/projects/:id/requirements/:rid" element={<RequirementDetailPage />} />
           {/* CAP-06 通知 */}
           <Route path="/notifications" element={<NotificationCenter />} />
@@ -53,7 +81,6 @@ export default function App() {
           <Route path="/sessions" element={<SessionsBoard />} />
           <Route path="/sessions/:id" element={<SessionDetail />} />
           {/* 旧路径兼容：管理功能已迁入 /admin 后台 */}
-          <Route path="/settings" element={<Navigate to="/admin/users" replace />} />
           <Route path="/servers" element={<Navigate to="/admin/servers" replace />} />
           <Route path="/templates" element={<Navigate to="/admin/templates" replace />} />
           {/* 后续能力在此追加路由，如 CAP-04 知识库 */}

@@ -1,10 +1,12 @@
-// CAP-02 项目列表（业务视图，全角色只读）：表格 + 状态筛选 + 进入详情。增删改在后台 /admin/projects。
+// CAP-02 项目列表（业务视图，全角色只读）：表格 + 状态筛选 + 「进入」= 切换为当前项目并回概览。
+// 入口已移出侧边栏，仅从项目切换器底部「查看全部项目」进入；增删改在后台 /admin/projects。
 import { useCallback, useEffect, useState } from 'react'
 import { Button, Card, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { listProjects } from '../api'
+import { setCurrentProject } from '../currentProjectStore'
 import type { Project } from '../types'
 
 const STATUS_OPTIONS = [
@@ -33,13 +35,18 @@ export default function ProjectsPage() {
     load()
   }, [load])
 
+  const enter = (id: string) => {
+    setCurrentProject(id)
+    navigate('/overview')
+  }
+
   const columns: ColumnsType<Project> = [
     {
       title: '名称',
       dataIndex: 'name',
       width: 180,
       render: (n: string, r) => (
-        <Button type="link" style={{ padding: 0 }} onClick={() => navigate(`/projects/${r.id}`)}>
+        <Button type="link" style={{ padding: 0 }} onClick={() => enter(r.id)}>
           {n}
         </Button>
       ),
@@ -79,7 +86,7 @@ export default function ProjectsPage() {
       key: 'action',
       width: 100,
       render: (_, r) => (
-        <Button size="small" onClick={() => navigate(`/projects/${r.id}`)}>
+        <Button size="small" onClick={() => enter(r.id)}>
           进入
         </Button>
       ),
