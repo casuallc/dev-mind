@@ -1,0 +1,28 @@
+{
+  "startAt": 0,
+  "maxResults": 50,
+  "total": 2,
+  "issues": [
+    {
+      "id": "10009",
+      "fields": {
+        "summary": "缺 key 的脏数据",
+        "issuetype": { "name": "Bug" }
+      }
+    },
+    {
+      "id": "10010",
+      "key": "PROJ-3",
+      "fields": {
+        "summary": "正常 issue",
+        "description": "h1. 标题",
+        "issuetype": { "name": "Task" },
+        "labels": ["ai"],
+        "status": { "name": "To Do" },
+        "created": "2026-08-30T08:00:00.000+0800",
+        "updated": "2026-08-30T08:00:00.000+0800",
+        "reporter": { "displayName": "李四" }
+      }
+    }
+  ]
+}

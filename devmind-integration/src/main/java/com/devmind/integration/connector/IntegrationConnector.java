@@ -1,7 +1,10 @@
 package com.devmind.integration.connector;
 
+import com.devmind.common.exception.DevMindException;
+import com.devmind.common.exception.ErrorCode;
 import com.devmind.integration.model.IntegrationEntity;
 
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -26,6 +29,14 @@ public interface IntegrationConnector {
     /** FR-06 创建平台 Release；tag 对应 Release 已存在时返回既有（reused=true） */
     ReleaseRef createRelease(IntegrationEntity cfg, String token, ReleaseSpec spec);
 
+    /**
+     * issue 拉取（issue 跟踪型平台如 Jira；git 平台默认不支持）。
+     * 只读操作——连接器不得向平台发起任何写请求。
+     */
+    default IssuePage searchIssues(IntegrationEntity cfg, String token, IssueQuery query) {
+        throw new DevMindException(ErrorCode.BAD_REQUEST, type() + " 不支持 issue 拉取");
+    }
+
     record TestResult(boolean ok, String message, String detail) {}
 
     record ExternalProject(String key, String name, String url, String defaultBranch) {}
@@ -38,4 +49,15 @@ public interface IntegrationConnector {
     record ReleaseSpec(String projectKey, String tagName, String name, String description) {}
 
     record ReleaseRef(String tagName, String url, boolean reused) {}
+
+    /** issue 查询：jql 为完整查询语句，startAt/maxResults 分页，fields 逗号分隔的字段清单 */
+    record IssueQuery(String jql, int startAt, int maxResults, String fields) {}
+
+    /** issue 分页结果（对齐 Jira /search 响应结构） */
+    record IssuePage(int startAt, int maxResults, int total, List<JiraIssue> issues) {}
+
+    /** 通用 issue 视图（命名对齐 Jira 字段；后续其他 issue 平台复用时映射到同一结构） */
+    record JiraIssue(String key, String summary, String description, String issueType,
+                     String priority, List<String> labels, String status,
+                     Instant created, Instant updated, String reporter) {}
 }

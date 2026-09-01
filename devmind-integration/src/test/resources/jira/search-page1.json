@@ -1,0 +1,38 @@
+{
+  "expand": "names,schema",
+  "startAt": 0,
+  "maxResults": 2,
+  "total": 3,
+  "issues": [
+    {
+      "id": "10001",
+      "key": "PROJ-1",
+      "fields": {
+        "summary": "登录页报错",
+        "description": "h2. 复现步骤\n# 打开登录页\n# 输入错误密码\n\n报 500 错误",
+        "issuetype": { "id": "1", "name": "Bug" },
+        "priority": { "id": "2", "name": "High" },
+        "labels": ["ai", "backend"],
+        "status": { "id": "1", "name": "Open" },
+        "created": "2026-08-20T10:15:30.000+0800",
+        "updated": "2026-08-28T09:00:00.000+0800",
+        "reporter": { "name": "zhangsan", "displayName": "张三" }
+      }
+    },
+    {
+      "id": "10002",
+      "key": "PROJ-2",
+      "fields": {
+        "summary": "支持批量导出",
+        "description": null,
+        "issuetype": { "id": "2", "name": "Story" },
+        "priority": null,
+        "labels": [],
+        "status": { "id": "3", "name": "In Progress" },
+        "created": "2026-08-21T11:00:00.000+0800",
+        "updated": "2026-08-29T14:30:00.000+0800",
+        "reporter": null
+      }
+    }
+  ]
+}
