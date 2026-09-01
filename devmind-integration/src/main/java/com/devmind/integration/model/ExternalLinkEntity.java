@@ -21,6 +21,8 @@ public class ExternalLinkEntity {
     public static final String INTERNAL_WORK_ITEM = "WORK_ITEM";
     /** 内部对象：发版单 */
     public static final String INTERNAL_RELEASE = "RELEASE";
+    /** 内部对象：需求（Jira issue 同步落点） */
+    public static final String INTERNAL_REQUIREMENT = "REQUIREMENT";
 
     /** 外部对象：Merge Request */
     public static final String EXTERNAL_MR = "MR";

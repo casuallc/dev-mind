@@ -414,8 +414,8 @@ public class IntegrationService implements PlatformIntegrationHook {
         return c;
     }
 
-    /** 解密凭据（仅内存使用，不进日志） */
-    private String tokenOf(IntegrationEntity e) {
+    /** 解密凭据（仅内存使用，不进日志）；public 供 JiraSyncService 等站内服务复用 */
+    public String tokenOf(IntegrationEntity e) {
         String token = cipher.decrypt(e.getSecretEnc());
         if (token == null || token.isBlank()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "集成 " + e.getId() + " 未配置凭据");
@@ -491,9 +491,9 @@ public class IntegrationService implements PlatformIntegrationHook {
         return linkRepo.save(link);
     }
 
-    /** 调用日志（FR-08）：旁路，失败不阻断 */
-    private void recordCall(Long integrationId, String action, String internalType, String internalId,
-                            boolean ok, String error) {
+    /** 调用日志（FR-08）：旁路，失败不阻断；public 供 JiraSyncService 等站内服务复用 */
+    public void recordCall(Long integrationId, String action, String internalType, String internalId,
+                           boolean ok, String error) {
         try {
             IntegrationCallEntity c = new IntegrationCallEntity();
             c.setIntegrationId(integrationId);
