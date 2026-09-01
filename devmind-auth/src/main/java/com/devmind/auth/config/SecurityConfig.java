@@ -1,8 +1,10 @@
 package com.devmind.auth.config;
 
 import com.devmind.auth.security.JwtAuthFilter;
+import com.devmind.auth.security.PreJwtAuthFilter;
 import com.devmind.common.exception.ApiError;
 import com.devmind.common.exception.ErrorCode;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -35,8 +37,9 @@ public class SecurityConfig {
     }
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthFilter jwtAuthFilter) throws Exception {
-        return http
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthFilter jwtAuthFilter,
+                                                   ObjectProvider<PreJwtAuthFilter> preJwtFilters) throws Exception {
+        http
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -60,8 +63,10 @@ public class SecurityConfig {
                                 writeError(res, 401, ErrorCode.UNAUTHORIZED, "未登录或 token 已过期", req.getRequestURI()))
                         .accessDeniedHandler((req, res, ex) ->
                                 writeError(res, 403, ErrorCode.FORBIDDEN, "当前角色无权限执行该操作", req.getRequestURI())))
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
-                .build();
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+        // CAP-20 等模块提供的 PreJwtAuthFilter（如 HMAC 签名认证）插在 JWT 过滤器之前
+        preJwtFilters.orderedStream().forEach(f -> http.addFilterBefore(f, JwtAuthFilter.class));
+        return http.build();
     }
 
     /** 与 WebConfig#addCorsMappings 同口径；Security 过滤器先于 MVC，预检（OPTIONS）必须在此放行 */
