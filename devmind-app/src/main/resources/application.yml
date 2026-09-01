@@ -21,6 +21,11 @@ spring:
       path: /h2-console
 
 devmind:
+  auth:
+    jwt-secret: ""                 # JWT HS256 密钥；空=自动生成存 data/auth.key（gitignored）
+    admin-password: admin123       # 仅首次种子 admin 时读取；请登录后立即修改
+    access-ttl: 2h                 # access token 有效期
+    refresh-ttl: 14d               # refresh token 有效期
   session:
     executor: claude              # 执行器：fake=内置假进程(自测) / claude=真实 Claude Code
     claude-path: ""               # 空=自动探测全局命令（where claude）

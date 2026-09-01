@@ -11,7 +11,7 @@
     </parent>
     <artifactId>devmind-auth</artifactId>
     <name>devmind-auth</name>
-    <description>身份最小版（P0-2）：User / ApiToken + 当前操作者</description>
+    <description>CAP-01 用户认证与权限：JWT 登录 + 三角色 RBAC + 当前操作者</description>
     <dependencies>
         <dependency>
             <groupId>com.devmind</groupId>
@@ -20,6 +20,19 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>
