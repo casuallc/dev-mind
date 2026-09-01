@@ -46,6 +46,8 @@ public class SecurityConfig {
                                 "/health", "/h2-console/**", "/ws/**").permitAll()
                         .requestMatchers("/api/auth/users", "/api/auth/users/**").hasRole("ADMIN")
                         .requestMatchers("/api/auth/change-password").authenticated()
+                        // CAP-20：API Key 管理仅 ADMIN（开放面 /open-api/** 由 OpenApiAuthFilter 独立认证，不走 JWT）
+                        .requestMatchers("/api/open-keys", "/api/open-keys/**").hasRole("ADMIN")
                         // CAP-18：平台集成实例（含凭据）的写操作仅 ADMIN；读与项目级动作走通用规则
                         .requestMatchers(HttpMethod.POST, "/api/integrations", "/api/integrations/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/integrations/**").hasRole("ADMIN")

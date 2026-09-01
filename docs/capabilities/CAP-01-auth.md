@@ -61,4 +61,4 @@ permitAll：`/api/auth/login`、`/api/auth/refresh`、`/health`、`/h2-console/*
 
 - SSO / LDAP 集成、多租户、密码找回流程、操作级细粒度权限（先角色级）。
 - WebSocket 握手鉴权（MVP `/ws/**` permitAll；后续方案：握手 query param 带 token + HandshakeInterceptor 校验）。
-- 通知按用户分发（通知偏好仍 keyed "local"）；API token 的 HTTP 端点（ApiTokenEntity 已有签发/校验能力，留给脚本集成）。
+- 通知按用户分发（通知偏好仍 keyed "local"）；脚本/外部系统集成走 CAP-20 的 API Key（api_keys + HMAC 签名），不再使用 api token 方案。

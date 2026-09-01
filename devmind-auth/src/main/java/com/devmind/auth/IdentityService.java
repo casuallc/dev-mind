@@ -1,9 +1,7 @@
 package com.devmind.auth;
 
 import com.devmind.auth.config.AuthProperties;
-import com.devmind.auth.model.ApiTokenEntity;
 import com.devmind.auth.model.UserEntity;
-import com.devmind.auth.repo.ApiTokenRepository;
 import com.devmind.auth.repo.UserRepository;
 import com.devmind.auth.security.DevMindPrincipal;
 import jakarta.annotation.PostConstruct;
@@ -13,8 +11,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -34,14 +30,12 @@ public class IdentityService {
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final UserRepository userRepo;
-    private final ApiTokenRepository tokenRepo;
     private final PasswordEncoder passwordEncoder;
     private final AuthProperties props;
 
-    public IdentityService(UserRepository userRepo, ApiTokenRepository tokenRepo,
+    public IdentityService(UserRepository userRepo,
                            PasswordEncoder passwordEncoder, AuthProperties props) {
         this.userRepo = userRepo;
-        this.tokenRepo = tokenRepo;
         this.passwordEncoder = passwordEncoder;
         this.props = props;
     }
@@ -111,51 +105,6 @@ public class IdentityService {
 
     public Optional<UserEntity> currentUser() {
         return userRepo.findByUsername(currentActor());
-    }
-
-    /**
-     * 签发 API 令牌：返回明文令牌（仅此一次可见），库里只存 SHA-256 哈希。
-     *
-     * @return [明文令牌, 实体]
-     */
-    public Object[] issueToken(String name, Instant expiresAt) {
-        UserEntity user = currentUser()
-                .orElseThrow(() -> new IllegalStateException("种子用户不存在"));
-        byte[] raw = new byte[24];
-        RANDOM.nextBytes(raw);
-        String token = "dmt_" + HexFormat.of().formatHex(raw);
-        ApiTokenEntity t = new ApiTokenEntity();
-        t.setUserId(user.getId());
-        t.setName(name == null || name.isBlank() ? "api-token" : name.trim());
-        t.setTokenHash(sha256(token));
-        t.setEnabled(true);
-        t.setExpiresAt(expiresAt);
-        t.setCreatedAt(Instant.now());
-        return new Object[]{token, tokenRepo.save(t)};
-    }
-
-    /** 校验令牌：存在 + 启用 + 未过期；命中时刷新 lastUsedAt。 */
-    public Optional<ApiTokenEntity> verifyToken(String token) {
-        if (token == null || token.isBlank()) {
-            return Optional.empty();
-        }
-        Optional<ApiTokenEntity> found = tokenRepo.findByTokenHash(sha256(token))
-                .filter(t -> Boolean.TRUE.equals(t.getEnabled()))
-                .filter(t -> t.getExpiresAt() == null || t.getExpiresAt().isAfter(Instant.now()));
-        found.ifPresent(t -> {
-            t.setLastUsedAt(Instant.now());
-            tokenRepo.save(t);
-        });
-        return found;
-    }
-
-    private String sha256(String s) {
-        try {
-            return HexFormat.of().formatHex(
-                    MessageDigest.getInstance("SHA-256").digest(s.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
     }
 
     private String shortId() {

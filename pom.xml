@@ -37,6 +37,7 @@
         <module>devmind-release</module>
         <module>devmind-flow</module>
         <module>devmind-integration</module>
+        <module>devmind-open-api</module>
         <module>devmind-app</module>
     </modules>
 
@@ -129,6 +130,11 @@
             <dependency>
                 <groupId>com.devmind</groupId>
                 <artifactId>devmind-integration</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.devmind</groupId>
+                <artifactId>devmind-open-api</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

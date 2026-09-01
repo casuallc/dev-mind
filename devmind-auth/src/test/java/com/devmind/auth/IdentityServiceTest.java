@@ -1,7 +1,6 @@
 package com.devmind.auth;
 
 import com.devmind.auth.config.AuthProperties;
-import com.devmind.auth.repo.ApiTokenRepository;
 import com.devmind.auth.repo.UserRepository;
 import com.devmind.auth.security.DevMindPrincipal;
 import org.junit.jupiter.api.AfterEach;
@@ -19,7 +18,7 @@ import static org.mockito.Mockito.mock;
 class IdentityServiceTest {
 
     private IdentityService service() {
-        return new IdentityService(mock(UserRepository.class), mock(ApiTokenRepository.class),
+        return new IdentityService(mock(UserRepository.class),
                 new BCryptPasswordEncoder(), new AuthProperties());
     }
 

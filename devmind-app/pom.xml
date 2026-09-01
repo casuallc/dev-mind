@@ -81,6 +81,10 @@
             <groupId>com.devmind</groupId>
             <artifactId>devmind-integration</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-open-api</artifactId>
+        </dependency>
 
         <!-- Spring Boot 基础 -->
         <dependency>
