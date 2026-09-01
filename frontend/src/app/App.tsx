@@ -7,6 +7,8 @@ import SessionDetail from '../features/sessions/pages/SessionDetail'
 import SessionTemplates from '../features/sessions/pages/SessionTemplates'
 import ProjectsPage from '../features/projects/pages/ProjectsPage'
 import ProjectDetail from '../features/projects/pages/ProjectDetail'
+import AdminProjectsPage from '../features/projects/pages/AdminProjectsPage'
+import AdminProjectDetail from '../features/projects/pages/AdminProjectDetail'
 import NotificationCenter from '../features/notifications/pages/NotificationCenter'
 import KnowledgeBase from '../features/knowledge/pages/KnowledgeBase'
 import DocsPage from '../features/docs/pages/DocsPage'
@@ -62,6 +64,9 @@ export default function App() {
           }
         >
           <Route path="/admin" element={<Navigate to="/admin/projects" replace />} />
+          {/* CAP-02 项目管理（增删改 + 项目配置） */}
+          <Route path="/admin/projects" element={<AdminProjectsPage />} />
+          <Route path="/admin/projects/:id" element={<AdminProjectDetail />} />
           {/* CAP-01 用户管理 */}
           <Route path="/admin/users" element={<UserManagementPage />} />
           {/* CAP-07 服务器适配器 */}

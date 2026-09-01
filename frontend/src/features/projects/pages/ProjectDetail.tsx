@@ -1,136 +1,39 @@
-// CAP-02 项目详情：头部信息 + 需求研发主线（CAP-13）+ 项目级资产 Tabs（各 Tab 拆至 components/detail/）。
+// CAP-02 项目详情（业务视图，全角色）：头部信息 + 需求研发主线（CAP-13）+ 执行记录 Tabs。
+// 配置类功能（仓库/服务器/环境/构建/发版/锁）在后台 /admin/projects/:id（仅 ADMIN）。
 import { useCallback, useEffect, useState } from 'react'
-import {
-  Button,
-  Card,
-  Descriptions,
-  Empty,
-  Form,
-  Input,
-  Modal,
-  Select,
-  Space,
-  Spin,
-  Switch,
-  Tabs,
-  Tag,
-  Typography,
-  message,
-} from 'antd'
-import { EditOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Button, Card, Descriptions, Empty, Space, Spin, Tabs, Tag, Typography } from 'antd'
+import { ReloadOutlined, SettingOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import BuildCenterTab from '../../build/components/BuildTab'
 import DeployTab from '../../deploy/components/DeployTab'
 import TestTab from '../../test/components/TestTab'
-import ReleaseTab from '../../release/components/ReleaseTab'
 import RequirementCockpit from '../components/RequirementCockpit'
-import ReposTab from '../components/detail/ReposTab'
-import SummaryTab from '../components/detail/SummaryTab'
-import ServersTab from '../components/detail/ServersTab'
-import EnvironmentsTab from '../components/detail/EnvironmentsTab'
-import BuildTab from '../components/detail/BuildTab'
 import WorktreesTab from '../components/detail/WorktreesTab'
-import LockTab from '../components/detail/LockTab'
-import {
-  getLock,
-  getProject,
-  getSummary,
-  listBuildSteps,
-  listEnvironments,
-  listRepos,
-  listServers,
-  listWorktrees,
-  updateProject,
-} from '../api'
-import type {
-  BuildStep,
-  ContextSummary,
-  ProjectEnvironment,
-  Project,
-  ProjectInput,
-  ProjectLock,
-  ProjectRepo,
-  ProjectServer,
-  WorktreeInfo,
-} from '../types'
+import { useProject } from '../hooks/useProject'
+import { listWorktrees } from '../api'
+import { isAdmin } from '../../auth/authStore'
+import type { WorktreeInfo } from '../types'
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const [project, setProject] = useState<Project | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [servers, setServers] = useState<ProjectServer[]>([])
-  const [environments, setEnvironments] = useState<ProjectEnvironment[]>([])
-  const [repos, setRepos] = useState<ProjectRepo[]>([])
-  const [steps, setSteps] = useState<BuildStep[]>([])
-  const [summary, setSummary] = useState<ContextSummary>({ projectId: id ?? '', summary: '' })
+  const { project, loading, reload } = useProject(id)
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([])
-  const [lock, setLock] = useState<ProjectLock | null>(null)
-  const [editOpen, setEditOpen] = useState(false)
-  const [form] = Form.useForm()
 
-  const loadAll = useCallback(async () => {
+  const loadWorktrees = useCallback(() => {
     if (!id) return
-    try {
-      const [p, rp, s, env, b, sm, wt, lk] = await Promise.all([
-        getProject(id),
-        listRepos(id).catch(() => []),
-        listServers(id),
-        listEnvironments(id).catch(() => []),
-        listBuildSteps(id),
-        getSummary(id).catch(() => ({ projectId: id, summary: '' })),
-        listWorktrees(id).catch(() => []),
-        getLock(id).catch(() => null),
-      ])
-      setProject(p)
-      setRepos(rp)
-      setServers(s)
-      setEnvironments(env)
-      setSteps(b)
-      setSummary(sm)
-      setWorktrees(wt)
-      setLock(lk)
-    } catch (e) {
-      message.error(`加载项目失败：${(e as Error).message}`)
-    } finally {
-      setLoading(false)
-    }
+    listWorktrees(id)
+      .then(setWorktrees)
+      .catch(() => setWorktrees([]))
   }, [id])
 
-  useEffect(() => {
-    setLoading(true)
-    loadAll()
-  }, [loadAll])
+  useEffect(loadWorktrees, [loadWorktrees])
 
   if (loading) {
     return <Card><Spin /></Card>
   }
   if (!project) {
     return <Card><Empty description="项目不存在" /></Card>
-  }
-
-  const openEdit = () => {
-    form.setFieldsValue({
-      name: project.name,
-      path: project.path,
-      defaultBranch: project.defaultBranch,
-      tags: project.tags,
-      description: project.description,
-      status: project.status,
-      apiDocSource: project.apiDocSource,
-      autoRegressionOnDeploy: project.autoRegressionOnDeploy,
-    })
-    setEditOpen(true)
-  }
-
-  const onSaveEdit = async (values: ProjectInput) => {
-    try {
-      setProject(await updateProject(project.id, values))
-      setEditOpen(false)
-      message.success('已保存')
-    } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
-    }
   }
 
   return (
@@ -146,10 +49,16 @@ export default function ProjectDetail() {
         }
         extra={
           <Space>
-            <Button size="small" icon={<EditOutlined />} onClick={openEdit}>
-              编辑
-            </Button>
-            <Button size="small" icon={<ReloadOutlined />} onClick={loadAll}>
+            {isAdmin() && (
+              <Button
+                size="small"
+                icon={<SettingOutlined />}
+                onClick={() => navigate(`/admin/projects/${project.id}`)}
+              >
+                项目设置
+              </Button>
+            )}
+            <Button size="small" icon={<ReloadOutlined />} onClick={reload}>
               刷新
             </Button>
             <Button size="small" onClick={() => navigate('/projects')}>
@@ -187,47 +96,9 @@ export default function ProjectDetail() {
         <RequirementCockpit projectId={project.id} />
       </Card>
 
-      <Card size="small" title="项目级资产">
+      <Card size="small" title="执行记录">
         <Tabs
           items={[
-            {
-              key: 'repos',
-              label: '仓库',
-              children: (
-                <ReposTab
-                  id={project.id}
-                  repos={repos}
-                  onChanged={(rs) => {
-                    setRepos(rs)
-                    // 主库切换会同步 projects.path 镜像，刷新头部展示
-                    getProject(project.id).then(setProject).catch(() => undefined)
-                  }}
-                />
-              ),
-            },
-            {
-              key: 'summary',
-              label: '上下文摘要',
-              children: <SummaryTab id={project.id} summary={summary} onChanged={setSummary} />,
-            },
-            {
-              key: 'servers',
-              label: '服务器',
-              children: <ServersTab id={project.id} servers={servers} onChanged={setServers} />,
-            },
-            {
-              key: 'environments',
-              label: '环境',
-              children: (
-                <EnvironmentsTab id={project.id} environments={environments} servers={servers}
-                  onChanged={setEnvironments} />
-              ),
-            },
-            {
-              key: 'build',
-              label: '构建配置',
-              children: <BuildTab id={project.id} steps={steps} onChanged={setSteps} />,
-            },
             {
               key: 'builds',
               label: '构建',
@@ -244,60 +115,13 @@ export default function ProjectDetail() {
               children: <TestTab id={project.id} />,
             },
             {
-              key: 'release',
-              label: '发版配置',
-              children: <ReleaseTab id={project.id} />,
-            },
-            {
               key: 'worktrees',
               label: 'Worktree',
-              children: <WorktreesTab worktrees={worktrees} onRefresh={() => listWorktrees(project.id).then(setWorktrees)} />,
-            },
-            {
-              key: 'lock',
-              label: '锁定',
-              children: <LockTab id={project.id} lock={lock} onChanged={setLock} />,
+              children: <WorktreesTab worktrees={worktrees} onRefresh={loadWorktrees} />,
             },
           ]}
         />
       </Card>
-
-      {/* 编辑项目 */}
-      <Modal
-        title="编辑项目"
-        open={editOpen}
-        onCancel={() => setEditOpen(false)}
-        onOk={() => form.submit()}
-        okText="保存"
-        width={560}
-      >
-        <Form form={form} layout="vertical" onFinish={onSaveEdit}>
-          <Form.Item label="名称" name="name" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item label="本地仓库路径" name="path" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item label="默认分支" name="defaultBranch">
-            <Input />
-          </Form.Item>
-          <Form.Item label="标签" name="tags">
-            <Select mode="tags" open={false} suffixIcon={null} />
-          </Form.Item>
-          <Form.Item label="描述" name="description">
-            <Input.TextArea rows={2} />
-          </Form.Item>
-          <Form.Item label="状态" name="status">
-            <Select options={[{ value: 'ACTIVE', label: 'ACTIVE' }, { value: 'ARCHIVED', label: 'ARCHIVED' }]} />
-          </Form.Item>
-          <Form.Item label="API 文档源" name="apiDocSource">
-            <Input />
-          </Form.Item>
-          <Form.Item label="部署成功后自动回归" name="autoRegressionOnDeploy" valuePropName="checked" extra="CAP-10 FR-05：部署单成功后自动对该项目全部套件跑一次回归">
-            <Switch />
-          </Form.Item>
-        </Form>
-      </Modal>
     </Space>
   )
 }
