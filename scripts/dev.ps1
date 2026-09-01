@@ -1,4 +1,4 @@
-# Dev-Mind 本地一键启动：后端 :8080 + 前端 Vite :5173（代理 /api、/ws）
+﻿# Dev-Mind 本地一键启动：后端 :8080 + 前端 Vite :5173（代理 /api、/ws）
 # 用法：
 #   scripts\dev.ps1                  # 构建（跳测试）后起前后端，真实 claude 执行器
 #   scripts\dev.ps1 -Executor fake   # 用内置假进程执行器（自测/E2E）
