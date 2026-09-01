@@ -12,12 +12,22 @@ import DocsPage from '../features/docs/pages/DocsPage'
 import DocEditorPage from '../features/docs/pages/DocEditorPage'
 import ServersPage from '../features/server-adapter/pages/ServersPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
+import LoginPage from '../features/auth/pages/LoginPage'
+import RequireAuth from '../features/auth/RequireAuth'
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route element={<AppLayout />}>
+        {/* CAP-01 登录（裸路由，不带布局） */}
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          element={
+            <RequireAuth>
+              <AppLayout />
+            </RequireAuth>
+          }
+        >
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           {/* CAP-16 指挥中心 */}
           <Route path="/dashboard" element={<DashboardPage />} />
