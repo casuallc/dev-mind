@@ -37,11 +37,13 @@ function textToVars(text: string): Record<string, string> {
   return out
 }
 
-export default function EnvironmentsTab({ id, environments, servers, onChanged }: {
+export default function EnvironmentsTab({ id, environments, servers, onChanged, readOnly }: {
   id: string
   environments: ProjectEnvironment[]
   servers: ProjectServer[]
   onChanged: (e: ProjectEnvironment[]) => void
+  /** 只读模式（工作台 /settings 对 VIEWER）：隐藏增删改入口 */
+  readOnly?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<ProjectEnvironment | null>(null)
@@ -123,25 +125,27 @@ export default function EnvironmentsTab({ id, environments, servers, onChanged }
       render: (sec: string[]) => sec?.length ? sec.map((x) => <Tag key={x} color="purple">{x}</Tag>) : '-',
     },
     { title: '描述', dataIndex: 'description', ellipsis: true, render: (d?: string) => d || '-' },
-    {
+    ...(!readOnly ? [{
       title: '操作',
       key: 'action',
       width: 120,
-      render: (_, r) => (
+      render: (_: unknown, r: ProjectEnvironment) => (
         <Space size={4}>
           <Button size="small" onClick={() => openEdit(r)}>编辑</Button>
           <Button size="small" danger onClick={() => confirmDelete(r)}>删除</Button>
         </Space>
       ),
-    },
+    }] : []),
   ]
 
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       <Space>
-        <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-          添加环境
-        </Button>
+        {!readOnly && (
+          <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
+            添加环境
+          </Button>
+        )}
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           部署/测试目标从服务器升级为环境（DEV/TEST/STAGING/PROD），环境聚合服务器 + 变量 + 密钥引用
         </Typography.Text>

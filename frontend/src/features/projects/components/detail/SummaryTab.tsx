@@ -5,10 +5,12 @@ import { DiffOutlined, ReloadOutlined } from '@ant-design/icons'
 import { refreshSummary, saveSummary } from '../../api'
 import type { ContextSummary } from '../../types'
 
-export default function SummaryTab({ id, summary, onChanged }: {
+export default function SummaryTab({ id, summary, onChanged, readOnly }: {
   id: string
   summary: ContextSummary
   onChanged: (s: ContextSummary) => void
+  /** 只读模式（工作台 /settings 对 VIEWER）：隐藏生成/保存，文本框只读 */
+  readOnly?: boolean
 }) {
   const [text, setText] = useState(summary.summary)
   const [busy, setBusy] = useState(false)
@@ -44,12 +46,16 @@ export default function SummaryTab({ id, summary, onChanged }: {
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       <Space>
-        <Button size="small" type="primary" icon={<ReloadOutlined />} loading={busy} onClick={doRefresh}>
-          重新扫描生成
-        </Button>
-        <Button size="small" type="primary" ghost icon={<DiffOutlined />} loading={busy} onClick={doSave}>
-          保存修改
-        </Button>
+        {!readOnly && (
+          <>
+            <Button size="small" type="primary" icon={<ReloadOutlined />} loading={busy} onClick={doRefresh}>
+              重新扫描生成
+            </Button>
+            <Button size="small" type="primary" ghost icon={<DiffOutlined />} loading={busy} onClick={doSave}>
+              保存修改
+            </Button>
+          </>
+        )}
         {summary.generatedAt && (
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             生成于 {new Date(summary.generatedAt).toLocaleString()}
@@ -59,6 +65,7 @@ export default function SummaryTab({ id, summary, onChanged }: {
       <Input.TextArea
         rows={18}
         value={text}
+        readOnly={readOnly}
         onChange={(e) => setText(e.target.value)}
         placeholder="点击「重新扫描生成」自动扫描仓库结构；也可直接编辑此摘要作为项目上下文（供需求对话/方案/会话注入）。"
         style={{ fontFamily: 'monospace', fontSize: 12 }}

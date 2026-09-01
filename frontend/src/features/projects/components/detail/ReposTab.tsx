@@ -21,10 +21,12 @@ import type { ProjectRepo, ProjectRepoInput } from '../../types'
 
 const ROLE_OPTIONS = ['CODE', 'DOCS', 'CONFIG']
 
-export default function ReposTab({ id, repos, onChanged }: {
+export default function ReposTab({ id, repos, onChanged, readOnly }: {
   id: string
   repos: ProjectRepo[]
   onChanged: (r: ProjectRepo[]) => void
+  /** 只读模式（工作台 /settings 对 VIEWER）：隐藏增删改入口 */
+  readOnly?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<ProjectRepo | null>(null)
@@ -111,26 +113,28 @@ export default function ReposTab({ id, repos, onChanged }: {
     { title: '默认分支', dataIndex: 'defaultBranch', width: 110, render: (v?: string) => v || '-' },
     { title: '远端', dataIndex: 'remoteUrl', width: 160, ellipsis: true, render: (v?: string) => v || '-' },
     { title: '排序', dataIndex: 'sortOrder', width: 60 },
-    {
+    ...(!readOnly ? [{
       title: '操作',
       key: 'action',
       width: 200,
-      render: (_, r) => (
+      render: (_: unknown, r: ProjectRepo) => (
         <Space size={4}>
           {!r.primary && <Button size="small" onClick={() => makePrimary(r)}>设为主库</Button>}
           <Button size="small" onClick={() => openEdit(r)}>编辑</Button>
           {!r.primary && <Button size="small" danger onClick={() => confirmDelete(r)}>移除</Button>}
         </Space>
       ),
-    },
+    }] : []),
   ]
 
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       <Space>
-        <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-          添加仓库
-        </Button>
+        {!readOnly && (
+          <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
+            添加仓库
+          </Button>
+        )}
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           项目为多 git 库组合：代码/文档/配置各有角色；恰好一个主库（projects.path 为主库镜像）。
         </Typography.Text>

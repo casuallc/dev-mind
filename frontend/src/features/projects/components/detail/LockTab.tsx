@@ -5,10 +5,12 @@ import { DiffOutlined, StopOutlined } from '@ant-design/icons'
 import { claimWrite, releaseWrite, updateLock } from '../../api'
 import type { ProjectLock } from '../../types'
 
-export default function LockTab({ id, lock, onChanged }: {
+export default function LockTab({ id, lock, onChanged, readOnly }: {
   id: string
   lock: ProjectLock | null
   onChanged: (l: ProjectLock) => void
+  /** 只读模式（工作台 /settings 对 VIEWER）：只看配额状态，不可调整 */
+  readOnly?: boolean
 }) {
   const [max, setMax] = useState(lock?.maxConcurrent ?? 1)
 
@@ -44,16 +46,18 @@ export default function LockTab({ id, lock, onChanged }: {
           <Typography.Text strong>{lock?.maxConcurrent ?? '-'}</Typography.Text>
         </Descriptions.Item>
       </Descriptions>
-      <Space wrap>
-        <InputNumber min={1} value={max} onChange={(v) => setMax(v ?? 1)} addonBefore="并发上限" />
-        <Button size="small" type="primary" onClick={saveMax}>保存上限</Button>
-        <Button size="small" icon={<DiffOutlined />} onClick={() => act(() => claimWrite(id), '已占用一个写配额')}>
-          占用写配额
-        </Button>
-        <Button size="small" icon={<StopOutlined />} onClick={() => act(() => releaseWrite(id), '已释放一个写配额')}>
-          释放写配额
-        </Button>
-      </Space>
+      {!readOnly && (
+        <Space wrap>
+          <InputNumber min={1} value={max} onChange={(v) => setMax(v ?? 1)} addonBefore="并发上限" />
+          <Button size="small" type="primary" onClick={saveMax}>保存上限</Button>
+          <Button size="small" icon={<DiffOutlined />} onClick={() => act(() => claimWrite(id), '已占用一个写配额')}>
+            占用写配额
+          </Button>
+          <Button size="small" icon={<StopOutlined />} onClick={() => act(() => releaseWrite(id), '已释放一个写配额')}>
+            释放写配额
+          </Button>
+        </Space>
+      )}
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
         供任务编排 Orchestrator 做项目级并发控制；达上限时 claim 返回冲突。
       </Typography.Text>

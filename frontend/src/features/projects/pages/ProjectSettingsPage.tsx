@@ -1,11 +1,10 @@
-// 后台项目设置页（仅 ADMIN）：基本信息编辑 + 配置类 Tabs（仓库/摘要/服务器/环境/构建配置/发版配置/Jira 同步/锁定）。
-// 业务视图在工作台（/overview 等项目上下文页面）；工作台的 /settings 复用同一批 Tab 组件（readOnly 受角色控制）。
+// 工作台项目设置页（/settings）：当前项目的配置类 Tabs，全角色可见。
+// readOnly = !canWrite()：ADMIN/DEVELOPER 可编辑（与后端 SecurityConfig 写权限一致），VIEWER 只读。
+// Jira 同步属平台集成配置，只留在后台 /admin/projects/:id，不在此挂载。
 import { useState } from 'react'
-import { Button, Card, Descriptions, Empty, Space, Spin, Tabs, Tag, Typography } from 'antd'
+import { Button, Card, Empty, Space, Spin, Tabs, Tag, Typography } from 'antd'
 import { EditOutlined, ReloadOutlined } from '@ant-design/icons'
-import { useNavigate, useParams } from 'react-router-dom'
 import ReleaseTab from '../../release/components/ReleaseTab'
-import JiraSyncTab from '../../integrations/components/JiraSyncTab'
 import ReposTab from '../components/detail/ReposTab'
 import SummaryTab from '../components/detail/SummaryTab'
 import ServersTab from '../components/detail/ServersTab'
@@ -13,14 +12,13 @@ import EnvironmentsTab from '../components/detail/EnvironmentsTab'
 import BuildTab from '../components/detail/BuildTab'
 import LockTab from '../components/detail/LockTab'
 import ProjectFormModal from '../components/ProjectFormModal'
-import { useProject } from '../hooks/useProject'
+import { useCurrentProject } from '../hooks/useCurrentProject'
 import { useProjectConfig } from '../hooks/useProjectConfig'
+import { canWrite } from '../../auth/authStore'
 import { getProject } from '../api'
 
-export default function AdminProjectDetail() {
-  const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
-  const { project, setProject, loading, reload } = useProject(id)
+export default function ProjectSettingsPage() {
+  const { projectId, project, setProject, loading, reload } = useCurrentProject()
   const {
     servers, setServers,
     environments, setEnvironments,
@@ -29,14 +27,15 @@ export default function AdminProjectDetail() {
     summary, setSummary,
     lock, setLock,
     loadConfig,
-  } = useProjectConfig(id)
+  } = useProjectConfig(projectId ?? undefined)
   const [editOpen, setEditOpen] = useState(false)
+  const readOnly = !canWrite()
 
   if (loading) {
     return <Card><Spin /></Card>
   }
   if (!project) {
-    return <Card><Empty description="项目不存在" /></Card>
+    return <Card><Empty description="项目不存在或已删除" /></Card>
   }
 
   const reloadAll = () => {
@@ -53,41 +52,25 @@ export default function AdminProjectDetail() {
             <Typography.Text strong>{project.name}</Typography.Text>
             <Typography.Text code>{project.id}</Typography.Text>
             <Tag color={project.status === 'ACTIVE' ? 'green' : 'default'}>{project.status}</Tag>
+            {readOnly && <Tag>只读</Tag>}
           </Space>
         }
         extra={
           <Space>
-            <Button size="small" icon={<EditOutlined />} onClick={() => setEditOpen(true)}>
-              编辑基本信息
-            </Button>
+            {!readOnly && (
+              <Button size="small" icon={<EditOutlined />} onClick={() => setEditOpen(true)}>
+                编辑基本信息
+              </Button>
+            )}
             <Button size="small" icon={<ReloadOutlined />} onClick={reloadAll}>
               刷新
-            </Button>
-            <Button size="small" onClick={() => navigate('/admin/projects')}>
-              返回列表
             </Button>
           </Space>
         }
       >
-        <Descriptions size="small" column={{ xs: 1, sm: 2 }}>
-          <Descriptions.Item label="仓库路径">
-            <Typography.Text code copyable style={{ fontSize: 12 }}>
-              {project.path}
-            </Typography.Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="默认分支">{project.defaultBranch || '-'}</Descriptions.Item>
-          <Descriptions.Item label="标签">
-            {project.tags?.length ? project.tags.map((t) => <Tag key={t}>{t}</Tag>) : '-'}
-          </Descriptions.Item>
-          <Descriptions.Item label="API 文档源">{project.apiDocSource || '-'}</Descriptions.Item>
-          <Descriptions.Item label="创建">{new Date(project.createdAt).toLocaleString()}</Descriptions.Item>
-          <Descriptions.Item label="更新">{new Date(project.updatedAt).toLocaleString()}</Descriptions.Item>
-          {project.description && (
-            <Descriptions.Item label="描述" span={2}>
-              {project.description}
-            </Descriptions.Item>
-          )}
-        </Descriptions>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          项目配置（仓库/摘要/服务器/环境/构建/发版/锁定）{readOnly ? '，当前角色为只读视图' : ''}
+        </Typography.Text>
       </Card>
 
       <Card size="small" title="项目配置">
@@ -100,6 +83,7 @@ export default function AdminProjectDetail() {
                 <ReposTab
                   id={project.id}
                   repos={repos}
+                  readOnly={readOnly}
                   onChanged={(rs) => {
                     setRepos(rs)
                     // 主库切换会同步 projects.path 镜像，刷新头部展示
@@ -111,40 +95,35 @@ export default function AdminProjectDetail() {
             {
               key: 'summary',
               label: '上下文摘要',
-              children: <SummaryTab id={project.id} summary={summary} onChanged={setSummary} />,
+              children: <SummaryTab id={project.id} summary={summary} onChanged={setSummary} readOnly={readOnly} />,
             },
             {
               key: 'servers',
               label: '服务器',
-              children: <ServersTab id={project.id} servers={servers} onChanged={setServers} />,
+              children: <ServersTab id={project.id} servers={servers} onChanged={setServers} readOnly={readOnly} />,
             },
             {
               key: 'environments',
               label: '环境',
               children: (
                 <EnvironmentsTab id={project.id} environments={environments} servers={servers}
-                  onChanged={setEnvironments} />
+                  onChanged={setEnvironments} readOnly={readOnly} />
               ),
             },
             {
               key: 'build',
               label: '构建配置',
-              children: <BuildTab id={project.id} steps={steps} onChanged={setSteps} />,
+              children: <BuildTab id={project.id} steps={steps} onChanged={setSteps} readOnly={readOnly} />,
             },
             {
               key: 'release',
               label: '发版配置',
-              children: <ReleaseTab id={project.id} />,
-            },
-            {
-              key: 'jira-sync',
-              label: 'Jira 同步',
-              children: <JiraSyncTab projectId={project.id} />,
+              children: <ReleaseTab id={project.id} readOnly={readOnly} />,
             },
             {
               key: 'lock',
               label: '锁定',
-              children: <LockTab id={project.id} lock={lock} onChanged={setLock} />,
+              children: <LockTab id={project.id} lock={lock} onChanged={setLock} readOnly={readOnly} />,
             },
           ]}
         />

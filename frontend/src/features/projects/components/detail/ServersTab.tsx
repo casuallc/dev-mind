@@ -21,10 +21,12 @@ import { envColor } from './utils'
 const ENV_OPTIONS = ['test', 'staging', 'prod']
 const ACCESS_OPTIONS = ['ssh', 'http']
 
-export default function ServersTab({ id, servers, onChanged }: {
+export default function ServersTab({ id, servers, onChanged, readOnly }: {
   id: string
   servers: ProjectServer[]
   onChanged: (s: ProjectServer[]) => void
+  /** 只读模式（工作台 /settings 对 VIEWER）：隐藏增删改入口 */
+  readOnly?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<ProjectServer | null>(null)
@@ -91,24 +93,26 @@ export default function ServersTab({ id, servers, onChanged }: {
       width: 80,
       render: (v: boolean) => (v ? <Tag color="green">启用</Tag> : <Tag>停用</Tag>),
     },
-    {
+    ...(!readOnly ? [{
       title: '操作',
       key: 'action',
       width: 120,
-      render: (_, r) => (
+      render: (_: unknown, r: ProjectServer) => (
         <Space size={4}>
           <Button size="small" onClick={() => openEdit(r)}>编辑</Button>
           <Button size="small" danger onClick={() => confirmDelete(r)}>删除</Button>
         </Space>
       ),
-    },
+    }] : []),
   ]
 
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-        添加服务器
-      </Button>
+      {!readOnly && (
+        <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
+          添加服务器
+        </Button>
+      )}
       <Table rowKey="id" size="small" columns={columns} dataSource={servers} pagination={false} />
       <Modal title={editing ? '编辑服务器' : '添加服务器'} open={open} onCancel={() => setOpen(false)}
         onOk={() => form.submit()} okText="保存" width={560}>

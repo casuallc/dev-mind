@@ -26,10 +26,12 @@ import type { BuildStep, BuildStepInput } from '../../types'
 
 const LOCATION_OPTIONS = ['LOCAL', 'REMOTE']
 
-export default function BuildTab({ id, steps, onChanged }: {
+export default function BuildTab({ id, steps, onChanged, readOnly }: {
   id: string
   steps: BuildStep[]
   onChanged: (s: BuildStep[]) => void
+  /** 只读模式（工作台 /settings 对 VIEWER）：隐藏增删改/排序入口 */
+  readOnly?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<BuildStep | null>(null)
@@ -90,11 +92,11 @@ export default function BuildTab({ id, steps, onChanged }: {
     { title: '命令', dataIndex: 'command', render: (c: string) => <code style={{ fontSize: 12 }}>{c}</code> },
     { title: '目录', dataIndex: 'workingDir', width: 120, render: (d?: string) => d || '-' },
     { title: '位置', dataIndex: 'location', width: 90, render: (l: string) => <Tag color={l === 'REMOTE' ? 'purple' : 'default'}>{l}</Tag> },
-    {
+    ...(!readOnly ? [{
       title: '操作',
       key: 'action',
       width: 200,
-      render: (_, r, idx) => (
+      render: (_: unknown, r: BuildStep, idx: number) => (
         <Space size={4}>
           <Button size="small" icon={<ArrowUpOutlined />} disabled={idx === 0} onClick={() => move(idx, -1)} />
           <Button size="small" icon={<ArrowDownOutlined />} disabled={idx === steps.length - 1} onClick={() => move(idx, 1)} />
@@ -102,15 +104,17 @@ export default function BuildTab({ id, steps, onChanged }: {
           <Button size="small" danger onClick={() => confirmDelete(r)}>删除</Button>
         </Space>
       ),
-    },
+    }] : []),
   ]
 
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       <Space>
-        <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-          添加步骤
-        </Button>
+        {!readOnly && (
+          <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
+            添加步骤
+          </Button>
+        )}
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           有序构建步骤，按顺序执行；位置可选本机（LOCAL）或远程服务器（REMOTE，委托 CAP-08）。
         </Typography.Text>

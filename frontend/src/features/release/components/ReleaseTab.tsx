@@ -56,7 +56,11 @@ interface CreateValues {
   force?: boolean
 }
 
-export default function ReleaseTab({ id }: { id: string }) {
+export default function ReleaseTab({ id, readOnly }: {
+  id: string
+  /** 只读模式（工作台 /settings 对 VIEWER）：只看配置与历史，不可保存/新建/执行/回滚/删除 */
+  readOnly?: boolean
+}) {
   const [config, setConfig] = useState<ReleaseConfig | null>(null)
   const [rows, setRows] = useState<ReleaseRecord[]>([])
   const [detail, setDetail] = useState<ReleaseRecord | null>(null)
@@ -144,19 +148,21 @@ export default function ReleaseTab({ id }: { id: string }) {
       render: (_: unknown, r) => (
         <Space size={4}>
           <Button size="small" onClick={() => setDetail(r)}>详情</Button>
-          {r.status === 'PLANNED' && (
+          {!readOnly && r.status === 'PLANNED' && (
             <Button size="small" type="primary" onClick={() => doAction(() => executeRelease(r.id), '已开始执行')}>
               执行
             </Button>
           )}
-          {r.status !== 'RUNNING' && r.status !== 'ROLLED_BACK' && (
+          {!readOnly && r.status !== 'RUNNING' && r.status !== 'ROLLED_BACK' && (
             <Popconfirm title={`回滚 v${r.version}？将删除 tag 并移除制品引用`} onConfirm={() => doAction(() => rollbackRelease(r.id), '已回滚')}>
               <Button size="small" danger>回滚</Button>
             </Popconfirm>
           )}
-          <Popconfirm title="删除该发版记录？" onConfirm={() => deleteRelease(r.id).then(() => { message.success('已删除'); load() })}>
-            <Button size="small" type="text">删</Button>
-          </Popconfirm>
+          {!readOnly && (
+            <Popconfirm title="删除该发版记录？" onConfirm={() => deleteRelease(r.id).then(() => { message.success('已删除'); load() })}>
+              <Button size="small" type="text">删</Button>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -202,12 +208,13 @@ export default function ReleaseTab({ id }: { id: string }) {
             }
           </Form.Item>
           <Form.Item>
-            <Button type="primary" htmlType="submit" loading={configBusy}>保存配置</Button>
+            <Button type="primary" htmlType="submit" loading={configBusy} disabled={readOnly}>保存配置</Button>
           </Form.Item>
         </Form>
       </Card>
 
-      <Card size="small" title="新建发版">
+      {!readOnly && (
+        <Card size="small" title="新建发版">
         <Form form={createForm} layout="inline" onFinish={onCreate} style={{ rowGap: 8, columnGap: 8 }}>
           <Form.Item label="构建 id" name="buildId" extra="产物来源（可选，留空则模板自带制品）">
             <InputNumber min={1} style={{ width: 110 }} />
@@ -233,24 +240,26 @@ export default function ReleaseTab({ id }: { id: string }) {
             <Button type="primary" htmlType="submit" loading={createBusy}>创建并执行</Button>
           </Form.Item>
         </Form>
-      </Card>
+        </Card>
+      )}
 
       <Card size="small" title="发版历史">
         <Table rowKey="id" size="small" columns={columns} dataSource={rows} pagination={{ pageSize: 8 }}
           locale={{ emptyText: '暂无发版记录' }} scroll={{ x: 1000 }} />
       </Card>
 
-      <DetailDrawer record={detail} onClose={() => setDetail(null)} onChanged={load} />
+      <DetailDrawer record={detail} onClose={() => setDetail(null)} onChanged={load} readOnly={readOnly} />
     </Space>
   )
 }
 
 // ---------------- 发版详情 Drawer（WS 实时） ----------------
 
-function DetailDrawer({ record, onClose, onChanged }: {
+function DetailDrawer({ record, onClose, onChanged, readOnly }: {
   record: ReleaseRecord | null
   onClose: () => void
   onChanged: () => void
+  readOnly?: boolean
 }) {
   const [d, setD] = useState<ReleaseRecord | null>(record)
   const [text, setText] = useState('')
@@ -339,10 +348,10 @@ function DetailDrawer({ record, onClose, onChanged }: {
           </Space>
           {d.errorSummary && <Alert type="error" showIcon message="失败原因" description={d.errorSummary} />}
           <Space>
-            {d.status === 'PLANNED' && (
+            {!readOnly && d.status === 'PLANNED' && (
               <Button type="primary" loading={busy} onClick={() => act(() => executeRelease(d.id), '已开始执行')}>执行发版</Button>
             )}
-            {d.status !== 'RUNNING' && d.status !== 'ROLLED_BACK' && (
+            {!readOnly && d.status !== 'RUNNING' && d.status !== 'ROLLED_BACK' && (
               <Popconfirm title="回滚该发版？将删除 tag 并移除制品引用" onConfirm={() => act(() => rollbackRelease(d.id), '已回滚')}>
                 <Button danger loading={busy}>回滚</Button>
               </Popconfirm>
