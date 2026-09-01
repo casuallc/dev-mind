@@ -30,7 +30,8 @@
 ## 2. 功能需求
 
 - **FR-01 Integration CRUD**：登记外部平台实例：type（GITLAB / GITHUB / JIRA）、name、
-  base_url、auth_type（MVP 仅 PAT）、token、status（ENABLED / DISABLED）；
+  base_url、auth_type（PAT / BASIC，BASIC 为 Jira 8.13 及更早的用户名+密码，密文格式
+  `"username\npassword"`）、token、status（ENABLED / DISABLED）；
   token **加密落库**（复用 `data/auth.key` 派生密钥，AES-GCM），任何 API 响应不回显明文。
 - **FR-02 连接测试**：`POST /integrations/{id}/test` 调平台 API 验证 token 有效性与权限范围
   （GitLab：`/api/v4/user` + `scope: api`），返回诊断信息。
@@ -82,7 +83,7 @@ interface IntegrationConnector {                      // SPI，按 type 注册
 
 ```
 integrations(id, type[GITLAB|GITHUB|JIRA], name, base_url,
-             auth_type[PAT], secret_enc, status[ENABLED|DISABLED],
+             auth_type[PAT|BASIC], secret_enc, status[ENABLED|DISABLED],
              config_json?, created_by, created_at, updated_at)
 integration_bindings(id, integration_id, project_id, repo_id,
                      external_project_key,        -- GitLab project id / path

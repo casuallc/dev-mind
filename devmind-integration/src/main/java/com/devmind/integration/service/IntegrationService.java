@@ -105,15 +105,24 @@ public class IntegrationService implements PlatformIntegrationHook {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "name 不能为空");
         }
         String baseUrl = validateBaseUrl(req.baseUrl());
+        String authType = normalizeAuthType(req.authType());
         if (req.token() == null || req.token().isBlank()) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "token 不能为空（MVP 仅支持 PAT）");
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    IntegrationEntity.AUTH_BASIC.equals(authType) ? "密码不能为空" : "token 不能为空");
+        }
+        String username = null;
+        if (IntegrationEntity.AUTH_BASIC.equals(authType)) {
+            if (req.username() == null || req.username().isBlank()) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "Basic Auth 需要填写用户名");
+            }
+            username = req.username().trim();
         }
         IntegrationEntity e = new IntegrationEntity();
         e.setType(type);
         e.setName(req.name().trim());
         e.setBaseUrl(baseUrl);
-        e.setAuthType(IntegrationEntity.AUTH_PAT);
-        e.setSecretEnc(cipher.encrypt(req.token().trim()));
+        e.setAuthType(authType);
+        e.setSecretEnc(cipher.encrypt(encodeSecret(authType, username, req.token().trim())));
         e.setStatus(IntegrationEntity.STATUS_ENABLED);
         e.setConfigJson(blankToNull(req.configJson()));
         e.setCreatedBy(identityService.currentActor());
@@ -132,9 +141,18 @@ public class IntegrationService implements PlatformIntegrationHook {
         if (req.baseUrl() != null && !req.baseUrl().isBlank()) {
             e.setBaseUrl(validateBaseUrl(req.baseUrl()));
         }
-        // token 空白=保持不变；非空=换凭据
+        // token 空白=保持不变；非空=换凭据（BASIC 时 username 留空沿用原用户名）
         if (req.token() != null && !req.token().isBlank()) {
-            e.setSecretEnc(cipher.encrypt(req.token().trim()));
+            if (IntegrationEntity.AUTH_BASIC.equals(e.getAuthType())) {
+                String username = req.username() != null && !req.username().isBlank()
+                        ? req.username().trim() : basicUsername(cipher.decrypt(e.getSecretEnc()));
+                if (username == null || username.isBlank()) {
+                    throw new DevMindException(ErrorCode.BAD_REQUEST, "更换 Basic 凭据需填写用户名");
+                }
+                e.setSecretEnc(cipher.encrypt(encodeSecret(e.getAuthType(), username, req.token().trim())));
+            } else {
+                e.setSecretEnc(cipher.encrypt(req.token().trim()));
+            }
         }
         if (req.configJson() != null) {
             e.setConfigJson(blankToNull(req.configJson()));
@@ -493,6 +511,38 @@ public class IntegrationService implements PlatformIntegrationHook {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "type 不能为空（GITLAB/GITHUB/JIRA）");
         }
         return type.trim().toUpperCase();
+    }
+
+    /** authType 归一：空白默认 PAT；仅支持 PAT / BASIC */
+    static String normalizeAuthType(String authType) {
+        if (authType == null || authType.isBlank()) {
+            return IntegrationEntity.AUTH_PAT;
+        }
+        String a = authType.trim().toUpperCase();
+        if (!IntegrationEntity.AUTH_PAT.equals(a) && !IntegrationEntity.AUTH_BASIC.equals(a)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "authType 仅支持 PAT / BASIC");
+        }
+        return a;
+    }
+
+    /** 凭据存储格式：PAT=原样 token；BASIC="username\npassword"（换行分隔，连接器按首行分割） */
+    static String encodeSecret(String authType, String username, String token) {
+        if (IntegrationEntity.AUTH_BASIC.equals(authType)) {
+            if (username.contains("\n")) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "用户名不能包含换行");
+            }
+            return username + "\n" + token;
+        }
+        return token;
+    }
+
+    /** 从 BASIC 密文明文中取用户名（更新时留空沿用）；非 BASIC 格式返回 null */
+    static String basicUsername(String secret) {
+        if (secret == null) {
+            return null;
+        }
+        int i = secret.indexOf('\n');
+        return i > 0 ? secret.substring(0, i) : null;
     }
 
     private ExternalLinkEntity registerLink(ResolvedBinding rb, String internalType, String internalId,

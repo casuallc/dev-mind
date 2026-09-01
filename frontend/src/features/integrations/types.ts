@@ -15,11 +15,13 @@ export interface Integration {
   updatedAt: string
 }
 
-/** 创建/更新请求；更新时 token 留空 = 保持不变 */
+/** 创建/更新请求；更新时 token 留空 = 保持不变。authType：PAT（默认）/ BASIC（Jira 8.13-，token=密码） */
 export interface IntegrationInput {
   type: string
   name: string
   baseUrl: string
+  authType?: string
+  username?: string
   token?: string
   configJson?: string
 }

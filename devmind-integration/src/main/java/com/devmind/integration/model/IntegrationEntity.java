@@ -25,8 +25,10 @@ public class IntegrationEntity {
     /** Jira（后续，无 git 能力） */
     public static final String TYPE_JIRA = "JIRA";
 
-    /** 个人访问令牌（MVP 唯一认证方式） */
+    /** 个人访问令牌（Jira 需 8.14+；GitLab PAT） */
     public static final String AUTH_PAT = "PAT";
+    /** 用户名 + 密码（Jira Server/DC 8.13 及更早无 PAT，走 Basic Auth） */
+    public static final String AUTH_BASIC = "BASIC";
 
     public static final String STATUS_ENABLED = "ENABLED";
     public static final String STATUS_DISABLED = "DISABLED";
@@ -46,7 +48,7 @@ public class IntegrationEntity {
     @Column(name = "base_url", nullable = false, length = 512)
     private String baseUrl;
 
-    /** PAT（MVP） */
+    /** PAT / BASIC（BASIC 时 secretEnc 密文内容为 "username\npassword"） */
     @Column(name = "auth_type", nullable = false, length = 16)
     private String authType = AUTH_PAT;
 

@@ -12,7 +12,7 @@ Requirement（DRAFT），经人工确认后走既有流程（分析 → 方案 �
 Jira Server/DC                    dev-mind
 ──────────────                   ─────────────────────────────────
 Task / Bug / Story
-      ↑  轮询（JQL + updated 水印增量，PAT Bearer 认证）
+      ↑  轮询（JQL + updated 水印增量，PAT Bearer 或 Basic 认证）
       │  GET /rest/api/2/search
 JiraSyncService ──→ Requirement（DRAFT，标题 [PROJ-123] summary）
                   └─→ external_links（REQUIREMENT ↔ ISSUE）幂等登记
@@ -26,7 +26,9 @@ JiraSyncService ──→ Requirement（DRAFT，标题 [PROJ-123] summary）
 
 ## 2. 功能需求
 
-- **FR-01 Jira 连接器**：`JiraConnector`（`/rest/api/2`，`Authorization: Bearer <PAT>`）。
+- **FR-01 Jira 连接器**：`JiraConnector`（`/rest/api/2`）。认证按集成 `auth_type`：
+  PAT（Jira 8.14+，`Authorization: Bearer <PAT>`）/ BASIC（8.13 及更早，
+  `Basic base64(username:password)`，密文格式 `"username\npassword"`）。
   testConnection = `/myself` + `/serverInfo`；listProjects = `/project`（绑定辅助）；
   searchIssues = `/search`（JQL + startAt/maxResults 分页 + fields 白名单）。
   只读连接器：git 动词抛"不支持"，不向 Jira 发任何写请求。
@@ -79,7 +81,7 @@ JiraSyncService ──→ Requirement（DRAFT，标题 [PROJ-123] summary）
 
 | 现象 | 排查 |
 |---|---|
-| 测试连接 401/403 | PAT 失效或权限不足；Jira Server 用 Bearer PAT（非 Cloud 的 email+token） |
+| 测试连接 401/403 | 凭据失效或权限不足。Jira Server 8.14+ 用 Bearer PAT；**8.13 及更早无 PAT**，认证方式选「用户名 + 密码」（Basic Auth，均非 Cloud 的 email+token） |
 | 同步 0 条但 Jira 有 issue | 检查附加 JQL 是否过严；首轮按 created 全量限 20 页，超大项目多跑几轮 |
 | 重复导入 | 不应发生：幂等键 = (integration_id, ISSUE, issue key)；查 external_links |
 | 需求没被 Jira 更新刷新 | 预期行为：非 DRAFT 需求不覆盖；看链接 status 是否仍刷新 |

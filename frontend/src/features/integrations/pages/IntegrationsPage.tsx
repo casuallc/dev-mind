@@ -30,6 +30,11 @@ const TYPE_OPTIONS = [
   { value: 'JIRA', label: 'Jira（任务/Bug 同步）' },
 ]
 
+const AUTH_OPTIONS = [
+  { value: 'PAT', label: '个人访问令牌 PAT（Jira 8.14+）' },
+  { value: 'BASIC', label: '用户名 + 密码（Jira 8.13 及更早）' },
+]
+
 const TYPE_COLOR: Record<string, string> = { GITLAB: 'orange', GITHUB: 'default', JIRA: 'blue' }
 
 export default function IntegrationsPage() {
@@ -40,6 +45,10 @@ export default function IntegrationsPage() {
   const [testingId, setTestingId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [form] = Form.useForm<IntegrationInput>()
+  const formType = Form.useWatch('type', form)
+  const formAuthType = Form.useWatch('authType', form)
+  const isJira = formType === 'JIRA'
+  const isBasic = isJira && formAuthType === 'BASIC'
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -60,20 +69,33 @@ export default function IntegrationsPage() {
     if (!editOpen) return
     form.setFieldsValue(
       editing
-        ? { type: editing.type, name: editing.name, baseUrl: editing.baseUrl, token: '' }
-        : { type: 'JIRA', name: '', baseUrl: '', token: '' },
+        ? {
+            type: editing.type,
+            name: editing.name,
+            baseUrl: editing.baseUrl,
+            authType: editing.authType ?? 'PAT',
+            username: '',
+            token: '',
+          }
+        : { type: 'JIRA', name: '', baseUrl: '', authType: 'PAT', username: '', token: '' },
     )
   }, [editOpen, editing, form])
 
   const onSave = async (values: IntegrationInput) => {
     setSaving(true)
     try {
+      // GitLab 仅 PAT，不下发 authType；BASIC 才带 username
+      const payload: IntegrationInput = {
+        ...values,
+        authType: isJira ? values.authType : undefined,
+        username: isBasic && values.username ? values.username : undefined,
+      }
       if (editing) {
         // token 留空 = 保持不变
-        await updateIntegration(editing.id, { ...values, token: values.token || undefined })
+        await updateIntegration(editing.id, { ...payload, token: values.token || undefined })
         message.success('已更新')
       } else {
-        await createIntegration(values)
+        await createIntegration(payload)
         message.success('已创建，建议先点「测试」验证连通性')
       }
       setEditOpen(false)
@@ -156,8 +178,13 @@ export default function IntegrationsPage() {
           {
             title: '凭据',
             dataIndex: 'hasToken',
-            width: 80,
-            render: (has: boolean) => (has ? <Tag color="green">已配置</Tag> : <Tag>未配置</Tag>),
+            width: 120,
+            render: (has: boolean, row) =>
+              has ? (
+                <Tag color="green">{row.authType === 'BASIC' ? '账号密码' : 'PAT'}</Tag>
+              ) : (
+                <Tag>未配置</Tag>
+              ),
           },
           {
             title: '状态',
@@ -226,17 +253,54 @@ export default function IntegrationsPage() {
           >
             <Input placeholder="https://jira.example.com" />
           </Form.Item>
+          {isJira && (
+            <Form.Item
+              label="认证方式"
+              name="authType"
+              rules={[{ required: true, message: '请选择认证方式' }]}
+              extra={
+                editing
+                  ? '认证方式创建后不可切换，换方式请新建集成'
+                  : 'Jira Server/DC 8.13 及更早没有 PAT，选「用户名 + 密码」'
+              }
+            >
+              <Select options={AUTH_OPTIONS} disabled={!!editing} />
+            </Form.Item>
+          )}
+          {isBasic && (
+            <Form.Item
+              label="用户名"
+              name="username"
+              rules={
+                editing
+                  ? []
+                  : [{ required: true, message: 'Basic Auth 需要填写 Jira 登录用户名' }]
+              }
+              extra={editing ? '留空表示沿用原用户名' : undefined}
+            >
+              <Input placeholder="Jira 登录用户名" autoComplete="off" />
+            </Form.Item>
+          )}
           <Form.Item
-            label="访问令牌（PAT）"
+            label={isBasic ? '密码' : '访问令牌（PAT）'}
             name="token"
-            rules={editing ? [] : [{ required: true, message: '请输入 PAT' }]}
+            rules={
+              editing
+                ? []
+                : [{ required: true, message: isBasic ? '请输入密码' : '请输入 PAT' }]
+            }
             extra={
               editing
-                ? '留空表示保持现有凭据不变；Jira Server/DC 用 Personal Access Token，GitLab 用 PAT'
-                : 'Jira Server/DC：个人访问令牌（Personal Access Token）；GitLab：Personal Access Token（api scope）'
+                ? '留空表示保持现有凭据不变'
+                : isBasic
+                  ? 'Jira 登录密码（加密存储，仅用于调用 Jira API）'
+                  : 'Jira Server/DC 8.14+：个人访问令牌；GitLab：Personal Access Token（api scope）'
             }
           >
-            <Input.Password placeholder={editing ? '（不修改请留空）' : '粘贴 token'} autoComplete="off" />
+            <Input.Password
+              placeholder={editing ? '（不修改请留空）' : isBasic ? '输入密码' : '粘贴 token'}
+              autoComplete="off"
+            />
           </Form.Item>
         </Form>
       </Modal>

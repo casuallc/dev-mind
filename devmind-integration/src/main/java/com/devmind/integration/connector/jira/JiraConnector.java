@@ -23,7 +23,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Jira Server/DC 连接器（/rest/api/2，PAT 走 Authorization: Bearer 头）。
+ * Jira Server/DC 连接器（/rest/api/2）。认证按集成配置：
+ * PAT（8.14+，Bearer 头）/ BASIC（8.13 及更早，Basic base64(user:password)）。
  * 只读连接器：只拉取 issue，不向 Jira 发起任何写请求；git 动词不支持。
  * 与 GitLabConnector 同一手法：查询参数自行 URL 编码后拼完整 URI，
  * 避开 RestClient URI 模板展开的二次编码。
@@ -49,12 +50,12 @@ public class JiraConnector implements IntegrationConnector {
     @Override
     public TestResult testConnection(IntegrationEntity cfg, String token) {
         try {
-            JsonNode me = client(token).get().uri(uri(cfg, "/myself")).retrieve().body(JsonNode.class);
+            JsonNode me = client(cfg, token).get().uri(uri(cfg, "/myself")).retrieve().body(JsonNode.class);
             String who = me != null && me.has("displayName") ? me.get("displayName").asText()
                     : (me != null && me.has("name") ? me.get("name").asText() : "?");
             String version;
             try {
-                JsonNode info = client(token).get().uri(uri(cfg, "/serverInfo")).retrieve().body(JsonNode.class);
+                JsonNode info = client(cfg, token).get().uri(uri(cfg, "/serverInfo")).retrieve().body(JsonNode.class);
                 version = info != null && info.has("version") ? info.get("version").asText() : "未知";
             } catch (Exception e) {
                 version = "不可读（serverInfo 权限不足）";
@@ -70,7 +71,7 @@ public class JiraConnector implements IntegrationConnector {
     @Override
     public List<ExternalProject> listProjects(IntegrationEntity cfg, String token) {
         try {
-            JsonNode arr = client(token).get().uri(uri(cfg, "/project")).retrieve().body(JsonNode.class);
+            JsonNode arr = client(cfg, token).get().uri(uri(cfg, "/project")).retrieve().body(JsonNode.class);
             List<ExternalProject> out = new ArrayList<>();
             if (arr != null && arr.isArray()) {
                 String base = cfg.getBaseUrl().replaceAll("/+$", "");
@@ -99,7 +100,7 @@ public class JiraConnector implements IntegrationConnector {
             path.append("&fields=").append(URLEncoder.encode(query.fields(), StandardCharsets.UTF_8));
         }
         try {
-            JsonNode body = client(token).get().uri(uri(cfg, path.toString())).retrieve().body(JsonNode.class);
+            JsonNode body = client(cfg, token).get().uri(uri(cfg, path.toString())).retrieve().body(JsonNode.class);
             return JiraIssueMapper.toPage(body);
         } catch (RestClientResponseException e) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
@@ -122,15 +123,29 @@ public class JiraConnector implements IntegrationConnector {
         return URI.create(cfg.getBaseUrl().replaceAll("/+$", "") + "/rest/api/2" + encodedPathAndQuery);
     }
 
-    private RestClient client(String token) {
+    private RestClient client(IntegrationEntity cfg, String token) {
         HttpClient http = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(props.getConnectTimeoutMs())).build();
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(http);
         factory.setReadTimeout(Duration.ofMillis(props.getReadTimeoutMs()));
         return RestClient.builder()
                 .requestFactory(factory)
-                .defaultHeader("Authorization", "Bearer " + token)
+                .defaultHeader("Authorization", authorizationHeader(cfg.getAuthType(), token))
                 .build();
+    }
+
+    /**
+     * Authorization 头组装：PAT → Bearer；BASIC → Basic base64(username:password)。
+     * BASIC 的 secret 存储格式为 "username\npassword"（见 IntegrationService.encodeSecret）。
+     */
+    static String authorizationHeader(String authType, String secret) {
+        if (IntegrationEntity.AUTH_BASIC.equals(authType)) {
+            int i = secret.indexOf('\n');
+            String raw = i >= 0 ? secret.substring(0, i) + ":" + secret.substring(i + 1) : secret;
+            return "Basic " + java.util.Base64.getEncoder()
+                    .encodeToString(raw.getBytes(StandardCharsets.UTF_8));
+        }
+        return "Bearer " + secret;
     }
 
     /** Jira 错误响应：{"errorMessages":[...],"errors":{...}}，不含任何凭据 */
