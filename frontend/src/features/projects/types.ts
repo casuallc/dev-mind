@@ -155,6 +155,9 @@ export interface WorktreeInfo {
 export type RequirementStatus =
   | 'DRAFT' | 'ANALYZING' | 'DESIGNING' | 'IN_PROGRESS' | 'ACCEPTANCE' | 'DONE' | 'CANCELLED'
 
+/** 需求类型（对齐 Jira issue type，同步直接映射） */
+export type RequirementType = 'FEATURE' | 'BUG' | 'IMPROVEMENT' | 'TASK'
+
 export interface Requirement {
   id: string
   projectId: string
@@ -163,6 +166,7 @@ export interface Requirement {
   title: string
   description?: string
   status: RequirementStatus
+  type?: RequirementType
   ownerId?: string
   docId?: number
   createdBy?: string
@@ -170,11 +174,20 @@ export interface Requirement {
   updatedAt: string
 }
 
+/** 需求分页响应（对应后端 PageView） */
+export interface RequirementPage {
+  items: Requirement[]
+  total: number
+  page: number
+  size: number
+}
+
 export interface RequirementInput {
   title: string
   description?: string
   ownerId?: string
   docId?: number
+  type?: RequirementType
 }
 
 export type WorkItemType = 'DESIGN' | 'DEVELOPMENT' | 'TEST' | 'DOCUMENT' | 'REVIEW'

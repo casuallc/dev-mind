@@ -1,8 +1,9 @@
 // 需求新建/编辑弹窗：项目列表卡（新建）与需求详情页（编辑）复用。
 import { useEffect } from 'react'
-import { Form, Input, Modal, message } from 'antd'
+import { Form, Input, Modal, Select, message } from 'antd'
 import { createRequirement, updateRequirement } from '../api'
 import type { Requirement, RequirementInput } from '../types'
+import { ALL_TYPES, TYPE_LABEL } from './requirementMeta'
 
 export default function RequirementFormModal({ projectId, editing, open, onClose, onSaved }: {
   projectId: string
@@ -15,7 +16,7 @@ export default function RequirementFormModal({ projectId, editing, open, onClose
 
   useEffect(() => {
     if (open) {
-      form.setFieldsValue(editing ?? { title: '', description: '', ownerId: '' })
+      form.setFieldsValue(editing ?? { title: '', description: '', ownerId: '', type: 'FEATURE' })
     }
   }, [open, editing, form])
 
@@ -45,6 +46,9 @@ export default function RequirementFormModal({ projectId, editing, open, onClose
       <Form form={form} layout="vertical" onFinish={onSave} preserve={false}>
         <Form.Item label="标题" name="title" rules={[{ required: true, message: '请输入标题' }]}>
           <Input placeholder="如 用户登录支持扫码" />
+        </Form.Item>
+        <Form.Item label="类型" name="type" rules={[{ required: true, message: '请选择类型' }]}>
+          <Select options={ALL_TYPES.map((t) => ({ value: t, label: TYPE_LABEL[t] }))} />
         </Form.Item>
         <Form.Item label="描述（业务目标）" name="description">
           <Input.TextArea rows={3} />

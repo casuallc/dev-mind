@@ -101,8 +101,8 @@ export default function SessionsBoard() {
       setRequirements([])
       return
     }
-    listRequirements(watchProjectId)
-      .then((rs) => setRequirements(rs.filter((r) => !['DONE', 'CANCELLED'].includes(r.status))))
+    listRequirements(watchProjectId, { size: 200 })
+      .then((data) => setRequirements(data.items.filter((r) => !['DONE', 'CANCELLED'].includes(r.status))))
       .catch(() => setRequirements([]))
   }, [watchProjectId, form])
 

@@ -19,6 +19,7 @@ import type {
   Requirement,
   RequirementInput,
   RequirementOverview,
+  RequirementPage,
   RequirementStatus,
   ServerInput,
   SplitDraft,
@@ -174,9 +175,17 @@ export function releaseWrite(id: string): Promise<ProjectLock> {
 
 // ---------------- 研发主线（CAP-13：Requirement / Design / WorkItem） ----------------
 
-export function listRequirements(projectId: string, status?: string): Promise<Requirement[]> {
-  const q = status && status !== 'ALL' ? `?status=${status}` : ''
-  return api.get<Requirement[]>(`/projects/${projectId}/requirements${q}`)
+/** 需求分页列表：status/type 过滤（空=不限），page 从 0 起 */
+export function listRequirements(
+  projectId: string,
+  opts?: { status?: string; type?: string; page?: number; size?: number },
+): Promise<RequirementPage> {
+  const q = new URLSearchParams()
+  if (opts?.status && opts.status !== 'ALL') q.set('status', opts.status)
+  if (opts?.type && opts.type !== 'ALL') q.set('type', opts.type)
+  q.set('page', String(opts?.page ?? 0))
+  q.set('size', String(opts?.size ?? 20))
+  return api.get<RequirementPage>(`/projects/${projectId}/requirements?${q}`)
 }
 
 export function createRequirement(projectId: string, input: RequirementInput): Promise<Requirement> {

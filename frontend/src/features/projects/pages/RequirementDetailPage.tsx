@@ -28,7 +28,7 @@ import RequirementFormModal from '../components/RequirementFormModal'
 import WorkItemsTab from '../components/WorkItemsTab'
 import { useProject } from '../hooks/useProject'
 import { getCurrentProjectId, setCurrentProject } from '../currentProjectStore'
-import { requirementStatusColor, STATUS_FLOW } from '../components/requirementMeta'
+import { requirementStatusColor, requirementTypeColor, STATUS_FLOW, TYPE_LABEL } from '../components/requirementMeta'
 import type { RequirementOverview } from '../types'
 
 export default function RequirementDetailPage() {
@@ -128,6 +128,7 @@ export default function RequirementDetailPage() {
             <Space wrap>
               <Typography.Text code>{r.code}</Typography.Text>
               <Typography.Text strong style={{ fontSize: 15 }}>{r.title}</Typography.Text>
+              <Tag color={requirementTypeColor(r.type ?? 'FEATURE')}>{TYPE_LABEL[r.type ?? 'FEATURE']}</Tag>
               <Tag color={requirementStatusColor(r.status)}>{r.status}</Tag>
               {r.status === 'CANCELLED' && (
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>该需求已取消</Typography.Text>
