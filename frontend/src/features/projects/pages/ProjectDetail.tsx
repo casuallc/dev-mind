@@ -7,7 +7,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import BuildCenterTab from '../../build/components/BuildTab'
 import DeployTab from '../../deploy/components/DeployTab'
 import TestTab from '../../test/components/TestTab'
-import RequirementCockpit from '../components/RequirementCockpit'
+import RequirementListCard from '../components/RequirementListCard'
 import WorktreesTab from '../components/detail/WorktreesTab'
 import { useProject } from '../hooks/useProject'
 import { listWorktrees } from '../api'
@@ -88,12 +88,8 @@ export default function ProjectDetail() {
         </Descriptions>
       </Card>
 
-      <Card size="small" title="研发主线（需求）" extra={
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          需求 → 分析/方案 → 工作单元 → 会话 → 构建 → 测试 → 部署 → 发版 → 时间线
-        </Typography.Text>
-      }>
-        <RequirementCockpit projectId={project.id} />
+      <Card size="small" title="需求">
+        <RequirementListCard projectId={project.id} />
       </Card>
 
       <Card size="small" title="执行记录">
