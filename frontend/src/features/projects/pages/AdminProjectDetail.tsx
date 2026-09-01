@@ -5,6 +5,7 @@ import { Button, Card, Descriptions, Empty, Space, Spin, Tabs, Tag, Typography, 
 import { EditOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import ReleaseTab from '../../release/components/ReleaseTab'
+import JiraSyncTab from '../../integrations/components/JiraSyncTab'
 import ReposTab from '../components/detail/ReposTab'
 import SummaryTab from '../components/detail/SummaryTab'
 import ServersTab from '../components/detail/ServersTab'
@@ -168,6 +169,11 @@ export default function AdminProjectDetail() {
               key: 'release',
               label: '发版配置',
               children: <ReleaseTab id={project.id} />,
+            },
+            {
+              key: 'jira-sync',
+              label: 'Jira 同步',
+              children: <JiraSyncTab projectId={project.id} />,
             },
             {
               key: 'lock',

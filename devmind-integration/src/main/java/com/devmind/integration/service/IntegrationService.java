@@ -360,6 +360,16 @@ public class IntegrationService implements PlatformIntegrationHook {
                 .stream().map(this::toLinkView).toList();
     }
 
+    /** 项目内某类内部实体的全部外部链接（需求列表 Jira 来源徽标批量反查用） */
+    public List<ExternalLinkView> linksByType(String projectId, String internalType) {
+        projectService.requireProject(projectId);
+        if (internalType == null || internalType.isBlank()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "internalType 必填");
+        }
+        return linkRepo.findByProjectIdAndInternalType(projectId, internalType.trim().toUpperCase())
+                .stream().map(this::toLinkView).toList();
+    }
+
     public List<IntegrationCallView> calls(String projectId) {
         projectService.requireProject(projectId);
         // 项目维度：经绑定反查涉及的 integration

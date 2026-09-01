@@ -1,5 +1,6 @@
 import { Layout, Menu } from 'antd'
 import {
+  ApiOutlined,
   CloudServerOutlined,
   DashboardOutlined,
   DeploymentUnitOutlined,
@@ -43,6 +44,7 @@ export default function AdminLayout() {
             { key: '/admin/projects', icon: <FolderOutlined />, label: '项目管理' },
             { key: '/admin/users', icon: <SafetyCertificateOutlined />, label: '用户管理' },
             { key: '/admin/servers', icon: <CloudServerOutlined />, label: '服务器运维' },
+            { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
             { key: '/admin/templates', icon: <DeploymentUnitOutlined />, label: '会话模板' },
             { type: 'divider' },
             { key: '/dashboard', icon: <DashboardOutlined />, label: '返回工作台' },

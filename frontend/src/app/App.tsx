@@ -15,6 +15,7 @@ import KnowledgeBase from '../features/knowledge/pages/KnowledgeBase'
 import DocsPage from '../features/docs/pages/DocsPage'
 import DocEditorPage from '../features/docs/pages/DocEditorPage'
 import ServersPage from '../features/server-adapter/pages/ServersPage'
+import IntegrationsPage from '../features/integrations/pages/IntegrationsPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
 import LoginPage from '../features/auth/pages/LoginPage'
 import UserManagementPage from '../features/auth/pages/UserManagementPage'
@@ -73,6 +74,8 @@ export default function App() {
           <Route path="/admin/users" element={<UserManagementPage />} />
           {/* CAP-07 服务器适配器 */}
           <Route path="/admin/servers" element={<ServersPage />} />
+          {/* CAP-18/19 平台集成（GitLab / Jira） */}
+          <Route path="/admin/integrations" element={<IntegrationsPage />} />
           {/* CAP-05 会话模板 */}
           <Route path="/admin/templates" element={<SessionTemplates />} />
         </Route>

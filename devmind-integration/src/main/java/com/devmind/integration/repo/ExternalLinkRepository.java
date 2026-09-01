@@ -21,4 +21,7 @@ public interface ExternalLinkRepository extends JpaRepository<ExternalLinkEntity
 
     /** 批量反查：一批内部实体的外部链接（需求列表来源徽标用，避免 N+1） */
     List<ExternalLinkEntity> findByInternalTypeAndInternalIdIn(String internalType, List<String> internalIds);
+
+    /** 项目内某类内部实体的全部外部链接（如项目所有 REQUIREMENT ↔ ISSUE 映射） */
+    List<ExternalLinkEntity> findByProjectIdAndInternalType(String projectId, String internalType);
 }

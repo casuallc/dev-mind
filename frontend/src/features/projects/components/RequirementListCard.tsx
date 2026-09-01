@@ -1,9 +1,12 @@
 // 需求列表卡（项目页内嵌）：按状态分组 + 状态筛选，点行进入需求详情页。
+// CAP-19：Jira 同步导入的需求带来源徽标（external_links 批量反查，点击跳 Jira）。
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Empty, List, Select, Space, Tag, Typography, message } from 'antd'
+import { Button, Empty, List, Select, Space, Tag, Tooltip, Typography, message } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { listRequirements } from '../api'
+import { listExternalLinksByType } from '../../integrations/api'
+import type { ExternalLink } from '../../integrations/types'
 import type { Requirement, RequirementStatus } from '../types'
 import RequirementFormModal from './RequirementFormModal'
 import { ALL_STATUSES, requirementStatusColor } from './requirementMeta'
@@ -11,6 +14,7 @@ import { ALL_STATUSES, requirementStatusColor } from './requirementMeta'
 export default function RequirementListCard({ projectId }: { projectId: string }) {
   const navigate = useNavigate()
   const [requirements, setRequirements] = useState<Requirement[]>([])
+  const [jiraLinks, setJiraLinks] = useState<Map<string, ExternalLink>>(new Map())
   const [statusFilter, setStatusFilter] = useState<RequirementStatus[]>([])
   const [createOpen, setCreateOpen] = useState(false)
 
@@ -20,6 +24,16 @@ export default function RequirementListCard({ projectId }: { projectId: string }
     } catch (e) {
       message.error(`加载需求失败：${(e as Error).message}`)
     }
+    // Jira 来源徽标：旁路加载，失败不影响主列表
+    listExternalLinksByType(projectId, 'REQUIREMENT')
+      .then((links) => {
+        const m = new Map<string, ExternalLink>()
+        links
+          .filter((l) => l.externalType === 'ISSUE')
+          .forEach((l) => m.set(l.internalId, l))
+        setJiraLinks(m)
+      })
+      .catch(() => setJiraLinks(new Map()))
   }, [projectId])
 
   useEffect(() => {
@@ -78,6 +92,21 @@ export default function RequirementListCard({ projectId }: { projectId: string }
                       <Typography.Text style={{ fontSize: 13 }} ellipsis={{ tooltip: r.title }}>
                         {r.title}
                       </Typography.Text>
+                      {jiraLinks.has(r.id) && (
+                        <Tooltip title={`来自 Jira，状态 ${jiraLinks.get(r.id)!.status ?? '-'}`}>
+                          <Tag
+                            color="blue"
+                            style={{ fontSize: 11, lineHeight: '16px', marginInlineEnd: 0 }}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const url = jiraLinks.get(r.id)!.externalUrl
+                              if (url) window.open(url, '_blank')
+                            }}
+                          >
+                            {jiraLinks.get(r.id)!.externalKey}
+                          </Tag>
+                        </Tooltip>
+                      )}
                     </Space>
                   </List.Item>
                 )}

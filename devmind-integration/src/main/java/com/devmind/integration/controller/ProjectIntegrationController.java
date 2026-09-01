@@ -70,6 +70,13 @@ public class ProjectIntegrationController {
         return service.links(pid, internalType, internalId);
     }
 
+    /** 项目内某类内部实体的全部外部链接（如 REQUIREMENT → Jira issue 徽标批量反查） */
+    @GetMapping("/external-links")
+    public List<ExternalLinkView> linksByType(@PathVariable String pid,
+                                              @RequestParam String internalType) {
+        return service.linksByType(pid, internalType);
+    }
+
     /** FR-08 调用日志 */
     @GetMapping("/integration-calls")
     public List<IntegrationCallView> calls(@PathVariable String pid) {
