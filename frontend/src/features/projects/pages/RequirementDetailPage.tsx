@@ -22,6 +22,8 @@ import { DownOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import { deleteRequirement, getRequirementOverview, updateRequirementStatus } from '../api'
 import FlowActions from '../components/flow/FlowActions'
+import DesignsTab from '../components/flow/DesignsTab'
+import RelatedRecordsTab from '../components/RelatedRecordsTab'
 import RequirementFormModal from '../components/RequirementFormModal'
 import WorkItemsTab from '../components/WorkItemsTab'
 import { useProject } from '../hooks/useProject'
@@ -176,6 +178,11 @@ export default function RequirementDetailPage() {
               ),
             },
             {
+              key: 'designs',
+              label: '方案',
+              children: <DesignsTab projectId={r.projectId} requirementId={r.id} />,
+            },
+            {
               key: 'timeline',
               label: `时间线（${overview.timeline.length}）`,
               children: (
@@ -196,6 +203,11 @@ export default function RequirementDetailPage() {
                   }))}
                 />
               ),
+            },
+            {
+              key: 'records',
+              label: '关联记录',
+              children: <RelatedRecordsTab overview={overview} />,
             },
           ]}
         />
