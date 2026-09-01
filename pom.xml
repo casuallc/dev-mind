@@ -36,6 +36,7 @@
         <module>devmind-test</module>
         <module>devmind-release</module>
         <module>devmind-flow</module>
+        <module>devmind-integration</module>
         <module>devmind-app</module>
     </modules>
 
@@ -123,6 +124,11 @@
             <dependency>
                 <groupId>com.devmind</groupId>
                 <artifactId>devmind-flow</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.devmind</groupId>
+                <artifactId>devmind-integration</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

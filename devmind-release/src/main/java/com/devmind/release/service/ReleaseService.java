@@ -22,6 +22,7 @@ import com.devmind.build.model.BuildEntity;
 import com.devmind.build.service.BuildService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.common.integration.PlatformIntegrationHook;
 import com.devmind.execution.model.StepResult;
 import com.devmind.execution.model.StepSpec;
 import com.devmind.execution.runner.LocalStepRunner;
@@ -67,6 +68,8 @@ public class ReleaseService {
     private final LocalStepRunner localRunner;
     private final NotificationService notificationService;
     private final ExecutionLogHub hub;
+    /** CAP-18 FR-06 可选钩子：devmind-integration 装配时存在，发版成功后 push tag + 建平台 Release */
+    private final org.springframework.beans.factory.ObjectProvider<PlatformIntegrationHook> integrationHook;
 
     public ReleaseService(ReleaseRepository repo,
                           ReleaseConfigRepository releaseConfigRepo,
@@ -77,7 +80,9 @@ public class ReleaseService {
                           LocalStepRunner localRunner,
                           NotificationService notificationService,
                           ExecutionLogHub hub,
-                           IdentityService identityService) {
+                           IdentityService identityService,
+                           org.springframework.beans.factory.ObjectProvider<PlatformIntegrationHook> integrationHook) {
+        this.integrationHook = integrationHook;
         this.identityService = identityService;
         this.repo = repo;
         this.releaseConfigRepo = releaseConfigRepo;
@@ -259,6 +264,23 @@ public class ReleaseService {
                     sink.accept("[git tag] 主库不可用，跳过打 tag");
                 }
                 r.setStatus(ReleaseEntity.SUCCESS);
+                // CAP-18 FR-06 可选钩子：push tag 到绑定远程 + 建平台 Release（未绑定时返回 null 静默跳过；
+                // 失败只进日志，不回转发版状态）
+                PlatformIntegrationHook hook = integrationHook.getIfAvailable();
+                if (hook != null) {
+                    try {
+                        String integrationResult = hook.onReleaseSuccess(r.getProjectId(), r.getId(),
+                                tag, r.getReleaseVersion(),
+                                "发版 #" + r.getId() + " v" + r.getReleaseVersion()
+                                        + (r.getArtifactRef() != null ? " · 产物 " + r.getArtifactRef() : ""));
+                        if (integrationResult != null) {
+                            sink.accept(integrationResult);
+                        }
+                    } catch (Exception e) {
+                        log.warn("平台集成钩子异常（发版已成功，不回转）: {}", e.getMessage());
+                        sink.accept("[集成] 平台 Release 推送异常：" + e.getMessage());
+                    }
+                }
                 notify(r, NotificationLevel.P1, "发版成功 #" + r.getId() + " v" + r.getReleaseVersion(),
                         "项目 " + r.getProjectId() + (tagged ? " · tag " + tag : ""));
             } else {
