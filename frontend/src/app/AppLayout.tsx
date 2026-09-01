@@ -1,45 +1,26 @@
-import { Layout, Menu, Space, Tag, Typography } from 'antd'
+import { Layout, Menu } from 'antd'
 import {
   RobotOutlined,
-  DeploymentUnitOutlined,
   SafetyCertificateOutlined,
   FolderOutlined,
   BellOutlined,
   ReadOutlined,
   FileTextOutlined,
-  CloudServerOutlined,
   DashboardOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { useEffect, useState, useSyncExternalStore } from 'react'
-import { api } from '../shared/api/client'
-import NotificationBell from '../features/notifications/components/NotificationBell'
+import { useEffect, useSyncExternalStore } from 'react'
+import AppHeader from './AppHeader'
 import { startNotificationStream, stopNotificationStream } from '../features/notifications/store'
 import { getUserSnapshot, isAdmin, subscribeAuth } from '../features/auth/authStore'
-import UserMenu from '../features/auth/components/UserMenu'
 
-const { Sider, Content, Header } = Layout
-
-interface HealthInfo {
-  status: string
-  service: string
-  version: string
-  time: string
-}
+const { Sider, Content } = Layout
 
 export default function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
-  const [health, setHealth] = useState<HealthInfo | null>(null)
   // 认证态变化（登录/退出/刷新轮换）时重渲染菜单与用户区
   useSyncExternalStore(subscribeAuth, getUserSnapshot)
-
-  useEffect(() => {
-    api
-      .get<HealthInfo>('/health')
-      .then(setHealth)
-      .catch(() => setHealth(null))
-  }, [])
 
   // 启动全局通知实时流（铃铛角标/浏览器通知依赖它）
   useEffect(() => {
@@ -53,9 +34,7 @@ export default function AppLayout() {
       ? '/projects'
       : location.pathname.startsWith('/docs/')
         ? '/docs'
-        : location.pathname.startsWith('/servers')
-          ? '/servers'
-          : location.pathname
+        : location.pathname
 
   return (
     <Layout style={{ height: '100vh' }}>
@@ -70,42 +49,23 @@ export default function AppLayout() {
           onClick={({ key }) => navigate(key)}
           items={[
             { key: '/dashboard', icon: <DashboardOutlined />, label: '指挥中心' },
-            { key: '/projects', icon: <FolderOutlined />, label: '项目管理' },
+            { key: '/projects', icon: <FolderOutlined />, label: '项目' },
             { key: '/sessions', icon: <RobotOutlined />, label: '会话看板' },
             { key: '/notifications', icon: <BellOutlined />, label: '通知中心' },
             { key: '/knowledge', icon: <ReadOutlined />, label: '知识库' },
             { key: '/docs', icon: <FileTextOutlined />, label: '文档管理' },
-            { key: '/servers', icon: <CloudServerOutlined />, label: '服务器运维' },
-            { key: '/templates', icon: <DeploymentUnitOutlined />, label: '会话模板' },
-            // CAP-01：用户管理仅 ADMIN 可见
+            // 管理功能集中在 /admin 后台，仅 ADMIN 可见入口
             ...(isAdmin()
-              ? [{ key: '/settings', icon: <SafetyCertificateOutlined />, label: '设置' }]
+              ? [
+                  { type: 'divider' as const },
+                  { key: '/admin', icon: <SafetyCertificateOutlined />, label: '后台管理' },
+                ]
               : []),
           ]}
         />
       </Sider>
       <Layout>
-        <Header
-          style={{
-            background: '#fff',
-            padding: '0 24px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12,
-          }}
-        >
-          <Space size={12}>
-            <Typography.Text strong>Agent 会话管理</Typography.Text>
-            <Tag color={health?.status === 'UP' ? 'green' : 'red'}>
-              后端 {health ? `${health.status} · v${health.version}` : '未连接'}
-            </Tag>
-          </Space>
-          <Space size={12}>
-            <NotificationBell />
-            <UserMenu />
-          </Space>
-        </Header>
+        <AppHeader />
         <Content style={{ padding: 24, overflow: 'auto' }}>
           <Outlet />
         </Content>
