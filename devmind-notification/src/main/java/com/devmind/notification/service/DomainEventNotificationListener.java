@@ -77,6 +77,7 @@ public class DomainEventNotificationListener {
             case "test" -> "测试";
             case "release" -> "发版";
             case "session" -> "会话";
+            case "integration" -> "集成";
             default -> "任务";
         };
     }
