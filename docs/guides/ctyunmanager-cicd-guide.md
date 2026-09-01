@@ -218,6 +218,7 @@ echo "artifact=ctyun-manager-1.0.0-SNAPSHOT.tar.gz"
 
 | 现象 | 排查 |
 |---|---|
+| 构建瞬间失败 exit=127，PowerShell 报「-File 参数不接受实际参数 build.ps1」 | 项目注册的仓库路径指错了（比如指到空壳 dev-test），构建在项目 path 目录下执行；改项目路径为 `D:\apusic\ctyunmanager` |
 | 构建步骤 1 秒失败，日志乱码/找不到 powershell | 平台用 Git Bash 执行；确认命令写的是 `powershell -File build.ps1` 不是直接 `.\build.ps1` |
 | 构建成功但创建部署选不到构建 | 构建日志里没有 `artifact=` 行，检查步骤 2 的 echo |
 | 部署执行报「模板不存在/不允许」 | 模板 code 拼写、模板的 allowed 能力是否含 deploy、模板 projectId 是否为本项目 |
