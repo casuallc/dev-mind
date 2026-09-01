@@ -41,17 +41,25 @@ function StepListEditor({ title, steps, onChange }: {
   onChange: (s: DeployStepInput[]) => void
 }) {
   const [editing, setEditing] = useState<DeployStepInput | null>(null)
+  // 新增时 editing 为 null，Modal 开关不能绑在 editing 上，需要独立的 open 状态
+  const [modalOpen, setModalOpen] = useState(false)
   const [isNew, setIsNew] = useState(false)
   const [form] = Form.useForm()
 
   const openEdit = (s: DeployStepInput | null) => {
     setIsNew(!s)
     setEditing(s)
+    setModalOpen(true)
     form.setFieldsValue(
       s
         ? { ...s, paramsText: paramsToText(s.params) }
         : { name: '', type: 'deploy', templateCode: '', paramsText: '' },
     )
+  }
+
+  const closeModal = () => {
+    setModalOpen(false)
+    setEditing(null)
   }
 
   const save = async (v: { name: string; type: string; templateCode: string; paramsText: string }) => {
@@ -61,7 +69,7 @@ function StepListEditor({ title, steps, onChange }: {
     } else {
       onChange([...steps, step])
     }
-    setEditing(null)
+    closeModal()
   }
 
   const columns: ColumnsType<DeployStepInput> = [
@@ -94,8 +102,8 @@ function StepListEditor({ title, steps, onChange }: {
         <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>添加步骤</Button>
       </Space>
       <Table<DeployStepInput> rowKey={(r) => r.name + r.type + r.templateCode} size="small" columns={columns} dataSource={steps} pagination={false} />
-      <Modal title={isNew ? '添加步骤' : '编辑步骤'} open={!!editing} onCancel={() => setEditing(null)}
-        onOk={() => form.submit()} okText="保存" width={520} destroyOnClose>
+      <Modal title={isNew ? '添加步骤' : '编辑步骤'} open={modalOpen} onCancel={closeModal}
+        onOk={() => form.submit()} okText="保存" width={520} destroyOnHidden>
         <Form form={form} layout="vertical" onFinish={save}>
           <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入步骤名' }]}>
             <Input placeholder="如 启动服务" />
