@@ -1,10 +1,11 @@
 // CAP-02 后台项目列表：表格 + 新建/编辑（ProjectFormModal）+ 居中确认删除。仅 ADMIN（RequireAdmin 守卫）。
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Card, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { PlusOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { deleteProject, listProjects } from '../api'
+import { onboardProject } from '../../open-api/api'
 import ProjectFormModal from '../components/ProjectFormModal'
 import type { Project } from '../types'
 
@@ -20,6 +21,10 @@ export default function AdminProjectsPage() {
   const [status, setStatus] = useState('ALL')
   const [editOpen, setEditOpen] = useState(false)
   const [editing, setEditing] = useState<Project | null>(null)
+  // CAP-20 AI 智能接入
+  const [onboardOpen, setOnboardOpen] = useState(false)
+  const [onboardDesc, setOnboardDesc] = useState('')
+  const [onboarding, setOnboarding] = useState(false)
 
   const load = useCallback(async (st?: string) => {
     setLoading(true)
@@ -39,6 +44,26 @@ export default function AdminProjectsPage() {
   const openEdit = (p: Project | null) => {
     setEditing(p)
     setEditOpen(true)
+  }
+
+  // CAP-20：提交描述 → 起全自动接入会话 → 跳会话页实时观看
+  const submitOnboard = async () => {
+    if (!onboardDesc.trim()) {
+      message.warning('请先描述项目情况')
+      return
+    }
+    setOnboarding(true)
+    try {
+      const { sessionId } = await onboardProject(onboardDesc.trim())
+      message.success('接入会话已启动')
+      setOnboardOpen(false)
+      setOnboardDesc('')
+      navigate(`/sessions/${sessionId}`)
+    } catch (e) {
+      message.error(`发起失败：${(e as Error).message}`)
+    } finally {
+      setOnboarding(false)
+    }
   }
 
   const confirmDelete = (p: Project) => {
@@ -139,6 +164,9 @@ export default function AdminProjectsPage() {
           <Button icon={<ReloadOutlined />} onClick={() => load()}>
             刷新
           </Button>
+          <Button icon={<RobotOutlined />} onClick={() => setOnboardOpen(true)}>
+            AI 智能接入
+          </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
             新建项目
           </Button>
@@ -167,6 +195,30 @@ export default function AdminProjectsPage() {
           load()
         }}
       />
+
+      <Modal
+        title="AI 智能接入"
+        open={onboardOpen}
+        onCancel={() => setOnboardOpen(false)}
+        onOk={submitOnboard}
+        okText="开始接入"
+        confirmLoading={onboarding}
+        width={640}
+        destroyOnHidden
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="描述项目的仓库、构建脚本、部署服务器等信息，平台将启动一个全自动会话，通过开放 API 把配置（项目/服务器/模板/环境/构建/部署计划）写入并触发一次构建验证。"
+        />
+        <Input.TextArea
+          rows={8}
+          value={onboardDesc}
+          onChange={(e) => setOnboardDesc(e.target.value)}
+          placeholder={'例如：\n项目仓库 D:\\apusic\\ctyunmanager，构建脚本 build.ps1\n部署服务器 172.20.140.224 root 免密登录，部署目录 /apusic/ctyun\n发布脚本 push.sh'}
+        />
+      </Modal>
     </Card>
   )
 }

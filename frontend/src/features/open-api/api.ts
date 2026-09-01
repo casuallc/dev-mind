@@ -17,3 +17,8 @@ export function setApiKeyEnabled(id: number, enabled: boolean): Promise<ApiKey> 
 export function deleteApiKey(id: number): Promise<void> {
   return api.del(`/open-keys/${id}`)
 }
+
+/** CAP-20 AI 智能接入：描述项目情况，平台起全自动会话把配置写入。返回会话 ID（跳转实时观看）。 */
+export function onboardProject(description: string): Promise<{ sessionId: string }> {
+  return api.post<{ sessionId: string }>('/projects/onboard', { description })
+}
