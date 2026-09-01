@@ -1,5 +1,6 @@
 // CAP-04 知识库：条目管理 + 经验提案 inbox + 注入内容预览。
 import { useCallback, useEffect, useState } from 'react'
+import { canWrite } from '../../auth/authStore'
 import {
   Button,
   Card,
@@ -320,9 +321,11 @@ export default function KnowledgeBase() {
                       ]}
                     />
                   </Space>
-                  <Button type="primary" icon={<FileAddOutlined />} onClick={openCreateEntry}>
-                    新增条目
-                  </Button>
+                  {canWrite() && (
+                    <Button type="primary" icon={<FileAddOutlined />} onClick={openCreateEntry}>
+                      新增条目
+                    </Button>
+                  )}
                 </Space>
                 <Table
                   size="small"

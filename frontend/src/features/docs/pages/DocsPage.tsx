@@ -1,5 +1,6 @@
 // CAP-03 文档列表：筛选/检索 + 新建文档（模板一键预填）+ git push。
 import { useCallback, useEffect, useState } from 'react'
+import { canWrite } from '../../auth/authStore'
 import {
   Button,
   Card,
@@ -167,14 +168,16 @@ export default function DocsPage() {
               options={Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label }))}
             />
           </Space>
-          <Space>
-            <Button icon={<CloudUploadOutlined />} loading={pushing} onClick={onPush}>
-              推送到远端
-            </Button>
-            <Button type="primary" icon={<FileAddOutlined />} onClick={openCreate}>
-              新建文档
-            </Button>
-          </Space>
+          {canWrite() && (
+            <Space>
+              <Button icon={<CloudUploadOutlined />} loading={pushing} onClick={onPush}>
+                推送到远端
+              </Button>
+              <Button type="primary" icon={<FileAddOutlined />} onClick={openCreate}>
+                新建文档
+              </Button>
+            </Space>
+          )}
         </Space>
       </Card>
       <Card size="small">
