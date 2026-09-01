@@ -13,6 +13,7 @@ public record RequirementView(
         String title,
         String description,
         String status,
+        String type,
         String ownerId,
         Long docId,
         String createdBy,

@@ -130,7 +130,7 @@ class JiraSyncServiceTest {
 
         private RequirementView toView(RequirementEntity e) {
             return new RequirementView(e.getId(), e.getProjectId(), 1L, "REQ-1", e.getTitle(),
-                    e.getDescription(), e.getStatus(), null, null, "test", Instant.now(), Instant.now());
+                    e.getDescription(), e.getStatus(), e.getType(), null, null, "test", Instant.now(), Instant.now());
         }
     }
 

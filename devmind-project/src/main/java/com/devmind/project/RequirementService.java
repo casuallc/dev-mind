@@ -3,6 +3,7 @@ package com.devmind.project;
 import com.devmind.auth.IdentityService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.project.dto.PageView;
 import com.devmind.project.dto.RequirementRequest;
 import com.devmind.project.dto.RequirementView;
 import com.devmind.project.model.RequirementEntity;
@@ -15,6 +16,9 @@ import com.devmind.project.repo.WorkItemRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -41,6 +45,12 @@ public class RequirementService {
             RequirementEntity.STATUS_DONE,
             RequirementEntity.STATUS_CANCELLED);
 
+    private static final Set<String> TYPES = Set.of(
+            RequirementEntity.TYPE_FEATURE,
+            RequirementEntity.TYPE_BUG,
+            RequirementEntity.TYPE_IMPROVEMENT,
+            RequirementEntity.TYPE_TASK);
+
     private final IdentityService identityService;
     private final ProjectRepository projectRepo;
     private final RequirementRepository requirementRepo;
@@ -62,13 +72,31 @@ public class RequirementService {
         this.relationRepo = relationRepo;
     }
 
-    public List<RequirementView> list(String projectId, String status) {
+    /**
+     * 需求分页列表：status/type 可组合过滤（空=不限），按 seq 倒序。
+     * page 从 0 起，size 限制 [1, 200] 防全量拉取打爆内存（Jira 首轮可同步数百上千条 DRAFT）。
+     */
+    public PageView<RequirementView> list(String projectId, String status, String type, int page, int size) {
         requireProject(projectId);
-        if (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status)) {
-            return requirementRepo.findByProjectIdOrderBySeqDesc(projectId).stream().map(this::toView).toList();
+        String st = (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status))
+                ? null : normalizeStatus(status);
+        String tp = (type == null || type.isBlank() || "ALL".equalsIgnoreCase(type))
+                ? null : normalizeType(type);
+        int p = Math.max(0, page);
+        int s = Math.min(Math.max(1, size), 200);
+        PageRequest pageable = PageRequest.of(p, s, Sort.by(Sort.Direction.DESC, "seq"));
+        Page<RequirementEntity> result;
+        if (st != null && tp != null) {
+            result = requirementRepo.findByProjectIdAndStatusAndType(projectId, st, tp, pageable);
+        } else if (st != null) {
+            result = requirementRepo.findByProjectIdAndStatus(projectId, st, pageable);
+        } else if (tp != null) {
+            result = requirementRepo.findByProjectIdAndType(projectId, tp, pageable);
+        } else {
+            result = requirementRepo.findByProjectId(projectId, pageable);
         }
-        return requirementRepo.findByProjectIdAndStatusOrderBySeqDesc(projectId, normalizeStatus(status))
-                .stream().map(this::toView).toList();
+        return new PageView<>(result.getContent().stream().map(this::toView).toList(),
+                result.getTotalElements(), p, s);
     }
 
     public RequirementView get(String projectId, String requirementId) {
@@ -86,6 +114,8 @@ public class RequirementService {
         e.setTitle(req.title().trim());
         e.setDescription(MainlineSupport.blankToNull(req.description()));
         e.setStatus(RequirementEntity.STATUS_DRAFT);
+        e.setType(req.type() == null || req.type().isBlank()
+                ? RequirementEntity.TYPE_FEATURE : normalizeType(req.type()));
         e.setOwnerId(MainlineSupport.blankToNull(req.ownerId()));
         e.setDocId(req.docId());
         e.setCreatedBy(identityService.currentActor());
@@ -103,6 +133,7 @@ public class RequirementService {
         if (req.description() != null) e.setDescription(MainlineSupport.blankToNull(req.description()));
         if (req.ownerId() != null) e.setOwnerId(MainlineSupport.blankToNull(req.ownerId()));
         if (req.docId() != null) e.setDocId(req.docId());
+        if (req.type() != null && !req.type().isBlank()) e.setType(normalizeType(req.type()));
         e.setUpdatedAt(Instant.now());
         return toView(requirementRepo.save(e));
     }
@@ -199,13 +230,22 @@ public class RequirementService {
         return s;
     }
 
+    private String normalizeType(String type) {
+        String t = type.trim().toUpperCase(Locale.ROOT);
+        if (!TYPES.contains(t)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "非法需求类型: " + type + "（可选 " + String.join("/", TYPES) + "）");
+        }
+        return t;
+    }
+
     private String code(Long seq) {
         return "REQ-" + seq;
     }
 
     private RequirementView toView(RequirementEntity e) {
         return new RequirementView(e.getId(), e.getProjectId(), e.getSeq(), code(e.getSeq()), e.getTitle(),
-                e.getDescription(), e.getStatus(), e.getOwnerId(), e.getDocId(),
+                e.getDescription(), e.getStatus(), e.getType(), e.getOwnerId(), e.getDocId(),
                 e.getCreatedBy(), e.getCreatedAt(), e.getUpdatedAt());
     }
 }

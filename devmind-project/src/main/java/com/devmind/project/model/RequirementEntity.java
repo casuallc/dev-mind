@@ -26,6 +26,12 @@ public class RequirementEntity {
     public static final String STATUS_DONE = "DONE";
     public static final String STATUS_CANCELLED = "CANCELLED";
 
+    /** 需求类型（对齐 Jira issue type，同步可直接映射） */
+    public static final String TYPE_FEATURE = "FEATURE";
+    public static final String TYPE_BUG = "BUG";
+    public static final String TYPE_IMPROVEMENT = "IMPROVEMENT";
+    public static final String TYPE_TASK = "TASK";
+
     @Id
     @Column(length = 32)
     private String id;
@@ -46,6 +52,10 @@ public class RequirementEntity {
 
     @Column(length = 24)
     private String status = STATUS_DRAFT;
+
+    /** 需求类型：FEATURE/BUG/IMPROVEMENT/TASK，默认 FEATURE */
+    @Column(length = 24)
+    private String type = TYPE_FEATURE;
 
     @Column(name = "owner_id", length = 64)
     private String ownerId;
@@ -75,6 +85,8 @@ public class RequirementEntity {
     public void setDescription(String description) { this.description = description; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public String getType() { return type; }
+    public void setType(String type) { this.type = type; }
     public String getOwnerId() { return ownerId; }
     public void setOwnerId(String ownerId) { this.ownerId = ownerId; }
     public Long getDocId() { return docId; }

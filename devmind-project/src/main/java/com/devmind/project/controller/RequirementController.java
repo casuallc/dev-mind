@@ -1,6 +1,7 @@
 package com.devmind.project.controller;
 
 import com.devmind.project.RequirementService;
+import com.devmind.project.dto.PageView;
 import com.devmind.project.dto.RequirementRequest;
 import com.devmind.project.dto.RequirementView;
 import com.devmind.project.dto.StatusRequest;
@@ -15,8 +16,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
-
 /**
  * Requirement REST API（CAP-13 研发主线）：业务目标（身份 + 状态 + 关联）。
  */
@@ -30,10 +29,14 @@ public class RequirementController {
         this.service = service;
     }
 
+    /** 分页列表：status/type 过滤（空=不限），page 从 0 起，size 默认 20 */
     @GetMapping
-    public List<RequirementView> list(@PathVariable String projectId,
-                                      @RequestParam(required = false) String status) {
-        return service.list(projectId, status);
+    public PageView<RequirementView> list(@PathVariable String projectId,
+                                          @RequestParam(required = false) String status,
+                                          @RequestParam(required = false) String type,
+                                          @RequestParam(defaultValue = "0") int page,
+                                          @RequestParam(defaultValue = "20") int size) {
+        return service.list(projectId, status, type, page, size);
     }
 
     @PostMapping

@@ -280,7 +280,7 @@ public class JiraSyncService {
         if (existing.isEmpty()) {
             RequirementView req = requirementService.create(cfg.getProjectId(),
                     new RequirementRequest(renderTitle(issue),
-                            renderDescription(integration, issue), null, null));
+                            renderDescription(integration, issue), null, null, requirementType(issue)));
             ExternalLinkEntity link = new ExternalLinkEntity();
             link.setProjectId(cfg.getProjectId());
             link.setIntegrationId(integration.getId());
@@ -304,7 +304,7 @@ public class JiraSyncService {
                 if (RequirementEntity.STATUS_DRAFT.equals(req.getStatus())) {
                     requirementService.update(cfg.getProjectId(), req.getId(),
                             new RequirementRequest(renderTitle(issue),
-                                    renderDescription(integration, issue), null, null));
+                                    renderDescription(integration, issue), null, null, requirementType(issue)));
                     return UpsertOutcome.UPDATED;
                 }
             } catch (DevMindException e) {
@@ -341,6 +341,15 @@ public class JiraSyncService {
     static String renderTitle(JiraIssue issue) {
         String title = "[" + issue.key() + "] " + (issue.summary() == null ? "" : issue.summary().trim());
         return title.length() <= 240 ? title : title.substring(0, 240);
+    }
+
+    /** Jira issue type → 需求类型（Bug→BUG，Improvement→IMPROVEMENT，Task/Sub-task→TASK，其余 Story/Epic/未知→FEATURE） */
+    static String requirementType(JiraIssue issue) {
+        String t = issue.issueType() == null ? "" : issue.issueType().trim().toUpperCase(java.util.Locale.ROOT);
+        if (t.contains("BUG")) return RequirementEntity.TYPE_BUG;
+        if (t.contains("IMPROVEMENT")) return RequirementEntity.TYPE_IMPROVEMENT;
+        if (t.contains("TASK")) return RequirementEntity.TYPE_TASK;
+        return RequirementEntity.TYPE_FEATURE;
     }
 
     /** 需求描述：Jira description（wiki 纯文本）原文 + 来源元信息尾注 */
