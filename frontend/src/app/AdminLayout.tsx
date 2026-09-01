@@ -7,6 +7,7 @@ import {
   DeploymentUnitOutlined,
   FileTextOutlined,
   FolderOutlined,
+  KeyOutlined,
   ReadOutlined,
   SafetyCertificateOutlined,
 } from '@ant-design/icons'
@@ -51,6 +52,7 @@ export default function AdminLayout() {
             { key: '/admin/users', icon: <SafetyCertificateOutlined />, label: '用户管理' },
             { key: '/admin/servers', icon: <CloudServerOutlined />, label: '服务器运维' },
             { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
+            { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
             { key: '/admin/templates', icon: <DeploymentUnitOutlined />, label: '会话模板' },
             { key: '/admin/knowledge', icon: <ReadOutlined />, label: '知识库' },
             { key: '/admin/docs', icon: <FileTextOutlined />, label: '文档管理' },
