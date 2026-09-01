@@ -34,6 +34,7 @@
 | [CAP-15](CAP-15-orchestrator.md) | 自动编排器 | 流程层 | WI DONE 触发 depends_on 依赖就绪自动派发会话 |
 | [CAP-16](CAP-16-command-center.md) | 指挥中心 | 组装层 | 全局聚合首页：状态分布/活跃会话/待办确认/最近失败 |
 | [CAP-17](CAP-17-pipeline-orchestrator.md) | 执行链编排 | 流程层 | WI DONE → 自动构建 → 测试环境自动部署；生产/发版人工门禁 |
+| [CAP-18](CAP-18-platform-integration.md) | 第三方平台集成 | 底座 | 外部平台连接器 SPI（GitLab 先行）：push 分支/tag、建 MR/Release、External Link 追溯 |
 
 ## 依赖关系
 
@@ -42,7 +43,8 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
               │               ├─ CAP-04 知识库 ─▶ CAP-05 会话
               │               ├─ CAP-07 服务器适配器 ─┬─ CAP-08 构建
               │               │                       ├─ CAP-09 部署 ─▶ CAP-10 测试
-              │               │                       └─ CAP-11 发版
+              │               │                       └─ CAP-11 发版 ─▶ CAP-18 平台集成
+              │               └─ CAP-18 平台集成（GitLab 先行：push 分支/tag、MR/Release）
               ├─ CAP-06 通知（被所有"等待人"的场景依赖）
               ├─ CAP-14 流程层（消费 CAP-03/05/06/13，推进需求主流程）
               │               ├─ CAP-15 编排器（消费 workitem.status.changed，自动派发）
@@ -59,6 +61,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-15 编排器在 CAP-14 之上：订阅 CAP-13 发布的 `workitem.status.changed` 事件，depends_on 依赖就绪自动派发会话。
 - CAP-16 指挥中心只读依赖各能力仓库（findAll 内存聚合），不改任何被聚合模块。
 - CAP-17 执行链编排依赖 CAP-08/09/13：WI DONE 自动构建、build.completed 自动部署 TEST 环境；生产部署与发版保持人工（确认门通知动作远程可确认）。
+- CAP-18 平台集成依赖 CAP-01/02/13：出站单向为主——WI 分支 push、建 MR、发版后 push tag + 建平台 Release（CAP-11 可选钩子）；入站 webhook 与 Jira/GitHub 属后续阶段。
 
 ## 组装方式（后续流程层）
 
