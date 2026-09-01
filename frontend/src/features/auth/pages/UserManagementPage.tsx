@@ -1,11 +1,11 @@
-import { Button, Form, Input, Modal, Result, Select, Space, Table, Tag, message } from 'antd'
+import { Button, Form, Input, Modal, Select, Space, Table, Tag, message } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { createUser, listUsers, resetPassword, updateUser } from '../api'
-import { getUserSnapshot, isAdmin } from '../authStore'
+import { getUserSnapshot } from '../authStore'
 import type { AuthUser } from '../types'
 
-/** CAP-01 设置页：用户管理（仅 ADMIN）。 */
+/** CAP-01 后台页：用户管理（仅 ADMIN，由 RequireAdmin 路由守卫保证）。 */
 export default function UserManagementPage() {
   const [users, setUsers] = useState<AuthUser[]>([])
   const [loading, setLoading] = useState(false)
@@ -24,10 +24,6 @@ export default function UserManagementPage() {
   }
 
   useEffect(reload, [])
-
-  if (!isAdmin()) {
-    return <Result status="403" title="无权限" subTitle="用户管理仅 ADMIN 可用" />
-  }
 
   const onCreate = async () => {
     const v = await createForm.validateFields()

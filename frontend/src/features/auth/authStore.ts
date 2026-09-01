@@ -67,3 +67,8 @@ export function getUserSnapshot(): AuthUser | null {
 export function isAdmin(): boolean {
   return user?.role === 'ADMIN'
 }
+
+/** 业务写权限：ADMIN/DEVELOPER 可写，VIEWER 全局只读（与后端 SecurityConfig 兜底规则一致）。 */
+export function canWrite(): boolean {
+  return user?.role === 'ADMIN' || user?.role === 'DEVELOPER'
+}
