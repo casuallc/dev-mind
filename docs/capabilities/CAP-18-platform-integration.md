@@ -19,7 +19,7 @@
          IntegrationConnector
          ├── GitLabConnector   MR / Release / 项目信息        ← MVP
          ├── GitHubConnector   PR / Release                  （后续）
-         └── JiraConnector     Issue 同步（无 git 能力）      （后续）
+         └── JiraConnector     Issue 同步（无 git 能力）      ← CAP-19 已落地
 ```
 
 术语约定：**Integration** = 一个外部平台实例的配置（base_url + 凭据）；

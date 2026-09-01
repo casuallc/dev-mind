@@ -139,7 +139,7 @@ class JiraSyncServiceTest {
         final List<Boolean> callOk = new ArrayList<>();
 
         FakeIntegrationService(IntegrationEntity integration) {
-            super(null, null, null, null, null, null, null, null, null, null, null, List.of());
+            super(null, null, null, null, null, null, null, null, null, null, null, null, List.of());
             this.integration = integration;
         }
 

@@ -18,10 +18,12 @@ import com.devmind.integration.model.ExternalLinkEntity;
 import com.devmind.integration.model.IntegrationBindingEntity;
 import com.devmind.integration.model.IntegrationCallEntity;
 import com.devmind.integration.model.IntegrationEntity;
+import com.devmind.integration.model.JiraSyncConfigEntity;
 import com.devmind.integration.repo.ExternalLinkRepository;
 import com.devmind.integration.repo.IntegrationBindingRepository;
 import com.devmind.integration.repo.IntegrationCallRepository;
 import com.devmind.integration.repo.IntegrationRepository;
+import com.devmind.integration.repo.JiraSyncConfigRepository;
 import com.devmind.project.ProjectService;
 import com.devmind.project.WorkItemService;
 import com.devmind.project.model.ProjectRepoEntity;
@@ -52,6 +54,7 @@ public class IntegrationService implements PlatformIntegrationHook {
     private final IntegrationBindingRepository bindingRepo;
     private final ExternalLinkRepository linkRepo;
     private final IntegrationCallRepository callRepo;
+    private final JiraSyncConfigRepository jiraSyncConfigRepo;
     private final IntegrationCipher cipher;
     private final GitRemoteOps gitOps;
     private final ProjectService projectService;
@@ -65,6 +68,7 @@ public class IntegrationService implements PlatformIntegrationHook {
                               IntegrationBindingRepository bindingRepo,
                               ExternalLinkRepository linkRepo,
                               IntegrationCallRepository callRepo,
+                              JiraSyncConfigRepository jiraSyncConfigRepo,
                               IntegrationCipher cipher,
                               GitRemoteOps gitOps,
                               ProjectService projectService,
@@ -77,6 +81,7 @@ public class IntegrationService implements PlatformIntegrationHook {
         this.bindingRepo = bindingRepo;
         this.linkRepo = linkRepo;
         this.callRepo = callRepo;
+        this.jiraSyncConfigRepo = jiraSyncConfigRepo;
         this.cipher = cipher;
         this.gitOps = gitOps;
         this.projectService = projectService;
@@ -372,9 +377,13 @@ public class IntegrationService implements PlatformIntegrationHook {
 
     public List<IntegrationCallView> calls(String projectId) {
         projectService.requireProject(projectId);
-        // 项目维度：经绑定反查涉及的 integration
-        List<Long> ids = bindingRepo.findByProjectIdOrderByIdAsc(projectId).stream()
-                .map(IntegrationBindingEntity::getIntegrationId).distinct().toList();
+        // 项目维度：经绑定（git 类）与 Jira 同步配置（issue 类）反查涉及的 integration
+        List<Long> ids = java.util.stream.Stream.concat(
+                        bindingRepo.findByProjectIdOrderByIdAsc(projectId).stream()
+                                .map(IntegrationBindingEntity::getIntegrationId),
+                        jiraSyncConfigRepo.findByProjectIdOrderByIdAsc(projectId).stream()
+                                .map(JiraSyncConfigEntity::getIntegrationId))
+                .distinct().toList();
         return ids.stream()
                 .flatMap(id -> callRepo.findByIntegrationIdOrderByIdDesc(id).stream())
                 .sorted((a, b) -> b.getId().compareTo(a.getId()))
