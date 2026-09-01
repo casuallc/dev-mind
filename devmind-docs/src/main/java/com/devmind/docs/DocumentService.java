@@ -1,5 +1,6 @@
 package com.devmind.docs;
 
+import com.devmind.auth.IdentityService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.docs.config.DocsProperties;
@@ -44,6 +45,7 @@ public class DocumentService {
     private static final Set<String> KINDS = Set.of("requirement", "design", "api-suite", "report");
     private static final Set<String> ACTIONS = Set.of("submit", "freeze", "unfreeze");
 
+    private final IdentityService identityService;
     private final DocumentRepository docRepo;
     private final DocumentVersionRepository verRepo;
     private final ProjectService projectService;
@@ -58,7 +60,9 @@ public class DocumentService {
                            RequirementService requirementService,
                            WorkItemService workItemService,
                            DocStore store,
-                           DocsProperties props) {
+                           DocsProperties props,
+                           IdentityService identityService) {
+        this.identityService = identityService;
         this.docRepo = docRepo;
         this.verRepo = verRepo;
         this.projectService = projectService;
@@ -337,7 +341,7 @@ public class DocumentService {
     }
 
     private String actor() {
-        return props.getAuthor() == null || props.getAuthor().isBlank() ? "local" : props.getAuthor();
+        return props.getAuthor() == null || props.getAuthor().isBlank() ? identityService.currentActor() : props.getAuthor();
     }
 
     private String blankToNull(String s) {

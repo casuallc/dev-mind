@@ -1,5 +1,6 @@
 package com.devmind.project;
 
+import com.devmind.auth.IdentityService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.project.dto.RequirementRequest;
@@ -40,6 +41,7 @@ public class RequirementService {
             RequirementEntity.STATUS_DONE,
             RequirementEntity.STATUS_CANCELLED);
 
+    private final IdentityService identityService;
     private final ProjectRepository projectRepo;
     private final RequirementRepository requirementRepo;
     private final WorkItemRepository workItemRepo;
@@ -50,7 +52,9 @@ public class RequirementService {
                               RequirementRepository requirementRepo,
                               WorkItemRepository workItemRepo,
                               DesignRepository designRepo,
-                              @Lazy RelationRepository relationRepo) {
+                              @Lazy RelationRepository relationRepo,
+                           IdentityService identityService) {
+        this.identityService = identityService;
         this.projectRepo = projectRepo;
         this.requirementRepo = requirementRepo;
         this.workItemRepo = workItemRepo;
@@ -84,7 +88,7 @@ public class RequirementService {
         e.setStatus(RequirementEntity.STATUS_DRAFT);
         e.setOwnerId(MainlineSupport.blankToNull(req.ownerId()));
         e.setDocId(req.docId());
-        e.setCreatedBy("local");
+        e.setCreatedBy(identityService.currentActor());
         Instant now = Instant.now();
         e.setCreatedAt(now);
         e.setUpdatedAt(now);

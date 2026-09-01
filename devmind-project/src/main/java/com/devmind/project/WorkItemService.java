@@ -1,5 +1,6 @@
 package com.devmind.project;
 
+import com.devmind.auth.IdentityService;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
@@ -45,6 +46,7 @@ public class WorkItemService {
             WorkItemEntity.STATUS_DONE,
             WorkItemEntity.STATUS_CANCELLED);
 
+    private final IdentityService identityService;
     private final RequirementService requirementService;
     private final WorkItemRepository workItemRepo;
     private final DesignRepository designRepo;
@@ -55,7 +57,9 @@ public class WorkItemService {
                            WorkItemRepository workItemRepo,
                            DesignRepository designRepo,
                            RelationRepository relationRepo,
-                           DomainEventPublisher eventPublisher) {
+                           DomainEventPublisher eventPublisher,
+                           IdentityService identityService) {
+        this.identityService = identityService;
         this.requirementService = requirementService;
         this.workItemRepo = workItemRepo;
         this.designRepo = designRepo;
@@ -89,7 +93,7 @@ public class WorkItemService {
         e.setOwnerId(MainlineSupport.blankToNull(req.ownerId()));
         e.setBranchSlug(req.branchSlug() == null || req.branchSlug().isBlank()
                 ? MainlineSupport.slugify(req.title()) : MainlineSupport.slugify(req.branchSlug()));
-        e.setCreatedBy("local");
+        e.setCreatedBy(identityService.currentActor());
         Instant now = Instant.now();
         e.setCreatedAt(now);
         e.setUpdatedAt(now);

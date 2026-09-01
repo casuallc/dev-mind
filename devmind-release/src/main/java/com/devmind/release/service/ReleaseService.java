@@ -1,5 +1,6 @@
 package com.devmind.release.service;
 
+import com.devmind.auth.IdentityService;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -54,6 +55,7 @@ public class ReleaseService {
 
     private static final Logger log = LoggerFactory.getLogger(ReleaseService.class);
 
+    private final IdentityService identityService;
     private final ExecutorService releaseExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     private final ReleaseRepository repo;
@@ -74,7 +76,9 @@ public class ReleaseService {
                           BuildService buildService,
                           LocalStepRunner localRunner,
                           NotificationService notificationService,
-                          ExecutionLogHub hub) {
+                          ExecutionLogHub hub,
+                           IdentityService identityService) {
+        this.identityService = identityService;
         this.repo = repo;
         this.releaseConfigRepo = releaseConfigRepo;
         this.projectService = projectService;
@@ -149,7 +153,7 @@ public class ReleaseService {
         r.setTagName("v" + version);
         r.setExecutor(executor);
         r.setServerId(serverId);
-        r.setCreatedBy("user");
+        r.setCreatedBy(identityService.currentActor());
         r.setCreatedAt(Instant.now());
         return toView(repo.save(r));
     }

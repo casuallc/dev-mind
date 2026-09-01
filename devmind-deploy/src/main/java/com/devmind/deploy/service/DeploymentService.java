@@ -1,5 +1,6 @@
 package com.devmind.deploy.service;
 
+import com.devmind.auth.IdentityService;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -58,6 +59,7 @@ public class DeploymentService {
     private static final Logger log = LoggerFactory.getLogger(DeploymentService.class);
     private static final Pattern BACKUP = Pattern.compile("(?im)^backup[:=]\\s*(.+)$");
 
+    private final IdentityService identityService;
     private final ExecutorService deployExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     private final DeploymentRepository repo;
@@ -82,7 +84,9 @@ public class DeploymentService {
                              ExecutionLogHub hub,
                              ObjectMapper mapper,
                              DomainEventPublisher eventPublisher,
-                             EnvironmentService environmentService) {
+                             EnvironmentService environmentService,
+                           IdentityService identityService) {
+        this.identityService = identityService;
         this.repo = repo;
         this.stepRepo = stepRepo;
         this.configService = configService;
@@ -179,7 +183,7 @@ public class DeploymentService {
         d.setCurrentStep(0);
         d.setConfirmRequired(confirmRequired);
         d.setConfirmed(!confirmRequired);
-        d.setCreatedBy("user");
+        d.setCreatedBy(identityService.currentActor());
         d.setCreatedAt(Instant.now());
         DeploymentEntity saved = repo.save(d);
 

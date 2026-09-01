@@ -1,5 +1,6 @@
 package com.devmind.test.service;
 
+import com.devmind.auth.IdentityService;
 import java.net.URI;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -73,6 +74,7 @@ public class TestRunService {
 
     private static final Logger log = LoggerFactory.getLogger(TestRunService.class);
 
+    private final IdentityService identityService;
     private final ExecutorService testExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     private final TestRunRepository repo;
@@ -105,7 +107,9 @@ public class TestRunService {
                           CredentialCrypto crypto,
                           ExecutionLogHub hub,
                           ObjectMapper mapper,
-                          EnvironmentService environmentService) {
+                          EnvironmentService environmentService,
+                           IdentityService identityService) {
+        this.identityService = identityService;
         this.repo = repo;
         this.resultRepo = resultRepo;
         this.caseRepo = caseRepo;
@@ -132,7 +136,7 @@ public class TestRunService {
 
     public TestRunView create(CreateTestRunRequest req) {
         return createInternal(req.projectId(), req.workItemId(), req.suiteIds(), req.deploymentId(),
-                req.serverId(), req.environmentId(), req.baseUrl(), "user");
+                req.serverId(), req.environmentId(), req.baseUrl(), identityService.currentActor());
     }
 
     private TestRunView createInternal(String projectId, String workItemId, List<Long> suiteIds,

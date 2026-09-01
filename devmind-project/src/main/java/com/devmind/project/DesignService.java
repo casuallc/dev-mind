@@ -1,5 +1,6 @@
 package com.devmind.project;
 
+import com.devmind.auth.IdentityService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.project.dto.DesignRequest;
@@ -29,10 +30,13 @@ public class DesignService {
             DesignEntity.STATUS_CONFIRMED,
             DesignEntity.STATUS_DISCARDED);
 
+    private final IdentityService identityService;
     private final RequirementService requirementService;
     private final DesignRepository designRepo;
 
-    public DesignService(RequirementService requirementService, DesignRepository designRepo) {
+    public DesignService(RequirementService requirementService, DesignRepository designRepo,
+                           IdentityService identityService) {
+        this.identityService = identityService;
         this.requirementService = requirementService;
         this.designRepo = designRepo;
     }
@@ -53,7 +57,7 @@ public class DesignService {
         Integer max = designRepo.findMaxVersionByRequirementId(requirementId);
         e.setVersion(max == null ? 1 : max + 1);
         e.setStatus(DesignEntity.STATUS_DRAFT);
-        e.setCreatedBy("local");
+        e.setCreatedBy(identityService.currentActor());
         Instant now = Instant.now();
         e.setCreatedAt(now);
         e.setUpdatedAt(now);
