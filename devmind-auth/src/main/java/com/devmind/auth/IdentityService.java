@@ -5,9 +5,11 @@ import com.devmind.auth.model.ApiTokenEntity;
 import com.devmind.auth.model.UserEntity;
 import com.devmind.auth.repo.ApiTokenRepository;
 import com.devmind.auth.repo.UserRepository;
+import com.devmind.auth.security.DevMindPrincipal;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -95,13 +97,20 @@ public class IdentityService {
         }
     }
 
-    /** 当前操作者标识（写各表 created_by 用）。登录接入前恒为 local。 */
+    /**
+     * 当前操作者标识（写各表 created_by 用）。
+     * 请求线程：SecurityContext 中的真实用户；异步线程/事件监听/启动种子：回退 local。
+     */
     public String currentActor() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof DevMindPrincipal p) {
+            return p.username();
+        }
         return LOCAL_USER;
     }
 
     public Optional<UserEntity> currentUser() {
-        return userRepo.findByUsername(LOCAL_USER);
+        return userRepo.findByUsername(currentActor());
     }
 
     /**

@@ -6,6 +6,7 @@ package com.devmind.common.exception;
 public enum ErrorCode {
 
     BAD_REQUEST(400, "DEV-400", "请求参数错误"),
+    UNAUTHORIZED(401, "DEV-401", "未认证或登录已过期"),
     FORBIDDEN(403, "DEV-403", "无权限执行"),
     NOT_FOUND(404, "DEV-404", "资源不存在"),
     CONFLICT(409, "DEV-409", "状态冲突"),
