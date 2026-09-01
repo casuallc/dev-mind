@@ -16,6 +16,7 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -49,11 +50,14 @@ public class JwtCodec {
         this.key = loadKey();
     }
 
-    /** 签发：sub + role + 有效期（秒数由调用方给绝对过期时刻）。 */
+    /** 签发：sub + role + jti（随机，保证同秒多次签发不撞车）+ 绝对过期时刻。 */
     public String issue(String subject, String role, Instant expiresAt) {
+        byte[] jti = new byte[8];
+        new SecureRandom().nextBytes(jti);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("sub", subject);
         payload.put("role", role);
+        payload.put("jti", HexFormat.of().formatHex(jti));
         payload.put("iat", Instant.now().getEpochSecond());
         payload.put("exp", expiresAt.getEpochSecond());
         String h = B64.encodeToString(HEADER);
