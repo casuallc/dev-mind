@@ -43,8 +43,8 @@ export default function ProjectSwitcher() {
 
   const switchTo = (id: string) => {
     setCurrentProject(id)
-    // 各子页面数据都随项目变，停留在原页面会经历「旧数据→刷新」闪烁，回需求列表等同切换租户回主页
-    navigate('/requirements')
+    // 各子页面数据都随项目变，停留在原页面会经历「旧数据→刷新」闪烁，回概览等同切换租户回主页
+    navigate('/overview')
   }
 
   if (loadError) {

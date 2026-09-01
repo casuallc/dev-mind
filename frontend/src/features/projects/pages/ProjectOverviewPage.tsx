@@ -1,15 +1,13 @@
-// 项目概览（/overview）：当前项目的信息卡 + 活跃 Worktree。原 ProjectDetail 头部平移。
+// 项目概览（/overview）：当前项目的信息卡 + 活跃 Worktree，全角色可见。原 ProjectDetail 头部平移。
 import { useCallback, useEffect, useState } from 'react'
 import { Button, Card, Descriptions, Empty, Space, Spin, Tag, Typography } from 'antd'
-import { ReloadOutlined, SettingOutlined } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+import { ReloadOutlined } from '@ant-design/icons'
 import WorktreesTab from '../components/detail/WorktreesTab'
 import { listWorktrees } from '../api'
 import { useCurrentProject } from '../hooks/useCurrentProject'
 import type { WorktreeInfo } from '../types'
 
 export default function ProjectOverviewPage() {
-  const navigate = useNavigate()
   const { projectId, project, loading, reload } = useCurrentProject()
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([])
 
@@ -41,18 +39,9 @@ export default function ProjectOverviewPage() {
           </Space>
         }
         extra={
-          <Space>
-            <Button
-              size="small"
-              icon={<SettingOutlined />}
-              onClick={() => navigate('/settings')}
-            >
-              项目设置
-            </Button>
-            <Button size="small" icon={<ReloadOutlined />} onClick={reload}>
-              刷新
-            </Button>
-          </Space>
+          <Button size="small" icon={<ReloadOutlined />} onClick={reload}>
+            刷新
+          </Button>
         }
       >
         <Descriptions size="small" column={{ xs: 1, sm: 2 }}>

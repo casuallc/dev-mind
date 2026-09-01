@@ -9,7 +9,6 @@ import SessionTemplates from '../features/sessions/pages/SessionTemplates'
 import ProjectsPage from '../features/projects/pages/ProjectsPage'
 import ProjectOverviewPage from '../features/projects/pages/ProjectOverviewPage'
 import RequirementsPage from '../features/projects/pages/RequirementsPage'
-import ProjectSettingsPage from '../features/projects/pages/ProjectSettingsPage'
 import ProjectContextGate from '../features/projects/components/ProjectContextGate'
 import RequirementDetailPage from '../features/projects/pages/RequirementDetailPage'
 import AdminProjectsPage from '../features/projects/pages/AdminProjectsPage'
@@ -28,16 +27,15 @@ import LoginPage from '../features/auth/pages/LoginPage'
 import UserManagementPage from '../features/auth/pages/UserManagementPage'
 import RequireAuth from '../features/auth/RequireAuth'
 import RequireAdmin from '../features/auth/RequireAdmin'
-import { isAdmin } from '../features/auth/authStore'
 import { setCurrentProject } from '../features/projects/currentProjectStore'
 
-/** 旧链接兼容：/projects/:id → 同步当前项目后回项目页（admin 回概览，非 admin 无概览权限回需求列表） */
+/** 旧链接兼容：/projects/:id → 同步当前项目后回概览（原 ProjectDetail 已拆成项目上下文菜单页） */
 function LegacyProjectRedirect() {
   const { id } = useParams<{ id: string }>()
   useEffect(() => {
     if (id) setCurrentProject(id)
   }, [id])
-  return <Navigate to={isAdmin() ? '/overview' : '/requirements'} replace />
+  return <Navigate to="/overview" replace />
 }
 
 /** 旧链接兼容：/docs/:id → /admin/docs/:id（文档管理已迁入后台） */
@@ -59,16 +57,14 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route path="/" element={<Navigate to="/requirements" replace />} />
+          <Route path="/" element={<Navigate to="/overview" replace />} />
           {/* 项目上下文页面（当前项目为主线，无项目时由 Gate 统一空态） */}
           <Route element={<ProjectContextGate />}>
-            {/* 项目概览仅 ADMIN（信息卡 + Worktree），非 admin 从需求列表进入工作 */}
-            <Route path="/overview" element={<RequireAdmin><ProjectOverviewPage /></RequireAdmin>} />
+            <Route path="/overview" element={<ProjectOverviewPage />} />
             <Route path="/requirements" element={<RequirementsPage />} />
             <Route path="/builds" element={<BuildsPage />} />
             <Route path="/deployments" element={<DeploymentsPage />} />
             <Route path="/tests" element={<TestsPage />} />
-            <Route path="/settings" element={<ProjectSettingsPage />} />
           </Route>
           {/* CAP-02 项目：列表仅切换器底部入口；详情页保留双参数 URL（可分享，进入时同步当前项目） */}
           <Route path="/projects" element={<ProjectsPage />} />

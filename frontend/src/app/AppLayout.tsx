@@ -3,11 +3,11 @@ import {
   RobotOutlined,
   SafetyCertificateOutlined,
   BellOutlined,
+  HomeOutlined,
   BulbOutlined,
   ToolOutlined,
   DeploymentUnitOutlined,
   ExperimentOutlined,
-  SettingOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useSyncExternalStore } from 'react'
@@ -26,7 +26,7 @@ const SELECT_PREFIXES: Array<[string, string]> = [
   ['/builds', '/builds'],
   ['/deployments', '/deployments'],
   ['/tests', '/tests'],
-  ['/settings', '/settings'],
+  ['/overview', '/overview'],
   ['/notifications', '/notifications'],
 ]
 
@@ -65,11 +65,11 @@ export default function AppLayout() {
           onClick={({ key }) => navigate(key)}
           items={[
             // 当前项目区：以某个具体项目为主线，切换项目在侧边栏顶部
+            { key: '/overview', icon: <HomeOutlined />, label: '项目概览' },
             { key: '/requirements', icon: <BulbOutlined />, label: '需求' },
             { key: '/builds', icon: <ToolOutlined />, label: '构建' },
             { key: '/deployments', icon: <DeploymentUnitOutlined />, label: '部署' },
             { key: '/tests', icon: <ExperimentOutlined />, label: '测试' },
-            { key: '/settings', icon: <SettingOutlined />, label: '项目设置' },
             { type: 'divider' as const },
             // 平台区
             { key: '/sessions', icon: <RobotOutlined />, label: '会话看板' },

@@ -116,7 +116,7 @@ export default function RequirementDetailPage() {
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
       <Breadcrumb
         items={[
-          { title: project?.name ?? projectId },
+          { title: <a onClick={() => navigate('/overview')}>{project?.name ?? projectId}</a> },
           { title: <a onClick={() => navigate('/requirements')}>需求</a> },
           { title: r.code },
         ]}
