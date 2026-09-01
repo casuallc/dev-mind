@@ -16,7 +16,7 @@ export default function LoginPage() {
       const resp = await login(values.username.trim(), values.password)
       setAuth(resp)
       message.success(`欢迎，${resp.user.displayName || resp.user.username}`)
-      navigate('/dashboard', { replace: true })
+      navigate('/', { replace: true })
     } catch (e) {
       message.error(e instanceof Error && e.message.includes('401') ? '用户名或密码错误' : '登录失败，请稍后重试')
     } finally {

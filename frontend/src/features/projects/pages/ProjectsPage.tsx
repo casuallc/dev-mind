@@ -37,7 +37,7 @@ export default function ProjectsPage() {
 
   const enter = (id: string) => {
     setCurrentProject(id)
-    navigate('/overview')
+    navigate('/requirements')
   }
 
   const columns: ColumnsType<Project> = [

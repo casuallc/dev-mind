@@ -17,7 +17,7 @@ export default function RequireAdmin({ children }: { children: ReactNode }) {
         title="无权限"
         subTitle="管理后台仅 ADMIN 可用"
         extra={
-          <Button type="primary" onClick={() => navigate('/dashboard')}>
+          <Button type="primary" onClick={() => navigate('/')}>
             返回工作台
           </Button>
         }

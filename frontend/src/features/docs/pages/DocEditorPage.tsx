@@ -131,7 +131,7 @@ export default function DocEditorPage() {
         try {
           await deleteDoc(docId)
           message.success('已删除')
-          navigate('/docs')
+          navigate('/admin/docs')
         } catch (e) {
           message.error(`删除失败：${(e as Error).message}`)
         }
@@ -225,7 +225,7 @@ export default function DocEditorPage() {
             size="small"
             title={
               <Space>
-                <Button type="text" size="small" icon={<ArrowLeftOutlined />} onClick={() => navigate('/docs')} />
+                <Button type="text" size="small" icon={<ArrowLeftOutlined />} onClick={() => navigate('/admin/docs')} />
                 <Typography.Text strong>{displayTitle}</Typography.Text>
                 <Tag color={doc.kind === 'requirement' ? 'blue' : doc.kind === 'design' ? 'geekblue' : doc.kind === 'api-suite' ? 'purple' : 'cyan'}>
                   {KIND_LABEL[doc.kind]}

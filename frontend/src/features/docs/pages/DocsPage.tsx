@@ -94,7 +94,7 @@ export default function DocsPage() {
       message.success('文档已创建')
       setCreateOpen(false)
       load()
-      navigate(`/docs/${created.id}`)
+      navigate(`/admin/docs/${created.id}`)
     } catch (e) {
       message.error(`创建失败：${(e as Error).message}`)
     }
@@ -117,7 +117,7 @@ export default function DocsPage() {
       title: '标题',
       dataIndex: 'title',
       render: (t: string, r) => (
-        <a onClick={() => navigate(`/docs/${r.id}`)}>{t}</a>
+        <a onClick={() => navigate(`/admin/docs/${r.id}`)}>{t}</a>
       ),
     },
     { title: '类型', dataIndex: 'kind', width: 100, render: kindTag },

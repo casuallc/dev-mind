@@ -9,7 +9,6 @@ import SessionTemplates from '../features/sessions/pages/SessionTemplates'
 import ProjectsPage from '../features/projects/pages/ProjectsPage'
 import ProjectOverviewPage from '../features/projects/pages/ProjectOverviewPage'
 import RequirementsPage from '../features/projects/pages/RequirementsPage'
-import WorktreesPage from '../features/projects/pages/WorktreesPage'
 import ProjectSettingsPage from '../features/projects/pages/ProjectSettingsPage'
 import ProjectContextGate from '../features/projects/components/ProjectContextGate'
 import RequirementDetailPage from '../features/projects/pages/RequirementDetailPage'
@@ -29,15 +28,22 @@ import LoginPage from '../features/auth/pages/LoginPage'
 import UserManagementPage from '../features/auth/pages/UserManagementPage'
 import RequireAuth from '../features/auth/RequireAuth'
 import RequireAdmin from '../features/auth/RequireAdmin'
+import { isAdmin } from '../features/auth/authStore'
 import { setCurrentProject } from '../features/projects/currentProjectStore'
 
-/** 旧链接兼容：/projects/:id → 同步当前项目后回概览（原 ProjectDetail 已拆成项目上下文菜单页） */
+/** 旧链接兼容：/projects/:id → 同步当前项目后回项目页（admin 回概览，非 admin 无概览权限回需求列表） */
 function LegacyProjectRedirect() {
   const { id } = useParams<{ id: string }>()
   useEffect(() => {
     if (id) setCurrentProject(id)
   }, [id])
-  return <Navigate to="/overview" replace />
+  return <Navigate to={isAdmin() ? '/overview' : '/requirements'} replace />
+}
+
+/** 旧链接兼容：/docs/:id → /admin/docs/:id（文档管理已迁入后台） */
+function LegacyDocRedirect() {
+  const { id } = useParams<{ id: string }>()
+  return <Navigate to={`/admin/docs/${id}`} replace />
 }
 
 export default function App() {
@@ -53,17 +59,15 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route path="/" element={<Navigate to="/overview" replace />} />
-          {/* CAP-16 指挥中心 */}
-          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/" element={<Navigate to="/requirements" replace />} />
           {/* 项目上下文页面（当前项目为主线，无项目时由 Gate 统一空态） */}
           <Route element={<ProjectContextGate />}>
-            <Route path="/overview" element={<ProjectOverviewPage />} />
+            {/* 项目概览仅 ADMIN（信息卡 + Worktree），非 admin 从需求列表进入工作 */}
+            <Route path="/overview" element={<RequireAdmin><ProjectOverviewPage /></RequireAdmin>} />
             <Route path="/requirements" element={<RequirementsPage />} />
             <Route path="/builds" element={<BuildsPage />} />
             <Route path="/deployments" element={<DeploymentsPage />} />
             <Route path="/tests" element={<TestsPage />} />
-            <Route path="/worktrees" element={<WorktreesPage />} />
             <Route path="/settings" element={<ProjectSettingsPage />} />
           </Route>
           {/* CAP-02 项目：列表仅切换器底部入口；详情页保留双参数 URL（可分享，进入时同步当前项目） */}
@@ -72,18 +76,16 @@ export default function App() {
           <Route path="/projects/:id/requirements/:rid" element={<RequirementDetailPage />} />
           {/* CAP-06 通知 */}
           <Route path="/notifications" element={<NotificationCenter />} />
-          {/* CAP-04 知识库 */}
-          <Route path="/knowledge" element={<KnowledgeBase />} />
-          {/* CAP-03 文档 */}
-          <Route path="/docs" element={<DocsPage />} />
-          <Route path="/docs/:id" element={<DocEditorPage />} />
           {/* CAP-05 会话 */}
           <Route path="/sessions" element={<SessionsBoard />} />
           <Route path="/sessions/:id" element={<SessionDetail />} />
-          {/* 旧路径兼容：管理功能已迁入 /admin 后台 */}
+          {/* 旧路径兼容：指挥中心/知识库/文档已迁入 /admin 后台 */}
+          <Route path="/dashboard" element={<Navigate to="/admin/dashboard" replace />} />
+          <Route path="/knowledge" element={<Navigate to="/admin/knowledge" replace />} />
+          <Route path="/docs" element={<Navigate to="/admin/docs" replace />} />
+          <Route path="/docs/:id" element={<LegacyDocRedirect />} />
           <Route path="/servers" element={<Navigate to="/admin/servers" replace />} />
           <Route path="/templates" element={<Navigate to="/admin/templates" replace />} />
-          {/* 后续能力在此追加路由，如 CAP-04 知识库 */}
         </Route>
         {/* 管理后台（仅 ADMIN，RequireAdmin 守卫） */}
         <Route
@@ -94,6 +96,8 @@ export default function App() {
           }
         >
           <Route path="/admin" element={<Navigate to="/admin/projects" replace />} />
+          {/* CAP-16 指挥中心（全局视角，仅 ADMIN） */}
+          <Route path="/admin/dashboard" element={<DashboardPage />} />
           {/* CAP-02 项目管理（增删改 + 项目配置） */}
           <Route path="/admin/projects" element={<AdminProjectsPage />} />
           <Route path="/admin/projects/:id" element={<AdminProjectDetail />} />
@@ -105,6 +109,11 @@ export default function App() {
           <Route path="/admin/integrations" element={<IntegrationsPage />} />
           {/* CAP-05 会话模板 */}
           <Route path="/admin/templates" element={<SessionTemplates />} />
+          {/* CAP-04 知识库 */}
+          <Route path="/admin/knowledge" element={<KnowledgeBase />} />
+          {/* CAP-03 文档 */}
+          <Route path="/admin/docs" element={<DocsPage />} />
+          <Route path="/admin/docs/:id" element={<DocEditorPage />} />
         </Route>
       </Routes>
     </BrowserRouter>
