@@ -7,6 +7,7 @@ import SessionDetail from '../features/sessions/pages/SessionDetail'
 import SessionTemplates from '../features/sessions/pages/SessionTemplates'
 import ProjectsPage from '../features/projects/pages/ProjectsPage'
 import ProjectDetail from '../features/projects/pages/ProjectDetail'
+import RequirementDetailPage from '../features/projects/pages/RequirementDetailPage'
 import AdminProjectsPage from '../features/projects/pages/AdminProjectsPage'
 import AdminProjectDetail from '../features/projects/pages/AdminProjectDetail'
 import NotificationCenter from '../features/notifications/pages/NotificationCenter'
@@ -39,6 +40,7 @@ export default function App() {
           {/* CAP-02 项目 */}
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />
+          <Route path="/projects/:id/requirements/:rid" element={<RequirementDetailPage />} />
           {/* CAP-06 通知 */}
           <Route path="/notifications" element={<NotificationCenter />} />
           {/* CAP-04 知识库 */}
