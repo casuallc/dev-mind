@@ -93,8 +93,16 @@ export default function JiraSyncTab({ projectId }: Props) {
             jql: editing.jql ?? '',
             enabled: editing.enabled,
             pollIntervalSec: editing.pollIntervalSec,
+            firstSyncDays: editing.firstSyncDays,
           }
-        : { integrationId: undefined, jiraProjectKey: undefined, jql: '', enabled: true, pollIntervalSec: 300 },
+        : {
+            integrationId: undefined,
+            jiraProjectKey: undefined,
+            jql: '',
+            enabled: true,
+            pollIntervalSec: 300,
+            firstSyncDays: 7,
+          },
     )
   }, [editOpen, editing, form])
 
@@ -309,6 +317,13 @@ export default function JiraSyncTab({ projectId }: Props) {
           </Form.Item>
           <Form.Item label="轮询间隔（秒）" name="pollIntervalSec" extra="最小 60，默认 300">
             <InputNumber min={60} max={86400} style={{ width: 160 }} />
+          </Form.Item>
+          <Form.Item
+            label="首次同步范围（天）"
+            name="firstSyncDays"
+            extra="首轮只拉近 N 天内有更新的 issue，防老项目全量灌入；0 = 不限（慎用）。已有水印后此值不再生效"
+          >
+            <InputNumber min={0} max={3650} style={{ width: 160 }} />
           </Form.Item>
           <Form.Item label="启用轮询" name="enabled" valuePropName="checked">
             <Switch />

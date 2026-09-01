@@ -342,6 +342,11 @@ class JiraSyncServiceTest {
 
     @Test
     void JQL拼装覆盖首轮与增量() {
+        // 首轮默认窗口 7 天（实体默认值），防老项目全量灌入
+        assertEquals("project = PROJ AND updated >= -7d ORDER BY created asc",
+                JiraSyncService.buildJql(cfg));
+
+        cfg.setFirstSyncDays(0); // 0 = 不限全量
         assertEquals("project = PROJ ORDER BY created asc", JiraSyncService.buildJql(cfg));
 
         cfg.setJql("issuetype in (Story, Bug) AND labels = ai");

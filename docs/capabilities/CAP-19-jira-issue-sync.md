@@ -41,7 +41,8 @@ JiraSyncService ──→ Requirement（DRAFT，标题 [PROJ-123] summary）
   AtomicBoolean 全局防重入；按配置 `lastSyncAt + pollIntervalSec` 到期筛选（天然错峰）。
   手动触发 `POST /{configId}/run` 与轮询共用核心。
 - **FR-04 增量水印**：JQL = `project = KEY AND (附加片段) AND updated >= "yyyy/MM/dd HH:mm"
-  ORDER BY updated asc`；首轮无水印按 `created asc` 全量限页（每轮 ≤20 页 × 100 条）。
+  ORDER BY updated asc`；首轮无水印按 `created asc`，且默认只拉近 `first_sync_days`
+  天（默认 7，0=不限）有更新的 issue——防老项目首轮全量灌入；每轮 ≤20 页 × 100 条。
   水印 = 已处理的最大 issue updated，**整页落库后推进**并回拨 60s overlap
   （防时钟/事务边界漏单）；同步失败水印不动，重复拉取由 external_links 幂等兜住。
 - **FR-05 issue → Requirement upsert**（单 issue 独立事务）：
@@ -82,7 +83,7 @@ JiraSyncService ──→ Requirement（DRAFT，标题 [PROJ-123] summary）
 | 现象 | 排查 |
 |---|---|
 | 测试连接 401/403 | 凭据失效或权限不足。Jira Server 8.14+ 用 Bearer PAT；**8.13 及更早无 PAT**，认证方式选「用户名 + 密码」（Basic Auth，均非 Cloud 的 email+token） |
-| 同步 0 条但 Jira 有 issue | 检查附加 JQL 是否过严；首轮按 created 全量限 20 页，超大项目多跑几轮 |
+| 同步 0 条但 Jira 有 issue | 首轮窗口默认只拉近 7 天更新的 issue（first_sync_days，0=不限）；再检查附加 JQL 是否过严；单轮限 20 页，量大时多跑几轮 |
 | 重复导入 | 不应发生：幂等键 = (integration_id, ISSUE, issue key)；查 external_links |
 | 需求没被 Jira 更新刷新 | 预期行为：非 DRAFT 需求不覆盖；看链接 status 是否仍刷新 |
 | 轮询没跑 | 配置 enabled=false / 间隔未到（看 lastSyncAt + pollIntervalSec）/ lastError |

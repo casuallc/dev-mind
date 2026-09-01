@@ -120,6 +120,7 @@ public class JiraSyncService {
         e.setProjectId(projectId);
         e.setJiraProjectKey(req.jiraProjectKey().trim().toUpperCase());
         e.setJql(blankToNull(req.jql()));
+        e.setFirstSyncDays(normalizeFirstSyncDays(req.firstSyncDays()));
         e.setEnabled(req.enabled() == null || req.enabled());
         e.setPollIntervalSec(normalizeInterval(req.pollIntervalSec()));
         e.setCreatedAt(Instant.now());
@@ -142,6 +143,10 @@ public class JiraSyncService {
         }
         if (req.jql() != null) {
             e.setJql(blankToNull(req.jql()));
+        }
+        if (req.firstSyncDays() != null) {
+            // 仅影响下一次无水印首轮（如换项目清零后）；已有水印的增量轮询不受影响
+            e.setFirstSyncDays(normalizeFirstSyncDays(req.firstSyncDays()));
         }
         if (req.enabled() != null) {
             e.setEnabled(req.enabled());
@@ -312,7 +317,7 @@ public class JiraSyncService {
 
     enum UpsertOutcome { IMPORTED, UPDATED, SKIPPED }
 
-    /** JQL 拼装（独立可测）：project 限定 + 用户附加片段 + 增量水印 + 排序 */
+    /** JQL 拼装（独立可测）：project 限定 + 用户附加片段 + 增量水印/首轮窗口 + 排序 */
     static String buildJql(JiraSyncConfigEntity cfg) {
         StringBuilder jql = new StringBuilder("project = ").append(cfg.getJiraProjectKey());
         if (cfg.getJql() != null && !cfg.getJql().isBlank()) {
@@ -323,7 +328,10 @@ public class JiraSyncService {
                     .append(JiraIssueMapper.toJqlTimeLiteral(cfg.getLastWatermark())).append("\"");
             jql.append(" ORDER BY updated asc");
         } else {
-            // 首轮全量：按创建时间正序，限页防爆量
+            // 首轮：默认只拉近 N 天有更新的 issue（防老项目全量灌入）；0 = 不限全量，限页防爆量
+            if (cfg.getFirstSyncDays() > 0) {
+                jql.append(" AND updated >= -").append(cfg.getFirstSyncDays()).append("d");
+            }
             jql.append(" ORDER BY created asc");
         }
         return jql.toString();
@@ -402,6 +410,15 @@ public class JiraSyncService {
         return v;
     }
 
+    /** 首轮窗口归一：null=默认 7 天；0=不限；负数非法 */
+    private int normalizeFirstSyncDays(Integer days) {
+        int v = days == null ? JiraSyncConfigEntity.DEFAULT_FIRST_SYNC_DAYS : days;
+        if (v < 0) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "firstSyncDays 不能为负数（0 = 不限）");
+        }
+        return v;
+    }
+
     private void audit(String action, Long integrationId, String projectId, boolean success, String detail) {
         auditService.record("integration", action, identityService.currentActor(),
                 projectId, success, integrationId != null ? "[#" + integrationId + "] " + detail : detail);
@@ -412,7 +429,7 @@ public class JiraSyncService {
         return new JiraSyncConfigView(e.getId(), e.getIntegrationId(),
                 integration != null ? integration.getName() : null,
                 e.getProjectId(), e.getJiraProjectKey(), e.getJql(), e.isEnabled(),
-                e.getPollIntervalSec(), e.getLastSyncAt(), e.getLastWatermark(),
+                e.getPollIntervalSec(), e.getFirstSyncDays(), e.getLastSyncAt(), e.getLastWatermark(),
                 e.getLastImported(), e.getLastUpdatedCount(), e.getLastError(),
                 e.getCreatedAt(), e.getUpdatedAt());
     }

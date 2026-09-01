@@ -50,6 +50,8 @@ export interface JiraSyncConfig {
   jql?: string | null
   enabled: boolean
   pollIntervalSec: number
+  /** 首轮同步窗口（天），0 = 不限；仅无水印首轮生效 */
+  firstSyncDays: number
   lastSyncAt?: string | null
   lastWatermark?: string | null
   lastImported?: number | null
@@ -65,6 +67,7 @@ export interface JiraSyncConfigInput {
   jql?: string
   enabled?: boolean
   pollIntervalSec?: number
+  firstSyncDays?: number
 }
 
 /** 一次同步运行结果 */

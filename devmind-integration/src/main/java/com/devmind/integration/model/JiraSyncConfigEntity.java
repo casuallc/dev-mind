@@ -27,6 +27,8 @@ public class JiraSyncConfigEntity {
     public static final int PAGE_SIZE = 100;
     /** 水印回拨（防时钟/事务边界漏单；重复由 external_links 幂等兜住） */
     public static final long WATERMARK_OVERLAP_SECONDS = 60;
+    /** 首轮同步窗口默认天数：只拉近 N 天有更新的 issue，防老项目全量灌入 */
+    public static final int DEFAULT_FIRST_SYNC_DAYS = 7;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -46,6 +48,10 @@ public class JiraSyncConfigEntity {
     /** 附加 JQL 过滤片段（不含 project/updated/order by，如 "issuetype in (Story,Bug) AND labels = ai"） */
     @Column(name = "jql", length = 1024)
     private String jql;
+
+    /** 首轮同步窗口（天）：0 = 不限（全量，慎用）；仅在无水印的首轮生效 */
+    @Column(name = "first_sync_days", nullable = false)
+    private int firstSyncDays = DEFAULT_FIRST_SYNC_DAYS;
 
     @Column(nullable = false)
     private boolean enabled = true;
@@ -88,6 +94,8 @@ public class JiraSyncConfigEntity {
     public void setJiraProjectKey(String jiraProjectKey) { this.jiraProjectKey = jiraProjectKey; }
     public String getJql() { return jql; }
     public void setJql(String jql) { this.jql = jql; }
+    public int getFirstSyncDays() { return firstSyncDays; }
+    public void setFirstSyncDays(int firstSyncDays) { this.firstSyncDays = firstSyncDays; }
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public int getPollIntervalSec() { return pollIntervalSec; }
