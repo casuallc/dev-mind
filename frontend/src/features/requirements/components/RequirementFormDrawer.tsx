@@ -1,8 +1,8 @@
-// 需求新建/编辑弹窗：项目列表卡（新建）与需求详情页（编辑）复用。
+// 需求新建/编辑抽屉：项目列表卡（新建）与需求详情页（编辑）复用。
 // Jira 来源（source=JIRA）：托管字段（标题/类型/描述/优先级/标签/经办人/报告人/截止日期/修复版本）
 // 由同步维护、本地禁用，仅本地负责人可改（服务端同样强制忽略）。
 import { useEffect } from 'react'
-import { DatePicker, Form, Input, Modal, Select, message } from 'antd'
+import { Button, DatePicker, Drawer, Form, Input, Select, Space, message } from 'antd'
 import dayjs from 'dayjs'
 import { createRequirement, updateRequirement } from '../api'
 import type { Requirement, RequirementInput } from '../types'
@@ -13,7 +13,7 @@ type FormValues = Omit<RequirementInput, 'dueDate'> & { dueDate?: dayjs.Dayjs | 
 
 const JIRA_MANAGED_TIP = 'Jira 来源字段由同步维护，本地只读'
 
-export default function RequirementFormModal({ projectId, editing, open, onClose, onSaved }: {
+export default function RequirementFormDrawer({ projectId, editing, open, onClose, onSaved }: {
   projectId: string
   editing: Requirement | null
   open: boolean
@@ -57,14 +57,20 @@ export default function RequirementFormModal({ projectId, editing, open, onClose
   }
 
   return (
-    <Modal
+    <Drawer
       title={editing ? `编辑需求 ${editing.code}` : '新建需求'}
       open={open}
-      onCancel={onClose}
-      onOk={() => form.submit()}
-      okText="保存"
-      width={560}
+      onClose={onClose}
+      width={600}
       destroyOnHidden
+      footer={
+        <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" onClick={() => form.submit()}>
+            保存
+          </Button>
+        </Space>
+      }
     >
       <Form form={form} layout="vertical" onFinish={onSave} preserve={false}>
         <Form.Item label="标题" name="title" rules={[{ required: true, message: '请输入标题' }]}
@@ -103,6 +109,6 @@ export default function RequirementFormModal({ projectId, editing, open, onClose
           <Input placeholder="可选" />
         </Form.Item>
       </Form>
-    </Modal>
+    </Drawer>
   )
 }

@@ -29,7 +29,7 @@ import { deleteRequirement, getRequirementOverview, updateRequirementStatus } fr
 import FlowActions from '../components/flow/FlowActions'
 import DesignsTab from '../components/flow/DesignsTab'
 import RelatedRecordsTab from '../components/RelatedRecordsTab'
-import RequirementFormModal from '../components/RequirementFormModal'
+import RequirementFormDrawer from '../components/RequirementFormDrawer'
 import WorkItemsTab from '../components/WorkItemsTab'
 import { useProject } from '../../projects/hooks/useProject'
 import { getCurrentProjectId, setCurrentProject } from '../../../app/currentProjectStore'
@@ -314,7 +314,7 @@ export default function RequirementDetailPage() {
       </Row>
 
       {projectId && (
-        <RequirementFormModal
+        <RequirementFormDrawer
           projectId={projectId}
           editing={r}
           open={editOpen}

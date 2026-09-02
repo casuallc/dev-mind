@@ -7,7 +7,7 @@ import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { listRequirements } from '../api'
 import type { Requirement, RequirementSource, RequirementType } from '../types'
-import RequirementFormModal from './RequirementFormModal'
+import RequirementFormDrawer from './RequirementFormDrawer'
 import { fmtTime } from '../../../shared/utils/format'
 import {
   ALL_STATUSES,
@@ -211,7 +211,7 @@ export default function RequirementListCard({ projectId }: { projectId: string }
         />
       </Space>
 
-      <RequirementFormModal
+      <RequirementFormDrawer
         projectId={projectId}
         editing={null}
         open={createOpen}
