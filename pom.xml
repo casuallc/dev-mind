@@ -39,6 +39,8 @@
         <module>devmind-flow</module>
         <module>devmind-integration</module>
         <module>devmind-open-api</module>
+        <module>devmind-agent</module>
+        <module>devmind-agent-runner</module>
         <module>devmind-app</module>
         <module>devmind-dist</module>
     </modules>
@@ -142,6 +144,16 @@
             <dependency>
                 <groupId>com.devmind</groupId>
                 <artifactId>devmind-open-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.devmind</groupId>
+                <artifactId>devmind-agent</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.devmind</groupId>
+                <artifactId>devmind-agent-runner</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
