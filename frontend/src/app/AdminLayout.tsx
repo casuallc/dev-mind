@@ -9,6 +9,7 @@ import {
   FolderOutlined,
   KeyOutlined,
   ReadOutlined,
+  RobotOutlined,
   SafetyCertificateOutlined,
   ToolOutlined,
 } from '@ant-design/icons'
@@ -52,6 +53,7 @@ export default function AdminLayout() {
               children: [
                 { key: '/admin/projects', icon: <FolderOutlined />, label: '项目管理' },
                 { key: '/admin/servers', icon: <CloudServerOutlined />, label: '服务器运维' },
+                { key: '/admin/agent-nodes', icon: <RobotOutlined />, label: 'Agent 节点' },
                 { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
                 { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
                 { key: '/admin/templates', icon: <DeploymentUnitOutlined />, label: '会话模板' },

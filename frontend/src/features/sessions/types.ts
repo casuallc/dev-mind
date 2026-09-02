@@ -21,6 +21,8 @@ export interface SessionSummary {
   pid?: number
   model?: string
   summary?: string
+  /** CAP-21：远程执行节点 id；空 = 本地 */
+  agentNodeId?: string
   createdAt: string
   updatedAt: string
   finishedAt?: string

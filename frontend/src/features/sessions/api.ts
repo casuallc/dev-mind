@@ -24,6 +24,7 @@ export function createSession(body: {
   baseBranch?: string
   model?: string
   permissionMode?: string
+  agentNodeId?: string
 }): Promise<SessionSummary> {
   return api.post<SessionSummary>('/sessions', body)
 }

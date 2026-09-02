@@ -32,6 +32,7 @@ import DocEditorPage from '../features/docs/pages/DocEditorPage'
 import ServersPage from '../features/server-adapter/pages/ServersPage'
 import IntegrationsPage from '../features/integrations/pages/IntegrationsPage'
 import ApiKeysPage from '../features/open-api/pages/ApiKeysPage'
+import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
 import LoginPage from '../features/auth/pages/LoginPage'
 import UserManagementPage from '../features/auth/pages/UserManagementPage'
@@ -125,6 +126,8 @@ export default function App() {
           <Route path="/admin/integrations" element={<IntegrationsPage />} />
           {/* CAP-20 API 密钥（open-api HMAC 认证凭证） */}
           <Route path="/admin/keys" element={<ApiKeysPage />} />
+          {/* CAP-21 Agent 节点（远程执行节点注册/在线状态） */}
+          <Route path="/admin/agent-nodes" element={<AgentNodesPage />} />
           {/* CAP-05 会话模板 */}
           <Route path="/admin/templates" element={<SessionTemplates />} />
           {/* CAP-04 知识库 */}

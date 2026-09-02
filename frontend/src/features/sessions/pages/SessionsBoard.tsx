@@ -26,6 +26,8 @@ import { listProjects } from '../../projects/api'
 import type { Project } from '../../projects/types'
 import { listRequirements, listWorkItems } from '../../requirements/api'
 import type { Requirement, WorkItem } from '../../requirements/types'
+import { listAgentNodes } from '../../agent/api'
+import type { AgentNode } from '../../agent/types'
 import AgentPanel from '../components/AgentPanel'
 import { fmtTime } from '../../../shared/utils/format'
 
@@ -55,6 +57,7 @@ export default function SessionsBoard() {
   const [creating, setCreating] = useState(false)
   const [requirements, setRequirements] = useState<Requirement[]>([])
   const [workItems, setWorkItems] = useState<WorkItem[]>([])
+  const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
   const [form] = Form.useForm()
   const timerRef = useRef<number | undefined>(undefined)
   const watchProjectId = Form.useWatch('projectId', form)
@@ -82,6 +85,9 @@ export default function SessionsBoard() {
   useEffect(() => {
     listTemplates()
       .then(setTemplates)
+      .catch(() => undefined)
+    listAgentNodes()
+      .then(setAgentNodes)
       .catch(() => undefined)
     listProjects('ACTIVE')
       .then((ps) => {
@@ -150,6 +156,7 @@ export default function SessionsBoard() {
     projectId?: string
     requirementId?: string
     workItemId?: string
+    agentNodeId?: string
   }) => {
     setCreating(true)
     try {
@@ -161,6 +168,7 @@ export default function SessionsBoard() {
         projectId: values.projectId || undefined,
         requirementId: values.requirementId || undefined,
         workItemId: values.workItemId || undefined,
+        agentNodeId: values.agentNodeId || undefined,
       })
       setCreateOpen(false)
       form.resetFields()
@@ -211,6 +219,17 @@ export default function SessionsBoard() {
       dataIndex: 'state',
       width: 130,
       render: (s: string) => <Tag color={stateColor[s] ?? 'default'}>{s}</Tag>,
+    },
+    {
+      title: '节点',
+      dataIndex: 'agentNodeId',
+      width: 110,
+      render: (v?: string) =>
+        v ? (
+          <Tag color="purple">{agentNodes.find((n) => String(n.id) === v)?.name ?? `节点${v}`}</Tag>
+        ) : (
+          '本机'
+        ),
     },
     {
       title: '摘要',
@@ -342,6 +361,20 @@ export default function SessionsBoard() {
               options={projects.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))}
               placeholder="选择项目（无项目时可留空裸跑）"
               allowClear
+            />
+          </Form.Item>
+          <Form.Item
+            label="执行节点"
+            name="agentNodeId"
+            extra="默认本机执行；选择远程节点后，会话在该节点机上运行（工作目录取节点的项目路径映射）"
+          >
+            <Select
+              placeholder="本机（默认）"
+              allowClear
+              options={agentNodes
+                .filter((n) => n.status === 'ONLINE')
+                .map((n) => ({ value: String(n.id), label: `${n.name} (${n.os ?? '远程节点'})` }))}
+              notFoundContent="暂无在线节点（后台 → Agent 节点 注册）"
             />
           </Form.Item>
           <Form.Item label="关联需求" name="requirementId" extra="不选工作单元时直挂需求（分析型会话）">
