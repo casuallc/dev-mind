@@ -115,24 +115,6 @@ export interface BuildStepInput {
   location: string
 }
 
-export interface ReleaseConfig {
-  id: number
-  projectId: string
-  nexusRepo?: string
-  scriptTemplateRef?: string
-  versionRule?: string
-  executor?: string // CAP-11: LOCAL / REMOTE
-  remoteServerId?: number
-}
-
-export interface ReleaseConfigInput {
-  nexusRepo?: string
-  scriptTemplateRef?: string
-  versionRule?: string
-  executor?: string
-  remoteServerId?: number
-}
-
 export interface ProjectLock {
   projectId: string
   activeWrites: number

@@ -12,8 +12,6 @@ import type {
   ProjectRepo,
   ProjectRepoInput,
   ProjectServer,
-  ReleaseConfig,
-  ReleaseConfigInput,
   ServerInput,
   WorktreeInfo,
 } from './types'
@@ -131,16 +129,6 @@ export function deleteBuildStep(id: string, stepId: number): Promise<void> {
 
 export function reorderBuildSteps(id: string, steps: BuildStepInput[]): Promise<BuildStep[]> {
   return api.put<BuildStep[]>(`/projects/${id}/build-steps`, steps)
-}
-
-// ---------------- 发版配置 ----------------
-
-export function getReleaseConfig(id: string): Promise<ReleaseConfig | null> {
-  return api.get<ReleaseConfig | null>(`/projects/${id}/release-config`)
-}
-
-export function saveReleaseConfig(id: string, input: ReleaseConfigInput): Promise<ReleaseConfig> {
-  return api.post<ReleaseConfig>(`/projects/${id}/release-config`, input)
 }
 
 // ---------------- 锁定 ----------------
