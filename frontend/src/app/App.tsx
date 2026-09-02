@@ -26,6 +26,7 @@ import DeploymentsPage from '../features/deploy/pages/DeploymentsPage'
 import TestsPage from '../features/test/pages/TestsPage'
 import NotificationCenter from '../features/notifications/pages/NotificationCenter'
 import KnowledgeBase from '../features/knowledge/pages/KnowledgeBase'
+import SkillsPage from '../features/skills/pages/SkillsPage'
 import DocsPage from '../features/docs/pages/DocsPage'
 import DocEditorPage from '../features/docs/pages/DocEditorPage'
 import ServersPage from '../features/server-adapter/pages/ServersPage'
@@ -128,6 +129,8 @@ export default function App() {
           <Route path="/admin/templates" element={<SessionTemplates />} />
           {/* CAP-04 知识库 */}
           <Route path="/admin/knowledge" element={<KnowledgeBase />} />
+          {/* Skill 管理（基础模块，供其他业务引用） */}
+          <Route path="/admin/skills" element={<SkillsPage />} />
           {/* CAP-03 文档 */}
           <Route path="/admin/docs" element={<DocsPage />} />
           <Route path="/admin/docs/:id" element={<DocEditorPage />} />

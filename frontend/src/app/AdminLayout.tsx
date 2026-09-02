@@ -10,6 +10,7 @@ import {
   KeyOutlined,
   ReadOutlined,
   SafetyCertificateOutlined,
+  ToolOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect } from 'react'
@@ -61,6 +62,7 @@ export default function AdminLayout() {
               label: '内容',
               children: [
                 { key: '/admin/knowledge', icon: <ReadOutlined />, label: '知识库' },
+                { key: '/admin/skills', icon: <ToolOutlined />, label: 'Skill 管理' },
                 { key: '/admin/docs', icon: <FileTextOutlined />, label: '文档管理' },
               ],
             },
