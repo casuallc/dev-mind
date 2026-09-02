@@ -1,4 +1,4 @@
-// CAP-02 后台项目列表：表格 + 新建/编辑（ProjectFormModal）+ 居中确认删除。仅 ADMIN（RequireAdmin 守卫）。
+// CAP-02 后台项目列表：表格 + 新建/编辑（ProjectFormDrawer）+ 居中确认删除。仅 ADMIN（RequireAdmin 守卫）。
 import { useCallback, useEffect, useState } from 'react'
 import { Alert, Button, Card, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -6,7 +6,7 @@ import { PlusOutlined, ReloadOutlined, RobotOutlined, SettingOutlined } from '@a
 import { useNavigate } from 'react-router-dom'
 import { deleteProject, listProjects } from '../api'
 import { onboardProject } from '../../open-api/api'
-import ProjectFormModal from '../components/ProjectFormModal'
+import ProjectFormDrawer from '../components/ProjectFormDrawer'
 import { CLONE_STATUS_COLOR } from '../components/CloneLogDrawer'
 import type { Project } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
@@ -194,7 +194,7 @@ export default function AdminProjectsPage() {
         locale={{ emptyText: '暂无项目。点击「新建项目」注册一个本地 git 仓库。' }}
       />
 
-      <ProjectFormModal
+      <ProjectFormDrawer
         open={editOpen}
         project={editing}
         onCancel={() => setEditOpen(false)}

@@ -1,8 +1,9 @@
-// 项目仓库页（/admin/projects/:id/repos，P0-4 多库模型）：列表 + 添加/编辑弹窗 + 设主库/移除。
-// CAP-23：克隆状态列 + 克隆/重试/日志操作 + 弹窗按 sourceType 切换（LOCAL 填路径，CLONE 填远端+集成实例）。
+// 项目仓库页（/admin/projects/:id/repos，P0-4 多库模型）：列表 + 添加/编辑抽屉 + 设主库/移除。
+// CAP-23：克隆状态列 + 克隆/重试/日志操作 + 抽屉按 sourceType 切换（LOCAL 填路径，CLONE 填远端+集成实例）。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Button,
+  Drawer,
   Form,
   Input,
   InputNumber,
@@ -229,8 +230,14 @@ export default function ReposPage() {
         </Typography.Text>
       </Space>
       <Table rowKey="id" size="small" columns={columns} dataSource={repos} loading={loading} pagination={false} />
-      <Modal title={editing ? '编辑仓库' : '添加仓库'} open={open} onCancel={() => setOpen(false)}
-        onOk={() => form.submit()} okText="保存" width={560} destroyOnHidden>
+      <Drawer title={editing ? '编辑仓库' : '添加仓库'} open={open} onClose={() => setOpen(false)}
+        width={600} destroyOnHidden
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setOpen(false)}>取消</Button>
+            <Button type="primary" onClick={() => form.submit()}>保存</Button>
+          </Space>
+        }>
         <Form form={form} layout="vertical" onFinish={onSave}>
           <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入名称' }]}>
             <Input placeholder="如 后端服务 / 前端 / 文档库" />
@@ -285,7 +292,7 @@ export default function ReposPage() {
             <InputNumber min={0} />
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
       <CloneLogDrawer
         projectId={id}
         repo={logRepo}

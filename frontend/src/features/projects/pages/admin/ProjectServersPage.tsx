@@ -1,7 +1,8 @@
-// 项目服务器页（/admin/projects/:id/servers）：列表 + 添加/编辑弹窗 + 删除。
+// 项目服务器页（/admin/projects/:id/servers）：列表 + 添加/编辑抽屉 + 删除。
 import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
+  Drawer,
   Form,
   Input,
   Modal,
@@ -125,8 +126,14 @@ export default function ProjectServersPage() {
         添加服务器
       </Button>
       <Table rowKey="id" size="small" columns={columns} dataSource={servers} loading={loading} pagination={false} />
-      <Modal title={editing ? '编辑服务器' : '添加服务器'} open={open} onCancel={() => setOpen(false)}
-        onOk={() => form.submit()} okText="保存" width={560}>
+      <Drawer title={editing ? '编辑服务器' : '添加服务器'} open={open} onClose={() => setOpen(false)}
+        width={600}
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setOpen(false)}>取消</Button>
+            <Button type="primary" onClick={() => form.submit()}>保存</Button>
+          </Space>
+        }>
         <Form form={form} layout="vertical" onFinish={onSave}>
           <Form.Item label="名称" name="name" rules={[{ required: true }]}>
             <Input placeholder="如 生产环境网关" />
@@ -147,7 +154,7 @@ export default function ProjectServersPage() {
             <Switch />
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
     </Space>
   )
 }

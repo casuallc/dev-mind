@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { Button, Card, Descriptions, Empty, Space, Spin, Tabs, Tag, Typography } from 'antd'
 import { EditOutlined, ReloadOutlined } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
-import ProjectFormModal from '../../components/ProjectFormModal'
+import ProjectFormDrawer from '../../components/ProjectFormDrawer'
 import { useProject } from '../../hooks/useProject'
 import { fmtTime } from '../../../../shared/utils/format'
 
@@ -93,7 +93,7 @@ export default function ProjectSettingsLayout() {
         <Outlet context={{ reloadProject: reload }} />
       </Card>
 
-      <ProjectFormModal
+      <ProjectFormDrawer
         open={editOpen}
         project={project}
         onCancel={() => setEditOpen(false)}

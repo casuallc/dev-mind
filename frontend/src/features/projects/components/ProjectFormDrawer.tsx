@@ -1,7 +1,7 @@
 // CAP-02 统一的新建/编辑项目表单：后台项目列表与项目设置页共用。
 // CAP-23：仓库来源支持 本地路径 / 从 Git 克隆（GitLab/GitHub，异步克隆到服务端工作区）。
 import { useEffect, useState } from 'react'
-import { Form, Input, Modal, Radio, Select, Switch, message } from 'antd'
+import { Button, Drawer, Form, Input, Radio, Select, Space, Switch, message } from 'antd'
 import { createProject, updateProject } from '../api'
 import type { Project, ProjectInput } from '../types'
 import { useGitIntegrations } from '../hooks/useGitIntegrations'
@@ -19,7 +19,7 @@ interface Props {
   onSaved: () => void
 }
 
-export default function ProjectFormModal({ open, project, onCancel, onSaved }: Props) {
+export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: Props) {
   const [form] = Form.useForm<ProjectInput>()
   const [saving, setSaving] = useState(false)
   const sourceType = Form.useWatch('sourceType', form) ?? 'LOCAL'
@@ -79,15 +79,20 @@ export default function ProjectFormModal({ open, project, onCancel, onSaved }: P
   }
 
   return (
-    <Modal
+    <Drawer
       title={project ? '编辑项目' : '新建项目'}
       open={open}
-      onCancel={onCancel}
-      onOk={() => form.submit()}
-      confirmLoading={saving}
-      okText="保存"
-      width={560}
+      onClose={onCancel}
+      width={600}
       destroyOnHidden
+      footer={
+        <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button onClick={onCancel}>取消</Button>
+          <Button type="primary" loading={saving} onClick={() => form.submit()}>
+            保存
+          </Button>
+        </Space>
+      }
     >
       <Form form={form} layout="vertical" onFinish={onSave}>
         <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入名称' }]}>
@@ -167,6 +172,6 @@ export default function ProjectFormModal({ open, project, onCancel, onSaved }: P
           <Switch />
         </Form.Item>
       </Form>
-    </Modal>
+    </Drawer>
   )
 }
