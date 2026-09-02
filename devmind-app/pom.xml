@@ -133,6 +133,10 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <!-- 跳过 repackage：产出瘦 jar，依赖散 jar 由 devmind-dist 收进 libs/（便于单 jar 替换更新） -->
+                    <skip>true</skip>
+                </configuration>
             </plugin>
         </plugins>
     </build>
