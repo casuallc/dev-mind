@@ -4,10 +4,10 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   AutoComplete,
   Button,
+  Drawer,
   Form,
   Input,
   InputNumber,
-  Modal,
   Popconfirm,
   Select,
   Space,
@@ -272,15 +272,20 @@ export default function JiraSyncTab({ projectId }: Props) {
         ]}
       />
 
-      <Modal
+      <Drawer
         title={editing ? `编辑 Jira 同步「${editing.jiraProjectKey}」` : '新建 Jira 同步'}
         open={editOpen}
-        onCancel={() => setEditOpen(false)}
-        onOk={() => form.submit()}
-        confirmLoading={saving}
-        okText="保存"
-        width={520}
+        onClose={() => setEditOpen(false)}
+        width={560}
         destroyOnHidden
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setEditOpen(false)}>取消</Button>
+            <Button type="primary" loading={saving} onClick={() => form.submit()}>
+              保存
+            </Button>
+          </Space>
+        }
       >
         <Form form={form} layout="vertical" onFinish={onSave}>
           <Form.Item
@@ -330,7 +335,7 @@ export default function JiraSyncTab({ projectId }: Props) {
             <Switch />
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
     </Space>
   )
 }

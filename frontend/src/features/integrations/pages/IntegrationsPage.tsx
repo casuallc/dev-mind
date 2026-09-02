@@ -4,9 +4,9 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
   Card,
+  Drawer,
   Form,
   Input,
-  Modal,
   Select,
   Space,
   Table,
@@ -230,15 +230,20 @@ export default function IntegrationsPage() {
         ]}
       />
 
-      <Modal
+      <Drawer
         title={editing ? `编辑集成「${editing.name}」` : '新建集成'}
         open={editOpen}
-        onCancel={() => setEditOpen(false)}
-        onOk={() => form.submit()}
-        confirmLoading={saving}
-        okText="保存"
-        width={520}
+        onClose={() => setEditOpen(false)}
+        width={560}
         destroyOnHidden
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setEditOpen(false)}>取消</Button>
+            <Button type="primary" loading={saving} onClick={() => form.submit()}>
+              保存
+            </Button>
+          </Space>
+        }
       >
         <Form form={form} layout="vertical" onFinish={onSave}>
           <Form.Item label="平台类型" name="type" rules={[{ required: true, message: '请选择平台类型' }]}>
@@ -311,7 +316,7 @@ export default function IntegrationsPage() {
             />
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
     </Card>
   )
 }
