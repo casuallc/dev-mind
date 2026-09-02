@@ -26,6 +26,14 @@
             <artifactId>devmind-project</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-execution</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-websocket</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
