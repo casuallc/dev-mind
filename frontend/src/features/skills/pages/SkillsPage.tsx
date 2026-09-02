@@ -1,4 +1,4 @@
-// Skill 管理（基础模块）：skill 包列表 + 筛选 + 启停/删除；新建/编辑走 SkillFormModal，附件走 SkillFilesDrawer。
+// Skill 管理（基础模块）：skill 包列表 + 筛选 + 启停/删除；新建/编辑走 SkillFormDrawer，附件走 SkillFilesDrawer。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Card, Input, message, Modal, Select, Space, Table, Tag, Typography } from 'antd'
 import {
@@ -15,7 +15,7 @@ import { listProjects } from '../../projects/api'
 import type { Project } from '../../projects/types'
 import { deleteSkill, getSkill, listSkills, updateSkillStatus } from '../api'
 import type { Skill, SkillDetail } from '../types'
-import SkillFormModal from '../components/SkillFormModal'
+import SkillFormDrawer from '../components/SkillFormDrawer'
 import SkillFilesDrawer from '../components/SkillFilesDrawer'
 import { fmtTime } from '../../../shared/utils/format'
 
@@ -256,7 +256,7 @@ export default function SkillsPage() {
         }}
       />
 
-      <SkillFormModal
+      <SkillFormDrawer
         open={formOpen}
         editing={editing}
         projects={projects}

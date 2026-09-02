@@ -1,6 +1,6 @@
-// Skill 新建/编辑弹窗：scope/projectId 仅创建时可改；contentMd 为 SKILL.md 正文，支持 Markdown 预览。
+// Skill 新建/编辑抽屉：scope/projectId 仅创建时可改；contentMd 为 SKILL.md 正文，支持 Markdown 预览。
 import { useEffect } from 'react'
-import { Form, Input, Modal, Select, Tabs, message } from 'antd'
+import { Button, Drawer, Form, Input, Select, Space, Tabs, message } from 'antd'
 import { createSkill, updateSkill } from '../api'
 import type { SkillDetail, SkillInput } from '../types'
 import type { Project } from '../../projects/types'
@@ -8,7 +8,7 @@ import Markdown from '../../docs/components/Markdown'
 
 const NAME_RULE = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
-export default function SkillFormModal({ open, editing, projects, onClose, onSaved }: {
+export default function SkillFormDrawer({ open, editing, projects, onClose, onSaved }: {
   open: boolean
   editing: SkillDetail | null
   projects: Project[]
@@ -55,14 +55,20 @@ export default function SkillFormModal({ open, editing, projects, onClose, onSav
   }
 
   return (
-    <Modal
+    <Drawer
       title={editing ? `编辑 Skill「${editing.skill.name}」` : '新增 Skill'}
       open={open}
-      onCancel={onClose}
-      onOk={() => form.submit()}
-      okText="保存"
-      width={760}
+      onClose={onClose}
+      width={720}
       destroyOnHidden
+      footer={
+        <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" onClick={() => form.submit()}>
+            保存
+          </Button>
+        </Space>
+      }
     >
       <Form form={form} layout="vertical" onFinish={onSave} preserve={false}>
         <Form.Item label="范围" name="scope" rules={[{ required: true }]}
@@ -136,6 +142,6 @@ export default function SkillFormModal({ open, editing, projects, onClose, onSav
           />
         </Form.Item>
       </Form>
-    </Modal>
+    </Drawer>
   )
 }

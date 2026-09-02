@@ -1,5 +1,5 @@
 // Skill 附件管理抽屉：附件列表 + 文本文件新增/编辑（Base64 传输）+ 二进制上传 + 下载/删除。
-// SKILL.md 本体不在此管理（走 SkillFormModal 正文）。
+// SKILL.md 本体不在此管理（走 SkillFormDrawer 正文）。
 import { useCallback, useEffect, useState } from 'react'
 import { Button, Drawer, Form, Input, message, Modal, Space, Table, Typography, Upload } from 'antd'
 import { DeleteOutlined, DownloadOutlined, EditOutlined, FileAddOutlined, UploadOutlined } from '@ant-design/icons'
