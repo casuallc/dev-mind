@@ -6,7 +6,7 @@
 
 ## 通用技术基线
 
-- **单体仓库，前后端一体**：一个项目 `dev-mind/`。后端 Spring Boot 4.2.x（REST + WebSocket + 静态托管前端构建产物）；前端 React + Ant Design 5（Vite 构建后由后端托管，浏览器访问）。
+- **单体仓库，前后端一体**：一个项目 `dev-mind/`。后端 Spring Boot 4.1.1（REST + WebSocket + 静态托管前端构建产物；公司 Nexus 无 4.2.x 正式版，4.2 正式版上线后可升级）；前端 React + Ant Design 5（Vite 构建后由后端托管，浏览器访问）。
 - **本地优先**：跑在个人开发机（Windows），单用户起步，为多人协作预留扩展。
 - **结构化存储**：H2 文件模式（后续可平滑切 PostgreSQL），存流程/会话/事件等结构化数据。
 - **文档与代码分离**：文档库 `docs-repo/` 与经验库 `knowledge-repo/` 均为独立 git 仓库，平台不存代码，只引用项目 git 仓库。
