@@ -1,27 +1,36 @@
-// 上下文摘要 Tab：重新扫描生成 + 人工编辑保存。
-import { useEffect, useState } from 'react'
+// 上下文摘要页（/admin/projects/:id/summary）：重新扫描生成 + 人工编辑保存。
+import { useCallback, useEffect, useState } from 'react'
 import { Button, Input, Space, Typography, message } from 'antd'
 import { DiffOutlined, ReloadOutlined } from '@ant-design/icons'
-import { refreshSummary, saveSummary } from '../../api'
+import { useParams } from 'react-router-dom'
+import { getSummary, refreshSummary, saveSummary } from '../../api'
 import type { ContextSummary } from '../../types'
 
-export default function SummaryTab({ id, summary, onChanged, readOnly }: {
-  id: string
-  summary: ContextSummary
-  onChanged: (s: ContextSummary) => void
-  /** 只读模式（工作台 /settings 对 VIEWER）：隐藏生成/保存，文本框只读 */
-  readOnly?: boolean
-}) {
-  const [text, setText] = useState(summary.summary)
+export default function SummaryPage() {
+  const { id = '' } = useParams<{ id: string }>()
+  const [summary, setSummary] = useState<ContextSummary>({ projectId: id, summary: '' })
+  const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
 
-  useEffect(() => setText(summary.summary), [summary.summary])
+  const load = useCallback(() => {
+    getSummary(id)
+      .then((s) => {
+        setSummary(s)
+        setText(s.summary)
+      })
+      .catch(() => {})
+  }, [id])
+
+  useEffect(() => {
+    load()
+  }, [load])
 
   const doRefresh = async () => {
     setBusy(true)
     try {
       const s = await refreshSummary(id)
-      onChanged(s)
+      setSummary(s)
+      setText(s.summary)
       message.success('已重新扫描生成摘要')
     } catch (e) {
       message.error(`生成失败：${(e as Error).message}`)
@@ -34,7 +43,7 @@ export default function SummaryTab({ id, summary, onChanged, readOnly }: {
     setBusy(true)
     try {
       const s = await saveSummary(id, text)
-      onChanged(s)
+      setSummary(s)
       message.success('已保存（人工修正）')
     } catch (e) {
       message.error(`保存失败：${(e as Error).message}`)
@@ -46,16 +55,12 @@ export default function SummaryTab({ id, summary, onChanged, readOnly }: {
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       <Space>
-        {!readOnly && (
-          <>
-            <Button size="small" type="primary" icon={<ReloadOutlined />} loading={busy} onClick={doRefresh}>
-              重新扫描生成
-            </Button>
-            <Button size="small" type="primary" ghost icon={<DiffOutlined />} loading={busy} onClick={doSave}>
-              保存修改
-            </Button>
-          </>
-        )}
+        <Button size="small" type="primary" icon={<ReloadOutlined />} loading={busy} onClick={doRefresh}>
+          重新扫描生成
+        </Button>
+        <Button size="small" type="primary" ghost icon={<DiffOutlined />} loading={busy} onClick={doSave}>
+          保存修改
+        </Button>
         {summary.generatedAt && (
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             生成于 {new Date(summary.generatedAt).toLocaleString()}
@@ -65,7 +70,6 @@ export default function SummaryTab({ id, summary, onChanged, readOnly }: {
       <Input.TextArea
         rows={18}
         value={text}
-        readOnly={readOnly}
         onChange={(e) => setText(e.target.value)}
         placeholder="点击「重新扫描生成」自动扫描仓库结构；也可直接编辑此摘要作为项目上下文（供需求对话/方案/会话注入）。"
         style={{ fontFamily: 'monospace', fontSize: 12 }}

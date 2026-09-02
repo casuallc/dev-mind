@@ -1,5 +1,5 @@
-// 项目仓库 Tab（P0-4 多库模型）：列表 + 添加/编辑弹窗 + 设主库/移除。
-import { useState } from 'react'
+// 项目仓库页（/admin/projects/:id/repos，P0-4 多库模型）：列表 + 添加/编辑弹窗 + 设主库/移除。
+import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
   Form,
@@ -16,21 +16,36 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined } from '@ant-design/icons'
+import { useOutletContext, useParams } from 'react-router-dom'
 import { addRepo, deleteRepo, listRepos, setPrimaryRepo, updateRepo } from '../../api'
 import type { ProjectRepo, ProjectRepoInput } from '../../types'
 
 const ROLE_OPTIONS = ['CODE', 'DOCS', 'CONFIG']
 
-export default function ReposTab({ id, repos, onChanged, readOnly }: {
-  id: string
-  repos: ProjectRepo[]
-  onChanged: (r: ProjectRepo[]) => void
-  /** 只读模式（工作台 /settings 对 VIEWER）：隐藏增删改入口 */
-  readOnly?: boolean
-}) {
+export default function ReposPage() {
+  const { id = '' } = useParams<{ id: string }>()
+  // 主库切换会同步 projects.path 镜像，通知布局刷新头部展示
+  const { reloadProject } = useOutletContext<{ reloadProject: () => void }>()
+  const [repos, setRepos] = useState<ProjectRepo[]>([])
+  const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<ProjectRepo | null>(null)
   const [form] = Form.useForm()
+
+  const reload = useCallback(async () => {
+    setLoading(true)
+    try {
+      setRepos(await listRepos(id))
+    } catch (e) {
+      message.error(`加载仓库失败：${(e as Error).message}`)
+    } finally {
+      setLoading(false)
+    }
+  }, [id])
+
+  useEffect(() => {
+    reload()
+  }, [reload])
 
   const openEdit = (r: ProjectRepo | null) => {
     setEditing(r)
@@ -39,8 +54,6 @@ export default function ReposTab({ id, repos, onChanged, readOnly }: {
     )
     setOpen(true)
   }
-
-  const reload = async () => onChanged(await listRepos(id))
 
   const onSave = async (v: ProjectRepoInput) => {
     try {
@@ -68,6 +81,7 @@ export default function ReposTab({ id, repos, onChanged, readOnly }: {
         try {
           await setPrimaryRepo(id, r.id)
           await reload()
+          reloadProject()
           message.success('已切换主库')
         } catch (e) {
           message.error((e as Error).message)
@@ -113,7 +127,7 @@ export default function ReposTab({ id, repos, onChanged, readOnly }: {
     { title: '默认分支', dataIndex: 'defaultBranch', width: 110, render: (v?: string) => v || '-' },
     { title: '远端', dataIndex: 'remoteUrl', width: 160, ellipsis: true, render: (v?: string) => v || '-' },
     { title: '排序', dataIndex: 'sortOrder', width: 60 },
-    ...(!readOnly ? [{
+    {
       title: '操作',
       key: 'action',
       width: 200,
@@ -124,22 +138,20 @@ export default function ReposTab({ id, repos, onChanged, readOnly }: {
           {!r.primary && <Button size="small" danger onClick={() => confirmDelete(r)}>移除</Button>}
         </Space>
       ),
-    }] : []),
+    },
   ]
 
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       <Space>
-        {!readOnly && (
-          <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-            添加仓库
-          </Button>
-        )}
+        <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
+          添加仓库
+        </Button>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           项目为多 git 库组合：代码/文档/配置各有角色；恰好一个主库（projects.path 为主库镜像）。
         </Typography.Text>
       </Space>
-      <Table rowKey="id" size="small" columns={columns} dataSource={repos} pagination={false} />
+      <Table rowKey="id" size="small" columns={columns} dataSource={repos} loading={loading} pagination={false} />
       <Modal title={editing ? '编辑仓库' : '添加仓库'} open={open} onCancel={() => setOpen(false)}
         onOk={() => form.submit()} okText="保存" width={560}>
         <Form form={form} layout="vertical" onFinish={onSave}>

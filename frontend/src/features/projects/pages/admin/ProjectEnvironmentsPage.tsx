@@ -1,5 +1,5 @@
-// 环境 Tab（P1-1）：环境聚合服务器 + 变量 + 密钥引用。
-import { useState } from 'react'
+// 项目环境页（/admin/projects/:id/environments，P1-1）：环境聚合服务器 + 变量 + 密钥引用。
+import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
   Form,
@@ -14,9 +14,10 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined } from '@ant-design/icons'
-import { addEnvironment, deleteEnvironment, listEnvironments, updateEnvironment } from '../../api'
+import { useParams } from 'react-router-dom'
+import { addEnvironment, deleteEnvironment, listEnvironments, listServers, updateEnvironment } from '../../api'
 import type { EnvironmentInput, ProjectEnvironment, ProjectServer } from '../../types'
-import { envColor } from './utils'
+import { envColor } from '../../components/utils'
 
 const ENV_NAME_OPTIONS = ['DEV', 'TEST', 'STAGING', 'PROD']
 
@@ -37,17 +38,32 @@ function textToVars(text: string): Record<string, string> {
   return out
 }
 
-export default function EnvironmentsTab({ id, environments, servers, onChanged, readOnly }: {
-  id: string
-  environments: ProjectEnvironment[]
-  servers: ProjectServer[]
-  onChanged: (e: ProjectEnvironment[]) => void
-  /** 只读模式（工作台 /settings 对 VIEWER）：隐藏增删改入口 */
-  readOnly?: boolean
-}) {
+export default function ProjectEnvironmentsPage() {
+  const { id = '' } = useParams<{ id: string }>()
+  const [environments, setEnvironments] = useState<ProjectEnvironment[]>([])
+  const [servers, setServers] = useState<ProjectServer[]>([])
+  const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<ProjectEnvironment | null>(null)
   const [form] = Form.useForm()
+
+  const reload = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [envs, srvs] = await Promise.all([
+        listEnvironments(id).catch(() => []),
+        listServers(id).catch(() => []),
+      ])
+      setEnvironments(envs)
+      setServers(srvs)
+    } finally {
+      setLoading(false)
+    }
+  }, [id])
+
+  useEffect(() => {
+    reload()
+  }, [reload])
 
   const serverOptions = servers.map((sv) => ({ value: sv.id, label: `${sv.name}（#${sv.id}）` }))
 
@@ -76,7 +92,7 @@ export default function EnvironmentsTab({ id, environments, servers, onChanged, 
         await addEnvironment(id, input)
       }
       setOpen(false)
-      onChanged(await listEnvironments(id))
+      await reload()
       message.success('已保存')
     } catch (e) {
       message.error(`保存失败：${(e as Error).message}`)
@@ -93,7 +109,7 @@ export default function EnvironmentsTab({ id, environments, servers, onChanged, 
       cancelText: '取消',
       onOk: async () => {
         await deleteEnvironment(id, e.id)
-        onChanged(await listEnvironments(id))
+        await reload()
         message.success('已删除')
       },
     })
@@ -125,7 +141,7 @@ export default function EnvironmentsTab({ id, environments, servers, onChanged, 
       render: (sec: string[]) => sec?.length ? sec.map((x) => <Tag key={x} color="purple">{x}</Tag>) : '-',
     },
     { title: '描述', dataIndex: 'description', ellipsis: true, render: (d?: string) => d || '-' },
-    ...(!readOnly ? [{
+    {
       title: '操作',
       key: 'action',
       width: 120,
@@ -135,22 +151,20 @@ export default function EnvironmentsTab({ id, environments, servers, onChanged, 
           <Button size="small" danger onClick={() => confirmDelete(r)}>删除</Button>
         </Space>
       ),
-    }] : []),
+    },
   ]
 
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       <Space>
-        {!readOnly && (
-          <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-            添加环境
-          </Button>
-        )}
+        <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
+          添加环境
+        </Button>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           部署/测试目标从服务器升级为环境（DEV/TEST/STAGING/PROD），环境聚合服务器 + 变量 + 密钥引用
         </Typography.Text>
       </Space>
-      <Table rowKey="id" size="small" columns={columns} dataSource={environments} pagination={false} />
+      <Table rowKey="id" size="small" columns={columns} dataSource={environments} loading={loading} pagination={false} />
       <Modal title={editing ? `编辑环境 ${editing.name}` : '添加环境'} open={open} onCancel={() => setOpen(false)}
         onOk={() => form.submit()} okText="保存" width={560}>
         <Form form={form} layout="vertical" onFinish={onSave}>

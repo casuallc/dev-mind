@@ -1,5 +1,5 @@
-// 服务器 Tab：列表 + 添加/编辑弹窗 + 删除。
-import { useState } from 'react'
+// 项目服务器页（/admin/projects/:id/servers）：列表 + 添加/编辑弹窗 + 删除。
+import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
   Form,
@@ -14,23 +14,36 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined } from '@ant-design/icons'
+import { useParams } from 'react-router-dom'
 import { addServer, deleteServer, listServers, updateServer } from '../../api'
 import type { ProjectServer, ServerInput } from '../../types'
-import { envColor } from './utils'
+import { envColor } from '../../components/utils'
 
 const ENV_OPTIONS = ['test', 'staging', 'prod']
 const ACCESS_OPTIONS = ['ssh', 'http']
 
-export default function ServersTab({ id, servers, onChanged, readOnly }: {
-  id: string
-  servers: ProjectServer[]
-  onChanged: (s: ProjectServer[]) => void
-  /** 只读模式（工作台 /settings 对 VIEWER）：隐藏增删改入口 */
-  readOnly?: boolean
-}) {
+export default function ProjectServersPage() {
+  const { id = '' } = useParams<{ id: string }>()
+  const [servers, setServers] = useState<ProjectServer[]>([])
+  const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<ProjectServer | null>(null)
   const [form] = Form.useForm()
+
+  const reload = useCallback(async () => {
+    setLoading(true)
+    try {
+      setServers(await listServers(id))
+    } catch (e) {
+      message.error(`加载服务器失败：${(e as Error).message}`)
+    } finally {
+      setLoading(false)
+    }
+  }, [id])
+
+  useEffect(() => {
+    reload()
+  }, [reload])
 
   const openEdit = (s: ProjectServer | null) => {
     setEditing(s)
@@ -48,7 +61,7 @@ export default function ServersTab({ id, servers, onChanged, readOnly }: {
         await addServer(id, v)
       }
       setOpen(false)
-      onChanged(await listServers(id))
+      await reload()
       message.success('已保存')
     } catch (e) {
       message.error(`保存失败：${(e as Error).message}`)
@@ -65,7 +78,7 @@ export default function ServersTab({ id, servers, onChanged, readOnly }: {
       cancelText: '取消',
       onOk: async () => {
         await deleteServer(id, s.id)
-        onChanged(await listServers(id))
+        await reload()
         message.success('已删除')
       },
     })
@@ -93,7 +106,7 @@ export default function ServersTab({ id, servers, onChanged, readOnly }: {
       width: 80,
       render: (v: boolean) => (v ? <Tag color="green">启用</Tag> : <Tag>停用</Tag>),
     },
-    ...(!readOnly ? [{
+    {
       title: '操作',
       key: 'action',
       width: 120,
@@ -103,17 +116,15 @@ export default function ServersTab({ id, servers, onChanged, readOnly }: {
           <Button size="small" danger onClick={() => confirmDelete(r)}>删除</Button>
         </Space>
       ),
-    }] : []),
+    },
   ]
 
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      {!readOnly && (
-        <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-          添加服务器
-        </Button>
-      )}
-      <Table rowKey="id" size="small" columns={columns} dataSource={servers} pagination={false} />
+      <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)} style={{ alignSelf: 'flex-start' }}>
+        添加服务器
+      </Button>
+      <Table rowKey="id" size="small" columns={columns} dataSource={servers} loading={loading} pagination={false} />
       <Modal title={editing ? '编辑服务器' : '添加服务器'} open={open} onCancel={() => setOpen(false)}
         onOk={() => form.submit()} okText="保存" width={560}>
         <Form form={form} layout="vertical" onFinish={onSave}>

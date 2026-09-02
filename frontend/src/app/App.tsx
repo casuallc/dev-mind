@@ -12,7 +12,15 @@ import RequirementsPage from '../features/requirements/pages/RequirementsPage'
 import ProjectContextGate from './ProjectContextGate'
 import RequirementDetailPage from '../features/requirements/pages/RequirementDetailPage'
 import AdminProjectsPage from '../features/projects/pages/AdminProjectsPage'
-import AdminProjectDetail from '../features/projects/pages/AdminProjectDetail'
+import ProjectSettingsLayout from '../features/projects/pages/admin/ProjectSettingsLayout'
+import ReposPage from '../features/projects/pages/admin/ReposPage'
+import SummaryPage from '../features/projects/pages/admin/SummaryPage'
+import ProjectServersPage from '../features/projects/pages/admin/ProjectServersPage'
+import ProjectEnvironmentsPage from '../features/projects/pages/admin/ProjectEnvironmentsPage'
+import BuildStepsPage from '../features/projects/pages/admin/BuildStepsPage'
+import ReleaseConfigPage from '../features/projects/pages/admin/ReleaseConfigPage'
+import JiraSyncPage from '../features/projects/pages/admin/JiraSyncPage'
+import LockPage from '../features/projects/pages/admin/LockPage'
 import BuildsPage from '../features/build/pages/BuildsPage'
 import DeploymentsPage from '../features/deploy/pages/DeploymentsPage'
 import TestsPage from '../features/test/pages/TestsPage'
@@ -95,9 +103,19 @@ export default function App() {
           <Route path="/admin" element={<Navigate to="/admin/projects" replace />} />
           {/* CAP-16 指挥中心（全局视角，仅 ADMIN） */}
           <Route path="/admin/dashboard" element={<DashboardPage />} />
-          {/* CAP-02 项目管理（增删改 + 项目配置） */}
+          {/* CAP-02 项目管理（增删改 + 项目配置；配置为嵌套子路由，各自独立加载） */}
           <Route path="/admin/projects" element={<AdminProjectsPage />} />
-          <Route path="/admin/projects/:id" element={<AdminProjectDetail />} />
+          <Route path="/admin/projects/:id" element={<ProjectSettingsLayout />}>
+            <Route index element={<Navigate to="repos" replace />} />
+            <Route path="repos" element={<ReposPage />} />
+            <Route path="summary" element={<SummaryPage />} />
+            <Route path="servers" element={<ProjectServersPage />} />
+            <Route path="environments" element={<ProjectEnvironmentsPage />} />
+            <Route path="build" element={<BuildStepsPage />} />
+            <Route path="release" element={<ReleaseConfigPage />} />
+            <Route path="jira" element={<JiraSyncPage />} />
+            <Route path="lock" element={<LockPage />} />
+          </Route>
           {/* CAP-01 用户管理 */}
           <Route path="/admin/users" element={<UserManagementPage />} />
           {/* CAP-07 服务器适配器 */}

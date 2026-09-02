@@ -1,6 +1,6 @@
-// 构建步骤配置 Tab（后台项目详情内）：有序构建步骤（上移/下移/增删改）。
+// 构建步骤配置页（/admin/projects/:id/build）：有序构建步骤（上移/下移/增删改）。
 // 注意与 build 模块的构建记录页区分：这里管「步骤配置」，不管触发与历史。
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
   Form,
@@ -16,6 +16,7 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ArrowDownOutlined, ArrowUpOutlined, PlusOutlined } from '@ant-design/icons'
+import { useParams } from 'react-router-dom'
 import {
   addBuildStep,
   deleteBuildStep,
@@ -27,16 +28,28 @@ import type { BuildStep, BuildStepInput } from '../../types'
 
 const LOCATION_OPTIONS = ['LOCAL', 'REMOTE']
 
-export default function BuildConfigTab({ id, steps, onChanged, readOnly }: {
-  id: string
-  steps: BuildStep[]
-  onChanged: (s: BuildStep[]) => void
-  /** 只读模式（工作台 /settings 对 VIEWER）：隐藏增删改/排序入口 */
-  readOnly?: boolean
-}) {
+export default function BuildStepsPage() {
+  const { id = '' } = useParams<{ id: string }>()
+  const [steps, setSteps] = useState<BuildStep[]>([])
+  const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<BuildStep | null>(null)
   const [form] = Form.useForm()
+
+  const reload = useCallback(async () => {
+    setLoading(true)
+    try {
+      setSteps(await listBuildSteps(id))
+    } catch (e) {
+      message.error(`加载构建步骤失败：${(e as Error).message}`)
+    } finally {
+      setLoading(false)
+    }
+  }, [id])
+
+  useEffect(() => {
+    reload()
+  }, [reload])
 
   const openEdit = (s: BuildStep | null) => {
     setEditing(s)
@@ -54,7 +67,7 @@ export default function BuildConfigTab({ id, steps, onChanged, readOnly }: {
         await addBuildStep(id, v)
       }
       setOpen(false)
-      onChanged(await listBuildSteps(id))
+      await reload()
       message.success('已保存')
     } catch (e) {
       message.error(`保存失败：${(e as Error).message}`)
@@ -68,7 +81,7 @@ export default function BuildConfigTab({ id, steps, onChanged, readOnly }: {
     const [it] = next.splice(index, 1)
     next.splice(target, 0, it)
     const ordered = next.map((s, i) => ({ ...s, sortOrder: i }))
-    onChanged(await reorderBuildSteps(id, ordered))
+    setSteps(await reorderBuildSteps(id, ordered))
   }
 
   const confirmDelete = (s: BuildStep) => {
@@ -81,7 +94,7 @@ export default function BuildConfigTab({ id, steps, onChanged, readOnly }: {
       cancelText: '取消',
       onOk: async () => {
         await deleteBuildStep(id, s.id)
-        onChanged(await listBuildSteps(id))
+        await reload()
         message.success('已删除')
       },
     })
@@ -93,7 +106,7 @@ export default function BuildConfigTab({ id, steps, onChanged, readOnly }: {
     { title: '命令', dataIndex: 'command', render: (c: string) => <code style={{ fontSize: 12 }}>{c}</code> },
     { title: '目录', dataIndex: 'workingDir', width: 120, render: (d?: string) => d || '-' },
     { title: '位置', dataIndex: 'location', width: 90, render: (l: string) => <Tag color={l === 'REMOTE' ? 'purple' : 'default'}>{l}</Tag> },
-    ...(!readOnly ? [{
+    {
       title: '操作',
       key: 'action',
       width: 200,
@@ -105,22 +118,20 @@ export default function BuildConfigTab({ id, steps, onChanged, readOnly }: {
           <Button size="small" danger onClick={() => confirmDelete(r)}>删除</Button>
         </Space>
       ),
-    }] : []),
+    },
   ]
 
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       <Space>
-        {!readOnly && (
-          <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-            添加步骤
-          </Button>
-        )}
+        <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
+          添加步骤
+        </Button>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           有序构建步骤，按顺序执行；位置可选本机（LOCAL）或远程服务器（REMOTE，委托 CAP-08）。
         </Typography.Text>
       </Space>
-      <Table rowKey="id" size="small" columns={columns} dataSource={steps} pagination={false} />
+      <Table rowKey="id" size="small" columns={columns} dataSource={steps} loading={loading} pagination={false} />
       <Modal title={editing ? '编辑构建步骤' : '添加构建步骤'} open={open} onCancel={() => setOpen(false)}
         onOk={() => form.submit()} okText="保存" width={560}>
         <Form form={form} layout="vertical" onFinish={onSave}>
