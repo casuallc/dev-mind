@@ -4,6 +4,7 @@ import { canWrite } from '../../auth/authStore'
 import {
   Button,
   Card,
+  Drawer,
   Form,
   Input,
   message,
@@ -414,13 +415,18 @@ export default function KnowledgeBase() {
         ]}
       />
 
-      {/* 条目编辑弹窗 */}
-      <Modal
+      {/* 条目编辑抽屉 */}
+      <Drawer
         title={editingEntry ? '编辑条目' : '新增条目'}
         open={entryModalOpen}
-        onCancel={() => setEntryModalOpen(false)}
-        onOk={onSaveEntry}
+        onClose={() => setEntryModalOpen(false)}
         width={640}
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setEntryModalOpen(false)}>取消</Button>
+            <Button type="primary" onClick={onSaveEntry}>保存</Button>
+          </Space>
+        }
       >
         <Form form={entryForm} labelCol={{ span: 5 }} wrapperCol={{ span: 18 }}>
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请填写名称' }]}>
@@ -462,7 +468,7 @@ export default function KnowledgeBase() {
             />
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
 
       {/* 手动沉淀经验弹窗 */}
       <Modal
