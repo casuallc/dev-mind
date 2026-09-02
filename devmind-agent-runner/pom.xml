@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.devmind</groupId>
+        <artifactId>devmind</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <artifactId>devmind-agent-runner</artifactId>
+    <name>devmind-agent-runner</name>
+    <description>CAP-21 节点 runner 瘦 jar：跑在 Windows 等执行节点上，反向 WS 连服务端，本地拉起 claude 子进程并回传解析后的事件流（无 Spring，JDK 内置 HttpClient WebSocket）</description>
+    <dependencies>
+        <!-- 复用 session 模块的 CLI 接触点（CliProcessLauncher/CliEventParser）；排除 Spring 与各能力模块传递依赖 -->
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-session</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.devmind</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.springframework</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>jakarta.validation</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+        </dependency>
+    </dependencies>
+
+    <!-- Boot 父 pom 的 pluginManagement 已备好 shade 默认执行（package 阶段 + Services/Appending/
+         Manifest transformers，mainClass 取 ${start-class}）——自定义 transformers 会与 Boot 列表按
+         下标错位合并报错，正确姿势是定义 start-class 属性并直接继承该执行 -->
+    <properties>
+        <start-class>com.devmind.agent.runner.AgentRunnerMain</start-class>
+    </properties>
+
+    <build>
+        <finalName>devmind-agent-runner</finalName>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+            </resource>
+        </resources>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <configuration>
+                    <!-- 默认会把 dependency-reduced-pom.xml 写到模块根目录，挪进 target 防误入 git -->
+                    <dependencyReducedPomLocation>${project.build.directory}/dependency-reduced-pom.xml</dependencyReducedPomLocation>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
