@@ -8,6 +8,10 @@ export interface Project {
   tags: string[]
   description?: string
   status: string // ACTIVE / ARCHIVED
+  /** CAP-23：主库来源镜像（LOCAL / CLONE；空 = 存量纯本地项目） */
+  sourceType?: string
+  /** CAP-23：主库克隆状态镜像（NONE / CLONING / READY / FAILED） */
+  cloneStatus?: string
   apiDocSource?: string
   /** CAP-10 FR-05：部署成功后自动对该项目全部套件做回归 */
   autoRegressionOnDeploy?: boolean
@@ -20,7 +24,14 @@ export interface Project {
 
 export interface ProjectInput {
   name: string
-  path: string
+  /** LOCAL 模式必填；CLONE 模式由服务端计算（无需传） */
+  path?: string
+  /** CAP-23：LOCAL（默认）/ CLONE（从 Git 克隆） */
+  sourceType?: string
+  /** CAP-23 CLONE 模式必填：远端仓库地址（http/https） */
+  remoteUrl?: string
+  /** CAP-23 CLONE 模式可选：克隆认证所用集成实例（不传 = 公开仓库匿名克隆） */
+  integrationId?: number | null
   defaultBranch?: string
   tags: string[]
   description?: string
@@ -35,19 +46,30 @@ export interface ProjectRepo {
   projectId: string
   name: string
   path: string
+  /** CAP-23：LOCAL / CLONE */
+  sourceType?: string
   remoteUrl?: string
+  integrationId?: number | null
   defaultBranch?: string
   role: string // CODE / DOCS / CONFIG
   primary: boolean
   sortOrder: number
+  /** CAP-23 克隆状态机：NONE / CLONING / READY / FAILED */
+  cloneStatus?: string
+  cloneError?: string
+  clonedAt?: string
   createdAt: string
   updatedAt: string
 }
 
 export interface ProjectRepoInput {
   name: string
-  path: string
+  /** LOCAL 模式必填；CLONE 模式由服务端计算（无需传） */
+  path?: string
+  /** CAP-23：LOCAL（默认）/ CLONE */
+  sourceType?: string
   remoteUrl?: string
+  integrationId?: number | null
   defaultBranch?: string
   role?: string
   primary?: boolean

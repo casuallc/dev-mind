@@ -59,6 +59,23 @@ export function setPrimaryRepo(id: string, repoId: number): Promise<ProjectRepo>
   return api.post<ProjectRepo>(`/projects/${id}/repos/${repoId}/primary`)
 }
 
+// ---------------- CAP-23 仓库克隆 ----------------
+
+/** 触发/重试单库克隆 */
+export function cloneRepo(id: string, repoId: number): Promise<ProjectRepo> {
+  return api.post<ProjectRepo>(`/projects/${id}/repos/${repoId}/clone`)
+}
+
+/** 重试项目内全部 FAILED 库 */
+export function retryProjectClone(id: string): Promise<ProjectRepo[]> {
+  return api.post<ProjectRepo[]>(`/projects/${id}/clone/retry`)
+}
+
+/** 克隆日志回放（非实时；实时走 WS /ws/repo-clones/clone-<repoId>） */
+export function getCloneLogs(id: string, repoId: number): Promise<{ logs: string }> {
+  return api.get<{ logs: string }>(`/projects/${id}/repos/${repoId}/clone/logs`)
+}
+
 // ---------------- 环境（P1-1） ----------------
 
 export function listEnvironments(id: string): Promise<ProjectEnvironment[]> {
