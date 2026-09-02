@@ -4,10 +4,10 @@ import { canWrite } from '../../auth/authStore'
 import {
   Button,
   Card,
+  Drawer,
   Form,
   Input,
   message,
-  Modal,
   Select,
   Space,
   Table,
@@ -192,7 +192,13 @@ export default function DocsPage() {
         />
       </Card>
 
-      <Modal title="新建文档" open={createOpen} onCancel={() => setCreateOpen(false)} onOk={onCreate} width={640}>
+      <Drawer title="新建文档" open={createOpen} onClose={() => setCreateOpen(false)} width={640}
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setCreateOpen(false)}>取消</Button>
+            <Button type="primary" onClick={onCreate}>创建</Button>
+          </Space>
+        }>
         <Form form={createForm} labelCol={{ span: 5 }} wrapperCol={{ span: 18 }}>
           <Form.Item name="kind" label="类型" rules={[{ required: true }]}>
             <Select options={Object.entries(KIND_LABEL).map(([value, label]) => ({ value, label }))} />
@@ -213,7 +219,7 @@ export default function DocsPage() {
             <Input.TextArea rows={10} placeholder="Markdown 内容（选择模板后自动预填）" />
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
     </Space>
   )
 }
