@@ -38,6 +38,7 @@
 | [CAP-19](CAP-19-jira-issue-sync.md) | Jira 任务/Bug 同步 | 底座 | Jira Server/DC 轮询拉取（JQL+水印增量）→ DRAFT 需求，单向只拉取，人工确认后进自动开发 |
 | [CAP-21](CAP-21-agent-node.md) | 远程 Agent 节点管理 | 底座 | Windows 节点 runner 反向 WS 连服务端，远程拉起/交互 claude 会话，事件解析下沉 runner |
 | [CAP-22](CAP-22-github-integration.md) | GitHub 集成 | 底座 | CAP-18 连接器第二个 git 平台实现：PR/Release，github.com 与 GHE（/api/v3）分流 |
+| [CAP-23](CAP-23-repo-clone.md) | 项目仓库从 Git 克隆 | 底座 | 项目/多库支持 GitLab/GitHub 远端地址异步克隆到工作区（按项目分目录），PAT 注入+状态机+实时日志 |
 
 ## 依赖关系
 
@@ -68,6 +69,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-19 Jira 同步依赖 CAP-18（Integration/凭据/SPI/审计/External Link）与 CAP-13（Requirement 落点）：轮询拉取 Jira issue → DRAFT 需求（单向只拉取不回写），人工确认后走 CAP-14/15 自动开发链。
 - CAP-21 远程 Agent 节点依赖 CAP-01/05：节点 runner 反向 WS 注册，远程会话复用 CAP-05 会话模型/状态机/事件流（`sessions.agent_node_id` 区分本地/远程），事件解析下沉 runner（复用 CliProcessLauncher/CliEventParser）。
 - CAP-22 GitHub 集成依赖 CAP-18（SPI/服务层/凭据/GitRemoteOps/External Link 全部复用，零表结构变更）：仅新增 GitHubConnector，覆盖 github.com 与 GHE。
+- CAP-23 仓库克隆依赖 CAP-02/12/18：project 创建 CLONE 行发领域事件，integration 监听后异步克隆（PAT 注入 + ExecutionLogHub 实时日志），按项目分目录落 `data/repositories/<projectId>/`。
 
 ## 组装方式（后续流程层）
 
