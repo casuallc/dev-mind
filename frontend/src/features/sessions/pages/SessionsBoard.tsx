@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Col,
+  Drawer,
   Empty,
   Form,
   Input,
@@ -347,13 +348,20 @@ export default function SessionsBoard() {
       )}
 
       {/* 新建会话 */}
-      <Modal
+      <Drawer
         title="新建会话"
         open={createOpen}
-        onCancel={() => setCreateOpen(false)}
-        onOk={() => form.submit()}
-        confirmLoading={creating}
-        okText="创建"
+        onClose={() => setCreateOpen(false)}
+        width={600}
+        destroyOnHidden
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setCreateOpen(false)}>取消</Button>
+            <Button type="primary" loading={creating} onClick={() => form.submit()}>
+              创建
+            </Button>
+          </Space>
+        }
       >
         <Form form={form} layout="vertical" onFinish={onCreate} initialValues={{ permissionMode: 'acceptEdits', projectId: 'default' }}>
           <Form.Item label="项目" name="projectId" extra="会话将在该项目的 worktree 中工作">
@@ -421,7 +429,7 @@ export default function SessionsBoard() {
             />
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
     </Card>
   )
 }
