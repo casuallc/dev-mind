@@ -6,6 +6,7 @@ import com.devmind.skill.dto.SkillDetailView;
 import com.devmind.skill.dto.SkillFileContentView;
 import com.devmind.skill.dto.SkillFileRequest;
 import com.devmind.skill.dto.SkillFileView;
+import com.devmind.skill.dto.SkillPackageView;
 import com.devmind.skill.dto.SkillRequest;
 import com.devmind.skill.dto.SkillView;
 import jakarta.validation.Valid;
@@ -70,6 +71,14 @@ public class SkillController {
     @DeleteMapping("/{id}")
     public void delete(@PathVariable String id) {
         service.delete(id);
+    }
+
+    // ---------------- 导出（为注入预留） ----------------
+
+    /** 按 ids 导出 skill 包文件树（files[0] 固定为拼好 frontmatter 的 SKILL.md）。 */
+    @GetMapping("/export")
+    public SkillPackageView exportPackages(@RequestParam List<String> ids) {
+        return service.exportPackages(ids);
     }
 
     // ---------------- 附件文件 ----------------

@@ -9,6 +9,7 @@ import com.devmind.skill.dto.SkillDetailView;
 import com.devmind.skill.dto.SkillFileContentView;
 import com.devmind.skill.dto.SkillFileRequest;
 import com.devmind.skill.dto.SkillFileView;
+import com.devmind.skill.dto.SkillPackageView;
 import com.devmind.skill.dto.SkillRequest;
 import com.devmind.skill.dto.SkillView;
 import com.devmind.skill.model.SkillEntity;
@@ -26,6 +27,7 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
@@ -342,6 +344,69 @@ public class SkillService {
         }
         f.setContentType(contentType);
         f.setSize(raw.length);
+    }
+
+    // ---------------- 导出（为注入 agent 工作目录预留） ----------------
+
+    /**
+     * 按 ids 导出 skill 包文件树：files[0] 为拼好 frontmatter 的 SKILL.md，其后为附件。
+     * 仅导出 ACTIVE（DISABLED 跳过）；id 不存在严格抛 NOT_FOUND。
+     */
+    public SkillPackageView exportPackages(List<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "ids 必填");
+        }
+        List<SkillPackageView.SkillPackageItem> items = ids.stream()
+                .map(String::trim).filter(s -> !s.isEmpty()).distinct()
+                .map(this::requireSkill)
+                .filter(e -> SkillEntity.STATUS_ACTIVE.equals(e.getStatus()))
+                .map(this::toPackageItem)
+                .toList();
+        return new SkillPackageView(items);
+    }
+
+    private SkillPackageView.SkillPackageItem toPackageItem(SkillEntity e) {
+        List<SkillPackageView.ExportedFile> files = new ArrayList<>();
+        files.add(new SkillPackageView.ExportedFile("SKILL.md", false,
+                Base64.getEncoder().encodeToString(assembleSkillMd(e).getBytes(StandardCharsets.UTF_8))));
+        for (SkillFileEntity f : fileRepo.findBySkillIdOrderByPathAsc(e.getId())) {
+            byte[] raw = f.isBinary()
+                    ? f.getContentBytes()
+                    : (f.getContentText() == null ? new byte[0]
+                        : f.getContentText().getBytes(StandardCharsets.UTF_8));
+            files.add(new SkillPackageView.ExportedFile(f.getPath(), f.isBinary(),
+                    Base64.getEncoder().encodeToString(raw)));
+        }
+        String projectId = SkillEntity.GLOBAL_PROJECT_ID.equals(e.getProjectId()) ? null : e.getProjectId();
+        return new SkillPackageView.SkillPackageItem(e.getId(), e.getName(), e.getScope(), projectId, files);
+    }
+
+    /** 拼回完整 SKILL.md：--- frontmatter（name/description + 其余键原样）--- + 正文。 */
+    private String assembleSkillMd(SkillEntity e) {
+        StringBuilder sb = new StringBuilder("---\n");
+        sb.append("name: ").append(e.getName()).append('\n');
+        sb.append("description: ").append(yamlValue(e.getDescription())).append('\n');
+        parseExtraFrontmatter(e.getExtraFrontmatter())
+                .forEach((k, v) -> sb.append(k).append(": ").append(yamlValue(v)).append('\n'));
+        sb.append("---\n");
+        if (e.getContentMd() != null && !e.getContentMd().isBlank()) {
+            sb.append('\n').append(e.getContentMd());
+            if (!e.getContentMd().endsWith("\n")) {
+                sb.append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
+    /** YAML 单行值：含冒号/# 或首尾空格等不安全字符时加双引号（frontmatter 解析器可直接读）。 */
+    private String yamlValue(String v) {
+        if (v == null) {
+            return "\"\"";
+        }
+        boolean safe = !v.isEmpty() && v.equals(v.trim())
+                && v.chars().noneMatch(c -> c == ':' || c == '#' || c == '\n' || c == '\r' || c == '"')
+                && !"-?[]{}&*!|>'%@`".contains(String.valueOf(v.charAt(0)));
+        return safe ? v : "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
     // ---------------- 校验与装配 ----------------
