@@ -40,6 +40,7 @@
         <module>devmind-integration</module>
         <module>devmind-open-api</module>
         <module>devmind-app</module>
+        <module>devmind-dist</module>
     </modules>
 
     <properties>
@@ -147,6 +148,12 @@
                 <groupId>com.devmind</groupId>
                 <artifactId>devmind-app</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.devmind</groupId>
+                <artifactId>devmind-dist</artifactId>
+                <version>${project.version}</version>
+                <type>pom</type>
             </dependency>
         </dependencies>
     </dependencyManagement>

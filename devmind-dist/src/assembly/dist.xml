@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<assembly xmlns="http://maven.apache.org/ASF/2.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/ASF/2.0.0 https://maven.apache.org/xsd/assembly-2.0.0.xsd">
+    <id>dist</id>
+    <formats>
+        <format>tar.gz</format>
+    </formats>
+    <includeBaseDirectory>true</includeBaseDirectory>
+    <baseDirectory>devmind-${project.version}</baseDirectory>
+
+    <!-- libs/：devmind-app 瘦 jar + 全部运行时依赖散 jar（不打 fat jar，便于单 jar 替换更新） -->
+    <dependencySets>
+        <dependencySet>
+            <outputDirectory>libs</outputDirectory>
+            <useTransitiveDependencies>true</useTransitiveDependencies>
+            <unpack>false</unpack>
+            <scope>runtime</scope>
+        </dependencySet>
+    </dependencySets>
+
+    <fileSets>
+        <!-- web/：前端构建产物（只外置，jar 内不含静态资源；需先 npm run build） -->
+        <fileSet>
+            <directory>../frontend/dist</directory>
+            <outputDirectory>web</outputDirectory>
+        </fileSet>
+        <!-- config/：外置配置，优先级高于 jar 内 yml -->
+        <fileSet>
+            <directory>../devmind-app/src/main/resources</directory>
+            <includes>
+                <include>application.yml</include>
+            </includes>
+            <outputDirectory>config</outputDirectory>
+        </fileSet>
+        <!-- bin/：服务控制脚本 -->
+        <fileSet>
+            <directory>src/main/dist/bin</directory>
+            <outputDirectory>bin</outputDirectory>
+            <fileMode>0755</fileMode>
+        </fileSet>
+        <!-- config 说明文档 -->
+        <fileSet>
+            <directory>src/main/dist/config</directory>
+            <outputDirectory>config</outputDirectory>
+        </fileSet>
+        <!-- data/ 占位 -->
+        <fileSet>
+            <directory>src/main/dist/data</directory>
+            <outputDirectory>data</outputDirectory>
+        </fileSet>
+    </fileSets>
+</assembly>

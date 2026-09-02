@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.devmind</groupId>
+        <artifactId>devmind</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>devmind-dist</artifactId>
+    <packaging>pom</packaging>
+    <name>devmind-dist</name>
+    <description>Dev-Mind 分发包组装（bin/config/libs/web/data，tar.gz）</description>
+
+    <!-- 产物名 devmind-<version>.tar.gz（不带 -dist 后缀） -->
+    <build>
+        <finalName>devmind-${project.version}</finalName>
+    </build>
+
+    <!-- 依赖 devmind-app 保证 reactor 构建顺序，且让 assembly 能收到 app 及其全部运行时依赖 -->
+    <dependencies>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-app</artifactId>
+        </dependency>
+    </dependencies>
+
+    <profiles>
+        <!-- 分发包组装只在显式 -Pdist 时执行（scripts/build-dist.sh）；
+             日常 mvn install 不触发，避免全新克隆无 frontend/dist 时构建失败 -->
+        <profile>
+            <id>dist</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-assembly-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>dist</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>single</goal>
+                                </goals>
+                                <configuration>
+                                    <appendAssemblyId>false</appendAssemblyId>
+                                    <descriptors>
+                                        <descriptor>src/assembly/dist.xml</descriptor>
+                                    </descriptors>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>

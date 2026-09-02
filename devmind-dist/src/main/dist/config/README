@@ -1,0 +1,14 @@
+Dev-Mind 配置目录
+=================
+
+application.yml 是随包发布的默认配置，可直接修改。
+
+本机专属覆盖（推荐）：在本目录新建 application-local.yml ——
+application.yml 中 spring.profiles.default=local，同目录下的
+application-local.yml 会被自动加载且优先级更高。机器相关的路径
+（devmind.project.default-path / devmind.docs.repo-path /
+devmind.knowledge.repo-path 等）放这里，不要改出含本机路径的
+application.yml 后再回流到源码仓库。
+
+启动参数亦可覆盖任意配置，例如：
+  EXTRA_OPTS="--devmind.session.executor=fake" bin/dev-mind start
