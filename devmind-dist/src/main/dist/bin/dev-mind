@@ -15,12 +15,11 @@
 #   JAVA_HOME         Fallback JDK home
 #   JAVA_OPTS         Full JVM options override (default: -Xms512m -Xmx1024m -XX:+UseG1GC)
 #   EXTRA_OPTS        Extra app args, e.g. EXTRA_OPTS="--devmind.session.executor=fake"
+#   DEVMIND_PORT      Health-check port override (default: parsed from config/, fallback 8080)
 set -euo pipefail
 
 APP_NAME="dev-mind"
 MAIN_CLASS="com.devmind.DevMindApplication"
-HTTP_PORT=8080
-HEALTH_URL="http://127.0.0.1:${HTTP_PORT}/api/health"
 START_TIMEOUT=120   # seconds to wait for health check on start
 STOP_TIMEOUT=30     # seconds to wait before SIGKILL on stop
 
@@ -29,6 +28,29 @@ APP_HOME="$(cd "${BIN_DIR}/.." && pwd)"
 PID_FILE="${APP_HOME}/data/${APP_NAME}.pid"
 LOG_DIR="${APP_HOME}/logs"
 LOG_FILE="${LOG_DIR}/${APP_NAME}.log"
+
+# Port resolution: DEVMIND_PORT env > config/application-local.yml > config/application.yml > 8080
+# (yml parsing takes the first "port:" value, which is server.port in the shipped configs)
+detect_port() {
+    if [[ -n "${DEVMIND_PORT:-}" ]]; then
+        echo "$DEVMIND_PORT"
+        return
+    fi
+    local f p
+    for f in "${APP_HOME}/config/application-local.yml" "${APP_HOME}/config/application.yml"; do
+        [[ -f "$f" ]] || continue
+        p="$(sed -n 's/^[[:space:]]*port:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$f" | head -1)"
+        if [[ -n "$p" ]]; then
+            echo "$p"
+            return
+        fi
+    done
+    echo 8080
+}
+
+health_url() {
+    echo "http://127.0.0.1:$(detect_port)/api/health"
+}
 
 DEFAULT_JVM_OPTS="-Xms512m -Xmx1024m -XX:+UseG1GC"
 JVM_OPTS="${JAVA_OPTS:-$DEFAULT_JVM_OPTS}"
@@ -105,14 +127,14 @@ do_start() {
             rm -f "$PID_FILE"
             exit 1
         fi
-        if curl -s -o /dev/null -w '%{http_code}' "$HEALTH_URL" 2>/dev/null | grep -q 200; then
+        if curl -s -o /dev/null -w '%{http_code}' "$(health_url)" 2>/dev/null | grep -q 200; then
             echo "${APP_NAME} started (pid $(get_pid)), log: $LOG_FILE"
             exit 0
         fi
         sleep 2
         waited=$((waited + 2))
     done
-    echo "ERROR: health check timeout after ${START_TIMEOUT}s ($HEALTH_URL), see $LOG_FILE" >&2
+    echo "ERROR: health check timeout after ${START_TIMEOUT}s ($(health_url)), see $LOG_FILE" >&2
     exit 1
 }
 
@@ -142,10 +164,10 @@ do_status() {
     if is_running; then
         echo "${APP_NAME} is running (pid $(get_pid))"
         local health
-        if health="$(curl -s --max-time 3 "$HEALTH_URL" 2>/dev/null)"; then
+        if health="$(curl -s --max-time 3 "$(health_url)" 2>/dev/null)"; then
             echo "health: $health"
         else
-            echo "health: not responding ($HEALTH_URL)"
+            echo "health: not responding ($(health_url))"
         fi
     else
         echo "${APP_NAME} is not running"
