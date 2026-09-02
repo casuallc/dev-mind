@@ -18,7 +18,7 @@
 第 2 层  平台连接器 SPI（平台相关）
          IntegrationConnector
          ├── GitLabConnector   MR / Release / 项目信息        ← MVP
-         ├── GitHubConnector   PR / Release                  （后续）
+         ├── GitHubConnector   PR / Release                   ← CAP-22 已落地
          └── JiraConnector     Issue 同步（无 git 能力）      ← CAP-19 已落地
 ```
 
@@ -138,6 +138,6 @@ GET    /projects/{pid}/integration-calls               调用日志
 
 ## 10. MVP 范围（暂不做）
 
-入站 webhook（MR 合并/Pipeline 状态回写）、GitHub/Jira Connector、OAuth App 认证、
+入站 webhook（MR 合并/Pipeline 状态回写）、OAuth App 认证、
 MR 合并动作与评审流、issue 双向同步、自动触发策略（WI DONE 自动 push）、
-远程 tag 删除/回滚联动。
+远程 tag 删除/回滚联动。（GitHub/Jira Connector 已分别由 CAP-22 / CAP-19 落地）
