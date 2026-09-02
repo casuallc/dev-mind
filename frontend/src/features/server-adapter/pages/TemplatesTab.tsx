@@ -1,6 +1,6 @@
 // CAP-07 FR-05 命令模板白名单管理
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Checkbox, Form, Input, message, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
+import { Button, Checkbox, Drawer, Form, Input, message, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import type { Project } from '../../projects/types'
@@ -143,14 +143,18 @@ export default function TemplatesTab() {
         locale={{ emptyText: '无模板。远程只能执行白名单内的模板（FR-05）。' }}
       />
 
-      <Modal
+      <Drawer
         title={editing ? `编辑模板 ${editing.code}` : '新建命令模板'}
         open={open}
-        onCancel={() => setOpen(false)}
-        onOk={onSave}
-        okText="保存"
-        width={760}
-        destroyOnClose
+        onClose={() => setOpen(false)}
+        width={720}
+        destroyOnHidden
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setOpen(false)}>取消</Button>
+            <Button type="primary" onClick={onSave}>保存</Button>
+          </Space>
+        }
       >
         <Form form={form} layout="vertical">
           <Space style={{ width: '100%' }} size={12}>
@@ -203,7 +207,7 @@ export default function TemplatesTab() {
             </Space>
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
     </Space>
   )
 }
