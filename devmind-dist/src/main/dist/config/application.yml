@@ -1,0 +1,30 @@
+# Dev-Mind 分发包配置。
+# 只列常用项；未列出的配置使用 jar 内置默认值（外置文件优先级更高，按 key 覆盖）。
+# 本机覆盖也可放同目录 application-local.yml（profile 默认 local，自动加载、优先级更高）。
+
+server:
+  port: 8080                # 服务端口（改端口后 bin/dev-mind 的健康探测会自动跟随；也可用 DEVMIND_PORT 环境变量指定）
+
+devmind:
+  auth:
+    admin-password: admin123   # 初始管理员密码（仅首次种子 admin 时读取；请登录后立即修改）
+    access-ttl: 2h             # access token 有效期
+    refresh-ttl: 14d           # refresh token 有效期
+  session:
+    executor: claude           # 执行器：claude=真实 Claude Code / fake=内置假进程（自测/E2E）
+    claude-path: ""            # 空=自动探测全局 claude 命令
+    model: ""                  # 空=claude 默认模型
+    permission-mode: acceptEdits
+    max-concurrent: 4          # 最大并发会话数
+  worktree:
+    base-branch: master        # 会话 worktree 基准分支
+  execution:
+    shell: bash                # 本地构建/部署步骤的 shell（Windows 下为 Git Bash）
+    step-timeout-ms: 1800000   # 单步超时 30 分钟，超时 kill
+
+# 数据库默认 H2 文件库（./data/devmind，跟随启动目录）；切 PostgreSQL 时覆盖：
+# spring:
+#   datasource:
+#     url: jdbc:postgresql://host:5432/devmind
+#     username: ...
+#     password: ...

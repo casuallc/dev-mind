@@ -25,12 +25,9 @@
             <directory>../frontend/dist</directory>
             <outputDirectory>web</outputDirectory>
         </fileSet>
-        <!-- config/：外置配置，优先级高于 jar 内 yml -->
+        <!-- config/：精简外置配置（常用项，未列出的回落 jar 内默认值）+ 说明文档 -->
         <fileSet>
-            <directory>../devmind-app/src/main/resources</directory>
-            <includes>
-                <include>application.yml</include>
-            </includes>
+            <directory>src/main/dist/config</directory>
             <outputDirectory>config</outputDirectory>
         </fileSet>
         <!-- bin/：服务控制脚本 -->
@@ -38,11 +35,6 @@
             <directory>src/main/dist/bin</directory>
             <outputDirectory>bin</outputDirectory>
             <fileMode>0755</fileMode>
-        </fileSet>
-        <!-- config 说明文档 -->
-        <fileSet>
-            <directory>src/main/dist/config</directory>
-            <outputDirectory>config</outputDirectory>
         </fileSet>
         <!-- data/ 占位 -->
         <fileSet>
