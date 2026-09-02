@@ -1,6 +1,6 @@
 # CAP-23 项目仓库从 Git 克隆（GitLab/GitHub）
 
-> 能力 ID：CAP-23 ｜ 分类：底座 ｜ 状态：草案 ｜ 日期：2026-09-02
+> 能力 ID：CAP-23 ｜ 分类：底座 ｜ 状态：已落地（2026-09-02：devmind-project 来源模型 + devmind-integration 克隆编排/WS 日志 + 前端表单与实时日志，E2E 21 项通过） ｜ 日期：2026-09-02
 
 ## 1. 目的
 
