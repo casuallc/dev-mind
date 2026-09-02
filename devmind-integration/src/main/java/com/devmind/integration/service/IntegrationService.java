@@ -440,7 +440,7 @@ public class IntegrationService implements PlatformIntegrationHook {
 
     private ResolvedBinding requireGitBinding(String projectId) {
         return findGitBinding(projectId).orElseThrow(() -> new DevMindException(ErrorCode.BAD_REQUEST,
-                "项目未绑定可用的代码平台集成（请先在项目设置绑定 GitLab Integration）"));
+                "项目未绑定可用的代码平台集成（请先在项目设置绑定 GitLab/GitHub Integration）"));
     }
 
     private IntegrationConnector connectorFor(IntegrationEntity e) {
@@ -460,7 +460,7 @@ public class IntegrationService implements PlatformIntegrationHook {
         return token;
     }
 
-    /** 从 remote_url 推断 GitLab 项目 path（https://host/group/proj.git → group/proj） */
+    /** 从 remote_url 推断平台项目标识（https://host/group/proj.git → group/proj，GitHub 即 owner/repo） */
     private String inferProjectKey(IntegrationEntity integration, ProjectRepoEntity repo) {
         String url = repo.getRemoteUrl();
         if (url != null && !url.isBlank()) {
@@ -482,7 +482,9 @@ public class IntegrationService implements PlatformIntegrationHook {
         throw new DevMindException(ErrorCode.BAD_REQUEST,
                 "无法从 remote_url 推断平台项目标识，请显式填写 externalProjectKey"
                         + (IntegrationEntity.TYPE_GITLAB.equals(integration.getType())
-                                ? "（GitLab project id 或 group/path）" : ""));
+                                ? "（GitLab project id 或 group/path）"
+                                : IntegrationEntity.TYPE_GITHUB.equals(integration.getType())
+                                        ? "（GitHub owner/repo）" : ""));
     }
 
     /** base_url 校验：仅 http/https（防 SSRF 指到 file: 等协议；内网地址属合法场景，后续可加白名单） */
