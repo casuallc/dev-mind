@@ -25,7 +25,8 @@ devmind-build/   CAP-08 构建执行器
 devmind-deploy/  CAP-09 部署执行器
 devmind-test/    CAP-10 测试执行器
 devmind-release/ CAP-11 发版执行器
-devmind-app/     组装入口（主类 + application.yml + 前端静态）
+devmind-app/     组装入口（主类 + application.yml，瘦 jar）
+devmind-dist/    分发包组装（bin/config/libs/web/data → tar.gz）
 frontend/        React 前端（app 壳 + features/<能力> + shared）
 docs/            需求文档(capabilities) + 实现方案(design)
 ```
@@ -52,13 +53,16 @@ npm run dev
 # 前端: http://localhost:5173  （/api 与 /ws 已代理到 8080）
 ```
 
-### 生产构建（前端产物进 devmind-app jar）
+### 分发包（生产部署）
 
 ```bash
-cd frontend && npm run build   # 产物输出到 devmind-app/src/main/resources/static
-cd .. && mvn -q -DskipTests package
-java -jar devmind-app/target/devmind-app-0.1.0-SNAPSHOT.jar
+scripts/build-dist.sh        # 前端 build + maven 组装（-Pdist），产出 devmind-dist/target/devmind-<version>.tar.gz
+tar xzf devmind-dist/target/devmind-<version>.tar.gz
+cd devmind-<version>
+bin/dev-mind start           # 后台启动（status/stop/restart/run 前台/install 安装为 systemd 服务）
 ```
+
+包布局：`bin/`（服务脚本）、`config/`（外置配置，可放 application-local.yml 覆盖）、`libs/`（瘦 jar + 全部依赖散 jar）、`web/`（前端产物，外置托管）、`data/`（H2 库与密钥，运行时生成）、`logs/`。
 
 ## 里程碑
 

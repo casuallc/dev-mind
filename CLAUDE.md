@@ -26,7 +26,8 @@ Guidance for Claude Code when working in this repository.
 | 起后端 :8080 | 先 `mvn -q install -DskipTests`，再 `mvn -pl devmind-app spring-boot:run`（**禁带 -am**，聚合器报 no main class） |
 | 起前端 :5173 | `cd frontend && npm run dev`（/api、/ws 已代理 8080） |
 | 前端类型检查 | `cd frontend && npx tsc -b` |
-| 前端构建 | `cd frontend && npm run build`（产物输出到 devmind-app static） |
+| 前端构建 | `cd frontend && npm run build`（产物输出到 `frontend/dist/`，不进 jar） |
+| 构建分发包 | `scripts/build-dist.sh`（→ `devmind-dist/target/devmind-<version>.tar.gz`） |
 | 一键起停 | `scripts\dev.ps1`（PowerShell）/ `scripts/dev.sh`（Git Bash） |
 
 健康检查 `GET /api/health`；H2 控制台 `/h2-console`（`jdbc:h2:file:./data/devmind`，sa/空）。起停与乱码等环境坑见上方「开发注意事项」。
@@ -47,7 +48,8 @@ Guidance for Claude Code when working in this repository.
 | devmind-execution | CAP-12 统一执行底座（StepRunner/日志 Hub/WS，**无统一 Job 表**） |
 | devmind-build / deploy / test / release | CAP-08~11 执行器（各自实体与状态机，共用执行底座） |
 | devmind-flow / integration / open-api | CAP-14 需求流程 / CAP-18·19 集成（GitLab/Jira）/ CAP-20 开放 API（HMAC） |
-| devmind-app | 组装入口（主类 + application.yml + 前端静态托管） |
+| devmind-app | 组装入口（主类 + application.yml；瘦 jar，不含前端静态） |
+| devmind-dist | 分发包组装（bin/config/libs/web/data → tar.gz，仅 `-Pdist` 触发） |
 | frontend/ | `src/app`（壳/路由/当前项目设施）+ `src/features/<能力>`（自包含）+ `src/shared` |
 
 ## Architecture
