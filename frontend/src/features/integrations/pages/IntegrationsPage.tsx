@@ -1,5 +1,5 @@
 // CAP-18/19 平台集成管理页（仅 ADMIN）：集成实例列表 + 新建/编辑 + 连接测试 + 启停。
-// GitLab（push 分支/MR/Release）与 Jira（issue 同步）共用同一 integrations 表。
+// GitLab/GitHub（push 分支/MR·PR/Release）与 Jira（issue 同步）共用同一 integrations 表。
 import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
@@ -27,6 +27,7 @@ import type { Integration, IntegrationInput } from '../types'
 
 const TYPE_OPTIONS = [
   { value: 'GITLAB', label: 'GitLab（代码平台）' },
+  { value: 'GITHUB', label: 'GitHub（代码平台，含 GHE）' },
   { value: 'JIRA', label: 'Jira（任务/Bug 同步）' },
 ]
 
@@ -48,6 +49,7 @@ export default function IntegrationsPage() {
   const formType = Form.useWatch('type', form)
   const formAuthType = Form.useWatch('authType', form)
   const isJira = formType === 'JIRA'
+  const isGitHub = formType === 'GITHUB'
   const isBasic = isJira && formAuthType === 'BASIC'
 
   const reload = useCallback(async () => {
@@ -249,9 +251,13 @@ export default function IntegrationsPage() {
             label="实例地址"
             name="baseUrl"
             rules={[{ required: true, message: '请输入实例地址' }]}
-            extra="仅 http/https，如 https://jira.example.com"
+            extra={
+              isGitHub
+                ? 'github.com 填 https://github.com（API 自动走 api.github.com）；GHE 填实例地址（自动拼 /api/v3）'
+                : '仅 http/https，如 https://jira.example.com'
+            }
           >
-            <Input placeholder="https://jira.example.com" />
+            <Input placeholder={isGitHub ? 'https://github.com' : 'https://jira.example.com'} />
           </Form.Item>
           {isJira && (
             <Form.Item
@@ -294,7 +300,9 @@ export default function IntegrationsPage() {
                 ? '留空表示保持现有凭据不变'
                 : isBasic
                   ? 'Jira 登录密码（加密存储，仅用于调用 Jira API）'
-                  : 'Jira Server/DC 8.14+：个人访问令牌；GitLab：Personal Access Token（api scope）'
+                  : isGitHub
+                    ? 'GitHub Personal Access Token（classic 需 repo scope；fine-grained 按仓库授权 Contents/Pull requests 读写）'
+                    : 'Jira Server/DC 8.14+：个人访问令牌；GitLab：Personal Access Token（api scope）'
             }
           >
             <Input.Password
