@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { deleteProject, listProjects } from '../api'
 import { onboardProject } from '../../open-api/api'
 import ProjectFormModal from '../components/ProjectFormModal'
+import { CLONE_STATUS_COLOR } from '../components/CloneLogDrawer'
 import type { Project } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 
@@ -93,9 +94,15 @@ export default function AdminProjectsPage() {
       dataIndex: 'name',
       width: 180,
       render: (n: string, r) => (
-        <Button type="link" style={{ padding: 0 }} onClick={() => navigate(`/admin/projects/${r.id}`)}>
-          {n}
-        </Button>
+        <Space size={4}>
+          <Button type="link" style={{ padding: 0 }} onClick={() => navigate(`/admin/projects/${r.id}`)}>
+            {n}
+          </Button>
+          {/* CAP-23：克隆项目的主库状态徽标（镜像自 project_repos） */}
+          {r.sourceType === 'CLONE' && r.cloneStatus && (
+            <Tag color={CLONE_STATUS_COLOR[r.cloneStatus]}>{r.cloneStatus}</Tag>
+          )}
+        </Space>
       ),
     },
     { title: 'ID', dataIndex: 'id', width: 110, render: (id: string) => <Typography.Text code>{id}</Typography.Text> },
