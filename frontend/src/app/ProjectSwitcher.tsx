@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Button, Select, Tag, Typography } from 'antd'
 import { useNavigate } from 'react-router-dom'
-import { listProjects } from '../api'
+import { listProjects } from '../features/projects/api'
 import {
   getCurrentProjectId,
   setCurrentProject,
   setProjectsLoaded,
-} from '../currentProjectStore'
-import { useCurrentProjectId } from '../hooks/useCurrentProject'
-import type { Project } from '../types'
+} from './currentProjectStore'
+import { useCurrentProjectId } from './useCurrentProject'
+import type { Project } from '../features/projects/types'
 
 export default function ProjectSwitcher() {
   const navigate = useNavigate()

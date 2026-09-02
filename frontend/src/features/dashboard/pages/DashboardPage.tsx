@@ -4,7 +4,7 @@ import { Badge, Button, Card, Col, Empty, List, Row, Space, Statistic, Tag, Typo
 import { ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { getDashboard } from '../api'
-import { setCurrentProject } from '../../projects/currentProjectStore'
+import { setCurrentProject } from '../../../app/currentProjectStore'
 import type { DashboardView, FailureItem } from '../types'
 
 const REQ_STATUS: { key: string; label: string; color: string }[] = [

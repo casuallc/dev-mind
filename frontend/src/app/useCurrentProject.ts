@@ -1,7 +1,7 @@
 // 当前项目 hook：useCurrentProjectId 订阅 store；useCurrentProject 组合 useProject 加载项目对象。
 import { useSyncExternalStore } from 'react'
-import { getCurrentProjectId, subscribeCurrentProject } from '../currentProjectStore'
-import { useProject } from './useProject'
+import { getCurrentProjectId, subscribeCurrentProject } from './currentProjectStore'
+import { useProject } from '../features/projects/hooks/useProject'
 
 export function useCurrentProjectId(): string | null {
   return useSyncExternalStore(subscribeCurrentProject, getCurrentProjectId)

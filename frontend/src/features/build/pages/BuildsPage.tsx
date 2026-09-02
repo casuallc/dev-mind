@@ -7,7 +7,7 @@ import { getBuild, getBuildConfig, getBuildLogs, listBuilds, saveBuildConfig, tr
 import type { BuildConfig, BuildExecutor, BuildRecord, BuildStatus } from '../types'
 import type { ProjectServer } from '../../projects/types'
 import { listServers } from '../../projects/api'
-import { useCurrentProjectId } from '../../projects/hooks/useCurrentProject'
+import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { durationMs, fmtTime } from '../../../shared/utils/format'
 
 const STATUS_COLOR: Record<BuildStatus, string> = {

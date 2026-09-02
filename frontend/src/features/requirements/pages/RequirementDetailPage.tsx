@@ -27,7 +27,7 @@ import RelatedRecordsTab from '../components/RelatedRecordsTab'
 import RequirementFormModal from '../components/RequirementFormModal'
 import WorkItemsTab from '../components/WorkItemsTab'
 import { useProject } from '../../projects/hooks/useProject'
-import { getCurrentProjectId, setCurrentProject } from '../../projects/currentProjectStore'
+import { getCurrentProjectId, setCurrentProject } from '../../../app/currentProjectStore'
 import { requirementStatusColor, requirementTypeColor, STATUS_FLOW, TYPE_LABEL } from '../components/requirementMeta'
 import type { RequirementOverview } from '../types'
 

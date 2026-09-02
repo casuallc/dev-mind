@@ -6,7 +6,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { listProjects } from '../api'
-import { setCurrentProject } from '../currentProjectStore'
+import { setCurrentProject } from '../../../app/currentProjectStore'
 import type { Project } from '../types'
 
 const STATUS_OPTIONS = [

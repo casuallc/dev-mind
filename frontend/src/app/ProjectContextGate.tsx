@@ -7,8 +7,8 @@ import {
   getCurrentProjectId,
   getProjectsLoaded,
   subscribeCurrentProject,
-} from '../currentProjectStore'
-import { isAdmin } from '../../auth/authStore'
+} from './currentProjectStore'
+import { isAdmin } from '../features/auth/authStore'
 
 export default function ProjectContextGate() {
   const navigate = useNavigate()

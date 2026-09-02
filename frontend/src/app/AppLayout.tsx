@@ -12,7 +12,7 @@ import {
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useSyncExternalStore } from 'react'
 import AppHeader from './AppHeader'
-import ProjectSwitcher from '../features/projects/components/ProjectSwitcher'
+import ProjectSwitcher from './ProjectSwitcher'
 import { startNotificationStream, stopNotificationStream } from '../features/notifications/store'
 import { getUserSnapshot, isAdmin, subscribeAuth } from '../features/auth/authStore'
 

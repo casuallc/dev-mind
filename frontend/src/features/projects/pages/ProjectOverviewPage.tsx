@@ -4,7 +4,7 @@ import { Button, Card, Descriptions, Empty, Space, Spin, Tag, Typography } from 
 import { ReloadOutlined } from '@ant-design/icons'
 import WorktreesTab from '../components/detail/WorktreesTab'
 import { listWorktrees } from '../api'
-import { useCurrentProject } from '../hooks/useCurrentProject'
+import { useCurrentProject } from '../../../app/useCurrentProject'
 import type { WorktreeInfo } from '../types'
 
 export default function ProjectOverviewPage() {

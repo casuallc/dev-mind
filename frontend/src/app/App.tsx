@@ -9,7 +9,7 @@ import SessionTemplates from '../features/sessions/pages/SessionTemplates'
 import ProjectsPage from '../features/projects/pages/ProjectsPage'
 import ProjectOverviewPage from '../features/projects/pages/ProjectOverviewPage'
 import RequirementsPage from '../features/requirements/pages/RequirementsPage'
-import ProjectContextGate from '../features/projects/components/ProjectContextGate'
+import ProjectContextGate from './ProjectContextGate'
 import RequirementDetailPage from '../features/requirements/pages/RequirementDetailPage'
 import AdminProjectsPage from '../features/projects/pages/AdminProjectsPage'
 import AdminProjectDetail from '../features/projects/pages/AdminProjectDetail'
@@ -28,7 +28,7 @@ import LoginPage from '../features/auth/pages/LoginPage'
 import UserManagementPage from '../features/auth/pages/UserManagementPage'
 import RequireAuth from '../features/auth/RequireAuth'
 import RequireAdmin from '../features/auth/RequireAdmin'
-import { setCurrentProject } from '../features/projects/currentProjectStore'
+import { setCurrentProject } from './currentProjectStore'
 
 /** 旧链接兼容：/projects/:id → 同步当前项目后回概览（原 ProjectDetail 已拆成项目上下文菜单页） */
 function LegacyProjectRedirect() {

@@ -41,7 +41,7 @@ import {
 import type { IssueDraft, TestRun, TestRunStatus, TestSuite } from '../types'
 import type { ProjectEnvironment, ProjectServer } from '../../projects/types'
 import { listEnvironments, listServers } from '../../projects/api'
-import { useCurrentProjectId } from '../../projects/hooks/useCurrentProject'
+import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { STATUS_COLOR, SUITE_KIND_COLOR } from '../constants'
 import CaseEditorDrawer from '../components/CaseEditorDrawer'
