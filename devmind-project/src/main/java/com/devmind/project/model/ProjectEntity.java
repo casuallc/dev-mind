@@ -42,6 +42,14 @@ public class ProjectEntity {
     @Column(length = 16)
     private String status;
 
+    /** CAP-23：主库来源镜像（LOCAL / CLONE；null = 存量纯本地项目），随 syncPrimaryMirror 维护 */
+    @Column(name = "source_type", length = 16)
+    private String sourceType;
+
+    /** CAP-23：主库克隆状态镜像（NONE / CLONING / READY / FAILED；null = 纯本地项目），供列表页徽标 */
+    @Column(name = "clone_status", length = 16)
+    private String cloneStatus;
+
     /** 指向 OpenAPI 文件（项目内路径或文档库），供测试套件生成（FR-06） */
     @Column(name = "api_doc_source", length = 512)
     private String apiDocSource;
@@ -84,6 +92,10 @@ public class ProjectEntity {
     public void setDescription(String description) { this.description = description; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public String getSourceType() { return sourceType; }
+    public void setSourceType(String sourceType) { this.sourceType = sourceType; }
+    public String getCloneStatus() { return cloneStatus; }
+    public void setCloneStatus(String cloneStatus) { this.cloneStatus = cloneStatus; }
     public String getApiDocSource() { return apiDocSource; }
     public void setApiDocSource(String apiDocSource) { this.apiDocSource = apiDocSource; }
     public Boolean getAutoRegressionOnDeploy() { return autoRegressionOnDeploy; }

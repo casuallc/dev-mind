@@ -18,6 +18,8 @@ devmind:
     max-concurrent: 4          # 最大并发会话数
   worktree:
     base-branch: master        # 会话 worktree 基准分支
+  project:
+    workspace-root: "data/repositories"   # CAP-23 克隆工作区根目录（跟随启动目录；服务器部署可改绝对路径）
   execution:
     shell: bash                # 本地构建/部署步骤的 shell（Windows 下为 Git Bash）
     step-timeout-ms: 1800000   # 单步超时 30 分钟，超时 kill

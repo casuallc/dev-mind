@@ -19,6 +19,8 @@ public class ProjectProperties {
     private List<String> defaultTags = new ArrayList<>();
     /** 项目并发写默认上限（FR-09，锁未单独配置时生效） */
     private int defaultMaxConcurrent = 1;
+    /** CAP-23 克隆工作区根目录（相对启动目录）：仓库克隆到 <workspaceRoot>/<projectId>/<repo子目录> */
+    private String workspaceRoot = "data/repositories";
 
     public String getDefaultPath() { return defaultPath; }
     public void setDefaultPath(String defaultPath) { this.defaultPath = defaultPath; }
@@ -28,4 +30,6 @@ public class ProjectProperties {
     public void setDefaultTags(List<String> defaultTags) { this.defaultTags = defaultTags; }
     public int getDefaultMaxConcurrent() { return defaultMaxConcurrent; }
     public void setDefaultMaxConcurrent(int defaultMaxConcurrent) { this.defaultMaxConcurrent = defaultMaxConcurrent; }
+    public String getWorkspaceRoot() { return workspaceRoot; }
+    public void setWorkspaceRoot(String workspaceRoot) { this.workspaceRoot = workspaceRoot; }
 }

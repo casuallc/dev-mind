@@ -1,6 +1,8 @@
 package com.devmind.project;
 
 import com.devmind.auth.IdentityService;
+import com.devmind.common.event.DomainEventPublisher;
+import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.security.ServerCredentialCipher;
@@ -89,6 +91,8 @@ public class ProjectService {
     private final RepoScanner repoScanner;
     /** CAP-07 提供凭证加密实现（可选）；缺省时 accessConfig 明文存储（无 server-adapter 模块时兼容） */
     private final ObjectProvider<ServerCredentialCipher> cipherProvider;
+    /** CAP-23：发布 project.repo.clone-requested 事件，由 integration 模块监听执行克隆（反向触发防依赖环） */
+    private final DomainEventPublisher eventPublisher;
 
     public ProjectService(IdentityService identityService,
                             ProjectProperties props,
@@ -105,7 +109,8 @@ public class ProjectService {
                           RelationRepository relationRepo,
                           EnvironmentRepository environmentRepo,
                           RepoScanner repoScanner,
-                          ObjectProvider<ServerCredentialCipher> cipherProvider) {
+                          ObjectProvider<ServerCredentialCipher> cipherProvider,
+                          DomainEventPublisher eventPublisher) {
         this.identityService = identityService;
         this.props = props;
         this.worktreeProps = worktreeProps;
@@ -122,6 +127,7 @@ public class ProjectService {
         this.environmentRepo = environmentRepo;
         this.repoScanner = repoScanner;
         this.cipherProvider = cipherProvider;
+        this.eventPublisher = eventPublisher;
     }
 
     /** 启动种子：projects 表为空且配置了 default-path 时，把 yml 预置仓库注册为 id=default 的项目（MVP 平滑迁移）。 */
@@ -188,18 +194,28 @@ public class ProjectService {
     }
 
     public ProjectView create(ProjectRequest req) {
-        Path repoPath = validateRepo(req.path());
+        boolean clone = isClone(req.sourceType());
+        ProjectEntity e = new ProjectEntity();
+        e.setId(shortId());
+        // CAP-23：CLONE 模式路径由系统计算（目录由 integration 模块异步克隆填充）；LOCAL 保持本地校验
+        Path repoPath;
+        if (clone) {
+            validateCloneRemote(req.remoteUrl(), req.integrationId());
+            repoPath = cloneTargetDir(e.getId(), "main");
+        } else {
+            repoPath = validateRepo(req.path());
+        }
         if (projectRepo.countByPath(repoPath.toString()) > 0) {
             throw new DevMindException(ErrorCode.CONFLICT, "该仓库路径已被注册为项目");
         }
-        ProjectEntity e = new ProjectEntity();
-        e.setId(shortId());
         e.setName(req.name().trim());
         e.setPath(repoPath.toString());
         e.setDefaultBranch(blankToNull(req.defaultBranch()));
         e.setTags(joinTags(req.tags()));
         e.setDescription(blankToNull(req.description()));
         e.setStatus(req.status() == null || req.status().isBlank() ? STATUS_ACTIVE : req.status().toUpperCase());
+        e.setSourceType(clone ? ProjectRepoEntity.SOURCE_CLONE : ProjectRepoEntity.SOURCE_LOCAL);
+        e.setCloneStatus(clone ? ProjectRepoEntity.CLONE_CLONING : null);
         e.setApiDocSource(blankToNull(req.apiDocSource()));
         e.setAutoRegressionOnDeploy(req.autoRegressionOnDeploy() != null && req.autoRegressionOnDeploy());
         e.setOwnerId(identityService.currentActor());
@@ -209,16 +225,30 @@ public class ProjectService {
         e.setUpdatedAt(now);
         projectRepo.save(e);
         // P0-4：注册主库记录（projects.path 为主库镜像）
-        ProjectRepoEntity primary = newRepoRow(e.getId(), repoDirName(e.getPath()), e.getPath(), null,
+        String primaryName = clone ? repoNameFromUrl(req.remoteUrl()) : repoDirName(e.getPath());
+        ProjectRepoEntity primary = newRepoRow(e.getId(), primaryName, e.getPath(),
+                clone ? req.remoteUrl().trim() : null,
                 e.getDefaultBranch(), ProjectRepoEntity.ROLE_CODE, true, 0);
+        if (clone) {
+            primary.setSourceType(ProjectRepoEntity.SOURCE_CLONE);
+            primary.setIntegrationId(req.integrationId());
+            primary.setCloneStatus(ProjectRepoEntity.CLONE_CLONING);
+        }
         repoRepo.save(primary);
-        log.info("项目已创建: id={} name={} path={}", e.getId(), e.getName(), e.getPath());
+        if (clone) {
+            publishCloneRequested(e.getId(), primary.getId(), primary.getName());
+        }
+        log.info("项目已创建: id={} name={} path={} sourceType={}", e.getId(), e.getName(), e.getPath(), e.getSourceType());
         return toView(e);
     }
 
     public ProjectView update(String id, ProjectRequest req) {
         ProjectEntity e = requireEntity(id);
+        boolean cloneProject = ProjectRepoEntity.SOURCE_CLONE.equals(e.getSourceType());
         if (req.path() != null && !req.path().isBlank()) {
+            if (cloneProject) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "克隆项目的仓库路径由系统管理，不可修改");
+            }
             Path repoPath = validateRepo(req.path());
             if (!repoPath.toString().equals(e.getPath()) && projectRepo.countByPath(repoPath.toString()) > 0) {
                 throw new DevMindException(ErrorCode.CONFLICT, "该仓库路径已被其他项目注册");
@@ -233,6 +263,22 @@ public class ProjectService {
                     },
                     () -> repoRepo.save(newRepoRow(id, repoDirName(e.getPath()), e.getPath(), null,
                             e.getDefaultBranch(), ProjectRepoEntity.ROLE_CODE, true, 0)));
+        }
+        // CAP-23：克隆项目允许改 remoteUrl/integrationId（镜像到主库记录；不自动重克隆，需显式触发）
+        if (cloneProject && req.remoteUrl() != null) {
+            validateCloneRemote(req.remoteUrl(), req.integrationId());
+            repoRepo.findByProjectIdAndIsPrimaryTrue(id).ifPresent(r -> {
+                r.setRemoteUrl(blankToNull(req.remoteUrl()));
+                r.setUpdatedAt(Instant.now());
+                repoRepo.save(r);
+            });
+        }
+        if (cloneProject && req.integrationId() != null) {
+            repoRepo.findByProjectIdAndIsPrimaryTrue(id).ifPresent(r -> {
+                r.setIntegrationId(req.integrationId());
+                r.setUpdatedAt(Instant.now());
+                repoRepo.save(r);
+            });
         }
         if (req.name() != null && !req.name().isBlank()) e.setName(req.name().trim());
         if (req.defaultBranch() != null) {
@@ -271,6 +317,10 @@ public class ProjectService {
         releaseRepo.deleteByProjectId(id);
         lockRepo.deleteById(id);
         projectRepo.delete(e);
+        // CAP-23：克隆项目不删磁盘目录，与 deleteRepo"不删除磁盘上的仓库"语义一致
+        if (ProjectRepoEntity.SOURCE_CLONE.equals(e.getSourceType())) {
+            log.warn("克隆项目已删除，工作区目录保留待人工清理: {}", workspaceRoot().resolve(id));
+        }
         log.info("项目已删除: id={} name={}", id, e.getName());
     }
 
@@ -303,14 +353,34 @@ public class ProjectService {
 
     public RepoView addRepo(String projectId, RepoRequest req) {
         requireEntity(projectId);
-        Path repoPath = validateRepo(req.path());
-        if (repoRepo.countByProjectIdAndPath(projectId, repoPath.toString()) > 0) {
+        boolean clone = isClone(req.sourceType());
+        String repoPath;
+        if (clone) {
+            // CAP-23：CLONE 模式 path 由系统计算（忽略请求值），按项目分目录
+            validateCloneRemote(req.remoteUrl(), req.integrationId());
+            String subDir = sanitizeDirName(req.name().trim());
+            String candidate = subDir;
+            int seq = 2;
+            while (repoRepo.countByProjectIdAndPath(projectId,
+                    cloneTargetDir(projectId, candidate).toString()) > 0) {
+                candidate = subDir + "-" + seq++;
+            }
+            repoPath = cloneTargetDir(projectId, candidate).toString();
+        } else {
+            repoPath = validateRepo(req.path()).toString();
+        }
+        if (repoRepo.countByProjectIdAndPath(projectId, repoPath) > 0) {
             throw new DevMindException(ErrorCode.CONFLICT, "该仓库已在项目仓库列表中");
         }
         boolean makePrimary = Boolean.TRUE.equals(req.primary()) || repoRepo.countByProjectId(projectId) == 0;
-        ProjectRepoEntity r = newRepoRow(projectId, req.name().trim(), repoPath.toString(),
+        ProjectRepoEntity r = newRepoRow(projectId, req.name().trim(), repoPath,
                 blankToNull(req.remoteUrl()), blankToNull(req.defaultBranch()),
                 normalizeRole(req.role()), makePrimary, req.sortOrder() == null ? 0 : req.sortOrder());
+        if (clone) {
+            r.setSourceType(ProjectRepoEntity.SOURCE_CLONE);
+            r.setIntegrationId(req.integrationId());
+            r.setCloneStatus(ProjectRepoEntity.CLONE_CLONING);
+        }
         if (makePrimary) {
             clearPrimary(projectId);
         }
@@ -318,13 +388,21 @@ public class ProjectService {
         if (makePrimary) {
             syncPrimaryMirror(projectId);
         }
-        log.info("项目仓库已添加: projectId={} name={} path={} primary={}", projectId, r.getName(), r.getPath(), makePrimary);
+        if (clone) {
+            publishCloneRequested(projectId, r.getId(), r.getName());
+        }
+        log.info("项目仓库已添加: projectId={} name={} path={} primary={} sourceType={}",
+                projectId, r.getName(), r.getPath(), makePrimary, r.getSourceType());
         return view;
     }
 
     public RepoView updateRepo(String projectId, Long repoId, RepoRequest req) {
         ProjectRepoEntity r = requireRepo(projectId, repoId);
+        boolean clone = ProjectRepoEntity.SOURCE_CLONE.equals(r.getSourceType());
         if (req.path() != null && !req.path().isBlank()) {
+            if (clone) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "克隆仓库的本地路径由系统管理，不可修改");
+            }
             Path repoPath = validateRepo(req.path());
             if (!repoPath.toString().equals(r.getPath())
                     && repoRepo.countByProjectIdAndPath(projectId, repoPath.toString()) > 0) {
@@ -333,7 +411,15 @@ public class ProjectService {
             r.setPath(repoPath.toString());
         }
         if (req.name() != null && !req.name().isBlank()) r.setName(req.name().trim());
-        if (req.remoteUrl() != null) r.setRemoteUrl(blankToNull(req.remoteUrl()));
+        if (req.remoteUrl() != null) {
+            // CAP-23：改 remoteUrl/integrationId 后不自动重克隆，前端引导用户显式"重新克隆"
+            if (clone && !req.remoteUrl().isBlank()) {
+                validateCloneRemote(req.remoteUrl(),
+                        req.integrationId() != null ? req.integrationId() : r.getIntegrationId());
+            }
+            r.setRemoteUrl(blankToNull(req.remoteUrl()));
+        }
+        if (req.integrationId() != null) r.setIntegrationId(req.integrationId());
         if (req.defaultBranch() != null) r.setDefaultBranch(blankToNull(req.defaultBranch()));
         if (req.role() != null && !req.role().isBlank()) r.setRole(normalizeRole(req.role()));
         if (req.sortOrder() != null) r.setSortOrder(req.sortOrder());
@@ -390,12 +476,15 @@ public class ProjectService {
         }
     }
 
-    /** projects.path / default_branch 作为主库镜像列，供既有消费方（会话/构建/摘要扫描）无感使用。 */
-    private void syncPrimaryMirror(String projectId) {
+    /** projects.path / default_branch 作为主库镜像列，供既有消费方（会话/构建/摘要扫描）无感使用。
+     *  CAP-23：同时镜像 source_type/clone_status；public 供 integration 模块克隆状态变化时回写。 */
+    public void syncPrimaryMirror(String projectId) {
         ProjectEntity p = requireEntity(projectId);
         repoRepo.findByProjectIdAndIsPrimaryTrue(projectId).ifPresent(r -> {
             p.setPath(r.getPath());
             p.setDefaultBranch(r.getDefaultBranch());
+            p.setSourceType(r.getSourceType());
+            p.setCloneStatus(ProjectRepoEntity.SOURCE_CLONE.equals(r.getSourceType()) ? r.getCloneStatus() : null);
             p.setUpdatedAt(Instant.now());
             projectRepo.save(p);
         });
@@ -710,6 +799,92 @@ public class ProjectService {
         return repo;
     }
 
+    // ---------------- CAP-23 克隆模式内部 ----------------
+
+    private boolean isClone(String sourceType) {
+        return ProjectRepoEntity.SOURCE_CLONE.equalsIgnoreCase(sourceType == null ? "" : sourceType.trim());
+    }
+
+    /**
+     * 克隆远端地址轻量校验（与 integration 模块 GitRemoteOps 口径一致）：
+     * 仅 http/https；ssh 明确拒绝；file:// 仅在匿名（无集成实例）时放行，供本地验证/内网通道。
+     * Integration 存在性/类型/host 一致性由 integration 模块在克隆启动时校验（project 不能反向依赖）。
+     */
+    private void validateCloneRemote(String remoteUrl, Long integrationId) {
+        if (remoteUrl == null || remoteUrl.isBlank()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "克隆模式 remoteUrl 不能为空");
+        }
+        String url = remoteUrl.trim();
+        if (url.startsWith("git@") || url.startsWith("ssh://")) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "仅支持 http/https 远端（PAT 注入），不支持 ssh 形式：" + url);
+        }
+        java.net.URI uri;
+        try {
+            uri = java.net.URI.create(url);
+        } catch (IllegalArgumentException e) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "remoteUrl 不是合法 URL：" + url);
+        }
+        String scheme = uri.getScheme();
+        if ("file".equalsIgnoreCase(scheme)) {
+            if (integrationId != null) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "file:// 仅支持匿名克隆（不可选择集成实例）");
+            }
+            return;
+        }
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "remoteUrl 协议仅支持 http/https：" + url);
+        }
+        if (uri.getHost() == null || uri.getHost().isBlank()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "remoteUrl 缺少主机名：" + url);
+        }
+    }
+
+    private Path workspaceRoot() {
+        return Path.of(props.getWorkspaceRoot()).toAbsolutePath().normalize();
+    }
+
+    /** 克隆目标目录 = <workspaceRoot>/<projectId>/<subDir>，防 .. 逃逸。 */
+    private Path cloneTargetDir(String projectId, String subDir) {
+        Path root = workspaceRoot();
+        Path dir = root.resolve(projectId).resolve(subDir).normalize();
+        if (!dir.startsWith(root)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "非法仓库目录: " + subDir);
+        }
+        return dir;
+    }
+
+    /** repo 子目录名白名单字符 [a-zA-Z0-9._-]，其余替换为 -。 */
+    private String sanitizeDirName(String name) {
+        String s = name.replaceAll("[^a-zA-Z0-9._-]", "-");
+        return s.isBlank() ? "repo" : s;
+    }
+
+    /** 从远端 URL 推导仓库名（去 .git 后缀取最后一段），供克隆主库命名。 */
+    private String repoNameFromUrl(String remoteUrl) {
+        String url = remoteUrl.trim();
+        int q = url.indexOf('?');
+        if (q > 0) {
+            url = url.substring(0, q);
+        }
+        while (url.endsWith("/")) {
+            url = url.substring(0, url.length() - 1);
+        }
+        if (url.endsWith(".git")) {
+            url = url.substring(0, url.length() - 4);
+        }
+        int slash = url.lastIndexOf('/');
+        String name = slash >= 0 ? url.substring(slash + 1) : url;
+        return name.isBlank() ? "main" : sanitizeDirName(name);
+    }
+
+    /** 发布克隆请求事件（integration 模块监听执行；旁路，发布失败不影响创建）。 */
+    private void publishCloneRequested(String projectId, Long repoId, String repoName) {
+        eventPublisher.publish(SimpleDomainEvent.of("project.repo.clone-requested", projectId, null,
+                identityService.currentActor(), "仓库克隆请求: " + repoName,
+                "PROJECT_REPO", String.valueOf(repoId), null));
+    }
+
     private boolean isGitRepo(Path repo) {
         return Files.isDirectory(repo.resolve(".git")) || Files.isRegularFile(repo.resolve(".git"));
     }
@@ -725,14 +900,17 @@ public class ProjectService {
 
     private ProjectView toView(ProjectEntity e) {
         return new ProjectView(e.getId(), e.getName(), e.getPath(), e.getDefaultBranch(),
-                splitTags(e.getTags()), e.getDescription(), e.getStatus(), e.getApiDocSource(),
+                splitTags(e.getTags()), e.getDescription(), e.getStatus(), e.getSourceType(), e.getCloneStatus(),
+                e.getApiDocSource(),
                 e.getAutoRegressionOnDeploy(), e.getContextSummary(), e.getSummaryGeneratedAt(),
                 e.getOwnerId(), e.getCreatedAt(), e.getUpdatedAt());
     }
 
     private RepoView toRepoView(ProjectRepoEntity r) {
-        return new RepoView(r.getId(), r.getProjectId(), r.getName(), r.getPath(), r.getRemoteUrl(),
+        return new RepoView(r.getId(), r.getProjectId(), r.getName(), r.getPath(), r.getSourceType(),
+                r.getRemoteUrl(), r.getIntegrationId(),
                 r.getDefaultBranch(), r.getRole(), Boolean.TRUE.equals(r.getIsPrimary()), r.getSortOrder(),
+                r.getCloneStatus(), r.getCloneError(), r.getClonedAt(),
                 r.getCreatedAt(), r.getUpdatedAt());
     }
 
