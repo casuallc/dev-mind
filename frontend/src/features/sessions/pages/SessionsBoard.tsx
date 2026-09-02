@@ -22,8 +22,10 @@ import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { createSession, deleteSession, listSessions, listTemplates } from '../api'
 import type { SessionSummary, SessionTemplate } from '../types'
-import { listProjects, listRequirements, listWorkItems } from '../../projects/api'
-import type { Project, Requirement, WorkItem } from '../../projects/types'
+import { listProjects } from '../../projects/api'
+import type { Project } from '../../projects/types'
+import { listRequirements, listWorkItems } from '../../requirements/api'
+import type { Requirement, WorkItem } from '../../requirements/types'
 import AgentPanel from '../components/AgentPanel'
 
 const stateColor: Record<string, string> = {

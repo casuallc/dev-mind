@@ -1,7 +1,7 @@
 // 需求列表页（/requirements）：当前项目的需求研发主线。
 import { Card } from 'antd'
 import RequirementListCard from '../components/RequirementListCard'
-import { useCurrentProjectId } from '../hooks/useCurrentProject'
+import { useCurrentProjectId } from '../../projects/hooks/useCurrentProject'
 
 export default function RequirementsPage() {
   const projectId = useCurrentProjectId()
