@@ -26,6 +26,7 @@
         <module>devmind-project</module>
         <module>devmind-docs</module>
         <module>devmind-knowledge</module>
+        <module>devmind-skill</module>
         <module>devmind-session</module>
         <module>devmind-notification</module>
         <module>devmind-server-adapter</module>
@@ -75,6 +76,11 @@
             <dependency>
                 <groupId>com.devmind</groupId>
                 <artifactId>devmind-knowledge</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.devmind</groupId>
+                <artifactId>devmind-skill</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
