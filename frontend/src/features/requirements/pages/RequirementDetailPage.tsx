@@ -30,6 +30,7 @@ import { useProject } from '../../projects/hooks/useProject'
 import { getCurrentProjectId, setCurrentProject } from '../../../app/currentProjectStore'
 import { requirementStatusColor, requirementTypeColor, STATUS_FLOW, TYPE_LABEL } from '../components/requirementMeta'
 import type { RequirementOverview } from '../types'
+import { fmtTime } from '../../../shared/utils/format'
 
 export default function RequirementDetailPage() {
   const { id: projectId, rid } = useParams<{ id: string; rid: string }>()
@@ -161,7 +162,7 @@ export default function RequirementDetailPage() {
           <FlowActions requirement={r} onChanged={reloadOverview} />
           <Descriptions size="small" column={{ xs: 1, sm: 3 }}>
             <Descriptions.Item label="负责人">{r.ownerId || '-'}</Descriptions.Item>
-            <Descriptions.Item label="创建">{new Date(r.createdAt).toLocaleString()}</Descriptions.Item>
+            <Descriptions.Item label="创建">{fmtTime(r.createdAt)}</Descriptions.Item>
             {r.description && (
               <Descriptions.Item label="描述（业务目标）" span={3}>{r.description}</Descriptions.Item>
             )}
@@ -203,7 +204,7 @@ export default function RequirementDetailPage() {
                     children: (
                       <Space size={8}>
                         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                          {new Date(t.time).toLocaleString()}
+                          {fmtTime(t.time)}
                         </Typography.Text>
                         <Tag style={{ fontSize: 11 }}>{t.type}</Tag>
                         <span style={{ fontSize: 13 }}>{t.label}</span>

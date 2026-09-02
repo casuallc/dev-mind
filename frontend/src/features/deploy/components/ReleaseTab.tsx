@@ -31,6 +31,7 @@ import {
   saveReleaseConfig,
 } from '../api'
 import type { CreateReleaseInput, ReleaseConfig, ReleaseRecord, ReleaseStatus } from '../types'
+import { fmtTime } from '../../../shared/utils/format'
 
 const STATUS_COLOR: Record<ReleaseStatus, string> = {
   PLANNED: 'blue',
@@ -141,7 +142,7 @@ export default function ReleaseTab({ id, readOnly }: {
     { title: '构建', dataIndex: 'buildId', width: 70, render: (v: number) => (v ? `#${v}` : '-') },
     {
       title: '创建时间', dataIndex: 'createdAt', width: 170,
-      render: (v: string) => (v ? new Date(v).toLocaleString() : '-'),
+      render: (v: string) => fmtTime(v),
     },
     {
       title: '操作', key: 'ops', width: 200,
@@ -342,7 +343,7 @@ function DetailDrawer({ record, onClose, onChanged, readOnly }: {
             {d.tagName && <Typography.Text code>{d.tagName}</Typography.Text>}
             {d.nexusRef && <Typography.Text type="secondary" style={{ fontSize: 12 }}>{d.nexusRef}</Typography.Text>}
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {d.createdAt ? new Date(d.createdAt).toLocaleString() : '-'}
+              {fmtTime(d.createdAt)}
             </Typography.Text>
             {d.rollbackOf && <Tag color="orange">回滚自 #{d.rollbackOf}</Tag>}
           </Space>

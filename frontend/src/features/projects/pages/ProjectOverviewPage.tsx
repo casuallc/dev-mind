@@ -6,6 +6,7 @@ import WorktreesTab from '../components/WorktreesTab'
 import { listWorktrees } from '../api'
 import { useCurrentProject } from '../../../app/useCurrentProject'
 import type { WorktreeInfo } from '../types'
+import { fmtTime } from '../../../shared/utils/format'
 
 export default function ProjectOverviewPage() {
   const { projectId, project, loading, reload } = useCurrentProject()
@@ -55,8 +56,8 @@ export default function ProjectOverviewPage() {
             {project.tags?.length ? project.tags.map((t) => <Tag key={t}>{t}</Tag>) : '-'}
           </Descriptions.Item>
           <Descriptions.Item label="API 文档源">{project.apiDocSource || '-'}</Descriptions.Item>
-          <Descriptions.Item label="创建">{new Date(project.createdAt).toLocaleString()}</Descriptions.Item>
-          <Descriptions.Item label="更新">{new Date(project.updatedAt).toLocaleString()}</Descriptions.Item>
+          <Descriptions.Item label="创建">{fmtTime(project.createdAt)}</Descriptions.Item>
+          <Descriptions.Item label="更新">{fmtTime(project.updatedAt)}</Descriptions.Item>
           {project.description && (
             <Descriptions.Item label="描述" span={2}>
               {project.description}

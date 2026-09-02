@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import { getDashboard } from '../api'
 import { setCurrentProject } from '../../../app/currentProjectStore'
 import type { DashboardView, FailureItem } from '../types'
+import { fmtTime } from '../../../shared/utils/format'
 
 const REQ_STATUS: { key: string; label: string; color: string }[] = [
   { key: 'DRAFT', label: '草稿', color: 'default' },
@@ -167,7 +168,7 @@ export default function DashboardPage() {
               onClick={() => { setCurrentProject(f.projectId); navigate('/overview') }}
               extra={
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  {f.time ? new Date(f.time).toLocaleString() : '-'}
+                  {fmtTime(f.time)}
                 </Typography.Text>
               }
             >

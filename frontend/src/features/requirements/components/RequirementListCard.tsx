@@ -10,6 +10,7 @@ import { listExternalLinksByType } from '../../integrations/api'
 import type { ExternalLink } from '../../integrations/types'
 import type { Requirement, RequirementType } from '../types'
 import RequirementFormModal from './RequirementFormModal'
+import { fmtTime } from '../../../shared/utils/format'
 import {
   ALL_STATUSES,
   ALL_TYPES,
@@ -112,7 +113,7 @@ export default function RequirementListCard({ projectId }: { projectId: string }
       width: 150,
       render: (t: string) => (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          {new Date(t).toLocaleString()}
+          {fmtTime(t)}
         </Typography.Text>
       ),
     },

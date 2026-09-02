@@ -5,6 +5,7 @@ import { Select, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate } from 'react-router-dom'
 import type { RequirementOverview } from '../types'
+import { fmtTime } from '../../../shared/utils/format'
 
 type RecordType = 'docs' | 'sessions' | 'builds' | 'tests' | 'deploys' | 'releases' | 'artifacts'
 
@@ -21,7 +22,7 @@ const RECORD_LABEL: Record<RecordType, string> = {
 const statusTag = (s: string) => (
   <Tag color={s === 'SUCCESS' || s === 'DONE' ? 'green' : s === 'FAILED' || s.includes('FAIL') || s === 'ROLLED_BACK' ? 'red' : 'blue'}>{s}</Tag>
 )
-const timeCol = { title: '创建', dataIndex: 'createdAt', width: 150, render: (v: string) => <span style={{ fontSize: 12 }}>{new Date(v).toLocaleString()}</span> } as const
+const timeCol = { title: '创建', dataIndex: 'createdAt', width: 150, render: (v: string) => <span style={{ fontSize: 12 }}>{fmtTime(v)}</span> } as const
 
 // RecordType → RequirementOverview 字段名（tests/deploys 与字段名不一致，需映射）
 const OVERVIEW_KEY = {

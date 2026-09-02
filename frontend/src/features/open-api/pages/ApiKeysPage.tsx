@@ -18,6 +18,7 @@ import { CopyOutlined, PlusOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { deleteApiKey, issueApiKey, listApiKeys, setApiKeyEnabled } from '../api'
 import type { ApiKey, IssuedKey } from '../types'
+import { fmtTime } from '../../../shared/utils/format'
 
 /**
  * CAP-20 后台页：API 密钥管理（仅 ADMIN）。
@@ -87,13 +88,13 @@ export default function ApiKeysPage() {
       title: '过期时间',
       dataIndex: 'expiresAt',
       width: 170,
-      render: (t: string | null) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm') : '永不过期'),
+      render: (t: string | null) => (t ? fmtTime(t) : '永不过期'),
     },
     {
       title: '最近使用',
       dataIndex: 'lastUsedAt',
       width: 170,
-      render: (t: string | null) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm') : '-'),
+      render: (t: string | null) => fmtTime(t),
     },
     { title: '创建人', dataIndex: 'createdBy', width: 100, render: (s: string | null) => s || '-' },
     {

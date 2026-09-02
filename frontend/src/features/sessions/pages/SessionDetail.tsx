@@ -40,6 +40,7 @@ import type { DiffView, SessionEvent, SessionSummary } from '../types'
 import { useSessionStream } from '../hooks/useSessionStream'
 import EventStream from '../components/EventStream'
 import SedimentExperienceModal from '../../knowledge/components/SedimentExperienceModal'
+import { fmtTime } from '../../../shared/utils/format'
 
 const stateColor: Record<string, string> = {
   RUNNING: 'processing',
@@ -287,8 +288,8 @@ export default function SessionDetail() {
           <Descriptions.Item label="项目">{session.projectId}</Descriptions.Item>
           <Descriptions.Item label="PID">{session.pid ?? '-'}</Descriptions.Item>
           <Descriptions.Item label="模型">{session.model || '默认'}</Descriptions.Item>
-          <Descriptions.Item label="创建">{new Date(session.createdAt).toLocaleString()}</Descriptions.Item>
-          <Descriptions.Item label="完成">{session.finishedAt ? new Date(session.finishedAt).toLocaleString() : '-'}</Descriptions.Item>
+          <Descriptions.Item label="创建">{fmtTime(session.createdAt)}</Descriptions.Item>
+          <Descriptions.Item label="完成">{fmtTime(session.finishedAt)}</Descriptions.Item>
           <Descriptions.Item label="Worktree" span={3}>
             <Typography.Text code copyable style={{ fontSize: 12 }}>
               {session.worktreePath || '-'}

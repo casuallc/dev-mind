@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom'
 import { listProjects } from '../api'
 import { setCurrentProject } from '../../../app/currentProjectStore'
 import type { Project } from '../types'
+import { fmtTime } from '../../../shared/utils/format'
 
 const STATUS_OPTIONS = [
   { value: 'ACTIVE', label: 'ACTIVE', color: 'green' },
@@ -79,7 +80,7 @@ export default function ProjectsPage() {
       title: '摘要',
       dataIndex: 'summaryGeneratedAt',
       width: 140,
-      render: (t?: string) => (t ? new Date(t).toLocaleString() : '-'),
+      render: (t?: string) => fmtTime(t),
     },
     {
       title: '操作',

@@ -32,6 +32,7 @@ import { markAllReadLocal, markReadLocal, useNotifications } from '../store'
 import { executeNotificationAction } from '../actions'
 import { EVENT_TYPES, LEVEL_COLOR } from '../types'
 import type { AppNotification, NotificationChannel, NotificationPrefs } from '../types'
+import { fmtTime } from '../../../shared/utils/format'
 
 export default function NotificationCenter() {
   const navigate = useNavigate()
@@ -181,7 +182,7 @@ export default function NotificationCenter() {
       title: '时间',
       dataIndex: 'createdAt',
       width: 170,
-      render: (t: string) => new Date(t).toLocaleString(),
+      render: (t: string) => fmtTime(t),
     },
     {
       title: '状态',

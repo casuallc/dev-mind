@@ -35,6 +35,7 @@ import {
   updateJiraSyncConfig,
 } from '../api'
 import type { ExternalProject, Integration, JiraSyncConfig, JiraSyncConfigInput } from '../types'
+import { fmtTime } from '../../../shared/utils/format'
 
 interface Props {
   projectId: string
@@ -232,7 +233,7 @@ export default function JiraSyncTab({ projectId }: Props) {
                 </Tooltip>
               ) : row.lastSyncAt ? (
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  {new Date(row.lastSyncAt).toLocaleString()} · 新增 {row.lastImported ?? 0} / 刷新{' '}
+                  {fmtTime(row.lastSyncAt)} · 新增 {row.lastImported ?? 0} / 刷新{' '}
                   {row.lastUpdatedCount ?? 0}
                 </Typography.Text>
               ) : (

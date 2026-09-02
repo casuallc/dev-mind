@@ -26,6 +26,7 @@ import type { Project } from '../../projects/types'
 import { createDoc, listDocs, listTemplates, pushDocs, searchDocs } from '../api'
 import { KIND_LABEL, STATUS_LABEL } from '../types'
 import type { DocInput, DocKind, DocMeta, DocStatus, DocTemplate } from '../types'
+import { fmtTime } from '../../../shared/utils/format'
 
 const kindTag = (k: DocKind) => <Tag color={k === 'requirement' ? 'blue' : k === 'design' ? 'geekblue' : k === 'api-suite' ? 'purple' : 'cyan'}>{KIND_LABEL[k] ?? k}</Tag>
 const statusTag = (s: DocStatus) => (
@@ -131,7 +132,7 @@ export default function DocsPage() {
         tags?.length ? tags.map((t) => <Tag key={t}>{t}</Tag>) : <Typography.Text type="secondary">-</Typography.Text>,
     },
     { title: '路径', dataIndex: 'filePath', ellipsis: true, render: (p: string) => <Typography.Text code style={{ fontSize: 12 }}>{p}</Typography.Text> },
-    { title: '更新时间', dataIndex: 'updatedAt', width: 170, render: (v) => new Date(v).toLocaleString() },
+    { title: '更新时间', dataIndex: 'updatedAt', width: 170, render: (v) => fmtTime(v) },
   ]
 
   const projectOptions = projects.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))

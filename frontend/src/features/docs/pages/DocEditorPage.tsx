@@ -29,6 +29,7 @@ import { deleteDoc, docDiff, getDoc, listDocVersions, revertDoc, saveDocVersion,
 import { KIND_LABEL, STATUS_LABEL } from '../types'
 import type { DiffResult, DocDetail, DocVersion } from '../types'
 import Markdown from '../components/Markdown'
+import { fmtTime } from '../../../shared/utils/format'
 
 const statusTag = (s: string) => (
   <Tag color={s === 'draft' ? 'default' : s === 'pending_confirm' ? 'gold' : 'green'}>{STATUS_LABEL[s as keyof typeof STATUS_LABEL] ?? s}</Tag>
@@ -181,7 +182,7 @@ export default function DocEditorPage() {
       width: 100,
       render: (s) => (s ? <Typography.Text code style={{ fontSize: 11 }}>{s.slice(0, 7)}</Typography.Text> : '-'),
     },
-    { title: '时间', dataIndex: 'createdAt', width: 170, render: (t) => new Date(t).toLocaleString() },
+    { title: '时间', dataIndex: 'createdAt', width: 170, render: (t) => fmtTime(t) },
     {
       title: '操作',
       width: 200,

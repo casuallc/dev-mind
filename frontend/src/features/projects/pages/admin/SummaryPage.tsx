@@ -5,6 +5,7 @@ import { DiffOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { getSummary, refreshSummary, saveSummary } from '../../api'
 import type { ContextSummary } from '../../types'
+import { fmtTime } from '../../../../shared/utils/format'
 
 export default function SummaryPage() {
   const { id = '' } = useParams<{ id: string }>()
@@ -63,7 +64,7 @@ export default function SummaryPage() {
         </Button>
         {summary.generatedAt && (
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            生成于 {new Date(summary.generatedAt).toLocaleString()}
+            生成于 {fmtTime(summary.generatedAt)}
           </Typography.Text>
         )}
       </Space>

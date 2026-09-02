@@ -27,6 +27,7 @@ import type { Project } from '../../projects/types'
 import { listRequirements, listWorkItems } from '../../requirements/api'
 import type { Requirement, WorkItem } from '../../requirements/types'
 import AgentPanel from '../components/AgentPanel'
+import { fmtTime } from '../../../shared/utils/format'
 
 const stateColor: Record<string, string> = {
   RUNNING: 'processing',
@@ -221,7 +222,7 @@ export default function SessionsBoard() {
       title: '创建时间',
       dataIndex: 'createdAt',
       width: 170,
-      render: (t: string) => new Date(t).toLocaleString(),
+      render: (t: string) => fmtTime(t),
     },
     {
       title: '操作',

@@ -6,6 +6,7 @@ import type { Project } from '../../projects/types'
 import { listProjects } from '../../projects/api'
 import { listServers, listAudit } from '../api'
 import type { AuditView, ServerListItem } from '../types'
+import { fmtTime } from '../../../shared/utils/format'
 
 const ACTIONS = ['connect_test', 'execute', 'upload', 'download', 'health_check']
 const ACTION_LABEL: Record<string, string> = {
@@ -45,7 +46,7 @@ export default function AuditTab() {
   useEffect(() => { load() }, [load])
 
   const columns: ColumnsType<AuditView> = [
-    { title: '时间', dataIndex: 'createdAt', width: 170, render: (t) => new Date(t).toLocaleString() },
+    { title: '时间', dataIndex: 'createdAt', width: 170, render: (t) => fmtTime(t) },
     { title: '服务器', dataIndex: 'serverName', width: 120, render: (n, r) => `${n} [${r.accessType}]` },
     {
       title: '动作',
@@ -99,7 +100,7 @@ export default function AuditTab() {
             <Typography.Paragraph type="secondary">
               {ACTION_LABEL[detail.action] ?? detail.action} · {detail.serverName} [{detail.accessType}]
               {detail.templateCode ? ` · 模板 ${detail.templateCode}` : ''}
-              {detail.capability ? ` · 能力 ${detail.capability}` : ''} · {new Date(detail.createdAt).toLocaleString()}
+              {detail.capability ? ` · 能力 ${detail.capability}` : ''} · {fmtTime(detail.createdAt)}
             </Typography.Paragraph>
             <Typography.Text strong>命令/脚本（模板渲染结果，不含凭证）</Typography.Text>
             <pre style={{ background: '#f6f6f6', padding: 12, borderRadius: 4, fontSize: 12, whiteSpace: 'pre-wrap' }}>

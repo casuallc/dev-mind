@@ -8,6 +8,7 @@ import { deleteProject, listProjects } from '../api'
 import { onboardProject } from '../../open-api/api'
 import ProjectFormModal from '../components/ProjectFormModal'
 import type { Project } from '../types'
+import { fmtTime } from '../../../shared/utils/format'
 
 const STATUS_OPTIONS = [
   { value: 'ACTIVE', label: 'ACTIVE', color: 'green' },
@@ -125,7 +126,7 @@ export default function AdminProjectsPage() {
       title: '摘要',
       dataIndex: 'summaryGeneratedAt',
       width: 140,
-      render: (t?: string) => (t ? new Date(t).toLocaleString() : '-'),
+      render: (t?: string) => fmtTime(t),
     },
     {
       title: '操作',

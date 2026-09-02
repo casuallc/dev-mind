@@ -37,6 +37,7 @@ import {
   updateEntry,
 } from '../api'
 import type { KnowledgeEntry, KnowledgeEntryInput, KnowledgeProposal, PreviewResult } from '../types'
+import { fmtTime } from '../../../shared/utils/format'
 
 const scopeTag = (s: string) => (s === 'global' ? <Tag color="blue">global</Tag> : <Tag>project</Tag>)
 const statusTag = (s: string) =>
@@ -241,7 +242,7 @@ export default function KnowledgeBase() {
     { title: '项目', dataIndex: 'projectId', width: 110, render: (v) => v ?? '-' },
     { title: '注入次数', dataIndex: 'hitCount', width: 90 },
     { title: '状态', dataIndex: 'status', width: 100, render: statusTag },
-    { title: '更新时间', dataIndex: 'updatedAt', width: 170, render: (v) => new Date(v).toLocaleString() },
+    { title: '更新时间', dataIndex: 'updatedAt', width: 170, render: (v) => fmtTime(v) },
     {
       title: '操作',
       width: 150,
@@ -261,7 +262,7 @@ export default function KnowledgeBase() {
     { title: '去向', dataIndex: 'targetScope', width: 90, render: scopeTag },
     { title: '来源会话', dataIndex: 'sourceSessionId', width: 130, render: (v) => v ?? '-' },
     { title: '状态', dataIndex: 'status', width: 100, render: statusTag },
-    { title: '创建时间', dataIndex: 'createdAt', width: 170, render: (v) => new Date(v).toLocaleString() },
+    { title: '创建时间', dataIndex: 'createdAt', width: 170, render: (v) => fmtTime(v) },
     {
       title: '操作',
       width: 260,

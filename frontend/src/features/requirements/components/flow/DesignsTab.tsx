@@ -7,6 +7,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { deleteDesign, listDesigns, updateDesignStatus } from '../../api'
 import { getDoc } from '../../../docs/api'
 import type { Design, DesignStatus } from '../../types'
+import { fmtTime } from '../../../../shared/utils/format'
 
 function designStatusColor(s: DesignStatus): string {
   switch (s) {
@@ -72,7 +73,7 @@ export default function DesignsTab({ projectId, requirementId }: {
     { title: '文档', dataIndex: 'docId', width: 90, render: (v?: number) => v ? `#${v}` : '-' },
     {
       title: '创建', dataIndex: 'createdAt', width: 160,
-      render: (v: string) => <span style={{ fontSize: 12 }}>{new Date(v).toLocaleString()}</span>,
+      render: (v: string) => <span style={{ fontSize: 12 }}>{fmtTime(v)}</span>,
     },
     {
       title: '操作', key: 'ops', width: 220,

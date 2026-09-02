@@ -7,6 +7,7 @@ import { EditOutlined, ReloadOutlined } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
 import ProjectFormModal from '../../components/ProjectFormModal'
 import { useProject } from '../../hooks/useProject'
+import { fmtTime } from '../../../../shared/utils/format'
 
 const SUB_TABS = [
   { key: 'repos', label: '仓库' },
@@ -73,8 +74,8 @@ export default function ProjectSettingsLayout() {
             {project.tags?.length ? project.tags.map((t) => <Tag key={t}>{t}</Tag>) : '-'}
           </Descriptions.Item>
           <Descriptions.Item label="API 文档源">{project.apiDocSource || '-'}</Descriptions.Item>
-          <Descriptions.Item label="创建">{new Date(project.createdAt).toLocaleString()}</Descriptions.Item>
-          <Descriptions.Item label="更新">{new Date(project.updatedAt).toLocaleString()}</Descriptions.Item>
+          <Descriptions.Item label="创建">{fmtTime(project.createdAt)}</Descriptions.Item>
+          <Descriptions.Item label="更新">{fmtTime(project.updatedAt)}</Descriptions.Item>
           {project.description && (
             <Descriptions.Item label="描述" span={2}>
               {project.description}
