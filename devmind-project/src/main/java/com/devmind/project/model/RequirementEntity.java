@@ -66,9 +66,9 @@ public class RequirementEntity {
     @Column(name = "owner_id", length = 64)
     private String ownerId;
 
-    /** 来源：LOCAL/JIRA，默认 LOCAL；旧行 null 兜底见 getSource() */
+    /** 来源：LOCAL/JIRA，默认 LOCAL；旧行 null 兜底见 getSource()。默认值须带引号，裸常量会生成 default LOCAL 导致建表失败 */
     @Column(length = 16)
-    @ColumnDefault(SOURCE_LOCAL)
+    @ColumnDefault("'LOCAL'")
     private String source = SOURCE_LOCAL;
 
     /** 优先级（Jira 词表 Highest/High/Medium/Low/Lowest，存字符串保持开放） */
