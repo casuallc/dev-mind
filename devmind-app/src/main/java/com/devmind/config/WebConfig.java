@@ -11,8 +11,9 @@ import org.springframework.web.servlet.resource.PathResourceResolver;
 
 /**
  * 前端静态托管 + SPA 路由回退。
- * 前后端一体：前端构建产物在 classpath:/static/，由后端托管；
+ * 前端资源只加载外置 file:./web/（相对启动工作目录，分发包包根；jar 内不含静态资源）；
  * 浏览器直接访问 /sessions 等前端路由时回退到 index.html（由 React Router 接管）。
+ * 开发态前端走 Vite dev server（:5173 代理 /api、/ws），后端不托管静态。
  */
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
@@ -21,7 +22,7 @@ public class WebConfig implements WebMvcConfigurer {
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         // 注册 "/**" 后 Spring Boot 跳过默认 handler（hasMappingForPattern 检查）
         registry.addResourceHandler("/**")
-                .addResourceLocations("classpath:/static/")
+                .addResourceLocations("file:./web/")
                 .resourceChain(true)
                 .addResolver(new SpaFallbackResolver());
     }
