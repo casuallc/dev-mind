@@ -1,4 +1,5 @@
-// 构建配置 Tab：有序构建步骤（上移/下移/增删改）。
+// 构建步骤配置 Tab（后台项目详情内）：有序构建步骤（上移/下移/增删改）。
+// 注意与 build 模块的构建记录页区分：这里管「步骤配置」，不管触发与历史。
 import { useState } from 'react'
 import {
   Button,
@@ -26,7 +27,7 @@ import type { BuildStep, BuildStepInput } from '../../types'
 
 const LOCATION_OPTIONS = ['LOCAL', 'REMOTE']
 
-export default function BuildTab({ id, steps, onChanged, readOnly }: {
+export default function BuildConfigTab({ id, steps, onChanged, readOnly }: {
   id: string
   steps: BuildStep[]
   onChanged: (s: BuildStep[]) => void

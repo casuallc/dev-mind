@@ -10,7 +10,7 @@ import ReposTab from '../components/detail/ReposTab'
 import SummaryTab from '../components/detail/SummaryTab'
 import ServersTab from '../components/detail/ServersTab'
 import EnvironmentsTab from '../components/detail/EnvironmentsTab'
-import BuildTab from '../components/detail/BuildTab'
+import BuildConfigTab from '../components/detail/BuildConfigTab'
 import LockTab from '../components/detail/LockTab'
 import ProjectFormModal from '../components/ProjectFormModal'
 import { useProject } from '../hooks/useProject'
@@ -129,7 +129,7 @@ export default function AdminProjectDetail() {
             {
               key: 'build',
               label: '构建配置',
-              children: <BuildTab id={project.id} steps={steps} onChanged={setSteps} />,
+              children: <BuildConfigTab id={project.id} steps={steps} onChanged={setSteps} />,
             },
             {
               key: 'release',
