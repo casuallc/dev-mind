@@ -8,6 +8,8 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.io.InputStream;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -40,6 +42,9 @@ class JiraIssueMapperTest {
         assertEquals(2, bug.labels().size());
         assertEquals("Open", bug.status());
         assertEquals("张三", bug.reporter());
+        assertEquals("李四", bug.assignee());
+        assertEquals(LocalDate.parse("2026-09-30"), bug.dueDate());
+        assertEquals(List.of("1.0", "1.1"), bug.fixVersions());
         assertEquals(Instant.parse("2026-08-28T01:00:00Z"), bug.updated());
     }
 
@@ -50,6 +55,9 @@ class JiraIssueMapperTest {
         assertNull(story.description());
         assertNull(story.priority());
         assertNull(story.reporter());
+        assertNull(story.assignee()); // 未指派返回 null
+        assertNull(story.dueDate());
+        assertTrue(story.fixVersions().isEmpty());
         assertTrue(story.labels().isEmpty());
     }
 

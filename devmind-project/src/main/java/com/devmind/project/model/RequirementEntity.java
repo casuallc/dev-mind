@@ -6,8 +6,10 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import org.hibernate.annotations.ColumnDefault;
 
 import java.time.Instant;
+import java.time.LocalDate;
 
 /**
  * requirements 表（CAP-13 研发主线）：业务目标，主线关系的根。
@@ -31,6 +33,10 @@ public class RequirementEntity {
     public static final String TYPE_BUG = "BUG";
     public static final String TYPE_IMPROVEMENT = "IMPROVEMENT";
     public static final String TYPE_TASK = "TASK";
+
+    /** 来源：LOCAL 自建 / JIRA 同步（Jira 托管字段本地只读，由同步刷新） */
+    public static final String SOURCE_LOCAL = "LOCAL";
+    public static final String SOURCE_JIRA = "JIRA";
 
     @Id
     @Column(length = 32)
@@ -59,6 +65,38 @@ public class RequirementEntity {
 
     @Column(name = "owner_id", length = 64)
     private String ownerId;
+
+    /** 来源：LOCAL/JIRA，默认 LOCAL；旧行 null 兜底见 getSource() */
+    @Column(length = 16)
+    @ColumnDefault(SOURCE_LOCAL)
+    private String source = SOURCE_LOCAL;
+
+    /** 优先级（Jira 词表 Highest/High/Medium/Low/Lowest，存字符串保持开放） */
+    @Column(length = 24)
+    private String priority;
+
+    /** 经办人（Jira displayName，不映射系统用户） */
+    @Column(length = 128)
+    private String assignee;
+
+    /** 报告人（Jira displayName） */
+    @Column(length = 128)
+    private String reporter;
+
+    /** 标签，逗号拼接存储（Jira label 无空格逗号，无损）；View 层拆 List */
+    @Column(length = 512)
+    private String labels;
+
+    /** 修复版本，逗号拼接 version name */
+    @Column(name = "fix_versions", length = 256)
+    private String fixVersions;
+
+    @Column(name = "due_date")
+    private LocalDate dueDate;
+
+    /** 外部 key 冗余展示/搜索缓存（Jira issue key，如 PROJ-123）；幂等真相源仍是 external_links */
+    @Column(name = "external_key", length = 256)
+    private String externalKey;
 
     /** 需求文档（docs 模块文档 id，可空后补） */
     @Column(name = "doc_id")
@@ -89,6 +127,23 @@ public class RequirementEntity {
     public void setType(String type) { this.type = type; }
     public String getOwnerId() { return ownerId; }
     public void setOwnerId(String ownerId) { this.ownerId = ownerId; }
+    /** 旧行可能为 null（ddl-auto 历史数据），统一兜底 LOCAL */
+    public String getSource() { return source == null ? SOURCE_LOCAL : source; }
+    public void setSource(String source) { this.source = source; }
+    public String getPriority() { return priority; }
+    public void setPriority(String priority) { this.priority = priority; }
+    public String getAssignee() { return assignee; }
+    public void setAssignee(String assignee) { this.assignee = assignee; }
+    public String getReporter() { return reporter; }
+    public void setReporter(String reporter) { this.reporter = reporter; }
+    public String getLabels() { return labels; }
+    public void setLabels(String labels) { this.labels = labels; }
+    public String getFixVersions() { return fixVersions; }
+    public void setFixVersions(String fixVersions) { this.fixVersions = fixVersions; }
+    public LocalDate getDueDate() { return dueDate; }
+    public void setDueDate(LocalDate dueDate) { this.dueDate = dueDate; }
+    public String getExternalKey() { return externalKey; }
+    public void setExternalKey(String externalKey) { this.externalKey = externalKey; }
     public Long getDocId() { return docId; }
     public void setDocId(Long docId) { this.docId = docId; }
     public String getCreatedBy() { return createdBy; }

@@ -5,6 +5,7 @@ import com.devmind.integration.connector.IntegrationConnector.JiraIssue;
 import tools.jackson.databind.JsonNode;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -62,7 +63,44 @@ public final class JiraIssueMapper {
                 nestedText(f, "status", "name"),
                 parseTime(text(f, "created")),
                 parseTime(text(f, "updated")),
-                nestedText(f, "reporter", "displayName"));
+                userName(f, "reporter"),
+                userName(f, "assignee"),
+                parseDate(text(f, "duedate")),
+                versionNames(f));
+    }
+
+    /** 用户对象取显示名：displayName 优先，回退 name（部分实例无 displayName）；未指派（null）返回 null */
+    private static String userName(JsonNode fields, String object) {
+        String displayName = nestedText(fields, object, "displayName");
+        return displayName != null ? displayName : nestedText(fields, object, "name");
+    }
+
+    /** fixVersions 是对象数组 [{"name":"1.0",...}]，取 name 拼接；缺失返回空表 */
+    private static List<String> versionNames(JsonNode fields) {
+        JsonNode arr = fields == null ? null : fields.get("fixVersions");
+        if (arr == null || !arr.isArray()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        for (JsonNode v : arr) {
+            String name = text(v, "name");
+            if (name != null) {
+                out.add(name);
+            }
+        }
+        return out;
+    }
+
+    /** 解析 Jira 日期（yyyy-MM-dd）；解析失败返回 null（与 parseTime 同款容错） */
+    static LocalDate parseDate(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(raw.trim());
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static String text(JsonNode node, String field) {

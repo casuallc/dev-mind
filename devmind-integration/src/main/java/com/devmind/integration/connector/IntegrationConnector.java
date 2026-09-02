@@ -5,6 +5,7 @@ import com.devmind.common.exception.ErrorCode;
 import com.devmind.integration.model.IntegrationEntity;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -59,5 +60,6 @@ public interface IntegrationConnector {
     /** 通用 issue 视图（命名对齐 Jira 字段；后续其他 issue 平台复用时映射到同一结构） */
     record JiraIssue(String key, String summary, String description, String issueType,
                      String priority, List<String> labels, String status,
-                     Instant created, Instant updated, String reporter) {}
+                     Instant created, Instant updated, String reporter,
+                     String assignee, LocalDate dueDate, List<String> fixVersions) {}
 }

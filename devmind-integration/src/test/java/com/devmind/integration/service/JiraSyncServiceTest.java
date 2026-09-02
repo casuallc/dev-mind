@@ -15,7 +15,7 @@ import com.devmind.integration.repo.ExternalLinkRepository;
 import com.devmind.integration.repo.IntegrationRepository;
 import com.devmind.integration.repo.JiraSyncConfigRepository;
 import com.devmind.project.RequirementService;
-import com.devmind.project.dto.RequirementRequest;
+import com.devmind.project.dto.JiraManagedFields;
 import com.devmind.project.dto.RequirementView;
 import com.devmind.project.model.RequirementEntity;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +25,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -42,7 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * JiraSyncService 同步闭环单测（无 Spring 上下文）：
  * repo 用 JDK 动态代理内存 fake，RequirementService/IntegrationService 子类覆盖，
- * connector 喂队列页面。覆盖：首轮导入/幂等重放/DRAFT 刷新/进行中不覆盖/失败不推水印/分页。
+ * connector 喂队列页面。覆盖：首轮导入/幂等重放/托管字段刷新（本地字段不动）/失败不推水印/分页。
  */
 class JiraSyncServiceTest {
 
@@ -91,31 +92,42 @@ class JiraSyncServiceTest {
         private int seq = 0;
 
         FakeRequirementService() {
-            super(null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null);
+        }
+
+        /** 与 RequirementService.applyJiraFields 同款的 fake 落库（标题截 240） */
+        private static void applyJira(RequirementEntity e, JiraManagedFields f) {
+            String title = f.title() == null ? "" : f.title().trim();
+            e.setTitle(title.length() > 240 ? title.substring(0, 240) : title);
+            e.setDescription(f.description());
+            e.setType(f.type());
+            e.setPriority(f.priority());
+            e.setAssignee(f.assignee());
+            e.setReporter(f.reporter());
+            e.setLabels(f.labels() == null || f.labels().isEmpty() ? null : String.join(",", f.labels()));
+            e.setFixVersions(f.fixVersions() == null || f.fixVersions().isEmpty()
+                    ? null : String.join(",", f.fixVersions()));
+            e.setDueDate(f.dueDate());
+            e.setExternalKey(f.externalKey());
         }
 
         @Override
-        public synchronized RequirementView create(String projectId, RequirementRequest req) {
+        public synchronized RequirementView createFromJira(String projectId, JiraManagedFields f) {
             String id = "req-" + (++seq);
             RequirementEntity e = new RequirementEntity();
             e.setId(id);
             e.setProjectId(projectId);
-            e.setTitle(req.title());
-            e.setDescription(req.description());
             e.setStatus(RequirementEntity.STATUS_DRAFT);
+            e.setSource(RequirementEntity.SOURCE_JIRA);
+            applyJira(e, f);
             store.put(id, e);
             return toView(e);
         }
 
         @Override
-        public RequirementView update(String projectId, String requirementId, RequirementRequest req) {
+        public RequirementView syncFromJira(String projectId, String requirementId, JiraManagedFields f) {
             RequirementEntity e = requireEntity(projectId, requirementId);
-            if (req.title() != null) {
-                e.setTitle(req.title());
-            }
-            if (req.description() != null) {
-                e.setDescription(req.description());
-            }
+            applyJira(e, f);
             return toView(e);
         }
 
@@ -130,7 +142,10 @@ class JiraSyncServiceTest {
 
         private RequirementView toView(RequirementEntity e) {
             return new RequirementView(e.getId(), e.getProjectId(), 1L, "REQ-1", e.getTitle(),
-                    e.getDescription(), e.getStatus(), e.getType(), null, null, "test", Instant.now(), Instant.now());
+                    e.getDescription(), e.getStatus(), e.getType(), null, null,
+                    e.getSource(), e.getPriority(), e.getAssignee(), e.getReporter(),
+                    List.of(), List.of(), e.getDueDate(), e.getExternalKey(), null, null,
+                    "test", Instant.now(), Instant.now());
         }
     }
 
@@ -230,7 +245,8 @@ class JiraSyncServiceTest {
 
     private IntegrationConnector.JiraIssue issue(String key, String summary, Instant updated) {
         return new IntegrationConnector.JiraIssue(key, summary, "描述 " + key, "Bug", "High",
-                List.of("ai"), "Open", updated, updated, "张三");
+                List.of("ai"), "Open", updated, updated, "张三",
+                "李四", LocalDate.parse("2026-09-30"), List.of("1.0", "1.1"));
     }
 
     private IssuePage page(int startAt, int total, IntegrationConnector.JiraIssue... issues) {
@@ -249,17 +265,27 @@ class JiraSyncServiceTest {
         assertEquals(0, result.updated());
         assertEquals(1, result.pages());
         assertNull(result.error());
-        // 需求：DRAFT + [KEY] 前缀标题 + 来源尾注
+        // 需求：DRAFT + source=JIRA + 标题无前缀、描述无尾注 + 扩展字段落列
         assertEquals(2, requirementService.store.size());
         RequirementEntity r1 = requirementService.store.get("req-1");
-        assertEquals("[PROJ-1] 登录页报错", r1.getTitle());
+        assertEquals("登录页报错", r1.getTitle());
+        assertEquals("描述 PROJ-1", r1.getDescription());
         assertEquals(RequirementEntity.STATUS_DRAFT, r1.getStatus());
-        assertTrue(r1.getDescription().contains("http://jira.local/browse/PROJ-1"));
+        assertEquals(RequirementEntity.SOURCE_JIRA, r1.getSource());
+        assertEquals(RequirementEntity.TYPE_BUG, r1.getType());
+        assertEquals("PROJ-1", r1.getExternalKey());
+        assertEquals("High", r1.getPriority());
+        assertEquals("李四", r1.getAssignee());
+        assertEquals("张三", r1.getReporter());
+        assertEquals("ai", r1.getLabels());
+        assertEquals("1.0,1.1", r1.getFixVersions());
+        assertEquals(LocalDate.parse("2026-09-30"), r1.getDueDate());
         // 链接：REQUIREMENT ↔ ISSUE
         ExternalLinkEntity link = linkStore.get("PROJ-1");
         assertEquals(ExternalLinkEntity.INTERNAL_REQUIREMENT, link.getInternalType());
         assertEquals("req-1", link.getInternalId());
         assertEquals("Open", link.getStatus());
+        assertEquals("http://jira.local/browse/PROJ-1", link.getExternalUrl());
         // 水印 = max(updated) 回拨 60s；运行状态落库
         assertEquals(T2.minusSeconds(60), cfg.getLastWatermark());
         assertNotNull(cfg.getLastSyncAt());
@@ -293,23 +319,33 @@ class JiraSyncServiceTest {
 
         assertEquals(0, result.imported());
         assertEquals(1, result.updated());
-        assertEquals("[PROJ-1] 新标题", requirementService.store.get("req-1").getTitle());
+        assertEquals("新标题", requirementService.store.get("req-1").getTitle());
     }
 
     @Test
-    void 进入流程的需求不再被覆盖仅刷链接状态() {
+    void 进入流程的需求托管字段仍刷新本地字段不动() {
         connector.pages.add(page(0, 1, issue("PROJ-1", "旧标题", T1)));
         service.doSync(1L);
-        requirementService.store.get("req-1").setStatus(RequirementEntity.STATUS_ANALYZING);
+        RequirementEntity stored = requirementService.store.get("req-1");
+        stored.setStatus(RequirementEntity.STATUS_ANALYZING);
+        stored.setOwnerId("local-owner"); // 本地字段
 
         IntegrationConnector.JiraIssue changed = new IntegrationConnector.JiraIssue("PROJ-1", "新标题",
-                "新描述", "Bug", "High", List.of(), "In Progress", T1, T2, "张三");
+                "新描述", "Bug", "Highest", List.of(), "In Progress", T1, T2, "张三",
+                "王五", null, List.of());
         connector.pages.add(page(0, 1, changed));
         JiraSyncRunView result = service.doSync(1L);
 
-        assertEquals(0, result.updated());
-        assertEquals(1, result.skipped());
-        assertEquals("[PROJ-1] 旧标题", requirementService.store.get("req-1").getTitle());
+        assertEquals(1, result.updated());
+        assertEquals(0, result.skipped());
+        // 托管字段刷新
+        assertEquals("新标题", stored.getTitle());
+        assertEquals("新描述", stored.getDescription());
+        assertEquals("Highest", stored.getPriority());
+        assertEquals("王五", stored.getAssignee());
+        // 本地字段不动
+        assertEquals(RequirementEntity.STATUS_ANALYZING, stored.getStatus());
+        assertEquals("local-owner", stored.getOwnerId());
         assertEquals("In Progress", linkStore.get("PROJ-1").getStatus()); // 链接状态仍刷新
     }
 
@@ -370,9 +406,8 @@ class JiraSyncServiceTest {
 
     @Test
     void 标题截断240字符() {
-        IntegrationConnector.JiraIssue longSummary = issue("PROJ-9", "长".repeat(300), T1);
-        String title = JiraSyncService.renderTitle(longSummary);
-        assertEquals(240, title.length());
-        assertTrue(title.startsWith("[PROJ-9] "));
+        connector.pages.add(page(0, 1, issue("PROJ-9", "长".repeat(300), T1)));
+        service.doSync(1L);
+        assertEquals(240, requirementService.store.get("req-1").getTitle().length());
     }
 }

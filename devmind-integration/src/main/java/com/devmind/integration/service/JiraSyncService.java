@@ -22,7 +22,7 @@ import com.devmind.integration.repo.IntegrationRepository;
 import com.devmind.integration.repo.JiraSyncConfigRepository;
 import com.devmind.project.ProjectService;
 import com.devmind.project.RequirementService;
-import com.devmind.project.dto.RequirementRequest;
+import com.devmind.project.dto.JiraManagedFields;
 import com.devmind.project.dto.RequirementView;
 import com.devmind.project.model.RequirementEntity;
 import org.slf4j.Logger;
@@ -39,17 +39,20 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * CAP-19 Jira 同步：配置 CRUD + 轮询/手动同步执行（单向只拉取，不回写 Jira）。
- * issue → Requirement（DRAFT）经 RequirementService 落主线，external_links 登记幂等；
- * 增量水印 = 已处理的最大 issue updated（回拨 overlap），失败不推进，重复由幂等兜住。
- * 已进入流程（非 DRAFT）的需求不再被 Jira 侧更新覆盖——人工已接管。
+ * issue → Requirement（DRAFT，source=JIRA）经 RequirementService 同步通道落主线，
+ * external_links 登记幂等；增量水印 = 已处理的最大 issue updated（回拨 overlap），
+ * 失败不推进，重复由幂等兜住。
+ * Jira 托管字段（标题/描述/类型/优先级/经办人/报告人/标签/修复版本/截止日期）始终随同步刷新
+ * （本地只读，无覆盖冲突）；本地字段 status/ownerId/docId 同步绝不动。
  */
 @Service
 public class JiraSyncService {
 
     private static final Logger log = LoggerFactory.getLogger(JiraSyncService.class);
 
-    /** 拉取字段清单（Jira /search fields 参数） */
-    static final String ISSUE_FIELDS = "summary,description,issuetype,priority,labels,status,created,updated,reporter";
+    /** 拉取字段清单（Jira /search fields 参数）；sprint 是自定义字段（实例间字段名不同），v1 不拉 */
+    static final String ISSUE_FIELDS =
+            "summary,description,issuetype,priority,labels,status,created,updated,reporter,assignee,fixVersions,duedate";
 
     private final JiraSyncConfigRepository configRepo;
     private final IntegrationRepository integrationRepo;
@@ -278,9 +281,7 @@ public class JiraSyncService {
                 .findFirstByIntegrationIdAndExternalTypeAndExternalKeyOrderByIdDesc(
                         integration.getId(), ExternalLinkEntity.EXTERNAL_ISSUE, issue.key());
         if (existing.isEmpty()) {
-            RequirementView req = requirementService.create(cfg.getProjectId(),
-                    new RequirementRequest(renderTitle(issue),
-                            renderDescription(integration, issue), null, null, requirementType(issue)));
+            RequirementView req = requirementService.createFromJira(cfg.getProjectId(), managedFields(issue));
             ExternalLinkEntity link = new ExternalLinkEntity();
             link.setProjectId(cfg.getProjectId());
             link.setIntegrationId(integration.getId());
@@ -297,22 +298,25 @@ public class JiraSyncService {
         ExternalLinkEntity link = existing.get();
         link.setStatus(issue.status());
         linkRepo.save(link);
-        // 仅 DRAFT 需求允许被 Jira 侧刷新；进入流程后人工已接管，不再覆盖
+        // Jira 托管字段始终随同步刷新（本地只读无冲突）；本地字段 status/ownerId/docId 不动
         if (ExternalLinkEntity.INTERNAL_REQUIREMENT.equals(link.getInternalType())) {
             try {
-                RequirementEntity req = requirementService.requireEntity(cfg.getProjectId(), link.getInternalId());
-                if (RequirementEntity.STATUS_DRAFT.equals(req.getStatus())) {
-                    requirementService.update(cfg.getProjectId(), req.getId(),
-                            new RequirementRequest(renderTitle(issue),
-                                    renderDescription(integration, issue), null, null, requirementType(issue)));
-                    return UpsertOutcome.UPDATED;
-                }
+                requirementService.syncFromJira(cfg.getProjectId(), link.getInternalId(), managedFields(issue));
+                return UpsertOutcome.UPDATED;
             } catch (DevMindException e) {
                 // 需求已删除等：保留 link 追溯，不再重建
                 log.info("Jira issue {} 对应需求不可用（{}），跳过刷新", issue.key(), e.getMessage());
             }
         }
         return UpsertOutcome.SKIPPED;
+    }
+
+    /** issue → 托管字段包（标题=summary 原文、描述=Jira 原文，无前缀无尾注——元信息全部进列） */
+    private static JiraManagedFields managedFields(JiraIssue issue) {
+        return new JiraManagedFields(
+                issue.summary(), issue.description(), requirementType(issue),
+                issue.priority(), issue.assignee(), issue.reporter(),
+                issue.labels(), issue.fixVersions(), issue.dueDate(), issue.key());
     }
 
     enum UpsertOutcome { IMPORTED, UPDATED, SKIPPED }
@@ -337,12 +341,6 @@ public class JiraSyncService {
         return jql.toString();
     }
 
-    /** 需求标题：[PROJ-123] summary（requirements.title 列长 256，留前缀余量截到 240） */
-    static String renderTitle(JiraIssue issue) {
-        String title = "[" + issue.key() + "] " + (issue.summary() == null ? "" : issue.summary().trim());
-        return title.length() <= 240 ? title : title.substring(0, 240);
-    }
-
     /** Jira issue type → 需求类型（Bug→BUG，Improvement→IMPROVEMENT，Task/Sub-task→TASK，其余 Story/Epic/未知→FEATURE） */
     static String requirementType(JiraIssue issue) {
         String t = issue.issueType() == null ? "" : issue.issueType().trim().toUpperCase(java.util.Locale.ROOT);
@@ -350,29 +348,6 @@ public class JiraSyncService {
         if (t.contains("IMPROVEMENT")) return RequirementEntity.TYPE_IMPROVEMENT;
         if (t.contains("TASK")) return RequirementEntity.TYPE_TASK;
         return RequirementEntity.TYPE_FEATURE;
-    }
-
-    /** 需求描述：Jira description（wiki 纯文本）原文 + 来源元信息尾注 */
-    static String renderDescription(IntegrationEntity integration, JiraIssue issue) {
-        StringBuilder sb = new StringBuilder();
-        if (issue.description() != null && !issue.description().isBlank()) {
-            sb.append(issue.description().trim());
-        }
-        sb.append("\n\n---\n> 来源 Jira：").append(browseUrl(integration, issue.key()));
-        appendMeta(sb, "类型", issue.issueType());
-        appendMeta(sb, "优先级", issue.priority());
-        appendMeta(sb, "状态", issue.status());
-        appendMeta(sb, "报告人", issue.reporter());
-        if (issue.labels() != null && !issue.labels().isEmpty()) {
-            appendMeta(sb, "标签", String.join(", ", issue.labels()));
-        }
-        return sb.toString().trim();
-    }
-
-    private static void appendMeta(StringBuilder sb, String label, String value) {
-        if (value != null && !value.isBlank()) {
-            sb.append(" · ").append(label).append(" ").append(value);
-        }
     }
 
     static String browseUrl(IntegrationEntity integration, String issueKey) {

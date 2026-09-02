@@ -16,7 +16,10 @@
         "status": { "id": "1", "name": "Open" },
         "created": "2026-08-20T10:15:30.000+0800",
         "updated": "2026-08-28T09:00:00.000+0800",
-        "reporter": { "name": "zhangsan", "displayName": "张三" }
+        "reporter": { "name": "zhangsan", "displayName": "张三" },
+        "assignee": { "name": "lisi", "displayName": "李四" },
+        "duedate": "2026-09-30",
+        "fixVersions": [ { "id": "10100", "name": "1.0" }, { "id": "10101", "name": "1.1" } ]
       }
     },
     {
@@ -31,7 +34,10 @@
         "status": { "id": "3", "name": "In Progress" },
         "created": "2026-08-21T11:00:00.000+0800",
         "updated": "2026-08-29T14:30:00.000+0800",
-        "reporter": null
+        "reporter": null,
+        "assignee": null,
+        "duedate": null,
+        "fixVersions": []
       }
     }
   ]
