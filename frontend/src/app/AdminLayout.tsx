@@ -14,11 +14,12 @@ import {
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect } from 'react'
 import AppHeader from './AppHeader'
+import { menuSelectedKey } from './menuSelectedKey'
 import { startNotificationStream, stopNotificationStream } from '../features/notifications/store'
 
 const { Sider, Content } = Layout
 
-/** 管理后台布局（仅 ADMIN，由 RequireAdmin 守卫）：指挥中心 / 项目管理 / 用户管理 / 服务器运维 / 平台集成 / 会话模板 / 知识库 / 文档。 */
+/** 管理后台布局（仅 ADMIN，由 RequireAdmin 守卫）：指挥中心 / 项目与资源 / 内容 / 系统。 */
 export default function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -29,11 +30,7 @@ export default function AdminLayout() {
     return () => stopNotificationStream()
   }, [])
 
-  const selectedKey = location.pathname.startsWith('/admin/projects')
-    ? '/admin/projects'
-    : location.pathname.startsWith('/admin/docs')
-      ? '/admin/docs'
-      : location.pathname
+  const selectedKey = menuSelectedKey(location.pathname)
 
   return (
     <Layout style={{ height: '100vh' }}>
@@ -48,15 +45,33 @@ export default function AdminLayout() {
           onClick={({ key }) => navigate(key)}
           items={[
             { key: '/admin/dashboard', icon: <DashboardOutlined />, label: '指挥中心' },
-            { key: '/admin/projects', icon: <FolderOutlined />, label: '项目管理' },
-            { key: '/admin/users', icon: <SafetyCertificateOutlined />, label: '用户管理' },
-            { key: '/admin/servers', icon: <CloudServerOutlined />, label: '服务器运维' },
-            { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
-            { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
-            { key: '/admin/templates', icon: <DeploymentUnitOutlined />, label: '会话模板' },
-            { key: '/admin/knowledge', icon: <ReadOutlined />, label: '知识库' },
-            { key: '/admin/docs', icon: <FileTextOutlined />, label: '文档管理' },
-            { type: 'divider' },
+            {
+              type: 'group' as const,
+              label: '项目与资源',
+              children: [
+                { key: '/admin/projects', icon: <FolderOutlined />, label: '项目管理' },
+                { key: '/admin/servers', icon: <CloudServerOutlined />, label: '服务器运维' },
+                { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
+                { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
+                { key: '/admin/templates', icon: <DeploymentUnitOutlined />, label: '会话模板' },
+              ],
+            },
+            {
+              type: 'group' as const,
+              label: '内容',
+              children: [
+                { key: '/admin/knowledge', icon: <ReadOutlined />, label: '知识库' },
+                { key: '/admin/docs', icon: <FileTextOutlined />, label: '文档管理' },
+              ],
+            },
+            {
+              type: 'group' as const,
+              label: '系统',
+              children: [
+                { key: '/admin/users', icon: <SafetyCertificateOutlined />, label: '用户管理' },
+              ],
+            },
+            { type: 'divider' as const },
             { key: '/', icon: <ArrowLeftOutlined />, label: '返回工作台' },
           ]}
         />
