@@ -10,7 +10,19 @@ import './index.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ConfigProvider locale={zhCN}>
+    <ConfigProvider
+      locale={zhCN}
+      theme={{
+        components: {
+          // 侧边栏菜单紧凑化：项高 40→32、项间距 4→2、分组标题行高收紧
+          Menu: {
+            itemHeight: 32,
+            itemMarginBlock: 2,
+            groupTitleLineHeight: 1.2,
+          },
+        },
+      }}
+    >
       <App />
     </ConfigProvider>
   </StrictMode>,
