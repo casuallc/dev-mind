@@ -66,14 +66,38 @@ public class CliProcessLauncher implements SessionExecutor {
         return process;
     }
 
-    /** 初始 prompt 以 stream-json user message 形式写入 stdin。 */
-    void writeUserMessage(OutputStream out, String text) throws IOException {
+    /** 初始 prompt 以 stream-json user message 形式写入 stdin。runner（CAP-21）复用本方法包装交互输入。 */
+    public void writeUserMessage(OutputStream out, String text) throws IOException {
+        out.write((buildUserMessage(text) + "\n").getBytes(StandardCharsets.UTF_8));
+        out.flush();
+    }
+
+    /** 构造 stream-json user message 行（不含换行）。 */
+    public String buildUserMessage(String text) {
         Map<String, Object> content = Map.of("type", "text", "text", text);
         Map<String, Object> message = Map.of("role", "user", "content", List.of(content));
         Map<String, Object> line = Map.of("type", "user", "message", message);
-        String json = mapper.writeValueAsString(line) + "\n";
-        out.write(json.getBytes(StandardCharsets.UTF_8));
-        out.flush();
+        try {
+            return mapper.writeValueAsString(line);
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
+    /** 构造 permission_result 行（不含换行）；accepted + scope 时附 scope。 */
+    public String buildPermissionResult(String requestId, boolean accepted, String scope) {
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("type", "permission_result");
+        payload.put("permission_request_id", requestId);
+        payload.put("permission", accepted ? "allow" : "deny");
+        if (accepted && scope != null && !scope.isBlank()) {
+            payload.put("scope", scope);
+        }
+        try {
+            return mapper.writeValueAsString(payload);
+        } catch (Exception e) {
+            return "{}";
+        }
     }
 
     List<String> buildCommand(LaunchContext ctx) {

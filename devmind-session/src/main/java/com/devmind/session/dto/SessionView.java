@@ -19,6 +19,7 @@ public record SessionView(
         Long pid,
         String model,
         String summary,
+        String agentNodeId,
         Instant createdAt,
         Instant updatedAt,
         Instant finishedAt) {

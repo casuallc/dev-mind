@@ -1,5 +1,8 @@
 package com.devmind.session.service;
 
+import com.devmind.common.agent.AgentEventFrame;
+import com.devmind.common.agent.AgentLaunchCommand;
+import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
@@ -30,15 +33,18 @@ import com.devmind.session.repo.SessionRepository;
 import com.devmind.session.repo.SessionTemplateRepository;
 import org.springframework.transaction.annotation.Transactional;
 import com.devmind.session.runtime.CliEventParser;
+import com.devmind.session.runtime.RemoteSessionRuntime;
 import com.devmind.session.runtime.RuntimeListener;
 import com.devmind.session.runtime.SessionEventSaver;
 import com.devmind.session.runtime.SessionExecutor;
+import com.devmind.session.runtime.SessionHandle;
 import com.devmind.session.runtime.SessionRuntime;
 import tools.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -79,9 +85,11 @@ public class SessionManagerService {
     private final ObjectMapper mapper;
     private final CliEventParser parser;
     private final Collection<SessionExecutor> executors;
+    /** CAP-21：远程节点连接（devmind-agent 装配时可用；ObjectProvider 探测防循环依赖） */
+    private final ObjectProvider<AgentNodeConnector> connectorProvider;
 
-    /** 运行中会话注册表。 */
-    private final Map<String, SessionRuntime> runtimes = new ConcurrentHashMap<>();
+    /** 运行中会话注册表（本地/远程统一句柄）。 */
+    private final Map<String, SessionHandle> runtimes = new ConcurrentHashMap<>();
 
     public SessionManagerService(IdentityService identityService,
                                  ProjectService projectService,
@@ -99,7 +107,8 @@ public class SessionManagerService {
                                  SessionProperties props,
                                  ObjectMapper mapper,
                                  CliEventParser parser,
-                                 Collection<SessionExecutor> executors) {
+                                 Collection<SessionExecutor> executors,
+                                 ObjectProvider<AgentNodeConnector> connectorProvider) {
         this.identityService = identityService;
         this.projectService = projectService;
         this.workItemService = workItemService;
@@ -117,6 +126,7 @@ public class SessionManagerService {
         this.mapper = mapper;
         this.parser = parser;
         this.executors = executors;
+        this.connectorProvider = connectorProvider;
     }
 
     private final RuntimeListener listener = new RuntimeListener() {
@@ -194,13 +204,17 @@ public class SessionManagerService {
             taskSpec = renderTemplate(req.templateCode(), req.taskSpec(), project);
         }
 
+        // CAP-21：指定执行节点 = 远程会话——工作目录在节点侧（runner 项目路径映射），
+        // 服务端不建 worktree、不做知识注入（知识注入依赖本地文件系统，远程暂不支持）
+        boolean remote = req.agentNodeId() != null && !req.agentNodeId().isBlank();
+
         // P1-3：会话只面向 Workspace 接口，本地实现为 git worktree（远程/容器预留）
         Workspace workspace = null;
-        if (project != null) {
+        if (!remote && project != null) {
             workspace = workspaceService.prepareSessionWorkspace(project, id);
         }
         Path worktree = workspace != null ? workspace.path() : null;
-        if (project != null && worktree != null) {
+        if (!remote && project != null && worktree != null) {
             try {
                 knowledgeInjector.apply(worktree.toString(), project, taskSpec);
             } catch (Exception e) {
@@ -208,19 +222,37 @@ public class SessionManagerService {
             }
         }
 
-        SessionExecutor executor = resolveExecutor();
         String model = req.model() != null && !req.model().isBlank() ? req.model() : props.getModel();
         String pm = req.permissionMode() != null && !req.permissionMode().isBlank()
                 ? req.permissionMode() : props.getPermissionMode();
 
-        Process proc;
-        try {
-            proc = executor.launch(new SessionExecutor.LaunchContext(id, worktree, taskSpec, model, pm));
-        } catch (IOException e) {
-            if (workspace != null) {
-                workspace.cleanup();
+        Process proc = null;
+        RemoteSessionRuntime remoteRt = null;
+        if (remote) {
+            AgentNodeConnector connector = requireConnector();
+            remoteRt = new RemoteSessionRuntime(id, req.agentNodeId(), connector, eventSaver, listener, props);
+            // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
+            runtimes.put(id, remoteRt);
+            try {
+                connector.launch(req.agentNodeId(), new AgentLaunchCommand(
+                        id, project != null ? project.id() : null, taskSpec, model, pm));
+            } catch (Exception e) {
+                runtimes.remove(id);
+                if (e instanceof DevMindException de) {
+                    throw de;
+                }
+                throw new DevMindException(ErrorCode.CONFLICT, "下发远程会话失败: " + e.getMessage(), e);
             }
-            throw new DevMindException(ErrorCode.INTERNAL, "启动执行器失败: " + e.getMessage(), e);
+        } else {
+            SessionExecutor executor = resolveExecutor();
+            try {
+                proc = executor.launch(new SessionExecutor.LaunchContext(id, worktree, taskSpec, model, pm));
+            } catch (IOException e) {
+                if (workspace != null) {
+                    workspace.cleanup();
+                }
+                throw new DevMindException(ErrorCode.INTERNAL, "启动执行器失败: " + e.getMessage(), e);
+            }
         }
 
         Instant now = Instant.now();
@@ -233,20 +265,27 @@ public class SessionManagerService {
         ent.setBaseBranch(baseBranch);
         ent.setStatus(SessionState.RUNNING.name());
         ent.setWorktreePath(worktree != null ? worktree.toString() : null);
-        ent.setPid(proc.pid());
+        ent.setAgentNodeId(remote ? req.agentNodeId() : null);
+        ent.setPid(proc != null ? proc.pid() : null);
         ent.setModel(model);
         ent.setCreatedBy(identityService.currentActor());
         ent.setCreatedAt(now);
         ent.setUpdatedAt(now);
         sessionRepo.save(ent);
 
-        SessionRuntime rt = new SessionRuntime(id, proc, mapper, parser, eventSaver, listener, props);
-        runtimes.put(id, rt);
-        rt.start();
+        SessionHandle handle;
+        if (remote) {
+            handle = remoteRt;
+        } else {
+            SessionRuntime rt = new SessionRuntime(id, proc, mapper, parser, eventSaver, listener, props);
+            runtimes.put(id, rt);
+            rt.start();
+            handle = rt;
+        }
 
         notificationPublisher.publish(NotificationEvent.of("SESSION_STARTED", id, "会话已启动",
                 preview(taskSpec, 80)));
-        return toView(ent, rt.state());
+        return toView(ent, handle.state());
     }
 
     public List<SessionView> list(String status, String projectId, String workItemId, String requirementId) {
@@ -295,17 +334,17 @@ public class SessionManagerService {
     // ---------------- 交互 ----------------
 
     public void input(String id, String text) {
-        SessionRuntime rt = requireRuntime(id);
+        SessionHandle rt = requireRuntime(id);
         rt.injectInput(text);
     }
 
     public void authorize(String id, boolean accepted, String scope, String requestId) {
-        SessionRuntime rt = requireRuntime(id);
+        SessionHandle rt = requireRuntime(id);
         rt.authorize(requestId, accepted, scope);
     }
 
     public SessionView suspend(String id) {
-        SessionRuntime rt = requireRuntime(id);
+        SessionHandle rt = requireRuntime(id);
         rt.suspend();
         updateStatus(id, SessionState.SUSPENDED, null);
         return get(id);
@@ -317,6 +356,29 @@ public class SessionManagerService {
             throw new DevMindException(ErrorCode.CONFLICT, "只有 SUSPENDED 会话可以恢复");
         }
         runtimes.remove(id);
+
+        // CAP-21 远程会话恢复：重新向节点下发 launch（workdir 仍由 runner 项目路径映射解析）
+        if (ent.getAgentNodeId() != null && !ent.getAgentNodeId().isBlank()) {
+            AgentNodeConnector connector = requireConnector();
+            RemoteSessionRuntime rt = new RemoteSessionRuntime(id, ent.getAgentNodeId(), connector,
+                    eventSaver, listener, props);
+            runtimes.put(id, rt);
+            try {
+                connector.launch(ent.getAgentNodeId(), new AgentLaunchCommand(
+                        id, ent.getProjectId(), ent.getTaskSpec(), ent.getModel(), props.getPermissionMode()));
+            } catch (Exception e) {
+                runtimes.remove(id);
+                if (e instanceof DevMindException de) {
+                    throw de;
+                }
+                throw new DevMindException(ErrorCode.CONFLICT, "恢复远程会话失败: " + e.getMessage(), e);
+            }
+            ent.setStatus(SessionState.RUNNING.name());
+            ent.setUpdatedAt(Instant.now());
+            sessionRepo.save(ent);
+            return toView(ent, rt.state());
+        }
+
         Project project = resolveProject(ent.getProjectId());
         Path worktree = ent.getWorktreePath() != null && !ent.getWorktreePath().isBlank()
                 ? Path.of(ent.getWorktreePath()) : null;
@@ -342,7 +404,7 @@ public class SessionManagerService {
     }
 
     public SessionView kill(String id) {
-        SessionRuntime rt = requireRuntime(id);
+        SessionHandle rt = requireRuntime(id);
         rt.kill();
         updateStatus(id, SessionState.TERMINATED, "已手动终止");
         return get(id);
@@ -350,18 +412,18 @@ public class SessionManagerService {
 
     /** 优雅结束：关 stdin，claude 读完后自然退出 → DONE/FAILED。 */
     public void finish(String id) {
-        SessionRuntime rt = requireRuntime(id);
+        SessionHandle rt = requireRuntime(id);
         rt.finish();
     }
 
     /** 订阅实时事件流，返回回放（环形缓冲快照）。 */
     public List<SessionEvent> subscribe(String id, Consumer<SessionEvent> consumer) {
-        SessionRuntime rt = requireRuntime(id);
+        SessionHandle rt = requireRuntime(id);
         return rt.subscribe(consumer);
     }
 
     public void unsubscribe(String id, Consumer<SessionEvent> consumer) {
-        SessionRuntime rt = runtimes.get(id);
+        SessionHandle rt = runtimes.get(id);
         if (rt != null) {
             rt.unsubscribe(consumer);
         }
@@ -398,7 +460,7 @@ public class SessionManagerService {
     /** 删除会话：杀进程（若在跑）、清理 worktree、删除事件与记录。 */
     @Transactional
     public void deleteSession(String id) {
-        SessionRuntime rt = runtimes.remove(id);
+        SessionHandle rt = runtimes.remove(id);
         if (rt != null) {
             rt.unsubscribeAll();
             rt.kill();
@@ -488,7 +550,7 @@ public class SessionManagerService {
 
     @PreDestroy
     public void shutdown() {
-        for (SessionRuntime rt : runtimes.values()) {
+        for (SessionHandle rt : runtimes.values()) {
             try {
                 rt.kill();
             } catch (Exception e) {
@@ -524,8 +586,57 @@ public class SessionManagerService {
         throw new DevMindException(ErrorCode.BAD_REQUEST, "未知执行器: " + props.getExecutor());
     }
 
-    private SessionRuntime requireRuntime(String id) {
-        SessionRuntime rt = runtimes.get(id);
+    /** CAP-21：取节点连接 SPI；devmind-agent 未装配时报错（远程会话不可用）。 */
+    private AgentNodeConnector requireConnector() {
+        AgentNodeConnector connector = connectorProvider.getIfAvailable();
+        if (connector == null) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "远程 agent 模块未装配，无法创建远程会话");
+        }
+        return connector;
+    }
+
+    // ---------------- CAP-21 远程事件入口（RemoteAgentBridge 路由至此） ----------------
+
+    /** runner 回传的已解析事件 → 对应远程运行时 ingest（驱动状态机/落库/WS 广播）。 */
+    public void onRemoteEvent(String nodeId, AgentEventFrame frame) {
+        SessionHandle h = runtimes.get(frame.sessionId());
+        if (h instanceof RemoteSessionRuntime r && r.nodeId().equals(nodeId)) {
+            r.ingest(frame);
+        }
+    }
+
+    /** runner 侧子进程退出。 */
+    public void onRemoteExit(String nodeId, String sessionId, int exitCode) {
+        SessionHandle h = runtimes.get(sessionId);
+        if (h instanceof RemoteSessionRuntime r && r.nodeId().equals(nodeId)) {
+            r.handleExit(exitCode);
+        }
+    }
+
+    /** runner hello 对账：不在存活清单里的会话标记 FAILED；清单内的恢复在线标记。 */
+    public void onRemoteHello(String nodeId, List<String> activeSessionIds) {
+        for (SessionHandle h : runtimes.values()) {
+            if (h instanceof RemoteSessionRuntime r && r.nodeId().equals(nodeId)) {
+                if (activeSessionIds != null && activeSessionIds.contains(r.id())) {
+                    r.noteReconnected();
+                } else {
+                    r.markLost("runner 重连后对账：会话不在存活清单（进程已随 runner 旧实例退出）");
+                }
+            }
+        }
+    }
+
+    /** 节点断线：该节点远程会话打失联标记事件，不判 FAILED。 */
+    public void onNodeDisconnected(String nodeId) {
+        for (SessionHandle h : runtimes.values()) {
+            if (h instanceof RemoteSessionRuntime r && r.nodeId().equals(nodeId)) {
+                r.noteDisconnected();
+            }
+        }
+    }
+
+    private SessionHandle requireRuntime(String id) {
+        SessionHandle rt = runtimes.get(id);
         if (rt == null) {
             throw new DevMindException(ErrorCode.NOT_FOUND, "会话不在运行中: " + id);
         }
@@ -538,7 +649,7 @@ public class SessionManagerService {
     }
 
     private SessionState liveState(SessionEntity ent) {
-        SessionRuntime rt = runtimes.get(ent.getId());
+        SessionHandle rt = runtimes.get(ent.getId());
         return rt != null ? rt.state() : SessionState.valueOf(ent.getStatus());
     }
 
@@ -546,7 +657,7 @@ public class SessionManagerService {
         return new SessionView(
                 ent.getId(), ent.getProjectId(), ent.getWorkItemId(), ent.getRequirementId(), ent.getTaskSpec(),
                 state.name(), state, ent.getWorktreePath(), ent.getPid(),
-                ent.getModel(), ent.getSummary(),
+                ent.getModel(), ent.getSummary(), ent.getAgentNodeId(),
                 ent.getCreatedAt(), ent.getUpdatedAt(), ent.getFinishedAt());
     }
 

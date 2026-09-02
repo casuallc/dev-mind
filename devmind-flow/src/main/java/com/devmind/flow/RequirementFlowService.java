@@ -109,7 +109,7 @@ public class RequirementFlowService {
         }
         SessionView session = sessionManager.create(new CreateSessionRequest(
                 null, projectId, null, requirementId,
-                FlowOutputContract.analysisSpec(req), null, null, null));
+                FlowOutputContract.analysisSpec(req), null, null, null, null));
         if (RequirementEntity.STATUS_DRAFT.equals(req.getStatus())) {
             requirementService.updateStatus(projectId, requirementId, RequirementEntity.STATUS_ANALYZING);
         }
@@ -173,7 +173,7 @@ public class RequirementFlowService {
         }
         SessionView session = sessionManager.create(new CreateSessionRequest(
                 null, projectId, null, requirementId,
-                FlowOutputContract.splitSpec(req, designContent), null, null, null));
+                FlowOutputContract.splitSpec(req, designContent), null, null, null, null));
         log.info("需求拆分会话已启动: req={} session={}", requirementId, session.id());
         return session;
     }
@@ -190,7 +190,7 @@ public class RequirementFlowService {
                     "工作单元缺少 spec（执行说明），请先补充再派发");
         }
         SessionView session = sessionManager.create(new CreateSessionRequest(
-                null, projectId, wi.getId(), wi.getRequirementId(), wi.getSpec(), null, null, null));
+                null, projectId, wi.getId(), wi.getRequirementId(), wi.getSpec(), null, null, null, null));
         if (WorkItemEntity.STATUS_TODO.equals(wi.getStatus())) {
             workItemService.updateStatus(projectId, wi.getRequirementId(), wi.getId(),
                     WorkItemEntity.STATUS_IN_PROGRESS);

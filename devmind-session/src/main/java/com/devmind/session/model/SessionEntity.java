@@ -43,6 +43,10 @@ public class SessionEntity {
     @Column(name = "worktree_path", length = 512)
     private String worktreePath;
 
+    /** CAP-21：远程执行节点 id（agent_nodes.id）；NULL = 本地子进程 */
+    @Column(name = "agent_node_id", length = 64)
+    private String agentNodeId;
+
     private Long pid;
 
     @Column(length = 64)
@@ -79,6 +83,8 @@ public class SessionEntity {
     public void setStatus(String status) { this.status = status; }
     public String getWorktreePath() { return worktreePath; }
     public void setWorktreePath(String worktreePath) { this.worktreePath = worktreePath; }
+    public String getAgentNodeId() { return agentNodeId; }
+    public void setAgentNodeId(String agentNodeId) { this.agentNodeId = agentNodeId; }
     public Long getPid() { return pid; }
     public void setPid(Long pid) { this.pid = pid; }
     public String getCreatedBy() { return createdBy; }

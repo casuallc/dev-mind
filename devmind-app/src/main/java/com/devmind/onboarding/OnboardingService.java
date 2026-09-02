@@ -45,7 +45,7 @@ public class OnboardingService {
         String prompt = OnboardingPrompt.render(description, key.getAccessKey(), secret);
         // 不挂项目的裸会话 + bypassPermissions：接入是全自动运维动作，发起入口本身已限定 ADMIN
         SessionView view = sessionManager.create(new CreateSessionRequest(
-                null, null, null, null, prompt, null, null, "bypassPermissions"));
+                null, null, null, null, prompt, null, null, "bypassPermissions", null));
         log.info("AI 接入会话已启动: session={} key={}", view.id(), key.getAccessKey());
         return view.id();
     }

@@ -13,6 +13,7 @@ import jakarta.validation.constraints.NotBlank;
  * @param baseBranch     基准分支（可选，默认项目/配置）
  * @param model          模型（可选，覆盖全局）
  * @param permissionMode 权限模式（可选，覆盖全局）
+ * @param agentNodeId    CAP-21 远程执行节点 ID（可选；空 = 本地子进程）
  */
 public record CreateSessionRequest(
         String templateCode,
@@ -22,5 +23,6 @@ public record CreateSessionRequest(
         @NotBlank(message = "taskSpec 不能为空") String taskSpec,
         String baseBranch,
         String model,
-        String permissionMode) {
+        String permissionMode,
+        String agentNodeId) {
 }
