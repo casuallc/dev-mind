@@ -3,9 +3,14 @@ package com.devmind.skill.controller;
 import com.devmind.project.dto.PageView;
 import com.devmind.skill.SkillService;
 import com.devmind.skill.dto.SkillDetailView;
+import com.devmind.skill.dto.SkillFileContentView;
+import com.devmind.skill.dto.SkillFileRequest;
+import com.devmind.skill.dto.SkillFileView;
 import com.devmind.skill.dto.SkillRequest;
 import com.devmind.skill.dto.SkillView;
 import jakarta.validation.Valid;
+
+import java.util.List;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -65,5 +70,33 @@ public class SkillController {
     @DeleteMapping("/{id}")
     public void delete(@PathVariable String id) {
         service.delete(id);
+    }
+
+    // ---------------- 附件文件 ----------------
+
+    @GetMapping("/{id}/files")
+    public List<SkillFileView> listFiles(@PathVariable String id) {
+        return service.listFiles(id);
+    }
+
+    @GetMapping("/{id}/files/{fileId}")
+    public SkillFileContentView getFileContent(@PathVariable String id, @PathVariable String fileId) {
+        return service.getFileContent(id, fileId);
+    }
+
+    @PostMapping("/{id}/files")
+    public SkillFileView addFile(@PathVariable String id, @RequestBody SkillFileRequest req) {
+        return service.addFile(id, req);
+    }
+
+    @PutMapping("/{id}/files/{fileId}")
+    public SkillFileView updateFile(@PathVariable String id, @PathVariable String fileId,
+                                    @RequestBody SkillFileRequest req) {
+        return service.updateFile(id, fileId, req);
+    }
+
+    @DeleteMapping("/{id}/files/{fileId}")
+    public void deleteFile(@PathVariable String id, @PathVariable String fileId) {
+        service.deleteFile(id, fileId);
     }
 }

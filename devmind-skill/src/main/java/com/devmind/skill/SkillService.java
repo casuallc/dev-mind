@@ -6,6 +6,8 @@ import com.devmind.common.exception.ErrorCode;
 import com.devmind.project.ProjectService;
 import com.devmind.project.dto.PageView;
 import com.devmind.skill.dto.SkillDetailView;
+import com.devmind.skill.dto.SkillFileContentView;
+import com.devmind.skill.dto.SkillFileRequest;
 import com.devmind.skill.dto.SkillFileView;
 import com.devmind.skill.dto.SkillRequest;
 import com.devmind.skill.dto.SkillView;
@@ -24,6 +26,8 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
+import java.util.Base64;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -167,6 +171,177 @@ public class SkillService {
         fileRepo.deleteBySkillId(id);
         skillRepo.deleteById(id);
         log.info("skill 已删除: id={}", id);
+    }
+
+    // ---------------- 附件文件 ----------------
+
+    /** 单文件 512KB / 单 skill 附件合计 2MB / 附件数 50（后续可提为配置项）。 */
+    private static final long MAX_FILE_SIZE = 512L * 1024;
+    private static final long MAX_TOTAL_SIZE = 2L * 1024 * 1024;
+    private static final int MAX_FILES = 50;
+    private static final int MAX_PATH_DEPTH = 5;
+    private static final String RESERVED_PATH = "skill.md";
+
+    /** contentType 命中则为文本（contentText 有效），其余按二进制（contentBytes 有效） */
+    private static final Set<String> TEXT_MIME_TYPES = Set.of(
+            "application/json", "application/xml", "application/javascript",
+            "application/x-sh", "application/yaml", "application/x-yaml", "image/svg+xml");
+
+    public List<SkillFileView> listFiles(String skillId) {
+        requireSkill(skillId);
+        return fileRepo.findBySkillIdOrderByPathAsc(skillId).stream()
+                .map(SkillService::toFileView).toList();
+    }
+
+    public SkillFileContentView getFileContent(String skillId, String fileId) {
+        requireSkill(skillId);
+        SkillFileEntity f = requireFile(skillId, fileId);
+        byte[] raw = f.isBinary()
+                ? f.getContentBytes()
+                : (f.getContentText() == null ? new byte[0] : f.getContentText().getBytes(StandardCharsets.UTF_8));
+        return new SkillFileContentView(toFileView(f), Base64.getEncoder().encodeToString(raw));
+    }
+
+    /** 新增附件：路径安全校验 + 重名 409 + 大小/数量限制。 */
+    public SkillFileView addFile(String skillId, SkillFileRequest req) {
+        requireSkill(skillId);
+        String path = validateFilePath(req.path());
+        if (fileRepo.existsBySkillIdAndPath(skillId, path)) {
+            throw new DevMindException(ErrorCode.CONFLICT, "附件已存在: " + path);
+        }
+        if (fileRepo.countBySkillId(skillId) >= MAX_FILES) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "附件数量超限（≤" + MAX_FILES + "）");
+        }
+        byte[] raw = decodeBase64(req.contentBase64());
+        checkSize(skillId, raw.length, 0);
+        SkillFileEntity f = new SkillFileEntity();
+        f.setId(UUID.randomUUID().toString().replace("-", ""));
+        f.setSkillId(skillId);
+        f.setPath(path);
+        fillContent(f, raw, req.contentType());
+        Instant now = Instant.now();
+        f.setCreatedAt(now);
+        f.setUpdatedAt(now);
+        fileRepo.save(f);
+        return toFileView(f);
+    }
+
+    /** 更新附件：改名（path 可选）/ 改内容（contentBase64 可选），二者至少传一。 */
+    public SkillFileView updateFile(String skillId, String fileId, SkillFileRequest req) {
+        requireSkill(skillId);
+        SkillFileEntity f = requireFile(skillId, fileId);
+        boolean changed = false;
+        if (req.path() != null && !req.path().isBlank()) {
+            String path = validateFilePath(req.path());
+            if (!f.getPath().equals(path) && fileRepo.existsBySkillIdAndPath(skillId, path)) {
+                throw new DevMindException(ErrorCode.CONFLICT, "附件已存在: " + path);
+            }
+            f.setPath(path);
+            changed = true;
+        }
+        if (req.contentBase64() != null) {
+            byte[] raw = decodeBase64(req.contentBase64());
+            checkSize(skillId, raw.length, f.getSize());
+            fillContent(f, raw, req.contentType());
+            changed = true;
+        }
+        if (!changed) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "无变更内容（path/contentBase64 至少传一）");
+        }
+        f.setUpdatedAt(Instant.now());
+        fileRepo.save(f);
+        return toFileView(f);
+    }
+
+    public void deleteFile(String skillId, String fileId) {
+        requireSkill(skillId);
+        fileRepo.delete(requireFile(skillId, fileId));
+    }
+
+    private SkillFileEntity requireFile(String skillId, String fileId) {
+        SkillFileEntity f = fileRepo.findById(fileId)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "附件不存在: " + fileId));
+        if (!f.getSkillId().equals(skillId)) {
+            throw new DevMindException(ErrorCode.NOT_FOUND, "附件不属于该 skill: " + fileId);
+        }
+        return f;
+    }
+
+    /**
+     * 路径安全校验：拒绝空白/超长/绝对路径/盘符/反斜杠/空段/"."/".."/控制字符/保留名 SKILL.md，
+     * 深度 ≤ 5。通过的路径原样返回（各段已校验，无需再归一化）。
+     */
+    private String validateFilePath(String path) {
+        if (path == null || path.isBlank()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "附件 path 必填");
+        }
+        String p = path.trim();
+        if (p.length() > 255) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "附件 path 过长（≤255）: " + path);
+        }
+        if (p.startsWith("/") || p.startsWith("\\") || p.matches("^[a-zA-Z]:.*")) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "附件 path 须为包内相对路径: " + path);
+        }
+        if (p.contains("\\")) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "附件 path 只用 \"/\" 分隔: " + path);
+        }
+        String[] segments = p.split("/", -1);
+        if (segments.length > MAX_PATH_DEPTH) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "附件 path 层级过深（≤" + MAX_PATH_DEPTH + "）: " + path);
+        }
+        for (String seg : segments) {
+            if (seg.isEmpty() || seg.equals(".") || seg.equals("..")) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "附件 path 含非法路径段: " + path);
+            }
+            if (seg.chars().anyMatch(Character::isISOControl)) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "附件 path 含控制字符: " + path);
+            }
+        }
+        if (RESERVED_PATH.equals(segments[segments.length - 1].toLowerCase())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "SKILL.md 为保留名（本体请编辑 skill 正文），附件不可使用");
+        }
+        return p;
+    }
+
+    private byte[] decodeBase64(String contentBase64) {
+        if (contentBase64 == null) {
+            return new byte[0];
+        }
+        try {
+            return Base64.getDecoder().decode(contentBase64);
+        } catch (IllegalArgumentException ex) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "contentBase64 不是合法 Base64");
+        }
+    }
+
+    /** 大小限制：单文件 ≤512KB；单 skill 附件合计 ≤2MB（更新时扣掉旧文件自身）。 */
+    private void checkSize(String skillId, long newSize, long replacedSize) {
+        if (newSize > MAX_FILE_SIZE) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "附件大小超限（≤512KB）: " + newSize + " 字节");
+        }
+        long total = fileRepo.sumSizeBySkillId(skillId) - replacedSize + newSize;
+        if (total > MAX_TOTAL_SIZE) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "skill 附件总大小超限（≤2MB），当前将达 " + total + " 字节");
+        }
+    }
+
+    private void fillContent(SkillFileEntity f, byte[] raw, String contentType) {
+        boolean text = contentType != null
+                && (contentType.startsWith("text/") || TEXT_MIME_TYPES.contains(contentType));
+        f.setBinary(!text);
+        if (text) {
+            f.setContentText(new String(raw, StandardCharsets.UTF_8));
+            f.setContentBytes(null);
+        } else {
+            f.setContentBytes(raw);
+            f.setContentText(null);
+        }
+        f.setContentType(contentType);
+        f.setSize(raw.length);
     }
 
     // ---------------- 校验与装配 ----------------
