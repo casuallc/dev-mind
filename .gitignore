@@ -8,8 +8,8 @@ devmind-app/src/main/resources/application-local.yml
 # Node / Vite
 frontend/node_modules/
 
-# 前端构建产物（由 npm run build 生成，进入 devmind-app jar）
-devmind-app/src/main/resources/static/
+# 前端构建产物（由 npm run build 生成，devmind-dist 打包进分发包 web/ 目录）
+frontend/dist/
 
 # IDE
 .idea/
