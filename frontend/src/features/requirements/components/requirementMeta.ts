@@ -1,5 +1,5 @@
 // 需求主线共享常量（列表卡与详情页共用）。
-import type { RequirementStatus, RequirementType } from '../types'
+import type { RequirementSource, RequirementStatus, RequirementType } from '../types'
 
 export const STATUS_FLOW: RequirementStatus[] =
   ['DRAFT', 'ANALYZING', 'DESIGNING', 'IN_PROGRESS', 'ACCEPTANCE', 'DONE']
@@ -12,6 +12,29 @@ export const TYPE_LABEL: Record<RequirementType, string> = {
   BUG: '缺陷',
   IMPROVEMENT: '优化',
   TASK: '任务',
+}
+
+export const SOURCE_LABEL: Record<RequirementSource, string> = {
+  JIRA: 'Jira',
+  LOCAL: '自建',
+}
+
+export function sourceTagColor(s: RequirementSource | string): string {
+  return s === 'JIRA' ? 'blue' : 'default'
+}
+
+/** 优先级词表（对齐 Jira；存字符串保持开放，表单 Select 用此词表） */
+export const ALL_PRIORITIES = ['Highest', 'High', 'Medium', 'Low', 'Lowest'] as const
+
+export function priorityColor(p?: string): string {
+  switch (p) {
+    case 'Highest': return 'red'
+    case 'High': return 'volcano'
+    case 'Medium': return 'gold'
+    case 'Low': return 'blue'
+    case 'Lowest': return 'default'
+    default: return 'default'
+  }
 }
 
 export function requirementTypeColor(t: RequirementType | string): string {

@@ -6,6 +6,9 @@ export type RequirementStatus =
 /** 需求类型（对齐 Jira issue type，同步直接映射） */
 export type RequirementType = 'FEATURE' | 'BUG' | 'IMPROVEMENT' | 'TASK'
 
+/** 需求来源：JIRA 同步 / LOCAL 自建 */
+export type RequirementSource = 'JIRA' | 'LOCAL'
+
 export interface Requirement {
   id: string
   projectId: string
@@ -17,6 +20,19 @@ export interface Requirement {
   type?: RequirementType
   ownerId?: string
   docId?: number
+  source: RequirementSource
+  priority?: string
+  assignee?: string
+  reporter?: string
+  labels?: string[]
+  fixVersions?: string[]
+  dueDate?: string // yyyy-MM-dd
+  /** Jira issue key（如 PROJ-123），仅 JIRA 来源 */
+  externalKey?: string
+  /** Jira issue 链接，仅 JIRA 来源 */
+  externalUrl?: string
+  /** Jira 远端状态（随同步刷新），仅 JIRA 来源 */
+  remoteStatus?: string
   createdBy?: string
   createdAt: string
   updatedAt: string
@@ -36,6 +52,12 @@ export interface RequirementInput {
   ownerId?: string
   docId?: number
   type?: RequirementType
+  priority?: string
+  assignee?: string
+  reporter?: string
+  labels?: string[]
+  fixVersions?: string[]
+  dueDate?: string // yyyy-MM-dd
 }
 
 export type WorkItemType = 'DESIGN' | 'DEVELOPMENT' | 'TEST' | 'DOCUMENT' | 'REVIEW'

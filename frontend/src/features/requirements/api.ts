@@ -15,14 +15,16 @@ import type {
   WorkItemStatus,
 } from './types'
 
-/** 需求分页列表：status/type 过滤（空=不限），page 从 0 起 */
+/** 需求分页列表：status/type/source 过滤（空=不限），keyword 匹配标题/Jira key，page 从 0 起 */
 export function listRequirements(
   projectId: string,
-  opts?: { status?: string; type?: string; page?: number; size?: number },
+  opts?: { status?: string; type?: string; source?: string; keyword?: string; page?: number; size?: number },
 ): Promise<RequirementPage> {
   const q = new URLSearchParams()
   if (opts?.status && opts.status !== 'ALL') q.set('status', opts.status)
   if (opts?.type && opts.type !== 'ALL') q.set('type', opts.type)
+  if (opts?.source && opts.source !== 'ALL') q.set('source', opts.source)
+  if (opts?.keyword) q.set('keyword', opts.keyword)
   q.set('page', String(opts?.page ?? 0))
   q.set('size', String(opts?.size ?? 20))
   return api.get<RequirementPage>(`/projects/${projectId}/requirements?${q}`)
