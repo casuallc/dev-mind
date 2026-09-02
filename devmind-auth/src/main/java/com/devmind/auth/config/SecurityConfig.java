@@ -46,7 +46,7 @@ public class SecurityConfig {
                 .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin())) // H2 控制台 iframe
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login", "/api/auth/refresh", "/api/auth/logout",
-                                "/health", "/h2-console/**", "/ws/**").permitAll()
+                                "/api/health", "/h2-console/**", "/ws/**").permitAll()
                         .requestMatchers("/api/auth/users", "/api/auth/users/**").hasRole("ADMIN")
                         .requestMatchers("/api/auth/change-password").authenticated()
                         // CAP-20：API Key 管理仅 ADMIN（开放面 /open-api/** 由 OpenApiAuthFilter 独立认证，不走 JWT）
