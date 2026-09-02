@@ -65,7 +65,7 @@ public class SkillEntity {
     private String tags;
 
     @Column(length = 16)
-    @ColumnDefault(STATUS_ACTIVE)
+    @ColumnDefault("'ACTIVE'")
     private String status = STATUS_ACTIVE;
 
     @Column(name = "created_by", length = 64)
