@@ -2,11 +2,15 @@ import { useEffect, useState } from 'react'
 import {
   Alert,
   Button,
+  Card,
+  Descriptions,
+  Drawer,
   Form,
   Input,
   Modal,
   Popconfirm,
   Space,
+  Spin,
   Table,
   Tabs,
   Tag,
@@ -14,7 +18,14 @@ import {
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined, RocketOutlined, StarOutlined, WindowsOutlined, CodeOutlined, DownloadOutlined } from '@ant-design/icons'
+import {
+  CodeOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  RocketOutlined,
+  StarOutlined,
+  WindowsOutlined,
+} from '@ant-design/icons'
 import {
   createAgentNode,
   deleteAgentNode,
@@ -37,30 +48,45 @@ const statusColor: Record<string, string> = {
   DISABLED: 'red',
 }
 
-/**
- * CAP-21 后台页：Agent 节点管理（仅 ADMIN）。
- * 节点 = 跑 runner（devmind-agent-runner.jar）的远程机器（如 Windows 开发机），
- * runner 用注册 token 反向 WS 连服务端后即可被会话调度。
- */
-export default function AgentNodesPage() {
-  const [nodes, setNodes] = useState<AgentNode[]>([])
-  const [pkg, setPkg] = useState<RunnerPackage | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [upgrading, setUpgrading] = useState<number | null>(null)
-  const [createOpen, setCreateOpen] = useState(false)
-  const [issued, setIssued] = useState<IssuedNode | null>(null)
-  const [scriptNode, setScriptNode] = useState<AgentNode | null>(null) // 行内「安装脚本」参数化版弹窗
-  const [form] = Form.useForm<{ name: string; labels?: string }>()
-
-  // 安装脚本生成参数:地址随当前访问入口走(同源部署/开发代理均适用)
+// 安装脚本生成参数：地址随当前访问入口走（同源部署/开发代理均适用）。
+// token 为 null 时生成参数化脚本（运行时传入），否则内嵌 token。
+const downloadScripts = (token: string | null) => {
   const wsUrl = location.origin.replace(/^http/, 'ws') + '/ws/agent'
   const downloadUrl = location.origin + '/api/agent-nodes/runner-package/download'
-  const downloadScripts = (token: string | null) => ({
+  return {
     windows: () =>
       downloadTextFile('install-runner.ps1', buildWindowsInstallScript({ serverUrl: wsUrl, downloadUrl, token }), true),
     linux: () =>
       downloadTextFile('install-runner.sh', buildLinuxInstallScript({ serverUrl: wsUrl, downloadUrl, token })),
-  })
+  }
+}
+
+/**
+ * CAP-21 后台页：Agent 节点管理（仅 ADMIN）。样式/交互对齐「服务器运维」：
+ * Card + Tabs 外壳，表格只保留状态浏览，行内单一「管理」入口开抽屉做全部操作。
+ */
+export default function AgentNodesPage() {
+  return (
+    <Card size="small">
+      <Tabs
+        items={[
+          { key: 'nodes', label: '节点列表', children: <NodesTab /> },
+          { key: 'package', label: 'Runner 包', children: <RunnerPackagePanel /> },
+        ]}
+      />
+    </Card>
+  )
+}
+
+// ---------------- 节点列表 ----------------
+function NodesTab() {
+  const [nodes, setNodes] = useState<AgentNode[]>([])
+  const [pkg, setPkg] = useState<RunnerPackage | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [issued, setIssued] = useState<IssuedNode | null>(null)
+  const [drawerId, setDrawerId] = useState<number | null>(null)
+  const [form] = Form.useForm<{ name: string; labels?: string }>()
 
   const reload = () => {
     setLoading(true)
@@ -91,36 +117,8 @@ export default function AgentNodesPage() {
     }
   }
 
-  const onUpgrade = async (r: AgentNode) => {
-    setUpgrading(r.id)
-    try {
-      const res = await upgradeAgentNode(r.id)
-      if (res.status === 'ACCEPTED') message.success(res.message)
-      else if (res.status === 'BUSY') message.warning(res.message)
-      else if (res.status === 'ALREADY_LATEST') message.info(res.message)
-      else message.error(res.message)
-      reload()
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : '升级失败')
-    } finally {
-      setUpgrading(null)
-    }
-  }
-
-  const onSetDefault = async (r: AgentNode, isDefault: boolean) => {
-    try {
-      if (isDefault) {
-        await setAgentNodeDefault(r.id)
-        message.success(`已将 ${r.name} 设为平台默认节点`)
-      } else {
-        await unsetAgentNodeDefault(r.id)
-        message.success(`已取消 ${r.name} 的平台默认`)
-      }
-      reload()
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : '操作失败')
-    }
-  }
+  // 抽屉里的节点随 5s 轮询保持新鲜；节点被删后抽屉自动关闭
+  const drawerNode = drawerId != null ? nodes.find((n) => n.id === drawerId) ?? null : null
 
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 70 },
@@ -147,12 +145,6 @@ export default function AgentNodesPage() {
     },
     { title: '系统', dataIndex: 'os', width: 180, render: (s?: string) => s || '-' },
     {
-      title: '能力',
-      dataIndex: 'capabilities',
-      width: 110,
-      render: (s?: string) => s || '-',
-    },
-    {
       title: 'runner 版本',
       dataIndex: 'runnerVersion',
       width: 150,
@@ -163,7 +155,6 @@ export default function AgentNodesPage() {
         return <Tag color={outdated ? 'orange' : 'default'}>{s}</Tag>
       },
     },
-    { title: '标签', dataIndex: 'labels', ellipsis: true, render: (s?: string) => s || '-' },
     {
       title: '最近心跳',
       dataIndex: 'lastHeartbeatAt',
@@ -173,114 +164,49 @@ export default function AgentNodesPage() {
     {
       title: '操作',
       key: 'act',
-      width: 420,
+      width: 90,
       render: (_: unknown, r: AgentNode) => (
-        <Space size={8}>
-          <Tooltip title="下载一键安装脚本(token 运行时传入),用于在新机器上安装 runner">
-            <Button size="small" icon={<DownloadOutlined />} onClick={() => setScriptNode(r)}>
-              安装脚本
-            </Button>
-          </Tooltip>
-          {r.isDefault ? (
-            <Button size="small" icon={<StarOutlined />} onClick={() => onSetDefault(r, false)}>
-              取消默认
-            </Button>
-          ) : (
-            <Tooltip title={r.status === 'DISABLED' ? '已禁用节点不能设为默认' : '会话/项目未指定节点时调度到该节点'}>
-              <Button
-                size="small"
-                icon={<StarOutlined />}
-                disabled={r.status === 'DISABLED'}
-                onClick={() => onSetDefault(r, true)}
-              >
-                设为默认
-              </Button>
-            </Tooltip>
-          )}
-          {r.status === 'ONLINE' && (
-            <Tooltip title={pkg ? undefined : '请先在「Runner 包」页签上传 runner 包'}>
-              <Popconfirm
-                title={`升级节点「${r.name}」？`}
-                description={`${r.runnerVersion ?? '-'} → ${pkg?.version ?? '-'}；有活跃会话时将推迟`}
-                onConfirm={() => onUpgrade(r)}
-              >
-                <Button
-                  size="small"
-                  icon={<RocketOutlined />}
-                  disabled={!pkg}
-                  loading={upgrading === r.id}
-                >
-                  升级
-                </Button>
-              </Popconfirm>
-            </Tooltip>
-          )}
-          {r.status === 'DISABLED' ? (
-            <Button size="small" onClick={async () => {
-              await enableAgentNode(r.id)
-              message.success(`已启用 ${r.name}`)
-              reload()
-            }}>
-              启用
-            </Button>
-          ) : (
-            <Button size="small" onClick={async () => {
-              await disableAgentNode(r.id)
-              message.success(`已禁用 ${r.name}`)
-              reload()
-            }}>
-              禁用
-            </Button>
-          )}
-          <Popconfirm title={`删除节点「${r.name}」？其运行中会话将失联。`} onConfirm={async () => {
-            await deleteAgentNode(r.id)
-            message.success('已删除')
-            reload()
-          }}>
-            <Button size="small" danger>删除</Button>
-          </Popconfirm>
-        </Space>
+        <Button size="small" type="primary" onClick={() => setDrawerId(r.id)}>
+          管理
+        </Button>
       ),
     },
   ]
 
   return (
-    <div>
-      <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
-        <h2 style={{ margin: 0 }}>Agent 节点</h2>
+    <Space direction="vertical" style={{ width: '100%' }} size={12}>
+      <Space style={{ justifyContent: 'space-between', width: '100%' }}>
         <Space>
-          <Button icon={<ReloadOutlined />} onClick={reload}>刷新</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            新建节点
-          </Button>
+          <Typography.Text type="secondary">
+            节点 = 运行 devmind-agent-runner.jar 的远程机器。服务端本机没有 AI 能力时，把节点「设为默认」，未指定节点的会话即自动调度过去。
+          </Typography.Text>
+          <Button size="small" icon={<ReloadOutlined />} onClick={reload} />
         </Space>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+          新建节点
+        </Button>
       </Space>
-      <Tabs
-        items={[
-          {
-            key: 'nodes',
-            label: '节点列表',
-            children: (
-              <>
-                <Alert
-                  type="info"
-                  showIcon
-                  style={{ marginBottom: 12 }}
-                  message="节点 = 运行 devmind-agent-runner.jar 的远程机器（如 Windows 开发机）。在节点机上配置 agent.properties（serverUrl / token / project.<项目id>=本地路径），java -jar 启动后反向连接上线，创建会话时即可选择该节点执行。服务端本机没有 AI 能力（如未装 claude 的 Linux 服务器）时，将节点「设为默认」，之后所有未指定节点的会话都会自动调度到该节点。"
-                />
-                <Table<AgentNode>
-                  rowKey="id"
-                  size="small"
-                  loading={loading}
-                  columns={columns}
-                  dataSource={nodes}
-                  pagination={false}
-                />
-              </>
-            ),
-          },
-          { key: 'package', label: 'Runner 包', children: <RunnerPackagePanel /> },
-        ]}
+      <Table<AgentNode>
+        rowKey="id"
+        size="small"
+        loading={loading}
+        columns={columns}
+        dataSource={nodes}
+        pagination={false}
+        locale={{
+          emptyText: (
+            <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
+              <Typography.Text type="secondary">
+                还没有 Agent 节点——先「新建节点」拿到 token，再在目标机执行一键安装脚本即可上线。
+              </Typography.Text>
+              <div>
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+                  新建节点
+                </Button>
+              </div>
+            </Space>
+          ),
+        }}
       />
 
       <Modal
@@ -352,32 +278,187 @@ export default function AgentNodesPage() {
         )}
       </Modal>
 
-      <Modal
-        title={scriptNode ? `安装脚本：${scriptNode.name}` : '安装脚本'}
-        open={!!scriptNode}
-        footer={<Button type="primary" onClick={() => setScriptNode(null)}>关闭</Button>}
-        onCancel={() => setScriptNode(null)}
-      >
-        <Space direction="vertical" style={{ width: '100%' }} size={8}>
-          <Alert
-            type="info"
-            showIcon
-            message="参数化脚本不含 token（节点 token 仅创建时可见）。下载后在目标机执行时传入；若 token 已丢失请重建节点。"
-          />
-          <Space>
-            <Button icon={<WindowsOutlined />} onClick={downloadScripts(null).windows}>
-              Windows (.ps1)
-            </Button>
-            <Button icon={<CodeOutlined />} onClick={downloadScripts(null).linux}>
-              Linux (.sh)
-            </Button>
-          </Space>
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-            Windows：<Typography.Text code>powershell -ExecutionPolicy Bypass -File install-runner.ps1 -Token dmag_xxx</Typography.Text>
-            ；Linux：<Typography.Text code>bash install-runner.sh dmag_xxx</Typography.Text>
-          </Typography.Paragraph>
+      {drawerNode && (
+        <NodeDrawer
+          node={drawerNode}
+          pkg={pkg}
+          onClose={() => setDrawerId(null)}
+          onChanged={reload}
+        />
+      )}
+    </Space>
+  )
+}
+
+// ---------------- 节点管理抽屉 ----------------
+function NodeDrawer({
+  node,
+  pkg,
+  onClose,
+  onChanged,
+}: {
+  node: AgentNode
+  pkg: RunnerPackage | null
+  onClose: () => void
+  onChanged: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const outdated = !!(pkg && node.runnerVersion && node.runnerVersion !== pkg.version)
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true)
+    try {
+      await fn()
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '操作失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onUpgrade = () =>
+    run(async () => {
+      const res = await upgradeAgentNode(node.id)
+      if (res.status === 'ACCEPTED') message.success(res.message)
+      else if (res.status === 'BUSY') message.warning(res.message)
+      else if (res.status === 'ALREADY_LATEST') message.info(res.message)
+      else message.error(res.message)
+      onChanged()
+    })
+
+  const onSetDefault = (isDefault: boolean) =>
+    run(async () => {
+      if (isDefault) {
+        await setAgentNodeDefault(node.id)
+        message.success(`已将 ${node.name} 设为平台默认节点`)
+      } else {
+        await unsetAgentNodeDefault(node.id)
+        message.success(`已取消 ${node.name} 的平台默认`)
+      }
+      onChanged()
+    })
+
+  const onToggleEnable = () =>
+    run(async () => {
+      if (node.status === 'DISABLED') {
+        await enableAgentNode(node.id)
+        message.success(`已启用 ${node.name}`)
+      } else {
+        await disableAgentNode(node.id)
+        message.success(`已禁用 ${node.name}`)
+      }
+      onChanged()
+    })
+
+  const onDelete = () =>
+    run(async () => {
+      await deleteAgentNode(node.id)
+      message.success('已删除')
+      onClose()
+      onChanged()
+    })
+
+  return (
+    <Drawer title={`节点 · ${node.name}`} open onClose={onClose} width={640}>
+      <Spin spinning={busy}>
+        <Space direction="vertical" style={{ width: '100%' }} size={16}>
+          <Descriptions size="small" column={2}>
+            <Descriptions.Item label="ID">{node.id}</Descriptions.Item>
+            <Descriptions.Item label="状态">
+              <Tag color={statusColor[node.status] ?? 'default'}>{node.status}</Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="系统">{node.os || '-'}</Descriptions.Item>
+            <Descriptions.Item label="能力">{node.capabilities || '-'}</Descriptions.Item>
+            <Descriptions.Item label="runner 版本">
+              {node.runnerVersion ? (
+                <Tag color={outdated ? 'orange' : 'default'}>{node.runnerVersion}</Tag>
+              ) : (
+                '-'
+              )}
+            </Descriptions.Item>
+            <Descriptions.Item label="最近心跳">{fmtTime(node.lastHeartbeatAt)}</Descriptions.Item>
+            <Descriptions.Item label="标签" span={2}>
+              {node.labels || '-'}
+            </Descriptions.Item>
+          </Descriptions>
+
+          <Card size="small" title="一键安装脚本">
+            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+              <Typography.Text type="secondary">
+                参数化脚本不含 token（token 仅创建节点时可见），下载后在目标机执行时传入；token 已丢失请重建节点。
+              </Typography.Text>
+              <Space>
+                <Button icon={<WindowsOutlined />} onClick={downloadScripts(null).windows}>
+                  Windows (.ps1)
+                </Button>
+                <Button icon={<CodeOutlined />} onClick={downloadScripts(null).linux}>
+                  Linux (.sh)
+                </Button>
+              </Space>
+              <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+                Windows：
+                <Typography.Text code>powershell -ExecutionPolicy Bypass -File install-runner.ps1 -Token dmag_xxx</Typography.Text>
+                ；Linux：<Typography.Text code>bash install-runner.sh dmag_xxx</Typography.Text>
+              </Typography.Paragraph>
+            </Space>
+          </Card>
+
+          <Card size="small" title="调度">
+            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+              <Typography.Text type="secondary">
+                平台默认执行节点：会话/项目未指定节点时调度到此（全平台至多一个）。
+              </Typography.Text>
+              <div>
+                {node.isDefault ? (
+                  <Button icon={<StarOutlined />} onClick={() => onSetDefault(false)}>
+                    取消平台默认
+                  </Button>
+                ) : (
+                  <Tooltip title={node.status === 'DISABLED' ? '已禁用节点不能设为默认' : undefined}>
+                    <Button
+                      icon={<StarOutlined />}
+                      disabled={node.status === 'DISABLED'}
+                      onClick={() => onSetDefault(true)}
+                    >
+                      设为平台默认
+                    </Button>
+                  </Tooltip>
+                )}
+              </div>
+            </Space>
+          </Card>
+
+          {node.status === 'ONLINE' && (
+            <Card size="small" title="升级 runner">
+              <Space direction="vertical" style={{ width: '100%' }} size={8}>
+                <Typography.Text type="secondary">
+                  {pkg
+                    ? `${node.runnerVersion ?? '-'} → ${pkg.version}；有活跃会话时将推迟执行。`
+                    : '请先在「Runner 包」页签上传 runner 包。'}
+                </Typography.Text>
+                <div>
+                  <Popconfirm title={`升级节点「${node.name}」？`} onConfirm={onUpgrade}>
+                    <Button type="primary" icon={<RocketOutlined />} disabled={!pkg}>
+                      升级
+                    </Button>
+                  </Popconfirm>
+                </div>
+              </Space>
+            </Card>
+          )}
+
+          <Card size="small" title="状态与删除">
+            <Space>
+              <Button onClick={onToggleEnable}>
+                {node.status === 'DISABLED' ? '启用' : '禁用'}
+              </Button>
+              <Popconfirm title={`删除节点「${node.name}」？其运行中会话将失联。`} onConfirm={onDelete}>
+                <Button danger>删除节点</Button>
+              </Popconfirm>
+            </Space>
+          </Card>
         </Space>
-      </Modal>
-    </div>
+      </Spin>
+    </Drawer>
   )
 }
