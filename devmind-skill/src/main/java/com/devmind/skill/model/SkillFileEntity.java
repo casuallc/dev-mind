@@ -33,7 +33,7 @@ public class SkillFileEntity {
     @Column(nullable = false)
     private String path;
 
-    @Column(nullable = false)
+    @Column(name = "binary_flag", nullable = false)   // 列名避开 MySQL 保留字 binary
     private boolean binary;
 
     @Lob
