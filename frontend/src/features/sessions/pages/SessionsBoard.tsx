@@ -369,12 +369,16 @@ export default function SessionsBoard() {
               options={projects.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))}
               placeholder="选择项目（无项目时可留空裸跑）"
               allowClear
+              onChange={(v?: string) =>
+                // 预填项目默认执行节点（CAP-21），用户可再改/清除
+                form.setFieldValue('agentNodeId', projects.find((p) => p.id === v)?.agentNodeId ?? undefined)
+              }
             />
           </Form.Item>
           <Form.Item
             label="执行节点"
             name="agentNodeId"
-            extra="默认本机执行；选择远程节点后，会话在该节点机上运行（工作目录取节点的项目路径映射）"
+            extra="留空 = 跟随项目默认节点（无默认则本机）；选择远程节点后，会话在该节点机上运行（工作目录取节点的项目路径映射）"
           >
             <Select
               placeholder="本机（默认）"

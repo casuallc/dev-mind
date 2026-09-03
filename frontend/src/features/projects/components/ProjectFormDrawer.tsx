@@ -5,6 +5,8 @@ import { Button, Drawer, Form, Input, Radio, Select, Space, Switch, message } fr
 import { createProject, updateProject } from '../api'
 import type { Project, ProjectInput } from '../types'
 import { useGitIntegrations } from '../hooks/useGitIntegrations'
+import { listAgentNodes } from '../../agent/api'
+import type { AgentNode } from '../../agent/types'
 
 const STATUS_OPTIONS = [
   { value: 'ACTIVE', label: 'ACTIVE' },
@@ -24,6 +26,14 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
   const [saving, setSaving] = useState(false)
   const sourceType = Form.useWatch('sourceType', form) ?? 'LOCAL'
   const { options: integrationOptions } = useGitIntegrations()
+  const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
+
+  useEffect(() => {
+    if (!open) return
+    listAgentNodes()
+      .then(setAgentNodes)
+      .catch(() => setAgentNodes([]))
+  }, [open])
   // 编辑存量项目时禁用来源切换（sourceType 创建后不可变，避免目录语义混乱）
   const editing = project != null
 
@@ -52,15 +62,18 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
     setSaving(true)
     try {
       // CLONE 模式不带 path（服务端计算）；LOCAL 不带克隆字段
-      const payload: ProjectInput =
-        values.sourceType === 'CLONE'
+      const payload: ProjectInput = {
+        ...(values.sourceType === 'CLONE'
           ? {
               ...values,
               path: undefined,
               // 编辑时留空 = 保持不变（当前地址到 项目设置-仓库 查看/修改）
               remoteUrl: values.remoteUrl || undefined,
             }
-          : { ...values, remoteUrl: undefined, integrationId: undefined }
+          : { ...values, remoteUrl: undefined, integrationId: undefined }),
+        // allowClear 清除后是 undefined（JSON 会丢弃，后端视为"保持"），显式空串才能清除默认节点
+        agentNodeId: values.agentNodeId ?? '',
+      }
       if (project) {
         await updateProject(project.id, payload)
         message.success('已更新')
@@ -170,6 +183,23 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
           extra="CAP-10 FR-05：部署单成功后自动对该项目全部套件跑一次回归"
         >
           <Switch />
+        </Form.Item>
+        <Form.Item
+          label="默认执行节点"
+          name="agentNodeId"
+          extra="新建会话未选节点时默认在该节点执行；节点离线时创建会话会失败。远程节点需在 runner 配置本项目路径映射（CAP-21）"
+        >
+          <Select
+            allowClear
+            placeholder="本机（默认）"
+            options={agentNodes
+              .filter((n) => n.status !== 'DISABLED')
+              .map((n) => ({
+                value: String(n.id),
+                label: `${n.name}（${n.status === 'ONLINE' ? '在线' : '离线'}${n.os ? ` · ${n.os}` : ''}）`,
+              }))}
+            notFoundContent="暂无节点（后台 → Agent 节点 注册）"
+          />
         </Form.Item>
       </Form>
     </Drawer>

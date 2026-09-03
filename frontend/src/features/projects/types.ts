@@ -15,6 +15,8 @@ export interface Project {
   apiDocSource?: string
   /** CAP-10 FR-05：部署成功后自动对该项目全部套件做回归 */
   autoRegressionOnDeploy?: boolean
+  /** CAP-21：默认执行节点 id（空 = 本机）；新建会话未显式选节点时继承 */
+  agentNodeId?: string
   contextSummary?: string
   summaryGeneratedAt?: string
   ownerId?: string
@@ -38,6 +40,8 @@ export interface ProjectInput {
   status?: string
   apiDocSource?: string
   autoRegressionOnDeploy?: boolean
+  /** CAP-21：默认执行节点 id；空串 = 清除回本机（不传 = 保持不变） */
+  agentNodeId?: string
 }
 
 // P0-4 项目多库模型

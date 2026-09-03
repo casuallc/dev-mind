@@ -6,6 +6,8 @@ import { PlusOutlined, ReloadOutlined, RobotOutlined, SettingOutlined } from '@a
 import { useNavigate } from 'react-router-dom'
 import { deleteProject, listProjects } from '../api'
 import { onboardProject } from '../../open-api/api'
+import { listAgentNodes } from '../../agent/api'
+import type { AgentNode } from '../../agent/types'
 import ProjectFormDrawer from '../components/ProjectFormDrawer'
 import { CLONE_STATUS_COLOR } from '../components/CloneLogDrawer'
 import type { Project } from '../types'
@@ -19,6 +21,7 @@ const STATUS_OPTIONS = [
 export default function AdminProjectsPage() {
   const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
+  const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('ALL')
   const [editOpen, setEditOpen] = useState(false)
@@ -41,6 +44,9 @@ export default function AdminProjectsPage() {
 
   useEffect(() => {
     load()
+    listAgentNodes()
+      .then(setAgentNodes)
+      .catch(() => setAgentNodes([]))
   }, [load])
 
   const openEdit = (p: Project | null) => {
@@ -113,6 +119,17 @@ export default function AdminProjectsPage() {
       render: (p: string) => <Typography.Text style={{ fontSize: 12 }}>{p}</Typography.Text>,
     },
     { title: '分支', dataIndex: 'defaultBranch', width: 110, render: (b?: string) => b || '-' },
+    {
+      title: '执行节点',
+      dataIndex: 'agentNodeId',
+      width: 110,
+      render: (v?: string) =>
+        v ? (
+          <Tag color="purple">{agentNodes.find((n) => String(n.id) === v)?.name ?? `节点${v}`}</Tag>
+        ) : (
+          '本机'
+        ),
+    },
     {
       title: '标签',
       dataIndex: 'tags',
