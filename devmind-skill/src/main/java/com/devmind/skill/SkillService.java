@@ -36,6 +36,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
  * Skill 管理（基础模块）：Claude Code skill 包本体的 CRUD/启停/分页检索。
@@ -407,6 +409,258 @@ public class SkillService {
                 && v.chars().noneMatch(c -> c == ':' || c == '#' || c == '\n' || c == '\r' || c == '"')
                 && !"-?[]{}&*!|>'%@`".contains(String.valueOf(v.charAt(0)));
         return safe ? v : "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
+
+    // ---------------- 导入（skill 压缩包） ----------------
+
+    /** 导入 zip 防爆：条目 ≤100、解压总量 ≤8MB、单条目 ≤1MB（附件 512KB 由 checkSize 二次把关） */
+    private static final int MAX_ZIP_ENTRIES = 100;
+    private static final long MAX_ZIP_TOTAL = 8L * 1024 * 1024;
+    private static final long MAX_ZIP_ENTRY = 1024 * 1024;
+
+    /** 附件按扩展名推断 contentType（未命中=二进制）；text/* 与 TEXT_MIME_TYPES 决定落 contentText */
+    private static final Map<String, String> EXT_MIME = Map.ofEntries(
+            Map.entry("md", "text/markdown"), Map.entry("markdown", "text/markdown"),
+            Map.entry("txt", "text/plain"), Map.entry("log", "text/plain"),
+            Map.entry("json", "application/json"), Map.entry("jsonc", "application/json"),
+            Map.entry("yaml", "application/yaml"), Map.entry("yml", "application/yaml"),
+            Map.entry("xml", "application/xml"), Map.entry("svg", "image/svg+xml"),
+            Map.entry("sh", "application/x-sh"), Map.entry("bash", "application/x-sh"),
+            Map.entry("js", "application/javascript"), Map.entry("mjs", "application/javascript"),
+            Map.entry("ts", "text/x-typescript"), Map.entry("tsx", "text/x-typescript"),
+            Map.entry("jsx", "text/x-jsx"), Map.entry("py", "text/x-python"),
+            Map.entry("java", "text/x-java"), Map.entry("go", "text/x-go"),
+            Map.entry("rs", "text/x-rust"), Map.entry("sql", "text/x-sql"),
+            Map.entry("css", "text/css"), Map.entry("html", "text/html"),
+            Map.entry("htm", "text/html"), Map.entry("csv", "text/csv"),
+            Map.entry("toml", "text/x-toml"), Map.entry("ini", "text/x-ini"),
+            Map.entry("cfg", "text/x-ini"), Map.entry("conf", "text/x-ini"),
+            Map.entry("properties", "text/x-properties"), Map.entry("c", "text/x-c"),
+            Map.entry("h", "text/x-c"), Map.entry("cpp", "text/x-c++"),
+            Map.entry("gitignore", "text/plain"), Map.entry("env", "text/plain"));
+
+    /**
+     * 导入 skill zip 压缩包：根目录或单层目录包裹的 SKILL.md 均可（其余文件作附件）。
+     * 同名（同 scope+projectId+name）默认 409；overwrite=true 时替换正文/frontmatter/全部附件
+     * （tags/status/createdBy 保留原值——zip 不承载这些信息）。synchronized 与 create 同理防并发重名。
+     */
+    @Transactional
+    public synchronized SkillView importPackage(byte[] zipBytes, String scope, String projectId,
+                                                boolean overwrite) {
+        String sc = requireScope(scope);
+        String pid = resolveProjectId(sc, projectId);
+        ParsedPackage pkg = parseZip(zipBytes);
+
+        SkillEntity e = skillRepo.findByScopeAndProjectIdAndName(sc, pid, pkg.name()).orElse(null);
+        if (e != null && !overwrite) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "同名 skill 已存在: " + sc + "/" + pkg.name() + "（勾选「覆盖已存在同名 skill」可替换）");
+        }
+        if (e == null) {
+            e = new SkillEntity();
+            e.setId(UUID.randomUUID().toString().replace("-", ""));
+            e.setScope(sc);
+            e.setProjectId(pid);
+            e.setName(pkg.name());
+            e.setStatus(SkillEntity.STATUS_ACTIVE);
+            e.setCreatedBy(identityService.currentActor());
+            e.setCreatedAt(Instant.now());
+        } else {
+            fileRepo.deleteBySkillId(e.getId());
+        }
+        e.setDescription(pkg.description());
+        e.setContentMd(pkg.contentMd());
+        e.setExtraFrontmatter(writeExtraFrontmatter(pkg.extraFrontmatter()));
+        e.setUpdatedAt(Instant.now());
+        skillRepo.save(e);
+
+        if (pkg.files().size() > MAX_FILES) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "附件数量超限（≤" + MAX_FILES + "）");
+        }
+        for (ParsedFile pf : pkg.files()) {
+            SkillFileEntity f = new SkillFileEntity();
+            f.setId(UUID.randomUUID().toString().replace("-", ""));
+            f.setSkillId(e.getId());
+            f.setPath(pf.path());
+            fillContent(f, pf.content(), pf.contentType());
+            Instant now = Instant.now();
+            f.setCreatedAt(now);
+            f.setUpdatedAt(now);
+            fileRepo.save(f);
+        }
+        log.info("skill 已导入: scope={} projectId={} name={} overwrite={} 附件数={}",
+                sc, pid, pkg.name(), overwrite, pkg.files().size());
+        return toView(e, pkg.files().size());
+    }
+
+    private record ParsedFile(String path, byte[] content, String contentType) {}
+
+    private record ParsedPackage(String name, String description, String contentMd,
+                                 Map<String, String> extraFrontmatter, List<ParsedFile> files) {}
+
+    /** 解 zip 到内存（带防爆限制），剥离单层目录前缀后解析 SKILL.md + 附件。 */
+    private ParsedPackage parseZip(byte[] zipBytes) {
+        Map<String, byte[]> entries = unzip(zipBytes);
+        String prefix = detectPrefix(entries);
+
+        byte[] skillMdRaw = null;
+        List<ParsedFile> files = new ArrayList<>();
+        for (Map.Entry<String, byte[]> en : entries.entrySet()) {
+            String rel = en.getKey().substring(prefix.length());
+            if (rel.isEmpty()) {
+                continue;
+            }
+            if ("skill.md".equalsIgnoreCase(rel)) {
+                skillMdRaw = en.getValue();
+                continue;
+            }
+            String path = validateFilePath(rel);
+            files.add(new ParsedFile(path, en.getValue(), guessContentType(path)));
+        }
+        if (skillMdRaw == null) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "压缩包中未找到 SKILL.md（支持根目录或单层目录包裹）");
+        }
+        if (skillMdRaw.length > MAX_FILE_SIZE) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "SKILL.md 过大（≤512KB）");
+        }
+        return parseSkillMd(new String(skillMdRaw, StandardCharsets.UTF_8), files);
+    }
+
+    /** 解 zip：路径归一化、跳过目录/macOS 垃圾文件，条目/大小超限即拒绝。 */
+    private Map<String, byte[]> unzip(byte[] zipBytes) {
+        Map<String, byte[]> entries = new LinkedHashMap<>();
+        long total = 0;
+        try (ZipInputStream zin = new ZipInputStream(
+                new java.io.ByteArrayInputStream(zipBytes), StandardCharsets.UTF_8)) {
+            ZipEntry ze;
+            while ((ze = zin.getNextEntry()) != null) {
+                if (entries.size() >= MAX_ZIP_ENTRIES) {
+                    throw new DevMindException(ErrorCode.BAD_REQUEST,
+                            "压缩包条目过多（≤" + MAX_ZIP_ENTRIES + "）");
+                }
+                if (ze.isDirectory()) {
+                    continue;
+                }
+                String name = ze.getName().replace('\\', '/');
+                while (name.startsWith("./")) {
+                    name = name.substring(2);
+                }
+                // macOS 打包垃圾
+                if (name.isEmpty() || name.startsWith("__MACOSX/")
+                        || name.endsWith("/.DS_Store") || name.equals(".DS_Store")) {
+                    continue;
+                }
+                byte[] raw = zin.readNBytes((int) (MAX_ZIP_ENTRY + 1));
+                if (raw.length > MAX_ZIP_ENTRY) {
+                    throw new DevMindException(ErrorCode.BAD_REQUEST,
+                            "压缩包含超大文件（单个 ≤1MB）: " + name);
+                }
+                total += raw.length;
+                if (total > MAX_ZIP_TOTAL) {
+                    throw new DevMindException(ErrorCode.BAD_REQUEST, "压缩包解压后总量超限（≤8MB）");
+                }
+                entries.putIfAbsent(name, raw);
+            }
+        } catch (java.io.IOException ex) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "无法读取压缩包（须为 zip 格式）: " + ex.getMessage());
+        }
+        if (entries.isEmpty()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "压缩包为空或不是合法 zip");
+        }
+        return entries;
+    }
+
+    /** 定位 SKILL.md：根目录直接命中则前缀 ""；否则取唯一「<dir>/SKILL.md」的 dir 作前缀。 */
+    private String detectPrefix(Map<String, byte[]> entries) {
+        for (String name : entries.keySet()) {
+            if ("skill.md".equalsIgnoreCase(name)) {
+                return "";
+            }
+        }
+        String prefix = null;
+        for (String name : entries.keySet()) {
+            int slash = name.indexOf('/');
+            if (slash > 0 && "skill.md".equalsIgnoreCase(name.substring(slash + 1))) {
+                String p = name.substring(0, slash + 1);
+                if (prefix != null && !prefix.equals(p)) {
+                    throw new DevMindException(ErrorCode.BAD_REQUEST,
+                            "压缩包含多个 skill 目录，无法确定导入目标");
+                }
+                prefix = p;
+            }
+        }
+        if (prefix == null) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "压缩包中未找到 SKILL.md（支持根目录或单层目录包裹）");
+        }
+        // 只保留前缀目录内的条目（忽略目录外的杂项文件）
+        String p = prefix;
+        entries.keySet().removeIf(k -> !k.startsWith(p));
+        return prefix;
+    }
+
+    /** 解析 SKILL.md：--- frontmatter（snakeyaml）--- + 正文；name/description 必填并复用结构化校验。 */
+    private ParsedPackage parseSkillMd(String text, List<ParsedFile> files) {
+        String[] lines = text.replace("\r\n", "\n").split("\n", -1);
+        if (lines.length < 2 || !lines[0].trim().equals("---")) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "SKILL.md 缺少 frontmatter（须以 --- 开头）");
+        }
+        int end = -1;
+        for (int i = 1; i < lines.length; i++) {
+            if (lines[i].trim().equals("---")) {
+                end = i;
+                break;
+            }
+        }
+        if (end < 0) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "SKILL.md frontmatter 未闭合（缺少第二个 ---）");
+        }
+        Map<String, Object> fm;
+        try {
+            Object parsed = new org.yaml.snakeyaml.Yaml()
+                    .load(String.join("\n", java.util.Arrays.copyOfRange(lines, 1, end)));
+            fm = (parsed instanceof Map<?, ?> m) ? toStringKeyMap(m) : Map.of();
+        } catch (Exception ex) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "SKILL.md frontmatter YAML 解析失败: " + ex.getMessage());
+        }
+        String name = validateName(fm.get("name") == null ? null : String.valueOf(fm.get("name")));
+        String description = validateDescription(
+                fm.get("description") == null ? null : String.valueOf(fm.get("description")));
+        Map<String, String> extra = new LinkedHashMap<>();
+        fm.forEach((k, v) -> {
+            if (!"name".equals(k) && !"description".equals(k)) {
+                extra.put(k, frontmatterValue(v));
+            }
+        });
+        String body = String.join("\n", java.util.Arrays.copyOfRange(lines, end + 1, lines.length)).strip();
+        return new ParsedPackage(name, description, body.isEmpty() ? null : body, extra, files);
+    }
+
+    private Map<String, Object> toStringKeyMap(Map<?, ?> m) {
+        Map<String, Object> r = new LinkedHashMap<>();
+        m.forEach((k, v) -> r.put(String.valueOf(k), v));
+        return r;
+    }
+
+    /** frontmatter 其余键值 → 字符串：标量直转，列表/映射序列化为 JSON 字符串保留。 */
+    private String frontmatterValue(Object v) {
+        if (v == null) {
+            return "";
+        }
+        if (v instanceof Map<?, ?> || v instanceof List<?>) {
+            return objectMapper.writeValueAsString(v);
+        }
+        return String.valueOf(v);
+    }
+
+    private String guessContentType(String path) {
+        String name = path.substring(path.lastIndexOf('/') + 1);
+        int dot = name.lastIndexOf('.');
+        if (dot < 0) {
+            return EXT_MIME.get(name.toLowerCase()); // .gitignore/.env 这类全名命中
+        }
+        return EXT_MIME.get(name.substring(dot + 1).toLowerCase());
     }
 
     // ---------------- 校验与装配 ----------------

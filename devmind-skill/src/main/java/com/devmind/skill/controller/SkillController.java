@@ -1,5 +1,7 @@
 package com.devmind.skill.controller;
 
+import com.devmind.common.exception.DevMindException;
+import com.devmind.common.exception.ErrorCode;
 import com.devmind.project.dto.PageView;
 import com.devmind.skill.SkillService;
 import com.devmind.skill.dto.SkillDetailView;
@@ -11,7 +13,9 @@ import com.devmind.skill.dto.SkillRequest;
 import com.devmind.skill.dto.SkillView;
 import jakarta.validation.Valid;
 
+import java.io.IOException;
 import java.util.List;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,9 +25,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
- * Skill 管理 REST（基础模块）：skill 包本体 CRUD/启停/分页检索 + 附件管理 + 导出。
+ * Skill 管理 REST（基础模块）：skill 包本体 CRUD/启停/分页检索 + 附件管理 + 导出/导入。
  * 平铺 URL 风格对照 KnowledgeController，scope/projectId 走 query param。
  */
 @RestController
@@ -79,6 +84,23 @@ public class SkillController {
     @GetMapping("/export")
     public SkillPackageView exportPackages(@RequestParam List<String> ids) {
         return service.exportPackages(ids);
+    }
+
+    // ---------------- 导入 ----------------
+
+    /**
+     * 导入 skill zip 压缩包（multipart: file + scope/projectId/overwrite）。
+     * 同名默认 409，overwrite=true 覆盖本体与全部附件。
+     */
+    @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public SkillView importPackage(@RequestParam("file") MultipartFile file,
+                                   @RequestParam String scope,
+                                   @RequestParam(required = false) String projectId,
+                                   @RequestParam(defaultValue = "false") boolean overwrite) throws IOException {
+        if (file.isEmpty()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "file 不能为空");
+        }
+        return service.importPackage(file.getBytes(), scope, projectId, overwrite);
     }
 
     // ---------------- 附件文件 ----------------
