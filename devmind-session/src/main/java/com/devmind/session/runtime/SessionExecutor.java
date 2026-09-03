@@ -2,6 +2,7 @@ package com.devmind.session.runtime;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Map;
 
 /**
  * 会话执行器 SPI：把会话拉起成一个子进程。MVP 两个实现：
@@ -21,7 +22,12 @@ public interface SessionExecutor {
      */
     Process launch(LaunchContext ctx) throws IOException;
 
-    /** 启动上下文（CLI 相关细节集中在各实现内）。 */
+    /**
+     * 启动上下文（CLI 相关细节集中在各实现内）。
+     *
+     * @param env CAP-24：附加进程环境变量（GIT_AUTHOR_NAME 等提交身份变量）；
+     *            null/空 = 不附加。随进程隔离，不写 git config（worktree 共享主仓配置，并行会话会互踩）
+     */
     record LaunchContext(String sessionId, Path worktree, String taskSpec,
-                         String model, String permissionMode) {}
+                         String model, String permissionMode, Map<String, String> env) {}
 }

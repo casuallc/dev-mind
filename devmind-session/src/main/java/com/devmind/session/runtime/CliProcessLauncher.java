@@ -57,6 +57,10 @@ public class CliProcessLauncher implements SessionExecutor {
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.directory(cwd.toFile());
+        // CAP-24：提交身份等附加 env 随进程注入（不写 git config，避免 worktree 共享配置互踩）
+        if (ctx.env() != null && !ctx.env().isEmpty()) {
+            pb.environment().putAll(ctx.env());
+        }
         pb.redirectErrorStream(false);
         Process process = pb.start();
 

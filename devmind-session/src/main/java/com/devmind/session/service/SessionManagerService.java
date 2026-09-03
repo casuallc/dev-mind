@@ -8,6 +8,7 @@ import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.auth.IdentityService;
+import com.devmind.common.integration.GitIdentityProvider;
 import com.devmind.common.notification.NotificationEvent;
 import com.devmind.knowledge.KnowledgeInjector;
 import com.devmind.notification.NotificationPublisher;
@@ -87,6 +88,8 @@ public class SessionManagerService {
     private final Collection<SessionExecutor> executors;
     /** CAP-21：远程节点连接（devmind-agent 装配时可用；ObjectProvider 探测防循环依赖） */
     private final ObjectProvider<AgentNodeConnector> connectorProvider;
+    /** CAP-24：Git 提交身份解析（devmind-integration 装配时可用；未装配回退系统 git 配置） */
+    private final ObjectProvider<GitIdentityProvider> gitIdentityProvider;
 
     /** 运行中会话注册表（本地/远程统一句柄）。 */
     private final Map<String, SessionHandle> runtimes = new ConcurrentHashMap<>();
@@ -108,7 +111,8 @@ public class SessionManagerService {
                                  ObjectMapper mapper,
                                  CliEventParser parser,
                                  Collection<SessionExecutor> executors,
-                                 ObjectProvider<AgentNodeConnector> connectorProvider) {
+                                 ObjectProvider<AgentNodeConnector> connectorProvider,
+                                 ObjectProvider<GitIdentityProvider> gitIdentityProvider) {
         this.identityService = identityService;
         this.projectService = projectService;
         this.workItemService = workItemService;
@@ -127,6 +131,7 @@ public class SessionManagerService {
         this.parser = parser;
         this.executors = executors;
         this.connectorProvider = connectorProvider;
+        this.gitIdentityProvider = gitIdentityProvider;
     }
 
     private final RuntimeListener listener = new RuntimeListener() {
@@ -237,6 +242,8 @@ public class SessionManagerService {
 
         Process proc = null;
         RemoteSessionRuntime remoteRt = null;
+        // CAP-24 FR-03：按会话发起人 + 主库 remoteUrl host 解析提交身份，随进程 env 注入
+        Map<String, String> gitEnv = resolveGitEnv(identityService.currentActor(), project);
         if (remote) {
             AgentNodeConnector connector = requireConnector();
             remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector, eventSaver, listener, props);
@@ -244,7 +251,7 @@ public class SessionManagerService {
             runtimes.put(id, remoteRt);
             try {
                 connector.launch(agentNodeId, new AgentLaunchCommand(
-                        id, project != null ? project.id() : null, taskSpec, model, pm));
+                        id, project != null ? project.id() : null, taskSpec, model, pm, gitEnv));
             } catch (Exception e) {
                 runtimes.remove(id);
                 if (e instanceof DevMindException de) {
@@ -255,7 +262,7 @@ public class SessionManagerService {
         } else {
             SessionExecutor executor = resolveExecutor();
             try {
-                proc = executor.launch(new SessionExecutor.LaunchContext(id, worktree, taskSpec, model, pm));
+                proc = executor.launch(new SessionExecutor.LaunchContext(id, worktree, taskSpec, model, pm, gitEnv));
             } catch (IOException e) {
                 if (workspace != null) {
                     workspace.cleanup();
@@ -374,7 +381,9 @@ public class SessionManagerService {
             runtimes.put(id, rt);
             try {
                 connector.launch(ent.getAgentNodeId(), new AgentLaunchCommand(
-                        id, ent.getProjectId(), ent.getTaskSpec(), ent.getModel(), props.getPermissionMode()));
+                        id, ent.getProjectId(), ent.getTaskSpec(), ent.getModel(),
+                        props.getPermissionMode(),
+                        resolveGitEnv(ent.getCreatedBy(), resolveProject(ent.getProjectId()))));
             } catch (Exception e) {
                 runtimes.remove(id);
                 if (e instanceof DevMindException de) {
@@ -396,8 +405,10 @@ public class SessionManagerService {
         String pm = props.getPermissionMode();
         Process proc;
         try {
+            // CAP-24：恢复时以原创建人（createdBy）身份注入，不用当前操作者
             proc = executor.launch(new SessionExecutor.LaunchContext(
-                    id, worktree, ent.getTaskSpec(), ent.getModel(), pm));
+                    id, worktree, ent.getTaskSpec(), ent.getModel(), pm,
+                    resolveGitEnv(ent.getCreatedBy(), project)));
         } catch (IOException e) {
             throw new DevMindException(ErrorCode.INTERNAL, "恢复会话失败: " + e.getMessage(), e);
         }
@@ -576,6 +587,54 @@ public class SessionManagerService {
             return null; // 无项目裸跑（fake 模式）
         }
         return projectService.requireProject(projectId);
+    }
+
+    /**
+     * CAP-24 FR-03：解析会话提交身份 env（GIT_AUTHOR_NAME 等变量）。
+     * 身份 = 用户在主库 remoteUrl host 的个人凭证署名 → 回退 displayName/username（仅 name）。
+     * SPI 未装配/无项目/解析失败均返回空 Map（保持现状，系统 git 配置兜底）。
+     */
+    private Map<String, String> resolveGitEnv(String username, Project project) {
+        GitIdentityProvider provider = gitIdentityProvider.getIfAvailable();
+        if (provider == null || username == null || username.isBlank()) {
+            return Map.of();
+        }
+        try {
+            String repoHost = null;
+            if (project != null) {
+                String remoteUrl = projectService.primaryRepo(project.id()).getRemoteUrl();
+                repoHost = hostOf(remoteUrl);
+            }
+            return provider.resolveAuthor(username, repoHost)
+                    .map(author -> {
+                        Map<String, String> env = new java.util.HashMap<>();
+                        if (author.name() != null && !author.name().isBlank()) {
+                            env.put("GIT_AUTHOR_NAME", author.name());
+                            env.put("GIT_COMMITTER_NAME", author.name());
+                        }
+                        if (author.email() != null && !author.email().isBlank()) {
+                            env.put("GIT_AUTHOR_EMAIL", author.email());
+                            env.put("GIT_COMMITTER_EMAIL", author.email());
+                        }
+                        return Map.copyOf(env);
+                    })
+                    .orElse(Map.of());
+        } catch (Exception e) {
+            // 身份解析失败不阻塞会话创建
+            log.debug("Git 提交身份解析失败(忽略): user={} err={}", username, e.getMessage());
+            return Map.of();
+        }
+    }
+
+    private static String hostOf(String url) {
+        if (url == null || url.isBlank()) {
+            return null;
+        }
+        try {
+            return java.net.URI.create(url.trim()).getHost();
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private void ensureCapacity() {
