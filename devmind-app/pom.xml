@@ -121,6 +121,12 @@
             <scope>runtime</scope>
         </dependency>
         <dependency>
+            <!-- MySQL 支持：驱动随包携带，切换只需在 application-local.yml 覆盖 spring.datasource -->
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-configuration-processor</artifactId>
             <optional>true</optional>

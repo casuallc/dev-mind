@@ -24,9 +24,11 @@ devmind:
     shell: bash                # 本地构建/部署步骤的 shell（Windows 下为 Git Bash）
     step-timeout-ms: 1800000   # 单步超时 30 分钟，超时 kill
 
-# 数据库默认 H2 文件库（./data/devmind，跟随启动目录）；切 PostgreSQL 时覆盖：
+# 数据库默认 H2 文件库（./data/devmind，跟随启动目录）；驱动已随包携带，切 MySQL/PostgreSQL 时覆盖：
 # spring:
 #   datasource:
-#     url: jdbc:postgresql://host:5432/devmind
+#     url: jdbc:mysql://host:3306/devmind?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&createDatabaseIfNotExist=true
+#     driver-class-name: com.mysql.cj.jdbc.Driver
 #     username: ...
 #     password: ...
+# PostgreSQL 同理（url: jdbc:postgresql://host:5432/devmind），但驱动未随包，需自行放入 libs/。

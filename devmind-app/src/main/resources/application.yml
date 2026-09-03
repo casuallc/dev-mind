@@ -11,6 +11,11 @@ spring:
     driver-class-name: org.h2.Driver
     username: sa
     password: ""
+    # 切 MySQL（驱动已随包携带）：在 application-local.yml 覆盖以下四项即可
+    #   url: jdbc:mysql://host:3306/devmind?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&createDatabaseIfNotExist=true
+    #   driver-class-name: com.mysql.cj.jdbc.Driver
+    #   username: ...
+    #   password: ...
   jpa:
     hibernate:
       ddl-auto: update
