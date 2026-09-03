@@ -33,8 +33,12 @@ Windows 办公机普遍在 NAT/防火墙后、入站不可达，因此采用**�
   创建会话指定目标节点 → 服务端经节点连接下发 `launch` 指令
   （sessionId / workdir / taskSpec / model / permissionMode）。
   节点离线时创建请求直接失败（409 + 明确提示），不产生挂死会话。
-  **项目可配默认执行节点**（`projects.agent_node_id`，空 = 本机）：创建会话未显式指定节点时
-  继承项目默认，显式指定优先。
+  **项目可配默认执行节点**（`projects.agent_node_id`，空 = 继承平台默认）；
+  **平台可配全局默认执行节点**（`agent_nodes.is_default`，全平台至多一个，2026-09-03 补）。
+  有效节点优先级：会话显式指定 > 项目默认 > 平台默认 > 本机——适配「服务端部署在无 AI
+  能力的 Linux 机器」场景：部署后注册一个 runner 节点并设为平台默认，所有会话即自动调度
+  到该节点，本机无 claude 也完全可用。平台默认节点离线时创建失败（409 明确提示），不静默
+  回落本机；禁用/删除默认节点自动清除标记。
 - **FR-04 事件回传与中继**：runner 本地完成 stream-json 解析，把 `SessionEvent`
   （含 state 翻转）流式回传；服务端中继三处：落库（`session_events`）、
   WS 广播给前端订阅者、驱动服务端会话状态机。前端对本地/远程会话**无感知**，
@@ -77,7 +81,8 @@ Windows 办公机普遍在 NAT/防火墙后、入站不可达，因此采用**�
 
 ```
 agent_nodes(id, name, token_hash, os, labels, capabilities, runner_version,
-            status[ONLINE|OFFLINE|DISABLED], last_heartbeat_at, created_at)
+            status[ONLINE|OFFLINE|DISABLED], last_heartbeat_at, created_at,
+            is_default)                            # 平台默认执行节点，全平台至多一个
 runner_packages(id=1 单行, version, sha256, size_bytes, original_filename,
                 uploaded_at, uploaded_by)        # FR-09：全局单份托管包，jar 本体在 data/agent-runner/runner.jar
 sessions  ── + agent_node_id (NULL=本地)
@@ -99,6 +104,7 @@ WS 协议（JSON 帧， runner ⇄ 服务端双向）：
 POST   /api/agent-nodes                 创建节点 + 生成注册 token（只显一次）
 GET    /api/agent-nodes                 节点列表（含在线状态/最近心跳/会话数）
 POST   /api/agent-nodes/{id}/disable | /enable | DELETE
+POST   /api/agent-nodes/{id}/default | /unset-default   设为/取消平台默认执行节点（设定时清除其他节点标记）
 WS     /ws/agent                        runner 接入端点（token 认证）
 POST   /api/sessions                    现有端点 + agentNodeId?（缺省=本地）
 # FR-09 runner 包（上传/升级仅 ADMIN；下载 permitAll + 控制器内「节点token 或 登录态」双认证）
