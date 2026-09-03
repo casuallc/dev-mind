@@ -12,3 +12,15 @@ export interface LoginResponse {
   refreshToken: string
   user: AuthUser
 }
+
+/** CAP-24 我的 Git 凭证视图（不含 secret 明文） */
+export interface GitCredential {
+  id: number
+  label: string
+  baseUrl: string
+  gitAuthorName: string
+  gitAuthorEmail: string
+  hasSecret: boolean
+  createdAt?: string
+  updatedAt?: string
+}

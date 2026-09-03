@@ -36,6 +36,7 @@ import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
 import LoginPage from '../features/auth/pages/LoginPage'
 import UserManagementPage from '../features/auth/pages/UserManagementPage'
+import GitCredentialsPage from '../features/auth/pages/GitCredentialsPage'
 import RequireAuth from '../features/auth/RequireAuth'
 import RequireAdmin from '../features/auth/RequireAdmin'
 import { setCurrentProject } from './currentProjectStore'
@@ -69,6 +70,8 @@ export default function App() {
           }
         >
           <Route path="/" element={<Navigate to="/overview" replace />} />
+          {/* CAP-24 个人设置：我的 Git 凭证 */}
+          <Route path="/me/git-credentials" element={<GitCredentialsPage />} />
           {/* 项目上下文页面（当前项目为主线，无项目时由 Gate 统一空态） */}
           <Route element={<ProjectContextGate />}>
             <Route path="/overview" element={<ProjectOverviewPage />} />
