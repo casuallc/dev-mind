@@ -86,6 +86,25 @@ public class ServerConnection {
         });
     }
 
+    /**
+     * 发送并同步等写完（exit 前最后一帧用，如 upgrade ack——fire-and-forget 紧接着
+     * System.exit 会丢帧）。返回是否成功落线。
+     */
+    public boolean sendAndWait(Map<String, Object> frame, long timeoutMs) {
+        WebSocket ws = current.get();
+        if (ws == null) {
+            return false;
+        }
+        try {
+            ws.sendText(mapper.writeValueAsString(frame), true)
+                    .get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+            return true;
+        } catch (Exception e) {
+            log.warn("同步发送失败: {}", e.getMessage());
+            return false;
+        }
+    }
+
     public void shutdown() {
         running = false;
         WebSocket ws = current.get();
