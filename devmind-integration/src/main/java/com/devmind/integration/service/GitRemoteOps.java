@@ -35,6 +35,12 @@ public class GitRemoteOps {
         return exec(repoPath, token, List.of("push", url, branch + ":" + branch));
     }
 
+    /** CAP-24 FR-02 凭证连通性自检：git ls-remote（只读，repoPath 用当前目录不参与鉴权） */
+    public GitResult lsRemote(String remoteUrl, String token) {
+        String url = withToken(remoteUrl, token);
+        return exec(".", token, List.of("ls-remote", url, "HEAD"));
+    }
+
     /** 推送 tag 到绑定远程 */
     public GitResult pushTag(String repoPath, String tag, String remoteUrl, String token) {
         String url = withToken(remoteUrl, token);

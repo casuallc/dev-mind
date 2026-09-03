@@ -1,5 +1,5 @@
 import { Dropdown, Form, Input, Modal, Space, Tag, Typography, message } from 'antd'
-import { KeyOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons'
+import { GithubOutlined, KeyOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons'
 import { useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { changePassword, logout } from '../api'
@@ -49,6 +49,12 @@ export default function UserMenu() {
         menu={{
           items: [
             { key: 'password', icon: <KeyOutlined />, label: '修改密码', onClick: () => setPwdOpen(true) },
+            {
+              key: 'git-credentials',
+              icon: <GithubOutlined />,
+              label: 'Git 凭证',
+              onClick: () => navigate('/me/git-credentials'),
+            },
             { type: 'divider' },
             { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', onClick: onLogout },
           ],

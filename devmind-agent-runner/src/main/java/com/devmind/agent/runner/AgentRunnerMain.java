@@ -160,8 +160,14 @@ public class AgentRunnerMain {
             Path workDir = config.resolveWorkDir(projectId);
             log.info("拉起会话: session={} project={} cwd={}", sessionId, projectId, workDir);
 
+            // CAP-24：服务端下发的提交身份等附加 env（旧服务端无此字段 → 空）
+            java.util.Map<String, String> env = new java.util.HashMap<>();
+            JsonNode envNode = frame.path("env");
+            if (envNode.isObject()) {
+                envNode.properties().forEach(e -> env.put(e.getKey(), e.getValue().asText("")));
+            }
             Process proc = executor.launch(new SessionExecutor.LaunchContext(
-                    sessionId, workDir, taskSpec, model, permissionMode));
+                    sessionId, workDir, taskSpec, model, permissionMode, env));
             sessions.register(sessionId, proc);
             conn.send(Map.of("type", "launched", "sessionId", sessionId, "ok", true));
         } catch (Exception e) {

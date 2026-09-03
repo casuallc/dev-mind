@@ -62,6 +62,7 @@ public class IntegrationService implements PlatformIntegrationHook {
     private final WorkItemService workItemService;
     private final IdentityService identityService;
     private final AuditService auditService;
+    private final UserGitCredentialService userGitCredentialService;
     private final Map<String, IntegrationConnector> connectors;
 
     public IntegrationService(IntegrationRepository integrationRepo,
@@ -76,6 +77,7 @@ public class IntegrationService implements PlatformIntegrationHook {
                               WorkItemService workItemService,
                               IdentityService identityService,
                               AuditService auditService,
+                              UserGitCredentialService userGitCredentialService,
                               List<IntegrationConnector> connectorList) {
         this.integrationRepo = integrationRepo;
         this.bindingRepo = bindingRepo;
@@ -89,6 +91,7 @@ public class IntegrationService implements PlatformIntegrationHook {
         this.workItemService = workItemService;
         this.identityService = identityService;
         this.auditService = auditService;
+        this.userGitCredentialService = userGitCredentialService;
         this.connectors = connectorList.stream()
                 .collect(Collectors.toMap(IntegrationConnector::type, Function.identity()));
     }
@@ -269,21 +272,31 @@ public class IntegrationService implements PlatformIntegrationHook {
 
     // ---------------- FR-04 推送 WI 分支 ----------------
 
-    public String pushWorkItemBranch(String projectId, String workItemId) {
+    /** CAP-24 FR-04：push 结果（branch + 实际所用身份来源 PERSONAL/INTEGRATION）。 */
+    public record PushResult(String branch, String identitySource) {}
+
+    public PushResult pushWorkItemBranch(String projectId, String workItemId) {
         WorkItemEntity wi = workItemService.requireEntity(projectId, workItemId);
         String branch = workItemService.branchName(wi);
         ResolvedBinding rb = requireGitBinding(projectId);
+        // CAP-24 FR-04 凭证优先级：触发用户个人 PAT（remoteUrl host 匹配）→ 项目绑定 Integration
+        String repoHost = UserGitCredentialService.hostOf(rb.repo.getRemoteUrl());
+        String actor = identityService.currentActor();
+        java.util.Optional<String> personal = userGitCredentialService.personalTokenFor(actor, repoHost);
+        String token = personal.orElseGet(() -> tokenOf(rb.integration));
+        String identitySource = personal.isPresent() ? "PERSONAL" : "INTEGRATION";
         GitRemoteOps.GitResult result = gitOps.pushBranch(
-                rb.repo.getPath(), branch, rb.repo.getRemoteUrl(), tokenOf(rb.integration));
+                rb.repo.getPath(), branch, rb.repo.getRemoteUrl(), token);
         recordCall(rb.integration.getId(), "push_branch",
                 ExternalLinkEntity.INTERNAL_WORK_ITEM, workItemId, result.ok(),
                 result.ok() ? null : tail(result.output()));
         audit("push_branch", rb.integration.getId(), projectId, result.ok(),
-                "WI-" + wi.getSeq() + " 分支 " + branch + (result.ok() ? " 已推送" : " 推送失败"));
+                "WI-" + wi.getSeq() + " 分支 " + branch + "（身份 " + identitySource + "）"
+                        + (result.ok() ? " 已推送" : " 推送失败"));
         if (!result.ok()) {
             throw new DevMindException(ErrorCode.INTERNAL, "分支推送失败：" + tail(result.output()));
         }
-        return branch;
+        return new PushResult(branch, identitySource);
     }
 
     // ---------------- FR-05 创建 MR（幂等） ----------------
