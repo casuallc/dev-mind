@@ -48,11 +48,11 @@ public class ProjectIntegrationController {
         return Map.of("ok", true);
     }
 
-    /** FR-04 推送 WI 分支到绑定远程 */
+    /** FR-04 推送 WI 分支到绑定远程；CAP-24：响应含 identitySource（PERSONAL/INTEGRATION） */
     @PostMapping("/work-items/{wid}/push")
     public Map<String, Object> pushBranch(@PathVariable String pid, @PathVariable String wid) {
-        String branch = service.pushWorkItemBranch(pid, wid);
-        return Map.of("ok", true, "branch", branch);
+        IntegrationService.PushResult result = service.pushWorkItemBranch(pid, wid);
+        return Map.of("ok", true, "branch", result.branch(), "identitySource", result.identitySource());
     }
 
     /** FR-05 创建/复用 MR，登记 External Link */

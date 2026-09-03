@@ -98,7 +98,7 @@ class RepoCloneServiceTest {
 
     static class FakeIntegrationService extends IntegrationService {
         FakeIntegrationService() {
-            super(null, null, null, null, null, null, null, null, null, null, null, null,
+            super(null, null, null, null, null, null, null, null, null, null, null, null, null,
                     java.util.List.of());
         }
 
