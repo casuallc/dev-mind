@@ -50,6 +50,14 @@ Windows 办公机普遍在 NAT/防火墙后、入站不可达，因此采用**�
 - **FR-08 runner 瘦包**：独立可执行 jar（只含 session runtime 依赖子集 + WS 客户端），
   `java -jar devmind-agent-runner.jar --config agent.yml` 启动；配置项 =
   serverUrl / token / 项目路径映射 / claude 路径 / 并发上限。
+- **FR-09 runner 版本维护与手动升级**（2026-09-03 补做）：节点页「Runner 包」页签上传
+  `devmind-agent-runner.jar` 由服务端托管（**全局单份，上传即替换**；版本从包内
+  `runner-version.txt` 提取、sha256 入库；强校验含 `SelfUpdater.class`，无自升级能力的
+  旧包拒收）。节点列表行内「升级」按钮（仅 ONLINE）→ 服务端 WS 下发 upgrade 指令 →
+  runner 校验后由 **SelfUpdater 独立进程**完成换包重启（Windows 运行中 jar 不可覆盖）。
+  **有活跃会话时 runner 回 busy 推迟，不杀会话**。在线老版本 runner 不认识 upgrade 帧，
+  需先手工部署到含升级能力的基线版本；升级后日志落 jar 旁 `runner.log`（首次手工启动
+  仍是控制台）。hello 版本自动比对升级仍不做。
 
 ## 3. 插件化接口
 
@@ -70,6 +78,8 @@ Windows 办公机普遍在 NAT/防火墙后、入站不可达，因此采用**�
 ```
 agent_nodes(id, name, token_hash, os, labels, capabilities, runner_version,
             status[ONLINE|OFFLINE|DISABLED], last_heartbeat_at, created_at)
+runner_packages(id=1 单行, version, sha256, size_bytes, original_filename,
+                uploaded_at, uploaded_by)        # FR-09：全局单份托管包，jar 本体在 data/agent-runner/runner.jar
 sessions  ── + agent_node_id (NULL=本地)
 projects  ── + agent_node_id (NULL=本机；项目默认执行节点，会话创建未指定时继承)
 ```
@@ -78,7 +88,9 @@ WS 协议（JSON 帧， runner ⇄ 服务端双向）：
 
 ```
 ↑ register{name,os,labels,capabilities,version} / heartbeat / event{sessionId,seq,...} / state{sessionId,state,reason} / exit{sessionId,code,ok,summary}
+  upgrade_ack{ok, reason?, activeSessions?}    # FR-09：busy=有活跃会话推迟；ok=true 后 runner 即退出换包
 ↓ launch{sessionId,workdir,taskSpec,model,permissionMode} / input{sessionId,text} / authorize{sessionId,requestId,accepted,scope} / kill{sessionId} / suspend{sessionId}
+  upgrade{version, sha256, sizeBytes}          # FR-09：手动触发；runner 下载校验后才回 ack
 ```
 
 ## 6. API 概要
@@ -89,6 +101,11 @@ GET    /api/agent-nodes                 节点列表（含在线状态/最近心
 POST   /api/agent-nodes/{id}/disable | /enable | DELETE
 WS     /ws/agent                        runner 接入端点（token 认证）
 POST   /api/sessions                    现有端点 + agentNodeId?（缺省=本地）
+# FR-09 runner 包（上传/升级仅 ADMIN；下载 permitAll + 控制器内「节点token 或 登录态」双认证）
+POST   /api/agent-nodes/runner-package           multipart 上传替换（提取版本+sha256，强校验 SelfUpdater）
+GET    /api/agent-nodes/runner-package           当前包元数据（无包 404）
+GET    /api/agent-nodes/runner-package/download  jar 流（runner 升级用 ?token=；管理页用 JWT）
+POST   /api/agent-nodes/{id}/upgrade             手动升级，恒 200：status=ACCEPTED/BUSY/ALREADY_LATEST/REJECTED
 ```
 
 ## 7. 验收标准
@@ -101,5 +118,5 @@ POST   /api/sessions                    现有端点 + agentNodeId?（缺省=本
 
 ## 8. MVP 范围（暂不做）
 
-标签调度/负载均衡（创建会话手工选节点）、runner 自动升级、jlink 免安装包、
-代码同步（worktree 由节点机自理）、多 agent 种类的能力协商 UI、节点间会话迁移。
+标签调度/负载均衡（创建会话手工选节点）、hello 版本自动比对升级（FR-09 已做手动升级）、
+jlink 免安装包、代码同步（worktree 由节点机自理）、多 agent 种类的能力协商 UI、节点间会话迁移。
