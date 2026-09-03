@@ -204,10 +204,14 @@ public class SessionManagerService {
             taskSpec = renderTemplate(req.templateCode(), req.taskSpec(), project);
         }
 
-        // CAP-21：有效执行节点 = 请求显式指定优先，空则继承项目默认节点（null = 本机）
+        // CAP-21：有效执行节点优先级 = 请求显式指定 > 项目默认 > 平台默认（agent_nodes.is_default），
+        // 全空 = 本机。平台默认适配「服务端部署在无 AI 能力的机器」场景（节点离线时 launch 409 报错，
+        // 不静默回落本机起失败进程）
         String agentNodeId = req.agentNodeId() != null && !req.agentNodeId().isBlank()
                 ? req.agentNodeId()
-                : (project != null ? project.agentNodeId() : null);
+                : (project != null && project.agentNodeId() != null && !project.agentNodeId().isBlank()
+                        ? project.agentNodeId()
+                        : platformDefaultNodeId());
 
         // CAP-21：指定执行节点 = 远程会话——工作目录在节点侧（runner 项目路径映射），
         // 服务端不建 worktree、不做知识注入（知识注入依赖本地文件系统，远程暂不支持）
@@ -598,6 +602,12 @@ public class SessionManagerService {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "远程 agent 模块未装配，无法创建远程会话");
         }
         return connector;
+    }
+
+    /** CAP-21 FR-03：平台默认执行节点（无默认或 agent 模块未装配 = null，回落本机）。 */
+    private String platformDefaultNodeId() {
+        AgentNodeConnector connector = connectorProvider.getIfAvailable();
+        return connector != null ? connector.defaultNodeId() : null;
     }
 
     // ---------------- CAP-21 远程事件入口（RemoteAgentBridge 路由至此） ----------------
