@@ -1,6 +1,6 @@
 # CAP-24 用户级 Git 身份与凭证
 
-> 能力 ID：CAP-24 ｜ 分类：底座 ｜ 状态：需求定稿（2026-09-03） ｜ 日期：2026-09-03
+> 能力 ID：CAP-24 ｜ 分类：底座 ｜ 状态：已落地（2026-09-03：integration 凭证 CRUD + SPI、session env 注入、push 个人优先、前端凭证页，单测 6 项通过） ｜ 日期：2026-09-03
 
 ## 1. 目的
 
@@ -43,18 +43,21 @@ CAP-18/23 的凭证模型是**平台级共享**：Integration 实例（PAT）由
   字段：label、baseUrl（host 用于匹配）、PAT、gitAuthorName、gitAuthorEmail。
   任何登录用户可管理**自己的**记录（user_id 隔离，ADMIN 也不能读他人明文——
   密文任何视图不回显）。
-- **FR-02 连通性自检**：`POST /api/me/git-credentials/{id}/test` 执行
-  `git ls-remote <baseUrl 派生的探测地址>`（内存注入 token，输出脱敏），
-  返回成功/失败摘要。
+- **FR-02 连通性自检**：`POST /api/me/git-credentials/{id}/test`，body 携带 `remoteUrl`
+  （host 必须与凭证 baseUrl host 一致），服务端以该凭证 PAT 执行 `git ls-remote`
+  （内存注入 token，输出脱敏），返回成功/失败摘要。
 - **FR-03 会话提交身份注入**：创建会话时按 `createdBy` + 主库 remoteUrl host 解析
-  身份（个人凭证 → 回退 displayName/username），经 `SessionExecutor.LaunchContext`
-  注入子进程环境变量；远程 Agent 节点（CAP-21）会话同理由 runner 透传 env。
+  身份（个人凭证 → 回退 displayName/username），经 `SessionExecutor.LaunchContext.env`
+  注入子进程环境变量（GIT_AUTHOR_NAME/EMAIL、GIT_COMMITTER_NAME/EMAIL）；
+  恢复会话（resume）以原创建人身份重新解析；远程 Agent 节点（CAP-21）经
+  `AgentLaunchCommand.env` 下发，runner 透传给子进程（旧版 runner 忽略该字段，优雅降级）。
 - **FR-04 push 身份优先个人**：CAP-18 `pushBranch`（WI 分支推送）改为先取触发用户的
   个人 PAT（host 匹配），命中则用个人身份 push；未命中回退项目 Integration（现状行为）。
-  执行结果视图标注实际所用身份来源（PERSONAL / INTEGRATION）。
-- **FR-05 身份解析 SPI**：`devmind-common` 新增 `GitIdentitySpi`（按 userId + repoHost
-  返回 token/authorName/authorEmail 三元组，token 仅内存），devmind-integration 实现；
-  消费方（session、integration 自身 push 路径）以 `ObjectProvider` 探测注入，不成环。
+  执行结果响应与审计标注实际所用身份来源（PERSONAL / INTEGRATION）。
+- **FR-05 身份解析 SPI**：`devmind-common` 新增 `GitIdentityProvider`
+  （按 username + repoHost 返回 GitAuthor(name, email)，email 可空 = 仅注入 name），
+  devmind-integration 实现；消费方（devmind-session）以 `ObjectProvider` 探测注入，不成环。
+  **token 不出 SPI**——会话侧只需要署名，push 用 token 在 integration 模块内部解析。
 
 ## 4. 校验规则
 
