@@ -602,6 +602,10 @@ public class SkillService {
 
     /** 解析 SKILL.md：--- frontmatter（snakeyaml）--- + 正文；name/description 必填并复用结构化校验。 */
     private ParsedPackage parseSkillMd(String text, List<ParsedFile> files) {
+        // UTF-8 BOM 兼容（Windows 编辑器常见）
+        if (!text.isEmpty() && text.charAt(0) == 0xFEFF) {
+            text = text.substring(1);
+        }
         String[] lines = text.replace("\r\n", "\n").split("\n", -1);
         if (lines.length < 2 || !lines[0].trim().equals("---")) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "SKILL.md 缺少 frontmatter（须以 --- 开头）");
@@ -624,7 +628,13 @@ public class SkillService {
         } catch (Exception ex) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "SKILL.md frontmatter YAML 解析失败: " + ex.getMessage());
         }
-        String name = validateName(fm.get("name") == null ? null : String.valueOf(fm.get("name")));
+        Object nameRaw = fm.get("name");
+        if (nameRaw == null || String.valueOf(nameRaw).isBlank()) {
+            String keys = fm.isEmpty() ? "（空）" : String.join(", ", fm.keySet());
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "SKILL.md frontmatter 缺少 name 字段（须含 name/description，当前解析到的键: " + keys + "）");
+        }
+        String name = validateName(String.valueOf(nameRaw));
         String description = validateDescription(
                 fm.get("description") == null ? null : String.valueOf(fm.get("description")));
         Map<String, String> extra = new LinkedHashMap<>();
