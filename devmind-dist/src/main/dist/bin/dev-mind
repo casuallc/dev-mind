@@ -142,7 +142,7 @@ do_stop() {
     if ! is_running; then
         echo "${APP_NAME} is not running"
         rm -f "$PID_FILE"
-        exit 0
+        return 0
     fi
     local pid waited=0
     pid="$(get_pid)"
