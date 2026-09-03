@@ -58,6 +58,10 @@ public class ProjectEntity {
     @Column(name = "auto_regression_on_deploy")
     private Boolean autoRegressionOnDeploy;
 
+    /** CAP-21：默认执行节点（agent_nodes.id；null = 本机），创建会话未显式指定节点时继承 */
+    @Column(name = "agent_node_id", length = 64)
+    private String agentNodeId;
+
     /** 项目上下文摘要（FR-07，可人工修正） */
     @Lob
     @Column(name = "context_summary")
@@ -100,6 +104,8 @@ public class ProjectEntity {
     public void setApiDocSource(String apiDocSource) { this.apiDocSource = apiDocSource; }
     public Boolean getAutoRegressionOnDeploy() { return autoRegressionOnDeploy; }
     public void setAutoRegressionOnDeploy(Boolean autoRegressionOnDeploy) { this.autoRegressionOnDeploy = autoRegressionOnDeploy; }
+    public String getAgentNodeId() { return agentNodeId; }
+    public void setAgentNodeId(String agentNodeId) { this.agentNodeId = agentNodeId; }
     public String getContextSummary() { return contextSummary; }
     public void setContextSummary(String contextSummary) { this.contextSummary = contextSummary; }
     public Instant getSummaryGeneratedAt() { return summaryGeneratedAt; }

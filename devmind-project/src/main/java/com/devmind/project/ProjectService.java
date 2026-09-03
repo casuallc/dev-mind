@@ -218,6 +218,7 @@ public class ProjectService {
         e.setCloneStatus(clone ? ProjectRepoEntity.CLONE_CLONING : null);
         e.setApiDocSource(blankToNull(req.apiDocSource()));
         e.setAutoRegressionOnDeploy(req.autoRegressionOnDeploy() != null && req.autoRegressionOnDeploy());
+        e.setAgentNodeId(blankToNull(req.agentNodeId()));
         e.setOwnerId(identityService.currentActor());
                 e.setCreatedBy(identityService.currentActor());
         Instant now = Instant.now();
@@ -297,6 +298,8 @@ public class ProjectService {
         }
         if (req.apiDocSource() != null) e.setApiDocSource(blankToNull(req.apiDocSource()));
         if (req.autoRegressionOnDeploy() != null) e.setAutoRegressionOnDeploy(req.autoRegressionOnDeploy());
+        // CAP-21：不传 = 保持，空串 = 清除默认节点回本机（同 apiDocSource 约定）
+        if (req.agentNodeId() != null) e.setAgentNodeId(blankToNull(req.agentNodeId()));
         e.setUpdatedAt(Instant.now());
         projectRepo.save(e);
         return toView(e);
@@ -895,14 +898,15 @@ public class ProjectService {
     }
 
     private Project toRecord(ProjectEntity e) {
-        return new Project(e.getId(), e.getName(), e.getPath(), e.getDefaultBranch(), splitTags(e.getTags()));
+        return new Project(e.getId(), e.getName(), e.getPath(), e.getDefaultBranch(), splitTags(e.getTags()),
+                e.getAgentNodeId());
     }
 
     private ProjectView toView(ProjectEntity e) {
         return new ProjectView(e.getId(), e.getName(), e.getPath(), e.getDefaultBranch(),
                 splitTags(e.getTags()), e.getDescription(), e.getStatus(), e.getSourceType(), e.getCloneStatus(),
                 e.getApiDocSource(),
-                e.getAutoRegressionOnDeploy(), e.getContextSummary(), e.getSummaryGeneratedAt(),
+                e.getAutoRegressionOnDeploy(), e.getAgentNodeId(), e.getContextSummary(), e.getSummaryGeneratedAt(),
                 e.getOwnerId(), e.getCreatedAt(), e.getUpdatedAt());
     }
 

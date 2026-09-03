@@ -33,6 +33,8 @@ Windows 办公机普遍在 NAT/防火墙后、入站不可达，因此采用**�
   创建会话指定目标节点 → 服务端经节点连接下发 `launch` 指令
   （sessionId / workdir / taskSpec / model / permissionMode）。
   节点离线时创建请求直接失败（409 + 明确提示），不产生挂死会话。
+  **项目可配默认执行节点**（`projects.agent_node_id`，空 = 本机）：创建会话未显式指定节点时
+  继承项目默认，显式指定优先。
 - **FR-04 事件回传与中继**：runner 本地完成 stream-json 解析，把 `SessionEvent`
   （含 state 翻转）流式回传；服务端中继三处：落库（`session_events`）、
   WS 广播给前端订阅者、驱动服务端会话状态机。前端对本地/远程会话**无感知**，
@@ -69,6 +71,7 @@ Windows 办公机普遍在 NAT/防火墙后、入站不可达，因此采用**�
 agent_nodes(id, name, token_hash, os, labels, capabilities, runner_version,
             status[ONLINE|OFFLINE|DISABLED], last_heartbeat_at, created_at)
 sessions  ── + agent_node_id (NULL=本地)
+projects  ── + agent_node_id (NULL=本机；项目默认执行节点，会话创建未指定时继承)
 ```
 
 WS 协议（JSON 帧， runner ⇄ 服务端双向）：

@@ -134,7 +134,7 @@ class ProjectServiceCloneTest {
 
     private ProjectRequest cloneRequest(String remoteUrl, Long integrationId) {
         return new ProjectRequest("demo", null, "CLONE", remoteUrl, integrationId,
-                "master", List.of(), null, null, null, null);
+                "master", List.of(), null, null, null, null, null);
     }
 
     @Test
@@ -191,7 +191,7 @@ class ProjectServiceCloneTest {
         ProjectView view = service.create(cloneRequest("https://gitlab.example.com/g/r.git", null));
         var ex = assertThrows(DevMindException.class, () -> service.update(view.id(),
                 new ProjectRequest("demo", "D:/somewhere", null, null, null,
-                        null, null, null, null, null, null)));
+                        null, null, null, null, null, null, null)));
         assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
     }
 
@@ -227,7 +227,7 @@ class ProjectServiceCloneTest {
     void localProjectStillRequiresGitRepoPath() {
         var ex = assertThrows(DevMindException.class, () -> service.create(
                 new ProjectRequest("local-demo", tempDir.resolve("not-a-repo").toString(), null, null, null,
-                        null, null, null, null, null, null)));
+                        null, null, null, null, null, null, null)));
         assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
         assertTrue(events.published.isEmpty());
     }
@@ -236,7 +236,7 @@ class ProjectServiceCloneTest {
     void updateCloneProjectRemoteUrlMirrorsToPrimaryRepo() {
         ProjectView project = service.create(cloneRequest("https://gitlab.example.com/g/r.git", null));
         service.update(project.id(), new ProjectRequest("demo", null, null,
-                "https://gitlab.example.com/g/r2.git", 9L, null, null, null, null, null, null));
+                "https://gitlab.example.com/g/r2.git", 9L, null, null, null, null, null, null, null));
         ProjectRepoEntity primary = repos.store.values().stream()
                 .filter(r -> Boolean.TRUE.equals(r.getIsPrimary())).findFirst().orElseThrow();
         assertEquals("https://gitlab.example.com/g/r2.git", primary.getRemoteUrl());

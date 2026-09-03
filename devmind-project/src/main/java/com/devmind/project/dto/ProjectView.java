@@ -18,6 +18,8 @@ public record ProjectView(
         String cloneStatus,
         String apiDocSource,
         Boolean autoRegressionOnDeploy,
+        /** CAP-21：默认执行节点 id（null = 本机） */
+        String agentNodeId,
         String contextSummary,
         Instant summaryGeneratedAt,
         String ownerId,

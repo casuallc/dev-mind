@@ -204,9 +204,14 @@ public class SessionManagerService {
             taskSpec = renderTemplate(req.templateCode(), req.taskSpec(), project);
         }
 
+        // CAP-21：有效执行节点 = 请求显式指定优先，空则继承项目默认节点（null = 本机）
+        String agentNodeId = req.agentNodeId() != null && !req.agentNodeId().isBlank()
+                ? req.agentNodeId()
+                : (project != null ? project.agentNodeId() : null);
+
         // CAP-21：指定执行节点 = 远程会话——工作目录在节点侧（runner 项目路径映射），
         // 服务端不建 worktree、不做知识注入（知识注入依赖本地文件系统，远程暂不支持）
-        boolean remote = req.agentNodeId() != null && !req.agentNodeId().isBlank();
+        boolean remote = agentNodeId != null && !agentNodeId.isBlank();
 
         // P1-3：会话只面向 Workspace 接口，本地实现为 git worktree（远程/容器预留）
         Workspace workspace = null;
@@ -230,11 +235,11 @@ public class SessionManagerService {
         RemoteSessionRuntime remoteRt = null;
         if (remote) {
             AgentNodeConnector connector = requireConnector();
-            remoteRt = new RemoteSessionRuntime(id, req.agentNodeId(), connector, eventSaver, listener, props);
+            remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector, eventSaver, listener, props);
             // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
             runtimes.put(id, remoteRt);
             try {
-                connector.launch(req.agentNodeId(), new AgentLaunchCommand(
+                connector.launch(agentNodeId, new AgentLaunchCommand(
                         id, project != null ? project.id() : null, taskSpec, model, pm));
             } catch (Exception e) {
                 runtimes.remove(id);
@@ -265,7 +270,7 @@ public class SessionManagerService {
         ent.setBaseBranch(baseBranch);
         ent.setStatus(SessionState.RUNNING.name());
         ent.setWorktreePath(worktree != null ? worktree.toString() : null);
-        ent.setAgentNodeId(remote ? req.agentNodeId() : null);
+        ent.setAgentNodeId(remote ? agentNodeId : null);
         ent.setPid(proc != null ? proc.pid() : null);
         ent.setModel(model);
         ent.setCreatedBy(identityService.currentActor());

@@ -20,5 +20,7 @@ public record ProjectRequest(
         String description,
         String status,
         String apiDocSource,
-        Boolean autoRegressionOnDeploy) {
+        Boolean autoRegressionOnDeploy,
+        /** CAP-21：默认执行节点 id（不传=保持不变，空串=清除回本机） */
+        String agentNodeId) {
 }
