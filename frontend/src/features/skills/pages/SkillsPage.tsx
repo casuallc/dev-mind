@@ -6,6 +6,7 @@ import {
   EditOutlined,
   FileAddOutlined,
   FolderOpenOutlined,
+  ImportOutlined,
   ReloadOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
@@ -17,6 +18,7 @@ import { deleteSkill, getSkill, listSkills, updateSkillStatus } from '../api'
 import type { Skill, SkillDetail } from '../types'
 import SkillFormDrawer from '../components/SkillFormDrawer'
 import SkillFilesDrawer from '../components/SkillFilesDrawer'
+import SkillImportModal from '../components/SkillImportModal'
 import { fmtTime } from '../../../shared/utils/format'
 
 const scopeTag = (s: string) =>
@@ -39,6 +41,7 @@ export default function SkillsPage() {
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<SkillDetail | null>(null)
   const [filesSkill, setFilesSkill] = useState<Skill | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
 
   const projectName = useMemo(() => {
     const m = new Map(projects.map((p) => [p.id, p.name]))
@@ -175,9 +178,14 @@ export default function SkillsPage() {
       title="Skill 管理"
       extra={
         canWrite() && (
-          <Button type="primary" icon={<FileAddOutlined />} onClick={openCreate}>
-            新增 Skill
-          </Button>
+          <Space>
+            <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
+              导入
+            </Button>
+            <Button type="primary" icon={<FileAddOutlined />} onClick={openCreate}>
+              新增 Skill
+            </Button>
+          </Space>
         )
       }
     >
@@ -267,6 +275,12 @@ export default function SkillsPage() {
         open={filesSkill != null}
         skill={filesSkill}
         onClose={() => setFilesSkill(null)}
+      />
+      <SkillImportModal
+        open={importOpen}
+        projects={projects}
+        onClose={() => setImportOpen(false)}
+        onSaved={load}
       />
     </Card>
   )

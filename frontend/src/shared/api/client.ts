@@ -53,7 +53,9 @@ function forceReLogin() {
 
 async function rawRequest(path: string, init?: RequestInit): Promise<Response> {
   const token = getAccessToken()
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const headers: Record<string, string> = {}
+  // FormData 由浏览器自带 boundary 的 Content-Type，不能手设
+  if (!(init?.body instanceof FormData)) headers['Content-Type'] = 'application/json'
   if (token) headers.Authorization = `Bearer ${token}`
   return fetch(`${BASE}${path}`, { ...init, headers: { ...headers, ...(init?.headers as object) } })
 }
@@ -85,4 +87,7 @@ export const api = {
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PUT', body: JSON.stringify(body ?? {}) }),
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  /** multipart 上传（FormData，Content-Type 由浏览器带 boundary） */
+  upload: <T>(path: string, form: FormData) =>
+    request<T>(path, { method: 'POST', body: form }),
 }

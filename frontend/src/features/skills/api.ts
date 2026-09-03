@@ -57,3 +57,19 @@ export const deleteSkillFile = (skillId: string, fileId: string) =>
 
 export const exportSkillPackages = (ids: string[]) =>
   api.get<SkillPackage>(`/skills/export?ids=${ids.map(encodeURIComponent).join(',')}`)
+
+// ---------------- 导入 ----------------
+
+/** 导入 skill zip 压缩包：同名默认 409，overwrite=true 覆盖本体与全部附件 */
+export const importSkillPackage = (params: {
+  scope: string
+  projectId?: string
+  overwrite: boolean
+  file: File
+}) => {
+  const q = new URLSearchParams({ scope: params.scope, overwrite: String(params.overwrite) })
+  if (params.projectId) q.set('projectId', params.projectId)
+  const form = new FormData()
+  form.append('file', params.file)
+  return api.upload<Skill>(`/skills/import?${q.toString()}`, form)
+}
