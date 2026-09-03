@@ -50,10 +50,16 @@ Windows 办公机普遍在 NAT/防火墙后、入站不可达，因此采用**�
   「项目 → 本地路径」映射（runner 配置文件）；平台不做代码同步，仓库由节点机自行维护。
 - **FR-07 节点管理 UI**：`features/agent` 自包含目录——节点列表（在线状态/os/版本/
   最近心跳/运行中会话数）、生成注册 token、禁用/删除节点；创建会话表单加「执行节点」
-  下拉（默认本地）。
+  下拉（默认本地）。**一键安装脚本**（2026-09-03 补做）：创建节点对话框直接下载
+  Windows `.ps1` / Linux `.sh` 一键脚本（内嵌 serverUrl+token，前端生成，依赖下载端点的
+  节点 token 认证，后端零改动）；节点行内另提供参数化脚本（token 运行时传参）。
+  脚本流程 = 检查 java(21+) → 下载 runner 包 → 写 agent.properties → 后台常驻启动
+  （Windows `Start-Process -WindowStyle Hidden`，Linux `nohup`，日志落 runner.log）。
 - **FR-08 runner 瘦包**：独立可执行 jar（只含 session runtime 依赖子集 + WS 客户端），
-  `java -jar devmind-agent-runner.jar --config agent.yml` 启动；配置项 =
-  serverUrl / token / 项目路径映射 / claude 路径 / 并发上限。
+  `java -jar devmind-agent-runner.jar [agent.properties]` 启动（args[0] 为配置文件路径，
+  缺省 `./agent.properties`，properties 格式）；配置项 = serverUrl(必填) / token(必填) /
+  workDir / permissionMode / executor / 项目路径映射(project.<id>) / claude 路径(claudePath) /
+  并发上限(maxConcurrent)。
 - **FR-09 runner 版本维护与手动升级**（2026-09-03 补做）：节点页「Runner 包」页签上传
   `devmind-agent-runner.jar` 由服务端托管（**全局单份，上传即替换**；版本从包内
   `runner-version.txt` 提取、sha256 入库；强校验含 `SelfUpdater.class`，无自升级能力的
