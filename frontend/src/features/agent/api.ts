@@ -23,6 +23,14 @@ export function deleteAgentNode(id: number): Promise<void> {
   return api.del(`/agent-nodes/${id}`)
 }
 
+export function setAgentNodeDefault(id: number): Promise<AgentNode> {
+  return api.post<AgentNode>(`/agent-nodes/${id}/default`)
+}
+
+export function unsetAgentNodeDefault(id: number): Promise<AgentNode> {
+  return api.post<AgentNode>(`/agent-nodes/${id}/unset-default`)
+}
+
 // ---------------- FR-09 runner 包托管与手动升级 ----------------
 
 /** 当前托管包；未上传时后端 404，调用方 catch 视为 null */

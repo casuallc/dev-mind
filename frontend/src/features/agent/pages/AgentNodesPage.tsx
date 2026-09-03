@@ -14,7 +14,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, RocketOutlined, StarOutlined } from '@ant-design/icons'
 import {
   createAgentNode,
   deleteAgentNode,
@@ -22,6 +22,8 @@ import {
   enableAgentNode,
   getRunnerPackage,
   listAgentNodes,
+  setAgentNodeDefault,
+  unsetAgentNodeDefault,
   upgradeAgentNode,
 } from '../api'
 import type { AgentNode, IssuedNode, RunnerPackage } from '../types'
@@ -93,9 +95,38 @@ export default function AgentNodesPage() {
     }
   }
 
+  const onSetDefault = async (r: AgentNode, isDefault: boolean) => {
+    try {
+      if (isDefault) {
+        await setAgentNodeDefault(r.id)
+        message.success(`已将 ${r.name} 设为平台默认节点`)
+      } else {
+        await unsetAgentNodeDefault(r.id)
+        message.success(`已取消 ${r.name} 的平台默认`)
+      }
+      reload()
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '操作失败')
+    }
+  }
+
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 70 },
-    { title: '名称', dataIndex: 'name', width: 160 },
+    {
+      title: '名称',
+      dataIndex: 'name',
+      width: 200,
+      render: (s: string, r: AgentNode) => (
+        <Space size={4}>
+          {s}
+          {r.isDefault && (
+            <Tooltip title="平台默认执行节点：会话/项目未指定节点时调度到此">
+              <Tag color="blue">默认</Tag>
+            </Tooltip>
+          )}
+        </Space>
+      ),
+    },
     {
       title: '状态',
       dataIndex: 'status',
@@ -130,9 +161,25 @@ export default function AgentNodesPage() {
     {
       title: '操作',
       key: 'act',
-      width: 250,
+      width: 330,
       render: (_: unknown, r: AgentNode) => (
         <Space size={8}>
+          {r.isDefault ? (
+            <Button size="small" icon={<StarOutlined />} onClick={() => onSetDefault(r, false)}>
+              取消默认
+            </Button>
+          ) : (
+            <Tooltip title={r.status === 'DISABLED' ? '已禁用节点不能设为默认' : '会话/项目未指定节点时调度到该节点'}>
+              <Button
+                size="small"
+                icon={<StarOutlined />}
+                disabled={r.status === 'DISABLED'}
+                onClick={() => onSetDefault(r, true)}
+              >
+                设为默认
+              </Button>
+            </Tooltip>
+          )}
           {r.status === 'ONLINE' && (
             <Tooltip title={pkg ? undefined : '请先在「Runner 包」页签上传 runner 包'}>
               <Popconfirm
@@ -202,7 +249,7 @@ export default function AgentNodesPage() {
                   type="info"
                   showIcon
                   style={{ marginBottom: 12 }}
-                  message="节点 = 运行 devmind-agent-runner.jar 的远程机器（如 Windows 开发机）。在节点机上配置 agent.properties（serverUrl / token / project.<项目id>=本地路径），java -jar 启动后反向连接上线，创建会话时即可选择该节点执行。"
+                  message="节点 = 运行 devmind-agent-runner.jar 的远程机器（如 Windows 开发机）。在节点机上配置 agent.properties（serverUrl / token / project.<项目id>=本地路径），java -jar 启动后反向连接上线，创建会话时即可选择该节点执行。服务端本机没有 AI 能力（如未装 claude 的 Linux 服务器）时，将节点「设为默认」，之后所有未指定节点的会话都会自动调度到该节点。"
                 />
                 <Table<AgentNode>
                   rowKey="id"

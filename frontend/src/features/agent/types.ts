@@ -10,6 +10,8 @@ export interface AgentNode {
   labels?: string
   capabilities?: string
   runnerVersion?: string
+  /** 平台默认执行节点：会话/项目未指定节点时调度到此（全平台至多一个） */
+  isDefault?: boolean
   lastHeartbeatAt?: string
   createdAt?: string
 }

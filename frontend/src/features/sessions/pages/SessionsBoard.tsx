@@ -378,14 +378,17 @@ export default function SessionsBoard() {
           <Form.Item
             label="执行节点"
             name="agentNodeId"
-            extra="留空 = 跟随项目默认节点（无默认则本机）；选择远程节点后，会话在该节点机上运行（工作目录取节点的项目路径映射）"
+            extra="留空 = 跟随项目默认节点 → 平台默认节点 → 本机；选择远程节点后，会话在该节点机上运行（工作目录取节点的项目路径映射）"
           >
             <Select
-              placeholder="本机（默认）"
+              placeholder="跟随默认（项目 → 平台 → 本机）"
               allowClear
               options={agentNodes
                 .filter((n) => n.status === 'ONLINE')
-                .map((n) => ({ value: String(n.id), label: `${n.name} (${n.os ?? '远程节点'})` }))}
+                .map((n) => ({
+                  value: String(n.id),
+                  label: `${n.name} (${n.os ?? '远程节点'})${n.isDefault ? ' · 平台默认' : ''}`,
+                }))}
               notFoundContent="暂无在线节点（后台 → Agent 节点 注册）"
             />
           </Form.Item>
