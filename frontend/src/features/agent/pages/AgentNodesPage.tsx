@@ -14,7 +14,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined, RocketOutlined, StarOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, RocketOutlined, StarOutlined, WindowsOutlined, CodeOutlined, DownloadOutlined } from '@ant-design/icons'
 import {
   createAgentNode,
   deleteAgentNode,
@@ -28,6 +28,7 @@ import {
 } from '../api'
 import type { AgentNode, IssuedNode, RunnerPackage } from '../types'
 import RunnerPackagePanel from '../components/RunnerPackagePanel'
+import { buildLinuxInstallScript, buildWindowsInstallScript, downloadTextFile } from '../utils/installScript'
 import { fmtTime } from '../../../shared/utils/format'
 
 const statusColor: Record<string, string> = {
@@ -48,7 +49,18 @@ export default function AgentNodesPage() {
   const [upgrading, setUpgrading] = useState<number | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [issued, setIssued] = useState<IssuedNode | null>(null)
+  const [scriptNode, setScriptNode] = useState<AgentNode | null>(null) // 行内「安装脚本」参数化版弹窗
   const [form] = Form.useForm<{ name: string; labels?: string }>()
+
+  // 安装脚本生成参数:地址随当前访问入口走(同源部署/开发代理均适用)
+  const wsUrl = location.origin.replace(/^http/, 'ws') + '/ws/agent'
+  const downloadUrl = location.origin + '/api/agent-nodes/runner-package/download'
+  const downloadScripts = (token: string | null) => ({
+    windows: () =>
+      downloadTextFile('install-runner.ps1', buildWindowsInstallScript({ serverUrl: wsUrl, downloadUrl, token }), true),
+    linux: () =>
+      downloadTextFile('install-runner.sh', buildLinuxInstallScript({ serverUrl: wsUrl, downloadUrl, token })),
+  })
 
   const reload = () => {
     setLoading(true)
@@ -161,9 +173,14 @@ export default function AgentNodesPage() {
     {
       title: '操作',
       key: 'act',
-      width: 330,
+      width: 420,
       render: (_: unknown, r: AgentNode) => (
         <Space size={8}>
+          <Tooltip title="下载一键安装脚本(token 运行时传入),用于在新机器上安装 runner">
+            <Button size="small" icon={<DownloadOutlined />} onClick={() => setScriptNode(r)}>
+              安装脚本
+            </Button>
+          </Tooltip>
           {r.isDefault ? (
             <Button size="small" icon={<StarOutlined />} onClick={() => onSetDefault(r, false)}>
               取消默认
@@ -305,8 +322,61 @@ export default function AgentNodesPage() {
                 {`serverUrl=${location.origin.replace(/^http/, 'ws')}/ws/agent\ntoken=${issued.token}`}
               </Typography.Paragraph>
             </div>
+            <div>
+              <Typography.Text type="secondary">一键安装脚本（已内嵌 token，拷到目标机执行即上线）</Typography.Text>
+              <div>
+                <Space>
+                  <Button icon={<WindowsOutlined />} onClick={downloadScripts(issued.token).windows}>
+                    Windows (.ps1)
+                  </Button>
+                  <Button icon={<CodeOutlined />} onClick={downloadScripts(issued.token).linux}>
+                    Linux (.sh)
+                  </Button>
+                </Space>
+              </div>
+              <Typography.Paragraph type="secondary" style={{ marginTop: 4, marginBottom: 0 }}>
+                Windows：<Typography.Text code>powershell -ExecutionPolicy Bypass -File install-runner.ps1</Typography.Text>
+                ；Linux：<Typography.Text code>bash install-runner.sh</Typography.Text>
+                。脚本会检查 java(21+)、下载 runner 包、写配置并后台启动。
+              </Typography.Paragraph>
+              {!pkg && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ marginTop: 8 }}
+                  message="尚未上传 runner 包——脚本中的下载步骤会失败，请先在「Runner 包」页签上传。"
+                />
+              )}
+            </div>
           </Space>
         )}
+      </Modal>
+
+      <Modal
+        title={scriptNode ? `安装脚本：${scriptNode.name}` : '安装脚本'}
+        open={!!scriptNode}
+        footer={<Button type="primary" onClick={() => setScriptNode(null)}>关闭</Button>}
+        onCancel={() => setScriptNode(null)}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size={8}>
+          <Alert
+            type="info"
+            showIcon
+            message="参数化脚本不含 token（节点 token 仅创建时可见）。下载后在目标机执行时传入；若 token 已丢失请重建节点。"
+          />
+          <Space>
+            <Button icon={<WindowsOutlined />} onClick={downloadScripts(null).windows}>
+              Windows (.ps1)
+            </Button>
+            <Button icon={<CodeOutlined />} onClick={downloadScripts(null).linux}>
+              Linux (.sh)
+            </Button>
+          </Space>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+            Windows：<Typography.Text code>powershell -ExecutionPolicy Bypass -File install-runner.ps1 -Token dmag_xxx</Typography.Text>
+            ；Linux：<Typography.Text code>bash install-runner.sh dmag_xxx</Typography.Text>
+          </Typography.Paragraph>
+        </Space>
       </Modal>
     </div>
   )
