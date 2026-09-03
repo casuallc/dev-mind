@@ -8,19 +8,24 @@ import {
   Popconfirm,
   Space,
   Table,
+  Tabs,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons'
 import {
   createAgentNode,
   deleteAgentNode,
   disableAgentNode,
   enableAgentNode,
+  getRunnerPackage,
   listAgentNodes,
+  upgradeAgentNode,
 } from '../api'
-import type { AgentNode, IssuedNode } from '../types'
+import type { AgentNode, IssuedNode, RunnerPackage } from '../types'
+import RunnerPackagePanel from '../components/RunnerPackagePanel'
 import { fmtTime } from '../../../shared/utils/format'
 
 const statusColor: Record<string, string> = {
@@ -36,7 +41,9 @@ const statusColor: Record<string, string> = {
  */
 export default function AgentNodesPage() {
   const [nodes, setNodes] = useState<AgentNode[]>([])
+  const [pkg, setPkg] = useState<RunnerPackage | null>(null)
   const [loading, setLoading] = useState(false)
+  const [upgrading, setUpgrading] = useState<number | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [issued, setIssued] = useState<IssuedNode | null>(null)
   const [form] = Form.useForm<{ name: string; labels?: string }>()
@@ -47,6 +54,7 @@ export default function AgentNodesPage() {
       .then(setNodes)
       .catch((e) => message.error(`加载节点失败: ${e.message}`))
       .finally(() => setLoading(false))
+    getRunnerPackage().then(setPkg).catch(() => setPkg(null)) // 404 = 未上传
   }
 
   useEffect(() => {
@@ -69,6 +77,22 @@ export default function AgentNodesPage() {
     }
   }
 
+  const onUpgrade = async (r: AgentNode) => {
+    setUpgrading(r.id)
+    try {
+      const res = await upgradeAgentNode(r.id)
+      if (res.status === 'ACCEPTED') message.success(res.message)
+      else if (res.status === 'BUSY') message.warning(res.message)
+      else if (res.status === 'ALREADY_LATEST') message.info(res.message)
+      else message.error(res.message)
+      reload()
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '升级失败')
+    } finally {
+      setUpgrading(null)
+    }
+  }
+
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 70 },
     { title: '名称', dataIndex: 'name', width: 160 },
@@ -85,7 +109,17 @@ export default function AgentNodesPage() {
       width: 110,
       render: (s?: string) => s || '-',
     },
-    { title: 'runner 版本', dataIndex: 'runnerVersion', width: 120, render: (s?: string) => s || '-' },
+    {
+      title: 'runner 版本',
+      dataIndex: 'runnerVersion',
+      width: 150,
+      render: (s: string | undefined) => {
+        if (!s) return '-'
+        // 与托管包版本不一致 = 可升级，橙色提示
+        const outdated = pkg && s !== pkg.version
+        return <Tag color={outdated ? 'orange' : 'default'}>{s}</Tag>
+      },
+    },
     { title: '标签', dataIndex: 'labels', ellipsis: true, render: (s?: string) => s || '-' },
     {
       title: '最近心跳',
@@ -96,9 +130,27 @@ export default function AgentNodesPage() {
     {
       title: '操作',
       key: 'act',
-      width: 170,
+      width: 250,
       render: (_: unknown, r: AgentNode) => (
         <Space size={8}>
+          {r.status === 'ONLINE' && (
+            <Tooltip title={pkg ? undefined : '请先在「Runner 包」页签上传 runner 包'}>
+              <Popconfirm
+                title={`升级节点「${r.name}」？`}
+                description={`${r.runnerVersion ?? '-'} → ${pkg?.version ?? '-'}；有活跃会话时将推迟`}
+                onConfirm={() => onUpgrade(r)}
+              >
+                <Button
+                  size="small"
+                  icon={<RocketOutlined />}
+                  disabled={!pkg}
+                  loading={upgrading === r.id}
+                >
+                  升级
+                </Button>
+              </Popconfirm>
+            </Tooltip>
+          )}
           {r.status === 'DISABLED' ? (
             <Button size="small" onClick={async () => {
               await enableAgentNode(r.id)
@@ -139,19 +191,32 @@ export default function AgentNodesPage() {
           </Button>
         </Space>
       </Space>
-      <Alert
-        type="info"
-        showIcon
-        style={{ marginBottom: 12 }}
-        message="节点 = 运行 devmind-agent-runner.jar 的远程机器（如 Windows 开发机）。在节点机上配置 agent.properties（serverUrl / token / project.<项目id>=本地路径），java -jar 启动后反向连接上线，创建会话时即可选择该节点执行。"
-      />
-      <Table<AgentNode>
-        rowKey="id"
-        size="small"
-        loading={loading}
-        columns={columns}
-        dataSource={nodes}
-        pagination={false}
+      <Tabs
+        items={[
+          {
+            key: 'nodes',
+            label: '节点列表',
+            children: (
+              <>
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message="节点 = 运行 devmind-agent-runner.jar 的远程机器（如 Windows 开发机）。在节点机上配置 agent.properties（serverUrl / token / project.<项目id>=本地路径），java -jar 启动后反向连接上线，创建会话时即可选择该节点执行。"
+                />
+                <Table<AgentNode>
+                  rowKey="id"
+                  size="small"
+                  loading={loading}
+                  columns={columns}
+                  dataSource={nodes}
+                  pagination={false}
+                />
+              </>
+            ),
+          },
+          { key: 'package', label: 'Runner 包', children: <RunnerPackagePanel /> },
+        ]}
       />
 
       <Modal

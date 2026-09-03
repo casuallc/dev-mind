@@ -19,3 +19,23 @@ export interface IssuedNode {
   node: AgentNode
   token: string
 }
+
+/** FR-09 服务端托管的 runner 包（全局单份，上传即替换） */
+export interface RunnerPackage {
+  id: number
+  version: string
+  sha256: string
+  sizeBytes: number
+  originalFilename?: string
+  uploadedAt?: string
+  uploadedBy?: string
+}
+
+export type UpgradeStatus = 'ACCEPTED' | 'BUSY' | 'ALREADY_LATEST' | 'REJECTED'
+
+/** 手动升级结果（后端恒 200，业务结果看 status） */
+export interface UpgradeResult {
+  status: UpgradeStatus
+  message: string
+  activeSessions?: number
+}
