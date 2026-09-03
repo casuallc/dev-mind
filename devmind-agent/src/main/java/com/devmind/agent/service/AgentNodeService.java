@@ -62,7 +62,37 @@ public class AgentNodeService {
         AgentNodeEntity e = require(id);
         // 启用后状态回到 OFFLINE，等 runner 重连翻 ONLINE
         e.setStatus(disabled ? STATUS_DISABLED : STATUS_OFFLINE);
+        if (disabled) {
+            e.setDefault(false); // 禁用即摘除平台默认标记，避免会话调度落到不可用节点
+        }
         return AgentNodeView.from(repo.save(e));
+    }
+
+    /**
+     * 设为/取消平台默认执行节点（FR-03）：设定时清除其他节点标记，全平台至多一个。
+     * 会话与项目均未指定节点时调度到平台默认节点；无平台默认则回落本机。
+     */
+    public AgentNodeView setDefault(Long id, boolean isDefault) {
+        AgentNodeEntity e = require(id);
+        if (isDefault && STATUS_DISABLED.equals(e.getStatus())) {
+            throw new DevMindException(ErrorCode.CONFLICT, "节点已禁用，不能设为默认: " + e.getName());
+        }
+        if (isDefault) {
+            for (AgentNodeEntity other : repo.findByIsDefaultTrue()) {
+                if (!other.getId().equals(id)) {
+                    other.setDefault(false);
+                    repo.save(other);
+                }
+            }
+        }
+        e.setDefault(isDefault);
+        return AgentNodeView.from(repo.save(e));
+    }
+
+    /** 平台默认执行节点 id（无默认 = null）：会话调度优先级的最终远程兜底。 */
+    public String defaultNodeId() {
+        return repo.findByIsDefaultTrue().stream().findFirst()
+                .map(n -> String.valueOf(n.getId())).orElse(null);
     }
 
     public void delete(Long id) {

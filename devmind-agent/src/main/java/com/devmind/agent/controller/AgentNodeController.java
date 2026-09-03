@@ -80,6 +80,18 @@ public class AgentNodeController {
         return service.setDisabled(id, false);
     }
 
+    /** 设为平台默认执行节点（FR-03）：会话/项目未指定节点时的最终远程兜底，全平台至多一个。 */
+    @PostMapping("/{id}/default")
+    public AgentNodeView setDefault(@PathVariable Long id) {
+        return service.setDefault(id, true);
+    }
+
+    /** 取消平台默认执行节点：之后未指定节点的会话回落本机。 */
+    @PostMapping("/{id}/unset-default")
+    public AgentNodeView unsetDefault(@PathVariable Long id) {
+        return service.setDefault(id, false);
+    }
+
     @DeleteMapping("/{id}")
     public void delete(@PathVariable Long id) {
         registry.evict(id);

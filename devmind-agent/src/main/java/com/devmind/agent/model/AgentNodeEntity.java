@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.ColumnDefault;
 
 import java.time.Instant;
 
@@ -48,6 +49,11 @@ public class AgentNodeEntity {
     @Column(name = "last_heartbeat_at")
     private Instant lastHeartbeatAt;
 
+    /** 平台默认执行节点（全平台至多一个）：会话与项目均未指定节点时回落到此（FR-03） */
+    @Column(name = "is_default", nullable = false)
+    @ColumnDefault("false")
+    private boolean isDefault;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -69,6 +75,8 @@ public class AgentNodeEntity {
     public void setRunnerVersion(String runnerVersion) { this.runnerVersion = runnerVersion; }
     public Instant getLastHeartbeatAt() { return lastHeartbeatAt; }
     public void setLastHeartbeatAt(Instant lastHeartbeatAt) { this.lastHeartbeatAt = lastHeartbeatAt; }
+    public boolean isDefault() { return isDefault; }
+    public void setDefault(boolean isDefault) { this.isDefault = isDefault; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 }

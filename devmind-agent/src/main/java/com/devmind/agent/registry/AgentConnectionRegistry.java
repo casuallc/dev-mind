@@ -157,6 +157,11 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     }
 
     @Override
+    public String defaultNodeId() {
+        return nodeService.defaultNodeId();
+    }
+
+    @Override
     public void launch(String nodeId, AgentLaunchCommand cmd) {
         WebSocketSession ws = requireConnection(nodeId);
         CompletableFuture<LaunchAck> future = new CompletableFuture<>();

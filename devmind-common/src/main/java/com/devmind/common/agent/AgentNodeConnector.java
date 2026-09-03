@@ -12,6 +12,12 @@ public interface AgentNodeConnector {
     boolean isOnline(String nodeId);
 
     /**
+     * 平台默认执行节点 id（agent_nodes.is_default；无默认返回 null）。
+     * 会话调度兜底链：显式指定 > 项目默认 > 平台默认 > 本机。
+     */
+    String defaultNodeId();
+
+    /**
      * 下发 launch 并阻塞等 runner ack（超时/失败/离线抛 DevMindException）。
      * 成功返回表示 runner 侧子进程已拉起。
      */
