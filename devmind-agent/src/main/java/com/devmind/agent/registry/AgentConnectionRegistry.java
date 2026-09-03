@@ -42,6 +42,10 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private record LaunchAck(boolean ok, String error) {
     }
 
+    /** upgrade 指令 ack（CAP-21 FR-09）：reason=busy 时 activeSessions 为活跃会话数。 */
+    public record UpgradeAck(boolean ok, String reason, int activeSessions) {
+    }
+
     private final AgentNodeService nodeService;
     private final AgentProperties props;
     private final ObjectMapper mapper;
@@ -53,6 +57,8 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private final Map<String, Long> lastSeen = new ConcurrentHashMap<>();
     /** sessionId → launch ack 等待者 */
     private final Map<String, CompletableFuture<LaunchAck>> pendingLaunches = new ConcurrentHashMap<>();
+    /** nodeId → upgrade ack 等待者（同节点同时只允许一个升级） */
+    private final Map<String, CompletableFuture<UpgradeAck>> pendingUpgrades = new ConcurrentHashMap<>();
 
     public AgentConnectionRegistry(AgentNodeService nodeService, AgentProperties props,
                                    ObjectMapper mapper, ObjectProvider<AgentEventListener> listenerProvider) {
@@ -84,6 +90,11 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         lastSeen.remove(nodeId);
         nodeService.markOffline(node.getId());
         log.info("agent 节点离线: id={} name={}", nodeId, node.getName());
+        // 断线即失败进行中的升级等待（升级中的 runner 断连属预期：换包重启）
+        CompletableFuture<UpgradeAck> pending = pendingUpgrades.remove(nodeId);
+        if (pending != null) {
+            pending.complete(new UpgradeAck(false, "disconnect", 0));
+        }
         AgentEventListener listener = listenerProvider.getIfAvailable();
         if (listener != null) {
             listener.onAgentDisconnected(nodeId);
@@ -123,6 +134,13 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         CompletableFuture<LaunchAck> future = pendingLaunches.remove(sessionId);
         if (future != null) {
             future.complete(new LaunchAck(ok, error));
+        }
+    }
+
+    public void onUpgradeAck(String nodeId, boolean ok, String reason, int activeSessions) {
+        CompletableFuture<UpgradeAck> future = pendingUpgrades.remove(nodeId);
+        if (future != null) {
+            future.complete(new UpgradeAck(ok, reason, activeSessions));
         }
     }
 
@@ -199,6 +217,34 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     @Override
     public void sendSuspend(String nodeId, String sessionId) {
         sendCommand(nodeId, sessionId, "suspend");
+    }
+
+    /**
+     * 下发 upgrade 指令并同步等 ack（CAP-21 FR-09，镜像 launch 模式；ack 超时覆盖 runner 侧
+     * 下载+校验全程，故走独立的 upgradeAckTimeoutMs）。runner 忙碌时回 ok=false reason=busy。
+     */
+    public UpgradeAck sendUpgrade(Long nodeDbId, String version, String sha256, long sizeBytes) {
+        String nodeId = String.valueOf(nodeDbId);
+        WebSocketSession ws = requireConnection(nodeId);
+        CompletableFuture<UpgradeAck> future = new CompletableFuture<>();
+        if (pendingUpgrades.putIfAbsent(nodeId, future) != null) {
+            throw new DevMindException(ErrorCode.CONFLICT, "该节点已有进行中的升级");
+        }
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "upgrade");
+        frame.put("version", version);
+        frame.put("sha256", sha256);
+        frame.put("sizeBytes", sizeBytes);
+        try {
+            send(ws, frame);
+            return future.get(props.getUpgradeAckTimeoutMs(), TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "等待升级确认超时/异常（在线旧版本 runner 不认识 upgrade 帧，需先手工部署基线版本）: "
+                            + e.getMessage(), e);
+        } finally {
+            pendingUpgrades.remove(nodeId, future);
+        }
     }
 
     /** 节点被删除/禁用时主动断开其连接。 */

@@ -17,6 +17,11 @@
             <groupId>com.devmind</groupId>
             <artifactId>devmind-common</artifactId>
         </dependency>
+        <!-- FR-09：上传包记录上传人（IdentityService.currentActor）；传递引入 spring-security 供下载端点双认证判定 -->
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-auth</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>

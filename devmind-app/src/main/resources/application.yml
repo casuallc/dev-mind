@@ -24,6 +24,10 @@ spring:
     console:
       enabled: true
       path: /h2-console
+  servlet:
+    multipart:
+      max-file-size: 64MB        # CAP-21 FR-09 runner shaded jar 上传（Boot 默认 1MB 必超限）
+      max-request-size: 64MB
 
 devmind:
   auth:

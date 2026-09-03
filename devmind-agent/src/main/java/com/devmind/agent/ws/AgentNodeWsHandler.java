@@ -24,7 +24,7 @@ import java.util.Map;
  *
  * <p>上行帧：hello{os,capabilities,version,activeSessions[]} / heartbeat /
  * event{sessionId,type,content,source,timestamp,payload} / exit{sessionId,code} /
- * launched{sessionId,ok,error}（launch ack）。</p>
+ * launched{sessionId,ok,error}（launch ack）/ upgrade_ack{ok,reason,activeSessions}（FR-09 升级 ack）。</p>
  */
 @Component
 public class AgentNodeWsHandler extends TextWebSocketHandler {
@@ -105,6 +105,9 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
                     frame.path("code").asInt(-1));
             case "launched" -> registry.onLaunchAck(frame.path("sessionId").asText(""),
                     frame.path("ok").asBoolean(false), frame.path("error").asText(null));
+            case "upgrade_ack" -> registry.onUpgradeAck(String.valueOf(node.getId()),
+                    frame.path("ok").asBoolean(false), frame.path("reason").asText(null),
+                    frame.path("activeSessions").asInt(0));
             default -> log.debug("未知 runner 帧类型: {}", type);
         }
     }

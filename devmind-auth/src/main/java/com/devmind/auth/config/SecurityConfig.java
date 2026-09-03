@@ -52,6 +52,8 @@ public class SecurityConfig {
                         // CAP-20：API Key 管理仅 ADMIN（开放面 /open-api/** 由 OpenApiAuthFilter 独立认证，不走 JWT）
                         .requestMatchers("/api/open-keys", "/api/open-keys/**").hasRole("ADMIN")
                         // CAP-21：Agent 节点管理（含注册 token 签发）写操作仅 ADMIN；/ws/agent 由节点 token 自证
+                        // FR-09 runner 包下载：permitAll 放行，节点 token 或登录态由控制器内双重判定
+                        .requestMatchers(HttpMethod.GET, "/api/agent-nodes/runner-package/download").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/agent-nodes", "/api/agent-nodes/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/agent-nodes/**").hasRole("ADMIN")
                         // CAP-20：AI 智能接入（全自动 bypassPermissions 会话）仅 ADMIN 可发起
