@@ -16,7 +16,8 @@ import {
 } from 'antd'
 import {
   CloudUploadOutlined,
-  FileAddOutlined,
+  PlusOutlined,
+  ReloadOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
@@ -139,58 +140,77 @@ export default function DocsPage() {
   const templateOptions = templates.map((t) => ({ value: t.kind, label: KIND_LABEL[t.kind] }))
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
-      <Card size="small">
-        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-          <Space>
-            <Input
-              allowClear
-              prefix={<SearchOutlined />}
-              placeholder="检索标题/内容/标签"
-              style={{ width: 240 }}
-              value={searchQ}
-              onChange={(e) => setSearchQ(e.target.value)}
-              onPressEnter={() => load(kindFilter, statusFilter, searchQ)}
-            />
-            <Select
-              allowClear
-              placeholder="类型"
-              style={{ width: 120 }}
-              value={kindFilter || undefined}
-              onChange={(v) => { setKindFilter(v ?? ''); load(v ?? '', statusFilter) }}
-              options={Object.entries(KIND_LABEL).map(([value, label]) => ({ value, label }))}
-            />
-            <Select
-              allowClear
-              placeholder="状态"
-              style={{ width: 120 }}
-              value={statusFilter || undefined}
-              onChange={(v) => { setStatusFilter(v ?? ''); load(kindFilter, v ?? '') }}
-              options={Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label }))}
-            />
-          </Space>
+    <Card
+      title="文档管理"
+      extra={
+        <Space wrap>
+          <Input
+            allowClear
+            prefix={<SearchOutlined />}
+            placeholder="检索标题/内容/标签"
+            style={{ width: 220 }}
+            value={searchQ}
+            onChange={(e) => setSearchQ(e.target.value)}
+            onPressEnter={() => load(kindFilter, statusFilter, searchQ)}
+          />
+          <Select
+            allowClear
+            placeholder="类型"
+            style={{ width: 110 }}
+            value={kindFilter || undefined}
+            onChange={(v) => { setKindFilter(v ?? ''); load(v ?? '', statusFilter) }}
+            options={Object.entries(KIND_LABEL).map(([value, label]) => ({ value, label }))}
+          />
+          <Select
+            allowClear
+            placeholder="状态"
+            style={{ width: 110 }}
+            value={statusFilter || undefined}
+            onChange={(v) => { setStatusFilter(v ?? ''); load(kindFilter, v ?? '') }}
+            options={Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label }))}
+          />
+          <Button icon={<ReloadOutlined />} onClick={() => load()}>
+            刷新
+          </Button>
           {canWrite() && (
-            <Space>
+            <>
               <Button icon={<CloudUploadOutlined />} loading={pushing} onClick={onPush}>
                 推送到远端
               </Button>
-              <Button type="primary" icon={<FileAddOutlined />} onClick={openCreate}>
+              <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
                 新建文档
               </Button>
-            </Space>
+            </>
           )}
         </Space>
-      </Card>
-      <Card size="small">
-        <Table
-          size="small"
-          rowKey="id"
-          loading={loading}
-          columns={columns}
-          dataSource={docs}
-          pagination={{ pageSize: 20, showSizeChanger: false }}
-        />
-      </Card>
+      }
+    >
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+        平台文档库：按类型/状态筛选或全文检索需求、设计、API 文档，支持从模板一键创建，可推送到远端 git 仓库。
+      </Typography.Paragraph>
+      <Table
+        rowKey="id"
+        loading={loading}
+        columns={columns}
+        dataSource={docs}
+        pagination={false}
+        locale={{
+          emptyText: (
+            <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
+              <Typography.Text type="secondary">
+                暂无文档。点击「新建文档」从模板开始写第一篇。
+              </Typography.Text>
+              {canWrite() && (
+                <div>
+                  <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+                    新建文档
+                  </Button>
+                </div>
+              )}
+            </Space>
+          ),
+        }}
+      />
 
       <Drawer title="新建文档" open={createOpen} onClose={() => setCreateOpen(false)} width={640}
         footer={
@@ -220,6 +240,6 @@ export default function DocsPage() {
           </Form.Item>
         </Form>
       </Drawer>
-    </Space>
+    </Card>
   )
 }
