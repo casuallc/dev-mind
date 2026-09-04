@@ -9,10 +9,10 @@ import {
   Input,
   Modal,
   Popconfirm,
+  Segmented,
   Space,
   Spin,
   Table,
-  Tabs,
   Tag,
   Tooltip,
   Typography,
@@ -62,24 +62,11 @@ const downloadScripts = (token: string | null) => {
 }
 
 /**
- * CAP-21 后台页：Agent 节点管理（仅 ADMIN）。样式/交互对齐「服务器运维」：
- * Card + Tabs 外壳，表格只保留状态浏览，行内单一「管理」入口开抽屉做全部操作。
+ * CAP-21 后台页：Agent 节点管理（仅 ADMIN）。样式/交互对齐「会话模板/会话看板」：
+ * Card 标题 + Segmented 切换视图，表头 extra 放操作按钮，表格默认密度，行内「管理」开抽屉做全部操作。
  */
 export default function AgentNodesPage() {
-  return (
-    <Card size="small">
-      <Tabs
-        items={[
-          { key: 'nodes', label: '节点列表', children: <NodesTab /> },
-          { key: 'package', label: 'Runner 包', children: <RunnerPackagePanel /> },
-        ]}
-      />
-    </Card>
-  )
-}
-
-// ---------------- 节点列表 ----------------
-function NodesTab() {
+  const [view, setView] = useState<string>('nodes') // nodes | package
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [pkg, setPkg] = useState<RunnerPackage | null>(null)
   const [loading, setLoading] = useState(false)
@@ -166,7 +153,7 @@ function NodesTab() {
       key: 'act',
       width: 90,
       render: (_: unknown, r: AgentNode) => (
-        <Button size="small" type="primary" onClick={() => setDrawerId(r.id)}>
+        <Button size="small" onClick={() => setDrawerId(r.id)}>
           管理
         </Button>
       ),
@@ -174,40 +161,63 @@ function NodesTab() {
   ]
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size={12}>
-      <Space style={{ justifyContent: 'space-between', width: '100%' }}>
-        <Space>
-          <Typography.Text type="secondary">
-            节点 = 运行 devmind-agent-runner.jar 的远程机器。服务端本机没有 AI 能力时，把节点「设为默认」，未指定节点的会话即自动调度过去。
-          </Typography.Text>
-          <Button size="small" icon={<ReloadOutlined />} onClick={reload} />
+    <Card
+      title={
+        <Space size={12}>
+          <span>Agent 节点</span>
+          <Segmented
+            value={view}
+            onChange={setView}
+            options={[
+              { value: 'nodes', label: '节点列表' },
+              { value: 'package', label: 'Runner 包' },
+            ]}
+          />
         </Space>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-          新建节点
-        </Button>
-      </Space>
-      <Table<AgentNode>
-        rowKey="id"
-        size="small"
-        loading={loading}
-        columns={columns}
-        dataSource={nodes}
-        pagination={false}
-        locale={{
-          emptyText: (
-            <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
-              <Typography.Text type="secondary">
-                还没有 Agent 节点——先「新建节点」拿到 token，再在目标机执行一键安装脚本即可上线。
-              </Typography.Text>
-              <div>
-                <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-                  新建节点
-                </Button>
-              </div>
-            </Space>
-          ),
-        }}
-      />
+      }
+      extra={
+        view === 'nodes' ? (
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={reload}>
+              刷新
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              新建节点
+            </Button>
+          </Space>
+        ) : undefined
+      }
+    >
+      {view === 'nodes' ? (
+        <>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+            节点 = 运行 devmind-agent-runner.jar 的远程机器。服务端本机没有 AI 能力时，把节点「设为默认」，未指定节点的会话即自动调度过去。
+          </Typography.Paragraph>
+          <Table<AgentNode>
+            rowKey="id"
+            loading={loading}
+            columns={columns}
+            dataSource={nodes}
+            pagination={false}
+            locale={{
+              emptyText: (
+                <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
+                  <Typography.Text type="secondary">
+                    还没有 Agent 节点——先「新建节点」拿到 token，再在目标机执行一键安装脚本即可上线。
+                  </Typography.Text>
+                  <div>
+                    <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+                      新建节点
+                    </Button>
+                  </div>
+                </Space>
+              ),
+            }}
+          />
+        </>
+      ) : (
+        <RunnerPackagePanel />
+      )}
 
       <Modal
         title="新建 Agent 节点"
@@ -286,7 +296,7 @@ function NodesTab() {
           onChanged={reload}
         />
       )}
-    </Space>
+    </Card>
   )
 }
 
