@@ -94,7 +94,6 @@ export default function JiraSyncTab({ projectId }: Props) {
             jql: editing.jql ?? '',
             enabled: editing.enabled,
             pollIntervalSec: editing.pollIntervalSec,
-            firstSyncDays: editing.firstSyncDays,
           }
         : {
             integrationId: undefined,
@@ -102,7 +101,6 @@ export default function JiraSyncTab({ projectId }: Props) {
             jql: '',
             enabled: true,
             pollIntervalSec: 300,
-            firstSyncDays: 7,
           },
     )
   }, [editOpen, editing, form])
@@ -308,7 +306,7 @@ export default function JiraSyncTab({ projectId }: Props) {
             label="Jira 项目"
             name="jiraProjectKey"
             rules={[{ required: true, message: '请选择或输入 Jira 项目 key' }]}
-            extra="选中集成后自动列出可见项目；也可直接输入 key（如 PROJ）。换项目会清零水位线重新全量拉取"
+            extra="选中集成后自动列出可见项目；也可直接输入 key（如 PROJ）"
           >
             <AutoComplete
               placeholder="选择或输入项目 key"
@@ -321,19 +319,12 @@ export default function JiraSyncTab({ projectId }: Props) {
           <Form.Item
             label="附加 JQL 过滤"
             name="jql"
-            extra="可选，与 project 条件 AND 组合。如 issuetype in (Story, Bug) AND labels = ai"
+            extra="可选，与 project 条件 AND 组合；同步只按这两个条件过滤，不加其他规则。如 issuetype in (Story, Bug) AND labels = ai"
           >
             <Input placeholder="issuetype in (Story, Bug)" />
           </Form.Item>
           <Form.Item label="轮询间隔（秒）" name="pollIntervalSec" extra="最小 60，默认 300">
             <InputNumber min={60} max={86400} style={{ width: 160 }} />
-          </Form.Item>
-          <Form.Item
-            label="首次同步范围（天）"
-            name="firstSyncDays"
-            extra="首轮只拉近 N 天内有更新的 issue，防老项目全量灌入；0 = 不限（慎用）。已有水印后此值不再生效"
-          >
-            <InputNumber min={0} max={3650} style={{ width: 160 }} />
           </Form.Item>
           <Form.Item label="启用轮询" name="enabled" valuePropName="checked">
             <Switch />

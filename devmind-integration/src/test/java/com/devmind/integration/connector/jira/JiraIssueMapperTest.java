@@ -83,12 +83,4 @@ class JiraIssueMapperTest {
         assertNull(JiraIssueMapper.parseTime("不是时间"));
         assertNull(JiraIssueMapper.parseTime(null));
     }
-
-    @Test
-    void JQL时间字面量按系统时区格式化() {
-        String literal = JiraIssueMapper.toJqlTimeLiteral(Instant.parse("2026-08-28T01:00:00Z"));
-        // 与系统默认时区自洽，不断言具体时区值
-        assertEquals("yyyy/MM/dd HH:mm".length(), literal.length());
-        assertTrue(literal.matches("\\d{4}/\\d{2}/\\d{2} \\d{2}:\\d{2}"));
-    }
 }

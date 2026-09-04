@@ -7,7 +7,6 @@ import tools.jackson.databind.JsonNode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -152,12 +151,5 @@ public final class JiraIssueMapper {
                 return null;
             }
         }
-    }
-
-    /** 水印 → JQL 时间字面量（"yyyy/MM/dd HH:mm"，JQL 服务端时区语义） */
-    public static String toJqlTimeLiteral(Instant watermark) {
-        return DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm")
-                .withZone(ZoneOffset.systemDefault())
-                .format(watermark);
     }
 }

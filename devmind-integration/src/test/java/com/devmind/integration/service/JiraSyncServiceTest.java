@@ -43,7 +43,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * JiraSyncService 同步闭环单测（无 Spring 上下文）：
  * repo 用 JDK 动态代理内存 fake，RequirementService/IntegrationService 子类覆盖，
- * connector 喂队列页面。覆盖：首轮导入/幂等重放/托管字段刷新（本地字段不动）/失败不推水印/分页。
+ * connector 喂队列页面。覆盖：导入/幂等重放/托管字段刷新
+ * （本地字段不动）/失败收敛/分页；JQL 只含 project + 附加片段，无其他过滤。
  */
 class JiraSyncServiceTest {
 
@@ -256,7 +257,7 @@ class JiraSyncServiceTest {
     // ---------------- 用例 ----------------
 
     @Test
-    void 首轮导入建需求登记链接推进水印() {
+    void 首轮导入建需求登记链接() {
         connector.pages.add(page(0, 2, issue("PROJ-1", "登录页报错", T1), issue("PROJ-2", "导出失败", T2)));
 
         JiraSyncRunView result = service.doSync(1L);
@@ -286,8 +287,7 @@ class JiraSyncServiceTest {
         assertEquals("req-1", link.getInternalId());
         assertEquals("Open", link.getStatus());
         assertEquals("http://jira.local/browse/PROJ-1", link.getExternalUrl());
-        // 水印 = max(updated) 回拨 60s；运行状态落库
-        assertEquals(T2.minusSeconds(60), cfg.getLastWatermark());
+        // 运行状态落库
         assertNotNull(cfg.getLastSyncAt());
         assertNull(cfg.getLastError());
         // 审计 + 事件
@@ -350,14 +350,13 @@ class JiraSyncServiceTest {
     }
 
     @Test
-    void 连接器失败不推水印落错误发失败事件() {
+    void 连接器失败收敛错误发失败事件() {
         connector.failure = new DevMindException(ErrorCode.BAD_REQUEST, "拉取 Jira issue 失败：HTTP 401");
 
         JiraSyncRunView result = service.doSync(1L);
 
         assertNotNull(result.error());
         assertEquals(0, result.imported());
-        assertNull(cfg.getLastWatermark()); // 水印不动，下轮重拉
         assertNotNull(cfg.getLastError());
         assertEquals(List.of(false), integrationService.callOk);
         assertEquals(1, eventPublisher.events.size());
@@ -373,26 +372,16 @@ class JiraSyncServiceTest {
 
         assertEquals(3, result.imported());
         assertEquals(2, result.pages());
-        assertEquals(T2.minusSeconds(60), cfg.getLastWatermark());
     }
 
     @Test
-    void JQL拼装覆盖首轮与增量() {
-        // 首轮默认窗口 7 天（实体默认值），防老项目全量灌入
-        assertEquals("project = PROJ AND updated >= -7d ORDER BY created asc",
-                JiraSyncService.buildJql(cfg));
-
-        cfg.setFirstSyncDays(0); // 0 = 不限全量
-        assertEquals("project = PROJ ORDER BY created asc", JiraSyncService.buildJql(cfg));
-
-        cfg.setJql("issuetype in (Story, Bug) AND labels = ai");
+    void JQL拼装只含project与附加片段() {
+        assertEquals("project = PROJ ORDER BY created asc",
+                JiraSyncService.buildJql("PROJ", null));
+        assertEquals("project = PROJ ORDER BY created asc",
+                JiraSyncService.buildJql("PROJ", "  "));
         assertEquals("project = PROJ AND (issuetype in (Story, Bug) AND labels = ai) ORDER BY created asc",
-                JiraSyncService.buildJql(cfg));
-
-        cfg.setLastWatermark(T1);
-        String jql = JiraSyncService.buildJql(cfg);
-        assertTrue(jql.startsWith("project = PROJ AND (issuetype in (Story, Bug) AND labels = ai) AND updated >= \""));
-        assertTrue(jql.endsWith("ORDER BY updated asc"));
+                JiraSyncService.buildJql("PROJ", "issuetype in (Story, Bug) AND labels = ai"));
     }
 
     @Test

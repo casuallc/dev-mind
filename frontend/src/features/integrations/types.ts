@@ -40,7 +40,7 @@ export interface ExternalProject {
   defaultBranch?: string | null
 }
 
-/** Jira 同步配置（含运行状态） */
+/** Jira 同步配置（含运行状态）；同步只按 project + 附加 JQL 过滤，无其他条件 */
 export interface JiraSyncConfig {
   id: number
   integrationId: number
@@ -50,10 +50,7 @@ export interface JiraSyncConfig {
   jql?: string | null
   enabled: boolean
   pollIntervalSec: number
-  /** 首轮同步窗口（天），0 = 不限；仅无水印首轮生效 */
-  firstSyncDays: number
   lastSyncAt?: string | null
-  lastWatermark?: string | null
   lastImported?: number | null
   lastUpdatedCount?: number | null
   lastError?: string | null
@@ -67,7 +64,6 @@ export interface JiraSyncConfigInput {
   jql?: string
   enabled?: boolean
   pollIntervalSec?: number
-  firstSyncDays?: number
 }
 
 /** 一次同步运行结果 */

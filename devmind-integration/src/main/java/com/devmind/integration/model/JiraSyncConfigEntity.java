@@ -13,7 +13,8 @@ import java.time.Instant;
 /**
  * jira_sync_configs 表（CAP-19）：Jira → 平台的 issue 同步配置（单向只拉取）。
  * 一条配置 = 一个 JIRA 型 Integration + 内部项目 + Jira 项目 key + 附加 JQL；
- * 增量水印（last_watermark = 已处理的最大 updated，回拨 overlap）推进同步进度。
+ * 每轮按创建时所给条件（project + 附加 JQL）全量拉取，不加任何额外过滤，
+ * 重复由 external_links 幂等兜住。
  * 同项目对同一 Jira 实例仅一条配置（唯一约束）。
  */
 @Entity
@@ -25,10 +26,6 @@ public class JiraSyncConfigEntity {
     public static final int MAX_PAGES_PER_RUN = 20;
     /** 每页条数 */
     public static final int PAGE_SIZE = 100;
-    /** 水印回拨（防时钟/事务边界漏单；重复由 external_links 幂等兜住） */
-    public static final long WATERMARK_OVERLAP_SECONDS = 60;
-    /** 首轮同步窗口默认天数：只拉近 N 天有更新的 issue，防老项目全量灌入 */
-    public static final int DEFAULT_FIRST_SYNC_DAYS = 7;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -45,13 +42,9 @@ public class JiraSyncConfigEntity {
     @Column(name = "jira_project_key", nullable = false, length = 64)
     private String jiraProjectKey;
 
-    /** 附加 JQL 过滤片段（不含 project/updated/order by，如 "issuetype in (Story,Bug) AND labels = ai"） */
+    /** 附加 JQL 过滤片段（不含 project/order by，如 "issuetype in (Story,Bug) AND labels = ai"） */
     @Column(name = "jql", length = 1024)
     private String jql;
-
-    /** 首轮同步窗口（天）：0 = 不限（全量，慎用）；仅在无水印的首轮生效 */
-    @Column(name = "first_sync_days", nullable = false)
-    private int firstSyncDays = DEFAULT_FIRST_SYNC_DAYS;
 
     @Column(nullable = false)
     private boolean enabled = true;
@@ -63,10 +56,6 @@ public class JiraSyncConfigEntity {
     /** 上次实际执行时刻（错峰判断依据） */
     @Column(name = "last_sync_at")
     private Instant lastSyncAt;
-
-    /** 增量水印：已处理的最大 issue updated（已回拨 overlap） */
-    @Column(name = "last_watermark")
-    private Instant lastWatermark;
 
     @Column(name = "last_imported")
     private Integer lastImported;
@@ -94,16 +83,12 @@ public class JiraSyncConfigEntity {
     public void setJiraProjectKey(String jiraProjectKey) { this.jiraProjectKey = jiraProjectKey; }
     public String getJql() { return jql; }
     public void setJql(String jql) { this.jql = jql; }
-    public int getFirstSyncDays() { return firstSyncDays; }
-    public void setFirstSyncDays(int firstSyncDays) { this.firstSyncDays = firstSyncDays; }
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public int getPollIntervalSec() { return pollIntervalSec; }
     public void setPollIntervalSec(int pollIntervalSec) { this.pollIntervalSec = pollIntervalSec; }
     public Instant getLastSyncAt() { return lastSyncAt; }
     public void setLastSyncAt(Instant lastSyncAt) { this.lastSyncAt = lastSyncAt; }
-    public Instant getLastWatermark() { return lastWatermark; }
-    public void setLastWatermark(Instant lastWatermark) { this.lastWatermark = lastWatermark; }
     public Integer getLastImported() { return lastImported; }
     public void setLastImported(Integer lastImported) { this.lastImported = lastImported; }
     public Integer getLastUpdatedCount() { return lastUpdatedCount; }
