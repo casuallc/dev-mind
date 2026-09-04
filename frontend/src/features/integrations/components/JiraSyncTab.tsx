@@ -1,6 +1,6 @@
 // CAP-19 项目「Jira 同步」配置卡（后台项目设置 Tab）：
 // 配置 CRUD + 启用开关 + 上次同步状态 + 立即同步；同步把 Jira issue 拉成 DRAFT 需求（单向只拉取）。
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AutoComplete,
   Button,
@@ -11,6 +11,7 @@ import {
   Popconfirm,
   Select,
   Space,
+  Spin,
   Switch,
   Table,
   Tag,
@@ -31,10 +32,11 @@ import {
   listExternalProjects,
   listIntegrations,
   listJiraSyncConfigs,
+  previewJiraSyncFilter,
   runJiraSync,
   updateJiraSyncConfig,
 } from '../api'
-import type { ExternalProject, Integration, JiraSyncConfig, JiraSyncConfigInput } from '../types'
+import type { ExternalProject, Integration, JiraSyncConfig, JiraSyncConfigInput, JiraSyncPreview } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 
 interface Props {
@@ -50,8 +52,15 @@ export default function JiraSyncTab({ projectId }: Props) {
   const [saving, setSaving] = useState(false)
   const [runningId, setRunningId] = useState<number | null>(null)
   const [extProjects, setExtProjects] = useState<ExternalProject[]>([])
+  // JQL 实时预览：命中数 + 样例 issue（防抖请求，序号防旧响应覆盖）
+  const [preview, setPreview] = useState<JiraSyncPreview | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const previewSeq = useRef(0)
   const [form] = Form.useForm<JiraSyncConfigInput>()
   const watchIntegrationId = Form.useWatch('integrationId', form)
+  const watchProjectKey = Form.useWatch('jiraProjectKey', form)
+  const watchJql = Form.useWatch('jql', form)
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -83,6 +92,39 @@ export default function JiraSyncTab({ projectId }: Props) {
       .then(setExtProjects)
       .catch(() => setExtProjects([]))
   }, [editOpen, watchIntegrationId])
+
+  // 集成/项目/JQL 变化后防抖试算命中结果（与正式同步同一套过滤：仅 project + 附加 JQL）
+  useEffect(() => {
+    if (!editOpen || !watchIntegrationId || !watchProjectKey?.trim()) {
+      setPreview(null)
+      setPreviewError(null)
+      setPreviewLoading(false)
+      return
+    }
+    const seq = ++previewSeq.current
+    setPreviewLoading(true)
+    const timer = setTimeout(() => {
+      previewJiraSyncFilter(projectId, {
+        integrationId: watchIntegrationId,
+        jiraProjectKey: watchProjectKey.trim(),
+        jql: watchJql,
+      })
+        .then((r) => {
+          if (previewSeq.current !== seq) return
+          setPreview(r)
+          setPreviewError(null)
+        })
+        .catch((e) => {
+          if (previewSeq.current !== seq) return
+          setPreview(null)
+          setPreviewError((e as Error).message)
+        })
+        .finally(() => {
+          if (previewSeq.current === seq) setPreviewLoading(false)
+        })
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [editOpen, projectId, watchIntegrationId, watchProjectKey, watchJql])
 
   useEffect(() => {
     if (!editOpen) return
@@ -323,6 +365,42 @@ export default function JiraSyncTab({ projectId }: Props) {
           >
             <Input placeholder="issuetype in (Story, Bug)" />
           </Form.Item>
+          {(watchIntegrationId && watchProjectKey?.trim()) && (
+            <div
+              style={{
+                marginTop: -8,
+                marginBottom: 16,
+                padding: '8px 12px',
+                background: 'rgba(0,0,0,0.02)',
+                borderRadius: 6,
+                fontSize: 12,
+              }}
+            >
+              {previewLoading ? (
+                <Space size={8}>
+                  <Spin size="small" />
+                  <Typography.Text type="secondary">正在试算 JQL 命中结果…</Typography.Text>
+                </Space>
+              ) : previewError ? (
+                <Typography.Text type="danger">JQL 试算失败：{previewError}</Typography.Text>
+              ) : preview ? (
+                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                  <Typography.Text>
+                    命中 <Typography.Text strong>{preview.total}</Typography.Text> 条 issue
+                    {preview.total > preview.issues.length && `（前 ${preview.issues.length} 条）`}
+                  </Typography.Text>
+                  {preview.issues.map((i) => (
+                    <div key={i.key} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <Tag color="blue" style={{ marginInlineEnd: 0 }}>{i.key}</Tag>
+                      <Typography.Text ellipsis style={{ flex: 1 }}>{i.summary}</Typography.Text>
+                      {i.status && <Tag style={{ marginInlineEnd: 0 }}>{i.status}</Tag>}
+                      <Typography.Text type="secondary">{fmtTime(i.updated)}</Typography.Text>
+                    </div>
+                  ))}
+                </Space>
+              ) : null}
+            </div>
+          )}
           <Form.Item label="轮询间隔（秒）" name="pollIntervalSec" extra="最小 60，默认 300">
             <InputNumber min={60} max={86400} style={{ width: 160 }} />
           </Form.Item>

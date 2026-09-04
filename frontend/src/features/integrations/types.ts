@@ -66,6 +66,26 @@ export interface JiraSyncConfigInput {
   pollIntervalSec?: number
 }
 
+/** JQL 预览请求（创建/编辑同步配置时实时试算） */
+export interface JiraSyncPreviewInput {
+  integrationId?: number
+  jiraProjectKey?: string
+  jql?: string
+}
+
+/** JQL 预览结果：命中总数 + 前几条样例 */
+export interface JiraSyncPreview {
+  total: number
+  issues: {
+    key: string
+    summary?: string | null
+    issueType?: string | null
+    status?: string | null
+    created?: string | null
+    updated?: string | null
+  }[]
+}
+
 /** 一次同步运行结果 */
 export interface JiraSyncRun {
   configId: number

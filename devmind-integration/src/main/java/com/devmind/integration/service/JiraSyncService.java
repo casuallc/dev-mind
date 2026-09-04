@@ -12,6 +12,8 @@ import com.devmind.integration.connector.IntegrationConnector.IssueQuery;
 import com.devmind.integration.connector.IntegrationConnector.JiraIssue;
 import com.devmind.integration.dto.JiraSyncConfigRequest;
 import com.devmind.integration.dto.JiraSyncConfigView;
+import com.devmind.integration.dto.JiraSyncPreviewRequest;
+import com.devmind.integration.dto.JiraSyncPreviewView;
 import com.devmind.integration.dto.JiraSyncRunView;
 import com.devmind.integration.model.ExternalLinkEntity;
 import com.devmind.integration.model.IntegrationEntity;
@@ -53,6 +55,10 @@ public class JiraSyncService {
     /** 拉取字段清单（Jira /search fields 参数）；sprint 是自定义字段（实例间字段名不同），v1 不拉 */
     static final String ISSUE_FIELDS =
             "summary,description,issuetype,priority,labels,status,created,updated,reporter,assignee,fixVersions,duedate";
+
+    /** 预览每页条数与字段（只要摘要展示所需） */
+    static final int PREVIEW_PAGE_SIZE = 8;
+    static final String PREVIEW_FIELDS = "summary,issuetype,status,created,updated";
 
     private final JiraSyncConfigRepository configRepo;
     private final IntegrationRepository integrationRepo;
@@ -162,6 +168,31 @@ public class JiraSyncService {
         return configRepo.findById(configId)
                 .filter(x -> projectId.equals(x.getProjectId()))
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "Jira 同步配置不存在: " + configId));
+    }
+
+    // ---------------- JQL 预览 ----------------
+
+    /** 预览试算（创建/编辑配置时实时反馈）：与正式同步同一套 JQL 拼装，只读拉首页样例 */
+    public JiraSyncPreviewView preview(String projectId, JiraSyncPreviewRequest req) {
+        projectService.requireProject(projectId);
+        if (req.integrationId() == null) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "integrationId 不能为空");
+        }
+        if (req.jiraProjectKey() == null || req.jiraProjectKey().isBlank()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "jiraProjectKey 不能为空");
+        }
+        IntegrationEntity integration = integrationService.require(req.integrationId());
+        if (!IntegrationEntity.TYPE_JIRA.equals(integration.getType())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "集成 #" + req.integrationId() + " 不是 JIRA 类型（" + integration.getType() + "）");
+        }
+        String jql = buildJql(req.jiraProjectKey().trim().toUpperCase(), req.jql());
+        IssuePage page = jiraConnector().searchIssues(integration, integrationService.tokenOf(integration),
+                new IssueQuery(jql, 0, PREVIEW_PAGE_SIZE, PREVIEW_FIELDS));
+        return new JiraSyncPreviewView(page.total(), page.issues().stream()
+                .map(i -> new JiraSyncPreviewView.IssueBrief(i.key(), i.summary(), i.issueType(),
+                        i.status(), i.created(), i.updated()))
+                .toList());
     }
 
     // ---------------- 同步执行 ----------------

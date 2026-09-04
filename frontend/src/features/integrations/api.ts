@@ -8,6 +8,8 @@ import type {
   IntegrationTestResult,
   JiraSyncConfig,
   JiraSyncConfigInput,
+  JiraSyncPreview,
+  JiraSyncPreviewInput,
   JiraSyncRun,
 } from './types'
 
@@ -62,6 +64,14 @@ export function deleteJiraSyncConfig(projectId: string, configId: number): Promi
 /** 手动触发一次同步 */
 export function runJiraSync(projectId: string, configId: number): Promise<JiraSyncRun> {
   return api.post<JiraSyncRun>(`/projects/${projectId}/jira-sync/${configId}/run`)
+}
+
+/** JQL 预览：按当前 project key + 附加 JQL 实时试算命中数与样例 issue */
+export function previewJiraSyncFilter(
+  projectId: string,
+  input: JiraSyncPreviewInput,
+): Promise<JiraSyncPreview> {
+  return api.post<JiraSyncPreview>(`/projects/${projectId}/jira-sync/preview`, input)
 }
 
 /** 项目内某类内部实体的全部外部链接（需求列表 Jira 徽标批量反查） */

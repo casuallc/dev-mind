@@ -2,6 +2,8 @@ package com.devmind.integration.controller;
 
 import com.devmind.integration.dto.JiraSyncConfigRequest;
 import com.devmind.integration.dto.JiraSyncConfigView;
+import com.devmind.integration.dto.JiraSyncPreviewRequest;
+import com.devmind.integration.dto.JiraSyncPreviewView;
 import com.devmind.integration.dto.JiraSyncRunView;
 import com.devmind.integration.service.JiraSyncService;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -49,6 +51,12 @@ public class ProjectJiraSyncController {
     public Map<String, Object> delete(@PathVariable String pid, @PathVariable Long configId) {
         service.delete(pid, configId);
         return Map.of("ok", true);
+    }
+
+    /** JQL 预览：按当前 project key + 附加 JQL 实时试算命中数与样例（创建/编辑表单用） */
+    @PostMapping("/preview")
+    public JiraSyncPreviewView preview(@PathVariable String pid, @RequestBody JiraSyncPreviewRequest req) {
+        return service.preview(pid, req);
     }
 
     /** 手动触发一次同步（与定时轮询共用核心逻辑） */

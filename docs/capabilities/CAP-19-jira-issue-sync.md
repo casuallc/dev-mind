@@ -12,7 +12,7 @@ Requirement（DRAFT），经人工确认后走既有流程（分析 → 方案 �
 Jira Server/DC                    dev-mind
 ──────────────                   ─────────────────────────────────
 Task / Bug / Story
-      ↑  轮询（JQL + updated 水印增量，PAT Bearer 或 Basic 认证）
+      ↑  轮询（JQL = project + 附加片段，PAT Bearer 或 Basic 认证）
       │  GET /rest/api/2/search
 JiraSyncService ──→ Requirement（DRAFT，标题 [PROJ-123] summary）
                   └─→ external_links（REQUIREMENT ↔ ISSUE）幂等登记
@@ -40,20 +40,23 @@ JiraSyncService ──→ Requirement（DRAFT，标题 [PROJ-123] summary）
   `devmind.integration.jira.tick-ms`），`@EnableScheduling` 独立配置类不侵启动类；
   AtomicBoolean 全局防重入；按配置 `lastSyncAt + pollIntervalSec` 到期筛选（天然错峰）。
   手动触发 `POST /{configId}/run` 与轮询共用核心。
-- **FR-04 增量水印**：JQL = `project = KEY AND (附加片段) AND updated >= "yyyy/MM/dd HH:mm"
-  ORDER BY updated asc`；首轮无水印按 `created asc`，且默认只拉近 `first_sync_days`
-  天（默认 7，0=不限）有更新的 issue——防老项目首轮全量灌入；每轮 ≤20 页 × 100 条。
-  水印 = 已处理的最大 issue updated，**整页落库后推进**并回拨 60s overlap
-  （防时钟/事务边界漏单）；同步失败水印不动，重复拉取由 external_links 幂等兜住。
+- **FR-04 同步范围 = 创建时所给条件**：JQL 只含 `project = KEY AND (附加片段)
+  ORDER BY created asc`，不加任何其他过滤规则（无时间窗口、无增量水印）；
+  每轮全量拉取匹配集，≤20 页 × 100 条防爆量；重复拉取由 external_links 幂等兜住。
+- **FR-04a JQL 实时预览**：`POST /api/projects/{pid}/jira-sync/preview`
+  （integrationId + jiraProjectKey + jql）按同一套拼装试算，返回命中总数 +
+  前 8 条样例；创建/编辑表单内防抖实时展示，保存前即可确认过滤效果。
 - **FR-05 issue → Requirement upsert**（单 issue 独立事务）：
-  - 新 issue → `RequirementService.create()`（DRAFT；标题 `[KEY] summary` 截断 240；
-    描述 = Jira description 原文 + 来源链接/类型/优先级/状态/报告人/标签尾注）
+  - 新 issue → `RequirementService.createFromJira()`（DRAFT，source=JIRA；
+    标题/描述为 Jira 原文无前缀无尾注，元信息全部落列；
+    **需求 createdAt/updatedAt 取 issue 自身的 created/updated**）
     + external_links 登记（external_url = `<base>/browse/<KEY>`，status = issue 状态）；
-  - 已导入 → 仅当需求仍为 **DRAFT** 才刷新标题/描述；进入流程（ANALYZING 起）后
-    不再覆盖（人工已接管），只刷链接状态。
+  - 已导入 → 托管字段（标题/描述/类型/优先级/经办人/报告人/标签/修复版本/截止日期）
+    无条件刷新（本地只读无冲突），updatedAt 同步为 issue updated；
+    本地字段 status/ownerId/docId 绝不动。
 - **FR-06 可观测**：每轮 `recordCall("jira_sync")` 落审计；有新增/刷新或失败时发领域事件
   `integration.jira.synced`（→ 通知中心"集成"事件，emit 去重窗口防轮询刷屏）；
-  配置视图回显 lastSyncAt / lastWatermark / lastImported / lastUpdatedCount / lastError。
+  配置视图回显 lastSyncAt / lastImported / lastUpdatedCount / lastError。
 - **FR-07 前端闭环**：后台「平台集成」管理页（GitLab/JIRA 新建/编辑/启停/测试连接）；
   项目设置「Jira 同步」Tab（配置表单 + 开关 + 上次状态 + 立即同步）；
   需求列表 Jira 来源徽标（`GET /projects/{pid}/external-links?internalType=REQUIREMENT`
@@ -66,8 +69,12 @@ JiraSyncService ──→ Requirement（DRAFT，标题 [PROJ-123] summary）
   GitLabConnector 零改动。
 - **新表而非复用 integration_bindings**：后者 `repo_id` 非空且 bind() 校验是 GitLab 在用的
   路径；Jira 同步配置与仓库正交，独立成表互不干扰。
-- **更新边界 = DRAFT**：需求一旦被人工确认进入流程，Jira 侧的后续编辑不再回灌，
-  避免覆盖人工/agent 已加工的内容；链接仍持续刷新状态供追溯。
+- **更新边界 = 托管字段**：Jira 托管字段本地只读、同步无条件刷新（含需求时间取 issue
+  自身 created/updated，列表排序与 Jira 一致）；status/ownerId/docId 为本地字段，
+  同步绝不动，人工接管状态机。
+- **全量重拉而非增量水印**（2026-09 口径调整）：过滤条件就是配置里看得见的
+  project + 附加 JQL，行为可预期、可用预览试算；幂等由 external_links 兜住，
+  单轮限页防爆量。
 - **自动开发触发 = 人工确认**（本期口径）：导入的 DRAFT 需求与手工创建的需求在流程上
   完全同构，FlowActions 链路零改动。后续可加"满足条件（如 label=auto-fix 的 Bug）
   自动进分析"的策略开关。
@@ -83,8 +90,7 @@ JiraSyncService ──→ Requirement（DRAFT，标题 [PROJ-123] summary）
 | 现象 | 排查 |
 |---|---|
 | 测试连接 401/403 | 凭据失效或权限不足。Jira Server 8.14+ 用 Bearer PAT；**8.13 及更早无 PAT**，认证方式选「用户名 + 密码」（Basic Auth，均非 Cloud 的 email+token） |
-| 同步 0 条但 Jira 有 issue | 首轮窗口默认只拉近 7 天更新的 issue（first_sync_days，0=不限）；再检查附加 JQL 是否过严；单轮限 20 页，量大时多跑几轮 |
+| 同步 0 条但 Jira 有 issue | 检查附加 JQL 是否过严（表单内预览可实时试算命中数）；单轮限 20 页，量大时多跑几轮 |
 | 重复导入 | 不应发生：幂等键 = (integration_id, ISSUE, issue key)；查 external_links |
-| 需求没被 Jira 更新刷新 | 预期行为：非 DRAFT 需求不覆盖；看链接 status 是否仍刷新 |
+| 需求没被 Jira 更新刷新 | 看配置 lastError 与链接 status；托管字段每轮无条件刷新 |
 | 轮询没跑 | 配置 enabled=false / 间隔未到（看 lastSyncAt + pollIntervalSec）/ lastError |
-| 时钟偏差漏单 | 水印已回拨 60s；仍可疑就把配置的 last_watermark 清空（改 Jira 项目 key 再改回）重全量 |
