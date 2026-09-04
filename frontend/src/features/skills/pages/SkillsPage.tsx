@@ -1,12 +1,13 @@
 // Skill 管理（基础模块）：skill 包列表 + 筛选 + 启停/删除；新建/编辑走 SkillFormDrawer，附件走 SkillFilesDrawer。
+// 布局遵循 docs/core/前端内容区布局约定.md：Card 标题，extra 放操作按钮，表格默认密度，行内「管理」开抽屉承载成套操作。
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Card, Input, message, Modal, Select, Space, Table, Tag, Typography } from 'antd'
+import { Button, Card, Drawer, Input, message, Modal, Select, Space, Table, Tag, Typography } from 'antd'
 import {
   DeleteOutlined,
   EditOutlined,
-  FileAddOutlined,
   FolderOpenOutlined,
   ImportOutlined,
+  PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
@@ -42,6 +43,7 @@ export default function SkillsPage() {
   const [editing, setEditing] = useState<SkillDetail | null>(null)
   const [filesSkill, setFilesSkill] = useState<Skill | null>(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [manageSkill, setManageSkill] = useState<Skill | null>(null)
 
   const projectName = useMemo(() => {
     const m = new Map(projects.map((p) => [p.id, p.name]))
@@ -148,47 +150,39 @@ export default function SkillsPage() {
     { title: '更新时间', dataIndex: 'updatedAt', width: 165, render: (v) => fmtTime(v) },
     {
       title: '操作',
-      width: 220,
+      width: 90,
       render: (_, r) => (
-        <Space size={4}>
-          {canWrite() && (
-            <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>
-              编辑
-            </Button>
-          )}
-          <Button size="small" icon={<FolderOpenOutlined />} onClick={() => setFilesSkill(r)}>
-            附件
-          </Button>
-          {canWrite() && (
-            <>
-              <Button size="small" onClick={() => onToggleStatus(r)}>
-                {r.status === 'ACTIVE' ? '停用' : '启用'}
-              </Button>
-              <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDelete(r)} />
-            </>
-          )}
-        </Space>
+        <Button size="small" onClick={() => setManageSkill(r)}>
+          管理
+        </Button>
       ),
     },
   ]
 
   return (
     <Card
-      size="small"
       title="Skill 管理"
       extra={
-        canWrite() && (
-          <Space>
-            <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
-              导入
-            </Button>
-            <Button type="primary" icon={<FileAddOutlined />} onClick={openCreate}>
-              新增 Skill
-            </Button>
-          </Space>
-        )
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={load}>
+            刷新
+          </Button>
+          {canWrite() && (
+            <>
+              <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
+                导入
+              </Button>
+              <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+                新建 Skill
+              </Button>
+            </>
+          )}
+        </Space>
       }
     >
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+        Skill 是可复用的能力包（含说明与附件文件），分全局/项目两种范围；在此检索、启停与维护。
+      </Typography.Paragraph>
       <Space style={{ marginBottom: 12 }} wrap>
         <Input.Search
           allowClear
@@ -243,10 +237,8 @@ export default function SkillsPage() {
             { value: 'DISABLED', label: '停用' },
           ]}
         />
-        <Button icon={<ReloadOutlined />} onClick={load} />
       </Space>
       <Table
-        size="small"
         rowKey="id"
         loading={loading}
         columns={columns}
@@ -262,7 +254,92 @@ export default function SkillsPage() {
             setSize(s)
           },
         }}
+        locale={{
+          emptyText: (
+            <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
+              <Typography.Text type="secondary">
+                还没有 skill——「新建 Skill」手工创建，或「导入」从 zip 包批量导入。
+              </Typography.Text>
+              {canWrite() && (
+                <div>
+                  <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+                    新建 Skill
+                  </Button>
+                </div>
+              )}
+            </Space>
+          ),
+        }}
       />
+
+      <Drawer
+        title={manageSkill ? `Skill · ${manageSkill.name}` : ''}
+        open={manageSkill != null}
+        onClose={() => setManageSkill(null)}
+        width={420}
+      >
+        {manageSkill && (
+          <Space direction="vertical" style={{ width: '100%' }} size={16}>
+            <Space size={8} wrap>
+              {scopeTag(manageSkill.scope)}
+              {statusTag(manageSkill.status)}
+              <Typography.Text type="secondary">
+                项目：{projectName(manageSkill.projectId)} · 更新于 {fmtTime(manageSkill.updatedAt)}
+              </Typography.Text>
+            </Space>
+            <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+              {manageSkill.description || '（无描述）'}
+            </Typography.Paragraph>
+            <Space wrap>
+              {canWrite() && (
+                <Button
+                  icon={<EditOutlined />}
+                  onClick={() => {
+                    const s = manageSkill
+                    setManageSkill(null)
+                    openEdit(s)
+                  }}
+                >
+                  编辑
+                </Button>
+              )}
+              <Button
+                icon={<FolderOpenOutlined />}
+                onClick={() => {
+                  setFilesSkill(manageSkill)
+                  setManageSkill(null)
+                }}
+              >
+                附件
+              </Button>
+              {canWrite() && (
+                <>
+                  <Button
+                    onClick={() => {
+                      const s = manageSkill
+                      setManageSkill(null)
+                      onToggleStatus(s)
+                    }}
+                  >
+                    {manageSkill.status === 'ACTIVE' ? '停用' : '启用'}
+                  </Button>
+                  <Button
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => {
+                      const s = manageSkill
+                      setManageSkill(null)
+                      onDelete(s)
+                    }}
+                  >
+                    删除
+                  </Button>
+                </>
+              )}
+            </Space>
+          </Space>
+        )}
+      </Drawer>
 
       <SkillFormDrawer
         open={formOpen}
