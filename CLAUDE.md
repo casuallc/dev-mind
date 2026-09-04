@@ -14,6 +14,7 @@ Guidance for Claude Code when working in this repository.
 | 实现方案（定稿） | [docs/design/](docs/design/) |
 | 使用/排错指南 | [docs/guides/](docs/guides/) |
 | 开发注意事项（Windows 环境 / H2 / Jackson / SSH 单点坑） | [docs/core/开发注意事项.md](docs/core/开发注意事项.md) |
+| 前端内容区布局约定（列表/管理页） | [docs/core/前端内容区布局约定.md](docs/core/前端内容区布局约定.md) |
 
 文档治理：capabilities 只放能力需求、design 放定稿方案、guides 放使用说明、core 放开发规范与踩坑记录；方案草稿与 E2E 脚本放 `tmp/`（已 gitignore，禁 commit）。
 
@@ -77,25 +78,7 @@ Guidance for Claude Code when working in this repository.
 ### 前端
 - 时间渲染禁 `toLocaleString`/散落 dayjs 格式化 → 一律 `fmtTime`。
 - 新能力在 `features/<能力>` 内自包含（页面/api/types）；被多能力引用的平台设施放 `src/app/` 或 `src/shared/`，禁跨 feature 私引内部文件。
-- 内容区（列表/管理页）布局约定（自包含规则，勿以某现有页面为参照）：
-  - 外壳：`Card` 默认尺寸（禁 `size="small"`），`title` 放页面名；有多视图时 title 里加 `Segmented` 切换（禁 Card 内套 `Tabs`）。
-  - 操作按钮一律放 Card `extra`：默认大小、图标+文字（`刷新` / `type="primary"` 的 `新建xx`）。
-  - 页面说明文字：body 顶部 `Typography.Paragraph type="secondary"`，不进工具栏。
-  - 表格：默认密度（禁 `size="small"`），`pagination={false}`（服务端真分页除外）；行内操作用小号普通按钮（查看/管理），`danger` 仅用于删除。
-  - 骨架：
-
-    ```tsx
-    <Card
-      title={<Space size={12}><span>页面名</span><Segmented value={view} onChange={setView} options={[...]} /></Space>}
-      extra={<Space>
-        <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
-        <Button type="primary" icon={<PlusOutlined />} onClick={onCreate}>新建xx</Button>
-      </Space>}
-    >
-      <Typography.Paragraph type="secondary">一句话说明这个页面管什么。</Typography.Paragraph>
-      <Table rowKey="id" loading={loading} columns={columns} dataSource={rows} pagination={false} />
-    </Card>
-    ```
+- 内容区（列表/管理页）布局必须遵循 [docs/core/前端内容区布局约定.md](docs/core/前端内容区布局约定.md)（Card+Segmented/extra 按钮/表格默认密度，含骨架示例）。
 
 ## Mandatory Workflow Rules
 
