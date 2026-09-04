@@ -4,23 +4,23 @@ import { canWrite } from '../../auth/authStore'
 import {
   Button,
   Card,
+  Descriptions,
   Drawer,
   Form,
   Input,
   message,
   Modal,
+  Segmented,
   Select,
   Space,
   Table,
-  Tabs,
   Tag,
   Typography,
 } from 'antd'
 import {
   BulbOutlined,
-  DeleteOutlined,
-  EditOutlined,
-  FileAddOutlined,
+  PlusOutlined,
+  ReloadOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
@@ -52,6 +52,11 @@ export default function KnowledgeBase() {
   const [proposalsLoading, setProposalsLoading] = useState(false)
   const [searchQ, setSearchQ] = useState('')
   const [scopeFilter, setScopeFilter] = useState<string>('')
+  const [view, setView] = useState<string>('entries') // entries | proposals | preview
+
+  // 提案管理抽屉：引用实时列表数据，状态变化自动反映
+  const [manageId, setManageId] = useState<number | null>(null)
+  const manageProposal = manageId != null ? proposals.find((p) => p.id === manageId) ?? null : null
 
   // 条目编辑
   const [entryModalOpen, setEntryModalOpen] = useState(false)
@@ -174,6 +179,7 @@ export default function KnowledgeBase() {
         try {
           await adoptProposal(p.id, target, p.targetProjectId ?? undefined)
           message.success('已采纳为知识条目')
+          setManageId(null)
           loadProposals()
         } catch (err) {
           message.error(`采纳失败：${(err as Error).message}`)
@@ -194,6 +200,7 @@ export default function KnowledgeBase() {
         try {
           await rejectProposal(p.id)
           message.success('已拒绝')
+          setManageId(null)
           loadProposals()
         } catch (err) {
           message.error(`操作失败：${(err as Error).message}`)
@@ -246,13 +253,15 @@ export default function KnowledgeBase() {
     { title: '更新时间', dataIndex: 'updatedAt', width: 170, render: (v) => fmtTime(v) },
     {
       title: '操作',
-      width: 150,
+      width: 130,
       render: (_, r) => (
         <Space size={4}>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEditEntry(r)}>
+          <Button size="small" onClick={() => openEditEntry(r)}>
             编辑
           </Button>
-          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDeleteEntry(r)} />
+          <Button size="small" danger onClick={() => onDeleteEntry(r)}>
+            删除
+          </Button>
         </Space>
       ),
     },
@@ -266,20 +275,12 @@ export default function KnowledgeBase() {
     { title: '创建时间', dataIndex: 'createdAt', width: 170, render: (v) => fmtTime(v) },
     {
       title: '操作',
-      width: 260,
+      width: 90,
       render: (_, r) =>
         r.status === 'open' ? (
-          <Space size={4}>
-            <Button size="small" type="primary" onClick={() => onAdopt(r, 'project')}>
-              采纳到项目
-            </Button>
-            <Button size="small" onClick={() => onAdopt(r, 'global')}>
-              晋升全局
-            </Button>
-            <Button size="small" danger onClick={() => onReject(r)}>
-              拒绝
-            </Button>
-          </Space>
+          <Button size="small" onClick={() => setManageId(r.id)}>
+            管理
+          </Button>
         ) : (
           <Typography.Text type="secondary">已处理</Typography.Text>
         ),
@@ -289,131 +290,214 @@ export default function KnowledgeBase() {
   const projectOptions = projects.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
-      <Tabs
-        items={[
-          {
-            key: 'entries',
-            label: '知识条目',
-            children: (
-              <Card size="small">
-                <Space style={{ marginBottom: 12, width: '100%', justifyContent: 'space-between' }}>
-                  <Space>
-                    <Input
-                      allowClear
-                      prefix={<SearchOutlined />}
-                      placeholder="搜索名称/内容/标签"
-                      style={{ width: 240 }}
-                      value={searchQ}
-                      onChange={(e) => setSearchQ(e.target.value)}
-                      onPressEnter={() => loadEntries(searchQ, scopeFilter)}
-                    />
-                    <Select
-                      allowClear
-                      placeholder="范围"
-                      style={{ width: 110 }}
-                      value={scopeFilter || undefined}
-                      onChange={(v) => {
-                        setScopeFilter(v ?? '')
-                        loadEntries(searchQ, v ?? '')
-                      }}
-                      options={[
-                        { value: 'global', label: 'global' },
-                        { value: 'project', label: 'project' },
-                      ]}
-                    />
-                  </Space>
-                  {canWrite() && (
-                    <Button type="primary" icon={<FileAddOutlined />} onClick={openCreateEntry}>
-                      新增条目
-                    </Button>
-                  )}
-                </Space>
-                <Table
-                  size="small"
-                  rowKey="id"
-                  loading={entriesLoading}
-                  columns={entryColumns}
-                  dataSource={entries}
-                  pagination={{ pageSize: 20, showSizeChanger: false }}
-                />
-              </Card>
-            ),
-          },
-          {
-            key: 'proposals',
-            label: '经验提案',
-            children: (
-              <Card size="small">
-                <Space style={{ marginBottom: 12, width: '100%', justifyContent: 'space-between' }}>
+    <Card
+      title={
+        <Space size={12}>
+          <span>知识库</span>
+          <Segmented
+            value={view}
+            onChange={setView}
+            options={[
+              { value: 'entries', label: '知识条目' },
+              { value: 'proposals', label: '经验提案' },
+              { value: 'preview', label: '注入预览' },
+            ]}
+          />
+        </Space>
+      }
+      extra={
+        <Space wrap>
+          {view === 'entries' && (
+            <>
+              <Input
+                allowClear
+                prefix={<SearchOutlined />}
+                placeholder="搜索名称/内容/标签"
+                style={{ width: 220 }}
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+                onPressEnter={() => loadEntries(searchQ, scopeFilter)}
+              />
+              <Select
+                allowClear
+                placeholder="范围"
+                style={{ width: 110 }}
+                value={scopeFilter || undefined}
+                onChange={(v) => {
+                  setScopeFilter(v ?? '')
+                  loadEntries(searchQ, v ?? '')
+                }}
+                options={[
+                  { value: 'global', label: 'global' },
+                  { value: 'project', label: 'project' },
+                ]}
+              />
+              <Button icon={<ReloadOutlined />} onClick={() => loadEntries()}>
+                刷新
+              </Button>
+              {canWrite() && (
+                <Button type="primary" icon={<PlusOutlined />} onClick={openCreateEntry}>
+                  新增条目
+                </Button>
+              )}
+            </>
+          )}
+          {view === 'proposals' && (
+            <>
+              <Button icon={<ReloadOutlined />} onClick={() => loadProposals()}>
+                刷新
+              </Button>
+              <Button type="primary" icon={<BulbOutlined />} onClick={() => setProposalModalOpen(true)}>
+                手动沉淀经验
+              </Button>
+            </>
+          )}
+        </Space>
+      }
+    >
+      {view === 'entries' && (
+        <>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+            知识条目在会话启动时按项目/标签匹配注入，分 global（所有项目）与 project（本项目）两种范围。
+          </Typography.Paragraph>
+          <Table
+            rowKey="id"
+            loading={entriesLoading}
+            columns={entryColumns}
+            dataSource={entries}
+            pagination={false}
+            locale={{
+              emptyText: (
+                <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
                   <Typography.Text type="secondary">
-                    会话中「沉淀经验」或手动提交的经验，审核后进入知识库（inbox）。
+                    暂无知识条目——点击「新增条目」创建第一条，或在「经验提案」中采纳沉淀的经验。
                   </Typography.Text>
-                  <Button icon={<BulbOutlined />} onClick={() => setProposalModalOpen(true)}>
-                    手动沉淀经验
-                  </Button>
-                </Space>
-                <Table
-                  size="small"
-                  rowKey="id"
-                  loading={proposalsLoading}
-                  columns={proposalColumns}
-                  dataSource={proposals}
-                  pagination={{ pageSize: 10, showSizeChanger: false }}
-                />
-              </Card>
-            ),
-          },
-          {
-            key: 'preview',
-            label: '注入预览',
-            children: (
-              <Card size="small">
-                <Space direction="vertical" style={{ width: '100%' }}>
-                  <Form form={previewForm} layout="inline">
-                    <Form.Item name="projectId" label="项目">
-                      <Select allowClear placeholder="选择项目" style={{ width: 240 }} options={projectOptions} />
-                    </Form.Item>
-                    <Form.Item name="taskSpec" label="任务说明" style={{ flex: 1, minWidth: 240 }}>
-                      <Input placeholder="本次会话要做什么？（将写入 ## 当前任务）" />
-                    </Form.Item>
-                    <Button type="primary" onClick={onPreview}>
-                      预览注入内容
-                    </Button>
-                  </Form>
-                  {previewResult && (
-                    <>
-                      <Typography.Text>
-                        命中条目（{previewResult.entriesUsed.length}）：
-                        {previewResult.entriesUsed.length
-                          ? previewResult.entriesUsed.map((e) => (
-                              <Tag key={e.id} color={e.scope === 'global' ? 'blue' : undefined}>
-                                {e.name}
-                              </Tag>
-                            ))
-                          : '无'}
-                      </Typography.Text>
-                      <pre
-                        style={{
-                          whiteSpace: 'pre-wrap',
-                          background: '#f6f6f6',
-                          padding: 12,
-                          borderRadius: 4,
-                          fontSize: 12,
-                          maxHeight: 480,
-                          overflow: 'auto',
-                        }}
-                      >
-                        {previewResult.content || '(空)'}
-                      </pre>
-                    </>
+                  {canWrite() && (
+                    <div>
+                      <Button type="primary" icon={<PlusOutlined />} onClick={openCreateEntry}>
+                        新增条目
+                      </Button>
+                    </div>
                   )}
                 </Space>
-              </Card>
-            ),
-          },
-        ]}
-      />
+              ),
+            }}
+          />
+        </>
+      )}
+
+      {view === 'proposals' && (
+        <>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+            会话中「沉淀经验」或手动提交的经验，审核后进入知识库（inbox）。
+          </Typography.Paragraph>
+          <Table
+            rowKey="id"
+            loading={proposalsLoading}
+            columns={proposalColumns}
+            dataSource={proposals}
+            pagination={false}
+            locale={{
+              emptyText:
+                '暂无待审核经验——在会话中点「沉淀经验」，或点击右上角「手动沉淀经验」提交一条。',
+            }}
+          />
+        </>
+      )}
+
+      {view === 'preview' && (
+        <>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+            选择项目与任务说明，预览会话启动时实际注入的知识内容。
+          </Typography.Paragraph>
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Form form={previewForm} layout="inline">
+              <Form.Item name="projectId" label="项目">
+                <Select allowClear placeholder="选择项目" style={{ width: 240 }} options={projectOptions} />
+              </Form.Item>
+              <Form.Item name="taskSpec" label="任务说明" style={{ flex: 1, minWidth: 240 }}>
+                <Input placeholder="本次会话要做什么？（将写入 ## 当前任务）" />
+              </Form.Item>
+              <Button type="primary" onClick={onPreview}>
+                预览注入内容
+              </Button>
+            </Form>
+            {previewResult && (
+              <>
+                <Typography.Text>
+                  命中条目（{previewResult.entriesUsed.length}）：
+                  {previewResult.entriesUsed.length
+                    ? previewResult.entriesUsed.map((e) => (
+                        <Tag key={e.id} color={e.scope === 'global' ? 'blue' : undefined}>
+                          {e.name}
+                        </Tag>
+                      ))
+                    : '无'}
+                </Typography.Text>
+                <pre
+                  style={{
+                    whiteSpace: 'pre-wrap',
+                    background: '#f6f6f6',
+                    padding: 12,
+                    borderRadius: 4,
+                    fontSize: 12,
+                    maxHeight: 480,
+                    overflow: 'auto',
+                  }}
+                >
+                  {previewResult.content || '(空)'}
+                </pre>
+              </>
+            )}
+          </Space>
+        </>
+      )}
+
+      {/* 提案管理抽屉：采纳到项目/晋升全局/拒绝 */}
+      {manageProposal && (
+        <Drawer
+          title={`提案 · ${manageProposal.title}`}
+          open
+          onClose={() => setManageId(null)}
+          width={560}
+        >
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Descriptions size="small" column={2}>
+              <Descriptions.Item label="去向">{scopeTag(manageProposal.targetScope)}</Descriptions.Item>
+              <Descriptions.Item label="状态">{statusTag(manageProposal.status)}</Descriptions.Item>
+              <Descriptions.Item label="来源会话">{manageProposal.sourceSessionId ?? '-'}</Descriptions.Item>
+              <Descriptions.Item label="创建时间">{fmtTime(manageProposal.createdAt)}</Descriptions.Item>
+            </Descriptions>
+            <pre
+              style={{
+                whiteSpace: 'pre-wrap',
+                background: '#f6f6f6',
+                padding: 12,
+                borderRadius: 4,
+                fontSize: 12,
+                maxHeight: 320,
+                overflow: 'auto',
+                margin: 0,
+              }}
+            >
+              {manageProposal.contentMd}
+            </pre>
+            {manageProposal.status === 'open' ? (
+              <Space>
+                <Button type="primary" onClick={() => onAdopt(manageProposal, 'project')}>
+                  采纳到项目
+                </Button>
+                <Button onClick={() => onAdopt(manageProposal, 'global')}>晋升全局</Button>
+                <Button danger onClick={() => onReject(manageProposal)}>
+                  拒绝
+                </Button>
+              </Space>
+            ) : (
+              <Typography.Text type="secondary">该提案已处理。</Typography.Text>
+            )}
+          </Space>
+        </Drawer>
+      )}
 
       {/* 条目编辑抽屉 */}
       <Drawer
@@ -503,6 +587,6 @@ export default function KnowledgeBase() {
           </Form.Item>
         </Form>
       </Modal>
-    </Space>
+    </Card>
   )
 }
