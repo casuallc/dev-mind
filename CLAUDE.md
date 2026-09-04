@@ -77,6 +77,7 @@ Guidance for Claude Code when working in this repository.
 ### 前端
 - 时间渲染禁 `toLocaleString`/散落 dayjs 格式化 → 一律 `fmtTime`。
 - 新能力在 `features/<能力>` 内自包含（页面/api/types）；被多能力引用的平台设施放 `src/app/` 或 `src/shared/`，禁跨 feature 私引内部文件。
+- 内容区（列表/管理页）布局统一参考 `features/sessions` 页面：`Card` 默认尺寸，`title` = 页面名 + `Segmented` 切视图（禁 Card 内套 Tabs）；操作按钮放 `extra`（默认大小、图标+文字）；说明文字在 body 顶部用 `Typography.Paragraph type="secondary"`；表格默认密度（禁 `size="small"`）；行内操作用小号普通按钮（查看/管理），danger 仅表删除。
 
 ## Mandatory Workflow Rules
 
