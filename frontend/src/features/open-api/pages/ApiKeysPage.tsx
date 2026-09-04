@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Alert,
   Button,
+  Card,
   DatePicker,
   Form,
   Input,
@@ -14,7 +15,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { CopyOutlined, PlusOutlined } from '@ant-design/icons'
+import { CopyOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { deleteApiKey, issueApiKey, listApiKeys, setApiKeyEnabled } from '../api'
 import type { ApiKey, IssuedKey } from '../types'
@@ -125,26 +126,42 @@ export default function ApiKeysPage() {
   ]
 
   return (
-    <div>
-      <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
-        <h2 style={{ margin: 0 }}>API 密钥</h2>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-          新建密钥
-        </Button>
-      </Space>
-      <Alert
-        type="info"
-        showIcon
-        style={{ marginBottom: 12 }}
-        message="密钥用于调用开放 API（/open-api/v1/**，HMAC-SHA256 签名认证）。调用方式见 scripts/openapi.sh；secret 仅在创建时展示一次。"
-      />
+    <Card
+      title="API 密钥"
+      extra={
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={reload}>
+            刷新
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+            新建密钥
+          </Button>
+        </Space>
+      }
+    >
+      <Typography.Paragraph type="secondary">
+        密钥用于调用开放 API（/open-api/v1/**，HMAC-SHA256 签名认证），调用方式见 scripts/openapi.sh；secret 仅在创建时展示一次。
+      </Typography.Paragraph>
       <Table<ApiKey>
         rowKey="id"
-        size="small"
         loading={loading}
         columns={columns}
         dataSource={keys}
         pagination={false}
+        locale={{
+          emptyText: (
+            <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
+              <Typography.Text type="secondary">
+                还没有 API 密钥——「新建密钥」签发一对 Access Key / Secret 即可接入。
+              </Typography.Text>
+              <div>
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+                  新建密钥
+                </Button>
+              </div>
+            </Space>
+          ),
+        }}
       />
 
       <Modal
@@ -194,6 +211,6 @@ export default function ApiKeysPage() {
           </Space>
         )}
       </Modal>
-    </div>
+    </Card>
   )
 }
