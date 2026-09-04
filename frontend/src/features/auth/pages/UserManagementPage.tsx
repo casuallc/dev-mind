@@ -1,5 +1,5 @@
-import { Button, Form, Input, Modal, Select, Space, Table, Tag, message } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { Button, Card, Drawer, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { createUser, listUsers, resetPassword, updateUser } from '../api'
 import { getUserSnapshot } from '../authStore'
@@ -11,6 +11,7 @@ export default function UserManagementPage() {
   const [loading, setLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [resetTarget, setResetTarget] = useState<AuthUser | null>(null)
+  const [manageTarget, setManageTarget] = useState<AuthUser | null>(null)
   const [createForm] = Form.useForm()
   const [resetForm] = Form.useForm()
   const me = getUserSnapshot()
@@ -55,6 +56,7 @@ export default function UserManagementPage() {
     try {
       await updateUser(u.id, { role })
       message.success(`${u.username} 角色已改为 ${role}`)
+      setManageTarget((t) => (t && t.id === u.id ? { ...t, role } : t))
       reload()
     } catch (e) {
       message.error(e instanceof Error ? e.message : '修改失败')
@@ -66,6 +68,7 @@ export default function UserManagementPage() {
     try {
       await updateUser(u.id, { status: next })
       message.success(`${u.username} 已${next === 'ACTIVE' ? '启用' : '禁用'}`)
+      setManageTarget((t) => (t && t.id === u.id ? { ...t, status: next } : t))
       reload()
     } catch (e) {
       message.error(e instanceof Error ? e.message : '操作失败')
@@ -73,38 +76,42 @@ export default function UserManagementPage() {
   }
 
   return (
-    <div>
-      <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
-        <h2 style={{ margin: 0 }}>用户管理</h2>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-          新建用户
-        </Button>
-      </Space>
+    <Card
+      title="用户管理"
+      extra={
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={reload}>
+            刷新
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+            新建用户
+          </Button>
+        </Space>
+      }
+    >
+      <Typography.Paragraph type="secondary">
+        管理平台账号与角色权限：ADMIN 全权限 / DEVELOPER 业务读写 / VIEWER 只读；local 为系统内置身份，不可修改。
+      </Typography.Paragraph>
       <Table
         rowKey="id"
         loading={loading}
         dataSource={users}
         pagination={false}
+        locale={{ emptyText: '暂无用户，点击右上角「新建用户」创建第一个账号' }}
         columns={[
           { title: '用户名', dataIndex: 'username' },
           { title: '显示名', dataIndex: 'displayName' },
           {
             title: '角色',
             dataIndex: 'role',
-            render: (role: string, u) => (
-              <Select
-                size="small"
-                value={role}
-                style={{ width: 130 }}
-                disabled={u.username === 'local'}
-                onChange={(r) => changeRole(u, r)}
-                options={[
-                  { value: 'ADMIN', label: <Tag color="red">ADMIN</Tag> },
-                  { value: 'DEVELOPER', label: <Tag color="blue">DEVELOPER</Tag> },
-                  { value: 'VIEWER', label: <Tag>VIEWER</Tag> },
-                ]}
-              />
-            ),
+            render: (role: string) =>
+              role === 'ADMIN' ? (
+                <Tag color="red">ADMIN</Tag>
+              ) : role === 'DEVELOPER' ? (
+                <Tag color="blue">DEVELOPER</Tag>
+              ) : (
+                <Tag>VIEWER</Tag>
+              ),
           },
           {
             title: '状态',
@@ -121,23 +128,51 @@ export default function UserManagementPage() {
           {
             title: '操作',
             render: (_, u) => (
-              <Space>
-                <Button size="small" onClick={() => setResetTarget(u)} disabled={u.username === 'local'}>
-                  重置密码
-                </Button>
-                <Button
-                  size="small"
-                  danger={u.status !== 'DISABLED'}
-                  disabled={u.username === 'local' || u.username === me?.username}
-                  onClick={() => toggleStatus(u)}
-                >
-                  {u.status === 'DISABLED' ? '启用' : '禁用'}
-                </Button>
-              </Space>
+              <Button size="small" onClick={() => setManageTarget(u)}>
+                管理
+              </Button>
             ),
           },
         ]}
       />
+
+      <Drawer
+        title={`管理用户：${manageTarget?.username ?? ''}`}
+        open={!!manageTarget}
+        onClose={() => setManageTarget(null)}
+        width={360}
+      >
+        {manageTarget && (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <div>
+              <Typography.Text type="secondary">角色</Typography.Text>
+              <Select
+                value={manageTarget.role}
+                style={{ width: '100%', marginTop: 8 }}
+                disabled={manageTarget.username === 'local'}
+                onChange={(r) => changeRole(manageTarget, r)}
+                options={[
+                  { value: 'ADMIN', label: 'ADMIN（全权限）' },
+                  { value: 'DEVELOPER', label: 'DEVELOPER（业务读写）' },
+                  { value: 'VIEWER', label: 'VIEWER（只读）' },
+                ]}
+              />
+            </div>
+            <Button
+              onClick={() => setResetTarget(manageTarget)}
+              disabled={manageTarget.username === 'local'}
+            >
+              重置密码
+            </Button>
+            <Button
+              disabled={manageTarget.username === 'local' || manageTarget.username === me?.username}
+              onClick={() => toggleStatus(manageTarget)}
+            >
+              {manageTarget.status === 'DISABLED' ? '启用' : '禁用'}
+            </Button>
+          </Space>
+        )}
+      </Drawer>
 
       <Modal
         title="新建用户"
@@ -189,6 +224,6 @@ export default function UserManagementPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </Card>
   )
 }
