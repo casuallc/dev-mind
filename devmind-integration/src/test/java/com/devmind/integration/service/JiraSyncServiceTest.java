@@ -43,7 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * JiraSyncService 同步闭环单测（无 Spring 上下文）：
  * repo 用 JDK 动态代理内存 fake，RequirementService/IntegrationService 子类覆盖，
- * connector 喂队列页面。覆盖：导入/幂等重放/托管字段刷新
+ * connector 喂队列页面。覆盖：导入（需求时间取 issue 自身）/幂等重放/托管字段刷新
  * （本地字段不动）/失败收敛/分页；JQL 只含 project + 附加片段，无其他过滤。
  */
 class JiraSyncServiceTest {
@@ -110,6 +110,9 @@ class JiraSyncServiceTest {
                     ? null : String.join(",", f.fixVersions()));
             e.setDueDate(f.dueDate());
             e.setExternalKey(f.externalKey());
+            // 与真实通道一致：创建/更新时间取 issue 自身
+            e.setCreatedAt(f.issueCreated());
+            e.setUpdatedAt(f.issueUpdated());
         }
 
         @Override
@@ -281,6 +284,10 @@ class JiraSyncServiceTest {
         assertEquals("ai", r1.getLabels());
         assertEquals("1.0,1.1", r1.getFixVersions());
         assertEquals(LocalDate.parse("2026-09-30"), r1.getDueDate());
+        // 创建/更新时间取 issue 自身（issue() 帮手 created=updated=T1）
+        assertEquals(T1, r1.getCreatedAt());
+        assertEquals(T1, r1.getUpdatedAt());
+        assertEquals(T2, requirementService.store.get("req-2").getCreatedAt());
         // 链接：REQUIREMENT ↔ ISSUE
         ExternalLinkEntity link = linkStore.get("PROJ-1");
         assertEquals(ExternalLinkEntity.INTERNAL_REQUIREMENT, link.getInternalType());
@@ -320,6 +327,8 @@ class JiraSyncServiceTest {
         assertEquals(0, result.imported());
         assertEquals(1, result.updated());
         assertEquals("新标题", requirementService.store.get("req-1").getTitle());
+        // 更新时间随 issue 自身 updated 刷新（不是同步时刻）
+        assertEquals(T2, requirementService.store.get("req-1").getUpdatedAt());
     }
 
     @Test

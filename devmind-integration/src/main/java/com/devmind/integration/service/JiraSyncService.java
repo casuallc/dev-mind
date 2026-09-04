@@ -41,6 +41,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * issue → Requirement（DRAFT，source=JIRA）经 RequirementService 同步通道落主线，
  * external_links 登记幂等；每轮严格按创建时所给条件（project + 附加 JQL）拉取，
  * 不加其他过滤，重复由幂等兜住。
+ * 需求的创建/更新时间取 Jira issue 自身的 created/updated；
  * Jira 托管字段（标题/描述/类型/优先级/经办人/报告人/标签/修复版本/截止日期）始终随同步刷新
  * （本地只读，无覆盖冲突）；本地字段 status/ownerId/docId 同步绝不动。
  */
@@ -291,12 +292,14 @@ public class JiraSyncService {
         return UpsertOutcome.SKIPPED;
     }
 
-    /** issue → 托管字段包（标题=summary 原文、描述=Jira 原文，无前缀无尾注——元信息全部进列） */
+    /** issue → 托管字段包（标题=summary 原文、描述=Jira 原文，无前缀无尾注——元信息全部进列；
+     *  创建/更新时间取 issue 自身时间） */
     private static JiraManagedFields managedFields(JiraIssue issue) {
         return new JiraManagedFields(
                 issue.summary(), issue.description(), requirementType(issue),
                 issue.priority(), issue.assignee(), issue.reporter(),
-                issue.labels(), issue.fixVersions(), issue.dueDate(), issue.key());
+                issue.labels(), issue.fixVersions(), issue.dueDate(), issue.key(),
+                issue.created(), issue.updated());
     }
 
     enum UpsertOutcome { IMPORTED, UPDATED, SKIPPED }

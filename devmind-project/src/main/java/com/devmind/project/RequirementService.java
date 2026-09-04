@@ -162,12 +162,15 @@ public class RequirementService {
                 refsFor(List.of(e.getId())).get(e.getId()));
     }
 
-    /** Jira 同步专用创建：source=JIRA，托管字段全部落列（标题/描述为 Jira 原文，无前缀无尾注）。 */
+    /** Jira 同步专用创建：source=JIRA，托管字段全部落列（标题/描述为 Jira 原文，无前缀无尾注）；
+     *  创建/更新时间取 issue 自身的 created/updated（缺省回退当前时刻）。 */
     public synchronized RequirementView createFromJira(String projectId, JiraManagedFields f) {
         requireProject(projectId);
         RequirementEntity e = newRequirement(projectId);
         e.setSource(RequirementEntity.SOURCE_JIRA);
         applyJiraFields(e, f);
+        if (f.issueCreated() != null) e.setCreatedAt(f.issueCreated());
+        e.setUpdatedAt(f.issueUpdated() != null ? f.issueUpdated() : e.getCreatedAt());
         requirementRepo.save(e);
         log.info("需求已由 Jira 导入: projectId={} code={} key={}", projectId, code(e.getSeq()), f.externalKey());
         return toView(e, null);
@@ -175,13 +178,13 @@ public class RequirementService {
 
     /**
      * Jira 同步专用更新：无条件刷新托管字段（本地只读不会冲突），
-     * 本地字段 status/ownerId/docId 绝不动。
+     * 更新时间取 issue 自身的 updated；本地字段 status/ownerId/docId 绝不动。
      */
     public RequirementView syncFromJira(String projectId, String requirementId, JiraManagedFields f) {
         RequirementEntity e = requireEntity(projectId, requirementId);
         e.setSource(RequirementEntity.SOURCE_JIRA);
         applyJiraFields(e, f);
-        e.setUpdatedAt(Instant.now());
+        e.setUpdatedAt(f.issueUpdated() != null ? f.issueUpdated() : Instant.now());
         return toView(requirementRepo.save(e), null);
     }
 
