@@ -1,6 +1,6 @@
 // 上下文摘要页（/admin/projects/:id/summary）：重新扫描生成 + 人工编辑保存。
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Input, Space, Typography, message } from 'antd'
+import { Button, Card, Input, Space, Typography, message } from 'antd'
 import { DiffOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { getSummary, refreshSummary, saveSummary } from '../../api'
@@ -54,20 +54,23 @@ export default function SummaryPage() {
   }
 
   return (
-    <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Space>
-        <Button size="small" type="primary" icon={<ReloadOutlined />} loading={busy} onClick={doRefresh}>
-          重新扫描生成
-        </Button>
-        <Button size="small" type="primary" ghost icon={<DiffOutlined />} loading={busy} onClick={doSave}>
-          保存修改
-        </Button>
-        {summary.generatedAt && (
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            生成于 {fmtTime(summary.generatedAt)}
-          </Typography.Text>
-        )}
-      </Space>
+    <Card
+      title="上下文摘要"
+      extra={
+        <Space>
+          <Button icon={<ReloadOutlined />} loading={busy} onClick={doRefresh}>
+            重新扫描生成
+          </Button>
+          <Button type="primary" icon={<DiffOutlined />} loading={busy} onClick={doSave}>
+            保存修改
+          </Button>
+        </Space>
+      }
+    >
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+        项目上下文摘要供需求对话/方案/会话注入；可「重新扫描生成」自动扫描仓库结构，也可直接编辑后保存。
+        {summary.generatedAt && ` 生成于 ${fmtTime(summary.generatedAt)}。`}
+      </Typography.Paragraph>
       <Input.TextArea
         rows={18}
         value={text}
@@ -75,6 +78,6 @@ export default function SummaryPage() {
         placeholder="点击「重新扫描生成」自动扫描仓库结构；也可直接编辑此摘要作为项目上下文（供需求对话/方案/会话注入）。"
         style={{ fontFamily: 'monospace', fontSize: 12 }}
       />
-    </Space>
+    </Card>
   )
 }

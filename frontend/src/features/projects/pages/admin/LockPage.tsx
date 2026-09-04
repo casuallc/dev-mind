@@ -1,6 +1,6 @@
 // 锁定页（/admin/projects/:id/lock）：项目级并发写配额（供 Orchestrator 并发控制）。
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Descriptions, InputNumber, Space, Typography, message } from 'antd'
+import { Button, Card, Descriptions, InputNumber, Space, Typography, message } from 'antd'
 import { DiffOutlined, StopOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { claimWrite, getLock, releaseWrite, updateLock } from '../../api'
@@ -45,28 +45,30 @@ export default function LockPage() {
   }
 
   return (
-    <Space direction="vertical" size={8} style={{ width: '100%', maxWidth: 480 }}>
-      <Descriptions size="small" column={2}>
-        <Descriptions.Item label="当前写任务">
-          <Typography.Text strong>{lock?.activeWrites ?? 0}</Typography.Text>
-        </Descriptions.Item>
-        <Descriptions.Item label="最大并发写">
-          <Typography.Text strong>{lock?.maxConcurrent ?? '-'}</Typography.Text>
-        </Descriptions.Item>
-      </Descriptions>
-      <Space wrap>
-        <InputNumber min={1} value={max} onChange={(v) => setMax(v ?? 1)} addonBefore="并发上限" />
-        <Button size="small" type="primary" onClick={saveMax}>保存上限</Button>
-        <Button size="small" icon={<DiffOutlined />} onClick={() => act(() => claimWrite(id), '已占用一个写配额')}>
-          占用写配额
-        </Button>
-        <Button size="small" icon={<StopOutlined />} onClick={() => act(() => releaseWrite(id), '已释放一个写配额')}>
-          释放写配额
-        </Button>
+    <Card title="锁定" style={{ maxWidth: 640 }}>
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+        项目级并发写配额，供任务编排 Orchestrator 做并发控制；达上限时 claim 返回冲突。
+      </Typography.Paragraph>
+      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Descriptions size="small" column={2}>
+          <Descriptions.Item label="当前写任务">
+            <Typography.Text strong>{lock?.activeWrites ?? 0}</Typography.Text>
+          </Descriptions.Item>
+          <Descriptions.Item label="最大并发写">
+            <Typography.Text strong>{lock?.maxConcurrent ?? '-'}</Typography.Text>
+          </Descriptions.Item>
+        </Descriptions>
+        <Space wrap>
+          <InputNumber min={1} value={max} onChange={(v) => setMax(v ?? 1)} addonBefore="并发上限" />
+          <Button type="primary" onClick={saveMax}>保存上限</Button>
+          <Button icon={<DiffOutlined />} onClick={() => act(() => claimWrite(id), '已占用一个写配额')}>
+            占用写配额
+          </Button>
+          <Button icon={<StopOutlined />} onClick={() => act(() => releaseWrite(id), '已释放一个写配额')}>
+            释放写配额
+          </Button>
+        </Space>
       </Space>
-      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-        供任务编排 Orchestrator 做项目级并发控制；达上限时 claim 返回冲突。
-      </Typography.Text>
-    </Space>
+    </Card>
   )
 }

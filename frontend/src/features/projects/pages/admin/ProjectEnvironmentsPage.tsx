@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
+  Card,
   Form,
   Input,
   Modal,
@@ -13,7 +14,7 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { PlusOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { addEnvironment, deleteEnvironment, listEnvironments, listServers, updateEnvironment } from '../../api'
 import type { EnvironmentInput, ProjectEnvironment, ProjectServer } from '../../types'
@@ -155,16 +156,30 @@ export default function ProjectEnvironmentsPage() {
   ]
 
   return (
-    <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Space>
-        <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-          添加环境
-        </Button>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          部署/测试目标从服务器升级为环境（DEV/TEST/STAGING/PROD），环境聚合服务器 + 变量 + 密钥引用
-        </Typography.Text>
-      </Space>
-      <Table rowKey="id" size="small" columns={columns} dataSource={environments} loading={loading} pagination={false} />
+    <Card
+      title="环境"
+      extra={
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={reload}>
+            刷新
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
+            添加环境
+          </Button>
+        </Space>
+      }
+    >
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+        部署/测试目标从服务器升级为环境（DEV/TEST/STAGING/PROD），环境聚合服务器 + 变量 + 密钥引用。
+      </Typography.Paragraph>
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={environments}
+        loading={loading}
+        pagination={false}
+        locale={{ emptyText: '暂无环境。点击「添加环境」创建第一个。' }}
+      />
       <Modal title={editing ? `编辑环境 ${editing.name}` : '添加环境'} open={open} onCancel={() => setOpen(false)}
         onOk={() => form.submit()} okText="保存" width={560}>
         <Form form={form} layout="vertical" onFinish={onSave}>
@@ -185,6 +200,6 @@ export default function ProjectEnvironmentsPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </Space>
+    </Card>
   )
 }

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
+  Card,
   Drawer,
   Form,
   Input,
@@ -11,10 +12,11 @@ import {
   Switch,
   Table,
   Tag,
+  Typography,
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { PlusOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { addServer, deleteServer, listServers, updateServer } from '../../api'
 import type { ProjectServer, ServerInput } from '../../types'
@@ -121,11 +123,30 @@ export default function ProjectServersPage() {
   ]
 
   return (
-    <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)} style={{ alignSelf: 'flex-start' }}>
-        添加服务器
-      </Button>
-      <Table rowKey="id" size="small" columns={columns} dataSource={servers} loading={loading} pagination={false} />
+    <Card
+      title="服务器"
+      extra={
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={reload}>
+            刷新
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
+            添加服务器
+          </Button>
+        </Space>
+      }
+    >
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+        登记项目可用的目标服务器（SSH/HTTP 接入），按环境/能力标注，供构建、部署、测试等执行器挑选。
+      </Typography.Paragraph>
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={servers}
+        loading={loading}
+        pagination={false}
+        locale={{ emptyText: '暂无服务器。点击「添加服务器」登记第一台。' }}
+      />
       <Drawer title={editing ? '编辑服务器' : '添加服务器'} open={open} onClose={() => setOpen(false)}
         width={600}
         footer={
@@ -155,6 +176,6 @@ export default function ProjectServersPage() {
           </Form.Item>
         </Form>
       </Drawer>
-    </Space>
+    </Card>
   )
 }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Button,
+  Card,
   Drawer,
   Form,
   Input,
@@ -19,7 +20,7 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { PlusOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useOutletContext, useParams } from 'react-router-dom'
 import { addRepo, cloneRepo, deleteRepo, listRepos, setPrimaryRepo, updateRepo } from '../../api'
 import type { ProjectRepo, ProjectRepoInput } from '../../types'
@@ -220,16 +221,30 @@ export default function ReposPage() {
   ]
 
   return (
-    <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Space>
-        <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-          添加仓库
-        </Button>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          项目为多 git 库组合：代码/文档/配置各有角色；恰好一个主库（projects.path 为主库镜像）。「从 Git 克隆」由服务端拉取到项目工作区。
-        </Typography.Text>
-      </Space>
-      <Table rowKey="id" size="small" columns={columns} dataSource={repos} loading={loading} pagination={false} />
+    <Card
+      title="仓库"
+      extra={
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={reload}>
+            刷新
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
+            添加仓库
+          </Button>
+        </Space>
+      }
+    >
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+        项目为多 git 库组合：代码/文档/配置各有角色；恰好一个主库（projects.path 为主库镜像）。「从 Git 克隆」由服务端拉取到项目工作区。
+      </Typography.Paragraph>
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={repos}
+        loading={loading}
+        pagination={false}
+        locale={{ emptyText: '暂无仓库。点击「添加仓库」登记本地路径或从 Git 克隆。' }}
+      />
       <Drawer title={editing ? '编辑仓库' : '添加仓库'} open={open} onClose={() => setOpen(false)}
         width={600} destroyOnHidden
         footer={
@@ -302,6 +317,6 @@ export default function ReposPage() {
           reloadProject()
         }}
       />
-    </Space>
+    </Card>
   )
 }

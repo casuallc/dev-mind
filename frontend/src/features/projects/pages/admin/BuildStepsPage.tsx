@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
+  Card,
   Form,
   Input,
   InputNumber,
@@ -15,7 +16,7 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { ArrowDownOutlined, ArrowUpOutlined, PlusOutlined } from '@ant-design/icons'
+import { ArrowDownOutlined, ArrowUpOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import {
   addBuildStep,
@@ -122,16 +123,30 @@ export default function BuildStepsPage() {
   ]
 
   return (
-    <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Space>
-        <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-          添加步骤
-        </Button>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          有序构建步骤，按顺序执行；位置可选本机（LOCAL）或远程服务器（REMOTE，委托 CAP-08）。
-        </Typography.Text>
-      </Space>
-      <Table rowKey="id" size="small" columns={columns} dataSource={steps} loading={loading} pagination={false} />
+    <Card
+      title="构建配置"
+      extra={
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={reload}>
+            刷新
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
+            添加步骤
+          </Button>
+        </Space>
+      }
+    >
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+        有序构建步骤，按顺序执行；位置可选本机（LOCAL）或远程服务器（REMOTE，委托 CAP-08）。
+      </Typography.Paragraph>
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={steps}
+        loading={loading}
+        pagination={false}
+        locale={{ emptyText: '暂无构建步骤。点击「添加步骤」创建第一个。' }}
+      />
       <Modal title={editing ? '编辑构建步骤' : '添加构建步骤'} open={open} onCancel={() => setOpen(false)}
         onOk={() => form.submit()} okText="保存" width={560}>
         <Form form={form} layout="vertical" onFinish={onSave}>
@@ -152,6 +167,6 @@ export default function BuildStepsPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </Space>
+    </Card>
   )
 }
