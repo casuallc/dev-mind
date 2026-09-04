@@ -19,6 +19,7 @@ import {
 } from 'antd'
 import { useEffect, useState } from 'react'
 import type { ColumnsType } from 'antd/es/table'
+import { ReloadOutlined } from '@ant-design/icons'
 import {
   createRelease,
   deleteRelease,
@@ -145,43 +146,26 @@ export default function ReleaseTab({ id, readOnly }: {
       render: (v: string) => fmtTime(v),
     },
     {
-      title: '操作', key: 'ops', width: 200,
+      title: '操作', key: 'ops', width: 90,
       render: (_: unknown, r) => (
-        <Space size={4}>
-          <Button size="small" onClick={() => setDetail(r)}>详情</Button>
-          {!readOnly && r.status === 'PLANNED' && (
-            <Button size="small" type="primary" onClick={() => doAction(() => executeRelease(r.id), '已开始执行')}>
-              执行
-            </Button>
-          )}
-          {!readOnly && r.status !== 'RUNNING' && r.status !== 'ROLLED_BACK' && (
-            <Popconfirm title={`回滚 v${r.version}？将删除 tag 并移除制品引用`} onConfirm={() => doAction(() => rollbackRelease(r.id), '已回滚')}>
-              <Button size="small" danger>回滚</Button>
-            </Popconfirm>
-          )}
-          {!readOnly && (
-            <Popconfirm title="删除该发版记录？" onConfirm={() => deleteRelease(r.id).then(() => { message.success('已删除'); load() })}>
-              <Button size="small" type="text">删</Button>
-            </Popconfirm>
-          )}
-        </Space>
+        <Button size="small" onClick={() => setDetail(r)}>管理</Button>
       ),
     },
   ]
 
-  const doAction = async (fn: () => Promise<ReleaseRecord>, ok: string) => {
-    try {
-      const nd = await fn()
-      setDetail(nd)
-      message.success(ok)
-      load()
-    } catch (e) {
-      message.error((e as Error).message)
-    }
-  }
-
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Card
+      title="发版"
+      extra={
+        <Button icon={<ReloadOutlined />} onClick={load}>
+          刷新
+        </Button>
+      }
+    >
+      <Typography.Paragraph type="secondary">
+        发版执行器（CAP-11）：维护发版配置（Nexus 仓库/推送模板/版本规则/执行方式），创建发版并在历史中跟踪执行与回滚；点「管理」开 Drawer 看实时日志并操作。
+      </Typography.Paragraph>
+      <Space direction="vertical" size={12} style={{ width: '100%' }}>
       <Card size="small" title="发版配置（CAP-11）">
         <Form form={configForm} layout="inline" onFinish={onSaveConfig} style={{ rowGap: 8, columnGap: 8 }}>
           <Form.Item label="Nexus 仓库" name="nexusRepo">
@@ -245,12 +229,18 @@ export default function ReleaseTab({ id, readOnly }: {
       )}
 
       <Card size="small" title="发版历史">
-        <Table rowKey="id" size="small" columns={columns} dataSource={rows} pagination={{ pageSize: 8 }}
-          locale={{ emptyText: '暂无发版记录' }} scroll={{ x: 1000 }} />
+        <Table rowKey="id" columns={columns} dataSource={rows} pagination={false}
+          locale={{
+            emptyText: readOnly
+              ? '暂无发版记录'
+              : '暂无发版记录。先在上方保存发版配置，再在「新建发版」创建并执行第一个发版。',
+          }}
+          scroll={{ x: 1000 }} />
       </Card>
 
       <DetailDrawer record={detail} onClose={() => setDetail(null)} onChanged={load} readOnly={readOnly} />
-    </Space>
+      </Space>
+    </Card>
   )
 }
 
@@ -354,7 +344,20 @@ function DetailDrawer({ record, onClose, onChanged, readOnly }: {
             )}
             {!readOnly && d.status !== 'RUNNING' && d.status !== 'ROLLED_BACK' && (
               <Popconfirm title="回滚该发版？将删除 tag 并移除制品引用" onConfirm={() => act(() => rollbackRelease(d.id), '已回滚')}>
-                <Button danger loading={busy}>回滚</Button>
+                <Button loading={busy}>回滚</Button>
+              </Popconfirm>
+            )}
+            {!readOnly && (
+              <Popconfirm
+                title="删除该发版记录？"
+                onConfirm={async () => {
+                  await deleteRelease(d.id)
+                  message.success('已删除')
+                  onChanged()
+                  onClose()
+                }}
+              >
+                <Button danger>删除</Button>
               </Popconfirm>
             )}
           </Space>
