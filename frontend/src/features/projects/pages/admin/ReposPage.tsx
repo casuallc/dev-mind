@@ -25,6 +25,7 @@ import { useOutletContext, useParams } from 'react-router-dom'
 import { addRepo, cloneRepo, deleteRepo, listRepos, setPrimaryRepo, updateRepo } from '../../api'
 import type { ProjectRepo, ProjectRepoInput } from '../../types'
 import CloneLogDrawer, { CLONE_STATUS_COLOR } from '../../components/CloneLogDrawer'
+import CloneAuthHint from '../../components/CloneAuthHint'
 import { useGitIntegrations } from '../../hooks/useGitIntegrations'
 
 const ROLE_OPTIONS = ['CODE', 'DOCS', 'CONFIG']
@@ -40,7 +41,9 @@ export default function ReposPage() {
   const [logRepo, setLogRepo] = useState<ProjectRepo | null>(null)
   const [form] = Form.useForm()
   const sourceType = Form.useWatch('sourceType', form) ?? 'LOCAL'
-  const { options: integrationOptions } = useGitIntegrations()
+  const remoteUrl = Form.useWatch('remoteUrl', form)
+  const integrationId = Form.useWatch('integrationId', form)
+  const { options: integrationOptions, integrations } = useGitIntegrations()
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -284,6 +287,7 @@ export default function ReposPage() {
               >
                 <Select allowClear placeholder="不选 = 公开仓库匿名克隆" options={integrationOptions} />
               </Form.Item>
+              <CloneAuthHint remoteUrl={remoteUrl} integrationId={integrationId} integrations={integrations} />
             </>
           ) : (
             <Form.Item label="本地仓库路径" name="path" rules={[{ required: true, message: '请输入 git 仓库路径' }]}>

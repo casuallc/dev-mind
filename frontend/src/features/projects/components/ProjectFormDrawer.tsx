@@ -5,6 +5,7 @@ import { Button, Drawer, Form, Input, Radio, Select, Space, Switch, message } fr
 import { createProject, updateProject } from '../api'
 import type { Project, ProjectInput } from '../types'
 import { useGitIntegrations } from '../hooks/useGitIntegrations'
+import CloneAuthHint from './CloneAuthHint'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
 
@@ -25,7 +26,9 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
   const [form] = Form.useForm<ProjectInput>()
   const [saving, setSaving] = useState(false)
   const sourceType = Form.useWatch('sourceType', form) ?? 'LOCAL'
-  const { options: integrationOptions } = useGitIntegrations()
+  const remoteUrl = Form.useWatch('remoteUrl', form)
+  const integrationId = Form.useWatch('integrationId', form)
+  const { options: integrationOptions, integrations } = useGitIntegrations()
   const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
 
   useEffect(() => {
@@ -146,6 +149,7 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
                 options={integrationOptions}
               />
             </Form.Item>
+            <CloneAuthHint remoteUrl={remoteUrl} integrationId={integrationId} integrations={integrations} />
           </>
         ) : (
           <Form.Item
