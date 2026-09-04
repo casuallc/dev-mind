@@ -137,13 +137,11 @@ export default function IntegrationsPage() {
 
   return (
     <Card
-      size="small"
       title="平台集成"
       extra={
         <Space>
-          <Button size="small" icon={<ReloadOutlined />} onClick={reload} />
+          <Button icon={<ReloadOutlined />} onClick={reload}>刷新</Button>
           <Button
-            size="small"
             type="primary"
             icon={<PlusOutlined />}
             onClick={() => {
@@ -156,12 +154,15 @@ export default function IntegrationsPage() {
         </Space>
       }
     >
+      <Typography.Paragraph type="secondary">
+        管理 GitLab/GitHub/Jira 实例的接入凭据，供代码事件接入与 Jira 需求同步使用。
+      </Typography.Paragraph>
       <Table<Integration>
         rowKey="id"
-        size="small"
         loading={loading}
         dataSource={items}
         pagination={false}
+        locale={{ emptyText: '还没有集成实例，点右上角「新建集成」接入 GitLab / GitHub / Jira' }}
         columns={[
           {
             title: '类型',

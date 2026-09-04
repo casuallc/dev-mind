@@ -167,9 +167,11 @@ export default function JiraSyncTab({ projectId }: Props) {
 
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+        把 Jira issue 单向拉取为本项目的 DRAFT 需求，支持按间隔自动轮询。
+      </Typography.Paragraph>
       <Space wrap>
         <Button
-          size="small"
           type="primary"
           icon={<PlusOutlined />}
           disabled={jiraIntegrations.length === 0}
@@ -180,7 +182,7 @@ export default function JiraSyncTab({ projectId }: Props) {
         >
           新建同步配置
         </Button>
-        <Button size="small" icon={<ReloadOutlined />} onClick={reload} />
+        <Button icon={<ReloadOutlined />} onClick={reload}>刷新</Button>
         {jiraIntegrations.length === 0 && (
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             请先在「平台集成」中新建 JIRA 类型集成
@@ -190,11 +192,15 @@ export default function JiraSyncTab({ projectId }: Props) {
 
       <Table<JiraSyncConfig>
         rowKey="id"
-        size="small"
         loading={loading}
         dataSource={configs}
         pagination={false}
-        locale={{ emptyText: '暂无 Jira 同步配置' }}
+        locale={{
+          emptyText:
+            jiraIntegrations.length === 0
+              ? '请先在「平台集成」中新建 JIRA 类型集成'
+              : '暂无同步配置，点「新建同步配置」开始拉取 Jira issue',
+        }}
         columns={[
           {
             title: 'Jira 项目',
@@ -247,8 +253,6 @@ export default function JiraSyncTab({ projectId }: Props) {
               <Space size={4}>
                 <Button
                   size="small"
-                  type="primary"
-                  ghost
                   icon={<CloudDownloadOutlined />}
                   loading={runningId === row.id}
                   onClick={() => onRun(row)}
