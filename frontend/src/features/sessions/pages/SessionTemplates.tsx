@@ -163,7 +163,14 @@ export default function SessionTemplates() {
         <Typography.Text code>{'{{project}}'}</Typography.Text>、{' '}
         <Typography.Text code>{'{{branch}}'}</Typography.Text> 变量占位，新建会话时选择模板自动渲染。
       </Typography.Paragraph>
-      <Table rowKey="id" loading={loading} columns={columns} dataSource={templates} pagination={false} />
+      <Table
+        rowKey="id"
+        loading={loading}
+        columns={columns}
+        dataSource={templates}
+        pagination={false}
+        locale={{ emptyText: '暂无模板。点击右上角「新建模板」创建第一个。' }}
+      />
 
       <Modal
         title={editing ? '编辑模板' : '新建模板'}

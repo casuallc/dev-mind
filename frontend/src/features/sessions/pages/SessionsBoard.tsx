@@ -324,6 +324,9 @@ export default function SessionsBoard() {
         </Space>
       }
     >
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+        管理本机与远程节点上的 Agent 会话——工作台并排盯活跃会话，列表视图可按状态筛选、搜索全部会话。
+      </Typography.Paragraph>
       {view === 'workbench' ? (
         workbench.length === 0 ? (
           <Empty description={showAll ? '暂无会话。点击「新建会话」创建第一个。' : '暂无活跃会话，点击「新建会话」发起一个新 agent。'} />
