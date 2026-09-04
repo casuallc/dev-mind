@@ -55,8 +55,7 @@ public class SessionRuntime extends AbstractSessionRuntime {
                 new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = r.readLine()) != null) {
-                SessionEvent ev = parser.parse(nextSeq(), line, "stdout");
-                if (ev != null) {
+                for (SessionEvent ev : parser.parse(this::nextSeq, line, "stdout")) {
                     publish(ev);
                 }
             }
@@ -78,8 +77,7 @@ public class SessionRuntime extends AbstractSessionRuntime {
                 new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = r.readLine()) != null) {
-                SessionEvent ev = parser.parse(nextSeq(), line, "stderr");
-                if (ev != null) {
+                for (SessionEvent ev : parser.parse(this::nextSeq, line, "stderr")) {
                     publish(ev);
                 }
             }

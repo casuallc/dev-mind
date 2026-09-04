@@ -109,8 +109,7 @@ public class RunnerSessionRegistry {
                 stderr ? s.process.getErrorStream() : s.process.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = r.readLine()) != null) {
-                SessionEvent ev = parser.parse(s.seq.incrementAndGet(), line, source);
-                if (ev != null) {
+                for (SessionEvent ev : parser.parse(s.seq::incrementAndGet, line, source)) {
                     sendEvent(s.sessionId, ev);
                 }
             }
