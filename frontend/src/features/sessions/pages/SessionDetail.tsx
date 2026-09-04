@@ -38,7 +38,7 @@ import {
 } from '../api'
 import type { DiffView, SessionEvent, SessionSummary } from '../types'
 import { useSessionStream } from '../hooks/useSessionStream'
-import EventStream from '../components/EventStream'
+import ChatStream from '../components/ChatStream'
 import SedimentExperienceModal from '../../knowledge/components/SedimentExperienceModal'
 import { fmtTime } from '../../../shared/utils/format'
 
@@ -288,9 +288,10 @@ export default function SessionDetail() {
           <Descriptions.Item label="项目">{session.projectId}</Descriptions.Item>
           <Descriptions.Item label="PID">{session.pid ?? '-'}</Descriptions.Item>
           <Descriptions.Item label="模型">{session.model || '默认'}</Descriptions.Item>
+          <Descriptions.Item label="执行节点">{session.agentNodeId || '本地'}</Descriptions.Item>
           <Descriptions.Item label="创建">{fmtTime(session.createdAt)}</Descriptions.Item>
           <Descriptions.Item label="完成">{fmtTime(session.finishedAt)}</Descriptions.Item>
-          <Descriptions.Item label="Worktree" span={3}>
+          <Descriptions.Item label="Worktree" span={2}>
             <Typography.Text code copyable style={{ fontSize: 12 }}>
               {session.worktreePath || '-'}
             </Typography.Text>
@@ -337,49 +338,56 @@ export default function SessionDetail() {
         </Card>
       )}
 
-      {/* 实时输出（共享终端流组件） */}
+      {/* 对话（问答气泡 + 工具卡片 + 输入） */}
       <Card
         size="small"
-        title="实时输出"
+        title="对话"
         extra={
           <Button size="small" icon={<PoweroffOutlined />} onClick={loadSession}>
             刷新
           </Button>
         }
       >
-        <EventStream
+        <ChatStream
           events={history}
+          taskSpec={session.taskSpec}
+          model={session.model}
+          maxHeight="56vh"
           emptyText={`等待事件…（${fatal ? '会话已结束' : connected ? '连接正常' : '重连中'}）`}
         />
-      </Card>
-
-      {/* 输入框 */}
-      <Card size="small" style={{ background: '#fafafa' }}>
-        <Space.Compact style={{ width: '100%' }}>
-          <Input
-            disabled={!canInput}
-            value={inputText}
-            placeholder={
-              canInput
-                ? session.state === 'WAITING_INPUT'
-                  ? '回复 agent 的提问，回车发送…'
-                  : session.state === 'WAITING_AUTH'
-                    ? '（正在等待授权，可在上方允许/拒绝）'
-                    : '会话运行中，可注入指令…'
-                : '会话已结束，无法输入'
-            }
-            onChange={(e) => setInputText(e.target.value)}
-            onPressEnter={() => onSend(inputText)}
-          />
-          <Button
-            type="primary"
-            icon={<SendOutlined />}
-            disabled={!canInput || !inputText.trim()}
-            onClick={() => onSend(inputText)}
-          >
-            发送
-          </Button>
-        </Space.Compact>
+        <div style={{ borderTop: '1px solid #f0f0f0', margin: '8px -12px 0', padding: '12px 12px 0' }}>
+          <Space.Compact style={{ width: '100%' }}>
+            <Input.TextArea
+              autoSize={{ minRows: 1, maxRows: 5 }}
+              disabled={!canInput}
+              value={inputText}
+              placeholder={
+                canInput
+                  ? session.state === 'WAITING_INPUT'
+                    ? '回复 agent 的提问，Enter 发送 / Shift+Enter 换行…'
+                    : session.state === 'WAITING_AUTH'
+                      ? '（正在等待授权，可在上方允许/拒绝）'
+                      : '会话运行中，可注入指令，Enter 发送 / Shift+Enter 换行…'
+                  : '会话已结束，无法输入'
+              }
+              onChange={(e) => setInputText(e.target.value)}
+              onPressEnter={(e) => {
+                if (!e.shiftKey) {
+                  e.preventDefault()
+                  onSend(inputText)
+                }
+              }}
+            />
+            <Button
+              type="primary"
+              icon={<SendOutlined />}
+              disabled={!canInput || !inputText.trim()}
+              onClick={() => onSend(inputText)}
+            >
+              发送
+            </Button>
+          </Space.Compact>
+        </div>
       </Card>
 
       {/* Diff 弹窗 */}
