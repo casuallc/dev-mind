@@ -35,6 +35,7 @@ public class NotificationEntity {
     private String title;
 
     @Lob
+    @Column(length = 16_777_216)
     private String body;
 
     /** 关联实体类型：SESSION / PROJECT / DOC / … */
@@ -47,10 +48,12 @@ public class NotificationEntity {
 
     /** 快捷动作 JSON：[{"action":"authorize","label":"允许授权"},…]（FR-04） */
     @Lob
+    @Column(length = 16_777_216)
     private String actions;
 
     /** 各通道发送结果 JSON：{"ws":"SENT","bark":"SKIPPED:未配置"…} */
     @Lob
+    @Column(length = 16_777_216)
     private String channelStatus;
 
     private Instant readAt;

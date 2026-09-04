@@ -54,10 +54,12 @@ public class SkillEntity {
 
     /** SKILL.md 正文（frontmatter 之后部分） */
     @Lob
+    @Column(length = 16_777_216)
     private String contentMd;
 
     /** 其余 frontmatter 键的 JSON（如 allowed-tools），导出时原样拼回 */
     @Lob
+    @Column(length = 16_777_216)
     private String extraFrontmatter;
 
     /** 标签，逗号拼接存储；为后续按项目匹配注入预留 */

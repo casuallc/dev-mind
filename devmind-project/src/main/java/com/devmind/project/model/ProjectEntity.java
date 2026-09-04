@@ -35,7 +35,7 @@ public class ProjectEntity {
     private String tags;
 
     @Lob
-    @Column(name = "description")
+    @Column(name = "description", length = 16_777_216)
     private String description;
 
     /** ACTIVE / ARCHIVED */
@@ -64,7 +64,7 @@ public class ProjectEntity {
 
     /** 项目上下文摘要（FR-07，可人工修正） */
     @Lob
-    @Column(name = "context_summary")
+    @Column(name = "context_summary", length = 16_777_216)
     private String contextSummary;
 
     @Column(name = "summary_generated_at")

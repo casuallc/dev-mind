@@ -43,14 +43,15 @@ public class TestCaseResultEntity {
     private String status;
 
     @Lob
-    @Column(name = "request_summary")
+    @Column(name = "request_summary", length = 16_777_216)
     private String requestSummary;
 
     @Lob
-    @Column(name = "response_summary")
+    @Column(name = "response_summary", length = 16_777_216)
     private String responseSummary;
 
     @Lob
+    @Column(length = 16_777_216)
     private String error;
 
     private Long duration;

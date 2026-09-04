@@ -27,6 +27,7 @@ public class DocumentVersionEntity {
     private int versionNo;
 
     @Lob
+    @Column(length = 16_777_216)
     private String contentMd;
 
     /** docs-repo 对应 commit 的 sha（git 同步成功后有值） */

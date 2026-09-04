@@ -31,7 +31,7 @@ public class SessionEntity {
     private String requirementId;
 
     @Lob
-    @Column(name = "task_spec")
+    @Column(name = "task_spec", length = 16_777_216)
     private String taskSpec;
 
     @Column(name = "base_branch", length = 128)
@@ -56,6 +56,7 @@ public class SessionEntity {
     private String createdBy;
 
     @Lob
+    @Column(length = 16_777_216)
     private String summary;
 
     @Column(name = "created_at")

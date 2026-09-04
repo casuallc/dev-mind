@@ -62,7 +62,7 @@ public class IntegrationEntity {
 
     /** 连接器专属配置 JSON（预留） */
     @Lob
-    @Column(name = "config_json")
+    @Column(name = "config_json", length = 16_777_216)
     private String configJson;
 
     @Column(name = "created_by", length = 64)

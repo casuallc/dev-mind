@@ -51,7 +51,7 @@ public class DeploymentEntity {
 
     /** 创建时渲染好的计划（JSON: [{name,type,templateCode,params}]） */
     @Lob
-    @Column(name = "plan_json")
+    @Column(name = "plan_json", length = 16_777_216)
     private String planJson;
 
     /** PLANNED / RUNNING / SUCCESS / FAILED / ROLLED_BACK */
@@ -77,11 +77,11 @@ public class DeploymentEntity {
     private boolean confirmed;
 
     @Lob
-    @Column(name = "logs_text")
+    @Column(name = "logs_text", length = 16_777_216)
     private String logsText;
 
     @Lob
-    @Column(name = "error_summary")
+    @Column(name = "error_summary", length = 16_777_216)
     private String errorSummary;
 
     @Column(name = "created_by", length = 64)

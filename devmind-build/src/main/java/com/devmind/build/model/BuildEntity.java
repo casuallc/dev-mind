@@ -51,7 +51,7 @@ public class BuildEntity {
 
     /** 触发时固化的步骤清单（JSON: [{name,command,workingDir,location}]） */
     @Lob
-    @Column(name = "steps_snapshot")
+    @Column(name = "steps_snapshot", length = 16_777_216)
     private String stepsSnapshot;
 
     /** 构建成功后登记的制品引用（FR-04，供部署/发版） */
@@ -69,11 +69,11 @@ public class BuildEntity {
     private Integer exitCode;
 
     @Lob
-    @Column(name = "error_summary")
+    @Column(name = "error_summary", length = 16_777_216)
     private String errorSummary;
 
     @Lob
-    @Column(name = "logs_text")
+    @Column(name = "logs_text", length = 16_777_216)
     private String logsText;
 
     @Column(name = "started_at")

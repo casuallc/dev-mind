@@ -59,7 +59,7 @@ public class AuditLogEntity {
 
     /** 渲染后的命令/脚本（模板内容，不含凭证） */
     @Lob
-    @Column(name = "command")
+    @Column(name = "command", length = 16_777_216)
     private String command;
 
     @Column(name = "exit_code")
@@ -70,7 +70,7 @@ public class AuditLogEntity {
 
     /** 输出摘要（stdout/stderr 尾段，截断） */
     @Lob
-    @Column(name = "detail")
+    @Column(name = "detail", length = 16_777_216)
     private String detail;
 
     @Column(name = "duration_ms")

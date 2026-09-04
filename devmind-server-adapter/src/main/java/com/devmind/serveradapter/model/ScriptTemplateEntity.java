@@ -34,12 +34,12 @@ public class ScriptTemplateEntity {
 
     /** 模板正文（shell 脚本，含 ${param} 占位符） */
     @Lob
-    @Column(name = "template_text")
+    @Column(name = "template_text", length = 16_777_216)
     private String templateText;
 
     /** JSON：参数 schema [{name,required,label,default}] */
     @Lob
-    @Column(name = "params_schema")
+    @Column(name = "params_schema", length = 16_777_216)
     private String paramsSchema;
 
     /** 逗号分隔：允许使用的能力（build/deploy/release/test/logs/exec），空=不限 */

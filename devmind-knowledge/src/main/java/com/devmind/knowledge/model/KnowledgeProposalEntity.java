@@ -24,6 +24,7 @@ public class KnowledgeProposalEntity {
     private String title;
 
     @Lob
+    @Column(length = 16_777_216)
     private String contentMd;
 
     /** 期望去向：project | global */

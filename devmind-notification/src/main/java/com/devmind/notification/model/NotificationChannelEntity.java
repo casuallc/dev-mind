@@ -34,6 +34,7 @@ public class NotificationChannelEntity {
 
     /** 通道专属配置 JSON，如 bark 的 {"server":"https://api.day.app","key":""} */
     @Lob
+    @Column(length = 16_777_216)
     private String configJson;
 
     public Long getId() { return id; }

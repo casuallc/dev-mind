@@ -19,6 +19,7 @@ public class NotificationPrefsEntity {
 
     /** 静默配置 JSON：{"eventTypes":["SESSION_DONE"],"entityIds":["abc123"]} */
     @Lob
+    @Column(length = 16_777_216)
     private String mutesJson;
 
     /** 免打扰时段 "HH:mm"，如 23:00 ~ 07:30；为空表示不启用 */

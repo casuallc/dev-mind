@@ -47,19 +47,19 @@ public class TestCaseEntity {
     private String path;
 
     @Lob
-    @Column(name = "params_json")
+    @Column(name = "params_json", length = 16_777_216)
     private String paramsJson;
 
     @Lob
-    @Column(name = "headers_json")
+    @Column(name = "headers_json", length = 16_777_216)
     private String headersJson;
 
     @Lob
-    @Column(name = "body_json")
+    @Column(name = "body_json", length = 16_777_216)
     private String bodyJson;
 
     @Lob
-    @Column(name = "expected_json")
+    @Column(name = "expected_json", length = 16_777_216)
     private String expectedJson;
 
     private Boolean enabled = true;

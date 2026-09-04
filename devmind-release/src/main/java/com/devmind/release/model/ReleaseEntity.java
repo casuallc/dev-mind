@@ -70,7 +70,7 @@ public class ReleaseEntity {
     private Long rollbackOf;
 
     @Lob
-    @Column(name = "logs_text")
+    @Column(name = "logs_text", length = 16_777_216)
     private String logsText;
 
     @Column(name = "error_summary")

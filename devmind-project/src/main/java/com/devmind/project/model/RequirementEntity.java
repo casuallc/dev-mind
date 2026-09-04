@@ -53,7 +53,7 @@ public class RequirementEntity {
     private String title;
 
     @Lob
-    @Column(name = "description")
+    @Column(name = "description", length = 16_777_216)
     private String description;
 
     @Column(length = 24)

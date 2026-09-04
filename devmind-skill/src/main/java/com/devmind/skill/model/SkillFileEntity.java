@@ -37,9 +37,11 @@ public class SkillFileEntity {
     private boolean binary;
 
     @Lob
+    @Column(length = 16_777_216)
     private String contentText;
 
     @Lob
+    @Column(length = 16_777_216)
     private byte[] contentBytes;
 
     /** 展示用（text/markdown、text/x-sh、image/png…），可空 */

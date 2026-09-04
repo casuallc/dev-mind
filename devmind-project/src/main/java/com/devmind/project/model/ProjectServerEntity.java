@@ -38,7 +38,7 @@ public class ProjectServerEntity {
 
     /** JSON 连接配置（主机/用户/端口/密钥路径 或 base-url/token 引用） */
     @Lob
-    @Column(name = "access_config")
+    @Column(name = "access_config", length = 16_777_216)
     private String accessConfig;
 
     /** 逗号分隔的能力列表（build/deploy/test/release） */

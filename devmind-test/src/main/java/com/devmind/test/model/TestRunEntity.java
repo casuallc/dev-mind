@@ -36,7 +36,7 @@ public class TestRunEntity {
     private String workItemId;
 
     @Lob
-    @Column(name = "suite_ids_json")
+    @Column(name = "suite_ids_json", length = 16_777_216)
     private String suiteIdsJson;
 
     @Column(name = "deployment_id")
@@ -57,18 +57,18 @@ public class TestRunEntity {
     private String status;
 
     @Lob
-    @Column(name = "summary_json")
+    @Column(name = "summary_json", length = 16_777_216)
     private String summaryJson;
 
     @Column(name = "report_doc_id")
     private Long reportDocId;
 
     @Lob
-    @Column(name = "error_summary")
+    @Column(name = "error_summary", length = 16_777_216)
     private String errorSummary;
 
     @Lob
-    @Column(name = "logs_text")
+    @Column(name = "logs_text", length = 16_777_216)
     private String logsText;
 
     /** user / deploy */

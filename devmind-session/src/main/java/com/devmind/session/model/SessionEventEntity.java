@@ -31,6 +31,7 @@ public class SessionEventEntity {
     private String type;
 
     @Lob
+    @Column(length = 16_777_216)
     private String content;
 
     @Column(length = 8)
@@ -38,7 +39,7 @@ public class SessionEventEntity {
 
     /** 结构化负载（tool_use 名称/参数、permission_request 的 requestId/options、result 的 isError 等），JSON 文本。 */
     @Lob
-    @Column(name = "payload")
+    @Column(name = "payload", length = 16_777_216)
     private String payload;
 
     @Column(name = "created_at")

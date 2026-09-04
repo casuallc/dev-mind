@@ -38,6 +38,7 @@ public class KnowledgeEntryEntity {
     private String path;
 
     @Lob
+    @Column(length = 16_777_216)
     private String contentMd;
 
     /** 标签，逗号分隔（global 条目用于按项目 tags 匹配注入） */

@@ -43,17 +43,17 @@ public class EnvironmentEntity {
 
     /** JSON 数组：servers 表 id 列表 */
     @Lob
-    @Column(name = "server_ids_json")
+    @Column(name = "server_ids_json", length = 16_777_216)
     private String serverIdsJson;
 
     /** JSON map：环境变量（部署/测试时注入） */
     @Lob
-    @Column(name = "variables_json")
+    @Column(name = "variables_json", length = 16_777_216)
     private String variablesJson;
 
     /** JSON 数组：密钥名称列表（仅名称引用，不存值） */
     @Lob
-    @Column(name = "secrets_json")
+    @Column(name = "secrets_json", length = 16_777_216)
     private String secretsJson;
 
     @Column(name = "created_at")

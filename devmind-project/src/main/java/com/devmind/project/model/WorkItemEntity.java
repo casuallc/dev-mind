@@ -58,7 +58,7 @@ public class WorkItemEntity {
 
     /** 执行输入：起 Session 时作为 taskSpec 注入（拆分时由 AI 生成、人可编辑） */
     @Lob
-    @Column(name = "spec")
+    @Column(name = "spec", length = 16_777_216)
     private String spec;
 
     @Column(length = 24)

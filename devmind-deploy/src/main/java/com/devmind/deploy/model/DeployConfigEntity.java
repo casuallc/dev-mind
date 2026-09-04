@@ -27,11 +27,11 @@ public class DeployConfigEntity {
     private String projectId;
 
     @Lob
-    @Column(name = "steps_json")
+    @Column(name = "steps_json", length = 16_777_216)
     private String stepsJson;
 
     @Lob
-    @Column(name = "rollback_steps_json")
+    @Column(name = "rollback_steps_json", length = 16_777_216)
     private String rollbackStepsJson;
 
     @Column(name = "updated_at")

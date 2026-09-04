@@ -26,6 +26,7 @@ public class SessionTemplateEntity {
     private String name;
 
     @Lob
+    @Column(length = 16_777_216)
     private String prompt;
 
     @Column(name = "sort_order")
