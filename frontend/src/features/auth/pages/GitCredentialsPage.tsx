@@ -1,5 +1,5 @@
-import { Button, Form, Input, Modal, Popconfirm, Space, Table, Tag, Typography, message } from 'antd'
-import { ApiOutlined, PlusOutlined } from '@ant-design/icons'
+import { Button, Card, Form, Input, Modal, Popconfirm, Space, Table, Tag, Typography, message } from 'antd'
+import { ApiOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import {
   createGitCredential,
@@ -82,14 +82,20 @@ export default function GitCredentialsPage() {
   }
 
   return (
-    <div>
-      <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
-        <h2 style={{ margin: 0 }}>我的 Git 凭证</h2>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          新增凭证
-        </Button>
-      </Space>
-      <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
+    <Card
+      title="我的 Git 凭证"
+      extra={
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={reload}>
+            刷新
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            新建凭证
+          </Button>
+        </Space>
+      }
+    >
+      <Typography.Paragraph type="secondary">
         每个 git 平台（按 host）一条：会话内 Agent 提交以这里的署名落 author/committer；
         WI 分支推送优先使用你的个人 PAT，未配置时回退项目绑定的平台集成凭证。
       </Typography.Paragraph>
@@ -98,6 +104,7 @@ export default function GitCredentialsPage() {
         loading={loading}
         dataSource={items}
         pagination={false}
+        locale={{ emptyText: '暂无凭证，点击右上角「新建凭证」添加你的第一个 Git 平台 PAT' }}
         columns={[
           { title: '名称', dataIndex: 'label' },
           { title: '平台地址', dataIndex: 'baseUrl' },
@@ -208,6 +215,6 @@ export default function GitCredentialsPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </Card>
   )
 }
