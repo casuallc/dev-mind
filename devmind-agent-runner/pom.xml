@@ -60,6 +60,10 @@
          下标错位合并报错，正确姿势是定义 start-class 属性并直接继承该执行 -->
     <properties>
         <start-class>com.devmind.agent.runner.AgentRunnerMain</start-class>
+        <!-- runner 版本串：每次构建唯一（项目版本 + 构建时间戳），节点据此与托管包比对出「可升级」；
+             恒等于 project.version 会让比对永远不触发 -->
+        <maven.build.timestamp.format>yyyyMMdd.HHmm</maven.build.timestamp.format>
+        <runner.version>${project.version}-b${maven.build.timestamp}</runner.version>
     </properties>
 
     <build>
