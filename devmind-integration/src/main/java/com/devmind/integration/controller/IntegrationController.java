@@ -61,6 +61,12 @@ public class IntegrationController {
         return service.testConnection(id);
     }
 
+    /** FR-02 未保存配置的连接测试（新建/编辑表单内预检，凭据不落库） */
+    @PostMapping("/test")
+    public IntegrationConnector.TestResult testDraft(@RequestBody IntegrationRequest req) {
+        return service.testConnectionDraft(req);
+    }
+
     /** FR-03 绑定辅助：列出 token 可见的平台项目 */
     @GetMapping("/{id}/projects")
     public List<IntegrationConnector.ExternalProject> projects(@PathVariable Long id) {

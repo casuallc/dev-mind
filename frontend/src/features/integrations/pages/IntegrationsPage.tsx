@@ -2,6 +2,7 @@
 // GitLab/GitHub（push 分支/MR·PR/Release）与 Jira（issue 同步）共用同一 integrations 表。
 import { useCallback, useEffect, useState } from 'react'
 import {
+  Badge,
   Button,
   Card,
   Drawer,
@@ -21,9 +22,10 @@ import {
   createIntegration,
   listIntegrations,
   testIntegration,
+  testIntegrationDraft,
   updateIntegration,
 } from '../api'
-import type { Integration, IntegrationInput } from '../types'
+import type { Integration, IntegrationInput, IntegrationTestResult } from '../types'
 
 const TYPE_OPTIONS = [
   { value: 'GITLAB', label: 'GitLab（代码平台）' },
@@ -38,13 +40,20 @@ const AUTH_OPTIONS = [
 
 const TYPE_COLOR: Record<string, string> = { GITLAB: 'orange', GITHUB: 'default', JIRA: 'blue' }
 
+/** 列表连通性实时探测结果（逐行异步更新） */
+type ConnState =
+  | { phase: 'probing' }
+  | { phase: 'done'; ok: boolean; message: string; detail?: string | null }
+
 export default function IntegrationsPage() {
   const [items, setItems] = useState<Integration[]>([])
   const [loading, setLoading] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [editing, setEditing] = useState<Integration | null>(null)
   const [testingId, setTestingId] = useState<number | null>(null)
+  const [testingForm, setTestingForm] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [conn, setConn] = useState<Record<number, ConnState>>({})
   const [form] = Form.useForm<IntegrationInput>()
   const formType = Form.useWatch('type', form)
   const formAuthType = Form.useWatch('authType', form)
@@ -52,16 +61,38 @@ export default function IntegrationsPage() {
   const isGitHub = formType === 'GITHUB'
   const isBasic = isJira && formAuthType === 'BASIC'
 
+  /** 列表加载后逐行实时探测连通性（结果回填「连通性」列） */
+  const probeAll = useCallback((list: Integration[]) => {
+    setConn(Object.fromEntries(list.map(i => [i.id, { phase: 'probing' as const }])))
+    list.forEach(i => {
+      testIntegration(i.id)
+        .then(r =>
+          setConn(prev => ({
+            ...prev,
+            [i.id]: { phase: 'done', ok: r.ok, message: r.message, detail: r.detail },
+          })),
+        )
+        .catch(e =>
+          setConn(prev => ({
+            ...prev,
+            [i.id]: { phase: 'done', ok: false, message: (e as Error).message },
+          })),
+        )
+    })
+  }, [])
+
   const reload = useCallback(async () => {
     setLoading(true)
     try {
-      setItems(await listIntegrations())
+      const list = await listIntegrations()
+      setItems(list)
+      probeAll(list)
     } catch (e) {
       message.error(`加载集成失败：${(e as Error).message}`)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [probeAll])
 
   useEffect(() => {
     reload()
@@ -111,17 +142,63 @@ export default function IntegrationsPage() {
 
   const onTest = async (row: Integration) => {
     setTestingId(row.id)
+    setConn(prev => ({ ...prev, [row.id]: { phase: 'probing' } }))
     try {
       const r = await testIntegration(row.id)
+      setConn(prev => ({
+        ...prev,
+        [row.id]: { phase: 'done', ok: r.ok, message: r.message, detail: r.detail },
+      }))
       if (r.ok) {
         message.success(`${row.name}：${r.message}${r.detail ? `（${r.detail}）` : ''}`)
       } else {
         message.error(`${row.name}：${r.message}${r.detail ? `（${r.detail}）` : ''}`)
       }
     } catch (e) {
+      setConn(prev => ({
+        ...prev,
+        [row.id]: { phase: 'done', ok: false, message: (e as Error).message },
+      }))
       message.error(`测试失败：${(e as Error).message}`)
     } finally {
       setTestingId(null)
+    }
+  }
+
+  /** 表单内「测试连接」：新建走未保存试连；编辑且 token 留空（凭据未改）时测已保存实例 */
+  const onTestForm = async () => {
+    let values: IntegrationInput
+    try {
+      values = await form.validateFields(['type', 'baseUrl', 'authType', 'username', 'token'])
+    } catch {
+      return // 校验未过，错误已标红
+    }
+    setTestingForm(true)
+    try {
+      const r: IntegrationTestResult =
+        editing && !values.token
+          ? await testIntegration(editing.id)
+          : await testIntegrationDraft({
+              ...values,
+              name: values.name ?? '',
+              authType: isJira ? values.authType : undefined,
+              username: isBasic && values.username ? values.username : undefined,
+            })
+      if (editing) {
+        setConn(prev => ({
+          ...prev,
+          [editing.id]: { phase: 'done', ok: r.ok, message: r.message, detail: r.detail },
+        }))
+      }
+      if (r.ok) {
+        message.success(`${r.message}${r.detail ? `（${r.detail}）` : ''}`)
+      } else {
+        message.error(`${r.message}${r.detail ? `（${r.detail}）` : ''}`)
+      }
+    } catch (e) {
+      message.error(`测试失败：${(e as Error).message}`)
+    } finally {
+      setTestingForm(false)
     }
   }
 
@@ -190,6 +267,26 @@ export default function IntegrationsPage() {
               ),
           },
           {
+            title: '连通性',
+            key: 'conn',
+            width: 100,
+            render: (_, row) => {
+              const c = conn[row.id]
+              if (!c || c.phase === 'probing') {
+                return <Badge status="processing" text="探测中" />
+              }
+              return (
+                <Tooltip title={`${c.message}${c.detail ? `（${c.detail}）` : ''}`}>
+                  {c.ok ? (
+                    <Badge status="success" text="正常" />
+                  ) : (
+                    <Badge status="error" text="异常" />
+                  )}
+                </Tooltip>
+              )
+            },
+          },
+          {
             title: '状态',
             dataIndex: 'status',
             width: 90,
@@ -238,11 +335,24 @@ export default function IntegrationsPage() {
         width={560}
         destroyOnHidden
         footer={
-          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <Button onClick={() => setEditOpen(false)}>取消</Button>
-            <Button type="primary" loading={saving} onClick={() => form.submit()}>
-              保存
-            </Button>
+          <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+            <Tooltip
+              title={
+                editing && !form.getFieldValue('token')
+                  ? '凭据未修改，将测试已保存的配置'
+                  : '按当前表单内容试连，凭据不会保存'
+              }
+            >
+              <Button icon={<ApiOutlined />} loading={testingForm} onClick={onTestForm}>
+                测试连接
+              </Button>
+            </Tooltip>
+            <Space>
+              <Button onClick={() => setEditOpen(false)}>取消</Button>
+              <Button type="primary" loading={saving} onClick={() => form.submit()}>
+                保存
+              </Button>
+            </Space>
           </Space>
         }
       >

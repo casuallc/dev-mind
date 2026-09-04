@@ -34,7 +34,9 @@
   `"username\npassword"`）、token、status（ENABLED / DISABLED）；
   token **加密落库**（复用 `data/auth.key` 派生密钥，AES-GCM），任何 API 响应不回显明文。
 - **FR-02 连接测试**：`POST /integrations/{id}/test` 调平台 API 验证 token 有效性与权限范围
-  （GitLab：`/api/v4/user` + `scope: api`），返回诊断信息。
+  （GitLab：`/api/v4/user` + `scope: api`），返回诊断信息；`POST /integrations/test`
+  按未保存的表单内容试连（新建/编辑预检，凭据不落库）。前端列表加载后逐行实时探测
+  展示连通性状态，表单内提供「测试连接」按钮。
 - **FR-03 项目绑定**：把 Integration 绑到 project_repo（按 remote_url 匹配或人工选择
   GitLab project id）；一个项目可绑多个 Integration（如 GitLab + Jira），
   同类型仅允许一个 ENABLED。
@@ -101,6 +103,7 @@ integration_calls(id, integration_id, action, internal_type?, internal_id?,
 ```
 CRUD   /integrations                                   平台实例管理（仅 ADMIN 写）
 POST   /integrations/{id}/test                         连接测试
+POST   /integrations/test                              未保存配置试连（表单预检，凭据不落库）
 CRUD   /projects/{pid}/integrations                    项目绑定（binding）
 POST   /projects/{pid}/work-items/{wid}/push           推送 WI 分支到绑定远程
 POST   /projects/{pid}/work-items/{wid}/merge-request  创建/复用 MR，登记 External Link

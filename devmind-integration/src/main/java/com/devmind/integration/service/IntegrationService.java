@@ -208,6 +208,40 @@ public class IntegrationService implements PlatformIntegrationHook {
         return result;
     }
 
+    /** FR-02 未保存配置的连接测试（新建/编辑表单内预检）：凭据只在内存使用，不落库、不写调用日志 */
+    public IntegrationConnector.TestResult testConnectionDraft(IntegrationRequest req) {
+        String type = normalizeType(req.type());
+        IntegrationConnector connector = connectors.get(type);
+        if (connector == null) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "暂不支持的平台类型 " + type + "（当前可用：" + String.join("/", connectors.keySet()) + "）");
+        }
+        String authType = normalizeAuthType(req.authType());
+        if (req.token() == null || req.token().isBlank()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    IntegrationEntity.AUTH_BASIC.equals(authType) ? "密码不能为空" : "token 不能为空");
+        }
+        String username = null;
+        if (IntegrationEntity.AUTH_BASIC.equals(authType)) {
+            if (req.username() == null || req.username().isBlank()) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "Basic Auth 需要填写用户名");
+            }
+            username = req.username().trim();
+        }
+        IntegrationEntity e = new IntegrationEntity();
+        e.setType(type);
+        e.setBaseUrl(validateBaseUrl(req.baseUrl()));
+        e.setAuthType(authType);
+        IntegrationConnector.TestResult result;
+        try {
+            result = connector.testConnection(e, encodeSecret(authType, username, req.token().trim()));
+        } catch (Exception ex) {
+            result = new IntegrationConnector.TestResult(false, "连接异常：" + ex.getMessage(), e.getBaseUrl());
+        }
+        audit("test_draft", null, null, result.ok(), type + " " + e.getBaseUrl() + "：" + result.message());
+        return result;
+    }
+
     /** FR-03 绑定辅助：列出 token 可见的平台项目 */
     public List<IntegrationConnector.ExternalProject> listExternalProjects(Long id) {
         IntegrationEntity e = require(id);

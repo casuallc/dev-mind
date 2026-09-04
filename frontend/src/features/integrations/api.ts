@@ -35,6 +35,11 @@ export function testIntegration(id: number): Promise<IntegrationTestResult> {
   return api.post<IntegrationTestResult>(`/integrations/${id}/test`)
 }
 
+/** 未保存配置的连接测试（新建/编辑表单内预检，凭据不落库） */
+export function testIntegrationDraft(input: IntegrationInput): Promise<IntegrationTestResult> {
+  return api.post<IntegrationTestResult>('/integrations/test', input)
+}
+
 export function listExternalProjects(id: number): Promise<ExternalProject[]> {
   return api.get<ExternalProject[]>(`/integrations/${id}/projects`)
 }
