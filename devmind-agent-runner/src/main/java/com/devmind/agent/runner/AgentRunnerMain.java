@@ -11,6 +11,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -158,6 +159,16 @@ public class AgentRunnerMain {
             String model = frame.path("model").asText("");
             String permissionMode = frame.path("permissionMode").asText("");
             Path workDir = config.resolveWorkDir(projectId);
+            // Windows CreateProcess error=267：cwd 不存在直接拉起失败。
+            // 兜底 workDir 属临时目录，缺则自建；项目映射目录缺失必须报错（自建会悄悄跑错目录）
+            if (!Files.isDirectory(workDir)) {
+                if (projectId != null && config.projectPaths().containsKey(projectId)) {
+                    throw new IllegalStateException("项目映射目录不存在: " + workDir
+                            + "（agent.properties 的 project." + projectId + " 指向无效路径）");
+                }
+                Files.createDirectories(workDir);
+                log.info("兜底工作目录不存在已创建: {}", workDir);
+            }
             log.info("拉起会话: session={} project={} cwd={}", sessionId, projectId, workDir);
 
             // CAP-24：服务端下发的提交身份等附加 env（旧服务端无此字段 → 空）
