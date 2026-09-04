@@ -107,6 +107,36 @@ export default function AgentNodesPage() {
   // 抽屉里的节点随 5s 轮询保持新鲜；节点被删后抽屉自动关闭
   const drawerNode = drawerId != null ? nodes.find((n) => n.id === drawerId) ?? null : null
 
+  // 与托管包版本比对：runnerVersion 不一致 = 可升级（版本串含构建时间戳，每次构建唯一）
+  const outdatedNodes = pkg ? nodes.filter((n) => n.runnerVersion && n.runnerVersion !== pkg.version) : []
+  const upgradableNodes = outdatedNodes.filter((n) => n.status === 'ONLINE')
+  const [batchBusy, setBatchBusy] = useState(false)
+
+  // 批量升级：逐个下发现有单节点升级接口，汇总 ACCEPTED/BUSY/失败
+  const onUpgradeAll = async () => {
+    setBatchBusy(true)
+    try {
+      const results = await Promise.all(
+        upgradableNodes.map(async (n) => {
+          try {
+            return await upgradeAgentNode(n.id)
+          } catch {
+            return { status: 'REJECTED' as const, message: '请求失败' }
+          }
+        }),
+      )
+      const accepted = results.filter((r) => r.status === 'ACCEPTED').length
+      const busy = results.filter((r) => r.status === 'BUSY').length
+      const failed = results.length - accepted - busy
+      if (failed > 0) message.warning(`已下发 ${accepted} 个升级，${busy} 个忙推迟，${failed} 个失败`)
+      else if (busy > 0) message.info(`已下发 ${accepted} 个升级，${busy} 个忙推迟（有活跃会话）`)
+      else message.success(`已下发 ${accepted} 个升级`)
+      reload()
+    } finally {
+      setBatchBusy(false)
+    }
+  }
+
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 70 },
     {
@@ -134,12 +164,21 @@ export default function AgentNodesPage() {
     {
       title: 'runner 版本',
       dataIndex: 'runnerVersion',
-      width: 150,
-      render: (s: string | undefined) => {
+      width: 280,
+      render: (s: string | undefined, r: AgentNode) => {
         if (!s) return '-'
-        // 与托管包版本不一致 = 可升级，橙色提示
+        // 与托管包版本不一致 = 可升级；离线节点只能等上线后再升
         const outdated = pkg && s !== pkg.version
-        return <Tag color={outdated ? 'orange' : 'default'}>{s}</Tag>
+        if (!outdated) return <Tag>{s}</Tag>
+        const tip =
+          r.status === 'ONLINE'
+            ? `可升级 → ${pkg.version}`
+            : `可升级 → ${pkg.version}（节点离线，上线后再升级）`
+        return (
+          <Tooltip title={tip}>
+            <Tag color="orange">{s} · 可升级</Tag>
+          </Tooltip>
+        )
       },
     },
     {
@@ -178,6 +217,24 @@ export default function AgentNodesPage() {
       extra={
         view === 'nodes' ? (
           <Space>
+            {outdatedNodes.length > 0 && (
+              <>
+                <Tag color="orange">{outdatedNodes.length} 个节点可升级 → {pkg!.version}</Tag>
+                <Popconfirm
+                  title={`升级全部在线旧节点（${upgradableNodes.length} 个）？`}
+                  description="有活跃会话的节点会推迟执行"
+                  onConfirm={onUpgradeAll}
+                >
+                  <Button
+                    icon={<RocketOutlined />}
+                    loading={batchBusy}
+                    disabled={upgradableNodes.length === 0}
+                  >
+                    全部升级
+                  </Button>
+                </Popconfirm>
+              </>
+            )}
             <Button icon={<ReloadOutlined />} onClick={reload}>
               刷新
             </Button>
@@ -381,7 +438,13 @@ function NodeDrawer({
             <Descriptions.Item label="能力">{node.capabilities || '-'}</Descriptions.Item>
             <Descriptions.Item label="runner 版本">
               {node.runnerVersion ? (
-                <Tag color={outdated ? 'orange' : 'default'}>{node.runnerVersion}</Tag>
+                outdated ? (
+                  <Tooltip title={`可升级 → ${pkg!.version}`}>
+                    <Tag color="orange">{node.runnerVersion} · 可升级</Tag>
+                  </Tooltip>
+                ) : (
+                  <Tag>{node.runnerVersion}</Tag>
+                )
               ) : (
                 '-'
               )}

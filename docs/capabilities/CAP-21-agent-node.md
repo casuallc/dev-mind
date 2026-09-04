@@ -68,6 +68,12 @@ Windows 办公机普遍在 NAT/防火墙后、入站不可达，因此采用**�
   **有活跃会话时 runner 回 busy 推迟，不杀会话**。在线老版本 runner 不认识 upgrade 帧，
   需先手工部署到含升级能力的基线版本；升级后日志落 jar 旁 `runner.log`（首次手工启动
   仍是控制台）。hello 版本自动比对升级仍不做。
+  **版本串口径（2026-09-04）**：`runner-version.txt` = `@runner.version@`（pom 属性
+  `${project.version}-b${maven.build.timestamp}`，如 `0.1.0-SNAPSHOT-b20260904.1019`）——
+  每次构建唯一，节点 hello 上报后与托管包版本字符串比对出「可升级」（恒等于
+  project.version 的旧口径比对永远不触发）。节点列表版本列对不一致行标「可升级 → 目标
+  版本」橙色 Tag（离线节点 tooltip 注明上线后再升），表头汇总「N 个节点可升级」并提供
+  「全部升级」（批量下发现有单节点升级接口，仅 ONLINE 且版本不一致者；忙节点推迟）。
 
 ## 3. 插件化接口
 
