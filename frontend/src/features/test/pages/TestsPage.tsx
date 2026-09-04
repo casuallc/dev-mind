@@ -1,12 +1,16 @@
 // 测试记录页（/tests）：当前项目的套件管理与测试运行历史。
 // CAP-10 测试中心：套件管理（OpenAPI 生成/新建/用例编辑/沉淀文档）→ 新建测试运行（选套件+目标环境/服务器/baseUrl）→
 // 运行历史 → 详情 Drawer（WS 实时结果流）；失败运行可一键生成缺陷线索（FR-06）。
+// 布局遵循 docs/core/前端内容区布局约定.md：单 Card + title 内 Segmented 切换视图，操作按钮收 extra，表格默认密度。
 import {
   Button,
   Card,
+  Descriptions,
+  Drawer,
   Form,
   Input,
   Modal,
+  Segmented,
   Select,
   Space,
   Table,
@@ -17,11 +21,10 @@ import {
 import { useEffect, useState } from 'react'
 import type { ColumnsType } from 'antd/es/table'
 import {
-  BugOutlined,
   DeleteOutlined,
   ExportOutlined,
-  FileAddOutlined,
   PlusOutlined,
+  ReloadOutlined,
   SyncOutlined,
 } from '@ant-design/icons'
 import {
@@ -51,21 +54,19 @@ import IssuesTable from '../components/IssuesTable'
 export default function TestsPage() {
   const projectId = useCurrentProjectId()
   if (!projectId) return null // ProjectContextGate 已保证非空，这里只为过 TS
-  return (
-    <Card size="small" title="测试记录">
-      <TestCenter id={projectId} />
-    </Card>
-  )
+  return <TestCenter id={projectId} />
 }
 
 function TestCenter({ id }: { id: string }) {
+  const [view, setView] = useState<string>('suites') // suites | runs
   const [suites, setSuites] = useState<TestSuite[]>([])
   const [runs, setRuns] = useState<TestRun[]>([])
   const [servers, setServers] = useState<ProjectServer[]>([])
   const [environments, setEnvironments] = useState<ProjectEnvironment[]>([])
   const [loading, setLoading] = useState(false)
 
-  // 新建运行表单
+  // 新建运行弹窗表单
+  const [runOpen, setRunOpen] = useState(false)
   const [suiteIds, setSuiteIds] = useState<number[]>([])
   const [environmentId, setEnvironmentId] = useState<number | undefined>()
   const [serverId, setServerId] = useState<number | undefined>()
@@ -76,7 +77,8 @@ function TestCenter({ id }: { id: string }) {
   const [newOpen, setNewOpen] = useState(false)
   const [newForm] = Form.useForm()
 
-  // 用例编辑 Drawer
+  // 套件管理 Drawer / 用例编辑 Drawer
+  const [manageId, setManageId] = useState<number | null>(null)
   const [editSuite, setEditSuite] = useState<TestSuite | null>(null)
 
   // 详情 Drawer / 文本（报告·日志）/ 缺陷线索
@@ -184,6 +186,7 @@ function TestCenter({ id }: { id: string }) {
         environmentId: environmentId || undefined,
         baseUrl: baseUrl.trim() || undefined,
       })
+      setRunOpen(false)
       setDetail(r)
       refresh()
       message.success(`测试运行 #${r.id} 已创建`)
@@ -196,6 +199,9 @@ function TestCenter({ id }: { id: string }) {
 
   const testServers = servers.filter((s) => s.enabled && s.capabilities.includes('test'))
 
+  // 管理 Drawer 中的套件随列表刷新保持新鲜；被删后自动关闭
+  const manageSuite = manageId != null ? suites.find((s) => s.id === manageId) ?? null : null
+
   const suiteColumns: ColumnsType<TestSuite> = [
     { title: 'ID', dataIndex: 'id', width: 60, render: (v: number) => `#${v}` },
     { title: '名称', dataIndex: 'name', ellipsis: true, render: (n: string) => n || '-' },
@@ -207,13 +213,9 @@ function TestCenter({ id }: { id: string }) {
     {
       title: '操作',
       key: 'action',
-      width: 220,
+      width: 90,
       render: (_, s) => (
-        <Space size={4}>
-          <Button size="small" icon={<SyncOutlined />} onClick={() => openEditor(s)}>编辑用例</Button>
-          <Button size="small" icon={<ExportOutlined />} disabled={!s.caseCount} onClick={() => onPublish(s)}>沉淀</Button>
-          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDeleteSuite(s)}>删除</Button>
-        </Space>
+        <Button size="small" onClick={() => setManageId(s.id)}>管理</Button>
       ),
     },
   ]
@@ -244,17 +246,13 @@ function TestCenter({ id }: { id: string }) {
     { title: '创建时间', dataIndex: 'createdAt', width: 150, render: (v: string) => fmtTime(v) },
     { title: '耗时', key: 'dur', width: 100, render: (_, r) => durationMs(r.startedAt, r.finishedAt) },
     {
-      title: '',
+      title: '操作',
       key: 'act',
-      width: 240,
+      width: 150,
       render: (_, r) => (
         <Space size={4}>
           <Button size="small" onClick={() => setDetail(r)}>详情</Button>
-          <Button size="small" icon={<FileAddOutlined />} onClick={() => openText(r.id, '报告')}>报告</Button>
-          {r.status === 'FAILED' && (
-            <Button size="small" danger icon={<BugOutlined />} onClick={() => openIssues(r.id)}>缺陷线索</Button>
-          )}
-          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDeleteRun(r)} />
+          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDeleteRun(r)}>删除</Button>
         </Space>
       ),
     },
@@ -293,74 +291,52 @@ function TestCenter({ id }: { id: string }) {
   }
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Card
-        size="small"
-        title="测试套件"
-        extra={
-          <Space>
-            <Button size="small" type="primary" icon={<SyncOutlined />} onClick={onGenerate}>
-              从 OpenAPI 生成
-            </Button>
-            <Button size="small" icon={<PlusOutlined />} onClick={() => setNewOpen(true)}>
-              新建套件
-            </Button>
-            <Button size="small" icon={<FileAddOutlined />} onClick={loadAll}>刷新</Button>
-          </Space>
-        }
-      >
-        <Table<TestSuite> rowKey="id" size="small" loading={loading} dataSource={suites} columns={suiteColumns}
-          pagination={false} locale={{ emptyText: '暂无套件：先「从 OpenAPI 生成」，或新建冒烟套件（health 用例走服务器健康检查）' }} />
-        <div style={{ marginTop: 8, fontSize: 12, color: 'rgba(0,0,0,0.45)' }}>
-          套件 = 一组用例；api 套件由 OpenAPI 生成（含未鉴权边界用例），smoke 冒烟套件用 health 用例做关键路径存活检查。
-        </div>
-      </Card>
-
-      <Card size="small" title="新建测试运行">
-        <Space wrap>
-          <Select<number[]>
-            mode="multiple"
-            style={{ minWidth: 320 }}
-            placeholder="选择测试套件"
-            value={suiteIds}
-            onChange={setSuiteIds}
-            options={suites.map((s) => ({ value: s.id, label: `${s.name}（${s.caseCount} 用例）` }))}
+    <Card
+      title={
+        <Space size={12}>
+          <span>测试记录</span>
+          <Segmented
+            value={view}
+            onChange={setView}
+            options={[
+              { value: 'suites', label: '测试套件' },
+              { value: 'runs', label: '运行历史' },
+            ]}
           />
-          <Select<number>
-            style={{ width: 180 }}
-            placeholder="目标环境（可选）"
-            value={environmentId}
-            onChange={(v) => { setEnvironmentId(v); if (v != null) setServerId(undefined) }}
-            allowClear
-            options={environments.map((e) => ({ value: e.id, label: e.name }))}
-          />
-          <Select<number>
-            style={{ width: 200 }}
-            placeholder={testServers.length ? '目标服务器（可选）' : '无可用服务器（需 test 能力）'}
-            value={serverId}
-            onChange={setServerId}
-            allowClear
-            disabled={environmentId != null}
-            options={testServers.map((s) => ({ value: s.id, label: `${s.name}（${s.accessType}）` }))}
-          />
-          <Input
-            style={{ width: 220 }}
-            placeholder="baseUrl（可选，http 用例目标）"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-          />
-          <Button type="primary" loading={creating} onClick={onCreate}>
-            执行测试
-          </Button>
         </Space>
-        <div style={{ marginTop: 8, fontSize: 12, color: 'rgba(0,0,0,0.45)' }}>
-          目标优先级：baseUrl 显式 &gt; 服务器（http 取配置 baseUrl）&gt; 环境（变量 baseUrl/BASE_URL）。未配置时 http 用例跳过、health 用例照跑。
-        </div>
-      </Card>
-
-      <Card size="small" title="运行历史">
-        <Table<TestRun> rowKey="id" size="small" dataSource={runs} columns={runColumns} pagination={{ pageSize: 10 }} />
-      </Card>
+      }
+      extra={
+        view === 'suites' ? (
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
+            <Button icon={<SyncOutlined />} onClick={onGenerate}>从 OpenAPI 生成</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setNewOpen(true)}>新建套件</Button>
+          </Space>
+        ) : (
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setRunOpen(true)}>新建运行</Button>
+          </Space>
+        )
+      }
+    >
+      {view === 'suites' ? (
+        <>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+            套件 = 一组用例；api 套件由 OpenAPI 生成（含未鉴权边界用例），smoke 冒烟套件用 health 用例做关键路径存活检查。
+          </Typography.Paragraph>
+          <Table<TestSuite> rowKey="id" loading={loading} dataSource={suites} columns={suiteColumns}
+            pagination={false} locale={{ emptyText: '暂无套件：先「从 OpenAPI 生成」，或新建冒烟套件（health 用例走服务器健康检查）' }} />
+        </>
+      ) : (
+        <>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+            运行的历史记录：「详情」里看实时结果流与报告/日志；失败运行可在详情中一键生成缺陷线索。
+          </Typography.Paragraph>
+          <Table<TestRun> rowKey="id" loading={loading} dataSource={runs} columns={runColumns}
+            pagination={false} locale={{ emptyText: '暂无运行记录：切到「测试套件」视图准备套件后，点右上角「新建运行」执行测试' }} />
+        </>
+      )}
 
       {/* 新建套件 */}
       <Modal title="新建套件" open={newOpen} onCancel={() => setNewOpen(false)}
@@ -374,6 +350,80 @@ function TestCenter({ id }: { id: string }) {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* 新建测试运行 */}
+      <Modal title="新建测试运行" open={runOpen} onCancel={() => setRunOpen(false)}
+        onOk={onCreate} okText="执行测试" confirmLoading={creating} width={520} destroyOnClose>
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Select<number[]>
+            mode="multiple"
+            style={{ width: '100%' }}
+            placeholder="选择测试套件"
+            value={suiteIds}
+            onChange={setSuiteIds}
+            options={suites.map((s) => ({ value: s.id, label: `${s.name}（${s.caseCount} 用例）` }))}
+          />
+          <Select<number>
+            style={{ width: '100%' }}
+            placeholder="目标环境（可选）"
+            value={environmentId}
+            onChange={(v) => { setEnvironmentId(v); if (v != null) setServerId(undefined) }}
+            allowClear
+            options={environments.map((e) => ({ value: e.id, label: e.name }))}
+          />
+          <Select<number>
+            style={{ width: '100%' }}
+            placeholder={testServers.length ? '目标服务器（可选）' : '无可用服务器（需 test 能力）'}
+            value={serverId}
+            onChange={setServerId}
+            allowClear
+            disabled={environmentId != null}
+            options={testServers.map((s) => ({ value: s.id, label: `${s.name}（${s.accessType}）` }))}
+          />
+          <Input
+            placeholder="baseUrl（可选，http 用例目标）"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+          />
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+            目标优先级：baseUrl 显式 &gt; 服务器（http 取配置 baseUrl）&gt; 环境（变量 baseUrl/BASE_URL）。未配置时 http 用例跳过、health 用例照跑。
+          </Typography.Paragraph>
+        </Space>
+      </Modal>
+
+      {/* 套件管理：编辑用例 / 沉淀文档 / 删除 */}
+      <Drawer title={manageSuite ? `套件 · ${manageSuite.name}` : '套件'} open={!!manageSuite}
+        onClose={() => setManageId(null)} width={480}>
+        {manageSuite && (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Descriptions size="small" column={2}>
+              <Descriptions.Item label="ID">#{manageSuite.id}</Descriptions.Item>
+              <Descriptions.Item label="类型">
+                <Tag color={SUITE_KIND_COLOR[manageSuite.kind]}>{manageSuite.kind}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="来源">
+                {manageSuite.source === 'openapi' ? <Tag color="geekblue">OpenAPI</Tag> : <Tag>手动</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="用例数">{manageSuite.caseCount}</Descriptions.Item>
+              <Descriptions.Item label="沉淀文档">
+                {manageSuite.docId ? `#${manageSuite.docId}` : '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="创建时间">{fmtTime(manageSuite.createdAt)}</Descriptions.Item>
+            </Descriptions>
+            <Space>
+              <Button icon={<SyncOutlined />} onClick={() => { const s = manageSuite; setManageId(null); openEditor(s) }}>
+                编辑用例
+              </Button>
+              <Button icon={<ExportOutlined />} disabled={!manageSuite.caseCount} onClick={() => onPublish(manageSuite)}>
+                沉淀为文档
+              </Button>
+              <Button danger icon={<DeleteOutlined />} onClick={() => { const s = manageSuite; setManageId(null); onDeleteSuite(s) }}>
+                删除
+              </Button>
+            </Space>
+          </Space>
+        )}
+      </Drawer>
 
       <CaseEditorDrawer
         suite={editSuite}
@@ -406,6 +456,6 @@ function TestCenter({ id }: { id: string }) {
         onCancel={() => setIssuesModal(null)}>
         <IssuesTable issues={issuesModal ?? []} />
       </Modal>
-    </Space>
+    </Card>
   )
 }
