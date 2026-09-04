@@ -114,6 +114,9 @@ export default function ProjectsPage() {
         </Space>
       }
     >
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+        全部已注册项目的只读列表，点「进入」切换为当前项目并回到概览；新建/编辑/删除在后台「项目管理」进行。
+      </Typography.Paragraph>
       <Table
         rowKey="id"
         loading={loading}
