@@ -100,7 +100,7 @@ public class SkillController {
         if (file.isEmpty()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "file 不能为空");
         }
-        return service.importPackage(file.getBytes(), scope, projectId, overwrite);
+        return service.importPackage(file.getBytes(), file.getOriginalFilename(), scope, projectId, overwrite);
     }
 
     // ---------------- 附件文件 ----------------

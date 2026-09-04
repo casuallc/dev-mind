@@ -443,13 +443,14 @@ public class SkillService {
      * 导入 skill zip 压缩包：根目录或单层目录包裹的 SKILL.md 均可（其余文件作附件）。
      * 同名（同 scope+projectId+name）默认 409；overwrite=true 时替换正文/frontmatter/全部附件
      * （tags/status/createdBy 保留原值——zip 不承载这些信息）。synchronized 与 create 同理防并发重名。
+     * frontmatter 缺 name 时回退用包内目录名 / zip 文件名（zipFilename）推导。
      */
     @Transactional
-    public synchronized SkillView importPackage(byte[] zipBytes, String scope, String projectId,
-                                                boolean overwrite) {
+    public synchronized SkillView importPackage(byte[] zipBytes, String zipFilename, String scope,
+                                                String projectId, boolean overwrite) {
         String sc = requireScope(scope);
         String pid = resolveProjectId(sc, projectId);
-        ParsedPackage pkg = parseZip(zipBytes);
+        ParsedPackage pkg = parseZip(zipBytes, zipFilename);
 
         SkillEntity e = skillRepo.findByScopeAndProjectIdAndName(sc, pid, pkg.name()).orElse(null);
         if (e != null && !overwrite) {
@@ -499,7 +500,7 @@ public class SkillService {
                                  Map<String, String> extraFrontmatter, List<ParsedFile> files) {}
 
     /** 解 zip 到内存（带防爆限制），剥离单层目录前缀后解析 SKILL.md + 附件。 */
-    private ParsedPackage parseZip(byte[] zipBytes) {
+    private ParsedPackage parseZip(byte[] zipBytes, String zipFilename) {
         Map<String, byte[]> entries = unzip(zipBytes);
         String prefix = detectPrefix(entries);
 
@@ -524,7 +525,33 @@ public class SkillService {
         if (skillMdRaw.length > MAX_FILE_SIZE) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "SKILL.md 过大（≤512KB）");
         }
-        return parseSkillMd(new String(skillMdRaw, StandardCharsets.UTF_8), files);
+        // frontmatter 缺 name 时的兜底名：优先包内目录名，其次 zip 文件名（去扩展名）
+        String fallbackName = !prefix.isEmpty()
+                ? prefix.substring(0, prefix.length() - 1)
+                : stripZipExt(zipFilename);
+        return parseSkillMd(new String(skillMdRaw, StandardCharsets.UTF_8), files, fallbackName);
+    }
+
+    private String stripZipExt(String filename) {
+        if (filename == null || filename.isBlank()) {
+            return null;
+        }
+        String n = filename.trim();
+        return n.toLowerCase(java.util.Locale.ROOT).endsWith(".zip") ? n.substring(0, n.length() - 4) : n;
+    }
+
+    /** 目录名/zip 文件名 → kebab-case：小写化、非法字符归并为中划线、去首尾中划线、截断 64。 */
+    private String sanitizeFallbackName(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String n = raw.trim().toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("^-+|-+$", "");
+        if (n.length() > 64) {
+            n = n.substring(0, 64).replaceAll("-+$", "");
+        }
+        return n;
     }
 
     /** 解 zip：路径归一化、跳过目录/macOS 垃圾文件，条目/大小超限即拒绝。 */
@@ -600,8 +627,8 @@ public class SkillService {
         return prefix;
     }
 
-    /** 解析 SKILL.md：--- frontmatter（snakeyaml）--- + 正文；name/description 必填并复用结构化校验。 */
-    private ParsedPackage parseSkillMd(String text, List<ParsedFile> files) {
+    /** 解析 SKILL.md：--- frontmatter（snakeyaml）--- + 正文；name 缺失时回退 fallbackName（目录名/zip 文件名），description 必填并复用结构化校验。 */
+    private ParsedPackage parseSkillMd(String text, List<ParsedFile> files, String fallbackName) {
         // UTF-8 BOM 兼容（Windows 编辑器常见）
         if (!text.isEmpty() && text.charAt(0) == 0xFEFF) {
             text = text.substring(1);
@@ -629,12 +656,19 @@ public class SkillService {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "SKILL.md frontmatter YAML 解析失败: " + ex.getMessage());
         }
         Object nameRaw = fm.get("name");
+        String name;
         if (nameRaw == null || String.valueOf(nameRaw).isBlank()) {
-            String keys = fm.isEmpty() ? "（空）" : String.join(", ", fm.keySet());
-            throw new DevMindException(ErrorCode.BAD_REQUEST,
-                    "SKILL.md frontmatter 缺少 name 字段（须含 name/description，当前解析到的键: " + keys + "）");
+            String fallback = sanitizeFallbackName(fallbackName);
+            if (fallback == null || fallback.isBlank()) {
+                String keys = fm.isEmpty() ? "（空）" : String.join(", ", fm.keySet());
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "SKILL.md frontmatter 缺少 name 字段，且无法从目录名/文件名推导合法名称"
+                                + "（须 kebab-case，当前解析到的键: " + keys + "）");
+            }
+            name = fallback;
+        } else {
+            name = validateName(String.valueOf(nameRaw));
         }
-        String name = validateName(String.valueOf(nameRaw));
         String description = validateDescription(
                 fm.get("description") == null ? null : String.valueOf(fm.get("description")));
         Map<String, String> extra = new LinkedHashMap<>();
