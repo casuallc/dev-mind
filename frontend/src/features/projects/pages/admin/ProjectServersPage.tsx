@@ -1,5 +1,6 @@
 // 项目服务器页（/admin/projects/:id/servers）：列表 + 添加/编辑抽屉 + 删除。
-import { useCallback, useEffect, useState } from 'react'
+// 连接配置为结构化表单（随接入类型切换），支持粘贴一段话智能识别填入；提交时序列化为 accessConfig JSON。
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Button,
   Card,
@@ -21,6 +22,13 @@ import { useParams } from 'react-router-dom'
 import { addServer, deleteServer, listServers, updateServer } from '../../api'
 import type { ProjectServer, ServerInput } from '../../types'
 import { envColor } from '../../components/utils'
+import {
+  buildAccessConfig,
+  parseAccessConfig,
+  ServerAccessFormItems,
+  smartParseAccess,
+  summarizeAccessConfig,
+} from '../../components/ServerAccessFields'
 
 const ENV_OPTIONS = ['test', 'staging', 'prod']
 const ACCESS_OPTIONS = ['ssh', 'http']
@@ -31,7 +39,12 @@ export default function ProjectServersPage() {
   const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<ProjectServer | null>(null)
+  const [smartText, setSmartText] = useState('')
   const [form] = Form.useForm()
+  const accessType: string = Form.useWatch('accessType', form) ?? 'ssh'
+  const authType: string = Form.useWatch('authType', form) ?? 'password'
+  /** 编辑时原 JSON 里未识别的扩展键，保存时原样带回 */
+  const extrasRef = useRef<Record<string, unknown>>({})
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -50,18 +63,52 @@ export default function ProjectServersPage() {
 
   const openEdit = (s: ProjectServer | null) => {
     setEditing(s)
-    form.setFieldsValue(
-      s ?? { name: '', env: 'test', accessType: 'ssh', accessConfig: '', capabilities: [], enabled: true },
-    )
+    setSmartText('')
+    if (s) {
+      const { values, extras } = parseAccessConfig(s.accessConfig)
+      extrasRef.current = extras
+      form.setFieldsValue({ ...s, authType: 'password', port: 22, ...values })
+    } else {
+      extrasRef.current = {}
+      form.setFieldsValue({
+        name: '', env: 'test', accessType: 'ssh', capabilities: [], enabled: true,
+        host: '', port: 22, username: '', authType: 'password',
+        password: '', privateKey: '', passphrase: '', baseUrl: '', token: '', timeoutMs: undefined,
+      })
+    }
     setOpen(true)
   }
 
-  const onSave = async (v: ServerInput) => {
+  /** 智能识别：解析一段话填入表单（不覆盖名称/环境等业务字段） */
+  const applySmartParse = () => {
+    if (!smartText.trim()) {
+      message.warning('请先粘贴一段连接信息')
+      return
+    }
+    const r = smartParseAccess(smartText)
+    if (!r.hits.length) {
+      message.warning('未识别到有效连接信息，试试「ssh 用户@主机:端口 密码 xxx」或「https://… token: xxx」')
+      return
+    }
+    if (r.accessType) form.setFieldValue('accessType', r.accessType)
+    form.setFieldsValue(r.values)
+    message.success(`已识别填入：${r.hits.join('，')}`)
+  }
+
+  const onSave = async (v: Record<string, unknown>) => {
+    const input: ServerInput = {
+      name: v.name as string,
+      env: v.env as string | undefined,
+      accessType: v.accessType as string,
+      accessConfig: buildAccessConfig(v.accessType as string, v, extrasRef.current),
+      capabilities: (v.capabilities as string[]) ?? [],
+      enabled: v.enabled !== false,
+    }
     try {
       if (editing) {
-        await updateServer(id, editing.id, v)
+        await updateServer(id, editing.id, input)
       } else {
-        await addServer(id, v)
+        await addServer(id, input)
       }
       setOpen(false)
       await reload()
@@ -95,7 +142,9 @@ export default function ProjectServersPage() {
       title: '配置',
       dataIndex: 'accessConfig',
       ellipsis: true,
-      render: (c?: string) => <span style={{ fontSize: 12 }}>{c || '-'}</span>,
+      render: (c: string | undefined, r: ProjectServer) => (
+        <span style={{ fontSize: 12 }}>{c ? summarizeAccessConfig(r.accessType, c) : '-'}</span>
+      ),
     },
     {
       title: '能力',
@@ -165,9 +214,24 @@ export default function ProjectServersPage() {
           <Form.Item label="接入类型" name="accessType" rules={[{ required: true }]}>
             <Select options={ACCESS_OPTIONS.map((v) => ({ value: v, label: v }))} />
           </Form.Item>
-          <Form.Item label="连接配置" name="accessConfig" extra="JSON：主机/用户/端口/密钥路径，或 base-url/token（接入 CAP-07 前存明文）">
-            <Input.TextArea rows={3} />
-          </Form.Item>
+          <Card
+            size="small"
+            title="连接配置"
+            style={{ marginBottom: 16, background: '#fafafa' }}
+            styles={{ header: { minHeight: 36, padding: '0 12px' }, body: { padding: 12 } }}
+          >
+            <Input.TextArea
+              rows={2}
+              value={smartText}
+              onChange={(e) => setSmartText(e.target.value)}
+              placeholder={'粘贴一段话自动识别填入，如：\nssh root@172.20.140.156:22 密码 xxx，或 https://ci.example.com token: xxx'}
+              style={{ resize: 'none', marginBottom: 8 }}
+            />
+            <Button size="small" onClick={applySmartParse} style={{ marginBottom: 16 }}>
+              识别填入
+            </Button>
+            <ServerAccessFormItems accessType={accessType} authType={authType} />
+          </Card>
           <Form.Item label="能力" name="capabilities">
             <Select mode="tags" placeholder="build / deploy / test / release" open={false} suffixIcon={null} />
           </Form.Item>
