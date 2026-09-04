@@ -1,4 +1,5 @@
 // CAP-07 服务器运维：连通测试 / 健康检查 / 模板执行 / 上传下载 / 日志 + 模板白名单 + 审计
+// 布局遵循 docs/core/前端内容区布局约定.md：Card 标题 + Segmented 切换视图，extra 随视图放操作按钮，表格默认密度。
 import { useCallback, useEffect, useState } from 'react'
 import {
   Alert,
@@ -10,18 +11,18 @@ import {
   Input,
   message,
   Radio,
+  Segmented,
   Select,
   Space,
   Spin,
   Table,
-  Tabs,
   Tag,
   Typography,
   Upload,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { UploadFile } from 'antd/es/upload/interface'
-import { ReloadOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { Project } from '../../projects/types'
 import { listProjects } from '../../projects/api'
 import {
@@ -41,22 +42,57 @@ import AuditTab from './AuditTab'
 
 const CAPABILITY_OPTIONS = ['build', 'deploy', 'release', 'test', 'logs', 'exec']
 
+const VIEW_DESC: Record<string, string> = {
+  ops: '项目服务器的远程运维入口：连通测试、健康检查、模板执行、上传下载与日志拉取。远程仅允许执行项目白名单命令模板（FR-05），全部操作留痕审计（FR-06）。',
+  templates: '命令模板白名单（FR-05）：服务器上只允许执行项目内登记的模板，可按能力限定可用范围、声明参数 schema。',
+  audit: '服务器远程操作审计（FR-06）：连通测试、模板执行、上传下载、健康检查全量留痕，可按项目 / 服务器 / 动作过滤。',
+}
+
 export default function ServersPage() {
+  const [view, setView] = useState<string>('ops') // ops | templates | audit
+  // extra 按钮通过 tick 触发当前视图内组件的动作（刷新 / 新建模板）
+  const [refreshTick, setRefreshTick] = useState(0)
+  const [createTick, setCreateTick] = useState(0)
+
   return (
-    <Card size="small">
-      <Tabs
-        items={[
-          { key: 'ops', label: '服务器运维', children: <OpsTab /> },
-          { key: 'templates', label: '命令模板', children: <TemplatesTab /> },
-          { key: 'audit', label: '审计日志', children: <AuditTab /> },
-        ]}
-      />
+    <Card
+      title={
+        <Space size={12}>
+          <span>服务器运维</span>
+          <Segmented
+            value={view}
+            onChange={setView}
+            options={[
+              { value: 'ops', label: '服务器运维' },
+              { value: 'templates', label: '命令模板' },
+              { value: 'audit', label: '审计日志' },
+            ]}
+          />
+        </Space>
+      }
+      extra={
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={() => setRefreshTick((t) => t + 1)}>
+            刷新
+          </Button>
+          {view === 'templates' && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateTick((t) => t + 1)}>
+              新建模板
+            </Button>
+          )}
+        </Space>
+      }
+    >
+      <Typography.Paragraph type="secondary">{VIEW_DESC[view]}</Typography.Paragraph>
+      {view === 'ops' && <OpsTab refreshTick={refreshTick} />}
+      {view === 'templates' && <TemplatesTab refreshTick={refreshTick} createTick={createTick} />}
+      {view === 'audit' && <AuditTab refreshTick={refreshTick} />}
     </Card>
   )
 }
 
 // ---------------- 服务器运维 ----------------
-function OpsTab() {
+function OpsTab({ refreshTick }: { refreshTick: number }) {
   const [servers, setServers] = useState<ServerListItem[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(false)
@@ -75,7 +111,7 @@ function OpsTab() {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, [load, refreshTick]) // refreshTick：外壳 extra「刷新」
 
   const columns: ColumnsType<ServerListItem> = [
     { title: '名称', dataIndex: 'name', width: 150 },
@@ -95,21 +131,22 @@ function OpsTab() {
     {
       title: '操作',
       width: 90,
-      render: (_, r) => <Button size="small" type="primary" onClick={() => setCurrent(r)}>运维</Button>,
+      render: (_, r) => <Button size="small" onClick={() => setCurrent(r)}>管理</Button>,
     },
   ]
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size={12}>
-      <Space>
-        <Typography.Text type="secondary">
-          共 {servers.length} 台服务器。远程操作仅允许执行项目白名单模板（FR-05），全部留痕（FR-06）。
-        </Typography.Text>
-        <Button size="small" icon={<ReloadOutlined />} onClick={load} />
-      </Space>
-      <Table size="small" rowKey="id" loading={loading} columns={columns} dataSource={servers} pagination={false} />
+    <>
+      <Table
+        rowKey="id"
+        loading={loading}
+        columns={columns}
+        dataSource={servers}
+        pagination={false}
+        locale={{ emptyText: '暂无服务器。请到项目后台的「服务器」页登记接入后，再回到此处运维。' }}
+      />
       {current && <OpsDrawer server={current} onClose={() => setCurrent(null)} />}
-    </Space>
+    </>
   )
 }
 

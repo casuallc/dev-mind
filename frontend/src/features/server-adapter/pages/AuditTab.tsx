@@ -1,4 +1,4 @@
-// CAP-07 FR-06 执行审计查看
+// CAP-07 FR-06 执行审计查看（视图内容组件；外壳 Card / extra 按钮在 ServersPage）
 import { useCallback, useEffect, useState } from 'react'
 import { Badge, Drawer, Select, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -17,7 +17,7 @@ const ACTION_LABEL: Record<string, string> = {
   health_check: '健康检查',
 }
 
-export default function AuditTab() {
+export default function AuditTab({ refreshTick = 0 }: { refreshTick?: number }) {
   const [projects, setProjects] = useState<Project[]>([])
   const [servers, setServers] = useState<ServerListItem[]>([])
   const [projectId, setProjectId] = useState<string>()
@@ -43,7 +43,7 @@ export default function AuditTab() {
     }
   }, [projectId, serverId, action])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, [load, refreshTick]) // refreshTick：外壳 extra「刷新」
 
   const columns: ColumnsType<AuditView> = [
     { title: '时间', dataIndex: 'createdAt', width: 170, render: (t) => fmtTime(t) },
@@ -92,7 +92,14 @@ export default function AuditTab() {
           options={ACTIONS.map((a) => ({ label: ACTION_LABEL[a] ?? a, value: a }))}
         />
       </Space>
-      <Table size="small" rowKey="id" loading={loading} columns={columns} dataSource={rows} pagination={false} />
+      <Table
+        rowKey="id"
+        loading={loading}
+        columns={columns}
+        dataSource={rows}
+        pagination={false}
+        locale={{ emptyText: '暂无审计记录。在「服务器运维」视图执行连通测试 / 模板执行等操作后自动留痕（FR-06）。' }}
+      />
 
       <Drawer title="审计详情" open={!!detail} onClose={() => setDetail(null)} width={640}>
         {detail && (

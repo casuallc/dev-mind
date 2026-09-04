@@ -1,7 +1,6 @@
-// CAP-07 FR-05 命令模板白名单管理
-import { useCallback, useEffect, useState } from 'react'
+// CAP-07 FR-05 命令模板白名单管理（视图内容组件；外壳 Card / extra 按钮在 ServersPage）
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Checkbox, Drawer, Form, Input, message, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import type { Project } from '../../projects/types'
 import { listProjects } from '../../projects/api'
@@ -10,7 +9,7 @@ import type { TemplateInput, TemplateView } from '../types'
 
 const CAPABILITIES = ['build', 'deploy', 'release', 'test', 'logs', 'exec']
 
-export default function TemplatesTab() {
+export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refreshTick?: number; createTick?: number }) {
   const [projects, setProjects] = useState<Project[]>([])
   const [projectId, setProjectId] = useState<string>('')
   const [templates, setTemplates] = useState<TemplateView[]>([])
@@ -42,7 +41,15 @@ export default function TemplatesTab() {
   }, [projectId])
 
   useEffect(() => { loadProjects() }, [loadProjects])
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, [load, refreshTick]) // refreshTick：外壳 extra「刷新」
+
+  // 外壳 extra「新建模板」经 createTick 触发；挂载首帧不触发（切回视图时不应自动弹窗）
+  const firstCreate = useRef(true)
+  useEffect(() => {
+    if (firstCreate.current) { firstCreate.current = false; return }
+    if (createTick > 0) openCreate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createTick])
 
   const openCreate = () => {
     setEditing(null)
@@ -131,16 +138,14 @@ export default function TemplatesTab() {
           onChange={setProjectId}
           options={projects.map((p) => ({ label: `${p.name} (${p.id})`, value: p.id }))}
         />
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新建模板</Button>
       </Space>
       <Table
-        size="small"
         rowKey="id"
         loading={loading}
         columns={columns}
         dataSource={templates}
         pagination={false}
-        locale={{ emptyText: '无模板。远程只能执行白名单内的模板（FR-05）。' }}
+        locale={{ emptyText: '暂无模板。点击右上角「新建模板」登记——远程只能执行白名单内的模板（FR-05）。' }}
       />
 
       <Drawer
