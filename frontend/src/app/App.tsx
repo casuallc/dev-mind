@@ -23,6 +23,7 @@ import JiraSyncPage from '../features/projects/pages/admin/JiraSyncPage'
 import LockPage from '../features/projects/pages/admin/LockPage'
 import BuildsPage from '../features/build/pages/BuildsPage'
 import DeploymentsPage from '../features/deploy/pages/DeploymentsPage'
+import ReleasesPage from '../features/deploy/pages/ReleasesPage'
 import TestsPage from '../features/test/pages/TestsPage'
 import NotificationCenter from '../features/notifications/pages/NotificationCenter'
 import KnowledgeBase from '../features/knowledge/pages/KnowledgeBase'
@@ -78,6 +79,7 @@ export default function App() {
             <Route path="/requirements" element={<RequirementsPage />} />
             <Route path="/builds" element={<BuildsPage />} />
             <Route path="/deployments" element={<DeploymentsPage />} />
+            <Route path="/releases" element={<ReleasesPage />} />
             <Route path="/tests" element={<TestsPage />} />
           </Route>
           {/* CAP-02 项目：列表仅切换器底部入口；详情页保留双参数 URL（可分享，进入时同步当前项目） */}

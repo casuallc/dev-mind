@@ -9,6 +9,7 @@ import {
   ToolOutlined,
   DeploymentUnitOutlined,
   ExperimentOutlined,
+  RocketOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useSyncExternalStore } from 'react'
@@ -57,6 +58,7 @@ export default function AppLayout() {
                 { key: '/builds', icon: <ToolOutlined />, label: '构建' },
                 { key: '/deployments', icon: <DeploymentUnitOutlined />, label: '部署' },
                 { key: '/tests', icon: <ExperimentOutlined />, label: '测试' },
+                { key: '/releases', icon: <RocketOutlined />, label: '发版' },
               ],
             },
             {
