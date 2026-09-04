@@ -16,7 +16,7 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { CheckOutlined, SettingOutlined } from '@ant-design/icons'
+import { CheckOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import {
@@ -214,47 +214,55 @@ export default function NotificationCenter() {
 
   return (
     <Card
-      title="通知中心"
+      title={
+        <Space size={12}>
+          <span>通知中心</span>
+          <Segmented
+            value={filter}
+            onChange={(v) => setFilter(v as 'all' | 'unread')}
+            options={[
+              { value: 'all', label: '全部' },
+              { value: 'unread', label: '未读' },
+            ]}
+          />
+        </Space>
+      }
       extra={
         <Space>
-          <Button icon={<SettingOutlined />} onClick={openPrefs}>
-            通道与偏好
+          <Select
+            value={level}
+            onChange={setLevel}
+            style={{ width: 120 }}
+            options={[
+              { value: 'ALL', label: '全部级别' },
+              { value: 'P0', label: 'P0' },
+              { value: 'P1', label: 'P1' },
+              { value: 'P2', label: 'P2' },
+            ]}
+          />
+          <Button icon={<ReloadOutlined />} onClick={load}>
+            刷新
           </Button>
           <Button icon={<CheckOutlined />} onClick={onReadAll}>
             全部已读
           </Button>
+          <Button icon={<SettingOutlined />} onClick={openPrefs}>
+            通道与偏好
+          </Button>
         </Space>
       }
     >
-      <Space style={{ marginBottom: 16 }} wrap>
-        <Segmented
-          value={filter}
-          onChange={(v) => setFilter(v as 'all' | 'unread')}
-          options={[
-            { value: 'all', label: '全部' },
-            { value: 'unread', label: '未读' },
-          ]}
-        />
-        <Select
-          value={level}
-          onChange={setLevel}
-          style={{ width: 120 }}
-          options={[
-            { value: 'ALL', label: '全部级别' },
-            { value: 'P0', label: 'P0' },
-            { value: 'P1', label: 'P1' },
-            { value: 'P2', label: 'P2' },
-          ]}
-        />
-      </Space>
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+        会话事件与执行结果的站内通知汇总；支持按级别筛选、标记已读，推送通道与免打扰偏好在「通道与偏好」里配置。
+      </Typography.Paragraph>
 
       <Table
         rowKey="id"
         loading={loading}
         columns={columns}
         dataSource={items}
-        pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 条` }}
-        locale={{ emptyText: <Empty description="暂无通知" /> }}
+        pagination={false}
+        locale={{ emptyText: <Empty description="暂无通知——会话事件与执行结果产生后会出现在这里。" /> }}
       />
 
       {/* 通道 + 偏好设置 */}
