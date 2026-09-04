@@ -62,7 +62,7 @@ const downloadScripts = (token: string | null) => {
 }
 
 /**
- * CAP-21 后台页：Agent 节点管理（仅 ADMIN）。样式/交互对齐「会话模板/会话看板」：
+ * CAP-21 后台页：Agent 节点管理（仅 ADMIN）。布局遵循 CLAUDE.md 前端内容区约定：
  * Card 标题 + Segmented 切换视图，表头 extra 放操作按钮，表格默认密度，行内「管理」开抽屉做全部操作。
  */
 export default function AgentNodesPage() {
