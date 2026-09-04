@@ -1,7 +1,8 @@
-// 需求列表卡：来源 Tab（全部/Jira/自建）+ 文本搜索 + 服务端分页表格，状态/类型筛选，点行进详情。
+// 需求列表卡：来源 Segmented（全部/Jira/自建）+ 文本搜索 + 服务端分页表格，状态/类型筛选，点行进详情。
 // 来源字段（externalKey/externalUrl/remoteStatus）由列表接口直接带出，不再旁路反查 external_links。
+// 布局遵循 docs/core/前端内容区布局约定.md：Card 默认尺寸、title 内 Segmented、操作收 extra、表格默认密度。
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Input, Select, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd'
+import { Button, Card, Input, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -18,14 +19,14 @@ import {
   requirementTypeColor,
 } from './requirementMeta'
 
-type SourceTab = '' | RequirementSource
+type SourceView = 'ALL' | RequirementSource
 
 export default function RequirementListCard({ projectId }: { projectId: string }) {
   const navigate = useNavigate()
   const [items, setItems] = useState<Requirement[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
-  const [sourceTab, setSourceTab] = useState<SourceTab>('')
+  const [sourceView, setSourceView] = useState<SourceView>('ALL')
   const [keyword, setKeyword] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [typeFilter, setTypeFilter] = useState<string>('')
@@ -49,14 +50,14 @@ export default function RequirementListCard({ projectId }: { projectId: string }
   }, [projectId])
 
   useEffect(() => {
-    load(page, size, sourceTab, keyword, statusFilter, typeFilter)
+    load(page, size, sourceView, keyword, statusFilter, typeFilter)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [load, page, size, sourceTab, keyword, statusFilter, typeFilter])
+  }, [load, page, size, sourceView, keyword, statusFilter, typeFilter])
 
-  const reload = () => load(page, size, sourceTab, keyword, statusFilter, typeFilter)
+  const reload = () => load(page, size, sourceView, keyword, statusFilter, typeFilter)
 
-  // 来源相关列仅「全部」「Jira」Tab 显示（自建没有这些字段）
-  const jiraColumns: ColumnsType<Requirement> = sourceTab === 'LOCAL' ? [] : [
+  // 来源相关列仅「全部」「Jira」视图显示（自建没有这些字段）
+  const jiraColumns: ColumnsType<Requirement> = sourceView === 'LOCAL' ? [] : [
     {
       title: 'Jira Key',
       dataIndex: 'externalKey',
@@ -143,52 +144,59 @@ export default function RequirementListCard({ projectId }: { projectId: string }
 
   return (
     <>
-      <Space direction="vertical" size={8} style={{ width: '100%' }}>
-        <Tabs
-          size="small"
-          activeKey={sourceTab}
-          onChange={(k) => { setSourceTab(k as SourceTab); setPage(0) }}
-          items={[
-            { key: '', label: '全部' },
-            { key: 'JIRA', label: 'Jira 同步' },
-            { key: 'LOCAL', label: '自建' },
-          ]}
-          style={{ marginBottom: -8 }}
-        />
-        <Space wrap>
-          <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            新建需求
-          </Button>
-          <Input.Search
-            allowClear
-            size="small"
-            placeholder="搜索标题 / Jira Key"
-            style={{ width: 200 }}
-            onSearch={(v) => { setKeyword(v.trim()); setPage(0) }}
-          />
-          <Select
-            allowClear
-            size="small"
-            placeholder="状态（默认全部）"
-            style={{ minWidth: 150 }}
-            value={statusFilter || undefined}
-            onChange={(v) => { setStatusFilter(v ?? ''); setPage(0) }}
-            options={ALL_STATUSES.map((s) => ({ value: s, label: s }))}
-          />
-          <Select
-            allowClear
-            size="small"
-            placeholder="类型（默认全部）"
-            style={{ minWidth: 130 }}
-            value={typeFilter || undefined}
-            onChange={(v) => { setTypeFilter(v ?? ''); setPage(0) }}
-            options={ALL_TYPES.map((t) => ({ value: t, label: TYPE_LABEL[t] }))}
-          />
-          <Button size="small" icon={<ReloadOutlined />} onClick={reload} />
-        </Space>
+      <Card
+        title={
+          <Space size={12}>
+            <span>需求</span>
+            <Segmented<SourceView>
+              value={sourceView}
+              onChange={(v) => { setSourceView(v); setPage(0) }}
+              options={[
+                { value: 'ALL', label: '全部' },
+                { value: 'JIRA', label: 'Jira 同步' },
+                { value: 'LOCAL', label: '自建' },
+              ]}
+            />
+          </Space>
+        }
+        extra={
+          <Space wrap>
+            <Input.Search
+              allowClear
+              placeholder="搜索标题 / Jira Key"
+              style={{ width: 200 }}
+              onSearch={(v) => { setKeyword(v.trim()); setPage(0) }}
+            />
+            <Select
+              allowClear
+              placeholder="状态（默认全部）"
+              style={{ minWidth: 150 }}
+              value={statusFilter || undefined}
+              onChange={(v) => { setStatusFilter(v ?? ''); setPage(0) }}
+              options={ALL_STATUSES.map((s) => ({ value: s, label: s }))}
+            />
+            <Select
+              allowClear
+              placeholder="类型（默认全部）"
+              style={{ minWidth: 130 }}
+              value={typeFilter || undefined}
+              onChange={(v) => { setTypeFilter(v ?? ''); setPage(0) }}
+              options={ALL_TYPES.map((t) => ({ value: t, label: TYPE_LABEL[t] }))}
+            />
+            <Button icon={<ReloadOutlined />} onClick={reload}>
+              刷新
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              新建需求
+            </Button>
+          </Space>
+        }
+      >
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+          需求 = 研发主线的顶层条目：可来自 Jira 同步或本地自建，点行进详情管理设计与工作单元。
+        </Typography.Paragraph>
         <Table
           rowKey="id"
-          size="small"
           loading={loading}
           columns={columns}
           dataSource={items}
@@ -209,7 +217,7 @@ export default function RequirementListCard({ projectId }: { projectId: string }
           }}
           locale={{ emptyText: '暂无需求，点击「新建需求」开始一条研发主线' }}
         />
-      </Space>
+      </Card>
 
       <RequirementFormDrawer
         projectId={projectId}
