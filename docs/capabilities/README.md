@@ -43,6 +43,7 @@
 | [CAP-25](CAP-25-runner-workspace.md) | 远程会话工作区编排 | 底座 | launch 帧下发 repo+短期凭据，runner 自动 clone/fetch/会话 worktree/结束 push，节点零手工配码 |
 | [CAP-26](CAP-26-exec-fetch.md) | 执行前代码同步 | 底座 | 构建/发版/worktree 基准一律取 origin/ 远端引用（执行前 fetch），服务端 clone 不再失鲜 |
 | [CAP-27](CAP-27-requirement-effort.md) | 需求工时 | 组装层 | AI 实际耗时会话时长自动汇总 + Jira 预估/已用工时同步展示 + worklog 一键回写 |
+| [CAP-28](CAP-28-personal-worklog.md) | 个人工作日志与工时管理 | 组装层 | git log + 手动补录成工作条目记工时，AI 定时生成日报/周报草稿人工确认，Jira 一键登记 |
 
 ## 依赖关系
 
@@ -78,6 +79,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-25 远程工作区依赖 CAP-21/23/24：launch 帧携带 repo 块（remoteUrl/分支/token，CAP-24 优先级解析），runner 侧 clone 缓存 + 每会话 worktree + 结束 push，节点机零手工维护代码。
 - CAP-26 执行前同步依赖 CAP-08/11/18/23：构建/发版前 fetch 并以 origin/ 远端引用为基准，与 CAP-25 闭环「节点开发 → 远端 → 服务端执行」。
 - CAP-27 需求工时依赖 CAP-05/13/19：会话时长经 RequirementAgentTimeLookup 端口（project 定义、session 实现）汇总为 AI 实际耗时；Jira time tracking 字段走 CAP-19 同步链路落托管列，worklog 回写复用其 FR-08 通道。
+- CAP-28 个人工时依赖 CAP-01/05/06/24：全局仓库登记 + 用户勾选，git log 按 CAP-24 署名过滤成工作条目，日报/周报经 OneShotAgentRunner 端口（common 定义、session 实现）跑 headless claude 生成草稿，事件走 CAP-06 通知；FR-07 Jira 一键操作另依赖 CAP-19/27。
 
 ## 组装方式（后续流程层）
 
