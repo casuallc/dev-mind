@@ -28,6 +28,8 @@ public class SessionProperties {
     private int maxConcurrent = 4;
     /** 单条事件内容截断字节数，防前端卡死 */
     private int maxEventBytes = 100 * 1024;
+    /** CAP-28 one-shot 总结会话专用权限模式（只读任务，不复用全局 acceptEdits） */
+    private String oneshotPermissionMode = "plan";
 
     public String getExecutor() { return executor; }
     public void setExecutor(String executor) { this.executor = executor; }
@@ -49,4 +51,6 @@ public class SessionProperties {
     public void setMaxConcurrent(int maxConcurrent) { this.maxConcurrent = maxConcurrent; }
     public int getMaxEventBytes() { return maxEventBytes; }
     public void setMaxEventBytes(int maxEventBytes) { this.maxEventBytes = maxEventBytes; }
+    public String getOneshotPermissionMode() { return oneshotPermissionMode; }
+    public void setOneshotPermissionMode(String oneshotPermissionMode) { this.oneshotPermissionMode = oneshotPermissionMode; }
 }
