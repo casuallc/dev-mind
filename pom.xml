@@ -41,6 +41,7 @@
         <module>devmind-open-api</module>
         <module>devmind-agent</module>
         <module>devmind-agent-runner</module>
+        <module>devmind-worklog</module>
         <module>devmind-app</module>
         <module>devmind-dist</module>
     </modules>
@@ -154,6 +155,11 @@
             <dependency>
                 <groupId>com.devmind</groupId>
                 <artifactId>devmind-agent-runner</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.devmind</groupId>
+                <artifactId>devmind-worklog</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

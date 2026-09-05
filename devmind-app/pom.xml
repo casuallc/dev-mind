@@ -93,6 +93,10 @@
             <groupId>com.devmind</groupId>
             <artifactId>devmind-agent</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-worklog</artifactId>
+        </dependency>
 
         <!-- Spring Boot 基础 -->
         <dependency>
