@@ -151,10 +151,11 @@ export default function RequirementDetailPage() {
       <Row gutter={12}>
         <Col xs={24} xl={17}>
           <Card
+            size="small"
             title={
               <Space size={8} wrap>
                 <Typography.Text code>{r.code}</Typography.Text>
-                <Typography.Text strong style={{ fontSize: 15 }}>{r.title}</Typography.Text>
+                <Typography.Text strong>{r.title}</Typography.Text>
                 <Tag color={requirementTypeColor(r.type ?? 'FEATURE')}>{TYPE_LABEL[r.type ?? 'FEATURE']}</Tag>
                 <Tag color={requirementStatusColor(r.status)}>{r.status}</Tag>
                 {r.status === 'CANCELLED' && (
@@ -166,7 +167,7 @@ export default function RequirementDetailPage() {
               <Space size={8} wrap>
                 <FlowActions requirement={r} onChanged={reloadOverview} />
                 <Button icon={<EditOutlined />} onClick={() => setEditOpen(true)}>编辑</Button>
-                <Button icon={<ReloadOutlined />} onClick={reloadOverview} />
+                <Button icon={<ReloadOutlined />} onClick={reloadOverview}>刷新</Button>
                 <Dropdown
                   menu={{
                     items: [
