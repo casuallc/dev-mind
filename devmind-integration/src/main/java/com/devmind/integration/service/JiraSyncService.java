@@ -324,8 +324,8 @@ public class JiraSyncService {
     }
 
     /** issue → 托管字段包（标题=summary 原文、描述=Jira 原文，无前缀无尾注——元信息全部进列；
-     *  创建/更新时间取 issue 自身时间） */
-    private static JiraManagedFields managedFields(JiraIssue issue) {
+     *  创建/更新时间取 issue 自身时间）；包可见供 JiraIssueActionService 转换后单条刷新复用 */
+    static JiraManagedFields managedFields(JiraIssue issue) {
         return new JiraManagedFields(
                 issue.summary(), issue.description(), requirementType(issue),
                 issue.priority(), issue.assignee(), issue.reporter(),
