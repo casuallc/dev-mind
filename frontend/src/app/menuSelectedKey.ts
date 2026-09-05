@@ -3,8 +3,10 @@
 const SELECT_PREFIXES: Array<[string, string]> = [
   ['/admin/projects', '/admin/projects'], // 列表 + 设置子路由
   ['/admin/docs', '/admin/docs'], // 列表 + 编辑器
+  ['/worklog/repos', '/worklog/repos'], // 先于 /worklog 前缀匹配
   ['/projects/', '/requirements'], // /projects/:id/requirements/:rid → 需求
   ['/sessions/', '/sessions'],
+  ['/worklog', '/worklog'],
   ['/requirements', '/requirements'],
   ['/builds', '/builds'],
   ['/deployments', '/deployments'],

@@ -35,6 +35,8 @@ import IntegrationsPage from '../features/integrations/pages/IntegrationsPage'
 import ApiKeysPage from '../features/open-api/pages/ApiKeysPage'
 import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
+import WorklogPage from '../features/worklog/pages/WorklogPage'
+import CodeReposPage from '../features/worklog/pages/CodeReposPage'
 import LoginPage from '../features/auth/pages/LoginPage'
 import UserManagementPage from '../features/auth/pages/UserManagementPage'
 import GitCredentialsPage from '../features/auth/pages/GitCredentialsPage'
@@ -73,6 +75,9 @@ export default function App() {
           <Route path="/" element={<Navigate to="/overview" replace />} />
           {/* CAP-24 个人设置：我的 Git 凭证 */}
           <Route path="/me/git-credentials" element={<GitCredentialsPage />} />
+          {/* CAP-28 个人工作日志（个人级，不进项目上下文） */}
+          <Route path="/worklog" element={<WorklogPage />} />
+          <Route path="/worklog/repos" element={<CodeReposPage />} />
           {/* 项目上下文页面（当前项目为主线，无项目时由 Gate 统一空态） */}
           <Route element={<ProjectContextGate />}>
             <Route path="/overview" element={<ProjectOverviewPage />} />
