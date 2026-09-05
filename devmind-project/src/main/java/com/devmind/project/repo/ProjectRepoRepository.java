@@ -16,5 +16,10 @@ public interface ProjectRepoRepository extends JpaRepository<ProjectRepoEntity, 
 
     long countByProjectIdAndPath(String projectId, String path);
 
+    /** CAP-29：全局仓库被多少项目行引用（删除保护 + 状态镜像扇出） */
+    long countByGitRepoId(Long gitRepoId);
+
+    List<ProjectRepoEntity> findByGitRepoId(Long gitRepoId);
+
     void deleteByProjectId(String projectId);
 }

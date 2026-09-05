@@ -100,6 +100,10 @@ public class ProjectRepoEntity {
     @Column(name = "cloned_at")
     private Instant clonedAt;
 
+    /** CAP-29 关联的全局仓库（git_repositories.id 弱引用；null=存量行，继续独立管理） */
+    @Column(name = "git_repo_id")
+    private Long gitRepoId;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -136,6 +140,8 @@ public class ProjectRepoEntity {
     public void setCloneLogs(String cloneLogs) { this.cloneLogs = cloneLogs; }
     public Instant getClonedAt() { return clonedAt; }
     public void setClonedAt(Instant clonedAt) { this.clonedAt = clonedAt; }
+    public Long getGitRepoId() { return gitRepoId; }
+    public void setGitRepoId(Long gitRepoId) { this.gitRepoId = gitRepoId; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

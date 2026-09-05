@@ -3,7 +3,8 @@ package com.devmind.worklog.service;
 import com.devmind.common.integration.GitIdentityProvider;
 import com.devmind.worklog.config.WorklogProperties;
 import com.devmind.worklog.dto.GitCommitView;
-import com.devmind.worklog.model.GitRepositoryEntity;
+import com.devmind.common.integration.GitRepoCatalog;
+import com.devmind.common.util.GitCli;
 import com.devmind.worklog.repo.WorklogEntryRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,12 +58,17 @@ public class GitLogScanner {
     /** 扫描该用户勾选仓库在 date 当日的提交（本机时区）。 */
     public List<GitCommitView> scan(String username, LocalDate date) {
         List<GitCommitView> out = new ArrayList<>();
-        for (GitRepositoryEntity repo : codeRepoService.subscribedActiveRepos(username)) {
+        for (GitRepoCatalog.RepoRef repo : codeRepoService.subscribedActiveRepos(username)) {
+            // CAP-29：服务端克隆未就绪（CLONING/FAILED）的行跳过；NONE=LOCAL 行直接可扫
+            if ("CLONING".equals(repo.cloneStatus()) || "FAILED".equals(repo.cloneStatus())) {
+                log.debug("仓库克隆未就绪，扫描跳过: repo={} cloneStatus={}", repo.name(), repo.cloneStatus());
+                continue;
+            }
             try {
                 out.addAll(scanRepo(username, repo, date));
             } catch (Exception e) {
                 // 单库失败不拖垮整体（仓库可能被删/移动），记 warn 继续
-                log.warn("git 扫描失败，已跳过: repo={}({}) err={}", repo.getName(), repo.getLocalPath(), e.getMessage());
+                log.warn("git 扫描失败，已跳过: repo={}({}) err={}", repo.name(), repo.localPath(), e.getMessage());
             }
         }
         out.sort((a, b) -> {
@@ -72,7 +78,7 @@ public class GitLogScanner {
         return out;
     }
 
-    private List<GitCommitView> scanRepo(String username, GitRepositoryEntity repo, LocalDate date) {
+    private List<GitCommitView> scanRepo(String username, GitRepoCatalog.RepoRef repo, LocalDate date) {
         List<String> args = new ArrayList<>(List.of(
                 "git", "-c", "i18n.logOutputEncoding=UTF-8",
                 "log", "--encoding=UTF-8", "--no-merges", FORMAT,
@@ -82,12 +88,12 @@ public class GitLogScanner {
         if (author != null) {
             args.add("--author=" + author);
         }
-        if (repo.getDefaultBranch() != null && !repo.getDefaultBranch().isBlank()) {
-            args.add(repo.getDefaultBranch().strip());
+        if (repo.defaultBranch() != null && !repo.defaultBranch().isBlank()) {
+            args.add(repo.defaultBranch().strip());
         }
-        GitCli.Result r = GitCli.run(Path.of(repo.getLocalPath()), 30, args.toArray(new String[0]));
+        GitCli.Result r = GitCli.run(Path.of(repo.localPath()), 30, args.toArray(new String[0]));
         if (r.exitCode() != 0) {
-            log.warn("git log 失败: repo={} err={}", repo.getName(), r.err() == null ? "" : r.err().strip());
+            log.warn("git log 失败: repo={} err={}", repo.name(), r.err() == null ? "" : r.err().strip());
             return List.of();
         }
         List<GitCommitView> out = new ArrayList<>();
@@ -96,35 +102,35 @@ public class GitLogScanner {
             if (f.length < 5 || f[0].isBlank()) {
                 continue;
             }
-            out.add(new GitCommitView(repo.getId(), repo.getName(), f[0], f[1], f[2],
+            out.add(new GitCommitView(repo.id(), repo.name(), f[0], f[1], f[2],
                     Instant.parse(f[3]), f[4],
-                    entryRepo.existsByUserIdAndRepoIdAndCommitSha(username, repo.getId(), f[0])));
+                    entryRepo.existsByUserIdAndRepoIdAndCommitSha(username, repo.id(), f[0])));
         }
         return out;
     }
 
     /** 解析 author 过滤串（email 优先，退 name）；无法解析返回 null（不过滤 + warn）。 */
-    private String resolveAuthorFilter(String username, GitRepositoryEntity repo) {
+    private String resolveAuthorFilter(String username, GitRepoCatalog.RepoRef repo) {
         GitIdentityProvider provider = identityProvider.getIfAvailable();
         if (provider == null) {
-            log.warn("GitIdentityProvider 未装配，仓库 {} 不做 author 过滤", repo.getName());
+            log.warn("GitIdentityProvider 未装配，仓库 {} 不做 author 过滤", repo.name());
             return null;
         }
-        String host = hostOf(repo.getRemoteUrl());
+        String host = hostOf(repo.remoteUrl());
         if (host == null) {
             host = hostOf(remoteUrlFromGit(repo));
         }
         return provider.resolveAuthor(username, host)
                 .map(a -> a.email() != null && !a.email().isBlank() ? a.email() : a.name())
                 .orElseGet(() -> {
-                    log.warn("未能解析用户 {} 在仓库 {} 的署名，不做 author 过滤", username, repo.getName());
+                    log.warn("未能解析用户 {} 在仓库 {} 的署名，不做 author 过滤", username, repo.name());
                     return null;
                 });
     }
 
-    private String remoteUrlFromGit(GitRepositoryEntity repo) {
+    private String remoteUrlFromGit(GitRepoCatalog.RepoRef repo) {
         try {
-            GitCli.Result r = GitCli.run(Path.of(repo.getLocalPath()), 10,
+            GitCli.Result r = GitCli.run(Path.of(repo.localPath()), 10,
                     "git", "remote", "get-url", "origin");
             return r.exitCode() == 0 ? r.out().strip() : null;
         } catch (Exception e) {

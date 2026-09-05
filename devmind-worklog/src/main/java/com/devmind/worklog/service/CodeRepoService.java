@@ -3,113 +3,65 @@ package com.devmind.worklog.service;
 import com.devmind.auth.IdentityService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
-import com.devmind.worklog.dto.RepoRequest;
+import com.devmind.common.integration.GitRepoCatalog;
 import com.devmind.worklog.dto.RepoView;
-import com.devmind.worklog.model.GitRepositoryEntity;
 import com.devmind.worklog.model.WorklogRepoSubscriptionEntity;
-import com.devmind.worklog.repo.GitRepositoryRepository;
 import com.devmind.worklog.repo.WorklogRepoSubscriptionRepository;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 /**
- * CAP-28 FR-01/02：全局代码仓库登记（写操作仅 ADMIN，由 SecurityConfig 路由规则保证）
- * 与用户参与勾选。登记时 git rev-parse 校验本地路径确为 git 仓库。
+ * CAP-28 FR-02 用户参与勾选（订阅数据归本模块）。
+ * CAP-29 起仓库登记表移到 devmind-project 全局管理，本服务只经
+ * {@link GitRepoCatalog} SPI 读注册表（ObjectProvider 探测，缺席时列表为空、勾选 404）。
  */
 @Service
 public class CodeRepoService {
 
-    private final GitRepositoryRepository repoRepo;
     private final WorklogRepoSubscriptionRepository subRepo;
     private final IdentityService identity;
+    private final ObjectProvider<GitRepoCatalog> catalog;
 
-    public CodeRepoService(GitRepositoryRepository repoRepo,
-                           WorklogRepoSubscriptionRepository subRepo,
-                           IdentityService identity) {
-        this.repoRepo = repoRepo;
+    public CodeRepoService(WorklogRepoSubscriptionRepository subRepo,
+                           IdentityService identity,
+                           ObjectProvider<GitRepoCatalog> catalog) {
         this.subRepo = subRepo;
         this.identity = identity;
+        this.catalog = catalog;
     }
 
     /** 全员可见；附当前用户 subscribed 标记。 */
     public List<RepoView> list() {
+        GitRepoCatalog cat = catalog.getIfAvailable();
+        if (cat == null) {
+            return List.of();
+        }
         String me = identity.currentActor();
         Set<Long> subscribed = new HashSet<>(
                 subRepo.findByUserId(me).stream().map(WorklogRepoSubscriptionEntity::getRepoId).toList());
-        return repoRepo.findAll().stream()
-                .map(e -> RepoView.of(e, subscribed.contains(e.getId())))
+        return cat.listAll().stream()
+                .map(r -> RepoView.of(r, subscribed.contains(r.id())))
                 .toList();
     }
 
     /** 本人勾选中的 ACTIVE 仓库（git 扫描用）。 */
-    public List<GitRepositoryEntity> subscribedActiveRepos(String username) {
-        List<Long> ids = subRepo.findByUserId(username).stream()
-                .map(WorklogRepoSubscriptionEntity::getRepoId).toList();
-        if (ids.isEmpty()) {
+    public List<GitRepoCatalog.RepoRef> subscribedActiveRepos(String username) {
+        GitRepoCatalog cat = catalog.getIfAvailable();
+        if (cat == null) {
             return List.of();
         }
-        return repoRepo.findAllById(ids).stream()
-                .filter(r -> GitRepositoryEntity.STATUS_ACTIVE.equals(r.getStatus()))
+        List<Long> ids = subRepo.findByUserId(username).stream()
+                .map(WorklogRepoSubscriptionEntity::getRepoId).toList();
+        return cat.listByIds(ids).stream()
+                // 状态常量归 project 模块实体，此处用字面量防跨模块依赖
+                .filter(r -> "ACTIVE".equals(r.status()))
                 .toList();
-    }
-
-    @Transactional
-    public RepoView create(RepoRequest req) {
-        String path = validateGitRepo(req.localPath());
-        if (repoRepo.findByLocalPath(path).isPresent()) {
-            throw new DevMindException(ErrorCode.CONFLICT, "该路径已登记: " + path);
-        }
-        GitRepositoryEntity e = new GitRepositoryEntity();
-        e.setName(req.name().strip());
-        e.setLocalPath(path);
-        e.setRemoteUrl(req.remoteUrl());
-        e.setDefaultBranch(req.defaultBranch());
-        e.setStatus(GitRepositoryEntity.STATUS_ACTIVE);
-        e.setCreatedBy(identity.currentActor());
-        e.setCreatedAt(Instant.now());
-        e.setUpdatedAt(Instant.now());
-        return RepoView.of(repoRepo.save(e), false);
-    }
-
-    @Transactional
-    public RepoView update(Long id, RepoRequest req) {
-        GitRepositoryEntity e = repoRepo.findById(id)
-                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "仓库不存在: " + id));
-        String path = req.localPath() == null || req.localPath().equals(e.getLocalPath())
-                ? e.getLocalPath() : validateGitRepo(req.localPath());
-        if (!path.equals(e.getLocalPath()) && repoRepo.findByLocalPath(path).isPresent()) {
-            throw new DevMindException(ErrorCode.CONFLICT, "该路径已登记: " + path);
-        }
-        e.setName(req.name().strip());
-        e.setLocalPath(path);
-        e.setRemoteUrl(req.remoteUrl());
-        e.setDefaultBranch(req.defaultBranch());
-        if (req.status() != null) {
-            if (!GitRepositoryEntity.STATUS_ACTIVE.equals(req.status())
-                    && !GitRepositoryEntity.STATUS_DISABLED.equals(req.status())) {
-                throw new DevMindException(ErrorCode.BAD_REQUEST, "status 仅支持 ACTIVE/DISABLED");
-            }
-            e.setStatus(req.status());
-        }
-        e.setUpdatedAt(Instant.now());
-        boolean subscribed = subRepo.findByUserIdAndRepoId(identity.currentActor(), id).isPresent();
-        return RepoView.of(repoRepo.save(e), subscribed);
-    }
-
-    @Transactional
-    public void delete(Long id) {
-        if (!repoRepo.existsById(id)) {
-            throw new DevMindException(ErrorCode.NOT_FOUND, "仓库不存在: " + id);
-        }
-        subRepo.deleteByRepoId(id);
-        repoRepo.deleteById(id);
     }
 
     /** 本人勾选/取消勾选。 */
@@ -117,7 +69,8 @@ public class CodeRepoService {
     public void setSubscription(Long repoId, boolean subscribed) {
         String me = identity.currentActor();
         if (subscribed) {
-            if (!repoRepo.existsById(repoId)) {
+            GitRepoCatalog cat = catalog.getIfAvailable();
+            if (cat == null || cat.listByIds(List.of(repoId)).isEmpty()) {
                 throw new DevMindException(ErrorCode.NOT_FOUND, "仓库不存在: " + repoId);
             }
             if (subRepo.findByUserIdAndRepoId(me, repoId).isEmpty()) {
@@ -130,22 +83,5 @@ public class CodeRepoService {
         } else {
             subRepo.deleteByUserIdAndRepoId(me, repoId);
         }
-    }
-
-    /** 路径存在且 git rev-parse 通过；返回规范化绝对路径。 */
-    private String validateGitRepo(String localPath) {
-        if (localPath == null || localPath.isBlank()) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "localPath 不能为空");
-        }
-        Path p = Path.of(localPath.strip());
-        if (!Files.isDirectory(p)) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "路径不存在或不是目录: " + p);
-        }
-        GitCli.Result r = GitCli.run(p, 15, "git", "rev-parse", "--is-inside-work-tree");
-        GitCli.requireOk(r, List.of("git", "rev-parse"));
-        if (!"true".equals(r.out().strip())) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "不是 git 仓库: " + p);
-        }
-        return p.toAbsolutePath().normalize().toString();
     }
 }

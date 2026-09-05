@@ -1,17 +1,16 @@
 package com.devmind.worklog.dto;
 
-import com.devmind.worklog.model.GitRepositoryEntity;
+import com.devmind.common.integration.GitRepoCatalog;
 
-import java.time.Instant;
+/**
+ * CAP-29 起 worklog 订阅页视图：全局登记数据经 GitRepoCatalog SPI 读（project 模块实现），
+ * subscribed 为本模块勾选状态。cloneStatus 透出供前端提示「克隆中暂不可扫」。
+ */
+public record RepoView(Long id, String name, String remoteUrl, String defaultBranch,
+                       String status, String cloneStatus, Boolean subscribed) {
 
-/** 全局仓库视图；subscribed 为当前用户是否已勾选（列表时填充）。 */
-public record RepoView(Long id, String name, String localPath, String remoteUrl,
-                       String defaultBranch, String status, String createdBy,
-                       Boolean subscribed, Instant createdAt, Instant updatedAt) {
-
-    public static RepoView of(GitRepositoryEntity e, boolean subscribed) {
-        return new RepoView(e.getId(), e.getName(), e.getLocalPath(), e.getRemoteUrl(),
-                e.getDefaultBranch(), e.getStatus(), e.getCreatedBy(),
-                subscribed, e.getCreatedAt(), e.getUpdatedAt());
+    public static RepoView of(GitRepoCatalog.RepoRef r, boolean subscribed) {
+        return new RepoView(r.id(), r.name(), r.remoteUrl(), r.defaultBranch(),
+                r.status(), r.cloneStatus(), subscribed);
     }
 }
