@@ -4,8 +4,6 @@ import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.execution.ws.ExecutionLogHub;
-import com.devmind.integration.model.IntegrationEntity;
-import com.devmind.integration.repo.IntegrationRepository;
 import com.devmind.project.ProjectService;
 import com.devmind.project.dto.RepoView;
 import com.devmind.project.model.ProjectRepoEntity;
@@ -44,26 +42,27 @@ public class RepoCloneService {
 
     private final ProjectRepoRepository repoRepo;
     private final ProjectService projectService;
-    private final IntegrationRepository integrationRepo;
-    private final IntegrationService integrationService;
+    private final CloneTokenResolver tokenResolver;
     private final GitRemoteOps gitOps;
     private final ExecutionLogHub hub;
+    /** CAP-29：已关联全局仓库（git_repo_id 非空）的行，克隆委派给全局同步服务 */
+    private final GitRepoSyncService gitRepoSyncService;
     private final ExecutorService cloneExecutor = Executors.newVirtualThreadPerTaskExecutor();
     /** 在途克隆（并发守卫；package-private 供单测预置） */
     final Set<Long> inFlight = ConcurrentHashMap.newKeySet();
 
     public RepoCloneService(ProjectRepoRepository repoRepo,
                             ProjectService projectService,
-                            IntegrationRepository integrationRepo,
-                            IntegrationService integrationService,
+                            CloneTokenResolver tokenResolver,
                             GitRemoteOps gitOps,
-                            ExecutionLogHub hub) {
+                            ExecutionLogHub hub,
+                            GitRepoSyncService gitRepoSyncService) {
         this.repoRepo = repoRepo;
         this.projectService = projectService;
-        this.integrationRepo = integrationRepo;
-        this.integrationService = integrationService;
+        this.tokenResolver = tokenResolver;
         this.gitOps = gitOps;
         this.hub = hub;
+        this.gitRepoSyncService = gitRepoSyncService;
     }
 
     @PreDestroy
@@ -98,6 +97,11 @@ public class RepoCloneService {
         ProjectRepoEntity repo = requireRepo(projectId, repoId);
         if (!ProjectRepoEntity.SOURCE_CLONE.equals(repo.getSourceType())) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "本地路径仓库无需克隆: " + repoId);
+        }
+        if (repo.getGitRepoId() != null) {
+            // CAP-29：已关联全局仓库 → 委派全局克隆，状态经镜像扇出回写本行
+            gitRepoSyncService.requestClone(repo.getGitRepoId());
+            return toView(repo);
         }
         if (!inFlight.add(repoId)) {
             throw new DevMindException(ErrorCode.CONFLICT, "该仓库正在克隆中: " + repoId);
@@ -205,45 +209,9 @@ public class RepoCloneService {
 
     // ---------------- 内部 ----------------
 
-    /**
-     * 解析克隆凭据（仅内存，不进日志）。null = 匿名克隆公开仓库。
-     * 校验：集成存在、ENABLED、类型 GITLAB/GITHUB、base_url host 与 remoteUrl host 一致
-     * （防拿 A 平台 token 撞 B 平台）。
-     */
+    /** 解析克隆凭据（仅内存，不进日志）。null = 匿名克隆公开仓库。CAP-29 起委托共享 resolver。 */
     private String resolveToken(ProjectRepoEntity repo) {
-        Long integrationId = repo.getIntegrationId();
-        if (integrationId == null) {
-            return null;
-        }
-        if (repo.getRemoteUrl() != null && repo.getRemoteUrl().trim().startsWith("file://")) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "file:// 仅支持匿名克隆（不可选择集成实例）");
-        }
-        IntegrationEntity e = integrationRepo.findById(integrationId)
-                .orElseThrow(() -> new DevMindException(ErrorCode.BAD_REQUEST, "集成实例不存在: " + integrationId));
-        if (!IntegrationEntity.STATUS_ENABLED.equals(e.getStatus())) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "集成实例已禁用: " + e.getName());
-        }
-        if (!IntegrationEntity.TYPE_GITLAB.equals(e.getType()) && !IntegrationEntity.TYPE_GITHUB.equals(e.getType())) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "克隆仅支持 GitLab/GitHub 集成实例: " + e.getType());
-        }
-        String repoHost = hostOf(repo.getRemoteUrl());
-        String baseHost = hostOf(e.getBaseUrl());
-        if (repoHost != null && baseHost != null && !repoHost.equalsIgnoreCase(baseHost)) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST,
-                    "集成实例地址（" + baseHost + "）与仓库远端主机（" + repoHost + "）不一致");
-        }
-        return integrationService.tokenOf(e);
-    }
-
-    private String hostOf(String url) {
-        if (url == null || url.isBlank()) {
-            return null;
-        }
-        try {
-            return java.net.URI.create(url.trim()).getHost();
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
+        return tokenResolver.resolve(repo.getIntegrationId(), repo.getRemoteUrl());
     }
 
     /** 主库时回写 projects.clone_status 镜像（syncPrimaryMirror 内部从主库记录取值）。 */

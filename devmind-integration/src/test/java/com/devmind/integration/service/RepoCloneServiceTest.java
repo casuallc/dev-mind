@@ -109,8 +109,11 @@ class RepoCloneServiceTest {
     void setUp() {
         repos = new FakeRepoRepository();
         integrations = new FakeIntegrationRepository();
-        service = new RepoCloneService(repos.jpa(), new FakeProjectService(), integrations.jpa(),
-                new FakeIntegrationService(), new GitRemoteOps(), new ExecutionLogHub(new ObjectMapper()));
+        // CAP-29：token 解析抽到 CloneTokenResolver；gitRepoSyncService 传 null——
+        // 本测试行 gitRepoId 均为空，不会触发已关联行的委派分支
+        service = new RepoCloneService(repos.jpa(), new FakeProjectService(),
+                new CloneTokenResolver(integrations.jpa(), new FakeIntegrationService()),
+                new GitRemoteOps(), new ExecutionLogHub(new ObjectMapper()), null);
     }
 
     private ProjectRepoEntity cloneRow(String remoteUrl, Long integrationId) {

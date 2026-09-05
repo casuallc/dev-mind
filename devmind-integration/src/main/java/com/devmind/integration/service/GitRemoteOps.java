@@ -62,6 +62,30 @@ public class GitRemoteOps {
     }
 
     /**
+     * CAP-29：全量抓取远端分支（显式 refspec 映射 + --prune 清理已删分支）。
+     * token 走 withToken 显式 URL 注入，不依赖 origin 凭据；token 空 = 匿名（含 file://）。
+     */
+    public GitResult fetchAllRefs(String repoPath, String remoteUrl, String token) {
+        String url = token == null || token.isBlank() ? remoteUrl.trim() : withToken(remoteUrl, token);
+        return exec(repoPath, token,
+                List.of("fetch", url, "+refs/heads/*:refs/remotes/origin/*", "--prune"));
+    }
+
+    /** CAP-29：列出远程跟踪分支（refs/remotes/origin/* 短名，含 origin/ 前缀与 origin/HEAD 指针，调用方过滤）。 */
+    public GitResult listRemoteBranches(String repoPath) {
+        return exec(repoPath, null,
+                List.of("for-each-ref", "--format=%(refname:short)", "refs/remotes/origin"));
+    }
+
+    /**
+     * CAP-29：fetch 后把已检出的默认分支快进到 origin/&lt;branch&gt;（纯本地操作，无网络/凭据）。
+     * 服务端克隆是只读用途的非裸库，本地分支不随 fetch 移动；失败（分叉等）由调用方忽略。
+     */
+    public GitResult ffOnly(String repoPath, String upstreamRef) {
+        return exec(repoPath, null, List.of("merge", "--ff-only", upstreamRef));
+    }
+
+    /**
      * CAP-23：克隆远端仓库到 targetDir（targetDir 必须不存在或为空目录）。
      * token 非空时内嵌 URL（仅进程参数）；匿名（token 空）支持 http/https 与 file://。
      * 输出逐行流式回调（已脱敏）。
