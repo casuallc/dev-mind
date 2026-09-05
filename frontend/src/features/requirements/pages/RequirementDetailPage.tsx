@@ -1,8 +1,9 @@
 // 需求详情页（/projects/:id/requirements/:rid）：单条需求的研发主线。
-// 布局参考 Jira issue 页 + SessionDetail 工具条风格：左主（头卡 + 裸 Tabs）右栏（属性卡）。
-// 头卡 title 放 code/标题/类型/状态（标题允许换行防截断），extra 集中放本地操作：FlowActions 主按钮 + 编辑/刷新 + 更多（取消/删除）。
+// 布局参考 Jira issue 页 + SessionDetail 工具条风格：左主（头卡 + StageGuideCard 引导条 + 裸 Tabs）右栏（属性卡）。
+// 头卡 title 放 code/标题/类型/状态（标题允许换行防截断），extra 只留 编辑/刷新/更多（取消/删除）。
+// 阶段动作唯一入口在 StageGuideCard（当前阶段说明 + FlowActions 主按钮 + 待确认提醒）。
 // Jira 远端操作（JiraActions）收在右侧属性卡，与本地流程按钮隔离防误点。
-// 引导式流转——状态仅由 FlowActions 流程按钮与验收/取消隐式推进，FlowProgress 只读。
+// 引导式流转——状态仅由 FlowActions 流程按钮与验收/取消隐式推进。
 // Jira 来源：托管字段本地只读（表单禁用 + 服务端强制），属性面板显示 Jira key 链接与远端状态。
 import { useCallback, useEffect, useState } from 'react'
 import {
@@ -25,9 +26,8 @@ import {
 } from 'antd'
 import { DownOutlined, EditOutlined, LockOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
-import { deleteRequirement, getRequirementOverview, updateRequirementStatus } from '../api'
-import FlowActions from '../components/flow/FlowActions'
-import FlowProgress from '../components/flow/FlowProgress'
+import { deleteRequirement, getRequirementOverview, listDesigns, updateRequirementStatus } from '../api'
+import StageGuideCard from '../components/flow/StageGuideCard'
 import DesignsTab from '../components/flow/DesignsTab'
 import JiraActions from '../components/JiraActions'
 import RelatedRecordsTab from '../components/RelatedRecordsTab'
@@ -46,7 +46,7 @@ import {
   STATUS_LABEL,
   TYPE_LABEL,
 } from '../components/requirementMeta'
-import type { RequirementOverview } from '../types'
+import type { Design, RequirementOverview } from '../types'
 
 export default function RequirementDetailPage() {
   const { id: projectId, rid } = useParams<{ id: string; rid: string }>()
@@ -55,6 +55,8 @@ export default function RequirementDetailPage() {
   const [overview, setOverview] = useState<RequirementOverview | null>(null)
   const [loading, setLoading] = useState(true)
   const [editOpen, setEditOpen] = useState(false)
+  const [designs, setDesigns] = useState<Design[]>([])
+  const [activeTab, setActiveTab] = useState('workItems')
 
   // URL 自含项目身份：从分享链接进入时把当前项目切到该需求所属项目
   useEffect(() => {
@@ -80,6 +82,20 @@ export default function RequirementDetailPage() {
     reloadOverview()
   }, [reloadOverview])
 
+  // 方案列表在页面层取一次：引导卡（待确认提醒）与方案 Tab 角标共用
+  const loadDesigns = useCallback(() => {
+    if (!projectId || !rid) return
+    listDesigns(projectId, rid).then(setDesigns).catch(() => {})
+  }, [projectId, rid])
+
+  useEffect(loadDesigns, [loadDesigns])
+
+  // 引导卡/流程动作触发的刷新：overview 与 designs 一起重取
+  const reloadAll = useCallback(() => {
+    reloadOverview()
+    loadDesigns()
+  }, [reloadOverview, loadDesigns])
+
   if (loading) {
     return <Card><Spin /></Card>
   }
@@ -90,6 +106,7 @@ export default function RequirementDetailPage() {
   const r = overview.requirement
   const isJira = r.source === 'JIRA'
   const cancellable = r.status !== 'DONE' && r.status !== 'CANCELLED'
+  const draftDesignCount = designs.filter((d) => d.status === 'DRAFT').length
 
   const confirmCancel = () => {
     Modal.confirm({
@@ -168,7 +185,6 @@ export default function RequirementDetailPage() {
             }
             extra={
               <Space size={8} wrap>
-                <FlowActions requirement={r} onChanged={reloadOverview} />
                 <Button icon={<EditOutlined />} onClick={() => setEditOpen(true)}>编辑</Button>
                 <Button icon={<ReloadOutlined />} onClick={reloadOverview}>刷新</Button>
                 <Dropdown
@@ -185,7 +201,6 @@ export default function RequirementDetailPage() {
               </Space>
             }
           >
-            {r.status !== 'CANCELLED' && <FlowProgress status={r.status} />}
             {r.description && (
               <Typography.Paragraph
                 style={{ fontSize: 13, marginBottom: 0, whiteSpace: 'pre-wrap' }}
@@ -196,7 +211,21 @@ export default function RequirementDetailPage() {
             )}
           </Card>
 
+          {r.status !== 'DONE' && r.status !== 'CANCELLED' && (
+            <div style={{ marginTop: 12 }}>
+              <StageGuideCard
+                requirement={r}
+                overview={overview}
+                designs={designs}
+                onGotoTab={setActiveTab}
+                onChanged={reloadAll}
+              />
+            </div>
+          )}
+
           <Tabs
+            activeKey={activeTab}
+            onChange={setActiveTab}
             items={[
               {
                 key: 'workItems',
@@ -213,7 +242,7 @@ export default function RequirementDetailPage() {
               },
               {
                 key: 'designs',
-                label: '方案',
+                label: draftDesignCount > 0 ? `方案（${draftDesignCount} 待确认）` : '方案',
                 children: <DesignsTab projectId={r.projectId} requirementId={r.id} />,
               },
               {
