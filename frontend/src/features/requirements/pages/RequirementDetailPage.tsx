@@ -1,7 +1,8 @@
 // 需求详情页（/projects/:id/requirements/:rid）：单条需求的研发主线。
-// 布局参考 Jira issue 页：左主（流程 + Tabs）右栏（属性卡）。
-// 引导式流转——状态仅由 FlowActions 流程按钮隐式推进，Steps 只读；取消走「更多」菜单（confirm）。
-// Jira 来源：托管字段本地只读（表单禁用 + 服务端强制），头卡显示 Jira key 链接与远端状态。
+// 布局参考 Jira issue 页 + SessionDetail 工具条风格：左主（头卡 + 裸 Tabs）右栏（属性卡）。
+// 头卡 title 放 code/标题/类型/状态，extra 集中放操作：FlowActions 主按钮（当前阶段下一步）+ 编辑/刷新 + 更多（取消/删除）。
+// 引导式流转——状态仅由 FlowActions 流程按钮与验收/取消隐式推进，FlowProgress 只读。
+// Jira 来源：托管字段本地只读（表单禁用 + 服务端强制），属性面板显示 Jira key 链接与远端状态。
 import { useCallback, useEffect, useState } from 'react'
 import {
   Breadcrumb,
@@ -15,10 +16,8 @@ import {
   Row,
   Space,
   Spin,
-  Steps,
   Tabs,
   Tag,
-  Timeline,
   Tooltip,
   Typography,
   message,
@@ -27,9 +26,11 @@ import { DownOutlined, EditOutlined, LockOutlined, ReloadOutlined } from '@ant-d
 import { useNavigate, useParams } from 'react-router-dom'
 import { deleteRequirement, getRequirementOverview, updateRequirementStatus } from '../api'
 import FlowActions from '../components/flow/FlowActions'
+import FlowProgress from '../components/flow/FlowProgress'
 import DesignsTab from '../components/flow/DesignsTab'
 import RelatedRecordsTab from '../components/RelatedRecordsTab'
 import RequirementFormDrawer from '../components/RequirementFormDrawer'
+import TimelineTab from '../components/TimelineTab'
 import WorkItemsTab from '../components/WorkItemsTab'
 import { useProject } from '../../projects/hooks/useProject'
 import { getCurrentProjectId, setCurrentProject } from '../../../app/currentProjectStore'
@@ -40,7 +41,6 @@ import {
   priorityColor,
   sourceTagColor,
   SOURCE_LABEL,
-  STATUS_FLOW,
   TYPE_LABEL,
 } from '../components/requirementMeta'
 import type { RequirementOverview } from '../types'
@@ -86,7 +86,6 @@ export default function RequirementDetailPage() {
 
   const r = overview.requirement
   const isJira = r.source === 'JIRA'
-  const flowIndex = STATUS_FLOW.indexOf(r.status)
   const cancellable = r.status !== 'DONE' && r.status !== 'CANCELLED'
 
   const confirmCancel = () => {
@@ -150,126 +149,84 @@ export default function RequirementDetailPage() {
       />
 
       <Row gutter={12}>
-        <Col xs={24} xl={16}>
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Card size="small">
-              <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
-                  <Space wrap>
-                    <Typography.Text code>{r.code}</Typography.Text>
-                    <Typography.Text strong style={{ fontSize: 15 }}>{r.title}</Typography.Text>
-                    <Tag color={sourceTagColor(r.source)}>{SOURCE_LABEL[r.source]}</Tag>
-                    {isJira && r.externalKey && (
-                      <Tag
-                        color="blue"
-                        style={{ cursor: r.externalUrl ? 'pointer' : 'default' }}
-                        onClick={() => r.externalUrl && window.open(r.externalUrl, '_blank')}
-                      >
-                        {r.externalKey}
-                      </Tag>
-                    )}
-                    {isJira && r.remoteStatus && (
-                      <Tooltip title="Jira 远端状态，随同步刷新">
-                        <Tag>{r.remoteStatus}</Tag>
-                      </Tooltip>
-                    )}
-                    <Tag color={requirementTypeColor(r.type ?? 'FEATURE')}>{TYPE_LABEL[r.type ?? 'FEATURE']}</Tag>
-                    <Tag color={requirementStatusColor(r.status)}>{r.status}</Tag>
-                    {r.status === 'CANCELLED' && (
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>该需求已取消</Typography.Text>
-                    )}
-                  </Space>
-                  <Space wrap>
-                    <Button size="small" icon={<EditOutlined />} onClick={() => setEditOpen(true)}>编辑</Button>
-                    <Button size="small" icon={<ReloadOutlined />} onClick={reloadOverview} />
-                    <Dropdown
-                      menu={{
-                        items: [
-                          { key: 'cancel', label: '取消需求', danger: true, disabled: !cancellable },
-                          { key: 'delete', label: '删除', danger: true },
-                        ],
-                        onClick: ({ key }) => (key === 'cancel' ? confirmCancel() : confirmDelete()),
-                      }}
-                    >
-                      <Button size="small">更多 <DownOutlined /></Button>
-                    </Dropdown>
-                  </Space>
-                </Space>
-                {r.status !== 'CANCELLED' && (
-                  <Steps
-                    size="small"
-                    current={flowIndex}
-                    items={STATUS_FLOW.map((s) => ({ title: s }))}
-                    style={{ maxWidth: 820 }}
-                  />
-                )}
-                <FlowActions requirement={r} onChanged={reloadOverview} />
-                {r.description && (
-                  <Typography.Paragraph
-                    style={{ fontSize: 13, marginBottom: 0, whiteSpace: 'pre-wrap' }}
-                  >
-                    {r.description}
-                  </Typography.Paragraph>
+        <Col xs={24} xl={17}>
+          <Card
+            title={
+              <Space size={8} wrap>
+                <Typography.Text code>{r.code}</Typography.Text>
+                <Typography.Text strong style={{ fontSize: 15 }}>{r.title}</Typography.Text>
+                <Tag color={requirementTypeColor(r.type ?? 'FEATURE')}>{TYPE_LABEL[r.type ?? 'FEATURE']}</Tag>
+                <Tag color={requirementStatusColor(r.status)}>{r.status}</Tag>
+                {r.status === 'CANCELLED' && (
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>该需求已取消</Typography.Text>
                 )}
               </Space>
-            </Card>
+            }
+            extra={
+              <Space size={8} wrap>
+                <FlowActions requirement={r} onChanged={reloadOverview} />
+                <Button icon={<EditOutlined />} onClick={() => setEditOpen(true)}>编辑</Button>
+                <Button icon={<ReloadOutlined />} onClick={reloadOverview} />
+                <Dropdown
+                  menu={{
+                    items: [
+                      { key: 'cancel', label: '取消需求', danger: true, disabled: !cancellable },
+                      { key: 'delete', label: '删除', danger: true },
+                    ],
+                    onClick: ({ key }) => (key === 'cancel' ? confirmCancel() : confirmDelete()),
+                  }}
+                >
+                  <Button>更多 <DownOutlined /></Button>
+                </Dropdown>
+              </Space>
+            }
+          >
+            {r.status !== 'CANCELLED' && <FlowProgress status={r.status} />}
+            {r.description && (
+              <Typography.Paragraph
+                style={{ fontSize: 13, marginBottom: 0, whiteSpace: 'pre-wrap' }}
+                ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}
+              >
+                {r.description}
+              </Typography.Paragraph>
+            )}
+          </Card>
 
-            <Card size="small">
-              <Tabs
-                size="small"
-                items={[
-                  {
-                    key: 'workItems',
-                    label: `工作单元（${overview.workItems.length}）`,
-                    children: (
-                      <WorkItemsTab
-                        projectId={r.projectId}
-                        requirementId={r.id}
-                        workItems={overview.workItems}
-                        locked={r.status === 'DONE' || r.status === 'CANCELLED'}
-                        onChanged={reloadOverview}
-                      />
-                    ),
-                  },
-                  {
-                    key: 'designs',
-                    label: '方案',
-                    children: <DesignsTab projectId={r.projectId} requirementId={r.id} />,
-                  },
-                  {
-                    key: 'timeline',
-                    label: `时间线（${overview.timeline.length}）`,
-                    children: (
-                      <Timeline
-                        style={{ marginTop: 8 }}
-                        items={overview.timeline.slice(0, 50).map((t) => ({
-                          key: `${t.type}-${t.refId}-${t.time}`,
-                          color: timelineColor(t.type),
-                          children: (
-                            <Space size={8}>
-                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                {fmtTime(t.time)}
-                              </Typography.Text>
-                              <Tag style={{ fontSize: 11 }}>{t.type}</Tag>
-                              <span style={{ fontSize: 13 }}>{t.label}</span>
-                            </Space>
-                          ),
-                        }))}
-                      />
-                    ),
-                  },
-                  {
-                    key: 'records',
-                    label: '关联记录',
-                    children: <RelatedRecordsTab overview={overview} />,
-                  },
-                ]}
-              />
-            </Card>
-          </Space>
+          <Tabs
+            items={[
+              {
+                key: 'workItems',
+                label: `工作单元（${overview.workItems.length}）`,
+                children: (
+                  <WorkItemsTab
+                    projectId={r.projectId}
+                    requirementId={r.id}
+                    workItems={overview.workItems}
+                    locked={r.status === 'DONE' || r.status === 'CANCELLED'}
+                    onChanged={reloadOverview}
+                  />
+                ),
+              },
+              {
+                key: 'designs',
+                label: '方案',
+                children: <DesignsTab projectId={r.projectId} requirementId={r.id} />,
+              },
+              {
+                key: 'timeline',
+                label: `时间线（${overview.timeline.length}）`,
+                children: <TimelineTab items={overview.timeline} />,
+              },
+              {
+                key: 'records',
+                label: '关联记录',
+                children: <RelatedRecordsTab overview={overview} />,
+              },
+            ]}
+          />
         </Col>
 
-        <Col xs={24} xl={8}>
+        <Col xs={24} xl={7}>
           <Card size="small" title="属性">
             <Descriptions size="small" column={1}>
               <Descriptions.Item label="来源">
@@ -324,19 +281,4 @@ export default function RequirementDetailPage() {
       )}
     </Space>
   )
-}
-
-function timelineColor(type: string): string {
-  switch (type) {
-    case 'REQUIREMENT': return 'purple'
-    case 'WORK_ITEM': return 'geekblue'
-    case 'DOC': return 'green'
-    case 'SESSION': return 'blue'
-    case 'BUILD': return 'orange'
-    case 'TEST_RUN': return 'cyan'
-    case 'DEPLOYMENT': return 'red'
-    case 'RELEASE': return 'magenta'
-    case 'ARTIFACT': return 'gold'
-    default: return 'gray'
-  }
 }
