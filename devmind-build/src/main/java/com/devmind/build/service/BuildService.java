@@ -10,6 +10,7 @@ import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.common.integration.RepoGitGateway;
 import com.devmind.execution.engine.StepChainRunner;
 import com.devmind.execution.model.StepResult;
 import com.devmind.execution.model.StepSpec;
@@ -25,6 +26,7 @@ import com.devmind.serveradapter.service.ServerOperationService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -36,6 +38,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
@@ -57,6 +60,8 @@ public class BuildService {
     private static final Pattern ARTIFACT = Pattern.compile("(?im)^artifact[:=]\\s*(.+)$");
 
     private final ExecutorService buildExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    /** CAP-26：同项目构建串行锁（checkout 改写共享 clone 工作区，防互踩） */
+    private final Map<String, Object> projectLocks = new ConcurrentHashMap<>();
 
     private final ArtifactService artifactService;
     private final IdentityService identityService;
@@ -72,6 +77,7 @@ public class BuildService {
     private final RemoteStepRunner remoteRunner;
     private final ExecutionLogHub hub;
     private final ObjectMapper mapper;
+    private final ObjectProvider<RepoGitGateway> repoGitGateway;
 
     public BuildService(ArtifactService artifactService,
                         IdentityService identityService,
@@ -86,7 +92,8 @@ public class BuildService {
                         LocalStepRunner localRunner,
                         RemoteStepRunner remoteRunner,
                         ExecutionLogHub hub,
-                        ObjectMapper mapper) {
+                        ObjectMapper mapper,
+                        ObjectProvider<RepoGitGateway> repoGitGateway) {
         this.artifactService = artifactService;
         this.identityService = identityService;
         this.eventPublisher = eventPublisher;
@@ -101,6 +108,7 @@ public class BuildService {
         this.remoteRunner = remoteRunner;
         this.hub = hub;
         this.mapper = mapper;
+        this.repoGitGateway = repoGitGateway;
     }
 
     @PreDestroy
@@ -140,11 +148,20 @@ public class BuildService {
         String commit = req.commit();
         String branch = req.branch();
         if ("LOCAL".equals(executor)) {
-            if (commit == null || commit.isBlank()) {
-                commit = gitExec(project.repoPath(), "rev-parse", "HEAD");
-            }
+            // CAP-26：有 remoteUrl 的库先 fetch（失败即触发失败，不拿过时 HEAD 构建），
+            // 基准一律取 origin/ 远端引用；纯本地库保持原行为
+            boolean synced = syncBeforeExec(project, branch, identityService.currentActor());
             if (branch == null || branch.isBlank()) {
-                branch = gitExec(project.repoPath(), "symbolic-ref", "--short", "HEAD");
+                branch = synced ? project.baseBranch()
+                        : gitExec(project.repoPath(), "symbolic-ref", "--short", "HEAD");
+            }
+            if (commit == null || commit.isBlank()) {
+                if (synced && branch != null && !branch.isBlank()) {
+                    commit = gitExec(project.repoPath(), "rev-parse", "origin/" + branch);
+                }
+                if (commit == null || commit.isBlank()) {
+                    commit = gitExec(project.repoPath(), "rev-parse", "HEAD");
+                }
             }
         }
         BuildEntity b = new BuildEntity();
@@ -191,27 +208,16 @@ public class BuildService {
         List<StepSpec> steps = parseSteps(b.getStepsSnapshot());
         try {
             Project finalProject = project;
-            StepChainRunner.ChainResult result = chainRunner.run(steps, (i, step, stepSink) -> {
-                if ("REMOTE".equals(b.getExecutor())) {
-                    Map<String, String> params = new HashMap<>();
-                    if (b.getCommit() != null && !b.getCommit().isBlank()) {
-                        params.put("commit", b.getCommit());
-                    }
-                    if (b.getBranch() != null && !b.getBranch().isBlank()) {
-                        params.put("branch", b.getBranch());
-                    }
-                    return remoteRunner.runStep(b.getRemoteServerId(), step, params, "build", stepSink);
+            StepChainRunner.ChainResult result;
+            if (!"REMOTE".equals(b.getExecutor()) && finalProject != null) {
+                // CAP-26 同项目构建串行：checkout 会改写共享 clone 工作区，项目级锁防互踩
+                synchronized (projectLock(b.getProjectId())) {
+                    checkoutSyncedCommit(b, finalProject, sink);
+                    result = executeChain(b, finalProject, steps, sink, logs);
                 }
-                if (finalProject == null) {
-                    return StepResult.failed(-1, "项目不存在，无法本地构建");
-                }
-                Map<String, String> env = new HashMap<>();
-                env.put("BUILD_PROJECT_ID", b.getProjectId() == null ? "" : b.getProjectId());
-                env.put("BUILD_COMMIT", b.getCommit() == null ? "" : b.getCommit());
-                env.put("BUILD_BRANCH", b.getBranch() == null ? "" : b.getBranch());
-                env.put("BUILD_STEP", step.name() == null ? "" : step.name());
-                return localRunner.runStep(Path.of(finalProject.repoPath()), step, env, stepSink);
-            }, sink, i -> flushLogs(b, logs)); // 步骤边界持久化
+            } else {
+                result = executeChain(b, finalProject, steps, sink, logs);
+            }
 
             if (result.ok()) {
                 b.setStatus(BuildEntity.SUCCESS);
@@ -283,6 +289,65 @@ public class BuildService {
     }
 
     // ---------------- 内部 ----------------
+
+    /** 原 run() 内的步骤链执行（LOCAL/REMOTE 分流），抽出以便 CAP-26 项目锁包裹。 */
+    private StepChainRunner.ChainResult executeChain(BuildEntity b, Project project, List<StepSpec> steps,
+                                                     Consumer<String> sink, StringBuilder logs) {
+        return chainRunner.run(steps, (i, step, stepSink) -> {
+            if ("REMOTE".equals(b.getExecutor())) {
+                Map<String, String> params = new HashMap<>();
+                if (b.getCommit() != null && !b.getCommit().isBlank()) {
+                    params.put("commit", b.getCommit());
+                }
+                if (b.getBranch() != null && !b.getBranch().isBlank()) {
+                    params.put("branch", b.getBranch());
+                }
+                return remoteRunner.runStep(b.getRemoteServerId(), step, params, "build", stepSink);
+            }
+            if (project == null) {
+                return StepResult.failed(-1, "项目不存在，无法本地构建");
+            }
+            Map<String, String> env = new HashMap<>();
+            env.put("BUILD_PROJECT_ID", b.getProjectId() == null ? "" : b.getProjectId());
+            env.put("BUILD_COMMIT", b.getCommit() == null ? "" : b.getCommit());
+            env.put("BUILD_BRANCH", b.getBranch() == null ? "" : b.getBranch());
+            env.put("BUILD_STEP", step.name() == null ? "" : step.name());
+            return localRunner.runStep(Path.of(project.repoPath()), step, env, stepSink);
+        }, sink, i -> flushLogs(b, logs)); // 步骤边界持久化
+    }
+
+    /** CAP-26 触发期同步：有 remoteUrl 的库 fetch（失败即抛错=触发失败）；纯本地库/SPI 未装配返回 false */
+    private boolean syncBeforeExec(Project project, String branch, String actor) {
+        RepoGitGateway gw = repoGitGateway.getIfAvailable();
+        if (gw == null) {
+            return false;
+        }
+        return gw.fetch(project.repoPath(), branch, actor);
+    }
+
+    /**
+     * CAP-26 执行期同步：再 fetch 一次（覆盖触发→执行间的新 push）后 checkout 到记录的 commit。
+     * 纯本地库（无 remoteUrl）跳过，保持原行为。失败抛 DevMindException → 构建 FAILED（fail-fast）。
+     */
+    private void checkoutSyncedCommit(BuildEntity b, Project project, Consumer<String> sink) {
+        RepoGitGateway gw = repoGitGateway.getIfAvailable();
+        if (gw == null || b.getCommit() == null || b.getCommit().isBlank()) {
+            return;
+        }
+        if (!gw.fetch(project.repoPath(), b.getBranch(), b.getCreatedBy())) {
+            return;
+        }
+        String c = b.getCommit();
+        sink.accept("[同步] fetch 完成，checkout " + c.substring(0, Math.min(8, c.length())));
+        if (gitExec(project.repoPath(), "checkout", "--detach", c) == null) {
+            throw new DevMindException(ErrorCode.INTERNAL,
+                    "git checkout " + c + " 失败（工作区可能有未提交改动或该 commit 不存在）");
+        }
+    }
+
+    private Object projectLock(String projectId) {
+        return projectLocks.computeIfAbsent(projectId == null ? "" : projectId, k -> new Object());
+    }
 
     private String snapshotJson(List<BuildStepEntity> steps) {
         try {

@@ -2,10 +2,12 @@ package com.devmind.project;
 
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.common.integration.RepoGitGateway;
 import com.devmind.project.config.WorktreeProperties;
 import com.devmind.project.model.Project;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -29,9 +31,12 @@ public class WorktreeManager {
     private static final Logger log = LoggerFactory.getLogger(WorktreeManager.class);
 
     private final WorktreeProperties props;
+    /** CAP-26 可选 SPI：integration 装配时 fetch 走凭据注入（私有 CLONE 库可刷新基线） */
+    private final ObjectProvider<RepoGitGateway> fetchGateway;
 
-    public WorktreeManager(WorktreeProperties props) {
+    public WorktreeManager(WorktreeProperties props, ObjectProvider<RepoGitGateway> fetchGateway) {
         this.props = props;
+        this.fetchGateway = fetchGateway;
     }
 
     /** 会话分支名：feature/<sid> */
@@ -60,6 +65,11 @@ public class WorktreeManager {
     /**
      * 建 worktree：先 best-effort fetch 保证基准分支存在，再 add。
      *
+     * <p>CAP-26 基线修正：fetch 成功后基准改用 {@code FETCH_HEAD}（远端最新），不再用
+     * 本地分支引用（`git fetch origin <base>` 不更新本地分支，本地 base 可能滞后）；
+     * fetch 失败（离线/新仓库/无凭据）回退本地 base 保持现状。凭据 fetch 经
+     * {@code RepoGitGateway} SPI（integration 装配时带 token，私有 CLONE 库可刷新）。</p>
+     *
      * @param repoPath  目标仓库绝对路径
      * @param baseBranch 基准分支（空则取配置默认）
      * @param branch    新分支名
@@ -70,15 +80,32 @@ public class WorktreeManager {
         Path repo = Path.of(repoPath).toAbsolutePath().normalize();
         String base = baseBranch != null && !baseBranch.isBlank() ? baseBranch : props.getBaseBranch();
 
-        // 基准分支保证：fetch 失败（离线/新仓库）不阻塞，留给 add 报错
-        run(repo, 30, "git", "fetch", "origin", base);
+        // CAP-26：fetch 成功 → 基准 = FETCH_HEAD（远端最新）；失败 → 本地 base（现状回退）
+        String baseRef = fetchBaseline(repo, base);
 
-        Result add = run(repo, 60, "git", "worktree", "add", "-b", branch, worktree.toString(), base);
+        Result add = run(repo, 60, "git", "worktree", "add", "-b", branch, worktree.toString(), baseRef);
         if (add.exit() != 0) {
             throw new DevMindException(ErrorCode.INTERNAL, "创建 worktree 失败: " + add.stderr());
         }
-        log.info("worktree created: {} @ {} (branch {}, base {})", worktree, repo, branch, base);
+        log.info("worktree created: {} @ {} (branch {}, base {} {})", worktree, repo, branch, base, baseRef);
         return worktree;
+    }
+
+    /** fetch 成功返回 "FETCH_HEAD"，否则返回本地 base（best-effort，不阻塞） */
+    private String fetchBaseline(Path repo, String base) {
+        RepoGitGateway gw = fetchGateway == null ? null : fetchGateway.getIfAvailable();
+        if (gw != null) {
+            try {
+                if (gw.fetch(repo.toString(), base, null)) {
+                    return "FETCH_HEAD";
+                }
+                // false = 纯本地库（无 remoteUrl）：跳过 origin fetch 也无意义，直接用本地 base
+                return base;
+            } catch (Exception e) {
+                log.warn("凭据 fetch 失败，回退 origin fetch: {}", e.getMessage());
+            }
+        }
+        return run(repo, 30, "git", "fetch", "origin", base).exit() == 0 ? "FETCH_HEAD" : base;
     }
 
     /** 建会话 worktree（项目主库便捷重载，分支 feature/<sid>） */

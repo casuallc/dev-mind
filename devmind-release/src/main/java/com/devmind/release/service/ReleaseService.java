@@ -23,6 +23,7 @@ import com.devmind.build.service.BuildService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.integration.PlatformIntegrationHook;
+import com.devmind.common.integration.RepoGitGateway;
 import com.devmind.execution.model.StepResult;
 import com.devmind.execution.model.StepSpec;
 import com.devmind.execution.runner.LocalStepRunner;
@@ -70,6 +71,8 @@ public class ReleaseService {
     private final ExecutionLogHub hub;
     /** CAP-18 FR-06 可选钩子：devmind-integration 装配时存在，发版成功后 push tag + 建平台 Release */
     private final org.springframework.beans.factory.ObjectProvider<PlatformIntegrationHook> integrationHook;
+    /** CAP-26 可选 SPI：devmind-integration 装配时存在，tag 前 fetch 服务端 clone 保鲜 */
+    private final org.springframework.beans.factory.ObjectProvider<RepoGitGateway> repoGitGateway;
 
     public ReleaseService(ReleaseRepository repo,
                           ReleaseConfigRepository releaseConfigRepo,
@@ -81,8 +84,10 @@ public class ReleaseService {
                           NotificationService notificationService,
                           ExecutionLogHub hub,
                            IdentityService identityService,
-                           org.springframework.beans.factory.ObjectProvider<PlatformIntegrationHook> integrationHook) {
+                           org.springframework.beans.factory.ObjectProvider<PlatformIntegrationHook> integrationHook,
+                           org.springframework.beans.factory.ObjectProvider<RepoGitGateway> repoGitGateway) {
         this.integrationHook = integrationHook;
+        this.repoGitGateway = repoGitGateway;
         this.identityService = identityService;
         this.repo = repo;
         this.releaseConfigRepo = releaseConfigRepo;
@@ -258,8 +263,13 @@ public class ReleaseService {
                 String tag = r.getTagName();
                 boolean tagged = false;
                 if (repoPath != null && tag != null && !tag.isBlank()) {
-                    tagged = gitExec(repoPath, "tag", "-a", tag, "-m", "release " + nz(r.getReleaseVersion()));
-                    sink.accept(tagged ? "[git tag] " + tag : "[git tag] " + tag + " 创建失败（可能已存在）");
+                    // CAP-26：tag 基准 = 关联构建 commit（最准确）→ fetch 后 origin/<baseBranch> → 本地 HEAD
+                    String target = tagTarget(r, repoPath, sink);
+                    tagged = target != null
+                            ? gitExec(repoPath, "tag", "-a", tag, "-m", "release " + nz(r.getReleaseVersion()), target)
+                            : gitExec(repoPath, "tag", "-a", tag, "-m", "release " + nz(r.getReleaseVersion()));
+                    sink.accept(tagged ? "[git tag] " + tag + (target != null ? " @ " + target.substring(0, Math.min(8, target.length())) : "")
+                            : "[git tag] " + tag + " 创建失败（可能已存在）");
                 } else {
                     sink.accept("[git tag] 主库不可用，跳过打 tag");
                 }
@@ -411,6 +421,59 @@ public class ReleaseService {
     private String primaryRepoPath(String projectId) {
         try {
             return projectService.primaryRepo(projectId).getPath();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * CAP-26 tag 基准解析：关联构建 commit（发版产物的真实来源，最准确）→
+     * fetch 成功后 origin/<baseBranch> → null（调用方按现状打本地 HEAD）。
+     * fetch 失败不阻断发版（推送已成功，仅降级基准来源并留日志）。
+     */
+    private String tagTarget(ReleaseEntity r, String repoPath, Consumer<String> sink) {
+        if (r.getBuildId() != null) {
+            try {
+                String c = buildService.requireBuild(r.getBuildId()).getCommit();
+                if (c != null && !c.isBlank()) {
+                    return c;
+                }
+            } catch (Exception e) {
+                log.debug("关联构建 {} 读取失败(忽略): {}", r.getBuildId(), e.getMessage());
+            }
+        }
+        RepoGitGateway gw = repoGitGateway.getIfAvailable();
+        if (gw != null) {
+            try {
+                String base = projectService.requireProject(r.getProjectId()).baseBranch();
+                if (gw.fetch(repoPath, base, r.getCreatedBy())) {
+                    String c = gitExecOut(repoPath, "rev-parse", "origin/" + base);
+                    if (c != null && !c.isBlank()) {
+                        sink.accept("[同步] fetch 完成，tag 基准 origin/" + base);
+                        return c;
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("发版 tag 前 fetch 失败(降级为本地 HEAD): {}", e.getMessage());
+                sink.accept("[同步] fetch 失败，tag 基准回退本地 HEAD: " + e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    /** git 命令取 stdout（失败/空输出返回 null），与 {@link #gitExec} 互补 */
+    private String gitExecOut(String repoPath, String... args) {
+        List<String> cmd = new ArrayList<>();
+        cmd.add("git");
+        cmd.add("-C");
+        cmd.add(repoPath);
+        for (String a : args) {
+            cmd.add(a);
+        }
+        try {
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).trim();
+            return p.waitFor() == 0 && !out.isEmpty() ? out : null;
         } catch (Exception e) {
             return null;
         }

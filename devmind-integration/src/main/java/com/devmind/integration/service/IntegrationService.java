@@ -507,6 +507,24 @@ public class IntegrationService implements PlatformIntegrationHook {
         return token;
     }
 
+    /**
+     * CAP-25/26：git 凭据解析（与 pushWorkItemBranch 同优先级）：actor 个人 PAT（repoHost
+     * 匹配，CAP-24）→ 项目绑定 Integration token。两者皆无返回 empty（调用方降级/匿名处理）。
+     * 解密仅内存，不进日志。
+     */
+    public Optional<String> resolveGitToken(String actor, String repoHost, String projectId) {
+        if (actor != null && !actor.isBlank() && repoHost != null && !repoHost.isBlank()) {
+            Optional<String> personal = userGitCredentialService.personalTokenFor(actor, repoHost);
+            if (personal.isPresent()) {
+                return personal;
+            }
+        }
+        if (projectId != null && !projectId.isBlank()) {
+            return findGitBinding(projectId).map(rb -> tokenOf(rb.integration));
+        }
+        return Optional.empty();
+    }
+
     /** 从 remote_url 推断平台项目标识（https://host/group/proj.git → group/proj，GitHub 即 owner/repo） */
     private String inferProjectKey(IntegrationEntity integration, ProjectRepoEntity repo) {
         String url = repo.getRemoteUrl();

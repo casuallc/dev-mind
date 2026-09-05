@@ -41,6 +41,20 @@ public class GitRemoteOps {
         return exec(".", token, List.of("ls-remote", url, "HEAD"));
     }
 
+    /**
+     * CAP-26：fetch 指定 ref 到 FETCH_HEAD。token 非空走 withToken 显式 URL 注入
+     * （不依赖 origin 凭据——CLONE 库的 origin 已被清成干净 URL）；token 空 = 匿名。
+     * ref 空 = 不指定 refspec（fetch 全部）。
+     */
+    public GitResult fetch(String repoPath, String ref, String remoteUrl, String token) {
+        String url = token == null || token.isBlank() ? remoteUrl.trim() : withToken(remoteUrl, token);
+        List<String> args = new ArrayList<>(List.of("fetch", url));
+        if (ref != null && !ref.isBlank()) {
+            args.add(ref.trim());
+        }
+        return exec(repoPath, token, args);
+    }
+
     /** 推送 tag 到绑定远程 */
     public GitResult pushTag(String repoPath, String tag, String remoteUrl, String token) {
         String url = withToken(remoteUrl, token);
