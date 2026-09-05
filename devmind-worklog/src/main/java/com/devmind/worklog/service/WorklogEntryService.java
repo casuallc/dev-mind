@@ -5,6 +5,7 @@ import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.worklog.dto.EntryRequest;
 import com.devmind.worklog.dto.EntryView;
+import com.devmind.worklog.dto.GitImportRequest;
 import com.devmind.worklog.model.WorklogEntryEntity;
 import com.devmind.worklog.repo.WorklogEntryRepository;
 import org.springframework.stereotype.Service;
@@ -63,6 +64,36 @@ public class WorklogEntryService {
     @Transactional
     public void delete(Long id) {
         entryRepo.delete(mine(id));
+    }
+
+    /**
+     * CAP-28 FR-04：git 提交导入为 GIT 条目。幂等：(user, repo, commit_sha) 已存在则跳过。
+     *
+     * @return [新增数, 跳过数]
+     */
+    @Transactional
+    public int[] importGit(String username, GitImportRequest req) {
+        int created = 0, skipped = 0;
+        for (GitImportRequest.Item item : req.items()) {
+            if (entryRepo.existsByUserIdAndRepoIdAndCommitSha(username, item.repoId(), item.commitSha())) {
+                skipped++;
+                continue;
+            }
+            WorklogEntryEntity e = new WorklogEntryEntity();
+            e.setUserId(username);
+            e.setWorkDate(req.date());
+            e.setTitle(item.subject().length() > 256 ? item.subject().substring(0, 256) : item.subject());
+            e.setEntryType(WorklogEntryEntity.TYPE_DEV);
+            e.setMinutes(toMinutes(item.hours() == null ? 0d : item.hours()));
+            e.setSource(WorklogEntryEntity.SOURCE_GIT);
+            e.setRepoId(item.repoId());
+            e.setCommitSha(item.commitSha());
+            e.setCreatedAt(Instant.now());
+            e.setUpdatedAt(Instant.now());
+            entryRepo.save(e);
+            created++;
+        }
+        return new int[]{created, skipped};
     }
 
     /** 仅本人可见可改；他人条目一律 404（不暴露存在性）。 */
