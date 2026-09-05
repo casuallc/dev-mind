@@ -51,13 +51,13 @@ export default function ProjectSettingsLayout() {
         }
         extra={
           <Space>
-            <Button size="small" icon={<EditOutlined />} onClick={() => setEditOpen(true)}>
+            <Button icon={<EditOutlined />} onClick={() => setEditOpen(true)}>
               编辑基本信息
             </Button>
-            <Button size="small" icon={<ReloadOutlined />} onClick={reload}>
+            <Button icon={<ReloadOutlined />} onClick={reload}>
               刷新
             </Button>
-            <Button size="small" onClick={() => navigate('/admin/projects')}>
+            <Button onClick={() => navigate('/admin/projects')}>
               返回列表
             </Button>
           </Space>
