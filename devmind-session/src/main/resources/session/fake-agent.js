@@ -16,6 +16,13 @@ const assistantMsg = blocks => emit({ type: 'assistant', message: { role: 'assis
 const readline = require('readline');
 const rl = readline.createInterface({ input: process.stdin });
 
+// stdin EOF = 优雅结束（与真实 claude -p 一致）：发 result 后退出；
+// 管道写是异步的，必须等 flush 回调再 exit，否则 Windows 下末行可能被截断
+rl.on('close', () => {
+  process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: '任务完成（fake，stdin EOF）。', duration_ms: 2000 }) + '\n',
+    () => process.exit(0));
+});
+
 rl.on('line', line => {
   let msg;
   try { msg = JSON.parse(line); } catch (e) { return; }
