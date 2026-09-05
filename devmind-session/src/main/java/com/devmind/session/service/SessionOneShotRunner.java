@@ -46,10 +46,11 @@ public class SessionOneShotRunner implements OneShotAgentRunner {
 
     @Override
     public Result run(String prompt, int timeoutSeconds) {
-        // 无 projectId/workItemId 裸跑；permissionMode 显式传 one-shot 专用值
+        // 无 projectId/workItemId 裸跑；permissionMode 显式传 one-shot 专用值；
+        // agentNodeId="local" 保留值强制本机（平台默认远程节点会把总结任务跑偏到离线节点）
         String sessionId = sessions.create(new CreateSessionRequest(
                 null, null, null, null, prompt, null, null,
-                props.getOneshotPermissionMode(), null)).id();
+                props.getOneshotPermissionMode(), "local")).id();
         try {
             sessions.finish(sessionId);
         } catch (Exception e) {
