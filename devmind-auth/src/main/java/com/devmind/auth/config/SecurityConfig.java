@@ -63,6 +63,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/integrations/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/integrations/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/**").authenticated()
+                        // CAP-28：全局仓库登记写操作仅 ADMIN；/repos/* 单段匹配不影响 {id}/subscription 本人勾选
+                        .requestMatchers(HttpMethod.POST, "/api/worklog/repos").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/worklog/repos/*").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/worklog/repos/**").hasRole("ADMIN")
                         .requestMatchers("/api/**").hasAnyRole("ADMIN", "DEVELOPER")
                         .anyRequest().permitAll())
                 .exceptionHandling(eh -> eh
