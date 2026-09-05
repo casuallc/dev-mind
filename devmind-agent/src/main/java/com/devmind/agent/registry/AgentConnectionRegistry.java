@@ -173,6 +173,19 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("taskSpec", cmd.taskSpec());
         frame.put("model", cmd.model());
         frame.put("permissionMode", cmd.permissionMode());
+        // CAP-24 修复：env 此前漏发（runner 侧读取逻辑已就绪，远程会话提交身份静默失效）
+        if (cmd.env() != null && !cmd.env().isEmpty()) {
+            frame.put("env", cmd.env());
+        }
+        // CAP-25：远程工作区描述（token 仅随帧传输，严禁进日志）
+        if (cmd.repo() != null) {
+            Map<String, Object> repo = new LinkedHashMap<>();
+            repo.put("remoteUrl", cmd.repo().remoteUrl());
+            repo.put("baseBranch", cmd.repo().baseBranch());
+            repo.put("branch", cmd.repo().branch());
+            repo.put("token", cmd.repo().token());
+            frame.put("repo", repo);
+        }
         try {
             send(ws, frame);
             LaunchAck ack = future.get(props.getLaunchAckTimeoutMs(), TimeUnit.MILLISECONDS);

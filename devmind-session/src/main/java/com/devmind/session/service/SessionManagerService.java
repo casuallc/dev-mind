@@ -9,6 +9,7 @@ import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.auth.IdentityService;
 import com.devmind.common.integration.GitIdentityProvider;
+import com.devmind.common.integration.RepoGitGateway;
 import com.devmind.common.notification.NotificationEvent;
 import com.devmind.knowledge.KnowledgeInjector;
 import com.devmind.notification.NotificationPublisher;
@@ -90,6 +91,8 @@ public class SessionManagerService {
     private final ObjectProvider<AgentNodeConnector> connectorProvider;
     /** CAP-24：Git 提交身份解析（devmind-integration 装配时可用；未装配回退系统 git 配置） */
     private final ObjectProvider<GitIdentityProvider> gitIdentityProvider;
+    /** CAP-25：远程工作区凭据解析（devmind-integration 装配时可用；未装配/无凭据降级为节点自理） */
+    private final ObjectProvider<RepoGitGateway> repoGitGateway;
 
     /** 运行中会话注册表（本地/远程统一句柄）。 */
     private final Map<String, SessionHandle> runtimes = new ConcurrentHashMap<>();
@@ -112,7 +115,8 @@ public class SessionManagerService {
                                  CliEventParser parser,
                                  Collection<SessionExecutor> executors,
                                  ObjectProvider<AgentNodeConnector> connectorProvider,
-                                 ObjectProvider<GitIdentityProvider> gitIdentityProvider) {
+                                 ObjectProvider<GitIdentityProvider> gitIdentityProvider,
+                                 ObjectProvider<RepoGitGateway> repoGitGateway) {
         this.identityService = identityService;
         this.projectService = projectService;
         this.workItemService = workItemService;
@@ -132,6 +136,7 @@ public class SessionManagerService {
         this.executors = executors;
         this.connectorProvider = connectorProvider;
         this.gitIdentityProvider = gitIdentityProvider;
+        this.repoGitGateway = repoGitGateway;
     }
 
     private final RuntimeListener listener = new RuntimeListener() {
@@ -251,7 +256,9 @@ public class SessionManagerService {
             runtimes.put(id, remoteRt);
             try {
                 connector.launch(agentNodeId, new AgentLaunchCommand(
-                        id, project != null ? project.id() : null, taskSpec, model, pm, gitEnv));
+                        id, project != null ? project.id() : null, taskSpec, model, pm, gitEnv,
+                        buildRepoSpec(project, baseBranch, worktreeManager.branchFor(id),
+                                identityService.currentActor())));
             } catch (Exception e) {
                 runtimes.remove(id);
                 if (e instanceof DevMindException de) {
@@ -380,10 +387,13 @@ public class SessionManagerService {
                     eventSaver, listener, props);
             runtimes.put(id, rt);
             try {
+                Project proj = resolveProject(ent.getProjectId());
                 connector.launch(ent.getAgentNodeId(), new AgentLaunchCommand(
                         id, ent.getProjectId(), ent.getTaskSpec(), ent.getModel(),
                         props.getPermissionMode(),
-                        resolveGitEnv(ent.getCreatedBy(), resolveProject(ent.getProjectId()))));
+                        resolveGitEnv(ent.getCreatedBy(), proj),
+                        buildRepoSpec(proj, ent.getBaseBranch(), worktreeManager.branchFor(id),
+                                ent.getCreatedBy())));
             } catch (Exception e) {
                 runtimes.remove(id);
                 if (e instanceof DevMindException de) {
@@ -623,6 +633,45 @@ public class SessionManagerService {
             // 身份解析失败不阻塞会话创建
             log.debug("Git 提交身份解析失败(忽略): user={} err={}", username, e.getMessage());
             return Map.of();
+        }
+    }
+
+    /**
+     * CAP-25：组装远程工作区描述（runner 据此 clone/fetch/切会话分支/结束 push）。
+     * 降级一律返回 null（= 旧行为，节点 project.<id> 映射自理）：无项目 / 主库无 remoteUrl /
+     * ssh 协议 / SPI 未装配 / 无可用凭据。token 仅随 launch 帧传输，严禁进日志。
+     */
+    private AgentLaunchCommand.RepoSpec buildRepoSpec(Project project, String baseBranch,
+                                                      String branch, String actor) {
+        if (project == null) {
+            return null;
+        }
+        try {
+            String remoteUrl = projectService.primaryRepo(project.id()).getRemoteUrl();
+            if (remoteUrl == null || remoteUrl.isBlank()) {
+                return null; // 纯本地库：远程会话无码可拉，走节点映射
+            }
+            String url = remoteUrl.trim();
+            if (url.startsWith("git@") || url.startsWith("ssh://")) {
+                log.warn("远程工作区降级：remote_url 为 ssh 协议（仅支持 http/https）: project={}", project.id());
+                return null;
+            }
+            RepoGitGateway gw = repoGitGateway.getIfAvailable();
+            if (gw == null) {
+                log.warn("远程工作区降级：integration 未装配，无凭据可下发: project={}", project.id());
+                return null;
+            }
+            String token = gw.resolveToken(actor, hostOf(url), project.id()).orElse(null);
+            if (token == null) {
+                log.warn("远程工作区降级：项目 {} 无可用 git 凭据（个人 PAT / 绑定 Integration 均无）", project.id());
+                return null;
+            }
+            return new AgentLaunchCommand.RepoSpec(url,
+                    baseBranch != null && !baseBranch.isBlank() ? baseBranch : project.baseBranch(),
+                    branch, token);
+        } catch (Exception e) {
+            log.warn("远程工作区描述组装失败(降级为节点自理): project={} err={}", project.id(), e.getMessage());
+            return null;
         }
     }
 
