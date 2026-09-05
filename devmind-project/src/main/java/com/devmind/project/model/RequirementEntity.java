@@ -98,6 +98,14 @@ public class RequirementEntity {
     @Column(name = "external_key", length = 256)
     private String externalKey;
 
+    /** CAP-27 Jira 托管工时：原始预估（timeoriginalestimate，秒；本地只读随同步刷新） */
+    @Column(name = "estimated_seconds")
+    private Long estimatedSeconds;
+
+    /** CAP-27 Jira 托管工时：已登记工时（timespent，秒；本地只读随同步刷新） */
+    @Column(name = "spent_seconds")
+    private Long spentSeconds;
+
     /** 需求文档（docs 模块文档 id，可空后补） */
     @Column(name = "doc_id")
     private Long docId;
@@ -144,6 +152,10 @@ public class RequirementEntity {
     public void setDueDate(LocalDate dueDate) { this.dueDate = dueDate; }
     public String getExternalKey() { return externalKey; }
     public void setExternalKey(String externalKey) { this.externalKey = externalKey; }
+    public Long getEstimatedSeconds() { return estimatedSeconds; }
+    public void setEstimatedSeconds(Long estimatedSeconds) { this.estimatedSeconds = estimatedSeconds; }
+    public Long getSpentSeconds() { return spentSeconds; }
+    public void setSpentSeconds(Long spentSeconds) { this.spentSeconds = spentSeconds; }
     public Long getDocId() { return docId; }
     public void setDocId(Long docId) { this.docId = docId; }
     public String getCreatedBy() { return createdBy; }

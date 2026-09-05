@@ -69,6 +69,7 @@ public class RequirementService {
     private final DesignRepository designRepo;
     private final RelationRepository relationRepo;
     private final ObjectProvider<RequirementExternalRefLookup> externalRefLookup;
+    private final ObjectProvider<RequirementAgentTimeLookup> agentTimeLookup;
 
     public RequirementService(ProjectRepository projectRepo,
                               RequirementRepository requirementRepo,
@@ -76,7 +77,8 @@ public class RequirementService {
                               DesignRepository designRepo,
                               @Lazy RelationRepository relationRepo,
                               IdentityService identityService,
-                              ObjectProvider<RequirementExternalRefLookup> externalRefLookup) {
+                              ObjectProvider<RequirementExternalRefLookup> externalRefLookup,
+                              ObjectProvider<RequirementAgentTimeLookup> agentTimeLookup) {
         this.identityService = identityService;
         this.projectRepo = projectRepo;
         this.requirementRepo = requirementRepo;
@@ -84,6 +86,7 @@ public class RequirementService {
         this.designRepo = designRepo;
         this.relationRepo = relationRepo;
         this.externalRefLookup = externalRefLookup;
+        this.agentTimeLookup = agentTimeLookup;
     }
 
     /**
@@ -104,16 +107,18 @@ public class RequirementService {
         int s = Math.min(Math.max(1, size), 200);
         PageRequest pageable = PageRequest.of(p, s, Sort.by(Sort.Direction.DESC, "seq"));
         Page<RequirementEntity> result = requirementRepo.search(projectId, st, tp, src, kw, pageable);
-        Map<String, RequirementExternalRefLookup.ExternalRef> refs = refsFor(
-                result.getContent().stream().map(RequirementEntity::getId).toList());
+        List<String> ids = result.getContent().stream().map(RequirementEntity::getId).toList();
+        Map<String, RequirementExternalRefLookup.ExternalRef> refs = refsFor(ids);
+        Map<String, Long> agentSeconds = agentSecondsFor(ids);
         return new PageView<>(result.getContent().stream()
-                .map(e -> toView(e, refs.get(e.getId()))).toList(),
+                .map(e -> toView(e, refs.get(e.getId()), agentSeconds.get(e.getId()))).toList(),
                 result.getTotalElements(), p, s);
     }
 
     public RequirementView get(String projectId, String requirementId) {
         RequirementEntity e = requireEntity(projectId, requirementId);
-        return toView(e, refsFor(List.of(e.getId())).get(e.getId()));
+        return toView(e, refsFor(List.of(e.getId())).get(e.getId()),
+                agentSecondsFor(List.of(e.getId())).get(e.getId()));
     }
 
     /** 创建需求（API 通道，source=LOCAL）：DRAFT 起步，seq 项目内自增（(project_id, seq) 唯一约束兜底）。 */
@@ -131,7 +136,7 @@ public class RequirementService {
                 req.labels(), req.fixVersions(), parseDueDate(req.dueDate()));
         requirementRepo.save(e);
         log.info("需求已创建: projectId={} code={} title={}", projectId, code(e.getSeq()), e.getTitle());
-        return toView(e, null);
+        return toView(e, null, null);
     }
 
     /**
@@ -159,7 +164,8 @@ public class RequirementService {
         if (req.docId() != null) e.setDocId(req.docId());
         e.setUpdatedAt(Instant.now());
         return toView(requirementRepo.save(e),
-                refsFor(List.of(e.getId())).get(e.getId()));
+                refsFor(List.of(e.getId())).get(e.getId()),
+                agentSecondsFor(List.of(e.getId())).get(e.getId()));
     }
 
     /** Jira 同步专用创建：source=JIRA，托管字段全部落列（标题/描述为 Jira 原文，无前缀无尾注）；
@@ -173,7 +179,7 @@ public class RequirementService {
         e.setUpdatedAt(f.issueUpdated() != null ? f.issueUpdated() : e.getCreatedAt());
         requirementRepo.save(e);
         log.info("需求已由 Jira 导入: projectId={} code={} key={}", projectId, code(e.getSeq()), f.externalKey());
-        return toView(e, null);
+        return toView(e, null, null);
     }
 
     /**
@@ -185,7 +191,7 @@ public class RequirementService {
         e.setSource(RequirementEntity.SOURCE_JIRA);
         applyJiraFields(e, f);
         e.setUpdatedAt(f.issueUpdated() != null ? f.issueUpdated() : Instant.now());
-        return toView(requirementRepo.save(e), null);
+        return toView(requirementRepo.save(e), null, null);
     }
 
     private RequirementEntity newRequirement(String projectId) {
@@ -210,6 +216,8 @@ public class RequirementService {
         e.setType(f.type() == null || f.type().isBlank()
                 ? RequirementEntity.TYPE_FEATURE : normalizeType(f.type()));
         e.setExternalKey(MainlineSupport.blankToNull(f.externalKey()));
+        e.setEstimatedSeconds(f.estimatedSeconds());
+        e.setSpentSeconds(f.spentSeconds());
         applyExtensionFields(e, f.priority(), f.assignee(), f.reporter(),
                 f.labels(), f.fixVersions(), f.dueDate());
     }
@@ -256,7 +264,8 @@ public class RequirementService {
         String prev = e.getStatus();
         e.setStatus(next);
         e.setUpdatedAt(Instant.now());
-        RequirementView view = toView(requirementRepo.save(e), refsFor(List.of(e.getId())).get(e.getId()));
+        RequirementView view = toView(requirementRepo.save(e), refsFor(List.of(e.getId())).get(e.getId()),
+                agentSecondsFor(List.of(e.getId())).get(e.getId()));
         log.info("需求状态推进: {} {} -> {}", code(e.getSeq()), prev, next);
         return view;
     }
@@ -368,17 +377,28 @@ public class RequirementService {
         return lookup.refsFor(ids);
     }
 
+    /** 批量反查 AI 实际耗时（CAP-27，会话时长汇总），端口缺席（project 单独测试）时返回空 map。 */
+    private Map<String, Long> agentSecondsFor(List<String> ids) {
+        RequirementAgentTimeLookup lookup = agentTimeLookup.getIfAvailable();
+        if (lookup == null || ids.isEmpty()) {
+            return Map.of();
+        }
+        return lookup.secondsFor(ids);
+    }
+
     private String code(Long seq) {
         return "REQ-" + seq;
     }
 
-    private RequirementView toView(RequirementEntity e, RequirementExternalRefLookup.ExternalRef ref) {
+    private RequirementView toView(RequirementEntity e, RequirementExternalRefLookup.ExternalRef ref,
+                                   Long agentSeconds) {
         return new RequirementView(e.getId(), e.getProjectId(), e.getSeq(), code(e.getSeq()), e.getTitle(),
                 e.getDescription(), e.getStatus(), e.getType(), e.getOwnerId(), e.getDocId(),
                 e.getSource(), e.getPriority(), e.getAssignee(), e.getReporter(),
                 splitCsv(e.getLabels()), splitCsv(e.getFixVersions()), e.getDueDate(),
                 e.getExternalKey(), ref == null ? null : ref.externalUrl(),
                 ref == null ? null : ref.remoteStatus(),
+                agentSeconds, e.getEstimatedSeconds(), e.getSpentSeconds(),
                 e.getCreatedBy(), e.getCreatedAt(), e.getUpdatedAt());
     }
 }
