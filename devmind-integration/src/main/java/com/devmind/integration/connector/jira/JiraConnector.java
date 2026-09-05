@@ -25,7 +25,8 @@ import java.util.List;
 /**
  * Jira Server/DC 连接器（/rest/api/2）。认证按集成配置：
  * PAT（8.14+，Bearer 头）/ BASIC（8.13 及更早，Basic base64(user:password)）。
- * 只读连接器：只拉取 issue，不向 Jira 发起任何写请求；git 动词不支持。
+ * 读：拉取 issue / 工作流转换清单；写：仅限 transitions 端点（CAP-19 FR-08 平台侧状态回写），
+ * git 动词不支持。
  * 与 GitLabConnector 同一手法：查询参数自行 URL 编码后拼完整 URI，
  * 避开 RestClient URI 模板展开的二次编码。
  */
@@ -106,6 +107,40 @@ public class JiraConnector implements IntegrationConnector {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "拉取 Jira issue 失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
         }
+    }
+
+    @Override
+    public List<IssueTransition> listTransitions(IntegrationEntity cfg, String token, String issueKey) {
+        try {
+            JsonNode body = client(cfg, token).get()
+                    .uri(uri(cfg, "/issue/" + encodeKey(issueKey) + "/transitions"))
+                    .retrieve().body(JsonNode.class);
+            return JiraIssueMapper.toTransitions(body);
+        } catch (RestClientResponseException e) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "拉取 Jira 转换清单失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
+        }
+    }
+
+    @Override
+    public void transitionIssue(IntegrationEntity cfg, String token, String issueKey, String transitionId) {
+        var payload = mapper.createObjectNode();
+        payload.putObject("transition").put("id", transitionId);
+        try {
+            client(cfg, token).post()
+                    .uri(uri(cfg, "/issue/" + encodeKey(issueKey) + "/transitions"))
+                    .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve().toBodilessEntity();
+        } catch (RestClientResponseException e) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "Jira 状态转换失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
+        }
+    }
+
+    /** issue key 进路径段（PROJ-123 这类本安全，编码兜底防脏数据） */
+    private static String encodeKey(String issueKey) {
+        return URLEncoder.encode(issueKey, StandardCharsets.UTF_8);
     }
 
     @Override

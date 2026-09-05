@@ -1,6 +1,7 @@
 package com.devmind.integration.connector.jira;
 
 import com.devmind.integration.connector.IntegrationConnector.IssuePage;
+import com.devmind.integration.connector.IntegrationConnector.IssueTransition;
 import com.devmind.integration.connector.IntegrationConnector.JiraIssue;
 import tools.jackson.databind.JsonNode;
 
@@ -43,6 +44,22 @@ public final class JiraIssueMapper {
                 body.path("maxResults").asInt(issues.size()),
                 body.path("total").asInt(issues.size()),
                 issues);
+    }
+
+    /** GET /issue/{key}/transitions 响应 → 转换清单；缺 id 的脏条目跳过（无法回传执行） */
+    public static List<IssueTransition> toTransitions(JsonNode body) {
+        JsonNode arr = body == null ? null : body.get("transitions");
+        if (arr == null || !arr.isArray()) {
+            return List.of();
+        }
+        List<IssueTransition> out = new ArrayList<>();
+        for (JsonNode t : arr) {
+            String id = text(t, "id");
+            if (id != null) {
+                out.add(new IssueTransition(id, text(t, "name"), nestedText(t, "to", "name")));
+            }
+        }
+        return out;
     }
 
     /** 单个 issue；缺 key 视为脏数据跳过（返回 null） */

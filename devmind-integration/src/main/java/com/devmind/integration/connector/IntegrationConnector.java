@@ -38,6 +38,22 @@ public interface IntegrationConnector {
         throw new DevMindException(ErrorCode.BAD_REQUEST, type() + " 不支持 issue 拉取");
     }
 
+    /**
+     * 列出 issue 当前可用工作流转换（CAP-19 FR-08；issue 跟踪型平台如 Jira）。
+     * 只读操作——转换清单随 issue 状态与工作流配置动态变化，不得硬编码。
+     */
+    default List<IssueTransition> listTransitions(IntegrationEntity cfg, String token, String issueKey) {
+        throw new DevMindException(ErrorCode.BAD_REQUEST, type() + " 不支持 issue 状态转换");
+    }
+
+    /**
+     * 执行 issue 工作流转换（CAP-19 FR-08）。**写操作**——本 SPI 唯一放行写请求的路径，
+     * 仅限 transitions 端点；transitionId 必须来自当前 {@link #listTransitions} 结果。
+     */
+    default void transitionIssue(IntegrationEntity cfg, String token, String issueKey, String transitionId) {
+        throw new DevMindException(ErrorCode.BAD_REQUEST, type() + " 不支持 issue 状态转换");
+    }
+
     record TestResult(boolean ok, String message, String detail) {}
 
     record ExternalProject(String key, String name, String url, String defaultBranch) {}
@@ -62,4 +78,7 @@ public interface IntegrationConnector {
                      String priority, List<String> labels, String status,
                      Instant created, Instant updated, String reporter,
                      String assignee, LocalDate dueDate, List<String> fixVersions) {}
+
+    /** issue 工作流转换（CAP-19 FR-08）：id=转换 id（执行时回传），name=转换名，toStatus=目标状态名 */
+    record IssueTransition(String id, String name, String toStatus) {}
 }

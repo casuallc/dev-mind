@@ -1,0 +1,19 @@
+{
+  "expand": "transitions",
+  "transitions": [
+    {
+      "id": "11",
+      "name": "开始处理",
+      "to": { "id": "3", "name": "In Progress" }
+    },
+    {
+      "id": "21",
+      "name": "完成",
+      "to": { "id": "6", "name": "Done" }
+    },
+    {
+      "name": "缺id脏数据应被跳过",
+      "to": { "id": "9", "name": "X" }
+    }
+  ]
+}

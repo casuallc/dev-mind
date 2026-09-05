@@ -75,6 +75,20 @@ class JiraIssueMapperTest {
     }
 
     @Test
+    void transitions清单映射跳过缺id脏数据() throws Exception {
+        var list = JiraIssueMapper.toTransitions(fixture("transitions.json"));
+        assertEquals(2, list.size());
+        assertEquals("11", list.get(0).id());
+        assertEquals("开始处理", list.get(0).name());
+        assertEquals("In Progress", list.get(0).toStatus());
+        assertEquals("21", list.get(1).id());
+        assertEquals("Done", list.get(1).toStatus());
+        // 空响应与 null 安全
+        assertTrue(JiraIssueMapper.toTransitions(null).isEmpty());
+        assertTrue(JiraIssueMapper.toTransitions(mapper.readTree("{}")).isEmpty());
+    }
+
+    @Test
     void 时间解析覆盖无冒号与标准ISO两种偏移() {
         assertEquals(Instant.parse("2026-08-28T01:00:00Z"),
                 JiraIssueMapper.parseTime("2026-08-28T09:00:00.000+0800"));
