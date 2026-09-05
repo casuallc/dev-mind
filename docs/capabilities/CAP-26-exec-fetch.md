@@ -1,6 +1,8 @@
 # CAP-26 执行前代码同步（服务端 clone 保鲜）
 
-> 能力 ID：CAP-26 ｜ 分类：底座 ｜ 状态：草案 ｜ 日期：2026-09-05
+> 能力 ID：CAP-26 ｜ 分类：底座 ｜ 状态：已落地（2026-09-05：RepoGitGateway SPI +
+> 构建双 fetch/checkout + 同项目串行锁 + 发版 tag 基准 + worktree FETCH_HEAD 基线，
+> 全量测试通过） ｜ 日期：2026-09-05
 
 ## 1. 目的
 

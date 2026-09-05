@@ -46,8 +46,9 @@ Windows 办公机普遍在 NAT/防火墙后、入站不可达，因此采用**�
 - **FR-05 远程交互**：`input` / `authorize` / `kill` / `suspend` 指令随节点连接下发，
   runner 映射为本地子进程操作（写 stdin / permission_result / 杀进程树）。
   指令必须带 sessionId 且校验该会话归属此节点。
-- **FR-06 远程工作目录**：workdir 语义 = **节点本地路径**。MVP 由节点侧配置
-  「项目 → 本地路径」映射（runner 配置文件）；平台不做代码同步，仓库由节点机自行维护。
+- **FR-06 远程工作目录**：workdir 语义 = **节点本地路径**。CAP-25 起由 runner 托管
+  （launch 帧携带 repo 块：clone/fetch/会话 worktree/结束 push 全自动）；无 repo 块时
+  回退节点侧「项目 → 本地路径」映射（runner 配置文件），代码节点自理。
 - **FR-07 节点管理 UI**：`features/agent` 自包含目录——节点列表（在线状态/os/版本/
   最近心跳/运行中会话数）、生成注册 token、禁用/删除节点；创建会话表单加「执行节点」
   下拉（默认本地）。**一键安装脚本**（2026-09-03 补做）：创建节点对话框直接下载
@@ -137,4 +138,5 @@ POST   /api/agent-nodes/{id}/upgrade             手动升级，恒 200：status
 ## 8. MVP 范围（暂不做）
 
 标签调度/负载均衡（创建会话手工选节点）、hello 版本自动比对升级（FR-09 已做手动升级）、
-jlink 免安装包、代码同步（worktree 由节点机自理）、多 agent 种类的能力协商 UI、节点间会话迁移。
+jlink 免安装包、~~代码同步（worktree 由节点机自理）~~ **已由 CAP-25 接管**（runner 托管
+工作区全自动）、多 agent 种类的能力协商 UI、节点间会话迁移。
