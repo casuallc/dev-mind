@@ -40,6 +40,8 @@
 | [CAP-22](CAP-22-github-integration.md) | GitHub 集成 | 底座 | CAP-18 连接器第二个 git 平台实现：PR/Release，github.com 与 GHE（/api/v3）分流 |
 | [CAP-23](CAP-23-repo-clone.md) | 项目仓库从 Git 克隆 | 底座 | 项目/多库支持 GitLab/GitHub 远端地址异步克隆到工作区（按项目分目录），PAT 注入+状态机+实时日志 |
 | [CAP-24](CAP-24-user-git-identity.md) | 用户级 Git 身份与凭证 | 底座 | 用户自助维护各 git 平台 PAT 与署名，Agent 提交按会话发起人署名（env 注入），push 个人凭证优先 |
+| [CAP-25](CAP-25-runner-workspace.md) | 远程会话工作区编排 | 底座 | launch 帧下发 repo+短期凭据，runner 自动 clone/fetch/会话 worktree/结束 push，节点零手工配码 |
+| [CAP-26](CAP-26-exec-fetch.md) | 执行前代码同步 | 底座 | 构建/发版/worktree 基准一律取 origin/ 远端引用（执行前 fetch），服务端 clone 不再失鲜 |
 
 ## 依赖关系
 
@@ -72,6 +74,8 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-22 GitHub 集成依赖 CAP-18（SPI/服务层/凭据/GitRemoteOps/External Link 全部复用，零表结构变更）：仅新增 GitHubConnector，覆盖 github.com 与 GHE。
 - CAP-23 仓库克隆依赖 CAP-02/12/18：project 创建 CLONE 行发领域事件，integration 监听后异步克隆（PAT 注入 + ExecutionLogHub 实时日志），按项目分目录落 `data/repositories/<projectId>/`。
 - CAP-24 用户 Git 身份依赖 CAP-01/05/18：用户级 PAT 与署名存 `user_git_credentials`（复用 IntegrationCipher 加密），会话拉起时经 env 注入提交身份，WI 分支 push 个人凭证优先于项目 Integration。
+- CAP-25 远程工作区依赖 CAP-21/23/24：launch 帧携带 repo 块（remoteUrl/分支/token，CAP-24 优先级解析），runner 侧 clone 缓存 + 每会话 worktree + 结束 push，节点机零手工维护代码。
+- CAP-26 执行前同步依赖 CAP-08/11/18/23：构建/发版前 fetch 并以 origin/ 远端引用为基准，与 CAP-25 闭环「节点开发 → 远端 → 服务端执行」。
 
 ## 组装方式（后续流程层）
 
