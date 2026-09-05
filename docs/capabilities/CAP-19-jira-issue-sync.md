@@ -70,6 +70,8 @@ JiraSyncService ──→ Requirement（DRAFT，标题 [PROJ-123] summary）
   成功后按 key 单条刷新：link.status + 托管字段（本地 status/ownerId/docId 绝不动）；
   刷新失败不回滚转换（下轮同步补齐）。每次执行 `recordCall("jira_transition")` + 审计 +
   领域事件 `integration.jira.transitioned`（→ 通知中心）。
+  工时字段（timeoriginalestimate/timespent）随同步刷新、worklog 工时登记同属本回写通道，
+  详见 CAP-27。
 
 ## 3. 关键设计
 
