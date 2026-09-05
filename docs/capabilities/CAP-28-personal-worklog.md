@@ -1,6 +1,6 @@
 # CAP-28 个人工作日志与工时管理（git log + 手动补录 → AI 日报/周报）
 
-> 能力 ID：CAP-28 ｜ 分类：组装层 ｜ 状态：草案 ｜ 日期：2026-09-05
+> 能力 ID：CAP-28 ｜ 分类：组装层 ｜ 状态：**已实现（MVP，FR-07 Jira 一键操作后置）** ｜ 日期：2026-09-05
 
 ## 1. 目的
 
@@ -182,3 +182,26 @@ worklog.daily.generated / worklog.weekly.generated / worklog.jira.worklogged
 - agent 会话自动转工时条目（source=AGENT 预留枚举，后续可接
   `session.completed` 事件）；
 - 工时报表/统计图表。
+
+## 9. 排错
+
+| 现象 | 根因 | 处理 |
+|------|------|------|
+| generate 提交 200 但报告一直不出现 | 生成是异步的：查 `GET /api/sessions` 最近一条无项目会话的状态；FAILED 且看服务日志 `报告生成失败:` 前缀 | 按下方分项处理 |
+| one-shot 会话秒 FAILED（createdAt==finishedAt） | fake 执行器脚本损坏（fake-agent.js 语法错误 node 秒退）或 claude 不在 PATH | fake 模式下 `node` 直接跑一遍 `devmind-session/src/main/resources/session/fake-agent.js` 验证；真实模式确认 claude CLI 可用 |
+| 报「节点不在线」 | one-shot 会话曾随平台默认远程节点派发；已修为 `agentNodeId="local"` 保留值强制本机 | 升级到此修复后版本；远端节点场景不要用 one-shot |
+| git 预览为空 | author 过滤不匹配：扫描按「我的 Git 凭证」（CAP-24）里该 host 的署名邮箱过滤 | 在 /me/git-credentials 配置与提交一致的署名；或仓库 remoteUrl 缺失导致无法推断 host（登记时补上） |
+| git 提交中文主题乱码 | Windows git 默认按本地编码输出 log | 扫描已显式带 `-c i18n.logOutputEncoding=UTF-8 --encoding=UTF-8` 且按 UTF-8 字节解码；仍乱码检查仓库本身提交编码 |
+| 已确认（CONFIRMED）报告 force 重生成不生效 | 设计如此：force 仅覆盖 DRAFT；异步任务内抛 409 记 warn 日志，报告保持 CONFIRMED | 先确认无误再定稿；确需重生成需先改回草稿（当前未开放，走库操作） |
+| 并发触发报 409「已有报告生成任务在跑」 | AtomicBoolean 防重入，全局同一时刻只允许一个生成任务 | 稍后重试 |
+| 日报/周报定时没跑 | 检查 `devmind.worklog.daily-enabled/weekly-enabled` 与 cron；调度覆盖范围 = 有仓库订阅的用户 ∪ 有设置行的用户，显式 autoDaily=false 排除 | 在「工作日志 → 设置」确认开关；完全无订阅无设置的用户不在覆盖范围内 |
+
+## 10. 实现落点
+
+- 后端：`devmind-worklog`（实体 6 表 / CodeRepoService / GitLogScanner / WorklogEntryService /
+  ReportService / WorklogScheduler / 5 控制器）；SPI `OneShotAgentRunner`（devmind-common 定义，
+  devmind-session `SessionOneShotRunner` 实现，ObjectProvider 探测缺席降级 400）；
+  `CreateSessionRequest.agentNodeId` 保留值 `local`；notification 域标签 `worklog → 工时`。
+- 前端：`features/worklog`（WorklogPage 三视图 + CodeReposPage + EntryFormDrawer /
+  GitImportModal / ReportEditor），裸路由 `/worklog`、`/worklog/repos`（不进项目上下文），
+  侧边栏「个人」组。
