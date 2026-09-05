@@ -78,6 +78,7 @@ public class DomainEventNotificationListener {
             case "release" -> "发版";
             case "session" -> "会话";
             case "integration" -> "集成";
+            case "worklog" -> "工时";
             default -> "任务";
         };
     }

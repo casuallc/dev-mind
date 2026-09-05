@@ -45,6 +45,14 @@ devmind:
     ring-buffer: 1000
     event-flush-ms: 200
     max-concurrent: 4
+    oneshot-permission-mode: plan    # CAP-28 one-shot 总结会话专用（只读任务，不复用上方 acceptEdits）
+  worklog:                         # CAP-28 个人工时
+    daily-enabled: true
+    daily-cron: "0 30 18 * * *"    # 每日 18:30 生成日报草稿
+    weekly-enabled: true
+    weekly-cron: "0 0 9 * * MON"   # 周一 09:00 生成上周周报草稿
+    git-scan-max-commits: 200      # 单库单日扫描上限
+    oneshot-timeout-seconds: 300
   worktree:
     root: ""                       # 空=项目内 .devmind/worktrees
     base-branch: master
