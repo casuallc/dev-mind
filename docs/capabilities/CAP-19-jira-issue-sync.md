@@ -6,7 +6,8 @@
 
 把 Jira Server/DC 上的任务/Bug **单向拉取**进平台，落成研发主线（CAP-13）的
 Requirement（DRAFT），经人工确认后走既有流程（分析 → 方案 → AI 拆分 → 派发 agent）
-自动开发/修复。**只拉取不回写**：不在 Jira 侧产生任何写操作。
+自动开发/修复。同步本身**只拉取不回写**；FR-08 起支持**人工触发的平台侧状态回写**
+（工作流转换），这是唯一的 Jira 写路径。
 
 ```
 Jira Server/DC                    dev-mind
@@ -61,6 +62,14 @@ JiraSyncService ──→ Requirement（DRAFT，标题 [PROJ-123] summary）
   项目设置「Jira 同步」Tab（配置表单 + 开关 + 上次状态 + 立即同步）；
   需求列表 Jira 来源徽标（`GET /projects/{pid}/external-links?internalType=REQUIREMENT`
   批量反查，点击新窗跳 Jira issue 页）。
+- **FR-08 平台侧状态回写（工作流转换）**：需求详情页「Jira 操作」下拉（仅 JIRA 来源渲染）
+  动态列出关联 issue 当前可用转换（`GET /issue/{key}/transitions`，名称/目标状态随实例
+  工作流，不硬编码）；确认后 `POST /api/projects/{pid}/requirements/{rid}/jira/transitions`
+  执行（`transitionId` 安全闸：必须在当前可用列表内）。写操作仅限 transitions 端点，
+  SPI 以 default 方法扩展（`listTransitions`/`transitionIssue`，git 平台默认抛不支持）。
+  成功后按 key 单条刷新：link.status + 托管字段（本地 status/ownerId/docId 绝不动）；
+  刷新失败不回滚转换（下轮同步补齐）。每次执行 `recordCall("jira_transition")` + 审计 +
+  领域事件 `integration.jira.transitioned`（→ 通知中心）。
 
 ## 3. 关键设计
 
@@ -71,7 +80,9 @@ JiraSyncService ──→ Requirement（DRAFT，标题 [PROJ-123] summary）
   路径；Jira 同步配置与仓库正交，独立成表互不干扰。
 - **更新边界 = 托管字段**：Jira 托管字段本地只读、同步无条件刷新（含需求时间取 issue
   自身 created/updated，列表排序与 Jira 一致）；status/ownerId/docId 为本地字段，
-  同步绝不动，人工接管状态机。
+  同步绝不动，人工接管状态机。FR-08 回写同样守此边界：平台执行 Jira 转换只改远端 +
+  刷新托管字段/remoteStatus，**不回写本地需求 status**（两边状态机独立，本地由
+  FlowActions 人工流转）。
 - **全量重拉而非增量水印**（2026-09 口径调整）：过滤条件就是配置里看得见的
   project + 附加 JQL，行为可预期、可用预览试算；幂等由 external_links 兜住，
   单轮限页防爆量。
@@ -94,3 +105,6 @@ JiraSyncService ──→ Requirement（DRAFT，标题 [PROJ-123] summary）
 | 重复导入 | 不应发生：幂等键 = (integration_id, ISSUE, issue key)；查 external_links |
 | 需求没被 Jira 更新刷新 | 看配置 lastError 与链接 status；托管字段每轮无条件刷新 |
 | 轮询没跑 | 配置 enabled=false / 间隔未到（看 lastSyncAt + pollIntervalSec）/ lastError |
+| 详情页没有「Jira 操作」按钮 | 非 Jira 来源 / 未关联 issue（查 external_links）/ 集成禁用 / 无可用转换或权限不足（静默降级，查集成调用审计 jira_transition） |
+| 执行转换报 400/403 | Jira 工作流 validator/条件拦截（如必填字段未填、无权转换），errorMessages 原样弹出；可用转换已随状态变化时刷新页面重试 |
+| 转换成功但状态没变 | 刷新失败不回滚（转换已生效）：看日志 warn，下轮同步补齐 remoteStatus |
