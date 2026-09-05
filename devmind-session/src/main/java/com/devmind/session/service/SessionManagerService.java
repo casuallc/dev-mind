@@ -661,10 +661,11 @@ public class SessionManagerService {
                 log.warn("远程工作区降级：integration 未装配，无凭据可下发: project={}", project.id());
                 return null;
             }
+            // token 可空 = 匿名通道（公开仓库 / file://），与 CAP-23 匿名克隆口径一致；
+            // 私有库匿名 clone 会在 runner 侧以清晰的 auth 错误失败（launch ack 回传）
             String token = gw.resolveToken(actor, hostOf(url), project.id()).orElse(null);
             if (token == null) {
-                log.warn("远程工作区降级：项目 {} 无可用 git 凭据（个人 PAT / 绑定 Integration 均无）", project.id());
-                return null;
+                log.info("远程工作区走匿名通道（无个人 PAT / 绑定 Integration）: project={}", project.id());
             }
             return new AgentLaunchCommand.RepoSpec(url,
                     baseBranch != null && !baseBranch.isBlank() ? baseBranch : project.baseBranch(),

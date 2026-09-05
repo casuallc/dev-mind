@@ -31,6 +31,11 @@ public class RunnerSessionRegistry {
         void send(Map<String, Object> frame);
     }
 
+    /** CAP-25 会话结束收尾（runner 托管工作区的 push + 清理）；执行完才上行 exit 帧。 */
+    public interface SessionFinalizer {
+        void finish(String sessionId);
+    }
+
     private final CliEventParser parser;
     private final FrameSender sender;
     private final Map<String, RunnerSession> sessions = new ConcurrentHashMap<>();
@@ -53,10 +58,20 @@ public class RunnerSessionRegistry {
     }
 
     public void register(String sessionId, Process process) {
-        RunnerSession s = new RunnerSession(sessionId, process);
+        register(sessionId, process, null);
+    }
+
+    /** CAP-25：finalizer 非空 = 托管工作区会话，进程退出后先收尾（push+清理）再上行 exit。 */
+    public void register(String sessionId, Process process, SessionFinalizer finalizer) {
+        RunnerSession s = new RunnerSession(sessionId, process, finalizer);
         sessions.put(sessionId, s);
         Thread.ofVirtual().name("runner-stdout-" + sessionId).start(() -> readLoop(s, false));
         Thread.ofVirtual().name("runner-stderr-" + sessionId).start(() -> readLoop(s, true));
+    }
+
+    /** CAP-25：向会话事件流注入 system 事件（工作区 push/清理结果，服务端落库+广播）。 */
+    public void reportSystem(String sessionId, String content) {
+        sendEvent(sessionId, SessionEvent.of(0, "system", content, "system"));
     }
 
     /** 写一行 JSON 到会话 stdin（调用方已按 CLI 协议拼装）。 */
@@ -122,7 +137,7 @@ public class RunnerSessionRegistry {
         }
     }
 
-    /** 进程退出收口（stdout EOF 后取退出码上行 exit 帧）。 */
+    /** 进程退出收口（stdout EOF 后取退出码上行 exit 帧；CAP-25 有 finalizer 先收尾）。 */
     private void onProcessEnd(RunnerSession s) {
         int code;
         try {
@@ -132,6 +147,13 @@ public class RunnerSessionRegistry {
             code = -1;
         }
         sessions.remove(s.sessionId, s);
+        if (s.finalizer != null) {
+            try {
+                s.finalizer.finish(s.sessionId);
+            } catch (Exception e) {
+                log.warn("会话收尾异常（不影响结局上报）: session={} err={}", s.sessionId, e.getMessage());
+            }
+        }
         sender.send(Map.of("type", "exit", "sessionId", s.sessionId, "code", code));
         log.info("会话进程退出: session={} exit={}", s.sessionId, code);
     }
@@ -151,12 +173,14 @@ public class RunnerSessionRegistry {
     private static final class RunnerSession {
         final String sessionId;
         final Process process;
+        final SessionFinalizer finalizer;
         final AtomicLong seq = new AtomicLong();
         final Object stdinLock = new Object();
 
-        RunnerSession(String sessionId, Process process) {
+        RunnerSession(String sessionId, Process process, SessionFinalizer finalizer) {
             this.sessionId = sessionId;
             this.process = process;
+            this.finalizer = finalizer;
         }
     }
 }

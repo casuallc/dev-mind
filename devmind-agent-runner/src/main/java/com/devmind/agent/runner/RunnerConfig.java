@@ -17,14 +17,16 @@ import java.util.Properties;
  * claudePath=                # 空 = where claude 探测
  * permissionMode=acceptEdits # runner 默认权限模式（服务端指令未指定时用）
  * workDir=D:\devmind-work    # 项目无映射时的兜底工作目录
- * project.&lt;projectId&gt;=D:\repos\xxx   # 项目 → 节点本地路径映射
+ * project.&lt;projectId&gt;=D:\repos\xxx   # 项目 → 节点本地路径映射（CAP-25 起仅作降级回退）
+ * workspaceRoot=./workspaces # CAP-25 托管工作区根目录（收到带 repo 块的 launch 时启用：
+ *                            # 克隆缓存 <root>/<projectId>/main + 会话 worktree <root>/<projectId>/sessions/<sid>）
  * maxConcurrent=4
  * executor=claude            # claude=真实 CLI / fake=内置假进程（自测/无 claude 环境）
  * </pre>
  */
 public record RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
                            Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
-                           String executor) {
+                           String executor, Path workspaceRoot) {
 
     public static RunnerConfig load(Path file) throws IOException {
         Properties p = new Properties();
@@ -46,7 +48,8 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                 Path.of(p.getProperty("workDir", ".").strip()),
                 projects,
                 Integer.parseInt(p.getProperty("maxConcurrent", "4").strip()),
-                p.getProperty("executor", "claude").strip());
+                p.getProperty("executor", "claude").strip(),
+                Path.of(p.getProperty("workspaceRoot", "./workspaces").strip()));
     }
 
     /** 会话工作目录：项目映射优先，否则兜底 workDir。 */

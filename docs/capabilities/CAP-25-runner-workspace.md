@@ -1,6 +1,7 @@
 # CAP-25 远程会话工作区编排（Runner 侧代码生命周期）
 
-> 能力 ID：CAP-25 ｜ 分类：底座 ｜ 状态：草案 ｜ 日期：2026-09-05
+> 能力 ID：CAP-25 ｜ 分类：底座 ｜ 状态：已落地（2026-09-05：服务端 repo 块组装 +
+> env 漏发修复 + runner 托管工作区 clone/fetch/worktree/push 全链路，E2E 通过） ｜ 日期：2026-09-05
 
 ## 1. 目的
 
@@ -54,24 +55,28 @@ clone（首次）→ fetch → 切会话分支（每会话独立 worktree）→ 
 - **FR-01 launch 协议扩展（服务端）**：`AgentLaunchCommand` 增加
   `RepoSpec(remoteUrl, baseBranch, branch, token)` 可空字段；组帧时序列化为
   `repo{remoteUrl,baseBranch,branch,token}`；`env` 字段补发（修复，见决策 6）。
-- **FR-02 repo 块组装（服务端）**：远程会话且项目主库 `remoteUrl` 非空时：
+- **FR-02 repo 块组装（服务端）**：远程会话且项目主库 `remoteUrl` 非空（http/https）时：
   `branch = feature/<sessionId>`，`baseBranch = 会话请求 > 项目默认`，token 经新增
   SPI `RepoCredentialResolver`（devmind-common 定义，devmind-integration 实现，
-  ObjectProvider 探测注入）解析：个人 PAT（CAP-24 host 匹配）→ 项目绑定 Integration
-  token。remoteUrl 为空或 token 解析不到 → 省略 repo 块（降级，决策 5）+ warn 日志。
+  ObjectProvider 探测注入）解析：个人 PAT（CAP-24 host 匹配）→ 项目绑定 Integration token。
+  **token 可空 = 匿名通道**（公开仓库 / file://，与 CAP-23 匿名克隆口径一致；私有库匿名
+  clone 会在 runner 侧以清晰 auth 错误经 launch ack 失败）。remoteUrl 为空 / ssh 协议 /
+  SPI 未装配 → 省略 repo 块（降级，决策 5）+ warn 日志。
 - **FR-03 runner 托管工作区**：配置新增 `workspaceRoot`（默认 `./workspaces`，相对
   runner 启动目录）。收到带 repo 块的 launch：
   1. 克隆缓存 `<workspaceRoot>/<projectId>/main` 不存在 → `git clone`（token 内嵌
      URL）→ 立即 `remote set-url origin <cleanUrl>`；
   2. `git fetch <urlWithToken> <baseBranch>`（显式 URL，不依赖 origin 凭据）；
   3. `git worktree add <workspaceRoot>/<projectId>/sessions/<sessionId> -b <branch> FETCH_HEAD`
-     （分支已存在则先 `-D`：同 sessionId 重发 launch 的幂等保障）；
+     （**resume 幂等**：会话目录仍在 → 直接复用；目录已清理但分支还在（上次结束 push 后
+     分支保留在克隆缓存）→ worktree add 挂回既有分支，不丢已有提交；全新会话才 -b 新建）；
   4. workdir = 会话 worktree，拉起 claude。
   任一步失败 → 回 `launched{ok:false,error}`（复用现有 ack 通道，服务端创建失败 409/500）。
 - **FR-04 结束 push 与清理**：进程退出收口（`RunnerSessionRegistry.onProcessEnd`）时，
-  有 repo 块的会话：先 push（`git push <urlWithToken> <branch>:<branch>`，up-to-date
-  算成功），再 `git worktree remove --force` 清理会话目录（本地分支保留在克隆缓存中，
-  供事后追溯；远端分支是交付物），最后发 exit 帧（扩展 `pushed/branch/pushError` 字段）。
+  有 repo 块的会话（以 SessionFinalizer 挂接）：先 push（`git push <urlWithToken>
+  <branch>:<branch>`，up-to-date 算成功），再 `git worktree remove --force` 清理会话目录
+  （本地分支保留在克隆缓存中，供事后追溯；远端分支是交付物）。push/清理结果以 **system
+  事件**先行上报（复用既有 event 帧通道，服务端落库 + WS 广播），exit 帧协议不变。
 - **FR-05 凭据安全红线**：token 仅存在于 launch 帧（生产应 wss）与 runner 内存；
   git 输出经 sanitize（token 明文 + URL 编码形态 → `***`）后才进 runner 日志/上行帧；
   `.git/config`、磁盘任何文件不得出现 token；launch 帧服务端侧不进日志。
@@ -97,8 +102,8 @@ clone（首次）→ fetch → 切会话分支（每会话独立 worktree）→ 
 
 - 服务端：`sessions` 表无变更。launch 帧协议见上（`repo` 块 + 补发 `env`）。
 - runner `agent.properties` 新增：`workspaceRoot=./workspaces`（可缺省）。
-- exit 帧扩展：`{type:"exit", sessionId, code, pushed?, branch?, pushError?}`
-  （老服务端忽略多余字段）。
+- push/清理结果经 system 事件上行（`event{sessionId, eventType:"system", content}`），
+  exit 帧不扩展（新老服务端/runner 任意组合兼容）。
 
 ## 7. 模块归属与依赖
 

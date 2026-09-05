@@ -19,7 +19,7 @@ class RunnerUpgraderTest {
 
     private static RunnerConfig config(String serverUrl) {
         return new RunnerConfig(serverUrl, "dmag_test token", "", "acceptEdits",
-                Path.of("."), Map.of(), 4, "claude");
+                Path.of("."), Map.of(), 4, "claude", Path.of("./workspaces"));
     }
 
     @Test

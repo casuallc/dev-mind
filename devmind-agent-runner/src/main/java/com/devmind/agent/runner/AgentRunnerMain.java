@@ -53,9 +53,10 @@ public class AgentRunnerMain {
 
         ServerConnection[] connRef = new ServerConnection[1];
         RunnerSessionRegistry sessions = new RunnerSessionRegistry(parser, frame -> connRef[0].send(frame));
+        RunnerWorkspace workspace = new RunnerWorkspace(config.workspaceRoot());
 
         ServerConnection conn = new ServerConnection(config, mapper,
-                frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, connRef[0]),
+                frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, workspace, connRef[0]),
                 () -> connRef[0].send(helloFrame(sessions, version)));
         connRef[0] = conn;
 
@@ -89,11 +90,12 @@ public class AgentRunnerMain {
 
     private static void handleFrame(JsonNode frame, RunnerConfig config, Path configFile,
                                     CliProcessLauncher protocol, SessionExecutor executor,
-                                    RunnerSessionRegistry sessions, ServerConnection conn) {
+                                    RunnerSessionRegistry sessions, RunnerWorkspace workspace,
+                                    ServerConnection conn) {
         String type = frame.path("type").asText("");
         String sessionId = frame.path("sessionId").asText("");
         switch (type) {
-            case "launch" -> handleLaunch(frame, sessionId, config, executor, sessions, conn);
+            case "launch" -> handleLaunch(frame, sessionId, config, executor, sessions, workspace, conn);
             case "input" -> sessions.writeStdin(sessionId,
                     protocol.buildUserMessage(frame.path("text").asText("")));
             case "authorize" -> sessions.writeStdin(sessionId, protocol.buildPermissionResult(
@@ -149,7 +151,7 @@ public class AgentRunnerMain {
 
     private static void handleLaunch(JsonNode frame, String sessionId, RunnerConfig config,
                                      SessionExecutor executor, RunnerSessionRegistry sessions,
-                                     ServerConnection conn) {
+                                     RunnerWorkspace workspace, ServerConnection conn) {
         try {
             if (sessions.size() >= config.maxConcurrent()) {
                 throw new IllegalStateException("runner 并发会话已达上限 " + config.maxConcurrent());
@@ -158,16 +160,38 @@ public class AgentRunnerMain {
             String taskSpec = frame.path("taskSpec").asText("");
             String model = frame.path("model").asText("");
             String permissionMode = frame.path("permissionMode").asText("");
-            Path workDir = config.resolveWorkDir(projectId);
-            // Windows CreateProcess error=267：cwd 不存在直接拉起失败。
-            // 兜底 workDir 属临时目录，缺则自建；项目映射目录缺失必须报错（自建会悄悄跑错目录）
-            if (!Files.isDirectory(workDir)) {
-                if (projectId != null && config.projectPaths().containsKey(projectId)) {
-                    throw new IllegalStateException("项目映射目录不存在: " + workDir
-                            + "（agent.properties 的 project." + projectId + " 指向无效路径）");
+
+            // CAP-25：launch 帧带 repo 块 → runner 托管工作区（clone/fetch/会话 worktree，
+            // 结束 push+清理）；无 repo 块 → 旧行为（project.<id> 映射/兜底目录，代码节点自理）。
+            // token 只进 RunnerWorkspace.RepoCtx（内存），严禁日志输出。
+            Path workDir;
+            RunnerSessionRegistry.SessionFinalizer finalizer = null;
+            JsonNode repoNode = frame.path("repo");
+            if (repoNode.isObject() && !repoNode.path("remoteUrl").asText("").isBlank()) {
+                if (projectId == null || projectId.isBlank()) {
+                    throw new IllegalStateException("带 repo 块的 launch 必须携带 projectId");
                 }
-                Files.createDirectories(workDir);
-                log.info("兜底工作目录不存在已创建: {}", workDir);
+                RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
+                        repoNode.path("remoteUrl").asText(""),
+                        repoNode.path("baseBranch").asText(""),
+                        repoNode.path("branch").asText(""),
+                        repoNode.path("token").asText(""));
+                RunnerWorkspace.RepoCtx ctx = workspace.prepare(sessionId, projectId, spec);
+                workDir = ctx.sessionDir();
+                finalizer = sid -> workspace.finish(ctx, msg -> sessions.reportSystem(sid, msg));
+                log.info("托管工作区就绪: session={} cwd={}", sessionId, workDir);
+            } else {
+                workDir = config.resolveWorkDir(projectId);
+                // Windows CreateProcess error=267：cwd 不存在直接拉起失败。
+                // 兜底 workDir 属临时目录，缺则自建；项目映射目录缺失必须报错（自建会悄悄跑错目录）
+                if (!Files.isDirectory(workDir)) {
+                    if (projectId != null && config.projectPaths().containsKey(projectId)) {
+                        throw new IllegalStateException("项目映射目录不存在: " + workDir
+                                + "（agent.properties 的 project." + projectId + " 指向无效路径）");
+                    }
+                    Files.createDirectories(workDir);
+                    log.info("兜底工作目录不存在已创建: {}", workDir);
+                }
             }
             log.info("拉起会话: session={} project={} cwd={}", sessionId, projectId, workDir);
 
@@ -179,7 +203,7 @@ public class AgentRunnerMain {
             }
             Process proc = executor.launch(new SessionExecutor.LaunchContext(
                     sessionId, workDir, taskSpec, model, permissionMode, env));
-            sessions.register(sessionId, proc);
+            sessions.register(sessionId, proc, finalizer);
             conn.send(Map.of("type", "launched", "sessionId", sessionId, "ok", true));
         } catch (Exception e) {
             log.warn("拉起会话失败: session={} err={}", sessionId, e.getMessage());
