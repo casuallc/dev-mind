@@ -13,6 +13,7 @@ import com.devmind.project.dto.RepoRequest;
 import com.devmind.project.dto.RepoView;
 import com.devmind.project.model.ProjectEntity;
 import com.devmind.project.model.ProjectRepoEntity;
+import com.devmind.project.repo.GitRepositoryRepository;
 import com.devmind.project.repo.ProjectRepoRepository;
 import com.devmind.project.repo.ProjectRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,9 +37,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * CAP-23 克隆模式创建单测（无 Spring 上下文）：
- * repository 用 JDK 动态代理内存 fake，IdentityService/DomainEventPublisher 子类覆盖。
- * 覆盖：CLONE 创建路径计算与状态机初值、事件发布、URL 校验（ssh/非法协议/file:// 带集成）、
+ * CAP-23/29 克隆模式创建单测（无 Spring 上下文）：
+ * repository 用 JDK 动态代理内存 fake，IdentityService/DomainEventPublisher 子类覆盖，
+ * GitRepoService 用真实实现 + fake 全局仓库表（CAP-29 起项目仓库只关联全局行）。
+ * 覆盖：CLONE 创建路径=全局克隆目录与 gitrepo.clone-requested 事件、URL 校验（ssh/非法协议/file:// 带集成）、
  * CLONE 项目禁改 path、主库镜像同步、LOCAL 回归（path 必填校验）。
  */
 class ProjectServiceCloneTest {
@@ -48,7 +50,9 @@ class ProjectServiceCloneTest {
 
     private FakeProjectRepository projects;
     private FakeRepoRepository repos;
+    private FakeGitRepoRepository gitRepos;
     private FakeEventPublisher events;
+    private GitRepoService gitRepoService;
     private ProjectService service;
 
     @SuppressWarnings("unchecked")
@@ -120,16 +124,47 @@ class ProjectServiceCloneTest {
         }
     }
 
+    static class FakeGitRepoRepository {
+        final Map<Long, com.devmind.project.model.GitRepositoryEntity> store = new HashMap<>();
+        private long seq = 0;
+
+        GitRepositoryRepository jpa() {
+            return proxy(GitRepositoryRepository.class, (p, m, args) -> switch (m.getName()) {
+                case "save" -> {
+                    com.devmind.project.model.GitRepositoryEntity e =
+                            (com.devmind.project.model.GitRepositoryEntity) args[0];
+                    if (e.getId() == null) {
+                        e.setId(++seq);
+                    }
+                    store.put(e.getId(), e);
+                    yield e;
+                }
+                case "findById" -> Optional.ofNullable(store.get((Long) args[0]));
+                case "findByRemoteUrlKey" -> store.values().stream()
+                        .filter(e -> java.util.Objects.equals(e.getRemoteUrlKey(), args[0])).findFirst();
+                case "findByLocalPath" -> store.values().stream()
+                        .filter(e -> e.getLocalPath().equals(args[0])).findFirst();
+                case "findAll" -> new ArrayList<>(store.values());
+                case "countByGitRepoId" -> 0L;
+                default -> throw new UnsupportedOperationException(m.getName());
+            });
+        }
+    }
+
     @BeforeEach
     void setUp() {
         projects = new FakeProjectRepository();
         repos = new FakeRepoRepository();
+        gitRepos = new FakeGitRepoRepository();
         events = new FakeEventPublisher();
         ProjectProperties props = new ProjectProperties();
         props.setWorkspaceRoot(tempDir.resolve("repositories").toString());
-        service = new ProjectService(new FakeIdentityService(), props, new WorktreeProperties(),
+        FakeIdentityService identity = new FakeIdentityService();
+        // CAP-29：真实 GitRepoService + fake 全局表（upsert/路径推导走真实逻辑）
+        gitRepoService = new GitRepoService(gitRepos.jpa(), repos.jpa(), props, identity, events);
+        service = new ProjectService(identity, props, new WorktreeProperties(),
                 projects.jpa(), repos.jpa(), null, null, null, null,
-                null, null, null, null, null, null, null, events);
+                null, null, null, null, null, null, null, gitRepoService);
     }
 
     private ProjectRequest cloneRequest(String remoteUrl, Long integrationId) {
@@ -141,8 +176,9 @@ class ProjectServiceCloneTest {
     void createCloneProjectComputesWorkspacePathAndPublishesEvent() {
         ProjectView view = service.create(cloneRequest("https://gitlab.example.com/group/my-repo.git", null));
 
-        String expected = tempDir.resolve("repositories").resolve(view.id()).resolve("main")
-                .toAbsolutePath().normalize().toString();
+        // CAP-29：项目路径 = 全局克隆目录 <workspaceRoot>/_global/<slug>-<sha8>
+        String expected = gitRepoService
+                .deriveClonePath("https://gitlab.example.com/group/my-repo.git").toString();
         assertEquals(expected, view.path());
         assertEquals("CLONE", view.sourceType());
         assertEquals("CLONING", view.cloneStatus());
@@ -154,13 +190,16 @@ class ProjectServiceCloneTest {
         assertEquals("CLONING", primary.getCloneStatus());
         assertEquals("https://gitlab.example.com/group/my-repo.git", primary.getRemoteUrl());
         assertNull(primary.getIntegrationId());
+        // 主库行已关联全局仓库行
+        assertEquals(1, gitRepos.store.size());
+        assertEquals(gitRepos.store.values().iterator().next().getId(), primary.getGitRepoId());
 
+        // CAP-29：事件改由 GitRepoService 发布（gitrepo.clone-requested / GIT_REPO）
         assertEquals(1, events.published.size());
         var event = (com.devmind.common.event.SimpleDomainEvent) events.published.get(0);
-        assertEquals("project.repo.clone-requested", event.type());
-        assertEquals(view.id(), event.projectId());
-        assertEquals("PROJECT_REPO", event.entityType());
-        assertEquals(String.valueOf(primary.getId()), event.entityId());
+        assertEquals("gitrepo.clone-requested", event.type());
+        assertEquals("GIT_REPO", event.entityType());
+        assertEquals(String.valueOf(primary.getGitRepoId()), event.entityId());
     }
 
     @Test
@@ -196,19 +235,31 @@ class ProjectServiceCloneTest {
     }
 
     @Test
-    void addCloneRepoComputesSubDirAndAvoidsCollision() {
+    void addCloneRepoLinksGlobalRowAndDeduplicatesByUrl() {
         ProjectView project = service.create(cloneRequest("https://gitlab.example.com/g/main.git", null));
         RepoView r1 = service.addRepo(project.id(),
                 new RepoRequest("docs repo", null, "CLONE", "https://gitlab.example.com/g/docs.git",
                         null, null, null, false, 0));
-        assertEquals("docs-repo", Path.of(r1.path()).getFileName().toString());
+        // CAP-29：path = 全局克隆目录（按 URL 推导，不再按项目分目录）
+        assertEquals(gitRepoService.deriveClonePath("https://gitlab.example.com/g/docs.git").toString(),
+                r1.path());
         assertEquals("CLONING", r1.cloneStatus());
 
         RepoView r2 = service.addRepo(project.id(),
                 new RepoRequest("docs repo", null, "CLONE", "https://gitlab.example.com/g/docs2.git",
                         null, null, null, false, 1));
-        assertEquals("docs-repo-2", Path.of(r2.path()).getFileName().toString());
+        assertEquals(gitRepoService.deriveClonePath("https://gitlab.example.com/g/docs2.git").toString(),
+                r2.path());
+        // create + 两次 addRepo 各 upsert 一行全局仓库
+        assertEquals(3, gitRepos.store.size());
         assertEquals(3, events.published.size());
+
+        // 同一远端重复添加 → 关联同一全局行 → 路径冲突拒绝
+        var dup = assertThrows(DevMindException.class, () -> service.addRepo(project.id(),
+                new RepoRequest("docs again", null, "CLONE", "https://gitlab.example.com/g/docs.git",
+                        null, null, null, false, 2)));
+        assertEquals(ErrorCode.CONFLICT, dup.getErrorCode());
+        assertEquals(3, gitRepos.store.size());
     }
 
     @Test

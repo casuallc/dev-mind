@@ -80,6 +80,8 @@ public class GitRepoService implements GitRepoCatalog {
     }
 
     // ---------------- CRUD（/api/repos，ADMIN） ----------------
+    // 注意：会发布 gitrepo.clone-requested 的方法禁 @Transactional（异步监听线程须看到已提交行，
+    // 平台红线：异步触发靠 save 自身事务即时提交）。update/delete 无异步触发，保留事务。
 
     public List<GitRepoView> list() {
         return repoRepo.findAll().stream().map(GitRepoView::of).toList();
@@ -94,7 +96,6 @@ public class GitRepoService implements GitRepoCatalog {
         return GitRepoView.of(require(id));
     }
 
-    @Transactional
     public GitRepoView create(GitRepoRequest req) {
         GitRepositoryEntity e = upsert(req, identity.currentActor());
         return GitRepoView.of(e);
@@ -149,10 +150,10 @@ public class GitRepoService implements GitRepoCatalog {
 
     /**
      * 按规范化 remoteUrl 找/建全局行：存在直接返回；不存在则按 CLONE 新建并触发克隆。
-     * 幂等：同 URL 多次添加返回同一行。
+     * 幂等：同 URL 多次添加返回同一行。禁 @Transactional（见上方红线注记）。
      */
-    @Transactional
     public GitRepositoryEntity upsertCloneByRemoteUrl(String name, String remoteUrl, Long integrationId) {
+        validateCloneRemote(remoteUrl, integrationId);
         String key = normalizeRemoteUrlKey(remoteUrl);
         if (key == null) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "remoteUrl 不合法: " + remoteUrl);
@@ -168,7 +169,6 @@ public class GitRepoService implements GitRepoCatalog {
     }
 
     /** LOCAL 关联：有 remoteUrl 按 key 找/建（不克隆），否则按 localPath 找/建。 */
-    @Transactional
     public GitRepositoryEntity upsertLocal(String name, String localPath, String remoteUrl) {
         String key = normalizeRemoteUrlKey(remoteUrl);
         if (key != null) {
@@ -191,7 +191,7 @@ public class GitRepoService implements GitRepoCatalog {
             if (req.remoteUrl() == null || req.remoteUrl().isBlank()) {
                 throw new DevMindException(ErrorCode.BAD_REQUEST, "CLONE 模式 remoteUrl 不能为空");
             }
-            validateCloneRemote(req.remoteUrl());
+            validateCloneRemote(req.remoteUrl(), req.integrationId());
             String key = normalizeRemoteUrlKey(req.remoteUrl());
             var existing = repoRepo.findByRemoteUrlKey(key);
             if (existing.isPresent()) {
@@ -252,7 +252,7 @@ public class GitRepoService implements GitRepoCatalog {
 
     /**
      * 规范化 remoteUrl 为 upsert 键：去 userinfo、小写 scheme+host、去默认端口、
-     * 去尾斜杠与 .git；git@host:org/repo → host/org/repo。非法/空返回 null。
+     * 去尾斜杠与 .git；git@host:org/repo → host/org/repo；file:// → file/&lt;path&gt;。非法/空返回 null。
      */
     public static String normalizeRemoteUrlKey(String remoteUrl) {
         if (remoteUrl == null || remoteUrl.isBlank()) {
@@ -262,6 +262,11 @@ public class GitRepoService implements GitRepoCatalog {
         try {
             if (u.contains("://")) {
                 var uri = java.net.URI.create(u);
+                if ("file".equalsIgnoreCase(uri.getScheme())) {
+                    // file:// 本地验证通道：无 host，按路径作键
+                    String path = uri.getPath() == null ? "" : uri.getPath();
+                    return path.isBlank() ? null : stripTail("file" + path);
+                }
                 String host = uri.getHost() == null ? null : uri.getHost().toLowerCase();
                 if (host == null) {
                     return null;
@@ -298,9 +303,16 @@ public class GitRepoService implements GitRepoCatalog {
         }
     }
 
-    /** http/https 校验（与 CAP-23 validateCloneRemote 同口径：ssh 拒绝）。 */
-    private void validateCloneRemote(String remoteUrl) {
+    /** http/https 校验（与 CAP-23 validateCloneRemote 同口径：ssh 拒绝；file:// 仅匿名，供本地验证通道）。 */
+    private void validateCloneRemote(String remoteUrl, Long integrationId) {
         String u = remoteUrl == null ? "" : remoteUrl.strip().toLowerCase();
+        if (u.startsWith("file://")) {
+            if (integrationId != null) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "file:// 仅支持匿名克隆（不可选择集成实例）: " + remoteUrl);
+            }
+            return;
+        }
         if (!u.startsWith("http://") && !u.startsWith("https://")) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "仅支持 http/https 远端地址（ssh 形态请先换 https）: " + remoteUrl);

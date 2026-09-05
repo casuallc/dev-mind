@@ -1,8 +1,6 @@
 package com.devmind.project;
 
 import com.devmind.auth.IdentityService;
-import com.devmind.common.event.DomainEventPublisher;
-import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.security.ServerCredentialCipher;
@@ -23,6 +21,7 @@ import com.devmind.project.dto.ServerRequest;
 import com.devmind.project.dto.ServerView;
 import com.devmind.project.dto.WorktreeView;
 import com.devmind.project.model.BuildStepEntity;
+import com.devmind.project.model.GitRepositoryEntity;
 import com.devmind.project.model.ProjectEntity;
 import com.devmind.project.model.Project;
 import com.devmind.project.model.ProjectLockEntity;
@@ -91,8 +90,8 @@ public class ProjectService {
     private final RepoScanner repoScanner;
     /** CAP-07 提供凭证加密实现（可选）；缺省时 accessConfig 明文存储（无 server-adapter 模块时兼容） */
     private final ObjectProvider<ServerCredentialCipher> cipherProvider;
-    /** CAP-23：发布 project.repo.clone-requested 事件，由 integration 模块监听执行克隆（反向触发防依赖环） */
-    private final DomainEventPublisher eventPublisher;
+    /** CAP-29：全局仓库登记（唯一数据源）；项目仓库只关联不复制 */
+    private final GitRepoService gitRepoService;
 
     public ProjectService(IdentityService identityService,
                             ProjectProperties props,
@@ -110,7 +109,7 @@ public class ProjectService {
                           EnvironmentRepository environmentRepo,
                           RepoScanner repoScanner,
                           ObjectProvider<ServerCredentialCipher> cipherProvider,
-                          DomainEventPublisher eventPublisher) {
+                          GitRepoService gitRepoService) {
         this.identityService = identityService;
         this.props = props;
         this.worktreeProps = worktreeProps;
@@ -127,7 +126,7 @@ public class ProjectService {
         this.environmentRepo = environmentRepo;
         this.repoScanner = repoScanner;
         this.cipherProvider = cipherProvider;
-        this.eventPublisher = eventPublisher;
+        this.gitRepoService = gitRepoService;
     }
 
     /** 启动种子：projects 表为空且配置了 default-path 时，把 yml 预置仓库注册为 id=default 的项目（MVP 平滑迁移）。 */
@@ -197,15 +196,22 @@ public class ProjectService {
         boolean clone = isClone(req.sourceType());
         ProjectEntity e = new ProjectEntity();
         e.setId(shortId());
-        // CAP-23：CLONE 模式路径由系统计算（目录由 integration 模块异步克隆填充）；LOCAL 保持本地校验
+        // CAP-29：先 upsert 全局仓库登记（唯一数据源），项目与主库行只关联；
+        // CLONE 路径 = 全局克隆目录（<workspace-root>/_global/<slug>-<sha8>），多项目共享同一克隆
+        GitRepositoryEntity globalRepo;
         Path repoPath;
         if (clone) {
             validateCloneRemote(req.remoteUrl(), req.integrationId());
-            repoPath = cloneTargetDir(e.getId(), "main");
+            globalRepo = gitRepoService.upsertCloneByRemoteUrl(
+                    repoNameFromUrl(req.remoteUrl()), req.remoteUrl().trim(), req.integrationId());
+            repoPath = Path.of(globalRepo.getLocalPath());
         } else {
             repoPath = validateRepo(req.path());
+            globalRepo = gitRepoService.upsertLocal(repoDirName(repoPath.toString()),
+                    repoPath.toString(), null);
         }
-        if (projectRepo.countByPath(repoPath.toString()) > 0) {
+        // 路径冲突只约束 LOCAL（CLONE 行走全局表去重，多项目可关联同一仓库）
+        if (!clone && projectRepo.countByPath(repoPath.toString()) > 0) {
             throw new DevMindException(ErrorCode.CONFLICT, "该仓库路径已被注册为项目");
         }
         e.setName(req.name().trim());
@@ -215,7 +221,7 @@ public class ProjectService {
         e.setDescription(blankToNull(req.description()));
         e.setStatus(req.status() == null || req.status().isBlank() ? STATUS_ACTIVE : req.status().toUpperCase());
         e.setSourceType(clone ? ProjectRepoEntity.SOURCE_CLONE : ProjectRepoEntity.SOURCE_LOCAL);
-        e.setCloneStatus(clone ? ProjectRepoEntity.CLONE_CLONING : null);
+        e.setCloneStatus(clone ? globalRepo.getCloneStatus() : null);
         e.setApiDocSource(blankToNull(req.apiDocSource()));
         e.setAutoRegressionOnDeploy(req.autoRegressionOnDeploy() != null && req.autoRegressionOnDeploy());
         e.setAgentNodeId(blankToNull(req.agentNodeId()));
@@ -225,21 +231,22 @@ public class ProjectService {
         e.setCreatedAt(now);
         e.setUpdatedAt(now);
         projectRepo.save(e);
-        // P0-4：注册主库记录（projects.path 为主库镜像）
+        // P0-4：注册主库记录（projects.path 为主库镜像）；CAP-29：回填 gitRepoId 关联全局行
         String primaryName = clone ? repoNameFromUrl(req.remoteUrl()) : repoDirName(e.getPath());
         ProjectRepoEntity primary = newRepoRow(e.getId(), primaryName, e.getPath(),
                 clone ? req.remoteUrl().trim() : null,
                 e.getDefaultBranch(), ProjectRepoEntity.ROLE_CODE, true, 0);
+        primary.setGitRepoId(globalRepo.getId());
         if (clone) {
             primary.setSourceType(ProjectRepoEntity.SOURCE_CLONE);
             primary.setIntegrationId(req.integrationId());
-            primary.setCloneStatus(ProjectRepoEntity.CLONE_CLONING);
+            primary.setCloneStatus(globalRepo.getCloneStatus());
         }
         repoRepo.save(primary);
-        if (clone) {
-            publishCloneRequested(e.getId(), primary.getId(), primary.getName());
-        }
-        log.info("项目已创建: id={} name={} path={} sourceType={}", e.getId(), e.getName(), e.getPath(), e.getSourceType());
+        // CAP-29：克隆触发由 GitRepoService.upsertCloneByRemoteUrl 发 gitrepo.clone-requested，
+        // 此处不再发 project.repo.clone-requested（全局行已存在时无需重复克隆）
+        log.info("项目已创建: id={} name={} path={} sourceType={} gitRepoId={}",
+                e.getId(), e.getName(), e.getPath(), e.getSourceType(), globalRepo.getId());
         return toView(e);
     }
 
@@ -357,32 +364,33 @@ public class ProjectService {
     public RepoView addRepo(String projectId, RepoRequest req) {
         requireEntity(projectId);
         boolean clone = isClone(req.sourceType());
-        String repoPath;
+        // CAP-29：项目添加仓库 = 全局登记表 upsert + 关联（不复制）；全局行是唯一数据源
+        GitRepositoryEntity globalRepo;
         if (clone) {
-            // CAP-23：CLONE 模式 path 由系统计算（忽略请求值），按项目分目录
             validateCloneRemote(req.remoteUrl(), req.integrationId());
-            String subDir = sanitizeDirName(req.name().trim());
-            String candidate = subDir;
-            int seq = 2;
-            while (repoRepo.countByProjectIdAndPath(projectId,
-                    cloneTargetDir(projectId, candidate).toString()) > 0) {
-                candidate = subDir + "-" + seq++;
-            }
-            repoPath = cloneTargetDir(projectId, candidate).toString();
+            globalRepo = gitRepoService.upsertCloneByRemoteUrl(
+                    req.name().trim(), req.remoteUrl().trim(), req.integrationId());
         } else {
-            repoPath = validateRepo(req.path()).toString();
+            Path localPath = validateRepo(req.path());
+            globalRepo = gitRepoService.upsertLocal(req.name().trim(), localPath.toString(), req.remoteUrl());
         }
+        String repoPath = globalRepo.getLocalPath();
         if (repoRepo.countByProjectIdAndPath(projectId, repoPath) > 0) {
             throw new DevMindException(ErrorCode.CONFLICT, "该仓库已在项目仓库列表中");
         }
         boolean makePrimary = Boolean.TRUE.equals(req.primary()) || repoRepo.countByProjectId(projectId) == 0;
         ProjectRepoEntity r = newRepoRow(projectId, req.name().trim(), repoPath,
-                blankToNull(req.remoteUrl()), blankToNull(req.defaultBranch()),
+                blankToNull(req.remoteUrl()),
+                req.defaultBranch() != null && !req.defaultBranch().isBlank()
+                        ? req.defaultBranch().trim() : globalRepo.getDefaultBranch(),
                 normalizeRole(req.role()), makePrimary, req.sortOrder() == null ? 0 : req.sortOrder());
+        r.setGitRepoId(globalRepo.getId());
         if (clone) {
             r.setSourceType(ProjectRepoEntity.SOURCE_CLONE);
             r.setIntegrationId(req.integrationId());
-            r.setCloneStatus(ProjectRepoEntity.CLONE_CLONING);
+            // 初始状态镜像全局行（新行=CLONING，已存在 READY 行立即可用）
+            r.setCloneStatus(globalRepo.getCloneStatus());
+            r.setCloneError(globalRepo.getCloneError());
         }
         if (makePrimary) {
             clearPrimary(projectId);
@@ -391,11 +399,9 @@ public class ProjectService {
         if (makePrimary) {
             syncPrimaryMirror(projectId);
         }
-        if (clone) {
-            publishCloneRequested(projectId, r.getId(), r.getName());
-        }
-        log.info("项目仓库已添加: projectId={} name={} path={} primary={} sourceType={}",
-                projectId, r.getName(), r.getPath(), makePrimary, r.getSourceType());
+        // CAP-29：克隆由全局行 upsert 时发 gitrepo.clone-requested 触发，此处不再发项目级事件
+        log.info("项目仓库已添加: projectId={} name={} path={} primary={} sourceType={} gitRepoId={}",
+                projectId, r.getName(), r.getPath(), makePrimary, r.getSourceType(), globalRepo.getId());
         return view;
     }
 
@@ -426,6 +432,11 @@ public class ProjectService {
         if (req.defaultBranch() != null) r.setDefaultBranch(blankToNull(req.defaultBranch()));
         if (req.role() != null && !req.role().isBlank()) r.setRole(normalizeRole(req.role()));
         if (req.sortOrder() != null) r.setSortOrder(req.sortOrder());
+        // CAP-29 惰性关联：存量 LOCAL 行补登全局表；CLONE 旧行继续走 per-project 克隆不回填
+        // （旧行 path 指向项目私有目录，与全局克隆目录不一致，链接会造成状态语义混乱）
+        if (r.getGitRepoId() == null && !clone) {
+            r.setGitRepoId(gitRepoService.upsertLocal(r.getName(), r.getPath(), r.getRemoteUrl()).getId());
+        }
         r.setUpdatedAt(Instant.now());
         if (Boolean.TRUE.equals(req.primary()) && !Boolean.TRUE.equals(r.getIsPrimary())) {
             clearPrimary(projectId);
@@ -847,16 +858,6 @@ public class ProjectService {
         return Path.of(props.getWorkspaceRoot()).toAbsolutePath().normalize();
     }
 
-    /** 克隆目标目录 = <workspaceRoot>/<projectId>/<subDir>，防 .. 逃逸。 */
-    private Path cloneTargetDir(String projectId, String subDir) {
-        Path root = workspaceRoot();
-        Path dir = root.resolve(projectId).resolve(subDir).normalize();
-        if (!dir.startsWith(root)) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "非法仓库目录: " + subDir);
-        }
-        return dir;
-    }
-
     /** repo 子目录名白名单字符 [a-zA-Z0-9._-]，其余替换为 -。 */
     private String sanitizeDirName(String name) {
         String s = name.replaceAll("[^a-zA-Z0-9._-]", "-");
@@ -879,13 +880,6 @@ public class ProjectService {
         int slash = url.lastIndexOf('/');
         String name = slash >= 0 ? url.substring(slash + 1) : url;
         return name.isBlank() ? "main" : sanitizeDirName(name);
-    }
-
-    /** 发布克隆请求事件（integration 模块监听执行；旁路，发布失败不影响创建）。 */
-    private void publishCloneRequested(String projectId, Long repoId, String repoName) {
-        eventPublisher.publish(SimpleDomainEvent.of("project.repo.clone-requested", projectId, null,
-                identityService.currentActor(), "仓库克隆请求: " + repoName,
-                "PROJECT_REPO", String.valueOf(repoId), null));
     }
 
     private boolean isGitRepo(Path repo) {
