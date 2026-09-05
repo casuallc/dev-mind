@@ -93,7 +93,7 @@ class JiraSyncServiceTest {
         private int seq = 0;
 
         FakeRequirementService() {
-            super(null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null);
         }
 
         /** 与 RequirementService.applyJiraFields 同款的 fake 落库（标题截 240） */
@@ -110,6 +110,8 @@ class JiraSyncServiceTest {
                     ? null : String.join(",", f.fixVersions()));
             e.setDueDate(f.dueDate());
             e.setExternalKey(f.externalKey());
+            e.setEstimatedSeconds(f.estimatedSeconds());
+            e.setSpentSeconds(f.spentSeconds());
             // 与真实通道一致：创建/更新时间取 issue 自身
             e.setCreatedAt(f.issueCreated());
             e.setUpdatedAt(f.issueUpdated());
@@ -149,6 +151,7 @@ class JiraSyncServiceTest {
                     e.getDescription(), e.getStatus(), e.getType(), null, null,
                     e.getSource(), e.getPriority(), e.getAssignee(), e.getReporter(),
                     List.of(), List.of(), e.getDueDate(), e.getExternalKey(), null, null,
+                    null, e.getEstimatedSeconds(), e.getSpentSeconds(),
                     "test", Instant.now(), Instant.now());
         }
     }
@@ -250,7 +253,7 @@ class JiraSyncServiceTest {
     private IntegrationConnector.JiraIssue issue(String key, String summary, Instant updated) {
         return new IntegrationConnector.JiraIssue(key, summary, "描述 " + key, "Bug", "High",
                 List.of("ai"), "Open", updated, updated, "张三",
-                "李四", LocalDate.parse("2026-09-30"), List.of("1.0", "1.1"));
+                "李四", LocalDate.parse("2026-09-30"), List.of("1.0", "1.1"), 7200L, 3600L);
     }
 
     private IssuePage page(int startAt, int total, IntegrationConnector.JiraIssue... issues) {
@@ -284,6 +287,9 @@ class JiraSyncServiceTest {
         assertEquals("ai", r1.getLabels());
         assertEquals("1.0,1.1", r1.getFixVersions());
         assertEquals(LocalDate.parse("2026-09-30"), r1.getDueDate());
+        // CAP-27：工时字段（time tracking 秒数）随同步落列
+        assertEquals(7200L, r1.getEstimatedSeconds());
+        assertEquals(3600L, r1.getSpentSeconds());
         // 创建/更新时间取 issue 自身（issue() 帮手 created=updated=T1）
         assertEquals(T1, r1.getCreatedAt());
         assertEquals(T1, r1.getUpdatedAt());
@@ -341,7 +347,7 @@ class JiraSyncServiceTest {
 
         IntegrationConnector.JiraIssue changed = new IntegrationConnector.JiraIssue("PROJ-1", "新标题",
                 "新描述", "Bug", "Highest", List.of(), "In Progress", T1, T2, "张三",
-                "王五", null, List.of());
+                "王五", null, List.of(), null, null);
         connector.pages.add(page(0, 1, changed));
         JiraSyncRunView result = service.doSync(1L);
 

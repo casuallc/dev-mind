@@ -82,7 +82,15 @@ public final class JiraIssueMapper {
                 userName(f, "reporter"),
                 userName(f, "assignee"),
                 parseDate(text(f, "duedate")),
-                versionNames(f));
+                versionNames(f),
+                seconds(f, "timeoriginalestimate"),
+                seconds(f, "timespent"));
+    }
+
+    /** time tracking 字段（秒）：数值取 long，null/非数值（实例未启用工时跟踪）返回 null */
+    private static Long seconds(JsonNode fields, String field) {
+        JsonNode v = fields == null ? null : fields.get(field);
+        return v != null && v.isNumber() ? v.asLong() : null;
     }
 
     /** 用户对象取显示名：displayName 优先，回退 name（部分实例无 displayName）；未指派（null）返回 null */

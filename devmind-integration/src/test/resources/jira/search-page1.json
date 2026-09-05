@@ -19,7 +19,9 @@
         "reporter": { "name": "zhangsan", "displayName": "张三" },
         "assignee": { "name": "lisi", "displayName": "李四" },
         "duedate": "2026-09-30",
-        "fixVersions": [ { "id": "10100", "name": "1.0" }, { "id": "10101", "name": "1.1" } ]
+        "fixVersions": [ { "id": "10100", "name": "1.0" }, { "id": "10101", "name": "1.1" } ],
+        "timeoriginalestimate": 7200,
+        "timespent": 3600
       }
     },
     {

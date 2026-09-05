@@ -25,8 +25,8 @@ import java.util.List;
 /**
  * Jira Server/DC 连接器（/rest/api/2）。认证按集成配置：
  * PAT（8.14+，Bearer 头）/ BASIC（8.13 及更早，Basic base64(user:password)）。
- * 读：拉取 issue / 工作流转换清单；写：仅限 transitions 端点（CAP-19 FR-08 平台侧状态回写），
- * git 动词不支持。
+ * 读：拉取 issue / 工作流转换清单；写：仅限 transitions / worklog 端点（CAP-19 FR-08 状态回写、
+ * CAP-27 工时登记），git 动词不支持。
  * 与 GitLabConnector 同一手法：查询参数自行 URL 编码后拼完整 URI，
  * 避开 RestClient URI 模板展开的二次编码。
  */
@@ -135,6 +135,25 @@ public class JiraConnector implements IntegrationConnector {
         } catch (RestClientResponseException e) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "Jira 状态转换失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
+        }
+    }
+
+    @Override
+    public void logWork(IntegrationEntity cfg, String token, String issueKey, long seconds, String comment) {
+        var payload = mapper.createObjectNode();
+        payload.put("timeSpentSeconds", seconds);
+        if (comment != null && !comment.isBlank()) {
+            payload.put("comment", comment.trim());
+        }
+        try {
+            client(cfg, token).post()
+                    .uri(uri(cfg, "/issue/" + encodeKey(issueKey) + "/worklog"))
+                    .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve().toBodilessEntity();
+        } catch (RestClientResponseException e) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "Jira 工时登记失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
         }
     }
 

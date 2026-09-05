@@ -54,7 +54,8 @@ public class JiraSyncService {
 
     /** 拉取字段清单（Jira /search fields 参数）；sprint 是自定义字段（实例间字段名不同），v1 不拉 */
     static final String ISSUE_FIELDS =
-            "summary,description,issuetype,priority,labels,status,created,updated,reporter,assignee,fixVersions,duedate";
+            "summary,description,issuetype,priority,labels,status,created,updated,reporter,assignee,"
+                    + "fixVersions,duedate,timeoriginalestimate,timespent";
 
     /** 预览每页条数与字段（只要摘要展示所需） */
     static final int PREVIEW_PAGE_SIZE = 8;
@@ -330,6 +331,7 @@ public class JiraSyncService {
                 issue.summary(), issue.description(), requirementType(issue),
                 issue.priority(), issue.assignee(), issue.reporter(),
                 issue.labels(), issue.fixVersions(), issue.dueDate(), issue.key(),
+                issue.originalEstimateSec(), issue.timeSpentSec(),
                 issue.created(), issue.updated());
     }
 

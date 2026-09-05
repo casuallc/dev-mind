@@ -3,6 +3,8 @@ package com.devmind.integration.controller;
 import com.devmind.integration.dto.JiraTransitionRequest;
 import com.devmind.integration.dto.JiraTransitionResultView;
 import com.devmind.integration.dto.JiraTransitionView;
+import com.devmind.integration.dto.JiraWorklogRequest;
+import com.devmind.integration.dto.JiraWorklogResultView;
 import com.devmind.integration.service.JiraIssueActionService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -37,5 +39,12 @@ public class ProjectJiraIssueController {
     public JiraTransitionResultView transit(@PathVariable String pid, @PathVariable String rid,
                                             @RequestBody JiraTransitionRequest req) {
         return service.transit(pid, rid, req.transitionId());
+    }
+
+    /** 登记工时（CAP-27）：写 Jira worklog 并刷新 timeSpent；本地需求状态不动 */
+    @PostMapping("/worklog")
+    public JiraWorklogResultView logWork(@PathVariable String pid, @PathVariable String rid,
+                                         @RequestBody JiraWorklogRequest req) {
+        return service.logWork(pid, rid, req.seconds(), req.comment());
     }
 }

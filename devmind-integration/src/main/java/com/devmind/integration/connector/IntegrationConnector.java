@@ -54,6 +54,14 @@ public interface IntegrationConnector {
         throw new DevMindException(ErrorCode.BAD_REQUEST, type() + " 不支持 issue 状态转换");
     }
 
+    /**
+     * 登记工时（CAP-27；issue 跟踪型平台如 Jira）。**写操作**——与 transitions 同属回写通道，
+     * comment 可空。seconds 为本次登记的工时秒数（Jira worklog timeSpentSeconds）。
+     */
+    default void logWork(IntegrationEntity cfg, String token, String issueKey, long seconds, String comment) {
+        throw new DevMindException(ErrorCode.BAD_REQUEST, type() + " 不支持工时登记");
+    }
+
     record TestResult(boolean ok, String message, String detail) {}
 
     record ExternalProject(String key, String name, String url, String defaultBranch) {}
@@ -73,11 +81,13 @@ public interface IntegrationConnector {
     /** issue 分页结果（对齐 Jira /search 响应结构） */
     record IssuePage(int startAt, int maxResults, int total, List<JiraIssue> issues) {}
 
-    /** 通用 issue 视图（命名对齐 Jira 字段；后续其他 issue 平台复用时映射到同一结构） */
+    /** 通用 issue 视图（命名对齐 Jira 字段；后续其他 issue 平台复用时映射到同一结构）；
+     *  originalEstimateSec/timeSpentSec 为 time tracking 秒数（CAP-27，实例未启用工时跟踪时为 null） */
     record JiraIssue(String key, String summary, String description, String issueType,
                      String priority, List<String> labels, String status,
                      Instant created, Instant updated, String reporter,
-                     String assignee, LocalDate dueDate, List<String> fixVersions) {}
+                     String assignee, LocalDate dueDate, List<String> fixVersions,
+                     Long originalEstimateSec, Long timeSpentSec) {}
 
     /** issue 工作流转换（CAP-19 FR-08）：id=转换 id（执行时回传），name=转换名，toStatus=目标状态名 */
     record IssueTransition(String id, String name, String toStatus) {}

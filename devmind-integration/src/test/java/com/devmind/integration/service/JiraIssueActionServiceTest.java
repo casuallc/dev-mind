@@ -60,6 +60,7 @@ class JiraIssueActionServiceTest {
         List<IssueTransition> transitions = new ArrayList<>();
         IssuePage refreshPage = new IssuePage(0, 0, 0, List.of());
         final List<String> executed = new ArrayList<>();
+        final List<String> worklogs = new ArrayList<>();
 
         @Override public String type() { return IntegrationEntity.TYPE_JIRA; }
         @Override public TestResult testConnection(IntegrationEntity c, String t) { throw new UnsupportedOperationException(); }
@@ -78,6 +79,11 @@ class JiraIssueActionServiceTest {
         }
 
         @Override
+        public void logWork(IntegrationEntity c, String token, String issueKey, long seconds, String comment) {
+            worklogs.add(issueKey + ":" + seconds + ":" + comment);
+        }
+
+        @Override
         public IssuePage searchIssues(IntegrationEntity c, String token, IssueQuery query) {
             return refreshPage;
         }
@@ -87,7 +93,7 @@ class JiraIssueActionServiceTest {
         final Map<String, RequirementEntity> store = new HashMap<>();
 
         FakeRequirementService() {
-            super(null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null);
         }
 
         RequirementEntity add(String id, String projectId, String source) {
@@ -240,7 +246,7 @@ class JiraIssueActionServiceTest {
         stored.setStatus(RequirementEntity.STATUS_IN_PROGRESS); // 本地流程中
         connector.refreshPage = new IssuePage(0, 1, 1, List.of(
                 new JiraIssue("PROJ-1", "Jira 新标题", "描述", "Bug", "High", List.of(), "Done",
-                        T1, T1, "张三", "李四", null, List.of())));
+                        T1, T1, "张三", "李四", null, List.of(), 7200L, 5400L)));
 
         JiraTransitionResultView result = service.transit("p1", "req-jira", "21");
 
@@ -253,6 +259,29 @@ class JiraIssueActionServiceTest {
         assertEquals(List.of(true), integrationService.callOk);    // 调用审计
         assertEquals(1, eventPublisher.events.size());
         assertEquals("integration.jira.transitioned", eventPublisher.events.get(0).type());
+    }
+
+    @Test
+    void 登记工时成功并刷新() {
+        connector.refreshPage = new IssuePage(0, 1, 1, List.of(
+                new JiraIssue("PROJ-1", "标题", "描述", "Bug", "High", List.of(), "In Progress",
+                        T1, T1, "张三", "李四", null, List.of(), 7200L, 9000L)));
+
+        var result = service.logWork("p1", "req-jira", 5400L, "AI 会话执行");
+
+        assertEquals(List.of("PROJ-1:5400:AI 会话执行"), connector.worklogs);
+        assertEquals(5400L, result.seconds());
+        assertEquals("In Progress", result.remoteStatus());
+        assertEquals(List.of(true), integrationService.callOk);
+        assertEquals("integration.jira.worklogged", eventPublisher.events.get(0).type());
+    }
+
+    @Test
+    void 非法工时秒数拒绝且不写远端() {
+        assertThrows(DevMindException.class, () -> service.logWork("p1", "req-jira", null, null));
+        assertThrows(DevMindException.class, () -> service.logWork("p1", "req-jira", 0L, null));
+        assertThrows(DevMindException.class, () -> service.logWork("p1", "req-jira", 400_000L, null));
+        assertTrue(connector.worklogs.isEmpty());
     }
 
     @Test

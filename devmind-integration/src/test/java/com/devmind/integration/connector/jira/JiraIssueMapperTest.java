@@ -46,6 +46,9 @@ class JiraIssueMapperTest {
         assertEquals(LocalDate.parse("2026-09-30"), bug.dueDate());
         assertEquals(List.of("1.0", "1.1"), bug.fixVersions());
         assertEquals(Instant.parse("2026-08-28T01:00:00Z"), bug.updated());
+        // CAP-27：time tracking 秒数
+        assertEquals(7200L, bug.originalEstimateSec());
+        assertEquals(3600L, bug.timeSpentSec());
     }
 
     @Test
@@ -59,6 +62,8 @@ class JiraIssueMapperTest {
         assertNull(story.dueDate());
         assertTrue(story.fixVersions().isEmpty());
         assertTrue(story.labels().isEmpty());
+        assertNull(story.originalEstimateSec()); // 未启用工时跟踪返回 null
+        assertNull(story.timeSpentSec());
     }
 
     @Test

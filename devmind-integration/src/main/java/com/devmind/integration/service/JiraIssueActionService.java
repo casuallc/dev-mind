@@ -13,6 +13,7 @@ import com.devmind.integration.connector.IntegrationConnector.IssueTransition;
 import com.devmind.integration.connector.IntegrationConnector.JiraIssue;
 import com.devmind.integration.dto.JiraTransitionResultView;
 import com.devmind.integration.dto.JiraTransitionView;
+import com.devmind.integration.dto.JiraWorklogResultView;
 import com.devmind.integration.model.ExternalLinkEntity;
 import com.devmind.integration.model.IntegrationEntity;
 import com.devmind.integration.repo.ExternalLinkRepository;
@@ -106,6 +107,47 @@ public class JiraIssueActionService {
         log.info("Jira issue {} 转换已执行: {} -> {}", ref.link().getExternalKey(), target.name(), target.toStatus());
         return new JiraTransitionResultView(
                 new JiraTransitionView(target.id(), target.name(), target.toStatus()), remoteStatus);
+    }
+
+    /** 登记工时（CAP-27）：写 Jira worklog → 单条刷新（spentSeconds 回落）→ 审计/事件 */
+    public JiraWorklogResultView logWork(String projectId, String requirementId, Long seconds, String comment) {
+        if (seconds == null || seconds <= 0 || seconds > 360_000) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "工时秒数非法（1~360000）: " + seconds);
+        }
+        Ref ref = resolve(projectId, requirementId);
+        IntegrationConnector connector = jiraConnector();
+        String token = integrationService.tokenOf(ref.integration());
+        try {
+            connector.logWork(ref.integration(), token, ref.link().getExternalKey(), seconds, comment);
+        } catch (Exception e) {
+            integrationService.recordCall(ref.integration().getId(), "jira_worklog",
+                    ExternalLinkEntity.INTERNAL_REQUIREMENT, requirementId, false, e.getMessage());
+            throw e;
+        }
+        String remoteStatus = refreshAfterTransit(projectId, requirementId, ref, connector, token);
+        integrationService.recordCall(ref.integration().getId(), "jira_worklog",
+                ExternalLinkEntity.INTERNAL_REQUIREMENT, requirementId, true, null);
+        String actor = identityService.currentActor();
+        auditService.record("integration", "jira_worklog", actor, projectId, true,
+                "[#" + ref.integration().getId() + "] " + ref.link().getExternalKey()
+                        + " 登记工时 " + seconds + "s（需求 " + requirementId + "）");
+        eventPublisher.publish(SimpleDomainEvent.of("integration.jira.worklogged", projectId,
+                null, actor,
+                "Jira " + ref.link().getExternalKey() + " 已登记工时 " + formatSeconds(seconds),
+                "REQUIREMENT", requirementId, true));
+        log.info("Jira issue {} 工时已登记: {}s", ref.link().getExternalKey(), seconds);
+        return new JiraWorklogResultView(seconds, remoteStatus);
+    }
+
+    /** 秒数 → 简报文案（1.5h / 45m） */
+    private static String formatSeconds(long seconds) {
+        if (seconds % 3600 == 0) {
+            return (seconds / 3600) + "h";
+        }
+        if (seconds < 3600) {
+            return (seconds / 60) + "m";
+        }
+        return String.format(java.util.Locale.ROOT, "%.1fh", seconds / 3600.0);
     }
 
     /** 转换后单条刷新：按 key 精确拉回 issue，刷新 link.status 与托管字段（本地 status 不动） */
