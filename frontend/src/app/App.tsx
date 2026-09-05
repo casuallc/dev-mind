@@ -37,6 +37,7 @@ import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
 import WorklogPage from '../features/worklog/pages/WorklogPage'
 import CodeReposPage from '../features/worklog/pages/CodeReposPage'
+import ReposAdminPage from '../features/repos/pages/ReposAdminPage'
 import LoginPage from '../features/auth/pages/LoginPage'
 import UserManagementPage from '../features/auth/pages/UserManagementPage'
 import GitCredentialsPage from '../features/auth/pages/GitCredentialsPage'
@@ -128,6 +129,8 @@ export default function App() {
             <Route path="jira" element={<JiraSyncPage />} />
             <Route path="lock" element={<LockPage />} />
           </Route>
+          {/* CAP-29 全局代码仓库登记（仅 ADMIN；项目仓库关联的单一数据源） */}
+          <Route path="/admin/repos" element={<ReposAdminPage />} />
           {/* CAP-01 用户管理 */}
           <Route path="/admin/users" element={<UserManagementPage />} />
           {/* CAP-07 服务器适配器 */}

@@ -11,12 +11,8 @@ import type {
   WorklogSettings,
 } from './types'
 
-// ---- 全局代码仓库（写操作仅 ADMIN；订阅为本人勾选） ----
+// ---- 全局代码仓库（CAP-29 起登记在 /admin/repos；此处仅列表 + 本人订阅勾选） ----
 export const listRepos = () => api.get<WorklogRepo[]>('/worklog/repos')
-export const createRepo = (body: Partial<WorklogRepo>) => api.post<WorklogRepo>('/worklog/repos', body)
-export const updateRepo = (id: number, body: Partial<WorklogRepo>) =>
-  api.put<WorklogRepo>(`/worklog/repos/${id}`, body)
-export const deleteRepo = (id: number) => api.del(`/worklog/repos/${id}`)
 export const setSubscription = (id: number, subscribed: boolean) =>
   api.put(`/worklog/repos/${id}/subscription`, { subscribed })
 

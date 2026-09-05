@@ -3,6 +3,7 @@ import {
   ApiOutlined,
   ArrowLeftOutlined,
   CloudServerOutlined,
+  CodeOutlined,
   DashboardOutlined,
   DeploymentUnitOutlined,
   FileTextOutlined,
@@ -52,6 +53,7 @@ export default function AdminLayout() {
               label: '项目与资源',
               children: [
                 { key: '/admin/projects', icon: <FolderOutlined />, label: '项目管理' },
+                { key: '/admin/repos', icon: <CodeOutlined />, label: '代码仓库' },
                 { key: '/admin/servers', icon: <CloudServerOutlined />, label: '服务器运维' },
                 { key: '/admin/agent-nodes', icon: <RobotOutlined />, label: 'Agent 节点' },
                 { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },

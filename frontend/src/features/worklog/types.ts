@@ -1,17 +1,14 @@
 // CAP-28 个人工作日志与工时管理 类型定义
 
-/** 全局代码仓库（平台级登记；subscribed 为当前用户是否勾选参与扫描） */
+/** 全局代码仓库（CAP-29 起经 /api/repos 登记；subscribed 为当前用户是否勾选参与扫描） */
 export interface WorklogRepo {
   id: number
   name: string
-  localPath: string
   remoteUrl?: string
   defaultBranch?: string
   status: string
-  createdBy?: string
+  cloneStatus?: string
   subscribed?: boolean
-  createdAt?: string
-  updatedAt?: string
 }
 
 /** 工作条目（一天多条；工时按条目记，单位小时） */
