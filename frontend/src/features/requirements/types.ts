@@ -33,6 +33,12 @@ export interface Requirement {
   externalUrl?: string
   /** Jira 远端状态（随同步刷新），仅 JIRA 来源 */
   remoteStatus?: string
+  /** CAP-27：AI 实际耗时（秒，需求下所有会话时长汇总，活跃会话算到当前） */
+  agentSeconds?: number
+  /** CAP-27：Jira 预估工时（秒，托管字段随同步刷新），仅 JIRA 来源 */
+  estimatedSeconds?: number
+  /** CAP-27：Jira 已用工时（秒，托管字段随同步/回写刷新），仅 JIRA 来源 */
+  spentSeconds?: number
   createdBy?: string
   createdAt: string
   updatedAt: string

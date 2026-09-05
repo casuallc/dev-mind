@@ -18,6 +18,16 @@ export function durationMs(a: string | null | undefined, b: string | null | unde
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
+/** 秒数 → '45m' / '2h' / '2h30m'，空值显示 '-'（CAP-27 工时展示） */
+export function fmtDuration(sec: number | null | undefined): string {
+  if (sec == null || sec <= 0) return '-'
+  const h = Math.floor(sec / 3600)
+  const m = Math.round((sec % 3600) / 60)
+  if (h === 0) return `${m}m`
+  if (m === 0 || m === 60) return `${m === 60 ? h + 1 : h}h`
+  return `${h}h${m}m`
+}
+
 /** Record → 每行 k=v 文本（表单编辑用） */
 export const paramsToText = (p: Record<string, string> | undefined): string =>
   Object.entries(p ?? {}).map(([k, v]) => `${k}=${v}`).join('\n')

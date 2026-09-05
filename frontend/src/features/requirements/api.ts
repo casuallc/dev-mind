@@ -83,6 +83,21 @@ export function transitionJiraIssue(
   )
 }
 
+// ---- CAP-27 Jira 工时回写 ----
+
+/** 登记 Jira 工时（hours 换算秒写 worklog，timeSpent 随即刷新；本地需求状态不动） */
+export function logJiraWork(
+  projectId: string,
+  requirementId: string,
+  hours: number,
+  comment?: string,
+): Promise<{ seconds: number; remoteStatus?: string }> {
+  return api.post(`/projects/${projectId}/requirements/${requirementId}/jira/worklog`, {
+    seconds: Math.round(hours * 3600),
+    comment: comment || undefined,
+  })
+}
+
 // ---- Work Item ----
 
 export function listWorkItems(projectId: string, requirementId: string): Promise<WorkItem[]> {
