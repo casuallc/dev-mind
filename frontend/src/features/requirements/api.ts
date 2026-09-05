@@ -3,6 +3,8 @@ import { api } from '../../shared/api/client'
 import type {
   Design,
   FlowSession,
+  JiraTransition,
+  JiraTransitionResult,
   Requirement,
   RequirementInput,
   RequirementOverview,
@@ -60,6 +62,25 @@ export function getRequirementOverview(
   requirementId: string,
 ): Promise<RequirementOverview> {
   return api.get<RequirementOverview>(`/projects/${projectId}/requirements/${requirementId}/overview`)
+}
+
+// ---- CAP-19 FR-08 Jira 状态回写 ----
+
+/** 需求关联 issue 当前可用的 Jira 工作流转换（详情页「Jira 操作」下拉数据源） */
+export function listJiraTransitions(projectId: string, requirementId: string): Promise<JiraTransition[]> {
+  return api.get<JiraTransition[]>(`/projects/${projectId}/requirements/${requirementId}/jira/transitions`)
+}
+
+/** 执行一次 Jira 工作流转换（只回写远端，本地需求状态不动） */
+export function transitionJiraIssue(
+  projectId: string,
+  requirementId: string,
+  transitionId: string,
+): Promise<JiraTransitionResult> {
+  return api.post<JiraTransitionResult>(
+    `/projects/${projectId}/requirements/${requirementId}/jira/transitions`,
+    { transitionId },
+  )
 }
 
 // ---- Work Item ----

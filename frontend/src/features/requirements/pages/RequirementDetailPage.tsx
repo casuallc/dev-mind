@@ -28,6 +28,7 @@ import { deleteRequirement, getRequirementOverview, updateRequirementStatus } fr
 import FlowActions from '../components/flow/FlowActions'
 import FlowProgress from '../components/flow/FlowProgress'
 import DesignsTab from '../components/flow/DesignsTab'
+import JiraActions from '../components/JiraActions'
 import RelatedRecordsTab from '../components/RelatedRecordsTab'
 import RequirementFormDrawer from '../components/RequirementFormDrawer'
 import TimelineTab from '../components/TimelineTab'
@@ -166,6 +167,7 @@ export default function RequirementDetailPage() {
             extra={
               <Space size={8} wrap>
                 <FlowActions requirement={r} onChanged={reloadOverview} />
+                {isJira && <JiraActions requirement={r} onChanged={reloadOverview} />}
                 <Button icon={<EditOutlined />} onClick={() => setEditOpen(true)}>编辑</Button>
                 <Button icon={<ReloadOutlined />} onClick={reloadOverview}>刷新</Button>
                 <Dropdown

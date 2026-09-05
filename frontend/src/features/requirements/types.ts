@@ -46,6 +46,19 @@ export interface RequirementPage {
   size: number
 }
 
+/** CAP-19 FR-08：Jira 工作流转换（id 执行时回传，toStatus 为目标状态名） */
+export interface JiraTransition {
+  id: string
+  name: string
+  toStatus?: string
+}
+
+/** CAP-19 FR-08：转换执行结果（已执行的转换 + 刷新后的远端状态） */
+export interface JiraTransitionResult {
+  transition: JiraTransition
+  remoteStatus?: string
+}
+
 export interface RequirementInput {
   title: string
   description?: string
