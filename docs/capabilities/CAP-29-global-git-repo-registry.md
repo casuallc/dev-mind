@@ -1,6 +1,6 @@
 # CAP-29 全局代码仓库登记（服务端克隆 + 项目关联 + 定时同步）
 
-> 能力 ID：CAP-29 ｜ 分类：平台层 ｜ 状态：草案 ｜ 日期：2026-09-05
+> 能力 ID：CAP-29 ｜ 分类：平台层 ｜ 状态：已实现（2026-09-06）｜ 日期：2026-09-05
 > 关联：CAP-23（项目仓库克隆，本能力复用其执行器并把仓库本体提升为全局）、CAP-28（个人工时，订阅源切换为本能力的服务端克隆）
 
 ## 1. 目的
@@ -128,3 +128,14 @@ PUT    /api/worklog/repos/{id}/subscription  本人勾选
 - 存量 `project_repos` 的 `git_repo_id` 启动回填；
 - 删除全局仓库时清理磁盘克隆目录（保留目录，手工清理）；
 - 多仓库（DOCS/CONFIG 角色）推送到 CAP-21 远程节点（RepoSpec 仍只覆盖主库）。
+
+## 7. 排错
+
+| 现象 | 根因 | 处置 |
+|---|---|---|
+| 本地验证克隆报「remote_url 协议仅支持 http/https」 | file:// 仅在匿名通道（integrationId 为空）放行；CloneTokenResolver 对带 integrationId 的行会先做集成校验 | 本地 E2E 用 file:// 且**不传** integrationId |
+| fetch 成功但工时扫描/构建读到的还是旧代码 | `git fetch` 只更新 `refs/remotes/origin/*`，不移动已检出的本地分支 | doFetch 已内置 `merge --ff-only origin/<默认分支>`（GitRemoteOps.ffOnly）；分叉导致非 ff 时记 info 日志跳过，不影响抓取结果 |
+| 分支列表出现 `origin`、`origin/HEAD` 脏行 | for-each-ref 短名含 HEAD 指针与裸 origin 行 | refreshBranches 已剥 `origin/` 前缀并过滤；老数据重新 fetch 一次即可 |
+| E2E 起 8081 报「Unable to determine Dialect」 | `application-local.yml`（local 为默认 profile）指向共享 MySQL 172.20.140.156 | 必须显式 `--spring.profiles.active=e2e` 并覆盖 `spring.datasource.url` 到 H2 |
+| git preview 空、但克隆 READY 且当天有提交 | 扫描按平台用户署名过滤，UserGitCredentialService 无配置时**回退 displayName** | 种子提交的 `user.name` 要与登录用户 displayName 一致（如 admin=「管理员」）；日期参数也要匹配提交日期 |
+| 非 ADMIN 调 /api/repos 写接口 403 但读也 403 | SecurityConfig 顺序错——写 matcher 必须放在 `GET /api/**` 认证兜底**之后**、其余写规则之前 | 现有顺序已验证：GET 全认证可读，POST/PUT/DELETE 仅 ADMIN |
