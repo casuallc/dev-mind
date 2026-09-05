@@ -1,6 +1,7 @@
 // 需求详情页（/projects/:id/requirements/:rid）：单条需求的研发主线。
 // 布局参考 Jira issue 页 + SessionDetail 工具条风格：左主（头卡 + 裸 Tabs）右栏（属性卡）。
-// 头卡 title 放 code/标题/类型/状态，extra 集中放操作：FlowActions 主按钮（当前阶段下一步）+ 编辑/刷新 + 更多（取消/删除）。
+// 头卡 title 放 code/标题/类型/状态（标题允许换行防截断），extra 集中放本地操作：FlowActions 主按钮 + 编辑/刷新 + 更多（取消/删除）。
+// Jira 远端操作（JiraActions）收在右侧属性卡，与本地流程按钮隔离防误点。
 // 引导式流转——状态仅由 FlowActions 流程按钮与验收/取消隐式推进，FlowProgress 只读。
 // Jira 来源：托管字段本地只读（表单禁用 + 服务端强制），属性面板显示 Jira key 链接与远端状态。
 import { useCallback, useEffect, useState } from 'react'
@@ -154,7 +155,7 @@ export default function RequirementDetailPage() {
           <Card
             size="small"
             title={
-              <Space size={8} wrap>
+              <Space size={8} wrap style={{ whiteSpace: 'normal' }}>
                 <Typography.Text code>{r.code}</Typography.Text>
                 <Typography.Text strong>{r.title}</Typography.Text>
                 <Tag color={requirementTypeColor(r.type ?? 'FEATURE')}>{TYPE_LABEL[r.type ?? 'FEATURE']}</Tag>
@@ -167,7 +168,6 @@ export default function RequirementDetailPage() {
             extra={
               <Space size={8} wrap>
                 <FlowActions requirement={r} onChanged={reloadOverview} />
-                {isJira && <JiraActions requirement={r} onChanged={reloadOverview} />}
                 <Button icon={<EditOutlined />} onClick={() => setEditOpen(true)}>编辑</Button>
                 <Button icon={<ReloadOutlined />} onClick={reloadOverview}>刷新</Button>
                 <Dropdown
@@ -269,6 +269,11 @@ export default function RequirementDetailPage() {
               <Descriptions.Item label="创建">{fmtTime(r.createdAt)}</Descriptions.Item>
               <Descriptions.Item label="更新">{fmtTime(r.updatedAt)}</Descriptions.Item>
             </Descriptions>
+            {isJira && (
+              <div style={{ marginTop: 12 }}>
+                <JiraActions requirement={r} onChanged={reloadOverview} />
+              </div>
+            )}
           </Card>
         </Col>
       </Row>

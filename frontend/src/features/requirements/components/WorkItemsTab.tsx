@@ -1,9 +1,9 @@
 // 需求详情页「工作单元」Tab：WI 表格（行内状态/起会话/编辑/删除）+ 新建/编辑弹窗。
 // 行内状态手动流转保留（WI 无引导流程，状态是需求 rollup 数据源）；需求完结（DONE/CANCELLED）后锁定。
 import { useState } from 'react'
-import { Button, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Button, Dropdown, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { PlayCircleOutlined, PlusOutlined } from '@ant-design/icons'
+import { DownOutlined, PlayCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import {
   createWorkItem,
@@ -115,20 +115,24 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, lock
     { title: '类型', dataIndex: 'type', width: 110, render: (t: string) => <Tag color={workItemTypeColor(t)}>{t}</Tag> },
     { title: '标题', dataIndex: 'title', ellipsis: true },
     {
-      title: '状态', dataIndex: 'status', width: 170,
+      title: '状态', dataIndex: 'status', width: 130,
       render: (s: WorkItemStatus, w) => (
-        <Space size={4}>
-          <Tag color={workItemStatusColor(s)} style={{ marginInlineEnd: 0 }}>{s}</Tag>
-          <Select
-            size="small"
-            value={s}
-            style={{ width: 108 }}
-            variant="borderless"
-            disabled={locked}
-            options={WI_STATUS_FLOW.map((x) => ({ value: x, label: x }))}
-            onChange={(next) => advance(w, next)}
-          />
-        </Space>
+        <Dropdown
+          menu={{
+            items: WI_STATUS_FLOW.map((x) => ({ key: x, label: x })),
+            selectedKeys: [s],
+            onClick: ({ key }) => advance(w, key as WorkItemStatus),
+          }}
+          trigger={['click']}
+          disabled={locked}
+        >
+          <Tag
+            color={workItemStatusColor(s)}
+            style={{ marginInlineEnd: 0, cursor: locked ? 'default' : 'pointer' }}
+          >
+            {s} {!locked && <DownOutlined style={{ fontSize: 10 }} />}
+          </Tag>
+        </Dropdown>
       ),
     },
     {
