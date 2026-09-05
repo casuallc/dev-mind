@@ -14,6 +14,17 @@ export const TYPE_LABEL: Record<RequirementType, string> = {
   TASK: '任务',
 }
 
+/** 需求状态中文标签（存储值仍为英文枚举，仅显示层映射） */
+export const STATUS_LABEL: Record<RequirementStatus, string> = {
+  DRAFT: '草稿',
+  ANALYZING: '分析中',
+  DESIGNING: '方案设计',
+  IN_PROGRESS: '实施中',
+  ACCEPTANCE: '待验收',
+  DONE: '已完成',
+  CANCELLED: '已取消',
+}
+
 export const SOURCE_LABEL: Record<RequirementSource, string> = {
   JIRA: 'Jira',
   LOCAL: '自建',

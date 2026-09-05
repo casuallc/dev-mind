@@ -9,10 +9,11 @@ import { useNavigate } from 'react-router-dom'
 import { listRequirements } from '../api'
 import type { Requirement, RequirementSource, RequirementType } from '../types'
 import RequirementFormDrawer from './RequirementFormDrawer'
-import { fmtTime } from '../../../shared/utils/format'
+import { fmtDuration, fmtTime } from '../../../shared/utils/format'
 import {
   ALL_STATUSES,
   ALL_TYPES,
+  STATUS_LABEL,
   TYPE_LABEL,
   priorityColor,
   requirementStatusColor,
@@ -98,6 +99,18 @@ export default function RequirementListCard({ projectId }: { projectId: string }
         </Tooltip>
       ) : '-',
     },
+    {
+      title: 'Jira 工时',
+      dataIndex: 'spentSeconds',
+      width: 110,
+      render: (_: number | undefined, r) => (
+        <Tooltip title="已用 / 预估（Jira time tracking，随同步刷新）">
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {fmtDuration(r.spentSeconds)} / {fmtDuration(r.estimatedSeconds)}
+          </Typography.Text>
+        </Tooltip>
+      ),
+    },
   ]
 
   const columns: ColumnsType<Requirement> = [
@@ -125,10 +138,22 @@ export default function RequirementListCard({ projectId }: { projectId: string }
     },
     ...jiraColumns,
     {
+      title: 'AI 耗时',
+      dataIndex: 'agentSeconds',
+      width: 90,
+      render: (s: number | undefined) => (
+        <Tooltip title="需求下所有 agent 会话时长汇总（活跃会话算到当前）">
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {fmtDuration(s)}
+          </Typography.Text>
+        </Tooltip>
+      ),
+    },
+    {
       title: '状态',
       dataIndex: 'status',
       width: 110,
-      render: (s: Requirement['status']) => <Tag color={requirementStatusColor(s)}>{s}</Tag>,
+      render: (s: Requirement['status']) => <Tag color={requirementStatusColor(s)}>{STATUS_LABEL[s]}</Tag>,
     },
     {
       title: '更新',
@@ -173,7 +198,7 @@ export default function RequirementListCard({ projectId }: { projectId: string }
               style={{ minWidth: 150 }}
               value={statusFilter || undefined}
               onChange={(v) => { setStatusFilter(v ?? ''); setPage(0) }}
-              options={ALL_STATUSES.map((s) => ({ value: s, label: s }))}
+              options={ALL_STATUSES.map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
             />
             <Select
               allowClear

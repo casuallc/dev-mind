@@ -36,13 +36,14 @@ import TimelineTab from '../components/TimelineTab'
 import WorkItemsTab from '../components/WorkItemsTab'
 import { useProject } from '../../projects/hooks/useProject'
 import { getCurrentProjectId, setCurrentProject } from '../../../app/currentProjectStore'
-import { fmtTime } from '../../../shared/utils/format'
+import { fmtDuration, fmtTime } from '../../../shared/utils/format'
 import {
   requirementStatusColor,
   requirementTypeColor,
   priorityColor,
   sourceTagColor,
   SOURCE_LABEL,
+  STATUS_LABEL,
   TYPE_LABEL,
 } from '../components/requirementMeta'
 import type { RequirementOverview } from '../types'
@@ -159,7 +160,7 @@ export default function RequirementDetailPage() {
                 <Typography.Text code>{r.code}</Typography.Text>
                 <Typography.Text strong>{r.title}</Typography.Text>
                 <Tag color={requirementTypeColor(r.type ?? 'FEATURE')}>{TYPE_LABEL[r.type ?? 'FEATURE']}</Tag>
-                <Tag color={requirementStatusColor(r.status)}>{r.status}</Tag>
+                <Tag color={requirementStatusColor(r.status)}>{STATUS_LABEL[r.status]}</Tag>
                 {r.status === 'CANCELLED' && (
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>该需求已取消</Typography.Text>
                 )}
@@ -244,6 +245,23 @@ export default function RequirementDetailPage() {
               </Descriptions.Item>
               {isJira && (
                 <Descriptions.Item label="Jira 状态">{r.remoteStatus ?? '-'}</Descriptions.Item>
+              )}
+              <Descriptions.Item label={
+                <Tooltip title="需求下所有 agent 会话时长汇总（活跃会话算到当前）">
+                  <span>AI 执行耗时</span>
+                </Tooltip>
+              }>
+                {fmtDuration(r.agentSeconds)}
+              </Descriptions.Item>
+              {isJira && (
+                <Descriptions.Item label={managedLabel('预估工时')}>
+                  {fmtDuration(r.estimatedSeconds)}
+                </Descriptions.Item>
+              )}
+              {isJira && (
+                <Descriptions.Item label={managedLabel('已用工时')}>
+                  {fmtDuration(r.spentSeconds)}
+                </Descriptions.Item>
               )}
               <Descriptions.Item label={managedLabel('优先级')}>
                 {r.priority ? <Tag color={priorityColor(r.priority)}>{r.priority}</Tag> : '-'}
