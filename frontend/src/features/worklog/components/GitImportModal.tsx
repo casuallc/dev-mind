@@ -1,4 +1,5 @@
-import { Button, Checkbox, Empty, Modal, Space, Table, Tag, Typography, message } from 'antd'
+import { Button, Checkbox, DatePicker, Empty, Modal, Space, Table, Tag, Typography, message } from 'antd'
+import dayjs, { type Dayjs } from 'dayjs'
 import { useEffect, useState } from 'react'
 import { importGit, previewGit } from '../api'
 import type { GitCommit, GitScanRepoDiag } from '../types'
@@ -6,7 +7,6 @@ import { fmtTime } from '../../../shared/utils/format'
 
 interface Props {
   open: boolean
-  date: string
   onCancel: () => void
   /** 导入完成后回调（刷新条目列表） */
   onImported: () => void
@@ -18,17 +18,33 @@ const OUTCOME_TAG: Record<string, { color: string; label: string }> = {
   FAILED: { color: 'error', label: '失败' },
 }
 
-/** CAP-28 FR-04 git 提交导入：预览当日（按本人 git author 过滤）提交，勾选后落成工作条目。 */
-export default function GitImportModal({ open, date, onCancel, onImported }: Props) {
+/** 扫描范围快捷选项：本周=周一至周日 */
+const RANGE_PRESETS: { label: string; value: [Dayjs, Dayjs] }[] = (() => {
+  const today = dayjs()
+  const monday = today.startOf('week').add(1, 'day') // dayjs 周日开头，+1 = 周一
+  return [
+    { label: '今天', value: [today, today] },
+    { label: '昨天', value: [today.subtract(1, 'day'), today.subtract(1, 'day')] },
+    { label: '本周', value: [monday, monday.add(6, 'day')] },
+    { label: '上周', value: [monday.subtract(7, 'day'), monday.subtract(1, 'day')] },
+  ]
+})()
+
+/** CAP-28 FR-04 git 提交导入：预览范围内（按本人 git author 过滤）提交，勾选后按提交实际日期落成工作条目。 */
+export default function GitImportModal({ open, onCancel, onImported }: Props) {
+  const [range, setRange] = useState<[Dayjs, Dayjs]>(RANGE_PRESETS[0].value)
   const [rows, setRows] = useState<GitCommit[]>([])
   const [diags, setDiags] = useState<GitScanRepoDiag[]>([])
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
+  const fromStr = range[0].format('YYYY-MM-DD')
+  const toStr = range[1].format('YYYY-MM-DD')
+
   const load = () => {
     setLoading(true)
-    previewGit(date)
+    previewGit(fromStr, toStr)
       .then((res) => {
         setRows(res.commits)
         setDiags(res.repos)
@@ -42,19 +58,25 @@ export default function GitImportModal({ open, date, onCancel, onImported }: Pro
   useEffect(() => {
     if (open) load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, date])
+  }, [open, fromStr, toStr])
 
   const doImport = async () => {
     const items = rows
       .filter((c) => selected.has(c.sha) && !c.alreadyImported)
-      .map((c) => ({ repoId: c.repoId, commitSha: c.sha, subject: c.subject }))
+      .map((c) => ({
+        repoId: c.repoId,
+        commitSha: c.sha,
+        subject: c.subject,
+        // 条目归属日 = 提交实际日期（本机时区），范围导入时跨天各归各日
+        date: dayjs(c.committedAt).format('YYYY-MM-DD'),
+      }))
     if (items.length === 0) {
       message.info('请先勾选要导入的提交')
       return
     }
     setImporting(true)
     try {
-      const r = await importGit(date, items)
+      const r = await importGit(items)
       message.success(`导入完成：新增 ${r.created} 条，跳过已存在 ${r.skipped} 条`)
       onImported()
       onCancel()
@@ -67,7 +89,7 @@ export default function GitImportModal({ open, date, onCancel, onImported }: Pro
 
   return (
     <Modal
-      title={`从 Git 导入（${date}）`}
+      title="从 Git 导入"
       open={open}
       onCancel={onCancel}
       width={860}
@@ -84,9 +106,19 @@ export default function GitImportModal({ open, date, onCancel, onImported }: Pro
       }
     >
       <Typography.Paragraph type="secondary">
-        扫描你勾选过的仓库当日提交（按你的 git 署名过滤，仅作者为你的提交出现在此）。
-        工时导入后可逐条编辑补齐。
+        扫描你勾选过的仓库在所选时间范围内的提交（按你的 git 署名过滤，仅作者为你的提交出现在此），
+        导入后条目按提交实际日期落账，工时可逐条编辑补齐。
       </Typography.Paragraph>
+      <DatePicker.RangePicker
+        style={{ marginBottom: 12 }}
+        value={range}
+        allowClear={false}
+        presets={RANGE_PRESETS}
+        disabledDate={(d) => d.isAfter(dayjs(), 'day')}
+        onChange={(r) => {
+          if (r && r[0] && r[1]) setRange([r[0], r[1]])
+        }}
+      />
       <Table
         rowKey="sha"
         size="small"
@@ -95,7 +127,7 @@ export default function GitImportModal({ open, date, onCancel, onImported }: Pro
         pagination={false}
         locale={{
           emptyText: (
-            <Empty description="当日没有扫描到你的提交：确认已在「仓库订阅」勾选参与扫描的仓库，且 git 署名与提交一致（见下方扫描详情）" />
+            <Empty description="该范围内没有扫描到你的提交：确认已在「仓库订阅」勾选参与扫描的仓库，且 git 署名与提交一致（见下方扫描详情）" />
           ),
         }}
         columns={[

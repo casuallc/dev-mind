@@ -285,9 +285,6 @@ export default function WorklogPage() {
     ),
   }
 
-  // 从 Git 导入的目标日：范围结束日，不超过今天
-  const importDate = range[1].isAfter(dayjs(), 'day') ? dayjs().format('YYYY-MM-DD') : toStr
-
   return (
     <Card
       title={
@@ -489,7 +486,6 @@ export default function WorklogPage() {
       />
       <GitImportModal
         open={importOpen}
-        date={importDate}
         onCancel={() => setImportOpen(false)}
         onImported={loadEntries}
       />

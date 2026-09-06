@@ -29,9 +29,11 @@ export const updateEntry = (id: number, body: EntryPayload) =>
 export const deleteEntry = (id: number) => api.del(`/worklog/entries/${id}`)
 
 // ---- git 扫描导入 ----
-export const previewGit = (date: string) => api.get<GitPreview>(`/worklog/git/preview?date=${date}`)
-export const importGit = (date: string, items: { repoId: number; commitSha: string; subject: string; hours?: number }[]) =>
-  api.post<{ created: number; skipped: number }>('/worklog/git/import', { date, items })
+export const previewGit = (from: string, to: string) =>
+  api.get<GitPreview>(`/worklog/git/preview?from=${from}&to=${to}`)
+export const importGit = (
+  items: { repoId: number; commitSha: string; subject: string; date: string; hours?: number }[],
+) => api.post<{ created: number; skipped: number }>('/worklog/git/import', { items })
 
 // ---- 日报 / 周报 ----
 export const getDaily = (date: string) => api.get<DailyReport | undefined>(`/worklog/daily?date=${date}`)
