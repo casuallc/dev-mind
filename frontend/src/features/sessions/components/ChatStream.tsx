@@ -1,5 +1,5 @@
-// 对话式事件流渲染（会话详情页专用）：把 SessionEvent 流转成问答气泡 + 工具调用卡片 + 回合分隔。
-// system/log 等底层事件收进底部折叠「过程日志」；工作台迷你终端仍用 EventStream。
+// 对话式事件流渲染（由 SessionChatPanel 承载）：把 SessionEvent 流转成问答气泡 + 工具调用卡片 + 回合分隔。
+// system/log 等底层事件收进底部折叠「过程日志」。
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Collapse, Tag, Typography } from 'antd'
 import {

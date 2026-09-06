@@ -1,12 +1,11 @@
-// 会话详情：头部信息 + 授权请求条 + 共享终端流 + 输入框 + 居中确认弹窗。
-import { useCallback, useEffect, useMemo, useState } from 'react'
+// 会话详情：头部信息 + 完整操作（含沉淀经验/清理 worktree）+ 对话面板（SessionChatPanel 复用）。
+import { useCallback, useEffect, useState } from 'react'
 import {
   Badge,
   Button,
   Card,
   Descriptions,
   Empty,
-  Input,
   message,
   Modal,
   Space,
@@ -21,53 +20,24 @@ import {
   DiffOutlined,
   PauseOutlined,
   PoweroffOutlined,
-  SendOutlined,
   StopOutlined,
 } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
-import {
-  authorize,
-  finishSession,
-  getSession,
-  killSession,
-  removeWorktree,
-  resumeSession,
-  sessionDiff,
-  sessionEvents,
-  suspendSession,
-} from '../api'
-import type { DiffView, SessionEvent, SessionSummary } from '../types'
-import { useSessionStream } from '../hooks/useSessionStream'
-import ChatStream from '../components/ChatStream'
+import { getSession, removeWorktree } from '../api'
+import type { SessionSummary } from '../types'
+import { stateColor, ACTIVE_STATES } from '../stateMeta'
+import { useSessionActions } from '../hooks/useSessionActions'
+import SessionChatPanel, { type StreamMeta } from '../components/SessionChatPanel'
+import SessionDiffModal from '../components/SessionDiffModal'
 import SedimentExperienceModal from '../../knowledge/components/SedimentExperienceModal'
 import { fmtTime } from '../../../shared/utils/format'
-
-const stateColor: Record<string, string> = {
-  RUNNING: 'processing',
-  WAITING_INPUT: 'gold',
-  WAITING_AUTH: 'orange',
-  DONE: 'success',
-  FAILED: 'error',
-  SUSPENDED: 'default',
-  TERMINATED: 'default',
-}
-
-const ACTIVE_STATES = ['RUNNING', 'WAITING_INPUT', 'WAITING_AUTH']
 
 export default function SessionDetail() {
   const { id } = useParams<{ id: string }>()
   const [session, setSession] = useState<SessionSummary | null>(null)
   const [loading, setLoading] = useState(true)
-  const [pendingReq, setPendingReq] = useState<SessionEvent | null>(null)
-  const [inputText, setInputText] = useState('')
-  const [diff, setDiff] = useState<DiffView | null>(null)
-  const [diffLoading, setDiffLoading] = useState(false)
-  const [diffOpen, setDiffOpen] = useState(false)
-  const [baseEvents, setBaseEvents] = useState<SessionEvent[]>([])
   const [sedimentOpen, setSedimentOpen] = useState(false)
-
-  const isLive = !!session && ACTIVE_STATES.includes(session.state)
-  const { events, connected, fatal, input, authorize: wsAuthorize } = useSessionStream(id, isLive)
+  const [streamMeta, setStreamMeta] = useState<StreamMeta>({ connected: false, fatal: false })
 
   const loadSession = useCallback(async () => {
     if (!id) return
@@ -85,79 +55,14 @@ export default function SessionDetail() {
     loadSession()
   }, [loadSession])
 
-  // 终态会话（进程已结束/重启恢复）无 WS 运行时，退化为 REST 拉取事件历史
-  useEffect(() => {
-    if (!id || isLive) return
-    let cancelled = false
-    sessionEvents(id)
-      .then((evs) => {
-        if (!cancelled) setBaseEvents(evs)
-      })
-      .catch(() => undefined)
-    return () => {
-      cancelled = true
-    }
-  }, [id, isLive])
-
-  // 捕获最近的授权请求
-  useEffect(() => {
-    if (session?.state !== 'WAITING_AUTH') {
-      setPendingReq(null)
-      return
-    }
-    const req = [...events].reverse().find((e) => e.type === 'permission_request')
-    setPendingReq(req ?? null)
-  }, [events, session?.state])
-
-  const onSend = useCallback(
-    (text: string) => {
-      const t = text.trim()
-      if (!t || !id) return
-      input(t)
-      setInputText('')
+  const onUpdated = useCallback(
+    (s?: SessionSummary) => {
+      if (s) setSession(s)
+      else loadSession()
     },
-    [id, input],
+    [loadSession],
   )
-
-  const onAuthorize = useCallback(
-    (accepted: boolean, scope: string) => {
-      if (!id || !pendingReq) return
-      const requestId = pendingReq.payload?.requestId as string | undefined
-      authorize(id, accepted, scope, requestId)
-        .then(() => wsAuthorize(accepted, scope, requestId))
-        .then(() => {
-          message.success(accepted ? `已允许（${scope}）` : '已拒绝')
-          setPendingReq(null)
-        })
-        .catch((e) => message.error(`授权失败：${(e as Error).message}`))
-    },
-    [id, pendingReq, wsAuthorize],
-  )
-
-  const doAction = useCallback(
-    async (fn: () => Promise<SessionSummary>, successMsg: string) => {
-      if (!id) return
-      try {
-        setSession(await fn())
-        message.success(successMsg)
-      } catch (e) {
-        message.error(`操作失败：${(e as Error).message}`)
-      }
-    },
-    [id],
-  )
-
-  // 结束会话：关 stdin，claude 自然退出 → DONE/FAILED
-  const onFinish = useCallback(async () => {
-    if (!id) return
-    try {
-      await finishSession(id)
-      message.success('已结束会话，等待 claude 退出…')
-      window.setTimeout(() => loadSession(), 800)
-    } catch (e) {
-      message.error(`结束失败：${(e as Error).message}`)
-    }
-  }, [id, loadSession])
+  const { onFinish, onSuspend, onResume, onKill, diff } = useSessionActions(id, onUpdated)
 
   const onRemoveWorktree = useCallback(() => {
     if (!id) return
@@ -180,41 +85,6 @@ export default function SessionDetail() {
     })
   }, [id])
 
-  const onKill = useCallback(() => {
-    if (!id) return
-    Modal.confirm({
-      centered: true,
-      title: '终止该会话？',
-      content: '将强制杀掉 claude 进程并标记为 TERMINATED。',
-      okText: '终止',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: () => doAction(() => killSession(id), '已终止'),
-    })
-  }, [id, doAction])
-
-  const openDiff = useCallback(async () => {
-    if (!id) return
-    setDiffLoading(true)
-    try {
-      setDiff(await sessionDiff(id))
-      setDiffOpen(true)
-    } catch (e) {
-      message.error(`获取 diff 失败：${(e as Error).message}`)
-    } finally {
-      setDiffLoading(false)
-    }
-  }, [id])
-
-  // 合并 REST 历史 + WS 实时事件，按 seq 排序去重
-  const history = useMemo(() => {
-    const merged = new Map<number, SessionEvent>()
-    for (const e of baseEvents) merged.set(e.seq, e)
-    for (const e of events) merged.set(e.seq, e)
-    return Array.from(merged.values()).sort((a, b) => a.seq - b.seq)
-  }, [baseEvents, events])
-
-  const canInput = session ? ['RUNNING', 'WAITING_INPUT', 'WAITING_AUTH'].includes(session.state) : false
   const canSuspend = !!session && ACTIVE_STATES.includes(session.state)
   const canResume = session?.state === 'SUSPENDED'
 
@@ -243,8 +113,8 @@ export default function SessionDetail() {
             <Typography.Text code>{session.id}</Typography.Text>
             <Tag color={stateColor[session.state] ?? 'default'}>{session.state}</Tag>
             <Badge
-              status={connected ? 'success' : fatal ? 'default' : 'processing'}
-              text={connected ? '实时' : fatal ? '历史(终态)' : '连接中…'}
+              status={streamMeta.connected ? 'success' : streamMeta.fatal ? 'default' : 'processing'}
+              text={streamMeta.connected ? '实时' : streamMeta.fatal ? '历史(终态)' : '连接中…'}
             />
           </Space>
         }
@@ -256,16 +126,16 @@ export default function SessionDetail() {
               </Button>
             )}
             {canSuspend && (
-              <Button size="small" icon={<PauseOutlined />} onClick={() => doAction(() => suspendSession(id!), '已挂起')}>
+              <Button size="small" icon={<PauseOutlined />} onClick={onSuspend}>
                 挂起
               </Button>
             )}
             {canResume && (
-              <Button size="small" icon={<CaretRightOutlined />} onClick={() => doAction(() => resumeSession(id!), '已恢复')}>
+              <Button size="small" icon={<CaretRightOutlined />} onClick={onResume}>
                 恢复
               </Button>
             )}
-            <Button size="small" icon={<DiffOutlined />} loading={diffLoading} onClick={openDiff}>
+            <Button size="small" icon={<DiffOutlined />} loading={diff.loading} onClick={diff.show}>
               Diff
             </Button>
             <Button size="small" icon={<BulbOutlined />} onClick={() => setSedimentOpen(true)}>
@@ -305,40 +175,7 @@ export default function SessionDetail() {
         )}
       </Card>
 
-      {/* 授权请求条 */}
-      {pendingReq && (
-        <Card size="small" style={{ borderColor: '#fa8c16', background: '#fff7e6' }}>
-          <Space align="start" style={{ width: '100%', justifyContent: 'space-between' }}>
-            <div>
-              <Typography.Text strong style={{ color: '#d46b08' }}>
-                权限请求
-              </Typography.Text>
-              <br />
-              <Typography.Text>
-                工具 <Typography.Text code>{(pendingReq.payload?.toolName as string) || '?'}</Typography.Text>
-              </Typography.Text>
-              <Typography.Paragraph style={{ margin: '4px 0 0' }}>
-                <pre style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 12 }}>
-                  {pendingReq.content}
-                </pre>
-              </Typography.Paragraph>
-            </div>
-            <Space>
-              <Button size="small" type="primary" onClick={() => onAuthorize(true, 'once')}>
-                允许一次
-              </Button>
-              <Button size="small" onClick={() => onAuthorize(true, 'session')}>
-                本次会话允许
-              </Button>
-              <Button size="small" danger onClick={() => onAuthorize(false, 'once')}>
-                拒绝
-              </Button>
-            </Space>
-          </Space>
-        </Card>
-      )}
-
-      {/* 对话（问答气泡 + 工具卡片 + 输入） */}
+      {/* 对话（授权条 + 消息流 + 输入） */}
       <Card
         size="small"
         title="对话"
@@ -348,72 +185,10 @@ export default function SessionDetail() {
           </Button>
         }
       >
-        <ChatStream
-          events={history}
-          taskSpec={session.taskSpec}
-          model={session.model}
-          maxHeight="56vh"
-          emptyText={`等待事件…（${fatal ? '会话已结束' : connected ? '连接正常' : '重连中'}）`}
-        />
-        <div style={{ borderTop: '1px solid #f0f0f0', margin: '8px -12px 0', padding: '12px 12px 0' }}>
-          <Space.Compact style={{ width: '100%' }}>
-            <Input.TextArea
-              autoSize={{ minRows: 1, maxRows: 5 }}
-              disabled={!canInput}
-              value={inputText}
-              placeholder={
-                canInput
-                  ? session.state === 'WAITING_INPUT'
-                    ? '回复 agent 的提问，Enter 发送 / Shift+Enter 换行…'
-                    : session.state === 'WAITING_AUTH'
-                      ? '（正在等待授权，可在上方允许/拒绝）'
-                      : '会话运行中，可注入指令，Enter 发送 / Shift+Enter 换行…'
-                  : '会话已结束，无法输入'
-              }
-              onChange={(e) => setInputText(e.target.value)}
-              onPressEnter={(e) => {
-                if (!e.shiftKey) {
-                  e.preventDefault()
-                  onSend(inputText)
-                }
-              }}
-            />
-            <Button
-              type="primary"
-              icon={<SendOutlined />}
-              disabled={!canInput || !inputText.trim()}
-              onClick={() => onSend(inputText)}
-            >
-              发送
-            </Button>
-          </Space.Compact>
-        </div>
+        <SessionChatPanel session={session} onChanged={loadSession} onStreamMeta={setStreamMeta} />
       </Card>
 
-      {/* Diff 弹窗 */}
-      <Modal
-        title="Worktree Diff"
-        open={diffOpen}
-        onCancel={() => setDiffOpen(false)}
-        footer={null}
-        width={720}
-      >
-        {diff && (
-          <>
-            {!diff.hasChanges && <Empty description="无变更" />}
-            {diff.files.length > 0 && (
-              <>
-                <Typography.Title level={5} style={{ marginTop: 0 }}>
-                  变更文件
-                </Typography.Title>
-                <pre style={{ whiteSpace: 'pre-wrap', background: '#f6f6f6', padding: 8, borderRadius: 4, fontSize: 12 }}>
-                  {diff.stat || diff.files.join('\n')}
-                </pre>
-              </>
-            )}
-          </>
-        )}
-      </Modal>
+      <SessionDiffModal open={diff.open} diff={diff.data} onClose={diff.close} />
 
       {/* 沉淀经验（CAP-04） */}
       <SedimentExperienceModal
