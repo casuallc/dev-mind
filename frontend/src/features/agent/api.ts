@@ -1,10 +1,15 @@
 // Agent 节点能力（CAP-21）的接口封装：页面只依赖本文件，不直接碰 shared client
 import { api } from '../../shared/api/client'
 import { getAccessToken } from '../auth/authStore'
-import type { AgentNode, IssuedNode, RunnerPackage, UpgradeResult } from './types'
+import type { AgentConnLog, AgentNode, IssuedNode, RunnerPackage, UpgradeResult } from './types'
 
 export function listAgentNodes(): Promise<AgentNode[]> {
   return api.get<AgentNode[]>('/agent-nodes')
+}
+
+/** 节点连接流水（接入/拒绝/断线，倒序） */
+export function listConnLogs(limit = 200): Promise<AgentConnLog[]> {
+  return api.get<AgentConnLog[]>(`/agent-nodes/conn-logs?limit=${limit}`)
 }
 
 export function createAgentNode(body: { name: string; labels?: string }): Promise<IssuedNode> {

@@ -39,6 +39,7 @@ import {
 } from '../api'
 import type { AgentNode, IssuedNode, RunnerPackage } from '../types'
 import RunnerPackagePanel from '../components/RunnerPackagePanel'
+import ConnLogsPanel from '../components/ConnLogsPanel'
 import { buildLinuxInstallScript, buildWindowsInstallScript, downloadTextFile } from '../utils/installScript'
 import { fmtTime } from '../../../shared/utils/format'
 
@@ -216,6 +217,7 @@ export default function AgentNodesPage() {
             options={[
               { value: 'nodes', label: '节点列表' },
               { value: 'package', label: 'Runner 包' },
+              { value: 'logs', label: '连接日志' },
             ]}
           />
         </Space>
@@ -278,8 +280,10 @@ export default function AgentNodesPage() {
             }}
           />
         </>
-      ) : (
+      ) : view === 'package' ? (
         <RunnerPackagePanel />
+      ) : (
+        <ConnLogsPanel />
       )}
 
       <Modal

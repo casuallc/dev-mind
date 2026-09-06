@@ -1,5 +1,6 @@
 package com.devmind.agent.controller;
 
+import com.devmind.agent.dto.AgentConnLogView;
 import com.devmind.agent.dto.AgentNodeView;
 import com.devmind.agent.dto.CreateAgentNodeRequest;
 import com.devmind.agent.dto.IssuedNodeView;
@@ -8,6 +9,7 @@ import com.devmind.agent.dto.UpgradeResultView;
 import com.devmind.agent.model.AgentNodeEntity;
 import com.devmind.agent.model.RunnerPackageEntity;
 import com.devmind.agent.registry.AgentConnectionRegistry;
+import com.devmind.agent.service.AgentConnLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.agent.service.RunnerPackageService;
 import com.devmind.auth.IdentityService;
@@ -48,13 +50,16 @@ public class AgentNodeController {
     private final AgentNodeService service;
     private final AgentConnectionRegistry registry;
     private final RunnerPackageService packageService;
+    private final AgentConnLogService connLogService;
     private final IdentityService identityService;
 
     public AgentNodeController(AgentNodeService service, AgentConnectionRegistry registry,
-                               RunnerPackageService packageService, IdentityService identityService) {
+                               RunnerPackageService packageService, AgentConnLogService connLogService,
+                               IdentityService identityService) {
         this.service = service;
         this.registry = registry;
         this.packageService = packageService;
+        this.connLogService = connLogService;
         this.identityService = identityService;
     }
 
@@ -66,6 +71,12 @@ public class AgentNodeController {
     @GetMapping
     public List<AgentNodeView> list() {
         return service.list();
+    }
+
+    /** 节点连接流水（接入/拒绝/断线，倒序，默认 200 条）——排查频繁重连/认证拒绝来源。 */
+    @GetMapping("/conn-logs")
+    public List<AgentConnLogView> connLogs(@RequestParam(defaultValue = "200") int limit) {
+        return connLogService.latest(limit).stream().map(AgentConnLogView::from).toList();
     }
 
     @PostMapping("/{id}/disable")

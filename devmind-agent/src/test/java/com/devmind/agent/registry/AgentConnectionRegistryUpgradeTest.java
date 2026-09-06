@@ -2,6 +2,7 @@ package com.devmind.agent.registry;
 
 import com.devmind.agent.config.AgentProperties;
 import com.devmind.agent.model.AgentNodeEntity;
+import com.devmind.agent.service.AgentConnLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.common.exception.DevMindException;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,7 +38,7 @@ class AgentConnectionRegistryUpgradeTest {
         ObjectProvider<com.devmind.common.agent.AgentEventListener> listenerProvider =
                 mock(ObjectProvider.class);
         registry = new AgentConnectionRegistry(nodeService, props, JsonMapper.builder().build(),
-                listenerProvider);
+                listenerProvider, mock(AgentConnLogService.class));
 
         ws = mock(WebSocketSession.class);
         when(ws.isOpen()).thenReturn(true);

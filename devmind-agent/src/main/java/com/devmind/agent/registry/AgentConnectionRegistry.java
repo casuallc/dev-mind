@@ -1,7 +1,9 @@
 package com.devmind.agent.registry;
 
 import com.devmind.agent.config.AgentProperties;
+import com.devmind.agent.model.AgentConnLogEntity;
 import com.devmind.agent.model.AgentNodeEntity;
+import com.devmind.agent.service.AgentConnLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.common.agent.AgentEventFrame;
 import com.devmind.common.agent.AgentEventListener;
@@ -50,6 +52,7 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private final AgentProperties props;
     private final ObjectMapper mapper;
     private final ObjectProvider<AgentEventListener> listenerProvider;
+    private final AgentConnLogService connLogService;
 
     /** nodeId(字符串) → runner WS 连接 */
     private final Map<String, WebSocketSession> connections = new ConcurrentHashMap<>();
@@ -61,11 +64,13 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private final Map<String, CompletableFuture<UpgradeAck>> pendingUpgrades = new ConcurrentHashMap<>();
 
     public AgentConnectionRegistry(AgentNodeService nodeService, AgentProperties props,
-                                   ObjectMapper mapper, ObjectProvider<AgentEventListener> listenerProvider) {
+                                   ObjectMapper mapper, ObjectProvider<AgentEventListener> listenerProvider,
+                                   AgentConnLogService connLogService) {
         this.nodeService = nodeService;
         this.props = props;
         this.mapper = mapper;
         this.listenerProvider = listenerProvider;
+        this.connLogService = connLogService;
     }
 
     // ---------------- 连接生命周期（AgentNodeWsHandler 回调） ----------------
@@ -77,19 +82,10 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             closeQuietly(old); // 同节点重复接入：踢掉旧连接
         }
         lastSeen.put(nodeId, System.currentTimeMillis());
-        String remoteAddr = formatRemoteAddr(ws);
+        String remoteAddr = AgentConnLogService.formatRemoteAddr(ws.getRemoteAddress());
         nodeService.markOnline(node.getId(), remoteAddr);
+        connLogService.record(AgentConnLogEntity.EVENT_CONNECT, node, remoteAddr, null);
         log.info("agent 节点上线: id={} name={} remote={}", nodeId, node.getName(), remoteAddr);
-    }
-
-    /** WS 远端地址格式化为 "IP:端口"（InetSocketAddress#toString 带前导斜杠）。 */
-    private static String formatRemoteAddr(WebSocketSession ws) {
-        if (ws.getRemoteAddress() == null) {
-            return null;
-        }
-        var addr = ws.getRemoteAddress();
-        String host = addr.getAddress() != null ? addr.getAddress().getHostAddress() : addr.getHostString();
-        return host + ":" + addr.getPort();
     }
 
     public void onDisconnect(AgentNodeEntity node, WebSocketSession ws) {
@@ -100,6 +96,8 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         }
         lastSeen.remove(nodeId);
         nodeService.markOffline(node.getId());
+        connLogService.record(AgentConnLogEntity.EVENT_DISCONNECT, node,
+                AgentConnLogService.formatRemoteAddr(ws.getRemoteAddress()), null);
         log.info("agent 节点离线: id={} name={}", nodeId, node.getName());
         // 断线即失败进行中的升级等待（升级中的 runner 断连属预期：换包重启）
         CompletableFuture<UpgradeAck> pending = pendingUpgrades.remove(nodeId);

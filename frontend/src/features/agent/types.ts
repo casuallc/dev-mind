@@ -43,3 +43,17 @@ export interface UpgradeResult {
   message: string
   activeSessions?: number
 }
+
+/** 节点连接事件类型 */
+export type ConnLogEvent = 'CONNECT' | 'REJECT' | 'DISCONNECT'
+
+/** 节点连接流水（REJECT 时 nodeId/nodeName 为空，只有来源地址） */
+export interface AgentConnLog {
+  id: number
+  nodeId?: number
+  nodeName?: string
+  event: ConnLogEvent
+  remoteAddr?: string
+  detail?: string
+  createdAt?: string
+}

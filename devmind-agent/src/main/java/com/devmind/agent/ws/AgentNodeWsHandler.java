@@ -1,7 +1,9 @@
 package com.devmind.agent.ws;
 
+import com.devmind.agent.model.AgentConnLogEntity;
 import com.devmind.agent.model.AgentNodeEntity;
 import com.devmind.agent.registry.AgentConnectionRegistry;
+import com.devmind.agent.service.AgentConnLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.common.agent.AgentEventFrame;
 import org.slf4j.Logger;
@@ -34,12 +36,14 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
 
     private final AgentNodeService nodeService;
     private final AgentConnectionRegistry registry;
+    private final AgentConnLogService connLogService;
     private final ObjectMapper mapper;
 
     public AgentNodeWsHandler(AgentNodeService nodeService, AgentConnectionRegistry registry,
-                              ObjectMapper mapper) {
+                              AgentConnLogService connLogService, ObjectMapper mapper) {
         this.nodeService = nodeService;
         this.registry = registry;
+        this.connLogService = connLogService;
         this.mapper = mapper;
     }
 
@@ -49,7 +53,9 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
                 .getQueryParams().getFirst("token");
         var nodeOpt = nodeService.resolveByToken(token);
         if (nodeOpt.isEmpty()) {
-            log.warn("runner 接入被拒绝（token 无效或节点已禁用）: remote={}", session.getRemoteAddress());
+            String remote = AgentConnLogService.formatRemoteAddr(session.getRemoteAddress());
+            log.warn("runner 接入被拒绝（token 无效或节点已禁用）: remote={}", remote);
+            connLogService.record(AgentConnLogEntity.EVENT_REJECT, null, remote, "token 无效或节点已禁用");
             session.close(CloseStatus.POLICY_VIOLATION);
             return;
         }
