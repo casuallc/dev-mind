@@ -263,6 +263,29 @@ class JiraSyncServiceTest {
     // ---------------- 用例 ----------------
 
     @Test
+    void issueType映射_中英文均识别() {
+        assertEquals(RequirementEntity.TYPE_BUG, typeOf("Bug"));
+        assertEquals(RequirementEntity.TYPE_BUG, typeOf("缺陷"));
+        assertEquals(RequirementEntity.TYPE_BUG, typeOf("故障"));
+        assertEquals(RequirementEntity.TYPE_IMPROVEMENT, typeOf("Improvement"));
+        assertEquals(RequirementEntity.TYPE_IMPROVEMENT, typeOf("改进"));
+        assertEquals(RequirementEntity.TYPE_IMPROVEMENT, typeOf("优化建议"));
+        assertEquals(RequirementEntity.TYPE_TASK, typeOf("Task"));
+        assertEquals(RequirementEntity.TYPE_TASK, typeOf("Sub-task"));
+        assertEquals(RequirementEntity.TYPE_TASK, typeOf("任务"));
+        assertEquals(RequirementEntity.TYPE_TASK, typeOf("子任务"));
+        assertEquals(RequirementEntity.TYPE_FEATURE, typeOf("Story"));
+        assertEquals(RequirementEntity.TYPE_FEATURE, typeOf("故事"));
+        assertEquals(RequirementEntity.TYPE_FEATURE, typeOf("Epic"));
+        assertEquals(RequirementEntity.TYPE_FEATURE, typeOf(null));
+    }
+
+    private String typeOf(String issueType) {
+        return JiraSyncService.requirementType(new IntegrationConnector.JiraIssue("K-1", "s", null, issueType,
+                null, List.of(), null, T1, T1, null, null, null, List.of(), null, null));
+    }
+
+    @Test
     void 首轮导入建需求登记链接() {
         connector.pages.add(page(0, 2, issue("PROJ-1", "登录页报错", T1), issue("PROJ-2", "导出失败", T2)));
 

@@ -347,12 +347,14 @@ public class JiraSyncService {
         return jql.toString();
     }
 
-    /** Jira issue type → 需求类型（Bug→BUG，Improvement→IMPROVEMENT，Task/Sub-task→TASK，其余 Story/Epic/未知→FEATURE） */
+    /** Jira issue type → 需求类型（Bug→BUG，Improvement→IMPROVEMENT，Task/Sub-task→TASK，其余 Story/Epic/未知→FEATURE）。
+     *  中文语言包实例返回中文类型名（缺陷/故障/改进/任务/子任务），须一并识别，否则全落成 FEATURE。 */
     static String requirementType(JiraIssue issue) {
-        String t = issue.issueType() == null ? "" : issue.issueType().trim().toUpperCase(java.util.Locale.ROOT);
-        if (t.contains("BUG")) return RequirementEntity.TYPE_BUG;
-        if (t.contains("IMPROVEMENT")) return RequirementEntity.TYPE_IMPROVEMENT;
-        if (t.contains("TASK")) return RequirementEntity.TYPE_TASK;
+        String raw = issue.issueType() == null ? "" : issue.issueType().trim();
+        String t = raw.toUpperCase(java.util.Locale.ROOT);
+        if (t.contains("BUG") || raw.contains("缺陷") || raw.contains("故障")) return RequirementEntity.TYPE_BUG;
+        if (t.contains("IMPROVEMENT") || raw.contains("改进") || raw.contains("优化")) return RequirementEntity.TYPE_IMPROVEMENT;
+        if (t.contains("TASK") || raw.contains("任务")) return RequirementEntity.TYPE_TASK;
         return RequirementEntity.TYPE_FEATURE;
     }
 
