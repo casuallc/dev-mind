@@ -1,186 +1,89 @@
-// 会话工作台：默认网格（多 Agent 并排，类 PowerShell 子窗口），可切换列表视图。
+// 会话工作台：默认对话视图（左侧会话列表 + 右侧对话交互，类聊天应用），可切换表格列表视图。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  Button,
-  Card,
-  Col,
-  Drawer,
-  Empty,
-  Form,
-  Input,
-  Modal,
-  Row,
-  Segmented,
-  Select,
-  Space,
-  Table,
-  Tag,
-  Typography,
-  message,
-} from 'antd'
+import { Badge, Button, Card, Input, Modal, Segmented, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import {
+  CaretRightOutlined,
+  DiffOutlined,
+  PauseOutlined,
+  ReloadOutlined,
+  StopOutlined,
+} from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import { createSession, deleteSession, listSessions, listTemplates } from '../api'
-import type { SessionSummary, SessionTemplate } from '../types'
-import { listProjects } from '../../projects/api'
-import type { Project } from '../../projects/types'
-import { listRequirements, listWorkItems } from '../../requirements/api'
-import type { Requirement, WorkItem } from '../../requirements/types'
+import { deleteSession, listSessions } from '../api'
+import type { SessionSummary } from '../types'
+import { stateColor, ACTIVE_STATES, STATE_OPTIONS } from '../stateMeta'
+import { useSessionActions } from '../hooks/useSessionActions'
+import SessionListPane from '../components/SessionListPane'
+import SessionChatPanel, { type StreamMeta } from '../components/SessionChatPanel'
+import NewSessionDraft from '../components/NewSessionDraft'
+import SessionDiffModal from '../components/SessionDiffModal'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
-import AgentPanel from '../components/AgentPanel'
 import { fmtTime } from '../../../shared/utils/format'
 
-const stateColor: Record<string, string> = {
-  RUNNING: 'processing',
-  WAITING_INPUT: 'gold',
-  WAITING_AUTH: 'orange',
-  DONE: 'success',
-  FAILED: 'error',
-  SUSPENDED: 'default',
-  TERMINATED: 'default',
+// 活跃在前 + 创建时间倒序（与 SessionListPane 一致，用于自动选中第一个）
+function sortForBoard(list: SessionSummary[]): SessionSummary[] {
+  return [...list].sort((a, b) => {
+    const aa = ACTIVE_STATES.includes(a.state) ? 0 : 1
+    const bb = ACTIVE_STATES.includes(b.state) ? 0 : 1
+    return aa - bb || +new Date(b.createdAt) - +new Date(a.createdAt)
+  })
 }
-const STATE_OPTIONS = ['ALL', 'RUNNING', 'WAITING_INPUT', 'WAITING_AUTH', 'DONE', 'FAILED', 'SUSPENDED', 'TERMINATED']
-const ACTIVE = ['RUNNING', 'WAITING_INPUT', 'WAITING_AUTH']
 
 export default function SessionsBoard() {
   const navigate = useNavigate()
   const [sessions, setSessions] = useState<SessionSummary[]>([])
-  const [templates, setTemplates] = useState<SessionTemplate[]>([])
-  const [projects, setProjects] = useState<Project[]>([])
+  const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
   const [loading, setLoading] = useState(false)
-  const [view, setView] = useState<string>('workbench') // workbench | list
-  const [showAll, setShowAll] = useState<boolean>(false) // 工作台：仅活跃 / 全部
+  const [view, setView] = useState<string>('chat') // chat | list
   const [status, setStatus] = useState('ALL')
   const [keyword, setKeyword] = useState('')
-  const [createOpen, setCreateOpen] = useState(false)
-  const [creating, setCreating] = useState(false)
-  const [requirements, setRequirements] = useState<Requirement[]>([])
-  const [workItems, setWorkItems] = useState<WorkItem[]>([])
-  const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
-  const [form] = Form.useForm()
-  const timerRef = useRef<number | undefined>(undefined)
-  const watchProjectId = Form.useWatch('projectId', form)
-  const watchRequirementId = Form.useWatch('requirementId', form)
+  const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
+  const [draft, setDraft] = useState(false)
+  const [streamMeta, setStreamMeta] = useState<StreamMeta>({ connected: false, fatal: false })
+  const autoPickedRef = useRef(false)
 
-  const load = useCallback(async (st?: string) => {
-    setLoading(true)
+  const load = useCallback(async () => {
     try {
-      setSessions(await listSessions(st ?? status))
+      setSessions(await listSessions())
     } catch (e) {
       message.error(`加载会话失败：${(e as Error).message}`)
     } finally {
       setLoading(false)
     }
-  }, [status])
+  }, [])
 
-  // 轮询刷新状态；工作台里每个面板有独立 WS 实时流，这里只刷新状态标签/摘要
+  // 轮询刷新状态；对话内容由 SessionChatPanel 的 WS 实时流负责，这里只刷状态标签/摘要
   useEffect(() => {
+    setLoading(true)
     load()
     const timer = window.setInterval(() => load(), 3000)
-    timerRef.current = timer
     return () => window.clearInterval(timer)
   }, [load])
 
   useEffect(() => {
-    listTemplates()
-      .then(setTemplates)
-      .catch(() => undefined)
     listAgentNodes()
       .then(setAgentNodes)
       .catch(() => undefined)
-    listProjects('ACTIVE')
-      .then((ps) => {
-        setProjects(ps)
-        // 默认选中种子项目 default；不存在则选第一个
-        if (!ps.some((p) => p.id === 'default') && ps.length > 0 && !form.getFieldValue('projectId')) {
-          form.setFieldsValue({ projectId: ps[0].id })
-        }
-      })
-      .catch(() => undefined)
-  }, [form])
+  }, [])
 
-  const onStateChange = useCallback(() => load(), [load])
-
-  // 项目变化时加载其需求列表（会话可挂到工作单元/需求主线上）；切换项目清空已选关联
+  // 首次加载后自动选中：有会话选排序第一个，否则直接进入新对话草稿态
   useEffect(() => {
-    form.setFieldsValue({ requirementId: undefined, workItemId: undefined })
-    setWorkItems([])
-    if (!watchProjectId) {
-      setRequirements([])
-      return
-    }
-    listRequirements(watchProjectId, { size: 200 })
-      .then((data) => setRequirements(data.items.filter((r) => !['DONE', 'CANCELLED'].includes(r.status))))
-      .catch(() => setRequirements([]))
-  }, [watchProjectId, form])
+    if (autoPickedRef.current || loading) return
+    autoPickedRef.current = true
+    if (sessions.length > 0) setSelectedId(sortForBoard(sessions)[0].id)
+    else setDraft(true)
+  }, [sessions, loading])
 
-  // 需求变化时加载其工作单元；切需求清空已选工作单元
+  // 选中的会话被删除/消失时兜底退出选中态
+  const current = useMemo(() => sessions.find((s) => s.id === selectedId), [sessions, selectedId])
   useEffect(() => {
-    form.setFieldsValue({ workItemId: undefined })
-    if (!watchProjectId || !watchRequirementId) {
-      setWorkItems([])
-      return
-    }
-    listWorkItems(watchProjectId, watchRequirementId)
-      .then((ws) => setWorkItems(ws.filter((w) => !['DONE', 'CANCELLED'].includes(w.status))))
-      .catch(() => setWorkItems([]))
-  }, [watchProjectId, watchRequirementId, form])
+    if (selectedId && !loading && !current) setSelectedId(undefined)
+  }, [selectedId, current, loading])
 
-  const filtered = useMemo(() => {
-    const kw = keyword.trim().toLowerCase()
-    const list = status === 'ALL' ? sessions : sessions.filter((s) => s.state === status)
-    if (!kw) return list
-    return list.filter(
-      (s) =>
-        s.id.toLowerCase().includes(kw) ||
-        s.taskSpec.toLowerCase().includes(kw) ||
-        (s.summary ?? '').toLowerCase().includes(kw),
-    )
-  }, [sessions, status, keyword])
-
-  const workbench = useMemo(() => {
-    const list = showAll ? sessions : sessions.filter((s) => ACTIVE.includes(s.state))
-    return [...list].sort((a, b) => {
-      const aa = ACTIVE.includes(a.state) ? 0 : 1
-      const bb = ACTIVE.includes(b.state) ? 0 : 1
-      return aa - bb || +new Date(b.createdAt) - +new Date(a.createdAt)
-    })
-  }, [sessions, showAll])
-
-  const onCreate = async (values: {
-    taskSpec: string
-    templateCode?: string
-    model?: string
-    permissionMode?: string
-    projectId?: string
-    requirementId?: string
-    workItemId?: string
-    agentNodeId?: string
-  }) => {
-    setCreating(true)
-    try {
-      const s = await createSession({
-        taskSpec: values.taskSpec,
-        templateCode: values.templateCode || undefined,
-        model: values.model || undefined,
-        permissionMode: values.permissionMode || undefined,
-        projectId: values.projectId || undefined,
-        requirementId: values.requirementId || undefined,
-        workItemId: values.workItemId || undefined,
-        agentNodeId: values.agentNodeId || undefined,
-      })
-      setCreateOpen(false)
-      form.resetFields()
-      message.success(`会话已创建：${s.id}`)
-      navigate(`/sessions/${s.id}`)
-    } catch (e) {
-      message.error(`创建失败：${(e as Error).message}`)
-    } finally {
-      setCreating(false)
-    }
-  }
+  const onUpdated = useCallback(() => load(), [load])
+  const { onFinish, onSuspend, onResume, onKill, diff } = useSessionActions(selectedId, onUpdated)
 
   const confirmDelete = (r: SessionSummary) => {
     Modal.confirm({
@@ -194,6 +97,7 @@ export default function SessionsBoard() {
         try {
           await deleteSession(r.id)
           message.success('已删除')
+          if (r.id === selectedId) setSelectedId(undefined)
           load()
         } catch (e) {
           message.error(`删除失败：${(e as Error).message}`)
@@ -201,6 +105,14 @@ export default function SessionsBoard() {
       },
     })
   }
+
+  const onSelect = (id: string) => {
+    setDraft(false)
+    setSelectedId(id)
+  }
+
+  const canSuspend = !!current && ACTIVE_STATES.includes(current.state)
+  const canResume = current?.state === 'SUSPENDED'
 
   const columns: ColumnsType<SessionSummary> = [
     {
@@ -250,8 +162,14 @@ export default function SessionsBoard() {
       width: 150,
       render: (_, r) => (
         <Space size={4}>
-          <Button size="small" onClick={() => navigate(`/sessions/${r.id}`)}>
-            查看
+          <Button
+            size="small"
+            onClick={() => {
+              onSelect(r.id)
+              setView('chat')
+            }}
+          >
+            对话
           </Button>
           <Button size="small" danger onClick={() => confirmDelete(r)}>
             删除
@@ -260,6 +178,18 @@ export default function SessionsBoard() {
       ),
     },
   ]
+
+  const listFiltered = useMemo(() => {
+    const kw = keyword.trim().toLowerCase()
+    const list = status === 'ALL' ? sessions : sessions.filter((s) => s.state === status)
+    if (!kw) return list
+    return list.filter(
+      (s) =>
+        s.id.toLowerCase().includes(kw) ||
+        s.taskSpec.toLowerCase().includes(kw) ||
+        (s.summary ?? '').toLowerCase().includes(kw),
+    )
+  }, [sessions, status, keyword])
 
   return (
     <Card
@@ -270,176 +200,150 @@ export default function SessionsBoard() {
             value={view}
             onChange={setView}
             options={[
-              { value: 'workbench', label: '工作台' },
+              { value: 'chat', label: '对话' },
               { value: 'list', label: '列表' },
             ]}
           />
         </Space>
       }
       extra={
-        <Space wrap>
-          {view === 'workbench' ? (
-            <>
-              <Segmented
-                value={showAll ? 'all' : 'active'}
-                onChange={(v) => setShowAll(v === 'all')}
-                options={[
-                  { value: 'active', label: '仅活跃' },
-                  { value: 'all', label: '全部' },
-                ]}
-              />
-              <Button icon={<ReloadOutlined />} onClick={() => load()}>
-                刷新
-              </Button>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-                新建会话
-              </Button>
-            </>
-          ) : (
-            <>
-              <Select
-                value={status}
-                onChange={(v) => {
-                  setStatus(v)
-                  load(v)
-                }}
-                options={STATE_OPTIONS.map((s) => ({ value: s, label: s }))}
-                style={{ width: 140 }}
-              />
-              <Input.Search
-                placeholder="搜索 ID / 任务 / 摘要"
-                allowClear
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                style={{ width: 220 }}
-              />
-              <Button icon={<ReloadOutlined />} onClick={() => load()}>
-                刷新
-              </Button>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-                新建会话
-              </Button>
-            </>
-          )}
-        </Space>
+        <Button icon={<ReloadOutlined />} onClick={() => load()}>
+          刷新
+        </Button>
       }
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-        管理本机与远程节点上的 Agent 会话——工作台并排盯活跃会话，列表视图可按状态筛选、搜索全部会话。
+        左侧选会话、右侧直接对话；「新对话」输入任务说明即创建 agent。列表视图可按状态筛选、搜索全部会话。
       </Typography.Paragraph>
-      {view === 'workbench' ? (
-        workbench.length === 0 ? (
-          <Empty description={showAll ? '暂无会话。点击「新建会话」创建第一个。' : '暂无活跃会话，点击「新建会话」发起一个新 agent。'} />
-        ) : (
-          <Row gutter={[16, 16]}>
-            {workbench.map((s) => (
-              <Col key={s.id} xs={24} sm={24} md={12} lg={12} xl={8} style={{ height: 560 }}>
-                <AgentPanel session={s} onStateChange={onStateChange} />
-              </Col>
-            ))}
-          </Row>
-        )
+
+      {view === 'chat' ? (
+        <div style={{ display: 'flex', alignItems: 'stretch' }}>
+          <SessionListPane
+            sessions={sessions}
+            loading={loading}
+            selectedId={draft ? undefined : selectedId}
+            onSelect={onSelect}
+            onNew={() => setDraft(true)}
+            status={status}
+            onStatusChange={setStatus}
+            keyword={keyword}
+            onKeywordChange={setKeyword}
+          />
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+            {draft ? (
+              <NewSessionDraft
+                onCreated={(s) => {
+                  setDraft(false)
+                  setSelectedId(s.id)
+                  load()
+                }}
+                onCancel={
+                  selectedId || sessions.length > 0
+                    ? () => {
+                        setDraft(false)
+                        if (!selectedId && sessions.length > 0) setSelectedId(sortForBoard(sessions)[0].id)
+                      }
+                    : undefined
+                }
+              />
+            ) : current ? (
+              <>
+                {/* 精简操作条 */}
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 8,
+                    flexWrap: 'wrap',
+                    marginBottom: 8,
+                  }}
+                >
+                  <Space size={8}>
+                    <Typography.Text code>{current.id}</Typography.Text>
+                    <Tag color={stateColor[current.state] ?? 'default'}>{current.state}</Tag>
+                    <Badge
+                      status={streamMeta.connected ? 'success' : streamMeta.fatal ? 'default' : 'processing'}
+                      text={streamMeta.connected ? '实时' : streamMeta.fatal ? '历史(终态)' : '连接中…'}
+                    />
+                  </Space>
+                  <Space size={4} wrap>
+                    {canSuspend && (
+                      <Button size="small" icon={<StopOutlined />} onClick={onFinish}>
+                        结束
+                      </Button>
+                    )}
+                    {canSuspend && (
+                      <Button size="small" icon={<PauseOutlined />} onClick={onSuspend}>
+                        挂起
+                      </Button>
+                    )}
+                    {canResume && (
+                      <Button size="small" icon={<CaretRightOutlined />} onClick={onResume}>
+                        恢复
+                      </Button>
+                    )}
+                    <Button size="small" icon={<DiffOutlined />} loading={diff.loading} onClick={diff.show}>
+                      Diff
+                    </Button>
+                    {canSuspend && (
+                      <Button size="small" danger icon={<StopOutlined />} onClick={onKill}>
+                        终止
+                      </Button>
+                    )}
+                    <Button size="small" type="link" onClick={() => navigate(`/sessions/${current.id}`)}>
+                      详情 →
+                    </Button>
+                  </Space>
+                </div>
+                <SessionChatPanel
+                  key={current.id}
+                  session={current}
+                  maxHeight="calc(100vh - 400px)"
+                  onChanged={load}
+                  onStreamMeta={setStreamMeta}
+                />
+              </>
+            ) : (
+              <NewSessionDraft
+                onCreated={(s) => {
+                  setDraft(false)
+                  setSelectedId(s.id)
+                  load()
+                }}
+              />
+            )}
+          </div>
+        </div>
       ) : (
-        <Table
-          rowKey="id"
-          loading={loading}
-          columns={columns}
-          dataSource={filtered}
-          pagination={false}
-          locale={{ emptyText: '暂无会话。点击「新建会话」创建第一个。' }}
-        />
+        <>
+          <Space style={{ marginBottom: 12 }} wrap>
+            <Select
+              value={status}
+              onChange={setStatus}
+              options={STATE_OPTIONS.map((s) => ({ value: s, label: s }))}
+              style={{ width: 140 }}
+            />
+            <Input.Search
+              placeholder="搜索 ID / 任务 / 摘要"
+              allowClear
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              style={{ width: 220 }}
+            />
+          </Space>
+          <Table
+            rowKey="id"
+            loading={loading}
+            columns={columns}
+            dataSource={listFiltered}
+            pagination={false}
+            locale={{ emptyText: '暂无会话。切到「对话」视图点「新对话」创建第一个。' }}
+          />
+        </>
       )}
 
-      {/* 新建会话 */}
-      <Drawer
-        title="新建会话"
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        width={600}
-        destroyOnHidden
-        footer={
-          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <Button onClick={() => setCreateOpen(false)}>取消</Button>
-            <Button type="primary" loading={creating} onClick={() => form.submit()}>
-              创建
-            </Button>
-          </Space>
-        }
-      >
-        <Form form={form} layout="vertical" onFinish={onCreate} initialValues={{ permissionMode: 'acceptEdits', projectId: 'default' }}>
-          <Form.Item label="项目" name="projectId" extra="会话将在该项目的 worktree 中工作">
-            <Select
-              options={projects.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))}
-              placeholder="选择项目（无项目时可留空裸跑）"
-              allowClear
-              onChange={(v?: string) =>
-                // 预填项目默认执行节点（CAP-21），用户可再改/清除
-                form.setFieldValue('agentNodeId', projects.find((p) => p.id === v)?.agentNodeId ?? undefined)
-              }
-            />
-          </Form.Item>
-          <Form.Item
-            label="执行节点"
-            name="agentNodeId"
-            extra="留空 = 跟随项目默认节点 → 平台默认节点 → 本机；选择远程节点后，会话在该节点机上运行（工作目录取节点的项目路径映射）"
-          >
-            <Select
-              placeholder="跟随默认（项目 → 平台 → 本机）"
-              allowClear
-              options={agentNodes
-                .filter((n) => n.status === 'ONLINE')
-                .map((n) => ({
-                  value: String(n.id),
-                  label: `${n.name} (${n.os ?? '远程节点'})${n.isDefault ? ' · 平台默认' : ''}`,
-                }))}
-              notFoundContent="暂无在线节点（后台 → Agent 节点 注册）"
-            />
-          </Form.Item>
-          <Form.Item label="关联需求" name="requirementId" extra="不选工作单元时直挂需求（分析型会话）">
-            <Select
-              options={requirements.map((r) => ({ value: r.id, label: `${r.code} ${r.title}` }))}
-              placeholder="（可选）选择需求"
-              allowClear
-              disabled={!watchProjectId}
-              showSearch
-              optionFilterProp="label"
-            />
-          </Form.Item>
-          <Form.Item label="关联工作单元" name="workItemId" extra="挂到工作单元后，会话将出现在需求详情聚合中">
-            <Select
-              options={workItems.map((w) => ({ value: w.id, label: `${w.code} ${w.title}` }))}
-              placeholder="（可选）选择工作单元"
-              allowClear
-              disabled={!watchRequirementId}
-              showSearch
-              optionFilterProp="label"
-            />
-          </Form.Item>
-          <Form.Item label="任务说明" name="taskSpec" rules={[{ required: true, message: '请输入任务说明' }]}>
-            <Input.TextArea rows={4} placeholder="例如：为项目添加用户登录功能，编写测试并通过。" />
-          </Form.Item>
-          <Form.Item label="会话模板" name="templateCode" extra="选择模板后任务说明可留空，按模板渲染">
-            <Select
-              allowClear
-              placeholder="（可选）选择模板"
-              options={templates.filter((t) => t.enabled).map((t) => ({ value: t.code, label: t.name }))}
-            />
-          </Form.Item>
-          <Form.Item label="模型" name="model">
-            <Input placeholder="留空使用全局默认模型" />
-          </Form.Item>
-          <Form.Item label="权限模式" name="permissionMode">
-            <Select
-              options={[
-                { value: 'acceptEdits', label: 'acceptEdits（默认）' },
-                { value: 'default', label: 'default（需要授权）' },
-                { value: 'bypassPermissions', label: 'bypassPermissions（全放）' },
-                { value: 'plan', label: 'plan（只读规划）' },
-              ]}
-            />
-          </Form.Item>
-        </Form>
-      </Drawer>
+      <SessionDiffModal open={diff.open} diff={diff.data} onClose={diff.close} />
     </Card>
   )
 }
