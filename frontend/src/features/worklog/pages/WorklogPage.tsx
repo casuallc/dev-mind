@@ -3,12 +3,12 @@ import {
   Card,
   DatePicker,
   Form,
+  Input,
   InputNumber,
   Modal,
   Popconfirm,
   Segmented,
   Space,
-  Statistic,
   Switch,
   Table,
   Tag,
@@ -27,8 +27,6 @@ import {
   getSettings,
   getWeekly,
   listEntries,
-  listRecentDaily,
-  listRecentWeekly,
   updateDaily,
   updateEntry,
   updateSettings,
@@ -49,87 +47,37 @@ import RepoSubscriptionModal from '../components/RepoSubscriptionModal'
 import ReportEditor from '../components/ReportEditor'
 
 type View = 'entries' | 'daily' | 'weekly'
-/** 条目快捷筛选：本周=周一至周日 */
-type Quick = 'today' | 'yesterday' | 'week' | 'lastWeek' | 'month'
 
 const mondayOf = (d: Dayjs) => d.startOf('week').add(1, 'day') // dayjs 周日开头，+1 = 周一
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
-const weekdayOf = (d: Dayjs) => `周${WEEKDAYS[d.day()]}`
-
-const quickRange = (q: Quick): [Dayjs, Dayjs] => {
+/** 条目 RangePicker 快捷范围：本周=周一至周日 */
+const RANGE_PRESETS: { label: string; value: [Dayjs, Dayjs] }[] = (() => {
   const today = dayjs()
-  switch (q) {
-    case 'today':
-      return [today, today]
-    case 'yesterday':
-      return [today.subtract(1, 'day'), today.subtract(1, 'day')]
-    case 'week':
-      return [mondayOf(today), mondayOf(today).add(6, 'day')]
-    case 'lastWeek':
-      return [mondayOf(today).subtract(7, 'day'), mondayOf(today).subtract(1, 'day')]
-    case 'month':
-      return [today.startOf('month'), today.endOf('month')]
-  }
-}
+  const monday = mondayOf(today)
+  return [
+    { label: '今天', value: [today, today] },
+    { label: '昨天', value: [today.subtract(1, 'day'), today.subtract(1, 'day')] },
+    { label: '本周', value: [monday, monday.add(6, 'day')] },
+    { label: '上周', value: [monday.subtract(7, 'day'), monday.subtract(1, 'day')] },
+    { label: '本月', value: [today.startOf('month'), today.endOf('month')] },
+  ]
+})()
 
-const QUICK_OPTIONS = [
-  { value: 'today', label: '今天' },
-  { value: 'yesterday', label: '昨天' },
-  { value: 'week', label: '本周' },
-  { value: 'lastWeek', label: '上周' },
-  { value: 'month', label: '本月' },
+/** 日报 DatePicker 快捷日期 */
+const DAILY_PRESETS = [0, 1, 2, 7].map((n) => ({
+  label: n === 0 ? '今天' : n === 1 ? '昨天' : n === 2 ? '前天' : '一周前',
+  value: dayjs().subtract(n, 'day'),
+}))
+
+/** 周报 DatePicker 快捷周 */
+const WEEKLY_PRESETS = [
+  { label: '本周', value: dayjs() },
+  { label: '上周', value: dayjs().subtract(7, 'day') },
 ]
 
-/** 报告状态点颜色：无=灰 草稿=蓝 已确认=绿 */
-const STATUS_DOT: Record<string, string> = { DRAFT: '#1677ff', CONFIRMED: '#52c41a' }
-const NO_REPORT_DOT = '#d9d9d9'
-
-/** 最近报告快捷 chips（日报按天 / 周报按周）；点击切换编辑器日期。 */
-function RecentChips({
-  items,
-  selectedKey,
-  onSelect,
-}: {
-  items: { key: string; label: string; status?: string }[]
-  selectedKey: string
-  onSelect: (key: string) => void
-}) {
-  return (
-    <div style={{ marginBottom: 16 }}>
-      <Space wrap size={[6, 6]} style={{ marginRight: 12 }}>
-        {items.map((it) => (
-          <Tag
-            key={it.key}
-            style={{ cursor: 'pointer', marginInlineEnd: 0 }}
-            color={it.key === selectedKey ? 'processing' : undefined}
-            onClick={() => onSelect(it.key)}
-          >
-            <span
-              style={{
-                display: 'inline-block',
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: it.status ? STATUS_DOT[it.status] ?? NO_REPORT_DOT : NO_REPORT_DOT,
-                marginRight: 4,
-                verticalAlign: 'middle',
-              }}
-            />
-            {it.label}
-          </Tag>
-        ))}
-      </Space>
-      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-        灰点=未生成　蓝点=草稿　绿点=已确认，点击切换
-      </Typography.Text>
-    </div>
-  )
-}
-
 /**
- * CAP-28 个人工作日志与工时：条目（范围筛选+分页+git 导入）/ AI 日报（最近两周）/ AI 周报（最近一月）。
+ * CAP-28 个人工作日志与工时：条目（范围筛选+标题搜索+分页+git 导入）/ AI 日报 / AI 周报。
  * 个人级页面，不进项目上下文（路由不进 ProjectContextGate）。
  */
 export default function WorklogPage() {
@@ -138,9 +86,9 @@ export default function WorklogPage() {
   const dateStr = date.format('YYYY-MM-DD')
   const weekStartStr = mondayOf(date).format('YYYY-MM-DD')
 
-  // ---- 条目：范围筛选 + 分页 ----
-  const [quick, setQuick] = useState<Quick | undefined>('today')
-  const [range, setRange] = useState<[Dayjs, Dayjs]>(quickRange('today'))
+  // ---- 条目：范围筛选 + 标题搜索 + 分页 ----
+  const [range, setRange] = useState<[Dayjs, Dayjs]>(RANGE_PRESETS[0].value)
+  const [keyword, setKeyword] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const fromStr = range[0].format('YYYY-MM-DD')
@@ -148,11 +96,8 @@ export default function WorklogPage() {
 
   const [entries, setEntries] = useState<WorklogEntry[]>([])
   const [entriesTotal, setEntriesTotal] = useState(0)
-  const [rangeMinutes, setRangeMinutes] = useState(0)
   const [daily, setDaily] = useState<DailyReport | undefined>()
   const [weekly, setWeekly] = useState<WeeklyReport | undefined>()
-  const [recentDaily, setRecentDaily] = useState<DailyReport[]>([])
-  const [recentWeekly, setRecentWeekly] = useState<WeeklyReport[]>([])
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
 
@@ -166,15 +111,14 @@ export default function WorklogPage() {
 
   const loadEntries = useCallback(() => {
     setLoading(true)
-    listEntries(fromStr, toStr, page - 1, pageSize)
+    listEntries(fromStr, toStr, page - 1, pageSize, keyword || undefined)
       .then((r) => {
         setEntries(r.items)
         setEntriesTotal(r.total)
-        setRangeMinutes(r.totalMinutes)
       })
       .catch((e) => message.error(`加载条目失败: ${e.message}`))
       .finally(() => setLoading(false))
-  }, [fromStr, toStr, page, pageSize])
+  }, [fromStr, toStr, page, pageSize, keyword])
 
   const loadDaily = useCallback(() => {
     setLoading(true)
@@ -192,37 +136,22 @@ export default function WorklogPage() {
       .finally(() => setLoading(false))
   }, [weekStartStr])
 
-  const loadRecentDaily = useCallback(() => {
-    listRecentDaily(14).then(setRecentDaily).catch(() => {})
-  }, [])
-
-  const loadRecentWeekly = useCallback(() => {
-    listRecentWeekly(5).then(setRecentWeekly).catch(() => {})
-  }, [])
-
   const reload = useCallback(() => {
     if (view === 'entries') loadEntries()
-    else if (view === 'daily') {
-      loadDaily()
-      loadRecentDaily()
-    } else {
-      loadWeekly()
-      loadRecentWeekly()
-    }
-  }, [view, loadEntries, loadDaily, loadWeekly, loadRecentDaily, loadRecentWeekly])
+    else if (view === 'daily') loadDaily()
+    else loadWeekly()
+  }, [view, loadEntries, loadDaily, loadWeekly])
 
   useEffect(reload, [reload])
 
-  const applyQuick = (q: Quick) => {
-    setQuick(q)
-    setRange(quickRange(q))
+  const applyRange = (r: [Dayjs | null, Dayjs | null] | null) => {
+    if (!r || !r[0] || !r[1]) return
+    setRange([r[0], r[1]])
     setPage(1)
   }
 
-  const applyRange = (r: [Dayjs | null, Dayjs | null] | null) => {
-    if (!r || !r[0] || !r[1]) return
-    setQuick(undefined)
-    setRange([r[0], r[1]])
+  const applyKeyword = (kw: string) => {
+    setKeyword(kw.trim())
     setPage(1)
   }
 
@@ -233,7 +162,7 @@ export default function WorklogPage() {
       if (kind === 'daily') await generateDaily(dateStr, force)
       else await generateWeekly(weekStartStr, force)
       message.info('AI 生成中，完成后自动刷新…')
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < 60; i++) {
         await sleep(2000)
         const r = kind === 'daily' ? await getDaily(dateStr) : await getWeekly(weekStartStr)
         if (r && (force ? r.updatedAt !== (kind === 'daily' ? daily?.updatedAt : weekly?.updatedAt) : true)) {
@@ -243,7 +172,8 @@ export default function WorklogPage() {
           return
         }
       }
-      message.warning('生成超时或失败，请稍后在通知中心查看结果')
+      // 超时/失败的真实原因由后端落通知中心（P0），此处引导查看
+      message.warning('生成超时或失败，失败原因与结果请查看通知中心')
     } catch (e) {
       message.error(e instanceof Error ? e.message : '生成失败')
     } finally {
@@ -309,7 +239,22 @@ export default function WorklogPage() {
 
   const extraByView: Record<View, React.ReactNode> = {
     entries: (
-      <Space>
+      <>
+        <DatePicker.RangePicker
+          value={range}
+          allowClear={false}
+          presets={RANGE_PRESETS}
+          onChange={(r) => applyRange(r)}
+        />
+        <Input.Search
+          placeholder="搜索标题"
+          allowClear
+          style={{ width: 200 }}
+          onSearch={applyKeyword}
+          onChange={(e) => {
+            if (!e.target.value) applyKeyword('')
+          }}
+        />
         <Button icon={<ReloadOutlined />} onClick={reload}>
           刷新
         </Button>
@@ -326,7 +271,7 @@ export default function WorklogPage() {
         >
           新建条目
         </Button>
-      </Space>
+      </>
     ),
     daily: (
       <Button icon={<ReloadOutlined />} onClick={reload}>
@@ -342,26 +287,6 @@ export default function WorklogPage() {
 
   // 从 Git 导入的目标日：范围结束日，不超过今天
   const importDate = range[1].isAfter(dayjs(), 'day') ? dayjs().format('YYYY-MM-DD') : toStr
-
-  const dailyChips = Array.from({ length: 14 }, (_, i) => {
-    const d = dayjs().subtract(i, 'day')
-    const key = d.format('YYYY-MM-DD')
-    return {
-      key,
-      label: `${d.format('MM-DD')} ${weekdayOf(d)}`,
-      status: recentDaily.find((r) => r.workDate === key)?.status,
-    }
-  })
-
-  const weeklyChips = Array.from({ length: 5 }, (_, i) => {
-    const monday = mondayOf(dayjs()).subtract(i * 7, 'day')
-    const key = monday.format('YYYY-MM-DD')
-    return {
-      key,
-      label: `${key} 周`,
-      status: recentWeekly.find((r) => r.weekStart === key)?.status,
-    }
-  })
 
   return (
     <Card
@@ -386,6 +311,7 @@ export default function WorklogPage() {
               value={date}
               allowClear={false}
               picker={view === 'weekly' ? 'week' : 'date'}
+              presets={view === 'weekly' ? WEEKLY_PRESETS : DAILY_PRESETS}
               onChange={(d) => d && setDate(d)}
             />
           )}
@@ -401,25 +327,9 @@ export default function WorklogPage() {
     >
       {view === 'entries' && (
         <>
-          <Space style={{ marginBottom: 16 }} wrap>
-            <Segmented
-              value={quick}
-              onChange={(v) => applyQuick(v as Quick)}
-              options={QUICK_OPTIONS}
-            />
-            <DatePicker.RangePicker
-              value={range}
-              allowClear={false}
-              onChange={(r) => applyRange(r)}
-            />
-            <Typography.Text type="secondary">
-              手动补录（项目支持/会议/调研）或从 git 提交导入；日报/周报的素材来源。
-            </Typography.Text>
-          </Space>
-          <Space size="large" style={{ marginBottom: 16 }}>
-            <Statistic title="范围工时合计" value={rangeMinutes / 60} precision={2} suffix="小时" />
-            <Statistic title="条目数" value={entriesTotal} />
-          </Space>
+          <Typography.Paragraph type="secondary">
+            手动补录（项目支持/会议/调研）或从 git 提交导入；日报/周报的素材来源。
+          </Typography.Paragraph>
           <Table
             rowKey="id"
             loading={loading}
@@ -519,7 +429,6 @@ export default function WorklogPage() {
           <Typography.Paragraph type="secondary">
             AI 汇总当日条目与 git 提交生成日报草稿；人工修订后「确认定稿」（已确认不可再重新生成）。
           </Typography.Paragraph>
-          <RecentChips items={dailyChips} selectedKey={dateStr} onSelect={(k) => setDate(dayjs(k))} />
           <ReportEditor
             id={daily?.id}
             status={daily?.status}
@@ -530,13 +439,11 @@ export default function WorklogPage() {
             onSave={async (values) => {
               if (daily) {
                 setDaily(await updateDaily(daily.id, { contentMd: values.contentMd }))
-                loadRecentDaily()
               }
             }}
             onConfirm={async () => {
               if (daily) {
                 setDaily(await updateDaily(daily.id, { status: 'CONFIRMED' }))
-                loadRecentDaily()
               }
             }}
           />
@@ -548,11 +455,6 @@ export default function WorklogPage() {
           <Typography.Paragraph type="secondary">
             AI 汇总本周（周一 {weekStartStr} 起）条目与日报，产出「上周总结 + 下周计划」草稿；人工修订后确认定稿。
           </Typography.Paragraph>
-          <RecentChips
-            items={weeklyChips}
-            selectedKey={weekStartStr}
-            onSelect={(k) => setDate(dayjs(k))}
-          />
           <ReportEditor
             id={weekly?.id}
             status={weekly?.status}
@@ -566,13 +468,11 @@ export default function WorklogPage() {
             onSave={async (values) => {
               if (weekly) {
                 setWeekly(await updateWeekly(weekly.id, { summaryMd: values.summaryMd, nextPlanMd: values.nextPlanMd }))
-                loadRecentWeekly()
               }
             }}
             onConfirm={async () => {
               if (weekly) {
                 setWeekly(await updateWeekly(weekly.id, { status: 'CONFIRMED' }))
-                loadRecentWeekly()
               }
             }}
           />
