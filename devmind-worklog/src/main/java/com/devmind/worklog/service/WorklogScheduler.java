@@ -1,5 +1,7 @@
 package com.devmind.worklog.service;
 
+import com.devmind.common.event.DomainEventPublisher;
+import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.worklog.config.WorklogProperties;
@@ -38,15 +40,18 @@ public class WorklogScheduler {
     private final WorklogUserSettingsRepository settingsRepo;
     private final WorklogRepoSubscriptionRepository subRepo;
     private final WorklogProperties props;
+    private final DomainEventPublisher eventPublisher;
 
     public WorklogScheduler(ReportService reportService,
                             WorklogUserSettingsRepository settingsRepo,
                             WorklogRepoSubscriptionRepository subRepo,
-                            WorklogProperties props) {
+                            WorklogProperties props,
+                            DomainEventPublisher eventPublisher) {
         this.reportService = reportService;
         this.settingsRepo = settingsRepo;
         this.subRepo = subRepo;
         this.props = props;
+        this.eventPublisher = eventPublisher;
     }
 
     /** 每日生成日报草稿（默认 18:30）。 */
@@ -71,11 +76,11 @@ public class WorklogScheduler {
 
     /** 手动触发（控制器入口）。已有任务在跑返回 false（→ 409）。 */
     public boolean submitDaily(String username, LocalDate date, boolean force) {
-        return runAsync(() -> reportService.generateDaily(username, date, force));
+        return runAsync("日报", username, () -> reportService.generateDaily(username, date, force));
     }
 
     public boolean submitWeekly(String username, LocalDate weekStart, boolean force) {
-        return runAsync(() -> reportService.generateWeekly(username, weekStart, force));
+        return runAsync("周报", username, () -> reportService.generateWeekly(username, weekStart, force));
     }
 
     public boolean isRunning() {
@@ -88,21 +93,23 @@ public class WorklogScheduler {
         if (users.isEmpty()) {
             return;
         }
-        runAsync(() -> {
+        runAsync(label, "-", () -> {
             for (String u : users) {
                 try {
                     job.run(u);
                 } catch (DevMindException e) {
-                    // 并发打满（TOO_MANY_SESSIONS）/素材为空等：warn 跳过，不重试不中断其他用户
+                    // 并发打满（TOO_MANY_SESSIONS）等：warn 跳过，不重试不中断其他用户；失败原因发 P0 通知
                     log.warn("{} 定时生成跳过: user={} err={}", label, u, e.getMessage());
+                    notifyFailed(label, u, e.getMessage());
                 } catch (Exception e) {
                     log.warn("{} 定时生成失败: user={}", label, u, e);
+                    notifyFailed(label, u, String.valueOf(e.getMessage()));
                 }
             }
         });
     }
 
-    private boolean runAsync(Runnable r) {
+    private boolean runAsync(String label, String username, Runnable r) {
         if (!running.compareAndSet(false, true)) {
             return false;
         }
@@ -110,14 +117,28 @@ public class WorklogScheduler {
             try {
                 r.run();
             } catch (DevMindException e) {
-                log.warn("报告生成失败: {}", e.getMessage());
+                // 手动触发走到这：预检之后的运行时失败（one-shot 超时/会话未产出等）——
+                // 前端只能空轮询到超时，必须让真实原因落通知中心（P0）
+                log.warn("{} 生成失败: user={} err={}", label, username, e.getMessage());
+                notifyFailed(label, username, e.getMessage());
             } catch (Exception e) {
-                log.warn("报告生成异常", e);
+                log.warn("{} 生成异常: user={}", label, username, e);
+                notifyFailed(label, username, String.valueOf(e.getMessage()));
             } finally {
                 running.set(false);
             }
         });
         return true;
+    }
+
+    /** 生成失败 → 领域事件（success=false 路由为 P0 通知，actor=本人收件）。 */
+    private void notifyFailed(String label, String username, String reason) {
+        try {
+            eventPublisher.publish(SimpleDomainEvent.of("worklog.report.failed", null, null, username,
+                    label + "生成失败: " + reason, null, null, Boolean.FALSE));
+        } catch (Exception e) {
+            log.warn("失败通知发布异常: {}", e.getMessage());
+        }
     }
 
     /**

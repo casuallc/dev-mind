@@ -85,6 +85,26 @@ public class ReportService {
     }
 
     /**
+     * 手动生成前同步预检（控制器调用）：已确认 → 409；无素材 → 400。
+     * 让「点生成却永远没有结果」的场景立即报错，而不是提交后异步静默跳过、
+     * 前端空轮询到超时只提示「生成超时或失败」。
+     */
+    public void precheckDaily(String username, LocalDate date, boolean force) {
+        DailyReportEntity existing = dailyRepo.findByUserIdAndWorkDate(username, date).orElse(null);
+        if (existing != null && !force) {
+            return; // 已有报告且非 force：generate 直接返回已有，无需素材
+        }
+        if (existing != null && DailyReportEntity.STATUS_CONFIRMED.equals(existing.getStatus())) {
+            throw new DevMindException(ErrorCode.CONFLICT, "当日日报已确认，不可重新生成: " + date);
+        }
+        if (gitScanner.scan(username, date).isEmpty()
+                && entryRepo.findByUserIdAndWorkDateOrderByIdAsc(username, date).isEmpty()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    date + " 无工作素材（无条目且无 git 提交），日报未生成");
+        }
+    }
+
+    /**
      * 生成日报草稿（同步阻塞；调度与手动共用核心）。
      * 已存在：非 force 直接返回；force 仅覆盖 DRAFT。
      */
@@ -152,6 +172,26 @@ public class ReportService {
         return weeklyRepo.findByUserIdAndWeekStartBetweenOrderByWeekStartDesc(
                         username, thisMonday.minusWeeks(weeks - 1L), thisMonday)
                 .stream().map(WeeklyReportView::of).toList();
+    }
+
+    /** 周报手动生成预检：同 {@link #precheckDaily}，素材 = 该周日报或原始条目。 */
+    public void precheckWeekly(String username, LocalDate weekStart, boolean force) {
+        WeeklyReportEntity existing = weeklyRepo.findByUserIdAndWeekStart(username, weekStart).orElse(null);
+        if (existing != null && !force) {
+            return;
+        }
+        if (existing != null && WeeklyReportEntity.STATUS_CONFIRMED.equals(existing.getStatus())) {
+            throw new DevMindException(ErrorCode.CONFLICT, "该周周报已确认，不可重新生成: " + weekStart);
+        }
+        LocalDate weekEnd = weekStart.plusDays(6);
+        boolean noDaily = dailyRepo
+                .findByUserIdAndWorkDateBetweenOrderByWorkDateAsc(username, weekStart, weekEnd).isEmpty();
+        boolean noEntry = entryRepo
+                .findByUserIdAndWorkDateBetweenOrderByWorkDateAscIdAsc(username, weekStart, weekEnd).isEmpty();
+        if (noDaily && noEntry) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    weekStart + " 周无工作素材（无日报且无条目），周报未生成");
+        }
     }
 
     /**

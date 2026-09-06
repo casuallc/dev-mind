@@ -60,11 +60,13 @@ public class WorklogReportController {
         return reportService.recentDaily(identity.currentActor(), Math.min(Math.max(days, 1), 62));
     }
 
-    /** 手动触发生成（异步）：返回 {accepted, running}；已有任务在跑 → 409。 */
+    /** 手动触发生成（异步）：先同步预检（已确认 409 / 无素材 400），再提交；已有任务在跑 → 409。 */
     @PostMapping("/daily/generate")
     public Map<String, Boolean> generateDaily(@Valid @RequestBody GenerateDailyRequest req) {
-        boolean accepted = scheduler.submitDaily(identity.currentActor(), req.date(),
-                Boolean.TRUE.equals(req.force()));
+        String actor = identity.currentActor();
+        boolean force = Boolean.TRUE.equals(req.force());
+        reportService.precheckDaily(actor, req.date(), force);
+        boolean accepted = scheduler.submitDaily(actor, req.date(), force);
         if (!accepted) {
             throw new DevMindException(ErrorCode.CONFLICT, "已有报告生成任务在跑，请稍后");
         }
@@ -93,8 +95,10 @@ public class WorklogReportController {
 
     @PostMapping("/weekly/generate")
     public Map<String, Boolean> generateWeekly(@Valid @RequestBody GenerateWeeklyRequest req) {
-        boolean accepted = scheduler.submitWeekly(identity.currentActor(), req.weekStart(),
-                Boolean.TRUE.equals(req.force()));
+        String actor = identity.currentActor();
+        boolean force = Boolean.TRUE.equals(req.force());
+        reportService.precheckWeekly(actor, req.weekStart(), force);
+        boolean accepted = scheduler.submitWeekly(actor, req.weekStart(), force);
         if (!accepted) {
             throw new DevMindException(ErrorCode.CONFLICT, "已有报告生成任务在跑，请稍后");
         }
