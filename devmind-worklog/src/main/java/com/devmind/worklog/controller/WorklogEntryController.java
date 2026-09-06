@@ -31,17 +31,18 @@ public class WorklogEntryController {
         this.service = service;
     }
 
-    /** 分页列表：page 从 0 起，size 默认 20（上限 200 防全量拉取）。 */
+    /** 分页列表：page 从 0 起，size 默认 20（上限 200 防全量拉取）；keyword 可选，标题模糊匹配。 */
     @GetMapping
     public EntryPage list(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         if (size < 1 || size > 200) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "size 取值范围 1-200");
         }
-        return service.list(from, to, Math.max(page, 0), size);
+        return service.list(from, to, keyword, Math.max(page, 0), size);
     }
 
     @PostMapping

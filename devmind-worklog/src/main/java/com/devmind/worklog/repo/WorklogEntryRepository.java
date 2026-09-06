@@ -18,6 +18,13 @@ public interface WorklogEntryRepository extends JpaRepository<WorklogEntryEntity
     Page<WorklogEntryEntity> findByUserIdAndWorkDateBetween(
             String userId, LocalDate from, LocalDate to, Pageable pageable);
 
+    /** 分页列表 + 标题模糊匹配（title 为普通 varchar，非 CLOB，IgnoreCase 安全） */
+    Page<WorklogEntryEntity> findByUserIdAndWorkDateBetweenAndTitleContainingIgnoreCase(
+            String userId, LocalDate from, LocalDate to, String keyword, Pageable pageable);
+
+    List<WorklogEntryEntity> findByUserIdAndWorkDateBetweenAndTitleContainingIgnoreCaseOrderByWorkDateAscIdAsc(
+            String userId, LocalDate from, LocalDate to, String keyword);
+
     List<WorklogEntryEntity> findByUserIdAndWorkDateOrderByIdAsc(String userId, LocalDate workDate);
 
     Optional<WorklogEntryEntity> findByIdAndUserId(Long id, String userId);

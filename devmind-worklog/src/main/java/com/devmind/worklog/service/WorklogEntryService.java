@@ -52,19 +52,25 @@ public class WorklogEntryService {
         this.catalog = catalog;
     }
 
-    /** 分页列表（含范围内工时合计与 git 仓库名解析）。 */
-    public EntryPage list(LocalDate from, LocalDate to, int page, int size) {
+    /** 分页列表（含范围内工时合计与 git 仓库名解析）；keyword 非空时按标题模糊匹配。 */
+    public EntryPage list(LocalDate from, LocalDate to, String keyword, int page, int size) {
         String me = identity.currentActor();
-        Page<WorklogEntryEntity> p = entryRepo.findByUserIdAndWorkDateBetween(
-                me, from, to, PageRequest.of(page, size, LIST_SORT));
+        String kw = keyword == null || keyword.isBlank() ? null : keyword.strip();
+        Page<WorklogEntryEntity> p = kw == null
+                ? entryRepo.findByUserIdAndWorkDateBetween(me, from, to, PageRequest.of(page, size, LIST_SORT))
+                : entryRepo.findByUserIdAndWorkDateBetweenAndTitleContainingIgnoreCase(
+                        me, from, to, kw, PageRequest.of(page, size, LIST_SORT));
         Map<Long, String> repoNames = resolveRepoNames(
                 p.getContent().stream().map(WorklogEntryEntity::getRepoId).filter(Objects::nonNull).toList());
         List<EntryView> items = p.getContent().stream()
                 .map(e -> EntryView.of(e, e.getRepoId() == null ? null : repoNames.get(e.getRepoId())))
                 .toList();
-        // 范围合计单独全量求和（个人数据量级小；分页后前端无法自算）
-        long totalMinutes = entryRepo.findByUserIdAndWorkDateBetweenOrderByWorkDateAscIdAsc(me, from, to)
-                .stream().mapToLong(e -> e.getMinutes() == null ? 0 : e.getMinutes()).sum();
+        // 范围合计单独全量求和（个人数据量级小；分页后前端无法自算），与列表同一过滤条件
+        List<WorklogEntryEntity> all = kw == null
+                ? entryRepo.findByUserIdAndWorkDateBetweenOrderByWorkDateAscIdAsc(me, from, to)
+                : entryRepo.findByUserIdAndWorkDateBetweenAndTitleContainingIgnoreCaseOrderByWorkDateAscIdAsc(
+                        me, from, to, kw);
+        long totalMinutes = all.stream().mapToLong(e -> e.getMinutes() == null ? 0 : e.getMinutes()).sum();
         return new EntryPage(items, p.getTotalElements(), totalMinutes);
     }
 
