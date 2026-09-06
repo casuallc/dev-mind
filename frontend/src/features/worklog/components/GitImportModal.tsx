@@ -1,7 +1,7 @@
 import { Button, Checkbox, Empty, Modal, Space, Table, Tag, Typography, message } from 'antd'
 import { useEffect, useState } from 'react'
 import { importGit, previewGit } from '../api'
-import type { GitCommit } from '../types'
+import type { GitCommit, GitScanRepoDiag } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 
 interface Props {
@@ -12,9 +12,16 @@ interface Props {
   onImported: () => void
 }
 
+const OUTCOME_TAG: Record<string, { color: string; label: string }> = {
+  SCANNED: { color: 'success', label: '已扫描' },
+  SKIPPED: { color: 'warning', label: '已跳过' },
+  FAILED: { color: 'error', label: '失败' },
+}
+
 /** CAP-28 FR-04 git 提交导入：预览当日（按本人 git author 过滤）提交，勾选后落成工作条目。 */
 export default function GitImportModal({ open, date, onCancel, onImported }: Props) {
   const [rows, setRows] = useState<GitCommit[]>([])
+  const [diags, setDiags] = useState<GitScanRepoDiag[]>([])
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -22,10 +29,11 @@ export default function GitImportModal({ open, date, onCancel, onImported }: Pro
   const load = () => {
     setLoading(true)
     previewGit(date)
-      .then((list) => {
-        setRows(list)
+      .then((res) => {
+        setRows(res.commits)
+        setDiags(res.repos)
         // 默认勾选未导入的
-        setSelected(new Set(list.filter((c) => !c.alreadyImported).map((c) => c.sha)))
+        setSelected(new Set(res.commits.filter((c) => !c.alreadyImported).map((c) => c.sha)))
       })
       .catch((e) => message.error(`扫描失败: ${e.message}`))
       .finally(() => setLoading(false))
@@ -87,7 +95,7 @@ export default function GitImportModal({ open, date, onCancel, onImported }: Pro
         pagination={false}
         locale={{
           emptyText: (
-            <Empty description="当日没有扫描到你的提交：确认已在「代码仓库」页勾选参与扫描的仓库，且 git 署名与提交一致" />
+            <Empty description="当日没有扫描到你的提交：确认已在「仓库订阅」勾选参与扫描的仓库，且 git 署名与提交一致（见下方扫描详情）" />
           ),
         }}
         columns={[
@@ -129,6 +137,28 @@ export default function GitImportModal({ open, date, onCancel, onImported }: Pro
           },
         ]}
       />
+      {diags.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <Typography.Text type="secondary">扫描详情（{diags.length} 个勾选仓库）：</Typography.Text>
+          <div style={{ marginTop: 4 }}>
+            {diags.map((d) => {
+              const tag = OUTCOME_TAG[d.outcome] ?? { color: 'default', label: d.outcome }
+              return (
+                <div key={d.repoId} style={{ lineHeight: '24px' }}>
+                  <Tag color={tag.color}>{tag.label}</Tag>
+                  <Typography.Text strong>{d.repoName}</Typography.Text>
+                  <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
+                    {d.outcome === 'SCANNED'
+                      ? `${d.commitCount} 条提交${d.authorFilter ? `（署名过滤: ${d.authorFilter}）` : ''}`
+                      : ''}
+                    {d.detail ? `${d.outcome === 'SCANNED' ? '；' : ''}${d.detail}` : ''}
+                  </Typography.Text>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </Modal>
   )
 }

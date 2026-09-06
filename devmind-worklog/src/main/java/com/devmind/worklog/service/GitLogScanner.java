@@ -3,6 +3,8 @@ package com.devmind.worklog.service;
 import com.devmind.common.integration.GitIdentityProvider;
 import com.devmind.worklog.config.WorklogProperties;
 import com.devmind.worklog.dto.GitCommitView;
+import com.devmind.worklog.dto.GitPreviewResponse;
+import com.devmind.worklog.dto.GitScanRepoDiag;
 import com.devmind.common.integration.GitRepoCatalog;
 import com.devmind.common.util.GitCli;
 import com.devmind.worklog.repo.WorklogEntryRepository;
@@ -25,10 +27,12 @@ import java.util.List;
  * --encoding=UTF-8}，stdout 由 {@link GitCli} 按 UTF-8 字节解码；
  * format 用 %x1f 字段分隔 + %x1e 记录分隔（提交信息可含 | 与换行）。</p>
  *
- * <p>author 过滤链：repo.remote_url（缺省 git remote get-url origin）取 host →
- * {@link GitIdentityProvider#resolveAuthor}（ObjectProvider 探测，integration 缺席时降级）
- * → {@code --author=<email>}（email 空退 name）；解析为空时不过滤并 warn，
- * 宁可多不可漏，导入靠人工预览勾选兜底。</p>
+ * <p>author 过滤链：个人 Git 凭证 email（CAP-24，按 repo host 匹配）→ 仓库本地
+ * {@code git config user.email}（LOCAL 行多为本人工作副本）→ 凭证/displayName
+ * → 不过滤（warn，宁可多不可漏，导入靠人工预览勾选兜底）。</p>
+ *
+ * <p>{@link #scanDetailed} 附带每仓库诊断（跳过/失败原因、实际署名过滤串），
+ * 供导入预览回答「勾选的仓库为什么没有提交出现」。</p>
  */
 @Service
 public class GitLogScanner {
@@ -36,8 +40,8 @@ public class GitLogScanner {
     private static final Logger log = LoggerFactory.getLogger(GitLogScanner.class);
 
     /** %x1f 字段分隔 / %x1e 记录分隔：H an ae aI s */
-    private static final String RECORD_SEP = "\u001e";
-    private static final String FIELD_SEP = "\u001f";
+    private static final String RECORD_SEP = "";
+    private static final String FIELD_SEP = "";
     private static final String FORMAT = "--format=%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1e";
 
     private final CodeRepoService codeRepoService;
@@ -55,30 +59,48 @@ public class GitLogScanner {
         this.identityProvider = identityProvider;
     }
 
-    /** 扫描该用户勾选仓库在 date 当日的提交（本机时区）。 */
+    /** 扫描该用户勾选仓库在 date 当日的提交（本机时区），仅返回提交列表（日报生成用）。 */
     public List<GitCommitView> scan(String username, LocalDate date) {
+        return scanDetailed(username, date).commits();
+    }
+
+    /** 同 {@link #scan}，另附每个勾选仓库的扫描诊断（导入预览用）。 */
+    public GitPreviewResponse scanDetailed(String username, LocalDate date) {
         List<GitCommitView> out = new ArrayList<>();
-        for (GitRepoCatalog.RepoRef repo : codeRepoService.subscribedActiveRepos(username)) {
+        List<GitScanRepoDiag> diags = new ArrayList<>();
+        for (GitRepoCatalog.RepoRef repo : codeRepoService.subscribedRepos(username)) {
+            // 状态常量归 project 模块实体，此处用字面量防跨模块依赖
+            if (!"ACTIVE".equals(repo.status())) {
+                diags.add(new GitScanRepoDiag(repo.id(), repo.name(), "SKIPPED", null, "仓库已停用", 0));
+                continue;
+            }
             // CAP-29：服务端克隆未就绪（CLONING/FAILED）的行跳过；NONE=LOCAL 行直接可扫
             if ("CLONING".equals(repo.cloneStatus()) || "FAILED".equals(repo.cloneStatus())) {
-                log.debug("仓库克隆未就绪，扫描跳过: repo={} cloneStatus={}", repo.name(), repo.cloneStatus());
+                diags.add(new GitScanRepoDiag(repo.id(), repo.name(), "SKIPPED", null,
+                        "服务端克隆未就绪（" + repo.cloneStatus() + "），请到后台「代码仓库」确认克隆状态", 0));
                 continue;
             }
             try {
-                out.addAll(scanRepo(username, repo, date));
+                RepoScan r = scanRepo(username, repo, date);
+                out.addAll(r.commits());
+                diags.add(r.diag());
             } catch (Exception e) {
                 // 单库失败不拖垮整体（仓库可能被删/移动），记 warn 继续
                 log.warn("git 扫描失败，已跳过: repo={}({}) err={}", repo.name(), repo.localPath(), e.getMessage());
+                diags.add(new GitScanRepoDiag(repo.id(), repo.name(), "FAILED", null,
+                        "扫描异常: " + e.getMessage(), 0));
             }
         }
         out.sort((a, b) -> {
             int c = a.committedAt().compareTo(b.committedAt());
             return c != 0 ? c : a.repoName().compareTo(b.repoName());
         });
-        return out;
+        return new GitPreviewResponse(out, diags);
     }
 
-    private List<GitCommitView> scanRepo(String username, GitRepoCatalog.RepoRef repo, LocalDate date) {
+    private record RepoScan(List<GitCommitView> commits, GitScanRepoDiag diag) {}
+
+    private RepoScan scanRepo(String username, GitRepoCatalog.RepoRef repo, LocalDate date) {
         List<String> args = new ArrayList<>(List.of(
                 "git", "-c", "i18n.logOutputEncoding=UTF-8",
                 "log", "--encoding=UTF-8", "--no-merges", FORMAT,
@@ -93,39 +115,74 @@ public class GitLogScanner {
         }
         GitCli.Result r = GitCli.run(Path.of(repo.localPath()), 30, args.toArray(new String[0]));
         if (r.exitCode() != 0) {
-            log.warn("git log 失败: repo={} err={}", repo.name(), r.err() == null ? "" : r.err().strip());
-            return List.of();
+            String err = r.err() == null ? "" : r.err().strip();
+            log.warn("git log 失败: repo={} err={}", repo.name(), err);
+            return new RepoScan(List.of(), new GitScanRepoDiag(repo.id(), repo.name(), "FAILED", author,
+                    "git log 失败（" + abbrev(err) + "）——检查默认分支与本地路径", 0));
         }
-        List<GitCommitView> out = new ArrayList<>();
+        List<GitCommitView> commits = new ArrayList<>();
         for (String rec : r.out().split(RECORD_SEP)) {
             String[] f = rec.strip().split(FIELD_SEP, -1);
             if (f.length < 5 || f[0].isBlank()) {
                 continue;
             }
-            out.add(new GitCommitView(repo.id(), repo.name(), f[0], f[1], f[2],
+            commits.add(new GitCommitView(repo.id(), repo.name(), f[0], f[1], f[2],
                     Instant.parse(f[3]), f[4],
                     entryRepo.existsByUserIdAndRepoIdAndCommitSha(username, repo.id(), f[0])));
         }
-        return out;
+        String detail = author == null ? "未解析到署名，未按作者过滤（可能混入他人提交）"
+                : commits.isEmpty() ? "当日没有署名「" + author + "」的提交" : null;
+        return new RepoScan(commits,
+                new GitScanRepoDiag(repo.id(), repo.name(), "SCANNED", author, detail, commits.size()));
     }
 
-    /** 解析 author 过滤串（email 优先，退 name）；无法解析返回 null（不过滤 + warn）。 */
+    private static String abbrev(String s) {
+        return s.length() > 120 ? s.substring(0, 120) : s;
+    }
+
+    /**
+     * 解析 author 过滤串：个人凭证 email → 仓库本地 user.email → 凭证/displayName；
+     * 全部落空返回 null（不过滤 + warn）。
+     */
     private String resolveAuthorFilter(String username, GitRepoCatalog.RepoRef repo) {
         GitIdentityProvider provider = identityProvider.getIfAvailable();
-        if (provider == null) {
-            log.warn("GitIdentityProvider 未装配，仓库 {} 不做 author 过滤", repo.name());
-            return null;
+        GitIdentityProvider.GitAuthor resolved = null;
+        if (provider != null) {
+            String host = hostOf(repo.remoteUrl());
+            if (host == null) {
+                host = hostOf(remoteUrlFromGit(repo));
+            }
+            resolved = provider.resolveAuthor(username, host).orElse(null);
+        } else {
+            log.warn("GitIdentityProvider 未装配，仓库 {} 仅按本地 git 配置过滤", repo.name());
         }
-        String host = hostOf(repo.remoteUrl());
-        if (host == null) {
-            host = hostOf(remoteUrlFromGit(repo));
+        if (resolved != null && resolved.email() != null && !resolved.email().isBlank()) {
+            return resolved.email();
         }
-        return provider.resolveAuthor(username, host)
-                .map(a -> a.email() != null && !a.email().isBlank() ? a.email() : a.name())
-                .orElseGet(() -> {
-                    log.warn("未能解析用户 {} 在仓库 {} 的署名，不做 author 过滤", username, repo.name());
-                    return null;
-                });
+        // 本地回退：LOCAL 行多为本人工作副本，仓库内 git config user.email 即真实提交署名
+        String localEmail = localGitEmail(repo);
+        if (localEmail != null) {
+            return localEmail;
+        }
+        if (resolved != null && resolved.name() != null && !resolved.name().isBlank()) {
+            return resolved.name();
+        }
+        log.warn("未能解析用户 {} 在仓库 {} 的署名，不做 author 过滤", username, repo.name());
+        return null;
+    }
+
+    /** 仓库本地 git config user.email（含全局配置）；取不到返回 null。 */
+    private String localGitEmail(GitRepoCatalog.RepoRef repo) {
+        try {
+            GitCli.Result r = GitCli.run(Path.of(repo.localPath()), 10,
+                    "git", "config", "--get", "user.email");
+            if (r.exitCode() == 0 && r.out() != null && !r.out().isBlank()) {
+                return r.out().strip();
+            }
+        } catch (Exception e) {
+            log.debug("读取仓库 {} 本地 user.email 失败: {}", repo.name(), e.getMessage());
+        }
+        return null;
     }
 
     private String remoteUrlFromGit(GitRepoCatalog.RepoRef repo) {

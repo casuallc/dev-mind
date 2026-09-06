@@ -52,16 +52,21 @@ public class CodeRepoService {
 
     /** 本人勾选中的 ACTIVE 仓库（git 扫描用）。 */
     public List<GitRepoCatalog.RepoRef> subscribedActiveRepos(String username) {
+        return subscribedRepos(username).stream()
+                // 状态常量归 project 模块实体，此处用字面量防跨模块依赖
+                .filter(r -> "ACTIVE".equals(r.status()))
+                .toList();
+    }
+
+    /** 本人勾选的全部仓库（含 DISABLED；扫描诊断用，让停用仓库也能说明原因）。 */
+    public List<GitRepoCatalog.RepoRef> subscribedRepos(String username) {
         GitRepoCatalog cat = catalog.getIfAvailable();
         if (cat == null) {
             return List.of();
         }
         List<Long> ids = subRepo.findByUserId(username).stream()
                 .map(WorklogRepoSubscriptionEntity::getRepoId).toList();
-        return cat.listByIds(ids).stream()
-                // 状态常量归 project 模块实体，此处用字面量防跨模块依赖
-                .filter(r -> "ACTIVE".equals(r.status()))
-                .toList();
+        return cat.listByIds(ids);
     }
 
     /** 本人勾选/取消勾选。 */

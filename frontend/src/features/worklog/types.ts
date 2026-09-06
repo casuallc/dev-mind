@@ -72,6 +72,22 @@ export interface GitCommit {
   alreadyImported: boolean
 }
 
+/** 单仓库扫描诊断：outcome = SCANNED / SKIPPED / FAILED */
+export interface GitScanRepoDiag {
+  repoId: number
+  repoName: string
+  outcome: string
+  authorFilter?: string
+  detail?: string
+  commitCount: number
+}
+
+/** git 扫描预览响应：提交列表 + 每仓库诊断 */
+export interface GitPreview {
+  commits: GitCommit[]
+  repos: GitScanRepoDiag[]
+}
+
 export interface WorklogSettings {
   autoDaily: boolean
   autoWeekly: boolean

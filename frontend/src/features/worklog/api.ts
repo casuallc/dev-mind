@@ -4,7 +4,7 @@ import type {
   DailyReport,
   EntryPayload,
   GenerateAck,
-  GitCommit,
+  GitPreview,
   WeeklyReport,
   WorklogEntry,
   WorklogRepo,
@@ -25,7 +25,7 @@ export const updateEntry = (id: number, body: EntryPayload) =>
 export const deleteEntry = (id: number) => api.del(`/worklog/entries/${id}`)
 
 // ---- git 扫描导入 ----
-export const previewGit = (date: string) => api.get<GitCommit[]>(`/worklog/git/preview?date=${date}`)
+export const previewGit = (date: string) => api.get<GitPreview>(`/worklog/git/preview?date=${date}`)
 export const importGit = (date: string, items: { repoId: number; commitSha: string; subject: string; hours?: number }[]) =>
   api.post<{ created: number; skipped: number }>('/worklog/git/import', { date, items })
 

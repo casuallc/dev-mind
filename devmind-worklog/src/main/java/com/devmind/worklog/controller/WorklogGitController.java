@@ -1,8 +1,8 @@
 package com.devmind.worklog.controller;
 
 import com.devmind.auth.IdentityService;
-import com.devmind.worklog.dto.GitCommitView;
 import com.devmind.worklog.dto.GitImportRequest;
+import com.devmind.worklog.dto.GitPreviewResponse;
 import com.devmind.worklog.service.GitLogScanner;
 import com.devmind.worklog.service.WorklogEntryService;
 import jakarta.validation.Valid;
@@ -15,7 +15,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
-import java.util.List;
 import java.util.Map;
 
 /** CAP-28 FR-04：git 提交扫描预览与导入（仅本人勾选仓库）。 */
@@ -34,10 +33,11 @@ public class WorklogGitController {
         this.identity = identity;
     }
 
+    /** 预览：当日提交 + 每个勾选仓库的扫描诊断（为什么某仓库没有提交出现）。 */
     @GetMapping("/preview")
-    public List<GitCommitView> preview(
+    public GitPreviewResponse preview(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        return scanner.scan(identity.currentActor(), date);
+        return scanner.scanDetailed(identity.currentActor(), date);
     }
 
     /** @return {created, skipped} */
