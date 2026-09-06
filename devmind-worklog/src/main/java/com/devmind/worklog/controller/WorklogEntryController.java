@@ -1,5 +1,8 @@
 package com.devmind.worklog.controller;
 
+import com.devmind.common.exception.DevMindException;
+import com.devmind.common.exception.ErrorCode;
+import com.devmind.worklog.dto.EntryPage;
 import com.devmind.worklog.dto.EntryRequest;
 import com.devmind.worklog.dto.EntryView;
 import com.devmind.worklog.service.WorklogEntryService;
@@ -16,7 +19,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
-import java.util.List;
 
 /** CAP-28 FR-03：工作条目 CRUD（仅本人）。 */
 @RestController
@@ -29,11 +31,17 @@ public class WorklogEntryController {
         this.service = service;
     }
 
+    /** 分页列表：page 从 0 起，size 默认 20（上限 200 防全量拉取）。 */
     @GetMapping
-    public List<EntryView> list(
+    public EntryPage list(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        return service.list(from, to);
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        if (size < 1 || size > 200) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "size 取值范围 1-200");
+        }
+        return service.list(from, to, Math.max(page, 0), size);
     }
 
     @PostMapping

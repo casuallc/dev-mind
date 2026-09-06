@@ -76,6 +76,14 @@ public class ReportService {
         return dailyRepo.findByUserIdAndWorkDate(username, date).map(DailyReportView::of).orElse(null);
     }
 
+    /** 最近 days 天内有报告的日报（新日期在前），前端「最近两周」列表用。 */
+    public List<DailyReportView> recentDaily(String username, int days) {
+        LocalDate to = LocalDate.now();
+        return dailyRepo.findByUserIdAndWorkDateBetweenOrderByWorkDateDesc(
+                        username, to.minusDays(days - 1L), to)
+                .stream().map(DailyReportView::of).toList();
+    }
+
     /**
      * 生成日报草稿（同步阻塞；调度与手动共用核心）。
      * 已存在：非 force 直接返回；force 仅覆盖 DRAFT。
@@ -136,6 +144,14 @@ public class ReportService {
     public WeeklyReportView getWeekly(String username, LocalDate weekStart) {
         return weeklyRepo.findByUserIdAndWeekStart(username, weekStart)
                 .map(WeeklyReportView::of).orElse(null);
+    }
+
+    /** 最近 weeks 个周（含本周，周一为界）有报告的周报（新周在前），前端「最近一个月」列表用。 */
+    public List<WeeklyReportView> recentWeekly(String username, int weeks) {
+        LocalDate thisMonday = LocalDate.now().with(java.time.DayOfWeek.MONDAY);
+        return weeklyRepo.findByUserIdAndWeekStartBetweenOrderByWeekStartDesc(
+                        username, thisMonday.minusWeeks(weeks - 1L), thisMonday)
+                .stream().map(WeeklyReportView::of).toList();
     }
 
     /**

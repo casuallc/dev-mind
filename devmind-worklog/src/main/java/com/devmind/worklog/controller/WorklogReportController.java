@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -53,6 +54,12 @@ public class WorklogReportController {
                 date != null ? date : LocalDate.now());
     }
 
+    /** 最近 days 天（默认 14 = 两周）内有报告的日报，新日期在前。 */
+    @GetMapping("/daily/recent")
+    public List<DailyReportView> recentDaily(@RequestParam(defaultValue = "14") int days) {
+        return reportService.recentDaily(identity.currentActor(), Math.min(Math.max(days, 1), 62));
+    }
+
     /** 手动触发生成（异步）：返回 {accepted, running}；已有任务在跑 → 409。 */
     @PostMapping("/daily/generate")
     public Map<String, Boolean> generateDaily(@Valid @RequestBody GenerateDailyRequest req) {
@@ -76,6 +83,12 @@ public class WorklogReportController {
     public WeeklyReportView getWeekly(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart) {
         return reportService.getWeekly(identity.currentActor(), weekStart);
+    }
+
+    /** 最近 weeks 个周（默认 5 ≈ 一个月，含本周）有报告的周报，新周在前。 */
+    @GetMapping("/weekly/recent")
+    public List<WeeklyReportView> recentWeekly(@RequestParam(defaultValue = "5") int weeks) {
+        return reportService.recentWeekly(identity.currentActor(), Math.min(Math.max(weeks, 1), 12));
     }
 
     @PostMapping("/weekly/generate")

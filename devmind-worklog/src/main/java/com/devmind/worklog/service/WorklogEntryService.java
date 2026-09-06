@@ -3,18 +3,27 @@ package com.devmind.worklog.service;
 import com.devmind.auth.IdentityService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.common.integration.GitRepoCatalog;
+import com.devmind.worklog.dto.EntryPage;
 import com.devmind.worklog.dto.EntryRequest;
 import com.devmind.worklog.dto.EntryView;
 import com.devmind.worklog.dto.GitImportRequest;
 import com.devmind.worklog.model.WorklogEntryEntity;
 import com.devmind.worklog.repo.WorklogEntryRepository;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * CAP-28 FR-03：工作条目 CRUD，按人隔离（仅能读写自己的条目，他人条目 404）。
@@ -28,18 +37,45 @@ public class WorklogEntryService {
             WorklogEntryEntity.TYPE_MEETING, WorklogEntryEntity.TYPE_RESEARCH,
             WorklogEntryEntity.TYPE_OTHER);
 
+    /** 列表排序：最新日期/最新录入在前 */
+    private static final Sort LIST_SORT = Sort.by(Sort.Direction.DESC, "workDate")
+            .and(Sort.by(Sort.Direction.DESC, "id"));
+
     private final WorklogEntryRepository entryRepo;
     private final IdentityService identity;
+    private final ObjectProvider<GitRepoCatalog> catalog;
 
-    public WorklogEntryService(WorklogEntryRepository entryRepo, IdentityService identity) {
+    public WorklogEntryService(WorklogEntryRepository entryRepo, IdentityService identity,
+                               ObjectProvider<GitRepoCatalog> catalog) {
         this.entryRepo = entryRepo;
         this.identity = identity;
+        this.catalog = catalog;
     }
 
-    public List<EntryView> list(LocalDate from, LocalDate to) {
+    /** 分页列表（含范围内工时合计与 git 仓库名解析）。 */
+    public EntryPage list(LocalDate from, LocalDate to, int page, int size) {
         String me = identity.currentActor();
-        return entryRepo.findByUserIdAndWorkDateBetweenOrderByWorkDateAscIdAsc(me, from, to)
-                .stream().map(EntryView::of).toList();
+        Page<WorklogEntryEntity> p = entryRepo.findByUserIdAndWorkDateBetween(
+                me, from, to, PageRequest.of(page, size, LIST_SORT));
+        Map<Long, String> repoNames = resolveRepoNames(
+                p.getContent().stream().map(WorklogEntryEntity::getRepoId).filter(Objects::nonNull).toList());
+        List<EntryView> items = p.getContent().stream()
+                .map(e -> EntryView.of(e, e.getRepoId() == null ? null : repoNames.get(e.getRepoId())))
+                .toList();
+        // 范围合计单独全量求和（个人数据量级小；分页后前端无法自算）
+        long totalMinutes = entryRepo.findByUserIdAndWorkDateBetweenOrderByWorkDateAscIdAsc(me, from, to)
+                .stream().mapToLong(e -> e.getMinutes() == null ? 0 : e.getMinutes()).sum();
+        return new EntryPage(items, p.getTotalElements(), totalMinutes);
+    }
+
+    /** repoId → 仓库名（CAP-29 全局登记表经 SPI 读，缺席时返回空表）。 */
+    private Map<Long, String> resolveRepoNames(List<Long> repoIds) {
+        GitRepoCatalog cat = catalog.getIfAvailable();
+        if (cat == null || repoIds.isEmpty()) {
+            return Map.of();
+        }
+        return cat.listByIds(repoIds).stream()
+                .collect(Collectors.toMap(GitRepoCatalog.RepoRef::id, GitRepoCatalog.RepoRef::name, (a, b) -> a));
     }
 
     @Transactional
