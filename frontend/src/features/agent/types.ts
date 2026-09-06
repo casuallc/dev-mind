@@ -10,6 +10,8 @@ export interface AgentNode {
   labels?: string
   capabilities?: string
   runnerVersion?: string
+  /** 最近一次接入的远端地址（IP:端口），离线后保留便于排查 */
+  remoteAddr?: string
   /** 平台默认执行节点：会话/项目未指定节点时调度到此（全平台至多一个） */
   isDefault?: boolean
   lastHeartbeatAt?: string

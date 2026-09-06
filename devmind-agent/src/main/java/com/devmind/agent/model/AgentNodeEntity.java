@@ -49,6 +49,10 @@ public class AgentNodeEntity {
     @Column(name = "last_heartbeat_at")
     private Instant lastHeartbeatAt;
 
+    /** 最近一次接入的远端地址（IP:端口，WS 连接建立时记录，离线后保留便于排查来源） */
+    @Column(name = "remote_addr", length = 64)
+    private String remoteAddr;
+
     /** 平台默认执行节点（全平台至多一个）：会话与项目均未指定节点时回落到此（FR-03） */
     @Column(name = "is_default", nullable = false)
     @ColumnDefault("false")
@@ -75,6 +79,8 @@ public class AgentNodeEntity {
     public void setRunnerVersion(String runnerVersion) { this.runnerVersion = runnerVersion; }
     public Instant getLastHeartbeatAt() { return lastHeartbeatAt; }
     public void setLastHeartbeatAt(Instant lastHeartbeatAt) { this.lastHeartbeatAt = lastHeartbeatAt; }
+    public String getRemoteAddr() { return remoteAddr; }
+    public void setRemoteAddr(String remoteAddr) { this.remoteAddr = remoteAddr; }
     public boolean isDefault() { return isDefault; }
     public void setDefault(boolean isDefault) { this.isDefault = isDefault; }
     public Instant getCreatedAt() { return createdAt; }

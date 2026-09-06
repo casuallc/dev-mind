@@ -162,6 +162,12 @@ export default function AgentNodesPage() {
     },
     { title: '系统', dataIndex: 'os', width: 180, render: (s?: string) => s || '-' },
     {
+      title: '来源地址',
+      dataIndex: 'remoteAddr',
+      width: 150,
+      render: (s?: string) => (s ? <Typography.Text code>{s}</Typography.Text> : '-'),
+    },
+    {
       title: 'runner 版本',
       dataIndex: 'runnerVersion',
       width: 280,
@@ -435,6 +441,9 @@ function NodeDrawer({
               <Tag color={statusColor[node.status] ?? 'default'}>{node.status}</Tag>
             </Descriptions.Item>
             <Descriptions.Item label="系统">{node.os || '-'}</Descriptions.Item>
+            <Descriptions.Item label="来源地址">
+              {node.remoteAddr ? <Typography.Text code>{node.remoteAddr}</Typography.Text> : '-'}
+            </Descriptions.Item>
             <Descriptions.Item label="能力">{node.capabilities || '-'}</Descriptions.Item>
             <Descriptions.Item label="runner 版本">
               {node.runnerVersion ? (

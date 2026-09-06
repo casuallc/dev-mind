@@ -113,11 +113,14 @@ public class AgentNodeService {
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "节点不存在: " + id));
     }
 
-    /** 连接建立：ONLINE + 心跳时间戳。 */
-    public void markOnline(Long id) {
+    /** 连接建立：ONLINE + 心跳时间戳 + 远端地址（IP:端口）。 */
+    public void markOnline(Long id, String remoteAddr) {
         repo.findById(id).ifPresent(e -> {
             e.setStatus(STATUS_ONLINE);
             e.setLastHeartbeatAt(Instant.now());
+            if (remoteAddr != null && !remoteAddr.isBlank()) {
+                e.setRemoteAddr(remoteAddr);
+            }
             repo.save(e);
         });
     }

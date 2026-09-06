@@ -77,8 +77,19 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             closeQuietly(old); // 同节点重复接入：踢掉旧连接
         }
         lastSeen.put(nodeId, System.currentTimeMillis());
-        nodeService.markOnline(node.getId());
-        log.info("agent 节点上线: id={} name={}", nodeId, node.getName());
+        String remoteAddr = formatRemoteAddr(ws);
+        nodeService.markOnline(node.getId(), remoteAddr);
+        log.info("agent 节点上线: id={} name={} remote={}", nodeId, node.getName(), remoteAddr);
+    }
+
+    /** WS 远端地址格式化为 "IP:端口"（InetSocketAddress#toString 带前导斜杠）。 */
+    private static String formatRemoteAddr(WebSocketSession ws) {
+        if (ws.getRemoteAddress() == null) {
+            return null;
+        }
+        var addr = ws.getRemoteAddress();
+        String host = addr.getAddress() != null ? addr.getAddress().getHostAddress() : addr.getHostString();
+        return host + ":" + addr.getPort();
     }
 
     public void onDisconnect(AgentNodeEntity node, WebSocketSession ws) {
