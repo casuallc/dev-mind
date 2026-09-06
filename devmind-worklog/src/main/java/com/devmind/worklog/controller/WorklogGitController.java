@@ -1,6 +1,8 @@
 package com.devmind.worklog.controller;
 
 import com.devmind.auth.IdentityService;
+import com.devmind.common.exception.DevMindException;
+import com.devmind.common.exception.ErrorCode;
 import com.devmind.worklog.dto.GitImportRequest;
 import com.devmind.worklog.dto.GitPreviewResponse;
 import com.devmind.worklog.service.GitLogScanner;
@@ -33,11 +35,18 @@ public class WorklogGitController {
         this.identity = identity;
     }
 
-    /** 预览：当日提交 + 每个勾选仓库的扫描诊断（为什么某仓库没有提交出现）。 */
+    /** 预览：范围内提交 + 每个勾选仓库的扫描诊断（为什么某仓库没有提交出现）。范围上限 62 天。 */
     @GetMapping("/preview")
     public GitPreviewResponse preview(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        return scanner.scanDetailed(identity.currentActor(), date);
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        if (to.isBefore(from)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "范围结束日不能早于开始日");
+        }
+        if (from.plusDays(62).isBefore(to)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "扫描范围最长 62 天");
+        }
+        return scanner.scanDetailed(identity.currentActor(), from, to);
     }
 
     /** @return {created, skipped} */

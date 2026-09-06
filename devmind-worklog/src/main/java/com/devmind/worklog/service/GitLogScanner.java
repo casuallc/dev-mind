@@ -64,8 +64,13 @@ public class GitLogScanner {
         return scanDetailed(username, date).commits();
     }
 
-    /** 同 {@link #scan}，另附每个勾选仓库的扫描诊断（导入预览用）。 */
+    /** 单日扫描 + 每仓库诊断（等价于 from == to 的范围扫描）。 */
     public GitPreviewResponse scanDetailed(String username, LocalDate date) {
+        return scanDetailed(username, date, date);
+    }
+
+    /** 范围扫描 [from, to]（本机时区，含首尾日），另附每个勾选仓库的扫描诊断（导入预览用）。 */
+    public GitPreviewResponse scanDetailed(String username, LocalDate from, LocalDate to) {
         List<GitCommitView> out = new ArrayList<>();
         List<GitScanRepoDiag> diags = new ArrayList<>();
         for (GitRepoCatalog.RepoRef repo : codeRepoService.subscribedRepos(username)) {
@@ -81,7 +86,7 @@ public class GitLogScanner {
                 continue;
             }
             try {
-                RepoScan r = scanRepo(username, repo, date);
+                RepoScan r = scanRepo(username, repo, from, to);
                 out.addAll(r.commits());
                 diags.add(r.diag());
             } catch (Exception e) {
@@ -100,11 +105,11 @@ public class GitLogScanner {
 
     private record RepoScan(List<GitCommitView> commits, GitScanRepoDiag diag) {}
 
-    private RepoScan scanRepo(String username, GitRepoCatalog.RepoRef repo, LocalDate date) {
+    private RepoScan scanRepo(String username, GitRepoCatalog.RepoRef repo, LocalDate from, LocalDate to) {
         List<String> args = new ArrayList<>(List.of(
                 "git", "-c", "i18n.logOutputEncoding=UTF-8",
                 "log", "--encoding=UTF-8", "--no-merges", FORMAT,
-                "--since=" + date + " 00:00:00", "--until=" + date + " 23:59:59",
+                "--since=" + from + " 00:00:00", "--until=" + to + " 23:59:59",
                 "-n", String.valueOf(props.getGitScanMaxCommits())));
         String author = resolveAuthorFilter(username, repo);
         if (author != null) {
@@ -131,7 +136,9 @@ public class GitLogScanner {
                     entryRepo.existsByUserIdAndRepoIdAndCommitSha(username, repo.id(), f[0])));
         }
         String detail = author == null ? "未解析到署名，未按作者过滤（可能混入他人提交）"
-                : commits.isEmpty() ? "当日没有署名「" + author + "」的提交" : null;
+                : commits.isEmpty()
+                ? (from.equals(to) ? "当日" : "范围内") + "没有署名「" + author + "」的提交"
+                : null;
         return new RepoScan(commits,
                 new GitScanRepoDiag(repo.id(), repo.name(), "SCANNED", author, detail, commits.size()));
     }

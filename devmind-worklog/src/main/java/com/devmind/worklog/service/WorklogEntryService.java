@@ -110,6 +110,7 @@ public class WorklogEntryService {
 
     /**
      * CAP-28 FR-04：git 提交导入为 GIT 条目。幂等：(user, repo, commit_sha) 已存在则跳过。
+     * 条目归属日取每条提交的实际日期（范围导入时跨天各归各日）。
      *
      * @return [新增数, 跳过数]
      */
@@ -123,7 +124,7 @@ public class WorklogEntryService {
             }
             WorklogEntryEntity e = new WorklogEntryEntity();
             e.setUserId(username);
-            e.setWorkDate(req.date());
+            e.setWorkDate(item.date());
             e.setTitle(item.subject().length() > 256 ? item.subject().substring(0, 256) : item.subject());
             e.setEntryType(WorklogEntryEntity.TYPE_DEV);
             e.setMinutes(toMinutes(item.hours() == null ? 0d : item.hours()));

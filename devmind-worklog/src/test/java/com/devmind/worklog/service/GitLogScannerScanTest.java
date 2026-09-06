@@ -95,6 +95,20 @@ class GitLogScannerScanTest {
     }
 
     @Test
+    void scansDateRangeInclusive() throws Exception {
+        Path repo = initRepoWithCommit();
+        GitLogScanner scanner = scannerWith(List.of(
+                new GitRepoCatalog.RepoRef(1, "demo", repo.toString(), null, null, "ACTIVE", "NONE")));
+
+        // 含今天的范围能扫到当日提交
+        GitPreviewResponse hit = scanner.scanDetailed("u1", LocalDate.now().minusDays(3), LocalDate.now());
+        assertEquals(1, hit.commits().size());
+        assertEquals("范围内没有署名「me@example.com」的提交",
+                scanner.scanDetailed("u1", LocalDate.now().minusDays(5), LocalDate.now().minusDays(3))
+                        .repos().get(0).detail());
+    }
+
+    @Test
     void skipsCloningAndDisabledReposWithReason() {
         GitLogScanner scanner = scannerWith(List.of(
                 new GitRepoCatalog.RepoRef(1, "cloning", repoDir.toString(), null, null, "ACTIVE", "CLONING"),
