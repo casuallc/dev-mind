@@ -5,6 +5,7 @@ import type {
   BuildStepInput,
   ContextSummary,
   EnvironmentInput,
+  GlobalRepo,
   Project,
   ProjectEnvironment,
   ProjectInput,
@@ -57,6 +58,11 @@ export function deleteRepo(id: string, repoId: number): Promise<void> {
 
 export function setPrimaryRepo(id: string, repoId: number): Promise<ProjectRepo> {
   return api.post<ProjectRepo>(`/projects/${id}/repos/${repoId}/primary`)
+}
+
+/** CAP-29：全局仓库列表（/api/repos，全认证用户可读）——「从已有仓库选择」的数据源 */
+export function listGlobalRepos(): Promise<GlobalRepo[]> {
+  return api.get<GlobalRepo[]>('/repos')
 }
 
 // ---------------- CAP-23 仓库克隆 ----------------

@@ -22,8 +22,8 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useOutletContext, useParams } from 'react-router-dom'
-import { addRepo, cloneRepo, deleteRepo, listRepos, setPrimaryRepo, updateRepo } from '../../api'
-import type { ProjectRepo, ProjectRepoInput } from '../../types'
+import { addRepo, cloneRepo, deleteRepo, listGlobalRepos, listRepos, setPrimaryRepo, updateRepo } from '../../api'
+import type { GlobalRepo, ProjectRepo, ProjectRepoInput } from '../../types'
 import CloneLogDrawer, { CLONE_STATUS_COLOR } from '../../components/CloneLogDrawer'
 import CloneAuthHint from '../../components/CloneAuthHint'
 import { useGitIntegrations } from '../../hooks/useGitIntegrations'
@@ -39,10 +39,14 @@ export default function ReposPage() {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<ProjectRepo | null>(null)
   const [logRepo, setLogRepo] = useState<ProjectRepo | null>(null)
+  // CAP-29：「从已有仓库选择」数据源（全局登记表 /api/repos），打开新建抽屉时加载
+  const [globalRepos, setGlobalRepos] = useState<GlobalRepo[]>([])
   const [form] = Form.useForm()
   const sourceType = Form.useWatch('sourceType', form) ?? 'LOCAL'
   const remoteUrl = Form.useWatch('remoteUrl', form)
   const integrationId = Form.useWatch('integrationId', form)
+  const gitRepoId = Form.useWatch('gitRepoId', form)
+  const selectedGlobal = globalRepos.find((g) => g.id === gitRepoId)
   const { options: integrationOptions, integrations } = useGitIntegrations()
 
   const reload = useCallback(async () => {
@@ -83,6 +87,7 @@ export default function ReposPage() {
             path: '',
             remoteUrl: '',
             integrationId: undefined,
+            gitRepoId: undefined,
             defaultBranch: '',
             role: 'CODE',
             primary: repos.length === 0,
@@ -90,21 +95,47 @@ export default function ReposPage() {
           },
     )
     setOpen(true)
+    if (!r) {
+      // 新建才可能选「已有仓库」，打开时拉全局登记表（失败不阻塞本地/克隆模式）
+      listGlobalRepos()
+        .then(setGlobalRepos)
+        .catch((e) => message.warning(`加载已有仓库列表失败：${(e as Error).message}`))
+    }
   }
 
-  const onSave = async (v: ProjectRepoInput) => {
+  const onSave = async (v: ProjectRepoInput & { gitRepoId?: number }) => {
     try {
-      // CLONE 模式 path 由服务端计算；LOCAL 不带克隆字段
-      const payload: ProjectRepoInput =
-        v.sourceType === 'CLONE'
-          ? { ...v, path: undefined, remoteUrl: v.remoteUrl || undefined }
-          : { ...v, remoteUrl: v.remoteUrl || undefined, integrationId: undefined }
+      // EXISTING（仅前端态）：复用全局登记表已有行，按行 sourceType 展开为 LOCAL/CLONE 载荷；
+      // 后端 upsert 按 remoteUrl/localPath 命中同一全局行并关联（gitRepoId），不复制不重复克隆
+      const { gitRepoId: _picked, ...rest } = v
+      let payload: ProjectRepoInput
+      if (v.sourceType === 'EXISTING') {
+        const g = globalRepos.find((x) => x.id === v.gitRepoId)
+        if (!g) {
+          message.error('请选择要关联的仓库')
+          return
+        }
+        payload =
+          g.sourceType === 'CLONE'
+            ? { ...rest, sourceType: 'CLONE', path: undefined, remoteUrl: g.remoteUrl, integrationId: g.integrationId ?? undefined }
+            : { ...rest, sourceType: 'LOCAL', path: g.localPath, remoteUrl: g.remoteUrl || undefined, integrationId: undefined }
+      } else {
+        // CLONE 模式 path 由服务端计算；LOCAL 不带克隆字段
+        payload =
+          v.sourceType === 'CLONE'
+            ? { ...rest, path: undefined, remoteUrl: v.remoteUrl || undefined }
+            : { ...rest, remoteUrl: v.remoteUrl || undefined, integrationId: undefined }
+      }
       if (editing) {
         await updateRepo(id, editing.id, payload)
       } else {
         await addRepo(id, payload)
         if (payload.sourceType === 'CLONE') {
-          message.success('已添加，后台开始克隆（可点「日志」查看进度）')
+          message.success(
+            v.sourceType === 'EXISTING'
+              ? '已关联已有仓库（克隆状态沿用全局仓库，无需重新克隆）'
+              : '已添加，后台开始克隆（可点「日志」查看进度）',
+          )
           setOpen(false)
           await reload()
           return
@@ -263,14 +294,64 @@ export default function ReposPage() {
           <Form.Item
             label="仓库来源"
             name="sourceType"
-            extra={editing ? '仓库来源创建后不可变更' : '克隆模式：服务端从 GitLab/GitHub 拉取到项目工作区'}
+            extra={editing ? '仓库来源创建后不可变更' : '克隆模式：服务端从 GitLab/GitHub 拉取；已有仓库：复用平台登记表（后台管理 → 代码仓库），多项目共享同一克隆'}
           >
             <Radio.Group disabled={!!editing} optionType="button" buttonStyle="solid">
               <Radio.Button value="LOCAL">本地路径</Radio.Button>
               <Radio.Button value="CLONE">从 Git 克隆</Radio.Button>
+              {!editing && <Radio.Button value="EXISTING">已有仓库</Radio.Button>}
             </Radio.Group>
           </Form.Item>
-          {sourceType === 'CLONE' ? (
+          {sourceType === 'EXISTING' ? (
+            <>
+              <Form.Item
+                label="选择仓库"
+                name="gitRepoId"
+                rules={[{ required: true, message: '请选择要关联的仓库' }]}
+                extra="项目仓库只关联不复制；已关联到本项目或已停用的仓库不可选"
+              >
+                <Select
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="搜索名称 / 远端地址 / 路径"
+                  options={globalRepos.map((g) => ({
+                    value: g.id,
+                    label: `${g.name}（${g.sourceType === 'CLONE' ? (g.remoteUrl ?? g.localPath) : g.localPath}）`,
+                    disabled:
+                      g.status === 'DISABLED' || repos.some((r) => r.path === g.localPath),
+                  }))}
+                  onChange={(gid: number) => {
+                    // 选中后带出名称与默认分支（名称可再改，仅作项目内显示名）
+                    const g = globalRepos.find((x) => x.id === gid)
+                    if (g) {
+                      form.setFieldsValue({ name: g.name, defaultBranch: g.defaultBranch ?? '' })
+                    }
+                  }}
+                />
+              </Form.Item>
+              {selectedGlobal && (
+                <Form.Item label="仓库信息">
+                  <Space direction="vertical" size={4}>
+                    <Space size={8}>
+                      {selectedGlobal.sourceType === 'CLONE' ? (
+                        <Tag color={CLONE_STATUS_COLOR[selectedGlobal.cloneStatus ?? 'NONE']}>
+                          {selectedGlobal.cloneStatus ?? 'NONE'}
+                        </Tag>
+                      ) : (
+                        <Tag>本地</Tag>
+                      )}
+                      <Typography.Text type="secondary">
+                        {selectedGlobal.remoteUrl ?? '（无远端）'}
+                      </Typography.Text>
+                    </Space>
+                    <Typography.Text code style={{ fontSize: 12 }}>
+                      {selectedGlobal.localPath}
+                    </Typography.Text>
+                  </Space>
+                </Form.Item>
+              )}
+            </>
+          ) : sourceType === 'CLONE' ? (
             <>
               <Form.Item
                 label="远端仓库地址"

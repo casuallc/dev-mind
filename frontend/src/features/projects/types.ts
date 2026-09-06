@@ -80,6 +80,23 @@ export interface ProjectRepoInput {
   sortOrder?: number
 }
 
+/**
+ * CAP-29 全局代码仓库视图（/api/repos，对应后端 GitRepoView）。
+ * 与 features/repos/types.ts 的 GitRepo 同口径，此处自包含副本避免跨 feature 私引。
+ * 项目「添加仓库 → 从已有仓库选择」用它列出可复用的全局行。
+ */
+export interface GlobalRepo {
+  id: number
+  name: string
+  localPath: string
+  remoteUrl?: string
+  defaultBranch?: string
+  sourceType: string // LOCAL / CLONE
+  integrationId?: number
+  cloneStatus?: string // NONE / CLONING / READY / FAILED
+  status: string // ACTIVE / DISABLED
+}
+
 export interface ProjectServer {
   id: number
   projectId: string
