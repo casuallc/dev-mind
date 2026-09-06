@@ -21,11 +21,19 @@ export interface WorklogEntry {
   hours: number
   source: string
   repoId?: number
+  repoName?: string
   commitSha?: string
   requirementId?: string
   jiraIssueKey?: string
   createdAt?: string
   updatedAt?: string
+}
+
+/** 条目分页响应（totalMinutes 为范围内工时合计，非当前页） */
+export interface EntryPage {
+  items: WorklogEntry[]
+  total: number
+  totalMinutes: number
 }
 
 /** 条目新建/更新请求 */

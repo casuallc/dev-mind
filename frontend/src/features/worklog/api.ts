@@ -2,6 +2,7 @@
 import { api } from '../../shared/api/client'
 import type {
   DailyReport,
+  EntryPage,
   EntryPayload,
   GenerateAck,
   GitPreview,
@@ -17,8 +18,8 @@ export const setSubscription = (id: number, subscribed: boolean) =>
   api.put(`/worklog/repos/${id}/subscription`, { subscribed })
 
 // ---- 工作条目 ----
-export const listEntries = (from: string, to: string) =>
-  api.get<WorklogEntry[]>(`/worklog/entries?from=${from}&to=${to}`)
+export const listEntries = (from: string, to: string, page = 0, size = 20) =>
+  api.get<EntryPage>(`/worklog/entries?from=${from}&to=${to}&page=${page}&size=${size}`)
 export const createEntry = (body: EntryPayload) => api.post<WorklogEntry>('/worklog/entries', body)
 export const updateEntry = (id: number, body: EntryPayload) =>
   api.put<WorklogEntry>(`/worklog/entries/${id}`, body)
@@ -31,6 +32,8 @@ export const importGit = (date: string, items: { repoId: number; commitSha: stri
 
 // ---- 日报 / 周报 ----
 export const getDaily = (date: string) => api.get<DailyReport | undefined>(`/worklog/daily?date=${date}`)
+/** 最近 days 天内有报告的日报（新日期在前） */
+export const listRecentDaily = (days = 14) => api.get<DailyReport[]>(`/worklog/daily/recent?days=${days}`)
 export const generateDaily = (date: string, force = false) =>
   api.post<GenerateAck>('/worklog/daily/generate', { date, force })
 export const updateDaily = (id: number, body: { contentMd?: string; status?: string }) =>
@@ -38,6 +41,8 @@ export const updateDaily = (id: number, body: { contentMd?: string; status?: str
 
 export const getWeekly = (weekStart: string) =>
   api.get<WeeklyReport | undefined>(`/worklog/weekly?weekStart=${weekStart}`)
+/** 最近 weeks 个周（含本周）有报告的周报（新周在前） */
+export const listRecentWeekly = (weeks = 5) => api.get<WeeklyReport[]>(`/worklog/weekly/recent?weeks=${weeks}`)
 export const generateWeekly = (weekStart: string, force = false) =>
   api.post<GenerateAck>('/worklog/weekly/generate', { weekStart, force })
 export const updateWeekly = (id: number, body: { summaryMd?: string; nextPlanMd?: string; status?: string }) =>
