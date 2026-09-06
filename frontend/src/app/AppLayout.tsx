@@ -54,7 +54,7 @@ export default function AppLayout() {
               type: 'group' as const,
               label: '当前项目',
               children: [
-                { key: '/overview', icon: <HomeOutlined />, label: '项目概览' },
+                { key: '/overview', icon: <HomeOutlined />, label: '概览' },
                 { key: '/requirements', icon: <BulbOutlined />, label: '需求' },
                 { key: '/builds', icon: <ToolOutlined />, label: '构建' },
                 { key: '/deployments', icon: <DeploymentUnitOutlined />, label: '部署' },
