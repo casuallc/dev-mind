@@ -277,7 +277,11 @@ public class SessionManagerService {
                 if (workspace != null) {
                     workspace.cleanup();
                 }
-                throw new DevMindException(ErrorCode.INTERNAL, "启动执行器失败: " + e.getMessage(), e);
+                // 程序不存在/不在 PATH（error=2）时给出可操作的修复提示，否则只有一句 Cannot run program
+                String hint = e.getMessage() != null && e.getMessage().contains("Cannot run program")
+                        ? "（执行器程序未安装或不在 PATH：请安装 claude CLI，或配置 devmind.session.claude-path 指向其绝对路径）"
+                        : "";
+                throw new DevMindException(ErrorCode.INTERNAL, "启动执行器失败: " + e.getMessage() + hint, e);
             }
         }
 

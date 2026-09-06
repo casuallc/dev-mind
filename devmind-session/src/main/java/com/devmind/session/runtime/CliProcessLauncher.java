@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit;
  * {@code claude -p --input-format stream-json --output-format stream-json --verbose --permission-mode <mode>}
  *
  * <p>CLI 参数与 schema 随版本变化——本类与 {@link CliEventParser} 是仅有的接触点。Windows 下
- * claude 多为 {@code .cmd} 包装，需经 {@code cmd.exe /c} 启动；路径可在配置指定，否则 {@code where claude} 探测。</p>
+ * claude 多为 {@code .cmd} 包装，需经 {@code cmd.exe /c} 启动；路径可在配置指定，否则按平台探测（Windows=where / Linux·macOS=which）。</p>
  *
  * <p>⚠️ 2026-08-30 spike 实测（claude 2.1.250）：</p>
  * <ul>
@@ -128,7 +128,7 @@ public class CliProcessLauncher implements SessionExecutor {
         return cmd;
     }
 
-    /** claude 路径：配置优先，空则 where claude 探测（结果缓存）。 */
+    /** claude 路径：配置优先，空则按平台探测（Windows=where，其余=which，结果缓存）。 */
     String resolvePath() {
         if (props.getClaudePath() != null && !props.getClaudePath().isBlank()) {
             return props.getClaudePath().strip();
@@ -136,8 +136,10 @@ public class CliProcessLauncher implements SessionExecutor {
         if (resolvedPath != null) {
             return resolvedPath;
         }
+        // where 是 Windows 独有命令，Linux/macOS 直接用 which（否则探测必败、回退裸命令 error=2）
+        boolean windows = System.getProperty("os.name", "").toLowerCase().contains("win");
         try {
-            Process p = new ProcessBuilder("where", "claude").redirectErrorStream(true).start();
+            Process p = new ProcessBuilder(windows ? "where" : "which", "claude").redirectErrorStream(true).start();
             String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             if (p.waitFor(5, TimeUnit.SECONDS)) {
                 String first = out.lines().map(String::strip).filter(l -> !l.isBlank()).findFirst().orElse(null);
