@@ -15,7 +15,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined, SettingOutlined, GithubOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, SettingOutlined, GithubOutlined, CodeOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 import {
@@ -43,6 +43,7 @@ import { ENTRY_SOURCES, ENTRY_TYPES } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import EntryFormDrawer from '../components/EntryFormDrawer'
 import GitImportModal from '../components/GitImportModal'
+import RepoSubscriptionModal from '../components/RepoSubscriptionModal'
 import ReportEditor from '../components/ReportEditor'
 
 type View = 'entries' | 'daily' | 'weekly'
@@ -70,6 +71,7 @@ export default function WorklogPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [reposOpen, setReposOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsForm] = Form.useForm()
 
@@ -235,6 +237,9 @@ export default function WorklogPage() {
             onChange={(d) => d && setDate(d)}
           />
           {extraByView[view]}
+          <Button icon={<CodeOutlined />} onClick={() => setReposOpen(true)}>
+            仓库订阅
+          </Button>
           <Button icon={<SettingOutlined />} onClick={openSettings}>
             设置
           </Button>
@@ -389,6 +394,7 @@ export default function WorklogPage() {
         onCancel={() => setImportOpen(false)}
         onImported={loadEntries}
       />
+      <RepoSubscriptionModal open={reposOpen} onCancel={() => setReposOpen(false)} />
 
       <Modal
         title="工时设置"

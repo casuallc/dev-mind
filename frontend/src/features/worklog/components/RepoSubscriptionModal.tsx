@@ -1,4 +1,4 @@
-import { Button, Card, Checkbox, Table, Tag, Typography, message } from 'antd'
+import { Button, Checkbox, Modal, Table, Tag, Typography, message } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -6,11 +6,16 @@ import { listRepos, setSubscription } from '../api'
 import type { WorklogRepo } from '../types'
 import { isAdmin } from '../../auth/authStore'
 
+interface Props {
+  open: boolean
+  onCancel: () => void
+}
+
 /**
- * CAP-28 FR-02 订阅页：勾选哪些全局仓库参与自己的 git log 扫描。
- * CAP-29 起登记 CRUD 移到后台 /admin/repos（仅 ADMIN），此页只保留勾选。
+ * CAP-28 FR-02 订阅勾选：勾选哪些全局仓库参与自己的 git log 扫描。
+ * CAP-29 起登记 CRUD 移到后台 /admin/repos（仅 ADMIN）；原独立订阅页并入工作日志页弹窗。
  */
-export default function CodeReposPage() {
+export default function RepoSubscriptionModal({ open, onCancel }: Props) {
   const [rows, setRows] = useState<WorklogRepo[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -22,7 +27,10 @@ export default function CodeReposPage() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(reload, [])
+  useEffect(() => {
+    if (open) reload()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   const toggle = async (r: WorklogRepo, checked: boolean) => {
     try {
@@ -35,10 +43,14 @@ export default function CodeReposPage() {
   }
 
   return (
-    <Card
-      title="代码仓库订阅"
-      extra={
-        <Button icon={<ReloadOutlined />} onClick={reload}>
+    <Modal
+      title="仓库订阅"
+      open={open}
+      onCancel={onCancel}
+      width={860}
+      destroyOnHidden
+      footer={
+        <Button icon={<ReloadOutlined />} onClick={reload} disabled={loading}>
           刷新
         </Button>
       }
@@ -55,6 +67,7 @@ export default function CodeReposPage() {
       </Typography.Paragraph>
       <Table
         rowKey="id"
+        size="small"
         loading={loading}
         dataSource={rows}
         pagination={false}
@@ -95,6 +108,6 @@ export default function CodeReposPage() {
           },
         ]}
       />
-    </Card>
+    </Modal>
   )
 }

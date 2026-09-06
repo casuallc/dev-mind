@@ -11,7 +11,6 @@ import {
   ExperimentOutlined,
   RocketOutlined,
   FieldTimeOutlined,
-  CodeOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useSyncExternalStore } from 'react'
@@ -76,7 +75,6 @@ export default function AppLayout() {
               label: '个人',
               children: [
                 { key: '/worklog', icon: <FieldTimeOutlined />, label: '工作日志' },
-                { key: '/worklog/repos', icon: <CodeOutlined />, label: '代码仓库' },
               ],
             },
             {

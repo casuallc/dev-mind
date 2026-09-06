@@ -36,7 +36,6 @@ import ApiKeysPage from '../features/open-api/pages/ApiKeysPage'
 import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
 import WorklogPage from '../features/worklog/pages/WorklogPage'
-import CodeReposPage from '../features/worklog/pages/CodeReposPage'
 import ReposAdminPage from '../features/repos/pages/ReposAdminPage'
 import LoginPage from '../features/auth/pages/LoginPage'
 import UserManagementPage from '../features/auth/pages/UserManagementPage'
@@ -78,7 +77,6 @@ export default function App() {
           <Route path="/me/git-credentials" element={<GitCredentialsPage />} />
           {/* CAP-28 个人工作日志（个人级，不进项目上下文） */}
           <Route path="/worklog" element={<WorklogPage />} />
-          <Route path="/worklog/repos" element={<CodeReposPage />} />
           {/* 项目上下文页面（当前项目为主线，无项目时由 Gate 统一空态） */}
           <Route element={<ProjectContextGate />}>
             <Route path="/overview" element={<ProjectOverviewPage />} />
