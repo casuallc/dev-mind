@@ -76,6 +76,16 @@ export default function SessionsBoard() {
     else setDraft(true)
   }, [sessions, loading])
 
+  // 草稿创建成功后：先等列表刷新拿到新会话行，再选中——否则「消失兜底」effect 会误清新 id
+  const onDraftCreated = useCallback(
+    async (s: SessionSummary) => {
+      await load()
+      setDraft(false)
+      setSelectedId(s.id)
+    },
+    [load],
+  )
+
   // 选中的会话被删除/消失时兜底退出选中态
   const current = useMemo(() => sessions.find((s) => s.id === selectedId), [sessions, selectedId])
   useEffect(() => {
@@ -232,11 +242,7 @@ export default function SessionsBoard() {
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
             {draft ? (
               <NewSessionDraft
-                onCreated={(s) => {
-                  setDraft(false)
-                  setSelectedId(s.id)
-                  load()
-                }}
+                onCreated={onDraftCreated}
                 onCancel={
                   selectedId || sessions.length > 0
                     ? () => {
@@ -305,13 +311,7 @@ export default function SessionsBoard() {
                 />
               </>
             ) : (
-              <NewSessionDraft
-                onCreated={(s) => {
-                  setDraft(false)
-                  setSelectedId(s.id)
-                  load()
-                }}
-              />
+              <NewSessionDraft onCreated={onDraftCreated} />
             )}
           </div>
         </div>
