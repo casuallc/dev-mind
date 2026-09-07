@@ -6,7 +6,7 @@ import com.devmind.common.exception.ErrorCode;
 import com.devmind.session.config.SessionProperties;
 import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.model.SessionEntity;
-import com.devmind.session.model.SessionState;
+import com.devmind.common.agent.runtime.SessionState;
 import com.devmind.session.repo.SessionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

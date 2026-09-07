@@ -23,5 +23,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
         </dependency>
+        <!-- CAP-30：headless agent 运行时内核（agent.runtime 包）的 CLI 协议解析/组帧需要 Jackson；
+             同时供 devmind-agent-runner 瘦 jar 复用（版本由 Boot BOM 管） -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
     </dependencies>
 </project>

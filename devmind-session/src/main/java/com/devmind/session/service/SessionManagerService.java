@@ -26,21 +26,21 @@ import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.SessionView;
 import com.devmind.session.dto.TemplateView;
 import com.devmind.session.model.SessionEntity;
-import com.devmind.session.model.SessionEvent;
+import com.devmind.common.agent.SessionEvent;
 import com.devmind.session.model.SessionEventEntity;
-import com.devmind.session.model.SessionState;
+import com.devmind.common.agent.runtime.SessionState;
 import com.devmind.session.model.SessionTemplateEntity;
 import com.devmind.session.repo.SessionEventRepository;
 import com.devmind.session.repo.SessionRepository;
 import com.devmind.session.repo.SessionTemplateRepository;
 import org.springframework.transaction.annotation.Transactional;
-import com.devmind.session.runtime.CliEventParser;
-import com.devmind.session.runtime.RemoteSessionRuntime;
-import com.devmind.session.runtime.RuntimeListener;
+import com.devmind.common.agent.runtime.CliEventParser;
+import com.devmind.common.agent.runtime.RemoteSessionRuntime;
+import com.devmind.common.agent.runtime.RuntimeListener;
 import com.devmind.session.runtime.SessionEventSaver;
-import com.devmind.session.runtime.SessionExecutor;
-import com.devmind.session.runtime.SessionHandle;
-import com.devmind.session.runtime.SessionRuntime;
+import com.devmind.common.agent.runtime.SessionExecutor;
+import com.devmind.common.agent.runtime.SessionHandle;
+import com.devmind.common.agent.runtime.SessionRuntime;
 import tools.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -254,7 +254,7 @@ public class SessionManagerService {
         Map<String, String> gitEnv = resolveGitEnv(identityService.currentActor(), project);
         if (remote) {
             AgentNodeConnector connector = requireConnector();
-            remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector, eventSaver, listener, props);
+            remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector, eventSaver, listener, props.toRuntimeSettings());
             // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
             runtimes.put(id, remoteRt);
             try {
@@ -307,7 +307,7 @@ public class SessionManagerService {
         if (remote) {
             handle = remoteRt;
         } else {
-            SessionRuntime rt = new SessionRuntime(id, proc, mapper, parser, eventSaver, listener, props);
+            SessionRuntime rt = new SessionRuntime(id, proc, mapper, parser, eventSaver, listener, props.toRuntimeSettings());
             runtimes.put(id, rt);
             rt.start();
             handle = rt;
@@ -391,7 +391,7 @@ public class SessionManagerService {
         if (ent.getAgentNodeId() != null && !ent.getAgentNodeId().isBlank()) {
             AgentNodeConnector connector = requireConnector();
             RemoteSessionRuntime rt = new RemoteSessionRuntime(id, ent.getAgentNodeId(), connector,
-                    eventSaver, listener, props);
+                    eventSaver, listener, props.toRuntimeSettings());
             runtimes.put(id, rt);
             try {
                 Project proj = resolveProject(ent.getProjectId());
@@ -429,7 +429,7 @@ public class SessionManagerService {
         } catch (IOException e) {
             throw new DevMindException(ErrorCode.INTERNAL, "恢复会话失败: " + e.getMessage(), e);
         }
-        SessionRuntime rt = new SessionRuntime(id, proc, mapper, parser, eventSaver, listener, props);
+        SessionRuntime rt = new SessionRuntime(id, proc, mapper, parser, eventSaver, listener, props.toRuntimeSettings());
         runtimes.put(id, rt);
         rt.start();
 

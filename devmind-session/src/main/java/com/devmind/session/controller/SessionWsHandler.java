@@ -1,6 +1,6 @@
 package com.devmind.session.controller;
 
-import com.devmind.session.model.SessionEvent;
+import com.devmind.common.agent.SessionEvent;
 import com.devmind.session.service.SessionManagerService;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;

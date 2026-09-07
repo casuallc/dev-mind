@@ -1,7 +1,8 @@
 package com.devmind.session.runtime;
 
+import com.devmind.common.agent.runtime.RuntimeEventSink;
 import com.devmind.session.config.SessionProperties;
-import com.devmind.session.model.SessionEvent;
+import com.devmind.common.agent.SessionEvent;
 import com.devmind.session.model.SessionEventEntity;
 import com.devmind.session.repo.SessionEventRepository;
 import jakarta.annotation.PostConstruct;
@@ -23,7 +24,7 @@ import java.util.concurrent.LinkedBlockingQueue;
  * 避免高频事件拖垮进程读取线程。
  */
 @Component
-public class SessionEventSaver {
+public class SessionEventSaver implements RuntimeEventSink {
 
     private static final Logger log = LoggerFactory.getLogger(SessionEventSaver.class);
 
@@ -61,6 +62,7 @@ public class SessionEventSaver {
         });
     }
 
+    @Override
     public void offer(String sessionId, SessionEvent ev) {
         SessionEventEntity e = new SessionEventEntity();
         e.setSessionId(sessionId);

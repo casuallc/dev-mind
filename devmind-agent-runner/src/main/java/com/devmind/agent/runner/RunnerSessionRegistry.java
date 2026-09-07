@@ -1,8 +1,8 @@
 package com.devmind.agent.runner;
 
-import com.devmind.session.model.SessionEvent;
-import com.devmind.session.proc.ProcessHelper;
-import com.devmind.session.runtime.CliEventParser;
+import com.devmind.common.agent.SessionEvent;
+import com.devmind.common.agent.runtime.ProcessHelper;
+import com.devmind.common.agent.runtime.CliEventParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

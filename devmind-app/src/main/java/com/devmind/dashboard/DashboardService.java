@@ -11,7 +11,7 @@ import com.devmind.project.repo.DesignRepository;
 import com.devmind.project.repo.RequirementRepository;
 import com.devmind.release.model.ReleaseEntity;
 import com.devmind.release.repo.ReleaseRepository;
-import com.devmind.session.model.SessionState;
+import com.devmind.common.agent.runtime.SessionState;
 import com.devmind.session.repo.SessionRepository;
 import com.devmind.test.model.TestRunEntity;
 import com.devmind.test.repo.TestRunRepository;

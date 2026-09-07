@@ -104,10 +104,9 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         if (pending != null) {
             pending.complete(new UpgradeAck(false, "disconnect", 0));
         }
-        AgentEventListener listener = listenerProvider.getIfAvailable();
-        if (listener != null) {
-            listener.onAgentDisconnected(nodeId);
-        }
+        // CAP-30：事件广播（原 getIfAvailable 单实现，chat 加入后有多实现）——各 bridge
+        // 按「自己是否持有该 sessionId 的运行时」自行忽略未命中帧
+        listenerProvider.forEach(l -> l.onAgentDisconnected(nodeId));
     }
 
     // ---------------- 上行帧处理 ----------------
@@ -117,26 +116,17 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         String nodeId = String.valueOf(node.getId());
         touch(nodeId);
         nodeService.updateMeta(node.getId(), os, capabilities, version);
-        AgentEventListener listener = listenerProvider.getIfAvailable();
-        if (listener != null) {
-            listener.onAgentHello(nodeId, activeSessionIds);
-        }
+        listenerProvider.forEach(l -> l.onAgentHello(nodeId, activeSessionIds));
     }
 
     public void onEvent(AgentNodeEntity node, AgentEventFrame frame) {
         touch(String.valueOf(node.getId()));
-        AgentEventListener listener = listenerProvider.getIfAvailable();
-        if (listener != null) {
-            listener.onAgentEvent(String.valueOf(node.getId()), frame);
-        }
+        listenerProvider.forEach(l -> l.onAgentEvent(String.valueOf(node.getId()), frame));
     }
 
     public void onExit(AgentNodeEntity node, String sessionId, int exitCode) {
         touch(String.valueOf(node.getId()));
-        AgentEventListener listener = listenerProvider.getIfAvailable();
-        if (listener != null) {
-            listener.onAgentExit(String.valueOf(node.getId()), sessionId, exitCode);
-        }
+        listenerProvider.forEach(l -> l.onAgentExit(String.valueOf(node.getId()), sessionId, exitCode));
     }
 
     public void onLaunchAck(String sessionId, boolean ok, String error) {
@@ -182,6 +172,10 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("taskSpec", cmd.taskSpec());
         frame.put("model", cmd.model());
         frame.put("permissionMode", cmd.permissionMode());
+        // CAP-30：会话种类（session 缺省 / chat=问答沙箱）；旧 runner 忽略该字段
+        if (cmd.kind() != null && !cmd.kind().isBlank()) {
+            frame.put("kind", cmd.kind());
+        }
         // CAP-24 修复：env 此前漏发（runner 侧读取逻辑已就绪，远程会话提交身份静默失效）
         if (cmd.env() != null && !cmd.env().isEmpty()) {
             frame.put("env", cmd.env());

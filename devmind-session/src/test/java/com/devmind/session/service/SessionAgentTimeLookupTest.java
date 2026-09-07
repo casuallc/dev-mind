@@ -1,7 +1,7 @@
 package com.devmind.session.service;
 
 import com.devmind.session.model.SessionEntity;
-import com.devmind.session.model.SessionState;
+import com.devmind.common.agent.runtime.SessionState;
 import com.devmind.session.repo.SessionRepository;
 import org.junit.jupiter.api.Test;
 

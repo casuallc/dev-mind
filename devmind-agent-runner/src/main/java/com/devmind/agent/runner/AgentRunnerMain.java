@@ -1,10 +1,10 @@
 package com.devmind.agent.runner;
 
-import com.devmind.session.config.SessionProperties;
-import com.devmind.session.runtime.CliEventParser;
-import com.devmind.session.runtime.CliProcessLauncher;
-import com.devmind.session.runtime.FakeProcessLauncher;
-import com.devmind.session.runtime.SessionExecutor;
+import com.devmind.common.agent.runtime.CliEventParser;
+import com.devmind.common.agent.runtime.CliProcessLauncher;
+import com.devmind.common.agent.runtime.FakeProcessLauncher;
+import com.devmind.common.agent.runtime.RuntimeSettings;
+import com.devmind.common.agent.runtime.SessionExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
@@ -22,8 +22,8 @@ import java.util.concurrent.TimeUnit;
 /**
  * CAP-21 agent runner 入口（瘦 jar，无 Spring）：
  * 反向 WS 连服务端 → 收 launch/input/authorize/finish/kill/suspend 指令 → 本地拉起
- * claude 子进程（复用 devmind-session 的 {@link CliProcessLauncher}/{@link CliEventParser}），
- * 解析后的事件流回传。
+ * claude 子进程（CLI 接触点 {@link CliProcessLauncher}/{@link CliEventParser} 已上移
+ * devmind-common 的 agent.runtime 包，CAP-30），解析后的事件流回传。
  *
  * <p>用法：{@code java -jar devmind-agent-runner.jar [agent.properties 路径]}（默认 ./agent.properties）。</p>
  */
@@ -40,16 +40,17 @@ public class AgentRunnerMain {
         log.info("devmind-agent-runner {} 启动，配置: {}", version, configFile.toAbsolutePath());
 
         ObjectMapper mapper = JsonMapper.builder().build();
-        SessionProperties sessionProps = new SessionProperties();
-        sessionProps.setClaudePath(config.claudePath());
-        sessionProps.setPermissionMode(config.permissionMode());
+        // CAP-30：内核参数从 Spring 配置类换成 RuntimeSettings 值对象（runner 无 Spring）
+        RuntimeSettings settings = RuntimeSettings.defaults()
+                .withClaudePath(config.claudePath())
+                .withPermissionMode(config.permissionMode());
         // executor=claude（默认）/ fake（内置假进程，自测/无 claude 环境）；
         // protocol（user message / permission_result 拼装）两种 executor 同 schema，恒用 CliProcessLauncher 构造器
-        CliProcessLauncher protocol = new CliProcessLauncher(sessionProps, mapper);
+        CliProcessLauncher protocol = new CliProcessLauncher(settings, mapper);
         SessionExecutor executor = "fake".equalsIgnoreCase(config.executor())
                 ? new FakeProcessLauncher()
                 : protocol;
-        CliEventParser parser = new CliEventParser(mapper, sessionProps);
+        CliEventParser parser = new CliEventParser(mapper, settings);
 
         ServerConnection[] connRef = new ServerConnection[1];
         RunnerSessionRegistry sessions = new RunnerSessionRegistry(parser, frame -> connRef[0].send(frame));

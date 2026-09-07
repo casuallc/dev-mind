@@ -1,5 +1,6 @@
 package com.devmind.session.config;
 
+import com.devmind.common.agent.runtime.RuntimeSettings;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -53,4 +54,9 @@ public class SessionProperties {
     public void setMaxEventBytes(int maxEventBytes) { this.maxEventBytes = maxEventBytes; }
     public String getOneshotPermissionMode() { return oneshotPermissionMode; }
     public void setOneshotPermissionMode(String oneshotPermissionMode) { this.oneshotPermissionMode = oneshotPermissionMode; }
+
+    /** CAP-30：转换为内核运行时参数（common.agent.runtime 与 Spring 配置解耦的桥梁）。 */
+    public RuntimeSettings toRuntimeSettings() {
+        return new RuntimeSettings(ringBuffer, idleTimeout, maxEventBytes, permissionMode, claudePath);
+    }
 }

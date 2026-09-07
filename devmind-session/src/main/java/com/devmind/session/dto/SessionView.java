@@ -1,6 +1,6 @@
 package com.devmind.session.dto;
 
-import com.devmind.session.model.SessionState;
+import com.devmind.common.agent.runtime.SessionState;
 
 import java.time.Instant;
 

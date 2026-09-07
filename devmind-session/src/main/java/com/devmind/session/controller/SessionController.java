@@ -6,7 +6,7 @@ import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.DiffView;
 import com.devmind.session.dto.InputRequest;
 import com.devmind.session.dto.SessionView;
-import com.devmind.session.model.SessionEvent;
+import com.devmind.common.agent.SessionEvent;
 import com.devmind.session.service.SessionManagerService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.DeleteMapping;
