@@ -1,8 +1,8 @@
 // 需求详情页（/projects/:id/requirements/:rid）：单条需求的研发主线。
-// 布局：返回按钮（层级浅，替代面包屑）+ 头卡（默认尺寸，标题栏更高）+ 白底 Tabs 卡。
+// 布局：头卡（默认尺寸，标题栏更高；extra 集中全部操作：验收/编辑/属性/Jira 操作/刷新/更多/返回列表）+ 白底 Tabs 卡。
 // 不设阶段引导卡：需求状态由工作单元 rollup 自动派生（全部完结 → ACCEPTANCE），验收按钮直接放头卡 extra。
 // AI 流程动作（分析/方案/拆分/拆分草稿）收进「更多」下拉保持可达，状态门禁以后端为准。
-// 属性面板非常驻：点「属性」按钮开右侧 Drawer（含 JiraActions）；需求描述默认全文展开。
+// 属性面板非常驻：点「属性」按钮开右侧 Drawer；需求描述默认全文展开。
 // Jira 来源：托管字段本地只读（表单禁用 + 服务端强制），属性面板显示 Jira key 链接与远端状态。
 import { useCallback, useEffect, useState } from 'react'
 import {
@@ -217,17 +217,6 @@ export default function RequirementDetailPage() {
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
-      <div>
-        <Button
-          type="text"
-          icon={<ArrowLeftOutlined />}
-          style={{ paddingLeft: 0 }}
-          onClick={() => navigate('/requirements')}
-        >
-          需求列表
-        </Button>
-      </div>
-
       <Row gutter={12}>
         <Col span={24}>
           <Card
@@ -251,25 +240,24 @@ export default function RequirementDetailPage() {
                 )}
                 <Button icon={<EditOutlined />} onClick={() => setEditOpen(true)}>编辑</Button>
                 <Button icon={<ProfileOutlined />} onClick={() => setPropsOpen(true)}>属性</Button>
+                {isJira && <JiraActions requirement={r} onChanged={reloadOverview} />}
+                <Button icon={<ReloadOutlined />} onClick={reloadOverview}>刷新</Button>
                 <Dropdown
                   menu={{
                     items: [
-                      { key: 'reload', label: '刷新', icon: <ReloadOutlined /> },
                       ...(!terminal ? [
-                        { type: 'divider' as const },
                         { key: 'analyze', label: r.status === 'DRAFT' ? '开始分析' : '重新分析', icon: <FileSearchOutlined />, disabled: flowBusy },
                         { key: 'design', label: '生成方案（AI）', icon: <FileDoneOutlined />, disabled: flowBusy },
                         { key: 'split', label: 'AI 拆分工作单元', icon: <ApartmentOutlined />, disabled: flowBusy },
                         { key: 'draft', label: '拆分草稿', icon: <PlayCircleOutlined /> },
+                        { type: 'divider' as const },
                       ] : []),
-                      { type: 'divider' as const },
                       { key: 'cancel', label: '取消需求', danger: true, disabled: !cancellable },
                       { key: 'delete', label: '删除', danger: true },
                     ],
                     onClick: ({ key }) => {
                       if (!projectId) return
-                      if (key === 'reload') reloadOverview()
-                      else if (key === 'cancel') confirmCancel()
+                      if (key === 'cancel') confirmCancel()
                       else if (key === 'delete') confirmDelete()
                       else if (key === 'draft') setDraftOpen(true)
                       else if (key === 'analyze') runFlow('分析', () => flowAnalyze(projectId, r.id))
@@ -280,6 +268,7 @@ export default function RequirementDetailPage() {
                 >
                   <Button>更多 <DownOutlined /></Button>
                 </Dropdown>
+                <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/requirements')}>返回列表</Button>
               </Space>
             }
           >
@@ -331,7 +320,7 @@ export default function RequirementDetailPage() {
 
       <Drawer
         title={`属性 · ${r.code}`}
-        width={380}
+        width={520}
         open={propsOpen}
         onClose={() => setPropsOpen(false)}
       >
@@ -390,11 +379,6 @@ export default function RequirementDetailPage() {
           <Descriptions.Item label="创建">{fmtTime(r.createdAt)}</Descriptions.Item>
           <Descriptions.Item label="更新">{fmtTime(r.updatedAt)}</Descriptions.Item>
         </Descriptions>
-        {isJira && (
-          <div style={{ marginTop: 12 }}>
-            <JiraActions requirement={r} onChanged={reloadOverview} />
-          </div>
-        )}
       </Drawer>
 
       {projectId && (

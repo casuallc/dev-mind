@@ -1,5 +1,5 @@
 // 需求详情页「工作单元」Tab：WI 表格（行内状态/起会话/编辑/删除）+ 新建/编辑弹窗。
-// 行内状态手动流转保留（WI 无引导流程，状态是需求 rollup 数据源）；需求完结（DONE/CANCELLED）后锁定。
+// 行内操作统一居中 Modal 二次确认（编辑走弹窗表单本身）；需求完结（DONE/CANCELLED）后锁定。
 import { useState } from 'react'
 import { Button, Dropdown, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -73,14 +73,23 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, lock
     }
   }
 
-  const advance = async (w: WorkItem, status: WorkItemStatus) => {
-    try {
-      await updateWorkItemStatus(projectId, requirementId, w.id, status)
-      await onChanged()
-      message.success(`${w.code} → ${status}`)
-    } catch (e) {
-      message.error((e as Error).message)
-    }
+  const advance = (w: WorkItem, status: WorkItemStatus) => {
+    Modal.confirm({
+      centered: true,
+      title: '变更工作单元状态？',
+      content: `「${w.code} ${w.title}」将标记为 ${status}。`,
+      okText: '确认',
+      cancelText: '返回',
+      onOk: async () => {
+        try {
+          await updateWorkItemStatus(projectId, requirementId, w.id, status)
+          await onChanged()
+          message.success(`${w.code} → ${status}`)
+        } catch (e) {
+          message.error((e as Error).message)
+        }
+      },
+    })
   }
 
   const confirmDelete = (w: WorkItem) => {
@@ -99,15 +108,24 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, lock
     })
   }
 
-  // CAP-14：工作单元一键起会话（spec 由后端自动带入 taskSpec），成功后跳会话详情
-  const startSession = async (w: WorkItem) => {
-    try {
-      const s = await startWorkItemSession(projectId, w.id)
-      message.success(`${w.code} 会话已启动`)
-      navigate(`/sessions/${s.id}`)
-    } catch (e) {
-      message.error((e as Error).message)
-    }
+  // CAP-14：工作单元一键起会话（spec 由后端自动带入 taskSpec），确认后启动并跳会话详情
+  const startSession = (w: WorkItem) => {
+    Modal.confirm({
+      centered: true,
+      title: '起会话？',
+      content: `将为「${w.code} ${w.title}」启动 agent 会话（执行输入取工作单元 spec），启动后跳转会话详情。`,
+      okText: '起会话',
+      cancelText: '返回',
+      onOk: async () => {
+        try {
+          const s = await startWorkItemSession(projectId, w.id)
+          message.success(`${w.code} 会话已启动`)
+          navigate(`/sessions/${s.id}`)
+        } catch (e) {
+          message.error((e as Error).message)
+        }
+      },
+    })
   }
 
   const columns: ColumnsType<WorkItem> = [
