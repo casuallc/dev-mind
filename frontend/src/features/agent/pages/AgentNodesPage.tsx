@@ -418,7 +418,7 @@ function NodeDrawer({
       onOk: doUpgrade,
     })
 
-  const onSetDefault = (isDefault: boolean) =>
+  const doSetDefault = (isDefault: boolean) =>
     run(async () => {
       if (isDefault) {
         await setAgentNodeDefault(node.id)
@@ -430,7 +430,20 @@ function NodeDrawer({
       onChanged()
     })
 
-  const onToggleEnable = () =>
+  // 默认节点影响全平台会话调度，设/取消都需二次确认
+  const onSetDefault = (isDefault: boolean) =>
+    Modal.confirm({
+      centered: true,
+      title: isDefault ? `将「${node.name}」设为平台默认节点？` : `取消「${node.name}」的平台默认？`,
+      content: isDefault
+        ? '会话/项目未指定节点时将调度到该节点（全平台至多一个，原有默认会被替换）。'
+        : '取消后未指定节点的会话将回落到服务端本机执行（本机无 claude 时创建会话会失败）。',
+      okText: isDefault ? '设为默认' : '取消默认',
+      cancelText: '再想想',
+      onOk: () => doSetDefault(isDefault),
+    })
+
+  const doToggleEnable = () =>
     run(async () => {
       if (node.status === 'DISABLED') {
         await enableAgentNode(node.id)
@@ -441,6 +454,23 @@ function NodeDrawer({
       }
       onChanged()
     })
+
+  // 启用无害直接执行；禁用会切断调度，需二次确认
+  const onToggleEnable = () => {
+    if (node.status === 'DISABLED') {
+      void doToggleEnable()
+      return
+    }
+    Modal.confirm({
+      centered: true,
+      title: `禁用节点「${node.name}」？`,
+      content: '禁用后新会话不再调度到该节点，其运行中会话不受影响。',
+      okText: '禁用',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: doToggleEnable,
+    })
+  }
 
   const doDelete = () =>
     run(async () => {
