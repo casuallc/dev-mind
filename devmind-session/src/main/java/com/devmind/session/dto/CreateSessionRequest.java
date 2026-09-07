@@ -13,8 +13,8 @@ import jakarta.validation.constraints.NotBlank;
  * @param baseBranch     基准分支（可选，默认项目/配置）
  * @param model          模型（可选，覆盖全局）
  * @param permissionMode 权限模式（可选，覆盖全局）
- * @param agentNodeId    CAP-21 远程执行节点 ID（可选；空 = 本地子进程；
- *                       保留值 "local" = 强制本地，忽略项目/平台默认节点——one-shot 总结类会话用）
+ * @param agentNodeId    CAP-21 远程执行节点 ID（可选；空 = 跟随项目默认 → 平台默认节点，皆无才落本地子进程；
+ *                       保留值 "local" = 强制本地，忽略项目/平台默认节点）
  */
 public record CreateSessionRequest(
         String templateCode,

@@ -46,11 +46,13 @@ public class SessionOneShotRunner implements OneShotAgentRunner {
 
     @Override
     public Result run(String prompt, int timeoutSeconds) {
-        // 无 projectId/workItemId 裸跑；permissionMode 显式传 one-shot 专用值；
-        // agentNodeId="local" 保留值强制本机（平台默认远程节点会把总结任务跑偏到离线节点）
+        // 无 projectId/workItemId 裸跑；permissionMode 显式传 one-shot 专用值。
+        // agentNodeId 传 null 走正常路由（平台默认节点优先，无默认节点才落本机）——
+        // 服务端部署在无 claude 的机器时总结任务由默认 agent runner 执行；节点离线时
+        // launch 抛 CONFLICT，错误会落到调用方的失败通知，不再静默跑偏。
         String sessionId = sessions.create(new CreateSessionRequest(
                 null, null, null, null, prompt, null, null,
-                props.getOneshotPermissionMode(), "local")).id();
+                props.getOneshotPermissionMode(), null)).id();
         try {
             sessions.finish(sessionId);
         } catch (Exception e) {

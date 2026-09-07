@@ -190,7 +190,8 @@ worklog.daily.generated / worklog.weekly.generated / worklog.jira.worklogged
 |------|------|------|
 | generate 提交 200 但报告一直不出现 | 生成是异步的：查 `GET /api/sessions` 最近一条无项目会话的状态；FAILED 且看服务日志 `报告生成失败:` 前缀 | 按下方分项处理 |
 | one-shot 会话秒 FAILED（createdAt==finishedAt） | fake 执行器脚本损坏（fake-agent.js 语法错误 node 秒退）或 claude 不在 PATH | fake 模式下 `node` 直接跑一遍 `devmind-session/src/main/resources/session/fake-agent.js` 验证；真实模式确认 claude CLI 可用 |
-| 报「节点不在线」 | one-shot 会话曾随平台默认远程节点派发；已修为 `agentNodeId="local"` 保留值强制本机 | 升级到此修复后版本；远端节点场景不要用 one-shot |
+| 报「节点不在线」 | one-shot 会话跟随平台默认节点派发（服务端无 claude 的部署正是靠默认 agent runner 执行 AI 任务），默认节点离线时 launch 抛 409 | 让默认节点 runner 上线重连；或摘掉默认节点让 one-shot 回落本机（本机需装 claude） |
+| 报「Cannot run program "claude" ... error=2」 | 无一-shot 可用的执行体：未配平台默认节点且本机未装 claude（或不在服务进程 PATH） | 注册一个默认 agent runner（推荐）；或在本机装 claude 并配置 `devmind.session.claude-path` 绝对路径 |
 | git 预览为空 | author 过滤不匹配：扫描按「我的 Git 凭证」（CAP-24）里该 host 的署名邮箱过滤 | 在 /me/git-credentials 配置与提交一致的署名；或仓库 remoteUrl 缺失导致无法推断 host（登记时补上） |
 | git 提交中文主题乱码 | Windows git 默认按本地编码输出 log | 扫描已显式带 `-c i18n.logOutputEncoding=UTF-8 --encoding=UTF-8` 且按 UTF-8 字节解码；仍乱码检查仓库本身提交编码 |
 | 已确认（CONFIRMED）报告 force 重生成不生效 | 设计如此：force 仅覆盖 DRAFT；异步任务内抛 409 记 warn 日志，报告保持 CONFIRMED | 先确认无误再定稿；确需重生成需先改回草稿（当前未开放，走库操作） |

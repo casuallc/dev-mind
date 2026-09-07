@@ -217,7 +217,7 @@ public class SessionManagerService {
         // CAP-21：有效执行节点优先级 = 请求显式指定 > 项目默认 > 平台默认（agent_nodes.is_default），
         // 全空 = 本机。平台默认适配「服务端部署在无 AI 能力的机器」场景（节点离线时 launch 409 报错，
         // 不静默回落本机起失败进程）
-        // CAP-28：保留值 "local" = 强制本机（one-shot 总结会话不随平台默认节点跑偏到远程）
+        // CAP-28：保留值 "local" = 强制本机，忽略项目/平台默认节点（保留给需要钉死本机的调用方）
         boolean forceLocal = "local".equalsIgnoreCase(req.agentNodeId());
         String agentNodeId = forceLocal ? null
                 : req.agentNodeId() != null && !req.agentNodeId().isBlank()
