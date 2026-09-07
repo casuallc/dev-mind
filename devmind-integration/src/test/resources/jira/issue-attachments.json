@@ -1,0 +1,25 @@
+{
+  "key": "PROJ-1",
+  "fields": {
+    "summary": "登录页报错",
+    "attachment": [
+      {
+        "id": "10201",
+        "filename": "截图 2026-09-01.png",
+        "mimeType": "image/png",
+        "content": "https://jira.example.com/secure/attachment/10201/%E6%88%AA%E5%9B%BE+2026-09-01.png"
+      },
+      {
+        "id": "10202",
+        "filename": "日志.txt",
+        "mimeType": "text/plain",
+        "content": "https://jira.example.com/secure/attachment/10202/%E6%97%A5%E5%BF%97.txt"
+      },
+      {
+        "id": "10203",
+        "filename": "无mime.bin",
+        "content": "https://jira.example.com/secure/attachment/10203/%E6%97%A0mime.bin"
+      }
+    ]
+  }
+}

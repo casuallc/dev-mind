@@ -87,6 +87,32 @@ public final class JiraIssueMapper {
                 seconds(f, "timespent"));
     }
 
+    /**
+     * CAP-19 FR-09：issue fields 下的 attachment 数组按文件名精确匹配（描述 wiki 标记
+     * {@code !name.png!} 按文件名引用附件），返回内容直链与 mime；数组缺失/未命中返回 null。
+     * 同名附件（Jira 允许）取首个，与 Jira 自身 wiki 渲染行为一致。
+     */
+    static AttachmentRef toAttachmentRef(JsonNode issueFields, String filename) {
+        if (issueFields == null || filename == null || filename.isBlank()) {
+            return null;
+        }
+        JsonNode arr = issueFields.get("attachment");
+        if (arr == null || !arr.isArray()) {
+            return null;
+        }
+        for (JsonNode a : arr) {
+            if (filename.equals(text(a, "filename"))) {
+                String contentUrl = text(a, "content");
+                return contentUrl != null ? new AttachmentRef(contentUrl, text(a, "mimeType")) : null;
+            }
+        }
+        return null;
+    }
+
+    /** 附件引用：contentUrl=Jira 返回的内容绝对地址（/secure/attachment/{id}/{name}），mimeType 可空 */
+    record AttachmentRef(String contentUrl, String mimeType) {
+    }
+
     /** time tracking 字段（秒）：数值取 long，null/非数值（实例未启用工时跟踪）返回 null */
     private static Long seconds(JsonNode fields, String field) {
         JsonNode v = fields == null ? null : fields.get(field);

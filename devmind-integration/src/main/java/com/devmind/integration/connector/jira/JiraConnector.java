@@ -25,7 +25,8 @@ import java.util.List;
 /**
  * Jira Server/DC 连接器（/rest/api/2）。认证按集成配置：
  * PAT（8.14+，Bearer 头）/ BASIC（8.13 及更早，Basic base64(user:password)）。
- * 读：拉取 issue / 工作流转换清单；写：仅限 transitions / worklog 端点（CAP-19 FR-08 状态回写、
+ * 读：拉取 issue / 工作流转换清单 / 附件内容（CAP-19 FR-09 描述图片代理）；
+ * 写：仅限 transitions / worklog 端点（CAP-19 FR-08 状态回写、
  * CAP-27 工时登记），git 动词不支持。
  * 与 GitLabConnector 同一手法：查询参数自行 URL 编码后拼完整 URI，
  * 避开 RestClient URI 模板展开的二次编码。
@@ -154,6 +155,41 @@ public class JiraConnector implements IntegrationConnector {
         } catch (RestClientResponseException e) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "Jira 工时登记失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
+        }
+    }
+
+    /**
+     * CAP-19 FR-09：issue 附件内容拉取（描述 wiki 图片标记 !name.png! 的按需代理数据源）。
+     * 两步：先取 issue 的 attachment 元数据按文件名定位内容直链，再以同一凭据拉字节流。
+     */
+    @Override
+    public IssueAttachment fetchIssueAttachment(IntegrationEntity cfg, String token, String issueKey,
+                                                String filename) {
+        JiraIssueMapper.AttachmentRef ref;
+        try {
+            JsonNode body = client(cfg, token).get()
+                    .uri(uri(cfg, "/issue/" + encodeKey(issueKey) + "?fields=attachment"))
+                    .retrieve().body(JsonNode.class);
+            ref = JiraIssueMapper.toAttachmentRef(body == null ? null : body.get("fields"), filename);
+        } catch (RestClientResponseException e) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "拉取 Jira 附件清单失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
+        }
+        if (ref == null) {
+            throw new DevMindException(ErrorCode.NOT_FOUND,
+                    "Jira issue " + issueKey + " 无附件: " + filename);
+        }
+        try {
+            byte[] bytes = client(cfg, token).get().uri(URI.create(ref.contentUrl()))
+                    .retrieve().body(byte[].class);
+            if (bytes == null || bytes.length == 0) {
+                throw new DevMindException(ErrorCode.NOT_FOUND,
+                        "Jira 附件内容为空: " + issueKey + " " + filename);
+            }
+            return new IssueAttachment(bytes, ref.mimeType());
+        } catch (RestClientResponseException e) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "拉取 Jira 附件内容失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
         }
     }
 

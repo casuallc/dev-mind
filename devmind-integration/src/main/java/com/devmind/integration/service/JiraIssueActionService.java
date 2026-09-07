@@ -71,6 +71,20 @@ public class JiraIssueActionService {
                 .toList();
     }
 
+    /**
+     * CAP-19 FR-09：需求关联 issue 的附件内容（描述 wiki 图片标记的按需代理）。
+     * 读操作，与 listTransitions 同口径——不 recordCall 不审计。
+     */
+    public IntegrationConnector.IssueAttachment loadAttachment(String projectId, String requirementId,
+                                                             String filename) {
+        if (filename == null || filename.isBlank()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "附件文件名不能为空");
+        }
+        Ref ref = resolve(projectId, requirementId);
+        return jiraConnector().fetchIssueAttachment(ref.integration(),
+                integrationService.tokenOf(ref.integration()), ref.link().getExternalKey(), filename.trim());
+    }
+
     /** 执行转换：安全闸校验 → 回写 Jira → 单条刷新（托管字段 + link.status）→ 审计/事件 */
     public JiraTransitionResultView transit(String projectId, String requirementId, String transitionId) {
         if (transitionId == null || transitionId.isBlank()) {

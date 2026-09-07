@@ -94,6 +94,30 @@ class JiraIssueMapperTest {
     }
 
     @Test
+    void 附件按文件名精确匹配() throws Exception {
+        JsonNode fields = fixture("issue-attachments.json").get("fields");
+        var ref = JiraIssueMapper.toAttachmentRef(fields, "截图 2026-09-01.png");
+        assertEquals("https://jira.example.com/secure/attachment/10201/%E6%88%AA%E5%9B%BE+2026-09-01.png",
+                ref.contentUrl());
+        assertEquals("image/png", ref.mimeType());
+        // mimeType 缺失时容忍（content 直链仍在）
+        var noMime = JiraIssueMapper.toAttachmentRef(fields, "无mime.bin");
+        assertEquals("https://jira.example.com/secure/attachment/10203/%E6%97%A0mime.bin",
+                noMime.contentUrl());
+        assertNull(noMime.mimeType());
+    }
+
+    @Test
+    void 附件未命中与空值安全() throws Exception {
+        JsonNode fields = fixture("issue-attachments.json").get("fields");
+        assertNull(JiraIssueMapper.toAttachmentRef(fields, "不存在.png"));
+        assertNull(JiraIssueMapper.toAttachmentRef(fields, null));
+        assertNull(JiraIssueMapper.toAttachmentRef(fields, "  "));
+        assertNull(JiraIssueMapper.toAttachmentRef(null, "截图 2026-09-01.png"));
+        assertNull(JiraIssueMapper.toAttachmentRef(mapper.readTree("{}"), "截图 2026-09-01.png"));
+    }
+
+    @Test
     void 时间解析覆盖无冒号与标准ISO两种偏移() {
         assertEquals(Instant.parse("2026-08-28T01:00:00Z"),
                 JiraIssueMapper.parseTime("2026-08-28T09:00:00.000+0800"));

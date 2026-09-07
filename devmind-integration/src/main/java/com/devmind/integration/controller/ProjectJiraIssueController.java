@@ -1,22 +1,31 @@
 package com.devmind.integration.controller;
 
+import com.devmind.integration.connector.IntegrationConnector;
 import com.devmind.integration.dto.JiraTransitionRequest;
 import com.devmind.integration.dto.JiraTransitionResultView;
 import com.devmind.integration.dto.JiraTransitionView;
 import com.devmind.integration.dto.JiraWorklogRequest;
 import com.devmind.integration.dto.JiraWorklogResultView;
 import com.devmind.integration.service.JiraIssueActionService;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
- * CAP-19 FR-08 项目作用域 Jira issue 操作端点：工作流转换清单 + 执行转换（平台侧状态回写）。
+ * CAP-19 项目作用域 Jira issue 操作端点：FR-08 工作流转换（平台侧状态回写）、
+ * CAP-27 工时登记、FR-09 附件内容代理（描述图片按需拉取）。
  */
 @RestController
 @RequestMapping("/api/projects/{pid}/requirements/{rid}/jira")
@@ -46,5 +55,24 @@ public class ProjectJiraIssueController {
     public JiraWorklogResultView logWork(@PathVariable String pid, @PathVariable String rid,
                                          @RequestBody JiraWorklogRequest req) {
         return service.logWork(pid, rid, req.seconds(), req.comment());
+    }
+
+    /**
+     * CAP-19 FR-09：issue 附件内容代理（描述 wiki 图片 !name.png! 的按需数据源）。
+     * inline + 短缓存；文件名走 query 参数（避开中文/空格进路径段的编码坑）。
+     * 图片经 <img src="...?access_token="> 访问（JwtAuthFilter GET 回退），无需自定义头。
+     */
+    @GetMapping("/attachments")
+    public ResponseEntity<byte[]> attachment(@PathVariable String pid, @PathVariable String rid,
+                                             @RequestParam("name") String name) {
+        IntegrationConnector.IssueAttachment attachment = service.loadAttachment(pid, rid, name);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(
+                        attachment.mimeType() != null && !attachment.mimeType().isBlank()
+                                ? attachment.mimeType() : MediaType.APPLICATION_OCTET_STREAM_VALUE))
+                .contentLength(attachment.content().length)
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.inline().build().toString())
+                .cacheControl(CacheControl.maxAge(5, TimeUnit.MINUTES).cachePrivate())
+                .body(attachment.content());
     }
 }

@@ -55,6 +55,15 @@ public interface IntegrationConnector {
     }
 
     /**
+     * 拉取 issue 附件内容（CAP-19 FR-09；issue 跟踪型平台如 Jira）。
+     * 只读操作——filename 为描述 wiki 标记（!name.png!）引用的附件文件名，按名精确匹配。
+     */
+    default IssueAttachment fetchIssueAttachment(IntegrationEntity cfg, String token, String issueKey,
+                                                 String filename) {
+        throw new DevMindException(ErrorCode.BAD_REQUEST, type() + " 不支持 issue 附件拉取");
+    }
+
+    /**
      * 登记工时（CAP-27；issue 跟踪型平台如 Jira）。**写操作**——与 transitions 同属回写通道，
      * comment 可空。seconds 为本次登记的工时秒数（Jira worklog timeSpentSeconds）。
      */
@@ -91,4 +100,7 @@ public interface IntegrationConnector {
 
     /** issue 工作流转换（CAP-19 FR-08）：id=转换 id（执行时回传），name=转换名，toStatus=目标状态名 */
     record IssueTransition(String id, String name, String toStatus) {}
+
+    /** issue 附件内容（CAP-19 FR-09）：原始字节 + mime 类型（Jira 附件元数据给出） */
+    record IssueAttachment(byte[] content, String mimeType) {}
 }
