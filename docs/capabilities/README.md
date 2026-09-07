@@ -47,6 +47,7 @@
 | [CAP-29](CAP-29-global-git-repo-registry.md) | 全局代码仓库登记 | 平台层 | 仓库提升为平台级资源：后台统一登记（仅 ADMIN）+ 服务端克隆 + 定时/手动 fetch 同步分支，项目仓库改为关联、CAP-28 订阅扫描切到服务端克隆 |
 | [CAP-30](CAP-30-agent-chat.md) | 通用问答 | 底座 | 无项目无仓库的纯 AI 问答独立成能力（个人组入口），共享内核上移 common，干净沙箱 cwd |
 | [CAP-31](CAP-31-session-multirepo.md) | 项目会话多仓库与归属拆分 | 底座 | 会话收敛为纯项目开发会话（当前项目组）+ 显式关联多 git 仓库（聚合目录/逐库 push/diff），远程 diff 走服务端克隆 |
+| [CAP-32](CAP-32-attachment.md) | 公共附件管理 | 底座 | 统一附件模型：二进制上传即附件、唯一字符串 id 对外引用，图片内联渲染（图床）/非图片下载，chat 图片下发 claude、docs 粘贴插图 |
 
 ## 依赖关系
 
@@ -86,6 +87,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-28 个人工时依赖 CAP-01/05/06/24：全局仓库登记 + 用户勾选，git log 按 CAP-24 署名过滤成工作条目，日报/周报经 OneShotAgentRunner 端口（common 定义、session 实现）跑 headless claude 生成草稿，事件走 CAP-06 通知；FR-07 Jira 一键操作另依赖 CAP-19/27。
 - CAP-30 通用问答依赖 CAP-01/06/21：headless 会话内核（状态机/事件流/CLI 协议）上移至 devmind-common 被 session/chat 共享；问答独立 chat_sessions/chat_events 表与个人组入口，无项目资产耦合。
 - CAP-31 会话多仓库依赖 CAP-05/21/24/25/29：会话收敛为当前项目开发会话，session_repos 快照表关联多库（聚合目录工作区），launch 帧 repos 数组逐库下发凭据，远程 diff 经服务端克隆 fetch 会话分支后比对。
+- CAP-32 公共附件管理依赖 CAP-01/21/30：统一附件表 + 本地磁盘存储 + 唯一字符串 id 引用，scope 归属可见性；chat 图片消息经 AttachmentContentResolver SPI（common 定义）解析下发 claude，远程节点 input 帧内嵌 base64 送达 runner；docs 编辑器粘贴插图。
 
 ## 组装方式（后续流程层）
 
