@@ -6,6 +6,7 @@ const SELECT_PREFIXES: Array<[string, string]> = [
   ['/projects/', '/requirements'], // /projects/:id/requirements/:rid → 需求
   ['/sessions/', '/sessions'],
   ['/chats', '/chats'],
+  ['/attachments', '/attachments'],
   ['/worklog', '/worklog'],
   ['/requirements', '/requirements'],
   ['/builds', '/builds'],

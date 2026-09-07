@@ -12,6 +12,7 @@ import {
   RocketOutlined,
   FieldTimeOutlined,
   CommentOutlined,
+  PaperClipOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useSyncExternalStore } from 'react'
@@ -75,6 +76,7 @@ export default function AppLayout() {
               children: [
                 { key: '/worklog', icon: <FieldTimeOutlined />, label: '工作日志' },
                 { key: '/chats', icon: <CommentOutlined />, label: 'AI 问答' },
+                { key: '/attachments', icon: <PaperClipOutlined />, label: '附件管理' },
               ],
             },
             {
