@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Dev-Mind 分发包日志配置（bin/dev-mind 以 logging.config=file:config/logback-spring.xml 加载）。
+  文件输出 logs/dev-mind.log：按天滚动 + 单文件超 50MB 再切分，历史文件 gzip 压缩，
+  保留 30 天、总量上限 3GB（超出从最旧开始清）。相对路径基于启动目录（APP_HOME）。
+  改日志级别：改下方 root 的 level，或启动参数 logging.level.xxx=DEBUG。
+  注意：XML 注释内禁止出现连续两个连字符，编辑注释时勿写命令行参数原样的双横线前缀。
+-->
+<configuration>
+    <!-- Spring Boot 默认 pattern/转换规则与 CONSOLE appender（前台 run 模式输出到终端） -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <property name="LOG_DIR" value="${LOG_DIR:-logs}"/>
+
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/dev-mind.log</file>
+        <encoder>
+            <pattern>${FILE_LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <!-- 按天滚动，同一天超 maxFileSize 以 %i 序号再切；归档 gz 压缩 -->
+            <fileNamePattern>${LOG_DIR}/dev-mind.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>3GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+</configuration>

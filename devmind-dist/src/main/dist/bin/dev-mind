@@ -27,7 +27,9 @@ BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_HOME="$(cd "${BIN_DIR}/.." && pwd)"
 PID_FILE="${APP_HOME}/data/${APP_NAME}.pid"
 LOG_DIR="${APP_HOME}/logs"
-LOG_FILE="${LOG_DIR}/${APP_NAME}.log"
+# 应用日志由 config/logback-spring.xml 的滚动 appender 写 logs/dev-mind.log（按天+50MB 切分、gz、留 30 天/3GB）。
+# console.out 仅捕获裸 stdout/stderr（JVM 崩溃、logback 初始化前的输出 + console appender 回声），每次 start 覆盖重写防无限增长。
+CONSOLE_LOG="${LOG_DIR}/console.out"
 
 # Port resolution: DEVMIND_PORT env > config/application-local.yml > config/application.yml > 8080
 # (yml parsing takes the first "port:" value, which is server.port in the shipped configs)
@@ -55,7 +57,7 @@ health_url() {
 DEFAULT_JVM_OPTS="-Xms512m -Xmx1024m -XX:+UseG1GC"
 JVM_OPTS="${JAVA_OPTS:-$DEFAULT_JVM_OPTS}"
 EXTRA_OPTS="${EXTRA_OPTS:-}"
-SPRING_OPTS="--spring.config.additional-location=optional:file:config/"
+SPRING_OPTS="--spring.config.additional-location=optional:file:config/ --logging.config=file:config/logback-spring.xml"
 
 usage() {
     sed -n '2,20p' "$0"
@@ -118,23 +120,23 @@ do_start() {
     mkdir -p data "$LOG_DIR"
     echo "starting ${APP_NAME} (home=$APP_HOME java=$java_bin)..."
     # shellcheck disable=SC2086
-    nohup "$java_bin" $JVM_OPTS -cp "libs/*" "$MAIN_CLASS" $SPRING_OPTS $EXTRA_OPTS >>"$LOG_FILE" 2>&1 &
+    nohup "$java_bin" $JVM_OPTS -cp "libs/*" "$MAIN_CLASS" $SPRING_OPTS $EXTRA_OPTS >"$CONSOLE_LOG" 2>&1 &
     echo $! >"$PID_FILE"
     local waited=0
     while [[ $waited -lt $START_TIMEOUT ]]; do
         if ! is_running; then
-            echo "ERROR: process died during startup, see $LOG_FILE" >&2
+            echo "ERROR: process died during startup, see $CONSOLE_LOG" >&2
             rm -f "$PID_FILE"
             exit 1
         fi
         if curl -s -o /dev/null -w '%{http_code}' "$(health_url)" 2>/dev/null | grep -q 200; then
-            echo "${APP_NAME} started (pid $(get_pid)), log: $LOG_FILE"
+            echo "${APP_NAME} started (pid $(get_pid)), log: ${LOG_DIR}/dev-mind.log (console: $CONSOLE_LOG)"
             exit 0
         fi
         sleep 2
         waited=$((waited + 2))
     done
-    echo "ERROR: health check timeout after ${START_TIMEOUT}s ($(health_url)), see $LOG_FILE" >&2
+    echo "ERROR: health check timeout after ${START_TIMEOUT}s ($(health_url)), see ${LOG_DIR}/dev-mind.log" >&2
     exit 1
 }
 

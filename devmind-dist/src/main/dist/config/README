@@ -3,6 +3,10 @@ Dev-Mind 配置目录
 
 application.yml 是随包发布的默认配置，可直接修改。
 
+logback-spring.xml 是日志配置（启动脚本以 --logging.config 加载）：
+应用日志写 ../logs/dev-mind.log，按天滚动、单文件超 50MB 再切分，
+历史文件 gz 压缩，保留 30 天、总量上限 3GB。改级别改文件内 root level。
+
 本机专属覆盖（推荐）：在本目录新建 application-local.yml ——
 application.yml 中 spring.profiles.default=local，同目录下的
 application-local.yml 会被自动加载且优先级更高。机器相关的路径
