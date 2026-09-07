@@ -1,11 +1,15 @@
 // 对话交互面板（CAP-30 由 sessions 上移并 apiBase 参数化）：授权请求条 + ChatStream 消息流 + 底部输入区。
 // 项目会话（apiBase=/sessions）与通用问答（/chats）共用；内部自管 WS 实时流（活跃态）与 REST 历史回退（终态）。
+// CAP-32：allowImages=true 时输入区支持粘贴/拖拽/选择图片（上传 CAP-32 附件模块后随消息发送）。
+// 仅问答传入——项目会话后端链路未接，显式门控防"上传成功但 agent 没收到"。
 // effect 依赖只用 summary.id/summary.state 标量——summary 对象可能来自轮询，引用每次变化。
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Card, Input, message, Space, Typography } from 'antd'
-import { SendOutlined } from '@ant-design/icons'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Button, Card, Image, Input, message, Space, Typography } from 'antd'
+import { CloseOutlined, PaperClipOutlined, SendOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
-import type { ChatApiBase, ChatEvent, ChatSummaryBase, StreamMeta } from './types'
+import { uploadAttachment, type AttachmentView } from '../attachments/api'
+import { attachmentRawUrl } from '../attachments/url'
+import type { ChatApiBase, ChatEvent, ChatImageAttachment, ChatSummaryBase, StreamMeta } from './types'
 import { useChatStream } from './useChatStream'
 import { ACTIVE_STATES } from './stateMeta'
 import ChatStream from './ChatStream'
@@ -14,6 +18,7 @@ export default function ChatPanel({
   summary,
   apiBase,
   maxHeight = '56vh',
+  allowImages = false,
   onChanged,
   onStreamMeta,
 }: {
@@ -21,6 +26,8 @@ export default function ChatPanel({
   /** REST/WS 路径前缀：项目会话 '/sessions'，通用问答 '/chats' */
   apiBase: ChatApiBase
   maxHeight?: number | string
+  /** CAP-32：是否允许发送图片附件（仅 /chats 后端链路支持） */
+  allowImages?: boolean
   /** 授权/发送后通知外部刷新摘要 */
   onChanged?: () => void
   /** 实时流连接状态回传（外层做徽标） */
@@ -28,6 +35,9 @@ export default function ChatPanel({
 }) {
   const [pendingReq, setPendingReq] = useState<ChatEvent | null>(null)
   const [inputText, setInputText] = useState('')
+  const [pendingImages, setPendingImages] = useState<AttachmentView[]>([])
+  const [uploading, setUploading] = useState(0)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [baseEvents, setBaseEvents] = useState<ChatEvent[]>([])
 
   const isLive = ACTIVE_STATES.includes(summary.state)
@@ -63,14 +73,50 @@ export default function ChatPanel({
     setPendingReq(req ?? null)
   }, [events, summary.state])
 
+  // CAP-32：图片入队即上传（发送时只带附件 id）；非图片提示后忽略（chat 链路仅支持图片）
+  const addImageFiles = useCallback(
+    (files: Iterable<File>) => {
+      for (const file of files) {
+        if (!file.type.startsWith('image/')) {
+          message.warning(`仅支持图片附件，已忽略：${file.name}`)
+          continue
+        }
+        setUploading((n) => n + 1)
+        uploadAttachment(file, file.name)
+          .then((v) => setPendingImages((prev) => [...prev, v]))
+          .catch((e) => message.error(`图片上传失败：${(e as Error).message}`))
+          .finally(() => setUploading((n) => n - 1))
+      }
+    },
+    [],
+  )
+
+  const onPaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (!allowImages) return
+      const files = Array.from(e.clipboardData?.files ?? [])
+      if (files.length > 0) {
+        e.preventDefault()
+        addImageFiles(files)
+      }
+    },
+    [allowImages, addImageFiles],
+  )
+
   const onSend = useCallback(
     (text: string) => {
       const t = text.trim()
-      if (!t) return
-      input(t)
+      if (!t && pendingImages.length === 0) return
+      const images: ChatImageAttachment[] = pendingImages.map((v) => ({
+        attachmentId: v.attachmentId,
+        name: v.originalName,
+        contentType: v.contentType,
+      }))
+      input(t, images)
       setInputText('')
+      setPendingImages([])
     },
-    [input],
+    [input, pendingImages],
   )
 
   const onAuthorize = useCallback(
@@ -140,7 +186,43 @@ export default function ChatPanel({
         maxHeight={maxHeight}
         emptyText={`等待事件…（${fatal ? '会话已结束' : connected ? '连接正常' : '重连中'}）`}
       />
-      <div style={{ borderTop: '1px solid #f0f0f0', marginTop: 8, paddingTop: 12 }}>
+      <div
+        style={{ borderTop: '1px solid #f0f0f0', marginTop: 8, paddingTop: 12 }}
+        onDragOver={allowImages ? (e) => e.preventDefault() : undefined}
+        onDrop={
+          allowImages
+            ? (e) => {
+                e.preventDefault()
+                if (canInput) addImageFiles(Array.from(e.dataTransfer?.files ?? []))
+              }
+            : undefined
+        }
+      >
+        {/* 待发送图片缩略图横条 */}
+        {pendingImages.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+            {pendingImages.map((img) => (
+              <div key={img.attachmentId} style={{ position: 'relative' }}>
+                <Image
+                  src={attachmentRawUrl(img.attachmentId)}
+                  alt={img.originalName}
+                  width={56}
+                  height={56}
+                  style={{ objectFit: 'cover', borderRadius: 6, border: '1px solid #f0f0f0' }}
+                />
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<CloseOutlined />}
+                  style={{ position: 'absolute', top: -6, right: -6, background: '#fff', boxShadow: '0 0 2px rgba(0,0,0,0.2)' }}
+                  onClick={() =>
+                    setPendingImages((prev) => prev.filter((p) => p.attachmentId !== img.attachmentId))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        )}
         <Space.Compact style={{ width: '100%' }}>
           <Input.TextArea
             autoSize={{ minRows: 1, maxRows: 5 }}
@@ -149,13 +231,14 @@ export default function ChatPanel({
             placeholder={
               canInput
                 ? summary.state === 'WAITING_INPUT'
-                  ? '回复 agent 的提问，Enter 发送 / Shift+Enter 换行…'
+                  ? `回复 agent 的提问，Enter 发送 / Shift+Enter 换行${allowImages ? '，可粘贴/拖拽图片' : ''}…`
                   : summary.state === 'WAITING_AUTH'
                     ? '（正在等待授权，可在上方允许/拒绝）'
-                    : '会话运行中，可注入指令，Enter 发送 / Shift+Enter 换行…'
+                    : `会话运行中，可注入指令，Enter 发送 / Shift+Enter 换行${allowImages ? '，可粘贴/拖拽图片' : ''}…`
                 : '会话已结束，无法输入'
             }
             onChange={(e) => setInputText(e.target.value)}
+            onPaste={onPaste}
             onPressEnter={(e) => {
               if (!e.shiftKey) {
                 e.preventDefault()
@@ -163,10 +246,31 @@ export default function ChatPanel({
               }
             }}
           />
+          {allowImages && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={(e) => {
+                  addImageFiles(Array.from(e.target.files ?? []))
+                  e.target.value = ''
+                }}
+              />
+              <Button
+                icon={<PaperClipOutlined />}
+                disabled={!canInput}
+                loading={uploading > 0}
+                onClick={() => fileInputRef.current?.click()}
+              />
+            </>
+          )}
           <Button
             type="primary"
             icon={<SendOutlined />}
-            disabled={!canInput || !inputText.trim()}
+            disabled={!canInput || (!inputText.trim() && pendingImages.length === 0) || uploading > 0}
             onClick={() => onSend(inputText)}
           >
             发送

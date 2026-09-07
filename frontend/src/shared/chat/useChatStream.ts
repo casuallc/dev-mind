@@ -2,7 +2,7 @@
 // 连接后先收 snapshot（环形缓冲回放），再收增量事件，按 seq 去重；断线指数退避重连。
 // enabled=false 时不建立连接；收到 error 帧视为致命（如会话已无运行时）不再重连。
 import { useEffect, useRef, useState } from 'react'
-import type { ChatApiBase, ChatEvent, WsServerFrame } from './types'
+import type { ChatApiBase, ChatEvent, ChatImageAttachment, WsServerFrame } from './types'
 
 function wsUrl(apiBase: ChatApiBase, id: string): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
@@ -102,7 +102,8 @@ export function useChatStream(id: string | undefined, apiBase: ChatApiBase, enab
     fatal: state.fatal,
     maxSeq: state.maxSeq,
     send,
-    input: (text: string) => send({ type: 'input', text }),
+    input: (text: string, images?: ChatImageAttachment[]) =>
+      send({ type: 'input', text, ...(images?.length ? { images } : {}) }),
     authorize: (accepted: boolean, scope: string, requestId?: string) =>
       send({ type: 'authorize', accepted, scope, requestId }),
     refresh: () => send({ type: 'ping' }),

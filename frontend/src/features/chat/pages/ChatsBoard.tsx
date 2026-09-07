@@ -229,6 +229,7 @@ export default function ChatsBoard() {
                 summary={current}
                 apiBase="/chats"
                 maxHeight="calc(100vh - 400px)"
+                allowImages
                 onChanged={load}
                 onStreamMeta={setStreamMeta}
               />

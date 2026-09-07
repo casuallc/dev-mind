@@ -1,7 +1,7 @@
 // 对话式事件流渲染（由 ChatPanel 承载；CAP-30 由 sessions 上移共享）：把 ChatEvent 流转成问答气泡 + 工具调用卡片 + 回合分隔。
 // system/log 等底层事件收进底部折叠「过程日志」。
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Collapse, Tag, Typography } from 'antd'
+import { Collapse, Image, Tag, Typography } from 'antd'
 import {
   CheckCircleFilled,
   CloseCircleFilled,
@@ -12,13 +12,15 @@ import {
   ToolOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
-import type { ChatEvent } from './types'
+import type { ChatEvent, ChatImageAttachment } from './types'
+import { isImageAttachment } from '../attachments/api'
+import { attachmentRawUrl } from '../attachments/url'
 import { fmtTime } from '../utils/format'
 
 // ---------------- 事件 → 渲染项 ----------------
 
 type ChatItem =
-  | { kind: 'user'; key: string; text: string; isTask?: boolean; ts?: number }
+  | { kind: 'user'; key: string; text: string; isTask?: boolean; attachments?: ChatImageAttachment[]; ts?: number }
   | { kind: 'assistant'; key: string; text: string; model?: string; ts: number }
   | ToolItem
   | { kind: 'result'; key: string; isError: boolean; cost?: string; durationMs?: number }
@@ -89,11 +91,17 @@ function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[];
     switch (ev.type) {
       case 'text_delta':
         break // assistant 全量消息为准
-      case 'user':
-        if (ev.content?.trim()) {
-          items.push({ kind: 'user', key: `e${ev.seq}`, text: ev.content, ts: ev.timestamp })
+      case 'user': {
+        // CAP-32：附件引用在 payload.attachments（只放 id/name/contentType）
+        const attachments = (ev.payload?.attachments as ChatImageAttachment[] | undefined) ?? []
+        if (ev.content?.trim() || attachments.length > 0) {
+          items.push({
+            kind: 'user', key: `e${ev.seq}`, text: ev.content ?? '',
+            attachments: attachments.length > 0 ? attachments : undefined, ts: ev.timestamp,
+          })
         }
         break
+      }
       case 'assistant': {
         const text = cleanAssistantText(ev.content ?? '')
         if (!text) break
@@ -250,7 +258,26 @@ function ChatItemView({ item, sessionModel }: { item: ChatItem; sessionModel?: s
         <div className="chat-row chat-row-user">
           <div className="chat-bubble-user" title={item.ts ? fmtTime(new Date(item.ts).toISOString()) : undefined}>
             {item.isTask && <Tag color="geekblue" style={{ marginBottom: 4 }}>任务</Tag>}
-            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.text}</div>
+            {item.text && <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.text}</div>}
+            {item.attachments && item.attachments.length > 0 && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: item.text ? 8 : 0 }}>
+                {item.attachments.map((a) =>
+                  isImageAttachment(a.contentType) ? (
+                    <Image
+                      key={a.attachmentId}
+                      src={attachmentRawUrl(a.attachmentId)}
+                      alt={a.name ?? '图片附件'}
+                      width={120}
+                      style={{ objectFit: 'cover', borderRadius: 6 }}
+                    />
+                  ) : (
+                    <a key={a.attachmentId} href={attachmentRawUrl(a.attachmentId)} download={a.name ?? true}>
+                      📎 {a.name ?? a.attachmentId}
+                    </a>
+                  ),
+                )}
+              </div>
+            )}
           </div>
         </div>
       )

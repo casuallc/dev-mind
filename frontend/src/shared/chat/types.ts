@@ -10,6 +10,13 @@ export type SessionState =
   | 'SUSPENDED'
   | 'TERMINATED'
 
+/** CAP-32 消息图片附件引用（事件 payload.attachments 元素；二进制本体在附件模块，这里只有引用） */
+export interface ChatImageAttachment {
+  attachmentId: string
+  name?: string
+  contentType?: string
+}
+
 export interface ChatEvent {
   seq: number
   type:
