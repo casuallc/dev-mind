@@ -1,5 +1,6 @@
 // CAP-03 文档编辑页：只读渲染 / Markdown 编辑+实时预览 / 保存新版本 / 版本历史 / diff / 回退 / 状态机。
-import { useCallback, useEffect, useState } from 'react'
+// CAP-32：编辑态支持粘贴/拖拽图片，上传附件库后在光标处插入 ![](附件URL)。
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Badge,
   Button,
@@ -30,6 +31,8 @@ import { KIND_LABEL, STATUS_LABEL } from '../types'
 import type { DiffResult, DocDetail, DocVersion } from '../types'
 import Markdown from '../components/Markdown'
 import { fmtTime } from '../../../shared/utils/format'
+import { uploadAttachment } from '../../../shared/attachments/api'
+import { attachmentRawUrl } from '../../../shared/attachments/url'
 
 const statusTag = (s: string) => (
   <Tag color={s === 'draft' ? 'default' : s === 'pending_confirm' ? 'gold' : 'green'}>{STATUS_LABEL[s as keyof typeof STATUS_LABEL] ?? s}</Tag>
@@ -47,6 +50,8 @@ export default function DocEditorPage() {
   const [mode, setMode] = useState<'view' | 'edit'>('view')
   const [editText, setEditText] = useState('')
   const [dirty, setDirty] = useState(false)
+  const editorWrapRef = useRef<HTMLDivElement>(null)
+  const uploadSeqRef = useRef(0)
 
   const [viewing, setViewing] = useState<DocDetail | null>(null) // 历史版本只读视图
   const [diff, setDiff] = useState<DiffResult | null>(null)
@@ -80,6 +85,65 @@ export default function DocEditorPage() {
   }, [load])
 
   const frozen = doc?.status === 'frozen'
+
+  // CAP-32：光标处插入文本（无焦点时追加到文末），保持 dirty 判定一致
+  const insertAtCursor = (snippet: string) => {
+    const ta = editorWrapRef.current?.querySelector('textarea')
+    setEditText((prev) => {
+      const p = ta?.selectionStart ?? prev.length
+      const next = prev.slice(0, p) + snippet + prev.slice(p)
+      setDirty(next !== doc?.contentMd)
+      requestAnimationFrame(() => {
+        if (ta) {
+          ta.focus()
+          const np = p + snippet.length
+          ta.setSelectionRange(np, np)
+        }
+      })
+      return next
+    })
+  }
+
+  // CAP-32：粘贴/拖拽图片 → 上传附件库 → 占位符替换为 ![](附件URL)（上传中先占位，防并发错位）
+  const insertImages = (files: Iterable<File>) => {
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) {
+        message.warning(`仅支持插入图片，已忽略：${file.name}`)
+        continue
+      }
+      const seq = ++uploadSeqRef.current
+      const placeholder = `![${file.name}](uploading://${seq})`
+      insertAtCursor(`\n${placeholder}\n`)
+      uploadAttachment(file, file.name)
+        .then((v) => {
+          setEditText((prev) => {
+            const next = prev.replace(placeholder, `![${v.originalName}](${attachmentRawUrl(v.attachmentId)})`)
+            setDirty(next !== doc?.contentMd)
+            return next
+          })
+        })
+        .catch((e) => {
+          message.error(`图片上传失败：${(e as Error).message}`)
+          setEditText((prev) => prev.replace(placeholder, ''))
+        })
+    }
+  }
+
+  const onEditorPaste = (e: React.ClipboardEvent) => {
+    const files = Array.from(e.clipboardData?.files ?? [])
+    if (files.length > 0) {
+      e.preventDefault()
+      insertImages(files)
+    }
+  }
+
+  const onEditorDrop = (e: React.DragEvent) => {
+    const files = Array.from(e.dataTransfer?.files ?? [])
+    if (files.length > 0) {
+      e.preventDefault()
+      insertImages(files)
+    }
+  }
 
   const onSave = async () => {
     if (!doc) return
@@ -300,16 +364,24 @@ export default function DocEditorPage() {
           {mode === 'edit' && !viewing ? (
             <Card size="small" title="编辑 + 实时预览">
               <div style={{ display: 'flex', gap: 12 }}>
-                <Input.TextArea
-                  value={editText}
-                  onChange={(e) => {
-                    setEditText(e.target.value)
-                    setDirty(e.target.value !== doc.contentMd)
-                  }}
-                  autoSize={{ minRows: 18, maxRows: 40 }}
-                  style={{ flex: 1, fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 13 }}
-                  placeholder="Markdown…"
-                />
+                <div
+                  ref={editorWrapRef}
+                  style={{ flex: 1, display: 'flex' }}
+                  onPaste={onEditorPaste}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={onEditorDrop}
+                >
+                  <Input.TextArea
+                    value={editText}
+                    onChange={(e) => {
+                      setEditText(e.target.value)
+                      setDirty(e.target.value !== doc.contentMd)
+                    }}
+                    autoSize={{ minRows: 18, maxRows: 40 }}
+                    style={{ flex: 1, fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 13 }}
+                    placeholder="Markdown…（可直接粘贴/拖拽图片插入）"
+                  />
+                </div>
                 <div style={{ flex: 1, maxHeight: 560, overflow: 'auto', padding: '0 4px' }}>
                   <Markdown content={editText} />
                 </div>
