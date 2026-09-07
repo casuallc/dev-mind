@@ -8,7 +8,6 @@ import {
   Form,
   Input,
   Modal,
-  Popconfirm,
   Segmented,
   Space,
   Spin,
@@ -114,7 +113,7 @@ export default function AgentNodesPage() {
   const [batchBusy, setBatchBusy] = useState(false)
 
   // 批量升级：逐个下发现有单节点升级接口，汇总 ACCEPTED/BUSY/失败
-  const onUpgradeAll = async () => {
+  const doUpgradeAll = async () => {
     setBatchBusy(true)
     try {
       const results = await Promise.all(
@@ -137,6 +136,17 @@ export default function AgentNodesPage() {
       setBatchBusy(false)
     }
   }
+
+  // 确认弹窗统一走平台通用的居中 Modal.confirm，不用贴按钮的 Popconfirm
+  const onUpgradeAll = () =>
+    Modal.confirm({
+      centered: true,
+      title: `升级全部在线旧节点（${upgradableNodes.length} 个）？`,
+      content: '有活跃会话的节点会推迟执行',
+      okText: '升级',
+      cancelText: '取消',
+      onOk: doUpgradeAll,
+    })
 
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 70 },
@@ -228,19 +238,14 @@ export default function AgentNodesPage() {
             {outdatedNodes.length > 0 && (
               <>
                 <Tag color="orange">{outdatedNodes.length} 个节点可升级 → {pkg!.version}</Tag>
-                <Popconfirm
-                  title={`升级全部在线旧节点（${upgradableNodes.length} 个）？`}
-                  description="有活跃会话的节点会推迟执行"
-                  onConfirm={onUpgradeAll}
+                <Button
+                  icon={<RocketOutlined />}
+                  loading={batchBusy}
+                  disabled={upgradableNodes.length === 0}
+                  onClick={onUpgradeAll}
                 >
-                  <Button
-                    icon={<RocketOutlined />}
-                    loading={batchBusy}
-                    disabled={upgradableNodes.length === 0}
-                  >
-                    全部升级
-                  </Button>
-                </Popconfirm>
+                  全部升级
+                </Button>
               </>
             )}
             <Button icon={<ReloadOutlined />} onClick={reload}>
@@ -393,7 +398,7 @@ function NodeDrawer({
     }
   }
 
-  const onUpgrade = () =>
+  const doUpgrade = () =>
     run(async () => {
       const res = await upgradeAgentNode(node.id)
       if (res.status === 'ACCEPTED') message.success(res.message)
@@ -401,6 +406,16 @@ function NodeDrawer({
       else if (res.status === 'ALREADY_LATEST') message.info(res.message)
       else message.error(res.message)
       onChanged()
+    })
+
+  // 确认弹窗统一走平台通用的居中 Modal.confirm，不用贴按钮的 Popconfirm
+  const onUpgrade = () =>
+    Modal.confirm({
+      centered: true,
+      title: `升级节点「${node.name}」？`,
+      okText: '升级',
+      cancelText: '取消',
+      onOk: doUpgrade,
     })
 
   const onSetDefault = (isDefault: boolean) =>
@@ -427,12 +442,23 @@ function NodeDrawer({
       onChanged()
     })
 
-  const onDelete = () =>
+  const doDelete = () =>
     run(async () => {
       await deleteAgentNode(node.id)
       message.success('已删除')
       onClose()
       onChanged()
+    })
+
+  const onDelete = () =>
+    Modal.confirm({
+      centered: true,
+      title: `删除节点「${node.name}」？`,
+      content: '其运行中会话将失联。',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: doDelete,
     })
 
   return (
@@ -523,11 +549,9 @@ function NodeDrawer({
                     : '请先在「Runner 包」页签上传 runner 包。'}
                 </Typography.Text>
                 <div>
-                  <Popconfirm title={`升级节点「${node.name}」？`} onConfirm={onUpgrade}>
-                    <Button type="primary" icon={<RocketOutlined />} disabled={!pkg}>
-                      升级
-                    </Button>
-                  </Popconfirm>
+                  <Button type="primary" icon={<RocketOutlined />} disabled={!pkg} onClick={onUpgrade}>
+                    升级
+                  </Button>
                 </div>
               </Space>
             </Card>
@@ -538,9 +562,9 @@ function NodeDrawer({
               <Button onClick={onToggleEnable}>
                 {node.status === 'DISABLED' ? '启用' : '禁用'}
               </Button>
-              <Popconfirm title={`删除节点「${node.name}」？其运行中会话将失联。`} onConfirm={onDelete}>
-                <Button danger>删除节点</Button>
-              </Popconfirm>
+              <Button danger onClick={onDelete}>
+                删除节点
+              </Button>
             </Space>
           </Card>
         </Space>
