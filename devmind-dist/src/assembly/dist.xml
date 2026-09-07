@@ -20,10 +20,10 @@
     </dependencySets>
 
     <fileSets>
-        <!-- web/：前端构建产物（只外置，jar 内不含静态资源；需先 npm run build） -->
+        <!-- ui/：前端构建产物（只外置，jar 内不含静态资源；需先 npm run build） -->
         <fileSet>
             <directory>../frontend/dist</directory>
-            <outputDirectory>web</outputDirectory>
+            <outputDirectory>ui</outputDirectory>
         </fileSet>
         <!-- config/：精简外置配置（常用项，未列出的回落 jar 内默认值）+ 说明文档 -->
         <fileSet>

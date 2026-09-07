@@ -7,7 +7,7 @@
 ## 技术栈
 
 - 后端：Spring Boot 4.1.1（Java 21）· REST + WebSocket · JPA + H2 文件库（公司 Nexus 暂无 4.2.x 正式版，先用 4.1.1 稳定版）
-- 前端：React 19 + Vite 6 + Ant Design 5（开发走 Vite 热更新；生产由后端托管分发包里的外置 web/ 目录）
+- 前端：React 19 + Vite 6 + Ant Design 5（开发走 Vite 热更新；生产由后端托管分发包里的外置 ui/ 目录）
 
 ## 目录（积木式结构）
 
@@ -32,7 +32,7 @@ devmind-flow/      CAP-14 需求流程
 devmind-integration/ CAP-18/19 平台集成（GitLab/Jira 同步）
 devmind-open-api/  CAP-20 开放 API（HMAC 签名）
 devmind-app/       组装入口（主类 + application.yml，瘦 jar）
-devmind-dist/      分发包组装（bin/config/libs/web/data → tar.gz）
+devmind-dist/      分发包组装（bin/config/libs/ui/data → tar.gz）
 frontend/          React 前端（app 壳 + features/<能力> + shared）
 docs/              需求文档(capabilities) + 实现方案(design) + 指南(guides) + 开发规范(core)
 ```
@@ -85,7 +85,7 @@ bin/dev-mind start           # 后台启动；status/stop/restart/run(前台)/in
 | `bin/` | `dev-mind` 服务脚本（JDK 解析顺序 `APUSIC_JAVA_HOME` > `JAVA_HOME` > PATH，要求 21+） |
 | `config/` | 精简外置配置（只列常用项，未列出的回落 jar 内置默认值）；本机覆盖放 `application-local.yml` 自动加载 |
 | `libs/` | devmind-app 瘦 jar + 全部依赖散 jar（不打 fat jar，便于单 jar 替换更新） |
-| `web/` | 前端构建产物（外置托管，替换即更新前端） |
+| `ui/` | 前端构建产物（外置托管，替换即更新前端） |
 | `data/` | H2 库、自动生成的密钥、pid 文件（运行时生成；删除=重置实例） |
 | `logs/` | 运行日志（`dev-mind.log`） |
 

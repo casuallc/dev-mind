@@ -13,7 +13,7 @@
     <artifactId>devmind-dist</artifactId>
     <packaging>pom</packaging>
     <name>devmind-dist</name>
-    <description>Dev-Mind 分发包组装（bin/config/libs/web/data，tar.gz）</description>
+    <description>Dev-Mind 分发包组装（bin/config/libs/ui/data，tar.gz）</description>
 
     <!-- 产物名 devmind-<version>.tar.gz（不带 -dist 后缀） -->
     <build>

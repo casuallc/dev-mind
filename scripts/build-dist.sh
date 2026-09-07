@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the Dev-Mind distribution package (tar.gz with bin/config/libs/web/data).
+# Build the Dev-Mind distribution package (tar.gz with bin/config/libs/ui/data).
 # Usage:
 #   scripts/build-dist.sh                  # frontend build + maven dist assembly
 #   scripts/build-dist.sh --skip-frontend  # reuse existing frontend/dist
