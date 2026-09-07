@@ -19,7 +19,6 @@ import {
   Typography,
 } from 'antd'
 import {
-  ArrowLeftOutlined,
   DiffOutlined,
   RollbackOutlined,
   SaveOutlined,
@@ -288,24 +287,21 @@ export default function DocEditorPage() {
           <Card
             title={
               <Space>
-                <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/admin/docs')} />
                 <Typography.Text strong>{displayTitle}</Typography.Text>
                 <Tag color={doc.kind === 'requirement' ? 'blue' : doc.kind === 'design' ? 'geekblue' : doc.kind === 'api-suite' ? 'purple' : 'cyan'}>
                   {KIND_LABEL[doc.kind]}
                 </Tag>
-                {statusTag(doc.status)}
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  v{doc.currentVersion}
-                  {viewing && <Badge status="processing" text={`查看历史 v${viewing.versionNo}`} />}
-                </Typography.Text>
               </Space>
             }
             extra={
               <Space>
                 {viewing ? (
-                  <Button type="primary" onClick={() => load()}>
-                    回到当前版本
-                  </Button>
+                  <>
+                    <Button type="primary" onClick={() => load()}>
+                      回到当前版本
+                    </Button>
+                    <Button onClick={() => navigate('/admin/docs')}>返回列表</Button>
+                  </>
                 ) : (
                   <>
                     <Segmented
@@ -347,12 +343,18 @@ export default function DocEditorPage() {
                     <Button danger onClick={onDelete}>
                       删除
                     </Button>
+                    <Button onClick={() => navigate('/admin/docs')}>返回列表</Button>
                   </>
                 )}
               </Space>
             }
           >
-            <Space style={{ marginBottom: 8 }}>
+            <Space style={{ marginBottom: 8 }} wrap>
+              {statusTag(doc.status)}
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                v{doc.currentVersion}
+                {viewing && <Badge status="processing" text={`查看历史 v${viewing.versionNo}`} />}
+              </Typography.Text>
               {doc.projectId && <Tag>项目: {doc.projectId}</Tag>}
               {doc.requirementId && <Tag>需求: {doc.requirementId}</Tag>}
               {doc.tags.map((t) => <Tag key={t}>{t}</Tag>)}
