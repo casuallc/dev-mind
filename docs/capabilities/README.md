@@ -45,6 +45,8 @@
 | [CAP-27](CAP-27-requirement-effort.md) | 需求工时 | 组装层 | AI 实际耗时会话时长自动汇总 + Jira 预估/已用工时同步展示 + worklog 一键回写 |
 | [CAP-28](CAP-28-personal-worklog.md) | 个人工作日志与工时管理 | 组装层 | git log + 手动补录成工作条目记工时，AI 定时生成日报/周报草稿人工确认，Jira 一键登记 |
 | [CAP-29](CAP-29-global-git-repo-registry.md) | 全局代码仓库登记 | 平台层 | 仓库提升为平台级资源：后台统一登记（仅 ADMIN）+ 服务端克隆 + 定时/手动 fetch 同步分支，项目仓库改为关联、CAP-28 订阅扫描切到服务端克隆 |
+| [CAP-30](CAP-30-agent-chat.md) | 通用问答 | 底座 | 无项目无仓库的纯 AI 问答独立成能力（个人组入口），共享内核上移 common，干净沙箱 cwd |
+| [CAP-31](CAP-31-session-multirepo.md) | 项目会话多仓库与归属拆分 | 底座 | 会话收敛为纯项目开发会话（当前项目组）+ 显式关联多 git 仓库（聚合目录/逐库 push/diff），远程 diff 走服务端克隆 |
 
 ## 依赖关系
 
@@ -82,6 +84,8 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-27 需求工时依赖 CAP-05/13/19：会话时长经 RequirementAgentTimeLookup 端口（project 定义、session 实现）汇总为 AI 实际耗时；Jira time tracking 字段走 CAP-19 同步链路落托管列，worklog 回写复用其 FR-08 通道。
 - CAP-29 全局仓库依赖 CAP-18/23/26：登记表归 devmind-project（git_repositories 扩列），克隆/定时 fetch 归 devmind-integration（复用 GitRemoteOps + Integration 凭证），项目仓库经 git_repo_id 关联且克隆状态由全局行镜像，CAP-28 经 common 的 GitRepoCatalog SPI 读注册表。
 - CAP-28 个人工时依赖 CAP-01/05/06/24：全局仓库登记 + 用户勾选，git log 按 CAP-24 署名过滤成工作条目，日报/周报经 OneShotAgentRunner 端口（common 定义、session 实现）跑 headless claude 生成草稿，事件走 CAP-06 通知；FR-07 Jira 一键操作另依赖 CAP-19/27。
+- CAP-30 通用问答依赖 CAP-01/06/21：headless 会话内核（状态机/事件流/CLI 协议）上移至 devmind-common 被 session/chat 共享；问答独立 chat_sessions/chat_events 表与个人组入口，无项目资产耦合。
+- CAP-31 会话多仓库依赖 CAP-05/21/24/25/29：会话收敛为当前项目开发会话，session_repos 快照表关联多库（聚合目录工作区），launch 帧 repos 数组逐库下发凭据，远程 diff 经服务端克隆 fetch 会话分支后比对。
 
 ## 组装方式（后续流程层）
 
