@@ -47,6 +47,7 @@ import {
   updateRequirementStatus,
 } from '../api'
 import JiraActions from '../components/JiraActions'
+import JiraDescription from '../components/JiraDescription'
 import DesignsTab from '../components/flow/DesignsTab'
 import SplitDraftDrawer from '../components/flow/SplitDraftDrawer'
 import RelatedRecordsTab from '../components/RelatedRecordsTab'
@@ -273,9 +274,13 @@ export default function RequirementDetailPage() {
             }
           >
             {r.description && (
-              <Typography.Paragraph style={{ fontSize: 13, marginBottom: 0, whiteSpace: 'pre-wrap' }}>
-                {r.description}
-              </Typography.Paragraph>
+              r.source === 'JIRA' ? (
+                <JiraDescription description={r.description} pid={r.projectId} rid={r.id} />
+              ) : (
+                <Typography.Paragraph style={{ fontSize: 13, marginBottom: 0, whiteSpace: 'pre-wrap' }}>
+                  {r.description}
+                </Typography.Paragraph>
+              )
             )}
           </Card>
         </Col>
