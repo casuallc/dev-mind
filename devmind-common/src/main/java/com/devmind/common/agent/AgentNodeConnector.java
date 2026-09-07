@@ -1,5 +1,7 @@
 package com.devmind.common.agent;
 
+import java.util.List;
+
 /**
  * CAP-21 节点连接 SPI（会话模块 → agent 模块：经节点 WS 长连接下发指令）。
  * 接口定义在 common（同 PlatformIntegrationHook 先例），实现方 devmind-agent 由调用方
@@ -25,6 +27,14 @@ public interface AgentNodeConnector {
 
     /** 注入用户输入（纯文本，协议包装在 runner 侧完成）。 */
     void sendInput(String nodeId, String sessionId, String text);
+
+    /**
+     * CAP-32：注入用户输入（可带图片附件 base64，随 input 帧 images 字段下发）。
+     * 默认降级为纯文本（丢图）——实现方应覆盖本方法；旧 runner 忽略 images 字段优雅降级。
+     */
+    default void sendInput(String nodeId, String sessionId, String text, List<InputImage> images) {
+        sendInput(nodeId, sessionId, text);
+    }
 
     /** 授权响应。 */
     void sendAuthorize(String nodeId, String sessionId, String requestId, boolean accepted, String scope);

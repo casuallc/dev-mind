@@ -1,5 +1,6 @@
 package com.devmind.common.agent.runtime;
 
+import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.SessionEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,8 +62,8 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
 
     // ---------------- 平台差异钩子 ----------------
 
-    /** 写一条 user message 到 agent stdin（本地=管道 JSONL；远程=节点指令）。 */
-    protected abstract void sendUserMessage(String text);
+    /** 写一条 user message 到 agent stdin（本地=管道 JSONL；远程=节点指令）。images 为 CAP-32 图片附件。 */
+    protected abstract void sendUserMessage(String text, List<InputImage> images);
 
     /** 写 permission_result 到 agent stdin。 */
     protected abstract void sendPermissionResult(String requestId, boolean accepted, String scope);
@@ -177,15 +178,46 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
     /** 注入用户消息；本地 publish 一条 user 事件保证"我输入了什么"在终端可见（agent 回显解析时被跳过）。 */
     @Override
     public void injectInput(String text) {
-        if (text == null || text.isBlank() || !alive()) {
+        injectInput(text, List.of());
+    }
+
+    /**
+     * CAP-32：注入用户消息（可带图片附件）。文本与附件皆空才拒；user 事件 payload 放
+     * attachments 引用（attachmentId/name/contentType，不放 base64——CLOB 虽 16MB，
+     * WS snapshot 回放也带 payload，base64 会撑爆帧）。
+     */
+    @Override
+    public void injectInput(String text, List<InputImage> images) {
+        boolean hasText = text != null && !text.isBlank();
+        boolean hasImages = images != null && !images.isEmpty();
+        if ((!hasText && !hasImages) || !alive()) {
             return;
         }
         lastActivityAt = System.currentTimeMillis();
-        sendUserMessage(text);
-        publish(SessionEvent.of(nextSeq(), "user", text, "system"));
+        List<InputImage> imgs = hasImages ? images : List.of();
+        sendUserMessage(hasText ? text : "", imgs);
+        publish(SessionEvent.of(nextSeq(), "user", hasText ? text : "[图片]", "system", attachmentPayload(imgs)));
         if (state == SessionState.WAITING_INPUT) {
             transition(SessionState.RUNNING, "收到用户输入，继续执行");
         }
+    }
+
+    /** user 事件 payload：附件引用（只放 id/name/contentType，不放 base64）。 */
+    private Map<String, Object> attachmentPayload(List<InputImage> images) {
+        if (images.isEmpty()) {
+            return Map.of();
+        }
+        List<Map<String, Object>> attachments = new ArrayList<>();
+        for (InputImage img : images) {
+            Map<String, Object> a = new LinkedHashMap<>();
+            a.put("attachmentId", img.attachmentId());
+            if (img.name() != null) {
+                a.put("name", img.name());
+            }
+            a.put("contentType", img.mediaType());
+            attachments.add(a);
+        }
+        return Map.of("attachments", attachments);
     }
 
     /**

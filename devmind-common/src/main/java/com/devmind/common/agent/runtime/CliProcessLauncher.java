@@ -1,5 +1,6 @@
 package com.devmind.common.agent.runtime;
 
+import com.devmind.common.agent.InputImage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
@@ -78,8 +79,33 @@ public class CliProcessLauncher implements SessionExecutor {
 
     /** 构造 stream-json user message 行（不含换行）。 */
     public String buildUserMessage(String text) {
-        Map<String, Object> content = Map.of("type", "text", "text", text);
-        Map<String, Object> message = Map.of("role", "user", "content", List.of(content));
+        return buildUserMessage(mapper, text, List.of());
+    }
+
+    /** CAP-32：构造带图片附件的 stream-json user message 行。runner（CAP-21）input 帧带图时复用。 */
+    public String buildUserMessage(String text, List<InputImage> images) {
+        return buildUserMessage(mapper, text, images);
+    }
+
+    /**
+     * 组帧核心（静态，供 {@link SessionRuntime} 等无 launcher 实例方复用）：
+     * image content blocks 在前、text block 在后；皆空时补空 text block 保证 content 非空。
+     */
+    public static String buildUserMessage(ObjectMapper mapper, String text, List<InputImage> images) {
+        List<Map<String, Object>> content = new ArrayList<>();
+        if (images != null) {
+            for (InputImage img : images) {
+                content.add(Map.of("type", "image", "source",
+                        Map.of("type", "base64", "media_type", img.mediaType(), "data", img.base64Data())));
+            }
+        }
+        if (text != null && !text.isBlank()) {
+            content.add(Map.of("type", "text", "text", text));
+        }
+        if (content.isEmpty()) {
+            content.add(Map.of("type", "text", "text", ""));
+        }
+        Map<String, Object> message = Map.of("role", "user", "content", content);
         Map<String, Object> line = Map.of("type", "user", "message", message);
         try {
             return mapper.writeValueAsString(line);

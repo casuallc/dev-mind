@@ -2,7 +2,10 @@ package com.devmind.common.agent.runtime;
 
 import com.devmind.common.agent.AgentEventFrame;
 import com.devmind.common.agent.AgentNodeConnector;
+import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.SessionEvent;
+
+import java.util.List;
 
 /**
  * CAP-21 远程会话运行时：会话进程在节点 runner 侧，本类经 {@link AgentNodeConnector}
@@ -53,8 +56,8 @@ public class RemoteSessionRuntime extends AbstractSessionRuntime {
     }
 
     @Override
-    protected void sendUserMessage(String text) {
-        connector.sendInput(nodeId, id, text);
+    protected void sendUserMessage(String text, List<InputImage> images) {
+        connector.sendInput(nodeId, id, text, images);
     }
 
     @Override

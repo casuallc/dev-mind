@@ -1,5 +1,6 @@
 package com.devmind.common.agent.runtime;
 
+import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.SessionEvent;
 
 import java.util.List;
@@ -19,6 +20,9 @@ public interface SessionHandle extends AutoCloseable {
 
     /** 注入用户消息。 */
     void injectInput(String text);
+
+    /** CAP-32：注入用户消息（可带图片附件，附件引用记入 user 事件 payload）。 */
+    void injectInput(String text, List<InputImage> images);
 
     /** 授权响应。 */
     void authorize(String requestId, boolean accepted, String scope);

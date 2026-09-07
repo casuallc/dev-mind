@@ -1,5 +1,6 @@
 package com.devmind.common.agent.runtime;
 
+import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.SessionEvent;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -86,12 +87,10 @@ public class SessionRuntime extends AbstractSessionRuntime {
 
     // ---------------- 平台差异钩子（本地管道 IO） ----------------
 
-    /** 格式必须与 claude stream-json 一致：完整 user message，而非 {"type":"input"}。 */
+    /** 格式必须与 claude stream-json 一致：完整 user message，而非 {"type":"input"}。CAP-32 起组帧复用 CliProcessLauncher。 */
     @Override
-    protected void sendUserMessage(String text) {
-        Map<String, Object> content = Map.of("type", "text", "text", text);
-        Map<String, Object> message = Map.of("role", "user", "content", List.of(content));
-        writeLine(toJson(Map.of("type", "user", "message", message)));
+    protected void sendUserMessage(String text, List<InputImage> images) {
+        writeLine(CliProcessLauncher.buildUserMessage(mapper, text, images));
     }
 
     @Override
