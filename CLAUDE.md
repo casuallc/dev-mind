@@ -39,11 +39,12 @@ Guidance for Claude Code when working in this repository.
 
 | 模块 | 职责 |
 |------|------|
-| devmind-common | 公共契约（错误码、SPI、DomainEvent） |
+| devmind-common | 公共契约（错误码、SPI、DomainEvent、`agent.runtime` 会话内核——状态机/事件流/CLI 协议，CAP-30 起 session/chat 共享） |
 | devmind-auth | CAP-01 认证/RBAC（JWT HS256） |
 | devmind-project | CAP-02 项目管理 + CAP-13 研发主线（Requirement/Design/WorkItem） |
 | devmind-docs / knowledge / skill | CAP-03 文档库 / CAP-04 知识库 / Skill 管理 |
-| devmind-session | CAP-05 Agent 会话（headless claude 子进程 + worktree） |
+| devmind-session | CAP-05 项目开发会话（headless claude + worktree；CAP-31 多库聚合目录 + 远程 diff） |
+| devmind-chat | CAP-30 通用问答（无项目纯问答，个人组 /chats，复用 common 会话内核） |
 | devmind-notification | CAP-06 通知中心（WS 站内/bark/企微） |
 | devmind-server-adapter | CAP-07 服务器适配（SSH/HTTP + 命令模板白名单 + 凭证加密） |
 | devmind-execution | CAP-12 统一执行底座（StepRunner/日志 Hub/WS，**无统一 Job 表**） |

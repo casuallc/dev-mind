@@ -134,3 +134,7 @@ clone（首次）→ fetch → 切会话分支（每会话独立 worktree）→ 
 agent 会话内自行 push（需节点侧凭据落盘，违背决策 2/3）、wss 强制、节点崩溃后未 push
 分支的自动恢复、远程会话 diff 视图（服务端读不到节点 FS）、多库项目的多 repo 下发
 （MVP 仅主库）、runner 工作区磁盘配额/定时清理。
+
+## 10. 变更记录
+
+- **CAP-31（2026-09）多库托管**：`repos` 数组 >1 时 runner 走多库模式——克隆缓存 `<root>/<projectId>/<name>/main`、会话 worktree `<root>/<projectId>/sessions/<sid>/<name>`、cwd=聚合根 `sessions/<sid>`，finalizer 逐库 push+remove（上报带 `[<name>]` 前缀）；RepoSpec 增 `name` 字段。「远程会话 diff 视图」「多库下发」移出暂不做——由 CAP-31 实现（diff 经服务端克隆缓存 fetch 会话分支比对，不读节点 FS）。

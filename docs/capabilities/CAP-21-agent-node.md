@@ -140,3 +140,7 @@ POST   /api/agent-nodes/{id}/upgrade             手动升级，恒 200：status
 标签调度/负载均衡（创建会话手工选节点）、hello 版本自动比对升级（FR-09 已做手动升级）、
 jlink 免安装包、~~代码同步（worktree 由节点机自理）~~ **已由 CAP-25 接管**（runner 托管
 工作区全自动）、多 agent 种类的能力协商 UI、节点间会话迁移。
+
+## 9. 变更记录
+
+- **CAP-30/31（2026-09）launch 帧扩展**：新增 `kind`（"session" 默认 / "chat" 问答沙箱 `_chat/<sid>`）与 `repos` 数组（>1 = 多库聚合目录模式，元素含 name/remoteUrl/baseBranch/branch/token）；`repo` 单字段恒发主库保持旧 runner 降级。会话节点路由加入平台默认节点档（agent_nodes.is_default），节点离线 launch 抛 409 不静默回落本机。

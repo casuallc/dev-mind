@@ -64,3 +64,7 @@ POST   /sessions/{id}/merge           合并 worktree 到主分支（可选，�
 ## 8. MVP 范围（暂不做）
 
 会话录制/回放、多 Agent 后端切换 UI、远程 Agent 执行。
+
+## 9. 变更记录
+
+- **CAP-30/31（2026-09）会话能力拆分**：无项目纯问答迁出为独立能力 CAP-30（devmind-chat，个人组 /chats），本会话收敛为纯项目开发会话——必须归属当前项目，创建时从 project_repos 拷值生成 session_repos 快照（支持多库，聚合目录工作区）；`GET /sessions/{id}/diff` 改返回按库分组的 `List<RepoDiffView>`；存量无项目会话启动时删除；resume 修复 permission_mode 丢失（新增 permission_mode 列持久化）。headless 内核（状态机/事件流/CLI 协议）上移 devmind-common `agent.runtime` 包，与 chat 共享。
