@@ -5,6 +5,7 @@ import com.devmind.common.agent.runtime.CliProcessLauncher;
 import com.devmind.common.agent.runtime.FakeProcessLauncher;
 import com.devmind.common.agent.runtime.RuntimeSettings;
 import com.devmind.common.agent.runtime.SessionExecutor;
+import com.devmind.common.agent.InputImage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
@@ -13,7 +14,9 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -98,7 +101,7 @@ public class AgentRunnerMain {
         switch (type) {
             case "launch" -> handleLaunch(frame, sessionId, config, executor, sessions, workspace, conn);
             case "input" -> sessions.writeStdin(sessionId,
-                    protocol.buildUserMessage(frame.path("text").asText("")));
+                    protocol.buildUserMessage(frame.path("text").asText(""), parseImages(frame)));
             case "authorize" -> sessions.writeStdin(sessionId, protocol.buildPermissionResult(
                     frame.path("requestId").asText("unknown"),
                     frame.path("accepted").asBoolean(false),
@@ -108,6 +111,26 @@ public class AgentRunnerMain {
             case "upgrade" -> handleUpgrade(frame, config, configFile, sessions, conn);
             default -> log.debug("未知指令类型: {}", type);
         }
+    }
+
+    /**
+     * CAP-32：input 帧 images 字段（base64 图片）→ InputImage。attachmentId 远端不可知，
+     * 占位空串（组帧只用 mediaType/data）；旧版服务端不带该字段时为空列表，行为不变。
+     */
+    private static List<InputImage> parseImages(JsonNode frame) {
+        JsonNode images = frame.path("images");
+        if (!images.isArray() || images.isEmpty()) {
+            return List.of();
+        }
+        List<InputImage> out = new ArrayList<>();
+        for (JsonNode img : images) {
+            String mediaType = img.path("mediaType").asText("");
+            String data = img.path("data").asText("");
+            if (!mediaType.isBlank() && !data.isBlank()) {
+                out.add(new InputImage("", null, mediaType, data));
+            }
+        }
+        return out;
     }
 
     /**

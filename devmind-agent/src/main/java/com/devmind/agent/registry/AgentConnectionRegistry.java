@@ -9,6 +9,7 @@ import com.devmind.common.agent.AgentEventFrame;
 import com.devmind.common.agent.AgentEventListener;
 import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.AgentNodeConnector;
+import com.devmind.common.agent.InputImage;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import org.slf4j.Logger;
@@ -22,6 +23,7 @@ import org.springframework.web.socket.WebSocketSession;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -207,10 +209,26 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
 
     @Override
     public void sendInput(String nodeId, String sessionId, String text) {
+        sendInput(nodeId, sessionId, text, List.of());
+    }
+
+    /** CAP-32：input 帧内嵌 base64 图片（images 字段）；旧 runner 忽略该字段优雅降级=丢图，远程用图需升级 runner。 */
+    @Override
+    public void sendInput(String nodeId, String sessionId, String text, List<InputImage> images) {
         Map<String, Object> frame = new LinkedHashMap<>();
         frame.put("type", "input");
         frame.put("sessionId", sessionId);
         frame.put("text", text);
+        if (images != null && !images.isEmpty()) {
+            List<Map<String, Object>> imgs = new ArrayList<>();
+            for (InputImage img : images) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("mediaType", img.mediaType());
+                m.put("data", img.base64Data());
+                imgs.add(m);
+            }
+            frame.put("images", imgs);
+        }
         send(requireConnection(nodeId), frame);
     }
 
