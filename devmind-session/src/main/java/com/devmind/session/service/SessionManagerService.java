@@ -21,6 +21,7 @@ import com.devmind.project.WorkItemService;
 import com.devmind.project.model.Project;
 import com.devmind.project.model.RequirementEntity;
 import com.devmind.project.model.WorkItemEntity;
+import com.devmind.project.dto.RepoView;
 import com.devmind.project.ProjectService;import com.devmind.session.config.SessionProperties;
 import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.SessionView;
@@ -29,8 +30,10 @@ import com.devmind.session.model.SessionEntity;
 import com.devmind.common.agent.SessionEvent;
 import com.devmind.session.model.SessionEventEntity;
 import com.devmind.common.agent.runtime.SessionState;
+import com.devmind.session.model.SessionRepoEntity;
 import com.devmind.session.model.SessionTemplateEntity;
 import com.devmind.session.repo.SessionEventRepository;
+import com.devmind.session.repo.SessionRepoRepository;
 import com.devmind.session.repo.SessionRepository;
 import com.devmind.session.repo.SessionTemplateRepository;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -57,8 +60,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
@@ -84,6 +89,8 @@ public class SessionManagerService {
     private final SessionRepository sessionRepo;
     private final SessionEventRepository eventRepo;
     private final SessionTemplateRepository templateRepo;
+    /** CAP-31：会话仓库快照（session_repos，创建时从 project_repos 拷值） */
+    private final SessionRepoRepository sessionRepoRepo;
     private final SessionEventSaver eventSaver;
     private final SessionProperties props;
     private final ObjectMapper mapper;
@@ -113,6 +120,7 @@ public class SessionManagerService {
                                  SessionRepository sessionRepo,
                                  SessionEventRepository eventRepo,
                                  SessionTemplateRepository templateRepo,
+                                 SessionRepoRepository sessionRepoRepo,
                                  SessionEventSaver eventSaver,
                                  SessionProperties props,
                                  ObjectMapper mapper,
@@ -134,6 +142,7 @@ public class SessionManagerService {
         this.sessionRepo = sessionRepo;
         this.eventRepo = eventRepo;
         this.templateRepo = templateRepo;
+        this.sessionRepoRepo = sessionRepoRepo;
         this.eventSaver = eventSaver;
         this.props = props;
         this.mapper = mapper;
@@ -236,10 +245,17 @@ public class SessionManagerService {
         // 服务端不建 worktree、不做知识注入（知识注入依赖本地文件系统，远程暂不支持）
         boolean remote = agentNodeId != null && !agentNodeId.isBlank();
 
-        // P1-3：会话只面向 Workspace 接口，本地实现为 git worktree（远程/容器预留）
+        // CAP-31：会话仓库快照（创建时从 project_repos 拷值，生命周期以快照为准）；
+        // 空 = 项目无仓库行（兼容旧单库路径，按 projects 镜像列跑）
+        List<SessionRepoEntity> repoRows = resolveRepoSnapshot(project, req, id, baseBranch);
+
+        // P1-3：会话只面向 Workspace 接口，本地实现为 git worktree（远程/容器预留）；
+        // CAP-31：多库走聚合目录（各库 worktree = <aggRoot>/<repoName>，cwd=聚合根）
         Workspace workspace = null;
         if (!remote && project != null) {
-            workspace = workspaceService.prepareSessionWorkspace(project, id);
+            workspace = repoRows.isEmpty()
+                    ? workspaceService.prepareSessionWorkspace(project, id)
+                    : workspaceService.prepareSessionWorkspace(toWorkspaceSpecs(repoRows), id);
         }
         Path worktree = workspace != null ? workspace.path() : null;
         if (!remote && project != null && worktree != null) {
@@ -264,10 +280,13 @@ public class SessionManagerService {
             // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
             runtimes.put(id, remoteRt);
             try {
+                // CAP-31：repos=全量快照（含 name，新 runner 多库模式）；repo=首个（主库）保持旧 runner 降级
+                List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(project, repoRows, baseBranch,
+                        worktreeManager.branchFor(id), identityService.currentActor());
                 connector.launch(agentNodeId, new AgentLaunchCommand(
                         id, project != null ? project.id() : null, taskSpec, model, pm, gitEnv,
-                        buildRepoSpec(project, baseBranch, worktreeManager.branchFor(id),
-                                identityService.currentActor())));
+                        specs.isEmpty() ? null : specs.get(0), "session",
+                        specs.size() > 1 ? specs : null));
             } catch (Exception e) {
                 runtimes.remove(id);
                 if (e instanceof DevMindException de) {
@@ -309,6 +328,10 @@ public class SessionManagerService {
         ent.setCreatedAt(now);
         ent.setUpdatedAt(now);
         sessionRepo.save(ent);
+        // CAP-31：仓库快照随会话记录一并落库（resume/清理/远程 diff 读快照，不回查项目现值）
+        if (!repoRows.isEmpty()) {
+            sessionRepoRepo.saveAll(repoRows);
+        }
 
         SessionHandle handle;
         if (remote) {
@@ -405,12 +428,16 @@ public class SessionManagerService {
             runtimes.put(id, rt);
             try {
                 Project proj = resolveProject(ent.getProjectId());
+                // CAP-31：从快照重建远程工作区描述（仓库可能已改名/改 URL，会话以创建时为准）
+                List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(proj,
+                        sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(id), ent.getBaseBranch(),
+                        worktreeManager.branchFor(id), ent.getCreatedBy());
                 connector.launch(ent.getAgentNodeId(), new AgentLaunchCommand(
                         id, ent.getProjectId(), ent.getTaskSpec(), ent.getModel(),
                         pm,
                         resolveGitEnv(ent.getCreatedBy(), proj),
-                        buildRepoSpec(proj, ent.getBaseBranch(), worktreeManager.branchFor(id),
-                                ent.getCreatedBy())));
+                        specs.isEmpty() ? null : specs.get(0), "session",
+                        specs.size() > 1 ? specs : null));
             } catch (Exception e) {
                 runtimes.remove(id);
                 if (e instanceof DevMindException de) {
@@ -491,11 +518,10 @@ public class SessionManagerService {
         if (ent.getWorktreePath() == null || ent.getWorktreePath().isBlank()) {
             return;
         }
-        Project project = resolveProject(ent.getProjectId());
-        if (project == null) {
+        if (resolveProject(ent.getProjectId()) == null) {
             return;
         }
-        workspaceService.cleanupSessionWorkspace(project, id, Path.of(ent.getWorktreePath()));
+        cleanupWorkspace(ent);
         ent.setWorktreePath(null);
         ent.setUpdatedAt(Instant.now());
         sessionRepo.save(ent);
@@ -514,15 +540,13 @@ public class SessionManagerService {
         SessionEntity ent = requireEntity(id);
         if (ent.getWorktreePath() != null && !ent.getWorktreePath().isBlank()) {
             try {
-                Project project = resolveProject(ent.getProjectId());
-                if (project != null) {
-                    workspaceService.cleanupSessionWorkspace(project, id, Path.of(ent.getWorktreePath()));
-                }
+                cleanupWorkspace(ent);
             } catch (Exception e) {
                 log.warn("删除会话时清理 worktree 失败: {} err={}", id, e.getMessage());
             }
         }
         eventRepo.deleteBySessionId(id);
+        sessionRepoRepo.deleteBySessionId(id);
         sessionRepo.delete(ent);
     }
 
@@ -705,6 +729,125 @@ public class SessionManagerService {
         }
     }
 
+    /**
+     * CAP-31：解析本次会话的仓库快照（内存对象，随会话记录一并落库）。
+     * repoIds 空 = 主库（旧行为）；非空校验均属该项目，缺一个都报错。排序：主库在前，其余按 sortOrder——
+     * 快照 sortOrder 按此顺序重编（聚合根落主库 .devmind 下、launch repos 首元素=主库均依赖该顺序）。
+     * baseBranch 覆盖只作用于主库，其余库用各自默认分支。
+     */
+    private List<SessionRepoEntity> resolveRepoSnapshot(Project project, CreateSessionRequest req,
+                                                        String sessionId, String baseBranch) {
+        if (project == null) {
+            return List.of();
+        }
+        List<RepoView> all = projectService.listRepos(project.id());
+        if (all.isEmpty()) {
+            return List.of();
+        }
+        List<RepoView> selected;
+        if (req.repoIds() == null || req.repoIds().isEmpty()) {
+            selected = all.stream().filter(RepoView::primary).limit(1).toList();
+        } else {
+            Set<Long> want = new HashSet<>(req.repoIds());
+            selected = all.stream().filter(r -> want.contains(r.id())).toList();
+            if (selected.size() != want.size()) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "存在不属于项目 " + project.id() + " 的仓库: " + req.repoIds());
+            }
+        }
+        if (selected.isEmpty()) {
+            return List.of();
+        }
+        List<RepoView> ordered = new ArrayList<>(selected);
+        ordered.sort(Comparator.comparing((RepoView r) -> !r.primary()).thenComparingInt(RepoView::sortOrder));
+        String branch = worktreeManager.branchFor(sessionId);
+        Instant now = Instant.now();
+        List<SessionRepoEntity> rows = new ArrayList<>();
+        int order = 0;
+        for (RepoView r : ordered) {
+            SessionRepoEntity e = new SessionRepoEntity();
+            e.setSessionId(sessionId);
+            e.setProjectRepoId(r.id());
+            e.setName(r.name());
+            e.setRemoteUrl(r.remoteUrl());
+            e.setLocalPath(r.path());
+            e.setBaseBranch(r.primary()
+                    ? baseBranch
+                    : (r.defaultBranch() != null && !r.defaultBranch().isBlank()
+                            ? r.defaultBranch() : project.baseBranch()));
+            e.setBranch(branch);
+            e.setIsPrimary(r.primary());
+            e.setSortOrder(order++);
+            e.setCreatedAt(now);
+            rows.add(e);
+        }
+        return rows;
+    }
+
+    /** 快照行 → 工作区参数（保序：主库在前）。 */
+    private static List<WorkspaceService.SessionRepoSpec> toWorkspaceSpecs(List<SessionRepoEntity> rows) {
+        return rows.stream()
+                .map(r -> new WorkspaceService.SessionRepoSpec(r.getName(), r.getLocalPath(), r.getBaseBranch()))
+                .toList();
+    }
+
+    /**
+     * CAP-31：按快照组装远程工作区描述列表（主库在前）。逐库解析 token（按各自 remoteUrl host）；
+     * 无 remoteUrl / ssh 协议 / token 解析失败的库跳过（记日志），全跳过 = 空列表（降级为节点自理）。
+     * token 仅随 launch 帧传输，严禁进日志。
+     */
+    private List<AgentLaunchCommand.RepoSpec> buildRepoSpecs(Project project, List<SessionRepoEntity> rows,
+                                                             String baseBranch, String branch, String actor) {
+        if (rows.isEmpty()) {
+            // 旧路径兼容：无快照（项目无仓库行）按 projects 镜像列单库组装
+            AgentLaunchCommand.RepoSpec single = buildRepoSpec(project, baseBranch, branch, actor);
+            return single != null ? List.of(single) : List.of();
+        }
+        RepoGitGateway gw = repoGitGateway.getIfAvailable();
+        if (gw == null) {
+            log.warn("远程工作区降级：integration 未装配，无凭据可下发: project={}",
+                    project != null ? project.id() : null);
+            return List.of();
+        }
+        List<AgentLaunchCommand.RepoSpec> out = new ArrayList<>();
+        for (SessionRepoEntity row : rows) {
+            try {
+                String url = row.getRemoteUrl() == null ? "" : row.getRemoteUrl().trim();
+                if (url.isBlank()) {
+                    log.warn("远程工作区跳过无 remoteUrl 的库（远程不拉取）: repo={}", row.getName());
+                    continue;
+                }
+                if (url.startsWith("git@") || url.startsWith("ssh://")) {
+                    log.warn("远程工作区跳过 ssh 协议的库（仅支持 http/https）: repo={}", row.getName());
+                    continue;
+                }
+                // token 可空 = 匿名通道（公开仓库 / file://），与 CAP-23 匿名克隆口径一致
+                String token = gw.resolveToken(actor, hostOf(url),
+                        project != null ? project.id() : null).orElse(null);
+                out.add(new AgentLaunchCommand.RepoSpec(url, row.getBaseBranch(), row.getBranch(),
+                        token, row.getName()));
+            } catch (Exception e) {
+                log.warn("远程工作区描述组装失败(跳过该库): repo={} err={}", row.getName(), e.getMessage());
+            }
+        }
+        return out;
+    }
+
+    /** CAP-31 工作区清理（快照驱动）：多库按快照重建聚合工作区倒序清理；单库/无快照走旧单库路径。 */
+    private void cleanupWorkspace(SessionEntity ent) {
+        Project project = resolveProject(ent.getProjectId());
+        if (project == null) {
+            return;
+        }
+        List<SessionRepoEntity> rows = sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(ent.getId());
+        if (rows.size() > 1) {
+            workspaceService.cleanupSessionWorkspace(toWorkspaceSpecs(rows), ent.getId(),
+                    Path.of(ent.getWorktreePath()));
+        } else {
+            workspaceService.cleanupSessionWorkspace(project, ent.getId(), Path.of(ent.getWorktreePath()));
+        }
+    }
+
     private static String hostOf(String url) {
         if (url == null || url.isBlank()) {
             return null;
@@ -807,10 +950,12 @@ public class SessionManagerService {
     }
 
     private SessionView toView(SessionEntity ent, SessionState state) {
+        List<String> repoNames = sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(ent.getId())
+                .stream().map(SessionRepoEntity::getName).toList();
         return new SessionView(
                 ent.getId(), ent.getProjectId(), ent.getWorkItemId(), ent.getRequirementId(), ent.getTaskSpec(),
                 state.name(), state, ent.getWorktreePath(), ent.getPid(),
-                ent.getModel(), ent.getSummary(), ent.getAgentNodeId(),
+                ent.getModel(), ent.getSummary(), ent.getAgentNodeId(), repoNames,
                 ent.getCreatedAt(), ent.getUpdatedAt(), ent.getFinishedAt());
     }
 

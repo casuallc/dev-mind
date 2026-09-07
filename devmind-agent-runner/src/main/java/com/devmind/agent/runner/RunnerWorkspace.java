@@ -36,12 +36,20 @@ public class RunnerWorkspace {
     private static final long PUSH_TIMEOUT_SEC = 5 * 60;
     private static final long OP_TIMEOUT_SEC = 60;
 
-    /** launch 帧 repo 块（token 仅内存）。 */
-    public record RepoSpec(String remoteUrl, String baseBranch, String branch, String token) {
+    /** launch 帧 repo 块（token 仅内存）。name = CAP-31 多库子目录名（单库可为 null）。 */
+    public record RepoSpec(String remoteUrl, String baseBranch, String branch, String token, String name) {
+        /** 兼容构造器：单库（无 name）。 */
+        public RepoSpec(String remoteUrl, String baseBranch, String branch, String token) {
+            this(remoteUrl, baseBranch, branch, token, null);
+        }
     }
 
     /** 一个会话的工作区上下文：随会话存活，结束（push+清理）后弃置。 */
     public record RepoCtx(RepoSpec spec, Path cacheDir, Path sessionDir) {
+    }
+
+    /** CAP-31 多库会话上下文：各库 RepoCtx + 聚合根（= claude cwd）。 */
+    public record MultiCtx(List<RepoCtx> repos, Path aggRoot) {
     }
 
     private final Path workspaceRoot;
@@ -74,21 +82,90 @@ public class RunnerWorkspace {
      * （分支保留在克隆缓存供追溯）。push 失败只上报，不反转会话结局。
      */
     public void finish(RepoCtx ctx, java.util.function.Consumer<String> sink) {
+        finishOne(ctx, "", sink);
+    }
+
+    /**
+     * CAP-31 多库会话工作区：每库独立克隆缓存（&lt;root&gt;/&lt;projectId&gt;/&lt;name&gt;/main）
+     * 与会话 worktree（&lt;root&gt;/&lt;projectId&gt;/sessions/&lt;sid&gt;/&lt;name&gt;），
+     * 聚合根 = sessions/&lt;sid&gt;（claude cwd；单库路径布局不动存量）。
+     * 中途失败：已备好的库逐个 best-effort 收口后抛错。
+     */
+    public MultiCtx prepareMulti(String sessionId, String projectId, List<RepoSpec> specs) {
+        if (projectId == null || !SAFE_ID.matcher(projectId).matches()) {
+            throw new IllegalStateException("非法 projectId（白名单 [a-zA-Z0-9._-]）: " + projectId);
+        }
+        Path aggRoot = workspaceRoot.resolve(projectId).resolve("sessions").resolve(sessionId).normalize();
+        if (!aggRoot.startsWith(workspaceRoot)) {
+            throw new IllegalStateException("工作区路径越界（.. 逃逸防护）: " + projectId);
+        }
+        List<RepoCtx> done = new ArrayList<>();
+        try {
+            for (RepoSpec spec : specs) {
+                if (spec.name() == null || !SAFE_ID.matcher(spec.name()).matches()) {
+                    throw new IllegalStateException("非法仓库名（白名单 [a-zA-Z0-9._-]，多库必填）: " + spec.name());
+                }
+                if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
+                    throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
+                }
+                Path cacheDir = workspaceRoot.resolve(projectId).resolve(spec.name()).resolve("main").normalize();
+                Path sessionDir = aggRoot.resolve(spec.name()).normalize();
+                if (!cacheDir.startsWith(workspaceRoot) || !sessionDir.startsWith(aggRoot)) {
+                    throw new IllegalStateException("工作区路径越界（.. 逃逸防护）: " + spec.name());
+                }
+                ensureClone(cacheDir, spec);
+                fetch(cacheDir, spec);
+                addWorktree(cacheDir, sessionDir, spec);
+                done.add(new RepoCtx(spec, cacheDir, sessionDir));
+                log.info("多库工作区就绪: session={} repo={} dir={}", sessionId, spec.name(), sessionDir);
+            }
+        } catch (RuntimeException e) {
+            for (RepoCtx ctx : done.reversed()) {
+                try {
+                    finishOne(ctx, "[" + ctx.spec().name() + "] ", m -> log.warn("回滚收口: {}", m));
+                } catch (Exception ex) {
+                    log.warn("多库准备失败回滚异常: repo={} err={}", ctx.spec().name(), ex.getMessage());
+                }
+            }
+            throw e;
+        }
+        return new MultiCtx(done, aggRoot);
+    }
+
+    /** CAP-31 多库结束收口（best-effort）：逐库 push+移除 worktree（上报带 [&lt;name&gt;] 前缀），再删聚合根。 */
+    public void finishMulti(MultiCtx ctx, java.util.function.Consumer<String> sink) {
+        for (RepoCtx repoCtx : ctx.repos()) {
+            finishOne(repoCtx, "[" + repoCtx.spec().name() + "] ", sink);
+        }
+        if (!Files.exists(ctx.aggRoot())) {
+            return;
+        }
+        try (var walk = Files.walk(ctx.aggRoot())) {
+            for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(p);
+            }
+        } catch (IOException e) {
+            log.warn("聚合根目录清理失败(可人工删除 {}): {}", ctx.aggRoot(), e.getMessage());
+        }
+    }
+
+    /** 单库收口（finish/finishMulti 共用）：push 会话分支 → 移除会话 worktree。label 为上报前缀（多库带库名）。 */
+    private void finishOne(RepoCtx ctx, String label, java.util.function.Consumer<String> sink) {
         RepoSpec spec = ctx.spec();
         try {
             Result push = run(ctx.cacheDir(), PUSH_TIMEOUT_SEC, spec.token(),
                     "push", withToken(spec.remoteUrl(), spec.token()), spec.branch() + ":" + spec.branch());
             if (push.exit() == 0) {
                 sink.accept(push.output().contains("Everything up-to-date")
-                        ? "[工作区] 分支 " + spec.branch() + " 无新提交，远端已是最新"
-                        : "[工作区] 已推送分支 " + spec.branch() + " 到远端");
+                        ? label + "[工作区] 分支 " + spec.branch() + " 无新提交，远端已是最新"
+                        : label + "[工作区] 已推送分支 " + spec.branch() + " 到远端");
             } else {
-                sink.accept("[工作区] 分支 " + spec.branch() + " 推送失败（改动保留在节点 "
+                sink.accept(label + "[工作区] 分支 " + spec.branch() + " 推送失败（改动保留在节点 "
                         + ctx.cacheDir() + "，可人工 push）: " + tail(push.output()));
                 log.warn("会话分支推送失败: branch={} err={}", spec.branch(), tail(push.output()));
             }
         } catch (Exception e) {
-            sink.accept("[工作区] 分支推送异常（不反转会话结局）: " + e.getMessage());
+            sink.accept(label + "[工作区] 分支推送异常（不反转会话结局）: " + e.getMessage());
             log.warn("会话分支推送异常: {}", e.getMessage());
         }
         try {

@@ -171,10 +171,29 @@ public class AgentRunnerMain {
             RunnerSessionRegistry.SessionFinalizer finalizer = null;
             String kind = frame.path("kind").asText("");
             JsonNode repoNode = frame.path("repo");
+            JsonNode reposNode = frame.path("repos");
             if ("chat".equals(kind)) {
                 workDir = workspace.prepareChat(sessionId);
                 finalizer = sid -> workspace.cleanChat(sid, msg -> sessions.reportSystem(sid, msg));
                 log.info("问答沙箱就绪: session={} cwd={}", sessionId, workDir);
+            } else if (reposNode.isArray() && reposNode.size() > 1) {
+                // CAP-31 多库会话：repos 数组 >1 → 聚合目录模式（cwd=聚合根，各库子目录 <name>/）
+                if (projectId == null || projectId.isBlank()) {
+                    throw new IllegalStateException("带 repos 块的 launch 必须携带 projectId");
+                }
+                java.util.List<RunnerWorkspace.RepoSpec> specs = new java.util.ArrayList<>();
+                for (JsonNode rn : reposNode) {
+                    specs.add(new RunnerWorkspace.RepoSpec(
+                            rn.path("remoteUrl").asText(""),
+                            rn.path("baseBranch").asText(""),
+                            rn.path("branch").asText(""),
+                            rn.path("token").asText(""),
+                            rn.path("name").asText("")));
+                }
+                RunnerWorkspace.MultiCtx mctx = workspace.prepareMulti(sessionId, projectId, specs);
+                workDir = mctx.aggRoot();
+                finalizer = sid -> workspace.finishMulti(mctx, msg -> sessions.reportSystem(sid, msg));
+                log.info("多库托管工作区就绪: session={} repos={} cwd={}", sessionId, specs.size(), workDir);
             } else if (repoNode.isObject() && !repoNode.path("remoteUrl").asText("").isBlank()) {
                 if (projectId == null || projectId.isBlank()) {
                     throw new IllegalStateException("带 repo 块的 launch 必须携带 projectId");

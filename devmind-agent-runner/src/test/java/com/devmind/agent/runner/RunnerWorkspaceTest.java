@@ -106,6 +106,74 @@ class RunnerWorkspaceTest {
     }
 
     @Test
+    void multiRepoLifecycle() throws Exception {
+        // 两个独立远端（file:// 匿名通道）
+        Path originA = tmp.resolve("origin-a.git");
+        Path originB = tmp.resolve("origin-b.git");
+        seedOrigin(originA, "a.txt");
+        seedOrigin(originB, "b.txt");
+
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        List<RunnerWorkspace.RepoSpec> specs = List.of(
+                new RunnerWorkspace.RepoSpec(originA.toUri().toString(), "main", "feature/s1", "", "backend"),
+                new RunnerWorkspace.RepoSpec(originB.toUri().toString(), "main", "feature/s1", "", "web"));
+
+        // prepareMulti：各库独立克隆缓存 <root>/<proj>/<name>/main + 会话 worktree sessions/<sid>/<name>，
+        // 聚合根 = sessions/<sid>
+        RunnerWorkspace.MultiCtx mctx = ws.prepareMulti("s1", "proj1", specs);
+        Path aggRoot = tmp.resolve("workspaces").resolve("proj1").resolve("sessions").resolve("s1");
+        assertEquals(aggRoot, mctx.aggRoot());
+        assertEquals(aggRoot.resolve("backend"), mctx.repos().get(0).sessionDir());
+        assertEquals(aggRoot.resolve("web"), mctx.repos().get(1).sessionDir());
+        assertTrue(Files.exists(aggRoot.resolve("backend").resolve("a.txt")));
+        assertTrue(Files.exists(aggRoot.resolve("web").resolve("b.txt")));
+        assertEquals("feature/s1", gitOut(aggRoot.resolve("backend"), "branch", "--show-current"));
+        assertEquals("feature/s1", gitOut(aggRoot.resolve("web"), "branch", "--show-current"));
+        // 克隆缓存按库分目录
+        assertTrue(Files.isDirectory(tmp.resolve("workspaces").resolve("proj1").resolve("backend")
+                .resolve("main").resolve(".git")));
+        assertTrue(Files.isDirectory(tmp.resolve("workspaces").resolve("proj1").resolve("web")
+                .resolve("main").resolve(".git")));
+
+        // 各库提交一笔 → finishMulti 逐库 push + 清理，聚合根删除
+        Files.writeString(aggRoot.resolve("backend").resolve("code.txt"), "A");
+        git(aggRoot.resolve("backend"), "add", ".");
+        git(aggRoot.resolve("backend"), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "workA");
+        Files.writeString(aggRoot.resolve("web").resolve("ui.txt"), "B");
+        git(aggRoot.resolve("web"), "add", ".");
+        git(aggRoot.resolve("web"), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "workB");
+
+        List<String> events = new ArrayList<>();
+        ws.finishMulti(mctx, events::add);
+        assertTrue(events.stream().anyMatch(m -> m.contains("[backend]") && m.contains("已推送分支 feature/s1")),
+                String.join("\n", events));
+        assertTrue(events.stream().anyMatch(m -> m.contains("[web]") && m.contains("已推送分支 feature/s1")),
+                String.join("\n", events));
+        assertFalse(Files.exists(aggRoot));
+        assertEquals("A", git(originA, "show", "feature/s1:code.txt").trim());
+        assertEquals("B", git(originB, "show", "feature/s1:ui.txt").trim());
+    }
+
+    @Test
+    void multiRepoRejectsUnsafeName() {
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        List<RunnerWorkspace.RepoSpec> specs = List.of(
+                new RunnerWorkspace.RepoSpec("file:///x", "main", "feature/s1", "", "ok"),
+                new RunnerWorkspace.RepoSpec("file:///y", "main", "feature/s1", "", "../escape"));
+        assertThrows(IllegalStateException.class, () -> ws.prepareMulti("s1", "proj1", specs));
+    }
+
+    private void seedOrigin(Path origin, String seedFile) throws Exception {
+        git(tmp, "init", "--bare", "-b", "main", origin.toString());
+        Path seed = tmp.resolve("seed-" + seedFile);
+        git(tmp, "clone", origin.toString(), seed.toString());
+        Files.writeString(seed.resolve(seedFile), "seed");
+        git(seed, "add", ".");
+        git(seed, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init");
+        git(seed, "push", "origin", "main");
+    }
+
+    @Test
     void sanitizeMasksToken() {
         String out = RunnerWorkspace.sanitize("remote: oauth2:abc+123@host abc%2B123 done", "abc+123");
         assertFalse(out.contains("abc+123"));
