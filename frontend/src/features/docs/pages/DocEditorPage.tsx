@@ -185,17 +185,16 @@ export default function DocEditorPage() {
     { title: '时间', dataIndex: 'createdAt', width: 170, render: (t) => fmtTime(t) },
     {
       title: '操作',
-      width: 200,
+      width: 300,
       render: (_, r) => (
         <Space size={4}>
-          <Button size="small" onClick={() => load(r.versionNo)}>
+          <Button onClick={() => load(r.versionNo)}>
             查看
           </Button>
-          <Button size="small" icon={<DiffOutlined />} onClick={() => onDiff(r.versionNo)}>
+          <Button icon={<DiffOutlined />} onClick={() => onDiff(r.versionNo)}>
             与当前 diff
           </Button>
           <Button
-            size="small"
             disabled={r.versionNo === doc?.currentVersion}
             icon={<RollbackOutlined />}
             onClick={() => onRevert(r.versionNo)}
@@ -223,10 +222,9 @@ export default function DocEditorPage() {
       ) : (
         <>
           <Card
-            size="small"
             title={
               <Space>
-                <Button type="text" size="small" icon={<ArrowLeftOutlined />} onClick={() => navigate('/admin/docs')} />
+                <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/admin/docs')} />
                 <Typography.Text strong>{displayTitle}</Typography.Text>
                 <Tag color={doc.kind === 'requirement' ? 'blue' : doc.kind === 'design' ? 'geekblue' : doc.kind === 'api-suite' ? 'purple' : 'cyan'}>
                   {KIND_LABEL[doc.kind]}
@@ -241,13 +239,12 @@ export default function DocEditorPage() {
             extra={
               <Space>
                 {viewing ? (
-                  <Button size="small" type="primary" onClick={() => load()}>
+                  <Button type="primary" onClick={() => load()}>
                     回到当前版本
                   </Button>
                 ) : (
                   <>
                     <Segmented
-                      size="small"
                       value={mode}
                       onChange={(v) => {
                         setMode(v as 'view' | 'edit')
@@ -260,7 +257,6 @@ export default function DocEditorPage() {
                     />
                     {mode === 'edit' && (
                       <Button
-                        size="small"
                         type="primary"
                         icon={<SaveOutlined />}
                         disabled={!dirty}
@@ -270,21 +266,21 @@ export default function DocEditorPage() {
                       </Button>
                     )}
                     {doc.status === 'draft' && (
-                      <Button size="small" onClick={() => onTransition('submit', '提交确认', '进入待确认状态，可进一步冻结为基线。')}>
+                      <Button onClick={() => onTransition('submit', '提交确认', '进入待确认状态，可进一步冻结为基线。')}>
                         提交确认
                       </Button>
                     )}
                     {doc.status === 'pending_confirm' && (
-                      <Button size="small" onClick={() => onTransition('freeze', '冻结', '冻结后为基线，后续变更必须生成新版本并填写变更说明。')}>
+                      <Button onClick={() => onTransition('freeze', '冻结', '冻结后为基线，后续变更必须生成新版本并填写变更说明。')}>
                         冻结
                       </Button>
                     )}
                     {doc.status === 'frozen' && (
-                      <Button size="small" onClick={() => onTransition('unfreeze', '解除冻结', '回到草稿态，可随意编辑。')}>
+                      <Button onClick={() => onTransition('unfreeze', '解除冻结', '回到草稿态，可随意编辑。')}>
                         解除冻结
                       </Button>
                     )}
-                    <Button size="small" danger onClick={onDelete}>
+                    <Button danger onClick={onDelete}>
                       删除
                     </Button>
                   </>
