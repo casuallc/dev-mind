@@ -93,7 +93,7 @@ export default function AppLayout() {
       </Sider>
       <Layout>
         <AppHeader />
-        <Content style={{ padding: 24, overflow: 'auto' }}>
+        <Content style={{ padding: '16px 24px 24px', overflow: 'auto' }}>
           <Outlet />
         </Content>
       </Layout>
