@@ -4,7 +4,7 @@
 import { useCallback, useState } from 'react'
 import { Modal, message } from 'antd'
 import { finishSession, killSession, resumeSession, sessionDiff, suspendSession } from '../api'
-import type { DiffView, SessionSummary } from '../types'
+import type { RepoDiffView, SessionSummary } from '../types'
 
 export interface SessionActions {
   /** 结束会话：关 stdin，claude 自然退出 → DONE/FAILED */
@@ -16,7 +16,8 @@ export interface SessionActions {
   diff: {
     open: boolean
     loading: boolean
-    data: DiffView | null
+    /** CAP-31：按库分组的 diff 列表 */
+    data: RepoDiffView[] | null
     show: () => Promise<void>
     close: () => void
   }
@@ -28,7 +29,7 @@ export function useSessionActions(
 ): SessionActions {
   const [diffOpen, setDiffOpen] = useState(false)
   const [diffLoading, setDiffLoading] = useState(false)
-  const [diffData, setDiffData] = useState<DiffView | null>(null)
+  const [diffData, setDiffData] = useState<RepoDiffView[] | null>(null)
 
   const doAction = useCallback(
     async (fn: () => Promise<SessionSummary>, successMsg: string) => {

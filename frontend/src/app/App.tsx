@@ -84,6 +84,9 @@ export default function App() {
           <Route element={<ProjectContextGate />}>
             <Route path="/overview" element={<ProjectOverviewPage />} />
             <Route path="/requirements" element={<RequirementsPage />} />
+            {/* CAP-05 会话（CAP-31 起归属当前项目；通用问答走个人 /chats） */}
+            <Route path="/sessions" element={<SessionsBoard />} />
+            <Route path="/sessions/:id" element={<SessionDetail />} />
             <Route path="/builds" element={<BuildsPage />} />
             <Route path="/deployments" element={<DeploymentsPage />} />
             <Route path="/releases" element={<ReleasesPage />} />
@@ -95,9 +98,6 @@ export default function App() {
           <Route path="/projects/:id/requirements/:rid" element={<RequirementDetailPage />} />
           {/* CAP-06 通知 */}
           <Route path="/notifications" element={<NotificationCenter />} />
-          {/* CAP-05 会话 */}
-          <Route path="/sessions" element={<SessionsBoard />} />
-          <Route path="/sessions/:id" element={<SessionDetail />} />
           {/* 旧路径兼容：指挥中心/知识库/文档已迁入 /admin 后台 */}
           <Route path="/dashboard" element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="/knowledge" element={<Navigate to="/admin/knowledge" replace />} />

@@ -22,6 +22,7 @@ import SessionDiffModal from '../components/SessionDiffModal'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
 import { fmtTime } from '../../../shared/utils/format'
+import { useCurrentProjectId } from '../../../app/useCurrentProject'
 
 // 活跃在前 + 创建时间倒序（与 SessionListPane 一致，用于自动选中第一个）
 function sortForBoard(list: SessionSummary[]): SessionSummary[] {
@@ -34,6 +35,8 @@ function sortForBoard(list: SessionSummary[]): SessionSummary[] {
 
 export default function SessionsBoard() {
   const navigate = useNavigate()
+  // CAP-31：会话归属当前项目（本页在 ProjectContextGate 内，必有当前项目）
+  const projectId = useCurrentProjectId()
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
   const [loading, setLoading] = useState(false)
@@ -47,13 +50,20 @@ export default function SessionsBoard() {
 
   const load = useCallback(async () => {
     try {
-      setSessions(await listSessions())
+      setSessions(await listSessions(projectId ?? undefined))
     } catch (e) {
       message.error(`加载会话失败：${(e as Error).message}`)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [projectId])
+
+  // 切换当前项目：清选中态与自动选中标记，避免选中到上一个项目的会话
+  useEffect(() => {
+    autoPickedRef.current = false
+    setSelectedId(undefined)
+    setDraft(false)
+  }, [projectId])
 
   // 轮询刷新状态；对话内容由 ChatPanel 的 WS 实时流负责，这里只刷状态标签/摘要
   useEffect(() => {

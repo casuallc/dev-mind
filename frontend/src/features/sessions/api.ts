@@ -1,9 +1,16 @@
 // 会话能力（CAP-05）的接口封装：页面只依赖本文件，不直接碰 shared client
 import { api } from '../../shared/api/client'
-import type { DiffView, SessionSummary, SessionEvent, SessionTemplate } from './types'
+import type { RepoDiffView, SessionSummary, SessionEvent, SessionTemplate } from './types'
 
-export function listSessions(status?: string, workItemId?: string, requirementId?: string): Promise<SessionSummary[]> {
+// CAP-31：会话归属当前项目——projectId 为首参（工作台在 ProjectContextGate 内，必有当前项目）
+export function listSessions(
+  projectId?: string,
+  status?: string,
+  workItemId?: string,
+  requirementId?: string,
+): Promise<SessionSummary[]> {
   const params = new URLSearchParams()
+  if (projectId) params.set('projectId', projectId)
   if (status && status !== 'ALL') params.set('status', status)
   if (workItemId) params.set('workItemId', workItemId)
   if (requirementId) params.set('requirementId', requirementId)
@@ -25,6 +32,8 @@ export function createSession(body: {
   model?: string
   permissionMode?: string
   agentNodeId?: string
+  /** CAP-31：关联仓库（project_repos id 列表）；空 = 主库；>1 = 多库聚合目录 */
+  repoIds?: number[]
 }): Promise<SessionSummary> {
   return api.post<SessionSummary>('/sessions', body)
 }
@@ -63,8 +72,8 @@ export function finishSession(id: string): Promise<void> {
   return api.post(`/sessions/${id}/finish`)
 }
 
-export function sessionDiff(id: string): Promise<DiffView> {
-  return api.get<DiffView>(`/sessions/${id}/diff`)
+export function sessionDiff(id: string): Promise<RepoDiffView[]> {
+  return api.get<RepoDiffView[]>(`/sessions/${id}/diff`)
 }
 
 export function removeWorktree(id: string): Promise<void> {

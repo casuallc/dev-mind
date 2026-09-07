@@ -1,10 +1,9 @@
 package com.devmind.session.controller;
 
-import com.devmind.project.WorktreeManager;
 import com.devmind.session.dto.AuthorizeRequest;
 import com.devmind.session.dto.CreateSessionRequest;
-import com.devmind.session.dto.DiffView;
 import com.devmind.session.dto.InputRequest;
+import com.devmind.session.dto.RepoDiffView;
 import com.devmind.session.dto.SessionView;
 import com.devmind.common.agent.SessionEvent;
 import com.devmind.session.service.SessionManagerService;
@@ -87,10 +86,10 @@ public class SessionController {
         service.finish(id);
     }
 
+    /** CAP-31：按库返回 diff 摘要（本地逐库 worktree；远程经服务端克隆缓存 fetch 后 diff）。 */
     @GetMapping("/{id}/diff")
-    public DiffView diff(@PathVariable String id) {
-        WorktreeManager.DiffResult d = service.diff(id);
-        return new DiffView(d.stat(), d.files(), d.hasChanges());
+    public List<RepoDiffView> diff(@PathVariable String id) {
+        return service.diff(id);
     }
 
     @DeleteMapping("/{id}/worktree")

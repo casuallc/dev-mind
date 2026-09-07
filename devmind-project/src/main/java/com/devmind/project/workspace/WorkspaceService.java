@@ -126,4 +126,14 @@ public class WorkspaceService {
         }
         return aggRoot.resolve(dir).normalize();
     }
+
+    /** 按快照库名列表推导各库 worktree 子目录（与 prepare 同算法；diff 等只读场景用）。 */
+    public static List<Path> childDirs(Path aggRoot, List<String> names) {
+        List<Path> out = new ArrayList<>();
+        Set<String> used = new HashSet<>();
+        for (String n : names) {
+            out.add(childDir(aggRoot, n, used));
+        }
+        return out;
+    }
 }

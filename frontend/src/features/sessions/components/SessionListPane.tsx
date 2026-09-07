@@ -106,6 +106,20 @@ export default function SessionListPane({
                 {s.state}
               </Tag>
             </div>
+            {/* CAP-31：显式展示会话针对哪些仓库（主库蓝色在前） */}
+            {(s.repoNames ?? []).length > 0 && (
+              <div style={{ marginTop: 2, display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+                {(s.repoNames ?? []).map((n, i) => (
+                  <Tag
+                    key={`${n}-${i}`}
+                    color={i === 0 ? 'blue' : 'default'}
+                    style={{ marginInlineEnd: 0, fontSize: 11, lineHeight: '16px', padding: '0 4px' }}
+                  >
+                    {n}
+                  </Tag>
+                ))}
+              </div>
+            )}
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               {fmtTime(s.createdAt)}
             </Typography.Text>

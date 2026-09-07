@@ -18,6 +18,8 @@ export interface SessionSummary {
   summary?: string
   /** CAP-21：远程执行节点 id；空 = 本地 */
   agentNodeId?: string
+  /** CAP-31：会话关联仓库名快照（主库在前；空 = 兼容旧单库路径） */
+  repoNames?: string[]
   createdAt: string
   updatedAt: string
   finishedAt?: string
@@ -32,8 +34,12 @@ export interface SessionTemplate {
   enabled: boolean
 }
 
-export interface DiffView {
+/** CAP-31：单仓库 diff 摘要（GET /sessions/{id}/diff 按库返回列表；单库失败只填 error） */
+export interface RepoDiffView {
+  repoName: string
+  primary: boolean
   stat: string
   files: string[]
   hasChanges: boolean
+  error?: string
 }

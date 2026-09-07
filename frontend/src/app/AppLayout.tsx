@@ -57,6 +57,7 @@ export default function AppLayout() {
               children: [
                 { key: '/overview', icon: <HomeOutlined />, label: '概览' },
                 { key: '/requirements', icon: <BulbOutlined />, label: '需求' },
+                { key: '/sessions', icon: <RobotOutlined />, label: '会话看板' },
                 { key: '/builds', icon: <ToolOutlined />, label: '构建' },
                 { key: '/deployments', icon: <DeploymentUnitOutlined />, label: '部署' },
                 { key: '/tests', icon: <ExperimentOutlined />, label: '测试' },
@@ -66,10 +67,7 @@ export default function AppLayout() {
             {
               type: 'group' as const,
               label: '协作',
-              children: [
-                { key: '/sessions', icon: <RobotOutlined />, label: '会话看板' },
-                { key: '/notifications', icon: <BellOutlined />, label: '通知中心' },
-              ],
+              children: [{ key: '/notifications', icon: <BellOutlined />, label: '通知中心' }],
             },
             {
               type: 'group' as const,

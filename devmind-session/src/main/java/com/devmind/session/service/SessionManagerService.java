@@ -24,6 +24,7 @@ import com.devmind.project.model.WorkItemEntity;
 import com.devmind.project.dto.RepoView;
 import com.devmind.project.ProjectService;import com.devmind.session.config.SessionProperties;
 import com.devmind.session.dto.CreateSessionRequest;
+import com.devmind.session.dto.RepoDiffView;
 import com.devmind.session.dto.SessionView;
 import com.devmind.session.dto.TemplateView;
 import com.devmind.session.model.SessionEntity;
@@ -102,6 +103,8 @@ public class SessionManagerService {
     private final ObjectProvider<GitIdentityProvider> gitIdentityProvider;
     /** CAP-25：远程工作区凭据解析（devmind-integration 装配时可用；未装配/无凭据降级为节点自理） */
     private final ObjectProvider<RepoGitGateway> repoGitGateway;
+    /** CAP-31：远程会话 diff（服务端克隆缓存 fetch + git diff） */
+    private final RemoteDiffService remoteDiffService;
     /** 启动期存量清理的事务边界（@PostConstruct 不经代理，@Transactional 不生效） */
     private final PlatformTransactionManager txManager;
 
@@ -129,6 +132,7 @@ public class SessionManagerService {
                                  ObjectProvider<AgentNodeConnector> connectorProvider,
                                  ObjectProvider<GitIdentityProvider> gitIdentityProvider,
                                  ObjectProvider<RepoGitGateway> repoGitGateway,
+                                 RemoteDiffService remoteDiffService,
                                  PlatformTransactionManager txManager) {
         this.identityService = identityService;
         this.projectService = projectService;
@@ -151,6 +155,7 @@ public class SessionManagerService {
         this.connectorProvider = connectorProvider;
         this.gitIdentityProvider = gitIdentityProvider;
         this.repoGitGateway = repoGitGateway;
+        this.remoteDiffService = remoteDiffService;
         this.txManager = txManager;
     }
 
@@ -504,13 +509,42 @@ public class SessionManagerService {
 
     // ---------------- worktree / diff ----------------
 
-    public WorktreeManager.DiffResult diff(String id) {
+    /**
+     * CAP-31 diff（按库返回）：本地会话逐库 worktree diff（多库 = 聚合根下各子目录）；
+     * 远程会话工作区在节点侧已随结束清理，走 {@link RemoteDiffService}（服务端克隆缓存 fetch + diff）。
+     * 单库失败只填该行 error，不拖垮整组。
+     */
+    public List<RepoDiffView> diff(String id) {
         SessionEntity ent = requireEntity(id);
+        List<SessionRepoEntity> rows = sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(id);
+        if (ent.getAgentNodeId() != null && !ent.getAgentNodeId().isBlank()) {
+            return remoteDiffService.diff(ent, rows);
+        }
         Project project = resolveProject(ent.getProjectId());
         if (project == null || ent.getWorktreePath() == null || ent.getWorktreePath().isBlank()) {
-            return WorktreeManager.DiffResult.empty();
+            return List.of();
         }
-        return worktreeManager.diff(project, Path.of(ent.getWorktreePath()));
+        Path root = Path.of(ent.getWorktreePath());
+        if (rows.isEmpty()) {
+            // 旧路径兼容：项目无仓库行，按 projects 镜像列单库
+            WorktreeManager.DiffResult d = worktreeManager.diff(project, root);
+            return List.of(RepoDiffView.of(project.name(), true, d.stat(), d.files()));
+        }
+        // 单库 cwd=worktree 本身；多库逐库定位聚合根下子目录（与 prepare 同算法推导）
+        List<Path> dirs = rows.size() == 1 ? List.of(root)
+                : WorkspaceService.childDirs(root, rows.stream().map(SessionRepoEntity::getName).toList());
+        List<RepoDiffView> out = new ArrayList<>();
+        for (int i = 0; i < rows.size(); i++) {
+            SessionRepoEntity row = rows.get(i);
+            boolean primary = Boolean.TRUE.equals(row.getIsPrimary());
+            try {
+                WorktreeManager.DiffResult d = worktreeManager.diff(row.getBaseBranch(), dirs.get(i));
+                out.add(RepoDiffView.of(row.getName(), primary, d.stat(), d.files()));
+            } catch (Exception e) {
+                out.add(RepoDiffView.error(row.getName(), primary, "diff 失败: " + e.getMessage()));
+            }
+        }
+        return out;
     }
 
     public void removeWorktree(String id) {
