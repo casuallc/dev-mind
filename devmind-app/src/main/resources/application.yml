@@ -46,6 +46,9 @@ devmind:
     event-flush-ms: 200
     max-concurrent: 4
     oneshot-permission-mode: plan    # CAP-28 one-shot 总结会话专用（只读任务，不复用上方 acceptEdits）
+  attachment:                      # CAP-32 公共附件管理
+    root-dir: ""                   # 空=${user.dir}/data/attachments
+    max-size-mb: 20                # 单附件上限（同时受 spring.servlet.multipart 64MB 约束）
   worklog:                         # CAP-28 个人工时
     daily-enabled: true
     daily-cron: "0 30 18 * * *"    # 每日 18:30 生成日报草稿

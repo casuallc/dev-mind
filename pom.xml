@@ -29,6 +29,7 @@
         <module>devmind-skill</module>
         <module>devmind-session</module>
         <module>devmind-chat</module>
+        <module>devmind-attachment</module>
         <module>devmind-notification</module>
         <module>devmind-server-adapter</module>
         <module>devmind-execution</module>
@@ -96,6 +97,11 @@
             <dependency>
                 <groupId>com.devmind</groupId>
                 <artifactId>devmind-chat</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.devmind</groupId>
+                <artifactId>devmind-attachment</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
