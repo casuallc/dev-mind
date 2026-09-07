@@ -102,8 +102,44 @@ public class RunnerWorkspace {
         }
     }
 
-    /** 克隆缓存就位：已有 .git 直接复用；否则 clone（token 内嵌）+ 立即清 origin URL 残留 */
-    private void ensureClone(Path cacheDir, RepoSpec spec) {
+    /**
+     * CAP-30 问答沙箱：&lt;workspaceRoot&gt;/_chat/&lt;sessionId&gt;（launch 帧 kind:"chat"）。
+     * 幂等创建（resume 复用）；无 clone/push 语义。
+     */
+    public Path prepareChat(String sessionId) {
+        if (sessionId == null || !SAFE_ID.matcher(sessionId).matches()) {
+            throw new IllegalStateException("非法 sessionId（白名单 [a-zA-Z0-9._-]）: " + sessionId);
+        }
+        Path dir = workspaceRoot.resolve("_chat").resolve(sessionId).normalize();
+        if (!dir.startsWith(workspaceRoot)) {
+            throw new IllegalStateException("工作区路径越界（.. 逃逸防护）: " + sessionId);
+        }
+        try {
+            Files.createDirectories(dir);
+        } catch (IOException e) {
+            throw new IllegalStateException("创建问答沙箱目录失败: " + dir, e);
+        }
+        return dir;
+    }
+
+    /** CAP-30 问答结束收口（best-effort）：递归删除沙箱目录。 */
+    public void cleanChat(String sessionId, java.util.function.Consumer<String> sink) {
+        Path dir = workspaceRoot.resolve("_chat").resolve(sessionId).normalize();
+        if (!dir.startsWith(workspaceRoot) || !Files.exists(dir)) {
+            return;
+        }
+        try (var walk = Files.walk(dir)) {
+            for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(p);
+            }
+            sink.accept("[工作区] 问答沙箱已清理: " + dir);
+        } catch (IOException e) {
+            log.warn("问答沙箱清理失败(可人工删除 {}): {}", dir, e.getMessage());
+            sink.accept("[工作区] 问答沙箱清理失败（可人工删除 " + dir + "）: " + e.getMessage());
+        }
+    }
+
+    /** 克隆缓存就位：已有 .git 直接复用；否则 clone（token 内嵌）+ 立即清 origin URL 残留 */private void ensureClone(Path cacheDir, RepoSpec spec) {
         if (Files.isDirectory(cacheDir.resolve(".git"))) {
             return;
         }

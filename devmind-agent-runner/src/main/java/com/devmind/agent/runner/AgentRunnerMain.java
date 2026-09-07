@@ -162,13 +162,20 @@ public class AgentRunnerMain {
             String model = frame.path("model").asText("");
             String permissionMode = frame.path("permissionMode").asText("");
 
+            // CAP-30：kind="chat" = 通用问答——沙箱 <workspaceRoot>/_chat/<sid>（幂等创建，
+            // resume 复用），进程退出 finalizer 递归删除；无 clone/push 语义。
             // CAP-25：launch 帧带 repo 块 → runner 托管工作区（clone/fetch/会话 worktree，
             // 结束 push+清理）；无 repo 块 → 旧行为（project.<id> 映射/兜底目录，代码节点自理）。
             // token 只进 RunnerWorkspace.RepoCtx（内存），严禁日志输出。
             Path workDir;
             RunnerSessionRegistry.SessionFinalizer finalizer = null;
+            String kind = frame.path("kind").asText("");
             JsonNode repoNode = frame.path("repo");
-            if (repoNode.isObject() && !repoNode.path("remoteUrl").asText("").isBlank()) {
+            if ("chat".equals(kind)) {
+                workDir = workspace.prepareChat(sessionId);
+                finalizer = sid -> workspace.cleanChat(sid, msg -> sessions.reportSystem(sid, msg));
+                log.info("问答沙箱就绪: session={} cwd={}", sessionId, workDir);
+            } else if (repoNode.isObject() && !repoNode.path("remoteUrl").asText("").isBlank()) {
                 if (projectId == null || projectId.isBlank()) {
                     throw new IllegalStateException("带 repo 块的 launch 必须携带 projectId");
                 }

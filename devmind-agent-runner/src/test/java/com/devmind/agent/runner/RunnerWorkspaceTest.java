@@ -77,6 +77,35 @@ class RunnerWorkspaceTest {
     }
 
     @Test
+    void chatSandboxLifecycle() throws Exception {
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        // 幂等创建（resume 复用）：重复 prepare 不报错、内容保留
+        Path dir = ws.prepareChat("chat01");
+        assertEquals(tmp.resolve("workspaces").resolve("_chat").resolve("chat01").toAbsolutePath().normalize(),
+                dir);
+        Files.writeString(dir.resolve("note.txt"), "草稿");
+        Path again = ws.prepareChat("chat01");
+        assertEquals(dir, again);
+        assertTrue(Files.exists(dir.resolve("note.txt")));
+
+        // 结束收口：递归删除
+        List<String> events = new ArrayList<>();
+        ws.cleanChat("chat01", events::add);
+        assertFalse(Files.exists(dir));
+        assertTrue(events.stream().anyMatch(m -> m.contains("问答沙箱已清理")), String.join("\n", events));
+
+        // 重复清理 no-op
+        ws.cleanChat("chat01", events::add);
+    }
+
+    @Test
+    void chatSandboxRejectsUnsafeId() {
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        assertThrows(IllegalStateException.class, () -> ws.prepareChat("../escape"));
+        assertThrows(IllegalStateException.class, () -> ws.prepareChat("a/b"));
+    }
+
+    @Test
     void sanitizeMasksToken() {
         String out = RunnerWorkspace.sanitize("remote: oauth2:abc+123@host abc%2B123 done", "abc+123");
         assertFalse(out.contains("abc+123"));

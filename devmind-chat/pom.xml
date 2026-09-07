@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.devmind</groupId>
+        <artifactId>devmind</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <artifactId>devmind-chat</artifactId>
+    <name>devmind-chat</name>
+    <description>CAP-30 通用问答：无项目无仓库的纯问答会话（复用 common 的 headless 会话内核，沙箱 cwd，独立表/REST/WS）</description>
+    <dependencies>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-auth</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-notification</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <!-- Spring Boot 4 默认 Jackson 3：tools.jackson.*（版本由父 BOM 管理） -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
