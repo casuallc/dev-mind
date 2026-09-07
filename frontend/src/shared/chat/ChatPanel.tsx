@@ -1,39 +1,37 @@
-// 会话对话交互面板：授权请求条 + ChatStream 消息流 + 底部输入区。
-// 内部自管 WS 实时流（活跃态）与 REST 历史回退（终态），供 SessionsBoard 右侧与 SessionDetail 复用。
-// effect 依赖只用 session.id/session.state 标量——session 对象可能来自轮询，引用每次变化。
+// 对话交互面板（CAP-30 由 sessions 上移并 apiBase 参数化）：授权请求条 + ChatStream 消息流 + 底部输入区。
+// 项目会话（apiBase=/sessions）与通用问答（/chats）共用；内部自管 WS 实时流（活跃态）与 REST 历史回退（终态）。
+// effect 依赖只用 summary.id/summary.state 标量——summary 对象可能来自轮询，引用每次变化。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Card, Input, message, Space, Typography } from 'antd'
 import { SendOutlined } from '@ant-design/icons'
-import { authorize, sessionEvents } from '../api'
-import type { SessionEvent, SessionSummary } from '../types'
-import { useSessionStream } from '../hooks/useSessionStream'
-import { ACTIVE_STATES } from '../stateMeta'
+import { api } from '../api/client'
+import type { ChatApiBase, ChatEvent, ChatSummaryBase, StreamMeta } from './types'
+import { useChatStream } from './useChatStream'
+import { ACTIVE_STATES } from './stateMeta'
 import ChatStream from './ChatStream'
 
-export interface StreamMeta {
-  connected: boolean
-  fatal: boolean
-}
-
-export default function SessionChatPanel({
-  session,
+export default function ChatPanel({
+  summary,
+  apiBase,
   maxHeight = '56vh',
   onChanged,
   onStreamMeta,
 }: {
-  session: SessionSummary
+  summary: ChatSummaryBase
+  /** REST/WS 路径前缀：项目会话 '/sessions'，通用问答 '/chats' */
+  apiBase: ChatApiBase
   maxHeight?: number | string
-  /** 授权/发送后通知外部刷新会话摘要 */
+  /** 授权/发送后通知外部刷新摘要 */
   onChanged?: () => void
   /** 实时流连接状态回传（外层做徽标） */
   onStreamMeta?: (meta: StreamMeta) => void
 }) {
-  const [pendingReq, setPendingReq] = useState<SessionEvent | null>(null)
+  const [pendingReq, setPendingReq] = useState<ChatEvent | null>(null)
   const [inputText, setInputText] = useState('')
-  const [baseEvents, setBaseEvents] = useState<SessionEvent[]>([])
+  const [baseEvents, setBaseEvents] = useState<ChatEvent[]>([])
 
-  const isLive = ACTIVE_STATES.includes(session.state)
-  const { events, connected, fatal, input, authorize: wsAuthorize } = useSessionStream(session.id, isLive)
+  const isLive = ACTIVE_STATES.includes(summary.state)
+  const { events, connected, fatal, input, authorize: wsAuthorize } = useChatStream(summary.id, apiBase, isLive)
 
   // 连接状态回传外层（徽标）
   useEffect(() => {
@@ -44,7 +42,8 @@ export default function SessionChatPanel({
   useEffect(() => {
     if (isLive) return
     let cancelled = false
-    sessionEvents(session.id)
+    api
+      .get<ChatEvent[]>(`${apiBase}/${summary.id}/events?afterSeq=-1`)
       .then((evs) => {
         if (!cancelled) setBaseEvents(evs)
       })
@@ -52,17 +51,17 @@ export default function SessionChatPanel({
     return () => {
       cancelled = true
     }
-  }, [session.id, isLive])
+  }, [summary.id, apiBase, isLive])
 
   // 捕获最近的授权请求
   useEffect(() => {
-    if (session.state !== 'WAITING_AUTH') {
+    if (summary.state !== 'WAITING_AUTH') {
       setPendingReq(null)
       return
     }
     const req = [...events].reverse().find((e) => e.type === 'permission_request')
     setPendingReq(req ?? null)
-  }, [events, session.state])
+  }, [events, summary.state])
 
   const onSend = useCallback(
     (text: string) => {
@@ -78,7 +77,8 @@ export default function SessionChatPanel({
     (accepted: boolean, scope: string) => {
       if (!pendingReq) return
       const requestId = pendingReq.payload?.requestId as string | undefined
-      authorize(session.id, accepted, scope, requestId)
+      api
+        .post(`${apiBase}/${summary.id}/authorize`, { accepted, scope, requestId })
         .then(() => wsAuthorize(accepted, scope, requestId))
         .then(() => {
           message.success(accepted ? `已允许（${scope}）` : '已拒绝')
@@ -87,18 +87,18 @@ export default function SessionChatPanel({
         })
         .catch((e) => message.error(`授权失败：${(e as Error).message}`))
     },
-    [session.id, pendingReq, wsAuthorize, onChanged],
+    [summary.id, apiBase, pendingReq, wsAuthorize, onChanged],
   )
 
   // 合并 REST 历史 + WS 实时事件，按 seq 排序去重
   const history = useMemo(() => {
-    const merged = new Map<number, SessionEvent>()
+    const merged = new Map<number, ChatEvent>()
     for (const e of baseEvents) merged.set(e.seq, e)
     for (const e of events) merged.set(e.seq, e)
     return Array.from(merged.values()).sort((a, b) => a.seq - b.seq)
   }, [baseEvents, events])
 
-  const canInput = ACTIVE_STATES.includes(session.state)
+  const canInput = ACTIVE_STATES.includes(summary.state)
 
   return (
     <div>
@@ -135,8 +135,8 @@ export default function SessionChatPanel({
 
       <ChatStream
         events={history}
-        taskSpec={session.taskSpec}
-        model={session.model}
+        taskSpec={summary.topic}
+        model={summary.model}
         maxHeight={maxHeight}
         emptyText={`等待事件…（${fatal ? '会话已结束' : connected ? '连接正常' : '重连中'}）`}
       />
@@ -148,9 +148,9 @@ export default function SessionChatPanel({
             value={inputText}
             placeholder={
               canInput
-                ? session.state === 'WAITING_INPUT'
+                ? summary.state === 'WAITING_INPUT'
                   ? '回复 agent 的提问，Enter 发送 / Shift+Enter 换行…'
-                  : session.state === 'WAITING_AUTH'
+                  : summary.state === 'WAITING_AUTH'
                     ? '（正在等待授权，可在上方允许/拒绝）'
                     : '会话运行中，可注入指令，Enter 发送 / Shift+Enter 换行…'
                 : '会话已结束，无法输入'

@@ -1,13 +1,8 @@
-// 会话能力（CAP-05）的类型定义，与后端 devmind-session 模块对齐
+// 会话能力（CAP-05）的类型定义，与后端 devmind-session 模块对齐。
+// 对话事件/状态/WS 帧等通用类型已上移 src/shared/chat（CAP-30），此处仅 re-export 兼容既有引用。
+import type { SessionState } from '../../shared/chat/types'
 
-export type SessionState =
-  | 'RUNNING'
-  | 'WAITING_INPUT'
-  | 'WAITING_AUTH'
-  | 'DONE'
-  | 'FAILED'
-  | 'SUSPENDED'
-  | 'TERMINATED'
+export type { SessionState, ChatEvent as SessionEvent, WsServerFrame } from '../../shared/chat/types'
 
 export interface SessionSummary {
   id: string
@@ -28,27 +23,6 @@ export interface SessionSummary {
   finishedAt?: string
 }
 
-export interface SessionEvent {
-  seq: number
-  type:
-    | 'system'
-    | 'assistant'
-    | 'user'
-    | 'tool_use'
-    | 'tool_result'
-    | 'text_delta'
-    | 'permission_request'
-    | 'permission_result'
-    | 'result'
-    | 'error'
-    | 'state'
-    | 'log'
-  content?: string
-  source?: string
-  timestamp: number
-  payload?: Record<string, unknown>
-}
-
 export interface SessionTemplate {
   id?: number
   code: string
@@ -63,10 +37,3 @@ export interface DiffView {
   files: string[]
   hasChanges: boolean
 }
-
-// WebSocket 帧：服务端→客户端
-export type WsServerFrame =
-  | { type: 'snapshot'; sessionId: string; seq: number; events: SessionEvent[] }
-  | { type: 'event'; seq: number; event: SessionEvent }
-  | { type: 'error'; message: string }
-  | { type: 'pong' }

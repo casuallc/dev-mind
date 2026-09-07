@@ -1,4 +1,4 @@
-// 对话式事件流渲染（由 SessionChatPanel 承载）：把 SessionEvent 流转成问答气泡 + 工具调用卡片 + 回合分隔。
+// 对话式事件流渲染（由 ChatPanel 承载；CAP-30 由 sessions 上移共享）：把 ChatEvent 流转成问答气泡 + 工具调用卡片 + 回合分隔。
 // system/log 等底层事件收进底部折叠「过程日志」。
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Collapse, Tag, Typography } from 'antd'
@@ -12,8 +12,8 @@ import {
   ToolOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
-import type { SessionEvent } from '../types'
-import { fmtTime } from '../../../shared/utils/format'
+import type { ChatEvent } from './types'
+import { fmtTime } from '../utils/format'
 
 // ---------------- 事件 → 渲染项 ----------------
 
@@ -74,10 +74,10 @@ function fmtDur(ms?: number): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
-function buildChat(events: SessionEvent[], taskSpec?: string): { items: ChatItem[]; logs: SessionEvent[] } {
+function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[]; logs: ChatEvent[] } {
   const sorted = [...events].sort((a, b) => a.seq - b.seq)
   const items: ChatItem[] = []
-  const logs: SessionEvent[] = []
+  const logs: ChatEvent[] = []
   const toolsById = new Map<string, ToolItem>()
   const pendingTools: ToolItem[] = [] // 未配对的工具调用，旧数据无 toolUseId 时按序兜底
 
@@ -187,7 +187,7 @@ export default function ChatStream({
   maxHeight = 560,
   emptyText = '等待事件…',
 }: {
-  events: SessionEvent[]
+  events: ChatEvent[]
   taskSpec?: string
   model?: string
   maxHeight?: number | string

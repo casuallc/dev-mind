@@ -1,22 +1,22 @@
-// 会话实时流 hook：WS /ws/sessions/{id}，连接后先收 snapshot（环形缓冲回放），
-// 再收增量事件，按 seq 去重；断线指数退避重连。
+// 对话实时流 hook（CAP-30 由 sessions 上移并 apiBase 参数化）：WS /ws<apiBase>/{id}，
+// 连接后先收 snapshot（环形缓冲回放），再收增量事件，按 seq 去重；断线指数退避重连。
 // enabled=false 时不建立连接；收到 error 帧视为致命（如会话已无运行时）不再重连。
 import { useEffect, useRef, useState } from 'react'
-import type { SessionEvent, WsServerFrame } from '../types'
+import type { ChatApiBase, ChatEvent, WsServerFrame } from './types'
 
-function wsUrl(id: string): string {
+function wsUrl(apiBase: ChatApiBase, id: string): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${location.host}/ws/sessions/${id}`
+  return `${proto}://${location.host}/ws${apiBase}/${id}`
 }
 
 export interface StreamState {
-  events: SessionEvent[]
+  events: ChatEvent[]
   connected: boolean
   fatal: boolean
   maxSeq: number
 }
 
-export function useSessionStream(id: string | undefined, enabled = true) {
+export function useChatStream(id: string | undefined, apiBase: ChatApiBase, enabled = true) {
   const [state, setState] = useState<StreamState>({
     events: [],
     connected: false,
@@ -57,7 +57,7 @@ export function useSessionStream(id: string | undefined, enabled = true) {
 
     const connect = () => {
       if (closed || fatal) return
-      ws = new WebSocket(wsUrl(id!))
+      ws = new WebSocket(wsUrl(apiBase, id!))
       wsRef.current = ws
       ws.onopen = () => {
         retry = 0
@@ -87,7 +87,7 @@ export function useSessionStream(id: string | undefined, enabled = true) {
       ws?.close()
       setState({ events: [], connected: false, fatal: false, maxSeq: 0 })
     }
-  }, [id, enabled])
+  }, [id, apiBase, enabled])
 
   const send = (payload: unknown) => {
     const ws = wsRef.current

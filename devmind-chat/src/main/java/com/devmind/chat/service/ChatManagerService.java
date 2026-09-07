@@ -14,6 +14,7 @@ import com.devmind.common.agent.AgentEventFrame;
 import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.SessionEvent;
+import com.devmind.common.agent.runtime.AbstractSessionRuntime;
 import com.devmind.common.agent.runtime.CliEventParser;
 import com.devmind.common.agent.runtime.CliProcessLauncher;
 import com.devmind.common.agent.runtime.FakeProcessLauncher;
@@ -204,6 +205,8 @@ public class ChatManagerService {
             rt.start();
             handle = rt;
         }
+        // 首条提问随 launch 作初始 prompt 下发、agent 回显被解析器跳过——补记 user 事件，开场气泡可见
+        ((AbstractSessionRuntime) handle).noteUserMessage(req.message());
 
         notificationPublisher.publish(NotificationEvent.of("CHAT_STARTED", id, "问答已启动",
                 preview(req.message(), 80)));

@@ -15,7 +15,8 @@ import type { SessionSummary } from '../types'
 import { stateColor, ACTIVE_STATES, STATE_OPTIONS } from '../stateMeta'
 import { useSessionActions } from '../hooks/useSessionActions'
 import SessionListPane from '../components/SessionListPane'
-import SessionChatPanel, { type StreamMeta } from '../components/SessionChatPanel'
+import ChatPanel from '../../../shared/chat/ChatPanel'
+import type { StreamMeta } from '../../../shared/chat/types'
 import NewSessionDraft from '../components/NewSessionDraft'
 import SessionDiffModal from '../components/SessionDiffModal'
 import { listAgentNodes } from '../../agent/api'
@@ -54,7 +55,7 @@ export default function SessionsBoard() {
     }
   }, [])
 
-  // 轮询刷新状态；对话内容由 SessionChatPanel 的 WS 实时流负责，这里只刷状态标签/摘要
+  // 轮询刷新状态；对话内容由 ChatPanel 的 WS 实时流负责，这里只刷状态标签/摘要
   useEffect(() => {
     setLoading(true)
     load()
@@ -302,9 +303,10 @@ export default function SessionsBoard() {
                     </Button>
                   </Space>
                 </div>
-                <SessionChatPanel
+                <ChatPanel
                   key={current.id}
-                  session={current}
+                  summary={{ ...current, topic: current.taskSpec }}
+                  apiBase="/sessions"
                   maxHeight="calc(100vh - 400px)"
                   onChanged={load}
                   onStreamMeta={setStreamMeta}

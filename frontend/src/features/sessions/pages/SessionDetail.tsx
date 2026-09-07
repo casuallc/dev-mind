@@ -1,4 +1,4 @@
-// 会话详情：头部信息 + 完整操作（含沉淀经验/清理 worktree）+ 对话面板（SessionChatPanel 复用）。
+// 会话详情：头部信息 + 完整操作（含沉淀经验/清理 worktree）+ 对话面板（shared ChatPanel 复用）。
 import { useCallback, useEffect, useState } from 'react'
 import {
   Badge,
@@ -27,7 +27,8 @@ import { getSession, removeWorktree } from '../api'
 import type { SessionSummary } from '../types'
 import { stateColor, ACTIVE_STATES } from '../stateMeta'
 import { useSessionActions } from '../hooks/useSessionActions'
-import SessionChatPanel, { type StreamMeta } from '../components/SessionChatPanel'
+import ChatPanel from '../../../shared/chat/ChatPanel'
+import type { StreamMeta } from '../../../shared/chat/types'
 import SessionDiffModal from '../components/SessionDiffModal'
 import SedimentExperienceModal from '../../knowledge/components/SedimentExperienceModal'
 import { fmtTime } from '../../../shared/utils/format'
@@ -185,7 +186,12 @@ export default function SessionDetail() {
           </Button>
         }
       >
-        <SessionChatPanel session={session} onChanged={loadSession} onStreamMeta={setStreamMeta} />
+        <ChatPanel
+          summary={{ ...session, topic: session.taskSpec }}
+          apiBase="/sessions"
+          onChanged={loadSession}
+          onStreamMeta={setStreamMeta}
+        />
       </Card>
 
       <SessionDiffModal open={diff.open} diff={diff.data} onClose={diff.close} />

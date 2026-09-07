@@ -188,6 +188,17 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
         }
     }
 
+    /**
+     * 仅把用户消息记入事件流（不发 stdin）。用于创建会话时：首条提问已作为初始 prompt
+     * 随 launch 下发，agent 回显又被解析器跳过——补一条 user 事件让开场气泡在对话流可见。
+     */
+    public void noteUserMessage(String text) {
+        if (text == null || text.isBlank()) {
+            return;
+        }
+        publish(SessionEvent.of(nextSeq(), "user", text, "system"));
+    }
+
     /** 优雅结束：关 stdin（EOF）/发 finish 指令，agent 读完后自然退出 → DONE/FAILED；20s 不退兜底强杀。 */
     @Override
     public void finish() {
