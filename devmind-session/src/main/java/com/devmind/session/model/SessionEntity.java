@@ -52,6 +52,10 @@ public class SessionEntity {
     @Column(length = 64)
     private String model;
 
+    /** 权限模式（acceptEdits/default/bypassPermissions/plan）；create 存值，resume 读回（修复恢复丢权限模式） */
+    @Column(name = "permission_mode", length = 32)
+    private String permissionMode;
+
     @Column(name = "created_by", length = 64)
     private String createdBy;
 
@@ -92,6 +96,8 @@ public class SessionEntity {
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public String getModel() { return model; }
     public void setModel(String model) { this.model = model; }
+    public String getPermissionMode() { return permissionMode; }
+    public void setPermissionMode(String permissionMode) { this.permissionMode = permissionMode; }
     public String getSummary() { return summary; }
     public void setSummary(String summary) { this.summary = summary; }
     public Instant getCreatedAt() { return createdAt; }

@@ -33,7 +33,9 @@ import com.devmind.session.model.SessionTemplateEntity;
 import com.devmind.session.repo.SessionEventRepository;
 import com.devmind.session.repo.SessionRepository;
 import com.devmind.session.repo.SessionTemplateRepository;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import com.devmind.common.agent.runtime.CliEventParser;
 import com.devmind.common.agent.runtime.RemoteSessionRuntime;
 import com.devmind.common.agent.runtime.RuntimeListener;
@@ -93,6 +95,8 @@ public class SessionManagerService {
     private final ObjectProvider<GitIdentityProvider> gitIdentityProvider;
     /** CAP-25：远程工作区凭据解析（devmind-integration 装配时可用；未装配/无凭据降级为节点自理） */
     private final ObjectProvider<RepoGitGateway> repoGitGateway;
+    /** 启动期存量清理的事务边界（@PostConstruct 不经代理，@Transactional 不生效） */
+    private final PlatformTransactionManager txManager;
 
     /** 运行中会话注册表（本地/远程统一句柄）。 */
     private final Map<String, SessionHandle> runtimes = new ConcurrentHashMap<>();
@@ -116,7 +120,8 @@ public class SessionManagerService {
                                  Collection<SessionExecutor> executors,
                                  ObjectProvider<AgentNodeConnector> connectorProvider,
                                  ObjectProvider<GitIdentityProvider> gitIdentityProvider,
-                                 ObjectProvider<RepoGitGateway> repoGitGateway) {
+                                 ObjectProvider<RepoGitGateway> repoGitGateway,
+                                 PlatformTransactionManager txManager) {
         this.identityService = identityService;
         this.projectService = projectService;
         this.workItemService = workItemService;
@@ -137,6 +142,7 @@ public class SessionManagerService {
         this.connectorProvider = connectorProvider;
         this.gitIdentityProvider = gitIdentityProvider;
         this.repoGitGateway = repoGitGateway;
+        this.txManager = txManager;
     }
 
     private final RuntimeListener listener = new RuntimeListener() {
@@ -298,6 +304,7 @@ public class SessionManagerService {
         ent.setAgentNodeId(remote ? agentNodeId : null);
         ent.setPid(proc != null ? proc.pid() : null);
         ent.setModel(model);
+        ent.setPermissionMode(pm);
         ent.setCreatedBy(identityService.currentActor());
         ent.setCreatedAt(now);
         ent.setUpdatedAt(now);
@@ -386,6 +393,9 @@ public class SessionManagerService {
             throw new DevMindException(ErrorCode.CONFLICT, "只有 SUSPENDED 会话可以恢复");
         }
         runtimes.remove(id);
+        // 恢复用创建时持久化的权限模式（老记录无值回退全局默认）
+        String pm = ent.getPermissionMode() != null && !ent.getPermissionMode().isBlank()
+                ? ent.getPermissionMode() : props.getPermissionMode();
 
         // CAP-21 远程会话恢复：重新向节点下发 launch（workdir 仍由 runner 项目路径映射解析）
         if (ent.getAgentNodeId() != null && !ent.getAgentNodeId().isBlank()) {
@@ -397,7 +407,7 @@ public class SessionManagerService {
                 Project proj = resolveProject(ent.getProjectId());
                 connector.launch(ent.getAgentNodeId(), new AgentLaunchCommand(
                         id, ent.getProjectId(), ent.getTaskSpec(), ent.getModel(),
-                        props.getPermissionMode(),
+                        pm,
                         resolveGitEnv(ent.getCreatedBy(), proj),
                         buildRepoSpec(proj, ent.getBaseBranch(), worktreeManager.branchFor(id),
                                 ent.getCreatedBy())));
@@ -419,7 +429,6 @@ public class SessionManagerService {
                 ? Path.of(ent.getWorktreePath()) : null;
 
         SessionExecutor executor = resolveExecutor();
-        String pm = props.getPermissionMode();
         Process proc;
         try {
             // CAP-24：恢复时以原创建人（createdBy）身份注入，不用当前操作者
@@ -568,6 +577,21 @@ public class SessionManagerService {
 
     @PostConstruct
     public void restoreOnStartup() {
+        // CAP-31 会话拆分：无项目的旧会话整体删除（含事件）——通用问答迁 /chats（CAP-30），
+        // CAP-28 one-shot 历史同属此类（运行期即建即弃，删除无影响）
+        List<SessionEntity> orphans = sessionRepo.findAll().stream()
+                .filter(e -> e.getProjectId() == null || e.getProjectId().isBlank())
+                .toList();
+        if (!orphans.isEmpty()) {
+            new TransactionTemplate(txManager).executeWithoutResult(tx -> {
+                for (SessionEntity e : orphans) {
+                    eventRepo.deleteBySessionId(e.getId());
+                    sessionRepo.delete(e);
+                }
+            });
+            log.info("存量无项目会话已清理: {} 条（通用问答请用 AI 问答 /chats）", orphans.size());
+        }
+
         // 服务重启后，上一次的进程已随旧实例消亡：遗留的"活动"状态全部标记 TERMINATED
         List<String> stale = List.of(SessionState.RUNNING.name(), SessionState.WAITING_INPUT.name(),
                 SessionState.WAITING_AUTH.name());
@@ -580,8 +604,6 @@ public class SessionManagerService {
                 sessionRepo.save(ent);
             }
         }
-        int n = sessionRepo.findAll().stream()
-                .filter(e -> SessionState.TERMINATED.name().equals(e.getStatus())).toList().size();
         log.info("启动恢复完成，遗留活动会话已标记 TERMINATED");
     }
 
