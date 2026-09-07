@@ -1,6 +1,6 @@
 // 需求详情页（/projects/:id/requirements/:rid）：单条需求的研发主线。
 // 布局参考 Jira issue 页 + SessionDetail 工具条风格：左主（头卡 + StageGuideCard 引导条 + 裸 Tabs）右栏（属性卡）。
-// 头卡 title 放 code/标题/类型/状态（标题允许换行防截断），extra 只留 编辑/刷新/更多（取消/删除）。
+// 头卡 title 放 code/标题/类型/状态（标题允许换行防截断），extra 只留 编辑 + 更多（刷新/取消/删除收敛进下拉）。
 // 阶段动作唯一入口在 StageGuideCard（当前阶段说明 + FlowActions 主按钮 + 待确认提醒）。
 // Jira 远端操作（JiraActions）收在右侧属性卡，与本地流程按钮隔离防误点。
 // 引导式流转——状态仅由 FlowActions 流程按钮与验收/取消隐式推进。
@@ -57,6 +57,7 @@ export default function RequirementDetailPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [designs, setDesigns] = useState<Design[]>([])
   const [activeTab, setActiveTab] = useState('workItems')
+  const [showAllProps, setShowAllProps] = useState(false)
 
   // URL 自含项目身份：从分享链接进入时把当前项目切到该需求所属项目
   useEffect(() => {
@@ -186,14 +187,19 @@ export default function RequirementDetailPage() {
             extra={
               <Space size={8} wrap>
                 <Button icon={<EditOutlined />} onClick={() => setEditOpen(true)}>编辑</Button>
-                <Button icon={<ReloadOutlined />} onClick={reloadOverview}>刷新</Button>
                 <Dropdown
                   menu={{
                     items: [
+                      { key: 'reload', label: '刷新', icon: <ReloadOutlined /> },
+                      { type: 'divider' },
                       { key: 'cancel', label: '取消需求', danger: true, disabled: !cancellable },
                       { key: 'delete', label: '删除', danger: true },
                     ],
-                    onClick: ({ key }) => (key === 'cancel' ? confirmCancel() : confirmDelete()),
+                    onClick: ({ key }) => {
+                      if (key === 'reload') reloadOverview()
+                      else if (key === 'cancel') confirmCancel()
+                      else confirmDelete()
+                    },
                   }}
                 >
                   <Button>更多 <DownOutlined /></Button>
@@ -261,6 +267,7 @@ export default function RequirementDetailPage() {
 
         <Col xs={24} xl={7}>
           <Card size="small" title="属性">
+            {/* 默认只露出决策相关的 5 项；Jira 托管明细与时间戳收进「展开全部属性」降噪 */}
             <Descriptions size="small" column={1}>
               <Descriptions.Item label="来源">
                 <Space size={6}>
@@ -272,9 +279,6 @@ export default function RequirementDetailPage() {
                   )}
                 </Space>
               </Descriptions.Item>
-              {isJira && (
-                <Descriptions.Item label="Jira 状态">{r.remoteStatus ?? '-'}</Descriptions.Item>
-              )}
               <Descriptions.Item label={
                 <Tooltip title="需求下所有 agent 会话时长汇总（活跃会话算到当前）">
                   <span>AI 执行耗时</span>
@@ -282,40 +286,53 @@ export default function RequirementDetailPage() {
               }>
                 {fmtDuration(r.agentSeconds)}
               </Descriptions.Item>
-              {isJira && (
-                <Descriptions.Item label={managedLabel('预估工时')}>
-                  {fmtDuration(r.estimatedSeconds)}
-                </Descriptions.Item>
-              )}
-              {isJira && (
-                <Descriptions.Item label={managedLabel('已用工时')}>
-                  {fmtDuration(r.spentSeconds)}
-                </Descriptions.Item>
-              )}
               <Descriptions.Item label={managedLabel('优先级')}>
                 {r.priority ? <Tag color={priorityColor(r.priority)}>{r.priority}</Tag> : '-'}
               </Descriptions.Item>
               <Descriptions.Item label={managedLabel('经办人')}>{r.assignee ?? '-'}</Descriptions.Item>
-              <Descriptions.Item label={managedLabel('报告人')}>{r.reporter ?? '-'}</Descriptions.Item>
-              <Descriptions.Item label={managedLabel('标签')}>
-                {r.labels?.length
-                  ? r.labels.map((l) => <Tag key={l} style={{ fontSize: 11 }}>{l}</Tag>)
-                  : '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label={managedLabel('修复版本')}>
-                {r.fixVersions?.length
-                  ? r.fixVersions.map((v) => <Tag key={v} style={{ fontSize: 11 }}>{v}</Tag>)
-                  : '-'}
-              </Descriptions.Item>
               <Descriptions.Item label={managedLabel('截止日期')}>{r.dueDate ?? '-'}</Descriptions.Item>
-              <Descriptions.Item label="本地负责人">
-                <Tooltip title="平台侧流程负责人，与 Jira 经办人相互独立">
-                  <span>{r.ownerId || '-'}</span>
-                </Tooltip>
-              </Descriptions.Item>
-              <Descriptions.Item label="创建">{fmtTime(r.createdAt)}</Descriptions.Item>
-              <Descriptions.Item label="更新">{fmtTime(r.updatedAt)}</Descriptions.Item>
+              {showAllProps && (
+                <>
+                  {isJira && (
+                    <Descriptions.Item label="Jira 状态">{r.remoteStatus ?? '-'}</Descriptions.Item>
+                  )}
+                  {isJira && (
+                    <Descriptions.Item label={managedLabel('预估工时')}>
+                      {fmtDuration(r.estimatedSeconds)}
+                    </Descriptions.Item>
+                  )}
+                  {isJira && (
+                    <Descriptions.Item label={managedLabel('已用工时')}>
+                      {fmtDuration(r.spentSeconds)}
+                    </Descriptions.Item>
+                  )}
+                  <Descriptions.Item label={managedLabel('报告人')}>{r.reporter ?? '-'}</Descriptions.Item>
+                  <Descriptions.Item label={managedLabel('标签')}>
+                    {r.labels?.length
+                      ? r.labels.map((l) => <Tag key={l} style={{ fontSize: 11 }}>{l}</Tag>)
+                      : '-'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label={managedLabel('修复版本')}>
+                    {r.fixVersions?.length
+                      ? r.fixVersions.map((v) => <Tag key={v} style={{ fontSize: 11 }}>{v}</Tag>)
+                      : '-'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="本地负责人">
+                    <Tooltip title="平台侧流程负责人，与 Jira 经办人相互独立">
+                      <span>{r.ownerId || '-'}</span>
+                    </Tooltip>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="创建">{fmtTime(r.createdAt)}</Descriptions.Item>
+                  <Descriptions.Item label="更新">{fmtTime(r.updatedAt)}</Descriptions.Item>
+                </>
+              )}
             </Descriptions>
+            <Typography.Link
+              style={{ fontSize: 12 }}
+              onClick={() => setShowAllProps((v) => !v)}
+            >
+              {showAllProps ? '收起属性' : '展开全部属性'}
+            </Typography.Link>
             {isJira && (
               <div style={{ marginTop: 12 }}>
                 <JiraActions requirement={r} onChanged={reloadOverview} />

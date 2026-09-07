@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Button, Dropdown, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { DownOutlined, PlayCircleOutlined, PlusOutlined } from '@ant-design/icons'
+import { DownOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import {
   createWorkItem,
@@ -136,7 +136,7 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, lock
       ),
     },
     {
-      title: '操作', key: 'ops', width: 170,
+      title: '操作', key: 'ops', width: 130,
       render: (_, w) => (
         <Space size={4}>
           {!locked && (w.status === 'TODO' || w.status === 'IN_PROGRESS') && (
@@ -144,8 +144,18 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, lock
               起会话
             </Button>
           )}
-          <Button size="small" type="link" onClick={() => openEdit(w)}>编辑</Button>
-          <Button size="small" type="link" danger disabled={locked} onClick={() => confirmDelete(w)}>删除</Button>
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'edit', label: '编辑' },
+                { key: 'delete', label: '删除', danger: true, disabled: locked },
+              ],
+              onClick: ({ key }) => (key === 'edit' ? openEdit(w) : confirmDelete(w)),
+            }}
+            trigger={['click']}
+          >
+            <Button size="small" type="text" icon={<MoreOutlined />} />
+          </Dropdown>
         </Space>
       ),
     },
