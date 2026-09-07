@@ -74,7 +74,7 @@ public class ChatWsHandler extends TextWebSocketHandler {
             return;
         }
         switch (type) {
-            case "input" -> service.input(id, node.path("text").asText(""));
+            case "input" -> service.input(id, node.path("text").asText(""), parseImages(node));
             case "authorize" -> service.authorize(id,
                     node.path("accepted").asBoolean(false),
                     node.path("scope").asText("once"),
@@ -82,6 +82,23 @@ public class ChatWsHandler extends TextWebSocketHandler {
             case "ping" -> send(session, Map.of("type", "pong"));
             default -> { }
         }
+    }
+
+    /** CAP-32：input 帧 images 附件引用数组 → ImageRef（只传引用，base64 由服务端经附件 SPI 解析）。 */
+    private List<com.devmind.chat.dto.ImageRef> parseImages(JsonNode node) {
+        JsonNode images = node.path("images");
+        if (!images.isArray() || images.isEmpty()) {
+            return List.of();
+        }
+        List<com.devmind.chat.dto.ImageRef> out = new java.util.ArrayList<>();
+        for (JsonNode img : images) {
+            String attachmentId = img.path("attachmentId").asText("");
+            if (!attachmentId.isBlank()) {
+                out.add(new com.devmind.chat.dto.ImageRef(attachmentId,
+                        img.path("name").asText(null), img.path("contentType").asText(null)));
+            }
+        }
+        return out;
     }
 
     @Override

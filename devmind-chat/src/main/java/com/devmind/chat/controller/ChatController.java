@@ -54,7 +54,7 @@ public class ChatController {
 
     @PostMapping("/{id}/input")
     public void input(@PathVariable String id, @RequestBody ChatInputRequest req) {
-        service.input(id, req.effectiveText());
+        service.input(id, req.effectiveText(), req.effectiveImages());
     }
 
     @PostMapping("/{id}/authorize")

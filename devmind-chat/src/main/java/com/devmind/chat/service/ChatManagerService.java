@@ -5,6 +5,7 @@ import com.devmind.auth.model.UserEntity;
 import com.devmind.chat.config.ChatProperties;
 import com.devmind.chat.dto.ChatView;
 import com.devmind.chat.dto.CreateChatRequest;
+import com.devmind.chat.dto.ImageRef;
 import com.devmind.chat.model.ChatEventEntity;
 import com.devmind.chat.model.ChatSessionEntity;
 import com.devmind.chat.repo.ChatEventRepository;
@@ -13,6 +14,7 @@ import com.devmind.chat.runtime.ChatEventSaver;
 import com.devmind.common.agent.AgentEventFrame;
 import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.AgentNodeConnector;
+import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.SessionEvent;
 import com.devmind.common.agent.runtime.AbstractSessionRuntime;
 import com.devmind.common.agent.runtime.CliEventParser;
@@ -25,6 +27,7 @@ import com.devmind.common.agent.runtime.SessionExecutor;
 import com.devmind.common.agent.runtime.SessionHandle;
 import com.devmind.common.agent.runtime.SessionRuntime;
 import com.devmind.common.agent.runtime.SessionState;
+import com.devmind.common.attachment.AttachmentContentResolver;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.notification.NotificationEvent;
@@ -42,6 +45,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -77,6 +82,8 @@ public class ChatManagerService {
     private final SessionExecutor executor;
     /** CAP-21：远程节点连接（devmind-agent 装配时可用；ObjectProvider 探测防循环依赖） */
     private final ObjectProvider<AgentNodeConnector> connectorProvider;
+    /** CAP-32：附件内容解析（devmind-attachment 装配时可用）；未装配时带附件输入报错，不静默丢图 */
+    private final ObjectProvider<AttachmentContentResolver> attachmentResolverProvider;
 
     /** 运行中问答注册表（本地/远程统一句柄）。 */
     private final Map<String, SessionHandle> runtimes = new ConcurrentHashMap<>();
@@ -88,7 +95,8 @@ public class ChatManagerService {
                               ChatEventSaver eventSaver,
                               ChatProperties props,
                               ObjectMapper mapper,
-                              ObjectProvider<AgentNodeConnector> connectorProvider) {
+                              ObjectProvider<AgentNodeConnector> connectorProvider,
+                              ObjectProvider<AttachmentContentResolver> attachmentResolverProvider) {
         this.identityService = identityService;
         this.notificationPublisher = notificationPublisher;
         this.chatRepo = chatRepo;
@@ -97,6 +105,7 @@ public class ChatManagerService {
         this.props = props;
         this.mapper = mapper;
         this.connectorProvider = connectorProvider;
+        this.attachmentResolverProvider = attachmentResolverProvider;
         this.settings = props.toRuntimeSettings();
         // 内核工具类（CAP-30 上移 common 后为纯类）：直接实例化，避免与 session 模块装配的同型 Bean 冲突
         this.parser = new CliEventParser(mapper, settings);
@@ -250,8 +259,36 @@ public class ChatManagerService {
     // ---------------- 交互 ----------------
 
     public void input(String id, String text) {
+        input(id, text, List.of());
+    }
+
+    /** CAP-32：注入用户输入（可带图片附件）。附件经 AttachmentContentResolver 解析为 base64 下发 claude。 */
+    public void input(String id, String text, List<ImageRef> images) {
         requireOwned(id);
-        requireRuntime(id).injectInput(text);
+        requireRuntime(id).injectInput(text, resolveImages(images));
+    }
+
+    /** 附件引用 → InputImage（base64）；解析失败一律报错，不静默丢图（用户需要知道 claude 没看到图）。 */
+    private List<InputImage> resolveImages(List<ImageRef> images) {
+        if (images == null || images.isEmpty()) {
+            return List.of();
+        }
+        AttachmentContentResolver resolver = attachmentResolverProvider.getIfAvailable();
+        if (resolver == null) {
+            throw new DevMindException(ErrorCode.CONFLICT, "附件模块未装配，无法发送图片");
+        }
+        List<InputImage> out = new ArrayList<>();
+        for (ImageRef ref : images) {
+            if (ref == null || ref.attachmentId() == null || ref.attachmentId().isBlank()) {
+                continue;
+            }
+            AttachmentContentResolver.ResolvedAttachment resolved = resolver.resolve(ref.attachmentId())
+                    .orElseThrow(() -> new DevMindException(ErrorCode.BAD_REQUEST,
+                            "图片附件不存在或不是图片类型: " + ref.attachmentId()));
+            out.add(new InputImage(ref.attachmentId(), ref.name(), resolved.contentType(),
+                    Base64.getEncoder().encodeToString(resolved.bytes())));
+        }
+        return out;
     }
 
     public void authorize(String id, boolean accepted, String scope, String requestId) {

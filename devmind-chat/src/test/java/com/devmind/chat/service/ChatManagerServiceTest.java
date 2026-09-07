@@ -4,6 +4,7 @@ import com.devmind.auth.IdentityService;
 import com.devmind.chat.config.ChatProperties;
 import com.devmind.chat.dto.ChatView;
 import com.devmind.chat.dto.CreateChatRequest;
+import com.devmind.chat.dto.ImageRef;
 import com.devmind.chat.model.ChatEventEntity;
 import com.devmind.chat.model.ChatSessionEntity;
 import com.devmind.chat.repo.ChatEventRepository;
@@ -33,6 +34,7 @@ import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -133,11 +135,13 @@ class ChatManagerServiceTest {
         service = new ChatManagerService(fakeIdentity(), noopPublisher,
                 chats.jpa(), events.jpa(), saver, props, mapper,
                 // 无 agent 模块：ObjectProvider 空实现（getIfAvailable 恒 null → 本机路由）
+                proxyObjectProvider(),
+                // 无 attachment 模块：getIfAvailable 恒 null → 带图输入报错
                 proxyObjectProvider());
     }
 
     @SuppressWarnings("unchecked")
-    private static org.springframework.beans.factory.ObjectProvider<com.devmind.common.agent.AgentNodeConnector> proxyObjectProvider() {
+    private static <T> org.springframework.beans.factory.ObjectProvider<T> proxyObjectProvider() {
         return proxy(org.springframework.beans.factory.ObjectProvider.class, (p, m, args) -> switch (m.getName()) {
             case "getIfAvailable" -> null;
             case "forEach" -> null;
@@ -190,6 +194,17 @@ class ChatManagerServiceTest {
         service.deleteChat(v.id());
         assertFalse(chats.store.containsKey(v.id()));
         assertTrue(events.store.isEmpty(), "删除后事件应清空");
+    }
+
+    @Test
+    void 带图输入但附件模块未装配时报错不静默丢图() throws Exception {
+        ChatView v = service.create(new CreateChatRequest("看图", "", "", "local"));
+        // resolver getIfAvailable 恒 null → CONFLICT
+        assertThrows(com.devmind.common.exception.DevMindException.class,
+                () -> service.input(v.id(), "", List.of(new ImageRef("abc123", "a.png", "image/png"))));
+        // 纯文本输入不受影响
+        service.input(v.id(), "纯文本没问题");
+        service.kill(v.id());
     }
 
     @Test
