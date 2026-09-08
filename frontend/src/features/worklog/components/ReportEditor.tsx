@@ -2,6 +2,7 @@ import { Button, Empty, Input, Space, Tag, Typography, message } from 'antd'
 import { RobotOutlined, CheckOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { fmtTime } from '../../../shared/utils/format'
+import Markdown from '../../../shared/components/Markdown'
 
 interface Props {
   /** 报告主键（无报告时 undefined） */
@@ -19,7 +20,7 @@ interface Props {
 
 /**
  * CAP-28 报告编辑卡：AI 草稿 → 人工修订 → 确认。
- * CONFIRMED 后只读（后端也拒绝 force 覆盖）。
+ * 编辑态：左编辑右预览，Markdown 实时渲染；CONFIRMED 后只读 Markdown 渲染（白底，非禁用灰框）。
  */
 export default function ReportEditor({
   id,
@@ -95,18 +96,48 @@ export default function ReportEditor({
           </>
         )}
       </Space>
-      {fields.map((f) => (
-        <div key={f.key} style={{ marginBottom: 16 }}>
-          <Typography.Text strong>{f.label}</Typography.Text>
-          <Input.TextArea
-            style={{ marginTop: 8, fontFamily: 'monospace' }}
-            rows={Math.max(6, (values[f.key] || '').split('\n').length + 1)}
-            value={values[f.key] || ''}
-            disabled={confirmed}
-            onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
-          />
-        </div>
-      ))}
+      {fields.map((f) => {
+        const content = values[f.key] || ''
+        if (confirmed) {
+          return (
+            <div key={f.key} style={{ marginBottom: 16 }}>
+              <Typography.Text strong>{f.label}</Typography.Text>
+              <div style={{ marginTop: 8 }}>
+                <Markdown content={content} />
+              </div>
+            </div>
+          )
+        }
+        const rows = Math.max(6, content.split('\n').length + 1)
+        // 预览框与输入框同高：TextArea 行高约 22px + 上下 padding
+        const boxHeight = rows * 22 + 12
+        return (
+          <div key={f.key} style={{ marginBottom: 16 }}>
+            <Typography.Text strong>{f.label}</Typography.Text>
+            <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+              <Input.TextArea
+                style={{ flex: 1, minWidth: 0, fontFamily: 'monospace' }}
+                rows={rows}
+                value={content}
+                onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
+              />
+              <div
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  height: boxHeight,
+                  overflow: 'auto',
+                  border: '1px solid #d9d9d9',
+                  borderRadius: 6,
+                  padding: '4px 11px',
+                }}
+              >
+                <Markdown content={content} />
+              </div>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
