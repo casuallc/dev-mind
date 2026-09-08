@@ -59,7 +59,7 @@ public class AttachmentService {
 
     // ---------------- 上传 ----------------
 
-    public AttachmentView upload(MultipartFile file, String scope) {
+    public AttachmentView upload(MultipartFile file, String scope, String description) {
         if (file == null || file.isEmpty()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "附件内容为空");
         }
@@ -107,6 +107,7 @@ public class AttachmentService {
         ent.setScope(AttachmentEntity.SCOPE_SHARED.equals(scope)
                 ? AttachmentEntity.SCOPE_SHARED : AttachmentEntity.SCOPE_PRIVATE);
         ent.setStoragePath(relPath);
+        ent.setDescription(normalizeDescription(description));
         ent.setUploadedBy(identityService.currentActor());
         ent.setCreatedAt(Instant.now());
         repo.save(ent);
@@ -125,9 +126,7 @@ public class AttachmentService {
                         identityService.currentActor(), AttachmentEntity.SCOPE_SHARED);
         return visible.stream()
                 .filter(e -> scope == null || scope.isBlank() || scope.equals(e.getScope()))
-                .filter(e -> keyword == null || keyword.isBlank()
-                        || (e.getOriginalName() != null
-                            && e.getOriginalName().toLowerCase(Locale.ROOT).contains(keyword.toLowerCase(Locale.ROOT))))
+                .filter(e -> keyword == null || keyword.isBlank() || matchesKeyword(e, keyword))
                 .filter(e -> type == null || type.isBlank()
                         || ("image".equals(type) == e.isImage()))
                 .sorted((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()))
@@ -216,6 +215,22 @@ public class AttachmentService {
             dir = Path.of("").toAbsolutePath().resolve("data/attachments").toString();
         }
         return Path.of(dir).toAbsolutePath().normalize();
+    }
+
+    /** 关键字匹配：文件名或描述（忽略大小写）。 */
+    private static boolean matchesKeyword(AttachmentEntity e, String keyword) {
+        String kw = keyword.toLowerCase(Locale.ROOT);
+        return (e.getOriginalName() != null && e.getOriginalName().toLowerCase(Locale.ROOT).contains(kw))
+                || (e.getDescription() != null && e.getDescription().toLowerCase(Locale.ROOT).contains(kw));
+    }
+
+    /** 描述：trim，空白归 null，超长按列长截断。 */
+    private static String normalizeDescription(String description) {
+        if (description == null || description.isBlank()) {
+            return null;
+        }
+        String trimmed = description.trim();
+        return trimmed.length() > 512 ? trimmed.substring(0, 512) : trimmed;
     }
 
     private String newAttachmentId() {

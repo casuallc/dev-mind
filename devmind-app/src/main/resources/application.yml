@@ -1,5 +1,9 @@
 server:
   port: 8080
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true   # multipart 表单字段（如附件 description）按 UTF-8 解码——客户端未带 charset 时 Tomcat 默认 ISO-8859-1 会乱码
 
 spring:
   application:

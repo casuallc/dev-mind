@@ -99,7 +99,16 @@ class AttachmentServiceTest {
     }
 
     private AttachmentView uploadPng(String name) {
-        return service.upload(new MockMultipartFile("file", name, "image/png", new byte[]{1, 2, 3}), null);
+        return service.upload(new MockMultipartFile("file", name, "image/png", new byte[]{1, 2, 3}), null, null);
+    }
+
+    @Test
+    void uploadPersistsDescription() {
+        AttachmentView v = service.upload(
+                new MockMultipartFile("file", "a.png", "image/png", new byte[]{1}), null, "  需求封面图  ");
+        assertEquals("需求封面图", v.description());
+        // 空白描述归 null
+        assertEquals(null, uploadPng("b.png").description());
     }
 
     @Test
@@ -157,9 +166,16 @@ class AttachmentServiceTest {
     @Test
     void typeAndKeywordFilter() {
         uploadPng("设计稿.png");
-        service.upload(new MockMultipartFile("file", "说明.txt", "text/plain", "hi".getBytes()), null);
+        service.upload(new MockMultipartFile("file", "说明.txt", "text/plain", "hi".getBytes()), null, null);
         assertEquals(1, service.list(null, null, "image").size());
         assertEquals(1, service.list(null, "设计", null).size());
         assertEquals(2, service.list(null, null, null).size());
+    }
+
+    @Test
+    void keywordMatchesDescription() {
+        service.upload(new MockMultipartFile("file", "a.png", "image/png", new byte[]{1}), null, "需求封面图");
+        uploadPng("b.png");
+        assertEquals(1, service.list(null, "封面", null).size());
     }
 }

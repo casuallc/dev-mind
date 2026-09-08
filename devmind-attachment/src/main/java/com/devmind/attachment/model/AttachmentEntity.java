@@ -43,6 +43,10 @@ public class AttachmentEntity {
     @Column(name = "storage_path", length = 512)
     private String storagePath;
 
+    /** 上传时可选的描述信息（管理页展示用） */
+    @Column(name = "description", length = 512)
+    private String description;
+
     @Column(name = "uploaded_by", length = 64)
     private String uploadedBy;
 
@@ -71,6 +75,8 @@ public class AttachmentEntity {
     public void setScope(String scope) { this.scope = scope; }
     public String getStoragePath() { return storagePath; }
     public void setStoragePath(String storagePath) { this.storagePath = storagePath; }
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
     public String getUploadedBy() { return uploadedBy; }
     public void setUploadedBy(String uploadedBy) { this.uploadedBy = uploadedBy; }
     public Instant getCreatedAt() { return createdAt; }

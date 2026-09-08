@@ -42,8 +42,9 @@ public class AttachmentController {
 
     @PostMapping
     public AttachmentView upload(@RequestParam("file") MultipartFile file,
-                                 @RequestParam(required = false) String scope) {
-        return service.upload(file, scope);
+                                 @RequestParam(required = false) String scope,
+                                 @RequestParam(required = false) String description) {
+        return service.upload(file, scope, description);
     }
 
     @GetMapping
