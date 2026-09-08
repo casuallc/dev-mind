@@ -63,6 +63,15 @@ public class SessionEntity {
     @Column(length = 16_777_216)
     private String summary;
 
+    /** CAP-33：创建时挂的场景 code（可空 = 无场景；旧 templateCode 迁移后同为此列） */
+    @Column(name = "scenario_code", length = 64)
+    private String scenarioCode;
+
+    /** CAP-33 FR-07：装配时的上下文清单快照（JSON；只存清单不存包内容，重建=重跑装配） */
+    @Lob
+    @Column(name = "context_manifest_json", length = 16_777_216)
+    private String contextManifestJson;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -100,6 +109,10 @@ public class SessionEntity {
     public void setPermissionMode(String permissionMode) { this.permissionMode = permissionMode; }
     public String getSummary() { return summary; }
     public void setSummary(String summary) { this.summary = summary; }
+    public String getScenarioCode() { return scenarioCode; }
+    public void setScenarioCode(String scenarioCode) { this.scenarioCode = scenarioCode; }
+    public String getContextManifestJson() { return contextManifestJson; }
+    public void setContextManifestJson(String contextManifestJson) { this.contextManifestJson = contextManifestJson; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

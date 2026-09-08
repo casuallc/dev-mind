@@ -7,23 +7,30 @@ import java.util.List;
 /**
  * 新建会话请求。
  *
- * @param templateCode   会话模板 code（可选，命中后渲染 prompt 骨架）
- * @param projectId      项目 ID（MVP 只有一个预置项目；空=无项目裸跑，fake 模式）
- * @param workItemId     工作单元 ID（可选，CAP-13 关联约定；与 projectId 不一致时报错，projectId 空时反推）
- * @param requirementId  需求 ID（可选，分析型会话直挂需求；与 workItemId 同传时校验一致）
- * @param taskSpec       任务说明（富文本）
- * @param baseBranch     基准分支（可选，默认项目/配置；多库时仅覆盖主库，其余库用各自默认分支）
- * @param model          模型（可选，覆盖全局）
- * @param permissionMode 权限模式（可选，覆盖全局）
- * @param agentNodeId    CAP-21 远程执行节点 ID（可选；空 = 跟随项目默认 → 平台默认节点，皆无则创建失败 409；
- *                       CAP-34 起保留值 "local" 已废除，传入报 400）
- * @param requiredLabels CAP-34 FR-07 标签要求（CSV，可选）：调度链上各级节点须标签全覆盖，
- *                       皆不符时按标签在线匹配兜底，仍无命中 409
- * @param repoIds        CAP-31 关联仓库（project_repos.id 列表；空 = 主库，兼容旧行为；
- *                       非空校验均属该项目，&gt;1 个走聚合目录多库工作区）
+ * @param templateCode       会话模板 code（CAP-33 兼容保留：等同 scenarioCode 走场景解析，
+ *                           模板行已迁移为场景；新代码请用 scenarioCode）
+ * @param scenarioCode       CAP-33 场景 code（可选：渲染 prompt 骨架 + 绑定资产进上下文包 +
+ *                           场景预设 model/permissionMode/agentNodeId；PROJECT 场景限本项目使用）
+ * @param projectId          项目 ID（MVP 只有一个预置项目；空=无项目裸跑，fake 模式）
+ * @param workItemId         工作单元 ID（可选，CAP-13 关联约定；与 projectId 不一致时报错，projectId 空时反推）
+ * @param requirementId      需求 ID（可选，分析型会话直挂需求；与 workItemId 同传时校验一致）
+ * @param taskSpec           任务说明（富文本）
+ * @param baseBranch         基准分支（可选，默认项目/配置；多库时仅覆盖主库，其余库用各自默认分支）
+ * @param model              模型（可选，覆盖场景预设与全局）
+ * @param permissionMode     权限模式（可选，覆盖场景预设与全局）
+ * @param agentNodeId        CAP-21 远程执行节点 ID（可选；空 = 场景预设 → 项目默认 → 平台默认节点，
+ *                           皆无则创建失败 409；CAP-34 起保留值 "local" 已废除，传入报 400）
+ * @param requiredLabels     CAP-34 FR-07 标签要求（CSV，可选）：调度链上各级节点须标签全覆盖，
+ *                           皆不符时按标签在线匹配兜底，仍无命中 409
+ * @param repoIds            CAP-31 关联仓库（project_repos.id 列表；空 = 主库，兼容旧行为；
+ *                           非空校验均属该项目，&gt;1 个走聚合目录多库工作区）
+ * @param extraSkillIds      CAP-33 FR-02 ③层请求级追加 skill ids（与场景绑定合并去重）
+ * @param extraDocIds        CAP-33 FR-02 ③层请求级追加 doc ids
+ * @param extraKnowledgeTags CAP-33 FR-02 ③层请求级追加知识 tags
  */
 public record CreateSessionRequest(
         String templateCode,
+        String scenarioCode,
         String projectId,
         String workItemId,
         String requirementId,
@@ -33,21 +40,24 @@ public record CreateSessionRequest(
         String permissionMode,
         String agentNodeId,
         String requiredLabels,
-        List<Long> repoIds) {
+        List<Long> repoIds,
+        List<String> extraSkillIds,
+        List<Long> extraDocIds,
+        List<String> extraKnowledgeTags) {
 
     /** 兼容构造器：CAP-31 之前的调用点（repoIds=null → 主库）。 */
     public CreateSessionRequest(String templateCode, String projectId, String workItemId, String requirementId,
                                 String taskSpec, String baseBranch, String model, String permissionMode,
                                 String agentNodeId) {
-        this(templateCode, projectId, workItemId, requirementId, taskSpec, baseBranch, model, permissionMode,
-                agentNodeId, null, null);
+        this(templateCode, null, projectId, workItemId, requirementId, taskSpec, baseBranch, model, permissionMode,
+                agentNodeId, null, null, null, null, null);
     }
 
     /** 兼容构造器：FR-07 之前的 10 参调用点（requiredLabels=null）。 */
     public CreateSessionRequest(String templateCode, String projectId, String workItemId, String requirementId,
                                 String taskSpec, String baseBranch, String model, String permissionMode,
                                 String agentNodeId, List<Long> repoIds) {
-        this(templateCode, projectId, workItemId, requirementId, taskSpec, baseBranch, model, permissionMode,
-                agentNodeId, null, repoIds);
+        this(templateCode, null, projectId, workItemId, requirementId, taskSpec, baseBranch, model, permissionMode,
+                agentNodeId, null, repoIds, null, null, null);
     }
 }

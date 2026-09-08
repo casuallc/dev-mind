@@ -25,17 +25,15 @@ import com.devmind.project.ProjectService;import com.devmind.session.config.Sess
 import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.RepoDiffView;
 import com.devmind.session.dto.SessionView;
-import com.devmind.session.dto.TemplateView;
 import com.devmind.session.model.SessionEntity;
 import com.devmind.common.agent.SessionEvent;
 import com.devmind.session.model.SessionEventEntity;
 import com.devmind.common.agent.runtime.SessionState;
 import com.devmind.session.model.SessionRepoEntity;
-import com.devmind.session.model.SessionTemplateEntity;
+import com.devmind.session.model.SessionScenarioEntity;
 import com.devmind.session.repo.SessionEventRepository;
 import com.devmind.session.repo.SessionRepoRepository;
 import com.devmind.session.repo.SessionRepository;
-import com.devmind.session.repo.SessionTemplateRepository;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -85,7 +83,8 @@ public class SessionManagerService {
     private final DomainEventPublisher eventPublisher;
     private final SessionRepository sessionRepo;
     private final SessionEventRepository eventRepo;
-    private final SessionTemplateRepository templateRepo;
+    /** CAP-33：场景解析/渲染/预设（session_templates 升级版；同槽位替换原 templateRepo） */
+    private final ScenarioService scenarioService;
     /** CAP-31：会话仓库快照（session_repos，创建时从 project_repos 拷值） */
     private final SessionRepoRepository sessionRepoRepo;
     private final SessionEventSaver eventSaver;
@@ -116,7 +115,7 @@ public class SessionManagerService {
                                  DomainEventPublisher eventPublisher,
                                  SessionRepository sessionRepo,
                                  SessionEventRepository eventRepo,
-                                 SessionTemplateRepository templateRepo,
+                                 ScenarioService scenarioService,
                                  SessionRepoRepository sessionRepoRepo,
                                  SessionEventSaver eventSaver,
                                  SessionProperties props,
@@ -137,7 +136,7 @@ public class SessionManagerService {
         this.eventPublisher = eventPublisher;
         this.sessionRepo = sessionRepo;
         this.eventRepo = eventRepo;
-        this.templateRepo = templateRepo;
+        this.scenarioService = scenarioService;
         this.sessionRepoRepo = sessionRepoRepo;
         this.eventSaver = eventSaver;
         this.props = props;
@@ -220,8 +219,11 @@ public class SessionManagerService {
         ensureCapacity();
 
         String taskSpec = req.taskSpec();
-        if (req.templateCode() != null && !req.templateCode().isBlank()) {
-            taskSpec = renderTemplate(req.templateCode(), req.taskSpec(), project);
+        // CAP-33：场景解析（templateCode 兼容 = 等同 scenarioCode；PROJECT 场景限本项目）+ 骨架渲染
+        SessionScenarioEntity scenario = resolveScenario(req, projectId);
+        if (scenario != null) {
+            taskSpec = scenarioService.render(scenario, req.taskSpec(), project,
+                    requirement != null ? requirement.getTitle() : null);
         }
 
         // CAP-34 FR-02：取消本机会话——会话必有执行节点：显式指定 > 项目默认 > 平台默认
@@ -289,6 +291,8 @@ public class SessionManagerService {
         ent.setModel(model);
         ent.setPermissionMode(pm);
         ent.setCreatedBy(identityService.currentActor());
+        // CAP-33：场景 code 落库（resume 据此重渲染重装配；FR-07 快照在装配后落）
+        ent.setScenarioCode(scenario != null ? scenario.getCode() : null);
         ent.setCreatedAt(now);
         ent.setUpdatedAt(now);
         sessionRepo.save(ent);
@@ -495,7 +499,7 @@ public class SessionManagerService {
         sessionRepo.save(ent);
     }
 
-    // ---------------- 模板 ----------------
+    // ---------------- 删除会话 ----------------
 
     /** 删除会话：杀进程（若在跑）、清理 worktree、删除事件与记录。 */
     @Transactional
@@ -518,51 +522,23 @@ public class SessionManagerService {
         sessionRepo.delete(ent);
     }
 
-    public List<TemplateView> listTemplates() {
-        return templateRepo.findAll().stream()
-                .sorted(Comparator.comparingInt(SessionTemplateEntity::getSortOrder))
-                .map(TemplateView::from).toList();
-    }
-
-    public TemplateView saveTemplate(Long id, String code, String name, String prompt,
-                                     Integer sortOrder, Boolean enabled) {
-        SessionTemplateEntity t = id == null ? new SessionTemplateEntity()
-                : templateRepo.findById(id).orElseThrow(() ->
-                        new DevMindException(ErrorCode.NOT_FOUND, "模板不存在: " + id));
-        if (code != null) t.setCode(code);
-        if (name != null) t.setName(name);
-        if (prompt != null) t.setPrompt(prompt);
-        if (sortOrder != null) t.setSortOrder(sortOrder);
-        if (enabled != null) t.setEnabled(enabled);
-        return TemplateView.from(templateRepo.save(t));
-    }
-
-    public void deleteTemplate(Long id) {
-        templateRepo.deleteById(id);
-    }
-
-    /** 渲染模板用于预览（三个占位符独立给定）。 */
-    public String previewTemplate(String code, String task, String projectName, String branch) {
-        SessionTemplateEntity t = templateRepo.findByCode(code)
-                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "模板不存在: " + code));
-        String prompt = t.getPrompt() == null ? "" : t.getPrompt();
-        return prompt
-                .replace("{{task}}", task == null ? "" : task)
-                .replace("{{project}}", projectName == null ? "" : projectName)
-                .replace("{{branch}}", branch == null ? "" : branch);
-    }
-
-    /** 渲染模板：替换 {{task}}/{{project}}/{{branch}} 占位符。 */
-    public String renderTemplate(String code, String task, Project project) {
-        SessionTemplateEntity t = templateRepo.findByCode(code)
-                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "模板不存在: " + code));
-        String prompt = t.getPrompt() == null ? "" : t.getPrompt();
-        String projectName = project != null ? project.name() : "";
-        String branch = project != null ? project.baseBranch() : "";
-        return prompt
-                .replace("{{task}}", task == null ? "" : task)
-                .replace("{{project}}", projectName)
-                .replace("{{branch}}", branch);
+    /**
+     * CAP-33 场景解析：scenarioCode 优先，templateCode 兼容等同（模板行已迁移为场景）。
+     * 按 code 解析不查 enabled（旧模板语义）；PROJECT 场景限本项目会话使用。
+     */
+    private SessionScenarioEntity resolveScenario(CreateSessionRequest req, String projectId) {
+        String code = req.scenarioCode() != null && !req.scenarioCode().isBlank()
+                ? req.scenarioCode() : req.templateCode();
+        if (code == null || code.isBlank()) {
+            return null;
+        }
+        SessionScenarioEntity s = scenarioService.requireByCode(code);
+        if (ScenarioService.SCOPE_PROJECT.equals(s.getScope())
+                && (projectId == null || projectId.isBlank() || !projectId.equals(s.getProjectId()))) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "场景 " + code + " 是项目 " + s.getProjectId() + " 的私有场景，不能在当前项目下使用");
+        }
+        return s;
     }
 
     // ---------------- 启动/关闭 ----------------
