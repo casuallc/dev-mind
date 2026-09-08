@@ -459,12 +459,13 @@ export default function WorklogPage() {
                 width: 180,
                 render: (_, e) =>
                   e.repoId ? (
-                    <Space size={4}>
-                      <span>{e.repoName ?? `#${e.repoId}`}</span>
-                      {e.commitSha && (
-                        <Typography.Text code>{e.commitSha.slice(0, 7)}</Typography.Text>
-                      )}
-                    </Space>
+                    // 仓库名与 commit sha 分两行，避免长仓库名把 sha 挤换行
+                    <div>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {e.repoName ?? `#${e.repoId}`}
+                      </div>
+                      {e.commitSha && <Typography.Text code>{e.commitSha.slice(0, 7)}</Typography.Text>}
+                    </div>
                   ) : (
                     '-'
                   ),
