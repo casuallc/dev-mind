@@ -367,6 +367,16 @@ public class SkillService {
         return new SkillPackageView(items);
     }
 
+    /** CAP-33 FR-04 ②层：项目私有 ACTIVE skill id 列表（装配时默认全带）。 */
+    public List<String> listActiveProjectSkillIds(String projectId) {
+        if (projectId == null || projectId.isBlank()) {
+            return List.of();
+        }
+        return skillRepo.search(SkillEntity.SCOPE_PROJECT, projectId, SkillEntity.STATUS_ACTIVE,
+                        null, PageRequest.of(0, 200))
+                .getContent().stream().map(SkillEntity::getId).toList();
+    }
+
     private SkillPackageView.SkillPackageItem toPackageItem(SkillEntity e) {
         List<SkillPackageView.ExportedFile> files = new ArrayList<>();
         files.add(new SkillPackageView.ExportedFile("SKILL.md", false,
