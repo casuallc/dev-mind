@@ -25,7 +25,8 @@ export default function ChatPanel({
   summary: ChatSummaryBase
   /** REST/WS 路径前缀：项目会话 '/sessions'，通用问答 '/chats' */
   apiBase: ChatApiBase
-  maxHeight?: number | string
+  /** 消息流最大高度；传 null 表示外层是 flex 容器、由面板撑满剩余高度 */
+  maxHeight?: number | string | null
   /** CAP-32：是否允许发送图片附件（仅 /chats 后端链路支持） */
   allowImages?: boolean
   /** 授权/发送后通知外部刷新摘要 */
@@ -147,7 +148,7 @@ export default function ChatPanel({
   const canInput = ACTIVE_STATES.includes(summary.state)
 
   return (
-    <div>
+    <div style={maxHeight === null ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } : undefined}>
       {/* 授权请求条 */}
       {pendingReq && (
         <Card size="small" style={{ borderColor: '#fa8c16', background: '#fff7e6', marginBottom: 8 }}>
@@ -187,7 +188,7 @@ export default function ChatPanel({
         emptyText={`等待事件…（${fatal ? '会话已结束' : connected ? '连接正常' : '重连中'}）`}
       />
       <div
-        style={{ borderTop: '1px solid #f0f0f0', marginTop: 8, paddingTop: 12 }}
+        style={{ borderTop: '1px solid #f0f0f0', marginTop: 8, paddingTop: 12, flexShrink: 0 }}
         onDragOver={allowImages ? (e) => e.preventDefault() : undefined}
         onDrop={
           allowImages

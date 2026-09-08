@@ -198,7 +198,7 @@ export default function ChatStream({
   events: ChatEvent[]
   taskSpec?: string
   model?: string
-  maxHeight?: number | string
+  maxHeight?: number | string | null
   emptyText?: string
 }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -218,7 +218,8 @@ export default function ChatStream({
         const el = e.currentTarget
         stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
       }}
-      style={{ maxHeight, overflow: 'auto', padding: '4px 8px' }}
+      // maxHeight=null 表示由外层 flex 容器撑满（flex:1），否则按给定最大高度滚动
+      style={maxHeight === null ? { flex: 1, minHeight: 0, overflow: 'auto', padding: '4px 8px' } : { maxHeight, overflow: 'auto', padding: '4px 8px' }}
     >
       {items.length === 0 && logs.length === 0 && (
         <Typography.Text type="secondary">{emptyText}</Typography.Text>

@@ -79,7 +79,7 @@ export default function ChatListPane({
       <List
         loading={loading}
         dataSource={filtered}
-        style={{ flex: 1, overflow: 'auto', maxHeight: 'calc(100vh - 320px)' }}
+        style={{ flex: 1, minHeight: 0, overflow: 'auto' }}
         locale={{ emptyText: <Empty description="暂无问答，点上方「新问答」发起" /> }}
         renderItem={(c) => (
           <div

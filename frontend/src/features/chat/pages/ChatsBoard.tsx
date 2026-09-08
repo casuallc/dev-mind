@@ -144,12 +144,14 @@ export default function ChatsBoard() {
           刷新
         </Button>
       }
+      style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+      styles={{ body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } }}
     >
-      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
         纯问答不关联项目/仓库，agent 在干净沙箱中运行。左侧选问答、右侧直接对话；「新问答」输入问题即创建。
       </Typography.Paragraph>
 
-      <div style={{ display: 'flex', alignItems: 'stretch' }}>
+      <div style={{ display: 'flex', alignItems: 'stretch', flex: 1, minHeight: 0 }}>
         <ChatListPane
           chats={chats}
           loading={loading}
@@ -161,7 +163,7 @@ export default function ChatsBoard() {
           keyword={keyword}
           onKeywordChange={setKeyword}
         />
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           {draft ? (
             <NewChatDraft
               onCreated={onDraftCreated}
@@ -228,7 +230,7 @@ export default function ChatsBoard() {
                 key={current.id}
                 summary={current}
                 apiBase="/chats"
-                maxHeight="calc(100vh - 400px)"
+                maxHeight={null}
                 allowImages
                 onChanged={load}
                 onStreamMeta={setStreamMeta}

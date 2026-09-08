@@ -95,7 +95,8 @@ export default function AppLayout() {
       </Sider>
       <Layout>
         <AppHeader />
-        <Content style={{ padding: '16px 24px 24px', overflow: 'auto' }}>
+        {/* flex 列布局：默认子页仍按内容自适应；需撑满屏的页面（如 AI 问答）根节点 flex:1 minHeight:0 即可 */}
+        <Content style={{ padding: '16px 24px 24px', overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
           <Outlet />
         </Content>
       </Layout>
