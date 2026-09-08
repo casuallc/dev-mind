@@ -15,7 +15,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined, SettingOutlined, GithubOutlined, CodeOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, SettingOutlined, GithubOutlined, CodeOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 import {
@@ -318,22 +318,9 @@ export default function WorklogPage() {
       </>
     ),
     daily: (
-      <>
-        <Button size="small" icon={<LeftOutlined />} onClick={() => shiftWeek(-1)} />
-        <Typography.Text>
-          {dailyWeekStart.format('YYYY-MM-DD')} ~ {dailyWeekStart.add(6, 'day').format('MM-DD')}
-        </Typography.Text>
-        {isCurrentWeek && <Tag color="blue">本周</Tag>}
-        <Button size="small" icon={<RightOutlined />} onClick={() => shiftWeek(1)} />
-        {!isCurrentWeek && (
-          <Button size="small" onClick={backToCurrentWeek}>
-            回到本周
-          </Button>
-        )}
-        <Button icon={<ReloadOutlined />} onClick={reload}>
-          刷新
-        </Button>
-      </>
+      <Button icon={<ReloadOutlined />} onClick={reload}>
+        刷新
+      </Button>
     ),
     weekly: (
       <Button icon={<ReloadOutlined />} onClick={reload}>
@@ -483,9 +470,20 @@ export default function WorklogPage() {
       {view === 'daily' && (
         <>
           <Typography.Paragraph type="secondary">
-            按周浏览日报（周一至周日），点某天查看/编辑；AI 汇总当日条目与 git 提交生成草稿，人工修订后「确认定稿」（已确认不可再重新生成）。
+            按周浏览日报（周一至周日），在周日条上左右滑动或点两侧箭头切换上一周/下一周，点某天查看/编辑；AI 汇总当日条目与 git 提交生成草稿，人工修订后「确认定稿」（已确认不可再重新生成）。
           </Typography.Paragraph>
-          <WeekDayStrip weekStart={dailyWeekStart} reports={dailyWeek} selected={dayStr} onSelect={setDay} />
+          <WeekDayStrip weekStart={dailyWeekStart} reports={dailyWeek} selected={dayStr} onSelect={setDay} onShiftWeek={shiftWeek} />
+          <div style={{ textAlign: 'center', marginTop: -8, marginBottom: 12 }}>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {dailyWeekStart.format('YYYY-MM-DD')} ~ {dailyWeekStart.add(6, 'day').format('MM-DD')}
+              {isCurrentWeek && '（本周）'}
+            </Typography.Text>
+            {!isCurrentWeek && (
+              <Button type="link" size="small" onClick={backToCurrentWeek}>
+                回到本周
+              </Button>
+            )}
+          </div>
           <ReportEditor
             key={dayStr}
             id={daily?.id}
