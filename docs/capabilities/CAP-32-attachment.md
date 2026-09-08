@@ -39,8 +39,10 @@ skill zip、服务器文件上传），chat 输入框与 docs 编辑器都是纯
   **远程用图要求 runner 升级到本期版本**，节点列表已展示版本供人工核对）。
 - **FR-08 文档插图**：docs Markdown 编辑器粘贴/拖拽图片 → 自动上传 → 光标处插入
   `![](<raw url>)`；上传中先插占位符完成后替换。
-- **FR-09 附件管理页**：「个人」菜单组新增「附件管理」：上传、列表（缩略图/文件名/类型/
-  大小/scope/上传者/时间）、复制 id / 复制 URL、预览或下载、切 scope、删除。
+- **FR-09 附件管理页**：后台管理「内容」分组新增「附件管理」（`/admin/attachments`，旧
+  `/attachments` 重定向）：上传（弹窗内选文件 + 描述信息 + 逐文件进度条）、列表
+  （缩略图/文件名/描述/类型/大小/scope/上传者/时间）、复制 id / 复制 URL、预览或下载、
+  切 scope、删除。
 
 ## 3. 插件化接口
 
@@ -73,6 +75,7 @@ attachments(id 自增 PK,
             sha256 CHAR(64),
             scope VARCHAR(16) DEFAULT 'PRIVATE',  -- PRIVATE | SHARED
             storage_path VARCHAR(512),            -- 相对 rootDir
+            description VARCHAR(512),             -- 上传时可选描述（关键字搜索覆盖）
             uploaded_by VARCHAR(64),
             created_at TIMESTAMP)
 ```
@@ -82,7 +85,7 @@ chat 侧**零表结构变更**：附件引用存 `chat_events.payload`（既有 
 ## 6. API 概要
 
 ```
-POST   /api/attachments                  上传（multipart file + 可选 scope）→ AttachmentView
+POST   /api/attachments                  上传（multipart file + 可选 scope/description）→ AttachmentView
 GET    /api/attachments?scope=&keyword=&type=&page=&size=   分页列表
 GET    /api/attachments/{id}             元数据
 GET    /api/attachments/{id}/raw         原始字节（图片 inline / 非图片下载；header 或 ?access_token=）
@@ -98,7 +101,7 @@ DELETE /api/attachments/{id}             删除（owner/ADMIN，删行+删盘）
   仅问答传入，项目会话后端链路未接不开放）；ChatStream user 消息按附件类型渲染。
 - `features/attachments/`：附件管理页（布局遵循前端内容区布局约定）。
 - `features/docs/`：编辑器粘贴/拖拽插图。
-- 菜单：「个人」组加「附件管理」`/attachments`。
+- 菜单：后台「内容」分组加「附件管理」`/admin/attachments`（仅 ADMIN），旧 `/attachments` 重定向。
 
 ## 8. 依赖关系
 
