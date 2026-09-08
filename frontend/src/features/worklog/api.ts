@@ -37,6 +37,9 @@ export const importGit = (
 
 // ---- 日报 / 周报 ----
 export const getDaily = (date: string) => api.get<DailyReport | undefined>(`/worklog/daily?date=${date}`)
+/** 某周（weekStart=周一）7 天内有报告的日报，日期升序；日报周视图的周日选择条用 */
+export const listDailyWeek = (weekStart: string) =>
+  api.get<DailyReport[]>(`/worklog/daily/week?weekStart=${weekStart}`)
 export const generateDaily = (date: string, force = false) =>
   api.post<GenerateAck>('/worklog/daily/generate', { date, force })
 export const updateDaily = (id: number, body: { contentMd?: string; status?: string }) =>

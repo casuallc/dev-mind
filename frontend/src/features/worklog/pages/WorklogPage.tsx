@@ -15,7 +15,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined, SettingOutlined, GithubOutlined, CodeOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, SettingOutlined, GithubOutlined, CodeOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 import {
@@ -26,6 +26,7 @@ import {
   getDaily,
   getSettings,
   getWeekly,
+  listDailyWeek,
   listEntries,
   updateDaily,
   updateEntry,
@@ -45,6 +46,7 @@ import EntryFormDrawer from '../components/EntryFormDrawer'
 import GitImportModal from '../components/GitImportModal'
 import RepoSubscriptionModal from '../components/RepoSubscriptionModal'
 import ReportEditor from '../components/ReportEditor'
+import WeekDayStrip from '../components/WeekDayStrip'
 
 type View = 'entries' | 'daily' | 'weekly'
 
@@ -64,12 +66,6 @@ const RANGE_PRESETS: { label: string; value: [Dayjs, Dayjs] }[] = (() => {
   ]
 })()
 
-/** 日报 DatePicker 快捷日期 */
-const DAILY_PRESETS = [0, 1, 2, 7].map((n) => ({
-  label: n === 0 ? '今天' : n === 1 ? '昨天' : n === 2 ? '前天' : '一周前',
-  value: dayjs().subtract(n, 'day'),
-}))
-
 /** 周报 DatePicker 快捷周 */
 const WEEKLY_PRESETS = [
   { label: '本周', value: dayjs() },
@@ -77,14 +73,21 @@ const WEEKLY_PRESETS = [
 ]
 
 /**
- * CAP-28 个人工作日志与工时：条目（范围筛选+标题搜索+分页+git 导入）/ AI 日报 / AI 周报。
+ * CAP-28 个人工作日志与工时：条目（范围筛选+标题搜索+分页+git 导入）/ AI 日报（按周浏览）/ AI 周报。
  * 个人级页面，不进项目上下文（路由不进 ProjectContextGate）。
  */
 export default function WorklogPage() {
   const [view, setView] = useState<View>('entries')
+  // 周报锚点（picker=week 任选一天，取所在周周一）
   const [date, setDate] = useState<Dayjs>(dayjs())
-  const dateStr = date.format('YYYY-MM-DD')
   const weekStartStr = mondayOf(date).format('YYYY-MM-DD')
+
+  // ---- 日报：按周浏览（周导航 + 周日选择条），默认当前周、选中今天 ----
+  const [dailyWeekStart, setDailyWeekStart] = useState<Dayjs>(() => mondayOf(dayjs()))
+  const [day, setDay] = useState<Dayjs>(dayjs())
+  const dailyWeekStartStr = dailyWeekStart.format('YYYY-MM-DD')
+  const dayStr = day.format('YYYY-MM-DD')
+  const isCurrentWeek = dailyWeekStartStr === mondayOf(dayjs()).format('YYYY-MM-DD')
 
   // ---- 条目：范围筛选 + 标题搜索 + 分页 ----
   const [range, setRange] = useState<[Dayjs, Dayjs]>(RANGE_PRESETS[0].value)
@@ -96,10 +99,12 @@ export default function WorklogPage() {
 
   const [entries, setEntries] = useState<WorklogEntry[]>([])
   const [entriesTotal, setEntriesTotal] = useState(0)
-  const [daily, setDaily] = useState<DailyReport | undefined>()
+  const [dailyWeek, setDailyWeek] = useState<Record<string, DailyReport>>({})
   const [weekly, setWeekly] = useState<WeeklyReport | undefined>()
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
+
+  const daily = dailyWeek[dayStr]
 
   const [editTarget, setEditTarget] = useState<WorklogEntry | null>(null)
   const [editOpen, setEditOpen] = useState(false)
@@ -120,13 +125,19 @@ export default function WorklogPage() {
       .finally(() => setLoading(false))
   }, [fromStr, toStr, page, pageSize, keyword])
 
-  const loadDaily = useCallback(() => {
+  const loadDailyWeek = useCallback(() => {
     setLoading(true)
-    getDaily(dateStr)
-      .then(setDaily)
+    listDailyWeek(dailyWeekStartStr)
+      .then((list) => {
+        const map: Record<string, DailyReport> = {}
+        list.forEach((r) => {
+          map[r.workDate] = r
+        })
+        setDailyWeek(map)
+      })
       .catch((e) => message.error(`加载日报失败: ${e.message}`))
       .finally(() => setLoading(false))
-  }, [dateStr])
+  }, [dailyWeekStartStr])
 
   const loadWeekly = useCallback(() => {
     setLoading(true)
@@ -138,11 +149,21 @@ export default function WorklogPage() {
 
   const reload = useCallback(() => {
     if (view === 'entries') loadEntries()
-    else if (view === 'daily') loadDaily()
+    else if (view === 'daily') loadDailyWeek()
     else loadWeekly()
-  }, [view, loadEntries, loadDaily, loadWeekly])
+  }, [view, loadEntries, loadDailyWeek, loadWeekly])
 
   useEffect(reload, [reload])
+
+  // 周导航：±7 天整体平移（选中日保持星期几不变）；回本周 = 当前周 + 选中今天
+  const shiftWeek = (n: number) => {
+    setDailyWeekStart((w) => w.add(n * 7, 'day'))
+    setDay((d) => d.add(n * 7, 'day'))
+  }
+  const backToCurrentWeek = () => {
+    setDailyWeekStart(mondayOf(dayjs()))
+    setDay(dayjs())
+  }
 
   const applyRange = (r: [Dayjs | null, Dayjs | null] | null) => {
     if (!r || !r[0] || !r[1]) return
@@ -158,15 +179,16 @@ export default function WorklogPage() {
   // 生成是异步的（后端 {accepted, running}）：提交后轮询直到报告出现
   const onGenerate = async (kind: 'daily' | 'weekly', force: boolean) => {
     setGenerating(true)
+    const prevDailyUpdatedAt = daily?.updatedAt
     try {
-      if (kind === 'daily') await generateDaily(dateStr, force)
+      if (kind === 'daily') await generateDaily(dayStr, force)
       else await generateWeekly(weekStartStr, force)
       message.info('AI 生成中，完成后自动刷新…')
       for (let i = 0; i < 60; i++) {
         await sleep(2000)
-        const r = kind === 'daily' ? await getDaily(dateStr) : await getWeekly(weekStartStr)
-        if (r && (force ? r.updatedAt !== (kind === 'daily' ? daily?.updatedAt : weekly?.updatedAt) : true)) {
-          if (kind === 'daily') setDaily(r as DailyReport)
+        const r = kind === 'daily' ? await getDaily(dayStr) : await getWeekly(weekStartStr)
+        if (r && (force ? r.updatedAt !== (kind === 'daily' ? prevDailyUpdatedAt : weekly?.updatedAt) : true)) {
+          if (kind === 'daily') setDailyWeek((m) => ({ ...m, [dayStr]: r as DailyReport }))
           else setWeekly(r as WeeklyReport)
           message.success('生成完成')
           return
@@ -274,9 +296,22 @@ export default function WorklogPage() {
       </>
     ),
     daily: (
-      <Button icon={<ReloadOutlined />} onClick={reload}>
-        刷新
-      </Button>
+      <>
+        <Button size="small" icon={<LeftOutlined />} onClick={() => shiftWeek(-1)} />
+        <Typography.Text>
+          {dailyWeekStart.format('YYYY-MM-DD')} ~ {dailyWeekStart.add(6, 'day').format('MM-DD')}
+        </Typography.Text>
+        {isCurrentWeek && <Tag color="blue">本周</Tag>}
+        <Button size="small" icon={<RightOutlined />} onClick={() => shiftWeek(1)} />
+        {!isCurrentWeek && (
+          <Button size="small" onClick={backToCurrentWeek}>
+            回到本周
+          </Button>
+        )}
+        <Button icon={<ReloadOutlined />} onClick={reload}>
+          刷新
+        </Button>
+      </>
     ),
     weekly: (
       <Button icon={<ReloadOutlined />} onClick={reload}>
@@ -303,12 +338,12 @@ export default function WorklogPage() {
       }
       extra={
         <Space>
-          {view !== 'entries' && (
+          {view === 'weekly' && (
             <DatePicker
               value={date}
               allowClear={false}
-              picker={view === 'weekly' ? 'week' : 'date'}
-              presets={view === 'weekly' ? WEEKLY_PRESETS : DAILY_PRESETS}
+              picker="week"
+              presets={WEEKLY_PRESETS}
               onChange={(d) => d && setDate(d)}
             />
           )}
@@ -424,23 +459,27 @@ export default function WorklogPage() {
       {view === 'daily' && (
         <>
           <Typography.Paragraph type="secondary">
-            AI 汇总当日条目与 git 提交生成日报草稿；人工修订后「确认定稿」（已确认不可再重新生成）。
+            按周浏览日报（周一至周日），点某天查看/编辑；AI 汇总当日条目与 git 提交生成草稿，人工修订后「确认定稿」（已确认不可再重新生成）。
           </Typography.Paragraph>
+          <WeekDayStrip weekStart={dailyWeekStart} reports={dailyWeek} selected={dayStr} onSelect={setDay} />
           <ReportEditor
+            key={dayStr}
             id={daily?.id}
             status={daily?.status}
             updatedAt={daily?.updatedAt}
             generating={generating}
-            fields={[{ key: 'contentMd', label: `日报内容（${dateStr}，Markdown）`, value: daily?.contentMd ?? '' }]}
+            fields={[{ key: 'contentMd', label: `日报内容（${dayStr}，Markdown）`, value: daily?.contentMd ?? '' }]}
             onGenerate={(force) => onGenerate('daily', force)}
             onSave={async (values) => {
               if (daily) {
-                setDaily(await updateDaily(daily.id, { contentMd: values.contentMd }))
+                const updated = await updateDaily(daily.id, { contentMd: values.contentMd })
+                setDailyWeek((m) => ({ ...m, [dayStr]: updated }))
               }
             }}
             onConfirm={async () => {
               if (daily) {
-                setDaily(await updateDaily(daily.id, { status: 'CONFIRMED' }))
+                const updated = await updateDaily(daily.id, { status: 'CONFIRMED' })
+                setDailyWeek((m) => ({ ...m, [dayStr]: updated }))
               }
             }}
           />
@@ -479,7 +518,7 @@ export default function WorklogPage() {
       <EntryFormDrawer
         open={editOpen}
         target={editTarget}
-        defaultDate={dayjs().format('YYYY-MM-DD')}
+        defaultDate={view === 'daily' ? dayStr : dayjs().format('YYYY-MM-DD')}
         saving={saving}
         onCancel={() => setEditOpen(false)}
         onSave={onSaveEntry}

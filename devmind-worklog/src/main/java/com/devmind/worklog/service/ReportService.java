@@ -84,6 +84,13 @@ public class ReportService {
                 .stream().map(DailyReportView::of).toList();
     }
 
+    /** 某周（weekStart=周一）7 天内有报告的日报（日期升序），前端日报周视图的周日选择条用。 */
+    public List<DailyReportView> weekDaily(String username, LocalDate weekStart) {
+        return dailyRepo.findByUserIdAndWorkDateBetweenOrderByWorkDateAsc(
+                        username, weekStart, weekStart.plusDays(6))
+                .stream().map(DailyReportView::of).toList();
+    }
+
     /**
      * 手动生成前同步预检（控制器调用）：已确认 → 409；无素材 → 400。
      * 让「点生成却永远没有结果」的场景立即报错，而不是提交后异步静默跳过、

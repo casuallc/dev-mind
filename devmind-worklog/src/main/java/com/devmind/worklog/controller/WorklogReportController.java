@@ -60,6 +60,13 @@ public class WorklogReportController {
         return reportService.recentDaily(identity.currentActor(), Math.min(Math.max(days, 1), 62));
     }
 
+    /** 某周（weekStart=周一）7 天内有报告的日报，日期升序；日报周视图的周日选择条用。 */
+    @GetMapping("/daily/week")
+    public List<DailyReportView> weekDaily(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart) {
+        return reportService.weekDaily(identity.currentActor(), weekStart);
+    }
+
     /** 手动触发生成（异步）：先同步预检（已确认 409 / 无素材 400），再提交；已有任务在跑 → 409。 */
     @PostMapping("/daily/generate")
     public Map<String, Boolean> generateDaily(@Valid @RequestBody GenerateDailyRequest req) {
