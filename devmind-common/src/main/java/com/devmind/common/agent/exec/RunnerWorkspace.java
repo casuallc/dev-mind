@@ -56,9 +56,19 @@ public class RunnerWorkspace {
     }
 
     private final Path workspaceRoot;
+    /**
+     * CAP-34 FR-04：同克隆缓存（key=cacheDir 绝对路径）的 fetch/worktree/push 互斥——
+     * 并发会话同库不再踩同一缓存。锁条目不清理（项目×库数量级小，无泄漏）。
+     */
+    private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.locks.ReentrantLock> cacheLocks =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     public RunnerWorkspace(Path workspaceRoot) {
         this.workspaceRoot = workspaceRoot.toAbsolutePath().normalize();
+    }
+
+    private java.util.concurrent.locks.ReentrantLock lockOf(Path cacheDir) {
+        return cacheLocks.computeIfAbsent(cacheDir.toString(), k -> new java.util.concurrent.locks.ReentrantLock());
     }
 
     /** 准备会话工作区：clone（首次）→ fetch 基线 → 会话 worktree；返回 workdir 所在上下文。 */
@@ -74,9 +84,15 @@ public class RunnerWorkspace {
         if (!cacheDir.startsWith(workspaceRoot) || !sessionDir.startsWith(workspaceRoot)) {
             throw new IllegalStateException("工作区路径越界（.. 逃逸防护）: " + projectId);
         }
-        ensureClone(cacheDir, spec);
-        fetch(cacheDir, spec);
-        addWorktree(cacheDir, sessionDir, spec);
+        var lock = lockOf(cacheDir);
+        lock.lock();
+        try {
+            ensureClone(cacheDir, spec);
+            fetch(cacheDir, spec);
+            addWorktree(cacheDir, sessionDir, spec);
+        } finally {
+            lock.unlock();
+        }
         return new RepoCtx(spec, cacheDir, sessionDir);
     }
 
@@ -116,9 +132,15 @@ public class RunnerWorkspace {
                 if (!cacheDir.startsWith(workspaceRoot) || !sessionDir.startsWith(aggRoot)) {
                     throw new IllegalStateException("工作区路径越界（.. 逃逸防护）: " + spec.name());
                 }
-                ensureClone(cacheDir, spec);
-                fetch(cacheDir, spec);
-                addWorktree(cacheDir, sessionDir, spec);
+                var lock = lockOf(cacheDir);
+                lock.lock();
+                try {
+                    ensureClone(cacheDir, spec);
+                    fetch(cacheDir, spec);
+                    addWorktree(cacheDir, sessionDir, spec);
+                } finally {
+                    lock.unlock();
+                }
                 done.add(new RepoCtx(spec, cacheDir, sessionDir));
                 log.info("多库工作区就绪: session={} repo={} dir={}", sessionId, spec.name(), sessionDir);
             }
@@ -154,6 +176,16 @@ public class RunnerWorkspace {
 
     /** 单库收口（finish/finishMulti 共用）：push 会话分支 → 移除会话 worktree。label 为上报前缀（多库带库名）。 */
     private void finishOne(RepoCtx ctx, String label, java.util.function.Consumer<String> sink) {
+        var lock = lockOf(ctx.cacheDir());
+        lock.lock();
+        try {
+            finishOneLocked(ctx, label, sink);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void finishOneLocked(RepoCtx ctx, String label, java.util.function.Consumer<String> sink) {
         RepoSpec spec = ctx.spec();
         try {
             Result push = run(ctx.cacheDir(), PUSH_TIMEOUT_SEC, spec.token(),
