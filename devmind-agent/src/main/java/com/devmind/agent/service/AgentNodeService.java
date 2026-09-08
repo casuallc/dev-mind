@@ -1,5 +1,6 @@
 package com.devmind.agent.service;
 
+import com.devmind.agent.dto.AgentHelloMeta;
 import com.devmind.agent.dto.AgentNodeView;
 import com.devmind.agent.dto.CreateAgentNodeRequest;
 import com.devmind.agent.dto.IssuedNodeView;
@@ -125,19 +126,33 @@ public class AgentNodeService {
         });
     }
 
-    /** hello 帧：更新节点元数据（os/capabilities/runner 版本）。 */
-    public void updateMeta(Long id, String os, String capabilities, String runnerVersion) {
+    /** hello 帧：更新节点元数据（meta 各字段可空 = 旧 runner 未上报，不动旧值）。 */
+    public void updateMeta(Long id, AgentHelloMeta meta) {
         repo.findById(id).ifPresent(e -> {
-            if (os != null && !os.isBlank()) {
-                e.setOs(os);
+            if (meta.os() != null && !meta.os().isBlank()) {
+                e.setOs(meta.os());
             }
-            if (capabilities != null) {
-                e.setCapabilities(capabilities);
+            if (meta.capabilities() != null) {
+                e.setCapabilities(meta.capabilities());
             }
-            if (runnerVersion != null) {
-                e.setRunnerVersion(runnerVersion);
+            if (meta.runnerVersion() != null) {
+                e.setRunnerVersion(meta.runnerVersion());
+            }
+            if (meta.workspaceBytes() != null) {
+                e.setWorkspaceBytes(meta.workspaceBytes());
             }
             e.setLastHeartbeatAt(Instant.now());
+            repo.save(e);
+        });
+    }
+
+    /** FR-05：心跳帧携带的工作区占用落库（心跳不带其他元数据）。 */
+    public void updateWorkspaceBytes(Long id, Long workspaceBytes) {
+        if (workspaceBytes == null) {
+            return;
+        }
+        repo.findById(id).ifPresent(e -> {
+            e.setWorkspaceBytes(workspaceBytes);
             repo.save(e);
         });
     }

@@ -28,6 +28,20 @@ export function fmtDuration(sec: number | null | undefined): string {
   return `${h}h${m}m`
 }
 
+/** 字节数 → '512B' / '3.2MB' / '1.5GB'，空值显示 '-'（CAP-34 FR-05 节点工作区占用） */
+export function fmtBytes(n: number | null | undefined): string {
+  if (n == null || n < 0) return '-'
+  if (n < 1024) return `${n}B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let v = n
+  let u = -1
+  do {
+    v /= 1024
+    u++
+  } while (v >= 1024 && u < units.length - 1)
+  return `${v >= 100 ? Math.round(v) : v.toFixed(1)}${units[u]}`
+}
+
 /** Record → 每行 k=v 文本（表单编辑用） */
 export const paramsToText = (p: Record<string, string> | undefined): string =>
   Object.entries(p ?? {}).map(([k, v]) => `${k}=${v}`).join('\n')

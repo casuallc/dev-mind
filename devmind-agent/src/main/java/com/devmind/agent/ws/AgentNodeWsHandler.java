@@ -2,6 +2,7 @@ package com.devmind.agent.ws;
 
 import com.devmind.agent.model.AgentConnLogEntity;
 import com.devmind.agent.model.AgentNodeEntity;
+import com.devmind.agent.dto.AgentHelloMeta;
 import com.devmind.agent.registry.AgentConnectionRegistry;
 import com.devmind.agent.service.AgentConnLogService;
 import com.devmind.agent.service.AgentNodeService;
@@ -87,13 +88,23 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
                         active.add(n.asText(""));
                     }
                 }
-                registry.onHello(node, frame.path("os").asText(null),
+                // CAP-34：workspaceBytes（FR-05）/ protocolVersion（FR-08）/ labels/toolchain（FR-07）
+                // 均为可选字段，旧 runner 不上报即 null，落库不动旧值
+                Long workspaceBytes = frame.has("workspaceBytes") && frame.path("workspaceBytes").isNumber()
+                        ? frame.path("workspaceBytes").asLong() : null;
+                registry.onHello(node, new AgentHelloMeta(
+                        frame.path("os").asText(null),
                         frame.path("capabilities").asText(null),
-                        frame.path("version").asText(null), active);
+                        frame.path("version").asText(null),
+                        workspaceBytes, null, null, null), active);
             }
             case "heartbeat" -> {
                 registry.touch(String.valueOf(node.getId()));
                 nodeService.touchHeartbeat(node.getId());
+                // FR-05：心跳携带的工作区占用落库（保鲜节点页展示）
+                if (frame.has("workspaceBytes") && frame.path("workspaceBytes").isNumber()) {
+                    nodeService.updateWorkspaceBytes(node.getId(), frame.path("workspaceBytes").asLong());
+                }
             }
             case "event" -> {
                 @SuppressWarnings("unchecked")

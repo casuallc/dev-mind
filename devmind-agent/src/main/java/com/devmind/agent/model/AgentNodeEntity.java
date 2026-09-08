@@ -46,6 +46,10 @@ public class AgentNodeEntity {
     @Column(name = "runner_version", length = 64)
     private String runnerVersion;
 
+    /** CAP-34 FR-05：工作区磁盘占用字节数（hello/heartbeat 上报，旧 runner 无此字段保持 null） */
+    @Column(name = "workspace_bytes")
+    private Long workspaceBytes;
+
     @Column(name = "last_heartbeat_at")
     private Instant lastHeartbeatAt;
 
@@ -77,6 +81,8 @@ public class AgentNodeEntity {
     public void setCapabilities(String capabilities) { this.capabilities = capabilities; }
     public String getRunnerVersion() { return runnerVersion; }
     public void setRunnerVersion(String runnerVersion) { this.runnerVersion = runnerVersion; }
+    public Long getWorkspaceBytes() { return workspaceBytes; }
+    public void setWorkspaceBytes(Long workspaceBytes) { this.workspaceBytes = workspaceBytes; }
     public Instant getLastHeartbeatAt() { return lastHeartbeatAt; }
     public void setLastHeartbeatAt(Instant lastHeartbeatAt) { this.lastHeartbeatAt = lastHeartbeatAt; }
     public String getRemoteAddr() { return remoteAddr; }

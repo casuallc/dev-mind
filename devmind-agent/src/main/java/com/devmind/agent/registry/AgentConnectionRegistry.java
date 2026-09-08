@@ -1,6 +1,7 @@
 package com.devmind.agent.registry;
 
 import com.devmind.agent.config.AgentProperties;
+import com.devmind.agent.dto.AgentHelloMeta;
 import com.devmind.agent.model.AgentConnLogEntity;
 import com.devmind.agent.model.AgentNodeEntity;
 import com.devmind.agent.service.AgentConnLogService;
@@ -113,11 +114,10 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
 
     // ---------------- 上行帧处理 ----------------
 
-    public void onHello(AgentNodeEntity node, String os, String capabilities, String version,
-                        List<String> activeSessionIds) {
+    public void onHello(AgentNodeEntity node, AgentHelloMeta meta, List<String> activeSessionIds) {
         String nodeId = String.valueOf(node.getId());
         touch(nodeId);
-        nodeService.updateMeta(node.getId(), os, capabilities, version);
+        nodeService.updateMeta(node.getId(), meta);
         listenerProvider.forEach(l -> l.onAgentHello(nodeId, activeSessionIds));
     }
 

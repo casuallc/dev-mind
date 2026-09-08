@@ -40,7 +40,7 @@ import type { AgentNode, IssuedNode, RunnerPackage } from '../types'
 import RunnerPackagePanel from '../components/RunnerPackagePanel'
 import ConnLogsPanel from '../components/ConnLogsPanel'
 import { buildLinuxInstallScript, buildWindowsInstallScript, downloadTextFile } from '../utils/installScript'
-import { fmtTime } from '../../../shared/utils/format'
+import { fmtTime, fmtBytes } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 const statusColor: Record<string, string> = {
@@ -198,6 +198,12 @@ export default function AgentNodesPage() {
           </Tooltip>
         )
       },
+    },
+    {
+      title: '工作区',
+      dataIndex: 'workspaceBytes',
+      width: 100,
+      render: (n?: number) => fmtBytes(n),
     },
     {
       title: '最近心跳',
@@ -521,6 +527,7 @@ function NodeDrawer({
                 '-'
               )}
             </Descriptions.Item>
+            <Descriptions.Item label="工作区占用">{fmtBytes(node.workspaceBytes)}</Descriptions.Item>
             <Descriptions.Item label="最近心跳">{fmtTime(node.lastHeartbeatAt)}</Descriptions.Item>
             <Descriptions.Item label="标签" span={2}>
               {node.labels || '-'}

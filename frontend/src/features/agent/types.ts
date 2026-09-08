@@ -14,6 +14,8 @@ export interface AgentNode {
   remoteAddr?: string
   /** 平台默认执行节点：会话/项目未指定节点时调度到此（全平台至多一个） */
   isDefault?: boolean
+  /** 工作区磁盘占用（字节，CAP-34 FR-05；旧 runner 未上报为 undefined） */
+  workspaceBytes?: number
   lastHeartbeatAt?: string
   createdAt?: string
 }
