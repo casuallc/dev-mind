@@ -54,6 +54,8 @@ public class SecurityConfig {
                         // CAP-21：Agent 节点管理（含注册 token 签发）写操作仅 ADMIN；/ws/agent 由节点 token 自证
                         // FR-09 runner 包下载：permitAll 放行，节点 token 或登录态由控制器内双重判定
                         .requestMatchers(HttpMethod.GET, "/api/agent-nodes/runner-package/download").permitAll()
+                        // CAP-34 FR-03：上下文包拉取 permitAll 放行，节点 token 由控制器内判定
+                        .requestMatchers(HttpMethod.GET, "/api/agent/context/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/agent-nodes", "/api/agent-nodes/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/agent-nodes/**").hasRole("ADMIN")
                         // CAP-20：AI 智能接入（全自动 bypassPermissions 会话）仅 ADMIN 可发起
