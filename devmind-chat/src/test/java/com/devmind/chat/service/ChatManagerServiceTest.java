@@ -96,6 +96,10 @@ class ChatManagerServiceTest {
                         .filter(e -> args[0].equals(e.getCreatedBy()))
                         .sorted(Comparator.comparing(ChatSessionEntity::getCreatedAt).reversed())
                         .toList();
+                case "findByAgentNodeIdAndStatusIn" -> store.values().stream()
+                        .filter(e -> args[0].equals(e.getAgentNodeId()))
+                        .filter(e -> ((java.util.Collection<?>) args[1]).contains(e.getStatus()))
+                        .toList();
                 case "delete" -> {
                     store.remove(((ChatSessionEntity) args[0]).getId());
                     yield null;
@@ -422,5 +426,49 @@ class ChatManagerServiceTest {
         chats.store.put(ent.getId(), ent);
         assertThrows(com.devmind.common.exception.DevMindException.class,
                 () -> service.resume("legacy01"));
+    }
+
+    @Test
+    void 服务端重启后hello对账_清单内reattach_清单外判FAILED() throws Exception {
+        // 模拟服务端重启：DB 里两条该节点的 RUNNING 问答，内存 runtimes 为空（本测试未 create）
+        for (String id : new String[]{"chat-alive", "chat-gone"}) {
+            ChatSessionEntity ent = new ChatSessionEntity();
+            ent.setId(id);
+            ent.setTitle("重启前问答");
+            ent.setStatus(SessionState.RUNNING.name());
+            ent.setAgentNodeId(NODE);
+            ent.setCreatedBy("tester");
+            ent.setCreatedAt(java.time.Instant.now());
+            ent.setUpdatedAt(java.time.Instant.now());
+            chats.store.put(id, ent);
+        }
+
+        service.onRemoteHello(NODE, List.of("chat-alive"));
+
+        // 清单外 → FAILED
+        assertEquals(SessionState.FAILED.name(), chats.store.get("chat-gone").getStatus());
+        // 清单内 → reattach 挂回：状态不变，且后续 exit 帧可路由（reattach 的证明）
+        assertEquals(SessionState.RUNNING.name(), chats.store.get("chat-alive").getStatus());
+        service.onRemoteExit(NODE, "chat-alive", 0);
+        await("reattach 后 exit 帧路由收口 DONE",
+                () -> SessionState.DONE.name().equals(chats.store.get("chat-alive").getStatus()));
+    }
+
+    @Test
+    void 启动恢复_远程问答不判死留待对账() {
+        ChatSessionEntity remote = new ChatSessionEntity();
+        remote.setId("chat-remote");
+        remote.setTitle("远程问答");
+        remote.setStatus(SessionState.RUNNING.name());
+        remote.setAgentNodeId(NODE);
+        remote.setCreatedBy("tester");
+        remote.setCreatedAt(java.time.Instant.now());
+        remote.setUpdatedAt(java.time.Instant.now());
+        chats.store.put(remote.getId(), remote);
+
+        service.restoreOnStartup();
+
+        assertEquals(SessionState.RUNNING.name(), chats.store.get("chat-remote").getStatus(),
+                "远程问答进程在 runner 侧可能仍存活，启动恢复不得判死");
     }
 }

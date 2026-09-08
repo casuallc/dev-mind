@@ -343,12 +343,15 @@ public class ChatManagerService {
 
     @PostConstruct
     public void restoreOnStartup() {
-        // 服务重启后，上一次的进程已随旧实例消亡：遗留的"活动"状态全部标记 TERMINATED
+        // 服务重启后，本机时代的进程已随旧实例消亡：遗留的"活动"状态标记 TERMINATED。
+        // CAP-34 FR-04：远程问答（agent_node_id 非空）进程在 runner 侧可能仍存活，不在此判死——
+        // 留给 runner 重连后的 hello 对账（onRemoteHello）：清单内 reattach，清单外 FAILED
         List<String> stale = List.of(SessionState.RUNNING.name(), SessionState.WAITING_INPUT.name(),
                 SessionState.WAITING_AUTH.name());
         int n = 0;
         for (ChatSessionEntity ent : chatRepo.findAll()) {
-            if (stale.contains(ent.getStatus())) {
+            if (stale.contains(ent.getStatus())
+                    && (ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank())) {
                 ent.setStatus(SessionState.TERMINATED.name());
                 ent.setSummary("服务重启，问答已终止（进程随旧实例退出）");
                 ent.setFinishedAt(Instant.now());
@@ -358,7 +361,7 @@ public class ChatManagerService {
             }
         }
         if (n > 0) {
-            log.info("启动恢复完成，{} 个遗留活动问答已标记 TERMINATED", n);
+            log.info("启动恢复完成，{} 个遗留活动问答已标记 TERMINATED（远程问答留待 hello 对账）", n);
         }
     }
 
@@ -398,6 +401,40 @@ public class ChatManagerService {
                 } else {
                     r.markLost("runner 重连后对账：问答不在存活清单（进程已随 runner 旧实例退出）");
                 }
+            }
+        }
+        reconcileFromDb(nodeId, activeSessionIds);
+    }
+
+    /**
+     * CAP-34 FR-04 服务端重启盲区：内存 runtimes 已丢失，DB 里该节点的活动状态存量问答
+     * 按 hello 清单对账——清单内 reattach 重建 RemoteSessionRuntime 挂回；清单外判 FAILED。
+     */
+    private void reconcileFromDb(String nodeId, List<String> activeSessionIds) {
+        List<ChatSessionEntity> stale = chatRepo.findByAgentNodeIdAndStatusIn(nodeId,
+                List.of(SessionState.RUNNING.name(), SessionState.WAITING_INPUT.name(),
+                        SessionState.WAITING_AUTH.name()));
+        for (ChatSessionEntity ent : stale) {
+            if (runtimes.containsKey(ent.getId())) {
+                continue; // 内存对账已处理
+            }
+            if (activeSessionIds != null && activeSessionIds.contains(ent.getId())) {
+                AgentNodeConnector connector = connectorProvider.getIfAvailable();
+                if (connector == null) {
+                    continue;
+                }
+                RemoteSessionRuntime rt = new RemoteSessionRuntime(ent.getId(), nodeId, connector,
+                        eventSaver, listener, settings);
+                runtimes.put(ent.getId(), rt);
+                rt.noteReconnected();
+                log.info("服务端重启后对账：问答 {} reattach 到节点 {}", ent.getId(), nodeId);
+            } else {
+                ent.setStatus(SessionState.FAILED.name());
+                ent.setSummary("服务端重启后对账：问答进程已不存在（不在 runner 存活清单）");
+                ent.setFinishedAt(Instant.now());
+                ent.setUpdatedAt(Instant.now());
+                chatRepo.save(ent);
+                log.info("服务端重启后对账：问答 {} 判 FAILED（不在节点 {} 存活清单）", ent.getId(), nodeId);
             }
         }
     }
