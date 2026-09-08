@@ -94,11 +94,32 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
                         ? frame.path("workspaceBytes").asLong() : null;
                 Integer protocolVersion = frame.has("protocolVersion") && frame.path("protocolVersion").isNumber()
                         ? frame.path("protocolVersion").asInt() : null;
+                // FR-07：labels 数组 → CSV 落库（D4：runner 仅配置非空时才带该字段，带上即覆盖服务端编辑值）；
+                // toolchain 对象原样序列化为 JSON 串落库
+                String labels = null;
+                JsonNode labelsNode = frame.path("labels");
+                if (labelsNode.isArray() && !labelsNode.isEmpty()) {
+                    List<String> labelList = new ArrayList<>();
+                    for (JsonNode n : labelsNode) {
+                        String v = n.asText("").strip();
+                        if (!v.isEmpty()) {
+                            labelList.add(v);
+                        }
+                    }
+                    if (!labelList.isEmpty()) {
+                        labels = String.join(",", labelList);
+                    }
+                }
+                String toolchainJson = null;
+                JsonNode toolchainNode = frame.path("toolchain");
+                if (toolchainNode.isObject() && !toolchainNode.isEmpty()) {
+                    toolchainJson = toolchainNode.toString();
+                }
                 registry.onHello(node, new AgentHelloMeta(
                         frame.path("os").asText(null),
                         frame.path("capabilities").asText(null),
                         frame.path("version").asText(null),
-                        workspaceBytes, protocolVersion, null, null), active);
+                        workspaceBytes, protocolVersion, labels, toolchainJson), active);
             }
             case "heartbeat" -> {
                 registry.touch(String.valueOf(node.getId()));

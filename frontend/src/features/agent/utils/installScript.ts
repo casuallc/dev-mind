@@ -51,7 +51,8 @@ $lines = @(
   "workDir=$workDir",
   'maxConcurrent=4',
   'executor=claude',
-  '#gcDays=14  # 会话工作区超龄回收天数(CAP-34 FR-05,默认 14)'
+  '#gcDays=14  # 会话工作区超龄回收天数(CAP-34 FR-05,默认 14)',
+  '#labels=    # 节点标签 CSV(CAP-34 FR-07,如 windows,office;非空时 hello 覆盖服务端编辑值)'
 )
 [IO.File]::WriteAllLines($conf, $lines, (New-Object Text.UTF8Encoding($false)))
 
@@ -101,6 +102,7 @@ workDir=$INSTALL_DIR/work
 maxConcurrent=4
 executor=claude
 #gcDays=14  # 会话工作区超龄回收天数(CAP-34 FR-05,默认 14)
+#labels=    # 节点标签 CSV(CAP-34 FR-07,如 windows,office;非空时 hello 覆盖服务端编辑值)
 EOF
 
 echo '[install] 后台启动 runner(日志 runner.log)...'

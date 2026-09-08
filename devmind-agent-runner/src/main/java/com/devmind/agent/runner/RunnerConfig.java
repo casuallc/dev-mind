@@ -22,20 +22,22 @@ import java.util.Properties;
  *                            # 克隆缓存 <root>/<projectId>/main + 会话 worktree <root>/<projectId>/sessions/<sid>）
  * gcDays=14                  # CAP-34 FR-05：会话目录超龄清理阈值（天）
  * gcIntervalMinutes=360      # GC 巡检间隔（分钟，启动后 10 分钟首跑）
+ * labels=windows,office      # CAP-34 FR-07：节点标签（CSV，hello 上报；非空覆盖服务端编辑值）
  * maxConcurrent=4
  * executor=claude            # claude=真实 CLI / fake=内置假进程（自测/无 claude 环境）
  * </pre>
  */
 public record RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
                            Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
-                           String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes) {
+                           String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes,
+                           java.util.List<String> labels) {
 
-    /** 兼容构造（FR-05 前的 9 参签名，测试/旧调用用）：GC 默认值 14 天 / 360 分钟。 */
+    /** 兼容构造（FR-05 前的 9 参签名，测试/旧调用用）：GC 默认值 14 天 / 360 分钟，无标签。 */
     public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
                         Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
                         String executor, Path workspaceRoot) {
         this(serverUrl, token, claudePath, permissionMode, workDir, projectPaths, maxConcurrent,
-                executor, workspaceRoot, 14, 360);
+                executor, workspaceRoot, 14, 360, java.util.List.of());
     }
 
     public static RunnerConfig load(Path file) throws IOException {
@@ -61,7 +63,17 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                 p.getProperty("executor", "claude").strip(),
                 Path.of(p.getProperty("workspaceRoot", "./workspaces").strip()),
                 Integer.parseInt(p.getProperty("gcDays", "14").strip()),
-                Integer.parseInt(p.getProperty("gcIntervalMinutes", "360").strip()));
+                Integer.parseInt(p.getProperty("gcIntervalMinutes", "360").strip()),
+                parseLabels(p.getProperty("labels", "")));
+    }
+
+    /** FR-07：labels CSV → 去空白去空项的 List（保序）。 */
+    static java.util.List<String> parseLabels(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return java.util.List.of();
+        }
+        return java.util.Arrays.stream(csv.split(","))
+                .map(String::strip).filter(s -> !s.isEmpty()).toList();
     }
 
     /** 会话工作目录：项目映射优先，否则兜底 workDir。 */

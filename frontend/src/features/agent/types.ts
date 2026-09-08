@@ -18,6 +18,8 @@ export interface AgentNode {
   workspaceBytes?: number
   /** WS 协议版本（CAP-34 FR-08；未上报的老 runner 按 v1 对待） */
   protocolVersion?: number
+  /** 探测到的工具链（JSON 对象串，如 {"git":"2.47"}，CAP-34 FR-07；未上报为 undefined） */
+  toolchain?: string
   lastHeartbeatAt?: string
   createdAt?: string
 }

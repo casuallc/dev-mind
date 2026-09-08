@@ -72,9 +72,18 @@ public class AgentRunnerMain {
         java.util.concurrent.atomic.AtomicLong workspaceBytes = new java.util.concurrent.atomic.AtomicLong(-1);
         Thread.ofVirtual().name("workspace-usage-init").start(() -> workspaceBytes.set(gc.usageBytes()));
 
+        // CAP-34 FR-07：工具链探测（各 5s 超时，异步避免拖慢首次接入；未完成前 hello 不带 toolchain）
+        var toolchain = new java.util.concurrent.atomic.AtomicReference<Map<String, String>>(Map.of());
+        Thread.ofVirtual().name("toolchain-detect").start(() -> {
+            Map<String, String> detected = new com.devmind.common.agent.exec.ToolchainDetector().detect();
+            toolchain.set(detected);
+            log.info("工具链探测完成: {}", detected);
+        });
+
         ServerConnection conn = new ServerConnection(config, mapper,
                 frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, workspace, connRef[0]),
-                () -> connRef[0].send(helloFrame(sessions, version, workspaceBytes.get())));
+                () -> connRef[0].send(helloFrame(sessions, version, workspaceBytes.get(),
+                        config.labels(), toolchain.get())));
         connRef[0] = conn;
 
         ScheduledExecutorService heartbeat = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -111,7 +120,8 @@ public class AgentRunnerMain {
         conn.run(); // 阻塞：断线重连循环
     }
 
-    private static Map<String, Object> helloFrame(RunnerSessionRegistry sessions, String version, long workspaceBytes) {
+    private static Map<String, Object> helloFrame(RunnerSessionRegistry sessions, String version, long workspaceBytes,
+                                                  List<String> labels, Map<String, String> toolchain) {
         Map<String, Object> hello = new LinkedHashMap<>();
         hello.put("type", "hello");
         hello.put("os", System.getProperty("os.name") + " / " + System.getProperty("os.arch"));
@@ -120,6 +130,13 @@ public class AgentRunnerMain {
         hello.put("activeSessions", sessions.activeSessionIds());
         // FR-08：协议版本协商——服务端据此门控「必须认识」的新下行帧（本轮仅落库/展示，FR-06 才消费）
         hello.put("protocolVersion", com.devmind.common.agent.AgentProtocol.CURRENT);
+        // FR-07：配置标签（非空时服务端覆盖 DB 值，空则保留服务端编辑值）+ 探测到的工具链
+        if (!labels.isEmpty()) {
+            hello.put("labels", labels);
+        }
+        if (!toolchain.isEmpty()) {
+            hello.put("toolchain", toolchain);
+        }
         if (workspaceBytes >= 0) {
             hello.put("workspaceBytes", workspaceBytes); // FR-05：占用未算完（-1）时不带，旧服务端本就不读
         }

@@ -144,6 +144,14 @@ public class AgentNodeService {
             if (meta.protocolVersion() != null) {
                 e.setProtocolVersion(meta.protocolVersion());
             }
+            // FR-07 D4：runner 配置 labels 非空时 hello 才带 → 带上即覆盖服务端编辑值；
+            // runner 未配置（hello 无此字段 = null）不动服务端编辑值
+            if (meta.labels() != null) {
+                e.setLabels(meta.labels());
+            }
+            if (meta.toolchainJson() != null) {
+                e.setToolchain(meta.toolchainJson());
+            }
             e.setLastHeartbeatAt(Instant.now());
             repo.save(e);
         });
@@ -158,6 +166,51 @@ public class AgentNodeService {
             e.setWorkspaceBytes(workspaceBytes);
             repo.save(e);
         });
+    }
+
+    /** FR-07：服务端编辑节点标签（CSV；null/空白 = 清空）。runner 配置非空 labels 时 hello 会覆盖此值。 */
+    public AgentNodeView updateLabels(Long id, String labels) {
+        AgentNodeEntity e = require(id);
+        String v = labels == null ? null : labels.strip();
+        e.setLabels(v == null || v.isEmpty() ? null : v);
+        return AgentNodeView.from(repo.save(e));
+    }
+
+    /** FR-07 标签调度：节点标签是否覆盖全部 required（required 空 = 恒 true；节点不存在 = false）。 */
+    public boolean nodeMatchesLabels(String nodeId, List<String> requiredLabels) {
+        if (requiredLabels == null || requiredLabels.isEmpty()) {
+            return true;
+        }
+        try {
+            return repo.findById(Long.parseLong(nodeId))
+                    .map(e -> labelsCover(e.getLabels(), requiredLabels))
+                    .orElse(false);
+        } catch (NumberFormatException ex) {
+            return false;
+        }
+    }
+
+    /** FR-07 标签调度：在线且标签覆盖全部 required 的节点（按 id 升序，取第一个即可）。 */
+    public List<AgentNodeEntity> onlineMatching(List<String> requiredLabels) {
+        return repo.findAll().stream()
+                .filter(e -> STATUS_ONLINE.equals(e.getStatus()))
+                .filter(e -> labelsCover(e.getLabels(), requiredLabels))
+                .sorted(java.util.Comparator.comparing(AgentNodeEntity::getId))
+                .toList();
+    }
+
+    /** CSV 标签覆盖判定：required 中每个标签都在节点 CSV 标签集合内（大小写敏感，去空白）。 */
+    static boolean labelsCover(String nodeLabelsCsv, List<String> requiredLabels) {
+        if (requiredLabels == null || requiredLabels.isEmpty()) {
+            return true;
+        }
+        if (nodeLabelsCsv == null || nodeLabelsCsv.isBlank()) {
+            return false;
+        }
+        java.util.Set<String> have = java.util.Arrays.stream(nodeLabelsCsv.split(","))
+                .map(String::strip).filter(s -> !s.isEmpty())
+                .collect(java.util.stream.Collectors.toSet());
+        return requiredLabels.stream().map(String::strip).filter(s -> !s.isEmpty()).allMatch(have::contains);
     }
 
     public void touchHeartbeat(Long id) {
