@@ -1,4 +1,4 @@
-package com.devmind.agent.runner;
+package com.devmind.common.agent.exec;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

@@ -6,6 +6,7 @@ import com.devmind.common.agent.runtime.FakeProcessLauncher;
 import com.devmind.common.agent.runtime.RuntimeSettings;
 import com.devmind.common.agent.runtime.SessionExecutor;
 import com.devmind.common.agent.InputImage;
+import com.devmind.common.agent.exec.RunnerWorkspace;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;

@@ -1,4 +1,4 @@
-package com.devmind.agent.runner;
+package com.devmind.common.agent.exec;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +18,9 @@ import java.util.regex.Pattern;
  * CAP-25 runner 侧托管工作区：收到带 repo 块的 launch 后负责节点本地代码生命周期——
  * 克隆缓存（&lt;workspaceRoot&gt;/&lt;projectId&gt;/main，首会话 clone）→ fetch 基线 →
  * 每会话独立 worktree（sessions/&lt;sessionId&gt;，分支由服务端下发）→ 结束 push + 清理。
+ *
+ * <p>CAP-34 FR-01：本类自 devmind-agent-runner 上移 common {@code agent.exec} 执行内核包
+ * （该包只被 runner 引用，服务端不持有任何执行实现）。</p>
  *
  * <p><b>凭据红线</b>：token 仅存内存（{@link RepoCtx} 随会话生命周期存活），git 进程一律
  * 显式 URL 内嵌注入（仅进程参数），clone 后立即 {@code remote set-url origin <cleanUrl>}
