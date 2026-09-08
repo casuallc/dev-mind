@@ -90,4 +90,51 @@ export const api = {
   /** multipart 上传（FormData，Content-Type 由浏览器带 boundary） */
   upload: <T>(path: string, form: FormData) =>
     request<T>(path, { method: 'POST', body: form }),
+  /** multipart 上传（XHR，支持上传进度回调；401 同样走静默刷新重放一次） */
+  uploadWithProgress: <T>(path: string, form: FormData, onProgress?: (percent: number) => void) =>
+    xhrUpload<T>(path, form, onProgress, true),
+}
+
+// fetch 不支持上传进度，进度场景走 XHR；鉴权头与 401 刷新语义与 rawRequest 对齐
+function xhrUpload<T>(
+  path: string,
+  form: FormData,
+  onProgress: ((percent: number) => void) | undefined,
+  allowRetry: boolean,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${BASE}${path}`)
+    const token = getAccessToken()
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(Math.round((e.loaded / e.total) * 100))
+    }
+    xhr.onload = () => {
+      if (xhr.status === 401 && allowRetry && !isAuthEndpoint(path)) {
+        tryRefresh()
+          .then((ok) => {
+            if (ok) {
+              xhrUpload<T>(path, form, onProgress, false).then(resolve, reject)
+            } else {
+              forceReLogin()
+              reject(new Error('401 登录已过期'))
+            }
+          })
+          .catch(reject)
+        return
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(xhr.responseText ? (JSON.parse(xhr.responseText) as T) : (undefined as T))
+        } catch (e) {
+          reject(e)
+        }
+      } else {
+        reject(new Error(`${xhr.status} ${xhr.responseText || xhr.statusText}`))
+      }
+    }
+    xhr.onerror = () => reject(new Error('网络错误，上传失败'))
+    xhr.send(form)
+  })
 }

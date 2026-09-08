@@ -9,6 +9,7 @@ import {
   FileTextOutlined,
   FolderOutlined,
   KeyOutlined,
+  PaperClipOutlined,
   ReadOutlined,
   RobotOutlined,
   SafetyCertificateOutlined,
@@ -68,6 +69,7 @@ export default function AdminLayout() {
                 { key: '/admin/knowledge', icon: <ReadOutlined />, label: '知识库' },
                 { key: '/admin/skills', icon: <ToolOutlined />, label: 'Skill 管理' },
                 { key: '/admin/docs', icon: <FileTextOutlined />, label: '文档管理' },
+                { key: '/admin/attachments', icon: <PaperClipOutlined />, label: '附件管理' },
               ],
             },
             {

@@ -82,8 +82,6 @@ export default function App() {
           <Route path="/worklog" element={<WorklogPage />} />
           {/* CAP-30 通用问答（个人级，不进项目上下文） */}
           <Route path="/chats" element={<ChatsBoard />} />
-          {/* CAP-32 附件管理（个人级，图床+文件统一库） */}
-          <Route path="/attachments" element={<AttachmentsPage />} />
           {/* 项目上下文页面（当前项目为主线，无项目时由 Gate 统一空态） */}
           <Route element={<ProjectContextGate />}>
             <Route path="/overview" element={<ProjectOverviewPage />} />
@@ -110,6 +108,8 @@ export default function App() {
           <Route path="/docs" element={<Navigate to="/admin/docs" replace />} />
           <Route path="/docs/:id" element={<LegacyDocRedirect />} />
           <Route path="/servers" element={<Navigate to="/admin/servers" replace />} />
+          {/* 附件管理已迁入后台「内容」分组，旧路径兼容 */}
+          <Route path="/attachments" element={<Navigate to="/admin/attachments" replace />} />
           {/* 会话模板已升级为场景（CAP-33），旧路径兼容 */}
           <Route path="/templates" element={<Navigate to="/admin/scenarios" replace />} />
         </Route>
@@ -159,6 +159,8 @@ export default function App() {
           {/* CAP-03 文档 */}
           <Route path="/admin/docs" element={<DocsPage />} />
           <Route path="/admin/docs/:id" element={<DocEditorPage />} />
+          {/* CAP-32 附件管理（图床+文件统一库；/attachments 旧路径重定向） */}
+          <Route path="/admin/attachments" element={<AttachmentsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

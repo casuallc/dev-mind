@@ -1,4 +1,5 @@
-// 附件管理页（CAP-32）：平台统一附件（图床+文件）的查看/上传/共享范围/删除。
+// 附件管理页（CAP-32）：平台统一附件（图床+文件）的查看/上传/共享范围/删除，挂在后台「内容」分组。
+// 上传走弹窗：先选文件（可多选）再填描述，逐个上传并展示逐文件进度条。
 // 图片类附件内联预览，非图片仅提供下载；其他地方凭 attachmentId 引用。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
@@ -8,7 +9,9 @@ import {
   Image,
   Input,
   message,
+  Modal,
   Popconfirm,
+  Progress,
   Segmented,
   Space,
   Table,
@@ -16,10 +19,13 @@ import {
   Typography,
   Upload,
 } from 'antd'
+import type { UploadFile } from 'antd'
 import {
   CopyOutlined,
+  DeleteOutlined,
   DownloadOutlined,
   EyeOutlined,
+  InboxOutlined,
   MoreOutlined,
   PictureOutlined,
   ReloadOutlined,
@@ -50,6 +56,13 @@ export default function AttachmentsPage() {
   const [scopeFilter, setScopeFilter] = useState<string>('ALL')
   const [typeFilter, setTypeFilter] = useState<string>('ALL')
   const [keyword, setKeyword] = useState('')
+  // 上传弹窗：暂存文件 + 描述 + 逐文件进度/失败信息
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [fileList, setFileList] = useState<UploadFile[]>([])
+  const [description, setDescription] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [progress, setProgress] = useState<Record<string, number>>({})
+  const [failed, setFailed] = useState<Record<string, string>>({})
 
   const load = useCallback(() => {
     setLoading(true)
@@ -91,6 +104,41 @@ export default function AttachmentsPage() {
       .catch((e) => message.error(`删除失败：${(e as Error).message}`))
   }
 
+  const resetUpload = () => {
+    setFileList([])
+    setDescription('')
+    setProgress({})
+    setFailed({})
+  }
+
+  // 逐个上传暂存文件；成功的从列表移除，失败的保留并标错，可修正后点「开始上传」重试
+  const startUpload = async () => {
+    const files = [...fileList]
+    setUploading(true)
+    setFailed({})
+    let okCount = 0
+    for (const f of files) {
+      try {
+        await uploadAttachment(f as unknown as File, f.name, 'PRIVATE', description, (p) =>
+          setProgress((prev) => ({ ...prev, [f.uid]: p })),
+        )
+        okCount++
+        setFileList((prev) => prev.filter((x) => x.uid !== f.uid))
+      } catch (e) {
+        setFailed((prev) => ({ ...prev, [f.uid]: (e as Error).message }))
+      }
+    }
+    setUploading(false)
+    if (okCount > 0) {
+      message.success(`已上传 ${okCount} 个附件`)
+      load()
+    }
+    if (okCount === files.length) {
+      setUploadOpen(false)
+      resetUpload()
+    }
+  }
+
   const columns = useMemo<ColumnsType<AttachmentView>>(
     () => [
       {
@@ -128,6 +176,18 @@ export default function AttachmentsPage() {
             </Typography.Text>
           </Space>
         ),
+      },
+      {
+        title: '描述',
+        dataIndex: 'description',
+        render: (v?: string) =>
+          v ? (
+            <Typography.Text style={{ maxWidth: 220 }} ellipsis={{ tooltip: v }} type="secondary">
+              {v}
+            </Typography.Text>
+          ) : (
+            <Typography.Text type="secondary">-</Typography.Text>
+          ),
       },
       {
         title: '类型',
@@ -243,33 +303,16 @@ export default function AttachmentsPage() {
         <Space>
           <Input.Search
             allowClear
-            placeholder="按文件名搜索"
+            placeholder="按文件名/描述搜索"
             style={{ width: 220 }}
             onSearch={(v) => setKeyword(v)}
           />
           <Button icon={<ReloadOutlined />} onClick={load}>
             刷新
           </Button>
-          <Upload
-            multiple
-            showUploadList={false}
-            customRequest={({ file, onSuccess, onError }) => {
-              uploadAttachment(file as File, (file as File).name)
-                .then((v) => {
-                  message.success(`已上传：${v.originalName}`)
-                  onSuccess?.(v)
-                  load()
-                })
-                .catch((e) => {
-                  message.error(`上传失败：${(e as Error).message}`)
-                  onError?.(e as Error)
-                })
-            }}
-          >
-            <Button type="primary" icon={<UploadOutlined />}>
-              上传附件
-            </Button>
-          </Upload>
+          <Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadOpen(true)}>
+            上传附件
+          </Button>
         </Space>
       }
     >
@@ -290,6 +333,75 @@ export default function AttachmentsPage() {
           ),
         }}
       />
+      <Modal
+        title="上传附件"
+        open={uploadOpen}
+        okText={uploading ? '上传中…' : '开始上传'}
+        okButtonProps={{ disabled: fileList.length === 0 || uploading }}
+        cancelButtonProps={{ disabled: uploading }}
+        maskClosable={!uploading}
+        onOk={startUpload}
+        onCancel={() => {
+          setUploadOpen(false)
+          resetUpload()
+        }}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Input.TextArea
+            rows={2}
+            maxLength={512}
+            showCount
+            placeholder="描述信息（可选，本批文件共用）"
+            value={description}
+            disabled={uploading}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+          <Upload.Dragger
+            multiple
+            fileList={fileList}
+            showUploadList={false}
+            disabled={uploading}
+            beforeUpload={() => false}
+            onChange={({ fileList: next }) => setFileList(next)}
+          >
+            <p style={{ fontSize: 32, color: '#1677ff', margin: '8px 0' }}>
+              <InboxOutlined />
+            </p>
+            <p style={{ margin: 0 }}>点击或拖拽文件到此处，可多选</p>
+          </Upload.Dragger>
+          {fileList.map((f) => (
+            <div key={f.uid}>
+              <Space size={4}>
+                <Typography.Text style={{ maxWidth: 360 }} ellipsis={{ tooltip: f.name }}>
+                  {f.name}
+                </Typography.Text>
+                {!uploading && (
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    onClick={() => setFileList((prev) => prev.filter((x) => x.uid !== f.uid))}
+                  />
+                )}
+              </Space>
+              {(progress[f.uid] !== undefined || failed[f.uid]) && (
+                <Progress
+                  percent={progress[f.uid] ?? 0}
+                  size="small"
+                  status={
+                    failed[f.uid] ? 'exception' : progress[f.uid] === 100 ? 'success' : 'active'
+                  }
+                />
+              )}
+              {failed[f.uid] && (
+                <Typography.Text type="danger" style={{ fontSize: 12 }}>
+                  上传失败：{failed[f.uid]}
+                </Typography.Text>
+              )}
+            </div>
+          ))}
+        </Space>
+      </Modal>
     </Card>
   )
 }

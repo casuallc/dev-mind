@@ -7,7 +7,6 @@ const SELECT_PREFIXES: Array<[string, string]> = [
   ['/sessions/', '/sessions'],
   ['/context', '/context'],
   ['/chats', '/chats'],
-  ['/attachments', '/attachments'],
   ['/worklog', '/worklog'],
   ['/requirements', '/requirements'],
   ['/builds', '/builds'],

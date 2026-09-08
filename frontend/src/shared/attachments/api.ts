@@ -11,15 +11,25 @@ export interface AttachmentView {
   image: boolean
   /** 原始访问地址（不含 token，渲染时用 attachmentRawUrl 拼） */
   url: string
+  /** 上传时可选的描述信息 */
+  description?: string
   uploadedBy: string
   createdAt: string
 }
 
-/** 上传附件（默认 PRIVATE；chat 附件无需全员可见） */
-export function uploadAttachment(file: File | Blob, fileName?: string, scope = 'PRIVATE') {
+/** 上传附件（默认 PRIVATE；chat 附件无需全员可见）；onProgress 传了走 XHR 带上传进度 */
+export function uploadAttachment(
+  file: File | Blob,
+  fileName?: string,
+  scope = 'PRIVATE',
+  description?: string,
+  onProgress?: (percent: number) => void,
+) {
   const form = new FormData()
   form.append('file', file, fileName)
   form.append('scope', scope)
+  if (description?.trim()) form.append('description', description.trim())
+  if (onProgress) return api.uploadWithProgress<AttachmentView>('/attachments', form, onProgress)
   return api.upload<AttachmentView>('/attachments', form)
 }
 
