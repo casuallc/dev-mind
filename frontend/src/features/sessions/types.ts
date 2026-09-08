@@ -16,7 +16,7 @@ export interface SessionSummary {
   pid?: number
   model?: string
   summary?: string
-  /** CAP-21：远程执行节点 id；空 = 本地 */
+  /** CAP-21：远程执行节点 id；空 = 历史本机会话（CAP-34 起新会话恒有值） */
   agentNodeId?: string
   /** CAP-31：会话关联仓库名快照（主库在前；空 = 兼容旧单库路径） */
   repoNames?: string[]

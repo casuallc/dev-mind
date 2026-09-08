@@ -104,9 +104,9 @@ export default function NewSessionDraft({
             notFoundContent="当前项目未关联仓库（后台 → 项目 → 仓库）"
           />
         </Form.Item>
-        <Form.Item label="执行节点" name="agentNodeId" extra="留空 = 跟随项目默认节点 → 平台默认节点 → 本机" style={{ marginBottom: 12 }}>
+        <Form.Item label="执行节点" name="agentNodeId" extra="留空 = 项目默认 → 平台默认；皆无则创建失败" style={{ marginBottom: 12 }}>
           <Select
-            placeholder="跟随默认（项目 → 平台 → 本机）"
+            placeholder="跟随默认（项目 → 平台）"
             allowClear
             options={agentNodes
               .filter((n) => n.status === 'ONLINE')

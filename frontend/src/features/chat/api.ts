@@ -7,7 +7,7 @@ export interface CreateChatPayload {
   message: string
   model?: string
   permissionMode?: string
-  /** 显式执行节点 id；"local" = 强制本机；留空 = 平台默认节点 → 本机 */
+  /** 显式执行节点 id；留空 = 平台默认节点，无默认则创建失败（CAP-34 起无本机回落） */
   agentNodeId?: string
 }
 

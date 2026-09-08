@@ -162,7 +162,7 @@ export default function SessionsBoard() {
         v ? (
           <Tag color="purple">{agentNodes.find((n) => String(n.id) === v)?.name ?? `节点${v}`}</Tag>
         ) : (
-          '本机'
+          '本机（历史）'
         ),
     },
     {

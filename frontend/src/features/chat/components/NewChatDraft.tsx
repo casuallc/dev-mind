@@ -71,21 +71,18 @@ export default function NewChatDraft({
         <Form.Item
           label="执行节点"
           name="agentNodeId"
-          extra="留空 = 平台默认节点 → 本机；选 local 强制本机"
+          extra="留空 = 平台默认节点；无默认则创建失败"
           style={{ marginBottom: 12 }}
         >
           <Select
-            placeholder="跟随默认（平台默认节点 → 本机）"
+            placeholder="跟随默认（平台默认节点）"
             allowClear
-            options={[
-              { value: 'local', label: '本机（强制）' },
-              ...agentNodes
-                .filter((n) => n.status === 'ONLINE')
-                .map((n) => ({
-                  value: String(n.id),
-                  label: `${n.name} (${n.os ?? '远程节点'})${n.isDefault ? ' · 平台默认' : ''}`,
-                })),
-            ]}
+            options={agentNodes
+              .filter((n) => n.status === 'ONLINE')
+              .map((n) => ({
+                value: String(n.id),
+                label: `${n.name} (${n.os ?? '远程节点'})${n.isDefault ? ' · 平台默认' : ''}`,
+              }))}
             notFoundContent="暂无在线节点（后台 → Agent 节点 注册）"
           />
         </Form.Item>

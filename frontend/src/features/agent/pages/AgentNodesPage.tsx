@@ -261,7 +261,7 @@ export default function AgentNodesPage() {
       {view === 'nodes' ? (
         <>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-            节点 = 运行 devmind-agent-runner.jar 的远程机器。服务端本机没有 AI 能力时，把节点「设为默认」，未指定节点的会话即自动调度过去。
+            节点 = 运行 devmind-agent-runner.jar 的远程机器。服务端不执行会话（零执行，CAP-34），务必注册节点并「设为默认」，未指定节点的会话即自动调度过去；无任何默认节点时创建会话会失败。
           </Typography.Paragraph>
           <Table<AgentNode>
             rowKey="id"
@@ -437,7 +437,7 @@ function NodeDrawer({
       title: isDefault ? `将「${node.name}」设为平台默认节点？` : `取消「${node.name}」的平台默认？`,
       content: isDefault
         ? '会话/项目未指定节点时将调度到该节点（全平台至多一个，原有默认会被替换）。'
-        : '取消后未指定节点的会话将回落到服务端本机执行（本机无 claude 时创建会话会失败）。',
+        : '取消后未指定节点且项目也无默认节点的会话将创建失败（无可用执行节点）。',
       okText: isDefault ? '设为默认' : '取消默认',
       cancelText: '再想想',
       onOk: () => doSetDefault(isDefault),

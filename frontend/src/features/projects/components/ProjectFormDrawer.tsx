@@ -191,11 +191,11 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
         <Form.Item
           label="默认执行节点"
           name="agentNodeId"
-          extra="新建会话未选节点时默认在该节点执行；节点离线时创建会话会失败。远程节点需在 runner 配置本项目路径映射（CAP-21）"
+          extra="新建会话未选节点时默认在该节点执行；留空 = 跟随平台默认节点，皆无则创建会话失败。远程节点需在 runner 配置本项目路径映射（CAP-21）"
         >
           <Select
             allowClear
-            placeholder="本机（默认）"
+            placeholder="跟随平台默认"
             options={agentNodes
               .filter((n) => n.status !== 'DISABLED')
               .map((n) => ({

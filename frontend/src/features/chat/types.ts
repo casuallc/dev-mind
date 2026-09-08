@@ -13,7 +13,7 @@ export interface ChatSummary {
   model?: string
   permissionMode?: string
   summary?: string
-  /** 远程执行节点 id；空 = 本地 */
+  /** 远程执行节点 id；空 = 历史本机问答（CAP-34 起新问答恒有值） */
   agentNodeId?: string
   createdBy?: string
   createdAt: string

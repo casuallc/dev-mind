@@ -159,7 +159,7 @@ export default function SessionDetail() {
           <Descriptions.Item label="项目">{session.projectId}</Descriptions.Item>
           <Descriptions.Item label="PID">{session.pid ?? '-'}</Descriptions.Item>
           <Descriptions.Item label="模型">{session.model || '默认'}</Descriptions.Item>
-          <Descriptions.Item label="执行节点">{session.agentNodeId || '本地'}</Descriptions.Item>
+          <Descriptions.Item label="执行节点">{session.agentNodeId || '本机（历史）'}</Descriptions.Item>
           <Descriptions.Item label="创建">{fmtTime(session.createdAt)}</Descriptions.Item>
           <Descriptions.Item label="完成">{fmtTime(session.finishedAt)}</Descriptions.Item>
           <Descriptions.Item label="Worktree" span={2}>

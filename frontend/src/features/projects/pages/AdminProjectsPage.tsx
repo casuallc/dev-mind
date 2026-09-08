@@ -127,7 +127,7 @@ export default function AdminProjectsPage() {
         v ? (
           <Tag color="purple">{agentNodes.find((n) => String(n.id) === v)?.name ?? `节点${v}`}</Tag>
         ) : (
-          '本机'
+          '跟随平台默认'
         ),
     },
     {
