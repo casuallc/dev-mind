@@ -1,6 +1,21 @@
 # CAP-33 场景化会话与上下文装配（Scenario Session & Context Assembly）
 
-> 能力 ID：CAP-33 ｜ 分类：底座 ｜ 状态：草案 ｜ 日期：2026-09-08
+> 能力 ID：CAP-33 ｜ 分类：底座 ｜ 状态：已落地 ｜ 日期：2026-09-08
+
+> 落地口径（2026-09-08 定稿实现）：
+> - 三层来源标注为 `scenario` / `project-auto` / `request`（同条目多层命中时以先命中层为准，
+>   ②项目自动优先标注）；`ContextAssemblyRequest.projectAuto` 会话恒 true、
+>   chat 仅 PROJECT 场景为 true。
+> - 快照 `context_manifest_json` 只存清单（条目/sha256/渲染预览 200 字），**不存包内容**；
+>   包重建 = 按落库 scenarioCode 重渲染重装配（场景已删则 best-effort 按原文装配）。
+>   行为修复：resume 由重装配未渲染原文改为按落库 scenarioCode 重渲染。
+> - dryRun 预览（`GET /api/scenarios/{code}/preview`）零副作用不 bumpHits；
+>   真实装配（create/resume/包重建）沿用 CAP-04 hitCount 累计。
+> - 路由/预设优先级——会话：显式 > 场景预设 > 项目默认 > 平台默认 > 标签兜底（皆无 409）；
+>   chat：显式 > 场景 > 平台默认；model/permissionMode：显式 > 场景 > props 默认。
+>   PROJECT 场景挂会话 projectId 必须相符（400）；chat 挂 PROJECT 场景 = 以该项目身份装配。
+> - E2E 验证脚本 `tmp/cap33_verify.py`（gitignored）：三层来源/拉包内容/沙箱物化/
+>   templateCode 兼容/重启重建（session 走 sessions 表、chat 走 ChatContextLookup）全覆盖。
 
 ## 1. 目的
 
