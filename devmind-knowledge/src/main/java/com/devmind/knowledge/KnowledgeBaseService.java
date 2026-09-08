@@ -142,6 +142,15 @@ public class KnowledgeBaseService {
 
     /** 按项目选出将被注入的条目：全局按项目 tags 匹配 + 项目特有。 */
     public List<EntryView> selectEntries(Project project) {
+        return selectEntries(project == null ? null : project.id(),
+                project == null ? null : project.tags());
+    }
+
+    /**
+     * {@link #selectEntries(Project)} 的无 Project 对象变体（CAP-33 装配管线按
+     * projectId+tags 入参调用，免回查项目表）。
+     */
+    public List<EntryView> selectEntries(String projectId, List<String> projectTags) {
         List<EntryView> used = new ArrayList<>();
         for (KnowledgeEntryEntity e : entryRepo.findByScopeOrderByUpdatedAtDesc("global")) {
             if (!"active".equals(e.getStatus())) {
@@ -149,21 +158,40 @@ public class KnowledgeBaseService {
             }
             List<String> tags = EntryViews.splitTags(e.getTags());
             if (!tags.isEmpty()) {
-                if (project == null || project.tags() == null || project.tags().isEmpty()
-                        || project.tags().stream().noneMatch(tags::contains)) {
+                if (projectTags == null || projectTags.isEmpty()
+                        || projectTags.stream().noneMatch(tags::contains)) {
                     continue; // 带标签但项目无匹配 → 不注入（防上下文膨胀）
                 }
             }
             used.add(EntryViews.entry(e));
         }
-        if (project != null) {
-            for (KnowledgeEntryEntity e : entryRepo.findByScopeAndProjectIdOrderByUpdatedAtDesc("project", project.id())) {
+        if (projectId != null && !projectId.isBlank()) {
+            for (KnowledgeEntryEntity e : entryRepo.findByScopeAndProjectIdOrderByUpdatedAtDesc("project", projectId)) {
                 if ("active".equals(e.getStatus())) {
                     used.add(EntryViews.entry(e));
                 }
             }
         }
         return used;
+    }
+
+    /**
+     * 按 tags 显式选条目（CAP-33 FR-02 ①③层：场景绑定/请求追加的 knowledgeTags 命中）：
+     * active 且条目 tags 与给定 tags 有交集；范围 = global + 指定项目的 project 条目。
+     */
+    public List<EntryView> selectByTags(List<String> tags, String projectId) {
+        if (tags == null || tags.isEmpty()) {
+            return List.of();
+        }
+        List<KnowledgeEntryEntity> pool = new ArrayList<>(entryRepo.findByScopeOrderByUpdatedAtDesc("global"));
+        if (projectId != null && !projectId.isBlank()) {
+            pool.addAll(entryRepo.findByScopeAndProjectIdOrderByUpdatedAtDesc("project", projectId));
+        }
+        return pool.stream()
+                .filter(e -> "active".equals(e.getStatus()))
+                .filter(e -> EntryViews.splitTags(e.getTags()).stream().anyMatch(tags::contains))
+                .map(EntryViews::entry)
+                .toList();
     }
 
     /** 注入预览（FR-04）：同真实注入的组装结果，但不写盘、不加 hitCount。 */

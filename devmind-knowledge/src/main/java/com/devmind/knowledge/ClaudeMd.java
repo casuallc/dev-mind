@@ -21,18 +21,24 @@ public final class ClaudeMd {
     public static String assemble(List<EntryView> entries, String taskSpec, String origContent) {
         StringBuilder md = new StringBuilder();
         md.append("<!-- 由 Dev-Mind KnowledgeInjector 自动生成，请勿手改本文件开头；项目自有内容保留在下方追加 -->\n");
-
-        List<EntryView> global = entries.stream().filter(e -> "global".equals(e.scope())).toList();
-        List<EntryView> project = entries.stream().filter(e -> "project".equals(e.scope())).toList();
-
-        appendSection(md, "通用经验（global）", global);
-        appendSection(md, "项目经验（project）", project);
-
+        md.append(renderEntrySections(entries));
         md.append("\n---\n\n## 当前任务\n\n").append(taskSpec == null ? "" : taskSpec.strip()).append("\n");
-
         if (origContent != null && !origContent.isBlank()) {
             md.append("\n---\n\n## 项目原有 CLAUDE.md（保留）\n\n").append(origContent).append("\n");
         }
+        return md.toString();
+    }
+
+    /**
+     * 只渲染条目分节（CAP-33 装配管线用：节序与「当前任务」节由 assembler 统一编排）：
+     * 通用经验（global）→ 项目经验（project），每节带 "\n---\n\n## " 分隔头；无条目返回空串。
+     */
+    public static String renderEntrySections(List<EntryView> entries) {
+        StringBuilder md = new StringBuilder();
+        List<EntryView> global = entries.stream().filter(e -> "global".equals(e.scope())).toList();
+        List<EntryView> project = entries.stream().filter(e -> "project".equals(e.scope())).toList();
+        appendSection(md, "通用经验（global）", global);
+        appendSection(md, "项目经验（project）", project);
         return md.toString();
     }
 
