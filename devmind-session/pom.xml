@@ -25,10 +25,7 @@
             <groupId>com.devmind</groupId>
             <artifactId>devmind-project</artifactId>
         </dependency>
-        <dependency>
-            <groupId>com.devmind</groupId>
-            <artifactId>devmind-knowledge</artifactId>
-        </dependency>
+        <!-- CAP-33：知识/文档/技能资产经 common ContextProvider SPI 收集，不再依赖 knowledge 实现 -->
         <dependency>
             <groupId>com.devmind</groupId>
             <artifactId>devmind-notification</artifactId>

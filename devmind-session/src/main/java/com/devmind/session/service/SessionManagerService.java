@@ -11,7 +11,6 @@ import com.devmind.auth.IdentityService;
 import com.devmind.common.integration.GitIdentityProvider;
 import com.devmind.common.integration.RepoGitGateway;
 import com.devmind.common.notification.NotificationEvent;
-import com.devmind.common.agent.exec.ContextManifest;
 import com.devmind.notification.NotificationPublisher;
 import com.devmind.project.WorktreeManager;
 import com.devmind.project.workspace.WorkspaceService;
@@ -226,18 +225,20 @@ public class SessionManagerService {
                     requirement != null ? requirement.getTitle() : null);
         }
 
-        // CAP-34 FR-02：取消本机会话——会话必有执行节点：显式指定 > 项目默认 > 平台默认
-        // （agent_nodes.is_default），皆无命中直接 409，不存在本机回落；节点离线由 launch
-        // ack 报错，不静默起失败进程。CAP-28 的 agentNodeId="local" 保留值同步废除。
+        // CAP-34 FR-02：取消本机会话——会话必有执行节点；CAP-33：场景预设插在显式与项目默认之间。
+        // 显式指定 > 场景预设 > 项目默认 > 平台默认（agent_nodes.is_default），皆无命中直接 409，
+        // 不存在本机回落；节点离线由 launch ack 报错，不静默起失败进程。
+        // CAP-28 的 agentNodeId="local" 保留值同步废除。
         if ("local".equalsIgnoreCase(req.agentNodeId())) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "CAP-34 起不存在本机会话：agentNodeId=\"local\" 保留值已废除，请指定 runner 节点或留空走默认路由");
         }
         AgentNodeConnector connector = requireConnector();
         List<String> requiredLabels = parseCsv(req.requiredLabels());
+        String scenarioNodeId = scenario != null ? scenario.getAgentNodeId() : null;
         String projectDefault = project != null && project.agentNodeId() != null
                 && !project.agentNodeId().isBlank() ? project.agentNodeId() : null;
-        String agentNodeId = routeAgentNode(req.agentNodeId(), projectDefault,
+        String agentNodeId = routeAgentNode(req.agentNodeId(), scenarioNodeId, projectDefault,
                 platformDefaultNodeId(), requiredLabels, connector, req.requiredLabels());
 
         // CAP-31：会话仓库快照（创建时从 project_repos 拷值，生命周期以快照为准）；
@@ -247,12 +248,19 @@ public class SessionManagerService {
         // CAP-34：服务端不建 worktree、不做本机知识注入——工作区与上下文物化均在 runner 侧
         // （launch 帧 repos + contextManifest，runner 拉包物化，见 SessionContextService）
 
-        String model = req.model() != null && !req.model().isBlank() ? req.model() : props.getModel();
-        String pm = req.permissionMode() != null && !req.permissionMode().isBlank()
-                ? req.permissionMode() : props.getPermissionMode();
+        // CAP-33：model/permissionMode 优先级 = 请求显式 > 场景预设 > 全局配置
+        String model = firstNonBlank(req.model(), scenario != null ? scenario.getModel() : null,
+                props.getModel());
+        String pm = firstNonBlank(req.permissionMode(),
+                scenario != null ? scenario.getPermissionMode() : null, props.getPermissionMode());
 
         // CAP-24 FR-03：按会话发起人 + 主库 remoteUrl host 解析提交身份，随进程 env 注入
         Map<String, String> gitEnv = resolveGitEnv(identityService.currentActor(), project);
+        // CAP-33 FR-02：三层合并装配上下文包（场景绑定 + 项目自动命中 + 请求追加）。
+        // 场景绑定的资产失效（DevMindException 404）fail-visible 向上传播；其它装配异常降级
+        // 为无上下文启动（沿用知识注入不阻塞会话的语义）
+        SessionContextService.Prepared prepared = prepareContext(id, project, scenario, taskSpec,
+                req.extraSkillIds(), req.extraDocIds(), req.extraKnowledgeTags());
         RemoteSessionRuntime remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector,
                 eventSaver, listener, props.toRuntimeSettings());
         // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
@@ -261,12 +269,11 @@ public class SessionManagerService {
             // CAP-31：repos=全量快照（含 name，新 runner 多库模式）；repo=首个（主库）保持旧 runner 降级
             List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(project, repoRows, baseBranch,
                     worktreeManager.branchFor(id), identityService.currentActor());
-            // CAP-34 FR-03：装配上下文包清单随帧下发（装配失败降级为无上下文启动，不阻塞会话）
-            ContextManifest contextManifest = prepareContext(id, project, taskSpec);
+            // CAP-34 FR-03：上下文包清单随帧下发，runner 凭 manifest 拉包物化
             connector.launch(agentNodeId, new AgentLaunchCommand(
                     id, project != null ? project.id() : null, taskSpec, model, pm, gitEnv,
                     specs.isEmpty() ? null : specs.get(0), "session",
-                    specs.size() > 1 ? specs : null, contextManifest));
+                    specs.size() > 1 ? specs : null, prepared != null ? prepared.manifest() : null));
         } catch (Exception e) {
             runtimes.remove(id);
             if (e instanceof DevMindException de) {
@@ -293,6 +300,7 @@ public class SessionManagerService {
         ent.setCreatedBy(identityService.currentActor());
         // CAP-33：场景 code 落库（resume 据此重渲染重装配；FR-07 快照在装配后落）
         ent.setScenarioCode(scenario != null ? scenario.getCode() : null);
+        ent.setContextManifestJson(prepared != null ? prepared.snapshotJson() : null);
         ent.setCreatedAt(now);
         ent.setUpdatedAt(now);
         sessionRepo.save(ent);
@@ -389,20 +397,28 @@ public class SessionManagerService {
             RemoteSessionRuntime rt = new RemoteSessionRuntime(id, ent.getAgentNodeId(), connector,
                     eventSaver, listener, props.toRuntimeSettings());
             runtimes.put(id, rt);
+            SessionContextService.Prepared prepared = null;
             try {
                 Project proj = resolveProject(ent.getProjectId());
                 // CAP-31：从快照重建远程工作区描述（仓库可能已改名/改 URL，会话以创建时为准）
                 List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(proj,
                         sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(id), ent.getBaseBranch(),
                         worktreeManager.branchFor(id), ent.getCreatedBy());
-                // CAP-34 FR-03：resume = 重新注入（hitCount 再累计一次，与创建同语义）
-                ContextManifest contextManifest = prepareContext(id, proj, ent.getTaskSpec());
+                // CAP-33：resume 按落库 scenarioCode 重渲染重装配（修复此前用未渲染原文重装配的
+                // 偏差；场景已删降级按原文；③层请求追加为创建时一次性，resume 不重放）；
+                // resume = 重新注入（hitCount 再累计一次，与创建同语义）
+                SessionScenarioEntity scenario = resumeScenario(ent);
+                String renderedTask = scenario != null
+                        ? scenarioService.render(scenario, ent.getTaskSpec(), proj, requirementTitleOf(ent))
+                        : ent.getTaskSpec();
+                prepared = prepareContext(id, proj, scenario, renderedTask, null, null, null);
                 connector.launch(ent.getAgentNodeId(), new AgentLaunchCommand(
-                        id, ent.getProjectId(), ent.getTaskSpec(), ent.getModel(),
+                        id, ent.getProjectId(), renderedTask, ent.getModel(),
                         pm,
                         resolveGitEnv(ent.getCreatedBy(), proj),
                         specs.isEmpty() ? null : specs.get(0), "session",
-                        specs.size() > 1 ? specs : null, contextManifest));
+                        specs.size() > 1 ? specs : null,
+                        prepared != null ? prepared.manifest() : null));
             } catch (Exception e) {
                 runtimes.remove(id);
                 if (e instanceof DevMindException de) {
@@ -411,6 +427,7 @@ public class SessionManagerService {
                 throw new DevMindException(ErrorCode.CONFLICT, "恢复远程会话失败: " + e.getMessage(), e);
             }
             ent.setStatus(SessionState.RUNNING.name());
+            ent.setContextManifestJson(prepared != null ? prepared.snapshotJson() : null);
             ent.setUpdatedAt(Instant.now());
             sessionRepo.save(ent);
             return toView(ent, rt.state());
@@ -839,11 +856,12 @@ public class SessionManagerService {
     }
 
     /**
-     * FR-02 + FR-07 节点路由（纯判定，可单测）：显式指定 > 项目默认 > 平台默认，
-     * requiredLabels 对每级门控；默认链皆不符且有标签要求时 pickNodeByLabels 在线兜底；
-     * 仍无命中 409。
+     * FR-02 + FR-07 节点路由（纯判定，可单测）：显式指定 > 场景预设（CAP-33）> 项目默认 >
+     * 平台默认，requiredLabels 对每级门控；默认链皆不符且有标签要求时 pickNodeByLabels
+     * 在线兜底；仍无命中 409。
      */
-    static String routeAgentNode(String explicitNodeId, String projectDefaultNodeId, String platformDefaultNodeId,
+    static String routeAgentNode(String explicitNodeId, String scenarioPresetNodeId,
+                                 String projectDefaultNodeId, String platformDefaultNodeId,
                                  List<String> requiredLabels, AgentNodeConnector connector,
                                  String requiredLabelsRaw) {
         if (explicitNodeId != null && !explicitNodeId.isBlank()) {
@@ -853,7 +871,7 @@ public class SessionManagerService {
             }
             return explicitNodeId;
         }
-        for (String candidate : new String[]{projectDefaultNodeId, platformDefaultNodeId}) {
+        for (String candidate : new String[]{scenarioPresetNodeId, projectDefaultNodeId, platformDefaultNodeId}) {
             if (candidate != null && !candidate.isBlank()
                     && connector.nodeMatches(candidate, requiredLabels)) {
                 return candidate;
@@ -870,14 +888,69 @@ public class SessionManagerService {
                 : "无满足标签的在线节点: " + requiredLabelsRaw);
     }
 
-    /** CAP-34 FR-03：装配上下文包清单（失败降级为 null = 无上下文启动，沿用注入不阻塞语义）。 */
-    private ContextManifest prepareContext(String sessionId, Project project, String taskSpec) {
+    /**
+     * CAP-33 FR-02：装配上下文包（三层合并）。场景绑定的资产失效（DevMindException 404）
+     * 向上传播 fail-visible；其它装配异常降级为 null = 无上下文启动（沿用注入不阻塞语义）。
+     */
+    private SessionContextService.Prepared prepareContext(String sessionId, Project project,
+                                                          SessionScenarioEntity scenario,
+                                                          String renderedTaskSpec,
+                                                          List<String> extraSkillIds,
+                                                          List<Long> extraDocIds,
+                                                          List<String> extraKnowledgeTags) {
         try {
-            return sessionContextService.prepare(sessionId, project, taskSpec);
+            return sessionContextService.prepare(sessionId, project, scenario, renderedTaskSpec,
+                    extraSkillIds, extraDocIds, extraKnowledgeTags);
+        } catch (DevMindException de) {
+            throw de;
         } catch (Exception e) {
             log.warn("上下文包装配失败(不带上下文启动): session={} err={}", sessionId, e.getMessage());
             return null;
         }
+    }
+
+    /** resume 场景解析（best-effort）：无场景/场景已删 → null（按原文恢复，不阻塞 resume）。 */
+    private SessionScenarioEntity resumeScenario(SessionEntity ent) {
+        if (ent.getScenarioCode() == null || ent.getScenarioCode().isBlank()) {
+            return null;
+        }
+        try {
+            return scenarioService.requireByCode(ent.getScenarioCode());
+        } catch (DevMindException e) {
+            log.warn("resume 时场景已删除，按原始任务恢复: session={} scenario={}",
+                    ent.getId(), ent.getScenarioCode());
+            return null;
+        }
+    }
+
+    /** {{requirement}} 占位符的需求标题（best-effort，需求已删除 = 置空）。 */
+    private String requirementTitleOf(SessionEntity ent) {
+        if (ent.getRequirementId() == null || ent.getRequirementId().isBlank()) {
+            return null;
+        }
+        try {
+            return requirementService.requireById(ent.getRequirementId()).getTitle();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** CAP-33 FR-07：已注入上下文清单（装配时的快照 JSON；无快照 = 无上下文会话，404）。 */
+    public String contextManifest(String id) {
+        SessionEntity ent = requireEntity(id);
+        if (ent.getContextManifestJson() == null || ent.getContextManifestJson().isBlank()) {
+            throw new DevMindException(ErrorCode.NOT_FOUND, "会话无上下文快照: " + id);
+        }
+        return ent.getContextManifestJson();
+    }
+
+    private static String firstNonBlank(String... candidates) {
+        for (String c : candidates) {
+            if (c != null && !c.isBlank()) {
+                return c;
+            }
+        }
+        return null;
     }
 
     // ---------------- CAP-21 远程事件入口（RemoteAgentBridge 路由至此） ----------------

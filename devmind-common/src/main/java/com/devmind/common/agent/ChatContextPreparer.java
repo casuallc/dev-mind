@@ -19,7 +19,8 @@ public interface ChatContextPreparer {
     ScenarioPreset preset(String scenarioCode);
 
     /**
-     * 装配并缓存上下文包，返回随 launch 帧下发的 manifest 与 FR-07 快照（供 chat 落库）。
+     * 装配并缓存上下文包，返回随 launch 帧下发的 manifest、FR-07 快照（供 chat 落库）与
+     * 渲染后 prompt（场景骨架 {{task}}=首条消息；无骨架时原样返回 message，chat 据此作 launch prompt）。
      * scenarioCode 为 null 且无其它命中时返回 null（不带上下文启动，现状语义）。
      */
     PreparedContext prepare(String chatId, String scenarioCode, String message);
@@ -30,6 +31,6 @@ public interface ChatContextPreparer {
     record ScenarioPreset(String model, String permissionMode, String agentNodeId, String projectId) {
     }
 
-    record PreparedContext(ContextManifest manifest, String snapshotJson) {
+    record PreparedContext(ContextManifest manifest, String snapshotJson, String renderedPrompt) {
     }
 }

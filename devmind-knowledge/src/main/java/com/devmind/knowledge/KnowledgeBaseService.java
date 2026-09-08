@@ -26,7 +26,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * CAP-04 知识库核心：三层经验（global/project）+ 提案流转（inbox）+ 注入内容预览。
- * 会话层不直接依赖本服务——经 {@link KnowledgeBaseInjector}（KnowledgeInjector SPI）在启动时注入。
+ * 会话层不直接依赖本服务——CAP-33 起经 {@link KnowledgeContextProvider}（common ContextProvider SPI）
+ * 被装配管线收集。
  */
 @Service
 public class KnowledgeBaseService {
