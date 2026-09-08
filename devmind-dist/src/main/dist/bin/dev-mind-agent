@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# dev-mind agent runner service control script (CAP-34: 会话/问答一律由 runner 执行).
+#
+# Commands:
+#   start      Start in background (nohup; 需先 config/agent.properties，参考同目录 .example)
+#   run        Run in foreground (for systemd / debugging)
+#   stop       Graceful stop (TERM, then KILL after timeout)
+#   restart    stop + start
+#   status     Show process status
+#
+# Environment:
+#   APUSIC_JAVA_HOME  Preferred JDK home (must be 21+)
+#   JAVA_HOME         Fallback JDK home
+#   JAVA_OPTS         JVM options override (default: -Xms128m -Xmx512m)
+set -euo pipefail
+
+APP_NAME="dev-mind-agent"
+STOP_TIMEOUT=30     # seconds to wait before SIGKILL on stop
+
+BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_HOME="$(cd "${BIN_DIR}/.." && pwd)"
+PID_FILE="${APP_HOME}/data/agent-runner.pid"
+LOG_DIR="${APP_HOME}/logs"
+CONSOLE_LOG="${LOG_DIR}/agent-runner.out"
+RUNNER_JAR="${APP_HOME}/runner/devmind-agent-runner.jar"
+CONF="${APP_HOME}/config/agent.properties"
+
+JVM_OPTS="${JAVA_OPTS:--Xms128m -Xmx512m}"
+
+usage() {
+    sed -n '2,17p' "$0"
+}
+
+# Java resolution order: APUSIC_JAVA_HOME > JAVA_HOME > PATH
+resolve_java() {
+    if [[ -n "${APUSIC_JAVA_HOME:-}" && -x "${APUSIC_JAVA_HOME}/bin/java" ]]; then
+        echo "${APUSIC_JAVA_HOME}/bin/java"
+    elif [[ -n "${JAVA_HOME:-}" && -x "${JAVA_HOME}/bin/java" ]]; then
+        echo "${JAVA_HOME}/bin/java"
+    elif command -v java >/dev/null 2>&1; then
+        command -v java
+    else
+        echo "ERROR: java not found; set APUSIC_JAVA_HOME or JAVA_HOME to a JDK 21+ home" >&2
+        exit 1
+    fi
+}
+
+check_java_version() {
+    local java_bin="$1" ver
+    ver="$("$java_bin" -version 2>&1 | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p' | head -1)"
+    if [[ -z "$ver" || "$ver" -lt 21 ]]; then
+        echo "ERROR: JDK 21+ required, but $java_bin reports:" >&2
+        "$java_bin" -version 2>&1 | head -3 >&2
+        exit 1
+    fi
+}
+
+check_config() {
+    if [[ ! -f "$CONF" ]]; then
+        echo "ERROR: 缺少 $CONF —— cp config/agent.properties.example config/agent.properties 并填入 token" >&2
+        exit 1
+    fi
+}
+
+get_pid() {
+    [[ -f "$PID_FILE" ]] && cat "$PID_FILE" || true
+}
+
+is_running() {
+    local pid
+    pid="$(get_pid)"
+    [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+do_run() {
+    check_config
+    local java_bin
+    java_bin="$(resolve_java)"
+    check_java_version "$java_bin"
+    cd "$APP_HOME"
+    mkdir -p data "$LOG_DIR"
+    echo "home=$APP_HOME java=$java_bin conf=$CONF"
+    # shellcheck disable=SC2086
+    exec "$java_bin" $JVM_OPTS -jar "$RUNNER_JAR" "$CONF"
+}
+
+do_start() {
+    check_config
+    if is_running; then
+        echo "${APP_NAME} is already running (pid $(get_pid))"
+        exit 0
+    fi
+    local java_bin
+    java_bin="$(resolve_java)"
+    check_java_version "$java_bin"
+    cd "$APP_HOME"
+    mkdir -p data "$LOG_DIR"
+    echo "starting ${APP_NAME} (home=$APP_HOME java=$java_bin)..."
+    # shellcheck disable=SC2086
+    nohup "$java_bin" $JVM_OPTS -jar "$RUNNER_JAR" "$CONF" >>"$CONSOLE_LOG" 2>&1 &
+    echo $! >"$PID_FILE"
+    sleep 2
+    if ! is_running; then
+        echo "ERROR: process died during startup, see $CONSOLE_LOG" >&2
+        rm -f "$PID_FILE"
+        exit 1
+    fi
+    echo "${APP_NAME} started (pid $(get_pid)), log: $CONSOLE_LOG"
+}
+
+do_stop() {
+    if ! is_running; then
+        echo "${APP_NAME} is not running"
+        rm -f "$PID_FILE"
+        return 0
+    fi
+    local pid waited=0
+    pid="$(get_pid)"
+    kill "$pid" 2>/dev/null || true
+    while [[ $waited -lt $STOP_TIMEOUT ]]; do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 1
+        waited=$((waited + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "graceful shutdown timeout (${STOP_TIMEOUT}s), sending SIGKILL to $pid"
+        kill -9 "$pid" 2>/dev/null || true
+    fi
+    rm -f "$PID_FILE"
+    echo "${APP_NAME} stopped"
+}
+
+do_status() {
+    if is_running; then
+        echo "${APP_NAME} is running (pid $(get_pid)), log: $CONSOLE_LOG"
+    else
+        echo "${APP_NAME} is not running"
+        exit 3
+    fi
+}
+
+case "${1:-}" in
+    start) do_start ;;
+    run) do_run ;;
+    stop) do_stop ;;
+    restart) do_stop; do_start ;;
+    status) do_status ;;
+    *) usage; exit 1 ;;
+esac

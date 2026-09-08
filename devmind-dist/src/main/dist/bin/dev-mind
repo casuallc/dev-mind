@@ -14,7 +14,7 @@
 #   APUSIC_JAVA_HOME  Preferred JDK home (must be 21+)
 #   JAVA_HOME         Fallback JDK home
 #   JAVA_OPTS         Full JVM options override (default: -Xms512m -Xmx1024m -XX:+UseG1GC)
-#   EXTRA_OPTS        Extra app args, e.g. EXTRA_OPTS="--devmind.session.executor=fake"
+#   EXTRA_OPTS        Extra app args, e.g. EXTRA_OPTS="--server.port=9090"
 #   DEVMIND_PORT      Health-check port override (default: parsed from config/, fallback 8080)
 set -euo pipefail
 

@@ -9,15 +9,27 @@
     <includeBaseDirectory>true</includeBaseDirectory>
     <baseDirectory>devmind-${project.version}</baseDirectory>
 
-    <!-- libs/：devmind-app 瘦 jar + 全部运行时依赖散 jar（不打 fat jar，便于单 jar 替换更新） -->
+    <!-- libs/：devmind-app 瘦 jar + 全部运行时依赖散 jar（不打 fat jar，便于单 jar 替换更新）；
+         runner shaded jar 单独落 runner/（bin/dev-mind-agent 直接 -jar 启动），不进 libs -->
     <dependencySets>
         <dependencySet>
             <outputDirectory>libs</outputDirectory>
             <useTransitiveDependencies>true</useTransitiveDependencies>
             <unpack>false</unpack>
             <scope>runtime</scope>
+            <excludes>
+                <exclude>com.devmind:devmind-agent-runner</exclude>
+            </excludes>
         </dependencySet>
     </dependencySets>
+
+    <files>
+        <!-- runner/：CAP-34 服务端零执行，会话/问答由 runner 执行——分发包附带 agent runner -->
+        <file>
+            <source>../devmind-agent-runner/target/devmind-agent-runner.jar</source>
+            <outputDirectory>runner</outputDirectory>
+        </file>
+    </files>
 
     <fileSets>
         <!-- ui/：前端构建产物（只外置，jar 内不含静态资源；需先 npm run build） -->

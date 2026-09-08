@@ -20,11 +20,16 @@
         <finalName>devmind-${project.version}</finalName>
     </build>
 
-    <!-- 依赖 devmind-app 保证 reactor 构建顺序，且让 assembly 能收到 app 及其全部运行时依赖 -->
+    <!-- 依赖 devmind-app 保证 reactor 构建顺序，且让 assembly 能收到 app 及其全部运行时依赖；
+         devmind-agent-runner 同理（收 shaded jar 到 runner/，不进 libs） -->
     <dependencies>
         <dependency>
             <groupId>com.devmind</groupId>
             <artifactId>devmind-app</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-agent-runner</artifactId>
         </dependency>
     </dependencies>
 

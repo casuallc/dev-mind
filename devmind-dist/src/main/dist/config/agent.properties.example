@@ -1,0 +1,26 @@
+# agent runner 配置模板（CAP-34：服务端零执行，会话/问答一律由 runner 执行）。
+# 使用：cp agent.properties.example agent.properties，填 token 后 bin/dev-mind-agent start。
+# 注意：必须 UTF-8 无 BOM（properties 首行 key 会被 BOM 污染）。
+
+# 服务端 WS 接入地址（wss 也行，路径固定 /ws/agent）
+serverUrl=ws://127.0.0.1:8080/ws/agent
+# 节点 token：服务端 后台 → Agent 节点 新建节点后复制（dmag_ 开头）；建议将该节点设为平台默认
+token=dmag_待填
+
+# 执行器：claude=真实 Claude Code CLI / fake=内置假进程（自测/无 claude 环境）
+executor=claude
+# claude 可执行文件路径；空 = 自动探测（which/where claude）
+claudePath=
+# runner 默认权限模式（服务端指令未指定时用）
+permissionMode=acceptEdits
+
+# CAP-25 托管工作区根目录：克隆缓存 <root>/<projectId>/main + 会话 worktree <root>/<projectId>/sessions/<sid>
+# （相对路径跟随 bin/dev-mind-agent 的工作目录 = 分发包根目录）
+workspaceRoot=./workspaces
+# 项目无 repo 块时的兜底工作目录
+workDir=./workspaces/_default
+# 最大并发会话数
+maxConcurrent=4
+
+# 项目 → 节点本地路径映射（仅作降级回退；会话带 repo 块时走托管工作区，不用此项）
+# project.<projectId>=/path/to/repo
