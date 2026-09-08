@@ -69,21 +69,17 @@ const RANGE_PRESETS: { label: string; value: [Dayjs, Dayjs] }[] = (() => {
   ]
 })()
 
-/** 周报 DatePicker 快捷周 */
-const WEEKLY_PRESETS = [
-  { label: '本周', value: dayjs() },
-  { label: '上周', value: dayjs().subtract(7, 'day') },
-]
-
 /**
  * CAP-28 个人工作日志与工时：条目（范围筛选+标题搜索+分页+git 导入）/ AI 日报（按周浏览）/ AI 周报。
  * 个人级页面，不进项目上下文（路由不进 ProjectContextGate）。
  */
 export default function WorklogPage() {
   const [view, setView] = useState<View>('entries')
-  // 周报锚点（picker=week 任选一天，取所在周周一）
+  // 周报选中周（周条点击切换）+ 周条窗口回退周数（0=最右为本周，滑动/箭头翻页）
   const [date, setDate] = useState<Dayjs>(dayjs())
+  const [weeksBack, setWeeksBack] = useState(0)
   const weekStartStr = mondayOf(date).format('YYYY-MM-DD')
+  const isCurrentWeekSelected = weekStartStr === mondayOf(dayjs()).format('YYYY-MM-DD')
 
   // ---- 日报：按周浏览（周导航 + 周日选择条），默认当前周、选中今天 ----
   const [dailyWeekStart, setDailyWeekStart] = useState<Dayjs>(() => mondayOf(dayjs()))
@@ -144,7 +140,8 @@ export default function WorklogPage() {
   }, [dailyWeekStartStr])
 
   const loadRecentWeeks = useCallback(() => {
-    listWeeklyRecent(7)
+    // 覆盖可见窗口：回退 weeksBack 周时多取相应周数
+    listWeeklyRecent(7 + weeksBack)
       .then((list) => {
         const map: Record<string, WeeklyReport> = {}
         list.forEach((r) => {
@@ -153,7 +150,7 @@ export default function WorklogPage() {
         setRecentWeeks(map)
       })
       .catch((e) => message.error(`加载最近周报失败: ${e.message}`))
-  }, [])
+  }, [weeksBack])
 
   const loadWeekly = useCallback(() => {
     setLoading(true)
@@ -183,6 +180,13 @@ export default function WorklogPage() {
   const backToCurrentWeek = () => {
     setDailyWeekStart(mondayOf(dayjs()))
     setDay(dayjs())
+  }
+
+  // 周报窗口翻页：+1 更早 7 周，-1 更近 7 周；最右不越过本周（weeksBack 最小 0）
+  const shiftWeekWindow = (pages: number) => setWeeksBack((b) => Math.max(0, b + pages))
+  const backToThisWeek = () => {
+    setWeeksBack(0)
+    setDate(dayjs())
   }
 
   const applyRange = (r: [Dayjs | null, Dayjs | null] | null) => {
@@ -332,9 +336,14 @@ export default function WorklogPage() {
       </>
     ),
     weekly: (
-      <Button icon={<ReloadOutlined />} onClick={reload}>
-        刷新
-      </Button>
+      <>
+        <Button disabled={weeksBack === 0 && isCurrentWeekSelected} onClick={backToThisWeek}>
+          本周
+        </Button>
+        <Button icon={<ReloadOutlined />} onClick={reload}>
+          刷新
+        </Button>
+      </>
     ),
   }
 
@@ -358,15 +367,6 @@ export default function WorklogPage() {
       }
       extra={
         <Space>
-          {view === 'weekly' && (
-            <DatePicker
-              value={date}
-              allowClear={false}
-              picker="week"
-              presets={WEEKLY_PRESETS}
-              onChange={(d) => d && setDate(d)}
-            />
-          )}
           {extraByView[view]}
           <Button icon={<CodeOutlined />} onClick={() => setReposOpen(true)}>
             仓库订阅
@@ -515,9 +515,15 @@ export default function WorklogPage() {
       {view === 'weekly' && (
         <>
           <Typography.Paragraph type="secondary">
-            点下方最近 7 周快速切换（更早的周走右上角周选择器）；AI 汇总该周（周一 {weekStartStr} 起）条目与日报，产出「上周总结 + 下周计划」草稿；人工修订后确认定稿。
+            点下方周条切换周，左右滑动或点两侧箭头整页翻看更早的 7 周；AI 汇总该周（周一 {weekStartStr} 起）条目与日报，产出「上周总结 + 下周计划」草稿；人工修订后确认定稿。
           </Typography.Paragraph>
-          <RecentWeekStrip reports={recentWeeks} selected={weekStartStr} onSelect={setDate} />
+          <RecentWeekStrip
+            reports={recentWeeks}
+            selected={weekStartStr}
+            onSelect={setDate}
+            weeksBack={weeksBack}
+            onShiftWindow={shiftWeekWindow}
+          />
           <ReportEditor
             key={weekStartStr}
             id={weekly?.id}
