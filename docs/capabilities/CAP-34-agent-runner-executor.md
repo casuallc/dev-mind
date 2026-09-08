@@ -8,14 +8,14 @@ runner 从「claude 进程代理」升级为「**本地执行代理**」：远�
 结果回收与调度管理，**一切执行逻辑收敛到 runner 层**——包括 claude 会话拉起、
 工作区编排、上下文物化，以及节点本地工具链（mvn/node/docker 等）的直接利用。
 
-核心架构决策（已定）：**本机会话同样经 runner 层执行**。执行内核上移至
-`devmind-common`，服务端以「内嵌 runner」（同进程直调内核，不经 WS）跑本机会话，
-远程节点跑同一内核的瘦 jar——本地/远程只有「传输层不同」，执行行为天然一致，
-从根上消除 CAP-21 时代「本机注入知识、远程不注入」这类行为分叉。
+核心架构决策（已定）：**取消本机会话——服务端进程不再拉起任何 claude/执行子进程，
+所有会话必须选择 runner 节点执行**（节点可以与服务端同机部署，但也是独立 runner
+进程、走同样的 WS 协议接入）。服务端只做任务分发、结果回收与调度管理；
+本地/远程不再是两条代码路径，而是**同一条路径：服务端 → runner**。
 
 ```
-浏览器 ⇄WS⇄ devmind-app（分发/调度/回收）─┬─ 内嵌 runner（common 内核，本机）
-                                          └─ ⇄WS⇄ agent-runner 节点（同一内核，瘦 jar）
+浏览器 ⇄WS⇄ devmind-app（纯分发/调度/回收，零执行）─⇄WS⇄ agent-runner 节点 ⇄spawn⇄ claude
+                                                       （可与服务端同机，无特例）
 ```
 
 数据与执行的接缝（已定）：**数据所有权在服务端**（knowledge/docs/skills 均在服务端 DB），
@@ -28,18 +28,19 @@ runner 不反向查服务端业务库。
   瘦 jar 可打进）：工作区管理（现 `RunnerWorkspace` 逻辑上移：clone 缓存/会话 worktree/
   chat 沙箱/结束 push 收口）、上下文物化器（CLAUDE.md 组装、`.claude/skills/<name>/` 落盘、
   `.claude/settings.local.json`，现 `KnowledgeBaseInjector` 的文件操作部分下移至此）、
-  进程拉起与事件解析（复用已有 `agent.runtime`）。服务端 `WorkspaceService` 的本地
-  worktree 实现同步切换为该内核，单一代码路径。
-- **FR-02 内嵌 runner**：服务端本机会话不再直接 `ProcessBuilder` 拉起 claude，改经
-  内嵌 runner 走同一内核（准备工作区 → 物化上下文 → 拉起进程 → 收口）。
-  `sessions.agent_node_id IS NULL = 本机` 语义不变；本机会话获得与远程完全一致的
-  上下文注入与工作区行为。
-- **FR-03 上下文包传输（远程）**：launch 帧新增 `contextManifest`（轻量清单：条目数/
+  进程拉起与事件解析（复用已有 `agent.runtime`）。**该内核只被 runner 使用，服务端不引用。**
+- **FR-02 服务端执行路径下线**：`SessionManagerService` 的本机 `ProcessBuilder` 拉起、
+  `WorkspaceService` 会话 worktree、`KnowledgeBaseInjector` 本机注入全部移除；
+  会话必有 `agent_node_id`（新会话 NOT NULL），节点路由 = 显式指定 > 项目默认 >
+  平台默认，**皆无命中直接 409，不存在本机回落**（CAP-21 平台默认节点档的语义推广为
+  唯一路径）。部署形态：服务端同机跑一个 runner 即「本机节点」（一键脚本/分发包
+  附带支持）；存量 `agent_node_id IS NULL` 历史会话只读保留，不再产生新行。
+  CAP-28 one-shot 总结会话的 `agentNodeId="local"` 保留值同步废除，改走平台默认节点。
+- **FR-03 上下文包传输**：launch 帧新增 `contextManifest`（轻量清单：条目数/
   总大小/sha256）；runner 凭节点 token 走 HTTP `GET /api/agent/context/<sessionId>`
   拉取 ContextPackage（skill 含二进制文件，不走 WS 帧；HTTP 拉取已有先例——
   RunnerUpgrader 下载升级包），内核物化到会话工作区后再拉起 claude。
-  内嵌 runner 直取装配结果对象，不经 HTTP。包拉取失败 = launch 失败回
-  `launched{ok:false}`，不静默降级为无上下文会话。
+  包拉取失败 = launch 失败回 `launched{ok:false}`，不静默降级为无上下文会话。
 - **FR-04 会话隔离强化**：进程树整体回收（kill 时杀子孙进程，Windows 经 Job Object /
   `taskkill /T`，Linux 进程组）；runner 重启现场对账（启动扫描 `sessions/` 目录 +
   hello 上报全量会话清单，孤儿 claude 进程回收、无主目录登记待清）；同 projectId
@@ -61,7 +62,7 @@ runner 不反向查服务端业务库。
 ## 3. 插件化接口
 
 - `AgentExecutionKernel`（common）：`prepareWorkspace / materializeContext / launch / finish`，
-  内嵌 runner 与远程 runner 共用同一实现，差别只在指令来源（直调 vs WS 帧）。
+  只有 runner 一种宿主（WS 帧驱动）；服务端不再持有任何执行实现。
 - `StepRunner` SPI（CAP-12）新增 `AgentNodeStepRunner`：经节点连接下发 exec 帧，
   日志帧回流 ExecutionLogHub，与 LocalStepRunner/SshStepRunner 并列可选。
 
@@ -79,7 +80,8 @@ agent_nodes  ── + labels (JSON 数组)                # FR-07 调度标签
                 + toolchain (JSON)                  # FR-07 工具链探测结果 {java:"21",mvn:"3.9",...}
                 + protocol_version                  # FR-08
                 + workspace_bytes                   # FR-05 hello 上报
-sessions     不变（agent_node_id IS NULL = 内嵌 runner 本机执行，语义沿用）
+sessions     新会话 agent_node_id 必有值（FR-02 无本机回落）；
+             存量 NULL 行（本机时代历史会话）只读保留
 ```
 
 WS 协议扩展（JSON 帧）：
@@ -100,8 +102,9 @@ WS     /ws/agent                        帧扩展见上（向下兼容）
 
 ## 7. 验收标准
 
-- 本机会话改走内嵌 runner 后行为零回归（创建/交互/kill/resume/收口全绿）；
-- 远程会话首次获得上下文注入：worktree 内 CLAUDE.md 与 `.claude/skills/` 与本机一致；
+- 服务端进程全程无 claude 子进程：无任何在线节点时创建会话一律 409（明确提示
+  「无可用执行节点」），不产生挂死会话；同机 runner 上线后体验与原「本机会话」一致；
+- 所有会话获得上下文注入：worktree 内 CLAUDE.md 与 `.claude/skills/` 由 runner 物化；
 - runner 进程被强杀后重启：孤儿 claude 进程被回收，节点页会话状态对账正确；
 - 同项目两个并发会话不再因 clone 缓存竞争失败；
 - exec 帧：向带 mvn 标签的节点下发构建命令，日志实时回流，退出码正确收口；
