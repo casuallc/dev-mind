@@ -36,8 +36,7 @@ devmind:
     access-ttl: 2h                 # access token 有效期
     refresh-ttl: 14d               # refresh token 有效期
   session:
-    executor: claude              # 执行器：fake=内置假进程(自测) / claude=真实 Claude Code
-    claude-path: ""               # 空=自动探测全局命令（where claude）
+    # CAP-34：服务端零执行，executor/claude-path 已删除——claude 二进制解析在 runner 侧 agent.properties
     model: ""
     permission-mode: acceptEdits   # 放手模式；会话级可覆盖
     input-timeout: 300

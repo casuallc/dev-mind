@@ -15,8 +15,8 @@ import java.util.List;
  * @param baseBranch     基准分支（可选，默认项目/配置；多库时仅覆盖主库，其余库用各自默认分支）
  * @param model          模型（可选，覆盖全局）
  * @param permissionMode 权限模式（可选，覆盖全局）
- * @param agentNodeId    CAP-21 远程执行节点 ID（可选；空 = 跟随项目默认 → 平台默认节点，皆无才落本地子进程；
- *                       保留值 "local" = 强制本地，忽略项目/平台默认节点）
+ * @param agentNodeId    CAP-21 远程执行节点 ID（可选；空 = 跟随项目默认 → 平台默认节点，皆无则创建失败 409；
+ *                       CAP-34 起保留值 "local" 已废除，传入报 400）
  * @param repoIds        CAP-31 关联仓库（project_repos.id 列表；空 = 主库，兼容旧行为；
  *                       非空校验均属该项目，&gt;1 个走聚合目录多库工作区）
  */

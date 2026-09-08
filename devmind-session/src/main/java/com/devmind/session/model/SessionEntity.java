@@ -43,7 +43,7 @@ public class SessionEntity {
     @Column(name = "worktree_path", length = 512)
     private String worktreePath;
 
-    /** CAP-21：远程执行节点 id（agent_nodes.id）；NULL = 本地子进程 */
+    /** CAP-21：远程执行节点 id（agent_nodes.id）；CAP-34 起新行恒有值，NULL = 历史本机会话（只读，不可 resume） */
     @Column(name = "agent_node_id", length = 64)
     private String agentNodeId;
 

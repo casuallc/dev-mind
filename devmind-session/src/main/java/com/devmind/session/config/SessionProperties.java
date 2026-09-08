@@ -5,14 +5,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
  * devmind.session.* — 会话执行配置。
+ * CAP-34 FR-02：服务端零执行，executor/claude-path 已删除（claude 二进制解析在 runner 侧
+ * agent.properties）；model/permissionMode 保留，作为 launch 帧下发默认值。
  */
 @ConfigurationProperties(prefix = "devmind.session")
 public class SessionProperties {
 
-    /** 执行器：fake=内置假进程(自测/无 claude 环境) / claude=真实 Claude Code CLI */
-    private String executor = "fake";
-    /** claude 可执行文件路径；空 = 自动探测(where claude) */
-    private String claudePath = "";
     /** 模型；空 = CLI 默认 */
     private String model = "";
     /** 默认权限模式：acceptEdits=放手 / bypassPermissions=全放开 / plan 等 */
@@ -32,10 +30,6 @@ public class SessionProperties {
     /** CAP-28 one-shot 总结会话专用权限模式（只读任务，不复用全局 acceptEdits） */
     private String oneshotPermissionMode = "plan";
 
-    public String getExecutor() { return executor; }
-    public void setExecutor(String executor) { this.executor = executor; }
-    public String getClaudePath() { return claudePath; }
-    public void setClaudePath(String claudePath) { this.claudePath = claudePath; }
     public String getModel() { return model; }
     public void setModel(String model) { this.model = model; }
     public String getPermissionMode() { return permissionMode; }
@@ -55,8 +49,9 @@ public class SessionProperties {
     public String getOneshotPermissionMode() { return oneshotPermissionMode; }
     public void setOneshotPermissionMode(String oneshotPermissionMode) { this.oneshotPermissionMode = oneshotPermissionMode; }
 
-    /** CAP-30：转换为内核运行时参数（common.agent.runtime 与 Spring 配置解耦的桥梁）。 */
+    /** CAP-30：转换为内核运行时参数（common.agent.runtime 与 Spring 配置解耦的桥梁）。
+     *  CAP-34：服务端不再拉起进程，claudePath 恒空（仅 runner 侧解析）。 */
     public RuntimeSettings toRuntimeSettings() {
-        return new RuntimeSettings(ringBuffer, idleTimeout, maxEventBytes, permissionMode, claudePath);
+        return new RuntimeSettings(ringBuffer, idleTimeout, maxEventBytes, permissionMode, "");
     }
 }

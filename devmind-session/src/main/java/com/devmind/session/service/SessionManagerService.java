@@ -11,11 +11,9 @@ import com.devmind.auth.IdentityService;
 import com.devmind.common.integration.GitIdentityProvider;
 import com.devmind.common.integration.RepoGitGateway;
 import com.devmind.common.notification.NotificationEvent;
-import com.devmind.knowledge.KnowledgeInjector;
 import com.devmind.common.agent.exec.ContextManifest;
 import com.devmind.notification.NotificationPublisher;
 import com.devmind.project.WorktreeManager;
-import com.devmind.project.workspace.Workspace;
 import com.devmind.project.workspace.WorkspaceService;
 import com.devmind.project.RequirementService;
 import com.devmind.project.WorkItemService;
@@ -41,13 +39,10 @@ import com.devmind.session.repo.SessionTemplateRepository;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
-import com.devmind.common.agent.runtime.CliEventParser;
 import com.devmind.common.agent.runtime.RemoteSessionRuntime;
 import com.devmind.common.agent.runtime.RuntimeListener;
 import com.devmind.session.runtime.SessionEventSaver;
-import com.devmind.common.agent.runtime.SessionExecutor;
 import com.devmind.common.agent.runtime.SessionHandle;
-import com.devmind.common.agent.runtime.SessionRuntime;
 import tools.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -56,11 +51,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -72,7 +65,8 @@ import java.util.function.Consumer;
 
 /**
  * 会话生命周期入口：create/list/get/events/input/authorize/suspend/resume/kill/diff/worktree/模板。
- * 持有运行时注册表，协调 Worktree/Injector/Executor/事件落库/通知。
+ * 持有运行时注册表，协调节点路由/上下文包/事件落库/通知。
+ * CAP-34 FR-02：服务端零执行——所有会话路由到 runner 节点，无本机分支。
  */
 @Service
 public class SessionManagerService {
@@ -85,7 +79,6 @@ public class SessionManagerService {
     private final RequirementService requirementService;
     private final WorktreeManager worktreeManager;
     private final WorkspaceService workspaceService;
-    private final KnowledgeInjector knowledgeInjector;
     /** CAP-34 FR-03：上下文包装配（launch 帧 contextManifest + runner HTTP 拉包的供给侧） */
     private final SessionContextService sessionContextService;
     private final NotificationPublisher notificationPublisher;
@@ -98,8 +91,6 @@ public class SessionManagerService {
     private final SessionEventSaver eventSaver;
     private final SessionProperties props;
     private final ObjectMapper mapper;
-    private final CliEventParser parser;
-    private final Collection<SessionExecutor> executors;
     /** CAP-21：远程节点连接（devmind-agent 装配时可用；ObjectProvider 探测防循环依赖） */
     private final ObjectProvider<AgentNodeConnector> connectorProvider;
     /** CAP-24：Git 提交身份解析（devmind-integration 装配时可用；未装配回退系统 git 配置） */
@@ -120,7 +111,6 @@ public class SessionManagerService {
                                  RequirementService requirementService,
                                  WorktreeManager worktreeManager,
                                  WorkspaceService workspaceService,
-                                 KnowledgeInjector knowledgeInjector,
                                  SessionContextService sessionContextService,
                                  NotificationPublisher notificationPublisher,
                                  DomainEventPublisher eventPublisher,
@@ -131,8 +121,6 @@ public class SessionManagerService {
                                  SessionEventSaver eventSaver,
                                  SessionProperties props,
                                  ObjectMapper mapper,
-                                 CliEventParser parser,
-                                 Collection<SessionExecutor> executors,
                                  ObjectProvider<AgentNodeConnector> connectorProvider,
                                  ObjectProvider<GitIdentityProvider> gitIdentityProvider,
                                  ObjectProvider<RepoGitGateway> repoGitGateway,
@@ -144,7 +132,6 @@ public class SessionManagerService {
         this.requirementService = requirementService;
         this.worktreeManager = worktreeManager;
         this.workspaceService = workspaceService;
-        this.knowledgeInjector = knowledgeInjector;
         this.sessionContextService = sessionContextService;
         this.notificationPublisher = notificationPublisher;
         this.eventPublisher = eventPublisher;
@@ -155,8 +142,6 @@ public class SessionManagerService {
         this.eventSaver = eventSaver;
         this.props = props;
         this.mapper = mapper;
-        this.parser = parser;
-        this.executors = executors;
         this.connectorProvider = connectorProvider;
         this.gitIdentityProvider = gitIdentityProvider;
         this.repoGitGateway = repoGitGateway;
@@ -239,82 +224,57 @@ public class SessionManagerService {
             taskSpec = renderTemplate(req.templateCode(), req.taskSpec(), project);
         }
 
-        // CAP-21：有效执行节点优先级 = 请求显式指定 > 项目默认 > 平台默认（agent_nodes.is_default），
-        // 全空 = 本机。平台默认适配「服务端部署在无 AI 能力的机器」场景（节点离线时 launch 409 报错，
-        // 不静默回落本机起失败进程）
-        // CAP-28：保留值 "local" = 强制本机，忽略项目/平台默认节点（保留给需要钉死本机的调用方）
-        boolean forceLocal = "local".equalsIgnoreCase(req.agentNodeId());
-        String agentNodeId = forceLocal ? null
-                : req.agentNodeId() != null && !req.agentNodeId().isBlank()
+        // CAP-34 FR-02：取消本机会话——会话必有执行节点：显式指定 > 项目默认 > 平台默认
+        // （agent_nodes.is_default），皆无命中直接 409，不存在本机回落；节点离线由 launch
+        // ack 报错，不静默起失败进程。CAP-28 的 agentNodeId="local" 保留值同步废除。
+        if ("local".equalsIgnoreCase(req.agentNodeId())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "CAP-34 起不存在本机会话：agentNodeId=\"local\" 保留值已废除，请指定 runner 节点或留空走默认路由");
+        }
+        String agentNodeId = req.agentNodeId() != null && !req.agentNodeId().isBlank()
                 ? req.agentNodeId()
                 : (project != null && project.agentNodeId() != null && !project.agentNodeId().isBlank()
                         ? project.agentNodeId()
                         : platformDefaultNodeId());
-
-        // CAP-21：指定执行节点 = 远程会话——工作目录在节点侧（runner 项目路径映射），
-        // 服务端不建 worktree、不做知识注入（知识注入依赖本地文件系统，远程暂不支持）
-        boolean remote = agentNodeId != null && !agentNodeId.isBlank();
+        if (agentNodeId == null || agentNodeId.isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "无可用执行节点：请显式指定执行节点，或配置项目默认/平台默认节点");
+        }
 
         // CAP-31：会话仓库快照（创建时从 project_repos 拷值，生命周期以快照为准）；
         // 空 = 项目无仓库行（兼容旧单库路径，按 projects 镜像列跑）
         List<SessionRepoEntity> repoRows = resolveRepoSnapshot(project, req, id, baseBranch);
 
-        // P1-3：会话只面向 Workspace 接口，本地实现为 git worktree（远程/容器预留）；
-        // CAP-31：多库走聚合目录（各库 worktree = <aggRoot>/<repoName>，cwd=聚合根）
-        Workspace workspace = null;
-        if (!remote && project != null) {
-            workspace = repoRows.isEmpty()
-                    ? workspaceService.prepareSessionWorkspace(project, id)
-                    : workspaceService.prepareSessionWorkspace(toWorkspaceSpecs(repoRows), id);
-        }
-        Path worktree = workspace != null ? workspace.path() : null;
-        // CAP-34：知识注入改由 runner 侧物化（launch 帧 contextManifest + HTTP 拉包），
-        // 装配在远程分支下发前完成（见下文 SessionContextService），此处不再直接写文件
+        // CAP-34：服务端不建 worktree、不做本机知识注入——工作区与上下文物化均在 runner 侧
+        // （launch 帧 repos + contextManifest，runner 拉包物化，见 SessionContextService）
 
         String model = req.model() != null && !req.model().isBlank() ? req.model() : props.getModel();
         String pm = req.permissionMode() != null && !req.permissionMode().isBlank()
                 ? req.permissionMode() : props.getPermissionMode();
 
-        Process proc = null;
-        RemoteSessionRuntime remoteRt = null;
         // CAP-24 FR-03：按会话发起人 + 主库 remoteUrl host 解析提交身份，随进程 env 注入
         Map<String, String> gitEnv = resolveGitEnv(identityService.currentActor(), project);
-        if (remote) {
-            AgentNodeConnector connector = requireConnector();
-            remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector, eventSaver, listener, props.toRuntimeSettings());
-            // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
-            runtimes.put(id, remoteRt);
-            try {
-                // CAP-31：repos=全量快照（含 name，新 runner 多库模式）；repo=首个（主库）保持旧 runner 降级
-                List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(project, repoRows, baseBranch,
-                        worktreeManager.branchFor(id), identityService.currentActor());
-                // CAP-34 FR-03：装配上下文包清单随帧下发（装配失败降级为无上下文启动，不阻塞会话）
-                ContextManifest contextManifest = prepareContext(id, project, taskSpec);
-                connector.launch(agentNodeId, new AgentLaunchCommand(
-                        id, project != null ? project.id() : null, taskSpec, model, pm, gitEnv,
-                        specs.isEmpty() ? null : specs.get(0), "session",
-                        specs.size() > 1 ? specs : null, contextManifest));
-            } catch (Exception e) {
-                runtimes.remove(id);
-                if (e instanceof DevMindException de) {
-                    throw de;
-                }
-                throw new DevMindException(ErrorCode.CONFLICT, "下发远程会话失败: " + e.getMessage(), e);
+        AgentNodeConnector connector = requireConnector();
+        RemoteSessionRuntime remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector,
+                eventSaver, listener, props.toRuntimeSettings());
+        // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
+        runtimes.put(id, remoteRt);
+        try {
+            // CAP-31：repos=全量快照（含 name，新 runner 多库模式）；repo=首个（主库）保持旧 runner 降级
+            List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(project, repoRows, baseBranch,
+                    worktreeManager.branchFor(id), identityService.currentActor());
+            // CAP-34 FR-03：装配上下文包清单随帧下发（装配失败降级为无上下文启动，不阻塞会话）
+            ContextManifest contextManifest = prepareContext(id, project, taskSpec);
+            connector.launch(agentNodeId, new AgentLaunchCommand(
+                    id, project != null ? project.id() : null, taskSpec, model, pm, gitEnv,
+                    specs.isEmpty() ? null : specs.get(0), "session",
+                    specs.size() > 1 ? specs : null, contextManifest));
+        } catch (Exception e) {
+            runtimes.remove(id);
+            if (e instanceof DevMindException de) {
+                throw de;
             }
-        } else {
-            SessionExecutor executor = resolveExecutor();
-            try {
-                proc = executor.launch(new SessionExecutor.LaunchContext(id, worktree, taskSpec, model, pm, gitEnv));
-            } catch (IOException e) {
-                if (workspace != null) {
-                    workspace.cleanup();
-                }
-                // 程序不存在/不在 PATH（error=2）时给出可操作的修复提示，否则只有一句 Cannot run program
-                String hint = e.getMessage() != null && e.getMessage().contains("Cannot run program")
-                        ? "（执行器程序未安装或不在 PATH：请安装 claude CLI，或配置 devmind.session.claude-path 指向其绝对路径）"
-                        : "";
-                throw new DevMindException(ErrorCode.INTERNAL, "启动执行器失败: " + e.getMessage() + hint, e);
-            }
+            throw new DevMindException(ErrorCode.CONFLICT, "下发会话到执行节点失败: " + e.getMessage(), e);
         }
 
         Instant now = Instant.now();
@@ -326,9 +286,10 @@ public class SessionManagerService {
         ent.setTaskSpec(req.taskSpec());
         ent.setBaseBranch(baseBranch);
         ent.setStatus(SessionState.RUNNING.name());
-        ent.setWorktreePath(worktree != null ? worktree.toString() : null);
-        ent.setAgentNodeId(remote ? agentNodeId : null);
-        ent.setPid(proc != null ? proc.pid() : null);
+        // CAP-34：新会话恒有执行节点；worktree_path/pid 为本机时代字段，新行恒 null
+        ent.setWorktreePath(null);
+        ent.setAgentNodeId(agentNodeId);
+        ent.setPid(null);
         ent.setModel(model);
         ent.setPermissionMode(pm);
         ent.setCreatedBy(identityService.currentActor());
@@ -340,19 +301,9 @@ public class SessionManagerService {
             sessionRepoRepo.saveAll(repoRows);
         }
 
-        SessionHandle handle;
-        if (remote) {
-            handle = remoteRt;
-        } else {
-            SessionRuntime rt = new SessionRuntime(id, proc, mapper, parser, eventSaver, listener, props.toRuntimeSettings());
-            runtimes.put(id, rt);
-            rt.start();
-            handle = rt;
-        }
-
         notificationPublisher.publish(NotificationEvent.of("SESSION_STARTED", id, "会话已启动",
                 preview(taskSpec, 80)));
-        return toView(ent, handle.state());
+        return toView(ent, remoteRt.state());
     }
 
     public List<SessionView> list(String status, String projectId, String workItemId, String requirementId) {
@@ -427,6 +378,11 @@ public class SessionManagerService {
         String pm = ent.getPermissionMode() != null && !ent.getPermissionMode().isBlank()
                 ? ent.getPermissionMode() : props.getPermissionMode();
 
+        // CAP-34 FR-02：历史本机会话（agent_node_id IS NULL）不可恢复——本机执行路径已下线
+        if (ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "历史本机会话（无执行节点）不可恢复，请新建会话");
+        }
         // CAP-21 远程会话恢复：重新向节点下发 launch（workdir 仍由 runner 项目路径映射解析）
         if (ent.getAgentNodeId() != null && !ent.getAgentNodeId().isBlank()) {
             AgentNodeConnector connector = requireConnector();
@@ -459,30 +415,8 @@ public class SessionManagerService {
             sessionRepo.save(ent);
             return toView(ent, rt.state());
         }
-
-        Project project = resolveProject(ent.getProjectId());
-        Path worktree = ent.getWorktreePath() != null && !ent.getWorktreePath().isBlank()
-                ? Path.of(ent.getWorktreePath()) : null;
-
-        SessionExecutor executor = resolveExecutor();
-        Process proc;
-        try {
-            // CAP-24：恢复时以原创建人（createdBy）身份注入，不用当前操作者
-            proc = executor.launch(new SessionExecutor.LaunchContext(
-                    id, worktree, ent.getTaskSpec(), ent.getModel(), pm,
-                    resolveGitEnv(ent.getCreatedBy(), project)));
-        } catch (IOException e) {
-            throw new DevMindException(ErrorCode.INTERNAL, "恢复会话失败: " + e.getMessage(), e);
-        }
-        SessionRuntime rt = new SessionRuntime(id, proc, mapper, parser, eventSaver, listener, props.toRuntimeSettings());
-        runtimes.put(id, rt);
-        rt.start();
-
-        ent.setStatus(SessionState.RUNNING.name());
-        ent.setPid(proc.pid());
-        ent.setUpdatedAt(Instant.now());
-        sessionRepo.save(ent);
-        return toView(ent, rt.state());
+        // 上方已拒绝 NULL 节点历史会话，编译器不可知，此处不可达
+        throw new DevMindException(ErrorCode.CONFLICT, "历史本机会话（无执行节点）不可恢复，请新建会话");
     }
 
     public SessionView kill(String id) {
@@ -905,15 +839,6 @@ public class SessionManagerService {
         }
     }
 
-    private SessionExecutor resolveExecutor() {
-        for (SessionExecutor ex : executors) {
-            if (ex.name().equalsIgnoreCase(props.getExecutor())) {
-                return ex;
-            }
-        }
-        throw new DevMindException(ErrorCode.BAD_REQUEST, "未知执行器: " + props.getExecutor());
-    }
-
     /** CAP-21：取节点连接 SPI；devmind-agent 未装配时报错（远程会话不可用）。 */
     private AgentNodeConnector requireConnector() {
         AgentNodeConnector connector = connectorProvider.getIfAvailable();
@@ -923,7 +848,7 @@ public class SessionManagerService {
         return connector;
     }
 
-    /** CAP-21 FR-03：平台默认执行节点（无默认或 agent 模块未装配 = null，回落本机）。 */
+    /** CAP-21 FR-03：平台默认执行节点（无默认或 agent 模块未装配 = null，调用方按 409 处理）。 */
     private String platformDefaultNodeId() {
         AgentNodeConnector connector = connectorProvider.getIfAvailable();
         return connector != null ? connector.defaultNodeId() : null;
