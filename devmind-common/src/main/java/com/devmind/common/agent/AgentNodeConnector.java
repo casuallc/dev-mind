@@ -15,7 +15,7 @@ public interface AgentNodeConnector {
 
     /**
      * 平台默认执行节点 id（agent_nodes.is_default；无默认返回 null）。
-     * 会话调度兜底链：显式指定 > 项目默认 > 平台默认 > 本机。
+     * 会话调度链（CAP-34）：显式指定 > 项目默认 > 平台默认；皆无命中 409，无本机回落。
      */
     String defaultNodeId();
 

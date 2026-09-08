@@ -17,15 +17,10 @@ import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.SessionEvent;
 import com.devmind.common.agent.runtime.AbstractSessionRuntime;
-import com.devmind.common.agent.runtime.CliEventParser;
-import com.devmind.common.agent.runtime.CliProcessLauncher;
-import com.devmind.common.agent.runtime.FakeProcessLauncher;
 import com.devmind.common.agent.runtime.RemoteSessionRuntime;
 import com.devmind.common.agent.runtime.RuntimeListener;
 import com.devmind.common.agent.runtime.RuntimeSettings;
-import com.devmind.common.agent.runtime.SessionExecutor;
 import com.devmind.common.agent.runtime.SessionHandle;
-import com.devmind.common.agent.runtime.SessionRuntime;
 import com.devmind.common.agent.runtime.SessionState;
 import com.devmind.common.attachment.AttachmentContentResolver;
 import com.devmind.common.exception.DevMindException;
@@ -41,13 +36,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -56,14 +47,14 @@ import java.util.function.Consumer;
 
 /**
  * CAP-30 通用问答生命周期入口：create/list/get/events/input/authorize/suspend/resume/kill/finish/delete。
- * 复用 common 的 headless 会话内核（{@link SessionRuntime}/{@link RemoteSessionRuntime}），
- * 本类只做实体/沙箱目录/节点路由的薄壳协调。
+ * 复用 common 的 headless 会话内核（{@link RemoteSessionRuntime}），
+ * 本类只做实体/节点路由的薄壳协调。
  *
- * <p>节点路由：显式 agentNodeId &gt; 平台默认节点 &gt; 本机（无项目默认层——问答无项目）；
- * 保留值 "local" = 强制本机。节点离线 launch 抛 409，不静默回落。</p>
+ * <p>CAP-34 FR-02：不存在本机问答——节点路由 = 显式 agentNodeId &gt; 平台默认节点（无项目默认层），
+ * 皆无命中直接 409；保留值 "local" 已废除（报 400）。节点离线 launch 抛 409，不静默回落。</p>
  *
- * <p>沙箱 cwd：本地 = &lt;devmind.chat.work-dir&gt;/&lt;chatId&gt;（空目录，结束后 best-effort
- * 递归删除）；远程 = runner 侧 &lt;workspaceRoot&gt;/_chat/&lt;chatId&gt;（launch 帧 kind:"chat"）。</p>
+ * <p>沙箱 cwd：runner 侧 &lt;workspaceRoot&gt;/_chat/&lt;chatId&gt;（launch 帧 kind:"chat"），
+ * 服务端不再建本地目录。</p>
  */
 @Service
 public class ChatManagerService {
@@ -78,8 +69,6 @@ public class ChatManagerService {
     private final ChatProperties props;
     private final ObjectMapper mapper;
     private final RuntimeSettings settings;
-    private final CliEventParser parser;
-    private final SessionExecutor executor;
     /** CAP-21：远程节点连接（devmind-agent 装配时可用；ObjectProvider 探测防循环依赖） */
     private final ObjectProvider<AgentNodeConnector> connectorProvider;
     /** CAP-32：附件内容解析（devmind-attachment 装配时可用）；未装配时带附件输入报错，不静默丢图 */
@@ -107,11 +96,6 @@ public class ChatManagerService {
         this.connectorProvider = connectorProvider;
         this.attachmentResolverProvider = attachmentResolverProvider;
         this.settings = props.toRuntimeSettings();
-        // 内核工具类（CAP-30 上移 common 后为纯类）：直接实例化，避免与 session 模块装配的同型 Bean 冲突
-        this.parser = new CliEventParser(mapper, settings);
-        this.executor = "fake".equalsIgnoreCase(props.getExecutor())
-                ? new FakeProcessLauncher()
-                : new CliProcessLauncher(settings, mapper);
     }
 
     private final RuntimeListener listener = new RuntimeListener() {
@@ -136,7 +120,6 @@ public class ChatManagerService {
                 ent.setUpdatedAt(Instant.now());
                 chatRepo.save(ent);
             });
-            cleanupSandboxIfLocal(sessionId);
         }
     };
 
@@ -149,46 +132,33 @@ public class ChatManagerService {
         String pm = req.permissionMode() != null && !req.permissionMode().isBlank()
                 ? req.permissionMode() : props.getPermissionMode();
 
-        // 节点路由：显式 > 平台默认 > 本机；"local" 保留值 = 强制本机
-        boolean forceLocal = "local".equalsIgnoreCase(req.agentNodeId());
-        String agentNodeId = forceLocal ? null
-                : req.agentNodeId() != null && !req.agentNodeId().isBlank()
+        // CAP-34 FR-02：取消本机问答——路由 = 显式 > 平台默认，皆无命中 409，不存在本机回落
+        if ("local".equalsIgnoreCase(req.agentNodeId())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "CAP-34 起不存在本机问答：agentNodeId=\"local\" 保留值已废除，请指定 runner 节点或留空走平台默认");
+        }
+        String agentNodeId = req.agentNodeId() != null && !req.agentNodeId().isBlank()
                 ? req.agentNodeId()
                 : platformDefaultNodeId();
-        boolean remote = agentNodeId != null && !agentNodeId.isBlank();
+        if (agentNodeId == null || agentNodeId.isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "无可用执行节点：请显式指定执行节点，或配置平台默认节点");
+        }
 
-        Process proc = null;
-        RemoteSessionRuntime remoteRt = null;
-        if (remote) {
-            AgentNodeConnector connector = requireConnector();
-            remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector, eventSaver, listener, settings);
-            // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
-            runtimes.put(id, remoteRt);
-            try {
-                // kind="chat"：runner 用 <workspaceRoot>/_chat/<sid> 沙箱，无 clone/push 语义
-                connector.launch(agentNodeId, new AgentLaunchCommand(
-                        id, null, req.message(), model, pm, Map.of(), null, "chat", null));
-            } catch (Exception e) {
-                runtimes.remove(id);
-                if (e instanceof DevMindException de) {
-                    throw de;
-                }
-                throw new DevMindException(ErrorCode.CONFLICT, "下发远程问答失败: " + e.getMessage(), e);
+        AgentNodeConnector connector = requireConnector();
+        RemoteSessionRuntime remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector, eventSaver, listener, settings);
+        // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
+        runtimes.put(id, remoteRt);
+        try {
+            // kind="chat"：runner 用 <workspaceRoot>/_chat/<sid> 沙箱，无 clone/push 语义
+            connector.launch(agentNodeId, new AgentLaunchCommand(
+                    id, null, req.message(), model, pm, Map.of(), null, "chat", null));
+        } catch (Exception e) {
+            runtimes.remove(id);
+            if (e instanceof DevMindException de) {
+                throw de;
             }
-        } else {
-            Path sandbox = sandboxDir(id);
-            try {
-                Files.createDirectories(sandbox);
-                proc = executor.launch(new SessionExecutor.LaunchContext(
-                        id, sandbox, req.message(), model, pm, Map.of()));
-            } catch (IOException e) {
-                deleteRecursively(sandbox);
-                // 程序不存在/不在 PATH（error=2）时给出可操作的修复提示
-                String hint = e.getMessage() != null && e.getMessage().contains("Cannot run program")
-                        ? "（执行器程序未安装或不在 PATH：请安装 claude CLI，或配置 devmind.chat.claude-path 指向其绝对路径）"
-                        : "";
-                throw new DevMindException(ErrorCode.INTERNAL, "启动执行器失败: " + e.getMessage() + hint, e);
-            }
+            throw new DevMindException(ErrorCode.CONFLICT, "下发远程问答失败: " + e.getMessage(), e);
         }
 
         Instant now = Instant.now();
@@ -196,8 +166,9 @@ public class ChatManagerService {
         ent.setId(id);
         ent.setTitle(titleOf(req.message()));
         ent.setStatus(SessionState.RUNNING.name());
-        ent.setAgentNodeId(remote ? agentNodeId : null);
-        ent.setPid(proc != null ? proc.pid() : null);
+        // CAP-34：新问答恒有执行节点；pid 为本机时代字段，新行恒 null
+        ent.setAgentNodeId(agentNodeId);
+        ent.setPid(null);
         ent.setModel(model);
         ent.setPermissionMode(pm);
         ent.setCreatedBy(identityService.currentActor());
@@ -205,21 +176,12 @@ public class ChatManagerService {
         ent.setUpdatedAt(now);
         chatRepo.save(ent);
 
-        SessionHandle handle;
-        if (remote) {
-            handle = remoteRt;
-        } else {
-            SessionRuntime rt = new SessionRuntime(id, proc, mapper, parser, eventSaver, listener, settings);
-            runtimes.put(id, rt);
-            rt.start();
-            handle = rt;
-        }
         // 首条提问随 launch 作初始 prompt 下发、agent 回显被解析器跳过——补记 user 事件，开场气泡可见
-        ((AbstractSessionRuntime) handle).noteUserMessage(req.message());
+        ((AbstractSessionRuntime) remoteRt).noteUserMessage(req.message());
 
         notificationPublisher.publish(NotificationEvent.of("CHAT_STARTED", id, "问答已启动",
                 preview(req.message(), 80)));
-        return toView(ent, handle.state());
+        return toView(ent, remoteRt.state());
     }
 
     /** 个人问答列表：当前用户 + 时间倒序，可选状态过滤。 */
@@ -311,45 +273,28 @@ public class ChatManagerService {
         }
         runtimes.remove(id);
 
-        if (ent.getAgentNodeId() != null && !ent.getAgentNodeId().isBlank()) {
-            // 远程恢复：重新下发 launch（runner 侧 _chat/<sid> 幂等复用）
-            AgentNodeConnector connector = requireConnector();
-            RemoteSessionRuntime rt = new RemoteSessionRuntime(id, ent.getAgentNodeId(), connector,
-                    eventSaver, listener, settings);
-            runtimes.put(id, rt);
-            try {
-                connector.launch(ent.getAgentNodeId(), new AgentLaunchCommand(
-                        id, null, "", ent.getModel(), ent.getPermissionMode(),
-                        Map.of(), null, "chat", null));
-            } catch (Exception e) {
-                runtimes.remove(id);
-                if (e instanceof DevMindException de) {
-                    throw de;
-                }
-                throw new DevMindException(ErrorCode.CONFLICT, "恢复远程问答失败: " + e.getMessage(), e);
-            }
-            ent.setStatus(SessionState.RUNNING.name());
-            ent.setUpdatedAt(Instant.now());
-            chatRepo.save(ent);
-            return toView(ent, rt.state());
+        // CAP-34 FR-02：历史本机问答（agent_node_id 空）不可恢复——本机执行路径已下线
+        if (ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "历史本机问答（无执行节点）不可恢复，请新建问答");
         }
-
-        // 本地恢复：沙箱目录可能已被清理，幂等重建
-        Path sandbox = sandboxDir(id);
-        Process proc;
-        try {
-            Files.createDirectories(sandbox);
-            proc = executor.launch(new SessionExecutor.LaunchContext(
-                    id, sandbox, "", ent.getModel(), ent.getPermissionMode(), Map.of()));
-        } catch (IOException e) {
-            throw new DevMindException(ErrorCode.INTERNAL, "恢复问答失败: " + e.getMessage(), e);
-        }
-        SessionRuntime rt = new SessionRuntime(id, proc, mapper, parser, eventSaver, listener, settings);
+        // 远程恢复：重新下发 launch（runner 侧 _chat/<sid> 幂等复用）
+        AgentNodeConnector connector = requireConnector();
+        RemoteSessionRuntime rt = new RemoteSessionRuntime(id, ent.getAgentNodeId(), connector,
+                eventSaver, listener, settings);
         runtimes.put(id, rt);
-        rt.start();
-
+        try {
+            connector.launch(ent.getAgentNodeId(), new AgentLaunchCommand(
+                    id, null, "", ent.getModel(), ent.getPermissionMode(),
+                    Map.of(), null, "chat", null));
+        } catch (Exception e) {
+            runtimes.remove(id);
+            if (e instanceof DevMindException de) {
+                throw de;
+            }
+            throw new DevMindException(ErrorCode.CONFLICT, "恢复远程问答失败: " + e.getMessage(), e);
+        }
         ent.setStatus(SessionState.RUNNING.name());
-        ent.setPid(proc.pid());
         ent.setUpdatedAt(Instant.now());
         chatRepo.save(ent);
         return toView(ent, rt.state());
@@ -360,11 +305,10 @@ public class ChatManagerService {
         SessionHandle rt = requireRuntime(id);
         rt.kill();
         updateStatus(id, SessionState.TERMINATED, "已手动终止");
-        cleanupSandboxIfLocal(id);
         return get(id);
     }
 
-    /** 优雅结束：关 stdin，agent 读完后自然退出 → DONE/FAILED（onExit 收 sandbox）。 */
+    /** 优雅结束：关 stdin，agent 读完后自然退出 → DONE/FAILED。 */
     public void finish(String id) {
         requireOwned(id);
         requireRuntime(id).finish();
@@ -382,7 +326,7 @@ public class ChatManagerService {
         }
     }
 
-    /** 删除问答：杀进程（若在跑）、清沙箱目录、删事件与记录。 */
+    /** 删除问答：杀进程（若在跑）、删事件与记录；远程沙箱由 runner finalizer 负责。 */
     @Transactional
     public void deleteChat(String id) {
         ChatSessionEntity ent = requireOwned(id);
@@ -391,7 +335,6 @@ public class ChatManagerService {
             rt.unsubscribeAll();
             rt.kill();
         }
-        cleanupSandboxIfLocal(id);
         eventRepo.deleteByChatId(id);
         chatRepo.delete(ent);
     }
@@ -464,39 +407,6 @@ public class ChatManagerService {
             if (h instanceof RemoteSessionRuntime r && r.nodeId().equals(nodeId)) {
                 r.noteDisconnected();
             }
-        }
-    }
-
-    // ---------------- 沙箱目录 ----------------
-
-    /** 本地沙箱目录：<workDir>/<chatId>（workDir 空 = ${user.dir}/data/chats）。 */
-    private Path sandboxDir(String id) {
-        Path root = props.getWorkDir() != null && !props.getWorkDir().isBlank()
-                ? Path.of(props.getWorkDir()).toAbsolutePath().normalize()
-                : Path.of(System.getProperty("user.dir"), "data", "chats");
-        return root.resolve(id).normalize();
-    }
-
-    /** 会话结束/删除/强杀后清本地沙箱（best-effort）；远程沙箱由 runner finalizer 负责。 */
-    private void cleanupSandboxIfLocal(String id) {
-        chatRepo.findById(id).ifPresent(ent -> {
-            if (ent.getAgentNodeId() != null && !ent.getAgentNodeId().isBlank()) {
-                return;
-            }
-            deleteRecursively(sandboxDir(id));
-        });
-    }
-
-    private static void deleteRecursively(Path dir) {
-        if (dir == null || !Files.exists(dir)) {
-            return;
-        }
-        try (var walk = Files.walk(dir)) {
-            for (Path p : walk.sorted(Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(p);
-            }
-        } catch (IOException e) {
-            log.warn("问答沙箱清理失败(可人工删除 {}): {}", dir, e.getMessage());
         }
     }
 
