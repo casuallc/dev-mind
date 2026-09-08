@@ -31,7 +31,6 @@ export default function ProjectOverviewPage() {
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
       <Card
-        size="small"
         title={
           <Space>
             <Typography.Text strong>{project.name}</Typography.Text>
@@ -40,7 +39,7 @@ export default function ProjectOverviewPage() {
           </Space>
         }
         extra={
-          <Button size="small" icon={<ReloadOutlined />} onClick={reload}>
+          <Button icon={<ReloadOutlined />} onClick={reload}>
             刷新
           </Button>
         }

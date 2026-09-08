@@ -41,7 +41,6 @@ export default function ProjectSettingsLayout() {
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
       <Card
-        size="small"
         title={
           <Space>
             <Typography.Text strong>{project.name}</Typography.Text>
