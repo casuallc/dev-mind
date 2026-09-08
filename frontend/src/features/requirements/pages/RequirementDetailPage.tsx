@@ -8,13 +8,11 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
   Card,
-  Col,
   Descriptions,
   Drawer,
   Dropdown,
   Empty,
   Modal,
-  Row,
   Space,
   Spin,
   Tabs,
@@ -219,73 +217,69 @@ export default function RequirementDetailPage() {
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%', ...pageRootScrollStyle }}>
-      <Row gutter={12}>
-        <Col span={24}>
-          <Card
-            title={
-              <Space size={8} wrap style={{ whiteSpace: 'normal' }}>
-                <Typography.Text code>{r.code}</Typography.Text>
-                <Typography.Text strong>{r.title}</Typography.Text>
-                <Tag color={requirementTypeColor(r.type ?? 'FEATURE')}>{TYPE_LABEL[r.type ?? 'FEATURE']}</Tag>
-                <Tag color={requirementStatusColor(r.status)}>{STATUS_LABEL[r.status]}</Tag>
-                {r.status === 'CANCELLED' && (
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>该需求已取消</Typography.Text>
-                )}
-              </Space>
-            }
-            extra={
-              <Space size={8} wrap>
-                {r.status === 'ACCEPTANCE' && (
-                  <Button type="primary" icon={<CheckOutlined />} onClick={confirmAccept}>
-                    验收通过
-                  </Button>
-                )}
-                <Button icon={<EditOutlined />} onClick={() => setEditOpen(true)}>编辑</Button>
-                <Button icon={<ProfileOutlined />} onClick={() => setPropsOpen(true)}>属性</Button>
-                {isJira && <JiraActions requirement={r} onChanged={reloadOverview} />}
-                <Button icon={<ReloadOutlined />} onClick={reloadOverview}>刷新</Button>
-                <Dropdown
-                  menu={{
-                    items: [
-                      ...(!terminal ? [
-                        { key: 'analyze', label: r.status === 'DRAFT' ? '开始分析' : '重新分析', icon: <FileSearchOutlined />, disabled: flowBusy },
-                        { key: 'design', label: '生成方案（AI）', icon: <FileDoneOutlined />, disabled: flowBusy },
-                        { key: 'split', label: 'AI 拆分工作单元', icon: <ApartmentOutlined />, disabled: flowBusy },
-                        { key: 'draft', label: '拆分草稿', icon: <PlayCircleOutlined /> },
-                        { type: 'divider' as const },
-                      ] : []),
-                      { key: 'cancel', label: '取消需求', danger: true, disabled: !cancellable },
-                      { key: 'delete', label: '删除', danger: true },
-                    ],
-                    onClick: ({ key }) => {
-                      if (!projectId) return
-                      if (key === 'cancel') confirmCancel()
-                      else if (key === 'delete') confirmDelete()
-                      else if (key === 'draft') setDraftOpen(true)
-                      else if (key === 'analyze') runFlow('分析', () => flowAnalyze(projectId, r.id))
-                      else if (key === 'design') runFlow('方案设计', () => flowDesign(projectId, r.id))
-                      else if (key === 'split') runFlow('拆分', () => flowSplit(projectId, r.id))
-                    },
-                  }}
-                >
-                  <Button>更多 <DownOutlined /></Button>
-                </Dropdown>
-                <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/requirements')}>返回列表</Button>
-              </Space>
-            }
-          >
-            {r.description && (
-              r.source === 'JIRA' ? (
-                <JiraDescription description={r.description} pid={r.projectId} rid={r.id} />
-              ) : (
-                <Typography.Paragraph style={{ fontSize: 13, marginBottom: 0, whiteSpace: 'pre-wrap' }}>
-                  {r.description}
-                </Typography.Paragraph>
-              )
+      <Card
+        title={
+          <Space size={8} wrap style={{ whiteSpace: 'normal' }}>
+            <Typography.Text code>{r.code}</Typography.Text>
+            <Typography.Text strong>{r.title}</Typography.Text>
+            <Tag color={requirementTypeColor(r.type ?? 'FEATURE')}>{TYPE_LABEL[r.type ?? 'FEATURE']}</Tag>
+            <Tag color={requirementStatusColor(r.status)}>{STATUS_LABEL[r.status]}</Tag>
+            {r.status === 'CANCELLED' && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>该需求已取消</Typography.Text>
             )}
-          </Card>
-        </Col>
-      </Row>
+          </Space>
+        }
+        extra={
+          <Space size={8} wrap>
+            {r.status === 'ACCEPTANCE' && (
+              <Button type="primary" icon={<CheckOutlined />} onClick={confirmAccept}>
+                验收通过
+              </Button>
+            )}
+            <Button icon={<EditOutlined />} onClick={() => setEditOpen(true)}>编辑</Button>
+            <Button icon={<ProfileOutlined />} onClick={() => setPropsOpen(true)}>属性</Button>
+            {isJira && <JiraActions requirement={r} onChanged={reloadOverview} />}
+            <Button icon={<ReloadOutlined />} onClick={reloadOverview}>刷新</Button>
+            <Dropdown
+              menu={{
+                items: [
+                  ...(!terminal ? [
+                    { key: 'analyze', label: r.status === 'DRAFT' ? '开始分析' : '重新分析', icon: <FileSearchOutlined />, disabled: flowBusy },
+                    { key: 'design', label: '生成方案（AI）', icon: <FileDoneOutlined />, disabled: flowBusy },
+                    { key: 'split', label: 'AI 拆分工作单元', icon: <ApartmentOutlined />, disabled: flowBusy },
+                    { key: 'draft', label: '拆分草稿', icon: <PlayCircleOutlined /> },
+                    { type: 'divider' as const },
+                  ] : []),
+                  { key: 'cancel', label: '取消需求', danger: true, disabled: !cancellable },
+                  { key: 'delete', label: '删除', danger: true },
+                ],
+                onClick: ({ key }) => {
+                  if (!projectId) return
+                  if (key === 'cancel') confirmCancel()
+                  else if (key === 'delete') confirmDelete()
+                  else if (key === 'draft') setDraftOpen(true)
+                  else if (key === 'analyze') runFlow('分析', () => flowAnalyze(projectId, r.id))
+                  else if (key === 'design') runFlow('方案设计', () => flowDesign(projectId, r.id))
+                  else if (key === 'split') runFlow('拆分', () => flowSplit(projectId, r.id))
+                },
+              }}
+            >
+              <Button>更多 <DownOutlined /></Button>
+            </Dropdown>
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/requirements')}>返回列表</Button>
+          </Space>
+        }
+      >
+        {r.description && (
+          r.source === 'JIRA' ? (
+            <JiraDescription description={r.description} pid={r.projectId} rid={r.id} />
+          ) : (
+            <Typography.Paragraph style={{ fontSize: 13, marginBottom: 0, whiteSpace: 'pre-wrap' }}>
+              {r.description}
+            </Typography.Paragraph>
+          )
+        )}
+      </Card>
 
       <Card size="small">
         <Tabs
