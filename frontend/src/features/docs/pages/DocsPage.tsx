@@ -28,6 +28,7 @@ import { createDoc, listDocs, listTemplates, pushDocs, searchDocs } from '../api
 import { KIND_LABEL, STATUS_LABEL } from '../types'
 import type { DocInput, DocKind, DocMeta, DocStatus, DocTemplate } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 const kindTag = (k: DocKind) => <Tag color={k === 'requirement' ? 'blue' : k === 'design' ? 'geekblue' : k === 'api-suite' ? 'purple' : 'cyan'}>{KIND_LABEL[k] ?? k}</Tag>
 const statusTag = (s: DocStatus) => (
@@ -141,6 +142,8 @@ export default function DocsPage() {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title="文档管理"
       extra={
         <Space wrap>

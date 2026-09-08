@@ -21,6 +21,7 @@ import SkillFormDrawer from '../components/SkillFormDrawer'
 import SkillFilesDrawer from '../components/SkillFilesDrawer'
 import SkillImportModal from '../components/SkillImportModal'
 import { fmtTime } from '../../../shared/utils/format'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 const scopeTag = (s: string) =>
   s === 'GLOBAL' ? <Tag color="blue">全局</Tag> : <Tag color="purple">项目</Tag>
@@ -161,6 +162,8 @@ export default function SkillsPage() {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title="Skill 管理"
       extra={
         <Space>

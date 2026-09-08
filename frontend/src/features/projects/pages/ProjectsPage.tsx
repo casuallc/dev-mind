@@ -9,6 +9,7 @@ import { listProjects } from '../api'
 import { setCurrentProject } from '../../../app/currentProjectStore'
 import type { Project } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 const STATUS_OPTIONS = [
   { value: 'ACTIVE', label: 'ACTIVE', color: 'green' },
@@ -96,6 +97,8 @@ export default function ProjectsPage() {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title="项目"
       extra={
         <Space>

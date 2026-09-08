@@ -39,6 +39,7 @@ import {
 } from '../api'
 import type { KnowledgeEntry, KnowledgeEntryInput, KnowledgeProposal, PreviewResult } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 const scopeTag = (s: string) => (s === 'global' ? <Tag color="blue">global</Tag> : <Tag>project</Tag>)
 const statusTag = (s: string) =>
@@ -291,6 +292,8 @@ export default function KnowledgeBase() {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title={
         <Space size={12}>
           <span>知识库</span>

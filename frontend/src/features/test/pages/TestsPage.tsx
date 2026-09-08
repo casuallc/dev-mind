@@ -50,6 +50,7 @@ import { STATUS_COLOR, SUITE_KIND_COLOR } from '../constants'
 import CaseEditorDrawer from '../components/CaseEditorDrawer'
 import RunDetailDrawer from '../components/RunDetailDrawer'
 import IssuesTable from '../components/IssuesTable'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 export default function TestsPage() {
   const projectId = useCurrentProjectId()
@@ -292,6 +293,8 @@ function TestCenter({ id }: { id: string }) {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title={
         <Space size={12}>
           <span>测试记录</span>

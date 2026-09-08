@@ -32,6 +32,7 @@ import type { StreamMeta } from '../../../shared/chat/types'
 import SessionDiffModal from '../components/SessionDiffModal'
 import SedimentExperienceModal from '../../knowledge/components/SedimentExperienceModal'
 import { fmtTime } from '../../../shared/utils/format'
+import { pageRootScrollStyle } from '../../../shared/utils/pageLayout'
 
 export default function SessionDetail() {
   const { id } = useParams<{ id: string }>()
@@ -105,7 +106,7 @@ export default function SessionDetail() {
   }
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Space direction="vertical" size={12} style={{ width: '100%', ...pageRootScrollStyle }}>
       {/* 头部信息 */}
       <Card
         size="small"

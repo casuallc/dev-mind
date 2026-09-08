@@ -23,6 +23,7 @@ import { CLONE_STATUS_COLOR } from '../types'
 // 集成实例列表为平台设施（projects feature 同样直接引用 integrations/api）
 import { listIntegrations } from '../../integrations/api'
 import { fmtTime } from '../../../shared/utils/format'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 /**
  * CAP-29 全局代码仓库登记（仅 ADMIN，/admin/repos）：平台级独立资源，项目仓库只关联不复制。
@@ -124,6 +125,8 @@ export default function ReposAdminPage() {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title="代码仓库"
       extra={
         <Space>

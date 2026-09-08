@@ -56,6 +56,7 @@ import TimelineTab from '../components/TimelineTab'
 import WorkItemsTab from '../components/WorkItemsTab'
 import { getCurrentProjectId, setCurrentProject } from '../../../app/currentProjectStore'
 import { fmtDuration, fmtTime } from '../../../shared/utils/format'
+import { pageRootScrollStyle } from '../../../shared/utils/pageLayout'
 import {
   requirementStatusColor,
   requirementTypeColor,
@@ -217,7 +218,7 @@ export default function RequirementDetailPage() {
   )
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Space direction="vertical" size={12} style={{ width: '100%', ...pageRootScrollStyle }}>
       <Row gutter={12}>
         <Col span={24}>
           <Card

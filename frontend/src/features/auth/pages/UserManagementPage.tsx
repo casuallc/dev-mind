@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { createUser, listUsers, resetPassword, updateUser } from '../api'
 import { getUserSnapshot } from '../authStore'
 import type { AuthUser } from '../types'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 /** CAP-01 后台页：用户管理（仅 ADMIN，由 RequireAdmin 路由守卫保证）。 */
 export default function UserManagementPage() {
@@ -77,6 +78,8 @@ export default function UserManagementPage() {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title="用户管理"
       extra={
         <Space>

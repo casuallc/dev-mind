@@ -22,6 +22,7 @@ import SessionDiffModal from '../components/SessionDiffModal'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
 import { fmtTime } from '../../../shared/utils/format'
+import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
 
 // 活跃在前 + 创建时间倒序（与 SessionListPane 一致，用于自动选中第一个）
@@ -232,13 +233,15 @@ export default function SessionsBoard() {
           刷新
         </Button>
       }
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyFlexStyle }}
     >
-      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
         左侧选会话、右侧直接对话；「新对话」输入任务说明即创建 agent。列表视图可按状态筛选、搜索全部会话。
       </Typography.Paragraph>
 
       {view === 'chat' ? (
-        <div style={{ display: 'flex', alignItems: 'stretch' }}>
+        <div style={{ display: 'flex', alignItems: 'stretch', flex: 1, minHeight: 0 }}>
           <SessionListPane
             sessions={sessions}
             loading={loading}
@@ -250,7 +253,7 @@ export default function SessionsBoard() {
             keyword={keyword}
             onKeywordChange={setKeyword}
           />
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             {draft ? (
               <NewSessionDraft
                 onCreated={onDraftCreated}
@@ -317,7 +320,7 @@ export default function SessionsBoard() {
                   key={current.id}
                   summary={{ ...current, topic: current.taskSpec }}
                   apiBase="/sessions"
-                  maxHeight="calc(100vh - 400px)"
+                  maxHeight={null}
                   onChanged={load}
                   onStreamMeta={setStreamMeta}
                 />
@@ -328,7 +331,7 @@ export default function SessionsBoard() {
           </div>
         </div>
       ) : (
-        <>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
           <Space style={{ marginBottom: 12 }} wrap>
             <Select
               value={status}
@@ -352,7 +355,7 @@ export default function SessionsBoard() {
             pagination={false}
             locale={{ emptyText: '暂无会话。切到「对话」视图点「新对话」创建第一个。' }}
           />
-        </>
+        </div>
       )}
 
       <SessionDiffModal open={diff.open} diff={diff.data} onClose={diff.close} />

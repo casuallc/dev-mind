@@ -21,6 +21,7 @@ import {
   updateTemplate,
 } from '../api'
 import type { SessionTemplate } from '../types'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 const PREVIEW_VARS: Record<string, string> = {
   task: '新增登录页',
@@ -146,6 +147,8 @@ export default function SessionTemplates() {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title="会话模板"
       extra={
         <Space>

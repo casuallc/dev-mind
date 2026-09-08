@@ -36,6 +36,7 @@ import {
 } from '../../../shared/attachments/api'
 import { attachmentRawUrl } from '../../../shared/attachments/url'
 import { fmtTime } from '../../../shared/utils/format'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`
@@ -213,6 +214,8 @@ export default function AttachmentsPage() {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title={
         <Space size={12}>
           <span>附件管理</span>

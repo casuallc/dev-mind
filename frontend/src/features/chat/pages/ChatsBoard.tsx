@@ -16,6 +16,7 @@ import ChatPanel from '../../../shared/chat/ChatPanel'
 import type { StreamMeta } from '../../../shared/chat/types'
 import ChatListPane from '../components/ChatListPane'
 import NewChatDraft from '../components/NewChatDraft'
+import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 
 // 活跃在前 + 创建时间倒序（与 ChatListPane 一致，用于自动选中第一个）
 function sortForBoard(list: ChatSummary[]): ChatSummary[] {
@@ -144,8 +145,8 @@ export default function ChatsBoard() {
           刷新
         </Button>
       }
-      style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-      styles={{ body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } }}
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyFlexStyle }}
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
         纯问答不关联项目/仓库，agent 在干净沙箱中运行。左侧选问答、右侧直接对话；「新问答」输入问题即创建。

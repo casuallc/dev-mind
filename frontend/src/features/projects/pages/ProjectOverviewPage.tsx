@@ -7,6 +7,7 @@ import { listWorktrees } from '../api'
 import { useCurrentProject } from '../../../app/useCurrentProject'
 import type { WorktreeInfo } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { pageRootScrollStyle } from '../../../shared/utils/pageLayout'
 
 export default function ProjectOverviewPage() {
   const { projectId, project, loading, reload } = useCurrentProject()
@@ -29,7 +30,7 @@ export default function ProjectOverviewPage() {
   }
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Space direction="vertical" size={12} style={{ width: '100%', ...pageRootScrollStyle }}>
       <Card
         title={
           <Space>

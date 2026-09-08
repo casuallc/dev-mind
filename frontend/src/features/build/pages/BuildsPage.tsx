@@ -11,6 +11,7 @@ import type { ProjectServer } from '../../projects/types'
 import { listServers } from '../../projects/api'
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { durationMs, fmtTime } from '../../../shared/utils/format'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 const STATUS_COLOR: Record<BuildStatus, string> = {
   QUEUED: 'blue',
@@ -139,6 +140,8 @@ function BuildCenter({ id }: { id: string }) {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title="构建记录"
       extra={
         <Space>

@@ -7,6 +7,7 @@ import { getDashboard } from '../api'
 import { setCurrentProject } from '../../../app/currentProjectStore'
 import type { DashboardView, FailureItem } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { pageRootScrollStyle } from '../../../shared/utils/pageLayout'
 
 const REQ_STATUS: { key: string; label: string; color: string }[] = [
   { key: 'DRAFT', label: '草稿', color: 'default' },
@@ -56,7 +57,7 @@ export default function DashboardPage() {
   const waiting = data?.activeSessions.filter((s) => s.status.startsWith('WAITING')).length ?? 0
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+    <Space direction="vertical" size={16} style={{ width: '100%', ...pageRootScrollStyle }}>
       <Card
         title="需求状态分布"
         size="small"

@@ -84,7 +84,8 @@ export default function AdminLayout() {
       </Sider>
       <Layout>
         <AppHeader />
-        <Content style={{ padding: '16px 24px 24px', overflow: 'auto' }}>
+        {/* flex 列布局与工作台一致：子页根节点 flex:1 minHeight:0 撑满高度（见 shared/utils/pageLayout） */}
+        <Content style={{ padding: '16px 24px 24px', overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
           <Outlet />
         </Content>
       </Layout>

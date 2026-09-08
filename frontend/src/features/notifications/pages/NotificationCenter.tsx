@@ -33,6 +33,7 @@ import { executeNotificationAction } from '../actions'
 import { EVENT_TYPES, LEVEL_COLOR } from '../types'
 import type { AppNotification, NotificationChannel, NotificationPrefs } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 export default function NotificationCenter() {
   const navigate = useNavigate()
@@ -214,6 +215,8 @@ export default function NotificationCenter() {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title={
         <Space size={12}>
           <span>通知中心</span>

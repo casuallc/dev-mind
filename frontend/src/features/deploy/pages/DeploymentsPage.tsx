@@ -32,6 +32,7 @@ import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { STATUS_COLOR } from '../constants'
 import ConfigEditor from '../components/ConfigEditor'
 import DeployDetailDrawer from '../components/DeployDetailDrawer'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 export default function DeploymentsPage() {
   const projectId = useCurrentProjectId()
@@ -149,6 +150,8 @@ function DeployCenter({ id }: { id: string }) {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title="部署记录"
       extra={
         <Button icon={<ReloadOutlined />} onClick={load}>

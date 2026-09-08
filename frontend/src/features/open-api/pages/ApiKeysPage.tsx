@@ -20,6 +20,7 @@ import dayjs from 'dayjs'
 import { deleteApiKey, issueApiKey, listApiKeys, setApiKeyEnabled } from '../api'
 import type { ApiKey, IssuedKey } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 /**
  * CAP-20 后台页：API 密钥管理（仅 ADMIN）。
@@ -127,6 +128,8 @@ export default function ApiKeysPage() {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title="API 密钥"
       extra={
         <Space>

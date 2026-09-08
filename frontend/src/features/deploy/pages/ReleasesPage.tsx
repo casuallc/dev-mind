@@ -25,6 +25,7 @@ import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { fmtTime } from '../../../shared/utils/format'
 import { STATUS_COLOR } from '../constants'
 import ReleaseDetailDrawer from '../components/ReleaseDetailDrawer'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 interface CreateValues {
   buildId?: number
@@ -109,6 +110,8 @@ function ReleaseCenter({ id }: { id: string }) {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title="发版"
       extra={
         <Space>

@@ -26,6 +26,7 @@ import {
   updateIntegration,
 } from '../api'
 import type { Integration, IntegrationInput, IntegrationTestResult } from '../types'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 const TYPE_OPTIONS = [
   { value: 'GITLAB', label: 'GitLab（代码平台）' },
@@ -214,6 +215,8 @@ export default function IntegrationsPage() {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title="平台集成"
       extra={
         <Space>

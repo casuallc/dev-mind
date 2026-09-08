@@ -8,6 +8,7 @@ import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
 import ProjectFormDrawer from '../../components/ProjectFormDrawer'
 import { useProject } from '../../hooks/useProject'
 import { fmtTime } from '../../../../shared/utils/format'
+import { pageCardBodyScrollStyle } from '../../../../shared/utils/pageLayout'
 
 const SUB_TABS = [
   { key: 'repos', label: '仓库' },
@@ -39,8 +40,9 @@ export default function ProjectSettingsLayout() {
   const activeKey = SUB_TABS.some((t) => t.key === seg) ? seg : 'repos'
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Space direction="vertical" size={12} style={{ width: '100%', flex: 1, minHeight: 0 }}>
       <Card
+        style={{ flexShrink: 0 }}
         title={
           <Space>
             <Typography.Text strong>{project.name}</Typography.Text>
@@ -83,7 +85,12 @@ export default function ProjectSettingsLayout() {
         </Descriptions>
       </Card>
 
-      <Card size="small" title="项目配置">
+      <Card
+        size="small"
+        title="项目配置"
+        style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+        styles={{ body: pageCardBodyScrollStyle }}
+      >
         <Tabs
           activeKey={activeKey}
           onChange={(k) => navigate(`/admin/projects/${project.id}/${k}`)}

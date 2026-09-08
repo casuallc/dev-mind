@@ -10,6 +10,7 @@ import {
 } from '../api'
 import type { GitCredential } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 /**
  * CAP-24 我的 Git 凭证：每 git 平台 host 一条 PAT + 提交署名。
@@ -83,6 +84,8 @@ export default function GitCredentialsPage() {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title="我的 Git 凭证"
       extra={
         <Space>

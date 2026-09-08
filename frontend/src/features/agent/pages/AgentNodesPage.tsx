@@ -41,6 +41,7 @@ import RunnerPackagePanel from '../components/RunnerPackagePanel'
 import ConnLogsPanel from '../components/ConnLogsPanel'
 import { buildLinuxInstallScript, buildWindowsInstallScript, downloadTextFile } from '../utils/installScript'
 import { fmtTime } from '../../../shared/utils/format'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 const statusColor: Record<string, string> = {
   ONLINE: 'green',
@@ -218,6 +219,8 @@ export default function AgentNodesPage() {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title={
         <Space size={12}>
           <span>Agent 节点</span>

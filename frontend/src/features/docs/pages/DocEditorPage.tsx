@@ -32,6 +32,7 @@ import Markdown from '../components/Markdown'
 import { fmtTime } from '../../../shared/utils/format'
 import { uploadAttachment } from '../../../shared/attachments/api'
 import { attachmentRawUrl } from '../../../shared/attachments/url'
+import { pageRootScrollStyle } from '../../../shared/utils/pageLayout'
 
 const statusTag = (s: string) => (
   <Tag color={s === 'draft' ? 'default' : s === 'pending_confirm' ? 'gold' : 'green'}>{STATUS_LABEL[s as keyof typeof STATUS_LABEL] ?? s}</Tag>
@@ -273,7 +274,7 @@ export default function DocEditorPage() {
   const displayTitle = viewing ? `${doc?.title ?? '文档'}（历史 v${viewing.versionNo}）` : doc?.title
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Space direction="vertical" size={12} style={{ width: '100%', ...pageRootScrollStyle }}>
       {loading ? (
         <Card>
           <Spin />

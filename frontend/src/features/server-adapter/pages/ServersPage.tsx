@@ -39,6 +39,7 @@ import {
 import type { ExecResult, ServerListItem, StoredConfig, TemplateView } from '../types'
 import TemplatesTab from './TemplatesTab'
 import AuditTab from './AuditTab'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 const CAPABILITY_OPTIONS = ['build', 'deploy', 'release', 'test', 'logs', 'exec']
 
@@ -56,6 +57,8 @@ export default function ServersPage() {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title={
         <Space size={12}>
           <span>服务器运维</span>

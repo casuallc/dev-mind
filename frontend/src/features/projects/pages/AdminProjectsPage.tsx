@@ -12,6 +12,7 @@ import ProjectFormDrawer from '../components/ProjectFormDrawer'
 import { CLONE_STATUS_COLOR } from '../components/CloneLogDrawer'
 import type { Project } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 const STATUS_OPTIONS = [
   { value: 'ACTIVE', label: 'ACTIVE', color: 'green' },
@@ -174,6 +175,8 @@ export default function AdminProjectsPage() {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title="项目管理"
       extra={
         <Space>
