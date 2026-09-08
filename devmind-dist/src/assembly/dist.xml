@@ -19,6 +19,9 @@
             <scope>runtime</scope>
             <excludes>
                 <exclude>com.devmind:devmind-agent-runner</exclude>
+                <!-- runner 的私有日志实现：只排除 runner 自身挡不住其传递依赖进 libs，
+                     slf4j-simple 与 app 的 Logback 抢 SLF4J binding → 启动即崩 -->
+                <exclude>org.slf4j:slf4j-simple</exclude>
             </excludes>
         </dependencySet>
     </dependencySets>
