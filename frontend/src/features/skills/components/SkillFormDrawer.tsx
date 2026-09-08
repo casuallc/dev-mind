@@ -4,7 +4,7 @@ import { Button, Drawer, Form, Input, Select, Space, Tabs, message } from 'antd'
 import { createSkill, updateSkill } from '../api'
 import type { SkillDetail, SkillInput } from '../types'
 import type { Project } from '../../projects/types'
-import Markdown from '../../docs/components/Markdown'
+import Markdown from '../../../shared/components/Markdown'
 
 const NAME_RULE = /^[a-z0-9]+(-[a-z0-9]+)*$/
 

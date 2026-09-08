@@ -1,4 +1,4 @@
-// 只读 Markdown 渲染（FR-03）：react-markdown + 轻量样式。
+// 只读 Markdown 渲染：react-markdown + 轻量样式（.doc-md 见 index.css）。
 import ReactMarkdown from 'react-markdown'
 
 export default function Markdown({ content }: { content: string }) {
