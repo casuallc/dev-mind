@@ -101,11 +101,11 @@ export default function WorklogPage() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsForm] = Form.useForm()
 
-  // 一次取整周条目（上限 500 足够覆盖单人一周量），当日列表与各天条数均在前端派生
+  // 一次取整周条目（后端 size 上限 200，足够覆盖单人一周量），当日列表与各天条数均在前端派生
   const loadEntries = useCallback(() => {
     setLoading(true)
     const to = dayjs(entriesWeekStartStr).add(6, 'day').format('YYYY-MM-DD')
-    listEntries(entriesWeekStartStr, to, 0, 500, keyword || undefined)
+    listEntries(entriesWeekStartStr, to, 0, 200, keyword || undefined)
       .then((r) => setWeekEntries(r.items))
       .catch((e) => message.error(`加载条目失败: ${e.message}`))
       .finally(() => setLoading(false))
