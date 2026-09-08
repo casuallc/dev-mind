@@ -1,10 +1,10 @@
 // 新建会话选项数据 hook（CAP-31：项目固定为「当前项目」，不再可选）：
-// 模板/执行节点/项目仓库/需求/工作单元的加载与级联联动，供 NewSessionDraft 高级选项使用。
+// 场景（CAP-33）/执行节点/项目仓库/需求/工作单元的加载与级联联动，供 NewSessionDraft 高级选项使用。
 import { useEffect, useState } from 'react'
 import type { FormInstance } from 'antd'
 import { Form } from 'antd'
-import { listTemplates } from '../api'
-import type { SessionTemplate } from '../types'
+import { listScenarios } from '../../scenarios/api'
+import type { Scenario } from '../../scenarios/types'
 import { listRepos } from '../../projects/api'
 import type { ProjectRepo } from '../../projects/types'
 import { listRequirements, listWorkItems } from '../../requirements/api'
@@ -13,7 +13,8 @@ import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
 
 export interface SessionOptionData {
-  templates: SessionTemplate[]
+  /** 可选场景：全局 + 当前项目的 PROJECT 场景（仅启用项） */
+  scenarios: Scenario[]
   agentNodes: AgentNode[]
   /** 当前项目关联仓库（主库在前由后端保证 sortOrder；多选会话用） */
   repos: ProjectRepo[]
@@ -22,7 +23,7 @@ export interface SessionOptionData {
 }
 
 export function useSessionOptionData(form: FormInstance, projectId: string | null): SessionOptionData {
-  const [templates, setTemplates] = useState<SessionTemplate[]>([])
+  const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
   const [repos, setRepos] = useState<ProjectRepo[]>([])
   const [requirements, setRequirements] = useState<Requirement[]>([])
@@ -30,8 +31,8 @@ export function useSessionOptionData(form: FormInstance, projectId: string | nul
   const watchRequirementId = Form.useWatch('requirementId', form)
 
   useEffect(() => {
-    listTemplates()
-      .then(setTemplates)
+    listScenarios(true)
+      .then(setScenarios)
       .catch(() => undefined)
     listAgentNodes()
       .then(setAgentNodes)
@@ -67,5 +68,9 @@ export function useSessionOptionData(form: FormInstance, projectId: string | nul
       .catch(() => setWorkItems([]))
   }, [projectId, watchRequirementId, form])
 
-  return { templates, agentNodes, repos, requirements, workItems }
+  const visibleScenarios = scenarios.filter(
+    (s) => s.scope === 'GLOBAL' || (s.scope === 'PROJECT' && s.projectId === projectId),
+  )
+
+  return { scenarios: visibleScenarios, agentNodes, repos, requirements, workItems }
 }

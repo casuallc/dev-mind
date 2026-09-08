@@ -25,15 +25,6 @@ export interface SessionSummary {
   finishedAt?: string
 }
 
-export interface SessionTemplate {
-  id?: number
-  code: string
-  name: string
-  prompt: string
-  sortOrder: number
-  enabled: boolean
-}
-
 /** CAP-31：单仓库 diff 摘要（GET /sessions/{id}/diff 按库返回列表；单库失败只填 error） */
 export interface RepoDiffView {
   repoName: string

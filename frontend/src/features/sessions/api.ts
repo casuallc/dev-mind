@@ -1,6 +1,6 @@
 // 会话能力（CAP-05）的接口封装：页面只依赖本文件，不直接碰 shared client
 import { api } from '../../shared/api/client'
-import type { RepoDiffView, SessionSummary, SessionEvent, SessionTemplate } from './types'
+import type { RepoDiffView, SessionSummary, SessionEvent } from './types'
 
 // CAP-31：会话归属当前项目——projectId 为首参（工作台在 ProjectContextGate 内，必有当前项目）
 export function listSessions(
@@ -23,7 +23,8 @@ export function getSession(id: string): Promise<SessionSummary> {
 }
 
 export function createSession(body: {
-  templateCode?: string
+  /** CAP-33：场景 code（骨架渲染 + 预装配上下文包；旧 templateCode 参数后端仍兼容） */
+  scenarioCode?: string
   projectId?: string
   workItemId?: string
   requirementId?: string
@@ -84,28 +85,4 @@ export function removeWorktree(id: string): Promise<void> {
 
 export function deleteSession(id: string): Promise<void> {
   return api.del(`/sessions/${id}`)
-}
-
-// ---------------- 模板 ----------------
-
-export function listTemplates(): Promise<SessionTemplate[]> {
-  return api.get<SessionTemplate[]>('/session-templates')
-}
-
-export function createTemplate(t: SessionTemplate): Promise<SessionTemplate> {
-  return api.post<SessionTemplate>('/session-templates', t)
-}
-
-export function updateTemplate(t: SessionTemplate): Promise<SessionTemplate> {
-  return api.put<SessionTemplate>(`/session-templates/${t.id}`, t)
-}
-
-export function deleteTemplate(id: number): Promise<void> {
-  return api.del(`/session-templates/${id}`)
-}
-
-export function previewTemplate(code: string, vars: Record<string, string>): Promise<string> {
-  return api
-    .post<{ rendered: string }>(`/session-templates/${code}/preview`, vars)
-    .then((r) => r.rendered)
 }

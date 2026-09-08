@@ -5,7 +5,8 @@ import AdminLayout from './AdminLayout'
 // 各能力 feature 在此注册路由（积木式组装点）
 import SessionsBoard from '../features/sessions/pages/SessionsBoard'
 import SessionDetail from '../features/sessions/pages/SessionDetail'
-import SessionTemplates from '../features/sessions/pages/SessionTemplates'
+import ScenariosPage from '../features/scenarios/pages/ScenariosPage'
+import ProjectContextPage from '../features/scenarios/pages/ProjectContextPage'
 import ProjectsPage from '../features/projects/pages/ProjectsPage'
 import ProjectOverviewPage from '../features/projects/pages/ProjectOverviewPage'
 import RequirementsPage from '../features/requirements/pages/RequirementsPage'
@@ -87,6 +88,8 @@ export default function App() {
           <Route element={<ProjectContextGate />}>
             <Route path="/overview" element={<ProjectOverviewPage />} />
             <Route path="/requirements" element={<RequirementsPage />} />
+            {/* CAP-33 项目上下文资产（只读视图，管理在 /admin） */}
+            <Route path="/context" element={<ProjectContextPage />} />
             {/* CAP-05 会话（CAP-31 起归属当前项目；通用问答走个人 /chats） */}
             <Route path="/sessions" element={<SessionsBoard />} />
             <Route path="/sessions/:id" element={<SessionDetail />} />
@@ -107,7 +110,8 @@ export default function App() {
           <Route path="/docs" element={<Navigate to="/admin/docs" replace />} />
           <Route path="/docs/:id" element={<LegacyDocRedirect />} />
           <Route path="/servers" element={<Navigate to="/admin/servers" replace />} />
-          <Route path="/templates" element={<Navigate to="/admin/templates" replace />} />
+          {/* 会话模板已升级为场景（CAP-33），旧路径兼容 */}
+          <Route path="/templates" element={<Navigate to="/admin/scenarios" replace />} />
         </Route>
         {/* 管理后台（仅 ADMIN，RequireAdmin 守卫） */}
         <Route
@@ -145,8 +149,9 @@ export default function App() {
           <Route path="/admin/keys" element={<ApiKeysPage />} />
           {/* CAP-21 Agent 节点（远程执行节点注册/在线状态） */}
           <Route path="/admin/agent-nodes" element={<AgentNodesPage />} />
-          {/* CAP-05 会话模板 */}
-          <Route path="/admin/templates" element={<SessionTemplates />} />
+          {/* CAP-33 场景（会话模板的升级形态；/admin/templates 旧路径重定向） */}
+          <Route path="/admin/scenarios" element={<ScenariosPage />} />
+          <Route path="/admin/templates" element={<Navigate to="/admin/scenarios" replace />} />
           {/* CAP-04 知识库 */}
           <Route path="/admin/knowledge" element={<KnowledgeBase />} />
           {/* Skill 管理（基础模块，供其他业务引用） */}

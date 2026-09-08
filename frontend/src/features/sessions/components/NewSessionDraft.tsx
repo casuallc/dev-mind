@@ -22,7 +22,7 @@ export default function NewSessionDraft({
   const [form] = Form.useForm()
   // ProjectContextGate 保证进入本页必有当前项目
   const { projectId, project } = useCurrentProject()
-  const { templates, agentNodes, repos, requirements, workItems } = useSessionOptionData(form, projectId)
+  const { scenarios, agentNodes, repos, requirements, workItems } = useSessionOptionData(form, projectId)
   const [text, setText] = useState('')
   const [creating, setCreating] = useState(false)
   const [optionsOpen, setOptionsOpen] = useState(false)
@@ -46,7 +46,7 @@ export default function NewSessionDraft({
     () =>
       Boolean(
         values.model ||
-          values.templateCode ||
+          values.scenarioCode ||
           (values.agentNodeId && values.agentNodeId !== project?.agentNodeId) ||
           values.requiredLabels ||
           values.requirementId ||
@@ -66,7 +66,7 @@ export default function NewSessionDraft({
       const v = form.getFieldsValue()
       const s = await createSession({
         taskSpec: t,
-        templateCode: v.templateCode || undefined,
+        scenarioCode: v.scenarioCode || undefined,
         model: v.model || undefined,
         permissionMode: v.permissionMode || undefined,
         projectId,
@@ -146,11 +146,20 @@ export default function NewSessionDraft({
             optionFilterProp="label"
           />
         </Form.Item>
-        <Form.Item label="会话模板" name="templateCode" extra="模板作为 prompt 骨架包裹首条消息" style={{ marginBottom: 12 }}>
+        <Form.Item
+          label="场景"
+          name="scenarioCode"
+          extra="场景 = prompt 骨架 + 预装配上下文包（skills/文档/知识/背景），骨架包裹首条消息、资产注入沙箱"
+          style={{ marginBottom: 12 }}
+        >
           <Select
             allowClear
-            placeholder="（可选）选择模板"
-            options={templates.filter((t) => t.enabled).map((t) => ({ value: t.code, label: t.name }))}
+            placeholder="（可选）选择场景"
+            options={scenarios.map((s) => ({
+              value: s.code,
+              label: `${s.name}${s.scope === 'PROJECT' ? '（本项目）' : ''}`,
+            }))}
+            notFoundContent="暂无可用场景（后台 → 场景 创建）"
           />
         </Form.Item>
         <Form.Item label="模型" name="model" style={{ marginBottom: 12 }}>
@@ -178,7 +187,7 @@ export default function NewSessionDraft({
             <>
               新对话——在下方输入任务说明，发送即基于当前项目（{project?.name ?? projectId}）创建会话。
               <br />
-              需要多仓库 / 模板 / 执行节点等时，点输入框左下「高级选项」。
+              需要多仓库 / 场景 / 执行节点等时，点输入框左下「高级选项」。
             </>
           }
         />

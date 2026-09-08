@@ -7,8 +7,10 @@ export interface CreateChatPayload {
   message: string
   model?: string
   permissionMode?: string
-  /** 显式执行节点 id；留空 = 平台默认节点，无默认则创建失败（CAP-34 起无本机回落） */
+  /** 显式执行节点 id；留空 = 场景预设 / 平台默认节点，皆无命中创建失败（CAP-34 起无本机回落） */
   agentNodeId?: string
+  /** CAP-33 FR-05：场景 code；骨架渲染为开场 prompt，绑定资产注入沙箱 */
+  scenarioCode?: string
 }
 
 export const createChat = (p: CreateChatPayload) => api.post<ChatSummary>('/chats', p)

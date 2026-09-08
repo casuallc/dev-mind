@@ -10,6 +10,7 @@ import {
   Modal,
   Space,
   Spin,
+  Table,
   Tag,
   Typography,
 } from 'antd'
@@ -18,6 +19,7 @@ import {
   CaretRightOutlined,
   DeleteOutlined,
   DiffOutlined,
+  FileSearchOutlined,
   PauseOutlined,
   PoweroffOutlined,
   StopOutlined,
@@ -25,6 +27,8 @@ import {
 import { useParams } from 'react-router-dom'
 import { getSession, removeWorktree } from '../api'
 import type { SessionSummary } from '../types'
+import { getSessionContext } from '../../scenarios/api'
+import type { ContextSnapshot } from '../../scenarios/types'
 import { stateColor, ACTIVE_STATES } from '../stateMeta'
 import { useSessionActions } from '../hooks/useSessionActions'
 import ChatPanel from '../../../shared/chat/ChatPanel'
@@ -39,6 +43,9 @@ export default function SessionDetail() {
   const [session, setSession] = useState<SessionSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [sedimentOpen, setSedimentOpen] = useState(false)
+  const [contextOpen, setContextOpen] = useState(false)
+  // CAP-33 FR-07：已注入上下文快照（404 = 未挂场景/无注入，静默为空）
+  const [ctx, setCtx] = useState<ContextSnapshot | null>(null)
   const [streamMeta, setStreamMeta] = useState<StreamMeta>({ connected: false, fatal: false })
 
   const loadSession = useCallback(async () => {
@@ -50,6 +57,9 @@ export default function SessionDetail() {
     } finally {
       setLoading(false)
     }
+    getSessionContext(id)
+      .then(setCtx)
+      .catch(() => setCtx(null))
   }, [id])
 
   useEffect(() => {
@@ -114,6 +124,9 @@ export default function SessionDetail() {
           <Space>
             <Typography.Text code>{session.id}</Typography.Text>
             <Tag color={stateColor[session.state] ?? 'default'}>{session.state}</Tag>
+            {ctx?.scenarioCode && (
+              <Tag color="blue">场景：{ctx.scenarioName ?? ctx.scenarioCode}</Tag>
+            )}
             <Badge
               status={streamMeta.connected ? 'success' : streamMeta.fatal ? 'default' : 'processing'}
               text={streamMeta.connected ? '实时' : streamMeta.fatal ? '历史(终态)' : '连接中…'}
@@ -140,6 +153,11 @@ export default function SessionDetail() {
             <Button size="small" icon={<DiffOutlined />} loading={diff.loading} onClick={diff.show}>
               Diff
             </Button>
+            {ctx && (
+              <Button size="small" icon={<FileSearchOutlined />} onClick={() => setContextOpen(true)}>
+                已注入上下文
+              </Button>
+            )}
             <Button size="small" icon={<BulbOutlined />} onClick={() => setSedimentOpen(true)}>
               沉淀经验
             </Button>
@@ -196,6 +214,53 @@ export default function SessionDetail() {
       </Card>
 
       <SessionDiffModal open={diff.open} diff={diff.data} onClose={diff.close} />
+
+      {/* 已注入上下文（CAP-33 FR-07 快照：场景 + 三层来源清单） */}
+      <Modal
+        title={`已注入上下文${ctx?.scenarioName ? `：${ctx.scenarioName}` : ''}`}
+        open={contextOpen}
+        onCancel={() => setContextOpen(false)}
+        footer={null}
+        width={720}
+      >
+        {ctx && (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Descriptions size="small" column={2}>
+              <Descriptions.Item label="场景">{ctx.scenarioCode ?? '-'}</Descriptions.Item>
+              <Descriptions.Item label="装配时间">{fmtTime(ctx.assembledAt)}</Descriptions.Item>
+              <Descriptions.Item label="包大小">{ctx.package.totalBytes} 字节</Descriptions.Item>
+              <Descriptions.Item label="条目数">{ctx.package.entries}</Descriptions.Item>
+            </Descriptions>
+            <Typography.Text type="secondary">任务：{ctx.renderedTaskSpecPreview}</Typography.Text>
+            <Table
+              rowKey={(r) => `${r.kind}:${r.ref}`}
+              size="small"
+              pagination={false}
+              dataSource={ctx.items}
+              columns={[
+                {
+                  title: '类型',
+                  dataIndex: 'kind',
+                  width: 70,
+                  render: (k: string) => ({ knowledge: '知识', skill: 'Skill', doc: '文档' })[k] ?? k,
+                },
+                { title: '名称', dataIndex: 'name', ellipsis: true },
+                { title: '范围', dataIndex: 'scope', width: 90, render: (s?: string) => s ?? '-' },
+                {
+                  title: '来源',
+                  dataIndex: 'source',
+                  width: 90,
+                  render: (s: string) => (
+                    <Tag color={s === 'scenario' ? 'blue' : s === 'project-auto' ? 'green' : 'orange'}>
+                      {({ scenario: '场景绑定', 'project-auto': '项目自动', request: '请求追加' })[s] ?? s}
+                    </Tag>
+                  ),
+                },
+              ]}
+            />
+          </Space>
+        )}
+      </Modal>
 
       {/* 沉淀经验（CAP-04） */}
       <SedimentExperienceModal

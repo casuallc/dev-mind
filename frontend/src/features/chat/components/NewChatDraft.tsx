@@ -1,5 +1,5 @@
 // 新问答草稿态：输入框直接开问——首条消息即开场提问，发送即创建问答。
-// 高级选项只留 执行节点/模型/权限模式（无项目/仓库/模板，与项目会话完全分开），收进 Popover。
+// 高级选项：场景（CAP-33）/执行节点/模型/权限模式（无项目/仓库，与项目会话完全分开），收进 Popover。
 import { useEffect, useMemo, useState } from 'react'
 import { Badge, Button, Empty, Form, Input, Popover, Select, Space, message } from 'antd'
 import { SendOutlined, SettingOutlined } from '@ant-design/icons'
@@ -7,6 +7,8 @@ import { createChat } from '../api'
 import type { ChatSummary } from '../types'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
+import { listScenarios } from '../../scenarios/api'
+import type { Scenario } from '../../scenarios/types'
 
 const DEFAULTS = { permissionMode: 'acceptEdits' }
 
@@ -20,6 +22,7 @@ export default function NewChatDraft({
 }) {
   const [form] = Form.useForm()
   const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
+  const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [text, setText] = useState('')
   const [creating, setCreating] = useState(false)
   const [optionsOpen, setOptionsOpen] = useState(false)
@@ -29,6 +32,9 @@ export default function NewChatDraft({
     listAgentNodes()
       .then(setAgentNodes)
       .catch(() => undefined)
+    listScenarios(true)
+      .then(setScenarios)
+      .catch(() => undefined)
   }, [])
 
   // 有任意非默认选项时给入口加徽标点
@@ -36,6 +42,7 @@ export default function NewChatDraft({
     () =>
       Boolean(
         values.model ||
+          values.scenarioCode ||
           values.agentNodeId ||
           (values.permissionMode && values.permissionMode !== DEFAULTS.permissionMode),
       ),
@@ -53,6 +60,7 @@ export default function NewChatDraft({
         model: v.model || undefined,
         permissionMode: v.permissionMode || undefined,
         agentNodeId: v.agentNodeId || undefined,
+        scenarioCode: v.scenarioCode || undefined,
       })
       message.success(`问答已创建：${c.id}`)
       setText('')
@@ -68,6 +76,22 @@ export default function NewChatDraft({
   const optionsForm = (
     <div style={{ width: 340 }}>
       <Form form={form} layout="vertical" size="small" initialValues={DEFAULTS}>
+        <Form.Item
+          label="场景"
+          name="scenarioCode"
+          extra="场景骨架包裹首条提问，并注入其绑定的知识/skills/文档；PROJECT 场景按该项目身份装配"
+          style={{ marginBottom: 12 }}
+        >
+          <Select
+            allowClear
+            placeholder="（可选）选择场景"
+            options={scenarios.map((s) => ({
+              value: s.code,
+              label: `${s.name}${s.scope === 'PROJECT' ? '（项目）' : ''}`,
+            }))}
+            notFoundContent="暂无可用场景（后台 → 场景 创建）"
+          />
+        </Form.Item>
         <Form.Item
           label="执行节点"
           name="agentNodeId"
@@ -111,7 +135,7 @@ export default function NewChatDraft({
             <>
               新问答——在下方输入问题，发送即开始对话。
               <br />
-              纯问答不关联项目/仓库，在干净沙箱中运行；需要指定执行节点 / 模型时，点左下「高级选项」。
+              纯问答不关联项目/仓库，在干净沙箱中运行；需要场景 / 执行节点 / 模型时，点左下「高级选项」。
             </>
           }
         />
