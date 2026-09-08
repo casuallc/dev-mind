@@ -16,6 +16,11 @@ export function createAgentNode(body: { name: string; labels?: string }): Promis
   return api.post<IssuedNode>('/agent-nodes', body)
 }
 
+/** CAP-34 FR-07：编辑节点标签（CSV；runner 配置非空 labels 时会被其 hello 覆盖） */
+export function updateAgentNode(id: number, body: { labels?: string }): Promise<AgentNode> {
+  return api.put<AgentNode>(`/agent-nodes/${id}`, body)
+}
+
 export function disableAgentNode(id: number): Promise<AgentNode> {
   return api.post<AgentNode>(`/agent-nodes/${id}/disable`)
 }

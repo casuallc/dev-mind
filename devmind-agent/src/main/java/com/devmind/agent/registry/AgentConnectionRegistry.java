@@ -178,6 +178,24 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         return protocolVersions.getOrDefault(nodeId, AgentProtocol.DEFAULT_WHEN_ABSENT) >= minVersion;
     }
 
+    /** FR-07：标签匹配判定在 service（持有 DB），此处仅委托。 */
+    @Override
+    public boolean nodeMatches(String nodeId, List<String> requiredLabels) {
+        return nodeService.nodeMatchesLabels(nodeId, requiredLabels);
+    }
+
+    /** FR-07：DB 判 ONLINE 且标签匹配的候选中，挑当前确有活跃连接的第一个。 */
+    @Override
+    public String pickNodeByLabels(List<String> requiredLabels) {
+        for (AgentNodeEntity e : nodeService.onlineMatching(requiredLabels)) {
+            String nodeId = String.valueOf(e.getId());
+            if (isOnline(nodeId)) {
+                return nodeId;
+            }
+        }
+        return null;
+    }
+
     @Override
     public void launch(String nodeId, AgentLaunchCommand cmd) {
         WebSocketSession ws = requireConnection(nodeId);

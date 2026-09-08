@@ -48,6 +48,7 @@ export default function NewSessionDraft({
         values.model ||
           values.templateCode ||
           (values.agentNodeId && values.agentNodeId !== project?.agentNodeId) ||
+          values.requiredLabels ||
           values.requirementId ||
           values.workItemId ||
           (values.permissionMode && values.permissionMode !== DEFAULTS.permissionMode) ||
@@ -72,6 +73,7 @@ export default function NewSessionDraft({
         requirementId: v.requirementId || undefined,
         workItemId: v.workItemId || undefined,
         agentNodeId: v.agentNodeId || undefined,
+        requiredLabels: v.requiredLabels?.trim() || undefined,
         repoIds: v.repoIds?.length ? v.repoIds : undefined,
       })
       message.success(`会话已创建：${s.id}`)
@@ -116,6 +118,14 @@ export default function NewSessionDraft({
               }))}
             notFoundContent="暂无在线节点（后台 → Agent 节点 注册）"
           />
+        </Form.Item>
+        <Form.Item
+          label="标签要求"
+          name="requiredLabels"
+          extra="（可选）仅标签全覆盖的节点可被调度；默认节点不符时按标签在线匹配兜底，仍无命中则创建失败"
+          style={{ marginBottom: 12 }}
+        >
+          <Input placeholder="如 mvn,linux（逗号分隔）" allowClear />
         </Form.Item>
         <Form.Item label="关联需求" name="requirementId" style={{ marginBottom: 12 }}>
           <Select

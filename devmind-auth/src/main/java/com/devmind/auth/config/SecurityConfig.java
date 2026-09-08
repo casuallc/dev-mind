@@ -60,6 +60,8 @@ public class SecurityConfig {
                         // CAP-34 FR-03：上下文包拉取 permitAll 放行，节点 token 由控制器内判定
                         .requestMatchers(HttpMethod.GET, "/api/agent/context/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/agent-nodes", "/api/agent-nodes/**").hasRole("ADMIN")
+                        // CAP-34 FR-07：编辑节点标签
+                        .requestMatchers(HttpMethod.PUT, "/api/agent-nodes/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/agent-nodes/**").hasRole("ADMIN")
                         // CAP-20：AI 智能接入（全自动 bypassPermissions 会话）仅 ADMIN 可发起
                         .requestMatchers(HttpMethod.POST, "/api/projects/onboard").hasRole("ADMIN")

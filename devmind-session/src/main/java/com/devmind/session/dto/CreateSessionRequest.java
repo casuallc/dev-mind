@@ -17,6 +17,8 @@ import java.util.List;
  * @param permissionMode 权限模式（可选，覆盖全局）
  * @param agentNodeId    CAP-21 远程执行节点 ID（可选；空 = 跟随项目默认 → 平台默认节点，皆无则创建失败 409；
  *                       CAP-34 起保留值 "local" 已废除，传入报 400）
+ * @param requiredLabels CAP-34 FR-07 标签要求（CSV，可选）：调度链上各级节点须标签全覆盖，
+ *                       皆不符时按标签在线匹配兜底，仍无命中 409
  * @param repoIds        CAP-31 关联仓库（project_repos.id 列表；空 = 主库，兼容旧行为；
  *                       非空校验均属该项目，&gt;1 个走聚合目录多库工作区）
  */
@@ -30,6 +32,7 @@ public record CreateSessionRequest(
         String model,
         String permissionMode,
         String agentNodeId,
+        String requiredLabels,
         List<Long> repoIds) {
 
     /** 兼容构造器：CAP-31 之前的调用点（repoIds=null → 主库）。 */
@@ -37,6 +40,14 @@ public record CreateSessionRequest(
                                 String taskSpec, String baseBranch, String model, String permissionMode,
                                 String agentNodeId) {
         this(templateCode, projectId, workItemId, requirementId, taskSpec, baseBranch, model, permissionMode,
-                agentNodeId, null);
+                agentNodeId, null, null);
+    }
+
+    /** 兼容构造器：FR-07 之前的 10 参调用点（requiredLabels=null）。 */
+    public CreateSessionRequest(String templateCode, String projectId, String workItemId, String requirementId,
+                                String taskSpec, String baseBranch, String model, String permissionMode,
+                                String agentNodeId, List<Long> repoIds) {
+        this(templateCode, projectId, workItemId, requirementId, taskSpec, baseBranch, model, permissionMode,
+                agentNodeId, null, repoIds);
     }
 }

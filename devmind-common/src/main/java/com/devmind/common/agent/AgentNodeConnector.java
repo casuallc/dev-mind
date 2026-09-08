@@ -56,4 +56,20 @@ public interface AgentNodeConnector {
     default boolean supports(String nodeId, int minVersion) {
         return false;
     }
+
+    /**
+     * CAP-34 FR-07 标签调度：节点标签是否覆盖全部 required（required 为空 = 恒匹配）。
+     * 默认 true（未装配 agent 模块时退化为不门控，维持旧行为）。
+     */
+    default boolean nodeMatches(String nodeId, List<String> requiredLabels) {
+        return true;
+    }
+
+    /**
+     * CAP-34 FR-07 标签调度：在在线节点中挑一个标签覆盖全部 required 的（无命中返回 null）。
+     * 默认 null（未装配 agent 模块 = 无节点可挑）。
+     */
+    default String pickNodeByLabels(List<String> requiredLabels) {
+        return null;
+    }
 }

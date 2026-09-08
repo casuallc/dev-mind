@@ -32,6 +32,8 @@ export function createSession(body: {
   model?: string
   permissionMode?: string
   agentNodeId?: string
+  /** CAP-34 FR-07：标签要求（CSV），仅标签全覆盖的节点可被调度 */
+  requiredLabels?: string
   /** CAP-31：关联仓库（project_repos id 列表）；空 = 主库；>1 = 多库聚合目录 */
   repoIds?: number[]
 }): Promise<SessionSummary> {

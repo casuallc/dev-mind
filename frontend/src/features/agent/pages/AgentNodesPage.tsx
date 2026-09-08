@@ -34,6 +34,7 @@ import {
   listAgentNodes,
   setAgentNodeDefault,
   unsetAgentNodeDefault,
+  updateAgentNode,
   upgradeAgentNode,
 } from '../api'
 import type { AgentNode, IssuedNode, RunnerPackage } from '../types'
@@ -394,6 +395,9 @@ function NodeDrawer({
   onChanged: () => void
 }) {
   const [busy, setBusy] = useState(false)
+  // 标签草稿只在切换节点时重置——5s 轮询刷新 labels 不应覆盖用户正在编辑的输入
+  const [labelsDraft, setLabelsDraft] = useState(node.labels ?? '')
+  useEffect(() => setLabelsDraft(node.labels ?? ''), [node.id]) // eslint-disable-line react-hooks/exhaustive-deps
   const outdated = !!(pkg && node.runnerVersion && node.runnerVersion !== pkg.version)
 
   const run = async (fn: () => Promise<void>) => {
@@ -481,6 +485,13 @@ function NodeDrawer({
     })
   }
 
+  const onSaveLabels = () =>
+    run(async () => {
+      await updateAgentNode(node.id, { labels: labelsDraft.trim() || undefined })
+      message.success('标签已保存')
+      onChanged()
+    })
+
   const doDelete = () =>
     run(async () => {
       await deleteAgentNode(node.id)
@@ -532,10 +543,31 @@ function NodeDrawer({
               {node.protocolVersion != null ? `v${node.protocolVersion}` : 'v1（未上报）'}
             </Descriptions.Item>
             <Descriptions.Item label="最近心跳">{fmtTime(node.lastHeartbeatAt)}</Descriptions.Item>
+            <Descriptions.Item label="工具链" span={2}>
+              <ToolchainTags json={node.toolchain} />
+            </Descriptions.Item>
             <Descriptions.Item label="标签" span={2}>
               {node.labels || '-'}
             </Descriptions.Item>
           </Descriptions>
+
+          <Card size="small" title="标签（调度）">
+            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+              <Typography.Text type="secondary">
+                创建会话时可填「标签要求」，仅标签全覆盖的节点可被调度。runner 的 agent.properties 配置了 labels 时，其 hello 会覆盖此处编辑值。
+              </Typography.Text>
+              <Space.Compact style={{ width: '100%' }}>
+                <Input
+                  placeholder="如 windows,office（逗号分隔；留空 = 清除）"
+                  value={labelsDraft}
+                  onChange={(e) => setLabelsDraft(e.target.value)}
+                />
+                <Button type="primary" onClick={onSaveLabels}>
+                  保存
+                </Button>
+              </Space.Compact>
+            </Space>
+          </Card>
 
           <Card size="small" title="一键安装脚本">
             <Space direction="vertical" style={{ width: '100%' }} size={8}>
@@ -615,3 +647,26 @@ function NodeDrawer({
     </Drawer>
   )
 }
+
+// ---------------- 工具链标签（FR-07） ----------------
+/** toolchain JSON 对象串 → 「工具 版本」Tag 列表；解析失败原样展示。 */
+function ToolchainTags({ json }: { json?: string }) {
+  if (!json) return <>-</>
+  let entries: [string, string][]
+  try {
+    entries = Object.entries(JSON.parse(json) as Record<string, string>)
+  } catch {
+    return <Typography.Text code>{json}</Typography.Text>
+  }
+  if (entries.length === 0) return <>-</>
+  return (
+    <Space size={4} wrap>
+      {entries.map(([k, v]) => (
+        <Tag key={k}>
+          {k} {v}
+        </Tag>
+      ))}
+    </Space>
+  )
+}
+

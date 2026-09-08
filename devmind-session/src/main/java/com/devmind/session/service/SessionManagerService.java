@@ -231,15 +231,12 @@ public class SessionManagerService {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "CAP-34 起不存在本机会话：agentNodeId=\"local\" 保留值已废除，请指定 runner 节点或留空走默认路由");
         }
-        String agentNodeId = req.agentNodeId() != null && !req.agentNodeId().isBlank()
-                ? req.agentNodeId()
-                : (project != null && project.agentNodeId() != null && !project.agentNodeId().isBlank()
-                        ? project.agentNodeId()
-                        : platformDefaultNodeId());
-        if (agentNodeId == null || agentNodeId.isBlank()) {
-            throw new DevMindException(ErrorCode.CONFLICT,
-                    "无可用执行节点：请显式指定执行节点，或配置项目默认/平台默认节点");
-        }
+        AgentNodeConnector connector = requireConnector();
+        List<String> requiredLabels = parseCsv(req.requiredLabels());
+        String projectDefault = project != null && project.agentNodeId() != null
+                && !project.agentNodeId().isBlank() ? project.agentNodeId() : null;
+        String agentNodeId = routeAgentNode(req.agentNodeId(), projectDefault,
+                platformDefaultNodeId(), requiredLabels, connector, req.requiredLabels());
 
         // CAP-31：会话仓库快照（创建时从 project_repos 拷值，生命周期以快照为准）；
         // 空 = 项目无仓库行（兼容旧单库路径，按 projects 镜像列跑）
@@ -254,7 +251,6 @@ public class SessionManagerService {
 
         // CAP-24 FR-03：按会话发起人 + 主库 remoteUrl host 解析提交身份，随进程 env 注入
         Map<String, String> gitEnv = resolveGitEnv(identityService.currentActor(), project);
-        AgentNodeConnector connector = requireConnector();
         RemoteSessionRuntime remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector,
                 eventSaver, listener, props.toRuntimeSettings());
         // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
@@ -855,6 +851,47 @@ public class SessionManagerService {
     private String platformDefaultNodeId() {
         AgentNodeConnector connector = connectorProvider.getIfAvailable();
         return connector != null ? connector.defaultNodeId() : null;
+    }
+
+    /** FR-07：CSV → 去空白去空项的标签列表（null/空白 = 空列表 = 无标签门控）。 */
+    private static List<String> parseCsv(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(csv.split(","))
+                .map(String::strip).filter(s -> !s.isEmpty()).toList();
+    }
+
+    /**
+     * FR-02 + FR-07 节点路由（纯判定，可单测）：显式指定 > 项目默认 > 平台默认，
+     * requiredLabels 对每级门控；默认链皆不符且有标签要求时 pickNodeByLabels 在线兜底；
+     * 仍无命中 409。
+     */
+    static String routeAgentNode(String explicitNodeId, String projectDefaultNodeId, String platformDefaultNodeId,
+                                 List<String> requiredLabels, AgentNodeConnector connector,
+                                 String requiredLabelsRaw) {
+        if (explicitNodeId != null && !explicitNodeId.isBlank()) {
+            if (!connector.nodeMatches(explicitNodeId, requiredLabels)) {
+                throw new DevMindException(ErrorCode.CONFLICT,
+                        "指定节点 " + explicitNodeId + " 不满足标签要求: " + requiredLabelsRaw);
+            }
+            return explicitNodeId;
+        }
+        for (String candidate : new String[]{projectDefaultNodeId, platformDefaultNodeId}) {
+            if (candidate != null && !candidate.isBlank()
+                    && connector.nodeMatches(candidate, requiredLabels)) {
+                return candidate;
+            }
+        }
+        if (!requiredLabels.isEmpty()) {
+            String picked = connector.pickNodeByLabels(requiredLabels);
+            if (picked != null && !picked.isBlank()) {
+                return picked;
+            }
+        }
+        throw new DevMindException(ErrorCode.CONFLICT, requiredLabels.isEmpty()
+                ? "无可用执行节点：请显式指定执行节点，或配置项目默认/平台默认节点"
+                : "无满足标签的在线节点: " + requiredLabelsRaw);
     }
 
     /** CAP-34 FR-03：装配上下文包清单（失败降级为 null = 无上下文启动，沿用注入不阻塞语义）。 */
