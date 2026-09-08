@@ -2,9 +2,10 @@
 // 布局：头卡（默认尺寸，标题栏更高；extra 集中全部操作：验收/编辑/属性/Jira 操作/刷新/更多/返回列表）+ 白底 Tabs 卡。
 // 不设阶段引导卡：需求状态由工作单元 rollup 自动派生（全部完结 → ACCEPTANCE），验收按钮直接放头卡 extra。
 // AI 流程动作（分析/方案/拆分/拆分草稿）收进「更多」下拉保持可达，状态门禁以后端为准。
-// 属性面板非常驻：点「属性」按钮开右侧 Drawer；需求描述默认全文展开。
+// 属性面板非常驻：点「属性」按钮开右侧 Drawer；需求描述超长时默认收起（渐变遮罩 + 展开/收起，ResizeObserver 跟随图片加载重测）。
 // Jira 来源：托管字段本地只读（表单禁用 + 服务端强制），属性面板显示 Jira key 链接与远端状态。
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import {
   Button,
   Card,
@@ -33,6 +34,7 @@ import {
   PlayCircleOutlined,
   ProfileOutlined,
   ReloadOutlined,
+  UpOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
@@ -65,6 +67,66 @@ import {
   TYPE_LABEL,
 } from '../components/requirementMeta'
 import type { Design, RequirementOverview } from '../types'
+
+/** 描述收起高度（超出才显示展开/收起；留 24px 余量避免刚好贴线也出按钮） */
+const DESC_COLLAPSED_HEIGHT = 168
+
+/** 超长描述收起容器：默认限高 + 底部渐变遮罩 + 展开/收起；内容不超高则原样渲染无按钮。
+ *  用 ResizeObserver 重测（Jira 截图异步加载完成后高度才稳定）。 */
+function CollapsibleDescription({ children }: { children: ReactNode }) {
+  const [expanded, setExpanded] = useState(false)
+  const [overflows, setOverflows] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const check = () => setOverflows(el.scrollHeight > DESC_COLLAPSED_HEIGHT + 24)
+    check()
+    const ro = new ResizeObserver(check)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const clipped = overflows && !expanded
+  return (
+    <div>
+      <div
+        ref={ref}
+        style={{
+          position: 'relative',
+          maxHeight: clipped ? DESC_COLLAPSED_HEIGHT : undefined,
+          overflow: clipped ? 'hidden' : 'visible',
+        }}
+      >
+        {children}
+        {clipped && (
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 48,
+              background: 'linear-gradient(rgba(255,255,255,0), #fff)',
+              pointerEvents: 'none',
+            }}
+          />
+        )}
+      </div>
+      {overflows && (
+        <Button
+          type="link"
+          size="small"
+          style={{ padding: 0, marginTop: 4 }}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? <>收起 <UpOutlined /></> : <>展开全部 <DownOutlined /></>}
+        </Button>
+      )}
+    </div>
+  )
+}
 
 export default function RequirementDetailPage() {
   const { id: projectId, rid } = useParams<{ id: string; rid: string }>()
@@ -271,13 +333,15 @@ export default function RequirementDetailPage() {
         }
       >
         {r.description && (
-          r.source === 'JIRA' ? (
-            <JiraDescription description={r.description} pid={r.projectId} rid={r.id} />
-          ) : (
-            <Typography.Paragraph style={{ fontSize: 13, marginBottom: 0, whiteSpace: 'pre-wrap' }}>
-              {r.description}
-            </Typography.Paragraph>
-          )
+          <CollapsibleDescription>
+            {r.source === 'JIRA' ? (
+              <JiraDescription description={r.description} pid={r.projectId} rid={r.id} />
+            ) : (
+              <Typography.Paragraph style={{ fontSize: 13, marginBottom: 0, whiteSpace: 'pre-wrap' }}>
+                {r.description}
+              </Typography.Paragraph>
+            )}
+          </CollapsibleDescription>
         )}
       </Card>
 
