@@ -47,6 +47,9 @@ export const updateDaily = (id: number, body: { contentMd?: string; status?: str
 
 export const getWeekly = (weekStart: string) =>
   api.get<WeeklyReport | undefined>(`/worklog/weekly?weekStart=${weekStart}`)
+/** 最近 weeks 个周（含本周）有报告的周报，新周在前；周报视图的最近周选择条用 */
+export const listWeeklyRecent = (weeks = 7) =>
+  api.get<WeeklyReport[]>(`/worklog/weekly/recent?weeks=${weeks}`)
 export const generateWeekly = (weekStart: string, force = false) =>
   api.post<GenerateAck>('/worklog/weekly/generate', { weekStart, force })
 export const updateWeekly = (id: number, body: { summaryMd?: string; nextPlanMd?: string; status?: string }) =>

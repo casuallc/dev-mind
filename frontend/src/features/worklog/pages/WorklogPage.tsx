@@ -28,6 +28,7 @@ import {
   getWeekly,
   listDailyWeek,
   listEntries,
+  listWeeklyRecent,
   updateDaily,
   updateEntry,
   updateSettings,
@@ -47,6 +48,8 @@ import GitImportModal from '../components/GitImportModal'
 import RepoSubscriptionModal from '../components/RepoSubscriptionModal'
 import ReportEditor from '../components/ReportEditor'
 import WeekDayStrip from '../components/WeekDayStrip'
+import RecentWeekStrip from '../components/RecentWeekStrip'
+import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 
 type View = 'entries' | 'daily' | 'weekly'
 
@@ -101,6 +104,7 @@ export default function WorklogPage() {
   const [entriesTotal, setEntriesTotal] = useState(0)
   const [dailyWeek, setDailyWeek] = useState<Record<string, DailyReport>>({})
   const [weekly, setWeekly] = useState<WeeklyReport | undefined>()
+  const [recentWeeks, setRecentWeeks] = useState<Record<string, WeeklyReport>>({})
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
 
@@ -139,6 +143,18 @@ export default function WorklogPage() {
       .finally(() => setLoading(false))
   }, [dailyWeekStartStr])
 
+  const loadRecentWeeks = useCallback(() => {
+    listWeeklyRecent(7)
+      .then((list) => {
+        const map: Record<string, WeeklyReport> = {}
+        list.forEach((r) => {
+          map[r.weekStart] = r
+        })
+        setRecentWeeks(map)
+      })
+      .catch((e) => message.error(`加载最近周报失败: ${e.message}`))
+  }, [])
+
   const loadWeekly = useCallback(() => {
     setLoading(true)
     getWeekly(weekStartStr)
@@ -150,8 +166,11 @@ export default function WorklogPage() {
   const reload = useCallback(() => {
     if (view === 'entries') loadEntries()
     else if (view === 'daily') loadDailyWeek()
-    else loadWeekly()
-  }, [view, loadEntries, loadDailyWeek, loadWeekly])
+    else {
+      loadWeekly()
+      loadRecentWeeks()
+    }
+  }, [view, loadEntries, loadDailyWeek, loadWeekly, loadRecentWeeks])
 
   useEffect(reload, [reload])
 
@@ -189,7 +208,10 @@ export default function WorklogPage() {
         const r = kind === 'daily' ? await getDaily(dayStr) : await getWeekly(weekStartStr)
         if (r && (force ? r.updatedAt !== (kind === 'daily' ? prevDailyUpdatedAt : weekly?.updatedAt) : true)) {
           if (kind === 'daily') setDailyWeek((m) => ({ ...m, [dayStr]: r as DailyReport }))
-          else setWeekly(r as WeeklyReport)
+          else {
+            setWeekly(r as WeeklyReport)
+            setRecentWeeks((m) => ({ ...m, [weekStartStr]: r as WeeklyReport }))
+          }
           message.success('生成完成')
           return
         }
@@ -322,6 +344,8 @@ export default function WorklogPage() {
 
   return (
     <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
       title={
         <Space size={12}>
           <span>工作日志</span>
@@ -489,9 +513,11 @@ export default function WorklogPage() {
       {view === 'weekly' && (
         <>
           <Typography.Paragraph type="secondary">
-            AI 汇总本周（周一 {weekStartStr} 起）条目与日报，产出「上周总结 + 下周计划」草稿；人工修订后确认定稿。
+            点下方最近 7 周快速切换（更早的周走右上角周选择器）；AI 汇总该周（周一 {weekStartStr} 起）条目与日报，产出「上周总结 + 下周计划」草稿；人工修订后确认定稿。
           </Typography.Paragraph>
+          <RecentWeekStrip reports={recentWeeks} selected={weekStartStr} onSelect={setDate} />
           <ReportEditor
+            key={weekStartStr}
             id={weekly?.id}
             status={weekly?.status}
             updatedAt={weekly?.updatedAt}
@@ -503,12 +529,16 @@ export default function WorklogPage() {
             onGenerate={(force) => onGenerate('weekly', force)}
             onSave={async (values) => {
               if (weekly) {
-                setWeekly(await updateWeekly(weekly.id, { summaryMd: values.summaryMd, nextPlanMd: values.nextPlanMd }))
+                const updated = await updateWeekly(weekly.id, { summaryMd: values.summaryMd, nextPlanMd: values.nextPlanMd })
+                setWeekly(updated)
+                setRecentWeeks((m) => ({ ...m, [weekStartStr]: updated }))
               }
             }}
             onConfirm={async () => {
               if (weekly) {
-                setWeekly(await updateWeekly(weekly.id, { status: 'CONFIRMED' }))
+                const updated = await updateWeekly(weekly.id, { status: 'CONFIRMED' })
+                setWeekly(updated)
+                setRecentWeeks((m) => ({ ...m, [weekStartStr]: updated }))
               }
             }}
           />
