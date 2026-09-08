@@ -82,6 +82,7 @@ public class KnowledgeBaseService {
         validateEntry(req);
         KnowledgeEntryEntity e = new KnowledgeEntryEntity();
         applyEntry(e, req);
+        if (e.getStatus() == null || e.getStatus().isBlank()) e.setStatus("active"); // 未显式传状态默认 active，否则永不注入
         e.setHitCount(0);
         e.setCreatedAt(Instant.now());
         e.setUpdatedAt(e.getCreatedAt());
