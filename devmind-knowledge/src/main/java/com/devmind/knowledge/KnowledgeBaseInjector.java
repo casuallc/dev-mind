@@ -7,21 +7,25 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 
 /**
- * CAP-04 注入器（替换 LocalDirInjector）：从知识库服务取「全局按标签命中 + 项目特有」条目，
- * 组装 CLAUDE.md 写入 worktree（项目原有内容追加在后，不覆盖），并落 .claude/settings.local.json。
- * 注入成功后对用到的条目 hitCount+1（FR-07 清理依据）。
+ * CAP-04 装配器（原 KnowledgeBaseInjector 的文件写操作已随 CAP-34 移交 runner 侧
+ * devmind-common {@code agent.exec.ContextMaterializer}）：从知识库服务取「全局按标签命中 +
+ * 项目特有」条目，组装 CLAUDE.md 注入块与 .claude/settings.local.json 内容（权限白名单
+ * 属服务端策略，随包下发）。装配成功后对用到的条目 hitCount+1（FR-07 清理依据）。
  */
 @Component
 public class KnowledgeBaseInjector implements KnowledgeInjector {
 
     private static final Logger log = LoggerFactory.getLogger(KnowledgeBaseInjector.class);
+
+    /** 注入会话工作区的权限白名单（服务端策略，物化由 runner 完成）。 */
+    private static final String SETTINGS_LOCAL_JSON = "{\n" +
+            "  \"permissions\": {\n" +
+            "    \"allow\": [\"Bash(npm:*)\", \"Bash(mvn:*)\", \"Bash(git:*)\", \"Edit\", \"Write\", \"Read\"]\n" +
+            "  }\n" +
+            "}\n";
 
     private final KnowledgeProperties props;
     private final KnowledgeBaseService service;
@@ -32,49 +36,19 @@ public class KnowledgeBaseInjector implements KnowledgeInjector {
     }
 
     @Override
-    public String apply(String worktreePath, Project project, String taskSpec) {
+    public InjectionPackage build(Project project, String taskSpec) {
         if (!props.isEnabled()) {
-            return "";
+            return null;
         }
-        Path wt = Path.of(worktreePath).toAbsolutePath().normalize();
-
         List<EntryView> used = service.selectEntries(project);
         if (used.isEmpty()) {
-            log.info("知识注入：无命中条目，跳过 worktree={}", wt);
-            return "";
+            log.info("知识注入：无命中条目，跳过 project={}", project != null ? project.id() : null);
+            return null;
         }
-
-        Path orig = wt.resolve("CLAUDE.md");
-        String origContent = null;
-        if (Files.exists(orig)) {
-            try {
-                origContent = Files.readString(orig, StandardCharsets.UTF_8);
-            } catch (IOException e) {
-                log.warn("读取原 CLAUDE.md 失败: {}", orig, e);
-            }
-        }
-
-        String content = ClaudeMd.assemble(used, taskSpec, origContent);
-        try {
-            Files.writeString(wt.resolve("CLAUDE.md"), content, StandardCharsets.UTF_8);
-            writeSettingsLocal(wt);
-            service.bumpHits(used);
-            log.info("知识注入完成: worktree={} 条目={} 注入字节={}",
-                    wt, used.size(), content.length());
-        } catch (IOException e) {
-            log.warn("知识注入写文件失败: {}", wt, e);
-        }
-        return content;
-    }
-
-    private void writeSettingsLocal(Path wt) throws IOException {
-        Path dir = wt.resolve(".claude");
-        Files.createDirectories(dir);
-        String json = "{\n" +
-                "  \"permissions\": {\n" +
-                "    \"allow\": [\"Bash(npm:*)\", \"Bash(mvn:*)\", \"Bash(git:*)\", \"Edit\", \"Write\", \"Read\"]\n" +
-                "  }\n" +
-                "}\n";
-        Files.writeString(dir.resolve("settings.local.json"), json, StandardCharsets.UTF_8);
+        String claudeMd = ClaudeMd.assemble(used, taskSpec, null);
+        service.bumpHits(used);
+        log.info("知识注入装配完成: project={} 条目={} 注入字节={}",
+                project != null ? project.id() : null, used.size(), claudeMd.length());
+        return new InjectionPackage(claudeMd, SETTINGS_LOCAL_JSON, used.size());
     }
 }

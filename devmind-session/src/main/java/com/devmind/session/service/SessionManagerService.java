@@ -263,13 +263,8 @@ public class SessionManagerService {
                     : workspaceService.prepareSessionWorkspace(toWorkspaceSpecs(repoRows), id);
         }
         Path worktree = workspace != null ? workspace.path() : null;
-        if (!remote && project != null && worktree != null) {
-            try {
-                knowledgeInjector.apply(worktree.toString(), project, taskSpec);
-            } catch (Exception e) {
-                log.warn("知识注入失败(不阻塞会话): session={} err={}", id, e.getMessage());
-            }
-        }
+        // CAP-34：知识注入改由 runner 侧物化（launch 帧 contextManifest + HTTP 拉包），
+        // 装配在远程分支下发前完成（见下文 SessionContextService），此处不再直接写文件
 
         String model = req.model() != null && !req.model().isBlank() ? req.model() : props.getModel();
         String pm = req.permissionMode() != null && !req.permissionMode().isBlank()
