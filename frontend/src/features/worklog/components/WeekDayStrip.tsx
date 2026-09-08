@@ -36,14 +36,15 @@ export default function WeekDayStrip({ weekStart, renderStatus, selected, onSele
   const canShiftNext = weekStart.isBefore(currentMonday, 'day')
   const [dragX, setDragX] = useState(0)
   const [dragging, setDragging] = useState(false)
-  const gesture = useRef<{ startX: number; startY: number; axis: 'h' | 'v' | null } | null>(null)
+  const gesture = useRef<{ startX: number; startY: number; pointerId: number; axis: 'h' | 'v' | null } | null>(null)
   /** 拖拽结束后抑制紧随其后的 click，避免误选某天 */
   const suppressClick = useRef(false)
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    gesture.current = { startX: e.clientX, startY: e.clientY, axis: null }
+    gesture.current = { startX: e.clientX, startY: e.clientY, pointerId: e.pointerId, axis: null }
+    // 注意：不能在此 setPointerCapture——捕获会把后续 click 重定向到本条容器，
+    // 子格子的 onClick 永不触发（表现为日期点不动）。拖到横向阈值再捕获。
     setDragging(true)
-    e.currentTarget.setPointerCapture(e.pointerId)
   }
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -54,6 +55,7 @@ export default function WeekDayStrip({ weekStart, renderStatus, selected, onSele
     if (!g.axis) {
       if (Math.abs(dx) < DRAG_MIN && Math.abs(dy) < DRAG_MIN) return
       g.axis = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v'
+      if (g.axis === 'h') e.currentTarget.setPointerCapture(g.pointerId)
     }
     if (g.axis === 'h') setDragX(dx)
   }
