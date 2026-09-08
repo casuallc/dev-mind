@@ -1,6 +1,6 @@
 # CAP-34 Agent Runner 执行代理化（统一执行内核）
 
-> 能力 ID：CAP-34 ｜ 分类：底座 ｜ 状态：已落地（P0：FR-01/02/03，2026-09-08；FR-04~08 后续分期） ｜ 日期：2026-09-08
+> 能力 ID：CAP-34 ｜ 分类：底座 ｜ 状态：FR-01~05、07、08 已落地（2026-09-08）；FR-06 exec 帧仍为后续分期 ｜ 日期：2026-09-08
 
 ## 1. 目的
 
@@ -41,23 +41,34 @@ runner 不反向查服务端业务库。
   拉取 ContextPackage（skill 含二进制文件，不走 WS 帧；HTTP 拉取已有先例——
   RunnerUpgrader 下载升级包），内核物化到会话工作区后再拉起 claude。
   包拉取失败 = launch 失败回 `launched{ok:false}`，不静默降级为无上下文会话。
-- **FR-04 会话隔离强化（后续分期）**：进程树整体回收（kill 时杀子孙进程，Windows 经 Job Object /
-  `taskkill /T`，Linux 进程组）；runner 重启现场对账（启动扫描 `sessions/` 目录 +
-  hello 上报全量会话清单，孤儿 claude 进程回收、无主目录登记待清）；同 projectId
-  clone 缓存的 fetch/worktree 操作互斥锁（并发会话同库不再踩同一缓存）。
-- **FR-05 工作区 GC（后续分期）**：会话目录生命周期治理——结束收口（已有）之外，新增超龄目录清理
-  （N 天未活动且会话分支已 push 才删，配置项 `gcDays`，默认 14）与磁盘占用上报
-  （hello 带 `workspaceBytes`，服务端节点页展示）。
-- **FR-06 本地执行能力（exec 帧，后续分期）**：runner 接受命令执行指令（如 mvn/npm 构建测试步骤），
+- **FR-04 会话隔离强化（已落地 2026-09-08）**：进程树整体回收（kill 时杀子孙进程，Windows
+  `taskkill /F /T` 优先、`ProcessHandle.descendants()` 跨平台兜底）；runner 重启现场对账
+  （启动扫描 `sessions/` 目录 + hello 上报全量会话清单：会话目录 `.runner-pid` 记录的孤儿
+  claude 进程整树回收——startInstant 比对防 PID 复用误杀；无主目录登记待 GC 不直接删；
+  服务端重启后 hello 对账覆盖存量远程会话——清单内 reattach 挂回 RemoteSessionRuntime、
+  清单外判 FAILED）；同 projectId clone 缓存的 fetch/worktree 操作互斥锁（并发会话同库
+  不再踩同一缓存）。
+- **FR-05 工作区 GC（已落地 2026-09-08）**：会话目录生命周期治理——结束收口（已有）之外，新增超龄目录清理
+  （`gcDays` 天未活动才删，默认 14；删除判定保守：活跃会话/存活 pid/未超龄一律跳过，
+  仓库会话须分支已推送——`git ls-remote` 无 token 判定，失败即保留，宁跳不错删）与磁盘占用上报
+  （hello/heartbeat 带 `workspaceBytes`，服务端节点页展示）。
+- **FR-06 本地执行能力（exec 帧，后续分期，本轮暂缓）**：runner 接受命令执行指令（如 mvn/npm 构建测试步骤），
   stdout/stderr 流式回传日志帧，退出码收口。命令双层校验：服务端按白名单模板渲染
   （沿用 CAP-07 命令模板思路）+ runner 配置 `execAllowlist` 二次过滤。CAP-12
   StepRunner 新增 AgentNodeRunner 实现，build/test 执行器获得「在 agent 节点本地执行」
-  选项（节点即构建机，不再只能 SSH 到目标服务器）。
-- **FR-07 工具链探测与标签调度（后续分期）**：hello 上报工具链清单（java/mvn/node/docker 版本、
-  os/arch）+ 配置 labels；`agent_nodes` 存 capabilities/labels/toolchain，会话与
-  exec 调度按标签匹配（如构建任务只派给带 `mvn` 的节点），替代现状盲选。
-- **FR-08 协议版本协商（后续分期）**：hello 带 `protocolVersion`，服务端按 runner 版本决定下发
-  字段集（延续 CAP-21/25/30/31 的优雅降级惯例：旧 runner 忽略未知字段，新字段恒可选）。
+  选项（节点即构建机，不再只能 SSH 到目标服务器）。协议侧已预留 `AgentProtocol.EXEC_FRAMES=2`
+  与 `AgentNodeConnector.supports(nodeId, minVersion)` 门控。
+- **FR-07 工具链探测与标签调度（已落地 2026-09-08）**：hello 上报工具链清单（java/mvn/node/
+  npm/docker/git 版本、os/arch，各 5s 超时缺装不报）+ 配置 labels；`agent_nodes` 存
+  capabilities/labels/toolchain；节点标签服务端可编辑（PUT /api/agent-nodes/{id}，
+  runner 配置非空 labels 时 hello 覆盖服务端值——runner 配置为权威源）；会话创建支持
+  `requiredLabels`（CSV）：调度链显式指定 > 项目默认 > 平台默认逐级门控（不符 409/跳过），
+  皆不符时在线节点按标签匹配兜底，仍无命中 409「无满足标签的在线节点」。
+  exec 侧按标签调度随 FR-06 一并接入。
+- **FR-08 协议版本协商（已落地 2026-09-08）**：hello 带 `protocolVersion`（当前 2，v1=CAP-21~FR-03
+  基线），落库并在节点页展示；`AgentNodeConnector.supports()` 供「必须认识」的新下行帧
+  门控（本轮暂无消费者，FR-06 接入）；未知字段恒可选、旧 runner 忽略（延续 CAP-21/25/30/31
+  的优雅降级惯例）。
 
 ## 3. 插件化接口
 
@@ -76,8 +87,8 @@ runner 不反向查服务端业务库。
 ## 5. 数据模型
 
 ```
-agent_nodes  ── + labels (JSON 数组)                # FR-07 调度标签
-                + toolchain (JSON)                  # FR-07 工具链探测结果 {java:"21",mvn:"3.9",...}
+agent_nodes  ── + labels (CSV 逗号分隔)             # FR-07 调度标签（D5：与实体/前端现状一致，不用 JSON 数组）
+                + toolchain (JSON 对象串)            # FR-07 工具链探测结果 {"java":"21.0.2","mvn":"3.9.9",...}
                 + protocol_version                  # FR-08
                 + workspace_bytes                   # FR-05 hello 上报
 sessions     新会话 agent_node_id 必有值（FR-02 无本机回落）；
@@ -97,6 +108,7 @@ WS 协议扩展（JSON 帧）：
 
 ```
 GET    /api/agent/context/{sessionId}   ContextPackage 拉取（节点 token 认证；FR-03）
+PUT    /api/agent-nodes/{id}            节点标签编辑（ADMIN；FR-07，runner 配置非空 labels 时 hello 覆盖）
 WS     /ws/agent                        帧扩展见上（向下兼容）
 ```
 
@@ -106,8 +118,12 @@ WS     /ws/agent                        帧扩展见上（向下兼容）
   「无可用执行节点」），不产生挂死会话；同机 runner 上线后体验与原「本机会话」一致；
 - 所有会话获得上下文注入：worktree 内 CLAUDE.md 与 `.claude/skills/` 由 runner 物化；
 - runner 进程被强杀后重启：孤儿 claude 进程被回收，节点页会话状态对账正确；
+- 服务端进程重启后：runner 侧存活会话在 hello 对账中 reattach 挂回（exit 帧照常路由收口），
+  已消亡的存量会话判 FAILED；
 - 同项目两个并发会话不再因 clone 缓存竞争失败；
-- exec 帧：向带 mvn 标签的节点下发构建命令，日志实时回流，退出码正确收口；
+- 超龄会话目录 GC：分支已推送的删除、未推送的保留，节点页可见工作区磁盘占用；
+- 会话创建带「标签要求」：仅标签全覆盖节点可调度，无命中 409；节点页可编辑标签、查看工具链；
+- exec 帧（待 FR-06）：向带 mvn 标签的节点下发构建命令，日志实时回流，退出码正确收口；
 - 旧版 runner 连上新服务端：未知字段忽略，会话功能不炸（优雅降级）。
 
 ## 8. MVP 范围（暂不做）
