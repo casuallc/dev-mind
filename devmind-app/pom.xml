@@ -153,6 +153,20 @@
     <build>
         <plugins>
             <plugin>
+                <!-- application-local.yml 是本机专属（已 gitignore，可能含共享库凭证），只进 target/classes
+                     供 spring-boot:run 本地开发用，禁进 jar——否则随 jar 进 dist 分发包，任何 dist 实例
+                     裸起就直连打包机的库。dist 侧覆盖走外置 config/application-local.yml -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>application-local*.yml</exclude>
+                        <exclude>application-local*.yaml</exclude>
+                        <exclude>application-local*.properties</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+            <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <executions>
