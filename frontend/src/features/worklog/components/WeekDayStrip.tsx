@@ -2,13 +2,12 @@ import { Typography } from 'antd'
 import { LeftOutlined, RightOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useRef, useState } from 'react'
-import type { DailyReport } from '../types'
 
 interface Props {
   /** 周一 */
   weekStart: Dayjs
-  /** workDate(YYYY-MM-DD) → 日报；无报告的天不在 map 里 */
-  reports: Record<string, DailyReport>
+  /** 渲染某天第二行状态小字（dateKey=YYYY-MM-DD，future=未来日期）；不传则不渲染状态行 */
+  renderStatus?: (dateKey: string, future: boolean) => React.ReactNode
   /** 选中日期 YYYY-MM-DD */
   selected: string
   onSelect: (date: Dayjs) => void
@@ -16,20 +15,21 @@ interface Props {
   onShiftWeek: (n: number) => void
 }
 
-const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日']
 /** 滑动超过该距离（px）才触发切周 */
 const SWIPE_THRESHOLD = 60
 /** 区分点击与拖拽的最小位移（px） */
 const DRAG_MIN = 8
 
+const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日']
+
 /**
- * 日报周视图的周日选择条：一周 7 格（周一至周日），每格显示当日报告状态
- * （● 已确认 / ◐ 草稿 / ○ 无；未来日期显 —），点击选中某天。
+ * 通用的周日选择条（日报/工作条目共用）：一周 7 格（周一至周日），点击选中某天，
+ * 第二行状态小字由 renderStatus 自定义（日报=报告状态，条目=当日条数）。
  * 支持在整条上水平滑动（触摸/鼠标拖拽）切换上一周/下一周，两侧箭头为可点击的回退方式；
  * 未来周不可切（当前周隐藏右箭头、左滑不生效），未来日期的格子不可选。
  * 滑动手势用 Pointer Events 统一触摸与鼠标；touchAction: pan-y 保留纵向滚动。
  */
-export default function WeekDayStrip({ weekStart, reports, selected, onSelect, onShiftWeek }: Props) {
+export default function WeekDayStrip({ weekStart, renderStatus, selected, onSelect, onShiftWeek }: Props) {
   const today = dayjs().format('YYYY-MM-DD')
   /** 当前周周一；已处于当前周时禁止再向后切（未来周无意义） */
   const currentMonday = dayjs().startOf('week').add(1, 'day')
@@ -133,7 +133,6 @@ export default function WeekDayStrip({ weekStart, reports, selected, onSelect, o
         {Array.from({ length: 7 }, (_, i) => {
           const d = weekStart.add(i, 'day')
           const key = d.format('YYYY-MM-DD')
-          const report = reports[key]
           const future = key > today
           const active = key === selected
           return (
@@ -161,17 +160,7 @@ export default function WeekDayStrip({ weekStart, reports, selected, onSelect, o
                   </Typography.Text>
                 )}
               </div>
-              <div style={{ fontSize: 12, marginTop: 2 }}>
-                {future ? (
-                  <Typography.Text type="secondary">—</Typography.Text>
-                ) : !report ? (
-                  <Typography.Text type="secondary">○ 无</Typography.Text>
-                ) : report.status === 'CONFIRMED' ? (
-                  <Typography.Text style={{ color: '#52c41a' }}>● 已确认</Typography.Text>
-                ) : (
-                  <Typography.Text style={{ color: '#faad14' }}>◐ 草稿</Typography.Text>
-                )}
-              </div>
+              <div style={{ fontSize: 12, marginTop: 2 }}>{renderStatus?.(key, future)}</div>
             </div>
           )
         })}

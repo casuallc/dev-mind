@@ -1,7 +1,6 @@
 import {
   Button,
   Card,
-  DatePicker,
   Form,
   Input,
   InputNumber,
@@ -17,7 +16,7 @@ import {
 } from 'antd'
 import { PlusOutlined, ReloadOutlined, SettingOutlined, GithubOutlined, CodeOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   createEntry,
   deleteEntry,
@@ -56,21 +55,8 @@ type View = 'entries' | 'daily' | 'weekly'
 const mondayOf = (d: Dayjs) => d.startOf('week').add(1, 'day') // dayjs 周日开头，+1 = 周一
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-/** 条目 RangePicker 快捷范围：本周=周一至周日 */
-const RANGE_PRESETS: { label: string; value: [Dayjs, Dayjs] }[] = (() => {
-  const today = dayjs()
-  const monday = mondayOf(today)
-  return [
-    { label: '今天', value: [today, today] },
-    { label: '昨天', value: [today.subtract(1, 'day'), today.subtract(1, 'day')] },
-    { label: '本周', value: [monday, monday.add(6, 'day')] },
-    { label: '上周', value: [monday.subtract(7, 'day'), monday.subtract(1, 'day')] },
-    { label: '本月', value: [today.startOf('month'), today.endOf('month')] },
-  ]
-})()
-
 /**
- * CAP-28 个人工作日志与工时：条目（范围筛选+标题搜索+分页+git 导入）/ AI 日报（按周浏览）/ AI 周报。
+ * CAP-28 个人工作日志与工时：条目（按周浏览+标题搜索+git 导入）/ AI 日报（按周浏览）/ AI 周报。
  * 个人级页面，不进项目上下文（路由不进 ProjectContextGate）。
  */
 export default function WorklogPage() {
@@ -88,16 +74,17 @@ export default function WorklogPage() {
   const dayStr = day.format('YYYY-MM-DD')
   const isCurrentWeek = dailyWeekStartStr === mondayOf(dayjs()).format('YYYY-MM-DD')
 
-  // ---- 条目：范围筛选 + 标题搜索 + 分页 ----
-  const [range, setRange] = useState<[Dayjs, Dayjs]>(RANGE_PRESETS[0].value)
+  // ---- 条目：按周浏览（同日报的周日条），点某天看当日条目；标题搜索 + 前端分页 ----
+  const [entriesWeekStart, setEntriesWeekStart] = useState<Dayjs>(() => mondayOf(dayjs()))
+  const [entryDay, setEntryDay] = useState<Dayjs>(dayjs())
+  const entriesWeekStartStr = entriesWeekStart.format('YYYY-MM-DD')
+  const entryDayStr = entryDay.format('YYYY-MM-DD')
+  const isEntriesCurrentWeek = entriesWeekStartStr === mondayOf(dayjs()).format('YYYY-MM-DD')
   const [keyword, setKeyword] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const fromStr = range[0].format('YYYY-MM-DD')
-  const toStr = range[1].format('YYYY-MM-DD')
 
-  const [entries, setEntries] = useState<WorklogEntry[]>([])
-  const [entriesTotal, setEntriesTotal] = useState(0)
+  const [weekEntries, setWeekEntries] = useState<WorklogEntry[]>([])
   const [dailyWeek, setDailyWeek] = useState<Record<string, DailyReport>>({})
   const [weekly, setWeekly] = useState<WeeklyReport | undefined>()
   const [recentWeeks, setRecentWeeks] = useState<Record<string, WeeklyReport>>({})
@@ -114,16 +101,29 @@ export default function WorklogPage() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsForm] = Form.useForm()
 
+  // 一次取整周条目（上限 500 足够覆盖单人一周量），当日列表与各天条数均在前端派生
   const loadEntries = useCallback(() => {
     setLoading(true)
-    listEntries(fromStr, toStr, page - 1, pageSize, keyword || undefined)
-      .then((r) => {
-        setEntries(r.items)
-        setEntriesTotal(r.total)
-      })
+    const to = dayjs(entriesWeekStartStr).add(6, 'day').format('YYYY-MM-DD')
+    listEntries(entriesWeekStartStr, to, 0, 500, keyword || undefined)
+      .then((r) => setWeekEntries(r.items))
       .catch((e) => message.error(`加载条目失败: ${e.message}`))
       .finally(() => setLoading(false))
-  }, [fromStr, toStr, page, pageSize, keyword])
+  }, [entriesWeekStartStr, keyword])
+
+  /** 选中日当天的条目（表格数据源） */
+  const dayEntries = useMemo(
+    () => weekEntries.filter((e) => e.workDate === entryDayStr),
+    [weekEntries, entryDayStr],
+  )
+  /** workDate → 当日条数（周日条状态点用） */
+  const entryCountByDate = useMemo(() => {
+    const m: Record<string, number> = {}
+    weekEntries.forEach((e) => {
+      m[e.workDate] = (m[e.workDate] ?? 0) + 1
+    })
+    return m
+  }, [weekEntries])
 
   const loadDailyWeek = useCallback(() => {
     setLoading(true)
@@ -189,9 +189,20 @@ export default function WorklogPage() {
     setDate(dayjs())
   }
 
-  const applyRange = (r: [Dayjs | null, Dayjs | null] | null) => {
-    if (!r || !r[0] || !r[1]) return
-    setRange([r[0], r[1]])
+  // 条目周导航：同日报规则，已处于当前周时禁止再向后切未来周；切周/选天/搜索均回到第 1 页
+  const shiftEntriesWeek = (n: number) => {
+    if (n > 0 && isEntriesCurrentWeek) return
+    setEntriesWeekStart((w) => w.add(n * 7, 'day'))
+    setEntryDay((d) => d.add(n * 7, 'day'))
+    setPage(1)
+  }
+  const backToEntriesToday = () => {
+    setEntriesWeekStart(mondayOf(dayjs()))
+    setEntryDay(dayjs())
+    setPage(1)
+  }
+  const selectEntryDay = (d: Dayjs) => {
+    setEntryDay(d)
     setPage(1)
   }
 
@@ -250,9 +261,9 @@ export default function WorklogPage() {
     deleteEntry(e.id)
       .then(() => {
         message.success('已删除')
-        // 删空当前页且非首页时回退一页，避免空白页
-        if (entries.length === 1 && page > 1) setPage(page - 1)
-        else loadEntries()
+        // 删空当日当前页且非首页时回退一页，避免空白页
+        if (dayEntries.length === 1 && page > 1) setPage(page - 1)
+        loadEntries()
       })
       .catch((err) => message.error(err instanceof Error ? err.message : '删除失败'))
   }
@@ -289,12 +300,15 @@ export default function WorklogPage() {
   const extraByView: Record<View, React.ReactNode> = {
     entries: (
       <>
-        <DatePicker.RangePicker
-          value={range}
-          allowClear={false}
-          presets={RANGE_PRESETS}
-          onChange={(r) => applyRange(r)}
-        />
+        <Button
+          disabled={isEntriesCurrentWeek && entryDayStr === dayjs().format('YYYY-MM-DD')}
+          onClick={backToEntriesToday}
+        >
+          今天
+        </Button>
+        <Button icon={<ReloadOutlined />} onClick={reload}>
+          刷新
+        </Button>
         <Input.Search
           placeholder="搜索标题"
           allowClear
@@ -304,9 +318,6 @@ export default function WorklogPage() {
             if (!e.target.value) applyKeyword('')
           }}
         />
-        <Button icon={<ReloadOutlined />} onClick={reload}>
-          刷新
-        </Button>
         <Button icon={<GithubOutlined />} onClick={() => setImportOpen(true)}>
           从 Git 导入
         </Button>
@@ -380,16 +391,37 @@ export default function WorklogPage() {
       {view === 'entries' && (
         <>
           <Typography.Paragraph type="secondary">
-            手动补录（项目支持/会议/调研）或从 git 提交导入；日报/周报的素材来源。
+            按周浏览条目（周一至周日），在周日条上左右滑动或点两侧箭头切周，点某天只看当日记录；手动补录（项目支持/会议/调研）或从 git 提交导入；日报/周报的素材来源。
           </Typography.Paragraph>
+          <WeekDayStrip
+            weekStart={entriesWeekStart}
+            selected={entryDayStr}
+            onSelect={selectEntryDay}
+            onShiftWeek={shiftEntriesWeek}
+            renderStatus={(key, future) => {
+              if (future) return <Typography.Text type="secondary">—</Typography.Text>
+              const n = entryCountByDate[key] ?? 0
+              return n > 0 ? (
+                <Typography.Text style={{ color: '#1677ff' }}>{n} 条</Typography.Text>
+              ) : (
+                <Typography.Text type="secondary">○ 无</Typography.Text>
+              )
+            }}
+          />
+          <div style={{ textAlign: 'center', marginTop: -8, marginBottom: 12 }}>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {entriesWeekStart.format('YYYY-MM-DD')} ~ {entriesWeekStart.add(6, 'day').format('MM-DD')}
+              {isEntriesCurrentWeek && '（本周）'}
+            </Typography.Text>
+          </div>
           <Table
             rowKey="id"
             loading={loading}
-            dataSource={entries}
+            dataSource={dayEntries.slice((page - 1) * pageSize, page * pageSize)}
             pagination={{
               current: page,
               pageSize,
-              total: entriesTotal,
+              total: dayEntries.length,
               showSizeChanger: true,
               pageSizeOptions: [10, 20, 50, 100],
               showTotal: (t) => `共 ${t} 条`,
@@ -399,7 +431,7 @@ export default function WorklogPage() {
               },
             }}
             locale={{
-              emptyText: '范围内暂无条目：点「新建条目」手动补录，或「从 Git 导入」扫描提交',
+              emptyText: '当日暂无条目：点「新建条目」手动补录，或「从 Git 导入」扫描提交',
             }}
             columns={[
               { title: '日期', dataIndex: 'workDate', width: 110 },
@@ -481,7 +513,22 @@ export default function WorklogPage() {
           <Typography.Paragraph type="secondary">
             按周浏览日报（周一至周日），在周日条上左右滑动或点两侧箭头切换上一周/下一周，点某天查看/编辑；AI 汇总当日条目与 git 提交生成草稿，人工修订后「确认定稿」（已确认不可再重新生成）。
           </Typography.Paragraph>
-          <WeekDayStrip weekStart={dailyWeekStart} reports={dailyWeek} selected={dayStr} onSelect={setDay} onShiftWeek={shiftWeek} />
+          <WeekDayStrip
+            weekStart={dailyWeekStart}
+            selected={dayStr}
+            onSelect={setDay}
+            onShiftWeek={shiftWeek}
+            renderStatus={(key, future) => {
+              if (future) return <Typography.Text type="secondary">—</Typography.Text>
+              const r = dailyWeek[key]
+              if (!r) return <Typography.Text type="secondary">○ 无</Typography.Text>
+              return r.status === 'CONFIRMED' ? (
+                <Typography.Text style={{ color: '#52c41a' }}>● 已确认</Typography.Text>
+              ) : (
+                <Typography.Text style={{ color: '#faad14' }}>◐ 草稿</Typography.Text>
+              )
+            }}
+          />
           <div style={{ textAlign: 'center', marginTop: -8, marginBottom: 12 }}>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               {dailyWeekStart.format('YYYY-MM-DD')} ~ {dailyWeekStart.add(6, 'day').format('MM-DD')}
@@ -556,7 +603,9 @@ export default function WorklogPage() {
       <EntryFormDrawer
         open={editOpen}
         target={editTarget}
-        defaultDate={view === 'daily' ? dayStr : dayjs().format('YYYY-MM-DD')}
+        defaultDate={
+          view === 'daily' ? dayStr : view === 'entries' ? entryDayStr : dayjs().format('YYYY-MM-DD')
+        }
         saving={saving}
         onCancel={() => setEditOpen(false)}
         onSave={onSaveEntry}
