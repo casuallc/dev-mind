@@ -174,8 +174,9 @@ export default function WorklogPage() {
 
   useEffect(reload, [reload])
 
-  // 周导航：±7 天整体平移（选中日保持星期几不变）；回本周 = 当前周 + 选中今天
+  // 周导航：±7 天整体平移（选中日保持星期几不变），已处于当前周时禁止再向后切未来周
   const shiftWeek = (n: number) => {
+    if (n > 0 && isCurrentWeek) return
     setDailyWeekStart((w) => w.add(n * 7, 'day'))
     setDay((d) => d.add(n * 7, 'day'))
   }
@@ -318,9 +319,17 @@ export default function WorklogPage() {
       </>
     ),
     daily: (
-      <Button icon={<ReloadOutlined />} onClick={reload}>
-        刷新
-      </Button>
+      <>
+        <Button
+          disabled={isCurrentWeek && dayStr === dayjs().format('YYYY-MM-DD')}
+          onClick={backToCurrentWeek}
+        >
+          今天
+        </Button>
+        <Button icon={<ReloadOutlined />} onClick={reload}>
+          刷新
+        </Button>
+      </>
     ),
     weekly: (
       <Button icon={<ReloadOutlined />} onClick={reload}>
@@ -478,11 +487,6 @@ export default function WorklogPage() {
               {dailyWeekStart.format('YYYY-MM-DD')} ~ {dailyWeekStart.add(6, 'day').format('MM-DD')}
               {isCurrentWeek && '（本周）'}
             </Typography.Text>
-            {!isCurrentWeek && (
-              <Button type="link" size="small" onClick={backToCurrentWeek}>
-                回到本周
-              </Button>
-            )}
           </div>
           <ReportEditor
             key={dayStr}

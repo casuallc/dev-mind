@@ -25,11 +25,15 @@ const DRAG_MIN = 8
 /**
  * 日报周视图的周日选择条：一周 7 格（周一至周日），每格显示当日报告状态
  * （● 已确认 / ◐ 草稿 / ○ 无；未来日期显 —），点击选中某天。
- * 支持在整条上水平滑动（触摸/鼠标拖拽）切换上一周/下一周，两侧箭头为可点击的回退方式。
+ * 支持在整条上水平滑动（触摸/鼠标拖拽）切换上一周/下一周，两侧箭头为可点击的回退方式；
+ * 未来周不可切（当前周隐藏右箭头、左滑不生效），未来日期的格子不可选。
  * 滑动手势用 Pointer Events 统一触摸与鼠标；touchAction: pan-y 保留纵向滚动。
  */
 export default function WeekDayStrip({ weekStart, reports, selected, onSelect, onShiftWeek }: Props) {
   const today = dayjs().format('YYYY-MM-DD')
+  /** 当前周周一；已处于当前周时禁止再向后切（未来周无意义） */
+  const currentMonday = dayjs().startOf('week').add(1, 'day')
+  const canShiftNext = weekStart.isBefore(currentMonday, 'day')
   const [dragX, setDragX] = useState(0)
   const [dragging, setDragging] = useState(false)
   const gesture = useRef<{ startX: number; startY: number; axis: 'h' | 'v' | null } | null>(null)
@@ -61,7 +65,9 @@ export default function WeekDayStrip({ weekStart, reports, selected, onSelect, o
     setDragging(false)
     if (g.axis === 'h') {
       suppressClick.current = true
-      if (Math.abs(dragX) > SWIPE_THRESHOLD) onShiftWeek(dragX < 0 ? 1 : -1)
+      if (Math.abs(dragX) > SWIPE_THRESHOLD && (dragX > 0 || canShiftNext)) {
+        onShiftWeek(dragX < 0 ? 1 : -1)
+      }
     }
     setDragX(0)
   }
@@ -94,14 +100,16 @@ export default function WeekDayStrip({ weekStart, reports, selected, onSelect, o
       >
         <LeftOutlined />
       </div>
-      <div
-        role="button"
-        aria-label="下一周"
-        style={{ ...arrowStyle, right: 4 }}
-        onClick={() => onShiftWeek(1)}
-      >
-        <RightOutlined />
-      </div>
+      {canShiftNext && (
+        <div
+          role="button"
+          aria-label="下一周"
+          style={{ ...arrowStyle, right: 4 }}
+          onClick={() => onShiftWeek(1)}
+        >
+          <RightOutlined />
+        </div>
+      )}
       <div
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -131,13 +139,15 @@ export default function WeekDayStrip({ weekStart, reports, selected, onSelect, o
           return (
             <div
               key={key}
-              onClick={() => onSelect(d)}
+              onClick={() => {
+                if (!future) onSelect(d)
+              }}
               style={{
                 flex: 1,
                 minWidth: 0,
                 padding: '6px 0 4px',
                 textAlign: 'center',
-                cursor: 'pointer',
+                cursor: future ? 'default' : 'pointer',
                 border: `1px solid ${active ? '#1677ff' : '#f0f0f0'}`,
                 borderRadius: 8,
                 background: active ? '#e6f4ff' : undefined,
