@@ -67,9 +67,14 @@ public class AgentRunnerMain {
             log.info("对账登记无主会话目录 {} 个（待 GC）: {}", report.ownerlessDirs().size(), report.ownerlessDirs());
         }
 
+        // CAP-34 FR-05：工作区磁盘占用（hello/heartbeat 上报）+ 超龄会话目录 GC 调度
+        var gc = new com.devmind.common.agent.exec.WorkspaceGc(config.workspaceRoot());
+        java.util.concurrent.atomic.AtomicLong workspaceBytes = new java.util.concurrent.atomic.AtomicLong(-1);
+        Thread.ofVirtual().name("workspace-usage-init").start(() -> workspaceBytes.set(gc.usageBytes()));
+
         ServerConnection conn = new ServerConnection(config, mapper,
                 frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, workspace, connRef[0]),
-                () -> connRef[0].send(helloFrame(sessions, version)));
+                () -> connRef[0].send(helloFrame(sessions, version, workspaceBytes.get())));
         connRef[0] = conn;
 
         ScheduledExecutorService heartbeat = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -78,11 +83,27 @@ public class AgentRunnerMain {
             return t;
         });
         heartbeat.scheduleWithFixedDelay(
-                () -> conn.send(Map.of("type", "heartbeat")), HEARTBEAT_MS, HEARTBEAT_MS, TimeUnit.MILLISECONDS);
+                () -> conn.send(heartbeatFrame(workspaceBytes.get())), HEARTBEAT_MS, HEARTBEAT_MS, TimeUnit.MILLISECONDS);
+
+        // FR-05 GC：启动 10 分钟后首跑，其后按 gcIntervalMinutes 巡检；跑完刷新磁盘占用缓存
+        ScheduledExecutorService gcTimer = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "workspace-gc");
+            t.setDaemon(true);
+            return t;
+        });
+        gcTimer.scheduleWithFixedDelay(() -> {
+            try {
+                gc.run(config.gcDays(), java.util.Set.copyOf(sessions.activeSessionIds()));
+                workspaceBytes.set(gc.usageBytes());
+            } catch (Exception e) {
+                log.warn("工作区 GC 异常（下轮重试）: {}", e.getMessage());
+            }
+        }, 10, config.gcIntervalMinutes(), TimeUnit.MINUTES);
 
         Runtime.getRuntime().addShutdownHook(Thread.ofPlatform().unstarted(() -> {
             log.info("runner 关闭中，终止全部会话进程");
             heartbeat.shutdownNow();
+            gcTimer.shutdownNow();
             sessions.killAll();
             conn.shutdown();
         }));
@@ -90,14 +111,27 @@ public class AgentRunnerMain {
         conn.run(); // 阻塞：断线重连循环
     }
 
-    private static Map<String, Object> helloFrame(RunnerSessionRegistry sessions, String version) {
+    private static Map<String, Object> helloFrame(RunnerSessionRegistry sessions, String version, long workspaceBytes) {
         Map<String, Object> hello = new LinkedHashMap<>();
         hello.put("type", "hello");
         hello.put("os", System.getProperty("os.name") + " / " + System.getProperty("os.arch"));
         hello.put("capabilities", "claude");
         hello.put("version", version);
         hello.put("activeSessions", sessions.activeSessionIds());
+        if (workspaceBytes >= 0) {
+            hello.put("workspaceBytes", workspaceBytes); // FR-05：占用未算完（-1）时不带，旧服务端本就不读
+        }
         return hello;
+    }
+
+    /** FR-05：心跳带 workspaceBytes 让节点页数据保鲜（重连才发 hello 更新太慢）。 */
+    private static Map<String, Object> heartbeatFrame(long workspaceBytes) {
+        Map<String, Object> hb = new LinkedHashMap<>();
+        hb.put("type", "heartbeat");
+        if (workspaceBytes >= 0) {
+            hb.put("workspaceBytes", workspaceBytes);
+        }
+        return hb;
     }
 
     private static void handleFrame(JsonNode frame, RunnerConfig config, Path configFile,

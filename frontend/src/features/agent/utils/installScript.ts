@@ -50,7 +50,8 @@ $lines = @(
   "token=$Token",
   "workDir=$workDir",
   'maxConcurrent=4',
-  'executor=claude'
+  'executor=claude',
+  '#gcDays=14  # 会话工作区超龄回收天数(CAP-34 FR-05,默认 14)'
 )
 [IO.File]::WriteAllLines($conf, $lines, (New-Object Text.UTF8Encoding($false)))
 
@@ -99,6 +100,7 @@ token=$TOKEN
 workDir=$INSTALL_DIR/work
 maxConcurrent=4
 executor=claude
+#gcDays=14  # 会话工作区超龄回收天数(CAP-34 FR-05,默认 14)
 EOF
 
 echo '[install] 后台启动 runner(日志 runner.log)...'

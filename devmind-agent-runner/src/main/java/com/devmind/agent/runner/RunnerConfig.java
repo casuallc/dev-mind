@@ -20,13 +20,23 @@ import java.util.Properties;
  * project.&lt;projectId&gt;=D:\repos\xxx   # 项目 → 节点本地路径映射（CAP-25 起仅作降级回退）
  * workspaceRoot=./workspaces # CAP-25 托管工作区根目录（收到带 repo 块的 launch 时启用：
  *                            # 克隆缓存 <root>/<projectId>/main + 会话 worktree <root>/<projectId>/sessions/<sid>）
+ * gcDays=14                  # CAP-34 FR-05：会话目录超龄清理阈值（天）
+ * gcIntervalMinutes=360      # GC 巡检间隔（分钟，启动后 10 分钟首跑）
  * maxConcurrent=4
  * executor=claude            # claude=真实 CLI / fake=内置假进程（自测/无 claude 环境）
  * </pre>
  */
 public record RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
                            Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
-                           String executor, Path workspaceRoot) {
+                           String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes) {
+
+    /** 兼容构造（FR-05 前的 9 参签名，测试/旧调用用）：GC 默认值 14 天 / 360 分钟。 */
+    public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
+                        Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
+                        String executor, Path workspaceRoot) {
+        this(serverUrl, token, claudePath, permissionMode, workDir, projectPaths, maxConcurrent,
+                executor, workspaceRoot, 14, 360);
+    }
 
     public static RunnerConfig load(Path file) throws IOException {
         Properties p = new Properties();
@@ -49,7 +59,9 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                 projects,
                 Integer.parseInt(p.getProperty("maxConcurrent", "4").strip()),
                 p.getProperty("executor", "claude").strip(),
-                Path.of(p.getProperty("workspaceRoot", "./workspaces").strip()));
+                Path.of(p.getProperty("workspaceRoot", "./workspaces").strip()),
+                Integer.parseInt(p.getProperty("gcDays", "14").strip()),
+                Integer.parseInt(p.getProperty("gcIntervalMinutes", "360").strip()));
     }
 
     /** 会话工作目录：项目映射优先，否则兜底 workDir。 */

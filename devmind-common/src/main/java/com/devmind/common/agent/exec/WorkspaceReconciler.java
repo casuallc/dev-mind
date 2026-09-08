@@ -117,6 +117,15 @@ public class WorkspaceReconciler {
         }
     }
 
+    /** FR-05 GC 复用：会话目录有无可信的存活 pid 文件（有 = 进程还活着，不得删）。 */
+    public static boolean hasLivePidFile(Path sessionDir) {
+        Path pidFile = sessionDir.resolve(PID_FILE);
+        if (!Files.isRegularFile(pidFile)) {
+            return false;
+        }
+        return new WorkspaceReconciler(sessionDir).readLivePid(pidFile) != null;
+    }
+
     /** 存量会话目录：<root>/<projectId>/sessions/<sid>（跳过 _chat 桶）+ <root>/_chat/<sid>。 */
     private List<Path> sessionDirs() {
         List<Path> out = new ArrayList<>();
