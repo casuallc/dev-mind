@@ -246,6 +246,13 @@ public class AgentRunnerMain {
             }
             log.info("拉起会话: session={} project={} cwd={}", sessionId, projectId, workDir);
 
+            // CAP-34 FR-03：launch 帧带 contextManifest → HTTP 拉包物化后再拉起；
+            // 拉取/校验/物化失败即 launch 失败（走 catch 回 launched{ok:false}），不静默降级为无上下文会话
+            JsonNode manifestNode = frame.path("contextManifest");
+            if (manifestNode.isObject() && !manifestNode.path("sha256").asText("").isBlank()) {
+                ContextPuller.pullAndMaterialize(config, sessionId, manifestNode, workDir);
+            }
+
             // CAP-24：服务端下发的提交身份等附加 env（旧服务端无此字段 → 空）
             java.util.Map<String, String> env = new java.util.HashMap<>();
             JsonNode envNode = frame.path("env");

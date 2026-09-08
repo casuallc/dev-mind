@@ -24,15 +24,19 @@ public final class RunnerUpgrader {
     private RunnerUpgrader() {
     }
 
-    /** 由 serverUrl（ws://host:8080/ws/agent）派生下载 URL：换 scheme + 换 path + 拼 token。 */
-    public static String downloadUrl(RunnerConfig config) {
+    /** 由 serverUrl（ws://host:8080/ws/agent）派生服务端 HTTP base（换 scheme，去 path）。 */
+    public static String serverHttpBase(RunnerConfig config) {
         URI uri = URI.create(config.serverUrl());
         String scheme = switch (uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT)) {
             case "wss" -> "https";
             default -> "http";
         };
-        String base = scheme + "://" + uri.getAuthority();
-        return base + "/api/agent-nodes/runner-package/download?token="
+        return scheme + "://" + uri.getAuthority();
+    }
+
+    /** runner 包下载 URL：HTTP base + 固定 path + token（query 参数，与 WS 接入同通道先例）。 */
+    public static String downloadUrl(RunnerConfig config) {
+        return serverHttpBase(config) + "/api/agent-nodes/runner-package/download?token="
                 + URLEncoder.encode(config.token(), java.nio.charset.StandardCharsets.UTF_8);
     }
 
