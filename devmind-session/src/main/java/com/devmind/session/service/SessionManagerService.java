@@ -12,6 +12,7 @@ import com.devmind.common.integration.GitIdentityProvider;
 import com.devmind.common.integration.RepoGitGateway;
 import com.devmind.common.notification.NotificationEvent;
 import com.devmind.knowledge.KnowledgeInjector;
+import com.devmind.common.agent.exec.ContextManifest;
 import com.devmind.notification.NotificationPublisher;
 import com.devmind.project.WorktreeManager;
 import com.devmind.project.workspace.Workspace;
@@ -85,6 +86,8 @@ public class SessionManagerService {
     private final WorktreeManager worktreeManager;
     private final WorkspaceService workspaceService;
     private final KnowledgeInjector knowledgeInjector;
+    /** CAP-34 FR-03：上下文包装配（launch 帧 contextManifest + runner HTTP 拉包的供给侧） */
+    private final SessionContextService sessionContextService;
     private final NotificationPublisher notificationPublisher;
     private final DomainEventPublisher eventPublisher;
     private final SessionRepository sessionRepo;
@@ -118,6 +121,7 @@ public class SessionManagerService {
                                  WorktreeManager worktreeManager,
                                  WorkspaceService workspaceService,
                                  KnowledgeInjector knowledgeInjector,
+                                 SessionContextService sessionContextService,
                                  NotificationPublisher notificationPublisher,
                                  DomainEventPublisher eventPublisher,
                                  SessionRepository sessionRepo,
@@ -141,6 +145,7 @@ public class SessionManagerService {
         this.worktreeManager = worktreeManager;
         this.workspaceService = workspaceService;
         this.knowledgeInjector = knowledgeInjector;
+        this.sessionContextService = sessionContextService;
         this.notificationPublisher = notificationPublisher;
         this.eventPublisher = eventPublisher;
         this.sessionRepo = sessionRepo;
@@ -283,10 +288,12 @@ public class SessionManagerService {
                 // CAP-31：repos=全量快照（含 name，新 runner 多库模式）；repo=首个（主库）保持旧 runner 降级
                 List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(project, repoRows, baseBranch,
                         worktreeManager.branchFor(id), identityService.currentActor());
+                // CAP-34 FR-03：装配上下文包清单随帧下发（装配失败降级为无上下文启动，不阻塞会话）
+                ContextManifest contextManifest = prepareContext(id, project, taskSpec);
                 connector.launch(agentNodeId, new AgentLaunchCommand(
                         id, project != null ? project.id() : null, taskSpec, model, pm, gitEnv,
                         specs.isEmpty() ? null : specs.get(0), "session",
-                        specs.size() > 1 ? specs : null));
+                        specs.size() > 1 ? specs : null, contextManifest));
             } catch (Exception e) {
                 runtimes.remove(id);
                 if (e instanceof DevMindException de) {
@@ -432,12 +439,14 @@ public class SessionManagerService {
                 List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(proj,
                         sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(id), ent.getBaseBranch(),
                         worktreeManager.branchFor(id), ent.getCreatedBy());
+                // CAP-34 FR-03：resume = 重新注入（hitCount 再累计一次，与创建同语义）
+                ContextManifest contextManifest = prepareContext(id, proj, ent.getTaskSpec());
                 connector.launch(ent.getAgentNodeId(), new AgentLaunchCommand(
                         id, ent.getProjectId(), ent.getTaskSpec(), ent.getModel(),
                         pm,
                         resolveGitEnv(ent.getCreatedBy(), proj),
                         specs.isEmpty() ? null : specs.get(0), "session",
-                        specs.size() > 1 ? specs : null));
+                        specs.size() > 1 ? specs : null, contextManifest));
             } catch (Exception e) {
                 runtimes.remove(id);
                 if (e instanceof DevMindException de) {
@@ -918,6 +927,16 @@ public class SessionManagerService {
     private String platformDefaultNodeId() {
         AgentNodeConnector connector = connectorProvider.getIfAvailable();
         return connector != null ? connector.defaultNodeId() : null;
+    }
+
+    /** CAP-34 FR-03：装配上下文包清单（失败降级为 null = 无上下文启动，沿用注入不阻塞语义）。 */
+    private ContextManifest prepareContext(String sessionId, Project project, String taskSpec) {
+        try {
+            return sessionContextService.prepare(sessionId, project, taskSpec);
+        } catch (Exception e) {
+            log.warn("上下文包装配失败(不带上下文启动): session={} err={}", sessionId, e.getMessage());
+            return null;
+        }
     }
 
     // ---------------- CAP-21 远程事件入口（RemoteAgentBridge 路由至此） ----------------

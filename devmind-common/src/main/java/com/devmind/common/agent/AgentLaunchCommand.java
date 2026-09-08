@@ -1,5 +1,8 @@
 package com.devmind.common.agent;
 
+import com.devmind.common.agent.exec.ContextManifest;
+import com.devmind.common.agent.exec.ContextPackage;
+
 import java.util.List;
 import java.util.Map;
 
@@ -21,16 +24,27 @@ import java.util.Map;
  *                       旧版 runner 忽略该字段：chat 帧退化为兜底 workDir（部署侧需升级 runner）。
  * @param repos          CAP-31：多仓库工作区描述（每项含 name）。null/空 = 单库（看 repo 字段）。
  *                       旧版 runner 只读 repo 单字段 → 降级为只拉主库。
+ * @param contextManifest CAP-34：上下文包清单（{@link ContextPackage} 的 sha256/大小/条目数）。
+ *                       runner 据此 HTTP 拉包物化后再拉起 claude；null = 无上下文。
+ *                       旧版 runner 忽略该字段（优雅降级为无上下文会话）。
  */
 public record AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
                                  String model, String permissionMode, Map<String, String> env,
-                                 RepoSpec repo, String kind, List<RepoSpec> repos) {
+                                 RepoSpec repo, String kind, List<RepoSpec> repos,
+                                 ContextManifest contextManifest) {
 
-    /** 兼容构造器：CAP-25 及之前的调用点（kind=session，无多库）。 */
+    /** 兼容构造器：CAP-25 及之前的调用点（kind=session，无多库、无上下文）。 */
     public AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
                               String model, String permissionMode, Map<String, String> env,
                               RepoSpec repo) {
-        this(sessionId, projectId, taskSpec, model, permissionMode, env, repo, "session", null);
+        this(sessionId, projectId, taskSpec, model, permissionMode, env, repo, "session", null, null);
+    }
+
+    /** 兼容构造器：CAP-30/31 调用点（无上下文清单）。 */
+    public AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
+                              String model, String permissionMode, Map<String, String> env,
+                              RepoSpec repo, String kind, List<RepoSpec> repos) {
+        this(sessionId, projectId, taskSpec, model, permissionMode, env, repo, kind, repos, null);
     }
 
     /**

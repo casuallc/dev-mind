@@ -191,6 +191,28 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             repo.put("token", cmd.repo().token());
             frame.put("repo", repo);
         }
+        // CAP-31 修复：repos 多库数组此前漏序列化进帧（多库远程会话静默退化为只拉主库）
+        if (cmd.repos() != null && cmd.repos().size() > 1) {
+            List<Map<String, Object>> repos = new ArrayList<>();
+            for (AgentLaunchCommand.RepoSpec spec : cmd.repos()) {
+                Map<String, Object> r = new LinkedHashMap<>();
+                r.put("remoteUrl", spec.remoteUrl());
+                r.put("baseBranch", spec.baseBranch());
+                r.put("branch", spec.branch());
+                r.put("token", spec.token());
+                r.put("name", spec.name());
+                repos.add(r);
+            }
+            frame.put("repos", repos);
+        }
+        // CAP-34 FR-03：上下文包清单（runner 据此 HTTP 拉包物化；旧 runner 忽略该字段）
+        if (cmd.contextManifest() != null) {
+            Map<String, Object> manifest = new LinkedHashMap<>();
+            manifest.put("entries", cmd.contextManifest().entries());
+            manifest.put("totalBytes", cmd.contextManifest().totalBytes());
+            manifest.put("sha256", cmd.contextManifest().sha256());
+            frame.put("contextManifest", manifest);
+        }
         try {
             send(ws, frame);
             LaunchAck ack = future.get(props.getLaunchAckTimeoutMs(), TimeUnit.MILLISECONDS);
