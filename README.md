@@ -69,6 +69,22 @@ cd frontend && npm install && npm run dev
 
 首次登录：`admin / admin123`（`devmind.auth.admin-password` 可改，请登录后立即修改）。
 
+### 本地前端直连远程后端（联调）
+
+Vite 代理目标支持 `VITE_BACKEND_URL` 环境变量覆盖（默认 `http://localhost:8080`），`/ws` 自动按 `http→ws` 派生，无需改代码：
+
+```bash
+# Git Bash
+VITE_BACKEND_URL=http://172.20.140.224:8080 npm run dev
+```
+
+```powershell
+# PowerShell
+$env:VITE_BACKEND_URL='http://172.20.140.224:8080'; npm run dev
+```
+
+浏览器侧经 dev server 代理无跨域问题；环境变量仅当次启动生效，不设则回落本机后端。
+
 ## 分发包（生产部署）
 
 ```bash
