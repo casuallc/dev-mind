@@ -43,6 +43,20 @@ public class ChatSessionEntity {
     @Column(length = 16_777_216)
     private String summary;
 
+    /** CAP-33 FR-05：场景 code（可空 = 未挂场景） */
+    @Column(name = "scenario_code", length = 64)
+    private String scenarioCode;
+
+    /** CAP-33 FR-07：上下文装配快照（清单 JSON，无快照 = null） */
+    @Lob
+    @Column(name = "context_manifest_json", length = 16_777_216)
+    private String contextManifestJson;
+
+    /** CAP-33：首条消息原文（重建上下文包时按场景骨架重渲染的 {{task}} 输入） */
+    @Lob
+    @Column(name = "initial_prompt", length = 16_777_216)
+    private String initialPrompt;
+
     @Column(name = "created_by", length = 64)
     private String createdBy;
 
@@ -71,6 +85,12 @@ public class ChatSessionEntity {
     public void setPermissionMode(String permissionMode) { this.permissionMode = permissionMode; }
     public String getSummary() { return summary; }
     public void setSummary(String summary) { this.summary = summary; }
+    public String getScenarioCode() { return scenarioCode; }
+    public void setScenarioCode(String scenarioCode) { this.scenarioCode = scenarioCode; }
+    public String getContextManifestJson() { return contextManifestJson; }
+    public void setContextManifestJson(String contextManifestJson) { this.contextManifestJson = contextManifestJson; }
+    public String getInitialPrompt() { return initialPrompt; }
+    public void setInitialPrompt(String initialPrompt) { this.initialPrompt = initialPrompt; }
     public String getCreatedBy() { return createdBy; }
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public Instant getCreatedAt() { return createdAt; }

@@ -13,8 +13,10 @@ import com.devmind.chat.runtime.ChatEventSaver;
 import com.devmind.common.agent.AgentEventFrame;
 import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.AgentNodeConnector;
+import com.devmind.common.agent.ChatContextPreparer;
 import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.SessionEvent;
+import com.devmind.common.agent.exec.ContextManifest;
 import com.devmind.common.agent.runtime.CliEventParser;
 import com.devmind.common.agent.runtime.CliProcessLauncher;
 import com.devmind.common.agent.runtime.FakeProcessLauncher;
@@ -140,6 +142,8 @@ class ChatManagerServiceTest {
         private final CliProcessLauncher protocol;
         private final SessionExecutor fake = new FakeProcessLauncher();
         private final Map<String, Process> processes = new ConcurrentHashMap<>();
+        /** 最近一次 launch 帧（断言 scenario/manifest 透传用） */
+        volatile AgentLaunchCommand lastLaunch;
 
         FakeRunnerConnector(ObjectMapper mapper, RuntimeSettings settings) {
             this.parser = new CliEventParser(mapper, settings);
@@ -158,6 +162,7 @@ class ChatManagerServiceTest {
 
         @Override
         public void launch(String nodeId, AgentLaunchCommand cmd) {
+            lastLaunch = cmd;
             String sid = cmd.sessionId();
             try {
                 Path sandbox = sandboxRoot.resolve(sid);
@@ -295,6 +300,8 @@ class ChatManagerServiceTest {
                 chats.jpa(), events.jpa(), saver, props, mapper,
                 objectProviderOf(runner = new FakeRunnerConnector(mapper, props.toRuntimeSettings())),
                 // 无 attachment 模块：getIfAvailable 恒 null → 带图输入报错
+                emptyObjectProvider(),
+                // 无 session 模块：getIfAvailable 恒 null → 传 scenarioCode 报 409
                 emptyObjectProvider());
     }
 
@@ -374,6 +381,62 @@ class ChatManagerServiceTest {
         // "local" 保留值已废除 → 400
         assertThrows(com.devmind.common.exception.DevMindException.class,
                 () -> service.create(new CreateChatRequest("x", "", "", "local")));
+    }
+
+    @Test
+    void 场景问答_预设生效_manifest随帧下发_快照落库() {
+        ContextManifest manifest = new ContextManifest(2, 100, "abc123");
+        ChatContextPreparer preparer = new ChatContextPreparer() {
+            @Override
+            public ScenarioPreset preset(String scenarioCode) {
+                assertEquals("qa", scenarioCode);
+                return new ScenarioPreset("claude-opus", "plan", NODE, null);
+            }
+
+            @Override
+            public PreparedContext prepare(String chatId, String scenarioCode, String message) {
+                return new PreparedContext(manifest, "{\"scenarioCode\":\"" + scenarioCode + "\"}",
+                        "渲染后：" + message);
+            }
+        };
+        // 换上带 preparer 的 service（setUp 里的是「session 模块未装配」形态）
+        ChatProperties props = new ChatProperties();
+        service.shutdown();
+        service = new ChatManagerService(fakeIdentity(), (NotificationEvent e) -> { },
+                chats.jpa(), events.jpa(), saver, props, JsonMapper.builder().build(),
+                objectProviderOf(runner), emptyObjectProvider(), objectProviderOf(preparer));
+
+        // 显式全空 → 场景预设的 model/pm/node 生效
+        ChatView v = service.create(new CreateChatRequest("你好", null, null, null, "qa"));
+        assertEquals("claude-opus", v.model());
+        assertEquals("plan", v.permissionMode());
+        assertEquals(NODE, v.agentNodeId());
+
+        // launch 帧：渲染后 prompt + manifest
+        assertEquals("渲染后：你好", runner.lastLaunch.taskSpec());
+        assertEquals(manifest, runner.lastLaunch.contextManifest());
+
+        // 落库三列 + 快照端点
+        ChatSessionEntity ent = chats.store.get(v.id());
+        assertEquals("qa", ent.getScenarioCode());
+        assertEquals("你好", ent.getInitialPrompt());
+        assertTrue(ent.getContextManifestJson().contains("\"qa\""));
+        assertTrue(service.contextManifest(v.id()).contains("\"qa\""));
+        service.kill(v.id());
+    }
+
+    @Test
+    void 场景问答但session模块未装配时409() {
+        assertThrows(com.devmind.common.exception.DevMindException.class,
+                () -> service.create(new CreateChatRequest("x", "", "", NODE, "qa")));
+    }
+
+    @Test
+    void 无场景问答无快照404() {
+        ChatView v = service.create(new CreateChatRequest("无场景", "", "", NODE));
+        assertThrows(com.devmind.common.exception.DevMindException.class,
+                () -> service.contextManifest(v.id()));
+        service.kill(v.id());
     }
 
     @Test

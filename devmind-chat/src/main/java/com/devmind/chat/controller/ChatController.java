@@ -82,6 +82,12 @@ public class ChatController {
         service.finish(id);
     }
 
+    /** CAP-33 FR-07：已注入上下文清单（装配快照，归属校验同 get）。 */
+    @GetMapping(value = "/{id}/context", produces = "application/json")
+    public String context(@PathVariable String id) {
+        return service.contextManifest(id); // 落库的即合法 JSON 快照，原样透传
+    }
+
     @DeleteMapping("/{id}")
     public void delete(@PathVariable String id) {
         service.deleteChat(id);

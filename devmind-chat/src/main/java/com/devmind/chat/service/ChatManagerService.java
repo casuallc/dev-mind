@@ -14,8 +14,10 @@ import com.devmind.chat.runtime.ChatEventSaver;
 import com.devmind.common.agent.AgentEventFrame;
 import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.AgentNodeConnector;
+import com.devmind.common.agent.ChatContextPreparer;
 import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.SessionEvent;
+import com.devmind.common.agent.exec.ContextManifest;
 import com.devmind.common.agent.runtime.AbstractSessionRuntime;
 import com.devmind.common.agent.runtime.RemoteSessionRuntime;
 import com.devmind.common.agent.runtime.RuntimeListener;
@@ -50,8 +52,13 @@ import java.util.function.Consumer;
  * 复用 common 的 headless 会话内核（{@link RemoteSessionRuntime}），
  * 本类只做实体/节点路由的薄壳协调。
  *
- * <p>CAP-34 FR-02：不存在本机问答——节点路由 = 显式 agentNodeId &gt; 平台默认节点（无项目默认层），
- * 皆无命中直接 409；保留值 "local" 已废除（报 400）。节点离线 launch 抛 409，不静默回落。</p>
+ * <p>CAP-34 FR-02：不存在本机问答——节点路由 = 显式 agentNodeId &gt; 场景预设（CAP-33 FR-05）
+ * &gt; 平台默认节点（无项目默认层），皆无命中直接 409；保留值 "local" 已废除（报 400）。
+ * 节点离线 launch 抛 409，不静默回落。</p>
+ *
+ * <p>CAP-33 FR-05：scenarioCode 非空时经 {@link ChatContextPreparer}（session 模块实现）
+ * 取场景预设（模型/权限/节点）并装配上下文包——骨架渲染产物作初始 prompt，manifest 随
+ * launch 帧下发，快照落 context_manifest_json。</p>
  *
  * <p>沙箱 cwd：runner 侧 &lt;workspaceRoot&gt;/_chat/&lt;chatId&gt;（launch 帧 kind:"chat"），
  * 服务端不再建本地目录。</p>
@@ -73,6 +80,8 @@ public class ChatManagerService {
     private final ObjectProvider<AgentNodeConnector> connectorProvider;
     /** CAP-32：附件内容解析（devmind-attachment 装配时可用）；未装配时带附件输入报错，不静默丢图 */
     private final ObjectProvider<AttachmentContentResolver> attachmentResolverProvider;
+    /** CAP-33 FR-05：场景问答装配（devmind-session 装配时可用；ObjectProvider 探测防循环依赖） */
+    private final ObjectProvider<ChatContextPreparer> contextPreparerProvider;
 
     /** 运行中问答注册表（本地/远程统一句柄）。 */
     private final Map<String, SessionHandle> runtimes = new ConcurrentHashMap<>();
@@ -85,7 +94,8 @@ public class ChatManagerService {
                               ChatProperties props,
                               ObjectMapper mapper,
                               ObjectProvider<AgentNodeConnector> connectorProvider,
-                              ObjectProvider<AttachmentContentResolver> attachmentResolverProvider) {
+                              ObjectProvider<AttachmentContentResolver> attachmentResolverProvider,
+                              ObjectProvider<ChatContextPreparer> contextPreparerProvider) {
         this.identityService = identityService;
         this.notificationPublisher = notificationPublisher;
         this.chatRepo = chatRepo;
@@ -95,6 +105,7 @@ public class ChatManagerService {
         this.mapper = mapper;
         this.connectorProvider = connectorProvider;
         this.attachmentResolverProvider = attachmentResolverProvider;
+        this.contextPreparerProvider = contextPreparerProvider;
         this.settings = props.toRuntimeSettings();
     }
 
@@ -128,31 +139,48 @@ public class ChatManagerService {
     public ChatView create(CreateChatRequest req) {
         ensureCapacity();
         String id = shortId();
-        String model = req.model() != null && !req.model().isBlank() ? req.model() : props.getModel();
-        String pm = req.permissionMode() != null && !req.permissionMode().isBlank()
-                ? req.permissionMode() : props.getPermissionMode();
 
-        // CAP-34 FR-02：取消本机问答——路由 = 显式 > 平台默认，皆无命中 409，不存在本机回落
+        // CAP-33 FR-05 场景预设：模型/权限/节点优先级 = 显式 > 场景 > 配置/平台默认
+        ChatContextPreparer preparer = null;
+        ChatContextPreparer.ScenarioPreset preset = null;
+        if (req.scenarioCode() != null && !req.scenarioCode().isBlank()) {
+            preparer = contextPreparerProvider.getIfAvailable();
+            if (preparer == null) {
+                throw new DevMindException(ErrorCode.CONFLICT, "会话模块未装配，无法使用场景问答");
+            }
+            preset = preparer.preset(req.scenarioCode()); // 场景不存在 404
+        }
+        String model = firstNonBlank(req.model(), preset != null ? preset.model() : null, props.getModel());
+        String pm = firstNonBlank(req.permissionMode(), preset != null ? preset.permissionMode() : null,
+                props.getPermissionMode());
+
+        // CAP-34 FR-02：取消本机问答——路由 = 显式 > 场景预设 > 平台默认，皆无命中 409，不存在本机回落
         if ("local".equalsIgnoreCase(req.agentNodeId())) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "CAP-34 起不存在本机问答：agentNodeId=\"local\" 保留值已废除，请指定 runner 节点或留空走平台默认");
         }
-        String agentNodeId = req.agentNodeId() != null && !req.agentNodeId().isBlank()
-                ? req.agentNodeId()
-                : platformDefaultNodeId();
+        String agentNodeId = firstNonBlank(req.agentNodeId(),
+                preset != null ? preset.agentNodeId() : null, platformDefaultNodeId());
         if (agentNodeId == null || agentNodeId.isBlank()) {
             throw new DevMindException(ErrorCode.CONFLICT,
                     "无可用执行节点：请显式指定执行节点，或配置平台默认节点");
         }
 
         AgentNodeConnector connector = requireConnector();
+        // 场景装配先于注册/launch：绑定资产失效（严格 404）即创建失败，不留半拉子运行时；
+        // 装配产物同时入 session 侧缓存，供 runner 凭 manifest 拉包
+        ChatContextPreparer.PreparedContext prepared = preparer != null
+                ? preparer.prepare(id, req.scenarioCode(), req.message()) : null;
+        String launchPrompt = prepared != null ? prepared.renderedPrompt() : req.message();
+        ContextManifest manifest = prepared != null ? prepared.manifest() : null;
+
         RemoteSessionRuntime remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector, eventSaver, listener, settings);
         // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
         runtimes.put(id, remoteRt);
         try {
             // kind="chat"：runner 用 <workspaceRoot>/_chat/<sid> 沙箱，无 clone/push 语义
             connector.launch(agentNodeId, new AgentLaunchCommand(
-                    id, null, req.message(), model, pm, Map.of(), null, "chat", null));
+                    id, null, launchPrompt, model, pm, Map.of(), null, "chat", null, manifest));
         } catch (Exception e) {
             runtimes.remove(id);
             if (e instanceof DevMindException de) {
@@ -171,6 +199,9 @@ public class ChatManagerService {
         ent.setPid(null);
         ent.setModel(model);
         ent.setPermissionMode(pm);
+        ent.setScenarioCode(preset != null ? req.scenarioCode().strip() : null);
+        ent.setContextManifestJson(prepared != null ? prepared.snapshotJson() : null);
+        ent.setInitialPrompt(req.message());
         ent.setCreatedBy(identityService.currentActor());
         ent.setCreatedAt(now);
         ent.setUpdatedAt(now);
@@ -280,13 +311,16 @@ public class ChatManagerService {
         }
         // 远程恢复：重新下发 launch（runner 侧 _chat/<sid> 幂等复用）
         AgentNodeConnector connector = requireConnector();
+        // CAP-33：挂场景的问答恢复时重装配上下文（资产可能已变更）；装配失败降级为无上下文恢复，
+        // 不阻塞恢复主链路（场景/资产删除不应让旧问答永远起不来）
+        ContextManifest manifest = refreshScenarioContext(ent);
         RemoteSessionRuntime rt = new RemoteSessionRuntime(id, ent.getAgentNodeId(), connector,
                 eventSaver, listener, settings);
         runtimes.put(id, rt);
         try {
             connector.launch(ent.getAgentNodeId(), new AgentLaunchCommand(
                     id, null, "", ent.getModel(), ent.getPermissionMode(),
-                    Map.of(), null, "chat", null));
+                    Map.of(), null, "chat", null, manifest));
         } catch (Exception e) {
             runtimes.remove(id);
             if (e instanceof DevMindException de) {
@@ -489,6 +523,47 @@ public class ChatManagerService {
     private String platformDefaultNodeId() {
         AgentNodeConnector connector = connectorProvider.getIfAvailable();
         return connector != null ? connector.defaultNodeId() : null;
+    }
+
+    /** CAP-33：挂场景问答的重装配（resume 用）；失败/无产出 = null（降级无上下文）。 */
+    private ContextManifest refreshScenarioContext(ChatSessionEntity ent) {
+        if (ent.getScenarioCode() == null || ent.getScenarioCode().isBlank()) {
+            return null;
+        }
+        ChatContextPreparer preparer = contextPreparerProvider.getIfAvailable();
+        if (preparer == null) {
+            return null;
+        }
+        try {
+            ChatContextPreparer.PreparedContext prepared = preparer.prepare(
+                    ent.getId(), ent.getScenarioCode(), ent.getInitialPrompt());
+            if (prepared != null && prepared.manifest() != null) {
+                ent.setContextManifestJson(prepared.snapshotJson()); // 快照随 resume 刷新
+                return prepared.manifest();
+            }
+        } catch (Exception e) {
+            log.warn("问答恢复时场景上下文重装配失败，降级无上下文恢复: chat={} scenario={} err={}",
+                    ent.getId(), ent.getScenarioCode(), e.getMessage());
+        }
+        return null;
+    }
+
+    /** CAP-33 FR-07：已注入上下文快照（未挂场景/无快照 404）。 */
+    public String contextManifest(String id) {
+        ChatSessionEntity ent = requireOwned(id);
+        if (ent.getContextManifestJson() == null || ent.getContextManifestJson().isBlank()) {
+            throw new DevMindException(ErrorCode.NOT_FOUND, "该问答无上下文快照（未挂场景或装配为空）: " + id);
+        }
+        return ent.getContextManifestJson();
+    }
+
+    private static String firstNonBlank(String... candidates) {
+        for (String c : candidates) {
+            if (c != null && !c.isBlank()) {
+                return c;
+            }
+        }
+        return null;
     }
 
     private SessionHandle requireRuntime(String id) {
