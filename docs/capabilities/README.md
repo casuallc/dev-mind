@@ -48,6 +48,8 @@
 | [CAP-30](CAP-30-agent-chat.md) | 通用问答 | 底座 | 无项目无仓库的纯 AI 问答独立成能力（个人组入口），共享内核上移 common，干净沙箱 cwd |
 | [CAP-31](CAP-31-session-multirepo.md) | 项目会话多仓库与归属拆分 | 底座 | 会话收敛为纯项目开发会话（当前项目组）+ 显式关联多 git 仓库（聚合目录/逐库 push/diff），远程 diff 走服务端克隆 |
 | [CAP-32](CAP-32-attachment.md) | 公共附件管理 | 底座 | 统一附件模型：二进制上传即附件、唯一字符串 id 对外引用，图片内联渲染（图床）/非图片下载，chat 图片下发 claude、docs 粘贴插图 |
+| [CAP-33](CAP-33-scenario-session-context.md) | 场景化会话与上下文装配 | 底座 | 场景 = 命名模板 + 预装配上下文包（skills/docs/knowledge 绑定到意图），session/chat 统一装配管线一键带齐上下文 |
+| [CAP-34](CAP-34-agent-runner-executor.md) | Agent Runner 执行代理化 | 底座 | 执行内核上移 common，本机=内嵌 runner 与远程同一执行路径；上下文包传输、会话隔离强化、exec 帧利用节点本地工具链 |
 
 ## 依赖关系
 
@@ -88,6 +90,8 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-30 通用问答依赖 CAP-01/06/21：headless 会话内核（状态机/事件流/CLI 协议）上移至 devmind-common 被 session/chat 共享；问答独立 chat_sessions/chat_events 表与个人组入口，无项目资产耦合。
 - CAP-31 会话多仓库依赖 CAP-05/21/24/25/29：会话收敛为当前项目开发会话，session_repos 快照表关联多库（聚合目录工作区），launch 帧 repos 数组逐库下发凭据，远程 diff 经服务端克隆 fetch 会话分支后比对。
 - CAP-32 公共附件管理依赖 CAP-01/21/30：统一附件表 + 本地磁盘存储 + 唯一字符串 id 引用，scope 归属可见性；chat 图片消息经 AttachmentContentResolver SPI（common 定义）解析下发 claude，远程节点 input 帧内嵌 base64 送达 runner；docs 编辑器粘贴插图。
+- CAP-33 场景化会话依赖 CAP-03/04/05/30/34 与 Skill 管理：场景实体绑定 skills/docs/knowledgeTags 产出 ContextPackage（装什么），传输与物化由 CAP-34 承担；session/chat 创建链路统一走装配管线，session_templates 迁入场景。
+- CAP-34 runner 执行代理化依赖 CAP-21/25/30/31/12：执行内核（工作区/上下文物化/进程拉起）上移 devmind-common，本机会话经内嵌 runner 与远程同一代码路径；launch 帧 contextManifest + HTTP 拉包补掉远程注入缺口；exec 帧 + 工具链标签让 build/test 可在 agent 节点本地执行。
 
 ## 组装方式（后续流程层）
 
