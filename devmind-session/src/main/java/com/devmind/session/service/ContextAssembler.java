@@ -47,8 +47,9 @@ public class ContextAssembler {
         this.mapper = mapper;
     }
 
-    /** 装配结果：包（缓存供 runner 拉取）+ 随帧 manifest + FR-07 快照 JSON（落库）。 */
-    public record AssembledContext(ContextPackage pkg, ContextManifest manifest, String snapshotJson) {
+    /** 装配结果：包（缓存供 runner 拉取）+ 随帧 manifest + FR-07 快照 JSON（落库）+ 清单项（预览用）。 */
+    public record AssembledContext(ContextPackage pkg, ContextManifest manifest, String snapshotJson,
+                                   List<ManifestItem> items) {
     }
 
     /**
@@ -98,7 +99,7 @@ public class ContextAssembler {
                 items, manifest);
         log.info("上下文装配完成: scenario={} 条目={} skills={} docs={} 包字节={}",
                 scenarioCode, items.size(), skills.size(), docs.size(), manifest.totalBytes());
-        return new AssembledContext(pkg, manifest, snapshotJson);
+        return new AssembledContext(pkg, manifest, snapshotJson, List.copyOf(items));
     }
 
     /** FR-07 快照：只存清单（id/name/source/路径等），不存包内容；重建 = 重跑装配。 */
