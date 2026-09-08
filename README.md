@@ -85,6 +85,14 @@ $env:VITE_BACKEND_URL='http://172.20.140.224:8080'; npm run dev
 
 浏览器侧经 dev server 代理无跨域问题；环境变量仅当次启动生效，不设则回落本机后端。
 
+> 若经**非 localhost 地址**（如 `http://<本机IP>:5173`）访问 dev server，浏览器带的 Origin 须在远端后端的 `devmind.cors.allowed-origins` 白名单内，否则登录等请求被 CORS 拦截返回 403。在远端 `application-local.yml` 整表覆盖追加（默认值需一并带上）：
+>
+> ```yaml
+> devmind:
+>   cors:
+>     allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080,http://<你的IP>:5173
+> ```
+
 ## 分发包（生产部署）
 
 ```bash

@@ -1,5 +1,6 @@
 package com.devmind.release.config;
 
+import com.devmind.common.security.CorsProperties;
 import com.devmind.execution.ws.ExecutionLogHub;
 import com.devmind.execution.ws.ExecutionSnapshotProvider.ExecutionSnapshot;
 import com.devmind.execution.ws.ExecutionWsHandler;
@@ -26,19 +27,21 @@ public class ReleaseWebSocketConfig implements WebSocketConfigurer {
     private final ExecutionLogHub hub;
     private final ReleaseRepository repo;
     private final ObjectMapper mapper;
+    private final CorsProperties corsProperties;
 
-    public ReleaseWebSocketConfig(ExecutionLogHub hub, ReleaseRepository repo, ObjectMapper mapper) {
+    public ReleaseWebSocketConfig(ExecutionLogHub hub, ReleaseRepository repo, ObjectMapper mapper,
+                                  CorsProperties corsProperties) {
         this.hub = hub;
         this.repo = repo;
         this.mapper = mapper;
+        this.corsProperties = corsProperties;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(new ExecutionWsHandler(hub, this::snapshot, mapper, "/releases/"),
                         "/ws/releases/**")
-                .setAllowedOrigins("http://localhost:5173", "http://127.0.0.1:5173",
-                        "http://localhost:8080", "http://127.0.0.1:8080");
+                .setAllowedOrigins(corsProperties.originsArray());
     }
 
     /** 发版快照：业务字段（日志不重复快照，前端只看实时流）；终态立即补发 done 帧 */

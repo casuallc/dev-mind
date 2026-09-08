@@ -1,5 +1,6 @@
 package com.devmind.notification.config;
 
+import com.devmind.common.security.CorsProperties;
 import com.devmind.notification.controller.NotificationWsHandler;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
@@ -14,15 +15,16 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 public class NotificationWebSocketConfig implements WebSocketConfigurer {
 
     private final NotificationWsHandler notificationWsHandler;
+    private final CorsProperties corsProperties;
 
-    public NotificationWebSocketConfig(NotificationWsHandler notificationWsHandler) {
+    public NotificationWebSocketConfig(NotificationWsHandler notificationWsHandler, CorsProperties corsProperties) {
         this.notificationWsHandler = notificationWsHandler;
+        this.corsProperties = corsProperties;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(notificationWsHandler, "/ws/notifications/stream")
-                .setAllowedOrigins("http://localhost:5173", "http://127.0.0.1:5173",
-                        "http://localhost:8080", "http://127.0.0.1:8080");
+                .setAllowedOrigins(corsProperties.originsArray());
     }
 }

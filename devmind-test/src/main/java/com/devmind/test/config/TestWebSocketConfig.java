@@ -1,5 +1,6 @@
 package com.devmind.test.config;
 
+import com.devmind.common.security.CorsProperties;
 import com.devmind.execution.ws.ExecutionLogHub;
 import com.devmind.execution.ws.ExecutionSnapshotProvider.ExecutionSnapshot;
 import com.devmind.execution.ws.ExecutionWsHandler;
@@ -29,21 +30,23 @@ public class TestWebSocketConfig implements WebSocketConfigurer {
     private final TestRunRepository runRepo;
     private final TestCaseResultRepository resultRepo;
     private final ObjectMapper mapper;
+    private final CorsProperties corsProperties;
 
     public TestWebSocketConfig(ExecutionLogHub hub, TestRunRepository runRepo,
-                               TestCaseResultRepository resultRepo, ObjectMapper mapper) {
+                               TestCaseResultRepository resultRepo, ObjectMapper mapper,
+                               CorsProperties corsProperties) {
         this.hub = hub;
         this.runRepo = runRepo;
         this.resultRepo = resultRepo;
         this.mapper = mapper;
+        this.corsProperties = corsProperties;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(new ExecutionWsHandler(hub, this::snapshot, mapper, "/test-runs/"),
                         "/ws/test-runs/**")
-                .setAllowedOrigins("http://localhost:5173", "http://127.0.0.1:5173",
-                        "http://localhost:8080", "http://127.0.0.1:8080");
+                .setAllowedOrigins(corsProperties.originsArray());
     }
 
     /** 测试运行快照：已完成用例结果 + baseUrl（日志不重复快照，前端只看实时流） */

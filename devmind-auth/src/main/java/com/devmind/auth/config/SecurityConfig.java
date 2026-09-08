@@ -4,6 +4,7 @@ import com.devmind.auth.security.JwtAuthFilter;
 import com.devmind.auth.security.PreJwtAuthFilter;
 import com.devmind.common.exception.ApiError;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.common.security.CorsProperties;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -31,9 +32,11 @@ import java.util.List;
 public class SecurityConfig {
 
     private final ObjectMapper mapper;
+    private final CorsProperties corsProperties;
 
-    public SecurityConfig(ObjectMapper mapper) {
+    public SecurityConfig(ObjectMapper mapper, CorsProperties corsProperties) {
         this.mapper = mapper;
+        this.corsProperties = corsProperties;
     }
 
     @Bean
@@ -85,7 +88,7 @@ public class SecurityConfig {
     /** 与 WebConfig#addCorsMappings 同口径；Security 过滤器先于 MVC，预检（OPTIONS）必须在此放行 */
     private CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration cfg = new CorsConfiguration();
-        cfg.setAllowedOrigins(List.of("http://localhost:5173", "http://127.0.0.1:5173"));
+        cfg.setAllowedOrigins(corsProperties.getAllowedOrigins());
         cfg.setAllowedMethods(List.of("*"));
         cfg.setAllowedHeaders(List.of("*"));
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

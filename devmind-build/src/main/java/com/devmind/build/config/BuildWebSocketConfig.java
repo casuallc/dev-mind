@@ -2,6 +2,7 @@ package com.devmind.build.config;
 
 import com.devmind.build.model.BuildEntity;
 import com.devmind.build.repo.BuildRepository;
+import com.devmind.common.security.CorsProperties;
 import com.devmind.execution.ws.ExecutionLogHub;
 import com.devmind.execution.ws.ExecutionSnapshotProvider.ExecutionSnapshot;
 import com.devmind.execution.ws.ExecutionWsHandler;
@@ -22,11 +23,14 @@ public class BuildWebSocketConfig implements WebSocketConfigurer {
     private final ExecutionLogHub hub;
     private final BuildRepository repo;
     private final ObjectMapper mapper;
+    private final CorsProperties corsProperties;
 
-    public BuildWebSocketConfig(ExecutionLogHub hub, BuildRepository repo, ObjectMapper mapper) {
+    public BuildWebSocketConfig(ExecutionLogHub hub, BuildRepository repo, ObjectMapper mapper,
+                                CorsProperties corsProperties) {
         this.hub = hub;
         this.repo = repo;
         this.mapper = mapper;
+        this.corsProperties = corsProperties;
     }
 
     @Override
@@ -34,8 +38,7 @@ public class BuildWebSocketConfig implements WebSocketConfigurer {
         registry.addHandler(
                         new ExecutionWsHandler(hub, this::snapshot, mapper, "/builds/"),
                         "/ws/builds/**")
-                .setAllowedOrigins("http://localhost:5173", "http://127.0.0.1:5173",
-                        "http://localhost:8080", "http://127.0.0.1:8080");
+                .setAllowedOrigins(corsProperties.originsArray());
     }
 
     /** 按 buildId 提供历史日志快照与终态；id 非法或记录不存在返回 null（关闭连接） */

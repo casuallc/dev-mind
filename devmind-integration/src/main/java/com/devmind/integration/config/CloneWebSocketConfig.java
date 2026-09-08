@@ -1,5 +1,6 @@
 package com.devmind.integration.config;
 
+import com.devmind.common.security.CorsProperties;
 import com.devmind.execution.ws.ExecutionLogHub;
 import com.devmind.execution.ws.ExecutionSnapshotProvider.ExecutionSnapshot;
 import com.devmind.execution.ws.ExecutionWsHandler;
@@ -23,11 +24,14 @@ public class CloneWebSocketConfig implements WebSocketConfigurer {
     private final ExecutionLogHub hub;
     private final ProjectRepoRepository repoRepo;
     private final ObjectMapper mapper;
+    private final CorsProperties corsProperties;
 
-    public CloneWebSocketConfig(ExecutionLogHub hub, ProjectRepoRepository repoRepo, ObjectMapper mapper) {
+    public CloneWebSocketConfig(ExecutionLogHub hub, ProjectRepoRepository repoRepo, ObjectMapper mapper,
+                                CorsProperties corsProperties) {
         this.hub = hub;
         this.repoRepo = repoRepo;
         this.mapper = mapper;
+        this.corsProperties = corsProperties;
     }
 
     @Override
@@ -35,8 +39,7 @@ public class CloneWebSocketConfig implements WebSocketConfigurer {
         registry.addHandler(
                         new ExecutionWsHandler(hub, this::snapshot, mapper, "/repo-clones/"),
                         "/ws/repo-clones/**")
-                .setAllowedOrigins("http://localhost:5173", "http://127.0.0.1:5173",
-                        "http://localhost:8080", "http://127.0.0.1:8080");
+                .setAllowedOrigins(corsProperties.originsArray());
     }
 
     /** 按 repoId 提供历史日志快照与终态；非 CLONE 来源或记录不存在返回 null（关闭连接） */

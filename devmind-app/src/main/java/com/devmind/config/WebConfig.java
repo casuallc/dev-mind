@@ -2,6 +2,7 @@ package com.devmind.config;
 
 import java.io.IOException;
 
+import com.devmind.common.security.CorsProperties;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.Resource;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
@@ -18,6 +19,12 @@ import org.springframework.web.servlet.resource.PathResourceResolver;
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
 
+    private final CorsProperties corsProperties;
+
+    public WebConfig(CorsProperties corsProperties) {
+        this.corsProperties = corsProperties;
+    }
+
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         // 注册 "/**" 后 Spring Boot 跳过默认 handler（hasMappingForPattern 检查）
@@ -31,7 +38,7 @@ public class WebConfig implements WebMvcConfigurer {
     public void addCorsMappings(CorsRegistry registry) {
         // 开发期：前端 Vite dev server（5173）直连后端；生产同源无需 CORS
         registry.addMapping("/api/**")
-                .allowedOrigins("http://localhost:5173", "http://127.0.0.1:5173")
+                .allowedOrigins(corsProperties.originsArray())
                 .allowedMethods("*")
                 .allowedHeaders("*");
     }

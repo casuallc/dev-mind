@@ -30,6 +30,11 @@ spring:
       max-request-size: 64MB
 
 devmind:
+  cors:
+    # CORS / WebSocket 握手来源白名单（REST 过滤器与 WS 握手同口径）。
+    # 默认本地开发来源；联调/分离部署时在 application-local.yml 覆盖追加（整表替换，默认值需一并带上），
+    # 如：devmind.cors.allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://<前端机IP>:5173
+    allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080
   auth:
     jwt-secret: ""                 # JWT HS256 密钥；空=自动生成存 data/auth.key（gitignored）
     admin-password: admin123       # 仅首次种子 admin 时读取；请登录后立即修改

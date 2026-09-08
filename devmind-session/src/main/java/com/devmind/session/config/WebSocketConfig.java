@@ -1,5 +1,6 @@
 package com.devmind.session.config;
 
+import com.devmind.common.security.CorsProperties;
 import com.devmind.session.controller.SessionWsHandler;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
@@ -14,15 +15,16 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 public class WebSocketConfig implements WebSocketConfigurer {
 
     private final SessionWsHandler sessionWsHandler;
+    private final CorsProperties corsProperties;
 
-    public WebSocketConfig(SessionWsHandler sessionWsHandler) {
+    public WebSocketConfig(SessionWsHandler sessionWsHandler, CorsProperties corsProperties) {
         this.sessionWsHandler = sessionWsHandler;
+        this.corsProperties = corsProperties;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(sessionWsHandler, "/ws/sessions/{id}")
-                .setAllowedOrigins("http://localhost:5173", "http://127.0.0.1:5173",
-                        "http://localhost:8080", "http://127.0.0.1:8080");
+                .setAllowedOrigins(corsProperties.originsArray());
     }
 }

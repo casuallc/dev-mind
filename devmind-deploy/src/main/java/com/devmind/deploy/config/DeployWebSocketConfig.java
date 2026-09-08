@@ -1,5 +1,6 @@
 package com.devmind.deploy.config;
 
+import com.devmind.common.security.CorsProperties;
 import com.devmind.deploy.dto.StepView;
 import com.devmind.deploy.model.DeploymentEntity;
 import com.devmind.deploy.repo.DeploymentRepository;
@@ -29,21 +30,23 @@ public class DeployWebSocketConfig implements WebSocketConfigurer {
     private final DeploymentRepository repo;
     private final DeploymentStepRepository stepRepo;
     private final ObjectMapper mapper;
+    private final CorsProperties corsProperties;
 
     public DeployWebSocketConfig(ExecutionLogHub hub, DeploymentRepository repo,
-                                 DeploymentStepRepository stepRepo, ObjectMapper mapper) {
+                                 DeploymentStepRepository stepRepo, ObjectMapper mapper,
+                                 CorsProperties corsProperties) {
         this.hub = hub;
         this.repo = repo;
         this.stepRepo = stepRepo;
         this.mapper = mapper;
+        this.corsProperties = corsProperties;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(new ExecutionWsHandler(hub, this::snapshot, mapper, "/deployments/"),
                         "/ws/deployments/**")
-                .setAllowedOrigins("http://localhost:5173", "http://127.0.0.1:5173",
-                        "http://localhost:8080", "http://127.0.0.1:8080");
+                .setAllowedOrigins(corsProperties.originsArray());
     }
 
     /** 部署快照：步骤列表 + 当前步 + 备份引用（日志不重复快照，前端只看实时流） */
