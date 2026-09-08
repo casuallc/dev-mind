@@ -25,11 +25,12 @@ Guidance for Claude Code when working in this repository.
 | 编译后端 | `mvn -q -DskipTests compile` |
 | 后端测试 | `mvn -q test` |
 | 起后端 :8080 | 先 `mvn -q install -DskipTests`，再 `mvn -pl devmind-app spring-boot:run`（**禁带 -am**，聚合器报 no main class） |
+| 起 runner | `java -jar devmind-agent-runner/target/devmind-agent-runner.jar tmp/runner/agent.properties`（cwd 任意；CAP-34 起会话/问答全靠它，无 runner 创建 409） |
 | 起前端 :5173 | `cd frontend && npm run dev`（/api、/ws 已代理 8080） |
 | 前端类型检查 | `cd frontend && npx tsc -b` |
 | 前端构建 | `cd frontend && npm run build`（产物输出到 `frontend/dist/`，不进 jar） |
 | 构建分发包 | `scripts/build-dist.sh`（→ `devmind-dist/target/devmind-<version>.tar.gz`） |
-| 一键起停 | `scripts\dev.ps1`（PowerShell）/ `scripts/dev.sh`（Git Bash） |
+| 一键起停 | `scripts\dev.ps1`（PowerShell）/ `scripts/dev.sh`（Git Bash）（后端+前端+runner 三进程；runner 配置 tmp/runner/agent.properties 缺失自动生成模板） |
 
 健康检查 `GET /api/health`；H2 控制台 `/h2-console`（`jdbc:h2:file:./data/devmind`，sa/空）。起停与乱码等环境坑见上方「开发注意事项」。
 
@@ -43,8 +44,9 @@ Guidance for Claude Code when working in this repository.
 | devmind-auth | CAP-01 认证/RBAC（JWT HS256） |
 | devmind-project | CAP-02 项目管理 + CAP-13 研发主线（Requirement/Design/WorkItem） |
 | devmind-docs / knowledge / skill | CAP-03 文档库 / CAP-04 知识库 / Skill 管理 |
-| devmind-session | CAP-05 项目开发会话（headless claude + worktree；CAP-31 多库聚合目录 + 远程 diff） |
+| devmind-session | CAP-05 项目开发会话（headless claude + worktree；CAP-31 多库聚合目录 + 远程 diff；CAP-34 起零执行、纯调度 runner） |
 | devmind-chat | CAP-30 通用问答（无项目纯问答，个人组 /chats，复用 common 会话内核） |
+| devmind-agent / agent-runner | CAP-21 节点注册/指令下发（WS）/ CAP-34 上下文包端点 ｜ runner 执行体（瘦 jar 无 Spring，拉包物化 + 起 claude） |
 | devmind-notification | CAP-06 通知中心（WS 站内/bark/企微） |
 | devmind-server-adapter | CAP-07 服务器适配（SSH/HTTP + 命令模板白名单 + 凭证加密） |
 | devmind-execution | CAP-12 统一执行底座（StepRunner/日志 Hub/WS，**无统一 Job 表**） |
@@ -60,7 +62,7 @@ Guidance for Claude Code when working in this repository.
 - 跨模块调用走 `devmind-common` 的 SPI 接口；实现方由调用方以 `ObjectProvider<T>` 探测注入（防启动期循环依赖，禁反向依赖）。
 - 数据约定：归属用外键（project_id/requirement_id/work_item_id 层级），追溯用 relations 表（稀疏边）；schema 靠 `ddl-auto=update` 自动演进，不写迁移脚本。
 - 时间格式全局统一 `yyyy-MM-dd HH:mm:ss`：后端 `JacksonConfig` 一个 ObjectMapper（REST/WS 同生效），前端 `shared/utils/format.ts` 的 `fmtTime`。
-- **claude 执行体的选择（两层）**：① 在哪台机器跑——会话创建时按 `CreateSessionRequest.agentNodeId`（显式指定；保留值 `"local"` = 强制本机）→ 项目默认节点 → 平台默认节点（`agent_nodes.is_default`，agent runner 经 WS 注册）→ 皆无才落本机子进程；one-shot 总结会话（CAP-28 日报/周报）传 null 跟随此路由，**服务端无 claude 的部署靠默认 agent runner 执行 AI 任务**，节点离线 launch 抛 409 不静默回落本机。② 本机执行时 claude 二进制解析——`devmind.session.claude-path` 配置优先，空则按平台探测（Windows=`where` / Linux·macOS=`which`，结果缓存），再回退裸命令 `claude`；探测/启动失败报 error=2 时优先检查这两项。
+- **claude 执行体 = runner 节点（CAP-34，无本机会话）**：服务端零执行（纯调度），会话/问答/one-shot 一律下发 runner 执行。路由链：`CreateSessionRequest.agentNodeId`（显式指定）→ 项目默认节点 → 平台默认节点（`agent_nodes.is_default`）→ 皆无命中 409 不回落；CAP-28 的 `"local"` 保留值已废除（传了报 400），历史本机会话（agent_node_id 为空）不可 resume。节点离线 launch 抛 409 不静默起失败进程。claude 二进制解析在 runner 侧 `agent.properties`：`claudePath` 优先，空按平台探测（Windows=`where` / Linux·macOS=`which`），探测/启动失败报 error=2 查此项；`executor=fake` 用内置假进程自测。上下文（知识注入 CLAUDE.md 块 + settings 白名单）由服务端装配 ContextPackage、launch 帧挂 manifest、runner 经 `GET /api/agent/context/{sessionId}?token=` 拉取物化（失败即 launch 失败，不降级）。
 
 ## 红线速览（MUST）
 
