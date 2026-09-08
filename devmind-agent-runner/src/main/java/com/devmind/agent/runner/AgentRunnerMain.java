@@ -94,7 +94,7 @@ public class AgentRunnerMain {
         heartbeat.scheduleWithFixedDelay(
                 () -> conn.send(heartbeatFrame(workspaceBytes.get())), HEARTBEAT_MS, HEARTBEAT_MS, TimeUnit.MILLISECONDS);
 
-        // FR-05 GC：启动 10 分钟后首跑，其后按 gcIntervalMinutes 巡检；跑完刷新磁盘占用缓存
+        // FR-05 GC：首跑延迟 gcInitialDelayMinutes（默认 10），其后按 gcIntervalMinutes 巡检；跑完刷新磁盘占用缓存
         ScheduledExecutorService gcTimer = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "workspace-gc");
             t.setDaemon(true);
@@ -107,7 +107,7 @@ public class AgentRunnerMain {
             } catch (Exception e) {
                 log.warn("工作区 GC 异常（下轮重试）: {}", e.getMessage());
             }
-        }, 10, config.gcIntervalMinutes(), TimeUnit.MINUTES);
+        }, config.gcInitialDelayMinutes(), config.gcIntervalMinutes(), TimeUnit.MINUTES);
 
         Runtime.getRuntime().addShutdownHook(Thread.ofPlatform().unstarted(() -> {
             log.info("runner 关闭中，终止全部会话进程");
