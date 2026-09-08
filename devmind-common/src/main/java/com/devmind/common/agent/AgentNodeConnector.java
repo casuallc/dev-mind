@@ -47,4 +47,13 @@ public interface AgentNodeConnector {
 
     /** 挂起（杀进程，会话记录保留可 resume）。 */
     void sendSuspend(String nodeId, String sessionId);
+
+    /**
+     * CAP-34 FR-08 协议版本门控：节点当前连接的 runner 是否支持 {@code minVersion}
+     * （见 {@link AgentProtocol}）。无 hello 版本记录的老 runner 按 v1 对待。
+     * 默认 false（未装配 agent 模块 = 无任何节点可用）；下发「必须认识」的新帧前先查。
+     */
+    default boolean supports(String nodeId, int minVersion) {
+        return false;
+    }
 }

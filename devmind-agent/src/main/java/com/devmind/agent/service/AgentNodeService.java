@@ -141,6 +141,9 @@ public class AgentNodeService {
             if (meta.workspaceBytes() != null) {
                 e.setWorkspaceBytes(meta.workspaceBytes());
             }
+            if (meta.protocolVersion() != null) {
+                e.setProtocolVersion(meta.protocolVersion());
+            }
             e.setLastHeartbeatAt(Instant.now());
             repo.save(e);
         });

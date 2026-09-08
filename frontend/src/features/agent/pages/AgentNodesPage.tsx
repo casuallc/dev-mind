@@ -528,6 +528,9 @@ function NodeDrawer({
               )}
             </Descriptions.Item>
             <Descriptions.Item label="工作区占用">{fmtBytes(node.workspaceBytes)}</Descriptions.Item>
+            <Descriptions.Item label="协议版本">
+              {node.protocolVersion != null ? `v${node.protocolVersion}` : 'v1（未上报）'}
+            </Descriptions.Item>
             <Descriptions.Item label="最近心跳">{fmtTime(node.lastHeartbeatAt)}</Descriptions.Item>
             <Descriptions.Item label="标签" span={2}>
               {node.labels || '-'}

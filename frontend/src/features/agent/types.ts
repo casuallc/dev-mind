@@ -16,6 +16,8 @@ export interface AgentNode {
   isDefault?: boolean
   /** 工作区磁盘占用（字节，CAP-34 FR-05；旧 runner 未上报为 undefined） */
   workspaceBytes?: number
+  /** WS 协议版本（CAP-34 FR-08；未上报的老 runner 按 v1 对待） */
+  protocolVersion?: number
   lastHeartbeatAt?: string
   createdAt?: string
 }

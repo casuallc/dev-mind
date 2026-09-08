@@ -118,6 +118,8 @@ public class AgentRunnerMain {
         hello.put("capabilities", "claude");
         hello.put("version", version);
         hello.put("activeSessions", sessions.activeSessionIds());
+        // FR-08：协议版本协商——服务端据此门控「必须认识」的新下行帧（本轮仅落库/展示，FR-06 才消费）
+        hello.put("protocolVersion", com.devmind.common.agent.AgentProtocol.CURRENT);
         if (workspaceBytes >= 0) {
             hello.put("workspaceBytes", workspaceBytes); // FR-05：占用未算完（-1）时不带，旧服务端本就不读
         }

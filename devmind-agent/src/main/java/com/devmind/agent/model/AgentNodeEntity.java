@@ -50,6 +50,10 @@ public class AgentNodeEntity {
     @Column(name = "workspace_bytes")
     private Long workspaceBytes;
 
+    /** CAP-34 FR-08：WS 协议版本（hello 上报；老 runner 未上报保持 null，按 v1 对待） */
+    @Column(name = "protocol_version")
+    private Integer protocolVersion;
+
     @Column(name = "last_heartbeat_at")
     private Instant lastHeartbeatAt;
 
@@ -83,6 +87,8 @@ public class AgentNodeEntity {
     public void setRunnerVersion(String runnerVersion) { this.runnerVersion = runnerVersion; }
     public Long getWorkspaceBytes() { return workspaceBytes; }
     public void setWorkspaceBytes(Long workspaceBytes) { this.workspaceBytes = workspaceBytes; }
+    public Integer getProtocolVersion() { return protocolVersion; }
+    public void setProtocolVersion(Integer protocolVersion) { this.protocolVersion = protocolVersion; }
     public Instant getLastHeartbeatAt() { return lastHeartbeatAt; }
     public void setLastHeartbeatAt(Instant lastHeartbeatAt) { this.lastHeartbeatAt = lastHeartbeatAt; }
     public String getRemoteAddr() { return remoteAddr; }

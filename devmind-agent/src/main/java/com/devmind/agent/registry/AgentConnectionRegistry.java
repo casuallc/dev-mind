@@ -10,6 +10,7 @@ import com.devmind.common.agent.AgentEventFrame;
 import com.devmind.common.agent.AgentEventListener;
 import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.AgentNodeConnector;
+import com.devmind.common.agent.AgentProtocol;
 import com.devmind.common.agent.InputImage;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
@@ -65,6 +66,8 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private final Map<String, CompletableFuture<LaunchAck>> pendingLaunches = new ConcurrentHashMap<>();
     /** nodeId → upgrade ack 等待者（同节点同时只允许一个升级） */
     private final Map<String, CompletableFuture<UpgradeAck>> pendingUpgrades = new ConcurrentHashMap<>();
+    /** nodeId → hello 上报的协议版本（CAP-34 FR-08，断连清除；无记录按 v1 对待） */
+    private final Map<String, Integer> protocolVersions = new ConcurrentHashMap<>();
 
     public AgentConnectionRegistry(AgentNodeService nodeService, AgentProperties props,
                                    ObjectMapper mapper, ObjectProvider<AgentEventListener> listenerProvider,
@@ -98,6 +101,7 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             return;
         }
         lastSeen.remove(nodeId);
+        protocolVersions.remove(nodeId);
         nodeService.markOffline(node.getId());
         connLogService.record(AgentConnLogEntity.EVENT_DISCONNECT, node,
                 AgentConnLogService.formatRemoteAddr(ws.getRemoteAddress()), null);
@@ -118,6 +122,12 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         String nodeId = String.valueOf(node.getId());
         touch(nodeId);
         nodeService.updateMeta(node.getId(), meta);
+        // FR-08：登记协议版本（未上报的老 runner 移除记录 → supports 按 v1 兜底）
+        if (meta.protocolVersion() != null) {
+            protocolVersions.put(nodeId, meta.protocolVersion());
+        } else {
+            protocolVersions.remove(nodeId);
+        }
         listenerProvider.forEach(l -> l.onAgentHello(nodeId, activeSessionIds));
     }
 
@@ -160,6 +170,12 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     @Override
     public String defaultNodeId() {
         return nodeService.defaultNodeId();
+    }
+
+    /** FR-08：无 hello 版本记录（老 runner / 未装配）按 {@link AgentProtocol#DEFAULT_WHEN_ABSENT} 对待。 */
+    @Override
+    public boolean supports(String nodeId, int minVersion) {
+        return protocolVersions.getOrDefault(nodeId, AgentProtocol.DEFAULT_WHEN_ABSENT) >= minVersion;
     }
 
     @Override

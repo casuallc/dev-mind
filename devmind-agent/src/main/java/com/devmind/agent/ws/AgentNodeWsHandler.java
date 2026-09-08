@@ -92,11 +92,13 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
                 // 均为可选字段，旧 runner 不上报即 null，落库不动旧值
                 Long workspaceBytes = frame.has("workspaceBytes") && frame.path("workspaceBytes").isNumber()
                         ? frame.path("workspaceBytes").asLong() : null;
+                Integer protocolVersion = frame.has("protocolVersion") && frame.path("protocolVersion").isNumber()
+                        ? frame.path("protocolVersion").asInt() : null;
                 registry.onHello(node, new AgentHelloMeta(
                         frame.path("os").asText(null),
                         frame.path("capabilities").asText(null),
                         frame.path("version").asText(null),
-                        workspaceBytes, null, null, null), active);
+                        workspaceBytes, protocolVersion, null, null), active);
             }
             case "heartbeat" -> {
                 registry.touch(String.valueOf(node.getId()));
