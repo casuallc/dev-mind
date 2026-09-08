@@ -63,8 +63,19 @@ public class RunnerSessionRegistry {
 
     /** CAP-25：finalizer 非空 = 托管工作区会话，进程退出后先收尾（push+清理）再上行 exit。 */
     public void register(String sessionId, Process process, SessionFinalizer finalizer) {
-        RunnerSession s = new RunnerSession(sessionId, process, finalizer);
+        register(sessionId, process, finalizer, null);
+    }
+
+    /**
+     * CAP-34 FR-04：sessionDir 非空时写入 .runner-pid（pid + 启动时刻），
+     * runner 重启后 {@link com.devmind.common.agent.exec.WorkspaceReconciler} 据此回收孤儿进程。
+     */
+    public void register(String sessionId, Process process, SessionFinalizer finalizer, java.nio.file.Path sessionDir) {
+        RunnerSession s = new RunnerSession(sessionId, process, finalizer, sessionDir);
         sessions.put(sessionId, s);
+        if (sessionDir != null) {
+            com.devmind.common.agent.exec.WorkspaceReconciler.writePidFile(sessionDir, process);
+        }
         Thread.ofVirtual().name("runner-stdout-" + sessionId).start(() -> readLoop(s, false));
         Thread.ofVirtual().name("runner-stderr-" + sessionId).start(() -> readLoop(s, true));
     }
@@ -147,6 +158,7 @@ public class RunnerSessionRegistry {
             code = -1;
         }
         sessions.remove(s.sessionId, s);
+        com.devmind.common.agent.exec.WorkspaceReconciler.clearPidFile(s.sessionDir);
         if (s.finalizer != null) {
             try {
                 s.finalizer.finish(s.sessionId);
@@ -174,13 +186,15 @@ public class RunnerSessionRegistry {
         final String sessionId;
         final Process process;
         final SessionFinalizer finalizer;
+        final java.nio.file.Path sessionDir;
         final AtomicLong seq = new AtomicLong();
         final Object stdinLock = new Object();
 
-        RunnerSession(String sessionId, Process process, SessionFinalizer finalizer) {
+        RunnerSession(String sessionId, Process process, SessionFinalizer finalizer, java.nio.file.Path sessionDir) {
             this.sessionId = sessionId;
             this.process = process;
             this.finalizer = finalizer;
+            this.sessionDir = sessionDir;
         }
     }
 }

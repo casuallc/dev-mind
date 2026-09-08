@@ -60,6 +60,13 @@ public class AgentRunnerMain {
         RunnerSessionRegistry sessions = new RunnerSessionRegistry(parser, frame -> connRef[0].send(frame));
         RunnerWorkspace workspace = new RunnerWorkspace(config.workspaceRoot());
 
+        // CAP-34 FR-04：连接前先现场对账——强杀/崩溃残留的孤儿 claude 进程整树回收，
+        // 无主目录登记（超龄删除归 FR-05 GC）。对账完再上线，hello 的 activeSessions 才是真实清单
+        var report = new com.devmind.common.agent.exec.WorkspaceReconciler(config.workspaceRoot()).reconcile();
+        if (!report.ownerlessDirs().isEmpty()) {
+            log.info("对账登记无主会话目录 {} 个（待 GC）: {}", report.ownerlessDirs().size(), report.ownerlessDirs());
+        }
+
         ServerConnection conn = new ServerConnection(config, mapper,
                 frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, workspace, connRef[0]),
                 () -> connRef[0].send(helloFrame(sessions, version)));
@@ -192,12 +199,14 @@ public class AgentRunnerMain {
             // 结束 push+清理）；无 repo 块 → 旧行为（project.<id> 映射/兜底目录，代码节点自理）。
             // token 只进 RunnerWorkspace.RepoCtx（内存），严禁日志输出。
             Path workDir;
+            Path sessionDir = null; // CAP-34 FR-04：pid 文件落点（legacy 映射路径为 null，不参与重启对账）
             RunnerSessionRegistry.SessionFinalizer finalizer = null;
             String kind = frame.path("kind").asText("");
             JsonNode repoNode = frame.path("repo");
             JsonNode reposNode = frame.path("repos");
             if ("chat".equals(kind)) {
                 workDir = workspace.prepareChat(sessionId);
+                sessionDir = workDir;
                 finalizer = sid -> workspace.cleanChat(sid, msg -> sessions.reportSystem(sid, msg));
                 log.info("问答沙箱就绪: session={} cwd={}", sessionId, workDir);
             } else if (reposNode.isArray() && reposNode.size() > 1) {
@@ -216,6 +225,7 @@ public class AgentRunnerMain {
                 }
                 RunnerWorkspace.MultiCtx mctx = workspace.prepareMulti(sessionId, projectId, specs);
                 workDir = mctx.aggRoot();
+                sessionDir = mctx.aggRoot();
                 finalizer = sid -> workspace.finishMulti(mctx, msg -> sessions.reportSystem(sid, msg));
                 log.info("多库托管工作区就绪: session={} repos={} cwd={}", sessionId, specs.size(), workDir);
             } else if (repoNode.isObject() && !repoNode.path("remoteUrl").asText("").isBlank()) {
@@ -229,6 +239,7 @@ public class AgentRunnerMain {
                         repoNode.path("token").asText(""));
                 RunnerWorkspace.RepoCtx ctx = workspace.prepare(sessionId, projectId, spec);
                 workDir = ctx.sessionDir();
+                sessionDir = ctx.sessionDir();
                 finalizer = sid -> workspace.finish(ctx, msg -> sessions.reportSystem(sid, msg));
                 log.info("托管工作区就绪: session={} cwd={}", sessionId, workDir);
             } else {
@@ -261,7 +272,7 @@ public class AgentRunnerMain {
             }
             Process proc = executor.launch(new SessionExecutor.LaunchContext(
                     sessionId, workDir, taskSpec, model, permissionMode, env));
-            sessions.register(sessionId, proc, finalizer);
+            sessions.register(sessionId, proc, finalizer, sessionDir);
             conn.send(Map.of("type", "launched", "sessionId", sessionId, "ok", true));
         } catch (Exception e) {
             log.warn("拉起会话失败: session={} err={}", sessionId, e.getMessage());
