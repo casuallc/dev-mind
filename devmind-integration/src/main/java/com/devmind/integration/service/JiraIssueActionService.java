@@ -92,7 +92,11 @@ public class JiraIssueActionService {
         }
         Ref ref = resolve(projectId, requirementId);
         IntegrationConnector connector = jiraConnector();
-        String token = integrationService.tokenOf(ref.integration());
+        String actor = identityService.currentActor();
+        // CAP-35 FR-03：人触发写操作个人账号优先（Jira 侧操作人 = 当前用户）
+        IntegrationService.WriteIdentity identity =
+                integrationService.resolveWriteIdentity(actor, ref.integration());
+        String token = identity.secret();
         List<IssueTransition> available = connector.listTransitions(ref.integration(), token,
                 ref.link().getExternalKey());
         IssueTransition target = available.stream()
@@ -110,10 +114,10 @@ public class JiraIssueActionService {
         String remoteStatus = refreshAfterTransit(projectId, requirementId, ref, connector, token);
         integrationService.recordCall(ref.integration().getId(), "jira_transition",
                 ExternalLinkEntity.INTERNAL_REQUIREMENT, requirementId, true, null);
-        String actor = identityService.currentActor();
         auditService.record("integration", "jira_transition", actor, projectId, true,
                 "[#" + ref.integration().getId() + "] " + ref.link().getExternalKey()
-                        + " 执行转换「" + target.name() + "」（需求 " + requirementId + "）");
+                        + " 执行转换「" + target.name() + "」（需求 " + requirementId
+                        + "，身份 " + identity.source() + "）");
         eventPublisher.publish(SimpleDomainEvent.of("integration.jira.transitioned", projectId,
                 null, actor,
                 "Jira " + ref.link().getExternalKey() + " 已执行转换「" + target.name() + "」",
@@ -130,7 +134,11 @@ public class JiraIssueActionService {
         }
         Ref ref = resolve(projectId, requirementId);
         IntegrationConnector connector = jiraConnector();
-        String token = integrationService.tokenOf(ref.integration());
+        String actor = identityService.currentActor();
+        // CAP-35 FR-03：人触发写操作个人账号优先（Jira worklog 作者 = 当前用户）
+        IntegrationService.WriteIdentity identity =
+                integrationService.resolveWriteIdentity(actor, ref.integration());
+        String token = identity.secret();
         try {
             connector.logWork(ref.integration(), token, ref.link().getExternalKey(), seconds, comment);
         } catch (Exception e) {
@@ -141,10 +149,10 @@ public class JiraIssueActionService {
         String remoteStatus = refreshAfterTransit(projectId, requirementId, ref, connector, token);
         integrationService.recordCall(ref.integration().getId(), "jira_worklog",
                 ExternalLinkEntity.INTERNAL_REQUIREMENT, requirementId, true, null);
-        String actor = identityService.currentActor();
         auditService.record("integration", "jira_worklog", actor, projectId, true,
                 "[#" + ref.integration().getId() + "] " + ref.link().getExternalKey()
-                        + " 登记工时 " + seconds + "s（需求 " + requirementId + "）");
+                        + " 登记工时 " + seconds + "s（需求 " + requirementId
+                        + "，身份 " + identity.source() + "）");
         eventPublisher.publish(SimpleDomainEvent.of("integration.jira.worklogged", projectId,
                 null, actor,
                 "Jira " + ref.link().getExternalKey() + " 已登记工时 " + formatSeconds(seconds),

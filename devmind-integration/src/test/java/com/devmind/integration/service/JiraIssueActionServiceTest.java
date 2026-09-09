@@ -136,6 +136,11 @@ class JiraIssueActionServiceTest {
 
         @Override public String tokenOf(IntegrationEntity e) { return "fake-token"; }
 
+        /** CAP-35：测试场景一律按机器人身份（个人账号解析另由 UserPlatformAccountServiceTest 覆盖） */
+        @Override public WriteIdentity resolveWriteIdentity(String actor, IntegrationEntity e) {
+            return new WriteIdentity("fake-token", IdentitySource.BOT);
+        }
+
         @Override
         public void recordCall(Long id, String action, String it, String ii, boolean ok, String err) {
             callOk.add(ok);

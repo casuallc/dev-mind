@@ -45,7 +45,7 @@ public class RepoGitGatewayImpl implements RepoGitGateway {
         if (remoteUrl == null || remoteUrl.isBlank()) {
             return false; // 纯本地库：未执行，调用方走本地基准
         }
-        String host = UserGitCredentialService.hostOf(remoteUrl);
+        String host = UserPlatformAccountService.hostOf(remoteUrl);
         String token = integrationService.resolveGitToken(actor, host, repo.getProjectId()).orElse(null);
         GitRemoteOps.GitResult r = gitOps.fetch(repoPath, ref, remoteUrl, token);
         if (!r.ok()) {

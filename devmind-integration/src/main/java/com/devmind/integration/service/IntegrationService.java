@@ -62,7 +62,7 @@ public class IntegrationService implements PlatformIntegrationHook {
     private final WorkItemService workItemService;
     private final IdentityService identityService;
     private final AuditService auditService;
-    private final UserGitCredentialService userGitCredentialService;
+    private final UserPlatformAccountService accountService;
     private final Map<String, IntegrationConnector> connectors;
 
     public IntegrationService(IntegrationRepository integrationRepo,
@@ -77,7 +77,7 @@ public class IntegrationService implements PlatformIntegrationHook {
                               WorkItemService workItemService,
                               IdentityService identityService,
                               AuditService auditService,
-                              UserGitCredentialService userGitCredentialService,
+                              UserPlatformAccountService accountService,
                               List<IntegrationConnector> connectorList) {
         this.integrationRepo = integrationRepo;
         this.bindingRepo = bindingRepo;
@@ -91,7 +91,7 @@ public class IntegrationService implements PlatformIntegrationHook {
         this.workItemService = workItemService;
         this.identityService = identityService;
         this.auditService = auditService;
-        this.userGitCredentialService = userGitCredentialService;
+        this.accountService = accountService;
         this.connectors = connectorList.stream()
                 .collect(Collectors.toMap(IntegrationConnector::type, Function.identity()));
     }
@@ -109,12 +109,10 @@ public class IntegrationService implements PlatformIntegrationHook {
         }
         String baseUrl = validateBaseUrl(req.baseUrl());
         String authType = normalizeAuthType(req.authType());
-        if (req.token() == null || req.token().isBlank()) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST,
-                    IntegrationEntity.AUTH_BASIC.equals(authType) ? "密码不能为空" : "token 不能为空");
-        }
+        // CAP-35 §2.4：机器人凭证可选——留空 = 纯实例登记（自动化路径将报明确错误）
+        boolean hasToken = req.token() != null && !req.token().isBlank();
         String username = null;
-        if (IntegrationEntity.AUTH_BASIC.equals(authType)) {
+        if (hasToken && IntegrationEntity.AUTH_BASIC.equals(authType)) {
             if (req.username() == null || req.username().isBlank()) {
                 throw new DevMindException(ErrorCode.BAD_REQUEST, "Basic Auth 需要填写用户名");
             }
@@ -125,7 +123,9 @@ public class IntegrationService implements PlatformIntegrationHook {
         e.setName(req.name().trim());
         e.setBaseUrl(baseUrl);
         e.setAuthType(authType);
-        e.setSecretEnc(cipher.encrypt(encodeSecret(authType, username, req.token().trim())));
+        if (hasToken) {
+            e.setSecretEnc(cipher.encrypt(encodeSecret(authType, username, req.token().trim())));
+        }
         e.setStatus(IntegrationEntity.STATUS_ENABLED);
         e.setConfigJson(blankToNull(req.configJson()));
         e.setCreatedBy(identityService.currentActor());
@@ -306,32 +306,53 @@ public class IntegrationService implements PlatformIntegrationHook {
 
     // ---------------- FR-04 推送 WI 分支 ----------------
 
-    /** CAP-24 FR-04：push 结果（branch + 实际所用身份来源 PERSONAL/INTEGRATION）。 */
+    /** push 结果（branch + 实际所用身份来源 PERSONAL/BOT，CAP-35 FR-03）。 */
     public record PushResult(String branch, String identitySource) {}
 
     public PushResult pushWorkItemBranch(String projectId, String workItemId) {
         WorkItemEntity wi = workItemService.requireEntity(projectId, workItemId);
         String branch = workItemService.branchName(wi);
         ResolvedBinding rb = requireGitBinding(projectId);
-        // CAP-24 FR-04 凭证优先级：触发用户个人 PAT（remoteUrl host 匹配）→ 项目绑定 Integration
-        String repoHost = UserGitCredentialService.hostOf(rb.repo.getRemoteUrl());
-        String actor = identityService.currentActor();
-        java.util.Optional<String> personal = userGitCredentialService.personalTokenFor(actor, repoHost);
-        String token = personal.orElseGet(() -> tokenOf(rb.integration));
-        String identitySource = personal.isPresent() ? "PERSONAL" : "INTEGRATION";
+        // CAP-35 FR-03 统一身份链：触发用户个人账号 → 机器人凭证 → 报错引导
+        WriteIdentity identity = resolveWriteIdentity(identityService.currentActor(), rb.integration);
         GitRemoteOps.GitResult result = gitOps.pushBranch(
-                rb.repo.getPath(), branch, rb.repo.getRemoteUrl(), token);
+                rb.repo.getPath(), branch, rb.repo.getRemoteUrl(), identity.secret());
         recordCall(rb.integration.getId(), "push_branch",
                 ExternalLinkEntity.INTERNAL_WORK_ITEM, workItemId, result.ok(),
                 result.ok() ? null : tail(result.output()));
         audit("push_branch", rb.integration.getId(), projectId, result.ok(),
-                "WI-" + wi.getSeq() + " 分支 " + branch + "（身份 " + identitySource + "）"
+                "WI-" + wi.getSeq() + " 分支 " + branch + "（身份 " + identity.source() + "）"
                         + (result.ok() ? " 已推送" : " 推送失败"));
         if (!result.ok()) {
             throw new DevMindException(ErrorCode.INTERNAL, "分支推送失败：" + tail(result.output()));
         }
-        return new PushResult(branch, identitySource);
+        return new PushResult(branch, identity.source().name());
     }
+
+    // ---------------- CAP-35 FR-03 统一身份解析链 ----------------
+
+    /** 写操作实际所用身份来源：PERSONAL=操作人个人账号；BOT=实例机器人凭证 */
+    public enum IdentitySource { PERSONAL, BOT }
+
+    /**
+     * 人触发写操作的身份（个人账号 → 机器人凭证 → 报错引导绑定）；
+     * 自动化路径请用 {@link #tokenOf}（固定机器人）。secret 为 Connector 可直接消费的格式
+     * （BASIC 即 "username\npassword"），仅内存使用、不进日志。
+     */
+    public WriteIdentity resolveWriteIdentity(String actorUsername, IntegrationEntity integration) {
+        Optional<String> personal = accountService.personalSecretFor(actorUsername, integration.getId());
+        if (personal.isPresent()) {
+            return new WriteIdentity(personal.get(), IdentitySource.PERSONAL);
+        }
+        String bot = integration.getSecretEnc() == null ? null : cipher.decrypt(integration.getSecretEnc());
+        if (bot == null || bot.isBlank()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "未配置可用凭据：请先在「我的 → 第三方账号」绑定该平台账号，或联系 ADMIN 为实例配置平台凭证");
+        }
+        return new WriteIdentity(bot, IdentitySource.BOT);
+    }
+
+    public record WriteIdentity(String secret, IdentitySource source) {}
 
     // ---------------- FR-05 创建 MR（幂等） ----------------
 
@@ -349,6 +370,8 @@ public class IntegrationService implements PlatformIntegrationHook {
             return toLinkView(existing.get());
         }
 
+        // CAP-35 FR-03：人触发写操作个人账号优先（外部平台上 MR 作者 = 操作人本人）
+        WriteIdentity identity = resolveWriteIdentity(identityService.currentActor(), rb.integration);
         String branch = workItemService.branchName(wi);
         String target = req != null && req.targetBranch() != null && !req.targetBranch().isBlank()
                 ? req.targetBranch().trim()
@@ -360,7 +383,7 @@ public class IntegrationService implements PlatformIntegrationHook {
                 + (wi.getSpec() == null ? "" : wi.getSpec());
 
         IntegrationConnector.MergeRequestRef mr = connector.createMergeRequest(rb.integration,
-                tokenOf(rb.integration),
+                identity.secret(),
                 new IntegrationConnector.MrSpec(rb.binding.getExternalProjectKey(), branch, target,
                         title, description));
         ExternalLinkEntity link = registerLink(rb, ExternalLinkEntity.INTERNAL_WORK_ITEM, workItemId,
@@ -369,8 +392,12 @@ public class IntegrationService implements PlatformIntegrationHook {
         recordCall(rb.integration.getId(), "create_mr",
                 ExternalLinkEntity.INTERNAL_WORK_ITEM, workItemId, true, null);
         audit("create_mr", rb.integration.getId(), projectId, true,
-                "WI-" + wi.getSeq() + " MR !" + mr.iid() + (mr.reused() ? "（复用既有）" : ""));
-        return toLinkView(link);
+                "WI-" + wi.getSeq() + " MR !" + mr.iid() + (mr.reused() ? "（复用既有）" : "")
+                        + "（身份 " + identity.source() + "）");
+        ExternalLinkView view = toLinkView(link);
+        return new ExternalLinkView(view.id(), view.integrationId(), view.internalType(),
+                view.internalId(), view.externalType(), view.externalKey(), view.externalUrl(),
+                view.status(), view.createdAt(), identity.source().name());
     }
 
     // ---------------- FR-06 发版钩子（push tag + 平台 Release） ----------------
@@ -498,23 +525,25 @@ public class IntegrationService implements PlatformIntegrationHook {
         return c;
     }
 
-    /** 解密凭据（仅内存使用，不进日志）；public 供 JiraSyncService 等站内服务复用 */
+    /** 解密机器人凭据（仅内存使用，不进日志）；public 供 JiraSyncService 等站内服务复用 */
     public String tokenOf(IntegrationEntity e) {
-        String token = cipher.decrypt(e.getSecretEnc());
+        String token = e.getSecretEnc() == null ? null : cipher.decrypt(e.getSecretEnc());
         if (token == null || token.isBlank()) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "集成 " + e.getId() + " 未配置凭据");
+            // CAP-35 §2.4：机器人凭证可选——自动化路径（clone/轮询/tag/Release）必须有
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "实例「" + e.getName() + "」未配置平台凭证（自动化路径需要），请联系 ADMIN 在 平台集成 中补配");
         }
         return token;
     }
 
     /**
      * CAP-25/26：git 凭据解析（与 pushWorkItemBranch 同优先级）：actor 个人 PAT（repoHost
-     * 匹配，CAP-24）→ 项目绑定 Integration token。两者皆无返回 empty（调用方降级/匿名处理）。
+     * 匹配，CAP-35 账号模型）→ 项目绑定 Integration token。两者皆无返回 empty（调用方降级/匿名处理）。
      * 解密仅内存，不进日志。
      */
     public Optional<String> resolveGitToken(String actor, String repoHost, String projectId) {
         if (actor != null && !actor.isBlank() && repoHost != null && !repoHost.isBlank()) {
-            Optional<String> personal = userGitCredentialService.personalTokenFor(actor, repoHost);
+            Optional<String> personal = accountService.personalTokenFor(actor, repoHost);
             if (personal.isPresent()) {
                 return personal;
             }
@@ -670,7 +699,8 @@ public class IntegrationService implements PlatformIntegrationHook {
 
     private ExternalLinkView toLinkView(ExternalLinkEntity e) {
         return new ExternalLinkView(e.getId(), e.getIntegrationId(), e.getInternalType(), e.getInternalId(),
-                e.getExternalType(), e.getExternalKey(), e.getExternalUrl(), e.getStatus(), e.getCreatedAt());
+                e.getExternalType(), e.getExternalKey(), e.getExternalUrl(), e.getStatus(),
+                e.getCreatedAt(), null);
     }
 
     private IntegrationCallView toCallView(IntegrationCallEntity e) {
