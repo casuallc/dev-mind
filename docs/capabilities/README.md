@@ -39,7 +39,7 @@
 | [CAP-21](CAP-21-agent-node.md) | 远程 Agent 节点管理 | 底座 | Windows 节点 runner 反向 WS 连服务端，远程拉起/交互 claude 会话，事件解析下沉 runner |
 | [CAP-22](CAP-22-github-integration.md) | GitHub 集成 | 底座 | CAP-18 连接器第二个 git 平台实现：PR/Release，github.com 与 GHE（/api/v3）分流 |
 | [CAP-23](CAP-23-repo-clone.md) | 项目仓库从 Git 克隆 | 底座 | 项目/多库支持 GitLab/GitHub 远端地址异步克隆到工作区（按项目分目录），PAT 注入+状态机+实时日志 |
-| [CAP-24](CAP-24-user-git-identity.md) | 用户级 Git 身份与凭证 | 底座 | 用户自助维护各 git 平台 PAT 与署名，Agent 提交按会话发起人署名（env 注入），push 个人凭证优先 |
+| [CAP-24](CAP-24-user-git-identity.md) | 用户级 Git 身份与凭证 | 底座 | 用户自助维护各 git 平台 PAT 与署名，Agent 提交按会话发起人署名（env 注入），push 个人凭证优先（**已由 CAP-35 演进取代**） |
 | [CAP-25](CAP-25-runner-workspace.md) | 远程会话工作区编排 | 底座 | launch 帧下发 repo+短期凭据，runner 自动 clone/fetch/会话 worktree/结束 push，节点零手工配码 |
 | [CAP-26](CAP-26-exec-fetch.md) | 执行前代码同步 | 底座 | 构建/发版/worktree 基准一律取 origin/ 远端引用（执行前 fetch），服务端 clone 不再失鲜 |
 | [CAP-27](CAP-27-requirement-effort.md) | 需求工时 | 组装层 | AI 实际耗时会话时长自动汇总 + Jira 预估/已用工时同步展示 + worklog 一键回写 |
@@ -50,6 +50,7 @@
 | [CAP-32](CAP-32-attachment.md) | 公共附件管理 | 底座 | 统一附件模型：二进制上传即附件、唯一字符串 id 对外引用，图片内联渲染（图床）/非图片下载，chat 图片下发 claude、docs 粘贴插图 |
 | [CAP-33](CAP-33-scenario-session-context.md) | 场景化会话与上下文装配 | 底座 | 场景 = 命名模板 + 预装配上下文包（skills/docs/knowledge 绑定到意图），session/chat 统一装配管线一键带齐上下文 |
 | [CAP-34](CAP-34-agent-runner-executor.md) | Agent Runner 执行代理化 | 底座 | 取消本机会话：服务端零执行纯分发调度，一切执行收敛 runner 层（执行内核上移 common）；上下文包传输、会话隔离强化、exec 帧利用节点本地工具链 |
+| [CAP-35](CAP-35-unified-platform-accounts.md) | 统一第三方账号体系 | 底座 | Integration 收敛为实例登记+可选机器人凭证；用户账号统一为绑定实例的 UserPlatformAccount（git PAT+署名 / Jira PAT·BASIC）；MR·PR 创建、Jira transition、worklog 回写全部切个人优先身份链（取代 CAP-24） |
 
 ## 依赖关系
 
@@ -92,6 +93,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-32 公共附件管理依赖 CAP-01/21/30：统一附件表 + 本地磁盘存储 + 唯一字符串 id 引用，scope 归属可见性；chat 图片消息经 AttachmentContentResolver SPI（common 定义）解析下发 claude，远程节点 input 帧内嵌 base64 送达 runner；docs 编辑器粘贴插图。
 - CAP-33 场景化会话依赖 CAP-03/04/05/30/34 与 Skill 管理：场景实体绑定 skills/docs/knowledgeTags 产出 ContextPackage（装什么），传输与物化由 CAP-34 承担；session/chat 创建链路统一走装配管线，session_templates 迁入场景。
 - CAP-34 runner 执行代理化依赖 CAP-21/25/30/31/12：取消本机会话，服务端不再拉起任何执行子进程，会话必有执行节点（皆无命中 409 不回落）；执行内核（工作区/上下文物化/进程拉起）上移 devmind-common 仅供 runner 使用；launch 帧 contextManifest + HTTP 拉包补掉远程注入缺口；exec 帧 + 工具链标签让 build/test 可在 agent 节点本地执行。
+- CAP-35 统一第三方账号依赖 CAP-01/18/19/22/27：取代 CAP-24——Integration 收敛为实例登记 + 可选机器人凭证（自动化专用），用户个人账号绑定实例（user_platform_accounts），人触发的写操作（push/MR·PR/Jira transition/worklog）统一「个人 → 机器人 → 报错引导」身份链，Connector SPI 零变更。
 
 ## 组装方式（后续流程层）
 

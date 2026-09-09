@@ -1,6 +1,6 @@
 # CAP-24 用户级 Git 身份与凭证
 
-> 能力 ID：CAP-24 ｜ 分类：底座 ｜ 状态：已落地（2026-09-03：integration 凭证 CRUD + SPI、session env 注入、push 个人优先、前端凭证页，单测 6 项通过） ｜ 日期：2026-09-03
+> 能力 ID：CAP-24 ｜ 分类：底座 ｜ 状态：**已由 [CAP-35](CAP-35-unified-platform-accounts.md) 演进取代**（2026-09-09：模型推广为绑定 Integration 实例的统一第三方账号，身份链覆盖 MR/PR、Jira transition、worklog）｜ 原状态：已落地（2026-09-03）
 
 ## 1. 目的
 
