@@ -11,6 +11,7 @@ import type { PlatformAccountUpsertRequest } from '../api'
 import type { PlatformAccount } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 const TYPE_COLOR: Record<string, string> = { GITLAB: 'orange', GITHUB: 'default', JIRA: 'blue' }
 const TYPE_LABEL: Record<string, string> = { GITLAB: 'GitLab', GITHUB: 'GitHub', JIRA: 'Jira' }
@@ -35,7 +36,7 @@ export default function PlatformAccountsPage() {
     setLoading(true)
     listPlatformAccounts()
       .then(setItems)
-      .catch((e) => message.error(`加载账号失败: ${e.message}`))
+      .catch((e) => showError(e, '加载账号失败'))
       .finally(() => setLoading(false))
   }
 
@@ -71,7 +72,7 @@ export default function PlatformAccountsPage() {
       form.resetFields()
       reload()
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '保存失败')
+      showError(e, '保存失败')
     } finally {
       setSaving(false)
     }
@@ -87,7 +88,7 @@ export default function PlatformAccountsPage() {
         message.error(`${row.integrationName}：${r.message}${r.detail ? `（${r.detail}）` : ''}`)
       }
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '自检失败')
+      showError(e, '自检失败')
     } finally {
       setTestingId(null)
     }
@@ -189,7 +190,7 @@ export default function PlatformAccountsPage() {
                             message.success('已解绑')
                             reload()
                           })
-                          .catch((e) => message.error(e instanceof Error ? e.message : '解绑失败'))
+                          .catch((e) => showError(e, '解绑失败'))
                       }
                     >
                       <Button size="small" danger>

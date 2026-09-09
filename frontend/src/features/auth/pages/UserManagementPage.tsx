@@ -5,6 +5,7 @@ import { createUser, listUsers, resetPassword, updateUser } from '../api'
 import { getUserSnapshot } from '../authStore'
 import type { AuthUser } from '../types'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 /** CAP-01 后台页：用户管理（仅 ADMIN，由 RequireAdmin 路由守卫保证）。 */
 export default function UserManagementPage() {
@@ -21,7 +22,7 @@ export default function UserManagementPage() {
     setLoading(true)
     listUsers()
       .then(setUsers)
-      .catch((e) => message.error(`加载用户失败: ${e.message}`))
+      .catch((e) => showError(e, '加载用户失败'))
       .finally(() => setLoading(false))
   }
 
@@ -36,7 +37,7 @@ export default function UserManagementPage() {
       createForm.resetFields()
       reload()
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '创建失败')
+      showError(e, '创建失败')
     }
   }
 
@@ -49,7 +50,7 @@ export default function UserManagementPage() {
       setResetTarget(null)
       resetForm.resetFields()
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '重置失败')
+      showError(e, '重置失败')
     }
   }
 
@@ -60,7 +61,7 @@ export default function UserManagementPage() {
       setManageTarget((t) => (t && t.id === u.id ? { ...t, role } : t))
       reload()
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '修改失败')
+      showError(e, '修改失败')
     }
   }
 
@@ -72,7 +73,7 @@ export default function UserManagementPage() {
       setManageTarget((t) => (t && t.id === u.id ? { ...t, status: next } : t))
       reload()
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '操作失败')
+      showError(e, '操作失败')
     }
   }
 

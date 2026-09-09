@@ -39,6 +39,7 @@ import {
 import { attachmentRawUrl } from '../../../shared/attachments/url'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`
@@ -68,7 +69,7 @@ export default function AttachmentsPage() {
       keyword: keyword.trim() || undefined,
     })
       .then(setRows)
-      .catch((e) => message.error(`加载失败：${(e as Error).message}`))
+      .catch((e) => showError(e, '加载失败'))
       .finally(() => setLoading(false))
   }, [scopeFilter, typeFilter, keyword])
 
@@ -88,7 +89,7 @@ export default function AttachmentsPage() {
         message.success(next === 'SHARED' ? '已设为全员共享' : '已设为仅自己可见')
         load()
       })
-      .catch((e) => message.error(`操作失败：${(e as Error).message}`))
+      .catch((e) => showError(e, '操作失败'))
   }
 
   const onDelete = (r: AttachmentView) => {
@@ -97,7 +98,7 @@ export default function AttachmentsPage() {
         message.success('已删除')
         load()
       })
-      .catch((e) => message.error(`删除失败：${(e as Error).message}`))
+      .catch((e) => showError(e, '删除失败'))
   }
 
   const resetUpload = () => {
