@@ -542,7 +542,7 @@ function NodeDrawer({
     })
 
   return (
-    <Drawer title={`节点 · ${node.name}`} open onClose={onClose} width={640}>
+    <Drawer title={`节点 · ${node.name}`} open onClose={onClose} width={760}>
       <Spin spinning={busy}>
         <Space direction="vertical" style={{ width: '100%' }} size={16}>
           <Descriptions size="small" column={2}>
@@ -615,7 +615,10 @@ function NodeDrawer({
               <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
                 Windows：
                 <Typography.Text code>powershell -ExecutionPolicy Bypass -File install-runner.ps1 -Token dmag_xxx</Typography.Text>
-                ；Linux：<Typography.Text code>bash install-runner.sh dmag_xxx</Typography.Text>
+              </Typography.Paragraph>
+              <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+                Linux：
+                <Typography.Text code>bash install-runner.sh dmag_xxx</Typography.Text>
               </Typography.Paragraph>
             </Space>
           </Card>
