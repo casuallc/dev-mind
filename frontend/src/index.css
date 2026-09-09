@@ -5,6 +5,30 @@ html, body, #root {
     'Microsoft YaHei', sans-serif;
 }
 
+/* 表格内操作按钮统一为纯文字样式：蓝字（危险操作红字）、无边框、无图标 */
+.ant-table .ant-btn {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: #1677ff;
+  padding-inline: 4px;
+}
+.ant-table .ant-btn:hover:not(:disabled) {
+  background: transparent;
+  color: #4096ff;
+}
+.ant-table .ant-btn-dangerous {
+  color: #ff4d4f;
+}
+.ant-table .ant-btn-dangerous:hover:not(:disabled) {
+  background: transparent;
+  color: #ff7875;
+}
+/* 隐藏图标（含 loading 转圈），表格行内操作只留文字 */
+.ant-table .ant-btn .anticon {
+  display: none;
+}
+
 /* CAP-03 只读 Markdown 渲染样式 */
 .doc-md h1, .doc-md h2, .doc-md h3, .doc-md h4 {
   margin: 0.8em 0 0.4em;
