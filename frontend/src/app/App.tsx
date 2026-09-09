@@ -42,7 +42,7 @@ import AttachmentsPage from '../features/attachments/pages/AttachmentsPage'
 import ReposAdminPage from '../features/repos/pages/ReposAdminPage'
 import LoginPage from '../features/auth/pages/LoginPage'
 import UserManagementPage from '../features/auth/pages/UserManagementPage'
-import GitCredentialsPage from '../features/auth/pages/GitCredentialsPage'
+import PlatformAccountsPage from '../features/auth/pages/PlatformAccountsPage'
 import RequireAuth from '../features/auth/RequireAuth'
 import RequireAdmin from '../features/auth/RequireAdmin'
 import { setCurrentProject } from './currentProjectStore'
@@ -76,8 +76,9 @@ export default function App() {
           }
         >
           <Route path="/" element={<Navigate to="/overview" replace />} />
-          {/* CAP-24 个人设置：我的 Git 凭证 */}
-          <Route path="/me/git-credentials" element={<GitCredentialsPage />} />
+          {/* CAP-35 个人设置：第三方账号（旧 Git 凭证路径兼容跳转） */}
+          <Route path="/me/accounts" element={<PlatformAccountsPage />} />
+          <Route path="/me/git-credentials" element={<Navigate to="/me/accounts" replace />} />
           {/* CAP-28 个人工作日志（个人级，不进项目上下文） */}
           <Route path="/worklog" element={<WorklogPage />} />
           {/* CAP-30 通用问答（个人级，不进项目上下文） */}

@@ -1,5 +1,6 @@
-// CAP-18/19 平台集成管理页（仅 ADMIN）：集成实例列表 + 新建/编辑 + 连接测试 + 启停。
-// GitLab/GitHub（push 分支/MR·PR/Release）与 Jira（issue 同步）共用同一 integrations 表。
+// CAP-18/19/35 平台集成管理页（仅 ADMIN）：平台实例登记 + 可选机器人凭证 + 连接测试 + 启停。
+// 机器人凭证仅供自动化（克隆、Jira 轮询、打 tag/Release）；人触发的写操作优先用操作人在
+// 「我的 → 第三方账号」绑定的个人账号（CAP-35）。
 import { useCallback, useEffect, useState } from 'react'
 import {
   Badge,
@@ -58,6 +59,7 @@ export default function IntegrationsPage() {
   const [form] = Form.useForm<IntegrationInput>()
   const formType = Form.useWatch('type', form)
   const formAuthType = Form.useWatch('authType', form)
+  const formToken = Form.useWatch('token', form)
   const isJira = formType === 'JIRA'
   const isGitHub = formType === 'GITHUB'
   const isBasic = isJira && formAuthType === 'BASIC'
@@ -176,6 +178,10 @@ export default function IntegrationsPage() {
     }
     setTestingForm(true)
     try {
+      if (!editing && !values.token) {
+        message.warning('未填写平台凭证（纯实例登记），无需测试连接')
+        return
+      }
       const r: IntegrationTestResult =
         editing && !values.token
           ? await testIntegration(editing.id)
@@ -235,7 +241,9 @@ export default function IntegrationsPage() {
       }
     >
       <Typography.Paragraph type="secondary">
-        管理 GitLab/GitHub/Jira 实例的接入凭据，供代码事件接入与 Jira 需求同步使用。
+        登记 GitLab/GitHub/Jira 平台实例。平台凭证（机器人）选填：供克隆、Jira 轮询同步、打 tag/Release
+        等自动化使用；人触发的写操作（推送分支、建 MR/PR、Jira 状态/工时回写）优先使用操作人在
+        「我的 → 第三方账号」绑定的个人账号。实例启用后，用户即可在个人设置中绑定自己的账号。
       </Typography.Paragraph>
       <Table<Integration>
         rowKey="id"
@@ -395,35 +403,30 @@ export default function IntegrationsPage() {
               label="用户名"
               name="username"
               rules={
-                editing
+                editing || !formToken
                   ? []
                   : [{ required: true, message: 'Basic Auth 需要填写 Jira 登录用户名' }]
               }
-              extra={editing ? '留空表示沿用原用户名' : undefined}
+              extra={editing ? '留空表示沿用原用户名' : '配置平台凭证时必填'}
             >
               <Input placeholder="Jira 登录用户名" autoComplete="off" />
             </Form.Item>
           )}
           <Form.Item
-            label={isBasic ? '密码' : '访问令牌（PAT）'}
+            label={isBasic ? '密码（平台凭证）' : '访问令牌 PAT（平台凭证）'}
             name="token"
-            rules={
-              editing
-                ? []
-                : [{ required: true, message: isBasic ? '请输入密码' : '请输入 PAT' }]
-            }
             extra={
               editing
                 ? '留空表示保持现有凭据不变'
                 : isBasic
-                  ? 'Jira 登录密码（加密存储，仅用于调用 Jira API）'
+                  ? 'Jira 登录密码（加密存储）。留空 = 纯实例登记，自动化（轮询同步等）将不可用'
                   : isGitHub
-                    ? 'GitHub Personal Access Token（classic 需 repo scope；fine-grained 按仓库授权 Contents/Pull requests 读写）'
-                    : 'Jira Server/DC 8.14+：个人访问令牌；GitLab：Personal Access Token（api scope）'
+                    ? 'GitHub Personal Access Token（classic 需 repo scope；fine-grained 按仓库授权 Contents/Pull requests 读写）。留空 = 纯实例登记，自动化（克隆/Release 等）将不可用'
+                    : 'Jira Server/DC 8.14+：个人访问令牌；GitLab：Personal Access Token（api scope）。留空 = 纯实例登记，自动化（克隆/轮询/tag/Release 等）将不可用'
             }
           >
             <Input.Password
-              placeholder={editing ? '（不修改请留空）' : isBasic ? '输入密码' : '粘贴 token'}
+              placeholder={editing ? '（不修改请留空）' : isBasic ? '输入密码（可留空不配置）' : '粘贴 token（可留空不配置）'}
               autoComplete="off"
             />
           </Form.Item>

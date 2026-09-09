@@ -107,4 +107,6 @@ export interface ExternalLink {
   externalUrl?: string | null
   status?: string | null
   createdAt: string
+  /** 仅创建 MR 响应携带（CAP-35：PERSONAL/BOT 身份来源） */
+  identitySource?: string | null
 }
