@@ -59,7 +59,7 @@ export default function AdminLayout() {
                 { key: '/admin/agent-nodes', icon: <RobotOutlined />, label: 'Agent 节点' },
                 { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
                 { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
-                { key: '/admin/scenarios', icon: <DeploymentUnitOutlined />, label: '场景' },
+                { key: '/admin/scenarios', icon: <DeploymentUnitOutlined />, label: '应用场景' },
               ],
             },
             {
