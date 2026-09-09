@@ -8,6 +8,7 @@ import {
   setAuth,
 } from '../../features/auth/authStore'
 import type { LoginResponse } from '../../features/auth/types'
+import { parseApiError } from './error'
 
 const BASE = '/api'
 
@@ -71,7 +72,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    throw new Error(`${res.status} ${text || res.statusText}`)
+    throw parseApiError(res.status, text)
   }
   // void 端点返回空 body，res.json() 会抛 "Unexpected end of JSON input"
   if (res.status === 204) return undefined as T
@@ -131,7 +132,7 @@ function xhrUpload<T>(
           reject(e)
         }
       } else {
-        reject(new Error(`${xhr.status} ${xhr.responseText || xhr.statusText}`))
+        reject(parseApiError(xhr.status, xhr.responseText || xhr.statusText))
       }
     }
     xhr.onerror = () => reject(new Error('网络错误，上传失败'))
