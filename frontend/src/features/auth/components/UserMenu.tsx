@@ -1,5 +1,5 @@
 import { Dropdown, Form, Input, Modal, Space, Tag, Typography, message } from 'antd'
-import { ApiOutlined, KeyOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons'
+import { KeyOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons'
 import { useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { changePassword, logout } from '../api'
@@ -11,7 +11,8 @@ const ROLE_LABELS: Record<string, { color: string; text: string }> = {
   VIEWER: { color: 'default', text: 'VIEWER' },
 }
 
-/** CAP-01 Header 用户区：当前用户 + 角色 + 下拉（修改密码 / 退出登录）。 */
+/** CAP-01 Header 用户区：当前用户 + 角色 + 下拉（修改密码 / 退出登录）。
+ *  第三方账号入口在侧边栏「个人」组（CAP-35）。 */
 export default function UserMenu() {
   const user = useSyncExternalStore(subscribeAuth, getUserSnapshot)
   const navigate = useNavigate()
@@ -49,12 +50,6 @@ export default function UserMenu() {
         menu={{
           items: [
             { key: 'password', icon: <KeyOutlined />, label: '修改密码', onClick: () => setPwdOpen(true) },
-            {
-              key: 'platform-accounts',
-              icon: <ApiOutlined />,
-              label: '第三方账号',
-              onClick: () => navigate('/me/accounts'),
-            },
             { type: 'divider' },
             { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', onClick: onLogout },
           ],

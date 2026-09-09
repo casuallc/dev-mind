@@ -13,6 +13,7 @@ import {
   RocketOutlined,
   FieldTimeOutlined,
   CommentOutlined,
+  ApiOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useSyncExternalStore } from 'react'
@@ -77,6 +78,8 @@ export default function AppLayout() {
               children: [
                 { key: '/worklog', icon: <FieldTimeOutlined />, label: '工作日志' },
                 { key: '/chats', icon: <CommentOutlined />, label: 'AI 问答' },
+                // CAP-35 第三方平台账号绑定（原头像下拉「Git 凭证」入口）
+                { key: '/me/accounts', icon: <ApiOutlined />, label: '第三方账号' },
               ],
             },
             {
