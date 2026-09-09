@@ -72,4 +72,15 @@ public interface AgentNodeConnector {
     default String pickNodeByLabels(List<String> requiredLabels) {
         return null;
     }
+
+    /**
+     * CAP-36：下发 exec 帧并阻塞至 exec_exit 收口（exec_log 帧实时推 sink，stderr 行前缀
+     * 「[stderr] 」——与 LocalStepRunner 日志形态一致）。节点离线/协议版本不足（需 v3+）/
+     * 等待超时抛 DevMindException(CONFLICT)；进程非零退出不抛，看 {@link AgentExecResult#exitCode()}。
+     * 默认实现 = agent 模块未装配（无任何执行节点可用）。
+     */
+    default AgentExecResult exec(String nodeId, AgentExecCommand cmd, java.util.function.Consumer<String> sink) {
+        throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+    }
 }

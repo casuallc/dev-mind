@@ -95,6 +95,67 @@ public class WorkspaceGc {
         return sizeOf(workspaceRoot);
     }
 
+    /**
+     * CAP-36 构建工作区（&lt;proj&gt;/builds/&lt;id&gt;）超龄清理：无分支/push 语义，
+     * 超龄即删（仍在执行中的 workspaceId 跳过）。构建链结束后工作区无保留价值，
+     * 保留窗口（runner 配置 buildGcHours，默认 24h）仅供失败排查。删除后 best-effort
+     * {@code git worktree prune} 清缓存库的 worktree 元数据。
+     */
+    public GcReport sweepBuilds(long maxAgeMs, Set<String> activeBuildIds) {
+        int scanned = 0;
+        int deleted = 0;
+        long freed = 0;
+        List<String> skipped = new ArrayList<>();
+        long cutoffMillis = System.currentTimeMillis() - maxAgeMs;
+        if (!Files.isDirectory(workspaceRoot)) {
+            return new GcReport(0, 0, 0, List.of());
+        }
+        try (Stream<Path> projects = Files.list(workspaceRoot)) {
+            for (Path proj : projects.filter(Files::isDirectory).toList()) {
+                Path builds = proj.resolve("builds");
+                if (!Files.isDirectory(builds)) {
+                    continue;
+                }
+                try (Stream<Path> s = Files.list(builds)) {
+                    for (Path dir : s.filter(Files::isDirectory)
+                            .filter(p -> SAFE_ID.matcher(p.getFileName().toString()).matches()).toList()) {
+                        scanned++;
+                        String id = dir.getFileName().toString();
+                        if (activeBuildIds.contains(id)) {
+                            skipped.add(id + ": 构建进行中");
+                            continue;
+                        }
+                        try {
+                            if (Files.getLastModifiedTime(dir).toMillis() > cutoffMillis) {
+                                continue; // 未超龄
+                            }
+                        } catch (IOException e) {
+                            skipped.add(id + ": mtime 不可读");
+                            continue;
+                        }
+                        long size = sizeOf(dir);
+                        if (deleteRecursively(dir)) {
+                            deleted++;
+                            freed += size;
+                            log.info("GC 删除超龄构建工作区: {}（释放 {} 字节）", dir, size);
+                            git(proj.resolve("main"), "worktree", "prune"); // best-effort 清元数据
+                        } else {
+                            skipped.add(id + ": 删除失败");
+                        }
+                    }
+                } catch (IOException e) {
+                    log.warn("GC 扫描构建目录失败: {} err={}", builds, e.getMessage());
+                }
+            }
+        } catch (IOException e) {
+            log.warn("GC 扫描失败: {} err={}", workspaceRoot, e.getMessage());
+        }
+        if (scanned > 0) {
+            log.info("构建工作区 GC 完成: 扫描 {} 删除 {} 释放 {} 字节 跳过(带原因) {}", scanned, deleted, freed, skipped.size());
+        }
+        return new GcReport(scanned, deleted, freed, skipped);
+    }
+
     /** 候选目录：repo 会话（带缓存库路径供分支判定）+ chat 沙箱。 */
     private record Candidate(Path dir, Path repoCacheDir) {
     }

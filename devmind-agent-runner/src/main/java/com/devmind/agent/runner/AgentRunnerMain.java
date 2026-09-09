@@ -78,6 +78,8 @@ public class AgentRunnerMain {
         ServerConnection[] connRef = new ServerConnection[1];
         RunnerSessionRegistry sessions = new RunnerSessionRegistry(parser, frame -> connRef[0].send(frame));
         RunnerWorkspace workspace = new RunnerWorkspace(config.workspaceRoot());
+        // CAP-36：exec 帧 handler（构建/部署/测试/发版下发执行；execAllowlist 空 = 全部拒绝）
+        ExecHandler execHandler = new ExecHandler(config, workspace, frame -> connRef[0].send(frame));
 
         // CAP-34 FR-04：连接前先现场对账——强杀/崩溃残留的孤儿 claude 进程整树回收，
         // 无主目录登记（超龄删除归 FR-05 GC）。对账完再上线，hello 的 activeSessions 才是真实清单
@@ -100,7 +102,8 @@ public class AgentRunnerMain {
         });
 
         ServerConnection conn = new ServerConnection(config, mapper,
-                frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, workspace, connRef[0]),
+                frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, workspace,
+                        execHandler, connRef[0]),
                 () -> connRef[0].send(helloFrame(sessions, version, workspaceBytes.get(),
                         config.labels(), toolchain.get())));
         connRef[0] = conn;
@@ -122,6 +125,8 @@ public class AgentRunnerMain {
         gcTimer.scheduleWithFixedDelay(() -> {
             try {
                 gc.run(config.gcDays(), java.util.Set.copyOf(sessions.activeSessionIds()));
+                // CAP-36：构建工作区（无分支/push 语义）保留窗口更短，独立清理
+                gc.sweepBuilds(config.buildGcHours() * 3600_000L, execHandler.activeBuildWorkspaceIds());
                 workspaceBytes.set(gc.usageBytes());
             } catch (Exception e) {
                 log.warn("工作区 GC 异常（下轮重试）: {}", e.getMessage());
@@ -129,10 +134,11 @@ public class AgentRunnerMain {
         }, config.gcInitialDelayMinutes(), config.gcIntervalMinutes(), TimeUnit.MINUTES);
 
         Runtime.getRuntime().addShutdownHook(Thread.ofPlatform().unstarted(() -> {
-            log.info("runner 关闭中，终止全部会话进程");
+            log.info("runner 关闭中，终止全部会话/exec 进程");
             heartbeat.shutdownNow();
             gcTimer.shutdownNow();
             sessions.killAll();
+            execHandler.killAll();
             conn.shutdown();
         }));
 
@@ -175,11 +181,12 @@ public class AgentRunnerMain {
     private static void handleFrame(JsonNode frame, RunnerConfig config, Path configFile,
                                     CliProcessLauncher protocol, SessionExecutor executor,
                                     RunnerSessionRegistry sessions, RunnerWorkspace workspace,
-                                    ServerConnection conn) {
+                                    ExecHandler execHandler, ServerConnection conn) {
         String type = frame.path("type").asText("");
         String sessionId = frame.path("sessionId").asText("");
         switch (type) {
             case "launch" -> handleLaunch(frame, sessionId, config, executor, sessions, workspace, conn);
+            case "exec" -> execHandler.handle(frame); // CAP-36：构建/部署/测试/发版下发执行
             case "input" -> sessions.writeStdin(sessionId,
                     protocol.buildUserMessage(frame.path("text").asText(""), parseImages(frame)));
             case "authorize" -> sessions.writeStdin(sessionId, protocol.buildPermissionResult(

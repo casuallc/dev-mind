@@ -215,8 +215,96 @@ public class RunnerWorkspace {
     }
 
     /**
-     * CAP-30 问答沙箱：&lt;workspaceRoot&gt;/_chat/&lt;sessionId&gt;（launch 帧 kind:"chat"）。
-     * 幂等创建（resume 复用）；无 clone/push 语义。
+     * CAP-36 构建工作区：&lt;workspaceRoot&gt;/&lt;projectId&gt;/builds/&lt;workspaceId&gt;，
+     * detach checkout 到 commit（无分支、无 push，构建结束即弃，超龄由 {@link WorkspaceGc#sweepBuilds} 兜底）。
+     * 克隆缓存复用 &lt;projectId&gt;/main（与会话链路同一缓存，fetch/worktree 同锁互斥）。
+     *
+     * <p><b>幂等</b>：buildDir 已在 = 同一条执行链（同 workspaceId）的后续步骤，直接复用，
+     * 不再 fetch/checkout——链内步骤必须看到前步骤的产物。</p>
+     *
+     * @return 构建工作区目录（exec 的 cwd 基准）
+     */
+    public Path prepareBuild(String workspaceId, String projectId, String remoteUrl,
+                             String branch, String commit, String token) {
+        if (projectId == null || !SAFE_ID.matcher(projectId).matches()) {
+            throw new IllegalStateException("非法 projectId（白名单 [a-zA-Z0-9._-]）: " + projectId);
+        }
+        if (workspaceId == null || !SAFE_ID.matcher(workspaceId).matches()) {
+            throw new IllegalStateException("非法 workspaceId（白名单 [a-zA-Z0-9._-]）: " + workspaceId);
+        }
+        if (remoteUrl == null || remoteUrl.isBlank()) {
+            throw new IllegalStateException("构建工作区缺 remoteUrl");
+        }
+        Path cacheDir = workspaceRoot.resolve(projectId).resolve("main").normalize();
+        Path buildDir = workspaceRoot.resolve(projectId).resolve("builds").resolve(workspaceId).normalize();
+        if (!cacheDir.startsWith(workspaceRoot) || !buildDir.startsWith(workspaceRoot)) {
+            throw new IllegalStateException("工作区路径越界（.. 逃逸防护）: " + projectId);
+        }
+        if (Files.isDirectory(buildDir)) {
+            return buildDir; // 链内后续步骤复用
+        }
+        RepoSpec spec = new RepoSpec(remoteUrl, branch, branch, token);
+        var lock = lockOf(cacheDir);
+        lock.lock();
+        try {
+            ensureClone(cacheDir, spec);
+            fetch(cacheDir, spec);
+            String baseline = commit != null && !commit.isBlank() ? commit
+                    : branch != null && !branch.isBlank() ? "FETCH_HEAD" : "HEAD";
+            Result add = run(cacheDir, OP_TIMEOUT_SEC, token, "worktree", "add", "--detach",
+                    buildDir.toString(), baseline);
+            if (add.exit() != 0) {
+                throw new IllegalStateException("git worktree add（detach " + baseline + "）失败: " + tail(add.output()));
+            }
+        } finally {
+            lock.unlock();
+        }
+        log.info("构建工作区就绪: workspace={} dir={}", workspaceId, buildDir);
+        return buildDir;
+    }
+
+    /**
+     * CAP-36 构建 worktree 移除（best-effort）：git worktree remove --force，
+     * 失败递归删目录兜底 + worktree prune 清缓存元数据。目录不在 = no-op。
+     */
+    public void finishBuild(String projectId, String workspaceId, String token) {
+        if (projectId == null || workspaceId == null
+                || !SAFE_ID.matcher(projectId).matches() || !SAFE_ID.matcher(workspaceId).matches()) {
+            return;
+        }
+        Path cacheDir = workspaceRoot.resolve(projectId).resolve("main").normalize();
+        Path buildDir = workspaceRoot.resolve(projectId).resolve("builds").resolve(workspaceId).normalize();
+        if (!Files.exists(buildDir)) {
+            return;
+        }
+        var lock = lockOf(cacheDir);
+        lock.lock();
+        try {
+            Result rm = run(cacheDir, OP_TIMEOUT_SEC, token, "worktree", "remove", "--force", buildDir.toString());
+            if (rm.exit() != 0) {
+                log.warn("构建 worktree 清理失败(可人工删除 {}): {}", buildDir, tail(rm.output()));
+                deleteRecursively(buildDir);
+                run(cacheDir, OP_TIMEOUT_SEC, token, "worktree", "prune");
+            }
+        } catch (Exception e) {
+            log.warn("构建 worktree 清理异常: {}", e.getMessage());
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private static void deleteRecursively(Path dir) {
+        try (var walk = Files.walk(dir)) {
+            for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(p);
+            }
+        } catch (IOException e) {
+            log.warn("目录递归删除失败: {} err={}", dir, e.getMessage());
+        }
+    }
+
+    /** CAP-30 问答沙箱：&lt;workspaceRoot&gt;/_chat/&lt;sessionId&gt;（launch 帧 kind:"chat"）。
+     *  幂等创建（resume 复用）；无 clone/push 语义。
      */
     public Path prepareChat(String sessionId) {
         if (sessionId == null || !SAFE_ID.matcher(sessionId).matches()) {
@@ -364,7 +452,8 @@ public class RunnerWorkspace {
         }
     }
 
-    static String sanitize(String s, String token) {
+    /** 输出脱敏（token 明文 + URL 编码形态 → ***）；CAP-36 exec 日志帧回流前同样必须过此。 */
+    public static String sanitize(String s, String token) {
         if (s == null || token == null || token.isEmpty()) {
             return s;
         }

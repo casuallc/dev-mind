@@ -163,8 +163,49 @@ class RunnerWorkspaceTest {
         assertThrows(IllegalStateException.class, () -> ws.prepareMulti("s1", "proj1", specs));
     }
 
-    private void seedOrigin(Path origin, String seedFile) throws Exception {
-        git(tmp, "init", "--bare", "-b", "main", origin.toString());
+    @Test
+    void buildWorkspaceLifecycle() throws Exception {
+        // CAP-36：构建工作区——clone 缓存复用 <proj>/main，builds/<id> detach 到 commit，
+        // 幂等复用（链内后续步骤不再 fetch），finishBuild 移除
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        String head = gitOut(origin, "rev-parse", "main");
+
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        Path dir = ws.prepareBuild("build-1", "proj1", origin.toUri().toString(), "main", head, null);
+        assertEquals(tmp.resolve("workspaces").resolve("proj1").resolve("builds").resolve("build-1")
+                .toAbsolutePath().normalize(), dir);
+        assertTrue(Files.exists(dir.resolve("README.md")));
+        // detach：无分支
+        assertEquals("", gitOut(dir, "branch", "--show-current"));
+        assertEquals(head, gitOut(dir, "rev-parse", "HEAD"));
+        // 克隆缓存复用会话链路同一目录
+        assertTrue(Files.isDirectory(tmp.resolve("workspaces").resolve("proj1").resolve("main").resolve(".git")));
+
+        // 幂等：同 workspaceId 再 prepare 直接复用（前步骤产物保留）
+        Files.writeString(dir.resolve("target.txt"), "built");
+        Path again = ws.prepareBuild("build-1", "proj1", origin.toUri().toString(), "main", head, null);
+        assertEquals(dir, again);
+        assertTrue(Files.exists(again.resolve("target.txt")));
+
+        // 收口：worktree 移除；重复收口 no-op
+        ws.finishBuild("proj1", "build-1", null);
+        assertFalse(Files.exists(dir));
+        ws.finishBuild("proj1", "build-1", null);
+    }
+
+    @Test
+    void buildWorkspaceRejectsUnsafeIds() {
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        assertThrows(IllegalStateException.class,
+                () -> ws.prepareBuild("../escape", "proj1", "file:///x", "main", "", null));
+        assertThrows(IllegalStateException.class,
+                () -> ws.prepareBuild("build-1", "../escape", "file:///x", "main", "", null));
+        assertThrows(IllegalStateException.class,
+                () -> ws.prepareBuild("build-1", "proj1", " ", "main", "", null));
+    }
+
+    private void seedOrigin(Path origin, String seedFile) throws Exception {        git(tmp, "init", "--bare", "-b", "main", origin.toString());
         Path seed = tmp.resolve("seed-" + seedFile);
         git(tmp, "clone", origin.toString(), seed.toString());
         Files.writeString(seed.resolve(seedFile), "seed");
