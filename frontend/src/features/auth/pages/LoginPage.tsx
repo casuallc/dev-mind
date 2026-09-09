@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { login } from '../api'
 import { setAuth } from '../authStore'
+import { isApiRequestError } from '../../../shared/api/error'
 
 /** CAP-01 登录页：裸路由（不带 AppLayout），成功后回指挥中心。 */
 export default function LoginPage() {
@@ -18,7 +19,7 @@ export default function LoginPage() {
       message.success(`欢迎，${resp.user.displayName || resp.user.username}`)
       navigate('/', { replace: true })
     } catch (e) {
-      message.error(e instanceof Error && e.message.includes('401') ? '用户名或密码错误' : '登录失败，请稍后重试')
+      message.error(isApiRequestError(e) && e.status === 401 ? '用户名或密码错误' : '登录失败，请稍后重试')
     } finally {
       setLoading(false)
     }
