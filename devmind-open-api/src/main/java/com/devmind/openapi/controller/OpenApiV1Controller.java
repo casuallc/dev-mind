@@ -19,11 +19,9 @@ import com.devmind.project.dto.ProjectRequest;
 import com.devmind.project.dto.ProjectView;
 import com.devmind.project.dto.ReleaseConfigRequest;
 import com.devmind.project.dto.ReleaseConfigView;
-import com.devmind.project.dto.ServerRequest;
-import com.devmind.project.dto.ServerView;
-import com.devmind.serveradapter.dto.TemplateRequest;
-import com.devmind.serveradapter.dto.TemplateView;
-import com.devmind.serveradapter.service.ScriptTemplateService;
+import com.devmind.execution.template.TemplateRequest;
+import com.devmind.execution.template.TemplateView;
+import com.devmind.execution.template.ScriptTemplateService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -76,13 +74,6 @@ public class OpenApiV1Controller {
     @PostMapping("/projects")
     public ProjectView createProject(@Valid @RequestBody ProjectRequest req) {
         return projectService.create(req);
-    }
-
-    // ---------------- 服务器（登记到项目下） ----------------
-
-    @PostMapping("/projects/{id}/servers")
-    public ServerView addServer(@PathVariable String id, @Valid @RequestBody ServerRequest req) {
-        return projectService.addServer(id, req);
     }
 
     // ---------------- 命令模板白名单 ----------------

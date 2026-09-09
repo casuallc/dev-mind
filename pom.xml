@@ -31,7 +31,6 @@
         <module>devmind-chat</module>
         <module>devmind-attachment</module>
         <module>devmind-notification</module>
-        <module>devmind-server-adapter</module>
         <module>devmind-execution</module>
         <module>devmind-artifact</module>
         <module>devmind-build</module>

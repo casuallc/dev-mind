@@ -39,6 +39,10 @@ executor=claude          # claude=真实 CLI / fake=内置假进程（自测/E2E
 claudePath=              # 空 = where claude 自动探测
 workspaceRoot=./workspaces
 maxConcurrent=4
+# CAP-36 exec 帧（构建/部署/发版/健康检查命令）：白名单逐行首词前缀匹配，空=全部拒绝
+#execAllowlist=git,mvn,java,echo
+#execShell=bash           # exec 脚本解释器（Windows 需 Git Bash 在 PATH）
+#buildGcHours=24          # 构建工作区（builds/<id>）保留时长
 "@
     [System.IO.File]::WriteAllText("$PWD/$runnerConf", $tpl, (New-Object System.Text.UTF8Encoding($false)))
     Write-Host "[dev] 已生成 runner 配置模板 $runnerConf ——填入 token 后重跑本脚本才会启动 runner"
