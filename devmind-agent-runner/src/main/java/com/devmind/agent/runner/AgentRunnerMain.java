@@ -36,6 +36,25 @@ public class AgentRunnerMain {
     private static final Logger log = LoggerFactory.getLogger(AgentRunnerMain.class);
     /** 心跳周期：须明显小于服务端 heartbeatTimeoutMs（默认 45s） */
     private static final long HEARTBEAT_MS = 15_000;
+    /** 强制升级时等待会话排空的上限（exit 帧 + finalizer push/清理）；须小于服务端 upgradeAckTimeoutMs */
+    private static final long DRAIN_TIMEOUT_MS = 30_000;
+
+    /** 轮询等会话表排空（进程退出收口在 readLoop 线程，含 finalizer 收尾）；超时不再等。 */
+    private static void awaitSessionsDrained(RunnerSessionRegistry sessions) {
+        long deadline = System.currentTimeMillis() + DRAIN_TIMEOUT_MS;
+        while (sessions.size() > 0 && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        if (sessions.size() > 0) {
+            log.warn("等待会话排空超时（{}ms），剩余 {} 个会话的 exit 帧可能丢失，由服务端对账兜底",
+                    DRAIN_TIMEOUT_MS, sessions.size());
+        }
+    }
 
     public static void main(String[] args) throws Exception {
         Path configFile = args.length > 0 ? Path.of(args[0]) : Path.of("agent.properties");
@@ -195,18 +214,26 @@ public class AgentRunnerMain {
     }
 
     /**
-     * FR-09 手动升级：有活跃会话回 busy 推迟（不杀会话）；否则同步下载+校验（本方法跑在
-     * WS listener 线程，心跳在独立调度线程不受影响）→ ack 落线 → spawn SelfUpdater → 退出，
-     * 换包与重启由 SelfUpdater 在本进程退出后完成。
+     * FR-09 手动升级：有活跃会话回 busy 推迟（不杀会话）；force=true 时先 killAll 并等会话
+     * 排空（exit 帧 + 托管工作区收尾上行，上限 DRAIN_TIMEOUT_MS，超时也继续，残留由服务端
+     * hello 对账兜底判 FAILED）；否则同步下载+校验（本方法跑在 WS listener 线程，心跳在独立
+     * 调度线程不受影响）→ ack 落线 → spawn SelfUpdater → 退出，换包与重启由 SelfUpdater 在
+     * 本进程退出后完成。
      */
     private static void handleUpgrade(JsonNode frame, RunnerConfig config, Path configFile,
                                       RunnerSessionRegistry sessions, ServerConnection conn) {
+        boolean force = frame.path("force").asBoolean(false); // 旧服务端不带该字段 → 非强制
         int active = sessions.size();
-        if (active > 0) {
+        if (active > 0 && !force) {
             log.info("有 {} 个活跃会话，推迟升级", active);
             conn.send(Map.of("type", "upgrade_ack", "ok", false,
                     "reason", "busy", "activeSessions", active));
             return;
+        }
+        if (active > 0) {
+            log.info("强制升级：终止 {} 个活跃会话并等待排空", active);
+            sessions.killAll();
+            awaitSessionsDrained(sessions);
         }
         Path target;
         Path newJar;

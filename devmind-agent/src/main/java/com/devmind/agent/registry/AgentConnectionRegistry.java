@@ -314,11 +314,17 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         sendCommand(nodeId, sessionId, "suspend");
     }
 
+    /** 非强制升级（force=false），等价于 {@link #sendUpgrade(Long, String, String, long, boolean)}。 */
+    public UpgradeAck sendUpgrade(Long nodeDbId, String version, String sha256, long sizeBytes) {
+        return sendUpgrade(nodeDbId, version, sha256, sizeBytes, false);
+    }
+
     /**
      * 下发 upgrade 指令并同步等 ack（CAP-21 FR-09，镜像 launch 模式；ack 超时覆盖 runner 侧
      * 下载+校验全程，故走独立的 upgradeAckTimeoutMs）。runner 忙碌时回 ok=false reason=busy。
+     * force=true 时 runner 先终止全部活跃会话（正常 kill → exit 帧 → 收尾）再升级。
      */
-    public UpgradeAck sendUpgrade(Long nodeDbId, String version, String sha256, long sizeBytes) {
+    public UpgradeAck sendUpgrade(Long nodeDbId, String version, String sha256, long sizeBytes, boolean force) {
         String nodeId = String.valueOf(nodeDbId);
         WebSocketSession ws = requireConnection(nodeId);
         CompletableFuture<UpgradeAck> future = new CompletableFuture<>();
@@ -330,6 +336,7 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("version", version);
         frame.put("sha256", sha256);
         frame.put("sizeBytes", sizeBytes);
+        frame.put("force", force); // 旧 runner 忽略未知字段，仍按非 force 处理（回 busy）
         try {
             send(ws, frame);
             return future.get(props.getUpgradeAckTimeoutMs(), TimeUnit.MILLISECONDS);

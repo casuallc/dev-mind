@@ -78,6 +78,16 @@ class AgentConnectionRegistryUpgradeTest {
         assertTrue(payload.contains("\"version\":\"0.2.0\""), payload);
         assertTrue(payload.contains("\"sha256\":\"" + "ab".repeat(32) + "\""), payload);
         assertTrue(payload.contains("\"sizeBytes\":123"), payload);
+        assertTrue(payload.contains("\"force\":false"), payload);
+    }
+
+    @Test
+    void forceUpgradeCarriesForceFlag() throws Exception {
+        ackLater(50, true, null, 0);
+        AgentConnectionRegistry.UpgradeAck ack = registry.sendUpgrade(7L, "0.2.0", "x", 1, true);
+
+        assertTrue(ack.ok());
+        assertTrue(lastSentPayload().contains("\"force\":true"));
     }
 
     @Test

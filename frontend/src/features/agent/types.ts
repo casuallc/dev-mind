@@ -50,6 +50,17 @@ export interface UpgradeResult {
   activeSessions?: number
 }
 
+/** 节点上的活跃会话（GET /agent-nodes/{id}/active-sessions，强制升级前展示） */
+export interface NodeActiveSession {
+  sessionId: string
+  /** SESSION = 项目开发会话；CHAT = 通用问答 */
+  kind: 'SESSION' | 'CHAT'
+  title?: string
+  status: string
+  createdBy?: string
+  createdAt?: string
+}
+
 /** 节点连接事件类型 */
 export type ConnLogEvent = 'CONNECT' | 'REJECT' | 'DISCONNECT'
 

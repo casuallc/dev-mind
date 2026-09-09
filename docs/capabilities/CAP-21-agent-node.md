@@ -75,6 +75,13 @@ Windows 办公机普遍在 NAT/防火墙后、入站不可达，因此采用**�
   project.version 的旧口径比对永远不触发）。节点列表版本列对不一致行标「可升级 → 目标
   版本」橙色 Tag（离线节点 tooltip 注明上线后再升），表头汇总「N 个节点可升级」并提供
   「全部升级」（批量下发现有单节点升级接口，仅 ONLINE 且版本不一致者；忙节点推迟）。
+  **强制升级与活跃会话可见（2026-09-09 补做）**：升级回 BUSY 时前端弹窗列出该节点
+  活跃会话（`GET /api/agent-nodes/{id}/active-sessions`，session/chat 两模块经 common 的
+  `AgentNodeSessionsProvider` SPI 供数，活动三态 RUNNING/WAITING_INPUT/WAITING_AUTH），
+  可「终止并升级」→ `POST /{id}/upgrade?force=true` → upgrade 帧带 `force` 字段 →
+  runner 先 killAll 并等会话排空（exit 帧 + 托管工作区 push/清理上行，上限 30s 超时照走，
+  残留由 hello 对账兜底）再下载换包。旧 runner 忽略 force 字段仍回 busy，前端提示先手工
+  部署基线。批量升级确认弹窗提供「强制升级」勾选。
 
 ## 3. 插件化接口
 
@@ -108,7 +115,7 @@ WS 协议（JSON 帧， runner ⇄ 服务端双向）：
 ↑ register{name,os,labels,capabilities,version} / heartbeat / event{sessionId,seq,...} / state{sessionId,state,reason} / exit{sessionId,code,ok,summary}
   upgrade_ack{ok, reason?, activeSessions?}    # FR-09：busy=有活跃会话推迟；ok=true 后 runner 即退出换包
 ↓ launch{sessionId,workdir,taskSpec,model,permissionMode} / input{sessionId,text} / authorize{sessionId,requestId,accepted,scope} / kill{sessionId} / suspend{sessionId}
-  upgrade{version, sha256, sizeBytes}          # FR-09：手动触发；runner 下载校验后才回 ack
+  upgrade{version, sha256, sizeBytes, force?}   # FR-09：手动触发；runner 下载校验后才回 ack；force=true 先终止活跃会话
 ```
 
 ## 6. API 概要
@@ -124,7 +131,8 @@ POST   /api/sessions                    现有端点 + agentNodeId?（缺省=本
 POST   /api/agent-nodes/runner-package           multipart 上传替换（提取版本+sha256，强校验 SelfUpdater）
 GET    /api/agent-nodes/runner-package           当前包元数据（无包 404）
 GET    /api/agent-nodes/runner-package/download  jar 流（runner 升级用 ?token=；管理页用 JWT）
-POST   /api/agent-nodes/{id}/upgrade             手动升级，恒 200：status=ACCEPTED/BUSY/ALREADY_LATEST/REJECTED
+POST   /api/agent-nodes/{id}/upgrade             手动升级，恒 200：status=ACCEPTED/BUSY/ALREADY_LATEST/REJECTED；?force=true 强制（先终止活跃会话）
+GET    /api/agent-nodes/{id}/active-sessions     节点活跃会话清单（SESSION/CHAT，强制升级前展示）
 ```
 
 ## 7. 验收标准

@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Descriptions,
   Drawer,
   Form,
@@ -32,12 +33,13 @@ import {
   enableAgentNode,
   getRunnerPackage,
   listAgentNodes,
+  listNodeActiveSessions,
   setAgentNodeDefault,
   unsetAgentNodeDefault,
   updateAgentNode,
   upgradeAgentNode,
 } from '../api'
-import type { AgentNode, IssuedNode, RunnerPackage } from '../types'
+import type { AgentNode, IssuedNode, NodeActiveSession, RunnerPackage } from '../types'
 import RunnerPackagePanel from '../components/RunnerPackagePanel'
 import ConnLogsPanel from '../components/ConnLogsPanel'
 import { buildLinuxInstallScript, buildWindowsInstallScript, downloadTextFile } from '../utils/installScript'
@@ -114,14 +116,14 @@ export default function AgentNodesPage() {
   const upgradableNodes = outdatedNodes.filter((n) => n.status === 'ONLINE')
   const [batchBusy, setBatchBusy] = useState(false)
 
-  // 批量升级：逐个下发现有单节点升级接口，汇总 ACCEPTED/BUSY/失败
-  const doUpgradeAll = async () => {
+  // 批量升级：逐个下发现有单节点升级接口，汇总 ACCEPTED/BUSY/失败；force=终止活跃会话后升级
+  const doUpgradeAll = async (force: boolean) => {
     setBatchBusy(true)
     try {
       const results = await Promise.all(
         upgradableNodes.map(async (n) => {
           try {
-            return await upgradeAgentNode(n.id)
+            return await upgradeAgentNode(n.id, force)
           } catch {
             return { status: 'REJECTED' as const, message: '请求失败' }
           }
@@ -131,7 +133,7 @@ export default function AgentNodesPage() {
       const busy = results.filter((r) => r.status === 'BUSY').length
       const failed = results.length - accepted - busy
       if (failed > 0) message.warning(`已下发 ${accepted} 个升级，${busy} 个忙推迟，${failed} 个失败`)
-      else if (busy > 0) message.info(`已下发 ${accepted} 个升级，${busy} 个忙推迟（有活跃会话）`)
+      else if (busy > 0) message.info(`已下发 ${accepted} 个升级，${busy} 个忙推迟（有活跃会话，可在节点抽屉里强制升级）`)
       else message.success(`已下发 ${accepted} 个升级`)
       reload()
     } finally {
@@ -140,15 +142,24 @@ export default function AgentNodesPage() {
   }
 
   // 确认弹窗统一走平台通用的居中 Modal.confirm，不用贴按钮的 Popconfirm
-  const onUpgradeAll = () =>
+  const onUpgradeAll = () => {
+    let force = false
     Modal.confirm({
       centered: true,
       title: `升级全部在线旧节点（${upgradableNodes.length} 个）？`,
-      content: '有活跃会话的节点会推迟执行',
+      content: (
+        <Space direction="vertical" size={8}>
+          <span>有活跃会话的节点会推迟执行。</span>
+          <Checkbox onChange={(e) => { force = e.target.checked }}>
+            强制升级（先终止各节点的活跃会话；未推送的工作区改动 runner 会尝试 push）
+          </Checkbox>
+        </Space>
+      ),
       okText: '升级',
       cancelText: '取消',
-      onOk: doUpgradeAll,
+      onOk: () => doUpgradeAll(force),
     })
+  }
 
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 70 },
@@ -400,6 +411,10 @@ function NodeDrawer({
   useEffect(() => setLabelsDraft(node.labels ?? ''), [node.id]) // eslint-disable-line react-hooks/exhaustive-deps
   const outdated = !!(pkg && node.runnerVersion && node.runnerVersion !== pkg.version)
 
+  // 强制升级弹窗：BUSY 时打开，异步拉活跃会话清单（null=加载中）
+  const [forceOpen, setForceOpen] = useState(false)
+  const [activeSessions, setActiveSessions] = useState<NodeActiveSession[] | null>(null)
+
   const run = async (fn: () => Promise<void>) => {
     setBusy(true)
     try {
@@ -411,11 +426,26 @@ function NodeDrawer({
     }
   }
 
-  const doUpgrade = () =>
+  const showForceModal = () => {
+    setForceOpen(true)
+    setActiveSessions(null)
+    listNodeActiveSessions(node.id)
+      .then(setActiveSessions)
+      .catch(() => setActiveSessions([])) // 拉取失败降级为纯计数文案，不挡强制升级
+  }
+
+  const doUpgrade = (force = false) =>
     run(async () => {
-      const res = await upgradeAgentNode(node.id)
+      const res = await upgradeAgentNode(node.id, force)
       if (res.status === 'ACCEPTED') message.success(res.message)
-      else if (res.status === 'BUSY') message.warning(res.message)
+      else if (res.status === 'BUSY') {
+        if (force) {
+          // 仍 busy：runner 版本过旧不认识 force 字段
+          message.warning(`${res.message}（节点 runner 过旧不支持强制升级，请先手工部署基线版本）`)
+        } else {
+          showForceModal()
+        }
+      }
       else if (res.status === 'ALREADY_LATEST') message.info(res.message)
       else message.error(res.message)
       onChanged()
@@ -428,7 +458,7 @@ function NodeDrawer({
       title: `升级节点「${node.name}」？`,
       okText: '升级',
       cancelText: '取消',
-      onOk: doUpgrade,
+      onOk: () => doUpgrade(false),
     })
 
   const doSetDefault = (isDefault: boolean) =>
@@ -620,7 +650,7 @@ function NodeDrawer({
               <Space direction="vertical" style={{ width: '100%' }} size={8}>
                 <Typography.Text type="secondary">
                   {pkg
-                    ? `${node.runnerVersion ?? '-'} → ${pkg.version}；有活跃会话时将推迟执行。`
+                    ? `${node.runnerVersion ?? '-'} → ${pkg.version}；有活跃会话时将推迟执行（可选择强制升级，先终止会话）。`
                     : '请先在「Runner 包」页签上传 runner 包。'}
                 </Typography.Text>
                 <div>
@@ -644,6 +674,61 @@ function NodeDrawer({
           </Card>
         </Space>
       </Spin>
+
+      {/* BUSY 后的强制升级确认：列出将被终止的活跃会话 */}
+      <Modal
+        centered
+        title="节点有活跃会话，已推迟升级"
+        open={forceOpen}
+        onCancel={() => setForceOpen(false)}
+        okText="终止并升级"
+        okButtonProps={{ danger: true, loading: busy }}
+        cancelText="取消"
+        onOk={() => {
+          setForceOpen(false)
+          void doUpgrade(true)
+        }}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          {activeSessions === null ? (
+            <Spin size="small" />
+          ) : activeSessions.length === 0 ? (
+            <Typography.Text type="secondary">
+              未查到会话清单（服务端会话模块未装配或已全部结束）——确认后 runner 将自行终止其本地会话进程。
+            </Typography.Text>
+          ) : (
+            <Table<NodeActiveSession>
+              rowKey="sessionId"
+              size="small"
+              pagination={false}
+              dataSource={activeSessions}
+              columns={[
+                {
+                  title: '类型',
+                  dataIndex: 'kind',
+                  width: 70,
+                  render: (k: string) =>
+                    k === 'CHAT' ? <Tag color="purple">问答</Tag> : <Tag color="blue">会话</Tag>,
+                },
+                {
+                  title: '标题',
+                  dataIndex: 'title',
+                  ellipsis: true,
+                  render: (t?: string) => t || '-',
+                },
+                { title: '状态', dataIndex: 'status', width: 130 },
+                { title: '创建人', dataIndex: 'createdBy', width: 100, render: (s?: string) => s || '-' },
+                { title: '创建时间', dataIndex: 'createdAt', width: 150, render: (t?: string) => fmtTime(t) },
+              ]}
+            />
+          )}
+          <Alert
+            type="warning"
+            showIcon
+            message="强制升级将终止以上会话：runner 先正常终止进程（托管工作区会尝试 push 未推送的改动），再下载换包并自动重启。"
+          />
+        </Space>
+      </Modal>
     </Drawer>
   )
 }

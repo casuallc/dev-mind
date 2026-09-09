@@ -1,7 +1,7 @@
 // Agent 节点能力（CAP-21）的接口封装：页面只依赖本文件，不直接碰 shared client
 import { api } from '../../shared/api/client'
 import { getAccessToken } from '../auth/authStore'
-import type { AgentConnLog, AgentNode, IssuedNode, RunnerPackage, UpgradeResult } from './types'
+import type { AgentConnLog, AgentNode, IssuedNode, NodeActiveSession, RunnerPackage, UpgradeResult } from './types'
 
 export function listAgentNodes(): Promise<AgentNode[]> {
   return api.get<AgentNode[]>('/agent-nodes')
@@ -54,8 +54,13 @@ export function uploadRunnerPackage(file: File): Promise<RunnerPackage> {
   return api.upload<RunnerPackage>('/agent-nodes/runner-package', form)
 }
 
-export function upgradeAgentNode(id: number): Promise<UpgradeResult> {
-  return api.post<UpgradeResult>(`/agent-nodes/${id}/upgrade`)
+export function upgradeAgentNode(id: number, force = false): Promise<UpgradeResult> {
+  return api.post<UpgradeResult>(`/agent-nodes/${id}/upgrade${force ? '?force=true' : ''}`)
+}
+
+/** 节点上的活跃会话清单（强制升级前展示「会终止哪些会话」） */
+export function listNodeActiveSessions(id: number): Promise<NodeActiveSession[]> {
+  return api.get<NodeActiveSession[]>(`/agent-nodes/${id}/active-sessions`)
 }
 
 /** 管理员下载托管 jar（api client 只解 JSON，二进制走原生 fetch + blob） */

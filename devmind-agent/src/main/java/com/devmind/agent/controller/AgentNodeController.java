@@ -13,6 +13,7 @@ import com.devmind.agent.service.AgentConnLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.agent.service.RunnerPackageService;
 import com.devmind.auth.IdentityService;
+import com.devmind.common.agent.AgentNodeSessionsProvider;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import jakarta.validation.Valid;
@@ -52,15 +53,19 @@ public class AgentNodeController {
     private final RunnerPackageService packageService;
     private final AgentConnLogService connLogService;
     private final IdentityService identityService;
+    /** 会话持有方（session/chat 模块）的活跃会话 SPI，Spring 聚合注入，无实现时为空表 */
+    private final List<AgentNodeSessionsProvider> sessionsProviders;
 
     public AgentNodeController(AgentNodeService service, AgentConnectionRegistry registry,
                                RunnerPackageService packageService, AgentConnLogService connLogService,
-                               IdentityService identityService) {
+                               IdentityService identityService,
+                               List<AgentNodeSessionsProvider> sessionsProviders) {
         this.service = service;
         this.registry = registry;
         this.packageService = packageService;
         this.connLogService = connLogService;
         this.identityService = identityService;
+        this.sessionsProviders = sessionsProviders;
     }
 
     @PostMapping
@@ -115,6 +120,19 @@ public class AgentNodeController {
         service.delete(id);
     }
 
+    /**
+     * 节点上的活跃会话清单（开发会话 + 通用问答，活动三态 RUNNING/WAITING_INPUT/WAITING_AUTH）。
+     * 强制升级前展示「会终止哪些会话」；数据来自各会话模块的 AgentNodeSessionsProvider SPI，
+     * 未装配任何实现时为空表。
+     */
+    @GetMapping("/{id}/active-sessions")
+    public List<AgentNodeSessionsProvider.ActiveSessionInfo> activeSessions(@PathVariable Long id) {
+        service.require(id); // 节点不存在 → 404
+        return sessionsProviders.stream()
+                .flatMap(p -> p.activeSessions(String.valueOf(id)).stream())
+                .toList();
+    }
+
     // ---------------- FR-09 runner 包托管与手动升级 ----------------
 
     /** 上传替换当前 runner 包（全局单份）。 */
@@ -146,9 +164,12 @@ public class AgentNodeController {
     /**
      * 手动升级指定节点到当前托管包版本。恒 200，业务结果看 status：
      * ACCEPTED / BUSY（活跃会话推迟）/ ALREADY_LATEST / REJECTED。
+     * force=true：runner 先终止全部活跃会话（正常 kill → exit 帧 → 托管工作区收尾）再升级；
+     * 旧 runner 不认识 force 字段仍回 busy。
      */
     @PostMapping("/{id}/upgrade")
-    public UpgradeResultView upgrade(@PathVariable Long id) {
+    public UpgradeResultView upgrade(@PathVariable Long id,
+                                     @RequestParam(defaultValue = "false") boolean force) {
         AgentNodeEntity node = service.require(id);
         if (!registry.isOnline(String.valueOf(id))) {
             throw new DevMindException(ErrorCode.CONFLICT, "节点不在线: " + node.getName());
@@ -160,7 +181,7 @@ public class AgentNodeController {
                     "节点已是当前版本 " + pkg.getVersion() + "，无需升级", null);
         }
         AgentConnectionRegistry.UpgradeAck ack =
-                registry.sendUpgrade(id, pkg.getVersion(), pkg.getSha256(), pkg.getSizeBytes());
+                registry.sendUpgrade(id, pkg.getVersion(), pkg.getSha256(), pkg.getSizeBytes(), force);
         if (ack.ok()) {
             return new UpgradeResultView("ACCEPTED", "升级指令已下发，节点将自动重启到新版本", null);
         }
