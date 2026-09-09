@@ -1,6 +1,8 @@
 # CAP-10 测试执行器（Test Executor）
 
 > 能力 ID：CAP-10 ｜ 分类：执行器 ｜ 状态：草案 ｜ 日期：2026-08-30
+>
+> ⚠️ 2026-09-10 更新（[CAP-36](CAP-36-build-on-runner.md)）：健康检查的 command 型改经 exec 帧下发 runner 节点执行，http 型由服务端直接探测；运行目标 `serverId` 改为 `agentNodeId`。
 
 ## 1. 目的
 

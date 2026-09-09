@@ -1,6 +1,8 @@
 # CAP-08 构建执行器（Build Executor）
 
 > 能力 ID：CAP-08 ｜ 分类：执行器 ｜ 状态：草案 ｜ 日期：2026-08-30
+>
+> ⚠️ 2026-09-10 更新（[CAP-36](CAP-36-build-on-runner.md)）：执行位置 `remote`（CAP-07 SSH 适配器）已下线，统一为 `executor = LOCAL | AGENT`——AGENT 经 exec 帧下发 runner 节点执行，服务端渲染命令串、GitLab 凭证随帧下发（不落盘）。
 
 ## 1. 目的
 

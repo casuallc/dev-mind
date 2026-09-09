@@ -1,6 +1,8 @@
 # CAP-11 发版执行器（Release Executor）
 
 > 能力 ID：CAP-11 ｜ 分类：执行器 ｜ 状态：草案 ｜ 日期：2026-08-30
+>
+> ⚠️ 2026-09-10 更新（[CAP-36](CAP-36-build-on-runner.md)）：`executor = REMOTE` 归一为 `AGENT`（exec 帧下发 runner 节点，凭证随帧下发）；`remoteServerId` 改为 `agentNodeId`。
 
 ## 1. 目的
 

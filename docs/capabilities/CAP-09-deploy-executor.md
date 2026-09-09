@@ -1,6 +1,8 @@
 # CAP-09 部署执行器（Deploy Executor）
 
 > 能力 ID：CAP-09 ｜ 分类：执行器 ｜ 状态：草案 ｜ 日期：2026-08-30
+>
+> ⚠️ 2026-09-10 更新（[CAP-36](CAP-36-build-on-runner.md)）：CAP-07 适配器已下线，部署步骤改为经 exec 帧下发 runner 节点执行；部署目标 `serverId` 改为 `agentNodeId`（显式 → 环境首节点 → 路由链），环境模型聚合节点（nodeIds）。
 
 ## 1. 目的
 
