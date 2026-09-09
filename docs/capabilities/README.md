@@ -51,6 +51,7 @@
 | [CAP-33](CAP-33-scenario-session-context.md) | 场景化会话与上下文装配 | 底座 | 场景 = 命名模板 + 预装配上下文包（skills/docs/knowledge 绑定到意图），session/chat 统一装配管线一键带齐上下文 |
 | [CAP-34](CAP-34-agent-runner-executor.md) | Agent Runner 执行代理化 | 底座 | 取消本机会话：服务端零执行纯分发调度，一切执行收敛 runner 层（执行内核上移 common）；上下文包传输、会话隔离强化、exec 帧利用节点本地工具链 |
 | [CAP-35](CAP-35-unified-platform-accounts.md) | 统一第三方账号体系 | 底座 | Integration 收敛为实例登记+可选机器人凭证；用户账号统一为绑定实例的 UserPlatformAccount（git PAT+署名 / Jira PAT·BASIC）；MR·PR 创建、Jira transition、worklog 回写全部切个人优先身份链（取代 CAP-24） |
+| [CAP-36](CAP-36-build-on-runner.md) | 构建执行 Runner 化 | 底座 | exec 帧落地：构建/测试/部署/发版统一切 agent 节点执行，GitLab 凭证随帧下发复用集成体系，SSH/HTTP server-adapter 整体下线（取代 CAP-07） |
 
 ## 依赖关系
 
@@ -94,6 +95,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-33 场景化会话依赖 CAP-03/04/05/30/34 与 Skill 管理：场景实体绑定 skills/docs/knowledgeTags 产出 ContextPackage（装什么），传输与物化由 CAP-34 承担；session/chat 创建链路统一走装配管线，session_templates 迁入场景。
 - CAP-34 runner 执行代理化依赖 CAP-21/25/30/31/12：取消本机会话，服务端不再拉起任何执行子进程，会话必有执行节点（皆无命中 409 不回落）；执行内核（工作区/上下文物化/进程拉起）上移 devmind-common 仅供 runner 使用；launch 帧 contextManifest + HTTP 拉包补掉远程注入缺口；exec 帧 + 工具链标签让 build/test 可在 agent 节点本地执行。
 - CAP-35 统一第三方账号依赖 CAP-01/18/19/22/27：取代 CAP-24——Integration 收敛为实例登记 + 可选机器人凭证（自动化专用），用户个人账号绑定实例（user_platform_accounts），人触发的写操作（push/MR·PR/Jira transition/worklog）统一「个人 → 机器人 → 报错引导」身份链，Connector SPI 零变更。
+- CAP-36 构建执行 Runner 化依赖 CAP-21/34/25/12/18/35：取代 CAP-07——exec 帧（CAP-34 FR-06 预留协议）落地，构建/测试/部署/发版远程执行统一切 agent 节点；repo 块照搬 launch 帧 RepoSpec 语义（CloneTokenResolver 解析 token 随帧下发、runner 内存持有不落盘），标签调度选构建机；SSH/HTTP server-adapter 模块整体下线，远程执行只余「服务端 → runner」一条路径。
 
 ## 组装方式（后续流程层）
 

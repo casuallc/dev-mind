@@ -1,6 +1,6 @@
 # CAP-07 服务器适配器（Server Adapter）
 
-> 能力 ID：CAP-07 ｜ 分类：底座 ｜ 状态：草案 ｜ 日期：2026-08-30
+> 能力 ID：CAP-07 ｜ 分类：底座 ｜ 状态：**已废弃（2026-09-10，由 [CAP-36](CAP-36-build-on-runner.md) 取代——远程执行统一切 agent-runner exec 帧，SSH/HTTP 形态整体下线，无存量数据）** ｜ 日期：2026-08-30
 
 ## 1. 目的
 
