@@ -2,7 +2,7 @@ import { Layout, Menu } from 'antd'
 import {
   ApiOutlined,
   ArrowLeftOutlined,
-  CloudServerOutlined,
+  AuditOutlined,
   CodeOutlined,
   DashboardOutlined,
   DeploymentUnitOutlined,
@@ -55,8 +55,8 @@ export default function AdminLayout() {
               children: [
                 { key: '/admin/projects', icon: <FolderOutlined />, label: '项目管理' },
                 { key: '/admin/repos', icon: <CodeOutlined />, label: '代码仓库' },
-                { key: '/admin/servers', icon: <CloudServerOutlined />, label: '服务器运维' },
                 { key: '/admin/agent-nodes', icon: <RobotOutlined />, label: 'Agent 节点' },
+                { key: '/admin/execution', icon: <AuditOutlined />, label: '模板与审计' },
                 { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
                 { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
                 { key: '/admin/scenarios', icon: <DeploymentUnitOutlined />, label: '应用场景' },

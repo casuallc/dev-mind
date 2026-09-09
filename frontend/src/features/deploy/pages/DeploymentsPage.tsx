@@ -1,6 +1,7 @@
 // 部署记录页（/deployments）：当前项目的部署计划配置与历史。
-// CAP-09 部署中心：部署计划配置（步骤/回滚步骤）→ 创建部署单（服务器+构建+环境）→ 历史表格 →
+// CAP-09 部署中心：部署计划配置（步骤/回滚步骤）→ 创建部署单（节点+构建+环境）→ 历史表格 →
 // 详情 Drawer（WS 实时步骤状态 + 日志，执行/确认/回滚）。
+// CAP-36：部署步骤经 exec 帧下发 runner 节点执行（渲染后的脚本串），SSH/HTTP 直连已下线。
 import {
   Button,
   Card,
@@ -24,9 +25,11 @@ import {
 } from '../api'
 import type { DeployConfig, DeployStatus, DeploymentRecord } from '../types'
 import type { BuildRecord } from '../../build/types'
-import type { ProjectEnvironment, ProjectServer } from '../../projects/types'
+import type { ProjectEnvironment } from '../../projects/types'
+import type { AgentNode } from '../../agent/types'
 import { listBuilds } from '../../build/api'
-import { listEnvironments, listServers } from '../../projects/api'
+import { listEnvironments } from '../../projects/api'
+import { listAgentNodes } from '../../agent/api'
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { STATUS_COLOR } from '../constants'
@@ -43,7 +46,7 @@ export default function DeploymentsPage() {
 
 function DeployCenter({ id }: { id: string }) {
   const [cfg, setCfg] = useState<DeployConfig | null>(null)
-  const [servers, setServers] = useState<ProjectServer[]>([])
+  const [nodes, setNodes] = useState<AgentNode[]>([])
   const [environments, setEnvironments] = useState<ProjectEnvironment[]>([])
   const [builds, setBuilds] = useState<BuildRecord[]>([])
   const [deploys, setDeploys] = useState<DeploymentRecord[]>([])
@@ -51,7 +54,7 @@ function DeployCenter({ id }: { id: string }) {
   const [detail, setDetail] = useState<DeploymentRecord | null>(null)
 
   // 创建表单
-  const [serverId, setServerId] = useState<number | undefined>()
+  const [agentNodeId, setAgentNodeId] = useState<string | undefined>()
   const [environmentId, setEnvironmentId] = useState<number | undefined>()
   const [buildId, setBuildId] = useState<number | undefined>()
   const [env, setEnv] = useState('test')
@@ -61,7 +64,7 @@ function DeployCenter({ id }: { id: string }) {
 
   const load = () => {
     getDeployConfig(id).then(setCfg).catch(() => {})
-    listServers(id).then(setServers).catch(() => {})
+    listAgentNodes().then(setNodes).catch(() => {})
     listEnvironments(id).then(setEnvironments).catch(() => {})
     listBuilds(id).then(setBuilds).catch(() => {})
     refresh()
@@ -72,7 +75,6 @@ function DeployCenter({ id }: { id: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  const deployCaps = servers.filter((s) => s.enabled && s.capabilities.includes('deploy'))
   const artifactBuilds = builds.filter((b) => b.artifactRef)
 
   const onConfigChanged = async (cfg: DeployConfig) => {
@@ -87,15 +89,11 @@ function DeployCenter({ id }: { id: string }) {
   }
 
   const onCreate = async () => {
-    if (!serverId && !environmentId) {
-      message.warning('请选择目标服务器或环境')
-      return
-    }
     setCreating(true)
     try {
       const d = await createDeployment({
         projectId: id,
-        serverId: serverId || undefined,
+        agentNodeId: agentNodeId || undefined,
         environmentId: environmentId || undefined,
         buildId: buildId || undefined,
         env: environmentId ? undefined : env || 'test',
@@ -126,6 +124,13 @@ function DeployCenter({ id }: { id: string }) {
     {
       title: '环境', dataIndex: 'env', width: 90,
       render: (v: string) => <Tag color={v === 'prod' ? 'red' : v === 'staging' ? 'orange' : 'blue'}>{v || '-'}</Tag>,
+    },
+    {
+      title: '执行节点', dataIndex: 'agentNodeId', width: 110,
+      render: (v: string) => {
+        const n = nodes.find((x) => String(x.id) === v)
+        return n ? n.name : v || '-'
+      },
     },
     {
       title: '备份', dataIndex: 'backupRef', ellipsis: true,
@@ -180,17 +185,20 @@ function DeployCenter({ id }: { id: string }) {
               allowClear
               options={environments.map((e) => ({ value: e.id, label: `${e.name}${e.description ? ` · ${e.description}` : ''}` }))}
             />
-            <Select<number>
+            <Select<string>
               style={{ width: 200 }}
               placeholder={
-                deployCaps.length
-                  ? environmentId ? '目标服务器（缺省取环境首台）' : '选择目标服务器'
-                  : '无可用服务器（需 deploy 能力）'
+                nodes.length
+                  ? environmentId ? '执行节点（缺省取环境首节点）' : '执行节点（缺省走默认路由）'
+                  : '无可用节点（先到后台「Agent 节点」登记）'
               }
-              value={serverId}
-              onChange={setServerId}
-              allowClear={!!environmentId}
-              options={deployCaps.map((s) => ({ value: s.id, label: `${s.name}（${s.accessType} · ${s.env || '?'}）` }))}
+              value={agentNodeId}
+              onChange={setAgentNodeId}
+              allowClear
+              options={nodes.map((n) => ({
+                value: String(n.id),
+                label: `${n.name}${n.isDefault ? ' · 平台默认' : ''}${n.status !== 'ONLINE' ? '（离线）' : ''}`,
+              }))}
             />
             <Select<number>
               style={{ width: 220 }}
@@ -222,7 +230,7 @@ function DeployCenter({ id }: { id: string }) {
             dataSource={deploys}
             columns={columns}
             pagination={false}
-            locale={{ emptyText: '暂无部署记录。在上方「创建部署」选择服务器/环境与构建，发起第一个部署。' }}
+            locale={{ emptyText: '暂无部署记录。在上方「创建部署」选择环境/节点与构建，发起第一个部署。' }}
           />
         </Card>
       </Space>

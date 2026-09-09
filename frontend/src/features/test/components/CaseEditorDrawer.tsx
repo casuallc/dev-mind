@@ -200,7 +200,7 @@ export default function CaseEditorDrawer({ suite, onClose, onChanged }: {
           <Space wrap>
             <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>添加用例</Button>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              整体替换保存：不在列表中的现有用例将被删除；http 用例直请求 baseUrl，health 用例走目标服务器健康检查。
+              整体替换保存：不在列表中的现有用例将被删除；http 用例由服务端直请求 baseUrl，health 用例的 command 型经 exec 帧下发执行节点。
             </Typography.Text>
           </Space>
           <Table<TestCaseInput> rowKey={(c) => c.id ?? c.name + c.path} size="small" columns={columns}
@@ -239,7 +239,7 @@ function CaseForm({ form, onFinish }: { form: FormInstance<CaseFormValues>; onFi
           </Form.Item>
           {healthMode === 'command' ? (
             <Form.Item label="命令（CAP-07 模板）" name="healthCommand" rules={[{ required: true, message: '请输入命令' }]} style={{ flex: 1 }}>
-              <Input placeholder="如 echo ok 或模板 code（走服务器命令模板白名单）" />
+              <Input placeholder="如 curl -sf http://…/health（exec 帧下发执行节点，受 runner 白名单约束）" />
             </Form.Item>
           ) : (
             <Space size={8} style={{ display: 'flex' }}>

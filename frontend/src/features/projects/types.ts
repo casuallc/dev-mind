@@ -97,35 +97,14 @@ export interface GlobalRepo {
   status: string // ACTIVE / DISABLED
 }
 
-export interface ProjectServer {
-  id: number
-  projectId: string
-  name: string
-  env?: string
-  accessType: string
-  accessConfig?: string
-  capabilities: string[]
-  enabled: boolean
-  createdAt: string
-  updatedAt: string
-}
-
-export interface ServerInput {
-  name: string
-  env?: string
-  accessType: string
-  accessConfig?: string
-  capabilities: string[]
-  enabled: boolean
-}
-
-// P1-1 环境模型（部署/测试目标）
+// P1-1 环境模型（部署/测试目标；CAP-36 起聚合 Agent 节点而非服务器）
 export interface ProjectEnvironment {
   id: number
   projectId: string
   name: string // DEV / TEST / STAGING / PROD
   description?: string
-  serverIds: number[]
+  /** 环境内可用的 Agent 节点 id（字符串，引用 agent_nodes） */
+  nodeIds: string[]
   variables: Record<string, string>
   secrets: string[]
   createdAt: string
@@ -135,7 +114,7 @@ export interface ProjectEnvironment {
 export interface EnvironmentInput {
   name: string
   description?: string
-  serverIds: number[]
+  nodeIds: string[]
   variables: Record<string, string>
   secrets: string[]
 }

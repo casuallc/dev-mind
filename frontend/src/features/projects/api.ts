@@ -12,8 +12,6 @@ import type {
   ProjectLock,
   ProjectRepo,
   ProjectRepoInput,
-  ProjectServer,
-  ServerInput,
   WorktreeInfo,
 } from './types'
 
@@ -112,24 +110,6 @@ export function refreshSummary(id: string): Promise<ContextSummary> {
 
 export function saveSummary(id: string, text: string): Promise<ContextSummary> {
   return api.put<ContextSummary>(`/projects/${id}/summary`, { text })
-}
-
-// ---------------- 服务器 ----------------
-
-export function listServers(id: string): Promise<ProjectServer[]> {
-  return api.get<ProjectServer[]>(`/projects/${id}/servers`)
-}
-
-export function addServer(id: string, input: ServerInput): Promise<ProjectServer> {
-  return api.post<ProjectServer>(`/projects/${id}/servers`, input)
-}
-
-export function updateServer(id: string, serverId: number, input: ServerInput): Promise<ProjectServer> {
-  return api.put<ProjectServer>(`/projects/${id}/servers/${serverId}`, input)
-}
-
-export function deleteServer(id: string, serverId: number): Promise<void> {
-  return api.del(`/projects/${id}/servers/${serverId}`)
 }
 
 // ---------------- 构建步骤 ----------------

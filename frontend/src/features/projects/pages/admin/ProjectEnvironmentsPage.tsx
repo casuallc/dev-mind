@@ -1,4 +1,5 @@
-// 项目环境页（/admin/projects/:id/environments，P1-1）：环境聚合服务器 + 变量 + 密钥引用。
+// 项目环境页（/admin/projects/:id/environments，P1-1）：环境聚合 Agent 节点 + 变量 + 密钥引用。
+// CAP-36：部署/测试的执行目标从 SSH/HTTP 服务器切换为 runner 节点（agent_nodes），节点在后台「Agent 节点」登记。
 import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
@@ -16,8 +17,10 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
-import { addEnvironment, deleteEnvironment, listEnvironments, listServers, updateEnvironment } from '../../api'
-import type { EnvironmentInput, ProjectEnvironment, ProjectServer } from '../../types'
+import { addEnvironment, deleteEnvironment, listEnvironments, updateEnvironment } from '../../api'
+import type { EnvironmentInput, ProjectEnvironment } from '../../types'
+import { listAgentNodes } from '../../../agent/api'
+import type { AgentNode } from '../../../agent/types'
 import { envColor } from '../../components/utils'
 import { showError } from '../../../../shared/utils/showError'
 
@@ -43,7 +46,7 @@ function textToVars(text: string): Record<string, string> {
 export default function ProjectEnvironmentsPage() {
   const { id = '' } = useParams<{ id: string }>()
   const [environments, setEnvironments] = useState<ProjectEnvironment[]>([])
-  const [servers, setServers] = useState<ProjectServer[]>([])
+  const [nodes, setNodes] = useState<AgentNode[]>([])
   const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<ProjectEnvironment | null>(null)
@@ -52,12 +55,12 @@ export default function ProjectEnvironmentsPage() {
   const reload = useCallback(async () => {
     setLoading(true)
     try {
-      const [envs, srvs] = await Promise.all([
+      const [envs, ns] = await Promise.all([
         listEnvironments(id).catch(() => []),
-        listServers(id).catch(() => []),
+        listAgentNodes().catch(() => []),
       ])
       setEnvironments(envs)
-      setServers(srvs)
+      setNodes(ns)
     } finally {
       setLoading(false)
     }
@@ -67,23 +70,26 @@ export default function ProjectEnvironmentsPage() {
     reload()
   }, [reload])
 
-  const serverOptions = servers.map((sv) => ({ value: sv.id, label: `${sv.name}（#${sv.id}）` }))
+  const nodeOptions = nodes.map((n) => ({
+    value: String(n.id),
+    label: `${n.name}${n.isDefault ? ' · 平台默认' : ''}${n.status !== 'ONLINE' ? '（离线）' : ''}`,
+  }))
 
   const openEdit = (e: ProjectEnvironment | null) => {
     setEditing(e)
     form.setFieldsValue(
       e
-        ? { name: e.name, description: e.description, serverIds: e.serverIds, varsText: varsToText(e.variables), secrets: e.secrets }
-        : { name: 'DEV', description: '', serverIds: [], varsText: '', secrets: [] },
+        ? { name: e.name, description: e.description, nodeIds: e.nodeIds, varsText: varsToText(e.variables), secrets: e.secrets }
+        : { name: 'DEV', description: '', nodeIds: [], varsText: '', secrets: [] },
     )
     setOpen(true)
   }
 
-  const onSave = async (v: { name: string; description?: string; serverIds: number[]; varsText: string; secrets: string[] }) => {
+  const onSave = async (v: { name: string; description?: string; nodeIds: string[]; varsText: string; secrets: string[] }) => {
     const input: EnvironmentInput = {
       name: v.name,
       description: v.description,
-      serverIds: v.serverIds ?? [],
+      nodeIds: v.nodeIds ?? [],
       variables: textToVars(v.varsText),
       secrets: v.secrets ?? [],
     }
@@ -105,7 +111,7 @@ export default function ProjectEnvironmentsPage() {
     Modal.confirm({
       centered: true,
       title: '删除环境？',
-      content: `将删除环境「${e.name}」（不影响其引用的服务器）。`,
+      content: `将删除环境「${e.name}」（不影响其引用的节点）。`,
       okText: '删除',
       okButtonProps: { danger: true },
       cancelText: '取消',
@@ -117,14 +123,14 @@ export default function ProjectEnvironmentsPage() {
     })
   }
 
-  const serverName = (sid: number) => servers.find((sv) => sv.id === sid)?.name ?? `#${sid}`
+  const nodeName = (nid: string) => nodes.find((n) => String(n.id) === nid)?.name ?? nid
 
   const columns: ColumnsType<ProjectEnvironment> = [
     { title: '环境', dataIndex: 'name', width: 110, render: (v: string) => <Tag color={envColor(v.toLowerCase() === 'dev' ? 'test' : v.toLowerCase())}>{v}</Tag> },
     {
-      title: '服务器',
-      dataIndex: 'serverIds',
-      render: (ids: number[]) => ids?.length ? ids.map((sid) => <Tag key={sid}>{serverName(sid)}</Tag>) : '-',
+      title: '执行节点',
+      dataIndex: 'nodeIds',
+      render: (ids: string[]) => ids?.length ? ids.map((nid) => <Tag key={nid}>{nodeName(nid)}</Tag>) : '-',
     },
     {
       title: '变量',
@@ -171,7 +177,7 @@ export default function ProjectEnvironmentsPage() {
       }
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-        部署/测试目标从服务器升级为环境（DEV/TEST/STAGING/PROD），环境聚合服务器 + 变量 + 密钥引用。
+        部署/测试目标按环境（DEV/TEST/STAGING/PROD）组织：环境聚合执行节点（runner）+ 变量 + 密钥引用；部署未显式选节点时取环境首个节点。
       </Typography.Paragraph>
       <Table
         rowKey="id"
@@ -187,13 +193,13 @@ export default function ProjectEnvironmentsPage() {
           <Form.Item label="名称" name="name" rules={[{ required: true }]}>
             <Select options={ENV_NAME_OPTIONS.map((v) => ({ value: v, label: v }))} />
           </Form.Item>
-          <Form.Item label="服务器" name="serverIds" extra="从「服务器」页已登记的服务器中选择">
-            <Select mode="multiple" options={serverOptions} placeholder="选择服务器" />
+          <Form.Item label="执行节点" name="nodeIds" extra="从后台「Agent 节点」已登记的 runner 节点中选择">
+            <Select mode="multiple" options={nodeOptions} placeholder="选择执行节点" />
           </Form.Item>
           <Form.Item label="环境变量" name="varsText" extra="每行一条 KEY=VALUE，# 开头为注释">
             <Input.TextArea rows={4} placeholder="APP_PROFILE=dev（每行一条 KEY=VALUE）" />
           </Form.Item>
-          <Form.Item label="密钥引用" name="secrets" extra="只存名称引用，密钥值由服务器凭证体系保管，永不落库">
+          <Form.Item label="密钥引用" name="secrets" extra="只存名称引用，密钥值由凭证体系保管，永不落库">
             <Select mode="tags" placeholder="如 NEXUS_PASSWORD" open={false} suffixIcon={null} />
           </Form.Item>
           <Form.Item label="描述" name="description">

@@ -1,5 +1,6 @@
 // 构建记录页（/builds）：当前项目的构建配置、触发与历史。
-// CAP-08 构建中心：配置（执行位置/远程服务器/并发）→ 触发构建 → 历史表格 → 日志 Drawer（WS 实时流）。
+// CAP-08 构建中心：配置（执行位置/执行节点/并发）→ 触发构建 → 历史表格 → 日志 Drawer（WS 实时流）。
+// CAP-36：AGENT 执行由 runner 节点承接（exec 帧），配置 GitLab 仓库时凭证随帧下发。
 // 布局遵循 docs/core/前端内容区布局约定.md：单 Card 默认尺寸，配置/触发表单收进 extra 按钮打开的 Modal。
 import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
 import { useEffect, useRef, useState } from 'react'
@@ -7,8 +8,8 @@ import { ReloadOutlined, RocketOutlined, SettingOutlined } from '@ant-design/ico
 import type { ColumnsType } from 'antd/es/table'
 import { getBuild, getBuildConfig, getBuildLogs, listBuilds, saveBuildConfig, triggerBuild } from '../api'
 import type { BuildConfig, BuildExecutor, BuildRecord, BuildStatus } from '../types'
-import type { ProjectServer } from '../../projects/types'
-import { listServers } from '../../projects/api'
+import { listAgentNodes } from '../../agent/api'
+import type { AgentNode } from '../../agent/types'
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
@@ -30,7 +31,7 @@ export default function BuildsPage() {
 
 function BuildCenter({ id }: { id: string }) {
   const [cfg, setCfg] = useState<BuildConfig | null>(null)
-  const [servers, setServers] = useState<ProjectServer[]>([])
+  const [nodes, setNodes] = useState<AgentNode[]>([])
   const [builds, setBuilds] = useState<BuildRecord[]>([])
   const [loading, setLoading] = useState(false)
   const [commit, setCommit] = useState('')
@@ -52,12 +53,14 @@ function BuildCenter({ id }: { id: string }) {
 
   useEffect(() => {
     getBuildConfig(id).then(setCfg).catch(() => {})
-    listServers(id).then(setServers).catch(() => {})
+    listAgentNodes().then(setNodes).catch(() => {})
     refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  const buildCaps = servers.filter((s) => s.enabled && s.capabilities.includes('build'))
+  const onlineNodes = nodes.filter((n) => n.status === 'ONLINE')
+  const nodeOptions = (list: AgentNode[]) =>
+    list.map((n) => ({ value: String(n.id), label: `${n.name}${n.isDefault ? ' · 平台默认' : ''}` }))
 
   const onSave = async () => {
     if (!cfg) return
@@ -65,7 +68,7 @@ function BuildCenter({ id }: { id: string }) {
     try {
       const saved = await saveBuildConfig(id, {
         executor: cfg.executor,
-        remoteServerId: cfg.remoteServerId,
+        agentNodeId: cfg.agentNodeId,
         concurrencyLimit: cfg.concurrencyLimit,
       })
       setCfg(saved)
@@ -85,7 +88,7 @@ function BuildCenter({ id }: { id: string }) {
         commit: commit || undefined,
         branch: branch || undefined,
         executor: triggerExecutor || undefined,
-        remoteServerId: triggerExecutor === 'REMOTE' ? cfg?.remoteServerId ?? undefined : undefined,
+        agentNodeId: triggerExecutor === 'AGENT' ? cfg?.agentNodeId ?? undefined : undefined,
       })
       message.success(`构建 #${b.id} 已触发（${b.executor}）`)
       setCommit('')
@@ -119,7 +122,7 @@ function BuildCenter({ id }: { id: string }) {
     },
     {
       title: '执行位置', dataIndex: 'executor', width: 100,
-      render: (v: BuildExecutor) => <Tag color={v === 'REMOTE' ? 'purple' : 'default'}>{v}</Tag>,
+      render: (v: BuildExecutor) => <Tag color={v === 'AGENT' ? 'purple' : 'default'}>{v}</Tag>,
     },
     {
       title: '产物', dataIndex: 'artifactRef', width: 200,
@@ -188,23 +191,24 @@ function BuildCenter({ id }: { id: string }) {
       >
         {cfg && (
           <Form layout="vertical" initialValues={{ executor: cfg.executor, concurrencyLimit: cfg.concurrencyLimit }}>
-            <Form.Item label="执行位置">
+            <Form.Item label="执行位置" extra="AGENT = 下发 runner 节点执行（exec 帧），节点在线且支持 exec 才会被选中">
               <Select<BuildExecutor>
                 value={cfg.executor}
                 onChange={(v) => setCfg({ ...cfg, executor: v })}
                 options={[
                   { value: 'LOCAL', label: '本机' },
-                  { value: 'REMOTE', label: '远程服务器' },
+                  { value: 'AGENT', label: 'Agent 节点' },
                 ]}
               />
             </Form.Item>
-            <Form.Item label="远程服务器">
-              <Select<number>
-                placeholder={buildCaps.length ? '选择服务器' : '无可用服务器'}
-                value={cfg.remoteServerId ?? undefined}
-                disabled={cfg.executor !== 'REMOTE'}
-                onChange={(v) => setCfg({ ...cfg, remoteServerId: v ?? null })}
-                options={buildCaps.map((s) => ({ value: s.id, label: `${s.name}（${s.accessType}）` }))}
+            <Form.Item label="执行节点">
+              <Select<string>
+                placeholder={onlineNodes.length ? '留空 = 默认路由（项目默认 → 平台默认）' : '无在线节点'}
+                value={cfg.agentNodeId ?? undefined}
+                disabled={cfg.executor !== 'AGENT'}
+                allowClear
+                onChange={(v) => setCfg({ ...cfg, agentNodeId: v ?? null })}
+                options={nodeOptions(onlineNodes)}
               />
             </Form.Item>
             <Form.Item label="并发上限">
@@ -233,7 +237,7 @@ function BuildCenter({ id }: { id: string }) {
             options={[
               { value: '', label: '执行位置：继承配置' },
               { value: 'LOCAL', label: '执行位置：本机' },
-              { value: 'REMOTE', label: '执行位置：远程' },
+              { value: 'AGENT', label: '执行位置：Agent 节点' },
             ]}
           />
         </Space>

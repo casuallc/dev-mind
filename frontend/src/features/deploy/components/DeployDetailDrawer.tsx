@@ -173,7 +173,7 @@ export default function DeployDetailDrawer({ record, onClose, onChanged }: {
           </Space>
           <Space wrap size={8}>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              构建 {d.buildId ? `#${d.buildId}` : '-'} · 服务器 # {d.serverId} · 环境 {d.env || '-'}
+              构建 {d.buildId ? `#${d.buildId}` : '-'} · 节点 {d.agentNodeId || '-'} · 环境 {d.env || '-'}
             </Typography.Text>
             {d.backupRef && (
               <Tag color="gold">备份: <Typography.Text copyable style={{ fontSize: 12 }}>{d.backupRef}</Typography.Text></Tag>

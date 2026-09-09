@@ -80,7 +80,7 @@ export default function AdminProjectsPage() {
     Modal.confirm({
       centered: true,
       title: '删除项目？',
-      content: `将删除项目「${p.name}」及其服务器/构建/发版/锁配置（不影响仓库本身）。`,
+      content: `将删除项目「${p.name}」及其环境/构建/发版/锁配置（不影响仓库本身）。`,
       okText: '删除',
       okButtonProps: { danger: true },
       cancelText: '取消',
@@ -239,13 +239,13 @@ export default function AdminProjectsPage() {
           type="info"
           showIcon
           style={{ marginBottom: 12 }}
-          message="描述项目的仓库、构建脚本、部署服务器等信息，平台将启动一个全自动会话，通过开放 API 把配置（项目/服务器/模板/环境/构建/部署计划）写入并触发一次构建验证。"
+          message="描述项目的仓库、构建脚本、部署方式等信息，平台将启动一个全自动会话，通过开放 API 把配置（项目/模板/环境/构建/部署计划）写入并触发一次构建验证。"
         />
         <Input.TextArea
           rows={8}
           value={onboardDesc}
           onChange={(e) => setOnboardDesc(e.target.value)}
-          placeholder={'例如：\n项目仓库 D:\\apusic\\ctyunmanager，构建脚本 build.ps1\n部署服务器 172.20.140.224 root 免密登录，部署目录 /apusic/ctyun\n发布脚本 push.sh'}
+          placeholder={'例如：\n项目仓库 D:\\apusic\\ctyunmanager，构建脚本 build.ps1\n部署到 runner 节点 local-dev，部署目录 /apusic/ctyun\n发布脚本 push.sh'}
         />
       </Modal>
     </Card>

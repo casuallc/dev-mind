@@ -32,7 +32,8 @@ export interface DeploymentRecord {
   id: number
   projectId: string
   workItemId: string | null
-  serverId: number
+  /** 执行节点 id（runner；创建时显式指定或经环境/路由链解析） */
+  agentNodeId: string
   environmentId: number | null
   buildId: number | null
   env: string
@@ -54,7 +55,8 @@ export interface DeploymentRecord {
 // ---- CAP-11 发版执行器（与后端 devmind-release / release_config 对齐） ----
 
 export type ReleaseStatus = 'PLANNED' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'ROLLED_BACK'
-export type ReleaseExecutor = 'LOCAL' | 'REMOTE'
+/** CAP-36：REMOTE/SSH 已下线，远程执行统一 AGENT（runner 节点） */
+export type ReleaseExecutor = 'LOCAL' | 'AGENT'
 
 /** /projects/{id}/release-config（CAP-02 发版配置，已含 CAP-11 执行方式） */
 export interface ReleaseConfig {
@@ -63,8 +65,9 @@ export interface ReleaseConfig {
   nexusRepo?: string
   scriptTemplateRef?: string
   versionRule?: string
-  executor?: string // LOCAL / REMOTE
-  remoteServerId?: number
+  executor?: string // LOCAL / AGENT
+  /** AGENT 执行的目标节点 id（空 = 路由链） */
+  agentNodeId?: string
 }
 
 export interface ReleaseConfigInput {
@@ -72,7 +75,7 @@ export interface ReleaseConfigInput {
   scriptTemplateRef?: string
   versionRule?: string
   executor?: string
-  remoteServerId?: number
+  agentNodeId?: string
 }
 
 export interface ReleaseRecord {
@@ -86,7 +89,7 @@ export interface ReleaseRecord {
   nexusRef?: string
   tagName?: string
   executor: string
-  serverId?: number
+  agentNodeId?: string
   rollbackOf?: number
   errorSummary?: string
   createdBy?: string
@@ -101,6 +104,6 @@ export interface CreateReleaseInput {
   buildId?: number
   version?: string
   executor?: string
-  serverId?: number
+  agentNodeId?: string
   force?: boolean
 }

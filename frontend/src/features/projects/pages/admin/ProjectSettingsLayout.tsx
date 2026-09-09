@@ -1,5 +1,5 @@
 // 后台项目设置布局（仅 ADMIN）：头部信息卡 + 子路由 Tabs + Outlet。
-// 各配置子页面（仓库/摘要/服务器/环境/构建步骤/发版/Jira/锁定）独立成路由、各自加载数据，
+// 各配置子页面（仓库/摘要/环境/构建步骤/发版/Jira/锁定）独立成路由、各自加载数据，
 // 取代原 AdminProjectDetail 一页 8 Tab + useProjectConfig 全量预加载的模式。
 import { useState } from 'react'
 import { Button, Card, Descriptions, Empty, Space, Spin, Tabs, Tag, Typography } from 'antd'
@@ -13,7 +13,6 @@ import { pageCardBodyScrollStyle } from '../../../../shared/utils/pageLayout'
 const SUB_TABS = [
   { key: 'repos', label: '仓库' },
   { key: 'summary', label: '上下文摘要' },
-  { key: 'servers', label: '服务器' },
   { key: 'environments', label: '环境' },
   { key: 'build', label: '构建配置' },
   { key: 'release', label: '发版配置' },

@@ -1,17 +1,20 @@
-// CAP-07 FR-06 执行审计查看（视图内容组件；外壳 Card / extra 按钮在 ServersPage）
+// CAP-36 执行审计查看（视图内容组件；外壳 Card / extra 按钮在 ExecutionPage）
+// exec 帧下发 runner 节点的每次执行全量留痕（domain=agent_exec）；历史 CAP-07 SSH/HTTP 记录同表可查。
 import { useCallback, useEffect, useState } from 'react'
 import { Badge, Drawer, Select, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { Project } from '../../projects/types'
 import { listProjects } from '../../projects/api'
-import { listServers, listAudit } from '../api'
-import type { AuditView, ServerListItem } from '../types'
+import { listAgentNodes } from '../../agent/api'
+import type { AgentNode } from '../../agent/types'
+import { listAudit } from '../api'
+import type { AuditView } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 
-const ACTIONS = ['connect_test', 'execute', 'upload', 'download', 'health_check']
+const ACTIONS = ['execute', 'connect_test', 'upload', 'download', 'health_check']
 const ACTION_LABEL: Record<string, string> = {
-  connect_test: '连通测试',
   execute: '执行',
+  connect_test: '连通测试',
   upload: '上传',
   download: '下载',
   health_check: '健康检查',
@@ -19,9 +22,9 @@ const ACTION_LABEL: Record<string, string> = {
 
 export default function AuditTab({ refreshTick = 0 }: { refreshTick?: number }) {
   const [projects, setProjects] = useState<Project[]>([])
-  const [servers, setServers] = useState<ServerListItem[]>([])
+  const [nodes, setNodes] = useState<AgentNode[]>([])
   const [projectId, setProjectId] = useState<string>()
-  const [serverId, setServerId] = useState<number>()
+  const [nodeId, setNodeId] = useState<number>()
   const [action, setAction] = useState<string>()
   const [rows, setRows] = useState<AuditView[]>([])
   const [loading, setLoading] = useState(false)
@@ -29,25 +32,29 @@ export default function AuditTab({ refreshTick = 0 }: { refreshTick?: number }) 
 
   useEffect(() => {
     listProjects().then(setProjects).catch(() => undefined)
-    listServers().then(setServers).catch(() => undefined)
+    listAgentNodes().then(setNodes).catch(() => undefined)
   }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setRows(await listAudit({ projectId, serverId, action }))
-    } catch (e) {
-      // 无服务器时不阻塞
+      setRows(await listAudit({ projectId, nodeId, action }))
+    } catch {
+      // 无记录时不阻塞
     } finally {
       setLoading(false)
     }
-  }, [projectId, serverId, action])
+  }, [projectId, nodeId, action])
 
   useEffect(() => { load() }, [load, refreshTick]) // refreshTick：外壳 extra「刷新」
 
+  const nodeName = (r: AuditView) =>
+    r.serverName
+      || (r.serverId != null ? nodes.find((n) => n.id === r.serverId)?.name ?? `#${r.serverId}` : '-')
+
   const columns: ColumnsType<AuditView> = [
     { title: '时间', dataIndex: 'createdAt', width: 170, render: (t) => fmtTime(t) },
-    { title: '服务器', dataIndex: 'serverName', width: 120, render: (n, r) => `${n} [${r.accessType}]` },
+    { title: '节点', key: 'node', width: 130, render: (_, r) => `${nodeName(r)} [${r.accessType}]` },
     {
       title: '动作',
       dataIndex: 'action',
@@ -77,14 +84,13 @@ export default function AuditTab({ refreshTick = 0 }: { refreshTick?: number }) 
       <Space>
         <Select
           allowClear placeholder="项目" style={{ width: 180 }}
-          value={projectId} onChange={(v) => { setProjectId(v); setServerId(undefined) }}
+          value={projectId} onChange={(v) => { setProjectId(v); setNodeId(undefined) }}
           options={projects.map((p) => ({ label: `${p.name} (${p.id})`, value: p.id }))}
         />
         <Select
-          allowClear placeholder="服务器" style={{ width: 220 }}
-          value={serverId} onChange={setServerId}
-          options={servers.filter((s) => !projectId || s.projectId === projectId)
-            .map((s) => ({ label: `${s.name} (${s.accessType})`, value: s.id }))}
+          allowClear placeholder="节点" style={{ width: 220 }}
+          value={nodeId} onChange={setNodeId}
+          options={nodes.map((n) => ({ label: `${n.name}${n.status !== 'ONLINE' ? '（离线）' : ''}`, value: n.id }))}
         />
         <Select
           allowClear placeholder="动作" style={{ width: 140 }}
@@ -98,14 +104,14 @@ export default function AuditTab({ refreshTick = 0 }: { refreshTick?: number }) 
         columns={columns}
         dataSource={rows}
         pagination={false}
-        locale={{ emptyText: '暂无审计记录。在「服务器运维」视图执行连通测试 / 模板执行等操作后自动留痕（FR-06）。' }}
+        locale={{ emptyText: '暂无审计记录。构建/部署/发版/健康检查等经 exec 帧下发节点执行后自动留痕。' }}
       />
 
       <Drawer title="审计详情" open={!!detail} onClose={() => setDetail(null)} width={640}>
         {detail && (
           <Space direction="vertical" style={{ width: '100%' }}>
             <Typography.Paragraph type="secondary">
-              {ACTION_LABEL[detail.action] ?? detail.action} · {detail.serverName} [{detail.accessType}]
+              {ACTION_LABEL[detail.action] ?? detail.action} · {nodeName(detail)} [{detail.accessType}]
               {detail.templateCode ? ` · 模板 ${detail.templateCode}` : ''}
               {detail.capability ? ` · 能力 ${detail.capability}` : ''} · {fmtTime(detail.createdAt)}
             </Typography.Paragraph>

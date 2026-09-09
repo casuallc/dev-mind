@@ -112,7 +112,7 @@ export default function RunDetailDrawer({ record, onClose, onChanged, onOpenText
           </Space>
           <Space wrap size={8}>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              目标 {d.baseUrl || '-'} · 服务器 # {d.serverId ?? '-'} · 环境 {d.environmentId ? `#${d.environmentId}` : '-'} · 部署 #{d.deploymentId ?? '-'}
+              目标 {d.baseUrl || '-'} · 节点 {d.agentNodeId ?? '-'} · 环境 {d.environmentId ? `#${d.environmentId}` : '-'} · 部署 #{d.deploymentId ?? '-'}
             </Typography.Text>
             {d.summary && (
               <span style={{ fontSize: 12 }}>

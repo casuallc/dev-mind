@@ -73,7 +73,8 @@ export interface TestRun {
   workItemId: string | null
   suiteIds: number[]
   deploymentId: number | null
-  serverId: number | null
+  /** 执行节点 id（runner；command 型健康检查在该节点执行） */
+  agentNodeId: string | null
   environmentId: number | null
   baseUrl: string | null
   status: TestRunStatus
@@ -92,7 +93,7 @@ export interface CreateTestRunInput {
   workItemId?: string
   suiteIds: number[]
   deploymentId?: number
-  serverId?: number
+  agentNodeId?: string
   environmentId?: number
   baseUrl?: string
 }

@@ -1,5 +1,5 @@
 // 测试记录页（/tests）：当前项目的套件管理与测试运行历史。
-// CAP-10 测试中心：套件管理（OpenAPI 生成/新建/用例编辑/沉淀文档）→ 新建测试运行（选套件+目标环境/服务器/baseUrl）→
+// CAP-10 测试中心：套件管理（OpenAPI 生成/新建/用例编辑/沉淀文档）→ 新建测试运行（选套件+目标环境/执行节点/baseUrl）→
 // 运行历史 → 详情 Drawer（WS 实时结果流）；失败运行可一键生成缺陷线索（FR-06）。
 // 布局遵循 docs/core/前端内容区布局约定.md：单 Card + title 内 Segmented 切换视图，操作按钮收 extra，表格默认密度。
 import {
@@ -42,8 +42,10 @@ import {
   publishSuite,
 } from '../api'
 import type { IssueDraft, TestRun, TestRunStatus, TestSuite } from '../types'
-import type { ProjectEnvironment, ProjectServer } from '../../projects/types'
-import { listEnvironments, listServers } from '../../projects/api'
+import type { ProjectEnvironment } from '../../projects/types'
+import type { AgentNode } from '../../agent/types'
+import { listEnvironments } from '../../projects/api'
+import { listAgentNodes } from '../../agent/api'
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { STATUS_COLOR, SUITE_KIND_COLOR } from '../constants'
@@ -63,7 +65,7 @@ function TestCenter({ id }: { id: string }) {
   const [view, setView] = useState<string>('suites') // suites | runs
   const [suites, setSuites] = useState<TestSuite[]>([])
   const [runs, setRuns] = useState<TestRun[]>([])
-  const [servers, setServers] = useState<ProjectServer[]>([])
+  const [nodes, setNodes] = useState<AgentNode[]>([])
   const [environments, setEnvironments] = useState<ProjectEnvironment[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -71,7 +73,7 @@ function TestCenter({ id }: { id: string }) {
   const [runOpen, setRunOpen] = useState(false)
   const [suiteIds, setSuiteIds] = useState<number[]>([])
   const [environmentId, setEnvironmentId] = useState<number | undefined>()
-  const [serverId, setServerId] = useState<number | undefined>()
+  const [agentNodeId, setAgentNodeId] = useState<string | undefined>()
   const [baseUrl, setBaseUrl] = useState('')
   const [creating, setCreating] = useState(false)
 
@@ -95,15 +97,15 @@ function TestCenter({ id }: { id: string }) {
   const loadAll = async () => {
     setLoading(true)
     try {
-      const [s, r, sv, ev] = await Promise.all([
+      const [s, r, nd, ev] = await Promise.all([
         listSuites(id),
         listRuns(id),
-        listServers(id).catch(() => []),
+        listAgentNodes().catch(() => []),
         listEnvironments(id).catch(() => []),
       ])
       setSuites(s)
       setRuns(r)
-      setServers(sv)
+      setNodes(nd)
       setEnvironments(ev)
     } catch (e) {
       showError(e, '加载失败')
@@ -184,7 +186,7 @@ function TestCenter({ id }: { id: string }) {
       const r = await createRun({
         projectId: id,
         suiteIds,
-        serverId: serverId || undefined,
+        agentNodeId: agentNodeId || undefined,
         environmentId: environmentId || undefined,
         baseUrl: baseUrl.trim() || undefined,
       })
@@ -198,8 +200,6 @@ function TestCenter({ id }: { id: string }) {
       setCreating(false)
     }
   }
-
-  const testServers = servers.filter((s) => s.enabled && s.capabilities.includes('test'))
 
   // 管理 Drawer 中的套件随列表刷新保持新鲜；被删后自动关闭
   const manageSuite = manageId != null ? suites.find((s) => s.id === manageId) ?? null : null
@@ -330,7 +330,7 @@ function TestCenter({ id }: { id: string }) {
             套件 = 一组用例；api 套件由 OpenAPI 生成（含未鉴权边界用例），smoke 冒烟套件用 health 用例做关键路径存活检查。
           </Typography.Paragraph>
           <Table<TestSuite> rowKey="id" loading={loading} dataSource={suites} columns={suiteColumns}
-            pagination={false} locale={{ emptyText: '暂无套件：先「从 OpenAPI 生成」，或新建冒烟套件（health 用例走服务器健康检查）' }} />
+            pagination={false} locale={{ emptyText: '暂无套件：先「从 OpenAPI 生成」，或新建冒烟套件（health 用例走执行节点健康检查）' }} />
         </>
       ) : (
         <>
@@ -371,18 +371,21 @@ function TestCenter({ id }: { id: string }) {
             style={{ width: '100%' }}
             placeholder="目标环境（可选）"
             value={environmentId}
-            onChange={(v) => { setEnvironmentId(v); if (v != null) setServerId(undefined) }}
+            onChange={(v) => { setEnvironmentId(v); if (v != null) setAgentNodeId(undefined) }}
             allowClear
             options={environments.map((e) => ({ value: e.id, label: e.name }))}
           />
-          <Select<number>
+          <Select<string>
             style={{ width: '100%' }}
-            placeholder={testServers.length ? '目标服务器（可选）' : '无可用服务器（需 test 能力）'}
-            value={serverId}
-            onChange={setServerId}
+            placeholder={nodes.length ? '执行节点（可选，command 型健康检查用）' : '无可用节点（先到后台「Agent 节点」登记）'}
+            value={agentNodeId}
+            onChange={setAgentNodeId}
             allowClear
             disabled={environmentId != null}
-            options={testServers.map((s) => ({ value: s.id, label: `${s.name}（${s.accessType}）` }))}
+            options={nodes.map((n) => ({
+              value: String(n.id),
+              label: `${n.name}${n.isDefault ? ' · 平台默认' : ''}${n.status !== 'ONLINE' ? '（离线）' : ''}`,
+            }))}
           />
           <Input
             placeholder="baseUrl（可选，http 用例目标）"
@@ -390,7 +393,7 @@ function TestCenter({ id }: { id: string }) {
             onChange={(e) => setBaseUrl(e.target.value)}
           />
           <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-            目标优先级：baseUrl 显式 &gt; 服务器（http 取配置 baseUrl）&gt; 环境（变量 baseUrl/BASE_URL）。未配置时 http 用例跳过、health 用例照跑。
+            目标优先级：baseUrl 显式 &gt; 环境变量（baseUrl/BASE_URL）&gt; 关联部署的环境。http 用例由服务端直接探测；command 型健康检查经 exec 帧下发执行节点。
           </Typography.Paragraph>
         </Space>
       </Modal>

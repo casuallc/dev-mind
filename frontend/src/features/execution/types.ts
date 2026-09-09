@@ -1,34 +1,4 @@
-// CAP-07 服务器适配器类型，与后端 devmind-server-adapter 对齐
-
-export interface ServerListItem {
-  id: number
-  projectId: string
-  name: string
-  env: string | null
-  accessType: 'ssh' | 'http'
-  capabilities: string[]
-  enabled: boolean
-}
-
-export interface ConnectResult {
-  ok: boolean
-  message: string
-  durationMs: number
-}
-
-export interface ExecResult {
-  exitCode: number
-  success: boolean
-  stdout: string
-  stderr: string
-  durationMs: number
-}
-
-export interface HealthResult {
-  ok: boolean
-  message: string
-  durationMs: number
-}
+// CAP-36 执行底座视图类型：命令模板白名单（script_templates）与执行审计（audit_logs），与 devmind-execution 对齐
 
 export interface TemplateParam {
   name: string
@@ -61,21 +31,19 @@ export interface TemplateInput {
 export interface AuditView {
   id: number
   projectId: string
-  serverId: number
-  serverName: string
+  /** 目标节点 id（数值；复用 audit_logs.server_id 列，CAP-07 时代的服务器记录同列） */
+  serverId: number | null
+  serverName: string | null
+  /** 执行通道：agent = exec 帧下发 runner 节点（历史值 ssh/http 为 CAP-07 旧记录） */
   accessType: string
   action: string
   templateCode: string | null
   capability: string | null
+  /** 模板渲染后的完整脚本串，不含凭证 */
   command: string | null
   exitCode: number | null
   success: boolean
   detail: string | null
   durationMs: number | null
   createdAt: string
-}
-
-export interface StoredConfig {
-  accessConfig: string | null
-  fields: { field: string; encrypted: boolean }[]
 }

@@ -16,7 +16,6 @@ import AdminProjectsPage from '../features/projects/pages/AdminProjectsPage'
 import ProjectSettingsLayout from '../features/projects/pages/admin/ProjectSettingsLayout'
 import ReposPage from '../features/projects/pages/admin/ReposPage'
 import SummaryPage from '../features/projects/pages/admin/SummaryPage'
-import ProjectServersPage from '../features/projects/pages/admin/ProjectServersPage'
 import ProjectEnvironmentsPage from '../features/projects/pages/admin/ProjectEnvironmentsPage'
 import BuildStepsPage from '../features/projects/pages/admin/BuildStepsPage'
 import ReleaseConfigPage from '../features/projects/pages/admin/ReleaseConfigPage'
@@ -31,7 +30,7 @@ import KnowledgeBase from '../features/knowledge/pages/KnowledgeBase'
 import SkillsPage from '../features/skills/pages/SkillsPage'
 import DocsPage from '../features/docs/pages/DocsPage'
 import DocEditorPage from '../features/docs/pages/DocEditorPage'
-import ServersPage from '../features/server-adapter/pages/ServersPage'
+import ExecutionPage from '../features/execution/pages/ExecutionPage'
 import IntegrationsPage from '../features/integrations/pages/IntegrationsPage'
 import ApiKeysPage from '../features/open-api/pages/ApiKeysPage'
 import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
@@ -108,7 +107,7 @@ export default function App() {
           <Route path="/knowledge" element={<Navigate to="/admin/knowledge" replace />} />
           <Route path="/docs" element={<Navigate to="/admin/docs" replace />} />
           <Route path="/docs/:id" element={<LegacyDocRedirect />} />
-          <Route path="/servers" element={<Navigate to="/admin/servers" replace />} />
+          <Route path="/servers" element={<Navigate to="/admin/execution" replace />} />
           {/* 附件管理已迁入后台「内容」分组，旧路径兼容 */}
           <Route path="/attachments" element={<Navigate to="/admin/attachments" replace />} />
           {/* 会话模板已升级为场景（CAP-33），旧路径兼容 */}
@@ -131,7 +130,6 @@ export default function App() {
             <Route index element={<Navigate to="repos" replace />} />
             <Route path="repos" element={<ReposPage />} />
             <Route path="summary" element={<SummaryPage />} />
-            <Route path="servers" element={<ProjectServersPage />} />
             <Route path="environments" element={<ProjectEnvironmentsPage />} />
             <Route path="build" element={<BuildStepsPage />} />
             <Route path="release" element={<ReleaseConfigPage />} />
@@ -142,8 +140,9 @@ export default function App() {
           <Route path="/admin/repos" element={<ReposAdminPage />} />
           {/* CAP-01 用户管理 */}
           <Route path="/admin/users" element={<UserManagementPage />} />
-          {/* CAP-07 服务器适配器 */}
-          <Route path="/admin/servers" element={<ServersPage />} />
+          {/* CAP-36 执行底座：命令模板 + 执行审计（CAP-07 服务器运维已下线，旧路径兼容） */}
+          <Route path="/admin/execution" element={<ExecutionPage />} />
+          <Route path="/admin/servers" element={<Navigate to="/admin/execution" replace />} />
           {/* CAP-18/19 平台集成（GitLab / Jira） */}
           <Route path="/admin/integrations" element={<IntegrationsPage />} />
           {/* CAP-20 API 密钥（open-api HMAC 认证凭证） */}

@@ -1,4 +1,5 @@
-// CAP-07 FR-05 命令模板白名单管理（视图内容组件；外壳 Card / extra 按钮在 ServersPage）
+// CAP-36 命令模板白名单管理（视图内容组件；外壳 Card / extra 按钮在 ExecutionPage）
+// 模板由服务端渲染后经 exec 帧下发 runner 节点执行；本地与远程执行共用同一份白名单。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Checkbox, Drawer, Form, Input, message, Modal, Select, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -153,7 +154,7 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
         columns={columns}
         dataSource={templates}
         pagination={false}
-        locale={{ emptyText: '暂无模板。点击右上角「新建模板」登记——远程只能执行白名单内的模板（FR-05）。' }}
+        locale={{ emptyText: '暂无模板。点击右上角「新建模板」登记——构建/部署/发版等执行器只允许使用白名单内的模板。' }}
       />
 
       <Drawer

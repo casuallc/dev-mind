@@ -1,4 +1,4 @@
-// 共享格式化工具：test/deploy/build/server-adapter 等页面统一使用，避免各抄一份。
+// 共享格式化工具：test/deploy/build 等页面统一使用，避免各抄一份。
 
 /** ISO 时间 → 'YYYY-MM-DD HH:mm:ss'，空值显示 '-' */
 export function fmtTime(s: string | null | undefined): string {

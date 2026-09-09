@@ -21,6 +21,8 @@ import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { createRelease, executeRelease, listReleases } from '../api'
 import type { CreateReleaseInput, ReleaseRecord, ReleaseStatus } from '../types'
+import { listAgentNodes } from '../../agent/api'
+import type { AgentNode } from '../../agent/types'
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { fmtTime } from '../../../shared/utils/format'
 import { STATUS_COLOR } from '../constants'
@@ -32,7 +34,7 @@ interface CreateValues {
   buildId?: number
   version?: string
   executor?: string
-  serverId?: number
+  agentNodeId?: string
   force?: boolean
 }
 
@@ -47,6 +49,7 @@ function ReleaseCenter({ id }: { id: string }) {
   const [detail, setDetail] = useState<ReleaseRecord | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [createBusy, setCreateBusy] = useState(false)
+  const [nodes, setNodes] = useState<AgentNode[]>([])
   const [createForm] = Form.useForm<CreateValues>()
 
   const load = () => {
@@ -55,6 +58,7 @@ function ReleaseCenter({ id }: { id: string }) {
 
   useEffect(() => {
     load()
+    listAgentNodes().then(setNodes).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
@@ -66,7 +70,7 @@ function ReleaseCenter({ id }: { id: string }) {
         buildId: v.buildId,
         version: v.version,
         executor: v.executor,
-        serverId: v.serverId,
+        agentNodeId: v.agentNodeId,
         force: v.force,
       }
       const r = await createRelease(input)
@@ -154,11 +158,18 @@ function ReleaseCenter({ id }: { id: string }) {
             <Select
               allowClear
               placeholder="取配置"
-              options={[{ value: 'LOCAL', label: 'LOCAL' }, { value: 'REMOTE', label: 'REMOTE' }]}
+              options={[{ value: 'LOCAL', label: 'LOCAL（本机）' }, { value: 'AGENT', label: 'AGENT（Agent 节点）' }]}
             />
           </Form.Item>
-          <Form.Item label="服务器 id" name="serverId" extra="REMOTE 时必填">
-            <InputNumber min={1} style={{ width: '100%' }} />
+          <Form.Item label="执行节点" name="agentNodeId" extra="AGENT 时可显式指定；留空 = 发版配置节点 → 路由链">
+            <Select
+              allowClear
+              placeholder="选择 runner 节点"
+              options={nodes.map((n) => ({
+                value: String(n.id),
+                label: `${n.name}${n.isDefault ? ' · 平台默认' : ''}${n.status !== 'ONLINE' ? '（离线）' : ''}`,
+              }))}
+            />
           </Form.Item>
           <Form.Item name="force" valuePropName="checked">
             <Checkbox>force（允许同版本重发）</Checkbox>

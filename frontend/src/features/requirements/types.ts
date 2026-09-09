@@ -152,7 +152,7 @@ export interface RequirementOverview {
   sessions: { id: string; status: string; taskSpec: string; model?: string; workItemId?: string; createdAt: string; finishedAt?: string }[]
   builds: { id: number; status: string; branch?: string; commit?: string; artifactRef?: string; workItemId?: string; createdAt: string; finishedAt?: string }[]
   testRuns: { id: number; status: string; summaryJson?: string; reportDocId?: number; triggeredBy?: string; workItemId?: string; createdAt: string; finishedAt?: string }[]
-  deployments: { id: number; status: string; env?: string; serverId?: number; buildId?: number; workItemId?: string; createdBy?: string; createdAt: string; finishedAt?: string }[]
+  deployments: { id: number; status: string; env?: string; agentNodeId?: string; buildId?: number; workItemId?: string; createdBy?: string; createdAt: string; finishedAt?: string }[]
   releases: { id: number; version?: string; status: string; executor?: string; rollbackOf?: number; createdAt: string; finishedAt: string }[]
   artifacts: { id: number; type: string; name?: string; path?: string; producerType?: string; createdAt: string }[]
   timeline: { time: string; type: string; label: string; refId: string }[]

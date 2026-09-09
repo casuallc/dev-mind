@@ -28,7 +28,7 @@ import {
 import type { BuildStep, BuildStepInput } from '../../types'
 import { showError } from '../../../../shared/utils/showError'
 
-const LOCATION_OPTIONS = ['LOCAL', 'REMOTE']
+const LOCATION_OPTIONS = ['LOCAL', 'AGENT']
 
 export default function BuildStepsPage() {
   const { id = '' } = useParams<{ id: string }>()
@@ -107,7 +107,7 @@ export default function BuildStepsPage() {
     { title: '名称', dataIndex: 'name', width: 140, render: (n?: string) => n || '-' },
     { title: '命令', dataIndex: 'command', render: (c: string) => <code style={{ fontSize: 12 }}>{c}</code> },
     { title: '目录', dataIndex: 'workingDir', width: 120, render: (d?: string) => d || '-' },
-    { title: '位置', dataIndex: 'location', width: 90, render: (l: string) => <Tag color={l === 'REMOTE' ? 'purple' : 'default'}>{l}</Tag> },
+    { title: '位置', dataIndex: 'location', width: 90, render: (l: string) => <Tag color={l === 'AGENT' ? 'purple' : 'default'}>{l}</Tag> },
     {
       title: '操作',
       key: 'action',
@@ -142,7 +142,7 @@ export default function BuildStepsPage() {
       }
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-        有序构建步骤，按顺序执行；位置可选本机（LOCAL）或远程服务器（REMOTE，委托 CAP-08）。
+        有序构建步骤，按顺序执行；实际执行位置由构建配置的 executor 决定（LOCAL 本机 / AGENT 节点），步骤上的位置标签用于审计归类。
       </Typography.Paragraph>
       <Table
         rowKey="id"
