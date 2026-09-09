@@ -43,13 +43,13 @@ public class BuildEntity {
     @Column(length = 128)
     private String branch;
 
-    /** LOCAL / REMOTE */
+    /** LOCAL / AGENT（CAP-36：REMOTE/SSH 已下线） */
     @Column(length = 16)
     private String executor;
 
-    /** 远程执行的目标服务器（触发时固化，配置可再改） */
-    @Column(name = "remote_server_id")
-    private Long remoteServerId;
+    /** AGENT 执行的目标节点 id（触发时路由固化，配置可再改） */
+    @Column(name = "agent_node_id", length = 64)
+    private String agentNodeId;
 
     /** 触发时固化的步骤清单（JSON: [{name,command,workingDir,location}]） */
     @Lob
@@ -102,8 +102,8 @@ public class BuildEntity {
     public void setBranch(String branch) { this.branch = branch; }
     public String getExecutor() { return executor; }
     public void setExecutor(String executor) { this.executor = executor; }
-    public Long getRemoteServerId() { return remoteServerId; }
-    public void setRemoteServerId(Long remoteServerId) { this.remoteServerId = remoteServerId; }
+    public String getAgentNodeId() { return agentNodeId; }
+    public void setAgentNodeId(String agentNodeId) { this.agentNodeId = agentNodeId; }
     public String getStepsSnapshot() { return stepsSnapshot; }
     public void setStepsSnapshot(String stepsSnapshot) { this.stepsSnapshot = stepsSnapshot; }
     public String getCreatedBy() { return createdBy; }

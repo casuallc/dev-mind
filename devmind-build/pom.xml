@@ -30,10 +30,6 @@
         </dependency>
         <dependency>
             <groupId>com.devmind</groupId>
-            <artifactId>devmind-server-adapter</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.devmind</groupId>
             <artifactId>devmind-execution</artifactId>
         </dependency>
         <dependency>

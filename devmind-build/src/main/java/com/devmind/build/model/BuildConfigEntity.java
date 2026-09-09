@@ -24,13 +24,13 @@ public class BuildConfigEntity {
     @Column(name = "project_id", nullable = false, length = 32, unique = true)
     private String projectId;
 
-    /** LOCAL / REMOTE */
+    /** LOCAL / AGENT（CAP-36：REMOTE/SSH 已下线，AGENT = runner 节点执行） */
     @Column(nullable = false, length = 16)
     private String executor = "LOCAL";
 
-    /** 远程执行时的目标服务器（CAP-07 server id） */
-    @Column(name = "remote_server_id")
-    private Long remoteServerId;
+    /** AGENT 执行时的目标节点 id（CAP-36；空 = 触发时走路由链） */
+    @Column(name = "agent_node_id", length = 64)
+    private String agentNodeId;
 
     @Column(name = "concurrency_limit")
     private int concurrencyLimit = 1;
@@ -44,8 +44,8 @@ public class BuildConfigEntity {
     public void setProjectId(String projectId) { this.projectId = projectId; }
     public String getExecutor() { return executor; }
     public void setExecutor(String executor) { this.executor = executor; }
-    public Long getRemoteServerId() { return remoteServerId; }
-    public void setRemoteServerId(Long remoteServerId) { this.remoteServerId = remoteServerId; }
+    public String getAgentNodeId() { return agentNodeId; }
+    public void setAgentNodeId(String agentNodeId) { this.agentNodeId = agentNodeId; }
     public int getConcurrencyLimit() { return concurrencyLimit; }
     public void setConcurrencyLimit(int concurrencyLimit) { this.concurrencyLimit = concurrencyLimit; }
     public Instant getUpdatedAt() { return updatedAt; }
