@@ -18,7 +18,7 @@ public interface KnowledgeEntryRepository extends JpaRepository<KnowledgeEntryEn
     Optional<KnowledgeEntryEntity> findByIdAndStatus(Long id, String status);
 
     @Query("select e from KnowledgeEntryEntity e where e.status = 'active' and (e.scope = 'global' or e.projectId = :projectId) " +
-            "and (lower(e.name) like lower(concat('%', :q, '%')) or lower(cast(e.contentMd as string)) like lower(concat('%', :q, '%')) " +
-            "or lower(e.tags) like lower(concat('%', :q, '%'))) order by e.updatedAt desc")
+            "and (lower(e.name) like lower(concat('%', cast(:q as string), '%')) or lower(cast(e.contentMd as string)) like lower(concat('%', cast(:q as string), '%')) " +
+            "or lower(e.tags) like lower(concat('%', cast(:q as string), '%'))) order by e.updatedAt desc")
     List<KnowledgeEntryEntity> searchActive(@Param("q") String q, @Param("projectId") String projectId);
 }
