@@ -9,7 +9,7 @@ public record TestRunView(
         String workItemId,
         List<Long> suiteIds,
         Long deploymentId,
-        Long serverId,
+        String agentNodeId,
         Long environmentId,
         String baseUrl,
         String status,

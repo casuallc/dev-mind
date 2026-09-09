@@ -45,14 +45,15 @@ public class TestRunEntity {
     @Column(name = "deployment_id")
     private Long deploymentId;
 
-    @Column(name = "server_id")
-    private Long serverId;
+    /** health command 用例的执行节点（CAP-36：agent_nodes 表 id；取代 servers 表 server_id） */
+    @Column(name = "agent_node_id", length = 64)
+    private String agentNodeId;
 
-    /** 目标环境（P1-1 environments 表 id；环境提供默认服务器与 baseUrl 变量） */
+    /** 目标环境（P1-1 environments 表 id；环境提供默认节点与 baseUrl 变量） */
     @Column(name = "environment_id")
     private Long environmentId;
 
-    /** API 测试目标 base URL（http 用例），可空（从服务器推导） */
+    /** API 测试目标 base URL（http 用例），可空（从环境变量推导） */
     @Column(length = 512)
     private String baseUrl;
 
@@ -100,8 +101,8 @@ public class TestRunEntity {
     public void setSuiteIdsJson(String suiteIdsJson) { this.suiteIdsJson = suiteIdsJson; }
     public Long getDeploymentId() { return deploymentId; }
     public void setDeploymentId(Long deploymentId) { this.deploymentId = deploymentId; }
-    public Long getServerId() { return serverId; }
-    public void setServerId(Long serverId) { this.serverId = serverId; }
+    public String getAgentNodeId() { return agentNodeId; }
+    public void setAgentNodeId(String agentNodeId) { this.agentNodeId = agentNodeId; }
     public Long getEnvironmentId() { return environmentId; }
     public void setEnvironmentId(Long environmentId) { this.environmentId = environmentId; }
     public String getBaseUrl() { return baseUrl; }

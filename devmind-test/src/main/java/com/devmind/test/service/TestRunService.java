@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -34,6 +35,10 @@ import com.devmind.deploy.repo.DeploymentRepository;
 import com.devmind.docs.DocumentService;
 import com.devmind.docs.dto.DocDetail;
 import com.devmind.docs.dto.DocRequest;
+import com.devmind.execution.model.StepResult;
+import com.devmind.execution.model.StepSpec;
+import com.devmind.execution.runner.AgentNodeRouter;
+import com.devmind.execution.runner.AgentNodeStepRunner;
 import com.devmind.notification.dto.NotificationDraft;
 import com.devmind.notification.model.NotificationLevel;
 import com.devmind.notification.service.NotificationService;
@@ -42,12 +47,6 @@ import com.devmind.project.EnvironmentService;
 import com.devmind.project.WorkItemService;
 import com.devmind.project.dto.ProjectView;
 import com.devmind.project.model.EnvironmentEntity;
-import com.devmind.project.model.ProjectServerEntity;
-import com.devmind.project.repo.ProjectServerRepository;
-import com.devmind.serveradapter.config.CredentialCrypto;
-import com.devmind.serveradapter.service.ServerOperationService;
-import com.devmind.serveradapter.spi.HealthCheckConfig;
-import com.devmind.serveradapter.spi.HealthResult;
 import com.devmind.test.dto.CaseResultView;
 import com.devmind.test.dto.CreateTestRunRequest;
 import com.devmind.test.dto.IssueDraftView;
@@ -64,8 +63,9 @@ import com.devmind.test.repo.TestSuiteRepository;
 import com.devmind.execution.ws.ExecutionLogHub;
 
 /**
- * CAP-10 测试执行：创建并异步执行 test_run（http 用例直请求 baseUrl 匹配 expected；health 用例走 CAP-07
- * 健康检查）→ 用例级结果落库 + WS 实时 → 汇总 + 报告文档（FR-04）→ 失败转缺陷线索（FR-06）。
+ * CAP-10 测试执行：创建并异步执行 test_run（http 用例直请求 baseUrl 匹配 expected；health 用例——http 型
+ * 服务端直接探测，command 型经 CAP-36 exec 帧下发 runner 节点执行）→ 用例级结果落库 + WS 实时 →
+ * 汇总 + 报告文档（FR-04）→ 失败转缺陷线索（FR-06）。
  * 监听部署完成事件按项目 autoRegressionOnDeploy 自动回归（FR-05）。
  * 关键陷阱同构建/部署：create() 不加 @Transactional，save 自身事务即时提交后异步 run()。
  */
@@ -83,12 +83,11 @@ public class TestRunService {
     private final TestSuiteRepository suiteRepo;
     private final ProjectService projectService;
     private final WorkItemService workItemService;
-    private final ProjectServerRepository serverRepo;
     private final DeploymentRepository deploymentRepo;
-    private final ServerOperationService serverOpService;
+    private final AgentNodeRouter agentNodeRouter;
+    private final AgentNodeStepRunner agentNodeRunner;
     private final DocumentService documentService;
     private final NotificationService notificationService;
-    private final CredentialCrypto crypto;
     private final ExecutionLogHub hub;
     private final ObjectMapper mapper;
     private final EnvironmentService environmentService;
@@ -99,12 +98,11 @@ public class TestRunService {
                           TestSuiteRepository suiteRepo,
                           ProjectService projectService,
                           WorkItemService workItemService,
-                          ProjectServerRepository serverRepo,
                           DeploymentRepository deploymentRepo,
-                          ServerOperationService serverOpService,
+                          AgentNodeRouter agentNodeRouter,
+                          AgentNodeStepRunner agentNodeRunner,
                           DocumentService documentService,
                           NotificationService notificationService,
-                          CredentialCrypto crypto,
                           ExecutionLogHub hub,
                           ObjectMapper mapper,
                           EnvironmentService environmentService,
@@ -116,12 +114,11 @@ public class TestRunService {
         this.suiteRepo = suiteRepo;
         this.projectService = projectService;
         this.workItemService = workItemService;
-        this.serverRepo = serverRepo;
         this.deploymentRepo = deploymentRepo;
-        this.serverOpService = serverOpService;
+        this.agentNodeRouter = agentNodeRouter;
+        this.agentNodeRunner = agentNodeRunner;
         this.documentService = documentService;
         this.notificationService = notificationService;
-        this.crypto = crypto;
         this.hub = hub;
         this.mapper = mapper;
         this.environmentService = environmentService;
@@ -136,11 +133,11 @@ public class TestRunService {
 
     public TestRunView create(CreateTestRunRequest req) {
         return createInternal(req.projectId(), req.workItemId(), req.suiteIds(), req.deploymentId(),
-                req.serverId(), req.environmentId(), req.baseUrl(), identityService.currentActor());
+                req.agentNodeId(), req.environmentId(), req.baseUrl(), identityService.currentActor());
     }
 
     private TestRunView createInternal(String projectId, String workItemId, List<Long> suiteIds,
-                                       Long deploymentId, Long serverId, Long environmentId,
+                                       Long deploymentId, String agentNodeId, Long environmentId,
                                        String baseUrl, String triggeredBy) {
         projectService.requireProject(projectId);
         if (workItemId != null && !workItemId.isBlank()) {
@@ -157,18 +154,18 @@ public class TestRunService {
                 throw new DevMindException(ErrorCode.BAD_REQUEST, "套件 " + sid + " 不属于该项目");
             }
         }
-        // 收尾3：环境补全——缺省 serverId 取环境首台服务器，缺省 baseUrl 取环境变量 baseUrl/BASE_URL
+        // 环境补全（CAP-36）：缺省 agentNodeId 取环境首个节点，缺省 baseUrl 取环境变量 baseUrl/BASE_URL
         String envBaseUrl = null;
         if (environmentId != null) {
             EnvironmentEntity environment = environmentService.requireEnvironment(projectId, environmentId);
-            List<Long> envServers = environmentService.serverIdsOf(environment);
-            if (serverId == null && !envServers.isEmpty()) {
-                serverId = envServers.get(0);
+            List<String> envNodes = environmentService.nodeIdsOf(environment);
+            if ((agentNodeId == null || agentNodeId.isBlank()) && !envNodes.isEmpty()) {
+                agentNodeId = envNodes.get(0);
             }
             Map<String, String> vars = environmentService.variablesOf(environment);
             envBaseUrl = vars.getOrDefault("baseUrl", vars.get("BASE_URL"));
         }
-        String resolvedBaseUrl = resolveBaseUrl(baseUrl, serverId, deploymentId);
+        String resolvedBaseUrl = resolveBaseUrl(baseUrl, deploymentId);
         if ((resolvedBaseUrl == null || resolvedBaseUrl.isBlank()) && envBaseUrl != null && !envBaseUrl.isBlank()) {
             resolvedBaseUrl = envBaseUrl.strip();
         }
@@ -178,7 +175,7 @@ public class TestRunService {
         r.setWorkItemId(workItemId == null || workItemId.isBlank() ? null : workItemId);
         r.setSuiteIdsJson(writeIds(suiteIds));
         r.setDeploymentId(deploymentId);
-        r.setServerId(serverId);
+        r.setAgentNodeId(agentNodeId == null || agentNodeId.isBlank() ? null : agentNodeId.trim());
         r.setEnvironmentId(environmentId);
         r.setBaseUrl(resolvedBaseUrl);
         r.setStatus(TestRunEntity.RUNNING);
@@ -209,7 +206,7 @@ public class TestRunService {
                     }
                     total++;
                     CaseOutcome out = "health".equalsIgnoreCase(c.getKind())
-                            ? runHealth(c, r.getServerId(), r.getBaseUrl())
+                            ? runHealth(c, r)
                             : runHttp(c, r.getBaseUrl());
                     long dur = out.duration();
 
@@ -328,39 +325,64 @@ public class TestRunService {
         }
     }
 
-    /** health 用例：走 CAP-07 健康检查（command 型走 SSH 执行；http 型走健康检查适配器）。 */
-    private CaseOutcome runHealth(TestCaseEntity c, Long serverId, String baseUrl) {
-        if (serverId == null) {
-            return new CaseOutcome("skip", c.getName(), null, "未指定目标服务器（health 用例）", 0);
-        }
+    /**
+     * health 用例（CAP-36）：command 型经 exec 帧下发 runner 节点执行（exit 0 = 通过；
+     * 缺省节点走路由链：项目默认 > 平台默认）；http 型由服务端直接探测 URL 状态码。
+     */
+    private CaseOutcome runHealth(TestCaseEntity c, TestRunEntity run) {
         Map<String, Object> exp = readObjectMap(c.getExpectedJson());
         long start = System.currentTimeMillis();
         try {
-            HealthCheckConfig cfg;
             if ("command".equals(str(exp.get("type")))) {
                 String cmd = str(exp.get("command"));
                 if (cmd == null || cmd.isBlank()) {
                     return new CaseOutcome("skip", c.getName(), null, "health 用例缺 command", 0);
                 }
-                cfg = HealthCheckConfig.command(cmd);
-            } else {
-                String url = str(exp.get("url"));
-                if ((url == null || url.isBlank()) && baseUrl != null) {
-                    String p = c.getPath() == null ? "" : c.getPath();
-                    url = baseUrl.replaceAll("/+$", "") + (p.startsWith("/") ? p : "/" + p);
+                String nodeId = run.getAgentNodeId();
+                if (nodeId == null || nodeId.isBlank()) {
+                    nodeId = agentNodeRouter.route(null,
+                            projectService.requireProject(run.getProjectId()).agentNodeId(), null);
                 }
-                if (url == null || url.isBlank()) {
-                    return new CaseOutcome("skip", c.getName(), null, "health 用例缺 url/baseUrl", 0);
+                StringBuilder buf = new StringBuilder();
+                Consumer<String> sink = line -> {
+                    if (buf.length() < 2000) {
+                        buf.append(line).append('\n');
+                    }
+                };
+                StepResult res = agentNodeRunner.runStep(nodeId, run.getProjectId(), "health-" + run.getId(),
+                        c.getSort() == null ? 0 : c.getSort(),
+                        new StepSpec(c.getName() == null || c.getName().isBlank() ? "health" : c.getName(),
+                                cmd, null, "test"),
+                        Map.of(), null, sink);
+                long dur = System.currentTimeMillis() - start;
+                String out = truncate(buf.toString().strip(), 500);
+                if (res.ok()) {
+                    return new CaseOutcome("pass", c.getName(), out.isBlank() ? "exit=0" : out, null, dur);
                 }
-                int st = exp.get("status") instanceof Number n ? n.intValue() : 200;
-                cfg = HealthCheckConfig.http(url, st);
+                String err = res.error() == null || res.error().isBlank() ? "exit=" + res.exitCode() : res.error();
+                return new CaseOutcome("fail", c.getName(), out, "健康检查未通过: " + err, dur);
             }
-            HealthResult r = serverOpService.healthCheck(serverId, cfg);
+            String url = str(exp.get("url"));
+            if ((url == null || url.isBlank()) && run.getBaseUrl() != null) {
+                String p = c.getPath() == null ? "" : c.getPath();
+                url = run.getBaseUrl().replaceAll("/+$", "") + (p.startsWith("/") ? p : "/" + p);
+            }
+            if (url == null || url.isBlank()) {
+                return new CaseOutcome("skip", c.getName(), null, "health 用例缺 url/baseUrl", 0);
+            }
+            int expected = exp.get("status") instanceof Number n ? n.intValue() : 200;
+            int status;
+            try {
+                status = RestClient.create().get().uri(url).retrieve().toBodilessEntity().getStatusCode().value();
+            } catch (HttpClientErrorException e) {
+                status = e.getStatusCode().value();
+            }
             long dur = System.currentTimeMillis() - start;
-            if (r.ok()) {
-                return new CaseOutcome("pass", c.getName(), r.message(), null, dur);
+            String sum = "HTTP " + status + "（期望 " + expected + "）";
+            if (status == expected) {
+                return new CaseOutcome("pass", c.getName(), sum, null, dur);
             }
-            return new CaseOutcome("fail", c.getName(), r.message(), "健康检查未通过: " + r.message(), dur);
+            return new CaseOutcome("fail", c.getName(), sum, "健康检查未通过: " + sum, dur);
         } catch (Exception e) {
             return new CaseOutcome("fail", c.getName(), null, "健康检查异常: " + rootMessage(e),
                     System.currentTimeMillis() - start);
@@ -389,7 +411,7 @@ public class TestRunService {
             String workItemId = deploymentRepo.findById(evt.deploymentId())
                     .map(d -> d.getWorkItemId()).orElse(null);
             log.info("部署 #{} 成功，自动回归触发（项目 {}，套件 {}）", evt.deploymentId(), evt.projectId(), ids);
-            createInternal(evt.projectId(), workItemId, ids, evt.deploymentId(), evt.serverId(), null, null,
+            createInternal(evt.projectId(), workItemId, ids, evt.deploymentId(), evt.agentNodeId(), null, null,
                     "deploy");
         } catch (Exception e) {
             log.warn("自动回归触发失败: {}", e.getMessage());
@@ -465,35 +487,30 @@ public class TestRunService {
         List<CaseResultView> results = resultRepo.findByRunIdOrderBySortAsc(r.getId()).stream()
                 .map(this::toResultView).toList();
         return new TestRunView(r.getId(), r.getProjectId(), r.getWorkItemId(), suiteIds, r.getDeploymentId(),
-                r.getServerId(), r.getEnvironmentId(), r.getBaseUrl(), r.getStatus(), summary, r.getReportDocId(),
+                r.getAgentNodeId(), r.getEnvironmentId(), r.getBaseUrl(), r.getStatus(), summary, r.getReportDocId(),
                 r.getErrorSummary(),
                 r.getTriggeredBy(), r.getStartedAt(), r.getFinishedAt(), r.getCreatedAt(), results);
     }
 
     // ---------------- 内部 ----------------
 
-    private String resolveBaseUrl(String explicit, Long serverId, Long deploymentId) {
+    /** baseUrl 解析（CAP-36）：显式 > 关联部署的环境变量 baseUrl/BASE_URL（servers 表已下线）。 */
+    private String resolveBaseUrl(String explicit, Long deploymentId) {
         if (explicit != null && !explicit.isBlank()) {
             return explicit.strip();
         }
-        Long sid = serverId != null ? serverId : (deploymentId != null
-                ? deploymentRepo.findById(deploymentId).map(e -> e.getServerId()).orElse(null) : null);
-        return sid == null ? null : serverBaseUrl(sid);
-    }
-
-    private String serverBaseUrl(Long serverId) {
-        ProjectServerEntity s = serverRepo.findById(serverId).orElse(null);
-        if (s == null || s.getAccessConfig() == null || s.getAccessConfig().isBlank()) {
+        if (deploymentId == null) {
+            return null;
+        }
+        var d = deploymentRepo.findById(deploymentId).orElse(null);
+        if (d == null || d.getEnvironmentId() == null) {
             return null;
         }
         try {
-            String cfg = s.getAccessConfig();
-            if (crypto != null && crypto.isEncrypted(cfg)) {
-                cfg = crypto.decryptConfigJson(cfg);
-            }
-            JsonNode node = mapper.readTree(cfg);
-            JsonNode u = node.get("baseUrl");
-            return u == null || u.isNull() || u.asText().isBlank() ? null : u.asText();
+            Map<String, String> vars = environmentService.variablesOf(
+                    environmentService.requireEnvironment(d.getProjectId(), d.getEnvironmentId()));
+            String v = vars.getOrDefault("baseUrl", vars.get("BASE_URL"));
+            return v == null || v.isBlank() ? null : v.strip();
         } catch (Exception e) {
             return null;
         }
@@ -569,7 +586,7 @@ public class TestRunService {
         md.append("- 状态: **").append(r.getStatus()).append("**\n");
         md.append("- 结果: ").append(s.total()).append(" 用例 / ").append(s.passed()).append(" 通过 / ")
                 .append(s.failed()).append(" 失败 / ").append(s.skipped()).append(" 跳过\n");
-        md.append("- 目标: ").append(r.getBaseUrl() == null || r.getBaseUrl().isBlank() ? "(服务器)" : "`" + r.getBaseUrl() + "`").append("\n");
+        md.append("- 目标: ").append(r.getBaseUrl() == null || r.getBaseUrl().isBlank() ? "(节点)" : "`" + r.getBaseUrl() + "`").append("\n");
         if (r.getDeploymentId() != null) {
             md.append("- 关联部署: #").append(r.getDeploymentId()).append("\n");
         }
