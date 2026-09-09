@@ -29,8 +29,8 @@ html, body, #root {
   background: transparent;
   color: #ff7875;
 }
-/* 隐藏图标（含 loading 转圈），表格行内操作只留文字 */
-.ant-table .ant-btn .anticon {
+/* 隐藏图标整个包裹层（.ant-btn-icon 自带 margin，只藏 .anticon 会留空白），表格行内操作只留文字 */
+.ant-table .ant-btn .ant-btn-icon {
   display: none;
 }
 
