@@ -11,15 +11,23 @@
     </parent>
     <artifactId>devmind-execution</artifactId>
     <name>devmind-execution</name>
-    <description>统一执行底座：步骤模型/执行引擎/本地与远程 Runner/统一 WS 日志枢纽（P0-1）</description>
+    <description>统一执行底座：步骤模型/执行引擎/节点 Runner/命令模板白名单/执行审计/统一 WS 日志枢纽（P0-1，CAP-36 起承接原 CAP-07 模板与审计）</description>
     <dependencies>
         <dependency>
             <groupId>com.devmind</groupId>
             <artifactId>devmind-common</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.devmind</groupId>
-            <artifactId>devmind-server-adapter</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework</groupId>
