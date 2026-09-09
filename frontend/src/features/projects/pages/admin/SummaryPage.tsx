@@ -6,6 +6,7 @@ import { useParams } from 'react-router-dom'
 import { getSummary, refreshSummary, saveSummary } from '../../api'
 import type { ContextSummary } from '../../types'
 import { fmtTime } from '../../../../shared/utils/format'
+import { showError } from '../../../../shared/utils/showError'
 
 export default function SummaryPage() {
   const { id = '' } = useParams<{ id: string }>()
@@ -34,7 +35,7 @@ export default function SummaryPage() {
       setText(s.summary)
       message.success('已重新扫描生成摘要')
     } catch (e) {
-      message.error(`生成失败：${(e as Error).message}`)
+      showError(e, '生成失败')
     } finally {
       setBusy(false)
     }
@@ -47,7 +48,7 @@ export default function SummaryPage() {
       setSummary(s)
       message.success('已保存（人工修正）')
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     } finally {
       setBusy(false)
     }

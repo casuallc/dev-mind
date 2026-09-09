@@ -29,6 +29,7 @@ import { KIND_LABEL, STATUS_LABEL } from '../types'
 import type { DocInput, DocKind, DocMeta, DocStatus, DocTemplate } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 const kindTag = (k: DocKind) => <Tag color={k === 'requirement' ? 'blue' : k === 'design' ? 'geekblue' : k === 'api-suite' ? 'purple' : 'cyan'}>{KIND_LABEL[k] ?? k}</Tag>
 const statusTag = (s: DocStatus) => (
@@ -57,7 +58,7 @@ export default function DocsPage() {
         setDocs(await listDocs({ kind: kind || undefined, status: status || undefined }))
       }
     } catch (e) {
-      message.error(`加载文档失败：${(e as Error).message}`)
+      showError(e, '加载文档失败')
     } finally {
       setLoading(false)
     }
@@ -99,7 +100,7 @@ export default function DocsPage() {
       load()
       navigate(`/admin/docs/${created.id}`)
     } catch (e) {
-      message.error(`创建失败：${(e as Error).message}`)
+      showError(e, '创建失败')
     }
   }
 
@@ -109,7 +110,7 @@ export default function DocsPage() {
       const r = await pushDocs()
       message.success(r.message)
     } catch (e) {
-      message.error(`推送失败：${(e as Error).message}`)
+      showError(e, '推送失败')
     } finally {
       setPushing(false)
     }

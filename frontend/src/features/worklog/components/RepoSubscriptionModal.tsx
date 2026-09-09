@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import { listRepos, setSubscription } from '../api'
 import type { WorklogRepo } from '../types'
 import { isAdmin } from '../../auth/authStore'
+import { showError } from '../../../shared/utils/showError'
 
 interface Props {
   open: boolean
@@ -23,7 +24,7 @@ export default function RepoSubscriptionModal({ open, onCancel }: Props) {
     setLoading(true)
     listRepos()
       .then(setRows)
-      .catch((e) => message.error(`加载仓库失败: ${e.message}`))
+      .catch((e) => showError(e, '加载仓库失败'))
       .finally(() => setLoading(false))
   }
 
@@ -38,7 +39,7 @@ export default function RepoSubscriptionModal({ open, onCancel }: Props) {
       setRows(rows.map((x) => (x.id === r.id ? { ...x, subscribed: checked } : x)))
       message.success(checked ? `已勾选「${r.name}」，将参与你的 git 扫描` : `已取消勾选「${r.name}」`)
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '操作失败')
+      showError(e, '操作失败')
     }
   }
 

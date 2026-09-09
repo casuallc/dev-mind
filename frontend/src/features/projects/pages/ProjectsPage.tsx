@@ -1,7 +1,7 @@
 // CAP-02 项目列表（业务视图，全角色只读）：表格 + 状态筛选 + 「进入」= 切换为当前项目并回概览。
 // 入口已移出侧边栏，仅从项目切换器底部「查看全部项目」进入；增删改在后台 /admin/projects。
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Card, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Button, Card, Select, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -10,6 +10,7 @@ import { setCurrentProject } from '../../../app/currentProjectStore'
 import type { Project } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 const STATUS_OPTIONS = [
   { value: 'ACTIVE', label: 'ACTIVE', color: 'green' },
@@ -27,7 +28,7 @@ export default function ProjectsPage() {
     try {
       setProjects(await listProjects(st ?? status))
     } catch (e) {
-      message.error(`加载项目失败：${(e as Error).message}`)
+      showError(e, '加载项目失败')
     } finally {
       setLoading(false)
     }

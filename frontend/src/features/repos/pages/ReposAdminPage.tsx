@@ -24,6 +24,7 @@ import { CLONE_STATUS_COLOR } from '../types'
 import { listIntegrations } from '../../integrations/api'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 /**
  * CAP-29 全局代码仓库登记（仅 ADMIN，/admin/repos）：平台级独立资源，项目仓库只关联不复制。
@@ -42,7 +43,7 @@ export default function ReposAdminPage() {
     setLoading(true)
     listRepos()
       .then(setRows)
-      .catch((e) => message.error(`加载仓库失败: ${e.message}`))
+      .catch((e) => showError(e, '加载仓库失败'))
       .finally(() => setLoading(false))
   }
 
@@ -99,7 +100,7 @@ export default function ReposAdminPage() {
       form.resetFields()
       reload()
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '保存失败')
+      showError(e, '保存失败')
     }
   }
 
@@ -109,7 +110,7 @@ export default function ReposAdminPage() {
       message.success(`已触发「${r.name}」抓取`)
       setTimeout(reload, 1500)
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '抓取失败')
+      showError(e, '抓取失败')
     }
   }
 
@@ -119,7 +120,7 @@ export default function ReposAdminPage() {
       message.success(`已触发「${r.name}」重新克隆`)
       setTimeout(reload, 1500)
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '操作失败')
+      showError(e, '操作失败')
     }
   }
 
@@ -255,7 +256,7 @@ export default function ReposAdminPage() {
                         message.success('已删除')
                         reload()
                       })
-                      .catch((e) => message.error(e instanceof Error ? e.message : '删除失败'))
+                      .catch((e) => showError(e, '删除失败'))
                   }
                 >
                   <Button size="small" danger>

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { importGit, previewGit } from '../api'
 import type { GitCommit, GitScanRepoDiag } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { showError } from '../../../shared/utils/showError'
 
 interface Props {
   open: boolean
@@ -51,7 +52,7 @@ export default function GitImportModal({ open, onCancel, onImported }: Props) {
         // 默认勾选未导入的
         setSelected(new Set(res.commits.filter((c) => !c.alreadyImported).map((c) => c.sha)))
       })
-      .catch((e) => message.error(`扫描失败: ${e.message}`))
+      .catch((e) => showError(e, '扫描失败'))
       .finally(() => setLoading(false))
   }
 
@@ -81,7 +82,7 @@ export default function GitImportModal({ open, onCancel, onImported }: Props) {
       onImported()
       onCancel()
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '导入失败')
+      showError(e, '导入失败')
     } finally {
       setImporting(false)
     }

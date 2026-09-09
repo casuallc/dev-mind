@@ -49,6 +49,7 @@ import ReportEditor from '../components/ReportEditor'
 import WeekDayStrip from '../components/WeekDayStrip'
 import RecentWeekStrip from '../components/RecentWeekStrip'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 type View = 'entries' | 'daily' | 'weekly'
 
@@ -107,7 +108,7 @@ export default function WorklogPage() {
     const to = dayjs(entriesWeekStartStr).add(6, 'day').format('YYYY-MM-DD')
     listEntries(entriesWeekStartStr, to, 0, 200, keyword || undefined)
       .then((r) => setWeekEntries(r.items))
-      .catch((e) => message.error(`加载条目失败: ${e.message}`))
+      .catch((e) => showError(e, '加载条目失败'))
       .finally(() => setLoading(false))
   }, [entriesWeekStartStr, keyword])
 
@@ -135,7 +136,7 @@ export default function WorklogPage() {
         })
         setDailyWeek(map)
       })
-      .catch((e) => message.error(`加载日报失败: ${e.message}`))
+      .catch((e) => showError(e, '加载日报失败'))
       .finally(() => setLoading(false))
   }, [dailyWeekStartStr])
 
@@ -149,14 +150,14 @@ export default function WorklogPage() {
         })
         setRecentWeeks(map)
       })
-      .catch((e) => message.error(`加载最近周报失败: ${e.message}`))
+      .catch((e) => showError(e, '加载最近周报失败'))
   }, [weeksBack])
 
   const loadWeekly = useCallback(() => {
     setLoading(true)
     getWeekly(weekStartStr)
       .then(setWeekly)
-      .catch((e) => message.error(`加载周报失败: ${e.message}`))
+      .catch((e) => showError(e, '加载周报失败'))
       .finally(() => setLoading(false))
   }, [weekStartStr])
 
@@ -235,7 +236,7 @@ export default function WorklogPage() {
       // 超时/失败的真实原因由后端落通知中心（P0），此处引导查看
       message.warning('生成超时或失败，失败原因与结果请查看通知中心')
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '生成失败')
+      showError(e, '生成失败')
     } finally {
       setGenerating(false)
       reload()
@@ -251,7 +252,7 @@ export default function WorklogPage() {
       setEditOpen(false)
       loadEntries()
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '保存失败')
+      showError(e, '保存失败')
     } finally {
       setSaving(false)
     }
@@ -265,7 +266,7 @@ export default function WorklogPage() {
         if (dayEntries.length === 1 && page > 1) setPage(page - 1)
         loadEntries()
       })
-      .catch((err) => message.error(err instanceof Error ? err.message : '删除失败'))
+      .catch((err) => showError(err, '删除失败'))
   }
 
   const openSettings = async () => {
@@ -278,7 +279,7 @@ export default function WorklogPage() {
       })
       setSettingsOpen(true)
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '加载设置失败')
+      showError(e, '加载设置失败')
     }
   }
 
@@ -293,7 +294,7 @@ export default function WorklogPage() {
       message.success('设置已保存')
       setSettingsOpen(false)
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '保存失败')
+      showError(e, '保存失败')
     }
   }
 

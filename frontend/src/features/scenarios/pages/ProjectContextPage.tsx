@@ -2,12 +2,13 @@
 // （知识条目 / 文档 / Skills 三视图，GET /api/projects/{id}/context-assets 聚合）。
 // 多视图切换走 Card title 里的 Segmented（布局约定：禁 Card 内套 Tabs）；维护请去 /admin 对应管理页。
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Card, Segmented, Space, Table, Tag, Typography, message } from 'antd'
+import { Button, Card, Segmented, Space, Table, Tag, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { listContextAssets } from '../api'
 import type { AssetGroup, ProjectAssetItem } from '../types'
 import { useCurrentProject } from '../../../app/useCurrentProject'
 import { pageCardBodyScrollStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 /** kind → 展示名 + 说明；数组顺序即 Segmented 视图顺序；未知 kind 用兜底配置排在最后 */
 const GROUP_META: Array<{ kind: string; title: string; hint: string }> = [
@@ -54,7 +55,7 @@ export default function ProjectContextPage() {
     try {
       setGroups(await listContextAssets(projectId))
     } catch (e) {
-      message.error(`加载上下文资产失败：${(e as Error).message}`)
+      showError(e, '加载上下文资产失败')
     } finally {
       setLoading(false)
     }

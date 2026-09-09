@@ -8,6 +8,7 @@ import { deleteDesign, listDesigns, updateDesignStatus } from '../../api'
 import { getDoc } from '../../../docs/api'
 import type { Design, DesignStatus } from '../../types'
 import { fmtTime } from '../../../../shared/utils/format'
+import { showError } from '../../../../shared/utils/showError'
 
 function designStatusColor(s: DesignStatus): string {
   switch (s) {
@@ -31,7 +32,7 @@ export default function DesignsTab({ projectId, requirementId }: {
     try {
       setDesigns(await listDesigns(projectId, requirementId))
     } catch (e) {
-      message.error(`加载方案失败：${(e as Error).message}`)
+      showError(e, '加载方案失败')
     } finally {
       setLoading(false)
     }
@@ -47,7 +48,7 @@ export default function DesignsTab({ projectId, requirementId }: {
       message.success(`方案 v${d.version} → ${status}`)
       await load()
     } catch (e) {
-      message.error((e as Error).message)
+      showError(e)
     }
   }
 
@@ -60,7 +61,7 @@ export default function DesignsTab({ projectId, requirementId }: {
       const doc = await getDoc(d.docId)
       setPreview({ title: `方案 v${d.version} · ${doc.title}`, content: doc.contentMd || '（空）' })
     } catch (e) {
-      message.error(`读取方案文档失败：${(e as Error).message}`)
+      showError(e, '读取方案文档失败')
     }
   }
 

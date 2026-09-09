@@ -35,6 +35,7 @@ import {
 } from '../api'
 import type { ExternalProject, Integration, JiraSyncConfig, JiraSyncConfigInput, JiraSyncPreview } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { showError } from '../../../shared/utils/showError'
 
 interface Props {
   projectId: string
@@ -69,7 +70,7 @@ export default function JiraSyncTab({ projectId }: Props) {
       setConfigs(cfgs)
       setJiraIntegrations(integrations.filter((i) => i.type === 'JIRA'))
     } catch (e) {
-      message.error(`加载 Jira 同步配置失败：${(e as Error).message}`)
+      showError(e, '加载 Jira 同步配置失败')
     } finally {
       setLoading(false)
     }
@@ -157,7 +158,7 @@ export default function JiraSyncTab({ projectId }: Props) {
       setEditOpen(false)
       reload()
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     } finally {
       setSaving(false)
     }
@@ -176,7 +177,7 @@ export default function JiraSyncTab({ projectId }: Props) {
       }
       reload()
     } catch (e) {
-      message.error(`同步失败：${(e as Error).message}`)
+      showError(e, '同步失败')
     } finally {
       setRunningId(null)
     }
@@ -188,7 +189,7 @@ export default function JiraSyncTab({ projectId }: Props) {
       message.success(enabled ? '已启用轮询' : '已暂停轮询')
       reload()
     } catch (e) {
-      message.error(`操作失败：${(e as Error).message}`)
+      showError(e, '操作失败')
     }
   }
 
@@ -198,7 +199,7 @@ export default function JiraSyncTab({ projectId }: Props) {
       message.success('已删除（已导入的需求与链接保留）')
       reload()
     } catch (e) {
-      message.error(`删除失败：${(e as Error).message}`)
+      showError(e, '删除失败')
     }
   }
 

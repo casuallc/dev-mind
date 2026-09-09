@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Button, Space, Table, Tag, Typography, message } from 'antd'
+import { Button, Space, Table, Tag, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { listConnLogs } from '../api'
 import type { AgentConnLog, ConnLogEvent } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { showError } from '../../../shared/utils/showError'
 
 const eventColor: Record<ConnLogEvent, string> = {
   CONNECT: 'green',
@@ -29,7 +30,7 @@ export default function ConnLogsPanel() {
     setLoading(true)
     listConnLogs()
       .then(setLogs)
-      .catch((e) => message.error(`加载连接日志失败: ${e.message}`))
+      .catch((e) => showError(e, '加载连接日志失败'))
       .finally(() => setLoading(false))
   }
 

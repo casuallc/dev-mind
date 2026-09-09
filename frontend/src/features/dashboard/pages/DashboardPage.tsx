@@ -1,6 +1,6 @@
 // 指挥中心（CAP-16）：30 秒看全局——需求状态分布 / 活跃会话 / 待办确认 / 最近失败，10s 轮询。
 import { useCallback, useEffect, useState } from 'react'
-import { Badge, Button, Card, Col, Empty, List, Row, Space, Statistic, Tag, Typography, message } from 'antd'
+import { Badge, Button, Card, Col, Empty, List, Row, Space, Statistic, Tag, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { getDashboard } from '../api'
@@ -8,6 +8,7 @@ import { setCurrentProject } from '../../../app/currentProjectStore'
 import type { DashboardView, FailureItem } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageRootScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 const REQ_STATUS: { key: string; label: string; color: string }[] = [
   { key: 'DRAFT', label: '草稿', color: 'default' },
@@ -42,7 +43,7 @@ export default function DashboardPage() {
     try {
       setData(await getDashboard())
     } catch (e) {
-      message.error(`加载指挥中心失败：${(e as Error).message}`)
+      showError(e, '加载指挥中心失败')
     } finally {
       setLoading(false)
     }

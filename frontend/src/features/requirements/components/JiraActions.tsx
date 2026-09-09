@@ -8,6 +8,7 @@ import { ClockCircleOutlined, DownOutlined, SwapOutlined } from '@ant-design/ico
 import type { MenuProps } from 'antd'
 import { listJiraTransitions, logJiraWork, transitionJiraIssue } from '../api'
 import type { JiraTransition, Requirement } from '../types'
+import { showError } from '../../../shared/utils/showError'
 
 export default function JiraActions({ requirement, onChanged }: {
   requirement: Requirement
@@ -52,7 +53,7 @@ export default function JiraActions({ requirement, onChanged }: {
           message.success(`${requirement.externalKey} 已执行「${t.name}」${r.remoteStatus ? ` → ${r.remoteStatus}` : ''}`)
           onChanged()
         } catch (e) {
-          message.error((e as Error).message)
+          showError(e)
         } finally {
           setBusy(false)
         }
@@ -76,7 +77,7 @@ export default function JiraActions({ requirement, onChanged }: {
       setWorklogOpen(false)
       onChanged()
     } catch (e) {
-      message.error((e as Error).message)
+      showError(e)
     } finally {
       setBusy(false)
     }

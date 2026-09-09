@@ -22,6 +22,7 @@ import SkillFilesDrawer from '../components/SkillFilesDrawer'
 import SkillImportModal from '../components/SkillImportModal'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 const scopeTag = (s: string) =>
   s === 'GLOBAL' ? <Tag color="blue">全局</Tag> : <Tag color="purple">项目</Tag>
@@ -65,7 +66,7 @@ export default function SkillsPage() {
       setItems(r.items)
       setTotal(r.total)
     } catch (e) {
-      message.error(`加载 skill 失败：${(e as Error).message}`)
+      showError(e, '加载 skill 失败')
     } finally {
       setLoading(false)
     }
@@ -89,7 +90,7 @@ export default function SkillsPage() {
       setEditing(await getSkill(s.id))
       setFormOpen(true)
     } catch (e) {
-      message.error(`加载详情失败：${(e as Error).message}`)
+      showError(e, '加载详情失败')
     }
   }
 
@@ -99,7 +100,7 @@ export default function SkillsPage() {
       message.success(s.status === 'ACTIVE' ? '已停用' : '已启用')
       load()
     } catch (e) {
-      message.error(`操作失败：${(e as Error).message}`)
+      showError(e, '操作失败')
     }
   }
 
@@ -117,7 +118,7 @@ export default function SkillsPage() {
           message.success('已删除')
           load()
         } catch (e) {
-          message.error(`删除失败：${(e as Error).message}`)
+          showError(e, '删除失败')
         }
       },
     })

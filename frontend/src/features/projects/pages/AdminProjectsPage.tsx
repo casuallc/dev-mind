@@ -13,6 +13,7 @@ import { CLONE_STATUS_COLOR } from '../components/CloneLogDrawer'
 import type { Project } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 const STATUS_OPTIONS = [
   { value: 'ACTIVE', label: 'ACTIVE', color: 'green' },
@@ -37,7 +38,7 @@ export default function AdminProjectsPage() {
     try {
       setProjects(await listProjects(st ?? status))
     } catch (e) {
-      message.error(`加载项目失败：${(e as Error).message}`)
+      showError(e, '加载项目失败')
     } finally {
       setLoading(false)
     }
@@ -69,7 +70,7 @@ export default function AdminProjectsPage() {
       setOnboardDesc('')
       navigate(`/sessions/${sessionId}`)
     } catch (e) {
-      message.error(`发起失败：${(e as Error).message}`)
+      showError(e, '发起失败')
     } finally {
       setOnboarding(false)
     }
@@ -89,7 +90,7 @@ export default function AdminProjectsPage() {
           message.success('已删除')
           load()
         } catch (e) {
-          message.error(`删除失败：${(e as Error).message}`)
+          showError(e, '删除失败')
         }
       },
     })

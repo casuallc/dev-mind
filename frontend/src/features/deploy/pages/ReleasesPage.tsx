@@ -26,6 +26,7 @@ import { fmtTime } from '../../../shared/utils/format'
 import { STATUS_COLOR } from '../constants'
 import ReleaseDetailDrawer from '../components/ReleaseDetailDrawer'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 interface CreateValues {
   buildId?: number
@@ -76,7 +77,7 @@ function ReleaseCenter({ id }: { id: string }) {
       message.success(`发版 v${r.version} 已开始执行`)
       load()
     } catch (e) {
-      message.error(`创建失败：${(e as Error).message}`)
+      showError(e, '创建失败')
     } finally {
       setCreateBusy(false)
     }

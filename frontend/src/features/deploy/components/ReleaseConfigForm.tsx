@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { SaveOutlined } from '@ant-design/icons'
 import { getReleaseConfig, saveReleaseConfig } from '../api'
 import type { ReleaseConfigInput } from '../types'
+import { showError } from '../../../shared/utils/showError'
 
 export default function ReleaseConfigForm({ id }: { id: string }) {
   const [form] = Form.useForm<ReleaseConfigInput>()
@@ -30,7 +31,7 @@ export default function ReleaseConfigForm({ id }: { id: string }) {
       await saveReleaseConfig(id, v)
       message.success('发版配置已保存')
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     } finally {
       setBusy(false)
     }

@@ -27,6 +27,7 @@ import type { GlobalRepo, ProjectRepo, ProjectRepoInput } from '../../types'
 import CloneLogDrawer, { CLONE_STATUS_COLOR } from '../../components/CloneLogDrawer'
 import CloneAuthHint from '../../components/CloneAuthHint'
 import { useGitIntegrations } from '../../hooks/useGitIntegrations'
+import { showError } from '../../../../shared/utils/showError'
 
 const ROLE_OPTIONS = ['CODE', 'DOCS', 'CONFIG']
 
@@ -54,7 +55,7 @@ export default function ReposPage() {
     try {
       setRepos(await listRepos(id))
     } catch (e) {
-      message.error(`加载仓库失败：${(e as Error).message}`)
+      showError(e, '加载仓库失败')
     } finally {
       setLoading(false)
     }
@@ -145,7 +146,7 @@ export default function ReposPage() {
       await reload()
       message.success('已保存')
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     }
   }
 
@@ -155,7 +156,7 @@ export default function ReposPage() {
       message.success(`已触发克隆：${r.name}`)
       await reload()
     } catch (e) {
-      message.error(`触发克隆失败：${(e as Error).message}`)
+      showError(e, '触发克隆失败')
     }
   }
 
@@ -173,7 +174,7 @@ export default function ReposPage() {
           reloadProject()
           message.success('已切换主库')
         } catch (e) {
-          message.error((e as Error).message)
+          showError(e)
         }
       },
     })
@@ -193,7 +194,7 @@ export default function ReposPage() {
           await reload()
           message.success('已移除')
         } catch (e) {
-          message.error((e as Error).message)
+          showError(e)
         }
       },
     })

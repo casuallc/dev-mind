@@ -24,6 +24,7 @@ import type { AgentNode } from '../../agent/types'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
+import { showError } from '../../../shared/utils/showError'
 
 // 活跃在前 + 创建时间倒序（与 SessionListPane 一致，用于自动选中第一个）
 function sortForBoard(list: SessionSummary[]): SessionSummary[] {
@@ -53,7 +54,7 @@ export default function SessionsBoard() {
     try {
       setSessions(await listSessions(projectId ?? undefined))
     } catch (e) {
-      message.error(`加载会话失败：${(e as Error).message}`)
+      showError(e, '加载会话失败')
     } finally {
       setLoading(false)
     }
@@ -122,7 +123,7 @@ export default function SessionsBoard() {
           if (r.id === selectedId) setSelectedId(undefined)
           load()
         } catch (e) {
-          message.error(`删除失败：${(e as Error).message}`)
+          showError(e, '删除失败')
         }
       },
     })

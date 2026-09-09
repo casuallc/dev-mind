@@ -26,6 +26,7 @@ import {
   updateBuildStep,
 } from '../../api'
 import type { BuildStep, BuildStepInput } from '../../types'
+import { showError } from '../../../../shared/utils/showError'
 
 const LOCATION_OPTIONS = ['LOCAL', 'REMOTE']
 
@@ -42,7 +43,7 @@ export default function BuildStepsPage() {
     try {
       setSteps(await listBuildSteps(id))
     } catch (e) {
-      message.error(`加载构建步骤失败：${(e as Error).message}`)
+      showError(e, '加载构建步骤失败')
     } finally {
       setLoading(false)
     }
@@ -71,7 +72,7 @@ export default function BuildStepsPage() {
       await reload()
       message.success('已保存')
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     }
   }
 

@@ -13,6 +13,7 @@ import {
   updateWorkItemStatus,
 } from '../api'
 import type { WorkItem, WorkItemInput, WorkItemStatus, WorkItemType } from '../types'
+import { showError } from '../../../shared/utils/showError'
 
 const WI_STATUS_FLOW: WorkItemStatus[] = ['TODO', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED']
 const WI_TYPES: WorkItemType[] = ['DESIGN', 'DEVELOPMENT', 'TEST', 'DOCUMENT', 'REVIEW']
@@ -69,7 +70,7 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, lock
       message.success('已保存')
       await onChanged()
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     }
   }
 
@@ -86,7 +87,7 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, lock
           await onChanged()
           message.success(`${w.code} → ${status}`)
         } catch (e) {
-          message.error((e as Error).message)
+          showError(e)
         }
       },
     })
@@ -122,7 +123,7 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, lock
           message.success(`${w.code} 会话已启动`)
           navigate(`/sessions/${s.id}`)
         } catch (e) {
-          message.error((e as Error).message)
+          showError(e)
         }
       },
     })

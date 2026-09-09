@@ -3,6 +3,7 @@ import { RobotOutlined, CheckOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { fmtTime } from '../../../shared/utils/format'
 import Markdown from '../../../shared/components/Markdown'
+import { showError } from '../../../shared/utils/showError'
 
 interface Props {
   /** 报告主键（无报告时 undefined） */
@@ -50,7 +51,7 @@ export default function ReportEditor({
       await onSave(values)
       message.success('已保存')
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '保存失败')
+      showError(e, '保存失败')
     } finally {
       setSaving(false)
     }

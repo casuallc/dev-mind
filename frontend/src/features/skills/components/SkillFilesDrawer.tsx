@@ -14,6 +14,7 @@ import {
 } from '../api'
 import type { Skill, SkillFileMeta } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { showError } from '../../../shared/utils/showError'
 
 // UTF-8 安全的 Base64 编解码（内容可能含中文，不能直接用 btoa/atob）
 const b64encode = (text: string) => {
@@ -59,7 +60,7 @@ export default function SkillFilesDrawer({ open, skill, onClose }: {
     try {
       setFiles(await listSkillFiles(skill.id))
     } catch (e) {
-      message.error(`加载附件失败：${(e as Error).message}`)
+      showError(e, '加载附件失败')
     } finally {
       setLoading(false)
     }
@@ -83,7 +84,7 @@ export default function SkillFilesDrawer({ open, skill, onClose }: {
       form.setFieldsValue({ path: f.path, content: b64decode(detail.contentBase64) })
       setEditOpen(true)
     } catch (e) {
-      message.error(`读取附件失败：${(e as Error).message}`)
+      showError(e, '读取附件失败')
     }
   }
 
@@ -100,7 +101,7 @@ export default function SkillFilesDrawer({ open, skill, onClose }: {
       setEditOpen(false)
       load()
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     }
   }
 
@@ -118,7 +119,7 @@ export default function SkillFilesDrawer({ open, skill, onClose }: {
           message.success('已删除')
           load()
         } catch (e) {
-          message.error(`删除失败：${(e as Error).message}`)
+          showError(e, '删除失败')
         }
       },
     })
@@ -136,7 +137,7 @@ export default function SkillFilesDrawer({ open, skill, onClose }: {
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) {
-      message.error(`下载失败：${(e as Error).message}`)
+      showError(e, '下载失败')
     }
   }
 
@@ -200,7 +201,7 @@ export default function SkillFilesDrawer({ open, skill, onClose }: {
                     message.success(`已上传 ${file.name}`)
                     load()
                   } catch (e) {
-                    message.error(`上传失败：${(e as Error).message}`)
+                    showError(e, '上传失败')
                   }
                 }
                 reader.readAsDataURL(file)

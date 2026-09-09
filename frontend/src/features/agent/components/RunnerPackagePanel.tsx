@@ -17,6 +17,7 @@ import {
 } from '../api'
 import type { RunnerPackage } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { showError } from '../../../shared/utils/showError'
 
 /**
  * FR-09「Runner 包」页签：服务端托管的 devmind-agent-runner.jar（全局单份，上传即替换）。
@@ -47,7 +48,7 @@ export default function RunnerPackagePanel() {
       setFile(null)
       reload()
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '上传失败')
+      showError(e, '上传失败')
     } finally {
       setUploading(false)
     }
@@ -115,7 +116,7 @@ export default function RunnerPackagePanel() {
           <Button
             icon={<DownloadOutlined />}
             disabled={!pkg}
-            onClick={() => downloadRunnerPackage().catch((e) => message.error(e.message))}
+            onClick={() => downloadRunnerPackage().catch((e) => showError(e))}
           >
             下载当前包
           </Button>

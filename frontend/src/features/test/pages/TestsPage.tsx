@@ -51,6 +51,7 @@ import CaseEditorDrawer from '../components/CaseEditorDrawer'
 import RunDetailDrawer from '../components/RunDetailDrawer'
 import IssuesTable from '../components/IssuesTable'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 export default function TestsPage() {
   const projectId = useCurrentProjectId()
@@ -105,7 +106,7 @@ function TestCenter({ id }: { id: string }) {
       setServers(sv)
       setEnvironments(ev)
     } catch (e) {
-      message.error(`加载失败：${(e as Error).message}`)
+      showError(e, '加载失败')
     } finally {
       setLoading(false)
     }
@@ -122,7 +123,7 @@ function TestCenter({ id }: { id: string }) {
       message.success(`已从 OpenAPI 生成套件「${s.name}」（${s.caseCount} 个用例）`)
       setSuites(await listSuites(id))
     } catch (e) {
-      message.error(`生成失败：${(e as Error).message}`)
+      showError(e, '生成失败')
     }
   }
 
@@ -134,7 +135,7 @@ function TestCenter({ id }: { id: string }) {
       setSuites(await listSuites(id))
       message.success('套件已创建')
     } catch (e) {
-      message.error((e as Error).message)
+      showError(e)
     }
   }
 
@@ -160,7 +161,7 @@ function TestCenter({ id }: { id: string }) {
       setSuites(await listSuites(id))
       message.success(`已沉淀为 api-suite 文档${updated.docId ? `（#${updated.docId}）` : ''}`)
     } catch (e) {
-      message.error(`沉淀失败：${(e as Error).message}`)
+      showError(e, '沉淀失败')
     }
   }
 
@@ -169,7 +170,7 @@ function TestCenter({ id }: { id: string }) {
     try {
       setEditSuite(await getSuite(s.id))
     } catch (e) {
-      message.error(`加载套件失败：${(e as Error).message}`)
+      showError(e, '加载套件失败')
     }
   }
 
@@ -192,7 +193,7 @@ function TestCenter({ id }: { id: string }) {
       refresh()
       message.success(`测试运行 #${r.id} 已创建`)
     } catch (e) {
-      message.error((e as Error).message)
+      showError(e)
     } finally {
       setCreating(false)
     }
@@ -264,7 +265,7 @@ function TestCenter({ id }: { id: string }) {
       const text = title === '报告' ? await getRunReport(runId) : await getRunLogs(runId)
       setTextModal({ title: `测试 #${runId} ${title}`, text })
     } catch (e) {
-      message.error(`读取失败：${(e as Error).message}`)
+      showError(e, '读取失败')
     }
   }
 
@@ -272,7 +273,7 @@ function TestCenter({ id }: { id: string }) {
     try {
       setIssuesModal(await getIssues(runId))
     } catch (e) {
-      message.error(`生成缺陷线索失败：${(e as Error).message}`)
+      showError(e, '生成缺陷线索失败')
     }
   }
 

@@ -33,6 +33,7 @@ import { listProjects } from '../../projects/api'
 import { listAgentNodes } from '../../agent/api'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardBodyScrollStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 const SOURCE_LABEL: Record<string, string> = {
   scenario: '场景绑定',
@@ -62,7 +63,7 @@ export default function ScenariosPage() {
     try {
       setRows(await listScenarios())
     } catch (e) {
-      message.error(`加载场景失败：${(e as Error).message}`)
+      showError(e, '加载场景失败')
     } finally {
       setLoading(false)
     }
@@ -133,7 +134,7 @@ export default function ScenariosPage() {
       setDrawerOpen(false)
       load()
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     } finally {
       setSaving(false)
     }
@@ -155,7 +156,7 @@ export default function ScenariosPage() {
           setDrawerOpen(false)
           load()
         } catch (e) {
-          message.error(`删除失败：${(e as Error).message}`)
+          showError(e, '删除失败')
         }
       },
     })
@@ -178,7 +179,7 @@ export default function ScenariosPage() {
         }),
       )
     } catch (e) {
-      message.error(`预览失败：${(e as Error).message}`)
+      showError(e, '预览失败')
     } finally {
       setPreviewLoading(false)
     }

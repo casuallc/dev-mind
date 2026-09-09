@@ -6,6 +6,7 @@ import { PlusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { confirmSplit, getSplitDraft } from '../../api'
 import type { SplitDraftItem, WorkItemType } from '../../types'
+import { showError } from '../../../../shared/utils/showError'
 
 const WI_TYPES: WorkItemType[] = ['DESIGN', 'DEVELOPMENT', 'TEST', 'DOCUMENT', 'REVIEW']
 
@@ -32,7 +33,7 @@ export default function SplitDraftDrawer({ projectId, requirementId, open, onClo
       setSessionId(draft.sessionId)
       setRows(draft.items.map((it, i) => ({ ...it, key: i, dependsOn: it.dependsOn ?? [] })))
     } catch (e) {
-      message.error(`读取拆分草稿失败：${(e as Error).message}`)
+      showError(e, '读取拆分草稿失败')
     } finally {
       setLoading(false)
     }
@@ -117,7 +118,7 @@ export default function SplitDraftDrawer({ projectId, requirementId, open, onClo
       onClose()
       onConfirmed()
     } catch (e) {
-      message.error((e as Error).message)
+      showError(e)
     } finally {
       setSaving(false)
     }

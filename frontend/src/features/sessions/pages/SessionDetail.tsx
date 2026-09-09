@@ -37,6 +37,7 @@ import SessionDiffModal from '../components/SessionDiffModal'
 import SedimentExperienceModal from '../../knowledge/components/SedimentExperienceModal'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageRootScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 export default function SessionDetail() {
   const { id } = useParams<{ id: string }>()
@@ -53,7 +54,7 @@ export default function SessionDetail() {
     try {
       setSession(await getSession(id))
     } catch (e) {
-      message.error(`加载会话失败：${(e as Error).message}`)
+      showError(e, '加载会话失败')
     } finally {
       setLoading(false)
     }
@@ -91,7 +92,7 @@ export default function SessionDetail() {
           message.success('已删除 worktree')
           setSession(await getSession(id))
         } catch (e) {
-          message.error(`删除失败：${(e as Error).message}`)
+          showError(e, '删除失败')
         }
       },
     })

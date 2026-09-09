@@ -7,6 +7,7 @@ import { readAll } from '../api'
 import { executeNotificationAction } from '../actions'
 import { LEVEL_COLOR } from '../types'
 import type { AppNotification } from '../types'
+import { showError } from '../../../shared/utils/showError'
 
 export default function NotificationBell() {
   const { notifications, connected } = useNotifications()
@@ -18,7 +19,7 @@ export default function NotificationBell() {
       const label = await executeNotificationAction(n, action, { navigate })
       message.success(`${label} 已执行`)
     } catch (e) {
-      message.error(`动作失败：${(e as Error).message}`)
+      showError(e, '动作失败')
     }
   }
 
@@ -28,7 +29,7 @@ export default function NotificationBell() {
       markAllReadLocal()
       message.success('已全部标记为已读')
     } catch (e) {
-      message.error(`操作失败：${(e as Error).message}`)
+      showError(e, '操作失败')
     }
   }
 

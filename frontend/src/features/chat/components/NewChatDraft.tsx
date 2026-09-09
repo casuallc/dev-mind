@@ -9,6 +9,7 @@ import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
 import { listScenarios } from '../../scenarios/api'
 import type { Scenario } from '../../scenarios/types'
+import { showError } from '../../../shared/utils/showError'
 
 const DEFAULTS = { permissionMode: 'acceptEdits' }
 
@@ -67,7 +68,7 @@ export default function NewChatDraft({
       form.resetFields()
       onCreated(c)
     } catch (e) {
-      message.error(`创建失败：${(e as Error).message}`)
+      showError(e, '创建失败')
     } finally {
       setCreating(false)
     }

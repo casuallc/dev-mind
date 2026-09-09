@@ -67,6 +67,7 @@ import {
   TYPE_LABEL,
 } from '../components/requirementMeta'
 import type { Design, RequirementOverview } from '../types'
+import { showError } from '../../../shared/utils/showError'
 
 /** 描述收起高度（超出才显示展开/收起；留 24px 余量避免刚好贴线也出按钮） */
 const DESC_COLLAPSED_HEIGHT = 168
@@ -152,7 +153,7 @@ export default function RequirementDetailPage() {
     try {
       setOverview(await getRequirementOverview(projectId, rid))
     } catch (e) {
-      message.error(`加载需求主线失败：${(e as Error).message}`)
+      showError(e, '加载需求主线失败')
       setOverview(null)
     } finally {
       setLoading(false)
@@ -200,7 +201,7 @@ export default function RequirementDetailPage() {
       message.success(`${label}会话已启动，完成后会通知你确认产出`)
       reloadAll()
     } catch (e) {
-      message.error((e as Error).message)
+      showError(e)
     } finally {
       setFlowBusy(false)
     }
@@ -221,7 +222,7 @@ export default function RequirementDetailPage() {
           message.success(`${r.code} → DONE`)
           reloadAll()
         } catch (e) {
-          message.error((e as Error).message)
+          showError(e)
         }
       },
     })
@@ -242,7 +243,7 @@ export default function RequirementDetailPage() {
           await reloadOverview()
           message.success(`${r.code} → CANCELLED`)
         } catch (e) {
-          message.error((e as Error).message)
+          showError(e)
         }
       },
     })

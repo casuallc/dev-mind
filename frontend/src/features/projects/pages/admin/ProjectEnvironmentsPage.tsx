@@ -19,6 +19,7 @@ import { useParams } from 'react-router-dom'
 import { addEnvironment, deleteEnvironment, listEnvironments, listServers, updateEnvironment } from '../../api'
 import type { EnvironmentInput, ProjectEnvironment, ProjectServer } from '../../types'
 import { envColor } from '../../components/utils'
+import { showError } from '../../../../shared/utils/showError'
 
 const ENV_NAME_OPTIONS = ['DEV', 'TEST', 'STAGING', 'PROD']
 
@@ -96,7 +97,7 @@ export default function ProjectEnvironmentsPage() {
       await reload()
       message.success('已保存')
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     }
   }
 

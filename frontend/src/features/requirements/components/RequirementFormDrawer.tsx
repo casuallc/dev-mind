@@ -7,6 +7,7 @@ import dayjs from 'dayjs'
 import { createRequirement, updateRequirement } from '../api'
 import type { Requirement, RequirementInput } from '../types'
 import { ALL_PRIORITIES, ALL_TYPES, TYPE_LABEL } from './requirementMeta'
+import { showError } from '../../../shared/utils/showError'
 
 /** 表单值形态：dueDate 在表单里是 dayjs，提交时转 'YYYY-MM-DD' */
 type FormValues = Omit<RequirementInput, 'dueDate'> & { dueDate?: dayjs.Dayjs | null }
@@ -52,7 +53,7 @@ export default function RequirementFormDrawer({ projectId, editing, open, onClos
       onClose()
       onSaved(saved)
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     }
   }
 

@@ -13,6 +13,7 @@ import type { ChatApiBase, ChatEvent, ChatImageAttachment, ChatSummaryBase, Stre
 import { useChatStream } from './useChatStream'
 import { ACTIVE_STATES } from './stateMeta'
 import ChatStream from './ChatStream'
+import { showError } from '../utils/showError'
 
 export default function ChatPanel({
   summary,
@@ -85,7 +86,7 @@ export default function ChatPanel({
         setUploading((n) => n + 1)
         uploadAttachment(file, file.name)
           .then((v) => setPendingImages((prev) => [...prev, v]))
-          .catch((e) => message.error(`图片上传失败：${(e as Error).message}`))
+          .catch((e) => showError(e, '图片上传失败'))
           .finally(() => setUploading((n) => n - 1))
       }
     },
@@ -132,7 +133,7 @@ export default function ChatPanel({
           setPendingReq(null)
           onChanged?.()
         })
-        .catch((e) => message.error(`授权失败：${(e as Error).message}`))
+        .catch((e) => showError(e, '授权失败'))
     },
     [summary.id, apiBase, pendingReq, wsAuthorize, onChanged],
   )

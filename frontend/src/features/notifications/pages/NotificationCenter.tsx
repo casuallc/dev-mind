@@ -34,6 +34,7 @@ import { EVENT_TYPES, LEVEL_COLOR } from '../types'
 import type { AppNotification, NotificationChannel, NotificationPrefs } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 export default function NotificationCenter() {
   const navigate = useNavigate()
@@ -59,7 +60,7 @@ export default function NotificationCenter() {
       })
       setItems(list)
     } catch (e) {
-      message.error(`加载通知失败：${(e as Error).message}`)
+      showError(e, '加载通知失败')
     } finally {
       setLoading(false)
     }
@@ -84,7 +85,7 @@ export default function NotificationCenter() {
       syncLocal(n.id)
       load()
     } catch (e) {
-      message.error(`动作失败：${(e as Error).message}`)
+      showError(e, '动作失败')
     }
   }
 
@@ -100,7 +101,7 @@ export default function NotificationCenter() {
       await apiMarkRead(id)
       syncLocal(id)
     } catch (e) {
-      message.error(`操作失败：${(e as Error).message}`)
+      showError(e, '操作失败')
     }
   }
 
@@ -111,7 +112,7 @@ export default function NotificationCenter() {
       setItems((prev) => prev.map((x) => (x.readAt ? x : { ...x, readAt: new Date().toISOString() })))
       message.success('已全部标记为已读')
     } catch (e) {
-      message.error(`操作失败：${(e as Error).message}`)
+      showError(e, '操作失败')
     }
   }
 
@@ -121,7 +122,7 @@ export default function NotificationCenter() {
       setChannels(await listChannels())
       setPrefs(await getPrefs())
     } catch (e) {
-      message.error(`加载设置失败：${(e as Error).message}`)
+      showError(e, '加载设置失败')
     }
   }
 
@@ -141,7 +142,7 @@ export default function NotificationCenter() {
       message.success('偏好已保存')
       setPrefsOpen(false)
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     } finally {
       setSavingPrefs(false)
     }

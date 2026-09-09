@@ -20,6 +20,7 @@ import { PlusOutlined } from '@ant-design/icons'
 import { saveCases } from '../api'
 import type { TestCase, TestCaseInput, TestSuite } from '../types'
 import { paramsToText, textToParams } from '../../../shared/utils/format'
+import { showError } from '../../../shared/utils/showError'
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
@@ -154,7 +155,7 @@ export default function CaseEditorDrawer({ suite, onClose, onChanged }: {
       message.success(`已保存 ${cases.length} 个用例`)
       onClose()
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     } finally {
       setSaving(false)
     }

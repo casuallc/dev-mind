@@ -22,6 +22,7 @@ import { useParams } from 'react-router-dom'
 import { addServer, deleteServer, listServers, updateServer } from '../../api'
 import type { ProjectServer, ServerInput } from '../../types'
 import { envColor } from '../../components/utils'
+import { showError } from '../../../../shared/utils/showError'
 import {
   buildAccessConfig,
   parseAccessConfig,
@@ -51,7 +52,7 @@ export default function ProjectServersPage() {
     try {
       setServers(await listServers(id))
     } catch (e) {
-      message.error(`加载服务器失败：${(e as Error).message}`)
+      showError(e, '加载服务器失败')
     } finally {
       setLoading(false)
     }
@@ -114,7 +115,7 @@ export default function ProjectServersPage() {
       await reload()
       message.success('已保存')
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     }
   }
 

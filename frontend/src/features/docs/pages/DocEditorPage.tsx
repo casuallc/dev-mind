@@ -31,6 +31,7 @@ import { fmtTime } from '../../../shared/utils/format'
 import { uploadAttachment } from '../../../shared/attachments/api'
 import { attachmentRawUrl } from '../../../shared/attachments/url'
 import { pageRootScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 const statusTag = (s: string) => (
   <Tag color={s === 'draft' ? 'default' : s === 'pending_confirm' ? 'gold' : 'green'}>{STATUS_LABEL[s as keyof typeof STATUS_LABEL] ?? s}</Tag>
@@ -71,7 +72,7 @@ export default function DocEditorPage() {
       }
       setVersions(vs)
     } catch (e) {
-      message.error(`加载文档失败：${(e as Error).message}`)
+      showError(e, '加载文档失败')
     } finally {
       setLoading(false)
     }
@@ -121,7 +122,7 @@ export default function DocEditorPage() {
           })
         })
         .catch((e) => {
-          message.error(`图片上传失败：${(e as Error).message}`)
+          showError(e, '图片上传失败')
           setEditText((prev) => prev.replace(placeholder, ''))
         })
     }
@@ -159,7 +160,7 @@ export default function DocEditorPage() {
       setMode('view')
       await load()
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     }
   }
 
@@ -176,7 +177,7 @@ export default function DocEditorPage() {
           message.success(`已${okText}`)
           await load()
         } catch (e) {
-          message.error(`操作失败：${(e as Error).message}`)
+          showError(e, '操作失败')
         }
       },
     })
@@ -196,7 +197,7 @@ export default function DocEditorPage() {
           message.success('已删除')
           navigate('/admin/docs')
         } catch (e) {
-          message.error(`删除失败：${(e as Error).message}`)
+          showError(e, '删除失败')
         }
       },
     })
@@ -207,7 +208,7 @@ export default function DocEditorPage() {
       setDiff(await docDiff(docId, v))
       setDiffFor(v)
     } catch (e) {
-      message.error(`获取 diff 失败：${(e as Error).message}`)
+      showError(e, '获取 diff 失败')
     }
   }
 
@@ -224,7 +225,7 @@ export default function DocEditorPage() {
           message.success(`已回退并生成 v${r.versionNo}`)
           await load()
         } catch (e) {
-          message.error(`回退失败：${(e as Error).message}`)
+          showError(e, '回退失败')
         }
       },
     })

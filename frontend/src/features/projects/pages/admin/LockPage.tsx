@@ -5,6 +5,7 @@ import { DiffOutlined, StopOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { claimWrite, getLock, releaseWrite, updateLock } from '../../api'
 import type { ProjectLock } from '../../types'
+import { showError } from '../../../../shared/utils/showError'
 
 export default function LockPage() {
   const { id = '' } = useParams<{ id: string }>()
@@ -30,7 +31,7 @@ export default function LockPage() {
       setLock(l)
       message.success(ok)
     } catch (e) {
-      message.error((e as Error).message)
+      showError(e)
     }
   }
 
@@ -40,7 +41,7 @@ export default function LockPage() {
       setLock(l)
       message.success('已保存并发上限')
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     }
   }
 

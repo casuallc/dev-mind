@@ -17,6 +17,7 @@ import type { StreamMeta } from '../../../shared/chat/types'
 import ChatListPane from '../components/ChatListPane'
 import NewChatDraft from '../components/NewChatDraft'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 // 活跃在前 + 创建时间倒序（与 ChatListPane 一致，用于自动选中第一个）
 function sortForBoard(list: ChatSummary[]): ChatSummary[] {
@@ -41,7 +42,7 @@ export default function ChatsBoard() {
     try {
       setChats(await listChats())
     } catch (e) {
-      message.error(`加载问答失败：${(e as Error).message}`)
+      showError(e, '加载问答失败')
     } finally {
       setLoading(false)
     }
@@ -88,7 +89,7 @@ export default function ChatsBoard() {
         message.success(okText)
         load()
       } catch (e) {
-        message.error(`操作失败：${(e as Error).message}`)
+        showError(e, '操作失败')
       }
     },
     [selectedId, load],
@@ -123,7 +124,7 @@ export default function ChatsBoard() {
           if (current.id === selectedId) setSelectedId(undefined)
           load()
         } catch (e) {
-          message.error(`删除失败：${(e as Error).message}`)
+          showError(e, '删除失败')
         }
       },
     })

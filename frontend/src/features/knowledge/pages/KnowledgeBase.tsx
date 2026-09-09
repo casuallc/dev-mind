@@ -40,6 +40,7 @@ import {
 import type { KnowledgeEntry, KnowledgeEntryInput, KnowledgeProposal, PreviewResult } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 const scopeTag = (s: string) => (s === 'global' ? <Tag color="blue">global</Tag> : <Tag>project</Tag>)
 const statusTag = (s: string) =>
@@ -84,7 +85,7 @@ export default function KnowledgeBase() {
           : await listEntries({ scope: scope || undefined }),
       )
     } catch (e) {
-      message.error(`加载条目失败：${(e as Error).message}`)
+      showError(e, '加载条目失败')
     } finally {
       setEntriesLoading(false)
     }
@@ -95,7 +96,7 @@ export default function KnowledgeBase() {
     try {
       setProposals(await listProposals(status))
     } catch (e) {
-      message.error(`加载提案失败：${(e as Error).message}`)
+      showError(e, '加载提案失败')
     } finally {
       setProposalsLoading(false)
     }
@@ -142,7 +143,7 @@ export default function KnowledgeBase() {
       setEntryModalOpen(false)
       loadEntries()
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     }
   }
 
@@ -160,7 +161,7 @@ export default function KnowledgeBase() {
           message.success('已删除')
           loadEntries()
         } catch (err) {
-          message.error(`删除失败：${(err as Error).message}`)
+          showError(err, '删除失败')
         }
       },
     })
@@ -183,7 +184,7 @@ export default function KnowledgeBase() {
           setManageId(null)
           loadProposals()
         } catch (err) {
-          message.error(`采纳失败：${(err as Error).message}`)
+          showError(err, '采纳失败')
         }
       },
     })
@@ -204,7 +205,7 @@ export default function KnowledgeBase() {
           setManageId(null)
           loadProposals()
         } catch (err) {
-          message.error(`操作失败：${(err as Error).message}`)
+          showError(err, '操作失败')
         }
       },
     })
@@ -216,7 +217,7 @@ export default function KnowledgeBase() {
       const r = await previewInjection(v.projectId, v.taskSpec)
       setPreviewResult(r)
     } catch (e) {
-      message.error(`预览失败：${(e as Error).message}`)
+      showError(e, '预览失败')
     }
   }
 
@@ -234,7 +235,7 @@ export default function KnowledgeBase() {
       proposalForm.resetFields()
       loadProposals()
     } catch (e) {
-      message.error(`提交失败：${(e as Error).message}`)
+      showError(e, '提交失败')
     }
   }
 

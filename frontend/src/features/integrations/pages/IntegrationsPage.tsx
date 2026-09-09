@@ -28,6 +28,7 @@ import {
 } from '../api'
 import type { Integration, IntegrationInput, IntegrationTestResult } from '../types'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 const TYPE_OPTIONS = [
   { value: 'GITLAB', label: 'GitLab（代码平台）' },
@@ -91,7 +92,7 @@ export default function IntegrationsPage() {
       setItems(list)
       probeAll(list)
     } catch (e) {
-      message.error(`加载集成失败：${(e as Error).message}`)
+      showError(e, '加载集成失败')
     } finally {
       setLoading(false)
     }
@@ -137,7 +138,7 @@ export default function IntegrationsPage() {
       setEditOpen(false)
       reload()
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     } finally {
       setSaving(false)
     }
@@ -162,7 +163,7 @@ export default function IntegrationsPage() {
         ...prev,
         [row.id]: { phase: 'done', ok: false, message: (e as Error).message },
       }))
-      message.error(`测试失败：${(e as Error).message}`)
+      showError(e, '测试失败')
     } finally {
       setTestingId(null)
     }
@@ -203,7 +204,7 @@ export default function IntegrationsPage() {
         message.error(`${r.message}${r.detail ? `（${r.detail}）` : ''}`)
       }
     } catch (e) {
-      message.error(`测试失败：${(e as Error).message}`)
+      showError(e, '测试失败')
     } finally {
       setTestingForm(false)
     }
@@ -215,7 +216,7 @@ export default function IntegrationsPage() {
       message.success(row.status === 'ENABLED' ? '已停用' : '已启用')
       reload()
     } catch (e) {
-      message.error(`操作失败：${(e as Error).message}`)
+      showError(e, '操作失败')
     }
   }
 

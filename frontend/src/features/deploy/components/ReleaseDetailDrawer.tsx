@@ -11,6 +11,7 @@ import {
 import type { ReleaseRecord } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { STATUS_COLOR } from '../constants'
+import { showError } from '../../../shared/utils/showError'
 
 export default function ReleaseDetailDrawer({ record, onClose, onChanged }: {
   record: ReleaseRecord | null
@@ -82,7 +83,7 @@ export default function ReleaseDetailDrawer({ record, onClose, onChanged }: {
       onChanged()
       message.success(ok)
     } catch (e) {
-      message.error((e as Error).message)
+      showError(e)
     } finally {
       setBusy(false)
     }

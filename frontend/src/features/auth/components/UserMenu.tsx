@@ -4,6 +4,7 @@ import { useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { changePassword, logout } from '../api'
 import { clearAuth, getRefreshToken, getUserSnapshot, subscribeAuth } from '../authStore'
+import { showError } from '../../../shared/utils/showError'
 
 const ROLE_LABELS: Record<string, { color: string; text: string }> = {
   ADMIN: { color: 'red', text: 'ADMIN' },
@@ -40,7 +41,7 @@ export default function UserMenu() {
       setPwdOpen(false)
       form.resetFields()
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '修改失败')
+      showError(e, '修改失败')
     }
   }
 

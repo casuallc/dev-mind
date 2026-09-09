@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import { Form, Input, message, Modal, Select } from 'antd'
 import { createProposal } from '../api'
 import type { KnowledgeProposalInput } from '../types'
+import { showError } from '../../../shared/utils/showError'
 
 interface Props {
   open: boolean
@@ -40,7 +41,7 @@ export default function SedimentExperienceModal({ open, onClose, sessionId, proj
       message.success('经验已提交为提案，等待审核')
       onClose()
     } catch (e) {
-      message.error(`提交失败：${(e as Error).message}`)
+      showError(e, '提交失败')
     }
   }
 

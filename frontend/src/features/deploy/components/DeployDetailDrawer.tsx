@@ -21,6 +21,7 @@ import {
 import type { DeploymentRecord, DeployStep } from '../types'
 import { durationMs } from '../../../shared/utils/format'
 import { STATUS_COLOR } from '../constants'
+import { showError } from '../../../shared/utils/showError'
 
 const STEP_STATUS_COLOR: Record<string, string> = {
   PENDING: 'default',
@@ -111,7 +112,7 @@ export default function DeployDetailDrawer({ record, onClose, onChanged }: {
         message.success(ok)
       }
     } catch (e) {
-      message.error((e as Error).message)
+      showError(e)
     } finally {
       setBusy(false)
     }

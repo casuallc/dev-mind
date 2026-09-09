@@ -33,6 +33,7 @@ import { STATUS_COLOR } from '../constants'
 import ConfigEditor from '../components/ConfigEditor'
 import DeployDetailDrawer from '../components/DeployDetailDrawer'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 export default function DeploymentsPage() {
   const projectId = useCurrentProjectId()
@@ -80,7 +81,7 @@ function DeployCenter({ id }: { id: string }) {
       setCfg(saved)
       message.success('部署计划配置已保存')
     } catch (e) {
-      message.error((e as Error).message)
+      showError(e)
       setCfg(await getDeployConfig(id))
     }
   }
@@ -103,7 +104,7 @@ function DeployCenter({ id }: { id: string }) {
       setDetail(d)
       refresh()
     } catch (e) {
-      message.error((e as Error).message)
+      showError(e)
     } finally {
       setCreating(false)
     }

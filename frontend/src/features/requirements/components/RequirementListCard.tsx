@@ -2,7 +2,7 @@
 // 来源字段（externalKey/externalUrl/remoteStatus）由列表接口直接带出，不再旁路反查 external_links。
 // 布局遵循 docs/core/前端内容区布局约定.md：Card 默认尺寸、title 内 Segmented、操作收 extra、表格默认密度。
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Card, Input, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
+import { Button, Card, Input, Segmented, Select, Space, Table, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -10,6 +10,7 @@ import { listRequirements } from '../api'
 import type { Requirement, RequirementSource, RequirementType } from '../types'
 import RequirementFormDrawer from './RequirementFormDrawer'
 import { fmtDuration, fmtTime } from '../../../shared/utils/format'
+import { showError } from '../../../shared/utils/showError'
 import {
   ALL_STATUSES,
   ALL_TYPES,
@@ -44,7 +45,7 @@ export default function RequirementListCard({ projectId }: { projectId: string }
       setItems(data.items)
       setTotal(data.total)
     } catch (e) {
-      message.error(`加载需求失败：${(e as Error).message}`)
+      showError(e, '加载需求失败')
     } finally {
       setLoading(false)
     }

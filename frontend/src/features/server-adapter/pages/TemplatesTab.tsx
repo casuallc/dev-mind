@@ -6,6 +6,7 @@ import type { Project } from '../../projects/types'
 import { listProjects } from '../../projects/api'
 import { createTemplate, deleteTemplate, listTemplates, updateTemplate } from '../api'
 import type { TemplateInput, TemplateView } from '../types'
+import { showError } from '../../../shared/utils/showError'
 
 const CAPABILITIES = ['build', 'deploy', 'release', 'test', 'logs', 'exec']
 
@@ -24,7 +25,7 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
       setProjects(list)
       if (list.length > 0 && !projectId) setProjectId(list[0].id)
     } catch (e) {
-      message.error(`加载项目失败：${(e as Error).message}`)
+      showError(e, '加载项目失败')
     }
   }, [projectId])
 
@@ -34,7 +35,7 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
     try {
       setTemplates(await listTemplates(projectId))
     } catch (e) {
-      message.error(`加载模板失败：${(e as Error).message}`)
+      showError(e, '加载模板失败')
     } finally {
       setLoading(false)
     }
@@ -84,7 +85,7 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
       setOpen(false)
       await load()
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     }
   }
 
@@ -94,7 +95,7 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
       message.success('已删除')
       await load()
     } catch (e) {
-      message.error(`删除失败：${(e as Error).message}`)
+      showError(e, '删除失败')
     }
   }
 

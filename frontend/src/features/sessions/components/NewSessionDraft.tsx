@@ -8,6 +8,7 @@ import { createSession } from '../api'
 import type { SessionSummary } from '../types'
 import { useSessionOptionData } from '../hooks/useSessionOptionData'
 import { useCurrentProject } from '../../../app/useCurrentProject'
+import { showError } from '../../../shared/utils/showError'
 
 const DEFAULTS = { permissionMode: 'acceptEdits' }
 
@@ -81,7 +82,7 @@ export default function NewSessionDraft({
       form.resetFields()
       onCreated(s)
     } catch (e) {
-      message.error(`创建失败：${(e as Error).message}`)
+      showError(e, '创建失败')
     } finally {
       setCreating(false)
     }

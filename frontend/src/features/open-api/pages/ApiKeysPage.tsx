@@ -21,6 +21,7 @@ import { deleteApiKey, issueApiKey, listApiKeys, setApiKeyEnabled } from '../api
 import type { ApiKey, IssuedKey } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 /**
  * CAP-20 后台页：API 密钥管理（仅 ADMIN）。
@@ -37,7 +38,7 @@ export default function ApiKeysPage() {
     setLoading(true)
     listApiKeys()
       .then(setKeys)
-      .catch((e) => message.error(`加载密钥失败: ${e.message}`))
+      .catch((e) => showError(e, '加载密钥失败'))
       .finally(() => setLoading(false))
   }
 
@@ -56,7 +57,7 @@ export default function ApiKeysPage() {
       setIssued(res)
       reload()
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '签发失败')
+      showError(e, '签发失败')
     }
   }
 

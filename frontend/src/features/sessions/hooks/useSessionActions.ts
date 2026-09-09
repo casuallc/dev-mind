@@ -5,6 +5,7 @@ import { useCallback, useState } from 'react'
 import { Modal, message } from 'antd'
 import { finishSession, killSession, resumeSession, sessionDiff, suspendSession } from '../api'
 import type { RepoDiffView, SessionSummary } from '../types'
+import { showError } from '../../../shared/utils/showError'
 
 export interface SessionActions {
   /** 结束会话：关 stdin，claude 自然退出 → DONE/FAILED */
@@ -38,7 +39,7 @@ export function useSessionActions(
         onUpdated(await fn())
         message.success(successMsg)
       } catch (e) {
-        message.error(`操作失败：${(e as Error).message}`)
+        showError(e, '操作失败')
       }
     },
     [id, onUpdated],
@@ -51,7 +52,7 @@ export function useSessionActions(
       message.success('已结束会话，等待 claude 退出…')
       window.setTimeout(() => onUpdated(), 800)
     } catch (e) {
-      message.error(`结束失败：${(e as Error).message}`)
+      showError(e, '结束失败')
     }
   }, [id, onUpdated])
 
@@ -78,7 +79,7 @@ export function useSessionActions(
       setDiffData(await sessionDiff(id))
       setDiffOpen(true)
     } catch (e) {
-      message.error(`获取 diff 失败：${(e as Error).message}`)
+      showError(e, '获取 diff 失败')
     } finally {
       setDiffLoading(false)
     }

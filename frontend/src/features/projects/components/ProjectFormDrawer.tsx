@@ -8,6 +8,7 @@ import { useGitIntegrations } from '../hooks/useGitIntegrations'
 import CloneAuthHint from './CloneAuthHint'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
+import { showError } from '../../../shared/utils/showError'
 
 const STATUS_OPTIONS = [
   { value: 'ACTIVE', label: 'ACTIVE' },
@@ -88,7 +89,7 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
       }
       onSaved()
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     } finally {
       setSaving(false)
     }

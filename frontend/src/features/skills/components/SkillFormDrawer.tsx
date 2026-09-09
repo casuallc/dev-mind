@@ -5,6 +5,7 @@ import { createSkill, updateSkill } from '../api'
 import type { SkillDetail, SkillInput } from '../types'
 import type { Project } from '../../projects/types'
 import Markdown from '../../../shared/components/Markdown'
+import { showError } from '../../../shared/utils/showError'
 
 const NAME_RULE = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
@@ -50,7 +51,7 @@ export default function SkillFormDrawer({ open, editing, projects, onClose, onSa
       onClose()
       onSaved()
     } catch (e) {
-      message.error(`保存失败：${(e as Error).message}`)
+      showError(e, '保存失败')
     }
   }
 

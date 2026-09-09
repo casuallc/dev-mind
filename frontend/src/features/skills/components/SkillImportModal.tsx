@@ -7,6 +7,7 @@ import { InboxOutlined } from '@ant-design/icons'
 import { importSkillPackage } from '../api'
 import type { SkillScope } from '../types'
 import type { Project } from '../../projects/types'
+import { showError } from '../../../shared/utils/showError'
 
 interface ImportForm {
   scope: SkillScope
@@ -51,7 +52,7 @@ export default function SkillImportModal({ open, projects, onClose, onSaved }: {
       onClose()
       onSaved()
     } catch (e) {
-      message.error(`导入失败：${(e as Error).message}`)
+      showError(e, '导入失败')
     } finally {
       setImporting(false)
     }

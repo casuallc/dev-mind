@@ -12,6 +12,7 @@ import { listServers } from '../../projects/api'
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 const STATUS_COLOR: Record<BuildStatus, string> = {
   QUEUED: 'blue',
@@ -71,7 +72,7 @@ function BuildCenter({ id }: { id: string }) {
       setConfigOpen(false)
       message.success('构建配置已保存')
     } catch (e) {
-      message.error((e as Error).message)
+      showError(e)
     } finally {
       setSaving(false)
     }
@@ -92,7 +93,7 @@ function BuildCenter({ id }: { id: string }) {
       setTriggerOpen(false)
       refresh()
     } catch (e) {
-      message.error((e as Error).message)
+      showError(e)
     } finally {
       setBuilding(false)
     }

@@ -40,6 +40,7 @@ import type { ExecResult, ServerListItem, StoredConfig, TemplateView } from '../
 import TemplatesTab from './TemplatesTab'
 import AuditTab from './AuditTab'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 const CAPABILITY_OPTIONS = ['build', 'deploy', 'release', 'test', 'logs', 'exec']
 
@@ -108,7 +109,7 @@ function OpsTab({ refreshTick }: { refreshTick: number }) {
       setServers(s)
       setProjects(p)
     } catch (e) {
-      message.error(`加载失败：${(e as Error).message}`)
+      showError(e, '加载失败')
     } finally {
       setLoading(false)
     }
@@ -249,7 +250,7 @@ function OpsDrawer({ server, onClose }: { server: ServerListItem; onClose: () =>
       message.success(r.message)
       setFileList([])
     } catch (e) {
-      message.error(`上传失败：${(e as Error).message}`)
+      showError(e, '上传失败')
     } finally {
       setBusy(false)
     }
@@ -261,7 +262,7 @@ function OpsDrawer({ server, onClose }: { server: ServerListItem; onClose: () =>
     try {
       setDownloadText(await downloadFromServer(server.id, downloadPath))
     } catch (e) {
-      message.error(`下载失败：${(e as Error).message}`)
+      showError(e, '下载失败')
     } finally {
       setBusy(false)
     }

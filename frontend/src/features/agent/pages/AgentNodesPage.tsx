@@ -45,6 +45,7 @@ import ConnLogsPanel from '../components/ConnLogsPanel'
 import { buildLinuxInstallScript, buildWindowsInstallScript, downloadTextFile } from '../utils/installScript'
 import { fmtTime, fmtBytes } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { showError } from '../../../shared/utils/showError'
 
 const statusColor: Record<string, string> = {
   ONLINE: 'green',
@@ -83,7 +84,7 @@ export default function AgentNodesPage() {
     setLoading(true)
     listAgentNodes()
       .then(setNodes)
-      .catch((e) => message.error(`加载节点失败: ${e.message}`))
+      .catch((e) => showError(e, '加载节点失败'))
       .finally(() => setLoading(false))
     getRunnerPackage().then(setPkg).catch(() => setPkg(null)) // 404 = 未上传
   }
@@ -104,7 +105,7 @@ export default function AgentNodesPage() {
       setIssued(res)
       reload()
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '创建失败')
+      showError(e, '创建失败')
     }
   }
 
@@ -420,7 +421,7 @@ function NodeDrawer({
     try {
       await fn()
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '操作失败')
+      showError(e, '操作失败')
     } finally {
       setBusy(false)
     }
