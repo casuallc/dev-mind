@@ -1,34 +1,33 @@
-// 项目「上下文」页（CAP-33 FR-06）：当前项目实际会注入/可用的上下文资产只读清单
-// （知识条目 / Skills / 文档三组，GET /api/projects/{id}/context-assets 聚合）。
-// 管理入口在各组右上角，跳 /admin 对应管理页。
-import { useCallback, useEffect, useState } from 'react'
-import { Button, Card, Space, Table, Tag, Typography, message } from 'antd'
-import { ReloadOutlined, SettingOutlined } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+// 项目「知识」页（CAP-33 FR-06）：当前项目实际会注入/可用的上下文资产只读清单
+// （知识条目 / 文档 / Skills 三视图，GET /api/projects/{id}/context-assets 聚合）。
+// 多视图切换走 Card title 里的 Segmented（布局约定：禁 Card 内套 Tabs）；维护请去 /admin 对应管理页。
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Button, Card, Segmented, Space, Table, Tag, Typography, message } from 'antd'
+import { ReloadOutlined } from '@ant-design/icons'
 import { listContextAssets } from '../api'
 import type { AssetGroup, ProjectAssetItem } from '../types'
 import { useCurrentProject } from '../../../app/useCurrentProject'
-import { pageRootScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardBodyScrollStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 
-/** kind → 展示名 + 管理页跳转；未知 kind 用兜底配置 */
-const GROUP_META: Record<string, { title: string; adminPath: string; hint: string }> = {
-  knowledge: {
+/** kind → 展示名 + 说明；数组顺序即 Segmented 视图顺序；未知 kind 用兜底配置排在最后 */
+const GROUP_META: Array<{ kind: string; title: string; hint: string }> = [
+  {
+    kind: 'knowledge',
     title: '知识条目',
-    adminPath: '/admin/knowledge',
     hint: '创建会话时按项目标签自动命中（global 无标签条目恒命中）',
   },
-  skill: {
-    title: 'Skills',
-    adminPath: '/admin/skills',
-    hint: '项目私有 ACTIVE 全量注入；全局 skill 需在场景里显式绑定',
-  },
-  doc: {
+  {
+    kind: 'doc',
     title: '文档',
-    adminPath: '/admin/docs',
     hint: '文档不自动注入，需在场景里显式绑定（摘要进 CLAUDE.md + 全文物化）',
   },
-}
-const FALLBACK_META = { title: '资产', adminPath: '/admin', hint: '' }
+  {
+    kind: 'skill',
+    title: 'Skills',
+    hint: '项目私有 ACTIVE 全量注入；全局 skill 需在场景里显式绑定',
+  },
+]
+const FALLBACK_TITLE = '资产'
 
 /** extra 附加信息白名单渲染（scope/status/tags/hitCount/version），其余忽略 */
 function ExtraTags({ extra }: { extra?: Record<string, unknown> }) {
@@ -44,10 +43,10 @@ function ExtraTags({ extra }: { extra?: Record<string, unknown> }) {
 }
 
 export default function ProjectContextPage() {
-  const navigate = useNavigate()
   const { projectId, project } = useCurrentProject()
   const [groups, setGroups] = useState<AssetGroup[]>([])
   const [loading, setLoading] = useState(false)
+  const [view, setView] = useState<string>('knowledge')
 
   const load = useCallback(async () => {
     if (!projectId) return
@@ -64,6 +63,24 @@ export default function ProjectContextPage() {
   useEffect(() => {
     load()
   }, [load])
+
+  // 视图选项：按 GROUP_META 顺序排已知 kind，未知 kind 追加在最后
+  const viewOptions = useMemo(() => {
+    const known = GROUP_META.filter((m) => groups.some((g) => g.kind === m.kind))
+    const unknown = groups
+      .filter((g) => !GROUP_META.some((m) => m.kind === g.kind))
+      .map((g) => ({ kind: g.kind, title: FALLBACK_TITLE, hint: '' }))
+    return [...known, ...unknown]
+  }, [groups])
+
+  // 当前视图的数据与元信息；视图无效（如重载后该组消失）时回落到首个可用视图
+  const activeKind = viewOptions.some((o) => o.kind === view) ? view : (viewOptions[0]?.kind ?? view)
+  const activeMeta = GROUP_META.find((m) => m.kind === activeKind) ?? {
+    kind: activeKind,
+    title: FALLBACK_TITLE,
+    hint: '',
+  }
+  const activeGroup = groups.find((g) => g.kind === activeKind)
 
   const columns = [
     { title: '名称', dataIndex: 'name', width: 260, ellipsis: true },
@@ -82,44 +99,43 @@ export default function ProjectContextPage() {
   ]
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%', ...pageRootScrollStyle }}>
-      <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+    <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
+      title={
+        <Space size={12}>
+          <span>知识</span>
+          <Segmented
+            value={activeKind}
+            onChange={(v) => setView(v as string)}
+            options={viewOptions.map((o) => ({ label: o.title, value: o.kind }))}
+          />
+        </Space>
+      }
+      extra={
+        <Button icon={<ReloadOutlined />} onClick={load}>
+          刷新
+        </Button>
+      }
+    >
+      <Typography.Paragraph type="secondary">
         当前项目（{project?.name ?? projectId}）的会话上下文资产：创建会话/场景问答时经装配管线注入沙箱
-        （CLAUDE.md + .claude/skills/ + .devmind/docs/）。此页只读，维护请去对应管理页。
+        （CLAUDE.md + .claude/skills/ + .devmind/docs/）。此页只读，维护请去后台管理对应页面。
+        {activeMeta.hint && (
+          <>
+            <br />
+            {activeMeta.hint}
+          </>
+        )}
       </Typography.Paragraph>
-      {groups.map((g) => {
-        const meta = GROUP_META[g.kind] ?? { ...FALLBACK_META, title: g.kind }
-        return (
-          <Card
-            key={g.kind}
-            title={meta.title}
-            extra={
-              <Space>
-                <Button icon={<ReloadOutlined />} onClick={load}>
-                  刷新
-                </Button>
-                <Button icon={<SettingOutlined />} onClick={() => navigate(meta.adminPath)}>
-                  管理
-                </Button>
-              </Space>
-            }
-          >
-            {meta.hint && (
-              <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                {meta.hint}
-              </Typography.Paragraph>
-            )}
-            <Table
-              rowKey="ref"
-              loading={loading}
-              columns={columns}
-              dataSource={g.items}
-              pagination={false}
-              locale={{ emptyText: `暂无${meta.title}。点右上角「管理」去维护。` }}
-            />
-          </Card>
-        )
-      })}
-    </Space>
+      <Table
+        rowKey="ref"
+        loading={loading}
+        columns={columns}
+        dataSource={activeGroup?.items ?? []}
+        pagination={false}
+        locale={{ emptyText: `暂无${activeMeta.title}，可到后台管理维护。` }}
+      />
+    </Card>
   )
 }

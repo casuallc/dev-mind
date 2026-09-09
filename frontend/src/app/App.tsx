@@ -86,7 +86,7 @@ export default function App() {
           <Route element={<ProjectContextGate />}>
             <Route path="/overview" element={<ProjectOverviewPage />} />
             <Route path="/requirements" element={<RequirementsPage />} />
-            {/* CAP-33 项目上下文资产（只读视图，管理在 /admin） */}
+            {/* CAP-33 项目知识/上下文资产（只读视图，管理在 /admin） */}
             <Route path="/context" element={<ProjectContextPage />} />
             {/* CAP-05 会话（CAP-31 起归属当前项目；通用问答走个人 /chats） */}
             <Route path="/sessions" element={<SessionsBoard />} />

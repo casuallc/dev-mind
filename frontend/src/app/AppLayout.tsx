@@ -59,7 +59,7 @@ export default function AppLayout() {
                 { key: '/overview', icon: <HomeOutlined />, label: '概览' },
                 { key: '/sessions', icon: <RobotOutlined />, label: '会话' },
                 { key: '/requirements', icon: <BulbOutlined />, label: '需求' },
-                { key: '/context', icon: <DatabaseOutlined />, label: '上下文' },
+                { key: '/context', icon: <DatabaseOutlined />, label: '知识' },
                 { key: '/builds', icon: <ToolOutlined />, label: '构建' },
                 { key: '/deployments', icon: <DeploymentUnitOutlined />, label: '部署' },
                 { key: '/tests', icon: <ExperimentOutlined />, label: '测试' },
