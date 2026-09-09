@@ -35,3 +35,6 @@ devmind:
 #     password: ...
 # PostgreSQL 同理（url: jdbc:postgresql://host:5432/devmind，driver-class-name: org.postgresql.Driver），
 # 驱动亦随包携带；注意 PG 需提前手工建库（无 createDatabaseIfNotExist 机制）。
+# @Lob 已按 text/bytea 建列（@JdbcTypeCode LONGVARCHAR/LONGVARBINARY），切 PG 零额外配置；
+# 但 ddl-auto=update 不转换存量列——从旧版升级、库里 @Lob 列已是 oid 的，须先手工跑迁移 SQL
+# （oid→text/bytea，生成在源码仓 tmp/alter_pg_oid_to_text.sql），再启动新包。

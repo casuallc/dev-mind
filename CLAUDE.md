@@ -75,6 +75,7 @@ Guidance for Claude Code when working in this repository.
 - `@ColumnDefault` 字符串默认值必带引号 → `@ColumnDefault("'ACTIVE'")`。裸常量 H2 建表失败（已两次事故）。
 - 异步触发方法（trigger/execute/rollback/run）**禁 @Transactional** → 靠 save 自身事务即时提交；否则异步线程看不到未提交行，任务卡 QUEUED。
 - H2 保留字禁作列名（commit/version/…）→ 用 `commit_sha`/`release_version` 这类名。
+- `@Lob` 必带 `@JdbcTypeCode`：String 用 `SqlTypes.LONGVARCHAR`、byte[] 用 `SqlTypes.LONGVARBINARY`（配 `@Column(length = 16_777_216)`）。裸 @Lob（CLOB/BLOB）在 PG 落成 oid 大对象 → auto-commit 读炸 "Large Objects may not be used in auto-commit mode"、lower() 渲染 bytea；在 MySQL 靠 length 防 tinytext。回归网：`devmind-common` 的 `LobColumnTypeTest`（钉死 PG→text/bytea、MySQL→longtext/longblob）。
 - `@Lob` CLOB 禁直接 `lower()` → `lower(cast(e.contentMd as string))`（否则 Hibernate 启动期报错）。
 - Jackson 3：请求 DTO 的布尔字段必用 `Boolean` 包装（null→primitive 直接抛错）；`ObjectNode` 迭代用 `properties()`；`Map.of` 禁 null 值。
 - 时间序列化禁散点定制（@JsonFormat/自写格式化）→ 统一走 `JacksonConfig`。
