@@ -11,7 +11,12 @@ html, body, #root {
   background: transparent;
   box-shadow: none;
   color: #1677ff;
-  padding-inline: 4px;
+  /* 左右 padding 归零：文字左缘与表头对齐，间隙完全交给 Space */
+  padding-inline: 0;
+}
+/* 行内按钮统一 8px 间隙（覆盖 Space size={n} 的内联 gap，保证全站一致） */
+.ant-table .ant-space {
+  column-gap: 8px !important;
 }
 .ant-table .ant-btn:hover:not(:disabled) {
   background: transparent;
