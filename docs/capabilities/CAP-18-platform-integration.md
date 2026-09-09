@@ -47,6 +47,8 @@
 - **FR-05 创建 MR**：对已推送分支创建 Merge Request（source=WI 分支，target=仓库默认分支），
   title/description 由 WI 标题/spec 渲染；结果登记 External Link
   （WI ↔ MR iid + web_url）。重复调用按 External Link 幂等，已有未关闭 MR 时返回既有 MR。
+  （CAP-35 起身份链改走 `resolveWriteIdentity`：操作人个人账号优先 → 机器人凭证，
+  响应/审计标 `identitySource`；Integration 机器人凭证改为可选，仅自动化路径必需。）
 - **FR-06 tag 推送 + GitLab Release**：CAP-11 发版打 tag 成功后，push tag 到绑定远程，
   并创建 GitLab Release（name=版本号，description=发版单摘要）；
   结果登记 External Link（Release ↔ tag/release）。回滚时**不删远程 tag**（只记录，防误操作）。

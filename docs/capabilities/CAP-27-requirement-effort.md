@@ -47,6 +47,8 @@ requirements.estimated_seconds / spent_seconds
   与 refreshAfterTransit 单条刷新（timeSpent 随即回落托管列）；
   秒数校验 1..360000；`recordCall("jira_worklog")` + 审计 + 领域事件
   `integration.jira.worklogged`（→ 通知中心）。
+  （CAP-35 起身份链改走 `resolveWriteIdentity`：操作人 Jira 个人账号优先 → 机器人凭证，
+  worklog 作者 = 当前用户，审计标注身份来源。）
 - **FR-04 前端展示与登记**：
   - `shared/utils/format.ts` 增 `fmtDuration(sec)`：null/≤0 → '-'；<1h → 'Xm'；
     整点 → 'Xh'；否则 'XhYm'。

@@ -72,6 +72,8 @@ JiraSyncService ──→ Requirement（DRAFT，标题 [PROJ-123] summary）
   领域事件 `integration.jira.transitioned`（→ 通知中心）。
   工时字段（timeoriginalestimate/timespent）随同步刷新、worklog 工时登记同属本回写通道，
   详见 CAP-27。
+  （CAP-35 起 transition/worklog 写路径身份链改走 `resolveWriteIdentity`：操作人在
+  「我的 → 第三方账号」绑定的 Jira 个人 PAT/BASIC 优先 → 机器人凭证，审计标注身份来源。）
 - **FR-09 描述图片可见化（附件按需代理）**：描述保持 Jira wiki 原文入库不改写，其中图片
   标记 `!name.png|thumbnail!` 由前端详情页解析（JIRA 来源），经项目作用域代理端点
   `GET /api/projects/{pid}/requirements/{rid}/jira/attachments?name=<文件名>` 实时拉取——
