@@ -20,9 +20,6 @@ import {
   message,
 } from 'antd'
 import {
-  CloudDownloadOutlined,
-  DeleteOutlined,
-  EditOutlined,
   PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons'
@@ -293,7 +290,6 @@ export default function JiraSyncTab({ projectId }: Props) {
               <Space size={4}>
                 <Button
                   size="small"
-                  icon={<CloudDownloadOutlined />}
                   loading={runningId === row.id}
                   onClick={() => onRun(row)}
                 >
@@ -301,14 +297,17 @@ export default function JiraSyncTab({ projectId }: Props) {
                 </Button>
                 <Button
                   size="small"
-                  icon={<EditOutlined />}
                   onClick={() => {
                     setEditing(row)
                     setEditOpen(true)
                   }}
-                />
+                >
+                  编辑
+                </Button>
                 <Popconfirm title="删除该同步配置？" description="已导入的需求与 Jira 链接保留" onConfirm={() => onDelete(row)}>
-                  <Button size="small" danger icon={<DeleteOutlined />} />
+                  <Button size="small" danger>
+                    删除
+                  </Button>
                 </Popconfirm>
               </Space>
             ),

@@ -15,7 +15,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { CloudSyncOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { createRepo, deleteRepo, fetchRepo, listRepos, recloneRepo, updateRepo } from '../api'
 import type { GitRepo } from '../types'
@@ -235,7 +235,7 @@ export default function ReposAdminPage() {
             render: (_, r) => (
               <Space>
                 {r.sourceType === 'CLONE' && r.cloneStatus === 'READY' && (
-                  <Button size="small" icon={<CloudSyncOutlined />} onClick={() => onFetch(r)}>
+                  <Button size="small" onClick={() => onFetch(r)}>
                     立即抓取
                   </Button>
                 )}

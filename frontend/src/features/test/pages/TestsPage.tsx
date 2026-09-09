@@ -253,7 +253,7 @@ function TestCenter({ id }: { id: string }) {
       render: (_, r) => (
         <Space size={4}>
           <Button size="small" onClick={() => setDetail(r)}>详情</Button>
-          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDeleteRun(r)}>删除</Button>
+          <Button size="small" danger onClick={() => onDeleteRun(r)}>删除</Button>
         </Space>
       ),
     },

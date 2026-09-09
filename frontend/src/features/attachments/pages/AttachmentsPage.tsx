@@ -21,12 +21,8 @@ import {
 } from 'antd'
 import type { UploadFile } from 'antd'
 import {
-  CopyOutlined,
   DeleteOutlined,
-  DownloadOutlined,
-  EyeOutlined,
   InboxOutlined,
-  MoreOutlined,
   PictureOutlined,
   ReloadOutlined,
   UploadOutlined,
@@ -220,7 +216,6 @@ export default function AttachmentsPage() {
               <Button
                 size="small"
                 type="link"
-                icon={<EyeOutlined />}
                 onClick={() => window.open(attachmentRawUrl(r.attachmentId), '_blank')}
               >
                 预览
@@ -229,7 +224,6 @@ export default function AttachmentsPage() {
               <Button
                 size="small"
                 type="link"
-                icon={<DownloadOutlined />}
                 href={attachmentRawUrl(r.attachmentId)}
                 download={r.originalName}
               >
@@ -239,7 +233,6 @@ export default function AttachmentsPage() {
             <Button
               size="small"
               type="link"
-              icon={<CopyOutlined />}
               onClick={() => copyText(r.attachmentId, '附件 id 已复制')}
             >
               id
@@ -257,7 +250,9 @@ export default function AttachmentsPage() {
                 },
               }}
             >
-              <Button size="small" type="text" icon={<MoreOutlined />} />
+              <Button size="small" type="text">
+                更多
+              </Button>
             </Dropdown>
             <Popconfirm title="删除后不可恢复，确认删除？" onConfirm={() => onDelete(r)}>
               <Button size="small" type="text" danger>

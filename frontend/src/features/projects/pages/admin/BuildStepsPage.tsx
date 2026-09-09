@@ -16,7 +16,7 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { ArrowDownOutlined, ArrowUpOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import {
   addBuildStep,
@@ -113,8 +113,12 @@ export default function BuildStepsPage() {
       width: 200,
       render: (_: unknown, r: BuildStep, idx: number) => (
         <Space size={4}>
-          <Button size="small" icon={<ArrowUpOutlined />} disabled={idx === 0} onClick={() => move(idx, -1)} />
-          <Button size="small" icon={<ArrowDownOutlined />} disabled={idx === steps.length - 1} onClick={() => move(idx, 1)} />
+          <Button size="small" disabled={idx === 0} onClick={() => move(idx, -1)}>
+            上移
+          </Button>
+          <Button size="small" disabled={idx === steps.length - 1} onClick={() => move(idx, 1)}>
+            下移
+          </Button>
           <Button size="small" onClick={() => openEdit(r)}>编辑</Button>
           <Button size="small" danger onClick={() => confirmDelete(r)}>删除</Button>
         </Space>

@@ -2,7 +2,7 @@
 // SKILL.md 本体不在此管理（走 SkillFormDrawer 正文）。
 import { useCallback, useEffect, useState } from 'react'
 import { Button, Drawer, Form, Input, message, Modal, Space, Table, Typography, Upload } from 'antd'
-import { DeleteOutlined, DownloadOutlined, EditOutlined, FileAddOutlined, UploadOutlined } from '@ant-design/icons'
+import { FileAddOutlined, UploadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { canWrite } from '../../auth/authStore'
 import {
@@ -151,11 +151,17 @@ export default function SkillFilesDrawer({ open, skill, onClose }: {
       render: (_, r) => (
         <Space size={4}>
           {canWrite() && !r.binary && (
-            <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} />
+            <Button size="small" onClick={() => openEdit(r)}>
+              编辑
+            </Button>
           )}
-          <Button size="small" icon={<DownloadOutlined />} onClick={() => onDownload(r)} />
+          <Button size="small" onClick={() => onDownload(r)}>
+            下载
+          </Button>
           {canWrite() && (
-            <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDelete(r)} />
+            <Button size="small" danger onClick={() => onDelete(r)}>
+              删除
+            </Button>
           )}
         </Space>
       ),

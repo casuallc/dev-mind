@@ -1,5 +1,5 @@
 import { Button, Card, Form, Input, Modal, Popconfirm, Space, Table, Tag, Typography, message } from 'antd'
-import { ApiOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import {
   createGitCredential,
@@ -126,7 +126,7 @@ export default function GitCredentialsPage() {
             title: '操作',
             render: (_, c) => (
               <Space>
-                <Button size="small" icon={<ApiOutlined />} onClick={() => setTestTarget(c)}>
+                <Button size="small" onClick={() => setTestTarget(c)}>
                   自检
                 </Button>
                 <Button size="small" onClick={() => openEdit(c)}>

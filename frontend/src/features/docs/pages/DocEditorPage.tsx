@@ -19,8 +19,6 @@ import {
   Typography,
 } from 'antd'
 import {
-  DiffOutlined,
-  RollbackOutlined,
   SaveOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
@@ -255,12 +253,11 @@ export default function DocEditorPage() {
           <Button onClick={() => load(r.versionNo)}>
             查看
           </Button>
-          <Button icon={<DiffOutlined />} onClick={() => onDiff(r.versionNo)}>
+          <Button onClick={() => onDiff(r.versionNo)}>
             与当前 diff
           </Button>
           <Button
             disabled={r.versionNo === doc?.currentVersion}
-            icon={<RollbackOutlined />}
             onClick={() => onRevert(r.versionNo)}
           >
             回退

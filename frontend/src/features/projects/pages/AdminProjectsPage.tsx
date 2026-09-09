@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Alert, Button, Card, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { PlusOutlined, ReloadOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, RobotOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { deleteProject, listProjects } from '../api'
 import { onboardProject } from '../../open-api/api'
@@ -159,7 +159,7 @@ export default function AdminProjectsPage() {
       width: 200,
       render: (_, r) => (
         <Space size={4}>
-          <Button size="small" icon={<SettingOutlined />} onClick={() => navigate(`/admin/projects/${r.id}`)}>
+          <Button size="small" onClick={() => navigate(`/admin/projects/${r.id}`)}>
             设置
           </Button>
           <Button size="small" onClick={() => openEdit(r)}>

@@ -16,7 +16,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { ApiOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { ApiOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import {
   changeIntegrationStatus,
   createIntegration,
@@ -305,7 +305,6 @@ export default function IntegrationsPage() {
                 <Tooltip title="验证地址可达 + 凭据有效">
                   <Button
                     size="small"
-                    icon={<ApiOutlined />}
                     loading={testingId === row.id}
                     onClick={() => onTest(row)}
                   >
@@ -314,7 +313,6 @@ export default function IntegrationsPage() {
                 </Tooltip>
                 <Button
                   size="small"
-                  icon={<EditOutlined />}
                   onClick={() => {
                     setEditing(row)
                     setEditOpen(true)
