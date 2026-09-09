@@ -4,7 +4,6 @@ import {
   Form,
   Input,
   Modal,
-  Popconfirm,
   Popover,
   Radio,
   Select,
@@ -248,21 +247,28 @@ export default function ReposAdminPage() {
                 <Button size="small" onClick={() => openEdit(r)}>
                   编辑
                 </Button>
-                <Popconfirm
-                  title={`删除仓库「${r.name}」？被项目引用时将被拒绝`}
-                  onConfirm={() =>
-                    deleteRepo(r.id)
-                      .then(() => {
-                        message.success('已删除')
-                        reload()
-                      })
-                      .catch((e) => showError(e, '删除失败'))
+                <Button
+                  size="small"
+                  danger
+                  onClick={() =>
+                    Modal.confirm({
+                      centered: true,
+                      title: `删除仓库「${r.name}」？`,
+                      content: '被项目引用时将被拒绝。',
+                      okText: '删除',
+                      okButtonProps: { danger: true },
+                      onOk: () =>
+                        deleteRepo(r.id)
+                          .then(() => {
+                            message.success('已删除')
+                            reload()
+                          })
+                          .catch((e) => showError(e, '删除失败')),
+                    })
                   }
                 >
-                  <Button size="small" danger>
-                    删除
-                  </Button>
-                </Popconfirm>
+                  删除
+                </Button>
               </Space>
             ),
           },

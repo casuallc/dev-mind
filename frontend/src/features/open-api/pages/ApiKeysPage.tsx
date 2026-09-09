@@ -7,7 +7,6 @@ import {
   Form,
   Input,
   Modal,
-  Popconfirm,
   Space,
   Switch,
   Table,
@@ -115,13 +114,17 @@ export default function ApiKeysPage() {
               reload()
             }}
           />
-          <Popconfirm title={`删除密钥「${r.name}」？`} onConfirm={async () => {
-            await deleteApiKey(r.id)
-            message.success('已删除')
-            reload()
-          }}>
-            <Button size="small" danger>删除</Button>
-          </Popconfirm>
+          <Button size="small" danger onClick={() => Modal.confirm({
+            centered: true,
+            title: `删除密钥「${r.name}」？`,
+            okText: '删除',
+            okButtonProps: { danger: true },
+            onOk: async () => {
+              await deleteApiKey(r.id)
+              message.success('已删除')
+              reload()
+            },
+          })}>删除</Button>
         </Space>
       ),
     },

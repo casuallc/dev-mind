@@ -96,13 +96,17 @@ export default function DesignsTab({ projectId, requirementId }: {
           {d.status === 'DISCARDED' && (
             <Button size="small" type="link" onClick={() => setStatus(d, 'DRAFT')}>恢复</Button>
           )}
-          <Popconfirm title={`删除方案 v${d.version}？`} onConfirm={async () => {
-            await deleteDesign(projectId, requirementId, d.id)
-            message.success('已删除')
-            await load()
-          }}>
-            <Button size="small" type="link" danger>删除</Button>
-          </Popconfirm>
+          <Button size="small" type="link" danger onClick={() => Modal.confirm({
+            centered: true,
+            title: `删除方案 v${d.version}？`,
+            okText: '删除',
+            okButtonProps: { danger: true },
+            onOk: async () => {
+              await deleteDesign(projectId, requirementId, d.id)
+              message.success('已删除')
+              await load()
+            },
+          })}>删除</Button>
         </Space>
       ),
     },

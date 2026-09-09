@@ -5,7 +5,6 @@ import {
   Input,
   InputNumber,
   Modal,
-  Popconfirm,
   Segmented,
   Space,
   Switch,
@@ -259,14 +258,22 @@ export default function WorklogPage() {
   }
 
   const onDeleteEntry = (e: WorklogEntry) => {
-    deleteEntry(e.id)
-      .then(() => {
-        message.success('已删除')
-        // 删空当日当前页且非首页时回退一页，避免空白页
-        if (dayEntries.length === 1 && page > 1) setPage(page - 1)
-        loadEntries()
-      })
-      .catch((err) => showError(err, '删除失败'))
+    // 确认弹窗统一走平台通用的居中 Modal.confirm，不用贴按钮的 Popconfirm
+    Modal.confirm({
+      centered: true,
+      title: '删除该条目？',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      onOk: () =>
+        deleteEntry(e.id)
+          .then(() => {
+            message.success('已删除')
+            // 删空当日当前页且非首页时回退一页，避免空白页
+            if (dayEntries.length === 1 && page > 1) setPage(page - 1)
+            loadEntries()
+          })
+          .catch((err) => showError(err, '删除失败')),
+    })
   }
 
   const openSettings = async () => {
@@ -497,11 +504,9 @@ export default function WorklogPage() {
                     >
                       编辑
                     </Button>
-                    <Popconfirm title="删除该条目？" onConfirm={() => onDeleteEntry(e)}>
-                      <Button size="small" danger>
-                        删除
-                      </Button>
-                    </Popconfirm>
+                    <Button size="small" danger onClick={() => onDeleteEntry(e)}>
+                      删除
+                    </Button>
                   </Space>
                 ),
               },

@@ -8,7 +8,7 @@ import {
   Form,
   Input,
   InputNumber,
-  Popconfirm,
+  Modal,
   Select,
   Space,
   Spin,
@@ -193,14 +193,24 @@ export default function JiraSyncTab({ projectId }: Props) {
     }
   }
 
-  const onDelete = async (row: JiraSyncConfig) => {
-    try {
-      await deleteJiraSyncConfig(projectId, row.id)
-      message.success('已删除（已导入的需求与链接保留）')
-      reload()
-    } catch (e) {
-      showError(e, '删除失败')
-    }
+  const onDelete = (row: JiraSyncConfig) => {
+    // 确认弹窗统一走平台通用的居中 Modal.confirm，不用贴按钮的 Popconfirm
+    Modal.confirm({
+      centered: true,
+      title: '删除该同步配置？',
+      content: '已导入的需求与 Jira 链接保留。',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await deleteJiraSyncConfig(projectId, row.id)
+          message.success('已删除（已导入的需求与链接保留）')
+          reload()
+        } catch (e) {
+          showError(e, '删除失败')
+        }
+      },
+    })
   }
 
   return (
@@ -305,11 +315,9 @@ export default function JiraSyncTab({ projectId }: Props) {
                 >
                   编辑
                 </Button>
-                <Popconfirm title="删除该同步配置？" description="已导入的需求与 Jira 链接保留" onConfirm={() => onDelete(row)}>
-                  <Button size="small" danger>
-                    删除
-                  </Button>
-                </Popconfirm>
+                <Button size="small" danger onClick={() => onDelete(row)}>
+                  删除
+                </Button>
               </Space>
             ),
           },

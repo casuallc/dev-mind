@@ -1,5 +1,5 @@
 // 发版详情 Drawer：WS 实时日志 + 状态快照，承载单条发版的成套操作（执行/回滚/删除）。
-import { Alert, Button, Drawer, Popconfirm, Space, Tag, Typography, message } from 'antd'
+import { Alert, Button, Drawer, Modal, Space, Tag, Typography, message } from 'antd'
 import { useEffect, useState } from 'react'
 import {
   deleteRelease,
@@ -109,21 +109,41 @@ export default function ReleaseDetailDrawer({ record, onClose, onChanged }: {
               <Button type="primary" loading={busy} onClick={() => act(() => executeRelease(d.id), '已开始执行')}>执行发版</Button>
             )}
             {d.status !== 'RUNNING' && d.status !== 'ROLLED_BACK' && (
-              <Popconfirm title="回滚该发版？将删除 tag 并移除制品引用" onConfirm={() => act(() => rollbackRelease(d.id), '已回滚')}>
-                <Button loading={busy}>回滚</Button>
-              </Popconfirm>
+              <Button
+                loading={busy}
+                onClick={() =>
+                  Modal.confirm({
+                    centered: true,
+                    title: '回滚该发版？',
+                    content: '将删除 tag 并移除制品引用。',
+                    okText: '回滚',
+                    okButtonProps: { danger: true },
+                    onOk: () => act(() => rollbackRelease(d.id), '已回滚'),
+                  })
+                }
+              >
+                回滚
+              </Button>
             )}
-            <Popconfirm
-              title="删除该发版记录？"
-              onConfirm={async () => {
-                await deleteRelease(d.id)
-                message.success('已删除')
-                onChanged()
-                onClose()
-              }}
+            <Button
+              danger
+              onClick={() =>
+                Modal.confirm({
+                  centered: true,
+                  title: '删除该发版记录？',
+                  okText: '删除',
+                  okButtonProps: { danger: true },
+                  onOk: async () => {
+                    await deleteRelease(d.id)
+                    message.success('已删除')
+                    onChanged()
+                    onClose()
+                  },
+                })
+              }
             >
-              <Button danger>删除</Button>
-            </Popconfirm>
+              删除
+            </Button>
           </Space>
           <div style={{ maxHeight: 420, overflow: 'auto', background: '#111', color: '#cfc', padding: 8, borderRadius: 4, fontFamily: 'monospace', fontSize: 12, width: '100%' }}>
             <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{text || '（暂无日志）'}</pre>

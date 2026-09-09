@@ -10,7 +10,6 @@ import {
   Input,
   message,
   Modal,
-  Popconfirm,
   Progress,
   Segmented,
   Space,
@@ -93,12 +92,20 @@ export default function AttachmentsPage() {
   }
 
   const onDelete = (r: AttachmentView) => {
-    deleteAttachment(r.attachmentId)
-      .then(() => {
-        message.success('已删除')
-        load()
-      })
-      .catch((e) => showError(e, '删除失败'))
+    // 确认弹窗统一走平台通用的居中 Modal.confirm，不用贴按钮的 Popconfirm
+    Modal.confirm({
+      centered: true,
+      title: '删除后不可恢复，确认删除？',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      onOk: () =>
+        deleteAttachment(r.attachmentId)
+          .then(() => {
+            message.success('已删除')
+            load()
+          })
+          .catch((e) => showError(e, '删除失败')),
+    })
   }
 
   const resetUpload = () => {
@@ -255,11 +262,9 @@ export default function AttachmentsPage() {
                 更多
               </Button>
             </Dropdown>
-            <Popconfirm title="删除后不可恢复，确认删除？" onConfirm={() => onDelete(r)}>
-              <Button size="small" type="text" danger>
-                删除
-              </Button>
-            </Popconfirm>
+            <Button size="small" type="text" danger onClick={() => onDelete(r)}>
+              删除
+            </Button>
           </Space>
         ),
       },

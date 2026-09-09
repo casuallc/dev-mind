@@ -1,6 +1,6 @@
 // CAP-07 FR-05 命令模板白名单管理（视图内容组件；外壳 Card / extra 按钮在 ServersPage）
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button, Checkbox, Drawer, Form, Input, message, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
+import { Button, Checkbox, Drawer, Form, Input, message, Modal, Select, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { Project } from '../../projects/types'
 import { listProjects } from '../../projects/api'
@@ -89,14 +89,23 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
     }
   }
 
-  const onDelete = async (id: number) => {
-    try {
-      await deleteTemplate(id)
-      message.success('已删除')
-      await load()
-    } catch (e) {
-      showError(e, '删除失败')
-    }
+  const onDelete = (id: number) => {
+    // 确认弹窗统一走平台通用的居中 Modal.confirm，不用贴按钮的 Popconfirm
+    Modal.confirm({
+      centered: true,
+      title: '删除该模板？',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await deleteTemplate(id)
+          message.success('已删除')
+          await load()
+        } catch (e) {
+          showError(e, '删除失败')
+        }
+      },
+    })
   }
 
   const columns: ColumnsType<TemplateView> = [
@@ -121,9 +130,7 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
       render: (_, r) => (
         <Space>
           <Button size="small" onClick={() => openEdit(r)}>编辑</Button>
-          <Popconfirm title="删除该模板？" okText="删除" okButtonProps={{ danger: true }} onConfirm={() => onDelete(r.id)}>
-            <Button size="small" danger>删除</Button>
-          </Popconfirm>
+          <Button size="small" danger onClick={() => onDelete(r.id)}>删除</Button>
         </Space>
       ),
     },
