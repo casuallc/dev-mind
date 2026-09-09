@@ -7,6 +7,8 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * session_templates 表：会话模板（预设 prompt 骨架，占位符 {{task}}/{{project}}/{{branch}}）。
@@ -26,6 +28,7 @@ public class SessionTemplateEntity {
     private String name;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String prompt;
 

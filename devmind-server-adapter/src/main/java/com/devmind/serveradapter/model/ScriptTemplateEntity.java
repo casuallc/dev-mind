@@ -9,6 +9,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * script_templates 表（CAP-07 FR-05 命令模板白名单）：项目预定义的远程执行模板，占位符参数化。
@@ -34,11 +36,13 @@ public class ScriptTemplateEntity {
 
     /** 模板正文（shell 脚本，含 ${param} 占位符） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "template_text", length = 16_777_216)
     private String templateText;
 
     /** JSON：参数 schema [{name,required,label,default}] */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "params_schema", length = 16_777_216)
     private String paramsSchema;
 

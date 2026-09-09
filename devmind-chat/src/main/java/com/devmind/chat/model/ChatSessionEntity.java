@@ -7,6 +7,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * chat_sessions 表：CAP-30 通用问答元数据。
@@ -40,6 +42,7 @@ public class ChatSessionEntity {
     private String permissionMode;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String summary;
 
@@ -49,11 +52,13 @@ public class ChatSessionEntity {
 
     /** CAP-33 FR-07：上下文装配快照（清单 JSON，无快照 = null） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "context_manifest_json", length = 16_777_216)
     private String contextManifestJson;
 
     /** CAP-33：首条消息原文（重建上下文包时按场景骨架重渲染的 {{task}} 输入） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "initial_prompt", length = 16_777_216)
     private String initialPrompt;
 

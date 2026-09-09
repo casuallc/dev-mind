@@ -8,6 +8,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * 经验提案（CAP-04 FR-05/FR-06）：会话中「沉淀经验」/ agent 提议 → inbox 待审核 → 采纳到项目/晋升全局。
@@ -24,6 +26,7 @@ public class KnowledgeProposalEntity {
     private String title;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String contentMd;
 

@@ -9,6 +9,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * deployments 表（CAP-09 FR-03/04/05）：一次部署单。
@@ -51,6 +53,7 @@ public class DeploymentEntity {
 
     /** 创建时渲染好的计划（JSON: [{name,type,templateCode,params}]） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "plan_json", length = 16_777_216)
     private String planJson;
 
@@ -77,10 +80,12 @@ public class DeploymentEntity {
     private boolean confirmed;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "logs_text", length = 16_777_216)
     private String logsText;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "error_summary", length = 16_777_216)
     private String errorSummary;
 

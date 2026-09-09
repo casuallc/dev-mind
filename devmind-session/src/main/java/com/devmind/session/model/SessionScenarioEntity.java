@@ -9,6 +9,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * CAP-33 FR-01 session_scenarios 表：场景 = 命名模板 + 预装配上下文包
@@ -34,16 +36,19 @@ public class SessionScenarioEntity {
 
     /** prompt 骨架（占位符渲染产物 = taskSpec，既作 launch prompt 也进 CLAUDE.md「当前任务」节） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "prompt_skeleton", length = 16_777_216)
     private String promptSkeleton;
 
     /** ①层显式绑定的 skill id 列表（JSON 数组串，全库 xxxJson 惯例手工序列化） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "skill_ids_json", length = 16_777_216)
     private String skillIdsJson;
 
     /** ①层显式绑定的 doc id 列表（JSON 数组串） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "doc_ids_json", length = 16_777_216)
     private String docIdsJson;
 
@@ -53,6 +58,7 @@ public class SessionScenarioEntity {
 
     /** 业务背景/口径约定等自由文本 → CLAUDE.md「场景背景」节 */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "extra_context_md", length = 16_777_216)
     private String extraContextMd;
 

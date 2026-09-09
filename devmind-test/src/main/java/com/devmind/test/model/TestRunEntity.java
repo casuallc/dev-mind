@@ -9,6 +9,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * test_runs 表（CAP-10）：一次测试执行。状态机 QUEUED → RUNNING → SUCCESS（无失败用例）| FAILED。
@@ -36,6 +38,7 @@ public class TestRunEntity {
     private String workItemId;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "suite_ids_json", length = 16_777_216)
     private String suiteIdsJson;
 
@@ -57,6 +60,7 @@ public class TestRunEntity {
     private String status;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "summary_json", length = 16_777_216)
     private String summaryJson;
 
@@ -64,10 +68,12 @@ public class TestRunEntity {
     private Long reportDocId;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "error_summary", length = 16_777_216)
     private String errorSummary;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "logs_text", length = 16_777_216)
     private String logsText;
 

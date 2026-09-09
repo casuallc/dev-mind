@@ -9,6 +9,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * deploy_configs 表（CAP-09 FR-01）：每项目一份部署计划定义。
@@ -27,10 +29,12 @@ public class DeployConfigEntity {
     private String projectId;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "steps_json", length = 16_777_216)
     private String stepsJson;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "rollback_steps_json", length = 16_777_216)
     private String rollbackStepsJson;
 

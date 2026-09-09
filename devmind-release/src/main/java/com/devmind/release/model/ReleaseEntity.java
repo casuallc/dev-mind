@@ -9,6 +9,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * releases 表（CAP-11 FR-05 发版记录）：一次发版 = 版本号 + 产物引用 + 推送执行 + git tag。
@@ -70,6 +72,7 @@ public class ReleaseEntity {
     private Long rollbackOf;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "logs_text", length = 16_777_216)
     private String logsText;
 

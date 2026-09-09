@@ -10,6 +10,8 @@ import org.hibernate.annotations.ColumnDefault;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * requirements 表（CAP-13 研发主线）：业务目标，主线关系的根。
@@ -53,6 +55,7 @@ public class RequirementEntity {
     private String title;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "description", length = 16_777_216)
     private String description;
 

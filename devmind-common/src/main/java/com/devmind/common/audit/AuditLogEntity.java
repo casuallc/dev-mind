@@ -9,6 +9,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * audit_logs 表——全局审计（P0-3 自 server-adapter 提升）：各域操作全量留痕。
@@ -59,6 +61,7 @@ public class AuditLogEntity {
 
     /** 渲染后的命令/脚本（模板内容，不含凭证） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "command", length = 16_777_216)
     private String command;
 
@@ -70,6 +73,7 @@ public class AuditLogEntity {
 
     /** 输出摘要（stdout/stderr 尾段，截断） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "detail", length = 16_777_216)
     private String detail;
 

@@ -9,6 +9,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * test_cases 表（CAP-10）：套件内用例。kind = http（对 baseUrl 发 HTTP 请求校验 expected）|
@@ -47,18 +49,22 @@ public class TestCaseEntity {
     private String path;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "params_json", length = 16_777_216)
     private String paramsJson;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "headers_json", length = 16_777_216)
     private String headersJson;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "body_json", length = 16_777_216)
     private String bodyJson;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "expected_json", length = 16_777_216)
     private String expectedJson;
 

@@ -10,6 +10,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * 通知记录（CAP-06 FR-06 通知中心）。分级+去重+快捷动作+通道状态都挂在这。
@@ -35,6 +37,7 @@ public class NotificationEntity {
     private String title;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String body;
 
@@ -48,11 +51,13 @@ public class NotificationEntity {
 
     /** 快捷动作 JSON：[{"action":"authorize","label":"允许授权"},…]（FR-04） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String actions;
 
     /** 各通道发送结果 JSON：{"ws":"SENT","bark":"SKIPPED:未配置"…} */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String channelStatus;
 

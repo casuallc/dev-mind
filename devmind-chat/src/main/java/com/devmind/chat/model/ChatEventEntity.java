@@ -10,6 +10,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * chat_events 表：CAP-30 问答事件流（历史回放）。批量异步落库（ChatEventSaver）。
@@ -31,6 +33,7 @@ public class ChatEventEntity {
     private String type;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String content;
 
@@ -39,6 +42,7 @@ public class ChatEventEntity {
 
     /** 结构化负载（tool_use 名称/参数、permission_request 的 requestId/options 等），JSON 文本。 */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "payload", length = 16_777_216)
     private String payload;
 

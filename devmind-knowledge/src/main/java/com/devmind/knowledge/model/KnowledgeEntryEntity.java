@@ -8,6 +8,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * 经验条目（CAP-04 FR-02/FR-03）：global（通用，可按标签筛选）/ project（项目特有）。
@@ -38,6 +40,7 @@ public class KnowledgeEntryEntity {
     private String path;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String contentMd;
 

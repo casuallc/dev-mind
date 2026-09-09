@@ -12,6 +12,8 @@ import org.hibernate.annotations.ColumnDefault;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * daily_reports 表（CAP-28 FR-05）：AI 生成的当日工作日志，DRAFT 草稿 → 用户编辑确认 CONFIRMED。
@@ -36,6 +38,7 @@ public class DailyReportEntity {
     private LocalDate workDate;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "content_md", length = 16_777_216)
     private String contentMd;
 

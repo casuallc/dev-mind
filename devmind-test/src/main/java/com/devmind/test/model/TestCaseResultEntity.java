@@ -9,6 +9,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * test_case_results 表（CAP-10）：用例级结果。status = pass | fail | skip。
@@ -43,14 +45,17 @@ public class TestCaseResultEntity {
     private String status;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "request_summary", length = 16_777_216)
     private String requestSummary;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "response_summary", length = 16_777_216)
     private String responseSummary;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String error;
 

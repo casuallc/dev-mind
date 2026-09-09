@@ -7,6 +7,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * projects 表（CAP-02 FR-01）：本地 git 仓库项目注册。
@@ -35,6 +37,7 @@ public class ProjectEntity {
     private String tags;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "description", length = 16_777_216)
     private String description;
 
@@ -64,6 +67,7 @@ public class ProjectEntity {
 
     /** 项目上下文摘要（FR-07，可人工修正） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "context_summary", length = 16_777_216)
     private String contextSummary;
 

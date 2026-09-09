@@ -7,6 +7,8 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * 通知通道配置（CAP-06 FR-03 通道插件化）：启用开关 + 分级阈值 + 通道专属配置。
@@ -34,6 +36,7 @@ public class NotificationChannelEntity {
 
     /** 通道专属配置 JSON，如 bark 的 {"server":"https://api.day.app","key":""} */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String configJson;
 

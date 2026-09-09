@@ -9,6 +9,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * servers 表（CAP-02 FR-03）：项目下关联服务器（引用 CAP-07 实体之前的落点）。
@@ -38,6 +40,7 @@ public class ProjectServerEntity {
 
     /** JSON 连接配置（主机/用户/端口/密钥路径 或 base-url/token 引用） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "access_config", length = 16_777_216)
     private String accessConfig;
 

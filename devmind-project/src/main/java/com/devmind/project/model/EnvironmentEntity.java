@@ -10,6 +10,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * environments 表（P1-1 Environment 模型）：项目内的部署/测试目标环境。
@@ -43,16 +45,19 @@ public class EnvironmentEntity {
 
     /** JSON 数组：servers 表 id 列表 */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "server_ids_json", length = 16_777_216)
     private String serverIdsJson;
 
     /** JSON map：环境变量（部署/测试时注入） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "variables_json", length = 16_777_216)
     private String variablesJson;
 
     /** JSON 数组：密钥名称列表（仅名称引用，不存值） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "secrets_json", length = 16_777_216)
     private String secretsJson;
 

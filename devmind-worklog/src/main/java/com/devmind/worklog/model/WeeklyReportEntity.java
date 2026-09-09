@@ -12,6 +12,8 @@ import org.hibernate.annotations.ColumnDefault;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * weekly_reports 表（CAP-28 FR-06）：AI 生成的周报，上周总结 + 下周计划草稿。
@@ -38,11 +40,13 @@ public class WeeklyReportEntity {
 
     /** 上周工作总结 */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "summary_md", length = 16_777_216)
     private String summaryMd;
 
     /** 下周工作计划草稿 */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "next_plan_md", length = 16_777_216)
     private String nextPlanMd;
 

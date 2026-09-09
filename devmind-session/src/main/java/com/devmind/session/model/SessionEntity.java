@@ -7,6 +7,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * sessions 表：会话元数据（短 ID 同时用于 worktree 目录名）。
@@ -31,6 +33,7 @@ public class SessionEntity {
     private String requirementId;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "task_spec", length = 16_777_216)
     private String taskSpec;
 
@@ -60,6 +63,7 @@ public class SessionEntity {
     private String createdBy;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String summary;
 
@@ -69,6 +73,7 @@ public class SessionEntity {
 
     /** CAP-33 FR-07：装配时的上下文清单快照（JSON；只存清单不存包内容，重建=重跑装配） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "context_manifest_json", length = 16_777_216)
     private String contextManifestJson;
 

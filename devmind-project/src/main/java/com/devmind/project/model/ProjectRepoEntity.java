@@ -10,6 +10,8 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.ColumnDefault;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * project_repos 表（P0-4 项目多库模型）：项目 = 多 git 库组合。
@@ -93,6 +95,7 @@ public class ProjectRepoEntity {
 
     /** CAP-23 全量克隆日志（WS 快照 + REST 回放用，对齐 BuildEntity.logsText 先例） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "clone_logs", length = 16_777_216)
     private String cloneLogs;
 

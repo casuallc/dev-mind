@@ -10,6 +10,8 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.ColumnDefault;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * git_repositories 表（CAP-29）：全局代码仓库登记，平台级共享、不挂项目。
@@ -75,6 +77,7 @@ public class GitRepositoryEntity {
 
     /** 远程分支列表（换行分隔，fetch 刷新） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String branches;
 

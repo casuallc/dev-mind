@@ -9,6 +9,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * skill_files 表：skill 包的附属文件（references/scripts 等，相对路径）。
@@ -37,10 +39,12 @@ public class SkillFileEntity {
     private boolean binary;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String contentText;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARBINARY)
     @Column(length = 16_777_216)
     private byte[] contentBytes;
 

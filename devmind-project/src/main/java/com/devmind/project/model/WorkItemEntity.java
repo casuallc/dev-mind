@@ -8,6 +8,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * work_items 表（CAP-13 研发主线）：工作单元，可派发给 agent/人执行的最小单位。
@@ -58,6 +60,7 @@ public class WorkItemEntity {
 
     /** 执行输入：起 Session 时作为 taskSpec 注入（拆分时由 AI 生成、人可编辑） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "spec", length = 16_777_216)
     private String spec;
 

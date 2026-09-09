@@ -5,6 +5,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * 通知偏好（CAP-06 FR-05 防打扰）：免打扰时段、按事件/实体的静默。
@@ -19,6 +21,7 @@ public class NotificationPrefsEntity {
 
     /** 静默配置 JSON：{"eventTypes":["SESSION_DONE"],"entityIds":["abc123"]} */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String mutesJson;
 

@@ -8,6 +8,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * 文档版本（CAP-03 FR-02）：每次保存生成新版本，保留全量历史与 commit_sha（docs-repo 镜像提交）。
@@ -27,6 +29,7 @@ public class DocumentVersionEntity {
     private int versionNo;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String contentMd;
 

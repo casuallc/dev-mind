@@ -9,6 +9,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * builds 表（CAP-08 FR-04/05/06）：一次构建记录。
@@ -51,6 +53,7 @@ public class BuildEntity {
 
     /** 触发时固化的步骤清单（JSON: [{name,command,workingDir,location}]） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "steps_snapshot", length = 16_777_216)
     private String stepsSnapshot;
 
@@ -69,10 +72,12 @@ public class BuildEntity {
     private Integer exitCode;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "error_summary", length = 16_777_216)
     private String errorSummary;
 
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "logs_text", length = 16_777_216)
     private String logsText;
 

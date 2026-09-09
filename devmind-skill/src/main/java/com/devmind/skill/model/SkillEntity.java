@@ -9,6 +9,8 @@ import jakarta.persistence.UniqueConstraint;
 import org.hibernate.annotations.ColumnDefault;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * skills 表（Skill 管理，基础模块）：Claude Code skill 包本体。
@@ -54,11 +56,13 @@ public class SkillEntity {
 
     /** SKILL.md 正文（frontmatter 之后部分） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String contentMd;
 
     /** 其余 frontmatter 键的 JSON（如 allowed-tools），导出时原样拼回 */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String extraFrontmatter;
 

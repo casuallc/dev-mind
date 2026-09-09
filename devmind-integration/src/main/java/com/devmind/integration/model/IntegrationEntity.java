@@ -9,6 +9,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * integrations 表（CAP-18 FR-01）：一个外部平台实例的配置。
@@ -62,6 +64,7 @@ public class IntegrationEntity {
 
     /** 连接器专属配置 JSON（预留） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(name = "config_json", length = 16_777_216)
     private String configJson;
 

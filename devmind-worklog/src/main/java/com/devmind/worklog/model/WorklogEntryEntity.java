@@ -11,6 +11,8 @@ import org.hibernate.annotations.ColumnDefault;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * worklog_entries 表（CAP-28 FR-03）：个人工作条目，每天多条，各记工时。
@@ -48,6 +50,7 @@ public class WorklogEntryEntity {
 
     /** 详情（@Lob 必带 length：裸 @Lob 在 MySQL 落成 tinytext 的历史教训） */
     @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
     private String content;
 
