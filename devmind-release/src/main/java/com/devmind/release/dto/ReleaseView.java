@@ -17,7 +17,7 @@ public record ReleaseView(
         String nexusRef,
         String tagName,
         String executor,
-        Long serverId,
+        String agentNodeId,
         Long rollbackOf,
         String errorSummary,
         String createdBy,

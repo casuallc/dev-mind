@@ -59,13 +59,13 @@ public class ReleaseEntity {
     @Column(name = "tag_name", length = 256)
     private String tagName;
 
-    /** 执行方式：LOCAL / REMOTE */
+    /** 执行方式：LOCAL / AGENT（CAP-36：runner 节点执行，取代 REMOTE/SSH） */
     @Column(length = 16)
     private String executor;
 
-    /** 远程执行目标服务器 id（executor=REMOTE 时有效） */
-    @Column(name = "server_id")
-    private Long serverId;
+    /** 节点执行目标 runner id（executor=AGENT 时有效；CAP-36） */
+    @Column(name = "agent_node_id", length = 64)
+    private String agentNodeId;
 
     /** 回滚来源：本记录是对该发版的回滚 */
     @Column(name = "rollback_of")
@@ -111,8 +111,8 @@ public class ReleaseEntity {
     public void setTagName(String tagName) { this.tagName = tagName; }
     public String getExecutor() { return executor; }
     public void setExecutor(String executor) { this.executor = executor; }
-    public Long getServerId() { return serverId; }
-    public void setServerId(Long serverId) { this.serverId = serverId; }
+    public String getAgentNodeId() { return agentNodeId; }
+    public void setAgentNodeId(String agentNodeId) { this.agentNodeId = agentNodeId; }
     public Long getRollbackOf() { return rollbackOf; }
     public void setRollbackOf(Long rollbackOf) { this.rollbackOf = rollbackOf; }
     public String getLogsText() { return logsText; }

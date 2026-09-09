@@ -20,13 +20,17 @@ import org.springframework.stereotype.Service;
 
 import com.devmind.build.model.BuildEntity;
 import com.devmind.build.service.BuildService;
+import com.devmind.common.agent.AgentExecCommand;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.integration.PlatformIntegrationHook;
 import com.devmind.common.integration.RepoGitGateway;
 import com.devmind.execution.model.StepResult;
 import com.devmind.execution.model.StepSpec;
+import com.devmind.execution.runner.AgentNodeRouter;
+import com.devmind.execution.runner.AgentNodeStepRunner;
 import com.devmind.execution.runner.LocalStepRunner;
+import com.devmind.execution.template.ScriptTemplateService;
 import com.devmind.execution.ws.ExecutionLogHub;
 import com.devmind.notification.dto.NotificationDraft;
 import com.devmind.notification.model.NotificationLevel;
@@ -39,15 +43,11 @@ import com.devmind.release.dto.CreateReleaseRequest;
 import com.devmind.release.dto.ReleaseView;
 import com.devmind.release.model.ReleaseEntity;
 import com.devmind.release.repo.ReleaseRepository;
-import com.devmind.serveradapter.model.ScriptTemplateEntity;
-import com.devmind.serveradapter.repo.ScriptTemplateRepository;
-import com.devmind.serveradapter.service.ServerOperationService;
-import com.devmind.serveradapter.spi.ExecResult;
-import com.devmind.serveradapter.spi.ScriptTemplate;
 
 /**
  * CAP-11 发版编排（复用 P0-1 执行底座）：创建（版本解析 FR-02/幂等/校验构建产物）→ 异步执行
- * （LOCAL=LocalStepRunner 渲染模板正文在主库路径执行；REMOTE=经 CAP-07 模板白名单 capability=release）
+ * （LOCAL=LocalStepRunner 渲染模板正文在主库路径执行；AGENT=CAP-36 渲染后经 exec 帧下发 runner 节点，
+ * 主库 remoteUrl + Git 凭据随帧下发准备构建工作区）
  * → git tag v&lt;version&gt;（FR-04）→ 状态机 PLANNED/RUNNING/SUCCESS/FAILED/ROLLED_BACK
  * → 通知（FR-07 成功 P1 / 失败 P0）；回滚=删 tag + 移除 Nexus 制品引用（FR-06）。
  * 关键陷阱同构建/部署：execute() 不标 @Transactional，save() 自身事务即时提交后异步 run() 才能看到未提交行。
@@ -63,8 +63,9 @@ public class ReleaseService {
     private final ReleaseRepository repo;
     private final ReleaseConfigRepository releaseConfigRepo;
     private final ProjectService projectService;
-    private final ServerOperationService serverOpService;
-    private final ScriptTemplateRepository templateRepo;
+    private final AgentNodeRouter agentNodeRouter;
+    private final AgentNodeStepRunner agentNodeRunner;
+    private final ScriptTemplateService templateService;
     private final BuildService buildService;
     private final LocalStepRunner localRunner;
     private final NotificationService notificationService;
@@ -77,8 +78,9 @@ public class ReleaseService {
     public ReleaseService(ReleaseRepository repo,
                           ReleaseConfigRepository releaseConfigRepo,
                           ProjectService projectService,
-                          ServerOperationService serverOpService,
-                          ScriptTemplateRepository templateRepo,
+                          AgentNodeRouter agentNodeRouter,
+                          AgentNodeStepRunner agentNodeRunner,
+                          ScriptTemplateService templateService,
                           BuildService buildService,
                           LocalStepRunner localRunner,
                           NotificationService notificationService,
@@ -92,8 +94,9 @@ public class ReleaseService {
         this.repo = repo;
         this.releaseConfigRepo = releaseConfigRepo;
         this.projectService = projectService;
-        this.serverOpService = serverOpService;
-        this.templateRepo = templateRepo;
+        this.agentNodeRouter = agentNodeRouter;
+        this.agentNodeRunner = agentNodeRunner;
+        this.templateService = templateService;
         this.buildService = buildService;
         this.localRunner = localRunner;
         this.notificationService = notificationService;
@@ -118,13 +121,15 @@ public class ReleaseService {
 
         String executor = normalizeExecutor(req.executor() != null && !req.executor().isBlank()
                 ? req.executor() : cfg.getExecutor());
-        Long serverId = req.serverId() != null ? req.serverId() : cfg.getRemoteServerId();
-        if ("REMOTE".equals(executor)) {
-            if (serverId == null) {
-                throw new DevMindException(ErrorCode.BAD_REQUEST,
-                        "远程发版需指定目标服务器（executor=REMOTE 时 remoteServerId 必填）");
+        // CAP-36 目标节点：显式 > 项目发版配置 > 节点路由链（项目默认 > 平台默认），fail-fast 409
+        String agentNodeId = req.agentNodeId() != null && !req.agentNodeId().isBlank()
+                ? req.agentNodeId().trim() : cfg.getAgentNodeId();
+        if ("AGENT".equals(executor)) {
+            if (agentNodeId == null || agentNodeId.isBlank()) {
+                agentNodeId = agentNodeRouter.route(null,
+                        projectService.requireProject(req.projectId()).agentNodeId(), null);
             }
-            serverOpService.requireServer(serverId);
+            agentNodeRouter.requireExecCapable(agentNodeId);
         }
         if (cfg.getScriptTemplateRef() == null || cfg.getScriptTemplateRef().isBlank()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "项目未配置推送脚本模板引用（scriptTemplateRef）");
@@ -162,7 +167,7 @@ public class ReleaseService {
         r.setNexusRef(blankToNull(cfg.getNexusRepo()) == null ? null : cfg.getNexusRepo().trim() + ":" + version);
         r.setTagName("v" + version);
         r.setExecutor(executor);
-        r.setServerId(serverId);
+        r.setAgentNodeId(agentNodeId);
         r.setCreatedBy(identityService.currentActor());
         r.setCreatedAt(Instant.now());
         return toView(repo.save(r));
@@ -225,32 +230,33 @@ public class ReleaseService {
                 throw new DevMindException(ErrorCode.BAD_REQUEST, "项目发版配置已不存在");
             }
             Map<String, String> params = paramsOf(r, cfg);
+            Map<String, String> env = new HashMap<>();
+            env.put("RELEASE_PROJECT_ID", nz(r.getProjectId()));
+            env.put("RELEASE_VERSION", nz(r.getReleaseVersion()));
+            env.put("RELEASE_ARTIFACT", nz(r.getArtifactRef()));
+            env.put("RELEASE_REPOSITORY", nz(cfg.getNexusRepo()));
+            env.put("RELEASE_TAG", nz(r.getTagName()));
             boolean ok;
             String err;
-            if ("REMOTE".equals(r.getExecutor())) {
-                sink.accept("===== 远程执行发版脚本（服务器 " + r.getServerId() + " · 模板 " + cfg.getScriptTemplateRef() + "）=====");
-                ExecResult res = serverOpService.execute(r.getServerId(), cfg.getScriptTemplateRef().trim(), params, "release");
-                streamOut(sink, res.stdout(), res.stderr());
-                ok = res.success();
-                err = ok ? null : failureReason(res);
+            if ("AGENT".equals(r.getExecutor())) {
+                // CAP-36：模板渲染（白名单 capability=release）→ exec 帧下发 runner 节点；
+                // 主库有 http(s) remoteUrl 时随帧下发凭据准备构建工作区（checkout 到关联构建 commit）
+                sink.accept("===== 节点执行发版脚本（节点 " + r.getAgentNodeId() + " · 模板 "
+                        + cfg.getScriptTemplateRef() + "）=====");
+                String rendered = templateService.renderTemplate(r.getProjectId(),
+                        cfg.getScriptTemplateRef().trim(), "release", params);
+                AgentExecCommand.Repo execRepo = buildExecRepo(r, sink);
+                StepResult res = agentNodeRunner.runStep(r.getAgentNodeId(), r.getProjectId(),
+                        "release-" + r.getId(), 0,
+                        new StepSpec("release-push", rendered, null, "release"), env, execRepo, sink);
+                ok = res.ok();
+                err = ok ? null : (res.error() == null ? "exit=" + res.exitCode() : res.error());
             } else {
-                ScriptTemplateEntity tplEntity = templateRepo.findByProjectIdAndCode(
-                                r.getProjectId(), cfg.getScriptTemplateRef().trim())
-                        .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND,
-                                "项目 " + r.getProjectId() + " 无模板 " + cfg.getScriptTemplateRef().trim()
-                                        + "（白名单外不可执行）"));
-                ScriptTemplate tpl = serverOpService.toDomain(tplEntity);
-                checkRequired(tpl, params);
-                String rendered = tpl.render(params);
+                String rendered = templateService.renderTemplate(r.getProjectId(),
+                        cfg.getScriptTemplateRef().trim(), "release", params);
                 ProjectRepoEntity primary = projectService.primaryRepo(r.getProjectId());
                 String repoPath = primary.getPath();
                 sink.accept("===== 本地执行发版脚本（仓库 " + repoPath + "）=====");
-                Map<String, String> env = new HashMap<>();
-                env.put("RELEASE_PROJECT_ID", nz(r.getProjectId()));
-                env.put("RELEASE_VERSION", nz(r.getReleaseVersion()));
-                env.put("RELEASE_ARTIFACT", nz(r.getArtifactRef()));
-                env.put("RELEASE_REPOSITORY", nz(cfg.getNexusRepo()));
-                env.put("RELEASE_TAG", nz(r.getTagName()));
                 StepResult res = localRunner.runStep(Path.of(repoPath),
                         new StepSpec("release-push", rendered, null, "LOCAL"), env, sink);
                 ok = res.ok();
@@ -362,17 +368,57 @@ public class ReleaseService {
         return p;
     }
 
-    private void checkRequired(ScriptTemplate tpl, Map<String, String> params) {
-        for (ScriptTemplate.ParamSpec p : tpl.params()) {
-            if (!p.required()) {
-                continue;
+    /**
+     * CAP-36 AGENT 发版的工作区描述：remoteUrl 取项目主库，token 经 RepoGitGateway 按 CAP-35 身份链解析
+     * （发版人个人 PAT → 项目绑定 Integration），随 exec 帧下发（runner 仅内存持有）。
+     * checkout 基准 = 关联构建 commit（无则分支 HEAD）。无 remoteUrl / 非 http(s) 远端返回 null——
+     * runner 不准备代码，退化到节点项目映射目录执行（日志留痕）。
+     */
+    private AgentExecCommand.Repo buildExecRepo(ReleaseEntity r, Consumer<String> sink) {
+        String remoteUrl;
+        String branch = null;
+        try {
+            ProjectRepoEntity primary = projectService.primaryRepo(r.getProjectId());
+            remoteUrl = primary == null ? null : primary.getRemoteUrl();
+            branch = primary == null ? null : primary.getDefaultBranch();
+        } catch (Exception e) {
+            remoteUrl = null;
+        }
+        if (remoteUrl == null || remoteUrl.isBlank()) {
+            sink.accept("[工作区] 项目主库无 remoteUrl，runner 侧不拉取代码（使用节点本地映射目录）");
+            return null;
+        }
+        String url = remoteUrl.trim();
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            sink.accept("[工作区] 非 http(s) 远端（" + hostOf(url) + "），runner 侧不拉取代码（使用节点本地映射目录）");
+            return null;
+        }
+        String commit = null;
+        if (r.getBuildId() != null) {
+            try {
+                commit = buildService.requireBuild(r.getBuildId()).getCommit();
+            } catch (Exception e) {
+                log.debug("关联构建 {} 读取 commit 失败(忽略): {}", r.getBuildId(), e.getMessage());
             }
-            String v = params != null ? params.get(p.name()) : null;
-            boolean hasDefault = p.defaultValue() != null && !p.defaultValue().isBlank();
-            if ((v == null || v.isBlank()) && !hasDefault) {
-                throw new DevMindException(ErrorCode.BAD_REQUEST,
-                        "模板 " + tpl.code() + " 缺少必填参数: " + p.name());
-            }
+        }
+        String token = null;
+        RepoGitGateway gw = repoGitGateway.getIfAvailable();
+        if (gw != null) {
+            token = gw.resolveToken(r.getCreatedBy(), hostOf(url), r.getProjectId()).orElse(null);
+        }
+        if (token == null) {
+            sink.accept("[工作区] 未解析到 Git 凭据（个人 PAT / 项目绑定集成均无），按匿名克隆");
+        } else {
+            sink.accept("[工作区] Git 凭据已随帧下发（runner 仅内存持有）");
+        }
+        return new AgentExecCommand.Repo(url, branch, commit, token);
+    }
+
+    private static String hostOf(String url) {
+        try {
+            return java.net.URI.create(url.trim()).getHost();
+        } catch (IllegalArgumentException e) {
+            return null;
         }
     }
 
@@ -414,8 +460,13 @@ public class ReleaseService {
         return major + "." + minor + "." + next;
     }
 
+    /** CAP-36：executor ∈ LOCAL|AGENT；历史 REMOTE 一律映射为 AGENT（SSH 通道已下线） */
     private String normalizeExecutor(String executor) {
-        return executor != null && "REMOTE".equalsIgnoreCase(executor.trim()) ? "REMOTE" : "LOCAL";
+        if (executor == null) {
+            return "LOCAL";
+        }
+        String t = executor.trim();
+        return "AGENT".equalsIgnoreCase(t) || "REMOTE".equalsIgnoreCase(t) ? "AGENT" : "LOCAL";
     }
 
     private String primaryRepoPath(String projectId) {
@@ -502,31 +553,6 @@ public class ReleaseService {
         return String.valueOf(releaseId);
     }
 
-    private String failureReason(ExecResult r) {
-        String e = firstLine(r.stderr());
-        if (e != null && !e.isBlank()) {
-            return e;
-        }
-        e = lastLine(r.stdout());
-        if (e != null && !e.isBlank()) {
-            return e;
-        }
-        return "exit=" + r.exitCode();
-    }
-
-    private void streamOut(Consumer<String> sink, String stdout, String stderr) {
-        if (stdout != null && !stdout.isBlank()) {
-            for (String l : stdout.split("\\R")) {
-                sink.accept(l);
-            }
-        }
-        if (stderr != null && !stderr.isBlank()) {
-            for (String l : stderr.split("\\R")) {
-                sink.accept("[stderr] " + l);
-            }
-        }
-    }
-
     private void notify(ReleaseEntity r, NotificationLevel level, String title, String body) {
         try {
             notificationService.emit(new NotificationDraft(level, "release", title, body,
@@ -539,33 +565,8 @@ public class ReleaseService {
     private ReleaseView toView(ReleaseEntity r) {
         return new ReleaseView(r.getId(), r.getProjectId(), r.getWorkItemId(), r.getBuildId(),
                 r.getReleaseVersion(), r.getStatus(), r.getArtifactRef(), r.getNexusRef(), r.getTagName(),
-                r.getExecutor(), r.getServerId(), r.getRollbackOf(), r.getErrorSummary(), r.getCreatedBy(),
+                r.getExecutor(), r.getAgentNodeId(), r.getRollbackOf(), r.getErrorSummary(), r.getCreatedBy(),
                 r.getStartedAt(), r.getFinishedAt(), r.getCreatedAt());
-    }
-
-    private String firstLine(String s) {
-        if (s == null) {
-            return null;
-        }
-        for (String l : s.split("\\R")) {
-            if (!l.isBlank()) {
-                return l.trim();
-            }
-        }
-        return null;
-    }
-
-    private String lastLine(String s) {
-        if (s == null) {
-            return null;
-        }
-        String last = null;
-        for (String l : s.split("\\R")) {
-            if (!l.isBlank()) {
-                last = l.trim();
-            }
-        }
-        return last;
     }
 
     private String blankToNull(String s) {
