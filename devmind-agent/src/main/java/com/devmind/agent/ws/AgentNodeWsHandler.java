@@ -145,6 +145,13 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
                     frame.path("code").asInt(-1));
             case "launched" -> registry.onLaunchAck(frame.path("sessionId").asText(""),
                     frame.path("ok").asBoolean(false), frame.path("error").asText(null));
+            // CAP-36：exec 上行帧（exec_log 流式日志 / exec_exit 收口）
+            case "exec_log" -> registry.onExecLog(String.valueOf(node.getId()),
+                    frame.path("execId").asText(""), frame.path("stream").asText("stdout"),
+                    frame.path("chunk").asText(""));
+            case "exec_exit" -> registry.onExecExit(String.valueOf(node.getId()),
+                    frame.path("execId").asText(""), frame.path("code").asInt(-1),
+                    frame.path("timedOut").asBoolean(false), frame.path("error").asText(null));
             case "upgrade_ack" -> registry.onUpgradeAck(String.valueOf(node.getId()),
                     frame.path("ok").asBoolean(false), frame.path("reason").asText(null),
                     frame.path("activeSessions").asInt(0));

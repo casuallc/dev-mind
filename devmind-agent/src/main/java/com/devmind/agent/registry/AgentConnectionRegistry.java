@@ -8,6 +8,8 @@ import com.devmind.agent.service.AgentConnLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.common.agent.AgentEventFrame;
 import com.devmind.common.agent.AgentEventListener;
+import com.devmind.common.agent.AgentExecCommand;
+import com.devmind.common.agent.AgentExecResult;
 import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.AgentProtocol;
@@ -52,6 +54,11 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     public record UpgradeAck(boolean ok, String reason, int activeSessions) {
     }
 
+    /** CAP-36 exec 等待者：日志帧实时推 sink，exec_exit 完成 future。 */
+    private record ExecWaiter(String nodeId, java.util.function.Consumer<String> sink,
+                              CompletableFuture<AgentExecResult> done) {
+    }
+
     private final AgentNodeService nodeService;
     private final AgentProperties props;
     private final ObjectMapper mapper;
@@ -68,6 +75,8 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private final Map<String, CompletableFuture<UpgradeAck>> pendingUpgrades = new ConcurrentHashMap<>();
     /** nodeId → hello 上报的协议版本（CAP-34 FR-08，断连清除；无记录按 v1 对待） */
     private final Map<String, Integer> protocolVersions = new ConcurrentHashMap<>();
+    /** execId → exec 等待者（CAP-36） */
+    private final Map<String, ExecWaiter> pendingExecs = new ConcurrentHashMap<>();
 
     public AgentConnectionRegistry(AgentNodeService nodeService, AgentProperties props,
                                    ObjectMapper mapper, ObjectProvider<AgentEventListener> listenerProvider,
@@ -111,6 +120,12 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         if (pending != null) {
             pending.complete(new UpgradeAck(false, "disconnect", 0));
         }
+        // CAP-36：断线即失败该节点进行中的 exec（runner 已死，exec_exit 不会再来）
+        for (Map.Entry<String, ExecWaiter> e : pendingExecs.entrySet()) {
+            if (e.getValue().nodeId().equals(nodeId) && pendingExecs.remove(e.getKey(), e.getValue())) {
+                e.getValue().done().complete(AgentExecResult.failed("节点断连，exec 中断"));
+            }
+        }
         // CAP-30：事件广播（原 getIfAvailable 单实现，chat 加入后有多实现）——各 bridge
         // 按「自己是否持有该 sessionId 的运行时」自行忽略未命中帧
         listenerProvider.forEach(l -> l.onAgentDisconnected(nodeId));
@@ -152,6 +167,29 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         CompletableFuture<UpgradeAck> future = pendingUpgrades.remove(nodeId);
         if (future != null) {
             future.complete(new UpgradeAck(ok, reason, activeSessions));
+        }
+    }
+
+    /** CAP-36：exec_log 上行帧 → 实时推给等待中的 sink（stderr 行前缀与 LocalStepRunner 一致）。 */
+    public void onExecLog(String nodeId, String execId, String stream, String chunk) {
+        touch(nodeId);
+        ExecWaiter w = pendingExecs.get(execId);
+        if (w == null || !w.nodeId().equals(nodeId)) {
+            return;
+        }
+        try {
+            w.sink().accept("stderr".equals(stream) ? "[stderr] " + chunk : chunk);
+        } catch (Exception e) {
+            log.debug("exec_log sink 异常: {}", e.getMessage());
+        }
+    }
+
+    /** CAP-36：exec_exit 上行帧 → 收口完成等待 future。 */
+    public void onExecExit(String nodeId, String execId, int code, boolean timedOut, String error) {
+        touch(nodeId);
+        ExecWaiter w = pendingExecs.get(execId);
+        if (w != null && w.nodeId().equals(nodeId)) {
+            w.done().complete(new AgentExecResult(code, timedOut, error));
         }
     }
 
@@ -312,6 +350,55 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     @Override
     public void sendSuspend(String nodeId, String sessionId) {
         sendCommand(nodeId, sessionId, "suspend");
+    }
+
+    /**
+     * CAP-36：下发 exec 帧并阻塞至 exec_exit（镜像 launch 的「发帧 + 等 ack」模式）。
+     * 协议门控：runner 低于 v3 直接 409 提示升级；等待上限 = 步骤超时 + 120s 余量
+     * （runner 侧超时 kill 后仍会回 exec_exit，这里只兜 runner 无响应）。
+     */
+    @Override
+    public AgentExecResult exec(String nodeId, AgentExecCommand cmd, java.util.function.Consumer<String> sink) {
+        if (!supports(nodeId, AgentProtocol.EXEC_FRAMES)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 的 runner 协议版本过低（exec 需 v" + AgentProtocol.EXEC_FRAMES
+                            + "+），请到节点页升级 runner");
+        }
+        WebSocketSession ws = requireConnection(nodeId);
+        CompletableFuture<AgentExecResult> done = new CompletableFuture<>();
+        pendingExecs.put(cmd.execId(), new ExecWaiter(nodeId, sink, done));
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "exec");
+        frame.put("execId", cmd.execId());
+        frame.put("projectId", cmd.projectId());
+        frame.put("workspaceId", cmd.workspaceId());
+        frame.put("command", cmd.command());
+        frame.put("workingDir", cmd.workingDir());
+        frame.put("timeoutSec", cmd.timeoutSec());
+        if (cmd.env() != null && !cmd.env().isEmpty()) {
+            frame.put("env", cmd.env());
+        }
+        // token 仅随帧传输，严禁进日志（同 CAP-25 launch repo 块红线）
+        if (cmd.repo() != null) {
+            Map<String, Object> repo = new LinkedHashMap<>();
+            repo.put("remoteUrl", cmd.repo().remoteUrl());
+            repo.put("branch", cmd.repo().branch());
+            repo.put("commit", cmd.repo().commit());
+            repo.put("token", cmd.repo().token());
+            frame.put("repo", repo);
+        }
+        try {
+            send(ws, frame);
+            return done.get(cmd.timeoutSec() + 120, TimeUnit.SECONDS);
+        } catch (DevMindException e) {
+            throw e;
+        } catch (java.util.concurrent.TimeoutException e) {
+            return new AgentExecResult(-1, true, "等待 runner exec_exit 超时（runner 无响应）");
+        } catch (Exception e) {
+            throw new DevMindException(ErrorCode.CONFLICT, "exec 下发异常: " + e.getMessage(), e);
+        } finally {
+            pendingExecs.remove(cmd.execId());
+        }
     }
 
     /** 非强制升级（force=false），等价于 {@link #sendUpgrade(Long, String, String, long, boolean)}。 */
