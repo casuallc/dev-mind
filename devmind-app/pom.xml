@@ -139,6 +139,12 @@
             <scope>runtime</scope>
         </dependency>
         <dependency>
+            <!-- PostgreSQL 支持：同 MySQL，驱动随包携带，application-local.yml 覆盖 spring.datasource 即可 -->
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-configuration-processor</artifactId>
             <optional>true</optional>

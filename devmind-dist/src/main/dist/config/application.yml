@@ -31,4 +31,5 @@ devmind:
 #     driver-class-name: com.mysql.cj.jdbc.Driver
 #     username: ...
 #     password: ...
-# PostgreSQL 同理（url: jdbc:postgresql://host:5432/devmind），但驱动未随包，需自行放入 libs/。
+# PostgreSQL 同理（url: jdbc:postgresql://host:5432/devmind，driver-class-name: org.postgresql.Driver），
+# 驱动亦随包携带；注意 PG 需提前手工建库（无 createDatabaseIfNotExist 机制）。
