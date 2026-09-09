@@ -1,4 +1,4 @@
-import { Badge, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
+import { Badge, Button, Card, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
 import { ApiOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import {
@@ -78,6 +78,24 @@ export default function PlatformAccountsPage() {
     }
   }
 
+  const onUnbind = (row: PlatformAccount) => {
+    Modal.confirm({
+      title: `解绑「${row.integrationName}」的我的账号？`,
+      content: '解绑后写操作将回退平台（机器人）凭证',
+      centered: true,
+      okText: '解绑',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: () =>
+        unbindPlatformAccount(row.integrationId)
+          .then(() => {
+            message.success('已解绑')
+            reload()
+          })
+          .catch((e) => showError(e, '解绑失败')),
+    })
+  }
+
   const onTest = async (row: PlatformAccount) => {
     setTestingId(row.integrationId)
     try {
@@ -136,10 +154,11 @@ export default function PlatformAccountsPage() {
           {
             title: '绑定状态',
             dataIndex: 'bound',
-            width: 110,
+            width: 140,
+            onCell: () => ({ style: { whiteSpace: 'nowrap' } }),
             render: (bound: boolean, row) =>
               bound ? (
-                <Space size={4}>
+                <Space size={4} wrap={false}>
                   <Badge status="success" text="已绑定" />
                   <Tooltip title={row.authType === 'BASIC' ? `账号密码（${row.username}）` : 'PAT'}>
                     <Tag>{row.authType === 'BASIC' ? '账号密码' : 'PAT'}</Tag>
@@ -181,22 +200,9 @@ export default function PlatformAccountsPage() {
                     >
                       自检
                     </Button>
-                    <Popconfirm
-                      title={`解绑「${row.integrationName}」的我的账号？`}
-                      description="解绑后写操作将回退平台（机器人）凭证"
-                      onConfirm={() =>
-                        unbindPlatformAccount(row.integrationId)
-                          .then(() => {
-                            message.success('已解绑')
-                            reload()
-                          })
-                          .catch((e) => showError(e, '解绑失败'))
-                      }
-                    >
-                      <Button size="small" danger>
-                        解绑
-                      </Button>
-                    </Popconfirm>
+                    <Button size="small" danger onClick={() => onUnbind(row)}>
+                      解绑
+                    </Button>
                   </>
                 )}
               </Space>
