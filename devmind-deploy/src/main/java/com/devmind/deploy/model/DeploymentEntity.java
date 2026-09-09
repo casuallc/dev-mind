@@ -38,8 +38,9 @@ public class DeploymentEntity {
     @Column(name = "work_item_id", length = 32)
     private String workItemId;
 
-    @Column(name = "server_id", nullable = false)
-    private Long serverId;
+    /** 目标 runner 节点 id（CAP-36：部署在 agent 节点本地执行，取代 servers 表 server_id） */
+    @Column(name = "agent_node_id", nullable = false, length = 64)
+    private String agentNodeId;
 
     @Column(name = "build_id")
     private Long buildId;
@@ -107,8 +108,8 @@ public class DeploymentEntity {
     public void setProjectId(String projectId) { this.projectId = projectId; }
     public String getWorkItemId() { return workItemId; }
     public void setWorkItemId(String workItemId) { this.workItemId = workItemId; }
-    public Long getServerId() { return serverId; }
-    public void setServerId(Long serverId) { this.serverId = serverId; }
+    public String getAgentNodeId() { return agentNodeId; }
+    public void setAgentNodeId(String agentNodeId) { this.agentNodeId = agentNodeId; }
     public Long getBuildId() { return buildId; }
     public void setBuildId(Long buildId) { this.buildId = buildId; }
     public String getEnv() { return env; }

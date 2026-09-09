@@ -38,7 +38,7 @@ public record RequirementOverviewView(
                               String triggeredBy, String workItemId, Instant createdAt, Instant finishedAt) {
     }
 
-    public record DeploymentItem(Long id, String status, String env, Long serverId, Long buildId,
+    public record DeploymentItem(Long id, String status, String env, String agentNodeId, Long buildId,
                                  String workItemId, String createdBy, Instant createdAt, Instant finishedAt) {
     }
 

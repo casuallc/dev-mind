@@ -90,7 +90,7 @@ public class RequirementOverviewService {
         List<RequirementOverviewView.DeploymentItem> deployments = workItemIds.isEmpty() ? List.of()
                 : deploymentRepo.findByWorkItemIdInOrderByCreatedAtDesc(workItemIds).stream()
                 .map(d -> new RequirementOverviewView.DeploymentItem(d.getId(), d.getStatus(), d.getEnv(),
-                        d.getServerId(), d.getBuildId(), d.getWorkItemId(), d.getCreatedBy(),
+                        d.getAgentNodeId(), d.getBuildId(), d.getWorkItemId(), d.getCreatedBy(),
                         d.getCreatedAt(), d.getFinishedAt()))
                 .toList();
         List<RequirementOverviewView.ReleaseItem> releases = workItemIds.isEmpty() ? List.of()

@@ -35,6 +35,11 @@ import com.devmind.deploy.model.DeploymentStepEntity;
 import com.devmind.deploy.model.DeployStep;
 import com.devmind.deploy.repo.DeploymentRepository;
 import com.devmind.deploy.repo.DeploymentStepRepository;
+import com.devmind.execution.model.StepResult;
+import com.devmind.execution.model.StepSpec;
+import com.devmind.execution.runner.AgentNodeRouter;
+import com.devmind.execution.runner.AgentNodeStepRunner;
+import com.devmind.execution.template.ScriptTemplateService;
 import com.devmind.execution.ws.ExecutionLogHub;
 import com.devmind.notification.dto.ActionDef;
 import com.devmind.notification.dto.NotificationDraft;
@@ -43,14 +48,12 @@ import com.devmind.notification.service.NotificationService;
 import com.devmind.project.EnvironmentService;
 import com.devmind.project.ProjectService;
 import com.devmind.project.model.EnvironmentEntity;
-import com.devmind.project.model.ProjectServerEntity;
-import com.devmind.serveradapter.service.ServerOperationService;
-import com.devmind.serveradapter.spi.ExecResult;
 
 /**
- * CAP-09 部署编排：创建（渲染计划可见 + 幂等 FR-04）→ 异步执行（逐步走 CAP-07 模板白名单 capability=deploy，
- * 备份步捕获 backup= 行 → backup_ref）→ 任一步失败自动回滚（FR-03）→ 状态机
- * PLANNED/RUNNING/SUCCESS/FAILED/ROLLED_BACK → 通知（FR-06，成功 P1 / 失败·回滚 P0）。
+ * CAP-09 部署编排：创建（渲染计划可见 + 幂等 FR-04）→ 异步执行（逐步走模板白名单 capability=deploy，
+ * CAP-36 起渲染后经 exec 帧下发 runner 节点执行，备份步捕获 backup= 行 → backup_ref）
+ * → 任一步失败自动回滚（FR-03）→ 状态机 PLANNED/RUNNING/SUCCESS/FAILED/ROLLED_BACK
+ * → 通知（FR-06，成功 P1 / 失败·回滚 P0）。
  * 关键陷阱同构建：execute() 不标 @Transactional，save() 自身事务即时提交，否则异步 run() 看不到未提交行。
  */
 @Service
@@ -66,7 +69,9 @@ public class DeploymentService {
     private final DeploymentStepRepository stepRepo;
     private final DeployConfigService configService;
     private final ProjectService projectService;
-    private final ServerOperationService serverOpService;
+    private final AgentNodeRouter agentNodeRouter;
+    private final AgentNodeStepRunner agentNodeRunner;
+    private final ScriptTemplateService templateService;
     private final BuildService buildService;
     private final NotificationService notificationService;
     private final ExecutionLogHub hub;
@@ -78,7 +83,9 @@ public class DeploymentService {
                              DeploymentStepRepository stepRepo,
                              DeployConfigService configService,
                              ProjectService projectService,
-                             ServerOperationService serverOpService,
+                             AgentNodeRouter agentNodeRouter,
+                             AgentNodeStepRunner agentNodeRunner,
+                             ScriptTemplateService templateService,
                              BuildService buildService,
                              NotificationService notificationService,
                              ExecutionLogHub hub,
@@ -91,7 +98,9 @@ public class DeploymentService {
         this.stepRepo = stepRepo;
         this.configService = configService;
         this.projectService = projectService;
-        this.serverOpService = serverOpService;
+        this.agentNodeRouter = agentNodeRouter;
+        this.agentNodeRunner = agentNodeRunner;
+        this.templateService = templateService;
         this.buildService = buildService;
         this.notificationService = notificationService;
         this.hub = hub;
@@ -113,28 +122,31 @@ public class DeploymentService {
         boolean confirmRequired = req.confirmRequired() != null && req.confirmRequired();
         boolean force = req.force() != null && req.force();
 
-        // 收尾3：目标解析——environmentId（环境：服务器组+变量）优先补全 serverId/env 名；serverId 直指兼容旧用法
-        Long serverId = req.serverId();
+        // 目标节点解析（CAP-36）：environmentId（环境：节点组+变量）优先补全 agentNodeId/env 名；
+        // 显式 agentNodeId 直指节点；皆空走节点路由链（项目默认 > 平台默认），fail-fast 409
+        String agentNodeId = req.agentNodeId();
         String envName = req.env();
         if (req.environmentId() != null) {
             EnvironmentEntity environment = environmentService.requireEnvironment(projectId, req.environmentId());
             envName = environment.getName();
-            List<Long> envServers = environmentService.serverIdsOf(environment);
-            if (serverId == null) {
-                if (envServers.isEmpty()) {
+            List<String> envNodes = environmentService.nodeIdsOf(environment);
+            if (agentNodeId == null || agentNodeId.isBlank()) {
+                if (envNodes.isEmpty()) {
                     throw new DevMindException(ErrorCode.BAD_REQUEST,
-                            "环境 " + environment.getName() + " 未绑定服务器，请传 serverId 或在环境中配置");
+                            "环境 " + environment.getName() + " 未绑定节点，请传 agentNodeId 或在环境中配置");
                 }
-                serverId = envServers.get(0);
-            } else if (!envServers.isEmpty() && !envServers.contains(serverId)) {
+                agentNodeId = envNodes.get(0);
+            } else if (!envNodes.isEmpty() && !envNodes.contains(agentNodeId.trim())) {
                 throw new DevMindException(ErrorCode.BAD_REQUEST,
-                        "服务器 " + serverId + " 不属于环境 " + environment.getName() + " 的服务器组");
+                        "节点 " + agentNodeId + " 不属于环境 " + environment.getName() + " 的节点组");
             }
         }
-        if (serverId == null) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "serverId 与 environmentId 至少传一个");
+        if (agentNodeId == null || agentNodeId.isBlank()) {
+            agentNodeId = agentNodeRouter.route(null, projectService.requireProject(projectId).agentNodeId(), null);
+        } else {
+            agentNodeId = agentNodeId.trim();
         }
-        serverOpService.requireServer(serverId);
+        agentNodeRouter.requireExecCapable(agentNodeId);
 
         String artifact = null;
         if (req.buildId() != null) {
@@ -146,10 +158,10 @@ public class DeploymentService {
             artifact = build.getArtifactRef();
         }
 
-        // FR-04 幂等：同 project+server+build 的 PLANNED/RUNNING/SUCCESS 视为重复部署
+        // FR-04 幂等：同 project+node+build 的 PLANNED/RUNNING/SUCCESS 视为重复部署
         if (!force && req.buildId() != null) {
-            List<DeploymentEntity> dup = repo.findByProjectIdAndServerIdAndBuildIdAndStatusIn(
-                    projectId, serverId, req.buildId(),
+            List<DeploymentEntity> dup = repo.findByProjectIdAndAgentNodeIdAndBuildIdAndStatusIn(
+                    projectId, agentNodeId, req.buildId(),
                     List.of(DeploymentEntity.PLANNED, DeploymentEntity.RUNNING, DeploymentEntity.SUCCESS));
             if (!dup.isEmpty()) {
                 DeploymentEntity first = dup.get(0);
@@ -174,7 +186,7 @@ public class DeploymentService {
         DeploymentEntity d = new DeploymentEntity();
         d.setProjectId(projectId);
         d.setWorkItemId(req.workItemId());
-        d.setServerId(serverId);
+        d.setAgentNodeId(agentNodeId);
         d.setEnvironmentId(req.environmentId());
         d.setBuildId(req.buildId());
         d.setEnv(envName == null || envName.isBlank() ? "test" : envName);
@@ -266,7 +278,7 @@ public class DeploymentService {
         DeploymentEntity nd = new DeploymentEntity();
         nd.setProjectId(d.getProjectId());
         nd.setWorkItemId(d.getWorkItemId());
-        nd.setServerId(d.getServerId());
+        nd.setAgentNodeId(d.getAgentNodeId());
         nd.setBuildId(d.getBuildId());
         nd.setEnv(d.getEnv());
         nd.setPlanJson(writeJson(rb));
@@ -326,9 +338,8 @@ public class DeploymentService {
                 hub.publishEvent(topic(deploymentId), "step", toStepView(se));
                 sink.accept("===== 步骤 " + seq + "/" + plan.size() + " · " + label(s) + " =====");
 
-                ExecResult r = execStep(d, s, backupRef, artifact);
-                streamOut(sink, r.stdout(), r.stderr());
-                if (r.success()) {
+                StepResult r = execStep(d, seq, s, backupRef, artifact, sink);
+                if (r.ok()) {
                     se.setStatus(DeploymentStepEntity.SUCCESS);
                     se.setFinishedAt(Instant.now());
                     if ("backup".equalsIgnoreCase(s.type())) {
@@ -365,7 +376,7 @@ public class DeploymentService {
                             "原部署 #" + d.getRollbackOf() + " 已回滚到备份");
                 } else {
                     notify(d, NotificationLevel.P1, "部署成功 #" + d.getId(),
-                            "服务器 " + d.getServerId() + " · 环境 " + d.getEnv()
+                            "节点 " + d.getAgentNodeId() + " · 环境 " + d.getEnv()
                                     + (d.getBackupRef() == null ? "" : " · 备份 " + d.getBackupRef()));
                 }
             } else if (d.getRollbackOf() == null) {
@@ -411,7 +422,7 @@ public class DeploymentService {
             try {
                 // CAP-10 FR-05：发布终态事件，供自动回归监听（异常不影响主流程）
                 eventPublisher.publish(new DeploymentCompletedEvent(
-                        d.getId(), d.getProjectId(), d.getServerId(), DeploymentEntity.SUCCESS.equals(d.getStatus())));
+                        d.getId(), d.getProjectId(), d.getAgentNodeId(), DeploymentEntity.SUCCESS.equals(d.getStatus())));
             } catch (Exception ex) {
                 log.warn("发布部署完成事件失败: {}", ex.getMessage());
             }
@@ -434,9 +445,8 @@ public class DeploymentService {
             stepRepo.save(se);
             hub.publishEvent(topic(d.getId()), "step", toStepView(se));
             sink.accept("===== 回滚步骤 " + (i + 1) + "/" + rb.size() + " · " + label(s) + " =====");
-            ExecResult r = execStep(d, s, backupRef, artifact);
-            streamOut(sink, r.stdout(), r.stderr());
-            if (r.success()) {
+            StepResult r = execStep(d, seq, s, backupRef, artifact, sink);
+            if (r.ok()) {
                 se.setStatus(DeploymentStepEntity.SUCCESS);
                 se.setFinishedAt(Instant.now());
             } else {
@@ -456,7 +466,9 @@ public class DeploymentService {
         return allOk;
     }
 
-    private ExecResult execStep(DeploymentEntity d, DeployStep s, String backupRef, String artifact) {
+    /** 渲染模板（白名单 capability=deploy，环境变量作基底参数）→ exec 帧下发节点执行（CAP-36） */
+    private StepResult execStep(DeploymentEntity d, int stepIndex, DeployStep s, String backupRef, String artifact,
+                                Consumer<String> sink) {
         Map<String, String> p = new LinkedHashMap<>();
         // 环境变量作为基底参数注入（步骤 params 与内置变量可覆盖同名项）
         if (d.getEnvironmentId() != null) {
@@ -473,13 +485,17 @@ public class DeploymentService {
         }
         p.put("env", d.getEnv() == null ? "" : d.getEnv());
         p.put("projectId", d.getProjectId());
-        p.put("serverId", String.valueOf(d.getServerId()));
+        p.put("agentNodeId", d.getAgentNodeId());
+        // serverId 形参保留（历史模板可能引用 ${serverId}），值为节点 id
+        p.put("serverId", d.getAgentNodeId());
         p.put("artifact", artifact == null ? "" : artifact);
         p.put("backup", backupRef == null ? "" : backupRef);
         try {
-            return serverOpService.execute(d.getServerId(), s.templateCode(), p, "deploy");
+            String command = templateService.renderTemplate(d.getProjectId(), s.templateCode(), "deploy", p);
+            return agentNodeRunner.runStep(d.getAgentNodeId(), d.getProjectId(), "deploy-" + d.getId(), stepIndex,
+                    new StepSpec(label(s), command, null, "deploy"), Map.of(), null, sink);
         } catch (Exception e) {
-            return new ExecResult(-1, false, "", rootMessage(e), 0);
+            return StepResult.failed(-1, rootMessage(e));
         }
     }
 
@@ -522,7 +538,7 @@ public class DeploymentService {
                 .toList();
         List<StepView> steps = stepRepo.findByDeploymentIdOrderBySeqAsc(d.getId()).stream()
                 .map(this::toStepView).toList();
-        return new DeploymentView(d.getId(), d.getProjectId(), d.getWorkItemId(), d.getServerId(),
+        return new DeploymentView(d.getId(), d.getProjectId(), d.getWorkItemId(), d.getAgentNodeId(),
                 d.getEnvironmentId(), d.getBuildId(),
                 d.getEnv(), d.getStatus(), d.getCurrentStep(), d.getBackupRef(), d.getRollbackOf(),
                 d.isConfirmRequired(), d.isConfirmed(), d.getErrorSummary(), d.getCreatedBy(),
@@ -559,17 +575,9 @@ public class DeploymentService {
         }
     }
 
-    /** 失败原因：优先 stderr 首行，其次 stdout 末行（真实启动失败常打 stdout），再退化为 exit 码 */
-    private String failureReason(ExecResult r) {
-        String e = firstLine(r.stderr());
-        if (e != null && !e.isBlank()) {
-            return e;
-        }
-        e = lastLine(r.stdout());
-        if (e != null && !e.isBlank()) {
-            return e;
-        }
-        return "exit=" + r.exitCode();
+    /** 失败原因：节点执行器已给出错误摘要（含 stderr 回流），退化为 exit 码 */
+    private String failureReason(StepResult r) {
+        return r.error() == null || r.error().isBlank() ? "exit=" + r.exitCode() : r.error();
     }
 
     /** 备份步在日志中输出 backup= 或 backup: 行即登记备份引用（最后一个生效） */
@@ -590,19 +598,6 @@ public class DeploymentService {
             d.setLogsText(logs.toString());
         }
         repo.save(d);
-    }
-
-    private void streamOut(Consumer<String> sink, String stdout, String stderr) {
-        if (stdout != null && !stdout.isBlank()) {
-            for (String l : stdout.split("\\R")) {
-                sink.accept(l);
-            }
-        }
-        if (stderr != null && !stderr.isBlank()) {
-            for (String l : stderr.split("\\R")) {
-                sink.accept("[stderr] " + l);
-            }
-        }
     }
 
     private void notify(DeploymentEntity d, NotificationLevel level, String title, String body) {
@@ -666,31 +661,6 @@ public class DeploymentService {
         } catch (Exception e) {
             throw new DevMindException(ErrorCode.INTERNAL, "部署计划序列化失败");
         }
-    }
-
-    private String firstLine(String s) {
-        if (s == null) {
-            return null;
-        }
-        for (String l : s.split("\\R")) {
-            if (!l.isBlank()) {
-                return l.trim();
-            }
-        }
-        return null;
-    }
-
-    private String lastLine(String s) {
-        if (s == null) {
-            return null;
-        }
-        String last = null;
-        for (String l : s.split("\\R")) {
-            if (!l.isBlank()) {
-                last = l.trim();
-            }
-        }
-        return last;
     }
 
     private String truncate(String s, int max) {

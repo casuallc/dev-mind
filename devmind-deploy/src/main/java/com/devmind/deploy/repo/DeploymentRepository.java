@@ -17,7 +17,7 @@ public interface DeploymentRepository extends JpaRepository<DeploymentEntity, Lo
     /** CAP-13：需求概览按工作单元集合聚合 */
     List<DeploymentEntity> findByWorkItemIdInOrderByCreatedAtDesc(java.util.Collection<String> workItemIds);
 
-    /** FR-04 幂等：同 project + server + build 的进行中/已完成部署（识别重复部署） */
-    List<DeploymentEntity> findByProjectIdAndServerIdAndBuildIdAndStatusIn(
-            String projectId, Long serverId, Long buildId, List<String> statuses);
+    /** FR-04 幂等：同 project + node + build 的进行中/已完成部署（识别重复部署） */
+    List<DeploymentEntity> findByProjectIdAndAgentNodeIdAndBuildIdAndStatusIn(
+            String projectId, String agentNodeId, Long buildId, List<String> statuses);
 }

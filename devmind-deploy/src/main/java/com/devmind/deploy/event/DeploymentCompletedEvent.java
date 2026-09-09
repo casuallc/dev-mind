@@ -14,15 +14,15 @@ import java.time.Instant;
  *
  * @param deploymentId 部署记录 id
  * @param projectId    项目 id
- * @param serverId     目标服务器 id
+ * @param agentNodeId  目标 runner 节点 id（CAP-36）
  * @param success      部署成功（SUCCESS 终态，含回滚成功/失败均视为未成功）
  * @param occurredAt   事件时间
  */
-public record DeploymentCompletedEvent(Long deploymentId, String projectId, Long serverId, boolean success,
+public record DeploymentCompletedEvent(Long deploymentId, String projectId, String agentNodeId, boolean success,
                                        Instant occurredAt) implements DomainEvent {
 
-    public DeploymentCompletedEvent(Long deploymentId, String projectId, Long serverId, boolean success) {
-        this(deploymentId, projectId, serverId, success, Instant.now());
+    public DeploymentCompletedEvent(Long deploymentId, String projectId, String agentNodeId, boolean success) {
+        this(deploymentId, projectId, agentNodeId, success, Instant.now());
     }
 
     @Override

@@ -5,13 +5,14 @@ import jakarta.validation.constraints.NotBlank;
 import java.util.List;
 
 /**
- * 创建部署单（CAP-09 FR-01/04）：projectId 必填；目标二选一——serverId（直指服务器，兼容旧用法）
- * 或 environmentId（P1-1 环境：取其服务器组与变量注入，env 名以环境名为准）。
+ * 创建部署单（CAP-09 FR-01/04）：projectId 必填；目标节点解析（CAP-36）——
+ * agentNodeId（显式指定 runner 节点）> environmentId（P1-1 环境：取其节点组与变量注入，env 名以环境名为准）
+ * > 皆空走节点路由链（项目默认 > 平台默认）。
  */
 public record CreateDeploymentRequest(
         @NotBlank String projectId,
-        Long serverId,
-        /** 目标环境 id（与 serverId 可同时传：校验服务器属于环境；缺省 serverId 取环境首台） */
+        /** 目标 runner 节点 id（与 environmentId 可同时传：校验节点属于环境节点组；缺省取环境首个节点） */
+        String agentNodeId,
         Long environmentId,
         Long buildId,
         String workItemId,

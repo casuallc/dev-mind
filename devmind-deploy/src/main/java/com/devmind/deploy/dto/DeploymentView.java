@@ -8,7 +8,7 @@ public record DeploymentView(
         Long id,
         String projectId,
         String workItemId,
-        Long serverId,
+        String agentNodeId,
         Long environmentId,
         Long buildId,
         String env,
