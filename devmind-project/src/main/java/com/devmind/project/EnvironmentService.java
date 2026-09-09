@@ -5,9 +5,7 @@ import com.devmind.common.exception.ErrorCode;
 import com.devmind.project.dto.EnvironmentRequest;
 import com.devmind.project.dto.EnvironmentView;
 import com.devmind.project.model.EnvironmentEntity;
-import com.devmind.project.model.ProjectServerEntity;
 import com.devmind.project.repo.EnvironmentRepository;
-import com.devmind.project.repo.ProjectServerRepository;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -15,11 +13,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * P1-1 Environment 模型：项目内环境 CRUD（DEV/TEST/STAGING/PROD）。
- * 部署/测试目标从「服务器」升级为「环境」的承载体——本服务只管数据，
+ * 部署/测试目标 = runner 节点（CAP-36：nodeIds 引用 agent_nodes）——本服务只管数据，
  * deploy/test 的切换在各自模块接入（requireEnvironment 提供校验入口）。
  */
 @Service
@@ -30,16 +27,13 @@ public class EnvironmentService {
 
     private final ProjectService projectService;
     private final EnvironmentRepository envRepo;
-    private final ProjectServerRepository serverRepo;
     private final ObjectMapper mapper;
 
     public EnvironmentService(ProjectService projectService,
                               EnvironmentRepository envRepo,
-                              ProjectServerRepository serverRepo,
                               ObjectMapper mapper) {
         this.projectService = projectService;
         this.envRepo = envRepo;
-        this.serverRepo = serverRepo;
         this.mapper = mapper;
     }
 
@@ -52,7 +46,7 @@ public class EnvironmentService {
         return toView(requireEnvironment(projectId, envId));
     }
 
-    /** 校验并取出环境（供 deploy/test 等执行器按环境定位目标服务器/变量） */
+    /** 校验并取出环境（供 deploy/test 等执行器按环境定位目标节点/变量） */
     public EnvironmentEntity requireEnvironment(String projectId, Long envId) {
         projectService.requireProject(projectId);
         EnvironmentEntity e = envRepo.findById(envId)
@@ -100,10 +94,22 @@ public class EnvironmentService {
     private void apply(EnvironmentEntity e, EnvironmentRequest req, String name) {
         e.setName(name);
         e.setDescription(blankToNull(req.description()));
-        validateServers(e.getProjectId(), req.serverIds());
-        e.setServerIdsJson(json(req.serverIds() == null ? List.of() : req.serverIds()));
+        e.setNodeIdsJson(json(normalizeNodeIds(req.nodeIds())));
         e.setVariablesJson(json(req.variables() == null ? Map.of() : req.variables()));
         e.setSecretsJson(json(req.secrets() == null ? List.of() : req.secrets()));
+    }
+
+    /** 节点 id 轻量校验（非空、去空白、去重）；节点存在性/在线状态由执行期路由校验。 */
+    private List<String> normalizeNodeIds(List<String> nodeIds) {
+        if (nodeIds == null || nodeIds.isEmpty()) {
+            return List.of();
+        }
+        List<String> out = nodeIds.stream().filter(n -> n != null && !n.isBlank())
+                .map(String::trim).distinct().toList();
+        if (out.size() != nodeIds.size()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "节点 id 存在空白项");
+        }
+        return out;
     }
 
     private String normalizeName(String name) {
@@ -116,18 +122,6 @@ public class EnvironmentService {
                     "环境名称限定 DEV/TEST/STAGING/PROD（收到 " + n + "）");
         }
         return n;
-    }
-
-    private void validateServers(String projectId, List<Long> serverIds) {
-        if (serverIds == null || serverIds.isEmpty()) {
-            return;
-        }
-        Set<Long> owned = serverRepo.findByProjectIdOrderByIdAsc(projectId).stream()
-                .map(ProjectServerEntity::getId).collect(Collectors.toSet());
-        List<Long> foreign = serverIds.stream().filter(sid -> !owned.contains(sid)).toList();
-        if (!foreign.isEmpty()) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "服务器不属于本项目: " + foreign);
-        }
     }
 
     private String json(Object v) {
@@ -150,11 +144,11 @@ public class EnvironmentService {
         }
     }
 
-    /** 环境的目标服务器 id 列表（deploy/test 按环境定位执行目标） */
+    /** 环境的目标节点 id 列表（deploy/test 按环境定位执行节点；CAP-36） */
     @SuppressWarnings("unchecked")
-    public List<Long> serverIdsOf(EnvironmentEntity e) {
-        List<Object> ids = parse(e.getServerIdsJson(), List.class, List.of());
-        return ids.stream().map(n -> ((Number) n).longValue()).toList();
+    public List<String> nodeIdsOf(EnvironmentEntity e) {
+        List<Object> ids = parse(e.getNodeIdsJson(), List.class, List.of());
+        return ids.stream().map(String::valueOf).filter(s -> !s.isBlank()).toList();
     }
 
     /** 环境变量（注入执行参数；secret 仅为名字引用，此处不取值） */
@@ -164,12 +158,10 @@ public class EnvironmentService {
     }
 
     public EnvironmentView toView(EnvironmentEntity e) {
-        List<Object> ids = parse(e.getServerIdsJson(), List.class, List.of());
         Map<String, String> vars = parse(e.getVariablesJson(), Map.class, Map.of());
         List<String> secrets = parse(e.getSecretsJson(), List.class, List.of());
         return new EnvironmentView(e.getId(), e.getProjectId(), e.getName(), e.getDescription(),
-                ids.stream().map(n -> ((Number) n).longValue()).toList(),
-                vars, secrets,
+                nodeIdsOf(e), vars, secrets,
                 e.getCreatedAt(), e.getUpdatedAt());
     }
 

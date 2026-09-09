@@ -3,7 +3,6 @@ package com.devmind.project;
 import com.devmind.auth.IdentityService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
-import com.devmind.common.security.ServerCredentialCipher;
 import com.devmind.project.config.ProjectProperties;
 import com.devmind.project.config.WorktreeProperties;
 import com.devmind.project.dto.BuildStepRequest;
@@ -17,8 +16,6 @@ import com.devmind.project.dto.ReleaseConfigRequest;
 import com.devmind.project.dto.ReleaseConfigView;
 import com.devmind.project.dto.RepoRequest;
 import com.devmind.project.dto.RepoView;
-import com.devmind.project.dto.ServerRequest;
-import com.devmind.project.dto.ServerView;
 import com.devmind.project.dto.WorktreeView;
 import com.devmind.project.model.BuildStepEntity;
 import com.devmind.project.model.GitRepositoryEntity;
@@ -26,7 +23,6 @@ import com.devmind.project.model.ProjectEntity;
 import com.devmind.project.model.Project;
 import com.devmind.project.model.ProjectLockEntity;
 import com.devmind.project.model.ProjectRepoEntity;
-import com.devmind.project.model.ProjectServerEntity;
 import com.devmind.project.model.ReleaseConfigEntity;
 import com.devmind.project.repo.BuildStepRepository;
 import com.devmind.project.repo.DesignRepository;
@@ -34,7 +30,6 @@ import com.devmind.project.repo.EnvironmentRepository;
 import com.devmind.project.repo.ProjectLockRepository;
 import com.devmind.project.repo.ProjectRepoRepository;
 import com.devmind.project.repo.ProjectRepository;
-import com.devmind.project.repo.ProjectServerRepository;
 import com.devmind.project.repo.RelationRepository;
 import com.devmind.project.repo.ReleaseConfigRepository;
 import com.devmind.project.repo.RequirementRepository;
@@ -44,7 +39,6 @@ import jakarta.annotation.PostConstruct;
 import jakarta.transaction.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -60,9 +54,9 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 /**
- * CAP-02 项目管理：项目 CRUD（FR-01）、标签（FR-02）、服务器（FR-03）、构建配置（FR-04）、
+ * CAP-02 项目管理：项目 CRUD（FR-01）、标签（FR-02）、构建配置（FR-04）、
  * 发版配置（FR-05）、API 文档源（FR-06）、上下文摘要（FR-07）、worktree 规范（FR-08）、
- * 项目锁定（FR-09）。
+ * 项目锁定（FR-09）。CAP-36：服务器管理（原 FR-03）随 SSH/HTTP 通道下线，执行目标统一为 runner 节点。
  *
  * <p>同时保留 {@link #requireProject(String)} 供会话能力按 projectId 取项目（向后兼容 MVP）。</p>
  */
@@ -78,7 +72,6 @@ public class ProjectService {
     private final WorktreeProperties worktreeProps;
     private final ProjectRepository projectRepo;
     private final ProjectRepoRepository repoRepo;
-    private final ProjectServerRepository serverRepo;
     private final BuildStepRepository stepRepo;
     private final ReleaseConfigRepository releaseRepo;
     private final ProjectLockRepository lockRepo;
@@ -88,8 +81,6 @@ public class ProjectService {
     private final RelationRepository relationRepo;
     private final EnvironmentRepository environmentRepo;
     private final RepoScanner repoScanner;
-    /** CAP-07 提供凭证加密实现（可选）；缺省时 accessConfig 明文存储（无 server-adapter 模块时兼容） */
-    private final ObjectProvider<ServerCredentialCipher> cipherProvider;
     /** CAP-29：全局仓库登记（唯一数据源）；项目仓库只关联不复制 */
     private final GitRepoService gitRepoService;
 
@@ -98,7 +89,6 @@ public class ProjectService {
                           WorktreeProperties worktreeProps,
                           ProjectRepository projectRepo,
                           ProjectRepoRepository repoRepo,
-                          ProjectServerRepository serverRepo,
                           BuildStepRepository stepRepo,
                           ReleaseConfigRepository releaseRepo,
                           ProjectLockRepository lockRepo,
@@ -108,14 +98,12 @@ public class ProjectService {
                           RelationRepository relationRepo,
                           EnvironmentRepository environmentRepo,
                           RepoScanner repoScanner,
-                          ObjectProvider<ServerCredentialCipher> cipherProvider,
                           GitRepoService gitRepoService) {
         this.identityService = identityService;
         this.props = props;
         this.worktreeProps = worktreeProps;
         this.projectRepo = projectRepo;
         this.repoRepo = repoRepo;
-        this.serverRepo = serverRepo;
         this.stepRepo = stepRepo;
         this.releaseRepo = releaseRepo;
         this.lockRepo = lockRepo;
@@ -125,7 +113,6 @@ public class ProjectService {
         this.relationRepo = relationRepo;
         this.environmentRepo = environmentRepo;
         this.repoScanner = repoScanner;
-        this.cipherProvider = cipherProvider;
         this.gitRepoService = gitRepoService;
     }
 
@@ -312,7 +299,7 @@ public class ProjectService {
         return toView(e);
     }
 
-    /** 删除项目：级联清理仓库/研发主线（需求/工作单元/方案/关系）/服务器/构建步骤/发版配置/锁。 */
+    /** 删除项目：级联清理仓库/研发主线（需求/工作单元/方案/关系）/环境/构建步骤/发版配置/锁。 */
     @Transactional
     public void delete(String id) {
         ProjectEntity e = requireEntity(id);
@@ -322,7 +309,6 @@ public class ProjectService {
         designRepo.deleteByProjectId(id);
         requirementRepo.deleteByProjectId(id);
         environmentRepo.deleteByProjectId(id);
-        serverRepo.deleteByProjectId(id);
         stepRepo.deleteByProjectId(id);
         releaseRepo.deleteByProjectId(id);
         lockRepo.deleteById(id);
@@ -569,37 +555,6 @@ public class ProjectService {
         return new ContextSummaryView(id, e.getContextSummary(), e.getSummaryGeneratedAt());
     }
 
-    // ---------------- 服务器（FR-03） ----------------
-
-    public List<ServerView> listServers(String projectId) {
-        requireEntity(projectId);
-        return serverRepo.findByProjectIdOrderByIdAsc(projectId).stream().map(this::toServerView).toList();
-    }
-
-    public ServerView addServer(String projectId, ServerRequest req) {
-        requireEntity(projectId);
-        ProjectServerEntity s = new ProjectServerEntity();
-        applyServer(s, req);
-        s.setProjectId(projectId);
-        Instant now = Instant.now();
-        s.setCreatedAt(now);
-        s.setUpdatedAt(now);
-        return toServerView(serverRepo.save(s));
-    }
-
-    public ServerView updateServer(String projectId, Long serverId, ServerRequest req) {
-        ProjectServerEntity s = serverRepo.findById(serverId)
-                .filter(x -> x.getProjectId().equals(projectId))
-                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "服务器不存在: " + serverId));
-        applyServer(s, req);
-        s.setUpdatedAt(Instant.now());
-        return toServerView(serverRepo.save(s));
-    }
-
-    public void deleteServer(String projectId, Long serverId) {
-        serverRepo.deleteById(serverId);
-    }
-
     // ---------------- 构建配置（FR-04） ----------------
 
     public List<BuildStepView> listBuildSteps(String projectId) {
@@ -670,8 +625,8 @@ public class ProjectService {
         e.setVersionRule(blankToNull(req.versionRule()));
         String executor = req.executor() == null || req.executor().isBlank()
                 ? "LOCAL" : req.executor().trim().toUpperCase();
-        e.setExecutor("REMOTE".equals(executor) ? "REMOTE" : "LOCAL");
-        e.setRemoteServerId(req.remoteServerId());
+        e.setExecutor("AGENT".equals(executor) ? "AGENT" : "LOCAL");
+        e.setAgentNodeId(blankToNull(req.agentNodeId()));
         e.setUpdatedAt(Instant.now());
         return toReleaseView(releaseRepo.save(e));
     }
@@ -780,18 +735,6 @@ public class ProjectService {
             n.setUpdatedAt(Instant.now());
             return lockRepo.save(n);
         });
-    }
-
-    private void applyServer(ProjectServerEntity s, ServerRequest req) {
-        s.setName(req.name().trim());
-        s.setEnv(blankToNull(req.env()));
-        s.setAccessType(req.accessType());
-        // CAP-07 FR-07：有凭证加密实现时敏感字段密文落库（幂等：已是密文不再加密）
-        ServerCredentialCipher cipher = cipherProvider.getIfAvailable();
-        String config = blankToNull(req.accessConfig());
-        s.setAccessConfig(cipher != null && config != null ? cipher.encryptConfigJson(config) : config);
-        s.setCapabilities(joinTags(req.capabilities()));
-        s.setEnabled(req.enabled() == null || req.enabled());
     }
 
     private void applyStep(BuildStepEntity s, BuildStepRequest req) {
@@ -912,16 +855,6 @@ public class ProjectService {
                 r.getCreatedAt(), r.getUpdatedAt());
     }
 
-    private ServerView toServerView(ProjectServerEntity s) {
-        // 读取时解密，保证前端编辑回显是明文（重新保存会再加密）
-        ServerCredentialCipher cipher = cipherProvider.getIfAvailable();
-        String config = s.getAccessConfig();
-        return new ServerView(s.getId(), s.getProjectId(), s.getName(), s.getEnv(), s.getAccessType(),
-                cipher != null && config != null ? cipher.decryptConfigJson(config) : config,
-                splitTags(s.getCapabilities()),
-                Boolean.TRUE.equals(s.getEnabled()), s.getCreatedAt(), s.getUpdatedAt());
-    }
-
     private BuildStepView toStepView(BuildStepEntity s) {
         return new BuildStepView(s.getId(), s.getProjectId(), s.getSortOrder(), s.getName(),
                 s.getCommand(), s.getWorkingDir(), s.getLocation());
@@ -929,7 +862,7 @@ public class ProjectService {
 
     private ReleaseConfigView toReleaseView(ReleaseConfigEntity e) {
         return new ReleaseConfigView(e.getId(), e.getProjectId(), e.getNexusRepo(),
-                e.getScriptTemplateRef(), e.getVersionRule(), e.getExecutor(), e.getRemoteServerId());
+                e.getScriptTemplateRef(), e.getVersionRule(), e.getExecutor(), e.getAgentNodeId());
     }
 
     private ProjectLockView toLockView(ProjectLockEntity l) {

@@ -9,7 +9,8 @@ public record EnvironmentView(
         String projectId,
         String name,
         String description,
-        List<Long> serverIds,
+        /** 目标 runner 节点 id 列表（CAP-36） */
+        List<String> nodeIds,
         Map<String, String> variables,
         List<String> secrets,
         Instant createdAt,

@@ -16,8 +16,8 @@ import org.hibernate.type.SqlTypes;
 /**
  * environments 表（P1-1 Environment 模型）：项目内的部署/测试目标环境。
  * name 约定 DEV/TEST/STAGING/PROD（每项目同名唯一）；
- * serverIds 引用 servers 表（JSON 数组）；variables 为环境变量（JSON map）；
- * secrets 只存密钥名称列表（值永远不落库，由 CAP-07 凭证体系保管）。
+ * nodeIds 引用 agent_nodes 表 id（JSON 数组，CAP-36：部署/测试目标 = runner 节点）；
+ * variables 为环境变量（JSON map）；secrets 只存密钥名称列表（值永远不落库）。
  */
 @Entity
 @Table(name = "environments",
@@ -43,11 +43,11 @@ public class EnvironmentEntity {
     @Column(length = 256)
     private String description;
 
-    /** JSON 数组：servers 表 id 列表 */
+    /** JSON 数组：agent_nodes 表 id 列表（字符串；CAP-36 起部署/测试目标 = runner 节点） */
     @Lob
     @JdbcTypeCode(SqlTypes.LONGVARCHAR)
-    @Column(name = "server_ids_json", length = 16_777_216)
-    private String serverIdsJson;
+    @Column(name = "node_ids_json", length = 16_777_216)
+    private String nodeIdsJson;
 
     /** JSON map：环境变量（部署/测试时注入） */
     @Lob
@@ -75,8 +75,8 @@ public class EnvironmentEntity {
     public void setName(String name) { this.name = name; }
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
-    public String getServerIdsJson() { return serverIdsJson; }
-    public void setServerIdsJson(String serverIdsJson) { this.serverIdsJson = serverIdsJson; }
+    public String getNodeIdsJson() { return nodeIdsJson; }
+    public void setNodeIdsJson(String nodeIdsJson) { this.nodeIdsJson = nodeIdsJson; }
     public String getVariablesJson() { return variablesJson; }
     public void setVariablesJson(String variablesJson) { this.variablesJson = variablesJson; }
     public String getSecretsJson() { return secretsJson; }

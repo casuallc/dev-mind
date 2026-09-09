@@ -163,8 +163,8 @@ class ProjectServiceCloneTest {
         // CAP-29：真实 GitRepoService + fake 全局表（upsert/路径推导走真实逻辑）
         gitRepoService = new GitRepoService(gitRepos.jpa(), repos.jpa(), props, identity, events);
         service = new ProjectService(identity, props, new WorktreeProperties(),
-                projects.jpa(), repos.jpa(), null, null, null, null,
-                null, null, null, null, null, null, null, gitRepoService);
+                projects.jpa(), repos.jpa(), null, null, null,
+                null, null, null, null, null, null, gitRepoService);
     }
 
     private ProjectRequest cloneRequest(String remoteUrl, Long integrationId) {

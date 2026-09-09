@@ -90,7 +90,7 @@ class RepoCloneServiceTest {
 
         FakeProjectService() {
             super(null, null, null, null, null, null, null, null, null,
-                    null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null);
         }
 
         @Override public void syncPrimaryMirror(String projectId) { mirrorCalls++; }

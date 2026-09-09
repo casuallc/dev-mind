@@ -12,8 +12,6 @@ import com.devmind.project.dto.ReleaseConfigRequest;
 import com.devmind.project.dto.ReleaseConfigView;
 import com.devmind.project.dto.RepoRequest;
 import com.devmind.project.dto.RepoView;
-import com.devmind.project.dto.ServerRequest;
-import com.devmind.project.dto.ServerView;
 import com.devmind.project.dto.SummaryRequest;
 import com.devmind.project.dto.WorktreeView;
 import jakarta.validation.Valid;
@@ -113,29 +111,6 @@ public class ProjectController {
     @PutMapping("/{id}/summary")
     public ContextSummaryView updateSummary(@PathVariable String id, @RequestBody SummaryRequest req) {
         return service.updateSummary(id, req.text());
-    }
-
-    // ---------------- 服务器 ----------------
-
-    @GetMapping("/{id}/servers")
-    public List<ServerView> servers(@PathVariable String id) {
-        return service.listServers(id);
-    }
-
-    @PostMapping("/{id}/servers")
-    public ServerView addServer(@PathVariable String id, @Valid @RequestBody ServerRequest req) {
-        return service.addServer(id, req);
-    }
-
-    @PutMapping("/{id}/servers/{serverId}")
-    public ServerView updateServer(@PathVariable String id, @PathVariable Long serverId,
-                                   @Valid @RequestBody ServerRequest req) {
-        return service.updateServer(id, serverId, req);
-    }
-
-    @DeleteMapping("/{id}/servers/{serverId}")
-    public void deleteServer(@PathVariable String id, @PathVariable Long serverId) {
-        service.deleteServer(id, serverId);
     }
 
     // ---------------- 构建配置 ----------------

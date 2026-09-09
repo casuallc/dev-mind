@@ -5,5 +5,6 @@ public record ReleaseConfigRequest(
         String scriptTemplateRef,
         String versionRule,
         String executor,
-        Long remoteServerId) {
+        /** executor=AGENT 时的目标 runner 节点 id（CAP-36；空走节点路由链） */
+        String agentNodeId) {
 }

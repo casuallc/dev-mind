@@ -7,5 +7,5 @@ public record ReleaseConfigView(
         String scriptTemplateRef,
         String versionRule,
         String executor,
-        Long remoteServerId) {
+        String agentNodeId) {
 }

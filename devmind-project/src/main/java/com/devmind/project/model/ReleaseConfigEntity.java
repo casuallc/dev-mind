@@ -35,13 +35,13 @@ public class ReleaseConfigEntity {
     @Column(name = "version_rule", length = 512)
     private String versionRule;
 
-    /** CAP-11 执行方式：LOCAL（本机渲染模板正文执行）/ REMOTE（经 CAP-07 远程）；默认 LOCAL */
+    /** CAP-11 执行方式：LOCAL（本机渲染模板正文执行）/ AGENT（CAP-36：渲染后经 exec 帧下发 runner 节点）；默认 LOCAL */
     @Column(name = "executor", length = 16)
     private String executor = "LOCAL";
 
-    /** CAP-11 远程执行目标服务器 id（executor=REMOTE 时必填） */
-    @Column(name = "remote_server_id")
-    private Long remoteServerId;
+    /** CAP-36 节点执行目标（executor=AGENT 时生效；空走节点路由链） */
+    @Column(name = "agent_node_id", length = 64)
+    private String agentNodeId;
 
     @Column(name = "created_at")
     private Instant createdAt;
@@ -61,8 +61,8 @@ public class ReleaseConfigEntity {
     public void setVersionRule(String versionRule) { this.versionRule = versionRule; }
     public String getExecutor() { return executor; }
     public void setExecutor(String executor) { this.executor = executor; }
-    public Long getRemoteServerId() { return remoteServerId; }
-    public void setRemoteServerId(Long remoteServerId) { this.remoteServerId = remoteServerId; }
+    public String getAgentNodeId() { return agentNodeId; }
+    public void setAgentNodeId(String agentNodeId) { this.agentNodeId = agentNodeId; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
