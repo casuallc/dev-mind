@@ -20,6 +20,8 @@ export interface AgentNode {
   protocolVersion?: number
   /** 探测到的工具链（JSON 对象串，如 {"git":"2.47"}，CAP-34 FR-07；未上报为 undefined） */
   toolchain?: string
+  /** 活跃会话数（列表接口聚合各会话模块 SPI 填充；RUNNING/WAITING_INPUT/WAITING_AUTH 三态） */
+  activeSessionCount?: number
   lastHeartbeatAt?: string
   createdAt?: string
 }

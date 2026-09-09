@@ -73,9 +73,18 @@ public class AgentNodeController {
         return service.create(req);
     }
 
+    /** 节点列表：逐节点聚合各会话模块 SPI 得活跃会话数（节点数为个位数，逐点查询可接受）。 */
     @GetMapping
     public List<AgentNodeView> list() {
-        return service.list();
+        return service.list().stream()
+                .map(v -> v.withActiveSessionCount(countActiveSessions(v.id())))
+                .toList();
+    }
+
+    private int countActiveSessions(Long nodeId) {
+        return sessionsProviders.stream()
+                .mapToInt(p -> p.activeSessions(String.valueOf(nodeId)).size())
+                .sum();
     }
 
     /** 节点连接流水（接入/拒绝/断线，倒序，默认 200 条）——排查频繁重连/认证拒绝来源。 */

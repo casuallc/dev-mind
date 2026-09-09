@@ -42,6 +42,7 @@ import {
 import type { AgentNode, IssuedNode, NodeActiveSession, RunnerPackage } from '../types'
 import RunnerPackagePanel from '../components/RunnerPackagePanel'
 import ConnLogsPanel from '../components/ConnLogsPanel'
+import ActiveSessionsCard, { activeSessionColumns } from '../components/ActiveSessionsCard'
 import { buildLinuxInstallScript, buildWindowsInstallScript, downloadTextFile } from '../utils/installScript'
 import { fmtTime, fmtBytes } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
@@ -217,6 +218,22 @@ export default function AgentNodesPage() {
       dataIndex: 'workspaceBytes',
       width: 100,
       render: (n?: number) => fmtBytes(n),
+    },
+    {
+      title: '活跃会话',
+      dataIndex: 'activeSessionCount',
+      width: 100,
+      // 有会话时数字可点开抽屉看清单；null = 无会话模块装配（不显示 0 误导）
+      render: (n: number | undefined, r: AgentNode) =>
+        n == null ? (
+          '-'
+        ) : n > 0 ? (
+          <Button type="link" size="small" style={{ padding: 0 }} onClick={() => setDrawerId(r.id)}>
+            {n} 个
+          </Button>
+        ) : (
+          '0'
+        ),
     },
     {
       title: '最近心跳',
@@ -582,6 +599,8 @@ function NodeDrawer({
             </Descriptions.Item>
           </Descriptions>
 
+          <ActiveSessionsCard nodeId={node.id} />
+
           <Card size="small" title="标签（调度）">
             <Space direction="vertical" style={{ width: '100%' }} size={8}>
               <Typography.Text type="secondary">
@@ -706,24 +725,7 @@ function NodeDrawer({
               size="small"
               pagination={false}
               dataSource={activeSessions}
-              columns={[
-                {
-                  title: '类型',
-                  dataIndex: 'kind',
-                  width: 70,
-                  render: (k: string) =>
-                    k === 'CHAT' ? <Tag color="purple">问答</Tag> : <Tag color="blue">会话</Tag>,
-                },
-                {
-                  title: '标题',
-                  dataIndex: 'title',
-                  ellipsis: true,
-                  render: (t?: string) => t || '-',
-                },
-                { title: '状态', dataIndex: 'status', width: 130 },
-                { title: '创建人', dataIndex: 'createdBy', width: 100, render: (s?: string) => s || '-' },
-                { title: '创建时间', dataIndex: 'createdAt', width: 150, render: (t?: string) => fmtTime(t) },
-              ]}
+              columns={activeSessionColumns}
             />
           )}
           <Alert
