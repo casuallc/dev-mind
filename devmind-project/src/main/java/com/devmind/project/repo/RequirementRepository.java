@@ -23,7 +23,7 @@ public interface RequirementRepository extends JpaRepository<RequirementEntity, 
             + " and (:status is null or r.status = :status)"
             + " and (:type is null or r.type = :type)"
             + " and (:source is null or r.source = :source)"
-            + " and (:kw is null or lower(r.title) like lower(concat('%', cast(:kw as string), '%'))"
+            + " and (cast(:kw as string) is null or lower(r.title) like lower(concat('%', cast(:kw as string), '%'))"
             + "      or lower(r.externalKey) like lower(concat('%', cast(:kw as string), '%')))")
     Page<RequirementEntity> search(@Param("projectId") String projectId,
                                    @Param("status") String status,

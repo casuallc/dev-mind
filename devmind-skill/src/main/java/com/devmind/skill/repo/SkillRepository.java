@@ -15,7 +15,7 @@ public interface SkillRepository extends JpaRepository<SkillEntity, String> {
     @Query("select s from SkillEntity s where (:scope is null or s.scope = :scope)"
             + " and (:projectId is null or s.projectId = :projectId)"
             + " and (:status is null or s.status = :status)"
-            + " and (:kw is null or lower(s.name) like lower(concat('%', cast(:kw as string), '%'))"
+            + " and (cast(:kw as string) is null or lower(s.name) like lower(concat('%', cast(:kw as string), '%'))"
             + "     or lower(s.description) like lower(concat('%', cast(:kw as string), '%')))")
     Page<SkillEntity> search(@Param("scope") String scope,
                              @Param("projectId") String projectId,
