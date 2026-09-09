@@ -34,6 +34,8 @@ spring:
       max-request-size: 64MB
 
 devmind:
+  error:
+    include-stacktrace: false      # 错误响应体是否附带异常堆栈（ApiError.stackTrace）；仅本地排错用，在 application-local.yml 开 true，线上必须 false
   cors:
     # CORS / WebSocket 握手来源白名单（REST 过滤器与 WS 握手同口径）。
     # 默认本地开发来源；联调/分离部署时在 application-local.yml 覆盖追加（整表替换，默认值需一并带上），
