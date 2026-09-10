@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.Resource;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
+import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import org.springframework.web.servlet.resource.PathResourceResolver;
 
@@ -35,6 +36,14 @@ public class WebConfig implements WebMvcConfigurer {
     }
 
     @Override
+    public void addViewControllers(ViewControllerRegistry registry) {
+        // ResourceHttpRequestHandler 对空路径短路返回 null（不经 resolver 链），
+        // SPA 回退解析器管不到 "/"，故由视图控制器显式 forward 到 index.html
+        // （URL 保持 "/"，React Router 接管后再跳 /overview）
+        registry.addViewController("/").setViewName("forward:/index.html");
+    }
+
+    @Override
     public void addCorsMappings(CorsRegistry registry) {
         // 开发期：前端 Vite dev server（5173）直连后端；生产同源无需 CORS
         registry.addMapping("/api/**")
@@ -50,9 +59,6 @@ public class WebConfig implements WebMvcConfigurer {
     static class SpaFallbackResolver extends PathResourceResolver {
         @Override
         protected Resource getResource(String resourcePath, Resource location) throws IOException {
-            if (resourcePath.isEmpty()) {
-                return index(location);              // "/" → index.html
-            }
             if (resourcePath.startsWith("api/") || resourcePath.startsWith("ws/")) {
                 return null;                          // 保持 REST/WS 的 404 语义
             }
