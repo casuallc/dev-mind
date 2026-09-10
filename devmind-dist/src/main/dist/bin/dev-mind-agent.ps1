@@ -67,7 +67,8 @@ function Assert-Config {
     if (-not (Test-Path $Conf)) {
         throw "缺少 $Conf —— 参考同目录 agent.properties.example 填入 token"
     }
-    if ((Get-Content $Conf -Raw -Encoding UTF8) -match '(?m)^token=\s*$') {
+    $content = Get-Content $Conf -Raw -Encoding UTF8
+    if ($content -match '(?m)^token=\s*$' -or $content -match '(?m)^token=dmag_待填') {
         throw "$Conf 的 token 未填写（后台 → Agent 节点 新建节点复制 token）"
     }
     if (-not (Test-Path $RunnerJar)) {
