@@ -6,6 +6,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -33,8 +34,8 @@ public class ScriptTemplateService {
 
     public List<TemplateView> list(String projectId) {
         List<ScriptTemplateEntity> list = projectId == null || projectId.isBlank()
-                ? repo.findAll().stream().sorted((a, b) -> a.getProjectId().compareTo(b.getProjectId())).toList()
-                : repo.findByProjectIdOrderByCodeAsc(projectId);
+                ? repo.findAll(Sort.by(Sort.Direction.DESC, "createdAt"))
+                : repo.findByProjectIdOrderByCreatedAtDesc(projectId);
         return list.stream().map(this::toView).toList();
     }
 

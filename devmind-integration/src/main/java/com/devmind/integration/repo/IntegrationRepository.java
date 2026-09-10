@@ -7,5 +7,5 @@ import java.util.List;
 
 public interface IntegrationRepository extends JpaRepository<IntegrationEntity, Long> {
 
-    List<IntegrationEntity> findAllByOrderByIdAsc();
+    List<IntegrationEntity> findAllByOrderByCreatedAtDesc();
 }

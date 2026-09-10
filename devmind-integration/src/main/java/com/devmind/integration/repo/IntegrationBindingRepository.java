@@ -7,7 +7,7 @@ import java.util.List;
 
 public interface IntegrationBindingRepository extends JpaRepository<IntegrationBindingEntity, Long> {
 
-    List<IntegrationBindingEntity> findByProjectIdOrderByIdAsc(String projectId);
+    List<IntegrationBindingEntity> findByProjectIdOrderByCreatedAtDesc(String projectId);
 
     List<IntegrationBindingEntity> findByIntegrationId(Long integrationId);
 }

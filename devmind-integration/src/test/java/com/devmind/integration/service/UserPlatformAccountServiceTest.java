@@ -111,7 +111,7 @@ class UserPlatformAccountServiceTest {
                         accounts.put(e.getId(), e);
                         yield e;
                     }
-                    case "findByUserIdOrderByIdAsc" -> accounts.values().stream()
+                    case "findByUserIdOrderByCreatedAtDesc" -> accounts.values().stream()
                             .filter(e -> e.getUserId().equals(args[0]))
                             .sorted(java.util.Comparator.comparing(UserPlatformAccountEntity::getId))
                             .toList();
@@ -128,7 +128,7 @@ class UserPlatformAccountServiceTest {
         IntegrationRepository integrationRepo = proxy(IntegrationRepository.class,
                 (p, m, args) -> switch (m.getName()) {
                     case "findById" -> Optional.ofNullable(integrations.get((Long) args[0]));
-                    case "findAllByOrderByIdAsc" -> new ArrayList<>(integrations.values());
+                    case "findAllByOrderByCreatedAtDesc" -> new ArrayList<>(integrations.values());
                     default -> throw new UnsupportedOperationException(m.getName());
                 });
         UserRepository userRepo = proxy(UserRepository.class, (p, m, args) ->

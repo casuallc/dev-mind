@@ -8,6 +8,10 @@ import java.util.Optional;
 
 public interface EnvironmentRepository extends JpaRepository<EnvironmentEntity, Long> {
 
+    /** 列表 API：创建时间倒排 */
+    List<EnvironmentEntity> findByProjectIdOrderByCreatedAtDesc(String projectId);
+
+    /** 内部取默认环境用：保持最早创建在前 */
     List<EnvironmentEntity> findByProjectIdOrderByIdAsc(String projectId);
 
     Optional<EnvironmentEntity> findByProjectIdAndName(String projectId, String name);

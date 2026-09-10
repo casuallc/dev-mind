@@ -9,16 +9,16 @@ import org.springframework.data.repository.query.Param;
 
 public interface KnowledgeEntryRepository extends JpaRepository<KnowledgeEntryEntity, Long> {
 
-    List<KnowledgeEntryEntity> findByScopeOrderByUpdatedAtDesc(String scope);
+    List<KnowledgeEntryEntity> findByScopeOrderByCreatedAtDesc(String scope);
 
-    List<KnowledgeEntryEntity> findByScopeAndProjectIdOrderByUpdatedAtDesc(String scope, String projectId);
+    List<KnowledgeEntryEntity> findByScopeAndProjectIdOrderByCreatedAtDesc(String scope, String projectId);
 
-    List<KnowledgeEntryEntity> findByStatusOrderByUpdatedAtDesc(String status);
+    List<KnowledgeEntryEntity> findByStatusOrderByCreatedAtDesc(String status);
 
     Optional<KnowledgeEntryEntity> findByIdAndStatus(Long id, String status);
 
     @Query("select e from KnowledgeEntryEntity e where e.status = 'active' and (e.scope = 'global' or e.projectId = :projectId) " +
             "and (lower(e.name) like lower(concat('%', cast(:q as string), '%')) or lower(cast(e.contentMd as string)) like lower(concat('%', cast(:q as string), '%')) " +
-            "or lower(e.tags) like lower(concat('%', cast(:q as string), '%'))) order by e.updatedAt desc")
+            "or lower(e.tags) like lower(concat('%', cast(:q as string), '%'))) order by e.createdAt desc")
     List<KnowledgeEntryEntity> searchActive(@Param("q") String q, @Param("projectId") String projectId);
 }

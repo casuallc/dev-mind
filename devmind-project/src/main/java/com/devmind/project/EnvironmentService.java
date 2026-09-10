@@ -39,7 +39,7 @@ public class EnvironmentService {
 
     public List<EnvironmentView> list(String projectId) {
         projectService.requireProject(projectId);
-        return envRepo.findByProjectIdOrderByIdAsc(projectId).stream().map(this::toView).toList();
+        return envRepo.findByProjectIdOrderByCreatedAtDesc(projectId).stream().map(this::toView).toList();
     }
 
     public EnvironmentView get(String projectId, Long envId) {

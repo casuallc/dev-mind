@@ -86,7 +86,7 @@ class ProjectServiceCloneTest {
                         .filter(e -> e.getPath().equals(args[0])).count();
                 case "count" -> (long) store.size();
                 case "findAll" -> new ArrayList<>(store.values());
-                case "findAllByOrderByUpdatedAtDesc" -> store.values().stream()
+                case "findAllByOrderByCreatedAtDesc" -> store.values().stream()
                         .sorted(Comparator.comparing(ProjectEntity::getUpdatedAt).reversed()).toList();
                 default -> throw new UnsupportedOperationException(m.getName());
             });

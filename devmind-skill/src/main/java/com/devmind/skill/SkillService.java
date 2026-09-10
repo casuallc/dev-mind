@@ -88,7 +88,7 @@ public class SkillService {
         String kw = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
         int p = Math.max(0, page);
         int s = Math.min(Math.max(1, size), 200);
-        PageRequest pageable = PageRequest.of(p, s, Sort.by(Sort.Direction.DESC, "updatedAt"));
+        PageRequest pageable = PageRequest.of(p, s, Sort.by(Sort.Direction.DESC, "createdAt"));
         Page<SkillEntity> result = skillRepo.search(sc, pid, st, kw, pageable);
         Map<String, Long> counts = fileCounts(
                 result.getContent().stream().map(SkillEntity::getId).toList());

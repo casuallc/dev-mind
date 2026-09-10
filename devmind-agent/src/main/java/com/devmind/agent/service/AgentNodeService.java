@@ -10,6 +10,7 @@ import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -56,7 +57,8 @@ public class AgentNodeService {
     }
 
     public List<AgentNodeView> list() {
-        return repo.findAll().stream().map(AgentNodeView::from).toList();
+        return repo.findAll(Sort.by(Sort.Direction.DESC, "createdAt")).stream()
+                .map(AgentNodeView::from).toList();
     }
 
     public AgentNodeView setDisabled(Long id, boolean disabled) {

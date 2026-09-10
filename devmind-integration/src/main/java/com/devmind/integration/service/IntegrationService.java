@@ -180,7 +180,7 @@ public class IntegrationService implements PlatformIntegrationHook {
     }
 
     public List<IntegrationView> list() {
-        return integrationRepo.findAllByOrderByIdAsc().stream().map(this::toView).toList();
+        return integrationRepo.findAllByOrderByCreatedAtDesc().stream().map(this::toView).toList();
     }
 
     public IntegrationView get(Long id) {
@@ -268,7 +268,7 @@ public class IntegrationService implements PlatformIntegrationHook {
             key = inferProjectKey(integration, repo);
         }
         // 同项目同类型仅允许一个 ENABLED 绑定
-        for (IntegrationBindingEntity b : bindingRepo.findByProjectIdOrderByIdAsc(projectId)) {
+        for (IntegrationBindingEntity b : bindingRepo.findByProjectIdOrderByCreatedAtDesc(projectId)) {
             if (IntegrationBindingEntity.STATUS_ENABLED.equals(b.getStatus())) {
                 IntegrationEntity other = integrationRepo.findById(b.getIntegrationId()).orElse(null);
                 if (other != null && other.getType().equals(integration.getType())) {
@@ -301,7 +301,7 @@ public class IntegrationService implements PlatformIntegrationHook {
 
     public List<BindingView> listBindings(String projectId) {
         projectService.requireProject(projectId);
-        return bindingRepo.findByProjectIdOrderByIdAsc(projectId).stream().map(this::toBindingView).toList();
+        return bindingRepo.findByProjectIdOrderByCreatedAtDesc(projectId).stream().map(this::toBindingView).toList();
     }
 
     // ---------------- FR-04 推送 WI 分支 ----------------
@@ -471,9 +471,9 @@ public class IntegrationService implements PlatformIntegrationHook {
         projectService.requireProject(projectId);
         // 项目维度：经绑定（git 类）与 Jira 同步配置（issue 类）反查涉及的 integration
         List<Long> ids = java.util.stream.Stream.concat(
-                        bindingRepo.findByProjectIdOrderByIdAsc(projectId).stream()
+                        bindingRepo.findByProjectIdOrderByCreatedAtDesc(projectId).stream()
                                 .map(IntegrationBindingEntity::getIntegrationId),
-                        jiraSyncConfigRepo.findByProjectIdOrderByIdAsc(projectId).stream()
+                        jiraSyncConfigRepo.findByProjectIdOrderByCreatedAtDesc(projectId).stream()
                                 .map(JiraSyncConfigEntity::getIntegrationId))
                 .distinct().toList();
         return ids.stream()
@@ -491,7 +491,7 @@ public class IntegrationService implements PlatformIntegrationHook {
 
     /** 找项目的 git 类绑定（GITLAB/GITHUB，双 ENABLED）；无则空 */
     private Optional<ResolvedBinding> findGitBinding(String projectId) {
-        for (IntegrationBindingEntity b : bindingRepo.findByProjectIdOrderByIdAsc(projectId)) {
+        for (IntegrationBindingEntity b : bindingRepo.findByProjectIdOrderByCreatedAtDesc(projectId)) {
             if (!IntegrationBindingEntity.STATUS_ENABLED.equals(b.getStatus())) {
                 continue;
             }

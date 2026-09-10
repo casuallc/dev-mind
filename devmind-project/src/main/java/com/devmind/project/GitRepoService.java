@@ -15,6 +15,7 @@ import com.devmind.project.repo.GitRepositoryRepository;
 import com.devmind.project.repo.ProjectRepoRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -84,7 +85,8 @@ public class GitRepoService implements GitRepoCatalog {
     // 平台红线：异步触发靠 save 自身事务即时提交）。update/delete 无异步触发，保留事务。
 
     public List<GitRepoView> list() {
-        return repoRepo.findAll().stream().map(GitRepoView::of).toList();
+        return repoRepo.findAll(Sort.by(Sort.Direction.DESC, "createdAt")).stream()
+                .map(GitRepoView::of).toList();
     }
 
     public GitRepositoryEntity require(Long id) {

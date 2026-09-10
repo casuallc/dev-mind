@@ -7,6 +7,7 @@ import com.devmind.auth.model.UserEntity;
 import com.devmind.auth.repo.UserRepository;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,7 +41,8 @@ public class UserAdminService {
     }
 
     public List<UserView> list() {
-        return userRepo.findAll().stream().map(authService::toView).toList();
+        return userRepo.findAll(Sort.by(Sort.Direction.DESC, "createdAt")).stream()
+                .map(authService::toView).toList();
     }
 
     @Transactional

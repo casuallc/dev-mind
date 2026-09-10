@@ -6,16 +6,16 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface DocumentRepository extends JpaRepository<DocumentEntity, Long> {
 
-    List<DocumentEntity> findAllByOrderByUpdatedAtDesc();
+    List<DocumentEntity> findAllByOrderByCreatedAtDesc();
 
-    List<DocumentEntity> findByKindOrderByUpdatedAtDesc(String kind);
+    List<DocumentEntity> findByKindOrderByCreatedAtDesc(String kind);
 
-    List<DocumentEntity> findByStatusOrderByUpdatedAtDesc(String status);
+    List<DocumentEntity> findByStatusOrderByCreatedAtDesc(String status);
 
-    List<DocumentEntity> findByProjectIdOrderByUpdatedAtDesc(String projectId);
+    List<DocumentEntity> findByProjectIdOrderByCreatedAtDesc(String projectId);
 
     /** P0-6：按任务聚合文档（任务主线视图） */
-    List<DocumentEntity> findByRequirementIdOrderByUpdatedAtDesc(String requirementId);
+    List<DocumentEntity> findByRequirementIdOrderByCreatedAtDesc(String requirementId);
 
-    List<DocumentEntity> findByWorkItemIdOrderByUpdatedAtDesc(String workItemId);
+    List<DocumentEntity> findByWorkItemIdOrderByCreatedAtDesc(String workItemId);
 }

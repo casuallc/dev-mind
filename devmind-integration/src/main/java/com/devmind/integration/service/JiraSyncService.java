@@ -105,7 +105,7 @@ public class JiraSyncService {
 
     public List<JiraSyncConfigView> list(String projectId) {
         projectService.requireProject(projectId);
-        return configRepo.findByProjectIdOrderByIdAsc(projectId).stream().map(this::toView).toList();
+        return configRepo.findByProjectIdOrderByCreatedAtDesc(projectId).stream().map(this::toView).toList();
     }
 
     public JiraSyncConfigView create(String projectId, JiraSyncConfigRequest req) {

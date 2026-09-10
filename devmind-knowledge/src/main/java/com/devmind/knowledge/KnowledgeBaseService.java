@@ -54,19 +54,19 @@ public class KnowledgeBaseService {
     public List<EntryView> list(String scope, String projectId, String status) {
         List<KnowledgeEntryEntity> list;
         if (status != null && !status.isBlank()) {
-            list = entryRepo.findByStatusOrderByUpdatedAtDesc(status);
+            list = entryRepo.findByStatusOrderByCreatedAtDesc(status);
         } else if (scope != null && !scope.isBlank()) {
             if ("global".equals(scope)) {
-                list = entryRepo.findByScopeOrderByUpdatedAtDesc("global");
+                list = entryRepo.findByScopeOrderByCreatedAtDesc("global");
             } else if (projectId == null || projectId.isBlank()) {
                 // 未指定项目时按 scope 全量（projectId 为 null 的派生查询会因 SQL 空比较匹配不到）
-                list = entryRepo.findByScopeOrderByUpdatedAtDesc("project");
+                list = entryRepo.findByScopeOrderByCreatedAtDesc("project");
             } else {
-                list = entryRepo.findByScopeAndProjectIdOrderByUpdatedAtDesc("project", projectId);
+                list = entryRepo.findByScopeAndProjectIdOrderByCreatedAtDesc("project", projectId);
             }
         } else {
-            list = entryRepo.findByStatusOrderByUpdatedAtDesc("active");
-            List<KnowledgeEntryEntity> deprecated = entryRepo.findByStatusOrderByUpdatedAtDesc("deprecated");
+            list = entryRepo.findByStatusOrderByCreatedAtDesc("active");
+            List<KnowledgeEntryEntity> deprecated = entryRepo.findByStatusOrderByCreatedAtDesc("deprecated");
             List<KnowledgeEntryEntity> merged = new ArrayList<>(list);
             merged.addAll(deprecated);
             list = merged;
@@ -153,7 +153,7 @@ public class KnowledgeBaseService {
      */
     public List<EntryView> selectEntries(String projectId, List<String> projectTags) {
         List<EntryView> used = new ArrayList<>();
-        for (KnowledgeEntryEntity e : entryRepo.findByScopeOrderByUpdatedAtDesc("global")) {
+        for (KnowledgeEntryEntity e : entryRepo.findByScopeOrderByCreatedAtDesc("global")) {
             if (!"active".equals(e.getStatus())) {
                 continue;
             }
@@ -167,7 +167,7 @@ public class KnowledgeBaseService {
             used.add(EntryViews.entry(e));
         }
         if (projectId != null && !projectId.isBlank()) {
-            for (KnowledgeEntryEntity e : entryRepo.findByScopeAndProjectIdOrderByUpdatedAtDesc("project", projectId)) {
+            for (KnowledgeEntryEntity e : entryRepo.findByScopeAndProjectIdOrderByCreatedAtDesc("project", projectId)) {
                 if ("active".equals(e.getStatus())) {
                     used.add(EntryViews.entry(e));
                 }
@@ -184,9 +184,9 @@ public class KnowledgeBaseService {
         if (tags == null || tags.isEmpty()) {
             return List.of();
         }
-        List<KnowledgeEntryEntity> pool = new ArrayList<>(entryRepo.findByScopeOrderByUpdatedAtDesc("global"));
+        List<KnowledgeEntryEntity> pool = new ArrayList<>(entryRepo.findByScopeOrderByCreatedAtDesc("global"));
         if (projectId != null && !projectId.isBlank()) {
-            pool.addAll(entryRepo.findByScopeAndProjectIdOrderByUpdatedAtDesc("project", projectId));
+            pool.addAll(entryRepo.findByScopeAndProjectIdOrderByCreatedAtDesc("project", projectId));
         }
         return pool.stream()
                 .filter(e -> "active".equals(e.getStatus()))

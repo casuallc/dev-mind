@@ -7,7 +7,7 @@ import java.util.Optional;
 
 public interface ScriptTemplateRepository extends JpaRepository<ScriptTemplateEntity, Long> {
 
-    List<ScriptTemplateEntity> findByProjectIdOrderByCodeAsc(String projectId);
+    List<ScriptTemplateEntity> findByProjectIdOrderByCreatedAtDesc(String projectId);
 
     Optional<ScriptTemplateEntity> findByProjectIdAndCode(String projectId, String code);
 

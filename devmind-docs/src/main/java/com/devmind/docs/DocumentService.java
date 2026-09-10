@@ -77,13 +77,13 @@ public class DocumentService {
     public List<DocView> list(String kind, String projectId, String status) {
         List<DocumentEntity> list;
         if (kind != null && !kind.isBlank()) {
-            list = docRepo.findByKindOrderByUpdatedAtDesc(kind);
+            list = docRepo.findByKindOrderByCreatedAtDesc(kind);
         } else if (projectId != null && !projectId.isBlank()) {
-            list = docRepo.findByProjectIdOrderByUpdatedAtDesc(projectId);
+            list = docRepo.findByProjectIdOrderByCreatedAtDesc(projectId);
         } else if (status != null && !status.isBlank()) {
-            list = docRepo.findByStatusOrderByUpdatedAtDesc(status);
+            list = docRepo.findByStatusOrderByCreatedAtDesc(status);
         } else {
-            list = docRepo.findAllByOrderByUpdatedAtDesc();
+            list = docRepo.findAllByOrderByCreatedAtDesc();
         }
         return list.stream().map(e -> DocViews.doc(e, DocPaths.filePath(e))).toList();
     }

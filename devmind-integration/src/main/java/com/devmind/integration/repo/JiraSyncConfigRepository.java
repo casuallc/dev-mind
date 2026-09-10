@@ -8,7 +8,7 @@ import java.util.Optional;
 
 public interface JiraSyncConfigRepository extends JpaRepository<JiraSyncConfigEntity, Long> {
 
-    List<JiraSyncConfigEntity> findByProjectIdOrderByIdAsc(String projectId);
+    List<JiraSyncConfigEntity> findByProjectIdOrderByCreatedAtDesc(String projectId);
 
     Optional<JiraSyncConfigEntity> findByIntegrationIdAndProjectId(Long integrationId, String projectId);
 

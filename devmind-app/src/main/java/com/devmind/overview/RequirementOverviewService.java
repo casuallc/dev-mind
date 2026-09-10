@@ -67,7 +67,7 @@ public class RequirementOverviewService {
         List<String> workItemIds = workItems.stream().map(WorkItemView::id).toList();
 
         List<RequirementOverviewView.DocItem> docs = docRepo
-                .findByRequirementIdOrderByUpdatedAtDesc(requirementId).stream()
+                .findByRequirementIdOrderByCreatedAtDesc(requirementId).stream()
                 .map(d -> new RequirementOverviewView.DocItem(d.getId(), d.getKind(), d.getTitle(), d.getStatus(),
                         d.getCurrentVersion(), d.getUpdatedAt()))
                 .toList();

@@ -4,6 +4,7 @@ import com.devmind.auth.IdentityService;
 import com.devmind.openapi.dto.ApiKeyView;
 import com.devmind.openapi.model.ApiKeyEntity;
 import com.devmind.openapi.repo.ApiKeyRepository;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -55,7 +56,8 @@ public class ApiKeyService {
 
     @Transactional(readOnly = true)
     public List<ApiKeyView> list() {
-        return repo.findAll().stream().map(ApiKeyService::toView).toList();
+        return repo.findAll(Sort.by(Sort.Direction.DESC, "createdAt")).stream()
+                .map(ApiKeyService::toView).toList();
     }
 
     @Transactional

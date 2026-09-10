@@ -170,8 +170,8 @@ public class ProjectService {
 
     public List<ProjectView> list(String status) {
         List<ProjectEntity> entities = (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status))
-                ? projectRepo.findAllByOrderByUpdatedAtDesc()
-                : projectRepo.findByStatusOrderByUpdatedAtDesc(status.toUpperCase());
+                ? projectRepo.findAllByOrderByCreatedAtDesc()
+                : projectRepo.findByStatusOrderByCreatedAtDesc(status.toUpperCase());
         return entities.stream().map(this::toView).toList();
     }
 
@@ -330,7 +330,7 @@ public class ProjectService {
     /** 缺省项目（种子 default 或第一个 ACTIVE）；无项目时返回 null（fake 模式）。 */
     public Project defaultProject() {
         return projectRepo.findById("default")
-                .or(() -> projectRepo.findAllByOrderByUpdatedAtDesc().stream().findFirst())
+                .or(() -> projectRepo.findAllByOrderByCreatedAtDesc().stream().findFirst())
                 .map(this::toRecord).orElse(null);
     }
 

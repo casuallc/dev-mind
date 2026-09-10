@@ -9,7 +9,7 @@ import java.util.Optional;
 /** CAP-35 user_platform_accounts 存取。 */
 public interface UserPlatformAccountRepository extends JpaRepository<UserPlatformAccountEntity, Long> {
 
-    List<UserPlatformAccountEntity> findByUserIdOrderByIdAsc(String userId);
+    List<UserPlatformAccountEntity> findByUserIdOrderByCreatedAtDesc(String userId);
 
     Optional<UserPlatformAccountEntity> findByUserIdAndIntegrationId(String userId, Long integrationId);
 }

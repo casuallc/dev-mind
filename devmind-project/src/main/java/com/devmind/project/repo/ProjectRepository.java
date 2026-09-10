@@ -7,9 +7,9 @@ import java.util.List;
 
 public interface ProjectRepository extends JpaRepository<ProjectEntity, String> {
 
-    List<ProjectEntity> findByStatusOrderByUpdatedAtDesc(String status);
+    List<ProjectEntity> findByStatusOrderByCreatedAtDesc(String status);
 
-    List<ProjectEntity> findAllByOrderByUpdatedAtDesc();
+    List<ProjectEntity> findAllByOrderByCreatedAtDesc();
 
     long countByPath(String path);
 }

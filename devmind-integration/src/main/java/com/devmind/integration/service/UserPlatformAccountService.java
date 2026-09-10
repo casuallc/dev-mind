@@ -71,11 +71,11 @@ public class UserPlatformAccountService implements GitIdentityProvider {
     /** 全部 ENABLED 实例 + 我的绑定状态（未绑定也列出，前端引导配置） */
     public List<PlatformAccountView> listOverview() {
         String userId = currentUser().getId();
-        Map<Long, UserPlatformAccountEntity> mine = accountRepo.findByUserIdOrderByIdAsc(userId)
+        Map<Long, UserPlatformAccountEntity> mine = accountRepo.findByUserIdOrderByCreatedAtDesc(userId)
                 .stream().collect(Collectors.toMap(UserPlatformAccountEntity::getIntegrationId,
                         Function.identity()));
         List<PlatformAccountView> out = new ArrayList<>();
-        for (IntegrationEntity i : integrationRepo.findAllByOrderByIdAsc()) {
+        for (IntegrationEntity i : integrationRepo.findAllByOrderByCreatedAtDesc()) {
             if (!IntegrationEntity.STATUS_ENABLED.equals(i.getStatus())) {
                 continue;
             }
@@ -252,7 +252,7 @@ public class UserPlatformAccountService implements GitIdentityProvider {
     /** 按 remoteUrl host 找我的 git 平台账号：ENABLED git 实例 host 匹配 → 查绑定 */
     private Optional<UserPlatformAccountEntity> findGitAccountByHost(String userId, String repoHost) {
         List<Long> candidateIds = new ArrayList<>();
-        for (IntegrationEntity i : integrationRepo.findAllByOrderByIdAsc()) {
+        for (IntegrationEntity i : integrationRepo.findAllByOrderByCreatedAtDesc()) {
             if (!IntegrationEntity.STATUS_ENABLED.equals(i.getStatus())) {
                 continue;
             }
@@ -268,7 +268,7 @@ public class UserPlatformAccountService implements GitIdentityProvider {
         if (candidateIds.isEmpty()) {
             return Optional.empty();
         }
-        return accountRepo.findByUserIdOrderByIdAsc(userId).stream()
+        return accountRepo.findByUserIdOrderByCreatedAtDesc(userId).stream()
                 .filter(a -> candidateIds.contains(a.getIntegrationId()))
                 .findFirst();
     }

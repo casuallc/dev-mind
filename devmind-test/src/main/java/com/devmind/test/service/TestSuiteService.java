@@ -71,7 +71,7 @@ public class TestSuiteService {
     // ---------------- 套件 CRUD ----------------
 
     public List<TestSuiteView> list(String projectId) {
-        return suiteRepo.findByProjectIdOrderByCreatedAtAsc(projectId).stream()
+        return suiteRepo.findByProjectIdOrderByCreatedAtDesc(projectId).stream()
                 .map(s -> new TestSuiteView(s.getId(), s.getProjectId(), s.getName(), s.getKind(), s.getSource(),
                         s.getDocId(), caseRepo.findBySuiteIdOrderBySortAsc(s.getId()).size(), List.of(), s.getCreatedAt()))
                 .toList();
