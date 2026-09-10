@@ -155,7 +155,7 @@ public class PipelineOrchestrator {
         }
         try {
             BuildView build = buildService.trigger(projectId,
-                    new TriggerRequest(null, null, null, null, workItemId));
+                    new TriggerRequest(null, null, null, null, null, workItemId));
             log.info("WI 已自动触发构建: wi={} build={}", workItemId, build.id());
         } catch (DevMindException e) {
             if (ErrorCode.CONFLICT.equals(e.getErrorCode())) {
