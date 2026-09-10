@@ -64,11 +64,9 @@ export function listDeployments(projectId: string, status?: string): Promise<Dep
   return api.get<DeploymentRecord[]>(`/deployments${q}`)
 }
 
-/** 日志为纯文本，走原生 fetch */
-export async function getDeploymentLogs(id: number): Promise<string> {
-  const res = await fetch(`/api/deployments/${id}/logs`)
-  if (!res.ok) throw new Error(`${res.status}`)
-  return res.text()
+/** 日志为纯文本（api 客户端按 JSON 解析，故走 getText） */
+export function getDeploymentLogs(id: number): Promise<string> {
+  return api.getText(`/deployments/${id}/logs`)
 }
 
 // ---------------- CAP-11 发版配置（/projects/{id}/release-config） ----------------
@@ -108,9 +106,7 @@ export function deleteRelease(id: number): Promise<void> {
   return api.del(`/releases/${id}`)
 }
 
-/** 全量日志为纯文本，走原生 fetch */
-export async function getReleaseLogs(id: number): Promise<string> {
-  const res = await fetch(`/api/releases/${id}/logs`)
-  if (!res.ok) throw new Error(`${res.status}`)
-  return res.text()
+/** 全量日志为纯文本，走 getText */
+export function getReleaseLogs(id: number): Promise<string> {
+  return api.getText(`/releases/${id}/logs`)
 }

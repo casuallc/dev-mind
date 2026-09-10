@@ -81,8 +81,27 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return JSON.parse(text) as T
 }
 
+/** 纯文本响应（日志/报告）：鉴权头与 401 静默刷新语义同 request */
+async function requestText(path: string): Promise<string> {
+  let res = await rawRequest(path)
+  if (res.status === 401 && !isAuthEndpoint(path)) {
+    if (await tryRefresh()) {
+      res = await rawRequest(path)
+    } else {
+      forceReLogin()
+    }
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw parseApiError(res.status, text)
+  }
+  return res.text()
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
+  /** 纯文本 GET（日志/报告等非 JSON 响应） */
+  getText: (path: string) => requestText(path),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) }),
   put: <T>(path: string, body?: unknown) =>

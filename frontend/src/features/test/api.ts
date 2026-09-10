@@ -62,15 +62,11 @@ export function deleteRun(id: number): Promise<void> {
   return api.del(`/test-runs/${id}`)
 }
 
-/** 报告/日志为纯文本，走原生 fetch */
-export async function getRunReport(id: number): Promise<string> {
-  const res = await fetch(`/api/test-runs/${id}/report`)
-  if (!res.ok) throw new Error(`${res.status}`)
-  return res.text()
+/** 报告/日志为纯文本，走 getText */
+export function getRunReport(id: number): Promise<string> {
+  return api.getText(`/test-runs/${id}/report`)
 }
 
-export async function getRunLogs(id: number): Promise<string> {
-  const res = await fetch(`/api/test-runs/${id}/logs`)
-  if (!res.ok) throw new Error(`${res.status}`)
-  return res.text()
+export function getRunLogs(id: number): Promise<string> {
+  return api.getText(`/test-runs/${id}/logs`)
 }

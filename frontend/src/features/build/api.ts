@@ -23,9 +23,7 @@ export function listBuilds(projectId: string, status?: BuildStatus): Promise<Bui
   return api.get<BuildRecord[]>(`/builds${q}`)
 }
 
-/** 日志为纯文本，走原生 fetch（api 客户端按 JSON 解析） */
-export async function getBuildLogs(buildId: number): Promise<string> {
-  const res = await fetch(`/api/builds/${buildId}/logs`)
-  if (!res.ok) throw new Error(`${res.status}`)
-  return res.text()
+/** 日志为纯文本（api 客户端按 JSON 解析，故走 getText） */
+export function getBuildLogs(buildId: number): Promise<string> {
+  return api.getText(`/builds/${buildId}/logs`)
 }
