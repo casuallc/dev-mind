@@ -24,8 +24,10 @@ if [ ! -d frontend/dist ]; then
   exit 1
 fi
 
-echo "[dist] packaging (maven, profile=dist, skip tests)..."
-mvn -q -DskipTests -Pdist package
+echo "[dist] packaging (maven clean package, profile=dist, skip tests)..."
+# 必须 clean：增量构建不会清理 target/classes 里已删源码的残留资源
+# （2026-09-10 事故：残留 spring.factories 注册已删类 → 部署启动 ClassNotFoundException）
+mvn -q -DskipTests -Pdist clean package
 
 VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
 PKG="devmind-dist/target/devmind-${VERSION}.tar.gz"
