@@ -1,4 +1,4 @@
-// 需求列表卡：来源 Segmented（全部/Jira/自建）+ 文本搜索 + 服务端分页表格，状态/类型筛选，点行进详情。
+// 需求列表卡：来源 Segmented（全部/Jira/自建）+ 文本搜索 + 服务端分页表格；状态默认「未完结」（OPEN=排除已完成/已取消，可切全部或单状态），点行进详情。
 // 来源字段（externalKey/externalUrl/remoteStatus）由列表接口直接带出，不再旁路反查 external_links。
 // 布局遵循 docs/core/前端内容区布局约定.md：Card 默认尺寸、title 内 Segmented、操作收 extra、表格默认密度。
 import { useCallback, useEffect, useState } from 'react'
@@ -30,7 +30,7 @@ export default function RequirementListCard({ projectId }: { projectId: string }
   const [loading, setLoading] = useState(false)
   const [sourceView, setSourceView] = useState<SourceView>('ALL')
   const [keyword, setKeyword] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string>('')
+  const [statusFilter, setStatusFilter] = useState<string>('OPEN')
   const [typeFilter, setTypeFilter] = useState<string>('')
   const [page, setPage] = useState(0)
   const [size, setSize] = useState(20)
@@ -194,12 +194,14 @@ export default function RequirementListCard({ projectId }: { projectId: string }
               onSearch={(v) => { setKeyword(v.trim()); setPage(0) }}
             />
             <Select
-              allowClear
-              placeholder="状态（默认全部）"
-              style={{ minWidth: 150 }}
-              value={statusFilter || undefined}
-              onChange={(v) => { setStatusFilter(v ?? ''); setPage(0) }}
-              options={ALL_STATUSES.map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
+              style={{ minWidth: 110 }}
+              value={statusFilter}
+              onChange={(v) => { setStatusFilter(v); setPage(0) }}
+              options={[
+                { value: 'OPEN', label: '未完结' },
+                { value: 'ALL', label: '全部状态' },
+                ...ALL_STATUSES.map((s) => ({ value: s, label: STATUS_LABEL[s] })),
+              ]}
             />
             <Select
               allowClear

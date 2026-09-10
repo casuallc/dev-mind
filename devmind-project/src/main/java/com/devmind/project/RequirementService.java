@@ -91,12 +91,14 @@ public class RequirementService {
 
     /**
      * 需求分页列表：status/type/source 可组合过滤（空=不限），keyword 匹配 title/externalKey，按 seq 倒序。
+     * status 支持伪值 OPEN = 未完结（排除 DONE/CANCELLED），为前端列表默认视图。
      * page 从 0 起，size 限制 [1, 200] 防全量拉取打爆内存（Jira 首轮可同步数百上千条 DRAFT）。
      */
     public PageView<RequirementView> list(String projectId, String status, String type, String source,
                                           String keyword, int page, int size) {
         requireProject(projectId);
-        String st = (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status))
+        boolean openOnly = "OPEN".equalsIgnoreCase(status == null ? "" : status.trim());
+        String st = (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status) || openOnly)
                 ? null : normalizeStatus(status);
         String tp = (type == null || type.isBlank() || "ALL".equalsIgnoreCase(type))
                 ? null : normalizeType(type);
@@ -106,7 +108,7 @@ public class RequirementService {
         int p = Math.max(0, page);
         int s = Math.min(Math.max(1, size), 200);
         PageRequest pageable = PageRequest.of(p, s, Sort.by(Sort.Direction.DESC, "seq"));
-        Page<RequirementEntity> result = requirementRepo.search(projectId, st, tp, src, kw, pageable);
+        Page<RequirementEntity> result = requirementRepo.search(projectId, st, tp, src, kw, openOnly, pageable);
         List<String> ids = result.getContent().stream().map(RequirementEntity::getId).toList();
         Map<String, RequirementExternalRefLookup.ExternalRef> refs = refsFor(ids);
         Map<String, Long> agentSeconds = agentSecondsFor(ids);

@@ -18,9 +18,11 @@ public interface RequirementRepository extends JpaRepository<RequirementEntity, 
     /**
      * 组合过滤搜索：status/type/source 可空（null=不限）；keyword 匹配 title/externalKey
      * （不匹配 description——@Lob 上 LIKE 跨库不稳且无索引意义）。
+     * openOnly=true 时排除终态（DONE/CANCELLED），对应列表默认「未完结」视图。
      */
     @Query("select r from RequirementEntity r where r.projectId = :projectId"
             + " and (:status is null or r.status = :status)"
+            + " and (:openOnly = false or r.status not in ('DONE', 'CANCELLED'))"
             + " and (:type is null or r.type = :type)"
             + " and (:source is null or r.source = :source)"
             + " and (cast(:kw as string) is null or lower(r.title) like lower(concat('%', cast(:kw as string), '%'))"
@@ -30,6 +32,7 @@ public interface RequirementRepository extends JpaRepository<RequirementEntity, 
                                    @Param("type") String type,
                                    @Param("source") String source,
                                    @Param("kw") String keyword,
+                                   @Param("openOnly") boolean openOnly,
                                    Pageable pageable);
 
     /** 项目内当前最大 seq（无需求时 null） */

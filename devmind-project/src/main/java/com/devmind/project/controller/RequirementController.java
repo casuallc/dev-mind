@@ -29,7 +29,7 @@ public class RequirementController {
         this.service = service;
     }
 
-    /** 分页列表：status/type/source 过滤（空=不限），keyword 匹配标题/Jira key，page 从 0 起，size 默认 20 */
+    /** 分页列表：status/type/source 过滤（空=不限；status=OPEN 为伪值=未完结，排除 DONE/CANCELLED），keyword 匹配标题/Jira key，page 从 0 起，size 默认 20 */
     @GetMapping
     public PageView<RequirementView> list(@PathVariable String projectId,
                                           @RequestParam(required = false) String status,

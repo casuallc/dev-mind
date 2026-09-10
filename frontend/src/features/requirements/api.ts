@@ -17,7 +17,7 @@ import type {
   WorkItemStatus,
 } from './types'
 
-/** 需求分页列表：status/type/source 过滤（空=不限），keyword 匹配标题/Jira key，page 从 0 起 */
+/** 需求分页列表：status/type/source 过滤（空/ALL=不限；status=OPEN 伪值=未完结，排除 DONE/CANCELLED），keyword 匹配标题/Jira key，page 从 0 起 */
 export function listRequirements(
   projectId: string,
   opts?: { status?: string; type?: string; source?: string; keyword?: string; page?: number; size?: number },
