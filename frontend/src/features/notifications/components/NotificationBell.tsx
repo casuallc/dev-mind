@@ -1,5 +1,5 @@
 // 顶部铃铛：未读角标 + 下拉最近未读 + 一键执行动作 / 全部已读。
-import { Badge, Button, Dropdown, Empty, Space, Tag, Typography, message } from 'antd'
+import { Badge, Button, Dropdown, Empty, Space, Tag, Typography, message, theme } from 'antd'
 import { BellOutlined, CheckOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useNotifications, markAllReadLocal } from '../store'
@@ -12,6 +12,7 @@ import { showError } from '../../../shared/utils/showError'
 export default function NotificationBell() {
   const { notifications, connected } = useNotifications()
   const navigate = useNavigate()
+  const { token } = theme.useToken()
   const unread = notifications.filter((n) => !n.readAt)
 
   const onAction = async (n: AppNotification, action: string) => {
@@ -33,8 +34,19 @@ export default function NotificationBell() {
     }
   }
 
+  // dropdownRender 自定义内容时 antd 只提供定位容器，白色面板/阴影要自带，否则背景页文字从卡片缝隙透出
   const content = (
-    <div style={{ width: 340, maxHeight: 440, overflow: 'auto', padding: 8 }}>
+    <div
+      style={{
+        width: 340,
+        maxHeight: 440,
+        overflow: 'auto',
+        padding: 8,
+        background: token.colorBgElevated,
+        borderRadius: token.borderRadiusLG,
+        boxShadow: token.boxShadowSecondary,
+      }}
+    >
       {unread.length === 0 ? (
         <Empty
           description="暂无未读通知"
