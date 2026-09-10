@@ -65,6 +65,12 @@ public final class RunnerUpgrader {
         return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
     }
 
+    /** 服务管理模式：由 systemd unit / WinSW xml 注入 DEVMIND_RUNNER_SERVICE=1，
+     * 升级收口走「换包后由服务管理器重启」，SelfUpdater 不再自行 spawn runner。 */
+    public static boolean isServiceMode() {
+        return "1".equals(System.getenv("DEVMIND_RUNNER_SERVICE"));
+    }
+
     /** 同步下载到 newFile 并校验 sha256（不匹配删除残渣并抛异常）。 */
     public static void downloadAndVerify(String url, String sha256, Path newFile) throws Exception {
         HttpClient client = HttpClient.newHttpClient();

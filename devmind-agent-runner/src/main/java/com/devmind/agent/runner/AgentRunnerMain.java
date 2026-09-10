@@ -265,7 +265,10 @@ public class AgentRunnerMain {
             log.error("SelfUpdater 拉起失败: {}", e.getMessage(), e);
             // 仍退出：心跳停后服务端判 OFFLINE，保留 .new 现场人工恢复
         }
-        System.exit(0); // shutdown hook: killAll（空）+ conn.shutdown()
+        // 服务管理模式（systemd/WinSW 托管，DEVMIND_RUNNER_SERVICE=1 由服务定义注入）：
+        // 以非零码退出让服务管理器判定失败并自动拉起（on-failure restart），
+        // SelfUpdater 只换包不自行重启，避免与服务管理器双份拉起。
+        System.exit(RunnerUpgrader.isServiceMode() ? 42 : 0); // shutdown hook: killAll（空）+ conn.shutdown()
     }
 
     private static void handleLaunch(JsonNode frame, String sessionId, RunnerConfig config,

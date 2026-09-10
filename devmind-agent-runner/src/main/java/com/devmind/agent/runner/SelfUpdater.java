@@ -42,6 +42,12 @@ public class SelfUpdater {
             }
             log(log, "替换完成，重启 runner: " + target);
 
+            if (RunnerUpgrader.isServiceMode()) {
+                // 服务管理模式（systemd/WinSW）：本进程环境继承自 runner，jar 换好后
+                // 由服务管理器按 on-failure 策略拉起新 runner（runner 以退出码 42 触发）。
+                log(log, "服务管理模式（DEVMIND_RUNNER_SERVICE=1）：换包完成，由服务管理器重启，SelfUpdater 退出");
+                return;
+            }
             new ProcessBuilder(RunnerUpgrader.javaBin(), "-jar",
                     target.toAbsolutePath().toString(), configFile.toAbsolutePath().toString())
                     .directory(target.toAbsolutePath().getParent().toFile())

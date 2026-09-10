@@ -99,6 +99,9 @@ function Write-WinSwXml([string]$JavaExe) {
   <executable>$(& $esc $JavaExe)</executable>
   <arguments>-jar runner\devmind-agent-runner.jar config\agent.properties</arguments>
   <workingdirectory>$(& $esc $AppHome)</workingdirectory>
+  <!-- 服务管理模式标记：runner 升级换包后以退出码 42 退出，由本服务 onfailure 拉起新 jar，
+       SelfUpdater 不自行 spawn（防与服务双份起进程） -->
+  <env name="DEVMIND_RUNNER_SERVICE" value="1"/>
   <logpath>$(& $esc $LogDir)</logpath>
   <logmode>roll</logmode>
   <onfailure action="restart" delay="5 sec"/>

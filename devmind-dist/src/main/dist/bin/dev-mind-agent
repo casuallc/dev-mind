@@ -152,6 +152,9 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=${APP_HOME}
+# 服务管理模式标记：runner 升级换包后以退出码 42 触发本 unit 的 on-failure 重启，
+# SelfUpdater 不自行拉起（防与 systemd 双份起进程）
+Environment=DEVMIND_RUNNER_SERVICE=1
 ExecStart=${BIN_DIR}/${APP_NAME} run
 Restart=on-failure
 RestartSec=5
