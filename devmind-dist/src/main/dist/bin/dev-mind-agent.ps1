@@ -25,6 +25,21 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# PS 5.1 坑：脚本级 EAP=Stop 时，原生命令的 stderr 输出（java -version 的版本行、winsw 的
+# 诊断）经 2>&1 合并后会变成 ErrorRecord 直接终止脚本。所有原生命令调用统一走本函数——
+# 临时降为 Continue，退出码仍由调用方查 $LASTEXITCODE。
+function Invoke-Native([scriptblock]$Cmd, [switch]$Join) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & $Cmd
+        if ($Join) { return ($out | Out-String).Trim() }
+        return $out
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
 # WinSW v2 系：.NET Framework 4.6.1+ 即可运行（Win10/Server2016+ 自带），无需额外运行时。
 # 配置约定：exe 与同目录同名 xml 配对（devmind-agent.exe + devmind-agent.xml）。
 $DefaultWinSwUrl = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET461.exe'
@@ -54,7 +69,7 @@ function Resolve-Java {
     foreach ($java in $candidates) {
         if (-not (Test-Path $java)) { continue }
         # java -version 输出走 stderr："openjdk version \"21.0.x\"" / "java version \"21\""
-        $verLine = (& $java -version 2>&1 | Select-Object -First 1) -join ' '
+        $verLine = Invoke-Native { & $java -version 2>&1 | Select-Object -First 1 } -Join
         if ($verLine -match 'version "(\d+)') {
             $major = [int]$Matches[1]
             if ($major -ge 21) { return (Resolve-Path $java).Path }
@@ -129,7 +144,7 @@ function Invoke-Install {
     Write-WinSwXml $java
     New-Item -ItemType Directory -Force $LogDir | Out-Null
     Write-Host "[agent] 注册服务 $ServiceName (java=$java home=$AppHome)"
-    & $WinSwExe install
+    Invoke-Native { & $WinSwExe install }
     if ($LASTEXITCODE -ne 0) { throw "winsw install 失败（exit $LASTEXITCODE）" }
     Write-Host "[agent] 已注册。启动：Start-Service $ServiceName（或 dev-mind-agent.ps1 start）"
 }
@@ -142,7 +157,7 @@ function Invoke-Uninstall {
         Write-Host "[agent] 停止服务 $ServiceName ..."
         Stop-Service -Name $ServiceName -Force
     }
-    & $WinSwExe uninstall
+    Invoke-Native { & $WinSwExe uninstall }
     if ($LASTEXITCODE -ne 0) { throw "winsw uninstall 失败（exit $LASTEXITCODE）" }
     Write-Host "[agent] 已移除服务 $ServiceName"
 }
@@ -152,7 +167,8 @@ function Invoke-Run {
     $java = Resolve-Java
     Set-Location $AppHome
     Write-Host "[agent] home=$AppHome java=$java conf=$Conf"
-    & $java -jar $RunnerJar $Conf
+    # runner 日志走 stderr，必须经 Invoke-Native 防 EAP=Stop 误杀
+    Invoke-Native { & $java -jar $RunnerJar $Conf }
 }
 
 switch ($Command) {
