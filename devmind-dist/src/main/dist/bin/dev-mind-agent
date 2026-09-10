@@ -7,14 +7,18 @@
 #   stop       Graceful stop (TERM, then KILL after timeout)
 #   restart    stop + start
 #   status     Show process status
+#   install    Install systemd unit (requires root)
+#   uninstall  Remove systemd unit (requires root)
 #
 # Environment:
-#   APUSIC_JAVA_HOME  Preferred JDK home (must be 21+)
-#   JAVA_HOME         Fallback JDK home
-#   JAVA_OPTS         JVM options override (default: -Xms128m -Xmx512m)
+#   APUSIC_JAVA_HOME     Preferred JDK home (must be 21+)
+#   JAVA_HOME            Fallback JDK home
+#   JAVA_OPTS            JVM options override (default: -Xms128m -Xmx512m)
+#   DEVMIND_SERVICE_NAME systemd unit name override (default: dev-mind-agent)
 set -euo pipefail
 
 APP_NAME="dev-mind-agent"
+SERVICE_NAME="${DEVMIND_SERVICE_NAME:-$APP_NAME}"
 STOP_TIMEOUT=30     # seconds to wait before SIGKILL on stop
 
 BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -139,11 +143,57 @@ do_status() {
     fi
 }
 
+print_unit() {
+    cat <<EOF
+[Unit]
+Description=Dev-Mind agent runner (CAP-34 executor)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=${APP_HOME}
+ExecStart=${BIN_DIR}/${APP_NAME} run
+Restart=on-failure
+RestartSec=5
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+do_install() {
+    local unit="/etc/systemd/system/${SERVICE_NAME}.service"
+    if [[ $EUID -ne 0 ]]; then
+        echo "ERROR: install requires root; re-run with sudo, or create $unit manually:" >&2
+        print_unit
+        exit 1
+    fi
+    print_unit >"$unit"
+    systemctl daemon-reload
+    echo "installed: $unit"
+    echo "next: systemctl enable --now ${SERVICE_NAME}"
+}
+
+do_uninstall() {
+    local unit="/etc/systemd/system/${SERVICE_NAME}.service"
+    if [[ $EUID -ne 0 ]]; then
+        echo "ERROR: uninstall requires root" >&2
+        exit 1
+    fi
+    systemctl disable --now "${SERVICE_NAME}" 2>/dev/null || true
+    rm -f "$unit"
+    systemctl daemon-reload
+    echo "uninstalled: $unit"
+}
+
 case "${1:-}" in
     start) do_start ;;
     run) do_run ;;
     stop) do_stop ;;
     restart) do_stop; do_start ;;
     status) do_status ;;
+    install) do_install ;;
+    uninstall) do_uninstall ;;
     *) usage; exit 1 ;;
 esac
