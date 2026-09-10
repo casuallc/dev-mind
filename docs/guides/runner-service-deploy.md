@@ -38,5 +38,6 @@ sudo bin/dev-mind-agent uninstall      # disable --now + 删 unit
 ## 注意事项
 
 - **停服是直接终止 java 进程**（Windows 无优雅停机通道），不影响会话数据——runner 重启时扫描 `sessions/` 目录做现场对账：存活 claude 进程 reattach 挂回、孤儿进程整树回收（CAP-34）。
-- **runner jar 升级后必须重启服务**（`systemctl restart` / `restart`）——运行中的 jar 被覆盖会新旧类混装，典型症状 409 ack 超时。
+- **自升级与服务托管的协同**：服务定义会注入 `DEVMIND_RUNNER_SERVICE=1`。平台推送升级时，runner 换包后以退出码 42 退出，由 systemd/WinSW 的 on-failure 策略拉起新 jar（SelfUpdater 不再自行 spawn，防双份进程）。非服务部署行为不变（SelfUpdater 自己重启）。
+- **runner jar 手工升级后必须重启服务**（`systemctl restart` / `restart`）——运行中的 jar 被覆盖会新旧类混装，典型症状 409 ack 超时。
 - 不想注册服务时，`bin/dev-mind-agent start|stop|restart|status`（nohup + pid 文件）依旧可用，两条路径互不冲突但不要混用同一实例。
