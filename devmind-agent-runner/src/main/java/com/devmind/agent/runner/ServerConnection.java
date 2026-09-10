@@ -29,6 +29,8 @@ public class ServerConnection {
 
     /** 服务端拒绝接入的关闭码（POLICY_VIOLATION：token 无效或节点已禁用） */
     static final int CLOSE_AUTH_REJECTED = 1008;
+    /** 同节点重复接入被踢的关闭码（与服务端 AgentConnectionRegistry.CLOSE_DUPLICATE 约定） */
+    static final int CLOSE_DUPLICATE = 4000;
     /** 连接存活超过此时长视为健康（认证通过），复位退避 */
     static final long MIN_HEALTHY_MS = 10_000;
 
@@ -79,9 +81,15 @@ public class ServerConnection {
             if (!running) {
                 break;
             }
-            long sleepMs = backoff.next(listener.closeStatus == CLOSE_AUTH_REJECTED, healthy);
-            if (listener.closeStatus == CLOSE_AUTH_REJECTED) {
+            int close = listener.closeStatus;
+            long sleepMs = backoff.next(close == CLOSE_AUTH_REJECTED, close == CLOSE_DUPLICATE, healthy);
+            if (close == CLOSE_AUTH_REJECTED) {
                 log.error("接入被拒绝（token 无效或节点已禁用），{}s 后重试——请到 Agent 节点页核对节点状态/token",
+                        sleepMs / 1000);
+            } else if (close == CLOSE_DUPLICATE) {
+                // 本机有另一份 runner 实例占了座位：长退避静观其变，不抢（抢则双实例互踢风暴，
+                // 每次重连对账还会误杀对方刚起的会话）。对方退出后本实例在退避窗口内自行接管。
+                log.error("被判定为重复实例（同节点已有另一连接），{}s 后重试——请检查本机是否跑了多份 runner 进程",
                         sleepMs / 1000);
             } else {
                 log.info("{}ms 后重连", sleepMs);
@@ -92,23 +100,32 @@ public class ServerConnection {
 
     /**
      * 重连退避：普通断线 1s→30s 封顶；认证拒绝 30s→5min 封顶（永久性失败，低频重试等人工处理，
-     * 节点被重新启用后能自行恢复）。健康连接（存活 ≥{@value #MIN_HEALTHY_MS}ms）复位两者。
+     * 节点被重新启用后能自行恢复）；重复实例被踢 60s→10min 封顶（座位已被占，静等对方退出自行接管）。
+     * 健康连接（存活 ≥{@value #MIN_HEALTHY_MS}ms）复位三者。
      */
     static class Backoff {
         static final long MAX_NORMAL_MS = 30_000;
         static final long MAX_AUTH_MS = 300_000;
+        static final long MAX_DUP_MS = 600_000;
 
         private long normalMs = 1000;
         private long authMs = 30_000;
+        private long dupMs = 60_000;
 
-        long next(boolean authRejected, boolean healthy) {
+        long next(boolean authRejected, boolean duplicate, boolean healthy) {
             if (healthy) {
                 normalMs = 1000;
                 authMs = 30_000;
+                dupMs = 60_000;
             }
             if (authRejected) {
                 long sleep = authMs;
                 authMs = Math.min(authMs * 2, MAX_AUTH_MS);
+                return sleep;
+            }
+            if (duplicate) {
+                long sleep = dupMs;
+                dupMs = Math.min(dupMs * 2, MAX_DUP_MS);
                 return sleep;
             }
             long sleep = normalMs;

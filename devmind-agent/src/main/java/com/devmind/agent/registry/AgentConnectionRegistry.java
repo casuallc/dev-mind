@@ -94,7 +94,7 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         String nodeId = String.valueOf(node.getId());
         WebSocketSession old = connections.put(nodeId, ws);
         if (old != null && old.isOpen()) {
-            closeQuietly(old); // 同节点重复接入：踢掉旧连接
+            kickDuplicate(old); // 同节点重复接入：踢掉旧连接（专用关闭码 4000，runner 侧走长退避防互踢风暴）
         }
         lastSeen.put(nodeId, System.currentTimeMillis());
         String remoteAddr = AgentConnLogService.formatRemoteAddr(ws.getRemoteAddress());
@@ -466,6 +466,18 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             }
         } catch (Exception e) {
             throw new DevMindException(ErrorCode.CONFLICT, "向节点发送指令失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 同节点重复接入被踢的专用关闭码（4000-4999 私用段）：runner 凭此识别「本实例多余」走长退避。 */
+    static final CloseStatus CLOSE_DUPLICATE = new CloseStatus(4000, "duplicate: kicked by newer connection");
+
+    /** 重复接入踢旧连接：不用 NORMAL（1000），避免 runner 按普通断线 1s 重连形成双实例互踢风暴。 */
+    private void kickDuplicate(WebSocketSession ws) {
+        try {
+            ws.close(CLOSE_DUPLICATE);
+        } catch (Exception e) {
+            // 忽略
         }
     }
 
