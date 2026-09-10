@@ -224,7 +224,7 @@ public class PipelineOrchestrator {
                         String projectId, String workItemId) {
         try {
             notificationService.emit(new NotificationDraft(level, type, title, body,
-                    "WORK_ITEM", workItemId, List.of()));
+                    "WORK_ITEM", workItemId, projectId, List.of()));
         } catch (Exception e) {
             log.warn("执行链通知发送失败: {}", e.getMessage());
         }

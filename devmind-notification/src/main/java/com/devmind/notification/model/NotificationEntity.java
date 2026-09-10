@@ -49,6 +49,10 @@ public class NotificationEntity {
     @Column(length = 64)
     private String entityId;
 
+    /** 所属项目（view 动作前端路由定位用；平台级事件为 null）。 */
+    @Column(length = 64)
+    private String projectId;
+
     /** 快捷动作 JSON：[{"action":"authorize","label":"允许授权"},…]（FR-04） */
     @Lob
     @JdbcTypeCode(SqlTypes.LONGVARCHAR)
@@ -78,6 +82,8 @@ public class NotificationEntity {
     public void setEntityType(String entityType) { this.entityType = entityType; }
     public String getEntityId() { return entityId; }
     public void setEntityId(String entityId) { this.entityId = entityId; }
+    public String getProjectId() { return projectId; }
+    public void setProjectId(String projectId) { this.projectId = projectId; }
     public String getActions() { return actions; }
     public void setActions(String actions) { this.actions = actions; }
     public String getChannelStatus() { return channelStatus; }

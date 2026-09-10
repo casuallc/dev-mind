@@ -127,7 +127,7 @@ public class NotificationService implements NotificationPublisher {
             default -> List.of();
         };
         return new NotificationDraft(level, ev.kind(), ev.title(), ev.content(),
-                ENTITY_SESSION, ev.sessionId(), actions);
+                ENTITY_SESSION, ev.sessionId(), null, actions);
     }
 
     // ---------------- emit 核心 ----------------
@@ -154,6 +154,7 @@ public class NotificationService implements NotificationPublisher {
         ent.setBody(draft.body());
         ent.setEntityType(draft.entityType());
         ent.setEntityId(draft.entityId());
+        ent.setProjectId(draft.projectId());
         ent.setActions(NotificationViews.toJson(mapper, draft.actions()));
         ent.setCreatedAt(Instant.now());
         ent = repo.save(ent);
@@ -285,7 +286,7 @@ public class NotificationService implements NotificationPublisher {
         return emit(new NotificationDraft(level, eventType,
                 req.title() != null ? req.title() : "测试通知",
                 req.body(), req.entityType() != null ? req.entityType() : "TEST",
-                entityId, List.of()));
+                entityId, null, List.of()));
     }
 
     // ---------------- 通道配置 ----------------

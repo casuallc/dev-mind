@@ -32,6 +32,7 @@ public final class NotificationViews {
                 e.getBody(),
                 e.getEntityType(),
                 e.getEntityId(),
+                e.getProjectId(),
                 parseActions(e.getActions(), mapper),
                 parseStatus(e.getChannelStatus(), mapper),
                 e.getReadAt(),

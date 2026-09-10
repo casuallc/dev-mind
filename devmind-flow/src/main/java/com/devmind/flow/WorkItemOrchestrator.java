@@ -89,7 +89,7 @@ public class WorkItemOrchestrator {
                 notificationService.emit(new NotificationDraft(NotificationLevel.P1, "flow.dispatched",
                         wi.code() + " 依赖就绪，已自动派发会话",
                         "工作单元「" + wi.title() + "」已自动起会话并转为 IN_PROGRESS",
-                        "REQUIREMENT", requirementId, List.of(new ActionDef("view", "查看需求"))));
+                        "REQUIREMENT", requirementId, projectId, List.of(new ActionDef("view", "查看需求"))));
                 log.info("工作单元已自动派发: {} ({})", wi.code(), wi.id());
             } catch (DevMindException e) {
                 if (ErrorCode.TOO_MANY_SESSIONS.equals(e.getErrorCode())) {

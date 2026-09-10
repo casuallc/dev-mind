@@ -209,7 +209,7 @@ public class DeploymentService {
                 notificationService.emit(new NotificationDraft(NotificationLevel.P0, "deploy.confirm.required",
                         "部署 #" + saved.getId() + " 待确认",
                         "环境 " + saved.getEnv() + " 的部署需人工确认后执行（构建 #" + saved.getBuildId() + "）",
-                        "deployment", String.valueOf(saved.getId()),
+                        "deployment", String.valueOf(saved.getId()), saved.getProjectId(),
                         List.of(new ActionDef("confirm", "确认并执行"))));
             } catch (Exception e) {
                 log.warn("部署待确认通知发送失败: {}", e.getMessage());
@@ -603,7 +603,7 @@ public class DeploymentService {
     private void notify(DeploymentEntity d, NotificationLevel level, String title, String body) {
         try {
             notificationService.emit(new NotificationDraft(level, "deploy", title, body,
-                    "deployment", String.valueOf(d.getId()), List.of()));
+                    "deployment", String.valueOf(d.getId()), d.getProjectId(), List.of()));
         } catch (Exception e) {
             log.warn("部署通知发送失败: {}", e.getMessage());
         }

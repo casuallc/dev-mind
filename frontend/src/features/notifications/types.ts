@@ -14,6 +14,7 @@ export interface AppNotification {
   body: string | null
   entityType: string
   entityId: string
+  projectId: string | null
   actions: NotificationAction[]
   channelStatus: Record<string, string>
   readAt: string | null

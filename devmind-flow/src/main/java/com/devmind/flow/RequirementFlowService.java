@@ -280,7 +280,7 @@ public class RequirementFlowService {
             notify(NotificationLevel.P1, "flow.split.ready",
                     "REQ-" + req.getSeq() + " 拆分草稿就绪",
                     "AI 已生成工作单元拆分草稿，请前往需求看板确认固化",
-                    req.getId());
+                    req.getProjectId(), req.getId());
         }
     }
 
@@ -293,7 +293,7 @@ public class RequirementFlowService {
                     "REQ-" + req.getSeq() + " 分析会话已完成",
                     "未找到约定输出 " + FlowOutputContract.OUTPUT_DIR + "/" + FlowOutputContract.ANALYSIS_FILE
                             + "，请查看会话输出并人工整理结论",
-                    req.getId());
+                    req.getProjectId(), req.getId());
             return;
         }
         artifactService.registerInfo(session.getProjectId(), req.getId(), null,
@@ -302,7 +302,7 @@ public class RequirementFlowService {
         notify(NotificationLevel.P1, "flow.analysis.ready",
                 "REQ-" + req.getSeq() + " 分析就绪",
                 "分析产物已登记，请查阅后决定生成方案或直接拆分",
-                req.getId());
+                req.getProjectId(), req.getId());
     }
 
     /** DESIGN 型 WI 会话 DONE → 读 design.md 登记方案文档 + Design(DRAFT) + DOC 产物，通知"方案待确认"。 */
@@ -314,7 +314,7 @@ public class RequirementFlowService {
                     "REQ-" + req.getSeq() + " 方案会话已完成",
                     "未找到约定输出 " + FlowOutputContract.OUTPUT_DIR + "/" + FlowOutputContract.DESIGN_FILE
                             + "，请查看会话输出并人工登记方案",
-                    req.getId());
+                    req.getProjectId(), req.getId());
             return;
         }
         try {
@@ -330,7 +330,7 @@ public class RequirementFlowService {
             notify(NotificationLevel.P1, "flow.design.ready",
                     "REQ-" + req.getSeq() + " 方案 v" + design.version() + " 待确认",
                     "AI 已生成方案文档，请前往需求看板「方案」Tab 确认或废弃",
-                    req.getId());
+                    req.getProjectId(), req.getId());
         } catch (IOException e) {
             log.warn("读取方案输出失败: session={} err={}", session.getId(), e.getMessage());
         }
@@ -383,9 +383,10 @@ public class RequirementFlowService {
         }
     }
 
-    private void notify(NotificationLevel level, String type, String title, String body, String requirementId) {
+    private void notify(NotificationLevel level, String type, String title, String body,
+                        String projectId, String requirementId) {
         notificationService.emit(new NotificationDraft(level, type, title, body,
-                "REQUIREMENT", requirementId, List.of(new ActionDef("view", "查看需求"))));
+                "REQUIREMENT", requirementId, projectId, List.of(new ActionDef("view", "查看需求"))));
     }
 
     private boolean isTerminal(String status) {

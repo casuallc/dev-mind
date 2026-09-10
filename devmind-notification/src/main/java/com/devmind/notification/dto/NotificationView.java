@@ -15,6 +15,7 @@ import java.util.Map;
  * @param body          正文
  * @param entityType    关联实体类型（SESSION）
  * @param entityId      关联实体 ID（会话 ID）
+ * @param projectId     所属项目（view 动作前端路由定位用；平台级事件为 null）
  * @param actions       快捷动作
  * @param channelStatus 各通道发送结果 {"ws":"SENT",...}
  * @param readAt        已读时间（null=未读）
@@ -28,6 +29,7 @@ public record NotificationView(
         String body,
         String entityType,
         String entityId,
+        String projectId,
         List<ActionDef> actions,
         Map<String, String> channelStatus,
         Instant readAt,

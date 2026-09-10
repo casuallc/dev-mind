@@ -13,5 +13,6 @@ public record NotificationDraft(
         String body,
         String entityType,
         String entityId,
+        String projectId,
         List<ActionDef> actions) {
 }

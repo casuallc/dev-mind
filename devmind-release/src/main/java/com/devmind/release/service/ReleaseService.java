@@ -556,7 +556,7 @@ public class ReleaseService {
     private void notify(ReleaseEntity r, NotificationLevel level, String title, String body) {
         try {
             notificationService.emit(new NotificationDraft(level, "release", title, body,
-                    "release", String.valueOf(r.getId()), List.of()));
+                    "release", String.valueOf(r.getId()), r.getProjectId(), List.of()));
         } catch (Exception e) {
             log.warn("发版通知发送失败: {}", e.getMessage());
         }

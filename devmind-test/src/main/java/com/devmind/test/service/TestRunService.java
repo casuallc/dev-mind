@@ -616,7 +616,7 @@ public class TestRunService {
     private void notify(TestRunEntity r, NotificationLevel level, String title, String body) {
         try {
             notificationService.emit(new NotificationDraft(level, "test", title, body,
-                    "test_run", String.valueOf(r.getId()), List.of()));
+                    "test_run", String.valueOf(r.getId()), r.getProjectId(), List.of()));
         } catch (Exception e) {
             log.warn("测试通知发送失败: {}", e.getMessage());
         }

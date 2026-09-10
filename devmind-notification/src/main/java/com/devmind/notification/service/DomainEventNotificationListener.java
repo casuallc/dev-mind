@@ -55,7 +55,7 @@ public class DomainEventNotificationListener {
         List<ActionDef> actions = e.entityId() == null ? List.of()
                 : List.of(new ActionDef("view", "查看" + domainLabel(e.type())));
         return new NotificationDraft(level, e.type().toUpperCase().replace('.', '_'),
-                title(e), e.summary(), e.entityType(), e.entityId(), actions);
+                title(e), e.summary(), e.entityType(), e.entityId(), e.projectId(), actions);
     }
 
     private String title(SimpleDomainEvent e) {
