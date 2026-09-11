@@ -64,7 +64,8 @@ Windows 办公机普遍在 NAT/防火墙后、入站不可达，因此采用**�
 - **FR-09 runner 版本维护与手动升级**（2026-09-03 补做）：节点页「Runner 包」页签上传
   `devmind-agent-runner.jar` 由服务端托管（**全局单份，上传即替换**；版本从包内
   `runner-version.txt` 提取、sha256 入库；强校验含 `SelfUpdater.class`，无自升级能力的
-  旧包拒收）。节点列表行内「升级」按钮（仅 ONLINE）→ 服务端 WS 下发 upgrade 指令 →
+  旧包拒收；**按版本串尾部构建时间戳 `-byyyyMMdd.HHmm` 防倒退**——旧构建覆盖新构建 409
+  拒收，前端弹确认框后带 `?force=true` 降级重传，无时间戳的历史 dev 构建不比对直接放行）。节点列表行内「升级」按钮（仅 ONLINE）→ 服务端 WS 下发 upgrade 指令 →
   runner 校验后由 **SelfUpdater 独立进程**完成换包重启（Windows 运行中 jar 不可覆盖）。
   **有活跃会话时 runner 回 busy 推迟，不杀会话**。在线老版本 runner 不认识 upgrade 帧，
   需先手工部署到含升级能力的基线版本；升级后日志落 jar 旁 `runner.log`（首次手工启动
@@ -128,7 +129,7 @@ POST   /api/agent-nodes/{id}/default | /unset-default   设为/取消平台默�
 WS     /ws/agent                        runner 接入端点（token 认证）
 POST   /api/sessions                    现有端点 + agentNodeId?（缺省=本地）
 # FR-09 runner 包（上传/升级仅 ADMIN；下载 permitAll + 控制器内「节点token 或 登录态」双认证）
-POST   /api/agent-nodes/runner-package           multipart 上传替换（提取版本+sha256，强校验 SelfUpdater）
+POST   /api/agent-nodes/runner-package           multipart 上传替换（提取版本+sha256，强校验 SelfUpdater；旧构建覆盖新构建 409，?force=true 强制降级）
 GET    /api/agent-nodes/runner-package           当前包元数据（无包 404）
 GET    /api/agent-nodes/runner-package/download  jar 流（runner 升级用 ?token=；管理页用 JWT）
 POST   /api/agent-nodes/{id}/upgrade             手动升级，恒 200：status=ACCEPTED/BUSY/ALREADY_LATEST/REJECTED；?force=true 强制（先终止活跃会话）

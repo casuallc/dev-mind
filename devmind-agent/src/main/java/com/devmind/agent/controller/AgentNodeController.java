@@ -144,10 +144,11 @@ public class AgentNodeController {
 
     // ---------------- FR-09 runner 包托管与手动升级 ----------------
 
-    /** 上传替换当前 runner 包（全局单份）。 */
+    /** 上传替换当前 runner 包（全局单份）。旧构建覆盖新构建 → 409；?force=true 确认降级。 */
     @PostMapping(value = "/runner-package", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public RunnerPackageView uploadPackage(@RequestParam("file") MultipartFile file) throws IOException {
-        return packageService.upload(file, identityService.currentActor());
+    public RunnerPackageView uploadPackage(@RequestParam("file") MultipartFile file,
+                                           @RequestParam(defaultValue = "false") boolean force) throws IOException {
+        return packageService.upload(file, identityService.currentActor(), force);
     }
 
     @GetMapping("/runner-package")

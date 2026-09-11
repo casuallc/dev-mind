@@ -4,6 +4,7 @@ import {
   Button,
   Descriptions,
   Empty,
+  Modal,
   Space,
   Typography,
   Upload,
@@ -18,10 +19,13 @@ import {
 import type { RunnerPackage } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
+import { isApiRequestError } from '../../../shared/api/error'
 
 /**
  * FR-09「Runner 包」页签：服务端托管的 devmind-agent-runner.jar（全局单份，上传即替换）。
- * 上传时后端强校验包内 runner-version.txt 与 SelfUpdater；节点升级走节点列表的「升级」按钮。
+ * 上传时后端强校验包内 runner-version.txt 与 SelfUpdater，并按构建时间戳防倒退——
+ * 旧构建覆盖新构建返回 409，前端弹确认框，用户确认后带 force=true 降级重传；
+ * 节点升级走节点列表的「升级」按钮。
  */
 export default function RunnerPackagePanel() {
   const [pkg, setPkg] = useState<RunnerPackage | null>(null)
@@ -39,16 +43,28 @@ export default function RunnerPackagePanel() {
 
   useEffect(reload, [])
 
-  const onUpload = async () => {
+  const doUpload = async (force: boolean) => {
     if (!file) return
     setUploading(true)
     try {
-      const res = await uploadRunnerPackage(file)
+      const res = await uploadRunnerPackage(file, force)
       message.success(`已上传 runner 包 ${res.version}（旧包已替换）`)
       setFile(null)
       reload()
     } catch (e) {
-      showError(e, '上传失败')
+      if (!force && isApiRequestError(e) && e.status === 409) {
+        // 版本防倒退拦截：确认后强制降级重传
+        Modal.confirm({
+          title: '旧构建会覆盖新构建',
+          content: `${e.message}。确认要降级覆盖吗？`,
+          okText: '强制覆盖',
+          okButtonProps: { danger: true },
+          cancelText: '取消',
+          onOk: () => doUpload(true),
+        })
+      } else {
+        showError(e, '上传失败')
+      }
     } finally {
       setUploading(false)
     }
@@ -60,7 +76,7 @@ export default function RunnerPackagePanel() {
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="全局托管一份 devmind-agent-runner.jar，上传即替换。节点机上首次手工部署后，后续在「节点列表」点「升级」即可让节点自动下载、换包、重启。"
+        message="全局托管一份 devmind-agent-runner.jar，上传即替换。版本低于当前托管包的旧构建会被拒收（确认降级可强制覆盖）。节点机上首次手工部署后，后续在「节点列表」点「升级」即可让节点自动下载、换包、重启。"
       />
       {pkg ? (
         <Descriptions
@@ -109,7 +125,7 @@ export default function RunnerPackagePanel() {
             icon={<UploadOutlined />}
             disabled={!file}
             loading={uploading}
-            onClick={onUpload}
+            onClick={() => doUpload(false)}
           >
             上传替换
           </Button>

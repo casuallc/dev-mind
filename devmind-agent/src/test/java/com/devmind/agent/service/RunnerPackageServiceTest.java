@@ -79,10 +79,14 @@ class RunnerPackageServiceTest {
         return new MockMultipartFile("file", "devmind-agent-runner.jar", "application/java-archive", bytes);
     }
 
+    private RunnerPackageView upload(String version, String by) throws Exception {
+        return service.upload(jarFile(fakeJar(version, true)), by, false);
+    }
+
     @Test
     void uploadExtractsVersionAndSha256AndWritesFile() throws Exception {
         byte[] jar = fakeJar("0.2.0", true);
-        RunnerPackageView view = service.upload(jarFile(jar), "admin");
+        RunnerPackageView view = service.upload(jarFile(jar), "admin", false);
 
         assertEquals("0.2.0", view.version());
         assertEquals(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(jar)), view.sha256());
@@ -95,9 +99,9 @@ class RunnerPackageServiceTest {
 
     @Test
     void reuploadReplacesInPlace() throws Exception {
-        service.upload(jarFile(fakeJar("0.1.0", true)), "admin");
+        upload("0.1.0", "admin");
         byte[] newer = fakeJar("0.2.0", true);
-        RunnerPackageView view = service.upload(jarFile(newer), "bob");
+        RunnerPackageView view = service.upload(jarFile(newer), "bob", false);
 
         assertEquals(RunnerPackageService.PKG_ID, view.id());
         assertEquals("0.2.0", view.version());
@@ -107,24 +111,58 @@ class RunnerPackageServiceTest {
     @Test
     void rejectsNonJar() {
         MockMultipartFile txt = new MockMultipartFile("file", "a.txt", "text/plain", "hi".getBytes());
-        assertThrows(DevMindException.class, () -> service.upload(txt, "admin"));
+        assertThrows(DevMindException.class, () -> service.upload(txt, "admin", false));
     }
 
     @Test
     void rejectsJarWithoutVersion() {
-        assertThrows(DevMindException.class, () -> service.upload(jarFile(new byte[]{1, 2, 3}), "admin"));
+        assertThrows(DevMindException.class, () -> service.upload(jarFile(new byte[]{1, 2, 3}), "admin", false));
     }
 
     @Test
     void rejectsUnfilteredPlaceholderVersion() throws Exception {
         // 未过滤的 @project.version@ 占位（历史 bug 重现防护）
         assertThrows(DevMindException.class,
-                () -> service.upload(jarFile(fakeJar("@project.version@", true)), "admin"));
+                () -> service.upload(jarFile(fakeJar("@project.version@", true)), "admin", false));
     }
 
     @Test
     void rejectsJarWithoutSelfUpdater() throws Exception {
-        assertThrows(DevMindException.class, () -> service.upload(jarFile(fakeJar("0.2.0", false)), "admin"));
+        assertThrows(DevMindException.class, () -> service.upload(jarFile(fakeJar("0.2.0", false)), "admin", false));
+    }
+
+    @Test
+    void rejectsOlderBuildTimestamp() throws Exception {
+        upload("0.1.0-SNAPSHOT-b20260911.1400", "admin");
+        DevMindException e = assertThrows(DevMindException.class,
+                () -> upload("0.1.0-SNAPSHOT-b20260910.0900", "admin"));
+        assertEquals(409, e.getErrorCode().getStatus());
+        // 旧构建未落盘覆盖，当前包保持新版本
+        assertEquals("0.1.0-SNAPSHOT-b20260911.1400", service.current().version());
+    }
+
+    @Test
+    void allowsNewerOrEqualBuildTimestamp() throws Exception {
+        upload("0.1.0-SNAPSHOT-b20260911.1400", "admin");
+        assertEquals("0.1.0-SNAPSHOT-b20260911.1530", upload("0.1.0-SNAPSHOT-b20260911.1530", "admin").version());
+        // 同时间戳重传（重复上传同一构建）放行
+        assertEquals("0.1.0-SNAPSHOT-b20260911.1530", upload("0.1.0-SNAPSHOT-b20260911.1530", "admin").version());
+    }
+
+    @Test
+    void forceAllowsDowngrade() throws Exception {
+        upload("0.1.0-SNAPSHOT-b20260911.1400", "admin");
+        RunnerPackageView view = service.upload(
+                jarFile(fakeJar("0.1.0-SNAPSHOT-b20260910.0900", true)), "admin", true);
+        assertEquals("0.1.0-SNAPSHOT-b20260910.0900", view.version());
+    }
+
+    @Test
+    void skipsComparisonWhenTimestampMissing() throws Exception {
+        // 历史 dev 构建无构建时间戳：不比对、放行
+        upload("dev", "admin");
+        assertEquals("0.1.0-SNAPSHOT-b20260911.1400", upload("0.1.0-SNAPSHOT-b20260911.1400", "admin").version());
+        assertEquals("dev", upload("dev", "admin").version());
     }
 
     @Test

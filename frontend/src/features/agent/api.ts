@@ -48,10 +48,11 @@ export function getRunnerPackage(): Promise<RunnerPackage> {
   return api.get<RunnerPackage>('/agent-nodes/runner-package')
 }
 
-export function uploadRunnerPackage(file: File): Promise<RunnerPackage> {
+/** 上传替换托管包；旧构建覆盖新构建后端 409，force=true 确认降级 */
+export function uploadRunnerPackage(file: File, force = false): Promise<RunnerPackage> {
   const form = new FormData()
   form.append('file', file)
-  return api.upload<RunnerPackage>('/agent-nodes/runner-package', form)
+  return api.upload<RunnerPackage>(`/agent-nodes/runner-package${force ? '?force=true' : ''}`, form)
 }
 
 export function upgradeAgentNode(id: number, force = false): Promise<UpgradeResult> {

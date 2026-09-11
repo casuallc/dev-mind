@@ -23,13 +23,16 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
  * CAP-21 FR-09 runner 包托管：全局单份（固定 id=1 覆盖式 upsert），jar 落盘
  * {@code data/agent-runner/runner.jar}（原子 move 替换）。上传时强校验包内
- * runner-version.txt（版本来源）与 SelfUpdater.class（无自升级能力的旧包会把节点升死，拒收）。
+ * runner-version.txt（版本来源）与 SelfUpdater.class（无自升级能力的旧包会把节点升死，拒收），
+ * 并按构建时间戳防倒退：旧构建覆盖新构建 → 409（force=true 跳过，用于确认过的降级）。
  */
 @Service
 public class RunnerPackageService {
@@ -42,6 +45,9 @@ public class RunnerPackageService {
     static final String VERSION_ENTRY = "runner-version.txt";
     static final String SELF_UPDATER_ENTRY = "com/devmind/agent/runner/SelfUpdater.class";
 
+    /** 版本串尾部构建时间戳（pom 注入的 runner.version = ${project.version}-b<yyyyMMdd.HHmm>） */
+    private static final Pattern BUILD_STAMP = Pattern.compile("-b(\\d{8}\\.\\d{4})$");
+
     private final RunnerPackageRepository repo;
     private final AgentProperties props;
 
@@ -50,8 +56,14 @@ public class RunnerPackageService {
         this.props = props;
     }
 
-    /** 上传替换当前包：校验 → 算 sha256 → 原子落盘 → upsert 元数据。 */
-    public synchronized RunnerPackageView upload(MultipartFile file, String uploadedBy) throws IOException {
+    /**
+     * 上传替换当前包：校验 → 版本防倒退 → 算 sha256 → 原子落盘 → upsert 元数据。
+     * 防倒退：新包构建时间戳早于当前托管包时 409 拒收（旧构建误传会覆盖新构建）；
+     * force=true 跳过该校验，用于确认过的降级回滚。任一侧版本串无构建时间戳
+     * （历史 dev 构建）时不比对、直接放行。
+     */
+    public synchronized RunnerPackageView upload(MultipartFile file, String uploadedBy,
+                                                 boolean force) throws IOException {
         if (file == null || file.isEmpty()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "上传文件为空");
         }
@@ -61,6 +73,7 @@ public class RunnerPackageService {
         }
         byte[] bytes = file.getBytes();
         String version = inspectJar(bytes);
+        rejectIfOlderBuild(version, force);
 
         Path dir = packageDir();
         Path tmp = dir.resolve(JAR_NAME + ".tmp");
@@ -115,6 +128,37 @@ public class RunnerPackageService {
 
     private Path packageDirQuietly() {
         return Path.of(props.getRunnerPackageDir());
+    }
+
+    /** 版本防倒退：新包构建时间戳早于当前托管包 → 409（force 跳过；无时间戳可比对时放行）。 */
+    private void rejectIfOlderBuild(String newVersion, boolean force) {
+        if (force) {
+            return;
+        }
+        Optional<RunnerPackageEntity> current = currentOpt();
+        if (current.isEmpty()) {
+            return;
+        }
+        String curVersion = current.get().getVersion();
+        String curStamp = buildStamp(curVersion);
+        String newStamp = buildStamp(newVersion);
+        if (curStamp == null || newStamp == null) {
+            log.warn("runner 包版本无构建时间戳，跳过防倒退比对: current={} new={}", curVersion, newVersion);
+            return;
+        }
+        if (newStamp.compareTo(curStamp) < 0) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "上传包 " + newVersion + " 早于当前托管包 " + curVersion + "，已拒收（旧构建会覆盖新构建）");
+        }
+    }
+
+    /** 提取版本串尾部的构建时间戳（-b yyyyMMdd.HHmm），无 → null。 */
+    private static String buildStamp(String version) {
+        if (version == null) {
+            return null;
+        }
+        Matcher m = BUILD_STAMP.matcher(version.strip());
+        return m.find() ? m.group(1) : null;
     }
 
     /** 遍历 jar 条目：提取版本并强校验自升级能力。 */
