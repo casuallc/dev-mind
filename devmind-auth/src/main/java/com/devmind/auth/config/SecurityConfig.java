@@ -59,6 +59,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/agent-nodes/runner-package/download").permitAll()
                         // CAP-34 FR-03：上下文包拉取 permitAll 放行，节点 token 由控制器内判定
                         .requestMatchers(HttpMethod.GET, "/api/agent/context/**").permitAll()
+                        // CAP-37 FR-01：会话产出上传 permitAll 放行，节点 token 由控制器内判定
+                        .requestMatchers(HttpMethod.POST, "/api/agent/output/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/agent-nodes", "/api/agent-nodes/**").hasRole("ADMIN")
                         // CAP-34 FR-07：编辑节点标签
                         .requestMatchers(HttpMethod.PUT, "/api/agent-nodes/**").hasRole("ADMIN")
