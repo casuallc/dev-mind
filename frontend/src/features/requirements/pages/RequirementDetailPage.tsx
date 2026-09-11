@@ -1,7 +1,7 @@
 // 需求详情页（/projects/:id/requirements/:rid）：单条需求的研发主线。
 // 布局：头卡（默认尺寸，标题栏更高；extra 集中全部操作：验收/编辑/属性/Jira 操作/刷新/更多/返回列表）+ 白底 Tabs 卡。
 // 不设阶段引导卡：需求状态由工作单元 rollup 自动派生（全部完结 → ACCEPTANCE），验收按钮直接放头卡 extra。
-// AI 流程动作（分析/方案/拆分/拆分草稿）收进「更多」下拉保持可达，状态门禁以后端为准。
+// AI 流程动作（分析/方案/拆分/草稿）集中在「流程」Tab（CAP-37 FR-04），「更多」下拉只留生命周期操作。
 // 属性面板非常驻：点「属性」按钮开右侧 Drawer；需求描述超长时默认收起（渐变遮罩 + 展开/收起，ResizeObserver 跟随图片加载重测）。
 // Jira 来源：托管字段本地只读（表单禁用 + 服务端强制），属性面板显示 Jira key 链接与远端状态。
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -23,25 +23,18 @@ import {
   message,
 } from 'antd'
 import {
-  ApartmentOutlined,
   ArrowLeftOutlined,
   CheckOutlined,
   DownOutlined,
   EditOutlined,
-  FileDoneOutlined,
-  FileSearchOutlined,
   LockOutlined,
-  PlayCircleOutlined,
   ProfileOutlined,
   ReloadOutlined,
   UpOutlined,
 } from '@ant-design/icons'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   deleteRequirement,
-  flowAnalyze,
-  flowDesign,
-  flowSplit,
   getRequirementOverview,
   listDesigns,
   updateRequirementStatus,
@@ -49,7 +42,7 @@ import {
 import JiraActions from '../components/JiraActions'
 import JiraDescription from '../components/JiraDescription'
 import DesignsTab from '../components/flow/DesignsTab'
-import SplitDraftDrawer from '../components/flow/SplitDraftDrawer'
+import FlowTab from '../components/flow/FlowTab'
 import RelatedRecordsTab from '../components/RelatedRecordsTab'
 import RequirementFormDrawer from '../components/RequirementFormDrawer'
 import TimelineTab from '../components/TimelineTab'
@@ -136,10 +129,13 @@ export default function RequirementDetailPage() {
   const [loading, setLoading] = useState(true)
   const [editOpen, setEditOpen] = useState(false)
   const [propsOpen, setPropsOpen] = useState(false)
-  const [draftOpen, setDraftOpen] = useState(false)
-  const [flowBusy, setFlowBusy] = useState(false)
   const [designs, setDesigns] = useState<Design[]>([])
-  const [activeTab, setActiveTab] = useState('workItems')
+  // Tab 与 URL 同步（?tab=flow）：流程通知深链直达对应 Tab，刷新/分享不丢位置
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = searchParams.get('tab') || 'workItems'
+  const setActiveTab = (key: string) => {
+    setSearchParams(key === 'workItems' ? {} : { tab: key }, { replace: true })
+  }
 
   // URL 自含项目身份：从分享链接进入时把当前项目切到该需求所属项目
   useEffect(() => {
@@ -191,21 +187,6 @@ export default function RequirementDetailPage() {
   const terminal = r.status === 'DONE' || r.status === 'CANCELLED'
   const cancellable = !terminal
   const draftDesignCount = designs.filter((d) => d.status === 'DRAFT').length
-
-  // AI 流程动作触发（原 FlowActions）：只做触发与提示，状态门禁以后端报错为准
-  const runFlow = async (label: string, fn: () => Promise<{ id: string }>) => {
-    if (!projectId) return
-    setFlowBusy(true)
-    try {
-      await fn()
-      message.success(`${label}会话已启动，完成后会通知你确认产出`)
-      reloadAll()
-    } catch (e) {
-      showError(e)
-    } finally {
-      setFlowBusy(false)
-    }
-  }
 
   // 需求翻 DONE（终态）：验收通过（ACCEPTANCE 主按钮）与直接完成（伪需求/无需工作单元，不经 rollup）共用，仅文案不同
   const confirmMarkDone = (mode: 'accept' | 'direct') => {
@@ -309,13 +290,6 @@ export default function RequirementDetailPage() {
             <Dropdown
               menu={{
                 items: [
-                  ...(!terminal ? [
-                    { key: 'analyze', label: r.status === 'DRAFT' ? '开始分析' : '重新分析', icon: <FileSearchOutlined />, disabled: flowBusy },
-                    { key: 'design', label: '生成方案（AI）', icon: <FileDoneOutlined />, disabled: flowBusy },
-                    { key: 'split', label: 'AI 拆分工作单元', icon: <ApartmentOutlined />, disabled: flowBusy },
-                    { key: 'draft', label: '拆分草稿', icon: <PlayCircleOutlined /> },
-                    { type: 'divider' as const },
-                  ] : []),
                   ...(r.status !== 'ACCEPTANCE' ? [
                     { key: 'done', label: '直接完成', icon: <CheckOutlined />, disabled: terminal },
                   ] : []),
@@ -327,10 +301,6 @@ export default function RequirementDetailPage() {
                   if (key === 'cancel') confirmCancel()
                   else if (key === 'delete') confirmDelete()
                   else if (key === 'done') confirmMarkDone('direct')
-                  else if (key === 'draft') setDraftOpen(true)
-                  else if (key === 'analyze') runFlow('分析', () => flowAnalyze(projectId, r.id))
-                  else if (key === 'design') runFlow('方案设计', () => flowDesign(projectId, r.id))
-                  else if (key === 'split') runFlow('拆分', () => flowSplit(projectId, r.id))
                 },
               }}
             >
@@ -375,6 +345,20 @@ export default function RequirementDetailPage() {
               key: 'designs',
               label: draftDesignCount > 0 ? `方案（${draftDesignCount} 待确认）` : '方案',
               children: <DesignsTab projectId={r.projectId} requirementId={r.id} />,
+            },
+            {
+              key: 'flow',
+              label: '流程',
+              children: (
+                <FlowTab
+                  projectId={r.projectId}
+                  requirementId={r.id}
+                  overview={overview}
+                  designs={designs}
+                  onChanged={reloadAll}
+                  onGotoWorkItems={() => setActiveTab('workItems')}
+                />
+              ),
             },
             {
               key: 'timeline',
@@ -454,22 +438,13 @@ export default function RequirementDetailPage() {
       </Drawer>
 
       {projectId && (
-        <>
-          <RequirementFormDrawer
-            projectId={projectId}
-            editing={r}
-            open={editOpen}
-            onClose={() => setEditOpen(false)}
-            onSaved={() => reloadOverview()}
-          />
-          <SplitDraftDrawer
-            projectId={projectId}
-            requirementId={r.id}
-            open={draftOpen}
-            onClose={() => setDraftOpen(false)}
-            onConfirmed={reloadAll}
-          />
-        </>
+        <RequirementFormDrawer
+          projectId={projectId}
+          editing={r}
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+          onSaved={() => reloadOverview()}
+        />
       )}
     </Space>
   )
