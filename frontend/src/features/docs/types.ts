@@ -1,6 +1,6 @@
 // CAP-03 文档管理类型，与后端 devmind-docs 对齐
 
-export type DocKind = 'requirement' | 'design' | 'api-suite' | 'report'
+export type DocKind = 'requirement' | 'design' | 'analysis' | 'api-suite' | 'report'
 export type DocStatus = 'draft' | 'pending_confirm' | 'frozen'
 
 export interface DocMeta {
@@ -67,6 +67,7 @@ export interface DocTemplate {
 export const KIND_LABEL: Record<DocKind, string> = {
   requirement: '需求文档',
   design: '技术方案',
+  analysis: '需求分析',
   'api-suite': 'API 套件',
   report: '报告',
 }

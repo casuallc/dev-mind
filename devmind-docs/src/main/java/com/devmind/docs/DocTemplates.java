@@ -12,6 +12,7 @@ public final class DocTemplates {
     public static List<TemplateView> all() {
         return List.of(new TemplateView("requirement", "需求文档模板", REQUIREMENT),
                 new TemplateView("design", "技术方案模板", DESIGN),
+                new TemplateView("analysis", "需求分析模板", ANALYSIS),
                 new TemplateView("api-suite", "API 测试套件模板", API_SUITE),
                 new TemplateView("report", "测试/总结报告模板", REPORT));
     }
@@ -59,6 +60,22 @@ public final class DocTemplates {
 
             ## 验证方案
             <!-- 测试策略、验收方式 -->
+            """;
+
+    static final String ANALYSIS = """
+            # 需求分析
+
+            ## 影响面
+            <!-- 涉及的模块/表/接口 -->
+
+            ## 复杂度评估
+            <!-- 工作量与难度判断，依据 -->
+
+            ## 建议拆分方向
+            <!-- 可独立派发的工作单元切分建议 -->
+
+            ## 风险点
+            <!-- 兼容/数据迁移/外部依赖等风险 -->
             """;
 
     static final String API_SUITE = """

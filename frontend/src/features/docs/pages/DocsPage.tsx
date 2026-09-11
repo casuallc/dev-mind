@@ -32,7 +32,7 @@ import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pa
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
-const kindTag = (k: DocKind) => <Tag color={k === 'requirement' ? 'blue' : k === 'design' ? 'geekblue' : k === 'api-suite' ? 'purple' : 'cyan'}>{KIND_LABEL[k] ?? k}</Tag>
+const kindTag = (k: DocKind) => <Tag color={k === 'requirement' ? 'blue' : k === 'design' ? 'geekblue' : k === 'analysis' ? 'gold' : k === 'api-suite' ? 'purple' : 'cyan'}>{KIND_LABEL[k] ?? k}</Tag>
 const statusTag = (s: DocStatus) => (
   <Tag color={s === 'draft' ? 'default' : s === 'pending_confirm' ? 'gold' : 'green'}>{STATUS_LABEL[s] ?? s}</Tag>
 )

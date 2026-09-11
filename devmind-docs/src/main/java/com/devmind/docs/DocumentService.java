@@ -42,7 +42,7 @@ public class DocumentService {
 
     private static final Logger log = LoggerFactory.getLogger(DocumentService.class);
 
-    private static final Set<String> KINDS = Set.of("requirement", "design", "api-suite", "report");
+    private static final Set<String> KINDS = Set.of("requirement", "design", "analysis", "api-suite", "report");
     private static final Set<String> ACTIONS = Set.of("submit", "freeze", "unfreeze");
 
     private final IdentityService identityService;
@@ -112,7 +112,7 @@ public class DocumentService {
         }
         String kind = req.kind() == null || req.kind().isBlank() ? "requirement" : req.kind();
         if (!KINDS.contains(kind)) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "kind 必须是 requirement/design/api-suite/report");
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "kind 必须是 requirement/design/analysis/api-suite/report");
         }
         if (req.projectId() != null && !req.projectId().isBlank()) {
             projectService.requireProject(req.projectId()); // 存在性校验（FR-01 归属）

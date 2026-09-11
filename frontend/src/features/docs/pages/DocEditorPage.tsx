@@ -287,7 +287,7 @@ export default function DocEditorPage() {
             title={
               <Space>
                 <Typography.Text strong>{displayTitle}</Typography.Text>
-                <Tag color={doc.kind === 'requirement' ? 'blue' : doc.kind === 'design' ? 'geekblue' : doc.kind === 'api-suite' ? 'purple' : 'cyan'}>
+                <Tag color={doc.kind === 'requirement' ? 'blue' : doc.kind === 'design' ? 'geekblue' : doc.kind === 'analysis' ? 'gold' : doc.kind === 'api-suite' ? 'purple' : 'cyan'}>
                   {KIND_LABEL[doc.kind]}
                 </Tag>
               </Space>
