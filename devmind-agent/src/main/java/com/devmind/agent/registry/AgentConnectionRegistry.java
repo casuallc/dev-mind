@@ -285,6 +285,10 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             manifest.put("sha256", cmd.contextManifest().sha256());
             frame.put("contextManifest", manifest);
         }
+        // 续接对话（claude --resume 目标）；旧 runner 忽略该字段 → 降级为全新对话
+        if (cmd.resumeSessionId() != null && !cmd.resumeSessionId().isBlank()) {
+            frame.put("resumeSessionId", cmd.resumeSessionId());
+        }
         try {
             send(ws, frame);
             LaunchAck ack = future.get(props.getLaunchAckTimeoutMs(), TimeUnit.MILLISECONDS);

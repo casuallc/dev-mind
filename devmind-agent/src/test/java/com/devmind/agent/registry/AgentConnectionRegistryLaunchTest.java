@@ -101,5 +101,14 @@ class AgentConnectionRegistryLaunchTest {
         assertTrue(payload.contains("\"repo\":{"), payload);
         assertFalse(payload.contains("\"repos\""), payload);
         assertFalse(payload.contains("contextManifest"), payload);
+        assertFalse(payload.contains("resumeSessionId"), payload);
+    }
+
+    @Test
+    void serializesResumeSessionId() throws Exception {
+        String payload = launchAndCapture(new AgentLaunchCommand(
+                "s1", null, "", null, "acceptEdits", Map.of(),
+                null, "chat", null, null, "cli-abc-123"));
+        assertTrue(payload.contains("\"resumeSessionId\":\"cli-abc-123\""), payload);
     }
 }
