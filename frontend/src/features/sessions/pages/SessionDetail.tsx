@@ -99,7 +99,8 @@ export default function SessionDetail() {
   }, [id])
 
   const canSuspend = !!session && ACTIVE_STATES.includes(session.state)
-  const canResume = session?.state === 'SUSPENDED'
+  // SUSPENDED=恢复；DONE/FAILED/TERMINATED=继续对话（claude --resume 带历史重拉起）
+  const canResume = !!session && ['SUSPENDED', 'DONE', 'FAILED', 'TERMINATED'].includes(session.state)
 
   if (loading) {
     return (
@@ -148,7 +149,7 @@ export default function SessionDetail() {
             )}
             {canResume && (
               <Button size="small" icon={<CaretRightOutlined />} onClick={onResume}>
-                恢复
+                {session.state === 'SUSPENDED' ? '恢复' : '继续对话'}
               </Button>
             )}
             <Button size="small" icon={<DiffOutlined />} loading={diff.loading} onClick={diff.show}>

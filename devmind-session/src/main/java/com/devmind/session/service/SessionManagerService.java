@@ -378,8 +378,15 @@ public class SessionManagerService {
 
     public SessionView resume(String id) {
         SessionEntity ent = requireEntity(id);
-        if (!SessionState.SUSPENDED.name().equals(ent.getStatus())) {
-            throw new DevMindException(ErrorCode.CONFLICT, "只有 SUSPENDED 会话可以恢复");
+        SessionState cur = SessionState.valueOf(ent.getStatus());
+        if (cur.isActive()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "会话正在运行中，无需恢复");
+        }
+        // 终态恢复依赖 claude --resume 续接对话历史；无 CLI 会话记录的历史数据只能全新开始，不允许
+        if (cur != SessionState.SUSPENDED
+                && (ent.getCliSessionId() == null || ent.getCliSessionId().isBlank())) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "该会话缺少 CLI 会话记录（历史数据），无法继续对话");
         }
         runtimes.remove(id);
         // 恢复用创建时持久化的权限模式（老记录无值回退全局默认）
@@ -418,7 +425,8 @@ public class SessionManagerService {
                         resolveGitEnv(ent.getCreatedBy(), proj),
                         specs.isEmpty() ? null : specs.get(0), "session",
                         specs.size() > 1 ? specs : null,
-                        prepared != null ? prepared.manifest() : null));
+                        prepared != null ? prepared.manifest() : null,
+                        ent.getCliSessionId()));
             } catch (Exception e) {
                 runtimes.remove(id);
                 if (e instanceof DevMindException de) {
@@ -428,6 +436,7 @@ public class SessionManagerService {
             }
             ent.setStatus(SessionState.RUNNING.name());
             ent.setContextManifestJson(prepared != null ? prepared.snapshotJson() : null);
+            ent.setFinishedAt(null);
             ent.setUpdatedAt(Instant.now());
             sessionRepo.save(ent);
             return toView(ent, rt.state());
@@ -959,8 +968,27 @@ public class SessionManagerService {
     public void onRemoteEvent(String nodeId, AgentEventFrame frame) {
         SessionHandle h = runtimes.get(frame.sessionId());
         if (h instanceof RemoteSessionRuntime r && r.nodeId().equals(nodeId)) {
+            captureCliSessionId(frame);
             r.ingest(frame);
         }
+    }
+
+    /** init 事件 payload 带 claude 侧 session_id → 落库（resume 时以 --resume 续接对话历史）。 */
+    private void captureCliSessionId(AgentEventFrame frame) {
+        if (!"system".equals(frame.type()) || frame.payload() == null) {
+            return;
+        }
+        Object subtype = frame.payload().get("subtype");
+        Object cliId = frame.payload().get("sessionId");
+        if (!"init".equals(subtype) || !(cliId instanceof String id) || id.isBlank()) {
+            return;
+        }
+        sessionRepo.findById(frame.sessionId()).ifPresent(ent -> {
+            if (!id.equals(ent.getCliSessionId())) {
+                ent.setCliSessionId(id);
+                sessionRepo.save(ent);
+            }
+        });
     }
 
     /** runner 侧子进程退出。 */

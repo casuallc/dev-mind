@@ -65,8 +65,12 @@ public class CliProcessLauncher implements SessionExecutor {
         pb.redirectErrorStream(false);
         Process process = pb.start();
 
-        if (ctx.taskSpec() != null && !ctx.taskSpec().isBlank()) {
-            writeUserMessage(process.getOutputStream(), ctx.taskSpec());
+        // 初始 prompt 作为第一条 user message 写入 stdin；--resume 续接时对话历史已含原任务，
+        // 再写一遍等于重复下达 → 续接拉起不注入 taskSpec（场景重渲染的 renderedTask 同理跳过）
+        if (ctx.resumeSessionId() == null || ctx.resumeSessionId().isBlank()) {
+            if (ctx.taskSpec() != null && !ctx.taskSpec().isBlank()) {
+                writeUserMessage(process.getOutputStream(), ctx.taskSpec());
+            }
         }
         return process;
     }

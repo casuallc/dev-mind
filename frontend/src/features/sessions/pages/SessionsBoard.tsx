@@ -135,7 +135,8 @@ export default function SessionsBoard() {
   }
 
   const canSuspend = !!current && ACTIVE_STATES.includes(current.state)
-  const canResume = current?.state === 'SUSPENDED'
+  // SUSPENDED=恢复；DONE/FAILED/TERMINATED=继续对话（claude --resume 带历史重拉起，worktree 挂回原分支）
+  const canResume = !!current && ['SUSPENDED', 'DONE', 'FAILED', 'TERMINATED'].includes(current.state)
 
   const columns: ColumnsType<SessionSummary> = [
     {
@@ -301,7 +302,7 @@ export default function SessionsBoard() {
                     )}
                     {canResume && (
                       <Button size="small" icon={<CaretRightOutlined />} onClick={onResume}>
-                        恢复
+                        {current.state === 'SUSPENDED' ? '恢复' : '继续对话'}
                       </Button>
                     )}
                     <Button size="small" icon={<DiffOutlined />} loading={diff.loading} onClick={diff.show}>

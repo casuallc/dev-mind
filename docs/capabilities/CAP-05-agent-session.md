@@ -68,3 +68,4 @@ POST   /sessions/{id}/merge           合并 worktree 到主分支（可选，�
 ## 9. 变更记录
 
 - **CAP-30/31（2026-09）会话能力拆分**：无项目纯问答迁出为独立能力 CAP-30（devmind-chat，个人组 /chats），本会话收敛为纯项目开发会话——必须归属当前项目，创建时从 project_repos 拷值生成 session_repos 快照（支持多库，聚合目录工作区）；`GET /sessions/{id}/diff` 改返回按库分组的 `List<RepoDiffView>`；存量无项目会话启动时删除；resume 修复 permission_mode 丢失（新增 permission_mode 列持久化）。headless 内核（状态机/事件流/CLI 协议）上移 devmind-common `agent.runtime` 包，与 chat 共享。
+- **终态「继续对话」（2026-09）**：resume 从仅 SUSPENDED 放开到 DONE/FAILED/TERMINATED——init 事件捕获 claude 侧 session_id 落库（`sessions.cli_session_id`），resume 时 launch 帧带 `resumeSessionId`，runner 以 `claude --resume` 续接完整对话历史（历史在 runner 侧 CLI 配置目录按 cwd 归档，进程退出不丢失；目录已清理则恢复失败报错）；worktree 由 RunnerWorkspace 挂回原 feature 分支。续接拉起不再重复注入 taskSpec（历史已含原任务）。无 cli_session_id 的历史记录终态不可恢复（409）；旧版 runner 忽略该字段降级为无对话历史恢复。chat 侧同语义见 CAP-30 FR-04。
