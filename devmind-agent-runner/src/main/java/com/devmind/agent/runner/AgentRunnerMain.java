@@ -77,6 +77,14 @@ public class AgentRunnerMain {
 
         ServerConnection[] connRef = new ServerConnection[1];
         RunnerSessionRegistry sessions = new RunnerSessionRegistry(parser, frame -> connRef[0].send(frame));
+        // CAP-37：进程退出后、finalizer 清理工作区前回传 .devmind/output 产出；
+        // 失败仅 system 事件告知，不阻塞 exit 帧（setter 注入：hook 内需反向引用 registry）
+        sessions.setOutputHook((sid, dir) -> {
+            String err = OutputUploader.upload(config, sid, dir);
+            if (err != null) {
+                sessions.reportSystem(sid, "[runner] " + err);
+            }
+        });
         RunnerWorkspace workspace = new RunnerWorkspace(config.workspaceRoot());
         // CAP-36：exec 帧 handler（构建/部署/测试/发版下发执行；execAllowlist 空 = 全部拒绝）
         ExecHandler execHandler = new ExecHandler(config, workspace, frame -> connRef[0].send(frame));

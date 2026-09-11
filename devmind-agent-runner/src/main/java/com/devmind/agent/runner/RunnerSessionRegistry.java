@@ -36,13 +36,24 @@ public class RunnerSessionRegistry {
         void finish(String sessionId);
     }
 
+    /** CAP-37 产出回传挂钩：进程退出后、finalizer 清理工作区之前调用（此时 .devmind/output 还在）。 */
+    public interface OutputUploadHook {
+        void upload(String sessionId, java.nio.file.Path sessionDir);
+    }
+
     private final CliEventParser parser;
     private final FrameSender sender;
+    private volatile OutputUploadHook outputHook;
     private final Map<String, RunnerSession> sessions = new ConcurrentHashMap<>();
 
     public RunnerSessionRegistry(CliEventParser parser, FrameSender sender) {
         this.parser = parser;
         this.sender = sender;
+    }
+
+    /** CAP-37：装配产出回传挂钩（hook 内可能反向调用本表 reportSystem，故用 setter 而非构造器）。 */
+    public void setOutputHook(OutputUploadHook outputHook) {
+        this.outputHook = outputHook;
     }
 
     public int size() {
@@ -159,6 +170,14 @@ public class RunnerSessionRegistry {
         }
         sessions.remove(s.sessionId, s);
         com.devmind.common.agent.exec.WorkspaceReconciler.clearPidFile(s.sessionDir);
+        // CAP-37：产出回传必须在 finalizer（push + 删除工作区）之前，否则 .devmind/output 已被删
+        if (outputHook != null && s.sessionDir != null) {
+            try {
+                outputHook.upload(s.sessionId, s.sessionDir);
+            } catch (Exception e) {
+                log.warn("产出回传异常（不影响结局上报）: session={} err={}", s.sessionId, e.getMessage());
+            }
+        }
         if (s.finalizer != null) {
             try {
                 s.finalizer.finish(s.sessionId);
