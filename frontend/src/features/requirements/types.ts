@@ -129,19 +129,6 @@ export interface Design {
 
 // ---- CAP-14 需求流程 ----
 
-/** 拆分草稿项：AI 生成、人编辑后随 confirmSplit 提交固化 */
-export interface SplitDraftItem {
-  type: WorkItemType
-  title: string
-  spec: string
-  dependsOn: number[]
-}
-
-export interface SplitDraft {
-  sessionId?: string
-  items: SplitDraftItem[]
-}
-
 /** 流程阶段动作返回的会话（只关心 id/status，用于提示与跳转） */
 export interface FlowSession {
   id: string

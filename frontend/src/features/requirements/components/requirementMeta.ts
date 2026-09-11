@@ -1,5 +1,5 @@
 // 需求主线共享常量（列表卡与详情页共用）。
-import type { RequirementSource, RequirementStatus, RequirementType } from '../types'
+import type { DesignStatus, RequirementSource, RequirementStatus, RequirementType, WorkItemStatus, WorkItemType } from '../types'
 
 export const STATUS_FLOW: RequirementStatus[] =
   ['DRAFT', 'ANALYZING', 'DESIGNING', 'IN_PROGRESS', 'ACCEPTANCE', 'DONE']
@@ -67,6 +67,52 @@ export function requirementStatusColor(s: RequirementStatus | string): string {
     case 'ACCEPTANCE': return 'purple'
     case 'DONE': return 'green'
     case 'CANCELLED': return 'red'
+    default: return 'default'
+  }
+}
+
+/** CAP-38：工作单元状态中文标签（存储值仍为英文枚举，仅显示层映射） */
+export const WI_STATUS_LABEL: Record<WorkItemStatus, string> = {
+  TODO: '待办',
+  IN_PROGRESS: '进行中',
+  BLOCKED: '阻塞',
+  DONE: '已完成',
+  CANCELLED: '已取消',
+}
+
+export const WI_TYPE_LABEL: Record<WorkItemType, string> = {
+  DESIGN: '方案设计',
+  DEVELOPMENT: '开发',
+  TEST: '测试',
+  DOCUMENT: '文档',
+  REVIEW: '评审',
+}
+
+/** 方案状态中文标签（CAP-38 起 CONFIRMED 为纯标记，不再门控拆分） */
+export const DESIGN_STATUS_LABEL: Record<DesignStatus, string> = {
+  DRAFT: '草稿',
+  CONFIRMED: '已确认',
+  DISCARDED: '已废弃',
+}
+
+export function workItemStatusColor(s: WorkItemStatus | string): string {
+  switch (s) {
+    case 'TODO': return 'default'
+    case 'IN_PROGRESS': return 'blue'
+    case 'BLOCKED': return 'orange'
+    case 'DONE': return 'green'
+    case 'CANCELLED': return 'red'
+    default: return 'default'
+  }
+}
+
+export function workItemTypeColor(t: WorkItemType | string): string {
+  switch (t) {
+    case 'DESIGN': return 'cyan'
+    case 'DEVELOPMENT': return 'blue'
+    case 'TEST': return 'orange'
+    case 'DOCUMENT': return 'green'
+    case 'REVIEW': return 'purple'
     default: return 'default'
   }
 }

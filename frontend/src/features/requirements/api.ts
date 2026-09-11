@@ -10,8 +10,6 @@ import type {
   RequirementOverview,
   RequirementPage,
   RequirementStatus,
-  SplitDraft,
-  SplitDraftItem,
   WorkItem,
   WorkItemInput,
   WorkItemStatus,
@@ -186,23 +184,18 @@ export function flowDesign(projectId: string, requirementId: string): Promise<Fl
   return api.post<FlowSession>(`/projects/${projectId}/requirements/${requirementId}/flow/design`)
 }
 
-/** AI 拆分（起拆分会话，产出 wi-plan.json） */
+/** AI 拆分（手动路径：起拆分会话，产出 wi-plan.json 自动固化为工作单元） */
 export function flowSplit(projectId: string, requirementId: string): Promise<FlowSession> {
   return api.post<FlowSession>(`/projects/${projectId}/requirements/${requirementId}/flow/split`)
 }
 
-/** 拆分草稿（解析最近拆分会话输出，不落库） */
-export function getSplitDraft(projectId: string, requirementId: string): Promise<SplitDraft> {
-  return api.get<SplitDraft>(`/projects/${projectId}/requirements/${requirementId}/flow/split-draft`)
-}
-
-/** 确认固化（批量建工作单元 + depends_on 边） */
-export function confirmSplit(
+/** CAP-38 阶段跳过（幂等）：stage = analysis | design */
+export function flowSkip(
   projectId: string,
   requirementId: string,
-  items: SplitDraftItem[],
-): Promise<WorkItem[]> {
-  return api.post<WorkItem[]>(`/projects/${projectId}/requirements/${requirementId}/flow/confirm-split`, { items })
+  stage: 'analysis' | 'design',
+): Promise<void> {
+  return api.post<void>(`/projects/${projectId}/requirements/${requirementId}/flow/skip`, { stage })
 }
 
 /** 工作单元起会话（spec 自动带入 taskSpec） */
