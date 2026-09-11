@@ -34,8 +34,8 @@ export interface AuditView {
   /** 目标节点 id（数值；复用 audit_logs.server_id 列，CAP-07 时代的服务器记录同列） */
   serverId: number | null
   serverName: string | null
-  /** 执行通道：agent = exec 帧下发 runner 节点（历史值 ssh/http 为 CAP-07 旧记录） */
-  accessType: string
+  /** 执行通道：agent = exec 帧下发 runner 节点（历史值 ssh/http 为 CAP-07 旧记录；通用域审计无通道为 null） */
+  accessType: string | null
   action: string
   templateCode: string | null
   capability: string | null

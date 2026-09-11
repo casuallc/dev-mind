@@ -54,7 +54,7 @@ export default function AuditTab({ refreshTick = 0 }: { refreshTick?: number }) 
 
   const columns: ColumnsType<AuditView> = [
     { title: '时间', dataIndex: 'createdAt', width: 170, render: (t) => fmtTime(t) },
-    { title: '节点', key: 'node', width: 130, render: (_, r) => `${nodeName(r)} [${r.accessType}]` },
+    { title: '节点', key: 'node', width: 130, render: (_, r) => r.accessType ? `${nodeName(r)} [${r.accessType}]` : nodeName(r) },
     {
       title: '动作',
       dataIndex: 'action',
@@ -111,7 +111,7 @@ export default function AuditTab({ refreshTick = 0 }: { refreshTick?: number }) 
         {detail && (
           <Space direction="vertical" style={{ width: '100%' }}>
             <Typography.Paragraph type="secondary">
-              {ACTION_LABEL[detail.action] ?? detail.action} · {nodeName(detail)} [{detail.accessType}]
+              {ACTION_LABEL[detail.action] ?? detail.action} · {nodeName(detail)}{detail.accessType ? ` [${detail.accessType}]` : ''}
               {detail.templateCode ? ` · 模板 ${detail.templateCode}` : ''}
               {detail.capability ? ` · 能力 ${detail.capability}` : ''} · {fmtTime(detail.createdAt)}
             </Typography.Paragraph>
