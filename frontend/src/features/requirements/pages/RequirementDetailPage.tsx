@@ -207,13 +207,16 @@ export default function RequirementDetailPage() {
     }
   }
 
-  // 人工验收（CAP-13）：ACCEPTANCE→DONE 是终态翻转，直接放头卡主按钮
-  const confirmAccept = () => {
+  // 需求翻 DONE（终态）：验收通过（ACCEPTANCE 主按钮）与直接完成（伪需求/无需工作单元，不经 rollup）共用，仅文案不同
+  const confirmMarkDone = (mode: 'accept' | 'direct') => {
+    const direct = mode === 'direct'
     Modal.confirm({
       centered: true,
-      title: '验收通过？',
-      content: `「${r.code} ${r.title}」将标记为 DONE，工作单元与关联记录保留。`,
-      okText: '验收通过',
+      title: direct ? '直接完成需求？' : '验收通过？',
+      content: direct
+        ? `「${r.code} ${r.title}」将不经过工作单元直接标记为 DONE，适用于伪需求/无需开发处理的条目。`
+        : `「${r.code} ${r.title}」将标记为 DONE，工作单元与关联记录保留。`,
+      okText: direct ? '直接完成' : '验收通过',
       cancelText: '返回',
       onOk: async () => {
         if (!projectId) return
@@ -295,7 +298,7 @@ export default function RequirementDetailPage() {
         extra={
           <Space size={8} wrap>
             {r.status === 'ACCEPTANCE' && (
-              <Button type="primary" icon={<CheckOutlined />} onClick={confirmAccept}>
+              <Button type="primary" icon={<CheckOutlined />} onClick={() => confirmMarkDone('accept')}>
                 验收通过
               </Button>
             )}
@@ -313,6 +316,9 @@ export default function RequirementDetailPage() {
                     { key: 'draft', label: '拆分草稿', icon: <PlayCircleOutlined /> },
                     { type: 'divider' as const },
                   ] : []),
+                  ...(r.status !== 'ACCEPTANCE' ? [
+                    { key: 'done', label: '直接完成', icon: <CheckOutlined />, disabled: terminal },
+                  ] : []),
                   { key: 'cancel', label: '取消需求', danger: true, disabled: !cancellable },
                   { key: 'delete', label: '删除', danger: true },
                 ],
@@ -320,6 +326,7 @@ export default function RequirementDetailPage() {
                   if (!projectId) return
                   if (key === 'cancel') confirmCancel()
                   else if (key === 'delete') confirmDelete()
+                  else if (key === 'done') confirmMarkDone('direct')
                   else if (key === 'draft') setDraftOpen(true)
                   else if (key === 'analyze') runFlow('分析', () => flowAnalyze(projectId, r.id))
                   else if (key === 'design') runFlow('方案设计', () => flowDesign(projectId, r.id))

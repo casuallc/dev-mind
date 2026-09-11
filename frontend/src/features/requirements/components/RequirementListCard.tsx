@@ -2,11 +2,11 @@
 // 来源字段（externalKey/externalUrl/remoteStatus）由列表接口直接带出，不再旁路反查 external_links。
 // 布局遵循 docs/core/前端内容区布局约定.md：Card 默认尺寸、title 内 Segmented、操作收 extra、表格默认密度。
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Card, Input, Segmented, Select, Space, Table, Tag, Tooltip, Typography } from 'antd'
+import { Button, Card, Input, Modal, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import { listRequirements } from '../api'
+import { listRequirements, updateRequirementStatus } from '../api'
 import type { Requirement, RequirementSource, RequirementType } from '../types'
 import RequirementFormDrawer from './RequirementFormDrawer'
 import { fmtDuration, fmtTime } from '../../../shared/utils/format'
@@ -57,6 +57,26 @@ export default function RequirementListCard({ projectId }: { projectId: string }
   }, [load, page, size, sourceView, keyword, statusFilter, typeFilter])
 
   const reload = () => load(page, size, sourceView, keyword, statusFilter, typeFilter)
+
+  // 伪需求/无需工作单元的条目行内直接翻 DONE（不经工作单元 rollup 路径）
+  const confirmDirectDone = (r: Requirement) => {
+    Modal.confirm({
+      centered: true,
+      title: '直接完成需求？',
+      content: `「${r.code} ${r.title}」将不经过工作单元直接标记为 DONE，适用于伪需求/无需开发处理的条目。`,
+      okText: '直接完成',
+      cancelText: '返回',
+      onOk: async () => {
+        try {
+          await updateRequirementStatus(projectId, r.id, 'DONE')
+          message.success(`${r.code} → DONE`)
+          reload()
+        } catch (e) {
+          showError(e)
+        }
+      },
+    })
+  }
 
   // 来源相关列仅「全部」「Jira」视图显示（自建没有这些字段）
   const jiraColumns: ColumnsType<Requirement> = sourceView === 'LOCAL' ? [] : [
@@ -165,6 +185,25 @@ export default function RequirementListCard({ projectId }: { projectId: string }
           {fmtTime(t)}
         </Typography.Text>
       ),
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 60,
+      render: (_, r) =>
+        r.status === 'DONE' || r.status === 'CANCELLED' ? null : (
+          <Button
+            type="link"
+            size="small"
+            style={{ padding: 0 }}
+            onClick={(e) => {
+              e.stopPropagation()
+              confirmDirectDone(r)
+            }}
+          >
+            完成
+          </Button>
+        ),
     },
   ]
 
