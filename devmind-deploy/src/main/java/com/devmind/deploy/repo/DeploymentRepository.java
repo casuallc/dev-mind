@@ -1,15 +1,18 @@
 package com.devmind.deploy.repo;
 
 import com.devmind.deploy.model.DeploymentEntity;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
 
 public interface DeploymentRepository extends JpaRepository<DeploymentEntity, Long> {
 
-    List<DeploymentEntity> findByProjectIdOrderByCreatedAtDesc(String projectId);
+    /** 部署历史分页（排序在 Pageable 里指定：createdAt DESC） */
+    Page<DeploymentEntity> findByProjectId(String projectId, Pageable pageable);
 
-    List<DeploymentEntity> findByProjectIdAndStatusOrderByCreatedAtDesc(String projectId, String status);
+    Page<DeploymentEntity> findByProjectIdAndStatus(String projectId, String status, Pageable pageable);
 
     /** P0-6：按需求聚合部署（需求主线视图） */
     List<DeploymentEntity> findByWorkItemIdOrderByCreatedAtDesc(String workItemId);

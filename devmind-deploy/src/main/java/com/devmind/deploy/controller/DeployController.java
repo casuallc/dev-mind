@@ -1,7 +1,5 @@
 package com.devmind.deploy.controller;
 
-import java.util.List;
-
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,6 +16,7 @@ import com.devmind.deploy.dto.DeployConfigView;
 import com.devmind.deploy.dto.DeploymentView;
 import com.devmind.deploy.service.DeployConfigService;
 import com.devmind.deploy.service.DeploymentService;
+import com.devmind.project.dto.PageView;
 
 /**
  * CAP-09 REST：部署计划配置（FR-01）、创建/详情/执行/确认/回滚（FR-03/04/05/07）、历史、全量日志。
@@ -79,9 +78,11 @@ public class DeployController {
     }
 
     @GetMapping("/deployments")
-    public List<DeploymentView> history(@RequestParam String projectId,
-                                        @RequestParam(required = false) String status) {
-        return deploymentService.history(projectId, status);
+    public PageView<DeploymentView> history(@RequestParam String projectId,
+                                            @RequestParam(required = false) String status,
+                                            @RequestParam(defaultValue = "0") int page,
+                                            @RequestParam(defaultValue = "20") int size) {
+        return deploymentService.history(projectId, status, page, size);
     }
 
     @GetMapping("/deployments/{id}/logs")

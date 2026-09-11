@@ -15,6 +15,9 @@ import java.util.regex.Pattern;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -47,6 +50,7 @@ import com.devmind.notification.model.NotificationLevel;
 import com.devmind.notification.service.NotificationService;
 import com.devmind.project.EnvironmentService;
 import com.devmind.project.ProjectService;
+import com.devmind.project.dto.PageView;
 import com.devmind.project.model.EnvironmentEntity;
 
 /**
@@ -510,11 +514,19 @@ public class DeploymentService {
         return toView(require(id));
     }
 
-    public List<DeploymentView> history(String projectId, String status) {
-        List<DeploymentEntity> list = status == null || status.isBlank()
-                ? repo.findByProjectIdOrderByCreatedAtDesc(projectId)
-                : repo.findByProjectIdAndStatusOrderByCreatedAtDesc(projectId, status.trim().toUpperCase());
-        return list.stream().map(this::toView).toList();
+    /**
+     * 部署历史分页：status 空=不限，按 createdAt 倒序。
+     * page 从 0 起，size 限制 [1, 200]（与需求列表同一约定，防全量拉取）。
+     */
+    public PageView<DeploymentView> history(String projectId, String status, int page, int size) {
+        int p = Math.max(0, page);
+        int s = Math.min(Math.max(1, size), 200);
+        PageRequest pageable = PageRequest.of(p, s, Sort.by(Sort.Direction.DESC, "createdAt"));
+        Page<DeploymentEntity> result = status == null || status.isBlank()
+                ? repo.findByProjectId(projectId, pageable)
+                : repo.findByProjectIdAndStatus(projectId, status.trim().toUpperCase(), pageable);
+        return new PageView<>(result.getContent().stream().map(this::toView).toList(),
+                result.getTotalElements(), p, s);
     }
 
     public String logs(Long id) {

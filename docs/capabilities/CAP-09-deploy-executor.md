@@ -47,7 +47,7 @@ POST   /deployments/{id}/execute       执行部署
 POST   /deployments/{id}/confirm       执行前确认（流程层用）
 POST   /deployments/{id}/rollback      手动回滚
 WS     /deployments/{id}/stream        步骤/日志实时流
-GET    /deployments?projectId=&status= 历史
+GET    /deployments?projectId=&status=&page=&size= 历史（服务端分页，返回 PageView）
 ```
 
 ## 7. 验收标准

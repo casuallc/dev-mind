@@ -1,11 +1,12 @@
-// 部署记录页（/deployments）：当前项目的部署计划配置与历史。
-// CAP-09 部署中心：部署计划配置（步骤/回滚步骤）→ 创建部署单（节点+构建+环境）→ 历史表格 →
+// 部署记录页（/deployments）：当前项目的部署历史与部署计划配置（Segmented 两视图，配置不常改故独立成视图）。
+// CAP-09 部署中心：部署计划配置（步骤/回滚步骤）→ 创建部署单（节点+构建+环境）→ 历史表格（服务端分页）→
 // 详情 Drawer（WS 实时步骤状态 + 日志，执行/确认/回滚）。
 // CAP-36：部署步骤经 exec 帧下发 runner 节点执行（渲染后的脚本串），SSH/HTTP 直连已下线。
 import {
   Button,
   Card,
   Input,
+  Segmented,
   Select,
   Space,
   Switch,
@@ -45,11 +46,16 @@ export default function DeploymentsPage() {
 }
 
 function DeployCenter({ id }: { id: string }) {
+  const [view, setView] = useState<'history' | 'config'>('history')
   const [cfg, setCfg] = useState<DeployConfig | null>(null)
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [environments, setEnvironments] = useState<ProjectEnvironment[]>([])
   const [builds, setBuilds] = useState<BuildRecord[]>([])
   const [deploys, setDeploys] = useState<DeploymentRecord[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(0)
+  const [size, setSize] = useState(20)
+  const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
   const [detail, setDetail] = useState<DeploymentRecord | null>(null)
 
@@ -60,20 +66,33 @@ function DeployCenter({ id }: { id: string }) {
   const [env, setEnv] = useState('test')
   const [confirmRequired, setConfirmRequired] = useState(false)
 
-  const refresh = () => listDeployments(id).then(setDeploys).catch(() => {})
+  const loadHistory = (p = page, s = size) => {
+    setLoading(true)
+    listDeployments(id, p, s)
+      .then((r) => {
+        setDeploys(r.items)
+        setTotal(r.total)
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }
 
   const load = () => {
     getDeployConfig(id).then(setCfg).catch(() => {})
     listAgentNodes().then(setNodes).catch(() => {})
     listEnvironments(id).then(setEnvironments).catch(() => {})
     listBuilds(id).then(setBuilds).catch(() => {})
-    refresh()
   }
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  useEffect(() => {
+    loadHistory()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, page, size])
 
   const artifactBuilds = builds.filter((b) => b.artifactRef)
 
@@ -100,7 +119,8 @@ function DeployCenter({ id }: { id: string }) {
         confirmRequired,
       })
       setDetail(d)
-      refresh()
+      setPage(0) // 新记录在最前，回第一页看
+      if (page === 0) loadHistory(0)
     } catch (e) {
       showError(e)
     } finally {
@@ -158,89 +178,109 @@ function DeployCenter({ id }: { id: string }) {
     <Card
       style={pageCardStyle}
       styles={{ body: pageCardBodyScrollStyle }}
-      title="部署记录"
+      title={
+        <Space size={12}>
+          <span>部署记录</span>
+          <Segmented
+            value={view}
+            onChange={(v) => setView(v as 'history' | 'config')}
+            options={[
+              { value: 'history', label: '部署历史' },
+              { value: 'config', label: '部署配置' },
+            ]}
+          />
+        </Space>
+      }
       extra={
-        <Button icon={<ReloadOutlined />} onClick={load}>
+        <Button icon={<ReloadOutlined />} onClick={() => { load(); loadHistory() }}>
           刷新
         </Button>
       }
     >
       <Typography.Paragraph type="secondary">
-        部署中心（CAP-09）：维护部署计划（步骤/回滚步骤），创建部署单并在历史中跟踪执行；点「详情」开 Drawer 实时看步骤与日志。
+        部署中心（CAP-09）：创建部署单并在历史中跟踪执行（点「详情」开 Drawer 实时看步骤与日志）；部署计划（步骤/回滚步骤）在「部署配置」视图维护，一般不常改。
       </Typography.Paragraph>
-      <Space direction="vertical" style={{ width: '100%' }} size={16}>
-        <Card size="small" title="部署计划配置">
-          {cfg && (
-            <ConfigEditor cfg={cfg} onChanged={onConfigChanged} />
-          )}
-        </Card>
 
-        <Card size="small" title="创建部署">
-          <Space wrap>
-            <Select<number>
-              style={{ width: 180 }}
-              placeholder="选择环境（可选）"
-              value={environmentId}
-              onChange={setEnvironmentId}
-              allowClear
-              options={environments.map((e) => ({ value: e.id, label: `${e.name}${e.description ? ` · ${e.description}` : ''}` }))}
-            />
-            <Select<string>
-              style={{ width: 200 }}
-              placeholder={
-                nodes.length
-                  ? environmentId ? '执行节点（缺省取环境首节点）' : '执行节点（缺省走默认路由）'
-                  : '无可用节点（先到后台「Agent 节点」登记）'
-              }
-              value={agentNodeId}
-              onChange={setAgentNodeId}
-              allowClear
-              options={nodes.map((n) => ({
-                value: String(n.id),
-                label: `${n.name}${n.isDefault ? ' · 平台默认' : ''}${n.status !== 'ONLINE' ? '（离线）' : ''}`,
-              }))}
-            />
-            <Select<number>
-              style={{ width: 220 }}
-              placeholder={artifactBuilds.length ? '选择构建（产物）' : '无已登记产物的构建'}
-              value={buildId}
-              onChange={setBuildId}
-              allowClear
-              options={artifactBuilds.map((b) => ({ value: b.id, label: `#${b.id} · ${b.artifactRef}` }))}
-            />
-            {environmentId == null && (
-              <Input placeholder="环境" value={env} onChange={(e) => setEnv(e.target.value)} style={{ width: 120 }} />
-            )}
-            <Space size={4}>
-              <span style={{ fontSize: 12 }}>需确认</span>
-              <Switch checked={confirmRequired} onChange={setConfirmRequired} size="small" />
+      {view === 'history' ? (
+        <Space direction="vertical" style={{ width: '100%' }} size={16}>
+          <Card size="small" title="创建部署">
+            <Space wrap>
+              <Select<number>
+                style={{ width: 180 }}
+                placeholder="选择环境（可选）"
+                value={environmentId}
+                onChange={setEnvironmentId}
+                allowClear
+                options={environments.map((e) => ({ value: e.id, label: `${e.name}${e.description ? ` · ${e.description}` : ''}` }))}
+              />
+              <Select<string>
+                style={{ width: 200 }}
+                placeholder={
+                  nodes.length
+                    ? environmentId ? '执行节点（缺省取环境首节点）' : '执行节点（缺省走默认路由）'
+                    : '无可用节点（先到后台「Agent 节点」登记）'
+                }
+                value={agentNodeId}
+                onChange={setAgentNodeId}
+                allowClear
+                options={nodes.map((n) => ({
+                  value: String(n.id),
+                  label: `${n.name}${n.isDefault ? ' · 平台默认' : ''}${n.status !== 'ONLINE' ? '（离线）' : ''}`,
+                }))}
+              />
+              <Select<number>
+                style={{ width: 220 }}
+                placeholder={artifactBuilds.length ? '选择构建（产物）' : '无已登记产物的构建'}
+                value={buildId}
+                onChange={setBuildId}
+                allowClear
+                options={artifactBuilds.map((b) => ({ value: b.id, label: `#${b.id} · ${b.artifactRef}` }))}
+              />
+              {environmentId == null && (
+                <Input placeholder="环境" value={env} onChange={(e) => setEnv(e.target.value)} style={{ width: 120 }} />
+              )}
+              <Space size={4}>
+                <span style={{ fontSize: 12 }}>需确认</span>
+                <Switch checked={confirmRequired} onChange={setConfirmRequired} size="small" />
+              </Space>
+              <Button type="primary" loading={creating} onClick={onCreate}>
+                创建部署
+              </Button>
             </Space>
-            <Button type="primary" loading={creating} onClick={onCreate}>
-              创建部署
-            </Button>
-          </Space>
-          <div style={{ marginTop: 8, fontSize: 12, color: 'rgba(0,0,0,0.45)' }}>
-            创建后进入待执行（PLANNED），计划在执行前可见；同构建重复部署会被识别（需 force 才可重建）。
-          </div>
-        </Card>
+            <div style={{ marginTop: 8, fontSize: 12, color: 'rgba(0,0,0,0.45)' }}>
+              创建后进入待执行（PLANNED），计划在执行前可见；同构建重复部署会被识别（需 force 才可重建）。
+            </div>
+          </Card>
 
-        <Card size="small" title="部署历史">
           <Table<DeploymentRecord>
             rowKey="id"
+            loading={loading}
             dataSource={deploys}
             columns={columns}
-            pagination={false}
+            pagination={{
+              current: page + 1,
+              pageSize: size,
+              total,
+              showSizeChanger: true,
+              showTotal: (t) => `共 ${t} 条`,
+              onChange: (p, s) => {
+                setPage(s !== size ? 0 : p - 1)
+                setSize(s)
+              },
+            }}
             locale={{ emptyText: '暂无部署记录。在上方「创建部署」选择环境/节点与构建，发起第一个部署。' }}
           />
-        </Card>
-      </Space>
+        </Space>
+      ) : (
+        cfg && <ConfigEditor cfg={cfg} onChanged={onConfigChanged} />
+      )}
 
       <DeployDetailDrawer
         record={detail}
         onClose={() => setDetail(null)}
         onChanged={(d) => {
           setDetail(d)
-          refresh()
+          loadHistory()
         }}
       />
     </Card>

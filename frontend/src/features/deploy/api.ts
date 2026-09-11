@@ -59,9 +59,23 @@ export function rollbackDeployment(id: number): Promise<DeploymentRecord> {
   return api.post<DeploymentRecord>(`/deployments/${id}/rollback`)
 }
 
-export function listDeployments(projectId: string, status?: string): Promise<DeploymentRecord[]> {
-  const q = status ? `?projectId=${projectId}&status=${status}` : `?projectId=${projectId}`
-  return api.get<DeploymentRecord[]>(`/deployments${q}`)
+/** 部署历史分页响应（对应后端 PageView） */
+export interface DeploymentPage {
+  items: DeploymentRecord[]
+  total: number
+  page: number
+  size: number
+}
+
+export function listDeployments(
+  projectId: string,
+  page = 0,
+  size = 20,
+  status?: string,
+): Promise<DeploymentPage> {
+  const q = new URLSearchParams({ projectId, page: String(page), size: String(size) })
+  if (status) q.set('status', status)
+  return api.get<DeploymentPage>(`/deployments?${q}`)
 }
 
 /** 日志为纯文本（api 客户端按 JSON 解析，故走 getText） */
