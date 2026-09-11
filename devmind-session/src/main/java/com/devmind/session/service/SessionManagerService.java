@@ -20,6 +20,8 @@ import com.devmind.project.model.Project;
 import com.devmind.project.model.RequirementEntity;
 import com.devmind.project.model.WorkItemEntity;
 import com.devmind.project.dto.RepoView;
+import com.devmind.project.dto.WorkItemRequest;
+import com.devmind.project.dto.WorkItemView;
 import com.devmind.project.ProjectService;import com.devmind.session.config.SessionProperties;
 import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.RepoDiffView;
@@ -201,7 +203,6 @@ public class SessionManagerService {
                         "工作单元 " + req.workItemId() + " 不属于项目 " + projectId);
             }
         } else if (req.requirementId() != null && !req.requirementId().isBlank()) {
-            // 分析型会话：直挂需求，不算 Work Item
             requirement = requirementService.requireById(req.requirementId());
             if (projectId == null || projectId.isBlank()) {
                 projectId = requirement.getProjectId();
@@ -209,6 +210,8 @@ public class SessionManagerService {
                 throw new DevMindException(ErrorCode.BAD_REQUEST,
                         "需求 " + req.requirementId() + " 不属于项目 " + projectId);
             }
+            // CAP-38 FR-06：挂需求的执行会话自动建 DEVELOPMENT 工作单元（[flow:*] 流程会话豁免）
+            workItem = autoCreateWorkItem(req, requirement);
         }
         Project project = resolveProject(projectId);
         String id = shortId();
@@ -312,6 +315,34 @@ public class SessionManagerService {
         notificationPublisher.publish(NotificationEvent.of("SESSION_STARTED", id, "会话已启动",
                 preview(taskSpec, 80)));
         return toView(ent, remoteRt.state());
+    }
+
+    /**
+     * CAP-38 FR-06：会话直挂需求时自动创建 DEVELOPMENT 工作单元（title=taskSpec 首行截 60 字符，
+     * spec=taskSpec），会话改挂新 WI；[flow:*] 流程会话（分析/拆分）豁免——它们直挂需求不算工作单元。
+     * 需求终态（ACCEPTANCE/DONE/CANCELLED）拒绝关联新会话；建 WI 触发既有 rollup 推进需求状态。
+     * 包可见便于单测（构造全链路 create 成本过高）。
+     */
+    WorkItemEntity autoCreateWorkItem(CreateSessionRequest req, RequirementEntity requirement) {
+        String spec = req.taskSpec();
+        if (spec == null || spec.startsWith("[flow:")) {
+            return null;
+        }
+        String status = requirement.getStatus();
+        if (RequirementEntity.STATUS_ACCEPTANCE.equals(status)
+                || RequirementEntity.STATUS_DONE.equals(status)
+                || RequirementEntity.STATUS_CANCELLED.equals(status)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "需求已 " + status + "（验收/完结），不能关联新会话创建工作单元");
+        }
+        String firstLine = spec.lines().map(String::trim).filter(l -> !l.isEmpty())
+                .findFirst().orElse("");
+        String title = firstLine.isEmpty() ? "执行 - " + requirement.getTitle()
+                : (firstLine.length() > 60 ? firstLine.substring(0, 60) : firstLine);
+        WorkItemView view = workItemService.create(requirement.getProjectId(), requirement.getId(),
+                new WorkItemRequest(WorkItemEntity.TYPE_DEVELOPMENT, title, spec, null, null, null));
+        log.info("会话关联需求自动建工作单元: req={} wi={} title={}", requirement.getId(), view.id(), title);
+        return workItemService.requireById(view.id());
     }
 
     public List<SessionView> list(String status, String projectId, String workItemId, String requirementId) {
