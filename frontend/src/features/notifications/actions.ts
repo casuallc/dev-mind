@@ -30,9 +30,9 @@ function viewPath(n: AppNotification): string | null {
     case 'SESSION':
       return `/sessions/${n.entityId}`
     case 'REQUIREMENT':
-      // 流程通知（flow.*：分析/方案/拆分就绪）直达详情页「流程」Tab（CAP-37 FR-04）
+      // 流程通知（flow.*）直达详情页对应阶段 Tab（CAP-38：分析/方案/工作单元独立 Tab）
       return n.projectId
-        ? `/projects/${n.projectId}/requirements/${n.entityId}${n.eventType.startsWith('flow.') ? '?tab=flow' : ''}`
+        ? `/projects/${n.projectId}/requirements/${n.entityId}${flowTabParam(n.eventType)}`
         : null
     case 'JIRA_SYNC':
       return n.projectId ? `/admin/projects/${n.projectId}/jira` : '/admin/integrations'
@@ -47,6 +47,14 @@ function viewPath(n: AppNotification): string | null {
     default:
       return null
   }
+}
+
+/** flow.* 事件 → 详情页阶段 Tab 深链参数（CAP-38）；非流程事件空串（默认首 Tab）。 */
+function flowTabParam(eventType: string): string {
+  if (eventType.startsWith('flow.analysis.')) return '?tab=analysis'
+  if (eventType.startsWith('flow.design.')) return '?tab=design'
+  if (eventType.startsWith('flow.split.') || eventType.startsWith('flow.dispatched')) return '?tab=workItems'
+  return ''
 }
 
 /** 项目工作区页面（构建/部署/测试/发版）依赖当前项目上下文，跳转前先把项目切过去。 */

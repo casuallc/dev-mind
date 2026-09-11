@@ -128,7 +128,12 @@ export default function NewSessionDraft({
         >
           <Input placeholder="如 mvn,linux（逗号分隔）" allowClear />
         </Form.Item>
-        <Form.Item label="关联需求" name="requirementId" style={{ marginBottom: 12 }}>
+        <Form.Item
+          label="关联需求"
+          name="requirementId"
+          extra="（可选）关联后将自动创建工作单元（会话挂在该单元上）；仅未验收/未完结的需求可选"
+          style={{ marginBottom: 12 }}
+        >
           <Select
             options={requirements.map((r) => ({ value: r.id, label: `${r.code} ${r.title}` }))}
             placeholder="（可选）选择需求"

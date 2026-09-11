@@ -52,7 +52,9 @@ export function useSessionOptionData(form: FormInstance, projectId: string | nul
       .then(setRepos)
       .catch(() => setRepos([]))
     listRequirements(projectId, { size: 200 })
-      .then((data) => setRequirements(data.items.filter((r) => !['DONE', 'CANCELLED'].includes(r.status))))
+      // CAP-38 FR-06：关联需求自动建 WI，仅「可建 WI」的需求可选（排验收/完结/取消）
+      .then((data) => setRequirements(
+        data.items.filter((r) => !['ACCEPTANCE', 'DONE', 'CANCELLED'].includes(r.status))))
       .catch(() => setRequirements([]))
   }, [projectId, form])
 
