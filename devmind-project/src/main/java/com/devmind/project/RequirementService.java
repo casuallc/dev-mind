@@ -401,6 +401,7 @@ public class RequirementService {
                 e.getExternalKey(), ref == null ? null : ref.externalUrl(),
                 ref == null ? null : ref.remoteStatus(),
                 agentSeconds, e.getEstimatedSeconds(), e.getSpentSeconds(),
-                e.getCreatedBy(), e.getCreatedAt(), e.getUpdatedAt());
+                e.getCreatedBy(), e.getCreatedAt(), e.getUpdatedAt(),
+                e.getAnalysisSkipped(), e.getDesignSkipped());
     }
 }

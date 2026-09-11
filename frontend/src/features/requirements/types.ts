@@ -39,6 +39,10 @@ export interface Requirement {
   estimatedSeconds?: number
   /** CAP-27：Jira 已用工时（秒，托管字段随同步/回写刷新），仅 JIRA 来源 */
   spentSeconds?: number
+  /** CAP-38 FR-01：需求分析阶段已跳过（流程不可逆引导标记） */
+  analysisSkipped?: boolean
+  /** CAP-38 FR-01：方案设计阶段已跳过 */
+  designSkipped?: boolean
   createdBy?: string
   createdAt: string
   updatedAt: string

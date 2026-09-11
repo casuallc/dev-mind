@@ -37,5 +37,9 @@ public record RequirementView(
         Long spentSeconds,
         String createdBy,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        /** CAP-38 FR-01：需求分析阶段已跳过 */
+        Boolean analysisSkipped,
+        /** CAP-38 FR-01：方案设计阶段已跳过 */
+        Boolean designSkipped) {
 }

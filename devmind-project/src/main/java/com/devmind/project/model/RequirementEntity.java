@@ -113,6 +113,16 @@ public class RequirementEntity {
     @Column(name = "doc_id")
     private Long docId;
 
+    /** CAP-38 FR-01：需求分析阶段已跳过（流程不可逆引导的持久化标记） */
+    @Column(name = "analysis_skipped")
+    @ColumnDefault("'false'")
+    private Boolean analysisSkipped = false;
+
+    /** CAP-38 FR-01：方案设计阶段已跳过 */
+    @Column(name = "design_skipped")
+    @ColumnDefault("'false'")
+    private Boolean designSkipped = false;
+
     @Column(name = "created_by", length = 64)
     private String createdBy;
 
@@ -161,6 +171,10 @@ public class RequirementEntity {
     public void setSpentSeconds(Long spentSeconds) { this.spentSeconds = spentSeconds; }
     public Long getDocId() { return docId; }
     public void setDocId(Long docId) { this.docId = docId; }
+    public Boolean getAnalysisSkipped() { return analysisSkipped != null && analysisSkipped; }
+    public void setAnalysisSkipped(Boolean analysisSkipped) { this.analysisSkipped = analysisSkipped; }
+    public Boolean getDesignSkipped() { return designSkipped != null && designSkipped; }
+    public void setDesignSkipped(Boolean designSkipped) { this.designSkipped = designSkipped; }
     public String getCreatedBy() { return createdBy; }
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public Instant getCreatedAt() { return createdAt; }

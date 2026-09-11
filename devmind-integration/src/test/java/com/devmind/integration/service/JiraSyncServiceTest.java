@@ -152,7 +152,7 @@ class JiraSyncServiceTest {
                     e.getSource(), e.getPriority(), e.getAssignee(), e.getReporter(),
                     List.of(), List.of(), e.getDueDate(), e.getExternalKey(), null, null,
                     null, e.getEstimatedSeconds(), e.getSpentSeconds(),
-                    "test", Instant.now(), Instant.now());
+                    "test", Instant.now(), Instant.now(), false, false);
         }
     }
 
