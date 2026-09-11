@@ -3,9 +3,8 @@
 // CAP-36：AGENT 执行由 runner 节点承接（exec 帧），配置 GitLab 仓库时凭证随帧下发。
 // 布局遵循 docs/core/前端内容区布局约定.md：单 Card 默认尺寸，配置/触发表单收进 extra 按钮打开的 Modal。
 import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
-import { ArrowDownOutlined, ArrowUpOutlined, DownloadOutlined, ReloadOutlined, RocketOutlined, SettingOutlined, VerticalAlignBottomOutlined } from '@ant-design/icons'
+import { useEffect, useRef, useState } from 'react'
+import { ReloadOutlined, RocketOutlined, SettingOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { getBuild, getBuildConfig, getBuildLogs, listBuilds, saveBuildConfig, triggerBuild } from '../api'
 import type { BuildConfig, BuildExecutor, BuildRecord, BuildStatus } from '../types'
@@ -15,6 +14,7 @@ import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import LogView from '../../../shared/components/LogView'
 
 const STATUS_COLOR: Record<BuildStatus, string> = {
   QUEUED: 'blue',
@@ -249,31 +249,21 @@ function BuildCenter({ id }: { id: string }) {
   )
 }
 
-// ---------------- 日志 Drawer（WS 实时流 + 搜索定位 + 下载） ----------------
+// ---------------- 日志 Drawer（WS 实时流，查看能力走 shared LogView） ----------------
 
 function LogDrawer({ build, onClose }: { build: BuildRecord | null; onClose: () => void }) {
   const [text, setText] = useState('')
   const [connected, setConnected] = useState(false)
-  const [kw, setKw] = useState('')
-  const [current, setCurrent] = useState(0)
-  const [follow, setFollow] = useState(true) // 跟随最新日志：用户上翻自动暂停，回到底部恢复
   const wsRef = useRef<WebSocket | null>(null)
-  const preRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (!build) {
       setText('')
       setConnected(false)
-      setKw('')
-      setCurrent(0)
-      setFollow(true)
       return
     }
     setText('')
     setConnected(false)
-    setKw('')
-    setCurrent(0)
-    setFollow(true)
     getBuildLogs(build.id)
       .then(setText)
       .catch(() => setText(''))
@@ -321,93 +311,6 @@ function LogDrawer({ build, onClose }: { build: BuildRecord | null; onClose: () 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [build])
 
-  // 按行渲染（左侧行号）；有关键词时行内切片高亮，<mark data-mi=序号> 序号全局连续（大小写不敏感）
-  const rendered = useMemo(() => {
-    if (!text) return null
-    const k = kw.toLowerCase()
-    let ordinal = 0
-    const rows = text.split('\n').map((line, li) => {
-      let content: ReactNode = line
-      if (k) {
-        const lower = line.toLowerCase()
-        const parts: ReactNode[] = []
-        let i = 0
-        for (;;) {
-          const idx = lower.indexOf(k, i)
-          if (idx === -1) {
-            parts.push(line.slice(i))
-            break
-          }
-          if (idx > i) parts.push(line.slice(i, idx))
-          const o = ordinal++
-          parts.push(
-            <mark
-              key={o}
-              data-mi={o}
-              style={{
-                padding: 0,
-                color: '#0f1115',
-                background: o === current ? '#fa8c16' : '#d4b106',
-              }}
-            >
-              {line.slice(idx, idx + kw.length)}
-            </mark>,
-          )
-          i = idx + kw.length
-        }
-        content = parts
-      }
-      return { li, content }
-    })
-    return { rows, total: ordinal }
-  }, [text, kw, current])
-  const total = rendered?.total ?? 0
-
-  // 跟随模式：新日志到达自动滚到底部
-  useEffect(() => {
-    if (follow && preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight
-  }, [text, follow])
-
-  // 输入关键词后跳到第一处匹配
-  useEffect(() => {
-    if (!kw || !total) return
-    setCurrent(0)
-    requestAnimationFrame(() => {
-      preRef.current?.querySelector('[data-mi="0"]')?.scrollIntoView({ block: 'center' })
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kw])
-
-  const onScroll = () => {
-    const el = preRef.current
-    if (!el) return
-    setFollow(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
-  }
-
-  const jumpTo = (idx: number) => {
-    if (!total) return
-    const next = ((idx % total) + total) % total
-    setCurrent(next)
-    requestAnimationFrame(() => {
-      preRef.current?.querySelector(`[data-mi="${next}"]`)?.scrollIntoView({ block: 'center' })
-    })
-  }
-
-  const scrollToBottom = () => {
-    if (preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight
-  }
-
-  const download = () => {
-    if (!build || !text) return
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `build-${build.id}.log`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
   return (
     <Drawer
       title={
@@ -423,80 +326,12 @@ function LogDrawer({ build, onClose }: { build: BuildRecord | null; onClose: () 
       width="70%"
       open={!!build}
       onClose={onClose}
-      extra={
-        <Space size={8}>
-          <Input
-            allowClear
-            placeholder="搜索日志"
-            style={{ width: 220 }}
-            value={kw}
-            onChange={(e) => setKw(e.target.value)}
-            onPressEnter={() => jumpTo(current + 1)}
-          />
-          {kw && (
-            <Typography.Text type={total ? undefined : 'danger'} style={{ minWidth: 48 }}>
-              {total ? `${current + 1}/${total}` : '0/0'}
-            </Typography.Text>
-          )}
-          <Button size="small" icon={<ArrowUpOutlined />} disabled={!total} onClick={() => jumpTo(current - 1)} />
-          <Button size="small" icon={<ArrowDownOutlined />} disabled={!total} onClick={() => jumpTo(current + 1)} />
-          <Button size="small" icon={<DownloadOutlined />} disabled={!text} onClick={download}>
-            下载
-          </Button>
-        </Space>
-      }
     >
       {build?.errorSummary && (
         <Alert type="error" showIcon style={{ marginBottom: 12 }} message={build.errorSummary} />
       )}
-      <div style={{ position: 'relative' }}>
-        <div
-          ref={preRef}
-          onScroll={onScroll}
-          style={{
-            background: '#0f1115',
-            color: '#d0d7de',
-            padding: '12px 12px 12px 0',
-            borderRadius: 6,
-            fontSize: 12,
-            lineHeight: 1.6,
-            fontFamily: 'Consolas, Menlo, monospace',
-            maxHeight: 'calc(100vh - 200px)',
-            overflow: 'auto',
-          }}
-        >
-          {rendered
-            ? rendered.rows.map((r) => (
-                <div key={r.li} style={{ display: 'flex', minHeight: '1.6em' }}>
-                  <span
-                    style={{
-                      flex: '0 0 48px',
-                      paddingRight: 12,
-                      textAlign: 'right',
-                      color: '#6e7681',
-                      userSelect: 'none',
-                    }}
-                  >
-                    {r.li + 1}
-                  </span>
-                  <span style={{ flex: 1, minWidth: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                    {r.content}
-                  </span>
-                </div>
-              ))
-            : '（等待日志…）'}
-        </div>
-        {!follow && (
-          <Button
-            size="small"
-            icon={<VerticalAlignBottomOutlined />}
-            style={{ position: 'absolute', right: 24, bottom: 16, opacity: 0.9 }}
-            onClick={scrollToBottom}
-          >
-            回到底部
-          </Button>
-        )}
-      </div>
+      {/* key 保证切换构建时搜索/滚动状态重置 */}
+      {build && <LogView key={build.id} text={text} downloadName={`build-${build.id}`} />}
     </Drawer>
   )
 }
