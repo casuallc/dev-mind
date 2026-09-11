@@ -53,6 +53,7 @@
 | [CAP-35](CAP-35-unified-platform-accounts.md) | 统一第三方账号体系 | 底座 | Integration 收敛为实例登记+可选机器人凭证；用户账号统一为绑定实例的 UserPlatformAccount（git PAT+署名 / Jira PAT·BASIC）；MR·PR 创建、Jira transition、worklog 回写全部切个人优先身份链（取代 CAP-24） |
 | [CAP-36](CAP-36-build-on-runner.md) | 构建执行 Runner 化 | 底座 | exec 帧落地：构建/测试/部署/发版统一切 agent 节点执行，GitLab 凭证随帧下发复用集成体系，SSH/HTTP server-adapter 整体下线（取代 CAP-07） |
 | [CAP-37](CAP-37-flow-output-pipeline.md) | 流程产出回传与阶段串联 | 流程层 | runner 退出前 HTTP 回传 .devmind/output 产出落 session_outputs，分析落成 docs 文档，方案/拆分会话注入上游产出，需求详情页流程 Tab 串联四阶段 |
+| [CAP-38](CAP-38-requirement-flow-simplify.md) | 需求流程简化：阶段 Tab 与自动拆分固化 | 流程层 | 分析/方案独立 Tab 且可跳过（不可逆引导），方案产出后自动拆分+自动固化 WI，WI 状态中文+跳会话，会话关联需求自动建 WI（调整 CAP-37 FR-04、取代 CAP-14 FR-06/07 草稿人工确认） |
 
 ## 依赖关系
 
@@ -98,6 +99,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-35 统一第三方账号依赖 CAP-01/18/19/22/27：取代 CAP-24——Integration 收敛为实例登记 + 可选机器人凭证（自动化专用），用户个人账号绑定实例（user_platform_accounts），人触发的写操作（push/MR·PR/Jira transition/worklog）统一「个人 → 机器人 → 报错引导」身份链，Connector SPI 零变更。
 - CAP-36 构建执行 Runner 化依赖 CAP-21/34/25/12/18/35：取代 CAP-07——exec 帧（CAP-34 FR-06 预留协议）落地，构建/测试/部署/发版远程执行统一切 agent 节点；repo 块照搬 launch 帧 RepoSpec 语义（CloneTokenResolver 解析 token 随帧下发、runner 内存持有不落盘），标签调度选构建机；SSH/HTTP server-adapter 模块整体下线，远程执行只余「服务端 → runner」一条路径。
 - CAP-37 流程产出回传依赖 CAP-03/13/14/34：runner 退出前经 HTTP 旁路把 `.devmind/output/` 产出回传落 `session_outputs`（SessionOutputSink SPI），修复 CAP-34 后流程引擎读不到产出的断链；分析产出文档化（docs kind=analysis），方案/拆分会话 spec 注入上游产出，需求详情页新增流程 Tab 串联四阶段。
+- CAP-38 需求流程简化依赖 CAP-13/14/15/37：分析/方案拆独立 Tab 且可跳过（需求实体 analysis_skipped/design_skipped 持久化），方案产出登记后自动起拆分会话、wi-plan.json 自动固化为正式 WI（删除 split-draft/confirm-split 端点与流程 Tab，调整 CAP-37 FR-04、取代 CAP-14 FR-06/07 的人工确认草稿），sessions 关联需求自动建 DEVELOPMENT WI（终态需求 409）。
 
 ## 组装方式（后续流程层）
 
