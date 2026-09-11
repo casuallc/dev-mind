@@ -258,7 +258,7 @@ function LogDrawer({ build, onClose }: { build: BuildRecord | null; onClose: () 
   const [current, setCurrent] = useState(0)
   const [follow, setFollow] = useState(true) // 跟随最新日志：用户上翻自动暂停，回到底部恢复
   const wsRef = useRef<WebSocket | null>(null)
-  const preRef = useRef<HTMLPreElement | null>(null)
+  const preRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (!build) {
@@ -321,40 +321,47 @@ function LogDrawer({ build, onClose }: { build: BuildRecord | null; onClose: () 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [build])
 
-  // 关键词高亮：把日志切成 普通段 / <mark data-mi=序号> 段，序号即匹配序号（大小写不敏感）
-  const segments = useMemo(() => {
-    if (!kw) return null
+  // 按行渲染（左侧行号）；有关键词时行内切片高亮，<mark data-mi=序号> 序号全局连续（大小写不敏感）
+  const rendered = useMemo(() => {
+    if (!text) return null
     const k = kw.toLowerCase()
-    const lower = text.toLowerCase()
-    const parts: ReactNode[] = []
-    let i = 0
     let ordinal = 0
-    for (;;) {
-      const idx = lower.indexOf(k, i)
-      if (idx === -1) {
-        parts.push(text.slice(i))
-        break
+    const rows = text.split('\n').map((line, li) => {
+      let content: ReactNode = line
+      if (k) {
+        const lower = line.toLowerCase()
+        const parts: ReactNode[] = []
+        let i = 0
+        for (;;) {
+          const idx = lower.indexOf(k, i)
+          if (idx === -1) {
+            parts.push(line.slice(i))
+            break
+          }
+          if (idx > i) parts.push(line.slice(i, idx))
+          const o = ordinal++
+          parts.push(
+            <mark
+              key={o}
+              data-mi={o}
+              style={{
+                padding: 0,
+                color: '#0f1115',
+                background: o === current ? '#fa8c16' : '#d4b106',
+              }}
+            >
+              {line.slice(idx, idx + kw.length)}
+            </mark>,
+          )
+          i = idx + kw.length
+        }
+        content = parts
       }
-      if (idx > i) parts.push(text.slice(i, idx))
-      const o = ordinal++
-      parts.push(
-        <mark
-          key={o}
-          data-mi={o}
-          style={{
-            padding: 0,
-            color: '#0f1115',
-            background: o === current ? '#fa8c16' : '#d4b106',
-          }}
-        >
-          {text.slice(idx, idx + kw.length)}
-        </mark>,
-      )
-      i = idx + kw.length
-    }
-    return { parts, total: ordinal }
+      return { li, content }
+    })
+    return { rows, total: ordinal }
   }, [text, kw, current])
-  const total = segments?.total ?? 0
+  const total = rendered?.total ?? 0
 
   // 跟随模式：新日志到达自动滚到底部
   useEffect(() => {
@@ -443,24 +450,42 @@ function LogDrawer({ build, onClose }: { build: BuildRecord | null; onClose: () 
         <Alert type="error" showIcon style={{ marginBottom: 12 }} message={build.errorSummary} />
       )}
       <div style={{ position: 'relative' }}>
-        <pre
+        <div
           ref={preRef}
           onScroll={onScroll}
           style={{
             background: '#0f1115',
             color: '#d0d7de',
-            padding: 12,
+            padding: '12px 12px 12px 0',
             borderRadius: 6,
             fontSize: 12,
             lineHeight: 1.6,
+            fontFamily: 'Consolas, Menlo, monospace',
             maxHeight: 'calc(100vh - 200px)',
             overflow: 'auto',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
           }}
         >
-          {segments ? segments.parts : text || '（等待日志…）'}
-        </pre>
+          {rendered
+            ? rendered.rows.map((r) => (
+                <div key={r.li} style={{ display: 'flex', minHeight: '1.6em' }}>
+                  <span
+                    style={{
+                      flex: '0 0 48px',
+                      paddingRight: 12,
+                      textAlign: 'right',
+                      color: '#6e7681',
+                      userSelect: 'none',
+                    }}
+                  >
+                    {r.li + 1}
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                    {r.content}
+                  </span>
+                </div>
+              ))
+            : '（等待日志…）'}
+        </div>
         {!follow && (
           <Button
             size="small"
