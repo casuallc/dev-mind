@@ -15,6 +15,9 @@ import java.util.Properties;
  * serverUrl=ws://192.168.1.10:8080/ws/agent
  * token=dmag_xxx
  * claudePath=                # 空 = where claude 探测
+ * claudeConfigDir=           # 空 = claude 默认配置目录（~/.claude）；服务化部署（LocalSystem/root）
+ *                            # 读不到安装用户的登录态时，指向已登录的 .claude 目录（含 settings.json/.credentials.json），
+ *                            # 以 CLAUDE_CONFIG_DIR 环境变量注入 claude 子进程
  * permissionMode=acceptEdits # runner 默认权限模式（服务端指令未指定时用）
  * workDir=D:\devmind-work    # 项目无映射时的兜底工作目录
  * project.&lt;projectId&gt;=D:\repos\xxx   # 项目 → 节点本地路径映射（CAP-25 起仅作降级回退）
@@ -36,7 +39,8 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                            Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
                            String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes,
                            int gcInitialDelayMinutes, java.util.List<String> labels,
-                           java.util.List<String> execAllowlist, String execShell, int buildGcHours) {
+                           java.util.List<String> execAllowlist, String execShell, int buildGcHours,
+                           String claudeConfigDir) {
 
     /** 兼容构造（FR-05 前的 9 参签名，测试/旧调用用）：GC 默认值 14 天 / 360 分钟 / 首跑 10 分钟，无标签。 */
     public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -54,6 +58,17 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
         this(serverUrl, token, claudePath, permissionMode, workDir, projectPaths, maxConcurrent,
                 executor, workspaceRoot, gcDays, gcIntervalMinutes, gcInitialDelayMinutes, labels,
                 java.util.List.of(), "bash", 24);
+    }
+
+    /** 兼容构造（claudeConfigDir 前的 16 参签名）：claude 配置目录默认空（用 claude 默认 ~/.claude）。 */
+    public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
+                        Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
+                        String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes,
+                        int gcInitialDelayMinutes, java.util.List<String> labels,
+                        java.util.List<String> execAllowlist, String execShell, int buildGcHours) {
+        this(serverUrl, token, claudePath, permissionMode, workDir, projectPaths, maxConcurrent,
+                executor, workspaceRoot, gcDays, gcIntervalMinutes, gcInitialDelayMinutes, labels,
+                execAllowlist, execShell, buildGcHours, "");
     }
 
     public static RunnerConfig load(Path file) throws IOException {
@@ -84,7 +99,8 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                 parseLabels(p.getProperty("labels", "")),
                 parseLabels(p.getProperty("execAllowlist", "")),
                 p.getProperty("execShell", "bash").strip(),
-                Integer.parseInt(p.getProperty("buildGcHours", "24").strip()));
+                Integer.parseInt(p.getProperty("buildGcHours", "24").strip()),
+                p.getProperty("claudeConfigDir", "").strip());
     }
 
     /** FR-07：labels CSV → 去空白去空项的 List（保序）。 */

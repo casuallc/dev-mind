@@ -4,6 +4,8 @@
 
 前置：解开分发包 → 参考 `config/agent.properties.example` 生成 `config/agent.properties` 并填入 token（后台 → Agent 节点 新建节点复制）。
 
+> **claude 登录态（服务化必配）**：服务以 LocalSystem（Windows）/ root（Linux）运行，其 HOME 不是安装用户的，claude 默认读 `<服务账户HOME>/.claude`，读不到你本机登录态 → 会话回 `Not logged in · Please run /login`。在 `agent.properties` 配 `claudeConfigDir=` 指向**已完成 claude 登录**（或 settings.json 里配好 `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`）的 `.claude` 目录（Windows 如 `C:/Users/<用户名>/.claude`，Linux 如 `/home/<用户名>/.claude`），runner 会把它以 `CLAUDE_CONFIG_DIR` 注入 claude 子进程。
+
 ## Linux（systemd）
 
 ```bash

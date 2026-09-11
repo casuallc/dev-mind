@@ -360,6 +360,12 @@ public class AgentRunnerMain {
             if (envNode.isObject()) {
                 envNode.properties().forEach(e -> env.put(e.getKey(), e.getValue().asText("")));
             }
+            // 服务化部署（WinSW LocalSystem / systemd root）下 claude 默认读服务账户的 ~/.claude，
+            // 读不到安装用户的登录态 → "Not logged in"。按配置注入 CLAUDE_CONFIG_DIR 指向已登录的
+            // .claude 目录；空 = 不注入（claude 用默认目录）。节点本地配置优先于服务端下发同名字段
+            if (!config.claudeConfigDir().isBlank()) {
+                env.put("CLAUDE_CONFIG_DIR", config.claudeConfigDir());
+            }
             Process proc = executor.launch(new SessionExecutor.LaunchContext(
                     sessionId, workDir, taskSpec, model, permissionMode, env));
             sessions.register(sessionId, proc, finalizer, sessionDir);

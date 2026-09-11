@@ -11,6 +11,11 @@ token=dmag_待填
 executor=claude
 # claude 可执行文件路径；空 = 自动探测（which/where claude）
 claudePath=
+# claude 配置目录（含登录态：settings.json / .credentials.json）；空 = claude 默认（~/.claude）
+# 服务化部署必配：WinSW LocalSystem / systemd root 的 HOME 不是安装用户的，claude 读不到登录态
+# 会报 "Not logged in · Please run /login"。指向已登录用户的 .claude 目录即可，如：
+#   Windows: claudeConfigDir=C:/Users/<用户名>/.claude    Linux: claudeConfigDir=/home/<用户名>/.claude
+claudeConfigDir=
 # runner 默认权限模式（服务端指令未指定时用）
 permissionMode=acceptEdits
 
