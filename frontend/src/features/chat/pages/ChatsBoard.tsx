@@ -1,7 +1,8 @@
-// AI 问答工作台（CAP-30）：左侧问答列表 + 右侧对话交互（shared ChatPanel, apiBase=/chats）。
+// AI 问答工作台（CAP-30）：默认对话视图（左侧问答列表 + 右侧对话交互，shared ChatPanel, apiBase=/chats），可切换表格列表视图。
 // 与项目会话完全分开：无项目/仓库/Diff/详情页，问答在干净沙箱运行，按创建人隔离。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Badge, Button, Card, Modal, Space, Tag, Typography, message } from 'antd'
+import { Badge, Button, Card, Input, Modal, Segmented, Select, Space, Table, Tag, Typography, message } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
 import {
   CaretRightOutlined,
   DeleteOutlined,
@@ -11,13 +12,17 @@ import {
 } from '@ant-design/icons'
 import { deleteChat, finishChat, killChat, listChats, resumeChat, suspendChat } from '../api'
 import type { ChatSummary } from '../types'
-import { stateColor, ACTIVE_STATES } from '../../../shared/chat/stateMeta'
+import { stateColor, ACTIVE_STATES, STATE_OPTIONS } from '../../../shared/chat/stateMeta'
 import ChatPanel from '../../../shared/chat/ChatPanel'
 import type { StreamMeta } from '../../../shared/chat/types'
 import ChatListPane from '../components/ChatListPane'
 import NewChatDraft from '../components/NewChatDraft'
+import { listAgentNodes } from '../../agent/api'
+import type { AgentNode } from '../../agent/types'
+import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 // 活跃在前 + 创建时间倒序（与 ChatListPane 一致，用于自动选中第一个）
 function sortForBoard(list: ChatSummary[]): ChatSummary[] {
@@ -30,7 +35,9 @@ function sortForBoard(list: ChatSummary[]): ChatSummary[] {
 
 export default function ChatsBoard() {
   const [chats, setChats] = useState<ChatSummary[]>([])
+  const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
   const [loading, setLoading] = useState(false)
+  const [view, setView] = useState<string>('chat') // chat | list
   const [status, setStatus] = useState('ALL')
   const [keyword, setKeyword] = useState('')
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
@@ -55,6 +62,12 @@ export default function ChatsBoard() {
     const timer = window.setInterval(() => load(), 3000)
     return () => window.clearInterval(timer)
   }, [load])
+
+  useEffect(() => {
+    listAgentNodes()
+      .then(setAgentNodes)
+      .catch(() => undefined)
+  }, [])
 
   // 首次加载后自动选中：有问答选排序第一个，否则直接进入新问答草稿态
   useEffect(() => {
@@ -108,8 +121,7 @@ export default function ChatsBoard() {
       onOk: () => act(killChat, '已终止'),
     })
 
-  const confirmDelete = () => {
-    if (!current) return
+  const confirmDelete = (c: ChatSummary) => {
     Modal.confirm({
       centered: true,
       title: '删除该问答？',
@@ -119,9 +131,9 @@ export default function ChatsBoard() {
       cancelText: '取消',
       onOk: async () => {
         try {
-          await deleteChat(current.id)
+          await deleteChat(c.id)
           message.success('已删除')
-          if (current.id === selectedId) setSelectedId(undefined)
+          if (c.id === selectedId) setSelectedId(undefined)
           load()
         } catch (e) {
           showError(e, '删除失败')
@@ -139,9 +151,98 @@ export default function ChatsBoard() {
   // SUSPENDED=恢复（同进程语义）；DONE/FAILED/TERMINATED=继续对话（claude --resume 带历史重拉起）
   const canResume = !!current && ['SUSPENDED', 'DONE', 'FAILED', 'TERMINATED'].includes(current.state)
 
+  const columns: ColumnsType<ChatSummary> = [
+    {
+      title: 'ID',
+      dataIndex: 'id',
+      width: 140,
+      render: (id: string) => <Typography.Text code>{id}</Typography.Text>,
+    },
+    {
+      title: '标题',
+      dataIndex: 'title',
+      ellipsis: true,
+      render: (t: string) => t || '-',
+    },
+    {
+      title: '状态',
+      dataIndex: 'state',
+      width: 130,
+      render: (s: string) => <Tag color={stateColor[s] ?? 'default'}>{s}</Tag>,
+    },
+    {
+      title: '节点',
+      dataIndex: 'agentNodeId',
+      width: 110,
+      render: (v?: string) =>
+        v ? (
+          <Tag color="purple">{agentNodes.find((n) => String(n.id) === v)?.name ?? `节点${v}`}</Tag>
+        ) : (
+          '本机（历史）'
+        ),
+    },
+    {
+      title: '摘要',
+      dataIndex: 'summary',
+      ellipsis: true,
+      render: (s?: string) => s?.slice(0, 80) || '-',
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'createdAt',
+      width: 170,
+      render: (t: string) => fmtTime(t),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 150,
+      render: (_, r) => (
+        <Space size={4}>
+          <Button
+            size="small"
+            onClick={() => {
+              onSelect(r.id)
+              setView('chat')
+            }}
+          >
+            对话
+          </Button>
+          <Button size="small" danger onClick={() => confirmDelete(r)}>
+            删除
+          </Button>
+        </Space>
+      ),
+    },
+  ]
+
+  const listFiltered = useMemo(() => {
+    const kw = keyword.trim().toLowerCase()
+    const list = status === 'ALL' ? chats : chats.filter((c) => c.state === status)
+    if (!kw) return list
+    return list.filter(
+      (c) =>
+        c.id.toLowerCase().includes(kw) ||
+        c.title.toLowerCase().includes(kw) ||
+        (c.summary ?? '').toLowerCase().includes(kw),
+    )
+  }, [chats, status, keyword])
+
   return (
     <Card
-      title="AI 问答"
+      title={
+        <Space size={12}>
+          <span>AI 问答</span>
+          <Segmented
+            value={view}
+            onChange={setView}
+            options={[
+              { value: 'chat', label: '对话' },
+              { value: 'list', label: '列表' },
+            ]}
+          />
+        </Space>
+      }
       extra={
         <Button icon={<ReloadOutlined />} onClick={() => load()}>
           刷新
@@ -151,9 +252,10 @@ export default function ChatsBoard() {
       styles={{ body: pageCardBodyFlexStyle }}
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
-        纯问答不关联项目/仓库，agent 在干净沙箱中运行。左侧选问答、右侧直接对话；「新问答」输入问题即创建。
+        纯问答不关联项目/仓库，agent 在干净沙箱中运行。左侧选问答、右侧直接对话；「新问答」输入问题即创建。列表视图可按状态筛选、搜索全部问答。
       </Typography.Paragraph>
 
+      {view === 'chat' ? (
       <div style={{ display: 'flex', alignItems: 'stretch', flex: 1, minHeight: 0 }}>
         <ChatListPane
           chats={chats}
@@ -224,7 +326,7 @@ export default function ChatsBoard() {
                       终止
                     </Button>
                   )}
-                  <Button size="small" danger icon={<DeleteOutlined />} onClick={confirmDelete}>
+                  <Button size="small" danger icon={<DeleteOutlined />} onClick={() => confirmDelete(current)}>
                     删除
                   </Button>
                 </Space>
@@ -244,6 +346,33 @@ export default function ChatsBoard() {
           )}
         </div>
       </div>
+      ) : (
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <Space style={{ marginBottom: 12 }} wrap>
+            <Select
+              value={status}
+              onChange={setStatus}
+              options={STATE_OPTIONS.map((s) => ({ value: s, label: s }))}
+              style={{ width: 140 }}
+            />
+            <Input.Search
+              placeholder="搜索标题 / 摘要"
+              allowClear
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              style={{ width: 220 }}
+            />
+          </Space>
+          <Table
+            rowKey="id"
+            loading={loading}
+            columns={columns}
+            dataSource={listFiltered}
+            pagination={LIST_PAGINATION}
+            locale={{ emptyText: '暂无问答。切到「对话」视图点「新问答」发起第一个。' }}
+          />
+        </div>
+      )}
     </Card>
   )
 }
