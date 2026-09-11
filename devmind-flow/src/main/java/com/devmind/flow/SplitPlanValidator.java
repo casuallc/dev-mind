@@ -8,7 +8,7 @@ import java.util.List;
 
 /**
  * 拆分清单校验（CAP-14 FR-07）：dependsOn 下标越界与环检测。
- * 纯函数，供 confirmSplit 提交前调用；独立成类便于单测。
+ * 纯函数，自动固化（handleSplitOutput）前调用；独立成类便于单测。
  */
 public final class SplitPlanValidator {
 

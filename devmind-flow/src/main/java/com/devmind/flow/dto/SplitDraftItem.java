@@ -3,7 +3,7 @@ package com.devmind.flow.dto;
 import java.util.List;
 
 /**
- * 拆分草稿项（CAP-14）：AI 拆分的工作单元草稿，人编辑后随 confirm-split 提交固化。
+ * 拆分清单项（CAP-14/CAP-38）：wi-plan.json 解析载体，CAP-38 起产出直接固化为正式工作单元（无人工编辑环节）。
  *
  * @param type      DESIGN / DEVELOPMENT / TEST / DOCUMENT / REVIEW
  * @param title     标题

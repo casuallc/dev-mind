@@ -272,6 +272,12 @@ public class RequirementService {
         return view;
     }
 
+    /** CAP-38 FR-01：流程阶段跳过标记落库（flow 模块用；仅保存实体并刷新 updatedAt）。 */
+    public void saveStageFlags(RequirementEntity e) {
+        e.setUpdatedAt(Instant.now());
+        requirementRepo.save(e);
+    }
+
     /** 删除需求：级联清理其 Work Item / Design / 相关 Relation。派生 deleteBy 查询需事务上下文。 */
     @org.springframework.transaction.annotation.Transactional
     public void delete(String projectId, String requirementId) {
