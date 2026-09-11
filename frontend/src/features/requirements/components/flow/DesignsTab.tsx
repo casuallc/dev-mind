@@ -1,24 +1,17 @@
-// 方案 Tab（CAP-13/14）：Design 列表 + 确认/废弃/删除 + 方案文档内容预览。
+// 方案 Tab（CAP-13/14）：Design 列表 + 确认/废弃/删除 + 方案文档内容预览（Markdown 渲染）。
 // AI 方案由流程引擎在方案会话完成后自动登记（DRAFT），人在此确认（CONFIRMED）后进入拆分。
+// 状态操作与预览逻辑走共享 useDesignActions/DocPreviewModal（流程 Tab 同用，CAP-37 FR-04）。
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Modal, Popconfirm, Space, Table, Tag, Typography, message } from 'antd'
+import { Button, Popconfirm, Space, Table, Tag, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
-import { deleteDesign, listDesigns, updateDesignStatus } from '../../api'
-import { getDoc } from '../../../docs/api'
+import { listDesigns } from '../../api'
 import type { Design, DesignStatus } from '../../types'
 import { fmtTime } from '../../../../shared/utils/format'
 import { showError } from '../../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../../shared/utils/table'
-
-function designStatusColor(s: DesignStatus): string {
-  switch (s) {
-    case 'DRAFT': return 'gold'
-    case 'CONFIRMED': return 'green'
-    case 'DISCARDED': return 'default'
-    default: return 'default'
-  }
-}
+import DocPreviewModal from './DocPreviewModal'
+import { designStatusColor, useDesignActions } from './useDesignActions'
 
 export default function DesignsTab({ projectId, requirementId }: {
   projectId: string
@@ -26,7 +19,6 @@ export default function DesignsTab({ projectId, requirementId }: {
 }) {
   const [designs, setDesigns] = useState<Design[]>([])
   const [loading, setLoading] = useState(false)
-  const [preview, setPreview] = useState<{ title: string; content: string } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -43,28 +35,8 @@ export default function DesignsTab({ projectId, requirementId }: {
     load()
   }, [load])
 
-  const setStatus = async (d: Design, status: DesignStatus) => {
-    try {
-      await updateDesignStatus(projectId, requirementId, d.id, status)
-      message.success(`方案 v${d.version} → ${status}`)
-      await load()
-    } catch (e) {
-      showError(e)
-    }
-  }
-
-  const onPreview = async (d: Design) => {
-    if (!d.docId) {
-      message.info('该方案未关联文档')
-      return
-    }
-    try {
-      const doc = await getDoc(d.docId)
-      setPreview({ title: `方案 v${d.version} · ${doc.title}`, content: doc.contentMd || '（空）' })
-    } catch (e) {
-      showError(e, '读取方案文档失败')
-    }
-  }
+  const { preview, closePreview, setStatus, remove, previewDesign } =
+    useDesignActions(projectId, requirementId, load)
 
   const columns: ColumnsType<Design> = [
     { title: '版本', dataIndex: 'version', width: 70, render: (v: number) => `v${v}` },
@@ -81,7 +53,7 @@ export default function DesignsTab({ projectId, requirementId }: {
       title: '操作', key: 'ops', width: 220,
       render: (_, d) => (
         <Space size={4}>
-          <Button size="small" type="link" disabled={!d.docId} onClick={() => onPreview(d)}>查看</Button>
+          <Button size="small" type="link" disabled={!d.docId} onClick={() => previewDesign(d)}>查看</Button>
           {d.status === 'DRAFT' && (
             <>
               <Popconfirm title={`确认方案 v${d.version}？`} description="确认后可作为拆分工作单元的依据"
@@ -97,17 +69,7 @@ export default function DesignsTab({ projectId, requirementId }: {
           {d.status === 'DISCARDED' && (
             <Button size="small" type="link" onClick={() => setStatus(d, 'DRAFT')}>恢复</Button>
           )}
-          <Button size="small" type="link" danger onClick={() => Modal.confirm({
-            centered: true,
-            title: `删除方案 v${d.version}？`,
-            okText: '删除',
-            okButtonProps: { danger: true },
-            onOk: async () => {
-              await deleteDesign(projectId, requirementId, d.id)
-              message.success('已删除')
-              await load()
-            },
-          })}>删除</Button>
+          <Button size="small" type="link" danger onClick={() => remove(d)}>删除</Button>
         </Space>
       ),
     },
@@ -122,17 +84,7 @@ export default function DesignsTab({ projectId, requirementId }: {
         <Button size="small" icon={<ReloadOutlined />} onClick={load} loading={loading} />
       </Space>
       <Table rowKey="id" size="small" columns={columns} dataSource={designs} loading={loading} pagination={LIST_PAGINATION} />
-      <Modal
-        title={preview?.title}
-        open={!!preview}
-        onCancel={() => setPreview(null)}
-        footer={null}
-        width={860}
-      >
-        <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12, maxHeight: '65vh', overflow: 'auto' }}>
-          {preview?.content}
-        </pre>
-      </Modal>
+      <DocPreviewModal preview={preview} onClose={closePreview} />
     </Space>
   )
 }
