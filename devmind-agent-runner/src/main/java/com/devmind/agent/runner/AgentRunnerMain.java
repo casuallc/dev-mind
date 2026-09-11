@@ -282,6 +282,8 @@ public class AgentRunnerMain {
             String taskSpec = frame.path("taskSpec").asText("");
             String model = frame.path("model").asText("");
             String permissionMode = frame.path("permissionMode").asText("");
+            // 服务端 resume 时带上 → claude --resume 续接对话历史；空 = 全新对话（旧服务端不发此字段）
+            String resumeSessionId = frame.path("resumeSessionId").asText("");
 
             // CAP-30：kind="chat" = 通用问答——沙箱 <workspaceRoot>/_chat/<sid>（幂等创建，
             // resume 复用），进程退出 finalizer 递归删除；无 clone/push 语义。
@@ -345,7 +347,8 @@ public class AgentRunnerMain {
                     log.info("兜底工作目录不存在已创建: {}", workDir);
                 }
             }
-            log.info("拉起会话: session={} project={} cwd={}", sessionId, projectId, workDir);
+            log.info("拉起会话: session={} project={} cwd={} resume={}", sessionId, projectId, workDir,
+                    resumeSessionId.isBlank() ? "-" : resumeSessionId);
 
             // CAP-34 FR-03：launch 帧带 contextManifest → HTTP 拉包物化后再拉起；
             // 拉取/校验/物化失败即 launch 失败（走 catch 回 launched{ok:false}），不静默降级为无上下文会话
@@ -367,7 +370,7 @@ public class AgentRunnerMain {
                 env.put("CLAUDE_CONFIG_DIR", config.claudeConfigDir());
             }
             Process proc = executor.launch(new SessionExecutor.LaunchContext(
-                    sessionId, workDir, taskSpec, model, permissionMode, env));
+                    sessionId, workDir, taskSpec, model, permissionMode, env, resumeSessionId));
             sessions.register(sessionId, proc, finalizer, sessionDir);
             conn.send(Map.of("type", "launched", "sessionId", sessionId, "ok", true));
         } catch (Exception e) {

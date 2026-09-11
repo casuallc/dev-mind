@@ -27,24 +27,37 @@ import java.util.Map;
  * @param contextManifest CAP-34：上下文包清单（{@link ContextPackage} 的 sha256/大小/条目数）。
  *                       runner 据此 HTTP 拉包物化后再拉起 claude；null = 无上下文。
  *                       旧版 runner 忽略该字段（优雅降级为无上下文会话）。
+ * @param resumeSessionId 续接目标 CLI 会话 id（claude --resume，服务端 resume 时带上）；
+ *                       null/空 = 全新对话。对话历史在 runner 侧 CLI 配置目录按 cwd 归档，
+ *                       进程退出不丢失；id 失效（配置目录已清理）时 CLI 报错退出即 launch 失败。
+ *                       旧版 runner 忽略该字段（优雅降级为无对话历史的全新会话）。
  */
 public record AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
                                  String model, String permissionMode, Map<String, String> env,
                                  RepoSpec repo, String kind, List<RepoSpec> repos,
-                                 ContextManifest contextManifest) {
+                                 ContextManifest contextManifest, String resumeSessionId) {
 
     /** 兼容构造器：CAP-25 及之前的调用点（kind=session，无多库、无上下文）。 */
     public AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
                               String model, String permissionMode, Map<String, String> env,
                               RepoSpec repo) {
-        this(sessionId, projectId, taskSpec, model, permissionMode, env, repo, "session", null, null);
+        this(sessionId, projectId, taskSpec, model, permissionMode, env, repo, "session", null, null, null);
     }
 
     /** 兼容构造器：CAP-30/31 调用点（无上下文清单）。 */
     public AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
                               String model, String permissionMode, Map<String, String> env,
                               RepoSpec repo, String kind, List<RepoSpec> repos) {
-        this(sessionId, projectId, taskSpec, model, permissionMode, env, repo, kind, repos, null);
+        this(sessionId, projectId, taskSpec, model, permissionMode, env, repo, kind, repos, null, null);
+    }
+
+    /** 兼容构造器：CAP-34 调用点（无续接，全新对话）。 */
+    public AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
+                              String model, String permissionMode, Map<String, String> env,
+                              RepoSpec repo, String kind, List<RepoSpec> repos,
+                              ContextManifest contextManifest) {
+        this(sessionId, projectId, taskSpec, model, permissionMode, env, repo, kind, repos,
+                contextManifest, null);
     }
 
     /**

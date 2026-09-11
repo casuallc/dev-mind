@@ -151,6 +151,11 @@ public class CliProcessLauncher implements SessionExecutor {
             cmd.add("--model");
             cmd.add(ctx.model());
         }
+        // 续接既有 CLI 会话（对话历史在 CLI 配置目录按 cwd 归档）；id 失效时 CLI 报错退出
+        if (ctx.resumeSessionId() != null && !ctx.resumeSessionId().isBlank()) {
+            cmd.add("--resume");
+            cmd.add(ctx.resumeSessionId());
+        }
         return cmd;
     }
 

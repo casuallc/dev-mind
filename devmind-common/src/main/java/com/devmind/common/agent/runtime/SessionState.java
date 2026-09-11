@@ -9,6 +9,9 @@ package com.devmind.common.agent.runtime;
  *             ├─ 异常退出 ─▶ FAILED
  *             ├─ 挂起     ─▶ SUSPENDED（杀进程保留工作区，可 resume 续跑）
  *             └─ kill     ─▶ TERMINATED
+ *
+ * resume：SUSPENDED/DONE/FAILED/TERMINATED ─▶ RUNNING（重新拉起进程，claude --resume
+ * 续接对话历史；历史在 runner 侧 CLI 配置目录按 cwd 归档，已清理则恢复失败）
  * </pre>
  */
 public enum SessionState {
