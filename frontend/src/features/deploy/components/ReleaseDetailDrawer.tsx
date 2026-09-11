@@ -12,6 +12,7 @@ import type { ReleaseRecord } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { STATUS_COLOR } from '../constants'
 import { showError } from '../../../shared/utils/showError'
+import LogView from '../../../shared/components/LogView'
 
 export default function ReleaseDetailDrawer({ record, onClose, onChanged }: {
   record: ReleaseRecord | null
@@ -90,7 +91,7 @@ export default function ReleaseDetailDrawer({ record, onClose, onChanged }: {
   }
 
   return (
-    <Drawer title={d ? `发版 v${d.version} #${d.id}` : '发版详情'} width={680} open={!!d} onClose={onClose}>
+    <Drawer title={d ? `发版 v${d.version} #${d.id}` : '发版详情'} width="70%" open={!!d} onClose={onClose}>
       {d && (
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
           <Space wrap>
@@ -145,9 +146,12 @@ export default function ReleaseDetailDrawer({ record, onClose, onChanged }: {
               删除
             </Button>
           </Space>
-          <div style={{ maxHeight: 420, overflow: 'auto', background: '#111', color: '#cfc', padding: 8, borderRadius: 4, fontFamily: 'monospace', fontSize: 12, width: '100%' }}>
-            <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{text || '（暂无日志）'}</pre>
-          </div>
+          <LogView
+            key={d.id}
+            text={text}
+            downloadName={`release-${d.id}`}
+            maxHeight="calc(100vh - 320px)"
+          />
         </Space>
       )}
     </Drawer>
