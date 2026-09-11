@@ -3,8 +3,9 @@
 // CAP-36：AGENT 执行由 runner 节点承接（exec 帧），配置 GitLab 仓库时凭证随帧下发。
 // 布局遵循 docs/core/前端内容区布局约定.md：单 Card 默认尺寸，配置/触发表单收进 extra 按钮打开的 Modal。
 import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
-import { useEffect, useRef, useState } from 'react'
-import { ReloadOutlined, RocketOutlined, SettingOutlined } from '@ant-design/icons'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
+import { ArrowDownOutlined, ArrowUpOutlined, DownloadOutlined, ReloadOutlined, RocketOutlined, SettingOutlined, VerticalAlignBottomOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { getBuild, getBuildConfig, getBuildLogs, listBuilds, saveBuildConfig, triggerBuild } from '../api'
 import type { BuildConfig, BuildExecutor, BuildRecord, BuildStatus } from '../types'
@@ -248,21 +249,31 @@ function BuildCenter({ id }: { id: string }) {
   )
 }
 
-// ---------------- 日志 Drawer（WS 实时流） ----------------
+// ---------------- 日志 Drawer（WS 实时流 + 搜索定位 + 下载） ----------------
 
 function LogDrawer({ build, onClose }: { build: BuildRecord | null; onClose: () => void }) {
   const [text, setText] = useState('')
   const [connected, setConnected] = useState(false)
+  const [kw, setKw] = useState('')
+  const [current, setCurrent] = useState(0)
+  const [follow, setFollow] = useState(true) // 跟随最新日志：用户上翻自动暂停，回到底部恢复
   const wsRef = useRef<WebSocket | null>(null)
+  const preRef = useRef<HTMLPreElement | null>(null)
 
   useEffect(() => {
     if (!build) {
       setText('')
       setConnected(false)
+      setKw('')
+      setCurrent(0)
+      setFollow(true)
       return
     }
     setText('')
     setConnected(false)
+    setKw('')
+    setCurrent(0)
+    setFollow(true)
     getBuildLogs(build.id)
       .then(setText)
       .catch(() => setText(''))
@@ -310,6 +321,86 @@ function LogDrawer({ build, onClose }: { build: BuildRecord | null; onClose: () 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [build])
 
+  // 关键词高亮：把日志切成 普通段 / <mark data-mi=序号> 段，序号即匹配序号（大小写不敏感）
+  const segments = useMemo(() => {
+    if (!kw) return null
+    const k = kw.toLowerCase()
+    const lower = text.toLowerCase()
+    const parts: ReactNode[] = []
+    let i = 0
+    let ordinal = 0
+    for (;;) {
+      const idx = lower.indexOf(k, i)
+      if (idx === -1) {
+        parts.push(text.slice(i))
+        break
+      }
+      if (idx > i) parts.push(text.slice(i, idx))
+      const o = ordinal++
+      parts.push(
+        <mark
+          key={o}
+          data-mi={o}
+          style={{
+            padding: 0,
+            color: '#0f1115',
+            background: o === current ? '#fa8c16' : '#d4b106',
+          }}
+        >
+          {text.slice(idx, idx + kw.length)}
+        </mark>,
+      )
+      i = idx + kw.length
+    }
+    return { parts, total: ordinal }
+  }, [text, kw, current])
+  const total = segments?.total ?? 0
+
+  // 跟随模式：新日志到达自动滚到底部
+  useEffect(() => {
+    if (follow && preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight
+  }, [text, follow])
+
+  // 输入关键词后跳到第一处匹配
+  useEffect(() => {
+    if (!kw || !total) return
+    setCurrent(0)
+    requestAnimationFrame(() => {
+      preRef.current?.querySelector('[data-mi="0"]')?.scrollIntoView({ block: 'center' })
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kw])
+
+  const onScroll = () => {
+    const el = preRef.current
+    if (!el) return
+    setFollow(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
+  }
+
+  const jumpTo = (idx: number) => {
+    if (!total) return
+    const next = ((idx % total) + total) % total
+    setCurrent(next)
+    requestAnimationFrame(() => {
+      preRef.current?.querySelector(`[data-mi="${next}"]`)?.scrollIntoView({ block: 'center' })
+    })
+  }
+
+  const scrollToBottom = () => {
+    if (preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight
+  }
+
+  const download = () => {
+    if (!build || !text) return
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `build-${build.id}.log`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <Drawer
       title={
@@ -322,29 +413,65 @@ function LogDrawer({ build, onClose }: { build: BuildRecord | null; onClose: () 
           </Space>
         ) : '构建日志'
       }
-      width={720}
+      width="70%"
       open={!!build}
       onClose={onClose}
+      extra={
+        <Space size={8}>
+          <Input
+            allowClear
+            placeholder="搜索日志"
+            style={{ width: 220 }}
+            value={kw}
+            onChange={(e) => setKw(e.target.value)}
+            onPressEnter={() => jumpTo(current + 1)}
+          />
+          {kw && (
+            <Typography.Text type={total ? undefined : 'danger'} style={{ minWidth: 48 }}>
+              {total ? `${current + 1}/${total}` : '0/0'}
+            </Typography.Text>
+          )}
+          <Button size="small" icon={<ArrowUpOutlined />} disabled={!total} onClick={() => jumpTo(current - 1)} />
+          <Button size="small" icon={<ArrowDownOutlined />} disabled={!total} onClick={() => jumpTo(current + 1)} />
+          <Button size="small" icon={<DownloadOutlined />} disabled={!text} onClick={download}>
+            下载
+          </Button>
+        </Space>
+      }
     >
       {build?.errorSummary && (
         <Alert type="error" showIcon style={{ marginBottom: 12 }} message={build.errorSummary} />
       )}
-      <pre
-        style={{
-          background: '#0f1115',
-          color: '#d0d7de',
-          padding: 12,
-          borderRadius: 6,
-          fontSize: 12,
-          lineHeight: 1.6,
-          maxHeight: 'calc(100vh - 200px)',
-          overflow: 'auto',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-all',
-        }}
-      >
-        {text || '（等待日志…）'}
-      </pre>
+      <div style={{ position: 'relative' }}>
+        <pre
+          ref={preRef}
+          onScroll={onScroll}
+          style={{
+            background: '#0f1115',
+            color: '#d0d7de',
+            padding: 12,
+            borderRadius: 6,
+            fontSize: 12,
+            lineHeight: 1.6,
+            maxHeight: 'calc(100vh - 200px)',
+            overflow: 'auto',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-all',
+          }}
+        >
+          {segments ? segments.parts : text || '（等待日志…）'}
+        </pre>
+        {!follow && (
+          <Button
+            size="small"
+            icon={<VerticalAlignBottomOutlined />}
+            style={{ position: 'absolute', right: 24, bottom: 16, opacity: 0.9 }}
+            onClick={scrollToBottom}
+          >
+            回到底部
+          </Button>
+        )}
+      </div>
     </Drawer>
   )
 }
