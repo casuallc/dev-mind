@@ -23,8 +23,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Jira Server/DC 连接器（/rest/api/2）。认证按集成配置：
- * PAT（8.14+，Bearer 头）/ BASIC（8.13 及更早，Basic base64(user:password)）。
+ * Jira Server/DC 连接器（/rest/api/2）。认证按凭据格式自探测：
+ * PAT（8.14+，Bearer 头）/ BASIC（8.13 及更早，Basic base64(user:password)，
+ * secret 含换行即 BASIC），与个人账号（CAP-35）/实例机器人凭据无关来源均适用。
  * 读：拉取 issue / 工作流转换清单 / 附件内容（CAP-19 FR-09 描述图片代理）；
  * 写：仅限 transitions / worklog 端点（CAP-19 FR-08 状态回写、
  * CAP-27 工时登记），git 动词不支持。
@@ -220,18 +221,21 @@ public class JiraConnector implements IntegrationConnector {
         factory.setReadTimeout(Duration.ofMillis(props.getReadTimeoutMs()));
         return RestClient.builder()
                 .requestFactory(factory)
-                .defaultHeader("Authorization", authorizationHeader(cfg.getAuthType(), token))
+                .defaultHeader("Authorization", authorizationHeader(token))
                 .build();
     }
 
     /**
-     * Authorization 头组装：PAT → Bearer；BASIC → Basic base64(username:password)。
-     * BASIC 的 secret 存储格式为 "username\npassword"（见 IntegrationService.encodeSecret）。
+     * Authorization 头组装：按 secret 存储格式自探测（不按实例 authType）——
+     * 含换行即 BASIC 的 "username\npassword"（见 IntegrationService.encodeSecret）
+     * 转 Basic base64(username:password)，否则按 PAT 走 Bearer。
+     * 原因：CAP-35 个人账号的认证方式独立于实例（resolveWriteIdentity 只回 secret），
+     * 凭据格式才是权威来源；实例 BASIC + 个人 PAT（或反之）时必须按实际凭据组头。
      */
-    static String authorizationHeader(String authType, String secret) {
-        if (IntegrationEntity.AUTH_BASIC.equals(authType)) {
-            int i = secret.indexOf('\n');
-            String raw = i >= 0 ? secret.substring(0, i) + ":" + secret.substring(i + 1) : secret;
+    static String authorizationHeader(String secret) {
+        int i = secret == null ? -1 : secret.indexOf('\n');
+        if (i >= 0) {
+            String raw = secret.substring(0, i) + ":" + secret.substring(i + 1);
             return "Basic " + java.util.Base64.getEncoder()
                     .encodeToString(raw.getBytes(StandardCharsets.UTF_8));
         }
