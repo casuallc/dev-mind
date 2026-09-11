@@ -112,6 +112,10 @@ WriteIdentity resolveWriteIdentity(String actorUsername, IntegrationEntity integ
 // common SPI 不变：GitIdentityProvider.resolveAuthor(username, repoHost)
 ```
 
+> 实现注记（2026-09-11）：`WriteIdentity` 实际只携带 `(secret, source)`；Jira 的
+> Bearer/Basic 选择改为 `JiraConnector.authorizationHeader` 按 secret 格式自探测
+> （含 `\n` 即 BASIC），个人账号与实例 authType 不一致不再 401，无需回传 authType。
+
 - Connector SPI **零变更**：各方法仍收 `(IntegrationEntity cfg, String token)`，
   个人 BASIC 凭据按既有 `"username\npassword"` 格式解密传入，Connector 无感知；
 - 个人自检复用 Connector `testConnection`（FR-02），Connector 不需要知道凭据来源。
