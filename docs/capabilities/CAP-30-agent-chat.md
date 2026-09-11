@@ -29,6 +29,12 @@ devmind-session， exclusions 一堆，依赖关系本就不干净）。
 - **FR-04 状态机与交互**：复用共享内核——RUNNING/WAITING_INPUT/WAITING_AUTH/DONE/FAILED/
   SUSPENDED/TERMINATED；stdin 注入、授权（permission_request 中转）、挂起/恢复、优雅结束
   （关 stdin）、强杀；空闲超时自动结束。
+  - **恢复语义（2026-09 扩展）**：SUSPENDED/DONE/FAILED/TERMINATED 均可 resume——重新拉起进程，
+    launch 帧带 `resumeSessionId`（= 落库的 claude init session_id，`chat_sessions.cli_session_id`），
+    claude 以 `--resume` 续接**完整对话历史**（历史在 runner 侧 CLI 配置目录按 cwd 归档，进程退出
+    不丢失；该目录被清理则恢复失败报错）。无 cli_session_id 的历史记录（升级前）终态不可恢复，
+    SUSPENDED 则降级为全新进程复用沙箱（旧行为）。旧版 runner 忽略 resumeSessionId 字段，
+    降级为无对话历史的恢复。
 - **FR-05 事件流**：`chat_events` 表批量落库（复刻 SessionEventSaver 模式）；WS
   `/ws/chats/{id}` 帧协议与 `/ws/sessions/{id}` 完全一致（snapshot/event/error/pong +
   input/authorize/ping 上行），前端共享同一套流组件。

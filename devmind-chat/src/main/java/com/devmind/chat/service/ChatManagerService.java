@@ -299,8 +299,15 @@ public class ChatManagerService {
 
     public ChatView resume(String id) {
         ChatSessionEntity ent = requireOwned(id);
-        if (!SessionState.SUSPENDED.name().equals(ent.getStatus())) {
-            throw new DevMindException(ErrorCode.CONFLICT, "只有 SUSPENDED 问答可以恢复");
+        SessionState cur = SessionState.valueOf(ent.getStatus());
+        if (cur.isActive()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "问答正在运行中，无需恢复");
+        }
+        // 终态恢复依赖 claude --resume 续接对话历史；无 CLI 会话记录的历史数据只能全新开始，不允许
+        if (cur != SessionState.SUSPENDED
+                && (ent.getCliSessionId() == null || ent.getCliSessionId().isBlank())) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "该问答缺少 CLI 会话记录（历史数据），无法继续对话");
         }
         runtimes.remove(id);
 
@@ -320,7 +327,7 @@ public class ChatManagerService {
         try {
             connector.launch(ent.getAgentNodeId(), new AgentLaunchCommand(
                     id, null, "", ent.getModel(), ent.getPermissionMode(),
-                    Map.of(), null, "chat", null, manifest));
+                    Map.of(), null, "chat", null, manifest, ent.getCliSessionId()));
         } catch (Exception e) {
             runtimes.remove(id);
             if (e instanceof DevMindException de) {
@@ -329,6 +336,7 @@ public class ChatManagerService {
             throw new DevMindException(ErrorCode.CONFLICT, "恢复远程问答失败: " + e.getMessage(), e);
         }
         ent.setStatus(SessionState.RUNNING.name());
+        ent.setFinishedAt(null);
         ent.setUpdatedAt(Instant.now());
         chatRepo.save(ent);
         return toView(ent, rt.state());
@@ -416,8 +424,27 @@ public class ChatManagerService {
     public void onRemoteEvent(String nodeId, AgentEventFrame frame) {
         SessionHandle h = runtimes.get(frame.sessionId());
         if (h instanceof RemoteSessionRuntime r && r.nodeId().equals(nodeId)) {
+            captureCliSessionId(frame);
             r.ingest(frame);
         }
+    }
+
+    /** init 事件 payload 带 claude 侧 session_id → 落库（resume 时以 --resume 续接对话历史）。 */
+    private void captureCliSessionId(AgentEventFrame frame) {
+        if (!"system".equals(frame.type()) || frame.payload() == null) {
+            return;
+        }
+        Object subtype = frame.payload().get("subtype");
+        Object cliId = frame.payload().get("sessionId");
+        if (!"init".equals(subtype) || !(cliId instanceof String id) || id.isBlank()) {
+            return;
+        }
+        chatRepo.findById(frame.sessionId()).ifPresent(ent -> {
+            if (!id.equals(ent.getCliSessionId())) {
+                ent.setCliSessionId(id);
+                chatRepo.save(ent);
+            }
+        });
     }
 
     public void onRemoteExit(String nodeId, String sessionId, int exitCode) {

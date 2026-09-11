@@ -33,6 +33,10 @@ public class ChatSessionEntity {
     @Column(name = "agent_node_id", length = 64)
     private String agentNodeId;
 
+    /** claude 侧会话 id（init 事件捕获，resume 时以 --resume 续接对话历史）；历史行为 NULL */
+    @Column(name = "cli_session_id", length = 64)
+    private String cliSessionId;
+
     private Long pid;
 
     @Column(length = 64)
@@ -82,6 +86,8 @@ public class ChatSessionEntity {
     public void setStatus(String status) { this.status = status; }
     public String getAgentNodeId() { return agentNodeId; }
     public void setAgentNodeId(String agentNodeId) { this.agentNodeId = agentNodeId; }
+    public String getCliSessionId() { return cliSessionId; }
+    public void setCliSessionId(String cliSessionId) { this.cliSessionId = cliSessionId; }
     public Long getPid() { return pid; }
     public void setPid(Long pid) { this.pid = pid; }
     public String getModel() { return model; }

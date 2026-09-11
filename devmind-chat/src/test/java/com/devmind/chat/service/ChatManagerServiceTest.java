@@ -53,6 +53,7 @@ import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -489,6 +490,53 @@ class ChatManagerServiceTest {
         chats.store.put(ent.getId(), ent);
         assertThrows(com.devmind.common.exception.DevMindException.class,
                 () -> service.resume("legacy01"));
+    }
+
+    @Test
+    void init事件捕获cliSessionId落库() throws Exception {
+        ChatView v = service.create(new CreateChatRequest("测试捕获", "", "", NODE));
+        // fake-agent 启动即发 system/init（session_id = 会话 id）→ onRemoteEvent 捕获落库
+        await("cliSessionId 落库", () -> v.id().equals(chats.store.get(v.id()).getCliSessionId()));
+        service.kill(v.id());
+    }
+
+    @Test
+    void DONE问答可继续对话_launch带resumeSessionId且finishedAt清空() throws Exception {
+        ChatView v = service.create(new CreateChatRequest("测试终态恢复", "", "", NODE));
+        await("进程拉起", () -> Files.isDirectory(sandboxRoot.resolve(v.id())));
+        await("cliSessionId 落库", () -> chats.store.get(v.id()).getCliSessionId() != null);
+        service.finish(v.id());
+        await("问答 DONE", () -> service.get(v.id()).status().equals(SessionState.DONE.name()));
+
+        ChatView r = service.resume(v.id());
+        assertEquals(SessionState.RUNNING.name(), r.status());
+        // launch 帧带 --resume 目标（= 捕获的 cliSessionId），对话历史由 claude 续接
+        assertEquals(chats.store.get(v.id()).getCliSessionId(), runner.lastLaunch.resumeSessionId());
+        assertNull(chats.store.get(v.id()).getFinishedAt(), "恢复后 finishedAt 应清空");
+        await("恢复后沙箱重建", () -> Files.isDirectory(sandboxRoot.resolve(v.id())));
+        service.kill(v.id());
+    }
+
+    @Test
+    void 终态无cliSessionId不可恢复_活跃态不可恢复() throws Exception {
+        // 升级前的历史 DONE 记录（无 cliSessionId）→ 409
+        ChatSessionEntity ent = new ChatSessionEntity();
+        ent.setId("legacy-done");
+        ent.setTitle("历史已完成问答");
+        ent.setStatus(SessionState.DONE.name());
+        ent.setAgentNodeId(NODE);
+        ent.setCreatedBy("tester");
+        ent.setCreatedAt(java.time.Instant.now());
+        ent.setUpdatedAt(java.time.Instant.now());
+        chats.store.put(ent.getId(), ent);
+        assertThrows(com.devmind.common.exception.DevMindException.class,
+                () -> service.resume("legacy-done"));
+
+        // 活跃态 → 409（无需恢复）
+        ChatView v = service.create(new CreateChatRequest("运行中", "", "", NODE));
+        assertThrows(com.devmind.common.exception.DevMindException.class,
+                () -> service.resume(v.id()));
+        service.kill(v.id());
     }
 
     @Test
