@@ -35,6 +35,7 @@ import type { AppNotification, NotificationChannel, NotificationPrefs } from '..
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 export default function NotificationCenter() {
   const navigate = useNavigate()
@@ -265,7 +266,7 @@ export default function NotificationCenter() {
         loading={loading}
         columns={columns}
         dataSource={items}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{ emptyText: <Empty description="暂无通知——会话事件与执行结果产生后会出现在这里。" /> }}
       />
 

@@ -29,6 +29,7 @@ import {
 import type { Integration, IntegrationInput, IntegrationTestResult } from '../types'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 const TYPE_OPTIONS = [
   { value: 'GITLAB', label: 'GitLab（代码平台）' },
@@ -250,7 +251,7 @@ export default function IntegrationsPage() {
         rowKey="id"
         loading={loading}
         dataSource={items}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{ emptyText: '还没有集成实例，点右上角「新建集成」接入 GitLab / GitHub / Jira' }}
         columns={[
           {

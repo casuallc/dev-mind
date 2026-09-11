@@ -15,6 +15,7 @@ import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
 import LogView from '../../../shared/components/LogView'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 const STATUS_COLOR: Record<BuildStatus, string> = {
   QUEUED: 'blue',
@@ -164,7 +165,7 @@ function BuildCenter({ id }: { id: string }) {
         loading={loading}
         dataSource={builds}
         columns={columns}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{
           emptyText: (
             <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>

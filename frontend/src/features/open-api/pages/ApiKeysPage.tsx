@@ -21,6 +21,7 @@ import type { ApiKey, IssuedKey } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 /**
  * CAP-20 后台页：API 密钥管理（仅 ADMIN）。
@@ -154,7 +155,7 @@ export default function ApiKeysPage() {
         loading={loading}
         columns={columns}
         dataSource={keys}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{
           emptyText: (
             <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>

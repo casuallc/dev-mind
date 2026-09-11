@@ -8,6 +8,7 @@ import { listProjects } from '../../projects/api'
 import { createTemplate, deleteTemplate, listTemplates, updateTemplate } from '../api'
 import type { TemplateInput, TemplateView } from '../types'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 const CAPABILITIES = ['build', 'deploy', 'release', 'test', 'logs', 'exec']
 
@@ -153,7 +154,7 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
         loading={loading}
         columns={columns}
         dataSource={templates}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{ emptyText: '暂无模板。点击右上角「新建模板」登记——构建/部署/发版等执行器只允许使用白名单内的模板。' }}
       />
 

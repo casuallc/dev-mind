@@ -25,6 +25,7 @@ import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 // 活跃在前 + 创建时间倒序（与 SessionListPane 一致，用于自动选中第一个）
 function sortForBoard(list: SessionSummary[]): SessionSummary[] {
@@ -354,7 +355,7 @@ export default function SessionsBoard() {
             loading={loading}
             columns={columns}
             dataSource={listFiltered}
-            pagination={false}
+            pagination={LIST_PAGINATION}
             locale={{ emptyText: '暂无会话。切到「对话」视图点「新对话」创建第一个。' }}
           />
         </div>

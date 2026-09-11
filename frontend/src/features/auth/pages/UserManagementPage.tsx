@@ -6,6 +6,7 @@ import { getUserSnapshot } from '../authStore'
 import type { AuthUser } from '../types'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 /** CAP-01 后台页：用户管理（仅 ADMIN，由 RequireAdmin 路由守卫保证）。 */
 export default function UserManagementPage() {
@@ -100,7 +101,7 @@ export default function UserManagementPage() {
         rowKey="id"
         loading={loading}
         dataSource={users}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{ emptyText: '暂无用户，点击右上角「新建用户」创建第一个账号' }}
         columns={[
           { title: '用户名', dataIndex: 'username' },

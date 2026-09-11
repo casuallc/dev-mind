@@ -9,6 +9,7 @@ import { getDoc } from '../../../docs/api'
 import type { Design, DesignStatus } from '../../types'
 import { fmtTime } from '../../../../shared/utils/format'
 import { showError } from '../../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../../shared/utils/table'
 
 function designStatusColor(s: DesignStatus): string {
   switch (s) {
@@ -120,7 +121,7 @@ export default function DesignsTab({ projectId, requirementId }: {
         </Typography.Text>
         <Button size="small" icon={<ReloadOutlined />} onClick={load} loading={loading} />
       </Space>
-      <Table rowKey="id" size="small" columns={columns} dataSource={designs} loading={loading} pagination={false} />
+      <Table rowKey="id" size="small" columns={columns} dataSource={designs} loading={loading} pagination={LIST_PAGINATION} />
       <Modal
         title={preview?.title}
         open={!!preview}

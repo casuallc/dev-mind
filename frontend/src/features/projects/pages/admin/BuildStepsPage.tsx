@@ -27,6 +27,7 @@ import {
 } from '../../api'
 import type { BuildStep, BuildStepInput } from '../../types'
 import { showError } from '../../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../../shared/utils/table'
 
 const LOCATION_OPTIONS = ['LOCAL', 'AGENT']
 
@@ -149,7 +150,7 @@ export default function BuildStepsPage() {
         columns={columns}
         dataSource={steps}
         loading={loading}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{ emptyText: '暂无构建步骤。点击「添加步骤」创建第一个。' }}
       />
       <Modal title={editing ? '编辑构建步骤' : '添加构建步骤'} open={open} onCancel={() => setOpen(false)}

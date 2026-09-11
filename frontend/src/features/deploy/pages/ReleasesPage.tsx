@@ -29,6 +29,7 @@ import { STATUS_COLOR } from '../constants'
 import ReleaseDetailDrawer from '../components/ReleaseDetailDrawer'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 interface CreateValues {
   buildId?: number
@@ -132,7 +133,7 @@ function ReleaseCenter({ id }: { id: string }) {
       <Typography.Paragraph type="secondary">
         发版执行器（CAP-11）：把构建制品推送 Nexus 并打版本 tag；点「管理」开 Drawer 看实时日志并执行/回滚。发版配置在项目设置「发版配置」Tab 维护。
       </Typography.Paragraph>
-      <Table rowKey="id" columns={columns} dataSource={rows} pagination={false}
+      <Table rowKey="id" columns={columns} dataSource={rows} pagination={LIST_PAGINATION}
         locale={{
           emptyText: '暂无发版记录。先在项目设置保存发版配置，再点「新建发版」创建并执行第一个发版。',
         }}

@@ -41,6 +41,7 @@ import type { KnowledgeEntry, KnowledgeEntryInput, KnowledgeProposal, PreviewRes
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 const scopeTag = (s: string) => (s === 'global' ? <Tag color="blue">global</Tag> : <Tag>project</Tag>)
 const statusTag = (s: string) =>
@@ -369,7 +370,7 @@ export default function KnowledgeBase() {
             loading={entriesLoading}
             columns={entryColumns}
             dataSource={entries}
-            pagination={false}
+            pagination={LIST_PAGINATION}
             locale={{
               emptyText: (
                 <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
@@ -400,7 +401,7 @@ export default function KnowledgeBase() {
             loading={proposalsLoading}
             columns={proposalColumns}
             dataSource={proposals}
-            pagination={false}
+            pagination={LIST_PAGINATION}
             locale={{
               emptyText:
                 '暂无待审核经验——在会话中点「沉淀经验」，或点击右上角「手动沉淀经验」提交一条。',

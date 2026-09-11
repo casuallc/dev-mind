@@ -14,6 +14,7 @@ import type { Project } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 const STATUS_OPTIONS = [
   { value: 'ACTIVE', label: 'ACTIVE', color: 'green' },
@@ -211,7 +212,7 @@ export default function AdminProjectsPage() {
         loading={loading}
         columns={columns}
         dataSource={projects}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{ emptyText: '暂无项目。点击「新建项目」注册一个本地 git 仓库。' }}
       />
 

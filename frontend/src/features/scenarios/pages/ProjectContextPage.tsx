@@ -9,6 +9,7 @@ import type { AssetGroup, ProjectAssetItem } from '../types'
 import { useCurrentProject } from '../../../app/useCurrentProject'
 import { pageCardBodyScrollStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 /** kind → 展示名 + 说明；数组顺序即 Segmented 视图顺序；未知 kind 用兜底配置排在最后 */
 const GROUP_META: Array<{ kind: string; title: string; hint: string }> = [
@@ -134,7 +135,7 @@ export default function ProjectContextPage() {
         loading={loading}
         columns={columns}
         dataSource={activeGroup?.items ?? []}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{ emptyText: `暂无${activeMeta.title}，可到后台管理维护。` }}
       />
     </Card>

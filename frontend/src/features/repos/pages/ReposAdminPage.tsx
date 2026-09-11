@@ -24,6 +24,7 @@ import { listIntegrations } from '../../integrations/api'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 /**
  * CAP-29 全局代码仓库登记（仅 ADMIN，/admin/repos）：平台级独立资源，项目仓库只关联不复制。
@@ -147,7 +148,7 @@ export default function ReposAdminPage() {
         rowKey="id"
         loading={loading}
         dataSource={rows}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{ emptyText: '暂无登记仓库，点击右上角「登记仓库」添加' }}
         columns={[
           { title: '名称', dataIndex: 'name', width: 160 },

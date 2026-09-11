@@ -14,6 +14,7 @@ import {
 } from '../api'
 import type { WorkItem, WorkItemInput, WorkItemStatus, WorkItemType } from '../types'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 const WI_STATUS_FLOW: WorkItemStatus[] = ['TODO', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED']
 const WI_TYPES: WorkItemType[] = ['DESIGN', 'DEVELOPMENT', 'TEST', 'DOCUMENT', 'REVIEW']
@@ -189,7 +190,7 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, lock
           新建工作单元
         </Button>
       )}
-      <Table rowKey="id" size="small" columns={columns} dataSource={workItems} pagination={false} />
+      <Table rowKey="id" size="small" columns={columns} dataSource={workItems} pagination={LIST_PAGINATION} />
 
       <Modal title={editing ? `编辑工作单元 ${editing.code}` : '新建工作单元'} open={editOpen}
         onCancel={() => setEditOpen(false)} onOk={() => form.submit()} okText="保存" width={560}>

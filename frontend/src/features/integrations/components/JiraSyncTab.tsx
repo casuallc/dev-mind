@@ -36,6 +36,7 @@ import {
 import type { ExternalProject, Integration, JiraSyncConfig, JiraSyncConfigInput, JiraSyncPreview } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 interface Props {
   projectId: string
@@ -242,7 +243,7 @@ export default function JiraSyncTab({ projectId }: Props) {
         rowKey="id"
         loading={loading}
         dataSource={configs}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{
           emptyText:
             jiraIntegrations.length === 0

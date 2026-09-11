@@ -39,6 +39,7 @@ import { attachmentRawUrl } from '../../../shared/attachments/url'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`
@@ -325,7 +326,7 @@ export default function AttachmentsPage() {
         loading={loading}
         columns={columns}
         dataSource={rows}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{
           emptyText: (
             <span>

@@ -30,6 +30,7 @@ import type { DocInput, DocKind, DocMeta, DocStatus, DocTemplate } from '../type
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 const kindTag = (k: DocKind) => <Tag color={k === 'requirement' ? 'blue' : k === 'design' ? 'geekblue' : k === 'api-suite' ? 'purple' : 'cyan'}>{KIND_LABEL[k] ?? k}</Tag>
 const statusTag = (s: DocStatus) => (
@@ -197,7 +198,7 @@ export default function DocsPage() {
         loading={loading}
         columns={columns}
         dataSource={docs}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{
           emptyText: (
             <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>

@@ -12,6 +12,7 @@ import type { PlatformAccount } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 const TYPE_COLOR: Record<string, string> = { GITLAB: 'orange', GITHUB: 'default', JIRA: 'blue' }
 const TYPE_LABEL: Record<string, string> = { GITLAB: 'GitLab', GITHUB: 'GitHub', JIRA: 'Jira' }
@@ -132,7 +133,7 @@ export default function PlatformAccountsPage() {
         rowKey="integrationId"
         loading={loading}
         dataSource={items}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{ emptyText: '暂无已启用的平台实例，请联系管理员在后台「平台集成」登记 GitLab / GitHub / Jira' }}
         columns={[
           {

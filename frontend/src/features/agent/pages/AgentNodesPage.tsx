@@ -47,6 +47,7 @@ import { buildLinuxInstallScript, buildWindowsInstallScript, downloadTextFile } 
 import { fmtTime, fmtBytes } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 const statusColor: Record<string, string> = {
   ONLINE: 'green',
@@ -307,7 +308,7 @@ export default function AgentNodesPage() {
             loading={loading}
             columns={columns}
             dataSource={nodes}
-            pagination={false}
+            pagination={LIST_PAGINATION}
             locale={{
               emptyText: (
                 <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>

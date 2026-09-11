@@ -34,6 +34,7 @@ import { listAgentNodes } from '../../agent/api'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardBodyScrollStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 const SOURCE_LABEL: Record<string, string> = {
   scenario: '场景绑定',
@@ -258,7 +259,7 @@ export default function ScenariosPage() {
         loading={loading}
         columns={columns}
         dataSource={rows}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{ emptyText: '暂无场景。点击右上角「新建场景」创建第一个。' }}
       />
 

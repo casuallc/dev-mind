@@ -23,6 +23,7 @@ import { listAgentNodes } from '../../../agent/api'
 import type { AgentNode } from '../../../agent/types'
 import { envColor } from '../../components/utils'
 import { showError } from '../../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../../shared/utils/table'
 
 const ENV_NAME_OPTIONS = ['DEV', 'TEST', 'STAGING', 'PROD']
 
@@ -184,7 +185,7 @@ export default function ProjectEnvironmentsPage() {
         columns={columns}
         dataSource={environments}
         loading={loading}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{ emptyText: '暂无环境。点击「添加环境」创建第一个。' }}
       />
       <Modal title={editing ? `编辑环境 ${editing.name}` : '添加环境'} open={open} onCancel={() => setOpen(false)}

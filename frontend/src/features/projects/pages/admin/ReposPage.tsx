@@ -28,6 +28,7 @@ import CloneLogDrawer, { CLONE_STATUS_COLOR } from '../../components/CloneLogDra
 import CloneAuthHint from '../../components/CloneAuthHint'
 import { useGitIntegrations } from '../../hooks/useGitIntegrations'
 import { showError } from '../../../../shared/utils/showError'
+import { LIST_PAGINATION } from '../../../../shared/utils/table'
 
 const ROLE_OPTIONS = ['CODE', 'DOCS', 'CONFIG']
 
@@ -277,7 +278,7 @@ export default function ReposPage() {
         columns={columns}
         dataSource={repos}
         loading={loading}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         locale={{ emptyText: '暂无仓库。点击「添加仓库」登记本地路径或从 Git 克隆。' }}
       />
       <Drawer title={editing ? '编辑仓库' : '添加仓库'} open={open} onClose={() => setOpen(false)}
