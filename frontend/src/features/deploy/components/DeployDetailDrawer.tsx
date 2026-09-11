@@ -22,6 +22,7 @@ import type { DeploymentRecord, DeployStep } from '../types'
 import { durationMs } from '../../../shared/utils/format'
 import { STATUS_COLOR } from '../constants'
 import { showError } from '../../../shared/utils/showError'
+import LogView from '../../../shared/components/LogView'
 
 const STEP_STATUS_COLOR: Record<string, string> = {
   PENDING: 'default',
@@ -150,7 +151,7 @@ export default function DeployDetailDrawer({ record, onClose, onChanged }: {
           </Space>
         ) : '部署详情'
       }
-      width={820}
+      width="70%"
       open={!!record}
       onClose={onClose}
     >
@@ -182,22 +183,12 @@ export default function DeployDetailDrawer({ record, onClose, onChanged }: {
           <Typography.Text strong style={{ fontSize: 13 }}>执行计划（{d.plan.length} 步）</Typography.Text>
           <Table<DeployStep> rowKey="id" size="small" columns={stepColumns} dataSource={d.steps} pagination={false} />
           <Typography.Text strong style={{ fontSize: 13 }}>日志</Typography.Text>
-          <pre
-            style={{
-              background: '#0f1115',
-              color: '#d0d7de',
-              padding: 12,
-              borderRadius: 6,
-              fontSize: 12,
-              lineHeight: 1.6,
-              maxHeight: 'calc(100vh - 420px)',
-              overflow: 'auto',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-all',
-            }}
-          >
-            {text || '（等待日志…）'}
-          </pre>
+          <LogView
+            key={d.id}
+            text={text}
+            downloadName={`deploy-${d.id}`}
+            maxHeight="calc(100vh - 470px)"
+          />
         </Space>
       )}
     </Drawer>
