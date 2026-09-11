@@ -27,6 +27,9 @@ export default function AuditTab({ refreshTick = 0 }: { refreshTick?: number }) 
   const [nodeId, setNodeId] = useState<number>()
   const [action, setAction] = useState<string>()
   const [rows, setRows] = useState<AuditView[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(0)
+  const [size, setSize] = useState(10)
   const [loading, setLoading] = useState(false)
   const [detail, setDetail] = useState<AuditView | null>(null)
 
@@ -38,13 +41,15 @@ export default function AuditTab({ refreshTick = 0 }: { refreshTick?: number }) 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setRows(await listAudit({ projectId, nodeId, action }))
+      const r = await listAudit({ projectId, nodeId, action, page, size })
+      setRows(r.items)
+      setTotal(r.total)
     } catch {
       // 无记录时不阻塞
     } finally {
       setLoading(false)
     }
-  }, [projectId, nodeId, action])
+  }, [projectId, nodeId, action, page, size])
 
   useEffect(() => { load() }, [load, refreshTick]) // refreshTick：外壳 extra「刷新」
 
@@ -84,17 +89,17 @@ export default function AuditTab({ refreshTick = 0 }: { refreshTick?: number }) 
       <Space>
         <Select
           allowClear placeholder="项目" style={{ width: 180 }}
-          value={projectId} onChange={(v) => { setProjectId(v); setNodeId(undefined) }}
+          value={projectId} onChange={(v) => { setProjectId(v); setNodeId(undefined); setPage(0) }}
           options={projects.map((p) => ({ label: `${p.name} (${p.id})`, value: p.id }))}
         />
         <Select
           allowClear placeholder="节点" style={{ width: 220 }}
-          value={nodeId} onChange={setNodeId}
+          value={nodeId} onChange={(v) => { setNodeId(v); setPage(0) }}
           options={nodes.map((n) => ({ label: `${n.name}${n.status !== 'ONLINE' ? '（离线）' : ''}`, value: n.id }))}
         />
         <Select
           allowClear placeholder="动作" style={{ width: 140 }}
-          value={action} onChange={setAction}
+          value={action} onChange={(v) => { setAction(v); setPage(0) }}
           options={ACTIONS.map((a) => ({ label: ACTION_LABEL[a] ?? a, value: a }))}
         />
       </Space>
@@ -103,7 +108,17 @@ export default function AuditTab({ refreshTick = 0 }: { refreshTick?: number }) 
         loading={loading}
         columns={columns}
         dataSource={rows}
-        pagination={false}
+        pagination={{
+          current: page + 1,
+          pageSize: size,
+          total,
+          showSizeChanger: true,
+          showTotal: (t) => `共 ${t} 条`,
+          onChange: (p, s) => {
+            setPage(s !== size ? 0 : p - 1)
+            setSize(s)
+          },
+        }}
         locale={{ emptyText: '暂无审计记录。构建/部署/发版/健康检查等经 exec 帧下发节点执行后自动留痕。' }}
       />
 

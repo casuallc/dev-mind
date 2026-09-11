@@ -10,12 +10,21 @@ export const createTemplate = (input: TemplateInput) => api.post<TemplateView>('
 export const updateTemplate = (id: number, input: TemplateInput) => api.put<TemplateView>(`/script-templates/${id}`, input)
 export const deleteTemplate = (id: number) => api.del(`/script-templates/${id}`)
 
-// ---- 执行审计（nodeId 对应 audit_logs.server_id 列，存 agent_nodes 数值 id） ----
-export const listAudit = (params: { projectId?: string; nodeId?: number; action?: string; limit?: number } = {}) => {
+// ---- 执行审计（nodeId 对应 audit_logs.server_id 列，存 agent_nodes 数值 id；服务端真分页，page 从 0 起） ----
+/** 审计分页响应（对应后端 PageView） */
+export interface AuditPage {
+  items: AuditView[]
+  total: number
+  page: number
+  size: number
+}
+
+export const listAudit = (params: { projectId?: string; nodeId?: number; action?: string; page?: number; size?: number } = {}) => {
   const q = new URLSearchParams()
   if (params.projectId) q.set('projectId', params.projectId)
   if (params.nodeId != null) q.set('serverId', String(params.nodeId))
   if (params.action) q.set('action', params.action)
-  q.set('limit', String(params.limit ?? 100))
-  return api.get<AuditView[]>(`/audit-logs?${q.toString()}`)
+  q.set('page', String(params.page ?? 0))
+  q.set('size', String(params.size ?? 10))
+  return api.get<AuditPage>(`/audit-logs?${q.toString()}`)
 }
