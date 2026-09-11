@@ -151,6 +151,26 @@ public class ReportService {
         return DailyReportView.of(saved);
     }
 
+    /**
+     * 手动创建空白日报草稿（不经 AI、不要求素材）。幂等：已存在直接返回，
+     * 不覆盖任何已有内容与状态（含 CONFIRMED）。
+     */
+    public DailyReportView createDaily(String username, LocalDate date) {
+        DailyReportEntity existing = dailyRepo.findByUserIdAndWorkDate(username, date).orElse(null);
+        if (existing != null) {
+            return DailyReportView.of(existing);
+        }
+        DailyReportEntity e = new DailyReportEntity();
+        e.setUserId(username);
+        e.setWorkDate(date);
+        e.setContentMd("");
+        e.setStatus(DailyReportEntity.STATUS_DRAFT);
+        Instant now = Instant.now();
+        e.setCreatedAt(now);
+        e.setUpdatedAt(now);
+        return DailyReportView.of(dailyRepo.save(e));
+    }
+
     @Transactional
     public DailyReportView updateDaily(Long id, String username, UpdateDailyRequest req) {
         DailyReportEntity e = dailyRepo.findByIdAndUserId(id, username)
@@ -247,6 +267,26 @@ public class ReportService {
                 username + " 的 " + weekStart + " 周周报草稿已生成", "WEEKLY_REPORT",
                 String.valueOf(saved.getId()), null));
         return WeeklyReportView.of(saved);
+    }
+
+    /**
+     * 手动创建空白周报草稿（不经 AI、不要求素材）。幂等：同 {@link #createDaily}。
+     */
+    public WeeklyReportView createWeekly(String username, LocalDate weekStart) {
+        WeeklyReportEntity existing = weeklyRepo.findByUserIdAndWeekStart(username, weekStart).orElse(null);
+        if (existing != null) {
+            return WeeklyReportView.of(existing);
+        }
+        WeeklyReportEntity e = new WeeklyReportEntity();
+        e.setUserId(username);
+        e.setWeekStart(weekStart);
+        e.setSummaryMd("");
+        e.setNextPlanMd("");
+        e.setStatus(WeeklyReportEntity.STATUS_DRAFT);
+        Instant now = Instant.now();
+        e.setCreatedAt(now);
+        e.setUpdatedAt(now);
+        return WeeklyReportView.of(weeklyRepo.save(e));
     }
 
     @Transactional

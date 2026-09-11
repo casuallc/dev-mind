@@ -17,7 +17,9 @@ import { PlusOutlined, ReloadOutlined, SettingOutlined, GithubOutlined, CodeOutl
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  createDaily,
   createEntry,
+  createWeekly,
   deleteEntry,
   generateDaily,
   generateWeekly,
@@ -240,6 +242,17 @@ export default function WorklogPage() {
       setGenerating(false)
       reload()
     }
+  }
+
+  // 手动创建空白草稿（不经 AI）：创建后进入编辑态，保存/确认与 AI 草稿同一路径
+  const onCreateDaily = async () => {
+    const r = await createDaily(dayStr)
+    setDailyWeek((m) => ({ ...m, [dayStr]: r }))
+  }
+  const onCreateWeekly = async () => {
+    const r = await createWeekly(weekStartStr)
+    setWeekly(r)
+    setRecentWeeks((m) => ({ ...m, [weekStartStr]: r }))
   }
 
   const onSaveEntry = async (payload: EntryPayload) => {
@@ -518,7 +531,7 @@ export default function WorklogPage() {
       {view === 'daily' && (
         <>
           <Typography.Paragraph type="secondary">
-            按周浏览日报（周一至周日），在周日条上左右滑动或点两侧箭头切换上一周/下一周，点某天查看/编辑；AI 汇总当日条目与 git 提交生成草稿，人工修订后「确认定稿」（已确认不可再重新生成）。
+            按周浏览日报（周一至周日），在周日条上左右滑动或点两侧箭头切换上一周/下一周，点某天查看/编辑；可「手动填写」直接写，或由 AI 汇总当日条目与 git 提交生成草稿，人工修订后「确认定稿」（已确认不可再重新生成）。
           </Typography.Paragraph>
           <WeekDayStrip
             weekStart={dailyWeekStart}
@@ -549,6 +562,7 @@ export default function WorklogPage() {
             updatedAt={daily?.updatedAt}
             generating={generating}
             fields={[{ key: 'contentMd', label: `日报内容（${dayStr}，Markdown）`, value: daily?.contentMd ?? '' }]}
+            onCreateManual={onCreateDaily}
             onGenerate={(force) => onGenerate('daily', force)}
             onSave={async (values) => {
               if (daily) {
@@ -569,7 +583,7 @@ export default function WorklogPage() {
       {view === 'weekly' && (
         <>
           <Typography.Paragraph type="secondary">
-            点下方周条切换周，左右滑动或点两侧箭头整页翻看更早的 7 周；AI 汇总该周（周一 {weekStartStr} 起）条目与日报，产出「上周总结 + 下周计划」草稿；人工修订后确认定稿。
+            点下方周条切换周，左右滑动或点两侧箭头整页翻看更早的 7 周；可「手动填写」直接写，或由 AI 汇总该周（周一 {weekStartStr} 起）条目与日报产出「上周总结 + 下周计划」草稿；人工修订后确认定稿。
           </Typography.Paragraph>
           <RecentWeekStrip
             reports={recentWeeks}
@@ -588,6 +602,7 @@ export default function WorklogPage() {
               { key: 'summaryMd', label: `周总结（${weekStartStr} 周，Markdown）`, value: weekly?.summaryMd ?? '' },
               { key: 'nextPlanMd', label: '下周计划（Markdown）', value: weekly?.nextPlanMd ?? '' },
             ]}
+            onCreateManual={onCreateWeekly}
             onGenerate={(force) => onGenerate('weekly', force)}
             onSave={async (values) => {
               if (weekly) {

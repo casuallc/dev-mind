@@ -1,5 +1,5 @@
 import { Button, Empty, Input, Space, Tag, Typography, message } from 'antd'
-import { RobotOutlined, CheckOutlined } from '@ant-design/icons'
+import { RobotOutlined, CheckOutlined, EditOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { fmtTime } from '../../../shared/utils/format'
 import Markdown from '../../../shared/components/Markdown'
@@ -13,6 +13,8 @@ interface Props {
   /** 编辑字段：日报单段 contentMd；周报两段 summaryMd/nextPlanMd */
   fields: { key: string; label: string; value: string }[]
   generating: boolean
+  /** 手动创建空白草稿（不经 AI），创建后进入编辑态 */
+  onCreateManual: () => Promise<void>
   /** 触发 AI 生成（已存在且已确认由后端 409 拦截） */
   onGenerate: (force: boolean) => void
   onSave: (values: Record<string, string>) => Promise<void>
@@ -20,7 +22,7 @@ interface Props {
 }
 
 /**
- * CAP-28 报告编辑卡：AI 草稿 → 人工修订 → 确认。
+ * CAP-28 报告编辑卡：空白手填 / AI 草稿 → 人工修订 → 确认。
  * 编辑态：左编辑右预览，Markdown 实时渲染；CONFIRMED 后只读 Markdown 渲染（白底，非禁用灰框）。
  */
 export default function ReportEditor({
@@ -29,12 +31,14 @@ export default function ReportEditor({
   updatedAt,
   fields,
   generating,
+  onCreateManual,
   onGenerate,
   onSave,
   onConfirm,
 }: Props) {
   const [values, setValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
+  const [creating, setCreating] = useState(false)
   const confirmed = status === 'CONFIRMED'
 
   useEffect(() => {
@@ -60,12 +64,31 @@ export default function ReportEditor({
   if (!id) {
     return (
       <Empty
-        description="还没有报告：点击「AI 生成」根据当天/当周工作条目与 git 提交生成草稿"
+        description="还没有报告：可「手动填写」直接写，或点「AI 生成」根据当天/当周工作条目与 git 提交生成草稿"
         style={{ padding: '48px 0' }}
       >
-        <Button type="primary" icon={<RobotOutlined />} loading={generating} onClick={() => onGenerate(false)}>
-          AI 生成
-        </Button>
+        <Space>
+          <Button
+            type="primary"
+            icon={<EditOutlined />}
+            loading={creating}
+            onClick={async () => {
+              setCreating(true)
+              try {
+                await onCreateManual()
+              } catch (e) {
+                showError(e, '创建失败')
+              } finally {
+                setCreating(false)
+              }
+            }}
+          >
+            手动填写
+          </Button>
+          <Button icon={<RobotOutlined />} loading={generating} onClick={() => onGenerate(false)}>
+            AI 生成
+          </Button>
+        </Space>
       </Empty>
     )
   }

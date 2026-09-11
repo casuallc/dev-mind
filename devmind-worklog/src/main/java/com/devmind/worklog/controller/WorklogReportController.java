@@ -3,6 +3,8 @@ package com.devmind.worklog.controller;
 import com.devmind.auth.IdentityService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.worklog.dto.CreateDailyRequest;
+import com.devmind.worklog.dto.CreateWeeklyRequest;
 import com.devmind.worklog.dto.DailyReportView;
 import com.devmind.worklog.dto.GenerateDailyRequest;
 import com.devmind.worklog.dto.GenerateWeeklyRequest;
@@ -27,7 +29,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * CAP-28 FR-05/06：日报/周报查询、手动触发生成（异步，前端轮询 GET 取草稿）、编辑确认。
+ * CAP-28 FR-05/06：日报/周报查询、手动创建空白草稿、AI 触发生成（异步，前端轮询 GET 取草稿）、编辑确认。
  */
 @RestController
 @RequestMapping("/api/worklog")
@@ -80,6 +82,15 @@ public class WorklogReportController {
         return Map.of("accepted", Boolean.TRUE, "running", scheduler.isRunning());
     }
 
+    /**
+     * 手动创建空白日报草稿（不经 AI、不要求素材）：已存在幂等返回。
+     * 返回的 DRAFT 走 PUT /daily/{id} 编辑、确认，与 AI 草稿同一生命周期。
+     */
+    @PostMapping("/daily")
+    public DailyReportView createDaily(@Valid @RequestBody CreateDailyRequest req) {
+        return reportService.createDaily(identity.currentActor(), req.date());
+    }
+
     @PutMapping("/daily/{id}")
     public DailyReportView updateDaily(@PathVariable Long id,
                                        @Valid @RequestBody UpdateDailyRequest req) {
@@ -110,6 +121,12 @@ public class WorklogReportController {
             throw new DevMindException(ErrorCode.CONFLICT, "已有报告生成任务在跑，请稍后");
         }
         return Map.of("accepted", Boolean.TRUE, "running", scheduler.isRunning());
+    }
+
+    /** 手动创建空白周报草稿：同 POST /daily，幂等。 */
+    @PostMapping("/weekly")
+    public WeeklyReportView createWeekly(@Valid @RequestBody CreateWeeklyRequest req) {
+        return reportService.createWeekly(identity.currentActor(), req.weekStart());
     }
 
     @PutMapping("/weekly/{id}")

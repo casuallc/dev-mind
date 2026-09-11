@@ -40,6 +40,7 @@ export const getDaily = (date: string) => api.get<DailyReport | undefined>(`/wor
 /** 某周（weekStart=周一）7 天内有报告的日报，日期升序；日报周视图的周日选择条用 */
 export const listDailyWeek = (weekStart: string) =>
   api.get<DailyReport[]>(`/worklog/daily/week?weekStart=${weekStart}`)
+export const createDaily = (date: string) => api.post<DailyReport>('/worklog/daily', { date })
 export const generateDaily = (date: string, force = false) =>
   api.post<GenerateAck>('/worklog/daily/generate', { date, force })
 export const updateDaily = (id: number, body: { contentMd?: string; status?: string }) =>
@@ -50,6 +51,7 @@ export const getWeekly = (weekStart: string) =>
 /** 最近 weeks 个周（含本周）有报告的周报，新周在前；周报视图的最近周选择条用 */
 export const listWeeklyRecent = (weeks = 7) =>
   api.get<WeeklyReport[]>(`/worklog/weekly/recent?weeks=${weeks}`)
+export const createWeekly = (weekStart: string) => api.post<WeeklyReport>('/worklog/weekly', { weekStart })
 export const generateWeekly = (weekStart: string, force = false) =>
   api.post<GenerateAck>('/worklog/weekly/generate', { weekStart, force })
 export const updateWeekly = (id: number, body: { summaryMd?: string; nextPlanMd?: string; status?: string }) =>
