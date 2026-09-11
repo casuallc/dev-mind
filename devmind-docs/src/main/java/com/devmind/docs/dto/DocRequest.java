@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * 文档创建请求（FR-01/FR-07）。
  *
- * @param kind          requirement | design | api-suite | report
+ * @param kind          requirement | design | analysis | api-suite | report
  * @param requirementId 关联需求（CAP-13 主线，可为空）
  * @param workItemId    关联工作单元（CAP-13 主线，可为空）
  * @param projectId     归属项目（可为空，存在时校验）

@@ -103,6 +103,12 @@ public class DocumentService {
                 .map(DocViews::version).toList();
     }
 
+    /** CAP-37：需求下某 kind 最新一份文档的详情（含 contentMd），流程引擎注入下游会话 spec 用。 */
+    public java.util.Optional<DocDetail> findLatestByKind(String requirementId, String kind) {
+        return docRepo.findFirstByRequirementIdAndKindOrderByCreatedAtDesc(requirementId, kind)
+                .map(e -> get(e.getId(), null));
+    }
+
     // ---------------- 创建 / 保存版本 ----------------
 
     @Transactional

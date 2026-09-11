@@ -17,5 +17,8 @@ public interface DocumentRepository extends JpaRepository<DocumentEntity, Long> 
     /** P0-6：按任务聚合文档（任务主线视图） */
     List<DocumentEntity> findByRequirementIdOrderByCreatedAtDesc(String requirementId);
 
+    /** CAP-37：需求下某 kind 最新一份（流程引擎取分析产出注入下游会话） */
+    java.util.Optional<DocumentEntity> findFirstByRequirementIdAndKindOrderByCreatedAtDesc(String requirementId, String kind);
+
     List<DocumentEntity> findByWorkItemIdOrderByCreatedAtDesc(String workItemId);
 }
