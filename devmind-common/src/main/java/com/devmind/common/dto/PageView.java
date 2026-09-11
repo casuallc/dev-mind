@@ -1,4 +1,4 @@
-package com.devmind.project.dto;
+package com.devmind.common.dto;
 
 import java.util.List;
 

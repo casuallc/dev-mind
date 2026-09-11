@@ -4,7 +4,7 @@ import com.devmind.auth.IdentityService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.project.ProjectService;
-import com.devmind.project.dto.PageView;
+import com.devmind.common.dto.PageView;
 import com.devmind.skill.dto.SkillDetailView;
 import com.devmind.skill.dto.SkillFileContentView;
 import com.devmind.skill.dto.SkillFileRequest;

@@ -4,7 +4,7 @@ import com.devmind.auth.IdentityService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.project.dto.JiraManagedFields;
-import com.devmind.project.dto.PageView;
+import com.devmind.common.dto.PageView;
 import com.devmind.project.dto.RequirementRequest;
 import com.devmind.project.dto.RequirementView;
 import com.devmind.project.model.RequirementEntity;

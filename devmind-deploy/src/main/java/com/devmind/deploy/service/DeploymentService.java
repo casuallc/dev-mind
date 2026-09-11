@@ -50,7 +50,7 @@ import com.devmind.notification.model.NotificationLevel;
 import com.devmind.notification.service.NotificationService;
 import com.devmind.project.EnvironmentService;
 import com.devmind.project.ProjectService;
-import com.devmind.project.dto.PageView;
+import com.devmind.common.dto.PageView;
 import com.devmind.project.model.EnvironmentEntity;
 
 /**

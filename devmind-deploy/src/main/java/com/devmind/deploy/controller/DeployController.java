@@ -16,7 +16,7 @@ import com.devmind.deploy.dto.DeployConfigView;
 import com.devmind.deploy.dto.DeploymentView;
 import com.devmind.deploy.service.DeployConfigService;
 import com.devmind.deploy.service.DeploymentService;
-import com.devmind.project.dto.PageView;
+import com.devmind.common.dto.PageView;
 
 /**
  * CAP-09 REST：部署计划配置（FR-01）、创建/详情/执行/确认/回滚（FR-03/04/05/07）、历史、全量日志。

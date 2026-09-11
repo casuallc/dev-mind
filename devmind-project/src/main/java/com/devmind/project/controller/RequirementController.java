@@ -1,7 +1,7 @@
 package com.devmind.project.controller;
 
 import com.devmind.project.RequirementService;
-import com.devmind.project.dto.PageView;
+import com.devmind.common.dto.PageView;
 import com.devmind.project.dto.RequirementRequest;
 import com.devmind.project.dto.RequirementView;
 import com.devmind.project.dto.StatusRequest;

@@ -2,7 +2,7 @@ package com.devmind.skill.controller;
 
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
-import com.devmind.project.dto.PageView;
+import com.devmind.common.dto.PageView;
 import com.devmind.skill.SkillService;
 import com.devmind.skill.dto.SkillDetailView;
 import com.devmind.skill.dto.SkillFileContentView;
