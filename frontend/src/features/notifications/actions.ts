@@ -30,7 +30,10 @@ function viewPath(n: AppNotification): string | null {
     case 'SESSION':
       return `/sessions/${n.entityId}`
     case 'REQUIREMENT':
-      return n.projectId ? `/projects/${n.projectId}/requirements/${n.entityId}` : null
+      // 流程通知（flow.*：分析/方案/拆分就绪）直达详情页「流程」Tab（CAP-37 FR-04）
+      return n.projectId
+        ? `/projects/${n.projectId}/requirements/${n.entityId}${n.eventType.startsWith('flow.') ? '?tab=flow' : ''}`
+        : null
     case 'JIRA_SYNC':
       return n.projectId ? `/admin/projects/${n.projectId}/jira` : '/admin/integrations'
     case 'BUILD':
