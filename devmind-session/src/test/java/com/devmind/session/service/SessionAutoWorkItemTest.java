@@ -65,7 +65,7 @@ class SessionAutoWorkItemTest {
     void setUp() {
         workItemService = new FakeWorkItemService();
         service = new SessionManagerService(null, null, workItemService, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     private static RequirementEntity requirement(String status) {

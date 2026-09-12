@@ -72,7 +72,7 @@ class SessionManagerReconcileTest {
         return new SessionManagerService(null, null, null, null, null, null, null,
                 e -> { }, new DomainEventPublisher(published::add),
                 repo, eventRepo, null, null, saver, props, JsonMapper.builder().build(),
-                connectorProvider, null, null, null, null);
+                connectorProvider, null, null, null, null, null);
     }
 
     @Test

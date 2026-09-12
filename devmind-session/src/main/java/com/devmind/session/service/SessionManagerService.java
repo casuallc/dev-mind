@@ -3,6 +3,7 @@ package com.devmind.session.service;
 import com.devmind.common.agent.AgentEventFrame;
 import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.AgentNodeConnector;
+import com.devmind.common.agent.AgentCollectResult;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
@@ -24,6 +25,9 @@ import com.devmind.project.dto.WorkItemRequest;
 import com.devmind.project.dto.WorkItemView;
 import com.devmind.project.ProjectService;import com.devmind.session.config.SessionProperties;
 import com.devmind.session.dto.CreateSessionRequest;
+import com.devmind.session.dto.CollectResultView;
+import com.devmind.session.dto.OutputContentView;
+import com.devmind.session.dto.OutputFileView;
 import com.devmind.session.dto.RepoDiffView;
 import com.devmind.session.dto.SessionView;
 import com.devmind.session.model.SessionEntity;
@@ -101,6 +105,8 @@ public class SessionManagerService {
     private final RemoteDiffService remoteDiffService;
     /** 启动期存量清理的事务边界（@PostConstruct 不经代理，@Transactional 不生效） */
     private final PlatformTransactionManager txManager;
+    /** CAP-39：会话产出读取（runner 回传的 session_outputs） */
+    private final SessionOutputService outputService;
 
     /** 运行中会话注册表（本地/远程统一句柄）。 */
     private final Map<String, SessionHandle> runtimes = new ConcurrentHashMap<>();
@@ -125,7 +131,8 @@ public class SessionManagerService {
                                  ObjectProvider<GitIdentityProvider> gitIdentityProvider,
                                  ObjectProvider<RepoGitGateway> repoGitGateway,
                                  RemoteDiffService remoteDiffService,
-                                 PlatformTransactionManager txManager) {
+                                 PlatformTransactionManager txManager,
+                                 SessionOutputService outputService) {
         this.identityService = identityService;
         this.projectService = projectService;
         this.workItemService = workItemService;
@@ -147,6 +154,7 @@ public class SessionManagerService {
         this.repoGitGateway = repoGitGateway;
         this.remoteDiffService = remoteDiffService;
         this.txManager = txManager;
+        this.outputService = outputService;
     }
 
     private final RuntimeListener listener = new RuntimeListener() {
@@ -1090,6 +1098,59 @@ public class SessionManagerService {
                 r.noteDisconnected();
             }
         }
+    }
+
+    // ---------------- CAP-39 会话产出读取/按需回传 ----------------
+
+    /** 列出已回传的产出文件（session_outputs 落库内容，按文件名排序）。 */
+    public List<OutputFileView> listOutputs(String id) {
+        requireEntity(id);
+        return outputService.list(id).stream()
+                .map(e -> new OutputFileView(e.getFileName(),
+                        e.getContent() == null ? 0
+                                : e.getContent().getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
+                        e.getCreatedAt()))
+                .sorted(java.util.Comparator.comparing(OutputFileView::fileName))
+                .toList();
+    }
+
+    /** 读产出内容；会话/产出不存在 404。 */
+    public OutputContentView getOutputContent(String id, String fileName) {
+        requireEntity(id);
+        String content = outputService.findContent(id, fileName)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND,
+                        "产出不存在: " + fileName + "（可尝试「从节点同步」后再查看）"));
+        return new OutputContentView(fileName, content);
+    }
+
+    /**
+     * 触发 runner 即时回传产出（CAP-39 FR-01/02 collect_output 帧）。恒返回当前已存列表：
+     * 历史本机会话/节点离线/老 runner/ runner 侧失败都降级为 message 提示（前端一次调用拿到
+     * 最新列表与提示），仅会话不存在抛 404。
+     */
+    public CollectResultView collectOutputs(String id) {
+        SessionEntity ent = requireEntity(id);
+        boolean collected = false;
+        String message = null;
+        if (ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank()) {
+            message = "历史本机会话无执行节点可同步，仅展示已回传产出";
+        } else {
+            AgentNodeConnector connector = connectorProvider.getIfAvailable();
+            if (connector == null || !connector.isOnline(ent.getAgentNodeId())) {
+                message = "执行节点不在线，仅展示已回传产出";
+            } else {
+                try {
+                    AgentCollectResult ack = connector.collectOutput(ent.getAgentNodeId(), id);
+                    collected = ack.ok();
+                    if (!ack.ok()) {
+                        message = "节点未回传新产出：" + (ack.error() == null ? "未知原因" : ack.error());
+                    }
+                } catch (DevMindException e) {
+                    message = e.getMessage() + "；仅展示已回传产出";
+                }
+            }
+        }
+        return new CollectResultView(collected, message, listOutputs(id));
     }
 
     private SessionHandle requireRuntime(String id) {

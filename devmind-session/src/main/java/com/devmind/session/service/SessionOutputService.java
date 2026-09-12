@@ -50,4 +50,9 @@ public class SessionOutputService implements SessionOutputSink {
     public Optional<String> findContent(String sessionId, String fileName) {
         return repo.findBySessionIdAndFileName(sessionId, fileName).map(SessionOutputEntity::getContent);
     }
+
+    /** 列出会话全部已回传产出（CAP-39 FR-02  outputs 列表端点）。 */
+    public List<SessionOutputEntity> list(String sessionId) {
+        return repo.findBySessionId(sessionId);
+    }
 }

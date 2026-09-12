@@ -74,7 +74,7 @@ class SessionManagerResumeTest {
         return new SessionManagerService(null, null, null, null, null, null, null,
                 e -> { }, new DomainEventPublisher(new ArrayList<>()::add),
                 repo, eventRepo, null, null, saver, props, JsonMapper.builder().build(),
-                connectorProvider, null, null, null, null);
+                connectorProvider, null, null, null, null, null);
     }
 
     @Test

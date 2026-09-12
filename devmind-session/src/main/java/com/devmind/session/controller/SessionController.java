@@ -1,8 +1,11 @@
 package com.devmind.session.controller;
 
 import com.devmind.session.dto.AuthorizeRequest;
+import com.devmind.session.dto.CollectResultView;
 import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.InputRequest;
+import com.devmind.session.dto.OutputContentView;
+import com.devmind.session.dto.OutputFileView;
 import com.devmind.session.dto.RepoDiffView;
 import com.devmind.session.dto.SessionView;
 import com.devmind.common.agent.SessionEvent;
@@ -101,6 +104,24 @@ public class SessionController {
     @GetMapping(value = "/{id}/context", produces = "application/json")
     public String context(@PathVariable String id) {
         return service.contextManifest(id); // 落库的即合法 JSON 快照，原样透传
+    }
+
+    /** CAP-39 FR-02：已回传产出文件列表（runner 上传的 .devmind/output/*）。 */
+    @GetMapping("/{id}/outputs")
+    public List<OutputFileView> outputs(@PathVariable String id) {
+        return service.listOutputs(id);
+    }
+
+    /** CAP-39 FR-02：读产出内容（预览用）。 */
+    @GetMapping("/{id}/outputs/{fileName}")
+    public OutputContentView outputContent(@PathVariable String id, @PathVariable String fileName) {
+        return service.getOutputContent(id, fileName);
+    }
+
+    /** CAP-39 FR-01/02：触发 runner 即时回传产出（collect_output 帧），降级提示见 message 字段。 */
+    @PostMapping("/{id}/outputs/collect")
+    public CollectResultView collectOutputs(@PathVariable String id) {
+        return service.collectOutputs(id);
     }
 
     @DeleteMapping("/{id}")
