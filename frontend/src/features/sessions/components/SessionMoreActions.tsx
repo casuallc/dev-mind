@@ -117,7 +117,7 @@ export default function SessionMoreActions({
                   title: '类型',
                   dataIndex: 'kind',
                   width: 70,
-                  render: (k: string) => ({ knowledge: '知识', skill: 'Skill', doc: '文档' })[k] ?? k,
+                  render: (k: string) => ({ knowledge: '知识', skill: 'Skill', doc: '文档', attachment: '附件' })[k] ?? k,
                 },
                 { title: '名称', dataIndex: 'name', ellipsis: true },
                 { title: '范围', dataIndex: 'scope', width: 90, render: (s?: string) => s ?? '-' },
