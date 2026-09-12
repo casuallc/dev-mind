@@ -96,6 +96,12 @@ public class RunnerSessionRegistry {
         sendEvent(sessionId, SessionEvent.of(0, "system", content, "system"));
     }
 
+    /** CAP-39：运行中会话的工作目录（collect_output 按需回传产出用）；未注册返回 empty。 */
+    public java.util.Optional<java.nio.file.Path> sessionDirOf(String sessionId) {
+        RunnerSession s = sessions.get(sessionId);
+        return s == null ? java.util.Optional.empty() : java.util.Optional.ofNullable(s.sessionDir);
+    }
+
     /** 写一行 JSON 到会话 stdin（调用方已按 CLI 协议拼装）。 */
     public void writeStdin(String sessionId, String jsonLine) {
         RunnerSession s = sessions.get(sessionId);

@@ -204,6 +204,7 @@ public class AgentRunnerMain {
             case "finish" -> sessions.closeStdin(sessionId);
             case "kill", "suspend" -> sessions.kill(sessionId);
             case "upgrade" -> handleUpgrade(frame, config, configFile, sessions, conn);
+            case "collect_output" -> handleCollectOutput(sessionId, config, sessions, conn);
             default -> log.debug("未知指令类型: {}", type);
         }
     }
@@ -386,6 +387,31 @@ public class AgentRunnerMain {
             conn.send(Map.of("type", "launched", "sessionId", sessionId,
                     "ok", false, "error", String.valueOf(e.getMessage())));
         }
+    }
+
+    /**
+     * CAP-39：产出按需回传——对在本节点运行中的会话即时扫描 `.devmind/output/` 上传
+     * （与退出时自动回传同 OutputUploader 通道）。虚拟线程异步执行，不阻塞 WS listener
+     * （上传 HTTP 最长 60s）；上传先于 ack 同步完成，服务端 ack 后回读无竞态。
+     * 会话不在本节点运行（已退出/不认得）→ ok:false（退出时已自动回传，不视为故障）。
+     */
+    private static void handleCollectOutput(String sessionId, RunnerConfig config,
+                                            RunnerSessionRegistry sessions, ServerConnection conn) {
+        Thread.ofVirtual().name("collect-output-" + sessionId).start(() -> {
+            var dir = sessions.sessionDirOf(sessionId);
+            if (dir.isEmpty()) {
+                conn.send(Map.of("type", "output_collected", "sessionId", sessionId,
+                        "ok", false, "error", "会话不在本节点运行（退出时已自动回传产出）"));
+                return;
+            }
+            String err = OutputUploader.upload(config, sessionId, dir.get());
+            if (err != null) {
+                conn.send(Map.of("type", "output_collected", "sessionId", sessionId,
+                        "ok", false, "error", err));
+            } else {
+                conn.send(Map.of("type", "output_collected", "sessionId", sessionId, "ok", true));
+            }
+        });
     }
 
     private static String resolveVersion() {

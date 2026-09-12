@@ -83,4 +83,16 @@ public interface AgentNodeConnector {
         throw new com.devmind.common.exception.DevMindException(
                 com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
     }
+
+    /**
+     * CAP-39：下发 collect_output 帧并阻塞等 output_collected ack——runner 对在本节点运行中的
+     * 会话即时扫描 `.devmind/output/` 上传（与退出时自动回传同通道），ack 到达时产出已落库。
+     * 节点离线/协议版本不足（需 v4+）/等待超时抛 DevMindException(CONFLICT)；
+     * 会话不在本节点运行不抛，看 {@link AgentCollectResult#ok()}（退出时已自动回传）。
+     * 默认实现 = agent 模块未装配（无任何执行节点可用）。
+     */
+    default AgentCollectResult collectOutput(String nodeId, String sessionId) {
+        throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+    }
 }

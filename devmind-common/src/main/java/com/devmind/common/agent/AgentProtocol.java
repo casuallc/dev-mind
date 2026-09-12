@@ -7,15 +7,19 @@ package com.devmind.common.agent;
  * <p>版本史：v1 = CAP-21~FR-03 基线（launch/input/authorize/finish/kill/suspend/hello/heartbeat/
  * event/exit/launched/upgrade/upgrade_ack）；v2 = FR-04~08（对账/GC/版本协商/工具链标签，
  * 均为 hello 可选字段，无新下行帧）；v3 = CAP-36 exec 帧（exec/exec_log/exec_exit，
- * 构建/测试/部署/发版下发 runner 执行）。</p>
+ * 构建/测试/部署/发版下发 runner 执行）；v4 = CAP-39 collect_output 帧
+ * （collect_output/output_collected，进行中会话产出按需即时回传）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 3;
+    public static final int CURRENT = 4;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
+
+    /** CAP-39 collect_output 帧（进行中会话产出按需回传）所需最低版本 */
+    public static final int COLLECT_OUTPUT_FRAMES = 4;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;

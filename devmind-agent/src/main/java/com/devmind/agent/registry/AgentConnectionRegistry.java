@@ -6,6 +6,7 @@ import com.devmind.agent.model.AgentConnLogEntity;
 import com.devmind.agent.model.AgentNodeEntity;
 import com.devmind.agent.service.AgentConnLogService;
 import com.devmind.agent.service.AgentNodeService;
+import com.devmind.common.agent.AgentCollectResult;
 import com.devmind.common.agent.AgentEventFrame;
 import com.devmind.common.agent.AgentEventListener;
 import com.devmind.common.agent.AgentExecCommand;
@@ -59,6 +60,10 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
                               CompletableFuture<AgentExecResult> done) {
     }
 
+    /** CAP-39 collect_output 等待者：带 nodeId 供断连时批量失败。 */
+    private record CollectWaiter(String nodeId, CompletableFuture<AgentCollectResult> done) {
+    }
+
     private final AgentNodeService nodeService;
     private final AgentProperties props;
     private final ObjectMapper mapper;
@@ -77,6 +82,8 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private final Map<String, Integer> protocolVersions = new ConcurrentHashMap<>();
     /** execId → exec 等待者（CAP-36） */
     private final Map<String, ExecWaiter> pendingExecs = new ConcurrentHashMap<>();
+    /** sessionId → collect_output 等待者（CAP-39） */
+    private final Map<String, CollectWaiter> pendingCollects = new ConcurrentHashMap<>();
 
     public AgentConnectionRegistry(AgentNodeService nodeService, AgentProperties props,
                                    ObjectMapper mapper, ObjectProvider<AgentEventListener> listenerProvider,
@@ -124,6 +131,12 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         for (Map.Entry<String, ExecWaiter> e : pendingExecs.entrySet()) {
             if (e.getValue().nodeId().equals(nodeId) && pendingExecs.remove(e.getKey(), e.getValue())) {
                 e.getValue().done().complete(AgentExecResult.failed("节点断连，exec 中断"));
+            }
+        }
+        // CAP-39：断线即失败该节点进行中的产出收集（ack 不会再来）
+        for (Map.Entry<String, CollectWaiter> e : pendingCollects.entrySet()) {
+            if (e.getValue().nodeId().equals(nodeId) && pendingCollects.remove(e.getKey(), e.getValue())) {
+                e.getValue().done().complete(new AgentCollectResult(false, "节点断连，产出回传中断"));
             }
         }
         // CAP-30：事件广播（原 getIfAvailable 单实现，chat 加入后有多实现）——各 bridge
@@ -190,6 +203,14 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         ExecWaiter w = pendingExecs.get(execId);
         if (w != null && w.nodeId().equals(nodeId)) {
             w.done().complete(new AgentExecResult(code, timedOut, error));
+        }
+    }
+
+    /** CAP-39：output_collected 上行帧 → 完成等待 future。 */
+    public void onOutputCollectedAck(String sessionId, boolean ok, String error) {
+        CollectWaiter w = pendingCollects.remove(sessionId);
+        if (w != null) {
+            w.done().complete(new AgentCollectResult(ok, error));
         }
     }
 
@@ -402,6 +423,37 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             throw new DevMindException(ErrorCode.CONFLICT, "exec 下发异常: " + e.getMessage(), e);
         } finally {
             pendingExecs.remove(cmd.execId());
+        }
+    }
+
+    /**
+     * CAP-39：下发 collect_output 帧并阻塞等 output_collected ack（镜像 launch/exec 模式）。
+     * 协议门控：runner 低于 v4 直接 409 提示升级；等待上限 75s（runner 上传 HTTP 超时 60s + 余量）。
+     * runner 上传先于 ack 同步完成，调用方 ack 后回读 session_outputs 无竞态。
+     */
+    @Override
+    public AgentCollectResult collectOutput(String nodeId, String sessionId) {
+        if (!supports(nodeId, AgentProtocol.COLLECT_OUTPUT_FRAMES)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 的 runner 协议版本过低（产出即时回传需 v"
+                            + AgentProtocol.COLLECT_OUTPUT_FRAMES + "+），请到节点页升级 runner");
+        }
+        WebSocketSession ws = requireConnection(nodeId);
+        CompletableFuture<AgentCollectResult> done = new CompletableFuture<>();
+        pendingCollects.put(sessionId, new CollectWaiter(nodeId, done));
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "collect_output");
+        frame.put("sessionId", sessionId);
+        try {
+            send(ws, frame);
+            return done.get(75, TimeUnit.SECONDS);
+        } catch (DevMindException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "等待产出回传确认超时/异常: " + e.getMessage(), e);
+        } finally {
+            pendingCollects.remove(sessionId);
         }
     }
 

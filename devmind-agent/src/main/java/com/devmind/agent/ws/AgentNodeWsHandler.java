@@ -155,6 +155,9 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
             case "upgrade_ack" -> registry.onUpgradeAck(String.valueOf(node.getId()),
                     frame.path("ok").asBoolean(false), frame.path("reason").asText(null),
                     frame.path("activeSessions").asInt(0));
+            // CAP-39：产出按需回传 ack
+            case "output_collected" -> registry.onOutputCollectedAck(frame.path("sessionId").asText(""),
+                    frame.path("ok").asBoolean(false), frame.path("error").asText(null));
             default -> log.debug("未知 runner 帧类型: {}", type);
         }
     }
