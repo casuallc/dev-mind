@@ -4,7 +4,6 @@ const SELECT_PREFIXES: Array<[string, string]> = [
   ['/admin/projects', '/admin/projects'], // 列表 + 设置子路由
   ['/admin/docs', '/admin/docs'], // 列表 + 编辑器
   ['/projects/', '/requirements'], // /projects/:id/requirements/:rid → 需求
-  ['/sessions/', '/sessions'],
   ['/context', '/context'],
   ['/chats', '/chats'],
   ['/worklog', '/worklog'],

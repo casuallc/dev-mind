@@ -106,7 +106,7 @@ export default function DashboardPage() {
               renderItem={(s) => (
                 <List.Item
                   style={{ cursor: 'pointer' }}
-                  onClick={() => navigate(`/sessions/${s.id}`)}
+                  onClick={() => navigate(`/sessions?sid=${s.id}`)}
                   extra={<Tag color={SESSION_COLOR[s.status] ?? 'default'}>{s.status}</Tag>}
                 >
                   <List.Item.Meta

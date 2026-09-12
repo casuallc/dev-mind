@@ -28,7 +28,7 @@ function viewPath(n: AppNotification): string | null {
   }
   switch (n.entityType) {
     case 'SESSION':
-      return `/sessions/${n.entityId}`
+      return `/sessions?sid=${n.entityId}`
     case 'REQUIREMENT':
       // 流程通知（flow.*）直达详情页对应阶段 Tab（CAP-38：分析/方案/工作单元独立 Tab）
       return n.projectId

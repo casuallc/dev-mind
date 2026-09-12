@@ -1,6 +1,13 @@
 // 会话能力（CAP-05）的接口封装：页面只依赖本文件，不直接碰 shared client
 import { api } from '../../shared/api/client'
 import type { RepoDiffView, SessionSummary, SessionEvent } from './types'
+import type {
+  CollectOutputsResult,
+  PublishOutputRequest,
+  PublishOutputResult,
+  SessionOutputContent,
+  SessionOutputFile,
+} from './types'
 
 // CAP-31：会话归属当前项目——projectId 为首参（工作台在 ProjectContextGate 内，必有当前项目）
 export function listSessions(
@@ -85,4 +92,24 @@ export function removeWorktree(id: string): Promise<void> {
 
 export function deleteSession(id: string): Promise<void> {
   return api.del(`/sessions/${id}`)
+}
+
+// ---------------- CAP-39 会话产出（.devmind/output 回传） ----------------
+
+export function listSessionOutputs(id: string): Promise<SessionOutputFile[]> {
+  return api.get<SessionOutputFile[]>(`/sessions/${id}/outputs`)
+}
+
+export function getSessionOutput(id: string, fileName: string): Promise<SessionOutputContent> {
+  return api.get<SessionOutputContent>(`/sessions/${id}/outputs/${encodeURIComponent(fileName)}`)
+}
+
+/** 触发 runner 即时回传产出（协议 v4 collect_output）；降级提示在返回体 message。 */
+export function collectSessionOutputs(id: string): Promise<CollectOutputsResult> {
+  return api.post<CollectOutputsResult>(`/sessions/${id}/outputs/collect`)
+}
+
+/** 推送产出为关联需求文档（create 新建 / update 目标文档新版本；design 同步落 Design 记录）。 */
+export function publishSessionOutput(id: string, body: PublishOutputRequest): Promise<PublishOutputResult> {
+  return api.post<PublishOutputResult>(`/sessions/${id}/outputs/publish`, body)
 }

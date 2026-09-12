@@ -1,5 +1,5 @@
 // 需求详情页「关联记录」Tab：7 类只读记录（文档/会话/构建/测试/部署/发版/产物）合并为一个类型筛选 + 表格。
-// 会话行可点击跳 /sessions/:id；其余类型无详情路由，保持只读。
+// 会话行可点击跳 /sessions?sid=（CAP-39 详情页裁撤，工作台按参数选中）；其余类型无详情路由，保持只读。
 import { useState, type ReactNode } from 'react'
 import { Select, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -113,7 +113,7 @@ export default function RelatedRecordsTab({ overview }: { overview: RequirementO
         columns={sessionColumns}
         dataSource={o.sessions}
         pagination={false}
-        onRow={(s) => ({ onClick: () => navigate(`/sessions/${s.id}`), style: { cursor: 'pointer' } })}
+        onRow={(s) => ({ onClick: () => navigate(`/sessions?sid=${s.id}`), style: { cursor: 'pointer' } })}
       />
     ),
     builds: (o) => <Table rowKey="id" size="small" columns={buildColumns} dataSource={o.builds} pagination={false} />,

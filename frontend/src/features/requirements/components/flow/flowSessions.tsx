@@ -30,7 +30,7 @@ export function SessionTag({ s }: { s?: OverviewSession }) {
   if (!s) return null
   const active = ACTIVE_SESSION_STATES.includes(s.status)
   return (
-    <a href={`/sessions/${s.id}`} target="_blank" rel="noreferrer">
+    <a href={`/sessions?sid=${s.id}`} target="_blank" rel="noreferrer">
       <Tag color={active ? 'processing' : s.status === 'DONE' ? 'success' : 'default'}>
         会话 {active ? '进行中' : s.status}
       </Tag>

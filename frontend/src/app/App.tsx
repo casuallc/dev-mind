@@ -4,7 +4,6 @@ import AppLayout from './AppLayout'
 import AdminLayout from './AdminLayout'
 // 各能力 feature 在此注册路由（积木式组装点）
 import SessionsBoard from '../features/sessions/pages/SessionsBoard'
-import SessionDetail from '../features/sessions/pages/SessionDetail'
 import ScenariosPage from '../features/scenarios/pages/ScenariosPage'
 import ProjectContextPage from '../features/scenarios/pages/ProjectContextPage'
 import ProjectsPage from '../features/projects/pages/ProjectsPage'
@@ -90,7 +89,6 @@ export default function App() {
             <Route path="/context" element={<ProjectContextPage />} />
             {/* CAP-05 会话（CAP-31 起归属当前项目；通用问答走个人 /chats） */}
             <Route path="/sessions" element={<SessionsBoard />} />
-            <Route path="/sessions/:id" element={<SessionDetail />} />
             <Route path="/builds" element={<BuildsPage />} />
             <Route path="/deployments" element={<DeploymentsPage />} />
             <Route path="/releases" element={<ReleasesPage />} />

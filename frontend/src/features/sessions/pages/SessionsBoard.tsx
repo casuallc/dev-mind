@@ -1,4 +1,5 @@
 // 会话工作台：默认对话视图（左侧会话列表 + 右侧对话交互，类聊天应用），可切换表格列表视图。
+// CAP-39：会话详情页已裁撤——产出推送/更多操作（上下文/沉淀/清理 worktree）均在操作条，深链 /sessions?sid=<id>。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Badge, Button, Card, Input, Modal, Segmented, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -8,8 +9,9 @@ import {
   PauseOutlined,
   ReloadOutlined,
   StopOutlined,
+  UploadOutlined,
 } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { deleteSession, listSessions } from '../api'
 import type { SessionSummary } from '../types'
 import { stateColor, ACTIVE_STATES, STATE_OPTIONS } from '../stateMeta'
@@ -19,6 +21,8 @@ import ChatPanel from '../../../shared/chat/ChatPanel'
 import type { StreamMeta } from '../../../shared/chat/types'
 import NewSessionDraft from '../components/NewSessionDraft'
 import SessionDiffModal from '../components/SessionDiffModal'
+import SessionOutputsModal from '../components/SessionOutputsModal'
+import SessionMoreActions from '../components/SessionMoreActions'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
 import { fmtTime } from '../../../shared/utils/format'
@@ -37,7 +41,8 @@ function sortForBoard(list: SessionSummary[]): SessionSummary[] {
 }
 
 export default function SessionsBoard() {
-  const navigate = useNavigate()
+  // CAP-39：深链 /sessions?sid=<id>（通知/需求关联记录等原详情页入口统一落这里）
+  const [searchParams, setSearchParams] = useSearchParams()
   // CAP-31：会话归属当前项目（本页在 ProjectContextGate 内，必有当前项目）
   const projectId = useCurrentProjectId()
   const [sessions, setSessions] = useState<SessionSummary[]>([])
@@ -48,6 +53,7 @@ export default function SessionsBoard() {
   const [keyword, setKeyword] = useState('')
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
   const [draft, setDraft] = useState(false)
+  const [outputsOpen, setOutputsOpen] = useState(false)
   const [streamMeta, setStreamMeta] = useState<StreamMeta>({ connected: false, fatal: false })
   const autoPickedRef = useRef(false)
 
@@ -81,6 +87,16 @@ export default function SessionsBoard() {
       .then(setAgentNodes)
       .catch(() => undefined)
   }, [])
+
+  // 深链 ?sid=：列表加载后选中目标会话并清参数（防粘性选中；跨项目会话不在列表时由消失兜底清选中态）
+  useEffect(() => {
+    const sid = searchParams.get('sid')
+    if (!sid || loading) return
+    setDraft(false)
+    setSelectedId(sid)
+    searchParams.delete('sid')
+    setSearchParams(searchParams, { replace: true })
+  }, [searchParams, loading, setSearchParams])
 
   // 首次加载后自动选中：有会话选排序第一个，否则直接进入新对话草稿态
   useEffect(() => {
@@ -309,14 +325,15 @@ export default function SessionsBoard() {
                     <Button size="small" icon={<DiffOutlined />} loading={diff.loading} onClick={diff.show}>
                       Diff
                     </Button>
+                    <Button size="small" icon={<UploadOutlined />} onClick={() => setOutputsOpen(true)}>
+                      推送产出
+                    </Button>
+                    <SessionMoreActions session={current} canSuspend={canSuspend} onChanged={load} />
                     {canSuspend && (
                       <Button size="small" danger icon={<StopOutlined />} onClick={onKill}>
                         终止
                       </Button>
                     )}
-                    <Button size="small" type="link" onClick={() => navigate(`/sessions/${current.id}`)}>
-                      详情 →
-                    </Button>
                   </Space>
                 </div>
                 <ChatPanel
@@ -362,6 +379,7 @@ export default function SessionsBoard() {
       )}
 
       <SessionDiffModal open={diff.open} diff={diff.data} onClose={diff.close} />
+      <SessionOutputsModal open={outputsOpen} onClose={() => setOutputsOpen(false)} session={current ?? null} />
     </Card>
   )
 }

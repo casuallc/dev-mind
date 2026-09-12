@@ -34,3 +34,42 @@ export interface RepoDiffView {
   hasChanges: boolean
   error?: string
 }
+
+/** CAP-39：会话产出文件列表项（GET /sessions/{id}/outputs） */
+export interface SessionOutputFile {
+  fileName: string
+  sizeBytes: number
+  updatedAt: string
+}
+
+export interface SessionOutputContent {
+  fileName: string
+  content: string
+}
+
+/** CAP-39：按需回传结果（POST collect；message = 降级提示：历史会话/节点离线/老 runner 等） */
+export interface CollectOutputsResult {
+  collected: boolean
+  message?: string
+  files: SessionOutputFile[]
+}
+
+export type PublishDocKind = 'analysis' | 'design' | 'requirement'
+
+/** CAP-39 FR-03：推送产出为需求文档请求（POST /sessions/{id}/outputs/publish） */
+export interface PublishOutputRequest {
+  fileName: string
+  kind: PublishDocKind
+  requirementId: string
+  mode: 'create' | 'update'
+  /** update 必填（须与需求/类型一致） */
+  docId?: number
+  title?: string
+  changeNote?: string
+}
+
+export interface PublishOutputResult {
+  docId: number
+  versionNo: number
+  designId?: string
+}

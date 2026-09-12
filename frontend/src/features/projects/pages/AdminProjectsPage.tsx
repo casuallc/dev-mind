@@ -69,7 +69,7 @@ export default function AdminProjectsPage() {
       message.success('接入会话已启动')
       setOnboardOpen(false)
       setOnboardDesc('')
-      navigate(`/sessions/${sessionId}`)
+      navigate(`/sessions?sid=${sessionId}`)
     } catch (e) {
       showError(e, '发起失败')
     } finally {

@@ -114,7 +114,7 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
         try {
           const s = await startWorkItemSession(projectId, w.id)
           message.success(`${w.code} 会话已启动`)
-          navigate(`/sessions/${s.id}`)
+          navigate(`/sessions?sid=${s.id}`)
         } catch (e) {
           showError(e)
         }

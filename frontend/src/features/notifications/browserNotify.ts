@@ -19,7 +19,7 @@ export function showBrowserNotification(n: AppNotification) {
     notif.onclick = () => {
       window.focus()
       if (n.entityType === 'SESSION' && n.entityId) {
-        window.location.href = `/sessions/${n.entityId}`
+        window.location.href = `/sessions?sid=${n.entityId}`
       }
       notif.close()
     }
