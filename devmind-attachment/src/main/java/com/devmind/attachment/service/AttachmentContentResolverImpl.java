@@ -34,15 +34,23 @@ public class AttachmentContentResolverImpl implements AttachmentContentResolver 
     public Optional<ResolvedAttachment> resolve(String attachmentId) {
         return repo.findById(attachmentId)
                 .filter(AttachmentEntity::isImage)
-                .flatMap(ent -> {
-                    Path path = attachmentService.rootDir().resolve(ent.getStoragePath()).normalize();
-                    try {
-                        return Optional.of(new ResolvedAttachment(attachmentId, ent.getContentType(),
-                                Files.readAllBytes(path)));
-                    } catch (IOException e) {
-                        log.warn("附件盘文件读取失败: id={} path={} err={}", attachmentId, path, e.getMessage());
-                        return Optional.empty();
-                    }
-                });
+                .flatMap(this::readBytes);
+    }
+
+    /** CAP-40：不限 mime（需求附件投送：pdf/text 等一并给 agent）；盘文件读取失败同样 empty。 */
+    @Override
+    public Optional<ResolvedAttachment> resolveAny(String attachmentId) {
+        return repo.findById(attachmentId).flatMap(this::readBytes);
+    }
+
+    private Optional<ResolvedAttachment> readBytes(AttachmentEntity ent) {
+        Path path = attachmentService.rootDir().resolve(ent.getStoragePath()).normalize();
+        try {
+            return Optional.of(new ResolvedAttachment(ent.getId(), ent.getContentType(),
+                    Files.readAllBytes(path)));
+        } catch (IOException e) {
+            log.warn("附件盘文件读取失败: id={} path={} err={}", ent.getId(), path, e.getMessage());
+            return Optional.empty();
+        }
     }
 }
