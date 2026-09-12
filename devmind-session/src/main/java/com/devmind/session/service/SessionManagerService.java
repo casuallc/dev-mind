@@ -271,7 +271,8 @@ public class SessionManagerService {
         // 场景绑定的资产失效（DevMindException 404）fail-visible 向上传播；其它装配异常降级
         // 为无上下文启动（沿用知识注入不阻塞会话的语义）
         SessionContextService.Prepared prepared = prepareContext(id, project, scenario, taskSpec,
-                req.extraSkillIds(), req.extraDocIds(), req.extraKnowledgeTags());
+                req.extraSkillIds(), req.extraDocIds(), req.extraKnowledgeTags(),
+                requirement != null ? requirement.getId() : null);
         RemoteSessionRuntime remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector,
                 eventSaver, listener, props.toRuntimeSettings());
         // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
@@ -457,7 +458,8 @@ public class SessionManagerService {
                 String renderedTask = scenario != null
                         ? scenarioService.render(scenario, ent.getTaskSpec(), proj, requirementTitleOf(ent))
                         : ent.getTaskSpec();
-                prepared = prepareContext(id, proj, scenario, renderedTask, null, null, null);
+                prepared = prepareContext(id, proj, scenario, renderedTask, null, null, null,
+                        ent.getRequirementId());
                 connector.launch(ent.getAgentNodeId(), new AgentLaunchCommand(
                         id, ent.getProjectId(), renderedTask, ent.getModel(),
                         pm,
@@ -945,10 +947,11 @@ public class SessionManagerService {
                                                           String renderedTaskSpec,
                                                           List<String> extraSkillIds,
                                                           List<Long> extraDocIds,
-                                                          List<String> extraKnowledgeTags) {
+                                                          List<String> extraKnowledgeTags,
+                                                          String requirementId) {
         try {
             return sessionContextService.prepare(sessionId, project, scenario, renderedTaskSpec,
-                    extraSkillIds, extraDocIds, extraKnowledgeTags);
+                    extraSkillIds, extraDocIds, extraKnowledgeTags, requirementId);
         } catch (DevMindException de) {
             throw de;
         } catch (Exception e) {

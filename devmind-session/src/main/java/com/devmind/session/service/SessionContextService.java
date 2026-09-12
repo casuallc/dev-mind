@@ -76,11 +76,13 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
     /**
      * 会话 launch 前装配（create/resume 调用）。projectAuto 恒 true：无项目会话仅全局无标签
      * 条目命中（沿用 CAP-04 现状口径）。renderedTaskSpec 须为场景骨架渲染后的任务说明。
+     * requirementId 透传给 CAP-40 附件投送 provider（无关联需求传 null）。
      * 空产出返回 null（不带上下文启动）；场景绑定资产失效等 DevMindException 向上传播。
      */
     public Prepared prepare(String sessionId, Project project, SessionScenarioEntity scenario,
                             String renderedTaskSpec, List<String> extraSkillIds,
-                            List<Long> extraDocIds, List<String> extraKnowledgeTags) {
+                            List<Long> extraDocIds, List<String> extraKnowledgeTags,
+                            String requirementId) {
         ContextAssemblyRequest req = new ContextAssemblyRequest(
                 project != null ? project.id() : null,
                 project != null && project.tags() != null ? project.tags() : List.of(),
@@ -90,7 +92,7 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
                 extraDocIds != null ? extraDocIds : List.of(),
                 scenario != null ? scenarioService.knowledgeTagsOf(scenario) : List.of(),
                 extraKnowledgeTags != null ? extraKnowledgeTags : List.of(),
-                true, false);
+                true, false, requirementId);
         ContextAssembler.AssembledContext a = assembleAndCache(sessionId, req,
                 scenario != null ? scenario.getCode() : null,
                 scenario != null ? scenario.getName() : null,
@@ -183,7 +185,8 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
                 rendered = scenarioService.render(scenario, ent.getTaskSpec(), project,
                         requirementTitle(ent.getRequirementId()));
             }
-            prepare(ent.getId(), project, scenario, rendered, null, null, null); // 命中即入缓存
+            prepare(ent.getId(), project, scenario, rendered, null, null, null,
+                    ent.getRequirementId()); // 命中即入缓存
             Cached cached = cache.get(ent.getId());
             return cached != null ? Optional.of(cached.pkg()) : Optional.empty();
         } catch (Exception e) {

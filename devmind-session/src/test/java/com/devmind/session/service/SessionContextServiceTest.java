@@ -45,7 +45,7 @@ class SessionContextServiceTest {
     @Test
     void 装配缓存与manifest摘要一致() {
         SessionContextService svc = newSvc(repoWith(null), null, null, stub(ONE_ENTRY));
-        SessionContextService.Prepared p = svc.prepare("s1", null, null, "任务", null, null, null);
+        SessionContextService.Prepared p = svc.prepare("s1", null, null, "任务", null, null, null, null);
         assertEquals(1, p.manifest().entries());
         assertTrue(p.snapshotJson().contains("\"scenarioCode\":null") || p.snapshotJson().contains("scenarioCode"));
 
@@ -61,7 +61,7 @@ class SessionContextServiceTest {
     @Test
     void 无命中装配为null() {
         SessionContextService svc = newSvc(repoWith(null), null, null, stub(ContextContribution.empty()));
-        assertNull(svc.prepare("s1", null, null, "任务", null, null, null));
+        assertNull(svc.prepare("s1", null, null, "任务", null, null, null, null));
         assertTrue(svc.find("unknown").isEmpty());
     }
 

@@ -65,6 +65,7 @@ public class ContextAssembler {
         List<String> sections = new ArrayList<>();
         List<ContextPackage.SkillPackage> skills = new ArrayList<>();
         List<ContextPackage.DocEntry> docs = new ArrayList<>();
+        List<ContextPackage.InputFile> inputs = new ArrayList<>();
         List<ManifestItem> items = new ArrayList<>();
         String settings = null;
         for (ContextContribution c : contribs) {
@@ -72,13 +73,16 @@ public class ContextAssembler {
             skills.addAll(c.skills());
             docs.addAll(c.docs());
             items.addAll(c.items());
+            inputs.addAll(c.inputs());
             if (settings == null && c.settingsLocalJson() != null) {
                 settings = c.settingsLocalJson();
             }
         }
 
         boolean hasScenarioBg = extraContextMd != null && !extraContextMd.isBlank();
-        if (!hasScenarioBg && sections.isEmpty() && skills.isEmpty() && docs.isEmpty()) {
+        // CAP-40：附件投送也算产出——挂需求会话即使无场景无知识命中，有附件就必须出包
+        if (!hasScenarioBg && sections.isEmpty() && skills.isEmpty() && docs.isEmpty()
+                && inputs.isEmpty()) {
             return null;
         }
 
@@ -92,8 +96,7 @@ public class ContextAssembler {
         md.append("\n---\n\n## 当前任务\n\n")
                 .append(renderedTaskSpec == null ? "" : renderedTaskSpec.strip()).append("\n");
 
-        ContextPackage pkg = new ContextPackage(ContextPackage.CURRENT_SCHEMA, md.toString(),
-                settings, skills, docs);
+        ContextPackage pkg = ContextPackage.of(md.toString(), settings, skills, docs, inputs);
         ContextManifest manifest = ContextPackages.manifestOf(ContextPackages.toJsonBytes(pkg), items.size());
         String snapshotJson = snapshotJson(scenarioCode, scenarioName, renderedTaskSpec, hasScenarioBg,
                 items, manifest);
