@@ -68,6 +68,12 @@ public final class ContextPuller {
         }
 
         ContextPackage pkg = ContextPackages.fromJson(body);
+        // CAP-40：版本门控——包结构比本 runner 新（如含 inputs 附件投送）即 fail-visible，
+        // 不静默丢内容降级启动（老 runner 的 Jackson 会忽略未知字段）
+        if (pkg.schemaVersion() > ContextPackage.CURRENT_SCHEMA) {
+            throw new IOException("上下文包结构版本过新（schema=" + pkg.schemaVersion()
+                    + "，本节点支持 " + ContextPackage.CURRENT_SCHEMA + "），请升级 runner 后重试");
+        }
         ContextMaterializer.materialize(workDir, pkg);
         log.info("上下文包物化完成: session={} entries={} bytes={}",
                 sessionId, manifest.path("entries").asInt(-1), body.length);
