@@ -113,14 +113,14 @@ public class RequirementEntity {
     @Column(name = "doc_id")
     private Long docId;
 
-    /** CAP-38 FR-01：需求分析阶段已跳过（流程不可逆引导的持久化标记） */
+    /** CAP-38 FR-01：需求分析阶段已跳过（流程不可逆引导的持久化标记）。
+     *  不带 @ColumnDefault：MySQL bit 列 default 'false' 建列失败；新行由 Hibernate 显式写 false，
+     *  存量行 NULL 由 getter 兜底 false。 */
     @Column(name = "analysis_skipped")
-    @ColumnDefault("'false'")
     private Boolean analysisSkipped = false;
 
     /** CAP-38 FR-01：方案设计阶段已跳过 */
     @Column(name = "design_skipped")
-    @ColumnDefault("'false'")
     private Boolean designSkipped = false;
 
     @Column(name = "created_by", length = 64)
