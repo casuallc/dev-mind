@@ -16,6 +16,14 @@ public interface AttachmentContentResolver {
      */
     Optional<ResolvedAttachment> resolve(String attachmentId);
 
+    /**
+     * CAP-40：不限 mime 类型读字节（需求附件投送：pdf/text 等一并给 agent）。
+     * default 回落 {@link #resolve}（仅图片）保兼容；attachment 模块覆写为全类型。
+     */
+    default Optional<ResolvedAttachment> resolveAny(String attachmentId) {
+        return resolve(attachmentId);
+    }
+
     /** @param attachmentId 附件 id；@param contentType 原始 mime；@param bytes 原始字节 */
     record ResolvedAttachment(String attachmentId, String contentType, byte[] bytes) {}
 }

@@ -54,7 +54,7 @@ class ContextMaterializerTest {
                 List.of(new ContextPackage.SkillPackage("review", Map.of(
                         "SKILL.md", Base64.getEncoder().encodeToString("# 评审\n".getBytes(StandardCharsets.UTF_8)),
                         "bin/tool.bin", Base64.getEncoder().encodeToString(bin)))),
-                List.of(new ContextPackage.DocEntry("d1", "方案", "正文")));
+                List.of(new ContextPackage.DocEntry("d1", "方案", "正文")), List.of());
         ContextMaterializer.materialize(workDir, pkg);
         assertEquals("# 评审\n", Files.readString(
                 workDir.resolve(".claude/skills/review/SKILL.md"), StandardCharsets.UTF_8));
@@ -66,11 +66,30 @@ class ContextMaterializerTest {
     @Test
     void rejectsUnsafeSkillPaths() {
         ContextPackage badName = new ContextPackage(1, null, null,
-                List.of(new ContextPackage.SkillPackage("../evil", Map.of())), List.of());
+                List.of(new ContextPackage.SkillPackage("../evil", Map.of())), List.of(), List.of());
         assertThrows(IllegalArgumentException.class, () -> ContextMaterializer.materialize(workDir, badName));
         ContextPackage badFile = new ContextPackage(1, null, null,
-                List.of(new ContextPackage.SkillPackage("ok", Map.of("../../escape.txt", "eA=="))), List.of());
+                List.of(new ContextPackage.SkillPackage("ok", Map.of("../../escape.txt", "eA=="))), List.of(),
+                List.of());
         assertThrows(IllegalArgumentException.class, () -> ContextMaterializer.materialize(workDir, badFile));
+    }
+
+    @Test
+    void materializesInputsAndRejectsUnsafePaths() throws Exception {
+        byte[] png = {1, 2, 3};
+        ContextPackage pkg = ContextPackage.of(null, null, List.of(), List.of(),
+                List.of(new ContextPackage.InputFile("abc123-shot.png", "shot.png", "image/png",
+                        Base64.getEncoder().encodeToString(png))));
+        // inputs 非空 → schema 2
+        assertEquals(2, pkg.schemaVersion());
+        ContextMaterializer.materialize(workDir, pkg);
+        assertEquals(3, Files.readAllBytes(workDir.resolve(".devmind/input/abc123-shot.png")).length);
+        // 空 inputs → schema 1（存量 runner 无感）
+        assertEquals(1, ContextPackage.of("md", null, List.of(), List.of(), List.of()).schemaVersion());
+        // 非法附件路径（白名单外字符）→ 拒绝
+        ContextPackage bad = new ContextPackage(2, null, null, List.of(), List.of(),
+                List.of(new ContextPackage.InputFile("../evil.png", "evil.png", "image/png", "eA==")));
+        assertThrows(IllegalArgumentException.class, () -> ContextMaterializer.materialize(workDir, bad));
     }
 
     @Test

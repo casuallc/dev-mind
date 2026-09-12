@@ -34,6 +34,21 @@ public final class ContextMaterializer {
         for (ContextPackage.DocEntry doc : pkg.docs() == null ? List.<ContextPackage.DocEntry>of() : pkg.docs()) {
             writeDoc(workDir, doc);
         }
+        for (ContextPackage.InputFile input : pkg.inputs() == null ? List.<ContextPackage.InputFile>of() : pkg.inputs()) {
+            writeInput(workDir, input);
+        }
+    }
+
+    /** CAP-40 需求附件：物化为 .devmind/input/<path>（path 白名单 + 越界校验，同 skill 文件）。 */
+    private static void writeInput(Path workDir, ContextPackage.InputFile input) throws IOException {
+        requireSafe(input.path(), "附件路径");
+        Path dir = workDir.resolve(".devmind").resolve("input");
+        Path target = dir.resolve(input.path()).normalize();
+        if (!target.startsWith(dir)) {
+            throw new IllegalArgumentException("附件路径越界: " + input.path());
+        }
+        Files.createDirectories(dir);
+        Files.write(target, Base64.getDecoder().decode(input.base64()));
     }
 
     /** CLAUDE.md：注入块在前；既有内容（仓库自带）以保留节追加在后（沿用 KnowledgeInjector 时代结构）。 */

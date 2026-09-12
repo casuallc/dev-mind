@@ -12,16 +12,27 @@ import java.util.List;
  * @param settingsLocalJson .claude/settings.local.json 内容；契约：仅 knowledge provider 出，
  *                          assembler 取第一个非空
  * @param items             FR-07 可追溯清单（含 source 标注）
+ * @param inputs            CAP-40 需求附件（物化为 .devmind/input/&lt;path&gt;；无附件 provider 恒空）
  */
 public record ContextContribution(
         List<String> claudeMdSections,
         List<ContextPackage.SkillPackage> skills,
         List<ContextPackage.DocEntry> docs,
         String settingsLocalJson,
-        List<ManifestItem> items) {
+        List<ManifestItem> items,
+        List<ContextPackage.InputFile> inputs) {
+
+    /** 兼容构造：无附件投送的既有 provider（knowledge/docs/skill）。 */
+    public ContextContribution(List<String> claudeMdSections,
+                               List<ContextPackage.SkillPackage> skills,
+                               List<ContextPackage.DocEntry> docs,
+                               String settingsLocalJson,
+                               List<ManifestItem> items) {
+        this(claudeMdSections, skills, docs, settingsLocalJson, items, List.of());
+    }
 
     /** 空产出（本 provider 无命中）。 */
     public static ContextContribution empty() {
-        return new ContextContribution(List.of(), List.of(), List.of(), null, List.of());
+        return new ContextContribution(List.of(), List.of(), List.of(), null, List.of(), List.of());
     }
 }
