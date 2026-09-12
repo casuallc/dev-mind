@@ -10,6 +10,8 @@ import com.devmind.docs.DocumentService;
 import com.devmind.docs.dto.DocDetail;
 import com.devmind.docs.dto.DocRequest;
 import com.devmind.docs.dto.SaveVersionRequest;
+import com.devmind.flow.dto.PublishOutputRequest;
+import com.devmind.flow.dto.PublishOutputResult;
 import com.devmind.flow.dto.SplitDraftItem;
 import com.devmind.notification.dto.ActionDef;
 import com.devmind.notification.dto.NotificationDraft;
@@ -442,6 +444,83 @@ public class RequirementFlowService {
                     "原因：" + e.getMessage() + "；可在「工作单元」Tab 手动 AI 拆分",
                     req.getProjectId(), req.getId());
         }
+    }
+
+    // ---------------- CAP-39 手动推送产出为需求文档 ----------------
+
+    /** FR-03 可选文档类型 → 中文名（标题/产物命名共用）。 */
+    private static final java.util.Map<String, String> PUBLISH_KIND_LABELS = java.util.Map.of(
+            "analysis", "需求分析", "design", "方案设计", "requirement", "需求文档");
+
+    /**
+     * FR-03 手动推送会话产出为关联需求文档：create 新建（kind=design 同步落 Design(DRAFT)，
+     * 对齐 handleDesignOutput）/ update 目标文档存新版本（校验需求与类型一致，防跨需求改文档）。
+     * 两模式均登记产物（analysis→ANALYSIS、其余→DOC，ref=docId）。
+     */
+    public PublishOutputResult publishOutput(String sessionId, PublishOutputRequest req) {
+        SessionEntity session = sessionRepo.findById(sessionId)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "会话不存在: " + sessionId));
+        if (req == null || req.fileName() == null || req.fileName().isBlank()
+                || req.kind() == null || req.requirementId() == null || req.requirementId().isBlank()
+                || req.mode() == null) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "fileName/kind/requirementId/mode 必填");
+        }
+        String kindLabel = PUBLISH_KIND_LABELS.get(req.kind());
+        if (kindLabel == null) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "不支持的文档类型: " + req.kind() + "（仅 analysis/design/requirement）");
+        }
+        String content = sessionOutputService.findContent(sessionId, req.fileName())
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND,
+                        "产出不存在: " + req.fileName() + "（请先在会话工作台「推送产出」中同步）"));
+        RequirementEntity requirement = requirementService.requireById(req.requirementId());
+        // WI 仅当同属目标需求时透传（DocRequest 有 WI→需求一致性校验，跨需求推送传了会报错）
+        String workItemId = session.getWorkItemId() != null && !session.getWorkItemId().isBlank()
+                && req.requirementId().equals(session.getRequirementId()) ? session.getWorkItemId() : null;
+
+        if ("update".equals(req.mode())) {
+            if (req.docId() == null) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "更新模式 docId 必填");
+            }
+            DocDetail target = documentService.get(req.docId(), null);
+            if (!req.requirementId().equals(target.requirementId()) || !req.kind().equals(target.kind())) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "目标文档与所选需求/文档类型不匹配（文档 #" + req.docId() + " 是 "
+                                + target.kind() + "，属需求 " + target.requirementId() + "）");
+            }
+            String note = req.changeNote() == null || req.changeNote().isBlank()
+                    ? "手动推送自会话 " + sessionId : req.changeNote();
+            DocDetail doc = documentService.saveVersion(req.docId(), new SaveVersionRequest(content, note));
+            registerPublishArtifact(requirement, req.kind(), kindLabel, doc, workItemId);
+            return new PublishOutputResult(doc.id(), doc.versionNo(), null);
+        }
+        if (!"create".equals(req.mode())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "mode 仅支持 create/update");
+        }
+        String title = req.title() == null || req.title().isBlank()
+                ? kindLabel + " - " + requirement.getTitle() : req.title();
+        DocDetail doc = documentService.create(new DocRequest(
+                req.kind(), requirement.getId(), workItemId, requirement.getProjectId(), title,
+                null, null, content));
+        String designId = null;
+        if ("design".equals(req.kind())) {
+            DesignView design = designService.create(requirement.getProjectId(), requirement.getId(),
+                    new DesignRequest(doc.id()));
+            designId = design.id();
+        }
+        registerPublishArtifact(requirement, req.kind(), kindLabel, doc, workItemId);
+        return new PublishOutputResult(doc.id(), doc.versionNo(), designId);
+    }
+
+    /** 推送产物登记：analysis→ANALYSIS、其余→DOC（ref=docId，producer=SESSION，对齐 flow 自动登记形态）。 */
+    private void registerPublishArtifact(RequirementEntity req, String kind, String kindLabel,
+                                         DocDetail doc, String workItemId) {
+        String type = "analysis".equals(kind)
+                ? com.devmind.artifact.model.ArtifactEntity.TYPE_ANALYSIS
+                : com.devmind.artifact.model.ArtifactEntity.TYPE_DOC;
+        artifactService.registerInfo(req.getProjectId(), req.getId(), workItemId, type,
+                "REQ-" + req.getSeq() + " " + kindLabel + " v" + doc.versionNo() + "（手动推送）",
+                String.valueOf(doc.id()), ArtifactService.PRODUCER_SESSION);
     }
 
     // ---------------- 内部 ----------------

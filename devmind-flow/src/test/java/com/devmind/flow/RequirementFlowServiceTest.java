@@ -233,7 +233,7 @@ class RequirementFlowServiceTest {
 
         FakeSessionManager() {
             super(null, null, null, null, null, null, null, null, null, null,
-                    null, null, null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         @Override
@@ -561,5 +561,94 @@ class RequirementFlowServiceTest {
         // 环依赖校验失败 → 降级人工
         assertEquals(0, workItemService.list("p1", "r1").size());
         assertEquals(1, notificationService.ofType("flow.split.missing").size());
+    }
+
+    // ---------------- CAP-39 publishOutput ----------------
+
+    @Test
+    void 推送创建分析文档() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+        addSession("s1", null, "r1", "任意任务");
+        sessionOutputService.put("s1", "analysis.md", "# 分析结论");
+
+        var result = service.publishOutput("s1", new com.devmind.flow.dto.PublishOutputRequest(
+                "analysis.md", "analysis", "r1", "create", null, null, null));
+
+        assertEquals(1, result.versionNo());
+        assertNull(result.designId());
+        DocDetail doc = documentService.get(result.docId(), null);
+        assertEquals("analysis", doc.kind());
+        assertEquals("r1", doc.requirementId());
+        assertEquals("# 分析结论", doc.contentMd());
+        assertTrue(designService.designs.isEmpty());
+    }
+
+    @Test
+    void 推送创建方案文档同步落Design草稿() {
+        requirementService.add("r1", RequirementEntity.STATUS_DESIGNING);
+        addSession("s1", "wi1", "r1", "方案任务");
+        sessionOutputService.put("s1", "design.md", "# 方案");
+
+        var result = service.publishOutput("s1", new com.devmind.flow.dto.PublishOutputRequest(
+                "design.md", "design", "r1", "create", null, null, null));
+
+        assertEquals(1, designService.designs.size());
+        assertEquals(result.designId(), designService.designs.get(0).id());
+        assertEquals(result.docId(), designService.designs.get(0).docId());
+        assertEquals(DesignEntity.STATUS_DRAFT, designService.designs.get(0).status());
+    }
+
+    @Test
+    void 推送更新既有文档存新版本带默认说明() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+        addSession("s1", null, "r1", "任务");
+        sessionOutputService.put("s1", "analysis.md", "v2 内容");
+        DocDetail existing = documentService.add("analysis", "r1", "旧内容");
+
+        var result = service.publishOutput("s1", new com.devmind.flow.dto.PublishOutputRequest(
+                "analysis.md", "analysis", "r1", "update", existing.id(), null, null));
+
+        assertEquals(2, result.versionNo());
+        DocDetail doc = documentService.get(existing.id(), null);
+        assertEquals("v2 内容", doc.contentMd());
+        assertEquals("手动推送自会话 s1", doc.changeNote());
+        assertEquals(1, documentService.docs.size(), "更新不新建第二份文档");
+    }
+
+    @Test
+    void 推送更新跨需求或类型不匹配400() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+        requirementService.add("r2", RequirementEntity.STATUS_DRAFT);
+        addSession("s1", null, "r1", "任务");
+        sessionOutputService.put("s1", "analysis.md", "内容");
+        DocDetail otherReq = documentService.add("analysis", "r2", "别需求的");
+
+        DevMindException e = assertThrows(DevMindException.class, () -> service.publishOutput("s1",
+                new com.devmind.flow.dto.PublishOutputRequest(
+                        "analysis.md", "analysis", "r1", "update", otherReq.id(), null, null)));
+        assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
+
+        DocDetail otherKind = documentService.add("design", "r1", "类型不符");
+        e = assertThrows(DevMindException.class, () -> service.publishOutput("s1",
+                new com.devmind.flow.dto.PublishOutputRequest(
+                        "analysis.md", "analysis", "r1", "update", otherKind.id(), null, null)));
+        assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
+    }
+
+    @Test
+    void 推送产出缺失404_类型非法400() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+        addSession("s1", null, "r1", "任务");
+
+        DevMindException e = assertThrows(DevMindException.class, () -> service.publishOutput("s1",
+                new com.devmind.flow.dto.PublishOutputRequest(
+                        "ghost.md", "analysis", "r1", "create", null, null, null)));
+        assertEquals(ErrorCode.NOT_FOUND, e.getErrorCode());
+
+        sessionOutputService.put("s1", "a.md", "内容");
+        e = assertThrows(DevMindException.class, () -> service.publishOutput("s1",
+                new com.devmind.flow.dto.PublishOutputRequest(
+                        "a.md", "wiki", "r1", "create", null, null, null)));
+        assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
     }
 }
