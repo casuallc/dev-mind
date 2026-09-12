@@ -40,8 +40,11 @@ import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 需求流程引擎（CAP-14/CAP-37/CAP-38）：需求主流程的半自动推进——每阶段一个流程动作（起会话/生成），
@@ -309,13 +312,34 @@ public class RequirementFlowService {
 
     // ---------------- 会话完成分流 ----------------
 
+    /**
+     * 分流专用单线程执行器：agent WS 每连接消息串行派发——分流链路里的 launch 等待 ack
+     * （autoSplit、拆分固化后编排器首批派发都在会话完成事件链里起新会话），
+     * 若同步跑在 WS 读线程上，ack 帧进不来必然 15s 超时。单线程保序且离开 WS 线程。
+     */
+    private final ExecutorService flowExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "requirement-flow");
+        t.setDaemon(true);
+        return t;
+    });
+
+    @PreDestroy
+    void shutdown() {
+        flowExecutor.shutdown();
+    }
+
     /** FR-05：消费 session.completed，按会话归属登记产物/文档并通知人确认。失败会话已由统一监听器发 P0。 */
     @EventListener
     public void onSessionCompleted(SimpleDomainEvent event) {
         if (!"session.completed".equals(event.type()) || !Boolean.TRUE.equals(event.success())) {
             return;
         }
-        sessionRepo.findById(event.entityId()).ifPresent(session -> {
+        flowExecutor.submit(() -> handleCompleted(event.entityId()));
+    }
+
+    /** 完成事件分流本体（包可见便于单测同步驱动；生产路径恒走 flowExecutor）。 */
+    void handleCompleted(String sessionId) {
+        sessionRepo.findById(sessionId).ifPresent(session -> {
             try {
                 dispatch(session);
             } catch (Exception e) {

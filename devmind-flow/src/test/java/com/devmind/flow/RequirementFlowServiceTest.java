@@ -4,7 +4,6 @@ import com.devmind.artifact.ArtifactService;
 import com.devmind.auth.IdentityService;
 import com.devmind.common.event.DomainEvent;
 import com.devmind.common.event.DomainEventPublisher;
-import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.docs.DocumentService;
@@ -400,10 +399,9 @@ class RequirementFlowServiceTest {
         return s;
     }
 
-    /** 触发 session.completed（success=true）走 dispatch 分流。 */
+    /** 触发会话完成分流（生产走 flowExecutor 异步，测试同步直调本体）。 */
     private void fireCompleted(String sessionId) {
-        service.onSessionCompleted(SimpleDomainEvent.of("session.completed", "p1", null,
-                "system", "会话完成", "SESSION", sessionId, true));
+        service.handleCompleted(sessionId);
     }
 
     // ---------------- skipStage ----------------
