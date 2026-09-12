@@ -55,6 +55,7 @@
 | [CAP-37](CAP-37-flow-output-pipeline.md) | 流程产出回传与阶段串联 | 流程层 | runner 退出前 HTTP 回传 .devmind/output 产出落 session_outputs，分析落成 docs 文档，方案/拆分会话注入上游产出，需求详情页流程 Tab 串联四阶段 |
 | [CAP-38](CAP-38-requirement-flow-simplify.md) | 需求流程简化：阶段 Tab 与自动拆分固化 | 流程层 | 分析/方案独立 Tab 且可跳过（不可逆引导），方案产出后自动拆分+自动固化 WI，WI 状态中文+跳会话，会话关联需求自动建 WI（调整 CAP-37 FR-04、取代 CAP-14 FR-06/07 草稿人工确认） |
 | [CAP-39](CAP-39-session-output-publish.md) | 会话产出手动推送与按需回传 | 流程层 | collect_output 帧（协议 v4）进行中会话即时回传产出，outputs 读取/同步端点，手动推送为关联需求文档（新建/更新版本，design 落 Design 记录），会话详情页裁撤并入工作台 |
+| [CAP-40](CAP-40-requirement-attachment-context.md) | 需求附件上下文投送 | 流程层 | 需求描述引用的本地附件 + Jira 内嵌图打进 ContextPackage（schema v2 inputs），runner 物化 .devmind/input/，流程会话 agent 用 Read 读图 |
 
 ## 依赖关系
 
@@ -102,6 +103,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-37 流程产出回传依赖 CAP-03/13/14/34：runner 退出前经 HTTP 旁路把 `.devmind/output/` 产出回传落 `session_outputs`（SessionOutputSink SPI），修复 CAP-34 后流程引擎读不到产出的断链；分析产出文档化（docs kind=analysis），方案/拆分会话 spec 注入上游产出，需求详情页新增流程 Tab 串联四阶段。
 - CAP-38 需求流程简化依赖 CAP-13/14/15/37：分析/方案拆独立 Tab 且可跳过（需求实体 analysis_skipped/design_skipped 持久化），方案产出登记后自动起拆分会话、wi-plan.json 自动固化为正式 WI（删除 split-draft/confirm-split 端点与流程 Tab，调整 CAP-37 FR-04、取代 CAP-14 FR-06/07 的人工确认草稿），sessions 关联需求自动建 DEVELOPMENT WI（终态需求 409）。
 - CAP-39 会话产出手动推送依赖 CAP-37/34/03/13/38：collect_output 帧（协议 v4，版本门控）让进行中会话即时回传 `.devmind/output/`，session 模块开放 outputs 读取/同步端点，flow 模块新增 publish 端点把产出落成关联需求文档（create/update 版本化，design 同步落 Design(DRAFT)，登记 ANALYSIS/DOC 产物）；会话详情页裁撤，独有操作迁工作台「更多」下拉，全站深链统一 `/sessions?sid=`。
+- CAP-40 需求附件投送依赖 CAP-32/19/33/34/37：需求 description 引用的本地附件（AttachmentContentResolver 扩 resolveAny）与 Jira 内嵌图（新 SPI IssueAttachmentResolver 复用 FR-09 下载链）由 devmind-flow 的 ContextProvider 打进 ContextPackage（schema v2 增 inputs，老 runner fail-visible），runner 物化 `.devmind/input/`，挂 requirementId 的会话 agent 用 Read 读图。
 
 ## 组装方式（后续流程层）
 
