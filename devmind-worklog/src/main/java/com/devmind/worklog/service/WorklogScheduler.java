@@ -3,7 +3,6 @@ package com.devmind.worklog.service;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
-import com.devmind.common.exception.ErrorCode;
 import com.devmind.worklog.config.WorklogProperties;
 import com.devmind.worklog.repo.WorklogRepoSubscriptionRepository;
 import com.devmind.worklog.repo.WorklogUserSettingsRepository;
@@ -19,13 +18,12 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * CAP-28 FR-05/06 定时调度（照 JiraSyncService 模板）：
- * cron 配置化 + 全局 AtomicBoolean 防重入 + 手动/定时共用核心（{@link ReportService}）。
+ * CAP-28 FR-05/06 定时调度（照 JiraSyncService 模板）：cron 配置化 + 全局 AtomicBoolean 防重入。
  *
- * <p>生成是同步阻塞长任务（one-shot 会话最长 oneshot-timeout-seconds），故统一提交到
- * 虚拟线程执行，调度线程即刻返回；running 旗标跨整个异步执行持有，重复触发（含手动）
- * 直接拒绝。调度方法本身禁 @Transactional（红线：异步线程看不到未提交行）——
- * 报告逐用户逐份 save 即时提交。</p>
+ * <p>CAP-41 FR-03 起生成 = 创建 worklog 会话（受理即返回，成稿由会话结束回传落镜像，
+ * 见 {@link WorklogOutputMirror}），调度只需逐用户触发会话创建；并发冲突/节点离线等
+ * 409 由会话层 fail-visible 抛出，这里 warn 跳过并发 P0 失败通知（不中断其他用户）。
+ * 调度方法本身禁 @Transactional（红线）。</p>
  *
  * <p>调度线程无 SecurityContext：归属一律显式传 username，绝不调 currentActor()。</p>
  */
@@ -74,61 +72,34 @@ public class WorklogScheduler {
         runBatch("周报", coveredUsers(false), u -> reportService.generateWeekly(u, lastWeekStart, false));
     }
 
-    /** 手动触发（控制器入口）。已有任务在跑返回 false（→ 409）。 */
-    public boolean submitDaily(String username, LocalDate date, boolean force) {
-        return runAsync("日报", username, () -> reportService.generateDaily(username, date, force));
-    }
-
-    public boolean submitWeekly(String username, LocalDate weekStart, boolean force) {
-        return runAsync("周报", username, () -> reportService.generateWeekly(username, weekStart, force));
-    }
-
-    public boolean isRunning() {
-        return running.get();
-    }
-
     // ---------------- 内部 ----------------
 
     private void runBatch(String label, Set<String> users, UserJob job) {
         if (users.isEmpty()) {
             return;
         }
-        runAsync(label, "-", () -> {
-            for (String u : users) {
-                try {
-                    job.run(u);
-                } catch (DevMindException e) {
-                    // 并发打满（TOO_MANY_SESSIONS）等：warn 跳过，不重试不中断其他用户；失败原因发 P0 通知
-                    log.warn("{} 定时生成跳过: user={} err={}", label, u, e.getMessage());
-                    notifyFailed(label, u, e.getMessage());
-                } catch (Exception e) {
-                    log.warn("{} 定时生成失败: user={}", label, u, e);
-                    notifyFailed(label, u, String.valueOf(e.getMessage()));
-                }
-            }
-        });
-    }
-
-    private boolean runAsync(String label, String username, Runnable r) {
         if (!running.compareAndSet(false, true)) {
-            return false;
+            log.warn("{} 定时生成上一批未跑完，本次跳过", label);
+            return;
         }
         Thread.ofVirtual().name("worklog-generate").start(() -> {
             try {
-                r.run();
-            } catch (DevMindException e) {
-                // 手动触发走到这：预检之后的运行时失败（one-shot 超时/会话未产出等）——
-                // 前端只能空轮询到超时，必须让真实原因落通知中心（P0）
-                log.warn("{} 生成失败: user={} err={}", label, username, e.getMessage());
-                notifyFailed(label, username, e.getMessage());
-            } catch (Exception e) {
-                log.warn("{} 生成异常: user={}", label, username, e);
-                notifyFailed(label, username, String.valueOf(e.getMessage()));
+                for (String u : users) {
+                    try {
+                        job.run(u);
+                    } catch (DevMindException e) {
+                        // 节点离线/协议过低/同空间已有会话等 409：warn 跳过，不重试不中断其他用户；失败原因发 P0 通知
+                        log.warn("{} 定时生成跳过: user={} err={}", label, u, e.getMessage());
+                        notifyFailed(label, u, e.getMessage());
+                    } catch (Exception e) {
+                        log.warn("{} 定时生成失败: user={}", label, u, e);
+                        notifyFailed(label, u, String.valueOf(e.getMessage()));
+                    }
+                }
             } finally {
                 running.set(false);
             }
         });
-        return true;
     }
 
     /** 生成失败 → 领域事件（success=false 路由为 P0 通知，actor=本人收件）。 */

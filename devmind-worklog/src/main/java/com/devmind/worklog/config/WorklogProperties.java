@@ -23,9 +23,6 @@ public class WorklogProperties {
     /** 单库单日 git log 扫描上限 */
     private int gitScanMaxCommits = 200;
 
-    /** one-shot 总结会话超时（秒） */
-    private int oneshotTimeoutSeconds = 300;
-
     public boolean isDailyEnabled() { return dailyEnabled; }
     public void setDailyEnabled(boolean dailyEnabled) { this.dailyEnabled = dailyEnabled; }
     public String getDailyCron() { return dailyCron; }
@@ -36,6 +33,4 @@ public class WorklogProperties {
     public void setWeeklyCron(String weeklyCron) { this.weeklyCron = weeklyCron; }
     public int getGitScanMaxCommits() { return gitScanMaxCommits; }
     public void setGitScanMaxCommits(int gitScanMaxCommits) { this.gitScanMaxCommits = gitScanMaxCommits; }
-    public int getOneshotTimeoutSeconds() { return oneshotTimeoutSeconds; }
-    public void setOneshotTimeoutSeconds(int oneshotTimeoutSeconds) { this.oneshotTimeoutSeconds = oneshotTimeoutSeconds; }
 }

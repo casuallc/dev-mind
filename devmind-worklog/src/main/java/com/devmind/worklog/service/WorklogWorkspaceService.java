@@ -44,7 +44,14 @@ public class WorklogWorkspaceService {
 
     /** 懒创建本人空间（幂等）：亲和节点取平台默认节点，无默认节点 409 明确提示。 */
     public WorkspaceView ensure() {
-        String user = identity.currentActor();
+        return ensureFor(identity.currentActor());
+    }
+
+    /**
+     * 懒创建指定用户的空间（幂等）。调度线程无 SecurityContext，归属一律显式传 username；
+     * 返回带 projectId 的视图供生成链路直接取用。
+     */
+    public WorkspaceView ensureFor(String user) {
         var existing = projectService.findWorklogByOwner(user);
         if (existing.isPresent()) {
             return toView(existing.get());

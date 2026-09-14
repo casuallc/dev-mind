@@ -59,13 +59,12 @@ devmind:
   attachment:                      # CAP-32 公共附件管理
     root-dir: ""                   # 空=${user.dir}/data/attachments
     max-size-mb: 20                # 单附件上限（同时受 spring.servlet.multipart 64MB 约束）
-  worklog:                         # CAP-28 个人工时
+  worklog:                         # CAP-28 个人工时（CAP-41 起生成走 worklog 会话，one-shot 已摘除）
     daily-enabled: true
     daily-cron: "0 30 18 * * *"    # 每日 18:30 生成日报草稿
     weekly-enabled: true
     weekly-cron: "0 0 9 * * MON"   # 周一 09:00 生成上周周报草稿
     git-scan-max-commits: 200      # 单库单日扫描上限
-    oneshot-timeout-seconds: 300
   worktree:
     root: ""                       # 空=项目内 .devmind/worktrees
     base-branch: master

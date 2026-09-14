@@ -1,18 +1,16 @@
 package com.devmind.worklog.controller;
 
 import com.devmind.auth.IdentityService;
-import com.devmind.common.exception.DevMindException;
-import com.devmind.common.exception.ErrorCode;
 import com.devmind.worklog.dto.CreateDailyRequest;
 import com.devmind.worklog.dto.CreateWeeklyRequest;
 import com.devmind.worklog.dto.DailyReportView;
 import com.devmind.worklog.dto.GenerateDailyRequest;
 import com.devmind.worklog.dto.GenerateWeeklyRequest;
+import com.devmind.worklog.dto.ReportLaunch;
 import com.devmind.worklog.dto.UpdateDailyRequest;
 import com.devmind.worklog.dto.UpdateWeeklyRequest;
 import com.devmind.worklog.dto.WeeklyReportView;
 import com.devmind.worklog.service.ReportService;
-import com.devmind.worklog.service.WorklogScheduler;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,23 +24,20 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 
 /**
- * CAP-28 FR-05/06：日报/周报查询、手动创建空白草稿、AI 触发生成（异步，前端轮询 GET 取草稿）、编辑确认。
+ * CAP-28 FR-05/06：日报/周报查询、手动创建空白草稿、编辑确认；
+ * CAP-41 FR-03：AI 触发生成 = 创建 worklog 会话（同步受理返回 sessionId，前端轮询报告镜像）。
  */
 @RestController
 @RequestMapping("/api/worklog")
 public class WorklogReportController {
 
     private final ReportService reportService;
-    private final WorklogScheduler scheduler;
     private final IdentityService identity;
 
-    public WorklogReportController(ReportService reportService, WorklogScheduler scheduler,
-                                   IdentityService identity) {
+    public WorklogReportController(ReportService reportService, IdentityService identity) {
         this.reportService = reportService;
-        this.scheduler = scheduler;
         this.identity = identity;
     }
 
@@ -69,17 +64,13 @@ public class WorklogReportController {
         return reportService.weekDaily(identity.currentActor(), weekStart);
     }
 
-    /** 手动触发生成（异步）：先同步预检（已确认 409 / 无素材 400），再提交；已有任务在跑 → 409。 */
+    /** 手动触发生成（CAP-41：创建 worklog 会话，立即返回 sessionId；成稿随会话结束回传落镜像）。 */
     @PostMapping("/daily/generate")
-    public Map<String, Boolean> generateDaily(@Valid @RequestBody GenerateDailyRequest req) {
+    public ReportLaunch generateDaily(@Valid @RequestBody GenerateDailyRequest req) {
         String actor = identity.currentActor();
         boolean force = Boolean.TRUE.equals(req.force());
         reportService.precheckDaily(actor, req.date(), force);
-        boolean accepted = scheduler.submitDaily(actor, req.date(), force);
-        if (!accepted) {
-            throw new DevMindException(ErrorCode.CONFLICT, "已有报告生成任务在跑，请稍后");
-        }
-        return Map.of("accepted", Boolean.TRUE, "running", scheduler.isRunning());
+        return reportService.generateDaily(actor, req.date(), force);
     }
 
     /**
@@ -112,15 +103,11 @@ public class WorklogReportController {
     }
 
     @PostMapping("/weekly/generate")
-    public Map<String, Boolean> generateWeekly(@Valid @RequestBody GenerateWeeklyRequest req) {
+    public ReportLaunch generateWeekly(@Valid @RequestBody GenerateWeeklyRequest req) {
         String actor = identity.currentActor();
         boolean force = Boolean.TRUE.equals(req.force());
         reportService.precheckWeekly(actor, req.weekStart(), force);
-        boolean accepted = scheduler.submitWeekly(actor, req.weekStart(), force);
-        if (!accepted) {
-            throw new DevMindException(ErrorCode.CONFLICT, "已有报告生成任务在跑，请稍后");
-        }
-        return Map.of("accepted", Boolean.TRUE, "running", scheduler.isRunning());
+        return reportService.generateWeekly(actor, req.weekStart(), force);
     }
 
     /** 手动创建空白周报草稿：同 POST /daily，幂等。 */
