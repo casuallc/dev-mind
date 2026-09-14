@@ -205,6 +205,7 @@ public class AgentRunnerMain {
             case "kill", "suspend" -> sessions.kill(sessionId);
             case "upgrade" -> handleUpgrade(frame, config, configFile, sessions, conn);
             case "collect_output" -> handleCollectOutput(sessionId, config, sessions, conn);
+            case "worklog_push" -> handleWorklogPush(frame, config, workspace, conn);
             default -> log.debug("未知指令类型: {}", type);
         }
     }
@@ -424,6 +425,49 @@ public class AgentRunnerMain {
             } else {
                 conn.send(Map.of("type", "output_collected", "sessionId", sessionId, "ok", true));
             }
+        });
+    }
+
+    /**
+     * CAP-41 M3：worklog 远端备份（手动触发）——对持久工作区 {worklogRoot}/<owner>/ 执行
+     * git push（origin 幂等绑定 cleanUrl、push HEAD:branch）。虚拟线程异步执行，不阻塞
+     * WS listener（push 上限 300s）；token 仅内存持有，ack 输出已由 pushWorklog sanitize。
+     */
+    private static void handleWorklogPush(JsonNode frame, RunnerConfig config,
+                                          RunnerWorkspace workspace, ServerConnection conn) {
+        String requestId = frame.path("requestId").asText("");
+        String owner = frame.path("worklogOwner").asText("");
+        String remoteUrl = frame.path("remoteUrl").asText("");
+        String branch = frame.path("branch").asText("");
+        String token = frame.path("token").asText(null);
+        Thread.ofVirtual().name("worklog-push-" + requestId).start(() -> {
+            Map<String, Object> ack = new java.util.LinkedHashMap<>();
+            ack.put("type", "worklog_push_ack");
+            ack.put("requestId", requestId);
+            try {
+                // owner 白名单 + 越界防护（与 RunnerWorkspace.prepareWorklog 同口径）
+                if (!owner.matches("[a-zA-Z0-9._-]+")) {
+                    throw new IllegalStateException("非法 worklog 归属用户名: " + owner);
+                }
+                Path root = config.resolvedWorklogRoot().toAbsolutePath().normalize();
+                Path dir = root.resolve(owner).normalize();
+                if (!dir.startsWith(root)) {
+                    throw new IllegalStateException("worklog 工作区路径越界: " + owner);
+                }
+                RunnerWorkspace.WorklogPushOutcome r = workspace.pushWorklog(dir, remoteUrl, branch, token);
+                if (r.exit() == 0) {
+                    ack.put("ok", true);
+                    ack.put("detail", r.output());
+                } else {
+                    ack.put("ok", false);
+                    ack.put("error", r.output());
+                }
+            } catch (Exception e) {
+                log.warn("worklog 远端备份失败: owner={} err={}", owner, e.getMessage());
+                ack.put("ok", false);
+                ack.put("error", String.valueOf(e.getMessage()));
+            }
+            conn.send(ack);
         });
     }
 
