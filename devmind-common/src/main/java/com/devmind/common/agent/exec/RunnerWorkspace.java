@@ -322,6 +322,96 @@ public class RunnerWorkspace {
         return dir;
     }
 
+    /**
+     * CAP-41 工作日志持久工作区：&lt;worklogRoot&gt;/&lt;owner&gt;/（owner = 管控台用户名）。
+     * 与代码会话根本不同——同一用户的所有 worklog 会话<b>共享同一目录</b>（日志是连续积累的
+     * 工作区）：首次 git init + 骨架 commit，之后幂等复用；无 worktree、无 push、永不删除，
+     * 不在 workspaceRoot 下因此天然不参与 GC/重启对账扫描。
+     *
+     * @param worklogRoot 根目录（调用方解析：配置 worklogRoot 或默认 {user.home}/worklog）
+     */
+    public Path prepareWorklog(Path worklogRoot, String owner) {
+        if (owner == null || !SAFE_ID.matcher(owner).matches()) {
+            throw new IllegalStateException("非法 worklog 归属用户名（白名单 [a-zA-Z0-9._-]）: " + owner);
+        }
+        Path base = worklogRoot.toAbsolutePath().normalize();
+        Path dir = base.resolve(owner).normalize();
+        if (!dir.startsWith(base)) {
+            throw new IllegalStateException("worklog 工作区路径越界（.. 逃逸防护）: " + owner);
+        }
+        try {
+            Files.createDirectories(dir);
+        } catch (IOException e) {
+            throw new IllegalStateException("创建 worklog 工作区目录失败: " + dir, e);
+        }
+        if (Files.isDirectory(dir.resolve(".git"))) {
+            return dir; // 幂等复用：已有空间直接进
+        }
+        Result init = run(dir, OP_TIMEOUT_SEC, null, "init");
+        if (init.exit() != 0) {
+            throw new IllegalStateException("git init 失败: " + tail(init.output()));
+        }
+        writeSkeleton(dir);
+        run(dir, OP_TIMEOUT_SEC, null, "add", "-A");
+        // 骨架 commit 不依赖节点全局 git 身份配置（内联 -c 指定）
+        Result commit = run(dir, OP_TIMEOUT_SEC, null,
+                "-c", "user.name=devmind", "-c", "user.email=devmind@worklog.local",
+                "commit", "-m", "chore: init worklog workspace");
+        if (commit.exit() != 0) {
+            throw new IllegalStateException("worklog 骨架 commit 失败: " + tail(commit.output()));
+        }
+        log.info("worklog 持久工作区已初始化: owner={} dir={}", owner, dir);
+        return dir;
+    }
+
+    /**
+     * CAP-41 worklog 会话结束收口（best-effort）：只检查未提交改动并上报告警——
+     * 目录永不删除、无 push（纯本地 git，commit 由 agent 按 skill 约定执行）。
+     */
+    public void finishWorklog(Path dir, java.util.function.Consumer<String> sink) {
+        if (dir == null || !Files.isDirectory(dir.resolve(".git"))) {
+            return;
+        }
+        try {
+            Result status = run(dir, OP_TIMEOUT_SEC, null, "status", "--porcelain");
+            if (status.exit() == 0 && !status.output().isBlank()) {
+                long n = status.output().lines().filter(l -> !l.isBlank()).count();
+                sink.accept("[工作区] 工作日志空间存在 " + n + " 处未提交改动（agent 未自行 commit），"
+                        + "可在节点上进入 " + dir + " 查看");
+                log.warn("worklog 空间存在未提交改动: dir={} files={}", dir, n);
+            }
+        } catch (Exception e) {
+            log.warn("worklog 收口检查异常: {} err={}", dir, e.getMessage());
+        }
+    }
+
+    /** worklog 空间骨架：目录契约说明 + daily/weekly/entries 占位。 */
+    private static void writeSkeleton(Path dir) {
+        String readme = """
+                # 工作日志空间
+
+                本目录由 DevMind runner 托管（本地 git 维护，无远端）。
+
+                ## 目录契约
+                - `daily/yyyy-MM-dd.md`   日报（一天一份）
+                - `weekly/yyyy-Www.md`    周报（ISO 周，如 2026-W37）
+                - `entries/`              工作条目素材（可选）
+                - `.devmind/output/`      会话成稿回传目录（写这里的内容会自动回传管控台落库）
+
+                改动完成后请 `git add -A && git commit`。
+                """;
+        try {
+            Files.writeString(dir.resolve("README.md"), readme, StandardCharsets.UTF_8);
+            for (String sub : new String[]{"daily", "weekly", "entries"}) {
+                Path d = dir.resolve(sub);
+                Files.createDirectories(d);
+                Files.writeString(d.resolve(".gitkeep"), "", StandardCharsets.UTF_8);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("写 worklog 骨架文件失败: " + dir, e);
+        }
+    }
+
     /** CAP-30 问答结束收口（best-effort）：递归删除沙箱目录。 */
     public void cleanChat(String sessionId, java.util.function.Consumer<String> sink) {
         Path dir = workspaceRoot.resolve("_chat").resolve(sessionId).normalize();

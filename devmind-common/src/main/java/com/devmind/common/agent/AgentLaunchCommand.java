@@ -31,11 +31,16 @@ import java.util.Map;
  *                       null/空 = 全新对话。对话历史在 runner 侧 CLI 配置目录按 cwd 归档，
  *                       进程退出不丢失；id 失效（配置目录已清理）时 CLI 报错退出即 launch 失败。
  *                       旧版 runner 忽略该字段（优雅降级为无对话历史的全新会话）。
+ * @param worklogOwner   CAP-41：kind="worklog" 时的空间归属用户名（管控台账号），runner 据此
+ *                       定位持久工作区 {user.home}/worklog/&lt;owner&gt;。仅 kind="worklog" 有意义；
+ *                       协议 v5+，服务端经 {@code AgentNodeConnector.supports(nodeId, 5)} 门控，
+ *                       老 runner（会忽略本字段并落入兜底目录）不得派发。
  */
 public record AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
                                  String model, String permissionMode, Map<String, String> env,
                                  RepoSpec repo, String kind, List<RepoSpec> repos,
-                                 ContextManifest contextManifest, String resumeSessionId) {
+                                 ContextManifest contextManifest, String resumeSessionId,
+                                 String worklogOwner) {
 
     /** 兼容构造器：CAP-25 及之前的调用点（kind=session，无多库、无上下文）。 */
     public AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
@@ -58,6 +63,15 @@ public record AgentLaunchCommand(String sessionId, String projectId, String task
                               ContextManifest contextManifest) {
         this(sessionId, projectId, taskSpec, model, permissionMode, env, repo, kind, repos,
                 contextManifest, null);
+    }
+
+    /** 兼容构造器：CAP-39 及之前的全参调用点（无 worklogOwner）。 */
+    public AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
+                              String model, String permissionMode, Map<String, String> env,
+                              RepoSpec repo, String kind, List<RepoSpec> repos,
+                              ContextManifest contextManifest, String resumeSessionId) {
+        this(sessionId, projectId, taskSpec, model, permissionMode, env, repo, kind, repos,
+                contextManifest, resumeSessionId, null);
     }
 
     /**

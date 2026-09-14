@@ -8,18 +8,23 @@ package com.devmind.common.agent;
  * event/exit/launched/upgrade/upgrade_ack）；v2 = FR-04~08（对账/GC/版本协商/工具链标签，
  * 均为 hello 可选字段，无新下行帧）；v3 = CAP-36 exec 帧（exec/exec_log/exec_exit，
  * 构建/测试/部署/发版下发 runner 执行）；v4 = CAP-39 collect_output 帧
- * （collect_output/output_collected，进行中会话产出按需即时回传）。</p>
+ * （collect_output/output_collected，进行中会话产出按需即时回传）；
+ * v5 = CAP-41 launch 帧 kind:"worklog"（runner 持久工作区 {user.home}/worklog/&lt;owner&gt;，
+ * 老 runner 不认识会落入 legacy 兜底目录跑偏，故属「必须认识」需门控）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 4;
+    public static final int CURRENT = 5;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
 
     /** CAP-39 collect_output 帧（进行中会话产出按需回传）所需最低版本 */
     public static final int COLLECT_OUTPUT_FRAMES = 4;
+
+    /** CAP-41 launch kind:"worklog"（runner 持久工作区）所需最低版本 */
+    public static final int WORKLOG_KIND = 5;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;
