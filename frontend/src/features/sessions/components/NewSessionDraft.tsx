@@ -23,6 +23,8 @@ export default function NewSessionDraft({
   const [form] = Form.useForm()
   // ProjectContextGate 保证进入本页必有当前项目
   const { projectId, project } = useCurrentProject()
+  // CAP-41：WORKLOG 项目会话无仓库/需求/节点语义（亲和节点锁定、runner 持久工作区），裁剪高级选项
+  const worklog = project?.kind === 'WORKLOG'
   const { scenarios, agentNodes, repos, requirements, workItems } = useSessionOptionData(form, projectId)
   const [text, setText] = useState('')
   const [creating, setCreating] = useState(false)
@@ -71,11 +73,12 @@ export default function NewSessionDraft({
         model: v.model || undefined,
         permissionMode: v.permissionMode || undefined,
         projectId,
-        requirementId: v.requirementId || undefined,
-        workItemId: v.workItemId || undefined,
-        agentNodeId: v.agentNodeId || undefined,
-        requiredLabels: v.requiredLabels?.trim() || undefined,
-        repoIds: v.repoIds?.length ? v.repoIds : undefined,
+        // CAP-41：WORKLOG 项目不带仓库/需求/节点字段（后端按 kind 走 worklog 工作区）
+        requirementId: worklog ? undefined : v.requirementId || undefined,
+        workItemId: worklog ? undefined : v.workItemId || undefined,
+        agentNodeId: worklog ? undefined : v.agentNodeId || undefined,
+        requiredLabels: worklog ? undefined : v.requiredLabels?.trim() || undefined,
+        repoIds: worklog ? undefined : v.repoIds?.length ? v.repoIds : undefined,
       })
       message.success(`会话已创建：${s.id}`)
       setText('')
@@ -91,6 +94,8 @@ export default function NewSessionDraft({
   const optionsForm = (
     <div style={{ width: 380 }}>
       <Form form={form} layout="vertical" size="small" initialValues={DEFAULTS}>
+        {!worklog && (
+        <>
         <Form.Item
           label="关联仓库"
           name="repoIds"
@@ -152,6 +157,8 @@ export default function NewSessionDraft({
             optionFilterProp="label"
           />
         </Form.Item>
+        </>
+        )}
         <Form.Item
           label="场景"
           name="scenarioCode"

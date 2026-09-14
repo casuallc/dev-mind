@@ -1,4 +1,5 @@
 import {
+  Alert,
   Button,
   Card,
   Form,
@@ -13,19 +14,22 @@ import {
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined, SettingOutlined, GithubOutlined, CodeOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, SettingOutlined, GithubOutlined, CodeOutlined, RobotOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   createDaily,
   createEntry,
   createWeekly,
   deleteEntry,
+  ensureWorkspace,
   generateDaily,
   generateWeekly,
   getDaily,
   getSettings,
   getWeekly,
+  getWorkspace,
   listDailyWeek,
   listEntries,
   listWeeklyRecent,
@@ -40,9 +44,11 @@ import type {
   WeeklyReport,
   WorklogEntry,
   WorklogSettings,
+  WorkspaceView,
 } from '../types'
 import { ENTRY_SOURCES, ENTRY_TYPES } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { setCurrentProject } from '../../../app/currentProjectStore'
 import EntryFormDrawer from '../components/EntryFormDrawer'
 import GitImportModal from '../components/GitImportModal'
 import RepoSubscriptionModal from '../components/RepoSubscriptionModal'
@@ -62,7 +68,38 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
  * 个人级页面，不进项目上下文（路由不进 ProjectContextGate）。
  */
 export default function WorklogPage() {
+  const navigate = useNavigate()
   const [view, setView] = useState<View>('entries')
+
+  // ---- CAP-41 工作日志空间：WORKLOG 项目 + runner 持久工作区状态条 ----
+  const [workspace, setWorkspace] = useState<WorkspaceView | null>(null)
+  const [ensuring, setEnsuring] = useState(false)
+  const loadWorkspace = useCallback(() => {
+    getWorkspace()
+      .then(setWorkspace)
+      .catch(() => setWorkspace(null))
+  }, [])
+  useEffect(loadWorkspace, [loadWorkspace])
+
+  const onEnsure = async () => {
+    setEnsuring(true)
+    try {
+      const w = await ensureWorkspace()
+      setWorkspace(w)
+      message.success('工作日志空间已就绪')
+    } catch (e) {
+      showError(e, '初始化失败')
+    } finally {
+      setEnsuring(false)
+    }
+  }
+
+  /** 进入 WORKLOG 项目上下文开 worklog 会话（与 claude 对话记日志） */
+  const openSession = () => {
+    if (!workspace?.projectId) return
+    setCurrentProject(workspace.projectId)
+    navigate('/sessions')
+  }
   // 周报选中周（周条点击切换）+ 周条窗口回退周数（0=最右为本周，滑动/箭头翻页）
   const [date, setDate] = useState<Dayjs>(dayjs())
   const [weeksBack, setWeeksBack] = useState(0)
@@ -409,6 +446,44 @@ export default function WorklogPage() {
         </Space>
       }
     >
+      {workspace && !workspace.exists && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="工作日志空间尚未初始化"
+          description="在 runner 节点上按用户隔离的持久 git 工作区（工作日志/日报/周报由 AI 会话直接写入）。初始化后可通过「打开会话」与 claude 对话记日志。"
+          action={
+            <Button type="primary" loading={ensuring} onClick={onEnsure}>
+              初始化空间
+            </Button>
+          }
+        />
+      )}
+      {workspace?.exists && (
+        <Alert
+          type={workspace.nodeOnline ? 'success' : 'warning'}
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={
+            <Space size={8} wrap>
+              <span>工作日志空间已就绪</span>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                亲和节点 {workspace.agentNodeId}
+                {workspace.nodeOnline ? '（在线）' : '（离线，会话暂不可用）'}
+              </Typography.Text>
+            </Space>
+          }
+          action={
+            <Space>
+              <Button size="small" icon={<ReloadOutlined />} onClick={loadWorkspace} />
+              <Button size="small" type="primary" icon={<RobotOutlined />} onClick={openSession}>
+                打开会话
+              </Button>
+            </Space>
+          }
+        />
+      )}
       {view === 'entries' && (
         <>
           <Typography.Paragraph type="secondary">

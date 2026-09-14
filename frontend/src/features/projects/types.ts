@@ -20,6 +20,8 @@ export interface Project {
   contextSummary?: string
   summaryGeneratedAt?: string
   ownerId?: string
+  /** CAP-41：项目种类（NORMAL / WORKLOG——工作日志空间，runner 持久工作区，无仓库语义） */
+  kind?: string
   createdAt: string
   updatedAt: string
 }

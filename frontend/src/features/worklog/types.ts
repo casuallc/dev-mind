@@ -107,6 +107,16 @@ export interface GenerateAck {
   running: boolean
 }
 
+/** CAP-41 工作日志空间：WORKLOG 项目 + runner 持久工作区状态 */
+export interface WorkspaceView {
+  exists: boolean
+  projectId?: string
+  projectName?: string
+  path?: string
+  agentNodeId?: string
+  nodeOnline?: boolean
+}
+
 export const ENTRY_TYPES: Record<string, string> = {
   DEV: '开发',
   SUPPORT: '支持',

@@ -16,10 +16,12 @@ import {
   ApiOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { useEffect, useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import AppHeader from './AppHeader'
 import ProjectSwitcher from './ProjectSwitcher'
 import { menuSelectedKey } from './menuSelectedKey'
+import { getCurrentProjectId, subscribeCurrentProject } from './currentProjectStore'
+import { getProject } from '../features/projects/api'
 import { startNotificationStream, stopNotificationStream } from '../features/notifications/store'
 import { getUserSnapshot, isAdmin, subscribeAuth } from '../features/auth/authStore'
 
@@ -30,6 +32,25 @@ export default function AppLayout() {
   const location = useLocation()
   // 认证态变化（登录/退出/刷新轮换）时重渲染菜单与用户区
   useSyncExternalStore(subscribeAuth, getUserSnapshot)
+  // CAP-41：当前项目为 WORKLOG（工作日志空间）时裁剪代码类菜单（需求/构建/部署/测试/发版）
+  const currentProjectId = useSyncExternalStore(subscribeCurrentProject, getCurrentProjectId)
+  const [currentKind, setCurrentKind] = useState<string | null>(null)
+  useEffect(() => {
+    setCurrentKind(null)
+    if (!currentProjectId) return
+    let alive = true
+    getProject(currentProjectId)
+      .then((p) => {
+        if (alive) setCurrentKind(p.kind ?? 'NORMAL')
+      })
+      .catch(() => {
+        if (alive) setCurrentKind(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [currentProjectId])
+  const worklogProject = currentKind === 'WORKLOG'
 
   // 启动全局通知实时流（铃铛角标/浏览器通知依赖它）
   useEffect(() => {
@@ -59,12 +80,16 @@ export default function AppLayout() {
               children: [
                 { key: '/overview', icon: <HomeOutlined />, label: '概览' },
                 { key: '/sessions', icon: <RobotOutlined />, label: '会话' },
-                { key: '/requirements', icon: <BulbOutlined />, label: '需求' },
-                { key: '/context', icon: <DatabaseOutlined />, label: '知识' },
-                { key: '/builds', icon: <ToolOutlined />, label: '构建' },
-                { key: '/deployments', icon: <DeploymentUnitOutlined />, label: '部署' },
-                { key: '/tests', icon: <ExperimentOutlined />, label: '测试' },
-                { key: '/releases', icon: <RocketOutlined />, label: '发版' },
+                ...(!worklogProject
+                  ? [
+                      { key: '/requirements', icon: <BulbOutlined />, label: '需求' },
+                      { key: '/context', icon: <DatabaseOutlined />, label: '知识' },
+                      { key: '/builds', icon: <ToolOutlined />, label: '构建' },
+                      { key: '/deployments', icon: <DeploymentUnitOutlined />, label: '部署' },
+                      { key: '/tests', icon: <ExperimentOutlined />, label: '测试' },
+                      { key: '/releases', icon: <RocketOutlined />, label: '发版' },
+                    ]
+                  : [{ key: '/context', icon: <DatabaseOutlined />, label: '知识' }]),
               ],
             },
             {

@@ -10,6 +10,7 @@ import type {
   WorklogEntry,
   WorklogRepo,
   WorklogSettings,
+  WorkspaceView,
 } from './types'
 
 // ---- 全局代码仓库（CAP-29 起登记在 /admin/repos；此处仅列表 + 本人订阅勾选） ----
@@ -56,6 +57,10 @@ export const generateWeekly = (weekStart: string, force = false) =>
   api.post<GenerateAck>('/worklog/weekly/generate', { weekStart, force })
 export const updateWeekly = (id: number, body: { summaryMd?: string; nextPlanMd?: string; status?: string }) =>
   api.put<WeeklyReport>(`/worklog/weekly/${id}`, body)
+
+// ---- CAP-41 工作日志空间（WORKLOG 项目 + runner 持久工作区） ----
+export const getWorkspace = () => api.get<WorkspaceView>('/worklog/workspace')
+export const ensureWorkspace = () => api.post<WorkspaceView>('/worklog/workspace/ensure', {})
 
 // ---- 个人设置 ----
 export const getSettings = () => api.get<WorklogSettings>('/worklog/settings')

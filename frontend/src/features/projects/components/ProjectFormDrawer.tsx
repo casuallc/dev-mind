@@ -40,6 +40,8 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
   }, [open])
   // 编辑存量项目时禁用来源切换（sourceType 创建后不可变，避免目录语义混乱）
   const editing = project != null
+  // CAP-41：WORKLOG 项目仅名称/标签/描述可改——path/状态/执行节点均为系统管理（亲和红线）
+  const worklog = project?.kind === 'WORKLOG'
 
   useEffect(() => {
     if (!open) return
@@ -79,7 +81,10 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
         agentNodeId: values.agentNodeId ?? '',
       }
       if (project) {
-        await updateProject(project.id, payload)
+        // CAP-41：WORKLOG 项目只提交可编辑字段（path/status/agentNodeId 由系统锁定，后端守卫）
+        await updateProject(project.id, worklog
+          ? { name: values.name, tags: values.tags ?? [], description: values.description }
+          : payload)
         message.success('已更新')
       } else {
         await createProject(payload)
@@ -115,6 +120,8 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
         <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入名称' }]}>
           <Input placeholder="如 在线商城后端" />
         </Form.Item>
+        {!worklog && (
+        <>
         <Form.Item
           label="仓库来源"
           name="sourceType"
@@ -169,12 +176,16 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
         >
           <Input placeholder="master / main" />
         </Form.Item>
+        </>
+        )}
         <Form.Item label="标签" name="tags" extra="如 java/spring/frontend，供知识库注入筛选">
           <Select mode="tags" placeholder="输入后回车添加" open={false} suffixIcon={null} />
         </Form.Item>
         <Form.Item label="描述" name="description">
           <Input.TextArea rows={2} placeholder="项目职责、目标（可选）" />
         </Form.Item>
+        {!worklog && (
+        <>
         <Form.Item label="状态" name="status">
           <Select options={STATUS_OPTIONS} />
         </Form.Item>
@@ -206,6 +217,8 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
             notFoundContent="暂无节点（后台 → Agent 节点 注册）"
           />
         </Form.Item>
+        </>
+        )}
       </Form>
     </Drawer>
   )

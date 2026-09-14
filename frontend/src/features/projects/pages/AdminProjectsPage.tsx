@@ -111,6 +111,8 @@ export default function AdminProjectsPage() {
           {r.sourceType === 'CLONE' && r.cloneStatus && (
             <Tag color={CLONE_STATUS_COLOR[r.cloneStatus]}>{r.cloneStatus}</Tag>
           )}
+          {/* CAP-41：工作日志空间徽标（WORKLOG 特殊项目） */}
+          {r.kind === 'WORKLOG' && <Tag color="purple">日志</Tag>}
         </Space>
       ),
     },
@@ -167,9 +169,12 @@ export default function AdminProjectsPage() {
           <Button size="small" onClick={() => openEdit(r)}>
             编辑
           </Button>
-          <Button size="small" danger onClick={() => confirmDelete(r)}>
-            删除
-          </Button>
+          {/* CAP-41：WORKLOG 项目禁止删除（防孤儿化 runner 侧日志数据），后端同样 409 */}
+          {r.kind !== 'WORKLOG' && (
+            <Button size="small" danger onClick={() => confirmDelete(r)}>
+              删除
+            </Button>
+          )}
         </Space>
       ),
     },
