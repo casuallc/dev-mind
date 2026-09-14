@@ -6,6 +6,7 @@ import type {
   EntryPayload,
   GenerateAck,
   GitPreview,
+  TemplateDefaults,
   WeeklyReport,
   WorklogEntry,
   WorklogRepo,
@@ -66,3 +67,5 @@ export const ensureWorkspace = () => api.post<WorkspaceView>('/worklog/workspace
 export const getSettings = () => api.get<WorklogSettings>('/worklog/settings')
 export const updateSettings = (body: Partial<WorklogSettings>) =>
   api.put<WorklogSettings>('/worklog/settings', body)
+/** CAP-41 FR-05：内置默认模板（编辑器「填入默认」用） */
+export const getDefaultTemplates = () => api.get<TemplateDefaults>('/worklog/settings/templates/default')

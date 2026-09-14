@@ -100,11 +100,22 @@ export interface WorklogSettings {
   autoDaily: boolean
   autoWeekly: boolean
   dailyMinutesTarget?: number
+  /** CAP-41 FR-05：日报格式模板；null/undefined = 内置默认（见 TemplateDefaults） */
+  dailyTemplateMd?: string | null
+  /** CAP-41 FR-05：周报格式模板；null/undefined = 内置默认 */
+  weeklyTemplateMd?: string | null
 }
 
+/** 内置默认模板（GET /worklog/settings/templates/default），模板编辑器「填入默认」用 */
+export interface TemplateDefaults {
+  dailyTemplateMd: string
+  weeklyTemplateMd: string
+}
+
+/** CAP-41 FR-03：生成受理回执——sessionId 为生成会话；reused=true 表示已有报告直接复用 */
 export interface GenerateAck {
-  accepted: boolean
-  running: boolean
+  sessionId?: string
+  reused?: boolean
 }
 
 /** CAP-41 工作日志空间：WORKLOG 项目 + runner 持久工作区状态 */

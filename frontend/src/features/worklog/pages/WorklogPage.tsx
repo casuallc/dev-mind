@@ -27,6 +27,7 @@ import {
   generateDaily,
   generateWeekly,
   getDaily,
+  getDefaultTemplates,
   getSettings,
   getWeekly,
   getWorkspace,
@@ -250,15 +251,19 @@ export default function WorklogPage() {
     setPage(1)
   }
 
-  // 生成是异步的（后端 {accepted, running}）：提交后轮询直到报告出现
+  // 生成 = 创建 worklog 会话（CAP-41）：受理返回 {sessionId, reused}，成稿随会话结束回传落镜像，
+  // 前端轮询 GET 报告直到镜像出现（reused 表示已有报告未重新生成）
   const onGenerate = async (kind: 'daily' | 'weekly', force: boolean) => {
     setGenerating(true)
     const prevDailyUpdatedAt = daily?.updatedAt
     try {
-      if (kind === 'daily') await generateDaily(dayStr, force)
-      else await generateWeekly(weekStartStr, force)
-      message.info('AI 生成中，完成后自动刷新…')
-      for (let i = 0; i < 60; i++) {
+      const ack = kind === 'daily' ? await generateDaily(dayStr, force) : await generateWeekly(weekStartStr, force)
+      if (ack.reused) {
+        message.info('已存在该报告，未重复生成（如需重生成请使用强制重新生成）')
+        return
+      }
+      message.info(`生成会话已创建${ack.sessionId ? `（${ack.sessionId}）` : ''}，完成后自动刷新…`)
+      for (let i = 0; i < 150; i++) {
         await sleep(2000)
         const r = kind === 'daily' ? await getDaily(dayStr) : await getWeekly(weekStartStr)
         if (r && (force ? r.updatedAt !== (kind === 'daily' ? prevDailyUpdatedAt : weekly?.updatedAt) : true)) {
@@ -333,10 +338,22 @@ export default function WorklogPage() {
         autoDaily: s.autoDaily,
         autoWeekly: s.autoWeekly,
         dailyHoursTarget: s.dailyMinutesTarget != null ? s.dailyMinutesTarget / 60 : undefined,
+        dailyTemplateMd: s.dailyTemplateMd ?? '',
+        weeklyTemplateMd: s.weeklyTemplateMd ?? '',
       })
       setSettingsOpen(true)
     } catch (e) {
       showError(e, '加载设置失败')
+    }
+  }
+
+  // 模板留空 = 回退内置默认；「填入默认」拉取内置模板进编辑器便于在其基础上改
+  const fillDefaultTemplate = async (field: 'dailyTemplateMd' | 'weeklyTemplateMd') => {
+    try {
+      const d = await getDefaultTemplates()
+      settingsForm.setFieldsValue({ [field]: field === 'dailyTemplateMd' ? d.dailyTemplateMd : d.weeklyTemplateMd })
+    } catch (e) {
+      showError(e, '获取默认模板失败')
     }
   }
 
@@ -347,6 +364,8 @@ export default function WorklogPage() {
         autoDaily: v.autoDaily,
         autoWeekly: v.autoWeekly,
         dailyMinutesTarget: v.dailyHoursTarget != null ? Math.round(v.dailyHoursTarget * 60) : undefined,
+        dailyTemplateMd: v.dailyTemplateMd,
+        weeklyTemplateMd: v.weeklyTemplateMd,
       })
       message.success('设置已保存')
       setSettingsOpen(false)
@@ -720,6 +739,7 @@ export default function WorklogPage() {
         onOk={saveSettings}
         onCancel={() => setSettingsOpen(false)}
         destroyOnHidden
+        width={640}
       >
         <Form form={settingsForm} layout="vertical">
           <Form.Item name="autoDaily" label="每天自动生成日报草稿" valuePropName="checked" extra="默认 18:30（服务端 cron 可配）">
@@ -730,6 +750,34 @@ export default function WorklogPage() {
           </Form.Item>
           <Form.Item name="dailyHoursTarget" label="每日工时目标（小时）">
             <InputNumber min={0} max={24} step={0.5} style={{ width: '100%' }} placeholder="如 8" />
+          </Form.Item>
+          <Form.Item
+            name="dailyTemplateMd"
+            label="日报格式模板"
+            extra={
+              <>
+                占位符：{'{{date}}'} / {'{{entries}}'} / {'{{commits}}'}；留空 = 内置默认。
+                <Button type="link" size="small" onClick={() => fillDefaultTemplate('dailyTemplateMd')}>
+                  填入内置默认
+                </Button>
+              </>
+            }
+          >
+            <Input.TextArea rows={7} placeholder="留空使用内置默认模板" style={{ fontFamily: 'monospace' }} />
+          </Form.Item>
+          <Form.Item
+            name="weeklyTemplateMd"
+            label="周报格式模板"
+            extra={
+              <>
+                占位符：{'{{weekRange}}'} / {'{{entries}}'} / {'{{commits}}'}；留空 = 内置默认。
+                <Button type="link" size="small" onClick={() => fillDefaultTemplate('weeklyTemplateMd')}>
+                  填入内置默认
+                </Button>
+              </>
+            }
+          >
+            <Input.TextArea rows={8} placeholder="留空使用内置默认模板" style={{ fontFamily: 'monospace' }} />
           </Form.Item>
         </Form>
       </Modal>
