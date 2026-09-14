@@ -6,6 +6,8 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 
@@ -36,6 +38,16 @@ public class WorklogUserSettingsEntity {
     @Column(name = "daily_minutes_target")
     private Integer dailyMinutesTarget;
 
+    /** CAP-41 FR-05：日报格式模板（null/空白 = 内置默认，见 WorklogTemplates） */
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @Column(name = "daily_template_md", length = 16_777_216)
+    private String dailyTemplateMd;
+
+    /** CAP-41 FR-05：周报格式模板（null/空白 = 内置默认） */
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @Column(name = "weekly_template_md", length = 16_777_216)
+    private String weeklyTemplateMd;
+
     @Column(name = "updated_at")
     private Instant updatedAt;
 
@@ -49,6 +61,10 @@ public class WorklogUserSettingsEntity {
     public void setAutoWeekly(Boolean autoWeekly) { this.autoWeekly = autoWeekly; }
     public Integer getDailyMinutesTarget() { return dailyMinutesTarget; }
     public void setDailyMinutesTarget(Integer dailyMinutesTarget) { this.dailyMinutesTarget = dailyMinutesTarget; }
+    public String getDailyTemplateMd() { return dailyTemplateMd; }
+    public void setDailyTemplateMd(String dailyTemplateMd) { this.dailyTemplateMd = dailyTemplateMd; }
+    public String getWeeklyTemplateMd() { return weeklyTemplateMd; }
+    public void setWeeklyTemplateMd(String weeklyTemplateMd) { this.weeklyTemplateMd = weeklyTemplateMd; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
 }

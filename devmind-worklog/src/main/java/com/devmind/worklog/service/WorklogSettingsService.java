@@ -10,7 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 
-/** CAP-28：个人工时开关设置（无设置行 = 默认全开）。 */
+/** CAP-28：个人工时开关设置（无设置行 = 默认全开）；CAP-41 FR-05：日报/周报格式模板。 */
 @Service
 public class WorklogSettingsService {
 
@@ -45,7 +45,25 @@ public class WorklogSettingsService {
         if (req.dailyMinutesTarget() != null) {
             e.setDailyMinutesTarget(req.dailyMinutesTarget());
         }
+        if (req.dailyTemplateMd() != null) {
+            e.setDailyTemplateMd(normalizeTemplate(req.dailyTemplateMd()));
+        }
+        if (req.weeklyTemplateMd() != null) {
+            e.setWeeklyTemplateMd(normalizeTemplate(req.weeklyTemplateMd()));
+        }
         e.setUpdatedAt(Instant.now());
         return SettingsView.of(settingsRepo.save(e));
+    }
+
+    /** 模板取值（生成用）：无设置行或空白 → null（调用方回退内置默认）。 */
+    public String templateOf(String username, boolean daily) {
+        return settingsRepo.findByUserId(username)
+                .map(s -> daily ? s.getDailyTemplateMd() : s.getWeeklyTemplateMd())
+                .orElse(null);
+    }
+
+    /** 空白 → null（= 回退内置默认），避免空串与 null 两种语义并存。 */
+    private static String normalizeTemplate(String t) {
+        return t == null || t.isBlank() ? null : t;
     }
 }
