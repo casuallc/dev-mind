@@ -36,7 +36,12 @@ runner：{user.home}/worklog/<console-username>/   ← 持久目录，本地 git
 - **FR-01 WORKLOG 项目**：`projects` 增 `kind` 列（NORMAL 默认 / WORKLOG）。首次进
   /worklog 或首次触发生成时按当前用户懒创建（name=「工作日志」、owner=该用户、
   path 存逻辑占位 `worklog://<username>`，跳过 CAP-02 `git rev-parse` 校验）。
-  项目列表默认过滤 WORKLOG 行；进入 /worklog 即定位本人项目。**节点亲和**：
+  **可见、可进、可用，但危险操作收敛**（2026-09-14 定稿口径）：
+  - `/projects` 只读列表正常显示（带「日志」徽标），可「进入」切换为当前项目；
+    项目工作区会话/上下文页签照常可用，仓库/构建/部署/测试/发版等代码类页签隐藏；
+  - 后台编辑仅放行名称/标签；**path 只读、执行节点锁定**（亲和红线，见下）；
+  - **删除/归档禁止**：接口层 409 + 前端不出按钮（防孤儿化 runner 侧日志数据）；
+  - 创建会话表单对该 kind 隐藏分支/仓库字段，场景默认选中「工作日志」。**节点亲和**：
   创建时把路由节点固化进 `agent_node_id`（事实源在节点本地，换节点=换事实源），
   之后不可改；该节点离线 → 会话创建 409 明确提示，不静默落到别的节点。
 - **FR-02 runner 持久工作区**：launch 帧 `kind:"worklog"`（协议新版本门控，见 §5）。
@@ -78,7 +83,8 @@ runner：{user.home}/worklog/<console-username>/   ← 持久目录，本地 git
   - 「空间」信息条：WORKLOG 项目状态、亲和节点在线态、runner 目录路径（会话事件
     流可见）、「打开会话」入口（直接起 worklog 会话与 claude 对话记日志）；
   - 设置页加日报/周报模板编辑器（FR-05）；
-  - 项目工作区「上下文」页签对 WORKLOG 项目照常可用（场景/skill 可视化）。
+  - 项目列表徽标与工作区页签裁剪（代码类页签隐藏）、会话表单字段裁剪
+    （FR-01 可见性口径）；
 
 ## 3. 关键设计
 
@@ -127,8 +133,9 @@ GET/PUT /api/worklog/settings               + dailyTemplateMd / weeklyTemplateMd
 
 ## 7. 验收标准
 
-1. 新用户首次进 /worklog 自动建好 WORKLOG 项目；亲和节点在线时可「打开会话」，runner
-   侧出现 `{user.home}/worklog/<username>/` 且 `git log` 有骨架 commit；
+1. 新用户首次进 /worklog 自动建好 WORKLOG 项目；项目在 /projects 列表可见带「日志」
+   徽标，可进入工作区开会话；删除/归档/改 path/换节点被拒绝（409）；
+   亲和节点在线时 runner 侧出现 `{user.home}/worklog/<username>/` 且 `git log` 有骨架 commit；
 2. 该目录下起第二个并发会话被 409；会话结束目录仍在、不被 GC；
 3. 触发日报生成：claude 会话写 `daily/yyyy-MM-dd.md` 并 commit，exit 后 DB 出现同日
    DRAFT 镜像 + 站内通知；重复触发幂等不重复落库；
