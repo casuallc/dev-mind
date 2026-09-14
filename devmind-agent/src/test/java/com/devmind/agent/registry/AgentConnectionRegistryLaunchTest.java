@@ -110,5 +110,19 @@ class AgentConnectionRegistryLaunchTest {
                 "s1", null, "", null, "acceptEdits", Map.of(),
                 null, "chat", null, null, "cli-abc-123"));
         assertTrue(payload.contains("\"resumeSessionId\":\"cli-abc-123\""), payload);
+        // CAP-41：非 worklog 会话不带 worklogOwner
+        assertFalse(payload.contains("worklogOwner"), payload);
+    }
+
+    @Test
+    void serializesWorklogOwnerForWorklogKind() throws Exception {
+        String payload = launchAndCapture(new AgentLaunchCommand(
+                "s1", "proj-wl", "写日报", null, "acceptEdits", Map.of(),
+                null, "worklog", null, null, null, "zhangsan"));
+        assertTrue(payload.contains("\"kind\":\"worklog\""), payload);
+        assertTrue(payload.contains("\"worklogOwner\":\"zhangsan\""), payload);
+        // worklog 会话无仓库块
+        assertFalse(payload.contains("\"repo\""), payload);
+        assertFalse(payload.contains("\"repos\""), payload);
     }
 }
