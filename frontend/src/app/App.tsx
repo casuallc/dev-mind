@@ -34,6 +34,7 @@ import IntegrationsPage from '../features/integrations/pages/IntegrationsPage'
 import ApiKeysPage from '../features/open-api/pages/ApiKeysPage'
 import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
+import HomePage from '../features/home/pages/HomePage'
 import WorklogPage from '../features/worklog/pages/WorklogPage'
 import ChatsBoard from '../features/chat/pages/ChatsBoard'
 import AttachmentsPage from '../features/attachments/pages/AttachmentsPage'
@@ -73,7 +74,9 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route path="/" element={<Navigate to="/overview" replace />} />
+          <Route path="/" element={<Navigate to="/home" replace />} />
+          {/* 个人聚合首页（默认落地页） */}
+          <Route path="/home" element={<HomePage />} />
           {/* CAP-35 个人设置：第三方账号（旧 Git 凭证路径兼容跳转） */}
           <Route path="/me/accounts" element={<PlatformAccountsPage />} />
           <Route path="/me/git-credentials" element={<Navigate to="/me/accounts" replace />} />
