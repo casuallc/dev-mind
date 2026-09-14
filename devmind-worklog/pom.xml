@@ -21,6 +21,11 @@
             <groupId>com.devmind</groupId>
             <artifactId>devmind-auth</artifactId>
         </dependency>
+        <!-- CAP-41：WORKLOG 特殊项目懒创建/查询（项目域由 project 模块持有，对照 session 模块先例直接依赖） -->
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-project</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
