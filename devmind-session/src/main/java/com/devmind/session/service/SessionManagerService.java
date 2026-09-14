@@ -4,6 +4,7 @@ import com.devmind.common.agent.AgentEventFrame;
 import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.AgentCollectResult;
+import com.devmind.common.agent.AgentProtocol;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
@@ -18,6 +19,7 @@ import com.devmind.project.workspace.WorkspaceService;
 import com.devmind.project.RequirementService;
 import com.devmind.project.WorkItemService;
 import com.devmind.project.model.Project;
+import com.devmind.project.model.ProjectEntity;
 import com.devmind.project.model.RequirementEntity;
 import com.devmind.project.model.WorkItemEntity;
 import com.devmind.project.dto.RepoView;
@@ -222,8 +224,20 @@ public class SessionManagerService {
             workItem = autoCreateWorkItem(req, requirement);
         }
         Project project = resolveProject(projectId);
+        // CAP-41：WORKLOG 项目会话——runner 持久工作区（kind:"worklog"），无仓库/分支语义，
+        // 同一空间同时仅允许一个 RUNNING 会话（多会话共享同一目录，防写冲突）
+        boolean worklog = project != null && ProjectEntity.KIND_WORKLOG.equals(project.kind());
+        if (worklog) {
+            boolean hasRunning = sessionRepo.findByProjectIdOrderByCreatedAtDesc(project.id()).stream()
+                    .anyMatch(s -> SessionState.RUNNING.name().equals(s.getStatus()));
+            if (hasRunning) {
+                throw new DevMindException(ErrorCode.CONFLICT,
+                        "该工作日志空间已有进行中的会话（同一空间共享目录，同时只允许一个会话）");
+            }
+        }
         String id = shortId();
-        String baseBranch = req.baseBranch() != null && !req.baseBranch().isBlank()
+        String baseBranch = worklog ? ""
+                : req.baseBranch() != null && !req.baseBranch().isBlank()
                 ? req.baseBranch()
                 : (project != null ? project.baseBranch() : "");
         ensureCapacity();
@@ -251,10 +265,18 @@ public class SessionManagerService {
                 && !project.agentNodeId().isBlank() ? project.agentNodeId() : null;
         String agentNodeId = routeAgentNode(req.agentNodeId(), scenarioNodeId, projectDefault,
                 platformDefaultNodeId(), requiredLabels, connector, req.requiredLabels());
+        // CAP-41：worklog 会话属「必须认识」的新 kind——老 runner 会落入 legacy 兜底目录跑偏，
+        // 协议 v5 门控，不足直接 409 提示升级（fail-visible，不静默降级）
+        if (worklog && !connector.supports(agentNodeId, AgentProtocol.WORKLOG_KIND)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 runner 版本过低，不支持工作日志空间（需协议 v5+），请升级该节点 runner");
+        }
 
         // CAP-31：会话仓库快照（创建时从 project_repos 拷值，生命周期以快照为准）；
         // 空 = 项目无仓库行（兼容旧单库路径，按 projects 镜像列跑）
-        List<SessionRepoEntity> repoRows = resolveRepoSnapshot(project, req, id, baseBranch);
+        // CAP-41：WORKLOG 项目无仓库语义，跳过快照
+        List<SessionRepoEntity> repoRows = worklog ? List.of()
+                : resolveRepoSnapshot(project, req, id, baseBranch);
 
         // CAP-34：服务端不建 worktree、不做本机知识注入——工作区与上下文物化均在 runner 侧
         // （launch 帧 repos + contextManifest，runner 拉包物化，见 SessionContextService）
@@ -279,13 +301,16 @@ public class SessionManagerService {
         runtimes.put(id, remoteRt);
         try {
             // CAP-31：repos=全量快照（含 name，新 runner 多库模式）；repo=首个（主库）保持旧 runner 降级
-            List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(project, repoRows, baseBranch,
-                    worktreeManager.branchFor(id), identityService.currentActor());
+            // CAP-41：worklog 会话无仓库块，kind="worklog" + worklogOwner=项目归属用户（runner 目录隔离键）
+            List<AgentLaunchCommand.RepoSpec> specs = worklog ? List.of()
+                    : buildRepoSpecs(project, repoRows, baseBranch,
+                            worktreeManager.branchFor(id), identityService.currentActor());
             // CAP-34 FR-03：上下文包清单随帧下发，runner 凭 manifest 拉包物化
             connector.launch(agentNodeId, new AgentLaunchCommand(
                     id, project != null ? project.id() : null, taskSpec, model, pm, gitEnv,
-                    specs.isEmpty() ? null : specs.get(0), "session",
-                    specs.size() > 1 ? specs : null, prepared != null ? prepared.manifest() : null));
+                    specs.isEmpty() ? null : specs.get(0), worklog ? "worklog" : "session",
+                    specs.size() > 1 ? specs : null, prepared != null ? prepared.manifest() : null,
+                    null, worklog ? project.ownerId() : null));
         } catch (Exception e) {
             runtimes.remove(id);
             if (e instanceof DevMindException de) {
@@ -447,10 +472,18 @@ public class SessionManagerService {
             SessionContextService.Prepared prepared = null;
             try {
                 Project proj = resolveProject(ent.getProjectId());
+                // CAP-41：WORKLOG 项目 resume 同样走 worklog 持久工作区（无仓库快照/分支），
+                // 协议 v5 门控与创建一致（老 runner 不派发，fail-visible）
+                boolean worklog = proj != null && ProjectEntity.KIND_WORKLOG.equals(proj.kind());
+                if (worklog && !connector.supports(ent.getAgentNodeId(), AgentProtocol.WORKLOG_KIND)) {
+                    throw new DevMindException(ErrorCode.CONFLICT,
+                            "节点 runner 版本过低，不支持工作日志空间（需协议 v5+），请升级该节点 runner");
+                }
                 // CAP-31：从快照重建远程工作区描述（仓库可能已改名/改 URL，会话以创建时为准）
-                List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(proj,
-                        sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(id), ent.getBaseBranch(),
-                        worktreeManager.branchFor(id), ent.getCreatedBy());
+                List<AgentLaunchCommand.RepoSpec> specs = worklog ? List.of()
+                        : buildRepoSpecs(proj,
+                                sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(id), ent.getBaseBranch(),
+                                worktreeManager.branchFor(id), ent.getCreatedBy());
                 // CAP-33：resume 按落库 scenarioCode 重渲染重装配（修复此前用未渲染原文重装配的
                 // 偏差；场景已删降级按原文；③层请求追加为创建时一次性，resume 不重放）；
                 // resume = 重新注入（hitCount 再累计一次，与创建同语义）
@@ -464,10 +497,10 @@ public class SessionManagerService {
                         id, ent.getProjectId(), renderedTask, ent.getModel(),
                         pm,
                         resolveGitEnv(ent.getCreatedBy(), proj),
-                        specs.isEmpty() ? null : specs.get(0), "session",
+                        specs.isEmpty() ? null : specs.get(0), worklog ? "worklog" : "session",
                         specs.size() > 1 ? specs : null,
                         prepared != null ? prepared.manifest() : null,
-                        ent.getCliSessionId()));
+                        ent.getCliSessionId(), worklog ? proj.ownerId() : null));
             } catch (Exception e) {
                 runtimes.remove(id);
                 if (e instanceof DevMindException de) {
