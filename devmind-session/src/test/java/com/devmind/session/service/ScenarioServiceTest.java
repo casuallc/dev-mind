@@ -117,7 +117,7 @@ class ScenarioServiceTest {
         ScenarioService svc = service(new LinkedHashMap<>(), List.of());
         SessionScenarioEntity s = new SessionScenarioEntity();
         s.setPromptSkeleton("任务:{{task}}|项目:{{project}}|分支:{{branch}}|需求:{{requirement}}");
-        Project project = new Project("p1", "商城", null, "main", List.of(), null);
+        Project project = new Project("p1", "商城", null, "main", List.of(), null, "NORMAL", null);
         assertEquals("任务:修bug|项目:商城|分支:main|需求:登录改造",
                 svc.render(s, "修bug", project, "登录改造"));
         // null 安全：task/project/requirement 全空 → 占位符渲染为空串

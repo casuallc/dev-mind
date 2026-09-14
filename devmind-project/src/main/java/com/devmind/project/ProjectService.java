@@ -147,6 +147,10 @@ public class ProjectService {
      */
     private void migrateProjectRepos() {
         for (ProjectEntity p : projectRepo.findAll()) {
+            // CAP-41：WORKLOG 项目无仓库语义（path 是 worklog:// 逻辑占位），不补仓库行
+            if (ProjectEntity.KIND_WORKLOG.equals(p.getKind())) {
+                continue;
+            }
             if (p.getPath() == null || p.getPath().isBlank() || repoRepo.countByProjectId(p.getId()) > 0) {
                 continue;
             }
@@ -239,8 +243,22 @@ public class ProjectService {
 
     public ProjectView update(String id, ProjectRequest req) {
         ProjectEntity e = requireEntity(id);
+        // CAP-41：WORKLOG 项目收敛危险操作——path/执行节点（亲和红线）/归档均锁定，仅名称/标签/描述可改
+        boolean worklog = ProjectEntity.KIND_WORKLOG.equals(e.getKind());
+        if (worklog && req.path() != null && !req.path().isBlank() && !req.path().equals(e.getPath())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "工作日志项目的存储位置由系统管理，不可修改");
+        }
+        if (worklog && req.status() != null && !req.status().isBlank()
+                && !req.status().equalsIgnoreCase(e.getStatus())) {
+            throw new DevMindException(ErrorCode.CONFLICT, "工作日志项目不可归档/停用");
+        }
+        if (worklog && req.agentNodeId() != null
+                && !java.util.Objects.equals(blankToNull(req.agentNodeId()), e.getAgentNodeId())) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "工作日志项目的执行节点为亲和节点（日志数据在该节点本地），不可修改");
+        }
         boolean cloneProject = ProjectRepoEntity.SOURCE_CLONE.equals(e.getSourceType());
-        if (req.path() != null && !req.path().isBlank()) {
+        if (req.path() != null && !req.path().isBlank() && !worklog) {
             if (cloneProject) {
                 throw new DevMindException(ErrorCode.BAD_REQUEST, "克隆项目的仓库路径由系统管理，不可修改");
             }
@@ -303,6 +321,11 @@ public class ProjectService {
     @Transactional
     public void delete(String id) {
         ProjectEntity e = requireEntity(id);
+        // CAP-41：WORKLOG 项目禁止删除——runner 侧日志数据（{user.home}/worklog/<user>）会失去归属
+        if (ProjectEntity.KIND_WORKLOG.equals(e.getKind())) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "工作日志项目不可删除（runner 节点上的日志数据会失去归属）");
+        }
         repoRepo.deleteByProjectId(id);
         relationRepo.deleteByProjectId(id);
         workItemRepo.deleteByProjectId(id);
@@ -318,6 +341,40 @@ public class ProjectService {
             log.warn("克隆项目已删除，工作区目录保留待人工清理: {}", workspaceRoot().resolve(id));
         }
         log.info("项目已删除: id={} name={}", id, e.getName());
+    }
+
+    // ---------------- CAP-41 WORKLOG 项目（工作日志空间） ----------------
+
+    /** 按归属用户查 WORKLOG 项目（每用户至多一个）。 */
+    public Optional<ProjectEntity> findWorklogByOwner(String ownerId) {
+        return projectRepo.findByKindAndOwnerId(ProjectEntity.KIND_WORKLOG, ownerId);
+    }
+
+    /**
+     * CAP-41 FR-01：懒创建用户 WORKLOG 项目（幂等——已存在直接返回，亲和节点不回改）。
+     * path 存逻辑占位 {@code worklog://<owner>}（真实目录在 runner 侧 {user.home}/worklog/<owner>），
+     * 无仓库行、无 git 校验；亲和节点创建时固化进 agent_node_id（事实源在节点本地，不可改）。
+     */
+    public synchronized ProjectView ensureWorklogProject(String ownerId, String agentNodeId) {
+        Optional<ProjectEntity> existing = findWorklogByOwner(ownerId);
+        if (existing.isPresent()) {
+            return toView(existing.get());
+        }
+        ProjectEntity e = new ProjectEntity();
+        e.setId(shortId());
+        e.setName("工作日志");
+        e.setPath("worklog://" + ownerId);
+        e.setKind(ProjectEntity.KIND_WORKLOG);
+        e.setStatus(STATUS_ACTIVE);
+        e.setAgentNodeId(agentNodeId);
+        e.setOwnerId(ownerId);
+        e.setCreatedBy(ownerId);
+        Instant now = Instant.now();
+        e.setCreatedAt(now);
+        e.setUpdatedAt(now);
+        projectRepo.save(e);
+        log.info("CAP-41 WORKLOG 项目已创建: id={} owner={} affinityNode={}", e.getId(), ownerId, agentNodeId);
+        return toView(e);
     }
 
     // ---------------- 会话兼容 ----------------
@@ -836,7 +893,7 @@ public class ProjectService {
 
     private Project toRecord(ProjectEntity e) {
         return new Project(e.getId(), e.getName(), e.getPath(), e.getDefaultBranch(), splitTags(e.getTags()),
-                e.getAgentNodeId());
+                e.getAgentNodeId(), e.getKind(), e.getOwnerId());
     }
 
     private ProjectView toView(ProjectEntity e) {
@@ -844,7 +901,7 @@ public class ProjectService {
                 splitTags(e.getTags()), e.getDescription(), e.getStatus(), e.getSourceType(), e.getCloneStatus(),
                 e.getApiDocSource(),
                 e.getAutoRegressionOnDeploy(), e.getAgentNodeId(), e.getContextSummary(), e.getSummaryGeneratedAt(),
-                e.getOwnerId(), e.getCreatedAt(), e.getUpdatedAt());
+                e.getOwnerId(), e.getKind(), e.getCreatedAt(), e.getUpdatedAt());
     }
 
     private RepoView toRepoView(ProjectRepoEntity r) {

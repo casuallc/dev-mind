@@ -18,6 +18,10 @@ import org.hibernate.type.SqlTypes;
 @Table(name = "projects")
 public class ProjectEntity {
 
+    /** CAP-41：项目种类——NORMAL（缺省，代码项目）/ WORKLOG（工作日志空间：runner 持久工作区，无仓库语义） */
+    public static final String KIND_NORMAL = "NORMAL";
+    public static final String KIND_WORKLOG = "WORKLOG";
+
     @Id
     @Column(length = 32)
     private String id;
@@ -77,6 +81,10 @@ public class ProjectEntity {
     @Column(name = "owner_id", length = 64)
     private String ownerId;
 
+    /** CAP-41：项目种类（NORMAL/WORKLOG）；存量行 null 由 getter 兜底 NORMAL */
+    @Column(length = 16)
+    private String kind;
+
     @Column(name = "created_by", length = 64)
     private String createdBy;
 
@@ -118,6 +126,9 @@ public class ProjectEntity {
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public String getOwnerId() { return ownerId; }
     public void setOwnerId(String ownerId) { this.ownerId = ownerId; }
+    /** 旧行可能为 null（ddl-auto 历史数据），统一兜底 NORMAL */
+    public String getKind() { return kind == null ? KIND_NORMAL : kind; }
+    public void setKind(String kind) { this.kind = kind; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

@@ -23,6 +23,8 @@ public record ProjectView(
         String contextSummary,
         Instant summaryGeneratedAt,
         String ownerId,
+        /** CAP-41：项目种类（NORMAL/WORKLOG） */
+        String kind,
         Instant createdAt,
         Instant updatedAt) {
 }

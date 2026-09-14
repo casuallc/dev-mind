@@ -12,4 +12,7 @@ public interface ProjectRepository extends JpaRepository<ProjectEntity, String> 
     List<ProjectEntity> findAllByOrderByCreatedAtDesc();
 
     long countByPath(String path);
+
+    /** CAP-41：按种类 + 归属用户查（WORKLOG 项目每用户至多一个） */
+    java.util.Optional<ProjectEntity> findByKindAndOwnerId(String kind, String ownerId);
 }
