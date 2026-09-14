@@ -104,6 +104,17 @@ export interface WorklogSettings {
   dailyTemplateMd?: string | null
   /** CAP-41 FR-05：周报格式模板；null/undefined = 内置默认 */
   weeklyTemplateMd?: string | null
+  /** CAP-41 M3：远端备份仓库 URL（http/https/file）；null/undefined = 未绑定 */
+  remoteUrl?: string | null
+  /** CAP-41 M3：远端备份目标分支；null/空白 = main */
+  remoteBranch?: string | null
+}
+
+/** CAP-41 M3：远端备份推送回执（POST /worklog/workspace/push） */
+export interface PushAck {
+  ok: boolean
+  detail?: string
+  error?: string
 }
 
 /** 内置默认模板（GET /worklog/settings/templates/default），模板编辑器「填入默认」用 */

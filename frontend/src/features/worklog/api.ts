@@ -6,6 +6,7 @@ import type {
   EntryPayload,
   GenerateAck,
   GitPreview,
+  PushAck,
   TemplateDefaults,
   WeeklyReport,
   WorklogEntry,
@@ -62,6 +63,8 @@ export const updateWeekly = (id: number, body: { summaryMd?: string; nextPlanMd?
 // ---- CAP-41 工作日志空间（WORKLOG 项目 + runner 持久工作区） ----
 export const getWorkspace = () => api.get<WorkspaceView>('/worklog/workspace')
 export const ensureWorkspace = () => api.post<WorkspaceView>('/worklog/workspace/ensure', {})
+/** CAP-41 M3：把工作日志空间 push 到设置里绑定的远端仓库（阻塞等 runner ack） */
+export const pushWorkspace = () => api.post<PushAck>('/worklog/workspace/push', {})
 
 // ---- 个人设置 ----
 export const getSettings = () => api.get<WorklogSettings>('/worklog/settings')

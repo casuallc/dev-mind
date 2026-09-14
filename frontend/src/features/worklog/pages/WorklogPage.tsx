@@ -11,10 +11,11 @@ import {
   Switch,
   Table,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined, SettingOutlined, GithubOutlined, CodeOutlined, RobotOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, SettingOutlined, GithubOutlined, CodeOutlined, RobotOutlined, CloudUploadOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -34,6 +35,7 @@ import {
   listDailyWeek,
   listEntries,
   listWeeklyRecent,
+  pushWorkspace,
   updateDaily,
   updateEntry,
   updateSettings,
@@ -75,12 +77,32 @@ export default function WorklogPage() {
   // ---- CAP-41 工作日志空间：WORKLOG 项目 + runner 持久工作区状态条 ----
   const [workspace, setWorkspace] = useState<WorkspaceView | null>(null)
   const [ensuring, setEnsuring] = useState(false)
+  // CAP-41 M3：远端备份绑定状态（决定「推送远端」按钮可用性；详细编辑在设置 Modal）
+  const [remoteUrl, setRemoteUrl] = useState<string | null>(null)
+  const [pushing, setPushing] = useState(false)
   const loadWorkspace = useCallback(() => {
     getWorkspace()
       .then(setWorkspace)
       .catch(() => setWorkspace(null))
+    getSettings()
+      .then((s) => setRemoteUrl(s.remoteUrl ?? null))
+      .catch(() => setRemoteUrl(null))
   }, [])
   useEffect(loadWorkspace, [loadWorkspace])
+
+  /** CAP-41 M3：手动推送远端（runner 侧 git push；结果回执 ok/detail/error） */
+  const onPushRemote = async () => {
+    setPushing(true)
+    try {
+      const ack = await pushWorkspace()
+      if (ack.ok) message.success(ack.detail ? `已推送远端：${ack.detail}` : '已推送远端')
+      else Modal.error({ centered: true, title: '推送远端失败', content: ack.error || '未知原因' })
+    } catch (e) {
+      showError(e, '推送远端失败')
+    } finally {
+      setPushing(false)
+    }
+  }
 
   const onEnsure = async () => {
     setEnsuring(true)
@@ -340,6 +362,8 @@ export default function WorklogPage() {
         dailyHoursTarget: s.dailyMinutesTarget != null ? s.dailyMinutesTarget / 60 : undefined,
         dailyTemplateMd: s.dailyTemplateMd ?? '',
         weeklyTemplateMd: s.weeklyTemplateMd ?? '',
+        remoteUrl: s.remoteUrl ?? '',
+        remoteBranch: s.remoteBranch ?? '',
       })
       setSettingsOpen(true)
     } catch (e) {
@@ -366,9 +390,12 @@ export default function WorklogPage() {
         dailyMinutesTarget: v.dailyHoursTarget != null ? Math.round(v.dailyHoursTarget * 60) : undefined,
         dailyTemplateMd: v.dailyTemplateMd,
         weeklyTemplateMd: v.weeklyTemplateMd,
+        remoteUrl: v.remoteUrl ?? '',
+        remoteBranch: v.remoteBranch ?? '',
       })
       message.success('设置已保存')
       setSettingsOpen(false)
+      setRemoteUrl(v.remoteUrl?.trim() ? v.remoteUrl.trim() : null)
     } catch (e) {
       showError(e, '保存失败')
     }
@@ -496,6 +523,25 @@ export default function WorklogPage() {
           action={
             <Space>
               <Button size="small" icon={<ReloadOutlined />} onClick={loadWorkspace} />
+              <Tooltip
+                title={
+                  !remoteUrl
+                    ? '未绑定远程仓库：在「设置-远程仓库备份」里配置后可用'
+                    : !workspace.nodeOnline
+                      ? '亲和节点离线，暂不可推送'
+                      : `推送到 ${remoteUrl}`
+                }
+              >
+                <Button
+                  size="small"
+                  icon={<CloudUploadOutlined />}
+                  loading={pushing}
+                  disabled={!remoteUrl || !workspace.nodeOnline}
+                  onClick={onPushRemote}
+                >
+                  推送远端
+                </Button>
+              </Tooltip>
               <Button size="small" type="primary" icon={<RobotOutlined />} onClick={openSession}>
                 打开会话
               </Button>
@@ -778,6 +824,16 @@ export default function WorklogPage() {
             }
           >
             <Input.TextArea rows={8} placeholder="留空使用内置默认模板" style={{ fontFamily: 'monospace' }} />
+          </Form.Item>
+          <Form.Item
+            name="remoteUrl"
+            label="远程仓库备份（URL）"
+            extra="把日报/周报所在的工作日志空间备份到该远端（点空间条上的「推送远端」手动同步）。仅 http/https；凭证按 URL host 匹配「个人中心-平台账号」的个人访问令牌。留空 = 解绑。"
+          >
+            <Input placeholder="https://git.example.com/<你>/worklog.git" allowClear />
+          </Form.Item>
+          <Form.Item name="remoteBranch" label="备份分支">
+            <Input placeholder="留空默认 main" allowClear />
           </Form.Item>
         </Form>
       </Modal>
