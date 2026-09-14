@@ -310,6 +310,19 @@ public class AgentRunnerMain {
                 sessionDir = workDir;
                 finalizer = sid -> workspace.cleanChat(sid, msg -> sessions.reportSystem(sid, msg));
                 log.info("问答沙箱就绪: session={} cwd={}", sessionId, workDir);
+            } else if ("worklog".equals(kind)) {
+                // CAP-41：工作日志持久工作区——{worklogRoot}/<owner>/（默认 {user.home}/worklog），
+                // 同一用户的会话共享同一目录（幂等复用，首次 git init + 骨架 commit）；
+                // 永不删除、无 push，finalizer 只查未提交改动上报告警
+                String owner = frame.path("worklogOwner").asText("");
+                if (owner.isBlank()) {
+                    throw new IllegalStateException("worklog 会话缺少 worklogOwner（服务端组帧缺失）");
+                }
+                workDir = workspace.prepareWorklog(config.resolvedWorklogRoot(), owner);
+                sessionDir = workDir;
+                Path wlDir = workDir;
+                finalizer = sid -> workspace.finishWorklog(wlDir, msg -> sessions.reportSystem(sid, msg));
+                log.info("worklog 工作区就绪: session={} owner={} cwd={}", sessionId, owner, workDir);
             } else if (reposNode.isArray() && reposNode.size() > 1) {
                 // CAP-31 多库会话：repos 数组 >1 → 聚合目录模式（cwd=聚合根，各库子目录 <name>/）
                 if (projectId == null || projectId.isBlank()) {

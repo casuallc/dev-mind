@@ -33,6 +33,9 @@ import java.util.Properties;
  *                            # 逐行校验脚本每行首 token，shell 内置命令 echo/cd/if 等不受限）
  * execShell=bash             # CAP-36：exec 脚本解释器（命令写临时 .sh 后以其执行，同服务端 LocalStepRunner）
  * buildGcHours=24            # CAP-36：构建工作区（builds/）保留时长（小时），超龄 GC 删除
+ * worklogRoot=               # CAP-41：工作日志持久工作区根目录（kind:"worklog" 会话启用：
+ *                            # <root>/<console-username>/ 本地 git 仓库，永不删除、不参与 GC）。
+ *                            # 空 = {user.home}/worklog
  * </pre>
  */
 public record RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -40,7 +43,7 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                            String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes,
                            int gcInitialDelayMinutes, java.util.List<String> labels,
                            java.util.List<String> execAllowlist, String execShell, int buildGcHours,
-                           String claudeConfigDir) {
+                           String claudeConfigDir, String worklogRoot) {
 
     /** 兼容构造（FR-05 前的 9 参签名，测试/旧调用用）：GC 默认值 14 天 / 360 分钟 / 首跑 10 分钟，无标签。 */
     public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -69,6 +72,18 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
         this(serverUrl, token, claudePath, permissionMode, workDir, projectPaths, maxConcurrent,
                 executor, workspaceRoot, gcDays, gcIntervalMinutes, gcInitialDelayMinutes, labels,
                 execAllowlist, execShell, buildGcHours, "");
+    }
+
+    /** 兼容构造（CAP-41 前的 17 参签名）：worklogRoot 默认空（{user.home}/worklog）。 */
+    public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
+                        Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
+                        String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes,
+                        int gcInitialDelayMinutes, java.util.List<String> labels,
+                        java.util.List<String> execAllowlist, String execShell, int buildGcHours,
+                        String claudeConfigDir) {
+        this(serverUrl, token, claudePath, permissionMode, workDir, projectPaths, maxConcurrent,
+                executor, workspaceRoot, gcDays, gcIntervalMinutes, gcInitialDelayMinutes, labels,
+                execAllowlist, execShell, buildGcHours, claudeConfigDir, "");
     }
 
     public static RunnerConfig load(Path file) throws IOException {
@@ -100,7 +115,16 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                 parseLabels(p.getProperty("execAllowlist", "")),
                 p.getProperty("execShell", "bash").strip(),
                 Integer.parseInt(p.getProperty("buildGcHours", "24").strip()),
-                p.getProperty("claudeConfigDir", "").strip());
+                p.getProperty("claudeConfigDir", "").strip(),
+                p.getProperty("worklogRoot", "").strip());
+    }
+
+    /** CAP-41：worklog 持久工作区根目录——配置优先，空 = {user.home}/worklog。 */
+    public Path resolvedWorklogRoot() {
+        if (worklogRoot != null && !worklogRoot.isBlank()) {
+            return Path.of(worklogRoot).toAbsolutePath().normalize();
+        }
+        return Path.of(System.getProperty("user.home"), "worklog").toAbsolutePath().normalize();
     }
 
     /** FR-07：labels CSV → 去空白去空项的 List（保序）。 */
