@@ -1,6 +1,6 @@
 # CAP-41 工作日志空间（Worklog as Workspace：runner 持久工作区 + skill/模板驱动生成）
 
-> 能力 ID：CAP-41 ｜ 分类：组装层 ｜ 状态：**M1/M2 已实现（2026-09-14，E2E 通过）；M3 演进未做** ｜ 日期：2026-09-14
+> 能力 ID：CAP-41 ｜ 分类：组装层 ｜ 状态：**M1/M2 已实现（2026-09-14，E2E 通过）；M3 远端备份已实现（2026-09-14）** ｜ 日期：2026-09-14
 > 重构 CAP-28 的报告生成与存储链路；条目管理/git 扫描导入（CAP-28 FR-03/04）保留为素材源不动。
 
 ## 1. 目的
@@ -125,9 +125,10 @@ WS 协议：launch 帧 `kind` 新增枚举值 `"worklog"` + `worklogOwner` 字�
 ```
 POST   /api/worklog/workspace/ensure        懒创建本人 WORKLOG 项目（幂等，返回项目+亲和节点状态）
 GET    /api/worklog/workspace               本人空间信息（项目/节点在线/最近生成/最近会话）
+POST   /api/worklog/workspace/push          M3：推送空间到绑定远端（同步等 runner ack，返回 {ok,detail,error}）
 POST   /api/worklog/daily/generate {date}   改为创建 worklog 会话（异步，202 + sessionId）
 POST   /api/worklog/weekly/generate {weekStart}  同上
-GET/PUT /api/worklog/settings               + dailyTemplateMd / weeklyTemplateMd
+GET/PUT /api/worklog/settings               + dailyTemplateMd / weeklyTemplateMd / remoteUrl / remoteBranch
 条目/repos/git preview/import、报告 GET/PUT  全部不变（DB 镜像口径）
 ```
 
@@ -152,9 +153,22 @@ GET/PUT /api/worklog/settings               + dailyTemplateMd / weeklyTemplateMd
   并发锁/GC 豁免）+ 协议 v5 门控 +「打开会话」入口；
 - **M2 生成**：skill/场景种子 + 模板设置 + 报告生成改真实会话 + 回传落镜像 + 通知 +
   one-shot 链路从 worklog 摘除 + 前端模板编辑器；
-- **M3 演进（暂不做）**：条目文件化（entries/ 由 claude 维护）、runner 目录远端备份
-  （push 到 GitLab 私有库）、前端直接浏览/编辑 runner 文件、多节点空间迁移、
-  CAP-28 one-shot 相关代码与排错文档清理。
+- **M3 演进**：条目文件化（entries/ 由 claude 维护）、前端直接浏览/编辑 runner 文件、
+  多节点空间迁移、CAP-28 one-shot 相关代码与排错文档清理。
 
-MVP 明确不做：条目文件化、远端 git 同步（本地 git 即事实源，远端备份留 M3）、
-服务端读 runner 文件系统的通用通道（镜像只经回传建立）。
+### M3-远端备份（已实现，2026-09-14）
+
+- **FR-08 远端仓库绑定**：个人设置（`worklog_user_settings.remote_url`/`remote_branch`）
+  存绑定信息，null=未绑定、空白串=解绑；URL 仅 http/https/file（ssh 拒绝，口径同
+  GitRemoteOps/runner 侧）。凭证不落库——复用 CAP-35 个人 PAT：推送时按 URL host 经
+  `RepoGitGateway.resolveToken(username, host, null)` 解析，缺失 409 引导去
+  「个人中心-平台账号」配置。
+- **FR-09 手动推送**：前端空间条「推送远端」按钮（未绑定/节点离线置灰+tooltip 引导）
+  → `POST /api/worklog/workspace/push` → 服务端下发 `worklog_push` 帧（协议 v6，
+  `supports()` 门控，老 runner 409 提示升级）→ runner 对持久工作区执行
+  `origin` 幂等绑定（cleanUrl 防 token 残留 .git/config）+ `push -u HEAD:<branch>`。
+  阻塞等 `worklog_push_ack`（330s）；非快进不自动 rebase，sanitized 错误透传引导。
+  agent 侧契约不变：只 commit 不 push（skill 种子文案已同步；存量环境 skill 行
+  「不存在才建」不覆盖，需在管控台 skill 管理页手工同步文案）。
+
+MVP 明确不做：条目文件化、服务端读 runner 文件系统的通用通道（镜像只经回传建立）。
