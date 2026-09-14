@@ -15,6 +15,10 @@ createRoot(document.getElementById('root')!).render(
       // 全局关闭「两汉字按钮自动插空格」（编 辑 → 编辑），否则表格行内按钮样式不一致
       button={{ autoInsertSpace: false }}
       theme={{
+        token: {
+          // 工作台焕新：全局圆角 6→8，更圆润明快（后台同步生效）
+          borderRadius: 8,
+        },
         components: {
           // 侧边栏菜单紧凑化：项高 40→32、项间距 4→2、分组标题行高收紧
           Menu: {

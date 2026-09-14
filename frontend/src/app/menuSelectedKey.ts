@@ -23,3 +23,26 @@ export function menuSelectedKey(pathname: string): string {
   }
   return pathname
 }
+
+// 工作台顶部一级导航选中态：项目上下文各页与项目列表统一高亮「项目」（key=/overview）。
+const TOPNAV_PREFIXES: Array<[string, string]> = [
+  ['/home', '/home'],
+  ['/chats', '/chats'],
+  ['/worklog', '/worklog'],
+  ['/overview', '/overview'],
+  ['/sessions', '/overview'],
+  ['/requirements', '/overview'],
+  ['/context', '/overview'],
+  ['/builds', '/overview'],
+  ['/deployments', '/overview'],
+  ['/releases', '/overview'],
+  ['/tests', '/overview'],
+  ['/projects', '/overview'],
+]
+
+export function topNavKey(pathname: string): string {
+  for (const [prefix, key] of TOPNAV_PREFIXES) {
+    if (pathname.startsWith(prefix)) return key
+  }
+  return ''
+}

@@ -1,4 +1,4 @@
-// 项目切换器：像切换租户一样切换当前项目。常驻 AppLayout 侧边栏顶部，
+// 项目切换器：像切换租户一样切换当前项目。常驻 AppLayout 顶部导航栏，
 // 是项目列表的唯一加载点——挂载时校验 currentId 有效性并做兜底自动选择。
 import { useCallback, useEffect, useState } from 'react'
 import { Button, Select, Tag, Typography } from 'antd'
@@ -49,7 +49,7 @@ export default function ProjectSwitcher() {
 
   if (loadError) {
     return (
-      <div style={{ padding: '0 12px 12px' }}>
+      <div style={{ width: 200 }}>
         <Button size="small" block onClick={load}>
           项目列表加载失败，重试
         </Button>
@@ -58,7 +58,7 @@ export default function ProjectSwitcher() {
   }
 
   return (
-    <div style={{ padding: '0 12px 12px' }}>
+    <div style={{ width: 200 }}>
       <Select
         size="middle"
         showSearch
