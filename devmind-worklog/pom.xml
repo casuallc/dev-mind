@@ -26,6 +26,16 @@
             <groupId>com.devmind</groupId>
             <artifactId>devmind-project</artifactId>
         </dependency>
+        <!-- CAP-41 FR-03/04：报告生成走真实会话 + 场景种子（对照 flow 模块先例直接依赖 session） -->
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-session</artifactId>
+        </dependency>
+        <!-- CAP-41 FR-04：worklog skill 种子（管控台可维护，skill 域由 skill 模块持有） -->
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-skill</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
