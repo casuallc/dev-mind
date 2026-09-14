@@ -56,6 +56,7 @@
 | [CAP-38](CAP-38-requirement-flow-simplify.md) | 需求流程简化：阶段 Tab 与自动拆分固化 | 流程层 | 分析/方案独立 Tab 且可跳过（不可逆引导），方案产出后自动拆分+自动固化 WI，WI 状态中文+跳会话，会话关联需求自动建 WI（调整 CAP-37 FR-04、取代 CAP-14 FR-06/07 草稿人工确认） |
 | [CAP-39](CAP-39-session-output-publish.md) | 会话产出手动推送与按需回传 | 流程层 | collect_output 帧（协议 v4）进行中会话即时回传产出，outputs 读取/同步端点，手动推送为关联需求文档（新建/更新版本，design 落 Design 记录），会话详情页裁撤并入工作台 |
 | [CAP-40](CAP-40-requirement-attachment-context.md) | 需求附件上下文投送 | 流程层 | 需求描述引用的本地附件 + Jira 内嵌图打进 ContextPackage（schema v2 inputs），runner 物化 .devmind/input/，流程会话 agent 用 Read 读图 |
+| [CAP-41](CAP-41-worklog-workspace.md) | 工作日志空间 | 组装层 | 工作日志重构为 WORKLOG 特殊项目 + runner 按用户隔离的持久 git 工作区（{user.home}/worklog/<user>），skill/格式模板管控台可配，报告生成走真实会话写文件、复用 CAP-37 产出回传落 DB 镜像（重构 CAP-28 报告链路） |
 
 ## 依赖关系
 
