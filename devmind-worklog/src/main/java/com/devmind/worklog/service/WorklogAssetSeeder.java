@@ -48,7 +48,7 @@ public class WorklogAssetSeeder {
 
             ## git 规范
             - 每次成稿后 `git add` 相关文件并 commit，message 形如 `docs: daily 2026-09-14`
-            - 只提交、不 push（本地 git 即事实源）；不删除历史文件
+            - 只提交、不 push（远端备份由管控台「推送远端」按钮统一执行，agent 不自行 push）；不删除历史文件
 
             ## 成稿回传（平台契约，必须执行）
             - 日报成稿同时复制一份到 `.devmind/output/daily-yyyy-MM-dd.md`

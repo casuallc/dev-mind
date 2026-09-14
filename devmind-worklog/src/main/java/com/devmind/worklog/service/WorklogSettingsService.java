@@ -51,6 +51,13 @@ public class WorklogSettingsService {
         if (req.weeklyTemplateMd() != null) {
             e.setWeeklyTemplateMd(normalizeTemplate(req.weeklyTemplateMd()));
         }
+        // CAP-41 M3：远端备份绑定（null = 不变；空白串 = 解绑）
+        if (req.remoteUrl() != null) {
+            e.setRemoteUrl(normalizeRemoteUrl(req.remoteUrl()));
+        }
+        if (req.remoteBranch() != null) {
+            e.setRemoteBranch(normalizeTemplate(req.remoteBranch()));
+        }
         e.setUpdatedAt(Instant.now());
         return SettingsView.of(settingsRepo.save(e));
     }
@@ -65,5 +72,26 @@ public class WorklogSettingsService {
     /** 空白 → null（= 回退内置默认），避免空串与 null 两种语义并存。 */
     private static String normalizeTemplate(String t) {
         return t == null || t.isBlank() ? null : t;
+    }
+
+    /** CAP-41 M3：远端 URL 校验（空白=解绑置 null；仅 http/https/file，ssh 口径同 runner 侧）。 */
+    private static String normalizeRemoteUrl(String url) {
+        if (url.isBlank()) {
+            return null;
+        }
+        String u = url.trim();
+        String scheme;
+        try {
+            scheme = java.net.URI.create(u).getScheme();
+        } catch (IllegalArgumentException e) {
+            scheme = null;
+        }
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)
+                && !"file".equalsIgnoreCase(scheme)) {
+            throw new com.devmind.common.exception.DevMindException(
+                    com.devmind.common.exception.ErrorCode.BAD_REQUEST,
+                    "远端仓库仅支持 http/https URL（ssh 不支持）: " + u);
+        }
+        return u;
     }
 }

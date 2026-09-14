@@ -48,6 +48,14 @@ public class WorklogUserSettingsEntity {
     @Column(name = "weekly_template_md", length = 16_777_216)
     private String weeklyTemplateMd;
 
+    /** CAP-41 M3：远端备份仓库 URL（http/https/file，不含凭证；null = 未绑定） */
+    @Column(name = "remote_url", length = 512)
+    private String remoteUrl;
+
+    /** CAP-41 M3：远端备份目标分支（null/空白 = main） */
+    @Column(name = "remote_branch", length = 128)
+    private String remoteBranch;
+
     @Column(name = "updated_at")
     private Instant updatedAt;
 
@@ -65,6 +73,10 @@ public class WorklogUserSettingsEntity {
     public void setDailyTemplateMd(String dailyTemplateMd) { this.dailyTemplateMd = dailyTemplateMd; }
     public String getWeeklyTemplateMd() { return weeklyTemplateMd; }
     public void setWeeklyTemplateMd(String weeklyTemplateMd) { this.weeklyTemplateMd = weeklyTemplateMd; }
+    public String getRemoteUrl() { return remoteUrl; }
+    public void setRemoteUrl(String remoteUrl) { this.remoteUrl = remoteUrl; }
+    public String getRemoteBranch() { return remoteBranch; }
+    public void setRemoteBranch(String remoteBranch) { this.remoteBranch = remoteBranch; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
 }
