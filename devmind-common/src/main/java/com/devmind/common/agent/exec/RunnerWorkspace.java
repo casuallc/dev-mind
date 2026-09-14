@@ -385,12 +385,80 @@ public class RunnerWorkspace {
         }
     }
 
+    /**
+     * CAP-41 M3 工作日志空间远端备份（手动触发）：把持久工作区 push 到用户绑定的远端仓库。
+     * remote 幂等绑定 origin=cleanUrl（防 token 残留 .git/config，CAP-23 同款），
+     * push HEAD:&lt;branch&gt; 并 -u 建跟踪。节点亲和单写入，冲突罕见——非快进不自动 rebase，
+     * 把 sanitized 错误尾部抛给调用方引导人工处理。
+     *
+     * <p>URL 口径同 GitRemoteOps：仅 http/https（token 内嵌注入）与 file://（本地/测试，
+     * token 忽略）；ssh 明确报错。</p>
+     *
+     * @param dir       持久工作区（须已 git init，见 {@link #prepareWorklog}）
+     * @param remoteUrl 远端仓库 URL（不含凭证）
+     * @param branch    目标分支（空 = main）
+     * @param token     PAT（可空 = 匿名/file://；仅进程参数，输出经 sanitize）
+     * @return exit=0 成功（含 up-to-date），否则输出尾部为错误原因
+     */
+    public WorklogPushOutcome pushWorklog(Path dir, String remoteUrl, String branch, String token) {
+        if (dir == null || !Files.isDirectory(dir.resolve(".git"))) {
+            return new WorklogPushOutcome(-1, "worklog 工作区未初始化（无 .git）: " + dir);
+        }
+        if (remoteUrl == null || remoteUrl.isBlank()) {
+            return new WorklogPushOutcome(-1, "未绑定远程仓库");
+        }
+        String cleanUrl = remoteUrl.trim();
+        // scp 风格 ssh（git@host:path）URI 解析直接失败，按「不支持的协议」统一拒绝
+        String scheme;
+        try {
+            scheme = URI.create(cleanUrl).getScheme();
+        } catch (IllegalArgumentException e) {
+            scheme = null;
+        }
+        boolean fileScheme = "file".equalsIgnoreCase(scheme);
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme) && !fileScheme) {
+            return new WorklogPushOutcome(-1,
+                    "仅支持 http/https 远端仓库（ssh 不支持）: " + cleanUrl);
+        }
+        String effectiveToken = fileScheme ? null : token; // file:// 无凭证语义
+        String targetBranch = (branch == null || branch.isBlank()) ? "main" : branch.trim();
+
+        // 幂等绑定 origin=cleanUrl（不存在→add；变了→set-url）
+        Result getUrl = run(dir, OP_TIMEOUT_SEC, effectiveToken, "remote", "get-url", "origin");
+        if (getUrl.exit() != 0) {
+            Result add = run(dir, OP_TIMEOUT_SEC, effectiveToken, "remote", "add", "origin", cleanUrl);
+            if (add.exit() != 0) {
+                return new WorklogPushOutcome(add.exit(), "git remote add 失败: " + tail(add.output()));
+            }
+        } else if (!getUrl.output().trim().equals(cleanUrl)) {
+            Result set = run(dir, OP_TIMEOUT_SEC, effectiveToken, "remote", "set-url", "origin", cleanUrl);
+            if (set.exit() != 0) {
+                return new WorklogPushOutcome(set.exit(), "git remote set-url 失败: " + tail(set.output()));
+            }
+        }
+
+        Result push = run(dir, PUSH_TIMEOUT_SEC, effectiveToken, "push", "-u",
+                withToken(cleanUrl, effectiveToken), "HEAD:" + targetBranch);
+        String out = tail(push.output());
+        if (push.exit() != 0) {
+            log.warn("worklog 远端备份 push 失败: dir={} branch={} err={}", dir, targetBranch, out);
+            return new WorklogPushOutcome(push.exit(), "git push 失败: " + out);
+        }
+        log.info("worklog 远端备份完成: dir={} branch={}", dir, targetBranch);
+        return new WorklogPushOutcome(0, out.isBlank() ? "已推送至远端分支 " + targetBranch
+                : "分支 " + targetBranch + "：" + out);
+    }
+
+    /** worklog 远端备份结果：exit=0 成功（含 up-to-date），output 为摘要或错误尾部（已脱敏）。 */
+    public record WorklogPushOutcome(int exit, String output) {
+    }
+
     /** worklog 空间骨架：目录契约说明 + daily/weekly/entries 占位。 */
     private static void writeSkeleton(Path dir) {
         String readme = """
                 # 工作日志空间
 
-                本目录由 DevMind runner 托管（本地 git 维护，无远端）。
+                本目录由 DevMind runner 托管（本地 git 维护；远端备份由管控台「推送远端」统一执行，agent 不自行 push）。
 
                 ## 目录契约
                 - `daily/yyyy-MM-dd.md`   日报（一天一份）

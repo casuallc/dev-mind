@@ -215,6 +215,60 @@ class RunnerWorkspaceTest {
     }
 
     @Test
+    void worklogPushLifecycle() throws Exception {
+        // CAP-41 M3：file:// bare 库当远端（匿名通道），覆盖 绑定 origin → 首次 push →
+        // 增量 push → up-to-date → ssh 拒绝
+        Path origin = tmp.resolve("worklog-origin.git");
+        git(tmp, "init", "--bare", "-b", "main", origin.toString());
+
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        Path dir = ws.prepareWorklog(tmp.resolve("worklog"), "alice");
+        assertTrue(Files.isDirectory(dir.resolve(".git")));
+
+        // 首次 push：origin 幂等绑定 + main 分支建立，骨架提交上远端
+        RunnerWorkspace.WorklogPushOutcome first =
+                ws.pushWorklog(dir, origin.toUri().toString(), "main", null);
+        assertEquals(0, first.exit(), first.output());
+        assertTrue(git(origin, "show", "main:README.md").contains("工作日志空间"));
+        // origin URL 为 cleanUrl（本测试无 token，验证绑定逻辑本身）
+        assertEquals(origin.toUri().toString(), gitOut(dir, "remote", "get-url", "origin"));
+
+        // 增量：新成稿 commit 后 push，远端可见
+        Files.writeString(dir.resolve("daily").resolve("2026-09-14.md"), "# 日报");
+        git(dir, "add", "-A");
+        git(dir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "docs: daily 2026-09-14");
+        RunnerWorkspace.WorklogPushOutcome second =
+                ws.pushWorklog(dir, origin.toUri().toString(), "main", null);
+        assertEquals(0, second.exit(), second.output());
+        assertEquals("# 日报", git(origin, "show", "main:daily/2026-09-14.md").trim());
+
+        // up-to-date 也算成功
+        RunnerWorkspace.WorklogPushOutcome third =
+                ws.pushWorklog(dir, origin.toUri().toString(), "main", null);
+        assertEquals(0, third.exit(), third.output());
+
+        // 未初始化目录 / ssh URL 明确拒绝
+        assertTrue(ws.pushWorklog(tmp.resolve("nope"), origin.toUri().toString(), "main", null).exit() != 0);
+        RunnerWorkspace.WorklogPushOutcome ssh = ws.pushWorklog(dir, "git@example.com:a/b.git", "main", null);
+        assertTrue(ssh.exit() != 0);
+        assertTrue(ssh.output().contains("http"), ssh.output());
+    }
+
+    @Test
+    void worklogPushNeverLeaksToken() throws Exception {
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        Path dir = ws.prepareWorklog(tmp.resolve("worklog"), "bob");
+        // 打不通的 https 远端 + token：失败输出不得含 token 明文/URL 编码形态
+        RunnerWorkspace.WorklogPushOutcome r = ws.pushWorklog(
+                dir, "https://127.0.0.1:1/x/y.git", "main", "tok+abc123");
+        assertTrue(r.exit() != 0);
+        assertFalse(r.output().contains("tok+abc123"), r.output());
+        assertFalse(r.output().contains("tok%2Babc123"), r.output());
+        // 失败也不许把 token 写进 .git/config
+        assertEquals("https://127.0.0.1:1/x/y.git", gitOut(dir, "remote", "get-url", "origin"));
+    }
+
+    @Test
     void sanitizeMasksToken() {
         String out = RunnerWorkspace.sanitize("remote: oauth2:abc+123@host abc%2B123 done", "abc+123");
         assertFalse(out.contains("abc+123"));
