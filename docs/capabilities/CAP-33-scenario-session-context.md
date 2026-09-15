@@ -14,7 +14,7 @@
 > - 路由/预设优先级——会话：显式 > 场景预设 > 项目默认 > 平台默认 > 标签兜底（皆无 409）；
 >   chat：显式 > 场景 > 平台默认；model/permissionMode：显式 > 场景 > props 默认。
 >   PROJECT 场景挂会话 projectId 必须相符（400）；chat 挂 PROJECT 场景 = 以该项目身份装配。
-> - E2E 验证脚本 `tmp/cap33_verify.py`（gitignored）：三层来源/拉包内容/沙箱物化/
+> - E2E 验证脚本 `tests/cap33_verify.py`：三层来源/拉包内容/沙箱物化/
 >   templateCode 兼容/重启重建（session 走 sessions 表、chat 走 ChatContextLookup）全覆盖。
 
 ## 1. 目的

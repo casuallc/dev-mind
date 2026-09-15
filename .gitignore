@@ -25,3 +25,6 @@ Thumbs.db
 
 # 临时方案草稿（不进版本库）
 tmp/
+
+# tests fixtures 编译产物（TestSshServer.class，编译方法见 tests/README.md）
+tests/fixtures/*.class

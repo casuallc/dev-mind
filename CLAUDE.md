@@ -16,7 +16,7 @@ Guidance for Claude Code when working in this repository.
 | 开发注意事项（Windows 环境 / H2 / Jackson / SSH 单点坑） | [docs/core/开发注意事项.md](docs/core/开发注意事项.md) |
 | 前端内容区布局约定（列表/管理页） | [docs/core/前端内容区布局约定.md](docs/core/前端内容区布局约定.md) |
 
-文档治理：capabilities 只放能力需求、design 放定稿方案、guides 放使用说明、core 放开发规范与踩坑记录；方案草稿与 E2E 脚本放 `tmp/`（已 gitignore，禁 commit）。
+文档治理：capabilities 只放能力需求、design 放定稿方案、guides 放使用说明、core 放开发规范与踩坑记录；可复用 E2E 脚本沉淀 `tests/`（见 tests/README.md，随 git 提交），方案草稿与 E2E 运行产物放 `tmp/`（已 gitignore，禁 commit）。
 
 ## Quick Commands（已验证，Windows Git Bash）
 
@@ -96,7 +96,7 @@ Guidance for Claude Code when working in this repository.
 
 ### 提交前验证 (MUST)
 - 后端改动：`mvn -q test` 通过。前端改动：`npx tsc -b` 通过。
-- 端到端验证脚本写 `tmp/`（gitignored），不起服务跑一遍不算完成；起停姿势见「开发注意事项」。
+- 端到端验证脚本沉淀 `tests/`（运行产物仍写 tmp/），不起服务跑一遍不算完成；起停姿势见「开发注意事项」。
 
 ### 文档规则 (MUST)
 - 新能力先在 `docs/capabilities/` 立 CAP 需求文档，再动手实现。
