@@ -16,8 +16,19 @@ import java.util.regex.Pattern;
 
 /**
  * CAP-25 runner 侧托管工作区：收到带 repo 块的 launch 后负责节点本地代码生命周期——
- * 克隆缓存（&lt;workspaceRoot&gt;/&lt;projectId&gt;/main，首会话 clone）→ fetch 基线 →
- * 每会话独立 worktree（sessions/&lt;sessionId&gt;，分支由服务端下发）→ 结束 push + 清理。
+ * 克隆缓存 → fetch 基线 → 会话 worktree。
+ *
+ * <p>CAP-42 布局重构（每用户固定工作区）：目录固定到
+ * <pre>
+ * &lt;workspaceRoot&gt;/&lt;projectId&gt;/&lt;workspaceOwner&gt;/main            克隆缓存（每用户每库一份）
+ * &lt;workspaceRoot&gt;/&lt;projectId&gt;/&lt;workspaceOwner&gt;/work            固定 worktree（claude cwd，单库）
+ * &lt;workspaceRoot&gt;/&lt;projectId&gt;/&lt;workspaceOwner&gt;/&lt;repo&gt;/main 多库缓存（CAP-31）
+ * &lt;workspaceRoot&gt;/&lt;projectId&gt;/&lt;workspaceOwner&gt;/work/&lt;repo&gt; 多库子 worktree（聚合根 work/ = cwd）
+ * </pre>
+ * 同一 (项目, 用户) 同时只允许一个活跃工作区（占用冲突见 {@link #ensureUserWorktree}）；
+ * 会话结束<b>不再 push、不再删 worktree</b>（finalizer 只上报未提交告警），收口合并
+ * 由页面手动触发 {@link #finalize}；固定目录不参与 WorkspaceGc（不在 sessions/_chat
+ * 扫描桶下），`.runner-pid` 孤儿进程对账回收保留（WorkspaceReconciler 第三类目录）。</p>
  *
  * <p>CAP-34 FR-01：本类自 devmind-agent-runner 上移 common {@code agent.exec} 执行内核包
  * （该包只被 runner 引用，服务端不持有任何执行实现）。</p>
@@ -26,14 +37,17 @@ import java.util.regex.Pattern;
  * 显式 URL 内嵌注入（仅进程参数），clone 后立即 {@code remote set-url origin <cleanUrl>}
  * 防 .git/config 残留（CAP-23 同款）；所有 git 输出经 {@link #sanitize} 后才进日志/上行帧。</p>
  *
- * <p><b>resume 幂等</b>：同 sessionId 重发 launch（服务端 resume）——会话目录仍在则直接复用；
- * 目录已清理但分支还在（上次会话结束 push 后保留了分支）则 worktree add 挂回既有分支，
- * 不丢已有提交。</p>
+ * <p><b>resume 幂等</b>：同 sessionId 重发 launch（服务端 resume）——固定 worktree 仍在且
+ * 检出分支一致则直接复用；worktree 不在但分支还在（本地或远端 origin/）则 worktree add
+ * 挂回既有分支，不丢已有提交。</p>
  */
 public class RunnerWorkspace {
 
     private static final Logger log = LoggerFactory.getLogger(RunnerWorkspace.class);
     private static final Pattern SAFE_ID = Pattern.compile("[a-zA-Z0-9._-]+");
+    /** CAP-42：工作区保留目录名（GC/对账扫描桶 + 固定目录名），owner/库名禁用防撞名 */
+    private static final java.util.Set<String> RESERVED_DIRS =
+            java.util.Set.of("main", "sessions", "builds", "_chat", "work");
     private static final long CLONE_TIMEOUT_SEC = 30 * 60;
     private static final long FETCH_TIMEOUT_SEC = 5 * 60;
     private static final long PUSH_TIMEOUT_SEC = 5 * 60;
@@ -71,17 +85,17 @@ public class RunnerWorkspace {
         return cacheLocks.computeIfAbsent(cacheDir.toString(), k -> new java.util.concurrent.locks.ReentrantLock());
     }
 
-    /** 准备会话工作区：clone（首次）→ fetch 基线 → 会话 worktree；返回 workdir 所在上下文。 */
-    public RepoCtx prepare(String sessionId, String projectId, RepoSpec spec) {
-        if (projectId == null || !SAFE_ID.matcher(projectId).matches()) {
-            throw new IllegalStateException("非法 projectId（白名单 [a-zA-Z0-9._-]）: " + projectId);
-        }
+    /** 准备会话工作区：clone（首次）→ fetch 基线 → 固定 worktree；返回 workdir 所在上下文。 */
+    public RepoCtx prepare(String sessionId, String projectId, String workspaceOwner, RepoSpec spec) {
+        requireSafeId(projectId, "projectId");
+        String owner = requireOwner(workspaceOwner);
         if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
             throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
         }
-        Path cacheDir = workspaceRoot.resolve(projectId).resolve("main").normalize();
-        Path sessionDir = workspaceRoot.resolve(projectId).resolve("sessions").resolve(sessionId).normalize();
-        if (!cacheDir.startsWith(workspaceRoot) || !sessionDir.startsWith(workspaceRoot)) {
+        Path userRoot = userRoot(projectId, owner);
+        Path cacheDir = userRoot.resolve("main").normalize();
+        Path workDir = userRoot.resolve("work").normalize();
+        if (!cacheDir.startsWith(workspaceRoot) || !workDir.startsWith(workspaceRoot)) {
             throw new IllegalStateException("工作区路径越界（.. 逃逸防护）: " + projectId);
         }
         var lock = lockOf(cacheDir);
@@ -89,129 +103,128 @@ public class RunnerWorkspace {
         try {
             ensureClone(cacheDir, spec);
             fetch(cacheDir, spec);
-            addWorktree(cacheDir, sessionDir, spec);
+            ensureUserWorktree(cacheDir, workDir, spec);
         } finally {
             lock.unlock();
         }
-        return new RepoCtx(spec, cacheDir, sessionDir);
+        return new RepoCtx(spec, cacheDir, workDir);
     }
 
     /**
-     * 会话结束收口（best-effort）：push 会话分支（无新提交 = no-op 成功）→ 移除会话 worktree
-     * （分支保留在克隆缓存供追溯）。push 失败只上报，不反转会话结局。
+     * CAP-42 会话结束收口（best-effort）：固定 worktree 不 push 不删——仅检查未提交改动并
+     * 上报告警（引导收口前先提交或丢弃）；合并+push+删 worktree 由页面手动触发 {@link #finalize}。
      */
     public void finish(RepoCtx ctx, java.util.function.Consumer<String> sink) {
         finishOne(ctx, "", sink);
     }
 
     /**
-     * CAP-31 多库会话工作区：每库独立克隆缓存（&lt;root&gt;/&lt;projectId&gt;/&lt;name&gt;/main）
-     * 与会话 worktree（&lt;root&gt;/&lt;projectId&gt;/sessions/&lt;sid&gt;/&lt;name&gt;），
-     * 聚合根 = sessions/&lt;sid&gt;（claude cwd；单库路径布局不动存量）。
-     * 中途失败：已备好的库逐个 best-effort 收口后抛错。
+     * CAP-31 多库会话工作区：每库独立克隆缓存（&lt;root&gt;/&lt;projectId&gt;/&lt;owner&gt;/&lt;name&gt;/main）
+     * 与固定子 worktree（&lt;root&gt;/&lt;projectId&gt;/&lt;owner&gt;/work/&lt;name&gt;），
+     * 聚合根 = work/（claude cwd；CAP-42 起单库与多库同为固定布局）。
+     * 中途失败：本次新建的子 worktree 显式移除（复用的不动），已抛占用冲突的不做清理。
      */
-    public MultiCtx prepareMulti(String sessionId, String projectId, List<RepoSpec> specs) {
-        if (projectId == null || !SAFE_ID.matcher(projectId).matches()) {
-            throw new IllegalStateException("非法 projectId（白名单 [a-zA-Z0-9._-]）: " + projectId);
-        }
-        Path aggRoot = workspaceRoot.resolve(projectId).resolve("sessions").resolve(sessionId).normalize();
+    public MultiCtx prepareMulti(String sessionId, String projectId, String workspaceOwner, List<RepoSpec> specs) {
+        requireSafeId(projectId, "projectId");
+        String owner = requireOwner(workspaceOwner);
+        Path aggRoot = userRoot(projectId, owner).resolve("work").normalize();
         if (!aggRoot.startsWith(workspaceRoot)) {
             throw new IllegalStateException("工作区路径越界（.. 逃逸防护）: " + projectId);
         }
-        List<RepoCtx> done = new ArrayList<>();
+        List<RepoCtx> created = new ArrayList<>();
         try {
             for (RepoSpec spec : specs) {
-                if (spec.name() == null || !SAFE_ID.matcher(spec.name()).matches()) {
-                    throw new IllegalStateException("非法仓库名（白名单 [a-zA-Z0-9._-]，多库必填）: " + spec.name());
+                if (spec.name() == null || !SAFE_ID.matcher(spec.name()).matches()
+                        || "work".equals(spec.name())) {
+                    throw new IllegalStateException(
+                            "非法仓库名（白名单 [a-zA-Z0-9._-]，多库必填，禁用保留名 work）: " + spec.name());
                 }
                 if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
                     throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
                 }
-                Path cacheDir = workspaceRoot.resolve(projectId).resolve(spec.name()).resolve("main").normalize();
-                Path sessionDir = aggRoot.resolve(spec.name()).normalize();
-                if (!cacheDir.startsWith(workspaceRoot) || !sessionDir.startsWith(aggRoot)) {
+                Path cacheDir = userRoot(projectId, owner).resolve(spec.name()).resolve("main").normalize();
+                Path workDir = aggRoot.resolve(spec.name()).normalize();
+                if (!cacheDir.startsWith(workspaceRoot) || !workDir.startsWith(aggRoot)) {
                     throw new IllegalStateException("工作区路径越界（.. 逃逸防护）: " + spec.name());
                 }
                 var lock = lockOf(cacheDir);
                 lock.lock();
+                boolean fresh;
                 try {
                     ensureClone(cacheDir, spec);
                     fetch(cacheDir, spec);
-                    addWorktree(cacheDir, sessionDir, spec);
+                    fresh = ensureUserWorktree(cacheDir, workDir, spec);
                 } finally {
                     lock.unlock();
                 }
-                done.add(new RepoCtx(spec, cacheDir, sessionDir));
-                log.info("多库工作区就绪: session={} repo={} dir={}", sessionId, spec.name(), sessionDir);
+                if (fresh) {
+                    created.add(new RepoCtx(spec, cacheDir, workDir));
+                }
+                log.info("多库工作区就绪: session={} repo={} dir={}", sessionId, spec.name(), workDir);
             }
         } catch (RuntimeException e) {
-            for (RepoCtx ctx : done.reversed()) {
-                try {
-                    finishOne(ctx, "[" + ctx.spec().name() + "] ", m -> log.warn("回滚收口: {}", m));
-                } catch (Exception ex) {
-                    log.warn("多库准备失败回滚异常: repo={} err={}", ctx.spec().name(), ex.getMessage());
-                }
+            // 只清理本次新建的子 worktree（复用的属既有会话状态，不能动）
+            for (RepoCtx ctx : created.reversed()) {
+                removeWorktreeQuietly(ctx.cacheDir(), ctx.sessionDir(), ctx.spec().token());
             }
             throw e;
         }
-        return new MultiCtx(done, aggRoot);
+        List<RepoCtx> all = new ArrayList<>();
+        for (RepoSpec spec : specs) {
+            all.add(new RepoCtx(spec,
+                    userRoot(projectId, owner).resolve(spec.name()).resolve("main").normalize(),
+                    aggRoot.resolve(spec.name()).normalize()));
+        }
+        return new MultiCtx(all, aggRoot);
     }
 
-    /** CAP-31 多库结束收口（best-effort）：逐库 push+移除 worktree（上报带 [&lt;name&gt;] 前缀），再删聚合根。 */
+    /** CAP-31 多库结束收口（best-effort）：逐库未提交告警（不 push 不删，CAP-42 同单库口径）。 */
     public void finishMulti(MultiCtx ctx, java.util.function.Consumer<String> sink) {
         for (RepoCtx repoCtx : ctx.repos()) {
             finishOne(repoCtx, "[" + repoCtx.spec().name() + "] ", sink);
         }
-        if (!Files.exists(ctx.aggRoot())) {
-            return;
-        }
-        try (var walk = Files.walk(ctx.aggRoot())) {
-            for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(p);
-            }
-        } catch (IOException e) {
-            log.warn("聚合根目录清理失败(可人工删除 {}): {}", ctx.aggRoot(), e.getMessage());
-        }
     }
 
-    /** 单库收口（finish/finishMulti 共用）：push 会话分支 → 移除会话 worktree。label 为上报前缀（多库带库名）。 */
+    /** 单库收口检查（finish/finishMulti 共用）：固定 worktree 只查未提交改动并告警。label 为上报前缀（多库带库名）。 */
     private void finishOne(RepoCtx ctx, String label, java.util.function.Consumer<String> sink) {
         var lock = lockOf(ctx.cacheDir());
         lock.lock();
         try {
-            finishOneLocked(ctx, label, sink);
+            if (!Files.isDirectory(ctx.sessionDir())) {
+                return;
+            }
+            Result status = run(ctx.sessionDir(), OP_TIMEOUT_SEC, ctx.spec().token(), "status", "--porcelain");
+            if (status.exit() == 0 && !status.output().isBlank()) {
+                long n = status.output().lines().filter(l -> !l.isBlank()).count();
+                sink.accept(label + "[工作区] 固定工作区存在 " + n + " 处未提交改动（已保留在节点 "
+                        + ctx.sessionDir() + "），执行「收口合并到基线」前请先提交或丢弃");
+                log.warn("固定工作区存在未提交改动: dir={} files={}", ctx.sessionDir(), n);
+            }
+        } catch (Exception e) {
+            log.warn("会话工作区收口检查异常: {}", e.getMessage());
         } finally {
             lock.unlock();
         }
     }
 
-    private void finishOneLocked(RepoCtx ctx, String label, java.util.function.Consumer<String> sink) {
-        RepoSpec spec = ctx.spec();
-        try {
-            Result push = run(ctx.cacheDir(), PUSH_TIMEOUT_SEC, spec.token(),
-                    "push", withToken(spec.remoteUrl(), spec.token()), spec.branch() + ":" + spec.branch());
-            if (push.exit() == 0) {
-                sink.accept(push.output().contains("Everything up-to-date")
-                        ? label + "[工作区] 分支 " + spec.branch() + " 无新提交，远端已是最新"
-                        : label + "[工作区] 已推送分支 " + spec.branch() + " 到远端");
-            } else {
-                sink.accept(label + "[工作区] 分支 " + spec.branch() + " 推送失败（改动保留在节点 "
-                        + ctx.cacheDir() + "，可人工 push）: " + tail(push.output()));
-                log.warn("会话分支推送失败: branch={} err={}", spec.branch(), tail(push.output()));
-            }
-        } catch (Exception e) {
-            sink.accept(label + "[工作区] 分支推送异常（不反转会话结局）: " + e.getMessage());
-            log.warn("会话分支推送异常: {}", e.getMessage());
+    /** owner 白名单 + 保留名校验（防撞 GC/对账扫描桶与固定目录名） */
+    private static String requireOwner(String workspaceOwner) {
+        if (workspaceOwner == null || !SAFE_ID.matcher(workspaceOwner).matches()
+                || RESERVED_DIRS.contains(workspaceOwner)) {
+            throw new IllegalStateException("非法工作区归属用户名（白名单 [a-zA-Z0-9._-]，禁用保留名 "
+                    + RESERVED_DIRS + "）: " + workspaceOwner);
         }
-        try {
-            Result rm = run(ctx.cacheDir(), OP_TIMEOUT_SEC, spec.token(),
-                    "worktree", "remove", "--force", ctx.sessionDir().toString());
-            if (rm.exit() != 0) {
-                log.warn("会话 worktree 清理失败(可人工删除 {}): {}", ctx.sessionDir(), tail(rm.output()));
-            }
-        } catch (Exception e) {
-            log.warn("会话 worktree 清理异常: {}", e.getMessage());
+        return workspaceOwner;
+    }
+
+    private static void requireSafeId(String id, String what) {
+        if (id == null || !SAFE_ID.matcher(id).matches()) {
+            throw new IllegalStateException("非法 " + what + "（白名单 [a-zA-Z0-9._-]）: " + id);
         }
+    }
+
+    private Path userRoot(String projectId, String owner) {
+        return workspaceRoot.resolve(projectId).resolve(owner).normalize();
     }
 
     /**
@@ -538,28 +551,69 @@ public class RunnerWorkspace {
         }
     }
 
-    /** 会话 worktree：目录在 = resume 复用；分支在 = 挂回既有分支；都没有 = 从基线新建 */
-    private void addWorktree(Path cacheDir, Path sessionDir, RepoSpec spec) {
-        if (Files.isDirectory(sessionDir)) {
-            log.info("会话 worktree 已存在（resume 复用）: {}", sessionDir);
-            return;
+    /**
+     * CAP-42 固定 worktree 占用/幂等判定：
+     * 1. workDir 存在 → 检出分支 == 会话分支 = resume 复用（返回 false）；分支不符 = 占用冲突
+     *    （错误带占用分支名，引导先收口）；
+     * 2. workDir 不存在 → 本地分支在 = 挂回；本地无但 origin/&lt;branch&gt; 在（老会话已 push，
+     *    新克隆缓存迁移）→ 从远端分支建本地分支挂回防分叉；都没有 = 从基线 FETCH_HEAD 新建。
+     *
+     * @return true = 本次新建（prepareMulti 失败回滚时只清理新建的，复用的不动）
+     */
+    private boolean ensureUserWorktree(Path cacheDir, Path workDir, RepoSpec spec) {
+        if (Files.isDirectory(workDir)) {
+            Result head = run(workDir, OP_TIMEOUT_SEC, spec.token(), "rev-parse", "--abbrev-ref", "HEAD");
+            String current = head.exit() == 0 ? head.output().trim() : "";
+            if (current.equals(spec.branch())) {
+                log.info("固定 worktree 已存在且分支一致（resume 复用）: {}", workDir);
+                return false;
+            }
+            throw new IllegalStateException("该用户在本项目已有占用中的工作区（目录 " + workDir
+                    + (current.isEmpty() ? "，无法识别检出分支" : "，当前分支 " + current)
+                    + "）。请先在会话 " + occupantOf(current)
+                    + " 的「更多 → 收口合并到基线」完成收口（或由其本人/管理员执行），再开新会话");
         }
         Result verify = run(cacheDir, OP_TIMEOUT_SEC, spec.token(),
                 "rev-parse", "--verify", "--quiet", "refs/heads/" + spec.branch());
         Result add;
         if (verify.exit() == 0) {
             add = run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "worktree", "add",
-                    sessionDir.toString(), spec.branch());
+                    workDir.toString(), spec.branch());
+        } else if (run(cacheDir, OP_TIMEOUT_SEC, spec.token(),
+                "rev-parse", "--verify", "--quiet", "refs/remotes/origin/" + spec.branch()).exit() == 0) {
+            // 老会话 resume 迁移：分支已 push 远端、新克隆缓存本地无 → 从 origin/ 挂回防分叉
+            add = run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "worktree", "add",
+                    "-b", spec.branch(), workDir.toString(), "origin/" + spec.branch());
         } else {
             String baseline = spec.baseBranch() != null && !spec.baseBranch().isBlank()
                     ? "FETCH_HEAD" : "HEAD";
             add = run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "worktree", "add",
-                    "-b", spec.branch(), sessionDir.toString(), baseline);
+                    "-b", spec.branch(), workDir.toString(), baseline);
         }
         if (add.exit() != 0) {
             throw new IllegalStateException("git worktree add 失败: " + tail(add.output()));
         }
-        log.info("会话 worktree 就绪: {} (branch {})", sessionDir, spec.branch());
+        log.info("固定 worktree 就绪: {} (branch {})", workDir, spec.branch());
+        return true;
+    }
+
+    /** 占用分支名 → 占用会话 id（feature/&lt;sid&gt; 约定；无法识别时原样返回） */
+    private static String occupantOf(String branch) {
+        return branch != null && branch.startsWith("feature/") && branch.length() > "feature/".length()
+                ? branch.substring("feature/".length()) : String.valueOf(branch);
+    }
+
+    /** best-effort 移除 worktree（prepareMulti 失败回滚专用；异常只记日志） */
+    private void removeWorktreeQuietly(Path cacheDir, Path workDir, String token) {
+        try {
+            Result rm = run(cacheDir, OP_TIMEOUT_SEC, token,
+                    "worktree", "remove", "--force", workDir.toString());
+            if (rm.exit() != 0) {
+                log.warn("回滚移除 worktree 失败(可人工删除 {}): {}", workDir, tail(rm.output()));
+            }
+        } catch (Exception e) {
+            log.warn("回滚移除 worktree 异常: {}", e.getMessage());
+        }
     }
 
     /** HTTPS URL 内嵌 PAT（仅进程参数；GitLab 约定 oauth2 用户名，GitHub 接受任意用户名） */

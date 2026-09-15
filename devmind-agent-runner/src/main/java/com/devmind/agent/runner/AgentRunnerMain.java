@@ -329,6 +329,13 @@ public class AgentRunnerMain {
                 if (projectId == null || projectId.isBlank()) {
                     throw new IllegalStateException("带 repos 块的 launch 必须携带 projectId");
                 }
+                // CAP-42：repo 会话必须带 workspaceOwner（固定工作区归属用户名）；缺 = 老服务端
+                // 未升级，直接报错防静默落 sessions/<sid> 旧布局
+                String wsOwner = frame.path("workspaceOwner").asText("");
+                if (wsOwner.isBlank()) {
+                    throw new IllegalStateException(
+                            "repo 会话缺少 workspaceOwner（服务端版本过旧，runner 协议 v7+ 要求服务端同步升级）");
+                }
                 java.util.List<RunnerWorkspace.RepoSpec> specs = new java.util.ArrayList<>();
                 for (JsonNode rn : reposNode) {
                     specs.add(new RunnerWorkspace.RepoSpec(
@@ -338,7 +345,7 @@ public class AgentRunnerMain {
                             rn.path("token").asText(""),
                             rn.path("name").asText("")));
                 }
-                RunnerWorkspace.MultiCtx mctx = workspace.prepareMulti(sessionId, projectId, specs);
+                RunnerWorkspace.MultiCtx mctx = workspace.prepareMulti(sessionId, projectId, wsOwner, specs);
                 workDir = mctx.aggRoot();
                 sessionDir = mctx.aggRoot();
                 finalizer = sid -> workspace.finishMulti(mctx, msg -> sessions.reportSystem(sid, msg));
@@ -347,12 +354,17 @@ public class AgentRunnerMain {
                 if (projectId == null || projectId.isBlank()) {
                     throw new IllegalStateException("带 repo 块的 launch 必须携带 projectId");
                 }
+                String wsOwner = frame.path("workspaceOwner").asText("");
+                if (wsOwner.isBlank()) {
+                    throw new IllegalStateException(
+                            "repo 会话缺少 workspaceOwner（服务端版本过旧，runner 协议 v7+ 要求服务端同步升级）");
+                }
                 RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
                         repoNode.path("remoteUrl").asText(""),
                         repoNode.path("baseBranch").asText(""),
                         repoNode.path("branch").asText(""),
                         repoNode.path("token").asText(""));
-                RunnerWorkspace.RepoCtx ctx = workspace.prepare(sessionId, projectId, spec);
+                RunnerWorkspace.RepoCtx ctx = workspace.prepare(sessionId, projectId, wsOwner, spec);
                 workDir = ctx.sessionDir();
                 sessionDir = ctx.sessionDir();
                 finalizer = sid -> workspace.finish(ctx, msg -> sessions.reportSystem(sid, msg));

@@ -21,8 +21,11 @@ import java.util.Properties;
  * permissionMode=acceptEdits # runner 默认权限模式（服务端指令未指定时用）
  * workDir=D:\devmind-work    # 项目无映射时的兜底工作目录
  * project.&lt;projectId&gt;=D:\repos\xxx   # 项目 → 节点本地路径映射（CAP-25 起仅作降级回退）
- * workspaceRoot=./workspaces # CAP-25 托管工作区根目录（收到带 repo 块的 launch 时启用：
- *                            # 克隆缓存 <root>/<projectId>/main + 会话 worktree <root>/<projectId>/sessions/<sid>）
+ * workspaceRoot=./workspaces # CAP-25 托管工作区根目录（收到带 repo 块的 launch 时启用）；
+ *                            # CAP-42 起代码会话改为每用户固定布局：克隆缓存 <root>/<projectId>/<owner>/main
+ *                            # + 固定 worktree <root>/<projectId>/<owner>/work（多库缓存 <owner>/<repoName>/main、
+ *                            # 子 worktree work/<repoName>、聚合根 work/ 作 claude cwd）；结束不删，页面手动收口。
+ *                            # 构建工作区仍为共享 <root>/<projectId>/{main,builds}（owner 保留名防撞）；_chat 布局不变。
  * gcDays=14                  # CAP-34 FR-05：会话目录超龄清理阈值（天）
  * gcIntervalMinutes=360      # GC 巡检间隔（分钟）
  * gcInitialDelayMinutes=10   # GC 启动后首跑延迟（分钟）

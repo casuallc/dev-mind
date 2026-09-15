@@ -14,8 +14,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * CAP-25 {@link RunnerWorkspace} 全流程集成测试：本地 bare 仓库当远端（file:// 匿名通道），
- * 覆盖 clone → fetch → 会话 worktree → 提交 → 结束 push+清理 → resume 复用分支。
+ * CAP-25 {@link RunnerWorkspace} 全流程集成测试：本地 bare 仓库当远端（file:// 匿名通道）。
+ * CAP-42 起覆盖每用户固定布局：clone 缓存 &lt;proj&gt;/&lt;owner&gt;/main + 固定 worktree
+ * &lt;proj&gt;/&lt;owner&gt;/work → 会话提交 → finish 不 push 不删（脏检查告警）→ resume 复用。
  */
 class RunnerWorkspaceTest {
 
@@ -38,8 +39,12 @@ class RunnerWorkspaceTest {
         RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
                 origin.toUri().toString(), "main", "feature/s1", "");
 
-        // prepare：clone 缓存 + 会话 worktree + feature/s1 分支
-        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", spec);
+        // CAP-42 prepare：克隆缓存 <root>/<proj>/<owner>/main + 固定 worktree <proj>/<owner>/work
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", spec);
+        assertEquals(tmp.resolve("workspaces").resolve("proj1").resolve("alice").resolve("main")
+                .toAbsolutePath().normalize(), ctx.cacheDir());
+        assertEquals(tmp.resolve("workspaces").resolve("proj1").resolve("alice").resolve("work")
+                .toAbsolutePath().normalize(), ctx.sessionDir());
         assertTrue(Files.isDirectory(ctx.cacheDir().resolve(".git")));
         assertTrue(Files.isDirectory(ctx.sessionDir()));
         assertEquals("feature/s1", gitOut(ctx.sessionDir(), "branch", "--show-current"));
@@ -54,26 +59,96 @@ class RunnerWorkspaceTest {
         git(ctx.sessionDir(), "add", ".");
         git(ctx.sessionDir(), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "work");
 
-        // finish：push 分支到远端 + 移除会话 worktree（分支保留在缓存）
+        // CAP-42 finish：不 push、不删 worktree；工作区干净 → 无告警
         List<String> events = new ArrayList<>();
         ws.finish(ctx, events::add);
-        assertTrue(events.stream().anyMatch(m -> m.contains("已推送分支 feature/s1")), String.join("\n", events));
-        assertFalse(Files.exists(ctx.sessionDir()));
-        assertEquals("change", git(origin, "show", "feature/s1:code.txt").trim());
+        assertTrue(events.isEmpty(), String.join("\n", events));
+        assertTrue(Files.isDirectory(ctx.sessionDir()), "固定 worktree 结束不删除");
+        // 远端无自动 push（收口合并前分支不上远端）
+        assertThrows(IllegalStateException.class,
+                () -> git(origin, "rev-parse", "--verify", "refs/heads/feature/s1"));
 
-        // resume：目录已清理但分支在 → 挂回既有分支，提交还在
-        RunnerWorkspace.RepoCtx ctx2 = ws.prepare("s1", "proj1", spec);
+        // resume：worktree 在且分支一致 → 直接复用，提交还在
+        RunnerWorkspace.RepoCtx ctx2 = ws.prepare("s1", "proj1", "alice", spec);
+        assertEquals(ctx.sessionDir(), ctx2.sessionDir());
         assertEquals("feature/s1", gitOut(ctx2.sessionDir(), "branch", "--show-current"));
         assertEquals("change", Files.readString(ctx2.sessionDir().resolve("code.txt")));
     }
 
     @Test
+    void occupancyConflictBlocksSecondSession() throws Exception {
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec spec1 = new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s1", "");
+        ws.prepare("s1", "proj1", "alice", spec1);
+
+        // 同用户同项目第二个会话（不同分支）→ 占用冲突，错误带占用会话 sid 引导收口
+        RunnerWorkspace.RepoSpec spec2 = new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s2", "");
+        var e = assertThrows(IllegalStateException.class, () -> ws.prepare("s2", "proj1", "alice", spec2));
+        assertTrue(e.getMessage().contains("s1"), e.getMessage());
+        assertTrue(e.getMessage().contains("收口"), e.getMessage());
+
+        // 不同用户互不影响（独立缓存与 worktree）
+        RunnerWorkspace.RepoCtx bob = ws.prepare("s2", "proj1", "bob", spec2);
+        assertTrue(Files.isDirectory(bob.sessionDir()));
+        assertEquals("feature/s2", gitOut(bob.sessionDir(), "branch", "--show-current"));
+    }
+
+    @Test
+    void finishWarnsOnUncommittedChanges() throws Exception {
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s1", ""));
+
+        Files.writeString(ctx.sessionDir().resolve("dirty.txt"), "x");
+        List<String> events = new ArrayList<>();
+        ws.finish(ctx, events::add);
+        assertTrue(events.stream().anyMatch(m -> m.contains("未提交改动")), String.join("\n", events));
+        assertTrue(Files.isDirectory(ctx.sessionDir()), "脏工作区同样不删（改动保留待人工处理）");
+    }
+
+    @Test
+    void resumeAttachesToPushedBranchInFreshCache() throws Exception {
+        // 老会话已 push 分支（旧布局结束 push 的存量成果）；全新 per-user 缓存 resume →
+        // 本地无分支但 origin/ 有 → 从远端分支挂回，不从基线新建分叉
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        Path legacy = tmp.resolve("legacy");
+        git(tmp, "clone", origin.toString(), legacy.toString());
+        git(legacy, "checkout", "-b", "feature/s1");
+        Files.writeString(legacy.resolve("code.txt"), "change");
+        git(legacy, "add", ".");
+        git(legacy, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "work");
+        git(legacy, "push", "origin", "feature/s1");
+
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s1", ""));
+        assertEquals("feature/s1", gitOut(ctx.sessionDir(), "branch", "--show-current"));
+        assertEquals("change", Files.readString(ctx.sessionDir().resolve("code.txt")));
+        // 本地分支基于 origin/feature/s1（含会话提交），不是基线新建
+        assertEquals(gitOut(origin, "rev-parse", "feature/s1"),
+                gitOut(ctx.sessionDir(), "rev-parse", "HEAD"));
+    }
+
+    @Test
     void rejectsUnsafeIdsAndBranch() {
         RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
-        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec("file:///x", "main", "main", "");
-        assertThrows(IllegalStateException.class, () -> ws.prepare("s1", "../escape", spec));
+        RunnerWorkspace.RepoSpec badBranch = new RunnerWorkspace.RepoSpec("file:///x", "main", "main", "");
+        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec("file:///x", "main", "feature/s1", "");
+        assertThrows(IllegalStateException.class, () -> ws.prepare("s1", "../escape", "alice", badBranch));
         // 分支必须 feature/ 前缀
-        assertThrows(IllegalStateException.class, () -> ws.prepare("s1", "proj1", spec));
+        assertThrows(IllegalStateException.class, () -> ws.prepare("s1", "proj1", "alice", badBranch));
+        // CAP-42 FR-07：owner 白名单 + 保留名
+        assertThrows(IllegalStateException.class, () -> ws.prepare("s1", "proj1", "中文 名", spec));
+        assertThrows(IllegalStateException.class, () -> ws.prepare("s1", "proj1", "work", spec));
+        assertThrows(IllegalStateException.class, () -> ws.prepare("s1", "proj1", "sessions", spec));
+        assertThrows(IllegalStateException.class, () -> ws.prepare("s1", "proj1", null, spec));
     }
 
     @Test
@@ -118,10 +193,10 @@ class RunnerWorkspaceTest {
                 new RunnerWorkspace.RepoSpec(originA.toUri().toString(), "main", "feature/s1", "", "backend"),
                 new RunnerWorkspace.RepoSpec(originB.toUri().toString(), "main", "feature/s1", "", "web"));
 
-        // prepareMulti：各库独立克隆缓存 <root>/<proj>/<name>/main + 会话 worktree sessions/<sid>/<name>，
-        // 聚合根 = sessions/<sid>
-        RunnerWorkspace.MultiCtx mctx = ws.prepareMulti("s1", "proj1", specs);
-        Path aggRoot = tmp.resolve("workspaces").resolve("proj1").resolve("sessions").resolve("s1");
+        // CAP-42 prepareMulti：各库独立克隆缓存 <root>/<proj>/<owner>/<name>/main +
+        // 固定子 worktree <proj>/<owner>/work/<name>，聚合根 = <proj>/<owner>/work
+        RunnerWorkspace.MultiCtx mctx = ws.prepareMulti("s1", "proj1", "alice", specs);
+        Path aggRoot = tmp.resolve("workspaces").resolve("proj1").resolve("alice").resolve("work");
         assertEquals(aggRoot, mctx.aggRoot());
         assertEquals(aggRoot.resolve("backend"), mctx.repos().get(0).sessionDir());
         assertEquals(aggRoot.resolve("web"), mctx.repos().get(1).sessionDir());
@@ -129,13 +204,13 @@ class RunnerWorkspaceTest {
         assertTrue(Files.exists(aggRoot.resolve("web").resolve("b.txt")));
         assertEquals("feature/s1", gitOut(aggRoot.resolve("backend"), "branch", "--show-current"));
         assertEquals("feature/s1", gitOut(aggRoot.resolve("web"), "branch", "--show-current"));
-        // 克隆缓存按库分目录
-        assertTrue(Files.isDirectory(tmp.resolve("workspaces").resolve("proj1").resolve("backend")
-                .resolve("main").resolve(".git")));
-        assertTrue(Files.isDirectory(tmp.resolve("workspaces").resolve("proj1").resolve("web")
-                .resolve("main").resolve(".git")));
+        // 克隆缓存按用户按库分目录
+        assertTrue(Files.isDirectory(tmp.resolve("workspaces").resolve("proj1").resolve("alice")
+                .resolve("backend").resolve("main").resolve(".git")));
+        assertTrue(Files.isDirectory(tmp.resolve("workspaces").resolve("proj1").resolve("alice")
+                .resolve("web").resolve("main").resolve(".git")));
 
-        // 各库提交一笔 → finishMulti 逐库 push + 清理，聚合根删除
+        // 各库提交一笔 → CAP-42 finishMulti 不 push 不删，干净工作区无告警
         Files.writeString(aggRoot.resolve("backend").resolve("code.txt"), "A");
         git(aggRoot.resolve("backend"), "add", ".");
         git(aggRoot.resolve("backend"), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "workA");
@@ -145,13 +220,16 @@ class RunnerWorkspaceTest {
 
         List<String> events = new ArrayList<>();
         ws.finishMulti(mctx, events::add);
-        assertTrue(events.stream().anyMatch(m -> m.contains("[backend]") && m.contains("已推送分支 feature/s1")),
+        assertTrue(events.isEmpty(), String.join("\n", events));
+        assertTrue(Files.isDirectory(aggRoot), "多库聚合根结束不删除");
+        assertThrows(IllegalStateException.class,
+                () -> git(originA, "rev-parse", "--verify", "refs/heads/feature/s1"));
+
+        // 脏检查：web 库留未提交改动 → finishMulti 带 [web] 前缀告警
+        Files.writeString(aggRoot.resolve("web").resolve("dirty.txt"), "x");
+        ws.finishMulti(mctx, events::add);
+        assertTrue(events.stream().anyMatch(m -> m.contains("[web]") && m.contains("未提交改动")),
                 String.join("\n", events));
-        assertTrue(events.stream().anyMatch(m -> m.contains("[web]") && m.contains("已推送分支 feature/s1")),
-                String.join("\n", events));
-        assertFalse(Files.exists(aggRoot));
-        assertEquals("A", git(originA, "show", "feature/s1:code.txt").trim());
-        assertEquals("B", git(originB, "show", "feature/s1:ui.txt").trim());
     }
 
     @Test
@@ -160,7 +238,12 @@ class RunnerWorkspaceTest {
         List<RunnerWorkspace.RepoSpec> specs = List.of(
                 new RunnerWorkspace.RepoSpec("file:///x", "main", "feature/s1", "", "ok"),
                 new RunnerWorkspace.RepoSpec("file:///y", "main", "feature/s1", "", "../escape"));
-        assertThrows(IllegalStateException.class, () -> ws.prepareMulti("s1", "proj1", specs));
+        assertThrows(IllegalStateException.class, () -> ws.prepareMulti("s1", "proj1", "alice", specs));
+        // 保留名 work（与聚合根撞名）
+        List<RunnerWorkspace.RepoSpec> reserved = List.of(
+                new RunnerWorkspace.RepoSpec("file:///x", "main", "feature/s1", "", "work"),
+                new RunnerWorkspace.RepoSpec("file:///y", "main", "feature/s1", "", "ok"));
+        assertThrows(IllegalStateException.class, () -> ws.prepareMulti("s1", "proj1", "alice", reserved));
     }
 
     @Test
