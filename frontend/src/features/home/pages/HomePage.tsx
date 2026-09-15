@@ -127,6 +127,7 @@ export default function HomePage() {
       <Row gutter={[16, 16]}>
         <Col xs={24} md={8}>
           <Card
+            style={{ height: '100%' }}
             title={
               <Space>
                 <RobotOutlined />
@@ -148,7 +149,7 @@ export default function HomePage() {
                 <List.Item style={{ paddingInline: 0 }}>
                   <Typography.Text
                     ellipsis
-                    style={{ flex: 1, fontSize: 13, cursor: 'pointer' }}
+                    style={{ flex: 1, minWidth: 0, fontSize: 13, cursor: 'pointer' }}
                     onClick={() => navigate('/sessions')}
                   >
                     {s.taskSpec || s.id}
@@ -163,6 +164,7 @@ export default function HomePage() {
         </Col>
         <Col xs={24} md={8}>
           <Card
+            style={{ height: '100%' }}
             title={
               <Space>
                 <FieldTimeOutlined />
@@ -183,6 +185,7 @@ export default function HomePage() {
         </Col>
         <Col xs={24} md={8}>
           <Card
+            style={{ height: '100%' }}
             title={
               <Space>
                 <CommentOutlined />
@@ -204,7 +207,7 @@ export default function HomePage() {
                 <List.Item style={{ paddingInline: 0 }}>
                   <Typography.Text
                     ellipsis
-                    style={{ flex: 1, fontSize: 13, cursor: 'pointer' }}
+                    style={{ flex: 1, minWidth: 0, fontSize: 13, cursor: 'pointer' }}
                     onClick={() => navigate('/notifications')}
                   >
                     {n.title}
@@ -223,6 +226,7 @@ export default function HomePage() {
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24} md={12}>
           <Card
+            style={{ height: '100%' }}
             title="我的项目"
             extra={
               <Typography.Link onClick={() => navigate('/projects')}>
@@ -242,7 +246,7 @@ export default function HomePage() {
                 <List.Item style={{ paddingInline: 0 }}>
                   <Typography.Link
                     ellipsis
-                    style={{ flex: 1 }}
+                    style={{ flex: 1, minWidth: 0 }}
                     onClick={() => openProject(p.id)}
                   >
                     {p.name}
@@ -260,6 +264,7 @@ export default function HomePage() {
         </Col>
         <Col xs={24} md={12}>
           <Card
+            style={{ height: '100%' }}
             title="最近问答"
             extra={
               <Typography.Link onClick={() => navigate('/chats')}>
@@ -282,7 +287,7 @@ export default function HomePage() {
                 <List.Item style={{ paddingInline: 0 }}>
                   <Typography.Text
                     ellipsis
-                    style={{ flex: 1, fontSize: 13, cursor: 'pointer' }}
+                    style={{ flex: 1, minWidth: 0, fontSize: 13, cursor: 'pointer' }}
                     onClick={() => navigate('/chats')}
                   >
                     {c.title || c.id}
