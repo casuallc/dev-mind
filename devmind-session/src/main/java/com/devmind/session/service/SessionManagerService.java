@@ -299,18 +299,29 @@ public class SessionManagerService {
                 eventSaver, listener, props.toRuntimeSettings());
         // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
         runtimes.put(id, remoteRt);
+        // CAP-42：repo 会话固定工作区归属用户名（launch 帧 workspaceOwner；try 内解析后供落库）
+        String wsOwner = null;
         try {
             // CAP-31：repos=全量快照（含 name，新 runner 多库模式）；repo=首个（主库）保持旧 runner 降级
             // CAP-41：worklog 会话无仓库块，kind="worklog" + worklogOwner=项目归属用户（runner 目录隔离键）
             List<AgentLaunchCommand.RepoSpec> specs = worklog ? List.of()
                     : buildRepoSpecs(project, repoRows, baseBranch,
                             worktreeManager.branchFor(id), identityService.currentActor());
+            // CAP-42：repo 会话走每用户固定工作区——归属用户解析（无登录态按 WI/需求归属人回退链）
+            // + 协议 v7 门控（老 runner 会忽略 workspaceOwner 落 sessions/<sid> 旧布局，fail-visible 409）
+            if (!worklog && !specs.isEmpty()) {
+                wsOwner = requireWorkspaceOwner(resolveWorkspaceOwner(workItem, requirement));
+                if (!connector.supports(agentNodeId, AgentProtocol.PER_USER_WORKSPACE)) {
+                    throw new DevMindException(ErrorCode.CONFLICT,
+                            "节点 runner 版本过低，不支持每用户固定工作区（需协议 v7+），请升级该节点 runner");
+                }
+            }
             // CAP-34 FR-03：上下文包清单随帧下发，runner 凭 manifest 拉包物化
             connector.launch(agentNodeId, new AgentLaunchCommand(
                     id, project != null ? project.id() : null, taskSpec, model, pm, gitEnv,
                     specs.isEmpty() ? null : specs.get(0), worklog ? "worklog" : "session",
                     specs.size() > 1 ? specs : null, prepared != null ? prepared.manifest() : null,
-                    null, worklog ? project.ownerId() : null));
+                    null, worklog ? project.ownerId() : null, wsOwner));
         } catch (Exception e) {
             runtimes.remove(id);
             if (e instanceof DevMindException de) {
@@ -335,6 +346,8 @@ public class SessionManagerService {
         ent.setModel(model);
         ent.setPermissionMode(pm);
         ent.setCreatedBy(identityService.currentActor());
+        // CAP-42：固定工作区归属用户名落库（resume 以此为准，不随当前操作者漂移）
+        ent.setWorkspaceOwner(wsOwner);
         // CAP-33：场景 code 落库（resume 据此重渲染重装配；FR-07 快照在装配后落）
         ent.setScenarioCode(scenario != null ? scenario.getCode() : null);
         ent.setContextManifestJson(prepared != null ? prepared.snapshotJson() : null);
@@ -484,6 +497,18 @@ public class SessionManagerService {
                         : buildRepoSpecs(proj,
                                 sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(id), ent.getBaseBranch(),
                                 worktreeManager.branchFor(id), ent.getCreatedBy());
+                // CAP-42：repo 会话固定工作区——归属用户取落库 workspaceOwner（旧会话回退 createdBy，
+                // 新缓存经 origin/<branch> 挂回已 push 分支不丢提交），协议 v7 门控与创建一致
+                String wsOwner = null;
+                if (!worklog && !specs.isEmpty()) {
+                    wsOwner = requireWorkspaceOwner(ent.getWorkspaceOwner() != null
+                            && !ent.getWorkspaceOwner().isBlank()
+                            ? ent.getWorkspaceOwner() : ent.getCreatedBy());
+                    if (!connector.supports(ent.getAgentNodeId(), AgentProtocol.PER_USER_WORKSPACE)) {
+                        throw new DevMindException(ErrorCode.CONFLICT,
+                                "节点 runner 版本过低，不支持每用户固定工作区（需协议 v7+），请升级该节点 runner");
+                    }
+                }
                 // CAP-33：resume 按落库 scenarioCode 重渲染重装配（修复此前用未渲染原文重装配的
                 // 偏差；场景已删降级按原文；③层请求追加为创建时一次性，resume 不重放）；
                 // resume = 重新注入（hitCount 再累计一次，与创建同语义）
@@ -500,7 +525,7 @@ public class SessionManagerService {
                         specs.isEmpty() ? null : specs.get(0), worklog ? "worklog" : "session",
                         specs.size() > 1 ? specs : null,
                         prepared != null ? prepared.manifest() : null,
-                        ent.getCliSessionId(), worklog ? proj.ownerId() : null));
+                        ent.getCliSessionId(), worklog ? proj.ownerId() : null, wsOwner));
             } catch (Exception e) {
                 runtimes.remove(id);
                 if (e instanceof DevMindException de) {
@@ -969,6 +994,52 @@ public class SessionManagerService {
         throw new DevMindException(ErrorCode.CONFLICT, requiredLabels.isEmpty()
                 ? "无可用执行节点：请显式指定执行节点，或配置项目默认/平台默认节点"
                 : "无满足标签的在线节点: " + requiredLabelsRaw);
+    }
+
+    // ---------------- CAP-42：固定工作区归属用户解析 ----------------
+
+    /** runner 工作区目录名白名单（与 RunnerWorkspace.SAFE_ID 同口径） */
+    private static final java.util.regex.Pattern WS_OWNER_ID =
+            java.util.regex.Pattern.compile("[a-zA-Z0-9._-]+");
+    /** 工作区保留目录名（GC/对账扫描桶 + 固定目录名），owner 禁用防撞名 */
+    private static final java.util.Set<String> WS_RESERVED_DIRS =
+            java.util.Set.of("main", "sessions", "builds", "_chat", "work");
+
+    /**
+     * CAP-42 FR-06：repo 会话固定工作区归属用户名。
+     * 有登录态 = 当前操作者；无登录态（CAP-15/17 编排派发等异步链路，actor 回退 local）按
+     * WI.ownerId → 需求.ownerId → WI.createdBy → 需求.createdBy 回退链解析真实用户名，
+     * 解析不到 409 fail-visible（不落 local——多 WI 并发会全撞 &lt;proj&gt;/local/work）。
+     */
+    private String resolveWorkspaceOwner(WorkItemEntity workItem, RequirementEntity requirement) {
+        String actor = identityService.currentActor();
+        if (!com.devmind.auth.IdentityService.LOCAL_USER.equals(actor)) {
+            return actor;
+        }
+        for (String candidate : new String[]{
+                workItem != null ? workItem.getOwnerId() : null,
+                requirement != null ? requirement.getOwnerId() : null,
+                workItem != null ? workItem.getCreatedBy() : null,
+                requirement != null ? requirement.getCreatedBy() : null}) {
+            if (candidate != null && !candidate.isBlank()
+                    && !com.devmind.auth.IdentityService.LOCAL_USER.equals(candidate)) {
+                return candidate;
+            }
+        }
+        throw new DevMindException(ErrorCode.CONFLICT,
+                "无法确定工作区归属用户（无登录态且工作单元/需求均未指定负责人），"
+                        + "请先为工作单元/需求指定负责人再派发会话");
+    }
+
+    /** CAP-42 FR-07：归属用户名白名单 + 保留名校验（存量非法用户名在此 fail-visible） */
+    private static String requireWorkspaceOwner(String owner) {
+        if (owner == null || !WS_OWNER_ID.matcher(owner).matches() || WS_RESERVED_DIRS.contains(owner)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "用户名「" + owner + "」不能作为 runner 工作区目录名"
+                            + "（需匹配 [a-zA-Z0-9._-] 且非保留名 main/sessions/builds/_chat/work），"
+                            + "请联系管理员调整用户名");
+        }
+        return owner;
     }
 
     /**

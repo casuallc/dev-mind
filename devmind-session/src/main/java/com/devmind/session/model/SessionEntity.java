@@ -66,6 +66,14 @@ public class SessionEntity {
     @Column(name = "created_by", length = 64)
     private String createdBy;
 
+    /**
+     * CAP-42：runner 固定工作区归属用户名（= 创建时解析的工作区 owner；无登录态链路按
+     * WI.ownerId → 需求.ownerId → WI.createdBy → 需求.createdBy 回退链解析）。
+     * null = 旧会话（旧 sessions/&lt;sid&gt; 布局）或非 repo 会话。resume 以此为准（不随当前操作者漂移）。
+     */
+    @Column(name = "workspace_owner", length = 64)
+    private String workspaceOwner;
+
     @Lob
     @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
@@ -114,6 +122,9 @@ public class SessionEntity {
     public void setPid(Long pid) { this.pid = pid; }
     public String getCreatedBy() { return createdBy; }
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
+
+    public String getWorkspaceOwner() { return workspaceOwner; }
+    public void setWorkspaceOwner(String workspaceOwner) { this.workspaceOwner = workspaceOwner; }
     public String getModel() { return model; }
     public void setModel(String model) { this.model = model; }
     public String getPermissionMode() { return permissionMode; }
