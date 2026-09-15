@@ -21,6 +21,10 @@ import java.util.stream.Stream;
  * 按目录内 {@value #PID_FILE} 文件（register 时写入：pid + 进程启动时刻）判定孤儿 claude 进程并整树回收；
  * 进程已不在的目录登记为无主目录（<b>不删</b>——超龄删除是 FR-05 工作区 GC 的职责）。
  *
+ * <p>CAP-42 第三类目录：每用户固定工作区 &lt;root&gt;/&lt;projectId&gt;/&lt;owner&gt;/work
+ * 同样写 pid 文件、同样回收孤儿进程，但目录本身是持久用户空间——进程已不在时<b>不</b>登记
+ * 无主目录（永不移交 GC）。</p>
+ *
  * <p>PID 复用防护：要求进程 startInstant 与文件记录时刻误差 &lt; {@value #START_SKEW_MS}ms，
  * 否则视为无关进程，只登记不杀。legacy 目录（launch 无 repo/kind 块的 project 映射路径）
  * 不写 pid 文件，不参与对账。</p>
@@ -31,6 +35,9 @@ public class WorkspaceReconciler {
     private static final long START_SKEW_MS = 5_000;
     private static final Logger log = LoggerFactory.getLogger(WorkspaceReconciler.class);
     private static final Pattern SAFE_ID = Pattern.compile("[a-zA-Z0-9._-]+");
+    /** CAP-42：&lt;proj&gt; 下一级非用户目录的保留名（扫描桶/共享缓存），遍历时跳过 */
+    private static final java.util.Set<String> NON_OWNER_DIRS =
+            java.util.Set.of("main", "sessions", "builds", "_chat", "work");
 
     /** 被回收的孤儿会话进程。 */
     public record OrphanedSession(String sessionId, Path dir, long pid) {
@@ -74,18 +81,21 @@ public class WorkspaceReconciler {
     public ReconcileReport reconcile() {
         List<OrphanedSession> reaped = new ArrayList<>();
         List<Path> ownerless = new ArrayList<>();
-        for (Path dir : sessionDirs()) {
+        for (Candidate c : sessionDirs()) {
+            Path dir = c.dir();
             String sid = dir.getFileName().toString();
             Path pidFile = dir.resolve(PID_FILE);
             if (!Files.isRegularFile(pidFile)) {
-                ownerless.add(dir);
+                if (c.ownerlessEligible()) {
+                    ownerless.add(dir);
+                }
                 continue;
             }
             Long pid = readLivePid(pidFile);
             if (pid != null && ProcessHelper.killTreeByPid(pid)) {
                 reaped.add(new OrphanedSession(sid, dir, pid));
                 log.info("回收孤儿会话进程: session={} pid={} dir={}", sid, pid, dir);
-            } else {
+            } else if (c.ownerlessEligible()) {
                 ownerless.add(dir);
             }
         }
@@ -126,9 +136,20 @@ public class WorkspaceReconciler {
         return new WorkspaceReconciler(sessionDir).readLivePid(pidFile) != null;
     }
 
-    /** 存量会话目录：<root>/<projectId>/sessions/<sid>（跳过 _chat 桶）+ <root>/_chat/<sid>。 */
-    private List<Path> sessionDirs() {
-        List<Path> out = new ArrayList<>();
+    /**
+     * 对账候选目录。ownerlessEligible=false 的目录（CAP-42 固定工作区）只回收孤儿进程，
+     * 进程不在时也不登记无主（持久用户空间，永不移交 GC）。
+     */
+    private record Candidate(Path dir, boolean ownerlessEligible) {
+    }
+
+    /**
+     * 存量会话目录：&lt;root&gt;/&lt;projectId&gt;/sessions/&lt;sid&gt; + &lt;root&gt;/_chat/&lt;sid&gt;
+     * （eligible=true）；CAP-42 固定工作区 &lt;root&gt;/&lt;projectId&gt;/&lt;owner&gt;/work
+     * （eligible=false，跳过保留名桶）。
+     */
+    private List<Candidate> sessionDirs() {
+        List<Candidate> out = new ArrayList<>();
         if (!Files.isDirectory(workspaceRoot)) {
             return out;
         }
@@ -137,23 +158,36 @@ public class WorkspaceReconciler {
                 if ("_chat".equals(proj.getFileName().toString())) {
                     continue;
                 }
-                collectSubDirs(proj.resolve("sessions"), out);
+                collectSubDirs(proj.resolve("sessions"), out, true);
+                // CAP-42：<proj>/<owner>/work（owner = 非保留名的二级目录）
+                try (Stream<Path> owners = Files.list(proj)) {
+                    for (Path owner : owners.filter(Files::isDirectory).toList()) {
+                        String name = owner.getFileName().toString();
+                        if (NON_OWNER_DIRS.contains(name) || !SAFE_ID.matcher(name).matches()) {
+                            continue;
+                        }
+                        Path work = owner.resolve("work");
+                        if (Files.isDirectory(work)) {
+                            out.add(new Candidate(work, false));
+                        }
+                    }
+                }
             }
         } catch (IOException e) {
             log.warn("工作区扫描失败: {} err={}", workspaceRoot, e.getMessage());
         }
-        collectSubDirs(workspaceRoot.resolve("_chat"), out);
+        collectSubDirs(workspaceRoot.resolve("_chat"), out, true);
         return out;
     }
 
-    private void collectSubDirs(Path parent, List<Path> out) {
+    private void collectSubDirs(Path parent, List<Candidate> out, boolean ownerlessEligible) {
         if (!Files.isDirectory(parent)) {
             return;
         }
         try (Stream<Path> s = Files.list(parent)) {
             s.filter(Files::isDirectory)
                     .filter(p -> SAFE_ID.matcher(p.getFileName().toString()).matches())
-                    .forEach(out::add);
+                    .forEach(p -> out.add(new Candidate(p, ownerlessEligible)));
         } catch (IOException e) {
             log.warn("目录扫描失败: {} err={}", parent, e.getMessage());
         }

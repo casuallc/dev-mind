@@ -30,6 +30,10 @@ import java.util.stream.Stream;
  *       私有仓库探测失败一律保守跳过（正常 finish 已删目录，GC 兜底的漏网目录可人工清理）。</li>
  * </ol>
  * chat 沙箱只做 1~3。
+ *
+ * <p>CAP-42：每用户固定工作区 &lt;root&gt;/&lt;projectId&gt;/&lt;owner&gt;/{main,work}
+ * 不在 sessions/_chat 扫描桶下，<b>天然不参与 GC</b>（持久用户空间，收口只走手动
+ * workspace_finalize）；本类只兜存量旧布局目录。</p>
  */
 public class WorkspaceGc {
 

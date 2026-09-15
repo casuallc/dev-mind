@@ -45,15 +45,23 @@ class WorkspaceGcTest {
 
     /** prepare + 会话内提交一笔；push=true 时把分支推上远端（模拟 finish 的 push 但保留目录）。 */
     private Path orphanSessionDir(String sid, boolean push) throws Exception {
-        RunnerWorkspace.RepoCtx ctx = ws.prepare(sid, "proj1", new RunnerWorkspace.RepoSpec(
-                origin.toUri().toString(), "main", "feature/" + sid, ""));
-        Files.writeString(ctx.sessionDir().resolve("code.txt"), "change-" + sid);
-        git(ctx.sessionDir(), "add", ".");
-        git(ctx.sessionDir(), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "work");
-        if (push) {
-            git(ctx.sessionDir(), "push", "origin", "feature/" + sid + ":feature/" + sid);
+        // 存量旧布局手工搭建：共享缓存 <proj>/main + 会话 worktree <proj>/sessions/<sid>
+        // （CAP-42 起 prepare 落 <proj>/<owner>/{main,work} 固定布局，GC 扫描的旧桶由本方法模拟）
+        Path cacheDir = wsRoot.resolve("proj1").resolve("main");
+        if (!Files.isDirectory(cacheDir.resolve(".git"))) {
+            Files.createDirectories(cacheDir.getParent());
+            git(cacheDir.getParent(), "clone", origin.toUri().toString(), cacheDir.toString());
         }
-        return ctx.sessionDir();
+        git(cacheDir, "fetch", "origin", "main");
+        Path sessionDir = wsRoot.resolve("proj1").resolve("sessions").resolve(sid);
+        git(cacheDir, "worktree", "add", "-b", "feature/" + sid, sessionDir.toString(), "origin/main");
+        Files.writeString(sessionDir.resolve("code.txt"), "change-" + sid);
+        git(sessionDir, "add", ".");
+        git(sessionDir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "work");
+        if (push) {
+            git(sessionDir, "push", "origin", "feature/" + sid + ":feature/" + sid);
+        }
+        return sessionDir;
     }
 
     private static void makeOld(Path dir) throws Exception {
@@ -98,6 +106,23 @@ class WorkspaceGcTest {
         assertTrue(usage > 0);
         // 空根 = 0
         assertEquals(0, new WorkspaceGc(tmp.resolve("nonexistent")).usageBytes());
+    }
+
+    @Test
+    void fixedPerUserWorkspaceIsNeverGcCandidate() throws Exception {
+        // CAP-42：固定布局 <proj>/<owner>/{main,work} 不在 sessions/_chat 扫描桶下，
+        // 超龄也绝不删除（收口只走手动 finalize）
+        seedOriginAndWorkspace();
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s1", ""));
+        makeOld(ctx.sessionDir());
+        makeOld(ctx.cacheDir());
+        makeOld(ctx.sessionDir().getParent());
+
+        var report = new WorkspaceGc(wsRoot).run(14, Set.of());
+        assertEquals(0, report.deleted());
+        assertTrue(Files.isDirectory(ctx.sessionDir()));
+        assertTrue(Files.isDirectory(ctx.cacheDir()));
     }
 
     private static String git(Path cwd, String... args) throws Exception {

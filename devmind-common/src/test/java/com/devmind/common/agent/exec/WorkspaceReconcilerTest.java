@@ -111,4 +111,30 @@ class WorkspaceReconcilerTest {
             other.waitFor(10, TimeUnit.SECONDS);
         }
     }
+
+    @Test
+    void fixedWorkspaceReapsOrphanButNeverOwnerless() throws Exception {
+        // CAP-42：<proj>/<owner>/work 固定工作区——活 pid 孤儿进程照常回收；
+        // 无 pid/死 pid 不登记 ownerless（持久用户空间，永不移交 GC）
+        Process orphan = spawnSleeper();
+        Path work = root.resolve("p1").resolve("alice").resolve("work");
+        Files.createDirectories(work);
+        WorkspaceReconciler.writePidFile(work, orphan);
+        // 同项目另一个用户无 pid 文件的固定工作区
+        Path workNoPid = root.resolve("p1").resolve("bob").resolve("work");
+        Files.createDirectories(workNoPid);
+        // 保留名目录不视为 owner（legacy 共享缓存/扫描桶）
+        Files.createDirectories(root.resolve("p1").resolve("main"));
+        Files.createDirectories(root.resolve("p1").resolve("builds"));
+
+        var report = new WorkspaceReconciler(root).reconcile();
+
+        assertEquals(1, report.reaped().size());
+        orphan.waitFor(10, TimeUnit.SECONDS);
+        assertFalse(orphan.isAlive());
+        assertTrue(report.ownerlessDirs().isEmpty(),
+                "固定工作区不登记无主: " + report.ownerlessDirs());
+        assertTrue(Files.isDirectory(work));
+        assertTrue(Files.isDirectory(workNoPid));
+    }
 }
