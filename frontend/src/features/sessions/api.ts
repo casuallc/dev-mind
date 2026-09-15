@@ -1,6 +1,6 @@
 // 会话能力（CAP-05）的接口封装：页面只依赖本文件，不直接碰 shared client
 import { api } from '../../shared/api/client'
-import type { RepoDiffView, SessionSummary, SessionEvent } from './types'
+import type { FinalizeAck, RepoDiffView, SessionSummary, SessionEvent } from './types'
 import type {
   CollectOutputsResult,
   PublishOutputRequest,
@@ -80,6 +80,11 @@ export function killSession(id: string): Promise<SessionSummary> {
 /** 优雅结束：关闭 stdin，claude 自然退出。 */
 export function finishSession(id: string): Promise<void> {
   return api.post(`/sessions/${id}/finish`)
+}
+
+/** CAP-42：固定工作区手动收口（合并会话分支到基线 + push + 删 worktree）。 */
+export function finalizeSession(id: string, discardChanges: boolean): Promise<FinalizeAck> {
+  return api.post<FinalizeAck>(`/sessions/${id}/finalize`, { discardChanges })
 }
 
 export function sessionDiff(id: string): Promise<RepoDiffView[]> {

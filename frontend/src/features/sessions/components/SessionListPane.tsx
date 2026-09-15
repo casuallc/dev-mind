@@ -106,6 +106,17 @@ export default function SessionListPane({
                 {s.state}
               </Tag>
             </div>
+            {/* CAP-42：固定工作区收口状态（OPEN=占用中/蓝，FINALIZED=已收口/绿，空不显示） */}
+            {s.workspaceState && (
+              <div style={{ marginTop: 2 }}>
+                <Tag
+                  color={s.workspaceState === 'FINALIZED' ? 'green' : 'blue'}
+                  style={{ marginInlineEnd: 0, fontSize: 11, lineHeight: '16px', padding: '0 4px' }}
+                >
+                  {s.workspaceState === 'FINALIZED' ? '已收口' : '工作区占用中'}
+                </Tag>
+              </div>
+            )}
             {/* CAP-31：显式展示会话针对哪些仓库（主库蓝色在前） */}
             {(s.repoNames ?? []).length > 0 && (
               <div style={{ marginTop: 2, display: 'flex', flexWrap: 'wrap', gap: 2 }}>

@@ -20,9 +20,20 @@ export interface SessionSummary {
   agentNodeId?: string
   /** CAP-31：会话关联仓库名快照（主库在前；空 = 兼容旧单库路径） */
   repoNames?: string[]
+  /** CAP-42：创建者用户名（收口鉴权：本人或 admin） */
+  createdBy?: string
+  /** CAP-42：固定工作区收口状态（OPEN=占用中 / FINALIZED=已收口；空 = 旧会话或非代码会话） */
+  workspaceState?: string | null
   createdAt: string
   updatedAt: string
   finishedAt?: string
+}
+
+/** CAP-42：手动收口结果（POST /sessions/{id}/finalize；失败走 409 错误透传） */
+export interface FinalizeAck {
+  ok: boolean
+  detail?: string
+  error?: string
 }
 
 /** CAP-31：单仓库 diff 摘要（GET /sessions/{id}/diff 按库返回列表；单库失败只填 error） */
