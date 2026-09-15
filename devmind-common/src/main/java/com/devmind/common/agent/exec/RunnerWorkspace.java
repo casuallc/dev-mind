@@ -741,6 +741,7 @@ public class RunnerWorkspace {
             Result head = run(workDir, OP_TIMEOUT_SEC, spec.token(), "rev-parse", "--abbrev-ref", "HEAD");
             String current = head.exit() == 0 ? head.output().trim() : "";
             if (current.equals(spec.branch())) {
+                excludePidFile(cacheDir); // 修复前遗留的 worktree 补齐排除（幂等）
                 log.info("固定 worktree 已存在且分支一致（resume 复用）: {}", workDir);
                 return false;
             }
@@ -769,8 +770,32 @@ public class RunnerWorkspace {
         if (add.exit() != 0) {
             throw new IllegalStateException("git worktree add 失败: " + tail(add.output()));
         }
+        excludePidFile(cacheDir);
         log.info("固定 worktree 就绪: {} (branch {})", workDir, spec.branch());
         return true;
+    }
+
+    /**
+     * 会话进程 pid 文件（{@link WorkspaceReconciler#PID_FILE}）落在 worktree 根，必须排除出
+     * 版本控制——否则 agent「git add -A」会把它提交进会话分支，会话结束删 pid 文件后工作区
+     * 恒脏，收口被「未提交改动」挡住（CAP-42 E2E 实测踩中）。info/exclude 为缓存全 worktree
+     * 共享，best-effort，失败只告警。
+     */
+    private void excludePidFile(Path cacheDir) {
+        try {
+            Path exclude = cacheDir.resolve(".git/info/exclude");
+            String line = "/" + WorkspaceReconciler.PID_FILE;
+            String content = Files.isRegularFile(exclude)
+                    ? Files.readString(exclude, StandardCharsets.UTF_8) : "";
+            if (!content.contains(line)) {
+                Files.createDirectories(exclude.getParent());
+                Files.writeString(exclude,
+                        content + (content.isEmpty() || content.endsWith("\n") ? "" : "\n") + line + "\n",
+                        StandardCharsets.UTF_8);
+            }
+        } catch (Exception e) {
+            log.warn("写入 info/exclude 失败（可手工排除 {}）: {}", WorkspaceReconciler.PID_FILE, e.getMessage());
+        }
     }
 
     /** 占用分支名 → 占用会话 id（feature/&lt;sid&gt; 约定；无法识别时原样返回） */

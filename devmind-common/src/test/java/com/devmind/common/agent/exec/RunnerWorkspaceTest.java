@@ -53,6 +53,13 @@ class RunnerWorkspaceTest {
         // 克隆缓存 origin URL 无凭据残留（本测试无 token，验证 set-url 路径不破坏 URL）
         assertEquals(origin.toUri().toString(),
                 gitOut(ctx.cacheDir(), "remote", "get-url", "origin"));
+        // .runner-pid 被 info/exclude 排除：agent「git add -A」不会把 pid 文件提交进会话分支
+        // （否则会话结束删 pid 后工作区恒脏，收口被「未提交改动」挡住——E2E 实测踩中）
+        assertTrue(Files.readString(ctx.cacheDir().resolve(".git/info/exclude")).contains("/.runner-pid"));
+        Files.writeString(ctx.sessionDir().resolve(".runner-pid"), "1 2026-09-15");
+        git(ctx.sessionDir(), "add", "-A");
+        assertEquals("", gitOut(ctx.sessionDir(), "status", "--porcelain"));
+        Files.delete(ctx.sessionDir().resolve(".runner-pid"));
 
         // 会话内提交一笔
         Files.writeString(ctx.sessionDir().resolve("code.txt"), "change");
