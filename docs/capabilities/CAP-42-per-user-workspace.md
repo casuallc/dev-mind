@@ -25,7 +25,9 @@ CAP-25/31 的 runner 工作区是「每会话独立目录」：克隆缓存 `<wo
 ```
 
 - **固定不删**：会话结束不再 push、不再删 worktree（仅上报未提交告警）；目录不参与 GC，
-  依赖产物跨会话沉淀；`.runner-pid` 孤儿进程对账回收保留。
+  依赖产物跨会话沉淀；`.runner-pid` 孤儿进程对账回收保留。pid 文件落在 worktree 根，
+  runner 建 worktree 时把 `/.runner-pid` 写入克隆缓存 `info/exclude`（全 worktree 共享，
+  幂等），防 agent「git add -A」把它提交进会话分支导致会话结束后工作区恒脏。
 - **同 (项目, 用户) 唯一活跃工作区**：新会话 launch 时 worktree 已存在且检出分支不是
   `feature/<新sid>` → launch 失败报占用会话 sid，引导先收口；同 sid（resume）幂等复用。
 - **手动收口**（页面触发，不自动执行）：合并会话分支到基线 → push 基线 + 顺带 push
