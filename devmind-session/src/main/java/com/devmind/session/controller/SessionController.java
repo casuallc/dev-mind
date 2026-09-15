@@ -3,6 +3,7 @@ package com.devmind.session.controller;
 import com.devmind.session.dto.AuthorizeRequest;
 import com.devmind.session.dto.CollectResultView;
 import com.devmind.session.dto.CreateSessionRequest;
+import com.devmind.session.dto.FinalizeRequest;
 import com.devmind.session.dto.InputRequest;
 import com.devmind.session.dto.OutputContentView;
 import com.devmind.session.dto.OutputFileView;
@@ -87,6 +88,13 @@ public class SessionController {
     @PostMapping("/{id}/finish")
     public void finish(@PathVariable String id) {
         service.finish(id);
+    }
+
+    /** CAP-42：固定工作区手动收口（合并会话分支到基线 + push + 删 worktree；鉴权=创建者或 admin）。 */
+    @PostMapping("/{id}/finalize")
+    public com.devmind.common.agent.FinalizeResult finalize(@PathVariable String id,
+                                                            @RequestBody FinalizeRequest req) {
+        return service.finalizeWorkspace(id, req != null && req.effectiveDiscardChanges());
     }
 
     /** CAP-31：按库返回 diff 摘要（本地逐库 worktree；远程经服务端克隆缓存 fetch 后 diff）。 */

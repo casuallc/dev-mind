@@ -240,7 +240,7 @@ class RequirementFlowServiceTest {
         public SessionView create(CreateSessionRequest req) {
             requests.add(req);
             return new SessionView("sess-new-" + (++seq), req.projectId(), req.workItemId(), req.requirementId(),
-                    req.taskSpec(), "QUEUED", null, null, null, null, null, null, null,
+                    req.taskSpec(), "QUEUED", null, null, null, null, null, null, null, null, null,
                     Instant.now(), Instant.now(), null);
         }
     }

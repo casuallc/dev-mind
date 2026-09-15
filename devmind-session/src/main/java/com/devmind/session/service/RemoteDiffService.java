@@ -118,9 +118,9 @@ public class RemoteDiffService {
             GitCli.Result branchFetch = GitCli.run(cache, 120, "git", "fetch", "--no-tags", authUrl,
                     "+refs/heads/" + branch + ":" + REF_PREFIX + branch);
             if (branchFetch.exitCode() != 0) {
-                // 会话进行中/异常退出时 runner 尚未 push，属正常时序而非故障
+                // CAP-42：会话分支在收口（页面手动触发「收口合并到基线」）时才推送远端，此前属正常时序
                 return RepoDiffView.error(name, primary,
-                        "会话分支尚未推送到远端（会话正常结束后才可查看）");
+                        "会话分支尚未推送到远端（执行「更多 → 收口合并到基线」后可查看）");
             }
             String range = REF_PREFIX + baseBranch + "..." + REF_PREFIX + branch;
             GitCli.Result stat = GitCli.run(cache, 30, "git", "diff", "--stat", range);

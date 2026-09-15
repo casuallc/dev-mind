@@ -74,6 +74,16 @@ public class SessionEntity {
     @Column(name = "workspace_owner", length = 64)
     private String workspaceOwner;
 
+    /**
+     * CAP-42：固定工作区收口状态（OPEN=占用中 / FINALIZED=已手动收口合并基线并删 worktree）。
+     * null = 旧会话或非 repo 会话（不参与收口）。可空无默认值（规避 @ColumnDefault 红线）。
+     */
+    public static final String WORKSPACE_OPEN = "OPEN";
+    public static final String WORKSPACE_FINALIZED = "FINALIZED";
+
+    @Column(name = "workspace_state", length = 16)
+    private String workspaceState;
+
     @Lob
     @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
@@ -125,6 +135,8 @@ public class SessionEntity {
 
     public String getWorkspaceOwner() { return workspaceOwner; }
     public void setWorkspaceOwner(String workspaceOwner) { this.workspaceOwner = workspaceOwner; }
+    public String getWorkspaceState() { return workspaceState; }
+    public void setWorkspaceState(String workspaceState) { this.workspaceState = workspaceState; }
     public String getModel() { return model; }
     public void setModel(String model) { this.model = model; }
     public String getPermissionMode() { return permissionMode; }

@@ -22,4 +22,9 @@ public interface SessionRepository extends JpaRepository<SessionEntity, String> 
 
     /** CAP-34 FR-04：hello 对账 DB 兜底——按节点 + 活动状态查存量远程会话（服务端重启后内存 runtime 已丢失） */
     List<SessionEntity> findByAgentNodeIdAndStatusIn(String agentNodeId, java.util.Collection<String> statuses);
+
+    /** CAP-42：固定工作区占用预检——同 (项目, 归属用户) 未收口（OPEN）的会话 */
+    List<SessionEntity> findByProjectIdAndWorkspaceOwnerAndWorkspaceState(String projectId,
+                                                                          String workspaceOwner,
+                                                                          String workspaceState);
 }

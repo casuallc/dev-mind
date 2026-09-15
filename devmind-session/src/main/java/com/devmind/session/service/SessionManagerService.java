@@ -5,6 +5,7 @@ import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.AgentCollectResult;
 import com.devmind.common.agent.AgentProtocol;
+import com.devmind.common.agent.FinalizeResult;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
@@ -315,6 +316,15 @@ public class SessionManagerService {
                     throw new DevMindException(ErrorCode.CONFLICT,
                             "节点 runner 版本过低，不支持每用户固定工作区（需协议 v7+），请升级该节点 runner");
                 }
+                // 占用预检（服务端视角友好报错，runner 侧 ensureUserWorktree 仍是最终防线）：
+                // 同 (项目, 归属用户) 已有未收口工作区会话 → 引导先收口再开新会话
+                List<SessionEntity> occupants = sessionRepo.findByProjectIdAndWorkspaceOwnerAndWorkspaceState(
+                        project != null ? project.id() : null, wsOwner, SessionEntity.WORKSPACE_OPEN);
+                if (!occupants.isEmpty()) {
+                    throw new DevMindException(ErrorCode.CONFLICT,
+                            "你在本项目的固定工作区仍被会话 " + occupants.get(0).getId()
+                                    + " 占用，请先在该会话「更多 → 收口合并到基线」完成收口，再开新会话");
+                }
             }
             // CAP-34 FR-03：上下文包清单随帧下发，runner 凭 manifest 拉包物化
             connector.launch(agentNodeId, new AgentLaunchCommand(
@@ -346,8 +356,10 @@ public class SessionManagerService {
         ent.setModel(model);
         ent.setPermissionMode(pm);
         ent.setCreatedBy(identityService.currentActor());
-        // CAP-42：固定工作区归属用户名落库（resume 以此为准，不随当前操作者漂移）
+        // CAP-42：固定工作区归属用户名落库（resume 以此为准，不随当前操作者漂移）；
+        // repo 会话工作区状态置 OPEN（手动收口后置 FINALIZED）
         ent.setWorkspaceOwner(wsOwner);
+        ent.setWorkspaceState(wsOwner != null ? SessionEntity.WORKSPACE_OPEN : null);
         // CAP-33：场景 code 落库（resume 据此重渲染重装配；FR-07 快照在装配后落）
         ent.setScenarioCode(scenario != null ? scenario.getCode() : null);
         ent.setContextManifestJson(prepared != null ? prepared.snapshotJson() : null);
@@ -555,6 +567,69 @@ public class SessionManagerService {
     public void finish(String id) {
         SessionHandle rt = requireRuntime(id);
         rt.finish();
+    }
+
+    /**
+     * CAP-42 手动收口（页面触发，<b>禁 @Transactional</b>——内含 WS 阻塞等 ack）：
+     * 校验（归属/状态/协议版本）→ 按 session_repos 快照重建 specs → 下发 workspace_finalize
+     * 帧阻塞等 ack（runner 逐库合并基线+push+删 worktree）→ 成功落 FINALIZED。
+     * 失败（冲突/脏工作区/push 失败）透传 runner 脱敏错误，工作区保留可重试。
+     */
+    public FinalizeResult finalizeWorkspace(String id, boolean discardChanges) {
+        SessionEntity ent = requireEntity(id);
+        // 归属校验：创建人本人或 admin（仿 ChatManagerService 模式；固定工作区按创建者归属）
+        String actor = identityService.currentActor();
+        if (ent.getCreatedBy() != null && !ent.getCreatedBy().equals(actor) && !isAdmin()) {
+            throw new DevMindException(ErrorCode.FORBIDDEN, "只有会话创建者或管理员可以收口工作区");
+        }
+        if (ent.getWorkspaceState() == null || ent.getWorkspaceState().isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "该会话无固定工作区（旧布局或非代码会话），无需收口");
+        }
+        if (SessionEntity.WORKSPACE_FINALIZED.equals(ent.getWorkspaceState())) {
+            throw new DevMindException(ErrorCode.CONFLICT, "工作区已收口，无需重复操作");
+        }
+        if (SessionState.valueOf(ent.getStatus()).isActive() || runtimes.containsKey(id)) {
+            throw new DevMindException(ErrorCode.CONFLICT, "会话仍在运行中，请先结束会话再收口");
+        }
+        if (ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "历史本机会话（无执行节点）不可收口");
+        }
+        AgentNodeConnector connector = requireConnector();
+        if (!connector.supports(ent.getAgentNodeId(), AgentProtocol.PER_USER_WORKSPACE)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 runner 版本过低，不支持工作区收口（需协议 v7+），请升级该节点 runner");
+        }
+        Project proj = resolveProject(ent.getProjectId());
+        List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(proj,
+                sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(id), ent.getBaseBranch(),
+                worktreeManager.branchFor(id), ent.getCreatedBy());
+        if (specs.isEmpty()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "会话无仓库快照，无法收口（非代码会话）");
+        }
+        String wsOwner = requireWorkspaceOwner(ent.getWorkspaceOwner() != null
+                && !ent.getWorkspaceOwner().isBlank() ? ent.getWorkspaceOwner() : ent.getCreatedBy());
+        FinalizeResult result = connector.finalizeWorkspace(ent.getAgentNodeId(), id,
+                ent.getProjectId(), wsOwner, specs, discardChanges);
+        if (!result.ok()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "收口失败（工作区已保留，可处理后重试）: " + result.error());
+        }
+        ent.setWorkspaceState(SessionEntity.WORKSPACE_FINALIZED);
+        ent.setUpdatedAt(Instant.now());
+        sessionRepo.save(ent);
+        return result;
+    }
+
+    /** CAP-42：当前操作者是否 admin（收口越权判定用；异常按非 admin 兜底） */
+    private boolean isAdmin() {
+        try {
+            return identityService.currentUser()
+                    .map(u -> com.devmind.auth.model.UserEntity.ROLE_ADMIN.equals(u.getRole()))
+                    .orElse(false);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** 订阅实时事件流，返回回放（环形缓冲快照）。 */
@@ -1285,6 +1360,7 @@ public class SessionManagerService {
                 ent.getId(), ent.getProjectId(), ent.getWorkItemId(), ent.getRequirementId(), ent.getTaskSpec(),
                 state.name(), state, ent.getWorktreePath(), ent.getPid(),
                 ent.getModel(), ent.getSummary(), ent.getAgentNodeId(), repoNames,
+                ent.getCreatedBy(), ent.getWorkspaceState(),
                 ent.getCreatedAt(), ent.getUpdatedAt(), ent.getFinishedAt());
     }
 
