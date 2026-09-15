@@ -325,9 +325,18 @@ class ChatManagerServiceTest {
     }
 
     @AfterEach
-    void tearDown() {
+    void tearDown() throws InterruptedException {
         service.shutdown();
         saver.stop();
+        // 残留 fake 进程（node 子进程）必须杀掉并等 readLoop 收口完——Windows 下进程 cwd 句柄
+        // 不释放 / 收口线程与删除竞态会让 @TempDir 清理抛 "Failed to close extension context"（flaky）
+        for (Process p : runner.processes.values()) {
+            ProcessHelper.killTree(p);
+        }
+        long deadline = System.currentTimeMillis() + 10_000;
+        while (!runner.processes.isEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(50);
+        }
     }
 
     private static void await(String what, BooleanSupplier cond) throws InterruptedException {
