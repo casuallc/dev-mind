@@ -51,6 +51,7 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 | e2e-agent-node.py | CAP-21 节点全链路：注册→会话→授权→优雅退出→离线 409 |
 | e2e-cap41.py / b / c | CAP-41 工作日志空间：懒创建/守卫/种子模板/日报周报生成 |
 | e2e-cap41-m3-push.py | CAP-41 M3：worklog 远端绑定 + push（协议 v6，file:// bare 库） |
+| e2e-cap42.py | CAP-42 每用户固定工作区：固定布局/finish 不 push 不删/占用冲突 409/手动收口闭环/脏与合并冲突两负例重试（协议 v7，file:// bare 库） |
 | e2e-git-import-range.py / e2e-worklog-keyword.py | git 导入范围扫描 / 工时条目关键字筛选（:8081） |
 | skill-import-e2e.py | skill zip 导入：root/包裹结构/409/overwrite（:8081） |
 
