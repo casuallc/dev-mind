@@ -57,6 +57,7 @@
 | [CAP-39](CAP-39-session-output-publish.md) | 会话产出手动推送与按需回传 | 流程层 | collect_output 帧（协议 v4）进行中会话即时回传产出，outputs 读取/同步端点，手动推送为关联需求文档（新建/更新版本，design 落 Design 记录），会话详情页裁撤并入工作台 |
 | [CAP-40](CAP-40-requirement-attachment-context.md) | 需求附件上下文投送 | 流程层 | 需求描述引用的本地附件 + Jira 内嵌图打进 ContextPackage（schema v2 inputs），runner 物化 .devmind/input/，流程会话 agent 用 Read 读图 |
 | [CAP-41](CAP-41-worklog-workspace.md) | 工作日志空间 | 组装层 | 工作日志重构为 WORKLOG 特殊项目 + runner 按用户隔离的持久 git 工作区（{user.home}/worklog/<user>），skill/格式模板管控台可配，报告生成走真实会话写文件、复用 CAP-37 产出回传落 DB 镜像（重构 CAP-28 报告链路） |
+| [CAP-42](CAP-42-per-user-workspace.md) | 每用户固定工作区与手动收口 | 底座 | runner 代码工作区固定到 {项目}/{登录用户}（克隆缓存+固定 worktree，结束不 push 不删），页面手动收口合并基线+push+删 worktree（重构 CAP-25/31 布局与生命周期） |
 
 ## 依赖关系
 
@@ -105,6 +106,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-38 需求流程简化依赖 CAP-13/14/15/37：分析/方案拆独立 Tab 且可跳过（需求实体 analysis_skipped/design_skipped 持久化），方案产出登记后自动起拆分会话、wi-plan.json 自动固化为正式 WI（删除 split-draft/confirm-split 端点与流程 Tab，调整 CAP-37 FR-04、取代 CAP-14 FR-06/07 的人工确认草稿），sessions 关联需求自动建 DEVELOPMENT WI（终态需求 409）。
 - CAP-39 会话产出手动推送依赖 CAP-37/34/03/13/38：collect_output 帧（协议 v4，版本门控）让进行中会话即时回传 `.devmind/output/`，session 模块开放 outputs 读取/同步端点，flow 模块新增 publish 端点把产出落成关联需求文档（create/update 版本化，design 同步落 Design(DRAFT)，登记 ANALYSIS/DOC 产物）；会话详情页裁撤，独有操作迁工作台「更多」下拉，全站深链统一 `/sessions?sid=`。
 - CAP-40 需求附件投送依赖 CAP-32/19/33/34/37：需求 description 引用的本地附件（AttachmentContentResolver 扩 resolveAny）与 Jira 内嵌图（新 SPI IssueAttachmentResolver 复用 FR-09 下载链）由 devmind-flow 的 ContextProvider 打进 ContextPackage（schema v2 增 inputs，老 runner fail-visible），runner 物化 `.devmind/input/`，挂 requirementId 的会话 agent 用 Read 读图。
+- CAP-42 每用户固定工作区依赖 CAP-25/31/34/35/41：launch 帧 workspaceOwner（协议 v7 门控）把 runner 代码工作区固定到 {项目}/{登录用户}（克隆缓存+固定 worktree），结束降级为未提交告警不 push 不删，收口改为页面手动触发（合并基线+push+删 worktree 的 workspace_finalize 帧），编排链路按 WI/需求归属人解析目录归属。
 
 ## 组装方式（后续流程层）
 
