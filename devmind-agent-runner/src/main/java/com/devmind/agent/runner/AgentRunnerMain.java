@@ -206,6 +206,7 @@ public class AgentRunnerMain {
             case "upgrade" -> handleUpgrade(frame, config, configFile, sessions, conn);
             case "collect_output" -> handleCollectOutput(sessionId, config, sessions, conn);
             case "worklog_push" -> handleWorklogPush(frame, config, workspace, conn);
+            case "workspace_finalize" -> handleWorkspaceFinalize(frame, config, sessions, workspace, conn);
             default -> log.debug("未知指令类型: {}", type);
         }
     }
@@ -476,6 +477,60 @@ public class AgentRunnerMain {
                 }
             } catch (Exception e) {
                 log.warn("worklog 远端备份失败: owner={} err={}", owner, e.getMessage());
+                ack.put("ok", false);
+                ack.put("error", String.valueOf(e.getMessage()));
+            }
+            conn.send(ack);
+        });
+    }
+
+    /**
+     * CAP-42：固定工作区手动收口（页面触发）——对 <workspaceRoot>/<projectId>/<owner>/ 逐库执行
+     * 「合并会话分支到基线 → push 基线 + best-effort push 会话分支 → 删 worktree」（详见
+     * {@link RunnerWorkspace#finalize}）。虚拟线程异步执行，不阻塞 WS listener；
+     * token 仅内存持有，ack 输出已由 finalize 逐库 sanitize。
+     * 安全防护：会话仍在本节点运行（进程活着）时拒绝收口（防服务端状态滞后误删工作中的目录）。
+     */
+    private static void handleWorkspaceFinalize(JsonNode frame, RunnerConfig config,
+                                                RunnerSessionRegistry sessions,
+                                                RunnerWorkspace workspace, ServerConnection conn) {
+        String requestId = frame.path("requestId").asText("");
+        String sessionId = frame.path("sessionId").asText("");
+        String projectId = frame.path("projectId").asText("");
+        String owner = frame.path("workspaceOwner").asText("");
+        boolean discardChanges = frame.path("discardChanges").asBoolean(false);
+        java.util.List<RunnerWorkspace.RepoSpec> specs = new java.util.ArrayList<>();
+        for (JsonNode rn : frame.path("repos")) {
+            specs.add(new RunnerWorkspace.RepoSpec(
+                    rn.path("remoteUrl").asText(""),
+                    rn.path("baseBranch").asText(""),
+                    rn.path("branch").asText(""),
+                    rn.path("token").asText(""),
+                    rn.path("name").asText(null)));
+        }
+        Thread.ofVirtual().name("workspace-finalize-" + requestId).start(() -> {
+            Map<String, Object> ack = new java.util.LinkedHashMap<>();
+            ack.put("type", "workspace_finalize_ack");
+            ack.put("requestId", requestId);
+            try {
+                if (sessionId.isBlank() || projectId.isBlank() || owner.isBlank() || specs.isEmpty()) {
+                    throw new IllegalStateException(
+                            "workspace_finalize 帧缺字段（sessionId/projectId/workspaceOwner/repos 必填）");
+                }
+                if (sessions.sessionDirOf(sessionId).isPresent()) {
+                    throw new IllegalStateException(
+                            "会话 " + sessionId + " 仍在本节点运行，请先结束会话再收口");
+                }
+                RunnerWorkspace.FinalizeOutcome r = workspace.finalize(projectId, owner, specs, discardChanges);
+                if (r.exit() == 0) {
+                    ack.put("ok", true);
+                    ack.put("detail", r.output());
+                } else {
+                    ack.put("ok", false);
+                    ack.put("error", r.output());
+                }
+            } catch (Exception e) {
+                log.warn("工作区收口失败: session={} err={}", sessionId, e.getMessage());
                 ack.put("ok", false);
                 ack.put("error", String.valueOf(e.getMessage()));
             }
