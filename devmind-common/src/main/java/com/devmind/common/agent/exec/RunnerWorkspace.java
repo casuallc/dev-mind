@@ -466,6 +466,182 @@ public class RunnerWorkspace {
     public record WorklogPushOutcome(int exit, String output) {
     }
 
+    /** CAP-42 手动收口结果：exit=0 全部库成功；output 为逐库摘要/错误（已脱敏，多库带 [name] 前缀）。 */
+    public record FinalizeOutcome(int exit, String output) {
+    }
+
+    /**
+     * CAP-42 手动收口（页面触发）：对固定工作区逐库执行「合并会话分支到基线 → push 基线
+     * + best-effort push 会话分支（供收口后 diff）→ 删 worktree + 删本地分支」。
+     *
+     * <p>合并<b>绝不动 main 缓存的检出分支</b>——在 userRoot 下的临时 detached worktree
+     * （.finalize-tmp[-&lt;name&gt;]，建在新 fetch 的 FETCH_HEAD 上）里 merge --no-ff 后从那里
+     * push HEAD:&lt;baseBranch&gt;。合并冲突/脏工作区/push 失败 → 该库返回脱敏错误、固定 worktree
+     * 原样保留可重试；{@code discardChanges=true} 先 reset --hard + clean -fd（只清未提交脏文件，
+     * 不解提交级合并冲突）。多库逐库顺序执行：成功库即时收口，失败库保留，互不阻塞。</p>
+     */
+    public FinalizeOutcome finalize(String projectId, String workspaceOwner,
+                                    List<RepoSpec> specs, boolean discardChanges) {
+        requireSafeId(projectId, "projectId");
+        String owner = requireOwner(workspaceOwner);
+        if (specs == null || specs.isEmpty()) {
+            throw new IllegalStateException("收口缺少仓库描述（repos 为空）");
+        }
+        boolean multi = specs.size() > 1;
+        Path userRoot = userRoot(projectId, owner);
+        Path aggRoot = userRoot.resolve("work").normalize();
+        StringBuilder summary = new StringBuilder();
+        boolean allOk = true;
+        for (RepoSpec spec : specs) {
+            String label = spec.name() != null && !spec.name().isBlank() ? "[" + spec.name() + "] " : "";
+            if (multi && (spec.name() == null || !SAFE_ID.matcher(spec.name()).matches()
+                    || "work".equals(spec.name()))) {
+                throw new IllegalStateException(
+                        "非法仓库名（白名单 [a-zA-Z0-9._-]，多库必填，禁用保留名 work）: " + spec.name());
+            }
+            if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
+                throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
+            }
+            Path cacheDir = multi
+                    ? userRoot.resolve(spec.name()).resolve("main").normalize()
+                    : userRoot.resolve("main").normalize();
+            Path workDir = multi ? aggRoot.resolve(spec.name()).normalize() : aggRoot;
+            var lock = lockOf(cacheDir);
+            lock.lock();
+            try {
+                String err = finalizeOne(cacheDir, workDir, userRoot, spec, discardChanges, label, summary);
+                if (err != null) {
+                    allOk = false;
+                    summary.append(label).append("失败: ").append(err).append('\n');
+                    log.warn("工作区收口失败: owner={} repo={} err={}", owner, spec.name(), err);
+                }
+            } finally {
+                lock.unlock();
+            }
+        }
+        // 多库全部收口成功：聚合根 work/ 已空则一并删除（单库的 work/ 本身就是 worktree 已被移除）
+        if (allOk && multi && Files.isDirectory(aggRoot)) {
+            try (var s = Files.list(aggRoot)) {
+                if (s.findAny().isEmpty()) {
+                    Files.deleteIfExists(aggRoot);
+                }
+            } catch (IOException e) {
+                log.debug("聚合根清理跳过: {} err={}", aggRoot, e.getMessage());
+            }
+        }
+        if (allOk) {
+            log.info("工作区收口完成: project={} owner={} repos={}", projectId, owner, specs.size());
+        }
+        return new FinalizeOutcome(allOk ? 0 : 1, summary.toString().trim());
+    }
+
+    /**
+     * 单库收口（finalize 逐库调用，调用方持 cacheLock）。成功返回 null 并向 summary 追加摘要；
+     * 失败返回脱敏错误文案（固定 worktree 原样保留）。
+     */
+    private String finalizeOne(Path cacheDir, Path workDir, Path userRoot, RepoSpec spec,
+                               boolean discardChanges, String label, StringBuilder summary) {
+        if (!Files.isDirectory(cacheDir.resolve(".git"))) {
+            return "克隆缓存缺失（工作区未初始化或已收口）: " + cacheDir;
+        }
+        if (!Files.isDirectory(workDir)) {
+            // 多库部分收口后重试：worktree 与本地分支都已不在 = 该库此前已收口，幂等跳过
+            Result br = run(cacheDir, OP_TIMEOUT_SEC, spec.token(),
+                    "rev-parse", "--verify", "--quiet", "refs/heads/" + spec.branch());
+            if (br.exit() != 0) {
+                summary.append(label).append("该库已收口（worktree 与分支均已移除），跳过\n");
+                return null;
+            }
+            return "固定 worktree 不存在但分支 " + spec.branch() + " 仍在，请到节点人工核查: " + workDir;
+        }
+        if (spec.baseBranch() == null || spec.baseBranch().isBlank()) {
+            return "缺基线分支（baseBranch），无法收口合并";
+        }
+        Result head = run(workDir, OP_TIMEOUT_SEC, spec.token(), "rev-parse", "--abbrev-ref", "HEAD");
+        String current = head.exit() == 0 ? head.output().trim() : "";
+        if (!current.equals(spec.branch())) {
+            return "固定 worktree 检出分支（" + (current.isEmpty() ? "无法识别" : current)
+                    + "）与会话分支（" + spec.branch() + "）不一致，请到节点人工核查";
+        }
+        Result status = run(workDir, OP_TIMEOUT_SEC, spec.token(), "status", "--porcelain");
+        if (status.exit() != 0) {
+            return "git status 失败: " + tail(status.output());
+        }
+        if (!status.output().isBlank()) {
+            if (!discardChanges) {
+                return "工作区存在未提交改动（已保留），请先 resume 会话提交，或勾选「丢弃未提交改动」重试";
+            }
+            Result reset = run(workDir, OP_TIMEOUT_SEC, spec.token(), "reset", "--hard");
+            if (reset.exit() != 0) {
+                return "reset --hard 失败: " + tail(reset.output());
+            }
+            Result clean = run(workDir, OP_TIMEOUT_SEC, spec.token(), "clean", "-fd");
+            if (clean.exit() != 0) {
+                return "clean -fd 失败: " + tail(clean.output());
+            }
+            summary.append(label).append("已丢弃未提交改动\n");
+        }
+        try {
+            fetch(cacheDir, spec);
+        } catch (IllegalStateException e) {
+            return e.getMessage();
+        }
+        // 合并放临时 detached worktree（userRoot/.finalize-tmp[-<name>]），不动 main 缓存检出分支
+        Path tmp = userRoot.resolve(".finalize-tmp" + (spec.name() != null ? "-" + spec.name() : ""))
+                .normalize();
+        try {
+            removeWorktreeQuietly(cacheDir, tmp, spec.token()); // 防上次失败残留
+            deleteRecursively(tmp);
+            Result add = run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "worktree", "add", "--detach",
+                    tmp.toString(), "FETCH_HEAD");
+            if (add.exit() != 0) {
+                return "临时合并工作区创建失败: " + tail(add.output());
+            }
+            Result merge = run(tmp, OP_TIMEOUT_SEC, spec.token(),
+                    "-c", "user.name=devmind", "-c", "user.email=devmind@runner.local",
+                    "merge", "--no-ff", "-m", "merge: 会话分支 " + spec.branch() + " 收口", spec.branch());
+            if (merge.exit() != 0) {
+                run(tmp, OP_TIMEOUT_SEC, spec.token(), "merge", "--abort");
+                return "合并到基线存在冲突（工作区已保留）: " + tail(merge.output())
+                        + "。可 resume 会话让 agent rebase 解冲突后再收口，或到节点手工处理";
+            }
+            Result push = run(tmp, PUSH_TIMEOUT_SEC, spec.token(), "push",
+                    withToken(spec.remoteUrl(), spec.token()), "HEAD:" + spec.baseBranch());
+            if (push.exit() != 0) {
+                return "push 基线分支失败（如提示非快进 = 基线已被他人推进，请重试收口）: " + tail(push.output());
+            }
+            summary.append(label).append("已合并 ").append(spec.branch())
+                    .append(" → ").append(spec.baseBranch()).append(" 并推送基线\n");
+        } finally {
+            removeWorktreeQuietly(cacheDir, tmp, spec.token());
+            if (Files.exists(tmp)) {
+                deleteRecursively(tmp);
+                run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "worktree", "prune");
+            }
+        }
+        // best-effort push 会话分支（供收口后 diff 查看；失败不阻断收口）
+        Result pushBranch = run(cacheDir, PUSH_TIMEOUT_SEC, spec.token(), "push",
+                withToken(spec.remoteUrl(), spec.token()),
+                "refs/heads/" + spec.branch() + ":refs/heads/" + spec.branch());
+        if (pushBranch.exit() != 0) {
+            log.warn("会话分支推送失败（仅影响收口后 diff 查看）: branch={} err={}", spec.branch(),
+                    tail(pushBranch.output()));
+            summary.append(label).append("会话分支推送失败（仅影响收口后 diff 查看）: ")
+                    .append(tail(pushBranch.output())).append('\n');
+        }
+        // 删固定 worktree + 本地会话分支（best-effort：目录删不掉则兜底递归删 + prune）
+        Result rm = run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "worktree", "remove", "--force",
+                workDir.toString());
+        if (rm.exit() != 0) {
+            log.warn("收口移除 worktree 失败，递归删兜底: {} err={}", workDir, tail(rm.output()));
+            deleteRecursively(workDir);
+            run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "worktree", "prune");
+        }
+        run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "branch", "-D", spec.branch());
+        summary.append(label).append("已删除固定 worktree 与本地分支 ").append(spec.branch()).append('\n');
+        return null;
+    }
+
     /** worklog 空间骨架：目录契约说明 + daily/weekly/entries 占位。 */
     private static void writeSkeleton(Path dir) {
         String readme = """

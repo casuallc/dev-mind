@@ -247,6 +247,175 @@ class RunnerWorkspaceTest {
     }
 
     @Test
+    void finalizeMergesPushesAndRemovesWorktree() throws Exception {
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s1", "");
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", spec);
+        Files.writeString(ctx.sessionDir().resolve("code.txt"), "change");
+        git(ctx.sessionDir(), "add", ".");
+        git(ctx.sessionDir(), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "work");
+
+        RunnerWorkspace.FinalizeOutcome r = ws.finalize("proj1", "alice", List.of(spec), false);
+        assertEquals(0, r.exit(), r.output());
+        // 基线含合并提交（merge --no-ff + 收口消息）与会话产出
+        assertEquals("change", git(origin, "show", "main:code.txt").trim());
+        assertTrue(git(origin, "log", "--oneline", "main").contains("收口"), "基线应有收口合并提交");
+        // 会话分支 best-effort 推送远端（供收口后 diff）
+        assertFalse(gitOut(origin, "rev-parse", "--verify", "refs/heads/feature/s1").isBlank());
+        // 固定 worktree 与本地分支已删；临时合并目录已清
+        assertFalse(Files.exists(ctx.sessionDir()), "收口后固定 worktree 删除");
+        assertEquals("", gitOut(ctx.cacheDir(), "branch", "--list", "feature/s1"));
+        assertFalse(Files.exists(tmp.resolve("workspaces").resolve("proj1").resolve("alice")
+                .resolve(".finalize-tmp")));
+        // 缓存仍在（复用），origin URL 无凭据残留
+        assertTrue(Files.isDirectory(ctx.cacheDir().resolve(".git")));
+        // 收口后同用户可开新会话（占用释放）
+        RunnerWorkspace.RepoCtx s2 = ws.prepare("s2", "proj1", "alice", new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s2", ""));
+        assertEquals("feature/s2", gitOut(s2.sessionDir(), "branch", "--show-current"));
+        // 新会话基线含已收口的产出
+        assertEquals("change", Files.readString(s2.sessionDir().resolve("code.txt")));
+    }
+
+    @Test
+    void finalizeFailsOnMergeConflictAndKeepsWorktree() throws Exception {
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s1", "");
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", spec);
+        Files.writeString(ctx.sessionDir().resolve("README.md"), "session-change");
+        git(ctx.sessionDir(), "add", ".");
+        git(ctx.sessionDir(), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "work");
+        // 基线被他人推进（同一文件冲突改动）
+        Path other = tmp.resolve("other");
+        git(tmp, "clone", origin.toString(), other.toString());
+        Files.writeString(other.resolve("README.md"), "other-change");
+        git(other, "add", ".");
+        git(other, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "other");
+        git(other, "push", "origin", "main");
+
+        RunnerWorkspace.FinalizeOutcome r = ws.finalize("proj1", "alice", List.of(spec), false);
+        assertTrue(r.exit() != 0, r.output());
+        assertTrue(r.output().contains("冲突"), r.output());
+        // 工作区保留（可 resume 解冲突后重试），基线未被污染，临时目录已清
+        assertTrue(Files.isDirectory(ctx.sessionDir()));
+        assertEquals("feature/s1", gitOut(ctx.sessionDir(), "branch", "--show-current"));
+        assertEquals("session-change", Files.readString(ctx.sessionDir().resolve("README.md")));
+        assertEquals("other-change", git(origin, "show", "main:README.md").trim());
+        assertFalse(Files.exists(tmp.resolve("workspaces").resolve("proj1").resolve("alice")
+                .resolve(".finalize-tmp")));
+    }
+
+    @Test
+    void finalizeFailsOnDirtyWorktreeUnlessDiscarded() throws Exception {
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s1", "");
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", spec);
+        Files.writeString(ctx.sessionDir().resolve("code.txt"), "change");
+        git(ctx.sessionDir(), "add", ".");
+        git(ctx.sessionDir(), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "work");
+        Files.writeString(ctx.sessionDir().resolve("dirty.txt"), "uncommitted");
+
+        // 未提交改动 + 不丢弃 → 失败保留现场
+        RunnerWorkspace.FinalizeOutcome dirty = ws.finalize("proj1", "alice", List.of(spec), false);
+        assertTrue(dirty.exit() != 0, dirty.output());
+        assertTrue(dirty.output().contains("未提交改动"), dirty.output());
+        assertTrue(Files.exists(ctx.sessionDir().resolve("dirty.txt")));
+
+        // discardChanges=true → reset+clean 后正常收口
+        RunnerWorkspace.FinalizeOutcome r = ws.finalize("proj1", "alice", List.of(spec), true);
+        assertEquals(0, r.exit(), r.output());
+        assertEquals("change", git(origin, "show", "main:code.txt").trim());
+        assertFalse(Files.exists(ctx.sessionDir()));
+    }
+
+    @Test
+    void finalizeMultiRepoPartialFailureKeepsFailedRepo() throws Exception {
+        Path originA = tmp.resolve("origin-a.git");
+        Path originB = tmp.resolve("origin-b.git");
+        seedOrigin(originA, "a.txt");
+        seedOrigin(originB, "b.txt");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        List<RunnerWorkspace.RepoSpec> specs = List.of(
+                new RunnerWorkspace.RepoSpec(originA.toUri().toString(), "main", "feature/s1", "", "backend"),
+                new RunnerWorkspace.RepoSpec(originB.toUri().toString(), "main", "feature/s1", "", "web"));
+        RunnerWorkspace.MultiCtx mctx = ws.prepareMulti("s1", "proj1", "alice", specs);
+        Path aggRoot = mctx.aggRoot();
+        // 两库各提交一笔；web 库制造基线冲突
+        Files.writeString(aggRoot.resolve("backend").resolve("code.txt"), "A");
+        git(aggRoot.resolve("backend"), "add", ".");
+        git(aggRoot.resolve("backend"), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "workA");
+        Files.writeString(aggRoot.resolve("web").resolve("b.txt"), "session-change");
+        git(aggRoot.resolve("web"), "add", ".");
+        git(aggRoot.resolve("web"), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "workB");
+        Path other = tmp.resolve("other-b");
+        git(tmp, "clone", originB.toString(), other.toString());
+        Files.writeString(other.resolve("b.txt"), "other-change");
+        git(other, "add", ".");
+        git(other, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "other");
+        git(other, "push", "origin", "main");
+
+        RunnerWorkspace.FinalizeOutcome r = ws.finalize("proj1", "alice", specs, false);
+        assertTrue(r.exit() != 0, r.output());
+        assertTrue(r.output().contains("[web]"), r.output());
+        // 成功库已收口：基线含产出、子 worktree 已删；失败库保留
+        assertEquals("A", git(originA, "show", "main:code.txt").trim());
+        assertFalse(Files.exists(aggRoot.resolve("backend")));
+        assertTrue(Files.isDirectory(aggRoot.resolve("web")));
+        assertEquals("other-change", git(originB, "show", "main:b.txt").trim());
+        // 失败库解冲突（改为与基线一致的内容再提交）后重试收口成功
+        Files.writeString(aggRoot.resolve("web").resolve("b.txt"), "other-change");
+        git(aggRoot.resolve("web"), "add", ".");
+        git(aggRoot.resolve("web"), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "resolve");
+        Files.writeString(aggRoot.resolve("web").resolve("ui.txt"), "B");
+        git(aggRoot.resolve("web"), "add", ".");
+        git(aggRoot.resolve("web"), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "ui");
+        RunnerWorkspace.FinalizeOutcome retry = ws.finalize("proj1", "alice", specs, false);
+        assertEquals(0, retry.exit(), retry.output());
+        assertEquals("B", git(originB, "show", "main:ui.txt").trim());
+        // 全部收口成功 → 聚合根已删
+        assertFalse(Files.exists(aggRoot));
+    }
+
+    @Test
+    void finalizeRejectsMissingOrMismatchedWorktree() throws Exception {
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s1", "");
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", spec);
+
+        // 分支不符（工作区被别的会话占用）→ 拒绝
+        RunnerWorkspace.FinalizeOutcome wrong = ws.finalize("proj1", "alice", List.of(
+                new RunnerWorkspace.RepoSpec(origin.toUri().toString(), "main", "feature/s9", "")), false);
+        assertTrue(wrong.exit() != 0, wrong.output());
+        assertTrue(wrong.output().contains("不一致"), wrong.output());
+
+        // worktree 不存在（已收口/未初始化）→ 拒绝
+        deleteRec(ctx.sessionDir());
+        RunnerWorkspace.FinalizeOutcome missing = ws.finalize("proj1", "alice", List.of(spec), false);
+        assertTrue(missing.exit() != 0, missing.output());
+        assertTrue(missing.output().contains("不存在"), missing.output());
+    }
+
+    private static void deleteRec(Path dir) throws Exception {
+        try (var walk = Files.walk(dir)) {
+            for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(p);
+            }
+        }
+    }
+
+    @Test
     void buildWorkspaceLifecycle() throws Exception {
         // CAP-36：构建工作区——clone 缓存复用 <proj>/main，builds/<id> detach 到 commit，
         // 幂等复用（链内后续步骤不再 fetch），finishBuild 移除

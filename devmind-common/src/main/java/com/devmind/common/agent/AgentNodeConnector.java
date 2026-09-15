@@ -109,4 +109,22 @@ public interface AgentNodeConnector {
         throw new com.devmind.common.exception.DevMindException(
                 com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
     }
+
+    /**
+     * CAP-42：下发 workspace_finalize 帧并阻塞等 workspace_finalize_ack——runner 对固定工作区
+     * {@code <workspaceRoot>/<projectId>/<workspaceOwner>/} 逐库执行手动收口（合并会话分支到基线
+     * → push 基线 + best-effort push 会话分支 → 删 worktree；discardChanges=true 先 reset --hard
+     * + clean -fd 清未提交脏文件）。specs 带各库 remoteUrl/baseBranch/会话 branch/name/token
+     * （token 仅随帧传输严禁进日志）。
+     * 节点离线/协议版本不足（需 v7+）/等待超时抛 DevMindException(CONFLICT)；
+     * 合并冲突/脏工作区/push 失败不抛，看 {@link FinalizeResult#ok()}（目录保留可重试）。
+     * 默认实现 = agent 模块未装配（无任何执行节点可用）。
+     */
+    default FinalizeResult finalizeWorkspace(String nodeId, String sessionId, String projectId,
+                                             String workspaceOwner,
+                                             List<AgentLaunchCommand.RepoSpec> specs,
+                                             boolean discardChanges) {
+        throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+    }
 }
