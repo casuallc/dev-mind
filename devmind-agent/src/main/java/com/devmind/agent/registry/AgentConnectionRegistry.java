@@ -337,6 +337,11 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         if (cmd.worklogOwner() != null && !cmd.worklogOwner().isBlank()) {
             frame.put("worklogOwner", cmd.worklogOwner());
         }
+        // CAP-42：repo 会话固定工作区归属用户名（runner 定位 <projectId>/<owner>/{main,work}）；
+        // 协议 v7 由调用方 supports() 门控。红线：新字段必须在此 put + LaunchTest 断言
+        if (cmd.workspaceOwner() != null && !cmd.workspaceOwner().isBlank()) {
+            frame.put("workspaceOwner", cmd.workspaceOwner());
+        }
         try {
             send(ws, frame);
             LaunchAck ack = future.get(props.getLaunchAckTimeoutMs(), TimeUnit.MILLISECONDS);

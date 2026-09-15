@@ -125,4 +125,21 @@ class AgentConnectionRegistryLaunchTest {
         assertFalse(payload.contains("\"repo\""), payload);
         assertFalse(payload.contains("\"repos\""), payload);
     }
+
+    @Test
+    void serializesWorkspaceOwnerForRepoSession() throws Exception {
+        // CAP-42 红线回归：repo 会话 launch 帧必须带 workspaceOwner（runner 据此落
+        // <projectId>/<owner>/{main,work} 固定布局；缺字段会静默跑偏旧布局）
+        AgentLaunchCommand.RepoSpec main = new AgentLaunchCommand.RepoSpec(
+                "https://git/a.git", "main", "feature/s1", "tok-a");
+        String payload = launchAndCapture(new AgentLaunchCommand(
+                "s1", "proj1", "task", null, "acceptEdits", Map.of(),
+                main, "session", null, null, null, null, "alice"));
+        assertTrue(payload.contains("\"workspaceOwner\":\"alice\""), payload);
+        // chat 会话（无 repo 块、workspaceOwner=null）不带该字段
+        String chatPayload = launchAndCapture(new AgentLaunchCommand(
+                "s2", null, "", null, "acceptEdits", Map.of(),
+                null, "chat", null, null, null, null, null));
+        assertFalse(chatPayload.contains("workspaceOwner"), chatPayload);
+    }
 }
