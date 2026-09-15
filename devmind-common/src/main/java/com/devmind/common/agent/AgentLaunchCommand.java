@@ -35,12 +35,18 @@ import java.util.Map;
  *                       定位持久工作区 {user.home}/worklog/&lt;owner&gt;。仅 kind="worklog" 有意义；
  *                       协议 v5+，服务端经 {@code AgentNodeConnector.supports(nodeId, 5)} 门控，
  *                       老 runner（会忽略本字段并落入兜底目录）不得派发。
+ * @param workspaceOwner CAP-42：repo 会话固定工作区归属用户名（= 会话 createdBy，管控台登录
+ *                       用户名），runner 据此把工作区固定到 &lt;workspaceRoot&gt;/&lt;projectId&gt;/
+ *                       &lt;owner&gt;/{main,work}（每用户固定 worktree，结束不 push 不删）。
+ *                       仅 repo 会话（kind="session" 且带 repo/repos）有意义；协议 v7+，
+ *                       服务端经 {@code AgentNodeConnector.supports(nodeId, 7)} 门控，
+ *                       老 runner（会忽略本字段并落入 sessions/&lt;sid&gt; 旧布局）不得派发。
  */
 public record AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
                                  String model, String permissionMode, Map<String, String> env,
                                  RepoSpec repo, String kind, List<RepoSpec> repos,
                                  ContextManifest contextManifest, String resumeSessionId,
-                                 String worklogOwner) {
+                                 String worklogOwner, String workspaceOwner) {
 
     /** 兼容构造器：CAP-25 及之前的调用点（kind=session，无多库、无上下文）。 */
     public AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
@@ -65,13 +71,23 @@ public record AgentLaunchCommand(String sessionId, String projectId, String task
                 contextManifest, null);
     }
 
-    /** 兼容构造器：CAP-39 及之前的全参调用点（无 worklogOwner）。 */
+    /** 兼容构造器：CAP-39 及之前的全参调用点（无 worklogOwner/workspaceOwner）。 */
     public AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
                               String model, String permissionMode, Map<String, String> env,
                               RepoSpec repo, String kind, List<RepoSpec> repos,
                               ContextManifest contextManifest, String resumeSessionId) {
         this(sessionId, projectId, taskSpec, model, permissionMode, env, repo, kind, repos,
                 contextManifest, resumeSessionId, null);
+    }
+
+    /** 兼容构造器：CAP-41 调用点（无 workspaceOwner，repo 会话旧布局——仅测试/兼容用）。 */
+    public AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
+                              String model, String permissionMode, Map<String, String> env,
+                              RepoSpec repo, String kind, List<RepoSpec> repos,
+                              ContextManifest contextManifest, String resumeSessionId,
+                              String worklogOwner) {
+        this(sessionId, projectId, taskSpec, model, permissionMode, env, repo, kind, repos,
+                contextManifest, resumeSessionId, worklogOwner, null);
     }
 
     /**

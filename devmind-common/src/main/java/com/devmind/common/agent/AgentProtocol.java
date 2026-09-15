@@ -12,12 +12,16 @@ package com.devmind.common.agent;
  * v5 = CAP-41 launch 帧 kind:"worklog"（runner 持久工作区 {user.home}/worklog/&lt;owner&gt;，
  * 老 runner 不认识会落入 legacy 兜底目录跑偏，故属「必须认识」需门控）；
  * v6 = CAP-41 M3 worklog_push 帧（worklog_push/worklog_push_ack，工作日志持久工作区
- * 手动 push 到用户绑定的远端仓库）。</p>
+ * 手动 push 到用户绑定的远端仓库）。v7 = CAP-42 每用户固定工作区（launch 帧
+ * workspaceOwner——repo 会话工作区固定到 &lt;projectId&gt;/&lt;owner&gt;/{main,work}，
+ * 老 runner 会忽略并落入 sessions/&lt;sid&gt; 旧布局，故属「必须认识」需门控；
+ * 以及 workspace_finalize/workspace_finalize_ack 帧——手动收口：合并会话分支到基线
+ * + push + 删 worktree）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 6;
+    public static final int CURRENT = 7;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -30,6 +34,9 @@ public final class AgentProtocol {
 
     /** CAP-41 M3 worklog_push 帧（工作日志持久工作区手动 push 远端）所需最低版本 */
     public static final int WORKLOG_PUSH_FRAMES = 6;
+
+    /** CAP-42 每用户固定工作区（launch workspaceOwner）与 workspace_finalize 帧所需最低版本 */
+    public static final int PER_USER_WORKSPACE = 7;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;
