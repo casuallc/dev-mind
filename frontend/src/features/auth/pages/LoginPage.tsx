@@ -36,9 +36,12 @@ export default function LoginPage() {
       }}
     >
       <Card style={{ width: 360, boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
-        <Typography.Title level={3} style={{ textAlign: 'center', marginBottom: 24 }}>
-          Dev-Mind
-        </Typography.Title>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 24 }}>
+          <img src="/logo.svg" alt="Dev-Mind" width={36} height={36} />
+          <Typography.Title level={3} style={{ margin: 0 }}>
+            Dev-Mind
+          </Typography.Title>
+        </div>
         <Form onFinish={onFinish} size="large">
           <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
             <Input prefix={<UserOutlined />} placeholder="用户名" autoFocus />

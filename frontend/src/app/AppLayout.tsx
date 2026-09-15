@@ -47,9 +47,18 @@ export default function AppLayout() {
       >
         <div
           onClick={() => navigate('/home')}
-          style={{ fontWeight: 700, fontSize: 16, cursor: 'pointer', whiteSpace: 'nowrap' }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontWeight: 700,
+            fontSize: 16,
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+          }}
         >
-          ◆ Dev-Mind
+          <img src="/logo.svg" alt="Dev-Mind" width={24} height={24} />
+          Dev-Mind
         </div>
         <ProjectSwitcher />
         <Menu
