@@ -14,6 +14,7 @@ import com.devmind.common.agent.AgentExecResult;
 import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.AgentProtocol;
+import com.devmind.common.agent.FinalizeResult;
 import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.WorklogPushResult;
 import com.devmind.common.exception.DevMindException;
@@ -69,6 +70,10 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private record WorklogPushWaiter(String nodeId, CompletableFuture<WorklogPushResult> done) {
     }
 
+    /** CAP-42 workspace_finalize 等待者：带 nodeId 供断连时批量失败。 */
+    private record FinalizeWaiter(String nodeId, CompletableFuture<FinalizeResult> done) {
+    }
+
     private final AgentNodeService nodeService;
     private final AgentProperties props;
     private final ObjectMapper mapper;
@@ -91,6 +96,8 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private final Map<String, CollectWaiter> pendingCollects = new ConcurrentHashMap<>();
     /** requestId → worklog_push 等待者（CAP-41 M3） */
     private final Map<String, WorklogPushWaiter> pendingWorklogPushes = new ConcurrentHashMap<>();
+    /** requestId → workspace_finalize 等待者（CAP-42） */
+    private final Map<String, FinalizeWaiter> pendingFinalizes = new ConcurrentHashMap<>();
 
     public AgentConnectionRegistry(AgentNodeService nodeService, AgentProperties props,
                                    ObjectMapper mapper, ObjectProvider<AgentEventListener> listenerProvider,
@@ -150,6 +157,12 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         for (Map.Entry<String, WorklogPushWaiter> e : pendingWorklogPushes.entrySet()) {
             if (e.getValue().nodeId().equals(nodeId) && pendingWorklogPushes.remove(e.getKey(), e.getValue())) {
                 e.getValue().done().complete(WorklogPushResult.failed("节点断连，远端备份中断"));
+            }
+        }
+        // CAP-42：断线即失败该节点进行中的工作区收口（ack 不会再来）
+        for (Map.Entry<String, FinalizeWaiter> e : pendingFinalizes.entrySet()) {
+            if (e.getValue().nodeId().equals(nodeId) && pendingFinalizes.remove(e.getKey(), e.getValue())) {
+                e.getValue().done().complete(FinalizeResult.failed("节点断连，工作区收口中断"));
             }
         }
         // CAP-30：事件广播（原 getIfAvailable 单实现，chat 加入后有多实现）——各 bridge
@@ -233,6 +246,15 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         WorklogPushWaiter w = pendingWorklogPushes.remove(requestId);
         if (w != null) {
             w.done().complete(ok ? WorklogPushResult.ok(detail) : WorklogPushResult.failed(error));
+        }
+    }
+
+    /** CAP-42：workspace_finalize_ack 上行帧 → 完成等待 future。 */
+    public void onWorkspaceFinalizeAck(String nodeId, String requestId, boolean ok, String detail, String error) {
+        touch(nodeId);
+        FinalizeWaiter w = pendingFinalizes.remove(requestId);
+        if (w != null) {
+            w.done().complete(ok ? FinalizeResult.ok(detail) : FinalizeResult.failed(error));
         }
     }
 
@@ -526,6 +548,58 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             throw new DevMindException(ErrorCode.CONFLICT, "worklog push 下发异常: " + e.getMessage(), e);
         } finally {
             pendingWorklogPushes.remove(requestId);
+        }
+    }
+
+    /**
+     * CAP-42：下发 workspace_finalize 帧并阻塞等 workspace_finalize_ack（镜像 worklog_push 模式）。
+     * 协议门控：runner 低于 v7 直接 409 提示升级；等待上限 60 + 310×库数 秒（逐库 fetch+merge+push
+     * 各 300s 级 + 余量）。repos 数组含各库 token（仅随帧传输，严禁进日志，同 CAP-25 红线）。
+     */
+    @Override
+    public FinalizeResult finalizeWorkspace(String nodeId, String sessionId, String projectId,
+                                            String workspaceOwner,
+                                            List<AgentLaunchCommand.RepoSpec> specs,
+                                            boolean discardChanges) {
+        if (!supports(nodeId, AgentProtocol.PER_USER_WORKSPACE)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 的 runner 协议版本过低（工作区收口需 v"
+                            + AgentProtocol.PER_USER_WORKSPACE + "+），请到节点页升级 runner");
+        }
+        WebSocketSession ws = requireConnection(nodeId);
+        String requestId = "wf-" + System.currentTimeMillis() + "-" + sessionId;
+        CompletableFuture<FinalizeResult> done = new CompletableFuture<>();
+        pendingFinalizes.put(requestId, new FinalizeWaiter(nodeId, done));
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "workspace_finalize");
+        frame.put("requestId", requestId);
+        frame.put("sessionId", sessionId);
+        frame.put("projectId", projectId);
+        frame.put("workspaceOwner", workspaceOwner);
+        frame.put("discardChanges", discardChanges);
+        List<Map<String, Object>> repos = new ArrayList<>();
+        for (AgentLaunchCommand.RepoSpec spec : specs) {
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("remoteUrl", spec.remoteUrl());
+            r.put("baseBranch", spec.baseBranch());
+            r.put("branch", spec.branch());
+            r.put("token", spec.token()); // token 仅随帧传输，严禁进日志
+            r.put("name", spec.name());
+            repos.add(r);
+        }
+        frame.put("repos", repos);
+        long timeoutSec = 60L + 310L * Math.max(1, specs.size());
+        try {
+            send(ws, frame);
+            return done.get(timeoutSec, TimeUnit.SECONDS);
+        } catch (DevMindException e) {
+            throw e;
+        } catch (java.util.concurrent.TimeoutException e) {
+            return FinalizeResult.failed("等待 runner workspace_finalize_ack 超时（runner 无响应）");
+        } catch (Exception e) {
+            throw new DevMindException(ErrorCode.CONFLICT, "工作区收口下发异常: " + e.getMessage(), e);
+        } finally {
+            pendingFinalizes.remove(requestId);
         }
     }
 
