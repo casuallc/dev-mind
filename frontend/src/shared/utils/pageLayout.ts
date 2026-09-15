@@ -22,5 +22,13 @@ export const pageCardBodyFlexStyle: CSSProperties = {
   flexDirection: 'column',
 }
 
-/** 多区块页面（概览/详情等根节点为 Space/div 叠多张 Card）的根容器：撑满高度并内部滚动 */
-export const pageRootScrollStyle: CSSProperties = { flex: 1, minHeight: 0, overflow: 'auto' }
+/** 多区块页面（概览/详情等根节点为 Space/div 叠多张 Card）的根容器：撑满高度并内部滚动。
+ *  overflowX:hidden 是必须的——antd Row 的 gutter 靠 -8px 负 margin 实现，Row 比容器宽 16px，
+ *  在 overflow:auto 容器里会直接撑出横向滚动条；被裁掉的只是两侧空白 gutter，不影响内容。
+ *  表格等宽内容的横向滚动一律在 Card body 内部（pageCardBodyScrollStyle），不靠根容器。 */
+export const pageRootScrollStyle: CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  overflowY: 'auto',
+  overflowX: 'hidden',
+}
