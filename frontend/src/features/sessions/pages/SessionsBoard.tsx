@@ -43,11 +43,16 @@ function sortForBoard(list: SessionSummary[]): SessionSummary[] {
 export default function SessionsBoard({
   projectId: fixedProjectId,
   title,
+  view: controlledView,
+  onViewChange,
 }: {
-  /** 锁定项目（如工作日志页「会话」视图锁定 WORKLOG 空间）；不传则跟随当前项目切换器 */
+  /** 锁定项目（如工作日志页「对话/列表」视图锁定 WORKLOG 空间）；不传则跟随当前项目切换器 */
   projectId?: string
   /** 自定义 Card 标题（内嵌场景传入外层视图切换器）；不传默认「会话工作台 + 对话/列表」 */
   title?: ReactNode
+  /** 受控视图（chat/list）：传入后内层「对话/列表」Segmented 隐藏，由外层切换器驱动 */
+  view?: string
+  onViewChange?: (v: string) => void
 }) {
   // CAP-39：深链 /sessions?sid=<id>（通知/需求关联记录等原详情页入口统一落这里）
   const [searchParams, setSearchParams] = useSearchParams()
@@ -57,7 +62,9 @@ export default function SessionsBoard({
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
   const [loading, setLoading] = useState(false)
-  const [view, setView] = useState<string>('chat') // chat | list
+  const [innerView, setInnerView] = useState<string>('chat') // chat | list（受控时以 controlledView 为准）
+  const view = controlledView ?? innerView
+  const setView = onViewChange ?? setInnerView
   const [status, setStatus] = useState('ALL')
   const [keyword, setKeyword] = useState('')
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
@@ -246,14 +253,16 @@ export default function SessionsBoard({
       title={
         <Space size={12}>
           {title ?? <span>会话工作台</span>}
-          <Segmented
-            value={view}
-            onChange={setView}
-            options={[
-              { value: 'chat', label: '对话' },
-              { value: 'list', label: '列表' },
-            ]}
-          />
+          {!controlledView && (
+            <Segmented
+              value={view}
+              onChange={(v) => setView(v as string)}
+              options={[
+                { value: 'chat', label: '对话' },
+                { value: 'list', label: '列表' },
+              ]}
+            />
+          )}
         </Space>
       }
       extra={
