@@ -34,16 +34,80 @@ html, body, #root {
   display: none;
 }
 
-/* 页签多/extra 重的页面（如 /worklog）：Card 头部允许换行——
-   宽度不够时 extra 整体落到第二行（仍右对齐），title 里的 Segmented 不被挤压截断 */
-.card-head-wrap .ant-card-head-wrapper {
-  flex-wrap: wrap;
+/* ScrollRow 通用横向滚动行（shared/components/ScrollRow）：
+   children 超宽时容器内横向滑动，箭头 + 渐变遮罩提示可滚方向，滚动条隐藏 */
+.scroll-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
 }
-.card-head-wrap .ant-card-head .ant-card-head-title {
-  padding: 12px 0 6px;
+.scroll-row-viewport {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
-.card-head-wrap .ant-card-head .ant-card-extra {
-  padding: 6px 0 12px;
+.scroll-row-viewport::-webkit-scrollbar {
+  display: none;
+}
+.scroll-row-inner {
+  display: flex;
+  align-items: center;
+  width: max-content;
+  min-width: 100%;
+}
+.scroll-row-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid #e5e6eb;
+  background: rgba(255, 255, 255, 0.95);
+  color: rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  padding: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+.scroll-row-arrow:hover {
+  color: #1677ff;
+  border-color: #1677ff;
+}
+.scroll-row-arrow.left {
+  left: 0;
+}
+.scroll-row-arrow.right {
+  right: 0;
+}
+.scroll-row.has-left::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 28px;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(to right, #fff, rgba(255, 255, 255, 0));
+}
+.scroll-row.has-right::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 28px;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(to left, #fff, rgba(255, 255, 255, 0));
 }
 
 /* CAP-03 只读 Markdown 渲染样式 */

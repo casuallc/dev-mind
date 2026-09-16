@@ -52,7 +52,7 @@ export default function ProjectContextPage({
 }: {
   /** 锁定项目（如工作日志页「知识条目/文档/Skills」视图锁定 WORKLOG 空间）；不传则跟随当前项目切换器 */
   projectId?: string
-  /** 自定义 Card 标题（内嵌场景传入外层视图切换器）；不传默认「知识 + 资产视图」 */
+  /** 自定义 Card 标题（内嵌场景传入外层视图切换器，此时须配合受控 view 使用——内层 Segmented 不再渲染） */
   title?: ReactNode
   /** 受控视图（knowledge/doc/skill 资产 kind）：传入后内层 Segmented 隐藏，由外层切换器驱动 */
   view?: string
@@ -125,16 +125,16 @@ export default function ProjectContextPage({
       style={pageCardStyle}
       styles={{ body: pageCardBodyScrollStyle }}
       title={
-        <Space size={12}>
-          {title ?? <span>知识</span>}
-          {!controlledView && (
+        title ?? (
+          <Space size={12}>
+            <span>知识</span>
             <Segmented
               value={activeKind}
               onChange={(v) => setView(v as string)}
               options={viewOptions.map((o) => ({ label: o.title, value: o.kind }))}
             />
-          )}
-        </Space>
+          </Space>
+        )
       }
       extra={
         <Button icon={<ReloadOutlined />} onClick={load}>
