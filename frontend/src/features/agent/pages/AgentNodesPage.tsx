@@ -428,6 +428,15 @@ function NodeDrawer({
   // 标签草稿只在切换节点时重置——5s 轮询刷新 labels 不应覆盖用户正在编辑的输入
   const [labelsDraft, setLabelsDraft] = useState(node.labels ?? '')
   useEffect(() => setLabelsDraft(node.labels ?? ''), [node.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  // CAP-43 外网代理草稿：同 labels 的防轮询覆盖语义
+  const [proxyUrlDraft, setProxyUrlDraft] = useState(node.proxyUrl ?? '')
+  const [proxyScopesDraft, setProxyScopesDraft] = useState<string[]>(
+    node.proxyScopes ? node.proxyScopes.split(',').filter(Boolean) : ['git'],
+  )
+  useEffect(() => {
+    setProxyUrlDraft(node.proxyUrl ?? '')
+    setProxyScopesDraft(node.proxyScopes ? node.proxyScopes.split(',').filter(Boolean) : ['git'])
+  }, [node.id]) // eslint-disable-line react-hooks/exhaustive-deps
   const outdated = !!(pkg && node.runnerVersion && node.runnerVersion !== pkg.version)
 
   // 强制升级弹窗：BUSY 时打开，异步拉活跃会话清单（null=加载中）
@@ -541,6 +550,18 @@ function NodeDrawer({
       onChanged()
     })
 
+  // CAP-43：URL 留空 = 清空代理（连 scope 一起清）；只传代理字段，labels 不动
+  const onSaveProxy = () =>
+    run(async () => {
+      const url = proxyUrlDraft.trim()
+      await updateAgentNode(node.id, {
+        proxyUrl: url,
+        proxyScopes: url ? proxyScopesDraft.join(',') : undefined,
+      })
+      message.success(url ? '外网代理已保存（随下一指令帧生效）' : '外网代理已清空')
+      onChanged()
+    })
+
   const doDelete = () =>
     run(async () => {
       await deleteAgentNode(node.id)
@@ -617,6 +638,35 @@ function NodeDrawer({
                   保存
                 </Button>
               </Space.Compact>
+            </Space>
+          </Card>
+
+          <Card size="small" title="外网代理（CAP-43）">
+            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+              <Typography.Text type="secondary">
+                节点上的 git 网络操作 / claude 会话进程 / exec 脚本经此代理访问外网（按下方勾选生效）。
+                保存后随下一指令帧即时生效；runner 协议版本需 ≥ v8，低于 v8 时下发会被服务端拒绝并提示升级。
+                不支持带账号密码的代理地址。
+              </Typography.Text>
+              <Input
+                placeholder="http://127.0.0.1:8443（留空 = 直连）"
+                value={proxyUrlDraft}
+                onChange={(e) => setProxyUrlDraft(e.target.value)}
+              />
+              <Checkbox.Group
+                options={[
+                  { label: 'git 代码库操作', value: 'git' },
+                  { label: 'claude 会话进程', value: 'claude' },
+                  { label: 'exec 脚本', value: 'exec' },
+                ]}
+                value={proxyScopesDraft}
+                onChange={(v) => setProxyScopesDraft(v as string[])}
+              />
+              <div>
+                <Button type="primary" onClick={onSaveProxy}>
+                  保存
+                </Button>
+              </div>
             </Space>
           </Card>
 

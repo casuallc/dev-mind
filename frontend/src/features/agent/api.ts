@@ -16,8 +16,14 @@ export function createAgentNode(body: { name: string; labels?: string }): Promis
   return api.post<IssuedNode>('/agent-nodes', body)
 }
 
-/** CAP-34 FR-07：编辑节点标签（CSV；runner 配置非空 labels 时会被其 hello 覆盖） */
-export function updateAgentNode(id: number, body: { labels?: string }): Promise<AgentNode> {
+/**
+ * 编辑节点（CAP-34 FR-07 标签 / CAP-43 外网代理）。字段缺席 = 不动该配置；
+ * labels "" 清空标签；proxyUrl "" 清空代理（连同 scopes）。
+ */
+export function updateAgentNode(
+  id: number,
+  body: { labels?: string; proxyUrl?: string; proxyScopes?: string },
+): Promise<AgentNode> {
   return api.put<AgentNode>(`/agent-nodes/${id}`, body)
 }
 
