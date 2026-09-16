@@ -12,6 +12,7 @@ import type {
   WorklogEntry,
   WorklogRepo,
   WorklogSettings,
+  WorklogSyncResult,
   WorkspaceView,
 } from './types'
 
@@ -66,6 +67,9 @@ export const getWorkspace = () => api.get<WorkspaceView>('/worklog/workspace')
 export const ensureWorkspace = () => api.post<WorkspaceView>('/worklog/workspace/ensure', {})
 /** CAP-41 M3：把工作日志空间 push 到设置里绑定的远端仓库（阻塞等 runner ack） */
 export const pushWorkspace = () => api.post<PushAck>('/worklog/workspace/push', {})
+/** CAP-41：把空间某会话的成稿产出（daily-/weekly-）同步为日报/周报镜像（幂等，已确认不覆盖） */
+export const syncSessionReports = (sessionId: string) =>
+  api.post<WorklogSyncResult>('/worklog/reports/sync', { sessionId })
 
 // ---- 个人设置 ----
 export const getSettings = () => api.get<WorklogSettings>('/worklog/settings')

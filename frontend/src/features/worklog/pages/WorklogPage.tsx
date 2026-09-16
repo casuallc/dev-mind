@@ -488,6 +488,7 @@ export default function WorklogPage() {
         title={viewSwitch}
         view={view}
         onViewChange={(v) => setView(v as WorklogView)}
+        worklog
       />
     ) : (
       <ProjectContextPage

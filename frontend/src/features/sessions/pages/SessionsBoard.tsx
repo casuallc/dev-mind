@@ -5,6 +5,7 @@ import { Badge, Button, Card, Input, Modal, Segmented, Select, Space, Table, Tag
 import type { ColumnsType } from 'antd/es/table'
 import {
   CaretRightOutlined,
+  CloudSyncOutlined,
   DiffOutlined,
   PauseOutlined,
   ReloadOutlined,
@@ -12,7 +13,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
-import { deleteSession, listSessions } from '../api'
+import { collectSessionOutputs, deleteSession, listSessions } from '../api'
 import type { SessionSummary } from '../types'
 import { stateColor, ACTIVE_STATES, STATE_OPTIONS } from '../stateMeta'
 import { useSessionActions } from '../hooks/useSessionActions'
@@ -25,6 +26,7 @@ import SessionOutputsModal from '../components/SessionOutputsModal'
 import SessionMoreActions from '../components/SessionMoreActions'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
+import { syncSessionReports } from '../../worklog/api'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
@@ -45,14 +47,17 @@ export default function SessionsBoard({
   title,
   view: controlledView,
   onViewChange,
+  worklog = false,
 }: {
-  /** 锁定项目（如工作日志页「对话/列表」视图锁定 WORKLOG 空间）；不传则跟随当前项目切换器 */
+  /** 锁定项目（如工作日志页「对话/对话列表」视图锁定 WORKLOG 空间）；不传则跟随当前项目切换器 */
   projectId?: string
   /** 自定义 Card 标题（内嵌场景传入外层视图切换器，此时须配合受控 view 使用——内层 Segmented 不再渲染） */
   title?: ReactNode
   /** 受控视图（chat/list）：传入后内层「对话/列表」Segmented 隐藏，由外层切换器驱动 */
   view?: string
   onViewChange?: (v: string) => void
+  /** 工作日志空间模式：隐藏 Diff/推送产出/更多（无 worktree/需求文档语义），操作条改出「推送工作日志」 */
+  worklog?: boolean
 }) {
   // CAP-39：深链 /sessions?sid=<id>（通知/需求关联记录等原详情页入口统一落这里）
   const [searchParams, setSearchParams] = useSearchParams()
@@ -140,6 +145,32 @@ export default function SessionsBoard({
 
   const onUpdated = useCallback(() => load(), [load])
   const { onFinish, onSuspend, onResume, onKill, diff } = useSessionActions(selectedId, onUpdated)
+
+  // CAP-41 worklog 模式：「推送工作日志」——先让 runner 即时回传产出（进行中的会话也可），
+  // 再把 daily-/weekly- 成稿同步为日报/周报镜像（幂等；已确认不覆盖）
+  const [syncingWorklog, setSyncingWorklog] = useState(false)
+  const onSyncWorklog = async () => {
+    if (!current) return
+    setSyncingWorklog(true)
+    try {
+      const collect = await collectSessionOutputs(current.id)
+      if (collect.message) message.warning(collect.message)
+      const r = await syncSessionReports(current.id)
+      if (r.mirrored.length > 0) {
+        message.success(
+          `已同步：${r.mirrored.join('、')}${r.skipped.length ? `；未覆盖：${r.skipped.join('、')}` : ''}`,
+        )
+      } else if (r.skipped.length > 0) {
+        message.info(`未覆盖：${r.skipped.join('、')}`)
+      } else {
+        message.info('该会话暂无日志成稿（让 claude 把日报/周报写入 .devmind/output/ 后再推送）')
+      }
+    } catch (e) {
+      showError(e, '推送工作日志失败')
+    } finally {
+      setSyncingWorklog(false)
+    }
+  }
 
   const confirmDelete = (r: SessionSummary) => {
     Modal.confirm({
@@ -341,13 +372,28 @@ export default function SessionsBoard({
                         {current.state === 'SUSPENDED' ? '恢复' : '继续对话'}
                       </Button>
                     )}
-                    <Button size="small" icon={<DiffOutlined />} loading={diff.loading} onClick={diff.show}>
-                      Diff
-                    </Button>
-                    <Button size="small" icon={<UploadOutlined />} onClick={() => setOutputsOpen(true)}>
-                      推送产出
-                    </Button>
-                    <SessionMoreActions session={current} canSuspend={canSuspend} onChanged={load} />
+                    {worklog && (
+                      <Button
+                        size="small"
+                        type="primary"
+                        icon={<CloudSyncOutlined />}
+                        loading={syncingWorklog}
+                        onClick={onSyncWorklog}
+                      >
+                        推送工作日志
+                      </Button>
+                    )}
+                    {!worklog && (
+                      <>
+                        <Button size="small" icon={<DiffOutlined />} loading={diff.loading} onClick={diff.show}>
+                          Diff
+                        </Button>
+                        <Button size="small" icon={<UploadOutlined />} onClick={() => setOutputsOpen(true)}>
+                          推送产出
+                        </Button>
+                        <SessionMoreActions session={current} canSuspend={canSuspend} onChanged={load} />
+                      </>
+                    )}
                     {canSuspend && (
                       <Button size="small" danger icon={<StopOutlined />} onClick={onKill}>
                         终止

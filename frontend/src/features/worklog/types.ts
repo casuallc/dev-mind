@@ -133,6 +133,14 @@ export interface GenerateAck {
   reused?: boolean
 }
 
+/** CAP-41：会话成稿同步结果（POST /worklog/reports/sync） */
+export interface WorklogSyncResult {
+  /** 已落镜像的报告（如 "日报 2026-09-16"） */
+  mirrored: string[]
+  /** 命中但未覆盖（已确认为大） */
+  skipped: string[]
+}
+
 /** CAP-41 工作日志空间：WORKLOG 项目 + runner 持久工作区状态 */
 export interface WorkspaceView {
   exists: boolean
