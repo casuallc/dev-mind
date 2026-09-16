@@ -183,6 +183,10 @@ WORKLOG 项目是**会话调度的载体，不是给人浏览的项目**：每�
   ALL 保持既有契约。
 - 项目切换器只在项目上下文页（`isProjectPage`）渲染——工作台/问答/工作日志等
   个人域页面没有项目切换语义；列表加载/currentId 兜底拆为 AppLayout 常驻的
-  `useProjectBootstrap`（WORKLOG id 视为有效，防冲掉「进入空间开会话」流程）。
+  `useProjectBootstrap`（WORKLOG id 视为有效，兼容历史「进入空间」残留态）。
 - 切换器选项过滤 WORKLOG 空间；当前处于日志空间时占位提示「工作日志空间：<名称>」，
   下拉即可切回普通项目。
+- 「打开会话」不再 setCurrentProject 跳项目上下文（2026-09-16 修正）：新增
+  `/worklog/sessions` 路由，锁定 WORKLOG 项目复用会话工作台
+  （`SessionsBoard`/`NewSessionDraft` 支持固定 `projectId`，`useCurrentProject` 加
+  锁定参数），顶部导航高亮停留「工作日志」、不渲染项目页签条。
