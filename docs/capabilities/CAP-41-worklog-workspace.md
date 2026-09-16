@@ -36,9 +36,10 @@ runner：{user.home}/worklog/<console-username>/   ← 持久目录，本地 git
 - **FR-01 WORKLOG 项目**：`projects` 增 `kind` 列（NORMAL 默认 / WORKLOG）。首次进
   /worklog 或首次触发生成时按当前用户懒创建（name=「工作日志」、owner=该用户、
   path 存逻辑占位 `worklog://<username>`，跳过 CAP-02 `git rev-parse` 校验）。
-  **可见、可进、可用，但危险操作收敛**（2026-09-14 定稿口径）：
-  - `/projects` 只读列表正常显示（带「日志」徽标），可「进入」切换为当前项目；
-    项目工作区会话/上下文页签照常可用，仓库/构建/部署/测试/发版等代码类页签隐藏；
+  **可见、可用，但危险操作收敛**（2026-09-14 定稿；2026-09-16 起不进项目列表/切换语义，
+  会话与知识收为 /worklog 页内视图，见文末「前端展示隔离」）：
+  - `/projects` 列表/切换器默认排除 WORKLOG（kind 过滤，见文末「前端展示隔离」）；
+    工作日志空间的会话/上下文在 /worklog 页内「会话」「知识」视图使用，不进项目上下文页签；
   - 后台编辑仅放行名称/标签；**path 只读、执行节点锁定**（亲和红线，见下）；
   - **删除/归档禁止**：接口层 409 + 前端不出按钮（防孤儿化 runner 侧日志数据）；
   - 创建会话表单对该 kind 隐藏分支/仓库字段，场景默认选中「工作日志」。**节点亲和**：
@@ -81,7 +82,7 @@ runner：{user.home}/worklog/<console-username>/   ← 持久目录，本地 git
 - **FR-07 前端重构**：/worklog 页保留 Segmented[条目|日报|周报]（报告渲染 DB 镜像
   不变，确认/编辑沿用），新增：
   - 「空间」信息条：WORKLOG 项目状态、亲和节点在线态、runner 目录路径（会话事件
-    流可见）、「打开会话」入口（直接起 worklog 会话与 claude 对话记日志）；
+    流可见）、「打开会话」入口（切到页内「会话」视图，与 claude 对话记日志）；
   - 设置页加日报/周报模板编辑器（FR-05）；
   - 项目列表徽标与工作区页签裁剪（代码类页签隐藏）、会话表单字段裁剪
     （FR-01 可见性口径）；
@@ -183,10 +184,11 @@ WORKLOG 项目是**会话调度的载体，不是给人浏览的项目**：每�
   ALL 保持既有契约。
 - 项目切换器只在项目上下文页（`isProjectPage`）渲染——工作台/问答/工作日志等
   个人域页面没有项目切换语义；列表加载/currentId 兜底拆为 AppLayout 常驻的
-  `useProjectBootstrap`（WORKLOG id 视为有效，兼容历史「进入空间」残留态）。
-- 切换器选项过滤 WORKLOG 空间；当前处于日志空间时占位提示「工作日志空间：<名称>」，
-  下拉即可切回普通项目。
-- 「打开会话」不再 setCurrentProject 跳项目上下文（2026-09-16 修正）：新增
-  `/worklog/sessions` 路由，锁定 WORKLOG 项目复用会话工作台
-  （`SessionsBoard`/`NewSessionDraft` 支持固定 `projectId`，`useCurrentProject` 加
-  锁定参数），顶部导航高亮停留「工作日志」、不渲染项目页签条。
+  `useProjectBootstrap`。
+- 切换器选项过滤 WORKLOG 空间；`useProjectBootstrap` 校验 currentId 时 WORKLOG id
+  视为失效并兜底到首个普通项目（兼容历史残留的持久化态）。
+- 「打开会话」/知识**收为 /worklog 页内视图**（2026-09-16 定稿）：页签
+  `工作条目 | 日报 | 周报 | 会话 | 知识` 共用 Card title 的 Segmented
+  （`WorklogViewSwitch`），会话/知识视图整页渲染 `SessionsBoard`/`ProjectContextPage`
+  并锁定 WORKLOG 项目（两组件支持固定 `projectId`，`useCurrentProject` 加锁定参数）；
+  不再 setCurrentProject 跳项目上下文，项目页签条/切换器不做任何 WORKLOG 特判。
