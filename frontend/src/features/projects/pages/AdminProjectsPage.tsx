@@ -37,7 +37,8 @@ export default function AdminProjectsPage() {
   const load = useCallback(async (st?: string) => {
     setLoading(true)
     try {
-      setProjects(await listProjects(st ?? status))
+      // kind=ALL：后台管理需看到 WORKLOG 空间行（亲和节点等信息），缺省过滤只面向普通用户视图
+      setProjects(await listProjects(st ?? status, 'ALL'))
     } catch (e) {
       showError(e, '加载项目失败')
     } finally {

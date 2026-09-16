@@ -50,12 +50,9 @@ export default function ProjectsPage() {
       dataIndex: 'name',
       width: 180,
       render: (n: string, r) => (
-        <Space size={4}>
-          <Button type="link" style={{ padding: 0 }} onClick={() => enter(r.id)}>
-            {n}
-          </Button>
-          {r.kind === 'WORKLOG' && <Tag color="purple">日志</Tag>}
-        </Space>
+        <Button type="link" style={{ padding: 0 }} onClick={() => enter(r.id)}>
+          {n}
+        </Button>
       ),
     },
     { title: 'ID', dataIndex: 'id', width: 110, render: (id: string) => <Typography.Text code>{id}</Typography.Text> },

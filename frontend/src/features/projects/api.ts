@@ -15,9 +15,16 @@ import type {
   WorktreeInfo,
 } from './types'
 
-export function listProjects(status?: string): Promise<Project[]> {
-  const q = status && status !== 'ALL' ? `?status=${status}` : ''
-  return api.get<Project[]>(`/projects${q}`)
+/**
+ * 项目列表。kind 缺省 = 后端排除 WORKLOG 空间（工作日志是会话调度载体，不进项目列表/切换语义）；
+ * 传 'ALL' 返回全部（后台管理、切换器 currentId 校验用）。
+ */
+export function listProjects(status?: string, kind?: string): Promise<Project[]> {
+  const params = new URLSearchParams()
+  if (status && status !== 'ALL') params.set('status', status)
+  if (kind) params.set('kind', kind)
+  const q = params.toString()
+  return api.get<Project[]>(`/projects${q ? `?${q}` : ''}`)
 }
 
 export function getProject(id: string): Promise<Project> {
