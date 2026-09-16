@@ -188,8 +188,9 @@ WORKLOG 项目是**会话调度的载体，不是给人浏览的项目**：每�
 - 切换器选项过滤 WORKLOG 空间；`useProjectBootstrap` 校验 currentId 时 WORKLOG id
   视为失效并兜底到首个普通项目（兼容历史残留的持久化态）。
 - 「打开会话」/知识**收为 /worklog 页内视图**（2026-09-16 定稿）：页签
-  `工作条目 | 日报 | 周报 | 对话 | 列表 | 知识` 共用一个并列 Segmented
-  （`WorklogViewSwitch`；会话的「对话/列表」提为顶层视图，`SessionsBoard` 视图切换受控），
+  `工作条目 | 日报 | 周报 | 对话 | 对话列表 | 知识条目 | 文档 | Skills` 共用一个
+  并列 Segmented（`WorklogViewSwitch`；SessionsBoard 的 chat/list 与 ProjectContextPage
+  的 knowledge/doc/skill 全部提为顶层视图，两组件视图切换受控、内层 Segmented 隐藏），
   对话/列表/知识视图整页渲染 `SessionsBoard`/`ProjectContextPage`
   并锁定 WORKLOG 项目（两组件支持固定 `projectId`，`useCurrentProject` 加锁定参数）；
   不再 setCurrentProject 跳项目上下文，项目页签条/切换器不做任何 WORKLOG 特判。
