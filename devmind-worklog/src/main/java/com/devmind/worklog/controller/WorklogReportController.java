@@ -7,10 +7,12 @@ import com.devmind.worklog.dto.DailyReportView;
 import com.devmind.worklog.dto.GenerateDailyRequest;
 import com.devmind.worklog.dto.GenerateWeeklyRequest;
 import com.devmind.worklog.dto.ReportLaunch;
+import com.devmind.worklog.dto.SyncReportsRequest;
 import com.devmind.worklog.dto.UpdateDailyRequest;
 import com.devmind.worklog.dto.UpdateWeeklyRequest;
 import com.devmind.worklog.dto.WeeklyReportView;
 import com.devmind.worklog.service.ReportService;
+import com.devmind.worklog.service.WorklogOutputMirror;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,10 +37,13 @@ public class WorklogReportController {
 
     private final ReportService reportService;
     private final IdentityService identity;
+    private final WorklogOutputMirror outputMirror;
 
-    public WorklogReportController(ReportService reportService, IdentityService identity) {
+    public WorklogReportController(ReportService reportService, IdentityService identity,
+                                   WorklogOutputMirror outputMirror) {
         this.reportService = reportService;
         this.identity = identity;
+        this.outputMirror = outputMirror;
     }
 
     // ---------------- 日报 ----------------
@@ -120,5 +125,17 @@ public class WorklogReportController {
     public WeeklyReportView updateWeekly(@PathVariable Long id,
                                          @Valid @RequestBody UpdateWeeklyRequest req) {
         return reportService.updateWeekly(id, identity.currentActor(), req);
+    }
+
+    // ---------------- 会话成稿同步 ----------------
+
+    /**
+     * CAP-41：把工作日志空间某会话的成稿产出（.devmind/output 的 daily-/weekly- 文件）
+     * 同步为日报/周报镜像（幂等；已确认不覆盖）。前端对话页「推送工作日志」用，
+     * 调用前通常先 POST /sessions/{id}/outputs/collect 让 runner 即时回传。
+     */
+    @PostMapping("/reports/sync")
+    public com.devmind.worklog.dto.WorklogSyncResult syncReports(@Valid @RequestBody SyncReportsRequest req) {
+        return outputMirror.syncSession(req.sessionId(), identity.currentActor());
     }
 }

@@ -165,6 +165,32 @@ class WorklogOutputMirrorTest {
                 "不严格的日期/小写 W 不应命中");
     }
 
+    @Test
+    void 手工对话mirrorAll静默镜像全部成稿() {
+        var r = mirror.mirrorAll(session("s1"), "u1", List.of(
+                output("daily-2026-09-15.md", "日报v1"),
+                output("notes.md", "非契约文件忽略"),
+                output("weekly-2026-W38.md",
+                        ReportService.SUMMARY_HEADING + "\n- 完成 A\n" + ReportService.PLAN_HEADING + "\n- 继续 B\n")));
+        assertEquals(2, r.mirrored().size());
+        assertTrue(r.skipped().isEmpty());
+        assertEquals("日报v1", dailyTable.get("u1:2026-09-15").getContentMd());
+        assertEquals("- 完成 A", weeklyTable.get("u1:2026-09-14").getSummaryMd());
+    }
+
+    @Test
+    void mirrorAll已确认进skipped不覆盖() {
+        mirror.mirrorAll(session("s1"), "u1", List.of(output("daily-2026-09-15.md", "v1")));
+        dailyTable.get("u1:2026-09-15").setStatus(DailyReportEntity.STATUS_CONFIRMED);
+        int eventsBefore = publisher.events.size();
+        var r = mirror.mirrorAll(session("s2"), "u1", List.of(output("daily-2026-09-15.md", "v2")));
+        assertTrue(r.mirrored().isEmpty());
+        assertEquals(1, r.skipped().size());
+        assertTrue(r.skipped().get(0).contains("已确认"));
+        assertEquals("v1", dailyTable.get("u1:2026-09-15").getContentMd(), "CONFIRMED 不覆盖");
+        assertEquals(eventsBefore, publisher.events.size(), "跳过不发事件");
+    }
+
     private static SessionOutputEntity findMatch(List<SessionOutputEntity> outputs, java.util.regex.Pattern p) {
         for (SessionOutputEntity o : outputs) {
             if (p.matcher(o.getFileName()).matches()) {
