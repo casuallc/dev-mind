@@ -127,6 +127,8 @@ public class GitRepoService implements GitRepoCatalog {
         }
         if (req.defaultBranch() != null) {
             e.setDefaultBranch(req.defaultBranch().isBlank() ? null : req.defaultBranch().strip());
+            // 手工指定即锁定：fetch 不再按远端 HEAD 回写；清空则恢复自动跟踪
+            e.setDefaultBranchManual(!req.defaultBranch().isBlank());
         }
         if (req.status() != null) {
             e.setStatus(req.status());

@@ -55,9 +55,16 @@ public class GitRepositoryEntity {
     @Column(name = "remote_url_key", length = 512, unique = true)
     private String remoteUrlKey;
 
-    /** 默认分支（fetch 时按远端 HEAD 刷新） */
+    /** 默认分支（default_branch_manual=false 时 fetch 按远端 HEAD 自动跟踪） */
     @Column(name = "default_branch", length = 128)
     private String defaultBranch;
+
+    /**
+     * 默认分支为用户手工指定：true 时 fetch 不再按远端 HEAD 覆盖；清空默认值即恢复自动跟踪。
+     * Boolean 列禁 @ColumnDefault（MySQL bit 建列失败红线）——实体初始值 + getter 兜底。
+     */
+    @Column(name = "default_branch_manual")
+    private Boolean defaultBranchManual = false;
 
     /** LOCAL=登记已存在路径；CLONE=服务端克隆 */
     @Column(name = "source_type", nullable = false, length = 16)
@@ -112,6 +119,8 @@ public class GitRepositoryEntity {
     public void setRemoteUrlKey(String remoteUrlKey) { this.remoteUrlKey = remoteUrlKey; }
     public String getDefaultBranch() { return defaultBranch; }
     public void setDefaultBranch(String defaultBranch) { this.defaultBranch = defaultBranch; }
+    public boolean isDefaultBranchManual() { return Boolean.TRUE.equals(defaultBranchManual); }
+    public void setDefaultBranchManual(Boolean defaultBranchManual) { this.defaultBranchManual = defaultBranchManual; }
     public String getSourceType() { return sourceType; }
     public void setSourceType(String sourceType) { this.sourceType = sourceType; }
     public Long getIntegrationId() { return integrationId; }

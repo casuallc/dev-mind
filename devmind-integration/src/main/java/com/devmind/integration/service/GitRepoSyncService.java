@@ -209,11 +209,13 @@ public class GitRepoSyncService {
         GitRemoteOps.GitResult result = gitOps.fetchAllRefs(repo.getLocalPath(), repo.getRemoteUrl(), token);
         if (result.ok()) {
             refreshBranches(repo);
-            // 远端 HEAD 漂移时更新默认分支
-            GitRemoteOps.GitResult head = gitOps.remoteHeadBranch(repo.getLocalPath());
-            if (head.ok() && !head.output().equals(repo.getDefaultBranch())) {
-                repo.setDefaultBranch(head.output());
-                mirrorDefaultBranchToProjectRepos(repo);
+            // 远端 HEAD 漂移时更新默认分支（用户手工指定的除外，防抓取把编辑值还原）
+            if (!repo.isDefaultBranchManual()) {
+                GitRemoteOps.GitResult head = gitOps.remoteHeadBranch(repo.getLocalPath());
+                if (head.ok() && !head.output().equals(repo.getDefaultBranch())) {
+                    repo.setDefaultBranch(head.output());
+                    mirrorDefaultBranchToProjectRepos(repo);
+                }
             }
             // 本地检出分支不随 fetch 移动：快进到 origin/<默认分支>，供扫描/构建读到最新代码
             if (repo.getDefaultBranch() != null && !repo.getDefaultBranch().isBlank()) {
