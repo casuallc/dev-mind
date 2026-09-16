@@ -58,6 +58,7 @@
 | [CAP-40](CAP-40-requirement-attachment-context.md) | 需求附件上下文投送 | 流程层 | 需求描述引用的本地附件 + Jira 内嵌图打进 ContextPackage（schema v2 inputs），runner 物化 .devmind/input/，流程会话 agent 用 Read 读图 |
 | [CAP-41](CAP-41-worklog-workspace.md) | 工作日志空间 | 组装层 | 工作日志重构为 WORKLOG 特殊项目 + runner 按用户隔离的持久 git 工作区（{user.home}/worklog/<user>），skill/格式模板管控台可配，报告生成走真实会话写文件、复用 CAP-37 产出回传落 DB 镜像（重构 CAP-28 报告链路） |
 | [CAP-42](CAP-42-per-user-workspace.md) | 每用户固定工作区与手动收口 | 底座 | runner 代码工作区固定到 {项目}/{登录用户}（克隆缓存+固定 worktree，结束不 push 不删），页面手动收口合并基线+push+删 worktree（重构 CAP-25/31 布局与生命周期） |
+| [CAP-43](CAP-43-agent-node-proxy.md) | Agent 节点外网代理 | 底座 | 节点级 HTTP 代理配置（URL+按功能勾选 scope git/claude/exec），随 launch/worklog_push/exec/workspace_finalize 帧下发（协议 v8 门控），runner 进程级 holder 注入 git 命令行与子进程 env |
 
 ## 依赖关系
 
