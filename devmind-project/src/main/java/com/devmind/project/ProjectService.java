@@ -172,11 +172,25 @@ public class ProjectService {
 
     // ---------------- 项目 CRUD ----------------
 
-    public List<ProjectView> list(String status) {
+    /**
+     * 项目列表。kind 过滤：null/空白 = 排除 WORKLOG 空间（工作日志是会话调度载体，不进项目列表/切换语义）；
+     * "ALL" = 不过滤（后台管理、currentId 校验用）；其余值按种类精确匹配。
+     */
+    public List<ProjectView> list(String status, String kind) {
         List<ProjectEntity> entities = (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status))
                 ? projectRepo.findAllByOrderByCreatedAtDesc()
                 : projectRepo.findByStatusOrderByCreatedAtDesc(status.toUpperCase());
-        return entities.stream().map(this::toView).toList();
+        return entities.stream().filter(e -> kindMatches(e, kind)).map(this::toView).toList();
+    }
+
+    private static boolean kindMatches(ProjectEntity e, String kind) {
+        if (kind == null || kind.isBlank()) {
+            return !ProjectEntity.KIND_WORKLOG.equals(e.getKind());
+        }
+        if ("ALL".equalsIgnoreCase(kind)) {
+            return true;
+        }
+        return kind.equalsIgnoreCase(e.getKind());
     }
 
     public ProjectView get(String id) {

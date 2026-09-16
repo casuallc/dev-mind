@@ -68,7 +68,8 @@ public class OpenApiV1Controller {
 
     @GetMapping("/projects")
     public List<ProjectView> listProjects(@RequestParam(required = false) String status) {
-        return projectService.list(status);
+        // kind=ALL：开放 API 保持既有契约（含 WORKLOG 空间行），UI 列表的 WORKLOG 过滤不影响外部调用方
+        return projectService.list(status, "ALL");
     }
 
     @PostMapping("/projects")

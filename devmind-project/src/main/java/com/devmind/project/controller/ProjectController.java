@@ -43,8 +43,9 @@ public class ProjectController {
     // ---------------- 项目 CRUD ----------------
 
     @GetMapping
-    public List<ProjectView> list(@RequestParam(required = false) String status) {
-        return service.list(status);
+    public List<ProjectView> list(@RequestParam(required = false) String status,
+                                  @RequestParam(required = false) String kind) {
+        return service.list(status, kind);
     }
 
     @PostMapping
