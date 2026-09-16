@@ -501,6 +501,7 @@ export default function WorklogPage() {
 
   return (
     <Card
+      className="card-head-wrap"
       style={pageCardStyle}
       styles={{ body: pageCardBodyScrollStyle }}
       title={viewSwitch}
