@@ -358,6 +358,7 @@ public class RunnerWorkspace {
             throw new IllegalStateException("创建 worklog 工作区目录失败: " + dir, e);
         }
         if (Files.isDirectory(dir.resolve(".git"))) {
+            ensureGitignore(dir); // 存量空间幂等补写（.gitignore 为后加骨架能力，老空间没有）
             return dir; // 幂等复用：已有空间直接进
         }
         Result init = run(dir, OP_TIMEOUT_SEC, null, "init");
@@ -643,6 +644,15 @@ public class RunnerWorkspace {
     }
 
     /** worklog 空间骨架：目录契约说明 + daily/weekly/entries 占位。 */
+    /** worklog 空间 .gitignore：平台托管文件（上下文装配/物化设置/回传产物）不入库，
+     *  否则 agent 按 README「git add -A」会把它提交并随远端备份推上公网仓库。 */
+    private static final String WORKLOG_GITIGNORE = """
+            # Dev-Mind 平台托管文件（每次会话 launch 重新物化，勿提交）
+            CLAUDE.md
+            .claude/
+            .devmind/
+            """;
+
     private static void writeSkeleton(Path dir) {
         String readme = """
                 # 工作日志空间
@@ -659,6 +669,7 @@ public class RunnerWorkspace {
                 """;
         try {
             Files.writeString(dir.resolve("README.md"), readme, StandardCharsets.UTF_8);
+            Files.writeString(dir.resolve(".gitignore"), WORKLOG_GITIGNORE, StandardCharsets.UTF_8);
             for (String sub : new String[]{"daily", "weekly", "entries"}) {
                 Path d = dir.resolve(sub);
                 Files.createDirectories(d);
@@ -666,6 +677,20 @@ public class RunnerWorkspace {
             }
         } catch (IOException e) {
             throw new IllegalStateException("写 worklog 骨架文件失败: " + dir, e);
+        }
+    }
+
+    /** 存量 worklog 空间补写 .gitignore（缺失才写，已有不覆盖——用户可能自行加过规则）。 */
+    private static void ensureGitignore(Path dir) {
+        Path gitignore = dir.resolve(".gitignore");
+        if (Files.exists(gitignore)) {
+            return;
+        }
+        try {
+            Files.writeString(gitignore, WORKLOG_GITIGNORE, StandardCharsets.UTF_8);
+            log.info("worklog 存量空间已补写 .gitignore: dir={}", dir);
+        } catch (IOException e) {
+            throw new IllegalStateException("补写 worklog .gitignore 失败: " + dir, e);
         }
     }
 

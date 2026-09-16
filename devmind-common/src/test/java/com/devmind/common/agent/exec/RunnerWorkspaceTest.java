@@ -528,6 +528,39 @@ class RunnerWorkspaceTest {
     }
 
     @Test
+    void worklogSkeletonGitignoresPlatformFiles() throws Exception {
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        Path dir = ws.prepareWorklog(tmp.resolve("worklog"), "alice");
+        // 骨架含 .gitignore 且随骨架 commit 入库（忽略规则随远端备份一起走）
+        assertTrue(Files.exists(dir.resolve(".gitignore")));
+        assertEquals("", gitOut(dir, "status", "--porcelain"));
+        assertFalse(gitOut(dir, "ls-files", ".gitignore").isBlank());
+        // 平台托管文件（上下文装配/物化设置/回传产物）被忽略：agent「git add -A」扫不进仓库
+        Files.writeString(dir.resolve("CLAUDE.md"), "<!-- 装配产物 -->");
+        Files.createDirectories(dir.resolve(".claude"));
+        Files.writeString(dir.resolve(".claude").resolve("settings.local.json"), "{}");
+        Files.createDirectories(dir.resolve(".devmind").resolve("output"));
+        Files.writeString(dir.resolve(".devmind").resolve("output").resolve("daily-2026-09-16.md"), "# 日报");
+        git(dir, "add", "-A");
+        assertEquals("", gitOut(dir, "status", "--porcelain"));
+    }
+
+    @Test
+    void worklogPrepareBackfillsGitignoreForLegacySpace() throws Exception {
+        // 存量空间（老骨架无 .gitignore）幂等复用时补写
+        Path dir = tmp.resolve("worklog").resolve("bob");
+        Files.createDirectories(dir);
+        git(dir, "init");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        ws.prepareWorklog(tmp.resolve("worklog"), "bob");
+        assertTrue(Files.readString(dir.resolve(".gitignore")).contains(".devmind/"));
+        // 用户自行加过规则 → 不覆盖
+        Files.writeString(dir.resolve(".gitignore"), "custom-rule\n");
+        ws.prepareWorklog(tmp.resolve("worklog"), "bob");
+        assertEquals("custom-rule\n", Files.readString(dir.resolve(".gitignore")));
+    }
+
+    @Test
     void sanitizeMasksToken() {
         String out = RunnerWorkspace.sanitize("remote: oauth2:abc+123@host abc%2B123 done", "abc+123");
         assertFalse(out.contains("abc+123"));
