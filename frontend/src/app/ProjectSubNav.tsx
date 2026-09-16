@@ -1,11 +1,14 @@
 // 项目二级页签条：项目上下文页面（概览/会话/需求/知识/构建/部署/测试/发版）的顶部导航，
 // 由 AppLayout 在命中项目页路由时渲染于内容区上方。WORKLOG 项目裁剪代码类页签。
+// 右端承载项目切换器（从顶部导航移入——切换器显隐不再挤压一级导航位置）。
 import { Menu } from 'antd'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { menuSelectedKey } from './menuSelectedKey'
 import { getCurrentProjectId, subscribeCurrentProject } from './currentProjectStore'
 import { getProject } from '../features/projects/api'
+import ProjectSwitcher from './ProjectSwitcher'
+import type { Project } from '../features/projects/types'
 
 /** 项目上下文页面前缀（命中这些路径时 AppLayout 渲染本页签条） */
 const PROJECT_PAGE_PREFIXES = [
@@ -29,7 +32,14 @@ export function isProjectPage(pathname: string): boolean {
   )
 }
 
-export default function ProjectSubNav() {
+interface Props {
+  /** 引导数据（AppLayout 常驻 useProjectBootstrap 提供），透传给右端的项目切换器 */
+  projects: Project[]
+  loadError: boolean
+  onRetry: () => void
+}
+
+export default function ProjectSubNav({ projects, loadError, onRetry }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
   // CAP-41：当前项目为 WORKLOG（工作日志空间）时裁剪代码类页签（需求/构建/部署/测试/发版）
@@ -75,8 +85,11 @@ export default function ProjectSubNav() {
         background: '#fff',
         borderRadius: 8,
         marginBottom: 16,
-        padding: '0 8px',
+        padding: '0 12px 0 8px',
         flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
       }}
     >
       <Menu
@@ -84,8 +97,9 @@ export default function ProjectSubNav() {
         selectedKeys={[menuSelectedKey(location.pathname)]}
         onClick={({ key }) => navigate(key)}
         items={items}
-        style={{ background: 'transparent', borderBottom: 'none' }}
+        style={{ background: 'transparent', borderBottom: 'none', flex: 1, minWidth: 0 }}
       />
+      <ProjectSwitcher projects={projects} loadError={loadError} onRetry={onRetry} />
     </div>
   )
 }

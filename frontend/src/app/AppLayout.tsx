@@ -1,5 +1,6 @@
-// 个人工作台外壳：顶部导航（品牌 + 项目切换（仅项目上下文页）+ 一级导航 + 通知/用户）+ 居中内容区。
-// 项目上下文页面由 ProjectSubNav 在内容区顶部提供二级页签；后台管理走 AdminLayout（/admin）。
+// 个人工作台外壳：顶部导航（品牌 + 一级导航 + 通知/用户，布局恒定）+ 居中内容区。
+// 项目切换器放在 ProjectSubNav 二级页签条右端（仅项目上下文页），不进顶部导航——
+// 否则切 tab 时一级导航位置随切换器显隐左右移动。
 import { Button, Layout, Menu, Tooltip } from 'antd'
 import {
   CommentOutlined,
@@ -10,7 +11,6 @@ import {
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useSyncExternalStore } from 'react'
-import ProjectSwitcher from './ProjectSwitcher'
 import ProjectSubNav, { isProjectPage } from './ProjectSubNav'
 import { useProjectBootstrap } from './useProjectBootstrap'
 import { topNavKey } from './menuSelectedKey'
@@ -64,13 +64,6 @@ export default function AppLayout() {
           <img src="/logo.svg" alt="Dev-Mind" width={24} height={24} />
           Dev-Mind
         </div>
-        {projectPage && (
-          <ProjectSwitcher
-            projects={projectBootstrap.projects}
-            loadError={projectBootstrap.loadError}
-            onRetry={projectBootstrap.reload}
-          />
-        )}
         <Menu
           mode="horizontal"
           selectedKeys={[topNavKey(location.pathname)]}
@@ -117,7 +110,13 @@ export default function AppLayout() {
             flexDirection: 'column',
           }}
         >
-          {projectPage && <ProjectSubNav />}
+          {projectPage && (
+            <ProjectSubNav
+              projects={projectBootstrap.projects}
+              loadError={projectBootstrap.loadError}
+              onRetry={projectBootstrap.reload}
+            />
+          )}
           <Outlet />
         </div>
       </Content>

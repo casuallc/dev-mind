@@ -1,5 +1,5 @@
-// 项目切换器：像切换租户一样切换当前项目。只在项目上下文页渲染（AppLayout 按 isProjectPage 条件挂载）——
-// 工作台/问答/工作日志等个人域页面没有项目切换语义。
+// 项目切换器：像切换租户一样切换当前项目。渲染于 ProjectSubNav 二级页签条右端（仅项目上下文页）——
+// 工作台/问答/工作日志等个人域页面没有项目切换语义，且不放顶部导航以保证一级 tab 位置恒定。
 // 纯展示组件：列表加载与 currentId 兜底在 useProjectBootstrap（AppLayout 常驻）。
 // WORKLOG 空间不进切换选项（工作日志从顶部导航进）；当前正处于工作日志空间时占位提示、可切回普通项目。
 import { Button, Select, Tag, Typography } from 'antd'
