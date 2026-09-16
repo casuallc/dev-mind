@@ -36,7 +36,6 @@ import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
 import HomePage from '../features/home/pages/HomePage'
 import WorklogPage from '../features/worklog/pages/WorklogPage'
-import WorklogSessionsPage from '../features/worklog/pages/WorklogSessionsPage'
 import ChatsBoard from '../features/chat/pages/ChatsBoard'
 import AttachmentsPage from '../features/attachments/pages/AttachmentsPage'
 import ReposAdminPage from '../features/repos/pages/ReposAdminPage'
@@ -81,10 +80,8 @@ export default function App() {
           {/* CAP-35 个人设置：第三方账号（旧 Git 凭证路径兼容跳转） */}
           <Route path="/me/accounts" element={<PlatformAccountsPage />} />
           <Route path="/me/git-credentials" element={<Navigate to="/me/accounts" replace />} />
-          {/* CAP-28 个人工作日志（个人级，不进项目上下文） */}
+          {/* CAP-28 个人工作日志（个人级，不进项目上下文；会话/知识为页内视图） */}
           <Route path="/worklog" element={<WorklogPage />} />
-          {/* CAP-41 日志空间会话：锁定 WORKLOG 项目复用会话工作台，停留在工作日志个人域 */}
-          <Route path="/worklog/sessions" element={<WorklogSessionsPage />} />
           {/* CAP-30 通用问答（个人级，不进项目上下文） */}
           <Route path="/chats" element={<ChatsBoard />} />
           {/* 项目上下文页面（当前项目为主线，无项目时由 Gate 统一空态） */}

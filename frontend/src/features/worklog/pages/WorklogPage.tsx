@@ -6,7 +6,6 @@ import {
   Input,
   InputNumber,
   Modal,
-  Segmented,
   Space,
   Switch,
   Table,
@@ -18,7 +17,6 @@ import {
 import { PlusOutlined, ReloadOutlined, SettingOutlined, GithubOutlined, CodeOutlined, RobotOutlined, CloudUploadOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   createDaily,
   createEntry,
@@ -57,20 +55,23 @@ import RepoSubscriptionModal from '../components/RepoSubscriptionModal'
 import ReportEditor from '../components/ReportEditor'
 import WeekDayStrip from '../components/WeekDayStrip'
 import RecentWeekStrip from '../components/RecentWeekStrip'
+import WorklogViewSwitch, { type WorklogView } from '../components/WorklogViewSwitch'
+import SessionsBoard from '../../sessions/pages/SessionsBoard'
+import ProjectContextPage from '../../scenarios/pages/ProjectContextPage'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
 
-type View = 'entries' | 'daily' | 'weekly'
+type View = WorklogView
 
 const mondayOf = (d: Dayjs) => d.startOf('week').add(1, 'day') // dayjs 周日开头，+1 = 周一
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /**
  * CAP-28 个人工作日志与工时：条目（按周浏览+标题搜索+git 导入）/ AI 日报（按周浏览）/ AI 周报。
+ * CAP-41：日志空间的「会话」「知识」收为页内视图（锁定 WORKLOG 项目），不再跳项目上下文。
  * 个人级页面，不进项目上下文（路由不进 ProjectContextGate）。
  */
 export default function WorklogPage() {
-  const navigate = useNavigate()
   const [view, setView] = useState<View>('entries')
 
   // ---- CAP-41 工作日志空间：WORKLOG 项目 + runner 持久工作区状态条 ----
@@ -116,10 +117,10 @@ export default function WorklogPage() {
     }
   }
 
-  /** 进入日志空间会话（与 claude 对话记日志）：停留工作日志个人域，不切当前项目 */
+  /** 打开日志空间会话（与 claude 对话记日志）：切到页内「会话」视图 */
   const openSession = () => {
     if (!workspace?.projectId) return
-    navigate('/worklog/sessions')
+    setView('sessions')
   }
   // 周报选中周（周条点击切换）+ 周条窗口回退周数（0=最右为本周，滑动/箭头翻页）
   const [date, setDate] = useState<Dayjs>(dayjs())
@@ -399,7 +400,7 @@ export default function WorklogPage() {
     }
   }
 
-  const extraByView: Record<View, React.ReactNode> = {
+  const extraByView: Partial<Record<View, React.ReactNode>> = {
     entries: (
       <>
         <Button
@@ -460,24 +461,39 @@ export default function WorklogPage() {
     ),
   }
 
+  // ---- 会话/知识视图：整页渲染内嵌工作台（锁定 WORKLOG 项目），title 放共享视图切换器保证可切回 ----
+  const viewSwitch = <WorklogViewSwitch value={view} onChange={setView} />
+  const readyProjectId = workspace?.exists && workspace.projectId ? workspace.projectId : null
+  if (view === 'sessions' || view === 'context') {
+    if (!readyProjectId) {
+      return (
+        <Card style={pageCardStyle} styles={{ body: pageCardBodyScrollStyle }} title={viewSwitch}>
+          <Alert
+            type="info"
+            showIcon
+            message="工作日志空间尚未初始化"
+            description="会话与知识视图依赖日志空间（runner 节点上按用户隔离的持久 git 工作区），初始化后可用。"
+            action={
+              <Button type="primary" loading={ensuring} onClick={onEnsure}>
+                初始化空间
+              </Button>
+            }
+          />
+        </Card>
+      )
+    }
+    return view === 'sessions' ? (
+      <SessionsBoard projectId={readyProjectId} title={viewSwitch} />
+    ) : (
+      <ProjectContextPage projectId={readyProjectId} title={viewSwitch} />
+    )
+  }
+
   return (
     <Card
       style={pageCardStyle}
       styles={{ body: pageCardBodyScrollStyle }}
-      title={
-        <Space size={12}>
-          <span>工作日志</span>
-          <Segmented
-            value={view}
-            onChange={(v) => setView(v as View)}
-            options={[
-              { value: 'entries', label: '工作条目' },
-              { value: 'daily', label: '日报' },
-              { value: 'weekly', label: '周报' },
-            ]}
-          />
-        </Space>
-      }
+      title={viewSwitch}
       extra={
         <Space>
           {extraByView[view]}
@@ -496,7 +512,7 @@ export default function WorklogPage() {
           showIcon
           style={{ marginBottom: 12 }}
           message="工作日志空间尚未初始化"
-          description="在 runner 节点上按用户隔离的持久 git 工作区（工作日志/日报/周报由 AI 会话直接写入）。初始化后可通过「打开会话」与 claude 对话记日志。"
+          description="在 runner 节点上按用户隔离的持久 git 工作区（工作日志/日报/周报由 AI 会话直接写入）。初始化后可在「会话」页签与 claude 对话记日志。"
           action={
             <Button type="primary" loading={ensuring} onClick={onEnsure}>
               初始化空间

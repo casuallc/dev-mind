@@ -1,7 +1,7 @@
 // 项目「知识」页（CAP-33 FR-06）：当前项目实际会注入/可用的上下文资产只读清单
 // （知识条目 / 文档 / Skills 三视图，GET /api/projects/{id}/context-assets 聚合）。
 // 多视图切换走 Card title 里的 Segmented（布局约定：禁 Card 内套 Tabs）；维护请去 /admin 对应管理页。
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Button, Card, Segmented, Space, Table, Tag, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { listContextAssets } from '../api'
@@ -44,8 +44,16 @@ function ExtraTags({ extra }: { extra?: Record<string, unknown> }) {
   return show.length > 0 ? <Space size={4} wrap>{show}</Space> : null
 }
 
-export default function ProjectContextPage() {
-  const { projectId, project } = useCurrentProject()
+export default function ProjectContextPage({
+  projectId: fixedProjectId,
+  title,
+}: {
+  /** 锁定项目（如工作日志页「知识」视图锁定 WORKLOG 空间）；不传则跟随当前项目切换器 */
+  projectId?: string
+  /** 自定义 Card 标题（内嵌场景传入外层视图切换器）；不传默认「知识」 */
+  title?: ReactNode
+} = {}) {
+  const { projectId, project } = useCurrentProject(fixedProjectId)
   const [groups, setGroups] = useState<AssetGroup[]>([])
   const [loading, setLoading] = useState(false)
   const [view, setView] = useState<string>('knowledge')
@@ -106,7 +114,7 @@ export default function ProjectContextPage() {
       styles={{ body: pageCardBodyScrollStyle }}
       title={
         <Space size={12}>
-          <span>知识</span>
+          {title ?? <span>知识</span>}
           <Segmented
             value={activeKind}
             onChange={(v) => setView(v as string)}

@@ -1,7 +1,7 @@
 // 项目切换器：像切换租户一样切换当前项目。渲染于 ProjectSubNav 二级页签条右端（仅项目上下文页）——
 // 工作台/问答/工作日志等个人域页面没有项目切换语义，且不放顶部导航以保证一级 tab 位置恒定。
 // 纯展示组件：列表加载与 currentId 兜底在 useProjectBootstrap（AppLayout 常驻）。
-// WORKLOG 空间不进切换选项（工作日志从顶部导航进）；当前正处于工作日志空间时占位提示、可切回普通项目。
+// WORKLOG 空间不进切换选项（工作日志从顶部导航进，会话/知识收在 /worklog 页内视图）。
 import { Button, Select, Tag, Typography } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { setCurrentProject } from './currentProjectStore'
@@ -20,8 +20,7 @@ export default function ProjectSwitcher({ projects, loadError, onRetry }: Props)
 
   // WORKLOG 空间不参与切换（每用户一个、内容与人绑定，切换语义空转）
   const switchable = projects.filter((p) => p.kind !== 'WORKLOG')
-  const current = projects.find((p) => p.id === currentId)
-  const worklogCurrent = current?.kind === 'WORKLOG'
+  const current = switchable.find((p) => p.id === currentId)
 
   const switchTo = (id: string) => {
     setCurrentProject(id)
@@ -46,16 +45,10 @@ export default function ProjectSwitcher({ projects, loadError, onRetry }: Props)
         showSearch
         optionFilterProp="label"
         style={{ width: '100%' }}
-        placeholder={
-          worklogCurrent
-            ? `工作日志空间：${current.name}`
-            : switchable.length
-              ? '选择项目'
-              : '暂无项目'
-        }
+        placeholder={switchable.length ? '选择项目' : '暂无项目'}
         disabled={!switchable.length}
-        // 当前在工作日志空间时不回显值（该 id 不在选项里），占位提示 + 下拉即可切回普通项目
-        value={worklogCurrent ? undefined : (currentId ?? undefined)}
+        // 当前 id 不在可选项（历史残留的 WORKLOG 空间态）时不回显，下拉选普通项目即恢复
+        value={current ? currentId : undefined}
         onChange={switchTo}
         options={switchable.map((p) => ({
           value: p.id,

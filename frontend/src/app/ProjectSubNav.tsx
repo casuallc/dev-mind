@@ -1,12 +1,11 @@
 // 项目二级页签条：项目上下文页面（概览/会话/需求/知识/构建/部署/测试/发版）的顶部导航，
-// 由 AppLayout 在命中项目页路由时渲染于内容区上方。WORKLOG 项目裁剪代码类页签。
+// 由 AppLayout 在命中项目页路由时渲染于内容区上方。
 // 右端承载项目切换器（从顶部导航移入——切换器显隐不再挤压一级导航位置）。
 import { Menu } from 'antd'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useSyncExternalStore } from 'react'
 import { menuSelectedKey } from './menuSelectedKey'
 import { getCurrentProjectId, subscribeCurrentProject } from './currentProjectStore'
-import { getProject } from '../features/projects/api'
 import ProjectSwitcher from './ProjectSwitcher'
 import type { Project } from '../features/projects/types'
 
@@ -42,41 +41,19 @@ interface Props {
 export default function ProjectSubNav({ projects, loadError, onRetry }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
-  // CAP-41：当前项目为 WORKLOG（工作日志空间）时裁剪代码类页签（需求/构建/部署/测试/发版）
   const currentProjectId = useSyncExternalStore(subscribeCurrentProject, getCurrentProjectId)
-  const [currentKind, setCurrentKind] = useState<string | null>(null)
-  useEffect(() => {
-    setCurrentKind(null)
-    if (!currentProjectId) return
-    let alive = true
-    getProject(currentProjectId)
-      .then((p) => {
-        if (alive) setCurrentKind(p.kind ?? 'NORMAL')
-      })
-      .catch(() => {
-        if (alive) setCurrentKind(null)
-      })
-    return () => {
-      alive = false
-    }
-  }, [currentProjectId])
-  const worklogProject = currentKind === 'WORKLOG'
 
   if (!currentProjectId) return null
 
   const items = [
     { key: '/overview', label: '概览' },
     { key: '/sessions', label: '会话' },
-    ...(!worklogProject ? [{ key: '/requirements', label: '需求' }] : []),
+    { key: '/requirements', label: '需求' },
     { key: '/context', label: '知识' },
-    ...(!worklogProject
-      ? [
-          { key: '/builds', label: '构建' },
-          { key: '/deployments', label: '部署' },
-          { key: '/tests', label: '测试' },
-          { key: '/releases', label: '发版' },
-        ]
-      : []),
+    { key: '/builds', label: '构建' },
+    { key: '/deployments', label: '部署' },
+    { key: '/tests', label: '测试' },
+    { key: '/releases', label: '发版' },
   ]
 
   return (

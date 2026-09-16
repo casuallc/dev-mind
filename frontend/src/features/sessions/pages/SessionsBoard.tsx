@@ -1,6 +1,6 @@
 // 会话工作台：默认对话视图（左侧会话列表 + 右侧对话交互，类聊天应用），可切换表格列表视图。
 // CAP-39：会话详情页已裁撤——产出推送/更多操作（上下文/沉淀/清理 worktree）均在操作条，深链 /sessions?sid=<id>。
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Badge, Button, Card, Input, Modal, Segmented, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
@@ -42,11 +42,12 @@ function sortForBoard(list: SessionSummary[]): SessionSummary[] {
 
 export default function SessionsBoard({
   projectId: fixedProjectId,
-  title = '会话工作台',
+  title,
 }: {
-  /** 锁定项目（如 /worklog/sessions 锁定 WORKLOG 空间）；不传则跟随当前项目切换器 */
+  /** 锁定项目（如工作日志页「会话」视图锁定 WORKLOG 空间）；不传则跟随当前项目切换器 */
   projectId?: string
-  title?: string
+  /** 自定义 Card 标题（内嵌场景传入外层视图切换器）；不传默认「会话工作台 + 对话/列表」 */
+  title?: ReactNode
 }) {
   // CAP-39：深链 /sessions?sid=<id>（通知/需求关联记录等原详情页入口统一落这里）
   const [searchParams, setSearchParams] = useSearchParams()
@@ -244,7 +245,7 @@ export default function SessionsBoard({
     <Card
       title={
         <Space size={12}>
-          <span>{title}</span>
+          {title ?? <span>会话工作台</span>}
           <Segmented
             value={view}
             onChange={setView}
