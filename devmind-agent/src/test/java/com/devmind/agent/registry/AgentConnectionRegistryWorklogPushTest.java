@@ -30,10 +30,11 @@ class AgentConnectionRegistryWorklogPushTest {
     private AgentConnectionRegistry registry;
     private WebSocketSession ws;
     private AgentNodeEntity node;
+    private AgentNodeService nodeService;
 
     @BeforeEach
     void setUp() {
-        AgentNodeService nodeService = mock(AgentNodeService.class);
+        nodeService = mock(AgentNodeService.class);
         @SuppressWarnings("unchecked")
         ObjectProvider<com.devmind.common.agent.AgentEventListener> listenerProvider =
                 mock(ObjectProvider.class);
@@ -73,6 +74,48 @@ class AgentConnectionRegistryWorklogPushTest {
         registry.onWorklogPushAck("7", requestId, true, "分支 main：Everything up-to-date", null);
         caller.join(10_000);
         assertFalse(caller.isAlive(), "ack 后 pushWorklog 应立即返回");
+        // CAP-43：节点未配代理（require 未 stub → null）→ 帧不携带 proxy 字段
+        assertFalse(payload.contains("\"proxy\""), payload);
+    }
+
+    /** CAP-43：配了代理的节点（协议 v8+）帧携带 proxy 块。 */
+    private AgentNodeEntity proxiedNode(String scopes) {
+        AgentNodeEntity e = new AgentNodeEntity();
+        e.setId(7L);
+        e.setProxyUrl("http://127.0.0.1:8443");
+        e.setProxyScopes(scopes);
+        return e;
+    }
+
+    @Test
+    void serializesProxyWhenNodeConfigured() throws Exception {
+        helloWithProtocol(8);
+        when(nodeService.require(7L)).thenReturn(proxiedNode("git,claude"));
+        Thread caller = new Thread(() ->
+                registry.pushWorklog("7", "alice", "https://git.example.com/u/worklog.git", "main", null));
+        caller.start();
+        Thread.sleep(100);
+        ArgumentCaptor<TextMessage> captor = ArgumentCaptor.forClass(TextMessage.class);
+        verify(ws, atLeastOnce()).sendMessage(captor.capture());
+        String payload = captor.getValue().getPayload();
+        assertTrue(payload.contains("\"proxy\":{"), payload);
+        assertTrue(payload.contains("\"url\":\"http://127.0.0.1:8443\""), payload);
+        assertTrue(payload.contains("\"scopes\":[\"git\",\"claude\"]"), payload);
+        String requestId = payload.replaceAll(".*\"requestId\":\"([^\"]+)\".*", "$1");
+        registry.onWorklogPushAck("7", requestId, true, "ok", null);
+        caller.join(10_000);
+        assertFalse(caller.isAlive());
+    }
+
+    @Test
+    void proxyGateRejectsOldRunner() {
+        // 节点配了代理但 runner 协议 <8（不认识 proxy 字段会静默直连失败）→ 明示升级
+        helloWithProtocol(7);
+        when(nodeService.require(7L)).thenReturn(proxiedNode("git"));
+        DevMindException e = assertThrows(DevMindException.class,
+                () -> registry.pushWorklog("7", "alice", "https://x/y.git", "main", null));
+        assertTrue(e.getMessage().contains("代理"), e.getMessage());
+        assertTrue(e.getMessage().contains("升级"), e.getMessage());
     }
 
     @Test

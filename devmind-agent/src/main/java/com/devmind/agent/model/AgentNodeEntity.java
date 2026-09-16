@@ -39,6 +39,14 @@ public class AgentNodeEntity {
     @Column(length = 512)
     private String labels;
 
+    /** CAP-43：节点外网代理地址（http(s)://host:port，无 userinfo；空 = 未配置） */
+    @Column(name = "proxy_url", length = 512)
+    private String proxyUrl;
+
+    /** CAP-43：代理生效范围 CSV（子集 git/claude/exec；配了代理但空 = 默认 git） */
+    @Column(name = "proxy_scopes", length = 64)
+    private String proxyScopes;
+
     /** 可用 agent 种类（逗号分隔，如 "claude"） */
     @Column(length = 256)
     private String capabilities;
@@ -85,6 +93,10 @@ public class AgentNodeEntity {
     public void setOs(String os) { this.os = os; }
     public String getLabels() { return labels; }
     public void setLabels(String labels) { this.labels = labels; }
+    public String getProxyUrl() { return proxyUrl; }
+    public void setProxyUrl(String proxyUrl) { this.proxyUrl = proxyUrl; }
+    public String getProxyScopes() { return proxyScopes; }
+    public void setProxyScopes(String proxyScopes) { this.proxyScopes = proxyScopes; }
     public String getCapabilities() { return capabilities; }
     public void setCapabilities(String capabilities) { this.capabilities = capabilities; }
     public String getRunnerVersion() { return runnerVersion; }

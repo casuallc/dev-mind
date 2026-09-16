@@ -16,12 +16,14 @@ package com.devmind.common.agent;
  * workspaceOwner——repo 会话工作区固定到 &lt;projectId&gt;/&lt;owner&gt;/{main,work}，
  * 老 runner 会忽略并落入 sessions/&lt;sid&gt; 旧布局，故属「必须认识」需门控；
  * 以及 workspace_finalize/workspace_finalize_ack 帧——手动收口：合并会话分支到基线
- * + push + 删 worktree）。</p>
+ * + push + 删 worktree）。v8 = CAP-43 节点外网代理（launch/worklog_push/exec/
+ * workspace_finalize 帧携带 proxy{url,scopes}——老 runner 会忽略字段导致该走代理的
+ * 网络操作直连失败，故属「必须认识」需门控）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 7;
+    public static final int CURRENT = 8;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -37,6 +39,9 @@ public final class AgentProtocol {
 
     /** CAP-42 每用户固定工作区（launch workspaceOwner）与 workspace_finalize 帧所需最低版本 */
     public static final int PER_USER_WORKSPACE = 7;
+
+    /** CAP-43 节点外网代理（下行帧携带 proxy 对象）所需最低版本 */
+    public static final int NODE_PROXY = 8;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;

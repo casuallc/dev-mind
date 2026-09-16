@@ -86,4 +86,50 @@ class AgentNodeServiceTest {
     void defaultNodeIdNullWhenEmpty() {
         assertNull(service.defaultNodeId());
     }
+
+    // ---- CAP-43 节点外网代理 ----
+
+    @Test
+    void proxyUrlValidatedAndScopesNormalized() {
+        AgentNodeEntity a = addNode(1L, AgentNodeService.STATUS_ONLINE);
+        // 合法 URL + 空 scope → 默认 git
+        service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest(
+                null, "http://127.0.0.1:8443", null));
+        assertEquals("http://127.0.0.1:8443", a.getProxyUrl());
+        assertEquals("git", a.getProxyScopes());
+        // 白名单子集保序去重
+        service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest(
+                null, null, "claude,git,claude"));
+        assertEquals("claude,git", a.getProxyScopes());
+        // 清空 URL → 连 scope 一起清
+        service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest(null, "", null));
+        assertNull(a.getProxyUrl());
+        assertNull(a.getProxyScopes());
+    }
+
+    @Test
+    void proxyUrlRejectsBadSchemeUserinfoAndEmptyHost() {
+        addNode(1L, AgentNodeService.STATUS_ONLINE);
+        assertThrows(DevMindException.class, () -> service.update(1L,
+                new com.devmind.agent.dto.UpdateAgentNodeRequest(null, "socks5://127.0.0.1:1080", null)));
+        DevMindException userinfo = assertThrows(DevMindException.class, () -> service.update(1L,
+                new com.devmind.agent.dto.UpdateAgentNodeRequest(null, "http://u:p@127.0.0.1:8443", null)));
+        assertTrue(userinfo.getMessage().contains("userinfo"), userinfo.getMessage());
+        assertThrows(DevMindException.class, () -> service.update(1L,
+                new com.devmind.agent.dto.UpdateAgentNodeRequest(null, "http://", null)));
+        // 未知 scope
+        assertThrows(DevMindException.class, () -> service.update(1L,
+                new com.devmind.agent.dto.UpdateAgentNodeRequest(null, "http://127.0.0.1:8443", "git,ssh")));
+    }
+
+    @Test
+    void proxyFieldsUntouchedWhenAbsent() {
+        // labels-only 更新（proxyUrl=null）不动已有代理配置
+        AgentNodeEntity a = addNode(1L, AgentNodeService.STATUS_ONLINE);
+        service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest(
+                null, "http://127.0.0.1:8443", "git"));
+        service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest("windows", null, null));
+        assertEquals("windows", a.getLabels());
+        assertEquals("http://127.0.0.1:8443", a.getProxyUrl(), "labels 编辑不应清掉代理配置");
+    }
 }

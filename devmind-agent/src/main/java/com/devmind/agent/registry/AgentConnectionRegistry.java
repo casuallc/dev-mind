@@ -287,6 +287,29 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         return nodeService.nodeMatchesLabels(nodeId, requiredLabels);
     }
 
+    /**
+     * CAP-43：节点配了外网代理时随帧携带 {@code proxy:{url,scopes}}（runner 进程级 holder 生效）。
+     * 协议 v8 门控：runner 过旧抛 CONFLICT 明示升级——不静默发送（老 runner 忽略该字段会让
+     * 该走代理的网络操作直连失败，又是排查黑洞）。节点未配代理 = 帧不携带，老 runner 零感知。
+     */
+    private void putProxy(Map<String, Object> frame, String nodeId) {
+        AgentNodeEntity node = nodeService.require(Long.parseLong(nodeId));
+        if (node == null || node.getProxyUrl() == null || node.getProxyUrl().isBlank()) {
+            return;
+        }
+        if (!supports(nodeId, AgentProtocol.NODE_PROXY)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 已配置外网代理，但 runner 协议版本过低（节点代理需 v"
+                            + AgentProtocol.NODE_PROXY + "+），请到节点页升级 runner（或先清空代理配置）");
+        }
+        Map<String, Object> proxy = new LinkedHashMap<>();
+        proxy.put("url", node.getProxyUrl());
+        String scopes = node.getProxyScopes() == null || node.getProxyScopes().isBlank()
+                ? "git" : node.getProxyScopes();
+        proxy.put("scopes", List.of(scopes.split(",")));
+        frame.put("proxy", proxy);
+    }
+
     /** FR-07：DB 判 ONLINE 且标签匹配的候选中，挑当前确有活跃连接的第一个。 */
     @Override
     public String pickNodeByLabels(List<String> requiredLabels) {
@@ -364,6 +387,7 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         if (cmd.workspaceOwner() != null && !cmd.workspaceOwner().isBlank()) {
             frame.put("workspaceOwner", cmd.workspaceOwner());
         }
+        putProxy(frame, nodeId);
         try {
             send(ws, frame);
             LaunchAck ack = future.get(props.getLaunchAckTimeoutMs(), TimeUnit.MILLISECONDS);
@@ -466,6 +490,7 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             repo.put("token", cmd.repo().token());
             frame.put("repo", repo);
         }
+        putProxy(frame, nodeId);
         try {
             send(ws, frame);
             return done.get(cmd.timeoutSec() + 120, TimeUnit.SECONDS);
@@ -537,6 +562,7 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         if (token != null && !token.isBlank()) {
             frame.put("token", token);
         }
+        putProxy(frame, nodeId);
         try {
             send(ws, frame);
             return done.get(330, TimeUnit.SECONDS);
@@ -588,6 +614,7 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             repos.add(r);
         }
         frame.put("repos", repos);
+        putProxy(frame, nodeId);
         long timeoutSec = 60L + 310L * Math.max(1, specs.size());
         try {
             send(ws, frame);

@@ -30,10 +30,11 @@ class AgentConnectionRegistryLaunchTest {
 
     private AgentConnectionRegistry registry;
     private WebSocketSession ws;
+    private AgentNodeService nodeService;
 
     @BeforeEach
     void setUp() {
-        AgentNodeService nodeService = mock(AgentNodeService.class);
+        nodeService = mock(AgentNodeService.class);
         @SuppressWarnings("unchecked")
         ObjectProvider<com.devmind.common.agent.AgentEventListener> listenerProvider =
                 mock(ObjectProvider.class);
@@ -141,5 +142,25 @@ class AgentConnectionRegistryLaunchTest {
                 "s2", null, "", null, "acceptEdits", Map.of(),
                 null, "chat", null, null, null, null, null));
         assertFalse(chatPayload.contains("workspaceOwner"), chatPayload);
+        // CAP-43：节点未配代理（require 未 stub → null）→ launch 帧不携带 proxy 字段
+        assertFalse(payload.contains("\"proxy\""), payload);
+    }
+
+    @Test
+    void serializesProxyWhenNodeConfigured() throws Exception {
+        // CAP-43 红线回归：节点配了代理（协议 v8+）launch 帧必须带 proxy 块
+        // （缺字段 runner 该走代理的 clone/fetch 会直连失败）
+        AgentNodeEntity proxied = new AgentNodeEntity();
+        proxied.setId(7L);
+        proxied.setProxyUrl("http://127.0.0.1:8443");
+        proxied.setProxyScopes("git");
+        when(nodeService.require(7L)).thenReturn(proxied);
+        registry.onHello(proxied, new com.devmind.agent.dto.AgentHelloMeta(
+                "os", "claude", "1.0", null, 8, null, null), List.of());
+        String payload = launchAndCapture(new AgentLaunchCommand(
+                "s1", "proj1", "task", null, "acceptEdits", Map.of(),
+                null, "session", null, null));
+        assertTrue(payload.contains("\"proxy\":{\"url\":\"http://127.0.0.1:8443\",\"scopes\":[\"git\"]}"),
+                payload);
     }
 }

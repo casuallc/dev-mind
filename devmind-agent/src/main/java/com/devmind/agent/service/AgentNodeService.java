@@ -178,6 +178,73 @@ public class AgentNodeService {
         return AgentNodeView.from(repo.save(e));
     }
 
+    /** CAP-43 代理 scope 白名单（CSV 存储）。 */
+    public static final List<String> PROXY_SCOPES = List.of("git", "claude", "exec");
+
+    /**
+     * CAP-43：编辑节点（labels + 外网代理）。proxyUrl 仅 http(s)://host:port、禁 userinfo
+     * （凭证不落库）；空串 = 清空关闭。proxyScopes 为空且配了代理 = 默认 git。
+     * 注意：req 各字段均为全量语义（非 null 即覆盖），前端提交时带上全部当前值。
+     */
+    public AgentNodeView update(Long id, com.devmind.agent.dto.UpdateAgentNodeRequest req) {
+        AgentNodeEntity e = require(id);
+        if (req.labels() != null) {
+            String v = req.labels().strip();
+            e.setLabels(v.isEmpty() ? null : v);
+        }
+        if (req.proxyUrl() != null) {
+            String url = req.proxyUrl().strip();
+            if (url.isEmpty()) {
+                e.setProxyUrl(null);
+                e.setProxyScopes(null);
+            } else {
+                e.setProxyUrl(validateProxyUrl(url));
+                e.setProxyScopes(normalizeProxyScopes(req.proxyScopes()));
+            }
+        } else if (req.proxyScopes() != null && e.getProxyUrl() != null) {
+            e.setProxyScopes(normalizeProxyScopes(req.proxyScopes()));
+        }
+        return AgentNodeView.from(repo.save(e));
+    }
+
+    /** 代理 URL 校验：仅 http/https、host 非空、禁 userinfo（密钥不入库）。合法返回原串。 */
+    private static String validateProxyUrl(String url) {
+        java.net.URI uri;
+        try {
+            uri = new java.net.URI(url);
+        } catch (java.net.URISyntaxException ex) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "代理地址无法解析: " + url);
+        }
+        String scheme = uri.getScheme();
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "代理地址仅支持 http/https: " + url);
+        }
+        if (uri.getHost() == null || uri.getHost().isBlank()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "代理地址缺少主机: " + url);
+        }
+        if (uri.getUserInfo() != null) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "代理地址不支持内嵌账号密码（userinfo 不落库）；请使用无认证代理");
+        }
+        return url;
+    }
+
+    /** scope 归一化：白名单过滤 + 保序 CSV；空（null/空白/过滤后空）= 默认 git。 */
+    private static String normalizeProxyScopes(String scopes) {
+        if (scopes == null || scopes.isBlank()) {
+            return "git";
+        }
+        List<String> valid = List.of(scopes.split(",")).stream()
+                .map(String::strip).filter(s -> !s.isEmpty()).distinct().toList();
+        for (String s : valid) {
+            if (!PROXY_SCOPES.contains(s)) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "未知代理生效范围: " + s + "（可选 " + String.join("/", PROXY_SCOPES) + "）");
+            }
+        }
+        return valid.isEmpty() ? "git" : String.join(",", valid);
+    }
+
     /** FR-07 标签调度：节点标签是否覆盖全部 required（required 空 = 恒 true；节点不存在 = false）。 */
     public boolean nodeMatchesLabels(String nodeId, List<String> requiredLabels) {
         if (requiredLabels == null || requiredLabels.isEmpty()) {

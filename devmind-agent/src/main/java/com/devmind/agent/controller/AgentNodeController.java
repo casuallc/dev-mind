@@ -105,10 +105,10 @@ public class AgentNodeController {
         return service.setDisabled(id, false);
     }
 
-    /** FR-07：编辑节点标签（CSV）。runner 配置非空 labels 时会被其 hello 覆盖。 */
+    /** FR-07 编辑节点标签（runner 配置非空 labels 时会被其 hello 覆盖）+ CAP-43 外网代理（proxyUrl/proxyScopes）。 */
     @org.springframework.web.bind.annotation.PutMapping("/{id}")
     public AgentNodeView update(@PathVariable Long id, @RequestBody com.devmind.agent.dto.UpdateAgentNodeRequest req) {
-        return service.updateLabels(id, req.labels());
+        return service.update(id, req);
     }
 
     /** 设为平台默认执行节点（FR-03）：会话/项目未指定节点时的最终远程兜底，全平台至多一个。 */
