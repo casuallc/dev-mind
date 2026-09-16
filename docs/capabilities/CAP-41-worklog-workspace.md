@@ -79,6 +79,10 @@ runner：{user.home}/worklog/<console-username>/   ← 持久目录，本地 git
   为镜像；`session_id` 列记录来源会话）→ 发 `worklog.daily.generated` /
   `worklog.weekly.generated` 事件 → 站内通知（沿用 CAP-06）。回传缺失（claude 没
   写输出目录）→ 生成判失败发降级通知，不落空镜像。
+  手工对话（无场景码的空间会话）同样回传成稿：镜像消费放宽到 WORKLOG 项目
+  全部会话（手工会话静默镜像，成功/缺失都不发通知）；另提供手动同步端点
+  `POST /api/worklog/reports/sync {sessionId}`（限本人空间会话，404/403 校验），
+  返回 `{mirrored, skipped}`——已确认（CONFIRMED）报告进 skipped 不覆盖。
 - **FR-07 前端重构**：/worklog 页保留 Segmented[条目|日报|周报]（报告渲染 DB 镜像
   不变，确认/编辑沿用），新增：
   - 「空间」信息条：WORKLOG 项目状态、亲和节点在线态、runner 目录路径（会话事件
@@ -194,3 +198,6 @@ WORKLOG 项目是**会话调度的载体，不是给人浏览的项目**：每�
   对话/列表/知识视图整页渲染 `SessionsBoard`/`ProjectContextPage`
   并锁定 WORKLOG 项目（两组件支持固定 `projectId`，`useCurrentProject` 加锁定参数）；
   不再 setCurrentProject 跳项目上下文，项目页签条/切换器不做任何 WORKLOG 特判。
+- 「对话」视图操作条按空间语义裁剪（SessionsBoard `worklog` 模式）：隐藏
+  Diff/推送产出/更多（无 worktree/需求文档语义），改出「推送工作日志」——
+  先 `collectSessionOutputs` 让 runner 即时回传产出，再调 `reports/sync` 落镜像。
