@@ -865,8 +865,7 @@ public class RunnerWorkspace {
 
     /** 跑 git 进程，输出合并捕获并脱敏（token 明文 + URL 编码形态 → ***）后才允许外溢 */
     private Result run(Path cwd, long timeoutSec, String token, String... args) {
-        List<String> cmd = new ArrayList<>(List.of("git", "-C", cwd.toString()));
-        cmd.addAll(List.of(args));
+        List<String> cmd = buildCmd(cwd, args);
         try {
             Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
             // 读输出与等待分离，防缓冲满死锁
@@ -888,6 +887,25 @@ public class RunnerWorkspace {
         } catch (IOException e) {
             return new Result(-1, "git 命令执行失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 组 git 命令行。CAP-43：NodeProxy holder 命中 git scope → {@code git} 后插
+     * {@code -c http.proxy=<url>}（全局选项必须在 -C 与子命令之前；进程级注入不落
+     * repo/global 配置，单一事实源在服务端节点配置）。package-private 供单测断言。
+     */
+    static List<String> buildCmd(Path cwd, String... args) {
+        List<String> cmd = new ArrayList<>();
+        cmd.add("git");
+        String proxy = NodeProxy.urlFor("git");
+        if (proxy != null) {
+            cmd.add("-c");
+            cmd.add("http.proxy=" + proxy);
+        }
+        cmd.add("-C");
+        cmd.add(cwd.toString());
+        cmd.addAll(List.of(args));
+        return cmd;
     }
 
     /** 输出脱敏（token 明文 + URL 编码形态 → ***）；CAP-36 exec 日志帧回流前同样必须过此。 */

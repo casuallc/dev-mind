@@ -190,6 +190,10 @@ public class AgentRunnerMain {
                                     CliProcessLauncher protocol, SessionExecutor executor,
                                     RunnerSessionRegistry sessions, RunnerWorkspace workspace,
                                     ExecHandler execHandler, ServerConnection conn) {
+        // CAP-43：帧携带 proxy{url,scopes}（协议 v8+，节点配了外网代理才带）→ 刷新进程级
+        // NodeProxy holder，git/claude/exec 三 scope 消费点直接读 holder；帧无此字段不动 holder
+        // （权威源在服务端，四类消费帧都带同一值，重复刷新幂等）
+        refreshProxy(frame);
         String type = frame.path("type").asText("");
         String sessionId = frame.path("sessionId").asText("");
         switch (type) {
@@ -209,6 +213,21 @@ public class AgentRunnerMain {
             case "workspace_finalize" -> handleWorkspaceFinalize(frame, config, sessions, workspace, conn);
             default -> log.debug("未知指令类型: {}", type);
         }
+    }
+
+    /**
+     * CAP-43：解析帧里 proxy 对象刷新 NodeProxy holder。{url:"",scopes:[]} = 服务端显式清空
+     * （节点代理被清除后下一帧即回直连）；字段缺失 = 老服务端/未配置，不动 holder。
+     * package-private 供单测驱动。
+     */
+    static void refreshProxy(JsonNode frame) {
+        JsonNode proxy = frame.path("proxy");
+        if (!proxy.isObject()) {
+            return;
+        }
+        java.util.Set<String> scopes = new java.util.HashSet<>();
+        proxy.path("scopes").forEach(s -> scopes.add(s.asText("")));
+        com.devmind.common.agent.exec.NodeProxy.set(proxy.path("url").asText(""), scopes);
     }
 
     /**
@@ -404,6 +423,15 @@ public class AgentRunnerMain {
             // .claude 目录；空 = 不注入（claude 用默认目录）。节点本地配置优先于服务端下发同名字段
             if (!config.claudeConfigDir().isBlank()) {
                 env.put("CLAUDE_CONFIG_DIR", config.claudeConfigDir());
+            }
+            // CAP-43：节点代理命中 claude scope → claude 子进程走代理（模型 API/遥测等外网流量）。
+            // 大小写四件全注入（不同库读不同大小写）；服务端下发的同名字段不覆盖（帧 env 优先）
+            String claudeProxy = com.devmind.common.agent.exec.NodeProxy.urlFor("claude");
+            if (claudeProxy != null) {
+                env.putIfAbsent("HTTP_PROXY", claudeProxy);
+                env.putIfAbsent("HTTPS_PROXY", claudeProxy);
+                env.putIfAbsent("http_proxy", claudeProxy);
+                env.putIfAbsent("https_proxy", claudeProxy);
             }
             Process proc = executor.launch(new SessionExecutor.LaunchContext(
                     sessionId, workDir, taskSpec, model, permissionMode, env, resumeSessionId));

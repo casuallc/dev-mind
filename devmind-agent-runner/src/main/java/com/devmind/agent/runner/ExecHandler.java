@@ -135,6 +135,14 @@ public class ExecHandler {
                 ProcessBuilder pb = new ProcessBuilder(config.execShell(), tmp.toAbsolutePath().toString());
                 pb.directory(cwd.toFile());
                 env.forEach((k, v) -> pb.environment().put(k, v == null ? "" : v));
+                // CAP-43：节点代理命中 exec scope → exec 脚本进程走代理（脚本内 curl/git 等
+                // 外网流量）。大小写四件全注入；帧 env 已有同名键不覆盖（帧 env 优先）
+                String execProxy = com.devmind.common.agent.exec.NodeProxy.urlFor("exec");
+                if (execProxy != null) {
+                    for (String key : new String[]{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"}) {
+                        pb.environment().putIfAbsent(key, execProxy);
+                    }
+                }
                 proc = pb.start();
                 active.put(execId, proc);
                 String tk = token;

@@ -568,6 +568,53 @@ class RunnerWorkspaceTest {
         assertTrue(out.contains("***"));
     }
 
+    // ---- CAP-43 节点外网代理：git scope 注入 ----
+
+    @Test
+    void buildCmdInjectsProxyOnlyWhenGitScopeApplies() {
+        try {
+            NodeProxy.clear();
+            // 未配置 → 原样
+            assertEquals(List.of("git", "-C", tmp.toString(), "status"),
+                    RunnerWorkspace.buildCmd(tmp, "status"));
+            // 命中 git scope → git 后、-C 前插 -c http.proxy=
+            NodeProxy.set("http://127.0.0.1:8443", java.util.Set.of("git"));
+            assertEquals(List.of("git", "-c", "http.proxy=http://127.0.0.1:8443",
+                            "-C", tmp.toString(), "fetch", "origin"),
+                    RunnerWorkspace.buildCmd(tmp, "fetch", "origin"));
+            // scope 不含 git → 不注入
+            NodeProxy.set("http://127.0.0.1:8443", java.util.Set.of("claude", "exec"));
+            assertEquals(List.of("git", "-C", tmp.toString(), "status"),
+                    RunnerWorkspace.buildCmd(tmp, "status"));
+        } finally {
+            NodeProxy.clear(); // holder 是进程级静态，防泄漏到后续用例
+        }
+    }
+
+    @Test
+    void proxyConfiguredDoesNotBreakLocalFileRemotes() throws Exception {
+        // 回归：git scope 代理指向不可达地址时，file:// 本地裸库全链路（clone/fetch/push）
+        // 不受影响——http.proxy 只作用于 HTTP(S) 传输，误伤本地通道才是真 bug
+        NodeProxy.set("http://127.0.0.1:1", java.util.Set.of("git"));
+        try {
+            Path origin = tmp.resolve("proxy-origin.git");
+            seedOrigin(origin, "README.md");
+            RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+            RunnerWorkspace.RepoCtx ctx = ws.prepare("px1", "proj1", "alice",
+                    new RunnerWorkspace.RepoSpec(origin.toUri().toString(), "main", "feature/p1", ""));
+            assertTrue(Files.exists(ctx.sessionDir().resolve("README.md")));
+            // worklog push 走同一 run() 注入点
+            Path wlOrigin = tmp.resolve("proxy-worklog-origin.git");
+            git(tmp, "init", "--bare", "-b", "main", wlOrigin.toString());
+            Path dir = ws.prepareWorklog(tmp.resolve("worklog"), "carol");
+            RunnerWorkspace.WorklogPushOutcome push =
+                    ws.pushWorklog(dir, wlOrigin.toUri().toString(), "main", null);
+            assertEquals(0, push.exit(), push.output());
+        } finally {
+            NodeProxy.clear();
+        }
+    }
+
     private static String git(Path cwd, String... args) throws Exception {
         List<String> cmd = new ArrayList<>(List.of("git", "-C", cwd.toString()));
         cmd.addAll(List.of(args));
