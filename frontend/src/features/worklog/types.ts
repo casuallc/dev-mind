@@ -9,6 +9,10 @@ export interface WorklogRepo {
   status: string
   cloneStatus?: string
   subscribed?: boolean
+  /** 仓库远程分支列表（订阅分支选择的选项来源；LOCAL 行/未抓取过为空） */
+  branches?: string[]
+  /** 本人勾选扫描的分支；空 = 跟随默认分支 */
+  subscribedBranches?: string[]
 }
 
 /** 工作条目（一天多条；工时按条目记，单位小时） */

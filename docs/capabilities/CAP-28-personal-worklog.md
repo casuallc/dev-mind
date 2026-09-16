@@ -37,7 +37,10 @@ CAP-06 通知中心（站内提醒）
   CAP-02 的项目级多库模型）；登记写操作仅 ADMIN；登记时 `git rev-parse` 校验
   本地路径确为 git 仓库；字段含 local_path(unique)/remote_url/default_branch/status。
 - **FR-02 用户参与勾选**：`worklog_repo_subscriptions`（user_id+repo_id 唯一），
-  每用户勾选自己参与的仓库子集，git 扫描只覆盖勾选仓库。
+  每用户勾选自己参与的仓库子集，git 扫描只覆盖勾选仓库；
+  订阅行可再勾选扫描分支（`branches` 换行分隔，一个或多个），
+  空 = 跟随仓库默认分支；多分支扫描按 commit_sha 去重，
+  分支解析本地分支优先、缺省回退 `origin/<branch>` 远程跟踪引用。
 - **FR-03 工作条目 CRUD**：`worklog_entries` = 日期 + 标题 + 类型
   （DEV/SUPPORT/MEETING/RESEARCH/OTHER）+ 工时 + 来源（GIT/MANUAL/AGENT）+
   可选关联（requirement_id / jira_issue_key）；按人隔离（仅能改自己的条目，

@@ -33,9 +33,9 @@ public class CodeRepoController {
         return service.list();
     }
 
-    /** 本人勾选/取消勾选（任意登录用户） */
+    /** 本人勾选/取消勾选（任意登录用户）；branches 可选，勾选扫描的分支（空 = 跟随默认分支） */
     @PutMapping("/{id}/subscription")
     public void subscribe(@PathVariable Long id, @Valid @RequestBody SubscriptionRequest req) {
-        service.setSubscription(id, req.subscribed());
+        service.setSubscription(id, req.subscribed(), req.branches());
     }
 }

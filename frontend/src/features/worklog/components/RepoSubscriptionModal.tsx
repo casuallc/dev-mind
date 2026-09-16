@@ -1,4 +1,4 @@
-import { Button, Checkbox, Modal, Table, Tag, Typography, message } from 'antd'
+import { Button, Checkbox, Modal, Select, Table, Tag, Typography, message } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -15,6 +15,7 @@ interface Props {
 /**
  * CAP-28 FR-02 订阅勾选：勾选哪些全局仓库参与自己的 git log 扫描。
  * CAP-29 起登记 CRUD 移到后台 /admin/repos（仅 ADMIN）；原独立订阅页并入工作日志页弹窗。
+ * 勾选仓库后可再选一个或多个扫描分支；留空 = 跟随仓库默认分支。
  */
 export default function RepoSubscriptionModal({ open, onCancel }: Props) {
   const [rows, setRows] = useState<WorklogRepo[]>([])
@@ -43,12 +44,21 @@ export default function RepoSubscriptionModal({ open, onCancel }: Props) {
     }
   }
 
+  const saveBranches = async (r: WorklogRepo, branches: string[]) => {
+    try {
+      await setSubscription(r.id, true, branches)
+      setRows(rows.map((x) => (x.id === r.id ? { ...x, subscribedBranches: branches } : x)))
+    } catch (e) {
+      showError(e, '保存分支失败')
+    }
+  }
+
   return (
     <Modal
       title="仓库订阅"
       open={open}
       onCancel={onCancel}
-      width={860}
+      width={960}
       destroyOnHidden
       footer={
         <Button icon={<ReloadOutlined />} onClick={reload} disabled={loading}>
@@ -58,6 +68,7 @@ export default function RepoSubscriptionModal({ open, onCancel }: Props) {
     >
       <Typography.Paragraph type="secondary">
         勾选你参与的仓库后，git 扫描只按你的署名从这些仓库的服务端克隆取当日提交。
+        「扫描分支」可再限定一个或多个分支，留空 = 跟随默认分支（选项来自服务端定时抓取，本地路径仓库可直接输入分支名）。
         {isAdmin() ? (
           <>
             仓库登记与维护在 <Link to="/admin/repos">后台管理 → 代码仓库</Link>。
@@ -81,14 +92,31 @@ export default function RepoSubscriptionModal({ open, onCancel }: Props) {
               <Checkbox checked={!!r.subscribed} onChange={(e) => toggle(r, e.target.checked)} />
             ),
           },
-          { title: '名称', dataIndex: 'name', width: 180 },
+          { title: '名称', dataIndex: 'name', width: 150 },
           {
             title: '远端',
             dataIndex: 'remoteUrl',
             ellipsis: true,
             render: (u: string) => u || '-',
           },
-          { title: '默认分支', dataIndex: 'defaultBranch', width: 110, render: (b: string) => b || '-' },
+          { title: '默认分支', dataIndex: 'defaultBranch', width: 100, render: (b: string) => b || '-' },
+          {
+            title: '扫描分支',
+            width: 220,
+            render: (_, r) => (
+              <Select
+                mode="tags"
+                size="small"
+                style={{ width: '100%' }}
+                disabled={!r.subscribed}
+                value={r.subscribedBranches ?? []}
+                options={(r.branches ?? []).map((b) => ({ value: b, label: b }))}
+                placeholder={r.defaultBranch ? `默认分支（${r.defaultBranch}）` : '默认分支'}
+                maxTagCount={2}
+                onChange={(vs) => saveBranches(r, vs)}
+              />
+            ),
+          },
           {
             title: '克隆状态',
             dataIndex: 'cloneStatus',

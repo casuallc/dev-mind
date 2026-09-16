@@ -31,10 +31,16 @@ class GitLogScannerScanTest {
     Path repoDir;
 
     private GitLogScanner scannerWith(List<GitRepoCatalog.RepoRef> repos) {
+        return scannerWithSelections(repos.stream()
+                .map(r -> new CodeRepoService.SubscribedRepo(r, List.of()))
+                .toList());
+    }
+
+    private GitLogScanner scannerWithSelections(List<CodeRepoService.SubscribedRepo> subs) {
         CodeRepoService codeRepoService = new CodeRepoService(null, null, null) {
             @Override
-            public List<GitRepoCatalog.RepoRef> subscribedRepos(String username) {
-                return repos;
+            public List<CodeRepoService.SubscribedRepo> subscribedRepos(String username) {
+                return subs;
             }
         };
         WorklogEntryRepository entryRepo = (WorklogEntryRepository) Proxy.newProxyInstance(
@@ -80,7 +86,7 @@ class GitLogScannerScanTest {
     void scansLocalRepoWithLocalEmailFallback() throws Exception {
         Path repo = initRepoWithCommit();
         GitLogScanner scanner = scannerWith(List.of(
-                new GitRepoCatalog.RepoRef(1, "demo", repo.toString(), null, null, "ACTIVE", "NONE")));
+                new GitRepoCatalog.RepoRef(1, "demo", repo.toString(), null, null, "ACTIVE", "NONE", List.of())));
 
         GitPreviewResponse res = scanner.scanDetailed("u1", LocalDate.now());
 
@@ -98,7 +104,7 @@ class GitLogScannerScanTest {
     void scansDateRangeInclusive() throws Exception {
         Path repo = initRepoWithCommit();
         GitLogScanner scanner = scannerWith(List.of(
-                new GitRepoCatalog.RepoRef(1, "demo", repo.toString(), null, null, "ACTIVE", "NONE")));
+                new GitRepoCatalog.RepoRef(1, "demo", repo.toString(), null, null, "ACTIVE", "NONE", List.of())));
 
         // 含今天的范围能扫到当日提交
         GitPreviewResponse hit = scanner.scanDetailed("u1", LocalDate.now().minusDays(3), LocalDate.now());
@@ -111,8 +117,8 @@ class GitLogScannerScanTest {
     @Test
     void skipsCloningAndDisabledReposWithReason() {
         GitLogScanner scanner = scannerWith(List.of(
-                new GitRepoCatalog.RepoRef(1, "cloning", repoDir.toString(), null, null, "ACTIVE", "CLONING"),
-                new GitRepoCatalog.RepoRef(2, "disabled", repoDir.toString(), null, null, "DISABLED", "NONE")));
+                new GitRepoCatalog.RepoRef(1, "cloning", repoDir.toString(), null, null, "ACTIVE", "CLONING", List.of()),
+                new GitRepoCatalog.RepoRef(2, "disabled", repoDir.toString(), null, null, "DISABLED", "NONE", List.of())));
 
         GitPreviewResponse res = scanner.scanDetailed("u1", LocalDate.now());
 
@@ -127,12 +133,61 @@ class GitLogScannerScanTest {
     void missingPathSurfacedAsFailed() {
         GitLogScanner scanner = scannerWith(List.of(
                 new GitRepoCatalog.RepoRef(1, "gone", repoDir.resolve("not-exist").toString(),
-                        null, null, "ACTIVE", "NONE")));
+                        null, null, "ACTIVE", "NONE", List.of())));
 
         GitPreviewResponse res = scanner.scanDetailed("u1", LocalDate.now());
 
         assertTrue(res.commits().isEmpty());
         assertEquals(1, res.repos().size());
         assertEquals("FAILED", res.repos().get(0).outcome());
+    }
+
+    @Test
+    void scansSelectedBranchesWithShaDedupe() throws Exception {
+        Path repo = initRepoWithCommit();
+        git("git", "checkout", "-b", "feature");
+        Files.writeString(repoDir.resolve("b.txt"), "branch work");
+        git("git", "add", "b.txt");
+        git("git", "commit", "-m", "特性分支提交");
+        GitCli.Result cur = GitCli.run(repoDir, 15, "git", "branch", "--show-current");
+        assertEquals("feature", cur.out().strip());
+
+        GitRepoCatalog.RepoRef ref = new GitRepoCatalog.RepoRef(
+                1, "demo", repo.toString(), null, null, "ACTIVE", "NONE", List.of());
+        // 勾选 master/main 主干 + feature：主干提交是 feature 的祖先，应按 sha 去重只出一次
+        String trunk = trunkBranch();
+        GitLogScanner scanner = scannerWithSelections(List.of(
+                new CodeRepoService.SubscribedRepo(ref, List.of(trunk, "feature"))));
+
+        GitPreviewResponse res = scanner.scanDetailed("u1", LocalDate.now());
+
+        assertEquals(2, res.commits().size());
+        assertTrue(res.commits().stream().anyMatch(c -> "当日提交".equals(c.subject())));
+        assertTrue(res.commits().stream().anyMatch(c -> "特性分支提交".equals(c.subject())));
+        assertEquals("SCANNED", res.repos().get(0).outcome());
+        assertEquals(2, res.repos().get(0).commitCount());
+    }
+
+    @Test
+    void missingSelectedBranchNotedAndSkipped() throws Exception {
+        Path repo = initRepoWithCommit();
+        GitRepoCatalog.RepoRef ref = new GitRepoCatalog.RepoRef(
+                1, "demo", repo.toString(), null, null, "ACTIVE", "NONE", List.of());
+        GitLogScanner scanner = scannerWithSelections(List.of(
+                new CodeRepoService.SubscribedRepo(ref, List.of(trunkBranch(), "no-such-branch"))));
+
+        GitPreviewResponse res = scanner.scanDetailed("u1", LocalDate.now());
+
+        assertEquals(1, res.commits().size());
+        GitScanRepoDiag diag = res.repos().get(0);
+        assertEquals("SCANNED", diag.outcome());
+        assertTrue(diag.detail().contains("no-such-branch"), diag.detail());
+        assertTrue(diag.detail().contains("不存在"), diag.detail());
+    }
+
+    /** 仓库主干分支名（git init 默认分支随版本为 master 或 main）。 */
+    private String trunkBranch() {
+        GitCli.Result r = GitCli.run(repoDir, 15, "git", "rev-parse", "--verify", "--quiet", "refs/heads/master");
+        return r.exitCode() == 0 ? "master" : "main";
     }
 }

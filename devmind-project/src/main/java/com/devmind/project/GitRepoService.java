@@ -77,7 +77,15 @@ public class GitRepoService implements GitRepoCatalog {
 
     private static RepoRef toRef(GitRepositoryEntity e) {
         return new RepoRef(e.getId(), e.getName(), e.getLocalPath(), e.getRemoteUrl(),
-                e.getDefaultBranch(), e.getStatus(), e.getCloneStatus());
+                e.getDefaultBranch(), e.getStatus(), e.getCloneStatus(), splitBranches(e.getBranches()));
+    }
+
+    /** branches 列换行分隔存储（同 GitRepoView 口径），SPI 拆成列表。 */
+    private static List<String> splitBranches(String branches) {
+        if (branches == null || branches.isBlank()) {
+            return List.of();
+        }
+        return branches.lines().map(String::trim).filter(s -> !s.isBlank()).toList();
     }
 
     // ---------------- CRUD（/api/repos，ADMIN） ----------------

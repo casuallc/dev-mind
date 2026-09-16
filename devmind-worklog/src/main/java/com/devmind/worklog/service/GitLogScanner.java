@@ -18,7 +18,9 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * CAP-28 FR-04：本地 git log 扫描。遍历用户勾选的 ACTIVE 仓库，按用户署名过滤当日提交。
@@ -73,7 +75,8 @@ public class GitLogScanner {
     public GitPreviewResponse scanDetailed(String username, LocalDate from, LocalDate to) {
         List<GitCommitView> out = new ArrayList<>();
         List<GitScanRepoDiag> diags = new ArrayList<>();
-        for (GitRepoCatalog.RepoRef repo : codeRepoService.subscribedRepos(username)) {
+        for (CodeRepoService.SubscribedRepo sub : codeRepoService.subscribedRepos(username)) {
+            GitRepoCatalog.RepoRef repo = sub.repo();
             // 状态常量归 project 模块实体，此处用字面量防跨模块依赖
             if (!"ACTIVE".equals(repo.status())) {
                 diags.add(new GitScanRepoDiag(repo.id(), repo.name(), "SKIPPED", null, "仓库已停用", 0));
@@ -86,7 +89,7 @@ public class GitLogScanner {
                 continue;
             }
             try {
-                RepoScan r = scanRepo(username, repo, from, to);
+                RepoScan r = scanRepo(username, repo, sub.branches(), from, to);
                 out.addAll(r.commits());
                 diags.add(r.diag());
             } catch (Exception e) {
@@ -105,42 +108,106 @@ public class GitLogScanner {
 
     private record RepoScan(List<GitCommitView> commits, GitScanRepoDiag diag) {}
 
-    private RepoScan scanRepo(String username, GitRepoCatalog.RepoRef repo, LocalDate from, LocalDate to) {
+    /**
+     * 扫单库。selectedBranches 为空 = 跟随默认分支（CAP-28 原行为）；
+     * 非空则逐分支扫描并按 sha 去重（同一提交常被多个分支同时包含）。
+     */
+    private RepoScan scanRepo(String username, GitRepoCatalog.RepoRef repo, List<String> selectedBranches,
+                              LocalDate from, LocalDate to) {
+        String author = resolveAuthorFilter(username, repo);
+        // 待扫描的分支名：空选择 → 默认分支（null 表示不限定 rev，扫 HEAD）
+        List<String> branches = selectedBranches.isEmpty()
+                ? List.of(repo.defaultBranch() == null ? "" : repo.defaultBranch().strip())
+                : selectedBranches;
+        List<GitCommitView> commits = new ArrayList<>();
+        Set<String> seenSha = new LinkedHashSet<>();
+        List<String> notes = new ArrayList<>();
+        for (String branch : branches) {
+            BranchScan b = scanBranch(username, repo, branch, author, from, to, seenSha);
+            commits.addAll(b.commits());
+            if (b.note() != null) {
+                notes.add(b.note());
+            }
+        }
+        String branchInfo = selectedBranches.isEmpty() ? null : "分支 " + String.join(", ", selectedBranches) + "：";
+        String detail;
+        if (!notes.isEmpty()) {
+            detail = (branchInfo == null ? "" : branchInfo) + String.join("；", notes);
+        } else if (author == null) {
+            detail = "未解析到署名，未按作者过滤（可能混入他人提交）";
+        } else if (commits.isEmpty()) {
+            detail = (branchInfo == null ? "" : branchInfo)
+                    + (from.equals(to) ? "当日" : "范围内") + "没有署名「" + author + "」的提交";
+        } else {
+            detail = null;
+        }
+        return new RepoScan(commits,
+                new GitScanRepoDiag(repo.id(), repo.name(), "SCANNED", author, detail, commits.size()));
+    }
+
+    private record BranchScan(List<GitCommitView> commits, String note) {}
+
+    /**
+     * 扫单分支；branch 空白 = 不限定 rev（沿用 git log 默认 HEAD）。
+     * 分支解析：本地分支优先，其次 origin/&lt;branch&gt; 远程跟踪引用（CLONE 行只检出默认分支，
+     * 其余分支只有远程跟踪引用）；都不存在记 note 跳过。
+     */
+    private BranchScan scanBranch(String username, GitRepoCatalog.RepoRef repo, String branch, String author,
+                                  LocalDate from, LocalDate to, Set<String> seenSha) {
+        Path dir = Path.of(repo.localPath());
+        String rev = null;
+        if (branch != null && !branch.isBlank()) {
+            rev = resolveBranchRev(dir, branch);
+            if (rev == null) {
+                log.info("分支不存在，跳过: repo={} branch={}", repo.name(), branch);
+                return new BranchScan(List.of(), "分支「" + branch + "」不存在（本地与 origin 均无）");
+            }
+        }
         List<String> args = new ArrayList<>(List.of(
                 "git", "-c", "i18n.logOutputEncoding=UTF-8",
                 "log", "--encoding=UTF-8", "--no-merges", FORMAT,
                 "--since=" + from + " 00:00:00", "--until=" + to + " 23:59:59",
                 "-n", String.valueOf(props.getGitScanMaxCommits())));
-        String author = resolveAuthorFilter(username, repo);
         if (author != null) {
             args.add("--author=" + author);
         }
-        if (repo.defaultBranch() != null && !repo.defaultBranch().isBlank()) {
-            args.add(repo.defaultBranch().strip());
+        if (rev != null) {
+            args.add(rev);
         }
-        GitCli.Result r = GitCli.run(Path.of(repo.localPath()), 30, args.toArray(new String[0]));
+        GitCli.Result r = GitCli.run(dir, 30, args.toArray(new String[0]));
         if (r.exitCode() != 0) {
             String err = r.err() == null ? "" : r.err().strip();
-            log.warn("git log 失败: repo={} err={}", repo.name(), err);
-            return new RepoScan(List.of(), new GitScanRepoDiag(repo.id(), repo.name(), "FAILED", author,
-                    "git log 失败（" + abbrev(err) + "）——检查默认分支与本地路径", 0));
+            log.warn("git log 失败: repo={} branch={} err={}", repo.name(), branch, err);
+            return new BranchScan(List.of(),
+                    "分支「" + (branch == null || branch.isBlank() ? "HEAD" : branch) + "」git log 失败（"
+                            + abbrev(err) + "）——检查分支与本地路径");
         }
         List<GitCommitView> commits = new ArrayList<>();
         for (String rec : r.out().split(RECORD_SEP)) {
             String[] f = rec.strip().split(FIELD_SEP, -1);
-            if (f.length < 5 || f[0].isBlank()) {
+            if (f.length < 5 || f[0].isBlank() || !seenSha.add(f[0])) {
                 continue;
             }
             commits.add(new GitCommitView(repo.id(), repo.name(), f[0], f[1], f[2],
                     Instant.parse(f[3]), f[4],
                     entryRepo.existsByUserIdAndRepoIdAndCommitSha(username, repo.id(), f[0])));
         }
-        String detail = author == null ? "未解析到署名，未按作者过滤（可能混入他人提交）"
-                : commits.isEmpty()
-                ? (from.equals(to) ? "当日" : "范围内") + "没有署名「" + author + "」的提交"
-                : null;
-        return new RepoScan(commits,
-                new GitScanRepoDiag(repo.id(), repo.name(), "SCANNED", author, detail, commits.size()));
+        return new BranchScan(commits, null);
+    }
+
+    /** 分支 → rev：本地分支存在用本地名；否则 origin/&lt;branch&gt; 存在用远程跟踪引用；都无返回 null。 */
+    private static String resolveBranchRev(Path dir, String branch) {
+        GitCli.Result local = GitCli.run(dir, 10,
+                "git", "rev-parse", "--verify", "--quiet", "refs/heads/" + branch);
+        if (local.exitCode() == 0) {
+            return branch;
+        }
+        GitCli.Result remote = GitCli.run(dir, 10,
+                "git", "rev-parse", "--verify", "--quiet", "refs/remotes/origin/" + branch);
+        if (remote.exitCode() == 0) {
+            return "origin/" + branch;
+        }
+        return null;
     }
 
     private static String abbrev(String s) {

@@ -30,6 +30,10 @@ public class WorklogRepoSubscriptionEntity {
     @Column(name = "repo_id", nullable = false)
     private Long repoId;
 
+    /** 勾选扫描的分支（换行分隔；null/空 = 跟随仓库默认分支，保持原行为） */
+    @Column(length = 4096)
+    private String branches;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -39,6 +43,8 @@ public class WorklogRepoSubscriptionEntity {
     public void setUserId(String userId) { this.userId = userId; }
     public Long getRepoId() { return repoId; }
     public void setRepoId(Long repoId) { this.repoId = repoId; }
+    public String getBranches() { return branches; }
+    public void setBranches(String branches) { this.branches = branches; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 }

@@ -17,8 +17,9 @@ import type {
 
 // ---- 全局代码仓库（CAP-29 起登记在 /admin/repos；此处仅列表 + 本人订阅勾选） ----
 export const listRepos = () => api.get<WorklogRepo[]>('/worklog/repos')
-export const setSubscription = (id: number, subscribed: boolean) =>
-  api.put(`/worklog/repos/${id}/subscription`, { subscribed })
+/** 订阅勾选；branches 传空数组 = 恢复跟随默认分支，不传 = 不改动既有选择 */
+export const setSubscription = (id: number, subscribed: boolean, branches?: string[]) =>
+  api.put(`/worklog/repos/${id}/subscription`, branches === undefined ? { subscribed } : { subscribed, branches })
 
 // ---- 工作条目 ----
 export const listEntries = (from: string, to: string, page = 0, size = 20, keyword?: string) =>

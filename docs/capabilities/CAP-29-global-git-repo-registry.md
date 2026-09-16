@@ -88,7 +88,8 @@ public interface GitRepoCatalog {
     List<RepoRef> listAll();                       // 订阅页展示（含 DISABLED）
     List<RepoRef> listByIds(Collection<Long> ids); // 订阅校验 + 扫描取库
     record RepoRef(long id, String name, String localPath, String remoteUrl,
-                   String defaultBranch, String status, String cloneStatus) {}
+                   String defaultBranch, String status, String cloneStatus,
+                   List<String> branches /* 远程分支列表，fetch 刷新 */) {}
 }
 ```
 
