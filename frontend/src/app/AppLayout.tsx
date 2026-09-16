@@ -1,4 +1,4 @@
-// 个人工作台外壳：顶部导航（品牌 + 项目切换 + 一级导航 + 通知/用户）+ 居中内容区。
+// 个人工作台外壳：顶部导航（品牌 + 项目切换（仅项目上下文页）+ 一级导航 + 通知/用户）+ 居中内容区。
 // 项目上下文页面由 ProjectSubNav 在内容区顶部提供二级页签；后台管理走 AdminLayout（/admin）。
 import { Button, Layout, Menu, Tooltip } from 'antd'
 import {
@@ -12,6 +12,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useSyncExternalStore } from 'react'
 import ProjectSwitcher from './ProjectSwitcher'
 import ProjectSubNav, { isProjectPage } from './ProjectSubNav'
+import { useProjectBootstrap } from './useProjectBootstrap'
 import { topNavKey } from './menuSelectedKey'
 import NotificationBell from '../features/notifications/components/NotificationBell'
 import UserMenu from '../features/auth/components/UserMenu'
@@ -25,6 +26,9 @@ export default function AppLayout() {
   const location = useLocation()
   // 认证态变化（登录/退出/刷新轮换）时重渲染导航与用户区
   useSyncExternalStore(subscribeAuth, getUserSnapshot)
+  // 项目列表常驻引导（加载 + currentId 兜底），与切换器 UI 解耦
+  const projectBootstrap = useProjectBootstrap()
+  const projectPage = isProjectPage(location.pathname)
 
   // 启动全局通知实时流（铃铛角标/浏览器通知依赖它）
   useEffect(() => {
@@ -60,7 +64,13 @@ export default function AppLayout() {
           <img src="/logo.svg" alt="Dev-Mind" width={24} height={24} />
           Dev-Mind
         </div>
-        <ProjectSwitcher />
+        {projectPage && (
+          <ProjectSwitcher
+            projects={projectBootstrap.projects}
+            loadError={projectBootstrap.loadError}
+            onRetry={projectBootstrap.reload}
+          />
+        )}
         <Menu
           mode="horizontal"
           selectedKeys={[topNavKey(location.pathname)]}
@@ -107,7 +117,7 @@ export default function AppLayout() {
             flexDirection: 'column',
           }}
         >
-          {isProjectPage(location.pathname) && <ProjectSubNav />}
+          {projectPage && <ProjectSubNav />}
           <Outlet />
         </div>
       </Content>

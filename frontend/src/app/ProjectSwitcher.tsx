@@ -1,45 +1,27 @@
-// 项目切换器：像切换租户一样切换当前项目。常驻 AppLayout 顶部导航栏，
-// 是项目列表的唯一加载点——挂载时校验 currentId 有效性并做兜底自动选择。
-import { useCallback, useEffect, useState } from 'react'
+// 项目切换器：像切换租户一样切换当前项目。只在项目上下文页渲染（AppLayout 按 isProjectPage 条件挂载）——
+// 工作台/问答/工作日志等个人域页面没有项目切换语义。
+// 纯展示组件：列表加载与 currentId 兜底在 useProjectBootstrap（AppLayout 常驻）。
+// WORKLOG 空间不进切换选项（工作日志从顶部导航进）；当前正处于工作日志空间时占位提示、可切回普通项目。
 import { Button, Select, Tag, Typography } from 'antd'
 import { useNavigate } from 'react-router-dom'
-import { listProjects } from '../features/projects/api'
-import {
-  getCurrentProjectId,
-  setCurrentProject,
-  setProjectsLoaded,
-} from './currentProjectStore'
+import { setCurrentProject } from './currentProjectStore'
 import { useCurrentProjectId } from './useCurrentProject'
 import type { Project } from '../features/projects/types'
 
-export default function ProjectSwitcher() {
+interface Props {
+  projects: Project[]
+  loadError: boolean
+  onRetry: () => void
+}
+
+export default function ProjectSwitcher({ projects, loadError, onRetry }: Props) {
   const navigate = useNavigate()
   const currentId = useCurrentProjectId()
-  const [projects, setProjects] = useState<Project[]>([])
-  const [loadError, setLoadError] = useState(false)
 
-  const load = useCallback(async () => {
-    try {
-      const list = await listProjects()
-      setProjects(list)
-      setLoadError(false)
-      // 兜底：无当前项目，或持久化的 id 已失效（项目被删）→ 自动切到第一个 ACTIVE 项目
-      const valid = getCurrentProjectId()
-      if (!valid || !list.some((p) => p.id === valid)) {
-        const first = list.find((p) => p.status === 'ACTIVE') ?? null
-        setCurrentProject(first?.id ?? null)
-      }
-    } catch {
-      // 加载失败不清空已持久化的 currentId，避免一次网络抖动冲掉用户上下文
-      setLoadError(true)
-    } finally {
-      setProjectsLoaded(true)
-    }
-  }, [])
-
-  useEffect(() => {
-    load()
-  }, [load])
+  // WORKLOG 空间不参与切换（每用户一个、内容与人绑定，切换语义空转）
+  const switchable = projects.filter((p) => p.kind !== 'WORKLOG')
+  const current = projects.find((p) => p.id === currentId)
+  const worklogCurrent = current?.kind === 'WORKLOG'
 
   const switchTo = (id: string) => {
     setCurrentProject(id)
@@ -50,7 +32,7 @@ export default function ProjectSwitcher() {
   if (loadError) {
     return (
       <div style={{ width: 200 }}>
-        <Button size="small" block onClick={load}>
+        <Button size="small" block onClick={onRetry}>
           项目列表加载失败，重试
         </Button>
       </div>
@@ -64,11 +46,18 @@ export default function ProjectSwitcher() {
         showSearch
         optionFilterProp="label"
         style={{ width: '100%' }}
-        placeholder={projects.length ? '选择项目' : '暂无项目'}
-        disabled={!projects.length}
-        value={currentId ?? undefined}
+        placeholder={
+          worklogCurrent
+            ? `工作日志空间：${current.name}`
+            : switchable.length
+              ? '选择项目'
+              : '暂无项目'
+        }
+        disabled={!switchable.length}
+        // 当前在工作日志空间时不回显值（该 id 不在选项里），占位提示 + 下拉即可切回普通项目
+        value={worklogCurrent ? undefined : (currentId ?? undefined)}
         onChange={switchTo}
-        options={projects.map((p) => ({
+        options={switchable.map((p) => ({
           value: p.id,
           label: p.name,
           archived: p.status !== 'ACTIVE',
