@@ -172,3 +172,17 @@ GET/PUT /api/worklog/settings               + dailyTemplateMd / weeklyTemplateMd
   「不存在才建」不覆盖，需在管控台 skill 管理页手工同步文案）。
 
 MVP 明确不做：条目文件化、服务端读 runner 文件系统的通用通道（镜像只经回传建立）。
+
+### 前端展示隔离（已实现，2026-09-16）
+
+WORKLOG 项目是**会话调度的载体，不是给人浏览的项目**：每用户一个、内容与人绑定，
+切换语义空转。因此入口收敛为顶部导航「工作日志」，不进项目列表/切换语义：
+
+- `GET /api/projects` 加 `kind` 过滤参数：缺省排除 WORKLOG；`kind=ALL` 不过滤
+  （后台项目管理、切换器 currentId 校验用）；开放 API `/api/v1/projects` 显式传
+  ALL 保持既有契约。
+- 项目切换器只在项目上下文页（`isProjectPage`）渲染——工作台/问答/工作日志等
+  个人域页面没有项目切换语义；列表加载/currentId 兜底拆为 AppLayout 常驻的
+  `useProjectBootstrap`（WORKLOG id 视为有效，防冲掉「进入空间开会话」流程）。
+- 切换器选项过滤 WORKLOG 空间；当前处于日志空间时占位提示「工作日志空间：<名称>」，
+  下拉即可切回普通项目。
