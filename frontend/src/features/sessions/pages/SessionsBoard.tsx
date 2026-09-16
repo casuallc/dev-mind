@@ -40,11 +40,19 @@ function sortForBoard(list: SessionSummary[]): SessionSummary[] {
   })
 }
 
-export default function SessionsBoard() {
+export default function SessionsBoard({
+  projectId: fixedProjectId,
+  title = '会话工作台',
+}: {
+  /** 锁定项目（如 /worklog/sessions 锁定 WORKLOG 空间）；不传则跟随当前项目切换器 */
+  projectId?: string
+  title?: string
+}) {
   // CAP-39：深链 /sessions?sid=<id>（通知/需求关联记录等原详情页入口统一落这里）
   const [searchParams, setSearchParams] = useSearchParams()
-  // CAP-31：会话归属当前项目（本页在 ProjectContextGate 内，必有当前项目）
-  const projectId = useCurrentProjectId()
+  // CAP-31：会话归属当前项目（/sessions 在 ProjectContextGate 内，必有当前项目；锁定项目时以 fixedProjectId 为准）
+  const storeProjectId = useCurrentProjectId()
+  const projectId = fixedProjectId ?? storeProjectId
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
   const [loading, setLoading] = useState(false)
@@ -236,7 +244,7 @@ export default function SessionsBoard() {
     <Card
       title={
         <Space size={12}>
-          <span>会话工作台</span>
+          <span>{title}</span>
           <Segmented
             value={view}
             onChange={setView}
@@ -275,6 +283,7 @@ export default function SessionsBoard() {
           <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             {draft ? (
               <NewSessionDraft
+                projectId={projectId ?? undefined}
                 onCreated={onDraftCreated}
                 onCancel={
                   selectedId || sessions.length > 0
@@ -346,7 +355,7 @@ export default function SessionsBoard() {
                 />
               </>
             ) : (
-              <NewSessionDraft onCreated={onDraftCreated} />
+              <NewSessionDraft projectId={projectId ?? undefined} onCreated={onDraftCreated} />
             )}
           </div>
         </div>

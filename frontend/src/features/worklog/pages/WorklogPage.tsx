@@ -51,7 +51,6 @@ import type {
 } from '../types'
 import { ENTRY_SOURCES, ENTRY_TYPES } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
-import { setCurrentProject } from '../../../app/currentProjectStore'
 import EntryFormDrawer from '../components/EntryFormDrawer'
 import GitImportModal from '../components/GitImportModal'
 import RepoSubscriptionModal from '../components/RepoSubscriptionModal'
@@ -117,11 +116,10 @@ export default function WorklogPage() {
     }
   }
 
-  /** 进入 WORKLOG 项目上下文开 worklog 会话（与 claude 对话记日志） */
+  /** 进入日志空间会话（与 claude 对话记日志）：停留工作日志个人域，不切当前项目 */
   const openSession = () => {
     if (!workspace?.projectId) return
-    setCurrentProject(workspace.projectId)
-    navigate('/sessions')
+    navigate('/worklog/sessions')
   }
   // 周报选中周（周条点击切换）+ 周条窗口回退周数（0=最右为本周，滑动/箭头翻页）
   const [date, setDate] = useState<Dayjs>(dayjs())

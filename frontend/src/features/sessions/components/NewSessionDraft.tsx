@@ -13,16 +13,19 @@ import { showError } from '../../../shared/utils/showError'
 const DEFAULTS = { permissionMode: 'acceptEdits' }
 
 export default function NewSessionDraft({
+  projectId: fixedProjectId,
   onCreated,
   onCancel,
 }: {
+  /** 锁定项目（如 /worklog/sessions 锁定 WORKLOG 空间）；不传则跟随当前项目切换器 */
+  projectId?: string
   onCreated: (s: SessionSummary) => void
   /** 有可选会话时提供「取消」返回选中态 */
   onCancel?: () => void
 }) {
   const [form] = Form.useForm()
-  // ProjectContextGate 保证进入本页必有当前项目
-  const { projectId, project } = useCurrentProject()
+  // ProjectContextGate 保证 /sessions 必有当前项目；锁定项目时以 fixedProjectId 为准
+  const { projectId, project } = useCurrentProject(fixedProjectId)
   // CAP-41：WORKLOG 项目会话无仓库/需求/节点语义（亲和节点锁定、runner 持久工作区），裁剪高级选项
   const worklog = project?.kind === 'WORKLOG'
   const { scenarios, agentNodes, repos, requirements, workItems } = useSessionOptionData(form, projectId)
