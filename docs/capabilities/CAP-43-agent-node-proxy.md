@@ -63,7 +63,9 @@
 "proxy": { "url": "http://127.0.0.1:8443", "scopes": ["git", "claude"] }
 ```
 
-节点未配代理时帧不携带该字段（老 runner 零感知）。
+节点未配代理时：runner <v8 帧不携带该字段（老 runner 零感知）；runner ≥v8 恒携带显式空
+`{"url":"","scopes":[]}`——runner 侧「字段缺席 = 不动 holder」，若缺席则「先配后清」
+永远清不掉 runner 上已生效的代理，显式空帧即清空语义。
 
 ## 6. API 概要
 

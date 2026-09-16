@@ -294,19 +294,27 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
      */
     private void putProxy(Map<String, Object> frame, String nodeId) {
         AgentNodeEntity node = nodeService.require(Long.parseLong(nodeId));
-        if (node == null || node.getProxyUrl() == null || node.getProxyUrl().isBlank()) {
-            return;
-        }
+        boolean configured = node != null && node.getProxyUrl() != null && !node.getProxyUrl().isBlank();
         if (!supports(nodeId, AgentProtocol.NODE_PROXY)) {
-            throw new DevMindException(ErrorCode.CONFLICT,
-                    "节点 " + nodeId + " 已配置外网代理，但 runner 协议版本过低（节点代理需 v"
-                            + AgentProtocol.NODE_PROXY + "+），请到节点页升级 runner（或先清空代理配置）");
+            if (configured) {
+                throw new DevMindException(ErrorCode.CONFLICT,
+                        "节点 " + nodeId + " 已配置外网代理，但 runner 协议版本过低（节点代理需 v"
+                                + AgentProtocol.NODE_PROXY + "+），请到节点页升级 runner（或先清空代理配置）");
+            }
+            return; // 老 runner 且未配置：不带字段（反正不认识）
         }
+        // v8+ runner 恒带 proxy 字段：未配置时显式空 url——runner 侧「字段缺席 = 不动 holder」，
+        // 若缺席则「先配后清」永远清不掉 runner 上已生效的代理（E2E 实测踩中：清空后 push 仍走旧代理）
         Map<String, Object> proxy = new LinkedHashMap<>();
-        proxy.put("url", node.getProxyUrl());
-        String scopes = node.getProxyScopes() == null || node.getProxyScopes().isBlank()
-                ? "git" : node.getProxyScopes();
-        proxy.put("scopes", List.of(scopes.split(",")));
+        if (!configured) {
+            proxy.put("url", "");
+            proxy.put("scopes", List.of());
+        } else {
+            proxy.put("url", node.getProxyUrl());
+            String scopes = node.getProxyScopes() == null || node.getProxyScopes().isBlank()
+                    ? "git" : node.getProxyScopes();
+            proxy.put("scopes", List.of(scopes.split(",")));
+        }
         frame.put("proxy", proxy);
     }
 

@@ -119,6 +119,25 @@ class AgentConnectionRegistryWorklogPushTest {
     }
 
     @Test
+    void emptyProxySentToV8RunnerWhenUnconfigured() throws Exception {
+        // CAP-43 修复回归：v8+ runner 未配置代理时也必须带显式空 proxy——runner 侧
+        // 「字段缺席 = 不动 holder」，缺席会让「先配后清」清不掉 runner 已生效的代理
+        helloWithProtocol(8);
+        Thread caller = new Thread(() ->
+                registry.pushWorklog("7", "alice", "https://git.example.com/u/worklog.git", "main", null));
+        caller.start();
+        Thread.sleep(100);
+        ArgumentCaptor<TextMessage> captor = ArgumentCaptor.forClass(TextMessage.class);
+        verify(ws, atLeastOnce()).sendMessage(captor.capture());
+        String payload = captor.getValue().getPayload();
+        assertTrue(payload.contains("\"proxy\":{\"url\":\"\",\"scopes\":[]}"), payload);
+        String requestId = payload.replaceAll(".*\"requestId\":\"([^\"]+)\".*", "$1");
+        registry.onWorklogPushAck("7", requestId, true, "ok", null);
+        caller.join(10_000);
+        assertFalse(caller.isAlive());
+    }
+
+    @Test
     void ackErrorPropagates() {
         helloWithProtocol(6);
         Thread caller = new Thread(() ->
