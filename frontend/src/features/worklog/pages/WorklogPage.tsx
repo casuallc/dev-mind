@@ -55,7 +55,7 @@ import RepoSubscriptionModal from '../components/RepoSubscriptionModal'
 import ReportEditor from '../components/ReportEditor'
 import WeekDayStrip from '../components/WeekDayStrip'
 import RecentWeekStrip from '../components/RecentWeekStrip'
-import WorklogViewSwitch, { isSessionsView, type WorklogView } from '../components/WorklogViewSwitch'
+import WorklogViewSwitch, { isContextView, isSessionsView, type WorklogView } from '../components/WorklogViewSwitch'
 import SessionsBoard from '../../sessions/pages/SessionsBoard'
 import ProjectContextPage from '../../scenarios/pages/ProjectContextPage'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
@@ -461,10 +461,10 @@ export default function WorklogPage() {
     ),
   }
 
-  // ---- 对话/列表/知识视图：整页渲染内嵌工作台（锁定 WORKLOG 项目），title 放共享视图切换器保证可切回 ----
+  // ---- 对话/对话列表/知识视图：整页渲染内嵌工作台（锁定 WORKLOG 项目），title 放共享视图切换器保证可切回 ----
   const viewSwitch = <WorklogViewSwitch value={view} onChange={setView} />
   const readyProjectId = workspace?.exists && workspace.projectId ? workspace.projectId : null
-  if (isSessionsView(view) || view === 'context') {
+  if (isSessionsView(view) || isContextView(view)) {
     if (!readyProjectId) {
       return (
         <Card style={pageCardStyle} styles={{ body: pageCardBodyScrollStyle }} title={viewSwitch}>
@@ -490,7 +490,12 @@ export default function WorklogPage() {
         onViewChange={(v) => setView(v as WorklogView)}
       />
     ) : (
-      <ProjectContextPage projectId={readyProjectId} title={viewSwitch} />
+      <ProjectContextPage
+        projectId={readyProjectId}
+        title={viewSwitch}
+        view={view}
+        onViewChange={(v) => setView(v as WorklogView)}
+      />
     )
   }
 

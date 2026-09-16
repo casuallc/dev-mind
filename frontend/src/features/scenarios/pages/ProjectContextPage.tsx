@@ -47,16 +47,23 @@ function ExtraTags({ extra }: { extra?: Record<string, unknown> }) {
 export default function ProjectContextPage({
   projectId: fixedProjectId,
   title,
+  view: controlledView,
+  onViewChange,
 }: {
-  /** 锁定项目（如工作日志页「知识」视图锁定 WORKLOG 空间）；不传则跟随当前项目切换器 */
+  /** 锁定项目（如工作日志页「知识条目/文档/Skills」视图锁定 WORKLOG 空间）；不传则跟随当前项目切换器 */
   projectId?: string
-  /** 自定义 Card 标题（内嵌场景传入外层视图切换器）；不传默认「知识」 */
+  /** 自定义 Card 标题（内嵌场景传入外层视图切换器）；不传默认「知识 + 资产视图」 */
   title?: ReactNode
+  /** 受控视图（knowledge/doc/skill 资产 kind）：传入后内层 Segmented 隐藏，由外层切换器驱动 */
+  view?: string
+  onViewChange?: (v: string) => void
 } = {}) {
   const { projectId, project } = useCurrentProject(fixedProjectId)
   const [groups, setGroups] = useState<AssetGroup[]>([])
   const [loading, setLoading] = useState(false)
-  const [view, setView] = useState<string>('knowledge')
+  const [innerView, setInnerView] = useState<string>('knowledge')
+  const view = controlledView ?? innerView
+  const setView = onViewChange ?? setInnerView
 
   const load = useCallback(async () => {
     if (!projectId) return
@@ -83,8 +90,13 @@ export default function ProjectContextPage({
     return [...known, ...unknown]
   }, [groups])
 
-  // 当前视图的数据与元信息；视图无效（如重载后该组消失）时回落到首个可用视图
-  const activeKind = viewOptions.some((o) => o.kind === view) ? view : (viewOptions[0]?.kind ?? view)
+  // 当前视图的数据与元信息；受控时直接用受控值（该 kind 无数据显示空表，外层页签与内容保持一致），
+  // 非受控且视图无效（如重载后该组消失）时回落到首个可用视图
+  const activeKind = controlledView
+    ? controlledView
+    : viewOptions.some((o) => o.kind === view)
+      ? view
+      : (viewOptions[0]?.kind ?? view)
   const activeMeta = GROUP_META.find((m) => m.kind === activeKind) ?? {
     kind: activeKind,
     title: FALLBACK_TITLE,
@@ -115,11 +127,13 @@ export default function ProjectContextPage({
       title={
         <Space size={12}>
           {title ?? <span>知识</span>}
-          <Segmented
-            value={activeKind}
-            onChange={(v) => setView(v as string)}
-            options={viewOptions.map((o) => ({ label: o.title, value: o.kind }))}
-          />
+          {!controlledView && (
+            <Segmented
+              value={activeKind}
+              onChange={(v) => setView(v as string)}
+              options={viewOptions.map((o) => ({ label: o.title, value: o.kind }))}
+            />
+          )}
         </Space>
       }
       extra={
