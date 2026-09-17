@@ -678,7 +678,9 @@ public class ChatManagerService {
                 sb.append("- ").append(name).append('\n');
             }
         }
-        sb.append("后续每轮提问会按内容自动检索该库并附相关分块（<knowledge-context>）。\n</knowledge-base>\n\n");
+        // 注意：概览文本刻意不出现字面 <knowledge-context>——初始 prompt 回显进事件流后，
+        // 「本轮是否注入了检索块」的断言（单测/E2E）靠的是该标签只在真正注入时出现
+        sb.append("后续每轮提问会按内容自动检索该库并附上相关分块供参考。\n</knowledge-base>\n\n");
         return sb.toString();
     }
 

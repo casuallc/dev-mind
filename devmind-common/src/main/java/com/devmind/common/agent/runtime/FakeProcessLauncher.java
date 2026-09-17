@@ -6,10 +6,14 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * 假进程执行器：用内置 {@code fake-agent.js}（Node 脚本）模拟 claude stream-json 行为，
@@ -22,6 +26,7 @@ public class FakeProcessLauncher implements SessionExecutor {
     private static final Logger log = LoggerFactory.getLogger(FakeProcessLauncher.class);
     private static final String SCRIPT_RESOURCE = "/session/fake-agent.js";
 
+    private final ObjectMapper mapper = JsonMapper.builder().build();
     private volatile Path scriptPath;
 
     @Override
@@ -44,7 +49,18 @@ public class FakeProcessLauncher implements SessionExecutor {
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.directory(cwd.toFile());
         pb.redirectErrorStream(false);
-        return pb.start();
+        Process proc = pb.start();
+
+        // 与 CliProcessLauncher 一致：初始 prompt 作首条 user message 写入 stdin（续接不重复下达）。
+        // fake-agent 会回显 → 初始 prompt（含 CAP-46 库概览节等注入内容）在事件流可观测，E2E 可断言
+        if ((ctx.resumeSessionId() == null || ctx.resumeSessionId().isBlank())
+                && ctx.taskSpec() != null && !ctx.taskSpec().isBlank()) {
+            OutputStream out = proc.getOutputStream();
+            out.write((CliProcessLauncher.buildUserMessage(mapper, ctx.taskSpec(), List.of()) + "\n")
+                    .getBytes(StandardCharsets.UTF_8));
+            out.flush();
+        }
+        return proc;
     }
 
     private Path extractScript() throws IOException {
