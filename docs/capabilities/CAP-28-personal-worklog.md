@@ -49,7 +49,8 @@ CAP-06 通知中心（站内提醒）
   author 过滤链 = `git remote get-url origin` 取 host → CAP-24
   `GitIdentityProvider.resolveAuthor(username, host)` → `git log --author=<email>`；
   解析为空则不过滤并 warn（预览人工勾选兜底）；
-  `GET /git/preview` 预览不落库 → `POST /git/import` 导入为 GIT 条目，
+  `GET /git/preview` 预览不落库（支持 `filter=NEW/IMPORTED/ALL(默认)` 按是否已导入过滤，
+  诊断不受 filter 影响；前端弹窗默认传 NEW 且页内分页展示）→ `POST /git/import` 导入为 GIT 条目，
   按 (user_id, repo_id, commit_sha) 幂等去重。
 - **FR-05 AI 日报**：cron（默认每日 18:30）或手动触发
   `POST /api/worklog/daily/generate`；汇总当日 git 扫描 + 条目 → one-shot 会话
@@ -142,7 +143,7 @@ GET    /api/worklog/entries?from=&to=
 POST   /api/worklog/entries                     手动补录
 PUT    /api/worklog/entries/{id}
 DELETE /api/worklog/entries/{id}
-GET    /api/worklog/git/preview?date=           扫描当日 commit（不落库）
+GET    /api/worklog/git/preview?from=&to=&filter= 扫描范围 commit（不落库）；filter=NEW/IMPORTED/ALL(默认)，前端弹窗默认传 NEW
 POST   /api/worklog/git/import {date}           导入为 GIT 条目（幂等去重）
 
 # 日报 / 周报（仅本人；generate 与定时调度共用核心，幂等跳过已存在）

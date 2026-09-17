@@ -1,8 +1,8 @@
-import { Button, Checkbox, DatePicker, Empty, Modal, Space, Table, Tag, Typography, message } from 'antd'
+import { Button, Checkbox, Collapse, DatePicker, Empty, Modal, Segmented, Space, Table, Tag, Typography, message } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useEffect, useState } from 'react'
 import { importGit, previewGit } from '../api'
-import type { GitCommit, GitScanRepoDiag } from '../types'
+import type { GitCommit, GitPreviewFilter, GitScanRepoDiag } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 
@@ -34,6 +34,7 @@ const RANGE_PRESETS: { label: string; value: [Dayjs, Dayjs] }[] = (() => {
 /** CAP-28 FR-04 git 提交导入：预览范围内（按本人 git author 过滤）提交，勾选后按提交实际日期落成工作条目。 */
 export default function GitImportModal({ open, onCancel, onImported }: Props) {
   const [range, setRange] = useState<[Dayjs, Dayjs]>(RANGE_PRESETS[0].value)
+  const [filter, setFilter] = useState<GitPreviewFilter>('NEW')
   const [rows, setRows] = useState<GitCommit[]>([])
   const [diags, setDiags] = useState<GitScanRepoDiag[]>([])
   const [loading, setLoading] = useState(false)
@@ -45,7 +46,7 @@ export default function GitImportModal({ open, onCancel, onImported }: Props) {
 
   const load = () => {
     setLoading(true)
-    previewGit(fromStr, toStr)
+    previewGit(fromStr, toStr, filter)
       .then((res) => {
         setRows(res.commits)
         setDiags(res.repos)
@@ -59,7 +60,7 @@ export default function GitImportModal({ open, onCancel, onImported }: Props) {
   useEffect(() => {
     if (open) load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, fromStr, toStr])
+  }, [open, fromStr, toStr, filter])
 
   const doImport = async () => {
     const items = rows
@@ -110,25 +111,69 @@ export default function GitImportModal({ open, onCancel, onImported }: Props) {
         扫描你勾选过的仓库在所选时间范围内的提交（按你的 git 署名过滤，仅作者为你的提交出现在此），
         导入后条目按提交实际日期落账，工时可逐条编辑补齐。
       </Typography.Paragraph>
-      <DatePicker.RangePicker
-        style={{ marginBottom: 12 }}
-        value={range}
-        allowClear={false}
-        presets={RANGE_PRESETS}
-        disabledDate={(d) => d.isAfter(dayjs(), 'day')}
-        onChange={(r) => {
-          if (r && r[0] && r[1]) setRange([r[0], r[1]])
-        }}
-      />
+      <Space style={{ marginBottom: 12 }} wrap>
+        <DatePicker.RangePicker
+          value={range}
+          allowClear={false}
+          presets={RANGE_PRESETS}
+          disabledDate={(d) => d.isAfter(dayjs(), 'day')}
+          onChange={(r) => {
+            if (r && r[0] && r[1]) setRange([r[0], r[1]])
+          }}
+        />
+        <Segmented<GitPreviewFilter>
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { label: '新增', value: 'NEW' },
+            { label: '已导入', value: 'IMPORTED' },
+            { label: '所有', value: 'ALL' },
+          ]}
+        />
+      </Space>
+      {diags.length > 0 && (
+        <Collapse
+          style={{ marginBottom: 12 }}
+          items={[
+            {
+              key: 'diags',
+              label: (
+                <Typography.Text type="secondary">
+                  扫描详情（{diags.length} 个勾选仓库）
+                </Typography.Text>
+              ),
+              children: (
+                <div>
+                  {diags.map((d) => {
+                    const tag = OUTCOME_TAG[d.outcome] ?? { color: 'default', label: d.outcome }
+                    return (
+                      <div key={d.repoId} style={{ lineHeight: '24px' }}>
+                        <Tag color={tag.color}>{tag.label}</Tag>
+                        <Typography.Text strong>{d.repoName}</Typography.Text>
+                        <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
+                          {d.outcome === 'SCANNED'
+                            ? `${d.commitCount} 条提交${d.authorFilter ? `（署名过滤: ${d.authorFilter}）` : ''}`
+                            : ''}
+                          {d.detail ? `${d.outcome === 'SCANNED' ? '；' : ''}${d.detail}` : ''}
+                        </Typography.Text>
+                      </div>
+                    )
+                  })}
+                </div>
+              ),
+            },
+          ]}
+        />
+      )}
       <Table
         rowKey="sha"
         size="small"
         loading={loading}
         dataSource={rows}
-        pagination={false}
+        pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (t) => `共 ${t} 条` }}
         locale={{
           emptyText: (
-            <Empty description="该范围内没有扫描到你的提交：确认已在「仓库订阅」勾选参与扫描的仓库，且 git 署名与提交一致（见下方扫描详情）" />
+            <Empty description="该范围内没有扫描到你的提交：确认已在「仓库订阅」勾选参与扫描的仓库，且 git 署名与提交一致（见上方扫描详情）" />
           ),
         }}
         columns={[
@@ -170,28 +215,6 @@ export default function GitImportModal({ open, onCancel, onImported }: Props) {
           },
         ]}
       />
-      {diags.length > 0 && (
-        <div style={{ marginTop: 12 }}>
-          <Typography.Text type="secondary">扫描详情（{diags.length} 个勾选仓库）：</Typography.Text>
-          <div style={{ marginTop: 4 }}>
-            {diags.map((d) => {
-              const tag = OUTCOME_TAG[d.outcome] ?? { color: 'default', label: d.outcome }
-              return (
-                <div key={d.repoId} style={{ lineHeight: '24px' }}>
-                  <Tag color={tag.color}>{tag.label}</Tag>
-                  <Typography.Text strong>{d.repoName}</Typography.Text>
-                  <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
-                    {d.outcome === 'SCANNED'
-                      ? `${d.commitCount} 条提交${d.authorFilter ? `（署名过滤: ${d.authorFilter}）` : ''}`
-                      : ''}
-                    {d.detail ? `${d.outcome === 'SCANNED' ? '；' : ''}${d.detail}` : ''}
-                  </Typography.Text>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
     </Modal>
   )
 }

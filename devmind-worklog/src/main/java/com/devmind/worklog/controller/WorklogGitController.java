@@ -35,18 +35,34 @@ public class WorklogGitController {
         this.identity = identity;
     }
 
-    /** 预览：范围内提交 + 每个勾选仓库的扫描诊断（为什么某仓库没有提交出现）。范围上限 62 天。 */
+    /**
+     * 预览：范围内提交 + 每个勾选仓库的扫描诊断（为什么某仓库没有提交出现）。范围上限 62 天。
+     * filter=NEW 只返回未导入 / IMPORTED 只返回已导入 / ALL（默认，兼容旧调用）全部；
+     * 诊断不受 filter 影响。前端导入弹窗默认显式传 NEW。
+     */
     @GetMapping("/preview")
     public GitPreviewResponse preview(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(defaultValue = "ALL") String filter) {
         if (to.isBefore(from)) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "范围结束日不能早于开始日");
         }
         if (from.plusDays(62).isBefore(to)) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "扫描范围最长 62 天");
         }
-        return scanner.scanDetailed(identity.currentActor(), from, to);
+        String f = filter.strip().toUpperCase();
+        if (!f.equals("NEW") && !f.equals("IMPORTED") && !f.equals("ALL")) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "filter 仅支持 NEW/IMPORTED/ALL");
+        }
+        GitPreviewResponse res = scanner.scanDetailed(identity.currentActor(), from, to);
+        if (f.equals("ALL")) {
+            return res;
+        }
+        boolean wantImported = f.equals("IMPORTED");
+        return new GitPreviewResponse(
+                res.commits().stream().filter(c -> c.alreadyImported() == wantImported).toList(),
+                res.repos());
     }
 
     /** @return {created, skipped} */

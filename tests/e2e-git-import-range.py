@@ -73,4 +73,22 @@ st, preview2 = call("GET", f"/api/worklog/git/preview?from={FROM}&to={TO}", toke
 flags = {c["sha"][:7]: c["alreadyImported"] for c in preview2["commits"]}
 assert all(flags[it["commitSha"][:7]] for it in items), flags
 print("== alreadyImported 标记 OK")
+
+# filter 过滤（后端）：缺省=ALL 全量；NEW 排除已导入；IMPORTED 仅已导入；非法值 400
+st, pnew = call("GET", f"/api/worklog/git/preview?from={FROM}&to={TO}&filter=NEW", token=token)
+new_shas = {c["sha"][:7] for c in pnew["commits"]}
+assert st == 200 and not any(it["commitSha"][:7] in new_shas for it in items), new_shas
+assert all(not c["alreadyImported"] for c in pnew["commits"])
+assert len(pnew["repos"]) == len(preview2["repos"]), "诊断不受 filter 影响"
+print("== filter=NEW 仅未导入 OK")
+st, pimp = call("GET", f"/api/worklog/git/preview?from={FROM}&to={TO}&filter=IMPORTED", token=token)
+imp_shas = {c["sha"][:7] for c in pimp["commits"]}
+assert st == 200 and all(it["commitSha"][:7] in imp_shas for it in items), imp_shas
+assert all(c["alreadyImported"] for c in pimp["commits"])
+print("== filter=IMPORTED 仅已导入 OK")
+st, pall = call("GET", f"/api/worklog/git/preview?from={FROM}&to={TO}&filter=ALL", token=token)
+assert st == 200 and len(pall["commits"]) == len(preview2["commits"])
+print("== filter=ALL 与缺省一致 OK")
+st, b = call("GET", f"/api/worklog/git/preview?from={FROM}&to={TO}&filter=BOGUS", token=token)
+print("== filter 非法值 应400 ->", st); assert st == 400, b
 print("ALL PASS")

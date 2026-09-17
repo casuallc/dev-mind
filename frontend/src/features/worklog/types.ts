@@ -100,6 +100,9 @@ export interface GitPreview {
   repos: GitScanRepoDiag[]
 }
 
+/** git 预览过滤（后端过滤）：NEW=仅未导入（默认）/ IMPORTED=仅已导入 / ALL=全部 */
+export type GitPreviewFilter = 'NEW' | 'IMPORTED' | 'ALL'
+
 export interface WorklogSettings {
   autoDaily: boolean
   autoWeekly: boolean

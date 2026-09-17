@@ -6,6 +6,7 @@ import type {
   EntryPayload,
   GenerateAck,
   GitPreview,
+  GitPreviewFilter,
   PushAck,
   TemplateDefaults,
   WeeklyReport,
@@ -34,8 +35,9 @@ export const updateEntry = (id: number, body: EntryPayload) =>
 export const deleteEntry = (id: number) => api.del(`/worklog/entries/${id}`)
 
 // ---- git 扫描导入 ----
-export const previewGit = (from: string, to: string) =>
-  api.get<GitPreview>(`/worklog/git/preview?from=${from}&to=${to}`)
+/** filter：NEW（仅未导入，弹窗默认）/ IMPORTED（仅已导入）/ ALL（后端缺省值）；诊断不受 filter 影响 */
+export const previewGit = (from: string, to: string, filter: GitPreviewFilter = 'NEW') =>
+  api.get<GitPreview>(`/worklog/git/preview?from=${from}&to=${to}&filter=${filter}`)
 export const importGit = (
   items: { repoId: number; commitSha: string; subject: string; date: string; hours?: number }[],
 ) => api.post<{ created: number; skipped: number }>('/worklog/git/import', { items })
