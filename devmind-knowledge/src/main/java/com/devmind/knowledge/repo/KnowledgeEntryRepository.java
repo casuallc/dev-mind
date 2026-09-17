@@ -27,6 +27,8 @@ public interface KnowledgeEntryRepository extends JpaRepository<KnowledgeEntryEn
 
     List<KnowledgeEntryEntity> findByIndexStatus(String indexStatus);
 
+    List<KnowledgeEntryEntity> findByIndexStatusIn(List<String> indexStatuses);
+
     long countByKbId(Long kbId);
 
     @Query("select e from KnowledgeEntryEntity e where e.status = 'active' and (e.scope = 'global' or e.projectId = :projectId) " +
