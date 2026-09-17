@@ -61,6 +61,7 @@
 | [CAP-43](CAP-43-agent-node-proxy.md) | Agent 节点外网代理 | 底座 | 节点级 HTTP 代理配置（URL+按功能勾选 scope git/claude/exec），随 launch/worklog_push/exec/workspace_finalize 帧下发（协议 v8 门控），runner 进程级 holder 注入 git 命令行与子进程 env |
 | [CAP-44](CAP-44-knowledge-base-rag.md) | 知识库容器化与向量检索 | 管理 | 知识库成为一等容器（scope 归属+inject_mode FULL/RAG），条目重构归属并分块向量化（JSON CLOB+Java 余弦，无 pgvector），检索 SPI+降级 LIKE，shared MarkdownEditor（升级 CAP-04，打底 CAP-45/46） |
 | [CAP-45](CAP-45-feishu-knowledge-import.md) | 飞书文档对接 | 管理 | integrations 增 FEISHU（appId/appSecret 双行密文），wiki/docx/doc 拉取+blocks→markdown，手动选文档导入知识库（externalId 判重+contentHash 变更检测+手动重同步），条目走 CAP-44 摄入管线自动索引 |
+| [CAP-46](CAP-46-kb-chat.md) | 知识库 AI 会话 | 会话 | 通用问答绑定知识库：启动注入库概览、每轮提问经 KnowledgeRetriever 检索包 `<knowledge-context>` 前缀注入（无命中/异常原样降级），前端新问答库选择器+库详情发起会话入口 |
 
 ## 依赖关系
 
