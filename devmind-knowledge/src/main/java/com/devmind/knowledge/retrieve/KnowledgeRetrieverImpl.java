@@ -4,14 +4,17 @@ import com.devmind.common.knowledge.KnowledgeRetriever;
 import com.devmind.knowledge.config.KnowledgeProperties;
 import com.devmind.knowledge.embedding.EmbeddingClient;
 import com.devmind.knowledge.embedding.VectorJson;
+import com.devmind.knowledge.model.KnowledgeBaseEntity;
 import com.devmind.knowledge.model.KnowledgeChunkEntity;
 import com.devmind.knowledge.model.KnowledgeEntryEntity;
+import com.devmind.knowledge.repo.KnowledgeBaseRepository;
 import com.devmind.knowledge.repo.KnowledgeChunkRepository;
 import com.devmind.knowledge.repo.KnowledgeEntryRepository;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -30,18 +33,23 @@ public class KnowledgeRetrieverImpl implements KnowledgeRetriever {
     static final int CHUNK_LOAD_LIMIT = 20_000;
     /** LIKE 降级命中内容截断长度 */
     static final int FALLBACK_CONTENT_LEN = 500;
+    /** 库概览条目名清单上限（CAP-46 会话启动注入，防爆上下文） */
+    static final int OVERVIEW_ENTRY_LIMIT = 50;
 
     private final KnowledgeChunkRepository chunkRepo;
     private final KnowledgeEntryRepository entryRepo;
+    private final KnowledgeBaseRepository kbRepo;
     private final EmbeddingClient embeddingClient;
     private final KnowledgeProperties props;
 
     public KnowledgeRetrieverImpl(KnowledgeChunkRepository chunkRepo,
                                   KnowledgeEntryRepository entryRepo,
+                                  KnowledgeBaseRepository kbRepo,
                                   EmbeddingClient embeddingClient,
                                   KnowledgeProperties props) {
         this.chunkRepo = chunkRepo;
         this.entryRepo = entryRepo;
+        this.kbRepo = kbRepo;
         this.embeddingClient = embeddingClient;
         this.props = props;
     }
@@ -65,6 +73,17 @@ public class KnowledgeRetrieverImpl implements KnowledgeRetriever {
             log.warn("知识检索失败（按无命中降级）: kbIds={} err={}", kbIds, e.toString());
             return List.of();
         }
+    }
+
+    @Override
+    public Optional<KbOverview> overview(long kbId) {
+        return kbRepo.findById(kbId)
+                .filter(kb -> KnowledgeBaseEntity.STATUS_ACTIVE.equals(kb.getStatus()))
+                .map(kb -> new KbOverview(kb.getName(), kb.getDescription(), kb.getInjectMode(),
+                        entryRepo.findByKbIdAndStatusOrderByCreatedAtDesc(kbId, "active").stream()
+                                .limit(OVERVIEW_ENTRY_LIMIT)
+                                .map(KnowledgeEntryEntity::getName)
+                                .toList()));
     }
 
     private List<RetrievedChunk> vectorRetrieve(List<Long> kbIds, String query, int limit) {

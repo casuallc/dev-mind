@@ -1,6 +1,7 @@
 package com.devmind.common.knowledge;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * CAP-44 知识库检索 SPI：devmind-knowledge 实现，消费方（CAP-46 会话每轮注入、
@@ -24,8 +25,18 @@ public interface KnowledgeRetriever {
     List<RetrievedChunk> retrieve(List<Long> kbIds, String query, int topK);
 
     /**
+     * CAP-46 FR-02：库概览（会话启动注入用）。库不存在/已归档 → empty。
+     *
+     * @param entryNames 库内 active 条目名（创建时间倒序，实现侧截断上限）
+     */
+    Optional<KbOverview> overview(long kbId);
+
+    /**
      * @param score 向量余弦相似度；LIKE 降级命中为 0
      */
     record RetrievedChunk(Long entryId, String entryName, Long kbId, String content, double score) {
+    }
+
+    record KbOverview(String name, String description, String injectMode, List<String> entryNames) {
     }
 }

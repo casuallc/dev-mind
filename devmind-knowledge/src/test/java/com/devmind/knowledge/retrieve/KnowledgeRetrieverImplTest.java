@@ -1,16 +1,20 @@
 package com.devmind.knowledge.retrieve;
 
+import com.devmind.common.knowledge.KnowledgeRetriever.KbOverview;
 import com.devmind.common.knowledge.KnowledgeRetriever.RetrievedChunk;
 import com.devmind.knowledge.config.KnowledgeProperties;
 import com.devmind.knowledge.embedding.EmbeddingClient;
 import com.devmind.knowledge.embedding.EmbeddingException;
 import com.devmind.knowledge.embedding.MockEmbeddingClient;
 import com.devmind.knowledge.embedding.VectorJson;
+import com.devmind.knowledge.model.KnowledgeBaseEntity;
 import com.devmind.knowledge.model.KnowledgeChunkEntity;
 import com.devmind.knowledge.model.KnowledgeEntryEntity;
+import com.devmind.knowledge.repo.KnowledgeBaseRepository;
 import com.devmind.knowledge.repo.KnowledgeChunkRepository;
 import com.devmind.knowledge.repo.KnowledgeEntryRepository;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -18,6 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -35,6 +41,7 @@ class KnowledgeRetrieverImplTest {
 
     private KnowledgeChunkRepository chunkRepo;
     private KnowledgeEntryRepository entryRepo;
+    private KnowledgeBaseRepository kbRepo;
     private EmbeddingClient embeddingClient;
     private KnowledgeRetrieverImpl retriever;
 
@@ -42,9 +49,10 @@ class KnowledgeRetrieverImplTest {
     void setUp() {
         chunkRepo = mock(KnowledgeChunkRepository.class);
         entryRepo = mock(KnowledgeEntryRepository.class);
+        kbRepo = mock(KnowledgeBaseRepository.class);
         embeddingClient = mock(EmbeddingClient.class);
         KnowledgeProperties props = new KnowledgeProperties();
-        retriever = new KnowledgeRetrieverImpl(chunkRepo, entryRepo, embeddingClient, props);
+        retriever = new KnowledgeRetrieverImpl(chunkRepo, entryRepo, kbRepo, embeddingClient, props);
         lenient().when(embeddingClient.available()).thenReturn(true);
         lenient().when(embeddingClient.embed(anyList()))
                 .thenAnswer(inv -> MOCK.embed(inv.getArgument(0)));
@@ -76,7 +84,7 @@ class KnowledgeRetrieverImplTest {
         // 本用例验证排序/过滤逻辑而非 mock 向量质量
         KnowledgeProperties props = new KnowledgeProperties();
         props.getEmbedding().setThreshold(0.5);
-        retriever = new KnowledgeRetrieverImpl(chunkRepo, entryRepo, embeddingClient, props);
+        retriever = new KnowledgeRetrieverImpl(chunkRepo, entryRepo, kbRepo, embeddingClient, props);
 
         List<KnowledgeChunkEntity> chunks = List.of(
                 chunk(1, 10, 0, "前端构建规范与产物说明"),
@@ -140,5 +148,41 @@ class KnowledgeRetrieverImplTest {
         when(embeddingClient.embed(anyList())).thenThrow(new EmbeddingException("boom"));
 
         assertEquals(List.of(), retriever.retrieve(List.of(10L), "q", 8), "检索异常按无命中降级");
+    }
+
+    @Test
+    void overviewOfActiveKbListsEntryNames() {
+        KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
+        kb.setName("研发规范库");
+        kb.setDescription("团队研发规范");
+        kb.setInjectMode("RAG");
+        kb.setStatus(KnowledgeBaseEntity.STATUS_ACTIVE);
+        when(kbRepo.findById(10L)).thenReturn(Optional.of(kb));
+        when(entryRepo.findByKbIdAndStatusOrderByCreatedAtDesc(10L, "active")).thenReturn(List.of(
+                entry(1, 10, "新条目", "active"),
+                entry(2, 10, "旧条目", "active"),
+                entry(3, 10, "废弃条目", "deprecated")));
+
+        Optional<KbOverview> overview = retriever.overview(10L);
+
+        assertTrue(overview.isPresent());
+        assertEquals("研发规范库", overview.get().name());
+        assertEquals("团队研发规范", overview.get().description());
+        assertEquals("RAG", overview.get().injectMode());
+        assertEquals(List.of("新条目", "旧条目", "废弃条目"), overview.get().entryNames(),
+                "按创建时间倒序取回（截断由 SQL/实现侧 limit 处理，测试桩少于上限即全量）");
+    }
+
+    @Test
+    void overviewOfMissingOrArchivedKbIsEmpty() {
+        when(kbRepo.findById(anyLong())).thenReturn(Optional.empty());
+        assertTrue(retriever.overview(99L).isEmpty(), "库不存在 → empty");
+
+        KnowledgeBaseEntity archived = new KnowledgeBaseEntity();
+        archived.setName("归档库");
+        archived.setStatus("archived");
+        when(kbRepo.findById(11L)).thenReturn(Optional.of(archived));
+        assertTrue(retriever.overview(11L).isEmpty(), "已归档 → empty");
+        verify(entryRepo, never()).findByKbIdAndStatusOrderByCreatedAtDesc(eq(11L), any());
     }
 }
