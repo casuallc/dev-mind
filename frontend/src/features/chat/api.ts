@@ -11,6 +11,8 @@ export interface CreateChatPayload {
   agentNodeId?: string
   /** CAP-33 FR-05：场景 code；骨架渲染为开场 prompt，绑定资产注入沙箱 */
   scenarioCode?: string
+  /** CAP-46：绑定的知识库 id；启动注入库概览、每轮检索注入 <knowledge-context> */
+  knowledgeBaseId?: number
 }
 
 export const createChat = (p: CreateChatPayload) => api.post<ChatSummary>('/chats', p)

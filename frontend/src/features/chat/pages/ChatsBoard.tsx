@@ -1,6 +1,8 @@
 // AI 问答工作台（CAP-30）：默认对话视图（左侧问答列表 + 右侧对话交互，shared ChatPanel, apiBase=/chats），可切换表格列表视图。
 // 与项目会话完全分开：无项目/仓库/Diff/详情页，问答在干净沙箱运行，按创建人隔离。
+// CAP-46：?kbId=<id> 跳入（知识库详情「发起会话」）→ 新问答草稿预选该库；绑库问答标题区显示库名标签。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Badge, Button, Card, Input, Modal, Segmented, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
@@ -19,6 +21,8 @@ import ChatListPane from '../components/ChatListPane'
 import NewChatDraft from '../components/NewChatDraft'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
+import { listBases } from '../../knowledge/api'
+import type { KnowledgeBase } from '../../knowledge/types'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
@@ -36,14 +40,17 @@ function sortForBoard(list: ChatSummary[]): ChatSummary[] {
 export default function ChatsBoard() {
   const [chats, setChats] = useState<ChatSummary[]>([])
   const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([])
   const [loading, setLoading] = useState(false)
   const [view, setView] = useState<string>('chat') // chat | list
   const [status, setStatus] = useState('ALL')
   const [keyword, setKeyword] = useState('')
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
   const [draft, setDraft] = useState(false)
+  const [draftKbId, setDraftKbId] = useState<number | undefined>(undefined)
   const [streamMeta, setStreamMeta] = useState<StreamMeta>({ connected: false, fatal: false })
   const autoPickedRef = useRef(false)
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const load = useCallback(async () => {
     try {
@@ -67,7 +74,20 @@ export default function ChatsBoard() {
     listAgentNodes()
       .then(setAgentNodes)
       .catch(() => undefined)
+    listBases()
+      .then(setKnowledgeBases)
+      .catch(() => undefined)
   }, [])
+
+  // CAP-46 FR-04：?kbId=<id> 跳入（知识库详情「发起会话」）→ 进入草稿态并预选该库，参数消费后清掉
+  useEffect(() => {
+    const kb = Number(searchParams.get('kbId'))
+    if (!Number.isFinite(kb) || kb <= 0) return
+    setView('chat')
+    setDraftKbId(kb)
+    setDraft(true)
+    setSearchParams({}, { replace: true })
+  }, [searchParams, setSearchParams])
 
   // 首次加载后自动选中：有问答选排序第一个，否则直接进入新问答草稿态
   useEffect(() => {
@@ -82,6 +102,7 @@ export default function ChatsBoard() {
     async (c: ChatSummary) => {
       await load()
       setDraft(false)
+      setDraftKbId(undefined)
       setSelectedId(c.id)
     },
     [load],
@@ -271,11 +292,13 @@ export default function ChatsBoard() {
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           {draft ? (
             <NewChatDraft
+              presetKbId={draftKbId}
               onCreated={onDraftCreated}
               onCancel={
                 selectedId || chats.length > 0
                   ? () => {
                       setDraft(false)
+                      setDraftKbId(undefined)
                       if (!selectedId && chats.length > 0) setSelectedId(sortForBoard(chats)[0].id)
                     }
                   : undefined
@@ -300,6 +323,12 @@ export default function ChatsBoard() {
                   </Typography.Text>
                   <Typography.Text code>{current.id}</Typography.Text>
                   <Tag color={stateColor[current.state] ?? 'default'}>{current.state}</Tag>
+                  {current.knowledgeBaseId != null && (
+                    <Tag color="purple">
+                      知识库：{knowledgeBases.find((b) => b.id === current.knowledgeBaseId)?.name ??
+                        `#${current.knowledgeBaseId}`}
+                    </Tag>
+                  )}
                   <Badge
                     status={streamMeta.connected ? 'success' : streamMeta.fatal ? 'default' : 'processing'}
                     text={streamMeta.connected ? '实时' : streamMeta.fatal ? '历史(终态)' : '连接中…'}

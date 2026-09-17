@@ -1,5 +1,5 @@
 // 新问答草稿态：输入框直接开问——首条消息即开场提问，发送即创建问答。
-// 高级选项：场景（CAP-33）/执行节点/模型/权限模式（无项目/仓库，与项目会话完全分开），收进 Popover。
+// 高级选项：知识库（CAP-46）/场景（CAP-33）/执行节点/模型/权限模式（无项目/仓库，与项目会话完全分开），收进 Popover。
 import { useEffect, useMemo, useState } from 'react'
 import { Badge, Button, Empty, Form, Input, Popover, Select, Space, message } from 'antd'
 import { SendOutlined, SettingOutlined } from '@ant-design/icons'
@@ -9,6 +9,8 @@ import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
 import { listScenarios } from '../../scenarios/api'
 import type { Scenario } from '../../scenarios/types'
+import { listBases } from '../../knowledge/api'
+import type { KnowledgeBase } from '../../knowledge/types'
 import { showError } from '../../../shared/utils/showError'
 
 const DEFAULTS = { permissionMode: 'acceptEdits' }
@@ -16,14 +18,18 @@ const DEFAULTS = { permissionMode: 'acceptEdits' }
 export default function NewChatDraft({
   onCreated,
   onCancel,
+  presetKbId,
 }: {
   onCreated: (c: ChatSummary) => void
   /** 有可选问答时提供「取消」返回选中态 */
   onCancel?: () => void
+  /** CAP-46 FR-04：从知识库详情「发起会话」跳入时预选该库 */
+  presetKbId?: number
 }) {
   const [form] = Form.useForm()
   const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
   const [scenarios, setScenarios] = useState<Scenario[]>([])
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([])
   const [text, setText] = useState('')
   const [creating, setCreating] = useState(false)
   const [optionsOpen, setOptionsOpen] = useState(false)
@@ -36,7 +42,18 @@ export default function NewChatDraft({
     listScenarios(true)
       .then(setScenarios)
       .catch(() => undefined)
+    listBases()
+      .then(setKnowledgeBases)
+      .catch(() => undefined)
   }, [])
+
+  // 预选知识库（库详情「发起会话」跳入）：active 库直接选中，失效（归档/删除）则忽略
+  useEffect(() => {
+    if (presetKbId == null || knowledgeBases.length === 0) return
+    if (knowledgeBases.some((b) => b.id === presetKbId && b.status === 'active')) {
+      form.setFieldValue('knowledgeBaseId', presetKbId)
+    }
+  }, [presetKbId, knowledgeBases, form])
 
   // 有任意非默认选项时给入口加徽标点
   const hasCustomOptions = useMemo(
@@ -45,6 +62,7 @@ export default function NewChatDraft({
         values.model ||
           values.scenarioCode ||
           values.agentNodeId ||
+          values.knowledgeBaseId ||
           (values.permissionMode && values.permissionMode !== DEFAULTS.permissionMode),
       ),
     [values],
@@ -62,6 +80,7 @@ export default function NewChatDraft({
         permissionMode: v.permissionMode || undefined,
         agentNodeId: v.agentNodeId || undefined,
         scenarioCode: v.scenarioCode || undefined,
+        knowledgeBaseId: v.knowledgeBaseId || undefined,
       })
       message.success(`问答已创建：${c.id}`)
       setText('')
@@ -77,6 +96,24 @@ export default function NewChatDraft({
   const optionsForm = (
     <div style={{ width: 340 }}>
       <Form form={form} layout="vertical" size="small" initialValues={DEFAULTS}>
+        <Form.Item
+          label="知识库"
+          name="knowledgeBaseId"
+          extra="绑定后：启动注入库概览，每轮提问自动检索库内相关内容注入（CAP-46）"
+          style={{ marginBottom: 12 }}
+        >
+          <Select
+            allowClear
+            placeholder="（可选）绑定知识库"
+            options={knowledgeBases
+              .filter((b) => b.status === 'active')
+              .map((b) => ({
+                value: b.id,
+                label: `${b.name}（${b.injectMode} · ${b.entryCount} 条）`,
+              }))}
+            notFoundContent="暂无可用知识库（知识库 → 新建）"
+          />
+        </Form.Item>
         <Form.Item
           label="场景"
           name="scenarioCode"

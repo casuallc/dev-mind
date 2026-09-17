@@ -19,4 +19,6 @@ export interface ChatSummary {
   createdAt: string
   updatedAt: string
   finishedAt?: string
+  /** CAP-46：绑定的知识库 id；空 = 普通问答 */
+  knowledgeBaseId?: number | null
 }
