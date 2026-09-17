@@ -25,7 +25,8 @@ import DeploymentsPage from '../features/deploy/pages/DeploymentsPage'
 import ReleasesPage from '../features/deploy/pages/ReleasesPage'
 import TestsPage from '../features/test/pages/TestsPage'
 import NotificationCenter from '../features/notifications/pages/NotificationCenter'
-import KnowledgeBase from '../features/knowledge/pages/KnowledgeBase'
+import KnowledgeBaseList from '../features/knowledge/pages/KnowledgeBaseList'
+import KnowledgeBaseDetail from '../features/knowledge/pages/KnowledgeBaseDetail'
 import SkillsPage from '../features/skills/pages/SkillsPage'
 import DocsPage from '../features/docs/pages/DocsPage'
 import DocEditorPage from '../features/docs/pages/DocEditorPage'
@@ -153,8 +154,9 @@ export default function App() {
           {/* CAP-33 场景（会话模板的升级形态；/admin/templates 旧路径重定向） */}
           <Route path="/admin/scenarios" element={<ScenariosPage />} />
           <Route path="/admin/templates" element={<Navigate to="/admin/scenarios" replace />} />
-          {/* CAP-04 知识库 */}
-          <Route path="/admin/knowledge" element={<KnowledgeBase />} />
+          {/* CAP-04 知识库（CAP-44 库容器化：列表 + 详情） */}
+          <Route path="/admin/knowledge" element={<KnowledgeBaseList />} />
+          <Route path="/admin/knowledge/bases/:id" element={<KnowledgeBaseDetail />} />
           {/* Skill 管理（基础模块，供其他业务引用） */}
           <Route path="/admin/skills" element={<SkillsPage />} />
           {/* CAP-03 文档 */}

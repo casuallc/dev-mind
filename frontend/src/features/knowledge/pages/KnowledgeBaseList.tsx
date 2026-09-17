@@ -1,5 +1,7 @@
-// CAP-04 知识库：条目管理 + 经验提案 inbox + 注入内容预览。
+// CAP-44 知识库列表：库容器管理（新建/编辑/删除）+ 经验提案 inbox + 注入内容预览。
+// 条目管理与检索测试在库详情页（/admin/knowledge/bases/:id）。
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { canWrite } from '../../auth/authStore'
 import {
   Button,
@@ -17,54 +19,59 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import {
-  BulbOutlined,
-  PlusOutlined,
-  ReloadOutlined,
-  SearchOutlined,
-} from '@ant-design/icons'
+import { BulbOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { listProjects } from '../../projects/api'
 import type { Project } from '../../projects/types'
 import {
   adoptProposal,
-  createEntry,
+  createBase,
   createProposal,
-  deleteEntry,
-  listEntries,
+  deleteBase,
+  listBases,
   listProposals,
   previewInjection,
   rejectProposal,
-  updateEntry,
+  updateBase,
 } from '../api'
-import type { KnowledgeEntry, KnowledgeEntryInput, KnowledgeProposal, PreviewResult } from '../types'
+import type {
+  InjectMode,
+  KnowledgeBase,
+  KnowledgeBaseInput,
+  KnowledgeProposal,
+  PreviewResult,
+} from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 const scopeTag = (s: string) => (s === 'global' ? <Tag color="blue">global</Tag> : <Tag>project</Tag>)
+const injectModeTag = (m: InjectMode) =>
+  m === 'FULL' ? <Tag color="geekblue">FULL 全量注入</Tag> : <Tag color="purple">RAG 检索</Tag>
+const baseStatusTag = (s: string) =>
+  s === 'active' ? <Tag color="green">active</Tag> : <Tag>archived</Tag>
 const statusTag = (s: string) =>
-  s === 'active' ? <Tag color="green">active</Tag> : s === 'deprecated' ? <Tag>deprecated</Tag> : <Tag color="orange">{s}</Tag>
+  s === 'active' ? <Tag color="green">active</Tag> : s === 'open' ? <Tag color="gold">open</Tag>
+    : s === 'adopted' ? <Tag color="green">adopted</Tag> : s === 'rejected' ? <Tag>rejected</Tag>
+    : s === 'deprecated' ? <Tag>deprecated</Tag> : <Tag color="orange">{s}</Tag>
 
-export default function KnowledgeBase() {
+export default function KnowledgeBaseList() {
   const [projects, setProjects] = useState<Project[]>([])
-  const [entries, setEntries] = useState<KnowledgeEntry[]>([])
-  const [entriesLoading, setEntriesLoading] = useState(false)
+  const [bases, setBases] = useState<KnowledgeBase[]>([])
+  const [basesLoading, setBasesLoading] = useState(false)
   const [proposals, setProposals] = useState<KnowledgeProposal[]>([])
   const [proposalsLoading, setProposalsLoading] = useState(false)
-  const [searchQ, setSearchQ] = useState('')
-  const [scopeFilter, setScopeFilter] = useState<string>('')
-  const [view, setView] = useState<string>('entries') // entries | proposals | preview
+  const [view, setView] = useState<string>('bases') // bases | proposals | preview
 
   // 提案管理抽屉：引用实时列表数据，状态变化自动反映
   const [manageId, setManageId] = useState<number | null>(null)
   const manageProposal = manageId != null ? proposals.find((p) => p.id === manageId) ?? null : null
 
-  // 条目编辑
-  const [entryModalOpen, setEntryModalOpen] = useState(false)
-  const [editingEntry, setEditingEntry] = useState<KnowledgeEntry | null>(null)
-  const [entryForm] = Form.useForm<KnowledgeEntryInput>()
+  // 库编辑
+  const [baseModalOpen, setBaseModalOpen] = useState(false)
+  const [editingBase, setEditingBase] = useState<KnowledgeBase | null>(null)
+  const [baseForm] = Form.useForm<KnowledgeBaseInput>()
   const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null)
   const [previewForm] = Form.useForm()
 
@@ -72,25 +79,16 @@ export default function KnowledgeBase() {
   const [proposalModalOpen, setProposalModalOpen] = useState(false)
   const [proposalForm] = Form.useForm()
 
-  const loadEntries = useCallback(async (q = searchQ, scope = scopeFilter) => {
-    setEntriesLoading(true)
+  const loadBases = useCallback(async () => {
+    setBasesLoading(true)
     try {
-      setEntries(
-        q.trim()
-          ? await listEntries().then((all) =>
-              all.filter(
-                (e) =>
-                  (e.name + e.contentMd + e.tags.join(',')).toLowerCase().includes(q.trim().toLowerCase()),
-              ),
-            )
-          : await listEntries({ scope: scope || undefined }),
-      )
+      setBases(await listBases())
     } catch (e) {
-      showError(e, '加载条目失败')
+      showError(e, '加载知识库失败')
     } finally {
-      setEntriesLoading(false)
+      setBasesLoading(false)
     }
-  }, [searchQ, scopeFilter])
+  }, [])
 
   const loadProposals = useCallback(async (status?: string) => {
     setProposalsLoading(true)
@@ -107,60 +105,63 @@ export default function KnowledgeBase() {
     listProjects()
       .then(setProjects)
       .catch(() => undefined)
-    loadEntries()
+    loadBases()
     loadProposals()
-  }, [loadEntries, loadProposals])
+  }, [loadBases, loadProposals])
 
-  const openCreateEntry = () => {
-    setEditingEntry(null)
-    entryForm.resetFields()
-    entryForm.setFieldsValue({ scope: 'global', status: 'active', tags: [] })
-    setEntryModalOpen(true)
+  const openCreateBase = () => {
+    setEditingBase(null)
+    baseForm.resetFields()
+    baseForm.setFieldsValue({ scope: 'global', injectMode: 'RAG', status: 'active' })
+    setBaseModalOpen(true)
   }
 
-  const openEditEntry = (e: KnowledgeEntry) => {
-    setEditingEntry(e)
-    entryForm.setFieldsValue({
-      scope: e.scope,
-      projectId: e.projectId ?? undefined,
-      name: e.name,
-      contentMd: e.contentMd,
-      tags: e.tags,
-      status: e.status,
+  const openEditBase = (b: KnowledgeBase) => {
+    setEditingBase(b)
+    baseForm.setFieldsValue({
+      name: b.name,
+      description: b.description ?? undefined,
+      scope: b.scope,
+      projectId: b.projectId ?? undefined,
+      injectMode: b.injectMode,
+      status: b.status,
     })
-    setEntryModalOpen(true)
+    setBaseModalOpen(true)
   }
 
-  const onSaveEntry = async () => {
-    const v = await entryForm.validateFields()
+  const onSaveBase = async () => {
+    const v = await baseForm.validateFields()
     try {
-      if (editingEntry) {
-        await updateEntry(editingEntry.id, v)
-        message.success('条目已更新')
+      if (editingBase) {
+        await updateBase(editingBase.id, v)
+        message.success('知识库已更新')
       } else {
-        await createEntry(v)
-        message.success('条目已创建')
+        await createBase(v)
+        message.success('知识库已创建')
       }
-      setEntryModalOpen(false)
-      loadEntries()
+      setBaseModalOpen(false)
+      loadBases()
     } catch (e) {
       showError(e, '保存失败')
     }
   }
 
-  const onDeleteEntry = (e: KnowledgeEntry) => {
+  const onDeleteBase = (b: KnowledgeBase) => {
     Modal.confirm({
       centered: true,
-      title: `删除条目「${e.name}」？`,
-      content: '删除后无法恢复（不影响已生成的会话）。',
+      title: `删除知识库「${b.name}」？`,
+      content:
+        b.entryCount > 0
+          ? `库内还有 ${b.entryCount} 个条目，确认后将连同条目与索引一并删除，无法恢复。`
+          : '删除后无法恢复。',
       okText: '删除',
       okButtonProps: { danger: true },
       cancelText: '取消',
       onOk: async () => {
         try {
-          await deleteEntry(e.id)
+          await deleteBase(b.id, b.entryCount > 0)
           message.success('已删除')
-          loadEntries()
+          loadBases()
         } catch (err) {
           showError(err, '删除失败')
         }
@@ -174,8 +175,8 @@ export default function KnowledgeBase() {
       title: `采纳「${p.title}」${target === 'global' ? '到全局' : '到项目'}`,
       content:
         target === 'global'
-          ? '将作为 global 经验条目，后续所有项目会话都可能注入。'
-          : `将创建 project 范围条目（项目 ${p.targetProjectId ?? '待定'}）。`,
+          ? '将作为全局经验条目进入经验库，后续所有项目会话都可能注入。'
+          : `将进入项目经验库（项目 ${p.targetProjectId ?? '待定'}）。`,
       okText: '采纳',
       cancelText: '取消',
       onOk: async () => {
@@ -184,6 +185,7 @@ export default function KnowledgeBase() {
           message.success('已采纳为知识条目')
           setManageId(null)
           loadProposals()
+          loadBases()
         } catch (err) {
           showError(err, '采纳失败')
         }
@@ -215,8 +217,7 @@ export default function KnowledgeBase() {
   const onPreview = async () => {
     const v = await previewForm.validateFields()
     try {
-      const r = await previewInjection(v.projectId, v.taskSpec)
-      setPreviewResult(r)
+      setPreviewResult(await previewInjection(v.projectId, v.taskSpec))
     } catch (e) {
       showError(e, '预览失败')
     }
@@ -240,29 +241,35 @@ export default function KnowledgeBase() {
     }
   }
 
-  const entryColumns: ColumnsType<KnowledgeEntry> = [
-    { title: '名称', dataIndex: 'name', ellipsis: true },
+  const baseColumns: ColumnsType<KnowledgeBase> = [
+    {
+      title: '名称',
+      dataIndex: 'name',
+      ellipsis: true,
+      render: (v: string, r) => <Link to={`/admin/knowledge/bases/${r.id}`}>{v}</Link>,
+    },
     { title: '范围', dataIndex: 'scope', width: 90, render: scopeTag },
     {
-      title: '标签',
-      dataIndex: 'tags',
-      width: 180,
-      render: (tags: string[]) =>
-        tags.length ? tags.map((t) => <Tag key={t}>{t}</Tag>) : <Typography.Text type="secondary">-</Typography.Text>,
+      title: '所属项目',
+      dataIndex: 'projectName',
+      width: 140,
+      ellipsis: true,
+      render: (v, r) => (r.scope === 'project' ? v ?? r.projectId ?? '-' : '-'),
     },
-    { title: '项目', dataIndex: 'projectId', width: 110, render: (v) => v ?? '-' },
-    { title: '注入次数', dataIndex: 'hitCount', width: 90 },
-    { title: '状态', dataIndex: 'status', width: 100, render: statusTag },
+    { title: '注入模式', dataIndex: 'injectMode', width: 130, render: injectModeTag },
+    { title: '条目数', dataIndex: 'entryCount', width: 80 },
+    { title: '分块数', dataIndex: 'chunkCount', width: 80 },
+    { title: '状态', dataIndex: 'status', width: 90, render: baseStatusTag },
     { title: '更新时间', dataIndex: 'updatedAt', width: 170, render: (v) => fmtTime(v) },
     {
       title: '操作',
       width: 130,
       render: (_, r) => (
         <Space size={4}>
-          <Button size="small" onClick={() => openEditEntry(r)}>
+          <Button size="small" onClick={() => openEditBase(r)}>
             编辑
           </Button>
-          <Button size="small" danger onClick={() => onDeleteEntry(r)}>
+          <Button size="small" danger onClick={() => onDeleteBase(r)}>
             删除
           </Button>
         </Space>
@@ -303,7 +310,7 @@ export default function KnowledgeBase() {
             value={view}
             onChange={setView}
             options={[
-              { value: 'entries', label: '知识条目' },
+              { value: 'bases', label: '知识库' },
               { value: 'proposals', label: '经验提案' },
               { value: 'preview', label: '注入预览' },
             ]}
@@ -312,37 +319,14 @@ export default function KnowledgeBase() {
       }
       extra={
         <Space wrap>
-          {view === 'entries' && (
+          {view === 'bases' && (
             <>
-              <Input
-                allowClear
-                prefix={<SearchOutlined />}
-                placeholder="搜索名称/内容/标签"
-                style={{ width: 220 }}
-                value={searchQ}
-                onChange={(e) => setSearchQ(e.target.value)}
-                onPressEnter={() => loadEntries(searchQ, scopeFilter)}
-              />
-              <Select
-                allowClear
-                placeholder="范围"
-                style={{ width: 110 }}
-                value={scopeFilter || undefined}
-                onChange={(v) => {
-                  setScopeFilter(v ?? '')
-                  loadEntries(searchQ, v ?? '')
-                }}
-                options={[
-                  { value: 'global', label: 'global' },
-                  { value: 'project', label: 'project' },
-                ]}
-              />
-              <Button icon={<ReloadOutlined />} onClick={() => loadEntries()}>
+              <Button icon={<ReloadOutlined />} onClick={loadBases}>
                 刷新
               </Button>
               {canWrite() && (
-                <Button type="primary" icon={<PlusOutlined />} onClick={openCreateEntry}>
-                  新增条目
+                <Button type="primary" icon={<PlusOutlined />} onClick={openCreateBase}>
+                  新建知识库
                 </Button>
               )}
             </>
@@ -360,27 +344,28 @@ export default function KnowledgeBase() {
         </Space>
       }
     >
-      {view === 'entries' && (
+      {view === 'bases' && (
         <>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-            知识条目在会话启动时按项目/标签匹配注入，分 global（所有项目）与 project（本项目）两种范围。
+            知识库是条目的容器：FULL 库（经验库）在会话启动时全量注入 CLAUDE.md，RAG 库只做向量检索按召回内容。
+            点库名进入条目管理与检索测试。
           </Typography.Paragraph>
           <Table
             rowKey="id"
-            loading={entriesLoading}
-            columns={entryColumns}
-            dataSource={entries}
+            loading={basesLoading}
+            columns={baseColumns}
+            dataSource={bases}
             pagination={LIST_PAGINATION}
             locale={{
               emptyText: (
                 <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
                   <Typography.Text type="secondary">
-                    暂无知识条目——点击「新增条目」创建第一条，或在「经验提案」中采纳沉淀的经验。
+                    暂无知识库——点击「新建知识库」创建一个 RAG 库沉淀文档，或在「经验提案」采纳沉淀的经验。
                   </Typography.Text>
                   {canWrite() && (
                     <div>
-                      <Button type="primary" icon={<PlusOutlined />} onClick={openCreateEntry}>
-                        新增条目
+                      <Button type="primary" icon={<PlusOutlined />} onClick={openCreateBase}>
+                        新建知识库
                       </Button>
                     </div>
                   )}
@@ -394,7 +379,7 @@ export default function KnowledgeBase() {
       {view === 'proposals' && (
         <>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-            会话中「沉淀经验」或手动提交的经验，审核后进入知识库（inbox）。
+            会话中「沉淀经验」或手动提交的经验，审核采纳后进入对应经验库（inbox）。
           </Typography.Paragraph>
           <Table
             rowKey="id"
@@ -413,7 +398,7 @@ export default function KnowledgeBase() {
       {view === 'preview' && (
         <>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-            选择项目与任务说明，预览会话启动时实际注入的知识内容。
+            选择项目与任务说明，预览会话启动时实际注入的知识内容（FULL 库条目）。
           </Typography.Paragraph>
           <Space direction="vertical" style={{ width: '100%' }}>
             <Form form={previewForm} layout="inline">
@@ -504,28 +489,25 @@ export default function KnowledgeBase() {
         </Drawer>
       )}
 
-      {/* 条目编辑抽屉 */}
-      <Drawer
-        title={editingEntry ? '编辑条目' : '新增条目'}
-        open={entryModalOpen}
-        onClose={() => setEntryModalOpen(false)}
-        width={640}
-        footer={
-          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <Button onClick={() => setEntryModalOpen(false)}>取消</Button>
-            <Button type="primary" onClick={onSaveEntry}>保存</Button>
-          </Space>
-        }
+      {/* 库编辑弹窗 */}
+      <Modal
+        title={editingBase ? '编辑知识库' : '新建知识库'}
+        open={baseModalOpen}
+        onCancel={() => setBaseModalOpen(false)}
+        onOk={onSaveBase}
       >
-        <Form form={entryForm} labelCol={{ span: 5 }} wrapperCol={{ span: 18 }}>
+        <Form form={baseForm} labelCol={{ span: 5 }} wrapperCol={{ span: 18 }}>
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请填写名称' }]}>
-            <Input placeholder="如：AntD 表格固定列写法" />
+            <Input placeholder="如：前端规范库" />
+          </Form.Item>
+          <Form.Item name="description" label="描述">
+            <Input placeholder="这个库装什么？（可选）" />
           </Form.Item>
           <Form.Item name="scope" label="范围" rules={[{ required: true }]}>
             <Select
               options={[
-                { value: 'global', label: 'global（所有项目可注入）' },
-                { value: 'project', label: 'project（本项目注入）' },
+                { value: 'global', label: 'global（全局可用）' },
+                { value: 'project', label: 'project（指定项目）' },
               ]}
             />
           </Form.Item>
@@ -542,22 +524,31 @@ export default function KnowledgeBase() {
               )
             }
           </Form.Item>
-          <Form.Item name="tags" label="标签">
-            <Select mode="tags" placeholder="回车添加标签（global 条目会按项目 tags 匹配注入）" open={false} />
-          </Form.Item>
-          <Form.Item name="contentMd" label="内容" rules={[{ required: true, message: '请填写 Markdown 内容' }]}>
-            <Input.TextArea rows={8} placeholder="Markdown 内容，注入时整段追加" />
-          </Form.Item>
-          <Form.Item name="status" label="状态">
+          <Form.Item
+            name="injectMode"
+            label="注入模式"
+            rules={[{ required: true }]}
+            extra="FULL：会话启动全量注入 CLAUDE.md（经验库）；RAG：仅检索，按提问召回内容"
+          >
             <Select
               options={[
-                { value: 'active', label: 'active（启用注入）' },
-                { value: 'deprecated', label: 'deprecated（停用）' },
+                { value: 'RAG', label: 'RAG 检索（推荐）' },
+                { value: 'FULL', label: 'FULL 全量注入' },
               ]}
             />
           </Form.Item>
+          {editingBase && (
+            <Form.Item name="status" label="状态">
+              <Select
+                options={[
+                  { value: 'active', label: 'active（启用）' },
+                  { value: 'archived', label: 'archived（归档停用）' },
+                ]}
+              />
+            </Form.Item>
+          )}
         </Form>
-      </Drawer>
+      </Modal>
 
       {/* 手动沉淀经验弹窗 */}
       <Modal

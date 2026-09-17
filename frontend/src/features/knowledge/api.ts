@@ -1,12 +1,31 @@
-// CAP-04 知识库 API
+// CAP-04 知识库 API（CAP-44 增库容器管理与检索）
 import { api } from '../../shared/api/client'
 import type {
+  KnowledgeBase,
+  KnowledgeBaseInput,
   KnowledgeEntry,
   KnowledgeEntryInput,
   KnowledgeProposal,
   KnowledgeProposalInput,
+  KnowledgeSearchResult,
   PreviewResult,
 } from './types'
+
+// ---------------- 知识库（CAP-44） ----------------
+
+export const listBases = () => api.get<KnowledgeBase[]>('/knowledge/bases')
+export const getBase = (id: number) => api.get<KnowledgeBase>(`/knowledge/bases/${id}`)
+export const createBase = (input: KnowledgeBaseInput) =>
+  api.post<KnowledgeBase>('/knowledge/bases', input)
+export const updateBase = (id: number, input: Partial<KnowledgeBaseInput>) =>
+  api.put<KnowledgeBase>(`/knowledge/bases/${id}`, input)
+export const deleteBase = (id: number, force = false) =>
+  api.del(`/knowledge/bases/${id}${force ? '?force=true' : ''}`)
+export const listBaseEntries = (id: number) =>
+  api.get<KnowledgeEntry[]>(`/knowledge/bases/${id}/entries`)
+
+export const searchChunks = (kbIds: number[], query: string, topK?: number) =>
+  api.post<KnowledgeSearchResult>('/knowledge/search', { kbIds, query, topK })
 
 // ---------------- 条目 ----------------
 
@@ -30,6 +49,8 @@ export const createEntry = (input: KnowledgeEntryInput) =>
 export const updateEntry = (id: number, input: Partial<KnowledgeEntryInput>) =>
   api.put<KnowledgeEntry>(`/knowledge/entries/${id}`, input)
 export const deleteEntry = (id: number) => api.del(`/knowledge/entries/${id}`)
+export const reindexEntry = (id: number) =>
+  api.post<KnowledgeEntry>(`/knowledge/entries/${id}/reindex`)
 
 // ---------------- 注入预览 ----------------
 

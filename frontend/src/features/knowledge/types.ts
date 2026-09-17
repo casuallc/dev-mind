@@ -1,9 +1,44 @@
-// CAP-04 知识库类型定义，与后端 devmind-knowledge 模块对齐
+// CAP-04 知识库类型定义，与后端 devmind-knowledge 模块对齐（CAP-44 库容器化重构）
 
 export type EntryScope = 'global' | 'project'
 
+/** 注入模式：FULL=全量注入 CLAUDE.md（经验库）；RAG=仅向量检索 */
+export type InjectMode = 'FULL' | 'RAG'
+
+export type BaseStatus = 'active' | 'archived'
+
+export interface KnowledgeBase {
+  id: number
+  name: string
+  description: string | null
+  scope: EntryScope
+  projectId: string | null
+  projectName: string | null
+  injectMode: InjectMode
+  embeddingModel: string | null
+  status: BaseStatus
+  entryCount: number
+  chunkCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface KnowledgeBaseInput {
+  name: string
+  description?: string
+  scope?: EntryScope
+  projectId?: string
+  injectMode?: InjectMode
+  embeddingModel?: string
+  status?: BaseStatus
+}
+
+/** 向量索引状态：pending 待索引 | ready 已索引 | failed 失败 | disabled（embedding 未配置，检索降级关键词） */
+export type IndexStatus = 'pending' | 'ready' | 'failed' | 'disabled'
+
 export interface KnowledgeEntry {
   id: number
+  kbId: number | null
   scope: EntryScope
   projectId: string | null
   name: string
@@ -13,18 +48,37 @@ export interface KnowledgeEntry {
   sourceProject: string | null
   hitCount: number
   status: 'active' | 'deprecated'
+  source: 'manual' | 'feishu'
+  indexStatus: IndexStatus
+  indexError: string | null
   createdAt: string
   updatedAt: string
 }
 
 export interface KnowledgeEntryInput {
-  scope: EntryScope
+  kbId?: number
+  scope?: EntryScope
   projectId?: string
   name: string
   contentMd: string
   tags?: string[]
   sourceProject?: string
   status?: 'active' | 'deprecated'
+}
+
+/** 检索命中块（POST /knowledge/search） */
+export interface RetrievedChunk {
+  entryId: number
+  entryName: string
+  kbId: number
+  content: string
+  score: number
+}
+
+export interface KnowledgeSearchResult {
+  /** false = embedding 未配置，本次走关键词 LIKE 降级 */
+  vector: boolean
+  chunks: RetrievedChunk[]
 }
 
 export type ProposalStatus = 'open' | 'adopted' | 'rejected'
