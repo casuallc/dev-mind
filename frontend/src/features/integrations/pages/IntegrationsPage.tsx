@@ -35,6 +35,7 @@ const TYPE_OPTIONS = [
   { value: 'GITLAB', label: 'GitLab（代码平台）' },
   { value: 'GITHUB', label: 'GitHub（代码平台，含 GHE）' },
   { value: 'JIRA', label: 'Jira（任务/Bug 同步）' },
+  { value: 'FEISHU', label: '飞书（知识库文档导入）' },
 ]
 
 const AUTH_OPTIONS = [
@@ -42,7 +43,15 @@ const AUTH_OPTIONS = [
   { value: 'BASIC', label: '用户名 + 密码（Jira 8.13 及更早）' },
 ]
 
-const TYPE_COLOR: Record<string, string> = { GITLAB: 'orange', GITHUB: 'default', JIRA: 'blue' }
+const TYPE_COLOR: Record<string, string> = {
+  GITLAB: 'orange',
+  GITHUB: 'default',
+  JIRA: 'blue',
+  FEISHU: 'geekblue',
+}
+
+/** 飞书自建应用默认开放平台地址（CAP-45） */
+const FEISHU_DEFAULT_BASE_URL = 'https://open.feishu.cn'
 
 /** 列表连通性实时探测结果（逐行异步更新） */
 type ConnState =
@@ -64,7 +73,8 @@ export default function IntegrationsPage() {
   const formToken = Form.useWatch('token', form)
   const isJira = formType === 'JIRA'
   const isGitHub = formType === 'GITHUB'
-  const isBasic = isJira && formAuthType === 'BASIC'
+  const isFeishu = formType === 'FEISHU'
+  const isBasic = (isJira && formAuthType === 'BASIC') || isFeishu
 
   /** 列表加载后逐行实时探测连通性（结果回填「连通性」列） */
   const probeAll = useCallback((list: Integration[]) => {
@@ -122,10 +132,10 @@ export default function IntegrationsPage() {
   const onSave = async (values: IntegrationInput) => {
     setSaving(true)
     try {
-      // GitLab 仅 PAT，不下发 authType；BASIC 才带 username
+      // GitLab/GitHub 仅 PAT，不下发 authType；飞书固定 BASIC 双行（username=App ID, token=App Secret）
       const payload: IntegrationInput = {
         ...values,
-        authType: isJira ? values.authType : undefined,
+        authType: isJira ? values.authType : isFeishu ? 'BASIC' : undefined,
         username: isBasic && values.username ? values.username : undefined,
       }
       if (editing) {
@@ -190,7 +200,7 @@ export default function IntegrationsPage() {
           : await testIntegrationDraft({
               ...values,
               name: values.name ?? '',
-              authType: isJira ? values.authType : undefined,
+              authType: isJira ? values.authType : isFeishu ? 'BASIC' : undefined,
               username: isBasic && values.username ? values.username : undefined,
             })
       if (editing) {
@@ -243,8 +253,8 @@ export default function IntegrationsPage() {
       }
     >
       <Typography.Paragraph type="secondary">
-        登记 GitLab/GitHub/Jira 平台实例。平台凭证（机器人）选填：供克隆、Jira 轮询同步、打 tag/Release
-        等自动化使用；人触发的写操作（推送分支、建 MR/PR、Jira 状态/工时回写）优先使用操作人在
+        登记 GitLab/GitHub/Jira/飞书 平台实例。平台凭证（机器人）选填：供克隆、Jira 轮询同步、打 tag/Release、
+        飞书文档导入知识库等自动化使用；人触发的写操作（推送分支、建 MR/PR、Jira 状态/工时回写）优先使用操作人在
         「我的 → 第三方账号」绑定的个人账号。实例启用后，用户即可在个人设置中绑定自己的账号。
       </Typography.Paragraph>
       <Table<Integration>
@@ -369,7 +379,15 @@ export default function IntegrationsPage() {
       >
         <Form form={form} layout="vertical" onFinish={onSave}>
           <Form.Item label="平台类型" name="type" rules={[{ required: true, message: '请选择平台类型' }]}>
-            <Select options={TYPE_OPTIONS} disabled={!!editing} />
+            <Select
+              options={TYPE_OPTIONS}
+              disabled={!!editing}
+              onChange={t => {
+                if (t === 'FEISHU' && !form.getFieldValue('baseUrl')) {
+                  form.setFieldValue('baseUrl', FEISHU_DEFAULT_BASE_URL)
+                }
+              }}
+            />
           </Form.Item>
           <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入名称' }]}>
             <Input placeholder="如 公司 Jira / 研发 GitLab" />
@@ -379,12 +397,18 @@ export default function IntegrationsPage() {
             name="baseUrl"
             rules={[{ required: true, message: '请输入实例地址' }]}
             extra={
-              isGitHub
-                ? 'github.com 填 https://github.com（API 自动走 api.github.com）；GHE 填实例地址（自动拼 /api/v3）'
-                : '仅 http/https，如 https://jira.example.com'
+              isFeishu
+                ? '默认 https://open.feishu.cn；飞书私有部署填私有地址'
+                : isGitHub
+                  ? 'github.com 填 https://github.com（API 自动走 api.github.com）；GHE 填实例地址（自动拼 /api/v3）'
+                  : '仅 http/https，如 https://jira.example.com'
             }
           >
-            <Input placeholder={isGitHub ? 'https://github.com' : 'https://jira.example.com'} />
+            <Input
+              placeholder={
+                isFeishu ? FEISHU_DEFAULT_BASE_URL : isGitHub ? 'https://github.com' : 'https://jira.example.com'
+              }
+            />
           </Form.Item>
           {isJira && (
             <Form.Item
@@ -402,33 +426,49 @@ export default function IntegrationsPage() {
           )}
           {isBasic && (
             <Form.Item
-              label="用户名"
+              label={isFeishu ? 'App ID' : '用户名'}
               name="username"
               rules={
                 editing || !formToken
                   ? []
-                  : [{ required: true, message: 'Basic Auth 需要填写 Jira 登录用户名' }]
+                  : [
+                      {
+                        required: true,
+                        message: isFeishu ? '飞书自建应用需要填写 App ID' : 'Basic Auth 需要填写 Jira 登录用户名',
+                      },
+                    ]
               }
-              extra={editing ? '留空表示沿用原用户名' : '配置平台凭证时必填'}
+              extra={
+                editing
+                  ? '留空表示沿用原' + (isFeishu ? ' App ID' : '用户名')
+                  : isFeishu
+                    ? '飞书开放平台自建应用的 App ID（配置凭证时必填）'
+                    : '配置平台凭证时必填'
+              }
             >
-              <Input placeholder="Jira 登录用户名" autoComplete="off" />
+              <Input
+                placeholder={isFeishu ? 'cli_xxxxxxxxxxxxxxxx' : 'Jira 登录用户名'}
+                autoComplete="off"
+              />
             </Form.Item>
           )}
           <Form.Item
-            label={isBasic ? '密码（平台凭证）' : '访问令牌 PAT（平台凭证）'}
+            label={isFeishu ? 'App Secret（平台凭证）' : isBasic ? '密码（平台凭证）' : '访问令牌 PAT（平台凭证）'}
             name="token"
             extra={
               editing
                 ? '留空表示保持现有凭据不变'
-                : isBasic
-                  ? 'Jira 登录密码（加密存储）。留空 = 纯实例登记，自动化（轮询同步等）将不可用'
-                  : isGitHub
-                    ? 'GitHub Personal Access Token（classic 需 repo scope；fine-grained 按仓库授权 Contents/Pull requests 读写）。留空 = 纯实例登记，自动化（克隆/Release 等）将不可用'
-                    : 'Jira Server/DC 8.14+：个人访问令牌；GitLab：Personal Access Token（api scope）。留空 = 纯实例登记，自动化（克隆/轮询/tag/Release 等）将不可用'
+                : isFeishu
+                  ? '飞书自建应用的 App Secret（加密存储）。需给应用开通「云文档」读取权限并把文档分享给应用。留空 = 纯实例登记，知识库导入不可用'
+                  : isBasic
+                    ? 'Jira 登录密码（加密存储）。留空 = 纯实例登记，自动化（轮询同步等）将不可用'
+                    : isGitHub
+                      ? 'GitHub Personal Access Token（classic 需 repo scope；fine-grained 按仓库授权 Contents/Pull requests 读写）。留空 = 纯实例登记，自动化（克隆/Release 等）将不可用'
+                      : 'Jira Server/DC 8.14+：个人访问令牌；GitLab：Personal Access Token（api scope）。留空 = 纯实例登记，自动化（克隆/轮询/tag/Release 等）将不可用'
             }
           >
             <Input.Password
-              placeholder={editing ? '（不修改请留空）' : isBasic ? '输入密码（可留空不配置）' : '粘贴 token（可留空不配置）'}
+              placeholder={editing ? '（不修改请留空）' : isBasic ? (isFeishu ? '粘贴 App Secret' : '输入密码（可留空不配置）') : '粘贴 token（可留空不配置）'}
               autoComplete="off"
             />
           </Form.Item>

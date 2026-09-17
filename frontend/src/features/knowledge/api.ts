@@ -1,6 +1,8 @@
 // CAP-04 知识库 API（CAP-44 增库容器管理与检索）
 import { api } from '../../shared/api/client'
 import type {
+  FeishuImportResult,
+  FeishuIntegration,
   KnowledgeBase,
   KnowledgeBaseInput,
   KnowledgeEntry,
@@ -26,6 +28,14 @@ export const listBaseEntries = (id: number) =>
 
 export const searchChunks = (kbIds: number[], query: string, topK?: number) =>
   api.post<KnowledgeSearchResult>('/knowledge/search', { kbIds, query, topK })
+
+// ---------------- 飞书导入（CAP-45） ----------------
+
+export const listFeishuIntegrations = () => api.get<FeishuIntegration[]>('/knowledge/feishu/integrations')
+export const importFeishuDocs = (kbId: number, integrationId: number, urls: string[]) =>
+  api.post<FeishuImportResult[]>(`/knowledge/bases/${kbId}/import/feishu`, { integrationId, urls })
+export const resyncEntry = (entryId: number) =>
+  api.post<FeishuImportResult>(`/knowledge/entries/${entryId}/resync`)
 
 // ---------------- 条目 ----------------
 

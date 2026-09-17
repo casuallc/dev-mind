@@ -109,3 +109,19 @@ export interface PreviewResult {
   content: string
   entriesUsed: KnowledgeEntry[]
 }
+
+// ---------------- CAP-45 飞书导入 ----------------
+
+/** 可用飞书集成（GET /knowledge/feishu/integrations） */
+export interface FeishuIntegration {
+  id: number
+  name: string
+}
+
+/** 飞书导入/重同步逐条结果：created 新建 | updated 内容变更已更新 | unchanged 无变更 | failed 失败 */
+export interface FeishuImportResult {
+  url: string
+  status: 'created' | 'updated' | 'unchanged' | 'failed'
+  entryId: number | null
+  error: string | null
+}

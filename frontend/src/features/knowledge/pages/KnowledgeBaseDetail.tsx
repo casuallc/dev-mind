@@ -1,4 +1,4 @@
-// CAP-44 知识库详情：条目管理（MarkdownEditor 抽屉编辑/索引状态/重建索引）+ 检索测试 + 库设置。
+// CAP-44 知识库详情：条目管理（MarkdownEditor 抽屉编辑/索引状态/重建索引）+ 检索测试 + 飞书导入（CAP-45）+ 库设置。
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { canWrite } from '../../auth/authStore'
@@ -22,6 +22,7 @@ import {
 } from 'antd'
 import {
   ArrowLeftOutlined,
+  CloudDownloadOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -32,13 +33,18 @@ import {
   createEntry,
   deleteEntry,
   getBase,
+  importFeishuDocs,
   listBaseEntries,
+  listFeishuIntegrations,
   reindexEntry,
+  resyncEntry,
   searchChunks,
   updateBase,
   updateEntry,
 } from '../api'
 import type {
+  FeishuImportResult,
+  FeishuIntegration,
   IndexStatus,
   KnowledgeBase,
   KnowledgeBaseInput,
@@ -95,6 +101,14 @@ export default function KnowledgeBaseDetail() {
   const [searching, setSearching] = useState(false)
   const [searchResult, setSearchResult] = useState<KnowledgeSearchResult | null>(null)
 
+  // 飞书导入（CAP-45）
+  const [feishuIntegrations, setFeishuIntegrations] = useState<FeishuIntegration[] | null>(null)
+  const [feishuIntegrationId, setFeishuIntegrationId] = useState<number | null>(null)
+  const [feishuUrls, setFeishuUrls] = useState('')
+  const [feishuImporting, setFeishuImporting] = useState(false)
+  const [feishuResults, setFeishuResults] = useState<FeishuImportResult[] | null>(null)
+  const [resyncingId, setResyncingId] = useState<number | null>(null)
+
   // 设置
   const [settingsForm] = Form.useForm<KnowledgeBaseInput>()
   const [settingsSaving, setSettingsSaving] = useState(false)
@@ -127,6 +141,17 @@ export default function KnowledgeBaseDetail() {
       })
     }
   }, [base, view, settingsForm])
+
+  // 飞书导入视图打开时拉集成清单（空 = 未配置，页面提示去集成页）
+  useEffect(() => {
+    if (view !== 'feishu' || feishuIntegrations !== null) return
+    listFeishuIntegrations()
+      .then(list => {
+        setFeishuIntegrations(list)
+        if (list.length === 1) setFeishuIntegrationId(list[0].id)
+      })
+      .catch(e => showError(e, '加载飞书集成失败'))
+  }, [view, feishuIntegrations])
 
   const openCreateEntry = () => {
     setEditingEntry(null)
@@ -193,6 +218,59 @@ export default function KnowledgeBaseDetail() {
     }
   }
 
+  const onImportFeishu = async () => {
+    const urls = feishuUrls
+      .split('\n')
+      .map(u => u.trim())
+      .filter(Boolean)
+    if (!feishuIntegrationId) {
+      message.warning('请先选择飞书集成')
+      return
+    }
+    if (urls.length === 0) {
+      message.warning('请粘贴至少一条飞书文档 URL（每行一条）')
+      return
+    }
+    setFeishuImporting(true)
+    setFeishuResults(null)
+    try {
+      const results = await importFeishuDocs(baseId, feishuIntegrationId, urls)
+      setFeishuResults(results)
+      const created = results.filter(r => r.status === 'created').length
+      const updated = results.filter(r => r.status === 'updated').length
+      const failed = results.filter(r => r.status === 'failed').length
+      if (failed === 0) {
+        message.success(`导入完成：新建 ${created}、更新 ${updated}、未变更 ${results.length - created - updated}`)
+      } else {
+        message.warning(`导入完成：新建 ${created}、更新 ${updated}、失败 ${failed}（详见下方列表）`)
+      }
+      load()
+    } catch (e) {
+      showError(e, '飞书导入失败')
+    } finally {
+      setFeishuImporting(false)
+    }
+  }
+
+  const onResync = async (e: KnowledgeEntry) => {
+    setResyncingId(e.id)
+    try {
+      const r = await resyncEntry(e.id)
+      if (r.status === 'updated') {
+        message.success(`「${e.name}」已同步最新内容（自动重建索引）`)
+        setTimeout(load, 1500)
+      } else if (r.status === 'unchanged') {
+        message.info(`「${e.name}」内容无变更`)
+      } else {
+        message.warning(`重同步失败：${r.error ?? '未知原因'}（保留旧内容）`)
+      }
+    } catch (err) {
+      showError(err, '重同步失败')
+    } finally {
+      setResyncingId(null)
+    }
+  }
+
   const onSearch = async () => {
     if (!searchQ.trim()) return
     setSearching(true)
@@ -245,9 +323,16 @@ export default function KnowledgeBaseDetail() {
     { title: '更新时间', dataIndex: 'updatedAt', width: 170, render: (v) => fmtTime(v) },
     {
       title: '操作',
-      width: 200,
+      width: 260,
       render: (_, r) => (
-        <Space size={4}>
+        <Space size={4} wrap>
+          {r.source === 'feishu' && (
+            <Tooltip title="按来源 URL 重拉飞书文档，内容变更才更新">
+              <Button size="small" loading={resyncingId === r.id} onClick={() => onResync(r)}>
+                重同步
+              </Button>
+            </Tooltip>
+          )}
           <Button size="small" onClick={() => openEditEntry(r)}>
             编辑
           </Button>
@@ -284,6 +369,7 @@ export default function KnowledgeBaseDetail() {
             options={[
               { value: 'entries', label: `条目${base ? ` (${base.entryCount})` : ''}` },
               { value: 'search', label: '检索测试' },
+              { value: 'feishu', label: '飞书导入' },
               { value: 'settings', label: '设置' },
             ]}
           />
@@ -394,6 +480,105 @@ export default function KnowledgeBaseDetail() {
                   </Space>
                 </Card>
               ))}
+            </Space>
+          )}
+        </>
+      )}
+
+      {view === 'feishu' && (
+        <>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+            从飞书文档手动导入为知识条目：选集成 → 粘贴文档 URL（每行一条，支持 /wiki/、/docx/、/docs/
+            三种链接）→ 导入。同一文档重复导入按内容哈希判重；导入后条目来源标记「飞书」，
+            可在条目列表点「重同步」拉取最新内容。
+          </Typography.Paragraph>
+          {feishuIntegrations !== null && feishuIntegrations.length === 0 ? (
+            <Alert
+              type="info"
+              showIcon
+              message="尚未配置飞书集成"
+              description={
+                <span>
+                  请先到 <Link to="/admin/integrations">平台集成</Link> 新建「飞书」类型集成
+                  （填自建应用的 App ID / App Secret），再回到本页导入。
+                </span>
+              }
+            />
+          ) : (
+            <Space direction="vertical" size={12} style={{ width: '100%', maxWidth: 860 }}>
+              <Space wrap>
+                <span>飞书集成：</span>
+                <Select
+                  style={{ minWidth: 260 }}
+                  placeholder="选择飞书集成（自建应用）"
+                  loading={feishuIntegrations === null}
+                  value={feishuIntegrationId ?? undefined}
+                  onChange={v => setFeishuIntegrationId(v)}
+                  options={(feishuIntegrations ?? []).map(i => ({ value: i.id, label: i.name }))}
+                />
+              </Space>
+              <Input.TextArea
+                rows={6}
+                placeholder={'每行一条飞书文档 URL，如：\nhttps://xxx.feishu.cn/wiki/AbCdEf123\nhttps://xxx.feishu.cn/docx/XyZ456'}
+                value={feishuUrls}
+                onChange={e => setFeishuUrls(e.target.value)}
+              />
+              <div>
+                <Button
+                  type="primary"
+                  icon={<CloudDownloadOutlined />}
+                  loading={feishuImporting}
+                  onClick={onImportFeishu}
+                >
+                  导入
+                </Button>
+              </div>
+              {feishuResults && (
+                <Table<FeishuImportResult>
+                  rowKey={r => r.url}
+                  size="small"
+                  pagination={false}
+                  dataSource={feishuResults}
+                  columns={[
+                    {
+                      title: '文档 URL',
+                      dataIndex: 'url',
+                      ellipsis: true,
+                      render: (u: string) => (
+                        <Typography.Text style={{ fontSize: 12 }}>{u}</Typography.Text>
+                      ),
+                    },
+                    {
+                      title: '结果',
+                      dataIndex: 'status',
+                      width: 100,
+                      render: (s: FeishuImportResult['status']) =>
+                        s === 'created' ? (
+                          <Tag color="green">新建</Tag>
+                        ) : s === 'updated' ? (
+                          <Tag color="blue">已更新</Tag>
+                        ) : s === 'unchanged' ? (
+                          <Tag>未变更</Tag>
+                        ) : (
+                          <Tag color="red">失败</Tag>
+                        ),
+                    },
+                    {
+                      title: '说明',
+                      dataIndex: 'error',
+                      width: 260,
+                      render: (err: string | null, r) =>
+                        err ? (
+                          <Typography.Text type="danger" style={{ fontSize: 12 }}>{err}</Typography.Text>
+                        ) : r.entryId ? (
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            条目 #{r.entryId}
+                          </Typography.Text>
+                        ) : null,
+                    },
+                  ]}
+                />
+              )}
             </Space>
           )}
         </>
