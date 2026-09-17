@@ -36,6 +36,7 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 | cap04_verify.py | 知识库 FR-01~08 + 真实会话注入 |
 | cap44_verify.py | CAP-44 知识库容器化+向量检索：库 CRUD/级联删、legacy 兜底经验库、索引状态机、向量检索排序（需 app 配 `devmind.knowledge.embedding.provider=mock`，默认 :18090 独立实例） |
 | cap45_verify.py | CAP-45 飞书文档对接：FEISHU 集成+连接测试、docx/wiki/doc 三形态导入（externalId 判重+contentHash 变更检测）、URL 归一化、重同步 updated/unchanged/失败保留旧内容（需 node 起 fixtures/feishu-mock.js 由脚本自起、app 配 mock embedding，默认 :18090 独立实例） |
+| cap46_verify.py | CAP-46 知识库 AI 会话：绑库问答（ChatView 回传 knowledgeBaseId、库不存在 400）、事件流断言库概览节 <knowledge-base> 与两轮 <knowledge-context> 注入（来源标注）、不绑库问答无注入（脚本自起 fake runner 节点连 :18090，需 runner jar 已构建 + app 配 mock embedding 独立实例） |
 | cap06_verify.py / cap06_integration.py | 通知中心 REST / 集成链路 |
 | cap07_verify.py | 服务器适配：SSH/HTTP 连通、模板白名单、上传下载、凭证加密（自动拉起 fixtures） |
 | cap08_verify.py | 构建执行器：多步骤/上下文 env/并发 409/远程构建/WS 日志流 |
