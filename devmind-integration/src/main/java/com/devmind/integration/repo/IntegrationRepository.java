@@ -8,4 +8,6 @@ import java.util.List;
 public interface IntegrationRepository extends JpaRepository<IntegrationEntity, Long> {
 
     List<IntegrationEntity> findAllByOrderByCreatedAtDesc();
+
+    List<IntegrationEntity> findByTypeAndStatus(String type, String status);
 }

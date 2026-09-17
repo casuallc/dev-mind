@@ -26,6 +26,8 @@ public class IntegrationEntity {
     public static final String TYPE_GITHUB = "GITHUB";
     /** Jira（后续，无 git 能力） */
     public static final String TYPE_JIRA = "JIRA";
+    /** 飞书（CAP-45 文档拉取；BASIC 密文 = "appId\nappSecret"） */
+    public static final String TYPE_FEISHU = "FEISHU";
 
     /** 个人访问令牌（Jira 需 8.14+；GitLab PAT） */
     public static final String AUTH_PAT = "PAT";
