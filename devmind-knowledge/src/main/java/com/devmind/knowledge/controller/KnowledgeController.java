@@ -1,10 +1,12 @@
 package com.devmind.knowledge.controller;
 
+import com.devmind.common.knowledge.KnowledgeRetriever;
 import com.devmind.knowledge.KnowledgeBaseService;
 import com.devmind.knowledge.dto.EntryRequest;
 import com.devmind.knowledge.dto.EntryView;
 import com.devmind.knowledge.dto.KnowledgeBaseRequest;
 import com.devmind.knowledge.dto.KnowledgeBaseView;
+import com.devmind.knowledge.dto.KnowledgeSearchResponse;
 import com.devmind.knowledge.dto.PreviewResult;
 import com.devmind.knowledge.dto.ProposalRequest;
 import com.devmind.knowledge.dto.ProposalView;
@@ -27,9 +29,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class KnowledgeController {
 
     private final KnowledgeBaseService service;
+    private final KnowledgeRetriever retriever;
 
-    public KnowledgeController(KnowledgeBaseService service) {
+    public KnowledgeController(KnowledgeBaseService service, KnowledgeRetriever retriever) {
         this.service = service;
+        this.retriever = retriever;
     }
 
     // ---------------- 知识库（CAP-44 FR-07） ----------------
@@ -102,6 +106,15 @@ public class KnowledgeController {
     @PostMapping("/entries/{id}/reindex")
     public EntryView reindex(@PathVariable Long id) {
         return service.reindex(id);
+    }
+
+    // ---------------- 检索（CAP-44 FR-06） ----------------
+
+    @PostMapping("/search")
+    public KnowledgeSearchResponse searchChunks(
+            @RequestBody KnowledgeSearchResponse.KnowledgeSearchRequest req) {
+        return new KnowledgeSearchResponse(retriever.vectorAvailable(),
+                retriever.retrieve(req.kbIds(), req.query(), req.topK() == null ? 0 : req.topK()));
     }
 
     // ---------------- 注入预览（FR-04） ----------------
