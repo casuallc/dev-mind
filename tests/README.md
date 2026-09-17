@@ -34,6 +34,7 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 | cap02_verify.py | 项目 CRUD/查重 409/标签筛选 |
 | cap03_verify.py | 文档库：建档/模板/多版本/diff/回退/git 同步 |
 | cap04_verify.py | 知识库 FR-01~08 + 真实会话注入 |
+| cap44_verify.py | CAP-44 知识库容器化+向量检索：库 CRUD/级联删、legacy 兜底经验库、索引状态机、向量检索排序（需 app 配 `devmind.knowledge.embedding.provider=mock`，默认 :18090 独立实例） |
 | cap06_verify.py / cap06_integration.py | 通知中心 REST / 集成链路 |
 | cap07_verify.py | 服务器适配：SSH/HTTP 连通、模板白名单、上传下载、凭证加密（自动拉起 fixtures） |
 | cap08_verify.py | 构建执行器：多步骤/上下文 env/并发 409/远程构建/WS 日志流 |
