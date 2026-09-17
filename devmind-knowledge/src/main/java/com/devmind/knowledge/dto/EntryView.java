@@ -19,6 +19,7 @@ import java.util.List;
  * @param hitCount      被注入次数
  * @param status        active | deprecated
  * @param source        manual | feishu
+ * @param externalId    外部系统主键（飞书判重键 {integrationId}:{docToken}；manual 为 null）
  * @param indexStatus   pending | ready | failed | disabled
  * @param indexError    最近索引失败原因
  * @param createdAt     创建时间
@@ -37,6 +38,7 @@ public record EntryView(
         int hitCount,
         String status,
         String source,
+        String externalId,
         String indexStatus,
         String indexError,
         Instant createdAt,

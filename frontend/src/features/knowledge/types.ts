@@ -49,6 +49,8 @@ export interface KnowledgeEntry {
   hitCount: number
   status: 'active' | 'deprecated'
   source: 'manual' | 'feishu'
+  /** 飞书判重键 {integrationId}:{docToken}；manual 为 null */
+  externalId: string | null
   indexStatus: IndexStatus
   indexError: string | null
   createdAt: string

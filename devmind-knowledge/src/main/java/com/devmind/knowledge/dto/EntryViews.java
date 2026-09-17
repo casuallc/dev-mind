@@ -23,7 +23,8 @@ public final class EntryViews {
         return new EntryView(
                 e.getId(), e.getKbId(), scope, projectId, e.getName(), e.getPath(),
                 e.getContentMd(), splitTags(e.getTags()), e.getSourceProject(),
-                e.getHitCount(), e.getStatus(), e.getSource(), e.getIndexStatus(), e.getIndexError(),
+                e.getHitCount(), e.getStatus(), e.getSource(), e.getExternalId(),
+                e.getIndexStatus(), e.getIndexError(),
                 e.getCreatedAt(), e.getUpdatedAt());
     }
 
