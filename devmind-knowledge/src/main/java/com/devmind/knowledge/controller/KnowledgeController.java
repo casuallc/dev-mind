@@ -3,6 +3,8 @@ package com.devmind.knowledge.controller;
 import com.devmind.knowledge.KnowledgeBaseService;
 import com.devmind.knowledge.dto.EntryRequest;
 import com.devmind.knowledge.dto.EntryView;
+import com.devmind.knowledge.dto.KnowledgeBaseRequest;
+import com.devmind.knowledge.dto.KnowledgeBaseView;
 import com.devmind.knowledge.dto.PreviewResult;
 import com.devmind.knowledge.dto.ProposalRequest;
 import com.devmind.knowledge.dto.ProposalView;
@@ -18,7 +20,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 知识库 REST（CAP-04）：条目 CRUD/检索、注入预览、经验提案流转。
+ * 知识库 REST（CAP-04 条目/提案/预览 + CAP-44 库容器管理）。
  */
 @RestController
 @RequestMapping("/api/knowledge")
@@ -28,6 +30,38 @@ public class KnowledgeController {
 
     public KnowledgeController(KnowledgeBaseService service) {
         this.service = service;
+    }
+
+    // ---------------- 知识库（CAP-44 FR-07） ----------------
+
+    @GetMapping("/bases")
+    public List<KnowledgeBaseView> listBases() {
+        return service.listBases();
+    }
+
+    @PostMapping("/bases")
+    public KnowledgeBaseView createBase(@RequestBody KnowledgeBaseRequest req) {
+        return service.createBase(req);
+    }
+
+    @GetMapping("/bases/{id}")
+    public KnowledgeBaseView getBase(@PathVariable Long id) {
+        return service.getBase(id);
+    }
+
+    @PutMapping("/bases/{id}")
+    public KnowledgeBaseView updateBase(@PathVariable Long id, @RequestBody KnowledgeBaseRequest req) {
+        return service.updateBase(id, req);
+    }
+
+    @DeleteMapping("/bases/{id}")
+    public void deleteBase(@PathVariable Long id, @RequestParam(defaultValue = "false") boolean force) {
+        service.deleteBase(id, force);
+    }
+
+    @GetMapping("/bases/{id}/entries")
+    public List<EntryView> listBaseEntries(@PathVariable Long id) {
+        return service.listByBase(id);
     }
 
     // ---------------- 条目 ----------------
@@ -63,6 +97,11 @@ public class KnowledgeController {
     @DeleteMapping("/entries/{id}")
     public void delete(@PathVariable Long id) {
         service.deleteEntry(id);
+    }
+
+    @PostMapping("/entries/{id}/reindex")
+    public EntryView reindex(@PathVariable Long id) {
+        return service.reindex(id);
     }
 
     // ---------------- 注入预览（FR-04） ----------------

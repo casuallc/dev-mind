@@ -1,0 +1,22 @@
+package com.devmind.knowledge.dto;
+
+/**
+ * 知识库创建/更新请求（CAP-44 FR-01）。
+ *
+ * @param name           名称（创建必填）
+ * @param description    描述
+ * @param scope          global | project（创建必填，缺省 global）
+ * @param projectId      scope=project 必填
+ * @param injectMode     FULL | RAG（缺省 RAG）
+ * @param embeddingModel 覆盖平台默认 embedding 模型
+ * @param status         active | archived
+ */
+public record KnowledgeBaseRequest(
+        String name,
+        String description,
+        String scope,
+        String projectId,
+        String injectMode,
+        String embeddingModel,
+        String status) {
+}
