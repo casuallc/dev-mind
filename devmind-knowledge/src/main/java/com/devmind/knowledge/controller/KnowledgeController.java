@@ -1,9 +1,13 @@
 package com.devmind.knowledge.controller;
 
+import com.devmind.common.integration.FeishuDocFetcher.FeishuIntegration;
 import com.devmind.common.knowledge.KnowledgeRetriever;
+import com.devmind.knowledge.FeishuImportService;
 import com.devmind.knowledge.KnowledgeBaseService;
 import com.devmind.knowledge.dto.EntryRequest;
 import com.devmind.knowledge.dto.EntryView;
+import com.devmind.knowledge.dto.FeishuImportRequest;
+import com.devmind.knowledge.dto.FeishuImportResult;
 import com.devmind.knowledge.dto.KnowledgeBaseRequest;
 import com.devmind.knowledge.dto.KnowledgeBaseView;
 import com.devmind.knowledge.dto.KnowledgeSearchResponse;
@@ -30,10 +34,13 @@ public class KnowledgeController {
 
     private final KnowledgeBaseService service;
     private final KnowledgeRetriever retriever;
+    private final FeishuImportService feishuImportService;
 
-    public KnowledgeController(KnowledgeBaseService service, KnowledgeRetriever retriever) {
+    public KnowledgeController(KnowledgeBaseService service, KnowledgeRetriever retriever,
+                               FeishuImportService feishuImportService) {
         this.service = service;
         this.retriever = retriever;
+        this.feishuImportService = feishuImportService;
     }
 
     // ---------------- 知识库（CAP-44 FR-07） ----------------
@@ -106,6 +113,24 @@ public class KnowledgeController {
     @PostMapping("/entries/{id}/reindex")
     public EntryView reindex(@PathVariable Long id) {
         return service.reindex(id);
+    }
+
+    // ---------------- 飞书导入（CAP-45 FR-03/FR-04） ----------------
+
+    @GetMapping("/feishu/integrations")
+    public List<FeishuIntegration> feishuIntegrations() {
+        return feishuImportService.listIntegrations();
+    }
+
+    @PostMapping("/bases/{id}/import/feishu")
+    public List<FeishuImportResult> importFeishu(@PathVariable Long id,
+                                                 @RequestBody FeishuImportRequest req) {
+        return feishuImportService.importDocs(id, req);
+    }
+
+    @PostMapping("/entries/{id}/resync")
+    public FeishuImportResult resyncFeishu(@PathVariable Long id) {
+        return feishuImportService.resync(id);
     }
 
     // ---------------- 检索（CAP-44 FR-06） ----------------

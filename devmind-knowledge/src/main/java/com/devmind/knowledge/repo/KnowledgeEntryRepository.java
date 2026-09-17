@@ -17,6 +17,9 @@ public interface KnowledgeEntryRepository extends JpaRepository<KnowledgeEntryEn
 
     Optional<KnowledgeEntryEntity> findByIdAndStatus(Long id, String status);
 
+    /** CAP-45 飞书导入判重：同库同外部主键 */
+    Optional<KnowledgeEntryEntity> findByKbIdAndExternalId(Long kbId, String externalId);
+
     List<KnowledgeEntryEntity> findByKbIdOrderByCreatedAtDesc(Long kbId);
 
     List<KnowledgeEntryEntity> findByKbIdAndStatusOrderByCreatedAtDesc(Long kbId, String status);
