@@ -24,6 +24,10 @@ import com.devmind.common.agent.runtime.ProcessHelper;
 import com.devmind.common.agent.runtime.RuntimeSettings;
 import com.devmind.common.agent.runtime.SessionExecutor;
 import com.devmind.common.agent.runtime.SessionState;
+import com.devmind.common.exception.DevMindException;
+import com.devmind.common.knowledge.KnowledgeRetriever;
+import com.devmind.common.knowledge.KnowledgeRetriever.KbOverview;
+import com.devmind.common.knowledge.KnowledgeRetriever.RetrievedChunk;
 import com.devmind.common.notification.NotificationEvent;
 import com.devmind.notification.NotificationPublisher;
 import org.junit.jupiter.api.AfterEach;
@@ -48,6 +52,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 
@@ -303,7 +308,19 @@ class ChatManagerServiceTest {
                 // 无 attachment 模块：getIfAvailable 恒 null → 带图输入报错
                 emptyObjectProvider(),
                 // 无 session 模块：getIfAvailable 恒 null → 传 scenarioCode 报 409
+                emptyObjectProvider(),
+                // 无 knowledge 模块：getIfAvailable 恒 null → 绑库创建 409
                 emptyObjectProvider());
+    }
+
+    /** 换上带指定检索器的服务实例（CAP-46 用例重建 service 专用）。 */
+    private void rebuildWith(KnowledgeRetriever retriever) {
+        service.shutdown();
+        ChatProperties props = new ChatProperties();
+        service = new ChatManagerService(fakeIdentity(), (NotificationEvent e) -> { },
+                chats.jpa(), events.jpa(), saver, props, JsonMapper.builder().build(),
+                objectProviderOf(runner), emptyObjectProvider(), emptyObjectProvider(),
+                objectProviderOf(retriever));
     }
 
     @SuppressWarnings("unchecked")
@@ -414,7 +431,8 @@ class ChatManagerServiceTest {
         service.shutdown();
         service = new ChatManagerService(fakeIdentity(), (NotificationEvent e) -> { },
                 chats.jpa(), events.jpa(), saver, props, JsonMapper.builder().build(),
-                objectProviderOf(runner), emptyObjectProvider(), objectProviderOf(preparer));
+                objectProviderOf(runner), emptyObjectProvider(), objectProviderOf(preparer),
+                emptyObjectProvider());
 
         // 显式全空 → 场景预设的 model/pm/node 生效
         ChatView v = service.create(new CreateChatRequest("你好", null, null, null, "qa"));
@@ -590,5 +608,112 @@ class ChatManagerServiceTest {
 
         assertEquals(SessionState.RUNNING.name(), chats.store.get("chat-remote").getStatus(),
                 "远程问答进程在 runner 侧可能仍存活，启动恢复不得判死");
+    }
+
+    // ---------------- CAP-46 知识库问答 ----------------
+
+    /** 可变 fake 检索器：hits 可切换、fail=true 模拟检索异常、记录调用次数。 */
+    static class FakeRetriever implements KnowledgeRetriever {
+        volatile List<RetrievedChunk> hits = List.of();
+        volatile boolean fail = false;
+        final AtomicInteger retrieveCalls = new AtomicInteger();
+
+        @Override
+        public boolean vectorAvailable() {
+            return true;
+        }
+
+        @Override
+        public List<RetrievedChunk> retrieve(List<Long> kbIds, String query, int topK) {
+            retrieveCalls.incrementAndGet();
+            if (fail) {
+                throw new RuntimeException("检索炸了");
+            }
+            return hits;
+        }
+
+        @Override
+        public Optional<KbOverview> overview(long kbId) {
+            return kbId == 7L
+                    ? Optional.of(new KbOverview("研发规范库", "团队研发规范", "RAG",
+                            List.of("构建规范", "部署规范")))
+                    : Optional.empty();
+        }
+    }
+
+    @Test
+    void 绑库问答_启动注入库概览_每轮检索注入前缀() throws Exception {
+        FakeRetriever retriever = new FakeRetriever();
+        retriever.hits = List.of(new RetrievedChunk(1L, "构建规范", 7L, "构建前必须先跑单测", 0.9));
+        rebuildWith(retriever);
+
+        // 库不存在 → 400
+        assertThrows(DevMindException.class,
+                () -> service.create(new CreateChatRequest("x", null, null, NODE, null, 99L)));
+
+        ChatView v = service.create(new CreateChatRequest("构建规范有哪些", null, null, NODE, null, 7L));
+        assertEquals(7L, v.knowledgeBaseId());
+        assertEquals(7L, chats.store.get(v.id()).getKnowledgeBaseId(), "knowledge_base_id 落库");
+
+        // 启动注入：库概览节拼进初始 prompt 前缀
+        String prompt = runner.lastLaunch.taskSpec();
+        assertTrue(prompt.startsWith("<knowledge-base>"), "库概览节在初始 prompt 最前");
+        assertTrue(prompt.contains("研发规范库") && prompt.contains("注入模式：RAG"));
+        assertTrue(prompt.contains("- 构建规范") && prompt.contains("- 部署规范"));
+        assertTrue(prompt.endsWith("构建规范有哪些"), "概览节后接原始首条消息");
+
+        // 每轮注入：fake agent 回显可见 <knowledge-context> 前缀与来源标注
+        service.input(v.id(), "构建前要做什么");
+        await("检索注入回显", () -> events.store.stream().anyMatch(e ->
+                e.getContent() != null && e.getContent().contains("<knowledge-context>")));
+        assertTrue(events.store.stream().anyMatch(e ->
+                e.getContent() != null && e.getContent().contains("（来源：构建规范）")), "命中块带来源标注");
+        assertTrue(retriever.retrieveCalls.get() >= 1);
+        service.kill(v.id());
+    }
+
+    @Test
+    void 绑库问答_检索无命中或异常时原样发送() throws Exception {
+        FakeRetriever retriever = new FakeRetriever();
+        rebuildWith(retriever);
+        ChatView v = service.create(new CreateChatRequest("首问", null, null, NODE, null, 7L));
+
+        // 无命中（hits 空）→ 原样发送，不带注入壳
+        service.input(v.id(), "问题甲");
+        await("无命中回显", () -> events.store.stream().anyMatch(e ->
+                e.getContent() != null && e.getContent().contains("问题甲")));
+        assertTrue(events.store.stream().noneMatch(e ->
+                e.getContent() != null && e.getContent().contains("<knowledge-context>")),
+                "无命中不注入空壳");
+
+        // 检索异常 → 同样原样发送
+        retriever.fail = true;
+        service.input(v.id(), "问题乙");
+        await("异常降级回显", () -> events.store.stream().anyMatch(e ->
+                e.getContent() != null && e.getContent().contains("问题乙")));
+        assertTrue(events.store.stream().noneMatch(e ->
+                e.getContent() != null && e.getContent().contains("<knowledge-context>")),
+                "检索异常按无命中降级");
+        service.kill(v.id());
+    }
+
+    @Test
+    void 绑库但knowledge模块未装配时409() {
+        assertThrows(DevMindException.class,
+                () -> service.create(new CreateChatRequest("x", null, null, NODE, null, 7L)));
+    }
+
+    @Test
+    void 未绑库问答不调用检索() throws Exception {
+        FakeRetriever retriever = new FakeRetriever();
+        rebuildWith(retriever);
+        ChatView v = service.create(new CreateChatRequest("普通问答", null, null, NODE, null));
+        assertNull(v.knowledgeBaseId());
+
+        service.input(v.id(), "随便聊聊");
+        await("普通回显", () -> events.store.stream().anyMatch(e ->
+                e.getContent() != null && e.getContent().contains("随便聊聊")));
+        assertEquals(0, retriever.retrieveCalls.get(), "未绑库不得触发检索");
+        service.kill(v.id());
     }
 }

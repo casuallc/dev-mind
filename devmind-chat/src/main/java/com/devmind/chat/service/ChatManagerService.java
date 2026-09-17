@@ -27,6 +27,7 @@ import com.devmind.common.agent.runtime.SessionState;
 import com.devmind.common.attachment.AttachmentContentResolver;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.common.knowledge.KnowledgeRetriever;
 import com.devmind.common.notification.NotificationEvent;
 import com.devmind.notification.NotificationPublisher;
 import jakarta.annotation.PostConstruct;
@@ -82,6 +83,8 @@ public class ChatManagerService {
     private final ObjectProvider<AttachmentContentResolver> attachmentResolverProvider;
     /** CAP-33 FR-05：场景问答装配（devmind-session 装配时可用；ObjectProvider 探测防循环依赖） */
     private final ObjectProvider<ChatContextPreparer> contextPreparerProvider;
+    /** CAP-46：知识库检索（devmind-knowledge 装配时可用）；绑库问答未装配即 409 */
+    private final ObjectProvider<KnowledgeRetriever> retrieverProvider;
 
     /** 运行中问答注册表（本地/远程统一句柄）。 */
     private final Map<String, SessionHandle> runtimes = new ConcurrentHashMap<>();
@@ -95,7 +98,8 @@ public class ChatManagerService {
                               ObjectMapper mapper,
                               ObjectProvider<AgentNodeConnector> connectorProvider,
                               ObjectProvider<AttachmentContentResolver> attachmentResolverProvider,
-                              ObjectProvider<ChatContextPreparer> contextPreparerProvider) {
+                              ObjectProvider<ChatContextPreparer> contextPreparerProvider,
+                              ObjectProvider<KnowledgeRetriever> retrieverProvider) {
         this.identityService = identityService;
         this.notificationPublisher = notificationPublisher;
         this.chatRepo = chatRepo;
@@ -106,6 +110,7 @@ public class ChatManagerService {
         this.connectorProvider = connectorProvider;
         this.attachmentResolverProvider = attachmentResolverProvider;
         this.contextPreparerProvider = contextPreparerProvider;
+        this.retrieverProvider = retrieverProvider;
         this.settings = props.toRuntimeSettings();
     }
 
@@ -154,6 +159,18 @@ public class ChatManagerService {
         String pm = firstNonBlank(req.permissionMode(), preset != null ? preset.permissionMode() : null,
                 props.getPermissionMode());
 
+        // CAP-46 FR-01：绑库问答——库概览用于启动注入；未装配 knowledge 模块 409，库不存在/已归档 400
+        KnowledgeRetriever.KbOverview kbOverview = null;
+        if (req.knowledgeBaseId() != null) {
+            KnowledgeRetriever retriever = retrieverProvider.getIfAvailable();
+            if (retriever == null) {
+                throw new DevMindException(ErrorCode.CONFLICT, "知识库模块未装配，无法绑定知识库问答");
+            }
+            kbOverview = retriever.overview(req.knowledgeBaseId())
+                    .orElseThrow(() -> new DevMindException(ErrorCode.BAD_REQUEST,
+                            "知识库不存在或已归档: " + req.knowledgeBaseId()));
+        }
+
         // CAP-34 FR-02：取消本机问答——路由 = 显式 > 场景预设 > 平台默认，皆无命中 409，不存在本机回落
         if ("local".equalsIgnoreCase(req.agentNodeId())) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
@@ -173,6 +190,10 @@ public class ChatManagerService {
                 ? preparer.prepare(id, req.scenarioCode(), req.message()) : null;
         String launchPrompt = prepared != null ? prepared.renderedPrompt() : req.message();
         ContextManifest manifest = prepared != null ? prepared.manifest() : null;
+        // CAP-46 FR-02：绑库时库概览节拼进初始 prompt 前缀，首轮即知挂了哪个库、库里有什么
+        if (kbOverview != null) {
+            launchPrompt = overviewSection(kbOverview) + launchPrompt;
+        }
 
         RemoteSessionRuntime remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector, eventSaver, listener, settings);
         // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
@@ -200,6 +221,7 @@ public class ChatManagerService {
         ent.setModel(model);
         ent.setPermissionMode(pm);
         ent.setScenarioCode(preset != null ? req.scenarioCode().strip() : null);
+        ent.setKnowledgeBaseId(req.knowledgeBaseId());
         ent.setContextManifestJson(prepared != null ? prepared.snapshotJson() : null);
         ent.setInitialPrompt(req.message());
         ent.setCreatedBy(identityService.currentActor());
@@ -257,8 +279,40 @@ public class ChatManagerService {
 
     /** CAP-32：注入用户输入（可带图片附件）。附件经 AttachmentContentResolver 解析为 base64 下发 claude。 */
     public void input(String id, String text, List<ImageRef> images) {
-        requireOwned(id);
-        requireRuntime(id).injectInput(text, resolveImages(images));
+        ChatSessionEntity ent = requireOwned(id);
+        requireRuntime(id).injectInput(withKnowledgeContext(ent, text), resolveImages(images));
+    }
+
+    /**
+     * CAP-46 FR-03 每轮检索注入：会话绑库时按提问内容检索库内分块，非空则包成
+     * {@code <knowledge-context>} 前缀拼进用户消息；无命中/未绑库/检索异常一律原样发送。
+     * 本路径是 REST 线程（非 WS 事件链），同步远程 embedding 调用安全。
+     */
+    private String withKnowledgeContext(ChatSessionEntity ent, String text) {
+        if (ent.getKnowledgeBaseId() == null || text == null || text.isBlank()) {
+            return text;
+        }
+        KnowledgeRetriever retriever = retrieverProvider.getIfAvailable();
+        if (retriever == null) {
+            return text;
+        }
+        List<KnowledgeRetriever.RetrievedChunk> hits;
+        try {
+            hits = retriever.retrieve(List.of(ent.getKnowledgeBaseId()), text, 0);
+        } catch (Exception e) {
+            log.warn("问答知识检索失败，按无命中降级原样发送: chat={} kb={} err={}",
+                    ent.getId(), ent.getKnowledgeBaseId(), e.toString());
+            return text;
+        }
+        if (hits == null || hits.isEmpty()) {
+            return text;
+        }
+        StringBuilder sb = new StringBuilder("<knowledge-context>\n");
+        for (KnowledgeRetriever.RetrievedChunk hit : hits) {
+            sb.append(hit.content()).append("\n（来源：").append(hit.entryName()).append("）\n\n");
+        }
+        sb.append("</knowledge-context>\n\n").append(text);
+        return sb.toString();
     }
 
     /** 附件引用 → InputImage（base64）；解析失败一律报错，不静默丢图（用户需要知道 claude 没看到图）。 */
@@ -606,10 +660,33 @@ public class ChatManagerService {
         return rt != null ? rt.state() : SessionState.valueOf(ent.getStatus());
     }
 
+    /** CAP-46 FR-02：库概览节（启动注入初始 prompt 前缀）；描述截断防爆。 */
+    private static String overviewSection(KnowledgeRetriever.KbOverview kb) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("<knowledge-base>\n本会话已绑定知识库「").append(kb.name()).append("」");
+        if (kb.injectMode() != null && !kb.injectMode().isBlank()) {
+            sb.append("（注入模式：").append(kb.injectMode()).append("）");
+        }
+        sb.append('\n');
+        if (kb.description() != null && !kb.description().isBlank()) {
+            String desc = kb.description().replace('\n', ' ').strip();
+            sb.append("库描述：").append(desc.length() <= 200 ? desc : desc.substring(0, 200) + "…").append('\n');
+        }
+        if (kb.entryNames() != null && !kb.entryNames().isEmpty()) {
+            sb.append("库内条目（").append(kb.entryNames().size()).append(" 条）：\n");
+            for (String name : kb.entryNames()) {
+                sb.append("- ").append(name).append('\n');
+            }
+        }
+        sb.append("后续每轮提问会按内容自动检索该库并附相关分块（<knowledge-context>）。\n</knowledge-base>\n\n");
+        return sb.toString();
+    }
+
     private ChatView toView(ChatSessionEntity ent, SessionState state) {
         return new ChatView(ent.getId(), ent.getTitle(), state.name(), state, ent.getPid(),
                 ent.getModel(), ent.getPermissionMode(), ent.getSummary(), ent.getAgentNodeId(),
-                ent.getCreatedBy(), ent.getCreatedAt(), ent.getUpdatedAt(), ent.getFinishedAt());
+                ent.getCreatedBy(), ent.getCreatedAt(), ent.getUpdatedAt(), ent.getFinishedAt(),
+                ent.getKnowledgeBaseId());
     }
 
     private void updateStatus(String id, SessionState st, String summary) {

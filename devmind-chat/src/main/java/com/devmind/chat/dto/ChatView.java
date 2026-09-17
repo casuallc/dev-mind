@@ -10,5 +10,6 @@ import java.time.Instant;
 public record ChatView(String id, String title, String status, SessionState state,
                        Long pid, String model, String permissionMode, String summary,
                        String agentNodeId, String createdBy,
-                       Instant createdAt, Instant updatedAt, Instant finishedAt) {
+                       Instant createdAt, Instant updatedAt, Instant finishedAt,
+                       Long knowledgeBaseId) {
 }

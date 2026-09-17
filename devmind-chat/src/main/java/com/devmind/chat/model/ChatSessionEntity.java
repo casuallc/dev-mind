@@ -54,6 +54,10 @@ public class ChatSessionEntity {
     @Column(name = "scenario_code", length = 64)
     private String scenarioCode;
 
+    /** CAP-46 FR-01：绑定的知识库 id（可空 = 普通问答） */
+    @Column(name = "knowledge_base_id")
+    private Long knowledgeBaseId;
+
     /** CAP-33 FR-07：上下文装配快照（清单 JSON，无快照 = null） */
     @Lob
     @JdbcTypeCode(SqlTypes.LONGVARCHAR)
@@ -98,6 +102,8 @@ public class ChatSessionEntity {
     public void setSummary(String summary) { this.summary = summary; }
     public String getScenarioCode() { return scenarioCode; }
     public void setScenarioCode(String scenarioCode) { this.scenarioCode = scenarioCode; }
+    public Long getKnowledgeBaseId() { return knowledgeBaseId; }
+    public void setKnowledgeBaseId(Long knowledgeBaseId) { this.knowledgeBaseId = knowledgeBaseId; }
     public String getContextManifestJson() { return contextManifestJson; }
     public void setContextManifestJson(String contextManifestJson) { this.contextManifestJson = contextManifestJson; }
     public String getInitialPrompt() { return initialPrompt; }
