@@ -243,7 +243,7 @@ class JiraPushServiceTest {
             }
             if (!botConfigured) {
                 throw new DevMindException(ErrorCode.BAD_REQUEST,
-                        "未配置可用凭据：请先在「我的 → 第三方账号」绑定该平台账号，或联系 ADMIN 为实例配置平台凭证");
+                        "未配置可用凭据：请先在「个人设置 → 第三方账号」绑定该平台账号，或联系 ADMIN 为实例配置平台凭证");
             }
             return new WriteIdentity("bot-token", IdentitySource.BOT);
         }
