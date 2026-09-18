@@ -153,15 +153,15 @@ export interface JiraCreateFields {
   error?: string
 }
 
-// ---- CAP-47 FR-10 项目级 Jira 推送默认值 ----
+// ---- CAP-47 FR-10 个人 Jira 推送模板 ----
 
-/** 项目级推送默认值配置（一个项目一行）；未配置时接口返回空 body */
-export interface JiraPushDefaults {
+/** 个人推送模板（唯一键 = 我 + 实例 + Jira 项目 + 任务类型，一人多行） */
+export interface JiraPushTemplate {
   id: number
   integrationId: number
   integrationName?: string | null
-  jiraProjectKey?: string | null
-  issueTypeId?: string | null
+  jiraProjectKey: string
+  issueTypeId: string
   priorityName?: string | null
   assigneeName?: string | null
   labels?: string[] | null
@@ -171,11 +171,11 @@ export interface JiraPushDefaults {
   updatedAt?: string | null
 }
 
-/** 保存请求：整行覆盖，没给的字段即被清空 */
-export interface JiraPushDefaultsInput {
+/** 保存请求：同组合整行覆盖，没给的字段即被清空 */
+export interface JiraPushTemplateInput {
   integrationId: number
-  jiraProjectKey?: string
-  issueTypeId?: string
+  jiraProjectKey: string
+  issueTypeId: string
   priorityName?: string
   assigneeName?: string
   labels?: string[]

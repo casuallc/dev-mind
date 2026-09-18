@@ -17,7 +17,6 @@ const SUB_TABS = [
   { key: 'build', label: '构建配置' },
   { key: 'release', label: '发版配置' },
   { key: 'jira', label: 'Jira 同步' },
-  { key: 'jira-push', label: 'Jira 推送' },
   { key: 'lock', label: '锁定' },
 ]
 

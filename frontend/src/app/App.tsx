@@ -19,7 +19,6 @@ import ProjectEnvironmentsPage from '../features/projects/pages/admin/ProjectEnv
 import BuildStepsPage from '../features/projects/pages/admin/BuildStepsPage'
 import ReleaseConfigPage from '../features/projects/pages/admin/ReleaseConfigPage'
 import JiraSyncPage from '../features/projects/pages/admin/JiraSyncPage'
-import JiraPushDefaultsPage from '../features/projects/pages/admin/JiraPushDefaultsPage'
 import LockPage from '../features/projects/pages/admin/LockPage'
 import BuildsPage from '../features/build/pages/BuildsPage'
 import DeploymentsPage from '../features/deploy/pages/DeploymentsPage'
@@ -139,7 +138,6 @@ export default function App() {
             <Route path="build" element={<BuildStepsPage />} />
             <Route path="release" element={<ReleaseConfigPage />} />
             <Route path="jira" element={<JiraSyncPage />} />
-            <Route path="jira-push" element={<JiraPushDefaultsPage />} />
             <Route path="lock" element={<LockPage />} />
           </Route>
           {/* CAP-29 全局代码仓库登记（仅 ADMIN；项目仓库关联的单一数据源） */}

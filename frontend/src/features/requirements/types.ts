@@ -71,7 +71,7 @@ export interface JiraTransitionResult {
 
 // ---- CAP-47 自建需求推送到 Jira ----
 
-// Jira 选项 / 创建字段元数据这几组类型同时被「项目推送默认值配置页」（integrations 能力）使用，
+// Jira 选项 / 创建字段元数据这几组类型同时被「个人 Jira 推送模板」面板（integrations 能力）使用，
 // 定义已上移到 features/integrations/types：既 import 供本文件内引用，又原样转出，推送侧调用点无需改动。
 import type {
   JiraOption,
@@ -106,26 +106,37 @@ export interface JiraPushTargets {
   jiraProjects: JiraOption[]
   issueTypes: JiraOption[]
   priorities: JiraOption[]
-  /** 各字段默认值（需求当前值 + 项目级推送默认值，弹窗内可改）；只含与 Jira 同域的字段——
+  /** 各字段默认值（只取需求当前值，弹窗内可改）；只含与 Jira 同域的字段——
    *  平台 assignee 是人名、Jira 要登录名，故不从需求回填经办人，priority 也仅在命中实例词表时才有值。
-   *  issueTypeId/assigneeName/extraFields 只可能来自项目级推送默认值（需求本体没有这些概念），
-   *  extraFields 的值是 **Jira API 形态**（{id} / [{id}]），前端须反向转换成表单形态再回填。 */
+   *  任务类型/经办人/动态字段的默认值不在此处：它们来自 templates（个人推送模板），
+   *  由弹窗在「实例+项目+类型」组合选定时带入。 */
   defaults: {
     title?: string
     description?: string
     priority?: string
     labels?: string[]
     dueDate?: string // yyyy-MM-dd
-    issueTypeId?: string
-    assigneeName?: string
-    extraFields?: Record<string, unknown>
   }
+  /** CAP-47 FR-10：当前用户的全部个人推送模板（随本响应一次给齐，弹窗按组合本地匹配）。
+   *  extraFields 的值是 **Jira API 形态**（{id} / [{id}]），前端须反向转换成表单形态再回填。 */
+  templates: JiraPushTemplateRef[]
   /** 写身份来源：PERSONAL 个人账号 / BOT 实例机器人 / NONE 都没有（须先绑定，提交禁用） */
   identitySource: 'PERSONAL' | 'BOT' | 'NONE'
   /** 该项目在此实例上被 enabled 的同步配置覆盖 → 托管字段会自动刷新 */
   syncCovered: boolean
   /** 选项拉取失败的原因；空表可能是「确实没有可创建的类型」，也可能是这里失败（须区分提示） */
   optionsError?: string
+}
+
+/** CAP-47 FR-10：个人推送模板引用（匹配键 = integrationId + jiraProjectKey + issueTypeId） */
+export interface JiraPushTemplateRef {
+  integrationId: number
+  jiraProjectKey: string
+  issueTypeId: string
+  priorityName?: string
+  assigneeName?: string
+  labels?: string[]
+  extraFields?: Record<string, unknown>
 }
 
 /** CAP-47 FR-03：推送入参（backlinkUrl 由前端按 window.location.origin 拼，服务端拼回链文案） */

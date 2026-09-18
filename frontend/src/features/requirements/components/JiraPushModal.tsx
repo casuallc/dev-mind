@@ -11,6 +11,10 @@
 // 时间跟踪），平台侧根本没有这些数据源，固定表单必然被 400 拒。故选完任务类型后问 createmeta
 // 「这个类型要哪些字段」，按服务端给的 control 动态渲染输入项；渲染不了的（必填用户选择器/
 // 级联选择）列出来并禁用提交——提前说清好过提交后吃一条读不完的 400。
+//
+// FR-10 个人推送模板：push-targets 一次带回当前用户全部模板，「实例+项目+类型」选定/切换时
+// 本地匹配并带入 优先级/经办人/标签/动态字段——只补缺（需求/表单已有的值不覆盖），动态字段除外
+// （它随类型而换，换类型总是重置后按模板重填）。模板在「个人设置 → Jira 推送模板」维护。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert,
@@ -92,8 +96,10 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
   const [createFields, setCreateFields] = useState<JiraCreateFields | null>(null)
   const [createFieldsLoading, setCreateFieldsLoading] = useState(false)
   const searchTimer = useRef<number | undefined>(undefined)
-  // FR-10：项目推送默认值的动态字段取值（Jira API 形态），等 createmeta 回来按 control 逆转换后消费
-  const projectExtra = useRef<Record<string, unknown> | null>(null)
+  // FR-10：匹配中的个人模板的动态字段取值（Jira API 形态），等 createmeta 回来按 control 逆转换后消费
+  const templateExtra = useRef<Record<string, unknown> | null>(null)
+  // FR-10：push-targets 一次带回的当前用户模板（本地匹配用，不随切换重拉）
+  const templates = useRef<JiraPushTargets['templates']>([])
   // 已选 Jira 项目 key（响应式读表单值：任务类型是否为空要结合「有没有选项目」判断）
   const jiraProjectKey = Form.useWatch('jiraProjectKey', form)
   // 任务类型变化要重拉必填字段（类型 id 是实例内项目的值，字段清单随类型变）
@@ -113,15 +119,39 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
     setUsers([])
     setPushError(null)
     setCreateFields(null)
-    projectExtra.current = null
+    templateExtra.current = null
+    templates.current = []
     getJiraPushTargets(pid, rid)
       .then((t) => {
+        templates.current = t.templates ?? []
         setTargets(t)
         setOptions({ jiraProjects: t.jiraProjects, issueTypes: t.issueTypes, priorities: t.priorities })
       })
       .catch((e) => showError(e, '加载推送目标失败'))
       .finally(() => setLoading(false))
   }, [open, pid, rid])
+
+  // FR-10：「实例+项目+类型」选定/切换时匹配个人模板并带入——只补缺（表单已有的值不覆盖）；
+  // 动态字段例外：它随类型而换，交给下面的 create-fields 效应按模板重置后重填
+  useEffect(() => {
+    if (!open || integrationIdValue == null || !jiraProjectKey || !issueTypeId) return
+    const t = templates.current.find((x) =>
+      x.integrationId === integrationIdValue
+      && x.jiraProjectKey === jiraProjectKey
+      && x.issueTypeId === issueTypeId)
+    templateExtra.current = t?.extraFields ?? null
+    if (!t) return
+    if (!form.getFieldValue('priorityName') && t.priorityName) {
+      form.setFieldValue('priorityName', t.priorityName)
+    }
+    if (!form.getFieldValue('assigneeName') && t.assigneeName) {
+      form.setFieldValue('assigneeName', t.assigneeName)
+    }
+    const curLabels: string[] = form.getFieldValue('labels') ?? []
+    if (curLabels.length === 0 && t.labels?.length) {
+      form.setFieldValue('labels', t.labels)
+    }
+  }, [open, integrationIdValue, jiraProjectKey, issueTypeId, form])
 
   // FR-08：实例 + 项目 + 任务类型三者齐了才问 Jira「这个类型要哪些必填字段」。
   // 服务端已把拉取失败降级进 createFields.error（不抛错），这里再兜一层网络异常。
@@ -137,10 +167,10 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
         if (cancelled) return
         setCreateFields(r)
         // 换任务类型即换字段集，一律先清空再回填。回填来源二者取一：
-        //   首次（默认类型来自项目推送默认值）→ 项目默认值的动态字段，按 control 逆转换；
-        //   用户换过类型 → 只剩服务端给的同域本地值（fixVersions）。
-        const saved = projectExtra.current
-        projectExtra.current = null
+        //   命中个人模板（FR-10）→ 模板的动态字段，按 control 逆转换；
+        //   无模板 → 只剩服务端给的同域本地值（fixVersions）。
+        const saved = templateExtra.current
+        templateExtra.current = null
         const next: Record<string, unknown> = {}
         if (saved) {
           for (const f of r.fields) {
@@ -169,19 +199,21 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
   // 表单随弹窗重建，等 Form 挂载完再写值才不会丢（也能避开 antd 未连接告警）
   useEffect(() => {
     if (!open || !targets || targets.instances.length === 0) return
-    // FR-10：项目推送默认值的动态字段取值是 Jira API 形态，得等 createmeta 回来知道每个字段的
-    // control 才能逆转换成表单形态；先挂起来，由下面的 create-fields 效应首次回填时消费掉
-    projectExtra.current = targets.defaults.extraFields ?? null
+    const integrationId = targets.defaultIntegrationId ?? targets.instances[0]?.id
+    const jiraProjectKey = targets.defaultJiraProjectKey
+    // FR-10：默认实例+项目下恰好只有一个模板时预选其任务类型（多个则留给用户选，不瞎猜）；
+    // 字段带入由上面的模板匹配效应完成（issueTypeId 落表即触发）
+    const matching = templates.current.filter((t) =>
+      t.integrationId === integrationId && t.jiraProjectKey === jiraProjectKey)
     form.setFieldsValue({
-      integrationId: targets.defaultIntegrationId ?? targets.instances[0]?.id,
-      jiraProjectKey: targets.defaultJiraProjectKey,
-      issueTypeId: targets.defaults.issueTypeId,
+      integrationId,
+      jiraProjectKey,
+      issueTypeId: matching.length === 1 ? matching[0].issueTypeId : undefined,
       summary: targets.defaults.title || requirement.title,
       description: targets.defaults.description ?? '',
       priorityName: targets.defaults.priority,
       labels: targets.defaults.labels ?? [],
       dueDate: targets.defaults.dueDate ? dayjs(targets.defaults.dueDate) : null,
-      assigneeName: targets.defaults.assigneeName ?? undefined,
     })
   }, [open, targets, form, requirement.title])
 
@@ -212,13 +244,13 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
     setAssigneeDegraded(false)
     setUsers([])
     setCreateFields(null)
-    projectExtra.current = null // 项目默认值的动态字段属于默认实例，切走即作废
+    templateExtra.current = null // 模板属于原实例的组合，切走即作废
     loadOptions(integrationId)
   }
 
   const onProjectChange = (jiraProjectKey: string) => {
     form.setFieldValue('issueTypeId', undefined)
-    projectExtra.current = null // 换项目即换整套字段取值，默认值的动态字段不再适用
+    templateExtra.current = null // 换项目即换组合，原模板的动态字段不再适用
     const integrationId = form.getFieldValue('integrationId')
     if (integrationId != null) loadOptions(integrationId, jiraProjectKey)
   }
@@ -256,7 +288,7 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
       jiraProjectKey: v.jiraProjectKey,
       issueTypeId: v.issueTypeId,
       summary: v.summary.trim(),
-      // 创建界面上没有的固定字段一律不带：值可能来自项目推送默认值或需求本体，
+      // 创建界面上没有的固定字段一律不带：值可能来自个人推送模板或需求本体，
       // 带上去 Jira 只会回一句「Field 'labels' cannot be set」
       description: shows('description') ? v.description?.trim() || undefined : undefined,
       backlinkUrl,
@@ -358,7 +390,7 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
                   type="error"
                   showIcon
                   message="该实例没有可用凭据，无法创建 issue"
-                  description="实例既未配置机器人凭证，当前账号也没绑定该实例的个人账号。请到「我的 → 第三方账号」绑定后重试。"
+                  description="实例既未配置机器人凭证，当前账号也没绑定该实例的个人账号。请到「个人设置 → 第三方账号」绑定后重试。"
                 />
               ) : (
                 <Alert

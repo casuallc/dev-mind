@@ -4,6 +4,7 @@ import { Card, Tabs } from 'antd'
 import { useNavigate, useParams } from 'react-router-dom'
 import PlatformAccountsPanel from '../components/PlatformAccountsPanel'
 import ProfilePanel from '../components/ProfilePanel'
+import JiraPushTemplatesPanel from '../../integrations/components/JiraPushTemplatesPanel'
 import { pageCardBodyScrollStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 
 const TAB_KEYS = ['profile', 'accounts', 'jira-templates'] as const
@@ -25,6 +26,8 @@ export default function SettingsPage() {
           { key: 'profile', label: '个人信息', children: <ProfilePanel /> },
           // CAP-35：第三方平台账号绑定（原 /me/accounts 单页）
           { key: 'accounts', label: '第三方账号', children: <PlatformAccountsPanel /> },
+          // CAP-47 FR-10：个人 Jira 推送模板（按 Jira 项目 + 任务类型）
+          { key: 'jira-templates', label: 'Jira 推送模板', children: <JiraPushTemplatesPanel /> },
         ]}
       />
     </Card>

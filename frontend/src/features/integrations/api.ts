@@ -8,9 +8,9 @@ import type {
   IntegrationTestResult,
   JiraAssignableUser,
   JiraCreateFields,
-  JiraPushDefaults,
-  JiraPushDefaultsInput,
   JiraPushOptions,
+  JiraPushTemplate,
+  JiraPushTemplateInput,
   JiraSyncConfig,
   JiraSyncConfigInput,
   JiraSyncPreview,
@@ -91,34 +91,33 @@ export function listExternalLinksByType(projectId: string, internalType: string)
   )
 }
 
-// ---------------- CAP-47 FR-10 项目级 Jira 推送默认值 ----------------
+// ---------------- CAP-47 FR-10 个人 Jira 推送模板 ----------------
 
-/** 读项目推送默认值；未配置时后端返回空 body（不是错误），故可能为 null */
-export function getJiraPushDefaults(projectId: string): Promise<JiraPushDefaults | null> {
-  return api.get<JiraPushDefaults | null>(`/projects/${projectId}/jira-push-defaults`)
+/** 我的推送模板列表（按更新时间倒序） */
+export function listJiraPushTemplates(): Promise<JiraPushTemplate[]> {
+  return api.get<JiraPushTemplate[]>('/me/jira-push-templates')
 }
 
-/** 保存项目推送默认值（整行覆盖：没给的字段即被清空） */
-export function saveJiraPushDefaults(
-  projectId: string,
-  input: JiraPushDefaultsInput,
-): Promise<JiraPushDefaults> {
-  return api.put<JiraPushDefaults>(`/projects/${projectId}/jira-push-defaults`, input)
+/** 保存我的推送模板（upsert：同 实例+项目+类型 整行覆盖，没给的字段即被清空） */
+export function saveJiraPushTemplate(input: JiraPushTemplateInput): Promise<JiraPushTemplate> {
+  return api.put<JiraPushTemplate>('/me/jira-push-templates', input)
 }
 
-/** 配置页用的项目作用域选项端点（需求侧的同类端点在路径里带 rid，配置页不挂在需求上） */
-export function getJiraPushOptionsForProject(
-  projectId: string,
+export function deleteJiraPushTemplate(id: number): Promise<void> {
+  return api.del<void>(`/me/jira-push-templates/${id}`)
+}
+
+/** 模板配置表单用的个人作用域选项端点（需求侧的同类端点在路径里带 pid/rid，配置页不挂在需求上） */
+export function getJiraPushTemplateOptions(
   integrationId: number,
   jiraProjectKey?: string,
 ): Promise<JiraPushOptions> {
   const q = new URLSearchParams({ integrationId: String(integrationId) })
   if (jiraProjectKey) q.set('jiraProjectKey', jiraProjectKey)
-  return api.get<JiraPushOptions>(`/projects/${projectId}/jira-push-defaults/options?${q}`)
+  return api.get<JiraPushOptions>(`/me/jira-push-templates/options?${q}`)
 }
 
-export function searchJiraAssignableUsersForProject(
-  projectId: string,
+export function searchJiraTemplateAssignableUsers(
   integrationId: number,
   jiraProjectKey: string | undefined,
   q: string,
@@ -126,13 +125,10 @@ export function searchJiraAssignableUsersForProject(
   const params = new URLSearchParams({ integrationId: String(integrationId) })
   if (jiraProjectKey) params.set('jiraProjectKey', jiraProjectKey)
   if (q) params.set('q', q)
-  return api.get<JiraAssignableUser[]>(
-    `/projects/${projectId}/jira-push-defaults/assignable-users?${params}`,
-  )
+  return api.get<JiraAssignableUser[]>(`/me/jira-push-templates/assignable-users?${params}`)
 }
 
-export function getJiraCreateFieldsForProject(
-  projectId: string,
+export function getJiraTemplateCreateFields(
   integrationId: number,
   jiraProjectKey: string,
   issueTypeId: string,
@@ -142,5 +138,5 @@ export function getJiraCreateFieldsForProject(
     jiraProjectKey,
     issueTypeId,
   })
-  return api.get<JiraCreateFields>(`/projects/${projectId}/jira-push-defaults/create-fields?${q}`)
+  return api.get<JiraCreateFields>(`/me/jira-push-templates/create-fields?${q}`)
 }
