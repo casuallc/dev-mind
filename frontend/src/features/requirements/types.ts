@@ -71,10 +71,24 @@ export interface JiraTransitionResult {
 
 // ---- CAP-47 自建需求推送到 Jira ----
 
-/** 通用下拉选项：id 为回传值（任务类型 id / Jira 项目 key；优先级 id 可能为空，回传用 name） */
-export interface JiraOption {
-  id?: string
-  name: string
+// Jira 选项 / 创建字段元数据这几组类型同时被「项目推送默认值配置页」（integrations 能力）使用，
+// 定义已上移到 features/integrations/types：既 import 供本文件内引用，又原样转出，推送侧调用点无需改动。
+import type {
+  JiraOption,
+  JiraPushOptions,
+  JiraAssignableUser,
+  JiraCreateFieldControl,
+  JiraCreateField,
+  JiraCreateFields,
+} from '../integrations/types'
+
+export type {
+  JiraOption,
+  JiraPushOptions,
+  JiraAssignableUser,
+  JiraCreateFieldControl,
+  JiraCreateField,
+  JiraCreateFields,
 }
 
 /** CAP-47 FR-02：候选 Jira 实例（TYPE_JIRA + ENABLED） */
@@ -92,14 +106,19 @@ export interface JiraPushTargets {
   jiraProjects: JiraOption[]
   issueTypes: JiraOption[]
   priorities: JiraOption[]
-  /** 各字段默认值（取需求当前值，弹窗内可改）；只含与 Jira 同域的字段——平台 assignee 是人名、
-   *  Jira 要登录名，故不回填经办人，priority 也仅在命中实例词表时才有值 */
+  /** 各字段默认值（需求当前值 + 项目级推送默认值，弹窗内可改）；只含与 Jira 同域的字段——
+   *  平台 assignee 是人名、Jira 要登录名，故不从需求回填经办人，priority 也仅在命中实例词表时才有值。
+   *  issueTypeId/assigneeName/extraFields 只可能来自项目级推送默认值（需求本体没有这些概念），
+   *  extraFields 的值是 **Jira API 形态**（{id} / [{id}]），前端须反向转换成表单形态再回填。 */
   defaults: {
     title?: string
     description?: string
     priority?: string
     labels?: string[]
     dueDate?: string // yyyy-MM-dd
+    issueTypeId?: string
+    assigneeName?: string
+    extraFields?: Record<string, unknown>
   }
   /** 写身份来源：PERSONAL 个人账号 / BOT 实例机器人 / NONE 都没有（须先绑定，提交禁用） */
   identitySource: 'PERSONAL' | 'BOT' | 'NONE'
@@ -107,50 +126,6 @@ export interface JiraPushTargets {
   syncCovered: boolean
   /** 选项拉取失败的原因；空表可能是「确实没有可创建的类型」，也可能是这里失败（须区分提示） */
   optionsError?: string
-}
-
-/** CAP-47 FR-02：切换实例/项目后重拉的选项 */
-export interface JiraPushOptions {
-  jiraProjects: JiraOption[]
-  issueTypes: JiraOption[]
-  priorities: JiraOption[]
-}
-
-/** CAP-47 FR-02：经办人候选（name = 平台用户名，创建 issue 时回传） */
-export interface JiraAssignableUser {
-  name: string
-  displayName: string
-}
-
-/** CAP-47 FR-08：动态必填字段的渲染控件（服务端按 Jira schema 判定，前端只按它 switch，
- *  不必理解 Jira 字段类型）。null 表示必填但平台渲染不了 → 列入 unsupported 并禁用提交。 */
-export type JiraCreateFieldControl =
-  | 'MULTI_SELECT'
-  | 'SELECT'
-  | 'DATE'
-  | 'TEXT'
-  | 'NUMBER'
-  | 'TIMETRACKING'
-
-/** CAP-47 FR-08：一个待填写的创建字段；options 为平台合法取值（枚举类必有，自由文本数组为空） */
-export interface JiraCreateField {
-  id: string
-  name: string
-  control: JiraCreateFieldControl | null
-  options: JiraOption[]
-}
-
-/** CAP-47 FR-08：必填字段清单（createmeta）。requiredFixed 是固定表单已有的字段 id
- *  （duedate/priority/assignee/labels/description），前端加必填校验即可，不重复渲染。 */
-export interface JiraCreateFields {
-  fields: JiraCreateField[]
-  requiredFixed: string[]
-  /** 必填但渲染不了（用户选择器/级联选择等）：列出并禁用提交，好过提交后吃 400 */
-  unsupported: JiraCreateField[]
-  /** 字段 id → 预填值（只回填同域且命中实例候选值的本地值，目前只有 fixVersions） */
-  prefill: Record<string, string[]>
-  /** 元数据拉取失败原因；非空时三个列表皆空且**不禁用提交** */
-  error?: string
 }
 
 /** CAP-47 FR-03：推送入参（backlinkUrl 由前端按 window.location.origin 拼，服务端拼回链文案） */

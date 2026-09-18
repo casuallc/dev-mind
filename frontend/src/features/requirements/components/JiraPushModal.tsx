@@ -18,7 +18,6 @@ import {
   Empty,
   Form,
   Input,
-  InputNumber,
   Modal,
   Select,
   Space,
@@ -37,7 +36,6 @@ import {
 } from '../api'
 import type {
   JiraAssignableUser,
-  JiraCreateField,
   JiraCreateFields,
   JiraPushInput,
   JiraPushOptions,
@@ -45,6 +43,7 @@ import type {
   JiraPushTargets,
   Requirement,
 } from '../types'
+import JiraDynamicField, { fromJiraValue, toJiraValue } from '../../integrations/components/JiraDynamicField'
 import { isAdmin } from '../../auth/authStore'
 import { isApiRequestError } from '../../../shared/api/error'
 import { showError } from '../../../shared/utils/showError'
@@ -71,40 +70,6 @@ const FIXED_FIELD_LABEL: Record<string, string> = {
   duedate: '截止日期',
 }
 
-/**
- * FR-08 表单值 → 平台取值。取值形态由字段类型决定（枚举回传 id、日期回传字符串…），
- * 而控件类型是服务端按 Jira schema 判定的——此处只按 control 分支，不猜 Jira 内部结构。
- */
-function toJiraValue(f: JiraCreateField, v: unknown): unknown {
-  switch (f.control) {
-    case 'MULTI_SELECT': {
-      const list = (Array.isArray(v) ? v : []).filter(
-        (x): x is string => typeof x === 'string' && !!x.trim(),
-      )
-      if (!list.length) return undefined
-      // 枚举类传 id（模块/版本/选项）；无候选的自由文本数组原样传字符串
-      return f.options.length ? list.map((id) => ({ id })) : list
-    }
-    case 'SELECT':
-      return typeof v === 'string' && v ? { id: v } : undefined
-    case 'DATE':
-      return v ? (v as dayjs.Dayjs).format('YYYY-MM-DD') : undefined
-    case 'NUMBER':
-      return typeof v === 'number' ? v : undefined
-    case 'TIMETRACKING': {
-      const t = (v ?? {}) as { originalEstimate?: string; remainingEstimate?: string }
-      const original = t.originalEstimate?.trim()
-      const remaining = t.remainingEstimate?.trim()
-      if (!original && !remaining) return undefined
-      // 剩余估算留空时取初始预估同值：Jira 自己的创建页就是这个默认，
-      // 而该字段两项都被标必填时只传一项同样会被拒
-      return { originalEstimate: original, remainingEstimate: remaining || original }
-    }
-    default:
-      return typeof v === 'string' && v.trim() ? v.trim() : undefined
-  }
-}
-
 export default function JiraPushModal({ requirement, open, onClose, onPushed }: {
   requirement: Requirement
   open: boolean
@@ -127,6 +92,8 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
   const [createFields, setCreateFields] = useState<JiraCreateFields | null>(null)
   const [createFieldsLoading, setCreateFieldsLoading] = useState(false)
   const searchTimer = useRef<number | undefined>(undefined)
+  // FR-10：项目推送默认值的动态字段取值（Jira API 形态），等 createmeta 回来按 control 逆转换后消费
+  const projectExtra = useRef<Record<string, unknown> | null>(null)
   // 已选 Jira 项目 key（响应式读表单值：任务类型是否为空要结合「有没有选项目」判断）
   const jiraProjectKey = Form.useWatch('jiraProjectKey', form)
   // 任务类型变化要重拉必填字段（类型 id 是实例内项目的值，字段清单随类型变）
@@ -146,6 +113,7 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
     setUsers([])
     setPushError(null)
     setCreateFields(null)
+    projectExtra.current = null
     getJiraPushTargets(pid, rid)
       .then((t) => {
         setTargets(t)
@@ -168,11 +136,23 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
       .then((r) => {
         if (cancelled) return
         setCreateFields(r)
-        // 换任务类型即换字段集：先清空再按 prefill 回填同域本地值（fixVersions）
-        form.setFieldValue('extraFields', undefined)
-        Object.entries(r.prefill ?? {}).forEach(([id, values]) => {
-          form.setFieldValue(['extraFields', id], values)
-        })
+        // 换任务类型即换字段集，一律先清空再回填。回填来源二者取一：
+        //   首次（默认类型来自项目推送默认值）→ 项目默认值的动态字段，按 control 逆转换；
+        //   用户换过类型 → 只剩服务端给的同域本地值（fixVersions）。
+        const saved = projectExtra.current
+        projectExtra.current = null
+        const next: Record<string, unknown> = {}
+        if (saved) {
+          for (const f of r.fields) {
+            const v = fromJiraValue(f, saved[f.id])
+            if (v !== undefined) next[f.id] = v
+          }
+        } else {
+          Object.entries(r.prefill ?? {}).forEach(([id, values]) => {
+            next[id] = values
+          })
+        }
+        form.setFieldValue('extraFields', Object.keys(next).length ? next : undefined)
       })
       .catch((e) => {
         if (cancelled) return
@@ -189,15 +169,19 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
   // 表单随弹窗重建，等 Form 挂载完再写值才不会丢（也能避开 antd 未连接告警）
   useEffect(() => {
     if (!open || !targets || targets.instances.length === 0) return
+    // FR-10：项目推送默认值的动态字段取值是 Jira API 形态，得等 createmeta 回来知道每个字段的
+    // control 才能逆转换成表单形态；先挂起来，由下面的 create-fields 效应首次回填时消费掉
+    projectExtra.current = targets.defaults.extraFields ?? null
     form.setFieldsValue({
       integrationId: targets.defaultIntegrationId ?? targets.instances[0]?.id,
       jiraProjectKey: targets.defaultJiraProjectKey,
-      issueTypeId: undefined,
+      issueTypeId: targets.defaults.issueTypeId,
       summary: targets.defaults.title || requirement.title,
       description: targets.defaults.description ?? '',
       priorityName: targets.defaults.priority,
       labels: targets.defaults.labels ?? [],
       dueDate: targets.defaults.dueDate ? dayjs(targets.defaults.dueDate) : null,
+      assigneeName: targets.defaults.assigneeName ?? undefined,
     })
   }, [open, targets, form, requirement.title])
 
@@ -228,11 +212,13 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
     setAssigneeDegraded(false)
     setUsers([])
     setCreateFields(null)
+    projectExtra.current = null // 项目默认值的动态字段属于默认实例，切走即作废
     loadOptions(integrationId)
   }
 
   const onProjectChange = (jiraProjectKey: string) => {
     form.setFieldValue('issueTypeId', undefined)
+    projectExtra.current = null // 换项目即换整套字段取值，默认值的动态字段不再适用
     const integrationId = form.getFieldValue('integrationId')
     if (integrationId != null) loadOptions(integrationId, jiraProjectKey)
   }
@@ -528,7 +514,7 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
                   以下字段是该任务类型在 Jira 侧要求的，已从 Jira 拉取可选值：
                 </div>
                 {createFields?.fields.map((f) => (
-                  <DynamicField key={f.id} field={f} />
+                  <JiraDynamicField key={f.id} field={f} />
                 ))}
               </>
             )}
@@ -540,47 +526,5 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
         </Space>
       )}
     </Modal>
-  )
-}
-
-/**
- * FR-08 动态字段输入项。control 由服务端按 Jira schema 判定，这里只做控件映射；
- * 时间跟踪是唯一的多值字段（初始预估 + 剩余估算），单独一组输入。
- */
-function DynamicField({ field }: { field: JiraCreateField }) {
-  const options = field.options.map((o) => ({ value: o.id ?? o.name, label: o.name }))
-  if (field.control === 'TIMETRACKING') {
-    return (
-      <Form.Item label={field.name} required tooltip="Jira 时长格式，如 2h、30m、1d 4h">
-        <Space.Compact style={{ width: '100%' }}>
-          <Form.Item name={['extraFields', field.id, 'originalEstimate']} noStyle
-            rules={[{ required: true, message: '请填写初始预估' }]}>
-            <Input placeholder="初始预估（如 2h）" />
-          </Form.Item>
-          <Form.Item name={['extraFields', field.id, 'remainingEstimate']} noStyle>
-            <Input placeholder="剩余估算（留空取初始预估）" />
-          </Form.Item>
-        </Space.Compact>
-      </Form.Item>
-    )
-  }
-  return (
-    <Form.Item label={field.name} name={['extraFields', field.id]}
-      rules={[{ required: true, message: `请填写${field.name}` }]}>
-      {field.control === 'MULTI_SELECT' ? (
-        options.length
-          ? <Select mode="multiple" optionFilterProp="label" placeholder="可多选" options={options} />
-          // 无候选的自由文本数组（自定义的标签类字段）
-          : <Select mode="tags" open={false} placeholder="回车添加" />
-      ) : field.control === 'SELECT' ? (
-        <Select allowClear placeholder="请选择" optionFilterProp="label" options={options} />
-      ) : field.control === 'DATE' ? (
-        <DatePicker style={{ width: '100%' }} />
-      ) : field.control === 'NUMBER' ? (
-        <InputNumber style={{ width: '100%' }} placeholder="请填写数字" />
-      ) : (
-        <Input placeholder="请填写" />
-      )}
-    </Form.Item>
   )
 }

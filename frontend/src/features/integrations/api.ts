@@ -6,6 +6,11 @@ import type {
   Integration,
   IntegrationInput,
   IntegrationTestResult,
+  JiraAssignableUser,
+  JiraCreateFields,
+  JiraPushDefaults,
+  JiraPushDefaultsInput,
+  JiraPushOptions,
   JiraSyncConfig,
   JiraSyncConfigInput,
   JiraSyncPreview,
@@ -84,4 +89,58 @@ export function listExternalLinksByType(projectId: string, internalType: string)
   return api.get<ExternalLink[]>(
     `/projects/${projectId}/external-links?internalType=${encodeURIComponent(internalType)}`,
   )
+}
+
+// ---------------- CAP-47 FR-10 项目级 Jira 推送默认值 ----------------
+
+/** 读项目推送默认值；未配置时后端返回空 body（不是错误），故可能为 null */
+export function getJiraPushDefaults(projectId: string): Promise<JiraPushDefaults | null> {
+  return api.get<JiraPushDefaults | null>(`/projects/${projectId}/jira-push-defaults`)
+}
+
+/** 保存项目推送默认值（整行覆盖：没给的字段即被清空） */
+export function saveJiraPushDefaults(
+  projectId: string,
+  input: JiraPushDefaultsInput,
+): Promise<JiraPushDefaults> {
+  return api.put<JiraPushDefaults>(`/projects/${projectId}/jira-push-defaults`, input)
+}
+
+/** 配置页用的项目作用域选项端点（需求侧的同类端点在路径里带 rid，配置页不挂在需求上） */
+export function getJiraPushOptionsForProject(
+  projectId: string,
+  integrationId: number,
+  jiraProjectKey?: string,
+): Promise<JiraPushOptions> {
+  const q = new URLSearchParams({ integrationId: String(integrationId) })
+  if (jiraProjectKey) q.set('jiraProjectKey', jiraProjectKey)
+  return api.get<JiraPushOptions>(`/projects/${projectId}/jira-push-defaults/options?${q}`)
+}
+
+export function searchJiraAssignableUsersForProject(
+  projectId: string,
+  integrationId: number,
+  jiraProjectKey: string | undefined,
+  q: string,
+): Promise<JiraAssignableUser[]> {
+  const params = new URLSearchParams({ integrationId: String(integrationId) })
+  if (jiraProjectKey) params.set('jiraProjectKey', jiraProjectKey)
+  if (q) params.set('q', q)
+  return api.get<JiraAssignableUser[]>(
+    `/projects/${projectId}/jira-push-defaults/assignable-users?${params}`,
+  )
+}
+
+export function getJiraCreateFieldsForProject(
+  projectId: string,
+  integrationId: number,
+  jiraProjectKey: string,
+  issueTypeId: string,
+): Promise<JiraCreateFields> {
+  const q = new URLSearchParams({
+    integrationId: String(integrationId),
+    jiraProjectKey,
+    issueTypeId,
+  })
+  return api.get<JiraCreateFields>(`/projects/${projectId}/jira-push-defaults/create-fields?${q}`)
 }

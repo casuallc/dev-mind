@@ -1,6 +1,7 @@
 package com.devmind.integration.dto;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * CAP-47 FR-02 推送弹窗一次给齐的候选与默认值（打开弹窗只发这一个请求）。
@@ -33,14 +34,21 @@ public record JiraPushTargetsView(List<Instance> instances,
     }
 
     /**
-     * 各字段默认值（取需求当前值，弹窗内可改）；dueDate 为 yyyy-MM-dd 字符串。
+     * 各字段默认值（取需求当前值 + 项目级推送默认值，弹窗内可改）；dueDate 为 yyyy-MM-dd 字符串。
      *
      * <p>**只回填与 Jira 同域的字段**：标题/描述/标签/截止日期直接取；priority 须命中实例词表
      * （见 {@code JiraPushService.prefillPriority}）；**不回填 assignee**——平台 assignee 是人名
      * （「刘长青」），Jira {@code assignee.name} 要的是登录名，回填要么 400
      * 「用户 '刘长青' 不存在」，要么在人名恰好与某登录名相同时静默指派给错误的人。
+     *
+     * <p>新增的 {@code issueTypeId}/{@code assigneeName}/{@code extraFields} 来自项目级推送默认值配置
+     * （{@code JiraPushDefaultsEntity}）——需求本体没有这些字段的概念，只能来自项目默认。
+     * 默认 Jira 项目 key 不在此处：顶层 {@code defaultJiraProjectKey} 已承载（同步配置优先，
+     * 无同步配置时退项目推送默认值），避免两个字段各说各话。
      */
     public record Defaults(String title, String description, String priority, List<String> labels,
-                           String dueDate) {
+                           String dueDate,
+                           String issueTypeId, String assigneeName,
+                           Map<String, Object> extraFields) {
     }
 }
