@@ -22,7 +22,10 @@ imported=0、需求总数不变（防「推送过的 issue 被同步重复建成
 非必填的不进清单）→ 不填动态字段被 mock 逐字段拒 400（与真实 Jira 同形，需求仍 LOCAL）→ 带动态字段
 推送成功且 payload 是 Jira 取值形态（[{id}] / {originalEstimate,remainingEstimate}，空值不写）→
 护栏：覆盖 description 类字段/取值超两层被 400 拦在本地 → 新端点 404 时退旧端点（清单等价，候选值
-走 name 回退）→ 两端点皆 500 时降级为空表 + error（不禁用提交）。
+走 name 回退）→ 两端点皆 500 时降级为空表 + error（不禁用提交）→ **FR-10 个人推送模板**：未登录 401
+→ 非 ADMIN 用户 B 可用（个人设置入口）→ 四元组 upsert（同组合整行覆盖不新增行、不同组合各自成行、
+缺组合键 400）→ 动态字段沿用推送口径护栏 → **用户隔离**（B 看不到也删不掉 A 的模板、B 的 targets
+不带模板）→ A 的 push-targets 一次带回全部模板 → 配置页用的三个项目无关选项端点 → 删除本人模板。
 
 复用同一 H2 时实例可能残留，故候选实例相关断言用「包含 / 与 instances 首条一致」而非精确计数。
 """
@@ -597,6 +600,125 @@ try:
     check("目录为空 → 清单全空且无错误（提交不禁用）",
           st == 200 and not (cf_empty or {}).get("fields") and not (cf_empty or {}).get("unsupported")
           and (cf_empty or {}).get("error") is None, "%s %s" % (st, cf_empty))
+
+    # ---------- 13. FR-10 个人推送模板（多用户隔离 + 四元组 upsert） ----------
+    tpl_url = "/me/jira-push-templates"
+    combo_a = {"integrationId": ia_id, "jiraProjectKey": "PROJ", "issueTypeId": "10001"}
+
+    # 13a. 未登录一律 401（个人作用域靠登录身份隔离，不吃匿名）
+    saved_token = TOKEN
+    TOKEN = None
+    st, anon = call("GET", tpl_url)
+    check("未登录读模板列表 401", st == 401, "%s %s" % (st, anon))
+    st, anon2 = call("PUT", tpl_url, dict(combo_a))
+    check("未登录保存模板 401", st == 401, "%s %s" % (st, anon2))
+    TOKEN = saved_token
+
+    # 13b. 用户 B（非 ADMIN）：普通用户的配置入口是「个人设置 → Jira 推送模板」
+    user_b = "e2e47b" + MARK.rsplit("-", 1)[-1]
+    st, ub = call("POST", "/auth/users", {
+        "username": user_b, "displayName": "E2E 用户B", "password": "e2e-pass-47", "role": "DEVELOPER"})
+    check("创建非 ADMIN 用户 B", st == 200, "%s %s" % (st, ub))
+    st, lb = call("POST", "/auth/login", {"username": user_b, "password": "e2e-pass-47"})
+    token_b = (lb or {}).get("token") or (lb or {}).get("accessToken")
+    check("用户 B 登录", st == 200 and bool(token_b), "%s %s" % (st, lb))
+    if not token_b:
+        sys.exit(1)
+
+    # 13c. A（admin）建模板：动态字段存 Jira API 形态（与推送 payload 同构，推送时原样复用）
+    st, tpl1 = call("PUT", tpl_url, dict(combo_a, priorityName="High", assigneeName="lisi",
+                                         labels=["tpl", "cap47"],
+                                         extraFields={"components": [{"id": "10100"}]}))
+    check("保存模板（含动态字段）200", st == 200 and bool((tpl1 or {}).get("id")), "%s %s" % (st, tpl1))
+    check("模板视图带回实例名（列表展示用）", (tpl1 or {}).get("integrationName") == MARK + " 实例A",
+          "%s" % (tpl1,))
+    st, lst = call("GET", tpl_url)
+    mine = [t for t in lst or [] if t.get("integrationId") == ia_id]  # 复用同一 H2 时可能残留上轮的模板
+    check("列表读回 1 条且动态字段原样（API 形态）",
+          st == 200 and len(mine) == 1 and mine[0].get("extraFields")
+          == {"components": [{"id": "10100"}]} and mine[0].get("labels") == ["tpl", "cap47"],
+          "%s %s" % (st, lst))
+    tpl_id = mine[0].get("id")
+
+    # 13d. 同四元组再存 = 整行覆盖（不是新增一行）
+    st, _ = call("PUT", tpl_url, dict(combo_a, priorityName="Low"))
+    st, lst = call("GET", tpl_url)
+    mine = [t for t in lst or [] if t.get("integrationId") == ia_id]
+    check("同组合再保存是整行覆盖（1 条，且没给的字段被清空）",
+          st == 200 and len(mine) == 1 and mine[0].get("priorityName") == "Low"
+          and mine[0].get("assigneeName") in (None, "")
+          and mine[0].get("extraFields") in (None, {}), "%s %s" % (st, lst))
+    check("覆盖后仍是同一行（id 不变）", mine[0].get("id") == tpl_id, "%s" % (lst,))
+
+    # 13e. 不同组合各自成行
+    st, _ = call("PUT", tpl_url, dict(combo_a, issueTypeId="10002", priorityName="Medium"))
+    st, lst = call("GET", tpl_url)
+    combos = [(t.get("jiraProjectKey"), t.get("issueTypeId"))
+              for t in lst or [] if t.get("integrationId") == ia_id]
+    check("不同任务类型各自成行（同实例同项目两行）",
+          st == 200 and sorted(combos) == [("PROJ", "10001"), ("PROJ", "10002")], "%s" % (combos,))
+
+    # 13f. 组合键必填 + 动态字段沿用推送口径的护栏
+    st, bad1 = call("PUT", tpl_url, {"integrationId": ia_id, "jiraProjectKey": "PROJ"})
+    check("缺任务类型报 400（组合键就是这行的身份）",
+          st == 400 and "issueTypeId" in json.dumps(bad1, ensure_ascii=False), "%s %s" % (st, bad1))
+    st, bad2 = call("PUT", tpl_url, dict(combo_a, extraFields={"description": "越权"}))
+    check("模板动态字段覆盖平台管理字段被拒 400（与推送同一套护栏）",
+          st == 400 and "平台管理" in json.dumps(bad2, ensure_ascii=False), "%s %s" % (st, bad2))
+    st, bad3 = call("PUT", tpl_url, dict(combo_a, extraFields={"components": [{"id": {"x": "y"}}]}))
+    check("模板动态字段取值超两层被拒 400", st == 400 and "取值非法" in json.dumps(bad3, ensure_ascii=False),
+          "%s %s" % (st, bad3))
+
+    # 13g. 用户隔离：B 看不到 / 删不掉 A 的行，也读不到 A 的模板端点数据
+    TOKEN = token_b
+    st, lst_b = call("GET", tpl_url)
+    check("用户 B 看不到 A 的模板（个人作用域，ADMIN 亦同）", st == 200 and lst_b == [], "%s %s" % (st, lst_b))
+    st, del_b = call("DELETE", "%s/%s" % (tpl_url, tpl_id))
+    check("B 删 A 的模板回 404（403 等于承认这行存在）", st == 404, "%s %s" % (st, del_b))
+    st, tgt_b = call("GET", "/projects/%s/requirements/%s/jira/push-targets" % (pid, rid_a))
+    check("B 的 push-targets 不带任何模板且 200 照常",
+          st == 200 and (tgt_b or {}).get("templates") == [], "%s" % ((tgt_b or {}).get("templates"),))
+    st, opt_b = call("GET", "%s/options?integrationId=%s&jiraProjectKey=PROJ" % (tpl_url, ia_id))
+    check("B 能用自己的身份看选项（模板配置页与项目无关，不校验项目归属）",
+          st == 200 and [t.get("name") for t in (opt_b or {}).get("issueTypes") or []] == ["任务", "缺陷"],
+          "%s %s" % (st, opt_b))
+
+    # 13h. A 的 targets 带回全部模板（前端本地匹配的数据源）
+    TOKEN = saved_token
+    st, tgt_a = call("GET", "/projects/%s/requirements/%s/jira/push-targets" % (pid, rid_a))
+    tpls = [t for t in (tgt_a or {}).get("templates") or [] if t.get("integrationId") == ia_id]
+    check("push-targets 带回当前用户全部模板（三元组匹配键齐备）",
+          st == 200 and len(tpls) == 2
+          and all(t.get("jiraProjectKey") == "PROJ" for t in tpls)
+          and sorted(t.get("issueTypeId") for t in tpls) == ["10001", "10002"],
+          "%s" % (tpls,))
+    check("模板值随响应一次给齐（优先级/动态字段，前端按组合本地匹配）",
+          {t.get("issueTypeId"): t.get("priorityName") for t in tpls} == {"10001": "Low", "10002": "Medium"},
+          "%s" % (tpls,))
+
+    # 13i. 个人作用域的选项端点（配置页没有需求/项目上下文）
+    st, t_opt = call("GET", "%s/options?integrationId=%s&jiraProjectKey=PROJ" % (tpl_url, ia_id))
+    check("模板配置选项：任务类型与优先级可拉（项目无关版）",
+          st == 200 and [t.get("name") for t in (t_opt or {}).get("issueTypes") or []] == ["任务", "缺陷"]
+          and [p.get("name") for p in (t_opt or {}).get("priorities") or []]
+          == ["Highest", "High", "Medium", "Low"], "%s %s" % (st, t_opt))
+    st, t_users = call("GET", "%s/assignable-users?integrationId=%s&jiraProjectKey=PROJ&q=lisi"
+                       % (tpl_url, ia_id))
+    check("模板配置经办人搜索（回填登录名）",
+          st == 200 and [u.get("name") for u in (t_users or [])] == ["lisi"], "%s %s" % (st, t_users))
+    st, t_cf = call("GET", "%s/create-fields?integrationId=%s&jiraProjectKey=PROJ&issueTypeId=10001"
+                    % (tpl_url, ia_id))
+    check("模板配置动态字段清单（与推送同一套元数据，无需求上下文故无 prefill）",
+          st == 200 and (t_cf or {}).get("error") is None and not (t_cf or {}).get("prefill"),
+          "%s %s" % (st, t_cf))
+
+    # 13j. 删除本人的模板
+    st, _ = call("DELETE", "%s/%s" % (tpl_url, tpl_id))
+    st, lst = call("GET", tpl_url)
+    check("删除模板后列表少一条（同一实例下只剩 10002）",
+          st == 200
+          and [t.get("issueTypeId") for t in lst or [] if t.get("integrationId") == ia_id] == ["10002"],
+          "%s %s" % (st, lst))
 
     print("\n== CAP-47 E2E: %d passed, %d failed ==" % (passed, failed))
 finally:
