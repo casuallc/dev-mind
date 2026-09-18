@@ -14,8 +14,9 @@
 username 重试）→ 推送建 issue（payload 断言：项目/类型/标题/优先级/经办人/标签/截止日期 + 描述尾
 回链 + 机器人 Bearer 身份 + 空参数不写进 payload）→ 需求转 JIRA 托管且**不套用托管字段**（本地
 fixVersions/reporter 不被 Jira 空值清空）→ 重复推送 409 → 无机器人凭证的实例推送 400 引导绑定
-→ 手动 refresh 拉回远端变更 → 无 link 需求 refresh 400 → 建同步配置跑 run：imported=0、需求总数
-不变（防「推送过的 issue 被同步重复建成新需求」回归）且 syncCovered 翻真。
+→ 创建被 Jira 拒（__create-error 注入 fields 级错误）时 errorMessages 与 errors **都要**透出、
+不再 dump 原始 JSON → 手动 refresh 拉回远端变更 → 无 link 需求 refresh 400 → 建同步配置跑 run：
+imported=0、需求总数不变（防「推送过的 issue 被同步重复建成新需求」回归）且 syncCovered 翻真。
 
 复用同一 H2 时实例可能残留，故候选实例相关断言用「包含 / 与 instances 首条一致」而非精确计数。
 """
@@ -317,6 +318,31 @@ try:
           (c_before or {}).get("source") == "LOCAL" and not (c_before or {}).get("externalKey"),
           "%s" % (c_before,))
     check("失败推送未在远端建 issue", len(create_payloads()) == 2, "%s" % (len(create_payloads()),))
+
+    # ---------- 9b. 创建被 Jira 拒：字段级错误明细逐条透出 ----------
+    # 真实场景：项目给该任务类型配了必填自定义字段，Jira 一次回 8~9 条 errors；
+    # 原实现把 errors 直接 dump 成 JSON 一行，用户读不出哪些字段必填、也看不到取值错
+    mock("/__create-error", {"error": {
+        "errorMessages": ["工作流校验失败"],
+        "errors": {"components": "模块是必需的。", "customfield_10207": "缺陷类型是必需的。",
+                   "timetracking_originalestimate": "初始预估是必需的。",
+                   "assignee": "用户 '刘长青' 不存在。"}}})
+    st, rejected = call("POST", "/projects/%s/requirements/%s/jira/push" % (pid, rid_c), {
+        "integrationId": ia_id, "jiraProjectKey": "PROJ", "issueTypeId": "10002",
+        "summary": MARK + " 被拒", "backlinkUrl": backlink, "assigneeName": "刘长青"})
+    msg = json.dumps(rejected, ensure_ascii=False)
+    check("Jira 拒绝创建 → 400 原样透出", st == 400, "%s %s" % (st, rejected))
+    check("errorMessages 与 errors 都在（不因前者存在而丢掉字段明细）",
+          "工作流校验失败" in msg and "模块是必需的。" in msg and "缺陷类型是必需的。" in msg
+          and "初始预估是必需的。" in msg, "%s" % (msg,))
+    check("取值错（用户不存在）也透出，且带字段名", "assignee: 用户 '刘长青' 不存在。" in msg, "%s" % (msg,))
+    check("不再 dump 原始 JSON（响应里若还带转义引号 = 原文 JSON 未展开）",
+          "\\\"" not in msg, "%s" % (msg,))
+    st, c_still = call("GET", "/projects/%s/requirements/%s" % (pid, rid_c))
+    check("被拒后需求 C 仍 LOCAL 且无 key",
+          (c_still or {}).get("source") == "LOCAL" and not (c_still or {}).get("externalKey"),
+          "%s" % (c_still,))
+    mock("/__create-error", {"error": None})
 
     # ---------- 10. 手动 refresh：拉回远端变更 ----------
     mock("/__mutate", {"key": key_a, "patch": {

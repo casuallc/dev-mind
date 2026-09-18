@@ -15,7 +15,8 @@
   GET  /__state    {"issues":[…回读形态…], "requests":[{method,path,auth,body}]}
   POST /__mutate   {"key":"PROJ-101","patch":{"status":"In Progress",…}} 改远端字段
   POST /__gdpr     {"on":true} 让 user/assignable/search 对 query 参数报 400 GDPR
-  POST /__reset    清空 issue 与请求记录
+  POST /__create-error {"error":{…}} 让 POST /issue 回该 400 体（字段级错误透出用；{"error":null} 关闭）
+  POST /__reset    清空 issue、请求记录与错误注入
 """
 import json
 import sys
@@ -46,7 +47,7 @@ USERS = [
     {"name": "wangwu"},  # 无显示名：displayName 回退 name
 ]
 
-STATE = {"issues": {}, "seq": 100, "gdpr": False, "requests": []}
+STATE = {"issues": {}, "seq": 100, "gdpr": False, "requests": [], "create_error": None}
 
 
 def new_issue_fields(payload_fields):
@@ -189,6 +190,9 @@ class Handler(BaseHTTPRequestHandler):
         return self.send_json(200, hits)
 
     def create_issue(self, path, query, body):
+        # 注入的 400（__create-error）：模拟 Jira 项目给该任务类型配了必填字段/取值非法
+        if STATE["create_error"]:
+            return self.send_json(400, STATE["create_error"])
         fields = (body or {}).get("fields") or {}
         missing = [k for k in ("project", "issuetype", "summary") if not fields.get(k)]
         if missing:
@@ -224,11 +228,17 @@ class Handler(BaseHTTPRequestHandler):
         STATE["gdpr"] = bool((body or {}).get("on"))
         return self.send_json(200, {"gdpr": STATE["gdpr"]})
 
+    def control_create_error(self, path, query, body):
+        """body {"error": {"errorMessages":[…], "errors":{字段: 原因}}} 注入；{"error": null} 关闭"""
+        STATE["create_error"] = (body or {}).get("error") or None
+        return self.send_json(200, {"createError": STATE["create_error"]})
+
     def control_reset(self, path, query, body):
         STATE["issues"].clear()
         STATE["requests"].clear()
         STATE["seq"] = 100
         STATE["gdpr"] = False
+        STATE["create_error"] = None
         return self.send_json(200, {"ok": True})
 
 
@@ -245,6 +255,7 @@ ROUTES = {
     ("GET", "/__state"): Handler.control_state,
     ("POST", "/__mutate"): Handler.control_mutate,
     ("POST", "/__gdpr"): Handler.control_gdpr,
+    ("POST", "/__create-error"): Handler.control_create_error,
     ("POST", "/__reset"): Handler.control_reset,
 }
 

@@ -426,23 +426,45 @@ public class JiraConnector implements IntegrationConnector {
     /** Jira 错误响应：{"errorMessages":[...],"errors":{...}}，不含任何凭据 */
     private String extractMessage(RestClientResponseException e) {
         try {
-            JsonNode body = mapper.readTree(e.getResponseBodyAsString());
-            JsonNode msgs = body.get("errorMessages");
-            if (msgs != null && msgs.isArray() && !msgs.isEmpty()) {
-                List<String> out = new ArrayList<>();
-                for (JsonNode m : msgs) {
-                    out.add(m.asText());
-                }
-                return String.join("；", out);
-            }
-            JsonNode errors = body.get("errors");
-            if (errors != null && errors.isObject()) {
-                return errors.toString();
+            String described = describeError(mapper.readTree(e.getResponseBodyAsString()));
+            if (described != null) {
+                return described;
             }
         } catch (Exception ignored) {
             // 非 JSON 错误体
         }
         String raw = e.getResponseBodyAsString();
         return raw == null ? "" : (raw.length() <= 300 ? raw : raw.substring(0, 300));
+    }
+
+    /**
+     * Jira 错误体 → 单行可读文案；不是 Jira 错误封套时返回 null（交调用方退原始报文）。
+     *
+     * <p>errorMessages 与 errors **都要**：创建 issue 时 Jira 常同时给
+     * （如「工作流校验失败」+ 逐字段的必填/取值明细），只取前者会把 8 条必填明细丢掉。
+     * errors 的 value 已本地化（「模块是必需的。」），key 是字段 id——逐条
+     * {@code key: value} 展开；直接 {@code toString()} 出来的 JSON 挤成一行，
+     * 用户既读不出哪几个字段必填，也看不到「用户 '刘长青' 不存在」这类取值错。
+     */
+    static String describeError(JsonNode body) {
+        if (body == null || body.isNull()) {
+            return null;
+        }
+        List<String> parts = new ArrayList<>();
+        JsonNode msgs = body.get("errorMessages");
+        if (msgs != null && msgs.isArray()) {
+            for (JsonNode m : msgs) {
+                parts.add(m.asText());
+            }
+        }
+        JsonNode errors = body.get("errors");
+        if (errors != null && errors.isObject()) {
+            var it = errors.properties().iterator();
+            while (it.hasNext()) {
+                var field = it.next();
+                parts.add(field.getKey() + ": " + field.getValue().asText());
+            }
+        }
+        return parts.isEmpty() ? null : String.join("；", parts);
     }
 }

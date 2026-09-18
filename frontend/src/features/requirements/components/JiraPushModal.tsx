@@ -3,7 +3,9 @@
 // 切实例时除标题/描述外全部重置、切项目时只重置任务类型——任务类型 id / 优先级词表 / 经办人 username
 // 都是实例内的值，跨实例沿用会静默推到错误的对象上。
 // 经办人搜索三段式降级（服务端 query → GDPR 退 username → 前端退纯文本输入），任何一段失败都不阻断提交。
-// 推送失败保持弹窗打开、表单不清空（Jira 必填自定义字段等 400 需用户改参数重试），错误原文透出。
+// 推送失败保持弹窗打开、表单不清空（Jira 必填自定义字段等 400 需用户改参数重试），错误原文常驻弹窗：
+// Jira 一次会给 8~9 条字段级错误（「模块是必需的。」…），message toast 几秒即散且读不全，故落成弹窗内
+// 常驻 Alert（改参数期间一直在），仅带堆栈的调试态仍走 showError 的 Modal。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert,
@@ -35,6 +37,7 @@ import type {
   Requirement,
 } from '../types'
 import { isAdmin } from '../../auth/authStore'
+import { isApiRequestError } from '../../../shared/api/error'
 import { showError } from '../../../shared/utils/showError'
 
 /** 表单值形态：dueDate 在表单里是 dayjs，提交时转 'YYYY-MM-DD' */
@@ -64,6 +67,8 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
   const [users, setUsers] = useState<JiraAssignableUser[]>([])
   const [searching, setSearching] = useState(false)
   const [busy, setBusy] = useState(false)
+  // 推送失败原文：常驻弹窗内（toast 会散、读不全 Jira 的逐字段错误）
+  const [pushError, setPushError] = useState<string | null>(null)
   const searchTimer = useRef<number | undefined>(undefined)
   // 已选 Jira 项目 key（响应式读表单值：任务类型是否为空要结合「有没有选项目」判断）
   const jiraProjectKey = Form.useWatch('jiraProjectKey', form)
@@ -79,6 +84,7 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
     setOptions(EMPTY_OPTIONS)
     setAssigneeDegraded(false)
     setUsers([])
+    setPushError(null)
     getJiraPushTargets(pid, rid)
       .then((t) => {
         setTargets(t)
@@ -173,13 +179,19 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
       dueDate: v.dueDate ? v.dueDate.format('YYYY-MM-DD') : undefined,
     }
     setBusy(true)
+    setPushError(null)
     try {
       const r = await pushRequirementToJira(pid, rid, input)
       message.success(`已创建 Jira issue ${r.externalKey}${r.remoteStatus ? `（${r.remoteStatus}）` : ''}`)
       onClose()
       onPushed(r)
     } catch (e) {
-      showError(e, '推送失败') // 弹窗保持打开、表单不清空，用户可改参数重试
+      // 弹窗保持打开、表单不清空，用户可改参数重试；Jira 的逐字段错误落常驻 Alert
+      if (isApiRequestError(e) && e.body?.stackTrace) {
+        showError(e, '推送失败') // 本地排错模式：完整堆栈走 Modal
+      } else {
+        setPushError(e instanceof Error ? e.message : String(e))
+      }
     } finally {
       setBusy(false)
     }
@@ -216,6 +228,25 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
         </Empty>
       ) : (
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          {pushError && (
+            <Alert
+              type="error"
+              showIcon
+              message="推送失败"
+              description={(
+                <>
+                  <div style={{ whiteSpace: 'pre-wrap' }}>{pushError}</div>
+                  {/* 只读必填字段这一种（本弹窗不推自定义字段）：给出可操作的两条出路，别让用户只看到报错 */}
+                  {/(必需的|required)/i.test(pushError) && (
+                    <div style={{ marginTop: 4 }}>
+                      若提示某字段「是必需的」，说明该任务类型在 Jira 项目里配了必填字段（本弹窗不推自定义字段）：
+                      可换一个任务类型，或先在 Jira 侧把该字段配成默认值。
+                    </div>
+                  )}
+                </>
+              )}
+            />
+          )}
           {targets && (
             <>
               {noIdentity ? (
