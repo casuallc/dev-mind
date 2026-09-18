@@ -463,23 +463,29 @@ public class JiraPushService {
     }
 
     /**
-     * 默认目标实例：同步配置指定的 → 项目推送默认值指定的（须在启用实例内）→ 候选首条。
-     * 推送默认值指向的实例被禁用/删除时静默回落，不报错——陈旧配置不该把弹窗打死。
-     * 无同步配置时保持原行为（同步配置指定了但实例不在启用列表内 → 无默认目标）。
+     * 默认目标实例：**项目推送默认值指定的**（须在启用实例内）→ 同步配置指定的 → 候选首条。
+     *
+     * <p>推送默认值优先于同步配置，是为了让「Jira 推送」Tab 配的那一行**整行自洽**：
+     * 同步配置回答的是「本项目从哪个 Jira 项目拉 issue」，推送目标却被它顶掉的话，
+     * 实例/项目 key 与任务类型/动态字段会分属两个项目——那些 id 在另一个项目里要么不存在
+     * （吃 400），要么恰好撞上而静默推到错误的对象。没有推送默认值时行为不变。
+     *
+     * <p>推送默认值指向的实例被禁用/删除时静默回落，不报错——陈旧配置不该把弹窗打死。
+     * 同步配置指定了但实例不在启用列表内 → 无默认目标。
      */
     private static IntegrationEntity resolveTarget(List<IntegrationEntity> instances,
                                                    JiraSyncConfigEntity cfg,
                                                    JiraPushDefaultsEntity pushDefaults) {
-        if (cfg != null) {
-            return instances.stream()
-                    .filter(i -> i.getId().equals(cfg.getIntegrationId())).findFirst().orElse(null);
-        }
         if (pushDefaults != null && pushDefaults.getIntegrationId() != null) {
             IntegrationEntity hit = instances.stream()
                     .filter(i -> i.getId().equals(pushDefaults.getIntegrationId())).findFirst().orElse(null);
             if (hit != null) {
                 return hit;
             }
+        }
+        if (cfg != null) {
+            return instances.stream()
+                    .filter(i -> i.getId().equals(cfg.getIntegrationId())).findFirst().orElse(null);
         }
         return instances.isEmpty() ? null : instances.get(0);
     }
@@ -494,10 +500,13 @@ public class JiraPushService {
                 && pushDefaults.getIntegrationId().equals(target.getId());
     }
 
-    /** 默认 Jira 项目 key：同步配置优先，无同步配置时退项目推送默认值 */
+    /**
+     * 默认 Jira 项目 key：项目推送默认值优先，未配时退同步配置（与 {@link #resolveTarget} 同序，
+     * 否则实例与 key 会分属两套配置）。两处都优先推送默认值，那一行才整行自洽。
+     */
     private static String defaultProjectKey(JiraSyncConfigEntity cfg, JiraPushDefaultsEntity pushDefaults) {
-        String key = cfg == null ? null : trimToNull(cfg.getJiraProjectKey());
-        return key != null ? key : (pushDefaults == null ? null : trimToNull(pushDefaults.getJiraProjectKey()));
+        String key = pushDefaults == null ? null : trimToNull(pushDefaults.getJiraProjectKey());
+        return key != null ? key : (cfg == null ? null : trimToNull(cfg.getJiraProjectKey()));
     }
 
     // ---------------- FR-03 推送 ----------------

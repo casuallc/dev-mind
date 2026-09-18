@@ -43,8 +43,8 @@ public record JiraPushTargetsView(List<Instance> instances,
      *
      * <p>新增的 {@code issueTypeId}/{@code assigneeName}/{@code extraFields} 来自项目级推送默认值配置
      * （{@code JiraPushDefaultsEntity}）——需求本体没有这些字段的概念，只能来自项目默认。
-     * 默认 Jira 项目 key 不在此处：顶层 {@code defaultJiraProjectKey} 已承载（同步配置优先，
-     * 无同步配置时退项目推送默认值），避免两个字段各说各话。
+     * 默认 Jira 项目 key 不在此处：顶层 {@code defaultJiraProjectKey} 已承载（项目推送默认值优先，
+     * 未配时退同步配置），避免两个字段各说各话。
      */
     public record Defaults(String title, String description, String priority, List<String> labels,
                            String dueDate,

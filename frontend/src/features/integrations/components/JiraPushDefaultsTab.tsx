@@ -263,7 +263,8 @@ export default function JiraPushDefaultsTab({ projectId }: Props) {
         </Form.Item>
 
         <Form.Item label="Jira 项目" name="jiraProjectKey"
-          tooltip="决定 issue key 前缀（如 PROJ-123）；有同步配置时同步配置优先">
+          tooltip="决定 issue key 前缀（如 PROJ-123）。推送目标的唯一来源：下面这些默认值都按这个项目取值，
+            故它优先于项目里的 Jira 同步配置（同步配置只管「从哪个项目拉 issue」）">
           <Select
             showSearch
             allowClear

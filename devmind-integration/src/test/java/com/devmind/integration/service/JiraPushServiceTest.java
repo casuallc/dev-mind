@@ -997,13 +997,29 @@ class JiraPushServiceTest {
     }
 
     @Test
-    void 同步配置优先于推送默认值() {
-        syncConfig("p1", 7L, "OTHER", true);
+    void 推送默认值优先于同步配置() {
+        syncConfig("p1", 7L, "ADMQ", true);
         service.savePushDefaults("p1", new JiraPushDefaultsRequest(7L, "PROJ", "10003",
                 null, null, List.of(), null));
 
-        // 同步配置代表「本项目同步哪个 Jira 项目」，推送默认不该把它顶掉
-        assertEquals("OTHER", service.targets("p1", "req-local").defaultJiraProjectKey());
+        // 同步配置只回答「从哪个 Jira 项目拉 issue」；推送目标以「Jira 推送」Tab 配的为准，
+        // 否则项目 key 与任务类型/动态字段会分属两个项目
+        JiraPushTargetsView view = service.targets("p1", "req-local");
+
+        assertEquals("PROJ", view.defaultJiraProjectKey());
+        assertEquals("10003", view.defaults().issueTypeId());
+        assertFalse(view.syncCovered());   // 推到 PROJ 确实不被 ADMQ 的同步配置覆盖
+    }
+
+    @Test
+    void 无推送默认值时同步配置照旧决定默认目标() {
+        syncConfig("p1", 7L, "ADMQ", true);
+
+        JiraPushTargetsView view = service.targets("p1", "req-local");
+
+        assertEquals(7L, view.defaultIntegrationId());
+        assertEquals("ADMQ", view.defaultJiraProjectKey());
+        assertTrue(view.syncCovered());
     }
 
     @Test
@@ -1040,8 +1056,10 @@ class JiraPushServiceTest {
     }
 
     @Test
-    void 推送默认值不跨实例带入() {
-        // 同步配置把默认目标指到另一个实例：实例 7 的默认值（类型 id/经办人/动态字段）带到实例 8 上会静默推错
+    void 推送默认值指向的实例不可用时整行作废并退回同步配置() {
+        // 实例 9 已删除/停用，不在启用候选里 → 默认目标退同步配置的实例 8。
+        // 此时那份默认值（任务类型 id/经办人/动态字段都是实例 7 的值）一律不带入：
+        // 陈旧配置不该把弹窗打死，但也不该把另一个实例的取值硬塞进来。
         IntegrationEntity other = new IntegrationEntity();
         other.setId(8L);
         other.setName("别家 Jira");
@@ -1051,6 +1069,7 @@ class JiraPushServiceTest {
         instances.add(other);
         syncConfig("p1", 8L, "OTHER", true);
         service.savePushDefaults("p1", defaultsRequest(Map.of("components", List.of(Map.of("id", "10000")))));
+        defaultsStore.get("p1").setIntegrationId(9L);
         requirementService.store.get("req-local").setPriority("High");
         connector.priorities = List.of(new PriorityRef("2", "High"));
 
@@ -1058,26 +1077,24 @@ class JiraPushServiceTest {
         JiraPushTargetsView.Defaults d = view.defaults();
 
         assertEquals(8L, view.defaultIntegrationId());
+        assertEquals("OTHER", view.defaultJiraProjectKey());   // 退回同步配置（顺带证明它确实被退回了）
         assertNull(d.issueTypeId());
         assertNull(d.assigneeName());
-        assertTrue(d.extraFields().isEmpty());
         assertTrue(d.labels().isEmpty());      // 「ai」是实例 7 的默认标签，不跟着走
+        assertTrue(d.extraFields().isEmpty());
         assertEquals("High", d.priority());    // 需求自身的值照旧带入
     }
 
     @Test
-    void 默认值指向的实例已不可用时照常回落() {
-        // 陈旧配置不该把弹窗打死：默认实例不在启用列表内 → 退回候选首条，且其默认值不带入
-        service.savePushDefaults("p1", new JiraPushDefaultsRequest(9L, "GONE", "10003",
-                "Low", "lisi", List.of("ai"), Map.of("components", List.of(Map.of("id", "10000")))));
-        defaultsStore.get("p1").setIntegrationId(9L);   // 实例 9 已删除/停用，不在候选里
+    void 推送默认值实例不可用且无同步配置时退候选首条() {
+        // 陈旧配置不该把弹窗打死：退到候选首条即可，默认值同样不带入
+        service.savePushDefaults("p1", defaultsRequest(null));
+        defaultsStore.get("p1").setIntegrationId(9L);
 
         JiraPushTargetsView view = service.targets("p1", "req-local");
 
         assertEquals(7L, view.defaultIntegrationId());
         assertNull(view.defaults().issueTypeId());
-        assertNull(view.defaults().assigneeName());
-        assertTrue(view.defaults().labels().isEmpty());
         assertTrue(view.defaults().extraFields().isEmpty());
     }
 
