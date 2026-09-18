@@ -3,6 +3,11 @@ import { api } from '../../shared/api/client'
 import type {
   Design,
   FlowSession,
+  JiraAssignableUser,
+  JiraPushInput,
+  JiraPushOptions,
+  JiraPushResult,
+  JiraPushTargets,
   JiraTransition,
   JiraTransitionResult,
   Requirement,
@@ -94,6 +99,66 @@ export function logJiraWork(
     seconds: Math.round(hours * 3600),
     comment: comment || undefined,
   })
+}
+
+// ---- CAP-47 自建需求手动推送到 Jira ----
+
+/** 推送弹窗数据源：候选实例/默认目标/任务类型/优先级/默认值/写身份来源/是否被同步覆盖。
+ *  服务端不抛错（选项拉取失败降级为空表 + optionsError），弹窗一定打得开。 */
+export function getJiraPushTargets(projectId: string, requirementId: string): Promise<JiraPushTargets> {
+  return api.get<JiraPushTargets>(`/projects/${projectId}/requirements/${requirementId}/jira/push-targets`)
+}
+
+/** 切换实例/项目后重拉 Jira 项目 / 任务类型 / 优先级（失败即抛，错误原文透出） */
+export function getJiraPushOptions(
+  projectId: string,
+  requirementId: string,
+  integrationId: number,
+  jiraProjectKey?: string,
+): Promise<JiraPushOptions> {
+  const q = new URLSearchParams({ integrationId: String(integrationId) })
+  if (jiraProjectKey) q.set('jiraProjectKey', jiraProjectKey)
+  return api.get<JiraPushOptions>(
+    `/projects/${projectId}/requirements/${requirementId}/jira/push-options?${q}`,
+  )
+}
+
+/** 经办人搜索（q 为用户名/显示名关键字）；失败由调用方降级为纯文本输入，不阻断提交 */
+export function searchJiraAssignableUsers(
+  projectId: string,
+  requirementId: string,
+  integrationId: number,
+  jiraProjectKey: string | undefined,
+  q: string,
+): Promise<JiraAssignableUser[]> {
+  const params = new URLSearchParams({ integrationId: String(integrationId) })
+  if (jiraProjectKey) params.set('jiraProjectKey', jiraProjectKey)
+  if (q) params.set('q', q)
+  return api.get<JiraAssignableUser[]>(
+    `/projects/${projectId}/requirements/${requirementId}/jira/assignable-users?${params}`,
+  )
+}
+
+/** 推送自建需求到 Jira：建 issue + 登记关联 + 需求转 Jira 托管（不可撤销） */
+export function pushRequirementToJira(
+  projectId: string,
+  requirementId: string,
+  input: JiraPushInput,
+): Promise<JiraPushResult> {
+  return api.post<JiraPushResult>(
+    `/projects/${projectId}/requirements/${requirementId}/jira/push`,
+    input,
+  )
+}
+
+/** 按已关联 issue 手动刷新托管字段（同步配置不覆盖该 issue 时的兜底通道） */
+export function refreshRequirementFromJira(
+  projectId: string,
+  requirementId: string,
+): Promise<JiraPushResult> {
+  return api.post<JiraPushResult>(
+    `/projects/${projectId}/requirements/${requirementId}/jira/refresh`,
+  )
 }
 
 // ---- Work Item ----

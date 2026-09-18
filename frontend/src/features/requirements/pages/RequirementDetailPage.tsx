@@ -26,6 +26,7 @@ import {
 import {
   ArrowLeftOutlined,
   CheckOutlined,
+  CloudUploadOutlined,
   DownOutlined,
   EditOutlined,
   LockOutlined,
@@ -38,10 +39,12 @@ import {
   deleteRequirement,
   getRequirementOverview,
   listDesigns,
+  refreshRequirementFromJira,
   updateRequirementStatus,
 } from '../api'
 import JiraActions from '../components/JiraActions'
 import JiraDescription from '../components/JiraDescription'
+import JiraPushModal from '../components/JiraPushModal'
 import AnalysisTab from '../components/flow/AnalysisTab'
 import DesignsTab from '../components/flow/DesignsTab'
 import RelatedRecordsTab from '../components/RelatedRecordsTab'
@@ -130,6 +133,8 @@ export default function RequirementDetailPage() {
   const [loading, setLoading] = useState(true)
   const [editOpen, setEditOpen] = useState(false)
   const [propsOpen, setPropsOpen] = useState(false)
+  const [pushOpen, setPushOpen] = useState(false)
+  const [refreshingJira, setRefreshingJira] = useState(false)
   const [designs, setDesigns] = useState<Design[]>([])
   // Tab 与 URL 同步（?tab=analysis/design/workItems）：流程通知深链直达对应 Tab，刷新/分享不丢位置
   const [searchParams, setSearchParams] = useSearchParams()
@@ -266,6 +271,21 @@ export default function RequirementDetailPage() {
     </Space>
   )
 
+  /** CAP-47 FR-05：按已关联 issue 手动拉回托管字段（同步配置未覆盖该 issue 时的兜底通道） */
+  const refreshFromJira = async () => {
+    if (!projectId) return
+    setRefreshingJira(true)
+    try {
+      const res = await refreshRequirementFromJira(projectId, r.id)
+      message.success(`已从 Jira 刷新 ${res.externalKey}${res.remoteStatus ? ` → ${res.remoteStatus}` : ''}`)
+      await reloadOverview()
+    } catch (e) {
+      showError(e, '从 Jira 刷新失败')
+    } finally {
+      setRefreshingJira(false)
+    }
+  }
+
   return (
     <Space direction="vertical" size={12} style={{ width: '100%', ...pageRootScrollStyle }}>
       <Card
@@ -289,6 +309,19 @@ export default function RequirementDetailPage() {
             )}
             <Button icon={<EditOutlined />} onClick={() => setEditOpen(true)}>编辑</Button>
             <Button icon={<ProfileOutlined />} onClick={() => setPropsOpen(true)}>属性</Button>
+            {!isJira && (
+              <Tooltip title={terminal ? '需求已完结（DONE/CANCELLED），不可推送' : undefined}>
+                <span>
+                  <Button
+                    icon={<CloudUploadOutlined />}
+                    disabled={terminal}
+                    onClick={() => setPushOpen(true)}
+                  >
+                    推送到 Jira
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
             {isJira && <JiraActions requirement={r} onChanged={reloadOverview} />}
             <Button icon={<ReloadOutlined />} onClick={reloadOverview}>刷新</Button>
             <Dropdown
@@ -403,7 +436,21 @@ export default function RequirementDetailPage() {
             </Space>
           </Descriptions.Item>
           {isJira && (
-            <Descriptions.Item label="Jira 状态">{r.remoteStatus ?? '-'}</Descriptions.Item>
+            <Descriptions.Item label="Jira 状态">
+              <Space size={8}>
+                <span>{r.remoteStatus ?? '-'}</span>
+                <Tooltip title="按关联 issue 拉回托管字段（JQL 同步未覆盖该 issue 时的兜底通道）">
+                  <Button
+                    size="small"
+                    icon={<ReloadOutlined />}
+                    loading={refreshingJira}
+                    onClick={refreshFromJira}
+                  >
+                    从 Jira 刷新
+                  </Button>
+                </Tooltip>
+              </Space>
+            </Descriptions.Item>
           )}
           <Descriptions.Item label={
             <Tooltip title="需求下所有 agent 会话时长汇总（活跃会话算到当前）">
@@ -455,6 +502,16 @@ export default function RequirementDetailPage() {
           open={editOpen}
           onClose={() => setEditOpen(false)}
           onSaved={() => reloadOverview()}
+        />
+      )}
+
+      {/* CAP-47：仅自建需求渲染（推送成功后 source 翻 JIRA，入口自然消失、改由「Jira 操作」接管） */}
+      {!isJira && (
+        <JiraPushModal
+          requirement={r}
+          open={pushOpen}
+          onClose={() => setPushOpen(false)}
+          onPushed={reloadAll}
         />
       )}
     </Space>

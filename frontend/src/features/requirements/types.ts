@@ -69,6 +69,82 @@ export interface JiraTransitionResult {
   remoteStatus?: string
 }
 
+// ---- CAP-47 自建需求推送到 Jira ----
+
+/** 通用下拉选项：id 为回传值（任务类型 id / Jira 项目 key；优先级 id 可能为空，回传用 name） */
+export interface JiraOption {
+  id?: string
+  name: string
+}
+
+/** CAP-47 FR-02：候选 Jira 实例（TYPE_JIRA + ENABLED） */
+export interface JiraPushInstance {
+  id: number
+  name: string
+  baseUrl: string
+}
+
+/** CAP-47 FR-02：推送弹窗一次性数据源（打开弹窗只发这一个请求） */
+export interface JiraPushTargets {
+  instances: JiraPushInstance[]
+  defaultIntegrationId?: number
+  defaultJiraProjectKey?: string
+  jiraProjects: JiraOption[]
+  issueTypes: JiraOption[]
+  priorities: JiraOption[]
+  /** 各字段默认值（取需求当前值，弹窗内可改） */
+  defaults: {
+    title?: string
+    description?: string
+    priority?: string
+    labels?: string[]
+    assignee?: string
+    dueDate?: string // yyyy-MM-dd
+  }
+  /** 写身份来源：PERSONAL 个人账号 / BOT 实例机器人 / NONE 都没有（须先绑定，提交禁用） */
+  identitySource: 'PERSONAL' | 'BOT' | 'NONE'
+  /** 该项目在此实例上被 enabled 的同步配置覆盖 → 托管字段会自动刷新 */
+  syncCovered: boolean
+  /** 选项拉取失败的原因；空表可能是「确实没有可创建的类型」，也可能是这里失败（须区分提示） */
+  optionsError?: string
+}
+
+/** CAP-47 FR-02：切换实例/项目后重拉的选项 */
+export interface JiraPushOptions {
+  jiraProjects: JiraOption[]
+  issueTypes: JiraOption[]
+  priorities: JiraOption[]
+}
+
+/** CAP-47 FR-02：经办人候选（name = 平台用户名，创建 issue 时回传） */
+export interface JiraAssignableUser {
+  name: string
+  displayName: string
+}
+
+/** CAP-47 FR-03：推送入参（backlinkUrl 由前端按 window.location.origin 拼，服务端拼回链文案） */
+export interface JiraPushInput {
+  integrationId: number
+  jiraProjectKey: string
+  issueTypeId: string
+  summary: string
+  description?: string
+  backlinkUrl: string
+  priorityName?: string
+  assigneeName?: string
+  labels?: string[]
+  dueDate?: string // yyyy-MM-dd
+}
+
+/** CAP-47：推送/刷新结果（回读失败时 remoteStatus/issueType 为空，走「从 Jira 刷新」补齐） */
+export interface JiraPushResult {
+  externalKey: string
+  externalUrl?: string
+  remoteStatus?: string
+  issueType?: string
+  syncCovered: boolean
+}
+
 export interface RequirementInput {
   title: string
   description?: string
