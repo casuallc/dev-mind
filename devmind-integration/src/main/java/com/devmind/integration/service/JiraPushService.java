@@ -83,9 +83,9 @@ public class JiraPushService {
      */
     private static final Set<String> FIXED_ALWAYS_REQUIRED = Set.of("summary");
 
-    /** FR-08：动态字段不许覆盖的字段 id = 固定字段 + 连接器自行组装的 project/issuetype */
+    /** FR-08：动态字段不许覆盖的字段 id = 固定字段 + 连接器自行组装的 project/issuetype + Jira 自动回填的 reporter */
     private static final Set<String> RESERVED_FIELD_IDS = Set.of(
-            "project", "issuetype", "summary", "description", "priority", "assignee", "labels", "duedate");
+            "project", "issuetype", "summary", "description", "priority", "assignee", "labels", "duedate", "reporter");
 
     private final IntegrationRepository integrationRepo;
     private final JiraSyncConfigRepository configRepo;
@@ -237,6 +237,11 @@ public class JiraPushService {
                 if (!FIXED_ALWAYS_REQUIRED.contains(ref.id())) {
                     requiredFixed.add(ref.id());
                 }
+                continue;
+            }
+            // Platform manages these (project/issuetype) or Jira auto-fills (reporter) —
+            // silently skip instead of putting them into unsupported and blocking submit
+            if (RESERVED_FIELD_IDS.contains(ref.id())) {
                 continue;
             }
             List<JiraOptionView> options = ref.allowedValues().stream()

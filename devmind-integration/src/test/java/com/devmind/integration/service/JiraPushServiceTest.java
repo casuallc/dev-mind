@@ -761,8 +761,6 @@ class JiraPushServiceTest {
     @Test
     void 渲染不了的必填字段进unsupported而不是硬塞文本框() {
         connector.createFields = List.of(
-                // 必填用户选择器：平台没有对应控件
-                new CreateFieldRef("reporter", "报告人", true, "user", null, List.of(), false),
                 // 级联选择：option 类型但无候选值 → 塞成自由文本只会误导用户
                 new CreateFieldRef("customfield_10700", "归属组织", true, "option", null, List.of(), false),
                 new CreateFieldRef("components", "模块", true, "array", "component",
@@ -770,9 +768,28 @@ class JiraPushServiceTest {
 
         JiraCreateFieldsView view = service.createFields("p1", "req-local", 7L, "PROJ", "10003");
 
-        assertEquals(List.of("reporter", "customfield_10700"),
+        assertEquals(List.of("customfield_10700"),
                 view.unsupported().stream().map(JiraCreateFieldView::id).toList());
         assertTrue(view.unsupported().stream().allMatch(f -> f.control() == null));
+        assertEquals(List.of("components"), view.fields().stream().map(JiraCreateFieldView::id).toList());
+    }
+
+    @Test
+    void reserved字段project和issuetype和reporter不进unsupported列表() {
+        // Jira createmeta 返回 project/issuetype/reporter 为必填，但平台已管理前两者，
+        // Jira REST API 自动回填 reporter——三者都应静默跳过，不进 unsupported 以免阻断提交
+        connector.createFields = List.of(
+                new CreateFieldRef("project", "项目", true, "project", null,
+                        List.of(new FieldOption("10311", "分布式消息")), false),
+                new CreateFieldRef("issuetype", "问题类型", true, "issuetype", null,
+                        List.of(new FieldOption("10103", "缺陷")), false),
+                new CreateFieldRef("reporter", "报告人", true, "user", null, List.of(), false),
+                new CreateFieldRef("components", "模块", true, "array", "component",
+                        List.of(new FieldOption("10000", "后端")), false));
+
+        JiraCreateFieldsView view = service.createFields("p1", "req-local", 7L, "PROJ", "10003");
+
+        assertTrue(view.unsupported().isEmpty());
         assertEquals(List.of("components"), view.fields().stream().map(JiraCreateFieldView::id).toList());
     }
 
