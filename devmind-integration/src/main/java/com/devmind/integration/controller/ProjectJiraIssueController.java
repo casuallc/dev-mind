@@ -1,12 +1,18 @@
 package com.devmind.integration.controller;
 
 import com.devmind.integration.connector.IntegrationConnector;
+import com.devmind.integration.dto.JiraAssignableUserView;
+import com.devmind.integration.dto.JiraPushOptionsView;
+import com.devmind.integration.dto.JiraPushRequest;
+import com.devmind.integration.dto.JiraPushResultView;
+import com.devmind.integration.dto.JiraPushTargetsView;
 import com.devmind.integration.dto.JiraTransitionRequest;
 import com.devmind.integration.dto.JiraTransitionResultView;
 import com.devmind.integration.dto.JiraTransitionView;
 import com.devmind.integration.dto.JiraWorklogRequest;
 import com.devmind.integration.dto.JiraWorklogResultView;
 import com.devmind.integration.service.JiraIssueActionService;
+import com.devmind.integration.service.JiraPushService;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -24,17 +30,20 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- * CAP-19 项目作用域 Jira issue 操作端点：FR-08 工作流转换（平台侧状态回写）、
- * CAP-27 工时登记、FR-09 附件内容代理（描述图片按需拉取）。
+ * 项目作用域 Jira issue 端点（全部挂在需求上）：
+ * CAP-19 FR-08 工作流转换（平台侧状态回写）、CAP-27 工时登记、CAP-19 FR-09 附件内容代理（描述图片按需拉取）、
+ * CAP-47 自建需求推送（候选/选项/可指派用户/推送/手动刷新）。
  */
 @RestController
 @RequestMapping("/api/projects/{pid}/requirements/{rid}/jira")
 public class ProjectJiraIssueController {
 
     private final JiraIssueActionService service;
+    private final JiraPushService pushService;
 
-    public ProjectJiraIssueController(JiraIssueActionService service) {
+    public ProjectJiraIssueController(JiraIssueActionService service, JiraPushService pushService) {
         this.service = service;
+        this.pushService = pushService;
     }
 
     /** 需求关联 issue 当前可用的工作流转换（详情页「Jira 操作」下拉数据源） */
@@ -55,6 +64,47 @@ public class ProjectJiraIssueController {
     public JiraWorklogResultView logWork(@PathVariable String pid, @PathVariable String rid,
                                          @RequestBody JiraWorklogRequest req) {
         return service.logWork(pid, rid, req.seconds(), req.comment());
+    }
+
+    /**
+     * CAP-47 FR-02：推送弹窗的一次性数据源（候选实例/默认目标/任务类型/优先级/可指派默认值/
+     * 身份来源/是否被同步覆盖）。不抛错——选项拉取失败降级空表 + optionsError，弹窗一定打得开。
+     */
+    @GetMapping("/push-targets")
+    public JiraPushTargetsView pushTargets(@PathVariable String pid, @PathVariable String rid) {
+        return pushService.targets(pid, rid);
+    }
+
+    /** CAP-47 FR-02：切换实例/项目后重拉 Jira 项目 / 任务类型 / 优先级（失败即抛出，错误原文透出） */
+    @GetMapping("/push-options")
+    public JiraPushOptionsView pushOptions(@PathVariable String pid, @PathVariable String rid,
+                                           @RequestParam("integrationId") Long integrationId,
+                                           @RequestParam(value = "jiraProjectKey", required = false)
+                                           String jiraProjectKey) {
+        return pushService.options(pid, rid, integrationId, jiraProjectKey);
+    }
+
+    /** CAP-47 FR-02：经办人候选（q 为关键字，空取默认列表）；失败由前端降级为纯文本输入 */
+    @GetMapping("/assignable-users")
+    public List<JiraAssignableUserView> assignableUsers(@PathVariable String pid, @PathVariable String rid,
+                                                        @RequestParam("integrationId") Long integrationId,
+                                                        @RequestParam(value = "jiraProjectKey", required = false)
+                                                        String jiraProjectKey,
+                                                        @RequestParam(value = "q", required = false) String q) {
+        return pushService.assignableUsers(pid, rid, integrationId, jiraProjectKey, q);
+    }
+
+    /** CAP-47 FR-03：推送自建需求到 Jira（建 issue + 登记 link + 转 Jira 托管），幂等冲突报 409 */
+    @PostMapping("/push")
+    public JiraPushResultView push(@PathVariable String pid, @PathVariable String rid,
+                                   @RequestBody JiraPushRequest req) {
+        return pushService.push(pid, rid, req);
+    }
+
+    /** CAP-47 FR-05：按已关联 issue 手动刷新托管字段（JQL 不覆盖该 issue 时的兜底通道） */
+    @PostMapping("/refresh")
+    public JiraPushResultView refresh(@PathVariable String pid, @PathVariable String rid) {
+        return pushService.refresh(pid, rid);
     }
 
     /**
