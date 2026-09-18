@@ -122,6 +122,37 @@ export interface JiraAssignableUser {
   displayName: string
 }
 
+/** CAP-47 FR-08：动态必填字段的渲染控件（服务端按 Jira schema 判定，前端只按它 switch，
+ *  不必理解 Jira 字段类型）。null 表示必填但平台渲染不了 → 列入 unsupported 并禁用提交。 */
+export type JiraCreateFieldControl =
+  | 'MULTI_SELECT'
+  | 'SELECT'
+  | 'DATE'
+  | 'TEXT'
+  | 'NUMBER'
+  | 'TIMETRACKING'
+
+/** CAP-47 FR-08：一个待填写的创建字段；options 为平台合法取值（枚举类必有，自由文本数组为空） */
+export interface JiraCreateField {
+  id: string
+  name: string
+  control: JiraCreateFieldControl | null
+  options: JiraOption[]
+}
+
+/** CAP-47 FR-08：必填字段清单（createmeta）。requiredFixed 是固定表单已有的字段 id
+ *  （duedate/priority/assignee/labels/description），前端加必填校验即可，不重复渲染。 */
+export interface JiraCreateFields {
+  fields: JiraCreateField[]
+  requiredFixed: string[]
+  /** 必填但渲染不了（用户选择器/级联选择等）：列出并禁用提交，好过提交后吃 400 */
+  unsupported: JiraCreateField[]
+  /** 字段 id → 预填值（只回填同域且命中实例候选值的本地值，目前只有 fixVersions） */
+  prefill: Record<string, string[]>
+  /** 元数据拉取失败原因；非空时三个列表皆空且**不禁用提交** */
+  error?: string
+}
+
 /** CAP-47 FR-03：推送入参（backlinkUrl 由前端按 window.location.origin 拼，服务端拼回链文案） */
 export interface JiraPushInput {
   integrationId: number
@@ -134,6 +165,8 @@ export interface JiraPushInput {
   assigneeName?: string
   labels?: string[]
   dueDate?: string // yyyy-MM-dd
+  /** CAP-47 FR-08：动态字段（键=平台字段 id，值=按 control 组装好的平台取值，见 modal 的 toJiraValue） */
+  extraFields?: Record<string, unknown>
 }
 
 /** CAP-47：推送/刷新结果（回读失败时 remoteStatus/issueType 为空，走「从 Jira 刷新」补齐） */

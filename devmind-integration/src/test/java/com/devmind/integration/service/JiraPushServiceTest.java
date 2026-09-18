@@ -8,13 +8,18 @@ import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.integration.connector.IntegrationConnector;
+import com.devmind.integration.connector.IntegrationConnector.CreateFieldRef;
 import com.devmind.integration.connector.IntegrationConnector.ExternalProject;
+import com.devmind.integration.connector.IntegrationConnector.FieldOption;
 import com.devmind.integration.connector.IntegrationConnector.IssueRef;
 import com.devmind.integration.connector.IntegrationConnector.IssueSpec;
 import com.devmind.integration.connector.IntegrationConnector.IssueTypeRef;
 import com.devmind.integration.connector.IntegrationConnector.JiraIssue;
 import com.devmind.integration.connector.IntegrationConnector.PriorityRef;
 import com.devmind.integration.connector.IntegrationConnector.UserRef;
+import com.devmind.integration.dto.JiraCreateFieldView;
+import com.devmind.integration.dto.JiraCreateFieldsView;
+import com.devmind.integration.dto.JiraOptionView;
 import com.devmind.integration.dto.JiraPushRequest;
 import com.devmind.integration.dto.JiraPushResultView;
 import com.devmind.integration.dto.JiraPushTargetsView;
@@ -79,12 +84,14 @@ class JiraPushServiceTest {
         List<PriorityRef> priorities = List.of();
         List<IssueTypeRef> issueTypes = List.of();
         List<UserRef> assignableUsers = List.of();
+        List<CreateFieldRef> createFields = List.of();
         /** createIssue 的返回键；置 null 表示连接器直接抛错 */
         String createdKey = "PROJ-123";
         /** getIssue 的返回；置 null 表示回读抛错 */
         JiraIssue readback = null;
         boolean readbackFails = false;
         boolean listPrioritiesFails = false;
+        boolean listCreateFieldsFails = false;
 
         @Override public String type() { return IntegrationEntity.TYPE_JIRA; }
         @Override public TestResult testConnection(IntegrationEntity c, String t) { throw new UnsupportedOperationException(); }
@@ -129,6 +136,15 @@ class JiraPushServiceTest {
         @Override
         public List<UserRef> listAssignableUsers(IntegrationEntity c, String token, String projectKey, String q) {
             return assignableUsers;
+        }
+
+        @Override
+        public List<CreateFieldRef> listCreateFields(IntegrationEntity c, String token,
+                                                     String projectKey, String issueTypeId) {
+            if (listCreateFieldsFails) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "拉取 Jira 创建字段失败：HTTP 500");
+            }
+            return createFields;
         }
     }
 
@@ -315,7 +331,13 @@ class JiraPushServiceTest {
 
     private static JiraPushRequest request(String title) {
         return new JiraPushRequest(7L, "PROJ", "10001", title, "原始描述", BACKLINK,
-                "High", "lisi", List.of("ai", "账单"), "2026-10-31");
+                "High", "lisi", List.of("ai", "账单"), "2026-10-31", null);
+    }
+
+    /** FR-08：带动态字段的推送入参（其余参数同 {@link #request}） */
+    private static JiraPushRequest pushRequest(Map<String, Object> extraFields) {
+        return new JiraPushRequest(7L, "PROJ", "10001", "支持导出对账单", "原始描述", BACKLINK,
+                null, null, List.of(), null, extraFields);
     }
 
     // ---------------- FR-03 推送 ----------------
@@ -511,24 +533,24 @@ class JiraPushServiceTest {
         // 优先级不在词表内
         assertEquals(ErrorCode.BAD_REQUEST, assertThrows(DevMindException.class,
                 () -> service.push("p1", "req-local", new JiraPushRequest(7L, "PROJ", "10001", "标题",
-                        "描述", BACKLINK, "Urgent", null, List.of(), null))).getErrorCode());
+                        "描述", BACKLINK, "Urgent", null, List.of(), null, null))).getErrorCode());
         // 标签含空格 / 逗号
         assertThrows(DevMindException.class, () -> service.push("p1", "req-local",
                 new JiraPushRequest(7L, "PROJ", "10001", "标题", "描述", BACKLINK, null, null,
-                        List.of("a b"), null)));
+                        List.of("a b"), null, null)));
         assertThrows(DevMindException.class, () -> service.push("p1", "req-local",
                 new JiraPushRequest(7L, "PROJ", "10001", "标题", "描述", BACKLINK, null, null,
-                        List.of("a,b"), null)));
+                        List.of("a,b"), null, null)));
         // 截止日期非法
         assertThrows(DevMindException.class, () -> service.push("p1", "req-local",
                 new JiraPushRequest(7L, "PROJ", "10001", "标题", "描述", BACKLINK, null, null,
-                        List.of(), "2026/10/31")));
+                        List.of(), "2026/10/31", null)));
         // 回链缺失
         assertThrows(DevMindException.class, () -> service.push("p1", "req-local",
-                new JiraPushRequest(7L, "PROJ", "10001", "标题", "描述", " ", null, null, List.of(), null)));
+                new JiraPushRequest(7L, "PROJ", "10001", "标题", "描述", " ", null, null, List.of(), null, null)));
         // 任务类型缺失
         assertThrows(DevMindException.class, () -> service.push("p1", "req-local",
-                new JiraPushRequest(7L, "PROJ", null, "标题", "描述", BACKLINK, null, null, List.of(), null)));
+                new JiraPushRequest(7L, "PROJ", null, "标题", "描述", BACKLINK, null, null, List.of(), null, null)));
 
         assertTrue(connector.created.isEmpty());
         assertTrue(linkStore.isEmpty());
@@ -541,7 +563,7 @@ class JiraPushServiceTest {
 
         // 词表不可用不该阻断写操作（读接口抖动）
         service.push("p1", "req-local", new JiraPushRequest(7L, "PROJ", "10001", "标题",
-                "描述", BACKLINK, "任意值", null, List.of(), null));
+                "描述", BACKLINK, "任意值", null, List.of(), null, null));
 
         assertEquals(1, connector.created.size());
     }
@@ -689,5 +711,135 @@ class JiraPushServiceTest {
 
         assertEquals("Open", linkStore.get("PROJ-123").getStatus());
         assertEquals(List.of("jira_refresh:false"), integrationService.calls);
+    }
+
+    // ---------------- FR-08 动态必填字段 ----------------
+
+    /** 用户真实撞到的那组：模块/影响版本/修复版本/到期日/时间跟踪 + 一个下拉自定义字段 */
+    private void requiredFieldsLikeRealJira() {
+        connector.createFields = List.of(
+                new CreateFieldRef("summary", "摘要", true, "string", null, List.of(), false),
+                new CreateFieldRef("components", "模块", true, "array", "component",
+                        List.of(new FieldOption("10000", "后端"), new FieldOption("10001", "前端")), false),
+                new CreateFieldRef("versions", "影响版本", true, "array", "version",
+                        List.of(new FieldOption("10100", "1.0")), false),
+                new CreateFieldRef("fixVersions", "修复的版本", true, "array", "version",
+                        List.of(new FieldOption("10100", "1.0"), new FieldOption("10101", "2.0")), false),
+                new CreateFieldRef("duedate", "到期日", true, "date", null, List.of(), false),
+                new CreateFieldRef("timetracking", "时间跟踪", true, "timetracking", null, List.of(), false),
+                new CreateFieldRef("customfield_10207", "缺陷类型", true, "option", null,
+                        List.of(new FieldOption("10201", "功能缺陷")), false),
+                // 有默认值的必填字段：Jira 自填，不该让用户填
+                new CreateFieldRef("customfield_10606", "缺陷引入的活动", true, "option", null,
+                        List.of(new FieldOption("10601", "需求分析")), true),
+                // 非必填字段不进清单
+                new CreateFieldRef("priority", "优先级", false, "option", null,
+                        List.of(new FieldOption("3", "中")), true));
+    }
+
+    @Test
+    void 必填字段按可渲染性分区且固定字段不重复渲染() {
+        requiredFieldsLikeRealJira();
+
+        JiraCreateFieldsView view = service.createFields("p1", "req-local", 7L, "PROJ", "10003");
+
+        // duedate 固定表单已有（加必填校验即可），summary 本就必填——都不重复渲染
+        assertEquals(List.of("duedate"), view.requiredFixed());
+        assertEquals(List.of("components", "versions", "fixVersions", "timetracking", "customfield_10207"),
+                view.fields().stream().map(JiraCreateFieldView::id).toList());
+        assertTrue(view.unsupported().isEmpty());
+        assertNull(view.error());
+        // 组件/版本带候选值，时间跟踪是专用控件
+        assertEquals(List.of("后端", "前端"),
+                view.fields().get(0).options().stream().map(JiraOptionView::name).toList());
+        assertEquals(JiraCreateFieldView.CONTROL_TIMETRACKING, view.fields().get(3).control());
+        // 有默认值的必填字段与非常填字段都不出现
+        assertTrue(view.fields().stream().noneMatch(f -> "customfield_10606".equals(f.id())));
+        assertTrue(view.fields().stream().noneMatch(f -> "priority".equals(f.id())));
+    }
+
+    @Test
+    void 渲染不了的必填字段进unsupported而不是硬塞文本框() {
+        connector.createFields = List.of(
+                // 必填用户选择器：平台没有对应控件
+                new CreateFieldRef("reporter", "报告人", true, "user", null, List.of(), false),
+                // 级联选择：option 类型但无候选值 → 塞成自由文本只会误导用户
+                new CreateFieldRef("customfield_10700", "归属组织", true, "option", null, List.of(), false),
+                new CreateFieldRef("components", "模块", true, "array", "component",
+                        List.of(new FieldOption("10000", "后端")), false));
+
+        JiraCreateFieldsView view = service.createFields("p1", "req-local", 7L, "PROJ", "10003");
+
+        assertEquals(List.of("reporter", "customfield_10700"),
+                view.unsupported().stream().map(JiraCreateFieldView::id).toList());
+        assertTrue(view.unsupported().stream().allMatch(f -> f.control() == null));
+        assertEquals(List.of("components"), view.fields().stream().map(JiraCreateFieldView::id).toList());
+    }
+
+    @Test
+    void 元数据拉不到时降级为空表且不抛错() {
+        connector.listCreateFieldsFails = true;
+
+        JiraCreateFieldsView view = service.createFields("p1", "req-local", 7L, "PROJ", "10003");
+
+        // 读接口不可用不该把原本能推的类型也堵死：只给错误原文，由前端提示但不禁用提交
+        assertTrue(view.fields().isEmpty());
+        assertTrue(view.unsupported().isEmpty());
+        assertNotNull(view.error());
+    }
+
+    @Test
+    void 修复版本命中实例候选值才预填() {
+        requiredFieldsLikeRealJira();
+        requirementService.store.get("req-local").setFixVersions("2.0,不存在的版本");
+
+        JiraCreateFieldsView view = service.createFields("p1", "req-local", 7L, "PROJ", "10003");
+
+        // 只回填命中项（2.0 → id 10101）；不命中不猜（猜错版本比留空更糟）
+        assertEquals(Map.of("fixVersions", List.of("10101")), view.prefill());
+    }
+
+    @Test
+    void 动态字段随payload写入() {
+        // 服务端不重解释取值（Jira 形态由前端按控件类型组装），标量/组件/时间跟踪原样过去
+        JiraPushRequest req = pushRequest(Map.of("components", List.of(Map.of("id", "10000")),
+                "timetracking", Map.of("originalEstimate", "2h"),
+                "customfield_10800", 3));
+
+        service.push("p1", "req-local", req);
+
+        IssueSpec spec = connector.created.get(0);
+        assertEquals(Map.of("components", List.of(Map.of("id", "10000")),
+                "timetracking", Map.of("originalEstimate", "2h"),
+                "customfield_10800", 3), spec.extraFields());
+    }
+
+    @Test
+    void 动态字段不许覆盖描述等平台管理的字段() {
+        // description 被覆盖 = 服务端强制追加的回链形同虚设；project/issuetype 被覆盖会推错项目
+        for (String reserved : List.of("description", "project", "issuetype", "summary", "duedate")) {
+            DevMindException e = assertThrows(DevMindException.class,
+                    () -> service.push("p1", "req-local", pushRequest(Map.of(reserved, "x"))));
+            assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
+        }
+        assertTrue(connector.created.isEmpty());
+    }
+
+    @Test
+    void 动态字段取值形态超两层直接拒绝() {
+        // 放开等于把任意 JSON 转手发给 Jira，脏 payload 的错误反而更难读
+        for (Object bad : List.of(List.of(List.of("a")), List.of(Map.of("a", List.of("b"))),
+                Map.of("a", List.of("b")), Map.of("a", Map.of("b", "c")), new Object())) {
+            assertThrows(DevMindException.class,
+                    () -> service.push("p1", "req-local", pushRequest(Map.of("components", bad))));
+        }
+        assertTrue(connector.created.isEmpty());
+    }
+
+    @Test
+    void 动态字段空值不写进payload() {
+        service.push("p1", "req-local", pushRequest(Map.of("components", List.of(), "versions", "  ")));
+
+        assertTrue(connector.created.get(0).extraFields().isEmpty());
     }
 }

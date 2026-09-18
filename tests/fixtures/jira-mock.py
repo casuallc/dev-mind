@@ -7,6 +7,8 @@
 端点：
   GET  /rest/api/2/myself | /serverInfo | /project | /priority
   GET  /rest/api/2/issue/createmeta/<KEY>/issuetypes   任务类型（子任务含在内，由服务端过滤）
+  GET  /rest/api/2/issue/createmeta/<KEY>/issuetypes/<ID>  创建字段元数据（FR-08；__createmeta notFound 时 404）
+  GET  /rest/api/2/issue/createmeta                    旧版创建字段元数据（<8.4 兜底；fields 为 fieldId 为键的对象）
   POST /rest/api/2/issue                               创建 issue（记录收到的 payload）
   GET  /rest/api/2/issue/<KEY>                         单条读取（回读/手动刷新用）
   GET  /rest/api/2/user/assignable/search              可指派用户（__gdpr 打开时拒 query 参数）
@@ -16,7 +18,11 @@
   POST /__mutate   {"key":"PROJ-101","patch":{"status":"In Progress",…}} 改远端字段
   POST /__gdpr     {"on":true} 让 user/assignable/search 对 query 参数报 400 GDPR
   POST /__create-error {"error":{…}} 让 POST /issue 回该 400 体（字段级错误透出用；{"error":null} 关闭）
-  POST /__reset    清空 issue、请求记录与错误注入
+  POST /__createmeta {"fields":[…],"enforce":true,"notFound":true,"fail":true} 注入创建字段目录（FR-08）；
+                    enforce 打开后 POST /issue 按目录逐字段校验必填并回 Jira 同形 400；
+                    notFound 让新端点 404（走旧端点兜底）；fail 让新旧端点都 500（降级用例）；
+                    未给的键保持原值
+  POST /__reset    清空 issue、请求记录、错误注入与字段目录
 """
 import json
 import sys
@@ -47,7 +53,31 @@ USERS = [
     {"name": "wangwu"},  # 无显示名：displayName 回退 name
 ]
 
-STATE = {"issues": {}, "seq": 100, "gdpr": False, "requests": [], "create_error": None}
+# FR-08 创建字段目录：默认空（既有用例不受影响），由控制面 /__createmeta 注入。
+# 形态与真实 createmeta 一致：fieldId/name/required/hasDefaultValue/schema/allowedValues。
+STATE = {"issues": {}, "seq": 100, "gdpr": False, "requests": [], "create_error": None,
+         "create_fields": [], "createmeta_404": False, "createmeta_500": False, "enforce_fields": False}
+
+
+def legacy_field(ref):
+    """旧版端点形态：allowedValues 用 name 而非 value（映射端须退 name 取展示名）"""
+    out = {k: v for k, v in ref.items() if k != "fieldId"}
+    if "allowedValues" in out:
+        out["allowedValues"] = [{"id": o["id"], "name": o.get("value") or o.get("name")}
+                                for o in out["allowedValues"] or []]
+    return out
+
+
+def missing_required_fields(fields):
+    """按注入的目录逐字段校验必填（hasDefaultValue 的 Jira 自填，不校验）——
+    与真实 Jira 的 400 同形，让 E2E 能证明「动态字段真的收到了」而不是只看本地状态。"""
+    errors = {}
+    for ref in STATE["create_fields"]:
+        if not ref.get("required") or ref.get("hasDefaultValue"):
+            continue
+        if not fields.get(ref["fieldId"]):
+            errors[ref["fieldId"]] = "%s是必需的。" % ref.get("name", ref["fieldId"])
+    return errors
 
 
 def new_issue_fields(payload_fields):
@@ -157,6 +187,8 @@ class Handler(BaseHTTPRequestHandler):
     def dynamic(self, method, path):
         """带路径参数的端点（issue key / 项目 key）。"""
         prefix = "/rest/api/2/issue/createmeta/"
+        if path.startswith(prefix) and "/issuetypes/" in path:
+            return lambda self_, p, q, b: self_.create_fields_page(q)
         if path.startswith(prefix) and path.endswith("/issuetypes"):
             return lambda self_, p, q, b: self_.issue_types_page(q)
         prefix = "/rest/api/2/issue/"
@@ -171,6 +203,29 @@ class Handler(BaseHTTPRequestHandler):
         page = ISSUE_TYPES[start:start + size]
         return self.send_json(200, {"startAt": start, "maxResults": size, "total": len(ISSUE_TYPES),
                                     "isLast": start + size >= len(ISSUE_TYPES), "values": page})
+
+    def create_fields_page(self, query):
+        """FR-08 新端点（Jira 8.4+）：{values:[{fieldId,…}]}。notFound 开关模拟 9.x 之前/权限不足"""
+        if STATE["createmeta_500"]:
+            return self.send_json(500, {"errorMessages": ["内建脚本异常（模拟读接口抖动）"]})
+        if STATE["createmeta_404"]:
+            return self.send_json(404, {"errorMessages": ["Endpoint not found（模拟 Jira 8.4 前）"]})
+        fields = STATE["create_fields"]
+        start = int(query.get("startAt", ["0"])[0])
+        size = int(query.get("maxResults", ["50"])[0])
+        page = fields[start:start + size]
+        return self.send_json(200, {"startAt": start, "maxResults": size, "total": len(fields),
+                                    "isLast": start + size >= len(fields), "values": page})
+
+    def create_fields_legacy(self, path, query, body):
+        """旧版 createmeta：projects[].issuetypes[].fields 是「fieldId 为键」的对象"""
+        if STATE["createmeta_500"]:
+            return self.send_json(500, {"errorMessages": ["内建脚本异常（模拟读接口抖动）"]})
+        type_id = (query.get("issuetypeIds") or ["10001"])[0]
+        project_key = (query.get("projectKeys") or ["PROJ"])[0]
+        fields = {ref["fieldId"]: legacy_field(ref) for ref in STATE["create_fields"]}
+        return self.send_json(200, {"projects": [{"key": project_key, "issuetypes": [
+            {"id": type_id, "name": "任务", "fields": fields}]}]})
 
     def get_issue(self, raw_key):
         key = raw_key.split("?")[0]
@@ -194,6 +249,12 @@ class Handler(BaseHTTPRequestHandler):
         if STATE["create_error"]:
             return self.send_json(400, STATE["create_error"])
         fields = (body or {}).get("fields") or {}
+        # FR-08：enforce 打开后按注入的字段目录逐字段校验（真实 Jira 就是这样把「模块是必需的。」
+        # 一次回一列），E2E 据此证明弹窗渲染出的动态字段真的写进了 payload
+        if STATE["enforce_fields"]:
+            errors = missing_required_fields(fields)
+            if errors:
+                return self.send_json(400, {"errorMessages": ["工作流校验失败"], "errors": errors})
         missing = [k for k in ("project", "issuetype", "summary") if not fields.get(k)]
         if missing:
             return self.send_json(400, {"errorMessages": ["缺少必填字段: " + ",".join(missing)]})
@@ -233,12 +294,33 @@ class Handler(BaseHTTPRequestHandler):
         STATE["create_error"] = (body or {}).get("error") or None
         return self.send_json(200, {"createError": STATE["create_error"]})
 
+    def control_createmeta(self, path, query, body):
+        """body {"fields":[…]|null, "enforce":bool, "notFound":bool}；未给的键保持原值
+        （便于只翻 notFound 开关去验证旧端点兜底，而不必重发整张字段表）"""
+        body = body or {}
+        if "fields" in body:
+            STATE["create_fields"] = body["fields"] or []
+        if "enforce" in body:
+            STATE["enforce_fields"] = bool(body["enforce"])
+        if "notFound" in body:
+            STATE["createmeta_404"] = bool(body["notFound"])
+        if "fail" in body:
+            STATE["createmeta_500"] = bool(body["fail"])
+        return self.send_json(200, {"createFields": STATE["create_fields"],
+                                    "enforce": STATE["enforce_fields"],
+                                    "notFound": STATE["createmeta_404"],
+                                    "fail": STATE["createmeta_500"]})
+
     def control_reset(self, path, query, body):
         STATE["issues"].clear()
         STATE["requests"].clear()
         STATE["seq"] = 100
         STATE["gdpr"] = False
         STATE["create_error"] = None
+        STATE["create_fields"] = []
+        STATE["createmeta_404"] = False
+        STATE["createmeta_500"] = False
+        STATE["enforce_fields"] = False
         return self.send_json(200, {"ok": True})
 
 
@@ -249,6 +331,7 @@ ROUTES = {
         200, {"version": "9.4.0", "serverTitle": "E2E Jira"}),
     ("GET", "/rest/api/2/project"): lambda s, p, q, b: s.send_json(200, PROJECTS),
     ("GET", "/rest/api/2/priority"): lambda s, p, q, b: s.send_json(200, PRIORITIES),
+    ("GET", "/rest/api/2/issue/createmeta"): Handler.create_fields_legacy,
     ("GET", "/rest/api/2/user/assignable/search"): Handler.assignable_search,
     ("POST", "/rest/api/2/issue"): Handler.create_issue,
     ("GET", "/rest/api/2/search"): Handler.search,
@@ -256,6 +339,7 @@ ROUTES = {
     ("POST", "/__mutate"): Handler.control_mutate,
     ("POST", "/__gdpr"): Handler.control_gdpr,
     ("POST", "/__create-error"): Handler.control_create_error,
+    ("POST", "/__createmeta"): Handler.control_createmeta,
     ("POST", "/__reset"): Handler.control_reset,
 }
 

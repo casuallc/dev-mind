@@ -1,5 +1,7 @@
 package com.devmind.integration.connector.jira;
 
+import com.devmind.integration.connector.IntegrationConnector.CreateFieldRef;
+import com.devmind.integration.connector.IntegrationConnector.FieldOption;
 import com.devmind.integration.connector.IntegrationConnector.IssuePage;
 import com.devmind.integration.connector.IntegrationConnector.IssueRef;
 import com.devmind.integration.connector.IntegrationConnector.IssueTransition;
@@ -8,6 +10,7 @@ import com.devmind.integration.connector.IntegrationConnector.JiraIssue;
 import com.devmind.integration.connector.IntegrationConnector.PriorityRef;
 import com.devmind.integration.connector.IntegrationConnector.UserRef;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -152,6 +155,89 @@ public final class JiraIssueMapper {
             if (id != null) {
                 out.add(new IssueTypeRef(id, text(t, "name"), t.path("subtask").asBoolean(false)));
             }
+        }
+        return out;
+    }
+
+    /**
+     * CAP-47 FR-08：创建字段元数据。兼容两种响应——
+     * 新端点 {@code /issue/createmeta/{key}/issuetypes/{id}} 的
+     * {@code {values:[{fieldId,name,required,hasDefaultValue,schema,allowedValues}]}}，
+     * 与旧端点 {@code /issue/createmeta?...&expand=projects.issuetypes.fields} 的
+     * {@code {projects:[{issuetypes:[{fields:{<fieldId>:{…}}}]}]}}。
+     * 缺 fieldId 的脏条目跳过（拿不到键就无法回传取值）。
+     */
+    static List<CreateFieldRef> toCreateFields(JsonNode body) {
+        List<JsonNode> raws = new ArrayList<>();
+        JsonNode values = body == null ? null : body.get("values");
+        if (values != null && values.isArray()) {
+            for (JsonNode f : values) {
+                raws.add(f);
+            }
+        } else {
+            // 旧版：fields 是以 fieldId 为键的对象，键本身才是 id（对象内不再重复 fieldId），补进去后走同一段解析
+            JsonNode fields = legacyFields(body);
+            if (fields != null && fields.isObject()) {
+                var it = fields.properties().iterator();
+                while (it.hasNext()) {
+                    var entry = it.next();
+                    JsonNode v = entry.getValue();
+                    if (v == null) {
+                        continue;
+                    }
+                    if (v.isObject() && text(v, "fieldId") == null) {
+                        ((ObjectNode) v).put("fieldId", entry.getKey());
+                    }
+                    raws.add(v);
+                }
+            }
+        }
+        List<CreateFieldRef> out = new ArrayList<>();
+        for (JsonNode f : raws) {
+            String id = text(f, "fieldId");
+            if (id == null) {
+                continue;
+            }
+            JsonNode schema = f.get("schema");
+            out.add(new CreateFieldRef(id, text(f, "name"), f.path("required").asBoolean(false),
+                    schema == null ? null : text(schema, "type"),
+                    schema == null ? null : text(schema, "items"),
+                    toFieldOptions(f.get("allowedValues")),
+                    f.path("hasDefaultValue").asBoolean(false)));
+        }
+        return out;
+    }
+
+    /** 旧版 createmeta：projects[0].issuetypes[0].fields */
+    private static JsonNode legacyFields(JsonNode body) {
+        JsonNode projects = body == null ? null : body.get("projects");
+        if (projects == null || !projects.isArray() || projects.isEmpty()) {
+            return null;
+        }
+        JsonNode types = projects.get(0).get("issuetypes");
+        if (types == null || !types.isArray() || types.isEmpty()) {
+            return null;
+        }
+        return types.get(0).get("fields");
+    }
+
+    /**
+     * allowedValues → 选项表。展示名取 value 再退 name：option 类字段是
+     * {@code {id,value}}，组件/版本类字段是 {@code {id,name}}。
+     * 无 id 的条目仍可用 name 回传（Jira 两种都收），故退化为 id=name。
+     */
+    private static List<FieldOption> toFieldOptions(JsonNode arr) {
+        if (arr == null || !arr.isArray()) {
+            return List.of();
+        }
+        List<FieldOption> out = new ArrayList<>();
+        for (JsonNode o : arr) {
+            String name = text(o, "value") != null ? text(o, "value") : text(o, "name");
+            if (name == null) {
+                continue;
+            }
+            String id = text(o, "id");
+            out.add(new FieldOption(id != null ? id : name, name));
         }
         return out;
     }

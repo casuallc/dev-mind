@@ -4,6 +4,7 @@ import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.integration.config.IntegrationProperties;
 import com.devmind.integration.connector.IntegrationConnector;
+import com.devmind.integration.connector.IntegrationConnector.CreateFieldRef;
 import com.devmind.integration.connector.IntegrationConnector.IssueRef;
 import com.devmind.integration.connector.IntegrationConnector.IssueSpec;
 import com.devmind.integration.connector.IntegrationConnector.IssueTypeRef;
@@ -32,7 +33,7 @@ import java.util.List;
  * PAT（8.14+，Bearer 头）/ BASIC（8.13 及更早，Basic base64(user:password)，
  * secret 含换行即 BASIC），与个人账号（CAP-35）/实例机器人凭据无关来源均适用。
  * 读：拉取 issue / 单条读取 / 工作流转换清单 / 附件内容（CAP-19 FR-09 描述图片代理）/
- * 任务类型·优先级·可指派用户（CAP-47 FR-02）；
+ * 任务类型·优先级·可指派用户（CAP-47 FR-02）/ 创建字段元数据（CAP-47 FR-08）；
  * 写：仅限 createIssue / transitions / worklog 端点（CAP-47 FR-01 创建 issue、
  * CAP-19 FR-08 状态回写、CAP-27 工时登记），git 动词不支持。
  * 与 GitLabConnector 同一手法：查询参数自行 URL 编码后拼完整 URI，
@@ -175,10 +176,18 @@ public class JiraConnector implements IntegrationConnector {
     /**
      * CAP-47 FR-01：创建 issue。空值字段一律不写进 payload——写 null 会显式清空 Jira 侧
      * 默认值（如项目默认经办人）。duedate 用字符串手工拼（不给 ObjectMapper 加 JavaTimeModule）。
+     *
+     * <p>动态字段（{@link IssueSpec#extraFields}）**先写**、固定字段后写：正常路径两者交集为空
+     * （服务层已拒绝覆盖固定字段 id），真撞上时以平台语义确定的固定字段为准。
      */
     @Override
     public IssueRef createIssue(IntegrationEntity cfg, String token, IssueSpec spec) {
         var fields = mapper.createObjectNode();
+        if (spec.extraFields() != null) {
+            for (var entry : spec.extraFields().entrySet()) {
+                fields.set(entry.getKey(), mapper.valueToTree(entry.getValue()));
+            }
+        }
         fields.putObject("project").put("key", spec.projectKey());
         fields.putObject("issuetype").put("id", spec.issueTypeId());
         fields.put("summary", spec.summary());
@@ -295,6 +304,57 @@ public class JiraConnector implements IntegrationConnector {
         } catch (RestClientResponseException e) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "拉取 Jira 优先级失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
+        }
+    }
+
+    /**
+     * CAP-47 FR-08：创建字段元数据。主路径 {@code /issue/createmeta/{key}/issuetypes/{id}}
+     * （8.4+，需按 total/isLast 翻页）；老实例 404 时兜底旧端点
+     * {@code /issue/createmeta?projectKeys=&issuetypeIds=&expand=projects.issuetypes.fields}。
+     * 两条路径的响应形态不同，由 {@link JiraIssueMapper#toCreateFields} 归一。
+     */
+    @Override
+    public List<CreateFieldRef> listCreateFields(IntegrationEntity cfg, String token,
+                                                 String projectKey, String issueTypeId) {
+        try {
+            List<CreateFieldRef> out = new ArrayList<>();
+            int startAt = 0;
+            for (int page = 0; page < MAX_ISSUE_TYPE_PAGES; page++) {
+                JsonNode body = client(cfg, token).get()
+                        .uri(uri(cfg, "/issue/createmeta/" + encodeKey(projectKey) + "/issuetypes/"
+                                + encodeKey(issueTypeId) + "?startAt=" + startAt
+                                + "&maxResults=" + ISSUE_TYPE_PAGE_SIZE))
+                        .retrieve().body(JsonNode.class);
+                List<CreateFieldRef> batch = JiraIssueMapper.toCreateFields(body);
+                out.addAll(batch);
+                if (batch.isEmpty() || body.path("isLast").asBoolean(batch.size() < ISSUE_TYPE_PAGE_SIZE)) {
+                    break;
+                }
+                startAt += ISSUE_TYPE_PAGE_SIZE;
+            }
+            return out;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                return listCreateFieldsLegacy(cfg, token, projectKey, issueTypeId);
+            }
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "拉取 Jira 创建字段失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
+        }
+    }
+
+    /** 旧版 createmeta 字段（Jira 8.4 前；新端点 404 时兜底）：fields 为 fieldId 为键的对象 */
+    private List<CreateFieldRef> listCreateFieldsLegacy(IntegrationEntity cfg, String token,
+                                                       String projectKey, String issueTypeId) {
+        try {
+            JsonNode body = client(cfg, token).get()
+                    .uri(uri(cfg, "/issue/createmeta?projectKeys=" + encodeKey(projectKey)
+                            + "&issuetypeIds=" + encodeKey(issueTypeId)
+                            + "&expand=" + URLEncoder.encode("projects.issuetypes.fields", StandardCharsets.UTF_8)))
+                    .retrieve().body(JsonNode.class);
+            return JiraIssueMapper.toCreateFields(body);
+        } catch (RestClientResponseException e) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "拉取 Jira 创建字段失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
         }
     }
 

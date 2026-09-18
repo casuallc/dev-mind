@@ -28,6 +28,12 @@ Requirement(source=JIRA, externalKey=PROJ-123)
 顺带落地 CAP-28 FR-07 早已标注为「未实现依赖」的 `IntegrationConnector.createIssue`：
 SPI 从「只读 issue」扩到「可创建 issue」，后续工作日志未关联条目一键建 issue 可直接复用本能力的写通道。
 
+> 修订（2026-09-18，FR-08）：首版把「Jira 因必填字段拒我」当成配置问题，指引用户「换任务类型或去 Jira
+> 配默认值」。实测不成立——`components`/`versions`/`fixVersions`/`timetracking`/`duedate` 都是 Jira
+> **标准字段**，平台对「模块」「影响版本」根本没有数据源，固定表单**不可能**覆盖所有任务类型。
+> 改为**推送前问 Jira 要什么**：选完任务类型即拉 createmeta 的动态必填字段并在弹窗内渲染
+> （候选值也用 Jira 给的），渲染不了的提前列明并禁用提交——见 FR-08。
+
 与 CAP-19 的关系：共用 `integrations` 表（TYPE_JIRA）、`IntegrationCipher` 凭据、`IntegrationConnector` SPI、
 `external_links`（沿用 `REQUIREMENT ↔ ISSUE` 幂等键）、`integration_calls` 审计、CAP-35 的 `resolveWriteIdentity` 身份链。
 **零表结构变更**——不新增列、不新增表。
@@ -35,21 +41,22 @@ SPI 从「只读 issue」扩到「可创建 issue」，后续工作日志未关�
 ## 2. 功能需求
 
 - **FR-01 创建 issue 连接器能力**：`IntegrationConnector` 新增 `createIssue`（**写操作**，与 transitions/worklog
-  同属回放通道）、`getIssue`、`listIssueTypes`、`listPriorities`、`listAssignableUsers`（均 default 抛「不支持」，
-  git 平台零改动）。`JiraConnector` 实现：`POST /issue`（`fields.project.key`/`issuetype.id`/`summary` 必填，
+  同属回放通道）、`getIssue`、`listIssueTypes`、`listPriorities`、`listAssignableUsers`、`listCreateFields`
+  （均 default 抛「不支持」，git 平台零改动）。`JiraConnector` 实现：`POST /issue`（`fields.project.key`/`issuetype.id`/`summary` 必填，
   `description`/`priority.name`/`assignee.name`/`labels[]`/`duedate` 可选，**空值字段一律不写进 payload**——
   写 `null` 会显式清空 Jira 侧默认值）；`GET /issue/{key}?fields=` 单条读取；
   `GET /issue/createmeta/{projectIdOrKey}/issuetypes`（**8.4+ 新路径**，按 `total/isLast` 翻页，
   404 时兜底旧版 `?projectKeys=&expand=projects.issuetypes`，过滤 `subtask=true`）；
-  `GET /priority`；`GET /user/assignable/search`（`query` 参数，遇 GDPR 严格模式 400 时退 `username` 重试一次）。
+  `GET /priority`；`GET /user/assignable/search`（`query` 参数，遇 GDPR 严格模式 400 时退 `username` 重试一次）；
+  `GET /issue/createmeta/{key}/issuetypes/{id}` 创建字段元数据（见 FR-08，同为 8.4+ 新路径 + 旧端点兜底）。
   错误响应统一走 `extractMessage`：`errorMessages` 与 `errors` **都要取**（创建 issue 时 Jira 常同时给
   「工作流校验失败」+ 逐字段明细），`errors` 逐条展开为 `字段: 原因`——原样 `toString()` 的 JSON 挤成一行，
   用户既看不出哪几个字段必填，也读不到「用户 '刘长青' 不存在」这类取值错。
 - **FR-02 推送目标与选项**：`GET /api/projects/{pid}/requirements/{rid}/jira/push-targets` 一次给齐
   候选实例（TYPE_JIRA + ENABLED）、默认实例/项目 key（取本项目 `jira_sync_configs` 首条）、
   任务类型/优先级列表、各字段默认值、`identitySource(PERSONAL|BOT|NONE)`、`syncCovered`；
-  `GET /push-options?integrationId=&jiraProjectKey=` 在切实例/项目后重拉；`GET /assignable-users?…&q=` 供经办人搜索。
-  均为只读，不审计。
+  `GET /push-options?integrationId=&jiraProjectKey=` 在切实例/项目后重拉；`GET /assignable-users?…&q=` 供经办人搜索；
+  任务类型选定后再拉 `GET /create-fields`（FR-08）补齐 Jira 侧要求的必填字段。均为只读，不审计。
   **默认值只回填与 Jira 同域的字段**：标题/描述/标签/截止日期直接取需求当前值；优先级**命中实例词表才回填**
   （平台优先级是固定英文枚举 Highest…Lowest，Jira 词表随实例语言包与项目配置，两套只是偶尔重合）；
   **不回填经办人**——平台 `assignee` 是人名（「刘长青」），Jira `assignee.name` 要的是登录名，
@@ -57,13 +64,13 @@ SPI 从「只读 issue」扩到「可创建 issue」，后续工作日志未关�
   经办人一律由用户在弹窗内搜索/填写（搜索候选项回填的就是登录名）。
 - **FR-03 推送（核心）**：`POST /api/projects/{pid}/requirements/{rid}/jira/push`，
   请求 `{integrationId, jiraProjectKey, issueTypeId, summary, description, backlinkUrl, priorityName,
-  assigneeName, labels[], dueDate}`。步骤：
+  assigneeName, labels[], dueDate, extraFields{}}`（`extraFields` 见 FR-08）。步骤：
   1. **先**查幂等：已有 ISSUE link 或 `externalKey` 非空 → **409 幂等**并回既有 key；
      同一 issue key 已被**别的需求**关联 → 409 并指路既有需求。
      幂等检查**先于**来源守卫——推送成功会同时置 `source=JIRA`，若先查来源，重复推送只会拿到
      「已是 JIRA 来源」（没有 key 可追查）；来源守卫（`source≠LOCAL` → 400）只兜「JIRA 来源但没有 link」的异常态；
   2. 集成须 TYPE_JIRA + ENABLED；参数校验（`summary` ≤255、`labels` 无空格与逗号、
-     `priority` 命中实例词表、`dueDate` 可解析）；
+     `priority` 命中实例词表、`dueDate` 可解析、`extraFields` 过 FR-08 护栏）；
   3. 身份走 CAP-35 `resolveWriteIdentity`（个人账号 → 机器人凭证 → 400 引导「我的 → 第三方账号」绑定）；
   4. `createIssue` 建 issue；**服务端强制在描述尾部追加平台回链** `"\n\n" + 需求编号 + " · " + backlinkUrl`
      （`backlinkUrl` 由前端按 `window.location.origin` 拼——平台没有自身 base-url 配置，服务端造不出正确 origin）；
@@ -90,13 +97,45 @@ SPI 从「只读 issue」扩到「可创建 issue」，后续工作日志未关�
   引导用户走 FR-05 刷新——**杜绝 `source=JIRA 且 externalKey 为空` 的半吊子态**。
 - **FR-07 前端闭环**：需求详情页头卡「推送到 Jira」按钮（仅 `source=LOCAL` 且非终态渲染），
   弹窗内实例/项目/任务类型/优先级/标签/经办人/截止日期/标题/描述可编辑，
+  任务类型选定后按 FR-08 渲染出 Jira 要求的必填字段（渲染不了的列出并禁用提交），
   描述下方固定只读展示将自动追加的回链；确认文案写明「转为 Jira 托管、**不可撤销**」。
   切实例时除标题/描述外全部重置（类型 id、username、优先级词表都是实例内的值，跨实例会静默推错），
   切项目时只重置任务类型。经办人搜索三段式降级（`query` → GDPR 退 `username` → 搜索不可用时退纯文本输入），
   任何一段失败都不阻断提交。
   推送失败的错误**常驻弹窗内**（`Alert`，不是一闪而过的 toast）：Jira 一次会回 8~9 条字段级错误，
-  用户要边改参数边对照；表单不清空。错误里出现「…是必需的」时附一行指引（本弹窗不推自定义字段 →
-  换任务类型，或先在 Jira 侧配默认值）。仅带堆栈的本地排错模式仍走 `showError` 的 Modal。
+  用户要边改参数边对照；表单不清空。仅带堆栈的本地排错模式仍走 `showError` 的 Modal。
+- **FR-08 动态必填字段（createmeta 驱动，本能力第二次修订的核心）**：Jira 的 issue 类型可以配一堆**必填**
+  字段，其中模块/影响版本/修复版本/到期日/时间跟踪都是 **Jira 标准字段**——平台侧对「影响版本」「模块」
+  根本没有数据源，因此**不存在一份固定表单能覆盖所有任务类型**：用户换个任务类型就得吃一次 400
+  「components: 模块是必需的。；versions: 影响版本是必需的。…」，而这条错误既没说清「在哪儿填」，
+  也没给可选值。修法不是「换任务类型」或「去 Jira 配默认值」，而是**在推送前问 Jira 要什么**：
+
+  | 方法 | 行为 |
+  |---|---|
+  | `GET …/jira/create-fields?integrationId=&jiraProjectKey=&issueTypeId=` | 拉 `createmeta/{key}/issuetypes/{id}`（8.4+；404 退旧版 `?projectKeys=&issueTypeIds=`，旧端点的字段表以 fieldId 为键），只取**必填且 `hasDefaultValue=false`** 的字段，按可渲染性分三区返回 |
+
+  1. **`requiredFixed`**：固定表单里已有输入项的字段 id → 前端给对应控件补必填校验，不重复渲染
+     （`summary` 本就必填，不在此列；`duedate` 之类平时可选、Jira 要求必填的才下发）；
+  2. **`fields`**：需要新渲染的字段，服务端按 Jira schema 算出**控件类型**（前端不解析 Jira schema）：
+     `array` + `items∈{component,version,string,option}` → `MULTI_SELECT`、`option` → `SELECT`、
+     `date` → `DATE`、`string` → `TEXT`、`number` → `NUMBER`、`timetracking` → `TIMETRACKING`（两个时长输入）。
+     **枚举类字段必须带 `allowedValues` 才算可渲染**：级联选择在 createmeta 里就是「option 类型但无候选值」，
+     塞成自由文本框会误导用户，归入下一区。组件/版本/影响的候选值直接来自 Jira 的 `allowedValues`
+     （展示名取 `value`，回传值取 `id`）；
+  3. **`unsupported`**：必填但平台渲染不了的（用户选择器、级联选择等），**列出来并禁用提交**——
+     让用户在提交前就知道「这个任务类型本弹窗推不了」，好过提交后吃一条读不完的 400；
+
+  另附 `prefill`：只回填**与 Jira 同域且命中实例候选值**的本地值（目前只有 `fixVersions`，按 name 或 id
+  全等匹配，不做模糊匹配——猜错版本比留空更糟）。
+
+  **取值语义由前端按控件类型组装成 Jira 形态**（服务端不重解释、只护栏）：枚举回传 `{id}` 或 `[{id}]`、
+  日期回传 `'yyyy-MM-dd'`、时间跟踪回传 `{originalEstimate, remainingEstimate}`；空值/空数组条目不写进
+  payload（沿用固定参数口径）。服务端两条护栏：**不许覆盖平台管理的字段**（`project`/`issuetype` +
+  固定字段，否则回链与目标项目可被静默改写）、**取值形态限两层**（标量、数组、一层扁平对象；
+  放开等于把任意 JSON 转手发给 Jira）。
+
+  **降级**：元数据拉取失败不抛错，回 `error` + 空清单且**不禁用提交**——读接口抖动不该把原本能推的
+  任务类型也堵死（与 FR-02 的 `optionsError` 同口径）。
 
 ## 3. 插件化接口
 
@@ -104,18 +143,24 @@ SPI 从「只读 issue」扩到「可创建 issue」，后续工作日志未关�
 interface IntegrationConnector {
     // CAP-47 写：创建 issue（与 transitions/worklog 同属回写通道）
     default IssueRef createIssue(IntegrationEntity cfg, String token, IssueSpec spec);
-    // CAP-47 读：单条读取 / 任务类型 / 优先级 / 可指派用户
+    // CAP-47 读：单条读取 / 任务类型 / 优先级 / 可指派用户 / 创建字段元数据
     default JiraIssue getIssue(IntegrationEntity cfg, String token, String issueKey, String fields);
     default List<IssueTypeRef> listIssueTypes(IntegrationEntity cfg, String token, String projectKey);
     default List<PriorityRef>  listPriorities(IntegrationEntity cfg, String token);
     default List<UserRef>      listAssignableUsers(IntegrationEntity cfg, String token, String projectKey, String q);
+    default List<CreateFieldRef> listCreateFields(IntegrationEntity cfg, String token,
+                                                  String projectKey, String issueTypeId);
 }
 record IssueSpec(String projectKey, String issueTypeId, String summary, String description,
-                 String priorityName, String assigneeName, List<String> labels, LocalDate dueDate) {}
+                 String priorityName, String assigneeName, List<String> labels, LocalDate dueDate,
+                 Map<String, Object> extraFields) {}   // FR-08 动态字段：键为 Jira 字段 id，值已按字段类型成形
 record IssueRef(String id, String key, String url) {}
 record IssueTypeRef(String id, String name, boolean subtask) {}
 record PriorityRef(String id, String name) {}
 record UserRef(String name, String displayName) {}
+record CreateFieldRef(String id, String name, boolean required, String type, String items,
+                      List<FieldOption> allowedValues, boolean hasDefault) {}
+record FieldOption(String id, String value) {}   // id 为回传值，value 为展示名
 ```
 
 - 凭据统一走 `CredentialResolver` / `resolveWriteIdentity`（FR-03 第 3 步），连接器只收明文 token、不接触密文；
@@ -152,6 +197,8 @@ integration_calls(id, integration_id, action='create_issue'|'jira_refresh', …)
 GET  /projects/{pid}/requirements/{rid}/jira/push-targets                 推送候选实例/默认值/身份来源/覆盖判断
 GET  /projects/{pid}/requirements/{rid}/jira/push-options?integrationId=&jiraProjectKey=   Jira 项目/任务类型/优先级
 GET  /projects/{pid}/requirements/{rid}/jira/assignable-users?…&q=         经办人候选
+GET  /projects/{pid}/requirements/{rid}/jira/create-fields?integrationId=&jiraProjectKey=&issueTypeId=
+                                                                           选定实例+项目+类型后的必填字段清单（FR-08）
 POST /projects/{pid}/requirements/{rid}/jira/push                          创建 issue + 关联 + 转托管
 POST /projects/{pid}/requirements/{rid}/jira/refresh                       按 link 的 key 手动刷新托管字段
 ```
@@ -165,18 +212,25 @@ POST /projects/{pid}/requirements/{rid}/jira/refresh                       按 l
 - 重复推送同一需求返回 409 且给出既有 issue key；
 - 未绑定个人账号且实例无机器人凭证时，推送 400 并引导去「我的 → 第三方账号」绑定；
 - 同一 issue key 不会被两个需求关联；同步轮询不会为已推送的 issue 再建一条需求；
-- Jira 拒绝创建时（必填自定义字段/取值非法），`errorMessages` 与 `errors` 的错误**逐条**显示在弹窗内
+- **任务类型要必填字段时弹窗能自己渲染出来**：选完类型后，模块/影响版本/修复版本以下拉多选（候选值来自
+  Jira）、时间跟踪给两个时长输入、到期日给日期选择（并标必填）；`createmeta` 里渲染不了又必填的字段
+  （用户选择器/级联选择）会列出来并**禁用提交**，而不是等提交后吃一条 400；
+- 有默认值的必填字段（Jira 自填）与非必填字段不出现；`fixVersions` 命中实例候选值时预填；
+- 填了动态字段后推送成功，Jira 侧这些字段按枚举 id/时长/日期落地（`extraFields` 不许覆盖
+  `description`/`project` 等平台管理字段，取值形态超两层被 400 拦在本地）；
+- Jira 拒绝创建时（必填字段缺失/取值非法），`errorMessages` 与 `errors` 的错误**逐条**显示在弹窗内
   （`字段: 原因` 一行一条，不 dump 原始 JSON），需求不落任何本地状态、远端不建 issue；
+- 元数据接口抖动（createmeta 不可用）时弹窗仍可用：只提示一行错误，不阻塞本就能推的任务类型；
 - 修复版本等未推送字段不会在推送瞬间被清空；JQL 未覆盖时可用「从 Jira 刷新」补齐托管字段。
 
 ## 8. MVP 范围（暂不做）
 
 - **Jira Cloud**：认证与 `assignee` 需 accountId 而非 username，按 Server/DC 设计（与 CAP-19 同口径）；
 - **解除托管 / 反悔通道**：转 JIRA 后本地永久不可编辑托管字段，弹窗已明示不可撤销，反悔属后续能力；
-- **推 `reporter` / `fixVersions`**：reporter 需 Modify Reporter 权限；Jira 侧 fixVersion 必须已存在于项目，
-  自由文本会被拒，不做猜测映射；
-- **必填自定义字段预检**：任务类型若配了必填自定义字段，创建会被 Jira 400 拒绝，错误原样透出给用户
-  （不预拉 `createmeta/{key}/issuetypes/{id}` 做字段预检）；
+- **推 `reporter` 作为固定参数**：reporter 需 Modify Reporter 权限；FR-08 里若该任务类型把「报告人」
+  列为必填，只能进 `unsupported` 并禁用提交（不做「谁来推就填谁」的猜测——写身份是机器人时语义就错了）；
+- **Jira 侧 fixVersion 自由文本**：Jira 侧 fixVersion 必须已存在于项目，自由文本会被拒，
+  FR-08 只按实例候选值预填/选择，不做猜测映射；
 - **自动推送策略**（需求创建/确认时自动建 issue）——本期一律手动。
 
 ## 9. 排错
@@ -186,7 +240,10 @@ POST /projects/{pid}/requirements/{rid}/jira/refresh                       按 l
 | 弹窗任务类型为空 | 区分「失败」与「确实没有」：新路径 `createmeta/{key}/issuetypes` 已按当前账号可创建过滤，空 = 该项目下当前账号无创建权限或项目无可用类型；报错则看 HTTP 状态与 `extractMessage` |
 | 任务类型 404 | 实例 < 8.4：已自动兜底旧版 `?projectKeys=`；两者都 404 说明 token 无 browse 权限 |
 | 推送 400「未配置可用凭据」 | 该实例既无机器人凭证、当前用户也没绑个人账号（CAP-35）；去「我的 → 第三方账号」绑定 |
-| 推送 400 且错误里有「…是必需的」 | Jira 侧该任务类型配了必填字段（自定义字段居多，本弹窗不推自定义字段），错误已逐条透出；换一个任务类型，或先在 Jira 项目里给这些字段配默认值 |
+| 推送 400 且错误里有「…是必需的」 | 该任务类型有必填字段而本地没填（FR-08 之前的老路径）。正常流程下这些字段会在选完类型后由弹窗渲染出来（有默认值的 Jira 自填）；若仍出现，看该字段是否落在弹窗顶部的「本弹窗渲染不了」清单里——那就换任务类型，或在 Jira 侧把该字段移出必填/配默认值 |
+| 弹窗顶部提示「该任务类型有 N 个必填字段本弹窗渲染不了」 | createmeta 里这些字段是用户选择器/级联选择等平台没有控件的类型（FR-08 第 3 区）。这是**提前**告知，不是失败：换一个任务类型，或让 Jira 管理员给这些字段配默认值/移出必填 |
+| 弹窗没有任何动态字段 | 该任务类型的必填字段都已在固定表单里（`requiredFixed`，如到期日）或都有默认值。若确认 Jira 侧确有必填自定义字段却不在清单里，看一行 `Jira 创建字段元数据拉取失败` 的 warn：新端点 404 已自动退旧端点，两端点都失败说明 token 无 browse 权限（此时弹窗只提示、不阻塞提交） |
+| 推送 400「动态字段取值非法」/「动态字段不能覆盖由平台管理的字段」 | 本地护栏（FR-08）：前者是 `extraFields` 里塞了超两层的结构，后者试图覆盖 `description`/`project` 等平台字段。正常从弹窗提交不会触发；出现即为前端组装逻辑或有人直接调接口 |
 | 推送 400「用户 'X' 不存在」 | 经办人填的是**显示姓名**，Jira `assignee.name` 要**登录名**（username）。用弹窗搜索候选项（回填的就是登录名）或手填登录名；中文名通常不是登录名 |
 | 弹窗里经办人默认是空的 | 设计如此：平台 assignee 是人名，与 Jira 登录名不同域，不回填（见 FR-02） |
 | 推送 400「优先级不在实例词表内」 | 平台优先级（Highest…Lowest）与实例词表不同域；弹窗只在命中词表时回填，其余留空由用户从词表里选 |

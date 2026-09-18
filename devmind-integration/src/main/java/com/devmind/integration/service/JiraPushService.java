@@ -7,6 +7,7 @@ import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.integration.connector.IntegrationConnector;
+import com.devmind.integration.connector.IntegrationConnector.CreateFieldRef;
 import com.devmind.integration.connector.IntegrationConnector.ExternalProject;
 import com.devmind.integration.connector.IntegrationConnector.IssueRef;
 import com.devmind.integration.connector.IntegrationConnector.IssueSpec;
@@ -14,6 +15,8 @@ import com.devmind.integration.connector.IntegrationConnector.IssueTypeRef;
 import com.devmind.integration.connector.IntegrationConnector.JiraIssue;
 import com.devmind.integration.connector.IntegrationConnector.PriorityRef;
 import com.devmind.integration.dto.JiraAssignableUserView;
+import com.devmind.integration.dto.JiraCreateFieldView;
+import com.devmind.integration.dto.JiraCreateFieldsView;
 import com.devmind.integration.dto.JiraOptionView;
 import com.devmind.integration.dto.JiraPushOptionsView;
 import com.devmind.integration.dto.JiraPushRequest;
@@ -34,9 +37,13 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * CAP-47 自建需求手动推送到 Jira：候选项/默认值查询、推送（创建 issue + 登记 external_links + 转 Jira 托管）、
@@ -65,6 +72,20 @@ public class JiraPushService {
 
     private static final int MAX_SUMMARY = 255;
     private static final int MAX_BACKLINK = 512;
+
+    /** FR-08：固定表单已提供输入项的字段 id（{@code summary}…{@code duedate} 即连接器写的那 8 个） */
+    private static final Set<String> FIXED_FIELD_IDS = Set.of(
+            "summary", "description", "priority", "assignee", "labels", "duedate");
+
+    /**
+     * FR-08：固定字段中**无条件必填**的那些（标题由平台侧本就必填，前后端都拦了空值）。
+     * Jira 说它必填时不构成新增约束，回给前端只会多出一句多余的提示，故从 {@code requiredFixed} 里剔除。
+     */
+    private static final Set<String> FIXED_ALWAYS_REQUIRED = Set.of("summary");
+
+    /** FR-08：动态字段不许覆盖的字段 id = 固定字段 + 连接器自行组装的 project/issuetype */
+    private static final Set<String> RESERVED_FIELD_IDS = Set.of(
+            "project", "issuetype", "summary", "description", "priority", "assignee", "labels", "duedate");
 
     private final IntegrationRepository integrationRepo;
     private final JiraSyncConfigRepository configRepo;
@@ -177,6 +198,125 @@ public class JiraPushService {
                 .stream()
                 .map(u -> new JiraAssignableUserView(u.name(), u.displayName()))
                 .toList();
+    }
+
+    /**
+     * FR-08：选定「实例 + 项目 + 任务类型」后的必填字段清单。Jira 的 issue 类型可以配一堆必填字段
+     * （模块/影响版本/修复版本/时间跟踪/自定义字段），**平台侧没有这些数据源**（不存模块与影响版本），
+     * 只靠固定表单必然被 400 拒——所以这里把「要填什么」问出来，交给弹窗动态渲染。
+     *
+     * <p>只列**必填且平台无默认值**的字段（有默认值的平台自填，不必打扰用户），并分三区：
+     * 固定表单已有的（前端加必填校验）/ 需要新渲染的 / 渲染不了的（列出并禁用提交）。
+     * 元数据拉取失败**不抛错**：降级为空表 + {@code error}，提交不禁用——读接口不可用不该把
+     * 原本能推的类型也堵死（与 {@link #targets} 同款口径）。
+     */
+    public JiraCreateFieldsView createFields(String projectId, String requirementId, Long integrationId,
+                                            String jiraProjectKey, String issueTypeId) {
+        RequirementEntity requirement = requirementService.requireEntity(projectId, requirementId);
+        IntegrationEntity integration = requireJira(integrationId);
+        String key = requireText(jiraProjectKey, "jiraProjectKey（Jira 项目 key）");
+        String typeId = requireText(issueTypeId, "issueTypeId（任务类型）");
+        List<CreateFieldRef> refs;
+        try {
+            refs = connector().listCreateFields(integration, readToken(integration), key, typeId);
+        } catch (Exception e) {
+            log.warn("Jira 创建字段元数据拉取失败（降级为空表，提交不禁用）: integration={} project={} type={} err={}",
+                    integration.getId(), key, typeId, e.getMessage());
+            return new JiraCreateFieldsView(List.of(), List.of(), List.of(), Map.of(), e.getMessage());
+        }
+        List<JiraCreateFieldView> fields = new ArrayList<>();
+        List<String> requiredFixed = new ArrayList<>();
+        List<JiraCreateFieldView> unsupported = new ArrayList<>();
+        Map<String, List<String>> prefill = new LinkedHashMap<>();
+        for (CreateFieldRef ref : refs) {
+            // 有默认值的必填字段平台会自填（hasDefaultValue 即 Jira 的「字段配置有默认值」），不必让用户填
+            if (!ref.required() || ref.hasDefault()) {
+                continue;
+            }
+            if (FIXED_FIELD_IDS.contains(ref.id())) {
+                if (!FIXED_ALWAYS_REQUIRED.contains(ref.id())) {
+                    requiredFixed.add(ref.id());
+                }
+                continue;
+            }
+            List<JiraOptionView> options = ref.allowedValues().stream()
+                    .map(o -> new JiraOptionView(o.id(), o.value()))
+                    .toList();
+            String control = controlOf(ref.type(), ref.items(), !options.isEmpty());
+            JiraCreateFieldView view = new JiraCreateFieldView(ref.id(), ref.name(), control, options);
+            if (control == null) {
+                unsupported.add(view);
+                continue;
+            }
+            fields.add(view);
+            List<String> pre = prefillFor(requirement, ref.id(), options);
+            if (!pre.isEmpty()) {
+                prefill.put(ref.id(), pre);
+            }
+        }
+        return new JiraCreateFieldsView(fields, requiredFixed, unsupported, prefill, null);
+    }
+
+    /**
+     * FR-08 字段类型 → 渲染控件。只认平台真能表达的那些：多选（组件/版本/选项/自由文本数组）、
+     * 下拉、日期、文本、数字、时间跟踪。返回 null 即渲染不了，交给前端列出并禁用提交——
+     * 必填的用户选择器/级联选择若硬塞一个文本框，用户填什么都会被 Jira 拒，不如提前说清。
+     *
+     * <p>下拉**必须有候选值**才算可渲染：级联选择等字段在 createmeta 里就是「option 类型但无
+     * allowedValues」，塞成自由文本会误导用户。
+     */
+    static String controlOf(String type, String items, boolean hasOptions) {
+        if ("array".equals(type)) {
+            boolean renderableItem = "component".equals(items) || "version".equals(items)
+                    || "string".equals(items) || "option".equals(items);
+            if (!renderableItem || ("option".equals(items) && !hasOptions)) {
+                return null;
+            }
+            // 无候选的 array<string> → 前端渲染成可自由输入的标签框
+            return JiraCreateFieldView.CONTROL_MULTI_SELECT;
+        }
+        if ("option".equals(type)) {
+            return hasOptions ? JiraCreateFieldView.CONTROL_SELECT : null;
+        }
+        if ("date".equals(type)) {
+            return JiraCreateFieldView.CONTROL_DATE;
+        }
+        if ("string".equals(type)) {
+            return JiraCreateFieldView.CONTROL_TEXT;
+        }
+        if ("number".equals(type)) {
+            return JiraCreateFieldView.CONTROL_NUMBER;
+        }
+        if ("timetracking".equals(type)) {
+            return JiraCreateFieldView.CONTROL_TIMETRACKING;
+        }
+        return null;
+    }
+
+    /**
+     * FR-08 预填：只回填**与 Jira 同域且命中实例候选值**的本地值（FR-02 的同域口径）。
+     * 目前只有 {@code fixVersions}——平台存的版本名本就来自 Jira；模块/影响版本平台不存，无可回填。
+     * 命中判据用 name 或 id 全等（不做模糊匹配：猜错版本比留空更糟）。
+     */
+    private static List<String> prefillFor(RequirementEntity requirement, String fieldId,
+                                           List<JiraOptionView> options) {
+        if (!"fixVersions".equals(fieldId) || options.isEmpty()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        for (String local : splitCsv(requirement.getFixVersions())) {
+            String name = local.trim();
+            options.stream()
+                    .filter(o -> name.equals(o.name()) || name.equals(o.id()))
+                    .map(JiraOptionView::id)
+                    .findFirst()
+                    .ifPresent(id -> {
+                        if (!out.contains(id)) {
+                            out.add(id);
+                        }
+                    });
+        }
+        return out;
     }
 
     // ---------------- FR-03 推送 ----------------
@@ -356,7 +496,87 @@ public class JiraPushService {
         return new IssueSpec(projectKey, issueTypeId, summary,
                 composeDescription(req.description(), code(requirement.getSeq()), backlinkUrl),
                 trimToNull(req.priorityName()), trimToNull(req.assigneeName()),
-                normalizeLabels(req.labels()), parseDueDate(req.dueDate()));
+                normalizeLabels(req.labels()), parseDueDate(req.dueDate()),
+                normalizeExtraFields(req.extraFields()));
+    }
+
+    /**
+     * FR-08 动态字段护栏。取值语义（{@code [{"id":…}]} / {@code {"originalEstimate":…}}）由前端按
+     * {@link JiraCreateFieldView} 的控件类型组装，服务端不重解释——但必须把住两件事：
+     *
+     * <ol>
+     *   <li>**不许覆盖固定字段**：尤其 {@code description}——回链由服务端强制追加，能被覆盖就形同虚设；
+     *       {@code project}/{@code issuetype} 被覆盖会推到别的项目/类型上去。</li>
+     *   <li>**值形态限两层**：标量、数组（元素为标量或一层扁平对象）、一层扁平对象
+     *       （Jira 字段没有更深的结构）。放开等于把任意 JSON 转手发给 Jira，
+     *       脏 payload 的错误信息反而更难读。</li>
+     * </ol>
+     *
+     * 空值/空数组条目直接丢弃——沿用「空值字段一律不写进 payload」的既有口径。
+     */
+    static Map<String, Object> normalizeExtraFields(Map<String, Object> raw) {
+        if (raw == null || raw.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (var entry : raw.entrySet()) {
+            String id = trimToNull(entry.getKey());
+            if (id == null) {
+                continue;
+            }
+            if (RESERVED_FIELD_IDS.contains(id)) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "动态字段不能覆盖由平台管理的字段: " + id);
+            }
+            Object value = entry.getValue();
+            if (value == null || (value instanceof String s && s.isBlank())
+                    || (value instanceof Collection<?> c && c.isEmpty())) {
+                continue;
+            }
+            checkExtraFieldShape(id, value);
+            out.put(id, value);
+        }
+        return out;
+    }
+
+    private static void checkExtraFieldShape(String id, Object value) {
+        if (isScalar(value) || isFlatObject(id, value)) {
+            return;
+        }
+        if (value instanceof Collection<?> items) {
+            for (Object item : items) {
+                if (item == null || isScalar(item) || isFlatObject(id, item)) {
+                    continue;
+                }
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "动态字段 " + id + " 取值非法：数组元素只能是标量或一层扁平对象");
+            }
+            return;
+        }
+        throw new DevMindException(ErrorCode.BAD_REQUEST,
+                "动态字段 " + id + " 取值非法：只接受标量、数组或一层扁平对象");
+    }
+
+    /**
+     * 一层扁平对象：键为字符串、值为标量。Jira 的 {@code [{"id":…}]}（组件/版本）与
+     * {@code {"originalEstimate":…}}（时间跟踪）都是这形态；再深一层就抛。
+     */
+    private static boolean isFlatObject(String id, Object value) {
+        if (!(value instanceof Map<?, ?> map)) {
+            return false;
+        }
+        for (var entry : map.entrySet()) {
+            if (!(entry.getKey() instanceof String)
+                    || (entry.getValue() != null && !isScalar(entry.getValue()))) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "动态字段 " + id + " 取值非法：对象只能是一层标量键值");
+            }
+        }
+        return true;
+    }
+
+    private static boolean isScalar(Object v) {
+        return v instanceof String || v instanceof Number || v instanceof Boolean;
     }
 
     /** FR-03 步骤 4：服务端强制在描述尾部追加平台回链（文案格式只此一处；URL 由前端按 origin 拼） */

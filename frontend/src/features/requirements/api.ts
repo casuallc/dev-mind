@@ -4,6 +4,7 @@ import type {
   Design,
   FlowSession,
   JiraAssignableUser,
+  JiraCreateFields,
   JiraPushInput,
   JiraPushOptions,
   JiraPushResult,
@@ -136,6 +137,25 @@ export function searchJiraAssignableUsers(
   if (q) params.set('q', q)
   return api.get<JiraAssignableUser[]>(
     `/projects/${projectId}/requirements/${requirementId}/jira/assignable-users?${params}`,
+  )
+}
+
+/** CAP-47 FR-08：选定实例+项目+任务类型后的必填字段清单（createmeta）——弹窗据此动态渲染输入项。
+ *  不抛错：拉取失败降级为空表 + error，提交不禁用（读接口不可用不该堵死原本能推的类型）。 */
+export function getJiraCreateFields(
+  projectId: string,
+  requirementId: string,
+  integrationId: number,
+  jiraProjectKey: string,
+  issueTypeId: string,
+): Promise<JiraCreateFields> {
+  const q = new URLSearchParams({
+    integrationId: String(integrationId),
+    jiraProjectKey,
+    issueTypeId,
+  })
+  return api.get<JiraCreateFields>(
+    `/projects/${projectId}/requirements/${requirementId}/jira/create-fields?${q}`,
   )
 }
 

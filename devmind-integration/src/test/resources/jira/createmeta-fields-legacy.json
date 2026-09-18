@@ -1,0 +1,24 @@
+{
+  "projects": [
+    {
+      "id": "10000",
+      "key": "PROJ",
+      "name": "示例项目",
+      "issuetypes": [
+        {
+          "id": "10003",
+          "name": "缺陷",
+          "fields": {
+            "summary": { "name": "摘要", "required": true, "hasDefaultValue": false,
+                         "schema": { "type": "string", "system": "summary" } },
+            "components": { "name": "模块", "required": true, "hasDefaultValue": false,
+                            "schema": { "type": "array", "items": "component", "system": "components" },
+                            "allowedValues": [ { "id": "10000", "name": "后端" } ] },
+            "customfield_10606": { "name": "缺陷引入的活动", "required": false, "hasDefaultValue": false,
+                                   "schema": { "type": "option", "customId": 10606 } }
+          }
+        }
+      ]
+    }
+  ]
+}

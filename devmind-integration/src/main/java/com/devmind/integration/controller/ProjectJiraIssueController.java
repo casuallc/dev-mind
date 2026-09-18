@@ -2,6 +2,7 @@ package com.devmind.integration.controller;
 
 import com.devmind.integration.connector.IntegrationConnector;
 import com.devmind.integration.dto.JiraAssignableUserView;
+import com.devmind.integration.dto.JiraCreateFieldsView;
 import com.devmind.integration.dto.JiraPushOptionsView;
 import com.devmind.integration.dto.JiraPushRequest;
 import com.devmind.integration.dto.JiraPushResultView;
@@ -92,6 +93,18 @@ public class ProjectJiraIssueController {
                                                         String jiraProjectKey,
                                                         @RequestParam(value = "q", required = false) String q) {
         return pushService.assignableUsers(pid, rid, integrationId, jiraProjectKey, q);
+    }
+
+    /**
+     * CAP-47 FR-08：选定「实例 + 项目 + 任务类型」后的必填字段清单（createmeta）——
+     * 弹窗据此动态渲染输入项。不抛错：拉取失败降级为空表 + error，提交不禁用。
+     */
+    @GetMapping("/create-fields")
+    public JiraCreateFieldsView createFields(@PathVariable String pid, @PathVariable String rid,
+                                             @RequestParam("integrationId") Long integrationId,
+                                             @RequestParam("jiraProjectKey") String jiraProjectKey,
+                                             @RequestParam("issueTypeId") String issueTypeId) {
+        return pushService.createFields(pid, rid, integrationId, jiraProjectKey, issueTypeId);
     }
 
     /** CAP-47 FR-03：推送自建需求到 Jira（建 issue + 登记 link + 转 Jira 托管），幂等冲突报 409 */

@@ -1,5 +1,6 @@
 package com.devmind.integration.connector.jira;
 
+import com.devmind.integration.connector.IntegrationConnector.CreateFieldRef;
 import com.devmind.integration.connector.IntegrationConnector.IssuePage;
 import com.devmind.integration.connector.IntegrationConnector.JiraIssue;
 import org.junit.jupiter.api.Test;
@@ -193,5 +194,59 @@ class JiraIssueMapperTest {
                 JiraIssueMapper.parseTime("2026-08-28T09:00:00.000+08:00"));
         assertNull(JiraIssueMapper.parseTime("不是时间"));
         assertNull(JiraIssueMapper.parseTime(null));
+    }
+
+    @Test
+    void 创建字段新端点解析出类型与候选值() throws Exception {
+        var fields = JiraIssueMapper.toCreateFields(fixture("createmeta-fields.json"));
+        assertEquals(11, fields.size());
+        var summary = byId(fields, "summary");
+        assertEquals("摘要", summary.name());
+        assertEquals(true, summary.required());
+        assertEquals("string", summary.type());
+        assertEquals(false, summary.hasDefault());
+        assertTrue(summary.allowedValues().isEmpty());
+
+        // 组件/版本：array + items，候选值含 id 与展示名
+        var components = byId(fields, "components");
+        assertEquals("array", components.type());
+        assertEquals("component", components.items());
+        assertEquals(2, components.allowedValues().size());
+        assertEquals("10000", components.allowedValues().get(0).id());
+        assertEquals("后端", components.allowedValues().get(0).value());
+
+        // option 类自定义字段：展示名取 value（不是 name）
+        var flawType = byId(fields, "customfield_10207");
+        assertEquals("option", flawType.type());
+        assertEquals("功能缺陷", flawType.allowedValues().get(0).value());
+        assertEquals("10201", flawType.allowedValues().get(0).id());
+
+        // 级联选择：option 类型但无 allowedValues —— 服务层据此判为渲染不了
+        assertTrue(byId(fields, "customfield_10700").allowedValues().isEmpty());
+
+        // hasDefaultValue 与 required 都原样透出（有默认值的必填字段不必让用户填）
+        assertTrue(byId(fields, "customfield_10606").hasDefault());
+        assertEquals(true, byId(fields, "customfield_10606").required());
+
+        assertTrue(JiraIssueMapper.toCreateFields(null).isEmpty());
+        assertTrue(JiraIssueMapper.toCreateFields(mapper.readTree("{}")).isEmpty());
+        assertTrue(JiraIssueMapper.toCreateFields(mapper.readTree("{\"values\":[]}")).isEmpty());
+    }
+
+    @Test
+    void 创建字段旧端点用键名补出fieldId() throws Exception {
+        var fields = JiraIssueMapper.toCreateFields(fixture("createmeta-fields-legacy.json"));
+        assertEquals(3, fields.size());
+        // 旧端点 fields 是「fieldId 为键」的对象，键本身才是 id（对象内不含 fieldId）
+        assertEquals("summary", fields.get(0).id());
+        var components = byId(fields, "components");
+        assertEquals("模块", components.name());
+        assertEquals("component", components.items());
+        assertEquals(1, components.allowedValues().size());
+        assertEquals(false, byId(fields, "customfield_10606").required());
+    }
+
+    private static CreateFieldRef byId(List<CreateFieldRef> fields, String id) {
+        return fields.stream().filter(f -> id.equals(f.id())).findFirst().orElseThrow();
     }
 }

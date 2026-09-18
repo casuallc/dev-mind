@@ -1,0 +1,52 @@
+{
+  "maxResults": 50,
+  "startAt": 0,
+  "total": 11,
+  "isLast": true,
+  "values": [
+    { "fieldId": "summary", "name": "摘要", "required": true, "hasDefaultValue": false,
+      "schema": { "type": "string", "system": "summary" } },
+    { "fieldId": "components", "name": "模块", "required": true, "hasDefaultValue": false,
+      "schema": { "type": "array", "items": "component", "system": "components" },
+      "allowedValues": [
+        { "id": "10000", "name": "后端" },
+        { "id": "10001", "name": "前端" }
+      ] },
+    { "fieldId": "versions", "name": "影响版本", "required": true, "hasDefaultValue": false,
+      "schema": { "type": "array", "items": "version", "system": "versions" },
+      "allowedValues": [
+        { "id": "10100", "name": "1.0" },
+        { "id": "10101", "name": "2.0" }
+      ] },
+    { "fieldId": "fixVersions", "name": "修复的版本", "required": true, "hasDefaultValue": false,
+      "schema": { "type": "array", "items": "version", "system": "fixVersions" },
+      "allowedValues": [
+        { "id": "10100", "name": "1.0" },
+        { "id": "10101", "name": "2.0" }
+      ] },
+    { "fieldId": "duedate", "name": "到期日", "required": true, "hasDefaultValue": false,
+      "schema": { "type": "date", "system": "duedate" } },
+    { "fieldId": "timetracking", "name": "时间跟踪", "required": true, "hasDefaultValue": false,
+      "schema": { "type": "timetracking", "system": "timetracking" } },
+    { "fieldId": "customfield_10207", "name": "缺陷类型", "required": true, "hasDefaultValue": false,
+      "schema": { "type": "option", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:select",
+                  "customId": 10207 },
+      "allowedValues": [
+        { "id": "10201", "value": "功能缺陷" },
+        { "id": "10202", "value": "性能缺陷" }
+      ] },
+    { "fieldId": "customfield_10606", "name": "缺陷引入的活动", "required": true, "hasDefaultValue": true,
+      "schema": { "type": "option", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:select",
+                  "customId": 10606 },
+      "allowedValues": [ { "id": "10601", "value": "需求分析" } ] },
+    { "fieldId": "reporter", "name": "报告人", "required": true, "hasDefaultValue": false,
+      "schema": { "type": "user", "system": "reporter" } },
+    { "fieldId": "customfield_10700", "name": "归属组织", "required": true, "hasDefaultValue": false,
+      "schema": { "type": "option",
+                  "custom": "com.atlassian.jira.plugin.system.customfieldtypes:cascadingselect",
+                  "customId": 10700 } },
+    { "fieldId": "priority", "name": "优先级", "required": false, "hasDefaultValue": true,
+      "schema": { "type": "option", "system": "priority" },
+      "allowedValues": [ { "id": "3", "name": "中" } ] }
+  ]
+}

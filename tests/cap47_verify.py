@@ -16,7 +16,13 @@ username 重试）→ 推送建 issue（payload 断言：项目/类型/标题/�
 fixVersions/reporter 不被 Jira 空值清空）→ 重复推送 409 → 无机器人凭证的实例推送 400 引导绑定
 → 创建被 Jira 拒（__create-error 注入 fields 级错误）时 errorMessages 与 errors **都要**透出、
 不再 dump 原始 JSON → 手动 refresh 拉回远端变更 → 无 link 需求 refresh 400 → 建同步配置跑 run：
-imported=0、需求总数不变（防「推送过的 issue 被同步重复建成新需求」回归）且 syncCovered 翻真。
+imported=0、需求总数不变（防「推送过的 issue 被同步重复建成新需求」回归）且 syncCovered 翻真 →
+**FR-08 动态必填字段**：create-fields 按可渲染性分区（固定字段只补 duedate、模块/影响版本/修复版本→
+多选且候选值来自实例、时间跟踪→专用控件、必填但渲染不了的进 unsupported 且不给假控件、有默认值/
+非必填的不进清单）→ 不填动态字段被 mock 逐字段拒 400（与真实 Jira 同形，需求仍 LOCAL）→ 带动态字段
+推送成功且 payload 是 Jira 取值形态（[{id}] / {originalEstimate,remainingEstimate}，空值不写）→
+护栏：覆盖 description 类字段/取值超两层被 400 拦在本地 → 新端点 404 时退旧端点（清单等价，候选值
+走 name 回退）→ 两端点皆 500 时降级为空表 + error（不禁用提交）。
 
 复用同一 H2 时实例可能残留，故候选实例相关断言用「包含 / 与 instances 首条一致」而非精确计数。
 """
@@ -89,6 +95,14 @@ def create_payloads():
     st, state = mock("/__state")
     return [(r.get("body") or {}).get("fields") or {} for r in (state or {}).get("requests", [])
             if r["method"] == "POST" and r["path"] == "/rest/api/2/issue"]
+
+
+def payload_by_summary(summary):
+    """按标题取那次创建请求的 fields（比按下标可靠：被拒的请求也会被 mock 记录）"""
+    for f in create_payloads():
+        if f.get("summary") == summary:
+            return f
+    return {}
 
 
 def create_auths():
@@ -395,6 +409,182 @@ try:
     check("同步后需求总数不变",
           (after_page or {}).get("total") == before,
           "before=%s after=%s" % (before, (after_page or {}).get("total")))
+
+    # ---------- 12. FR-08 动态必填字段（createmeta 驱动） ----------
+    # 用户真实撞到的那组：项目给该任务类型配了 模块/影响版本/修复版本/到期日/时间跟踪 + 一个下拉
+    # 自定义字段，全为必填（原先只能在 Jira 侧看到 400 才知道要配什么）。
+    renderable = [
+        {"fieldId": "summary", "name": "摘要", "required": True, "hasDefaultValue": False,
+         "schema": {"type": "string", "system": "summary"}},
+        {"fieldId": "components", "name": "模块", "required": True, "hasDefaultValue": False,
+         "schema": {"type": "array", "items": "component", "system": "components"},
+         "allowedValues": [{"id": "10000", "name": "后端"}, {"id": "10001", "name": "前端"}]},
+        {"fieldId": "versions", "name": "影响版本", "required": True, "hasDefaultValue": False,
+         "schema": {"type": "array", "items": "version", "system": "versions"},
+         "allowedValues": [{"id": "10100", "name": "1.0"}, {"id": "10101", "name": "2.0"}]},
+        {"fieldId": "fixVersions", "name": "修复的版本", "required": True, "hasDefaultValue": False,
+         "schema": {"type": "array", "items": "version", "system": "fixVersions"},
+         "allowedValues": [{"id": "10100", "name": "1.0"}, {"id": "10101", "name": "2.0"}]},
+        {"fieldId": "duedate", "name": "到期日", "required": True, "hasDefaultValue": False,
+         "schema": {"type": "date", "system": "duedate"}},
+        {"fieldId": "timetracking", "name": "时间跟踪", "required": True, "hasDefaultValue": False,
+         "schema": {"type": "timetracking", "system": "timetracking"}},
+        {"fieldId": "customfield_10207", "name": "缺陷类型", "required": True, "hasDefaultValue": False,
+         "schema": {"type": "option", "customId": 10207},
+         "allowedValues": [{"id": "10201", "value": "功能缺陷"}, {"id": "10202", "value": "性能缺陷"}]},
+        {"fieldId": "customfield_10606", "name": "缺陷引入的活动", "required": True, "hasDefaultValue": True,
+         "schema": {"type": "option", "customId": 10606},
+         "allowedValues": [{"id": "10601", "value": "需求分析"}]},  # 有默认值：Jira 自填，不该让用户填
+        {"fieldId": "priority", "name": "优先级", "required": False, "hasDefaultValue": True,
+         "schema": {"type": "option", "system": "priority"},
+         "allowedValues": [{"id": "3", "name": "中"}]},  # 非必填：不进清单
+    ]
+    # 必填但平台渲染不了的：用户选择器、级联选择（option 类型却无候选值）
+    unrenderable = [
+        {"fieldId": "customfield_10700", "name": "归属组织", "required": True, "hasDefaultValue": False,
+         "schema": {"type": "option", "customId": 10700}},
+        {"fieldId": "reporter", "name": "报告人", "required": True, "hasDefaultValue": False,
+         "schema": {"type": "user", "system": "reporter"}},
+    ]
+    mock("/__createmeta", {"fields": renderable + unrenderable, "enforce": True})
+
+    st, re = call("POST", "/projects/%s/requirements" % pid, {
+        "title": MARK + " 动态字段", "description": "推送前先问 Jira 要填什么。",
+        "fixVersions": ["2.0", "不存在的版本"]})   # 只有 2.0 命中实例候选值
+    rid_e, code_e = (re or {}).get("id"), (re or {}).get("code")
+    check("创建需求 E（修复版本含一个不在实例候选值内的本地值）",
+          st == 200 and bool(rid_e) and (re or {}).get("source") == "LOCAL", "%s %s" % (st, re))
+    if not rid_e:
+        sys.exit(1)
+
+    cf_url = ("/projects/%s/requirements/%s/jira/create-fields"
+              "?integrationId=%s&jiraProjectKey=PROJ&issueTypeId=10001") % (pid, rid_e, ia_id)
+    st, cf = call("GET", cf_url)
+    check("create-fields 200", st == 200, "%s %s" % (st, cf))
+    cf = cf or {}
+    check("必填但已有输入项的固定字段只下发 duedate（标题本就必须，不重复渲染）",
+          cf.get("requiredFixed") == ["duedate"], "%s" % (cf.get("requiredFixed"),))
+    check("新渲染字段与控件映射（模块/影响版本/修复版本→多选，时间跟踪→专用控件，选项→下拉）",
+          [(f.get("id"), f.get("control")) for f in cf.get("fields") or []]
+          == [("components", "MULTI_SELECT"), ("versions", "MULTI_SELECT"),
+              ("fixVersions", "MULTI_SELECT"), ("timetracking", "TIMETRACKING"),
+              ("customfield_10207", "SELECT")],
+          "%s" % ([(f.get("id"), f.get("control")) for f in cf.get("fields") or []],))
+    fields_cf = cf.get("fields") or [{}]
+    check("候选值来自实例（模块的组件名 + 选项自定义字段取 value 作展示名）",
+          [o.get("name") for o in fields_cf[0].get("options") or []] == ["后端", "前端"]
+          and [o.get("name") for o in fields_cf[4].get("options") or []] == ["功能缺陷", "性能缺陷"],
+          "%s" % (fields_cf,))
+    check("渲染不了的必填字段进 unsupported 且 control 为空（不给一个填什么都必被拒的假控件）",
+          [(f.get("id"), f.get("control")) for f in cf.get("unsupported") or []]
+          == [("customfield_10700", None), ("reporter", None)], "%s" % (cf.get("unsupported"),))
+    check("有默认值的必填字段与非必填字段都不进任何清单（Jira 自填，不打扰用户）",
+          not any(f.get("id") in ("customfield_10606", "priority")
+                  for f in (cf.get("fields") or []) + (cf.get("unsupported") or [])), "%s" % (cf,))
+    check("修复版本按同域命中项预填（2.0→10101，不猜不存在的版本）",
+          cf.get("prefill") == {"fixVersions": ["10101"]}, "%s" % (cf.get("prefill"),))
+    check("元数据拉取无错误", cf.get("error") is None, "%s" % (cf.get("error"),))
+
+    # 12b. 不填动态字段必被拒（mock 按目录逐字段校验必填，与真实 Jira 同形）
+    st, miss = call("POST", "/projects/%s/requirements/%s/jira/push" % (pid, rid_e), {
+        "integrationId": ia_id, "jiraProjectKey": "PROJ", "issueTypeId": "10001",
+        "summary": MARK + " 缺动态字段", "backlinkUrl": backlink})
+    msg_miss = json.dumps(miss, ensure_ascii=False)
+    check("缺动态必填字段被 Jira 拒 400，且逐字段透出（模块/影响版本/修复版本/时间跟踪）",
+          st == 400 and "模块是必需的。" in msg_miss and "影响版本是必需的。" in msg_miss
+          and "修复的版本是必需的。" in msg_miss and "时间跟踪是必需的。" in msg_miss,
+          "%s %s" % (st, miss))
+    fm = payload_by_summary(MARK + " 缺动态字段")
+    check("那次 payload 里确实没有动态字段（证明拒绝来自 Jira 的必填校验）",
+          bool(fm) and not any(k in fm for k in ("components", "versions", "fixVersions",
+                                                "timetracking", "customfield_10207")), "%s" % (fm,))
+    st, e_local = call("GET", "/projects/%s/requirements/%s" % (pid, rid_e))
+    check("被拒后需求 E 仍 LOCAL 且无 key",
+          (e_local or {}).get("source") == "LOCAL" and not (e_local or {}).get("externalKey"),
+          "%s" % (e_local,))
+
+    # 12c. 带动态字段推送：payload 断言 Jira 取值形态（[{id}] / {originalEstimate}）。
+    # 目录换成「全部可渲染」的那批——渲染不了的字段正是弹窗禁用提交的原因，这里要看成功路径。
+    mock("/__createmeta", {"fields": renderable})
+    st, cf_ok = call("GET", cf_url)
+    check("目录去掉渲染不了的字段后 unsupported 为空（弹窗恢复可提交）",
+          (cf_ok or {}).get("unsupported") == [] and len((cf_ok or {}).get("fields") or []) == 5,
+          "%s" % (cf_ok,))
+    st, res_e = call("POST", "/projects/%s/requirements/%s/jira/push" % (pid, rid_e), {
+        "integrationId": ia_id, "jiraProjectKey": "PROJ", "issueTypeId": "10001",
+        "summary": MARK + " 动态字段（Jira）", "backlinkUrl": backlink, "dueDate": "2026-11-30",
+        "extraFields": {
+            "components": [{"id": "10000"}], "versions": [{"id": "10100"}],
+            "fixVersions": [{"id": "10101"}], "customfield_10207": {"id": "10201"},
+            "timetracking": {"originalEstimate": "2h", "remainingEstimate": "1h"},
+            "customfield_10700": None}})
+    key_e = (res_e or {}).get("externalKey")
+    check("带动态字段推送成功（mock 的逐字段必填校验全通过）",
+          st == 200 and (key_e or "").startswith("PROJ-"), "%s %s" % (st, res_e))
+    fe = payload_by_summary(MARK + " 动态字段（Jira）")
+    check("payload：动态字段按 Jira 取值形态原样写入（组件/影响版本/修复版本是 [{id}]）",
+          fe.get("components") == [{"id": "10000"}] and fe.get("versions") == [{"id": "10100"}]
+          and fe.get("fixVersions") == [{"id": "10101"}], "%s" % (fe,))
+    check("payload：时间跟踪是 {originalEstimate, remainingEstimate}，下拉选项是 {id}",
+          fe.get("timetracking") == {"originalEstimate": "2h", "remainingEstimate": "1h"}
+          and fe.get("customfield_10207") == {"id": "10201"}, "%s" % (fe,))
+    check("payload：到期日是固定表单的值（必填校验加在固定控件上，不来自动态字段）",
+          fe.get("duedate") == "2026-11-30", "%s" % (fe,))
+    check("payload：空值动态字段不写进 payload", "customfield_10700" not in fe, "%s" % (fe,))
+    check("payload：回链仍由服务端追加，动态字段不能顺带改标题/项目",
+          fe.get("summary") == MARK + " 动态字段（Jira）"
+          and (fe.get("description") or "").endswith("%s · %s" % (code_e, backlink))
+          and fe.get("project", {}).get("key") == "PROJ", "%s" % (fe,))
+    st, e_done = call("GET", "/projects/%s/requirements/%s" % (pid, rid_e))
+    check("推送成功后需求 E 转 JIRA 托管",
+          (e_done or {}).get("source") == "JIRA" and (e_done or {}).get("externalKey") == key_e,
+          "%s" % (e_done,))
+
+    # 12d. 服务端护栏：不许覆盖平台管理的字段 / 取值形态超两层
+    st, g1 = call("POST", "/projects/%s/requirements/%s/jira/push" % (pid, rid_c), {
+        "integrationId": ia_id, "jiraProjectKey": "PROJ", "issueTypeId": "10001",
+        "summary": MARK + " 越权动态字段", "backlinkUrl": backlink,
+        "extraFields": {"description": "被覆盖的回链"}})
+    check("动态字段覆盖 description/summary/project 类字段被拒 400",
+          st == 400 and "平台管理" in json.dumps(g1, ensure_ascii=False), "%s %s" % (st, g1))
+    st, g2 = call("POST", "/projects/%s/requirements/%s/jira/push" % (pid, rid_c), {
+        "integrationId": ia_id, "jiraProjectKey": "PROJ", "issueTypeId": "10001",
+        "summary": MARK + " 越深取值", "backlinkUrl": backlink,
+        "extraFields": {"components": [{"id": {"nested": "x"}}]}})
+    check("动态字段取值形态超两层被拒 400（不把任意 JSON 转手发给 Jira）",
+          st == 400 and "取值非法" in json.dumps(g2, ensure_ascii=False), "%s %s" % (st, g2))
+    check("护栏拒掉的推送未到 Jira（远端没有这两条）",
+          not payload_by_summary(MARK + " 越权动态字段") and not payload_by_summary(MARK + " 越深取值"),
+          "%s" % ([f.get("summary") for f in create_payloads()],))
+
+    # 12e. 旧端点兜底：新端点 404（Jira <8.4）时退 createmeta?projectKeys=
+    mock("/__createmeta", {"fields": renderable + unrenderable, "notFound": True})
+    st, cf_legacy = call("GET", cf_url)
+    check("新端点 404 时退旧端点，字段清单等价（候选值走 name 回退）",
+          st == 200
+          and [(f.get("id"), f.get("control")) for f in (cf_legacy or {}).get("fields") or []]
+          == [(f.get("id"), f.get("control")) for f in fields_cf]
+          and (cf_legacy or {}).get("requiredFixed") == ["duedate"]
+          and [o.get("name") for o in ((cf_legacy or {}).get("fields") or [{}])[0].get("options") or []]
+          == ["后端", "前端"]
+          and [(f.get("id"), f.get("control")) for f in (cf_legacy or {}).get("unsupported") or []]
+          == [("customfield_10700", None), ("reporter", None)], "%s" % (cf_legacy,))
+    st, state_legacy = mock("/__state")
+    legacy_hits = [r["path"] for r in (state_legacy or {}).get("requests", [])
+                   if r["path"] == "/rest/api/2/issue/createmeta"]
+    check("确实退到了旧端点（不是静默返回空清单）", bool(legacy_hits), "%s" % (legacy_hits,))
+
+    # 12f. 两个端点都不可用：降级为空表 + error，但**不禁用提交**（读接口抖动不该堵死能推的类型）
+    mock("/__createmeta", {"fail": True})
+    st, cf_broken = call("GET", cf_url)
+    check("元数据拉不到 → 200 + error + 空清单（降级而非报错）",
+          st == 200 and (cf_broken or {}).get("error") and not (cf_broken or {}).get("fields")
+          and not (cf_broken or {}).get("unsupported"), "%s %s" % (st, cf_broken))
+    mock("/__createmeta", {"fields": [], "enforce": False, "notFound": False, "fail": False})
+    st, cf_empty = call("GET", cf_url)
+    check("目录为空 → 清单全空且无错误（提交不禁用）",
+          st == 200 and not (cf_empty or {}).get("fields") and not (cf_empty or {}).get("unsupported")
+          and (cf_empty or {}).get("error") is None, "%s %s" % (st, cf_empty))
 
     print("\n== CAP-47 E2E: %d passed, %d failed ==" % (passed, failed))
 finally:

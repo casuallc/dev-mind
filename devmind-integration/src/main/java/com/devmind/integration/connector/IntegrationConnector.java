@@ -7,6 +7,7 @@ import com.devmind.integration.model.IntegrationEntity;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 /**
  * CAP-18 平台连接器 SPI：每种平台一个实现，按 {@link #type()} 注册。
@@ -84,6 +85,17 @@ public interface IntegrationConnector {
         throw new DevMindException(ErrorCode.BAD_REQUEST, type() + " 不支持读取优先级");
     }
 
+    /**
+     * 列出「在某项目下创建某 issue 类型」时的字段元数据（CAP-47 FR-08）。
+     * 只读操作——这是平台能回答「Jira 会因哪些字段拒我」的**唯一权威来源**：
+     * issue 类型可以配一堆必填字段（模块/影响版本/修复版本/时间跟踪/自定义字段），
+     * 硬编码字段清单必然落后于实例配置。返回含全部字段（不筛必填），由调用方按 required 分区。
+     */
+    default List<CreateFieldRef> listCreateFields(IntegrationEntity cfg, String token,
+                                                  String projectKey, String issueTypeId) {
+        throw new DevMindException(ErrorCode.BAD_REQUEST, type() + " 不支持读取创建字段元数据");
+    }
+
     /** 列出项目下可指派用户（CAP-47 FR-02，q 为用户名/显示名关键字，空则取默认列表）。只读操作。 */
     default List<UserRef> listAssignableUsers(IntegrationEntity cfg, String token, String projectKey, String q) {
         throw new DevMindException(ErrorCode.BAD_REQUEST, type() + " 不支持读取可指派用户");
@@ -140,9 +152,15 @@ public interface IntegrationConnector {
      * issue 创建入参（CAP-47 FR-01）。除 projectKey/issueTypeId/summary 外均可空——
      * **空值字段连接器一律不写进平台 payload**（写 null 会显式清空平台侧默认值）。
      * assigneeName 为平台用户名（Jira Server 的 name，非 displayName）。
+     *
+     * <p>{@code extraFields} 为 CAP-47 FR-08 的动态字段：键是平台字段 id（{@code components}/
+     * {@code fixVersions}/{@code customfield_10207}…），值是**已按该字段类型组装好的平台取值**
+     * （如 {@code [{"id":"10000"}]} / {@code {"originalEstimate":"2h"}}），连接器原样写进 payload。
+     * 平台语义的组装由服务层按 createmeta 的字段类型完成——连接器不猜字段类型。
      */
     record IssueSpec(String projectKey, String issueTypeId, String summary, String description,
-                     String priorityName, String assigneeName, List<String> labels, LocalDate dueDate) {}
+                     String priorityName, String assigneeName, List<String> labels, LocalDate dueDate,
+                     Map<String, Object> extraFields) {}
 
     /** issue 创建结果（CAP-47）：id 为平台内部 id，key 为外部键（如 PROJ-123），url 为可点击地址 */
     record IssueRef(String id, String key, String url) {}
@@ -152,6 +170,19 @@ public interface IntegrationConnector {
 
     /** 优先级词表项（CAP-47 FR-02）：name 为实例词表原文 */
     record PriorityRef(String id, String name) {}
+
+    /**
+     * 创建字段元数据（CAP-47 FR-08）。{@code type}/{@code items} 为平台 schema 原文
+     * （Jira 的 {@code array}/{@code option}/{@code date}/{@code timetracking}…；type=array 时
+     * items 是元素类型），原样透出不做映射——能否渲染成输入项由服务层判定。
+     * {@code allowedValues} 为该字段当前合法取值（枚举类字段才有，组件/影响版本/修复版本/
+     * 下拉自定义字段都由此拿到候选）；{@code hasDefault} 为真时平台会自填，不必要求用户填。
+     */
+    record CreateFieldRef(String id, String name, boolean required, String type, String items,
+                          List<FieldOption> allowedValues, boolean hasDefault) {}
+
+    /** 创建字段的合法取值项（CAP-47 FR-08）：id 为回传值，value 为展示名 */
+    record FieldOption(String id, String value) {}
 
     /** 可指派用户（CAP-47 FR-02）：name=平台用户名（创建 issue 时回传），displayName=界面展示名 */
     record UserRef(String name, String displayName) {}
