@@ -393,6 +393,22 @@ class JiraPushServiceTest {
     }
 
     @Test
+    void 已转托管且已关联时优先报409带既有key() {
+        // 推送成功后 source=JIRA 与 link 同时成立：重复推送必须回既有 key（409），
+        // 而不是「已是 JIRA 来源」（没有 key 可追查）——幂等检查先于来源守卫
+        link("p1", "req-local", "PROJ-123");
+        requirementService.store.get("req-local").setSource(RequirementEntity.SOURCE_JIRA);
+        requirementService.store.get("req-local").setExternalKey("PROJ-123");
+
+        DevMindException e = assertThrows(DevMindException.class,
+                () -> service.push("p1", "req-local", request("标题")));
+
+        assertEquals(ErrorCode.CONFLICT, e.getErrorCode());
+        assertTrue(e.getMessage().contains("PROJ-123"));
+        assertTrue(connector.created.isEmpty());
+    }
+
+    @Test
     void 非自建需求拒绝推送() {
         DevMindException e = assertThrows(DevMindException.class,
                 () -> service.push("p1", "req-jira", request("标题")));

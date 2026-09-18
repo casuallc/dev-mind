@@ -50,8 +50,10 @@ SPI 从「只读 issue」扩到「可创建 issue」，后续工作日志未关�
 - **FR-03 推送（核心）**：`POST /api/projects/{pid}/requirements/{rid}/jira/push`，
   请求 `{integrationId, jiraProjectKey, issueTypeId, summary, description, backlinkUrl, priorityName,
   assigneeName, labels[], dueDate}`。步骤：
-  1. 需求须 `source=LOCAL`（已是 JIRA 来源 400）；已有 ISSUE link 或 `externalKey` 非空 → **409 幂等**；
-     同一 issue key 已被**别的需求**关联 → 409 并指路既有需求；
+  1. **先**查幂等：已有 ISSUE link 或 `externalKey` 非空 → **409 幂等**并回既有 key；
+     同一 issue key 已被**别的需求**关联 → 409 并指路既有需求。
+     幂等检查**先于**来源守卫——推送成功会同时置 `source=JIRA`，若先查来源，重复推送只会拿到
+     「已是 JIRA 来源」（没有 key 可追查）；来源守卫（`source≠LOCAL` → 400）只兜「JIRA 来源但没有 link」的异常态；
   2. 集成须 TYPE_JIRA + ENABLED；参数校验（`summary` ≤255、`labels` 无空格与逗号、
      `priority` 命中实例词表、`dueDate` 可解析）；
   3. 身份走 CAP-35 `resolveWriteIdentity`（个人账号 → 机器人凭证 → 400 引导「我的 → 第三方账号」绑定）；

@@ -189,10 +189,8 @@ public class JiraPushService {
      */
     public synchronized JiraPushResultView push(String projectId, String requirementId, JiraPushRequest req) {
         RequirementEntity requirement = requirementService.requireEntity(projectId, requirementId);
-        if (!RequirementEntity.SOURCE_LOCAL.equals(requirement.getSource())) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST,
-                    "需求已是 " + requirement.getSource() + " 来源（Jira 托管），无需推送: " + requirementId);
-        }
+        // 幂等检查在来源守卫之前：推送成功会同时置 source=JIRA，若先查来源，
+        // 重复点击/陈旧页面只会拿到「已是 JIRA 来源」而看不到关联到哪个 issue，无从追查
         Optional<ExternalLinkEntity> linked = linkRepo
                 .findFirstByProjectIdAndInternalTypeAndInternalIdAndExternalTypeOrderByIdDesc(
                         projectId, ExternalLinkEntity.INTERNAL_REQUIREMENT, requirementId,
@@ -200,6 +198,11 @@ public class JiraPushService {
         if (linked.isPresent() || requirement.getExternalKey() != null) {
             String key = linked.map(ExternalLinkEntity::getExternalKey).orElse(requirement.getExternalKey());
             throw new DevMindException(ErrorCode.CONFLICT, "需求已关联 Jira issue: " + key);
+        }
+        // 无 link 的 JIRA 来源（同步建的需求未登记 link 等异常态）才落这里
+        if (!RequirementEntity.SOURCE_LOCAL.equals(requirement.getSource())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "需求已是 " + requirement.getSource() + " 来源（Jira 托管），无需推送: " + requirementId);
         }
         IntegrationEntity integration = requireJira(req.integrationId());
         // CAP-35 FR-03：人触发写操作个人账号优先，未绑定且有机器人凭证则用机器人，都没有则 400 引导绑定
