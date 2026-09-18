@@ -1,0 +1,13 @@
+{
+  "maxResults": 50,
+  "startAt": 0,
+  "total": 4,
+  "isLast": true,
+  "values": [
+    { "id": "10001", "name": "需求", "subtask": false, "iconUrl": "https://jira.example.com/images/icons/issuetypes/story.png" },
+    { "id": "10002", "name": "任务", "subtask": false },
+    { "id": "10003", "name": "缺陷", "subtask": false },
+    { "id": "10004", "name": "子任务", "subtask": true },
+    { "name": "缺 id 的脏类型" }
+  ]
+}

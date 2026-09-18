@@ -118,6 +118,74 @@ class JiraIssueMapperTest {
     }
 
     @Test
+    void 创建issue响应映射为外部键与浏览地址() throws Exception {
+        var ref = JiraIssueMapper.toIssueRef(fixture("create-issue.json"), "https://jira.example.com/");
+        assertEquals("10201", ref.id());
+        assertEquals("PROJ-123", ref.key());
+        // base_url 尾斜杠归一，拼出可点击地址
+        assertEquals("https://jira.example.com/browse/PROJ-123", ref.url());
+        // 缺 key 视为脏数据（拿不到外部键就无法登记 link）
+        assertNull(JiraIssueMapper.toIssueRef(mapper.readTree("{\"id\":\"1\"}"), "https://jira.example.com"));
+        assertNull(JiraIssueMapper.toIssueRef(null, "https://jira.example.com"));
+    }
+
+    @Test
+    void 单条issue读取复用分页映射() throws Exception {
+        JiraIssue issue = JiraIssueMapper.toIssue(fixture("issue-by-key.json"));
+        assertEquals("PROJ-123", issue.key());
+        assertEquals("需求", issue.issueType());
+        assertEquals("Medium", issue.priority());
+        assertEquals("待处理", issue.status());
+        assertEquals("李四", issue.assignee());
+        assertEquals(LocalDate.parse("2026-10-31"), issue.dueDate());
+        assertTrue(issue.description().contains("REQ-12"));
+        assertTrue(issue.fixVersions().isEmpty());
+        // 无 key 的脏响应返回 null（调用方按 NOT_FOUND 处理）
+        assertNull(JiraIssueMapper.toIssue(mapper.readTree("{\"id\":\"1\",\"fields\":{}}")));
+    }
+
+    @Test
+    void 任务类型新端点与旧端点两种形态都能解析() throws Exception {
+        var fresh = JiraIssueMapper.toIssueTypes(fixture("createmeta-issuetypes.json"));
+        // 缺 id 的脏条目跳过，subtask 原样透出由服务层过滤
+        assertEquals(4, fresh.size());
+        assertEquals("10001", fresh.get(0).id());
+        assertEquals("需求", fresh.get(0).name());
+        assertEquals(false, fresh.get(0).subtask());
+        assertEquals(true, fresh.get(3).subtask());
+
+        var legacy = JiraIssueMapper.toIssueTypes(fixture("createmeta-legacy.json"));
+        assertEquals(2, legacy.size());
+        assertEquals("需求", legacy.get(0).name());
+        assertEquals(true, legacy.get(1).subtask());
+
+        assertTrue(JiraIssueMapper.toIssueTypes(null).isEmpty());
+        assertTrue(JiraIssueMapper.toIssueTypes(mapper.readTree("{}")).isEmpty());
+        assertTrue(JiraIssueMapper.toIssueTypes(mapper.readTree("{\"values\":[]}")).isEmpty());
+    }
+
+    @Test
+    void 优先级与可指派用户映射() throws Exception {
+        var priorities = JiraIssueMapper.toPriorities(fixture("priorities.json"));
+        // 缺 name 的脏条目跳过（创建 issue 回传的是 name）；缺 id 不影响可用
+        assertEquals(3, priorities.size());
+        assertEquals("Highest", priorities.get(0).name());
+        assertEquals("3", priorities.get(2).id());
+        assertTrue(JiraIssueMapper.toPriorities(null).isEmpty());
+        assertTrue(JiraIssueMapper.toPriorities(mapper.readTree("{}")).isEmpty());
+
+        var users = JiraIssueMapper.toAssignableUsers(fixture("assignable-users.json"));
+        // 缺 name 的脏条目跳过（name 是回传给 Jira 的用户名，没有它无法指派）
+        assertEquals(3, users.size());
+        assertEquals("lisi", users.get(0).name());
+        assertEquals("李四", users.get(0).displayName());
+        // displayName 缺失回退 name（部分实例无显示名）
+        assertEquals("wangwu", users.get(2).displayName());
+        assertTrue(JiraIssueMapper.toAssignableUsers(null).isEmpty());
+        assertTrue(JiraIssueMapper.toAssignableUsers(mapper.readTree("{}")).isEmpty());
+    }
+
+    @Test
     void 时间解析覆盖无冒号与标准ISO两种偏移() {
         assertEquals(Instant.parse("2026-08-28T01:00:00Z"),
                 JiraIssueMapper.parseTime("2026-08-28T09:00:00.000+0800"));

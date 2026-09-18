@@ -47,11 +47,46 @@ public interface IntegrationConnector {
     }
 
     /**
-     * 执行 issue 工作流转换（CAP-19 FR-08）。**写操作**——本 SPI 唯一放行写请求的路径，
-     * 仅限 transitions 端点；transitionId 必须来自当前 {@link #listTransitions} 结果。
+     * 执行 issue 工作流转换（CAP-19 FR-08）。**写操作**——与 {@link #logWork}、{@link #createIssue}
+     * 同属本 SPI 放行写请求的三条路径；transitionId 必须来自当前 {@link #listTransitions} 结果。
      */
     default void transitionIssue(IntegrationEntity cfg, String token, String issueKey, String transitionId) {
         throw new DevMindException(ErrorCode.BAD_REQUEST, type() + " 不支持 issue 状态转换");
+    }
+
+    /**
+     * 创建 issue（CAP-47 FR-01；issue 跟踪型平台如 Jira）。**写操作**——与 transitions/worklog
+     * 同属回写通道，仅在用户显式触发时调用（不做自动推送）。
+     */
+    default IssueRef createIssue(IntegrationEntity cfg, String token, IssueSpec spec) {
+        throw new DevMindException(ErrorCode.BAD_REQUEST, type() + " 不支持创建 issue");
+    }
+
+    /**
+     * 单条读取 issue（CAP-47 FR-03；issue 跟踪型平台如 Jira）。只读操作。
+     * 与 {@link #searchIssues} 的区别：**不经过搜索索引**——新建 issue 后索引有延迟，
+     * /search 可能返回 0 条，回读必须走本方法。
+     */
+    default JiraIssue getIssue(IntegrationEntity cfg, String token, String issueKey, String fields) {
+        throw new DevMindException(ErrorCode.BAD_REQUEST, type() + " 不支持读取 issue");
+    }
+
+    /**
+     * 列出某项目下**当前账号可创建**的 issue 类型（CAP-47 FR-02）。
+     * 只读操作——类型清单随实例语言包与项目配置变化，不得硬编码；仅返回顶层类型（子任务被过滤）。
+     */
+    default List<IssueTypeRef> listIssueTypes(IntegrationEntity cfg, String token, String projectKey) {
+        throw new DevMindException(ErrorCode.BAD_REQUEST, type() + " 不支持读取任务类型");
+    }
+
+    /** 列出实例的优先级词表（CAP-47 FR-02）。只读操作；实例关闭优先级功能时返回空表。 */
+    default List<PriorityRef> listPriorities(IntegrationEntity cfg, String token) {
+        throw new DevMindException(ErrorCode.BAD_REQUEST, type() + " 不支持读取优先级");
+    }
+
+    /** 列出项目下可指派用户（CAP-47 FR-02，q 为用户名/显示名关键字，空则取默认列表）。只读操作。 */
+    default List<UserRef> listAssignableUsers(IntegrationEntity cfg, String token, String projectKey, String q) {
+        throw new DevMindException(ErrorCode.BAD_REQUEST, type() + " 不支持读取可指派用户");
     }
 
     /**
@@ -100,6 +135,26 @@ public interface IntegrationConnector {
 
     /** issue 工作流转换（CAP-19 FR-08）：id=转换 id（执行时回传），name=转换名，toStatus=目标状态名 */
     record IssueTransition(String id, String name, String toStatus) {}
+
+    /**
+     * issue 创建入参（CAP-47 FR-01）。除 projectKey/issueTypeId/summary 外均可空——
+     * **空值字段连接器一律不写进平台 payload**（写 null 会显式清空平台侧默认值）。
+     * assigneeName 为平台用户名（Jira Server 的 name，非 displayName）。
+     */
+    record IssueSpec(String projectKey, String issueTypeId, String summary, String description,
+                     String priorityName, String assigneeName, List<String> labels, LocalDate dueDate) {}
+
+    /** issue 创建结果（CAP-47）：id 为平台内部 id，key 为外部键（如 PROJ-123），url 为可点击地址 */
+    record IssueRef(String id, String key, String url) {}
+
+    /** issue 类型（CAP-47 FR-02）：name 受实例语言包影响（中文实例为「任务/缺陷」），原样展示不映射 */
+    record IssueTypeRef(String id, String name, boolean subtask) {}
+
+    /** 优先级词表项（CAP-47 FR-02）：name 为实例词表原文 */
+    record PriorityRef(String id, String name) {}
+
+    /** 可指派用户（CAP-47 FR-02）：name=平台用户名（创建 issue 时回传），displayName=界面展示名 */
+    record UserRef(String name, String displayName) {}
 
     /** issue 附件内容（CAP-19 FR-09）：原始字节 + mime 类型（Jira 附件元数据给出） */
     record IssueAttachment(byte[] content, String mimeType) {}

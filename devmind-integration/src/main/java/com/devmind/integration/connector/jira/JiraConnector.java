@@ -4,6 +4,11 @@ import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.integration.config.IntegrationProperties;
 import com.devmind.integration.connector.IntegrationConnector;
+import com.devmind.integration.connector.IntegrationConnector.IssueRef;
+import com.devmind.integration.connector.IntegrationConnector.IssueSpec;
+import com.devmind.integration.connector.IntegrationConnector.IssueTypeRef;
+import com.devmind.integration.connector.IntegrationConnector.PriorityRef;
+import com.devmind.integration.connector.IntegrationConnector.UserRef;
 import com.devmind.integration.model.IntegrationEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,9 +31,10 @@ import java.util.List;
  * Jira Server/DC 连接器（/rest/api/2）。认证按凭据格式自探测：
  * PAT（8.14+，Bearer 头）/ BASIC（8.13 及更早，Basic base64(user:password)，
  * secret 含换行即 BASIC），与个人账号（CAP-35）/实例机器人凭据无关来源均适用。
- * 读：拉取 issue / 工作流转换清单 / 附件内容（CAP-19 FR-09 描述图片代理）；
- * 写：仅限 transitions / worklog 端点（CAP-19 FR-08 状态回写、
- * CAP-27 工时登记），git 动词不支持。
+ * 读：拉取 issue / 单条读取 / 工作流转换清单 / 附件内容（CAP-19 FR-09 描述图片代理）/
+ * 任务类型·优先级·可指派用户（CAP-47 FR-02）；
+ * 写：仅限 createIssue / transitions / worklog 端点（CAP-47 FR-01 创建 issue、
+ * CAP-19 FR-08 状态回写、CAP-27 工时登记），git 动词不支持。
  * 与 GitLabConnector 同一手法：查询参数自行 URL 编码后拼完整 URI，
  * 避开 RestClient URI 模板展开的二次编码。
  */
@@ -36,6 +42,13 @@ import java.util.List;
 public class JiraConnector implements IntegrationConnector {
 
     private static final Logger log = LoggerFactory.getLogger(JiraConnector.class);
+
+    /** CAP-47 FR-02：任务类型翻页大小与页数上限（类型数远超实际，防某实例异常分页导致死循环） */
+    private static final int ISSUE_TYPE_PAGE_SIZE = 50;
+    private static final int MAX_ISSUE_TYPE_PAGES = 5;
+
+    /** CAP-47 FR-02：可指派用户单次返回上限 */
+    private static final int ASSIGNABLE_USER_LIMIT = 20;
 
     public JiraConnector(IntegrationProperties props, ObjectMapper mapper) {
         this.props = props;
@@ -157,6 +170,174 @@ public class JiraConnector implements IntegrationConnector {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "Jira 工时登记失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
         }
+    }
+
+    /**
+     * CAP-47 FR-01：创建 issue。空值字段一律不写进 payload——写 null 会显式清空 Jira 侧
+     * 默认值（如项目默认经办人）。duedate 用字符串手工拼（不给 ObjectMapper 加 JavaTimeModule）。
+     */
+    @Override
+    public IssueRef createIssue(IntegrationEntity cfg, String token, IssueSpec spec) {
+        var fields = mapper.createObjectNode();
+        fields.putObject("project").put("key", spec.projectKey());
+        fields.putObject("issuetype").put("id", spec.issueTypeId());
+        fields.put("summary", spec.summary());
+        if (notBlank(spec.description())) {
+            fields.put("description", spec.description());
+        }
+        if (notBlank(spec.priorityName())) {
+            fields.putObject("priority").put("name", spec.priorityName());
+        }
+        if (notBlank(spec.assigneeName())) {
+            fields.putObject("assignee").put("name", spec.assigneeName());
+        }
+        if (spec.labels() != null && !spec.labels().isEmpty()) {
+            var labels = fields.putArray("labels");
+            for (String label : spec.labels()) {
+                if (notBlank(label)) {
+                    labels.add(label.trim());
+                }
+            }
+        }
+        if (spec.dueDate() != null) {
+            fields.put("duedate", spec.dueDate().toString());
+        }
+        var payload = mapper.createObjectNode();
+        payload.set("fields", fields);
+        try {
+            JsonNode body = client(cfg, token).post().uri(uri(cfg, "/issue"))
+                    .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve().body(JsonNode.class);
+            IssueRef ref = JiraIssueMapper.toIssueRef(body, cfg.getBaseUrl());
+            if (ref == null) {
+                throw new DevMindException(ErrorCode.INTERNAL, "Jira 创建 issue 响应缺少 key");
+            }
+            return ref;
+        } catch (RestClientResponseException e) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "创建 Jira issue 失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
+        }
+    }
+
+    /** CAP-47 FR-01：单条读取（不经过搜索索引，新建 issue 后索引有延迟） */
+    @Override
+    public JiraIssue getIssue(IntegrationEntity cfg, String token, String issueKey, String fields) {
+        String path = "/issue/" + encodeKey(issueKey);
+        if (notBlank(fields)) {
+            path += "?fields=" + URLEncoder.encode(fields, StandardCharsets.UTF_8);
+        }
+        try {
+            JsonNode body = client(cfg, token).get().uri(uri(cfg, path)).retrieve().body(JsonNode.class);
+            JiraIssue issue = JiraIssueMapper.toIssue(body);
+            if (issue == null) {
+                throw new DevMindException(ErrorCode.NOT_FOUND, "Jira issue 不存在或不可读: " + issueKey);
+            }
+            return issue;
+        } catch (RestClientResponseException e) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "读取 Jira issue 失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
+        }
+    }
+
+    /**
+     * CAP-47 FR-02：项目下当前账号可创建的 issue 类型。主路径为 8.4+ 新端点
+     * {@code /issue/createmeta/{key}/issuetypes}（需按 total/isLast 翻页）；
+     * 老实例（<8.4）新端点 404，兜底旧端点 {@code /issue/createmeta?projectKeys=&expand=projects.issuetypes}。
+     */
+    @Override
+    public List<IssueTypeRef> listIssueTypes(IntegrationEntity cfg, String token, String projectKey) {
+        try {
+            List<IssueTypeRef> out = new ArrayList<>();
+            int startAt = 0;
+            for (int page = 0; page < MAX_ISSUE_TYPE_PAGES; page++) {
+                JsonNode body = client(cfg, token).get()
+                        .uri(uri(cfg, "/issue/createmeta/" + encodeKey(projectKey) + "/issuetypes?startAt="
+                                + startAt + "&maxResults=" + ISSUE_TYPE_PAGE_SIZE))
+                        .retrieve().body(JsonNode.class);
+                List<IssueTypeRef> batch = JiraIssueMapper.toIssueTypes(body);
+                out.addAll(batch);
+                if (batch.isEmpty() || body.path("isLast").asBoolean(batch.size() < ISSUE_TYPE_PAGE_SIZE)) {
+                    break;
+                }
+                startAt += ISSUE_TYPE_PAGE_SIZE;
+            }
+            return out;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                return listIssueTypesLegacy(cfg, token, projectKey);
+            }
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "拉取 Jira 任务类型失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
+        }
+    }
+
+    /** 旧版 createmeta（Jira 8.4 前；新端点 404 时兜底） */
+    private List<IssueTypeRef> listIssueTypesLegacy(IntegrationEntity cfg, String token, String projectKey) {
+        try {
+            JsonNode body = client(cfg, token).get()
+                    .uri(uri(cfg, "/issue/createmeta?projectKeys=" + encodeKey(projectKey)
+                            + "&expand=" + URLEncoder.encode("projects.issuetypes", StandardCharsets.UTF_8)))
+                    .retrieve().body(JsonNode.class);
+            return JiraIssueMapper.toIssueTypes(body);
+        } catch (RestClientResponseException e) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "拉取 Jira 任务类型失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
+        }
+    }
+
+    /** CAP-47 FR-02：优先级词表（实例关闭优先级功能时返回空表，前端隐藏该项） */
+    @Override
+    public List<PriorityRef> listPriorities(IntegrationEntity cfg, String token) {
+        try {
+            JsonNode body = client(cfg, token).get().uri(uri(cfg, "/priority")).retrieve().body(JsonNode.class);
+            return JiraIssueMapper.toPriorities(body);
+        } catch (RestClientResponseException e) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "拉取 Jira 优先级失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
+        }
+    }
+
+    /**
+     * CAP-47 FR-02：项目可指派用户。query 参数在 GDPR 严格模式的实例上被拒（400），
+     * 此时退 username 重试一次；两者都失败由调用方降级为纯文本输入，不阻断推送。
+     */
+    @Override
+    public List<UserRef> listAssignableUsers(IntegrationEntity cfg, String token, String projectKey, String q) {
+        try {
+            return fetchAssignableUsers(cfg, token, projectKey, q, "query");
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 400 && extractMessage(e).contains("GDPR")) {
+                try {
+                    return fetchAssignableUsers(cfg, token, projectKey, q, "username");
+                } catch (RestClientResponseException e2) {
+                    throw assignableUsersError(e2);
+                }
+            }
+            throw assignableUsersError(e);
+        }
+    }
+
+    private List<UserRef> fetchAssignableUsers(IntegrationEntity cfg, String token, String projectKey,
+                                              String q, String queryParam) {
+        StringBuilder path = new StringBuilder("/user/assignable/search?project=")
+                .append(encodeKey(projectKey))
+                .append("&maxResults=").append(ASSIGNABLE_USER_LIMIT);
+        if (notBlank(q)) {
+            path.append('&').append(queryParam).append('=')
+                    .append(URLEncoder.encode(q.trim(), StandardCharsets.UTF_8));
+        }
+        JsonNode body = client(cfg, token).get().uri(uri(cfg, path.toString())).retrieve().body(JsonNode.class);
+        return JiraIssueMapper.toAssignableUsers(body);
+    }
+
+    private DevMindException assignableUsersError(RestClientResponseException e) {
+        return new DevMindException(ErrorCode.BAD_REQUEST,
+                "拉取 Jira 可指派用户失败：HTTP " + e.getStatusCode().value() + " " + extractMessage(e));
+    }
+
+    private static boolean notBlank(String s) {
+        return s != null && !s.isBlank();
     }
 
     /**

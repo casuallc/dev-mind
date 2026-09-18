@@ -1,8 +1,12 @@
 package com.devmind.integration.connector.jira;
 
 import com.devmind.integration.connector.IntegrationConnector.IssuePage;
+import com.devmind.integration.connector.IntegrationConnector.IssueRef;
 import com.devmind.integration.connector.IntegrationConnector.IssueTransition;
+import com.devmind.integration.connector.IntegrationConnector.IssueTypeRef;
 import com.devmind.integration.connector.IntegrationConnector.JiraIssue;
+import com.devmind.integration.connector.IntegrationConnector.PriorityRef;
+import com.devmind.integration.connector.IntegrationConnector.UserRef;
 import tools.jackson.databind.JsonNode;
 
 import java.time.Instant;
@@ -111,6 +115,82 @@ public final class JiraIssueMapper {
 
     /** 附件引用：contentUrl=Jira 返回的内容绝对地址（/secure/attachment/{id}/{name}），mimeType 可空 */
     record AttachmentRef(String contentUrl, String mimeType) {
+    }
+
+    /**
+     * CAP-47：POST /issue 响应 → IssueRef。缺 key 视为脏数据（本次创建拿不到外部键，
+     * 后续无法登记 external_links）返回 null，由调用方报错，绝不落半吊子 link。
+     */
+    static IssueRef toIssueRef(JsonNode body, String baseUrl) {
+        String key = text(body, "key");
+        if (key == null) {
+            return null;
+        }
+        String base = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
+        return new IssueRef(text(body, "id"), key, base + "/browse/" + key);
+    }
+
+    /**
+     * CAP-47 FR-02：任务类型清单。兼容两种响应——
+     * 新端点 {@code /issue/createmeta/{key}/issuetypes} 的 {@code {values:[...]}}，
+     * 与旧端点 {@code /issue/createmeta?projectKeys=} 的 {@code {projects:[{issuetypes:[...]}]}}。
+     * 缺 id 的脏条目跳过（无法回传创建）；subtask 原样透出，由服务层过滤。
+     */
+    static List<IssueTypeRef> toIssueTypes(JsonNode body) {
+        JsonNode arr = body == null ? null : body.get("values");
+        if (arr == null || !arr.isArray()) {
+            JsonNode projects = body == null ? null : body.get("projects");
+            arr = (projects != null && projects.isArray() && !projects.isEmpty())
+                    ? projects.get(0).get("issuetypes") : null;
+        }
+        if (arr == null || !arr.isArray()) {
+            return List.of();
+        }
+        List<IssueTypeRef> out = new ArrayList<>();
+        for (JsonNode t : arr) {
+            String id = text(t, "id");
+            if (id != null) {
+                out.add(new IssueTypeRef(id, text(t, "name"), t.path("subtask").asBoolean(false)));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * CAP-47 FR-02：优先级词表 [{id,name}]；实例关闭优先级功能时返回空表。
+     * 按 name 过滤脏条目（创建 issue 回传的是 priority.name，id 非必需，缺 id 不影响可用）。
+     */
+    static List<PriorityRef> toPriorities(JsonNode body) {
+        if (body == null || !body.isArray()) {
+            return List.of();
+        }
+        List<PriorityRef> out = new ArrayList<>();
+        for (JsonNode p : body) {
+            String name = text(p, "name");
+            if (name != null) {
+                out.add(new PriorityRef(text(p, "id"), name));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * CAP-47 FR-02：可指派用户 [{name,displayName}]。name 为平台用户名（回传给 Jira 创建 issue 用），
+     * displayName 缺失时退 name（部分实例无显示名）。
+     */
+    static List<UserRef> toAssignableUsers(JsonNode body) {
+        if (body == null || !body.isArray()) {
+            return List.of();
+        }
+        List<UserRef> out = new ArrayList<>();
+        for (JsonNode u : body) {
+            String name = text(u, "name");
+            if (name != null) {
+                String display = text(u, "displayName");
+                out.add(new UserRef(name, display != null ? display : name));
+            }
+        }
+        return out;
     }
 
     /** time tracking 字段（秒）：数值取 long，null/非数值（实例未启用工时跟踪）返回 null */

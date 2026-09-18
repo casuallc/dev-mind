@@ -1,0 +1,6 @@
+[
+  { "name": "lisi", "displayName": "李四", "emailAddress": "lisi@example.com" },
+  { "name": "zhangsan", "displayName": "张三" },
+  { "name": "wangwu" },
+  { "displayName": "缺 name 的脏用户" }
+]

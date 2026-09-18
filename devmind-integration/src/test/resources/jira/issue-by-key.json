@@ -1,0 +1,21 @@
+{
+  "id": "10201",
+  "key": "PROJ-123",
+  "self": "https://jira.example.com/rest/api/2/issue/10201",
+  "fields": {
+    "summary": "支持导出对账单",
+    "description": "背景：财务每月手工整理对账单。\n\nREQ-12 · http://localhost:5173/projects/p1/requirements/r12",
+    "issuetype": { "id": "10001", "name": "需求" },
+    "priority": { "id": "3", "name": "Medium" },
+    "labels": ["ai", "finance"],
+    "status": { "id": "1", "name": "待处理" },
+    "created": "2026-09-18T10:15:30.000+0800",
+    "updated": "2026-09-18T10:15:30.000+0800",
+    "reporter": { "name": "admin", "displayName": "管理员" },
+    "assignee": { "name": "lisi", "displayName": "李四" },
+    "duedate": "2026-10-31",
+    "fixVersions": [],
+    "timeoriginalestimate": null,
+    "timespent": null
+  }
+}

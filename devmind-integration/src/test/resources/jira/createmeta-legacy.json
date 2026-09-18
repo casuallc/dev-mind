@@ -1,0 +1,14 @@
+{
+  "expand": "projects",
+  "projects": [
+    {
+      "id": "10000",
+      "key": "PROJ",
+      "name": "示例项目",
+      "issuetypes": [
+        { "id": "10001", "name": "需求", "subtask": false },
+        { "id": "10004", "name": "子任务", "subtask": true }
+      ]
+    }
+  ]
+}
