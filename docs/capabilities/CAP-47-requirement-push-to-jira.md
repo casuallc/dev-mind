@@ -310,8 +310,10 @@ GET    /me/jira-push-templates/create-fields?integrationId=&jiraProjectKey=&issu
 
 - **Jira Cloud**：认证与 `assignee` 需 accountId 而非 username，按 Server/DC 设计（与 CAP-19 同口径）；
 - **解除托管 / 反悔通道**：转 JIRA 后本地永久不可编辑托管字段，弹窗已明示不可撤销，反悔属后续能力；
-- **推 `reporter` 作为固定参数**：reporter 需 Modify Reporter 权限；FR-08 里若该任务类型把「报告人」
-  列为必填，只能进 `unsupported` 并禁用提交（不做「谁来推就填谁」的猜测——写身份是机器人时语义就错了）；
+- **推 `reporter` 作为固定参数**：reporter 需 Modify Reporter 权限。FR-08 里该任务类型把它列为必填时，
+  平台**既不推它、也不放进 `unsupported`**——静默跳过，由 Jira 按写身份自动回填（早先按「渲染不了的
+  必填字段」处理会把整个弹窗的提交禁掉，实际没人能推，见 511b99e）。同样不做「谁来推就填谁」的猜测：
+  写身份是机器人时语义就错了；
 - **Jira 侧 fixVersion 自由文本**：Jira 侧 fixVersion 必须已存在于项目，自由文本会被拒，
   FR-08 只按实例候选值预填/选择，不做猜测映射；
 - **自动推送策略**（需求创建/确认时自动建 issue）——本期一律手动。

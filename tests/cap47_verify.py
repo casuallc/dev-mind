@@ -416,6 +416,11 @@ try:
     renderable = [
         {"fieldId": "summary", "name": "摘要", "required": True, "hasDefaultValue": False,
          "schema": {"type": "string", "system": "summary"}},
+        # 非必填但**在创建界面上**：平台只在 createmeta 里有它时才写 description（否则 Jira 回
+        # 「Field 'description' cannot be set」）。缺了这条，服务端的回链会被正确的 writable 闸门丢掉，
+        # 12c 的「回链仍由服务端追加」就测不到东西了。
+        {"fieldId": "description", "name": "描述", "required": False, "hasDefaultValue": False,
+         "schema": {"type": "string", "system": "description"}},
         {"fieldId": "components", "name": "模块", "required": True, "hasDefaultValue": False,
          "schema": {"type": "array", "items": "component", "system": "components"},
          "allowedValues": [{"id": "10000", "name": "后端"}, {"id": "10001", "name": "前端"}]},
@@ -477,7 +482,14 @@ try:
           "%s" % (fields_cf,))
     check("渲染不了的必填字段进 unsupported 且 control 为空（不给一个填什么都必被拒的假控件）",
           [(f.get("id"), f.get("control")) for f in cf.get("unsupported") or []]
-          == [("customfield_10700", None), ("reporter", None)], "%s" % (cf.get("unsupported"),))
+          == [("customfield_10700", None)], "%s" % (cf.get("unsupported"),))
+    # reporter 走另一条路：平台不推它（Jira 按写身份自动回填），**静默跳过**而不是进 unsupported——
+    # 早先进 unsupported 会把弹窗提交整个禁掉（见 511b99e），故这里钉住「不在禁提交清单里、但确实在创建界面上」
+    check("必填的 reporter 静默跳过（平台不推、Jira 自填），不进 unsupported 也不进待填字段",
+          "reporter" in (cf.get("availableFields") or [])
+          and not any(f.get("id") == "reporter"
+                      for f in (cf.get("fields") or []) + (cf.get("unsupported") or [])),
+          "%s" % (cf,))
     check("有默认值的必填字段与非必填字段都不进任何清单（Jira 自填，不打扰用户）",
           not any(f.get("id") in ("customfield_10606", "priority")
                   for f in (cf.get("fields") or []) + (cf.get("unsupported") or [])), "%s" % (cf,))
@@ -568,7 +580,7 @@ try:
           and [o.get("name") for o in ((cf_legacy or {}).get("fields") or [{}])[0].get("options") or []]
           == ["后端", "前端"]
           and [(f.get("id"), f.get("control")) for f in (cf_legacy or {}).get("unsupported") or []]
-          == [("customfield_10700", None), ("reporter", None)], "%s" % (cf_legacy,))
+          == [("customfield_10700", None)], "%s" % (cf_legacy,))
     st, state_legacy = mock("/__state")
     legacy_hits = [r["path"] for r in (state_legacy or {}).get("requests", [])
                    if r["path"] == "/rest/api/2/issue/createmeta"]
