@@ -485,7 +485,10 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
                   <Select
                     showSearch
                     allowClear
-                    filterOption={false}
+                    // 本地过滤而非依赖 Jira 的关键字参数：实测该实例对 query 参数直接无视
+                    // （搜一个不存在的人仍返回全部 102 个），只听服务端的搜索框等于没搜。
+                    // 候选已一次取全（≤200），按 label 过滤即可，label 里同时含显示名与登录名。
+                    optionFilterProp="label"
                     loading={searching}
                     placeholder="输入用户名/姓名搜索（留空取默认列表）"
                     onSearch={searchUsers}

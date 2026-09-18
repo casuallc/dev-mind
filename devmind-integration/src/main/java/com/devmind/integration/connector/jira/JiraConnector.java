@@ -48,8 +48,13 @@ public class JiraConnector implements IntegrationConnector {
     private static final int ISSUE_TYPE_PAGE_SIZE = 50;
     private static final int MAX_ISSUE_TYPE_PAGES = 5;
 
-    /** CAP-47 FR-02：可指派用户单次返回上限 */
-    private static final int ASSIGNABLE_USER_LIMIT = 20;
+    /**
+     * CAP-47 FR-02：可指派用户单次返回上限。取 20 时用户抱怨「找不到人」——空关键字直接列默认
+     * 列表的用法下，一个稍大的项目里目标用户排在 20 名开外就永远看不到；搜关键字虽由 Jira 过滤，
+     * 但它匹配的是用户名/显示名/邮箱，显示名与登录名对不上时同样搜不到。放宽到 200（Jira 侧
+     * 只认这个参数上界，不回 total，故不做翻页）。
+     */
+    private static final int ASSIGNABLE_USER_LIMIT = 200;
 
     public JiraConnector(IntegrationProperties props, ObjectMapper mapper) {
         this.props = props;
@@ -361,6 +366,11 @@ public class JiraConnector implements IntegrationConnector {
     /**
      * CAP-47 FR-02：项目可指派用户。query 参数在 GDPR 严格模式的实例上被拒（400），
      * 此时退 username 重试一次；两者都失败由调用方降级为纯文本输入，不阻断推送。
+     *
+     * <p>{@code q} 不保证被服务端采纳：老 Server（GDPR 前）只认 {@code username}，收到
+     * 不认识的 {@code query} 既不报错也不过滤——实测搜一个不存在的人仍原样返回全部 102 个。
+     * 所以前端不靠这个参数做候选收敛，改为对取全的清单本地过滤（见 JiraPushModal）；
+     * 这里的 {@code q} 只当作「新实例能省一次全量」的优化。
      */
     @Override
     public List<UserRef> listAssignableUsers(IntegrationEntity cfg, String token, String projectKey, String q) {
