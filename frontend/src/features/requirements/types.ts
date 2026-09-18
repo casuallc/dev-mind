@@ -92,13 +92,13 @@ export interface JiraPushTargets {
   jiraProjects: JiraOption[]
   issueTypes: JiraOption[]
   priorities: JiraOption[]
-  /** 各字段默认值（取需求当前值，弹窗内可改） */
+  /** 各字段默认值（取需求当前值，弹窗内可改）；只含与 Jira 同域的字段——平台 assignee 是人名、
+   *  Jira 要登录名，故不回填经办人，priority 也仅在命中实例词表时才有值 */
   defaults: {
     title?: string
     description?: string
     priority?: string
     labels?: string[]
-    assignee?: string
     dueDate?: string // yyyy-MM-dd
   }
   /** 写身份来源：PERSONAL 个人账号 / BOT 实例机器人 / NONE 都没有（须先绑定，提交禁用） */

@@ -8,7 +8,8 @@
      mvn -pl devmind-app spring-boot:run -Dspring-boot.run.arguments="--spring.profiles.active=e2e --server.port=18090 --spring.datasource.url=jdbc:h2:file:./tmp/cap47-db/devmind"
 3. 本机有 python（fixtures/jira-mock.py 由本脚本自起，端口 JIRA_MOCK_PORT，默认 18192）。
 
-覆盖：push-targets 一次给齐（候选实例/默认实例/身份来源 BOT/未被同步覆盖）→ push-options 动态
+覆盖：push-targets 一次给齐（候选实例/默认实例/身份来源 BOT/未被同步覆盖/默认值只取同域字段：
+不回填经办人、优先级不在实例词表内时不回填）→ push-options 动态
 任务类型（子任务被过滤）与优先级（缺 name 的脏条目被过滤）→ 可指派用户（GDPR 拒 query 后自动退
 username 重试）→ 推送建 issue（payload 断言：项目/类型/标题/优先级/经办人/标签/截止日期 + 描述尾
 回链 + 机器人 Bearer 身份 + 空参数不写进 payload）→ 需求转 JIRA 托管且**不套用托管字段**（本地
@@ -154,7 +155,15 @@ try:
         "title": MARK + " 不推送", "description": ""})
     rid_c = (rc or {}).get("id")
     check("创建需求 C（留作负例）", st == 200 and bool(rid_c), "%s %s" % (st, rc))
-    if not (rid_a and rid_b and rid_c):
+
+    # 平台优先级是固定英文枚举（Highest…Lowest），mock 的实例词表只有 Highest..Low：
+    # 用 Lowest 这条「平台有、实例没有」的值验证不回填
+    st, rd = call("POST", "/projects/%s/requirements" % pid, {
+        "title": MARK + " 优先级跨域", "description": "", "priority": "Lowest"})
+    rid_d = (rd or {}).get("id")
+    check("创建需求 D（优先级 Lowest，不在实例词表内）",
+          st == 200 and (rd or {}).get("priority") == "Lowest", "%s %s" % (st, rd))
+    if not (rid_a and rid_b and rid_c and rid_d):
         sys.exit(1)
 
     # ---------- 2. JIRA 集成：A 带机器人凭证，B 无凭证 ----------
@@ -192,10 +201,15 @@ try:
           not tgt.get("defaultJiraProjectKey") and not (tgt.get("issueTypes") or []),
           "%s" % (tgt,))
     d = tgt.get("defaults") or {}
-    check("默认值取需求当前值（标题/优先级/标签/经办人/截止日期）",
+    check("默认值取需求当前值（标题/优先级命中词表/标签/截止日期）",
           d.get("title") == MARK + " 阈值告警" and d.get("priority") == "High"
-          and d.get("labels") == ["e2e", "cap47"] and d.get("assignee") == "zhangsan"
-          and d.get("dueDate") == "2026-10-31", "%s" % (d,))
+          and d.get("labels") == ["e2e", "cap47"] and d.get("dueDate") == "2026-10-31", "%s" % (d,))
+    check("不回填经办人（平台 assignee 是人名，Jira 要登录名）", "assignee" not in d, "%s" % (d,))
+    st, tgt_d = call("GET", "/projects/%s/requirements/%s/jira/push-targets" % (pid, rid_d))
+    check("平台优先级不在实例词表内时不回填（否则推送必被词表校验拒）",
+          (tgt_d or {}).get("defaults", {}).get("priority") is None
+          and [p.get("name") for p in (tgt_d or {}).get("priorities") or []] == ["Highest", "High", "Medium", "Low"],
+          "%s" % ((tgt_d or {}).get("defaults"),))
 
     # ---------- 4. push-options：任务类型（子任务过滤）/ 优先级（脏条目过滤） ----------
     st, opt = call("GET", "/projects/%s/requirements/%s/jira/push-options"

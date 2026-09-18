@@ -99,7 +99,6 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
       summary: targets.defaults.title || requirement.title,
       description: targets.defaults.description ?? '',
       priorityName: targets.defaults.priority,
-      assigneeName: targets.defaults.assignee,
       labels: targets.defaults.labels ?? [],
       dueDate: targets.defaults.dueDate ? dayjs(targets.defaults.dueDate) : null,
     })

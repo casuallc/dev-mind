@@ -44,9 +44,14 @@ SPI 从「只读 issue」扩到「可创建 issue」，后续工作日志未关�
   `GET /priority`；`GET /user/assignable/search`（`query` 参数，遇 GDPR 严格模式 400 时退 `username` 重试一次）。
 - **FR-02 推送目标与选项**：`GET /api/projects/{pid}/requirements/{rid}/jira/push-targets` 一次给齐
   候选实例（TYPE_JIRA + ENABLED）、默认实例/项目 key（取本项目 `jira_sync_configs` 首条）、
-  任务类型/优先级列表、各字段默认值（取需求当前值）、`identitySource(PERSONAL|BOT|NONE)`、`syncCovered`；
+  任务类型/优先级列表、各字段默认值、`identitySource(PERSONAL|BOT|NONE)`、`syncCovered`；
   `GET /push-options?integrationId=&jiraProjectKey=` 在切实例/项目后重拉；`GET /assignable-users?…&q=` 供经办人搜索。
   均为只读，不审计。
+  **默认值只回填与 Jira 同域的字段**：标题/描述/标签/截止日期直接取需求当前值；优先级**命中实例词表才回填**
+  （平台优先级是固定英文枚举 Highest…Lowest，Jira 词表随实例语言包与项目配置，两套只是偶尔重合）；
+  **不回填经办人**——平台 `assignee` 是人名（「刘长青」），Jira `assignee.name` 要的是登录名，
+  回填要么 400「用户 '刘长青' 不存在」，要么在人名恰好等于某登录名时静默指派给错误的人。
+  经办人一律由用户在弹窗内搜索/填写（搜索候选项回填的就是登录名）。
 - **FR-03 推送（核心）**：`POST /api/projects/{pid}/requirements/{rid}/jira/push`，
   请求 `{integrationId, jiraProjectKey, issueTypeId, summary, description, backlinkUrl, priorityName,
   assigneeName, labels[], dueDate}`。步骤：
@@ -148,6 +153,7 @@ POST /projects/{pid}/requirements/{rid}/jira/refresh                       按 l
 ## 7. 验收标准
 
 - 自建需求详情页可点「推送到 Jira」，弹窗列出 ENABLED 的 Jira 实例与目标项目的**动态**任务类型；
+- 弹窗默认值不跨域：**经办人留空**（平台人名 ≠ Jira 登录名），优先级不在实例词表内时留空；
 - 推送成功后：Jira 侧出现 issue（标题/描述/类型/优先级/标签/经办人/截止日期按填写落地，描述尾部带回链），
   需求转为 `source=JIRA` 且 `externalKey`/`externalUrl`/`remoteStatus` 就位，详情页出现「Jira 操作」；
 - 重复推送同一需求返回 409 且给出既有 issue key；
@@ -173,6 +179,9 @@ POST /projects/{pid}/requirements/{rid}/jira/refresh                       按 l
 | 任务类型 404 | 实例 < 8.4：已自动兜底旧版 `?projectKeys=`；两者都 404 说明 token 无 browse 权限 |
 | 推送 400「未配置可用凭据」 | 该实例既无机器人凭证、当前用户也没绑个人账号（CAP-35）；去「我的 → 第三方账号」绑定 |
 | 推送 400 且 errorMessages 提到必填字段 | Jira 侧该任务类型配了必填自定义字段（如经办人/自定义字段），错误已原样透出；先在 Jira 项目里配默认值或用别的任务类型 |
+| 推送 400「用户 'X' 不存在」 | 经办人填的是**显示姓名**，Jira `assignee.name` 要**登录名**（username）。用弹窗搜索候选项（回填的就是登录名）或手填登录名；中文名通常不是登录名 |
+| 弹窗里经办人默认是空的 | 设计如此：平台 assignee 是人名，与 Jira 登录名不同域，不回填（见 FR-02） |
+| 推送 400「优先级不在实例词表内」 | 平台优先级（Highest…Lowest）与实例词表不同域；弹窗只在命中词表时回填，其余留空由用户从词表里选 |
 | 推送成功但需求页 Jira 状态迟迟不刷新 | 该项目在此实例上没有 enabled 的 `jira_sync_configs`（`syncCovered=false`），或附加 JQL 排除了该 issue → 用详情页「从 Jira 刷新」手动拉 |
 | 推送 500 但 message 里带 issue key | issue 已建成、link 已登记，只是回读失败（Jira 抖动/权限）：用「从 Jira 刷新」补齐托管字段，勿重复推送（再点会 409） |
 | 描述里的 `!xxx!` 在详情页显示成图片占位 | Jira wiki 语法与平台描述的既有差异（CAP-19 FR-09 渲染链），已在弹窗提示 |

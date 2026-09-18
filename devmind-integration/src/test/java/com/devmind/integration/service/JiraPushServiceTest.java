@@ -596,6 +596,34 @@ class JiraPushServiceTest {
     }
 
     @Test
+    void 平台优先级未命中实例词表时不回填() {
+        // 平台优先级是固定英文枚举，Jira 词表随实例语言包（中文实例返回「高/中/低」），两套只是偶尔重合。
+        // 照填会被 validatePriority 拦成 400「优先级不在实例词表内」→ 不命中就不回填，留空让用户从词表选
+        connector.priorities = List.of(new PriorityRef("2", "高"), new PriorityRef("3", "中"));
+        requirementService.store.get("req-local").setPriority("High");
+
+        JiraPushTargetsView view = service.targets("p1", "req-local");
+
+        assertEquals(2, view.priorities().size());
+        assertEquals("高", view.priorities().get(0).name());
+        assertNull(view.defaults().priority());
+    }
+
+    @Test
+    void 词表拉不到时不回填优先级() {
+        // 拉不到词表 = 无从判断是否同域，不赌（push 侧对用户手填值跳过校验，自动回填不无据推测）；
+        // 选项拉取失败仍降级为空表 + optionsError，弹窗照常打开
+        connector.priorities = List.of();
+        connector.listPrioritiesFails = true;
+        requirementService.store.get("req-local").setPriority("High");
+
+        JiraPushTargetsView view = service.targets("p1", "req-local");
+
+        assertNull(view.defaults().priority());
+        assertNotNull(view.optionsError());
+    }
+
+    @Test
     void 无可用凭据时候选项降级但弹窗可打开() {
         integrationService.botConfigured = false;
 

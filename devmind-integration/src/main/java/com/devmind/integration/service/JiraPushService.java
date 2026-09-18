@@ -148,7 +148,7 @@ public class JiraPushService {
                         .map(i -> new JiraPushTargetsView.Instance(i.getId(), i.getName(), i.getBaseUrl()))
                         .toList(),
                 target == null ? null : target.getId(),
-                defaultKey, projects, issueTypes, priorities, defaults(requirement), identitySource,
+                defaultKey, projects, issueTypes, priorities, defaults(requirement, priorities), identitySource,
                 target != null
                         && syncCovered(projectId, target.getId(), defaultKey, requirement.getExternalKey()),
                 optionsError);
@@ -501,10 +501,29 @@ public class JiraPushService {
     private record IdentityProbe(IntegrationService.WriteIdentity identity, String reason) {
     }
 
-    private JiraPushTargetsView.Defaults defaults(RequirementEntity requirement) {
+    private JiraPushTargetsView.Defaults defaults(RequirementEntity requirement,
+                                                  List<JiraOptionView> priorities) {
         return new JiraPushTargetsView.Defaults(requirement.getTitle(), requirement.getDescription(),
-                requirement.getPriority(), splitCsv(requirement.getLabels()), requirement.getAssignee(),
+                prefillPriority(requirement.getPriority(), priorities), splitCsv(requirement.getLabels()),
                 requirement.getDueDate() == null ? null : requirement.getDueDate().toString());
+    }
+
+    /**
+     * 优先级回填须**命中实例词表**才给：平台优先级是固定英文枚举（Highest/High/Medium/Low/Lowest），
+     * Jira 词表随实例语言包与项目配置（中文实例返回「高/中/低」），两套枚举只是偶尔重合。
+     * 不命中就不回填——照填只会被 {@link #validatePriority} 拦成 400，或把平台值当 Jira 值推上去。
+     * 词表拉取失败或实例关闭优先级功能时列表为空 → 同样不回填（不做无据推测）。
+     */
+    static String prefillPriority(String platformPriority, List<JiraOptionView> priorities) {
+        if (platformPriority == null || platformPriority.isBlank()) {
+            return null;
+        }
+        String name = platformPriority.trim();
+        return priorities.stream()
+                .filter(p -> name.equals(p.name()))
+                .map(JiraOptionView::name)
+                .findFirst()
+                .orElse(null);
     }
 
     /** Jira 项目选项：id=项目 key，name=「KEY 项目名」（无名或同名时只留 key） */
