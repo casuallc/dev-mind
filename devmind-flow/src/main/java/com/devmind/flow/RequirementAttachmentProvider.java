@@ -30,9 +30,10 @@ import java.util.regex.Pattern;
  * 会话挂 requirementId 时，把需求 description 引用的附件字节打进上下文包
  * （物化为 .devmind/input/），agent 用 Read 读图/读附件。
  *
- * <p>两类引用按需求来源分流（不会混）：本地需求（Markdown）提取
- * {@code /api/attachments/{id}/raw} 链接走 {@link AttachmentContentResolver}；
- * Jira 来源需求（wiki 原文）提取 {@code !name.png!} 标记走 {@link IssueAttachmentResolver}。
+ * <p>两类引用**按引用形态各自解析、互不影响**：{@code /api/attachments/{id}/raw} 链接走
+ * {@link AttachmentContentResolver}，{@code !name.png!} wiki 标记走 {@link IssueAttachmentResolver}。
+ * 刻意**不按需求 source 二选一**——source 会被「推送到 Jira」（CAP-47）翻转成 JIRA，
+ * 而描述里的本地 Markdown 附件链接原样保留，按 source 分流会让这些附件在会话里静默消失。
  * 两个附件源均 ObjectProvider 探测注入，未装配 = 无该源（清单标注不可用，不报错）。</p>
  *
  * <p>降级策略：单附件缺失/拉取失败跳过并在 CLAUDE.md 节标注原因，不阻断装配
@@ -44,10 +45,20 @@ public class RequirementAttachmentProvider implements ContextProvider {
 
     private static final Logger log = LoggerFactory.getLogger(RequirementAttachmentProvider.class);
 
-    /** Markdown 内嵌附件链接：/api/attachments/{32hex}/raw */
-    private static final Pattern LOCAL_REF = Pattern.compile("/api/attachments/([0-9a-f]{32})/raw");
-    /** Jira wiki 图片标记：!文件名! 或 !文件名|attrs!（与前端 JiraDescription 同款） */
-    private static final Pattern JIRA_REF = Pattern.compile("!([^!\\n|]+?)(\\|[^!\\n]*)?!");
+    /**
+     * 描述中的两类附件引用，按出现顺序匹配：group 1 = 本地附件 id
+     * （{@code /api/attachments/{32hex}/raw}），group 2 = Jira wiki 图文件名
+     * （{@code !文件名!} 或 {@code !文件名|attrs!}）。两条分支每次只有一条参与匹配，
+     * 故按 group 是否为空即可判定来源。
+     *
+     * <p>wiki 分支要求文件名带图片扩展名（与前端 JiraDescription 同款）——{@code !x!} 在 Jira wiki 里
+     * 本就是图片嵌入语法；否则 Markdown 的 {@code ![alt](url)} 会被整段当成一个 wiki 引用，
+     * 既产出不存在的文件名，又会把紧随其后的本地附件链接一起吞掉。
+     */
+    private static final Pattern ANY_REF = Pattern.compile(
+            "/api/attachments/([0-9a-f]{32})/raw"
+                    + "|!([^!\\n|]+?\\.(?:png|jpe?g|gif|bmp|webp))(?:\\|[^!\\n]*)?!",
+            Pattern.CASE_INSENSITIVE);
     /** 物化文件名字符白名单（与 ContextMaterializer 一致） */
     private static final Pattern UNSAFE_CHARS = Pattern.compile("[^a-zA-Z0-9._-]");
 
@@ -91,7 +102,6 @@ public class RequirementAttachmentProvider implements ContextProvider {
             return ContextContribution.empty();
         }
 
-        boolean jiraSource = RequirementEntity.SOURCE_JIRA.equals(requirement.getSource());
         List<ContextPackage.InputFile> inputs = new ArrayList<>();
         List<ManifestItem> items = new ArrayList<>();
         List<String> sectionLines = new ArrayList<>();
@@ -99,21 +109,21 @@ public class RequirementAttachmentProvider implements ContextProvider {
         int omitted = 0;
 
         // 按描述中引用出现顺序去重处理
-        for (String ref : extractRefs(description, jiraSource)) {
+        for (Ref ref : extractRefs(description)) {
             if (inputs.size() + omitted >= MAX_FILES) {
                 omitted++;
                 continue;
             }
-            Resolved resolved = jiraSource
-                    ? resolveJira(requirementId, ref)
-                    : resolveLocal(ref);
+            Resolved resolved = ref.jira()
+                    ? resolveJira(requirementId, ref.value())
+                    : resolveLocal(ref.value());
             if (resolved == null) {
-                sectionLines.add("- ❌ `" + ref + "`（" + (jiraSource ? "Jira 内嵌图" : "本地附件")
+                sectionLines.add("- ❌ `" + ref.value() + "`（" + (ref.jira() ? "Jira 内嵌图" : "本地附件")
                         + "）不可用：附件不存在或读取失败");
                 continue;
             }
             if (resolved.bytes().length > MAX_FILE_BYTES) {
-                sectionLines.add("- ⚠️ `" + ref + "` 超过单文件上限 5MB，已省略");
+                sectionLines.add("- ⚠️ `" + ref.value() + "` 超过单文件上限 5MB，已省略");
                 omitted++;
                 continue;
             }
@@ -122,7 +132,7 @@ public class RequirementAttachmentProvider implements ContextProvider {
                 continue;
             }
             totalBytes += resolved.bytes().length;
-            inputs.add(new ContextPackage.InputFile(resolved.path(), ref, resolved.contentType(),
+            inputs.add(new ContextPackage.InputFile(resolved.path(), ref.value(), resolved.contentType(),
                     Base64.getEncoder().encodeToString(resolved.bytes())));
             sectionLines.add("- `.devmind/input/" + resolved.path() + "`（" + resolved.sourceLabel()
                     + (resolved.contentType() != null ? "，" + resolved.contentType() : "") + "）");
@@ -153,17 +163,30 @@ public class RequirementAttachmentProvider implements ContextProvider {
                 items, inputs);
     }
 
-    /** 按出现顺序提取引用（去重保序）：本地需求取附件 id，Jira 需求取 wiki 图片文件名。 */
-    private List<String> extractRefs(String description, boolean jiraSource) {
-        Set<String> refs = new LinkedHashSet<>();
-        Matcher m = (jiraSource ? JIRA_REF : LOCAL_REF).matcher(description);
+    /**
+     * 按出现顺序提取两类引用（去重保序，跨类混排也保持文档顺序）。
+     * 不按需求 source 过滤：source 会被推送翻转（CAP-47），而描述文本不变，
+     * 按 source 二选一会让另一类引用在会话里静默消失；可用性交给各自的 resolver 判定。
+     */
+    private List<Ref> extractRefs(String description) {
+        Set<String> seen = new LinkedHashSet<>();
+        List<Ref> refs = new ArrayList<>();
+        Matcher m = ANY_REF.matcher(description);
         while (m.find()) {
-            String ref = m.group(1).trim();
-            if (!ref.isBlank() && !ref.startsWith("http://") && !ref.startsWith("https://")) {
-                refs.add(ref);
+            boolean jira = m.group(1) == null;
+            String ref = (jira ? m.group(2) : m.group(1)).trim();
+            if (ref.isBlank() || ref.startsWith("http://") || ref.startsWith("https://")) {
+                continue;
+            }
+            if (seen.add((jira ? "jira:" : "local:") + ref)) {
+                refs.add(new Ref(ref, jira));
             }
         }
-        return List.copyOf(refs);
+        return refs;
+    }
+
+    /** 描述中的一处附件引用：jira=true 为 wiki 图标记，false 为本地 Markdown 附件链接 */
+    private record Ref(String value, boolean jira) {
     }
 
     /** 本地附件：attachmentId → 字节；路径 {id}{mime 扩展名}。 */

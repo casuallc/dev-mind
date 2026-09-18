@@ -87,6 +87,43 @@ class RequirementAttachmentProviderTest {
     }
 
     @Test
+    void 推送转托管后本地附件引用仍被投送() {
+        // CAP-47 回归：「推送到 Jira」把 source 翻成 JIRA，但描述里的 Markdown 本地附件链接原样保留；
+        // 原先按 source 二选一只扫 wiki 标记，这些附件会在会话上下文里静默消失
+        requirement = entity("本地图 ![](/api/attachments/0123456789abcdef0123456789abcdef/raw)"
+                + " 与 Jira 图 !arch.png! 混排", true);
+        ContextContribution c = provider.contribute(req("r1"));
+        assertEquals(2, c.inputs().size());
+        // 两类混排仍按文档出现顺序物化
+        assertEquals("0123456789abcdef0123456789abcdef.png", c.inputs().get(0).path());
+        assertEquals("jira-ADMQ-1-arch.png", c.inputs().get(1).path());
+        assertTrue(c.items().stream().anyMatch(i -> "0123456789abcdef0123456789abcdef".equals(i.ref())));
+        assertTrue(c.items().stream().anyMatch(i -> "jira:ADMQ-1:arch.png".equals(i.ref())));
+    }
+
+    @Test
+    void 本地需求描述里的wiki标记走Jira分支而非被静默忽略() {
+        // 反向同理：LOCAL 需求里的 !x! 也尝试 Jira 分支（拿不到就标不可用），不再按 source 丢弃
+        requirement = entity("!ghost.png! 与 ![a](/api/attachments/0123456789abcdef0123456789abcdef/raw)",
+                false);
+        ContextContribution c = provider.contribute(req("r1"));
+        assertEquals(1, c.inputs().size());
+        assertEquals("0123456789abcdef0123456789abcdef.png", c.inputs().get(0).path());
+        assertTrue(c.claudeMdSections().get(0).contains("不可用"), c.claudeMdSections().get(0));
+    }
+
+    @Test
+    void 同类引用去重但跨类同名不去重() {
+        requirement = entity("![a](/api/attachments/0123456789abcdef0123456789abcdef/raw) 重复"
+                + " ![a](/api/attachments/0123456789abcdef0123456789abcdef/raw) 与 !same.png! 及其重复 !same.png!",
+                true);
+        ContextContribution c = provider.contribute(req("r1"));
+        assertEquals(2, c.inputs().size());
+        assertEquals("0123456789abcdef0123456789abcdef.png", c.inputs().get(0).path());
+        assertEquals("jira-ADMQ-1-same.png", c.inputs().get(1).path());
+    }
+
+    @Test
     void capsFileCountAndNotesOmission() {
         StringBuilder desc = new StringBuilder();
         for (int i = 0; i < 12; i++) {
