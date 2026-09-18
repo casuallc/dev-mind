@@ -6,8 +6,13 @@ import { useState } from 'react'
 import { Image, Typography } from 'antd'
 import { withAccessToken } from '../../../shared/attachments/url'
 
-/** wiki 图片标记：!文件名! 或 !文件名|width=300,thumbnail!（属性段剥掉只留文件名） */
-const WIKI_IMAGE = /!([^!\n|]+?)(\|[^!\n]*)?!/g
+/**
+ * wiki 图片标记：!文件名.png! 或 !文件名.png|width=300,thumbnail!（属性段剥掉只留文件名）。
+ * 只认图片扩展名：!x! 在 Jira wiki 里是图片嵌入语法，但 Jira 描述里也常出现 !重要! 这类
+ * 纯文本感叹号对，一律当图片会把它们渲染成「图片不可用」。与后端 RequirementAttachmentProvider
+ * 的 wiki 分支同一口径。
+ */
+const WIKI_IMAGE = /!([^!\n|]+?\.(?:png|jpe?g|gif|bmp|webp))(\|[^!\n]*)?!/gi
 
 type Segment = { kind: 'text'; text: string } | { kind: 'image'; target: string }
 
