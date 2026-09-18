@@ -13,34 +13,37 @@ import org.hibernate.type.SqlTypes;
 import java.time.Instant;
 
 /**
- * CAP-47 FR-10：项目级 Jira 推送默认值模板。
- * 一个项目一行——打开推送弹窗时自动带入，减少重复填字段。
+ * CAP-47 FR-10：个人 Jira 推送模板（取代原项目级单行默认值）。
+ * 唯一键 = 用户 + 实例 + Jira 项目 + 任务类型——动态必填字段随「项目+类型」组合变化，
+ * 一人可有多行；推送弹窗选定组合后自动带入匹配模板的字段默认值。
  *
  * <p>{@code extraFieldsJson} 存动态字段默认值（JSON，键=Jira字段id，值=Jira API 取值形态），
  * 不存 control/options（随 Jira 配置变化，由 createmeta 实时拉取）。
  */
 @Entity
-@Table(name = "jira_push_defaults",
-        uniqueConstraints = @UniqueConstraint(columnNames = "project_id"))
-public class JiraPushDefaultsEntity {
+@Table(name = "jira_push_templates",
+        uniqueConstraints = @UniqueConstraint(
+                columnNames = {"user_id", "integration_id", "jira_project_key", "issue_type_id"}))
+public class JiraPushTemplateEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** integrations.id（JIRA 型）——默认推送目标实例 */
+    /** users.id——模板是 per-user 的，服务层按认证上下文隔离，ADMIN 也不能读他人 */
+    @Column(name = "user_id", nullable = false, length = 32)
+    private String userId;
+
+    /** integrations.id（JIRA 型） */
     @Column(name = "integration_id", nullable = false)
     private Long integrationId;
 
-    @Column(name = "project_id", nullable = false, length = 32)
-    private String projectId;
-
-    /** 默认 Jira 项目 key（如 ADMQ） */
-    @Column(name = "jira_project_key", length = 64)
+    /** Jira 项目 key（如 ADMQ） */
+    @Column(name = "jira_project_key", nullable = false, length = 64)
     private String jiraProjectKey;
 
-    /** 默认任务类型 id */
-    @Column(name = "issue_type_id", length = 32)
+    /** 任务类型 id（实例内的值，跨实例无意义） */
+    @Column(name = "issue_type_id", nullable = false, length = 32)
     private String issueTypeId;
 
     /** 默认优先级 name */
@@ -68,10 +71,10 @@ public class JiraPushDefaultsEntity {
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
     public Long getIntegrationId() { return integrationId; }
     public void setIntegrationId(Long integrationId) { this.integrationId = integrationId; }
-    public String getProjectId() { return projectId; }
-    public void setProjectId(String projectId) { this.projectId = projectId; }
     public String getJiraProjectKey() { return jiraProjectKey; }
     public void setJiraProjectKey(String jiraProjectKey) { this.jiraProjectKey = jiraProjectKey; }
     public String getIssueTypeId() { return issueTypeId; }

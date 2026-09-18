@@ -1,6 +1,10 @@
 package com.devmind.integration.service;
 
 import com.devmind.auth.IdentityService;
+import com.devmind.auth.config.AuthProperties;
+import com.devmind.auth.model.UserEntity;
+import com.devmind.auth.repo.UserRepository;
+import com.devmind.auth.security.DevMindPrincipal;
 import com.devmind.common.audit.AuditService;
 import com.devmind.common.event.DomainEvent;
 import com.devmind.common.event.DomainEventPublisher;
@@ -21,28 +25,31 @@ import com.devmind.integration.dto.JiraAssignableUserView;
 import com.devmind.integration.dto.JiraCreateFieldView;
 import com.devmind.integration.dto.JiraCreateFieldsView;
 import com.devmind.integration.dto.JiraOptionView;
-import com.devmind.integration.dto.JiraPushDefaultsRequest;
-import com.devmind.integration.dto.JiraPushDefaultsView;
 import com.devmind.integration.dto.JiraPushOptionsView;
 import com.devmind.integration.dto.JiraPushRequest;
 import com.devmind.integration.dto.JiraPushResultView;
 import com.devmind.integration.dto.JiraPushTargetsView;
+import com.devmind.integration.dto.JiraPushTemplateRequest;
+import com.devmind.integration.dto.JiraPushTemplateView;
 import com.devmind.integration.model.ExternalLinkEntity;
 import com.devmind.integration.model.IntegrationEntity;
-import com.devmind.integration.model.JiraPushDefaultsEntity;
+import com.devmind.integration.model.JiraPushTemplateEntity;
 import com.devmind.integration.model.JiraSyncConfigEntity;
 import com.devmind.integration.repo.ExternalLinkRepository;
 import com.devmind.integration.repo.IntegrationRepository;
-import com.devmind.integration.repo.JiraPushDefaultsRepository;
+import com.devmind.integration.repo.JiraPushTemplateRepository;
 import com.devmind.integration.repo.JiraSyncConfigRepository;
-import com.devmind.project.ProjectService;
 import com.devmind.project.RequirementService;
 import com.devmind.project.dto.JiraManagedFields;
 import com.devmind.project.dto.RequirementView;
-import com.devmind.project.model.Project;
 import com.devmind.project.model.RequirementEntity;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import tools.jackson.databind.ObjectMapper;
 
 import java.lang.reflect.InvocationHandler;
@@ -81,8 +88,9 @@ class JiraPushServiceTest {
 
     private final Map<String, ExternalLinkEntity> linkStore = new HashMap<>();
     private long linkSeq = 0;
-    private final Map<String, JiraPushDefaultsEntity> defaultsStore = new HashMap<>();
-    private long defaultsSeq = 0;
+    private final Map<Long, JiraPushTemplateEntity> templateStore = new HashMap<>();
+    private long templateSeq = 0;
+    private final Map<String, UserEntity> users = new HashMap<>();
     /** 启用中的 JIRA 实例（默认只有 integration；跨实例用例往里加第二条） */
     private final List<IntegrationEntity> instances = new ArrayList<>();
 
@@ -209,18 +217,6 @@ class JiraPushServiceTest {
         }
     }
 
-    /** FR-10：项目存在性校验在单测里是隐式的（项目由 test 自己指定），只要不抛错即可 */
-    static class FakeProjectService extends ProjectService {
-        FakeProjectService() {
-            super(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
-        }
-
-        @Override
-        public Project requireProject(String projectId) {
-            return null;
-        }
-    }
-
     static class FakeIntegrationService extends IntegrationService {
         final IntegrationEntity integration;
         final List<String> calls = new ArrayList<>();
@@ -331,23 +327,66 @@ class JiraPushServiceTest {
             default -> throw new UnsupportedOperationException(m.getName());
         });
 
-        JiraPushDefaultsRepository defaultsRepo = proxy(JiraPushDefaultsRepository.class, (p, m, args) -> switch (m.getName()) {
-            case "findByProjectId" -> Optional.ofNullable(defaultsStore.get((String) args[0]));
-            case "save" -> {
-                JiraPushDefaultsEntity e = (JiraPushDefaultsEntity) args[0];
-                if (e.getId() == null) {
-                    e.setId(++defaultsSeq);
-                }
-                defaultsStore.put(e.getProjectId(), e);
-                yield e;
-            }
-            default -> throw new UnsupportedOperationException(m.getName());
-        });
+        JiraPushTemplateRepository templateRepo = proxy(JiraPushTemplateRepository.class,
+                (p, m, args) -> switch (m.getName()) {
+                    case "findByUserIdOrderByUpdatedAtDesc" -> templateStore.values().stream()
+                            .filter(t -> args[0].equals(t.getUserId()))
+                            .toList();
+                    case "findByUserIdAndIntegrationIdAndJiraProjectKeyAndIssueTypeId" ->
+                            templateStore.values().stream()
+                                    .filter(t -> args[0].equals(t.getUserId())
+                                            && t.getIntegrationId().equals(args[1])
+                                            && t.getJiraProjectKey().equals(args[2])
+                                            && t.getIssueTypeId().equals(args[3]))
+                                    .findFirst();
+                    case "findById" -> Optional.ofNullable(templateStore.get((Long) args[0]));
+                    case "save" -> {
+                        JiraPushTemplateEntity e = (JiraPushTemplateEntity) args[0];
+                        if (e.getId() == null) {
+                            e.setId(++templateSeq);
+                        }
+                        templateStore.put(e.getId(), e);
+                        yield e;
+                    }
+                    case "delete" -> {
+                        templateStore.remove(((JiraPushTemplateEntity) args[0]).getId());
+                        yield null;
+                    }
+                    default -> throw new UnsupportedOperationException(m.getName());
+                });
 
-        service = new JiraPushService(integrationRepo, configRepo, defaultsRepo, linkRepo, integrationService,
-                requirementService, new FakeProjectService(), new IdentityService(null, null, null),
+        UserRepository userRepo = proxy(UserRepository.class, (p, m, args) ->
+                switch (m.getName()) {
+                    case "findByUsername" -> Optional.ofNullable(users.get((String) args[0]));
+                    default -> throw new UnsupportedOperationException(m.getName());
+                });
+
+        service = new JiraPushService(integrationRepo, configRepo, templateRepo, linkRepo, integrationService,
+                requirementService, new IdentityService(userRepo, new BCryptPasswordEncoder(),
+                new AuthProperties()),
                 new AuditService(null), eventPublisher, List.of(connector), new JiraWriteGuard(),
                 new ObjectMapper());
+    }
+
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
+    }
+
+    private UserEntity addUser(String id, String username) {
+        UserEntity u = new UserEntity();
+        u.setId(id);
+        u.setUsername(username);
+        users.put(username, u);
+        return u;
+    }
+
+    /** 模拟登录（IdentityService.currentActor 从 SecurityContext 取真实用户） */
+    private void loginAs(String username) {
+        var auth = new UsernamePasswordAuthenticationToken(
+                new DevMindPrincipal(username, "DEVELOPER"), null,
+                List.of(new SimpleGrantedAuthority("ROLE_DEVELOPER")));
+        SecurityContextHolder.getContext().setAuthentication(auth);
     }
 
     /** 每个用例独立可改的同步配置（默认空 = 未被同步覆盖） */
@@ -992,17 +1031,20 @@ class JiraPushServiceTest {
         assertEquals(Map.of("customfield_99999", "x"), spec.extraFields());
     }
 
-    // ---------------- FR-10 项目级推送默认值 ----------------
+    // ---------------- FR-10 个人推送模板 ----------------
 
-    private static JiraPushDefaultsRequest defaultsRequest(Map<String, Object> extraFields) {
-        return new JiraPushDefaultsRequest(7L, "PROJ", "10003", "Low", "lisi",
+    private static JiraPushTemplateRequest templateRequest(Map<String, Object> extraFields) {
+        return new JiraPushTemplateRequest(7L, "PROJ", "10003", "Low", "lisi",
                 List.of("ai"), extraFields);
     }
 
     @Test
-    void 保存并读回项目推送默认值() {
-        JiraPushDefaultsView saved = service.savePushDefaults("p1",
-                defaultsRequest(Map.of("components", List.of(Map.of("id", "10000")))));
+    void 模板保存并读回() {
+        addUser("u1", "alice");
+        loginAs("alice");
+
+        JiraPushTemplateView saved = service.saveMyTemplate(
+                templateRequest(Map.of("components", List.of(Map.of("id", "10000")))));
 
         assertEquals(7L, saved.integrationId());
         assertEquals("公司 Jira", saved.integrationName());   // 展示名随实例带出
@@ -1013,216 +1055,175 @@ class JiraPushServiceTest {
         assertEquals(List.of("ai"), saved.labels());
         assertEquals(Map.of("components", List.of(Map.of("id", "10000"))), saved.extraFields());
 
-        JiraPushDefaultsView read = service.getPushDefaults("p1");
-        assertEquals(saved.id(), read.id());
-        assertEquals("10003", read.issueTypeId());
+        List<JiraPushTemplateView> list = service.listMyTemplates();
+        assertEquals(1, list.size());
+        assertEquals(saved.id(), list.get(0).id());
     }
 
     @Test
-    void 无配置时读默认值返回null() {
-        assertNull(service.getPushDefaults("p1"));
-    }
-
-    @Test
-    void 再次保存整行覆盖而不是合并() {
-        service.savePushDefaults("p1", defaultsRequest(Map.of("components", List.of(Map.of("id", "10000")))));
+    void 同组合再保存整行覆盖而不是新增() {
+        addUser("u1", "alice");
+        loginAs("alice");
+        service.saveMyTemplate(templateRequest(Map.of("components", List.of(Map.of("id", "10000")))));
         // 第二次请求不带动态字段与经办人/优先级 → 应被清空，而不是保留上一轮的值
-        service.savePushDefaults("p1", new JiraPushDefaultsRequest(7L, "PROJ", "10003",
+        service.saveMyTemplate(new JiraPushTemplateRequest(7L, "PROJ", "10003",
                 null, null, List.of(), null));
 
-        JiraPushDefaultsView view = service.getPushDefaults("p1");
-        assertNull(view.assigneeName());
-        assertNull(view.priorityName());
-        assertTrue(view.labels().isEmpty());
-        assertTrue(view.extraFields().isEmpty());
-        assertEquals(1, defaultsStore.size());   // 一项目一行
+        List<JiraPushTemplateView> list = service.listMyTemplates();
+        assertEquals(1, list.size());   // 四元组判重：同组合只有一行
+        assertNull(list.get(0).assigneeName());
+        assertNull(list.get(0).priorityName());
+        assertTrue(list.get(0).labels().isEmpty());
+        assertTrue(list.get(0).extraFields().isEmpty());
     }
 
     @Test
-    void 推送默认值作为弹窗默认目标与字段() {
-        service.savePushDefaults("p1", defaultsRequest(Map.of("components", List.of(Map.of("id", "10000")))));
-
-        JiraPushTargetsView view = service.targets("p1", "req-local");
-
-        // 无同步配置 → 默认实例与项目 key 都退到推送默认值
-        assertEquals(7L, view.defaultIntegrationId());
-        assertEquals("PROJ", view.defaultJiraProjectKey());
-        assertEquals("10003", view.defaults().issueTypeId());
-        assertEquals("lisi", view.defaults().assigneeName());
-        assertEquals(List.of("ai"), view.defaults().labels());
-        assertEquals(Map.of("components", List.of(Map.of("id", "10000"))), view.defaults().extraFields());
-    }
-
-    @Test
-    void 需求已有值时不被项目默认覆盖() {
-        service.savePushDefaults("p1", new JiraPushDefaultsRequest(7L, "PROJ", "10003",
-                "Low", "lisi", List.of("默认标签"), null));
-        RequirementEntity req = requirementService.store.get("req-local");
-        req.setPriority("High");
-        req.setLabels("需求标签");
-        connector.priorities = List.of(new PriorityRef("2", "High"), new PriorityRef("4", "Low"));
-
-        JiraPushTargetsView.Defaults d = service.targets("p1", "req-local").defaults();
-
-        assertEquals(List.of("需求标签"), d.labels());   // 需求填过就不覆盖
-        assertEquals("High", d.priority());              // 需求命中词表 → 用需求值，不用项目默认的 Low
-        assertEquals("10003", d.issueTypeId());          // 需求没有的字段仍来自项目默认
-        assertEquals("lisi", d.assigneeName());
-    }
-
-    @Test
-    void 需求优先级未命中词表时退项目默认值() {
-        // 平台优先级是英文枚举、实例词表是中文 → 本地值被弃用，此处正是项目默认值的价值所在
-        service.savePushDefaults("p1", new JiraPushDefaultsRequest(7L, "PROJ", "10003",
-                "中", "lisi", List.of(), null));
-        requirementService.store.get("req-local").setPriority("High");
-        connector.priorities = List.of(new PriorityRef("3", "中"));
-
-        assertEquals("中", service.targets("p1", "req-local").defaults().priority());
-    }
-
-    @Test
-    void 推送默认值优先于同步配置() {
-        syncConfig("p1", 7L, "ADMQ", true);
-        service.savePushDefaults("p1", new JiraPushDefaultsRequest(7L, "PROJ", "10003",
+    void 不同组合各自成行() {
+        addUser("u1", "alice");
+        loginAs("alice");
+        service.saveMyTemplate(templateRequest(null));
+        service.saveMyTemplate(new JiraPushTemplateRequest(7L, "PROJ", "10004",
+                null, null, List.of(), null));
+        service.saveMyTemplate(new JiraPushTemplateRequest(7L, "ADMQ", "10003",
                 null, null, List.of(), null));
 
-        // 同步配置只回答「从哪个 Jira 项目拉 issue」；推送目标以「Jira 推送」Tab 配的为准，
-        // 否则项目 key 与任务类型/动态字段会分属两个项目
-        JiraPushTargetsView view = service.targets("p1", "req-local");
-
-        assertEquals("PROJ", view.defaultJiraProjectKey());
-        assertEquals("10003", view.defaults().issueTypeId());
-        assertFalse(view.syncCovered());   // 推到 PROJ 确实不被 ADMQ 的同步配置覆盖
+        assertEquals(3, service.listMyTemplates().size());
     }
 
     @Test
-    void 无推送默认值时同步配置照旧决定默认目标() {
-        syncConfig("p1", 7L, "ADMQ", true);
+    void 模板按用户隔离() {
+        addUser("u1", "alice");
+        addUser("u2", "bob");
+        loginAs("alice");
+        JiraPushTemplateView saved = service.saveMyTemplate(templateRequest(null));
 
-        JiraPushTargetsView view = service.targets("p1", "req-local");
+        loginAs("bob");
+        // 别人的模板看不到、删不掉（按不存在处理，不暴露存在性）
+        assertTrue(service.listMyTemplates().isEmpty());
+        DevMindException e = assertThrows(DevMindException.class, () -> service.deleteMyTemplate(saved.id()));
+        assertEquals(ErrorCode.NOT_FOUND, e.getErrorCode());
 
-        assertEquals(7L, view.defaultIntegrationId());
-        assertEquals("ADMQ", view.defaultJiraProjectKey());
-        assertTrue(view.syncCovered());
+        loginAs("alice");
+        service.deleteMyTemplate(saved.id());
+        assertTrue(service.listMyTemplates().isEmpty());
     }
 
     @Test
-    void 保存默认值时动态字段照推送口径校验() {
+    void 未登录时模板读写报401() {
+        // 无 SecurityContext 且 users 表没有 local → currentUser 为空
+        assertThrows(DevMindException.class, () -> service.saveMyTemplate(templateRequest(null)));
+        assertThrows(DevMindException.class, () -> service.listMyTemplates());
+    }
+
+    @Test
+    void 保存模板缺实例或组合键报400() {
+        addUser("u1", "alice");
+        loginAs("alice");
+
+        assertThrows(DevMindException.class, () -> service.saveMyTemplate(
+                new JiraPushTemplateRequest(null, "PROJ", "10003", null, null, List.of(), null)));
+        assertThrows(DevMindException.class, () -> service.saveMyTemplate(
+                new JiraPushTemplateRequest(7L, null, "10003", null, null, List.of(), null)));
+        assertThrows(DevMindException.class, () -> service.saveMyTemplate(
+                new JiraPushTemplateRequest(7L, "PROJ", null, null, null, List.of(), null)));
+        assertTrue(templateStore.isEmpty());
+    }
+
+    @Test
+    void 保存模板时动态字段照推送口径校验() {
         // 复用推送侧同一道护栏：能存进来的取值，推送时一定也能发出去
-        assertThrows(DevMindException.class, () -> service.savePushDefaults("p1",
-                defaultsRequest(Map.of("components", Map.of("a", Map.of("b", "c"))))));
-        // description 由服务端强制追加回链，不许被默认值改写
-        assertThrows(DevMindException.class, () -> service.savePushDefaults("p1",
-                defaultsRequest(Map.of("description", "不许覆盖"))));
+        addUser("u1", "alice");
+        loginAs("alice");
 
-        assertTrue(defaultsStore.isEmpty());
+        assertThrows(DevMindException.class, () -> service.saveMyTemplate(
+                templateRequest(Map.of("components", Map.of("a", Map.of("b", "c"))))));
+        // description 由服务端强制追加回链，不许被模板改写
+        assertThrows(DevMindException.class, () -> service.saveMyTemplate(
+                templateRequest(Map.of("description", "不许覆盖"))));
+        assertTrue(templateStore.isEmpty());
     }
 
     @Test
-    void 保存默认值缺实例报400() {
-        DevMindException e = assertThrows(DevMindException.class, () -> service.savePushDefaults("p1",
-                new JiraPushDefaultsRequest(null, "PROJ", null, null, null, List.of(), null)));
-
-        assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
-        assertTrue(defaultsStore.isEmpty());
-    }
-
-    @Test
-    void 默认值JSON脏数据当作未配置() {
+    void 模板JSON脏数据当作未配置() {
         // 读侧降级：一条坏配置不该让推送弹窗打不开
-        service.savePushDefaults("p1", defaultsRequest(Map.of("components", List.of(Map.of("id", "10000")))));
-        defaultsStore.get("p1").setExtraFieldsJson("{不是合法 JSON");
+        addUser("u1", "alice");
+        loginAs("alice");
+        service.saveMyTemplate(templateRequest(Map.of("components", List.of(Map.of("id", "10000")))));
+        templateStore.values().forEach(t -> t.setExtraFieldsJson("{不是合法 JSON"));
 
         JiraPushTargetsView view = service.targets("p1", "req-local");
 
-        assertTrue(view.defaults().extraFields().isEmpty());
-        assertEquals("10003", view.defaults().issueTypeId());   // 其余字段不受影响
+        assertEquals(1, view.templates().size());
+        assertTrue(view.templates().get(0).extraFields().isEmpty());
+        assertEquals("10003", view.templates().get(0).issueTypeId());   // 其余字段不受影响
     }
 
     @Test
-    void 推送默认值指向的实例不可用时整行作废并退回同步配置() {
-        // 实例 9 已删除/停用，不在启用候选里 → 默认目标退同步配置的实例 8。
-        // 此时那份默认值（任务类型 id/经办人/动态字段都是实例 7 的值）一律不带入：
-        // 陈旧配置不该把弹窗打死，但也不该把另一个实例的取值硬塞进来。
-        IntegrationEntity other = new IntegrationEntity();
-        other.setId(8L);
-        other.setName("别家 Jira");
-        other.setType(IntegrationEntity.TYPE_JIRA);
-        other.setBaseUrl("http://jira2.local");
-        other.setStatus(IntegrationEntity.STATUS_ENABLED);
-        instances.add(other);
-        syncConfig("p1", 8L, "OTHER", true);
-        service.savePushDefaults("p1", defaultsRequest(Map.of("components", List.of(Map.of("id", "10000")))));
-        defaultsStore.get("p1").setIntegrationId(9L);
-        requirementService.store.get("req-local").setPriority("High");
-        connector.priorities = List.of(new PriorityRef("2", "High"));
+    void targets带回当前用户模板() {
+        addUser("u1", "alice");
+        loginAs("alice");
+        service.saveMyTemplate(templateRequest(Map.of("components", List.of(Map.of("id", "10000")))));
 
         JiraPushTargetsView view = service.targets("p1", "req-local");
-        JiraPushTargetsView.Defaults d = view.defaults();
 
-        assertEquals(8L, view.defaultIntegrationId());
-        assertEquals("OTHER", view.defaultJiraProjectKey());   // 退回同步配置（顺带证明它确实被退回了）
-        assertNull(d.issueTypeId());
-        assertNull(d.assigneeName());
-        assertTrue(d.labels().isEmpty());      // 「ai」是实例 7 的默认标签，不跟着走
-        assertTrue(d.extraFields().isEmpty());
-        assertEquals("High", d.priority());    // 需求自身的值照旧带入
+        assertEquals(1, view.templates().size());
+        JiraPushTargetsView.TemplateRef t = view.templates().get(0);
+        assertEquals(7L, t.integrationId());
+        assertEquals("PROJ", t.jiraProjectKey());
+        assertEquals("10003", t.issueTypeId());
+        assertEquals("lisi", t.assigneeName());
+        assertEquals(Map.of("components", List.of(Map.of("id", "10000"))), t.extraFields());
     }
 
     @Test
-    void 推送默认值实例不可用且无同步配置时退候选首条() {
-        // 陈旧配置不该把弹窗打死：退到候选首条即可，默认值同样不带入
-        service.savePushDefaults("p1", defaultsRequest(null));
-        defaultsStore.get("p1").setIntegrationId(9L);
-
+    void 无登录用户时targets不带模板() {
+        // 异步线程/系统身份没有用户上下文：无模板可带，其余字段不受影响
         JiraPushTargetsView view = service.targets("p1", "req-local");
 
+        assertTrue(view.templates().isEmpty());
         assertEquals(7L, view.defaultIntegrationId());
-        assertNull(view.defaults().issueTypeId());
-        assertTrue(view.defaults().extraFields().isEmpty());
     }
 
-    // ---------------- FR-10 项目作用域选项端点（配置页无需求上下文） ----------------
+    // ---------------- FR-10 个人作用域选项端点（配置页无需求/项目上下文） ----------------
 
     @Test
-    void 项目作用域选项端点不依赖需求() {
+    void 个人作用域选项端点不依赖需求与项目() {
         connector.projects = List.of(new ExternalProject("PROJ", "对账系统", "http://jira.local/PROJ", "main"));
         connector.issueTypes = List.of(new IssueTypeRef("10003", "任务", false));
         connector.priorities = List.of(new PriorityRef("2", "High"));
         connector.assignableUsers = List.of(new UserRef("lisi", "李四"));
 
-        JiraPushOptionsView opts = service.optionsForProject("p1", 7L, "PROJ");
+        JiraPushOptionsView opts = service.optionsMine(7L, "PROJ");
         assertEquals(1, opts.jiraProjects().size());
         assertEquals(1, opts.issueTypes().size());
         assertEquals(1, opts.priorities().size());
 
-        List<JiraAssignableUserView> users = service.assignableUsersForProject("p1", 7L, "PROJ", "李");
+        List<JiraAssignableUserView> users = service.assignableUsersMine(7L, "PROJ", "李");
         assertEquals(List.of("lisi"), users.stream().map(JiraAssignableUserView::name).toList());
     }
 
     @Test
-    void 项目作用域必填字段无需求上下文时不预填() {
+    void 个人作用域必填字段无需求上下文时不预填() {
         requiredFieldsLikeRealJira();
         requirementService.store.get("req-local").setFixVersions("1.0,2.0");
 
         JiraCreateFieldsView fromRequirement = service.createFields("p1", "req-local", 7L, "PROJ", "10003");
-        JiraCreateFieldsView fromProject = service.createFieldsForProject("p1", 7L, "PROJ", "10003");
+        JiraCreateFieldsView fromMine = service.createFieldsMine(7L, "PROJ", "10003");
 
         // 字段清单与推送弹窗完全一致（渲染不了的照样单独列出）
         assertEquals(fromRequirement.fields().stream().map(JiraCreateFieldView::id).toList(),
-                fromProject.fields().stream().map(JiraCreateFieldView::id).toList());
-        assertEquals(fromRequirement.requiredFixed(), fromProject.requiredFixed());
+                fromMine.fields().stream().map(JiraCreateFieldView::id).toList());
+        assertEquals(fromRequirement.requiredFixed(), fromMine.requiredFixed());
         // 唯一的差别：配置页没有本地需求，fixVersions 无从命中
         assertEquals(Map.of("fixVersions", List.of("10100", "10101")), fromRequirement.prefill());
-        assertTrue(fromProject.prefill().isEmpty());
+        assertTrue(fromMine.prefill().isEmpty());
     }
 
     @Test
-    void 项目作用域必填字段拉取失败照推送口径降级() {
+    void 个人作用域必填字段拉取失败照推送口径降级() {
         connector.listCreateFieldsFails = true;
 
-        JiraCreateFieldsView view = service.createFieldsForProject("p1", 7L, "PROJ", "10003");
+        JiraCreateFieldsView view = service.createFieldsMine(7L, "PROJ", "10003");
 
         assertTrue(view.fields().isEmpty());
         assertNotNull(view.error());

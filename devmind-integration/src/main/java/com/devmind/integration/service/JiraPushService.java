@@ -18,21 +18,20 @@ import com.devmind.integration.dto.JiraAssignableUserView;
 import com.devmind.integration.dto.JiraCreateFieldView;
 import com.devmind.integration.dto.JiraCreateFieldsView;
 import com.devmind.integration.dto.JiraOptionView;
-import com.devmind.integration.dto.JiraPushDefaultsRequest;
-import com.devmind.integration.dto.JiraPushDefaultsView;
 import com.devmind.integration.dto.JiraPushOptionsView;
 import com.devmind.integration.dto.JiraPushRequest;
 import com.devmind.integration.dto.JiraPushResultView;
 import com.devmind.integration.dto.JiraPushTargetsView;
+import com.devmind.integration.dto.JiraPushTemplateRequest;
+import com.devmind.integration.dto.JiraPushTemplateView;
 import com.devmind.integration.model.ExternalLinkEntity;
 import com.devmind.integration.model.IntegrationEntity;
-import com.devmind.integration.model.JiraPushDefaultsEntity;
+import com.devmind.integration.model.JiraPushTemplateEntity;
 import com.devmind.integration.model.JiraSyncConfigEntity;
 import com.devmind.integration.repo.ExternalLinkRepository;
 import com.devmind.integration.repo.IntegrationRepository;
-import com.devmind.integration.repo.JiraPushDefaultsRepository;
+import com.devmind.integration.repo.JiraPushTemplateRepository;
 import com.devmind.integration.repo.JiraSyncConfigRepository;
-import com.devmind.project.ProjectService;
 import com.devmind.project.RequirementService;
 import com.devmind.project.model.RequirementEntity;
 import org.slf4j.Logger;
@@ -97,11 +96,10 @@ public class JiraPushService {
 
     private final IntegrationRepository integrationRepo;
     private final JiraSyncConfigRepository configRepo;
-    private final JiraPushDefaultsRepository defaultsRepo;
+    private final JiraPushTemplateRepository templateRepo;
     private final ExternalLinkRepository linkRepo;
     private final IntegrationService integrationService;
     private final RequirementService requirementService;
-    private final ProjectService projectService;
     private final IdentityService identityService;
     private final AuditService auditService;
     private final DomainEventPublisher eventPublisher;
@@ -111,11 +109,10 @@ public class JiraPushService {
 
     public JiraPushService(IntegrationRepository integrationRepo,
                            JiraSyncConfigRepository configRepo,
-                           JiraPushDefaultsRepository defaultsRepo,
+                           JiraPushTemplateRepository templateRepo,
                            ExternalLinkRepository linkRepo,
                            IntegrationService integrationService,
                            RequirementService requirementService,
-                           ProjectService projectService,
                            IdentityService identityService,
                            AuditService auditService,
                            DomainEventPublisher eventPublisher,
@@ -124,11 +121,10 @@ public class JiraPushService {
                            ObjectMapper mapper) {
         this.integrationRepo = integrationRepo;
         this.configRepo = configRepo;
-        this.defaultsRepo = defaultsRepo;
+        this.templateRepo = templateRepo;
         this.linkRepo = linkRepo;
         this.integrationService = integrationService;
         this.requirementService = requirementService;
-        this.projectService = projectService;
         this.identityService = identityService;
         this.auditService = auditService;
         this.eventPublisher = eventPublisher;
@@ -149,13 +145,8 @@ public class JiraPushService {
         List<IntegrationEntity> instances = integrationRepo.findByTypeAndStatus(
                 IntegrationEntity.TYPE_JIRA, IntegrationEntity.STATUS_ENABLED);
         JiraSyncConfigEntity cfg = defaultConfig(projectId, instances);
-        // FR-10：项目级推送默认值。无配置时全部回落到既有行为（同步配置 → 候选首条）
-        JiraPushDefaultsEntity pushDefaults = defaultsRepo.findByProjectId(projectId).orElse(null);
-        IntegrationEntity target = resolveTarget(instances, cfg, pushDefaults);
-        // 推送默认值整行都属于它自己那个实例（任务类型 id / 经办人 / 动态字段取值都是实例内的值）。
-        // 同步配置把默认目标指到别的实例时，这份默认值一律不参与——跨实例带入会静默推错对象。
-        JiraPushDefaultsEntity effective = appliesTo(pushDefaults, target) ? pushDefaults : null;
-        String defaultKey = defaultProjectKey(cfg, effective);
+        IntegrationEntity target = resolveTarget(instances, cfg);
+        String defaultKey = cfg == null ? null : trimToNull(cfg.getJiraProjectKey());
 
         List<JiraOptionView> projects = List.of();
         List<JiraOptionView> issueTypes = List.of();
@@ -190,7 +181,7 @@ public class JiraPushService {
                         .toList(),
                 target == null ? null : target.getId(),
                 defaultKey, projects, issueTypes, priorities,
-                defaults(requirement, priorities, effective), identitySource,
+                defaults(requirement, priorities), myTemplateRefs(), identitySource,
                 target != null
                         && syncCovered(projectId, target.getId(), defaultKey, requirement.getExternalKey()),
                 optionsError);
@@ -204,11 +195,10 @@ public class JiraPushService {
     }
 
     /**
-     * 项目作用域的同一份选项（FR-10 推送默认值配置页用）。
-     * 配置页不挂在任何需求上，故这里只校验项目存在——选项本身与需求无关。
+     * 个人作用域的同一份选项（FR-10 推送模板配置页用）。
+     * 配置页不挂在任何需求/项目上——选项本身与二者无关，只验实例可用。
      */
-    public JiraPushOptionsView optionsForProject(String projectId, Long integrationId, String jiraProjectKey) {
-        projectService.requireProject(projectId);
+    public JiraPushOptionsView optionsMine(Long integrationId, String jiraProjectKey) {
         return optionsOf(requireJira(integrationId), jiraProjectKey);
     }
 
@@ -228,10 +218,9 @@ public class JiraPushService {
         return assignableUsersOf(requireJira(integrationId), jiraProjectKey, q);
     }
 
-    /** 项目作用域的经办人搜索（FR-10 配置页用） */
-    public List<JiraAssignableUserView> assignableUsersForProject(String projectId, Long integrationId,
-                                                                  String jiraProjectKey, String q) {
-        projectService.requireProject(projectId);
+    /** 个人作用域的经办人搜索（FR-10 模板配置页用） */
+    public List<JiraAssignableUserView> assignableUsersMine(Long integrationId,
+                                                            String jiraProjectKey, String q) {
         return assignableUsersOf(requireJira(integrationId), jiraProjectKey, q);
     }
 
@@ -261,13 +250,12 @@ public class JiraPushService {
     }
 
     /**
-     * 项目作用域的必填字段清单（FR-10 配置页用）。配置页没有需求上下文，故
+     * 个人作用域的必填字段清单（FR-10 模板配置页用）。配置页没有需求上下文，故
      * {@code requirement} 传 null —— 影响面只有一处：prefill（目前仅 fixVersions）
      * 无本地需求可取，返回空表，其余字段清单与推送弹窗完全一致。
      */
-    public JiraCreateFieldsView createFieldsForProject(String projectId, Long integrationId,
-                                                       String jiraProjectKey, String issueTypeId) {
-        projectService.requireProject(projectId);
+    public JiraCreateFieldsView createFieldsMine(Long integrationId,
+                                                 String jiraProjectKey, String issueTypeId) {
         return createFieldsOf(requireJira(integrationId), null, jiraProjectKey, issueTypeId);
     }
 
@@ -387,60 +375,94 @@ public class JiraPushService {
         return out;
     }
 
-    // ---------------- FR-10 项目级推送默认值 ----------------
+    // ---------------- FR-10 个人推送模板 ----------------
 
-    /** 读项目级推送默认值；无配置返回 null（前端渲染空表单，不是错误） */
-    public JiraPushDefaultsView getPushDefaults(String projectId) {
-        projectService.requireProject(projectId);
-        return defaultsRepo.findByProjectId(projectId).map(this::toDefaultsView).orElse(null);
+    /** 我的模板列表（配置页）；按更新时间倒序 */
+    public List<JiraPushTemplateView> listMyTemplates() {
+        String userId = currentUserId();
+        return templateRepo.findByUserIdOrderByUpdatedAtDesc(userId).stream()
+                .map(this::toTemplateView)
+                .toList();
     }
 
     /**
-     * 保存项目级推送默认值（upsert）。**整行覆盖**——请求里没给的字段即被清空：
-     * 配置页是「所见即所存」，做局部合并没有额外收益，反而解释不清「明明删了怎么还在」。
+     * 保存我的推送模板（upsert，按 实例+项目+类型 判重）。**整行覆盖**——请求里没给的字段
+     * 即被清空：配置页是「所见即所存」，做局部合并没有额外收益，反而解释不清「明明删了怎么还在」。
      *
      * <p>动态字段默认值复用推送侧的同一道护栏（{@link #normalizeExtraFields}）：
      * 能存进来的取值，推送时一定也能发出去。
      */
-    public JiraPushDefaultsView savePushDefaults(String projectId, JiraPushDefaultsRequest req) {
-        projectService.requireProject(projectId);
-        if (req.integrationId() == null) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "integrationId 不能为空");
-        }
+    public JiraPushTemplateView saveMyTemplate(JiraPushTemplateRequest req) {
+        String userId = currentUserId();
         IntegrationEntity integration = requireJira(req.integrationId());
-        JiraPushDefaultsEntity e = defaultsRepo.findByProjectId(projectId).orElseGet(() -> {
-            JiraPushDefaultsEntity fresh = new JiraPushDefaultsEntity();
-            fresh.setProjectId(projectId);
-            fresh.setCreatedAt(Instant.now());
-            return fresh;
-        });
+        String jiraProjectKey = requireText(req.jiraProjectKey(), "jiraProjectKey（Jira 项目 key）");
+        String issueTypeId = requireText(req.issueTypeId(), "issueTypeId（任务类型）");
+        JiraPushTemplateEntity e = templateRepo
+                .findByUserIdAndIntegrationIdAndJiraProjectKeyAndIssueTypeId(
+                        userId, integration.getId(), jiraProjectKey, issueTypeId)
+                .orElseGet(() -> {
+                    JiraPushTemplateEntity fresh = new JiraPushTemplateEntity();
+                    fresh.setUserId(userId);
+                    fresh.setIntegrationId(integration.getId());
+                    fresh.setJiraProjectKey(jiraProjectKey);
+                    fresh.setIssueTypeId(issueTypeId);
+                    fresh.setCreatedAt(Instant.now());
+                    return fresh;
+                });
         List<String> labels = normalizeLabels(req.labels());
         Map<String, Object> extra = normalizeExtraFields(req.extraFields());
-        e.setIntegrationId(integration.getId());
-        e.setJiraProjectKey(trimToNull(req.jiraProjectKey()));
-        e.setIssueTypeId(trimToNull(req.issueTypeId()));
         e.setPriorityName(trimToNull(req.priorityName()));
         e.setAssigneeName(trimToNull(req.assigneeName()));
         e.setLabels(labels.isEmpty() ? null : String.join(",", labels));
         e.setExtraFieldsJson(extra.isEmpty() ? null : mapper.writeValueAsString(extra));
         e.setUpdatedAt(Instant.now());
-        JiraPushDefaultsView view = toDefaultsView(defaultsRepo.save(e));
-        log.info("项目 Jira 推送默认值已保存: project={} integration={} jiraProject={} issueType={} 动态字段={}",
-                projectId, integration.getId(), e.getJiraProjectKey(), e.getIssueTypeId(), extra.keySet());
+        JiraPushTemplateView view = toTemplateView(templateRepo.save(e));
+        log.info("个人 Jira 推送模板已保存: user={} integration={} jiraProject={} issueType={} 动态字段={}",
+                userId, integration.getId(), jiraProjectKey, issueTypeId, extra.keySet());
         return view;
     }
 
-    private JiraPushDefaultsView toDefaultsView(JiraPushDefaultsEntity e) {
+    /** 删我的模板；id 不属于当前用户按不存在处理（不暴露他人数据的存在性） */
+    public void deleteMyTemplate(Long id) {
+        String userId = currentUserId();
+        JiraPushTemplateEntity e = templateRepo.findById(id)
+                .filter(t -> userId.equals(t.getUserId()))
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "模板不存在: " + id));
+        templateRepo.delete(e);
+        log.info("个人 Jira 推送模板已删除: user={} id={} {}:{}:{}", userId, id,
+                e.getIntegrationId(), e.getJiraProjectKey(), e.getIssueTypeId());
+    }
+
+    /** targets 随响应带出的当前用户模板（匹配键 + 默认值字段，无 id/userId） */
+    private List<JiraPushTargetsView.TemplateRef> myTemplateRefs() {
+        return identityService.currentUser()
+                .map(u -> templateRepo.findByUserIdOrderByUpdatedAtDesc(u.getId()).stream()
+                        .map(t -> new JiraPushTargetsView.TemplateRef(t.getIntegrationId(),
+                                t.getJiraProjectKey(), t.getIssueTypeId(),
+                                trimToNull(t.getPriorityName()), trimToNull(t.getAssigneeName()),
+                                splitCsv(t.getLabels()), parseExtraFields(t.getExtraFieldsJson())))
+                        .toList())
+                // 异步线程/系统身份没有用户上下文：无模板可带（推送弹窗只在请求线程打开）
+                .orElse(List.of());
+    }
+
+    private String currentUserId() {
+        return identityService.currentUser()
+                .orElseThrow(() -> new DevMindException(ErrorCode.UNAUTHORIZED, "未登录"))
+                .getId();
+    }
+
+    private JiraPushTemplateView toTemplateView(JiraPushTemplateEntity e) {
         String integrationName = e.getIntegrationId() == null ? null
                 : integrationRepo.findById(e.getIntegrationId()).map(IntegrationEntity::getName).orElse(null);
-        return new JiraPushDefaultsView(e.getId(), e.getIntegrationId(), integrationName,
+        return new JiraPushTemplateView(e.getId(), e.getIntegrationId(), integrationName,
                 e.getJiraProjectKey(), e.getIssueTypeId(), e.getPriorityName(), e.getAssigneeName(),
                 splitCsv(e.getLabels()), parseExtraFields(e.getExtraFieldsJson()),
                 e.getCreatedAt(), e.getUpdatedAt());
     }
 
     /**
-     * 默认值 JSON → 取值表。空/脏数据一律当「没配」返回空表——一条坏配置不该让推送弹窗打不开
+     * 模板 JSON → 取值表。空/脏数据一律当「没配」返回空表——一条坏配置不该让推送弹窗打不开
      * （与 {@link #targets} 的降级口径一致：读侧失败不阻断主流程）。
      */
     private Map<String, Object> parseExtraFields(String json) {
@@ -466,50 +488,16 @@ public class JiraPushService {
     }
 
     /**
-     * 默认目标实例：**项目推送默认值指定的**（须在启用实例内）→ 同步配置指定的 → 候选首条。
-     *
-     * <p>推送默认值优先于同步配置，是为了让「Jira 推送」Tab 配的那一行**整行自洽**：
-     * 同步配置回答的是「本项目从哪个 Jira 项目拉 issue」，推送目标却被它顶掉的话，
-     * 实例/项目 key 与任务类型/动态字段会分属两个项目——那些 id 在另一个项目里要么不存在
-     * （吃 400），要么恰好撞上而静默推到错误的对象。没有推送默认值时行为不变。
-     *
-     * <p>推送默认值指向的实例被禁用/删除时静默回落，不报错——陈旧配置不该把弹窗打死。
+     * 默认目标实例：同步配置指定的（须在启用实例内）→ 候选首条。
      * 同步配置指定了但实例不在启用列表内 → 无默认目标。
      */
     private static IntegrationEntity resolveTarget(List<IntegrationEntity> instances,
-                                                   JiraSyncConfigEntity cfg,
-                                                   JiraPushDefaultsEntity pushDefaults) {
-        if (pushDefaults != null && pushDefaults.getIntegrationId() != null) {
-            IntegrationEntity hit = instances.stream()
-                    .filter(i -> i.getId().equals(pushDefaults.getIntegrationId())).findFirst().orElse(null);
-            if (hit != null) {
-                return hit;
-            }
-        }
+                                                   JiraSyncConfigEntity cfg) {
         if (cfg != null) {
             return instances.stream()
                     .filter(i -> i.getId().equals(cfg.getIntegrationId())).findFirst().orElse(null);
         }
         return instances.isEmpty() ? null : instances.get(0);
-    }
-
-    /**
-     * 项目推送默认值是否适用于已解析出的目标实例。无默认目标（target 为 null）时不适用：
-     * 没有目标就无从「带入」，此时弹窗本就提交不了。
-     */
-    private static boolean appliesTo(JiraPushDefaultsEntity pushDefaults, IntegrationEntity target) {
-        return pushDefaults != null && target != null
-                && pushDefaults.getIntegrationId() != null
-                && pushDefaults.getIntegrationId().equals(target.getId());
-    }
-
-    /**
-     * 默认 Jira 项目 key：项目推送默认值优先，未配时退同步配置（与 {@link #resolveTarget} 同序，
-     * 否则实例与 key 会分属两套配置）。两处都优先推送默认值，那一行才整行自洽。
-     */
-    private static String defaultProjectKey(JiraSyncConfigEntity cfg, JiraPushDefaultsEntity pushDefaults) {
-        String key = pushDefaults == null ? null : trimToNull(pushDefaults.getJiraProjectKey());
-        return key != null ? key : (cfg == null ? null : trimToNull(cfg.getJiraProjectKey()));
     }
 
     // ---------------- FR-03 推送 ----------------
@@ -972,25 +960,13 @@ public class JiraPushService {
     private record IdentityProbe(IntegrationService.WriteIdentity identity, String reason) {
     }
 
+    /** 弹窗默认值只取需求本体（同域口径见 {@link JiraPushTargetsView.Defaults}）；任务类型/经办人/动态字段由个人模板在前端带入 */
     private JiraPushTargetsView.Defaults defaults(RequirementEntity requirement,
-                                                  List<JiraOptionView> priorities,
-                                                  JiraPushDefaultsEntity pushDefaults) {
-        // 需求上显式填过的值优先——用户写过的不该被项目默认覆盖；需求没有的（任务类型/经办人/
-        // 动态字段）才从项目默认补。标签与优先级同理：本地为空/不命中词表才退项目默认值。
-        List<String> localLabels = splitCsv(requirement.getLabels());
-        List<String> labels = !localLabels.isEmpty()
-                ? localLabels
-                : (pushDefaults == null ? List.of() : splitCsv(pushDefaults.getLabels()));
-        String priority = prefillPriority(requirement.getPriority(), priorities);
-        if (priority == null && pushDefaults != null) {
-            priority = trimToNull(pushDefaults.getPriorityName());
-        }
+                                                  List<JiraOptionView> priorities) {
         return new JiraPushTargetsView.Defaults(requirement.getTitle(), requirement.getDescription(),
-                priority, labels,
-                requirement.getDueDate() == null ? null : requirement.getDueDate().toString(),
-                pushDefaults == null ? null : trimToNull(pushDefaults.getIssueTypeId()),
-                pushDefaults == null ? null : trimToNull(pushDefaults.getAssigneeName()),
-                pushDefaults == null ? Map.of() : parseExtraFields(pushDefaults.getExtraFieldsJson()));
+                prefillPriority(requirement.getPriority(), priorities),
+                splitCsv(requirement.getLabels()),
+                requirement.getDueDate() == null ? null : requirement.getDueDate().toString());
     }
 
     /**
