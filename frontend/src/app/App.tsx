@@ -43,7 +43,7 @@ import AttachmentsPage from '../features/attachments/pages/AttachmentsPage'
 import ReposAdminPage from '../features/repos/pages/ReposAdminPage'
 import LoginPage from '../features/auth/pages/LoginPage'
 import UserManagementPage from '../features/auth/pages/UserManagementPage'
-import PlatformAccountsPage from '../features/auth/pages/PlatformAccountsPage'
+import SettingsPage from '../features/auth/pages/SettingsPage'
 import RequireAuth from '../features/auth/RequireAuth'
 import RequireAdmin from '../features/auth/RequireAdmin'
 import { setCurrentProject } from './currentProjectStore'
@@ -79,9 +79,11 @@ export default function App() {
           <Route path="/" element={<Navigate to="/home" replace />} />
           {/* 个人聚合首页（默认落地页） */}
           <Route path="/home" element={<HomePage />} />
-          {/* CAP-35 个人设置：第三方账号（旧 Git 凭证路径兼容跳转） */}
-          <Route path="/me/accounts" element={<PlatformAccountsPage />} />
-          <Route path="/me/git-credentials" element={<Navigate to="/me/accounts" replace />} />
+          {/* 个人设置（个人信息/第三方账号/Jira 推送模板；旧 /me/accounts 与 Git 凭证路径兼容跳转） */}
+          <Route path="/me/settings" element={<Navigate to="/me/settings/profile" replace />} />
+          <Route path="/me/settings/:tab" element={<SettingsPage />} />
+          <Route path="/me/accounts" element={<Navigate to="/me/settings/accounts" replace />} />
+          <Route path="/me/git-credentials" element={<Navigate to="/me/settings/accounts" replace />} />
           {/* CAP-28 个人工作日志（个人级，不进项目上下文；会话/知识为页内视图） */}
           <Route path="/worklog" element={<WorklogPage />} />
           {/* CAP-30 通用问答（个人级，不进项目上下文） */}

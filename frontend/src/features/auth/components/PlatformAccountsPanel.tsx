@@ -1,4 +1,4 @@
-import { Badge, Button, Card, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
+import { Badge, Button, Flex, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
 import { ApiOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import {
@@ -10,7 +10,6 @@ import {
 import type { PlatformAccountUpsertRequest } from '../api'
 import type { PlatformAccount } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -18,11 +17,11 @@ const TYPE_COLOR: Record<string, string> = { GITLAB: 'orange', GITHUB: 'default'
 const TYPE_LABEL: Record<string, string> = { GITLAB: 'GitLab', GITHUB: 'GitHub', JIRA: 'Jira' }
 
 /**
- * CAP-35 我的第三方账号：一行 = 一个已启用的平台实例 + 我的绑定状态。
+ * CAP-35 我的第三方账号（个人设置子 tab 内容）：一行 = 一个已启用的平台实例 + 我的绑定状态。
  * 绑定个人账号后，WI push / 建 MR·PR / Jira 状态转换 / 登记工时以本人身份执行；
  * git 平台账号同时决定会话内 Agent 提交的 author/committer 署名。
  */
-export default function PlatformAccountsPage() {
+export default function PlatformAccountsPanel() {
   const [items, setItems] = useState<PlatformAccount[]>([])
   const [loading, setLoading] = useState(false)
   const [editTarget, setEditTarget] = useState<PlatformAccount | null>(null)
@@ -114,21 +113,17 @@ export default function PlatformAccountsPage() {
   }
 
   return (
-    <Card
-      style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
-      title="第三方账号"
-      extra={
+    <>
+      <Flex justify="space-between" align="flex-start" gap={16}>
+        <Typography.Paragraph type="secondary">
+          绑定你在各平台实例上的个人账号：会话内 Agent 提交以 git 平台账号的署名落 author/committer；
+          WI 分支推送、创建 MR/PR、Jira 状态转换与工时登记优先以你的个人身份执行，
+          未绑定时回退实例的平台（机器人）凭证。
+        </Typography.Paragraph>
         <Button icon={<ReloadOutlined />} onClick={reload}>
           刷新
         </Button>
-      }
-    >
-      <Typography.Paragraph type="secondary">
-        绑定你在各平台实例上的个人账号：会话内 Agent 提交以 git 平台账号的署名落 author/committer；
-        WI 分支推送、创建 MR/PR、Jira 状态转换与工时登记优先以你的个人身份执行，
-        未绑定时回退实例的平台（机器人）凭证。
-      </Typography.Paragraph>
+      </Flex>
       <Table<PlatformAccount>
         rowKey="integrationId"
         loading={loading}
@@ -286,6 +281,6 @@ export default function PlatformAccountsPage() {
           )}
         </Form>
       </Modal>
-    </Card>
+    </>
   )
 }
