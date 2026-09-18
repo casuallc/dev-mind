@@ -15,6 +15,10 @@ public interface ExternalLinkRepository extends JpaRepository<ExternalLinkEntity
     Optional<ExternalLinkEntity> findFirstByIntegrationIdAndInternalTypeAndInternalIdAndExternalTypeOrderByIdDesc(
             Long integrationId, String internalType, String internalId, String externalType);
 
+    /** 幂等查找（项目作用域，CAP-47 推送用）：某需求在本项目下已登记的某类外部对象 */
+    Optional<ExternalLinkEntity> findFirstByProjectIdAndInternalTypeAndInternalIdAndExternalTypeOrderByIdDesc(
+            String projectId, String internalType, String internalId, String externalType);
+
     /** 反向幂等查找：某外部对象（如 Jira issue key）在同一集成上是否已导入过 */
     Optional<ExternalLinkEntity> findFirstByIntegrationIdAndExternalTypeAndExternalKeyOrderByIdDesc(
             Long integrationId, String externalType, String externalKey);

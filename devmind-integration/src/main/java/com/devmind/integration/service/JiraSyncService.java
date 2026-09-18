@@ -71,6 +71,8 @@ public class JiraSyncService {
     private final AuditService auditService;
     private final DomainEventPublisher eventPublisher;
     private final List<IntegrationConnector> connectorList;
+    /** CAP-47 FR-06：与手动推送共抢的写锁（见 upsertGuarded 的锁边界说明） */
+    private final JiraWriteGuard writeGuard;
     /** 自注入代理：upsertIssue 的独立事务边界需要走代理（直接 this 调用会绕过 @Transactional） */
     private final ObjectProvider<JiraSyncService> self;
 
@@ -87,6 +89,7 @@ public class JiraSyncService {
                            AuditService auditService,
                            DomainEventPublisher eventPublisher,
                            List<IntegrationConnector> connectorList,
+                           JiraWriteGuard writeGuard,
                            ObjectProvider<JiraSyncService> self) {
         this.configRepo = configRepo;
         this.integrationRepo = integrationRepo;
@@ -98,6 +101,7 @@ public class JiraSyncService {
         this.auditService = auditService;
         this.eventPublisher = eventPublisher;
         this.connectorList = connectorList;
+        this.writeGuard = writeGuard;
         this.self = self;
     }
 
@@ -263,7 +267,7 @@ public class JiraSyncService {
                 }
                 for (JiraIssue issue : page.issues()) {
                     try {
-                        UpsertOutcome outcome = self.getObject().upsertIssue(cfg, integration, issue);
+                        UpsertOutcome outcome = upsertGuarded(cfg, integration, issue);
                         switch (outcome) {
                             case IMPORTED -> imported++;
                             case UPDATED -> updated++;
@@ -285,6 +289,15 @@ public class JiraSyncService {
             log.warn("Jira 同步失败: config={} err={}", configId, e.getMessage());
             return finish(cfg, imported, updated, skipped, pages, e.getMessage());
         }
+    }
+
+    /**
+     * CAP-47 FR-06：把 {@code @Transactional} 的 upsertIssue **整个**包进写锁——锁必须在事务提交之后
+     * 才释放。若把 synchronized 写进 upsertIssue 方法体内，事务提交发生在锁释放之后，并发的
+     * 「手动推送」在提交前仍读不到新 link，会为同一 issue 再建一条需求，锁形同虚设。
+     */
+    private UpsertOutcome upsertGuarded(JiraSyncConfigEntity cfg, IntegrationEntity integration, JiraIssue issue) {
+        return writeGuard.call(() -> self.getObject().upsertIssue(cfg, integration, issue));
     }
 
     /** 单 issue upsert（独立事务：需求 + link 要么一起落库要么都不落，避免半吊子状态破坏幂等） */

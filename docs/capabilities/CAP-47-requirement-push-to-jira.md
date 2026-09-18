@@ -68,7 +68,8 @@ SPI 从「只读 issue」扩到「可创建 issue」，后续工作日志未关�
 - **FR-05 按 issue 手动刷新**：`POST /api/projects/{pid}/requirements/{rid}/jira/refresh`
   （**只要求存在 ISSUE link，不要求 `source=JIRA`**）——
   按 link 的 `externalKey` 走 `getIssue` 拉回，刷新 `link.status` + 托管字段（复用 `RequirementService.syncFromJira`），
-  刷新失败只 warn 不回滚。这是 JQL 不覆盖该 issue 时的兜底通道。
+  失败按调用失败上报（`integration_calls` 记 `jira_refresh` 失败 + 错误原文透出，不静默成功），已刷新的字段不回滚。
+  这是 JQL 不覆盖该 issue 时的兜底通道。
   `push-targets.syncCovered`（存在同实例同项目 key 且 enabled 的 `jira_sync_configs`）为 false 时，
   前端提示「托管字段不会自动刷新，可用『从 Jira 刷新』手动拉取」。
 - **FR-06 并发与幂等**：`push` 为 `synchronized` 且**锁内重查 link**（`external_links` 无唯一约束，

@@ -246,7 +246,8 @@ class JiraSyncServiceTest {
             @Override public Iterator<JiraSyncService> iterator() { return List.of(holder[0]).iterator(); }
         };
         holder[0] = new JiraSyncService(configRepo, integrationRepo, linkRepo, integrationService,
-                null, requirementService, null, null, eventPublisher, List.of(connector), self);
+                null, requirementService, null, null, eventPublisher, List.of(connector),
+                new JiraWriteGuard(), self);
         service = holder[0];
     }
 

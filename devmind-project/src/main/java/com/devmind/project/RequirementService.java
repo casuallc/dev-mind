@@ -196,6 +196,20 @@ public class RequirementService {
         return toView(requirementRepo.save(e), null, null);
     }
 
+    /**
+     * CAP-47 FR-04 推送后转 Jira 托管：**只**置 source + externalKey（+ updatedAt）。
+     * 刻意不套用托管字段——推送参数不含 fixVersions/reporter，立即套用会拿 Jira 空值把本地已填值清空；
+     * 托管字段的收敛交给同步覆盖或「从 Jira 刷新」。本地 status/ownerId/docId 不动。
+     */
+    public void markPushedToJira(String projectId, String requirementId, String externalKey) {
+        RequirementEntity e = requireEntity(projectId, requirementId);
+        e.setSource(RequirementEntity.SOURCE_JIRA);
+        e.setExternalKey(externalKey);
+        e.setUpdatedAt(Instant.now());
+        requirementRepo.save(e);
+        log.info("需求已转 Jira 托管: {} {} key={}", code(e.getSeq()), requirementId, externalKey);
+    }
+
     private RequirementEntity newRequirement(String projectId) {
         RequirementEntity e = new RequirementEntity();
         e.setId(MainlineSupport.shortId());
