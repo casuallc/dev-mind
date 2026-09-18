@@ -45,6 +45,13 @@ interface Props {
 
 const EMPTY_OPTIONS: JiraPushOptions = { jiraProjects: [], issueTypes: [], priorities: [] }
 
+/** 本页会填的固定字段（id 对齐 Jira createmeta）——该创建界面上没有的要隐藏，否则存了也推不出去 */
+const FIXED_FIELD_LABEL: Record<string, string> = {
+  priority: '优先级',
+  assignee: '经办人',
+  labels: '标签',
+}
+
 export default function JiraPushDefaultsTab({ projectId }: Props) {
   const [form] = Form.useForm<FormValues>()
   const [instances, setInstances] = useState<Integration[]>([])
@@ -215,9 +222,10 @@ export default function JiraPushDefaultsTab({ projectId }: Props) {
       integrationId: v.integrationId,
       jiraProjectKey: v.jiraProjectKey,
       issueTypeId: v.issueTypeId,
-      priorityName: v.priorityName || undefined,
-      assigneeName: v.assigneeName?.trim() || undefined,
-      labels: (v.labels ?? []).map((l) => l.trim()).filter(Boolean),
+      // 创建界面上没有的字段不存：存下来也只会让推送时多一个被 Jira 拒的字段
+      priorityName: shows('priority') ? v.priorityName || undefined : undefined,
+      assigneeName: shows('assignee') ? v.assigneeName?.trim() || undefined : undefined,
+      labels: shows('labels') ? (v.labels ?? []).map((l) => l.trim()).filter(Boolean) : [],
       extraFields: Object.keys(extraFields).length ? extraFields : undefined,
     }
     setSaving(true)
@@ -231,6 +239,14 @@ export default function JiraPushDefaultsTab({ projectId }: Props) {
       setSaving(false)
     }
   }
+
+  // 元数据没拿到（error 或空 availableFields）时视作「未知」→ 固定字段一律照常显示
+  const available = createFields && !createFields.error && createFields.availableFields.length
+    ? new Set(createFields.availableFields)
+    : null
+  /** 该固定字段能不能写：Jira 的创建界面没有它（如某项目的「标签」），填/store 了也会被拒 */
+  const shows = (fieldId: string) => !available || available.has(fieldId)
+  const hiddenFixed = Object.keys(FIXED_FIELD_LABEL).filter((id) => !shows(id))
 
   if (loading) return <Spin />
 
@@ -298,51 +314,65 @@ export default function JiraPushDefaultsTab({ projectId }: Props) {
           />
         )}
 
-        <Form.Item label="优先级" name="priorityName"
-          tooltip="按实例词表校验；留空则用需求自身的优先级">
-          <Select
-            allowClear
-            loading={optionsLoading}
-            placeholder="可选"
-            optionFilterProp="label"
-            options={options.priorities.map((p) => ({ value: p.name, label: p.name }))}
-          />
-        </Form.Item>
-
-        <Form.Item label="经办人" name="assigneeName"
-          tooltip="Jira 的 assignee.name 要**登录名**（不是显示姓名）；搜索不可用时可直接输入用户名">
-          {assigneeDegraded ? (
-            <Input placeholder="请输入 Jira 用户名（该实例不支持搜索）" />
-          ) : (
+        {shows('priority') && (
+          <Form.Item label="优先级" name="priorityName"
+            tooltip="按实例词表校验；留空则用需求自身的优先级">
             <Select
-              showSearch
               allowClear
-              filterOption={false}
-              loading={searching}
-              placeholder="输入用户名/姓名搜索（留空取默认列表）"
-              onSearch={searchUsers}
-              onOpenChange={(o) => { if (o) searchUsers('') }}
-              notFoundContent={searching ? <Spin size="small" /> : null}
-              options={users.map((u) => ({
-                value: u.name,
-                label: u.displayName && u.displayName !== u.name
-                  ? `${u.displayName}（${u.name}）`
-                  : u.name,
-              }))}
+              loading={optionsLoading}
+              placeholder="可选"
+              optionFilterProp="label"
+              options={options.priorities.map((p) => ({ value: p.name, label: p.name }))}
             />
-          )}
-        </Form.Item>
+          </Form.Item>
+        )}
 
-        <Form.Item label="标签" name="labels"
-          rules={[{
-            validator: (_, v?: string[]) => {
-              const bad = (v ?? []).map((x) => x.trim()).find((x) => /[\s,]/.test(x))
-              return bad ? Promise.reject(new Error(`标签「${bad}」不能含空格或逗号`)) : Promise.resolve()
-            },
-          }]}
-          tooltip="留空则用需求自身的标签">
-          <Select mode="tags" open={false} placeholder="回车添加" />
-        </Form.Item>
+        {shows('assignee') && (
+          <Form.Item label="经办人" name="assigneeName"
+            tooltip="Jira 的 assignee.name 要**登录名**（不是显示姓名）；搜索不可用时可直接输入用户名">
+            {assigneeDegraded ? (
+              <Input placeholder="请输入 Jira 用户名（该实例不支持搜索）" />
+            ) : (
+              <Select
+                showSearch
+                allowClear
+                filterOption={false}
+                loading={searching}
+                placeholder="输入用户名/姓名搜索（留空取默认列表）"
+                onSearch={searchUsers}
+                onOpenChange={(o) => { if (o) searchUsers('') }}
+                notFoundContent={searching ? <Spin size="small" /> : null}
+                options={users.map((u) => ({
+                  value: u.name,
+                  label: u.displayName && u.displayName !== u.name
+                    ? `${u.displayName}（${u.name}）`
+                    : u.name,
+                }))}
+              />
+            )}
+          </Form.Item>
+        )}
+
+        {shows('labels') && (
+          <Form.Item label="标签" name="labels"
+            rules={[{
+              validator: (_, v?: string[]) => {
+                const bad = (v ?? []).map((x) => x.trim()).find((x) => /[\s,]/.test(x))
+                return bad ? Promise.reject(new Error(`标签「${bad}」不能含空格或逗号`)) : Promise.resolve()
+              },
+            }]}
+            tooltip="留空则用需求自身的标签">
+            <Select mode="tags" open={false} placeholder="回车添加" />
+          </Form.Item>
+        )}
+
+        {hiddenFixed.length > 0 && (
+          <div style={{ color: '#888', fontSize: 12, marginBottom: 16 }}>
+            Jira 的该任务类型创建界面上没有
+            {hiddenFixed.map((id) => `「${FIXED_FIELD_LABEL[id]}」`).join('')}
+            ，已隐藏——存了也会在推送时被 Jira 拒绝。
+          </div>
+        )}
 
         {createFieldsLoading && <Spin size="small" />}
         {createFields?.error && (

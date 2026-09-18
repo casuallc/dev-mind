@@ -142,9 +142,14 @@ export interface JiraCreateFields {
   requiredFixed: string[]
   /** 必填但渲染不了（用户选择器/级联选择等）：列出并禁用提交，好过提交后吃 400 */
   unsupported: JiraCreateField[]
+  /** 该创建界面上存在的字段 id 全集（createmeta 原始清单）。前面三个列表只讲「必填」，
+   *  讲不了「这个界面根本没有标签这个字段」——而 Jira 会因此直接拒掉 labels
+   *  （HTTP 400 Field 'labels' cannot be set. It is not on the appropriate screen）。
+   *  前端据此隐藏固定表单里 Jira 不接受的输入项；为空或 error 非空时视作「未知」，一律照常显示。 */
+  availableFields: string[]
   /** 字段 id → 预填值（只回填同域且命中实例候选值的本地值，目前只有 fixVersions） */
   prefill: Record<string, string[]>
-  /** 元数据拉取失败原因；非空时三个列表皆空且**不禁用提交** */
+  /** 元数据拉取失败原因；非空时各列表皆空且**不禁用提交** */
   error?: string
 }
 

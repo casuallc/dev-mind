@@ -907,6 +907,91 @@ class JiraPushServiceTest {
         assertTrue(connector.created.get(0).extraFields().isEmpty());
     }
 
+    // ---------------- 创建界面上没有的字段一律不写（用户撞到的 labels 400） ----------------
+    //
+    // 用户实报：HTTP 400 labels: Field 'labels' cannot be set. It is not on the appropriate
+    // screen, or unknown.——平台固定表单永远带 labels/priority，但某个项目的创建界面上可能
+    // 根本没有这些字段，于是推一次 400 一次。createmeta 的原始清单就是「这个界面上有什么」。
+
+    @Test
+    void 创建界面上没有的固定字段不写进payload() {
+        // 该项目的创建界面只有标题/描述/经办人；优先级与标签都不在上面
+        connector.createFields = List.of(
+                new CreateFieldRef("summary", "摘要", true, "string", null, List.of(), false),
+                new CreateFieldRef("description", "描述", true, "string", null, List.of(), false),
+                new CreateFieldRef("assignee", "经办人", true, "user", null, List.of(), false));
+
+        service.push("p1", "req-local", request("支持导出对账单"));
+
+        IssueSpec spec = connector.created.get(0);
+        assertEquals(List.of(), spec.labels());     // 需求本身有标签，但不写
+        assertNull(spec.priorityName());            // 需求优先级 High 也不写
+        assertEquals("lisi", spec.assigneeName());  // 界面上有的照写
+        assertNotNull(spec.description());
+    }
+
+    @Test
+    void 优先级不在创建界面上时不校验词表() {
+        // 校验了也没用——反正不写；校验不过反而把本来能推的堵死
+        connector.createFields = List.of(
+                new CreateFieldRef("summary", "摘要", true, "string", null, List.of(), false));
+
+        service.push("p1", "req-local", new JiraPushRequest(7L, "PROJ", "10001", "标题", "描述", BACKLINK,
+                "Urgent", null, List.of(), null, null));   // Urgent 不在词表（只有 High）
+
+        assertEquals(1, connector.created.size());
+        assertNull(connector.created.get(0).priorityName());
+    }
+
+    @Test
+    void 创建界面上没有的动态字段丢弃而不是发出去() {
+        connector.createFields = List.of(
+                new CreateFieldRef("summary", "摘要", true, "string", null, List.of(), false),
+                new CreateFieldRef("components", "模块", false, "array", "component", List.of(), false));
+
+        // 换过项目/类型后旧默认值可能指向已不在界面上的字段
+        service.push("p1", "req-local", pushRequest(Map.of(
+                "components", List.of(Map.of("id", "10000")),
+                "customfield_99999", "陈旧取值")));
+
+        assertEquals(Map.of("components", List.of(Map.of("id", "10000"))),
+                connector.created.get(0).extraFields());
+    }
+
+    /** 三个固定字段 + 一个动态字段都给上的推送入参（fail-open 用例要验「照写」） */
+    private static JiraPushRequest fullRequest() {
+        return new JiraPushRequest(7L, "PROJ", "10001", "支持导出对账单", "原始描述", BACKLINK,
+                "High", "lisi", List.of("ai", "账单"), "2026-10-31",
+                Map.of("customfield_99999", "x"));
+    }
+
+    @Test
+    void 元数据拉不到时固定字段与动态字段照常写() {
+        // 前端拉不到元数据会降级显示全部输入项，后端再跟着丢字段就成了两处都不敢写
+        connector.listCreateFieldsFails = true;
+
+        service.push("p1", "req-local", fullRequest());
+
+        IssueSpec spec = connector.created.get(0);
+        assertEquals(List.of("ai", "账单"), spec.labels());
+        assertEquals("High", spec.priorityName());
+        assertEquals(Map.of("customfield_99999", "x"), spec.extraFields());
+    }
+
+    @Test
+    void 元数据为空清单时视作未知而不是界面为空() {
+        // createmeta 至少含 summary/issuetype，真返回空只说明连接器没给出可用信息；
+        // 按空集裁剪会把所有字段连必填的一起丢光，比不裁更糟
+        connector.createFields = List.of();
+
+        service.push("p1", "req-local", fullRequest());
+
+        IssueSpec spec = connector.created.get(0);
+        assertEquals(List.of("ai", "账单"), spec.labels());
+        assertEquals("High", spec.priorityName());
+        assertEquals(Map.of("customfield_99999", "x"), spec.extraFields());
+    }
+
     // ---------------- FR-10 项目级推送默认值 ----------------
 
     private static JiraPushDefaultsRequest defaultsRequest(Map<String, Object> extraFields) {

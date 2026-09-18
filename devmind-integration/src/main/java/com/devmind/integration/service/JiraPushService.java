@@ -51,6 +51,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * CAP-47 自建需求手动推送到 Jira：候选项/默认值查询、推送（创建 issue + 登记 external_links + 转 Jira 托管）、
@@ -280,7 +281,7 @@ public class JiraPushService {
         } catch (Exception e) {
             log.warn("Jira 创建字段元数据拉取失败（降级为空表，提交不禁用）: integration={} project={} type={} err={}",
                     integration.getId(), key, typeId, e.getMessage());
-            return new JiraCreateFieldsView(List.of(), List.of(), List.of(), Map.of(), e.getMessage());
+            return new JiraCreateFieldsView(List.of(), List.of(), List.of(), List.of(), Map.of(), e.getMessage());
         }
         List<JiraCreateFieldView> fields = new ArrayList<>();
         List<String> requiredFixed = new ArrayList<>();
@@ -317,7 +318,9 @@ public class JiraPushService {
                 prefill.put(ref.id(), pre);
             }
         }
-        return new JiraCreateFieldsView(fields, requiredFixed, unsupported, prefill, null);
+        // createmeta 的原始清单就是「这个创建界面上有什么」，未过滤——固定字段能否写只由它说了算
+        List<String> availableFields = refs.stream().map(CreateFieldRef::id).distinct().toList();
+        return new JiraCreateFieldsView(fields, requiredFixed, unsupported, availableFields, prefill, null);
     }
 
     /**
@@ -682,12 +685,70 @@ public class JiraPushService {
         if (backlinkUrl.length() > MAX_BACKLINK) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "回链地址超长（≤" + MAX_BACKLINK + " 字符）");
         }
-        validatePriority(integration, token, req.priorityName());
+        // 创建界面上没有的字段一律不能写：Jira 直接拒「Field 'labels' cannot be set.
+        // It is not on the appropriate screen」。前端已按同一份 createmeta 隐藏了这些输入项，
+        // 这里再裁一道是为了元数据在前端拉取失败（降级显示全部输入项）时仍不会吃 400。
+        Set<String> onScreen = createScreenFieldIds(integration, token, projectKey, issueTypeId);
+        boolean priorityWritable = writable(onScreen, "priority");
+        if (priorityWritable) {
+            validatePriority(integration, token, req.priorityName());
+        }
         return new IssueSpec(projectKey, issueTypeId, summary,
-                composeDescription(req.description(), code(requirement.getSeq()), backlinkUrl),
-                trimToNull(req.priorityName()), trimToNull(req.assigneeName()),
-                normalizeLabels(req.labels()), parseDueDate(req.dueDate()),
-                normalizeExtraFields(req.extraFields()));
+                writable(onScreen, "description")
+                        ? composeDescription(req.description(), code(requirement.getSeq()), backlinkUrl) : null,
+                priorityWritable ? trimToNull(req.priorityName()) : null,
+                writable(onScreen, "assignee") ? trimToNull(req.assigneeName()) : null,
+                writable(onScreen, "labels") ? normalizeLabels(req.labels()) : List.of(),
+                writable(onScreen, "duedate") ? parseDueDate(req.dueDate()) : null,
+                dropUnwritable(normalizeExtraFields(req.extraFields()), onScreen, integration.getId()));
+    }
+
+    /**
+     * 该（项目 + 类型）创建界面上存在的字段 id 全集；**未知时返回 null**——调用方据此一律
+     * 照常提交（fail-open，与 FR-08 读接口降级同口径）：元数据读不到不该把本来能推的堵死。
+     *
+     * <p>两种「未知」：拉取抛错；拉取成功但清单为空。后者不是「这个界面什么都没有」——
+     * createmeta 至少含 summary/issuetype，真返回空只说明连接器没给出可用信息，按空集裁剪会把
+     * 所有字段连同必填的一起丢光，比不裁更糟。
+     */
+    private Set<String> createScreenFieldIds(IntegrationEntity integration, String token,
+                                             String projectKey, String issueTypeId) {
+        try {
+            Set<String> ids = connector().listCreateFields(integration, token, projectKey, issueTypeId)
+                    .stream().map(CreateFieldRef::id).collect(Collectors.toSet());
+            if (ids.isEmpty()) {
+                log.warn("Jira 创建字段元数据为空（不裁剪字段，按原样提交）: integration={} project={} type={}",
+                        integration.getId(), projectKey, issueTypeId);
+                return null;
+            }
+            return ids;
+        } catch (Exception e) {
+            log.warn("Jira 创建字段元数据拉取失败（不裁剪字段，按原样提交）: integration={} project={} type={} err={}",
+                    integration.getId(), projectKey, issueTypeId, e.getMessage());
+            return null;
+        }
+    }
+
+    /** {@code onScreen} 为 null（元数据未知）时一律视为可写 */
+    private static boolean writable(Set<String> onScreen, String fieldId) {
+        return onScreen == null || onScreen.contains(fieldId);
+    }
+
+    /** 动态字段同理：不在创建界面上的（换过项目/类型、或存量默认值指向旧配置）直接丢弃并留痕 */
+    private Map<String, Object> dropUnwritable(Map<String, Object> extraFields,
+                                               Set<String> onScreen, Long integrationId) {
+        if (onScreen == null || extraFields.isEmpty()) {
+            return extraFields;
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (var entry : extraFields.entrySet()) {
+            if (onScreen.contains(entry.getKey())) {
+                out.put(entry.getKey(), entry.getValue());
+            } else {
+                log.warn("动态字段不在创建界面上，已丢弃: integration={} field={}", integrationId, entry.getKey());
+            }
+        }
+        return out;
     }
 
     /**

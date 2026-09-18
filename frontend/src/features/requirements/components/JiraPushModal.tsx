@@ -256,12 +256,14 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
       jiraProjectKey: v.jiraProjectKey,
       issueTypeId: v.issueTypeId,
       summary: v.summary.trim(),
-      description: v.description?.trim() || undefined,
+      // 创建界面上没有的固定字段一律不带：值可能来自项目推送默认值或需求本体，
+      // 带上去 Jira 只会回一句「Field 'labels' cannot be set」
+      description: shows('description') ? v.description?.trim() || undefined : undefined,
       backlinkUrl,
-      priorityName: v.priorityName || undefined,
-      assigneeName: v.assigneeName?.trim() || undefined,
-      labels: (v.labels ?? []).map((l) => l.trim()).filter(Boolean),
-      dueDate: v.dueDate ? v.dueDate.format('YYYY-MM-DD') : undefined,
+      priorityName: shows('priority') ? v.priorityName || undefined : undefined,
+      assigneeName: shows('assignee') ? v.assigneeName?.trim() || undefined : undefined,
+      labels: shows('labels') ? (v.labels ?? []).map((l) => l.trim()).filter(Boolean) : [],
+      dueDate: shows('duedate') && v.dueDate ? v.dueDate.format('YYYY-MM-DD') : undefined,
       extraFields: Object.keys(extraFields).length ? extraFields : undefined,
     }
     setBusy(true)
@@ -289,8 +291,17 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
   const unsupported = createFields?.unsupported ?? []
   const blocked = !targets || noInstance || noIdentity || unsupported.length > 0
   const requiredFixed = createFields?.requiredFixed ?? []
-  /** 固定字段的必填规则：Jira 说必填时才加（否则白白挡住用户） */
-  const requiredRule = (fieldId: string) => (requiredFixed.includes(fieldId)
+  // 元数据没拿到（error 或空 availableFields）时视作「未知」→ 固定字段一律照常显示，
+  // 提交侧仍由服务端按 createmeta 裁剪，不会因为前端不知道而吃 400
+  const available = createFields && !createFields.error && createFields.availableFields.length
+    ? new Set(createFields.availableFields)
+    : null
+  /** 该固定字段能不能写：Jira 的创建界面没有它（如某项目的「标签」），填了也会被拒 */
+  const shows = (fieldId: string) => !available || available.has(fieldId)
+  /** 被 Jira 隐藏掉的固定字段（用于提示，别让输入项无声消失） */
+  const hiddenFixed = Object.keys(FIXED_FIELD_LABEL).filter((id) => id !== 'summary' && !shows(id))
+  /** 固定字段的必填规则：Jira 说必填时才加（否则白白挡住用户）；字段不存在时不该拦 */
+  const requiredRule = (fieldId: string) => (shows(fieldId) && requiredFixed.includes(fieldId)
     ? [{ required: true, message: `Jira 要求填写${FIXED_FIELD_LABEL[fieldId]}` }]
     : [])
 
@@ -425,67 +436,85 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
               <Input placeholder="Jira issue 标题" />
             </Form.Item>
 
-            <Form.Item label="描述" name="description"
-              rules={requiredRule('description')}
-              tooltip="按纯文本推送；若含 !name.png! 这类内容，Jira 侧会按 wiki 图片语法解析">
-              <Input.TextArea rows={4} placeholder="可选；留空则只推送下方回链" />
-            </Form.Item>
+            {shows('description') && (
+              <Form.Item label="描述" name="description"
+                rules={requiredRule('description')}
+                tooltip="按纯文本推送；若含 !name.png! 这类内容，Jira 侧会按 wiki 图片语法解析">
+                <Input.TextArea rows={4} placeholder="可选；留空则只推送下方回链" />
+              </Form.Item>
+            )}
 
-            <Form.Item label="优先级" name="priorityName"
-              rules={requiredRule('priority')}
-              tooltip="按实例词表校验；词表不可用时服务端跳过校验">
-              <Select
-                allowClear
-                loading={optionsLoading}
-                placeholder="可选"
-                optionFilterProp="label"
-                options={options.priorities.map((p) => ({ value: p.name, label: p.name }))}
-              />
-            </Form.Item>
-
-            <Form.Item label="标签" name="labels"
-              rules={[
-                ...requiredRule('labels'),
-                {
-                  validator: (_, v?: string[]) => {
-                    const bad = (v ?? []).map((x) => x.trim()).find((x) => /[\s,]/.test(x))
-                    return bad ? Promise.reject(new Error(`标签「${bad}」不能含空格或逗号`)) : Promise.resolve()
-                  },
-                },
-              ]}
-              tooltip="回车添加；不打回 Jira 侧已有标签">
-              {/* 不设 tokenSeparators：标签按整串存储（后端逗号拼接），防止逗号被拆 */}
-              <Select mode="tags" open={false} placeholder="回车添加" />
-            </Form.Item>
-
-            <Form.Item label="经办人" name="assigneeName"
-              rules={requiredRule('assignee')}
-              tooltip="Jira 的 assignee.name 要**登录名**（不是显示姓名）；搜索不可用时可直接输入用户名">
-              {assigneeDegraded ? (
-                <Input placeholder="请输入 Jira 用户名（该实例不支持搜索）" />
-              ) : (
+            {shows('priority') && (
+              <Form.Item label="优先级" name="priorityName"
+                rules={requiredRule('priority')}
+                tooltip="按实例词表校验；词表不可用时服务端跳过校验">
                 <Select
-                  showSearch
                   allowClear
-                  filterOption={false}
-                  loading={searching}
-                  placeholder="输入用户名/姓名搜索（留空取默认列表）"
-                  onSearch={searchUsers}
-                  onOpenChange={(o) => { if (o) searchUsers('') }}
-                  notFoundContent={searching ? <Spin size="small" /> : null}
-                  options={users.map((u) => ({
-                    value: u.name,
-                    label: u.displayName && u.displayName !== u.name
-                      ? `${u.displayName}（${u.name}）`
-                      : u.name,
-                  }))}
+                  loading={optionsLoading}
+                  placeholder="可选"
+                  optionFilterProp="label"
+                  options={options.priorities.map((p) => ({ value: p.name, label: p.name }))}
                 />
-              )}
-            </Form.Item>
+              </Form.Item>
+            )}
 
-            <Form.Item label="截止日期" name="dueDate" rules={requiredRule('duedate')}>
-              <DatePicker style={{ width: '100%' }} placeholder="可选" />
-            </Form.Item>
+            {shows('labels') && (
+              <Form.Item label="标签" name="labels"
+                rules={[
+                  ...requiredRule('labels'),
+                  {
+                    validator: (_, v?: string[]) => {
+                      const bad = (v ?? []).map((x) => x.trim()).find((x) => /[\s,]/.test(x))
+                      return bad ? Promise.reject(new Error(`标签「${bad}」不能含空格或逗号`)) : Promise.resolve()
+                    },
+                  },
+                ]}
+                tooltip="回车添加；不打回 Jira 侧已有标签">
+                {/* 不设 tokenSeparators：标签按整串存储（后端逗号拼接），防止逗号被拆 */}
+                <Select mode="tags" open={false} placeholder="回车添加" />
+              </Form.Item>
+            )}
+
+            {shows('assignee') && (
+              <Form.Item label="经办人" name="assigneeName"
+                rules={requiredRule('assignee')}
+                tooltip="Jira 的 assignee.name 要**登录名**（不是显示姓名）；搜索不可用时可直接输入用户名">
+                {assigneeDegraded ? (
+                  <Input placeholder="请输入 Jira 用户名（该实例不支持搜索）" />
+                ) : (
+                  <Select
+                    showSearch
+                    allowClear
+                    filterOption={false}
+                    loading={searching}
+                    placeholder="输入用户名/姓名搜索（留空取默认列表）"
+                    onSearch={searchUsers}
+                    onOpenChange={(o) => { if (o) searchUsers('') }}
+                    notFoundContent={searching ? <Spin size="small" /> : null}
+                    options={users.map((u) => ({
+                      value: u.name,
+                      label: u.displayName && u.displayName !== u.name
+                        ? `${u.displayName}（${u.name}）`
+                        : u.name,
+                    }))}
+                  />
+                )}
+              </Form.Item>
+            )}
+
+            {shows('duedate') && (
+              <Form.Item label="截止日期" name="dueDate" rules={requiredRule('duedate')}>
+                <DatePicker style={{ width: '100%' }} placeholder="可选" />
+              </Form.Item>
+            )}
+
+            {hiddenFixed.length > 0 && (
+              <div style={{ color: '#888', fontSize: 12, marginBottom: 16 }}>
+                Jira 的该任务类型创建界面上没有
+                {hiddenFixed.map((id) => `「${FIXED_FIELD_LABEL[id]}」`).join('')}
+                ，已隐藏——填了也会被 Jira 拒绝。
+              </div>
+            )}
 
             {/* FR-08：该任务类型在 Jira 侧要求的字段（createmeta 拉回，随类型变） */}
             {createFieldsLoading && <Spin size="small" />}
