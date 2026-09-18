@@ -62,6 +62,7 @@
 | [CAP-44](CAP-44-knowledge-base-rag.md) | 知识库容器化与向量检索 | 管理 | 知识库成为一等容器（scope 归属+inject_mode FULL/RAG），条目重构归属并分块向量化（JSON CLOB+Java 余弦，无 pgvector），检索 SPI+降级 LIKE，shared MarkdownEditor（升级 CAP-04，打底 CAP-45/46） |
 | [CAP-45](CAP-45-feishu-knowledge-import.md) | 飞书文档对接 | 管理 | integrations 增 FEISHU（appId/appSecret 双行密文），wiki/docx/doc 拉取+blocks→markdown，手动选文档导入知识库（externalId 判重+contentHash 变更检测+手动重同步），条目走 CAP-44 摄入管线自动索引 |
 | [CAP-46](CAP-46-kb-chat.md) | 知识库 AI 会话 | 会话 | 通用问答绑定知识库：启动注入库概览、每轮提问经 KnowledgeRetriever 检索包 `<knowledge-context>` 前缀注入（无命中/异常原样降级），前端新问答库选择器+库详情发起会话入口 |
+| [CAP-47](CAP-47-requirement-push-to-jira.md) | 自建需求手动推送到 Jira | 底座 | 需求详情页手动推送 LOCAL 需求建 Jira issue（实例/项目/任务类型/优先级/标签/经办人/截止日期可选，描述附平台回链），登记 External Link 并转 JIRA 托管（SPI 补 createIssue，零表结构变更） |
 
 ## 依赖关系
 
@@ -110,6 +111,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-38 需求流程简化依赖 CAP-13/14/15/37：分析/方案拆独立 Tab 且可跳过（需求实体 analysis_skipped/design_skipped 持久化），方案产出登记后自动起拆分会话、wi-plan.json 自动固化为正式 WI（删除 split-draft/confirm-split 端点与流程 Tab，调整 CAP-37 FR-04、取代 CAP-14 FR-06/07 的人工确认草稿），sessions 关联需求自动建 DEVELOPMENT WI（终态需求 409）。
 - CAP-39 会话产出手动推送依赖 CAP-37/34/03/13/38：collect_output 帧（协议 v4，版本门控）让进行中会话即时回传 `.devmind/output/`，session 模块开放 outputs 读取/同步端点，flow 模块新增 publish 端点把产出落成关联需求文档（create/update 版本化，design 同步落 Design(DRAFT)，登记 ANALYSIS/DOC 产物）；会话详情页裁撤，独有操作迁工作台「更多」下拉，全站深链统一 `/sessions?sid=`。
 - CAP-40 需求附件投送依赖 CAP-32/19/33/34/37：需求 description 引用的本地附件（AttachmentContentResolver 扩 resolveAny）与 Jira 内嵌图（新 SPI IssueAttachmentResolver 复用 FR-09 下载链）由 devmind-flow 的 ContextProvider 打进 ContextPackage（schema v2 增 inputs，老 runner fail-visible），runner 物化 `.devmind/input/`，挂 requirementId 的会话 agent 用 Read 读图。
+- CAP-47 需求推送 Jira 依赖 CAP-13/18/19/35：把 CAP-19 的单向拉取补成双向——自建需求手动建 Jira issue 并登记 `external_links(REQUIREMENT↔ISSUE)` 后转 JIRA 托管，复用 CAP-19 的同步/回写链路与 CAP-35 的写身份链；SPI 补 `createIssue`/`getIssue`/任务类型·优先级·可指派用户查询五个 default 方法（顺带满足 CAP-28 FR-07 的未实现依赖），零表结构变更。
 - CAP-42 每用户固定工作区依赖 CAP-25/31/34/35/41：launch 帧 workspaceOwner（协议 v7 门控）把 runner 代码工作区固定到 {项目}/{登录用户}（克隆缓存+固定 worktree），结束降级为未提交告警不 push 不删，收口改为页面手动触发（合并基线+push+删 worktree 的 workspace_finalize 帧），编排链路按 WI/需求归属人解析目录归属。
 
 ## 组装方式（后续流程层）
