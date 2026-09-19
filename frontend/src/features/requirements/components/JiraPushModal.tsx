@@ -14,7 +14,7 @@
 //
 // FR-10 个人推送模板：push-targets 一次带回当前用户全部模板，「实例+项目+类型」选定/切换时
 // 本地匹配并带入 优先级/经办人/标签/动态字段——只补缺（需求/表单已有的值不覆盖），动态字段除外
-// （它随类型而换，换类型总是重置后按模板重填）。模板在「个人设置 → Jira 推送模板」维护。
+// （它随类型而换，换类型总是重置后按模板重填）。模板在「设置 → Jira 推送模板」维护。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert,
@@ -390,7 +390,7 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
                   type="error"
                   showIcon
                   message="该实例没有可用凭据，无法创建 issue"
-                  description="实例既未配置机器人凭证，当前账号也没绑定该实例的个人账号。请到「个人设置 → 第三方账号」绑定后重试。"
+                  description="实例既未配置机器人凭证，当前账号也没绑定该实例的个人账号。请到「设置 → 第三方账号」绑定后重试。"
                 />
               ) : (
                 <Alert

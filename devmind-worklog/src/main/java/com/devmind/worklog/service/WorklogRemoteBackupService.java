@@ -93,6 +93,6 @@ public class WorklogRemoteBackupService {
         }
         return gateway.resolveToken(me, host, null)
                 .orElseThrow(() -> new DevMindException(ErrorCode.CONFLICT,
-                        "未找到 " + host + " 的个人访问令牌（请先在 个人中心-平台账号 配置该 host 的 PAT）"));
+                        "未找到 " + host + " 的个人访问令牌（请先在「设置 → 第三方账号」配置该 host 的 PAT）"));
     }
 }

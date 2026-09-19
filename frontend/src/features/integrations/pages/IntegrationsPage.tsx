@@ -1,6 +1,6 @@
 // CAP-18/19/35 平台集成管理页（仅 ADMIN）：平台实例登记 + 可选机器人凭证 + 连接测试 + 启停。
 // 机器人凭证仅供自动化（克隆、Jira 轮询、打 tag/Release）；人触发的写操作优先用操作人在
-// 「个人设置 → 第三方账号」绑定的个人账号（CAP-35）。
+// 「设置 → 第三方账号」绑定的个人账号（CAP-35）。
 import { useCallback, useEffect, useState } from 'react'
 import {
   Badge,
@@ -255,7 +255,7 @@ export default function IntegrationsPage() {
       <Typography.Paragraph type="secondary">
         登记 GitLab/GitHub/Jira/飞书 平台实例。平台凭证（机器人）选填：供克隆、Jira 轮询同步、打 tag/Release、
         飞书文档导入知识库等自动化使用；人触发的写操作（推送分支、建 MR/PR、Jira 状态/工时回写）优先使用操作人在
-        「个人设置 → 第三方账号」绑定的个人账号。实例启用后，用户即可在个人设置中绑定自己的账号。
+        「设置 → 第三方账号」绑定的个人账号。实例启用后，用户即可在「设置」中绑定自己的账号。
       </Typography.Paragraph>
       <Table<Integration>
         rowKey="id"

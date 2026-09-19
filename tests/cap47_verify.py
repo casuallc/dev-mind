@@ -23,7 +23,7 @@ imported=0、需求总数不变（防「推送过的 issue 被同步重复建成
 推送成功且 payload 是 Jira 取值形态（[{id}] / {originalEstimate,remainingEstimate}，空值不写）→
 护栏：覆盖 description 类字段/取值超两层被 400 拦在本地 → 新端点 404 时退旧端点（清单等价，候选值
 走 name 回退）→ 两端点皆 500 时降级为空表 + error（不禁用提交）→ **FR-10 个人推送模板**：未登录 401
-→ 非 ADMIN 用户 B 可用（个人设置入口）→ 四元组 upsert（同组合整行覆盖不新增行、不同组合各自成行、
+→ 非 ADMIN 用户 B 可用（设置页入口）→ 四元组 upsert（同组合整行覆盖不新增行、不同组合各自成行、
 缺组合键 400）→ 动态字段沿用推送口径护栏 → **用户隔离**（B 看不到也删不掉 A 的模板、B 的 targets
 不带模板）→ A 的 push-targets 一次带回全部模板 → 配置页用的三个项目无关选项端点 → 删除本人模板。
 
@@ -614,7 +614,7 @@ try:
     check("未登录保存模板 401", st == 401, "%s %s" % (st, anon2))
     TOKEN = saved_token
 
-    # 13b. 用户 B（非 ADMIN）：普通用户的配置入口是「个人设置 → Jira 推送模板」
+    # 13b. 用户 B（非 ADMIN）：普通用户的配置入口是「设置 → Jira 推送模板」
     user_b = "e2e47b" + MARK.rsplit("-", 1)[-1]
     st, ub = call("POST", "/auth/users", {
         "username": user_b, "displayName": "E2E 用户B", "password": "e2e-pass-47", "role": "DEVELOPER"})

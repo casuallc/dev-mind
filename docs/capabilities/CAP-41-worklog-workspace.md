@@ -167,7 +167,7 @@ GET/PUT /api/worklog/settings               + dailyTemplateMd / weeklyTemplateMd
   存绑定信息，null=未绑定、空白串=解绑；URL 仅 http/https/file（ssh 拒绝，口径同
   GitRemoteOps/runner 侧）。凭证不落库——复用 CAP-35 个人 PAT：推送时按 URL host 经
   `RepoGitGateway.resolveToken(username, host, null)` 解析，缺失 409 引导去
-  「个人中心-平台账号」配置。
+  「设置 → 第三方账号」配置。
 - **FR-09 手动推送**：前端空间条「推送远端」按钮（未绑定/节点离线置灰+tooltip 引导）
   → `POST /api/worklog/workspace/push` → 服务端下发 `worklog_push` 帧（协议 v6，
   `supports()` 门控，老 runner 409 提示升级）→ runner 对持久工作区执行

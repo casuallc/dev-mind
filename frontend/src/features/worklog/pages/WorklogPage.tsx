@@ -853,7 +853,7 @@ export default function WorklogPage() {
           <Form.Item
             name="remoteUrl"
             label="远程仓库备份（URL）"
-            extra="把日报/周报所在的工作日志空间备份到该远端（点空间条上的「推送远端」手动同步）。仅 http/https；凭证按 URL host 匹配「个人中心-平台账号」的个人访问令牌。留空 = 解绑。"
+            extra="把日报/周报所在的工作日志空间备份到该远端（点空间条上的「推送远端」手动同步）。仅 http/https；凭证按 URL host 匹配「设置 → 第三方账号」的个人访问令牌。留空 = 解绑。"
           >
             <Input placeholder="https://git.example.com/<你>/worklog.git" allowClear />
           </Form.Item>
