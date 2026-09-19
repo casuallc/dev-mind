@@ -1,4 +1,4 @@
-import { Button, Descriptions, Divider, Form, Input, Tag, message } from 'antd'
+import { Button, Descriptions, Divider, Form, Input, Tag, Typography, message } from 'antd'
 import { useState, useSyncExternalStore } from 'react'
 import { changePassword } from '../api'
 import { getUserSnapshot, subscribeAuth } from '../authStore'
@@ -10,7 +10,7 @@ const ROLE_LABELS: Record<string, { color: string; text: string }> = {
   VIEWER: { color: 'default', text: 'VIEWER' },
 }
 
-/** 个人设置「个人信息」子 tab：账号信息只读展示 + 修改密码（原 UserMenu 弹窗搬入）。 */
+/** 设置页「个人信息」视图：账号信息只读展示 + 修改密码（原 UserMenu 弹窗搬入）。 */
 export default function ProfilePanel() {
   const user = useSyncExternalStore(subscribeAuth, getUserSnapshot)
   const [form] = Form.useForm<{ oldPassword: string; newPassword: string }>()
@@ -33,6 +33,9 @@ export default function ProfilePanel() {
   const role = ROLE_LABELS[user.role] ?? { color: 'default', text: user.role }
   return (
     <div style={{ maxWidth: 480 }}>
+      <Typography.Paragraph type="secondary">
+        你的账号信息（用户名 / 显示名 / 角色）与登录密码修改入口。
+      </Typography.Paragraph>
       <Descriptions
         column={1}
         items={[

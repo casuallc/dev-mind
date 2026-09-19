@@ -78,7 +78,7 @@ export default function App() {
           <Route path="/" element={<Navigate to="/home" replace />} />
           {/* 个人聚合首页（默认落地页） */}
           <Route path="/home" element={<HomePage />} />
-          {/* 个人设置（个人信息/第三方账号/Jira 推送模板；旧 /me/accounts 与 Git 凭证路径兼容跳转） */}
+          {/* 设置（一级导航「设置」；页内视图 = 个人信息/第三方账号/Jira 推送模板；旧 /me/accounts 与 Git 凭证路径兼容跳转） */}
           <Route path="/me/settings" element={<Navigate to="/me/settings/profile" replace />} />
           <Route path="/me/settings/:tab" element={<SettingsPage />} />
           <Route path="/me/accounts" element={<Navigate to="/me/settings/accounts" replace />} />

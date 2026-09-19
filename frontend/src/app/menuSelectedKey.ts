@@ -29,6 +29,7 @@ const TOPNAV_PREFIXES: Array<[string, string]> = [
   ['/home', '/home'],
   ['/chats', '/chats'],
   ['/worklog', '/worklog'],
+  ['/me/settings', '/me/settings'], // 一级导航「设置」
   ['/overview', '/overview'],
   ['/sessions', '/overview'],
   ['/requirements', '/overview'],

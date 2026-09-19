@@ -1,35 +1,54 @@
-// 个人设置页（/me/settings/:tab）：账号相关的个人偏好统一收口在这里，
-// 子 tab 可扩展（个人信息 / 第三方账号 / Jira 推送模板…）。入口在 Header 用户下拉。
-import { Card, Tabs } from 'antd'
+// 设置页（/me/settings/:tab，顶部一级导航「设置」）：账号相关的个人偏好统一收口在这里。
+// 布局对齐工作日志（布局约定第 1/2/3 条）：Card 头部 =「页面名 + Segmented 页内视图」，
+// 操作按钮一律随视图进 Card extra，各视图只管 body（说明文字 + 表格/表单）。
+import { Button, Card, Space } from 'antd'
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import PlatformAccountsPanel from '../components/PlatformAccountsPanel'
+import PlatformAccountsPanel, { type PlatformAccountsPanelHandle } from '../components/PlatformAccountsPanel'
 import ProfilePanel from '../components/ProfilePanel'
-import JiraPushTemplatesPanel from '../../integrations/components/JiraPushTemplatesPanel'
+import JiraPushTemplatesPanel, {
+  type JiraPushTemplatesPanelHandle,
+} from '../../integrations/components/JiraPushTemplatesPanel'
+import SettingsViewSwitch, { asSettingsTab, type SettingsTab } from '../components/SettingsViewSwitch'
 import { pageCardBodyScrollStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
-
-const TAB_KEYS = ['profile', 'accounts', 'jira-templates'] as const
-type TabKey = (typeof TAB_KEYS)[number]
-
-function asTab(raw: string | undefined): TabKey {
-  return (TAB_KEYS as readonly string[]).includes(raw ?? '') ? (raw as TabKey) : 'profile'
-}
 
 export default function SettingsPage() {
   const { tab } = useParams<{ tab: string }>()
   const navigate = useNavigate()
+  const view = asSettingsTab(tab)
+  // 工具栏在 extra 里，刷新/新建要触发面板内部动作 → 面板以 ref 暴露最小句柄
+  const accountsRef = useRef<PlatformAccountsPanelHandle>(null)
+  const templatesRef = useRef<JiraPushTemplatesPanelHandle>(null)
+
+  const extraByView: Partial<Record<SettingsTab, React.ReactNode>> = {
+    accounts: (
+      <Button icon={<ReloadOutlined />} onClick={() => accountsRef.current?.reload()}>
+        刷新
+      </Button>
+    ),
+    'jira-templates': (
+      <>
+        <Button icon={<ReloadOutlined />} onClick={() => templatesRef.current?.reload()}>
+          刷新
+        </Button>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => templatesRef.current?.openCreate()}>
+          新建模板
+        </Button>
+      </>
+    ),
+  }
+
   return (
-    <Card style={pageCardStyle} styles={{ body: pageCardBodyScrollStyle }} title="个人设置">
-      <Tabs
-        activeKey={asTab(tab)}
-        onChange={(k) => navigate(`/me/settings/${k}`)}
-        items={[
-          { key: 'profile', label: '个人信息', children: <ProfilePanel /> },
-          // CAP-35：第三方平台账号绑定（原 /me/accounts 单页）
-          { key: 'accounts', label: '第三方账号', children: <PlatformAccountsPanel /> },
-          // CAP-47 FR-10：个人 Jira 推送模板（按 Jira 项目 + 任务类型）
-          { key: 'jira-templates', label: 'Jira 推送模板', children: <JiraPushTemplatesPanel /> },
-        ]}
-      />
+    <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyScrollStyle }}
+      title={<SettingsViewSwitch value={view} onChange={(v) => navigate(`/me/settings/${v}`)} />}
+      extra={<Space>{extraByView[view]}</Space>}
+    >
+      {view === 'profile' && <ProfilePanel />}
+      {view === 'accounts' && <PlatformAccountsPanel ref={accountsRef} />}
+      {view === 'jira-templates' && <JiraPushTemplatesPanel ref={templatesRef} />}
     </Card>
   )
 }

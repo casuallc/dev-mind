@@ -8,6 +8,7 @@ import {
   FolderOutlined,
   HomeOutlined,
   SafetyCertificateOutlined,
+  SettingOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useSyncExternalStore } from 'react'
@@ -74,6 +75,8 @@ export default function AppLayout() {
             { key: '/overview', icon: <FolderOutlined />, label: '项目' },
             { key: '/chats', icon: <CommentOutlined />, label: 'AI 问答' },
             { key: '/worklog', icon: <FieldTimeOutlined />, label: '工作日志' },
+            // 个人设置已从用户下拉上提为一级导航（页内视图切换在页面 Card 头部）
+            { key: '/me/settings', icon: <SettingOutlined />, label: '设置' },
           ]}
         />
         {/* 管理功能集中在 /admin 后台，仅 ADMIN 可见入口 */}

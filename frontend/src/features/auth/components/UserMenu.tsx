@@ -1,5 +1,5 @@
 import { Dropdown, Space, Tag, Typography } from 'antd'
-import { LogoutOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons'
+import { LogoutOutlined, UserOutlined } from '@ant-design/icons'
 import { useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { logout } from '../api'
@@ -10,7 +10,8 @@ const ROLE_LABELS: Record<string, { color: string; text: string }> = {
   DEVELOPER: { color: 'blue', text: 'DEVELOPER' },
   VIEWER: { color: 'default', text: 'VIEWER' },
 }
-/** CAP-01 Header 用户区：当前用户 + 角色 + 下拉（个人设置 / 退出登录）。 */
+/** CAP-01 Header 用户区：当前用户 + 角色 + 下拉（退出登录）。
+ * 个人信息 / 第三方账号 / Jira 推送模板统一收进一级导航「设置」页（/me/settings），不再走下拉开入口。 */
 export default function UserMenu() {
   const user = useSyncExternalStore(subscribeAuth, getUserSnapshot)
   const navigate = useNavigate()
@@ -29,12 +30,7 @@ export default function UserMenu() {
   return (
     <Dropdown
       menu={{
-        items: [
-          // 个人信息 / 第三方账号（CAP-35）/ Jira 推送模板（CAP-47 FR-10）统一收进个人设置页
-          { key: 'settings', icon: <SettingOutlined />, label: '个人设置', onClick: () => navigate('/me/settings') },
-          { type: 'divider' },
-          { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', onClick: onLogout },
-        ],
+        items: [{ key: 'logout', icon: <LogoutOutlined />, label: '退出登录', onClick: onLogout }],
       }}
     >
       <Space style={{ cursor: 'pointer' }}>

@@ -6,11 +6,10 @@
 //
 // 编辑表单级联失效边界（与推送弹窗同）：切实例清空其后全部字段（任务类型 id/优先级词表/
 // 经办人/动态字段取值都是实例内的值，跨实例沿用会静默配错）；切项目只清任务类型与其后的动态字段。
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react'
 import {
   Alert,
   Button,
-  Flex,
   Form,
   Input,
   Modal,
@@ -22,7 +21,6 @@ import {
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { Link } from 'react-router-dom'
 import {
   deleteJiraPushTemplate,
@@ -60,7 +58,13 @@ type FormValues = Omit<JiraPushTemplateInput, 'extraFields'> & {
   extraFields?: Record<string, unknown>
 }
 
-export default function JiraPushTemplatesPanel() {
+/** 页面壳（SettingsPage）工具栏在 Card extra，靠该句柄触发刷新 / 打开新建弹窗 */
+export interface JiraPushTemplatesPanelHandle {
+  reload: () => void
+  openCreate: () => void
+}
+
+export default function JiraPushTemplatesPanel({ ref }: { ref?: Ref<JiraPushTemplatesPanelHandle> }) {
   const [templates, setTemplates] = useState<JiraPushTemplate[]>([])
   const [loading, setLoading] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
@@ -75,6 +79,8 @@ export default function JiraPushTemplatesPanel() {
   }, [])
 
   useEffect(reload, [reload])
+
+  useImperativeHandle(ref, () => ({ reload, openCreate: () => setEditOpen(true) }))
 
   const onDelete = (row: JiraPushTemplate) => {
     Modal.confirm({
@@ -101,20 +107,10 @@ export default function JiraPushTemplatesPanel() {
 
   return (
     <>
-      <Flex justify="space-between" align="flex-start" gap={16}>
-        <Typography.Paragraph type="secondary">
-          按「Jira 项目 + 任务类型」配置你常用的推送默认值：推送需求到 Jira 时选定同一组合，
-          弹窗自动带入这些值（可临时改）。只保存取值本身，可选值随 Jira 实时拉取。
-        </Typography.Paragraph>
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={reload}>
-            刷新
-          </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditOpen(true)}>
-            新建模板
-          </Button>
-        </Space>
-      </Flex>
+      <Typography.Paragraph type="secondary">
+        按「Jira 项目 + 任务类型」配置你常用的推送默认值：推送需求到 Jira 时选定同一组合，
+        弹窗自动带入这些值（可临时改）。只保存取值本身，可选值随 Jira 实时拉取。
+      </Typography.Paragraph>
       <Table<JiraPushTemplate>
         rowKey="id"
         loading={loading}
