@@ -2,10 +2,11 @@ package com.devmind.model;
 
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
-import com.devmind.common.model.EmbeddingCallException;
+import com.devmind.common.model.ModelCallException;
 import com.devmind.common.model.ModelEndpointProvider;
 import com.devmind.common.model.ModelEndpointUsageProvider;
 import com.devmind.common.model.ModelEndpointView;
+import com.devmind.common.model.OpenAiCompatChat;
 import com.devmind.common.model.OpenAiCompatEmbeddings;
 import com.devmind.model.config.EmbeddingSeedProperties;
 import com.devmind.model.dto.EndpointTestResult;
@@ -44,6 +45,10 @@ public class ModelEndpointService implements ModelEndpointProvider {
     static final int DEFAULT_BATCH_SIZE = 32;
     /** 探针文本：只为拿回一个向量看维度，内容无意义 */
     static final String PROBE_TEXT = "__devmind_probe__";
+    /** FR-11 对话探针文本：要求模型"回话"，好把回复摘要一并展示出来（证明它真的是个对话模型） */
+    static final String CHAT_PROBE_TEXT = "请回复两个字：可用";
+    /** 对话探针回复摘要长度（进 message，会落 last_test_message 并显示在 UI） */
+    static final int CHAT_REPLY_SNIPPET_LEN = 80;
 
     private final ModelEndpointRepository repo;
     private final ModelCipher cipher;
@@ -131,7 +136,7 @@ public class ModelEndpointService implements ModelEndpointProvider {
         }
         repo.delete(e);
         if (e.isDefault()) {
-            log.warn("平台默认端点 {} 已删除，在设置新的默认端点前索引将保持降级", id);
+            log.warn("平台默认端点 {} [{}] 已删除{}", id, e.getKind(), missingDefaultHint(e.getKind()));
         }
     }
 
@@ -162,8 +167,8 @@ public class ModelEndpointService implements ModelEndpointProvider {
     // ---------------- FR-03 连接测试 ----------------
 
     /**
-     * 已存端点连接测试：实调一次 {@code /embeddings}，把结果与<b>实测维度</b>回写端点。
-     * HTTP 调用刻意留在事务外——这是网络 IO，不该占着数据库连接。
+     * 已存端点连接测试：按 kind 实调一次（EMBEDDING → {@code /embeddings} 并回写<b>实测维度</b>；
+     * CHAT → {@code /chat/completions}）。HTTP 调用刻意留在事务外——这是网络 IO，不该占着数据库连接。
      */
     public EndpointTestResult test(long id) {
         ModelEndpointEntity e = require(id);
@@ -179,7 +184,7 @@ public class ModelEndpointService implements ModelEndpointProvider {
                 return r;
             }
         }
-        EndpointTestResult r = probe(e.getProvider(), e.getBaseUrl(), key, e.getModel(),
+        EndpointTestResult r = probe(e.getKind(), e.getProvider(), e.getBaseUrl(), key, e.getModel(),
                 e.getTimeoutSeconds(), before);
         if (r.ok() && r.dimensions() != null && before != null && !before.equals(r.dimensions())) {
             EndpointTestResult.DimensionChange changed =
@@ -191,21 +196,29 @@ public class ModelEndpointService implements ModelEndpointProvider {
         return r;
     }
 
-    /** 草稿预检：凭据不落库（新建/编辑表单内先测再存）。 */
+    /** 草稿预检：凭据不落库（新建/编辑表单内先测再存）。kind 也要校验——否则预留类型（RERANK）的草稿会静默打到 /embeddings。 */
     public EndpointTestResult testDraft(ModelEndpointRequest req) {
+        String k = kind(req.kind());
         String p = provider(req.provider());
-        return probe(p, blankToNull(req.baseUrl()), blankToNull(req.apiKey()), blankToNull(req.model()),
+        return probe(k, p, blankToNull(req.baseUrl()), blankToNull(req.apiKey()), blankToNull(req.model()),
                 req.timeoutSeconds() == null ? DEFAULT_TIMEOUT_SECONDS : req.timeoutSeconds(), null);
     }
 
     /**
-     * 探针调用：{@code mock} 自报维度（无远端可探）；{@code openai-compatible} 实调一次。
+     * 探针调用，按 kind 分派：{@code mock} 自报（无远端可探）；{@code openai-compatible} 实调一次。
+     * CHAT 没有维度概念——{@code dimensions} 恒 null，也就不会产生维度变化告警。
      *
      * @param prevDimensions 已存端点的原维度；null = 新建/草稿（mock 分支据此决定自报值）
      */
-    private EndpointTestResult probe(String provider, String baseUrl, String apiKey, String model,
+    private EndpointTestResult probe(String kind, String provider, String baseUrl, String apiKey, String model,
                                      int timeoutSeconds, Integer prevDimensions) {
+        boolean chat = ModelEndpointEntity.KIND_CHAT.equals(kind);
         if (ModelEndpointEntity.PROVIDER_MOCK.equalsIgnoreCase(provider)) {
+            if (chat) {
+                // 不复用 MODEL_MOCK（mock-embedding）——那是索引血缘的合同值，只对 EMBEDDING 有意义
+                return new EndpointTestResult(true, 0L, model, null,
+                        "mock provider 假回复（无远端可探测）", null);
+            }
             int dims = prevDimensions != null ? prevDimensions : seed.getDimensions();
             return new EndpointTestResult(true, 0L, ModelEndpointView.MODEL_MOCK, dims,
                     "mock provider 自报维度 " + dims + "（无远端可探测）", null);
@@ -216,6 +229,13 @@ public class ModelEndpointService implements ModelEndpointProvider {
         }
         long t0 = System.nanoTime();
         try {
+            if (chat) {
+                String reply = OpenAiCompatChat.chat(
+                        new OpenAiCompatChat.Options(baseUrl, apiKey, model, timeoutSeconds), CHAT_PROBE_TEXT);
+                long ms = (System.nanoTime() - t0) / 1_000_000;
+                return new EndpointTestResult(true, ms, model, null,
+                        "连接正常，模型回复：" + abbreviateReply(reply), null);
+            }
             List<float[]> vectors = OpenAiCompatEmbeddings.embed(
                     new OpenAiCompatEmbeddings.Options(baseUrl, apiKey, model, timeoutSeconds, 1),
                     List.of(PROBE_TEXT));
@@ -225,10 +245,18 @@ public class ModelEndpointService implements ModelEndpointProvider {
                     ? "（原记录维度 " + prevDimensions + "）" : "";
             return new EndpointTestResult(true, ms, model, dims,
                     "连接正常，实测维度 " + dims + note, null);
-        } catch (EmbeddingCallException ex) {
+        } catch (ModelCallException ex) {
+            // 父类同时覆盖向量与对话两条链（EmbeddingCallException 是它的子类）
             long ms = (System.nanoTime() - t0) / 1_000_000;
             return new EndpointTestResult(false, ms, model, null, ex.getMessage(), null);
         }
+    }
+
+    /** 回复摘要：压成一行 + 截断。它会进 UI，也会落 last_test_message，别把千字回复原样塞进去 */
+    private static String abbreviateReply(String reply) {
+        String oneLine = reply == null ? "" : reply.replaceAll("\\s+", " ").trim();
+        return oneLine.length() <= CHAT_REPLY_SNIPPET_LEN
+                ? oneLine : oneLine.substring(0, CHAT_REPLY_SNIPPET_LEN) + "…";
     }
 
     /** 测试结果回写（短事务；dimensions 只在测试成功时更新） */
@@ -348,8 +376,18 @@ public class ModelEndpointService implements ModelEndpointProvider {
             e.setModel(model);
         }
         int curTimeout = existing == null ? DEFAULT_TIMEOUT_SECONDS : existing.getTimeoutSeconds();
-        int curBatch = existing == null ? DEFAULT_BATCH_SIZE : existing.getBatchSize();
         e.setTimeoutSeconds(bounded(req.timeoutSeconds(), curTimeout, 1, 600, "timeoutSeconds"));
+        if (ModelEndpointEntity.KIND_CHAT.equals(e.getKind())) {
+            // 对话端点不吃向量语义：批量/检索参数一律落 null，且不做范围校验——
+            // 请求里带了越界 topK 也只当没传（报错会让前端必须为每种类型分叉校验，而这两个字段对
+            // CHAT 根本没有意义）。update 时同一个实例既是 target 又是 existing，先读旧值再置空即可。
+            // batchSize 列 NOT NULL，保留旧值/默认值不使用。
+            e.setBatchSize(existing == null ? DEFAULT_BATCH_SIZE : existing.getBatchSize());
+            e.setTopK(null);
+            e.setThreshold(null);
+            return;
+        }
+        int curBatch = existing == null ? DEFAULT_BATCH_SIZE : existing.getBatchSize();
         e.setBatchSize(bounded(req.batchSize(), curBatch, 1, 256, "batchSize"));
         Integer topK = req.topK() != null ? req.topK() : (existing == null ? null : existing.getTopK());
         if (topK != null && (topK < 1 || topK > 100)) {
@@ -369,17 +407,28 @@ public class ModelEndpointService implements ModelEndpointProvider {
         e.setStatus(status);
         if (ModelEndpointEntity.STATUS_DISABLED.equals(status) && e.isDefault()) {
             e.setDefault(false);
-            log.warn("平台默认端点 {} 被停用，默认端点已置空——在设置新默认前索引将保持降级", e.getId());
+            log.warn("平台默认端点 {} [{}] 被停用，默认端点已置空{}",
+                    e.getId(), e.getKind(), missingDefaultHint(e.getKind()));
         }
     }
 
+    /**
+     * kind 白名单：EMBEDDING（向量化）与 CHAT（通用对话）已开放；RERANK 仍预留——没有消费方就开门，
+     * 只会多出一批"配了没人用"的端点。
+     */
     private static String kind(String raw) {
         String k = raw == null || raw.isBlank() ? ModelEndpointEntity.KIND_EMBEDDING : raw.trim().toUpperCase();
-        if (!ModelEndpointEntity.KIND_EMBEDDING.equals(k)) {
+        if (!ModelEndpointEntity.KIND_EMBEDDING.equals(k) && !ModelEndpointEntity.KIND_CHAT.equals(k)) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
-                    "kind 本期只支持 EMBEDDING（CHAT/RERANK 已预留，待消费方就绪后开放）");
+                    "kind 目前支持 EMBEDDING / CHAT（RERANK 预留，待消费方就绪后开放）");
         }
         return k;
+    }
+
+    /** 「没有平台默认端点」的后果按 kind 不同：向量端点缺默认 = 索引降级；对话端点本期无消费方 */
+    private static String missingDefaultHint(String kind) {
+        return ModelEndpointEntity.KIND_EMBEDDING.equals(kind)
+                ? "，在设置新的默认端点前索引将保持降级" : "（该类型暂无默认端点）";
     }
 
     private static String provider(String raw) {

@@ -13,7 +13,9 @@ import java.time.Instant;
  *
  * <p>凭据以 {@code enc1:} AES-GCM 密文落 {@code api_key_enc}，任何视图不回显明文；
  * {@code dimensions} 是<b>连接测试实测探测的产物</b>，不接受人工提交——人工填错维度正是
- * FR-06 要防的事故源（换模型维度变化会让余弦恒 0、阈值过滤成"无命中"）。</p>
+ * FR-06 要防的事故源（换模型维度变化会让余弦恒 0、阈值过滤成"无命中"）。
+ * 它（连带 {@code batchSize}/{@code topK}/{@code threshold}）只对 {@code EMBEDDING} 有意义，
+ * {@code CHAT} 端点一律留空。</p>
  *
  * <p>红线：{@code is_default}/{@code last_test_ok} 是布尔列 → <b>禁 @ColumnDefault</b>
  * （MySQL bit 列不接受 default 'false' 建列），靠实体初始值 + getter 兜底。</p>
@@ -36,7 +38,7 @@ public class ModelEndpointEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** EMBEDDING / CHAT / RERANK（本期只实现 EMBEDDING，其余值 400 预留） */
+    /** EMBEDDING（向量化，知识库检索用）/ CHAT（通用对话）；RERANK 预留，传值 400 */
     @Column(nullable = false, length = 16)
     private String kind = KIND_EMBEDDING;
 

@@ -76,14 +76,18 @@ class ModelEndpointServiceTest {
         });
     }
 
-    /** 造一个已存端点并挂到 repo.findById 上；返回实体便于断言其被就地改写 */
+    /** 造一个已存向量端点并挂到 repo.findById 上；返回实体便于断言其被就地改写 */
     private ModelEndpointEntity stored(long id, String provider, boolean isDefault, String status) {
+        return stored(id, ModelEndpointEntity.KIND_EMBEDDING, provider, isDefault, status);
+    }
+
+    private ModelEndpointEntity stored(long id, String kind, String provider, boolean isDefault, String status) {
         ModelEndpointEntity e = new ModelEndpointEntity();
         e.setId(id);
-        e.setKind(ModelEndpointEntity.KIND_EMBEDDING);
+        e.setKind(kind);
         e.setName("端点" + id);
         e.setProvider(provider);
-        e.setModel("bge-m3");
+        e.setModel(ModelEndpointEntity.KIND_CHAT.equals(kind) ? "gpt-4o-mini" : "bge-m3");
         e.setBaseUrl(ModelEndpointEntity.PROVIDER_MOCK.equals(provider)
                 ? null : "https://api.example.com/v1");
         e.setStatus(status);
@@ -100,12 +104,13 @@ class ModelEndpointServiceTest {
     // ---------------- 字段校验 ----------------
 
     @Test
-    void rejectsKindOtherThanEmbedding() {
-        ModelEndpointRequest req = new ModelEndpointRequest("CHAT", "聊天端点", "openai-compatible",
-                "https://api.example.com/v1", "sk-abc", "gpt", null, null, null, null, null);
+    void rejectsKindRerank() {
+        ModelEndpointRequest req = new ModelEndpointRequest("RERANK", "重排端点", "openai-compatible",
+                "https://api.example.com/v1", "sk-abc", "bge-reranker", null, null, null, null, null);
 
         DevMindException ex = assertThrows(DevMindException.class, () -> service.create(req));
-        assertTrue(ex.getMessage().contains("EMBEDDING"), ex.getMessage());
+        assertEquals(400, ex.getErrorCode().getStatus());
+        assertTrue(ex.getMessage().contains("RERANK"), ex.getMessage());
     }
 
     @Test
@@ -243,6 +248,49 @@ class ModelEndpointServiceTest {
                 null, null, null, null, null);
 
         assertThrows(DevMindException.class, () -> service.update(1L, req));
+    }
+
+    // ---------------- FR-11 通用模型（CHAT） ----------------
+
+    @Test
+    void chatEndpointDropsVectorOnlyFields() {
+        // 向量语义字段即使带越界值也不报错——它们对 CHAT 没有意义，只当没传
+        ModelEndpointApiView view = service.create(new ModelEndpointRequest("chat", "通用模型",
+                "openai-compatible", "https://api.example.com/v1", "sk-abc", "gpt-4o-mini",
+                60, 999, 0, 1.5, null));
+
+        assertEquals(ModelEndpointEntity.KIND_CHAT, view.kind(), "kind 不区分大小写");
+        assertEquals(60, view.timeoutSeconds(), "超时对两种类型都有意义");
+        assertNull(view.topK(), "对话端点不吃检索参数");
+        assertNull(view.threshold());
+        assertEquals(32, view.batchSize(), "batchSize 列 NOT NULL：保留默认值但不使用");
+        assertNull(view.dimensions(), "维度只能由向量探针写入");
+    }
+
+    @Test
+    void chatUpdateClearsLegacyVectorOverrides() {
+        ModelEndpointEntity e = stored(1L, ModelEndpointEntity.KIND_CHAT,
+                ModelEndpointEntity.PROVIDER_OPENAI, false, ModelEndpointEntity.STATUS_ACTIVE);
+        e.setTopK(9);
+        e.setThreshold(0.7);
+
+        ModelEndpointApiView view = service.update(1L, new ModelEndpointRequest(null, null, null,
+                null, null, null, null, null, null, null, null));
+
+        assertNull(view.topK(), "遗留覆盖值要清掉，否则界面会显示一个对对话端点不生效的检索参数");
+        assertNull(view.threshold());
+        assertNull(e.getTopK());
+    }
+
+    @Test
+    void chatDefaultIsTrackedSeparatelyFromEmbeddingDefault() {
+        stored(2L, ModelEndpointEntity.KIND_CHAT, ModelEndpointEntity.PROVIDER_OPENAI, false,
+                ModelEndpointEntity.STATUS_ACTIVE);
+
+        service.setDefault(2L);
+
+        // 同类型内才互斥：设对话默认不能把向量默认端点摘掉
+        verify(repo).clearDefaultExcept(eq(ModelEndpointEntity.KIND_CHAT), eq(2L), any(Instant.class));
     }
 
     @Test

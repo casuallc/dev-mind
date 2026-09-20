@@ -326,8 +326,8 @@ try:
 
     # ---------- H. FR-01 校验与删除 ----------
     print("\n[H] 参数校验 + 无引用端点可删")
-    st, _ = call("POST", "/model-endpoints", {"kind": "CHAT", "name": "非目标类型", "provider": "mock"})
-    check("kind=CHAT 本期拒绝 400", st == 400, f"{st}")
+    st, _ = call("POST", "/model-endpoints", {"kind": "RERANK", "name": "非目标类型", "provider": "mock"})
+    check("kind=RERANK 仍为预留（400）", st == 400, f"{st}")
     st, _ = call("POST", "/model-endpoints",
                  {"name": "非法 provider", "provider": "anthropic"})
     check("非法 provider 拒绝 400", st == 400, f"{st}")
