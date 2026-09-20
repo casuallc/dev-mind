@@ -6,10 +6,20 @@ const KEY = 'devmind.currentProjectId'
 let currentId: string | null = localStorage.getItem(KEY)
 // 项目列表是否已加载过（由 ProjectSwitcher 上报），供 ProjectContextGate 区分「加载中」与「真无项目」
 let projectsLoaded = false
+// 版本号：任何字段变化都自增，供订阅方（如 ProjectContextGate）判断是否需要重渲染。
+// 只订阅 currentId 的组件会漏掉 projectsLoaded 的变化——bootstrap 拿到的项目与持久化值相同时
+// 快照不变，React 会跳过重渲染，Gate 就一直停在加载态（硬加载项目页必现）。
+let revision = 0
 const listeners = new Set<() => void>()
 
 function notify() {
+  revision += 1
   listeners.forEach((fn) => fn())
+}
+
+/** useSyncExternalStore 的快照：订阅本 store 的任一次变化 */
+export function getProjectStoreRevision(): number {
+  return revision
 }
 
 export function setCurrentProject(id: string | null) {

@@ -5,6 +5,7 @@ import { Outlet, useNavigate } from 'react-router-dom'
 import { useSyncExternalStore } from 'react'
 import {
   getCurrentProjectId,
+  getProjectStoreRevision,
   getProjectsLoaded,
   subscribeCurrentProject,
 } from './currentProjectStore'
@@ -12,8 +13,9 @@ import { isAdmin } from '../features/auth/authStore'
 
 export default function ProjectContextGate() {
   const navigate = useNavigate()
-  // 同时订阅 currentId 与 projectsLoaded（同一 store，任一变化都触发重渲染）
-  useSyncExternalStore(subscribeCurrentProject, getCurrentProjectId)
+  // 订阅 store 版本号（currentId 与 projectsLoaded 任一变化都自增）：只订阅 currentId 时，
+  // bootstrap 选出的项目与持久化值相同时快照不变，React 不会重渲染，Gate 会一直转圈
+  useSyncExternalStore(subscribeCurrentProject, getProjectStoreRevision)
 
   if (!getProjectsLoaded()) {
     return (
