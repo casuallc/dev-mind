@@ -122,14 +122,24 @@
 - **降级链不变**（已定）：无端点 → disabled/LIKE，绝不 5xx；失配 → 结构化原因而非静默空结果。
 - **kind 预留但不实现**（已定）：本期 CHAT/RERANK 传值 400，避免"配了没人用"。
 
-## 4. 插件化接口
+## 4. 插件化接口（实现定稿）
 
-- `devmind-common` 新增 `ModelEndpointProvider` SPI：
-  - `Optional<ModelEndpointView> resolveForKb(long kbId)`（含库级覆盖 → 平台默认的解析结果，或 empty 表示降级）；
-  - `Optional<ModelEndpointView> defaultEndpoint()`；
-  - `record ModelEndpointView(long id, String kind, String provider, String model, Integer dimensions, int timeoutSeconds, int batchSize, Integer topK, Double threshold)`（**不含凭据**）。
-- `devmind-model` 实现该 SPI；`devmind-knowledge` 以 `ObjectProvider<ModelEndpointProvider>` 探测注入（未装配 = 无端点 = 降级，与 CAP-44 现有降级路径一致，零反向依赖）。
-- `devmind-common` 新增 `SecretCipher`（FR-02）。
+- `devmind-common` 新增 `ModelEndpointProvider` SPI，`devmind-model` 实现：
+  - `Optional<ModelEndpointView> resolve(Long kbEndpointId)`——**入参是库级覆盖值而非 kbId**：
+    「哪个库用哪个端点」存在 `knowledge_bases`（knowledge 模块自有列），SPI 只负责"取端点"这步，
+    解析链由调用方传值驱动（原稿的 `resolveForKb(long kbId)` 会让 model 反向依赖 knowledge）；
+  - `Optional<ModelEndpointView> defaultEndpoint()`；另有 `activeEndpoint(long id)`（库级覆盖取用）；
+  - `record ModelEndpointView(id, kind, provider, name, baseUrl, apiKey, model, dimensions,
+    timeoutSeconds, batchSize, topK, threshold)`——**携带解密后的 apiKey**（SPI 内存传递，
+    连接器不接触持久层）：调用方要用它发 `Authorization`，不给就没法调。红线随类型走：
+    禁序列化进 HTTP 响应、禁日志、禁异常消息；HTTP 侧视图只有 `hasApiKey`。
+    另含 `MODEL_MOCK` 常量（跨模块合同值，索引血缘要比对，禁止两处各写一份）。
+- `devmind-common` 新增 `ModelEndpointUsageProvider`（FR-01 删除保护）：引用方是各消费模块的自有数据，
+  由消费模块实现、`devmind-model` 探测注入；未装配 = 无引用 = 删除放行。
+- `devmind-knowledge` 以 `ObjectProvider<ModelEndpointProvider>` 探测注入（未装配 = 回退 CAP-44 配置化单例，
+  装配了就**不回落**——否则 UI 里删了端点检索还在偷用配置，看到的降级提示与实际行为不符）。
+- `devmind-common` 新增 `SecretCipher`（FR-02），另有 `OpenAiCompatEmbeddings`（FR-05）：
+  两个消费方共用，且"报错不泄密"只有一套实现（`sanitize()` 抹 `sk-*`/`Bearer *`）。
 
 ## 5. 数据模型
 
@@ -187,3 +197,26 @@ POST   /api/knowledge/search                响应增 degradedReason（NONE|NO_E
 - **分块策略改造**（Markdown heading 感知、代码块与表格保护、块 breadcrumb、最小块合并、真 tokenizer 口径）→ 另立 CAP；本能力只把 `chunkSize/chunkOverlap` 留在平台级默认，不改变**当前**分块行为，避免一个 CAP 同时动模型与分块两处导致 E2E 归因不清；
 - 索引队列深度 / 批次进度可视化（本 CAP 只做到 `indexStats` 计数 + 触发）；
 - 把 runner 侧 claude 的接入纳入（claude 走节点本地 CLI 进程，`agent.properties` 是它的配置面，非本 CAP 消费方）。
+
+## 9. 实现记录（与初稿的偏差）
+
+| 项 | 初稿 | 实现 | 为什么 |
+|---|---|---|---|
+| SPI 解析入参 | `resolveForKb(long kbId)` | `resolve(Long kbEndpointId)` | kbId → 端点映射在 knowledge 自有列，传 kbId 会让 model 反向依赖 knowledge（模块依赖红线） |
+| `ModelEndpointView` 凭据 | 不含凭据 | 含解密后的 apiKey | 调用方要发 `Authorization`；红线改为"禁出 HTTP 响应/日志/异常消息"，HTTP 视图仅 `hasApiKey` |
+| 端点引用查询 | 未提 | 新增 `ModelEndpointUsageProvider` SPI | 同上，引用方数据在消费模块，不能让 model 反查 `knowledge_bases` |
+| 客户端缓存 | 计划 `EmbeddingClientFactory` | `HttpClient` 按超时值静态复用（common 内） | 每次新建客户端会连连接池一起废掉；端点参数已足够轻，不需要工厂层 |
+| 加解密密钥来源 | 复用 `devmind.integration.crypto-key` | 独立 `devmind.model.crypto-key`（空则同主密钥派生，再空自动生成 `data/model-crypto.key`） | 两条凭据链各自轮换互不影响；仍是同一 `SecretCipher` 实现、不同域分隔串 |
+| knowledge 侧降级 | 未提 | `devmind-model` 已装配 → 无端点即无（不回落 CAP-44 配置）；未装配 → 退回配置化单例 | 否则删了端点检索还偷用配置，降级提示与实际行为不符 |
+| 降级可诊断 | 仅"不静默空结果" | `KnowledgeRetriever` SPI 增 `retrieveDetailed()` + `DegradedReason(NONE/NO_EMBEDDING/DIMENSION_MISMATCH)` | 需区分"没配端点"与"配了但维度对不上"，前者才能引导去配置、后者引导去重建 |
+| 索引写入 | 未提 | `KnowledgeIndexListener`(AFTER_COMMIT) → `KnowledgeIndexService` → `KnowledgeIndexWriter`(短事务) | embedding 是网络 IO，必须落在事务外；写回用独立短事务，避免长事务占连接 |
+| 失配计数 | 未提 | 端点未探测过维度 / 无可用端点时 `mismatched=0` | 算不出来时宁可不报警，也不误报把用户引向无意义的重建 |
+
+**验收证据**：`tests/cap48_verify.py` 56 项全绿（含 `tests/fixtures/embedding-mock.py` 假 embedding 端）；
+cap44/45/46 三个 E2E 脚本**未改一行**仍全绿（迁移种子端点生效）；知识库列表/详情页布局巡检通过
+（`tests/e2e-layout-pages.mjs`，含详情页四个视图）。
+
+**踩坑归档**：JPQL 批量 update 里用 `CURRENT_TIMESTAMP` 赋 `Instant` 字段会被 Hibernate 7 语义校验拒
+（`Cannot assign expression of type 'java.sql.Timestamp' to target path ... of type 'java.time.Instant'`），
+repository bean 创建期即失败、应用起不来；MySQL 方言下不触发（本地 dev 一直正常，H2 上必炸）。
+时间戳一律由调用方传参。详见 [docs/core/开发注意事项.md](../core/开发注意事项.md)。
