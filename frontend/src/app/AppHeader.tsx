@@ -13,8 +13,8 @@ interface HealthInfo {
   time: string
 }
 
-/** 共享顶栏：后端健康状态 + 通知铃铛 + 用户下拉，工作台与后台两个布局共用。 */
-export default function AppHeader() {
+/** 后台顶栏：当前选中菜单名 + 后端健康状态 + 通知铃铛 + 用户下拉（仅 AdminLayout 使用）。 */
+export default function AppHeader({ title }: { title: string }) {
   const [health, setHealth] = useState<HealthInfo | null>(null)
 
   useEffect(() => {
@@ -36,7 +36,7 @@ export default function AppHeader() {
       }}
     >
       <Space size={12}>
-        <Typography.Text strong>Agent 会话管理</Typography.Text>
+        <Typography.Text strong>{title}</Typography.Text>
         <Tag color={health?.status === 'UP' ? 'green' : 'red'}>
           后端 {health ? `${health.status} · v${health.version}` : '未连接'}
         </Tag>

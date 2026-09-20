@@ -1,4 +1,5 @@
 import { Layout, Menu } from 'antd'
+import type { MenuProps } from 'antd'
 import {
   ApiOutlined,
   ArrowLeftOutlined,
@@ -23,6 +24,60 @@ import { startNotificationStream, stopNotificationStream } from '../features/not
 
 const { Sider, Content } = Layout
 
+type AdminMenuItem = NonNullable<MenuProps['items']>[number]
+
+/** 后台侧边菜单（单一数据源：菜单渲染、选中高亮、顶栏标题均取自此） */
+const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
+  { key: '/admin/dashboard', icon: <DashboardOutlined />, label: '指挥中心' },
+  {
+    type: 'group' as const,
+    label: '项目与资源',
+    children: [
+      { key: '/admin/projects', icon: <FolderOutlined />, label: '项目管理' },
+      { key: '/admin/repos', icon: <CodeOutlined />, label: '代码仓库' },
+      { key: '/admin/agent-nodes', icon: <RobotOutlined />, label: 'Agent 节点' },
+      { key: '/admin/execution', icon: <AuditOutlined />, label: '模板与审计' },
+      { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
+      { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
+      { key: '/admin/scenarios', icon: <DeploymentUnitOutlined />, label: '应用场景' },
+    ],
+  },
+  {
+    type: 'group' as const,
+    label: '内容',
+    children: [
+      { key: '/admin/knowledge', icon: <ReadOutlined />, label: '知识库' },
+      { key: '/admin/skills', icon: <ToolOutlined />, label: 'Skill 管理' },
+      { key: '/admin/docs', icon: <FileTextOutlined />, label: '文档管理' },
+      { key: '/admin/attachments', icon: <PaperClipOutlined />, label: '附件管理' },
+    ],
+  },
+  {
+    type: 'group' as const,
+    label: '系统',
+    children: [
+      { key: '/admin/users', icon: <SafetyCertificateOutlined />, label: '用户管理' },
+    ],
+  },
+  { type: 'divider' as const },
+  { key: '/', icon: <ArrowLeftOutlined />, label: '返回工作台' },
+]
+
+/** 按菜单 key 递归查 label（分组/分割线跳过），供顶栏展示当前选中菜单名 */
+function menuLabel(items: AdminMenuItem[], key: string): string | undefined {
+  for (const item of items) {
+    if (!item) continue
+    if ('key' in item && item.key === key && 'label' in item && typeof item.label === 'string') {
+      return item.label
+    }
+    if ('children' in item && item.children) {
+      const hit = menuLabel(item.children as AdminMenuItem[], key)
+      if (hit) return hit
+    }
+  }
+  return undefined
+}
+
 /** 管理后台布局（仅 ADMIN，由 RequireAdmin 守卫）：指挥中心 / 项目与资源 / 内容 / 系统。 */
 export default function AdminLayout() {
   const navigate = useNavigate()
@@ -35,6 +90,7 @@ export default function AdminLayout() {
   }, [])
 
   const selectedKey = menuSelectedKey(location.pathname)
+  const title = menuLabel(ADMIN_MENU_ITEMS, selectedKey) ?? '后台管理'
 
   return (
     <Layout style={{ height: '100vh' }}>
@@ -48,45 +104,11 @@ export default function AdminLayout() {
           mode="inline"
           selectedKeys={[selectedKey]}
           onClick={({ key }) => navigate(key)}
-          items={[
-            { key: '/admin/dashboard', icon: <DashboardOutlined />, label: '指挥中心' },
-            {
-              type: 'group' as const,
-              label: '项目与资源',
-              children: [
-                { key: '/admin/projects', icon: <FolderOutlined />, label: '项目管理' },
-                { key: '/admin/repos', icon: <CodeOutlined />, label: '代码仓库' },
-                { key: '/admin/agent-nodes', icon: <RobotOutlined />, label: 'Agent 节点' },
-                { key: '/admin/execution', icon: <AuditOutlined />, label: '模板与审计' },
-                { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
-                { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
-                { key: '/admin/scenarios', icon: <DeploymentUnitOutlined />, label: '应用场景' },
-              ],
-            },
-            {
-              type: 'group' as const,
-              label: '内容',
-              children: [
-                { key: '/admin/knowledge', icon: <ReadOutlined />, label: '知识库' },
-                { key: '/admin/skills', icon: <ToolOutlined />, label: 'Skill 管理' },
-                { key: '/admin/docs', icon: <FileTextOutlined />, label: '文档管理' },
-                { key: '/admin/attachments', icon: <PaperClipOutlined />, label: '附件管理' },
-              ],
-            },
-            {
-              type: 'group' as const,
-              label: '系统',
-              children: [
-                { key: '/admin/users', icon: <SafetyCertificateOutlined />, label: '用户管理' },
-              ],
-            },
-            { type: 'divider' as const },
-            { key: '/', icon: <ArrowLeftOutlined />, label: '返回工作台' },
-          ]}
+          items={ADMIN_MENU_ITEMS}
         />
       </Sider>
       <Layout>
-        <AppHeader />
+        <AppHeader title={title} />
         {/* flex 列布局与工作台一致：子页根节点 flex:1 minHeight:0 撑满高度（见 shared/utils/pageLayout） */}
         <Content style={{ padding: '16px 24px 24px', overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
           <Outlet />
