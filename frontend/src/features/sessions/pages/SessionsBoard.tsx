@@ -321,7 +321,9 @@ export default function SessionsBoard({
             keyword={keyword}
             onKeywordChange={setKeyword}
           />
-          <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          {/* overflow:auto 是兜底：右侧「操作条 + 摘要卡 + 输入区」的固定高度在矮视口（≤1366x768）会超过卡片高度，
+              不兜底就顶破内容区（实测 1280x720 溢 50px）；空间够时不会出现滚动条，行为与原先一致 */}
+          <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
             {draft ? (
               <NewSessionDraft
                 projectId={projectId ?? undefined}

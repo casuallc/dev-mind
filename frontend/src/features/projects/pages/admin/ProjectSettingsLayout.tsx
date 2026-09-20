@@ -39,7 +39,9 @@ export default function ProjectSettingsLayout() {
   const activeKey = SUB_TABS.some((t) => t.key === seg) ? seg : 'repos'
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%', flex: 1, minHeight: 0 }}>
+    // 根容器用 div flex 列而不是 antd Space：Space 会给每个子项套一层 .ant-space-item（不是 flex 项），
+    // 下面那张 flex:1 的配置 Card 撑不开也压不下去，内容就溢出内容区（实测上下文摘要/发版配置两页各溢 59/148px）
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
       <Card
         style={{ flexShrink: 0 }}
         title={
@@ -107,6 +109,6 @@ export default function ProjectSettingsLayout() {
           reload()
         }}
       />
-    </Space>
+    </div>
   )
 }

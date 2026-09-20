@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Button, Space, Table, Tag, Typography } from 'antd'
+import { Button, Space, Tag, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { listConnLogs } from '../api'
 import type { AgentConnLog, ConnLogEvent } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 
 const eventColor: Record<ConnLogEvent, string> = {
@@ -64,7 +65,9 @@ export default function ConnLogsPanel() {
   ]
 
   return (
-    <>
+    // 卡片 body 是 flex 列（pageCardBodyFlexStyle），本面板作为一个 flex 项撑满剩余高度：
+    // 说明行固定，流水表由 FitTable 实测高度、表内滚动（200 条不设分页，不固定高度会顶破内容区）
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <Space style={{ marginBottom: 12, width: '100%', justifyContent: 'space-between' }}>
         <Typography.Text type="secondary">
           接入 / 拒绝 / 断线流水（最新 200 条，保留 7 天）。「拒绝」= token 无效或节点已禁用，按来源地址定位陌生 runner。
@@ -73,7 +76,7 @@ export default function ConnLogsPanel() {
           刷新
         </Button>
       </Space>
-      <Table<AgentConnLog>
+      <FitTable<AgentConnLog>
         rowKey="id"
         loading={loading}
         columns={columns}
@@ -81,6 +84,6 @@ export default function ConnLogsPanel() {
         pagination={false}
         locale={{ emptyText: '暂无连接日志' }}
       />
-    </>
+    </div>
   )
 }

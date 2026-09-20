@@ -18,6 +18,7 @@ import {
 } from '../api'
 import type { RunnerPackage } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
 import { isApiRequestError } from '../../../shared/api/error'
 
@@ -71,7 +72,7 @@ export default function RunnerPackagePanel() {
   }
 
   return (
-    <div>
+    <div style={pagePaneScrollStyle}>
       <Alert
         type="info"
         showIcon
