@@ -163,7 +163,9 @@ GET/PUT /api/worklog/settings               + dailyTemplateMd / weeklyTemplateMd
 
 ### M3-远端备份（已实现，2026-09-14）
 
-- **FR-08 远端仓库绑定**：个人设置（`worklog_user_settings.remote_url`/`remote_branch`）
+- **FR-08 远端仓库绑定**：设置页「工作日志」视图（`/settings/worklog`；2026-09-20 起从
+  工作日志页的「工时设置」弹窗并入，与顶部一级导航「设置」重名的入口合并）
+  （`worklog_user_settings.remote_url`/`remote_branch`）
   存绑定信息，null=未绑定、空白串=解绑；URL 仅 http/https/file（ssh 拒绝，口径同
   GitRemoteOps/runner 侧）。凭证不落库——复用 CAP-35 个人 PAT：推送时按 URL host 经
   `RepoGitGateway.resolveToken(username, host, null)` 解析，缺失 409 引导去

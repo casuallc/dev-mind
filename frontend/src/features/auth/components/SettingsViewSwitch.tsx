@@ -3,8 +3,8 @@
 import { Segmented } from 'antd'
 import ScrollRow from '../../../shared/components/ScrollRow'
 
-/** 页内视图 = 路由 /me/settings/:tab 的 tab 段（可分享/可收藏），未知值回落 profile */
-export const SETTINGS_TAB_KEYS = ['profile', 'accounts', 'jira-templates'] as const
+/** 页内视图 = 路由 /settings/:tab 的 tab 段（可分享/可收藏），未知值回落 profile */
+export const SETTINGS_TAB_KEYS = ['profile', 'accounts', 'jira-templates', 'worklog'] as const
 export type SettingsTab = (typeof SETTINGS_TAB_KEYS)[number]
 
 const TAB_LABELS: Record<SettingsTab, string> = {
@@ -13,6 +13,8 @@ const TAB_LABELS: Record<SettingsTab, string> = {
   accounts: '第三方账号',
   // CAP-47 FR-10：个人 Jira 推送模板（按 Jira 项目 + 任务类型）
   'jira-templates': 'Jira 推送模板',
+  // CAP-28/41：工作日志偏好（原工作日志页「工时设置」Modal）
+  worklog: '工作日志',
 }
 
 export function asSettingsTab(raw: string | undefined): SettingsTab {

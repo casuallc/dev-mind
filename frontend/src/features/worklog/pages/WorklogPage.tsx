@@ -2,12 +2,9 @@ import {
   Alert,
   Button,
   Card,
-  Form,
   Input,
-  InputNumber,
   Modal,
   Space,
-  Switch,
   Table,
   Tag,
   Tooltip,
@@ -17,6 +14,7 @@ import {
 import { PlusOutlined, ReloadOutlined, SettingOutlined, GithubOutlined, CodeOutlined, RobotOutlined, CloudUploadOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   createDaily,
   createEntry,
@@ -26,7 +24,6 @@ import {
   generateDaily,
   generateWeekly,
   getDaily,
-  getDefaultTemplates,
   getSettings,
   getWeekly,
   getWorkspace,
@@ -36,7 +33,6 @@ import {
   pushWorkspace,
   updateDaily,
   updateEntry,
-  updateSettings,
   updateWeekly,
 } from '../api'
 import type {
@@ -44,7 +40,6 @@ import type {
   EntryPayload,
   WeeklyReport,
   WorklogEntry,
-  WorklogSettings,
   WorkspaceView,
 } from '../types'
 import { ENTRY_SOURCES, ENTRY_TYPES } from '../types'
@@ -72,6 +67,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
  * 个人级页面，不进项目上下文（路由不进 ProjectContextGate）。
  */
 export default function WorklogPage() {
+  const navigate = useNavigate()
   const [view, setView] = useState<View>('entries')
 
   // ---- CAP-41 工作日志空间：WORKLOG 项目 + runner 持久工作区状态条 ----
@@ -159,8 +155,6 @@ export default function WorklogPage() {
   const [saving, setSaving] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [reposOpen, setReposOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsForm] = Form.useForm()
 
   // 一次取整周条目（后端 size 上限 200，足够覆盖单人一周量），当日列表与各天条数均在前端派生
   const loadEntries = useCallback(() => {
@@ -352,54 +346,6 @@ export default function WorklogPage() {
     })
   }
 
-  const openSettings = async () => {
-    try {
-      const s: WorklogSettings = await getSettings()
-      settingsForm.setFieldsValue({
-        autoDaily: s.autoDaily,
-        autoWeekly: s.autoWeekly,
-        dailyHoursTarget: s.dailyMinutesTarget != null ? s.dailyMinutesTarget / 60 : undefined,
-        dailyTemplateMd: s.dailyTemplateMd ?? '',
-        weeklyTemplateMd: s.weeklyTemplateMd ?? '',
-        remoteUrl: s.remoteUrl ?? '',
-        remoteBranch: s.remoteBranch ?? '',
-      })
-      setSettingsOpen(true)
-    } catch (e) {
-      showError(e, '加载设置失败')
-    }
-  }
-
-  // 模板留空 = 回退内置默认；「填入默认」拉取内置模板进编辑器便于在其基础上改
-  const fillDefaultTemplate = async (field: 'dailyTemplateMd' | 'weeklyTemplateMd') => {
-    try {
-      const d = await getDefaultTemplates()
-      settingsForm.setFieldsValue({ [field]: field === 'dailyTemplateMd' ? d.dailyTemplateMd : d.weeklyTemplateMd })
-    } catch (e) {
-      showError(e, '获取默认模板失败')
-    }
-  }
-
-  const saveSettings = async () => {
-    const v = await settingsForm.validateFields()
-    try {
-      await updateSettings({
-        autoDaily: v.autoDaily,
-        autoWeekly: v.autoWeekly,
-        dailyMinutesTarget: v.dailyHoursTarget != null ? Math.round(v.dailyHoursTarget * 60) : undefined,
-        dailyTemplateMd: v.dailyTemplateMd,
-        weeklyTemplateMd: v.weeklyTemplateMd,
-        remoteUrl: v.remoteUrl ?? '',
-        remoteBranch: v.remoteBranch ?? '',
-      })
-      message.success('设置已保存')
-      setSettingsOpen(false)
-      setRemoteUrl(v.remoteUrl?.trim() ? v.remoteUrl.trim() : null)
-    } catch (e) {
-      showError(e, '保存失败')
-    }
-  }
-
   const extraByView: Partial<Record<View, React.ReactNode>> = {
     entries: (
       <>
@@ -511,7 +457,8 @@ export default function WorklogPage() {
           <Button icon={<CodeOutlined />} onClick={() => setReposOpen(true)}>
             仓库订阅
           </Button>
-          <Button icon={<SettingOutlined />} onClick={openSettings}>
+          {/* 工时/报表/备份偏好已收口到一级导航「设置」页的工作日志视图（原「工时设置」Modal） */}
+          <Button icon={<SettingOutlined />} onClick={() => navigate('/settings/worklog')}>
             设置
           </Button>
         </Space>
@@ -803,65 +750,6 @@ export default function WorklogPage() {
         onImported={loadEntries}
       />
       <RepoSubscriptionModal open={reposOpen} onCancel={() => setReposOpen(false)} />
-
-      <Modal
-        title="工时设置"
-        open={settingsOpen}
-        onOk={saveSettings}
-        onCancel={() => setSettingsOpen(false)}
-        destroyOnHidden
-        width={640}
-      >
-        <Form form={settingsForm} layout="vertical">
-          <Form.Item name="autoDaily" label="每天自动生成日报草稿" valuePropName="checked" extra="默认 18:30（服务端 cron 可配）">
-            <Switch />
-          </Form.Item>
-          <Form.Item name="autoWeekly" label="每周一自动生成上周周报草稿" valuePropName="checked" extra="默认周一 09:00">
-            <Switch />
-          </Form.Item>
-          <Form.Item name="dailyHoursTarget" label="每日工时目标（小时）">
-            <InputNumber min={0} max={24} step={0.5} style={{ width: '100%' }} placeholder="如 8" />
-          </Form.Item>
-          <Form.Item
-            name="dailyTemplateMd"
-            label="日报格式模板"
-            extra={
-              <>
-                占位符：{'{{date}}'} / {'{{entries}}'} / {'{{commits}}'}；留空 = 内置默认。
-                <Button type="link" size="small" onClick={() => fillDefaultTemplate('dailyTemplateMd')}>
-                  填入内置默认
-                </Button>
-              </>
-            }
-          >
-            <Input.TextArea rows={7} placeholder="留空使用内置默认模板" style={{ fontFamily: 'monospace' }} />
-          </Form.Item>
-          <Form.Item
-            name="weeklyTemplateMd"
-            label="周报格式模板"
-            extra={
-              <>
-                占位符：{'{{weekRange}}'} / {'{{entries}}'} / {'{{commits}}'}；留空 = 内置默认。
-                <Button type="link" size="small" onClick={() => fillDefaultTemplate('weeklyTemplateMd')}>
-                  填入内置默认
-                </Button>
-              </>
-            }
-          >
-            <Input.TextArea rows={8} placeholder="留空使用内置默认模板" style={{ fontFamily: 'monospace' }} />
-          </Form.Item>
-          <Form.Item
-            name="remoteUrl"
-            label="远程仓库备份（URL）"
-            extra="把日报/周报所在的工作日志空间备份到该远端（点空间条上的「推送远端」手动同步）。仅 http/https；凭证按 URL host 匹配「设置 → 第三方账号」的个人访问令牌。留空 = 解绑。"
-          >
-            <Input placeholder="https://git.example.com/<你>/worklog.git" allowClear />
-          </Form.Item>
-          <Form.Item name="remoteBranch" label="备份分支">
-            <Input placeholder="留空默认 main" allowClear />
-          </Form.Item>
-        </Form>
-      </Modal>
     </Card>
   )
 }

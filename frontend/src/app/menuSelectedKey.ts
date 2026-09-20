@@ -7,7 +7,7 @@ const SELECT_PREFIXES: Array<[string, string]> = [
   ['/context', '/context'],
   ['/chats', '/chats'],
   ['/worklog', '/worklog'],
-  ['/me/settings', '/me/settings'],
+  ['/settings', '/settings'], // 一级导航「设置」（旧 /me/settings 已重定向）
   ['/requirements', '/requirements'],
   ['/builds', '/builds'],
   ['/deployments', '/deployments'],
@@ -29,7 +29,7 @@ const TOPNAV_PREFIXES: Array<[string, string]> = [
   ['/home', '/home'],
   ['/chats', '/chats'],
   ['/worklog', '/worklog'],
-  ['/me/settings', '/me/settings'], // 一级导航「设置」
+  ['/settings', '/settings'], // 一级导航「设置」
   ['/overview', '/overview'],
   ['/sessions', '/overview'],
   ['/requirements', '/overview'],

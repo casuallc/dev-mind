@@ -41,9 +41,11 @@ SPI 从「只读 issue」扩到「可创建 issue」，后续工作日志未关�
 > Jira 项目 + 任务类型，入口收进「个人设置 → Jira 推送模板」；项目级那份连同表、端点、配置页一并废弃
 > ——见 FR-10（**首次为 CAP-47 引入表结构变更**，本节末句「零表结构变更」自本次修订起不再成立）。
 
-> 修订（2026-09-19，入口）：个人设置从 Header 用户下拉上提为一级导航「设置」（排在「工作日志」后，
-> 路由 `/me/settings` 不变，页内视图仍由路径段 `:tab` 决定）。下拉里的「个人设置」入口移除，只留退出登录；
-> 页面样式对齐 /worklog（Card 头部「设置 + Segmented 页内视图」，操作按钮随视图进 extra）。
+> 修订（2026-09-20，入口）：个人设置从 Header 用户下拉上提为一级导航「设置」（排在「工作日志」后），
+> 路由随之去掉 `/me` 前缀改为 `/settings/:tab`（`/me/settings*`、`/me/accounts`、`/me/git-credentials`
+> 整组保留兼容重定向）；下拉里的「个人设置」入口移除，只留退出登录。
+> 页面样式对齐 /worklog（Card 头部「设置 + Segmented 页内视图」，操作按钮随视图进 extra），
+> 工作日志页的「工时设置」弹窗同批并入该页的第 4 个视图（`/settings/worklog`）。
 > 本文中所有「个人设置 → xxx」的指路文案同步改为「设置 → xxx」。
 
 与 CAP-19 的关系：共用 `integrations` 表（TYPE_JIRA）、`IntegrationCipher` 凭据、`IntegrationConnector` SPI、
@@ -153,7 +155,7 @@ SPI 从「只读 issue」扩到「可创建 issue」，后续工作日志未关�
 
 - **FR-10 个人推送模板（推送默认值的重设计，取代项目级单行）**：一个用户可为每个「实例 + Jira 项目 +
   任务类型」组合各存一行默认值（优先级/经办人/标签/动态字段），推送弹窗选定同组合时自动带入。
-  入口在**设置 → Jira 推送模板**（`/me/settings/jira-templates`）——非 ADMIN 用户此前没有任何
+  入口在**设置 → Jira 推送模板**（`/settings/jira-templates`）——非 ADMIN 用户此前没有任何
   配置入口，而「我常推哪个项目的哪个类型」本就是个人偏好，不该挂后台管理。
 
   | 端点（`/api/me/jira-push-templates`） | 行为 |

@@ -56,6 +56,12 @@ function LegacyProjectRedirect() {
   return <Navigate to="/overview" replace />
 }
 
+/** 旧链接兼容：/me/settings/:tab → /settings/:tab（设置已上提为一级导航，路径去掉 /me 前缀） */
+function LegacySettingsTabRedirect() {
+  const { tab } = useParams<{ tab: string }>()
+  return <Navigate to={`/settings/${tab ?? 'profile'}`} replace />
+}
+
 /** 旧链接兼容：/docs/:id → /admin/docs/:id（文档管理已迁入后台） */
 function LegacyDocRedirect() {
   const { id } = useParams<{ id: string }>()
@@ -78,11 +84,14 @@ export default function App() {
           <Route path="/" element={<Navigate to="/home" replace />} />
           {/* 个人聚合首页（默认落地页） */}
           <Route path="/home" element={<HomePage />} />
-          {/* 设置（一级导航「设置」；页内视图 = 个人信息/第三方账号/Jira 推送模板；旧 /me/accounts 与 Git 凭证路径兼容跳转） */}
-          <Route path="/me/settings" element={<Navigate to="/me/settings/profile" replace />} />
-          <Route path="/me/settings/:tab" element={<SettingsPage />} />
-          <Route path="/me/accounts" element={<Navigate to="/me/settings/accounts" replace />} />
-          <Route path="/me/git-credentials" element={<Navigate to="/me/settings/accounts" replace />} />
+          {/* 设置（一级导航「设置」；页内视图 = 个人信息/第三方账号/Jira 推送模板/工作日志；
+              旧 /me/* 个人路径整组兼容跳转） */}
+          <Route path="/settings" element={<Navigate to="/settings/profile" replace />} />
+          <Route path="/settings/:tab" element={<SettingsPage />} />
+          <Route path="/me/settings" element={<Navigate to="/settings/profile" replace />} />
+          <Route path="/me/settings/:tab" element={<LegacySettingsTabRedirect />} />
+          <Route path="/me/accounts" element={<Navigate to="/settings/accounts" replace />} />
+          <Route path="/me/git-credentials" element={<Navigate to="/settings/accounts" replace />} />
           {/* CAP-28 个人工作日志（个人级，不进项目上下文；会话/知识为页内视图） */}
           <Route path="/worklog" element={<WorklogPage />} />
           {/* CAP-30 通用问答（个人级，不进项目上下文） */}

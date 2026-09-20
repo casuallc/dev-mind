@@ -11,7 +11,7 @@ const ROLE_LABELS: Record<string, { color: string; text: string }> = {
   VIEWER: { color: 'default', text: 'VIEWER' },
 }
 /** CAP-01 Header 用户区：当前用户 + 角色 + 下拉（退出登录）。
- * 个人信息 / 第三方账号 / Jira 推送模板统一收进一级导航「设置」页（/me/settings），不再走下拉开入口。 */
+ * 个人信息 / 第三方账号 / Jira 推送模板 / 工作日志统一收进一级导航「设置」页（/settings），不走下拉开入口。 */
 export default function UserMenu() {
   const user = useSyncExternalStore(subscribeAuth, getUserSnapshot)
   const navigate = useNavigate()

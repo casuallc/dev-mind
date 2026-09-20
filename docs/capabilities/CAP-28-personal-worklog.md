@@ -158,7 +158,8 @@ PUT    /api/worklog/weekly/{id}                 {summaryMd, nextPlanMd, status}
 POST   /api/worklog/entries/{id}/jira/log-work
 POST   /api/worklog/entries/{id}/jira/create-issue
 
-# 个人设置
+# 个人设置（工时/报表偏好；前端入口 = 设置页「工作日志」视图 /settings/worklog，
+# 2026-09-20 前是工作日志页 extra 的「工时设置」弹窗）
 GET/PUT /api/worklog/settings                   {autoDaily, autoWeekly, dailyMinutesTarget}
 
 # 领域事件 → 通知中心
