@@ -2,7 +2,7 @@
 // 来源字段（externalKey/externalUrl/remoteStatus）由列表接口直接带出，不再旁路反查 external_links。
 // 布局遵循 docs/core/前端内容区布局约定.md：Card 默认尺寸、title 内 Segmented、操作收 extra、表格默认密度。
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Card, Input, Modal, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
+import { Button, Card, Input, Modal, Segmented, Select, Space, Tag, Tooltip, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -10,7 +10,8 @@ import { listRequirements, updateRequirementStatus } from '../api'
 import type { Requirement, RequirementSource, RequirementType } from '../types'
 import RequirementFormDrawer from './RequirementFormDrawer'
 import { fmtDuration, fmtTime } from '../../../shared/utils/format'
-import { pageCardBodyScrollStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import {
   ALL_STATUSES,
@@ -212,7 +213,7 @@ export default function RequirementListCard({ projectId }: { projectId: string }
     <>
       <Card
         style={pageCardStyle}
-        styles={{ body: pageCardBodyScrollStyle }}
+        styles={{ body: pageCardBodyFlexStyle }}
         title={
           <Space size={12}>
             <span>需求</span>
@@ -265,7 +266,8 @@ export default function RequirementListCard({ projectId }: { projectId: string }
         <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
           需求 = 研发主线的顶层条目：可来自 Jira 同步或本地自建，点行进详情管理设计与工作单元。
         </Typography.Paragraph>
-        <Table
+        {/* FitTable：表头吸顶、分页条常驻，只表体滚动（整页不出现纵向滚动条） */}
+        <FitTable
           rowKey="id"
           loading={loading}
           columns={columns}
