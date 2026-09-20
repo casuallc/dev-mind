@@ -273,9 +273,21 @@ kind=RERANK 仍 400。绑定守卫（FR-11）落在 knowledge 侧，不新增 HT
 | CHAT 的 `top_k`/`threshold` | 未提 | 忽略并落 null，含**越界值不报错**、update 清历史遗留值 | 该类型无检索语义，报错只增加失败面而不带来收益；但绝不能静默存下一个永远没人读的脏值 |
 | 向量链守卫 | 未提 | knowledge 绑定处 `kind != EMBEDDING` → 400 + 解析结果 `filter(embedding())` + 前端只列 EMBEDDING | 解析链原本不看 kind：放开 CHAT 后一个对话端点会被当向量端点用（拿对话模型名打 `/embeddings`、写脏 `indexed_model` 血缘），且 UI 会把它显示成知识库"当前生效向量端点"——正是 §1/§9 反复收口的「UI 与实际行为不符」 |
 
-**验收证据**：`tests/cap48_verify.py` 56 项全绿（含 `tests/fixtures/embedding-mock.py` 假 embedding 端）；
-cap44/45/46 三个 E2E 脚本**未改一行**仍全绿（迁移种子端点生效）；知识库列表/详情页布局巡检通过
-（`tests/e2e-layout-pages.mjs`，含详情页四个视图）。
+**验收证据**：`tests/cap48_verify.py` **79 项全绿**（含 `tests/fixtures/embedding-mock.py` 假 embedding 端
+与 `tests/fixtures/chat-mock.py` 假对话端；FR-11 段（23 项）插在 F 与 G 之间，因为 G 会停用向量默认端点），
+单测 `devmind-model` 53 项、
+`devmind-knowledge` 解析链守卫、`devmind-common` 对话客户端全绿；
+cap44（20 项）/45（22 项）/46（18 项）三个 E2E 脚本**未改一行**在同一实例上仍全绿（迁移种子端点生效）；
+知识库列表/详情页布局巡检通过（`tests/e2e-layout-pages.mjs`，含详情页四个视图）。
+
+FR-11 段的端到端断言（同一实例，:18090 + 独立 H2）：建 CHAT 端点（`topK=0`/`threshold=1.5` 越界值不报错、
+落 null、无维度）→ 连接测试打 `chat-mock` 的 `/v1/chat/completions`（该 fixture **刻意不实现**
+`/embeddings`，探针没按 kind 分派会当场 404）且带 model/user 文本/解密密钥、**不带 `max_tokens`**，
+`message` 回显模型真实回复（fixture 回复改成"链路正常-XYZ"以区别于探针文本）、`dimensions`/
+`dimensionChanged` 皆 null → mock 对话端点零网络且不冒用 `mock-embedding` 血缘值 →
+草稿预检按 kind 分派、`RERANK` 草稿 400 → 知识库绑定对话端点被 400 拦下（含 "EMBEDDING" 文案）→
+设为该类型平台默认后向量默认端点不受影响、库 A 仍解析到向量端点且检索走向量通道（**对话默认不劫持向量链**）
+→ 401 失败诊断脱敏且不写维度 → 删净后端点清单只剩向量端点。
 
 **踩坑归档**：JPQL 批量 update 里用 `CURRENT_TIMESTAMP` 赋 `Instant` 字段会被 Hibernate 7 语义校验拒
 （`Cannot assign expression of type 'java.sql.Timestamp' to target path ... of type 'java.time.Instant'`），

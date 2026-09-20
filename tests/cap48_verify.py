@@ -15,7 +15,9 @@
 FR-03 连接测试（实测维度回写、维度变化告警、失败诊断且不回显凭据）、
 FR-04 解析链（库级覆盖 → 平台默认 → 无，停用/删除后回落且不回写脏数据）、
 FR-06 索引血缘与维度失配诊断（DIMENSION_MISMATCH / NO_EMBEDDING，不静默空结果）、
-FR-08 重建索引（全库 / 只重建失配）、删除端点引用保护。
+FR-08 重建索引（全库 / 只重建失配）、删除端点引用保护、
+FR-11 通用模型（CHAT）端点登记与连接测试（按 kind 分派 /chat/completions、不吃向量语义、
+按类型各自唯一的平台默认、知识库不能绑对话端点、对话默认不劫持向量解析链）。
 
 注意：本脚本会删除迁移生成的种子端点（迁移幂等判断是"表里已有 EMBEDDING 端点就跳过"，
 删完不重启就在也不会补），所以**请在 cap44/45/46 之后运行**，或在干净实例上单独跑。
@@ -33,6 +35,9 @@ BASE = os.environ.get("DEVMIND_BASE", "http://localhost:18090/api")
 EMB_PORT = int(os.environ.get("EMB_MOCK_PORT", "18193"))
 EMB_BASE = f"http://127.0.0.1:{EMB_PORT}/v1"
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "embedding-mock.py")
+CHAT_PORT = int(os.environ.get("CHAT_MOCK_PORT", "18194"))
+CHAT_BASE = f"http://127.0.0.1:{CHAT_PORT}/v1"
+CHAT_FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "chat-mock.py")
 passed = 0
 failed = 0
 TOKEN = None
@@ -65,6 +70,20 @@ def _mock_call(path, body=None):
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=10) as r:
         return json.loads(r.read())
+
+
+def _chat_call(path, body=None):
+    """对话 mock 的控制面调用（改回复 / 注入故障 / 回看请求）"""
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(f"http://127.0.0.1:{CHAT_PORT}{path}", data=data,
+                                 method="POST" if body is not None else "GET",
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read())
+
+
+def chat_requests():
+    return _chat_call("/__state")["requests"]
 
 
 def check(name, cond, detail=""):
@@ -119,19 +138,23 @@ def search(kb_ids, query, top_k=None):
     return r if st == 200 else {"chunks": [], "vector": False, "degradedReason": "HTTP" + str(st)}
 
 
-# ---------- 起 embedding-mock ----------
+# ---------- 起 embedding-mock + chat-mock ----------
 mock_proc = subprocess.Popen([sys.executable, FIXTURE, str(EMB_PORT)],
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+chat_proc = subprocess.Popen([sys.executable, CHAT_FIXTURE, str(CHAT_PORT)],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 try:
-    for _ in range(50):
-        try:
-            _mock_call("/__state")
-            break
-        except Exception:
-            time.sleep(0.2)
-    else:
-        print("embedding-mock 启动失败")
-        sys.exit(1)
+    for probe, name in ((lambda: _mock_call("/__state"), "embedding-mock"),
+                        (lambda: _chat_call("/__state"), "chat-mock")):
+        for _ in range(50):
+            try:
+                probe()
+                break
+            except Exception:
+                time.sleep(0.2)
+        else:
+            print(f"{name} 启动失败")
+            sys.exit(1)
 
     # ---------- 0. 登录 ----------
     st, login = call("POST", "/auth/login", {"username": "admin", "password": "admin123"})
@@ -308,6 +331,103 @@ try:
     check("12 维端点下检索命中", s.get("degradedReason") == "NONE"
           and (s.get("chunks") or []) and s["chunks"][0]["score"] > 0, f"{s}")
 
+    # ---------- F2. FR-11 通用模型（CHAT）端点：登记 + 按 kind 分派的连接测试 ----------
+    print("\n[F2] 通用模型（对话）端点登记 + 连接测试按类型分派 + 不劫持向量链")
+    # 回复文本故意与探针文本不同：否则「message 里有"可用"」可能只是把探针原样回显了
+    _chat_call("/__reply", {"reply": "链路正常-XYZ"})
+    st, ec = call("POST", "/model-endpoints",
+                  {"kind": "CHAT", "name": "CAP48-E2E-通用模型", "provider": "openai-compatible",
+                   "baseUrl": CHAT_BASE, "apiKey": "sk-e2e-chat-123456", "model": "fake-chat",
+                   "timeoutSeconds": 10, "topK": 0, "threshold": 1.5})
+    check("建对话端点（kind=CHAT）", st == 200 and (ec or {}).get("kind") == "CHAT", f"{st} {ec}")
+    EC = (ec or {}).get("id")
+    check("对话端点不吃向量语义：topK/threshold 落 null（越界值也不报错）、维度未探测",
+          (ec or {}).get("topK") is None and (ec or {}).get("threshold") is None
+          and (ec or {}).get("dimensions") is None, f"{ec}")
+
+    st, tc = call("POST", f"/model-endpoints/{EC}/test")
+    cmsg = (tc or {}).get("message") or ""
+    check("对话连接测试 ok 且 message 回显模型真实回复",
+          st == 200 and (tc or {}).get("ok") is True and "链路正常-XYZ" in cmsg, f"{st} {tc}")
+    check("对话测试不给维度也不报维度变化",
+          (tc or {}).get("dimensions") is None and (tc or {}).get("dimensionChanged") is None, f"{tc}")
+    creqs = chat_requests()
+    check("探针命中 /v1/chat/completions（chat-mock 无 /embeddings，打错必 404）",
+          bool(creqs) and creqs[-1]["path"].endswith("/chat/completions"), f"{creqs[-1:]}")
+    check("探针带 model + user 文本 + 解密后的密钥，且不发 max_tokens",
+          creqs[-1]["model"] == "fake-chat" and creqs[-1]["role"] == "user"
+          and bool(creqs[-1]["prompt"]) and creqs[-1]["hasMaxTokens"] is False
+          and creqs[-1]["auth"] == "Bearer sk-e2e-chat-123456", f"{creqs[-1]}")
+    check("对话测试结果落库（lastTestOk=True，维度仍空）",
+          ep(EC).get("lastTestOk") is True and ep(EC).get("dimensions") is None, f"{ep(EC)}")
+
+    st, mc = call("POST", "/model-endpoints",
+                  {"kind": "CHAT", "name": "CAP48-E2E-假对话", "provider": "mock"})
+    check("建 mock 对话端点（不需要地址/模型）", st == 200 and (mc or {}).get("kind") == "CHAT",
+          f"{st} {mc}")
+    MC = (mc or {}).get("id")
+    before = len(chat_requests())
+    st, tmc = call("POST", f"/model-endpoints/{MC}/test")
+    check("mock 对话端点零网络：自报假回复、不写维度",
+          st == 200 and (tmc or {}).get("ok") is True and (tmc or {}).get("dimensions") is None
+          and len(chat_requests()) == before, f"{st} {tmc}")
+    check("mock 对话端点不冒用 mock-embedding（索引血缘的合同值）",
+          (tmc or {}).get("model") != "mock-embedding", f"{tmc}")
+
+    st, td = call("POST", "/model-endpoints/test",
+                  {"kind": "CHAT", "name": "草稿对话", "provider": "openai-compatible",
+                   "baseUrl": CHAT_BASE, "model": "fake-chat"})
+    check("草稿预检按 kind 分派：对话草稿同样走 /chat/completions 且不给维度",
+          st == 200 and (td or {}).get("ok") is True and (td or {}).get("dimensions") is None,
+          f"{st} {td}")
+    st, _ = call("POST", "/model-endpoints/test",
+                 {"kind": "RERANK", "provider": "openai-compatible", "baseUrl": CHAT_BASE,
+                  "model": "m"})
+    check("RERANK 草稿预检 400（预留类型不发请求）", st == 400, f"{st}")
+
+    st, _ = call("POST", "/model-endpoints",
+                 {"kind": "CHAT", "name": "对话缺地址", "provider": "openai-compatible",
+                  "model": "gpt-4o-mini"})
+    check("对话端点缺 baseUrl 仍 400", st == 400, f"{st}")
+    st, _ = call("POST", "/model-endpoints",
+                 {"kind": "CHAT", "name": "对话非法 provider", "provider": "anthropic"})
+    check("对话端点非法 provider 仍 400", st == 400, f"{st}")
+
+    st, err = call("POST", "/knowledge/bases",
+                   {"name": "CAP48-E2E-错绑对话端点", "scope": "global", "injectMode": "RAG",
+                    "modelEndpointId": EC})
+    check("知识库不能绑对话端点（绑定时就 400，别等索引才炸）",
+          st == 400 and "EMBEDDING" in json.dumps(err, ensure_ascii=False), f"{st} {err}")
+
+    st, ec_def = call("PUT", f"/model-endpoints/{EC}/default")
+    check("对话端点可设为该类型平台默认",
+          st == 200 and (ec_def or {}).get("isDefault") is True, f"{st} {ec_def}")
+    check("平台默认按类型各自唯一：向量默认端点不受影响",
+          ep(E2).get("isDefault") is True, f"{ep(E2)}")
+
+    kb_a = get_kb(A)
+    check("存在对话默认端点时，库 A 仍解析到向量端点",
+          kb_a.get("modelEndpointName") == "CAP48-E2E-远端8维", f"{kb_a}")
+    s = search([A], "端点解析")
+    check("检索仍走向量通道（对话默认不劫持向量解析链）",
+          s.get("vector") is True and s.get("degradedReason") == "NONE"
+          and (s.get("chunks") or []) and s["chunks"][0]["score"] > 0, f"{s}")
+
+    _chat_call("/__status", {"code": 401})
+    st, tcf = call("POST", f"/model-endpoints/{EC}/test")
+    fmsg = (tcf or {}).get("message") or ""
+    check("对话端点失败诊断同样脱敏且不写维度",
+          st == 200 and (tcf or {}).get("ok") is False and "sk-e2e-chat-123456" not in fmsg
+          and "***" in fmsg and ep(EC).get("dimensions") is None, f"{st} {tcf}")
+    _chat_call("/__status", {"code": 200})
+
+    for ep_id in (EC, MC):
+        call("PUT", f"/model-endpoints/{ep_id}/status", {"status": "disabled"})
+        st, _ = call("DELETE", f"/model-endpoints/{ep_id}")
+        check(f"对话端点 {ep_id} 可删（无引用）", st == 200, f"{st}")
+    check("删净后端点清单只剩向量端点",
+          all(e["kind"] == "EMBEDDING" for e in endpoints()), f"{endpoints()}")
+
     # ---------- G. FR-04/06 无可用端点 → LIKE 降级不静默 ----------
     print("\n[G] 无可用端点 → LIKE 降级（vector=false，score=0，仍有命中）")
     call("PUT", f"/model-endpoints/{E2}/status", {"status": "disabled"})
@@ -366,3 +486,4 @@ try:
     sys.exit(1 if failed else 0)
 finally:
     mock_proc.terminate()
+    chat_proc.terminate()
