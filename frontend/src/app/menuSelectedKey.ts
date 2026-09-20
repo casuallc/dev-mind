@@ -3,6 +3,7 @@
 const SELECT_PREFIXES: Array<[string, string]> = [
   ['/admin/projects', '/admin/projects'], // 列表 + 设置子路由
   ['/admin/docs', '/admin/docs'], // 列表 + 编辑器
+  ['/admin/knowledge', '/admin/knowledge'], // 列表 + 库详情（/admin/knowledge/bases/:id）
   ['/projects/', '/requirements'], // /projects/:id/requirements/:rid → 需求
   ['/context', '/context'],
   ['/chats', '/chats'],
