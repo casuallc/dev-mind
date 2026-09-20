@@ -77,6 +77,12 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 | e2e-stacktrace.sh | 错误响应堆栈透传（local profile） |
 | verify-skill-import.sh | /api/skills/import 报错文案 + BOM 兼容 |
 
+### 前端布局回归（Node + 无头 Chrome，需 app :8080 与前端 dev :5173 同时起）
+
+| 脚本 | 覆盖 |
+|------|------|
+| e2e-requirements-layout.mjs | 需求列表：整页不出纵向滚动条、表体内部滚动（`scroll.y` 为实测值）、表头吸顶、分页条常驻；自带数据（临时项目「布局校验-临时」造 30 条需求，跑完连项目一起删，`--keep` 保留）。浏览器路径用 `CHROME_PATH` 覆盖，截图落 `tmp/layout-check-requirements.png` |
+
 ### WS 帧探针（Node，被 verify 脚本调用或手工）
 
 `ws_check.mjs`（通知流）、`cap08-ws-test.mjs <buildId>`、`cap09-ws-test.mjs <depId>`、`cap10-ws-test.mjs <runId>`、`cap23-ws-test.mjs <repoId>`
