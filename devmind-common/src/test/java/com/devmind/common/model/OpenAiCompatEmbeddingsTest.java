@@ -135,6 +135,7 @@ class OpenAiCompatEmbeddingsTest {
         assertTrue(ex.getMessage().contains("chunks[0,2)"), "失败消息要带批次区间: " + ex.getMessage());
         assertFalse(ex.getMessage().contains("sk-secret-key-123"), "消息不得回显 apiKey: " + ex.getMessage());
         assertTrue(ex.getMessage().contains("***"), "被回显的凭据片段应被抹掉");
+        assertTrue(ex.getMessage().contains("/embeddings"), "失败消息要回显实际请求的地址: " + ex.getMessage());
     }
 
     @Test

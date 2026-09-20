@@ -86,11 +86,12 @@ public final class OpenAiCompatEmbeddings {
             if (opt.apiKey() != null && !opt.apiKey().isBlank()) {
                 req.header("Authorization", "Bearer " + opt.apiKey());
             }
+            HttpRequest request = req.build();
             HttpResponse<String> resp = OpenAiCompatHttp.http(opt.timeoutSeconds())
-                    .send(req.build(), HttpResponse.BodyHandlers.ofString());
+                    .send(request, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() / 100 != 2) {
-                throw new EmbeddingCallException("embedding 端点返回 " + resp.statusCode() + ": "
-                        + OpenAiCompatHttp.sanitize(OpenAiCompatHttp.abbreviate(resp.body())));
+                throw new EmbeddingCallException(
+                        OpenAiCompatHttp.failure("embedding 端点", request.uri(), resp.statusCode(), resp.body()));
             }
             JsonNode data = MAPPER.readTree(resp.body()).path("data");
             if (!data.isArray() || data.size() != texts.size()) {

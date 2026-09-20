@@ -43,4 +43,19 @@ final class OpenAiCompatHttp {
         }
         return body.length() <= SNIPPET_LEN ? body : body.substring(0, SNIPPET_LEN) + "…";
     }
+
+    /**
+     * 非 2xx 的统一诊断串。<b>带上实际请求的 URL</b>：「baseUrl 填短了」是最常见的一类误配
+     * （如 {@code http://host:8000} 少了 {@code /v1}，FastAPI 系的 vLLM/SGLang 就回
+     * {@code {"detail":"Not Found"}}），不回显 URL 只能靠用户猜。
+     *
+     * <p>404 再补一句两类成因：路径不对，或该服务上没有这个模型名——vLLM 对未知 model 也回 404，
+     * 只报「404」会把人引向错误的方向（去查网络，其实是模型名拼错）。</p>
+     */
+    static String failure(String what, java.net.URI uri, int status, String body) {
+        String hint = status == 404
+                ? "（看上面的地址：OpenAI 兼容服务多数要求 baseUrl 带 /v1 前缀；地址没错则是该服务上没有这个模型名）"
+                : "";
+        return what + " " + uri + " 返回 " + status + ": " + sanitize(abbreviate(body)) + hint;
+    }
 }

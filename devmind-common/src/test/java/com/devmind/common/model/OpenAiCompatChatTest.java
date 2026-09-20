@@ -103,6 +103,22 @@ class OpenAiCompatChatTest {
         assertTrue(ex.getMessage().contains("401"), ex.getMessage());
         assertFalse(ex.getMessage().contains(API_KEY), ex.getMessage());
         assertTrue(ex.getMessage().contains("***"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("/chat/completions"),
+                "失败消息要回显实际请求的地址，否则「baseUrl 填短了」只能靠猜: " + ex.getMessage());
+    }
+
+    @Test
+    void notFoundMessagePointsAtBaseUrlAndModelName() throws IOException {
+        // vLLM/SGLang 的 baseUrl 少了 /v1 时就是这一句（FastAPI 默认 404），
+        // 而模型名不存在 vLLM 也回 404 —— 两种成因都得提，否则用户会去查网络
+        String baseUrl = serve(404, "{\"detail\":\"Not Found\"}");
+
+        ModelCallException ex = assertThrows(ModelCallException.class,
+                () -> OpenAiCompatChat.chat(options(baseUrl), "hi"));
+
+        assertTrue(ex.getMessage().contains("404"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("/v1"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("模型名"), ex.getMessage());
     }
 
     @Test
