@@ -17,6 +17,8 @@ const BASE = process.env.BASE ?? 'http://localhost:5173'
 const API = process.env.API ?? 'http://localhost:8080'
 const USER = process.env.USER ?? 'admin'
 const PASS = process.env.PASS ?? 'admin123'
+/** 知识库详情页默认取库里第一个库；KB_ID 可指定（验特定状态：失配告警、无可用端点等） */
+const KB_ID = process.env.KB_ID
 const CHROME = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 
 const argOf = (name, dflt) => {
@@ -67,6 +69,7 @@ const ROUTES = [
   { path: '/admin/agent-nodes', name: '后台-执行节点' },
   { path: '/admin/scenarios', name: '后台-场景' },
   { path: '/admin/knowledge', name: '后台-知识库' },
+  { path: '/admin/knowledge/bases/{kid}', name: '后台-知识库详情', kb: true },
   { path: '/admin/skills', name: '后台-Skill' },
   { path: '/admin/docs', name: '后台-文档库' },
   { path: '/admin/attachments', name: '后台-附件' },
@@ -246,6 +249,10 @@ async function main() {
   const project = list[0]
   if (!project) throw new Error('库里没有项目，先建一个再跑巡检（项目上下文页面无处可去）')
   log(`[1] 登录 ${USER}，巡检项目取 ${project.name}（${project.id}）`)
+  // 知识库详情页取库里第一个库（没有就跳过该路由，不算失败）
+  const kbList = await api('GET', '/knowledge/bases', undefined, accessToken).catch(() => [])
+  const kb = KB_ID ? { id: KB_ID } : (kbList ?? [])[0]
+  if (!kb) log('    （库里没有知识库，跳过知识库详情页）')
 
   // ── 2. 起 headless Chrome ─────────────────────────────────
   if (!existsSync(CHROME)) throw new Error(`找不到浏览器：${CHROME}（用 CHROME_PATH 指定）`)
@@ -282,10 +289,11 @@ async function main() {
 
     // ── 3. 逐路由巡检 ──────────────────────────────────────
     const routes = ROUTES.filter((r) => !ONLY.length || ONLY.some((o) => r.path.includes(o)))
+        .filter((r) => !r.kb || kb)
     log(`[2] 巡检 ${routes.length} 个路由（窗口 ${WIN_W}x${WIN_H}，settle ${SETTLE}ms）`)
 
     for (const route of routes) {
-      const url = BASE + route.path.replace('{pid}', project.id)
+      const url = BASE + route.path.replace('{pid}', project.id).replace('{kid}', kb?.id ?? '')
       ws.reset()
       await ws.send('Page.navigate', { url })
       try {
