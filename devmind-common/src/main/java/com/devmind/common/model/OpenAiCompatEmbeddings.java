@@ -1,15 +1,11 @@
 package com.devmind.common.model;
 
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Pattern;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -21,20 +17,15 @@ import tools.jackson.databind.ObjectMapper;
  * <p>职责：分批、单批失败重试一次（500ms 退避）、请求超时读端点配置、响应结构校验
  * （data 条数与输入一致 + 所有向量等长）、错误消息脱敏。</p>
  *
- * <p>{@code HttpClient} 按超时值静态复用——每次调用新建会把连接池也一起废掉。</p>
+ * <p>{@code HttpClient} 与脱敏助手见 {@link OpenAiCompatHttp}（与 FR-11 的对话客户端共用同一份实现）。</p>
  */
 public final class OpenAiCompatEmbeddings {
 
     /** 单批失败重试次数（首次 + 重试 1 次） */
     private static final int ATTEMPTS = 2;
     private static final long RETRY_BACKOFF_MS = 500;
-    /** 响应体摘要长度（错误消息里带的原文片段） */
-    private static final int SNIPPET_LEN = 200;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final Map<Integer, HttpClient> HTTP = new ConcurrentHashMap<>();
-    /** 形如 sk-xxx / Bearer xxx 的凭据片段，出现在任何回显文本里都要抹掉 */
-    private static final Pattern SECRET = Pattern.compile("(?i)(sk-[A-Za-z0-9_\\-]{6,}|bearer\\s+\\S+)");
 
     private OpenAiCompatEmbeddings() {
     }
@@ -95,11 +86,11 @@ public final class OpenAiCompatEmbeddings {
             if (opt.apiKey() != null && !opt.apiKey().isBlank()) {
                 req.header("Authorization", "Bearer " + opt.apiKey());
             }
-            HttpResponse<String> resp = http(opt.timeoutSeconds())
+            HttpResponse<String> resp = OpenAiCompatHttp.http(opt.timeoutSeconds())
                     .send(req.build(), HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() / 100 != 2) {
                 throw new EmbeddingCallException("embedding 端点返回 " + resp.statusCode() + ": "
-                        + sanitize(abbreviate(resp.body())));
+                        + OpenAiCompatHttp.sanitize(OpenAiCompatHttp.abbreviate(resp.body())));
             }
             JsonNode data = MAPPER.readTree(resp.body()).path("data");
             if (!data.isArray() || data.size() != texts.size()) {
@@ -131,25 +122,13 @@ public final class OpenAiCompatEmbeddings {
             Thread.currentThread().interrupt();
             throw new EmbeddingCallException("embedding 调用被中断", e);
         } catch (Exception e) {
-            throw new EmbeddingCallException("embedding 调用失败: " + sanitize(String.valueOf(e)), e);
+            throw new EmbeddingCallException("embedding 调用失败: "
+                    + OpenAiCompatHttp.sanitize(String.valueOf(e)), e);
         }
     }
 
-    private static HttpClient http(int timeoutSeconds) {
-        return HTTP.computeIfAbsent(timeoutSeconds, t -> HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(t))
-                .build());
-    }
-
-    private static String abbreviate(String body) {
-        if (body == null) {
-            return "";
-        }
-        return body.length() <= SNIPPET_LEN ? body : body.substring(0, SNIPPET_LEN) + "…";
-    }
-
-    /** 抹掉可能被端点回显的密钥片段（FR-02：异常消息不得含 apiKey） */
+    /** 抹掉可能被端点回显的密钥片段（FR-02：异常消息不得含 apiKey）。实现在 {@link OpenAiCompatHttp} */
     public static String sanitize(String text) {
-        return text == null ? "" : SECRET.matcher(text).replaceAll("***");
+        return OpenAiCompatHttp.sanitize(text);
     }
 }

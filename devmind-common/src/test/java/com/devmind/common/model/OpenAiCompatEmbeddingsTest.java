@@ -168,4 +168,18 @@ class OpenAiCompatEmbeddingsTest {
         assertEquals("plain text", OpenAiCompatEmbeddings.sanitize("plain text"));
         assertEquals("", OpenAiCompatEmbeddings.sanitize(null));
     }
+
+    /** FR-11 把 EmbeddingCallException 挂到了 ModelCallException 下：既有捕获点必须继续生效 */
+    @Test
+    void embeddingFailureIsAlsoAModelCallFailure() {
+        assertThrows(EmbeddingCallException.class,
+                () -> OpenAiCompatEmbeddings.embed(
+                        new OpenAiCompatEmbeddings.Options("http://127.0.0.1:1/v1", null, "m", 1, 8),
+                        List.of("a")));
+
+        assertThrows(ModelCallException.class,
+                () -> OpenAiCompatEmbeddings.embed(
+                        new OpenAiCompatEmbeddings.Options("http://127.0.0.1:1/v1", null, "m", 1, 8),
+                        List.of("a")));
+    }
 }
