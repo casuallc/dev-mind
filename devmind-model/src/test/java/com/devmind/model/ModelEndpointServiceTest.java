@@ -29,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -261,7 +262,7 @@ class ModelEndpointServiceTest {
 
         ModelEndpointApiView view = service.setDefault(1L);
 
-        verify(repo).clearDefaultExcept(ModelEndpointEntity.KIND_EMBEDDING, 1L);
+        verify(repo).clearDefaultExcept(eq(ModelEndpointEntity.KIND_EMBEDDING), eq(1L), any(Instant.class));
         assertTrue(view.isDefault());
     }
 
@@ -270,7 +271,7 @@ class ModelEndpointServiceTest {
         stored(1L, ModelEndpointEntity.PROVIDER_OPENAI, false, ModelEndpointEntity.STATUS_DISABLED);
 
         assertThrows(DevMindException.class, () -> service.setDefault(1L));
-        verify(repo, never()).clearDefaultExcept(anyString(), anyLong());
+        verify(repo, never()).clearDefaultExcept(anyString(), anyLong(), any(Instant.class));
     }
 
     @Test

@@ -150,9 +150,10 @@ public class ModelEndpointService implements ModelEndpointProvider {
         if (!e.active()) {
             throw new DevMindException(ErrorCode.CONFLICT, "停用的端点不能设为平台默认，请先启用");
         }
-        repo.clearDefaultExcept(e.getKind(), id);
+        Instant now = Instant.now();
+        repo.clearDefaultExcept(e.getKind(), id, now);
         e.setDefault(true);
-        e.setUpdatedAt(Instant.now());
+        e.setUpdatedAt(now);
         ModelEndpointEntity saved = repo.save(e);
         log.info("平台默认端点已切换: {} [{}]", saved.getId(), saved.getName());
         return view(saved);
