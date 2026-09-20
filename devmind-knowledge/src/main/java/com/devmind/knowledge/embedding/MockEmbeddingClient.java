@@ -12,7 +12,8 @@ import java.util.regex.Pattern;
  */
 public class MockEmbeddingClient implements EmbeddingClient {
 
-    public static final String MODEL = "mock-embedding";
+    /** 模型名取 common 的跨模块合同值（索引血缘要与端点侧逐字一致，禁止各写一份） */
+    public static final String MODEL = com.devmind.common.model.ModelEndpointView.MODEL_MOCK;
 
     private static final Pattern TOKEN = Pattern.compile("[a-z0-9]+|[\\u4e00-\\u9fff]");
 

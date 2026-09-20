@@ -25,6 +25,7 @@
         <module>devmind-auth</module>
         <module>devmind-project</module>
         <module>devmind-docs</module>
+        <module>devmind-model</module>
         <module>devmind-knowledge</module>
         <module>devmind-skill</module>
         <module>devmind-session</module>
@@ -76,6 +77,11 @@
             <dependency>
                 <groupId>com.devmind</groupId>
                 <artifactId>devmind-docs</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.devmind</groupId>
+                <artifactId>devmind-model</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

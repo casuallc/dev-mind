@@ -71,6 +71,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/integrations", "/api/integrations/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/integrations/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/integrations/**").hasRole("ADMIN")
+                        // CAP-48：模型端点（含凭据、决定全平台索引行为）的写操作仅 ADMIN；读列表走下方全认证
+                        .requestMatchers(HttpMethod.POST, "/api/model-endpoints", "/api/model-endpoints/**")
+                        .hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/model-endpoints/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/model-endpoints/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/**").authenticated()
                         // CAP-29：全局仓库登记写操作仅 ADMIN（含 fetch/clone 触发）；GET 走上方全认证
                         .requestMatchers(HttpMethod.POST, "/api/repos", "/api/repos/**").hasRole("ADMIN")
