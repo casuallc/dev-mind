@@ -63,6 +63,7 @@
 | [CAP-45](CAP-45-feishu-knowledge-import.md) | 飞书文档对接 | 管理 | integrations 增 FEISHU（appId/appSecret 双行密文），wiki/docx/doc 拉取+blocks→markdown，手动选文档导入知识库（externalId 判重+contentHash 变更检测+手动重同步），条目走 CAP-44 摄入管线自动索引 |
 | [CAP-46](CAP-46-kb-chat.md) | 知识库 AI 会话 | 会话 | 通用问答绑定知识库：启动注入库概览、每轮提问经 KnowledgeRetriever 检索包 `<knowledge-context>` 前缀注入（无命中/异常原样降级），前端新问答库选择器+库详情发起会话入口 |
 | [CAP-47](CAP-47-requirement-push-to-jira.md) | 自建需求手动推送到 Jira | 底座 | 需求详情页手动推送 LOCAL 需求建 Jira issue（实例/项目/任务类型/优先级/标签/经办人/截止日期可选，描述附平台回链），登记 External Link 并转 JIRA 托管；选完任务类型按 createmeta 动态渲染该类型要求的必填字段（FR-08，渲染不了的提前列出并禁用提交）；SPI 补 createIssue，零表结构变更 |
+| [CAP-48](CAP-48-model-endpoint-management.md) | 模型接入管理（Embedding 端点） | 底座 | 模型端点升为一等资源：独立模块+表 + 密文凭据（SecretCipher 抽取）+ 连接测试**实测探测维度** + 平台默认端点 + 库级覆盖；索引血缘落库（indexed_endpoint/model/dimensions）使**换模型维度失配可诊断**（degradedReason=DIMENSION_MISMATCH，不再静默空结果），补全库重建/定向重建立即修复；`devmind.knowledge.embedding.*` 迁成端点种子（cap44/45/46 E2E 零改动） |
 
 ## 依赖关系
 
@@ -113,6 +114,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-40 需求附件投送依赖 CAP-32/19/33/34/37：需求 description 引用的本地附件（AttachmentContentResolver 扩 resolveAny）与 Jira 内嵌图（新 SPI IssueAttachmentResolver 复用 FR-09 下载链）由 devmind-flow 的 ContextProvider 打进 ContextPackage（schema v2 增 inputs，老 runner fail-visible），runner 物化 `.devmind/input/`，挂 requirementId 的会话 agent 用 Read 读图。
 - CAP-47 需求推送 Jira 依赖 CAP-13/18/19/35：把 CAP-19 的单向拉取补成双向——自建需求手动建 Jira issue 并登记 `external_links(REQUIREMENT↔ISSUE)` 后转 JIRA 托管，复用 CAP-19 的同步/回写链路与 CAP-35 的写身份链；SPI 补 `createIssue`/`getIssue`/任务类型·优先级·可指派用户/创建字段元数据查询六个 default 方法（顺带满足 CAP-28 FR-07 的未实现依赖），零表结构变更。
 - CAP-42 每用户固定工作区依赖 CAP-25/31/34/35/41：launch 帧 workspaceOwner（协议 v7 门控）把 runner 代码工作区固定到 {项目}/{登录用户}（克隆缓存+固定 worktree），结束降级为未提交告警不 push 不删，收口改为页面手动触发（合并基线+push+删 worktree 的 workspace_finalize 帧），编排链路按 WI/需求归属人解析目录归属。
+- CAP-48 模型接入管理依赖 CAP-44/45/46（消费方）与 CAP-01/18（ADMIN 权限与密文凭据先例）：把 CAP-44 FR-05 的 `application-local.yml` embedding 配置升级为一等端点资源——`devmind-model` 新模块 + `model_endpoints` 表（kind 预留）、`SecretCipher` 从 `IntegrationCipher` 抽取到 common（integration 域分隔串保持兼容）、连接测试**实测探测维度**（维度是探测产物不可人工填）、解析链「库级覆盖 → 平台默认 → 降级」、索引血缘落库与维度失配的结构化诊断（`degradedReason`）、全库/定向重建作为修复入口；`devmind.knowledge.embedding.*` 降级为幂等迁移种子，CAP-44 的分块策略改造另立 CAP 不并入本能力。
 
 ## 组装方式（后续流程层）
 
