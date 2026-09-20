@@ -14,6 +14,7 @@ import com.devmind.knowledge.dto.KnowledgeSearchResponse;
 import com.devmind.knowledge.dto.PreviewResult;
 import com.devmind.knowledge.dto.ProposalRequest;
 import com.devmind.knowledge.dto.ProposalView;
+import com.devmind.knowledge.dto.ReindexResult;
 import java.util.List;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -73,6 +74,17 @@ public class KnowledgeController {
     @GetMapping("/bases/{id}/entries")
     public List<EntryView> listBaseEntries(@PathVariable Long id) {
         return service.listByBase(id);
+    }
+
+    /**
+     * CAP-48 FR-08 重建索引（换端点/换模型后的修复入口）。
+     *
+     * @param onlyMismatched true = 只重建血缘失配的条目（维度/端点对不上的那些）
+     */
+    @PostMapping("/bases/{id}/reindex")
+    public ReindexResult reindexBase(@PathVariable Long id,
+                                     @RequestParam(defaultValue = "false") boolean onlyMismatched) {
+        return service.reindexBase(id, onlyMismatched);
     }
 
     // ---------------- 条目 ----------------
@@ -138,8 +150,9 @@ public class KnowledgeController {
     @PostMapping("/search")
     public KnowledgeSearchResponse searchChunks(
             @RequestBody KnowledgeSearchResponse.KnowledgeSearchRequest req) {
-        return new KnowledgeSearchResponse(retriever.vectorAvailable(),
-                retriever.retrieve(req.kbIds(), req.query(), req.topK() == null ? 0 : req.topK()));
+        KnowledgeRetriever.Detailed result =
+                retriever.retrieveDetailed(req.kbIds(), req.query(), req.topK() == null ? 0 : req.topK());
+        return new KnowledgeSearchResponse(result.vector(), result.chunks(), result.degradedReason());
     }
 
     // ---------------- 注入预览（FR-04） ----------------

@@ -90,6 +90,20 @@ public class KnowledgeEntryEntity {
     @Column(length = 1000)
     private String indexError;
 
+    /**
+     * CAP-48 FR-06 索引血缘：本条目的向量是用哪个端点、哪个模型、多少维建的。
+     * 三者对齐才说明索引仍有效——换模型/换维度后旧向量与新查询向量维度不等，
+     * 余弦恒 0 被阈值全部过滤，旧行为只表现为"搜不到"（静默空结果）。
+     */
+    @Column(name = "indexed_endpoint_id")
+    private Long indexedEndpointId;
+
+    @Column(name = "indexed_model", length = 128)
+    private String indexedModel;
+
+    @Column(name = "indexed_dimensions")
+    private Integer indexedDimensions;
+
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -125,6 +139,12 @@ public class KnowledgeEntryEntity {
     public void setIndexStatus(String indexStatus) { this.indexStatus = indexStatus; }
     public String getIndexError() { return indexError; }
     public void setIndexError(String indexError) { this.indexError = indexError; }
+    public Long getIndexedEndpointId() { return indexedEndpointId; }
+    public void setIndexedEndpointId(Long indexedEndpointId) { this.indexedEndpointId = indexedEndpointId; }
+    public String getIndexedModel() { return indexedModel; }
+    public void setIndexedModel(String indexedModel) { this.indexedModel = indexedModel; }
+    public Integer getIndexedDimensions() { return indexedDimensions; }
+    public void setIndexedDimensions(Integer indexedDimensions) { this.indexedDimensions = indexedDimensions; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

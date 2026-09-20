@@ -32,6 +32,35 @@ public interface KnowledgeRetriever {
     Optional<KbOverview> overview(long kbId);
 
     /**
+     * CAP-48 FR-06：带降级原因的检索。默认实现按 {@link #vectorAvailable()} 推断，
+     * 老实现无需改动；向量通道实现应覆盖以区分"没配 embedding"与"配了但维度对不上"——
+     * 后者旧行为是静默 0 命中，用户只看到"搜不到"。
+     */
+    default Detailed retrieveDetailed(List<Long> kbIds, String query, int topK) {
+        List<RetrievedChunk> chunks = retrieve(kbIds, query, topK);
+        return vectorAvailable()
+                ? new Detailed(chunks, true, DegradedReason.NONE)
+                : new Detailed(chunks, false, DegradedReason.NO_EMBEDDING);
+    }
+
+    /** 检索降级原因（诊断用；NONE = 向量通道完全正常） */
+    enum DegradedReason {
+        /** 正常 */
+        NONE,
+        /** 未配置可用 embedding 端点：检索退化 LIKE 关键词 */
+        NO_EMBEDDING,
+        /** 端点维度与库内已建索引维度不一致：余弦恒 0，命中被阈值全部过滤 */
+        DIMENSION_MISMATCH
+    }
+
+    /**
+     * @param vector         本次是否走了向量通道（false = LIKE 降级）
+     * @param degradedReason 降级原因，供 UI 明示与「重建索引」入口判定
+     */
+    record Detailed(List<RetrievedChunk> chunks, boolean vector, DegradedReason degradedReason) {
+    }
+
+    /**
      * @param score 向量余弦相似度；LIKE 降级命中为 0
      */
     record RetrievedChunk(Long entryId, String entryName, Long kbId, String content, double score) {

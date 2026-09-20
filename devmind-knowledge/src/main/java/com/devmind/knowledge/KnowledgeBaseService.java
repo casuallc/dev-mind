@@ -2,6 +2,8 @@ package com.devmind.knowledge;
 
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.common.model.ModelEndpointProvider;
+import com.devmind.common.model.ModelEndpointView;
 import com.devmind.common.notification.NotificationEvent;
 import com.devmind.knowledge.dto.EntryRequest;
 import com.devmind.knowledge.dto.EntryView;
@@ -11,6 +13,8 @@ import com.devmind.knowledge.dto.KnowledgeBaseView;
 import com.devmind.knowledge.dto.PreviewResult;
 import com.devmind.knowledge.dto.ProposalRequest;
 import com.devmind.knowledge.dto.ProposalView;
+import com.devmind.knowledge.dto.ReindexResult;
+import com.devmind.knowledge.embedding.EmbeddingResolver;
 import com.devmind.knowledge.model.KnowledgeBaseEntity;
 import com.devmind.knowledge.model.KnowledgeEntryEntity;
 import com.devmind.knowledge.model.KnowledgeProposalEntity;
@@ -32,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -55,6 +60,8 @@ public class KnowledgeBaseService {
     private final ProjectService projectService;
     private final NotificationPublisher notificationPublisher;
     private final ApplicationEventPublisher eventPublisher;
+    private final EmbeddingResolver resolver;
+    private final ObjectProvider<ModelEndpointProvider> endpointProviders;
 
     public KnowledgeBaseService(KnowledgeBaseRepository kbRepo,
                                 KnowledgeEntryRepository entryRepo,
@@ -62,7 +69,9 @@ public class KnowledgeBaseService {
                                 KnowledgeProposalRepository proposalRepo,
                                 ProjectService projectService,
                                 NotificationPublisher notificationPublisher,
-                                ApplicationEventPublisher eventPublisher) {
+                                ApplicationEventPublisher eventPublisher,
+                                EmbeddingResolver resolver,
+                                ObjectProvider<ModelEndpointProvider> endpointProviders) {
         this.kbRepo = kbRepo;
         this.entryRepo = entryRepo;
         this.chunkRepo = chunkRepo;
@@ -70,6 +79,8 @@ public class KnowledgeBaseService {
         this.projectService = projectService;
         this.notificationPublisher = notificationPublisher;
         this.eventPublisher = eventPublisher;
+        this.resolver = resolver;
+        this.endpointProviders = endpointProviders;
     }
 
     // ---------------- 知识库（CAP-44 FR-01/FR-07） ----------------
@@ -159,8 +170,9 @@ public class KnowledgeBaseService {
         if (req.injectMode() != null && !req.injectMode().isBlank()) {
             kb.setInjectMode(req.injectMode());
         }
-        if (req.embeddingModel() != null) {
-            kb.setEmbeddingModel(req.embeddingModel().isBlank() ? null : req.embeddingModel());
+        // CAP-48 FR-04 库级端点覆盖：显式传 null 或缺省 = 平台默认端点
+        if (req.modelEndpointId() != null) {
+            kb.setModelEndpointId(req.modelEndpointId() > 0 ? req.modelEndpointId() : null);
         }
         if (req.status() != null && !req.status().isBlank()) {
             kb.setStatus(req.status());
@@ -177,7 +189,80 @@ public class KnowledgeBaseService {
             }
         }
         return EntryViews.base(kb, projectName, entryRepo.countByKbId(kb.getId()),
-                chunkRepo.countByKbId(kb.getId()));
+                chunkRepo.countByKbId(kb.getId()), endpointNameOf(kb), indexStatsOf(kb));
+    }
+
+    /** 实际生效的端点名（含回落平台默认的结果）；无可用端点 → null，UI 据此显示"未配置向量端点" */
+    private String endpointNameOf(KnowledgeBaseEntity kb) {
+        ModelEndpointProvider provider = endpointProviders.getIfAvailable();
+        if (provider == null) {
+            // CAP-44 旧全局配置路径：没有端点资源，展示配置来源即可
+            return resolver.resolve(kb.getModelEndpointId()).available()
+                    ? "devmind.knowledge.embedding.*（配置）" : null;
+        }
+        return provider.resolve(kb.getModelEndpointId()).map(ModelEndpointView::name).orElse(null);
+    }
+
+    /**
+     * CAP-48 FR-06 索引健康度：状态分布 + 失配数。
+     * 失配判定需要"端点声明的维度"，所以只有端点存在、且探测过维度时才算得出来；
+     * 算不出来时返回 0（宁可不报警，也不要误报把用户引向无意义的重建）。
+     */
+    private KnowledgeBaseView.IndexStats indexStatsOf(KnowledgeBaseEntity kb) {
+        long ready = 0;
+        long pending = 0;
+        long failed = 0;
+        long disabled = 0;
+        for (Object[] row : entryRepo.countByIndexStatus(kb.getId())) {
+            String status = row[0] == null ? "" : String.valueOf(row[0]);
+            long n = row[1] instanceof Number num ? num.longValue() : 0L;
+            switch (status) {
+                case KnowledgeEntryEntity.INDEX_READY -> ready = n;
+                case KnowledgeEntryEntity.INDEX_PENDING -> pending = n;
+                case KnowledgeEntryEntity.INDEX_FAILED -> failed = n;
+                case KnowledgeEntryEntity.INDEX_DISABLED -> disabled = n;
+                default -> { }
+            }
+        }
+        EmbeddingResolver.Resolution r = resolver.resolve(kb.getModelEndpointId());
+        long mismatched = 0;
+        if (r.available() && r.endpointId() != null && r.dimensions() != null) {
+            mismatched = entryRepo.countMismatched(kb.getId(), r.endpointId(), r.dimensions());
+        }
+        return new KnowledgeBaseView.IndexStats(ready, pending, failed, disabled, mismatched);
+    }
+
+    /**
+     * CAP-48 FR-08 重建索引：把库里条目重新置 pending 并投递索引事件（异步）。
+     *
+     * @param onlyMismatched true = 只重建血缘失配的条目（换端点/换模型后的修复入口，
+     *                       避免为了修几十条失配把全库几千条重跑一遍）
+     */
+    @Transactional
+    public ReindexResult reindexBase(Long id, boolean onlyMismatched) {
+        KnowledgeBaseEntity kb = requireBase(id);
+        List<KnowledgeEntryEntity> targets;
+        if (onlyMismatched) {
+            EmbeddingResolver.Resolution r = resolver.resolve(kb.getModelEndpointId());
+            if (!r.available() || r.endpointId() == null || r.dimensions() == null) {
+                log.info("全库失配重建跳过：知识库 {} 无可用端点或端点未探测过维度", id);
+                return new ReindexResult(0);
+            }
+            targets = entryRepo.findMismatched(id, r.endpointId(), r.dimensions());
+        } else {
+            targets = entryRepo.findByKbIdOrderByCreatedAtDesc(id);
+        }
+        Instant now = Instant.now();
+        for (KnowledgeEntryEntity e : targets) {
+            e.setIndexStatus(KnowledgeEntryEntity.INDEX_PENDING);
+            e.setIndexError(null);
+            e.setUpdatedAt(now);
+            entryRepo.save(e);
+        }
+        // 事件在事务提交后投递（KnowledgeIndexListener 是 AFTER_COMMIT），异步线程才读得到上面这些写
+        targets.forEach(this::publishContentChanged);
+        log.info("知识库 {} 重建索引已入队: {} 条（onlyMismatched={}）", id, targets.size(), onlyMismatched);
+        return new ReindexResult(targets.size());
     }
 
     private KnowledgeBaseEntity requireBase(Long id) {

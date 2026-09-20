@@ -1,7 +1,12 @@
 package com.devmind.knowledge;
 
+import com.devmind.common.model.ModelEndpointProvider;
 import com.devmind.knowledge.dto.EntryRequest;
 import com.devmind.knowledge.dto.EntryView;
+import com.devmind.knowledge.dto.KnowledgeBaseRequest;
+import com.devmind.knowledge.dto.ReindexResult;
+import com.devmind.knowledge.embedding.EmbeddingClient;
+import com.devmind.knowledge.embedding.EmbeddingResolver;
 import com.devmind.knowledge.model.KnowledgeBaseEntity;
 import com.devmind.knowledge.model.KnowledgeEntryEntity;
 import com.devmind.knowledge.repo.KnowledgeBaseRepository;
@@ -16,40 +21,56 @@ import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
  * KnowledgeBaseService 库模型重构（CAP-44 FR-03 注入口径零回归，mock repo 不拉起 Spring）：
  * selectEntries = global FULL 库按项目 tags 过滤 + 本项目 FULL 库全量；
- * legacy scope 创建条目 → 解析/兜底建经验库。
+ * legacy scope 创建条目 → 解析/兜底建经验库；CAP-48 库级端点绑定 / 失配重建。
  */
 class KnowledgeBaseServiceTest {
 
     private final List<KnowledgeBaseEntity> kbs = new ArrayList<>();
     private final List<KnowledgeEntryEntity> entries = new ArrayList<>();
     private KnowledgeBaseService service;
+    private KnowledgeBaseRepository kbRepo;
+    private KnowledgeEntryRepository entryRepo;
+    private EmbeddingResolver resolver;
+    private ApplicationEventPublisher eventPublisher;
     private long kbSeq = 0;
     private long entrySeq = 0;
 
     @BeforeEach
+    @SuppressWarnings("unchecked")
     void setUp() {
         kbs.clear();
         entries.clear();
-        KnowledgeBaseRepository kbRepo = mock(KnowledgeBaseRepository.class);
-        KnowledgeEntryRepository entryRepo = mock(KnowledgeEntryRepository.class);
+        kbRepo = mock(KnowledgeBaseRepository.class);
+        entryRepo = mock(KnowledgeEntryRepository.class);
         KnowledgeChunkRepository chunkRepo = mock(KnowledgeChunkRepository.class);
         KnowledgeProposalRepository proposalRepo = mock(KnowledgeProposalRepository.class);
         ProjectService projectService = mock(ProjectService.class);
         NotificationPublisher notificationPublisher = mock(NotificationPublisher.class);
-        ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+        eventPublisher = mock(ApplicationEventPublisher.class);
+        resolver = mock(EmbeddingResolver.class);
+        // 默认无可用端点：库视图端点名 null、失配数 0（CAP-48 前的行为）
+        lenient().when(resolver.resolve(any())).thenReturn(EmbeddingResolver.Resolution.unavailable());
+        ObjectProvider<ModelEndpointProvider> endpointProviders = mock(ObjectProvider.class);
+        lenient().when(endpointProviders.getIfAvailable()).thenReturn(null);
 
         when(kbRepo.findByScopeAndInjectModeAndStatus(anyString(), anyString(), anyString())).thenAnswer(inv ->
                 kbs.stream().filter(k -> inv.getArgument(0).equals(k.getScope())
@@ -84,7 +105,7 @@ class KnowledgeBaseServiceTest {
                         null, null, null));
 
         service = new KnowledgeBaseService(kbRepo, entryRepo, chunkRepo, proposalRepo,
-                projectService, notificationPublisher, eventPublisher);
+                projectService, notificationPublisher, eventPublisher, resolver, endpointProviders);
     }
 
     private KnowledgeBaseEntity addKb(String scope, String projectId, String injectMode) {
@@ -165,5 +186,81 @@ class KnowledgeBaseServiceTest {
         service.createEntry(new EntryRequest(null, "project", "p9", "条目B", "x", null, null, null));
         assertEquals(1, kbs.size(), "同项目经验库复用不重复建");
         assertEquals(2, entries.size());
+    }
+
+    // ---------------- CAP-48 库级端点绑定 / 失配重建 ----------------
+
+    @Test
+    void createBaseBindsKbLevelEndpointOverride() {
+        service.createBase(new KnowledgeBaseRequest("研发库", "d", "global", null, "RAG", 11L, null));
+        assertEquals(11L, kbs.get(0).getModelEndpointId(), "显式传端点 → 库级覆盖");
+
+        service.createBase(new KnowledgeBaseRequest("归档库", "d", "global", null, "RAG", 0L, null));
+        assertNull(kbs.get(1).getModelEndpointId(), "0 = 清除覆盖，回落平台默认端点");
+    }
+
+    @Test
+    void updateBaseWithoutEndpointKeepsExistingOverride() {
+        service.createBase(new KnowledgeBaseRequest("研发库", "d", "global", null, "RAG", 11L, null));
+        Long id = kbs.get(0).getId();
+        when(kbRepo.findById(id)).thenAnswer(inv -> kbs.stream()
+                .filter(k -> k.getId().equals(inv.getArgument(0))).findFirst());
+
+        // 只改描述（modelEndpointId 缺省 null）：其他表单字段的"未传=不改"语义要一致
+        service.updateBase(id, new KnowledgeBaseRequest(null, "新描述", null, null, null, null, null));
+
+        assertEquals(11L, kbs.get(0).getModelEndpointId(), "缺省不传端点不得清掉已有覆盖");
+        assertEquals("新描述", kbs.get(0).getDescription());
+    }
+
+    @Test
+    void reindexBaseQueuesAllEntries() {
+        KnowledgeBaseEntity kb = addKb("global", null, "RAG");
+        when(kbRepo.findById(kb.getId())).thenReturn(java.util.Optional.of(kb));
+        KnowledgeEntryEntity ready = addEntry(kb, "已索引", null, "active");
+        ready.setIndexStatus(KnowledgeEntryEntity.INDEX_READY);
+        KnowledgeEntryEntity failed = addEntry(kb, "失败条目", null, "active");
+        failed.setIndexStatus(KnowledgeEntryEntity.INDEX_FAILED);
+        failed.setIndexError("boom");
+        when(entryRepo.findByKbIdOrderByCreatedAtDesc(kb.getId())).thenReturn(List.of(ready, failed));
+
+        ReindexResult result = service.reindexBase(kb.getId(), false);
+
+        assertEquals(2, result.queued(), "全量重建把库里所有条目重新入队");
+        for (KnowledgeEntryEntity e : List.of(ready, failed)) {
+            assertEquals(KnowledgeEntryEntity.INDEX_PENDING, e.getIndexStatus());
+            assertNull(e.getIndexError(), "重建要清掉上一次的错误信息");
+        }
+        verify(eventPublisher, org.mockito.Mockito.times(2)).publishEvent(any(Object.class));
+    }
+
+    @Test
+    void reindexBaseOnlyMismatchedSkipsWithoutProbedDimensions() {
+        KnowledgeBaseEntity kb = addKb("global", null, "RAG");
+        when(kbRepo.findById(kb.getId())).thenReturn(java.util.Optional.of(kb));
+
+        ReindexResult result = service.reindexBase(kb.getId(), true);
+
+        assertEquals(0, result.queued(), "端点未探测过维度时算不出失配，宁可不重建");
+        verify(entryRepo, never()).findMismatched(anyLong(), anyLong(), anyInt());
+    }
+
+    @Test
+    void reindexBaseOnlyMismatchedUsesResolvedEndpointLineage() {
+        KnowledgeBaseEntity kb = addKb("global", null, "RAG");
+        when(kbRepo.findById(kb.getId())).thenReturn(java.util.Optional.of(kb));
+        when(resolver.resolve(any())).thenReturn(new EmbeddingResolver.Resolution(
+                11L, "bge-m3", 1024, 0.15, 8, mock(EmbeddingClient.class)));
+        KnowledgeEntryEntity stale = addEntry(kb, "旧端点建的", null, "active");
+        stale.setIndexStatus(KnowledgeEntryEntity.INDEX_READY);
+        KnowledgeEntryEntity current = addEntry(kb, "当前端点建的", null, "active");
+        current.setIndexStatus(KnowledgeEntryEntity.INDEX_READY);
+        when(entryRepo.findMismatched(kb.getId(), 11L, 1024)).thenReturn(List.of(stale));
+
+        ReindexResult result = service.reindexBase(kb.getId(), true);
+
+        assertEquals(1, result.queued(), "只重建当前端点+维度对不上的条目");
+        assertEquals(KnowledgeEntryEntity.INDEX_PENDING, stale.getIndexStatus());
+        assertEquals(KnowledgeEntryEntity.INDEX_READY, current.getIndexStatus(), "未失配的条目不动");
     }
 }

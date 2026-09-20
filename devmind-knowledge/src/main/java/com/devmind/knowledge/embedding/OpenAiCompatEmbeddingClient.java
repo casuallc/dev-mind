@@ -1,34 +1,29 @@
 package com.devmind.knowledge.embedding;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
-import java.util.ArrayList;
+import com.devmind.common.model.EmbeddingCallException;
+import com.devmind.common.model.OpenAiCompatEmbeddings;
 import java.util.List;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 
 /**
  * OpenAI 兼容 /embeddings 端点客户端（vLLM/OneAPI/Ollama 等同协议服务通用）。
- * POST {baseUrl}/embeddings {"model": ..., "input": [...]} → data[].embedding。
+ *
+ * <p>CAP-48 起真正的调用逻辑（分批、重试、响应校验、错误脱敏）在 common 的
+ * {@link OpenAiCompatEmbeddings}——devmind-model 的连接测试也调它，两处不能各写一份
+ * （尤其是"报错时不得回显 apiKey"这条）。本类只做 {@link EmbeddingClient} 契约适配。</p>
  */
 public class OpenAiCompatEmbeddingClient implements EmbeddingClient {
 
-    private final String endpoint;
-    private final String apiKey;
-    private final String model;
-    private final HttpClient http;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final OpenAiCompatEmbeddings.Options options;
 
+    /** CAP-44 兼容构造：不分批（一次带完），超时 30s */
     public OpenAiCompatEmbeddingClient(String baseUrl, String apiKey, String model, int timeoutSeconds) {
-        this.endpoint = baseUrl.replaceAll("/+$", "") + "/embeddings";
-        this.apiKey = apiKey;
-        this.model = model;
-        this.http = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(timeoutSeconds))
-                .build();
+        this(baseUrl, apiKey, model, timeoutSeconds, 32);
+    }
+
+    public OpenAiCompatEmbeddingClient(String baseUrl, String apiKey, String model, int timeoutSeconds,
+                                       int batchSize) {
+        this.options = new OpenAiCompatEmbeddings.Options(baseUrl, apiKey, model, timeoutSeconds,
+                Math.max(1, batchSize));
     }
 
     @Override
@@ -38,54 +33,16 @@ public class OpenAiCompatEmbeddingClient implements EmbeddingClient {
 
     @Override
     public String model() {
-        return model;
+        return options.model();
     }
 
     @Override
     public List<float[]> embed(List<String> texts) {
         try {
-            var root = mapper.createObjectNode();
-            root.put("model", model);
-            var input = root.putArray("input");
-            texts.forEach(input::add);
-            HttpRequest.Builder req = HttpRequest.newBuilder(URI.create(endpoint))
-                    .timeout(Duration.ofSeconds(60))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(root)));
-            if (apiKey != null && !apiKey.isBlank()) {
-                req.header("Authorization", "Bearer " + apiKey);
-            }
-            HttpResponse<String> resp = http.send(req.build(), HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() / 100 != 2) {
-                throw new EmbeddingException("embedding 端点返回 " + resp.statusCode() + ": "
-                        + abbreviate(resp.body()));
-            }
-            JsonNode data = mapper.readTree(resp.body()).path("data");
-            if (!data.isArray() || data.size() != texts.size()) {
-                throw new EmbeddingException("embedding 响应 data 条数与输入不符: expect="
-                        + texts.size() + " actual=" + (data.isArray() ? data.size() : "非数组"));
-            }
-            List<float[]> vectors = new ArrayList<>(texts.size());
-            for (JsonNode item : data) {
-                JsonNode arr = item.path("embedding");
-                float[] v = new float[arr.size()];
-                for (int i = 0; i < arr.size(); i++) {
-                    v[i] = (float) arr.get(i).asDouble();
-                }
-                vectors.add(v);
-            }
-            return vectors;
-        } catch (EmbeddingException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new EmbeddingException("embedding 调用失败: " + e, e);
+            return OpenAiCompatEmbeddings.embed(options, texts);
+        } catch (EmbeddingCallException e) {
+            // 保持 CAP-44 的契约：远程调用失败抛 EmbeddingException，调用方据此落 index_status=failed
+            throw new EmbeddingException(e.getMessage(), e);
         }
-    }
-
-    private static String abbreviate(String body) {
-        if (body == null) {
-            return "";
-        }
-        return body.length() <= 200 ? body : body.substring(0, 200) + "…";
     }
 }

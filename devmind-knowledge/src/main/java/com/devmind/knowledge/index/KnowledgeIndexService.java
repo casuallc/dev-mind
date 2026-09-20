@@ -2,23 +2,22 @@ package com.devmind.knowledge.index;
 
 import com.devmind.knowledge.chunk.TextChunker;
 import com.devmind.knowledge.config.KnowledgeProperties;
-import com.devmind.knowledge.embedding.EmbeddingClient;
-import com.devmind.knowledge.embedding.VectorJson;
-import com.devmind.knowledge.model.KnowledgeChunkEntity;
+import com.devmind.knowledge.embedding.EmbeddingResolver;
+import com.devmind.knowledge.model.KnowledgeBaseEntity;
 import com.devmind.knowledge.model.KnowledgeEntryEntity;
-import com.devmind.knowledge.repo.KnowledgeChunkRepository;
+import com.devmind.knowledge.repo.KnowledgeBaseRepository;
 import com.devmind.knowledge.repo.KnowledgeEntryRepository;
-import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
- * CAP-44 FR-04 摄入管线：条目 → 分块 → embedding → 重写 knowledge_chunks → index_status。
- * 由 KnowledgeIndexListener 异步触发（事件 AFTER_COMMIT / 启动清扫 pending+disabled）。
- * 本方法自带事务（非异步触发方法，红线合规）；embedding 未配置标 disabled（检索降级 LIKE）。
+ * CAP-44 FR-04 摄入管线（CAP-48 改造）：条目 → 分块 → 按库解析出的端点 embedding →
+ * 重写 knowledge_chunks → index_status + 索引血缘。
+ *
+ * <p>本类<b>不带事务</b>：embedding 是网络 IO，必须发生在事务外（落库交给
+ * {@link KnowledgeIndexWriter} 的短事务）。触发方是 KnowledgeIndexListener 的异步单线程。</p>
  */
 @Service
 public class KnowledgeIndexService {
@@ -28,34 +27,36 @@ public class KnowledgeIndexService {
     static final int SWEEP_LIMIT = 500;
 
     private final KnowledgeEntryRepository entryRepo;
-    private final KnowledgeChunkRepository chunkRepo;
-    private final EmbeddingClient embeddingClient;
+    private final KnowledgeBaseRepository kbRepo;
+    private final EmbeddingResolver resolver;
+    private final KnowledgeIndexWriter writer;
     private final KnowledgeProperties props;
 
     public KnowledgeIndexService(KnowledgeEntryRepository entryRepo,
-                                 KnowledgeChunkRepository chunkRepo,
-                                 EmbeddingClient embeddingClient,
+                                 KnowledgeBaseRepository kbRepo,
+                                 EmbeddingResolver resolver,
+                                 KnowledgeIndexWriter writer,
                                  KnowledgeProperties props) {
         this.entryRepo = entryRepo;
-        this.chunkRepo = chunkRepo;
-        this.embeddingClient = embeddingClient;
+        this.kbRepo = kbRepo;
+        this.resolver = resolver;
+        this.writer = writer;
         this.props = props;
     }
 
+    /** 是否配了可用端点（启动清扫是否值得跑的判据） */
     public boolean embeddingAvailable() {
-        return embeddingClient.available();
+        return resolver.anyConfigured();
     }
 
-    @Transactional
     public void indexEntry(long entryId) {
         KnowledgeEntryEntity entry = entryRepo.findById(entryId).orElse(null);
         if (entry == null) {
             return;
         }
-        if (!embeddingClient.available()) {
-            entry.setIndexStatus(KnowledgeEntryEntity.INDEX_DISABLED);
-            entry.setIndexError(null);
-            entryRepo.save(entry);
+        EmbeddingResolver.Resolution resolution = resolver.resolve(endpointIdOf(entry.getKbId()));
+        if (!resolution.available()) {
+            writer.markDisabled(entryId);
             return;
         }
         try {
@@ -64,39 +65,22 @@ public class KnowledgeIndexService {
                     cfg.getChunkSize(), cfg.getChunkOverlap());
             List<float[]> vectors = pieces.isEmpty()
                     ? List.of()
-                    : embeddingClient.embed(pieces.stream()
+                    : resolution.client().embed(pieces.stream()
                             .map(p -> entry.getName() + "\n" + p)
                             .toList());
-            chunkRepo.deleteByEntryId(entryId);
-            List<KnowledgeChunkEntity> chunks = new ArrayList<>(pieces.size());
-            for (int i = 0; i < pieces.size(); i++) {
-                KnowledgeChunkEntity c = new KnowledgeChunkEntity();
-                c.setKbId(entry.getKbId());
-                c.setEntryId(entryId);
-                c.setChunkIndex(i);
-                c.setContent(pieces.get(i));
-                c.setEmbedding(VectorJson.toJson(vectors.get(i)));
-                c.setTokenCount(pieces.get(i).length());
-                chunks.add(c);
-            }
-            if (!chunks.isEmpty()) {
-                chunkRepo.saveAll(chunks);
-            }
-            entry.setIndexStatus(KnowledgeEntryEntity.INDEX_READY);
-            entry.setIndexError(null);
-            entryRepo.save(entry);
-            log.info("知识条目索引完成: entry={} chunks={}", entryId, chunks.size());
+            writer.writeChunks(entryId, pieces, vectors, resolution);
+            log.info("知识条目索引完成: entry={} chunks={} endpoint={} dims={}",
+                    entryId, pieces.size(), resolution.endpointId(),
+                    vectors.isEmpty() ? "-" : vectors.get(0).length);
         } catch (Exception e) {
-            entry.setIndexStatus(KnowledgeEntryEntity.INDEX_FAILED);
-            entry.setIndexError(truncate(String.valueOf(e.getMessage()), 1000));
-            entryRepo.save(entry);
+            writer.markFailed(entryId, String.valueOf(e.getMessage()));
             log.warn("知识条目索引失败: entry={} err={}", entryId, e.toString());
         }
     }
 
-    /** 启动清扫：pending + disabled（曾未配置 embedding 的条目在配置补齐后自愈）；failed 留人工重试 */
+    /** 启动清扫：pending + disabled（曾无端点/端点停用的条目在端点补齐后自愈）；failed 留人工重试 */
     public void sweepPending() {
-        if (!embeddingClient.available()) {
+        if (!embeddingAvailable()) {
             return;
         }
         List<KnowledgeEntryEntity> stale = entryRepo.findByIndexStatusIn(List.of(
@@ -115,7 +99,11 @@ public class KnowledgeIndexService {
         }
     }
 
-    private static String truncate(String s, int max) {
-        return s.length() <= max ? s : s.substring(0, max);
+    /** 条目所属库的库级覆盖端点（库不存在/无覆盖 → null = 平台默认） */
+    private Long endpointIdOf(Long kbId) {
+        if (kbId == null) {
+            return null;
+        }
+        return kbRepo.findById(kbId).map(KnowledgeBaseEntity::getModelEndpointId).orElse(null);
     }
 }

@@ -34,6 +34,27 @@ public interface KnowledgeEntryRepository extends JpaRepository<KnowledgeEntryEn
 
     long countByKbId(Long kbId);
 
+    /** CAP-48 FR-06 索引健康度：库内条目按 index_status 分组计数（返回 [status, count]） */
+    @Query("select e.indexStatus, count(e) from KnowledgeEntryEntity e where e.kbId = :kbId group by e.indexStatus")
+    List<Object[]> countByIndexStatus(@Param("kbId") Long kbId);
+
+    /**
+     * CAP-48 FR-06 失配条目数：已 ready 但血缘和本库当前端点对不上（换过端点/模型/维度）。
+     * indexed_* 为 null 视为失配（CAP-48 之前建的索引没有血缘）。
+     */
+    @Query("select count(e) from KnowledgeEntryEntity e where e.kbId = :kbId and e.indexStatus = 'ready' "
+            + "and (e.indexedEndpointId is null or e.indexedEndpointId <> :endpointId "
+            + "or e.indexedDimensions is null or e.indexedDimensions <> :dimensions)")
+    long countMismatched(@Param("kbId") Long kbId, @Param("endpointId") Long endpointId,
+                         @Param("dimensions") int dimensions);
+
+    /** 失配条目（重建索引用，谓词同 {@link #countMismatched}） */
+    @Query("select e from KnowledgeEntryEntity e where e.kbId = :kbId and e.indexStatus = 'ready' "
+            + "and (e.indexedEndpointId is null or e.indexedEndpointId <> :endpointId "
+            + "or e.indexedDimensions is null or e.indexedDimensions <> :dimensions)")
+    List<KnowledgeEntryEntity> findMismatched(@Param("kbId") Long kbId, @Param("endpointId") Long endpointId,
+                                              @Param("dimensions") int dimensions);
+
     @Query("select e from KnowledgeEntryEntity e where e.status = 'active' and (e.scope = 'global' or e.projectId = :projectId) " +
             "and (lower(e.name) like lower(concat('%', cast(:q as string), '%')) or lower(cast(e.contentMd as string)) like lower(concat('%', cast(:q as string), '%')) " +
             "or lower(e.tags) like lower(concat('%', cast(:q as string), '%'))) order by e.createdAt desc")

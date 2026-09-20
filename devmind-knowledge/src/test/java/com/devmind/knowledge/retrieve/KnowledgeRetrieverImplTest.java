@@ -1,10 +1,13 @@
 package com.devmind.knowledge.retrieve;
 
+import com.devmind.common.knowledge.KnowledgeRetriever.DegradedReason;
+import com.devmind.common.knowledge.KnowledgeRetriever.Detailed;
 import com.devmind.common.knowledge.KnowledgeRetriever.KbOverview;
 import com.devmind.common.knowledge.KnowledgeRetriever.RetrievedChunk;
 import com.devmind.knowledge.config.KnowledgeProperties;
 import com.devmind.knowledge.embedding.EmbeddingClient;
 import com.devmind.knowledge.embedding.EmbeddingException;
+import com.devmind.knowledge.embedding.EmbeddingResolver;
 import com.devmind.knowledge.embedding.MockEmbeddingClient;
 import com.devmind.knowledge.embedding.VectorJson;
 import com.devmind.knowledge.model.KnowledgeBaseEntity;
@@ -31,8 +34,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * KnowledgeRetrieverImpl（CAP-44 FR-06）：向量路径排序/阈值/topK/active 过滤，
- * embedding 未配置 LIKE 降级，异常按无命中降级。
+ * KnowledgeRetrieverImpl（CAP-44 FR-06 + CAP-48 按端点分组/降级诊断）：向量路径排序/阈值/topK/
+ * active 过滤，无端点 LIKE 降级，异常按无命中降级，维度失配显式报 DIMENSION_MISMATCH。
  */
 class KnowledgeRetrieverImplTest {
 
@@ -43,6 +46,8 @@ class KnowledgeRetrieverImplTest {
     private KnowledgeEntryRepository entryRepo;
     private KnowledgeBaseRepository kbRepo;
     private EmbeddingClient embeddingClient;
+    private EmbeddingResolver resolver;
+    private KnowledgeProperties props;
     private KnowledgeRetrieverImpl retriever;
 
     @BeforeEach
@@ -51,11 +56,25 @@ class KnowledgeRetrieverImplTest {
         entryRepo = mock(KnowledgeEntryRepository.class);
         kbRepo = mock(KnowledgeBaseRepository.class);
         embeddingClient = mock(EmbeddingClient.class);
-        KnowledgeProperties props = new KnowledgeProperties();
-        retriever = new KnowledgeRetrieverImpl(chunkRepo, entryRepo, kbRepo, embeddingClient, props);
+        resolver = mock(EmbeddingResolver.class);
+        props = new KnowledgeProperties();
         lenient().when(embeddingClient.available()).thenReturn(true);
+        lenient().when(embeddingClient.model()).thenReturn("mock-embedding");
         lenient().when(embeddingClient.embed(anyList()))
                 .thenAnswer(inv -> MOCK.embed(inv.getArgument(0)));
+        lenient().when(resolver.anyConfigured()).thenReturn(true);
+        lenient().when(resolver.resolve(any())).thenReturn(resolution(11L, 64, 0.15));
+        retriever = new KnowledgeRetrieverImpl(chunkRepo, entryRepo, kbRepo, resolver, props);
+    }
+
+    private EmbeddingResolver.Resolution resolution(Long endpointId, Integer dimensions, double threshold) {
+        return new EmbeddingResolver.Resolution(endpointId, "mock-embedding", dimensions, threshold,
+                props.getEmbedding().getTopK(), embeddingClient);
+    }
+
+    private void unavailable() {
+        lenient().when(resolver.anyConfigured()).thenReturn(false);
+        lenient().when(resolver.resolve(any())).thenReturn(EmbeddingResolver.Resolution.unavailable());
     }
 
     private KnowledgeEntryEntity entry(long id, long kbId, String name, String status) {
@@ -69,12 +88,16 @@ class KnowledgeRetrieverImplTest {
     }
 
     private KnowledgeChunkEntity chunk(long entryId, long kbId, int idx, String content) {
+        return chunk(entryId, kbId, idx, content, 64);
+    }
+
+    private KnowledgeChunkEntity chunk(long entryId, long kbId, int idx, String content, int dims) {
         KnowledgeChunkEntity c = new KnowledgeChunkEntity();
         c.setEntryId(entryId);
         c.setKbId(kbId);
         c.setChunkIndex(idx);
         c.setContent(content);
-        c.setEmbedding(VectorJson.toJson(MOCK.embed(List.of(content)).get(0)));
+        c.setEmbedding(VectorJson.toJson(new MockEmbeddingClient(dims).embed(List.of(content)).get(0)));
         return c;
     }
 
@@ -82,9 +105,7 @@ class KnowledgeRetrieverImplTest {
     void vectorRetrieveRanksAndFilters() {
         // 测试侧阈值提到 0.5：mock 哈希向量无关文本碰撞分可达 ~0.15（真实 embedding 不存在此问题），
         // 本用例验证排序/过滤逻辑而非 mock 向量质量
-        KnowledgeProperties props = new KnowledgeProperties();
-        props.getEmbedding().setThreshold(0.5);
-        retriever = new KnowledgeRetrieverImpl(chunkRepo, entryRepo, kbRepo, embeddingClient, props);
+        lenient().when(resolver.resolve(any())).thenReturn(resolution(11L, 64, 0.5));
 
         List<KnowledgeChunkEntity> chunks = List.of(
                 chunk(1, 10, 0, "前端构建规范与产物说明"),
@@ -119,19 +140,77 @@ class KnowledgeRetrieverImplTest {
     }
 
     @Test
-    void fallsBackToLikeWhenEmbeddingUnavailable() {
-        when(embeddingClient.available()).thenReturn(false);
+    void reportsDimensionMismatchInsteadOfSilentEmptyResult() {
+        // 库内向量是 64 维（旧端点建的），当前端点返回 16 维：余弦恒 0、命中被阈值全过滤，
+        // 旧行为只表现为"搜不到"；现在必须显式告诉用户去重建索引
+        when(chunkRepo.findByKbIdIn(List.of(10L))).thenReturn(List.of(chunk(1, 10, 0, "前端构建规范", 64)));
+        when(entryRepo.findAllById(anyList())).thenReturn(List.of(entry(1, 10, "规范", "active")));
+        lenient().when(resolver.resolve(any())).thenReturn(resolution(11L, 16, 0.15));
+        lenient().when(embeddingClient.embed(anyList()))
+                .thenAnswer(inv -> new MockEmbeddingClient(16).embed(inv.getArgument(0)));
+
+        Detailed result = retriever.retrieveDetailed(List.of(10L), "前端构建规范", 8);
+
+        assertTrue(result.chunks().isEmpty(), "维度不等时不应有命中");
+        assertEquals(DegradedReason.DIMENSION_MISMATCH, result.degradedReason());
+        assertTrue(result.vector(), "仍然是走了向量通道的");
+    }
+
+    @Test
+    void healthyVectorRetrieveReportsNoDegradation() {
+        when(chunkRepo.findByKbIdIn(List.of(10L))).thenReturn(List.of(chunk(1, 10, 0, "前端构建规范")));
+        when(entryRepo.findAllById(anyList())).thenReturn(List.of(entry(1, 10, "规范", "active")));
+
+        Detailed result = retriever.retrieveDetailed(List.of(10L), "前端构建规范", 8);
+
+        assertEquals(DegradedReason.NONE, result.degradedReason());
+        assertTrue(result.vector());
+    }
+
+    @Test
+    void eachKbUsesItsOwnEndpointThenMergesHits() {
+        KnowledgeBaseEntity kb10 = new KnowledgeBaseEntity();
+        kb10.setId(10L);
+        kb10.setModelEndpointId(11L);
+        KnowledgeBaseEntity kb20 = new KnowledgeBaseEntity();
+        kb20.setId(20L);
+        kb20.setModelEndpointId(22L);
+        when(kbRepo.findAllById(List.of(10L, 20L))).thenReturn(List.of(kb10, kb20));
+        // 22 号端点用另一个客户端（另一个模型）：查询要向两个端点各投一次
+        EmbeddingClient other = mock(EmbeddingClient.class);
+        lenient().when(other.available()).thenReturn(true);
+        lenient().when(other.model()).thenReturn("other-model");
+        lenient().when(other.embed(anyList())).thenAnswer(inv -> MOCK.embed(inv.getArgument(0)));
+        when(resolver.resolve(11L)).thenReturn(resolution(11L, 64, 0.15));
+        when(resolver.resolve(22L)).thenReturn(new EmbeddingResolver.Resolution(
+                22L, "other-model", 64, 0.15, 8, other));
+        when(chunkRepo.findByKbIdIn(List.of(10L))).thenReturn(List.of(chunk(1, 10, 0, "前端构建规范")));
+        when(chunkRepo.findByKbIdIn(List.of(20L))).thenReturn(List.of(chunk(2, 20, 0, "前端构建规范")));
+        when(entryRepo.findAllById(anyList())).thenReturn(List.of(
+                entry(1, 10, "A 库条目", "active"), entry(2, 20, "B 库条目", "active")));
+
+        List<RetrievedChunk> hits = retriever.retrieve(List.of(10L, 20L), "前端构建规范", 8);
+
+        verify(other).embed(anyList());
+        assertEquals(2, hits.size(), "两个库各自的命中合并返回");
+    }
+
+    @Test
+    void fallsBackToLikeWhenNoEndpoint() {
+        unavailable();
         KnowledgeEntryEntity e = entry(1, 10, "构建规范", "active");
         e.setContentMd("长".repeat(600));
         when(entryRepo.searchInBases(List.of(10L), "构建")).thenReturn(List.of(e));
 
-        List<RetrievedChunk> hits = retriever.retrieve(List.of(10L), "构建", 8);
+        Detailed result = retriever.retrieveDetailed(List.of(10L), "构建", 8);
 
-        assertEquals(1, hits.size());
-        assertEquals(0.0, hits.get(0).score(), "LIKE 降级命中 score=0");
+        assertEquals(1, result.chunks().size());
+        assertEquals(0.0, result.chunks().get(0).score(), "LIKE 降级命中 score=0");
         assertEquals(KnowledgeRetrieverImpl.FALLBACK_CONTENT_LEN + 1,
-                hits.get(0).content().length(), "降级命中内容截断 500+省略号");
-        assertTrue(hits.get(0).content().endsWith("…"));
+                result.chunks().get(0).content().length(), "降级命中内容截断 500+省略号");
+        assertTrue(result.chunks().get(0).content().endsWith("…"));
+        assertEquals(DegradedReason.NO_EMBEDDING, result.degradedReason());
+        assertTrue(!result.vector());
         verify(embeddingClient, never()).embed(anyList());
     }
 

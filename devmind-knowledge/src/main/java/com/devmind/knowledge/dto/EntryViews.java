@@ -29,11 +29,12 @@ public final class EntryViews {
     }
 
     public static KnowledgeBaseView base(KnowledgeBaseEntity kb, String projectName,
-                                         long entryCount, long chunkCount) {
+                                         long entryCount, long chunkCount,
+                                         String modelEndpointName, KnowledgeBaseView.IndexStats indexStats) {
         return new KnowledgeBaseView(
                 kb.getId(), kb.getName(), kb.getDescription(), kb.getScope(), kb.getProjectId(),
-                projectName, kb.getInjectMode(), kb.getEmbeddingModel(), kb.getStatus(),
-                entryCount, chunkCount, kb.getCreatedAt(), kb.getUpdatedAt());
+                projectName, kb.getInjectMode(), kb.getModelEndpointId(), modelEndpointName, kb.getStatus(),
+                entryCount, chunkCount, indexStats, kb.getCreatedAt(), kb.getUpdatedAt());
     }
 
     public static ProposalView proposal(KnowledgeProposalEntity p) {

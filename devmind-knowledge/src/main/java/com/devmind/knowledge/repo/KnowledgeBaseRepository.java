@@ -16,4 +16,7 @@ public interface KnowledgeBaseRepository extends JpaRepository<KnowledgeBaseEnti
     List<KnowledgeBaseEntity> findByScopeAndProjectId(String scope, String projectId);
 
     List<KnowledgeBaseEntity> findByScopeAndName(String scope, String name);
+
+    /** CAP-48 删除端点前的引用检查（ModelEndpointUsageProvider 用） */
+    List<KnowledgeBaseEntity> findByModelEndpointId(Long modelEndpointId);
 }

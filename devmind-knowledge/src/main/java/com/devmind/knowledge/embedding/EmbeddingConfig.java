@@ -6,9 +6,13 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * 按 devmind.knowledge.embedding.* 装配 EmbeddingClient：
+ * 按 devmind.knowledge.embedding.* 装配全局 EmbeddingClient：
  * provider=mock → MockEmbeddingClient；baseUrl+model 齐备 → OpenAiCompatEmbeddingClient；
  * 否则不可用实现（索引标 disabled、检索降级 LIKE）。
+ *
+ * <p>CAP-48 起端点表取代这份配置成为唯一事实源，本 bean 只在
+ * {@code devmind-model} 未装配（模块裁剪/回滚）时被
+ * {@code KnowledgeEndpointResolver} 当作兜底路径使用。</p>
  */
 @Configuration
 public class EmbeddingConfig {

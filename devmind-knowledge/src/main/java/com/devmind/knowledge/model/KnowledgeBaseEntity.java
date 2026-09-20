@@ -46,9 +46,12 @@ public class KnowledgeBaseEntity {
     @Column(nullable = false, length = 8)
     private String injectMode = INJECT_RAG;
 
-    /** 覆盖平台默认 embedding 模型（空=走 devmind.knowledge.embedding.model） */
-    @Column(length = 64)
-    private String embeddingModel;
+    /**
+     * CAP-48 FR-04：库级覆盖的 embedding 端点（空 = 平台默认端点）。
+     * 取代 CAP-44 的 embedding_model（那是个从未被任何链路读取的死字段，本列已停写）。
+     */
+    @Column(name = "model_endpoint_id")
+    private Long modelEndpointId;
 
     /** active | archived（archived 不参与注入与检索） */
     @Column(nullable = false, length = 16)
@@ -69,8 +72,8 @@ public class KnowledgeBaseEntity {
     public void setProjectId(String projectId) { this.projectId = projectId; }
     public String getInjectMode() { return injectMode; }
     public void setInjectMode(String injectMode) { this.injectMode = injectMode; }
-    public String getEmbeddingModel() { return embeddingModel; }
-    public void setEmbeddingModel(String embeddingModel) { this.embeddingModel = embeddingModel; }
+    public Long getModelEndpointId() { return modelEndpointId; }
+    public void setModelEndpointId(Long modelEndpointId) { this.modelEndpointId = modelEndpointId; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public Instant getCreatedAt() { return createdAt; }

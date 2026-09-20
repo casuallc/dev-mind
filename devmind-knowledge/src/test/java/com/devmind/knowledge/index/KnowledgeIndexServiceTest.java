@@ -4,10 +4,13 @@ import com.devmind.knowledge.config.KnowledgeProperties;
 import com.devmind.knowledge.embedding.EmbeddingClient;
 import com.devmind.knowledge.embedding.EmbeddingConfig;
 import com.devmind.knowledge.embedding.EmbeddingException;
+import com.devmind.knowledge.embedding.EmbeddingResolver;
 import com.devmind.knowledge.embedding.MockEmbeddingClient;
 import com.devmind.knowledge.embedding.VectorJson;
+import com.devmind.knowledge.model.KnowledgeBaseEntity;
 import com.devmind.knowledge.model.KnowledgeChunkEntity;
 import com.devmind.knowledge.model.KnowledgeEntryEntity;
+import com.devmind.knowledge.repo.KnowledgeBaseRepository;
 import com.devmind.knowledge.repo.KnowledgeChunkRepository;
 import com.devmind.knowledge.repo.KnowledgeEntryRepository;
 import java.util.ArrayList;
@@ -31,27 +34,33 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * KnowledgeIndexService（CAP-44 FR-04 摄入管线，mock repo 不拉起 Spring）：
- * 成功 → 删旧写新 chunks + ready；embedding 未配置 → disabled；调用失败 → failed+error；
+ * KnowledgeIndexService（CAP-44 FR-04 摄入管线 + CAP-48 端点解析/血缘，mock repo 不拉起 Spring）：
+ * 成功 → 删旧写新 chunks + ready + 血缘；无可用端点 → disabled；调用失败 → failed+error；
  * 启动清扫只捞 pending+disabled。
  */
 class KnowledgeIndexServiceTest {
 
     private KnowledgeEntryRepository entryRepo;
+    private KnowledgeBaseRepository kbRepo;
     private KnowledgeChunkRepository chunkRepo;
     private EmbeddingClient embeddingClient;
+    private EmbeddingResolver resolver;
     private KnowledgeIndexService service;
     private KnowledgeEntryEntity entry;
 
     @BeforeEach
     void setUp() {
         entryRepo = mock(KnowledgeEntryRepository.class);
+        kbRepo = mock(KnowledgeBaseRepository.class);
         chunkRepo = mock(KnowledgeChunkRepository.class);
         embeddingClient = mock(EmbeddingClient.class);
+        resolver = mock(EmbeddingResolver.class);
         KnowledgeProperties props = new KnowledgeProperties();
         props.getEmbedding().setChunkSize(20);
         props.getEmbedding().setChunkOverlap(5);
-        service = new KnowledgeIndexService(entryRepo, chunkRepo, embeddingClient, props);
+        // 真 writer + mock repo：落库断言（删旧写新/血缘）才有意义
+        service = new KnowledgeIndexService(entryRepo, kbRepo, resolver,
+                new KnowledgeIndexWriter(entryRepo, chunkRepo), props);
 
         entry = new KnowledgeEntryEntity();
         entry.setId(7L);
@@ -66,6 +75,10 @@ class KnowledgeIndexServiceTest {
             MockEmbeddingClient mock = new MockEmbeddingClient(16);
             return mock.embed(inv.getArgument(0));
         });
+        lenient().when(embeddingClient.model()).thenReturn("mock-embedding");
+        lenient().when(resolver.anyConfigured()).thenReturn(true);
+        lenient().when(resolver.resolve(any())).thenReturn(
+                new EmbeddingResolver.Resolution(11L, "mock-embedding", 16, 0.15, 8, embeddingClient));
     }
 
     @Test
@@ -90,8 +103,29 @@ class KnowledgeIndexServiceTest {
     }
 
     @Test
-    void marksDisabledWhenEmbeddingUnavailable() {
-        when(embeddingClient.available()).thenReturn(false);
+    void recordsIndexLineageForMismatchDiagnosis() {
+        service.indexEntry(7L);
+
+        assertEquals(11L, entry.getIndexedEndpointId(), "血缘要记是哪个端点建的索引");
+        assertEquals("mock-embedding", entry.getIndexedModel());
+        assertEquals(16, entry.getIndexedDimensions(), "维度记实测向量长度");
+    }
+
+    @Test
+    void resolvesKbLevelEndpointOverride() {
+        KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
+        kb.setId(3L);
+        kb.setModelEndpointId(11L);
+        when(kbRepo.findById(3L)).thenReturn(Optional.of(kb));
+
+        service.indexEntry(7L);
+
+        verify(resolver).resolve(11L);
+    }
+
+    @Test
+    void marksDisabledWhenNoEndpointAvailable() {
+        when(resolver.resolve(any())).thenReturn(EmbeddingResolver.Resolution.unavailable());
 
         service.indexEntry(7L);
 
@@ -113,6 +147,15 @@ class KnowledgeIndexServiceTest {
     }
 
     @Test
+    void failureDoesNotWipeExistingChunks() {
+        when(embeddingClient.embed(anyList())).thenThrow(new EmbeddingException("boom"));
+
+        service.indexEntry(7L);
+
+        verify(chunkRepo, never()).deleteByEntryId(anyLong());
+    }
+
+    @Test
     void emptyContentMarksReadyWithoutChunks() {
         entry.setContentMd("  ");
 
@@ -121,10 +164,11 @@ class KnowledgeIndexServiceTest {
         assertEquals(KnowledgeEntryEntity.INDEX_READY, entry.getIndexStatus());
         verify(chunkRepo).deleteByEntryId(7L);
         verify(chunkRepo, never()).saveAll(anyList());
+        assertNull(entry.getIndexedDimensions(), "无分块时没有可记的维度");
     }
 
     @Test
-    void sweepOnlyWhenEmbeddingAvailable() {
+    void sweepOnlyWhenEndpointAvailable() {
         List<KnowledgeEntryEntity> saved = new ArrayList<>();
         when(entryRepo.findByIndexStatusIn(anyList())).thenReturn(List.of(entry));
         when(entryRepo.save(any())).thenAnswer(inv -> {
@@ -132,11 +176,11 @@ class KnowledgeIndexServiceTest {
             return inv.getArgument(0);
         });
 
-        when(embeddingClient.available()).thenReturn(false);
+        when(resolver.anyConfigured()).thenReturn(false);
         service.sweepPending();
         verify(entryRepo, never()).findByIndexStatusIn(anyList());
 
-        when(embeddingClient.available()).thenReturn(true);
+        when(resolver.anyConfigured()).thenReturn(true);
         service.sweepPending();
         assertEquals(KnowledgeEntryEntity.INDEX_READY, entry.getIndexStatus(), "清扫应索引 pending 条目");
     }
