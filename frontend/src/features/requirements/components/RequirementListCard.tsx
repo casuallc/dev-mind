@@ -10,6 +10,7 @@ import { listRequirements, updateRequirementStatus } from '../api'
 import type { Requirement, RequirementSource, RequirementType } from '../types'
 import RequirementFormDrawer from './RequirementFormDrawer'
 import { fmtDuration, fmtTime } from '../../../shared/utils/format'
+import { pageCardBodyScrollStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
 import {
   ALL_STATUSES,
@@ -210,6 +211,8 @@ export default function RequirementListCard({ projectId }: { projectId: string }
   return (
     <>
       <Card
+        style={pageCardStyle}
+        styles={{ body: pageCardBodyScrollStyle }}
         title={
           <Space size={12}>
             <span>需求</span>
