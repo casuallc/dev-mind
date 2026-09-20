@@ -1,4 +1,4 @@
-# CAP-48 模型接入管理（Embedding 端点）
+# CAP-48 模型接入管理（向量化 / 通用对话端点）
 
 > 能力 ID：CAP-48 ｜ 分类：底座 ｜ 状态：草案 ｜ 日期：2026-09-20
 > 缘起：CAP-44 FR-05 把 embedding 做成 `application-local.yml` 里的 `devmind.knowledge.embedding.*`，
@@ -21,15 +21,20 @@
 
 本能力 = 端点登记（密文凭据）+ 连接测试（**实测探测维度**）+ 默认端点 + 库级覆盖 + 索引血缘与失配防护 + 配置迁移 + 失配修复入口。
 
-**范围拍板**：本期只实现 `kind=EMBEDDING`，表结构预留 `kind` 列（CHAT/RERANK 留待有真实消费方）；端点实体放**新模块 `devmind-model` + 独立表**；绑定粒度为**平台默认 + 库级可覆盖**。
+**范围拍板**：首期只实现 `kind=EMBEDDING`、`kind` 列预留（CHAT/RERANK 留待有真实消费方）；端点实体放**新模块 `devmind-model` + 独立表**；绑定粒度为**平台默认 + 库级可覆盖**。
+
+**范围修订（FR-11）**：`kind=CHAT`（通用模型/对话）**开放登记 + 连接测试**，`RERANK` 继续预留（传值 400）。
+本次仍**不接任何 CHAT 消费方**（全仓无 `/chat/completions` 调用：CAP-46 知识库问答的答案是 runner 上
+claude CLI 产的，不走 HTTP 模型），因此开放登记的同时补了「向量解析链只认 EMBEDDING」的守卫（见 FR-11），
+否则一个 CHAT 端点会被知识库的向量链当成向量端点用。
 
 ## 2. 功能需求
 
 ### FR-01 端点实体与 CRUD
 
-- 新模块 `devmind-model`，新表 `model_endpoints`（见 §5）。`kind` 本期只接受 `EMBEDDING`，其余值 400（预留）。
+- 新模块 `devmind-model`，新表 `model_endpoints`（见 §5）。`kind` 接受 `EMBEDDING` / `CHAT`（FR-11），`RERANK` 传值 400（预留）。
 - `provider` 本期两个值：`openai-compatible`（默认）、`mock`（确定性哈希向量，供测试/E2E，仿 runner `executor=fake` 先例）；未知值 400。
-- 字段校验：`base_url` 必填（`mock` 除外）、`model` 必填（`mock` 除外）、`timeout_seconds` 1~600、`batch_size` 1~256、`dimensions` 只读（由 FR-03 探测写入，不接受人工提交）。
+- 字段校验：`base_url` 必填（`mock` 除外）、`model` 必填（`mock` 除外）、`timeout_seconds` 1~600、`batch_size` 1~256、`dimensions` 只读（由 FR-03 探测写入，不接受人工提交）。`kind=CHAT` 时 `top_k` / `threshold` **被忽略并落 null**（不报错、不做范围校验，见 FR-11）。
 - 删除：被知识库引用（`knowledge_bases.model_endpoint_id`）返回 409 并列出引用方；未被引用可直接删。
 - 状态：`active` / `disabled`；停用后解析链跳过该端点（不等于删除，可恢复）。
 
@@ -46,7 +51,7 @@
 - 两个入口，与平台集成同构：
   - `POST /api/model-endpoints/test` 草稿预检（凭据不落库，用于新建/编辑表单内先测再存）；
   - `POST /api/model-endpoints/{id}/test` 已存端点测试：**把探测结果回写端点**（`last_test_at/last_test_ok/last_test_message`），**并把探测到的维度写入 `dimensions`**。
-- 测试动作：`openai-compatible` 用探针文本（`"__devmind_probe__"`）实调一次 `/embeddings`，校验：HTTP 2xx、`data` 条数与输入一致、向量非空且**所有向量等长**；返回 `{ok, latencyMs, model, dimensions, message}`。
+- 测试动作按 `kind` 分派：`EMBEDDING` 用探针文本（`"__devmind_probe__"`）实调一次 `/embeddings`，校验：HTTP 2xx、`data` 条数与输入一致、向量非空且**所有向量等长**；返回 `{ok, latencyMs, model, dimensions, message}`（CHAT 的探针见 FR-11；`testDraft` 也必须先按 `kind` 分派，否则预留类型的草稿会静默打到 `/embeddings`）。
 - `mock` provider 走 `MockEmbeddingClient`，返回配置维度。
 - 维度语义（关键）：**`dimensions` 是连接测试的产物，不是人工输入**——人工填错维度是 FR-06 要防的事故源，因此设计上不允许手填。
 - 若已存端点重新测试得到**不同维度**，响应带 `dimensionChanged: {from, to}`，前端明确提示「维度已变化，该端点上已有的索引需重建」。
@@ -113,6 +118,39 @@
 - 写操作（POST/PUT/DELETE `/api/model-endpoints/**`）在 `SecurityConfig` 收紧为 `hasRole("ADMIN")`，读列表对已登录用户开放（不含密文），与平台集成一致。
 - 密钥禁入库：迁移与文档不写死任何 baseUrl/apiKey；`application-local.yml` 仍是本机密钥的落点（已 gitignore）。
 
+### FR-11 通用模型（CHAT）端点登记与连接测试
+
+**目标**：把「模型接入」从"只有向量模型"扩成多类型登记，首个新增类型 = 通用对话模型。本期**只做登记 + 连接测试**，
+不接消费方（无消费方的类型放开登记是刻意决定：端点是平台资源，先让运维能把"公司有哪几个通用模型"登记进来并
+验证可用；消费方接入时按 `kind` 取默认端点即可）。
+
+- **类型放行**：`kind` 接受 `EMBEDDING` / `CHAT`；`RERANK` 仍 400。类型创建后不可变更（沿用 FR-01）。
+- **连接测试（对话探针）**：`provider=openai-compatible` 实调一次 `{baseUrl}/chat/completions`，
+  body 为 `{model, messages:[{role:"user",content:<探针文本>}]}`——**不发 `max_tokens`**（部分网关/推理模型对
+  它的取值挑剔，而探针只需要"有回复"）；**不重试**（探针由人盯着，重试只双倍耗时与计费）。
+  ok 判定 = HTTP 2xx **且** body 可解析为 JSON **且** `choices` 为非空数组 **且** `content` 非空白；
+  `content` 允许是文本节点或数组里的首个文本元素（OneAPI/vLLM 兼容层会这么回）；**不要求**回显 `model`（网关会改写）。
+  `provider=mock` 零网络返回成功（假回复说明）。
+- **结果表达**：CHAT 的 `dimensions` 恒为 null、不产生 `dimensionChanged`（该类型无维度语义），
+  模型回复的脱敏摘要放进既有的 `message`（连续空白压成单空格、截 80 字 + `…`），**不扩展 `EndpointTestResult`**；
+  UI 在 `dimensions` 为空时不显示"探测维度"。
+- **字段语义**：`top_k` / `threshold` 对 CHAT 无意义 → 忽略并落 null（**不报错、不做范围校验**，含 update 时清掉
+  历史遗留值）；`batch_size` 列 NOT NULL 保留默认、不使用。
+- **默认端点按类型各自唯一**：`setDefault` 已按 kind 清理旧默认（FR-04），CHAT 默认与 EMBEDDING 默认互不影响。
+- **必须同时落的守卫（本 FR 的硬前置）**：向量解析链只认 EMBEDDING，三处收口——
+  1. `KnowledgeBaseService` 绑定库级端点处：`kind != EMBEDDING` → 400（**源头拒绝**，不存在/已停用的 id 维持
+     现状，解析时回落平台默认）；
+  2. `KnowledgeEndpointResolver.resolve(...)` 与 `KnowledgeBaseService.endpointNameOf` 对解析结果
+     `filter(ModelEndpointView::embedding)`（**解析防御**）；
+  3. 知识库详情页的端点下拉与「当前生效」兜底只取 `kind === 'EMBEDDING'`（**UI 与实际行为一致**）。
+  不做这三处的后果是：库级绑了 CHAT 端点后拿对话模型名打 `/embeddings`，条目 `index_status=failed`
+  并把对话模型名写进 `indexed_model` 血缘；且 UI 会把 CHAT 默认端点显示成知识库的"当前生效向量端点"。
+- **前端**：类型下拉新增「通用模型（对话，Chat Completions）」（新建可选、编辑禁用）；CHAT 表单只留
+  服务地址 / API Key / 模型名 / 超时（隐藏单批条数、维度、高级 topK/threshold）；表格维度列对 CHAT 显示 `—`；
+  provider 选项标签与页头/空态/抽屉/默认 tooltip 文案按类型走，并**明说 CHAT 端点本期无消费方**。
+- **非目标**：CHAT 端点的消费方（问答生成、摘要等）另立能力，届时在 SPI 上补 `defaultEndpoint(kind)`；
+  本 FR **不新增** SPI 方法。
+
 ## 3. 关键设计（已定）
 
 - **维度是探测结果而非人工输入**（已定）：这是 FR-06 能成立的前提。人工填维度 = 埋雷。
@@ -120,7 +158,7 @@
 - **抽取 `SecretCipher` 而非模型模块自带一套密钥派生**（已定）：避免出现两套密钥来源导致"数据在但解不开"；integration 域分隔串必须保持兼容。
 - **真实调用与事务解耦**（已定）：embedding 是网络 IO，不能留在 `@Transactional` 里。
 - **降级链不变**（已定）：无端点 → disabled/LIKE，绝不 5xx；失配 → 结构化原因而非静默空结果。
-- **kind 预留但不实现**（已定）：本期 CHAT/RERANK 传值 400，避免"配了没人用"。
+- **kind 分两步走**（已定，FR-11 修订）：首期 CHAT/RERANK 皆 400，避免"配了没人用"；FR-11 放开 **CHAT 的登记与连接测试**（消费方仍不做，属于"先登记后接入"），`RERANK` 继续 400。放开登记的文件必须与向量链守卫**同批**落地（见 FR-11 末条）。
 
 ## 4. 插件化接口（实现定稿）
 
@@ -140,6 +178,12 @@
   装配了就**不回落**——否则 UI 里删了端点检索还在偷用配置，看到的降级提示与实际行为不符）。
 - `devmind-common` 新增 `SecretCipher`（FR-02），另有 `OpenAiCompatEmbeddings`（FR-05）：
   两个消费方共用，且"报错不泄密"只有一套实现（`sanitize()` 抹 `sk-*`/`Bearer *`）。
+- FR-11 另增（仍在 common）：`OpenAiCompatChat`（对话调用，`record Options(baseUrl, apiKey, model, timeoutSeconds)`，
+  返模型回复文本）、`OpenAiCompatHttp`（**包内可见**：按超时缓存 `HttpClient` + `sanitize()` + `abbreviate()`；
+  脱敏正则只许有一份，第二份就是密钥泄漏路径）、`ModelCallException`（模型调用失败基类，
+  `EmbeddingCallException extends ModelCallException` 保持既有捕获点兼容）。
+  `ModelEndpointProvider` 的 javadoc 明确：**返回视图含 kind，消费方必须按 kind 过滤**；
+  本期**不新增** kind 版 `defaultEndpoint(kind)`（无消费方不加接口），它是未来 CHAT 消费方的接入点。
 
 ## 5. 数据模型
 
@@ -162,6 +206,9 @@ knowledge_entries + indexed_endpoint_id BIGINT?   -- 索引血缘（FR-06）
 
 红线：`@ColumnDefault` 字符串值必带引号；`is_default`/`last_test_ok` 是 Boolean 列 → **禁 `@ColumnDefault`**，走实体初始值 + getter 兜底（H2 测不出，MySQL bit 列建列失败）；`kind`/`status` 列名在 H2/PG/MySQL 均非保留字，但实现时仍需按红线过一遍保留字清单；无新增 `@Lob` 列。
 
+FR-11 **无表结构变更**：`kind` 已是 `VARCHAR(16) NOT NULL`，CHAT 只是它的新取值；`dimensions`/`top_k` 本就可空，
+`batch_size` 保持列默认 32。零 DDL ⇒ `@ColumnDefault` / Boolean 默认值 / `@Lob` 三条红线均不涉及。
+
 ## 6. API 概要
 
 ```
@@ -177,6 +224,9 @@ POST   /api/knowledge/bases/{id}/reindex    全库重建（?onlyMismatched=true 
 GET    /api/knowledge/bases/{id}            KnowledgeBaseView 增 modelEndpointId/modelEndpointName/indexStats
 POST   /api/knowledge/search                响应增 degradedReason（NONE|NO_EMBEDDING|DIMENSION_MISMATCH）
 兼容   application-local.yml 的 devmind.knowledge.embedding.* 仍可作首次迁移种子
+
+FR-11 复用上面同一组端点（无新端点）：kind=CHAT 走同一 CRUD，仅连接测试分派到 /chat/completions；
+kind=RERANK 仍 400。绑定守卫（FR-11）落在 knowledge 侧，不新增 HTTP 面。
 ```
 
 ## 7. 验收标准
@@ -189,10 +239,17 @@ POST   /api/knowledge/search                响应增 degradedReason（NONE|NO_E
 - 分批与超时生效：`batch_size=1` 时对 3 块的条目发出 3 次请求（测试内以 stub 端点断言请求次数）；`timeout_seconds=1` 对慢端点触发超时并落 `failed`，消息含批次区间；
 - 凭据红线：列表/详情视图无密文；日志与异常消息不含 apiKey；`git status --short` 无本机路径与密钥。
 - 单测：`SecretCipher` 兼容性（integration 旧密文可解）、解析链四级回落、维度探测、失配跳过与原因返回、分批切分、唯一默认互斥、迁移幂等（重启不重建、不覆盖 UI 修改）。
+- **FR-11 追加**：可建 CHAT 端点（`RERANK` 仍 400）；CHAT 连接测试打进 `/chat/completions` 且带 model/messages、
+  **不带 `max_tokens`**，成功回显模型回复摘要且 `dimensions` / `dimensionChanged` 皆 null、端点 `dimensions` 未被写；
+  401 失败消息脱敏（`***`）且不覆盖维度；2xx 但回复为空算失败；非 JSON 的 2xx 算失败而非异常外泄；
+  `mock` 对话端点零网络；CHAT 草稿预检按 kind 分派、RERANK 草稿 400 且零网络；CHAT 端点的
+  `top_k`/`threshold` 落 null（含越界值不 400、update 清历史遗留值）；`setDefault` 只清同类型默认；
+  **向量链守卫**：provider 返回 CHAT 视图 → 解析 `unavailable()`、绑定 CHAT 端点 → 400。
 
 ## 8. 非目标
 
-- `CHAT` / `RERANK` 类型端点的实现（仅预留 `kind` 列与 400 校验）；
+- `RERANK` 类型端点的实现（仅预留 `kind` 列与 400 校验；`CHAT` 已由 FR-11 放开登记，但**消费方仍不做** ——
+  知识库问答生成、摘要等改走 HTTP 模型属于消费方能力，需另立 CAP，届时在 SPI 上补 `defaultEndpoint(kind)`）；
 - 用量统计 / 配额 / 限流 / 多端点负载均衡与故障转移；
 - **分块策略改造**（Markdown heading 感知、代码块与表格保护、块 breadcrumb、最小块合并、真 tokenizer 口径）→ 另立 CAP；本能力只把 `chunkSize/chunkOverlap` 留在平台级默认，不改变**当前**分块行为，避免一个 CAP 同时动模型与分块两处导致 E2E 归因不清；
 - 索引队列深度 / 批次进度可视化（本 CAP 只做到 `indexStats` 计数 + 触发）；
@@ -211,6 +268,10 @@ POST   /api/knowledge/search                响应增 degradedReason（NONE|NO_E
 | 降级可诊断 | 仅"不静默空结果" | `KnowledgeRetriever` SPI 增 `retrieveDetailed()` + `DegradedReason(NONE/NO_EMBEDDING/DIMENSION_MISMATCH)` | 需区分"没配端点"与"配了但维度对不上"，前者才能引导去配置、后者引导去重建 |
 | 索引写入 | 未提 | `KnowledgeIndexListener`(AFTER_COMMIT) → `KnowledgeIndexService` → `KnowledgeIndexWriter`(短事务) | embedding 是网络 IO，必须落在事务外；写回用独立短事务，避免长事务占连接 |
 | 失配计数 | 未提 | 端点未探测过维度 / 无可用端点时 `mismatched=0` | 算不出来时宁可不报警，也不误报把用户引向无意义的重建 |
+| `kind=CHAT` | 「预留但不实现，传值 400」 | FR-11 放开**登记 + 连接测试**，消费方仍不做，`RERANK` 继续 400 | 多类型接入是用户诉求；端点是平台资源，先能登记与验证，消费方另立能力（避免一次动两处导致 E2E 归因不清） |
+| 对话探针 ok 判定 | 未提 | 2xx **且** JSON 可解析 **且** `choices` 非空 **且** `content` 非空白（允许数组首元素）；不要求回显 `model`、不要求 `id`、不发 `max_tokens`、不重试 | OneAPI/vLLM 兼容层会把 `content` 回成数组、会改写 `model`；部分网关/推理模型对 `max_tokens` 直接 400；探针由人盯着，重试只双倍耗时与计费 |
+| CHAT 的 `top_k`/`threshold` | 未提 | 忽略并落 null，含**越界值不报错**、update 清历史遗留值 | 该类型无检索语义，报错只增加失败面而不带来收益；但绝不能静默存下一个永远没人读的脏值 |
+| 向量链守卫 | 未提 | knowledge 绑定处 `kind != EMBEDDING` → 400 + 解析结果 `filter(embedding())` + 前端只列 EMBEDDING | 解析链原本不看 kind：放开 CHAT 后一个对话端点会被当向量端点用（拿对话模型名打 `/embeddings`、写脏 `indexed_model` 血缘），且 UI 会把它显示成知识库"当前生效向量端点"——正是 §1/§9 反复收口的「UI 与实际行为不符」 |
 
 **验收证据**：`tests/cap48_verify.py` 56 项全绿（含 `tests/fixtures/embedding-mock.py` 假 embedding 端）；
 cap44/45/46 三个 E2E 脚本**未改一行**仍全绿（迁移种子端点生效）；知识库列表/详情页布局巡检通过
