@@ -62,6 +62,7 @@ const ROUTES = [
   { path: '/admin/users', name: '后台-用户' },
   { path: '/admin/execution', name: '后台-执行' },
   { path: '/admin/integrations', name: '后台-集成' },
+  { path: '/admin/models', name: '后台-模型接入' },
   { path: '/admin/keys', name: '后台-开放 API' },
   { path: '/admin/agent-nodes', name: '后台-执行节点' },
   { path: '/admin/scenarios', name: '后台-场景' },

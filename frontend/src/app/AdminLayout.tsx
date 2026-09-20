@@ -14,6 +14,7 @@ import {
   ReadOutlined,
   RobotOutlined,
   SafetyCertificateOutlined,
+  ThunderboltOutlined,
   ToolOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
@@ -38,6 +39,7 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
       { key: '/admin/agent-nodes', icon: <RobotOutlined />, label: 'Agent 节点' },
       { key: '/admin/execution', icon: <AuditOutlined />, label: '模板与审计' },
       { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
+      { key: '/admin/models', icon: <ThunderboltOutlined />, label: '模型接入' },
       { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
       { key: '/admin/scenarios', icon: <DeploymentUnitOutlined />, label: '应用场景' },
     ],
