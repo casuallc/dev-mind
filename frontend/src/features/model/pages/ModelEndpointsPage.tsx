@@ -210,13 +210,16 @@ export default function ModelEndpointsPage() {
 
   /** 表单内「测试连接」：新建/改了凭据走未保存预检；编辑且凭据未改时测已保存实例（探测结果会落库） */
   const onTestForm = async () => {
-    let values: ModelEndpointInput
     try {
-      // kind 必须一起带上：草稿预检按 kind 分派，缺了它对话端点会被当成向量端点打 /embeddings
-      values = await form.validateFields(['kind', 'provider', 'baseUrl', 'model'])
+      // 只校验探针非填不可的四项：名称之类的留给「保存」，不该挡住试连
+      await form.validateFields(['kind', 'provider', 'baseUrl', 'model'])
     } catch {
       return // 校验未过，错误已标红
     }
+    // 取值必须取整个表单：validateFields(nameList) 只回 nameList 那几个字段
+    //（rc-field-form：`getFieldsValue(namePathList)`），拿它的返回值当表单值用，
+    // apiKey 与 timeoutSeconds 会被静默丢掉——表现是服务端不发 Authorization、上游回 401。
+    const values = form.getFieldsValue()
     setTestingForm(true)
     try {
       const base: ModelEndpointInput = {
@@ -225,6 +228,12 @@ export default function ModelEndpointsPage() {
         name: values.name || editing?.name || '（未命名端点）',
         baseUrl: isMock ? undefined : values.baseUrl,
         model: isMock ? undefined : values.model,
+      }
+      if (isChat) {
+        // 与 onSave 一致：对话端点不吃向量语义，别把切类型前残留的检索参数发出去
+        base.batchSize = undefined
+        base.topK = undefined
+        base.threshold = undefined
       }
       const r =
         editing && !values.apiKey

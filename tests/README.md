@@ -86,6 +86,7 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 |------|------|
 | e2e-requirements-layout.mjs | 需求列表：整页不出纵向滚动条、表体内部滚动（`scroll.y` 为实测值）、表头吸顶、分页条常驻；自带数据（临时项目「布局校验-临时」造 30 条需求，跑完连项目一起删，`--keep` 保留）。浏览器路径用 `CHROME_PATH` 覆盖，截图落 `tmp/layout-check-requirements.png` |
 | e2e-layout-pages.mjs | 全站布局巡检：34 个路由（项目页/个人页/后台页/项目设置，含知识库详情页取库里第一个库、没有则跳过该路由）逐个打开，并依次点开页内第一组 `Segmented` 的每个视图，逐个断言 `.ant-layout-content` 与 document 都不溢出、且没有「越界又无滚动祖先」的元素（漏了滚动容器 → 内容被裁或顶破卡片）。只读，不改数据（当前项目取库中第一个）。`--only knowledge,worklog` 只跑匹配路由（**别写前导斜杠**，Git Bash 会做路径转换；片段是 `includes` 匹配，`admin/knowledge` 会同时命中知识库列表页与详情页）、`KB_ID=<库ID>` 指定知识库详情页巡检哪个库（默认取库里第一个）、`--window 1366,768` 换视口（矮视口更易暴露问题，建议两轮都跑）、`--shots` 每页存图、`--dump` 失败时打印内容区组件树（含高度/滚动量）定位元凶。截图与 report.json 落 `tmp/layout-sweep/` |
+| e2e-model-form-probe.mjs | 「模型接入」抽屉内「测试连接」：**填进表单的凭据与超时必须真的进探针请求**（浏览器里那条「表单取值 → 草稿请求」的路径，cap48_verify.py 走接口测不到）。自起一个强制鉴权的假端点（Bearer 不匹配一律 401，与 vLLM 行为一致），无头 Chrome 开抽屉、选类型、填表、点「测试连接」，逐项断言：探针打对路径、**带上 apiKey**、提示条成功、表单填的超时生效（拖 5 秒的假端点按 2 秒超时失败）。只读，不点「保存」。前置同上一行（app + 前端 dev），另需前端 origin 在后端 CORS 白名单内（默认只放 5173/8080，Vite 因端口占用换到 5174 时脚本会直接报错并给处置办法）。报告与失败截图落 `tmp/e2e-model-form-probe/` |
 
 ### WS 帧探针（Node，被 verify 脚本调用或手工）
 

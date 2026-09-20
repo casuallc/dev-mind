@@ -272,9 +272,11 @@ kind=RERANK 仍 400。绑定守卫（FR-11）落在 knowledge 侧，不新增 HT
 | 对话探针 ok 判定 | 未提 | 2xx **且** JSON 可解析 **且** `choices` 非空 **且** `content` 非空白（允许数组首元素）；不要求回显 `model`、不要求 `id`、不发 `max_tokens`、不重试 | OneAPI/vLLM 兼容层会把 `content` 回成数组、会改写 `model`；部分网关/推理模型对 `max_tokens` 直接 400；探针由人盯着，重试只双倍耗时与计费 |
 | CHAT 的 `top_k`/`threshold` | 未提 | 忽略并落 null，含**越界值不报错**、update 清历史遗留值 | 该类型无检索语义，报错只增加失败面而不带来收益；但绝不能静默存下一个永远没人读的脏值 |
 | 向量链守卫 | 未提 | knowledge 绑定处 `kind != EMBEDDING` → 400 + 解析结果 `filter(embedding())` + 前端只列 EMBEDDING | 解析链原本不看 kind：放开 CHAT 后一个对话端点会被当向量端点用（拿对话模型名打 `/embeddings`、写脏 `indexed_model` 血缘），且 UI 会把它显示成知识库"当前生效向量端点"——正是 §1/§9 反复收口的「UI 与实际行为不符」 |
+| 表单内「测试连接」取值 | 未提 | 校验仍用 `validateFields(['kind','provider','baseUrl','model'])`，**取值改用 `form.getFieldsValue()`** | `validateFields(nameList)` 只回 nameList 里那几个字段（rc-field-form `getFieldsValue(namePathList)`），把它的返回值当表单取值用，`apiKey`/`timeoutSeconds` 会被静默丢掉：草稿探针不带 `Authorization` → 上游回 401（2026-09-20 真机「PowerShell 能列模型、页面添加报 401」的根因），且编辑时填了新密钥还会去测旧凭据。浏览器里那一跳接口测不到 → 新增 `tests/e2e-model-form-probe.mjs` 钉死 |
 
 **验收证据**：`tests/cap48_verify.py` **79 项全绿**（含 `tests/fixtures/embedding-mock.py` 假 embedding 端
 与 `tests/fixtures/chat-mock.py` 假对话端；FR-11 段（23 项）插在 F 与 G 之间，因为 G 会停用向量默认端点），
+`tests/e2e-model-form-probe.mjs` **5 项全绿**（表单内「测试连接」真的把 apiKey 与超时发出去；修前同一脚本 4 项红）；
 单测 `devmind-model` 53 项、
 `devmind-knowledge` 解析链守卫、`devmind-common` 对话客户端全绿；
 cap44（20 项）/45（22 项）/46（18 项）三个 E2E 脚本**未改一行**在同一实例上仍全绿（迁移种子端点生效）；
