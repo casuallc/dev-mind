@@ -1,9 +1,9 @@
-// CAP-48 模型接入（Embedding 端点）类型
+// CAP-48 模型接入（向量化 / 通用对话端点）类型
 
-/** 端点类型：本期只实现 EMBEDDING（CHAT/RERANK 服务端预留，传值 400） */
+/** 端点类型：EMBEDDING（向量化）| CHAT（通用对话，本期只登记 + 连接测试）；RERANK 服务端预留，传值 400 */
 export type ModelEndpointKind = 'EMBEDDING' | 'CHAT' | 'RERANK'
 
-/** 提供方：openai-compatible（任意 OpenAI 兼容 /embeddings 服务）| mock（确定性哈希向量，测试用） */
+/** 提供方：openai-compatible（OpenAI 兼容 /embeddings 或 /chat/completions）| mock（假向量 / 假回复，测试用） */
 export type ModelEndpointProvider = 'openai-compatible' | 'mock'
 
 /** 端点视图：永不含凭据（仅 hasApiKey）；dimensions 是连接测试实测探测的产物，不是人工输入 */
@@ -15,15 +15,17 @@ export interface ModelEndpoint {
   baseUrl?: string | null
   model?: string | null
   hasApiKey: boolean
-  /** 向量维度（连接测试探测写入，null = 尚未探测） */
+  /** 向量维度（连接测试探测写入，null = 尚未探测；CHAT 恒为 null——对话端点没有维度） */
   dimensions?: number | null
   timeoutSeconds: number
+  /** 单批条数（仅 EMBEDDING 使用；CHAT 保留默认值但不使用） */
   batchSize: number
-  /** 检索条数覆盖（null = 用平台默认） */
+  /** 检索条数覆盖（null = 用平台默认；仅 EMBEDDING 使用） */
   topK?: number | null
-  /** 余弦阈值覆盖（null = 用平台默认） */
+  /** 余弦阈值覆盖（null = 用平台默认；仅 EMBEDDING 使用） */
   threshold?: number | null
   status: 'active' | 'disabled'
+  /** 平台默认：同类型内唯一（向量默认与对话默认互不影响） */
   isDefault: boolean
   lastTestAt?: string | null
   /** null = 从未测试 */
@@ -48,7 +50,8 @@ export interface ModelEndpointInput {
   status?: 'active' | 'disabled'
 }
 
-/** 连接测试结果：dimensions 为本次实测维度，dimensionChanged 提示已有索引需重建 */
+/** 连接测试结果：向量端点给 dimensions（本次实测维度），对话端点的模型回复摘要走 message；
+ *  dimensionChanged 仅在维度真的变了时出现，提示已有索引需重建 */
 export interface EndpointTestResult {
   ok: boolean
   latencyMs: number
