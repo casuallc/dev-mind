@@ -2,12 +2,13 @@
 // （知识条目 / 文档 / Skills 三视图，GET /api/projects/{id}/context-assets 聚合）。
 // 多视图切换走 Card title 里的 Segmented（布局约定：禁 Card 内套 Tabs）；维护请去 /admin 对应管理页。
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Button, Card, Segmented, Space, Table, Tag, Typography } from 'antd'
+import { Button, Card, Segmented, Space, Tag, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { listContextAssets } from '../api'
 import type { AssetGroup, ProjectAssetItem } from '../types'
 import { useCurrentProject } from '../../../app/useCurrentProject'
-import { pageCardBodyScrollStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -123,7 +124,7 @@ export default function ProjectContextPage({
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title={
         title ?? (
           <Space size={12}>
@@ -152,7 +153,7 @@ export default function ProjectContextPage({
           </>
         )}
       </Typography.Paragraph>
-      <Table
+      <FitTable
         rowKey="ref"
         loading={loading}
         columns={columns}

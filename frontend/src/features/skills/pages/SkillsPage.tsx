@@ -1,7 +1,7 @@
 // Skill 管理（基础模块）：skill 包列表 + 筛选 + 启停/删除；新建/编辑走 SkillFormDrawer，附件走 SkillFilesDrawer。
 // 布局遵循 docs/core/前端内容区布局约定.md：Card 标题，extra 放操作按钮，表格默认密度，行内「管理」开抽屉承载成套操作。
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Card, Drawer, Input, message, Modal, Select, Space, Table, Tag, Typography } from 'antd'
+import { Button, Card, Drawer, Input, message, Modal, Select, Space, Tag, Typography } from 'antd'
 import {
   DeleteOutlined,
   EditOutlined,
@@ -21,7 +21,8 @@ import SkillFormDrawer from '../components/SkillFormDrawer'
 import SkillFilesDrawer from '../components/SkillFilesDrawer'
 import SkillImportModal from '../components/SkillImportModal'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 
 const scopeTag = (s: string) =>
@@ -164,7 +165,7 @@ export default function SkillsPage() {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title="Skill 管理"
       extra={
         <Space>
@@ -242,7 +243,7 @@ export default function SkillsPage() {
           ]}
         />
       </Space>
-      <Table
+      <FitTable
         rowKey="id"
         loading={loading}
         columns={columns}

@@ -1,10 +1,11 @@
-import { Button, Card, Drawer, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Button, Card, Drawer, Form, Input, Modal, Select, Space, Tag, Typography, message } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { createUser, listUsers, resetPassword, updateUser } from '../api'
 import { getUserSnapshot } from '../authStore'
 import type { AuthUser } from '../types'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -81,7 +82,7 @@ export default function UserManagementPage() {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title="用户管理"
       extra={
         <Space>
@@ -97,7 +98,7 @@ export default function UserManagementPage() {
       <Typography.Paragraph type="secondary">
         管理平台账号与角色权限：ADMIN 全权限 / DEVELOPER 业务读写 / VIEWER 只读；local 为系统内置身份，不可修改。
       </Typography.Paragraph>
-      <Table
+      <FitTable
         rowKey="id"
         loading={loading}
         dataSource={users}

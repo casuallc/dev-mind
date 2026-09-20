@@ -8,7 +8,6 @@ import {
   Radio,
   Select,
   Space,
-  Table,
   Tag,
   Tooltip,
   Typography,
@@ -22,7 +21,8 @@ import { CLONE_STATUS_COLOR } from '../types'
 // 集成实例列表为平台设施（projects feature 同样直接引用 integrations/api）
 import { listIntegrations } from '../../integrations/api'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -127,7 +127,7 @@ export default function ReposAdminPage() {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title="代码仓库"
       extra={
         <Space>
@@ -144,7 +144,7 @@ export default function ReposAdminPage() {
         平台级全局仓库：项目添加仓库时按远端地址自动关联到此处（不复制）；工时日志的 git 扫描也读取这里的服务端克隆。
         CLONE 行由服务端定时抓取（默认 30 分钟），也可手动「立即抓取」。
       </Typography.Paragraph>
-      <Table
+      <FitTable
         rowKey="id"
         loading={loading}
         dataSource={rows}

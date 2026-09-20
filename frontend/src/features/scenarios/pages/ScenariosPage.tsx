@@ -32,7 +32,8 @@ import { listDocs } from '../../docs/api'
 import { listProjects } from '../../projects/api'
 import { listAgentNodes } from '../../agent/api'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardBodyScrollStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -233,7 +234,7 @@ export default function ScenariosPage() {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title="场景"
       extra={
         <Space>
@@ -254,7 +255,7 @@ export default function ScenariosPage() {
         <Typography.Text code>{'{{branch}}'}</Typography.Text>、
         <Typography.Text code>{'{{requirement}}'}</Typography.Text>。
       </Typography.Paragraph>
-      <Table
+      <FitTable
         rowKey="id"
         loading={loading}
         columns={columns}

@@ -11,7 +11,6 @@ import {
   Modal,
   Select,
   Space,
-  Table,
   Tag,
   Typography,
   message,
@@ -27,7 +26,8 @@ import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { fmtTime } from '../../../shared/utils/format'
 import { STATUS_COLOR } from '../constants'
 import ReleaseDetailDrawer from '../components/ReleaseDetailDrawer'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -117,7 +117,7 @@ function ReleaseCenter({ id }: { id: string }) {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title="发版"
       extra={
         <Space>
@@ -133,7 +133,7 @@ function ReleaseCenter({ id }: { id: string }) {
       <Typography.Paragraph type="secondary">
         发版执行器（CAP-11）：把构建制品推送 Nexus 并打版本 tag；点「管理」开 Drawer 看实时日志并执行/回滚。发版配置在项目设置「发版配置」Tab 维护。
       </Typography.Paragraph>
-      <Table rowKey="id" columns={columns} dataSource={rows} pagination={LIST_PAGINATION}
+      <FitTable rowKey="id" columns={columns} dataSource={rows} pagination={LIST_PAGINATION}
         locale={{
           emptyText: '暂无发版记录。先在项目设置保存发版配置，再点「新建发版」创建并执行第一个发版。',
         }}

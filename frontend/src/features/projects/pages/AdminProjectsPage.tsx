@@ -1,6 +1,6 @@
 // CAP-02 后台项目列表：表格 + 新建/编辑（ProjectFormDrawer）+ 居中确认删除。仅 ADMIN（RequireAdmin 守卫）。
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Card, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, Input, Modal, Select, Space, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, ReloadOutlined, RobotOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -12,7 +12,8 @@ import ProjectFormDrawer from '../components/ProjectFormDrawer'
 import { CLONE_STATUS_COLOR } from '../components/CloneLogDrawer'
 import type { Project } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -184,7 +185,7 @@ export default function AdminProjectsPage() {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title="项目管理"
       extra={
         <Space>
@@ -213,7 +214,7 @@ export default function AdminProjectsPage() {
         注册本地 git 仓库作为项目，作为会话/构建/发版/测试能力的挂载点。worktree 约定在
         <Typography.Text code>path/.devmind/worktrees/&lt;sessionId&gt;</Typography.Text>。
       </Typography.Paragraph>
-      <Table
+      <FitTable
         rowKey="id"
         loading={loading}
         columns={columns}

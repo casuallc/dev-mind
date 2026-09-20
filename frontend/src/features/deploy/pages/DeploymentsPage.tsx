@@ -10,7 +10,6 @@ import {
   Select,
   Space,
   Switch,
-  Table,
   Tag,
   Typography,
   message,
@@ -36,7 +35,8 @@ import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { STATUS_COLOR } from '../constants'
 import ConfigEditor from '../components/ConfigEditor'
 import DeployDetailDrawer from '../components/DeployDetailDrawer'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 
 export default function DeploymentsPage() {
@@ -177,7 +177,7 @@ function DeployCenter({ id }: { id: string }) {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title={
         <Space size={12}>
           <span>部署记录</span>
@@ -202,7 +202,7 @@ function DeployCenter({ id }: { id: string }) {
       </Typography.Paragraph>
 
       {view === 'history' ? (
-        <Space direction="vertical" style={{ width: '100%' }} size={16}>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <Card size="small" title="创建部署">
             <Space wrap>
               <Select<number>
@@ -252,7 +252,7 @@ function DeployCenter({ id }: { id: string }) {
             </div>
           </Card>
 
-          <Table<DeploymentRecord>
+          <FitTable<DeploymentRecord>
             rowKey="id"
             loading={loading}
             dataSource={deploys}
@@ -270,9 +270,13 @@ function DeployCenter({ id }: { id: string }) {
             }}
             locale={{ emptyText: '暂无部署记录。在上方「创建部署」选择环境/节点与构建，发起第一个部署。' }}
           />
-        </Space>
+        </div>
       ) : (
-        cfg && <ConfigEditor cfg={cfg} onChanged={onConfigChanged} />
+        cfg && (
+          <div style={pagePaneScrollStyle}>
+            <ConfigEditor cfg={cfg} onChanged={onConfigChanged} />
+          </div>
+        )
       )}
 
       <DeployDetailDrawer

@@ -45,7 +45,8 @@ import ConnLogsPanel from '../components/ConnLogsPanel'
 import ActiveSessionsCard, { activeSessionColumns } from '../components/ActiveSessionsCard'
 import { buildLinuxInstallScript, buildWindowsInstallScript, downloadTextFile } from '../utils/installScript'
 import { fmtTime, fmtBytes } from '../../../shared/utils/format'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -257,7 +258,7 @@ export default function AgentNodesPage() {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title={
         <Space size={12}>
           <span>Agent 节点</span>
@@ -303,7 +304,7 @@ export default function AgentNodesPage() {
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
             节点 = 运行 devmind-agent-runner.jar 的远程机器。服务端不执行会话（零执行，CAP-34），务必注册节点并「设为默认」，未指定节点的会话即自动调度过去；无任何默认节点时创建会话会失败。
           </Typography.Paragraph>
-          <Table<AgentNode>
+          <FitTable<AgentNode>
             rowKey="id"
             loading={loading}
             columns={columns}

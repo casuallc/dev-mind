@@ -9,7 +9,6 @@ import {
   Modal,
   Space,
   Switch,
-  Table,
   Tag,
   Typography,
   message,
@@ -19,7 +18,8 @@ import dayjs from 'dayjs'
 import { deleteApiKey, issueApiKey, listApiKeys, setApiKeyEnabled } from '../api'
 import type { ApiKey, IssuedKey } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -134,7 +134,7 @@ export default function ApiKeysPage() {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title="API 密钥"
       extra={
         <Space>
@@ -150,7 +150,7 @@ export default function ApiKeysPage() {
       <Typography.Paragraph type="secondary">
         密钥用于调用开放 API（/open-api/v1/**，HMAC-SHA256 签名认证），调用方式见 scripts/openapi.sh；secret 仅在创建时展示一次。
       </Typography.Paragraph>
-      <Table<ApiKey>
+      <FitTable<ApiKey>
         rowKey="id"
         loading={loading}
         columns={columns}

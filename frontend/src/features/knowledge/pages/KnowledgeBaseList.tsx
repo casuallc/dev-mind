@@ -15,7 +15,6 @@ import {
   Segmented,
   Select,
   Space,
-  Table,
   Tag,
   Typography,
 } from 'antd'
@@ -42,7 +41,8 @@ import type {
   PreviewResult,
 } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -302,7 +302,7 @@ export default function KnowledgeBaseList() {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title={
         <Space size={12}>
           <span>知识库</span>
@@ -350,7 +350,7 @@ export default function KnowledgeBaseList() {
             知识库是条目的容器：FULL 库（经验库）在会话启动时全量注入 CLAUDE.md，RAG 库只做向量检索按召回内容。
             点库名进入条目管理与检索测试。
           </Typography.Paragraph>
-          <Table
+          <FitTable
             rowKey="id"
             loading={basesLoading}
             columns={baseColumns}
@@ -381,7 +381,7 @@ export default function KnowledgeBaseList() {
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
             会话中「沉淀经验」或手动提交的经验，审核采纳后进入对应经验库（inbox）。
           </Typography.Paragraph>
-          <Table
+          <FitTable
             rowKey="id"
             loading={proposalsLoading}
             columns={proposalColumns}
@@ -400,7 +400,7 @@ export default function KnowledgeBaseList() {
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
             选择项目与任务说明，预览会话启动时实际注入的知识内容（FULL 库条目）。
           </Typography.Paragraph>
-          <Space direction="vertical" style={{ width: '100%' }}>
+          <Space direction="vertical" style={{ width: '100%', ...pagePaneScrollStyle }}>
             <Form form={previewForm} layout="inline">
               <Form.Item name="projectId" label="项目">
                 <Select allowClear placeholder="选择项目" style={{ width: 240 }} options={projectOptions} />

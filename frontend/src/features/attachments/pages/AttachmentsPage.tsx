@@ -13,7 +13,6 @@ import {
   Progress,
   Segmented,
   Space,
-  Table,
   Tag,
   Typography,
   Upload,
@@ -37,7 +36,8 @@ import {
 } from '../../../shared/attachments/api'
 import { attachmentRawUrl } from '../../../shared/attachments/url'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -277,7 +277,7 @@ export default function AttachmentsPage() {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title={
         <Space size={12}>
           <span>附件管理</span>
@@ -321,7 +321,7 @@ export default function AttachmentsPage() {
       <Typography.Paragraph type="secondary">
         平台统一附件库（图床 + 文件）：图片可内联引用，其他类型仅下载；复制附件 id 即可在问答、文档等处引用。
       </Typography.Paragraph>
-      <Table
+      <FitTable
         rowKey="attachmentId"
         loading={loading}
         columns={columns}

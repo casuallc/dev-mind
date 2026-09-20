@@ -1,7 +1,7 @@
 // CAP-02 项目列表（业务视图，全角色只读）：表格 + 状态筛选 + 「进入」= 切换为当前项目并回概览。
 // 入口已移出侧边栏，仅从项目切换器底部「查看全部项目」进入；增删改在后台 /admin/projects。
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Card, Select, Space, Table, Tag, Typography } from 'antd'
+import { Button, Card, Select, Space, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -9,7 +9,8 @@ import { listProjects } from '../api'
 import { setCurrentProject } from '../../../app/currentProjectStore'
 import type { Project } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -100,7 +101,7 @@ export default function ProjectsPage() {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title="项目"
       extra={
         <Space>
@@ -122,7 +123,7 @@ export default function ProjectsPage() {
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
         全部已注册项目的只读列表，点「进入」切换为当前项目并回到概览；新建/编辑/删除在后台「项目管理」进行。
       </Typography.Paragraph>
-      <Table
+      <FitTable
         rowKey="id"
         loading={loading}
         columns={columns}

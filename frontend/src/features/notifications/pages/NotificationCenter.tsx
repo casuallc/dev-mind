@@ -9,7 +9,6 @@ import {
   Select,
   Space,
   Switch,
-  Table,
   Tag,
   TimePicker,
   Typography,
@@ -33,7 +32,8 @@ import { executeNotificationAction } from '../actions'
 import { EVENT_TYPES, LEVEL_COLOR } from '../types'
 import type { AppNotification, NotificationChannel, NotificationPrefs } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -218,7 +218,7 @@ export default function NotificationCenter() {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title={
         <Space size={12}>
           <span>通知中心</span>
@@ -261,7 +261,7 @@ export default function NotificationCenter() {
         会话事件与执行结果的站内通知汇总；支持按级别筛选、标记已读，推送通道与免打扰偏好在「通道与偏好」里配置。
       </Typography.Paragraph>
 
-      <Table
+      <FitTable
         rowKey="id"
         loading={loading}
         columns={columns}

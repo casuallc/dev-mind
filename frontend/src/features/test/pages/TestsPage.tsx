@@ -13,7 +13,6 @@ import {
   Segmented,
   Select,
   Space,
-  Table,
   Tag,
   Typography,
   message,
@@ -52,7 +51,8 @@ import { STATUS_COLOR, SUITE_KIND_COLOR } from '../constants'
 import CaseEditorDrawer from '../components/CaseEditorDrawer'
 import RunDetailDrawer from '../components/RunDetailDrawer'
 import IssuesTable from '../components/IssuesTable'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -296,7 +296,7 @@ function TestCenter({ id }: { id: string }) {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title={
         <Space size={12}>
           <span>测试记录</span>
@@ -330,7 +330,7 @@ function TestCenter({ id }: { id: string }) {
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
             套件 = 一组用例；api 套件由 OpenAPI 生成（含未鉴权边界用例），smoke 冒烟套件用 health 用例做关键路径存活检查。
           </Typography.Paragraph>
-          <Table<TestSuite> rowKey="id" loading={loading} dataSource={suites} columns={suiteColumns}
+          <FitTable<TestSuite> rowKey="id" loading={loading} dataSource={suites} columns={suiteColumns}
             pagination={LIST_PAGINATION} locale={{ emptyText: '暂无套件：先「从 OpenAPI 生成」，或新建冒烟套件（health 用例走执行节点健康检查）' }} />
         </>
       ) : (
@@ -338,7 +338,7 @@ function TestCenter({ id }: { id: string }) {
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
             运行的历史记录：「详情」里看实时结果流与报告/日志；失败运行可在详情中一键生成缺陷线索。
           </Typography.Paragraph>
-          <Table<TestRun> rowKey="id" loading={loading} dataSource={runs} columns={runColumns}
+          <FitTable<TestRun> rowKey="id" loading={loading} dataSource={runs} columns={runColumns}
             pagination={LIST_PAGINATION} locale={{ emptyText: '暂无运行记录：切到「测试套件」视图准备套件后，点右上角「新建运行」执行测试' }} />
         </>
       )}

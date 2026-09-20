@@ -5,7 +5,6 @@ import {
   Input,
   Modal,
   Space,
-  Table,
   Tag,
   Tooltip,
   Typography,
@@ -52,7 +51,8 @@ import RecentWeekStrip from '../components/RecentWeekStrip'
 import WorklogViewSwitch, { isContextView, isSessionsView, type WorklogView } from '../components/WorklogViewSwitch'
 import SessionsBoard from '../../sessions/pages/SessionsBoard'
 import ProjectContextPage from '../../scenarios/pages/ProjectContextPage'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardBodyFlexStyle, pageCardBodyScrollStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 
 type View = WorklogView
@@ -447,7 +447,7 @@ export default function WorklogPage() {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title={viewSwitch}
       extra={
         <Space>
@@ -543,7 +543,7 @@ export default function WorklogPage() {
               {isEntriesCurrentWeek && '（本周）'}
             </Typography.Text>
           </div>
-          <Table
+          <FitTable
             rowKey="id"
             loading={loading}
             dataSource={dayEntries.slice((page - 1) * pageSize, page * pageSize)}
@@ -663,28 +663,30 @@ export default function WorklogPage() {
               {isCurrentWeek && '（本周）'}
             </Typography.Text>
           </div>
-          <ReportEditor
-            key={dayStr}
-            id={daily?.id}
-            status={daily?.status}
-            updatedAt={daily?.updatedAt}
-            generating={generating}
-            fields={[{ key: 'contentMd', label: `日报内容（${dayStr}，Markdown）`, value: daily?.contentMd ?? '' }]}
-            onCreateManual={onCreateDaily}
-            onGenerate={(force) => onGenerate('daily', force)}
-            onSave={async (values) => {
-              if (daily) {
-                const updated = await updateDaily(daily.id, { contentMd: values.contentMd })
-                setDailyWeek((m) => ({ ...m, [dayStr]: updated }))
-              }
-            }}
-            onConfirm={async () => {
-              if (daily) {
-                const updated = await updateDaily(daily.id, { status: 'CONFIRMED' })
-                setDailyWeek((m) => ({ ...m, [dayStr]: updated }))
-              }
-            }}
-          />
+          <div style={pagePaneScrollStyle}>
+            <ReportEditor
+              key={dayStr}
+              id={daily?.id}
+              status={daily?.status}
+              updatedAt={daily?.updatedAt}
+              generating={generating}
+              fields={[{ key: 'contentMd', label: `日报内容（${dayStr}，Markdown）`, value: daily?.contentMd ?? '' }]}
+              onCreateManual={onCreateDaily}
+              onGenerate={(force) => onGenerate('daily', force)}
+              onSave={async (values) => {
+                if (daily) {
+                  const updated = await updateDaily(daily.id, { contentMd: values.contentMd })
+                  setDailyWeek((m) => ({ ...m, [dayStr]: updated }))
+                }
+              }}
+              onConfirm={async () => {
+                if (daily) {
+                  const updated = await updateDaily(daily.id, { status: 'CONFIRMED' })
+                  setDailyWeek((m) => ({ ...m, [dayStr]: updated }))
+                }
+              }}
+            />
+          </div>
         </>
       )}
 
@@ -700,33 +702,35 @@ export default function WorklogPage() {
             weeksBack={weeksBack}
             onShiftWindow={shiftWeekWindow}
           />
-          <ReportEditor
-            key={weekStartStr}
-            id={weekly?.id}
-            status={weekly?.status}
-            updatedAt={weekly?.updatedAt}
-            generating={generating}
-            fields={[
-              { key: 'summaryMd', label: `周总结（${weekStartStr} 周，Markdown）`, value: weekly?.summaryMd ?? '' },
-              { key: 'nextPlanMd', label: '下周计划（Markdown）', value: weekly?.nextPlanMd ?? '' },
-            ]}
-            onCreateManual={onCreateWeekly}
-            onGenerate={(force) => onGenerate('weekly', force)}
-            onSave={async (values) => {
-              if (weekly) {
-                const updated = await updateWeekly(weekly.id, { summaryMd: values.summaryMd, nextPlanMd: values.nextPlanMd })
-                setWeekly(updated)
-                setRecentWeeks((m) => ({ ...m, [weekStartStr]: updated }))
-              }
-            }}
-            onConfirm={async () => {
-              if (weekly) {
-                const updated = await updateWeekly(weekly.id, { status: 'CONFIRMED' })
-                setWeekly(updated)
-                setRecentWeeks((m) => ({ ...m, [weekStartStr]: updated }))
-              }
-            }}
-          />
+          <div style={pagePaneScrollStyle}>
+            <ReportEditor
+              key={weekStartStr}
+              id={weekly?.id}
+              status={weekly?.status}
+              updatedAt={weekly?.updatedAt}
+              generating={generating}
+              fields={[
+                { key: 'summaryMd', label: `周总结（${weekStartStr} 周，Markdown）`, value: weekly?.summaryMd ?? '' },
+                { key: 'nextPlanMd', label: '下周计划（Markdown）', value: weekly?.nextPlanMd ?? '' },
+              ]}
+              onCreateManual={onCreateWeekly}
+              onGenerate={(force) => onGenerate('weekly', force)}
+              onSave={async (values) => {
+                if (weekly) {
+                  const updated = await updateWeekly(weekly.id, { summaryMd: values.summaryMd, nextPlanMd: values.nextPlanMd })
+                  setWeekly(updated)
+                  setRecentWeeks((m) => ({ ...m, [weekStartStr]: updated }))
+                }
+              }}
+              onConfirm={async () => {
+                if (weekly) {
+                  const updated = await updateWeekly(weekly.id, { status: 'CONFIRMED' })
+                  setWeekly(updated)
+                  setRecentWeeks((m) => ({ ...m, [weekStartStr]: updated }))
+                }
+              }}
+            />
+          </div>
         </>
       )}
 

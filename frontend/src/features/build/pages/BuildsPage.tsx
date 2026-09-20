@@ -2,7 +2,7 @@
 // CAP-08 构建中心：配置（执行位置/执行节点/并发）→ 触发构建 → 历史表格 → 日志 Drawer（WS 实时流）。
 // CAP-36：AGENT 执行由 runner 节点承接（exec 帧），配置 GitLab 仓库时凭证随帧下发。
 // 布局遵循 docs/core/前端内容区布局约定.md：单 Card 默认尺寸，配置/触发表单收进 extra 按钮打开的 Modal。
-import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Modal, Select, Space, Tag, Typography, message } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import { ReloadOutlined, RocketOutlined, SettingOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
@@ -12,7 +12,8 @@ import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { durationMs, fmtTime } from '../../../shared/utils/format'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import LogView from '../../../shared/components/LogView'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
@@ -147,7 +148,7 @@ function BuildCenter({ id }: { id: string }) {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title="构建记录"
       extra={
         <Space>
@@ -160,7 +161,7 @@ function BuildCenter({ id }: { id: string }) {
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
         当前项目的构建历史：触发一次构建并查看状态与日志，执行位置/并发等在「构建配置」中调整。
       </Typography.Paragraph>
-      <Table<BuildRecord>
+      <FitTable<BuildRecord>
         rowKey="id"
         loading={loading}
         dataSource={builds}

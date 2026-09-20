@@ -10,7 +10,6 @@ import {
   message,
   Select,
   Space,
-  Table,
   Tag,
   Typography,
 } from 'antd'
@@ -28,7 +27,8 @@ import { createDoc, listDocs, listTemplates, pushDocs, searchDocs } from '../api
 import { KIND_LABEL, STATUS_LABEL } from '../types'
 import type { DocInput, DocKind, DocMeta, DocStatus, DocTemplate } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -145,7 +145,7 @@ export default function DocsPage() {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title="文档管理"
       extra={
         <Space wrap>
@@ -193,7 +193,7 @@ export default function DocsPage() {
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
         平台文档库：按类型/状态筛选或全文检索需求、设计、API 文档，支持从模板一键创建，可推送到远端 git 仓库。
       </Typography.Paragraph>
-      <Table
+      <FitTable
         rowKey="id"
         loading={loading}
         columns={columns}

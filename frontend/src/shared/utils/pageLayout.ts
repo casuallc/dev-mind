@@ -22,6 +22,11 @@ export const pageCardBodyFlexStyle: CSSProperties = {
   flexDirection: 'column',
 }
 
+/** Card body 为 flex 列（pageCardBodyFlexStyle）时的「非表格视图」内容容器：撑满剩余高度并在内部滚动。
+ *  表格视图直接用 shared/components/FitTable（自带 flex:1 容器），长表单/报告/结果列表等视图用它包一层，
+ *  否则 body 不再是滚动容器，超长内容会溢出到卡片外。 */
+export const pagePaneScrollStyle: CSSProperties = { flex: 1, minHeight: 0, overflow: 'auto' }
+
 /** 多区块页面（概览/详情等根节点为 Space/div 叠多张 Card）的根容器：撑满高度并内部滚动。
  *  overflowX:hidden 是必须的——antd Row 的 gutter 靠 -8px 负 margin 实现，Row 比容器宽 16px，
  *  在 overflow:auto 容器里会直接撑出横向滚动条；被裁掉的只是两侧空白 gutter，不影响内容。

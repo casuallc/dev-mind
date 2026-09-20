@@ -11,7 +11,6 @@ import {
   Input,
   Select,
   Space,
-  Table,
   Tag,
   Tooltip,
   Typography,
@@ -27,7 +26,8 @@ import {
   updateIntegration,
 } from '../api'
 import type { Integration, IntegrationInput, IntegrationTestResult } from '../types'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -234,7 +234,7 @@ export default function IntegrationsPage() {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title="平台集成"
       extra={
         <Space>
@@ -257,7 +257,7 @@ export default function IntegrationsPage() {
         飞书文档导入知识库等自动化使用；人触发的写操作（推送分支、建 MR/PR、Jira 状态/工时回写）优先使用操作人在
         「设置 → 第三方账号」绑定的个人账号。实例启用后，用户即可在「设置」中绑定自己的账号。
       </Typography.Paragraph>
-      <Table<Integration>
+      <FitTable<Integration>
         rowKey="id"
         loading={loading}
         dataSource={items}

@@ -55,7 +55,8 @@ import type {
 } from '../types'
 import MarkdownEditor from '../../../shared/components/MarkdownEditor'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -352,7 +353,7 @@ export default function KnowledgeBaseDetail() {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title={
         <Space size={12}>
           <Link to="/admin/knowledge">
@@ -409,7 +410,7 @@ export default function KnowledgeBaseDetail() {
               ? 'FULL 库条目在会话启动时全量注入 CLAUDE.md（global 库按项目标签过滤）；内容保存后自动重建向量索引。'
               : 'RAG 库条目不参与启动注入，仅供向量检索按提问召回；内容保存后自动重建向量索引。'}
           </Typography.Paragraph>
-          <Table
+          <FitTable
             rowKey="id"
             loading={entriesLoading}
             columns={entryColumns}
@@ -453,7 +454,7 @@ export default function KnowledgeBaseDetail() {
             </Button>
           </Space.Compact>
           {searchResult && (
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space direction="vertical" size={12} style={{ width: '100%', ...pagePaneScrollStyle }}>
               {!searchResult.vector && (
                 <Alert
                   type="warning"
@@ -515,7 +516,7 @@ export default function KnowledgeBaseDetail() {
               }
             />
           ) : (
-            <Space direction="vertical" size={12} style={{ width: '100%', maxWidth: 860 }}>
+            <Space direction="vertical" size={12} style={{ width: '100%', maxWidth: 860, ...pagePaneScrollStyle }}>
               <Space wrap>
                 <span>飞书集成：</span>
                 <Select
@@ -599,7 +600,7 @@ export default function KnowledgeBaseDetail() {
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
             库的基本设置；归档后不再参与注入与检索。
           </Typography.Paragraph>
-          <Form form={settingsForm} labelCol={{ span: 4 }} wrapperCol={{ span: 12 }} style={{ maxWidth: 720 }}>
+          <Form form={settingsForm} labelCol={{ span: 4 }} wrapperCol={{ span: 12 }} style={{ maxWidth: 720, ...pagePaneScrollStyle }}>
             <Form.Item name="name" label="名称" rules={[{ required: true, message: '请填写名称' }]}>
               <Input />
             </Form.Item>
