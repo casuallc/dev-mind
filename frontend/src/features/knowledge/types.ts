@@ -15,12 +15,30 @@ export interface KnowledgeBase {
   projectId: string | null
   projectName: string | null
   injectMode: InjectMode
-  embeddingModel: string | null
+  /** CAP-48 库级向量端点覆盖；null = 跟随平台默认端点 */
+  modelEndpointId: number | null
+  /** 实际生效的端点名（含回落平台默认的结果）；null = 无可用端点（索引停用、检索降级） */
+  modelEndpointName: string | null
   status: BaseStatus
   entryCount: number
   chunkCount: number
+  indexStats: IndexStats
   createdAt: string
   updatedAt: string
+}
+
+/** CAP-48 FR-06 索引健康度：mismatched = 已索引但血缘维度/端点与当前端点对不上（需重建） */
+export interface IndexStats {
+  ready: number
+  pending: number
+  failed: number
+  disabled: number
+  mismatched: number
+}
+
+/** 全库/失配重建索引结果 */
+export interface ReindexResult {
+  queued: number
 }
 
 export interface KnowledgeBaseInput {
@@ -29,7 +47,8 @@ export interface KnowledgeBaseInput {
   scope?: EntryScope
   projectId?: string
   injectMode?: InjectMode
-  embeddingModel?: string
+  /** 库级端点覆盖；传 0 或 null = 清除覆盖、跟随平台默认 */
+  modelEndpointId?: number | null
   status?: BaseStatus
 }
 
@@ -77,10 +96,14 @@ export interface RetrievedChunk {
   score: number
 }
 
+/** 检索降级原因（CAP-48 FR-06）：NONE 正常 | NO_EMBEDDING 无可用端点走关键词 | DIMENSION_MISMATCH 维度失配需重建索引 */
+export type DegradedReason = 'NONE' | 'NO_EMBEDDING' | 'DIMENSION_MISMATCH'
+
 export interface KnowledgeSearchResult {
-  /** false = embedding 未配置，本次走关键词 LIKE 降级 */
+  /** false = 无可用 embedding 端点，本次走关键词 LIKE 降级 */
   vector: boolean
   chunks: RetrievedChunk[]
+  degradedReason: DegradedReason
 }
 
 export type ProposalStatus = 'open' | 'adopted' | 'rejected'

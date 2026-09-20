@@ -12,6 +12,7 @@ import {
   InputNumber,
   message,
   Modal,
+  Popconfirm,
   Segmented,
   Select,
   Space,
@@ -37,12 +38,15 @@ import {
   importFeishuDocs,
   listBaseEntries,
   listFeishuIntegrations,
+  reindexBase,
   reindexEntry,
   resyncEntry,
   searchChunks,
   updateBase,
   updateEntry,
 } from '../api'
+import { listModelEndpoints } from '../../model/api'
+import type { ModelEndpoint } from '../../model/types'
 import type {
   FeishuImportResult,
   FeishuIntegration,
@@ -69,7 +73,7 @@ const indexStatusTag = (e: KnowledgeEntry, onRetry: (e: KnowledgeEntry) => void)
   if (s === 'pending') return <Tag color="gold">待索引</Tag>
   if (s === 'disabled')
     return (
-      <Tooltip title="未配置 embedding，检索走关键词降级">
+      <Tooltip title="无可用向量端点，索引停用、检索走关键词降级">
         <Tag>未启用</Tag>
       </Tooltip>
     )
@@ -92,7 +96,9 @@ export default function KnowledgeBaseDetail() {
   const [entries, setEntries] = useState<KnowledgeEntry[]>([])
   const [entriesLoading, setEntriesLoading] = useState(false)
   const [view, setView] = useState<string>('entries') // entries | search | settings
-
+  // CAP-48 向量端点清单（库级覆盖选择器）
+  const [endpoints, setEndpoints] = useState<ModelEndpoint[]>([])
+  const [reindexing, setReindexing] = useState(false)
   // 条目编辑
   const [entryDrawerOpen, setEntryDrawerOpen] = useState(false)
   const [editingEntry, setEditingEntry] = useState<KnowledgeEntry | null>(null)
@@ -133,13 +139,26 @@ export default function KnowledgeBaseDetail() {
     load()
   }, [load])
 
+  // 向量端点清单（CAP-48 解析链：库级覆盖 → 平台默认）——只用于展示与选择，失败不影响页面
+  useEffect(() => {
+    listModelEndpoints()
+      .then(setEndpoints)
+      .catch(() => undefined)
+  }, [])
+
+  /** 本库当前实际生效的端点（库级覆盖命中，否则平台默认） */
+  const resolvedEndpoint =
+    endpoints.find(e => e.id === base?.modelEndpointId) ??
+    endpoints.find(e => e.isDefault && e.status === 'active') ??
+    null
+
   useEffect(() => {
     if (base && view === 'settings') {
       settingsForm.setFieldsValue({
         name: base.name,
         description: base.description ?? undefined,
         injectMode: base.injectMode,
-        embeddingModel: base.embeddingModel ?? undefined,
+        modelEndpointId: base.modelEndpointId ?? undefined,
         status: base.status,
       })
     }
@@ -218,6 +237,28 @@ export default function KnowledgeBaseDetail() {
       setTimeout(load, 1500)
     } catch (err) {
       showError(err, '重建索引失败')
+    }
+  }
+
+  /** CAP-48 FR-08 整库重建（换端点/换模型/调分块参数后的修复入口，异步排队） */
+  const onReindexBase = async (onlyMismatched: boolean) => {
+    setReindexing(true)
+    try {
+      const r = await reindexBase(baseId, onlyMismatched)
+      if (r.queued === 0) {
+        message.info(
+          onlyMismatched
+            ? '没有失配条目需要重建（端点未探测过维度时无法判定失配，可先到「管理 → 测试连接」探测）'
+            : '库里没有可重建的条目',
+        )
+      } else {
+        message.success(`已入队重建 ${r.queued} 条，稍后自动刷新`)
+      }
+      setTimeout(load, 2000)
+    } catch (e) {
+      showError(e, '重建索引失败')
+    } finally {
+      setReindexing(false)
     }
   }
 
@@ -385,6 +426,18 @@ export default function KnowledgeBaseDetail() {
               <Button icon={<ReloadOutlined />} onClick={load}>
                 刷新
               </Button>
+              {canWrite() && base && base.entryCount > 0 && (
+                <Popconfirm
+                  title="重建全库索引？"
+                  description={`库内 ${base.entryCount} 条条目会全部重新向量化（异步排队），换端点/换分块参数后需要执行。`}
+                  okText="重建"
+                  onConfirm={() => onReindexBase(false)}
+                >
+                  <Button icon={<SyncOutlined />} loading={reindexing}>
+                    重建全库索引
+                  </Button>
+                </Popconfirm>
+              )}
               {canWrite() && (
                 <Button type="primary" icon={<PlusOutlined />} onClick={openCreateEntry}>
                   新增条目
@@ -409,7 +462,47 @@ export default function KnowledgeBaseDetail() {
             {base?.injectMode === 'FULL'
               ? 'FULL 库条目在会话启动时全量注入 CLAUDE.md（global 库按项目标签过滤）；内容保存后自动重建向量索引。'
               : 'RAG 库条目不参与启动注入，仅供向量检索按提问召回；内容保存后自动重建向量索引。'}
+            {base && (
+              <>
+                {' '}当前向量端点：
+                {base.modelEndpointName ? (
+                  <Tag color="blue">
+                    {base.modelEndpointName}
+                    {resolvedEndpoint?.dimensions ? ` · ${resolvedEndpoint.dimensions} 维` : ' · 维度未探测'}
+                  </Tag>
+                ) : (
+                  <Tooltip title="无可用端点：索引停用、检索走关键词降级。到「模型接入」新建端点或设为平台默认。">
+                    <Tag color="orange">未配置</Tag>
+                  </Tooltip>
+                )}
+                索引 {base.indexStats.ready}/{base.entryCount} 已索引
+                {base.indexStats.pending > 0 && ` · 待索引 ${base.indexStats.pending}`}
+                {base.indexStats.failed > 0 && ` · 失败 ${base.indexStats.failed}`}
+                {base.indexStats.disabled > 0 && ` · 未启用 ${base.indexStats.disabled}`}
+              </>
+            )}
           </Typography.Paragraph>
+          {/* CAP-48 FR-06 失配告警：换了端点/模型后维度对不上，检索会静默搜不到东西 */}
+          {base && base.indexStats.mismatched > 0 && (
+            <Alert
+              style={{ marginBottom: 12 }}
+              type="warning"
+              showIcon
+              message={`有 ${base.indexStats.mismatched} 条条目的索引与当前端点不匹配`}
+              description={
+                resolvedEndpoint
+                  ? `这些条目是用别的端点（或别的维度）建的索引，当前端点「${resolvedEndpoint.name}」${
+                      resolvedEndpoint.dimensions ? `为 ${resolvedEndpoint.dimensions} 维` : '维度未知'
+                    }，检索时会因维度不同而命中不到。重建后即刻恢复。`
+                  : '当前库没有可用向量端点，条目的历史索引无法用于检索。'
+              }
+              action={
+                <Button size="small" loading={reindexing} onClick={() => onReindexBase(true)}>
+                  重建失配条目
+                </Button>
+              }
+            />
+          )}
           <FitTable
             rowKey="id"
             loading={entriesLoading}
@@ -455,12 +548,36 @@ export default function KnowledgeBaseDetail() {
           </Space.Compact>
           {searchResult && (
             <Space direction="vertical" size={12} style={{ width: '100%', ...pagePaneScrollStyle }}>
-              {!searchResult.vector && (
+              {searchResult.degradedReason === 'DIMENSION_MISMATCH' && (
                 <Alert
                   type="warning"
                   showIcon
-                  message="embedding 未配置，本次检索为关键词 LIKE 降级（score 恒为 0）"
+                  message="维度失配：库内索引与当前端点维度不一致，命中被全部过滤"
+                  description={
+                    resolvedEndpoint
+                      ? `当前端点「${resolvedEndpoint.name}」为 ${resolvedEndpoint.dimensions ?? '未知'} 维。同维度的余弦才有意义，维度不同的向量算出来恒为 0 分，所以本次过滤掉了全部候选。执行「重建全库索引」（条目页右上角）后即可恢复。`
+                      : '当前库没有可用向量端点，历史索引无法参与检索。'
+                  }
+                  action={
+                    <Button size="small" loading={reindexing} onClick={() => onReindexBase(true)}>
+                      重建失配条目
+                    </Button>
+                  }
                 />
+              )}
+              {searchResult.degradedReason === 'NO_EMBEDDING' && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="无可用向量端点，本次检索为关键词 LIKE 降级（score 恒为 0）"
+                  description="到「模型接入」新建一个 Embedding 端点并设为平台默认（或在本库设置里指定端点）后重新索引，即可走向量检索。"
+                />
+              )}
+              {searchResult.degradedReason === 'NONE' && (
+                <Typography.Text type="secondary">
+                  向量检索命中：端点「{resolvedEndpoint?.name ?? '平台默认'}
+                  {resolvedEndpoint?.dimensions ? ` · ${resolvedEndpoint.dimensions} 维` : ''}」
+                </Typography.Text>
               )}
               {searchResult.chunks.length === 0 && (
                 <Typography.Text type="secondary">无命中——换个问法，或先确认条目索引状态为「已索引」。</Typography.Text>
@@ -630,11 +747,35 @@ export default function KnowledgeBaseDetail() {
               />
             </Form.Item>
             <Form.Item
-              name="embeddingModel"
-              label="向量模型"
-              extra="留空用平台默认（devmind.knowledge.embedding.model）"
+              name="modelEndpointId"
+              label="向量端点"
+              extra="留空 = 跟随平台默认端点；指定后本库索引与检索按该端点走（不同模型/维度不能混用同一份索引）"
             >
-              <Input allowClear placeholder="可选，覆盖平台默认 embedding 模型" />
+              <Select
+                allowClear
+                placeholder="跟随平台默认端点"
+                options={endpoints.map(e => ({
+                  value: e.id,
+                  label: `${e.name}（${e.model ?? e.provider}${e.dimensions ? ` · ${e.dimensions} 维` : ' · 未探测维度'}${e.status === 'disabled' ? ' · 已停用' : ''}）`,
+                }))}
+              />
+            </Form.Item>
+            <Form.Item label="当前生效">
+              <Space>
+                {base.modelEndpointName ? (
+                  <Tag color="blue">{base.modelEndpointName}</Tag>
+                ) : (
+                  <Tooltip title="无可用向量端点：索引停用、检索走关键词降级">
+                    <Tag color="orange">未配置向量端点</Tag>
+                  </Tooltip>
+                )}
+                <Typography.Text type="secondary">
+                  {resolvedEndpoint?.dimensions
+                    ? `维度 ${resolvedEndpoint.dimensions}`
+                    : '维度未探测（可在「模型接入」对该端点做一次连接测试）'}
+                </Typography.Text>
+                <Link to="/admin/models">模型接入</Link>
+              </Space>
             </Form.Item>
             <Form.Item name="status" label="状态">
               <Select

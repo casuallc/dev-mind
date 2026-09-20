@@ -16,6 +16,7 @@ import {
   Select,
   Space,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd'
 import { BulbOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
@@ -259,6 +260,37 @@ export default function KnowledgeBaseList() {
     { title: '注入模式', dataIndex: 'injectMode', width: 130, render: injectModeTag },
     { title: '条目数', dataIndex: 'entryCount', width: 80 },
     { title: '分块数', dataIndex: 'chunkCount', width: 80 },
+    {
+      // CAP-48 FR-09 索引健康度摘要：这库到底能不能用一眼可见
+      title: '索引',
+      key: 'indexStats',
+      width: 160,
+      render: (_, r) => {
+        const s = r.indexStats
+        if (!s || r.entryCount === 0) return <Typography.Text type="secondary">-</Typography.Text>
+        const parts: string[] = []
+        if (s.failed > 0) parts.push(`失败 ${s.failed}`)
+        if (s.pending > 0) parts.push(`待索引 ${s.pending}`)
+        if (s.disabled > 0) parts.push(`未启用 ${s.disabled}`)
+        return (
+          <Space size={4} wrap>
+            <Tag color={s.mismatched > 0 || s.failed > 0 ? 'orange' : s.ready === r.entryCount ? 'green' : 'gold'}>
+              {s.ready}/{r.entryCount} 已索引
+            </Tag>
+            {s.mismatched > 0 && (
+              <Tooltip title="索引维度/端点与当前端点不一致，检索会漏命中；进库详情执行「重建失配条目」">
+                <Tag color="red">失配 {s.mismatched}</Tag>
+              </Tooltip>
+            )}
+            {parts.length > 0 && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {parts.join(' · ')}
+              </Typography.Text>
+            )}
+          </Space>
+        )
+      },
+    },
     { title: '状态', dataIndex: 'status', width: 90, render: baseStatusTag },
     { title: '更新时间', dataIndex: 'updatedAt', width: 170, render: (v) => fmtTime(v) },
     {

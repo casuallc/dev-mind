@@ -11,6 +11,7 @@ import type {
   KnowledgeProposalInput,
   KnowledgeSearchResult,
   PreviewResult,
+  ReindexResult,
 } from './types'
 
 // ---------------- 知识库（CAP-44） ----------------
@@ -25,6 +26,12 @@ export const deleteBase = (id: number, force = false) =>
   api.del(`/knowledge/bases/${id}${force ? '?force=true' : ''}`)
 export const listBaseEntries = (id: number) =>
   api.get<KnowledgeEntry[]>(`/knowledge/bases/${id}/entries`)
+
+/** CAP-48 FR-08 全库重建索引；onlyMismatched=true 只重建血缘失配的条目（换端点后的定向修复） */
+export const reindexBase = (id: number, onlyMismatched = false) =>
+  api.post<ReindexResult>(
+    `/knowledge/bases/${id}/reindex?onlyMismatched=${onlyMismatched ? 'true' : 'false'}`,
+  )
 
 export const searchChunks = (kbIds: number[], query: string, topK?: number) =>
   api.post<KnowledgeSearchResult>('/knowledge/search', { kbIds, query, topK })
