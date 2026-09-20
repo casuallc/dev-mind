@@ -29,6 +29,7 @@ class OpenAiCompatChatTest {
     private final AtomicInteger calls = new AtomicInteger();
     private final AtomicReference<String> path = new AtomicReference<>();
     private final AtomicReference<String> auth = new AtomicReference<>();
+    private final AtomicReference<String> upgrade = new AtomicReference<>();
     private final List<String> bodies = new ArrayList<>();
 
     @AfterEach
@@ -45,6 +46,7 @@ class OpenAiCompatChatTest {
             calls.incrementAndGet();
             path.set(ex.getRequestURI().getPath());
             auth.set(ex.getRequestHeaders().getFirst("Authorization"));
+            upgrade.set(ex.getRequestHeaders().getFirst("Upgrade"));
             bodies.add(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
             ex.sendResponseHeaders(status, bytes.length);
@@ -80,6 +82,17 @@ class OpenAiCompatChatTest {
         assertTrue(body.contains("\"role\":\"user\""), body);
         assertTrue(body.contains("__devmind_chat_probe__"), body);
         assertFalse(body.contains("max_tokens"), "不传 max_tokens：部分网关/推理模型会直接 400: " + body);
+    }
+
+    @Test
+    void doesNotOfferH2cUpgrade() throws IOException {
+        // vLLM 0.28 的 uvicorn 见到 Upgrade: h2c 会把 POST body 丢掉（400「body Field required」），
+        // 客户端已钉死 HTTP/1.1——这条断言防回退。embedding 走同一个共享 client（OpenAiCompatHttp），一并覆盖
+        String baseUrl = serve(200, choicesJson("\"可用\""));
+
+        OpenAiCompatChat.chat(options(baseUrl), "hi");
+
+        assertEquals(null, upgrade.get(), "不得带 Upgrade 头（h2c 升级提议会让 uvicorn 丢请求体）");
     }
 
     @Test

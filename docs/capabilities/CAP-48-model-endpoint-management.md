@@ -273,6 +273,7 @@ kind=RERANK 仍 400。绑定守卫（FR-11）落在 knowledge 侧，不新增 HT
 | CHAT 的 `top_k`/`threshold` | 未提 | 忽略并落 null，含**越界值不报错**、update 清历史遗留值 | 该类型无检索语义，报错只增加失败面而不带来收益；但绝不能静默存下一个永远没人读的脏值 |
 | 向量链守卫 | 未提 | knowledge 绑定处 `kind != EMBEDDING` → 400 + 解析结果 `filter(embedding())` + 前端只列 EMBEDDING | 解析链原本不看 kind：放开 CHAT 后一个对话端点会被当向量端点用（拿对话模型名打 `/embeddings`、写脏 `indexed_model` 血缘），且 UI 会把它显示成知识库"当前生效向量端点"——正是 §1/§9 反复收口的「UI 与实际行为不符」 |
 | 表单内「测试连接」取值 | 未提 | 校验仍用 `validateFields(['kind','provider','baseUrl','model'])`，**取值改用 `form.getFieldsValue()`** | `validateFields(nameList)` 只回 nameList 里那几个字段（rc-field-form `getFieldsValue(namePathList)`），把它的返回值当表单取值用，`apiKey`/`timeoutSeconds` 会被静默丢掉：草稿探针不带 `Authorization` → 上游回 401（2026-09-20 真机「PowerShell 能列模型、页面添加报 401」的根因），且编辑时填了新密钥还会去测旧凭据。浏览器里那一跳接口测不到 → 新增 `tests/e2e-model-form-probe.mjs` 钉死 |
+| HTTP 协议版本 | 未提（JDK 默认，先发 h2c 升级提议） | `OpenAiCompatHttp` 钉死 `HTTP_1_1`，chat/embedding 共用 | **vLLM 0.28 的 uvicorn 见到 `Upgrade: h2c` 会把 POST body 丢掉**，回 400「body Field required, input None」（2026-09-20 真机逐字节对照实锤：同一请求去掉升级头即 200）。这些端点本来就是 HTTP/1.1 服务，升级永远协商不上。回归断言：请求不得带 `Upgrade` 头 |
 
 **验收证据**：`tests/cap48_verify.py` **79 项全绿**（含 `tests/fixtures/embedding-mock.py` 假 embedding 端
 与 `tests/fixtures/chat-mock.py` 假对话端；FR-11 段（23 项）插在 F 与 G 之间，因为 G 会停用向量默认端点），

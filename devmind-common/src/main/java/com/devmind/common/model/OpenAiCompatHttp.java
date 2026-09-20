@@ -29,6 +29,11 @@ final class OpenAiCompatHttp {
     static HttpClient http(int timeoutSeconds) {
         return HTTP.computeIfAbsent(timeoutSeconds, t -> HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(t))
+                // 钉死 HTTP/1.1：默认模式会先尝试 h2c 升级（请求带 Upgrade: h2c + HTTP2-Settings），
+                // 而 vLLM 0.28 的 uvicorn 在见到升级提议时会把 POST body 丢掉，
+                // 报 400「body Field required, input None」（2026-09-20 真机实锤：同一请求去掉这三个头即 200）。
+                // 这些 OpenAI 兼容端点本来就是 HTTP/1.1 服务，升级永远协商不上，只会有害。
+                .version(HttpClient.Version.HTTP_1_1)
                 .build());
     }
 
