@@ -11,10 +11,9 @@ import {
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined, SettingOutlined, GithubOutlined, CodeOutlined, RobotOutlined, CloudUploadOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, GithubOutlined, CodeOutlined, RobotOutlined, CloudUploadOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   createDaily,
   createEntry,
@@ -67,7 +66,6 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
  * 个人级页面，不进项目上下文（路由不进 ProjectContextGate）。
  */
 export default function WorklogPage() {
-  const navigate = useNavigate()
   const [view, setView] = useState<View>('entries')
 
   // ---- CAP-41 工作日志空间：WORKLOG 项目 + runner 持久工作区状态条 ----
@@ -457,10 +455,8 @@ export default function WorklogPage() {
           <Button icon={<CodeOutlined />} onClick={() => setReposOpen(true)}>
             仓库订阅
           </Button>
-          {/* 工时/报表/备份偏好已收口到一级导航「设置」页的工作日志视图（原「工时设置」Modal） */}
-          <Button icon={<SettingOutlined />} onClick={() => navigate('/settings/worklog')}>
-            设置
-          </Button>
+          {/* 工时/报表/备份偏好已收口到一级导航「设置」页的工作日志视图（原「工时设置」Modal），
+              此处不再留重复入口；仅「推送远端」的 tooltip 指路 */}
         </Space>
       }
     >
@@ -498,7 +494,7 @@ export default function WorklogPage() {
               <Tooltip
                 title={
                   !remoteUrl
-                    ? '未绑定远程仓库：在「设置-远程仓库备份」里配置后可用'
+                    ? '未绑定远程仓库：在「设置 → 工作日志」的「远程仓库备份」里配置后可用'
                     : !workspace.nodeOnline
                       ? '亲和节点离线，暂不可推送'
                       : `推送到 ${remoteUrl}`
