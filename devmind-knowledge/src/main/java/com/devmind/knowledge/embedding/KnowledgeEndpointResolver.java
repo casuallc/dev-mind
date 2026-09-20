@@ -41,7 +41,10 @@ public class KnowledgeEndpointResolver implements EmbeddingResolver {
     public Resolution resolve(Long kbEndpointId) {
         ModelEndpointProvider provider = endpointProviders.getIfAvailable();
         if (provider != null) {
-            Optional<ModelEndpointView> endpoint = provider.resolve(kbEndpointId);
+            // FR-11：端点表不再只有向量端点（CHAT 可登记），这里必须按 kind 收口——
+            // 否则库级绑了对话端点或它当了某类默认，就会拿对话模型名去打 /embeddings。
+            Optional<ModelEndpointView> endpoint = provider.resolve(kbEndpointId)
+                    .filter(ModelEndpointView::embedding);
             return endpoint.map(this::fromEndpoint).orElseGet(Resolution::unavailable);
         }
         KnowledgeProperties.Embedding cfg = props.getEmbedding();

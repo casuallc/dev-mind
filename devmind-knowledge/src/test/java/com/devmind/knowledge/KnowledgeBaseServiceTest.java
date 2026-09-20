@@ -1,6 +1,8 @@
 package com.devmind.knowledge;
 
+import com.devmind.common.exception.DevMindException;
 import com.devmind.common.model.ModelEndpointProvider;
+import com.devmind.common.model.ModelEndpointView;
 import com.devmind.knowledge.dto.EntryRequest;
 import com.devmind.knowledge.dto.EntryView;
 import com.devmind.knowledge.dto.KnowledgeBaseRequest;
@@ -26,6 +28,7 @@ import org.springframework.context.ApplicationEventPublisher;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -50,6 +53,7 @@ class KnowledgeBaseServiceTest {
     private KnowledgeBaseRepository kbRepo;
     private KnowledgeEntryRepository entryRepo;
     private EmbeddingResolver resolver;
+    private ObjectProvider<ModelEndpointProvider> endpointProviders;
     private ApplicationEventPublisher eventPublisher;
     private long kbSeq = 0;
     private long entrySeq = 0;
@@ -69,7 +73,7 @@ class KnowledgeBaseServiceTest {
         resolver = mock(EmbeddingResolver.class);
         // 默认无可用端点：库视图端点名 null、失配数 0（CAP-48 前的行为）
         lenient().when(resolver.resolve(any())).thenReturn(EmbeddingResolver.Resolution.unavailable());
-        ObjectProvider<ModelEndpointProvider> endpointProviders = mock(ObjectProvider.class);
+        endpointProviders = mock(ObjectProvider.class);
         lenient().when(endpointProviders.getIfAvailable()).thenReturn(null);
 
         when(kbRepo.findByScopeAndInjectModeAndStatus(anyString(), anyString(), anyString())).thenAnswer(inv ->
@@ -211,6 +215,22 @@ class KnowledgeBaseServiceTest {
 
         assertEquals(11L, kbs.get(0).getModelEndpointId(), "缺省不传端点不得清掉已有覆盖");
         assertEquals("新描述", kbs.get(0).getDescription());
+    }
+
+    /** FR-11 守卫：端点表里还有对话端点，知识库只能绑向量端点——绑定时就拒绝，别等索引阶段才炸 */
+    @Test
+    void rejectsBindingChatEndpointAsVectorEndpoint() {
+        ModelEndpointProvider provider = mock(ModelEndpointProvider.class);
+        when(endpointProviders.getIfAvailable()).thenReturn(provider);
+        when(provider.activeEndpoint(7L)).thenReturn(java.util.Optional.of(new ModelEndpointView(
+                7L, "CHAT", ModelEndpointView.PROVIDER_OPENAI, "公司通用模型", "https://api.example.com/v1",
+                null, "gpt-4o-mini", null, 30, 32, null, null)));
+
+        DevMindException ex = assertThrows(DevMindException.class, () -> service.createBase(
+                new KnowledgeBaseRequest("研发库", "d", "global", null, "RAG", 7L, null)));
+
+        assertTrue(ex.getMessage().contains("EMBEDDING"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("公司通用模型"), "错误消息要点名是哪个端点: " + ex.getMessage());
     }
 
     @Test

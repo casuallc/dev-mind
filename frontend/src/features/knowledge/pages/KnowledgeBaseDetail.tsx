@@ -146,10 +146,14 @@ export default function KnowledgeBaseDetail() {
       .catch(() => undefined)
   }, [])
 
+  // CAP-48 FR-11：端点表里还有通用模型（CHAT）端点，知识库侧只认向量端点——
+  // 不过滤就会把一个对话端点显示成"当前生效向量端点"，与后端实际解析到的不符
+  const embeddingEndpoints = endpoints.filter(e => e.kind === 'EMBEDDING')
+
   /** 本库当前实际生效的端点（库级覆盖命中，否则平台默认） */
   const resolvedEndpoint =
-    endpoints.find(e => e.id === base?.modelEndpointId) ??
-    endpoints.find(e => e.isDefault && e.status === 'active') ??
+    embeddingEndpoints.find(e => e.id === base?.modelEndpointId) ??
+    embeddingEndpoints.find(e => e.isDefault && e.status === 'active') ??
     null
 
   useEffect(() => {
@@ -754,7 +758,7 @@ export default function KnowledgeBaseDetail() {
               <Select
                 allowClear
                 placeholder="跟随平台默认端点"
-                options={endpoints.map(e => ({
+                options={embeddingEndpoints.map(e => ({
                   value: e.id,
                   label: `${e.name}（${e.model ?? e.provider}${e.dimensions ? ` · ${e.dimensions} 维` : ' · 未探测维度'}${e.status === 'disabled' ? ' · 已停用' : ''}）`,
                 }))}

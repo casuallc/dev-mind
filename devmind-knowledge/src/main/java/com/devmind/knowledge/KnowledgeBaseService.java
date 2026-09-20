@@ -149,6 +149,26 @@ public class KnowledgeBaseService {
                 && !KnowledgeBaseEntity.INJECT_RAG.equals(req.injectMode())) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "injectMode 必须是 FULL 或 RAG");
         }
+        if (req.modelEndpointId() != null && req.modelEndpointId() > 0) {
+            requireEmbeddingEndpoint(req.modelEndpointId());
+        }
+    }
+
+    /**
+     * CAP-48 FR-11 守卫：向量解析链只认 EMBEDDING 端点。绑定时就拒绝，别等索引阶段拿对话模型名
+     * 去打 {@code /embeddings} 才以 {@code index_error} 的形式暴露（那时血缘里已经落进脏模型名）。
+     *
+     * <p>端点为"不存在/已停用"时不在此判断——那是既有的「解析时回落平台默认端点」路径，不新增失败面。</p>
+     */
+    private void requireEmbeddingEndpoint(long endpointId) {
+        ModelEndpointProvider provider = endpointProviders.getIfAvailable();
+        if (provider == null) {
+            return; // devmind-model 未装配：无端点资源可校验（走 CAP-44 配置化路径）
+        }
+        provider.activeEndpoint(endpointId).filter(v -> !v.embedding()).ifPresent(v -> {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "知识库只能绑定向量（EMBEDDING）端点，「" + v.name() + "」是 " + v.kind() + " 类型");
+        });
     }
 
     private void applyBase(KnowledgeBaseEntity kb, KnowledgeBaseRequest req, boolean create) {
@@ -200,7 +220,11 @@ public class KnowledgeBaseService {
             return resolver.resolve(kb.getModelEndpointId()).available()
                     ? "devmind.knowledge.embedding.*（配置）" : null;
         }
-        return provider.resolve(kb.getModelEndpointId()).map(ModelEndpointView::name).orElse(null);
+        // FR-11：只认向量端点——否则知识库页会把一个对话端点显示成"当前生效向量端点"，
+        // 与实际解析结果（后端拿的是平台默认向量端点）不符
+        return provider.resolve(kb.getModelEndpointId())
+                .filter(ModelEndpointView::embedding)
+                .map(ModelEndpointView::name).orElse(null);
     }
 
     /**

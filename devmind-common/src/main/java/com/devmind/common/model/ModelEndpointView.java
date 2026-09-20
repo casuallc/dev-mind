@@ -13,7 +13,7 @@ package com.devmind.common.model;
  * {@code {baseUrl}/embeddings}；{@code mock} 走确定性哈希向量（测试/E2E 用）。</p>
  *
  * @param id             端点 ID（索引血缘以此记录"用了谁"）
- * @param kind           EMBEDDING / CHAT / RERANK（CAP-48 本期只实现 EMBEDDING）
+ * @param kind           EMBEDDING / CHAT / RERANK（CHAT 自 FR-11 起可登记；RERANK 仍是预留值）
  * @param provider       openai-compatible | mock
  * @param name           展示名
  * @param baseUrl        OpenAI 兼容服务根地址（mock 可空）
@@ -50,6 +50,15 @@ public record ModelEndpointView(
 
     public boolean mock() {
         return PROVIDER_MOCK.equalsIgnoreCase(provider);
+    }
+
+    /**
+     * 是否向量端点。FR-11 起端点表不再只有 EMBEDDING，<b>消费方必须用本方法过滤</b>——
+     * 把 CHAT 端点当向量端点用会拿对话模型名去打 {@code /embeddings}，失败之外还会把
+     * 对话模型名写进索引血缘（{@code indexed_model}）。
+     */
+    public boolean embedding() {
+        return KIND_EMBEDDING.equals(kind);
     }
 
     /** 平台默认端点无库级覆盖时的展示名 */
