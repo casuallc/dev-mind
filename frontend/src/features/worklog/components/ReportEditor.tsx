@@ -1,8 +1,9 @@
-import { Button, Empty, Input, Space, Tag, Typography, message } from 'antd'
+import { Button, Empty, Space, Tag, Typography, message } from 'antd'
 import { RobotOutlined, CheckOutlined, EditOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { fmtTime } from '../../../shared/utils/format'
 import Markdown from '../../../shared/components/Markdown'
+import MarkdownEditor from '../../../shared/components/MarkdownEditor'
 import { showError } from '../../../shared/utils/showError'
 
 interface Props {
@@ -23,7 +24,7 @@ interface Props {
 
 /**
  * CAP-28 报告编辑卡：空白手填 / AI 草稿 → 人工修订 → 确认。
- * 编辑态：左编辑右预览，Markdown 实时渲染；CONFIRMED 后只读 Markdown 渲染（白底，非禁用灰框）。
+ * 编辑态复用知识库 MarkdownEditor（工具栏 + 编辑/预览切换）；CONFIRMED 后只读 Markdown 渲染（白底，非禁用灰框）。
  */
 export default function ReportEditor({
   id,
@@ -133,31 +134,17 @@ export default function ReportEditor({
           )
         }
         const rows = Math.max(6, content.split('\n').length + 1)
-        // 预览框与输入框同高：TextArea 行高约 22px + 上下 padding
-        const boxHeight = rows * 22 + 12
+        // 编辑区高度随内容行数伸缩（下限 220，与知识库编辑器一致的工具栏+切换预览）
+        const boxHeight = Math.max(220, rows * 22 + 12)
         return (
           <div key={f.key} style={{ marginBottom: 16 }}>
             <Typography.Text strong>{f.label}</Typography.Text>
-            <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-              <Input.TextArea
-                style={{ flex: 1, minWidth: 0, fontFamily: 'monospace' }}
-                rows={rows}
+            <div style={{ marginTop: 8 }}>
+              <MarkdownEditor
+                height={boxHeight}
                 value={content}
-                onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
+                onChange={(v) => setValues({ ...values, [f.key]: v })}
               />
-              <div
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  height: boxHeight,
-                  overflow: 'auto',
-                  border: '1px solid #d9d9d9',
-                  borderRadius: 6,
-                  padding: '4px 11px',
-                }}
-              >
-                <Markdown content={content} />
-              </div>
             </div>
           </div>
         )
