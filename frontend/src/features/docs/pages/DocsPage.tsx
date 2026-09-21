@@ -29,6 +29,7 @@ import type { DocInput, DocKind, DocMeta, DocStatus, DocTemplate } from '../type
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
+import MarkdownEditor from '../../../shared/components/MarkdownEditor'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -85,8 +86,7 @@ export default function DocsPage() {
     }
   }
 
-  const onCreate = async () => {
-    const v = await createForm.validateFields()
+  const onCreate = async (v: DocInput & { template?: string }) => {
     try {
       const created = await createDoc({
         kind: v.kind,
@@ -217,14 +217,20 @@ export default function DocsPage() {
         }}
       />
 
-      <Drawer title="新建文档" open={createOpen} onClose={() => setCreateOpen(false)} width={640}
+      <Drawer
+        title="新建文档"
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        width={720}
+        destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button onClick={() => setCreateOpen(false)}>取消</Button>
-            <Button type="primary" onClick={onCreate}>创建</Button>
+            <Button type="primary" onClick={() => createForm.submit()}>创建</Button>
           </Space>
-        }>
-        <Form form={createForm} labelCol={{ span: 5 }} wrapperCol={{ span: 18 }}>
+        }
+      >
+        <Form form={createForm} layout="vertical" onFinish={onCreate}>
           <Form.Item name="kind" label="类型" rules={[{ required: true }]}>
             <Select options={Object.entries(KIND_LABEL).map(([value, label]) => ({ value, label }))} />
           </Form.Item>
@@ -241,7 +247,7 @@ export default function DocsPage() {
             <Select mode="tags" placeholder="回车添加标签" open={false} />
           </Form.Item>
           <Form.Item name="contentMd" label="内容" rules={[{ required: true, message: '请填写内容' }]}>
-            <Input.TextArea rows={10} placeholder="Markdown 内容（选择模板后自动预填）" />
+            <MarkdownEditor height={320} placeholder="Markdown 内容（选择模板后自动预填）" />
           </Form.Item>
         </Form>
       </Drawer>
