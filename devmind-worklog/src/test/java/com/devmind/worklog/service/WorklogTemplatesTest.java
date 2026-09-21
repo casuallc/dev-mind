@@ -45,4 +45,25 @@ class WorklogTemplatesTest {
         assertTrue(WorklogTemplates.DEFAULT_WEEKLY.contains(ReportService.PLAN_HEADING));
         assertFalse(WorklogTemplates.DEFAULT_DAILY.contains("{{weekRange}}"), "日报模板不应含周报占位符");
     }
+
+    @Test
+    void 内置模板锁定写作口径() {
+        // 口径=成稿口吻的唯一来源（模板即 prompt）：改坏会静默换风格，故钉死关键约定
+        for (String rule : new String[]{"有序列表", "commit sha", "项目支持：", "工时合计"}) {
+            assertTrue(WorklogTemplates.DEFAULT_DAILY.contains(rule), "日报模板缺写作约定: " + rule);
+        }
+        for (String rule : new String[]{"有序列表", "计划外工作", "下周计划"}) {
+            assertTrue(WorklogTemplates.DEFAULT_WEEKLY.contains(rule), "周报模板缺写作约定: " + rule);
+        }
+    }
+
+    @Test
+    void 周报计划外工作块必须落在上周总结内() {
+        // 用 lastIndexOf：模板开头交代「## 下周计划」标题约定的那句在分节指令之前，不能当分节位置
+        int summary = WorklogTemplates.DEFAULT_WEEKLY.indexOf(ReportService.SUMMARY_HEADING);
+        int block = WorklogTemplates.DEFAULT_WEEKLY.indexOf("计划外工作");
+        int plan = WorklogTemplates.DEFAULT_WEEKLY.lastIndexOf(ReportService.PLAN_HEADING);
+        assertTrue(summary < block && block < plan,
+                "计划外工作块须在上周总结节内，否则会被 splitWeekly 切进下周计划");
+    }
 }
