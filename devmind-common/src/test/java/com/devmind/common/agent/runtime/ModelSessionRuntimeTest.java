@@ -127,11 +127,14 @@ class ModelSessionRuntimeTest {
     };
 
     /** 装配固定 messages 的 TurnSupplier（记录收到的 beforeSeq 供断言） */
+    private final List<Integer> recentSizes = new CopyOnWriteArrayList<>();
+
     private ModelSessionRuntime runtime(String baseUrl, ModelSessionRuntime.StreamTuning tuning) {
         ModelSessionRuntime rt = new ModelSessionRuntime("chat1",
                 new ModelSessionRuntime.ModelTarget(baseUrl, KEY, "m1", 5),
-                (userText, beforeSeq) -> {
+                (userText, beforeSeq, recent) -> {
                     beforeSeqs.add(beforeSeq);
+                    recentSizes.add(recent.size());
                     return List.of(OpenAiCompatChatStream.Message.system("SYS"),
                             OpenAiCompatChatStream.Message.user(userText));
                 },
@@ -211,6 +214,11 @@ class ModelSessionRuntimeTest {
         SessionEvent user = ofType("user").get(0);
         assertEquals(List.of(user.seq()), beforeSeqs,
                 "装配用 beforeSeq 必须是本轮 user 事件的 seq——否则本轮提问会在历史里出现两次");
+        // 环形缓冲原样交给装配方（含本轮已发布的 user + 内核 transition 写的 state，共 2 条；
+        // 装配方按 seq < beforeSeq 自己过滤）。交给它而不是让它只读 DB：事件是 200ms 批量落库的，
+        // 用户紧接着上一轮提问时，上一轮的回答很可能还在缓冲里没进 DB。
+        assertEquals(List.of(2), recentSizes, "环形缓冲快照要交给装配方");
+        assertEquals(1, recentSizes.size(), "一轮只装配一次");
     }
 
     @Test

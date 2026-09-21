@@ -56,6 +56,12 @@ devmind:
     event-flush-ms: 200
     max-concurrent: 4
     oneshot-permission-mode: plan    # CAP-28 one-shot 总结会话专用（只读任务，不复用上方 acceptEdits）
+  chat:                            # CAP-30 通用问答（此处只列常调项；其余键用代码默认值）
+    # CAP-49 模型执行体（服务端直连已接入的 kind=CHAT 端点，不需要 runner 节点）
+    max-concurrent-model: 8        # 并发生成上限；与 Agent 分账，只数"正在生成"的（空闲不占额度）
+    stream-flush-ms: 120           # 增量合并窗口：攒够时间或字数才发一条 text_delta
+    stream-flush-chars: 24
+    answer-max-chars: 100000       # 单轮回答上限，超出截断并在 result 里标 truncated
   attachment:                      # CAP-32 公共附件管理
     root-dir: ""                   # 空=${user.dir}/data/attachments
     max-size-mb: 20                # 单附件上限（同时受 spring.servlet.multipart 64MB 约束）

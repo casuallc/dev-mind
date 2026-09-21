@@ -18,6 +18,11 @@ import org.hibernate.type.SqlTypes;
 @Table(name = "chat_sessions")
 public class ChatSessionEntity {
 
+    /** 执行体：runner 上的 claude CLI（CAP-30 原路径，默认） */
+    public static final String EXECUTOR_AGENT = "AGENT";
+    /** 执行体：服务端直连已接入的 CHAT 端点（CAP-49，无节点、无进程） */
+    public static final String EXECUTOR_MODEL = "MODEL";
+
     @Id
     @Column(length = 32)
     private String id;
@@ -57,6 +62,21 @@ public class ChatSessionEntity {
     /** CAP-46 FR-01：绑定的知识库 id（可空 = 普通问答） */
     @Column(name = "knowledge_base_id")
     private Long knowledgeBaseId;
+
+    /**
+     * CAP-49：执行体（AGENT / MODEL）。<b>可空 = AGENT</b>——沿用本表加列即可空的先例，
+     * 绕开 NOT NULL DEFAULT 在 H2/PG/MySQL 上的加列差异与 @ColumnDefault 坑。
+     */
+    @Column(length = 16)
+    private String executor;
+
+    /**
+     * CAP-49：模型执行体绑定的端点 id（仅 MODEL 有值，AGENT 恒空）。
+     * 存<b>创建时解析出的具体端点</b>而非"跟随默认"——默认端点日后被换掉时，历史会话的模型身份
+     * 不该漂移（可复现、可审计）。
+     */
+    @Column(name = "model_endpoint_id")
+    private Long modelEndpointId;
 
     /** CAP-33 FR-07：上下文装配快照（清单 JSON，无快照 = null） */
     @Lob
@@ -116,4 +136,13 @@ public class ChatSessionEntity {
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
     public Instant getFinishedAt() { return finishedAt; }
     public void setFinishedAt(Instant finishedAt) { this.finishedAt = finishedAt; }
+    public String getExecutor() { return executor; }
+    public void setExecutor(String executor) { this.executor = executor; }
+    public Long getModelEndpointId() { return modelEndpointId; }
+    public void setModelEndpointId(Long modelEndpointId) { this.modelEndpointId = modelEndpointId; }
+
+    /** CAP-49：是否模型执行体（空执行体 = AGENT，历史行同此口径）。 */
+    public boolean isModel() {
+        return EXECUTOR_MODEL.equals(executor);
+    }
 }

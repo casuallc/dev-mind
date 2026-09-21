@@ -19,6 +19,7 @@ import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.SessionEvent;
 import com.devmind.common.agent.exec.ContextManifest;
 import com.devmind.common.agent.runtime.AbstractSessionRuntime;
+import com.devmind.common.agent.runtime.ModelSessionRuntime;
 import com.devmind.common.agent.runtime.RemoteSessionRuntime;
 import com.devmind.common.agent.runtime.RuntimeListener;
 import com.devmind.common.agent.runtime.RuntimeSettings;
@@ -28,6 +29,8 @@ import com.devmind.common.attachment.AttachmentContentResolver;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.knowledge.KnowledgeRetriever;
+import com.devmind.common.model.ModelEndpointProvider;
+import com.devmind.common.model.ModelEndpointView;
 import com.devmind.common.notification.NotificationEvent;
 import com.devmind.notification.NotificationPublisher;
 import jakarta.annotation.PostConstruct;
@@ -63,6 +66,18 @@ import java.util.function.Consumer;
  *
  * <p>沙箱 cwd：runner 侧 &lt;workspaceRoot&gt;/_chat/&lt;chatId&gt;（launch 帧 kind:"chat"），
  * 服务端不再建本地目录。</p>
+ *
+ * <p>CAP-49 执行体分流：{@code executor=MODEL} 时走 {@link ModelSessionRuntime}——服务端直连
+ * 一个已接入的 {@code kind=CHAT} 端点，<b>不需要任何节点在线、也不拉起任何进程</b>（这是 CAP-34
+ * "服务端零执行"的收敛性例外：只有出站 HTTP）。与 AGENT 的四点差异：</p>
+ * <ul>
+ *   <li><b>状态不以内存为准</b>：多轮上下文每轮从 chat_events 重建，运行时可以随时重挂
+ *       （{@link #requireOrReattachRuntime}）——重启后模型问答仍可继续提问，这是 CLI 会话做不到的。</li>
+ *   <li><b>无授权、无挂起</b>：没有进程可以挂起来，也没有授权请求会产生（两个动作都 409）。</li>
+ *   <li><b>容量分账</b>：AGENT 数"活动会话"（每个都占 runner 进程），MODEL 只数"正在生成"的。</li>
+ *   <li><b>失败不判死</b>：端点这一轮没成只落 error+result{isError}，会话留在 WAITING_INPUT
+ *       等用户改完重试（模型会话是"只有人让它结束"的会话）。</li>
+ * </ul>
  */
 @Service
 public class ChatManagerService {
@@ -85,9 +100,21 @@ public class ChatManagerService {
     private final ObjectProvider<ChatContextPreparer> contextPreparerProvider;
     /** CAP-46：知识库检索（devmind-knowledge 装配时可用）；绑库问答未装配即 409 */
     private final ObjectProvider<KnowledgeRetriever> retrieverProvider;
+    /** CAP-49：模型端点解析（devmind-model 装配时可用）；未装配即无法建模型问答（409） */
+    private final ObjectProvider<ModelEndpointProvider> endpointProvider;
 
     /** 运行中问答注册表（本地/远程统一句柄）。 */
     private final Map<String, SessionHandle> runtimes = new ConcurrentHashMap<>();
+
+    /** CAP-49：模型执行体的 system 提示（多轮装配每轮复用；不落事件流，不会进用户可见文本） */
+    private static final String MODEL_SYSTEM_PROMPT = """
+            你是 Dev-Mind 平台的通用问答助手，直接回答用户的问题，不调用任何工具。
+            用中文回答，简洁、准确；不确定就明确说不确定，不要编造。
+            这是多轮对话，请保持上下文连贯。""";
+
+    /** 订阅路径可重挂的状态（活动态）：终态会话不该因为"被打开过"就在内存里留一个运行时 */
+    private static final List<String> LIVE_STATUSES = List.of(SessionState.RUNNING.name(),
+            SessionState.WAITING_INPUT.name(), SessionState.WAITING_AUTH.name());
 
     public ChatManagerService(IdentityService identityService,
                               NotificationPublisher notificationPublisher,
@@ -99,7 +126,8 @@ public class ChatManagerService {
                               ObjectProvider<AgentNodeConnector> connectorProvider,
                               ObjectProvider<AttachmentContentResolver> attachmentResolverProvider,
                               ObjectProvider<ChatContextPreparer> contextPreparerProvider,
-                              ObjectProvider<KnowledgeRetriever> retrieverProvider) {
+                              ObjectProvider<KnowledgeRetriever> retrieverProvider,
+                              ObjectProvider<ModelEndpointProvider> endpointProvider) {
         this.identityService = identityService;
         this.notificationPublisher = notificationPublisher;
         this.chatRepo = chatRepo;
@@ -111,12 +139,14 @@ public class ChatManagerService {
         this.attachmentResolverProvider = attachmentResolverProvider;
         this.contextPreparerProvider = contextPreparerProvider;
         this.retrieverProvider = retrieverProvider;
+        this.endpointProvider = endpointProvider;
         this.settings = props.toRuntimeSettings();
     }
 
     private final RuntimeListener listener = new RuntimeListener() {
         @Override
         public void onStateChange(String sessionId, SessionState state, SessionEvent stateEvent) {
+            persistModelLiveState(sessionId, state);
             switch (state) {
                 case WAITING_AUTH -> notificationPublisher.publish(NotificationEvent.of(
                         "WAITING_AUTH", sessionId, "问答需要授权", stateEvent.content()));
@@ -139,10 +169,42 @@ public class ChatManagerService {
         }
     };
 
+    /**
+     * CAP-49：把模型执行体的实时状态落库（RUNNING=正在生成 / WAITING_INPUT=空闲可续问）。
+     *
+     * <p>模型执行体没有进程可探测，DB 状态就是唯一凭据，两个消费方都靠它：重启自处
+     * （RUNNING → 生成已中断；WAITING_INPUT → 留着懒重挂）与端点引用保护（只锁"正在生成"的）。</p>
+     *
+     * <p>只写 status/updated_at（批量 UPDATE）：状态变更发生在生成线程上，且问答删除的事务里
+     * 若正好完成一轮生成，整实体 save 会把已删除的行插回来。AGENT 会话不在此路径——它的状态
+     * 由 onExit / updateStatus 写。</p>
+     */
+    private void persistModelLiveState(String sessionId, SessionState state) {
+        SessionHandle h = runtimes.get(sessionId);
+        if (!(h instanceof ModelSessionRuntime)) {
+            return;
+        }
+        if (state != SessionState.RUNNING && state != SessionState.WAITING_INPUT) {
+            return;
+        }
+        try {
+            chatRepo.updateLiveStatus(sessionId, state.name(), Instant.now());
+        } catch (Exception e) {
+            log.warn("模型问答实时状态落库失败: chat={} state={} err={}", sessionId, state, e.getMessage());
+        }
+    }
+
     // ---------------- 创建 / 生命周期 ----------------
 
     public ChatView create(CreateChatRequest req) {
-        ensureCapacity();
+        String executor = executorOf(req.executor());
+        boolean modelExecutor = ChatSessionEntity.EXECUTOR_MODEL.equals(executor);
+        if (modelExecutor) {
+            rejectModelConflicts(req);
+            ensureModelCapacity();
+        } else {
+            ensureCapacity();
+        }
         String id = shortId();
 
         // CAP-33 FR-05 场景预设：模型/权限/节点优先级 = 显式 > 场景 > 配置/平台默认
@@ -169,6 +231,11 @@ public class ChatManagerService {
             kbOverview = retriever.overview(req.knowledgeBaseId())
                     .orElseThrow(() -> new DevMindException(ErrorCode.BAD_REQUEST,
                             "知识库不存在或已归档: " + req.knowledgeBaseId()));
+        }
+
+        // CAP-49：模型执行体自成一格——无节点路由、无场景装配、无 launch，端点即执行环境
+        if (modelExecutor) {
+            return createModelChat(id, req, kbOverview);
         }
 
         // CAP-34 FR-02：取消本机问答——路由 = 显式 > 场景预设 > 平台默认，皆无命中 409，不存在本机回落
@@ -222,6 +289,7 @@ public class ChatManagerService {
         ent.setPermissionMode(pm);
         ent.setScenarioCode(preset != null ? req.scenarioCode().strip() : null);
         ent.setKnowledgeBaseId(req.knowledgeBaseId());
+        ent.setExecutor(ChatSessionEntity.EXECUTOR_AGENT);
         ent.setContextManifestJson(prepared != null ? prepared.snapshotJson() : null);
         ent.setInitialPrompt(req.message());
         ent.setCreatedBy(identityService.currentActor());
@@ -235,6 +303,41 @@ public class ChatManagerService {
         notificationPublisher.publish(NotificationEvent.of("CHAT_STARTED", id, "问答已启动",
                 preview(req.message(), 80)));
         return toView(ent, remoteRt.state());
+    }
+
+    /**
+     * CAP-49：建模型执行体问答——解析端点 → 装运行时 → 落库 → 起首轮。
+     * 全程无 launch、无节点通知（本就无节点参与），首轮与后续轮走同一条生成路径。
+     */
+    private ChatView createModelChat(String id, CreateChatRequest req, KnowledgeRetriever.KbOverview kbOverview) {
+        ModelEndpointView endpoint = resolveModelEndpoint(req.modelEndpointId());
+        ModelSessionRuntime rt = newModelRuntime(id, endpoint, modelSystemPrompt(kbOverview));
+        runtimes.put(id, rt);
+
+        Instant now = Instant.now();
+        ChatSessionEntity ent = new ChatSessionEntity();
+        ent.setId(id);
+        ent.setTitle(titleOf(req.message()));
+        ent.setStatus(SessionState.RUNNING.name());
+        ent.setAgentNodeId(null);                     // 模型执行体不进节点路由（无节点也能用）
+        ent.setExecutor(ChatSessionEntity.EXECUTOR_MODEL);
+        ent.setModelEndpointId(endpoint.id());        // 钉住具体端点：默认端点日后被换掉，历史会话身份不漂移
+        ent.setModel(endpoint.model());               // 模型身份来自端点，不取 req.model
+        ent.setPermissionMode(null);
+        ent.setScenarioCode(null);
+        ent.setKnowledgeBaseId(req.knowledgeBaseId());
+        ent.setInitialPrompt(req.message());
+        ent.setCreatedBy(identityService.currentActor());
+        ent.setCreatedAt(now);
+        ent.setUpdatedAt(now);
+        // 先落库再起首轮：首轮立刻会写 RUNNING/WAITING_INPUT 实时状态，行必须先存在
+        chatRepo.save(ent);
+
+        rt.startFirstTurn(req.message());
+
+        notificationPublisher.publish(NotificationEvent.of("CHAT_STARTED", id, "问答已启动",
+                preview(req.message(), 80)));
+        return toView(ent, liveState(ent));
     }
 
     /** 个人问答列表：当前用户 + 时间倒序，可选状态过滤。 */
@@ -280,7 +383,21 @@ public class ChatManagerService {
     /** CAP-32：注入用户输入（可带图片附件）。附件经 AttachmentContentResolver 解析为 base64 下发 claude。 */
     public void input(String id, String text, List<ImageRef> images) {
         ChatSessionEntity ent = requireOwned(id);
-        requireRuntime(id).injectInput(withKnowledgeContext(ent, text), resolveImages(images));
+        if (ent.isModel() && images != null && !images.isEmpty()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "模型执行体不支持图片输入：请去掉图片，或改用智能体（Agent）执行体");
+        }
+        if (ent.isModel()) {
+            // 内存里的 runtime 拿的是创建时的 baseUrl/apiKey/model 快照：端点被停用或删除后它会照旧发出去
+            // （模型服务还在跑的话甚至"成功"了）——用户刚删掉的东西不该继续被悄悄使用。
+            // 故每轮提问都核一次端点，把这种静默失效变成明确的 409。只管提问路径：
+            // 读历史（subscribe）与收口（finish）不该因为端点没了就打不开。
+            // 注意核的是"端点还在不在"，用的仍是快照——模型身份钉住不漂移；要重读端点（如换了密钥）
+            // 走 resume（它会重建 runtime）。
+            requirePinnedEndpoint(ent);
+        }
+        // CAP-46 每轮检索注入对两条执行体同样生效（模型执行体也只是"拼个前缀再发出去"）
+        requireOrReattachRuntime(id, ent).injectInput(withKnowledgeContext(ent, text), resolveImages(images));
     }
 
     /**
@@ -339,12 +456,20 @@ public class ChatManagerService {
     }
 
     public void authorize(String id, boolean accepted, String scope, String requestId) {
-        requireOwned(id);
+        ChatSessionEntity ent = requireOwned(id);
+        if (ent.isModel()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "模型执行体没有授权概念（不会产生授权请求），无法受理授权操作");
+        }
         requireRuntime(id).authorize(requestId, accepted, scope);
     }
 
     public ChatView suspend(String id) {
-        requireOwned(id);
+        ChatSessionEntity ent = requireOwned(id);
+        if (ent.isModel()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "模型执行体没有进程与工作区，不支持挂起：请直接终止，或结束当前回答后继续对话");
+        }
         SessionHandle rt = requireRuntime(id);
         rt.suspend();
         updateStatus(id, SessionState.SUSPENDED, null);
@@ -356,6 +481,10 @@ public class ChatManagerService {
         SessionState cur = SessionState.valueOf(ent.getStatus());
         if (cur.isActive()) {
             throw new DevMindException(ErrorCode.CONFLICT, "问答正在运行中，无需恢复");
+        }
+        // CAP-49：模型执行体的"继续对话"不依赖 CLI 会话记录与节点——重建运行时即可
+        if (ent.isModel()) {
+            return resumeModelChat(ent);
         }
         // 终态恢复依赖 claude --resume 续接对话历史；无 CLI 会话记录的历史数据只能全新开始，不允许
         if (cur != SessionState.SUSPENDED
@@ -397,22 +526,44 @@ public class ChatManagerService {
     }
 
     public ChatView kill(String id) {
-        requireOwned(id);
+        ChatSessionEntity ent = requireOwned(id);
         SessionHandle rt = requireRuntime(id);
         rt.kill();
+        // kill 不走 onExit（能力层自己写终态），运行时不会自我摘除——手动摘掉，别让死句柄常驻内存
+        runtimes.remove(id);
         updateStatus(id, SessionState.TERMINATED, "已手动终止");
-        return get(id);
+        return toView(chatRepo.findById(id).orElse(ent), SessionState.TERMINATED);
     }
 
     /** 优雅结束：关 stdin，agent 读完后自然退出 → DONE/FAILED。 */
     public void finish(String id) {
-        requireOwned(id);
-        requireRuntime(id).finish();
+        ChatSessionEntity ent = requireOwned(id);
+        requireOrReattachRuntime(id, ent).finish();
+    }
+
+    /**
+     * CAP-49「停止生成」：中断在跑的模型回合，保留已产出的部分正文与会话（随后可继续提问）。
+     *
+     * <p>只对模型执行体开放：Agent 执行体没有"中断一轮"的语义（claude 按回合输出），
+     * 要停就结束/终止会话，故这里 409 而不是"悄悄转成 finish"。</p>
+     */
+    public ChatView interrupt(String id) {
+        ChatSessionEntity ent = requireOwned(id);
+        SessionHandle rt = requireOrReattachRuntime(id, ent);
+        if (!(rt instanceof ModelSessionRuntime model)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "只有模型执行体的问答支持中断生成：Agent 执行体的回答请用「结束会话」");
+        }
+        if (!model.interruptTurn()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "当前没有正在生成的回答");
+        }
+        return toView(chatRepo.findById(id).orElse(ent), SessionState.RUNNING);
     }
 
     /** 订阅实时事件流，返回回放（环形缓冲快照）。 */
     public List<SessionEvent> subscribe(String id, Consumer<SessionEvent> consumer) {
-        return requireRuntime(id).subscribe(consumer);
+        ChatSessionEntity ent = requireOwned(id);
+        return requireSubscribeRuntime(id, ent).subscribe(consumer);
     }
 
     public void unsubscribe(String id, Consumer<SessionEvent> consumer) {
@@ -445,9 +596,27 @@ public class ChatManagerService {
         List<String> stale = List.of(SessionState.RUNNING.name(), SessionState.WAITING_INPUT.name(),
                 SessionState.WAITING_AUTH.name());
         int n = 0;
+        int modelStuck = 0;
         for (ChatSessionEntity ent : chatRepo.findAll()) {
-            if (stale.contains(ent.getStatus())
-                    && (ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank())) {
+            if (!stale.contains(ent.getStatus())) {
+                continue;
+            }
+            // CAP-49 模型执行体（agent_node_id 恒空，不能按上方判据判死）：
+            // 空闲的（WAITING_INPUT）原样留着——它没有进程可失去，历史在 DB，下次提问会自动重挂；
+            // 生成中的（RUNNING）才是真被打断：这一轮 HTTP 流随旧实例没了，标 TERMINATED 让用户续问
+            if (ent.isModel()) {
+                if (SessionState.WAITING_INPUT.name().equals(ent.getStatus())) {
+                    continue;
+                }
+                ent.setStatus(SessionState.TERMINATED.name());
+                ent.setSummary("服务重启，进行中的生成已中断（可继续对话）");
+                ent.setFinishedAt(Instant.now());
+                ent.setUpdatedAt(Instant.now());
+                chatRepo.save(ent);
+                modelStuck++;
+                continue;
+            }
+            if (ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank()) {
                 ent.setStatus(SessionState.TERMINATED.name());
                 ent.setSummary("服务重启，问答已终止（进程随旧实例退出）");
                 ent.setFinishedAt(Instant.now());
@@ -456,8 +625,9 @@ public class ChatManagerService {
                 n++;
             }
         }
-        if (n > 0) {
-            log.info("启动恢复完成，{} 个遗留活动问答已标记 TERMINATED（远程问答留待 hello 对账）", n);
+        if (n > 0 || modelStuck > 0) {
+            log.info("启动恢复完成，{} 个遗留活动问答已标记 TERMINATED（远程问答留待 hello 对账；"
+                    + "模型问答 {} 个生成中被打断，空闲的留待懒重挂）", n, modelStuck);
         }
     }
 
@@ -585,11 +755,29 @@ public class ChatManagerService {
         }
     }
 
+    /** Agent 执行体配额：只数 Agent 会话（每个都占一个 runner 进程；模型会话空闲时不占任何外部资源）。 */
     private void ensureCapacity() {
-        long active = runtimes.values().stream().filter(r -> r.state().isActive()).count();
+        long active = runtimes.values().stream()
+                .filter(r -> !(r instanceof ModelSessionRuntime))
+                .filter(r -> r.state().isActive())
+                .count();
         if (active >= props.getMaxConcurrent()) {
             throw new DevMindException(ErrorCode.TOO_MANY_SESSIONS,
                     "并发问答数已达上限 " + props.getMaxConcurrent());
+        }
+    }
+
+    /**
+     * CAP-49 模型执行体配额：只数<b>正在生成</b>的（空闲的模型问答不该挤占额度——
+     * 4 个闲置模型问答把平台卡到无法新建问答，是把额度用错了地方）。
+     */
+    private void ensureModelCapacity() {
+        long generating = runtimes.values().stream()
+                .filter(r -> r instanceof ModelSessionRuntime m && m.generating())
+                .count();
+        if (generating >= props.getMaxConcurrentModel()) {
+            throw new DevMindException(ErrorCode.TOO_MANY_SESSIONS,
+                    "并发模型问答数已达上限 " + props.getMaxConcurrentModel());
         }
     }
 
@@ -604,6 +792,193 @@ public class ChatManagerService {
     private String platformDefaultNodeId() {
         AgentNodeConnector connector = connectorProvider.getIfAvailable();
         return connector != null ? connector.defaultNodeId() : null;
+    }
+
+    // ---------------- CAP-49 模型执行体 ----------------
+
+    /** 执行体解析：空/未传 = AGENT（历史行同口径）；未知值 400，不静默当 AGENT 用。 */
+    private static String executorOf(String requested) {
+        if (!notBlank(requested)) {
+            return ChatSessionEntity.EXECUTOR_AGENT;
+        }
+        if (ChatSessionEntity.EXECUTOR_AGENT.equalsIgnoreCase(requested)) {
+            return ChatSessionEntity.EXECUTOR_AGENT;
+        }
+        if (ChatSessionEntity.EXECUTOR_MODEL.equalsIgnoreCase(requested)) {
+            return ChatSessionEntity.EXECUTOR_MODEL;
+        }
+        throw new DevMindException(ErrorCode.BAD_REQUEST,
+                "未知执行体: " + requested + "（可选 AGENT / MODEL）");
+    }
+
+    /**
+     * 模型执行体下 Agent 专有字段一律 400，不静默忽略：用户以为"选了场景"而模型执行体拿不到
+     * 场景资产（资产靠 runner manifest 物化），是最坏的一种失败——上下文悄悄没了。
+     */
+    private static void rejectModelConflicts(CreateChatRequest req) {
+        if (notBlank(req.scenarioCode())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "模型执行体不支持场景问答（场景资产需 runner 物化）：请不选场景，或改用 Agent 执行体");
+        }
+        if (notBlank(req.agentNodeId())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "模型执行体不使用执行节点（无节点也可用）：请清空 agentNodeId");
+        }
+        if (notBlank(req.permissionMode())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "模型执行体无权限模式概念（不执行工具）：请清空 permissionMode");
+        }
+        if (notBlank(req.model())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "模型执行体的模型名来自所选端点：请清空 model（指定 CLI 模型请用 Agent 执行体）");
+        }
+    }
+
+    /** 创建路径解析端点：显式 id 校验（存在/active/CHAT 类型），未给走平台默认 CHAT 端点（无则 409）。 */
+    private ModelEndpointView resolveModelEndpoint(Long endpointId) {
+        ModelEndpointProvider provider = requireEndpointProvider();
+        if (endpointId != null) {
+            ModelEndpointView ep = provider.activeEndpoint(endpointId)
+                    .orElseThrow(() -> new DevMindException(ErrorCode.BAD_REQUEST,
+                            "模型端点不存在或已停用: " + endpointId));
+            if (!ep.chat()) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "该端点不是通用对话端点（kind=" + ep.kind() + "），不能用于问答");
+            }
+            return requireCompleteEndpoint(ep);
+        }
+        // 显式未给 = 跟随平台默认；没配默认就是没配（不回落向量端点，那是必坏的组合）
+        return requireCompleteEndpoint(provider.defaultEndpoint(ModelEndpointView.KIND_CHAT)
+                .orElseThrow(() -> new DevMindException(ErrorCode.CONFLICT,
+                        "未配置通用对话端点：请在「后台 → 模型接入」登记 kind=CHAT 的端点并设为默认，"
+                                + "或在新建时选择端点")));
+    }
+
+    /**
+     * 重挂路径必须用会话当初<b>钉住</b>的那个端点：默认端点日后被换掉/删除，不该让历史会话
+     * 悄悄换一个模型继续说话（对话历史与新模型不匹配，错误比 409 隐蔽得多）。
+     */
+    private ModelEndpointView requirePinnedEndpoint(ChatSessionEntity ent) {
+        ModelEndpointProvider provider = requireEndpointProvider();
+        Long endpointId = ent.getModelEndpointId();
+        if (endpointId == null) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "该问答未记录模型端点（历史数据），无法继续对话：请新建问答");
+        }
+        return requireCompleteEndpoint(provider.activeEndpoint(endpointId)
+                .orElseThrow(() -> new DevMindException(ErrorCode.CONFLICT,
+                        "该问答绑定的模型端点已停用或删除（#" + endpointId + "），无法继续对话："
+                                + "请在后台恢复该端点，或新建问答")));
+    }
+
+    /** mock provider 之类没配 baseUrl/model 的端点在这里拦住——放过去只会在调用时报难懂的错。 */
+    private static ModelEndpointView requireCompleteEndpoint(ModelEndpointView ep) {
+        if (!notBlank(ep.baseUrl()) || !notBlank(ep.model())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "模型端点未配置完整（baseUrl/model 为空），无法用于问答: " + ep.display());
+        }
+        return ep;
+    }
+
+    private ModelEndpointProvider requireEndpointProvider() {
+        ModelEndpointProvider provider = endpointProvider.getIfAvailable();
+        if (provider == null) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "模型模块未装配，无法使用模型执行体：请改用 Agent 执行体，或启用 devmind-model 模块");
+        }
+        return provider;
+    }
+
+    /** 装配模型运行时（创建与懒重挂共用一段：两边参数一致，才不会出现"重挂后行为不一样"）。 */
+    private ModelSessionRuntime newModelRuntime(String id, ModelEndpointView ep, String systemPrompt) {
+        ModelSessionRuntime.StreamTuning tuning = new ModelSessionRuntime.StreamTuning(
+                props.getStreamFlushMs(), props.getStreamFlushChars(), props.getAnswerMaxChars());
+        return new ModelSessionRuntime(id,
+                new ModelSessionRuntime.ModelTarget(ep.baseUrl(), ep.apiKey(), ep.model(), ep.timeoutSeconds()),
+                new ChatModelTurnSupplier(id, systemPrompt, eventRepo),
+                tuning, eventSaver, listener, settings);
+    }
+
+    /** 模型执行体的 system：固定提示 + 绑库时的库概览（与 Agent 的启动注入同一段文案，不许两份漂移）。 */
+    private static String modelSystemPrompt(KnowledgeRetriever.KbOverview kb) {
+        if (kb == null) {
+            return MODEL_SYSTEM_PROMPT;
+        }
+        return MODEL_SYSTEM_PROMPT + "\n\n" + overviewSection(kb)
+                + "用户消息前缀里的 <knowledge-context> 是自动检索到的参考资料，据此作答即可，"
+                + "不要在回答里复述出处标记。\n";
+    }
+
+    /** 重挂时的库概览：库被删/归档/检索异常就按无库继续（与 CAP-46 的降级口径一致，不阻塞对话）。 */
+    private KnowledgeRetriever.KbOverview overviewOrNull(Long kbId) {
+        if (kbId == null) {
+            return null;
+        }
+        KnowledgeRetriever retriever = retrieverProvider.getIfAvailable();
+        if (retriever == null) {
+            return null;
+        }
+        try {
+            return retriever.overview(kbId).orElse(null);
+        } catch (Exception e) {
+            log.warn("知识库概览加载失败，按无库继续: kb={} err={}", kbId, e.toString());
+            return null;
+        }
+    }
+
+    /**
+     * 懒重挂（CAP-49）：运行时不在内存时按需重建。
+     *
+     * <p>模型执行体没有进程也没有节点，重建 = 重新装一个"HTTP 回合入口"：历史在 chat_events、
+     * 端点按会话钉住的那份解析。<b>不写 DB</b>——重建后的状态变化由真正发生的动作落库
+     * （提问 → RUNNING，收尾 → WAITING_INPUT / 终态），凭空写 RUNNING 会把已结束的会话显示成运行中。</p>
+     */
+    private ModelSessionRuntime reattachModelRuntime(ChatSessionEntity ent) {
+        ModelEndpointView ep = requirePinnedEndpoint(ent);
+        ModelSessionRuntime rt = newModelRuntime(ent.getId(), ep,
+                modelSystemPrompt(overviewOrNull(ent.getKnowledgeBaseId())));
+        runtimes.put(ent.getId(), rt);
+        log.info("模型问答懒重挂: chat={} endpoint=#{} model={}", ent.getId(), ep.id(), ep.model());
+        return rt;
+    }
+
+    /** 输入/中断/结束路径：模型执行体一律可按需重挂（历史在 DB，重挂即复活）。 */
+    private SessionHandle requireOrReattachRuntime(String id, ChatSessionEntity ent) {
+        SessionHandle rt = runtimes.get(id);
+        if (rt != null) {
+            return rt;
+        }
+        if (ent.isModel()) {
+            return reattachModelRuntime(ent);
+        }
+        throw new DevMindException(ErrorCode.NOT_FOUND, "问答不在运行中: " + id);
+    }
+
+    /** 订阅路径：只对活动状态重挂——终态会话不该因为"被打开过"就在内存里常驻一个运行时。 */
+    private SessionHandle requireSubscribeRuntime(String id, ChatSessionEntity ent) {
+        SessionHandle rt = runtimes.get(id);
+        if (rt != null) {
+            return rt;
+        }
+        if (ent.isModel() && LIVE_STATUSES.contains(ent.getStatus())) {
+            return reattachModelRuntime(ent);
+        }
+        throw new DevMindException(ErrorCode.NOT_FOUND, "问答不在运行中: " + id);
+    }
+
+    /** CAP-49：模型执行体的"继续对话"——无 cliSessionId、无节点、无 launch，重建运行时即可。 */
+    private ChatView resumeModelChat(ChatSessionEntity ent) {
+        runtimes.remove(ent.getId());
+        reattachModelRuntime(ent); // 端点已停用/删除 → 409 并说明
+        ent.setStatus(SessionState.RUNNING.name());
+        ent.setFinishedAt(null);
+        ent.setUpdatedAt(Instant.now());
+        chatRepo.save(ent);
+        return toView(ent, SessionState.RUNNING);
+    }
+
+    private static boolean notBlank(String s) {
+        return s != null && !s.isBlank();
     }
 
     /** CAP-33：挂场景问答的重装配（resume 用）；失败/无产出 = null（降级无上下文）。 */
@@ -655,8 +1030,18 @@ public class ChatManagerService {
         return rt;
     }
 
+    /**
+     * 实时状态：内存运行时优先，无运行时回落持久化状态。
+     *
+     * <p>CAP-49：模型运行时是"按需重建"的，新装好的运行时初始态即 RUNNING，直接采信会把
+     * 一场早已结束（甚至被终止）的问答显示成"运行中"。故空闲（未在生成）时一律以 DB 为准——
+     * <b>模型执行体的 DB 状态由运行时自己写</b>（每轮 2 次，见 persistModelLiveState）。</p>
+     */
     private SessionState liveState(ChatSessionEntity ent) {
         SessionHandle rt = runtimes.get(ent.getId());
+        if (rt instanceof ModelSessionRuntime m && !m.generating()) {
+            return SessionState.valueOf(ent.getStatus());
+        }
         return rt != null ? rt.state() : SessionState.valueOf(ent.getStatus());
     }
 
@@ -685,10 +1070,25 @@ public class ChatManagerService {
     }
 
     private ChatView toView(ChatSessionEntity ent, SessionState state) {
+        ModelEndpointView endpoint = endpointViewOrNull(ent.getModelEndpointId());
         return new ChatView(ent.getId(), ent.getTitle(), state.name(), state, ent.getPid(),
                 ent.getModel(), ent.getPermissionMode(), ent.getSummary(), ent.getAgentNodeId(),
                 ent.getCreatedBy(), ent.getCreatedAt(), ent.getUpdatedAt(), ent.getFinishedAt(),
-                ent.getKnowledgeBaseId());
+                ent.getKnowledgeBaseId(),
+                ent.getExecutor() == null ? ChatSessionEntity.EXECUTOR_AGENT : ent.getExecutor(),
+                ent.getModelEndpointId(),
+                // 端点被停用/删除后名字拿不到（视图仍可看历史；要继续提问会 409 并说明原因）
+                endpoint == null ? null : endpoint.display(),
+                endpoint == null ? null : endpoint.model());
+    }
+
+    /** 端点视图（视图层只用来显示名字与模型名；拿不到 = null，不影响会话本身可读）。 */
+    private ModelEndpointView endpointViewOrNull(Long endpointId) {
+        if (endpointId == null) {
+            return null;
+        }
+        ModelEndpointProvider provider = endpointProvider.getIfAvailable();
+        return provider == null ? null : provider.activeEndpoint(endpointId).orElse(null);
     }
 
     private void updateStatus(String id, SessionState st, String summary) {

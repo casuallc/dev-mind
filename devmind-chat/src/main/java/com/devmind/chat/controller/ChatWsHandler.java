@@ -19,7 +19,11 @@ import java.util.function.Consumer;
 
 /**
  * CAP-30 问答实时流：WS /ws/chats/{id}，帧协议与 /ws/sessions/{id} 完全一致
- * （snapshot/event/error/pong 下行 + input/authorize/ping 上行），前端共享同一套流组件。
+ * （snapshot/event/error/pong 下行 + input/authorize/interrupt/ping 上行），前端共享同一套流组件。
+ *
+ * <p>CAP-49：模型执行体会在一轮里推上千条 {@code text_delta}，慢客户端会把事件推送线程
+ * （进而把上游 SSE 读取）钉死，故由 {@link com.devmind.chat.config.ChatWsConfig} 给会话套上
+ * {@code ConcurrentWebSocketSessionDecorator}（发送缓冲 + 超时踢连接）。</p>
  */
 @Component
 public class ChatWsHandler extends TextWebSocketHandler {
@@ -73,14 +77,23 @@ public class ChatWsHandler extends TextWebSocketHandler {
         if (id == null) {
             return;
         }
-        switch (type) {
-            case "input" -> service.input(id, node.path("text").asText(""), parseImages(node));
-            case "authorize" -> service.authorize(id,
-                    node.path("accepted").asBoolean(false),
-                    node.path("scope").asText("once"),
-                    node.path("requestId").asText(""));
-            case "ping" -> send(session, Map.of("type", "pong"));
-            default -> { }
+        // 上行动作失败（问答已删、模型问答不支持该动作…）只回错误帧，不能把整条连接掀掉：
+        // 事件流断了用户就看不到后续回答，比"这一个动作没成"严重得多
+        try {
+            switch (type) {
+                case "input" -> service.input(id, node.path("text").asText(""), parseImages(node));
+                case "authorize" -> service.authorize(id,
+                        node.path("accepted").asBoolean(false),
+                        node.path("scope").asText("once"),
+                        node.path("requestId").asText(""));
+                // CAP-49「停止生成」：模型执行体中断在跑的那一轮
+                case "interrupt" -> service.interrupt(id);
+                case "ping" -> send(session, Map.of("type", "pong"));
+                default -> { }
+            }
+        } catch (Exception e) {
+            log.debug("WS 上行动作失败: chat={} type={} err={}", id, type, e.getMessage());
+            send(session, Map.of("type", "error", "message", "操作未生效: " + e.getMessage()));
         }
     }
 

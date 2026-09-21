@@ -72,6 +72,12 @@ public class ChatController {
         return service.resume(id);
     }
 
+    /** CAP-49「停止生成」：中断模型执行体在跑的那一轮，会话与已产出的部分正文都留着；Agent 执行体 409。 */
+    @PostMapping("/{id}/interrupt")
+    public ChatView interrupt(@PathVariable String id) {
+        return service.interrupt(id);
+    }
+
     @PostMapping("/{id}/kill")
     public ChatView kill(@PathVariable String id) {
         return service.kill(id);

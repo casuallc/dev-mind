@@ -21,16 +21,24 @@ import java.util.concurrent.LinkedBlockingQueue;
 /**
  * CAP-30 问答事件批量落库：事件先入内存队列，每隔 eventFlushMs 批量写 chat_events，
  * 避免高频事件拖垮进程读取线程（复刻 SessionEventSaver 模式）。
+ *
+ * <p>CAP-49：队列<b>有界</b>（10k）。原来的无界队列让"队列已满"分支成了死代码——DB 故障或
+ * 慢库叠加流式会话就是内存无界增长，一个进程能把整台机器拖垮。丢事件比 OOM 好，且丢弃要计数告警，
+ * 不能静默（事件是问答的全部证据，chat_events 少了一段用户是看得见的）。</p>
  */
 @Component
 public class ChatEventSaver implements RuntimeEventSink {
 
     private static final Logger log = LoggerFactory.getLogger(ChatEventSaver.class);
 
+    /** 队列容量：按 5k 事件/秒的极端产出，够 2 秒缓冲；再堆就是落库侧真的病了 */
+    private static final int MAX_QUEUE = 10_000;
+
     private final ChatEventRepository repo;
     private final ChatProperties props;
     private final ObjectMapper mapper;
-    private final BlockingQueue<ChatEventEntity> queue = new LinkedBlockingQueue<>();
+    private final BlockingQueue<ChatEventEntity> queue = new LinkedBlockingQueue<>(MAX_QUEUE);
+    private final java.util.concurrent.atomic.AtomicLong dropped = new java.util.concurrent.atomic.AtomicLong();
     private volatile boolean running = true;
     private Thread flusher;
 
@@ -78,7 +86,11 @@ public class ChatEventSaver implements RuntimeEventSink {
         }
         e.setCreatedAt(Instant.ofEpochMilli(ev.timestamp()));
         if (!queue.offer(e)) {
-            log.warn("问答事件队列已满，丢弃 1 条: chat={} seq={}", sessionId, ev.seq());
+            long n = dropped.incrementAndGet();
+            if (n == 1 || n % 1000 == 0) {
+                log.warn("问答事件落库队列已满（容量 {}），已丢弃 {} 条（落库跟不上产出，查 DB）: chat={} seq={}",
+                        MAX_QUEUE, n, sessionId, ev.seq());
+            }
         }
     }
 

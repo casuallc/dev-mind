@@ -61,9 +61,12 @@ public class ModelSessionRuntime extends AbstractSessionRuntime {
      *
      * @param userText  本轮用户文本（可能已带 {@code <knowledge-context>} 前缀）
      * @param beforeSeq 本轮 user 事件的 seq——历史只取它之前的，否则本轮提问会在历史里出现两次
+     * @param recent    运行时环形缓冲快照（含尚未落库的事件）：事件是 200ms 批量落库的，
+     *                  用户紧接着上一轮提问时，上一轮的 assistant 可能还在内存里没进 DB
      */
     public interface TurnSupplier {
-        List<OpenAiCompatChatStream.Message> buildTurn(String userText, long beforeSeq);
+        List<OpenAiCompatChatStream.Message> buildTurn(String userText, long beforeSeq,
+                                                       List<SessionEvent> recent);
     }
 
     /**
@@ -196,7 +199,7 @@ public class ModelSessionRuntime extends AbstractSessionRuntime {
         OpenAiCompatChatStream.Reply reply = null;
         ModelCallException failure = null;
         try {
-            List<OpenAiCompatChatStream.Message> messages = turns.buildTurn(userText, userSeq);
+            List<OpenAiCompatChatStream.Message> messages = turns.buildTurn(userText, userSeq, replay());
             reply = OpenAiCompatChatStream.chatStream(options, messages, this::onDelta);
         } catch (ModelInterruptedException e) {
             // 中断（用户点停止 / finish 收口）：不是故障，保留已产出的部分正文

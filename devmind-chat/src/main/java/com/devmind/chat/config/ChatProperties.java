@@ -25,6 +25,20 @@ public class ChatProperties {
     /** 单条事件内容截断字节数 */
     private int maxEventBytes = 100 * 1024;
 
+    // ---- CAP-49 模型执行体（服务端直连已接入的 CHAT 端点） ----
+
+    /**
+     * 最大并发<b>生成中</b>的模型问答数（与 Agent 分账：空闲的模型问答不占额度）。
+     * 模型会话空闲时不占任何外部资源，不该挤占 runner 配额。
+     */
+    private int maxConcurrentModel = 8;
+    /** 流式增量合并窗口（毫秒）：攒够时间或字数才发一条 text_delta */
+    private int streamFlushMs = 120;
+    /** 流式增量合并字数阈值（与窗口先到先发） */
+    private int streamFlushChars = 24;
+    /** 单轮回答上限（字符）：超出截断并在 result 里标 truncated */
+    private int answerMaxChars = 100_000;
+
     public String getModel() { return model; }
     public void setModel(String model) { this.model = model; }
     public String getPermissionMode() { return permissionMode; }
@@ -39,6 +53,14 @@ public class ChatProperties {
     public void setMaxConcurrent(int maxConcurrent) { this.maxConcurrent = maxConcurrent; }
     public int getMaxEventBytes() { return maxEventBytes; }
     public void setMaxEventBytes(int maxEventBytes) { this.maxEventBytes = maxEventBytes; }
+    public int getMaxConcurrentModel() { return maxConcurrentModel; }
+    public void setMaxConcurrentModel(int maxConcurrentModel) { this.maxConcurrentModel = maxConcurrentModel; }
+    public int getStreamFlushMs() { return streamFlushMs; }
+    public void setStreamFlushMs(int streamFlushMs) { this.streamFlushMs = streamFlushMs; }
+    public int getStreamFlushChars() { return streamFlushChars; }
+    public void setStreamFlushChars(int streamFlushChars) { this.streamFlushChars = streamFlushChars; }
+    public int getAnswerMaxChars() { return answerMaxChars; }
+    public void setAnswerMaxChars(int answerMaxChars) { this.answerMaxChars = answerMaxChars; }
 
     /** 转换为内核运行时参数（common.agent.runtime 与 Spring 配置解耦的桥梁）。
      *  CAP-34：服务端不再拉起进程，claudePath 恒空（仅 runner 侧解析）。 */
