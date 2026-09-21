@@ -12,13 +12,25 @@ import java.util.List;
  */
 public final class SplitPlanValidator {
 
+    /**
+     * CAP-52 FR-03 工作单元条数硬上限。prompt 的目标是 1~3 条，这里只是护栏：拆得越细，
+     * 清单本身越长、验收与构建的触发次数越多，而「一个会话做完整个需求」的收益会被摊薄。
+     * 超限不截断（截断等于把模型没打算合并的东西硬合），走降级通知让人决定。
+     */
+    public static final int MAX_ITEMS = 5;
+
     private SplitPlanValidator() {
     }
 
-    /** 校验清单：下标引用合法且无环；非法时抛 BAD_REQUEST，消息指明问题项。 */
+    /** 校验清单：条数 + 下标引用合法且无环；非法时抛 BAD_REQUEST，消息指明问题项。 */
     public static void validate(List<SplitDraftItem> items) {
         if (items == null || items.isEmpty()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "拆分清单不能为空");
+        }
+        if (items.size() > MAX_ITEMS) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "工作单元 " + items.size() + " 条，超过上限 " + MAX_ITEMS
+                            + "（拆分粒度过细：一个工作单元应为一次可独立验收的改动）");
         }
         for (int i = 0; i < items.size(); i++) {
             SplitDraftItem it = items.get(i);

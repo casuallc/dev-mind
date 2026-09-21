@@ -3,6 +3,7 @@ package com.devmind.flow;
 import com.devmind.artifact.ArtifactService;
 import com.devmind.auth.IdentityService;
 import com.devmind.common.event.DomainEvent;
+import com.devmind.common.agent.runtime.SessionState;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
@@ -225,6 +226,17 @@ class RequirementFlowServiceTest {
             created.add(req);
             return null;
         }
+
+        /** CAP-52：开发会话清单要把 depends_on 边渲染成「先完成 #n」，读的就是这个方法。 */
+        @Override
+        public List<com.devmind.project.dto.RelationView> list(String projectId, String fromType, String fromId) {
+            return created.stream()
+                    .filter(r -> fromType == null || fromType.equals(r.fromType()))
+                    .filter(r -> fromId == null || fromId.equals(r.fromId()))
+                    .map(r -> new com.devmind.project.dto.RelationView("rel-" + created.indexOf(r), projectId,
+                            r.fromType(), r.fromId(), r.toType(), r.toId(), r.relationType(), Instant.now()))
+                    .toList();
+        }
     }
 
     static class FakeSessionManager extends SessionManagerService {
@@ -380,6 +392,10 @@ class RequirementFlowServiceTest {
         SessionRepository sessionRepo = proxy(SessionRepository.class, (p, m, args) ->
                 switch (m.getName()) {
                     case "findById" -> Optional.ofNullable(sessionStore.get((String) args[0]));
+                    // CAP-52 requireNoActiveSession：同需求会话互斥预检
+                    case "findByRequirementIdOrderByCreatedAtDesc" -> sessionStore.values().stream()
+                            .filter(s -> args[0].equals(s.getRequirementId()))
+                            .toList();
                     default -> throw new UnsupportedOperationException(m.getName());
                 });
         service = new RequirementFlowService(requirementService, workItemService, designService,
@@ -402,59 +418,6 @@ class RequirementFlowServiceTest {
     /** 触发会话完成分流（生产走 flowExecutor 异步，测试同步直调本体）。 */
     private void fireCompleted(String sessionId) {
         service.handleCompleted(sessionId);
-    }
-
-    // ---------------- skipStage ----------------
-
-    @Test
-    void 跳过分析_置标记并推进DRAFT到ANALYZING且幂等() {
-        RequirementEntity req = requirementService.add("r1", RequirementEntity.STATUS_DRAFT);
-
-        service.skipStage("p1", "r1", "analysis");
-        assertTrue(req.getAnalysisSkipped());
-        assertEquals(RequirementEntity.STATUS_ANALYZING, req.getStatus());
-
-        // 幂等：重复跳过不报错、状态不后退
-        service.skipStage("p1", "r1", "analysis");
-        assertTrue(req.getAnalysisSkipped());
-        assertEquals(RequirementEntity.STATUS_ANALYZING, req.getStatus());
-    }
-
-    @Test
-    void 跳过分析_已有分析文档报409() {
-        requirementService.add("r1", RequirementEntity.STATUS_DRAFT);
-        documentService.add("analysis", "r1", "已有分析");
-
-        DevMindException e = assertThrows(DevMindException.class,
-                () -> service.skipStage("p1", "r1", "analysis"));
-        assertEquals(ErrorCode.CONFLICT, e.getErrorCode());
-    }
-
-    @Test
-    void 跳过方案_置标记不影响需求状态() {
-        RequirementEntity req = requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
-
-        service.skipStage("p1", "r1", "design");
-        assertTrue(req.getDesignSkipped());
-        assertEquals(RequirementEntity.STATUS_ANALYZING, req.getStatus());
-    }
-
-    @Test
-    void 跳过方案_已有未废弃方案报409() {
-        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
-        designService.create("p1", "r1", new DesignRequest(1L));
-
-        DevMindException e = assertThrows(DevMindException.class,
-                () -> service.skipStage("p1", "r1", "design"));
-        assertEquals(ErrorCode.CONFLICT, e.getErrorCode());
-    }
-
-    @Test
-    void 跳过_非法阶段报400() {
-        requirementService.add("r1", RequirementEntity.STATUS_DRAFT);
-        DevMindException e = assertThrows(DevMindException.class,
-                () -> service.skipStage("p1", "r1", "split"));
-        assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
     }
 
     // ---------------- 方案产出自动拆分 ----------------
@@ -516,20 +479,28 @@ class RequirementFlowServiceTest {
 
         fireCompleted("s2");
 
-        // 固化 2 个 WI（TODO 起步）
+        // 固化 2 个 WI（CAP-52：固化即交给唯一的开发会话，故直接 IN_PROGRESS）
         List<WorkItemView> items = workItemService.list("p1", "r1");
         assertEquals(2, items.size());
         assertEquals("后端接口", items.get(0).title());
-        assertEquals(WorkItemEntity.STATUS_TODO, items.get(1).status());
+        assertEquals(WorkItemEntity.STATUS_IN_PROGRESS, items.get(1).status());
         // depends_on 边：第 2 项依赖第 1 项
         assertEquals(1, relationService.created.size());
         RelationRequest edge = relationService.created.get(0);
         assertEquals("depends_on", edge.relationType());
         assertEquals(items.get(1).id(), edge.fromId());
         assertEquals(items.get(0).id(), edge.toId());
-        // 编排器事件 + 完成通知
+        // 编排器事件 + 完成通知 + 需求级开发会话（一个会话吃整份清单，依赖渲染成人话）
         assertEquals(1, eventPublisher.events.stream().filter(e -> "flow.split.confirmed".equals(e.type())).count());
         assertEquals(1, notificationService.ofType("flow.split.done").size());
+        assertEquals(1, notificationService.ofType("flow.dispatched").size());
+        assertEquals(1, sessionManager.requests.size());
+        CreateSessionRequest dev = sessionManager.requests.get(0);
+        assertTrue(dev.taskSpec().startsWith(FlowOutputContract.MARKER_DEV));
+        assertNull(dev.workItemId());
+        assertEquals("r1", dev.requirementId());
+        assertTrue(dev.taskSpec().contains("后端接口"));
+        assertTrue(dev.taskSpec().contains("依赖：先完成 #1"), dev.taskSpec());
     }
 
     @Test
@@ -561,6 +532,193 @@ class RequirementFlowServiceTest {
         // 环依赖校验失败 → 降级人工
         assertEquals(0, workItemService.list("p1", "r1").size());
         assertEquals(1, notificationService.ofType("flow.split.missing").size());
+    }
+
+    // ---------------- CAP-52：三合一规划会话 ----------------
+
+    @Test
+    void 规划产出_三文件齐备登记并自动起开发会话() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+        addSession("s3", null, "r1", FlowOutputContract.MARKER_PLAN + "\n规划任务");
+        sessionOutputService.put("s3", FlowOutputContract.ANALYSIS_FILE, "# 分析");
+        sessionOutputService.put("s3", FlowOutputContract.DESIGN_FILE, "# 方案");
+        sessionOutputService.put("s3", FlowOutputContract.WI_PLAN_FILE,
+                """
+                [
+                  {"type":"DEVELOPMENT","title":"改造接口","spec":"改哪里/怎么验收","dependsOn":[]},
+                  {"type":"TEST","title":"补测试","spec":"覆盖新分支","dependsOn":[0]}
+                ]
+                """);
+
+        fireCompleted("s3");
+
+        // 三份产出各自落库（一个会话 → 分析文档 + 方案文档/Design + 2 个 WI）
+        assertEquals(1, documentService.docs.stream().filter(d -> "analysis".equals(d.kind())).count());
+        assertEquals(1, documentService.docs.stream().filter(d -> "design".equals(d.kind())).count());
+        assertEquals(1, designService.designs.size());
+        assertEquals(2, workItemService.list("p1", "r1").size());
+        // 一次完成通知 + 一次自动派发通知，且只起一个开发会话
+        assertEquals(1, notificationService.ofType("flow.plan.done").size());
+        assertEquals(1, notificationService.ofType("flow.dispatched").size());
+        assertEquals(0, notificationService.ofType("flow.plan.partial").size());
+        assertEquals(1, sessionManager.requests.size());
+        assertTrue(sessionManager.requests.get(0).taskSpec().startsWith(FlowOutputContract.MARKER_DEV));
+    }
+
+    @Test
+    void 规划产出_缺方案只登记其余并发部分产出通知() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+        addSession("s3", null, "r1", FlowOutputContract.MARKER_PLAN + "\n规划任务");
+        sessionOutputService.put("s3", FlowOutputContract.ANALYSIS_FILE, "# 分析");
+        sessionOutputService.put("s3", FlowOutputContract.WI_PLAN_FILE,
+                """
+                [{"type":"DEVELOPMENT","title":"A","spec":"a","dependsOn":[]}]
+                """);
+
+        fireCompleted("s3");
+
+        // 缺一个文件不拖垮其余：分析与清单照常落库，只是不起开发会话
+        assertEquals(1, documentService.docs.stream().filter(d -> "analysis".equals(d.kind())).count());
+        assertEquals(1, workItemService.list("p1", "r1").size());
+        assertEquals(1, notificationService.ofType("flow.plan.partial").size());
+        assertTrue(notificationService.ofType("flow.plan.partial").get(0).body().contains("design.md"));
+        assertEquals(0, sessionManager.requests.size());
+    }
+
+    @Test
+    void 规划产出_跳过阶段不要求对应文件() {
+        RequirementEntity req = requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+        req.setAnalysisSkipped(true);
+        req.setDesignSkipped(true);
+        addSession("s3", null, "r1", FlowOutputContract.MARKER_PLAN + "\n规划任务");
+        sessionOutputService.put("s3", FlowOutputContract.WI_PLAN_FILE,
+                """
+                [{"type":"DEVELOPMENT","title":"A","spec":"a","dependsOn":[]}]
+                """);
+
+        fireCompleted("s3");
+
+        assertEquals(1, notificationService.ofType("flow.plan.done").size());
+        assertEquals(1, sessionManager.requests.size());
+    }
+
+    @Test
+    void 拆分粒度过细_超上限拒绝固化() {
+        requirementService.add("r1", RequirementEntity.STATUS_DESIGNING);
+        addSession("s2", null, "r1", FlowOutputContract.MARKER_SPLIT + "\n拆分任务");
+        StringBuilder json = new StringBuilder("[");
+        for (int i = 0; i < SplitPlanValidator.MAX_ITEMS + 1; i++) {
+            json.append(i > 0 ? "," : "")
+                    .append("{\"type\":\"DEVELOPMENT\",\"title\":\"T").append(i)
+                    .append("\",\"spec\":\"s\",\"dependsOn\":[]}");
+        }
+        sessionOutputService.put("s2", FlowOutputContract.WI_PLAN_FILE, json.append(']').toString());
+
+        fireCompleted("s2");
+
+        assertEquals(0, workItemService.list("p1", "r1").size());
+        assertEquals(1, notificationService.ofType("flow.split.missing").size());
+        assertTrue(notificationService.ofType("flow.split.missing").get(0).body().contains("上限"));
+        assertEquals(0, sessionManager.requests.size());
+    }
+
+    // ---------------- CAP-52：需求级开发会话 ----------------
+
+    @Test
+    void 开发产出_需求置待验收且不自动完成工作单元() {
+        requirementService.add("r1", RequirementEntity.STATUS_IN_PROGRESS);
+        workItemService.add("wi-1", WorkItemEntity.TYPE_DEVELOPMENT, WorkItemEntity.STATUS_IN_PROGRESS);
+        addSession("s4", null, "r1", FlowOutputContract.MARKER_DEV + "\n开发任务");
+        sessionOutputService.put("s4", FlowOutputContract.DEV_SUMMARY_FILE, "## 完成情况\n- 都做完了");
+
+        fireCompleted("s4");
+
+        assertEquals(RequirementEntity.STATUS_ACCEPTANCE, requirementService.requireById("r1").getStatus());
+        // 人验收才置 DONE：N 条一起自动 DONE 会掀起 N 次构建
+        assertEquals(WorkItemEntity.STATUS_IN_PROGRESS, workItemService.requireById("wi-1").getStatus());
+        assertEquals(1, notificationService.ofType("flow.dev.done").size());
+    }
+
+    @Test
+    void 开发产出_缺摘要仍待验收并提示核对() {
+        requirementService.add("r1", RequirementEntity.STATUS_IN_PROGRESS);
+        addSession("s4", null, "r1", FlowOutputContract.MARKER_DEV + "\n开发任务");
+
+        fireCompleted("s4");
+
+        assertEquals(RequirementEntity.STATUS_ACCEPTANCE, requirementService.requireById("r1").getStatus());
+        assertTrue(notificationService.ofType("flow.dev.done").get(0).body().contains("dev-summary.md"));
+    }
+
+    // ---------------- CAP-52：入口收敛 ----------------
+
+    @Test
+    void 规划入口_一个会话产出范围含三份且DRAFT推进ANALYZING() {
+        RequirementEntity req = requirementService.add("r1", RequirementEntity.STATUS_DRAFT);
+
+        SessionView view = service.startPlan("p1", "r1");
+
+        assertTrue(view.taskSpec().startsWith(FlowOutputContract.MARKER_PLAN));
+        assertTrue(view.taskSpec().contains(FlowOutputContract.ANALYSIS_FILE));
+        assertTrue(view.taskSpec().contains(FlowOutputContract.DESIGN_FILE));
+        assertTrue(view.taskSpec().contains(FlowOutputContract.WI_PLAN_FILE));
+        assertEquals(RequirementEntity.STATUS_ANALYZING, req.getStatus());
+        assertTrue(notificationService.drafts.isEmpty()); // 起会话本身不发通知，产出后才有
+        assertNull(view.workItemId());
+    }
+
+    @Test
+    void 规划入口_跳过分析时产出范围不含分析文件() {
+        RequirementEntity req = requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+        req.setAnalysisSkipped(true);
+
+        SessionView view = service.startPlan("p1", "r1");
+
+        assertTrue(view.taskSpec().startsWith(FlowOutputContract.MARKER_PLAN));
+        assertTrue(!view.taskSpec().contains(FlowOutputContract.ANALYSIS_FILE));
+        assertTrue(view.taskSpec().contains(FlowOutputContract.DESIGN_FILE));
+    }
+
+    @Test
+    void 规划入口_已有进行中会话报409() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+        SessionEntity active = addSession("s9", null, "r1", "在跑");
+        active.setStatus(SessionState.RUNNING.name());
+
+        DevMindException e = assertThrows(DevMindException.class, () -> service.startPlan("p1", "r1"));
+        assertEquals(ErrorCode.CONFLICT, e.getErrorCode());
+        assertEquals(0, sessionManager.requests.size());
+    }
+
+    @Test
+    void 规划入口_需求终态报409() {
+        requirementService.add("r1", RequirementEntity.STATUS_DONE);
+
+        DevMindException e = assertThrows(DevMindException.class, () -> service.startPlan("p1", "r1"));
+        assertEquals(ErrorCode.CONFLICT, e.getErrorCode());
+    }
+
+    @Test
+    void 开发入口_无工作单元报409() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+
+        DevMindException e = assertThrows(DevMindException.class, () -> service.startDev("p1", "r1"));
+        assertEquals(ErrorCode.CONFLICT, e.getErrorCode());
+        assertTrue(e.getMessage().contains("开启 AI 规划"));
+    }
+
+    @Test
+    void 开发入口_按清单起会话并把TODO置进行中() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+        workItemService.add("wi-1", WorkItemEntity.TYPE_DEVELOPMENT, WorkItemEntity.STATUS_TODO);
+        workItemService.add("wi-2", WorkItemEntity.TYPE_DEVELOPMENT, WorkItemEntity.STATUS_DONE);
+
+        SessionView view = service.startDev("p1", "r1");
+
+        assertTrue(view.taskSpec().startsWith(FlowOutputContract.MARKER_DEV));
+        assertEquals(WorkItemEntity.STATUS_IN_PROGRESS, workItemService.requireById("wi-1").getStatus());
+        // 已完成的不回退
+        assertEquals(WorkItemEntity.STATUS_DONE, workItemService.requireById("wi-2").getStatus());
     }
 
     // ---------------- CAP-39 publishOutput ----------------

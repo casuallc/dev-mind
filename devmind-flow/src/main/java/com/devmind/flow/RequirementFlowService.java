@@ -2,6 +2,7 @@ package com.devmind.flow;
 
 import com.devmind.auth.IdentityService;
 import com.devmind.artifact.ArtifactService;
+import com.devmind.common.agent.runtime.SessionState;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
@@ -24,9 +25,11 @@ import com.devmind.project.WorkItemService;
 import com.devmind.project.dto.DesignRequest;
 import com.devmind.project.dto.DesignView;
 import com.devmind.project.dto.RelationRequest;
+import com.devmind.project.dto.RelationView;
 import com.devmind.project.dto.WorkItemRequest;
 import com.devmind.project.dto.WorkItemView;
 import com.devmind.project.model.DesignEntity;
+import com.devmind.project.model.RelationEntity;
 import com.devmind.project.model.RequirementEntity;
 import com.devmind.project.model.WorkItemEntity;
 import com.devmind.session.dto.CreateSessionRequest;
@@ -44,21 +47,25 @@ import tools.jackson.databind.ObjectMapper;
 
 import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 需求流程引擎（CAP-14/CAP-37/CAP-38）：需求主流程的半自动推进——每阶段一个流程动作（起会话/生成），
- * 阶段可跳过（skipStage），方案产出后自动拆分并直接固化为正式工作单元（无人工确认草稿环节）。
- * 只做粘合与门禁校验，不做自动调度（属 CAP-15 Orchestrator）。
+ * 需求流程引擎（CAP-14/CAP-37/CAP-38/CAP-52）：需求主流程的半自动推进。
  *
- * <p>会话归属约定：分析/拆分会话直挂 requirementId（taskSpec 首行 [flow:*] 标记区分）；
- * 方案会话挂 DESIGN 型 Work Item；执行会话挂普通 Work Item。</p>
+ * <p>CAP-52 起正路只有两步：**开启 AI 规划**（{@link #startPlan}，一个会话产出分析+方案+工作单元，
+ * 产出齐备后自动起开发会话）与**需求级开发**（{@link #startDev}，整份清单交给一个会话）。
+ * 逐阶段起会话（分析/方案/拆分/跳过）的入口已删除——它们让每个阶段都重起进程、重注入上下文、
+ * 由服务端把上游产出当字符串搬运，正是 CAP-52 要消灭的 token 与请求开销。</p>
+ *
+ * <p>会话归属约定：规划/开发会话直挂 requirementId（taskSpec 首行 [flow:*] 标记区分）；
+ * 存量 DESIGN 型 Work Item 会话仍走 {@code handleDesignOutput} 分支（人工逃生通道）。</p>
  *
  * <p>CAP-37：产出读取走 session_outputs（runner 退出前回传），不再依赖 worktree 路径
- * （CAP-34 后服务端零执行，worktree_path 恒 null）；上游产出（分析文档/已确认方案）
- * 注入下游会话 spec，阶段间上下文串联。</p>
+ * （CAP-34 后服务端零执行，worktree_path 恒 null）。</p>
  */
 @Service
 public class RequirementFlowService {
@@ -107,106 +114,151 @@ public class RequirementFlowService {
         this.mapper = mapper;
     }
 
-    // ---------------- 阶段动作 ----------------
+    // ---------------- CAP-52：一次点击的规划会话 + 需求级开发会话 ----------------
 
-    /** FR-01 开始/重新分析：DRAFT/ANALYZING 可用；起分析型会话并把需求推进到 ANALYZING。 */
-    public SessionView startAnalysis(String projectId, String requirementId) {
+    /**
+     * CAP-52 FR-01「开启 AI 规划」：**一个会话**产出分析 + 方案 + 工作单元三个文件。
+     *
+     * <p>取代 CAP-14 的 startAnalysis/startDesign/startSplit 三入口（FR-07 已删端点，前端只剩
+     * 这一个按钮）。存量「跳过分析/方案」标记降级为**产出范围**：跳过的文件不要求产出，
+     * 但不再是门禁——只剩一个动作，没有下游要解锁。</p>
+     */
+    public SessionView startPlan(String projectId, String requirementId) {
         RequirementEntity req = requirementService.requireEntity(projectId, requirementId);
-        if (!RequirementEntity.STATUS_DRAFT.equals(req.getStatus())
-                && !RequirementEntity.STATUS_ANALYZING.equals(req.getStatus())) {
-            throw new DevMindException(ErrorCode.CONFLICT,
-                    "当前状态 " + req.getStatus() + " 不能发起分析（仅 DRAFT/ANALYZING 可分析）");
-        }
+        requireNotTerminal(req, "发起规划");
+        requireNoActiveSession(requirementId, "发起规划");
         SessionView session = sessionManager.create(new CreateSessionRequest(
                 null, projectId, null, requirementId,
-                FlowOutputContract.analysisSpec(req), null, null, null, null));
+                FlowOutputContract.planSpec(req, req.getAnalysisSkipped(), req.getDesignSkipped()),
+                null, null, null, null));
         if (RequirementEntity.STATUS_DRAFT.equals(req.getStatus())) {
             requirementService.updateStatus(projectId, requirementId, RequirementEntity.STATUS_ANALYZING);
         }
-        log.info("需求分析会话已启动: req={} session={}", requirementId, session.id());
+        log.info("需求规划会话已启动: req={} session={}", requirementId, session.id());
         return session;
     }
 
-    /** FR-02 生成方案：创建 DESIGN 型 Work Item 并起会话（spec=方案输出契约 + 最近一次分析结论）。 */
-    public SessionView startDesign(String projectId, String requirementId) {
+    /**
+     * CAP-52 FR-04「重新开发」：按已固化的工作单元清单重起需求级开发会话。
+     * 规划成功后由 {@link #startDevBestEffort} 自动起一次；本方法供人工在做完一轮改动后再来一轮。
+     */
+    public SessionView startDev(String projectId, String requirementId) {
         RequirementEntity req = requirementService.requireEntity(projectId, requirementId);
-        if (!RequirementEntity.STATUS_ANALYZING.equals(req.getStatus())
-                && !RequirementEntity.STATUS_DESIGNING.equals(req.getStatus())) {
-            throw new DevMindException(ErrorCode.CONFLICT,
-                    "当前状态 " + req.getStatus() + " 不能发起方案设计（需先完成分析）");
-        }
-        boolean activeDesign = workItemService.list(projectId, requirementId).stream()
-                .anyMatch(w -> WorkItemEntity.TYPE_DESIGN.equals(w.type()) && !isTerminal(w.status()));
-        if (activeDesign) {
-            throw new DevMindException(ErrorCode.CONFLICT, "已有进行中的方案工作单元，请先完成或取消");
-        }
-        WorkItemView wi = workItemService.create(projectId, requirementId, new WorkItemRequest(
-                WorkItemEntity.TYPE_DESIGN, "方案设计 - " + req.getTitle(),
-                FlowOutputContract.designSpec(req, latestAnalysisContent(requirementId)), null, null, null));
-        return startWorkItemSession(projectId, wi.id());
-    }
-
-    /** FR-03 AI 拆分（手动路径，跳过方案后可用）：校验前置（无进行中 WI）后起拆分会话。
-     *  CAP-38：方案确认（CONFIRMED）不再门控——有 CONFIRMED 用其内容，否则用最新方案文档，都没有注入分析。 */
-    public SessionView startSplit(String projectId, String requirementId) {
-        RequirementEntity req = requirementService.requireEntity(projectId, requirementId);
-        if (!RequirementEntity.STATUS_ANALYZING.equals(req.getStatus())
-                && !RequirementEntity.STATUS_DESIGNING.equals(req.getStatus())) {
-            throw new DevMindException(ErrorCode.CONFLICT,
-                    "当前状态 " + req.getStatus() + " 不能发起拆分（需处于 ANALYZING/DESIGNING）");
-        }
+        requireNotTerminal(req, "发起开发");
+        requireNoActiveSession(requirementId, "发起开发");
         List<WorkItemView> items = workItemService.list(projectId, requirementId);
-        if (hasActiveExecution(items)) {
-            throw new DevMindException(ErrorCode.CONFLICT, "已有进行中的工作单元，不能重复拆分");
+        if (items.isEmpty()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "该需求还没有工作单元，请先「开启 AI 规划」");
         }
-        return launchSplit(req, items, resolveDesignContent(projectId, requirementId));
+        return launchDev(req, items);
     }
 
-    /** CAP-38 FR-01 阶段跳过：幂等置标记；跳过分析且需求 DRAFT → 推进 ANALYZING（下游门禁自然放行）。 */
-    public void skipStage(String projectId, String requirementId, String stage) {
-        RequirementEntity req = requirementService.requireEntity(projectId, requirementId);
-        if ("analysis".equals(stage)) {
-            if (documentService.findLatestByKind(requirementId, "analysis").isPresent()) {
-                throw new DevMindException(ErrorCode.CONFLICT, "分析已完成，不能跳过");
+    /**
+     * 起需求级开发会话：清单整份交给一个会话，全部 TODO 工作单元置 IN_PROGRESS。
+     *
+     * <p>为什么一个需求只起一个：逐 WI 派发会让每个 WI 都重新起进程、重新理解需求、重新注入
+     * 上下文，请求数与 token 随 WI 数线性增长；配合 CAP-51 的需求工作树，一个会话连续做完
+     * 的改动天然累积在同一条需求分支上。</p>
+     */
+    private SessionView launchDev(RequirementEntity req, List<WorkItemView> items) {
+        SessionView session = sessionManager.create(new CreateSessionRequest(
+                null, req.getProjectId(), null, req.getId(),
+                FlowOutputContract.devSpec(req, toDevItems(req, items)), null, null, null, null));
+        for (WorkItemView w : items) {
+            if (!WorkItemEntity.STATUS_TODO.equals(w.status())) {
+                continue;
             }
-            if (!req.getAnalysisSkipped()) {
-                req.setAnalysisSkipped(true);
-                requirementService.saveStageFlags(req);
+            try {
+                workItemService.updateStatus(req.getProjectId(), req.getId(), w.id(),
+                        WorkItemEntity.STATUS_IN_PROGRESS);
+            } catch (Exception e) {
+                log.warn("工作单元置 IN_PROGRESS 失败(不阻塞开发会话): wi={} err={}", w.id(), e.getMessage());
             }
-            if (RequirementEntity.STATUS_DRAFT.equals(req.getStatus())) {
-                requirementService.updateStatus(projectId, requirementId, RequirementEntity.STATUS_ANALYZING);
-            }
-        } else if ("design".equals(stage)) {
-            boolean hasDesign = designService.list(projectId, requirementId).stream()
-                    .anyMatch(d -> !DesignEntity.STATUS_DISCARDED.equals(d.status()));
-            if (hasDesign) {
-                throw new DevMindException(ErrorCode.CONFLICT, "方案已生成，不能跳过");
-            }
-            if (!req.getDesignSkipped()) {
-                req.setDesignSkipped(true);
-                requirementService.saveStageFlags(req);
-            }
-        } else {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "stage 仅支持 analysis/design");
         }
-        log.info("流程阶段已跳过: req={} stage={}", requirementId, stage);
+        log.info("需求开发会话已启动: req={} session={} workItems={}",
+                req.getId(), session.id(), items.size());
+        return session;
     }
 
-    /** 方案内容解析：已确认方案优先，其次最新方案文档；皆无返回 null。 */
-    private String resolveDesignContent(String projectId, String requirementId) {
-        List<DesignView> designs = designService.list(projectId, requirementId);
-        Long docId = designs.stream()
-                .filter(d -> DesignEntity.STATUS_CONFIRMED.equals(d.status()))
-                .findFirst().map(DesignView::docId).orElse(null);
+    /** 规划/拆分固化后自动起开发会话：失败只降级通知（人可在工作单元行内起会话或点「重新开发」）。 */
+    private void startDevBestEffort(RequirementEntity req) {
         try {
-            if (docId != null) {
-                return documentService.get(docId, null).contentMd();
+            List<WorkItemView> items = workItemService.list(req.getProjectId(), req.getId());
+            if (items.isEmpty()) {
+                return;
             }
-            return documentService.findLatestByKind(requirementId, "design")
-                    .map(DocDetail::contentMd).orElse(null);
+            SessionView session = launchDev(req, items);
+            notify(NotificationLevel.P1, "flow.dispatched",
+                    "REQ-" + req.getSeq() + " 开发会话已启动",
+                    "工作单元清单（" + items.size() + " 条）已交给开发会话，将一次做完整个需求",
+                    req.getProjectId(), req.getId());
+            log.info("需求开发会话自动启动: req={} session={}", req.getId(), session.id());
         } catch (Exception e) {
-            log.warn("读取方案文档失败(拆分继续,不含方案内容): req={} err={}", requirementId, e.getMessage());
-            return null;
+            log.warn("自动起开发会话失败(降级人工): req={} err={}", req.getId(), e.getMessage());
+            notify(NotificationLevel.P1, "flow.dev.deferred",
+                    "REQ-" + req.getSeq() + " 开发会话未自动启动",
+                    "原因：" + e.getMessage() + "；可在「工作单元」Tab 行内起会话，或重新规划",
+                    req.getProjectId(), req.getId());
+        }
+    }
+
+    /** 清单渲染：序号 = 固化顺序；依赖写成「先完成 #n」的人话（开发会话看不到 relations 表）。 */
+    private List<FlowOutputContract.DevItem> toDevItems(RequirementEntity req, List<WorkItemView> items) {
+        Map<String, Integer> seqOf = new HashMap<>();
+        for (int i = 0; i < items.size(); i++) {
+            seqOf.put(items.get(i).id(), i + 1);
+        }
+        Map<String, List<String>> depsOf = new HashMap<>();
+        try {
+            for (RelationView e : relationService.list(req.getProjectId(), null, null)) {
+                if (!"work_item".equals(e.fromType())
+                        || !RelationEntity.TYPE_DEPENDS_ON.equals(e.relationType())) {
+                    continue;
+                }
+                Integer dep = seqOf.get(e.toId());
+                if (dep != null) {
+                    depsOf.computeIfAbsent(e.fromId(), k -> new ArrayList<>()).add("#" + dep);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("读取工作单元依赖失败(清单不含依赖提示): req={} err={}", req.getId(), e.getMessage());
+        }
+        List<FlowOutputContract.DevItem> out = new ArrayList<>();
+        for (int i = 0; i < items.size(); i++) {
+            WorkItemView w = items.get(i);
+            out.add(new FlowOutputContract.DevItem(i + 1, w.type(), w.title(), w.spec(),
+                    depsOf.getOrDefault(w.id(), List.of())));
+        }
+        return out;
+    }
+
+    /** 需求终态（DONE/CANCELLED）不可再起流程会话。 */
+    private void requireNotTerminal(RequirementEntity req, String action) {
+        if (RequirementEntity.STATUS_DONE.equals(req.getStatus())
+                || RequirementEntity.STATUS_CANCELLED.equals(req.getStatus())) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "需求已 " + req.getStatus() + "，不能" + action);
+        }
+    }
+
+    /**
+     * 同需求互斥预检：该需求已有进行中会话时友好报错（比 runner 侧「工作区被占用」可读得多）。
+     * CAP-51 的需求级占用预检是同一语义的另一道防线，两者都保留。
+     */
+    private void requireNoActiveSession(String requirementId, String action) {
+        for (SessionEntity s : sessionRepo.findByRequirementIdOrderByCreatedAtDesc(requirementId)) {
+            if (isActiveStatus(s.getStatus())) {
+                throw new DevMindException(ErrorCode.CONFLICT,
+                        "该需求已有进行中的会话 " + s.getId() + "，请等它结束后再" + action);
+            }
+        }
+    }
+
+    private static boolean isActiveStatus(String status) {
+        try {
+            return SessionState.valueOf(status).isActive();
+        } catch (Exception e) {
+            return false; // 状态缺失/未知：不当作进行中，避免把需求锁死
         }
     }
 
@@ -253,21 +305,13 @@ public class RequirementFlowService {
 
     // ---------------- 拆分固化（CAP-38 FR-03：wi-plan.json 产出直接固化，无人工确认环节） ----------------
 
-    /** 拆分会话 DONE → 解析 wi-plan.json 直接固化为正式 WI（建 depends_on 边 + 发 flow.split.confirmed，编排器自动派发）；
-     *  产出缺失/解析为空/校验失败 → flow.split.missing 降级通知人工建。 */
+    /** 拆分会话 DONE → 解析 wi-plan.json 直接固化为正式 WI（建 depends_on 边 + 发 flow.split.confirmed）。
+     *  产出缺失/解析为空/校验失败 → flow.split.missing 降级通知人工建。
+     *  CAP-52：固化成功后起**一个**需求级开发会话（不再逐 WI 派发）。 */
     private void handleSplitOutput(SessionEntity session) {
         RequirementEntity req = requirementService.requireById(session.getRequirementId());
         List<SplitDraftItem> items = parseWiPlan(readOutput(session, FlowOutputContract.WI_PLAN_FILE));
-        String invalid = null;
-        if (items.isEmpty()) {
-            invalid = "未找到有效产出 " + FlowOutputContract.OUTPUT_DIR + "/" + FlowOutputContract.WI_PLAN_FILE;
-        } else {
-            try {
-                SplitPlanValidator.validate(items);
-            } catch (DevMindException e) {
-                invalid = "拆分清单校验失败（" + e.getMessage() + "）";
-            }
-        }
+        String invalid = validatePlan(items);
         if (invalid != null) {
             notify(NotificationLevel.P1, "flow.split.missing",
                     "REQ-" + req.getSeq() + " 拆分未能自动固化",
@@ -278,8 +322,22 @@ public class RequirementFlowService {
         int count = applySplitPlan(req, items);
         notify(NotificationLevel.P1, "flow.split.done",
                 "REQ-" + req.getSeq() + " 已自动创建 " + count + " 个工作单元",
-                "AI 拆分已固化，首批无依赖工作单元将自动派发会话；请前往「工作单元」Tab 查看",
+                "AI 拆分已固化，正在启动需求级开发会话；请前往「工作单元」Tab 查看",
                 req.getProjectId(), req.getId());
+        startDevBestEffort(req);
+    }
+
+    /** 清单校验：空清单/校验失败返回原因文案，通过返回 null。 */
+    private String validatePlan(List<SplitDraftItem> items) {
+        if (items.isEmpty()) {
+            return "未找到有效产出 " + FlowOutputContract.OUTPUT_DIR + "/" + FlowOutputContract.WI_PLAN_FILE;
+        }
+        try {
+            SplitPlanValidator.validate(items);
+            return null;
+        } catch (DevMindException e) {
+            return "工作单元清单校验失败（" + e.getMessage() + "）";
+        }
     }
 
     /** 固化拆分清单：批量建 Work Item（触发既有 rollup）+ 按 dependsOn 下标建 depends_on 边，返回创建数。 */
@@ -361,7 +419,12 @@ public class RequirementFlowService {
         if (session.getRequirementId() == null || session.getTaskSpec() == null) {
             return;
         }
-        if (session.getTaskSpec().startsWith(FlowOutputContract.MARKER_ANALYZE)) {
+        if (session.getTaskSpec().startsWith(FlowOutputContract.MARKER_PLAN)) {
+            handlePlanOutput(session);
+        } else if (session.getTaskSpec().startsWith(FlowOutputContract.MARKER_DEV)) {
+            handleDevOutput(session);
+        } else if (session.getTaskSpec().startsWith(FlowOutputContract.MARKER_ANALYZE)) {
+            // 存量在途会话（升级前起的分析/拆分会话）照旧分流
             handleAnalysisOutput(session);
         } else if (session.getTaskSpec().startsWith(FlowOutputContract.MARKER_SPLIT)) {
             handleSplitOutput(session);
@@ -380,17 +443,7 @@ public class RequirementFlowService {
                     req.getProjectId(), req.getId());
             return;
         }
-        // 重新分析不新建第二份文档：走既有文档版本化更新
-        DocDetail doc = documentService.findLatestByKind(req.getId(), "analysis")
-                .map(existing -> documentService.saveVersion(existing.id(),
-                        new SaveVersionRequest(content, "AI 重新分析")))
-                .orElseGet(() -> documentService.create(new DocRequest(
-                        "analysis", req.getId(), null, session.getProjectId(),
-                        "分析 - " + req.getTitle(), null, null, content)));
-        artifactService.registerInfo(session.getProjectId(), req.getId(), null,
-                com.devmind.artifact.model.ArtifactEntity.TYPE_ANALYSIS,
-                "REQ-" + req.getSeq() + " 需求分析 v" + doc.versionNo(),
-                String.valueOf(doc.id()), ArtifactService.PRODUCER_SESSION);
+        DocDetail doc = registerAnalysisDocument(req, session, content);
         notify(NotificationLevel.P1, "flow.analysis.ready",
                 "REQ-" + req.getSeq() + " 分析就绪",
                 "分析文档已生成（v" + doc.versionNo() + "），请前往「需求分析」Tab 查阅后决定生成方案或跳过",
@@ -409,19 +462,134 @@ public class RequirementFlowService {
                     req.getProjectId(), req.getId());
             return;
         }
-        DocDetail doc = documentService.create(new DocRequest(
-                "design", req.getId(), wi.getId(), session.getProjectId(),
-                "方案 - " + req.getTitle(), null, null, content));
-        DesignView design = designService.create(session.getProjectId(), req.getId(),
-                new DesignRequest(doc.id()));
-        artifactService.registerInfo(session.getProjectId(), req.getId(), wi.getId(),
-                com.devmind.artifact.model.ArtifactEntity.TYPE_DOC,
-                "方案 v" + design.version(), String.valueOf(doc.id()), ArtifactService.PRODUCER_SESSION);
+        DesignView design = registerDesignDocument(req, session, content, wi.getId());
         notify(NotificationLevel.P1, "flow.design.ready",
                 "REQ-" + req.getSeq() + " 方案 v" + design.version() + " 已生成",
                 "AI 已生成方案文档，若无进行中工作单元将自动拆分；请前往「方案设计」Tab 查看",
                 req.getProjectId(), req.getId());
         autoSplit(req, content);
+    }
+
+    /**
+     * CAP-52 FR-02 规划会话 DONE：三个文件**独立登记**（缺一个不拖垮其余），三项齐了才起开发会话。
+     *
+     * <p>与旧「分析/方案/拆分各一个会话」的关键差别：三份产出在同一条对话里产生，服务端不做
+     * 上游产出的字符串搬运（那正是 token 浪费的来源）；这里只负责落库与分流。</p>
+     */
+    private void handlePlanOutput(SessionEntity session) {
+        RequirementEntity req = requirementService.requireById(session.getRequirementId());
+        List<String> missing = new ArrayList<>();
+        // 跳过的阶段不要求产出（存量标记 → 产出范围，不是门禁）
+        String analysis = readOutput(session, FlowOutputContract.ANALYSIS_FILE);
+        if (analysis == null) {
+            if (!req.getAnalysisSkipped()) {
+                missing.add(FlowOutputContract.ANALYSIS_FILE);
+            }
+        } else {
+            try {
+                registerAnalysisDocument(req, session, analysis);
+            } catch (Exception e) {
+                log.warn("分析文档登记失败: req={} err={}", req.getId(), e.getMessage());
+                missing.add(FlowOutputContract.ANALYSIS_FILE + "（登记失败）");
+            }
+        }
+        String design = readOutput(session, FlowOutputContract.DESIGN_FILE);
+        if (design == null) {
+            if (!req.getDesignSkipped()) {
+                missing.add(FlowOutputContract.DESIGN_FILE);
+            }
+        } else {
+            try {
+                registerDesignDocument(req, session, design, null);
+            } catch (Exception e) {
+                log.warn("方案文档登记失败: req={} err={}", req.getId(), e.getMessage());
+                missing.add(FlowOutputContract.DESIGN_FILE + "（登记失败）");
+            }
+        }
+        String planJson = readOutput(session, FlowOutputContract.WI_PLAN_FILE);
+        int created = 0;
+        if (planJson == null) {
+            missing.add(FlowOutputContract.WI_PLAN_FILE);
+        } else {
+            List<SplitDraftItem> items = parseWiPlan(planJson);
+            String invalid = validatePlan(items);
+            if (invalid != null) {
+                missing.add(FlowOutputContract.WI_PLAN_FILE + "（" + invalid + "）");
+            } else {
+                created = applySplitPlan(req, items);
+            }
+        }
+        if (missing.isEmpty()) {
+            notify(NotificationLevel.P1, "flow.plan.done",
+                    "REQ-" + req.getSeq() + " 规划完成",
+                    "分析/方案/工作单元（" + created + " 条）已就绪，正在启动开发会话；"
+                            + "请前往「工作单元」Tab 查看",
+                    req.getProjectId(), req.getId());
+            startDevBestEffort(req);
+            return;
+        }
+        notify(NotificationLevel.P1, "flow.plan.partial",
+                "REQ-" + req.getSeq() + " 规划产出不完整",
+                "未登记：" + String.join("；", missing)
+                        + "。可重新规划，或在「工作单元」Tab 手工新建工作单元",
+                req.getProjectId(), req.getId());
+    }
+
+    /**
+     * CAP-52 FR-06 开发会话 DONE → 需求进 ACCEPTANCE 待验收。
+     *
+     * <p>**不自动把工作单元置 DONE**：CAP-17 执行链按 WI DONE 触发构建，N 条一起自动 DONE 会掀起
+     * N 次构建；且「AI 产出、人验收」是既有原则。人可在工作单元 Tab 批量确认。</p>
+     */
+    private void handleDevOutput(SessionEntity session) {
+        RequirementEntity req = requirementService.requireById(session.getRequirementId());
+        String summary = readOutput(session, FlowOutputContract.DEV_SUMMARY_FILE);
+        if (!RequirementEntity.STATUS_DONE.equals(req.getStatus())
+                && !RequirementEntity.STATUS_CANCELLED.equals(req.getStatus())
+                && !RequirementEntity.STATUS_ACCEPTANCE.equals(req.getStatus())) {
+            try {
+                requirementService.updateStatus(req.getProjectId(), req.getId(),
+                        RequirementEntity.STATUS_ACCEPTANCE);
+            } catch (Exception e) {
+                log.warn("需求置 ACCEPTANCE 失败(不阻塞通知): req={} err={}", req.getId(), e.getMessage());
+            }
+        }
+        String body = summary == null
+                ? "开发会话已完成并提交改动，但未找到产出 " + FlowOutputContract.OUTPUT_DIR + "/"
+                        + FlowOutputContract.DEV_SUMMARY_FILE + "；请到会话详情核对改动后再验收。"
+                : "开发会话已完成并提交改动。摘要：" + preview(summary, 400) + "（完整内容见会话产出）";
+        notify(NotificationLevel.P1, "flow.dev.done",
+                "REQ-" + req.getSeq() + " 开发完成待验收",
+                body, req.getProjectId(), req.getId());
+    }
+
+    /** 分析文档登记：已存在则版本化更新（重新分析不新建第二份），登记 ANALYSIS 产物。 */
+    private DocDetail registerAnalysisDocument(RequirementEntity req, SessionEntity session, String content) {
+        DocDetail doc = documentService.findLatestByKind(req.getId(), "analysis")
+                .map(existing -> documentService.saveVersion(existing.id(),
+                        new SaveVersionRequest(content, "AI 重新分析")))
+                .orElseGet(() -> documentService.create(new DocRequest(
+                        "analysis", req.getId(), null, session.getProjectId(),
+                        "分析 - " + req.getTitle(), null, null, content)));
+        artifactService.registerInfo(session.getProjectId(), req.getId(), null,
+                com.devmind.artifact.model.ArtifactEntity.TYPE_ANALYSIS,
+                "REQ-" + req.getSeq() + " 需求分析 v" + doc.versionNo(),
+                String.valueOf(doc.id()), ArtifactService.PRODUCER_SESSION);
+        return doc;
+    }
+
+    /** 方案文档登记：新建 design 文档 + Design(DRAFT) + DOC 产物（workItemId 可为 null = 规划会话产出）。 */
+    private DesignView registerDesignDocument(RequirementEntity req, SessionEntity session, String content,
+                                              String workItemId) {
+        DocDetail doc = documentService.create(new DocRequest(
+                "design", req.getId(), workItemId, session.getProjectId(),
+                "方案 - " + req.getTitle(), null, null, content));
+        DesignView design = designService.create(session.getProjectId(), req.getId(),
+                new DesignRequest(doc.id()));
+        artifactService.registerInfo(session.getProjectId(), req.getId(), workItemId,
+                com.devmind.artifact.model.ArtifactEntity.TYPE_DOC,
+                "方案 v" + design.version(), String.valueOf(doc.id()), ArtifactService.PRODUCER_SESSION);
+        return design;
     }
 
     /** CAP-38 FR-03 方案产出后自动拆分：无进行中执行 WI 才自动起拆分会话（不等方案 CONFIRMED）；
@@ -585,5 +753,11 @@ public class RequirementFlowService {
 
     private boolean isTerminal(String status) {
         return WorkItemEntity.STATUS_DONE.equals(status) || WorkItemEntity.STATUS_CANCELLED.equals(status);
+    }
+
+    /** 通知正文用的单行摘录（换行压平后截断）。 */
+    private static String preview(String s, int max) {
+        String one = s.replace('\n', ' ').replace('\r', ' ').strip();
+        return one.length() <= max ? one : one.substring(0, max) + "…";
     }
 }
