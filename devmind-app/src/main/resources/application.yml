@@ -77,9 +77,6 @@ devmind:
   knowledge:
     repo-path: ""                  # 填 knowledge-repo 本地路径后可启用注入
     enabled: true
-  docs:
-    repo-path: ""                  # 填 docs-repo 本地 git 仓库路径（本机路径写 application-local.yml）
-    enabled: true
   project:
     default-path: ""               # 留空：本机路径写在 application-local.yml（DEVMIND_PROJECT_DEFAULT_PATH 亦可覆盖）
     default-name: "default"

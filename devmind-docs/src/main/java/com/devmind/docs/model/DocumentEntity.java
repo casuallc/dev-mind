@@ -10,7 +10,7 @@ import java.time.Instant;
 
 /**
  * 文档主表（CAP-03 FR-01/FR-02/FR-04）。内容本体在 {@link DocumentVersionEntity}，
- * 每次保存生成新版本；文件镜像到 docs-repo。
+ * 每次保存生成新版本（DB 单副本）。
  */
 @Entity
 @Table(name = "documents")

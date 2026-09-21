@@ -16,7 +16,6 @@ public record DocView(
         int currentVersion,
         String status,
         List<String> tags,
-        String filePath,
         String createdBy,
         Instant createdAt,
         Instant updatedAt) {

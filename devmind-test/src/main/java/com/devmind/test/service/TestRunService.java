@@ -255,7 +255,7 @@ public class TestRunService {
         r.setFinishedAt(Instant.now());
         repo.save(r);
 
-        // FR-04 报告沉淀为 docs-repo 的 report 文档
+        // FR-04 报告沉淀为 CAP-03 的 report 文档
         try {
             Long docId = createReportDoc(r);
             r.setReportDocId(docId);

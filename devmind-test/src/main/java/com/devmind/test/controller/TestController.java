@@ -65,7 +65,7 @@ public class TestController {
         suiteService.delete(id);
     }
 
-    /** FR-03 套件沉淀为 docs-repo 的 api-suite 文档 */
+    /** FR-03 套件沉淀为 CAP-03 的 api-suite 文档 */
     @PostMapping("/test-suites/{id}/publish")
     public TestSuiteView publishSuite(@PathVariable Long id) {
         return suiteService.publishToDocs(id);

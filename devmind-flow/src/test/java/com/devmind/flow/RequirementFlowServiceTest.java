@@ -267,12 +267,12 @@ class RequirementFlowServiceTest {
         private long seq = 0;
 
         FakeDocumentService() {
-            super(null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null);
         }
 
         DocDetail add(String kind, String requirementId, String content) {
             DocDetail d = new DocDetail(++seq, kind, requirementId, null, "p1", kind + " 文档",
-                    1, "PUBLISHED", List.of(), content, null, null, null, "test",
+                    1, "PUBLISHED", List.of(), content, null, "test",
                     Instant.now(), Instant.now());
             docs.add(d);
             return d;
@@ -295,7 +295,7 @@ class RequirementFlowServiceTest {
             DocDetail old = docs.stream().filter(d -> d.id().equals(id)).findFirst().orElseThrow();
             DocDetail d = new DocDetail(old.id(), old.kind(), old.requirementId(), old.workItemId(),
                     old.projectId(), old.title(), old.versionNo() + 1, old.status(), old.tags(),
-                    req.contentMd(), req.changeNote(), null, null, old.createdBy(),
+                    req.contentMd(), req.changeNote(), old.createdBy(),
                     old.createdAt(), Instant.now());
             docs.remove(old);
             docs.add(d);

@@ -18,8 +18,6 @@ public record DocDetail(
         List<String> tags,
         String contentMd,
         String changeNote,
-        String commitSha,
-        String filePath,
         String createdBy,
         Instant createdAt,
         Instant updatedAt) {

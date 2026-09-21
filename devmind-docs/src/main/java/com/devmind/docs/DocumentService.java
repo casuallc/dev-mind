@@ -16,9 +16,7 @@ import com.devmind.docs.model.DocumentEntity;
 import com.devmind.docs.model.DocumentVersionEntity;
 import com.devmind.docs.repo.DocumentRepository;
 import com.devmind.docs.repo.DocumentVersionRepository;
-import com.devmind.docs.store.DocPaths;
-import com.devmind.docs.store.DocStore;
-import com.devmind.docs.store.TextDiff;
+import com.devmind.docs.util.TextDiff;
 import com.devmind.project.ProjectService;
 import com.devmind.project.RequirementService;
 import com.devmind.project.WorkItemService;
@@ -27,7 +25,6 @@ import com.devmind.project.model.WorkItemEntity;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,7 +32,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 文档管理核心（CAP-03）：文档 CRUD + 版本化 + 状态机 + git 同步 + 检索 + 模板。
+ * 文档管理核心（CAP-03）：文档 CRUD + 版本化 + 状态机 + 检索 + 模板。
+ * 正文存 {@code document_versions.content_md}（DB 即唯一副本，无外部文件同步）。
  */
 @Service
 public class DocumentService {
@@ -51,7 +49,6 @@ public class DocumentService {
     private final ProjectService projectService;
     private final RequirementService requirementService;
     private final WorkItemService workItemService;
-    private final DocStore store;
     private final DocsProperties props;
 
     public DocumentService(DocumentRepository docRepo,
@@ -59,7 +56,6 @@ public class DocumentService {
                            ProjectService projectService,
                            RequirementService requirementService,
                            WorkItemService workItemService,
-                           DocStore store,
                            DocsProperties props,
                            IdentityService identityService) {
         this.identityService = identityService;
@@ -68,7 +64,6 @@ public class DocumentService {
         this.projectService = projectService;
         this.requirementService = requirementService;
         this.workItemService = workItemService;
-        this.store = store;
         this.props = props;
     }
 
@@ -85,7 +80,7 @@ public class DocumentService {
         } else {
             list = docRepo.findAllByOrderByCreatedAtDesc();
         }
-        return list.stream().map(e -> DocViews.doc(e, DocPaths.filePath(e))).toList();
+        return list.stream().map(DocViews::doc).toList();
     }
 
     public DocDetail get(Long id, Integer version) {
@@ -94,7 +89,7 @@ public class DocumentService {
                 ? requireLatest(id)
                 : verRepo.findByDocumentIdAndVersionNo(id, version)
                         .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "版本不存在: v" + version));
-        return DocViews.detail(e, v, DocPaths.filePath(e));
+        return DocViews.detail(e, v);
     }
 
     public List<DocVersionView> versions(Long id) {
@@ -170,8 +165,7 @@ public class DocumentService {
         e.setUpdatedAt(now);
         e = docRepo.save(e);
 
-        String sha = store.write(DocPaths.filePath(e), content, commitMsg(e, 1, "创建"));
-        saveVersionRow(e, 1, content, sha, "创建");
+        saveVersionRow(e, 1, content, "创建");
 
         log.info("文档已创建: id={} kind={} title={}", e.getId(), kind, e.getTitle());
         return get(e.getId(), 1);
@@ -190,8 +184,7 @@ public class DocumentService {
         }
         int newVer = e.getCurrentVersion() + 1;
         String note = req.changeNote() == null ? "" : req.changeNote().strip();
-        String sha = store.write(DocPaths.filePath(e), content, commitMsg(e, newVer, note.isBlank() ? "更新" : note));
-        saveVersionRow(e, newVer, content, sha, note);
+        saveVersionRow(e, newVer, content, note);
         e.setCurrentVersion(newVer);
         e.setUpdatedAt(Instant.now());
         docRepo.save(e);
@@ -209,8 +202,7 @@ public class DocumentService {
         }
         int newVer = e.getCurrentVersion() + 1;
         String note = "回退到 v" + versionNo;
-        String sha = store.write(DocPaths.filePath(e), target.getContentMd(), commitMsg(e, newVer, note));
-        saveVersionRow(e, newVer, target.getContentMd(), sha, note);
+        saveVersionRow(e, newVer, target.getContentMd(), note);
         e.setCurrentVersion(newVer);
         e.setUpdatedAt(Instant.now());
         docRepo.save(e);
@@ -239,7 +231,7 @@ public class DocumentService {
         return get(id, null);
     }
 
-    // ---------------- diff / 检索 / 删除 / push ----------------
+    // ---------------- diff / 检索 / 删除 ----------------
 
     public DiffView diff(Long id, int versionNo) {
         DocumentEntity e = requireDoc(id);
@@ -264,7 +256,7 @@ public class DocumentService {
                     || tags.toLowerCase().contains(kw)
                     || (content != null && content.toLowerCase().contains(kw));
             if (hit) {
-                out.add(DocViews.doc(e, DocPaths.filePath(e)));
+                out.add(DocViews.doc(e));
             }
         }
         out.sort((a, b) -> b.updatedAt().compareTo(a.updatedAt()));
@@ -274,23 +266,9 @@ public class DocumentService {
     @Transactional
     public void delete(Long id) {
         DocumentEntity e = requireDoc(id);
-        try {
-            store.delete(DocPaths.filePath(e), commitMsg(e, e.getCurrentVersion(), "删除"));
-        } catch (DevMindException ex) {
-            log.warn("删除 git 文件失败(继续删库记录): {} err={}", id, ex.getMessage());
-        }
         verRepo.deleteByDocumentId(id);
         docRepo.delete(e);
         log.info("文档已删除: id={} title={}", id, e.getTitle());
-    }
-
-    public Map<String, String> repoInfo() {
-        return Map.of("repoPath", props.getRepoPath() == null ? "" : props.getRepoPath(),
-                "headSha", store.headSha());
-    }
-
-    public String push() {
-        return store.push();
     }
 
     public List<TemplateView> templates() {
@@ -309,20 +287,15 @@ public class DocumentService {
         return req.contentMd();
     }
 
-    private void saveVersionRow(DocumentEntity e, int verNo, String content, String sha, String note) {
+    private void saveVersionRow(DocumentEntity e, int verNo, String content, String note) {
         DocumentVersionEntity v = new DocumentVersionEntity();
         v.setDocumentId(e.getId());
         v.setVersionNo(verNo);
         v.setContentMd(content);
-        v.setCommitSha(sha);
         v.setChangeNote(note == null ? "" : note);
         v.setCreatedBy(actor());
         v.setCreatedAt(Instant.now());
         verRepo.save(v);
-    }
-
-    private String commitMsg(DocumentEntity e, int verNo, String note) {
-        return "docs: " + e.getTitle() + " v" + verNo + (note == null || note.isBlank() ? "" : " - " + note);
     }
 
     private DocumentEntity requireDoc(Long id) {

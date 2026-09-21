@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 文档 REST（CAP-03）：CRUD / 版本化 / diff / 状态机 / 检索 / 模板 / git push。
+ * 文档 REST（CAP-03）：CRUD / 版本化 / diff / 状态机 / 检索 / 模板。
  */
 @RestController
 @RequestMapping("/api/documents")
@@ -52,16 +52,6 @@ public class DocumentController {
     @GetMapping("/templates")
     public List<TemplateView> templates() {
         return service.templates();
-    }
-
-    @GetMapping("/repo")
-    public Map<String, String> repo() {
-        return service.repoInfo();
-    }
-
-    @PostMapping("/push")
-    public Map<String, String> push() {
-        return Map.of("message", service.push());
     }
 
     @GetMapping("/{id}")

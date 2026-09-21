@@ -12,7 +12,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 /**
- * 文档版本（CAP-03 FR-02）：每次保存生成新版本，保留全量历史与 commit_sha（docs-repo 镜像提交）。
+ * 文档版本（CAP-03 FR-02）：每次保存生成新版本，保留全量历史正文。
  */
 @Entity
 @Table(name = "document_versions")
@@ -33,10 +33,6 @@ public class DocumentVersionEntity {
     @Column(length = 16_777_216)
     private String contentMd;
 
-    /** docs-repo 对应 commit 的 sha（git 同步成功后有值） */
-    @Column(length = 64)
-    private String commitSha;
-
     /** 变更说明（frozen 状态保存时必填，FR-04） */
     @Column(length = 1000)
     private String changeNote;
@@ -54,8 +50,6 @@ public class DocumentVersionEntity {
     public void setVersionNo(int versionNo) { this.versionNo = versionNo; }
     public String getContentMd() { return contentMd; }
     public void setContentMd(String contentMd) { this.contentMd = contentMd; }
-    public String getCommitSha() { return commitSha; }
-    public void setCommitSha(String commitSha) { this.commitSha = commitSha; }
     public String getChangeNote() { return changeNote; }
     public void setChangeNote(String changeNote) { this.changeNote = changeNote; }
     public String getCreatedBy() { return createdBy; }

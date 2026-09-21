@@ -15,7 +15,7 @@ import org.hibernate.type.SqlTypes;
 /**
  * test_runs 表（CAP-10）：一次测试执行。状态机 QUEUED → RUNNING → SUCCESS（无失败用例）| FAILED。
  * suiteIdsJson 为选中的套件 id 数组；summaryJson = {"total":n,"passed":n,"failed":n,"skipped":n}；
- * reportDocId 为沉淀到 docs-repo 的 report 文档 id（FR-04）。
+ * reportDocId 为 CAP-03 的 report 文档 id（FR-04）。
  */
 @Entity
 @Table(name = "test_runs")

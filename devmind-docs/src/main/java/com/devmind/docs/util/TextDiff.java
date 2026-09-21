@@ -1,4 +1,4 @@
-package com.devmind.docs.store;
+package com.devmind.docs.util;
 
 import com.devmind.docs.dto.DiffView;
 import java.util.ArrayList;

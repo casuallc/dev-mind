@@ -41,7 +41,7 @@ import java.util.function.Supplier;
 
 /**
  * CAP-10 测试套件管理：套件 CRUD、用例整体保存（增删改）、从 OpenAPI 生成 API 套件（FR-02）、
- * 套件沉淀到 docs-repo（FR-03）。
+ * 套件沉淀为 CAP-03 文档（FR-03）。
  */
 @Service
 public class TestSuiteService {
@@ -373,7 +373,7 @@ public class TestSuiteService {
         return ex == null || ex.isNull() ? null : ex.toString();
     }
 
-    // ---------------- 沉淀到 docs-repo（FR-03） ----------------
+    // ---------------- 沉淀为 CAP-03 文档（FR-03） ----------------
 
     public TestSuiteView publishToDocs(Long suiteId) {
         TestSuiteEntity s = require(suiteId);

@@ -11,7 +11,7 @@ import java.time.Instant;
 
 /**
  * test_suites 表（CAP-10）：测试套件。kind = api（由 OpenAPI 生成的 API 套件）| smoke（冒烟套件）。
- * source = openapi（生成）/ manual（手工）。docId 为沉淀到 docs-repo 的 api-suite 文档（FR-03）。
+ * source = openapi（生成）/ manual（手工）。docId 为 CAP-03 的 api-suite 文档（FR-03）。
  */
 @Entity
 @Table(name = "test_suites")
@@ -35,7 +35,7 @@ public class TestSuiteEntity {
     @Column(length = 32)
     private String source;
 
-    /** 沉淀到 docs-repo 的 api-suite 文档 id（FR-03），可空 */
+    /** CAP-03 的 api-suite 文档 id（FR-03），可空 */
     @Column(name = "doc_id")
     private Long docId;
 

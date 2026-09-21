@@ -12,25 +12,25 @@ public final class DocViews {
     private DocViews() {
     }
 
-    public static DocView doc(DocumentEntity e, String filePath) {
+    public static DocView doc(DocumentEntity e) {
         return new DocView(
                 e.getId(), e.getKind(), e.getRequirementId(), e.getWorkItemId(), e.getProjectId(), e.getTitle(),
                 e.getCurrentVersion(), e.getStatus(), splitTags(e.getTags()),
-                filePath, e.getCreatedBy(), e.getCreatedAt(), e.getUpdatedAt());
+                e.getCreatedBy(), e.getCreatedAt(), e.getUpdatedAt());
     }
 
-    public static DocDetail detail(DocumentEntity e, DocumentVersionEntity v, String filePath) {
+    public static DocDetail detail(DocumentEntity e, DocumentVersionEntity v) {
         return new DocDetail(
                 e.getId(), e.getKind(), e.getRequirementId(), e.getWorkItemId(), e.getProjectId(), e.getTitle(),
                 v.getVersionNo(), e.getStatus(), splitTags(e.getTags()),
-                v.getContentMd(), v.getChangeNote(), v.getCommitSha(), filePath,
+                v.getContentMd(), v.getChangeNote(),
                 e.getCreatedBy(), e.getCreatedAt(), e.getUpdatedAt());
     }
 
     public static DocVersionView version(DocumentVersionEntity v) {
         return new DocVersionView(
                 v.getDocumentId(), v.getVersionNo(), v.getChangeNote(),
-                v.getCommitSha(), v.getCreatedBy(), v.getCreatedAt());
+                v.getCreatedBy(), v.getCreatedAt());
     }
 
     public static List<String> splitTags(String tags) {

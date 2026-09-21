@@ -10,7 +10,7 @@ logback-spring.xml 是日志配置（启动脚本以 --logging.config 加载）�
 本机专属覆盖（推荐）：在本目录新建 application-local.yml ——
 application.yml 中 spring.profiles.default=local，同目录下的
 application-local.yml 会被自动加载且优先级更高。机器相关的路径
-（devmind.project.default-path / devmind.docs.repo-path /
+（devmind.project.default-path /
 devmind.knowledge.repo-path 等）放这里，不要改出含本机路径的
 application.yml 后再回流到源码仓库。
 

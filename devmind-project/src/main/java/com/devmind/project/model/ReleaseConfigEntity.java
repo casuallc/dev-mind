@@ -27,7 +27,7 @@ public class ReleaseConfigEntity {
     @Column(name = "nexus_repo", length = 256)
     private String nexusRepo;
 
-    /** 推送脚本模板引用（如 docs-repo 中模板 id 或路径） */
+    /** 推送脚本模板引用（模板 id 或路径） */
     @Column(name = "script_template_ref", length = 512)
     private String scriptTemplateRef;
 
