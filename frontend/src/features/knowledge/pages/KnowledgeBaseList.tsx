@@ -379,7 +379,7 @@ export default function KnowledgeBaseList() {
       {view === 'bases' && (
         <>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-            知识库是条目的容器：FULL 库（经验库）在会话启动时全量注入 CLAUDE.md，RAG 库只做向量检索按召回内容。
+            知识库是条目的容器：FULL 库（经验库）在会话启动时全量注入 CLAUDE.local.md，RAG 库只做向量检索按召回内容。
             点库名进入条目管理与检索测试。
           </Typography.Paragraph>
           <FitTable
@@ -560,7 +560,7 @@ export default function KnowledgeBaseList() {
             name="injectMode"
             label="注入模式"
             rules={[{ required: true }]}
-            extra="FULL：会话启动全量注入 CLAUDE.md（经验库）；RAG：仅检索，按提问召回内容"
+            extra="FULL：会话启动全量注入 CLAUDE.local.md（经验库）；RAG：仅检索，按提问召回内容"
           >
             <Select
               options={[

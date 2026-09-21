@@ -332,7 +332,7 @@ export default function ScenariosPage() {
           <Form.Item
             label="场景背景"
             name="extraContextMd"
-            extra="业务背景/口径约定（Markdown），进 CLAUDE.md「场景背景」节"
+            extra="业务背景/口径约定（Markdown），进 CLAUDE.local.md「场景背景」节"
           >
             <Input.TextArea rows={3} />
           </Form.Item>
@@ -342,11 +342,11 @@ export default function ScenariosPage() {
           <Form.Item
             label="绑定文档"
             name="docIds"
-            extra="摘要进 CLAUDE.md，全文物化为 .devmind/docs/<id>.md（需要时由 Read 查看）"
+            extra="摘要进 CLAUDE.local.md，全文物化为 .devmind/docs/<id>.md（需要时由 Read 查看）"
           >
             <Select mode="multiple" options={docOptions} placeholder="（可选）" showSearch optionFilterProp="label" />
           </Form.Item>
-          <Form.Item label="绑定知识标签" name="knowledgeTags" extra="命中的知识条目进 CLAUDE.md（可输入新标签回车添加）">
+          <Form.Item label="绑定知识标签" name="knowledgeTags" extra="命中的知识条目进 CLAUDE.local.md（可输入新标签回车添加）">
             <Select mode="tags" placeholder="（可选）如 gitlab,review" open={false} />
           </Form.Item>
           <Space size="middle" style={{ display: 'flex' }} wrap>
@@ -423,7 +423,7 @@ export default function ScenariosPage() {
                 <Typography.Text type="secondary">
                   上下文包：{preview.entries} 条目 / {preview.totalBytes} 字节
                 </Typography.Text>
-                <Typography.Text strong>CLAUDE.md（注入全文）</Typography.Text>
+                <Typography.Text strong>CLAUDE.local.md（注入全文）</Typography.Text>
                 <pre
                   style={{
                     whiteSpace: 'pre-wrap',

@@ -2,7 +2,7 @@
 
 export type EntryScope = 'global' | 'project'
 
-/** 注入模式：FULL=全量注入 CLAUDE.md（经验库）；RAG=仅向量检索 */
+/** 注入模式：FULL=全量注入 CLAUDE.local.md（经验库）；RAG=仅向量检索 */
 export type InjectMode = 'FULL' | 'RAG'
 
 export type BaseStatus = 'active' | 'archived'

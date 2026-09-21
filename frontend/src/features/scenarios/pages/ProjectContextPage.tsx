@@ -22,7 +22,7 @@ const GROUP_META: Array<{ kind: string; title: string; hint: string }> = [
   {
     kind: 'doc',
     title: '文档',
-    hint: '文档不自动注入，需在场景里显式绑定（摘要进 CLAUDE.md + 全文物化）',
+    hint: '文档不自动注入，需在场景里显式绑定（摘要进 CLAUDE.local.md + 全文物化）',
   },
   {
     kind: 'skill',
@@ -145,7 +145,7 @@ export default function ProjectContextPage({
     >
       <Typography.Paragraph type="secondary">
         当前项目（{project?.name ?? projectId}）的会话上下文资产：创建会话/场景问答时经装配管线注入沙箱
-        （CLAUDE.md + .claude/skills/ + .devmind/docs/）。此页只读，维护请去后台管理对应页面。
+        （CLAUDE.local.md + .claude/skills/ + .devmind/docs/）。此页只读，维护请去后台管理对应页面。
         {activeMeta.hint && (
           <>
             <br />

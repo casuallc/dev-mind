@@ -454,7 +454,7 @@ export default function KnowledgeBaseDetail() {
         <>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
             {base?.injectMode === 'FULL'
-              ? 'FULL 库条目在会话启动时全量注入 CLAUDE.md（global 库按项目标签过滤）；内容保存后自动重建向量索引。'
+              ? 'FULL 库条目在会话启动时全量注入 CLAUDE.local.md（global 库按项目标签过滤）；内容保存后自动重建向量索引。'
               : 'RAG 库条目不参与启动注入，仅供向量检索按提问召回；内容保存后自动重建向量索引。'}
             {base && (
               <>
@@ -731,7 +731,7 @@ export default function KnowledgeBaseDetail() {
             <Form.Item
               name="injectMode"
               label="注入模式"
-              extra="FULL：会话启动全量注入 CLAUDE.md（经验库）；RAG：仅检索，按提问召回内容"
+              extra="FULL：会话启动全量注入 CLAUDE.local.md（经验库）；RAG：仅检索，按提问召回内容"
             >
               <Select
                 options={[

@@ -14,7 +14,7 @@ export interface Scenario {
   docIds: number[]
   /** ①层绑定知识 tags */
   knowledgeTags: string[]
-  /** 场景背景（→ CLAUDE.md「场景背景」节） */
+  /** 场景背景（→ CLAUDE.local.md「场景背景」节） */
   extraContextMd?: string
   model?: string
   permissionMode?: string
