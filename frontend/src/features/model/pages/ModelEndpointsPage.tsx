@@ -638,13 +638,20 @@ export default function ModelEndpointsPage() {
               </Descriptions.Item>
               <Descriptions.Item label="最近测试">
                 {managing.lastTestAt ? (
-                  <Space size={6}>
-                    <Badge status={managing.lastTestOk ? 'success' : 'error'} />
-                    <span>{fmtTime(managing.lastTestAt)}</span>
+                  // 时间与结果消息分上下两行：同行 Space 里长消息会把时间挤成竖排折行
+                  <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                    <Space size={6}>
+                      <Badge status={managing.lastTestOk ? 'success' : 'error'} />
+                      <span style={{ whiteSpace: 'nowrap' }}>{fmtTime(managing.lastTestAt)}</span>
+                    </Space>
                     {managing.lastTestMessage && (
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      <Typography.Paragraph
+                        type="secondary"
+                        style={{ fontSize: 12, marginBottom: 0, wordBreak: 'break-all' }}
+                        ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}
+                      >
                         {managing.lastTestMessage}
-                      </Typography.Text>
+                      </Typography.Paragraph>
                     )}
                   </Space>
                 ) : (
