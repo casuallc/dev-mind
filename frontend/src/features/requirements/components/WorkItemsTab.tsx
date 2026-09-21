@@ -1,15 +1,15 @@
-// 需求详情页「工作单元」Tab：WI 表格（中文状态/会话列/起会话/编辑/删除）+ 新建/编辑弹窗 + AI 拆分。
+// 需求详情页「工作单元」Tab：WI 表格（中文状态/会话列/起会话/编辑/删除）+ 新建/编辑弹窗 + 全部完成。
 // 行内操作统一居中 Modal 二次确认（编辑走弹窗表单本身）；需求完结（DONE/CANCELLED）后锁定。
-// CAP-38：状态中文标签；「会话」列跳最近会话详情；阶段未解锁（分析/方案未完成且未跳过且无 WI）显示引导 Empty。
+// CAP-52：清单由规划会话自动固化（不再是「AI 拆分」按钮），开发会话也不自动把 WI 置 DONE——
+// 人核对改动后点「全部完成」一次性收口（逐个置 DONE 会连带触发 N 次构建）。
 import { useState } from 'react'
-import { Button, Dropdown, Empty, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Button, Dropdown, Empty, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { ApartmentOutlined, DownOutlined, PlusOutlined } from '@ant-design/icons'
+import { CheckCircleOutlined, DownOutlined, PlusOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import {
   createWorkItem,
   deleteWorkItem,
-  flowSplit,
   startWorkItemSession,
   updateWorkItem,
   updateWorkItemStatus,
@@ -28,7 +28,7 @@ import { LIST_PAGINATION } from '../../../shared/utils/table'
 const WI_STATUS_FLOW: WorkItemStatus[] = ['TODO', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED']
 const WI_TYPES: WorkItemType[] = ['DESIGN', 'DEVELOPMENT', 'TEST', 'DOCUMENT', 'REVIEW']
 
-export default function WorkItemsTab({ projectId, requirementId, workItems, sessions, locked, unlocked, onChanged }: {
+export default function WorkItemsTab({ projectId, requirementId, workItems, sessions, locked, onChanged }: {
   projectId: string
   requirementId: string
   workItems: WorkItem[]
@@ -36,14 +36,12 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
   sessions: RequirementOverview['sessions']
   /** 需求已完结（DONE/CANCELLED）时锁定新建与状态流转 */
   locked: boolean
-  /** 分析/方案阶段已完成或跳过（页面层计算）：解锁 AI 拆分引导 */
-  unlocked: boolean
   onChanged: () => Promise<void> | void
 }) {
   const navigate = useNavigate()
   const [editOpen, setEditOpen] = useState(false)
   const [editing, setEditing] = useState<WorkItem | null>(null)
-  const [splitting, setSplitting] = useState(false)
+  const [finishing, setFinishing] = useState(false)
   const [form] = Form.useForm<WorkItemInput>()
 
   const openEdit = (w: WorkItem | null) => {
@@ -122,18 +120,31 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
     })
   }
 
-  // CAP-38：手动 AI 拆分（跳过方案路径；方案产出后服务端会自动拆分，此为手动兜底）
-  const aiSplit = async () => {
-    setSplitting(true)
-    try {
-      await flowSplit(projectId, requirementId)
-      message.success('拆分会话已启动，产出将自动固化为工作单元')
-      await onChanged()
-    } catch (e) {
-      showError(e)
-    } finally {
-      setSplitting(false)
-    }
+  // CAP-52：开发会话完成后逐条核对改动，一次收口（未完成的条目留给下轮开发会话）
+  const pendingItems = workItems.filter((w) => w.status !== 'DONE' && w.status !== 'CANCELLED')
+  const finishAll = () => {
+    Modal.confirm({
+      centered: true,
+      title: '全部标记完成？',
+      content: `将把本需求下 ${pendingItems.length} 个未完结的工作单元置为「已完成」，`
+        + '并触发既有的构建/测试联动（每一条各自触发一次）。',
+      okText: '全部完成',
+      cancelText: '返回',
+      onOk: async () => {
+        setFinishing(true)
+        try {
+          for (const w of pendingItems) {
+            await updateWorkItemStatus(projectId, requirementId, w.id, 'DONE')
+          }
+          message.success(`已置完成 ${pendingItems.length} 条`)
+          await onChanged()
+        } catch (e) {
+          showError(e)
+        } finally {
+          setFinishing(false)
+        }
+      },
+    })
   }
 
   const columns: ColumnsType<WorkItem> = [
@@ -199,8 +210,8 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
     },
   ]
 
-  // 阶段未解锁且无既有 WI：引导先完成/跳过前置阶段（仍可手工新建，为逃生通道）
-  const showGuide = workItems.length === 0 && !unlocked && !locked
+  // CAP-52：没有清单时引导去起规划会话（清单由它一次性产出），手工新建保留为逃生通道
+  const showGuide = workItems.length === 0 && !locked
 
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -209,11 +220,19 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
           <Button size="small" type="primary" ghost icon={<PlusOutlined />} onClick={() => openEdit(null)}>
             新建工作单元
           </Button>
-          {unlocked && (
-            <Button size="small" icon={<ApartmentOutlined />} loading={splitting} onClick={aiSplit}>
-              AI 拆分
-            </Button>
-          )}
+          <Tooltip title={pendingItems.length === 0 ? '没有未完结的工作单元' : undefined}>
+            <span>
+              <Button
+                size="small"
+                icon={<CheckCircleOutlined />}
+                loading={finishing}
+                disabled={pendingItems.length === 0}
+                onClick={finishAll}
+              >
+                全部完成（{pendingItems.length}）
+              </Button>
+            </span>
+          </Tooltip>
         </Space>
       )}
       {showGuide ? (
@@ -221,7 +240,7 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description={
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              按流程先完成（或跳过）「需求分析」与「方案设计」，方案产出后将自动拆分工作单元；
+              工作单元由「开启 AI 规划」一次性产出（分析 + 方案 + 清单，并自动接开发会话）；
               也可以直接手工新建。
             </Typography.Text>
           }

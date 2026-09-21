@@ -1,11 +1,10 @@
-// 方案设计 Tab（CAP-13/14/38）：阶段操作区（生成方案/跳过方案）+ Design 列表（确认/废弃/删除/文档预览）。
-// 方案产出登记后服务端自动拆分工作单元；确认（CONFIRMED）降为纯标记——拆分时优先取已确认方案内容，不再门控。
-// 阶段解锁由页面层计算 analysisDone 传入：分析完成或跳过后才可生成方案（流程不可逆引导）。
+// 方案设计 Tab（CAP-52）：**只读展示**——规划会话产出的方案列表 + 文档预览（起会话入口在需求详情页头卡）。
+// 与 AI 流程无关的记录管理保留：「确认」为纯标记（人工挑一份作准绳），废弃/恢复/删除是本地记录整理。
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Popconfirm, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
+import { Button, Popconfirm, Space, Table, Tag, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
-import { flowDesign, flowSkip, listDesigns } from '../../api'
+import { listDesigns } from '../../api'
 import { DESIGN_STATUS_LABEL } from '../requirementMeta'
 import type { Design, DesignStatus, Requirement } from '../../types'
 import { fmtTime } from '../../../../shared/utils/format'
@@ -14,18 +13,15 @@ import { LIST_PAGINATION } from '../../../../shared/utils/table'
 import DocPreviewModal from './DocPreviewModal'
 import { designStatusColor, useDesignActions } from './useDesignActions'
 
-export default function DesignsTab({ projectId, requirement, analysisDone, onChanged }: {
+export default function DesignsTab({ projectId, requirement, onChanged }: {
   projectId: string
   requirement: Requirement
-  /** 需求分析已完成或已跳过（页面层计算）——未满足时生成/跳过动作禁用 */
-  analysisDone: boolean
-  /** 阶段动作触发后的整页刷新（overview + 页面级方案列表） */
+  /** 记录变更后的整页刷新（overview + 页面级方案列表） */
   onChanged: () => void
 }) {
   const requirementId = requirement.id
   const [designs, setDesigns] = useState<Design[]>([])
   const [loading, setLoading] = useState(false)
-  const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -42,37 +38,14 @@ export default function DesignsTab({ projectId, requirement, analysisDone, onCha
     load()
   }, [load])
 
+  // 记录变更后本地表与页面级方案列表都要刷（页面级列表决定头卡按钮文案是「开启」还是「重新规划」）
+  const refresh = useCallback(() => {
+    load()
+    onChanged()
+  }, [load, onChanged])
+
   const { preview, closePreview, setStatus, remove, previewDesign } =
-    useDesignActions(projectId, requirementId, load)
-
-  const hasActiveDesign = designs.some((d) => d.status !== 'DISCARDED')
-  const skipped = !!requirement.designSkipped
-
-  const generate = async () => {
-    setBusy(true)
-    try {
-      await flowDesign(projectId, requirementId)
-      message.success('方案设计会话已启动，产出后将自动拆分工作单元')
-      onChanged()
-    } catch (e) {
-      showError(e)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const skip = async () => {
-    setBusy(true)
-    try {
-      await flowSkip(projectId, requirementId, 'design')
-      message.success('已跳过方案设计，可在「工作单元」Tab 直接 AI 拆分或手工新建')
-      onChanged()
-    } catch (e) {
-      showError(e)
-    } finally {
-      setBusy(false)
-    }
-  }
+    useDesignActions(projectId, requirementId, refresh)
 
   const columns: ColumnsType<Design> = [
     { title: '版本', dataIndex: 'version', width: 70, render: (v: number) => `v${v}` },
@@ -114,25 +87,9 @@ export default function DesignsTab({ projectId, requirement, analysisDone, onCha
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       <Space wrap size={8}>
-        <Tooltip title={analysisDone ? '' : '先完成或跳过需求分析'}>
-          <Button size="small" type="primary" loading={busy} disabled={!analysisDone} onClick={generate}>
-            生成方案（AI）
-          </Button>
-        </Tooltip>
-        {!hasActiveDesign && !skipped && (
-          <Popconfirm
-            title="跳过方案设计？"
-            description="跳过后不可恢复（流程不可逆），可在「工作单元」Tab 直接 AI 拆分或手工新建"
-            okText="跳过"
-            cancelText="返回"
-            onConfirm={skip}
-          >
-            <Button size="small" disabled={!analysisDone}>跳过方案</Button>
-          </Popconfirm>
-        )}
-        {skipped && <Tag>已跳过方案设计</Tag>}
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          方案产出自动登记为草稿并自动拆分工作单元；「确认」为纯标记，拆分时优先采用已确认方案内容。
+          规划会话产出的方案自动登记为草稿并自动拆出工作单元；「确认」为纯标记（人工挑一份作准绳）。
+          生成/重跑方案请用页面右上角「开启 AI 规划」。
         </Typography.Text>
         <Button size="small" icon={<ReloadOutlined />} onClick={load} loading={loading} />
       </Space>

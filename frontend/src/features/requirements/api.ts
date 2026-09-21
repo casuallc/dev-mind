@@ -257,30 +257,16 @@ export function deleteDesign(projectId: string, requirementId: string, designId:
   return api.del(`/projects/${projectId}/requirements/${requirementId}/designs/${designId}`)
 }
 
-// ---- CAP-14 需求流程 ----
+// ---- CAP-14/52 需求流程 ----
 
-/** 开始/重新分析（起分析型会话） */
-export function flowAnalyze(projectId: string, requirementId: string): Promise<FlowSession> {
-  return api.post<FlowSession>(`/projects/${projectId}/requirements/${requirementId}/flow/analyze`)
+/** CAP-52 开启 AI 规划：一个会话产出 分析 + 方案 + 工作单元，三份齐备后自动起开发会话 */
+export function flowPlan(projectId: string, requirementId: string): Promise<FlowSession> {
+  return api.post<FlowSession>(`/projects/${projectId}/requirements/${requirementId}/flow/plan`)
 }
 
-/** 生成方案（创建 DESIGN 型工作单元并起会话） */
-export function flowDesign(projectId: string, requirementId: string): Promise<FlowSession> {
-  return api.post<FlowSession>(`/projects/${projectId}/requirements/${requirementId}/flow/design`)
-}
-
-/** AI 拆分（手动路径：起拆分会话，产出 wi-plan.json 自动固化为工作单元） */
-export function flowSplit(projectId: string, requirementId: string): Promise<FlowSession> {
-  return api.post<FlowSession>(`/projects/${projectId}/requirements/${requirementId}/flow/split`)
-}
-
-/** CAP-38 阶段跳过（幂等）：stage = analysis | design */
-export function flowSkip(
-  projectId: string,
-  requirementId: string,
-  stage: 'analysis' | 'design',
-): Promise<void> {
-  return api.post<void>(`/projects/${projectId}/requirements/${requirementId}/flow/skip`, { stage })
+/** CAP-52 开发（重新开发）：按已固化清单起需求级开发会话，整份清单一次做完 */
+export function flowDev(projectId: string, requirementId: string): Promise<FlowSession> {
+  return api.post<FlowSession>(`/projects/${projectId}/requirements/${requirementId}/flow/dev`)
 }
 
 /** 工作单元起会话（spec 自动带入 taskSpec） */

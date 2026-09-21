@@ -1,8 +1,9 @@
 // 需求详情页（/projects/:id/requirements/:rid）：单条需求的研发主线。
-// 布局：头卡（默认尺寸，标题栏更高；extra 集中全部操作：验收/编辑/属性/Jira 操作/刷新/更多/返回列表）+ 白底 Tabs 卡。
+// 布局：头卡（默认尺寸，标题栏更高；extra 集中全部操作：开启 AI 规划/重新开发/验收/编辑/属性/Jira 操作/刷新/更多/返回列表）+ 白底 Tabs 卡。
 // 不设阶段引导卡：需求状态由工作单元 rollup 自动派生（全部完结 → ACCEPTANCE），验收按钮直接放头卡 extra。
-// CAP-38：Tab 按流程排序（需求分析 → 方案设计 → 工作单元 → 时间线 → 关联记录），分析/方案为独立阶段 Tab，
-// 阶段可跳过、不可逆引导（前面完成或跳过才解锁后面）；方案产出后服务端自动拆分固化工作单元。
+// CAP-52 入口收敛：流程只有一个起点「开启 AI 规划」（一个会话产出 分析+方案+工作单元，自动接开发会话），
+// 与「重新开发」（按已固化清单重起需求级开发会话）；分析/方案 Tab 降为只读展示（要改就整段重跑），
+// 阶段跳过/单阶段起会话的入口已随 CAP-52 删除。工作单元仍可人工增删改与行内起会话。
 // 属性面板非常驻：点「属性」按钮开右侧 Drawer；需求描述超长时默认收起（渐变遮罩 + 展开/收起，ResizeObserver 跟随图片加载重测）。
 // Jira 来源：托管字段本地只读（表单禁用 + 服务端强制），属性面板显示 Jira key 链接与远端状态。
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -30,13 +31,17 @@ import {
   DownOutlined,
   EditOutlined,
   LockOutlined,
+  PlayCircleOutlined,
   ProfileOutlined,
   ReloadOutlined,
+  ThunderboltOutlined,
   UpOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   deleteRequirement,
+  flowDev,
+  flowPlan,
   getRequirementOverview,
   listDesigns,
   refreshRequirementFromJira,
@@ -51,6 +56,7 @@ import RelatedRecordsTab from '../components/RelatedRecordsTab'
 import RequirementFormDrawer from '../components/RequirementFormDrawer'
 import TimelineTab from '../components/TimelineTab'
 import WorkItemsTab from '../components/WorkItemsTab'
+import { ACTIVE_SESSION_STATES, latestFlowSession } from '../components/flow/flowSessions'
 import { getCurrentProjectId, setCurrentProject } from '../../../app/currentProjectStore'
 import { fmtDuration, fmtTime } from '../../../shared/utils/format'
 import { pageRootScrollStyle } from '../../../shared/utils/pageLayout'
@@ -136,6 +142,8 @@ export default function RequirementDetailPage() {
   const [pushOpen, setPushOpen] = useState(false)
   const [refreshingJira, setRefreshingJira] = useState(false)
   const [designs, setDesigns] = useState<Design[]>([])
+  // CAP-52 流程动作互斥：同一时刻只允许一个在飞（规划 / 开发）
+  const [flowBusy, setFlowBusy] = useState<null | 'plan' | 'dev'>(null)
   // Tab 与 URL 同步（?tab=analysis/design/workItems）：流程通知深链直达对应 Tab，刷新/分享不丢位置
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab = searchParams.get('tab') || 'analysis'
@@ -192,10 +200,64 @@ export default function RequirementDetailPage() {
   const isJira = r.source === 'JIRA'
   const terminal = r.status === 'DONE' || r.status === 'CANCELLED'
   const cancellable = !terminal
-  // CAP-38 阶段解锁判定：分析完成（有分析文档）或已跳过 → 方案解锁；方案完成（有未废弃方案）或已跳过 → 工作单元解锁
-  const analysisDone = overview.docs.some((d) => d.kind === 'analysis') || !!r.analysisSkipped
-  const designDone = designs.some((d) => d.status !== 'DISCARDED') || !!r.designSkipped
-  const workItemsUnlocked = analysisDone && designDone
+  // CAP-52：流程只有一个起点与一个续跑口——「开启/重新规划」与「重新开发」。已有进行中的流程会话时
+  // 两个入口都禁用（服务端另有互斥预检，这里只是别让人白点）。
+  const planSession = latestFlowSession(overview.sessions, '[flow:plan]')
+  const devSession = latestFlowSession(overview.sessions, '[flow:dev]')
+  const flowActive = [planSession, devSession].some(
+    (s) => !!s && ACTIVE_SESSION_STATES.includes(s.status),
+  )
+  // 已有规划产出（分析文档或方案）= 再点是「整段重跑」而非首次规划
+  const planned = overview.docs.some((d) => d.kind === 'analysis')
+    || designs.some((d) => d.status !== 'DISCARDED')
+  const hasWorkItems = overview.workItems.length > 0
+
+  /** 起流程会话：规划/开发共用（成功后刷新 overview + 方案列表，会话状态进「会话」列与 Tab 标签） */
+  const startFlow = async (kind: 'plan' | 'dev') => {
+    if (!projectId) return
+    setFlowBusy(kind)
+    try {
+      const s = kind === 'plan'
+        ? await flowPlan(projectId, r.id)
+        : await flowDev(projectId, r.id)
+      message.success(kind === 'plan'
+        ? '规划会话已启动：一个会话产出分析+方案+工作单元，完成后自动接开发会话'
+        : '开发会话已启动：按工作单元清单一次做完')
+      navigate(`/sessions?sid=${s.id}`)
+    } catch (e) {
+      showError(e)
+    } finally {
+      setFlowBusy(null)
+    }
+  }
+
+  const confirmPlan = () => {
+    if (!planned) {
+      startFlow('plan')
+      return
+    }
+    Modal.confirm({
+      centered: true,
+      title: '重新规划？',
+      content: '将重跑整个规划链路（分析 + 方案 + 工作单元），新产出会落成分析/方案文档的新版本；'
+        + '已有工作单元不会被删除。',
+      okText: '重新规划',
+      cancelText: '返回',
+      onOk: () => startFlow('plan'),
+    })
+  }
+
+  const confirmDev = () => {
+    Modal.confirm({
+      centered: true,
+      title: '起开发会话？',
+      content: `将按当前 ${overview.workItems.length} 个工作单元的清单起一个开发会话，一次做完整个需求`
+        + '（清单里未完成的会置为「进行中」）。',
+      okText: '起会话',
+      cancelText: '返回',
+      onOk: () => startFlow('dev'),
+    })
+  }
 
   // 需求翻 DONE（终态）：验收通过（ACCEPTANCE 主按钮）与直接完成（伪需求/无需工作单元，不经 rollup）共用，仅文案不同
   const confirmMarkDone = (mode: 'accept' | 'direct') => {
@@ -302,6 +364,35 @@ export default function RequirementDetailPage() {
         }
         extra={
           <Space size={8} wrap>
+            {!terminal && (
+              <Tooltip title={flowActive ? '该需求已有进行中的流程会话，等它结束后再起' : undefined}>
+                <span>
+                  <Button
+                    type={r.status === 'ACCEPTANCE' ? 'default' : 'primary'}
+                    icon={<ThunderboltOutlined />}
+                    loading={flowBusy === 'plan'}
+                    disabled={flowActive}
+                    onClick={confirmPlan}
+                  >
+                    {planned ? '重新规划' : '开启 AI 规划'}
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
+            {!terminal && hasWorkItems && (
+              <Tooltip title={flowActive ? '该需求已有进行中的流程会话，等它结束后再起' : undefined}>
+                <span>
+                  <Button
+                    icon={<PlayCircleOutlined />}
+                    loading={flowBusy === 'dev'}
+                    disabled={flowActive}
+                    onClick={confirmDev}
+                  >
+                    重新开发
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
             {r.status === 'ACCEPTANCE' && (
               <Button type="primary" icon={<CheckOutlined />} onClick={() => confirmMarkDone('accept')}>
                 验收通过
@@ -384,7 +475,6 @@ export default function RequirementDetailPage() {
                 <DesignsTab
                   projectId={r.projectId}
                   requirement={r}
-                  analysisDone={analysisDone}
                   onChanged={reloadAll}
                 />
               ),
@@ -399,7 +489,6 @@ export default function RequirementDetailPage() {
                   workItems={overview.workItems}
                   sessions={overview.sessions}
                   locked={terminal}
-                  unlocked={workItemsUnlocked}
                   onChanged={reloadOverview}
                 />
               ),
