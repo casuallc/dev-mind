@@ -93,7 +93,7 @@ class JiraIssueActionServiceTest {
         final Map<String, RequirementEntity> store = new HashMap<>();
 
         FakeRequirementService() {
-            super(null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null);
         }
 
         RequirementEntity add(String id, String projectId, String source) {

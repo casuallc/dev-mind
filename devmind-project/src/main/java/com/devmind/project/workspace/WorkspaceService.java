@@ -35,7 +35,16 @@ public class WorkspaceService {
 
     /** 会话工作区：项目主库 + feature/<sessionId> 分支 */
     public Workspace prepareSessionWorkspace(Project project, String sessionId) {
-        String branch = worktreeManager.branchFor(sessionId);
+        return prepareSessionWorkspace(project, null, sessionId);
+    }
+
+    /**
+     * CAP-51 会话工作区（需求维度分支）：关联需求 → {@code feature/req-<requirementId>}，
+     * 无需求 → {@code feature/<sessionId>}（{@link WorktreeManager#branchFor(String, String)}，
+     * 与 launch 帧下发的会话分支同口径）。
+     */
+    public Workspace prepareSessionWorkspace(Project project, String requirementId, String sessionId) {
+        String branch = worktreeManager.branchFor(requirementId, sessionId);
         Path dir = worktreeManager.worktreeDir(project.repoPath(), sessionId);
         worktreeManager.create(project.repoPath(), project.baseBranch(), branch, dir);
         return new LocalWorktreeWorkspace(worktreeManager, project.repoPath(), project.baseBranch(), branch, dir);
@@ -47,10 +56,16 @@ public class WorkspaceService {
      * specs 顺序约定：主库在前（聚合根落在主库 .devmind 下）。
      */
     public Workspace prepareSessionWorkspace(List<SessionRepoSpec> specs, String sessionId) {
+        return prepareSessionWorkspace(specs, null, sessionId);
+    }
+
+    /** CAP-51：多库版本，分支按需求维度推导（同 {@link #prepareSessionWorkspace(Project, String, String)}）。 */
+    public Workspace prepareSessionWorkspace(List<SessionRepoSpec> specs, String requirementId,
+                                            String sessionId) {
         if (specs == null || specs.isEmpty()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "会话仓库列表为空");
         }
-        String branch = worktreeManager.branchFor(sessionId);
+        String branch = worktreeManager.branchFor(requirementId, sessionId);
         if (specs.size() == 1) {
             SessionRepoSpec r = specs.get(0);
             Path dir = worktreeManager.worktreeDir(r.repoPath(), sessionId);
@@ -87,8 +102,14 @@ public class WorkspaceService {
 
     /** 清理会话工作区（按记录的路径与约定分支重建句柄） */
     public void cleanupSessionWorkspace(Project project, String sessionId, Path worktreePath) {
+        cleanupSessionWorkspace(project, null, sessionId, worktreePath);
+    }
+
+    /** CAP-51：清理本地会话工作区（分支按需求维度推导，与 prepare 同口径）。 */
+    public void cleanupSessionWorkspace(Project project, String requirementId, String sessionId,
+                                        Path worktreePath) {
         new LocalWorktreeWorkspace(worktreeManager, project.repoPath(), project.baseBranch(),
-                worktreeManager.branchFor(sessionId), worktreePath).cleanup();
+                worktreeManager.branchFor(requirementId, sessionId), worktreePath).cleanup();
     }
 
     /**
@@ -96,7 +117,13 @@ public class WorkspaceService {
      * 聚合工作区句柄（子目录名推导与 prepare 同算法，确定性一致）。
      */
     public void cleanupSessionWorkspace(List<SessionRepoSpec> specs, String sessionId, Path rootPath) {
-        String branch = worktreeManager.branchFor(sessionId);
+        cleanupSessionWorkspace(specs, null, sessionId, rootPath);
+    }
+
+    /** CAP-51：多库清理（分支按需求维度推导，与 prepare 同口径）。 */
+    public void cleanupSessionWorkspace(List<SessionRepoSpec> specs, String requirementId,
+                                        String sessionId, Path rootPath) {
+        String branch = worktreeManager.branchFor(requirementId, sessionId);
         if (specs == null || specs.size() <= 1) {
             if (specs != null && !specs.isEmpty()) {
                 SessionRepoSpec r = specs.get(0);

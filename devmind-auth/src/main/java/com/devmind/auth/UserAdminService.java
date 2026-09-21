@@ -31,9 +31,9 @@ public class UserAdminService {
     /** CAP-42 FR-07：username 作 runner 工作区目录名（与 RunnerWorkspace.SAFE_ID 同口径） */
     private static final java.util.regex.Pattern USERNAME_PATTERN =
             java.util.regex.Pattern.compile("[a-zA-Z0-9._-]+");
-    /** 工作区保留目录名（GC/对账扫描桶 + 固定目录名），禁用防撞名 */
+    /** 工作区保留目录名（GC/对账扫描桶 + 固定目录名），禁用防撞名；CAP-51 起加需求工作树桶 worktrees */
     private static final Set<String> RESERVED_WORKSPACE_DIRS =
-            Set.of("main", "sessions", "builds", "_chat", "work");
+            Set.of("main", "sessions", "builds", "_chat", "work", "worktrees");
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final UserRepository userRepo;
@@ -59,7 +59,7 @@ public class UserAdminService {
         if (!USERNAME_PATTERN.matcher(username).matches() || RESERVED_WORKSPACE_DIRS.contains(username)) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "用户名「" + username + "」不合法：需匹配 [a-zA-Z0-9._-] 且非保留名 "
-                            + "main/sessions/builds/_chat/work（用户名会作为 runner 工作区目录名）");
+                            + "main/sessions/builds/_chat/work/worktrees（用户名会作为 runner 工作区目录名）");
         }
         if (userRepo.findByUsername(username).isPresent()) {
             throw new DevMindException(ErrorCode.CONFLICT, "用户名已存在: " + username);

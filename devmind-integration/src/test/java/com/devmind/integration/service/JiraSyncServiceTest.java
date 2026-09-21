@@ -93,7 +93,7 @@ class JiraSyncServiceTest {
         private int seq = 0;
 
         FakeRequirementService() {
-            super(null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null);
         }
 
         /** 与 RequirementService.applyJiraFields 同款的 fake 落库（标题截 240） */

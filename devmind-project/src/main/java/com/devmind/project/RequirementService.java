@@ -1,12 +1,14 @@
 package com.devmind.project;
 
 import com.devmind.auth.IdentityService;
+import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.project.dto.JiraManagedFields;
 import com.devmind.common.dto.PageView;
 import com.devmind.project.dto.RequirementRequest;
 import com.devmind.project.dto.RequirementView;
+import com.devmind.project.event.RequirementDeletedEvent;
 import com.devmind.project.model.RequirementEntity;
 import com.devmind.project.model.WorkItemEntity;
 import com.devmind.project.repo.DesignRepository;
@@ -70,6 +72,8 @@ public class RequirementService {
     private final RelationRepository relationRepo;
     private final ObjectProvider<RequirementExternalRefLookup> externalRefLookup;
     private final ObjectProvider<RequirementAgentTimeLookup> agentTimeLookup;
+    /** CAP-51 FR-06：需求删除事件（session 模块据此释放需求工作树） */
+    private final DomainEventPublisher eventPublisher;
 
     public RequirementService(ProjectRepository projectRepo,
                               RequirementRepository requirementRepo,
@@ -78,7 +82,8 @@ public class RequirementService {
                               @Lazy RelationRepository relationRepo,
                               IdentityService identityService,
                               ObjectProvider<RequirementExternalRefLookup> externalRefLookup,
-                              ObjectProvider<RequirementAgentTimeLookup> agentTimeLookup) {
+                              ObjectProvider<RequirementAgentTimeLookup> agentTimeLookup,
+                              DomainEventPublisher eventPublisher) {
         this.identityService = identityService;
         this.projectRepo = projectRepo;
         this.requirementRepo = requirementRepo;
@@ -87,6 +92,7 @@ public class RequirementService {
         this.relationRepo = relationRepo;
         this.externalRefLookup = externalRefLookup;
         this.agentTimeLookup = agentTimeLookup;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -301,7 +307,45 @@ public class RequirementService {
         relationRepo.deleteByFromTypeAndFromId("requirement", requirementId);
         relationRepo.deleteByToTypeAndToId("requirement", requirementId);
         requirementRepo.delete(e);
+        // CAP-51 FR-06：需求删除 → 释放节点上的需求工作树（丢弃语义）。事件带 workspaceOwner：
+        // 需求行随即删除，监听方再查不到归属用户（owner 冻结在 workspace_owner 列上）。
+        eventPublisher.publish(new RequirementDeletedEvent(requirementId, projectId,
+                e.getWorkspaceOwner(), identityService.currentActor()));
         log.info("需求已删除: projectId={} code={}", projectId, code(e.getSeq()));
+    }
+
+    /**
+     * CAP-51 FR-09：需求工作区转为占用中（OPEN）。owner 只在首次建工作区时冻结写入，
+     * 之后不随需求负责人漂移（runner 目录已按该用户名分桶，改了会指向另一块地）。
+     */
+    public void markWorkspaceOpen(String requirementId, String workspaceOwner) {
+        requirementRepo.findById(requirementId).ifPresent(e -> {
+            boolean dirty = false;
+            if (e.getWorkspaceOwner() == null || e.getWorkspaceOwner().isBlank()) {
+                e.setWorkspaceOwner(workspaceOwner);
+                dirty = true;
+            }
+            if (!RequirementEntity.WORKSPACE_OPEN.equals(e.getWorkspaceState())) {
+                e.setWorkspaceState(RequirementEntity.WORKSPACE_OPEN);
+                dirty = true;
+            }
+            if (dirty) {
+                e.setUpdatedAt(Instant.now());
+                requirementRepo.save(e);
+            }
+        });
+    }
+
+    /** CAP-51 FR-04：需求工作区已收口（FINALIZED）。工作树仍保留在节点上（后续会话接着用）。 */
+    public void markWorkspaceFinalized(String requirementId) {
+        requirementRepo.findById(requirementId).ifPresent(e -> {
+            if (RequirementEntity.WORKSPACE_FINALIZED.equals(e.getWorkspaceState())) {
+                return;
+            }
+            e.setWorkspaceState(RequirementEntity.WORKSPACE_FINALIZED);
+            e.setUpdatedAt(Instant.now());
+            requirementRepo.save(e);
+        });
     }
 
     /**

@@ -155,7 +155,7 @@ class RequirementAttachmentProviderTest {
 
     private class FakeRequirementService extends RequirementService {
         FakeRequirementService() {
-            super(null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null);
         }
 
         @Override

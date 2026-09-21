@@ -44,6 +44,35 @@ public class WorktreeManager {
         return "feature/" + sessionId;
     }
 
+    /**
+     * CAP-51 FR-02 会话分支名（需求维度，服务端唯一生成点，runner 不复制命名逻辑）：
+     * 关联需求 → {@code feature/req-<requirementId>}（需求内多会话共用同一条线，改动天然累积）；
+     * 无需求会话 → {@code feature/<sessionId>}（同 {@link #branchFor(String)}）。
+     *
+     * <p><b>快照优先</b>：收口/释放/diff/resume 一律读 {@code session_repos.branch} 落库快照，
+     * 只有快照为空才用本方法推导（存量 CAP-42 会话快照是 {@code feature/<sid>}，现算值会不一致，
+     * 直接现算会被 runner 的「检出分支与会话分支不一致」挡下）。</p>
+     */
+    public String branchFor(String requirementId, String sessionId) {
+        return requirementId == null || requirementId.isBlank()
+                ? branchFor(sessionId)
+                : "feature/req-" + requirementId;
+    }
+
+    /**
+     * CAP-51 FR-01 工作区键（launch/finalize/release 帧的 {@code workspaceKey}，服务端唯一生成点）：
+     * 关联需求 → {@code req-<requirementId>}（同需求多会话共用一棵工作树）；无需求会话 →
+     * {@code sid-<sessionId>}（每会话独立目录，等价 CAP-42 之前的按会话隔离）。
+     *
+     * <p>键会走 runner 侧 {@code RunnerWorkspace.requireKey} 的 SAFE_ID 白名单 + 保留名校验，
+     * 故需求 id/会话 id 必须落在 {@code [a-zA-Z0-9._-]}（需求 id 为 8 位 {@code [a-z0-9]}，天然合规）。</p>
+     */
+    public String workspaceKeyFor(String requirementId, String sessionId) {
+        return requirementId == null || requirementId.isBlank()
+                ? "sid-" + sessionId
+                : "req-" + requirementId;
+    }
+
     /** 工作单元分支名（CAP-13 约定）：wi/<seq>-<slug>，每个 repo 一条 */
     public String branchForWorkItem(long seq, String slug) {
         return "wi/" + seq + (slug == null || slug.isBlank() ? "" : "-" + slug);

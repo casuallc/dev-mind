@@ -20,6 +20,7 @@ import com.devmind.project.WorktreeManager;
 import com.devmind.project.workspace.WorkspaceService;
 import com.devmind.project.RequirementService;
 import com.devmind.project.WorkItemService;
+import com.devmind.project.event.RequirementDeletedEvent;
 import com.devmind.project.model.Project;
 import com.devmind.project.model.ProjectEntity;
 import com.devmind.project.model.RequirementEntity;
@@ -283,7 +284,16 @@ public class SessionManagerService {
         // 空 = 项目无仓库行（兼容旧单库路径，按 projects 镜像列跑）
         // CAP-41：WORKLOG 项目无仓库语义，跳过快照
         List<SessionRepoEntity> repoRows = worklog ? List.of()
-                : resolveRepoSnapshot(project, req, id, baseBranch);
+                : resolveRepoSnapshot(project, req, requirement != null ? requirement.getId() : null,
+                        id, baseBranch);
+
+        // CAP-51 FR-01/FR-02：需求粒度工作区键与分支（服务端唯一生成点，runner 不推导）——
+        // 关联需求 → worktrees/req-<需求id> + feature/req-<需求id>；无需求 repo 会话 →
+        // worktrees/sid-<会话id> + feature/<会话id>。键随 launch 帧下发（协议 v10 门控），
+        // 分支写进 session_repos 快照（收口/释放/resume 一律读快照，见 FR-11）。
+        String requirementIdOfSession = requirement != null ? requirement.getId() : null;
+        String workspaceKey = worktreeManager.workspaceKeyFor(requirementIdOfSession, id);
+        String sessionBranch = worktreeManager.branchFor(requirementIdOfSession, id);
 
         // CAP-34：服务端不建 worktree、不做本机知识注入——工作区与上下文物化均在 runner 侧
         // （launch 帧 repos + contextManifest，runner 拉包物化，见 SessionContextService）
@@ -308,36 +318,33 @@ public class SessionManagerService {
         runtimes.put(id, remoteRt);
         // CAP-42：repo 会话固定工作区归属用户名（launch 帧 workspaceOwner；try 内解析后供落库）
         String wsOwner = null;
+        // CAP-51：本会话是否真的绑定了一块工作区（repo 会话且归属用户解析成功）——据此落 workspace_key
+        boolean workspaceBound = false;
         try {
             // CAP-31：repos=全量快照（含 name，新 runner 多库模式）；repo=首个（主库）保持旧 runner 降级
             // CAP-41：worklog 会话无仓库块，kind="worklog" + worklogOwner=项目归属用户（runner 目录隔离键）
             List<AgentLaunchCommand.RepoSpec> specs = worklog ? List.of()
-                    : buildRepoSpecs(project, repoRows, baseBranch,
-                            worktreeManager.branchFor(id), identityService.currentActor());
-            // CAP-42：repo 会话走每用户固定工作区——归属用户解析（无登录态按 WI/需求归属人回退链）
-            // + 协议 v7 门控（老 runner 会忽略 workspaceOwner 落 sessions/<sid> 旧布局，fail-visible 409）
+                    : buildRepoSpecs(project, repoRows, baseBranch, sessionBranch,
+                            identityService.currentActor());
+            // CAP-42/CAP-51：repo 会话走工作区——归属用户解析（无登录态按 WI/需求归属人回退链）
+            // + 协议门控（带 workspaceKey 需 v10+，缺 key 的存量路径仍是 v7；老 runner 会忽略新字段
+            //   把不同需求写进同一 work/ 目录，fail-visible 409，绝不静默下发）
             if (!worklog && !specs.isEmpty()) {
                 wsOwner = requireWorkspaceOwner(resolveWorkspaceOwner(workItem, requirement));
-                if (!connector.supports(agentNodeId, AgentProtocol.PER_USER_WORKSPACE)) {
-                    throw new DevMindException(ErrorCode.CONFLICT,
-                            "节点 runner 版本过低，不支持每用户固定工作区（需协议 v7+），请升级该节点 runner");
-                }
-                // 占用预检（服务端视角友好报错，runner 侧 ensureUserWorktree 仍是最终防线）：
-                // 同 (项目, 归属用户) 已有未收口工作区会话 → 引导先收口再开新会话
-                List<SessionEntity> occupants = sessionRepo.findByProjectIdAndWorkspaceOwnerAndWorkspaceState(
-                        project != null ? project.id() : null, wsOwner, SessionEntity.WORKSPACE_OPEN);
-                if (!occupants.isEmpty()) {
-                    throw new DevMindException(ErrorCode.CONFLICT,
-                            "你在本项目的固定工作区仍被会话 " + occupants.get(0).getId()
-                                    + " 占用，请先在该会话「更多 → 收口合并到基线」完成收口，再开新会话");
-                }
+                requireWorkspaceProtocol(connector, agentNodeId, workspaceKey);
+                // CAP-51 FR-03：需求级互斥预检（服务端视角友好报错，runner 侧 ensureUserWorktree
+                // 的分支比对仍是磁盘残留的最终防线）：同需求已有进行中的会话 → 409。
+                // 无需求会话不预检——sid- 键天生独占（FR-07）。
+                precheckRequirementOccupancy(requirementIdOfSession, null);
+                workspaceBound = true;
             }
             // CAP-34 FR-03：上下文包清单随帧下发，runner 凭 manifest 拉包物化
             connector.launch(agentNodeId, new AgentLaunchCommand(
                     id, project != null ? project.id() : null, taskSpec, model, pm, gitEnv,
                     specs.isEmpty() ? null : specs.get(0), worklog ? "worklog" : "session",
                     specs.size() > 1 ? specs : null, prepared != null ? prepared.manifest() : null,
-                    null, worklog ? project.ownerId() : null, wsOwner));
+                    null, worklog ? project.ownerId() : null, wsOwner,
+                    specs.isEmpty() ? null : workspaceKey));
         } catch (Exception e) {
             runtimes.remove(id);
             if (e instanceof DevMindException de) {
@@ -366,6 +373,8 @@ public class SessionManagerService {
         // repo 会话工作区状态置 OPEN（手动收口后置 FINALIZED）
         ent.setWorkspaceOwner(wsOwner);
         ent.setWorkspaceState(wsOwner != null ? SessionEntity.WORKSPACE_OPEN : null);
+        // CAP-51：需求粒度工作区键落库（收口/释放/resume 一律读本列，不再现算；null = 旧布局）
+        ent.setWorkspaceKey(workspaceBound ? workspaceKey : null);
         // CAP-33：场景 code 落库（resume 据此重渲染重装配；FR-07 快照在装配后落）
         ent.setScenarioCode(scenario != null ? scenario.getCode() : null);
         ent.setContextManifestJson(prepared != null ? prepared.snapshotJson() : null);
@@ -379,6 +388,10 @@ public class SessionManagerService {
 
         notificationPublisher.publish(NotificationEvent.of("SESSION_STARTED", id, "会话已启动",
                 preview(taskSpec, 80)));
+        // CAP-51 FR-09：需求工作区转「占用中」（归属用户冻结在需求行上，前端工作区卡片读它）
+        if (requirement != null && workspaceBound) {
+            requirementService.markWorkspaceOpen(requirement.getId(), wsOwner);
+        }
         return toView(ent, remoteRt.state());
     }
 
@@ -527,18 +540,19 @@ public class SessionManagerService {
                 List<AgentLaunchCommand.RepoSpec> specs = worklog ? List.of()
                         : buildRepoSpecs(proj,
                                 sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(id), ent.getBaseBranch(),
-                                worktreeManager.branchFor(id), ent.getCreatedBy());
-                // CAP-42：repo 会话固定工作区——归属用户取落库 workspaceOwner（旧会话回退 createdBy，
-                // 新缓存经 origin/<branch> 挂回已 push 分支不丢提交），协议 v7 门控与创建一致
+                                worktreeManager.branchFor(ent.getRequirementId(), id), ent.getCreatedBy());
+                // CAP-42/CAP-51：repo 会话工作区——归属用户取落库 workspaceOwner（旧会话回退 createdBy，
+                // 新缓存经 origin/<branch> 挂回已 push 分支不丢提交）；工作区键取落库快照
+                // （null = 存量旧布局 work/，不推导——推导会指到不存在的 worktrees/<key>，见 FR-11）
                 String wsOwner = null;
                 if (!worklog && !specs.isEmpty()) {
                     wsOwner = requireWorkspaceOwner(ent.getWorkspaceOwner() != null
                             && !ent.getWorkspaceOwner().isBlank()
                             ? ent.getWorkspaceOwner() : ent.getCreatedBy());
-                    if (!connector.supports(ent.getAgentNodeId(), AgentProtocol.PER_USER_WORKSPACE)) {
-                        throw new DevMindException(ErrorCode.CONFLICT,
-                                "节点 runner 版本过低，不支持每用户固定工作区（需协议 v7+），请升级该节点 runner");
-                    }
+                    requireWorkspaceProtocol(connector, ent.getAgentNodeId(), ent.getWorkspaceKey());
+                    // CAP-51 FR-03：需求级互斥预检——resume 自身要排除（被 resume 的会话本来就是
+                    // 该需求的占用方，不排除必自撞），同需求另有进行中会话才 409
+                    precheckRequirementOccupancy(ent.getRequirementId(), ent.getId());
                 }
                 // CAP-33：resume 按落库 scenarioCode 重渲染重装配（修复此前用未渲染原文重装配的
                 // 偏差；场景已删降级按原文；③层请求追加为创建时一次性，resume 不重放）；
@@ -556,7 +570,13 @@ public class SessionManagerService {
                         specs.isEmpty() ? null : specs.get(0), worklog ? "worklog" : "session",
                         specs.size() > 1 ? specs : null,
                         prepared != null ? prepared.manifest() : null,
-                        ent.getCliSessionId(), worklog ? proj.ownerId() : null, wsOwner));
+                        ent.getCliSessionId(), worklog ? proj.ownerId() : null, wsOwner,
+                        specs.isEmpty() ? null : ent.getWorkspaceKey()));
+                // CAP-51：收口后 resume 继续开发 → 需求工作区重新置「占用中」（M2 卡片状态不回退）
+                if (!specs.isEmpty() && ent.getRequirementId() != null
+                        && ent.getWorkspaceKey() != null && !ent.getWorkspaceKey().isBlank()) {
+                    requirementService.markWorkspaceOpen(ent.getRequirementId(), wsOwner);
+                }
             } catch (Exception e) {
                 runtimes.remove(id);
                 if (e instanceof DevMindException de) {
@@ -591,8 +611,12 @@ public class SessionManagerService {
     /**
      * CAP-42 手动收口（页面触发，<b>禁 @Transactional</b>——内含 WS 阻塞等 ack）：
      * 校验（归属/状态/协议版本）→ 按 session_repos 快照重建 specs → 下发 workspace_finalize
-     * 帧阻塞等 ack（runner 逐库合并基线+push+删 worktree）→ 成功落 FINALIZED。
+     * 帧阻塞等 ack（runner 逐库合并基线+push）→ 成功落 FINALIZED。
      * 失败（冲突/脏工作区/push 失败）透传 runner 脱敏错误，工作区保留可重试。
+     *
+     * <p>CAP-51 FR-04：有关联需求的会话转发到需求级语义（同一条 {@link #doFinalizeWorkspace}，
+     * 成功同时把需求工作区置 FINALIZED）——收口从「会话级动作」上移为「需求级动作」，
+     * 本端点保留给无需求会话（存量前端/脚本平滑过渡）。</p>
      */
     public FinalizeResult finalizeWorkspace(String id, boolean discardChanges) {
         SessionEntity ent = requireEntity(id);
@@ -608,6 +632,42 @@ public class SessionManagerService {
         if (SessionEntity.WORKSPACE_FINALIZED.equals(ent.getWorkspaceState())) {
             throw new DevMindException(ErrorCode.CONFLICT, "工作区已收口，无需重复操作");
         }
+        return doFinalizeWorkspace(ent, discardChanges);
+    }
+
+    /**
+     * CAP-51 FR-04 需求级收口（前端主入口，挂在需求详情页）：
+     * 取该需求最近的 workspace OPEN 会话 → 按其 session_repos 快照收口（合并需求分支到基线 + push，
+     * <b>保留</b>工作树与分支，runner 侧收口后 ff 前进到新基线）；成功后需求与同需求全部 OPEN 会话行
+     * 置 FINALIZED。无 OPEN 会话（未开工作区或已收口）→ 409；节点离线/老 runner → 409（不静默成功）。
+     */
+    public FinalizeResult finalizeRequirementWorkspace(String projectId, String requirementId,
+                                                      boolean discardChanges) {
+        RequirementEntity req = requirementService.requireEntity(projectId, requirementId);
+        // 归属校验（FR-04）：需求创建者/负责人或 admin
+        String actor = identityService.currentActor();
+        boolean owner = actor != null && (actor.equals(req.getCreatedBy()) || actor.equals(req.getOwnerId()));
+        if (!owner && !isAdmin()) {
+            throw new DevMindException(ErrorCode.FORBIDDEN, "只有需求创建者/负责人或管理员可以收口该需求工作区");
+        }
+        SessionEntity target = sessionRepo.findByRequirementIdOrderByCreatedAtDesc(requirementId).stream()
+                .filter(s -> SessionEntity.WORKSPACE_OPEN.equals(s.getWorkspaceState()))
+                .filter(s -> s.getAgentNodeId() != null && !s.getAgentNodeId().isBlank())
+                .findFirst()
+                .orElseThrow(() -> new DevMindException(ErrorCode.CONFLICT,
+                        "该需求工作区未开启或已收口"));
+        return doFinalizeWorkspace(target, discardChanges);
+    }
+
+    /**
+     * 收口本体（会话级/需求级共用）：状态与节点校验 → 快照重建 specs → 阻塞等 ack → 落库。
+     *
+     * <p>CAP-51：带落库 {@code workspace_key} 的会话走 v10 门控 + 带 key 的 finalize 重载
+     * （runner 定位 {@code worktrees/<key>}，且收口后<b>保留</b>工作树——需求后续会话接着用）；
+     * key 为空 = 存量 CAP-42 会话，仍是 v7 + 旧布局 {@code work/} 语义（FR-11）。</p>
+     */
+    private FinalizeResult doFinalizeWorkspace(SessionEntity ent, boolean discardChanges) {
+        String id = ent.getId();
         if (SessionState.valueOf(ent.getStatus()).isActive() || runtimes.containsKey(id)) {
             throw new DevMindException(ErrorCode.CONFLICT, "会话仍在运行中，请先结束会话再收口");
         }
@@ -615,29 +675,52 @@ public class SessionManagerService {
             throw new DevMindException(ErrorCode.CONFLICT, "历史本机会话（无执行节点）不可收口");
         }
         AgentNodeConnector connector = requireConnector();
-        if (!connector.supports(ent.getAgentNodeId(), AgentProtocol.PER_USER_WORKSPACE)) {
-            throw new DevMindException(ErrorCode.CONFLICT,
-                    "节点 runner 版本过低，不支持工作区收口（需协议 v7+），请升级该节点 runner");
-        }
+        requireWorkspaceProtocol(connector, ent.getAgentNodeId(), ent.getWorkspaceKey());
         Project proj = resolveProject(ent.getProjectId());
         List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(proj,
                 sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(id), ent.getBaseBranch(),
-                worktreeManager.branchFor(id), ent.getCreatedBy());
+                worktreeManager.branchFor(ent.getRequirementId(), id), ent.getCreatedBy());
         if (specs.isEmpty()) {
             throw new DevMindException(ErrorCode.CONFLICT, "会话无仓库快照，无法收口（非代码会话）");
         }
         String wsOwner = requireWorkspaceOwner(ent.getWorkspaceOwner() != null
                 && !ent.getWorkspaceOwner().isBlank() ? ent.getWorkspaceOwner() : ent.getCreatedBy());
         FinalizeResult result = connector.finalizeWorkspace(ent.getAgentNodeId(), id,
-                ent.getProjectId(), wsOwner, specs, discardChanges);
+                ent.getProjectId(), wsOwner, specs, discardChanges, ent.getWorkspaceKey());
         if (!result.ok()) {
             throw new DevMindException(ErrorCode.CONFLICT,
                     "收口失败（工作区已保留，可处理后重试）: " + result.error());
         }
-        ent.setWorkspaceState(SessionEntity.WORKSPACE_FINALIZED);
-        ent.setUpdatedAt(Instant.now());
-        sessionRepo.save(ent);
+        markRequirementWorkspaceFinalized(ent);
         return result;
+    }
+
+    /**
+     * CAP-51：需求粒度收口成功后的落库——目标会话行 + 同需求全部 OPEN 会话行置 FINALIZED，
+     * 需求行 {@code workspace_state=FINALIZED}。
+     *
+     * <p>为什么连兄弟会话一起置位：会话行的 workspace_state 是存量兼容字段，但「重复收口 409」
+     * 是靠「找不到 OPEN 会话」实现的——同需求的旧会话（如分析会话）留着 OPEN 会让第二次收口
+     * 又挑中它、重复合并（FR-04 验收 3 要求重复收口 409）。</p>
+     */
+    private void markRequirementWorkspaceFinalized(SessionEntity ent) {
+        Instant now = Instant.now();
+        if (ent.getRequirementId() != null && !ent.getRequirementId().isBlank()) {
+            requirementService.markWorkspaceFinalized(ent.getRequirementId());
+            for (SessionEntity s : sessionRepo.findByRequirementIdOrderByCreatedAtDesc(ent.getRequirementId())) {
+                if (SessionEntity.WORKSPACE_OPEN.equals(s.getWorkspaceState())) {
+                    s.setWorkspaceState(SessionEntity.WORKSPACE_FINALIZED);
+                    s.setUpdatedAt(now);
+                    sessionRepo.save(s);
+                }
+            }
+            return;
+        }
+        if (SessionEntity.WORKSPACE_OPEN.equals(ent.getWorkspaceState())) {
+            ent.setWorkspaceState(SessionEntity.WORKSPACE_FINALIZED);
+            ent.setUpdatedAt(now);
+            sessionRepo.save(ent);
+        }
     }
 
     /** CAP-42：当前操作者是否 admin（收口越权判定用；异常按非 admin 兜底） */
@@ -756,9 +839,18 @@ public class SessionManagerService {
      *
      * <p>无需释放的情形：workspace_state 为 null（旧布局/非代码会话）、已 FINALIZED
      * （目录随收口已删）、无执行节点（历史本机会话）、无仓库快照（非代码会话）。</p>
+     *
+     * <p><b>CAP-51 例外</b>：需求粒度会话（{@code workspace_key = req-<需求id>}）的工作区归<b>需求</b>所有
+     * （同需求多会话共用一棵工作树），删除单个会话不得回收——否则删掉一个会话就把需求里别人的改动
+     * 一起丢了。释放触发点改为需求删除（{@link #onRequirementDeleted}）与 runner 侧 GC。</p>
      */
     private void releaseFixedWorkspace(SessionEntity ent) {
         if (!SessionEntity.WORKSPACE_OPEN.equals(ent.getWorkspaceState())) {
+            return;
+        }
+        if (isRequirementScoped(ent)) {
+            log.info("需求粒度会话删除不释放共享工作树（归需求所有，见 CAP-51 FR-06）: session={} key={}",
+                    ent.getId(), ent.getWorkspaceKey());
             return;
         }
         String nodeId = ent.getAgentNodeId();
@@ -771,20 +863,114 @@ public class SessionManagerService {
         }
         List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(resolveProject(ent.getProjectId()),
                 sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(ent.getId()), ent.getBaseBranch(),
-                worktreeManager.branchFor(ent.getId()), ent.getCreatedBy());
+                worktreeManager.branchFor(ent.getRequirementId(), ent.getId()), ent.getCreatedBy());
         if (specs.isEmpty()) {
             return;
         }
         String wsOwner = requireWorkspaceOwner(ent.getWorkspaceOwner() != null
                 && !ent.getWorkspaceOwner().isBlank() ? ent.getWorkspaceOwner() : ent.getCreatedBy());
         WorkspaceReleaseResult result = connector.releaseWorkspace(nodeId, ent.getId(),
-                ent.getProjectId(), wsOwner, specs);
+                ent.getProjectId(), wsOwner, specs, ent.getWorkspaceKey());
         if (!result.ok()) {
             throw new DevMindException(ErrorCode.CONFLICT,
                     "释放节点固定工作区失败，会话未删除（可重试；或到节点手工删除该工作区后重试）: "
                             + result.error());
         }
         log.info("删除会话前已释放固定工作区: session={} detail={}", ent.getId(), result.detail());
+    }
+
+    /** CAP-51：会话是否绑定「需求级」工作区（req- 键；sid- 键仍按会话用完即弃）。 */
+    private static boolean isRequirementScoped(SessionEntity ent) {
+        String key = ent.getWorkspaceKey();
+        return key != null && key.startsWith("req-");
+    }
+
+    // ---------------- CAP-51 FR-06：需求删除 → 释放需求工作树 ----------------
+
+    /**
+     * 释放专用单线程执行器：agent WS 每连接消息串行派发——需求删除事件是在
+     * {@code RequirementService.delete} 的事务里同步发布的，而释放要阻塞等 runner ack（秒级），
+     * 若同步跑在发起请求的线程/事件链上，ack 帧进不来必然 15s 超时（同
+     * {@code RequirementFlowService.flowExecutor} 的同款事故，见 ws-event-chain-sync-launch-deadlock）。
+     * 单线程保序且离开事件链。
+     */
+    private final java.util.concurrent.ExecutorService releaseExecutor =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "requirement-workspace-release");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /**
+     * CAP-51 FR-06：需求删除 → 释放该需求工作树（丢弃语义：不合并不 push）。异步执行，
+     * <b>释放失败只告警不阻断删除</b>——需求已删，不能让用户卡在删除上；残留目录由 runner 侧
+     * GC（无存活 pid + 超龄 + 无未提交改动 + 分支已推远端）兜底。
+     */
+    @org.springframework.context.event.EventListener
+    public void onRequirementDeleted(RequirementDeletedEvent event) {
+        releaseExecutor.submit(() -> releaseRequirementWorkspace(
+                event.projectId(), event.requirementId(), event.workspaceOwner()));
+    }
+
+    /**
+     * 需求工作树释放本体（包可见便于单测同步驱动；生产路径恒走 {@link #releaseExecutor}）：
+     * 取该需求带 {@code req-<id>} 键的最近会话（键 + 仓库快照 + 归属用户/节点都从它读，
+     * 需求行已删查不回来）→ 下发 {@code workspace_release}（带 key，runner 整块回收
+     * {@code worktrees/<key>} 与本地需求分支）。任何失败只记日志 + 通知，绝不向外抛。
+     */
+    void releaseRequirementWorkspace(String projectId, String requirementId, String workspaceOwner) {
+        try {
+            String key = worktreeManager.workspaceKeyFor(requirementId, null);
+            SessionEntity ref = sessionRepo.findByRequirementIdOrderByCreatedAtDesc(requirementId).stream()
+                    .filter(s -> key.equals(s.getWorkspaceKey()))
+                    .filter(s -> s.getAgentNodeId() != null && !s.getAgentNodeId().isBlank())
+                    .findFirst()
+                    .orElse(null);
+            if (ref == null) {
+                return; // 该需求从未开过工作区（或只有存量旧布局会话）：无 key 可释放
+            }
+            AgentNodeConnector connector = connectorProvider.getIfAvailable();
+            if (connector == null) {
+                return; // agent 模块未装配（裁剪部署/单测）：无节点可释放
+            }
+            List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(resolveProject(projectId),
+                    sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(ref.getId()),
+                    ref.getBaseBranch(), worktreeManager.branchFor(requirementId, ref.getId()),
+                    ref.getCreatedBy());
+            if (specs.isEmpty()) {
+                return;
+            }
+            String owner = workspaceOwner != null && !workspaceOwner.isBlank()
+                    ? workspaceOwner
+                    : (ref.getWorkspaceOwner() != null && !ref.getWorkspaceOwner().isBlank()
+                    ? ref.getWorkspaceOwner() : ref.getCreatedBy());
+            WorkspaceReleaseResult result = connector.releaseWorkspace(ref.getAgentNodeId(), ref.getId(),
+                    projectId, requireWorkspaceOwner(owner), specs, ref.getWorkspaceKey());
+            if (!result.ok()) {
+                // 节点在线但释放失败（如目录被占用）：需求已删，只告警
+                warnReleaseFailure(requirementId, result.error());
+            } else {
+                log.info("需求删除后已释放工作树: req={} key={} detail={}",
+                        requirementId, ref.getWorkspaceKey(), result.detail());
+            }
+        } catch (Exception e) {
+            // 节点离线（connector 抛 CONFLICT）/无仓库快照/归属名非法：一律只告警，目录由 GC 兜底
+            warnReleaseFailure(requirementId, e.getMessage());
+        }
+    }
+
+    /** 需求删除后的释放失败告警（日志 + 通知；FR-06 要求失败可见但不阻断删除）。 */
+    private void warnReleaseFailure(String requirementId, String reason) {
+        log.warn("需求删除后释放工作树失败(不阻断删除，目录由节点 GC 兜底): req={} err={}",
+                requirementId, reason);
+        try {
+            notificationPublisher.publish(NotificationEvent.of("WORKSPACE_RELEASE_FAILED", null,
+                    "需求工作区释放失败",
+                    "需求 " + requirementId + " 已删除，但其节点工作树回收失败（" + reason
+                            + "）。目录会在节点上闲置，超期由 GC 回收；如需立即清理请到节点手工删除。"));
+        } catch (Exception e) {
+            log.debug("释放失败通知发布失败(忽略): {}", e.getMessage());
+        }
     }
 
     /**
@@ -858,6 +1044,7 @@ public class SessionManagerService {
 
     @PreDestroy
     public void shutdown() {
+        releaseExecutor.shutdownNow();
         for (SessionHandle rt : runtimes.values()) {
             try {
                 rt.kill();
@@ -961,7 +1148,8 @@ public class SessionManagerService {
      * baseBranch 覆盖只作用于主库，其余库用各自默认分支。
      */
     private List<SessionRepoEntity> resolveRepoSnapshot(Project project, CreateSessionRequest req,
-                                                        String sessionId, String baseBranch) {
+                                                        String requirementId, String sessionId,
+                                                        String baseBranch) {
         if (project == null) {
             return List.of();
         }
@@ -985,7 +1173,7 @@ public class SessionManagerService {
         }
         List<RepoView> ordered = new ArrayList<>(selected);
         ordered.sort(Comparator.comparing((RepoView r) -> !r.primary()).thenComparingInt(RepoView::sortOrder));
-        String branch = worktreeManager.branchFor(sessionId);
+        String branch = worktreeManager.branchFor(requirementId, sessionId);
         Instant now = Instant.now();
         List<SessionRepoEntity> rows = new ArrayList<>();
         int order = 0;
@@ -1020,9 +1208,14 @@ public class SessionManagerService {
      * CAP-31：按快照组装远程工作区描述列表（主库在前）。逐库解析 token（按各自 remoteUrl host）；
      * 无 remoteUrl / ssh 协议 / token 解析失败的库跳过（记日志），全跳过 = 空列表（降级为节点自理）。
      * token 仅随 launch 帧传输，严禁进日志。
+     *
+     * <p><b>CAP-51 FR-11 分支快照优先</b>：逐库分支取 {@code session_repos.branch} 落库快照，
+     * 快照为空才用入参 {@code branch}（按需求维度推导的现算值）。命名规则变更后存量 CAP-42 会话的
+     * 快照是 {@code feature/<sid>}，与现算值不符——收口/释放拿现算值去比对会被 runner 的
+     * 「检出分支与会话分支不一致」挡下，故快照必优先。包可见便于单测。</p>
      */
-    private List<AgentLaunchCommand.RepoSpec> buildRepoSpecs(Project project, List<SessionRepoEntity> rows,
-                                                             String baseBranch, String branch, String actor) {
+    List<AgentLaunchCommand.RepoSpec> buildRepoSpecs(Project project, List<SessionRepoEntity> rows,
+                                                     String baseBranch, String branch, String actor) {
         if (rows.isEmpty()) {
             // 旧路径兼容：无快照（项目无仓库行）按 projects 镜像列单库组装
             AgentLaunchCommand.RepoSpec single = buildRepoSpec(project, baseBranch, branch, actor);
@@ -1049,7 +1242,9 @@ public class SessionManagerService {
                 // token 可空 = 匿名通道（公开仓库 / file://），与 CAP-23 匿名克隆口径一致
                 String token = gw.resolveToken(actor, hostOf(url),
                         project != null ? project.id() : null).orElse(null);
-                out.add(new AgentLaunchCommand.RepoSpec(url, row.getBaseBranch(), row.getBranch(),
+                String rowBranch = row.getBranch() != null && !row.getBranch().isBlank()
+                        ? row.getBranch() : branch;
+                out.add(new AgentLaunchCommand.RepoSpec(url, row.getBaseBranch(), rowBranch,
                         token, row.getName()));
             } catch (Exception e) {
                 log.warn("远程工作区描述组装失败(跳过该库): repo={} err={}", row.getName(), e.getMessage());
@@ -1065,11 +1260,13 @@ public class SessionManagerService {
             return;
         }
         List<SessionRepoEntity> rows = sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(ent.getId());
+        // CAP-51：分支按需求维度推导（与 prepare/launch 同口径）
         if (rows.size() > 1) {
-            workspaceService.cleanupSessionWorkspace(toWorkspaceSpecs(rows), ent.getId(),
-                    Path.of(ent.getWorktreePath()));
+            workspaceService.cleanupSessionWorkspace(toWorkspaceSpecs(rows), ent.getRequirementId(),
+                    ent.getId(), Path.of(ent.getWorktreePath()));
         } else {
-            workspaceService.cleanupSessionWorkspace(project, ent.getId(), Path.of(ent.getWorktreePath()));
+            workspaceService.cleanupSessionWorkspace(project, ent.getRequirementId(), ent.getId(),
+                    Path.of(ent.getWorktreePath()));
         }
     }
 
@@ -1149,14 +1346,65 @@ public class SessionManagerService {
                 : "无满足标签的在线节点: " + requiredLabelsRaw);
     }
 
-    // ---------------- CAP-42：固定工作区归属用户解析 ----------------
+    // ---------------- CAP-42/CAP-51：固定工作区（归属用户 / 需求级互斥 / 释放） ----------------
 
     /** runner 工作区目录名白名单（与 RunnerWorkspace.SAFE_ID 同口径） */
     private static final java.util.regex.Pattern WS_OWNER_ID =
             java.util.regex.Pattern.compile("[a-zA-Z0-9._-]+");
-    /** 工作区保留目录名（GC/对账扫描桶 + 固定目录名），owner 禁用防撞名 */
+    /** 工作区保留目录名（GC/对账扫描桶 + 固定目录名），owner 禁用防撞名；CAP-51 起加 worktrees 桶 */
     private static final java.util.Set<String> WS_RESERVED_DIRS =
-            java.util.Set.of("main", "sessions", "builds", "_chat", "work");
+            java.util.Set.of("main", "sessions", "builds", "_chat", "work", "worktrees");
+
+    /**
+     * CAP-51 FR-09 协议门控（创建/resume/收口/释放共用）：<b>带 workspaceKey</b> 时要求 v10+
+     * （老 runner 忽略该字段会落回 {@code work/} 旧布局，把不同需求写进同一目录，故属「必须认识」）；
+     * <b>缺 key</b> 时退回 CAP-42 的 v7 门控（存量会话旧布局，字段缺席 = 旧语义，见 FR-11）。
+     */
+    private static void requireWorkspaceProtocol(AgentNodeConnector connector, String nodeId,
+                                                 String workspaceKey) {
+        boolean keyed = workspaceKey != null && !workspaceKey.isBlank();
+        if (keyed && !connector.supports(nodeId, AgentProtocol.REQUIREMENT_WORKSPACE)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 runner 版本过低，不支持需求粒度工作区（需协议 v10+），请升级该节点 runner");
+        }
+        if (!keyed && !connector.supports(nodeId, AgentProtocol.PER_USER_WORKSPACE)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 runner 版本过低，不支持每用户固定工作区（需协议 v7+），请升级该节点 runner");
+        }
+    }
+
+    /**
+     * CAP-51 FR-03 需求级互斥预检（服务端视角友好报错；runner 侧 {@code ensureUserWorktree} 的
+     * 检出分支比对仍是磁盘残留的最终防线）：同需求存在<b>进行中</b>会话（RUNNING/WAITING_INPUT/
+     * WAITING_AUTH/SUSPENDED）→ 409「该需求已有进行中的会话 X」。
+     *
+     * <p>判定用会话<b>状态</b>而非 workspace_state=OPEN：OPEN 是「工作区未收口」而非「有进程在跑」，
+     * 需求内多会话共用一棵工作树，拿 OPEN 当互斥会把「分析会话结束后直接起开发会话」也挡掉
+     * （CAP-51 验收 1 明确要求可直接复用，且 FR-09 已声明新逻辑不读会话行的 workspace_state）。</p>
+     *
+     * <p>selfSessionId = 被 resume 的会话自身，必须排除（它正是该需求的占用方，不排除必自撞）；
+     * 无需求会话（sid- 键）不预检——键天生独占，见 FR-07。</p>
+     */
+    void precheckRequirementOccupancy(String requirementId, String selfSessionId) {
+        if (requirementId == null || requirementId.isBlank()) {
+            return;
+        }
+        for (SessionEntity s : sessionRepo.findByRequirementIdOrderByCreatedAtDesc(requirementId)) {
+            if (selfSessionId != null && selfSessionId.equals(s.getId())) {
+                continue;
+            }
+            SessionState st;
+            try {
+                st = SessionState.valueOf(s.getStatus());
+            } catch (Exception e) {
+                continue; // 状态值异常的历史行不参与互斥
+            }
+            if (st.isActive() || st == SessionState.SUSPENDED) {
+                throw new DevMindException(ErrorCode.CONFLICT,
+                        "该需求已有进行中的会话 " + s.getId() + "，请先结束它或等待完成后再开新会话");
+            }
+        }
+    }
 
     /**
      * CAP-42 FR-06：repo 会话固定工作区归属用户名。

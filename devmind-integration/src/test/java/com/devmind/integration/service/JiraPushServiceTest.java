@@ -174,7 +174,7 @@ class JiraPushServiceTest {
         final List<JiraManagedFields> syncedFields = new ArrayList<>();
 
         FakeRequirementService() {
-            super(null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null);
         }
 
         RequirementEntity add(String id, String projectId, String source, long seq) {

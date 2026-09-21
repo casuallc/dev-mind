@@ -40,6 +40,10 @@ public class RequirementEntity {
     public static final String SOURCE_LOCAL = "LOCAL";
     public static final String SOURCE_JIRA = "JIRA";
 
+    /** CAP-51 工作区状态（口径同 SessionEntity.WORKSPACE_*）：占用中 / 已收口 */
+    public static final String WORKSPACE_OPEN = "OPEN";
+    public static final String WORKSPACE_FINALIZED = "FINALIZED";
+
     @Id
     @Column(length = 32)
     private String id;
@@ -113,6 +117,21 @@ public class RequirementEntity {
     @Column(name = "doc_id")
     private Long docId;
 
+    /**
+     * CAP-51 FR-09：工作区归属用户名（runner 工作区分桶 {@code <projectId>/<owner>/worktrees/<key>}）。
+     * 首次建工作区时冻结，之后不随负责人漂移；null = 该需求还没有过工作区。
+     */
+    @Column(name = "workspace_owner", length = 64)
+    private String workspaceOwner;
+
+    /**
+     * CAP-51 FR-09：工作区状态——OPEN=占用中（有未收口的需求工作树）/ FINALIZED=已收口；
+     * null = 无工作区。新逻辑的真源（会话行上的 workspace_state 保留为存量兼容，新逻辑不读）。
+     * 可空无默认值（规避 @ColumnDefault 红线）。
+     */
+    @Column(name = "workspace_state", length = 16)
+    private String workspaceState;
+
     /** CAP-38 FR-01：需求分析阶段已跳过（流程不可逆引导的持久化标记）。
      *  不带 @ColumnDefault：MySQL bit 列 default 'false' 建列失败；新行由 Hibernate 显式写 false，
      *  存量行 NULL 由 getter 兜底 false。 */
@@ -171,6 +190,10 @@ public class RequirementEntity {
     public void setSpentSeconds(Long spentSeconds) { this.spentSeconds = spentSeconds; }
     public Long getDocId() { return docId; }
     public void setDocId(Long docId) { this.docId = docId; }
+    public String getWorkspaceOwner() { return workspaceOwner; }
+    public void setWorkspaceOwner(String workspaceOwner) { this.workspaceOwner = workspaceOwner; }
+    public String getWorkspaceState() { return workspaceState; }
+    public void setWorkspaceState(String workspaceState) { this.workspaceState = workspaceState; }
     public Boolean getAnalysisSkipped() { return analysisSkipped != null && analysisSkipped; }
     public void setAnalysisSkipped(Boolean analysisSkipped) { this.analysisSkipped = analysisSkipped; }
     public Boolean getDesignSkipped() { return designSkipped != null && designSkipped; }

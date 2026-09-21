@@ -84,6 +84,14 @@ public class SessionEntity {
     @Column(name = "workspace_state", length = 16)
     private String workspaceState;
 
+    /**
+     * CAP-51：需求粒度工作区键（{@code req-<需求id>} / {@code sid-<会话id>}），runner 据此把工作树
+     * 落到 {@code <owner>/worktrees/<key>}。null = 旧布局（CAP-42 的 {@code <owner>/work}，存量会话语义，
+     * FR-11 契约：字段缺席不门控、按旧布局执行）。收口/释放/resume 一律读本列快照，不再现算。
+     */
+    @Column(name = "workspace_key", length = 64)
+    private String workspaceKey;
+
     @Lob
     @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(length = 16_777_216)
@@ -137,6 +145,8 @@ public class SessionEntity {
     public void setWorkspaceOwner(String workspaceOwner) { this.workspaceOwner = workspaceOwner; }
     public String getWorkspaceState() { return workspaceState; }
     public void setWorkspaceState(String workspaceState) { this.workspaceState = workspaceState; }
+    public String getWorkspaceKey() { return workspaceKey; }
+    public void setWorkspaceKey(String workspaceKey) { this.workspaceKey = workspaceKey; }
     public String getModel() { return model; }
     public void setModel(String model) { this.model = model; }
     public String getPermissionMode() { return permissionMode; }
