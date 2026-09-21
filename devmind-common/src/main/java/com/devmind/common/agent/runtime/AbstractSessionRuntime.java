@@ -105,12 +105,23 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
 
     // ---------------- 事件流 ----------------
 
-    /** 事件入流：环形缓冲 + 订阅者广播 + 落库 + 状态机分派。 */
+    /**
+     * 事件入流：环形缓冲 + 订阅者广播 + 落库 + 状态机分派。
+     *
+     * <p>CAP-50：{@code text_delta} 只广播与落库，**不进环形缓冲**。环形缓冲是
+     * {@link #subscribe} 回放（= 会话 WS 的 snapshot）的唯一来源，而前端只在该会话已不活跃时
+     * 才走 REST 拉全量历史——会话进行中刷新页面，环形缓冲就是唯一历史来源。一条长回答的增量
+     * 几百条，按默认 1000 条缓冲会把它前面的话题、工具卡片、历史提问整片挤掉，用户满屏碎片。
+     * 排除后回放退回「气泡等全量 assistant 到达时成形」的既有行为，DB 里增量仍在（会话被中断
+     * 时那是唯一痕迹），只是不占回放窗口。</p>
+     */
     protected void publish(SessionEvent ev) {
-        synchronized (ring) {
-            ring.addLast(ev);
-            while (ring.size() > settings.ringBuffer()) {
-                ring.removeFirst();
+        if (!"text_delta".equals(ev.type())) {
+            synchronized (ring) {
+                ring.addLast(ev);
+                while (ring.size() > settings.ringBuffer()) {
+                    ring.removeFirst();
+                }
             }
         }
         for (Consumer<SessionEvent> sub : subscribers) {

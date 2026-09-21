@@ -16,8 +16,9 @@ import org.springframework.web.socket.handler.WebSocketHandlerDecorator;
  *
  * <p>CAP-49：给问答会话套 {@link ConcurrentWebSocketSessionDecorator}（发送缓冲 + 超时踢连接）。
  * 模型执行体一轮会推上千条 {@code text_delta}，客户端读得慢时发送会阻塞事件推送线程，
- * 进而把上游 SSE 读取一起钉死（模型侧还在产，服务端却在等 WS）。装饰只包 /ws/chats，
- * 不影响 session/agent 的 WS（那条路径事件频率低，且改别人家行为不该混在这个能力里）。</p>
+ * 进而把上游 SSE 读取一起钉死（模型侧还在产，服务端却在等 WS）。装饰只包 /ws/chats。
+ * （CAP-50 起 /ws/sessions 也套了同规格装饰——CLI 会话开流式输出后它的帧率与问答同级，
+ * 当时「会话 WS 事件频率低」的判断已不成立；两处各自留一份是各能力自包含的取舍。）</p>
  */
 @Configuration
 public class ChatWsConfig implements WebSocketConfigurer {
