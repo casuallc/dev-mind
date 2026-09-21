@@ -281,7 +281,8 @@ export default function SkillsPage() {
         title={manageSkill ? `Skill · ${manageSkill.name}` : ''}
         open={manageSkill != null}
         onClose={() => setManageSkill(null)}
-        width={420}
+        // 与抽屉内「编辑」打开的 SkillFormDrawer 同宽，切换时不跳宽度
+        width={720}
       >
         {manageSkill && (
           <Space direction="vertical" style={{ width: '100%' }} size={16}>
