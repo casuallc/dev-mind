@@ -37,7 +37,9 @@ export default function NewChatDraft({
   const [text, setText] = useState('')
   const [creating, setCreating] = useState(false)
   const [optionsOpen, setOptionsOpen] = useState(false)
-  const values = Form.useWatch([], form) ?? {}
+  // preserve:true 必带：高级选项的 Form 住在 destroyOnHidden 的 Popover 里，弹层一关字段就卸载，
+  // 默认口径（只取已注册字段）会看着像"什么都没选"——徽标点会灭、条件字段会闪回默认视图
+  const values = Form.useWatch([], { form, preserve: true }) ?? {}
   const isModel = values.executor === 'MODEL'
 
   // 只有 active 的 CHAT 端点能用于问答；一个都没有就不让选模型执行体（选了指望着 409 更糟）
@@ -102,7 +104,11 @@ export default function NewChatDraft({
     }
     setCreating(true)
     try {
-      const v = form.getFieldsValue()
+      // 取值必须 getFieldsValue(true)（取整个 store，含已卸载字段）：高级选项的 Form 住在
+      // destroyOnHidden 的 Popover 里，用户点一下输入框弹层就关、字段随之卸载——无参
+      // getFieldsValue 只回"已注册字段"，这时会把执行体/知识库/节点等选项静默丢光，
+      // 表现就是"选了模型执行体，建的还是 runner 问答"（无值即回落后端默认）。
+      const v = form.getFieldsValue(true)
       const model = v.executor === 'MODEL'
       const c = await createChat({
         message: t,
