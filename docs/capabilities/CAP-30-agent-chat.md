@@ -109,3 +109,14 @@ WS     /ws/chats/{id}              实时事件流（协议同 /ws/sessions/{id}
 ## 10. 暂不做
 
 问答挂知识库检索、问答模板、对话导出/分享、多轮上下文压缩、one-shot（CAP-28）迁移。
+
+## 11. 后续演进（本文档定稿后的修订，行文保留原貌）
+
+- **CAP-33 场景**：新建问答可带 `scenarioCode`，绑定资产经装配管线注入 runner 沙箱。
+- **CAP-34 零执行**：服务端不再拉起任何子进程，问答必有执行节点（`agent_node_id` 恒非空；
+  §5 的「NULL=本机」与 `pid` 列均已作废），路由链 显式 → 场景预设 → 平台默认节点。
+- **CAP-46 知识库**：`chat_sessions.knowledge_base_id`，启动注入库概览（`<knowledge-base>` 节）+
+  每轮检索注入 `<knowledge-context>` 前缀。
+- **CAP-49 模型执行体**：问答新增 `executor`（`AGENT` 默认 / `MODEL` 服务端直连已接入 CHAT 端点），
+  见 [CAP-49](CAP-49-chat-model-executor.md)；`chat_sessions` 增 `executor` / `model_endpoint_id` 两列，
+  WS 上行帧增 `interrupt`，REST 增 `POST /api/chats/{id}/interrupt`。

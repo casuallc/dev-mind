@@ -149,7 +149,8 @@ claude CLI 产的，不走 HTTP 模型），因此开放登记的同时补了「
   服务地址 / API Key / 模型名 / 超时（隐藏单批条数、维度、高级 topK/threshold）；表格维度列对 CHAT 显示 `—`；
   provider 选项标签与页头/空态/抽屉/默认 tooltip 文案按类型走，并**明说 CHAT 端点本期无消费方**。
 - **非目标**：CHAT 端点的消费方（问答生成、摘要等）另立能力，届时在 SPI 上补 `defaultEndpoint(kind)`；
-  本 FR **不新增** SPI 方法。
+  本 FR **不新增** SPI 方法。（前述消费方已由 **CAP-49 问答模型执行体** 落地：通用问答新增 `MODEL` 执行体，
+  服务端直连 `kind=CHAT` 端点做流式问答，SPI 按本 FR 预留的方式补 `defaultEndpoint(kind)`。）
 
 ## 3. 关键设计（已定）
 
@@ -183,7 +184,8 @@ claude CLI 产的，不走 HTTP 模型），因此开放登记的同时补了「
   脱敏正则只许有一份，第二份就是密钥泄漏路径）、`ModelCallException`（模型调用失败基类，
   `EmbeddingCallException extends ModelCallException` 保持既有捕获点兼容）。
   `ModelEndpointProvider` 的 javadoc 明确：**返回视图含 kind，消费方必须按 kind 过滤**；
-  本期**不新增** kind 版 `defaultEndpoint(kind)`（无消费方不加接口），它是未来 CHAT 消费方的接入点。
+  本期**不新增** kind 版 `defaultEndpoint(kind)`（无消费方不加接口），它是未来 CHAT 消费方的接入点
+  （**已由 CAP-49 消费**：`defaultEndpoint("CHAT")` 作为模型执行体未指定端点时的解析链末级）。
 
 ## 5. 数据模型
 
@@ -249,7 +251,8 @@ kind=RERANK 仍 400。绑定守卫（FR-11）落在 knowledge 侧，不新增 HT
 ## 8. 非目标
 
 - `RERANK` 类型端点的实现（仅预留 `kind` 列与 400 校验；`CHAT` 已由 FR-11 放开登记，但**消费方仍不做** ——
-  知识库问答生成、摘要等改走 HTTP 模型属于消费方能力，需另立 CAP，届时在 SPI 上补 `defaultEndpoint(kind)`）；
+  知识库问答生成、摘要等改走 HTTP 模型属于消费方能力，需另立 CAP，届时在 SPI 上补 `defaultEndpoint(kind)`；
+  **CHAT 的首个消费方见 [CAP-49](CAP-49-chat-model-executor.md)**，本 CAP 的登记/测试面零变更）；
 - 用量统计 / 配额 / 限流 / 多端点负载均衡与故障转移；
 - **分块策略改造**（Markdown heading 感知、代码块与表格保护、块 breadcrumb、最小块合并、真 tokenizer 口径）→ 另立 CAP；本能力只把 `chunkSize/chunkOverlap` 留在平台级默认，不改变**当前**分块行为，避免一个 CAP 同时动模型与分块两处导致 E2E 归因不清；
 - 索引队列深度 / 批次进度可视化（本 CAP 只做到 `indexStats` 计数 + 触发）；
