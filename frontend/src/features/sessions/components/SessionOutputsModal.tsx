@@ -1,6 +1,6 @@
-// CAP-39：会话产出弹窗——打开即触发 runner 即时回传（collect_output，协议 v4），
-// 左侧文件列表 + 右侧 Markdown 预览；每文件可「推送为需求文档」
-// （关联需求 + 文档类型 + 新建/更新现有版本）。
+// CAP-39：会话产出弹窗——打开即触发一次 runner 即时回传（collect_output，协议 v4），
+// 之后靠「从节点同步」手动刷新；左侧文件列表 + 右侧 Markdown 预览；
+// 每文件可「推送为需求文档」（关联需求 + 文档类型 + 新建/更新现有版本）。
 import { useCallback, useEffect, useState } from 'react'
 import {
   Alert,
@@ -75,24 +75,26 @@ function PublishDocModal({
   const kind = Form.useWatch('kind', form)
   const mode = Form.useWatch('mode', form)
   const requirementId = Form.useWatch('requirementId', form)
+  // 同 SessionOutputsModal：按字段而非整个 session 做依赖，避免列表轮询重建对象时重跑
+  const { id: sessionId, projectId, requirementId: sessionRequirementId } = session
 
   // 打开：加载可选需求（排除验收/完结/取消，同新建会话的关联需求口径），猜类型给默认值
   useEffect(() => {
     if (!fileName) return
     form.setFieldsValue({
-      requirementId: session.requirementId,
+      requirementId: sessionRequirementId,
       kind: guessKind(fileName),
       mode: 'create',
       docId: undefined,
       title: `${KIND_LABEL[guessKind(fileName)]} - ${fileName.replace(/\.[^.]+$/, '')}`,
       changeNote: undefined,
     })
-    listRequirements(session.projectId, { size: 200 })
+    listRequirements(projectId, { size: 200 })
       .then((data) =>
         setRequirements(data.items.filter((r) => !['ACCEPTANCE', 'DONE', 'CANCELLED'].includes(r.status))),
       )
       .catch(() => setRequirements([]))
-  }, [fileName, session, form])
+  }, [fileName, sessionId, projectId, sessionRequirementId, form])
 
   // 需求/类型变化：加载该需求下同类型文档（更新模式的可选目标）
   useEffect(() => {
@@ -100,10 +102,10 @@ function PublishDocModal({
       setDocs([])
       return
     }
-    listDocs({ kind, projectId: session.projectId })
+    listDocs({ kind, projectId })
       .then((list) => setDocs(list.filter((d) => d.requirementId === requirementId)))
       .catch(() => setDocs([]))
-  }, [fileName, requirementId, kind, session.projectId])
+  }, [fileName, requirementId, kind, projectId])
 
   const onKindChange = (k: PublishDocKind) => {
     form.setFieldsValue({
@@ -117,7 +119,7 @@ function PublishDocModal({
     const v = await form.validateFields()
     setSubmitting(true)
     try {
-      const r = await publishSessionOutput(session.id, {
+      const r = await publishSessionOutput(sessionId, {
         fileName: fileName!,
         kind: v.kind,
         requirementId: v.requirementId,
@@ -213,11 +215,15 @@ export default function SessionOutputsModal({
   const [contentLoading, setContentLoading] = useState(false)
   const [publishFile, setPublishFile] = useState<string | null>(null)
 
+  // 依赖会话 id 而非整个 session 对象：列表页每 3s 轮询会重建 session，
+  // 按对象引用做依赖会把这里变成定时刷新（每次都重新 collect 回传并清空预览）
+  const sessionId = session?.id ?? null
+
   const sync = useCallback(async () => {
-    if (!session) return
+    if (!sessionId) return
     setSyncing(true)
     try {
-      const r = await collectSessionOutputs(session.id)
+      const r = await collectSessionOutputs(sessionId)
       setFiles(r.files)
       setSyncMessage(r.message ?? null)
       setSelected((cur) =>
@@ -228,29 +234,29 @@ export default function SessionOutputsModal({
     } finally {
       setSyncing(false)
     }
-  }, [session])
+  }, [sessionId])
 
+  // 打开（或切换会话）时同步一次；此后只由「从节点同步」手动触发
   useEffect(() => {
-    if (open) {
-      setFiles([])
-      setSelected(null)
-      setContent('')
-      setSyncMessage(null)
-      sync()
-    }
+    if (!open) return
+    setFiles([])
+    setSelected(null)
+    setContent('')
+    setSyncMessage(null)
+    sync()
   }, [open, sync])
 
   useEffect(() => {
-    if (!open || !session || !selected) {
+    if (!open || !sessionId || !selected) {
       setContent('')
       return
     }
     setContentLoading(true)
-    getSessionOutput(session.id, selected)
+    getSessionOutput(sessionId, selected)
       .then((r) => setContent(r.content))
       .catch((e) => showError(e, '读取产出失败'))
       .finally(() => setContentLoading(false))
-  }, [open, session, selected])
+  }, [open, sessionId, selected])
 
   return (
     <Modal
