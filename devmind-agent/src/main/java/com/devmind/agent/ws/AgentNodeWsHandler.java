@@ -166,6 +166,10 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
             case "workspace_finalize_ack" -> registry.onWorkspaceFinalizeAck(String.valueOf(node.getId()),
                     frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),
                     frame.path("detail").asText(null), frame.path("error").asText(null));
+            // CAP-42：删除会话释放固定工作区 ack
+            case "workspace_release_ack" -> registry.onWorkspaceReleaseAck(String.valueOf(node.getId()),
+                    frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),
+                    frame.path("detail").asText(null), frame.path("error").asText(null));
             default -> log.debug("未知 runner 帧类型: {}", type);
         }
     }
