@@ -93,12 +93,45 @@ def main():
         wait(auth_replied, "授权后 fake 回复事件", 30)
         print("[7] 远程授权 OK（permission_result 下行 + 回复上行）")
 
+        # 7.5 CAP-50：WS 实时流验证（增量先到、全量收口、拼接相等；流式进行中重连的 snapshot 不含增量）
+        wsr = subprocess.run(["node", str(ROOT / "tests/cap50-sessions-ws.mjs"), sid, "流式验证", "ws://localhost:8080"],
+                             capture_output=True, text=True, encoding="utf-8", timeout=120)
+        assert wsr.returncode == 0, f"WS 流式验证失败: {wsr.stdout[-800:]} {wsr.stderr[-300:]}"
+        wsj = json.loads(next(l for l in wsr.stdout.splitlines() if l.startswith("WS_JSON "))[len("WS_JSON "):])
+        assert len(wsj["deltas"]) >= 2, f"增量太少（没流式）: {wsj['deltas']}"
+        assert all(wsj["deltas"]), "实时流里出现空增量"
+        assert wsj["assistantSeq"] > max(wsj["deltaSeqs"]), "全量 assistant 的 seq 早于增量"
+        assert "text_delta" not in (wsj["probeSnapshotTypes"] or []), "snapshot 里混进了增量"
+        print(f"[7.5] WS 流式 OK（{len(wsj['deltas'])} 条增量 → {len(wsj['assistant'])} 字全量收口；"
+              f"流式进行中重连 snapshot {len(wsj['probeSnapshotTypes'])} 条，不含增量）")
+
         # 7. 输入 __exit__ → fake 发 result 退出 → exit 帧 → DONE
         req("POST", f"/sessions/{sid}/input", {"text": "__exit__"}, tok)
         st = wait(lambda: (v := req("GET", f"/sessions/{sid}", token=tok))["state"] in ("DONE", "FAILED") and v,
                   "会话 DONE", 30)
         assert st["state"] == "DONE", f"期望 DONE 实际 {st['state']}"
         print("[8] 输入下行 + exit 帧上行 OK，会话 DONE")
+
+        # 8.5 CAP-50：落库断言（REST 补拉路径）——增量打底、全量收口、拼接相等、无空增量、无噪音泄漏
+        evs = req("GET", f"/sessions/{sid}/events?afterSeq=-1", token=tok)
+        deltas = pairs = 0
+        buf = []
+        for e in evs:
+            t, c = e.get("type"), e.get("content") or ""
+            if t == "text_delta":
+                # 改坏解析层会为每个 stream_event 吐一条空增量——这条是最强的前后判别式
+                assert c != "", f"落库出现空增量 seq={e['seq']}"
+                deltas += 1
+                buf.append(c)
+            elif t == "assistant":
+                assert buf, f"assistant 之前没有增量打底 seq={e['seq']}"
+                assert "".join(buf) == c, f"增量拼接 != 全量正文 seq={e['seq']}: {''.join(buf)!r} / {c!r}"
+                buf, pairs = [], pairs + 1
+        assert deltas >= 4 and pairs >= 2, f"增量/收口样本太少: deltas={deltas} pairs={pairs}"
+        blob = json.dumps(evs, ensure_ascii=False)
+        for leak in ("（fake 思考", "（子 agent 正文", "stream_event", "partial_json"):
+            assert leak not in blob, f"该被整片吞掉的 partial 噪音漏进事件流: {leak}"
+        print(f"[8.5] 落库流式 OK（{deltas} 条增量 / {pairs} 次全量收口，无空增量、无噪音泄漏）")
 
         # 8. 再开一个会话，然后杀掉 runner → 断连对账（节点 OFFLINE + 会话有断连事件，不 FAILED）
         s2 = req("POST", "/sessions", {"taskSpec": "e2e 断连对账", "agentNodeId": str(node_id)}, tok)
