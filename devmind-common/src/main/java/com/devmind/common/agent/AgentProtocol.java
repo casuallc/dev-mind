@@ -21,12 +21,17 @@ package com.devmind.common.agent;
  * 网络操作直连失败，故属「必须认识」需门控）。v9 = CAP-42 补丁 删除会话时释放固定工作区
  * （workspace_release/workspace_release_ack 帧——丢弃未提交改动删 worktree + 本地会话分支，
  * 不合并不 push；老 runner 不认识该帧会静默忽略，目录被留下成孤儿永久锁死该
- * (项目,用户) 工作区，故属「必须认识」需门控）。</p>
+ * (项目,用户) 工作区，故属「必须认识」需门控）。v10 = CAP-51 需求粒度工作区
+ * （launch/workspace_finalize/workspace_release 帧携带 workspaceKey——工作区从
+ * &lt;projectId&gt;/&lt;owner&gt;/work 改为 &lt;projectId&gt;/&lt;owner&gt;/worktrees/&lt;key&gt;
+ * （key=req-&lt;需求id&gt; 或 sid-&lt;会话id&gt;）；老 runner 不认识该字段会落回 work/ 旧布局，
+ * 把不同需求写进同一目录，故属「必须认识」需门控。**字段缺席 = 旧布局**（存量会话与
+ * 未升级服务端），此时不门控——这是 FR-11 存量兼容的契约，不是降级）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 9;
+    public static final int CURRENT = 10;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -48,6 +53,12 @@ public final class AgentProtocol {
 
     /** CAP-42 删除会话释放固定工作区（workspace_release 帧）所需最低版本 */
     public static final int RELEASE_WORKSPACE = 9;
+
+    /**
+     * CAP-51 需求粒度工作区（三帧携带 {@code workspaceKey}）所需最低版本。
+     * 仅在确实要下发 {@code workspaceKey} 时门控：字段缺席表示旧布局（存量会话），走原版本门控。
+     */
+    public static final int REQUIREMENT_WORKSPACE = 10;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;

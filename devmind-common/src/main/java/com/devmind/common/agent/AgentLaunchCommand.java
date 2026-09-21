@@ -41,12 +41,19 @@ import java.util.Map;
  *                       仅 repo 会话（kind="session" 且带 repo/repos）有意义；协议 v7+，
  *                       服务端经 {@code AgentNodeConnector.supports(nodeId, 7)} 门控，
  *                       老 runner（会忽略本字段并落入 sessions/&lt;sid&gt; 旧布局）不得派发。
+ * @param workspaceKey   CAP-51：工作区键（需求粒度）——{@code req-<requirementId>}（会话关联需求）
+ *                       或 {@code sid-<sessionId>}（无需求会话），runner 据此把工作区落到
+ *                       &lt;workspaceRoot&gt;/&lt;projectId&gt;/&lt;workspaceOwner&gt;/worktrees/&lt;key&gt;。
+ *                       <b>null/空 = 旧布局</b>（&lt;owner&gt;/work，存量 CAP-42 会话与未升级服务端），
+ *                       不是降级而是 FR-11 的存量契约；非空时协议 v10+，
+ *                       服务端经 {@code AgentNodeConnector.supports(nodeId, 10)} 门控
+ *                       （老 runner 忽略本字段会把不同需求写进同一目录）。
  */
 public record AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
                                  String model, String permissionMode, Map<String, String> env,
                                  RepoSpec repo, String kind, List<RepoSpec> repos,
                                  ContextManifest contextManifest, String resumeSessionId,
-                                 String worklogOwner, String workspaceOwner) {
+                                 String worklogOwner, String workspaceOwner, String workspaceKey) {
 
     /** 兼容构造器：CAP-25 及之前的调用点（kind=session，无多库、无上下文）。 */
     public AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
@@ -87,7 +94,17 @@ public record AgentLaunchCommand(String sessionId, String projectId, String task
                               ContextManifest contextManifest, String resumeSessionId,
                               String worklogOwner) {
         this(sessionId, projectId, taskSpec, model, permissionMode, env, repo, kind, repos,
-                contextManifest, resumeSessionId, worklogOwner, null);
+                contextManifest, resumeSessionId, worklogOwner, null, null);
+    }
+
+    /** 兼容构造器：CAP-42 调用点（无 workspaceKey，落旧布局 work/——存量会话语义）。 */
+    public AgentLaunchCommand(String sessionId, String projectId, String taskSpec,
+                              String model, String permissionMode, Map<String, String> env,
+                              RepoSpec repo, String kind, List<RepoSpec> repos,
+                              ContextManifest contextManifest, String resumeSessionId,
+                              String worklogOwner, String workspaceOwner) {
+        this(sessionId, projectId, taskSpec, model, permissionMode, env, repo, kind, repos,
+                contextManifest, resumeSessionId, worklogOwner, workspaceOwner, null);
     }
 
     /**

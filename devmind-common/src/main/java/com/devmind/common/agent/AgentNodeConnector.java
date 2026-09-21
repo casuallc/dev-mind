@@ -124,6 +124,21 @@ public interface AgentNodeConnector {
                                              String workspaceOwner,
                                              List<AgentLaunchCommand.RepoSpec> specs,
                                              boolean discardChanges) {
+        return finalizeWorkspace(nodeId, sessionId, projectId, workspaceOwner, specs, discardChanges, null);
+    }
+
+    /**
+     * CAP-51 需求粒度收口：语义同上，但工作区定位到
+     * {@code <workspaceRoot>/<projectId>/<workspaceOwner>/worktrees/<workspaceKey>}
+     * （收口后<b>保留</b>工作树，见 {@link RunnerWorkspace#finalize} 的 CAP-51 语义）。
+     *
+     * <p>workspaceKey 为空 = 存量会话（旧布局 {@code work/}），协议门控退回 v7；
+     * 非空时需 v10+（老 runner 忽略该字段会去收口旧布局，与需求工作区不符）。</p>
+     */
+    default FinalizeResult finalizeWorkspace(String nodeId, String sessionId, String projectId,
+                                             String workspaceOwner,
+                                             List<AgentLaunchCommand.RepoSpec> specs,
+                                             boolean discardChanges, String workspaceKey) {
         throw new com.devmind.common.exception.DevMindException(
                 com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
     }
@@ -142,6 +157,22 @@ public interface AgentNodeConnector {
     default WorkspaceReleaseResult releaseWorkspace(String nodeId, String sessionId, String projectId,
                                                     String workspaceOwner,
                                                     List<AgentLaunchCommand.RepoSpec> specs) {
+        return releaseWorkspace(nodeId, sessionId, projectId, workspaceOwner, specs, null);
+    }
+
+    /**
+     * CAP-51 需求粒度释放：工作区定位到
+     * {@code <workspaceRoot>/<projectId>/<workspaceOwner>/worktrees/<workspaceKey>}，
+     * 逐库「丢弃未提交改动 → 删 worktree → 删本地需求分支」（不合并不 push）。
+     * 需求删除/需求终态清理走本方法（一个需求一条记录，释放即整块回收）。
+     *
+     * <p>workspaceKey 为空 = 存量会话（旧布局 {@code work/}），协议门控退回 v9；
+     * 非空时需 v10+。</p>
+     */
+    default WorkspaceReleaseResult releaseWorkspace(String nodeId, String sessionId, String projectId,
+                                                    String workspaceOwner,
+                                                    List<AgentLaunchCommand.RepoSpec> specs,
+                                                    String workspaceKey) {
         throw new com.devmind.common.exception.DevMindException(
                 com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
     }

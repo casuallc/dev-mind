@@ -68,11 +68,16 @@ class AgentConnectionRegistryReleaseTest {
     }
 
     private Call startRelease() throws Exception {
+        return startRelease(null);
+    }
+
+    private Call startRelease(String workspaceKey) throws Exception {
         AtomicReference<WorkspaceReleaseResult> result = new AtomicReference<>();
         AtomicReference<Throwable> error = new AtomicReference<>();
         Thread t = new Thread(() -> {
             try {
-                result.set(registry.releaseWorkspace("7", "s1", "proj1", "alice", specs()));
+                result.set(registry.releaseWorkspace("7", "s1", "proj1", "alice", specs(),
+                        workspaceKey));
             } catch (Throwable e) {
                 error.set(e);
             }
@@ -87,6 +92,31 @@ class AgentConnectionRegistryReleaseTest {
         String marker = "\"requestId\":\"";
         int i = payload.indexOf(marker);
         return payload.substring(i + marker.length(), payload.indexOf('"', i + marker.length()));
+    }
+
+    @Test
+    void serializesWorkspaceKeyOnlyWhenPresentAndGatesV10() throws Exception {
+        // CAP-51：v9 runner 收到带 key 的释放 → 409（老 runner 会去释放 work/ 旧布局）
+        var e = assertThrows(DevMindException.class, () -> registry.releaseWorkspace(
+                "7", "s1", "proj1", "alice", specs(), "req-ab12cd34"));
+        assertTrue(e.getMessage().contains("v10"), e.getMessage());
+
+        // v10 runner：帧带 workspaceKey（需求粒度目录）；不带 key 的存量会话帧不带该字段
+        registry.onHello(node, new AgentHelloMeta("windows", "", "0.2.0", null, 10, null, null),
+                List.of());
+        Call withKey = startRelease("req-ab12cd34");
+        assertTrue(withKey.payload().contains("\"workspaceKey\":\"req-ab12cd34\""), withKey.payload());
+        registry.onWorkspaceReleaseAck("7", requestIdOf(withKey.payload()), true, "ok", null);
+        withKey.thread().join(10_000);
+        assertTrue(withKey.result().get() != null && withKey.result().get().ok(),
+                String.valueOf(withKey.error().get()));
+
+        Call legacy = startRelease(null);
+        assertFalse(legacy.payload().contains("workspaceKey"), legacy.payload());
+        registry.onWorkspaceReleaseAck("7", requestIdOf(legacy.payload()), true, "ok", null);
+        legacy.thread().join(10_000);
+        assertTrue(legacy.result().get() != null && legacy.result().get().ok(),
+                String.valueOf(legacy.error().get()));
     }
 
     @Test

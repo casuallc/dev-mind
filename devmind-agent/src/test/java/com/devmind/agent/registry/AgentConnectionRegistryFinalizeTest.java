@@ -69,11 +69,16 @@ class AgentConnectionRegistryFinalizeTest {
     }
 
     private Call startFinalize() throws Exception {
+        return startFinalize(null);
+    }
+
+    private Call startFinalize(String workspaceKey) throws Exception {
         AtomicReference<FinalizeResult> result = new AtomicReference<>();
         AtomicReference<Throwable> error = new AtomicReference<>();
         Thread t = new Thread(() -> {
             try {
-                result.set(registry.finalizeWorkspace("7", "s1", "proj1", "alice", specs(), true));
+                result.set(registry.finalizeWorkspace("7", "s1", "proj1", "alice", specs(), true,
+                        workspaceKey));
             } catch (Throwable e) {
                 error.set(e);
             }
@@ -131,6 +136,34 @@ class AgentConnectionRegistryFinalizeTest {
         FinalizeResult r = call.result().get();
         assertTrue(r != null && !r.ok(), String.valueOf(call.error().get()));
         assertTrue(r.error().contains("断连"), r.error());
+    }
+
+    @Test
+    void serializesWorkspaceKeyOnlyWhenPresent() throws Exception {
+        // CAP-51 红线回归：带 key（需求粒度）→ 帧必须带 workspaceKey；不带 key（存量会话）→ 不带
+        registry.onHello(node, new AgentHelloMeta("windows", "", "0.2.0", null, 10, null, null),
+                List.of());
+        Call withKey = startFinalize("req-ab12cd34");
+        assertTrue(withKey.payload().contains("\"workspaceKey\":\"req-ab12cd34\""), withKey.payload());
+        registry.onWorkspaceFinalizeAck("7", requestIdOf(withKey.payload()), true, "ok", null);
+        withKey.thread().join(10_000);
+        assertTrue(withKey.result().get() != null && withKey.result().get().ok(),
+                String.valueOf(withKey.error().get()));
+
+        Call legacy = startFinalize(null);
+        assertFalse(legacy.payload().contains("workspaceKey"), legacy.payload());
+        registry.onWorkspaceFinalizeAck("7", requestIdOf(legacy.payload()), true, "ok", null);
+        legacy.thread().join(10_000);
+        assertTrue(legacy.result().get() != null && legacy.result().get().ok(),
+                String.valueOf(legacy.error().get()));
+    }
+
+    @Test
+    void workspaceKeyNeedsV10() {
+        // CAP-51：v7 runner 收到带 key 的收口 → 409（老 runner 忽略该字段会去收口 work/ 旧布局）
+        var e = assertThrows(DevMindException.class, () -> registry.finalizeWorkspace(
+                "7", "s1", "proj1", "alice", specs(), false, "req-ab12cd34"));
+        assertTrue(e.getMessage().contains("v10"), e.getMessage());
     }
 
     @Test

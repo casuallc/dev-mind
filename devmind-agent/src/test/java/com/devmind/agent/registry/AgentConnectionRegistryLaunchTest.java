@@ -147,6 +147,23 @@ class AgentConnectionRegistryLaunchTest {
     }
 
     @Test
+    void serializesWorkspaceKeyOnlyWhenPresent() throws Exception {
+        // CAP-51 红线回归：需求粒度会话 launch 帧必须带 workspaceKey（runner 据此落
+        // <owner>/worktrees/<key>；缺字段会静默落回 work/ 旧布局，多需求写进同一目录）
+        AgentLaunchCommand.RepoSpec main = new AgentLaunchCommand.RepoSpec(
+                "https://git/a.git", "main", "feature/req-ab12cd34", "tok-a");
+        String reqPayload = launchAndCapture(new AgentLaunchCommand(
+                "s1", "proj1", "task", null, "acceptEdits", Map.of(),
+                main, "session", null, null, null, null, "alice", "req-ab12cd34"));
+        assertTrue(reqPayload.contains("\"workspaceKey\":\"req-ab12cd34\""), reqPayload);
+        // 存量会话（key=null）不带该字段 → runner 落旧布局 work/（FR-11 存量契约）
+        String legacy = launchAndCapture(new AgentLaunchCommand(
+                "s2", "proj1", "task", null, "acceptEdits", Map.of(),
+                main, "session", null, null, null, null, "alice"));
+        assertFalse(legacy.contains("workspaceKey"), legacy);
+    }
+
+    @Test
     void serializesProxyWhenNodeConfigured() throws Exception {
         // CAP-43 红线回归：节点配了代理（协议 v8+）launch 帧必须带 proxy 块
         // （缺字段 runner 该走代理的 clone/fetch 会直连失败）

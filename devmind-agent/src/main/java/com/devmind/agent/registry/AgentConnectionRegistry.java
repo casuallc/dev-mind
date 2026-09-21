@@ -340,6 +340,21 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("proxy", proxy);
     }
 
+    /**
+     * CAP-51：workspaceKey 非空时要求 v10+。字段缺席（存量会话/未升级服务端）不门控——
+     * 那是 FR-11 的存量契约（runner 落旧布局 work/，语义正确），不是降级。
+     */
+    private void requireKeyProtocol(String nodeId, String workspaceKey, String what) {
+        if (workspaceKey == null || workspaceKey.isBlank()) {
+            return;
+        }
+        if (!supports(nodeId, AgentProtocol.REQUIREMENT_WORKSPACE)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 的 runner 协议版本过低（" + what + "需 v"
+                            + AgentProtocol.REQUIREMENT_WORKSPACE + "+，需求粒度工作区），请到节点页升级 runner");
+        }
+    }
+
     /** FR-07：DB 判 ONLINE 且标签匹配的候选中，挑当前确有活跃连接的第一个。 */
     @Override
     public String pickNodeByLabels(List<String> requiredLabels) {
@@ -416,6 +431,11 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         // 协议 v7 由调用方 supports() 门控。红线：新字段必须在此 put + LaunchTest 断言
         if (cmd.workspaceOwner() != null && !cmd.workspaceOwner().isBlank()) {
             frame.put("workspaceOwner", cmd.workspaceOwner());
+        }
+        // CAP-51：需求粒度工作区键（runner 落 <owner>/worktrees/<key>）；字段缺席 = 旧布局 work/。
+        // 协议 v10 由调用方 supports() 门控。红线：新字段必须在此 put + LaunchTest 断言
+        if (cmd.workspaceKey() != null && !cmd.workspaceKey().isBlank()) {
+            frame.put("workspaceKey", cmd.workspaceKey());
         }
         putProxy(frame, nodeId);
         try {
@@ -616,13 +636,15 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     public FinalizeResult finalizeWorkspace(String nodeId, String sessionId, String projectId,
                                             String workspaceOwner,
                                             List<AgentLaunchCommand.RepoSpec> specs,
-                                            boolean discardChanges) {
+                                            boolean discardChanges, String workspaceKey) {
         WebSocketSession ws = requireConnection(nodeId); // 先判在线再判版本，同 releaseWorkspace
         if (!supports(nodeId, AgentProtocol.PER_USER_WORKSPACE)) {
             throw new DevMindException(ErrorCode.CONFLICT,
                     "节点 " + nodeId + " 的 runner 协议版本过低（工作区收口需 v"
                             + AgentProtocol.PER_USER_WORKSPACE + "+），请到节点页升级 runner");
         }
+        // CAP-51：带 workspaceKey 时必须 v10+——老 runner 忽略该字段会去收口 work/ 旧布局
+        requireKeyProtocol(nodeId, workspaceKey, "工作区收口");
         String requestId = "wf-" + System.currentTimeMillis() + "-" + sessionId;
         CompletableFuture<FinalizeResult> done = new CompletableFuture<>();
         pendingFinalizes.put(requestId, new FinalizeWaiter(nodeId, done));
@@ -633,6 +655,10 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("projectId", projectId);
         frame.put("workspaceOwner", workspaceOwner);
         frame.put("discardChanges", discardChanges);
+        // CAP-51 红线：workspaceKey 必须在此 put（缺席 = runner 收口旧布局 work/）
+        if (workspaceKey != null && !workspaceKey.isBlank()) {
+            frame.put("workspaceKey", workspaceKey);
+        }
         List<Map<String, Object>> repos = new ArrayList<>();
         for (AgentLaunchCommand.RepoSpec spec : specs) {
             Map<String, Object> r = new LinkedHashMap<>();
@@ -669,7 +695,8 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     @Override
     public WorkspaceReleaseResult releaseWorkspace(String nodeId, String sessionId, String projectId,
                                                    String workspaceOwner,
-                                                   List<AgentLaunchCommand.RepoSpec> specs) {
+                                                   List<AgentLaunchCommand.RepoSpec> specs,
+                                                   String workspaceKey) {
         // 先判在线再判版本：断连会清掉 protocolVersions 记录（supports 按 v1 兜底），
         // 反过来就成了「节点明明离线却报协议版本过低、引导去升级 runner」——正是本事故里
         // 「报错指向错误对象」的翻版，必须让提示落在真实原因上。
@@ -680,6 +707,8 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
                             + AgentProtocol.RELEASE_WORKSPACE + "+），请到节点页升级 runner 后再删除会话"
                             + "（或到节点手工删除固定工作区目录）");
         }
+        // CAP-51：带 workspaceKey 时必须 v10+（老 runner 会去释放 work/ 旧布局）
+        requireKeyProtocol(nodeId, workspaceKey, "释放工作区");
         String requestId = "wr-" + System.currentTimeMillis() + "-" + sessionId;
         CompletableFuture<WorkspaceReleaseResult> done = new CompletableFuture<>();
         pendingReleases.put(requestId, new ReleaseWaiter(nodeId, done));
@@ -689,6 +718,10 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("sessionId", sessionId);
         frame.put("projectId", projectId);
         frame.put("workspaceOwner", workspaceOwner);
+        // CAP-51 红线：workspaceKey 必须在此 put（缺席 = runner 释放旧布局 work/）
+        if (workspaceKey != null && !workspaceKey.isBlank()) {
+            frame.put("workspaceKey", workspaceKey);
+        }
         List<Map<String, Object>> repos = new ArrayList<>();
         for (AgentLaunchCommand.RepoSpec spec : specs) {
             Map<String, Object> r = new LinkedHashMap<>();
