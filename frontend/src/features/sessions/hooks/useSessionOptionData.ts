@@ -28,7 +28,10 @@ export function useSessionOptionData(form: FormInstance, projectId: string | nul
   const [repos, setRepos] = useState<ProjectRepo[]>([])
   const [requirements, setRequirements] = useState<Requirement[]>([])
   const [workItems, setWorkItems] = useState<WorkItem[]>([])
-  const watchRequirementId = Form.useWatch('requirementId', form)
+  // preserve:true 必带：本 Form 住在 destroyOnHidden 的 Popover 里，弹层一关字段就卸载，
+  // 默认口径把"字段卸载"读成"需求被清空"→ 下面的联动 effect 会误清刚选好的工作单元
+  // （点一下输入框弹层就关，表现就是"选了工作单元，建会话时丢了"）
+  const watchRequirementId = Form.useWatch('requirementId', { form, preserve: true })
 
   useEffect(() => {
     listScenarios(true)

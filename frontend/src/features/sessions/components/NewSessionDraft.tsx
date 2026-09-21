@@ -32,7 +32,9 @@ export default function NewSessionDraft({
   const [text, setText] = useState('')
   const [creating, setCreating] = useState(false)
   const [optionsOpen, setOptionsOpen] = useState(false)
-  const values = Form.useWatch([], form) ?? {}
+  // preserve:true 必带：高级选项的 Form 住在 destroyOnHidden 的 Popover 里，弹层一关字段就卸载，
+  // 默认口径（只取已注册字段）会看着像"什么都没选"——徽标点会灭
+  const values = Form.useWatch([], { form, preserve: true }) ?? {}
 
   // 仓库默认勾主库；执行节点预填项目默认节点（可改/清除）
   const defaultRepoIds = useMemo(() => repos.filter((r) => r.primary).map((r) => r.id), [repos])
@@ -69,7 +71,11 @@ export default function NewSessionDraft({
     if (!t || creating || !projectId) return
     setCreating(true)
     try {
-      const v = form.getFieldsValue()
+      // 取值必须 getFieldsValue(true)（取整个 store，含已卸载字段）：高级选项的 Form 住在
+      // destroyOnHidden 的 Popover 里，用户点一下输入框弹层就关、字段随之卸载——无参
+      // getFieldsValue 只回"已注册字段"，仓库/需求/工作单元/节点/场景/模型全被静默丢光
+      //（大部分被后端默认值兜住，需求与工作单元这类关联是真丢）。
+      const v = form.getFieldsValue(true)
       const s = await createSession({
         taskSpec: t,
         scenarioCode: v.scenarioCode || undefined,
