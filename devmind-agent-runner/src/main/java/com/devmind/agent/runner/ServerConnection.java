@@ -9,8 +9,13 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.util.Map;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -22,6 +27,8 @@ import java.util.function.Consumer;
  * <p>认证拒绝（服务端关闭码 1008，token 无效或节点已禁用）走独立的长退避（30s→5min 封顶）：
  * 服务端是先完成 WS 握手再在 afterConnectionEstablished 里拒绝，握手成功不等于接入成功，
  * 不能在握手时复位退避——只有连接存活 ≥10s（证明认证通过）才复位。</p>
+ *
+ * <p>CAP-50：所有上行帧统一入 {@link #outbound 队列}，由**单条写线程**顺序落线（见该字段注释）。</p>
  */
 public class ServerConnection {
 
@@ -33,14 +40,35 @@ public class ServerConnection {
     static final int CLOSE_DUPLICATE = 4000;
     /** 连接存活超过此时长视为健康（认证通过），复位退避 */
     static final long MIN_HEALTHY_MS = 10_000;
+    /** 出口队列上限（兜底阀：写线程被慢连接拖住时防无界堆积；正常帧率远够不到）。 */
+    static final int SEND_QUEUE_CAPACITY = 10_000;
+    /** 单帧写完超时。 */
+    static final long SEND_TIMEOUT_MS = 10_000;
 
     private final RunnerConfig config;
     private final ObjectMapper mapper;
     private final Consumer<JsonNode> onFrame;
     /** 连接建立回调（发 hello） */
     private final Runnable onOpen;
-    private final AtomicReference<WebSocket> current = new AtomicReference<>();
+    /** 当前连接；包内可见，供 `ServerConnectionEgressTest` 塞入假 WebSocket 做出口串行化回归。 */
+    final AtomicReference<WebSocket> current = new AtomicReference<>();
     private volatile boolean running = true;
+
+    /**
+     * 出口串行化（CAP-50）：JDK 的 {@code WebSocket.sendText} 在**上一次发送尚未写完**时直接返回
+     * {@code failedFuture("Send pending")}，并发的 {@code sendText} 会让帧被静默丢掉。开流式之前
+     * 一回合没几帧、间隔以秒计，撞不上；开了 partial messages 后每会话有 stdout 循环、stderr 循环、
+     * 心跳线程三条并发生产者，帧率上一个量级——丢 text_delta 会被后续全量 assistant 自愈，但丢
+     * tool_use / result / **exit** 不会，丢一个 exit 帧就是会话永久卡在 RUNNING（服务端唯一兜底是
+     * 重连时的 hello 对账）。故所有上行帧统一入队，由单条写线程顺序发。
+     */
+    private final BlockingQueue<Outbound> outbound = new LinkedBlockingQueue<>(SEND_QUEUE_CAPACITY);
+    private final Thread writer;
+    /** 队列打满丢弃计数（仅在连接被拖住的病态场景增长），用于节流告警。 */
+    private final AtomicLong droppedFrames = new AtomicLong();
+
+    /** 一帧待发内容：带上它所属的连接（连接已换/已断即丢弃），以及可选的同步等待信号。 */
+    private record Outbound(WebSocket ws, String json, CompletableFuture<Boolean> done) { }
 
     public ServerConnection(RunnerConfig config, ObjectMapper mapper,
                             Consumer<JsonNode> onFrame, Runnable onOpen) {
@@ -48,6 +76,8 @@ public class ServerConnection {
         this.mapper = mapper;
         this.onFrame = onFrame;
         this.onOpen = onOpen;
+        // 虚拟线程随 JVM 退出，不需要 join；shutdown() 会打断它的 poll
+        this.writer = Thread.ofVirtual().name("ws-send").start(this::writeLoop);
     }
 
     /** 阻塞式连接循环：断线自动重连（指数退避），{@link #shutdown()} 后退出。 */
@@ -134,41 +164,84 @@ public class ServerConnection {
         }
     }
 
-    /** 发送一帧（未连接时丢弃并告警）。 */
+    /** 发送一帧（未连接时丢弃并告警）；入队即返回，由写线程顺序落线。 */
     public void send(Map<String, Object> frame) {
-        WebSocket ws = current.get();
-        if (ws == null) {
-            log.debug("未连接，帧丢弃: {}", frame.get("type"));
-            return;
-        }
-        String json = mapper.writeValueAsString(frame);
-        ws.sendText(json, true).exceptionally(e -> {
-            log.warn("发送失败: {}", e.getMessage());
-            return null;
-        });
+        enqueue(frame, null);
     }
 
     /**
      * 发送并同步等写完（exit 前最后一帧用，如 upgrade ack——fire-and-forget 紧接着
-     * System.exit 会丢帧）。返回是否成功落线。
+     * System.exit 会丢帧）。返回是否成功落线。走同一出口队列，顺序不受影响。
      */
     public boolean sendAndWait(Map<String, Object> frame, long timeoutMs) {
-        WebSocket ws = current.get();
-        if (ws == null) {
-            return false;
-        }
+        CompletableFuture<Boolean> done = new CompletableFuture<>();
+        enqueue(frame, done);
         try {
-            ws.sendText(mapper.writeValueAsString(frame), true)
-                    .get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
-            return true;
+            return Boolean.TRUE.equals(done.get(timeoutMs, TimeUnit.MILLISECONDS));
         } catch (Exception e) {
             log.warn("同步发送失败: {}", e.getMessage());
             return false;
         }
     }
 
+    private void enqueue(Map<String, Object> frame, CompletableFuture<Boolean> done) {
+        WebSocket ws = current.get();
+        if (ws == null) {
+            log.debug("未连接，帧丢弃: {}", frame.get("type"));
+            if (done != null) {
+                done.complete(false);
+            }
+            return;
+        }
+        Outbound item = new Outbound(ws, mapper.writeValueAsString(frame), done);
+        if (outbound.offer(item)) {
+            return;
+        }
+        long n = droppedFrames.incrementAndGet();
+        if (n == 1 || n % 100 == 0) {
+            log.warn("发送队列已满，累计丢弃 {} 帧（最近一帧 {}）——连接可能被拖住", n, frame.get("type"));
+        }
+        if (done != null) {
+            done.complete(false);
+        }
+    }
+
+    private void writeLoop() {
+        while (running) {
+            Outbound o;
+            try {
+                o = outbound.poll(200, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            if (o == null) {
+                continue;
+            }
+            boolean ok = write(o);
+            if (o.done() != null) {
+                o.done().complete(ok);
+            }
+        }
+    }
+
+    /** 真正落线：连接已换或已断即丢弃，与「断线期间上行帧丢弃」的既有语义一致。 */
+    private boolean write(Outbound o) {
+        if (o.ws() != current.get()) {
+            return false;
+        }
+        try {
+            o.ws().sendText(o.json(), true).get(SEND_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            return true;
+        } catch (Exception e) {
+            log.warn("发送失败: {}", e.getMessage());
+            return false;
+        }
+    }
+
     public void shutdown() {
         running = false;
+        writer.interrupt();
         WebSocket ws = current.get();
         if (ws != null) {
             ws.sendClose(WebSocket.NORMAL_CLOSURE, "runner shutdown");
