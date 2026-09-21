@@ -127,4 +127,22 @@ public interface AgentNodeConnector {
         throw new com.devmind.common.exception.DevMindException(
                 com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
     }
+
+    /**
+     * CAP-42：下发 workspace_release 帧并阻塞等 workspace_release_ack——删除会话时释放固定工作区
+     * {@code <workspaceRoot>/<projectId>/<workspaceOwner>/}：逐库丢弃未提交改动 → 删 worktree
+     * → 删本地会话分支（<b>不合并不 push</b>，与 {@link #finalizeWorkspace} 的区别见
+     * {@link WorkspaceReleaseResult}）。
+     *
+     * <p>节点离线/协议版本不足（需 v9+）/等待超时抛 DevMindException(CONFLICT)——删除链路必须
+     * fail-visible：静默跳过释放会把固定目录留成孤儿，该 (项目,用户) 之后永远开不了新会话。</p>
+     *
+     * 默认实现 = agent 模块未装配（无任何执行节点可用）。
+     */
+    default WorkspaceReleaseResult releaseWorkspace(String nodeId, String sessionId, String projectId,
+                                                    String workspaceOwner,
+                                                    List<AgentLaunchCommand.RepoSpec> specs) {
+        throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+    }
 }

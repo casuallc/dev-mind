@@ -414,6 +414,116 @@ class RunnerWorkspaceTest {
         assertTrue(missing.output().contains("不存在"), missing.output());
     }
 
+    @Test
+    void releaseRemovesWorktreeAndBranchWithoutMergingOrPushing() throws Exception {
+        // CAP-42 删除会话释放固定工作区：目录与本地分支删掉、基线不受影响、远端不动，
+        // 释放后同 (项目,用户) 能立刻再开新会话（本例用不同分支模拟）
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s1", "");
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", spec);
+        // 一笔未合并提交 + 一个未提交脏文件：释放是丢弃语义，两者一并丢弃
+        Files.writeString(ctx.sessionDir().resolve("code.txt"), "change");
+        git(ctx.sessionDir(), "add", ".");
+        git(ctx.sessionDir(), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "work");
+        Files.writeString(ctx.sessionDir().resolve("dirty.txt"), "x");
+
+        RunnerWorkspace.ReleaseOutcome r = ws.release("proj1", "alice", List.of(spec));
+        assertEquals(0, r.exit(), r.output());
+        assertFalse(Files.exists(ctx.sessionDir()), "固定 worktree 已删: " + r.output());
+        // 本地会话分支已删（rev-parse 非零 = 不存在）
+        assertThrows(IllegalStateException.class,
+                () -> git(ctx.cacheDir(), "rev-parse", "--verify", "refs/heads/feature/s1"));
+        // 不合并不 push：基线不含会话产出，远端无会话分支
+        assertThrows(IllegalStateException.class, () -> git(origin, "show", "main:code.txt"));
+        assertThrows(IllegalStateException.class,
+                () -> git(origin, "rev-parse", "--verify", "refs/heads/feature/s1"));
+        // 摘要报告丢弃量（脏文件 1 个、仅存于本地的提交 1 个）
+        assertTrue(r.output().contains("未提交文件 1"), r.output());
+        assertTrue(r.output().contains("仅存于本地的提交 1"), r.output());
+        // 克隆缓存保留（依赖沉淀，下次会话不重新 clone）
+        assertTrue(Files.isDirectory(ctx.cacheDir().resolve(".git")));
+
+        // 释放后可立即再开新会话（占用锁已解）
+        RunnerWorkspace.RepoCtx next = ws.prepare("s2", "proj1", "alice", new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s2", ""));
+        assertEquals("feature/s2", gitOut(next.sessionDir(), "branch", "--show-current"));
+    }
+
+    @Test
+    void releaseIsIdempotentAndCleansLeftoverBranch() throws Exception {
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s1", "");
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", spec);
+
+        // 首次释放：目录与分支都清掉
+        assertEquals(0, ws.release("proj1", "alice", List.of(spec)).exit());
+        // 重复释放（目录与分支都不在）→ 幂等成功，摘要标明已释放
+        RunnerWorkspace.ReleaseOutcome again = ws.release("proj1", "alice", List.of(spec));
+        assertEquals(0, again.exit(), again.output());
+        assertTrue(again.output().contains("已释放"), again.output());
+
+        // 半成品：worktree 已由 git 正常移除（收口/释放中断）但本地分支残留 → 一并清理
+        ws.prepare("s3", "proj1", "alice", new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s3", ""));
+        Path work3 = tmp.resolve("workspaces").resolve("proj1").resolve("alice").resolve("work");
+        git(ctx.cacheDir(), "worktree", "remove", "--force", work3.toString());
+        RunnerWorkspace.ReleaseOutcome leftover = ws.release("proj1", "alice", List.of(
+                new RunnerWorkspace.RepoSpec(origin.toUri().toString(), "main", "feature/s3", "")));
+        assertEquals(0, leftover.exit(), leftover.output());
+        assertTrue(leftover.output().contains("残留本地分支已清理"), leftover.output());
+        assertThrows(IllegalStateException.class,
+                () -> git(ctx.cacheDir(), "rev-parse", "--verify", "refs/heads/feature/s3"));
+    }
+
+    @Test
+    void releaseMultiRepoPartialFailureKeepsFailedRepo() throws Exception {
+        // 与 finalize 同语义：成功库即时释放，失败库保留待重试
+        Path originA = tmp.resolve("origin-a.git");
+        Path originB = tmp.resolve("origin-b.git");
+        seedOrigin(originA, "a.txt");
+        seedOrigin(originB, "b.txt");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec specA = new RunnerWorkspace.RepoSpec(
+                originA.toUri().toString(), "main", "feature/m1", "", "backend");
+        RunnerWorkspace.RepoSpec specB = new RunnerWorkspace.RepoSpec(
+                originB.toUri().toString(), "main", "feature/m1", "", "web");
+        RunnerWorkspace.MultiCtx mctx = ws.prepareMulti("m1", "proj1", "alice", List.of(specA, specB));
+        Path aggRoot = mctx.aggRoot();
+        // web 库克隆缓存被挪走（.git 不在原位）→ 该库释放失败并保留现场
+        Files.move(mctx.repos().get(1).cacheDir(),
+                mctx.repos().get(1).cacheDir().resolveSibling("web-cache-moved"));
+
+        RunnerWorkspace.ReleaseOutcome r = ws.release("proj1", "alice", List.of(specA, specB));
+        assertTrue(r.exit() != 0, r.output());
+        assertTrue(r.output().contains("[web] 失败"), r.output());
+        assertFalse(Files.exists(aggRoot.resolve("backend")), "成功库已释放: " + r.output());
+        assertTrue(Files.isDirectory(aggRoot.resolve("web")), "失败库保留: " + r.output());
+    }
+
+    @Test
+    void releaseMultiRepoAllOkRemovesAggregateRoot() throws Exception {
+        // 全部库释放成功 → 聚合根 work/ 一并删除（单库场景 work/ 本身就是 worktree，已被移除）
+        Path originA = tmp.resolve("origin-a.git");
+        Path originB = tmp.resolve("origin-b.git");
+        seedOrigin(originA, "a.txt");
+        seedOrigin(originB, "b.txt");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        List<RunnerWorkspace.RepoSpec> specs = List.of(
+                new RunnerWorkspace.RepoSpec(originA.toUri().toString(), "main", "feature/m1", "", "backend"),
+                new RunnerWorkspace.RepoSpec(originB.toUri().toString(), "main", "feature/m1", "", "web"));
+        Path aggRoot = ws.prepareMulti("m1", "proj1", "alice", specs).aggRoot();
+
+        RunnerWorkspace.ReleaseOutcome r = ws.release("proj1", "alice", specs);
+        assertEquals(0, r.exit(), r.output());
+        assertFalse(Files.exists(aggRoot), "聚合根已删: " + r.output());
+    }
+
     private static void deleteRec(Path dir) throws Exception {
         try (var walk = Files.walk(dir)) {
             for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {

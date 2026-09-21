@@ -18,12 +18,15 @@ package com.devmind.common.agent;
  * 以及 workspace_finalize/workspace_finalize_ack 帧——手动收口：合并会话分支到基线
  * + push + 删 worktree）。v8 = CAP-43 节点外网代理（launch/worklog_push/exec/
  * workspace_finalize 帧携带 proxy{url,scopes}——老 runner 会忽略字段导致该走代理的
- * 网络操作直连失败，故属「必须认识」需门控）。</p>
+ * 网络操作直连失败，故属「必须认识」需门控）。v9 = CAP-42 补丁 删除会话时释放固定工作区
+ * （workspace_release/workspace_release_ack 帧——丢弃未提交改动删 worktree + 本地会话分支，
+ * 不合并不 push；老 runner 不认识该帧会静默忽略，目录被留下成孤儿永久锁死该
+ * (项目,用户) 工作区，故属「必须认识」需门控）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 8;
+    public static final int CURRENT = 9;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -42,6 +45,9 @@ public final class AgentProtocol {
 
     /** CAP-43 节点外网代理（下行帧携带 proxy 对象）所需最低版本 */
     public static final int NODE_PROXY = 8;
+
+    /** CAP-42 删除会话释放固定工作区（workspace_release 帧）所需最低版本 */
+    public static final int RELEASE_WORKSPACE = 9;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;

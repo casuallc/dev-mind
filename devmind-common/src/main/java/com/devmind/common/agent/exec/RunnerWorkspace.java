@@ -643,6 +643,146 @@ public class RunnerWorkspace {
         return null;
     }
 
+    /** CAP-42 固定工作区释放结果：exit=0 全部库成功；output 为逐库摘要/错误（已脱敏，多库带 [name] 前缀）。 */
+    public record ReleaseOutcome(int exit, String output) {
+    }
+
+    /**
+     * CAP-42 删除会话时释放固定工作区：逐库执行「丢弃未提交改动（worktree remove --force）
+     * → 删 worktree → 删本地会话分支」——<b>不合并不 push</b>（删除是丢弃语义，不能把会话分支
+     * 合入基线，也不该在删除时改动远端）。
+     *
+     * <p>为什么必须有这条链路：固定工作区按 (项目, 用户) 唯一占用，占用判定只看<b>磁盘上
+     * worktree 的检出分支</b>（{@link #ensureUserWorktree}）。会话记录被删后目录若还在，新会话
+     * launch 必失败、而报错引导的「收口」入口又随会话记录一起消失——该 (项目,用户) 永久锁死
+     * （2026-09-21 admq-manager/admin 实事故）。</p>
+     */
+    public ReleaseOutcome release(String projectId, String workspaceOwner, List<RepoSpec> specs) {
+        requireSafeId(projectId, "projectId");
+        String owner = requireOwner(workspaceOwner);
+        if (specs == null || specs.isEmpty()) {
+            throw new IllegalStateException("释放工作区缺少仓库描述（repos 为空）");
+        }
+        boolean multi = specs.size() > 1;
+        Path userRoot = userRoot(projectId, owner);
+        Path aggRoot = userRoot.resolve("work").normalize();
+        StringBuilder summary = new StringBuilder();
+        boolean allOk = true;
+        for (RepoSpec spec : specs) {
+            String label = spec.name() != null && !spec.name().isBlank() ? "[" + spec.name() + "] " : "";
+            if (multi && (spec.name() == null || !SAFE_ID.matcher(spec.name()).matches()
+                    || "work".equals(spec.name()))) {
+                throw new IllegalStateException(
+                        "非法仓库名（白名单 [a-zA-Z0-9._-]，多库必填，禁用保留名 work）: " + spec.name());
+            }
+            if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
+                throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
+            }
+            Path cacheDir = multi
+                    ? userRoot.resolve(spec.name()).resolve("main").normalize()
+                    : userRoot.resolve("main").normalize();
+            Path workDir = multi ? aggRoot.resolve(spec.name()).normalize() : aggRoot;
+            var lock = lockOf(cacheDir);
+            lock.lock();
+            try {
+                String err = releaseOne(cacheDir, workDir, spec, label, summary);
+                if (err != null) {
+                    allOk = false;
+                    summary.append(label).append("失败: ").append(err).append('\n');
+                    log.warn("固定工作区释放失败: owner={} repo={} err={}", owner, spec.name(), err);
+                }
+            } finally {
+                lock.unlock();
+            }
+        }
+        // 多库全部释放成功：聚合根 work/ 已空则一并删除（单库的 work/ 本身就是 worktree 已被移除）
+        if (allOk && multi && Files.isDirectory(aggRoot)) {
+            try (var s = Files.list(aggRoot)) {
+                if (s.findAny().isEmpty()) {
+                    Files.deleteIfExists(aggRoot);
+                }
+            } catch (IOException e) {
+                log.debug("聚合根清理跳过: {} err={}", aggRoot, e.getMessage());
+            }
+        }
+        if (allOk) {
+            log.info("固定工作区已释放: project={} owner={} repos={}", projectId, owner, specs.size());
+        }
+        return new ReleaseOutcome(allOk ? 0 : 1, summary.toString().trim());
+    }
+
+    /**
+     * 单库释放（release 逐库调用，调用方持 cacheLock）。成功返回 null 并向 summary 追加摘要；
+     * 失败返回脱敏错误文案（固定 worktree 保留）。<b>幂等</b>：worktree 与分支都不在 = 已释放，跳过；
+     * 目录不在但分支残留 = 一并清理（收口/释放中断留下的半成品）。
+     */
+    private String releaseOne(Path cacheDir, Path workDir, RepoSpec spec, String label,
+                              StringBuilder summary) {
+        if (!Files.isDirectory(cacheDir.resolve(".git"))) {
+            return "克隆缓存缺失（工作区未初始化或已释放）: " + cacheDir;
+        }
+        if (!Files.isDirectory(workDir)) {
+            Result br = run(cacheDir, OP_TIMEOUT_SEC, spec.token(),
+                    "rev-parse", "--verify", "--quiet", "refs/heads/" + spec.branch());
+            if (br.exit() != 0) {
+                summary.append(label).append("该库工作区已释放，跳过\n");
+                return null;
+            }
+            run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "branch", "-D", spec.branch());
+            summary.append(label).append("worktree 已不在，残留本地分支已清理: ")
+                    .append(spec.branch()).append('\n');
+            return null;
+        }
+        // 丢弃前先把现场报告出来（删完就看不到了）：未提交文件数 + 仅存在于本分支的提交数
+        Result status = run(workDir, OP_TIMEOUT_SEC, spec.token(), "status", "--porcelain");
+        long dirty = status.exit() == 0 && !status.output().isBlank()
+                ? status.output().lines().count() : 0;
+        long onlyLocal = countLocalOnlyCommits(workDir, spec);
+        Result rm = run(cacheDir, OP_TIMEOUT_SEC, spec.token(),
+                "worktree", "remove", "--force", workDir.toString());
+        if (rm.exit() != 0) {
+            log.warn("释放移除 worktree 失败，递归删兜底: {} err={}", workDir, tail(rm.output()));
+            deleteRecursively(workDir);
+            run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "worktree", "prune");
+            if (Files.exists(workDir)) {
+                return "固定 worktree 删除失败（目录可能被占用，请到节点手工删除）: " + workDir;
+            }
+        }
+        Result br = run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "branch", "-D", spec.branch());
+        if (br.exit() != 0) {
+            // 目录已删，残留分支下次释放/收口会再清；不计失败（会话记录已无法再指向它）
+            log.warn("释放删除本地会话分支失败: {} err={}", spec.branch(), tail(br.output()));
+        }
+        summary.append(label).append("已释放固定 worktree");
+        if (dirty > 0) {
+            summary.append("（丢弃未提交文件 ").append(dirty).append(" 个）");
+        }
+        if (onlyLocal > 0) {
+            summary.append("（丢弃仅存于本地的提交 ").append(onlyLocal).append(" 个）");
+        }
+        summary.append('\n');
+        return null;
+    }
+
+    /**
+     * 仅存于本地、远端任何 ref 上都没有的提交数——释放前告知用户到底丢了多少活（只有这些
+     * 提交会随目录删除彻底消失）。<b>不用 {@code --exclude=<会话分支> --all}</b>：{@code --all}
+     * 会把 HEAD 单独算进来，exclude 掉分支 ref 也去不掉 HEAD 自身，实测恒等于全量提交数
+     * （2026-09-21 单元测试踩中）。命令失败返回 0（计数只是提示，绝不因它挡住释放）。
+     */
+    private long countLocalOnlyCommits(Path workDir, RepoSpec spec) {
+        Result r = run(workDir, OP_TIMEOUT_SEC, spec.token(), "rev-list", "--count", "HEAD",
+                "--not", "--remotes");
+        if (r.exit() != 0) {
+            return 0;
+        }
+        try {
+            return Long.parseLong(r.output().trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
     /** worklog 空间骨架：目录契约说明 + daily/weekly/entries 占位。 */
     /** worklog 空间 .gitignore：平台托管文件（上下文装配/物化设置/回传产物）不入库，
      *  否则 agent 按 README「git add -A」会把它提交并随远端备份推上公网仓库。 */
