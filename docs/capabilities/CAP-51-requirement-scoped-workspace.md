@@ -164,6 +164,34 @@ requirements ── + workspace_owner VARCHAR(64) NULL -- 工作区归属用户�
 - **`SessionRepoEntity.branch` 快照**：所有收口/释放/diff 一律**快照优先**，快照为 null 才按新规则推导。
 - 需求表两列由 `ddl-auto=update` 自动加列，不写迁移脚本。
 
+### FR-12 claude 本地状态目录与保留期
+
+工作树粒度变细后，claude CLI 自身的本地状态会跟着 cwd 走，必须显式管住（实测 + 对节点 CLI bundle
+2.1.278 的反编译级核实，结论见下）。
+
+- **状态目录按 cwd 归属**：claude 把 transcript 写到 `<claudeConfigDir>/projects/<slug(cwd)>/`，
+  slug = cwd 绝对路径里所有非 `[a-zA-Z0-9]` 字符替换为 `-`，超过 200 字符则截断为「前 200 + 短哈希」
+  （截断后靠哈希区分，不可逆）。同目录内：每会话一个 `<cli-session-id>.jsonl` + 一个同名 sidecar
+  目录（`subagents/`、`tool-results/`、`workflows/`、`remote-agents/`）+ `memory/`。
+  → **一需求一目录**（需求内多会话共用），目录数与需求数同阶、单个仅 KB 级；吃盘的是「会话数 ×
+  轮次」，与本能力选的粒度无关。
+- **`cleanupPeriodDays` 必须显式设置**：该设置的**默认值是 30 天**（`0` 被拒绝，最小值 1），claude
+  启动时静默清扫超过保留期的 transcript、sidecar、`file-history/`、`session-env/`、`tasks/` 等。
+  静置超期的需求工作树会**失去 resume 能力**（提交仍在分支上，代码不丢，但会话上下文不可续）。
+  清扫**遍历整机所有 `projects/`**，cutoff 取合并后的设置——**任一层 settings 写短值会波及整机**，
+  因此统一在 runner 专属 config 的 user settings 里设，**不放项目级**。
+- **runner 用专属 `claudeConfigDir`**（新配置项，默认 `{workspaceRoot}/../claude-config`，与
+  `claudePath`/`claudeConfigDir` 同处 `agent.properties`）：不再写节点用户个人的 `~/.claude`，
+  使平台会话的保留期策略、清理范围与用户的个人 Claude Code 记录彻底隔离（也避免清理误伤个人记录）。
+  升级时需在该目录补一次登录态（`ANTHROPIC_*` env 与凭据），随节点升级一次性完成。
+- **resume 需在原 cwd**：transcript 的归属键是**启动时的 cwd**，不是 git root。本机 2.1.278 构建里
+  `--resume <id>` 另有两层兜底（枚举同仓库 `git worktree list`、以及全 `projects/*` 扫 `<id>.jsonl`，
+  命中多个则放弃），故换路径后存量会话大概率仍可续——**但这两层无文档承诺，不得依赖**。
+  设计口径：**一律在原 worktree 路径 resume**（`sessions.workspace_key` + repo 快照可推导路径）；
+  跨路径续上算 bonus，续不上报清晰错误。
+- **平台不主动清 transcript**：工作树被 GC/释放后其 `projects/<slug>` 变孤儿目录，但由 claude 自身
+  保留期回收即可；留一个 `purgeClaudeStateOnWorktreeGc` 开关（**默认 false**）备极端场景。
+
 ## 3. 关键设计
 
 - **占用与并行的边界**：服务端预检管「同需求互斥」，runner 的目录比对管「磁盘残留」。
@@ -175,7 +203,11 @@ requirements ── + workspace_owner VARCHAR(64) NULL -- 工作区归属用户�
 - **依赖产物沉淀**：按需求沉淀（同需求的多个会话复用一个工作树），跨需求不共享
   （这是「并行」的对价）；人工地盘由 FR-08 的 `work/` 承担。
 - **磁盘成本**：活跃需求数 × 工作树文件（worktree 不复制 `.git` 对象库），
-  加上 agent 若跑构建则依赖各装一份。GC 是唯一兜底，参数可调。
+  加上 agent 若跑构建则依赖各装一份；claude 侧额外一份按 cwd 归属的 transcript（FR-12）。
+  GC 是唯一兜底，参数可调。
+- **保留期与工作区寿命对齐（FR-12）**：需求工作树保留多久，transcript 保留期就得覆盖多久，
+  否则「工作树还在、会话续不上」这种半可用状态最难排查。三者（`worktreeGcDays`、
+  `cleanupPeriodDays`、需求实际生命周期）在部署时一并确认。
 - **合并放临时 detached worktree**（沿用 CAP-42，已定）：绝不碰克隆缓存的检出分支，
   `.finalize-tmp` 内 merge 后 `push HEAD:<baseBranch>`。
 - **部署顺序约束**：老 runner + 新服务端 → 409 门控；新 runner + 老服务端 → repo 会话缺
@@ -210,13 +242,17 @@ GET  /api/sessions...                                                   SessionV
 8. 老 runner（协议 < v10）派发会话/收口/释放 409 提示升级；新 runner 收到缺 `workspaceKey`
    的 repo 会话直接报错（不落旧布局）；
 9. 存量 CAP-42 会话（`workspace_key IS NULL`）照常收口/释放/删除，行为与升级前一致；
-10. chat / worklog / 构建链路零回归；`git status --porcelain` 在零改动会话下仍为空（FR-10 回归保持）。
+10. chat / worklog / 构建链路零回归；`git status --porcelain` 在零改动会话下仍为空（FR-10 回归保持）；
+11. claude 状态落 runner 专属 `claudeConfigDir`（节点用户个人 `~/.claude/projects` 不再新增平台目录）；
+    该 config 的 `cleanupPeriodDays` 已显式设置（非默认 30）；静置超过 30 天的需求会话仍可 resume
+    （在**原 worktree 路径**启动，FR-12）。
 
 ## 7. 分期
 
 - **M1 需求粒度工作区（核心）**：CAP 文档 + 协议 v10（`workspaceKey` 三帧）+ 服务端
   分支/键解析与快照优先 + 需求级预检 + `requirements` 两列 + 收口需求级语义（保留工作树）+
-  runner 布局改造（`worktrees/<key>`）+ Reconciler/GC 扩展 + Java 单测 + E2E 脚本同步。
+  runner 布局改造（`worktrees/<key>`）+ Reconciler/GC 扩展 + claude 状态目录/保留期（FR-12，
+  随节点升级一次性完成）+ Java 单测 + E2E 脚本同步。
 - **M2 前端与需求页入口**：需求详情页工作区卡片 + 收口按钮/弹窗 + 会话列表撤收口入口 +
   SessionView 状态来源切换 + 前端类型检查/E2E。
 - **M3 共享基线检出 `work/`（可选）**：克隆缓存检出解耦（detached）+ 地盘创建与收口后前进 +
