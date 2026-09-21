@@ -83,31 +83,11 @@ public final class OpenAiCompatChat {
                     + OpenAiCompatHttp.sanitize(OpenAiCompatHttp.abbreviate(body)));
         }
         JsonNode content = choices.get(0).path("message").path("content");
-        String text = content.isArray() ? firstTextOf(content) : content.asText("");
+        // 探针语义：数组只取首个非空文本（正文通道要拼接全部，见 OpenAiCompatHttp.contentText）
+        String text = content.isArray() ? OpenAiCompatHttp.firstTextOf(content) : content.asText("");
         if (text.isBlank()) {
             throw new ModelCallException("chat 响应 choices[0].message.content 为空（网关拦截或限流？）");
         }
-        return collapse(text);
-    }
-
-    /** 数组形态的 content：取首个非空文本（元素可能是纯字符串，也可能是 {type:"text", text:"…"}） */
-    private static String firstTextOf(JsonNode parts) {
-        for (JsonNode part : parts) {
-            String text = part.path("text").asText("");
-            if (text.isBlank()) {
-                text = part.asText("");
-            }
-            if (!text.isBlank()) {
-                return text;
-            }
-        }
-        return "";
-    }
-
-    /** 回复文本要进 UI 与落库消息，先把换行/连续空白压成单空格 */
-    private static String collapse(String text) {
-        String oneLine = text.replaceAll("\\s+", " ").trim();
-        return oneLine.length() <= OpenAiCompatHttp.SNIPPET_LEN
-                ? oneLine : oneLine.substring(0, OpenAiCompatHttp.SNIPPET_LEN) + "…";
+        return OpenAiCompatHttp.collapse(text);
     }
 }

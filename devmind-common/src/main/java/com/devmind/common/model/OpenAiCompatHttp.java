@@ -5,6 +5,8 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * CAP-48 模型调用共用的 HTTP 与脱敏助手。包内可见——调用方只可能是本包的 OpenAI 兼容客户端。
@@ -22,6 +24,8 @@ final class OpenAiCompatHttp {
 
     /** 形如 sk-xxx / Bearer xxx 的凭据片段，出现在任何回显文本里都要抹掉 */
     private static final Pattern SECRET = Pattern.compile("(?i)(sk-[A-Za-z0-9_\\-]{6,}|bearer\\s+\\S+)");
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private OpenAiCompatHttp() {
     }
@@ -62,5 +66,72 @@ final class OpenAiCompatHttp {
                 ? "（看上面的地址：OpenAI 兼容服务多数要求 baseUrl 带 /v1 前缀；地址没错则是该服务上没有这个模型名）"
                 : "";
         return what + " " + uri + " 返回 " + status + ": " + sanitize(abbreviate(body)) + hint;
+    }
+
+    /**
+     * 从一个 {@code content} 节点取<b>全部</b>文本：文本节点直接取；数组则把所有 part 的文本<b>拼接</b>
+     * （元素可能是纯字符串，也可能是 {@code {type:"text", text:"…"}}）。
+     *
+     * <p>正文通道用这个（CAP-49）；截断/丢弃 part 在这里就是内容损坏，探针那套"只取首个"的语义见
+     * {@link #firstTextOf}。</p>
+     */
+    static String contentText(JsonNode content) {
+        if (content == null || content.isMissingNode() || content.isNull()) {
+            return "";
+        }
+        if (content.isTextual()) {
+            return content.asText("");
+        }
+        if (!content.isArray()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (JsonNode part : content) {
+            if (part.isTextual()) {
+                sb.append(part.asText(""));
+                continue;
+            }
+            sb.append(part.path("text").asText(""));
+        }
+        return sb.toString();
+    }
+
+    /** 数组形态的 content：取首个非空文本（探针语义——只要"有回复"） */
+    static String firstTextOf(JsonNode parts) {
+        for (JsonNode part : parts) {
+            String text = part.path("text").asText("");
+            if (text.isBlank()) {
+                text = part.asText("");
+            }
+            if (!text.isBlank()) {
+                return text;
+            }
+        }
+        return "";
+    }
+
+    /**
+     * 从<b>非流式</b>响应体里取正文（{@code choices[0].message.content}，拼接版）；结构不符一律空串。
+     * 只有 CAP-49 的「服务端忽略了 {@code stream:true}」回落路径用它。
+     */
+    static String messageText(String body) {
+        if (body == null || body.isBlank()) {
+            return "";
+        }
+        try {
+            JsonNode choices = MAPPER.readTree(body).path("choices");
+            if (!choices.isArray() || choices.isEmpty()) {
+                return "";
+            }
+            return contentText(choices.get(0).path("message").path("content"));
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** 要进 UI 与落库消息的短文本：换行/连续空白压成单空格，并截到 {@value #SNIPPET_LEN} 字 */
+    static String collapse(String text) {
+        String oneLine = text.replaceAll("\\s+", " ").trim();
+        return oneLine.length() <= SNIPPET_LEN ? oneLine : oneLine.substring(0, SNIPPET_LEN) + "…";
     }
 }
