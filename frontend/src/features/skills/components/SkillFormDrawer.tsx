@@ -1,10 +1,10 @@
 // Skill 新建/编辑抽屉：scope/projectId 仅创建时可改；contentMd 为 SKILL.md 正文，支持 Markdown 预览。
 import { useEffect } from 'react'
-import { Button, Drawer, Form, Input, Select, Space, Tabs, message } from 'antd'
+import { Button, Drawer, Form, Input, Select, Space, message } from 'antd'
 import { createSkill, updateSkill } from '../api'
 import type { SkillDetail, SkillInput } from '../types'
 import type { Project } from '../../projects/types'
-import Markdown from '../../../shared/components/Markdown'
+import MarkdownEditor from '../../../shared/components/MarkdownEditor'
 import { showError } from '../../../shared/utils/showError'
 
 const NAME_RULE = /^[a-z0-9]+(-[a-z0-9]+)*$/
@@ -17,7 +17,6 @@ export default function SkillFormDrawer({ open, editing, projects, onClose, onSa
   onSaved: () => void
 }) {
   const [form] = Form.useForm<SkillInput>()
-  const contentMd = Form.useWatch('contentMd', form)
 
   useEffect(() => {
     if (open) {
@@ -122,25 +121,12 @@ export default function SkillFormDrawer({ open, editing, projects, onClose, onSa
         <Form.Item label="标签" name="tags">
           <Select mode="tags" open={false} placeholder="回车添加（为按项目匹配注入预留）" />
         </Form.Item>
-        <Form.Item label="SKILL.md 正文">
-          <Tabs
-            size="small"
-            items={[
-              {
-                key: 'edit',
-                label: '编辑',
-                children: (
-                  <Form.Item name="contentMd" noStyle>
-                    <Input.TextArea
-                      rows={12}
-                      placeholder="Markdown 正文（frontmatter 由上面的名称/描述自动生成）"
-                    />
-                  </Form.Item>
-                ),
-              },
-              { key: 'preview', label: '预览', children: <Markdown content={contentMd ?? ''} /> },
-            ]}
-          />
+        <Form.Item
+          label="SKILL.md 正文"
+          name="contentMd"
+          extra="frontmatter 由上面的名称/描述自动生成"
+        >
+          <MarkdownEditor height={320} placeholder="Markdown 正文" />
         </Form.Item>
       </Form>
     </Drawer>
