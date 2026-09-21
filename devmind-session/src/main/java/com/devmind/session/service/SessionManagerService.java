@@ -6,6 +6,7 @@ import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.AgentCollectResult;
 import com.devmind.common.agent.AgentProtocol;
 import com.devmind.common.agent.FinalizeResult;
+import com.devmind.common.agent.WorkspaceReleaseResult;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
@@ -719,8 +720,14 @@ public class SessionManagerService {
 
     // ---------------- 删除会话 ----------------
 
-    /** 删除会话：杀进程（若在跑）、清理 worktree、删除事件与记录。 */
-    @Transactional
+    /**
+     * 删除会话：杀进程（若在跑）→ 释放节点固定工作区（CAP-42）→ 清理本机 worktree（旧布局）
+     * → 删除事件与记录。
+     *
+     * <p><b>禁 @Transactional</b>：方法内含阻塞 WS 往返（释放工作区等 runner ack，秒级），
+     * 事务里等 ack 会长时间占库连接（同 {@link #finalizeWorkspace} 红线）；落库收敛到
+     * {@link #purgeSession} 独立事务。</p>
+     */
     public void deleteSession(String id) {
         SessionHandle rt = runtimes.remove(id);
         if (rt != null) {
@@ -728,6 +735,7 @@ public class SessionManagerService {
             rt.kill();
         }
         SessionEntity ent = requireEntity(id);
+        releaseFixedWorkspace(ent);
         if (ent.getWorktreePath() != null && !ent.getWorktreePath().isBlank()) {
             try {
                 cleanupWorkspace(ent);
@@ -735,9 +743,61 @@ public class SessionManagerService {
                 log.warn("删除会话时清理 worktree 失败: {} err={}", id, e.getMessage());
             }
         }
-        eventRepo.deleteBySessionId(id);
-        sessionRepoRepo.deleteBySessionId(id);
-        sessionRepo.delete(ent);
+        purgeSession(id);
+    }
+
+    /**
+     * CAP-42：删除会话前释放 runner 侧固定工作区（不合并、不 push——丢弃语义）。
+     *
+     * <p>为什么必须做：固定工作区按 (项目, 用户) 唯一占用，runner 的占用判定只看磁盘上
+     * worktree 的检出分支。不释放就删记录 → 目录成孤儿：新会话 launch 必失败，而报错引导的
+     * 「收口合并到基线」入口又随会话记录一起消失，该 (项目,用户) 永久锁死（2026-09-21
+     * admq-manager/admin 实事故）。故失败<b>阻断删除</b>（fail-visible），不做静默跳过。</p>
+     *
+     * <p>无需释放的情形：workspace_state 为 null（旧布局/非代码会话）、已 FINALIZED
+     * （目录随收口已删）、无执行节点（历史本机会话）、无仓库快照（非代码会话）。</p>
+     */
+    private void releaseFixedWorkspace(SessionEntity ent) {
+        if (!SessionEntity.WORKSPACE_OPEN.equals(ent.getWorkspaceState())) {
+            return;
+        }
+        String nodeId = ent.getAgentNodeId();
+        if (nodeId == null || nodeId.isBlank()) {
+            return;
+        }
+        AgentNodeConnector connector = connectorProvider.getIfAvailable();
+        if (connector == null) {
+            return; // agent 模块未装配（裁剪部署/单测）：无节点可释放，沿用旧行为
+        }
+        List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(resolveProject(ent.getProjectId()),
+                sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(ent.getId()), ent.getBaseBranch(),
+                worktreeManager.branchFor(ent.getId()), ent.getCreatedBy());
+        if (specs.isEmpty()) {
+            return;
+        }
+        String wsOwner = requireWorkspaceOwner(ent.getWorkspaceOwner() != null
+                && !ent.getWorkspaceOwner().isBlank() ? ent.getWorkspaceOwner() : ent.getCreatedBy());
+        WorkspaceReleaseResult result = connector.releaseWorkspace(nodeId, ent.getId(),
+                ent.getProjectId(), wsOwner, specs);
+        if (!result.ok()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "释放节点固定工作区失败，会话未删除（可重试；或到节点手工删除该工作区后重试）: "
+                            + result.error());
+        }
+        log.info("删除会话前已释放固定工作区: session={} detail={}", ent.getId(), result.detail());
+    }
+
+    /**
+     * 删除落库（独立事务，由 {@link #deleteSession} 在 WS 往返之后调用）——批删需要事务，
+     * 而 self-invocation 走不到代理上的 {@code @Transactional}，故显式 TransactionTemplate
+     * （同 {@link #restoreOnStartup}）。
+     */
+    private void purgeSession(String id) {
+        new TransactionTemplate(txManager).executeWithoutResult(tx -> {
+            eventRepo.deleteBySessionId(id);
+            sessionRepoRepo.deleteBySessionId(id);
+            sessionRepo.findById(id).ifPresent(sessionRepo::delete);
+        });
     }
 
     /**
