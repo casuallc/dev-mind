@@ -3,10 +3,12 @@ package com.devmind.common.agent.exec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -80,6 +82,51 @@ class RunnerWorkspaceTest {
         assertEquals(ctx.sessionDir(), ctx2.sessionDir());
         assertEquals("feature/s1", gitOut(ctx2.sessionDir(), "branch", "--show-current"));
         assertEquals("change", Files.readString(ctx2.sessionDir().resolve("code.txt")));
+    }
+
+    @Test
+    void materializedPlatformFilesInvisibleToGitAndFinalizeSucceeds() throws Exception {
+        // CAP-42 事故回归：平台物化产物（注入块/settings/skills/docs）落进会话 worktree 后
+        // 必须对 git 完全不可见——否则挂了场景/知识的会话恒脏，零提交也收不了口
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        // 事故现场等价条件：仓库自有 CLAUDE.md 是**被跟踪**文件（忽略规则对它无效，
+        // 旧实现直接改写它 → 工作区必脏、零提交会话也收不了口）
+        Path seed = tmp.resolve("seed-README.md");
+        Files.writeString(seed.resolve("CLAUDE.md"), "# 仓库自有说明\n");
+        git(seed, "add", ".");
+        git(seed, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "claude-md");
+        git(seed, "push", "origin", "main");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s1", "");
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", spec);
+        String exclude = Files.readString(ctx.cacheDir().resolve(".git/info/exclude"));
+        for (String p : List.of(ContextMaterializer.INJECTION_FILE, ".devmind/",
+                ".claude/settings.local.json", ".claude/skills/")) {
+            assertTrue(exclude.contains(p), p + " 未被 info/exclude 排除:\n" + exclude);
+        }
+        // 等价 runner launch 前的物化一跳
+        ContextPackage pkg = new ContextPackage(ContextPackage.CURRENT_SCHEMA, "## 注入块\n", "{\"p\":1}",
+                List.of(new ContextPackage.SkillPackage("review", Map.of("SKILL.md", "IyByZXZpZXcK"))),
+                List.of(new ContextPackage.DocEntry("d1", "方案", "正文")), List.of());
+        ContextMaterializer.materialize(ctx.sessionDir(), pkg);
+        assertTrue(Files.readString(ctx.sessionDir().resolve(ContextMaterializer.INJECTION_FILE))
+                .contains("## 注入块"));
+        // 仓库自带的 CLAUDE.md 与 HEAD 版本逐字节一致（工作区可能被 autocrlf 归一，比对前折行）
+        assertEquals(gitOut(ctx.sessionDir(), "show", "HEAD:CLAUDE.md") + "\n",
+                Files.readString(ctx.sessionDir().resolve("CLAUDE.md"), StandardCharsets.UTF_8)
+                        .replace("\r\n", "\n"),
+                "仓库自带的 CLAUDE.md 不被改写（claude 自己会读它）");
+        assertEquals("", gitOut(ctx.sessionDir(), "status", "--porcelain"), "物化后 worktree 必须是干净的");
+        // agent「git add -A」也扫不进平台文件（否则会被提交进会话分支、收口后污染基线）
+        git(ctx.sessionDir(), "add", "-A");
+        assertEquals("", gitOut(ctx.sessionDir(), "status", "--porcelain"));
+
+        // 零提交会话：不勾「丢弃未提交改动」直接收口成功
+        RunnerWorkspace.FinalizeOutcome r = ws.finalize("proj1", "alice", List.of(spec), false);
+        assertEquals(0, r.exit(), r.output());
+        assertFalse(Files.exists(ctx.sessionDir()));
     }
 
     @Test
@@ -646,7 +693,8 @@ class RunnerWorkspaceTest {
         assertEquals("", gitOut(dir, "status", "--porcelain"));
         assertFalse(gitOut(dir, "ls-files", ".gitignore").isBlank());
         // 平台托管文件（上下文装配/物化设置/回传产物）被忽略：agent「git add -A」扫不进仓库
-        Files.writeString(dir.resolve("CLAUDE.md"), "<!-- 装配产物 -->");
+        Files.writeString(dir.resolve(ContextMaterializer.INJECTION_FILE), "<!-- 注入块 -->");
+        Files.writeString(dir.resolve("CLAUDE.md"), "<!-- 旧注入落点（CAP-34） -->");
         Files.createDirectories(dir.resolve(".claude"));
         Files.writeString(dir.resolve(".claude").resolve("settings.local.json"), "{}");
         Files.createDirectories(dir.resolve(".devmind").resolve("output"));
@@ -664,10 +712,15 @@ class RunnerWorkspaceTest {
         RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
         ws.prepareWorklog(tmp.resolve("worklog"), "bob");
         assertTrue(Files.readString(dir.resolve(".gitignore")).contains(".devmind/"));
-        // 用户自行加过规则 → 不覆盖
+        // 用户自行加过规则 → 原样保留，同时补回平台行（老骨架可能缺新落点规则）
         Files.writeString(dir.resolve(".gitignore"), "custom-rule\n");
         ws.prepareWorklog(tmp.resolve("worklog"), "bob");
-        assertEquals("custom-rule\n", Files.readString(dir.resolve(".gitignore")));
+        String merged = Files.readString(dir.resolve(".gitignore"));
+        assertTrue(merged.startsWith("custom-rule\n"), merged);
+        assertTrue(merged.contains(ContextMaterializer.INJECTION_FILE), merged);
+        assertTrue(merged.contains(".devmind/"), merged);
+        // 补写只对 .gitignore 代提交 → 空间仍然干净（否则下次 agent 会连脏状态一起带走）
+        assertEquals("", gitOut(dir, "status", "--porcelain"));
     }
 
     @Test

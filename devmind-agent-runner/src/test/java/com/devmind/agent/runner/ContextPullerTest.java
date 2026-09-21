@@ -63,7 +63,7 @@ class ContextPullerTest {
         byte[] body = ContextPackages.toJsonBytes(ContextPackage.of("## 通用经验\n", "{\"p\":1}"));
         server = serve(200, body);
         ContextPuller.pullAndMaterialize(configPointingAt(server), "s1", manifestOf(body), workDir);
-        assertTrue(Files.readString(workDir.resolve("CLAUDE.md"), StandardCharsets.UTF_8)
+        assertTrue(Files.readString(workDir.resolve("CLAUDE.local.md"), StandardCharsets.UTF_8)
                 .contains("## 通用经验"));
         assertTrue(Files.isRegularFile(workDir.resolve(".claude/settings.local.json")));
     }
@@ -76,7 +76,7 @@ class ContextPullerTest {
                 .readTree("{\"entries\":1,\"totalBytes\":" + body.length + ",\"sha256\":\"" + "0".repeat(64) + "\"}");
         assertThrows(IOException.class, () ->
                 ContextPuller.pullAndMaterialize(configPointingAt(server), "s1", bad, workDir));
-        assertTrue(Files.notExists(workDir.resolve("CLAUDE.md")), "校验失败不得物化");
+        assertTrue(Files.notExists(workDir.resolve("CLAUDE.local.md")), "校验失败不得物化");
     }
 
     @Test

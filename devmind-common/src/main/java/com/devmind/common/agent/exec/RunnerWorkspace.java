@@ -193,12 +193,13 @@ public class RunnerWorkspace {
             if (!Files.isDirectory(ctx.sessionDir())) {
                 return;
             }
+            excludePlatformPaths(ctx.cacheDir()); // 存量 worktree 补排除，避免平台物化产物造成假告警
             Result status = run(ctx.sessionDir(), OP_TIMEOUT_SEC, ctx.spec().token(), "status", "--porcelain");
             if (status.exit() == 0 && !status.output().isBlank()) {
-                long n = status.output().lines().filter(l -> !l.isBlank()).count();
-                sink.accept(label + "[工作区] 固定工作区存在 " + n + " 处未提交改动（已保留在节点 "
-                        + ctx.sessionDir() + "），执行「收口合并到基线」前请先提交或丢弃");
-                log.warn("固定工作区存在未提交改动: dir={} files={}", ctx.sessionDir(), n);
+                String dirty = dirtySummary(status.output());
+                sink.accept(label + "[工作区] 固定工作区存在未提交改动（已保留在节点 "
+                        + ctx.sessionDir() + "）：" + dirty + "，执行「收口合并到基线」前请先提交或丢弃");
+                log.warn("固定工作区存在未提交改动: dir={} files={}", ctx.sessionDir(), dirty);
             }
         } catch (Exception e) {
             log.warn("会话工作区收口检查异常: {}", e.getMessage());
@@ -564,13 +565,17 @@ public class RunnerWorkspace {
             return "固定 worktree 检出分支（" + (current.isEmpty() ? "无法识别" : current)
                     + "）与会话分支（" + spec.branch() + "）不一致，请到节点人工核查";
         }
+        // 从未 resume 过的存量 worktree：排除规则是后加的，这里补一次（幂等），
+        // 否则仅由平台物化产物造成的「假脏」（?? .devmind/ 等）也会挡住收口
+        excludePlatformPaths(cacheDir);
         Result status = run(workDir, OP_TIMEOUT_SEC, spec.token(), "status", "--porcelain");
         if (status.exit() != 0) {
             return "git status 失败: " + tail(status.output());
         }
         if (!status.output().isBlank()) {
             if (!discardChanges) {
-                return "工作区存在未提交改动（已保留），请先 resume 会话提交，或勾选「丢弃未提交改动」重试";
+                return "工作区存在未提交改动（已保留）：" + dirtySummary(status.output())
+                        + "，请先 resume 会话提交，或勾选「丢弃未提交改动」重试";
             }
             Result reset = run(workDir, OP_TIMEOUT_SEC, spec.token(), "reset", "--hard");
             if (reset.exit() != 0) {
@@ -785,13 +790,15 @@ public class RunnerWorkspace {
 
     /** worklog 空间骨架：目录契约说明 + daily/weekly/entries 占位。 */
     /** worklog 空间 .gitignore：平台托管文件（上下文装配/物化设置/回传产物）不入库，
-     *  否则 agent 按 README「git add -A」会把它提交并随远端备份推上公网仓库。 */
-    private static final String WORKLOG_GITIGNORE = """
-            # Dev-Mind 平台托管文件（每次会话 launch 重新物化，勿提交）
-            CLAUDE.md
-            .claude/
-            .devmind/
-            """;
+     *  否则 agent 按 README「git add -A」会把它提交并随远端备份推上公网仓库。
+     *  CLAUDE.md 是 CAP-34 旧注入落点（现为 {@link ContextMaterializer#INJECTION_FILE}），
+     *  存量空间可能已提交过，规则保留。 */
+    private static final String WORKLOG_GITIGNORE = String.join("\n",
+            "# Dev-Mind 平台托管文件（每次会话 launch 重新物化，勿提交）",
+            ContextMaterializer.INJECTION_FILE,
+            "CLAUDE.md",
+            ".claude/",
+            ".devmind/") + "\n";
 
     private static void writeSkeleton(Path dir) {
         String readme = """
@@ -820,17 +827,42 @@ public class RunnerWorkspace {
         }
     }
 
-    /** 存量 worklog 空间补写 .gitignore（缺失才写，已有不覆盖——用户可能自行加过规则）。 */
-    private static void ensureGitignore(Path dir) {
+    /**
+     * 存量 worklog 空间补写 .gitignore 缺失行（已有行与用户自行加过的规则一律不动），
+     * 并只对 .gitignore 做一次平台代提交：该文件在骨架 commit 里是被跟踪的，只改不提交
+     * 会让空间恒脏（agent 下次「git add -A」又会把它连同脏状态一起带走）。提交失败只告警
+     * ——忽略规则读的是工作区文件，即使没提交也照样生效。
+     */
+    private void ensureGitignore(Path dir) {
         Path gitignore = dir.resolve(".gitignore");
-        if (Files.exists(gitignore)) {
-            return;
-        }
         try {
-            Files.writeString(gitignore, WORKLOG_GITIGNORE, StandardCharsets.UTF_8);
-            log.info("worklog 存量空间已补写 .gitignore: dir={}", dir);
+            String content = Files.isRegularFile(gitignore)
+                    ? Files.readString(gitignore, StandardCharsets.UTF_8) : "";
+            var existing = content.lines().map(String::strip).toList();
+            StringBuilder missing = new StringBuilder();
+            for (String line : WORKLOG_GITIGNORE.lines().map(String::strip).toList()) {
+                if (!line.isEmpty() && !existing.contains(line)) {
+                    missing.append(line).append('\n');
+                }
+            }
+            if (missing.isEmpty()) {
+                return;
+            }
+            Files.writeString(gitignore,
+                    content + (content.isEmpty() || content.endsWith("\n") ? "" : "\n") + missing,
+                    StandardCharsets.UTF_8);
+            log.info("worklog 存量空间已补写 .gitignore 缺失行: dir={}", dir);
+            if (run(dir, OP_TIMEOUT_SEC, null, "add", ".gitignore").exit() == 0) {
+                Result commit = run(dir, OP_TIMEOUT_SEC, null,
+                        "-c", "user.name=devmind", "-c", "user.email=devmind@worklog.local",
+                        "commit", "-m", "chore: 补平台托管 .gitignore 规则", "--", ".gitignore");
+                if (commit.exit() != 0) {
+                    log.warn("worklog .gitignore 代提交失败（规则仍生效，可手工提交）: {}", tail(commit.output()));
+                }
+            }
         } catch (IOException e) {
-            throw new IllegalStateException("补写 worklog .gitignore 失败: " + dir, e);
+            // best-effort：迁移失败不该让用户开不了会话（忽略规则读工作区文件，缺行只影响增量补写）
+            log.warn("补写 worklog .gitignore 失败（可人工补行）: dir={} err={}", dir, e.getMessage());
         }
     }
 
@@ -906,7 +938,7 @@ public class RunnerWorkspace {
             Result head = run(workDir, OP_TIMEOUT_SEC, spec.token(), "rev-parse", "--abbrev-ref", "HEAD");
             String current = head.exit() == 0 ? head.output().trim() : "";
             if (current.equals(spec.branch())) {
-                excludePidFile(cacheDir); // 修复前遗留的 worktree 补齐排除（幂等）
+                excludePlatformPaths(cacheDir); // 修复前遗留的 worktree 补齐排除（幂等）
                 log.info("固定 worktree 已存在且分支一致（resume 复用）: {}", workDir);
                 return false;
             }
@@ -935,31 +967,65 @@ public class RunnerWorkspace {
         if (add.exit() != 0) {
             throw new IllegalStateException("git worktree add 失败: " + tail(add.output()));
         }
-        excludePidFile(cacheDir);
+        excludePlatformPaths(cacheDir);
         log.info("固定 worktree 就绪: {} (branch {})", workDir, spec.branch());
         return true;
     }
 
+    /** 脏文件清单最多列出的个数（收口被挡住时告诉用户到底哪些文件挡的，多则只报总数）。 */
+    private static final int DIRTY_PREVIEW = 3;
+
+    /** `git status --porcelain` 输出 → 「a.txt、b.txt 等 5 处」（前 3 列是状态码，剔掉取路径）。 */
+    private static String dirtySummary(String porcelain) {
+        List<String> files = porcelain.lines()
+                .map(String::strip)
+                .filter(l -> !l.isBlank())
+                .map(l -> l.length() > 3 ? l.substring(3).strip() : l)
+                .toList();
+        String head = String.join("、", files.subList(0, Math.min(DIRTY_PREVIEW, files.size())));
+        return files.size() > DIRTY_PREVIEW ? head + " 等 " + files.size() + " 处" : head;
+    }
+
     /**
-     * 会话进程 pid 文件（{@link WorkspaceReconciler#PID_FILE}）落在 worktree 根，必须排除出
-     * 版本控制——否则 agent「git add -A」会把它提交进会话分支，会话结束删 pid 文件后工作区
-     * 恒脏，收口被「未提交改动」挡住（CAP-42 E2E 实测踩中）。info/exclude 为缓存全 worktree
-     * 共享，best-effort，失败只告警。
+     * 平台托管路径（会话进程 pid 文件 + 上下文物化产物）必须排除出版本控制，否则：
+     * <ol>
+     *   <li>agent「git add -A」会把它们提交进会话分支，收口后合入基线造成污染；</li>
+     *   <li>单库会话 worktree 根就是仓库工作区，物化产物落在那里 → 工作区恒脏，收口被
+     *       「未提交改动」挡住（干净会话也收不了口，CAP-42 事故补）；会话结束删 pid 文件
+     *       同理（CAP-42 E2E 实测踩中）。</li>
+     * </ol>
+     * 走克隆缓存的 {@code .git/info/exclude}（全 worktree 共享，不改仓库自带 .gitignore）；
+     * 用精确路径而非整目录 {@code .claude/}（仓库可能自己要跟踪 .claude 下的东西）。
+     * 幂等、best-effort，失败只告警。
      */
-    private void excludePidFile(Path cacheDir) {
+    private static final List<String> PLATFORM_EXCLUDES = List.of(
+            "/" + WorkspaceReconciler.PID_FILE,
+            ContextMaterializer.INJECTION_FILE,
+            ".devmind/",
+            ".claude/settings.local.json",
+            ".claude/skills/");
+
+    private void excludePlatformPaths(Path cacheDir) {
         try {
             Path exclude = cacheDir.resolve(".git/info/exclude");
-            String line = "/" + WorkspaceReconciler.PID_FILE;
             String content = Files.isRegularFile(exclude)
                     ? Files.readString(exclude, StandardCharsets.UTF_8) : "";
-            if (!content.contains(line)) {
-                Files.createDirectories(exclude.getParent());
-                Files.writeString(exclude,
-                        content + (content.isEmpty() || content.endsWith("\n") ? "" : "\n") + line + "\n",
-                        StandardCharsets.UTF_8);
+            var existing = content.lines().map(String::strip).toList();
+            StringBuilder add = new StringBuilder();
+            for (String pattern : PLATFORM_EXCLUDES) {
+                if (!existing.contains(pattern)) {
+                    add.append(pattern).append('\n');
+                }
             }
+            if (add.isEmpty()) {
+                return;
+            }
+            Files.createDirectories(exclude.getParent());
+            Files.writeString(exclude,
+                    content + (content.isEmpty() || content.endsWith("\n") ? "" : "\n") + add,
+                    StandardCharsets.UTF_8);
         } catch (Exception e) {
-            log.warn("写入 info/exclude 失败（可手工排除 {}）: {}", WorkspaceReconciler.PID_FILE, e.getMessage());
+            log.warn("写入 info/exclude 失败（平台路径将污染 git status）: {}", e.getMessage());
         }
     }
 

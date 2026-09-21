@@ -37,7 +37,7 @@ public class ContextAssembler {
     private static final Logger log = LoggerFactory.getLogger(ContextAssembler.class);
 
     private static final String HEADER =
-            "<!-- 由 Dev-Mind 上下文装配管线自动生成（CAP-33），请勿手改本文件开头；项目自有内容保留在下方追加 -->\n";
+            "<!-- 由 Dev-Mind 上下文装配管线自动生成（CAP-33），请勿手改本文件；本文件为平台托管产物，不入版本控制 -->\n";
 
     private final ObjectProvider<ContextProvider> providers;
     private final ObjectMapper mapper;

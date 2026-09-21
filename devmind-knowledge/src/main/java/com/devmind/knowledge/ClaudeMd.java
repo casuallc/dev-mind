@@ -4,8 +4,9 @@ import com.devmind.knowledge.dto.EntryView;
 import java.util.List;
 
 /**
- * 注入 CLAUDE.md 的组装工具（preview 与真实注入共用）。
- * 结构：全局经验（按标签命中）→ 项目经验 → 当前任务 → 项目原有 CLAUDE.md（保留追加）。
+ * 知识注入内容的组装工具：现仅用于 <b>预览</b>（真实注入由 CAP-33 装配管线经
+ * {@code ContextMaterializer} 写入会话 worktree 的 CLAUDE.local.md，不再内联仓库自带 CLAUDE.md）。
+ * 结构：全局经验（按标签命中）→ 项目经验 → 当前任务。
  */
 public final class ClaudeMd {
 
@@ -15,12 +16,13 @@ public final class ClaudeMd {
     /**
      * @param entries     已按「全局在前、项目在后」排序的条目
      * @param taskSpec    任务说明
-     * @param origContent 项目原有 CLAUDE.md（可 null）
-     * @return 完整注入内容
+     * @param origContent 历史遗留参数（CAP-34 起平台不再内联仓库 CLAUDE.md，调用方传 null；
+     *                    仓库自带 CLAUDE.md 由 claude CLI 原生加载）
+     * @return 完整预览内容
      */
     public static String assemble(List<EntryView> entries, String taskSpec, String origContent) {
         StringBuilder md = new StringBuilder();
-        md.append("<!-- 由 Dev-Mind KnowledgeInjector 自动生成，请勿手改本文件开头；项目自有内容保留在下方追加 -->\n");
+        md.append("<!-- 由 Dev-Mind 知识注入预览生成（实际注入为会话 worktree 的 CLAUDE.local.md） -->\n");
         md.append(renderEntrySections(entries));
         md.append("\n---\n\n## 当前任务\n\n").append(taskSpec == null ? "" : taskSpec.strip()).append("\n");
         if (origContent != null && !origContent.isBlank()) {

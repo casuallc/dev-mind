@@ -10,12 +10,25 @@ import java.util.regex.Pattern;
 
 /**
  * CAP-34 FR-01/03 上下文物化器（只被 runner 使用，服务端不引用）：把 {@link ContextPackage}
- * 落进会话工作区——CLAUDE.md（注入块在前，工作区既有内容以「项目原有 CLAUDE.md（保留）」节
- * 追加，不覆盖）、.claude/settings.local.json、.claude/skills/&lt;name&gt;/、.devmind/docs/&lt;docId&gt;.md。
+ * 落进会话工作区——{@value #INJECTION_FILE}（整文件覆盖，注入块首行标记来自服务端装配器）、
+ * .claude/settings.local.json、.claude/skills/&lt;name&gt;/、.devmind/docs/&lt;docId&gt;.md。
+ *
+ * <p><b>落点全部是平台托管路径</b>（{@link RunnerWorkspace#excludePlatformPaths} 写进克隆缓存
+ * info/exclude）：不改写仓库被跟踪的文件、不进版本控制，否则会话 worktree 恒脏，收口
+ * 「未提交改动」检查必失败（CAP-42 事故：干净会话也收不了口）；也防 agent「git add -A」
+ * 把物化文件提交进会话分支后合入基线。</p>
  *
  * <p>防越界：skill 名/docId 走白名单，skill 文件相对路径拒绝绝对路径与 .. 逃逸。</p>
  */
 public final class ContextMaterializer {
+
+    /**
+     * 注入块落点：claude CLI 的 <b>Local 作用域</b>指令文件（与 CLAUDE.md 同一套向上查找、
+     * 随 cwd 自动加载，官方约定「不入库」）。选它而非 CLAUDE.md：仓库自带的 CLAUDE.md
+     * 由 claude 自己读，平台无需内联改写——写 CLAUDE.md 会让被跟踪文件恒脏，且续接时
+     * 上次注入内容会被当成「项目原有」再追加一层。
+     */
+    public static final String INJECTION_FILE = "CLAUDE.local.md";
 
     private static final Pattern SAFE_NAME = Pattern.compile("[a-zA-Z0-9._-]+");
 
@@ -51,18 +64,16 @@ public final class ContextMaterializer {
         Files.write(target, Base64.getDecoder().decode(input.base64()));
     }
 
-    /** CLAUDE.md：注入块在前；既有内容（仓库自带）以保留节追加在后（沿用 KnowledgeInjector 时代结构）。 */
+    /**
+     * 注入块整文件覆盖 {@value #INJECTION_FILE}（每次 launch 唯一内容，不追加、不读回既有内容：
+     * 续接时旧注入不残留、仓库自带 CLAUDE.md 一字节不动）。
+     */
     private static void writeClaudeMd(Path workDir, String injection) throws IOException {
         if (injection == null || injection.isBlank()) {
             return;
         }
-        Path file = workDir.resolve("CLAUDE.md");
-        String orig = Files.isRegularFile(file) ? Files.readString(file, StandardCharsets.UTF_8) : null;
-        StringBuilder content = new StringBuilder(injection.strip()).append('\n');
-        if (orig != null && !orig.isBlank()) {
-            content.append("\n---\n\n## 项目原有 CLAUDE.md（保留）\n\n").append(orig.strip()).append('\n');
-        }
-        Files.writeString(file, content.toString(), StandardCharsets.UTF_8);
+        Files.writeString(workDir.resolve(INJECTION_FILE),
+                injection.strip() + "\n", StandardCharsets.UTF_8);
     }
 
     private static void writeSettingsLocal(Path workDir, String json) throws IOException {

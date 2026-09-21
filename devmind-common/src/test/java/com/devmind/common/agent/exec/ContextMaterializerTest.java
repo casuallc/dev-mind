@@ -14,36 +14,51 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** {@link ContextMaterializer} 物化语义：CLAUDE.md 合并保留、settings 落盘、skills/docs 路径安全。 */
+/** {@link ContextMaterializer} 物化语义：注入块落 CLAUDE.local.md 且不碰仓库 CLAUDE.md、
+ *  settings 落盘、skills/docs 路径安全。 */
 class ContextMaterializerTest {
 
     @TempDir
     Path workDir;
 
     @Test
-    void materializesClaudeMdIntoEmptyWorkDir() throws Exception {
+    void materializesInjectionIntoLocalClaudeMd() throws Exception {
         ContextMaterializer.materialize(workDir, ContextPackage.of("<!-- 注入块 -->\n\n## 通用经验\n", SETTINGS_JSON));
         assertEquals("<!-- 注入块 -->\n\n## 通用经验\n",
-                Files.readString(workDir.resolve("CLAUDE.md"), StandardCharsets.UTF_8));
+                Files.readString(workDir.resolve(ContextMaterializer.INJECTION_FILE), StandardCharsets.UTF_8));
+        // 仓库自带的 CLAUDE.md 不落文件、不被改写（claude 自己会读它）
+        assertTrue(Files.notExists(workDir.resolve("CLAUDE.md")));
         assertTrue(Files.isRegularFile(workDir.resolve(".claude").resolve("settings.local.json")));
     }
 
     @Test
-    void keepsExistingClaudeMdAsPreservedSection() throws Exception {
+    void keepsRepoClaudeMdUntouched() throws Exception {
         Files.writeString(workDir.resolve("CLAUDE.md"), "# 项目自有说明\n", StandardCharsets.UTF_8);
         ContextMaterializer.materialize(workDir, ContextPackage.of("## 通用经验\n", null));
-        String merged = Files.readString(workDir.resolve("CLAUDE.md"), StandardCharsets.UTF_8);
-        assertTrue(merged.startsWith("## 通用经验"), merged);
-        assertTrue(merged.contains("## 项目原有 CLAUDE.md（保留）"), merged);
-        assertTrue(merged.contains("# 项目自有说明"), merged);
+        // 仓库 CLAUDE.md 一字节不动：会话 worktree 对 git 恒净，收口脏检查只反映真实改动
+        assertEquals("# 项目自有说明\n",
+                Files.readString(workDir.resolve("CLAUDE.md"), StandardCharsets.UTF_8));
+        String injected = Files.readString(workDir.resolve(ContextMaterializer.INJECTION_FILE),
+                StandardCharsets.UTF_8);
+        assertEquals("## 通用经验\n", injected);
+        assertTrue(!injected.contains("项目自有说明"), injected);
         // 无 settings 内容 → 不写文件
         assertTrue(Files.notExists(workDir.resolve(".claude").resolve("settings.local.json")));
     }
 
     @Test
+    void relaunchOverwritesInjectionInsteadOfStacking() throws Exception {
+        ContextMaterializer.materialize(workDir, ContextPackage.of("## 第一轮任务\n", null));
+        ContextMaterializer.materialize(workDir, ContextPackage.of("## 第二轮任务\n", null));
+        // 续接/重发 launch 整文件覆盖：旧注入不残留（旧实现会把它当「项目原有」再追加一层）
+        assertEquals("## 第二轮任务\n",
+                Files.readString(workDir.resolve(ContextMaterializer.INJECTION_FILE), StandardCharsets.UTF_8));
+    }
+
+    @Test
     void blankPackageWritesNothing() throws Exception {
         ContextMaterializer.materialize(workDir, ContextPackage.of(" ", ""));
-        assertTrue(Files.notExists(workDir.resolve("CLAUDE.md")));
+        assertTrue(Files.notExists(workDir.resolve(ContextMaterializer.INJECTION_FILE)));
         assertTrue(Files.notExists(workDir.resolve(".claude")));
     }
 
