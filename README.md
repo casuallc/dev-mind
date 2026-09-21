@@ -16,7 +16,7 @@ pom.xml            父 POM（聚合器，模块依赖图见各模块 pom）
 devmind-common/    公共契约（错误码、SPI、DomainEvent）
 devmind-auth/      CAP-01 认证/RBAC（JWT HS256）
 devmind-project/   CAP-02 项目管理 + CAP-13 研发主线（Requirement/Design/WorkItem）
-devmind-docs/      CAP-03 文档库（git 版本化）
+devmind-docs/      CAP-03 文档库（DB 版本化，需求/方案/套件/报告）
 devmind-knowledge/ CAP-04 知识库（经验沉淀与注入）
 devmind-skill/     Skill 管理（附件/导出）
 devmind-session/   CAP-05 Agent 会话（headless claude 子进程 + worktree）
@@ -122,4 +122,4 @@ bin/dev-mind start           # 后台启动；status/stop/restart/run(前台)/in
 - `devmind.session.executor`：`claude`（真实 Claude Code）/ `fake`（内置假进程，自测）
 - `devmind.session.claude-path`：claude 可执行文件路径（默认探测全局命令）
 - `devmind.project.default-path`：本机默认项目仓库路径（写 application-local.yml）
-- `devmind.docs.repo-path` / `devmind.knowledge.repo-path`：文档/知识 git 仓库路径（写 application-local.yml）
+- `devmind.knowledge.repo-path`：知识库历史字段（CAP-04 起以 DB 条目为准，已不使用）

@@ -9,7 +9,7 @@
 - **单体仓库，前后端一体**：一个项目 `dev-mind/`。后端 Spring Boot 4.1.1（REST + WebSocket + 静态托管前端构建产物；公司 Nexus 无 4.2.x 正式版，4.2 正式版上线后可升级）；前端 React + Ant Design 5（Vite 构建后由后端托管，浏览器访问）。
 - **本地优先**：跑在个人开发机（Windows），单用户起步，为多人协作预留扩展。
 - **结构化存储**：H2 文件模式（后续可平滑切 PostgreSQL），存流程/会话/事件等结构化数据。
-- **文档与代码分离**：文档库 `docs-repo/` 与经验库 `knowledge-repo/` 均为独立 git 仓库，平台不存代码，只引用项目 git 仓库。
+- **文档与代码分离**：文档库（CAP-03）与知识库（CAP-04）内容均存 DB，平台不存代码，只引用项目 git 仓库。
 - **Agent 执行**：headless Claude Code（`claude -p` / Agent SDK），由会话管理能力拉起本地子进程。
 - **插件化原则**：每个能力通过「SPI 接口 + 具体实现」注册，配置可切换；能力之间只依赖接口，不依赖实现。
 
@@ -19,7 +19,7 @@
 |---|---|---|---|
 | [CAP-01](CAP-01-auth.md) | 用户认证与权限 | 管理 | 登录鉴权与角色，所有操作的 actor 基础 |
 | [CAP-02](CAP-02-project-management.md) | 项目管理 | 管理 | 注册项目与服务器，其余能力的挂载点 |
-| [CAP-03](CAP-03-document-management.md) | 文档管理 | 管理 | git 版本化文档库，需求/方案/报告跟需求走 |
+| [CAP-03](CAP-03-document-management.md) | 文档管理 | 管理 | 版本化文档库（DB），需求/方案/报告跟需求走 |
 | [CAP-04](CAP-04-knowledge-base.md) | 知识库管理 | 管理 | 经验分层（global/projects/inbox）+ 注入 + 捕获 |
 | [CAP-05](CAP-05-agent-session.md) | Agent 会话管理 | 底座 | 起/管/收 headless agent 会话，worktree 隔离，看板 |
 | [CAP-06](CAP-06-notification.md) | 通知中心 | 底座 | 事件分级路由，多通道推送，远程快捷动作 |

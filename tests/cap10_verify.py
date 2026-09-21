@@ -315,7 +315,7 @@ def main():
                 for c in suite2["cases"] if c["name"] != "slow-echo"]
     call("PUT", f"/test-suites/{api_id}/cases", ok_cases)
 
-    # ---------- 8. 套件沉淀到 docs-repo（FR-03，版本化） ----------
+    # ---------- 8. 套件沉淀为 api-suite 文档（FR-03，版本化） ----------
     st, pub = call("POST", f"/test-suites/{api_id}/publish")
     check("套件沉淀 api-suite 文档", st == 200 and pub["docId"] is not None, f"{st} {pub}")
     st, doc = call("GET", f"/documents/{pub['docId']}")
