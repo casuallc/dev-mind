@@ -176,7 +176,11 @@ export default function SessionsBoard({
     Modal.confirm({
       centered: true,
       title: '删除该会话？',
-      content: '将杀掉进程（如运行中）并清理 worktree，不可恢复。',
+      // CAP-42：固定工作区会话删除会一并释放节点工作区（丢弃未提交改动与未合并提交），
+      // 文案必须写明——旧文案的"清理 worktree"只管本机时代的字段，用户会以为节点目录不受影响
+      content: r.workspaceState === 'OPEN'
+        ? '将杀掉进程（如运行中），并释放节点上的固定工作区（丢弃其中未提交改动与未合并提交），不可恢复。'
+        : '将杀掉进程（如运行中）并清理 worktree，不可恢复。',
       okText: '删除',
       okButtonProps: { danger: true },
       cancelText: '取消',
