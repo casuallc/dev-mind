@@ -42,6 +42,7 @@ import com.devmind.session.model.SessionScenarioEntity;
 import com.devmind.session.repo.SessionEventRepository;
 import com.devmind.session.repo.SessionRepoRepository;
 import com.devmind.session.repo.SessionRepository;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -78,6 +79,10 @@ import java.util.function.Consumer;
 public class SessionManagerService {
 
     private static final Logger log = LoggerFactory.getLogger(SessionManagerService.class);
+
+    /** CAP-50：事件补拉默认条数与硬上限（limit&lt;=0 走默认）。开流式后一轮就有几百条增量。 */
+    static final int DEFAULT_EVENT_LIMIT = 2000;
+    static final int MAX_EVENT_LIMIT = 20_000;
 
     private final IdentityService identityService;
     private final ProjectService projectService;
@@ -426,11 +431,24 @@ public class SessionManagerService {
         return toView(ent, liveState(ent));
     }
 
-    public List<SessionEvent> events(String id, long afterSeq) {
-        SessionEntity ent = requireEntity(id);
-        return eventRepo.findBySessionIdAndSeqGreaterThanOrderBySeqAsc(id, afterSeq).stream()
-                .map(this::toEvent)
-                .toList();
+    /**
+     * 补拉 seq &gt; afterSeq 的事件（升序返回，前端按 seq 追加）。
+     *
+     * <p>CAP-50：由「取全量」改为「取最近 limit 条」——倒序取页再反转，与 chat 侧的
+     * {@code ChatEventRepository} 同一手法。调用方是会话页在每次终态切换时的补拉
+     * （{@code ChatPanel}，仅在该会话已不活跃时），而流式增量让单会话事件数涨十几倍，
+     * 从头取会把内存与延迟都拖垮。</p>
+     */
+    public List<SessionEvent> events(String id, long afterSeq, int limit) {
+        requireEntity(id);
+        int size = limit <= 0 ? DEFAULT_EVENT_LIMIT : Math.min(limit, MAX_EVENT_LIMIT);
+        List<SessionEventEntity> rows = eventRepo.findBySessionIdAndSeqGreaterThanOrderBySeqDesc(
+                id, afterSeq, PageRequest.of(0, size));
+        List<SessionEvent> out = new ArrayList<>(rows.size());
+        for (int i = rows.size() - 1; i >= 0; i--) {
+            out.add(toEvent(rows.get(i)));
+        }
+        return out;
     }
 
     @SuppressWarnings("unchecked")
