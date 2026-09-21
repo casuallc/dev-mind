@@ -228,8 +228,9 @@ POST   /api/chats/{id}/resume     MODEL 走"重建 runtime"分支（无需 cliSe
 - **多轮正确**：第二轮请求的 `messages` 含 system（库概览）+ 历轮 user/assistant，且历轮
   `<knowledge-context>` / `<knowledge-base>` 前缀已剥离；绑库时本轮正文带新 `<knowledge-context>`；
 - **中断可用**：长流中 interrupt ⇒ 流停、部分文本保留、`result.subtype="interrupted"`、可继续提问；
-- **失败不炸链路**：端点停用后提问 ⇒ `error` 事件 + 会话仍在 WAITING_INPUT（可修端点重试）；
-  401 ⇒ 消息脱敏（`***`）不泄密；2xx 零正文算失败；服务端忽略 `stream:true` 时回落非流式仍可用；
+- **失败不炸链路**：已钉端点被停用/删除后**提问即 409**（读历史/收口不受影响，恢复端点后照常提问）；
+  生成期故障（401/网络/2xx 零正文）⇒ `error` 事件 + `result{isError:true}` + 会话仍在 WAITING_INPUT
+  （修好端点可直接重问）；401 ⇒ 消息脱敏（`***`）不泄密；服务端忽略 `stream:true` 时回落非流式仍可用；
 - **零回归**：AGENT 问答链路不变；`tests/cap46_verify.py`（知识库问答）与 `cap48_verify.py` 不改一行仍全绿；
 - **红线**：列表/详情视图无密文；日志与事件文本无 apiKey；`git status --short` 无本机路径与密钥。
 
@@ -246,6 +247,22 @@ POST   /api/chats/{id}/resume     MODEL 走"重建 runtime"分支（无需 cliSe
 
 | 项 | 初稿 | 实现 | 为什么 |
 |---|---|---|---|
-| （实现后回填） | | | |
+| §7 失败面验收口径 | "端点停用后提问 ⇒ `error` 事件" | **提问即 409**（读路径不受影响） | 端点没了不该等发出去才知道——`error` 事件只留给"真发出去了但失败"（401/网络/零正文）；E2E 分别钉住了这两条路 |
+| FR-08 引用保护口径 | RUNNING/WAITING_INPUT/WAITING_AUTH 三态都算引用 | **只算 RUNNING（正在生成）** | 空闲问答也计入 = "问过一次就永久锁死端点删除权"；真删了之后那场问答再提问会拿到明确的 409（端点已停用/删除，请新建问答），是可接受的降级 |
+| 提问路径的端点校验 | 懒重挂时解析一次端点 | **每轮提问再核一次"端点还在不在"** | 内存 runtime 拿的是创建时的 baseUrl/apiKey/model 快照：端点被停用/删除后它照旧发出去（模型服务还在跑的话甚至"成功"），用户刚删掉的东西不该继续被悄悄使用。只核提问路径；**用的仍是快照**（模型身份钉住不漂移），要重读端点走 resume |
+| WS 上行动作被拒的帧 | （初稿未定）用的是 `error` 帧 | **新增非致命 `notice` 帧** | 前端把 `error` 当致命处理（关连接、不再重连）：拿它回"这一个动作没生效"等于一次误触就把实时流打死（"停止生成"最容易踩）。后端 `notice` + 前端 `message.warning` |
+| 首轮知识注入 | "沿用 CAP-46 注入" | **创建路径（首轮）不做检索注入**；绑库时库概览进 system prompt | 与 AGENT 一致（AGENT 的库概览也是走启动 prompt）；检索注入只发生在后续输入路径。E2E 已把该形状钉死（首轮提问无注入痕迹、第三轮历轮前缀已剥离） |
+| 中断的 `result.subtype` 判据 | — | `reply == null && failure == null` ⇒ `interrupted`（`isError:false`） | 中断不是故障：会话保留、部分正文保留、可继续提问 |
+| 顺带加固（初稿列的两项） | — | 两项都落：`ConcurrentWebSocketSessionDecorator(10s/512KB)` **只包 `/ws/chats`**；`ChatEventSaver` 队列改有界（10k）+ 丢弃计数告警 | 一轮上千条 `text_delta` 时慢客户端会把事件推送线程进而把上游 SSE 读取钉死；无界队列在 DB 病时是无界内存增长（"队列已满"曾是死代码） |
 
-**验收证据**：（实现后回填）
+**验收证据**（2026-09-21）：
+
+- 后端 `mvn -q test` 全绿（含本能力新增单测：`OpenAiCompatChatStreamTest`、`ModelSessionRuntimeTest`、
+  `ChatModelTurnSupplierTest`、`ChatManagerServiceTest` 的 MODEL 分流/409/引用保护）；
+- 前端 `cd frontend && npx tsc -b` 通过；
+- `tests/cap49_verify.py` **72/72**（连跑三次稳定）：独立实例 `:18090` + 独立 H2 + mock embedding +
+  扩了 SSE 的 `tests/fixtures/chat-mock.py`，**全程无 runner 节点**——覆盖无节点建模型问答与流式、
+  WS 与落库逐条一致、多轮装配与历轮前缀剥离、绑库注入、中断保留部分正文、挂起/授权/空闲中断 409、
+  被拒动作只回 `notice`、冲突字段与图片 400、端点停用 409、401 脱敏、引用保护、无 CHAT 端点 409、
+  以及"Agent 仍必须有节点（无本机回落）"；
+- 回归：`tests/cap46_verify.py` **18/18**、`tests/cap48_verify.py` **79/79**，两个脚本一行未改仍全绿。
