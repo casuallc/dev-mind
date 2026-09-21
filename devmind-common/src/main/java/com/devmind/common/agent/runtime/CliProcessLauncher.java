@@ -16,7 +16,8 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * 真实 Claude Code 执行器（stream-json 双端流）：
- * {@code claude -p --input-format stream-json --output-format stream-json --verbose --permission-mode <mode>}
+ * {@code claude -p --input-format stream-json --output-format stream-json --verbose
+ * [--include-partial-messages] --permission-mode <mode>}
  *
  * <p>CLI 参数与 schema 随版本变化——本类与 {@link CliEventParser} 是仅有的接触点。Windows 下
  * claude 多为 {@code .cmd} 包装，需经 {@code cmd.exe /c} 启动；路径可在配置指定，否则按平台探测（Windows=where / Linux·macOS=which）。</p>
@@ -31,6 +32,11 @@ import java.util.concurrent.TimeUnit;
  *       而非 {@code {"type":"input",...}}（后者被静默忽略→零输出）；</li>
  *   <li>初始 prompt 作为第一条 user message 写入 stdin（不再作为位置参数）；stdin 保持打开供后续注入。</li>
  * </ul>
+ *
+ * <p>CAP-50 实测（claude 2.1.278）：{@code --include-partial-messages} 要求同时有 {@code -p} 与
+ * {@code --output-format=stream-json}（本类恒满足），与 {@code --input-format=stream-json} 双向流、
+ * {@code --resume} 均无冲突；开启后除了 {@code stream_event} 增量，**完整 assistant 消息仍照常下发**
+ * ——这是「增量打底 + 全量覆盖收口」得以成立的前提。</p>
  */
 public class CliProcessLauncher implements SessionExecutor {
 
@@ -148,6 +154,10 @@ public class CliProcessLauncher implements SessionExecutor {
         cmd.add("--output-format");
         cmd.add("stream-json");
         cmd.add("--verbose");
+        // CAP-50：逐 token 吐 stream_event 增量（前置条件 -p 与 --output-format=stream-json 已在上方）
+        if (settings.includePartialMessages()) {
+            cmd.add("--include-partial-messages");
+        }
         cmd.add("--permission-mode");
         cmd.add(ctx.permissionMode() == null || ctx.permissionMode().isBlank()
                 ? settings.defaultPermissionMode() : ctx.permissionMode());

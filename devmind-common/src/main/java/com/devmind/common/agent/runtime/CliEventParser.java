@@ -14,7 +14,9 @@ import java.util.function.LongSupplier;
  * 把 claude stream-json 的原始 JSON 行解析为统一 {@link SessionEvent}。
  *
  * <p>CLI 事件 schema 随版本可能变化——本类 + {@code CliProcessLauncher} 是仅有的两个接触 CLI 的地方，
- * 变更只改这两处。解析原则：认识的事件结构化提取，不认识的降级为 {@code log} 事件，绝不丢行。</p>
+ * 变更只改这两处。解析原则：认识的事件结构化提取，不认识的降级为 {@code log} 事件，绝不丢行。
+ * 唯一例外是 CAP-50 的 {@code stream_event} 命名空间——整片白名单过滤，非主流增量静默丢弃
+ * （见 {@link #parseStreamEvent}），因为它整帧都是噪音且频率极高。</p>
  *
  * <p>一行可产多条事件：assistant 消息按 content blocks 拆成 text（assistant）+ 逐个 tool_use；
  * user 消息里的 tool_result blocks 各产一条 tool_result（纯文本回显跳过——输入可见性由
@@ -92,10 +94,7 @@ public class CliEventParser {
                         Map.of("isError", isError, "toolUseId", node.path("tool_use_id").asText(""))));
             }
             case "stream_event" -> {
-                JsonNode ev = node.path("event");
-                String evType = ev.path("type").asText("");
-                String text = ev.path("delta").path("text").asText("");
-                return List.of(SessionEvent.of(seq.getAsLong(), "text_delta", text, source, Map.of("streamType", evType)));
+                return parseStreamEvent(seq, node, source);
             }
             case "permission_request" -> {
                 Map<String, Object> payload = new LinkedHashMap<>();
@@ -136,6 +135,41 @@ public class CliEventParser {
                 return List.of(SessionEvent.of(seq.getAsLong(), "log", truncate(trimmed), source));
             }
         }
+    }
+
+    /**
+     * CAP-50：claude 的 {@code stream_event} 增量帧（需 {@code --include-partial-messages}）。
+     *
+     * <p>本分支是**命名空间级白名单**：只放行主流正文增量，其余整帧静默丢弃——**不降级为 log**。
+     * 一回合里 message_start / content_block_start / content_block_stop / message_delta /
+     * message_stop / ping 各来一次，thinking 与工具入参的增量则逐 token 来，降级成 log 直接刷屏；
+     * 而写成黑名单枚举，将来 CLI 新增 delta 类型又会变成噪音。整片丢弃之后，未来任何新帧类型
+     * 都自动静默。</p>
+     *
+     * <p>{@code parent_tool_use_id} 非空 = 子 agent（Task）的流。**仅过滤增量、不过滤全量**：
+     * {@link #parseAssistant} 本就不看该字段，子 agent 的完整正文今天也并进主气泡；只挡增量
+     * = 不让子 agent 的 token 搅乱主流气泡，与既有语义一致（让子 agent 正文彻底不显示是另一个
+     * 能力的范围）。</p>
+     */
+    private List<SessionEvent> parseStreamEvent(LongSupplier seq, JsonNode node, String source) {
+        JsonNode parent = node.path("parent_tool_use_id");
+        if (parent.isTextual() && !parent.asText().isEmpty()) {
+            return List.of();
+        }
+        JsonNode ev = node.path("event");
+        if (!"content_block_delta".equals(ev.path("type").asText(""))) {
+            return List.of();
+        }
+        JsonNode delta = ev.path("delta");
+        if (!"text_delta".equals(delta.path("type").asText(""))) {
+            return List.of();
+        }
+        String text = delta.path("text").asText("");
+        if (text.isEmpty()) {
+            return List.of();
+        }
+        // 不带 payload：CAP-49 的等价事件就是无 payload 的，而 payload 会按 LONGTEXT 逐行落库
+        return List.of(SessionEvent.of(seq.getAsLong(), "text_delta", text, source));
     }
 
     /** assistant 消息：text blocks 合并为一条 assistant；每个 tool_use block 产一条 tool_use。 */

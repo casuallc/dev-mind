@@ -39,6 +39,9 @@ import java.util.Properties;
  * worklogRoot=               # CAP-41：工作日志持久工作区根目录（kind:"worklog" 会话启用：
  *                            # <root>/<console-username>/ 本地 git 仓库，永不删除、不参与 GC）。
  *                            # 空 = {user.home}/worklog
+ * partialMessages=true       # CAP-50：给 claude 加 --include-partial-messages 出逐 token 打字机效果。
+ *                            # 需 claude 认识该参数（2.1.250+ 实测可用）；节点上版本过旧时未知选项会让
+ *                            # claude 非零退出、会话直接 FAILED，此时改 false 重启 runner 即退回整块输出
  * </pre>
  */
 public record RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -46,7 +49,19 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                            String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes,
                            int gcInitialDelayMinutes, java.util.List<String> labels,
                            java.util.List<String> execAllowlist, String execShell, int buildGcHours,
-                           String claudeConfigDir, String worklogRoot) {
+                           String claudeConfigDir, String worklogRoot, boolean partialMessages) {
+
+    /** 兼容构造（CAP-50 前的 18 参签名）：partial messages 默认开启。 */
+    public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
+                        Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
+                        String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes,
+                        int gcInitialDelayMinutes, java.util.List<String> labels,
+                        java.util.List<String> execAllowlist, String execShell, int buildGcHours,
+                        String claudeConfigDir, String worklogRoot) {
+        this(serverUrl, token, claudePath, permissionMode, workDir, projectPaths, maxConcurrent,
+                executor, workspaceRoot, gcDays, gcIntervalMinutes, gcInitialDelayMinutes, labels,
+                execAllowlist, execShell, buildGcHours, claudeConfigDir, worklogRoot, true);
+    }
 
     /** 兼容构造（FR-05 前的 9 参签名，测试/旧调用用）：GC 默认值 14 天 / 360 分钟 / 首跑 10 分钟，无标签。 */
     public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -119,7 +134,8 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                 p.getProperty("execShell", "bash").strip(),
                 Integer.parseInt(p.getProperty("buildGcHours", "24").strip()),
                 p.getProperty("claudeConfigDir", "").strip(),
-                p.getProperty("worklogRoot", "").strip());
+                p.getProperty("worklogRoot", "").strip(),
+                !"false".equalsIgnoreCase(p.getProperty("partialMessages", "true").strip()));
     }
 
     /** CAP-41：worklog 持久工作区根目录——配置优先，空 = {user.home}/worklog。 */

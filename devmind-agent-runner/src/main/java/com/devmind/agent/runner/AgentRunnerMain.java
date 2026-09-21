@@ -66,7 +66,9 @@ public class AgentRunnerMain {
         // CAP-30：内核参数从 Spring 配置类换成 RuntimeSettings 值对象（runner 无 Spring）
         RuntimeSettings settings = RuntimeSettings.defaults()
                 .withClaudePath(config.claudePath())
-                .withPermissionMode(config.permissionMode());
+                .withPermissionMode(config.permissionMode())
+                // CAP-50：逐 token 打字机效果；节点 claude 版本过旧时置 partialMessages=false 退回整块输出
+                .withIncludePartialMessages(config.partialMessages());
         // executor=claude（默认）/ fake（内置假进程，自测/无 claude 环境）；
         // protocol（user message / permission_result 拼装）两种 executor 同 schema，恒用 CliProcessLauncher 构造器
         CliProcessLauncher protocol = new CliProcessLauncher(settings, mapper);
