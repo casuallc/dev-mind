@@ -162,6 +162,10 @@ requirements ── + workspace_owner VARCHAR(64) NULL -- 工作区归属用户�
   远端/本地分支挂回，提交不丢）。
 - **旧 `work/` 目录**：新代码不再写入该路径；升级说明列出人工清理步骤（FR-08）。
 - **`SessionRepoEntity.branch` 快照**：所有收口/释放/diff 一律**快照优先**，快照为 null 才按新规则推导。
+- **协议层缺键 = 旧布局**（不是错误）：三类帧的 `workspaceKey` 是**可选**字段，缺省/空串即
+  `<owner>/work` 旧布局 + 旧分支规则。理由：老服务端（升级前构建）根本不会发这个字段，把它当
+  错误会让「新 runner + 老服务端」直接不可用，还会把存量会话的收口/释放一并打死——缺键的语义
+  与升级前逐字节同义，才是真正的 fail-safe。
 - 需求表两列由 `ddl-auto=update` 自动加列，不写迁移脚本。
 
 ### FR-12 claude 本地状态目录与保留期
@@ -210,8 +214,10 @@ requirements ── + workspace_owner VARCHAR(64) NULL -- 工作区归属用户�
   `cleanupPeriodDays`、需求实际生命周期）在部署时一并确认。
 - **合并放临时 detached worktree**（沿用 CAP-42，已定）：绝不碰克隆缓存的检出分支，
   `.finalize-tmp` 内 merge 后 `push HEAD:<baseBranch>`。
-- **部署顺序约束**：老 runner + 新服务端 → 409 门控；新 runner + 老服务端 → repo 会话缺
-  `workspaceKey` 直接报错。双向 fail-visible，无静默降级。
+- **部署顺序约束**：老 runner + 新服务端 → 带 `workspaceKey` 的会话/收口/释放一律 409 门控
+  （老 runner 忽略该字段会把不同需求写进同一 `work/` 目录，故属「必须认识」，绝不静默下发）。
+  反向**不需要门控**：新 runner + 老服务端时服务端不发 `workspaceKey`，runner 按「缺键 = 旧布局」
+  落 `work/`，与升级前逐字节同义（FR-11）。
 
 ## 4. 插件化接口
 
@@ -239,8 +245,9 @@ GET  /api/sessions...                                                   SessionV
 6. 删除需求 → 节点工作树释放（丢弃语义）；节点离线时删除不阻断、记告警，目录由 GC 兜底；
 7. GC：无存活 pid + 超龄 `worktreeGcDays` + 无未提交改动 + 分支已推远端 → 工作树与本地分支删除；
    任一条件不满足则跳过并记原因；有未提交改动的工作树永不自动删；
-8. 老 runner（协议 < v10）派发会话/收口/释放 409 提示升级；新 runner 收到缺 `workspaceKey`
-   的 repo 会话直接报错（不落旧布局）；
+8. 老 runner（协议 < v10）派发带 `workspaceKey` 的会话/收口/释放 409 提示升级；缺 `workspaceKey`
+   一律按旧布局 `work/` 执行（等价升级前语义，见 FR-11）——「新 runner + 老服务端」与存量会话
+   的收口/释放都照常工作，不报错、不静默错分；
 9. 存量 CAP-42 会话（`workspace_key IS NULL`）照常收口/释放/删除，行为与升级前一致；
 10. chat / worklog / 构建链路零回归；`git status --porcelain` 在零改动会话下仍为空（FR-10 回归保持）；
 11. claude 状态落 runner 专属 `claudeConfigDir`（节点用户个人 `~/.claude/projects` 不再新增平台目录）；
