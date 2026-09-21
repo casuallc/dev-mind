@@ -16,7 +16,8 @@
 import json, os, shutil, subprocess, sys, time, urllib.request, urllib.error
 from pathlib import Path
 
-BASE = "http://localhost:8080/api"
+# 默认打本机 :8080；起隔离实例时用 E2E_BASE 覆盖（如 http://localhost:8090/api，见 tests/README.md）
+BASE = os.environ.get("E2E_BASE", "http://localhost:8080/api")
 ROOT = Path(__file__).resolve().parent.parent
 RUNNER_JAR = ROOT / "devmind-agent-runner/target/devmind-agent-runner.jar"
 TMP = ROOT / "tmp"
@@ -57,10 +58,13 @@ def kill_tree(pid):
 
 
 def session_dir(sid, rid, timeout=60):
-    """定位会话工作区：CAP-51 需求工作树（worktrees/req-<rid>）优先，兼容旧布局。"""
+    """定位会话工作区：CAP-51 需求工作树（<proj>/<owner>/worktrees/req-<rid>）优先，兼容旧布局。
+
+    `**` 必须带上：工作区根到工作树之间隔着 <项目>/<归属用户> 两层，少一层就永远找不到
+    （表现为「超时等待会话工作区」，但目录其实一直在）。"""
     t0 = time.time()
     while time.time() - t0 < timeout:
-        for pattern in (f"*/worktrees/req-{rid}", f"*/worktrees/sid-{sid}", f"*/sessions/{sid}"):
+        for pattern in (f"**/worktrees/req-{rid}", f"**/worktrees/sid-{sid}", f"**/sessions/{sid}"):
             hit = next(iter(WS.glob(pattern)), None)
             if hit:
                 return hit
@@ -131,7 +135,8 @@ def main():
     req("POST", f"/agent-nodes/{node['id']}/default", token=tok)
     shutil.rmtree(WS, ignore_errors=True)
     PROPS.write_text(
-        f"serverUrl=ws://localhost:8080/ws/agent\ntoken={node_token}\nexecutor=fake\n"
+        f"serverUrl={BASE.replace('http://', 'ws://').removesuffix('/api')}/ws/agent\n"
+        f"token={node_token}\nexecutor=fake\n"
         f"workDir={(TMP / 'cap52-runner-work').as_posix()}\nworkspaceRoot={WS.as_posix()}\n"
         f"maxConcurrent=3\n",
         encoding="utf-8")
@@ -195,7 +200,11 @@ def main():
         assert "后端阈值校验" in dev_spec and "前端阈值表单" in dev_spec, "开发 spec 未带清单条目"
         assert "依赖：先完成 #1" in dev_spec, f"依赖未渲染成先完成 #1:\n{dev_spec[:400]}"
         assert "dev-summary.md" in dev_spec, "开发 spec 缺收尾产出要求"
-        print(f"[7] 自动开发会话 {dev_sess[0]['id']}（整份清单 + 依赖 #1 渲染 OK）")
+        # CAP-51 验收 5：规划与开发会话落在同一棵需求工作树（同分支 → 改动天然累积，
+        # 这也是「一个需求一个会话做完」能成立的前提）
+        assert session_dir(dev_sess[0]["id"], rid) == session_dir(plan_sess["id"], rid), \
+            "开发会话与规划会话不在同一棵需求工作树"
+        print(f"[7] 自动开发会话 {dev_sess[0]['id']}（整份清单 + 依赖 #1 渲染 + 复用需求工作树 OK）")
 
         # ---- 链路 B：开发会话收尾 → 待验收，WI 不自动 DONE ----
         write_output(dev_sess[0]["id"], rid, "dev-summary.md",

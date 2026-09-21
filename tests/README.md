@@ -9,6 +9,27 @@
 - Python 脚本只用标准库（Windows 控制台已处理 UTF-8）；`.mjs` 需 Node 18+（原生 WebSocket/fetch）；`.sh` 用 Git Bash；从仓库根目录跑。
 - 新脚本命名 `capXX_*.py` / `e2e-<主题>.sh`，头部注明前置与覆盖点，禁硬编码密钥/本机密码。
 
+## 起独立实例跑 E2E（不碰本机 dev 实例与库）
+
+`:8080` 上常年跑着一个旧构建的 dev 实例，直接拿它跑 E2E 等于在测老代码；为它 taskkill
+又会打断正在用的人。起一个隔离实例（独立端口 + 独立 H2 + 独立工作区根，全部落 `tmp/`）：
+
+```bash
+export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"   # JDK 21
+mvn -q install -DskipTests          # 必须先装：-pl devmind-app 不带 -am，兄弟模块从 m2 取
+mvn -pl devmind-app spring-boot:run -Dspring-boot.run.profiles=e2e \
+  "-Dspring-boot.run.arguments=--server.port=8090 \
+   --spring.datasource.url=jdbc:h2:file:$PWD/tmp/e2e-data/db/devmind;AUTO_SERVER=TRUE \
+   --devmind.project.workspace-root=$PWD/tmp/e2e-data/repositories \
+   --devmind.worktree.root=$PWD/tmp/e2e-data/worktrees \
+   --devmind.attachment.root-dir=$PWD/tmp/e2e-data/attachments"
+E2E_BASE=http://localhost:8090/api python tests/cap52_e2e.py
+```
+
+`--spring-boot.run.profiles=e2e` 是**必需的**：仓库无 `application-e2e.yml`，该 profile 的作用是
+让默认的 `local`（指向共享 MySQL）不激活，落到 `application.yml` 的 H2 + `admin/admin123` 种子。
+脚本自己起 runner（`executor=fake`，工作区 `tmp/<脚本>-ws/`），不需要另开节点。
+
 ## fixtures/（测试双端）
 
 | 文件 | 用途 | 启动方式 |
@@ -56,7 +77,7 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 | cap33_verify.py | 场景化会话与上下文装配（自建 fake runner） |
 | cap34_fr04_08_verify.py / cap34_reattach_verify.py | runner 调度：断连对账/服务端重启 reattach/exit 路由 |
 | cap37_e2e.py ~ cap40_e2e.py | 产出回传、流程串联、需求附件上下文投送（协议 v3/v4；cap37 链路已被 CAP-38/52 取代，cap40 已改用 flow/plan） |
-| cap52_e2e.py | 需求流程精简：三合一规划会话（一会话三产出）→ 自动开发会话 → 待验收；粒度护栏/入口互斥/终态 409（协议 v10） |
+| cap52_e2e.py | 需求流程精简：三合一规划会话（一会话三产出）→ 自动开发会话（**复用同一棵需求工作树**，CAP-51 验收 5）→ 待验收；粒度护栏/入口互斥/无清单与终态 409（协议 v10）。支持 `E2E_BASE` 指向非 8080 实例（如 `E2E_BASE=http://localhost:8090/api`），起隔离实例的姿势见下方「起独立实例跑 E2E」 |
 | e2e-agent-node.py | CAP-21 节点全链路：注册→会话→授权→优雅退出→离线 409 |
 | e2e-cap41.py / b / c | CAP-41 工作日志空间：懒创建/守卫/种子模板/日报周报生成 |
 | e2e-cap41-m3-push.py | CAP-41 M3：worklog 远端绑定 + push（协议 v6，file:// bare 库） |
