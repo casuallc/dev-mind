@@ -88,6 +88,11 @@ public class AgentRunnerMain {
             }
         });
         RunnerWorkspace workspace = new RunnerWorkspace(config.workspaceRoot());
+        // CAP-51 FR-12：claude 状态目录与 transcript 保留期（默认 30 天会扫掉静置超期的需求会话，
+        // 造成「工作树还在、resume 失效」；清扫遍历整机 projects/，只能设在 runner 专属配置里）
+        Path claudeConfigDir = ClaudeStateSupport.resolveConfigDir(config);
+        ClaudeStateSupport.ensureRetention(claudeConfigDir, config.worktreeGcDays());
+        log.info("claude 配置目录: {}", claudeConfigDir);
         // CAP-36：exec 帧 handler（构建/部署/测试/发版下发执行；execAllowlist 空 = 全部拒绝）
         ExecHandler execHandler = new ExecHandler(config, workspace, frame -> connRef[0].send(frame));
 
@@ -134,7 +139,10 @@ public class AgentRunnerMain {
         });
         gcTimer.scheduleWithFixedDelay(() -> {
             try {
-                gc.run(config.gcDays(), java.util.Set.copyOf(sessions.activeSessionIds()));
+                java.util.Set<String> active = java.util.Set.copyOf(sessions.activeSessionIds());
+                gc.run(config.gcDays(), active);
+                // CAP-51：需求粒度工作树（worktrees/<key>）保留窗口更长，独立清理
+                gc.sweepWorktrees(config.worktreeGcDays(), active);
                 // CAP-36：构建工作区（无分支/push 语义）保留窗口更短，独立清理
                 gc.sweepBuilds(config.buildGcHours() * 3600_000L, execHandler.activeBuildWorkspaceIds());
                 workspaceBytes.set(gc.usageBytes());
@@ -327,6 +335,9 @@ public class AgentRunnerMain {
             Path sessionDir = null; // CAP-34 FR-04：pid 文件落点（legacy 映射路径为 null，不参与重启对账）
             RunnerSessionRegistry.SessionFinalizer finalizer = null;
             String kind = frame.path("kind").asText("");
+            // CAP-51：服务端下发的工作区键（req-<需求id> / sid-<会话id>）；空 = 存量会话旧布局
+            // work/（旧服务端不发此字段，不能当错误——FR-11 兼容契约）
+            String workspaceKey = frame.path("workspaceKey").asText("");
             JsonNode repoNode = frame.path("repo");
             JsonNode reposNode = frame.path("repos");
             if ("chat".equals(kind)) {
@@ -368,7 +379,8 @@ public class AgentRunnerMain {
                             rn.path("token").asText(""),
                             rn.path("name").asText("")));
                 }
-                RunnerWorkspace.MultiCtx mctx = workspace.prepareMulti(sessionId, projectId, wsOwner, specs);
+                RunnerWorkspace.MultiCtx mctx = workspace.prepareMulti(sessionId, projectId, wsOwner,
+                        workspaceKey, specs);
                 workDir = mctx.aggRoot();
                 sessionDir = mctx.aggRoot();
                 finalizer = sid -> workspace.finishMulti(mctx, msg -> sessions.reportSystem(sid, msg));
@@ -387,7 +399,8 @@ public class AgentRunnerMain {
                         repoNode.path("baseBranch").asText(""),
                         repoNode.path("branch").asText(""),
                         repoNode.path("token").asText(""));
-                RunnerWorkspace.RepoCtx ctx = workspace.prepare(sessionId, projectId, wsOwner, spec);
+                RunnerWorkspace.RepoCtx ctx = workspace.prepare(sessionId, projectId, wsOwner,
+                        workspaceKey, spec);
                 workDir = ctx.sessionDir();
                 sessionDir = ctx.sessionDir();
                 finalizer = sid -> workspace.finish(ctx, msg -> sessions.reportSystem(sid, msg));
@@ -424,9 +437,9 @@ public class AgentRunnerMain {
             // 服务化部署（WinSW LocalSystem / systemd root）下 claude 默认读服务账户的 ~/.claude，
             // 读不到安装用户的登录态 → "Not logged in"。按配置注入 CLAUDE_CONFIG_DIR 指向已登录的
             // .claude 目录；空 = 不注入（claude 用默认目录）。节点本地配置优先于服务端下发同名字段
-            if (!config.claudeConfigDir().isBlank()) {
-                env.put("CLAUDE_CONFIG_DIR", config.claudeConfigDir());
-            }
+            // CAP-51 FR-12：平台专属目录（配置为空时 = {workspaceRoot}/../claude-config），
+            // 恒注入——不注入就会写节点用户的 ~/.claude，把平台记录混进个人空间
+            env.put("CLAUDE_CONFIG_DIR", ClaudeStateSupport.resolveConfigDir(config).toString());
             // CAP-43：节点代理命中 claude scope → claude 子进程走代理（模型 API/遥测等外网流量）。
             // 大小写四件全注入（不同库读不同大小写）；服务端下发的同名字段不覆盖（帧 env 优先）
             String claudeProxy = com.devmind.common.agent.exec.NodeProxy.urlFor("claude");
@@ -529,6 +542,8 @@ public class AgentRunnerMain {
         String sessionId = frame.path("sessionId").asText("");
         String projectId = frame.path("projectId").asText("");
         String owner = frame.path("workspaceOwner").asText("");
+        // CAP-51：非空 = 需求粒度工作区 worktrees/<key>；空 = 存量会话旧布局 work/（旧服务端不发此字段）
+        String workspaceKey = frame.path("workspaceKey").asText("");
         boolean discardChanges = frame.path("discardChanges").asBoolean(false);
         java.util.List<RunnerWorkspace.RepoSpec> specs = new java.util.ArrayList<>();
         for (JsonNode rn : frame.path("repos")) {
@@ -552,7 +567,8 @@ public class AgentRunnerMain {
                     throw new IllegalStateException(
                             "会话 " + sessionId + " 仍在本节点运行，请先结束会话再收口");
                 }
-                RunnerWorkspace.FinalizeOutcome r = workspace.finalize(projectId, owner, specs, discardChanges);
+                RunnerWorkspace.FinalizeOutcome r = workspace.finalize(projectId, owner, specs,
+                        discardChanges, workspaceKey);
                 if (r.exit() == 0) {
                     ack.put("ok", true);
                     ack.put("detail", r.output());
@@ -582,6 +598,8 @@ public class AgentRunnerMain {
         String sessionId = frame.path("sessionId").asText("");
         String projectId = frame.path("projectId").asText("");
         String owner = frame.path("workspaceOwner").asText("");
+        // CAP-51：非空 = 需求粒度工作区 worktrees/<key>（需求删除释放走此帧）
+        String workspaceKey = frame.path("workspaceKey").asText("");
         java.util.List<RunnerWorkspace.RepoSpec> specs = new java.util.ArrayList<>();
         for (JsonNode rn : frame.path("repos")) {
             specs.add(new RunnerWorkspace.RepoSpec(
@@ -604,7 +622,7 @@ public class AgentRunnerMain {
                     throw new IllegalStateException(
                             "会话 " + sessionId + " 仍在本节点运行，请先结束会话再删除");
                 }
-                RunnerWorkspace.ReleaseOutcome r = workspace.release(projectId, owner, specs);
+                RunnerWorkspace.ReleaseOutcome r = workspace.release(projectId, owner, specs, workspaceKey);
                 if (r.exit() == 0) {
                     ack.put("ok", true);
                     ack.put("detail", r.output());

@@ -137,4 +137,25 @@ class WorkspaceReconcilerTest {
         assertTrue(Files.isDirectory(work));
         assertTrue(Files.isDirectory(workNoPid));
     }
+
+    @Test
+    void requirementWorktreeReapsOrphanAndIsOwnerlessEligible() throws Exception {
+        // CAP-51：<proj>/<owner>/worktrees/<key> 写 pid 文件、回收孤儿进程；且与 work/ 不同，
+        // 进程已不在时登记无主 → 交 GC 判超龄（需求工作树是可回收的临时产物）
+        Process orphan = spawnSleeper();
+        Path keyed = root.resolve("p1").resolve("alice").resolve("worktrees").resolve("req-ab12cd34");
+        Files.createDirectories(keyed);
+        WorkspaceReconciler.writePidFile(keyed, orphan);
+        Path keyedNoPid = root.resolve("p1").resolve("alice").resolve("worktrees").resolve("req-dead");
+        Files.createDirectories(keyedNoPid);
+
+        var report = new WorkspaceReconciler(root).reconcile();
+
+        assertEquals(1, report.reaped().size());
+        orphan.waitFor(10, TimeUnit.SECONDS);
+        assertFalse(orphan.isAlive());
+        assertTrue(report.ownerlessDirs().contains(keyedNoPid),
+                "需求工作树应登记无主交 GC: " + report.ownerlessDirs());
+        assertTrue(Files.isDirectory(keyed));
+    }
 }

@@ -15,9 +15,13 @@ import java.util.Properties;
  * serverUrl=ws://192.168.1.10:8080/ws/agent
  * token=dmag_xxx
  * claudePath=                # 空 = where claude 探测
- * claudeConfigDir=           # 空 = claude 默认配置目录（~/.claude）；服务化部署（LocalSystem/root）
- *                            # 读不到安装用户的登录态时，指向已登录的 .claude 目录（含 settings.json/.credentials.json），
- *                            # 以 CLAUDE_CONFIG_DIR 环境变量注入 claude 子进程
+ * claudeConfigDir=           # claude 配置目录（以 CLAUDE_CONFIG_DIR 注入 claude 子进程）。
+ *                            # CAP-51 起空 = 平台专属目录 {workspaceRoot}/../claude-config（不再写节点用户的
+ *                            # ~/.claude），使平台会话的 transcript 保留期与清理范围与个人记录隔离；
+ *                            # 升级时需在该目录补一次登录态（settings.json/.credentials.json 或 ANTHROPIC_* env）。
+ *                            # 服务化部署（LocalSystem/root）下务必显式指向已登录目录——
+ *                            # 平台专属目录里的 settings.json 的 cleanupPeriodDays 由 runner 落 180 天
+ *                            # （claude 默认 30 天会把静置超期的会话 transcript 扫掉、resume 失效）
  * permissionMode=acceptEdits # runner 默认权限模式（服务端指令未指定时用）
  * workDir=D:\devmind-work    # 项目无映射时的兜底工作目录
  * project.&lt;projectId&gt;=D:\repos\xxx   # 项目 → 节点本地路径映射（CAP-25 起仅作降级回退）
@@ -25,6 +29,8 @@ import java.util.Properties;
  *                            # CAP-42 起代码会话改为每用户固定布局：克隆缓存 <root>/<projectId>/<owner>/main
  *                            # + 固定 worktree <root>/<projectId>/<owner>/work（多库缓存 <owner>/<repoName>/main、
  *                            # 子 worktree work/<repoName>、聚合根 work/ 作 claude cwd）；结束不删，页面手动收口。
+ *                            # CAP-51 起带 workspaceKey 的会话改落 worktrees/<key>（需求内多会话共用一棵工作树，
+ *                            # 收口保留工作树并前进到新基线），无 key 的存量会话仍走 work/ 旧布局。
  *                            # 构建工作区仍为共享 <root>/<projectId>/{main,builds}（owner 保留名防撞）；_chat 布局不变。
  * gcDays=14                  # CAP-34 FR-05：会话目录超龄清理阈值（天）
  * gcIntervalMinutes=360      # GC 巡检间隔（分钟）
@@ -42,6 +48,10 @@ import java.util.Properties;
  * partialMessages=true       # CAP-50：给 claude 加 --include-partial-messages 出逐 token 打字机效果。
  *                            # 需 claude 认识该参数（2.1.250+ 实测可用）；节点上版本过旧时未知选项会让
  *                            # claude 非零退出、会话直接 FAILED，此时改 false 重启 runner 即退回整块输出
+ * worktreeGcDays=30          # CAP-51：需求粒度工作树（worktrees/&lt;key&gt;）超龄回收阈值（天）。
+ *                            # 比会话目录 gcDays 长——需求生命周期更长；未提交改动 / 分支未推远端永不删。
+ *                            # 应与 claude 侧 transcript 保留期（cleanupPeriodDays，runner 落 180 天）
+ *                            # 对齐：工作树还在而会话续不上是最难排查的半可用状态
  * </pre>
  */
 public record RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -49,7 +59,21 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                            String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes,
                            int gcInitialDelayMinutes, java.util.List<String> labels,
                            java.util.List<String> execAllowlist, String execShell, int buildGcHours,
-                           String claudeConfigDir, String worklogRoot, boolean partialMessages) {
+                           String claudeConfigDir, String worklogRoot, boolean partialMessages,
+                           int worktreeGcDays) {
+
+    /** 兼容构造（CAP-51 前的 19 参签名）：需求工作树 GC 阈值默认 30 天。 */
+    public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
+                        Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
+                        String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes,
+                        int gcInitialDelayMinutes, java.util.List<String> labels,
+                        java.util.List<String> execAllowlist, String execShell, int buildGcHours,
+                        String claudeConfigDir, String worklogRoot, boolean partialMessages) {
+        this(serverUrl, token, claudePath, permissionMode, workDir, projectPaths, maxConcurrent,
+                executor, workspaceRoot, gcDays, gcIntervalMinutes, gcInitialDelayMinutes, labels,
+                execAllowlist, execShell, buildGcHours, claudeConfigDir, worklogRoot, partialMessages,
+                30);
+    }
 
     /** 兼容构造（CAP-50 前的 18 参签名）：partial messages 默认开启。 */
     public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -135,7 +159,8 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                 Integer.parseInt(p.getProperty("buildGcHours", "24").strip()),
                 p.getProperty("claudeConfigDir", "").strip(),
                 p.getProperty("worklogRoot", "").strip(),
-                !"false".equalsIgnoreCase(p.getProperty("partialMessages", "true").strip()));
+                !"false".equalsIgnoreCase(p.getProperty("partialMessages", "true").strip()),
+                Integer.parseInt(p.getProperty("worktreeGcDays", "30").strip()));
     }
 
     /** CAP-41：worklog 持久工作区根目录——配置优先，空 = {user.home}/worklog。 */

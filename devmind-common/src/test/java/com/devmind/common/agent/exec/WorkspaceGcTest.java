@@ -14,6 +14,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -123,6 +124,60 @@ class WorkspaceGcTest {
         assertEquals(0, report.deleted());
         assertTrue(Files.isDirectory(ctx.sessionDir()));
         assertTrue(Files.isDirectory(ctx.cacheDir()));
+    }
+
+    @Test
+    void requirementWorktreeGcDecisionMatrix() throws Exception {
+        // CAP-51：<proj>/<owner>/worktrees/<key> 参与 GC（目录数随需求线性增长）。
+        // 四条件：无存活 pid + 超龄 + 无未提交改动 + 分支已推远端。
+        seedOriginAndWorkspace();
+        RunnerWorkspace.RepoCtx pushed = reqWorktree("req-pushed", true, false);
+        RunnerWorkspace.RepoCtx dirty = reqWorktree("req-dirty", true, true);
+        RunnerWorkspace.RepoCtx unpushed = reqWorktree("req-unpushed", false, false);
+        RunnerWorkspace.RepoCtx fresh = reqWorktree("req-fresh", true, false);
+        RunnerWorkspace.RepoCtx live = reqWorktree("req-live", true, false);
+        RunnerWorkspace.RepoCtx active = reqWorktree("sid-active1", true, false);
+        for (RunnerWorkspace.RepoCtx c : List.of(pushed, dirty, unpushed, live, active)) {
+            makeOld(c.sessionDir());
+        }
+        // 存活 pid 文件（模拟 claude 还在跑）：mtime 再老也不能删
+        ProcessHandle cur = ProcessHandle.current();
+        Files.writeString(live.sessionDir().resolve(WorkspaceReconciler.PID_FILE),
+                cur.pid() + "\n" + cur.info().startInstant().orElse(Instant.EPOCH).toEpochMilli() + "\n");
+
+        var report = new WorkspaceGc(wsRoot).sweepWorktrees(30, Set.of("active1"));
+
+        assertTrue(Files.notExists(pushed.sessionDir()), "已收口推送 + 超龄 → 删");
+        assertTrue(Files.isDirectory(dirty.sessionDir()), "有未提交改动 → 永不自动删");
+        assertTrue(Files.isDirectory(unpushed.sessionDir()), "分支未推远端 → 留");
+        assertTrue(Files.isDirectory(fresh.sessionDir()), "未超龄 → 留");
+        assertTrue(Files.isDirectory(live.sessionDir()), "claude 进程仍存活 → 留");
+        assertTrue(Files.isDirectory(active.sessionDir()), "会话进行中（sid- 键）→ 留");
+        assertEquals(1, report.deleted());
+        assertTrue(report.skipped().stream().anyMatch(s -> s.contains("未提交改动")),
+                String.join("\n", report.skipped()));
+        // 删除 = worktree 移除 + 本地分支删除（真源回收干净，不留孤儿）
+        assertThrows(IllegalStateException.class,
+                () -> git(pushed.cacheDir(), "rev-parse", "--verify", "refs/heads/feature/req-pushed"));
+        // 克隆缓存与基线不受影响（其余需求的依赖沉淀仍在）
+        assertTrue(Files.isDirectory(pushed.cacheDir().resolve(".git")));
+        assertTrue(Files.isDirectory(unpushed.sessionDir()));
+    }
+
+    /** CAP-51 需求工作树：prepare(key) + 一笔提交，push=true 推分支远端，dirty=true 再留个未提交文件。 */
+    private RunnerWorkspace.RepoCtx reqWorktree(String key, boolean push, boolean dirty) throws Exception {
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s-" + key, "proj1", "alice", key,
+                new RunnerWorkspace.RepoSpec(origin.toUri().toString(), "main", "feature/" + key, ""));
+        Files.writeString(ctx.sessionDir().resolve("code.txt"), "change-" + key);
+        git(ctx.sessionDir(), "add", ".");
+        git(ctx.sessionDir(), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "work");
+        if (push) {
+            git(ctx.sessionDir(), "push", "origin", "feature/" + key + ":feature/" + key);
+        }
+        if (dirty) {
+            Files.writeString(ctx.sessionDir().resolve("dirty.txt"), "x");
+        }
+        return ctx;
     }
 
     private static String git(Path cwd, String... args) throws Exception {

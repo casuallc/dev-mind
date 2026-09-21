@@ -298,6 +298,12 @@ class RunnerWorkspaceTest {
                 new RunnerWorkspace.RepoSpec("file:///x", "main", "feature/s1", "", "work"),
                 new RunnerWorkspace.RepoSpec("file:///y", "main", "feature/s1", "", "ok"));
         assertThrows(IllegalStateException.class, () -> ws.prepareMulti("s1", "proj1", "alice", reserved));
+        // CAP-51：worktrees（与需求工作树桶撞名）、main（与 <name>/main 克隆缓存撞成同一路径）
+        for (String bad : List.of("worktrees", "main", "sessions")) {
+            assertThrows(IllegalStateException.class, () -> ws.prepareMulti("s1", "proj1", "alice", List.of(
+                    new RunnerWorkspace.RepoSpec("file:///x", "main", "feature/s1", "", bad),
+                    new RunnerWorkspace.RepoSpec("file:///y", "main", "feature/s1", "", "ok"))));
+        }
     }
 
     @Test
@@ -729,6 +735,66 @@ class RunnerWorkspaceTest {
         assertFalse(out.contains("abc+123"));
         assertFalse(out.contains("abc%2B123"));
         assertTrue(out.contains("***"));
+    }
+
+    // ---- CAP-51 需求粒度工作区（worktrees/<key>） ----
+
+    @Test
+    void requirementWorkspaceSharedWithinRequirementAndKeptOnFinalize() throws Exception {
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/req-ab12cd34", "");
+
+        // 布局：<root>/<proj>/<owner>/worktrees/<key>（不是 work/ 旧布局）
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", "req-ab12cd34", spec);
+        assertEquals(tmp.resolve("workspaces").resolve("proj1").resolve("alice")
+                .resolve("worktrees").resolve("req-ab12cd34").toAbsolutePath().normalize(),
+                ctx.sessionDir());
+
+        // 需求内第二个会话（不同会话 id、同 key/分支）复用同一棵工作树，看得到上一个会话的改动
+        Files.writeString(ctx.sessionDir().resolve("code.txt"), "第一段改动");
+        git(ctx.sessionDir(), "add", ".");
+        git(ctx.sessionDir(), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "需求内改动");
+        RunnerWorkspace.RepoCtx again = ws.prepare("s2", "proj1", "alice", "req-ab12cd34", spec);
+        assertEquals(ctx.sessionDir(), again.sessionDir());
+        assertTrue(Files.exists(again.sessionDir().resolve("code.txt")),
+                "同需求第二个会话必须看到上一个会话的提交（需求内串行共用一棵工作树）");
+
+        // 收口：合并到基线 + push；工作树与分支<b>保留</b>并前进到新基线
+        RunnerWorkspace.FinalizeOutcome r = ws.finalize("proj1", "alice", List.of(spec), false,
+                "req-ab12cd34");
+        assertEquals(0, r.exit(), r.output());
+        assertTrue(Files.isDirectory(ctx.sessionDir()), "收口后保留工作树: " + r.output());
+        assertEquals("feature/req-ab12cd34", gitOut(ctx.sessionDir(), "branch", "--show-current"));
+        assertEquals("第一段改动", git(origin, "show", "main:code.txt").trim(), "基线含会话产出");
+        assertEquals(gitOut(origin, "rev-parse", "main"), gitOut(ctx.sessionDir(), "rev-parse", "HEAD"),
+                "工作树应前进到新基线，否则下次收口重复合并同一批提交");
+        assertFalse(gitOut(ctx.cacheDir(), "rev-parse", "--verify", "refs/heads/feature/req-ab12cd34")
+                .isBlank(), "收口保留需求分支（与旧布局「收口即删」相反）");
+
+        // 重复收口幂等（已前进到基线 → 无可合并内容，不产生第二个合并提交）
+        assertEquals(0, ws.finalize("proj1", "alice", List.of(spec), false, "req-ab12cd34").exit());
+        assertEquals(gitOut(origin, "rev-parse", "main"), gitOut(ctx.sessionDir(), "rev-parse", "HEAD"));
+
+        // 释放（需求删除）才真正回收：目录与本地分支都没了
+        RunnerWorkspace.ReleaseOutcome rel = ws.release("proj1", "alice", List.of(spec), "req-ab12cd34");
+        assertEquals(0, rel.exit(), rel.output());
+        assertTrue(Files.notExists(ctx.sessionDir()), "释放后目录删除");
+        assertThrows(IllegalStateException.class,
+                () -> git(ctx.cacheDir(), "rev-parse", "--verify", "refs/heads/feature/req-ab12cd34"));
+    }
+
+    @Test
+    void requirementKeyValidation() {
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec("file:///x", "main", "feature/x", "");
+        // key 是目录名：白名单防 ../ 逃逸，保留名防撞扫描桶
+        assertThrows(IllegalStateException.class, () -> ws.prepare("s1", "proj1", "alice", "../escape", spec));
+        assertThrows(IllegalStateException.class, () -> ws.prepare("s1", "proj1", "alice", "worktrees", spec));
+        assertThrows(IllegalStateException.class, () -> ws.prepare("s1", "proj1", "alice", "中文", spec));
+        // 空/null key = 存量旧布局 work/，不是错误（本类其余用例走 4 参重载覆盖该契约）
     }
 
     // ---- CAP-43 节点外网代理：git scope 注入 ----

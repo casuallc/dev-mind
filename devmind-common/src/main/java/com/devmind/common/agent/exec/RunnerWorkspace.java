@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
  * CAP-25 runner 侧托管工作区：收到带 repo 块的 launch 后负责节点本地代码生命周期——
  * 克隆缓存 → fetch 基线 → 会话 worktree。
  *
- * <p>CAP-42 布局重构（每用户固定工作区）：目录固定到
+ * <p>CAP-42 布局（每用户固定工作区）：目录固定到
  * <pre>
  * &lt;workspaceRoot&gt;/&lt;projectId&gt;/&lt;workspaceOwner&gt;/main            克隆缓存（每用户每库一份）
  * &lt;workspaceRoot&gt;/&lt;projectId&gt;/&lt;workspaceOwner&gt;/work            固定 worktree（claude cwd，单库）
@@ -29,6 +29,19 @@ import java.util.regex.Pattern;
  * 会话结束<b>不再 push、不再删 worktree</b>（finalizer 只上报未提交告警），收口合并
  * 由页面手动触发 {@link #finalize}；固定目录不参与 WorkspaceGc（不在 sessions/_chat
  * 扫描桶下），`.runner-pid` 孤儿进程对账回收保留（WorkspaceReconciler 第三类目录）。</p>
+ *
+ * <p><b>CAP-51 需求粒度工作区</b>：launch 帧带 {@code workspaceKey}（服务端下发，runner 不推导）
+ * 时工作树改落 {@code worktrees/}：
+ * <pre>
+ * &lt;workspaceRoot&gt;/&lt;projectId&gt;/&lt;workspaceOwner&gt;/worktrees/&lt;key&gt;/         工作树（claude cwd；多库时为聚合根）
+ * &lt;workspaceRoot&gt;/&lt;projectId&gt;/&lt;workspaceOwner&gt;/worktrees/&lt;key&gt;/&lt;repo&gt;/ 多库子 worktree
+ * </pre>
+ * key = {@code req-<需求id>}（需求内多会话共用一棵工作树与一条分支，改动自然累积）或
+ * {@code sid-<会话id>}（无需求会话，用完即弃）。归属粒度从「用户」变「需求」后：占用判定
+ * 由「同 (项目,用户) 是否已有工作树」降级为**磁盘残留防线**（同 key 的目录检出分支不符才报错，
+ * 报错按目录/key 描述而非反查会话）；<b>收口保留工作树与分支</b>（需求可能继续开发），
+ * 只在收口成功后 best-effort 把需求分支 ff 前进到新基线。key 为空 = 存量会话，走上面 CAP-42
+ * 旧布局与旧语义（FR-11 兼容契约：服务端对存量会话不下发 key，不能视为错误）。</p>
  *
  * <p>CAP-34 FR-01：本类自 devmind-agent-runner 上移 common {@code agent.exec} 执行内核包
  * （该包只被 runner 引用，服务端不持有任何执行实现）。</p>
@@ -47,7 +60,11 @@ public class RunnerWorkspace {
     private static final Pattern SAFE_ID = Pattern.compile("[a-zA-Z0-9._-]+");
     /** CAP-42：工作区保留目录名（GC/对账扫描桶 + 固定目录名），owner/库名禁用防撞名 */
     private static final java.util.Set<String> RESERVED_DIRS =
-            java.util.Set.of("main", "sessions", "builds", "_chat", "work");
+            java.util.Set.of("main", "sessions", "builds", "_chat", "work", "worktrees");
+    /** CAP-42 旧布局工作树目录名（无 workspaceKey 的存量会话） */
+    private static final String LEGACY_WORK_DIR = "work";
+    /** CAP-51 需求粒度工作树根目录名（workspaceKey 非空时用） */
+    private static final String WORKTREES_DIR = "worktrees";
     private static final long CLONE_TIMEOUT_SEC = 30 * 60;
     private static final long FETCH_TIMEOUT_SEC = 5 * 60;
     private static final long PUSH_TIMEOUT_SEC = 5 * 60;
@@ -85,16 +102,26 @@ public class RunnerWorkspace {
         return cacheLocks.computeIfAbsent(cacheDir.toString(), k -> new java.util.concurrent.locks.ReentrantLock());
     }
 
-    /** 准备会话工作区：clone（首次）→ fetch 基线 → 固定 worktree；返回 workdir 所在上下文。 */
+    /** 准备会话工作区（CAP-42 旧布局 {@code work/}）：等价于 {@code prepare(..., null, spec)}。 */
     public RepoCtx prepare(String sessionId, String projectId, String workspaceOwner, RepoSpec spec) {
+        return prepare(sessionId, projectId, workspaceOwner, null, spec);
+    }
+
+    /**
+     * 准备会话工作区：clone（首次）→ fetch 基线 → worktree；返回 workdir 所在上下文。
+     * workspaceKey 非空（CAP-51）→ {@code worktrees/<key>}，同 key 的会话共用一棵工作树。
+     */
+    public RepoCtx prepare(String sessionId, String projectId, String workspaceOwner,
+                           String workspaceKey, RepoSpec spec) {
         requireSafeId(projectId, "projectId");
         String owner = requireOwner(workspaceOwner);
+        String key = requireKey(workspaceKey);
         if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
             throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
         }
         Path userRoot = userRoot(projectId, owner);
         Path cacheDir = userRoot.resolve("main").normalize();
-        Path workDir = userRoot.resolve("work").normalize();
+        Path workDir = worktreeRoot(userRoot, key);
         if (!cacheDir.startsWith(workspaceRoot) || !workDir.startsWith(workspaceRoot)) {
             throw new IllegalStateException("工作区路径越界（.. 逃逸防护）: " + projectId);
         }
@@ -103,7 +130,7 @@ public class RunnerWorkspace {
         try {
             ensureClone(cacheDir, spec);
             fetch(cacheDir, spec);
-            ensureUserWorktree(cacheDir, workDir, spec);
+            ensureUserWorktree(cacheDir, workDir, spec, key);
         } finally {
             lock.unlock();
         }
@@ -124,25 +151,30 @@ public class RunnerWorkspace {
      * 聚合根 = work/（claude cwd；CAP-42 起单库与多库同为固定布局）。
      * 中途失败：本次新建的子 worktree 显式移除（复用的不动），已抛占用冲突的不做清理。
      */
-    public MultiCtx prepareMulti(String sessionId, String projectId, String workspaceOwner, List<RepoSpec> specs) {
+    public MultiCtx prepareMulti(String sessionId, String projectId, String workspaceOwner,
+                                 List<RepoSpec> specs) {
+        return prepareMulti(sessionId, projectId, workspaceOwner, null, specs);
+    }
+
+    /** CAP-51 多库版本：workspaceKey 非空 → 聚合根 {@code worktrees/<key>}（子 worktree 同下）。 */
+    public MultiCtx prepareMulti(String sessionId, String projectId, String workspaceOwner,
+                                 String workspaceKey, List<RepoSpec> specs) {
         requireSafeId(projectId, "projectId");
         String owner = requireOwner(workspaceOwner);
-        Path aggRoot = userRoot(projectId, owner).resolve("work").normalize();
+        String key = requireKey(workspaceKey);
+        Path userRoot = userRoot(projectId, owner);
+        Path aggRoot = worktreeRoot(userRoot, key);
         if (!aggRoot.startsWith(workspaceRoot)) {
             throw new IllegalStateException("工作区路径越界（.. 逃逸防护）: " + projectId);
         }
         List<RepoCtx> created = new ArrayList<>();
         try {
             for (RepoSpec spec : specs) {
-                if (spec.name() == null || !SAFE_ID.matcher(spec.name()).matches()
-                        || "work".equals(spec.name())) {
-                    throw new IllegalStateException(
-                            "非法仓库名（白名单 [a-zA-Z0-9._-]，多库必填，禁用保留名 work）: " + spec.name());
-                }
+                requireRepoName(spec.name(), true);
                 if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
                     throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
                 }
-                Path cacheDir = userRoot(projectId, owner).resolve(spec.name()).resolve("main").normalize();
+                Path cacheDir = userRoot.resolve(spec.name()).resolve("main").normalize();
                 Path workDir = aggRoot.resolve(spec.name()).normalize();
                 if (!cacheDir.startsWith(workspaceRoot) || !workDir.startsWith(aggRoot)) {
                     throw new IllegalStateException("工作区路径越界（.. 逃逸防护）: " + spec.name());
@@ -153,7 +185,7 @@ public class RunnerWorkspace {
                 try {
                     ensureClone(cacheDir, spec);
                     fetch(cacheDir, spec);
-                    fresh = ensureUserWorktree(cacheDir, workDir, spec);
+                    fresh = ensureUserWorktree(cacheDir, workDir, spec, key);
                 } finally {
                     lock.unlock();
                 }
@@ -172,7 +204,7 @@ public class RunnerWorkspace {
         List<RepoCtx> all = new ArrayList<>();
         for (RepoSpec spec : specs) {
             all.add(new RepoCtx(spec,
-                    userRoot(projectId, owner).resolve(spec.name()).resolve("main").normalize(),
+                    userRoot.resolve(spec.name()).resolve("main").normalize(),
                     aggRoot.resolve(spec.name()).normalize()));
         }
         return new MultiCtx(all, aggRoot);
@@ -197,9 +229,9 @@ public class RunnerWorkspace {
             Result status = run(ctx.sessionDir(), OP_TIMEOUT_SEC, ctx.spec().token(), "status", "--porcelain");
             if (status.exit() == 0 && !status.output().isBlank()) {
                 String dirty = dirtySummary(status.output());
-                sink.accept(label + "[工作区] 固定工作区存在未提交改动（已保留在节点 "
+                sink.accept(label + "[工作区] 工作区存在未提交改动（已保留在节点 "
                         + ctx.sessionDir() + "）：" + dirty + "，执行「收口合并到基线」前请先提交或丢弃");
-                log.warn("固定工作区存在未提交改动: dir={} files={}", ctx.sessionDir(), dirty);
+                log.warn("工作区存在未提交改动: dir={} files={}", ctx.sessionDir(), dirty);
             }
         } catch (Exception e) {
             log.warn("会话工作区收口检查异常: {}", e.getMessage());
@@ -221,6 +253,46 @@ public class RunnerWorkspace {
     private static void requireSafeId(String id, String what) {
         if (id == null || !SAFE_ID.matcher(id).matches()) {
             throw new IllegalStateException("非法 " + what + "（白名单 [a-zA-Z0-9._-]）: " + id);
+        }
+    }
+
+    /**
+     * CAP-51 工作区键规范化：null/空 = 存量会话（旧布局 {@code work/}，<b>不是错误</b>——
+     * 升级前建的会话服务端本就不下发 key，报错会让它们永久开不了）；非空则白名单 + 保留名校验
+     * （key 是目录名，必须防 {@code ../} 逃逸与撞扫描桶）。
+     */
+    private static String requireKey(String workspaceKey) {
+        if (workspaceKey == null || workspaceKey.isBlank()) {
+            return null;
+        }
+        if (!SAFE_ID.matcher(workspaceKey).matches() || RESERVED_DIRS.contains(workspaceKey)) {
+            throw new IllegalStateException("非法工作区键（白名单 [a-zA-Z0-9._-]，禁用保留名 "
+                    + RESERVED_DIRS + "）: " + workspaceKey);
+        }
+        return workspaceKey;
+    }
+
+    /**
+     * 工作树根目录：key 非空 → {@code <userRoot>/worktrees/<key>}（CAP-51 需求粒度）；
+     * 无 key → {@code <userRoot>/work}（CAP-42 存量布局）。
+     */
+    private Path worktreeRoot(Path userRoot, String key) {
+        return key == null ? userRoot.resolve(LEGACY_WORK_DIR).normalize()
+                : userRoot.resolve(WORKTREES_DIR).resolve(key).normalize();
+    }
+
+    /**
+     * 多库子目录名校验：白名单 + 全量保留名（{@code main}/{@code work}/{@code worktrees}/…）。
+     * 保留名此前只挡 {@code work}，但 {@code main} 会与克隆缓存 {@code <userRoot>/<name>/main}
+     * 撞成同一路径、{@code worktrees} 会与需求工作树桶撞名——两者都是静默写错地方，一并挡掉。
+     */
+    private static void requireRepoName(String name, boolean multi) {
+        if (!multi) {
+            return;
+        }
+        if (name == null || !SAFE_ID.matcher(name).matches() || RESERVED_DIRS.contains(name)) {
+            throw new IllegalStateException("非法仓库名（白名单 [a-zA-Z0-9._-]，多库必填，禁用保留名 "
+                    + RESERVED_DIRS + "）: " + name);
         }
     }
 
@@ -477,30 +549,38 @@ public class RunnerWorkspace {
      * + best-effort push 会话分支（供收口后 diff）→ 删 worktree + 删本地分支」。
      *
      * <p>合并<b>绝不动 main 缓存的检出分支</b>——在 userRoot 下的临时 detached worktree
-     * （.finalize-tmp[-&lt;name&gt;]，建在新 fetch 的 FETCH_HEAD 上）里 merge --no-ff 后从那里
-     * push HEAD:&lt;baseBranch&gt;。合并冲突/脏工作区/push 失败 → 该库返回脱敏错误、固定 worktree
+     * （.finalize-tmp[-&lt;key&gt;][-&lt;name&gt;]，建在新 fetch 的 FETCH_HEAD 上）里 merge --no-ff 后从那里
+     * push HEAD:&lt;baseBranch&gt;。合并冲突/脏工作区/push 失败 → 该库返回脱敏错误、worktree
      * 原样保留可重试；{@code discardChanges=true} 先 reset --hard + clean -fd（只清未提交脏文件，
      * 不解提交级合并冲突）。多库逐库顺序执行：成功库即时收口，失败库保留，互不阻塞。</p>
+     *
+     * <p>CAP-51：带 workspaceKey 时不删 worktree 与分支（需求后续会话接着用），改为 ff 前进到新基线。</p>
      */
     public FinalizeOutcome finalize(String projectId, String workspaceOwner,
                                     List<RepoSpec> specs, boolean discardChanges) {
+        return finalize(projectId, workspaceOwner, specs, discardChanges, null);
+    }
+
+    /**
+     * CAP-51 需求粒度收口：workspaceKey 非空 → 定位 {@code worktrees/<key>}，且收口后
+     * <b>保留</b>工作树与分支（需求可能继续开发，见 {@link #finalizeOne}）。
+     */
+    public FinalizeOutcome finalize(String projectId, String workspaceOwner,
+                                    List<RepoSpec> specs, boolean discardChanges, String workspaceKey) {
         requireSafeId(projectId, "projectId");
         String owner = requireOwner(workspaceOwner);
+        String key = requireKey(workspaceKey);
         if (specs == null || specs.isEmpty()) {
             throw new IllegalStateException("收口缺少仓库描述（repos 为空）");
         }
         boolean multi = specs.size() > 1;
         Path userRoot = userRoot(projectId, owner);
-        Path aggRoot = userRoot.resolve("work").normalize();
+        Path aggRoot = worktreeRoot(userRoot, key);
         StringBuilder summary = new StringBuilder();
         boolean allOk = true;
         for (RepoSpec spec : specs) {
             String label = spec.name() != null && !spec.name().isBlank() ? "[" + spec.name() + "] " : "";
-            if (multi && (spec.name() == null || !SAFE_ID.matcher(spec.name()).matches()
-                    || "work".equals(spec.name()))) {
-                throw new IllegalStateException(
-                        "非法仓库名（白名单 [a-zA-Z0-9._-]，多库必填，禁用保留名 work）: " + spec.name());
-            }
+            requireRepoName(spec.name(), multi);
             if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
                 throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
             }
@@ -511,7 +591,8 @@ public class RunnerWorkspace {
             var lock = lockOf(cacheDir);
             lock.lock();
             try {
-                String err = finalizeOne(cacheDir, workDir, userRoot, spec, discardChanges, label, summary);
+                String err = finalizeOne(cacheDir, workDir, userRoot, spec, discardChanges, label,
+                        summary, key);
                 if (err != null) {
                     allOk = false;
                     summary.append(label).append("失败: ").append(err).append('\n');
@@ -521,8 +602,9 @@ public class RunnerWorkspace {
                 lock.unlock();
             }
         }
-        // 多库全部收口成功：聚合根 work/ 已空则一并删除（单库的 work/ 本身就是 worktree 已被移除）
-        if (allOk && multi && Files.isDirectory(aggRoot)) {
+        // 多库全部收口成功：聚合根 work/ 已空则一并删除（单库的 work/ 本身就是 worktree 已被移除）。
+        // CAP-51 keyed：聚合根是 worktrees/<key>，收口保留工作树，绝不清目录。
+        if (allOk && multi && key == null && Files.isDirectory(aggRoot)) {
             try (var s = Files.list(aggRoot)) {
                 if (s.findAny().isEmpty()) {
                     Files.deleteIfExists(aggRoot);
@@ -542,12 +624,14 @@ public class RunnerWorkspace {
      * 失败返回脱敏错误文案（固定 worktree 原样保留）。
      */
     private String finalizeOne(Path cacheDir, Path workDir, Path userRoot, RepoSpec spec,
-                               boolean discardChanges, String label, StringBuilder summary) {
+                               boolean discardChanges, String label, StringBuilder summary,
+                               String key) {
         if (!Files.isDirectory(cacheDir.resolve(".git"))) {
             return "克隆缓存缺失（工作区未初始化或已收口）: " + cacheDir;
         }
         if (!Files.isDirectory(workDir)) {
             // 多库部分收口后重试：worktree 与本地分支都已不在 = 该库此前已收口，幂等跳过
+            // （CAP-51 keyed 收口保留工作树，走不到这里；工作树被 GC 删了才会命中）
             Result br = run(cacheDir, OP_TIMEOUT_SEC, spec.token(),
                     "rev-parse", "--verify", "--quiet", "refs/heads/" + spec.branch());
             if (br.exit() != 0) {
@@ -592,9 +676,11 @@ public class RunnerWorkspace {
         } catch (IllegalStateException e) {
             return e.getMessage();
         }
-        // 合并放临时 detached worktree（userRoot/.finalize-tmp[-<name>]），不动 main 缓存检出分支
-        Path tmp = userRoot.resolve(".finalize-tmp" + (spec.name() != null ? "-" + spec.name() : ""))
-                .normalize();
+        // 合并放临时 detached worktree（userRoot/.finalize-tmp[-<key>][-<name>]），不动 main 缓存检出分支
+        Path tmp = userRoot.resolve(".finalize-tmp"
+                + (key != null ? "-" + key : "")
+                + (spec.name() != null ? "-" + spec.name() : "")).normalize();
+        String baseSha = ""; // 本轮推上去的新基线提交号（临时 worktree 拆掉后仍要用）
         try {
             removeWorktreeQuietly(cacheDir, tmp, spec.token()); // 防上次失败残留
             deleteRecursively(tmp);
@@ -616,6 +702,11 @@ public class RunnerWorkspace {
             if (push.exit() != 0) {
                 return "push 基线分支失败（如提示非快进 = 基线已被他人推进，请重试收口）: " + tail(push.output());
             }
+            // 新基线提交号（tmp HEAD 就是刚推上去的合并提交）：供 CAP-51 收口后把保留的
+            // 工作树 ff 前进到它。不用 FETCH_HEAD——那是<b>每个 worktree 各自一份</b>的引用，
+            // 在缓存库 fetch 出来、到工作树里读不到（.git/worktrees/<n>/FETCH_HEAD 不存在）。
+            Result baseHead = run(tmp, OP_TIMEOUT_SEC, spec.token(), "rev-parse", "HEAD");
+            baseSha = baseHead.exit() == 0 ? baseHead.output().trim() : "";
             summary.append(label).append("已合并 ").append(spec.branch())
                     .append(" → ").append(spec.baseBranch()).append(" 并推送基线\n");
         } finally {
@@ -635,6 +726,13 @@ public class RunnerWorkspace {
             summary.append(label).append("会话分支推送失败（仅影响收口后 diff 查看）: ")
                     .append(tail(pushBranch.output())).append('\n');
         }
+        if (key != null) {
+            // CAP-51：收口<b>保留</b>工作树与分支——需求可能还要继续开发，保留才能让后续会话
+            // 接着用（同需求内改动天然累积）。但工作树仍停在收口前的基线上，必须 ff 前进到
+            // 刚推上去的合并提交，否则下次收口会把同一批提交再合一遍、下次会话看到旧基线。
+            advanceToBaseline(workDir, spec, baseSha, label, summary);
+            return null;
+        }
         // 删固定 worktree + 本地会话分支（best-effort：目录删不掉则兜底递归删 + prune）
         Result rm = run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "worktree", "remove", "--force",
                 workDir.toString());
@@ -646,6 +744,33 @@ public class RunnerWorkspace {
         run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "branch", "-D", spec.branch());
         summary.append(label).append("已删除固定 worktree 与本地分支 ").append(spec.branch()).append('\n');
         return null;
+    }
+
+    /**
+     * CAP-51 收口后把工作树检出的需求分支前进到新基线（best-effort）。必须 {@code --ff-only}：
+     * 工作树自身的提交是刚生成的合并提交的父提交，正常必能快进；快进不了（工作树有未提交改动
+     * 或已分叉）说明现场有人动过，跳过并告警——<b>不影响收口结果</b>（基线已推进、分支已 push），
+     * 只是该工作树下一次会话/收口看到旧基线，人工处理即可。
+     *
+     * <p>目标是 {@code baseSha}（本轮临时 worktree 推上基线的那个提交），对象已在同一克隆的
+     * 对象库里，<b>不需要也不该再 fetch</b>：FETCH_HEAD 是每个 worktree 各自的引用，缓存库里
+     * fetch 的 FETCH_HEAD 在工作树里根本不存在（2026-09-21 实测报
+     * {@code could not open '.../.git/worktrees/<n>/FETCH_HEAD'}）。</p>
+     */
+    private void advanceToBaseline(Path workDir, RepoSpec spec, String baseSha, String label,
+                                   StringBuilder summary) {
+        if (baseSha == null || baseSha.isBlank()) {
+            summary.append(label).append("工作树已保留；前进到新基线跳过（未取到基线提交号）\n");
+            return;
+        }
+        Result merge = run(workDir, OP_TIMEOUT_SEC, spec.token(), "merge", "--ff-only", baseSha);
+        if (merge.exit() != 0) {
+            log.warn("收口后工作树前进失败（保留原样）: dir={} err={}", workDir, tail(merge.output()));
+            summary.append(label).append("工作树已保留，但前进到新基线失败（工作树有未提交改动或已分叉，")
+                    .append("resume 会话后人工处理）: ").append(tail(merge.output())).append('\n');
+            return;
+        }
+        summary.append(label).append("工作树已保留并前进到基线 ").append(spec.baseBranch()).append('\n');
     }
 
     /** CAP-42 固定工作区释放结果：exit=0 全部库成功；output 为逐库摘要/错误（已脱敏，多库带 [name] 前缀）。 */
@@ -661,25 +786,35 @@ public class RunnerWorkspace {
      * worktree 的检出分支</b>（{@link #ensureUserWorktree}）。会话记录被删后目录若还在，新会话
      * launch 必失败、而报错引导的「收口」入口又随会话记录一起消失——该 (项目,用户) 永久锁死
      * （2026-09-21 admq-manager/admin 实事故）。</p>
+     *
+     * <p>CAP-51：带 workspaceKey 时定位 {@code worktrees/<key>} 整块回收——需求记录被删后，
+     * 该需求的目录与分支同样不能留（FR-06 释放触发点）；keyed 布局下同目录不再跨需求复用，
+     * 所以一个需求的残留只影响它自己。</p>
      */
     public ReleaseOutcome release(String projectId, String workspaceOwner, List<RepoSpec> specs) {
+        return release(projectId, workspaceOwner, specs, null);
+    }
+
+    /**
+     * CAP-51 需求粒度释放：workspaceKey 非空 → 定位 {@code worktrees/<key>} 并整块回收
+     * （语义不变：丢弃未提交改动 + 删 worktree + 删本地分支，<b>不合并不 push</b>）。
+     */
+    public ReleaseOutcome release(String projectId, String workspaceOwner, List<RepoSpec> specs,
+                                  String workspaceKey) {
         requireSafeId(projectId, "projectId");
         String owner = requireOwner(workspaceOwner);
+        String key = requireKey(workspaceKey);
         if (specs == null || specs.isEmpty()) {
             throw new IllegalStateException("释放工作区缺少仓库描述（repos 为空）");
         }
         boolean multi = specs.size() > 1;
         Path userRoot = userRoot(projectId, owner);
-        Path aggRoot = userRoot.resolve("work").normalize();
+        Path aggRoot = worktreeRoot(userRoot, key);
         StringBuilder summary = new StringBuilder();
         boolean allOk = true;
         for (RepoSpec spec : specs) {
             String label = spec.name() != null && !spec.name().isBlank() ? "[" + spec.name() + "] " : "";
-            if (multi && (spec.name() == null || !SAFE_ID.matcher(spec.name()).matches()
-                    || "work".equals(spec.name()))) {
-                throw new IllegalStateException(
-                        "非法仓库名（白名单 [a-zA-Z0-9._-]，多库必填，禁用保留名 work）: " + spec.name());
-            }
+            requireRepoName(spec.name(), multi);
             if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
                 throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
             }
@@ -700,7 +835,8 @@ public class RunnerWorkspace {
                 lock.unlock();
             }
         }
-        // 多库全部释放成功：聚合根 work/ 已空则一并删除（单库的 work/ 本身就是 worktree 已被移除）
+        // 多库全部释放成功：聚合根 work/ 已空则一并删除（单库的 work/ 本身就是 worktree 已被移除）。
+        // CAP-51 keyed：多库释放后 worktrees/<key> 也是空壳，删掉（释放是整块回收语义）。
         if (allOk && multi && Files.isDirectory(aggRoot)) {
             try (var s = Files.list(aggRoot)) {
                 if (s.findAny().isEmpty()) {
@@ -925,27 +1061,42 @@ public class RunnerWorkspace {
     }
 
     /**
-     * CAP-42 固定 worktree 占用/幂等判定：
+     * CAP-42/CAP-51 worktree 占用/幂等判定：
      * 1. workDir 存在 → 检出分支 == 会话分支 = resume 复用（返回 false）；分支不符 = 占用冲突
-     *    （错误带占用分支名，引导先收口）；
+     *    （CAP-42 旧布局错误带占用分支名引导收口；CAP-51 keyed 布局按目录/key 描述——
+     *    占用判定已上移到服务端的「同需求进行中会话」预检，这里只是磁盘残留的最终防线）；
      * 2. workDir 不存在 → 本地分支在 = 挂回；本地无但 origin/&lt;branch&gt; 在（老会话已 push，
      *    新克隆缓存迁移）→ 从远端分支建本地分支挂回防分叉；都没有 = 从基线 FETCH_HEAD 新建。
      *
+     * @param key workspaceKey（非空 = CAP-51 需求粒度布局，仅供错误文案与父目录创建使用）
      * @return true = 本次新建（prepareMulti 失败回滚时只清理新建的，复用的不动）
      */
-    private boolean ensureUserWorktree(Path cacheDir, Path workDir, RepoSpec spec) {
+    private boolean ensureUserWorktree(Path cacheDir, Path workDir, RepoSpec spec, String key) {
         if (Files.isDirectory(workDir)) {
             Result head = run(workDir, OP_TIMEOUT_SEC, spec.token(), "rev-parse", "--abbrev-ref", "HEAD");
             String current = head.exit() == 0 ? head.output().trim() : "";
             if (current.equals(spec.branch())) {
                 excludePlatformPaths(cacheDir); // 修复前遗留的 worktree 补齐排除（幂等）
-                log.info("固定 worktree 已存在且分支一致（resume 复用）: {}", workDir);
+                log.info("worktree 已存在且分支一致（resume 复用）: {}", workDir);
                 return false;
             }
-            throw new IllegalStateException("该用户在本项目已有占用中的工作区（目录 " + workDir
-                    + (current.isEmpty() ? "，无法识别检出分支" : "，当前分支 " + current)
+            String found = current.isEmpty() ? "，无法识别检出分支" : "，当前分支 " + current;
+            if (key != null) {
+                // 需求粒度下同 key 目录同一时刻只应有本需求的分支；不符 = 磁盘残留（历史布局/人工改动）
+                throw new IllegalStateException("工作区目录 " + workDir + " 已被占用" + found
+                        + "，与本次会话分支 " + spec.branch() + " 不一致（工作区键 " + key
+                        + "）。请先在对应需求的「收口合并到基线」完成收口，或到节点人工核查该目录");
+            }
+            throw new IllegalStateException("该用户在本项目已有占用中的工作区（目录 " + workDir + found
                     + "）。请先在会话 " + occupantOf(current)
                     + " 的「更多 → 收口合并到基线」完成收口（或由其本人/管理员执行），再开新会话");
+        }
+        try {
+            // CAP-51：workDir 的父目录（worktrees/ 或 worktrees/<key>）由本平台创建，
+            // 不能让 git worktree add 的建目录行为成为隐式依赖
+            Files.createDirectories(workDir.getParent());
+        } catch (IOException e) {
+            throw new IllegalStateException("创建工作区父目录失败: " + workDir.getParent(), e);
         }
         Result verify = run(cacheDir, OP_TIMEOUT_SEC, spec.token(),
                 "rev-parse", "--verify", "--quiet", "refs/heads/" + spec.branch());
@@ -968,7 +1119,7 @@ public class RunnerWorkspace {
             throw new IllegalStateException("git worktree add 失败: " + tail(add.output()));
         }
         excludePlatformPaths(cacheDir);
-        log.info("固定 worktree 就绪: {} (branch {})", workDir, spec.branch());
+        log.info("worktree 就绪: {} (branch {})", workDir, spec.branch());
         return true;
     }
 

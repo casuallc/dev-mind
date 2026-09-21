@@ -25,6 +25,10 @@ import java.util.stream.Stream;
  * 同样写 pid 文件、同样回收孤儿进程，但目录本身是持久用户空间——进程已不在时<b>不</b>登记
  * 无主目录（永不移交 GC）。</p>
  *
+ * <p>CAP-51 第四类目录：需求粒度工作树 &lt;root&gt;/&lt;projectId&gt;/&lt;owner&gt;/worktrees/&lt;key&gt;
+ * 同样写 pid 文件与回收孤儿进程，但目录是可回收的临时产物——进程已不在时<b>登记</b>无主目录，
+ * 交 FR-05 的 {@link WorkspaceGc#sweepWorktrees} 判超龄回收。</p>
+ *
  * <p>PID 复用防护：要求进程 startInstant 与文件记录时刻误差 &lt; {@value #START_SKEW_MS}ms，
  * 否则视为无关进程，只登记不杀。legacy 目录（launch 无 repo/kind 块的 project 映射路径）
  * 不写 pid 文件，不参与对账。</p>
@@ -37,7 +41,7 @@ public class WorkspaceReconciler {
     private static final Pattern SAFE_ID = Pattern.compile("[a-zA-Z0-9._-]+");
     /** CAP-42：&lt;proj&gt; 下一级非用户目录的保留名（扫描桶/共享缓存），遍历时跳过 */
     private static final java.util.Set<String> NON_OWNER_DIRS =
-            java.util.Set.of("main", "sessions", "builds", "_chat", "work");
+            java.util.Set.of("main", "sessions", "builds", "_chat", "work", "worktrees");
 
     /** 被回收的孤儿会话进程。 */
     public record OrphanedSession(String sessionId, Path dir, long pid) {
@@ -146,7 +150,9 @@ public class WorkspaceReconciler {
     /**
      * 存量会话目录：&lt;root&gt;/&lt;projectId&gt;/sessions/&lt;sid&gt; + &lt;root&gt;/_chat/&lt;sid&gt;
      * （eligible=true）；CAP-42 固定工作区 &lt;root&gt;/&lt;projectId&gt;/&lt;owner&gt;/work
-     * （eligible=false，跳过保留名桶）。
+     * （eligible=false，跳过保留名桶）；CAP-51 需求工作树
+     * &lt;root&gt;/&lt;projectId&gt;/&lt;owner&gt;/worktrees/&lt;key&gt;（eligible=true——与 {@code work/} 的
+     * 「永不移交 GC」不同，需求工作树是可回收的临时产物，孤儿进程回收后交 FR-05 GC 判超龄）。
      */
     private List<Candidate> sessionDirs() {
         List<Candidate> out = new ArrayList<>();
@@ -159,7 +165,7 @@ public class WorkspaceReconciler {
                     continue;
                 }
                 collectSubDirs(proj.resolve("sessions"), out, true);
-                // CAP-42：<proj>/<owner>/work（owner = 非保留名的二级目录）
+                // CAP-42/CAP-51：<proj>/<owner>/{work,worktrees/*}（owner = 非保留名的二级目录）
                 try (Stream<Path> owners = Files.list(proj)) {
                     for (Path owner : owners.filter(Files::isDirectory).toList()) {
                         String name = owner.getFileName().toString();
@@ -170,6 +176,7 @@ public class WorkspaceReconciler {
                         if (Files.isDirectory(work)) {
                             out.add(new Candidate(work, false));
                         }
+                        collectSubDirs(owner.resolve("worktrees"), out, true);
                     }
                 }
             }
