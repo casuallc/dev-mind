@@ -67,6 +67,11 @@ CAP-25/31 的 runner 工作区是「每会话独立目录」：克隆缓存 `<wo
 - **FR-08 前端**：会话列表/看板加工作区状态 Tag（OPEN=占用中/FINALIZED=已收口）；
   「收口合并到基线」操作（Modal 说明 + 「丢弃未提交改动」勾选，注明只清脏文件不解
   合并冲突）；diff 提示文案引导先收口。全部在 `features/sessions` 内，projects 零改动。
+- **FR-09 删除会话释放工作区（2026-09-21 事故补）**：删除 workspace_state=OPEN 的会话时，
+  服务端先下发 `workspace_release` 帧让 runner 逐库「丢弃未提交改动 → 删 worktree →
+  删本地会话分支」（**不合并不 push**，删除即丢弃语义），成功后才落库删行；释放失败
+  **阻断删除** 并明示原因（可重试 / 到节点手工删）。协议 v9 门控，老 runner 409 提示升级。
+  删除确认框文案写明会释放节点工作区（丢弃未提交改动与未合并提交）。
 
 ## 3. 关键设计
 
@@ -98,7 +103,9 @@ sessions  ── + workspace_state VARCHAR(16) NULL   -- OPEN / FINALIZED（null
 
 WS 协议 v7：launch 帧 +`workspaceOwner`；新下行帧 `workspace_finalize`
 （requestId/sessionId/projectId/workspaceOwner/discardChanges/repos[]）与上行
-`workspace_finalize_ack`（requestId/ok/detail|error）。
+`workspace_finalize_ack`（requestId/ok/detail|error）。v9（FR-09）：新下行帧
+`workspace_release`（requestId/sessionId/projectId/workspaceOwner/repos[]，无 discardChanges
+——删除链路的丢弃是语义既定）与上行 `workspace_release_ack`（requestId/ok/detail|error）。
 
 ## 6. API 概要
 
@@ -119,7 +126,10 @@ GET  /api/sessions...              SessionView + workspaceState（按钮态/Tag�
 5. 老 runner（协议 < v7）派发会话 409 提示升级；固定目录超龄不被 GC；runner 重启
    孤儿进程照常回收且固定目录不登记待删；
 6. 编排器自动派发落 WI/需求归属人目录；用户名非法的存量用户创建会话 409 清晰提示；
-7. chat/worklog/构建链路零回归。
+7. chat/worklog/构建链路零回归；
+8. （FR-09）删除 OPEN 会话 → runner 侧固定 worktree 与本地会话分支已删、远端不受影响、
+   同 (项目,用户) 可立即再开新会话；release 失败（节点离线/断连）→ 409 且会话记录保留；
+   老 runner（协议 < v9）删除 OPEN 会话 409 提示升级。
 
 ## 8. 分期
 
