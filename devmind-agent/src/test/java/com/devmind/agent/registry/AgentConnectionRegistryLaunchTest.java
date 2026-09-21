@@ -58,6 +58,8 @@ class AgentConnectionRegistryLaunchTest {
             registry.onLaunchAck(cmd.sessionId(), true, null);
         });
         acker.start();
+        // 清掉此前帧的调用记录：同一测试内多次组帧时，残留调用会让 captor 抓到上一帧
+        org.mockito.Mockito.clearInvocations(ws);
         registry.launch("7", cmd);
         acker.join(10_000);
         ArgumentCaptor<TextMessage> captor = ArgumentCaptor.forClass(TextMessage.class);

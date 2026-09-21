@@ -82,6 +82,9 @@ class AgentConnectionRegistryReleaseTest {
                 error.set(e);
             }
         });
+        // 清掉此前帧的调用记录：否则 timeout 校验会被「上一次已经发过帧」直接满足，
+        // 新 captor 抓到的是上一帧（同一测试内多次组帧时静默读错帧）
+        org.mockito.Mockito.clearInvocations(ws);
         t.start();
         ArgumentCaptor<TextMessage> captor = ArgumentCaptor.forClass(TextMessage.class);
         verify(ws, timeout(5000).atLeastOnce()).sendMessage(captor.capture());
