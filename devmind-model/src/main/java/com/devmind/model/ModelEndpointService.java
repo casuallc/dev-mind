@@ -293,8 +293,18 @@ public class ModelEndpointService implements ModelEndpointProvider {
 
     @Override
     public Optional<ModelEndpointView> defaultEndpoint() {
-        return repo.findFirstByKindAndIsDefaultTrueAndStatus(
-                ModelEndpointEntity.KIND_EMBEDDING, ModelEndpointEntity.STATUS_ACTIVE).map(this::toSpiView);
+        return defaultEndpoint(ModelEndpointView.KIND_EMBEDDING);
+    }
+
+    /**
+     * 指定类型的平台默认端点。类型由 kind 常量给出（{@code is_default} 的唯一性由 {@link #setDefault}
+     * 在单事务内保证，故"该类型的默认"最多一条）；<b>无默认就返回 empty，不跨类型回落</b>——
+     * 向量端点拿来对话、对话端点拿来索引都是必坏的组合。
+     */
+    @Override
+    public Optional<ModelEndpointView> defaultEndpoint(String kind) {
+        return repo.findFirstByKindAndIsDefaultTrueAndStatus(kind, ModelEndpointEntity.STATUS_ACTIVE)
+                .map(this::toSpiView);
     }
 
     @Override
@@ -425,10 +435,14 @@ public class ModelEndpointService implements ModelEndpointProvider {
         return k;
     }
 
-    /** 「没有平台默认端点」的后果按 kind 不同：向量端点缺默认 = 索引降级；对话端点本期无消费方 */
+    /**
+     * 「没有平台默认端点」的后果按 kind 不同：向量端点缺默认 = 索引降级；对话端点缺默认 =
+     * 没显式指定端点的模型问答建不出来（CAP-49 的解析链第二级，落空即 409 不回落）。
+     */
     private static String missingDefaultHint(String kind) {
         return ModelEndpointEntity.KIND_EMBEDDING.equals(kind)
-                ? "，在设置新的默认端点前索引将保持降级" : "（该类型暂无默认端点）";
+                ? "，在设置新的默认端点前索引将保持降级"
+                : "（未指定端点的模型问答将无法新建，需在新建时选择端点）";
     }
 
     private static String provider(String raw) {

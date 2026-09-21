@@ -40,6 +40,11 @@ public record ModelEndpointView(
         Double threshold) {
 
     public static final String KIND_EMBEDDING = "EMBEDDING";
+    /**
+     * 通用对话端点（FR-11 起可登记；消费方为 CAP-49 问答模型执行体）。
+     * <b>跨模块合同值</b>：实体侧与消费方都比对它，只许在此定义一份。
+     */
+    public static final String KIND_CHAT = "CHAT";
     public static final String PROVIDER_OPENAI = "openai-compatible";
     public static final String PROVIDER_MOCK = "mock";
     /**
@@ -59,6 +64,14 @@ public record ModelEndpointView(
      */
     public boolean embedding() {
         return KIND_EMBEDDING.equals(kind);
+    }
+
+    /**
+     * 是否通用对话端点。CAP-49 的模型执行体用本方法过滤——把向量端点当对话端点用会拿
+     * embedding 模型名去打 {@code /chat/completions}。
+     */
+    public boolean chat() {
+        return KIND_CHAT.equals(kind);
     }
 
     /** 平台默认端点无库级覆盖时的展示名 */

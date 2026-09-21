@@ -19,8 +19,8 @@ import java.util.Optional;
  * <p><b>kind 由消费方过滤</b>（FR-11）：本 SPI 只负责"取端点"，不替调用方判断类型——
  * 返回的 {@link ModelEndpointView} 带 {@code kind}，向量消费方必须先
  * {@link ModelEndpointView#embedding()} 再使用，否则会把通用对话端点当向量端点用。
- * 未来对话消费方（本能力不实现）的接入点是新增 {@code defaultEndpoint(String kind)}，届时在下方的
- * {@link #defaultEndpoint()} 旁并列实现。</p>
+ * 对话消费方（CAP-49 问答模型执行体）走 {@link #defaultEndpoint(String)}，再用
+ * {@link ModelEndpointView#chat()} 过滤。</p>
  */
 public interface ModelEndpointProvider {
 
@@ -34,9 +34,19 @@ public interface ModelEndpointProvider {
 
     /**
      * 平台默认<b>向量</b>端点（kind=EMBEDDING 且 is_default 且 active）；无 → empty。
-     * 默认端点按类型各自唯一，本方法只承担向量一侧。
+     * 默认端点按类型各自唯一；本方法是 {@code defaultEndpoint(KIND_EMBEDDING)} 的等价简写。
      */
     Optional<ModelEndpointView> defaultEndpoint();
+
+    /**
+     * 平台默认<b>指定类型</b>端点（is_default 且 active 且 kind 相符）；无 → empty。
+     *
+     * <p>调用方传 {@link ModelEndpointView#KIND_CHAT} 之类常量。默认端点按类型各自唯一
+     * （{@code is_default} 的唯一性由 ModelEndpointService 在单事务内保证），故这里是"该类型的默认"，
+     * 不是"任意类型的默认"。<b>empty 表示没配</b>，不要回落其它类型——向量端点拿来对话、
+     * 对话端点拿来索引都是必坏的组合。</p>
+     */
+    Optional<ModelEndpointView> defaultEndpoint(String kind);
 
     /** 按 ID 取 active 端点；不存在/已停用 → empty */
     Optional<ModelEndpointView> activeEndpoint(long id);

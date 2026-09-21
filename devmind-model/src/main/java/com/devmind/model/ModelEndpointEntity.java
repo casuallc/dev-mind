@@ -1,5 +1,6 @@
 package com.devmind.model;
 
+import com.devmind.common.model.ModelEndpointView;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -24,8 +25,9 @@ import java.time.Instant;
 @Table(name = "model_endpoints")
 public class ModelEndpointEntity {
 
-    public static final String KIND_EMBEDDING = "EMBEDDING";
-    public static final String KIND_CHAT = "CHAT";
+    /** kind 合同值引自 SPI 视图（跨模块只许一份定义；RERANK 尚无消费方，留在本侧） */
+    public static final String KIND_EMBEDDING = ModelEndpointView.KIND_EMBEDDING;
+    public static final String KIND_CHAT = ModelEndpointView.KIND_CHAT;
     public static final String KIND_RERANK = "RERANK";
 
     public static final String PROVIDER_OPENAI = "openai-compatible";

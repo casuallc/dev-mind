@@ -404,6 +404,33 @@ class ModelEndpointServiceTest {
         assertTrue(service.activeEndpoint(404L).isEmpty());
     }
 
+    @Test
+    void defaultEndpointIsScopedToItsKind() {
+        // 默认端点按类型各自唯一（is_default 的唯一性由 setDefault 保证）：查 CHAT 拿到的必须是对话端点
+        ModelEndpointEntity chat = stored(12L, ModelEndpointEntity.KIND_CHAT, ModelEndpointEntity.PROVIDER_OPENAI,
+                true, ModelEndpointEntity.STATUS_ACTIVE);
+        when(repo.findFirstByKindAndIsDefaultTrueAndStatus(
+                ModelEndpointEntity.KIND_CHAT, ModelEndpointEntity.STATUS_ACTIVE)).thenReturn(Optional.of(chat));
+
+        ModelEndpointView got = service.defaultEndpoint(ModelEndpointView.KIND_CHAT).orElseThrow();
+
+        assertEquals(12L, got.id());
+        assertTrue(got.chat(), "CAP-49 的消费方靠 chat() 过滤，kind 得原样带出来");
+    }
+
+    @Test
+    void defaultEndpointNeverFallsBackAcrossKinds() {
+        ModelEndpointEntity vector = stored(3L, ModelEndpointEntity.PROVIDER_OPENAI, true,
+                ModelEndpointEntity.STATUS_ACTIVE);
+        when(repo.findFirstByKindAndIsDefaultTrueAndStatus(
+                ModelEndpointEntity.KIND_EMBEDDING, ModelEndpointEntity.STATUS_ACTIVE))
+                .thenReturn(Optional.of(vector));
+
+        assertTrue(service.defaultEndpoint(ModelEndpointView.KIND_CHAT).isEmpty(),
+                "没配对话默认端点就是没配——拿向量端点去对话是必坏的组合，不许跨类型回落");
+        assertEquals(3L, service.defaultEndpoint().orElseThrow().id(), "无参版仍是向量一侧，行为不变");
+    }
+
     // ---------------- SPI 视图与密钥暴露面 ----------------
 
     @Test
