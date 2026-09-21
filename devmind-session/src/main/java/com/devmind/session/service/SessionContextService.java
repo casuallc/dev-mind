@@ -73,6 +73,26 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
     public record Prepared(ContextManifest manifest, String snapshotJson) {
     }
 
+    /** CAP-52 需求级开发会话 taskSpec 首行标记（对应 FlowOutputContract.MARKER_DEV）。 */
+    private static final String FLOW_DEV_MARKER = "[flow:dev]";
+
+    /**
+     * CAP-52 FR-05 瘦上下文判定：**执行会话**走瘦上下文——挂工作单元的会话（人工单 WI 会话）
+     * 与需求级开发会话（taskSpec 首行 {@value #FLOW_DEV_MARKER}）。规划会话/问答/手工会话一律
+     * 维持现状（注入知识 + skills + 附件）。
+     *
+     * <p>create / resume / rebuild 三处必须共用本判定：TTL 过期后 runner 重拉会走 rebuild，
+     * 口径不一致就会把已经在跑的瘦上下文会话重新灌满知识（同一会话两次拉包内容不同）。
+     * session 模块不依赖 flow 模块（依赖方向相反），故按前缀字面量判，同
+     * {@code SessionManagerService#autoCreateWorkItem} 的 {@code [flow:} 豁免判法。</p>
+     */
+    public static boolean isExecutionSession(String taskSpec, String workItemId) {
+        if (workItemId != null && !workItemId.isBlank()) {
+            return true;
+        }
+        return taskSpec != null && taskSpec.startsWith(FLOW_DEV_MARKER);
+    }
+
     /**
      * 会话 launch 前装配（create/resume 调用）。projectAuto 恒 true：无项目会话仅全局无标签
      * 条目命中（沿用 CAP-04 现状口径）。renderedTaskSpec 须为场景骨架渲染后的任务说明。
@@ -83,16 +103,32 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
                             String renderedTaskSpec, List<String> extraSkillIds,
                             List<Long> extraDocIds, List<String> extraKnowledgeTags,
                             String requirementId) {
+        return prepare(sessionId, project, scenario, renderedTaskSpec, extraSkillIds, extraDocIds,
+                extraKnowledgeTags, requirementId, false);
+    }
+
+    /**
+     * CAP-52 FR-05 分层注入：{@code lean=true} 的执行会话（挂工作单元）**不注入**知识条目、
+     * 项目 skills、需求附件——规划会话已经把结论写进工作单元的 spec，执行会话再读一遍同一批
+     * 知识是纯浪费（每个执行会话都要重新装配一次全量知识）。权限白名单不受影响（见
+     * {@link ContextAssembler}：只有 settings 也出包）。
+     *
+     * @param lean 瘦上下文开关；规划会话/手工会话传 false（现状口径）
+     */
+    public Prepared prepare(String sessionId, Project project, SessionScenarioEntity scenario,
+                            String renderedTaskSpec, List<String> extraSkillIds,
+                            List<Long> extraDocIds, List<String> extraKnowledgeTags,
+                            String requirementId, boolean lean) {
         ContextAssemblyRequest req = new ContextAssemblyRequest(
                 project != null ? project.id() : null,
                 project != null && project.tags() != null ? project.tags() : List.of(),
-                scenario != null ? scenarioService.skillIdsOf(scenario) : List.of(),
-                extraSkillIds != null ? extraSkillIds : List.of(),
-                scenario != null ? scenarioService.docIdsOf(scenario) : List.of(),
-                extraDocIds != null ? extraDocIds : List.of(),
-                scenario != null ? scenarioService.knowledgeTagsOf(scenario) : List.of(),
-                extraKnowledgeTags != null ? extraKnowledgeTags : List.of(),
-                true, false, requirementId);
+                lean || scenario == null ? List.of() : scenarioService.skillIdsOf(scenario),
+                lean || extraSkillIds == null ? List.of() : extraSkillIds,
+                lean || scenario == null ? List.of() : scenarioService.docIdsOf(scenario),
+                lean || extraDocIds == null ? List.of() : extraDocIds,
+                lean || scenario == null ? List.of() : scenarioService.knowledgeTagsOf(scenario),
+                lean || extraKnowledgeTags == null ? List.of() : extraKnowledgeTags,
+                !lean, false, lean ? null : requirementId);
         ContextAssembler.AssembledContext a = assembleAndCache(sessionId, req,
                 scenario != null ? scenario.getCode() : null,
                 scenario != null ? scenario.getName() : null,
@@ -185,8 +221,11 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
                 rendered = scenarioService.render(scenario, ent.getTaskSpec(), project,
                         requirementTitle(ent.getRequirementId()));
             }
+            // CAP-52 FR-05：重建必须与创建时同口径，否则 TTL 过期后 runner 重拉会把瘦上下文
+            // 的执行会话重新灌满知识（同一个会话两次拉包内容不一致，最难受的一种 bug）
+            boolean lean = isExecutionSession(ent.getTaskSpec(), ent.getWorkItemId());
             prepare(ent.getId(), project, scenario, rendered, null, null, null,
-                    ent.getRequirementId()); // 命中即入缓存
+                    ent.getRequirementId(), lean); // 命中即入缓存
             Cached cached = cache.get(ent.getId());
             return cached != null ? Optional.of(cached.pkg()) : Optional.empty();
         } catch (Exception e) {

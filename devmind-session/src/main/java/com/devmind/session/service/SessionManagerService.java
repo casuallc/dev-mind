@@ -311,7 +311,8 @@ public class SessionManagerService {
         // 为无上下文启动（沿用知识注入不阻塞会话的语义）
         SessionContextService.Prepared prepared = prepareContext(id, project, scenario, taskSpec,
                 req.extraSkillIds(), req.extraDocIds(), req.extraKnowledgeTags(),
-                requirement != null ? requirement.getId() : null);
+                requirement != null ? requirement.getId() : null,
+                SessionContextService.isExecutionSession(taskSpec, req.workItemId()));
         RemoteSessionRuntime remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector,
                 eventSaver, listener, props.toRuntimeSettings());
         // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
@@ -562,7 +563,8 @@ public class SessionManagerService {
                         ? scenarioService.render(scenario, ent.getTaskSpec(), proj, requirementTitleOf(ent))
                         : ent.getTaskSpec();
                 prepared = prepareContext(id, proj, scenario, renderedTask, null, null, null,
-                        ent.getRequirementId());
+                        ent.getRequirementId(),
+                        SessionContextService.isExecutionSession(ent.getTaskSpec(), ent.getWorkItemId()));
                 connector.launch(ent.getAgentNodeId(), new AgentLaunchCommand(
                         id, ent.getProjectId(), renderedTask, ent.getModel(),
                         pm,
@@ -1446,6 +1448,8 @@ public class SessionManagerService {
     /**
      * CAP-33 FR-02：装配上下文包（三层合并）。场景绑定的资产失效（DevMindException 404）
      * 向上传播 fail-visible；其它装配异常降级为 null = 无上下文启动（沿用注入不阻塞语义）。
+     *
+     * @param lean CAP-52 FR-05 瘦上下文开关，取 {@link SessionContextService#isExecutionSession}
      */
     private SessionContextService.Prepared prepareContext(String sessionId, Project project,
                                                           SessionScenarioEntity scenario,
@@ -1453,10 +1457,11 @@ public class SessionManagerService {
                                                           List<String> extraSkillIds,
                                                           List<Long> extraDocIds,
                                                           List<String> extraKnowledgeTags,
-                                                          String requirementId) {
+                                                          String requirementId,
+                                                          boolean lean) {
         try {
             return sessionContextService.prepare(sessionId, project, scenario, renderedTaskSpec,
-                    extraSkillIds, extraDocIds, extraKnowledgeTags, requirementId);
+                    extraSkillIds, extraDocIds, extraKnowledgeTags, requirementId, lean);
         } catch (DevMindException de) {
             throw de;
         } catch (Exception e) {

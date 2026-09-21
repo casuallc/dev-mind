@@ -18,11 +18,13 @@ import org.springframework.beans.factory.ObjectProvider;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.lang.reflect.Proxy;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -115,6 +117,43 @@ class SessionContextServiceTest {
         ChatContextPreparer.PreparedContext pc = svc.prepare("c9", "qa", "你好");
         assertEquals("问：你好", pc.renderedPrompt());
         assertEquals(1, pc.manifest().entries());
+    }
+
+    // ---------------- CAP-52 FR-05 瘦上下文 ----------------
+
+    @Test
+    void 执行会话瘦上下文判定() {
+        // 执行会话 = 挂工作单元的会话 + 需求级开发会话（[flow:dev]）；规划会话仍是胖上下文
+        assertTrue(SessionContextService.isExecutionSession("[flow:dev]\n开发任务", null));
+        assertTrue(SessionContextService.isExecutionSession("任意任务", "wi-1"));
+        assertFalse(SessionContextService.isExecutionSession("[flow:plan]\n规划任务", null));
+        assertFalse(SessionContextService.isExecutionSession("[flow:analyze]\n分析任务", null));
+        assertFalse(SessionContextService.isExecutionSession(null, null));
+        assertFalse(SessionContextService.isExecutionSession("[flow:plan]", "  "));
+        assertTrue(SessionContextService.isExecutionSession("[flow:dev]", "  "));
+    }
+
+    @Test
+    void 开发会话重建按瘦口径装配且不带包() {
+        // 重建（TTL 过期后 runner 重拉）必须与创建时同口径：projectAuto=false、知识/附件全空，
+        // 且没有权限白名单时不为空包出包（瘦上下文本来就没有内容节）
+        List<com.devmind.common.agent.exec.ContextAssemblyRequest> seen = new ArrayList<>();
+        ContextProvider capture = req -> {
+            seen.add(req);
+            return ContextContribution.empty();
+        };
+        SessionEntity ent = new SessionEntity();
+        ent.setId("s4");
+        ent.setTaskSpec("[flow:dev]\n开发任务");
+        SessionContextService svc = newSvc(repoWith(ent), null, null, capture);
+
+        assertTrue(svc.find("s4").isEmpty());
+        assertEquals(1, seen.size());
+        assertFalse(seen.get(0).projectAuto());
+        assertTrue(seen.get(0).scenarioKnowledgeTags().isEmpty());
+        assertTrue(seen.get(0).extraKnowledgeTags().isEmpty());
+        assertTrue(seen.get(0).scenarioSkillIds().isEmpty());
+        assertNull(seen.get(0).requirementId(), "执行会话不投送需求附件");
     }
 
     // ---------------- fake 工具 ----------------

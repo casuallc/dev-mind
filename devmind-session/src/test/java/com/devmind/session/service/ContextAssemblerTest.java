@@ -89,6 +89,22 @@ class ContextAssemblerTest {
         assertEquals(0, r.manifest().entries());
     }
 
+    /**
+     * CAP-52 FR-05：瘦上下文的执行会话没有任何内容节，但**权限白名单必须出包**——
+     * runner 拉不到包就不会物化 settings.local.json，headless claude 会卡在权限提示上。
+     */
+    @Test
+    void 仅权限白名单也成包且不重复注入任务说明() {
+        ContextAssembler a = assembler(provider(new ContextContribution(
+                List.of(), List.of(), List.of(), "{\"permissions\":{}}", List.of())));
+        ContextAssembler.AssembledContext r = a.assemble(REQ, null, null, null, "只走 stdin 的任务说明");
+
+        assertEquals("{\"permissions\":{}}", r.pkg().settingsLocalJson());
+        assertEquals(0, r.manifest().entries());
+        // taskSpec 已作为首条 stdin 消息下发，包里再写一遍是纯浪费
+        org.junit.jupiter.api.Assertions.assertFalse(r.pkg().claudeMd().contains("## 当前任务"));
+    }
+
     private static ContextAssembler assembler(ContextProvider... providers) {
         ObjectProvider<ContextProvider> op = (ObjectProvider<ContextProvider>) Proxy.newProxyInstance(
                 ContextAssemblerTest.class.getClassLoader(),

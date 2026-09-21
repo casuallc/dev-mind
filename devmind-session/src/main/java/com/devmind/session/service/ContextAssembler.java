@@ -28,8 +28,9 @@ import java.util.Map;
  * → 各 provider 节（@Order：知识 10 / 文档 20 / skill 30）→ ## 当前任务（渲染后 taskSpec）。
  * settings.local.json 契约上仅 knowledge provider 产出，取第一个非空。</p>
  *
- * <p>空产出（无场景背景/无条目节/无 skills/无 docs）= null：不带上下文启动，沿用
- * CAP-34 之前「知识无命中 = 无注入」的语义。</p>
+ * <p>空产出（无场景背景/无条目节/无 skills/无 docs/无附件 **且无 settings**）= null：不带上下文
+ * 启动，沿用 CAP-34 之前「知识无命中 = 无注入」的语义。CAP-52 起例外：**只有权限白名单**时
+ * 必须出包（瘦上下文的执行会话靠它拿到 settings.local.json）。</p>
  */
 @Service
 public class ContextAssembler {
@@ -81,20 +82,27 @@ public class ContextAssembler {
 
         boolean hasScenarioBg = extraContextMd != null && !extraContextMd.isBlank();
         // CAP-40：附件投送也算产出——挂需求会话即使无场景无知识命中，有附件就必须出包
-        if (!hasScenarioBg && sections.isEmpty() && skills.isEmpty() && docs.isEmpty()
-                && inputs.isEmpty()) {
+        // CAP-52：权限白名单（settings）**必须**独立成包——瘦上下文（执行会话）没有任何内容节，
+        // 若仍按「空产出 = null」返回，runner 拉不到包就不会物化 settings.local.json，
+        // headless claude 会在权限提示上卡死。白名单是沙箱策略，不是「上下文注入」。
+        boolean contentless = !hasScenarioBg && sections.isEmpty() && skills.isEmpty()
+                && docs.isEmpty() && inputs.isEmpty();
+        if (contentless && settings == null) {
             return null;
         }
 
         StringBuilder md = new StringBuilder(HEADER);
-        if (hasScenarioBg) {
-            md.append("\n---\n\n## 场景背景\n\n").append(extraContextMd.strip()).append("\n");
+        if (!contentless) {
+            if (hasScenarioBg) {
+                md.append("\n---\n\n## 场景背景\n\n").append(extraContextMd.strip()).append("\n");
+            }
+            for (String section : sections) {
+                md.append(section);
+            }
+            // 无内容节时不重复注入任务说明：taskSpec 已作为首条 stdin 消息下发，再写一遍纯属浪费 token
+            md.append("\n---\n\n## 当前任务\n\n")
+                    .append(renderedTaskSpec == null ? "" : renderedTaskSpec.strip()).append("\n");
         }
-        for (String section : sections) {
-            md.append(section);
-        }
-        md.append("\n---\n\n## 当前任务\n\n")
-                .append(renderedTaskSpec == null ? "" : renderedTaskSpec.strip()).append("\n");
 
         ContextPackage pkg = ContextPackage.of(md.toString(), settings, skills, docs, inputs);
         ContextManifest manifest = ContextPackages.manifestOf(ContextPackages.toJsonBytes(pkg), items.size());
