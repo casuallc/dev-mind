@@ -20,6 +20,9 @@ import java.util.function.Consumer;
 /**
  * CAP-30 问答实时流：WS /ws/chats/{id}，帧协议与 /ws/sessions/{id} 完全一致
  * （snapshot/event/error/pong 下行 + input/authorize/interrupt/ping 上行），前端共享同一套流组件。
+ * CAP-49 起下行多一个非致命 {@code notice}：上行动作被拒（问答已删、模型问答不支持该动作…）
+ * 只提示这一次没成，不能走 {@code error}——前端把 {@code error} 当致命处理（关连接、不再重连），
+ * 那样一次动作失败会把整条实时流打断。
  *
  * <p>CAP-49：模型执行体会在一轮里推上千条 {@code text_delta}，慢客户端会把事件推送线程
  * （进而把上游 SSE 读取）钉死，故由 {@link com.devmind.chat.config.ChatWsConfig} 给会话套上
@@ -77,8 +80,10 @@ public class ChatWsHandler extends TextWebSocketHandler {
         if (id == null) {
             return;
         }
-        // 上行动作失败（问答已删、模型问答不支持该动作…）只回错误帧，不能把整条连接掀掉：
-        // 事件流断了用户就看不到后续回答，比"这一个动作没成"严重得多
+        // 上行动作失败（问答已删、模型问答不支持该动作…）只回 notice 帧，不能把整条连接掀掉：
+        // 事件流断了用户就看不到后续回答，比"这一个动作没成"严重得多。
+        // 必须是 notice 而非 error——前端对 error 的处理是"关连接 + 不再重连"（那是对
+        // "会话已无运行时"的语义），拿它回动作失败等于一次误触就把实时流打死。
         try {
             switch (type) {
                 case "input" -> service.input(id, node.path("text").asText(""), parseImages(node));
@@ -93,7 +98,7 @@ public class ChatWsHandler extends TextWebSocketHandler {
             }
         } catch (Exception e) {
             log.debug("WS 上行动作失败: chat={} type={} err={}", id, type, e.getMessage());
-            send(session, Map.of("type", "error", "message", "操作未生效: " + e.getMessage()));
+            send(session, Map.of("type", "notice", "message", "操作未生效: " + e.getMessage()));
         }
     }
 
