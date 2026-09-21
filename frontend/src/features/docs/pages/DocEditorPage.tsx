@@ -187,7 +187,7 @@ export default function DocEditorPage() {
     Modal.confirm({
       centered: true,
       title: '删除该文档？',
-      content: '会删除数据库记录与 docs-repo 中的文件（git 历史保留）。',
+      content: '会删除文档与全部历史版本记录，不可恢复。',
       okText: '删除',
       okButtonProps: { danger: true },
       cancelText: '取消',
@@ -239,12 +239,6 @@ export default function DocEditorPage() {
       render: (v) => <Typography.Text strong>v{v}</Typography.Text>,
     },
     { title: '变更说明', dataIndex: 'changeNote', ellipsis: true, render: (n) => n || <Typography.Text type="secondary">-</Typography.Text> },
-    {
-      title: 'Commit',
-      dataIndex: 'commitSha',
-      width: 100,
-      render: (s) => (s ? <Typography.Text code style={{ fontSize: 11 }}>{s.slice(0, 7)}</Typography.Text> : '-'),
-    },
     { title: '时间', dataIndex: 'createdAt', width: 170, render: (t) => fmtTime(t) },
     {
       title: '操作',
@@ -357,7 +351,6 @@ export default function DocEditorPage() {
               {doc.projectId && <Tag>项目: {doc.projectId}</Tag>}
               {doc.requirementId && <Tag>需求: {doc.requirementId}</Tag>}
               {doc.tags.map((t) => <Tag key={t}>{t}</Tag>)}
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>{doc.filePath}</Typography.Text>
             </Space>
           </Card>
 

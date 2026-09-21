@@ -13,7 +13,6 @@ export interface DocMeta {
   currentVersion: number
   status: DocStatus
   tags: string[]
-  filePath: string
   createdBy: string
   createdAt: string
   updatedAt: string
@@ -23,14 +22,12 @@ export interface DocDetail extends DocMeta {
   versionNo: number
   contentMd: string
   changeNote: string | null
-  commitSha: string | null
 }
 
 export interface DocVersion {
   documentId: number
   versionNo: number
   changeNote: string | null
-  commitSha: string | null
   createdBy: string
   createdAt: string
 }

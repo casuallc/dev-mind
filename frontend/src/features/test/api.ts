@@ -28,7 +28,7 @@ export function deleteSuite(id: number): Promise<void> {
   return api.del(`/test-suites/${id}`)
 }
 
-/** FR-03 套件沉淀为 docs-repo 的 api-suite 文档（版本化） */
+/** FR-03 套件沉淀为 CAP-03 的 api-suite 文档（版本化） */
 export function publishSuite(id: number): Promise<TestSuite> {
   return api.post<TestSuite>(`/test-suites/${id}/publish`)
 }

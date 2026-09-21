@@ -36,5 +36,3 @@ export const revertDoc = (id: number, v: number) =>
 export const transitionDoc = (id: number, action: string) =>
   api.post<DocDetail>(`/documents/${id}/status`, { action })
 export const deleteDoc = (id: number) => api.del(`/documents/${id}`)
-export const pushDocs = () => api.post<{ message: string }>('/documents/push')
-export const repoInfo = () => api.get<{ repoPath: string; headSha: string }>('/documents/repo')

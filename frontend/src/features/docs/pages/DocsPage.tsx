@@ -1,4 +1,4 @@
-// CAP-03 文档列表：筛选/检索 + 新建文档（模板一键预填）+ git push。
+// CAP-03 文档列表：筛选/检索 + 新建文档（模板一键预填）。
 import { useCallback, useEffect, useState } from 'react'
 import { canWrite } from '../../auth/authStore'
 import {
@@ -14,7 +14,6 @@ import {
   Typography,
 } from 'antd'
 import {
-  CloudUploadOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -23,7 +22,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { useNavigate } from 'react-router-dom'
 import { listProjects } from '../../projects/api'
 import type { Project } from '../../projects/types'
-import { createDoc, listDocs, listTemplates, pushDocs, searchDocs } from '../api'
+import { createDoc, listDocs, listTemplates, searchDocs } from '../api'
 import { KIND_LABEL, STATUS_LABEL } from '../types'
 import type { DocInput, DocKind, DocMeta, DocStatus, DocTemplate } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
@@ -49,7 +48,6 @@ export default function DocsPage() {
   const [templates, setTemplates] = useState<DocTemplate[]>([])
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm] = Form.useForm<DocInput & { template?: string }>()
-  const [pushing, setPushing] = useState(false)
 
   const load = useCallback(async (kind = kindFilter, status = statusFilter, q = searchQ) => {
     setLoading(true)
@@ -105,18 +103,6 @@ export default function DocsPage() {
     }
   }
 
-  const onPush = async () => {
-    setPushing(true)
-    try {
-      const r = await pushDocs()
-      message.success(r.message)
-    } catch (e) {
-      showError(e, '推送失败')
-    } finally {
-      setPushing(false)
-    }
-  }
-
   const columns: ColumnsType<DocMeta> = [
     {
       title: '标题',
@@ -135,7 +121,6 @@ export default function DocsPage() {
       render: (tags: string[]) =>
         tags?.length ? tags.map((t) => <Tag key={t}>{t}</Tag>) : <Typography.Text type="secondary">-</Typography.Text>,
     },
-    { title: '路径', dataIndex: 'filePath', ellipsis: true, render: (p: string) => <Typography.Text code style={{ fontSize: 12 }}>{p}</Typography.Text> },
     { title: '更新时间', dataIndex: 'updatedAt', width: 170, render: (v) => fmtTime(v) },
   ]
 
@@ -178,20 +163,15 @@ export default function DocsPage() {
             刷新
           </Button>
           {canWrite() && (
-            <>
-              <Button icon={<CloudUploadOutlined />} loading={pushing} onClick={onPush}>
-                推送到远端
-              </Button>
-              <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-                新建文档
-              </Button>
-            </>
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建文档
+            </Button>
           )}
         </Space>
       }
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-        平台文档库：按类型/状态筛选或全文检索需求、设计、API 文档，支持从模板一键创建，可推送到远端 git 仓库。
+        平台文档库：按类型/状态筛选或全文检索需求、设计、API 文档，支持从模板一键创建，每次保存生成新版本。
       </Typography.Paragraph>
       <FitTable
         rowKey="id"
