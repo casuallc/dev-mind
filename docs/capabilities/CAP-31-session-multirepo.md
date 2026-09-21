@@ -23,7 +23,7 @@ resume 回落全局默认）与**存量无项目会话清理**（问答拆出后
 1. **聚合目录**：多库会话的工作区 = 一个聚合根目录，各仓库 worktree 为其下子目录
    `<agg>/<repoName>`，claude cwd = 聚合根（类 VSCode multi-root）。**单库会话保持现状**
    （cwd = 该库 worktree 根），不动存量行为与目录。
-   - 使用约定：cwd 非 git 仓库，`git status` 等需在子目录内执行（CLAUDE.md 注入提示
+   - 使用约定：cwd 非 git 仓库，`git status` 等需在子目录内执行（`CLAUDE.local.md` 注入提示
      「各仓库在子目录 `<name>/`」）。
 2. **session_repos 快照表**：会话-仓库关联在创建时从 project_repos **拷值快照**
    （name/remoteUrl/localPath/baseBranch），之后项目仓库变更/改名不影响历史会话的

@@ -26,7 +26,8 @@ runner 不反向查服务端业务库。
 
 - **FR-01 执行内核上移 common**：新增 `devmind-common` 的 `agent.exec` 包（无 Spring 依赖，
   瘦 jar 可打进）：工作区管理（现 `RunnerWorkspace` 逻辑上移：clone 缓存/会话 worktree/
-  chat 沙箱/结束 push 收口）、上下文物化器（CLAUDE.md 组装、`.claude/skills/<name>/` 落盘、
+  chat 沙箱/结束 push 收口）、上下文物化器（`CLAUDE.local.md` 注入块整文件覆盖、
+  `.claude/skills/<name>/` 落盘、
   `.claude/settings.local.json`，现 `KnowledgeBaseInjector` 的文件操作部分下移至此）、
   进程拉起与事件解析（复用已有 `agent.runtime`）。**该内核只被 runner 使用，服务端不引用。**
 - **FR-02 服务端执行路径下线**：`SessionManagerService` 的本机 `ProcessBuilder` 拉起、
@@ -116,7 +117,8 @@ WS     /ws/agent                        帧扩展见上（向下兼容）
 
 - 服务端进程全程无 claude 子进程：无任何在线节点时创建会话一律 409（明确提示
   「无可用执行节点」），不产生挂死会话；同机 runner 上线后体验与原「本机会话」一致；
-- 所有会话获得上下文注入：worktree 内 CLAUDE.md 与 `.claude/skills/` 由 runner 物化；
+- 所有会话获得上下文注入：worktree 内 `CLAUDE.local.md` 与 `.claude/skills/` 由 runner 物化，
+  且这些平台路径不进 `git status`（CAP-42 FR-10）；
 - runner 进程被强杀后重启：孤儿 claude 进程被回收，节点页会话状态对账正确；
 - 服务端进程重启后：runner 侧存活会话在 hello 对账中 reattach 挂回（exit 帧照常路由收口），
   已消亡的存量会话判 FAILED；

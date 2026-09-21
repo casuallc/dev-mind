@@ -25,9 +25,13 @@ CAP-25/31 的 runner 工作区是「每会话独立目录」：克隆缓存 `<wo
 ```
 
 - **固定不删**：会话结束不再 push、不再删 worktree（仅上报未提交告警）；目录不参与 GC，
-  依赖产物跨会话沉淀；`.runner-pid` 孤儿进程对账回收保留。pid 文件落在 worktree 根，
-  runner 建 worktree 时把 `/.runner-pid` 写入克隆缓存 `info/exclude`（全 worktree 共享，
-  幂等），防 agent「git add -A」把它提交进会话分支导致会话结束后工作区恒脏。
+  依赖产物跨会话沉淀；`.runner-pid` 孤儿进程对账回收保留。
+- **平台托管路径统一排除出版本控制**（`RunnerWorkspace.excludePlatformPaths`，写克隆缓存
+  `info/exclude`，全 worktree 共享、幂等）：`/.runner-pid`、`CLAUDE.local.md`、`.devmind/`、
+  `.claude/settings.local.json`、`.claude/skills/`。两个理由：① 防 agent「git add -A」把平台
+  物化产物提交进会话分支、收口后合入基线造成污染；② 物化产物（payload 含知识全文）不参与
+  `git status`，否则**只读工作区也恒脏**，收口被「未提交改动」挡住（见 FR-10 事故）。
+  用精确路径而非整目录 `.claude/`（仓库可能自己要跟踪 `.claude` 下的内容）。
 - **同 (项目, 用户) 唯一活跃工作区**：新会话 launch 时 worktree 已存在且检出分支不是
   `feature/<新sid>` → launch 失败报占用会话 sid，引导先收口；同 sid（resume）幂等复用。
 - **手动收口**（页面触发，不自动执行）：合并会话分支到基线 → push 基线 + 顺带 push
@@ -72,6 +76,18 @@ CAP-25/31 的 runner 工作区是「每会话独立目录」：克隆缓存 `<wo
   删本地会话分支」（**不合并不 push**，删除即丢弃语义），成功后才落库删行；释放失败
   **阻断删除** 并明示原因（可重试 / 到节点手工删）。协议 v9 门控，老 runner 409 提示升级。
   删除确认框文案写明会释放节点工作区（丢弃未提交改动与未合并提交）。
+- **FR-10 平台物化文件与版本控制隔离（2026-09-21 事故补）**：上下文物化产物必须对 git
+  完全不可见，且不得改写仓库被跟踪的文件：
+  1. 注入块落 **`CLAUDE.local.md`**（claude CLI 的 Local 作用域指令文件，与 `CLAUDE.md`
+     同一套向上查找、随 cwd 自动加载，官方约定不入库），整文件覆盖、不读回既有内容；
+     仓库自带 `CLAUDE.md` 由 claude 原生加载，平台不再内联改写（旧实现改写它 → 被跟踪
+     文件恒脏，且 resume 时把上轮注入当「项目原有」再追加一层）。
+  2. 上述五条平台路径写 `info/exclude`（FR-01 布局的 worktree 新建与 resume 两条路径都写，
+     收口/结束前再补写一次兜住存量 worktree）。
+  3. 收口/结束的「未提交改动」检查只反映真实改动：reporter 文案带脏文件清单（最多 3 个 +
+     总数），仍不做自动还原（比对 HEAD 依赖 CRLF 归一，易误判并可吞掉 agent 改动）。
+  4. worklog 空间同口径：`.gitignore` 骨架含平台行，存量空间幂等补缺失行并只对
+     `.gitignore` 做一次平台代提交（`commit -- .gitignore`），迁移失败 best-effort 不阻断 launch。
 
 ## 3. 关键设计
 
@@ -129,7 +145,11 @@ GET  /api/sessions...              SessionView + workspaceState（按钮态/Tag�
 7. chat/worklog/构建链路零回归；
 8. （FR-09）删除 OPEN 会话 → runner 侧固定 worktree 与本地会话分支已删、远端不受影响、
    同 (项目,用户) 可立即再开新会话；release 失败（节点离线/断连）→ 409 且会话记录保留；
-   老 runner（协议 < v9）删除 OPEN 会话 409 提示升级。
+   老 runner（协议 < v9）删除 OPEN 会话 409 提示升级；
+9. （FR-10）挂场景/知识（上下文非空）的会话：worktree 内出现 `CLAUDE.local.md`、仓库自带
+   `CLAUDE.md` 一字节不动、`.claude/settings.local.json` 就位，且 `git status --porcelain`
+   为空、`git add -A` 后仍为空（平台路径已进 `info/exclude`）；**零改动会话不勾
+   「丢弃未提交改动」也能收口成功**，基线不含 `CLAUDE.local.md`/`.devmind/`。
 
 ## 8. 分期
 

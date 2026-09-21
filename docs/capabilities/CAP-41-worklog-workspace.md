@@ -23,6 +23,7 @@ CAP-28 的日报/周报是「DB 台账 + one-shot 裸会话文本生成」：素
 runner：{user.home}/worklog/<console-username>/   ← 持久目录，本地 git 维护，永不删除
         ├── daily/2026-09-14.md     weekly/2026-W37.md     entries/（素材，预留）
         ├── .claude/skills/worklog/  ← CAP-33 上下文包物化（既有管线零改动）
+        ├── CLAUDE.local.md          ← 注入块落点（.gitignore 平台行忽略，CAP-42 FR-10）
         └── .devmind/output/         ← 成稿回传契约目录（复用 CAP-37）
      ▼ 会话结束 finalizer（OutputUploader 既有链路）
 服务端 upsert daily_reports/weekly_reports（DB 降为镜像：展示/搜索/通知）
@@ -69,8 +70,8 @@ runner：{user.home}/worklog/<console-username>/   ← 持久目录，本地 git
 - **FR-05 格式模板可配置**：`worklog_user_settings` 增 `daily_template_md` /
   `weekly_template_md`（LONGVARCHAR，null=内置默认模板）。占位符：`{{date}}` /
   `{{weekRange}}` / `{{entries}}`（当日条目清单）/ `{{commits}}`（git 扫描清单）。
-  渲染在服务端（生成 prompt 时），模板同时物化为 CLAUDE.md 节让 claude 明确输出
-  结构要求。设置页两个 Markdown 编辑器（保存即生效，无需重建场景）。
+  渲染在服务端（生成 prompt 时），模板同时物化为注入块（`CLAUDE.local.md`）节让 claude
+  明确输出结构要求。设置页两个 Markdown 编辑器（保存即生效，无需重建场景）。
 - **FR-06 成稿回传与 DB 镜像**：复用 CAP-37 契约——skill 约定 claude 把成稿写入
   `.devmind/output/daily-<yyyy-MM-dd>.md` / `weekly-<yyyy>-W<ww>.md`，
   `OutputUploader` 随 exit 前 POST `/api/agent/output/{sessionId}`（既有链路，

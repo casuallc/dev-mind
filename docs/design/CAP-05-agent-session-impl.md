@@ -124,6 +124,10 @@ Spring Boot 4.x 默认支持虚拟线程。每个会话固定 3 条虚拟线程�
 
 ### 3.7 CLAUDE.md 注入（MVP 简化版）
 
+> **历史方案（勿照此实现）**：CAP-34 起服务端零执行、物化由 runner 的 `ContextMaterializer`
+> 完成；CAP-42 FR-10 起注入落 `CLAUDE.local.md` 且**不再**追加仓库自带 `CLAUDE.md`（写被跟踪
+> 文件会让 worktree 恒脏、收口必失败）。现行口径见 `CAP-33`/`CAP-34`/`CAP-42`。
+
 - 定义 SPI `KnowledgeInjector.preview(project, taskSpec)` / `.apply(worktree, ...)`；
 - **MVP 实现 `LocalDirInjector`**：直接读配置的 knowledge-repo 目录，拼接
   `global/**（按项目 tags 粗略过滤） + projects/<项目>/** + 任务说明`，写入 worktree 根 `CLAUDE.md`（若项目原有 CLAUDE.md 则追加在后，不覆盖）；

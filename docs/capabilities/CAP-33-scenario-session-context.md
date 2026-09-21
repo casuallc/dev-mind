@@ -43,13 +43,13 @@ docs（CAP-03）/ knowledge（CAP-04）/ skills 三类资产目前挂在 /admin 
   产出 `ContextPackage { claudeMdSections[], skills[SkillPackage], settingsJson, docs[] }`；
   知识条目 hitCount 累计沿用 CAP-04 FR-07。
 - **FR-03 docs 进上下文**：绑定文档两级投递——摘要（标题 + 正文截断 N 字）进
-  CLAUDE.md「项目文档」节；全文由 CAP-34 内核物化为 worktree `.devmind/docs/<docId>.md`，
-  CLAUDE.md 中只留路径索引，大文档不全量塞 prompt（claude 需要时自行 Read）。
+  注入块「项目文档」节；全文由 CAP-34 内核物化为 worktree `.devmind/docs/<docId>.md`，
+  注入块中只留路径索引，大文档不全量塞 prompt（claude 需要时自行 Read）。
 - **FR-04 skills 物化**：场景显式绑定 + 项目私有 skill（scope=PROJECT 且 projectId 命中）
   默认全带，GLOBAL 按场景选择；复用 `SkillService.exportPackages` 产出包，
   经 CAP-34 通道落 `.claude/skills/<name>/` 被 Claude Code 原生识别。
 - **FR-05 场景问答（chat）**：`/chats` 创建问答可挂场景；上下文包物化到
-  `_chat/<sid>` 沙箱（CLAUDE.md + .claude/skills/，无仓库语义），问答同样吃资产积累。
+  `_chat/<sid>` 沙箱（CLAUDE.local.md 注入块 + .claude/skills/，无仓库语义），问答同样吃资产积累。
 - **FR-06 前端集成**：
   - 项目工作区新增「上下文」页签：按 projectId 过滤展示 docs/skills/knowledge
     三资产（只读视图 + 跳转 /admin 对应管理页），消除资产与项目的割裂感；
@@ -99,10 +99,10 @@ GET    /api/projects/{id}/context-assets         项目「上下文」页签聚�
 ## 7. 验收标准
 
 - 建「代码评审」场景绑定 1 skill + 2 docs + knowledgeTags，创建会话后 worktree 内
-  `.claude/skills/` 与 `.devmind/docs/` 就位，CLAUDE.md 含场景 extraContext 与文档索引；
+  `.claude/skills/` 与 `.devmind/docs/` 就位，`CLAUDE.local.md` 含场景 extraContext 与文档索引；
   本机与远程节点产物一致；
 - 项目工作区「上下文」页签正确按 projectId 过滤三资产；
-- 挂场景的 /chats 问答在沙箱内获得 CLAUDE.md 与 skills，回答体现注入内容；
+- 挂场景的 /chats 问答在沙箱内获得 `CLAUDE.local.md` 与 skills，回答体现注入内容；
 - 旧 templateCode 创建的会话行为不变（兼容）；
 - 会话详情「已注入上下文」清单与装配预览一致。
 

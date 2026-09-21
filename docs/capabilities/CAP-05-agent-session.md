@@ -10,7 +10,7 @@
 
 - **FR-01 起会话**：入参 `(projectId, taskSpec, branch?)` →
   1. 创建 git worktree（`<project>/.devmind/worktrees/<sessionId>`，基于指定分支）；
-  2. 调用 CAP-04 注入器组装 CLAUDE.md 写入 worktree；
+  2. 调用 CAP-04 注入器组装指令内容写入 worktree（CAP-34 起为 `CLAUDE.local.md` 注入块）；
   3. 拉起 headless Agent 进程（Claude Code `claude -p` / Agent SDK），接管 stdin/stdout/stderr 管道。
 - **FR-02 会话状态机**：`RUNNING / WAITING_INPUT / WAITING_AUTH / DONE / FAILED / SUSPENDED`。
   - `WAITING_INPUT`（agent 在等回复）、`WAITING_AUTH`（agent 在等授权）是**最需要人关注的状态**，看板置顶 + 触发 P0 通知（CAP-06）。

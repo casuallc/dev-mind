@@ -42,12 +42,12 @@ worktree `.devmind/input/`，agent 用 Read 工具直接读本地文件（claude
     同款正则）→ 经新 SPI `IssueAttachmentResolver.resolve(requirementId, filename)`
     （common 定义、devmind-integration 实现，内部复用 `JiraIssueActionService.loadAttachment`
     的 resolve + `fetchIssueAttachment` 带凭据下载链；未装配 integration = 无 Jira 源）。
-- **FR-04 降级策略**：单个附件缺失/拉取失败不阻断装配——跳过该文件并在 CLAUDE.md 节
+- **FR-04 降级策略**：单个附件缺失/拉取失败不阻断装配——跳过该文件并在注入块
   标注「不可用：原因」；两类 SPI 均未装配或 description 无引用 → provider 空产出。
   （Jira 是远程 HTTP，抽风不应阻断起会话；本地附件可能已被删除，同理降级。）
 - **FR-05 上限保护**：单次投送最多 10 个文件、单文件 ≤ 5MB、合计 ≤ 20MB；超限按
   描述中引用顺序截断，清单节注明「超出上限已省略 N 个」。
-- **FR-06 CLAUDE.md 节与可追溯**：provider 产出「## 需求附件」节，逐项列出
+- **FR-06 注入块附件节与可追溯**：provider 产出「## 需求附件」节（落 `CLAUDE.local.md`），逐项列出
   物化路径/原始文件名/来源（本地附件 / Jira issue KEY）/说明，并显式指示 agent
   「先用 Read 工具查看这些文件再分析」。ManifestItem 新增 `kind=attachment`
   （ref=attachmentId 或 jira:KEY:name，source=request）落快照，会话详情
@@ -98,7 +98,7 @@ SPI: IssueAttachmentResolver.resolve(requirementId, filename)（新增）
 ## 7. 验收标准
 
 - 描述含本地图片引用的需求起分析会话：runner worktree 出现 `.devmind/input/{id}-x.png`，
-  CLAUDE.md 含「## 需求附件」节与路径，agent 会话中 Read 该路径可看到图片；
+  `CLAUDE.local.md` 含「## 需求附件」节与路径，agent 会话中 Read 该路径可看到图片；
 - Jira 来源需求（描述含 `!name.png!`）起分析会话：Jira 附件被下载物化为
   `.devmind/input/jira-{KEY}-name.png`，清单标注来源 issue KEY；
 - 附件已删除/Jira 不可达：会话正常启动，清单节标注「不可用」，不 launch 失败；

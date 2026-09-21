@@ -63,7 +63,7 @@ Guidance for Claude Code when working in this repository.
 - 跨模块调用走 `devmind-common` 的 SPI 接口；实现方由调用方以 `ObjectProvider<T>` 探测注入（防启动期循环依赖，禁反向依赖）。
 - 数据约定：归属用外键（project_id/requirement_id/work_item_id 层级），追溯用 relations 表（稀疏边）；schema 靠 `ddl-auto=update` 自动演进，不写迁移脚本。
 - 时间格式全局统一 `yyyy-MM-dd HH:mm:ss`：后端 `JacksonConfig` 一个 ObjectMapper（REST/WS 同生效），前端 `shared/utils/format.ts` 的 `fmtTime`。
-- **claude 执行体 = runner 节点（CAP-34，无本机会话）**：服务端零执行（纯调度），会话/问答/one-shot 一律下发 runner 执行。路由链：`CreateSessionRequest.agentNodeId`（显式指定）→ 项目默认节点 → 平台默认节点（`agent_nodes.is_default`）→ 皆无命中 409 不回落；CAP-28 的 `"local"` 保留值已废除（传了报 400），历史本机会话（agent_node_id 为空）不可 resume。节点离线 launch 抛 409 不静默起失败进程。claude 二进制解析在 runner 侧 `agent.properties`：`claudePath` 优先，空按平台探测（Windows=`where` / Linux·macOS=`which`），探测/启动失败报 error=2 查此项；`executor=fake` 用内置假进程自测。上下文（知识注入 CLAUDE.md 块 + settings 白名单）由服务端装配 ContextPackage、launch 帧挂 manifest、runner 经 `GET /api/agent/context/{sessionId}?token=` 拉取物化（失败即 launch 失败，不降级）。
+- **claude 执行体 = runner 节点（CAP-34，无本机会话）**：服务端零执行（纯调度），会话/问答/one-shot 一律下发 runner 执行。路由链：`CreateSessionRequest.agentNodeId`（显式指定）→ 项目默认节点 → 平台默认节点（`agent_nodes.is_default`）→ 皆无命中 409 不回落；CAP-28 的 `"local"` 保留值已废除（传了报 400），历史本机会话（agent_node_id 为空）不可 resume。节点离线 launch 抛 409 不静默起失败进程。claude 二进制解析在 runner 侧 `agent.properties`：`claudePath` 优先，空按平台探测（Windows=`where` / Linux·macOS=`which`），探测/启动失败报 error=2 查此项；`executor=fake` 用内置假进程自测。上下文（知识注入块 `CLAUDE.local.md` + settings 白名单）由服务端装配 ContextPackage、launch 帧挂 manifest、runner 经 `GET /api/agent/context/{sessionId}?token=` 拉取物化（失败即 launch 失败，不降级）；平台物化路径一律写进 worktree 的 `info/exclude`（不改写仓库被跟踪文件），否则只读工作区也恒脏、收口被「未提交改动」挡住（CAP-42 FR-10）。
 
 ## 红线速览（MUST）
 
