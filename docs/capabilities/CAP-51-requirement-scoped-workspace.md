@@ -61,8 +61,11 @@ runner 侧目录从 `<proj>/<owner>/{main,work}` 改为：
 ### FR-03 占用判定改需求级
 
 - 服务端预检（替换 CAP-42 的 `findByProjectIdAndWorkspaceOwnerAndWorkspaceState`）：
-  **同需求存在非终态（RUNNING/QUEUED/SUSPENDED）会话** → 409「该需求已有进行中的会话 X，
-  请先结束它或等待完成」；resume 同一会话时跳过该预检。
+  **同需求存在进行中会话**（`SessionState.isActive()` 或 `SUSPENDED`）→ 409「该需求已有进行中的
+  会话 X，请先结束它或等待完成」；resume 同一会话时跳过该预检（它本来就是占用方，不排除必自撞）。
+- **判据是会话状态，不是需求行 `workspace_state=OPEN`**（`workspace_state` 语义是「工作区未收口」，
+  不是「有进程在跑」；按 OPEN 判会把「分析会话结束后直接起开发会话复用工作树」这条验收一起挡掉，
+  且 FR-09 已声明新逻辑不读会话行状态）。
 - 无需求会话不预检（`sid-` 键天然独占；同 sid resume 幂等）。
 - 跨需求不冲突：不同 `<key>` 目录，互不感知。
 - runner 侧 `ensureWorktree` 的分支比对逻辑保留为**最终防线**（需求粒度下期望分支恒定，
@@ -79,11 +82,16 @@ runner 侧目录从 `<proj>/<owner>/{main,work}` 改为：
 - 无需求会话（`sid-` 键）收口语义不变：合并 + push + **删工作树与分支**（用完即弃，
   没有「后续会话接着用」的诉求）。
 - 端点：
-  - 新增 `POST /api/requirements/{projectId}/{requirementId}/workspace/finalize {discardChanges}`
-    （鉴权 = 需求创建者/负责人或 admin）——前端主入口，挂在需求详情页；
-  - 保留 `POST /api/sessions/{id}/finalize`：无需求会话用；有需求的会话调用时**转发到需求级语义**
-    （便于存量前端与脚本平滑过渡）。
-- 仓库描述来源：该需求下最近一条带 `session_repos` 快照的会话；全无快照 → 409「该需求无代码工作区」。
+  - 新增 `POST /api/projects/{projectId}/requirements/{requirementId}/workspace/finalize
+    {discardChanges}`（挂项目作用域，与需求其余端点同前缀；鉴权 = 需求创建者/负责人或 admin）
+    ——前端主入口，挂在需求详情页；
+  - 保留 `POST /api/sessions/{id}/finalize`：会话级入口，无需求会话用；有需求的会话调用后同样把
+    需求行与同需求全部 OPEN 会话行置 FINALIZED（便于存量前端与脚本平滑过渡）。
+- 收口目标会话选取：该需求最近一条 `workspace_state=OPEN` 且带 `agentNodeId` 的会话；无 → 409
+  「该需求工作区未开启或已收口」。收口成功把该需求**全部** OPEN 会话行一并置 FINALIZED，
+  否则第二次收口会挑到旧 OPEN 会话重复合并同一批提交（验收 3 要求重复收口 409）。
+- 仓库描述来源：目标会话的 `session_repos` 快照（缺失才按新规则推导）；全无快照 →
+  409「该需求无代码工作区」。
 
 ### FR-05 释放与定期清理（新增 GC 维度）
 
@@ -104,9 +112,14 @@ CAP-42 明确固定工作区「不参与 GC」，需求粒度下目录数会随�
 
 ### FR-06 需求删除/终态释放
 
-- **需求删除**：project 模块发 `DomainEvent`，session 模块监听后向节点下发 `workspace_release`
-  （丢弃语义，不合并不 push）。释放失败**不阻断删除**（需求已删，不能让用户卡住），
-  记日志 + 通知；残留目录由 FR-05 的 GC 兜底（条件 4 能兜住已收口的需求）。
+- **需求删除**：project 模块发 `RequirementDeletedEvent`（带 `workspaceOwner`——需求行随即删除，
+  监听方查不回归属），session 模块监听后向节点下发 `workspace_release`（丢弃语义，不合并不 push）。
+  释放跑在独立的单线程 daemon（`releaseExecutor`）：agent WS 每连接消息串行派发，事件链内同步等
+  ack 必 15s 自死锁（同 `RequirementFlowService.flowExecutor`）。
+  释放失败**不阻断删除**（需求已删，不能让用户卡住），只记日志 + 一条
+  `WORKSPACE_RELEASE_FAILED` 通知、绝不外抛；残留目录由 FR-05 的 GC 兜底（条件 4 能兜住已收口的需求）。
+- **删除单个需求粒度会话（`req-` 键）不回收工作树**：那块树归需求所有，删其中一个会话就回收会把
+  同需求其他人的改动一起丢掉；`sid-` 键维持「删会话即释放」。需求级目录只能靠需求删除或 GC 回收。
 - **需求进终态（DONE/CANCELLED）**：不自动释放（用户可能还要看），页面提示可释放；
   超龄后由 GC 回收。
 
@@ -227,11 +240,14 @@ requirements ── + workspace_owner VARCHAR(64) NULL -- 工作区归属用户�
 ## 5. API 概要
 
 ```
-POST /api/requirements/{projectId}/{requirementId}/workspace/finalize   {discardChanges} → {ok, detail}
-POST /api/sessions/{id}/finalize                                        （无需求会话；有需求时转发需求级）
+POST /api/projects/{projectId}/requirements/{requirementId}/workspace/finalize {discardChanges} → {ok, detail}
+POST /api/sessions/{id}/finalize                                        （会话级入口；有需求时同步需求级状态）
 GET  /api/requirements/{projectId}/{requirementId}                      RequirementView + workspaceState
 GET  /api/sessions...                                                   SessionView.workspaceState（= 所属需求状态）
 ```
+
+注：`RequirementView`/`SessionView` 暂未暴露 `workspaceOwner`/`workspaceState`/`workspaceKey`
+（FR-10 前端字段属 M2，当前只落了数据与端点）。
 
 ## 6. 验收标准
 
@@ -254,15 +270,17 @@ GET  /api/sessions...                                                   SessionV
     该 config 的 `cleanupPeriodDays` 已显式设置（非默认 30）；静置超过 30 天的需求会话仍可 resume
     （在**原 worktree 路径**启动，FR-12）。
 
-## 7. 分期
+## 7. 分期与落地状态
 
-- **M1 需求粒度工作区（核心）**：CAP 文档 + 协议 v10（`workspaceKey` 三帧）+ 服务端
+- **M1 需求粒度工作区（核心）—— 已完成**：CAP 文档 + 协议 v10（`workspaceKey` 三帧）+ 服务端
   分支/键解析与快照优先 + 需求级预检 + `requirements` 两列 + 收口需求级语义（保留工作树）+
   runner 布局改造（`worktrees/<key>`）+ Reconciler/GC 扩展 + claude 状态目录/保留期（FR-12，
-  随节点升级一次性完成）+ Java 单测 + E2E 脚本同步。
-- **M2 前端与需求页入口**：需求详情页工作区卡片 + 收口按钮/弹窗 + 会话列表撤收口入口 +
+  随节点升级一次性完成）+ Java 单测（`WorktreeManagerWorkspaceNamingTest` 4 例、
+  `SessionRequirementWorkspaceTest` 20 例）。**尚未在真实节点上跑 E2E**：需重建 runner jar
+  并重启 `devmind-agent` 服务（FR-12 的 claude 状态目录也随之生效）。
+- **M2 前端与需求页入口 —— 未开始**：需求详情页工作区卡片 + 收口按钮/弹窗 + 会话列表撤收口入口 +
   SessionView 状态来源切换 + 前端类型检查/E2E。
-- **M3 共享基线检出 `work/`（可选）**：克隆缓存检出解耦（detached）+ 地盘创建与收口后前进 +
+- **M3 共享基线检出 `work/`（可选）—— 未开始**：克隆缓存检出解耦（detached）+ 地盘创建与收口后前进 +
   升级说明与存量 `work/` 清理指引。
 
 ## 8. 与 CAP-42 的关系

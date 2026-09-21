@@ -176,12 +176,30 @@ DRAFT ──开启 AI 规划──> ANALYZING ──规划产出固化 WI──>
 8. chat / worklog / 手工会话 / 构建链路的注入与派发零回归；`mvn -q test` 全绿。
 9. 存量需求：处于 DESIGNING/DONE 的照常显示；已有跳过标记的需求重新规划时按标记收窄产出范围。
 
-## 6. 分期
+## 6. 分期与落地状态
 
-- **M1 后端**：`planSpec`/`planDevSpec` 模板 + `[flow:plan]`/`[flow:dev]` 分流 + 三文件登记 +
-  粒度 validator 上限 + WI 固化后起需求级开发会话 + 编排器派发停用 + 注入分层（含 `ContextAssembler`
-  空产出条件修正）+ 端点 `flow/plan`、`flow/dev` + 单测。
-- **M2 前端与入口收敛**：需求详情页单按钮 + 三 Tab 只读化 + 工作单元「全部完成」批量翻转 +
-  删除 `flow/analyze`/`flow/design`/`flow/split`/`flow/skip` 端点与旧 UI + E2E 脚本同步。
-- **M3 观测与调优（可选）**：按需求统计会话数/请求数/token（会话表已有 usage 字段则直接聚合），
-  用于校准工作单元粒度上限与「是否值得再合并开发会话与收口」。
+- **M1 后端 —— 已完成**：`planSpec`/`devSpec` 模板 + `[flow:plan]`/`[flow:dev]` 分流 + 三文件登记 +
+  粒度 validator 上限（`SplitPlanValidator.MAX_ITEMS = 5`）+ WI 固化后起需求级开发会话 +
+  编排器派发停用（`WorkItemOrchestrator` 两个 `@EventListener` 删除，`dispatchReady` 保留为公开方法）
+  + 注入分层（含 `ContextAssembler` 空产出条件修正）+ 端点 `flow/plan`、`flow/dev` + 单测
+  （flow 53 例 / session 74 例全绿）。
+- **M2 前端与入口收敛 —— 已完成**：需求详情页两个流程按钮 + 分析/方案 Tab 只读化 +
+  工作单元「全部完成」批量翻转 + 删除 `flow/analyze`/`flow/design`/`flow/split`/`flow/skip`
+  端点与旧 UI + `tests/cap52_e2e.py`（cap37/38 标注为历史脚本）。
+- **M3 观测与调优（可选）—— 未开始**：按需求统计会话数/请求数/token（会话表已有 usage 字段
+  则直接聚合），用于校准工作单元粒度上限与「是否值得再合并开发会话与收口」。
+
+## 7. 实现说明（与本文的偏差与取舍）
+
+- **模板名**：讲的是「需求级开发 spec」，代码里叫 `FlowOutputContract.devSpec`（无 `planDevSpec`）。
+- **编排器是删除监听而非加开关**：`@EventListener` 一挂上就会被 CAP-17/14 的既有事件触发，
+  留开关等于留一个「谁都能打开、打开就逐 WI 起会话」的坑；需要自动派发时再显式调用 `dispatchReady`。
+- **瘦上下文判定落在 session 模块**：`SessionContextService.isExecutionSession(taskSpec, workItemId)`
+  按「挂工作单元」+「taskSpec 首行 `[flow:dev]`」判，且 create/resume/rebuild 三处共用——
+  重建口径不一致会让 TTL 过期后重拉的会话被重新灌满知识。session 不依赖 flow，故用前缀字面量。
+  副作用：`POST /sessions` 直挂工作单元的手工会话自本次起也是瘦上下文（符合 FR-05 的分层意图）。
+- **规划产出不完整的兜底**：缺文件/校验失败只发 `flow.plan.partial`（列出缺什么）并停在那里，
+  不固化 WI、不起开发会话；人可重新规划或在工作单元 Tab 手工新建（逃生通道保留）。
+- **存量路径保留**：`splitSpec` 与 `autoSplit`/`handleSplitOutput` 未删——DESIGN 型工作单元的
+  手工会话仍走这条老路（会话完成 → 读 `design.md` → 起拆分会话）。规划链路已不再经过它。
+- **分析/方案 Tab 数据源**：读 `[flow:plan]` 会话，回退 `[flow:analyze]` 以显示存量会话产出。
