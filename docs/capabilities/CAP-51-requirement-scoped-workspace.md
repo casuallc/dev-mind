@@ -276,8 +276,11 @@ GET  /api/sessions...                                                   SessionV
   分支/键解析与快照优先 + 需求级预检 + `requirements` 两列 + 收口需求级语义（保留工作树）+
   runner 布局改造（`worktrees/<key>`）+ Reconciler/GC 扩展 + claude 状态目录/保留期（FR-12，
   随节点升级一次性完成）+ Java 单测（`WorktreeManagerWorkspaceNamingTest` 4 例、
-  `SessionRequirementWorkspaceTest` 20 例）。**尚未在真实节点上跑 E2E**：需重建 runner jar
-  并重启 `devmind-agent` 服务（FR-12 的 claude 状态目录也随之生效）。
+  `SessionRequirementWorkspaceTest` 20 例）。`tests/cap52_e2e.py` 已在隔离实例 + 真 runner 节点
+  （`executor=fake`）上跑通：带 key 的会话落 `<proj>/<owner>/worktrees/req-<rid>`、同需求两个
+  会话复用同一棵树与分支（验收 1/5）。**尚未跑 E2E 的部分**：收口（合并/push/ff 前进）、
+  需求删除释放、Reconciler/GC、FR-12 状态目录——这些要重建 runner jar 并重启 `devmind-agent`
+  服务后按 `tests/e2e-cap42.py` 的姿势（file:// bare 库 + 真实 git 往返）另起一个脚本覆盖。
 - **M2 前端与需求页入口 —— 未开始**：需求详情页工作区卡片 + 收口按钮/弹窗 + 会话列表撤收口入口 +
   SessionView 状态来源切换 + 前端类型检查/E2E。
 - **M3 共享基线检出 `work/`（可选）—— 未开始**：克隆缓存检出解耦（detached）+ 地盘创建与收口后前进 +
