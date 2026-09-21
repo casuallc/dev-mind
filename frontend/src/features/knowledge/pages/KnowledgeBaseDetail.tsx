@@ -1,6 +1,6 @@
 // CAP-44 知识库详情：条目管理（MarkdownEditor 抽屉编辑/索引状态/重建索引）+ 检索测试 + 飞书导入（CAP-45）+ 库设置。
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { canWrite } from '../../auth/authStore'
 import {
   Alert,
@@ -24,7 +24,6 @@ import {
 import {
   ArrowLeftOutlined,
   CloudDownloadOutlined,
-  CommentOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -90,7 +89,6 @@ const indexStatusTag = (e: KnowledgeEntry, onRetry: (e: KnowledgeEntry) => void)
 export default function KnowledgeBaseDetail() {
   const { id } = useParams<{ id: string }>()
   const baseId = Number(id)
-  const navigate = useNavigate()
 
   const [base, setBase] = useState<KnowledgeBase | null>(null)
   const [entries, setEntries] = useState<KnowledgeEntry[]>([])
@@ -449,14 +447,6 @@ export default function KnowledgeBaseDetail() {
               )}
             </>
           )}
-          {/* CAP-46 FR-04：发起绑定本库的 AI 问答 */}
-          <Button
-            icon={<CommentOutlined />}
-            disabled={!base || base.status !== 'active'}
-            onClick={() => navigate(`/chats?kbId=${baseId}`)}
-          >
-            发起会话
-          </Button>
         </Space>
       }
     >
