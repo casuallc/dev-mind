@@ -82,7 +82,8 @@ public class RunnerSessionRegistry {
      * runner 重启后 {@link com.devmind.common.agent.exec.WorkspaceReconciler} 据此回收孤儿进程。
      */
     public void register(String sessionId, Process process, SessionFinalizer finalizer, java.nio.file.Path sessionDir) {
-        RunnerSession s = new RunnerSession(sessionId, process, finalizer, sessionDir);
+        RunnerSession s = new RunnerSession(sessionId, process, finalizer, sessionDir,
+                ev -> sendEvent(sessionId, ev));
         sessions.put(sessionId, s);
         if (sessionDir != null) {
             com.devmind.common.agent.exec.WorkspaceReconciler.writePidFile(sessionDir, process);
@@ -93,7 +94,14 @@ public class RunnerSessionRegistry {
 
     /** CAP-25：向会话事件流注入 system 事件（工作区 push/清理结果，服务端落库+广播）。 */
     public void reportSystem(String sessionId, String content) {
-        sendEvent(sessionId, SessionEvent.of(0, "system", content, "system"));
+        SessionEvent ev = SessionEvent.of(0, "system", content, "system");
+        // CAP-50：会话在册时走它的聚合器，保证被夹在流式正文中间时也不会插错位置
+        RunnerSession s = sessions.get(sessionId);
+        if (s != null) {
+            s.aggregator.accept(ev);
+        } else {
+            sendEvent(sessionId, ev);
+        }
     }
 
     /** CAP-39：运行中会话的工作目录（collect_output 按需回传产出用）；未注册返回 empty。 */
@@ -152,8 +160,9 @@ public class RunnerSessionRegistry {
                 stderr ? s.process.getErrorStream() : s.process.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = r.readLine()) != null) {
+                // CAP-50：经每会话聚合器收口——正文增量按阈值合并，其余事件先 flush 再上行（保序）
                 for (SessionEvent ev : parser.parse(s.seq::incrementAndGet, line, source)) {
-                    sendEvent(s.sessionId, ev);
+                    s.aggregator.accept(ev);
                 }
             }
         } catch (IOException e) {
@@ -167,6 +176,9 @@ public class RunnerSessionRegistry {
 
     /** 进程退出收口（stdout EOF 后取退出码上行 exit 帧；CAP-25 有 finalizer 先收尾）。 */
     private void onProcessEnd(RunnerSession s) {
+        // CAP-50：必须排在下面一切可能阻塞的动作之前（产出回传/finalizer 最长 30s，会让光标空转），
+        // 也必须在 exit 帧之前——会话被 kill 时已 flush 的增量是这段正文的唯一痕迹
+        s.aggregator.flush();
         int code;
         try {
             code = s.process.waitFor();
@@ -214,12 +226,17 @@ public class RunnerSessionRegistry {
         final java.nio.file.Path sessionDir;
         final AtomicLong seq = new AtomicLong();
         final Object stdinLock = new Object();
+        /** CAP-50：每会话一个（绝不可提到 registry 上——parser 是全局单例，缓冲挂错地方就是跨会话串味）。 */
+        final com.devmind.common.agent.runtime.RunnerDeltaAggregator aggregator;
 
-        RunnerSession(String sessionId, Process process, SessionFinalizer finalizer, java.nio.file.Path sessionDir) {
+        RunnerSession(String sessionId, Process process, SessionFinalizer finalizer,
+                      java.nio.file.Path sessionDir, Consumer<SessionEvent> sink) {
             this.sessionId = sessionId;
             this.process = process;
             this.finalizer = finalizer;
             this.sessionDir = sessionDir;
+            this.aggregator = new com.devmind.common.agent.runtime.RunnerDeltaAggregator(
+                    com.devmind.common.agent.runtime.RunnerDeltaAggregator.Tuning.defaults(), sink);
         }
     }
 }
