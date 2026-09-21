@@ -9,6 +9,7 @@ public enum ErrorCode {
     UNAUTHORIZED(401, "DEV-401", "未认证或登录已过期"),
     FORBIDDEN(403, "DEV-403", "无权限执行"),
     NOT_FOUND(404, "DEV-404", "资源不存在"),
+    METHOD_NOT_ALLOWED(405, "DEV-405", "请求方法不支持"),
     CONFLICT(409, "DEV-409", "状态冲突"),
     TOO_MANY_SESSIONS(429, "DEV-429", "并发会话数已达上限，请稍后再试"),
     INTERNAL(500, "DEV-500", "内部错误");

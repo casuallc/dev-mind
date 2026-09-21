@@ -176,12 +176,13 @@ st, _ = call("GET", f"/documents/{id2}/versions", token=token)
 check("删除后版本列表 404", st == 404, f"{st}")
 
 # ---------- 8. 已废除的 git 端点：不再提供 ----------
-# 注：路径落到 /documents/{id}（id 非数字）或方法不匹配时，全局异常处理后端当前回 500 而非 404
-# （既有行为，与本次改动无关），故断言放宽为「非 2xx」。
+# 路由层面这两个路径已无 handler：POST 落到 /documents/{id} 的 GET 映射 → 405；
+# GET /documents/repo 落到 /documents/{id} 但 id 转 Long 失败 → 400。
+# 断言精确状态码（客户端错误语义，见 tests/e2e-error-semantics.sh）。
 st, body = call("POST", "/documents/push", token=token)
-check("push 端点已移除（非 2xx）", st >= 400 and st != 401, f"{st} {body}")
+check("push 端点已移除（405）", st == 405, f"{st} {body}")
 st, body = call("GET", "/documents/repo", token=token)
-check("repo 端点已移除（非 2xx）", st >= 400 and st != 401, f"{st} {body}")
+check("repo 端点已移除（400）", st == 400, f"{st} {body}")
 
 # ---------- 清理：删除模板文档 ----------
 call("DELETE", f"/documents/{did}", token=token)
