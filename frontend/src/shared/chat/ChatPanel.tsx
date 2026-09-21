@@ -2,10 +2,12 @@
 // 项目会话（apiBase=/sessions）与通用问答（/chats）共用；内部自管 WS 实时流（活跃态）与 REST 历史回退（终态）。
 // CAP-32：allowImages=true 时输入区支持粘贴/拖拽/选择图片（上传 CAP-32 附件模块后随消息发送）。
 // 仅问答传入——项目会话后端链路未接，显式门控防"上传成功但 agent 没收到"。
+// CAP-49：模型执行体（summary.executor=MODEL）生成中不接受注入、可中断、不支持图片——
+// 三条都由这里按 summary 分派，页面不需要各写一遍。
 // effect 依赖只用 summary.id/summary.state 标量——summary 对象可能来自轮询，引用每次变化。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Card, Image, Input, message, Space, Typography } from 'antd'
-import { CloseOutlined, PaperClipOutlined, SendOutlined } from '@ant-design/icons'
+import { CloseOutlined, PaperClipOutlined, SendOutlined, StopOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import { uploadAttachment, type AttachmentView } from '../attachments/api'
 import { attachmentRawUrl } from '../attachments/url'
@@ -43,12 +45,25 @@ export default function ChatPanel({
   const [baseEvents, setBaseEvents] = useState<ChatEvent[]>([])
 
   const isLive = ACTIVE_STATES.includes(summary.state)
-  const { events, connected, fatal, input, authorize: wsAuthorize } = useChatStream(summary.id, apiBase, isLive)
+  const { events, connected, fatal, notice, input, interrupt, authorize: wsAuthorize } = useChatStream(
+    summary.id,
+    apiBase,
+    isLive,
+  )
+
+  // CAP-49：模型执行体（服务端直连 CHAT 端点）——生成中不能注入（后端拒），可中断；不支持图片
+  const isModel = summary.executor === 'MODEL'
+  const generating = isModel && summary.state === 'RUNNING'
 
   // 连接状态回传外层（徽标）
   useEffect(() => {
     onStreamMeta?.({ connected, fatal })
   }, [connected, fatal, onStreamMeta])
+
+  // 非致命提示（动作被拒）：WS 帧只说"这一次没成"，不关连接
+  useEffect(() => {
+    if (notice) message.warning(notice.text)
+  }, [notice])
 
   // 终态会话（进程已结束/重启恢复）无 WS 运行时，退化为 REST 拉取事件历史
   useEffect(() => {
@@ -76,8 +91,13 @@ export default function ChatPanel({
   }, [events, summary.state])
 
   // CAP-32：图片入队即上传（发送时只带附件 id）；非图片提示后忽略（chat 链路仅支持图片）
+  // CAP-49：模型执行体不支持图片（纯文本问答）——整条链路关掉，不让用户白传一次再被 400
   const addImageFiles = useCallback(
     (files: Iterable<File>) => {
+      if (isModel) {
+        message.warning('模型问答暂不支持图片：需要读图请改用智能体（Agent）执行体')
+        return
+      }
       for (const file of files) {
         if (!file.type.startsWith('image/')) {
           message.warning(`仅支持图片附件，已忽略：${file.name}`)
@@ -90,20 +110,30 @@ export default function ChatPanel({
           .finally(() => setUploading((n) => n - 1))
       }
     },
-    [],
+    [isModel],
   )
 
   const onPaste = useCallback(
     (e: React.ClipboardEvent) => {
-      if (!allowImages) return
+      if (!allowImages || isModel) return
       const files = Array.from(e.clipboardData?.files ?? [])
       if (files.length > 0) {
         e.preventDefault()
         addImageFiles(files)
       }
     },
-    [allowImages, addImageFiles],
+    [allowImages, isModel, addImageFiles],
   )
+
+  // CAP-49「停止生成」：WS 帧是首选（与输入同一个入口）；socket 断了就退回 REST，
+  // 否则按钮点了毫无反应（send 在未连接时静默丢弃）
+  const onInterrupt = useCallback(() => {
+    if (connected) {
+      interrupt()
+      return
+    }
+    api.post(`${apiBase}/${summary.id}/interrupt`).catch((e) => showError(e, '停止生成失败'))
+  }, [connected, interrupt, apiBase, summary.id])
 
   const onSend = useCallback(
     (text: string) => {
@@ -146,7 +176,9 @@ export default function ChatPanel({
     return Array.from(merged.values()).sort((a, b) => a.seq - b.seq)
   }, [baseEvents, events])
 
-  const canInput = ACTIVE_STATES.includes(summary.state)
+  // 模型执行体生成中不接受注入（后端会拒）：输入区此时换成「停止生成」
+  const canInput = ACTIVE_STATES.includes(summary.state) && !generating
+  const allowImg = allowImages && !isModel
 
   return (
     <div style={maxHeight === null ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } : undefined}>
@@ -185,14 +217,15 @@ export default function ChatPanel({
         events={history}
         taskSpec={summary.topic}
         model={summary.model}
+        speaker={isModel ? (summary.modelEndpointName || '模型') : 'Claude'}
         maxHeight={maxHeight}
         emptyText={`等待事件…（${fatal ? '会话已结束' : connected ? '连接正常' : '重连中'}）`}
       />
       <div
         style={{ borderTop: '1px solid #f0f0f0', marginTop: 8, paddingTop: 12, flexShrink: 0 }}
-        onDragOver={allowImages ? (e) => e.preventDefault() : undefined}
+        onDragOver={allowImg ? (e) => e.preventDefault() : undefined}
         onDrop={
-          allowImages
+          allowImg
             ? (e) => {
                 e.preventDefault()
                 if (canInput) addImageFiles(Array.from(e.dataTransfer?.files ?? []))
@@ -231,13 +264,15 @@ export default function ChatPanel({
             disabled={!canInput}
             value={inputText}
             placeholder={
-              canInput
-                ? summary.state === 'WAITING_INPUT'
-                  ? `回复 agent 的提问，Enter 发送 / Shift+Enter 换行${allowImages ? '，可粘贴/拖拽图片' : ''}…`
-                  : summary.state === 'WAITING_AUTH'
-                    ? '（正在等待授权，可在上方允许/拒绝）'
-                    : `会话运行中，可注入指令，Enter 发送 / Shift+Enter 换行${allowImages ? '，可粘贴/拖拽图片' : ''}…`
-                : '会话已结束，无法输入'
+              generating
+                ? '正在生成回答…点「停止生成」可中断'
+                : canInput
+                  ? summary.state === 'WAITING_INPUT'
+                    ? `回复 agent 的提问，Enter 发送 / Shift+Enter 换行${allowImg ? '，可粘贴/拖拽图片' : ''}…`
+                    : summary.state === 'WAITING_AUTH'
+                      ? '（正在等待授权，可在上方允许/拒绝）'
+                      : `会话运行中，可注入指令，Enter 发送 / Shift+Enter 换行${allowImg ? '，可粘贴/拖拽图片' : ''}…`
+                  : '会话已结束，无法输入'
             }
             onChange={(e) => setInputText(e.target.value)}
             onPaste={onPaste}
@@ -248,7 +283,7 @@ export default function ChatPanel({
               }
             }}
           />
-          {allowImages && (
+          {allowImg && (
             <>
               <input
                 ref={fileInputRef}
@@ -269,14 +304,20 @@ export default function ChatPanel({
               />
             </>
           )}
-          <Button
-            type="primary"
-            icon={<SendOutlined />}
-            disabled={!canInput || (!inputText.trim() && pendingImages.length === 0) || uploading > 0}
-            onClick={() => onSend(inputText)}
-          >
-            发送
-          </Button>
+          {generating ? (
+            <Button danger icon={<StopOutlined />} onClick={onInterrupt}>
+              停止生成
+            </Button>
+          ) : (
+            <Button
+              type="primary"
+              icon={<SendOutlined />}
+              disabled={!canInput || (!inputText.trim() && pendingImages.length === 0) || uploading > 0}
+              onClick={() => onSend(inputText)}
+            >
+              发送
+            </Button>
+          )}
         </Space.Compact>
       </div>
     </div>

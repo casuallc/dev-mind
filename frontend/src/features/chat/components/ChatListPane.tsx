@@ -107,6 +107,9 @@ export default function ChatListPane({
               </Tag>
             </div>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {/* CAP-49：列表里一眼看出这条是节点上的 claude 还是直连的模型端点 */}
+              {c.executor === 'MODEL' ? `模型 · ${c.modelEndpointName ?? `端点#${c.modelEndpointId ?? '?'}`}` : 'Agent'}
+              {' · '}
               {fmtTime(c.createdAt)}
             </Typography.Text>
           </div>

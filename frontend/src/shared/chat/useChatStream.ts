@@ -14,6 +14,8 @@ export interface StreamState {
   connected: boolean
   fatal: boolean
   maxSeq: number
+  /** 非致命提示（上行动作被拒等）；n 递增，同一条文字再被拒也能再弹一次 */
+  notice?: { text: string; n: number }
 }
 
 export function useChatStream(id: string | undefined, apiBase: ChatApiBase, enabled = true) {
@@ -48,6 +50,9 @@ export function useChatStream(id: string | undefined, apiBase: ChatApiBase, enab
             maxSeq: frame.seq,
           }
         })
+      } else if (frame.type === 'notice') {
+        // 只是这个动作没成（会话可能已删、模型问答不支持该动作…）：提示一下，连接照旧
+        setState((p) => ({ ...p, notice: { text: frame.message, n: (p.notice?.n ?? 0) + 1 } }))
       } else if (frame.type === 'error') {
         fatal = true
         setState((p) => ({ ...p, connected: false, fatal: true }))
@@ -101,9 +106,12 @@ export function useChatStream(id: string | undefined, apiBase: ChatApiBase, enab
     connected: state.connected,
     fatal: state.fatal,
     maxSeq: state.maxSeq,
+    notice: state.notice,
     send,
     input: (text: string, images?: ChatImageAttachment[]) =>
       send({ type: 'input', text, ...(images?.length ? { images } : {}) }),
+    /** CAP-49 FR：停止生成（仅模型执行体；Agent 执行体后端回 409） */
+    interrupt: () => send({ type: 'interrupt' }),
     authorize: (accepted: boolean, scope: string, requestId?: string) =>
       send({ type: 'authorize', accepted, scope, requestId }),
     refresh: () => send({ type: 'ping' }),

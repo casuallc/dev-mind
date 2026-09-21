@@ -1,6 +1,6 @@
 // 对话式事件流渲染（由 ChatPanel 承载；CAP-30 由 sessions 上移共享）：把 ChatEvent 流转成问答气泡 + 工具调用卡片 + 回合分隔。
 // system/log 等底层事件收进底部折叠「过程日志」。
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { Collapse, Image, Tag, Typography } from 'antd'
 import {
   CheckCircleFilled,
@@ -21,7 +21,8 @@ import { fmtTime } from '../utils/format'
 
 type ChatItem =
   | { kind: 'user'; key: string; text: string; isTask?: boolean; attachments?: ChatImageAttachment[]; ts?: number }
-  | { kind: 'assistant'; key: string; text: string; model?: string; ts: number }
+  // streaming=true：模型执行体正在逐段吐正文（CAP-49），气泡带光标、不定稿
+  | { kind: 'assistant'; key: string; text: string; model?: string; ts: number; streaming?: boolean }
   | ToolItem
   | { kind: 'result'; key: string; isError: boolean; cost?: string; durationMs?: number }
   | { kind: 'divider'; key: string; text: string }
@@ -82,6 +83,14 @@ function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[];
   const logs: ChatEvent[] = []
   const toolsById = new Map<string, ToolItem>()
   const pendingTools: ToolItem[] = [] // 未配对的工具调用，旧数据无 toolUseId 时按序兜底
+  // CAP-49 流式正文气泡：本轮 text_delta 原地累积的那一条（非流式执行体恒为 null）
+  let streamItem: Extract<ChatItem, { kind: 'assistant' }> | null = null
+  const endStream = () => {
+    if (streamItem) {
+      streamItem.streaming = false
+      streamItem = null
+    }
+  }
 
   if (taskSpec && taskSpec.trim()) {
     items.push({ kind: 'user', key: 'task', text: taskSpec, isTask: true })
@@ -89,9 +98,21 @@ function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[];
 
   for (const ev of sorted) {
     switch (ev.type) {
-      case 'text_delta':
-        break // assistant 全量消息为准
+      case 'text_delta': {
+        // 模型执行体逐段吐正文；CLI 未开 partial messages ⇒ 恒无此事件（AGENT 零影响）
+        const delta = ev.content ?? ''
+        if (!delta) break // 空增量不动：CLI 的 stream_event 会产空 content，别拿它开一个空气泡
+        if (streamItem) {
+          streamItem.text += delta
+          streamItem.ts = ev.timestamp
+        } else {
+          streamItem = { kind: 'assistant', key: `e${ev.seq}`, text: delta, streaming: true, ts: ev.timestamp }
+          items.push(streamItem)
+        }
+        break
+      }
       case 'user': {
+        endStream() // 新提问：上一轮气泡定稿（结果事件可能没来，气泡不能一直转）
         // CAP-32：附件引用在 payload.attachments（只放 id/name/contentType）
         const attachments = (ev.payload?.attachments as ChatImageAttachment[] | undefined) ?? []
         if (ev.content?.trim() || attachments.length > 0) {
@@ -106,6 +127,15 @@ function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[];
         const text = cleanAssistantText(ev.content ?? '')
         if (!text) break
         const model = (ev.payload?.model as string) || undefined
+        if (streamItem) {
+          // 全量为准：直接覆盖流式气泡的正文（增量与全量相等 / 前缀 / 网关重发不一致，三种情况
+          // 都收敛到这一条路径——否则会留下两个气泡或重复尾巴）
+          streamItem.text = text
+          streamItem.model = model ?? streamItem.model
+          streamItem.ts = ev.timestamp
+          endStream()
+          break
+        }
         const last = items[items.length - 1]
         if (last?.kind === 'assistant') {
           last.text += '\n\n' + text
@@ -149,6 +179,7 @@ function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[];
         break
       }
       case 'result':
+        endStream() // 回合收口：气泡定稿
         items.push({
           kind: 'result',
           key: `e${ev.seq}`,
@@ -158,6 +189,9 @@ function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[];
         })
         break
       case 'state':
+        // 非 RUNNING 的状态转移（终止/结束/回合完成）意味着这一轮不再产增量：
+        // 被 kill 的会话只有 state、没有 result，不收口气泡会一直转圈
+        if ((ev.payload?.state as string) !== 'RUNNING') endStream()
         if (ev.content) items.push({ kind: 'divider', key: `e${ev.seq}`, text: ev.content })
         break
       case 'permission_request':
@@ -173,6 +207,7 @@ function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[];
         break
       }
       case 'error':
+        endStream() // 报错即这一轮完了（随后一般有 result{isError}，但不指望它）
         items.push({ kind: 'error', key: `e${ev.seq}`, text: ev.content ?? 'unknown', ts: ev.timestamp })
         break
       case 'system':
@@ -192,12 +227,15 @@ export default function ChatStream({
   events,
   taskSpec,
   model,
+  speaker = 'Claude',
   maxHeight = 560,
   emptyText = '等待事件…',
 }: {
   events: ChatEvent[]
   taskSpec?: string
   model?: string
+  /** 回答方名称：Agent 执行体是 Claude，模型执行体是端点名（CAP-49） */
+  speaker?: string
   maxHeight?: number | string | null
   emptyText?: string
 }) {
@@ -225,7 +263,7 @@ export default function ChatStream({
         <Typography.Text type="secondary">{emptyText}</Typography.Text>
       )}
       {items.map((item) => (
-        <ChatItemView key={item.key} item={item} sessionModel={model} />
+        <ChatItemView key={item.key} item={item} sessionModel={model} speaker={speaker} />
       ))}
       {logs.length > 0 && (
         <Collapse
@@ -252,7 +290,7 @@ export default function ChatStream({
   )
 }
 
-function ChatItemView({ item, sessionModel }: { item: ChatItem; sessionModel?: string }) {
+function ChatItemView({ item, sessionModel, speaker }: { item: ChatItem; sessionModel?: string; speaker: string }) {
   switch (item.kind) {
     case 'user':
       return (
@@ -288,13 +326,12 @@ function ChatItemView({ item, sessionModel }: { item: ChatItem; sessionModel?: s
         <div className="chat-row">
           <div className="chat-msg-head">
             <RobotOutlined style={{ color: '#1677ff' }} />
-            <span style={{ fontWeight: 500 }}>Claude</span>
+            <span style={{ fontWeight: 500 }}>{speaker}</span>
             {m && <Tag style={{ marginInlineEnd: 0 }}>{m}</Tag>}
+            {item.streaming && <Loading3QuartersOutlined spin style={{ color: '#1677ff', fontSize: 12 }} />}
             <span className="chat-time">{fmtTime(new Date(item.ts).toISOString())}</span>
           </div>
-          <div className="doc-md chat-md">
-            <ReactMarkdown>{item.text}</ReactMarkdown>
-          </div>
+          <AssistantBody text={item.text} streaming={item.streaming} />
         </div>
       )
     }
@@ -328,6 +365,21 @@ function ChatItemView({ item, sessionModel }: { item: ChatItem; sessionModel?: s
     default:
       return null
   }
+}
+
+/**
+ * 回答正文。独立组件是为了能放 hook：ChatItemView 是个大 switch，在 case 里调 hook 会违反
+ * hook 规则。流式期间正文每 ~120ms 变一次，useDeferredValue 让 React 跳过中间帧——长回答
+ * 反复重解析 Markdown 才是真的卡（气泡内容本身是原地累积的，不是每次重建）。
+ */
+function AssistantBody({ text, streaming }: { text: string; streaming?: boolean }) {
+  const deferred = useDeferredValue(text)
+  return (
+    <div className="doc-md chat-md">
+      <ReactMarkdown>{deferred}</ReactMarkdown>
+      {streaming && <span className="chat-cursor" />}
+    </div>
+  )
 }
 
 function ToolCard({ item }: { item: ToolItem }) {

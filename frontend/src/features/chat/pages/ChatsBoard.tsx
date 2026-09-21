@@ -135,7 +135,9 @@ export default function ChatsBoard() {
     Modal.confirm({
       centered: true,
       title: '终止该问答？',
-      content: '将强杀 agent 进程并清理沙箱（保留问答记录与历史）。',
+      content: isModelChat
+        ? '将中断正在进行的生成（保留问答记录与历史）。'
+        : '将强杀 agent 进程并清理沙箱（保留问答记录与历史）。',
       okText: '终止',
       okButtonProps: { danger: true },
       cancelText: '取消',
@@ -168,8 +170,11 @@ export default function ChatsBoard() {
     setSelectedId(id)
   }
 
-  const canSuspend = !!current && ACTIVE_STATES.includes(current.state)
-  // SUSPENDED=恢复（同进程语义）；DONE/FAILED/TERMINATED=继续对话（claude --resume 带历史重拉起）
+  // CAP-49：模型执行体没有进程可挂（后端 409），「挂起」只给 Agent 执行体
+  const isModelChat = current?.executor === 'MODEL'
+  const canSuspend = !!current && !isModelChat && ACTIVE_STATES.includes(current.state)
+  // SUSPENDED=恢复（同进程语义）；DONE/FAILED/TERMINATED=继续对话（claude --resume 带历史重拉起，
+  // 模型执行体重建运行时即可——历史在事件表里）
   const canResume = !!current && ['SUSPENDED', 'DONE', 'FAILED', 'TERMINATED'].includes(current.state)
 
   const columns: ColumnsType<ChatSummary> = [
@@ -192,14 +197,19 @@ export default function ChatsBoard() {
       render: (s: string) => <Tag color={stateColor[s] ?? 'default'}>{s}</Tag>,
     },
     {
-      title: '节点',
-      dataIndex: 'agentNodeId',
-      width: 110,
-      render: (v?: string) =>
-        v ? (
-          <Tag color="purple">{agentNodes.find((n) => String(n.id) === v)?.name ?? `节点${v}`}</Tag>
+      title: '执行体',
+      dataIndex: 'executor',
+      width: 160,
+      // CAP-49：模型执行体不需要节点，agent_node_id 恒空——不能照旧渲染成「本机（历史）」
+      render: (_: unknown, r: ChatSummary) =>
+        r.executor === 'MODEL' ? (
+          <Tag color="cyan">{r.modelEndpointName ?? `模型端点#${r.modelEndpointId ?? '?'}`}</Tag>
+        ) : r.agentNodeId ? (
+          <Tag color="purple">
+            Agent · {agentNodes.find((n) => String(n.id) === r.agentNodeId)?.name ?? `节点${r.agentNodeId}`}
+          </Tag>
         ) : (
-          '本机（历史）'
+          'Agent · 本机（历史）'
         ),
     },
     {
@@ -273,7 +283,9 @@ export default function ChatsBoard() {
       styles={{ body: pageCardBodyFlexStyle }}
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
-        纯问答不关联项目/仓库，agent 在干净沙箱中运行。左侧选问答、右侧直接对话；「新问答」输入问题即创建。列表视图可按状态筛选、搜索全部问答。
+        纯问答不关联项目/仓库；执行体默认是 runner 节点上的 claude（Agent），也可在「新问答 → 高级选项」里
+        改选已接入的对话模型（模型，免节点、流式输出）。左侧选问答、右侧直接对话；「新问答」输入问题即创建。
+        列表视图可按状态筛选、搜索全部问答。
       </Typography.Paragraph>
 
       {view === 'chat' ? (
@@ -323,6 +335,20 @@ export default function ChatsBoard() {
                   </Typography.Text>
                   <Typography.Text code>{current.id}</Typography.Text>
                   <Tag color={stateColor[current.state] ?? 'default'}>{current.state}</Tag>
+                  {isModelChat ? (
+                    <Tag color="cyan">
+                      模型：{current.modelEndpointName ?? `端点#${current.modelEndpointId ?? '?'}`}
+                      {current.modelEndpointModel ? ` · ${current.modelEndpointModel}` : ''}
+                    </Tag>
+                  ) : (
+                    <Tag color="purple">
+                      Agent ·{' '}
+                      {current.agentNodeId
+                        ? (agentNodes.find((n) => String(n.id) === current.agentNodeId)?.name ??
+                          `节点${current.agentNodeId}`)
+                        : '本机（历史）'}
+                    </Tag>
+                  )}
                   {current.knowledgeBaseId != null && (
                     <Tag color="purple">
                       知识库：{knowledgeBases.find((b) => b.id === current.knowledgeBaseId)?.name ??

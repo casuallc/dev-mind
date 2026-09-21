@@ -1,6 +1,6 @@
 // 通用问答（CAP-30）REST 封装，对应后端 /api/chats
 import { api } from '../../shared/api/client'
-import type { ChatSummary } from './types'
+import type { ChatExecutor, ChatSummary } from './types'
 
 export interface CreateChatPayload {
   /** 首条提问（即开场消息，发送即创建问答） */
@@ -13,6 +13,10 @@ export interface CreateChatPayload {
   scenarioCode?: string
   /** CAP-46：绑定的知识库 id；启动注入库概览、每轮检索注入 <knowledge-context> */
   knowledgeBaseId?: number
+  /** CAP-49：执行体；缺省 = AGENT（runner 上的 claude CLI） */
+  executor?: ChatExecutor
+  /** CAP-49：MODEL 时钉住的对话端点 id；缺省走平台默认 CHAT 端点，都没有则创建失败 */
+  modelEndpointId?: number
 }
 
 export const createChat = (p: CreateChatPayload) => api.post<ChatSummary>('/chats', p)
