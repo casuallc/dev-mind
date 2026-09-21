@@ -9,7 +9,9 @@
 #   3. finalize：合并到基线 + push 基线与会话分支 + 删 worktree + workspace_state=FINALIZED；
 #      重复收口 409；
 #   4. 负例：脏工作区不 discard → 409；discard 后合并冲突 → 409 工作区保留；
-#      本地解冲突后重试收口成功。
+#      本地解冲突后重试收口成功；
+#   5. 删除会话释放固定工作区（FR-09，协议 v9 workspace_release）：目录+本地分支释放、
+#      远端不动、占用锁解开可立即再开新会话；节点离线时删除 409 阻断（fail-visible）。
 import json
 import os
 import pathlib
@@ -228,6 +230,45 @@ try:
     ok(ack2.get('ok') is True, f"解冲突后重试收口 ok: {ack2.get('detail')}")
     ok(git('show', 'main:README.md', cwd=ORIGIN).strip() == 'resolved', '基线含解冲突结果')
     ok(not work2.exists(), '会话2 收口后 worktree 已删')
+
+    # 8. 删除会话释放固定工作区（FR-09）：目录与本地分支释放、远端不动、同 (项目,用户)
+    #    可立即再开新会话——不释放则目录成孤儿，该用户在该项目永久开不了新会话
+    _, s3 = call('POST', '/sessions', {'projectId': pid, 'taskSpec': 'CAP-42 E2E 会话3（删除释放）'}, user)
+    sid3 = s3['id']
+    work3 = uroot / 'work'
+    wait(lambda: (work3 / '.git').exists() or None, '会话3 worktree 物化', 30)
+    ok(work3.is_dir(), '删除前固定 worktree 在')
+    call('POST', f'/sessions/{sid3}/finish', token=user)
+    wait_terminal(sid3, user)
+    # 带一个未提交脏文件：释放是丢弃语义，不该被它挡住（与收口不同，无 discardChanges 开关）
+    (work3 / 'wip.txt').write_text('discarded\n', encoding='utf-8')
+    call('DELETE', f'/sessions/{sid3}', token=user)
+    ok(not work3.exists(), '删除会话后固定 worktree 已释放')
+    ok(git('branch', '--list', f'feature/{sid3}', cwd=uroot / 'main') == '',
+       '本地会话分支已释放（残留分支同样会留成半成品）')
+    ok(git('ls-remote', ORIGIN, f'refs/heads/feature/{sid3}') == '', '释放不 push：远端无会话分支')
+    call('GET', f'/sessions/{sid3}', token=user, expect=404)
+    # 占用锁已解：同 (项目,用户) 立刻能再开会话（此前正是卡在这里永久死锁）
+    _, s4 = call('POST', '/sessions', {'projectId': pid, 'taskSpec': 'CAP-42 E2E 会话4（释放后可开）'}, user)
+    work4 = uroot / 'work'
+    wait(lambda: (work4 / '.git').exists() or None, '会话4 worktree 物化', 30)
+    ok(work4.is_dir(), '释放后同用户同项目可立即开新会话')
+    call('POST', f'/sessions/{s4["id"]}/finish', token=user)
+    wait_terminal(s4['id'], user)
+    print('[4] 删除会话释放固定工作区 OK')
+
+    # 9. 节点离线时删除必须 409 阻断（fail-visible）：绝不静默跳过释放留下孤儿目录
+    runner.terminate()
+    runner.wait(timeout=20)
+    wait(lambda: next((n for n in call('GET', '/agent-nodes', token=admin)[1]
+                       if n['id'] == node_id and n['status'] != 'ONLINE'), None), '节点转 OFFLINE', 40)
+    st, r = call('DELETE', f'/sessions/{s4["id"]}', token=user, expect=409)
+    # 提示须落在真实原因上：断连会清协议版本记录，先判版本会误报「版本过低，请升级 runner」
+    ok(st == 409 and '不在线' in json.dumps(r, ensure_ascii=False),
+       f'节点离线删除 409（报「不在线」而非版本过低）: {json.dumps(r, ensure_ascii=False)[:180]}')
+    call('GET', f'/sessions/{s4["id"]}', token=user)  # 记录保留，未半删
+    ok(work4.is_dir(), '节点离线：目录与会话记录都保留（可待节点上线后重试）')
+    print('[5] 节点离线删除 fail-visible OK')
 
     print('ALL PASS')
 finally:
