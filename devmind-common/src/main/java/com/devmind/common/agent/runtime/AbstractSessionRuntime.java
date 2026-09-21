@@ -95,6 +95,14 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
     /** 下一服务端序号（远程事件重编 seq：单连接有序到达，runner seq 不带上行）。 */
     protected long nextSeq() { return seq.incrementAndGet(); }
 
+    /**
+     * 刷新活跃时间（空闲超时判定的依据）。子类自行编排交互次序时（如模型执行体的
+     * {@code ModelSessionRuntime} 重写 injectInput）要调它，否则空闲计时不刷新。
+     */
+    protected void touchActivity() {
+        lastActivityAt = System.currentTimeMillis();
+    }
+
     // ---------------- 事件流 ----------------
 
     /** 事件入流：环形缓冲 + 订阅者广播 + 落库 + 状态机分派。 */
@@ -193,7 +201,7 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
         if ((!hasText && !hasImages) || !alive()) {
             return;
         }
-        lastActivityAt = System.currentTimeMillis();
+        touchActivity();
         List<InputImage> imgs = hasImages ? images : List.of();
         sendUserMessage(hasText ? text : "", imgs);
         publish(SessionEvent.of(nextSeq(), "user", hasText ? text : "[图片]", "system", attachmentPayload(imgs)));
@@ -237,7 +245,7 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
         if (!alive()) {
             return;
         }
-        lastActivityAt = System.currentTimeMillis();
+        touchActivity();
         doFinish();
         Thread.ofVirtual().name("finish-drain-" + id).start(() -> {
             long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(20);
@@ -259,7 +267,7 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
     /** 授权响应。 */
     @Override
     public void authorize(String requestId, boolean accepted, String scope) {
-        lastActivityAt = System.currentTimeMillis();
+        touchActivity();
         String rid = (requestId != null && !requestId.isBlank()) ? requestId : pendingPermissionRequestId;
         if (rid == null) {
             rid = "unknown";
