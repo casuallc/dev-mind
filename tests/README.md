@@ -55,7 +55,8 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 | cap32_e2e.py | 附件：上传/鉴权/Content-Disposition/chat 引用 |
 | cap33_verify.py | 场景化会话与上下文装配（自建 fake runner） |
 | cap34_fr04_08_verify.py / cap34_reattach_verify.py | runner 调度：断连对账/服务端重启 reattach/exit 路由 |
-| cap37_e2e.py ~ cap40_e2e.py | 产出回传、流程串联、需求附件上下文投送（协议 v3/v4） |
+| cap37_e2e.py ~ cap40_e2e.py | 产出回传、流程串联、需求附件上下文投送（协议 v3/v4；cap37 链路已被 CAP-38/52 取代，cap40 已改用 flow/plan） |
+| cap52_e2e.py | 需求流程精简：三合一规划会话（一会话三产出）→ 自动开发会话 → 待验收；粒度护栏/入口互斥/终态 409（协议 v10） |
 | e2e-agent-node.py | CAP-21 节点全链路：注册→会话→授权→优雅退出→离线 409 |
 | e2e-cap41.py / b / c | CAP-41 工作日志空间：懒创建/守卫/种子模板/日报周报生成 |
 | e2e-cap41-m3-push.py | CAP-41 M3：worklog 远端绑定 + push（协议 v6，file:// bare 库） |

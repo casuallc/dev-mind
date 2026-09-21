@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """CAP-37 产出回传 + 流程串联 E2E（前置：后端 :8080 已用新代码启动，runner jar 已重建）。
 
+（历史脚本：CAP-38 已用「产出自动固化」取代 split-draft/confirm-split，CAP-52 又删除了 flow/analyze|design|split|skip 阶段入口；
+当前流程验证见 tests/cap52_e2e.py，本脚本保留作产出回传链路的实现参考。）
 链路：flowAnalyze 起会话 → 脚本预写 .devmind/output/analysis.md 到 runner 会话工作区
 → /finish → fake 进程退出 → runner OutputUploader 回传 → session_outputs 落库
 → flow 监听器建 kind=analysis 文档 + 通知。

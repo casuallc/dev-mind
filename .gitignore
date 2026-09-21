@@ -28,3 +28,6 @@ tmp/
 
 # tests fixtures 编译产物（TestSshServer.class，编译方法见 tests/README.md）
 tests/fixtures/*.class
+
+# Python 编译产物（tests/ 下的 E2E 脚本）
+__pycache__/

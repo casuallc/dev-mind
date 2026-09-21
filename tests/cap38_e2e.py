@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """CAP-38 流程简化 E2E（前置：后端 :8080 已用新代码启动，runner jar 已重建）。
 
+（历史脚本：CAP-52 起流程入口收敛为「开启 AI 规划」/「重新开发」，flow/analyze|design|split|skip 已删除、
+阶段跳过不复存在；同链路验证见 tests/cap52_e2e.py，本脚本保留作历史足迹。）
 链路 A（自动化主线）：flowAnalyze → 预写 analysis.md → /finish → 分析文档；
 flowDesign → 预写 design.md → /finish → Design(DRAFT) 登记后【自动起拆分会话】
 （无需 CONFIRMED、无需手动 split）→ 预写 wi-plan.json → /finish →【自动固化】2 个 WI

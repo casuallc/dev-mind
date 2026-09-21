@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """CAP-40 需求附件上下文投送 E2E（前置：后端 :8080 已用新代码启动，runner jar 已重建）。
 
-链路：上传 png 附件 → 需求描述内嵌 /api/attachments/{id}/raw 链接 → flow/analyze 起会话
+链路：上传 png 附件 → 需求描述内嵌 /api/attachments/{id}/raw 链接 → flow/plan 起规划会话（挂需求，附件照常投送）
 → runner 拉上下文包物化 → 断言会话工作区 .devmind/input/{id}.png 字节一致、
 CLAUDE.local.md 含「## 需求附件」节。
 降级链路：描述引用不存在附件（32 个 f）→ 会话照常 RUNNING、注入块标注「不可用」。
@@ -144,7 +144,7 @@ def main():
              "节点上线", 40)
         print("[3] runner 上线")
 
-        s1 = req("POST", f"/projects/{pid}/requirements/{rid}/flow/analyze", None, tok)
+        s1 = req("POST", f"/projects/{pid}/requirements/{rid}/flow/plan", None, tok)
         sid = s1["id"]
         wait(lambda: req("GET", f"/sessions/{sid}", token=tok).get("status") == "RUNNING" or None,
              "分析会话 RUNNING", 60)
