@@ -123,47 +123,13 @@ check("拒绝 → rejected", st == 200 and res["status"] == "rejected", str(res)
 st, res = call("POST", f"/knowledge/proposals/{pr1['id']}/adopt?target=global")
 check("重复采纳 → 409", st == 409, f"{st}")
 
-# ---------- 5. 真实会话注入（FR-01 全链路） ----------
-st, sess = call("POST", "/sessions", {"projectId": "default", "taskSpec": "验证知识库注入",
-                                      "baseBranch": "master", "model": "sonnet"})
-check("创建真实会话", st in (200, 201), f"{st} {sess}")
-sid = sess.get("id") if sess else None
-wt = sess.get("worktreePath") if sess else None
-if not wt:
-    # 等一会再拉
-    for _ in range(10):
-        time.sleep(2)
-        _, s2 = call("GET", f"/sessions/{sid}")
-        wt = (s2 or {}).get("worktreePath")
-        if wt:
-            break
-check("会话拿到 worktree", bool(wt), str(wt))
+# ---------- 5. 真实会话注入 ----------
+# 已移除（2026-09-21，随 CAP-34 遗留清理）：CAP-34 起服务端零执行，会话一律下 runner 节点工作区，
+# SessionView.worktreePath 恒为 null → 本段「读服务端 worktree 里的注入文件」的断言语义已不存在
+# （且本脚本不起 runner，永远拿不到物化产物；运行还会误在默认节点上起真实会话）。
+# hitCount（FR-07）同样依赖真实注入，一并移出。现行覆盖：
+#   - 会话上下文快照 / 拉包内容 / 预览不 bumpHits → tests/cap33_verify.py [2][3][4]
+#   - 工作区物化文件（CLAUDE.local.md、settings.local.json、平台路径不进 git）→ tests/e2e-cap42.py [2b]
 
-if wt:
-    import pathlib
-    cm = pathlib.Path(wt) / "CLAUDE.md"
-    txt = ""
-    for _ in range(10):
-        if cm.exists():
-            txt = cm.read_text(encoding="utf-8", errors="replace")
-            break
-        time.sleep(1)
-    check("worktree 已写 CLAUDE.md", bool(txt), "文件不存在")
-    check("注入含全局经验（无标签）", "通用-无标签经验" in txt, "缺全局")
-    check("注入含全局经验（java 标签命中）", "Java 命名规范(修订)" in txt, "缺 java")
-    check("注入含项目经验", "playground 特有经验" in txt, "缺项目")
-    check("注入排除不匹配标签 G3", "前端样式规范" not in txt, "误注入")
-    check("注入含任务段", "验证知识库注入" in txt, "缺任务")
-    check("settings.local.json 已写", (pathlib.Path(wt) / ".claude" / "settings.local.json").exists(), "缺 settings")
-
-# 注入计数 hitCount（FR-07）
-st, lst = call("GET", "/knowledge/entries")
-hits = {e["name"]: e["hitCount"] for e in (lst or [])}
-check("注入命中条目 hitCount+1", hits.get("通用-无标签经验", 0) >= 1
-      and hits.get("Java 命名规范(修订)", 0) >= 1 and hits.get("playground 特有经验", 0) >= 1, str(hits))
-
-# ---------- 清理 ----------
-if sid:
-    call("DELETE", f"/sessions/{sid}")
 print(f"\n== CAP-04 验证结果: {passed} passed, {failed} failed ==")
 sys.exit(1 if failed else 0)

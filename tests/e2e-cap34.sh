@@ -3,7 +3,7 @@
 # 用 dist 包起 服务端:18090 + runner（executor=fake），验证
 #   1. 无节点时创建会话 → 409；传 "local" → 400
 #   2. 注册节点设默认 → runner 接入 → 问答全链路（RUNNING→finish→DONE，沙箱 _chat/<sid> 建了又被收）
-#   3. 带全局知识条目创建裸会话 → launch 帧 manifest → runner 拉包物化（workDir 下 CLAUDE.md 含注入 + settings.local.json）
+#   3. 带全局知识条目创建裸会话 → launch 帧 manifest → runner 拉包物化（worktree 下 CLAUDE.local.md 含注入 + settings.local.json）
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
@@ -119,14 +119,18 @@ post "$BASE/api/knowledge/entries" '{"scope":"global","name":"e2e-marker","conte
 SES=$(post "$BASE/api/sessions" "{\"taskSpec\":\"e2e 会话：验证上下文物化\",\"agentNodeId\":\"$NODE_ID\"}")
 SES_ID=$(echo "$SES" | jget id)
 [ -n "$SES_ID" ] || fail "会话创建失败: $SES"
+# 落点目录随 CAP-42 固定布局（<ws>/<proj>/<owner>/work）变化 → 用 find 定位，不硬编码层级
+INJ=""
 for i in $(seq 1 30); do
-  [ -f workspaces/_default/CLAUDE.md ] && break; sleep 1
+  INJ=$(find workspaces -path '*/_chat' -prune -o -name CLAUDE.local.md -print -quit)
+  [ -n "$INJ" ] && break; sleep 1
 done
-[ -f workspaces/_default/CLAUDE.md ] || fail "runner 未物化 CLAUDE.md（无 manifest？）"
-grep -q "E2E-INJECTION-MARKER-42" workspaces/_default/CLAUDE.md || { cat workspaces/_default/CLAUDE.md; fail "CLAUDE.md 缺知识注入块"; }
-[ -f workspaces/_default/.claude/settings.local.json ] || fail "缺 .claude/settings.local.json"
-grep -q "Bash(mvn" workspaces/_default/.claude/settings.local.json || fail "settings.local.json 缺权限白名单"
-say "物化校验通过（CLAUDE.md 注入块 + settings.local.json）"
+[ -n "$INJ" ] || fail "runner 未物化 CLAUDE.local.md（无 manifest？）"
+grep -q "E2E-INJECTION-MARKER-42" "$INJ" || { cat "$INJ"; fail "注入块缺知识内容"; }
+SET="${INJ%CLAUDE.local.md}.claude/settings.local.json"
+[ -f "$SET" ] || fail "缺 .claude/settings.local.json（$SET）"
+grep -q "Bash(mvn" "$SET" || fail "settings.local.json 缺权限白名单"
+say "物化校验通过（$INJ 注入块 + settings.local.json）"
 
 curl -s -o /dev/null "$BASE/api/sessions/$SES_ID/kill" -X POST -H "$AUTH"
 say "ALL PASS"

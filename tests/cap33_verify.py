@@ -12,7 +12,7 @@
     （scenario / project-auto / request）+ scenarioCode 落库
  4. 节点 token 拉 /agent/context/{sid}：SKILL.md base64、文档全文、claudeMd 场景背景与索引
  5. POST /chats + scenarioCode → /chats/{id}/context + runner 沙箱实际物化
-    （_chat/<cid>/CLAUDE.md、.claude/skills/<name>/SKILL.md、.devmind/docs/<id>.md）
+    （_chat/<cid>/CLAUDE.local.md、.claude/skills/<name>/SKILL.md、.devmind/docs/<id>.md）
  6. 旧 templateCode 兼容（= scenarioCode 解析）
  7. 后端重启后 find 重建：session 走 sessions 表、chat 走 ChatContextLookup，均可再拉包
 """
@@ -182,15 +182,15 @@ def main():
         csnap = req("GET", f"/chats/{cid}/context", token=tok)
         assert csnap["scenarioCode"] == SC
         sandbox = WS / "_chat" / cid
-        claude_md = wait(lambda: (sandbox / "CLAUDE.md").read_text(encoding="utf-8")
-                         if (sandbox / "CLAUDE.md").exists() else None, "chat 沙箱 CLAUDE.md 物化", 30)
+        claude_md = wait(lambda: (sandbox / "CLAUDE.local.md").read_text(encoding="utf-8")
+                         if (sandbox / "CLAUDE.local.md").exists() else None, "chat 沙箱 CLAUDE.local.md 物化", 30)
         assert "场景背景" in claude_md and "这个项目的发布流程怎么走？" in claude_md
         sk_file = sandbox / ".claude" / "skills" / f"{MARK}-skill" / "SKILL.md"
         assert sk_file.is_file() and skill_md.strip() in sk_file.read_text(encoding="utf-8")
         doc_file = sandbox / ".devmind" / "docs" / f"{doc['id']}.md"
         # 物化文件带 `# 标题` 头，断言正文完整在内
         assert doc_file.is_file() and doc_body in doc_file.read_text(encoding="utf-8")
-        print(f"[5] 问答沙箱物化 OK：CLAUDE.md + .claude/skills/SKILL.md + .devmind/docs/{doc['id']}.md")
+        print(f"[5] 问答沙箱物化 OK：CLAUDE.local.md + .claude/skills/SKILL.md + .devmind/docs/{doc['id']}.md")
 
         # ---------- [6] 旧 templateCode 兼容 ----------
         s2 = req("POST", "/sessions", {

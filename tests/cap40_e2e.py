@@ -4,8 +4,8 @@
 
 链路：上传 png 附件 → 需求描述内嵌 /api/attachments/{id}/raw 链接 → flow/analyze 起会话
 → runner 拉上下文包物化 → 断言会话工作区 .devmind/input/{id}.png 字节一致、
-CLAUDE.md 含「## 需求附件」节。
-降级链路：描述引用不存在附件（32 个 f）→ 会话照常 RUNNING、CLAUDE.md 标注「不可用」。
+CLAUDE.local.md 含「## 需求附件」节。
+降级链路：描述引用不存在附件（32 个 f）→ 会话照常 RUNNING、注入块标注「不可用」。
 （Jira 内嵌图链路需真实 Jira 实例，单测覆盖，E2E 不验。）
 """
 import json, os, shutil, subprocess, sys, time, urllib.request, urllib.error
@@ -76,12 +76,12 @@ def kill_tree(pid):
     subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
 
 
-def session_workdir(sid):
-    """定位 runner 会话工作区（托管布局 <ws>/<pid>/sessions/<sid>），就绪（含 CLAUDE.md）才返回。"""
+def session_workdir(sid, aid):
+    """定位 runner 会话工作区（CAP-42 固定布局 <ws>/<pid>/<owner>/work）：附件物化产物就绪才返回。"""
     t0 = time.time()
     while time.time() - t0 < 60:
-        for cand in WS.glob(f"*/sessions/{sid}"):
-            if (cand / "CLAUDE.md").exists():
+        for cand in WS.glob("*/*/work"):
+            if (cand / ".devmind" / "input" / f"{aid}.png").exists():
                 return cand
         time.sleep(1)
     raise AssertionError(f"未找到已物化的会话工作区: {sid}")
@@ -148,18 +148,18 @@ def main():
         sid = s1["id"]
         wait(lambda: req("GET", f"/sessions/{sid}", token=tok).get("status") == "RUNNING" or None,
              "分析会话 RUNNING", 60)
-        workdir = session_workdir(sid)
+        workdir = session_workdir(sid, aid)
 
         # 附件物化：字节一致 + 命名 {id}.png
         materialized = workdir / ".devmind" / "input" / f"{aid}.png"
         assert materialized.exists(), f"附件未物化: {materialized}（workdir={workdir}）"
         assert materialized.read_bytes() == PNG_BYTES, "物化附件字节不一致"
-        # 缺失附件：不阻断启动，CLAUDE.md 标注不可用
-        claude_md = (workdir / "CLAUDE.md").read_text(encoding="utf-8")
-        assert "## 需求附件" in claude_md, f"CLAUDE.md 缺需求附件节:\n{claude_md[:600]}"
+        # 缺失附件：不阻断启动，注入块标注不可用
+        claude_md = (workdir / "CLAUDE.local.md").read_text(encoding="utf-8")
+        assert "## 需求附件" in claude_md, f"注入块缺需求附件节:\n{claude_md[:600]}"
         assert f".devmind/input/{aid}.png" in claude_md, "清单缺物化路径"
         assert "不可用" in claude_md and MISSING_ID in claude_md, "缺失附件未标注不可用"
-        print("[4] 附件物化 .devmind/input OK，CLAUDE.md 清单含路径 + 缺失标注")
+        print("[4] 附件物化 .devmind/input OK，CLAUDE.local.md 清单含路径 + 缺失标注")
 
         # 已注入上下文快照含 attachment 条目
         snap = req("GET", f"/sessions/{sid}/context", token=tok)

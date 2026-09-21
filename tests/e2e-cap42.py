@@ -1,5 +1,6 @@
 # CAP-42 E2E：每用户固定工作区 + 手动收口（协议 v7 workspaceOwner / workspace_finalize 帧）
-# 前置：app :8080 新版已起，devmind-agent-runner/target/devmind-agent-runner.jar 已构建。
+# 前置：app 新版已起（默认 :8080，可用 DEVMIND_SERVER=http://localhost:18080 指到独立实例），
+# devmind-agent-runner/target/devmind-agent-runner.jar 已构建。
 # 脚本自建节点并 Popen 起 runner（tmp/runner-cap42 独立 jar 副本），独立 E2E 用户确保
 # 工作区归属隔离；远端用 file:// bare 库（免凭证通道）。运行产物全部落 tmp/（gitignored）。
 #
@@ -11,7 +12,10 @@
 #   4. 负例：脏工作区不 discard → 409；discard 后合并冲突 → 409 工作区保留；
 #      本地解冲突后重试收口成功；
 #   5. 删除会话释放固定工作区（FR-09，协议 v9 workspace_release）：目录+本地分支释放、
-#      远端不动、占用锁解开可立即再开新会话；节点离线时删除 409 阻断（fail-visible）。
+#      远端不动、占用锁解开可立即再开新会话；节点离线时删除 409 阻断（fail-visible）；
+#   6. 平台物化文件不进版本控制回归（2026-09-21 事故）：仓库跟踪的 CLAUDE.md 被注入改写
+#      + .devmind/ 未跟踪 → 干净会话收口被「未提交改动」挡住。断言物化后 worktree 仍
+#      git 干净、CLAUDE.md 一字节不动、零改动会话不勾 discard 也能收口，基线无平台文件。
 import json
 import os
 import pathlib
@@ -22,17 +26,22 @@ import time
 import urllib.error
 import urllib.request
 
-BASE = 'http://localhost:8080/api'
+SERVER = os.environ.get('DEVMIND_SERVER', 'http://localhost:8080')  # 可指到独立实例，不打扰本机开发环境
+BASE = SERVER + '/api'
+WS_URL = SERVER.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws/agent'
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TMP = ROOT / 'tmp'
 RUNNER_DIR = TMP / 'runner-cap42'
 WS = RUNNER_DIR / 'workspaces'
-ORIGIN = TMP / 'e2e-cap42' / 'origin.git'
 SEED = TMP / 'e2e-cap42' / 'seed'
 JAR = ROOT / 'devmind-agent-runner' / 'target' / 'devmind-agent-runner.jar'
 JAVA21 = r'C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot\bin\java.exe'
 MARK = 'cap42-' + str(int(time.time()))[-6:]
+# 远端 bare 库路径参与服务端克隆目录哈希（data/repositories/_global/origin-<hash>）：
+# 每轮用唯一路径，避免上一轮残留的克隆目录让本轮 clone 直接失败（"destination already exists"）
+ORIGIN = TMP / 'e2e-cap42' / f'origin-{MARK}.git'
 S1_CHANGE = 'change-s1 ' + MARK  # origin 跨轮复用，产出内容须每轮唯一否则 add 后无 diff
+SEED_CLAUDE_MD = '# 仓库自有说明 ' + MARK + '\n'  # 被跟踪的 CLAUDE.md（事故现场条件）
 E2E_USER = {'username': 'u' + str(int(time.time()))[-8:], 'password': 'cap42123456',
             'role': 'DEVELOPER', 'displayName': 'CAP42 E2E'}
 
@@ -111,13 +120,18 @@ if not JAR.exists():
 
 # 0. 管理员：建节点 + 设默认 + runner 配置（workspaceRoot 指向 tmp）
 admin = login('admin', 'admin123')
+# 记下现有默认节点：本脚本会把它改成自己的临时节点，收尾必须还原，
+# 否则留一个已下线节点当平台默认 → 后续任何未显式指定节点的会话 409
+prev_default = next((n['id'] for n in call('GET', '/agent-nodes', token=admin)[1]
+                     if n.get('isDefault')), None)
+pid = None  # 供 finally 清理（try 内才赋值，中途失败时可能仍是 None）
 _, issued = call('POST', '/agent-nodes', {'name': MARK, 'labels': ''}, admin)
 node_id = issued['node']['id']
 call('POST', f'/agent-nodes/{node_id}/default', token=admin)
 RUNNER_DIR.mkdir(parents=True, exist_ok=True)
 shutil.copy(JAR, RUNNER_DIR / 'devmind-agent-runner.jar')
 (RUNNER_DIR / 'agent.properties').write_text(
-    'serverUrl=ws://localhost:8080/ws/agent\n'
+    f'serverUrl={WS_URL}\n'
     f"token={issued['token']}\n"
     'executor=fake\n'
     f'workspaceRoot={WS.as_posix()}\n',
@@ -141,6 +155,7 @@ try:
     rm_rf(SEED)
     git('clone', ORIGIN, SEED)
     (SEED / 'README.md').write_text('# cap42 e2e ' + MARK + '\n', encoding='utf-8')
+    (SEED / 'CLAUDE.md').write_text(SEED_CLAUDE_MD, encoding='utf-8')
     commit(SEED, 'init')
     git('push', 'origin', 'main', cwd=SEED)
 
@@ -154,6 +169,14 @@ try:
          '项目克隆 READY', 90)
     print(f'[1] 项目 {pid} READY')
 
+    # 1b. 项目级知识条目：让会话上下文非空（否则不物化，回归测不到）
+    injection_md = '平台注入回归 ' + MARK
+    _, entry = call('POST', '/knowledge/entries', {
+        'scope': 'project', 'projectId': pid, 'name': f'{MARK} 注入回归',
+        'contentMd': injection_md, 'tags': [], 'status': 'active',
+    }, user)
+    print(f'[1b] 项目知识条目 {entry["id"]}（会话上下文非空）')
+
     uroot = WS / pid / E2E_USER['username']
 
     # 3. 会话 1：固定布局落盘（缓存 main + 固定 worktree work）
@@ -163,9 +186,22 @@ try:
     wait(lambda: (work1 / '.git').exists() or None, '固定 worktree 物化', 30)
     ok((uroot / 'main' / '.git').is_dir(), f'克隆缓存落 {uroot}/main')
     ok(s1.get('workspaceState') == 'OPEN', f'新会话 workspaceState=OPEN: {s1.get("workspaceState")}')
+
+    # 2b. 平台物化对 git 不可见（2026-09-21 事故回归：注入改写被跟踪 CLAUDE.md +
+    #     .devmind/ 未跟踪 → 恒脏 → 零改动会话也收不了口）
+    wait(lambda: (work1 / 'CLAUDE.local.md').exists() or None, '平台注入物化', 30)
+    ok(injection_md in (work1 / 'CLAUDE.local.md').read_text(encoding='utf-8'),
+       '注入块落 CLAUDE.local.md')
+    ok((work1 / 'CLAUDE.md').read_text(encoding='utf-8').replace('\r\n', '\n') == SEED_CLAUDE_MD,
+       '仓库自带的 CLAUDE.md 一字节不动（claude 自己会读它）')
+    ok((work1 / '.claude' / 'settings.local.json').is_file(), '权限白名单已物化')
+    dirty = git('status', '--porcelain', cwd=work1)
+    ok(dirty == '', f'物化后 worktree 必须 git 干净（实际: {dirty!r}）')
+    ok('CLAUDE.local.md' in git('check-ignore', '-v', 'CLAUDE.local.md', cwd=work1),
+       '平台物化路径已进 info/exclude（agent「git add -A」也扫不进分支）')
     (work1 / 'code.txt').write_text(S1_CHANGE + '\n', encoding='utf-8')
     commit(work1, 'work s1')
-    print(f'[2] 会话1 {sid1} 固定工作区就绪 + 提交一笔')
+    print(f'[2] 会话1 {sid1} 固定工作区就绪 + 提交一笔；平台物化对 git 不可见 OK')
 
     # 4. finish：不 push 不删（工作区保留、远端无会话分支）
     call('POST', f'/sessions/{sid1}/finish', token=user)
@@ -183,6 +219,11 @@ try:
     _, ack = call('POST', f'/sessions/{sid1}/finalize', {}, user)
     ok(ack.get('ok') is True, f"finalize ok: {ack.get('detail')}")
     ok(git('show', 'main:code.txt', cwd=ORIGIN).strip() == S1_CHANGE, '基线含会话产出 code.txt')
+    tree = git('ls-tree', '-r', '--name-only', 'main', cwd=ORIGIN).split('\n')
+    ok('CLAUDE.local.md' not in tree and not any(p.startswith('.devmind/') for p in tree),
+       f'平台物化文件不得合入基线: {[p for p in tree if "CLAUDE" in p or p.startswith(".devmind")]}')
+    ok(git('show', 'main:CLAUDE.md', cwd=ORIGIN).strip() == SEED_CLAUDE_MD.strip(),
+       '基线 CLAUDE.md 仍为仓库自有内容')
     ok(git('ls-remote', ORIGIN, f'refs/heads/feature/{sid1}') != '', '会话分支已推送远端（diff 链路）')
     ok(not work1.exists(), '收口后固定 worktree 已删')
     _, v1 = call('GET', f'/sessions/{sid1}', token=user)
@@ -277,3 +318,18 @@ finally:
         runner.wait(timeout=10)
     except subprocess.TimeoutExpired:
         runner.kill()
+    # 还原平台默认节点（best-effort，尽力而为地不弄脏环境）
+    try:
+        call('POST', f'/agent-nodes/{node_id}/unset-default', token=admin)
+        if prev_default:
+            call('POST', f'/agent-nodes/{prev_default}/default', token=admin)
+        print(f'[cleanup] 默认节点已还原（prev={prev_default}）')
+    except Exception as ex:
+        print(f'[cleanup] 默认节点还原失败，请人工确认: {ex}')
+    # 删测试项目（best-effort：留一堆 cap42-* 项目会污染项目列表）
+    try:
+        if pid:
+            call('DELETE', f'/projects/{pid}', token=admin)
+            print(f'[cleanup] 测试项目 {pid} 已删')
+    except Exception as ex:
+        print(f'[cleanup] 项目删除跳过: {ex}')
