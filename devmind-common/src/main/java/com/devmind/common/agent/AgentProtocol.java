@@ -35,12 +35,16 @@ package com.devmind.common.agent;
  * 缺席时 runner 回退内置 devmind 署名，双向优雅降级）。
  * v13 = CAP-51 FR-06 需求终态清理（workspace_release 帧携带 deleteRemoteBranch——需求
  * DONE/CANCELLED 时释放工作树并追加删除远端需求分支；<b>可选字段不门控</b>：老 runner
- * 忽略字段 = 只释放本地、远端分支留存，优雅降级）。</p>
+ * 忽略字段 = 只释放本地、远端分支留存，优雅降级）。
+ * v14 = CAP-56 决策实验室评测/微调（exec 帧携带 {@code bundle{kind,id}}——执行包（脚本 + 数据）
+ * 由 runner 凭节点 token 走 HTTP 拉取并物化到临时目录，env 注入
+ * {@code DEVMIND_LAB_SCRIPT}/{@code DEVMIND_LAB_PAYLOAD}；老 runner 忽略该字段会拿不到脚本与
+ * 数据，"照常执行"必然失败且失败原因指向脚本自身，故属「必须认识」需门控）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 13;
+    public static final int CURRENT = 14;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -77,6 +81,9 @@ public final class AgentProtocol {
 
     /** CAP-51 FR-06 需求终态清理（workspace_release 帧 deleteRemoteBranch）；可选字段不门控 */
     public static final int RELEASE_DELETE_REMOTE = 13;
+
+    /** CAP-56 决策实验室执行包（exec 帧 bundle 块：runner 拉包物化后再跑）所需最低版本 */
+    public static final int EXEC_BUNDLE = 14;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;

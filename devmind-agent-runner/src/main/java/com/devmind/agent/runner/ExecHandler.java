@@ -34,10 +34,20 @@ import java.util.function.Consumer;
  * token 仅内存：repo.token 只进 git 进程参数，所有上行日志经 {@link RunnerWorkspace#sanitize} 脱敏。</p>
  *
  * <p><b>并发</b>：许可数 = maxConcurrent（与会话共享同一上限语义）；超额在虚拟线程内排队等许可。</p>
+ *
+ * <p>CAP-56：帧带 {@code bundle{kind,id}} 时先由 {@link LabBundlePuller} 拉执行包（脚本 + 数据）
+ * 解到临时目录，再以本类注入的 {@link #SCRIPT_ENV}/{@link #PAYLOAD_ENV} 环境变量跑命令
+ * （服务端渲染的命令行按变量名引用）；<b>拉包失败即该步骤失败</b>，不降级跑一个空脚本。</p>
  */
 public class ExecHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ExecHandler.class);
+
+    /** CAP-56 入口脚本绝对路径的环境变量名（服务端渲染命令行时按名引用，改名要两边同步） */
+    public static final String SCRIPT_ENV = "DEVMIND_LAB_SCRIPT";
+
+    /** CAP-56 数据文件绝对路径的环境变量名（同上） */
+    public static final String PAYLOAD_ENV = "DEVMIND_LAB_PAYLOAD";
 
     /** 白名单豁免的 shell 内置命令/关键字（小写） */
     private static final Set<String> SHELL_BUILTINS = Set.of(
@@ -92,6 +102,7 @@ public class ExecHandler {
             return;
         }
         String token = null;
+        Path bundleDir = null;
         try {
             String command = frame.path("command").asText("");
             String projectId = frame.path("projectId").asText(null);
@@ -105,6 +116,23 @@ public class ExecHandler {
             }
 
             checkAllowlist(command);
+
+            // CAP-56：带 bundle 块 = 决策实验室评测/微调步骤——先拉执行包（脚本 + 数据）再跑。
+            // 白名单已在上一步拦掉不该跑的命令，拉包（有网络开销）放在其后。
+            JsonNode bundleNode = frame.path("bundle");
+            if (bundleNode.isObject()) {
+                String kind = bundleNode.path("kind").asText("");
+                String bundleId = bundleNode.path("id").asText("");
+                if (kind.isBlank() || bundleId.isBlank()) {
+                    throw new IllegalStateException("bundle 块缺 kind/id");
+                }
+                LabBundlePuller.Materialized bundle = LabBundlePuller.pull(config, kind, bundleId);
+                bundleDir = bundle.dir();
+                env.put(SCRIPT_ENV, bundle.script().toAbsolutePath().toString());
+                env.put(PAYLOAD_ENV, bundle.payload().toAbsolutePath().toString());
+                emit(execId, "stdout", "[runner] 执行包已物化: " + bundle.fileName()
+                        + " → " + bundle.dir(), token);
+            }
 
             // 工作区：带 repo 块 = 构建（clone 缓存 + detach checkout）；否则 runner 本地目录（部署/发版）
             Path cwd;
@@ -195,6 +223,8 @@ public class ExecHandler {
             if (workspaceId != null && !workspaceId.isBlank()) {
                 activeBuilds.remove(workspaceId);
             }
+            // 执行包临时目录：脚本与数据都在里面，跑完即弃（权重由 --out 指向服务端指定的持久路径，不在这）
+            LabBundlePuller.deleteQuietly(bundleDir);
             permits.release();
         }
     }

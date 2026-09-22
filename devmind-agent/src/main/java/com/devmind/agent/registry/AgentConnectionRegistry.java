@@ -556,6 +556,7 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
                     "节点 " + nodeId + " 的 runner 协议版本过低（exec 需 v" + AgentProtocol.EXEC_FRAMES
                             + "+），请到节点页升级 runner");
         }
+        requireBundleProtocol(nodeId, cmd.bundle());
         WebSocketSession ws = requireConnection(nodeId);
         CompletableFuture<AgentExecResult> done = new CompletableFuture<>();
         pendingExecs.put(cmd.execId(), new ExecWaiter(nodeId, sink, done));
@@ -579,6 +580,15 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             repo.put("token", cmd.repo().token());
             frame.put("repo", repo);
         }
+        // CAP-56：bundle 引用<b>必须在这里 put</b>——漏一行就是"帧看着发出去了、runner 却没拿到包"，
+        // 这类新字段漏拼本仓库已经出过三次（AgentLaunchCommand 的 repos/manifest/workspaceKey），
+        // 现象是任务跑起来但缺东西、日志里一点线索都没有。AgentConnectionRegistryExecTest 钉住它。
+        if (cmd.bundle() != null) {
+            Map<String, Object> bundle = new LinkedHashMap<>();
+            bundle.put("kind", cmd.bundle().kind());
+            bundle.put("id", cmd.bundle().id());
+            frame.put("bundle", bundle);
+        }
         putProxy(frame, nodeId);
         try {
             send(ws, frame);
@@ -591,6 +601,24 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             throw new DevMindException(ErrorCode.CONFLICT, "exec 下发异常: " + e.getMessage(), e);
         } finally {
             pendingExecs.remove(cmd.execId());
+        }
+    }
+
+    /**
+     * CAP-56：带执行包的 exec 需 v14+——老 runner 会忽略 bundle 块，然后"照常"去跑那条
+     * 引用 {@code $DEVMIND_LAB_SCRIPT} 的命令：脚本与数据都没物化，失败信息指向脚本自身
+     * （找不到文件），排查会从实验室一路查到节点上，而真正的原因只是版本不够。
+     * 故这是「必须认识」的帧字段，在服务端直接拦下并指向升级。
+     */
+    private void requireBundleProtocol(String nodeId, AgentExecCommand.LabBundleRef bundle) {
+        if (bundle == null) {
+            return;
+        }
+        if (!supports(nodeId, AgentProtocol.EXEC_BUNDLE)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 的 runner 协议版本过低（决策实验室评测/微调需 v"
+                            + AgentProtocol.EXEC_BUNDLE + "+，执行包要由 runner 拉取物化），"
+                            + "请到节点页升级 runner");
         }
     }
 

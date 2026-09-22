@@ -54,15 +54,40 @@ public class AgentNodeStepRunner {
     public StepResult runStep(String nodeId, String projectId, String workspaceId, int stepIndex,
                               StepSpec step, Map<String, String> env, AgentExecCommand.Repo repo,
                               Consumer<String> sink) {
+        return runStep(nodeId, projectId, workspaceId, stepIndex, step, env, repo, null, null, sink);
+    }
+
+    /**
+     * CAP-56 带执行包的重载：{@code bundle} 非空时 runner 先凭节点 token 拉执行包（脚本 + 数据）
+     * 物化到临时目录，再以 {@code DEVMIND_LAB_SCRIPT}/{@code DEVMIND_LAB_PAYLOAD} 跑 command。
+     *
+     * @param bundle 决策实验室执行包引用（可空 = 普通脚本步骤）
+     */
+    public StepResult runStep(String nodeId, String projectId, String workspaceId, int stepIndex,
+                              StepSpec step, Map<String, String> env, AgentExecCommand.Repo repo,
+                              AgentExecCommand.LabBundleRef bundle, Consumer<String> sink) {
+        return runStep(nodeId, projectId, workspaceId, stepIndex, step, env, repo, bundle, null, sink);
+    }
+
+    /**
+     * 全参版本（其余重载都收敛到这里）。
+     *
+     * @param timeoutSec 单步超时（秒）；null = 用全局 {@code execution.step-timeout-ms}
+     *                   （长任务如 RLCD 训练远超全局默认 30 分钟，必须能单独放宽）
+     */
+    public StepResult runStep(String nodeId, String projectId, String workspaceId, int stepIndex,
+                              StepSpec step, Map<String, String> env, AgentExecCommand.Repo repo,
+                              AgentExecCommand.LabBundleRef bundle, Long timeoutSec,
+                              Consumer<String> sink) {
         AgentNodeConnector connector = connectorProvider.getIfAvailable();
         if (connector == null) {
             return StepResult.failed(-1, "agent 模块未装配，无可用执行节点");
         }
         String execId = (workspaceId == null || workspaceId.isBlank() ? "exec-" + nodeId : workspaceId)
                 + "-s" + stepIndex + "-" + Long.toString(System.nanoTime(), 36);
-        long timeoutSec = props.getStepTimeoutMs() / 1000;
+        long timeout = timeoutSec != null && timeoutSec > 0 ? timeoutSec : props.getStepTimeoutMs() / 1000;
         AgentExecCommand cmd = new AgentExecCommand(execId, projectId, workspaceId, step.command(),
-                step.workingDir(), env, timeoutSec, repo);
+                step.workingDir(), env, timeout, repo, bundle);
         long start = System.currentTimeMillis();
         AgentExecResult r;
         try {
@@ -79,7 +104,7 @@ public class AgentNodeStepRunner {
             return StepResult.failed(r.exitCode(), r.error());
         }
         if (r.timedOut()) {
-            String err = "步骤超时（>" + timeoutSec + "s，runner 侧已整树终止）：" + step.name();
+            String err = "步骤超时（>" + timeout + "s，runner 侧已整树终止）：" + step.name();
             audit(projectId, nodeId, step, r.exitCode(), false, err, start);
             return StepResult.failed(r.exitCode(), err);
         }

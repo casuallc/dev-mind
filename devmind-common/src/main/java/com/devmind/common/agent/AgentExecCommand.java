@@ -18,9 +18,17 @@ import java.util.Map;
  * @param env         注入子进程的环境变量（可空）
  * @param timeoutSec  单步超时（秒），超时 runner 整树 kill 后回 timedOut=true
  * @param repo        构建工作区描述（可空 = 不准备代码，直接在 runner 本地目录执行——部署/发版场景）
+ * @param bundle      CAP-56 执行包引用（可空 = 普通脚本步骤），见 {@link LabBundleRef}
  */
 public record AgentExecCommand(String execId, String projectId, String workspaceId, String command,
-                               String workingDir, Map<String, String> env, long timeoutSec, Repo repo) {
+                               String workingDir, Map<String, String> env, long timeoutSec, Repo repo,
+                               LabBundleRef bundle) {
+
+    /** 兼容构造（CAP-56 前的 8 参签名）：普通脚本步骤，无执行包 */
+    public AgentExecCommand(String execId, String projectId, String workspaceId, String command,
+                            String workingDir, Map<String, String> env, long timeoutSec, Repo repo) {
+        this(execId, projectId, workspaceId, command, workingDir, env, timeoutSec, repo, null);
+    }
 
     /**
      * 构建工作区 repo 块（语义照搬 launch 帧 RepoSpec，CAP-25）：
@@ -32,5 +40,20 @@ public record AgentExecCommand(String execId, String projectId, String workspace
      * @param token  git 凭据（CloneTokenResolver 解析；仅随帧传输 + runner 内存持有，不落盘）
      */
     public record Repo(String remoteUrl, String branch, String commit, String token) {
+    }
+
+    /**
+     * CAP-56 执行包引用（帧里只放引用，字节由 runner 凭节点 token 走 HTTP 拉取）。
+     *
+     * <p>runner 侧动作：{@code GET /api/agent/decision-lab/bundles/{kind}/{id}?token=} → 解到临时目录
+     * → env 注入 {@code DEVMIND_LAB_SCRIPT}（清单里的入口脚本绝对路径）与
+     * {@code DEVMIND_LAB_PAYLOAD}（数据文件绝对路径）→ 跑 command；<b>拉取失败即 exec 失败</b>
+     * （不降级跑一个没有脚本与数据的步骤，同 CAP-34 上下文包口径）。</p>
+     *
+     * @param kind 任务类型（{@code evaluation} / {@code finetune}；见 common 的
+     *             {@code DecisionLabBundleProvider} 常量——这里用字符串以免 agent 模块反向依赖）
+     * @param id   任务 id
+     */
+    public record LabBundleRef(String kind, String id) {
     }
 }
