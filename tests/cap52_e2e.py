@@ -12,6 +12,8 @@
 链路 C（粒度护栏）：清单 6 条（> MAX_ITEMS=5）→ flow.plan.partial、不建 WI、不起开发会话。
 链路 D（入口门禁）：规划会话进行中再起规划 409；无清单起开发 409；终态需求起规划 409。
 链路 E（人工再跑一轮）：清单已就绪时 POST /flow/dev 再起一个开发会话。
+链路 F（CAP-53）：claude cwd 上抬「项目+用户」根——cwd 级恒定路由文件存在、settings 落 cwd
+（共享）而非代码目录（工作树布局不变，仍 worktrees/req-<rid>）。
 """
 import json, os, shutil, subprocess, sys, time, urllib.request, urllib.error
 from pathlib import Path
@@ -79,6 +81,11 @@ def write_output(sid, rid, name, content):
     out = session_dir(sid, rid) / ".devmind" / "output"
     out.mkdir(parents=True, exist_ok=True)
     (out / name).write_text(content, encoding="utf-8")
+
+
+def user_root(pid, owner="admin"):
+    """CAP-53 claude cwd（项目+用户粒度工作区根）：<workspaceRoot>/<pid>/<owner>。"""
+    return WS / pid / owner
 
 
 def overview(tok, pid, rid):
@@ -166,6 +173,19 @@ def main():
         e = req("POST", f"/projects/{pid}/requirements/{rid}/flow/plan", None, tok, expect=409)
         assert "进行中的会话" in json.dumps(e, ensure_ascii=False), f"409 文案不符: {e}"
         print("[5] 规划中重复起会话 409 OK")
+
+        # ---- 链路 F（CAP-53）：cwd 上抬「项目+用户」根，物化共享/会话拆分 ----
+        uroot = wait(lambda: user_root(pid) if (user_root(pid) / "CLAUDE.local.md").exists()
+                     else None, "cwd 级路由文件", 30)
+        routing = (uroot / "CLAUDE.local.md").read_text(encoding="utf-8")
+        assert "不是代码目录" in routing and "克隆缓存" in routing, f"路由文件内容不符: {routing[:200]}"
+        wait(lambda: (uroot / ".claude" / "settings.local.json").exists() or None,
+             "cwd 级 settings 物化", 30)
+        wt = session_dir(plan_sess["id"], rid)
+        assert wt == uroot / "worktrees" / f"req-{rid}", f"工作树布局应不变: {wt}"
+        assert not (wt / ".claude" / "settings.local.json").exists(), \
+            "settings 应落 cwd（共享）而非代码目录（会话特定）"
+        print("[5b] CAP-53：cwd 路由文件 + settings 落 cwd、代码目录无 settings、工作树布局不变 OK")
 
         write_output(plan_sess["id"], rid, "analysis.md",
                      "# 需求分析\n\n## 影响面\nalert_rule 表与阈值校验接口（CAP52-E2E-MARK）\n")
