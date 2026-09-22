@@ -170,3 +170,8 @@ GET /api/chats/{id}/workspace/...                      同上（问答沙箱，d
 ## 7. 落地状态
 
 - **M1 —— 需求定稿**：本文档。
+- **M2 —— 全链路实现（2026-09-22）**：协议 v11 + `workspace_status` 旁路推送 +
+  `workspace_query` 拉取（tree/file/diff/status）+ 服务端旁路缓存与 REST + 前端右栏面板
+  （变更/文件双 tab，diff 与文件内容抽屉；MODEL 执行体无面板）。单测：runner 采集/查询
+  纯函数面（porcelain/numstat/路径限定）、agent 帧链路面（组帧/ack 路由/v11 门控/断连清理）。
+  E2E 实跑范围待补（tests/ 脚本尚未沉淀）。
