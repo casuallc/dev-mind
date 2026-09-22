@@ -22,6 +22,10 @@
 //      **5173 常被本机常驻的 dev server 占着**，占着就用别的端口并把它加进上面的 CORS 白名单
 //   3) 本机 Chrome（CHROME_PATH 可覆盖）
 //
+// 数据前提：分诊能不能用除了端点，还多一道 CAP-56 FR-07 的准入闸门——库里得有一份**验证通过**的
+// 模型产物，否则按钮照样是灰的（原因指向决策实验室）。脚本 [1] 自己走完「登记 → 人工验证通过」
+// 两步（只登记不放行，闸门仍关着），收尾撤销放行再删除（验证中的产物删不掉，不撤下轮重跑必 409）。
+//
 // 用法：node tests/e2e-cap55-frontend.mjs
 //   可覆盖：BASE / API / USER / PASS / CHROME_PATH / CDP_PORT / MOCK_PORT
 // 副作用：往目标实例写端点/知识库/提案/采纳（收尾删掉自建物）；下载产物、截图与报告落 tmp/cap55-ui/。
@@ -249,6 +253,7 @@ let browserWs
 let login
 let token
 let endpointId = null
+let checkpointId = null
 let kbId = null
 let proposalId = null
 let p2Id = null
@@ -327,6 +332,22 @@ try {
     { kind: 'DECISION', name: 'CAP55-UI-E2E-决策边车', baseUrl: `http://127.0.0.1:${MOCK_PORT}` }, token)).id
   await api('PUT', `/model-endpoints/${endpointId}/default`, undefined, token)
   check('登记 DECISION 端点并设为默认', !!endpointId)
+
+  // 准入闸门（CAP-56 FR-07）挡在端点判定之前：端点配好但库里没有验证过的产物时，分诊按钮照样是灰的。
+  // 所以「按钮可用」这条前端断言必须先把闸门打开——登记一份产物并人工验证通过（这正是不验证闸门
+  // 就永远绿不了的那一步：登记 ≠ 放行）。留一条"还没验证时不可用"的断言，钉住这一步不能省。
+  const gate0 = await api('GET', '/decision/checkpoints/gate', undefined, token)
+  check('闸门关着（还没登记任何验证过的产物）', gate0?.open === false, JSON.stringify(gate0))
+  checkpointId = (await api('POST', '/decision/checkpoints',
+    { name: 'CAP55-UI-E2E-产物', serveSlot: 'multilingual', kind: 'BASE',
+      sourcePath: 'convaiinnovations/laya' }, token)).id
+  const beforeVerify = await api('GET', '/decision/checkpoints/gate', undefined, token)
+  check('登记完闸门仍关着（登记 ≠ 放行，要人看着指标按下验证）',
+    beforeVerify?.open === false, JSON.stringify(beforeVerify))
+  await api('POST', `/decision/checkpoints/${checkpointId}/verify`,
+    { note: 'E2E：mock 边车跑通的判断依据，非真实指标' }, token)
+  const gate1 = await api('GET', '/decision/checkpoints/gate', undefined, token)
+  check('验证通过后闸门打开（按钮才有理由亮）', gate1?.open === true, JSON.stringify(gate1))
 
   kbId = (await api('POST', '/knowledge/bases',
     { name: 'CAP55-UI-E2E 经验库', scope: 'global', injectMode: 'FULL' }, token)).id
@@ -577,10 +598,15 @@ try {
   }
 
   // ── 7. 清理 ──────────────────────────────────────────────────
-  log('\n[6] 清理自建的库/条目')
+  log('\n[6] 清理自建的库/条目/产物（产物要撤销放行才删得掉，否则下一轮重跑必 409）')
   const entries = await api('GET', `/knowledge/bases/${kbId}/entries`, undefined, token).catch(() => [])
   for (const e of entries ?? []) await api('DELETE', `/knowledge/entries/${e.id}`, undefined, token).catch(() => {})
   await api('DELETE', `/knowledge/bases/${kbId}`, undefined, token).catch(() => {})
+  if (checkpointId) {
+    await api('POST', `/decision/checkpoints/${checkpointId}/unverify`,
+      { reason: 'UI E2E 收尾：本轮产物作废' }, token).catch(() => {})
+    await api('DELETE', `/decision/checkpoints/${checkpointId}`, undefined, token).catch(() => {})
+  }
   check('清理完成（隔离实例，脏数据不落别人库）', true)
   void p2Id
 } catch (e) {

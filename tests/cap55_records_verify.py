@@ -11,6 +11,8 @@
    `devmind-app/tmp/cap55-records-e2e/`——想清库重跑要删的是那个目录（删仓库根的 tmp/ 没用，
    脚本会读到上一次的残留行）。
 3. python（tests/fixtures/laya-sidecar-mock.py 由脚本自起，端口 LAYA_MOCK_PORT 默认 18195）。
+4. **库要干净**：CAP-56 FR-07 的准入闸门生效后，分诊（进而留痕）多了一道前置——库里得有**一份
+   验证通过**的模型产物。脚本自己登记+验证一份（§0），重跑要清库（产物名固定，重名 409）。
 
 覆盖 FR-05 全链：
   A 分诊留痕——自动分诊后 decision_records 就有行：state/questions/model_answer/routing/延迟 逐字落库；
@@ -143,6 +145,8 @@ sidecar_proc = subprocess.Popen([sys.executable, FIXTURE, str(LAYA_PORT)],
 ENDPOINT_ID = None
 KB_ID = None
 ENTRY_ID = None
+CHECKPOINT_ID = None
+CHECKPOINT_NAME = "CAP55-RECORDS-E2E-产物"
 try:
     for _ in range(50):
         try:
@@ -169,6 +173,21 @@ try:
     check("建 DECISION 端点", st == 200 and bool(ENDPOINT_ID), f"{st} {ep}")
     st, _ = call("PUT", f"/model-endpoints/{ENDPOINT_ID}/default")
     check("设为平台默认", st == 200, f"{st}")
+
+    # 准入闸门（CAP-56 FR-07）挡在端点判定之前：只配端点不给过，库里得有**一份验证通过的产物**。
+    # 不打开它，下面所有"未降级"的断言都会变成降级（留痕会全是 degraded=true 的行）——
+    # 这条前置是本脚本与 CAP-56 的接口，写在这里而不是让人手点一份产物。
+    st, ck = call("POST", "/decision/checkpoints",
+                  {"name": CHECKPOINT_NAME, "serveSlot": "multilingual", "kind": "BASE",
+                   "sourcePath": "convaiinnovations/laya"})
+    CHECKPOINT_ID = (ck or {}).get("id")
+    check("登记模型产物（闸门的前置）", st == 200 and bool(CHECKPOINT_ID), f"{st} {ck}")
+    st, gate = call("GET", "/decision/checkpoints/gate")
+    check("只登记不验证：闸门仍关着（登记 ≠ 放行）",
+          st == 200 and (gate or {}).get("open") is False, f"{st} {gate}")
+    st, ck = call("POST", f"/decision/checkpoints/{CHECKPOINT_ID}/verify",
+                  {"note": "E2E：mock 边车跑通的判断依据，非真实指标"})
+    check("人工验证通过 → 闸门打开", st == 200 and (ck or {}).get("verified") is True, f"{st} {ck}")
 
     st, kb = call("POST", "/knowledge/bases",
                   {"name": "CAP55-RECORDS-E2E 经验库", "scope": "global", "injectMode": "FULL"})
@@ -354,7 +373,13 @@ try:
     check("降级行不进导出集", "降级期提案" not in export()[0], "被当成样本喂出去了")
 
     # ---------- G. 清理 ----------
-    print("\n[G] 清理：非空库拒删（409），清空条目后库可删")
+    print("\n[G] 清理：非空库拒删（409），清空条目后库可删；产物先撤销放行再删")
+    if CHECKPOINT_ID:
+        st, _ = call("POST", f"/decision/checkpoints/{CHECKPOINT_ID}/unverify",
+                     {"reason": "E2E 收尾：本轮产物作废"})
+        check("撤销放行", st == 200, f"{st}")
+        st, _ = call("DELETE", f"/decision/checkpoints/{CHECKPOINT_ID}")
+        check("撤销后可删（否则下一轮重跑必 409）", st == 200, f"{st}")
     if KB_ID:
         st, entries = call("GET", f"/knowledge/bases/{KB_ID}/entries")
         check("库里还有条目（对应下面的 409）", st == 200 and len(entries or []) >= 1, f"{st} {entries}")

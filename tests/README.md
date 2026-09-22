@@ -83,6 +83,8 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 | e2e-agent-node.py | CAP-21 节点全链路：注册→会话→授权→优雅退出→离线 409 |
 | cap56_sidecar_source.py | CAP-56 FR-01 边车槽位来源覆盖：真起边车（需 `tools/laya-sidecar/.venv` + `--artifact` 一份真实 checkpoint 目录），文件分支（`models.json` 的 `slots` 包裹/`_comment` 剔除）+ `/healthz.sources` 上报（kind/overridden/ready/missing/device/source_origin）+ **覆盖真被 serve**（真发一次 `/v1/predict`，断言响应 `routing.repo` 指向该产物）；五类坏配置（槽位名不认识/本地路径不存在/环境变量坏 JSON/来源文件坏 JSON/`LAYA_MODELS_FILE` 指了不存在的文件）一律启动即失败，与「没配覆盖」的正常降级划清界线。不起 app，纯边车侧，`python tests/cap56_sidecar_source.py --artifact <产物目录>` |
 | cap55_verify.py | CAP-55 FR-02 决策端点：DECISION 端点登记（provider 默认 laya、model=checkpoint 别名可空、不吃向量语义）、连接测试两段实调（/healthz→固定样例 /v1/predict，message 带常驻清单+样例答案+routing.reason）、边车未就绪不白跑样例题、样例失败透出边车 detail、mock provider 零网络自报、kind-provider 配对 400、同类型唯一的平台默认、无引用可删（脚本自起 fixtures/laya-sidecar-mock.py，默认 :18095 独立实例；真边车连通性由 FR-01 smoke 覆盖，这里只钉 Java 侧协议） |
+| cap55_triage_verify.py | CAP-55 FR-04 提案分诊：自动分诊出徽标（层级/置信度/重复/质量分+routing.reason）、发出去的题面与 state（三题类型/回引 state 键/不放提案人自称去向/1500 字截断/召回 query 用标题）、重复判定两段式（无 embedding 走关键词召回）、手动重分诊换答案徽标跟着变、降级链（端点删掉→按钮置灰+落 degraded 记录+其余接口零影响）、边界 404；**外加 CAP-56 FR-07 闸门联动**：端点配好但库里没有验证过的产物时仍不可用（原因指向决策实验室）→ 登记+人工验证后放行（只登记不放行）→ 删端点后原因才轮到「模型接入」（脚本自起 fixtures/laya-sidecar-mock.py，默认 :18095 独立实例，需干净 H2：产物名固定，重跑前清库） |
+| cap55_records_verify.py | CAP-55 FR-05 决策记录与训练集导出：自动分诊落 state/questions/model_answer/routing/延迟、人工裁决配对（gold/agreement 逐题算）、导出 JSONL 三字段与 gold one-hot、reject 行不进导出集、重分诊不抹裁决、查询过滤与 size 边界、降级样本也留痕（脚本自起 fixtures/laya-sidecar-mock.py，默认 :18095 独立实例，需干净 H2；同样先过 CAP-56 FR-07 闸门：§0 登记+验证一份产物，收尾撤销+删除） |
 | e2e-cap41.py / b / c | CAP-41 工作日志空间：懒创建/守卫/种子模板/日报周报生成 |
 | e2e-cap41-m3-push.py | CAP-41 M3：worklog 远端绑定 + push（协议 v6，file:// bare 库） |
 | e2e-cap42.py | CAP-42 固定工作区 + 手动收口（CAP-51 keyed 布局 worktrees/sid-*）：布局落盘/finish 不 push 不删/收口闭环（合并+push+FINALIZED+保留工作树 ff 前进+重复 409+merge 署名=操作者身份 CAP-24 FR-06）/脏与合并冲突两负例重试/删除释放与离线 fail-visible（协议 v7+，file:// bare 库） |
@@ -113,6 +115,12 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 | e2e-requirements-layout.mjs | 需求列表：整页不出纵向滚动条、表体内部滚动（`scroll.y` 为实测值）、表头吸顶、分页条常驻；自带数据（临时项目「布局校验-临时」造 30 条需求，跑完连项目一起删，`--keep` 保留）。浏览器路径用 `CHROME_PATH` 覆盖，截图落 `tmp/layout-check-requirements.png` |
 | e2e-layout-pages.mjs | 全站布局巡检：34 个路由（项目页/个人页/后台页/项目设置，含知识库详情页取库里第一个库、没有则跳过该路由）逐个打开，并依次点开页内第一组 `Segmented` 的每个视图，逐个断言 `.ant-layout-content` 与 document 都不溢出、且没有「越界又无滚动祖先」的元素（漏了滚动容器 → 内容被裁或顶破卡片）。只读，不改数据（当前项目取库中第一个）。`--only knowledge,worklog` 只跑匹配路由（**别写前导斜杠**，Git Bash 会做路径转换；片段是 `includes` 匹配，`admin/knowledge` 会同时命中知识库列表页与详情页）、`KB_ID=<库ID>` 指定知识库详情页巡检哪个库（默认取库里第一个）、`--window 1366,768` 换视口（矮视口更易暴露问题，建议两轮都跑）、`--shots` 每页存图、`--dump` 失败时打印内容区组件树（含高度/滚动量）定位元凶。截图与 report.json 落 `tmp/layout-sweep/` |
 | e2e-model-form-probe.mjs | 「模型接入」抽屉内「测试连接」：**填进表单的凭据与超时必须真的进探针请求**（浏览器里那条「表单取值 → 草稿请求」的路径，cap48_verify.py 走接口测不到）。自起一个强制鉴权的假端点（Bearer 不匹配一律 401，与 vLLM 行为一致），无头 Chrome 开抽屉、选类型、填表、点「测试连接」，逐项断言：探针打对路径、**带上 apiKey**、提示条成功、表单填的超时生效（拖 5 秒的假端点按 2 秒超时失败）。只读，不点「保存」。前置同上一行（app + 前端 dev），另需前端 origin 在后端 CORS 白名单内（默认只放 5173/8080，Vite 因端口占用换到 5174 时脚本会直接报错并给处置办法）。报告与失败截图落 `tmp/e2e-model-form-probe/` |
+
+### 前端 UI E2E（Node + 无头 Chrome，需 app 隔离实例 + 前端 dev server 同时起）
+
+| 脚本 | 覆盖 |
+|------|------|
+| e2e-cap55-frontend.mjs | CAP-55 FR-07 前端：inbox 分诊徽标三块、查看依据抽屉（routing.reason 原文/概率分布/召回比对物/laya 应答回放）、管理抽屉里「分诊」按钮的可用性、晋升全局 → 决策记录页（模型建议 vs 人工裁决、agreement、可训练标记、state 与题面逐字回放）、导出训练集（点按钮 → 浏览器真下载 → 校验 JSONL 三字段与 gold one-hot）、降级链（删端点 → 按钮置灰、悬停给出指向模型接入的原因）。**含 CAP-56 FR-07 闸门**：§1 先断言闸门关着（登记 ≠ 放行），登记+验证一份产物把闸门打开，按钮才不灰；收尾撤销放行再删（验证中的产物删不掉）。前置：app 隔离实例（`--server.port=18095 --spring.profiles.active=e2e` + 干净 H2 + **CORS 白名单带上前端 origin**）与 `VITE_BACKEND_URL=http://localhost:18095 npm run dev -- --port 5199 --strictPort`；脚本自起 fixtures/laya-sidecar-mock.py。`BASE` 指向前端 dev（默认 5173——端口被占时 Vite 会换端口，这时必须用 `BASE=` 指过去，否则代理检查会打到别人那份 dev server 上） |
 
 ### WS 帧探针（Node，被 verify 脚本调用或手工）
 

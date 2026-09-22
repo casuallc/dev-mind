@@ -8,8 +8,12 @@
        --spring.profiles.active=e2e \
        --spring.datasource.url=jdbc:h2:file:./tmp/cap55-triage-e2e/devmind;AUTO_SERVER=TRUE"
 3. python（tests/fixtures/laya-sidecar-mock.py 由脚本自起，端口 LAYA_MOCK_PORT 默认 18195）。
+4. **库要干净**：CAP-56 FR-07 的准入闸门生效后，分诊可用性多了一道前置——库里得有**一份验证通过**
+   的模型产物。脚本自己登记+验证一份（§0），所以重跑要清库（产物名固定，重名会 409）。
 
-覆盖 FR-04：
+覆盖 FR-04（外加 CAP-56 FR-07 的闸门联动）：
+  0 前置——闸门与分诊可用性同源：没登记产物时先被"准入"拦住（原因指向决策实验室），
+    登记+人工验证后放行；随后才轮到端点判定（这正是 E 段"删端点→指向模型接入"能成立的原因）；
   A 自动分诊——新提案入库后异步出徽标（层级/置信度/重复/质量分 + 模型与 routing.reason）；
   B 发出去的题面与 state——三题类型（choice/noul/score）、题里回引 state 键、不放"提案人自称去向"、
     超长正文按 1500 字截断、召回 query 用标题（LIKE 兜底才有命中）；
@@ -127,6 +131,9 @@ sidecar_proc = subprocess.Popen([sys.executable, FIXTURE, str(LAYA_PORT)],
 ENDPOINT_ID = None
 KB_ID = None
 ENTRY_ID = None
+CHECKPOINT_ID = None
+SLOT = "multilingual"
+CHECKPOINT_NAME = "CAP55-TRIAGE-E2E-产物"
 try:
     for _ in range(50):
         try:
@@ -153,6 +160,35 @@ try:
     check("建 DECISION 端点", st == 200 and bool(ENDPOINT_ID), f"{st} {ep}")
     st, d = call("PUT", f"/model-endpoints/{ENDPOINT_ID}/default")
     check("设为平台默认（分诊才找得到它）", st == 200 and (d or {}).get("isDefault") is True, f"{st} {d}")
+
+    # 闸门（CAP-56 FR-07）挡在端点判定之前：端点配好了，但库里一份验证过的产物都没有时，
+    # 分诊仍然不可用，而且原因要说"去决策实验室"，不能把人引去查一个本来就没问题的端点配置。
+    # 这几条同时钉住了两件事的**同源**：状态端点报的原因 == 闸门原因。
+    st, s = call("GET", "/knowledge/proposals/triage-status")
+    check("端点配好但没验证产物时：仍不可用（闸门先拦）",
+          st == 200 and (s or {}).get("available") is False, f"{st} {s}")
+    check("被拦的原因是准入（指向决策实验室），不是端点配置",
+          "决策实验室" in (s or {}).get("reason", ""), f"{s}")
+    st, gate0 = call("GET", "/decision/checkpoints/gate")
+    check("闸门自报与状态端点说法一致（同一个上游，不可能两样）",
+          st == 200 and (gate0 or {}).get("open") is False
+          and (gate0 or {}).get("reason") == (s or {}).get("reason"), f"{st} {gate0} / {s}")
+
+    st, ck = call("POST", "/decision/checkpoints",
+                  {"name": CHECKPOINT_NAME, "serveSlot": SLOT, "kind": "BASE",
+                   "sourcePath": "convaiinnovations/laya"})
+    CHECKPOINT_ID = (ck or {}).get("id")
+    check("登记一份模型产物（BASE，来源是 HF repo）",
+          st == 200 and bool(CHECKPOINT_ID) and (ck or {}).get("verified") is False, f"{st} {ck}")
+    st, s = call("GET", "/knowledge/proposals/triage-status")
+    check("刚登记还没验证：闸门照样关着（登记 ≠ 放行）",
+          st == 200 and (s or {}).get("available") is False, f"{st} {s}")
+
+    st, ck = call("POST", f"/decision/checkpoints/{CHECKPOINT_ID}/verify",
+                  {"note": "E2E：本轮的判断依据是 fixtures 的 mock 边车跑通，非真实指标"})
+    check("人工验证通过", st == 200 and (ck or {}).get("verified") is True, f"{st} {ck}")
+    st, s = call("GET", "/knowledge/proposals/triage-status")
+    check("验证通过后放行：状态端点报可用", st == 200 and (s or {}).get("available") is True, f"{st} {s}")
 
     st, kb = call("POST", "/knowledge/bases",
                   {"name": "CAP55-TRIAGE-E2E 经验库", "scope": "global", "injectMode": "FULL"})
@@ -271,13 +307,16 @@ try:
     # ---------- E. 降级链（FR-06） ----------
     print("\n[E] 端点删除 → 全链路降级（无徽标、按钮置灰、其余功能零影响）")
     st, s = call("GET", "/knowledge/proposals/triage-status")
-    check("配好时状态端点报可用", st == 200 and (s or {}).get("available") is True, f"{st} {s}")
+    check("配好时状态端点报可用（产物已验证，闸门开着）",
+          st == 200 and (s or {}).get("available") is True, f"{st} {s}")
     st, _ = call("DELETE", f"/model-endpoints/{ENDPOINT_ID}")
     check("删掉 DECISION 端点", st == 200, f"{st}")
     st, s = call("GET", "/knowledge/proposals/triage-status")
     check("按钮置灰：available=false 且带原因（指向模型接入）",
           st == 200 and (s or {}).get("available") is False and "模型接入" in (s or {}).get("reason", ""),
           f"{st} {s}")
+    check("闸门开着时原因不再提准入（判定确实按序落到端点这一支）",
+          "决策实验室" not in (s or {}).get("reason", ""), f"{s}")
 
     p2 = create_proposal("降级期提案", "端点没了也该能正常入库")
     check("端点缺失时提案照建（不 5xx）", p2.get("id") is not None, f"{p2}")
@@ -305,7 +344,18 @@ try:
     check("分诊不存在的提案 → 404", st == 404, f"{st} {r}")
 
     # ---------- G. 清理 ----------
-    print("\n[G] 清理：建的知识条目/库可删（端点已删）")
+    print("\n[G] 清理：建的知识条目/库可删（端点已删）；放行中的产物要先撤销再删")
+    if CHECKPOINT_ID:
+        st, _ = call("DELETE", f"/decision/checkpoints/{CHECKPOINT_ID}")
+        check("放行中的产物删不掉（删除=闸门当场关闭，不该由删按钮顺手做掉）", st == 409, f"{st}")
+        st, _ = call("POST", f"/decision/checkpoints/{CHECKPOINT_ID}/unverify",
+                     {"reason": "E2E 收尾：本轮产物作废"})
+        check("撤销放行", st == 200, f"{st}")
+        st, s = call("GET", "/knowledge/proposals/triage-status")
+        check("撤销后分诊立即不可用（无缓存，端点早已删）",
+              st == 200 and (s or {}).get("available") is False, f"{st} {s}")
+        st, _ = call("DELETE", f"/decision/checkpoints/{CHECKPOINT_ID}")
+        check("撤销后可删（否则下一轮重跑必 409）", st == 200, f"{st}")
     if ENTRY_ID:
         st, _ = call("DELETE", f"/knowledge/entries/{ENTRY_ID}")
         check("删条目", st == 200, f"{st}")
