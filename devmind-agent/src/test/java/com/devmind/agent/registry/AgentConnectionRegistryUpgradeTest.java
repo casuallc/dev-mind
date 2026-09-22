@@ -38,7 +38,7 @@ class AgentConnectionRegistryUpgradeTest {
         ObjectProvider<com.devmind.common.agent.AgentEventListener> listenerProvider =
                 mock(ObjectProvider.class);
         registry = new AgentConnectionRegistry(nodeService, props, JsonMapper.builder().build(),
-                listenerProvider, mock(AgentConnLogService.class));
+                listenerProvider, mock(ObjectProvider.class), mock(AgentConnLogService.class));
 
         ws = mock(WebSocketSession.class);
         when(ws.isOpen()).thenReturn(true);

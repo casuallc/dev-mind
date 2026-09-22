@@ -25,7 +25,7 @@ class AgentConnectionRegistryProtocolTest {
     @SuppressWarnings("unchecked")
     private static AgentConnectionRegistry newRegistry() {
         return new AgentConnectionRegistry(mock(AgentNodeService.class), mock(AgentProperties.class),
-                JsonMapper.builder().build(), mock(ObjectProvider.class), mock(AgentConnLogService.class));
+                JsonMapper.builder().build(), mock(ObjectProvider.class), mock(ObjectProvider.class), mock(AgentConnLogService.class));
     }
 
     private static AgentNodeEntity node(long id) {

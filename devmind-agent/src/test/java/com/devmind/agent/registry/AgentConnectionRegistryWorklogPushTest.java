@@ -39,7 +39,7 @@ class AgentConnectionRegistryWorklogPushTest {
         ObjectProvider<com.devmind.common.agent.AgentEventListener> listenerProvider =
                 mock(ObjectProvider.class);
         registry = new AgentConnectionRegistry(nodeService, new AgentProperties(),
-                JsonMapper.builder().build(), listenerProvider, mock(AgentConnLogService.class));
+                JsonMapper.builder().build(), listenerProvider, mock(ObjectProvider.class), mock(AgentConnLogService.class));
 
         ws = mock(WebSocketSession.class);
         when(ws.isOpen()).thenReturn(true);

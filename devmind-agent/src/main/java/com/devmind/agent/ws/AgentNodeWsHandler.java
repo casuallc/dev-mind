@@ -170,6 +170,22 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
             case "workspace_release_ack" -> registry.onWorkspaceReleaseAck(String.valueOf(node.getId()),
                     frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),
                     frame.path("detail").asText(null), frame.path("error").asText(null));
+            // CAP-54：工作区 git 变更快照（瞬态旁路，registry 原样透传给 session/chat bridge）
+            case "workspace_status" -> {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> snapshot = frame.has("snapshot")
+                        ? mapper.convertValue(frame.path("snapshot"), Map.class) : Map.of();
+                registry.onWorkspaceStatus(node, frame.path("sessionId").asText(""), snapshot);
+            }
+            // CAP-54：工作区只读查询 ack
+            case "workspace_query_ack" -> {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> payload = frame.has("payload")
+                        ? mapper.convertValue(frame.path("payload"), Map.class) : Map.of();
+                registry.onWorkspaceQueryAck(String.valueOf(node.getId()),
+                        frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),
+                        payload, frame.path("error").asText(null));
+            }
             default -> log.debug("未知 runner 帧类型: {}", type);
         }
     }

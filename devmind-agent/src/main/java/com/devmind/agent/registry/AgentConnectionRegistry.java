@@ -16,7 +16,9 @@ import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.AgentProtocol;
 import com.devmind.common.agent.FinalizeResult;
 import com.devmind.common.agent.InputImage;
+import com.devmind.common.agent.WorkspaceQueryResult;
 import com.devmind.common.agent.WorkspaceReleaseResult;
+import com.devmind.common.agent.WorkspaceStatusListener;
 import com.devmind.common.agent.WorklogPushResult;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
@@ -79,10 +81,16 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private record ReleaseWaiter(String nodeId, CompletableFuture<WorkspaceReleaseResult> done) {
     }
 
+    /** CAP-54 workspace_query 等待者：带 nodeId 供断连时批量失败。 */
+    private record WorkspaceQueryWaiter(String nodeId, CompletableFuture<WorkspaceQueryResult> done) {
+    }
+
     private final AgentNodeService nodeService;
     private final AgentProperties props;
     private final ObjectMapper mapper;
     private final ObjectProvider<AgentEventListener> listenerProvider;
+    /** CAP-54：workspace_status 上行帧广播（session/chat 各自认领，独立于会话事件流） */
+    private final ObjectProvider<WorkspaceStatusListener> workspaceListenerProvider;
     private final AgentConnLogService connLogService;
 
     /** nodeId(字符串) → runner WS 连接 */
@@ -105,14 +113,18 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private final Map<String, FinalizeWaiter> pendingFinalizes = new ConcurrentHashMap<>();
     /** requestId → workspace_release 等待者（CAP-42 删除会话释放固定工作区） */
     private final Map<String, ReleaseWaiter> pendingReleases = new ConcurrentHashMap<>();
+    /** requestId → workspace_query 等待者（CAP-54 工作区只读查询） */
+    private final Map<String, WorkspaceQueryWaiter> pendingWorkspaceQueries = new ConcurrentHashMap<>();
 
     public AgentConnectionRegistry(AgentNodeService nodeService, AgentProperties props,
                                    ObjectMapper mapper, ObjectProvider<AgentEventListener> listenerProvider,
+                                   ObjectProvider<WorkspaceStatusListener> workspaceListenerProvider,
                                    AgentConnLogService connLogService) {
         this.nodeService = nodeService;
         this.props = props;
         this.mapper = mapper;
         this.listenerProvider = listenerProvider;
+        this.workspaceListenerProvider = workspaceListenerProvider;
         this.connLogService = connLogService;
     }
 
@@ -176,6 +188,12 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         for (Map.Entry<String, ReleaseWaiter> e : pendingReleases.entrySet()) {
             if (e.getValue().nodeId().equals(nodeId) && pendingReleases.remove(e.getKey(), e.getValue())) {
                 e.getValue().done().complete(WorkspaceReleaseResult.failed("节点断连，工作区释放中断"));
+            }
+        }
+        // CAP-54：断线即失败该节点进行中的工作区查询（ack 不会再来）
+        for (Map.Entry<String, WorkspaceQueryWaiter> e : pendingWorkspaceQueries.entrySet()) {
+            if (e.getValue().nodeId().equals(nodeId) && pendingWorkspaceQueries.remove(e.getKey(), e.getValue())) {
+                e.getValue().done().complete(WorkspaceQueryResult.failed("节点断连，工作区查询中断"));
             }
         }
         // CAP-30：事件广播（原 getIfAvailable 单实现，chat 加入后有多实现）——各 bridge
@@ -277,6 +295,26 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         ReleaseWaiter w = pendingReleases.remove(requestId);
         if (w != null) {
             w.done().complete(ok ? WorkspaceReleaseResult.ok(detail) : WorkspaceReleaseResult.failed(error));
+        }
+    }
+
+    /**
+     * CAP-54：workspace_status 上行帧 → 广播给各 WorkspaceStatusListener（session/chat bridge
+     * 按自己是否持有该 sessionId 认领）。瞬态视图：agent 模块不缓存、不落库、不解析内容。
+     */
+    public void onWorkspaceStatus(AgentNodeEntity node, String sessionId, Map<String, Object> snapshot) {
+        touch(String.valueOf(node.getId()));
+        workspaceListenerProvider.forEach(
+                l -> l.onWorkspaceStatus(String.valueOf(node.getId()), sessionId, snapshot));
+    }
+
+    /** CAP-54：workspace_query_ack 上行帧 → 完成等待 future。 */
+    public void onWorkspaceQueryAck(String nodeId, String requestId, boolean ok,
+                                    Map<String, Object> payload, String error) {
+        touch(nodeId);
+        WorkspaceQueryWaiter w = pendingWorkspaceQueries.remove(requestId);
+        if (w != null) {
+            w.done().complete(ok ? WorkspaceQueryResult.ok(payload) : WorkspaceQueryResult.failed(error));
         }
     }
 
@@ -745,6 +783,48 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             throw new DevMindException(ErrorCode.CONFLICT, "工作区释放下发异常: " + e.getMessage(), e);
         } finally {
             pendingReleases.remove(requestId);
+        }
+    }
+
+    /**
+     * CAP-54：下发 workspace_query 帧并阻塞等 workspace_query_ack（镜像 collect_output 模式）。
+     * 协议门控：runner 低于 v11 直接 409 提示升级——不可静默发送，老 runner 忽略该帧会让
+     * REST 端点空等 30s 超时。等待上限 30s（runner 侧 git/读盘均为秒级操作 + 余量）。
+     */
+    @Override
+    public WorkspaceQueryResult workspaceQuery(String nodeId, String sessionId, String action,
+                                               String repo, String path) {
+        WebSocketSession ws = requireConnection(nodeId); // 先判在线再判版本，同 releaseWorkspace
+        if (!supports(nodeId, AgentProtocol.WORKSPACE_VIEW)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 的 runner 协议版本过低（工作区视图需 v"
+                            + AgentProtocol.WORKSPACE_VIEW + "+），请到节点页升级 runner");
+        }
+        String requestId = "wq-" + System.currentTimeMillis() + "-" + sessionId;
+        CompletableFuture<WorkspaceQueryResult> done = new CompletableFuture<>();
+        pendingWorkspaceQueries.put(requestId, new WorkspaceQueryWaiter(nodeId, done));
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "workspace_query");
+        frame.put("requestId", requestId);
+        frame.put("sessionId", sessionId);
+        frame.put("action", action);
+        if (repo != null && !repo.isBlank()) {
+            frame.put("repo", repo);
+        }
+        if (path != null && !path.isBlank()) {
+            frame.put("path", path);
+        }
+        try {
+            send(ws, frame);
+            return done.get(30, TimeUnit.SECONDS);
+        } catch (DevMindException e) {
+            throw e;
+        } catch (java.util.concurrent.TimeoutException e) {
+            return WorkspaceQueryResult.failed("等待 runner workspace_query_ack 超时（runner 无响应）");
+        } catch (Exception e) {
+            throw new DevMindException(ErrorCode.CONFLICT, "工作区查询下发异常: " + e.getMessage(), e);
+        } finally {
+            pendingWorkspaceQueries.remove(requestId);
         }
     }
 
