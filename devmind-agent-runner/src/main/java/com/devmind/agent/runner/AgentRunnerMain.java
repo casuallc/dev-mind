@@ -641,6 +641,8 @@ public class AgentRunnerMain {
         String owner = frame.path("workspaceOwner").asText("");
         // CAP-51：非空 = 需求粒度工作区 worktrees/<key>（需求删除释放走此帧）
         String workspaceKey = frame.path("workspaceKey").asText("");
+        // CAP-51 FR-06：需求终态清理时置位——本地释放后追加删除远端需求分支（缺席 = 不动远端）
+        boolean deleteRemoteBranch = frame.path("deleteRemoteBranch").asBoolean(false);
         java.util.List<RunnerWorkspace.RepoSpec> specs = new java.util.ArrayList<>();
         for (JsonNode rn : frame.path("repos")) {
             specs.add(new RunnerWorkspace.RepoSpec(
@@ -663,7 +665,8 @@ public class AgentRunnerMain {
                     throw new IllegalStateException(
                             "会话 " + sessionId + " 仍在本节点运行，请先结束会话再删除");
                 }
-                RunnerWorkspace.ReleaseOutcome r = workspace.release(projectId, owner, specs, workspaceKey);
+                RunnerWorkspace.ReleaseOutcome r = workspace.release(projectId, owner, specs,
+                        workspaceKey, deleteRemoteBranch);
                 if (r.exit() == 0) {
                     ack.put("ok", true);
                     ack.put("detail", r.output());

@@ -40,6 +40,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -189,6 +190,8 @@ class SessionRequirementWorkspaceTest {
         String launchKey;
         final List<String> releasedKeys = new ArrayList<>();
         int releaseCalls;
+        /** 最近一次 releaseWorkspace 的 deleteRemoteBranch 标志（FR-06 终态清理断言用） */
+        boolean lastReleaseDeleteRemote;
 
         @Override
         public boolean isOnline(String nodeId) {
@@ -249,7 +252,17 @@ class SessionRequirementWorkspaceTest {
                                                        String workspaceOwner,
                                                        List<AgentLaunchCommand.RepoSpec> specs,
                                                        String workspaceKey) {
+            return releaseWorkspace(nodeId, sessionId, projectId, workspaceOwner, specs,
+                    workspaceKey, false);
+        }
+
+        @Override
+        public WorkspaceReleaseResult releaseWorkspace(String nodeId, String sessionId, String projectId,
+                                                       String workspaceOwner,
+                                                       List<AgentLaunchCommand.RepoSpec> specs,
+                                                       String workspaceKey, boolean deleteRemoteBranch) {
             releaseCalls++;
+            lastReleaseDeleteRemote = deleteRemoteBranch;
             if (releaseThrowsOffline) {
                 throw new DevMindException(ErrorCode.CONFLICT, "节点不在线: " + nodeId);
             }
@@ -601,6 +614,59 @@ class SessionRequirementWorkspaceTest {
         assertDoesNotThrow(() -> service.onRequirementDeleted(
                 new com.devmind.project.event.RequirementDeletedEvent(REQ, PROJECT, "u1", "u1")));
         service.shutdown();
+    }
+
+    // ---------------- ③b 需求终态 → 释放工作树 + 删远端分支（FR-06 修订） ----------------
+
+    /** 终态释放带 req- 键且 deleteRemoteBranch=true（runner 本地释放后追加删远端需求分支）。 */
+    @Test
+    void 需求终态释放带key且删远端分支() {
+        session("s1", "DONE", REQ, REQ_KEY);
+        repoRows = List.of(repoRow("s1", REQ_BRANCH));
+        FakeConnector connector = new FakeConnector();
+        build(connector);
+
+        service.releaseRequirementWorkspace(PROJECT, REQ, "u1", true);
+
+        assertEquals(List.of(REQ_KEY), connector.releasedKeys);
+        assertTrue(connector.lastReleaseDeleteRemote, "终态清理必须置位 deleteRemoteBranch");
+    }
+
+    /** 对照：需求删除释放不动远端（删除是丢弃语义，远端分支不在删除时改动——FR-06 删除路径不变）。 */
+    @Test
+    void 需求删除释放不删远端分支() {
+        session("s1", "DONE", REQ, REQ_KEY);
+        repoRows = List.of(repoRow("s1", REQ_BRANCH));
+        FakeConnector connector = new FakeConnector();
+        build(connector);
+
+        service.releaseRequirementWorkspace(PROJECT, REQ, "u1");
+
+        assertEquals(List.of(REQ_KEY), connector.releasedKeys);
+        assertFalse(connector.lastReleaseDeleteRemote, "需求删除不得改动远端");
+    }
+
+    /** 终态事件经同一执行器异步释放（监听器本身不阻塞、不抛）。 */
+    @Test
+    void 需求终态事件监听不阻塞调用方() {
+        session("s1", "DONE", REQ, REQ_KEY);
+        repoRows = List.of(repoRow("s1", REQ_BRANCH));
+        FakeConnector connector = new FakeConnector();
+        build(connector);
+
+        assertDoesNotThrow(() -> service.onRequirementTerminal(
+                new com.devmind.project.event.RequirementTerminalEvent(REQ, PROJECT, "u1", "DONE", "u1")));
+        service.shutdown();
+    }
+
+    /** 该需求从未开过工作区（无 req- 键会话）→ 终态清理无操作，不抛。 */
+    @Test
+    void 无工作区需求终态无操作() {
+        FakeConnector connector = new FakeConnector();
+        build(connector);
+
+        assertDoesNotThrow(() -> service.releaseRequirementWorkspace(PROJECT, REQ, null, true));
+        assertEquals(0, connector.releaseCalls);
     }
 
     // ---------------- 需求删除时不得回收共享工作树 ----------------

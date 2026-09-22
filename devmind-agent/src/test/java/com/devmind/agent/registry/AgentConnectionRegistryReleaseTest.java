@@ -72,12 +72,16 @@ class AgentConnectionRegistryReleaseTest {
     }
 
     private Call startRelease(String workspaceKey) throws Exception {
+        return startRelease(workspaceKey, false);
+    }
+
+    private Call startRelease(String workspaceKey, boolean deleteRemoteBranch) throws Exception {
         AtomicReference<WorkspaceReleaseResult> result = new AtomicReference<>();
         AtomicReference<Throwable> error = new AtomicReference<>();
         Thread t = new Thread(() -> {
             try {
                 result.set(registry.releaseWorkspace("7", "s1", "proj1", "alice", specs(),
-                        workspaceKey));
+                        workspaceKey, deleteRemoteBranch));
             } catch (Throwable e) {
                 error.set(e);
             }
@@ -120,6 +124,25 @@ class AgentConnectionRegistryReleaseTest {
         legacy.thread().join(10_000);
         assertTrue(legacy.result().get() != null && legacy.result().get().ok(),
                 String.valueOf(legacy.error().get()));
+    }
+
+    @Test
+    void serializesDeleteRemoteBranchOnlyWhenSet() throws Exception {
+        // CAP-51 FR-06 终态清理：deleteRemoteBranch=true 时帧带标志（协议 v13 可选字段）；
+        // 缺席/false = 不动远端（需求删除维持丢弃语义）
+        Call flagged = startRelease(null, true);
+        assertTrue(flagged.payload().contains("\"deleteRemoteBranch\":true"), flagged.payload());
+        registry.onWorkspaceReleaseAck("7", requestIdOf(flagged.payload()), true, "ok", null);
+        flagged.thread().join(10_000);
+        assertTrue(flagged.result().get() != null && flagged.result().get().ok(),
+                String.valueOf(flagged.error().get()));
+
+        Call plain = startRelease(null, false);
+        assertFalse(plain.payload().contains("deleteRemoteBranch"), plain.payload());
+        registry.onWorkspaceReleaseAck("7", requestIdOf(plain.payload()), true, "ok", null);
+        plain.thread().join(10_000);
+        assertTrue(plain.result().get() != null && plain.result().get().ok(),
+                String.valueOf(plain.error().get()));
     }
 
     @Test

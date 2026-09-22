@@ -23,6 +23,7 @@ import com.devmind.project.workspace.WorkspaceService;
 import com.devmind.project.RequirementService;
 import com.devmind.project.WorkItemService;
 import com.devmind.project.event.RequirementDeletedEvent;
+import com.devmind.project.event.RequirementTerminalEvent;
 import com.devmind.project.model.Project;
 import com.devmind.project.model.ProjectEntity;
 import com.devmind.project.model.RequirementEntity;
@@ -994,16 +995,35 @@ public class SessionManagerService {
     @org.springframework.context.event.EventListener
     public void onRequirementDeleted(RequirementDeletedEvent event) {
         releaseExecutor.submit(() -> releaseRequirementWorkspace(
-                event.projectId(), event.requirementId(), event.workspaceOwner()));
+                event.projectId(), event.requirementId(), event.workspaceOwner(), false));
+    }
+
+    /**
+     * CAP-51 FR-06（2026-09-22 修订）：需求进终态（DONE/CANCELLED）→ 释放需求工作树
+     * <b>并删除远端需求分支</b>（{@code deleteRemoteBranch: true}，协议 v13 可选字段——
+     * 老 runner 只释放本地、远端分支留存，优雅降级）。与需求删除同一条链路：异步、
+     * 失败只告警不阻断（状态已翻转，不能让用户卡住）。
+     */
+    @org.springframework.context.event.EventListener
+    public void onRequirementTerminal(RequirementTerminalEvent event) {
+        releaseExecutor.submit(() -> releaseRequirementWorkspace(
+                event.projectId(), event.requirementId(), event.workspaceOwner(), true));
+    }
+
+    /** 需求删除触发的释放（3 参便捷重载，不动远端；单测同步驱动用）。 */
+    void releaseRequirementWorkspace(String projectId, String requirementId, String workspaceOwner) {
+        releaseRequirementWorkspace(projectId, requirementId, workspaceOwner, false);
     }
 
     /**
      * 需求工作树释放本体（包可见便于单测同步驱动；生产路径恒走 {@link #releaseExecutor}）：
      * 取该需求带 {@code req-<id>} 键的最近会话（键 + 仓库快照 + 归属用户/节点都从它读，
      * 需求行已删查不回来）→ 下发 {@code workspace_release}（带 key，runner 整块回收
-     * {@code worktrees/<key>} 与本地需求分支）。任何失败只记日志 + 通知，绝不向外抛。
+     * {@code worktrees/<key>} 与本地需求分支；{@code deleteRemoteBranch=true} 时追加删远端
+     * 需求分支——终态清理）。任何失败只记日志 + 通知，绝不向外抛。
      */
-    void releaseRequirementWorkspace(String projectId, String requirementId, String workspaceOwner) {
+    void releaseRequirementWorkspace(String projectId, String requirementId, String workspaceOwner,
+                                     boolean deleteRemoteBranch) {
         try {
             String key = worktreeManager.workspaceKeyFor(requirementId, null);
             SessionEntity ref = sessionRepo.findByRequirementIdOrderByCreatedAtDesc(requirementId).stream()
@@ -1030,29 +1050,33 @@ public class SessionManagerService {
                     : (ref.getWorkspaceOwner() != null && !ref.getWorkspaceOwner().isBlank()
                     ? ref.getWorkspaceOwner() : ref.getCreatedBy());
             WorkspaceReleaseResult result = connector.releaseWorkspace(ref.getAgentNodeId(), ref.getId(),
-                    projectId, requireWorkspaceOwner(owner), specs, ref.getWorkspaceKey());
+                    projectId, requireWorkspaceOwner(owner), specs, ref.getWorkspaceKey(), deleteRemoteBranch);
             if (!result.ok()) {
-                // 节点在线但释放失败（如目录被占用）：需求已删，只告警
-                warnReleaseFailure(requirementId, result.error());
+                // 节点在线但释放失败（如目录被占用）：需求已删/已终态，只告警
+                warnReleaseFailure(requirementId, result.error(), deleteRemoteBranch);
             } else {
-                log.info("需求删除后已释放工作树: req={} key={} detail={}",
-                        requirementId, ref.getWorkspaceKey(), result.detail());
+                log.info("需求工作树已释放: req={} key={} deleteRemoteBranch={} detail={}",
+                        requirementId, ref.getWorkspaceKey(), deleteRemoteBranch, result.detail());
             }
         } catch (Exception e) {
             // 节点离线（connector 抛 CONFLICT）/无仓库快照/归属名非法：一律只告警，目录由 GC 兜底
-            warnReleaseFailure(requirementId, e.getMessage());
+            warnReleaseFailure(requirementId, e.getMessage(), deleteRemoteBranch);
         }
     }
 
-    /** 需求删除后的释放失败告警（日志 + 通知；FR-06 要求失败可见但不阻断删除）。 */
-    private void warnReleaseFailure(String requirementId, String reason) {
-        log.warn("需求删除后释放工作树失败(不阻断删除，目录由节点 GC 兜底): req={} err={}",
-                requirementId, reason);
+    /** 需求删除/终态后的释放失败告警（日志 + 通知；FR-06 要求失败可见但不阻断主流程）。 */
+    private void warnReleaseFailure(String requirementId, String reason, boolean deleteRemoteBranch) {
+        log.warn("需求工作树释放失败(不阻断主流程，目录由节点 GC 兜底): req={} deleteRemoteBranch={} err={}",
+                requirementId, deleteRemoteBranch, reason);
+        String scenario = deleteRemoteBranch
+                ? "需求 " + requirementId + " 已进终态，但其节点工作树回收/远端需求分支清理失败（"
+                : "需求 " + requirementId + " 已删除，但其节点工作树回收失败（";
+        String tail = deleteRemoteBranch
+                ? "）。目录会在节点上闲置，超期由 GC 回收；远端 feature 分支如需立即清理请到代码平台手工删除。"
+                : "）。目录会在节点上闲置，超期由 GC 回收；如需立即清理请到节点手工删除。";
         try {
             notificationPublisher.publish(NotificationEvent.of("WORKSPACE_RELEASE_FAILED", null,
-                    "需求工作区释放失败",
-                    "需求 " + requirementId + " 已删除，但其节点工作树回收失败（" + reason
-                            + "）。目录会在节点上闲置，超期由 GC 回收；如需立即清理请到节点手工删除。"));
+                    "需求工作区释放失败", scenario + reason + tail));
         } catch (Exception e) {
             log.debug("释放失败通知发布失败(忽略): {}", e.getMessage());
         }

@@ -9,6 +9,7 @@ import com.devmind.common.dto.PageView;
 import com.devmind.project.dto.RequirementRequest;
 import com.devmind.project.dto.RequirementView;
 import com.devmind.project.event.RequirementDeletedEvent;
+import com.devmind.project.event.RequirementTerminalEvent;
 import com.devmind.project.model.RequirementEntity;
 import com.devmind.project.model.WorkItemEntity;
 import com.devmind.project.repo.DesignRepository;
@@ -288,6 +289,12 @@ public class RequirementService {
         e.setUpdatedAt(Instant.now());
         RequirementView view = toView(requirementRepo.save(e), refsFor(List.of(e.getId())).get(e.getId()),
                 agentSecondsFor(List.of(e.getId())).get(e.getId()));
+        // CAP-51 FR-06：进终态 → 释放需求工作树并删远端需求分支（事件带 workspaceOwner：
+        // owner 冻结在 workspace_owner 列，监听方不再反查需求行）。清理失败不阻断翻转。
+        if (RequirementEntity.STATUS_DONE.equals(next) || RequirementEntity.STATUS_CANCELLED.equals(next)) {
+            eventPublisher.publish(new RequirementTerminalEvent(requirementId, projectId,
+                    e.getWorkspaceOwner(), next, identityService.currentActor()));
+        }
         log.info("需求状态推进: {} {} -> {}", code(e.getSeq()), prev, next);
         return view;
     }

@@ -824,6 +824,58 @@ class RunnerWorkspaceTest {
                 () -> git(ctx.cacheDir(), "rev-parse", "--verify", "refs/heads/feature/req-ab12cd34"));
     }
 
+    /** CAP-51 FR-06 终态清理：deleteRemoteBranch=true → 本地释放 + 远端需求分支一并删除（幂等）。 */
+    @Test
+    void releaseWithDeleteRemoteBranchCleansRemoteToo() throws Exception {
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/req-t1", "");
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", "req-t1", spec);
+        // 模拟已收口：需求分支已推远端（终态清理要删的就是它）
+        Files.writeString(ctx.sessionDir().resolve("code.txt"), "change");
+        git(ctx.sessionDir(), "add", ".");
+        git(ctx.sessionDir(), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "work");
+        git(ctx.sessionDir(), "push", origin.toUri().toString(),
+                "refs/heads/feature/req-t1:refs/heads/feature/req-t1");
+        assertFalse(gitOut(origin, "rev-parse", "--verify", "refs/heads/feature/req-t1").isBlank(),
+                "前置：远端需求分支已存在");
+
+        RunnerWorkspace.ReleaseOutcome r = ws.release("proj1", "alice", List.of(spec), "req-t1", true);
+        assertEquals(0, r.exit(), r.output());
+        assertTrue(Files.notExists(ctx.sessionDir()), "本地工作树已释放");
+        assertThrows(IllegalStateException.class,
+                () -> git(ctx.cacheDir(), "rev-parse", "--verify", "refs/heads/feature/req-t1"));
+        assertThrows(IllegalStateException.class,
+                () -> git(origin, "rev-parse", "--verify", "refs/heads/feature/req-t1"),
+                "远端需求分支已删除");
+        assertTrue(r.output().contains("远端分支已删除"), r.output());
+
+        // 幂等重跑：本地已释放 + 远端已不在 → 仍成功（不重复报错）
+        RunnerWorkspace.ReleaseOutcome again = ws.release("proj1", "alice", List.of(spec), "req-t1", true);
+        assertEquals(0, again.exit(), again.output());
+        assertTrue(again.output().contains("远端分支已不在"), again.output());
+    }
+
+    /** 对照：默认释放（deleteRemoteBranch=false）不动远端分支——需求删除维持丢弃语义。 */
+    @Test
+    void releaseDefaultKeepsRemoteBranch() throws Exception {
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/req-t2", "");
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", "req-t2", spec);
+        git(ctx.sessionDir(), "push", origin.toUri().toString(),
+                "refs/heads/feature/req-t2:refs/heads/feature/req-t2");
+
+        RunnerWorkspace.ReleaseOutcome r = ws.release("proj1", "alice", List.of(spec), "req-t2");
+        assertEquals(0, r.exit(), r.output());
+        assertFalse(gitOut(origin, "rev-parse", "--verify", "refs/heads/feature/req-t2").isBlank(),
+                "默认释放不得改动远端分支");
+    }
+
     @Test
     void requirementKeyValidation() {
         RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));

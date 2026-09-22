@@ -759,6 +759,19 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
                                                    String workspaceOwner,
                                                    List<AgentLaunchCommand.RepoSpec> specs,
                                                    String workspaceKey) {
+        return releaseWorkspace(nodeId, sessionId, projectId, workspaceOwner, specs, workspaceKey, false);
+    }
+
+    /**
+     * CAP-51 FR-06：{@code deleteRemoteBranch=true} 时帧携带该标志（协议 v13 可选字段，
+     * <b>不门控</b>——老 runner 忽略字段 = 只释放本地不动远端，优雅降级），runner 本地释放
+     * 成功后追加删除远端需求分支。
+     */
+    @Override
+    public WorkspaceReleaseResult releaseWorkspace(String nodeId, String sessionId, String projectId,
+                                                   String workspaceOwner,
+                                                   List<AgentLaunchCommand.RepoSpec> specs,
+                                                   String workspaceKey, boolean deleteRemoteBranch) {
         // 先判在线再判版本：断连会清掉 protocolVersions 记录（supports 按 v1 兜底），
         // 反过来就成了「节点明明离线却报协议版本过低、引导去升级 runner」——正是本事故里
         // 「报错指向错误对象」的翻版，必须让提示落在真实原因上。
@@ -783,6 +796,11 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         // CAP-51 红线：workspaceKey 必须在此 put（缺席 = runner 释放旧布局 work/）
         if (workspaceKey != null && !workspaceKey.isBlank()) {
             frame.put("workspaceKey", workspaceKey);
+        }
+        // CAP-51 FR-06：终态清理才置位（缺席/false = 不动远端）；可选字段不门控（v13），
+        // 老 runner 忽略 = 只释放本地、远端分支留存（优雅降级）
+        if (deleteRemoteBranch) {
+            frame.put("deleteRemoteBranch", true);
         }
         List<Map<String, Object>> repos = new ArrayList<>();
         for (AgentLaunchCommand.RepoSpec spec : specs) {

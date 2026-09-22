@@ -32,12 +32,15 @@ package com.devmind.common.agent;
  * 故服务端先按版本门控直接 409 引导升级；上行 workspace_status 被老服务端忽略，不门控）。
  * v12 = CAP-24 FR-06 收口署名（workspace_finalize 帧携带 gitAuthorName/gitAuthorEmail——
  * 收口 merge 提交以操作者绑定身份署名；<b>可选字段不门控</b>：老 runner 忽略字段、字段
- * 缺席时 runner 回退内置 devmind 署名，双向优雅降级）。</p>
+ * 缺席时 runner 回退内置 devmind 署名，双向优雅降级）。
+ * v13 = CAP-51 FR-06 需求终态清理（workspace_release 帧携带 deleteRemoteBranch——需求
+ * DONE/CANCELLED 时释放工作树并追加删除远端需求分支；<b>可选字段不门控</b>：老 runner
+ * 忽略字段 = 只释放本地、远端分支留存，优雅降级）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 12;
+    public static final int CURRENT = 13;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -71,6 +74,9 @@ public final class AgentProtocol {
 
     /** CAP-24 FR-06 收口署名（workspace_finalize 帧 gitAuthorName/gitAuthorEmail）；可选字段不门控 */
     public static final int FINALIZE_IDENTITY = 12;
+
+    /** CAP-51 FR-06 需求终态清理（workspace_release 帧 deleteRemoteBranch）；可选字段不门控 */
+    public static final int RELEASE_DELETE_REMOTE = 13;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;

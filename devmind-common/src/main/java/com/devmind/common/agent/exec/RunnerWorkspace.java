@@ -848,6 +848,16 @@ public class RunnerWorkspace {
      */
     public ReleaseOutcome release(String projectId, String workspaceOwner, List<RepoSpec> specs,
                                   String workspaceKey) {
+        return release(projectId, workspaceOwner, specs, workspaceKey, false);
+    }
+
+    /**
+     * CAP-51 FR-06 需求终态清理：{@code deleteRemoteBranch=true} 时，单库本地释放成功后
+     * 追加 {@code git push --delete <branch>} 删远端需求分支（远端已不在视为成功——幂等；
+     * 删除失败计入失败，由调用方告警，本地已释放不回滚）。
+     */
+    public ReleaseOutcome release(String projectId, String workspaceOwner, List<RepoSpec> specs,
+                                  String workspaceKey, boolean deleteRemoteBranch) {
         requireSafeId(projectId, "projectId");
         String owner = requireOwner(workspaceOwner);
         String key = requireKey(workspaceKey);
@@ -877,6 +887,14 @@ public class RunnerWorkspace {
                     allOk = false;
                     summary.append(label).append("失败: ").append(err).append('\n');
                     log.warn("固定工作区释放失败: owner={} repo={} err={}", owner, spec.name(), err);
+                } else if (deleteRemoteBranch) {
+                    String remoteErr = deleteRemoteBranch(cacheDir, spec, label, summary);
+                    if (remoteErr != null) {
+                        allOk = false;
+                        summary.append(label).append("远端分支删除失败: ").append(remoteErr).append('\n');
+                        log.warn("远端需求分支删除失败: owner={} repo={} branch={} err={}",
+                                owner, spec.name(), spec.branch(), remoteErr);
+                    }
                 }
             } finally {
                 lock.unlock();
@@ -950,6 +968,26 @@ public class RunnerWorkspace {
         }
         summary.append('\n');
         return null;
+    }
+
+    /**
+     * 删除远端需求分支（CAP-51 FR-06 终态清理，release 逐库在本地释放成功后调用，调用方持
+     * cacheLock）。成功/远端已不在返回 null 并追加摘要；失败返回脱敏错误文案。
+     * 用 {@code withToken(remoteUrl)} 显式远端（同 finalize 的 push），不依赖 origin 配置。
+     */
+    private String deleteRemoteBranch(Path cacheDir, RepoSpec spec, String label, StringBuilder summary) {
+        Result del = run(cacheDir, PUSH_TIMEOUT_SEC, spec.token(), "push",
+                withToken(spec.remoteUrl(), spec.token()), "--delete", spec.branch());
+        if (del.exit() == 0) {
+            summary.append(label).append("远端分支已删除: ").append(spec.branch()).append('\n');
+            return null;
+        }
+        // 幂等：重跑/人工已删时 git 报 unable to delete ... remote ref does not exist，视为成功
+        if (del.output() != null && del.output().contains("remote ref does not exist")) {
+            summary.append(label).append("远端分支已不在，跳过删除: ").append(spec.branch()).append('\n');
+            return null;
+        }
+        return tail(del.output());
     }
 
     /**

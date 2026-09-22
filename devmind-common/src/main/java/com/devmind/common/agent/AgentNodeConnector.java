@@ -193,6 +193,19 @@ public interface AgentNodeConnector {
     }
 
     /**
+     * CAP-51 FR-06 需求终态清理：{@code deleteRemoteBranch=true} 时 runner 在本地释放之外
+     * 追加 {@code git push --delete <需求分支>} 清理远端（终态后收口 diff 与继续开发入口已关闭，
+     * 远端分支留着只会堆积）。可选字段不门控（协议 v13）：老 runner 忽略 = 只释放本地、
+     * 远端分支留存（优雅降级）。默认实现丢弃该标志降级到 6 参重载（兼容未更新的实现/fake）。
+     */
+    default WorkspaceReleaseResult releaseWorkspace(String nodeId, String sessionId, String projectId,
+                                                    String workspaceOwner,
+                                                    List<AgentLaunchCommand.RepoSpec> specs,
+                                                    String workspaceKey, boolean deleteRemoteBranch) {
+        return releaseWorkspace(nodeId, sessionId, projectId, workspaceOwner, specs, workspaceKey);
+    }
+
+    /**
      * CAP-54：下发 workspace_query 帧并阻塞等 workspace_query_ack——runner 对会话代码目录执行
      * 只读查询（action ∈ tree/file/diff/status；repo 为多库子目录名，单库传空；path 相对代码目录）。
      * 节点离线/协议版本不足（需 v11+）/等待超时抛 DevMindException(CONFLICT)；
