@@ -16,6 +16,7 @@ import com.devmind.decisionlab.eval.dto.EvalTriggerRequest;
 import com.devmind.decisionlab.eval.dto.EvalView;
 import com.devmind.decisionlab.eval.model.DecisionEvaluationEntity;
 import com.devmind.decisionlab.eval.repo.DecisionEvaluationRepository;
+import com.devmind.decisionlab.lab.LabConcurrency;
 import com.devmind.decisionlab.lab.LabMarkers;
 import com.devmind.decisionlab.lab.LabScripts;
 import com.devmind.execution.model.StepResult;
@@ -68,6 +69,7 @@ public class EvalService {
     private final CheckpointService checkpointService;
     private final DecisionLabProperties props;
     private final LabScripts scripts;
+    private final LabConcurrency concurrency;
     private final AgentNodeRouter nodeRouter;
     private final AgentNodeStepRunner stepRunner;
     private final ExecutionLogHub hub;
@@ -76,14 +78,15 @@ public class EvalService {
 
     public EvalService(DecisionEvaluationRepository repo, DatasetService datasetService,
                        CheckpointService checkpointService,
-                       DecisionLabProperties props, LabScripts scripts, AgentNodeRouter nodeRouter,
-                       AgentNodeStepRunner stepRunner, ExecutionLogHub hub,
+                       DecisionLabProperties props, LabScripts scripts, LabConcurrency concurrency,
+                       AgentNodeRouter nodeRouter, AgentNodeStepRunner stepRunner, ExecutionLogHub hub,
                        IdentityService identityService, ObjectMapper mapper) {
         this.repo = repo;
         this.datasetService = datasetService;
         this.checkpointService = checkpointService;
         this.props = props;
         this.scripts = scripts;
+        this.concurrency = concurrency;
         this.nodeRouter = nodeRouter;
         this.stepRunner = stepRunner;
         this.hub = hub;
@@ -185,14 +188,8 @@ public class EvalService {
     }
 
     private void requireConcurrency() {
-        int limit = Math.max(1, props.getMaxConcurrentRuns());
-        long active = repo.countByStatusIn(
-                List.of(DecisionEvaluationEntity.QUEUED, DecisionEvaluationEntity.RUNNING));
-        if (active >= limit) {
-            throw new DevMindException(ErrorCode.CONFLICT,
-                    "同时进行的评测/微调已达上限 " + limit + "（配置项 devmind.decision-lab.max-concurrent-runs）："
-                            + "一次运行会独占节点的一个执行许可，跑太多会把节点许可占满");
-        }
+        // 与微调共用一把闸门：占的是同一个节点执行许可（见 LabConcurrency）
+        concurrency.requireCapacity(props.getMaxConcurrentRuns(), "评测");
     }
 
     private long resolveTimeout(Long requested) {
@@ -281,6 +278,12 @@ public class EvalService {
         e.setReportStatus(EvalReport.status(report));
         e.setReportJson(toJson(report));
         e.setHeadlineJson(toJson(EvalReport.headline(report)));
+        // 指标回写产物行：FR-07 的闸门要人「看着指标」按验证按钮，报告只躺在评测行里
+        // 等于每次放行都要人去翻最近一次评测是哪条（见 CheckpointService.attachEvalResult）
+        if (e.getCheckpointId() != null) {
+            checkpointService.attachEvalResult(e.getCheckpointId(), e.getReportJson(),
+                    toJson(mapOf(report, "calibration")));
+        }
     }
 
     // ---------------- 查询 ----------------

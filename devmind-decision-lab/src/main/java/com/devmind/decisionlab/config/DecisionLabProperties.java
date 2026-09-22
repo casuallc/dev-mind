@@ -37,6 +37,43 @@ public class DecisionLabProperties {
     /** 单次运行允许的最大超时（秒）：默认 24 小时（RLCD 训练可能跑整夜） */
     private long maxTimeoutSec = 86400;
 
+    // ---------------- FR-05 微调默认值（请求里可逐项覆盖） ----------------
+
+    /**
+     * 默认训练轮数。
+     *
+     * <p>默认值存在的意义只是"不传也能跑起来"，不是"推荐的超参"——RLCD 的收敛性只能靠真机看指标，
+     * 页面上跑第一轮时就该把它改成本次实验真正要用的值。</p>
+     */
+    private int defaultEpochs = 3;
+
+    /** 默认学习率（RLCD 的 REINFORCE 类更新对学习率敏感，默认偏小） */
+    private double defaultLearningRate = 1e-4;
+
+    private int defaultBatchSize = 8;
+
+    /** 默认训练随机种子 */
+    private long defaultTrainSeed = 42;
+
+    /**
+     * 默认切分种子。
+     *
+     * <p>固定默认值的好处是"两次跑同一份集、只改超参"时验证集是同一批样本——
+     * 否则指标的变化里混着"换了一批考题"，说不清是模型变好了还是题目变简单了。</p>
+     */
+    private long defaultSplitSeed = 42;
+
+    /** 默认训练占比（验证集 = 剩下那部分，至少 1 条） */
+    private double defaultTrainRatio = 0.8;
+
+    /**
+     * 默认多卡启动前缀（空 = 单进程）。
+     *
+     * <p>形如 {@code torchrun --nproc_per_node=2}；由脚本按 shlex 拆开当子进程前缀，
+     * 不占 runner execAllowlist 的首 token（首 token 永远是 pythonPath）。</p>
+     */
+    private String defaultLauncher = "";
+
     public String getScriptsDir() { return scriptsDir; }
     public void setScriptsDir(String scriptsDir) { this.scriptsDir = scriptsDir; }
     public String getPythonPath() { return pythonPath; }
@@ -47,4 +84,18 @@ public class DecisionLabProperties {
     public void setDefaultTimeoutSec(long defaultTimeoutSec) { this.defaultTimeoutSec = defaultTimeoutSec; }
     public long getMaxTimeoutSec() { return maxTimeoutSec; }
     public void setMaxTimeoutSec(long maxTimeoutSec) { this.maxTimeoutSec = maxTimeoutSec; }
+    public int getDefaultEpochs() { return defaultEpochs; }
+    public void setDefaultEpochs(int defaultEpochs) { this.defaultEpochs = defaultEpochs; }
+    public double getDefaultLearningRate() { return defaultLearningRate; }
+    public void setDefaultLearningRate(double defaultLearningRate) { this.defaultLearningRate = defaultLearningRate; }
+    public int getDefaultBatchSize() { return defaultBatchSize; }
+    public void setDefaultBatchSize(int defaultBatchSize) { this.defaultBatchSize = defaultBatchSize; }
+    public long getDefaultTrainSeed() { return defaultTrainSeed; }
+    public void setDefaultTrainSeed(long defaultTrainSeed) { this.defaultTrainSeed = defaultTrainSeed; }
+    public long getDefaultSplitSeed() { return defaultSplitSeed; }
+    public void setDefaultSplitSeed(long defaultSplitSeed) { this.defaultSplitSeed = defaultSplitSeed; }
+    public double getDefaultTrainRatio() { return defaultTrainRatio; }
+    public void setDefaultTrainRatio(double defaultTrainRatio) { this.defaultTrainRatio = defaultTrainRatio; }
+    public String getDefaultLauncher() { return defaultLauncher; }
+    public void setDefaultLauncher(String defaultLauncher) { this.defaultLauncher = defaultLauncher; }
 }

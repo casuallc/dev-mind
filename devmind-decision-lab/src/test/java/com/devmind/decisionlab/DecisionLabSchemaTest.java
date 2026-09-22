@@ -4,6 +4,7 @@ import com.devmind.decisionlab.checkpoint.model.DecisionCheckpointEntity;
 import com.devmind.decisionlab.dataset.model.DecisionDatasetEntity;
 import com.devmind.decisionlab.dataset.model.DecisionDatasetItemEntity;
 import com.devmind.decisionlab.eval.model.DecisionEvaluationEntity;
+import com.devmind.decisionlab.finetune.model.DecisionFinetuneEntity;
 import org.hibernate.boot.Metadata;
 import org.hibernate.boot.MetadataSources;
 import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
@@ -43,6 +44,11 @@ class DecisionLabSchemaTest {
     private static final String[] EVAL_LOB_COLUMNS =
             {"command_text", "headline_json", "report_json", "logs_text"};
 
+    /** FR-05 微调任务的证据列（切分明细 / 命令行 / 报告 / 指纹 / 日志） */
+    private static final String[] FINETUNE_LOB_COLUMNS =
+            {"val_item_ids_json", "command_text", "headline_json", "metrics_json",
+                    "fingerprint_json", "logs_text"};
+
     private String exportDdl(Class<?> dialect) {
         var registry = new StandardServiceRegistryBuilder()
                 .applySetting("hibernate.dialect", dialect.getName())
@@ -52,6 +58,7 @@ class DecisionLabSchemaTest {
                 .addAnnotatedClass(DecisionDatasetItemEntity.class)
                 .addAnnotatedClass(DecisionCheckpointEntity.class)
                 .addAnnotatedClass(DecisionEvaluationEntity.class)
+                .addAnnotatedClass(DecisionFinetuneEntity.class)
                 .buildMetadata();
         String ddl = String.join("\n", new SchemaCreatorImpl(registry)
                 .generateCreationCommands(metadata, false)).toLowerCase();
@@ -78,7 +85,7 @@ class DecisionLabSchemaTest {
     @Test
     void pgLobColumnsAreInlineTextNotOid() {
         String ddl = exportDdl(PostgreSQLDialect.class);
-        for (String column : concat(concat(DATASET_LOB_COLUMNS, CHECKPOINT_LOB_COLUMNS), EVAL_LOB_COLUMNS)) {
+        for (String column : allLobColumns()) {
             assertTrue(columnDef(ddl, column).contains(" text"),
                     "PG 上 " + column + " 应为 text（@Lob 必须配 @JdbcTypeCode(LONGVARCHAR)）");
         }
@@ -88,7 +95,7 @@ class DecisionLabSchemaTest {
     @Test
     void mysqlLobColumnsAreLongtext() {
         String ddl = exportDdl(MySQLDialect.class);
-        for (String column : concat(concat(DATASET_LOB_COLUMNS, CHECKPOINT_LOB_COLUMNS), EVAL_LOB_COLUMNS)) {
+        for (String column : allLobColumns()) {
             assertTrue(columnDef(ddl, column).contains("longtext"),
                     "MySQL 上 " + column + " 应为 longtext（依赖 @Column(length = 16_777_216)）");
         }
@@ -125,12 +132,13 @@ class DecisionLabSchemaTest {
     }
 
     @Test
-    void allFourTablesAndTheirJoinKeysExist() {
+    void allFiveTablesAndTheirJoinKeysExist() {
         String ddl = exportDdl(PostgreSQLDialect.class);
         assertTrue(ddl.contains("decision_datasets"));
         assertTrue(ddl.contains("decision_dataset_items"));
         assertTrue(ddl.contains("decision_checkpoints"));
         assertTrue(ddl.contains("decision_evaluations"));
+        assertTrue(ddl.contains("decision_finetunes"));
         assertTrue(columnDef(ddl, "dataset_id").contains("dataset_id"), "样本靠 dataset_id 挂在集上");
         // 列表页要显示"上次自检过了没有"，靠这一列免得逐行解析自检报告 JSON
         assertTrue(columnDef(ddl, "serve_check_status").contains("serve_check_status"));
@@ -155,10 +163,56 @@ class DecisionLabSchemaTest {
         }
     }
 
+    /**
+     * 微调行要独立说得清"这次是怎么切的、在哪训的、训出什么"——训练集会被修订、产物登记可能被删、
+     * 基座来源可能被改。所以切分（{@code val_item_ids_json} + 两个条数 + 判据）、回评集、基座路径、
+     * 产出目录、超参、以及收尾的三样（指纹 / 产物 id / 回评 id + 失败原因）都是自己的列。
+     */
+    @Test
+    void finetuneRowCarriesItsSplitHyperparamsAndOutcome() {
+        String table = tableDef(exportDdl(PostgreSQLDialect.class), "decision_finetunes");
+        for (String column : new String[] {"eval_dataset_id", "eval_dataset_version",
+                "train_count", "val_count", "split_seed", "train_ratio", "val_item_ids_json",
+                "base_checkpoint_path", "base_serve_slot", "output_path", "python_path",
+                "epochs", "learning_rate", "batch_size", "train_seed", "launcher",
+                "fingerprint_json", "checkpoint_id", "eval_id", "post_error",
+                "report_status", "started_at", "finished_at"}) {
+            assertTrue(columnDef(table, column).contains(column), "微调表应有 " + column);
+        }
+        // 基座与产出各占一列：合成一列的话，"这份产物是从谁训出来的"与"这次训出了哪份产物"
+        // 就成了同一个字段的两个意思（一个是输入，一个是输出）
+        assertTrue(columnDef(table, "base_checkpoint_id").contains("base_checkpoint_id"),
+                "微调表要有基座 id");
+        assertTrue(columnDef(table, "checkpoint_id").contains("checkpoint_id"),
+                "微调表要有产出的产物 id（与基座是两个列）");
+    }
+
     private static String[] concat(String[] a, String[] b) {
         String[] out = new String[a.length + b.length];
         System.arraycopy(a, 0, out, 0, a.length);
         System.arraycopy(b, 0, out, a.length, b.length);
         return out;
+    }
+
+    /**
+     * 取某张表的 DDL 片段（从它的 {@code create table} 到下一张表开始）。
+     *
+     * <p>{@link #columnDef} 在整个 DDL 里找列名，同名不同表的列（{@code checkpoint_id} 在评测表与
+     * 微调表都有）会取到<b>先出现的那张表</b>——问"这一列在不在微调表里"就不准了。要精确问一张表的
+     * 列，得先把那张表切出来。</p>
+     */
+    private static String tableDef(String ddl, String table) {
+        int start = ddl.indexOf("create table " + table + " ");
+        if (start < 0) {
+            return "";
+        }
+        int next = ddl.indexOf("create table ", start + 1);
+        return next < 0 ? ddl.substring(start) : ddl.substring(start, next);
+    }
+
+    /** 五张表的全部 JSON 长文本列（新表加列时只改这一处，两个方言的回归网自动跟上） */
+    private static String[] allLobColumns() {
+        return concat(concat(concat(DATASET_LOB_COLUMNS, CHECKPOINT_LOB_COLUMNS),
+                EVAL_LOB_COLUMNS), FINETUNE_LOB_COLUMNS);
     }
 }

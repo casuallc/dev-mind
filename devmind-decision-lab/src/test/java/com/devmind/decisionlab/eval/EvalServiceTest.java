@@ -13,6 +13,8 @@ import com.devmind.decisionlab.eval.dto.EvalTriggerRequest;
 import com.devmind.decisionlab.eval.dto.EvalView;
 import com.devmind.decisionlab.eval.model.DecisionEvaluationEntity;
 import com.devmind.decisionlab.eval.repo.DecisionEvaluationRepository;
+import com.devmind.decisionlab.finetune.repo.DecisionFinetuneRepository;
+import com.devmind.decisionlab.lab.LabConcurrency;
 import com.devmind.decisionlab.lab.LabMarkers;
 import com.devmind.decisionlab.lab.LabScripts;
 import com.devmind.execution.model.StepResult;
@@ -68,6 +70,7 @@ class EvalServiceTest {
     private static final long EVAL_ID = 7L;
 
     private final DecisionEvaluationRepository repo = mock(DecisionEvaluationRepository.class);
+    private final DecisionFinetuneRepository finetuneRepo = mock(DecisionFinetuneRepository.class);
     private final DatasetService datasetService = mock(DatasetService.class);
     private final CheckpointService checkpointService = mock(CheckpointService.class);
     private final AgentNodeRouter nodeRouter = mock(AgentNodeRouter.class);
@@ -115,8 +118,11 @@ class EvalServiceTest {
         when(repo.findById(anyLong()))
                 .thenAnswer(inv -> Optional.ofNullable(rows.get(inv.<Long>getArgument(0))));
         when(repo.countByStatusIn(any())).thenReturn(0L);
+        // 并发闸门把评测与微调算在一起（微调会自己触发回评，分开计数会让"评测 2 + 微调 2"
+        // 在同一台 GPU 上真跑成 4 个进程）；这里微调侧固定为 0，只测评测自己的额度
         service = new EvalService(repo, datasetService, checkpointService, props,
-                new LabScripts(props), nodeRouter, stepRunner, hub, identity, mapper);
+                new LabScripts(props), new LabConcurrency(repo, finetuneRepo), nodeRouter, stepRunner,
+                hub, identity, mapper);
     }
 
     // ---------------- 触发前 fail-fast ----------------

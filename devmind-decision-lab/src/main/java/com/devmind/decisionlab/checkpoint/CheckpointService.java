@@ -228,6 +228,53 @@ public class CheckpointService {
         log.info("产物登记删除: id={} name={}", e.getId(), e.getName());
     }
 
+    // ---------------- 结果回写（FR-03/FR-05 的落点） ----------------
+
+    /**
+     * 把一次评测（或微调结束时的回评）的结论写回产物行：指标 + 温度校准参数。
+     *
+     * <p><b>为什么要回写</b>：{@code decision_checkpoints.metrics_json} 是"这份产物值不值得放行"的
+     * 第一手依据（人按下验证按钮前看的就是它）。让报告只躺在评测行里，等于每次放行都要人去翻
+     * "最近一次评测是哪一条"——而 FR-07 的闸门恰恰要人<b>看着指标</b>做决定。</p>
+     *
+     * <p><b>只在真有报告时写</b>：一次跑完却没产出报告的运行（脚本崩了、漏打 marker）不覆盖已有指标。
+     * 那份旧报告是"上次测出来是这样"，把它抹成空不会让人知道更多，只会让"这份产物测过没有"
+     * 变成"没测过"。所以这里写的是<b>最近一次产出报告的评测</b>的结论；
+     * 完整的评测时间线在评测列表里，不受影响。</p>
+     *
+     * <p><b>校准单独判断</b>：报告里没带 {@code calibration} 时保留已有参数——那是更可信的一次
+     * held-out 拟合留下的（微调在验证切分上拟合），不该被一次没做校准的评测抹掉。</p>
+     *
+     * @param metricsJson     报告 JSON（空 = 本次没有结论，不动指标列）
+     * @param calibrationJson 温度校准 JSON（空 = 本次没校准，不动校准列）
+     * @return 真的写回了任何一列
+     */
+    @Transactional
+    public boolean attachEvalResult(Long id, String metricsJson, String calibrationJson) {
+        String metrics = blankToNull(metricsJson);
+        String calibration = blankToNull(calibrationJson);
+        if (id == null || (metrics == null && calibration == null)) {
+            return false;
+        }
+        DecisionCheckpointEntity e = repo.findById(id).orElse(null);
+        if (e == null) {
+            // 产物行被删了（未验证的行可以随便删）：评测本身是成功的，不能因此失败
+            log.warn("产物 {} 已不存在，本次指标未写回（评测/微调本身不受影响）", id);
+            return false;
+        }
+        if (metrics != null) {
+            e.setMetricsJson(metrics);
+        }
+        if (calibration != null) {
+            e.setCalibrationJson(calibration);
+        }
+        e.setUpdatedAt(Instant.now());
+        repo.save(e);
+        log.info("产物 {}「{}」回写: 指标={} 校准={}", e.getId(), e.getName(),
+                metrics == null ? "未动" : "已更新", calibration == null ? "未动" : "已更新");
+        return true;
+    }
+
     // ---------------- serve 自检 ----------------
 
     /** 打边车问一次"你现在服务的是哪份"，落库（结论状态冗余一列，列表页免解析） */

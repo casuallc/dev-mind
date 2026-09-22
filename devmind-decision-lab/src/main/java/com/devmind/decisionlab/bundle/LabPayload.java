@@ -80,6 +80,22 @@ public class LabPayload {
         return new Item(node, questions.size(), distributions.size());
     }
 
+    /**
+     * 复制一份节点并打上切分标记（微调包专用）。
+     *
+     * <p>切分由服务端决定（{@code FinetuneSplit}，结果入库），脚本<b>按标记分流</b>而不是自己
+     * 再切一次——脚本自己切的话，"报告里那个 val 指标在哪几条上算出来的"就没人答得上来了
+     * （同一个 seed 在不同版本/不同读取顺序下会切出不同集合）。</p>
+     *
+     * <p>不回写原 map 而是复制：{@link Item#node()} 是评测与微调共用的构建结果，
+     * 在一处顺手加上 {@code split} 字段，另一个包的语义就悄悄变了。</p>
+     */
+    public static Item withSplit(Item item, String split) {
+        Map<String, Object> node = new LinkedHashMap<>(item.node());
+        node.put("split", split);
+        return new Item(node, item.questionCount(), item.scorableCount());
+    }
+
     /** 逐题标注覆盖面的一句话（进 payload 的 warnings；脚本会把它带进报告） */
     public String coverageWarning(List<Item> items) {
         int partial = 0;
