@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import com.devmind.common.decision.DecisionAnswer;
 import java.util.Map;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -25,7 +26,9 @@ import tools.jackson.databind.node.ObjectNode;
  * {@link OpenAiCompatHttp#sanitize}，与 CAP-48 同口径。</p>
  *
  * <p>本类只做"一次调用"：不重试、不降级——重试与降级是调用方的策略
- * （FR-03 的 {@code HttpDecisionEngine} 一次重试 + degraded，FR-02 的探针由人盯着、不重试）。</p>
+ * （FR-03 的 {@code HttpDecisionEngine} 一次重试 + degraded，FR-02 的探针由人盯着、不重试）。
+ * 失败一律 {@link ModelCallException}：HTTP/传输层失败是 {@link LayaDecisionException}
+ * （带状态码，调用方据此判断值不值得重试），应答解析失败（非 JSON / 缺 answers）是普通父类。</p>
  */
 public final class LayaDecisionClient {
 
@@ -81,13 +84,17 @@ public final class LayaDecisionClient {
      * {@code /v1/predict} 应答的解析产物。
      *
      * @param answers       逐题答案（题 id 原样保留，便于调用方按自己发的题取）
+     * @param routingModel  边车实际选中的 checkpoint 别名（可空 = 边车未报）。
+     *                      <b>不等于端点配的 model</b>：端点没配 checkpoint 时由边车按语言/脚本自己路由，
+     *                      那时这里才是"真实用了谁"，落库与「查看依据」都该用这个值
      * @param routingReason 边车选 checkpoint 的原因（UI「查看依据」展示，可能是空串）
      * @param rawJson       应答原文（落库/导出要原文，重新拼装会丢字段）
      */
-    public record Reply(Map<String, DecisionAnswer> answers, String routingReason, String rawJson) {
+    public record Reply(Map<String, DecisionAnswer> answers, String routingModel, String routingReason,
+                        String rawJson) {
     }
 
-    /** 存活 + 常驻清单；非 2xx/非 JSON 一律 {@link ModelCallException} */
+    /** 存活 + 常驻清单；非 2xx 抛 {@link LayaDecisionException}、非 JSON 抛 {@link ModelCallException} */
     public static Health healthz(Options opt) {
         HttpRequest request = withAuth(HttpRequest.newBuilder(uri(opt.baseUrl(), PATH_HEALTHZ)), opt)
                 .timeout(Duration.ofSeconds(opt.timeoutSeconds()))
@@ -106,7 +113,7 @@ public final class LayaDecisionClient {
         return new Health(root.path("status").asText(""), root.path("laya_version").asText(""), loaded, devices);
     }
 
-    /** 一次决策调用；网络/非 2xx/答案缺失一律 {@link ModelCallException} */
+    /** 一次决策调用；网络/非 2xx 抛 {@link LayaDecisionException}，答案缺失抛 {@link ModelCallException} */
     public static Reply predict(Options opt, Map<String, Object> state,
                                 Map<String, Map<String, Object>> questions) {
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -168,7 +175,8 @@ public final class LayaDecisionClient {
         }
         Map<String, DecisionAnswer> answers = new LinkedHashMap<>();
         ((ObjectNode) answersNode).properties().forEach(e -> answers.put(e.getKey(), answer(e.getValue())));
-        return new Reply(answers, root.path("routing").path("reason").asText(""), body);
+        JsonNode routing = root.path("routing");
+        return new Reply(answers, text(routing, "model"), text(routing, "reason"), body);
     }
 
     private static DecisionAnswer answer(JsonNode node) {
@@ -226,18 +234,20 @@ public final class LayaDecisionClient {
             HttpResponse<String> resp = OpenAiCompatHttp.http(opt.timeoutSeconds())
                     .send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (resp.statusCode() / 100 != 2) {
-                throw new ModelCallException(failure(what, request.uri(), resp.statusCode(), resp.body()));
+                throw LayaDecisionException.status(resp.statusCode(),
+                        failure(what, request.uri(), resp.statusCode(), resp.body()));
             }
             return resp.body();
         } catch (ModelCallException e) {
             throw e;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new ModelCallException(what + "被中断", e);
+            // 带 cause 但不带 IO cause：引擎据此判定"有人在喊停"，不重试（见 retryable()）
+            throw LayaDecisionException.transport(what + "被中断", e);
         } catch (Exception e) {
             // 连接被拒/超时/读中断都在这里：消息必须脱敏，且不许把 Jackson/HTTP 异常原文漏出去。
             // 带上 URI——连不上时运维第一个要问的就是"你打的哪个地址"（ConnectException 自己不带 URL）。
-            throw new ModelCallException(what + " " + request.uri() + " 失败: "
+            throw LayaDecisionException.transport(what + " " + request.uri() + " 失败: "
                     + OpenAiCompatHttp.sanitize(String.valueOf(e)), e);
         }
     }

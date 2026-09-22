@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.devmind</groupId>
+        <artifactId>devmind</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <artifactId>devmind-decision</artifactId>
+    <name>devmind-decision</name>
+    <description>CAP-55 FR-03 决策引擎：DecisionEngine SPI 的 HTTP 实现（laya 边车，一次重试 + 降级不改语义）</description>
+    <dependencies>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-common</artifactId>
+        </dependency>
+        <!-- 最小 starter（spring-context 的 ObjectProvider/@Component + spring-boot 的
+             @ConfigurationProperties）：本模块零持久层、零 Web 端点、零表 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

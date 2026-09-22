@@ -2,7 +2,7 @@ package com.devmind.model;
 
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
-import com.devmind.common.model.DecisionAnswer;
+import com.devmind.common.decision.DecisionAnswer;
 import com.devmind.common.model.LayaDecisionClient;
 import com.devmind.common.model.ModelCallException;
 import com.devmind.common.model.ModelEndpointProvider;

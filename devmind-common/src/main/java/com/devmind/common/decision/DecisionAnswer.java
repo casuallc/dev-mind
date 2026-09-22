@@ -1,10 +1,13 @@
-package com.devmind.common.model;
+package com.devmind.common.decision;
 
 import java.util.Map;
 
 /**
  * CAP-55 决策答案：laya 三原语（choice / score / noul）共用一个形状，与边车
  * {@code /v1/predict} 应答里的 {@code answers} 逐题对应。
+ *
+ * <p>放在决策契约包（而非 {@code common.model}）里：它是 {@link DecisionResult} 的组成部分，
+ * 消费方（FR-04 分诊、FR-07 前端）只认这一个包；{@code common.model} 留作端点解析与传输。</p>
  *
  * <p>哪个字段有值由 {@link #type()} 决定，其余为 null——这是刻意的取舍：三个原语在协议里
  * 本来就是同一层级的答案对象（{@code choice}/{@code score}/{@code noul} 三键之一 + 共有的

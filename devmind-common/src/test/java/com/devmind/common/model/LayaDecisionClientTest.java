@@ -1,5 +1,6 @@
 package com.devmind.common.model;
 
+import com.devmind.common.decision.DecisionAnswer;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
