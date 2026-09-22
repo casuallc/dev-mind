@@ -24,12 +24,18 @@ import java.util.function.Consumer;
  *   <li>客户端→服务端：input / authorize / ping。</li>
  * </ul>
  * 事件形如 {@code {"type":"event","event":{...}}}；snapshot 形如 {@code {"type":"snapshot","state":"...","seq":N,"events":[...]}}。
+ *
+ * <p>CAP-54：下行多一种 {@code {"type":"workspace","snapshot":{...}}} 帧——工作区 git 变更
+ * 快照旁路推送（最新值语义，不进事件回放）：连接建立时补发当前缓存快照（有才发），之后
+ * runner 上行 workspace_status 即转发。老前端忽略未知帧类型，天然兼容。</p>
  */
 @Component
 public class SessionWsHandler extends TextWebSocketHandler {
 
     private static final Logger log = LoggerFactory.getLogger(SessionWsHandler.class);
     private static final String ATTR_CONSUMER = "consumer";
+    /** CAP-54：workspace 快照订阅消费者（与事件消费者分开注销） */
+    private static final String ATTR_WS_CONSUMER = "wsConsumer";
 
     private final SessionManagerService service;
     private final ObjectMapper mapper;
@@ -53,6 +59,19 @@ public class SessionWsHandler extends TextWebSocketHandler {
             List<SessionEvent> replay = service.subscribe(id, consumer);
             session.getAttributes().put(ATTR_CONSUMER, consumer);
             send(session, snapshot(id, replay));
+            // CAP-54：订阅工作区快照旁路 + 补发当前缓存（老 runner 无缓存则什么都不发）
+            Consumer<Map<String, Object>> wsConsumer = snap -> {
+                Map<String, Object> frame = new LinkedHashMap<>();
+                frame.put("type", "workspace");
+                frame.put("snapshot", snap);
+                send(session, frame);
+            };
+            service.subscribeWorkspace(id, wsConsumer);
+            session.getAttributes().put(ATTR_WS_CONSUMER, wsConsumer);
+            Map<String, Object> cached = service.latestWorkspaceSnapshot(id);
+            if (cached != null) {
+                wsConsumer.accept(cached);
+            }
         } catch (Exception e) {
             log.warn("订阅会话失败: {} err={}", id, e.getMessage());
             send(session, Map.of("type", "error", "message", "会话不可用: " + e.getMessage()));
@@ -96,6 +115,12 @@ public class SessionWsHandler extends TextWebSocketHandler {
             @SuppressWarnings("unchecked")
             Consumer<SessionEvent> cast = (Consumer<SessionEvent>) c;
             service.unsubscribe(id, cast);
+        }
+        Object wsConsumer = session.getAttributes().remove(ATTR_WS_CONSUMER);
+        if (id != null && wsConsumer instanceof Consumer<?> c) {
+            @SuppressWarnings("unchecked")
+            Consumer<Map<String, Object>> cast = (Consumer<Map<String, Object>>) c;
+            service.unsubscribeWorkspace(id, cast);
         }
     }
 

@@ -6,6 +6,7 @@ import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.AgentCollectResult;
 import com.devmind.common.agent.AgentProtocol;
 import com.devmind.common.agent.FinalizeResult;
+import com.devmind.common.agent.WorkspaceQueryResult;
 import com.devmind.common.agent.WorkspaceReleaseResult;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
@@ -749,6 +750,78 @@ public class SessionManagerService {
         }
     }
 
+    // ---------------- CAP-54 工作区实时视图（旁路：最新值缓存 + WS 订阅，不入事件流/不落库） ----------------
+
+    /** sessionId → 最新工作区快照（进程退出后保留最终态，删除会话时清除）。 */
+    private final Map<String, Map<String, Object>> workspaceSnapshots = new ConcurrentHashMap<>();
+    /** sessionId → 工作区快照订阅者（浏览器 WS /ws/sessions/{id} 的 workspace 帧）。 */
+    private final Map<String, Set<Consumer<Map<String, Object>>>> workspaceSubs = new ConcurrentHashMap<>();
+
+    /**
+     * runner 上行 workspace_status（RemoteAgentBridge 路由至此）：认领本模块会话后缓存最新值
+     * 并推订阅者。运行时在册按节点匹配；刚退出的尾帧运行时已注销，按 DB 归属节点兜底认领。
+     */
+    public void onWorkspaceStatus(String nodeId, String sessionId, Map<String, Object> snapshot) {
+        SessionHandle h = runtimes.get(sessionId);
+        if (!(h instanceof RemoteSessionRuntime r) || !r.nodeId().equals(nodeId)) {
+            SessionEntity ent = sessionRepo.findById(sessionId).orElse(null);
+            if (ent == null || !nodeId.equals(ent.getAgentNodeId())) {
+                return; // 非本模块会话（chat 等）或节点不符——忽略
+            }
+        }
+        workspaceSnapshots.put(sessionId, snapshot);
+        Set<Consumer<Map<String, Object>>> subs = workspaceSubs.get(sessionId);
+        if (subs != null) {
+            for (Consumer<Map<String, Object>> c : subs) {
+                try {
+                    c.accept(snapshot);
+                } catch (Exception e) {
+                    log.debug("workspace 快照推送失败: session={} err={}", sessionId, e.getMessage());
+                }
+            }
+        }
+    }
+
+    /** 最新缓存快照（WS 连接建立时补发；无 = runner 未推过/版本过低）。 */
+    public Map<String, Object> latestWorkspaceSnapshot(String id) {
+        return workspaceSnapshots.get(id);
+    }
+
+    public void subscribeWorkspace(String id, Consumer<Map<String, Object>> consumer) {
+        workspaceSubs.computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet()).add(consumer);
+    }
+
+    public void unsubscribeWorkspace(String id, Consumer<Map<String, Object>> consumer) {
+        Set<Consumer<Map<String, Object>>> subs = workspaceSubs.get(id);
+        if (subs != null) {
+            subs.remove(consumer);
+            if (subs.isEmpty()) {
+                workspaceSubs.remove(id, subs);
+            }
+        }
+    }
+
+    /**
+     * 工作区只读查询透传（REST → workspace_query 帧 → runner 读盘/git）。
+     * 协议版本门控在 connector 内（老 runner 409 引导升级）；查询失败抛 CONFLICT 带 runner 原因。
+     */
+    public Map<String, Object> workspaceQuery(String id, String action, String repo, String path) {
+        SessionEntity ent = requireEntity(id);
+        if (ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "会话无执行节点记录，工作区视图不可用");
+        }
+        AgentNodeConnector connector = connectorProvider.getIfAvailable();
+        if (connector == null) {
+            throw new DevMindException(ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+        }
+        WorkspaceQueryResult r = connector.workspaceQuery(ent.getAgentNodeId(), id, action, repo, path);
+        if (!r.ok()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    r.error() == null || r.error().isBlank() ? "工作区查询失败" : r.error());
+        }
+        return r.payload();
+    }
+
     // ---------------- worktree / diff ----------------
 
     /**
@@ -819,6 +892,8 @@ public class SessionManagerService {
             rt.unsubscribeAll();
             rt.kill();
         }
+        workspaceSnapshots.remove(id); // CAP-54：旁路缓存随记录清除
+        workspaceSubs.remove(id);
         SessionEntity ent = requireEntity(id);
         releaseFixedWorkspace(ent);
         if (ent.getWorktreePath() != null && !ent.getWorktreePath().isBlank()) {

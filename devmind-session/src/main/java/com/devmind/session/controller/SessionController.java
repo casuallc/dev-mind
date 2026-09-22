@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 会话 REST API。
@@ -107,6 +108,33 @@ public class SessionController {
     @GetMapping("/{id}/diff")
     public List<RepoDiffView> diff(@PathVariable String id) {
         return service.diff(id);
+    }
+
+    // ---------------- CAP-54 工作区实时视图（拉取侧；推送走 /ws/sessions/{id} 的 workspace 帧） ----------------
+
+    /** 最新 git 快照：优先内存缓存；无缓存（未推过/终态）回 source 端点实时查询。 */
+    @GetMapping("/{id}/workspace/status")
+    public Map<String, Object> workspaceStatus(@PathVariable String id) {
+        Map<String, Object> cached = service.latestWorkspaceSnapshot(id);
+        return cached != null ? cached : service.workspaceQuery(id, "status", null, null);
+    }
+
+    @GetMapping("/{id}/workspace/tree")
+    public Map<String, Object> workspaceTree(@PathVariable String id,
+                                             @RequestParam(required = false) String path) {
+        return service.workspaceQuery(id, "tree", null, path);
+    }
+
+    @GetMapping("/{id}/workspace/file")
+    public Map<String, Object> workspaceFile(@PathVariable String id, @RequestParam String path) {
+        return service.workspaceQuery(id, "file", null, path);
+    }
+
+    @GetMapping("/{id}/workspace/diff")
+    public Map<String, Object> workspaceDiff(@PathVariable String id,
+                                             @RequestParam(required = false) String repo,
+                                             @RequestParam String path) {
+        return service.workspaceQuery(id, "diff", repo, path);
     }
 
     @DeleteMapping("/{id}/worktree")
