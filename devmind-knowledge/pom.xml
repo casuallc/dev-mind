@@ -25,6 +25,11 @@
             <groupId>com.devmind</groupId>
             <artifactId>devmind-notification</artifactId>
         </dependency>
+        <!-- CAP-55 FR-05：人工裁决要落"谁裁的"（decided_by），取 IdentityService.currentActor() -->
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-auth</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>

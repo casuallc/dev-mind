@@ -33,9 +33,15 @@ public interface DecisionRecordSink {
     /**
      * 人工裁决落地：upsert 到 {@link #saveSuggestion} 那一行。
      *
-     * @param gold 题 id → 人工答案（choice 题给选项名、score 题给等级下标、noul 题给 0/1），
-     *             与模型 {@code answers} 同键同值域，导出时转 one-hot 分布
-     * @param by   裁决人（用户名），导出留痕用
+     * <p><b>动作与 gold 分开记</b>：人工动作不总能落成某道题的答案——"拒绝提案"就不等于
+     * 选择"不值得沉淀"（可能只是"现在不采纳"），所以 gold 可以是空 map。但动作本身要留下，
+     * 否则记录页只能说"没人裁决"，而"人做了另一个决定"恰恰是数据飞轮最想看的信号。</p>
+     *
+     * @param humanAction 人工动作的机器值（如 {@code adopt:global} / {@code reject}），只做留痕与展示
+     * @param gold        题 id → 人工答案（choice 题给选项名、score 题给等级下标、noul 题给 0/1），
+     *                    与模型 {@code answers} 同键同值域；导出时按题面 criteria 转成分布，
+     *                    空 map = 这次裁决不构成任何题的 gold（该行不进导出集）
+     * @param by          裁决人（用户名），留痕用
      */
-    void saveVerdict(String capability, String refId, Map<String, Object> gold, String by);
+    void saveVerdict(String capability, String refId, String humanAction, Map<String, Object> gold, String by);
 }

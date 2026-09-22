@@ -1,5 +1,6 @@
 package com.devmind.knowledge;
 
+import com.devmind.auth.IdentityService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.model.ModelEndpointProvider;
@@ -23,6 +24,8 @@ import com.devmind.knowledge.repo.KnowledgeChunkRepository;
 import com.devmind.knowledge.repo.KnowledgeEntryRepository;
 import com.devmind.knowledge.repo.KnowledgeProposalRepository;
 import com.devmind.knowledge.triage.ProposalCreatedEvent;
+import com.devmind.knowledge.triage.ProposalVerdictEvent;
+import com.devmind.knowledge.triage.TriageQuestions;
 import com.devmind.notification.NotificationPublisher;
 import com.devmind.project.ProjectService;
 import com.devmind.project.model.Project;
@@ -63,6 +66,7 @@ public class KnowledgeBaseService {
     private final ApplicationEventPublisher eventPublisher;
     private final EmbeddingResolver resolver;
     private final ObjectProvider<ModelEndpointProvider> endpointProviders;
+    private final IdentityService identityService;
 
     public KnowledgeBaseService(KnowledgeBaseRepository kbRepo,
                                 KnowledgeEntryRepository entryRepo,
@@ -72,7 +76,8 @@ public class KnowledgeBaseService {
                                 NotificationPublisher notificationPublisher,
                                 ApplicationEventPublisher eventPublisher,
                                 EmbeddingResolver resolver,
-                                ObjectProvider<ModelEndpointProvider> endpointProviders) {
+                                ObjectProvider<ModelEndpointProvider> endpointProviders,
+                                IdentityService identityService) {
         this.kbRepo = kbRepo;
         this.entryRepo = entryRepo;
         this.chunkRepo = chunkRepo;
@@ -82,6 +87,7 @@ public class KnowledgeBaseService {
         this.eventPublisher = eventPublisher;
         this.resolver = resolver;
         this.endpointProviders = endpointProviders;
+        this.identityService = identityService;
     }
 
     // ---------------- 知识库（CAP-44 FR-01/FR-07） ----------------
@@ -664,7 +670,11 @@ public class KnowledgeBaseService {
         p.setAdoptedTo(target);
         p.setAdoptedProjectId("project".equals(target) ? kb.getProjectId() : null);
         p.setAdoptedAt(now);
-        return EntryViews.proposal(proposalRepo.save(p));
+        ProposalView view = EntryViews.proposal(proposalRepo.save(p));
+        // CAP-55 FR-05：采纳去向就是分诊"采纳层级"那题的人工 gold（选项 key 与 target 同域）；
+        // 提交后才落库（AFTER_COMMIT），事务回滚了就不会留下一条没发生过的"人工裁决"
+        publishVerdict(p.getId(), "adopt:" + target, Map.of(TriageQuestions.Q_LAYER, target));
+        return view;
     }
 
     @Transactional
@@ -675,7 +685,17 @@ public class KnowledgeBaseService {
         }
         p.setStatus("rejected");
         p.setAdoptedAt(Instant.now());
-        return EntryViews.proposal(proposalRepo.save(p));
+        ProposalView view = EntryViews.proposal(proposalRepo.save(p));
+        // CAP-55 FR-05：拒绝**不**折算成"不值得沉淀"那题——"现在不采纳"和"这经验没价值"
+        // 是两回事，把人的动作硬塞进一个他没表的态就是往训练集里灌噪声。动作本身仍留痕。
+        publishVerdict(p.getId(), "reject", Map.of());
+        return view;
+    }
+
+    /** 人工裁决留痕（FR-05）：谁做的、做了什么、构成哪道题的 gold（可能为空） */
+    private void publishVerdict(Long proposalId, String humanAction, Map<String, Object> gold) {
+        eventPublisher.publishEvent(new ProposalVerdictEvent(proposalId, humanAction, gold,
+                identityService.currentActor()));
     }
 
     private String defaultPath(KnowledgeEntryEntity e) {

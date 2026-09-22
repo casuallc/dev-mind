@@ -1,5 +1,6 @@
 package com.devmind.knowledge;
 
+import com.devmind.auth.IdentityService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.model.ModelEndpointProvider;
 import com.devmind.common.model.ModelEndpointView;
@@ -19,14 +20,18 @@ import com.devmind.knowledge.repo.KnowledgeChunkRepository;
 import com.devmind.knowledge.repo.KnowledgeEntryRepository;
 import com.devmind.knowledge.repo.KnowledgeProposalRepository;
 import com.devmind.knowledge.triage.ProposalCreatedEvent;
+import com.devmind.knowledge.triage.ProposalVerdictEvent;
 import com.devmind.notification.NotificationPublisher;
 import com.devmind.project.ProjectService;
 import com.devmind.project.model.Project;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 
@@ -112,9 +117,12 @@ class KnowledgeBaseServiceTest {
         when(projectService.requireProject(anyString())).thenAnswer(inv ->
                 new Project(inv.getArgument(0), "项目" + inv.getArgument(0), null, null, List.of(),
                         null, null, null));
+        IdentityService identityService = mock(IdentityService.class);
+        when(identityService.currentActor()).thenReturn("alice");
 
         service = new KnowledgeBaseService(kbRepo, entryRepo, chunkRepo, proposalRepo,
-                projectService, notificationPublisher, eventPublisher, resolver, endpointProviders);
+                projectService, notificationPublisher, eventPublisher, resolver, endpointProviders,
+                identityService);
     }
 
     private KnowledgeBaseEntity addKb(String scope, String projectId, String injectMode) {
@@ -279,6 +287,54 @@ class KnowledgeBaseServiceTest {
         verify(eventPublisher).publishEvent(event.capture());
         assertEquals(view.id(), event.getValue().proposalId(),
                 "事件带的是落库后的 id——异步线程按 id 读回，带实体引用就是过期快照");
+    }
+
+    // ---------------- CAP-55 FR-05 人工裁决留痕 ----------------
+
+    private KnowledgeProposalEntity addOpenProposal() {
+        KnowledgeProposalEntity p = new KnowledgeProposalEntity();
+        p.setId(4711L);
+        p.setTitle("构建失败先看日志末尾");
+        p.setContentMd("九成环境类报错在日志最后 200 行");
+        p.setTargetScope("project");
+        p.setTargetProjectId("p1");
+        p.setStatus("open");
+        p.setCreatedAt(Instant.now());
+        when(proposalRepo.findById(4711L)).thenReturn(Optional.of(p));
+        when(proposalRepo.save(any(KnowledgeProposalEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+        return p;
+    }
+
+    private ProposalVerdictEvent capturedVerdict() {
+        ArgumentCaptor<ProposalVerdictEvent> captor = ArgumentCaptor.forClass(ProposalVerdictEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        return captor.getValue();
+    }
+
+    @Test
+    void adoptAnnouncesVerdictAsGoldForTheLayerQuestion() {
+        KnowledgeProposalEntity p = addOpenProposal();
+
+        ProposalView view = service.adopt(p.getId(), "global", null);
+
+        assertEquals("adopted", view.status());
+        ProposalVerdictEvent event = capturedVerdict();
+        assertEquals("adopt:global", event.humanAction());
+        assertEquals(Map.of("adopt_layer", "global"), event.gold(),
+                "采纳去向与题面选项 key 同域，导出才摊得出分布");
+        assertEquals("alice", event.by(), "留痕要带裁决人（IdentityService.currentActor）");
+    }
+
+    @Test
+    void rejectRecordsTheActionWithoutInventingGold() {
+        KnowledgeProposalEntity p = addOpenProposal();
+
+        assertEquals("rejected", service.reject(p.getId()).status());
+
+        ProposalVerdictEvent event = capturedVerdict();
+        assertEquals("reject", event.humanAction());
+        assertTrue(event.gold().isEmpty(),
+                "拒绝 ≠ 不值得沉淀（可能只是现在不采纳）：不给人没表的态编 gold，否则训练集里全是噪声");
     }
 
     @Test
