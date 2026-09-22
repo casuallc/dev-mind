@@ -305,8 +305,11 @@ public class SessionManagerService {
         String pm = firstNonBlank(req.permissionMode(),
                 scenario != null ? scenario.getPermissionMode() : null, props.getPermissionMode());
 
-        // CAP-24 FR-03：按会话发起人 + 主库 remoteUrl host 解析提交身份，随进程 env 注入
-        Map<String, String> gitEnv = resolveGitEnv(identityService.currentActor(), project);
+        // CAP-24 FR-03：按会话发起人 + 主库 remoteUrl host 解析提交身份，随进程 env 注入。
+        // 异步链路（需求流程分流/编排派发，actor 回退 local）按 WI/需求归属回退真实用户，
+        // 否则 createdBy=local 会让身份解析落空、agent 提交署名退化成 runner 机系统 git 配置
+        String effectiveActor = resolveSessionActor(workItem, requirement);
+        Map<String, String> gitEnv = resolveGitEnv(effectiveActor, project);
         // CAP-33 FR-02：三层合并装配上下文包（场景绑定 + 项目自动命中 + 请求追加）。
         // 场景绑定的资产失效（DevMindException 404）fail-visible 向上传播；其它装配异常降级
         // 为无上下文启动（沿用知识注入不阻塞会话的语义）
@@ -327,7 +330,7 @@ public class SessionManagerService {
             // CAP-41：worklog 会话无仓库块，kind="worklog" + worklogOwner=项目归属用户（runner 目录隔离键）
             List<AgentLaunchCommand.RepoSpec> specs = worklog ? List.of()
                     : buildRepoSpecs(project, repoRows, baseBranch, sessionBranch,
-                            identityService.currentActor());
+                            effectiveActor);
             // CAP-42/CAP-51：repo 会话走工作区——归属用户解析（无登录态按 WI/需求归属人回退链）
             // + 协议门控（带 workspaceKey 需 v10+，缺 key 的存量路径仍是 v7；老 runner 会忽略新字段
             //   把不同需求写进同一 work/ 目录，fail-visible 409，绝不静默下发）
@@ -370,7 +373,8 @@ public class SessionManagerService {
         ent.setPid(null);
         ent.setModel(model);
         ent.setPermissionMode(pm);
-        ent.setCreatedBy(identityService.currentActor());
+        // 归属落库用 effectiveActor（异步链路回退真实用户，resume 身份解析以此为据）
+        ent.setCreatedBy(effectiveActor);
         // CAP-42：固定工作区归属用户名落库（resume 以此为准，不随当前操作者漂移）；
         // repo 会话工作区状态置 OPEN（手动收口后置 FINALIZED）
         ent.setWorkspaceOwner(wsOwner);
@@ -1490,6 +1494,23 @@ public class SessionManagerService {
      * 解析不到 409 fail-visible（不落 local——多 WI 并发会全撞 &lt;proj&gt;/local/work）。
      */
     private String resolveWorkspaceOwner(WorkItemEntity workItem, RequirementEntity requirement) {
+        String owner = resolveSessionActor(workItem, requirement);
+        if (com.devmind.auth.IdentityService.LOCAL_USER.equals(owner)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "无法确定工作区归属用户（无登录态且工作单元/需求均未指定负责人），"
+                            + "请先为工作单元/需求指定负责人再派发会话");
+        }
+        return owner;
+    }
+
+    /**
+     * 会话归属用户（createdBy / CAP-24 提交身份 / repo spec 归属共用）：有登录态 = 当前操作者；
+     * 异步链路（actor 回退 local）按 WI.ownerId → 需求.ownerId → WI.createdBy → 需求.createdBy
+     * 回退。与 {@link #resolveWorkspaceOwner} 同一条链，但<b>不抛错</b>——非 repo 会话没有
+     * 工作区归属语义，解析不到就保持 local（repo 会话会在 resolveWorkspaceOwner 处 409）。
+     * package-private 供单测直接驱动。
+     */
+    String resolveSessionActor(WorkItemEntity workItem, RequirementEntity requirement) {
         String actor = identityService.currentActor();
         if (!com.devmind.auth.IdentityService.LOCAL_USER.equals(actor)) {
             return actor;
@@ -1504,9 +1525,7 @@ public class SessionManagerService {
                 return candidate;
             }
         }
-        throw new DevMindException(ErrorCode.CONFLICT,
-                "无法确定工作区归属用户（无登录态且工作单元/需求均未指定负责人），"
-                        + "请先为工作单元/需求指定负责人再派发会话");
+        return actor;
     }
 
     /** CAP-42 FR-07：归属用户名白名单 + 保留名校验（存量非法用户名在此 fail-visible） */

@@ -347,6 +347,48 @@ class SessionRequirementWorkspaceTest {
         assertEquals(REQ_BRANCH, specs.get(0).branch());
     }
 
+    // ---------------- ①.5 异步链路会话归属回退（resolveSessionActor） ----------------
+
+    /** 有登录态（请求线程）：归属当前操作者，不看 WI/需求字段。 */
+    @Test
+    void 有登录态时归属当前操作者() {
+        build(new FakeConnector());
+        identity.actor = "u9";
+
+        assertEquals("u9", service.resolveSessionActor(null, requirement("u1", "u2")));
+    }
+
+    /** 异步链路（流程分流线程，actor=local）：回退需求创建者，createdBy/提交身份不再落 local。 */
+    @Test
+    void actor为local时回退需求创建者() {
+        build(new FakeConnector());
+        identity.actor = IdentityService.LOCAL_USER;
+
+        assertEquals("u1", service.resolveSessionActor(null, requirement("u1", null)));
+    }
+
+    /** 回退链优先级：WI.ownerId > 需求.ownerId > WI.createdBy > 需求.createdBy。 */
+    @Test
+    void actor为local时优先工作单元负责人() {
+        build(new FakeConnector());
+        identity.actor = IdentityService.LOCAL_USER;
+        com.devmind.project.model.WorkItemEntity wi = new com.devmind.project.model.WorkItemEntity();
+        wi.setOwnerId("wi-owner");
+        wi.setCreatedBy("wi-creator");
+
+        assertEquals("wi-owner", service.resolveSessionActor(wi, requirement("req-creator", "req-owner")));
+    }
+
+    /** 全链路都解析不到：保持 local 不抛错（repo 会话的 409 由 resolveWorkspaceOwner 负责）。 */
+    @Test
+    void 归属全空时保持local不抛错() {
+        build(new FakeConnector());
+        identity.actor = IdentityService.LOCAL_USER;
+
+        assertEquals(IdentityService.LOCAL_USER, service.resolveSessionActor(null, requirement(null, null)));
+        assertEquals(IdentityService.LOCAL_USER, service.resolveSessionActor(null, null));
+    }
+
     // ---------------- ② 需求级互斥预检 ----------------
 
     @Test
