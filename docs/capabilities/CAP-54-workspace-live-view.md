@@ -174,4 +174,5 @@ GET /api/chats/{id}/workspace/...                      同上（问答沙箱，d
   `workspace_query` 拉取（tree/file/diff/status）+ 服务端旁路缓存与 REST + 前端右栏面板
   （变更/文件双 tab，diff 与文件内容抽屉；MODEL 执行体无面板）。单测：runner 采集/查询
   纯函数面（porcelain/numstat/路径限定）、agent 帧链路面（组帧/ack 路由/v11 门控/断连清理）。
-  E2E 实跑范围待补（tests/ 脚本尚未沉淀）。
+  E2E：`tests/cap54_e2e.py` 已实跑通过（fake runner + 独立 :8090 实例）——status/tree/file/diff、
+  路径逃逸 409、问答沙箱非 git、终态经 recentDirs 可读。
