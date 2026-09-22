@@ -62,6 +62,7 @@
 | [CAP-53](CAP-53-project-user-claude-cwd.md) | claude 工作目录上抬与代码目录分离 | 底座 | claude cwd 从需求工作树上抬到「项目+用户」粒度（`<proj>/<owner>/`），代码仍在需求子目录：memory/transcript 跨需求共享；上下文物化拆分（settings/skills 落 cwd、会话特定注入落代码目录）+ 路由注入（恒定文件 + 首条消息【代码目录】前缀）+ resume transcript 一次性迁移（修订 CAP-51 的 cwd 设定） |
 | [CAP-54](CAP-54-workspace-live-view.md) | 会话工作区实时视图 | 底座 | 会话/问答页右侧工作区面板：git 变更实时推送（tool_result 事件触发采集+去抖+哈希去重，旁路内存快照不入事件流）+ 文件树/内容/单文件 diff 拉取（workspace_query 帧，协议 v11），补 RemoteDiffService 看不到未提交改动的盲区 |
 | [CAP-55](CAP-55-decision-engine.md) | 决策引擎接入与知识库提案分诊 | 底座 | Laya 非自回归决策模型（choice/score/noul，33ms 级）以 Python 边车服务接入：端点复用 CAP-48 体系放开 kind=DECISION，DecisionEngine SPI 入 common；首场景 inbox 提案 AI 分诊（采纳层级+重复判定+质量分，建议先行不自动执行），人工裁决落 decision_records 沉淀微调训练集（数据飞轮），边车不可用全链降级现状 |
+| [CAP-56](CAP-56-decision-eval-finetune.md) | 决策模型评测与微调闭环 | 底座 | 先证明"这套判断准不准"再接模块：评测集（人工基准集+decision_records 回流，**强制含空召回/逐字重复/不相关对照组**）+ 官方口径指标（accuracy/ECE/Brier/score_mae，**必报随机与多数类基线**）+ 温度校准 + runner 编排微调（官方 RLCD recipe，2×T4 分钟级；权重留节点只回传指标指纹）+ **准入闸门**（只有验证通过的 checkpoint 才允许消费方启用）；同时更正 CAP-55「首发用 typed-decisions」口径 |
 | [CAP-43](CAP-43-agent-node-proxy.md) | Agent 节点外网代理 | 底座 | 节点级 HTTP 代理配置（URL+按功能勾选 scope git/claude/exec），随 launch/worklog_push/exec/workspace_finalize 帧下发（协议 v8 门控），runner 进程级 holder 注入 git 命令行与子进程 env |
 | [CAP-44](CAP-44-knowledge-base-rag.md) | 知识库容器化与向量检索 | 管理 | 知识库成为一等容器（scope 归属+inject_mode FULL/RAG），条目重构归属并分块向量化（JSON CLOB+Java 余弦，无 pgvector），检索 SPI+降级 LIKE，shared MarkdownEditor（升级 CAP-04，打底 CAP-45/46） |
 | [CAP-45](CAP-45-feishu-knowledge-import.md) | 飞书文档对接 | 管理 | integrations 增 FEISHU（appId/appSecret 双行密文），wiki/docx/doc 拉取+blocks→markdown，手动选文档导入知识库（externalId 判重+contentHash 变更检测+手动重同步），条目走 CAP-44 摄入管线自动索引 |
@@ -131,6 +132,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
   丢 `exit` 帧即会话永卡 RUNNING）、回放环形缓冲排除增量（会话进行中刷新页面时它是唯一历史来源）、
   `/ws/sessions` 慢客户端装饰；`/sessions/{id}/events` 补拉上限（零表结构变更，增量行仍落 `session_events`）。
 - CAP-55 决策引擎依赖 CAP-48/44/04：`model_endpoints.kind` 放开 DECISION 登记 Python 边车服务（laya 决策模型，不进 Maven/dist），`DecisionEngine` SPI 入 common、devmind-decision 实现 HTTP 客户端（超时转 degraded），首场景 knowledge inbox 提案分诊（重复判定召回段复用 KnowledgeRetriever）；人工裁决落 `decision_records` 并可导出 laya 训练 JSONL，为后续「训练执行器 + checkpoint 发布闭环」（另立 CAP）攒数据。
+- CAP-56 决策模型评测与微调闭环依赖 CAP-55/48/12/21/34：兑现 CAP-55 留白的两项（评测与训练），并把它们的顺序倒过来——**先证明判断准不准，再谈接入更多消费方**。评测集（人工基准集 + decision_records 回流，强制含对照组）与微调任务（官方 RLCD recipe 移植到自有题面）都作为批量为负载走 `AgentNodeRouter`+`AgentNodeStepRunner`+`ExecutionLogHub`（CAP-12/21/34 现成链路，零改造），指标口径照抄 laya 官方（accuracy/ECE/Brier/score_mae，必报随机与多数类基线）；权重产物因 exec 链路无文件上行通道而**留在节点**，边车经「槽位→本地路径」覆盖（`Agent` 本就支持本地目录）serve，只回传指标与指纹；准入闸门落在 `HttpDecisionEngine.unavailableReason()`（按钮置灰与运行时降级的共同上游）。**并更正 CAP-55 §1/FR-04**：`laya-typed-decisions` 的四套微调 workflow 题 id 集合均不含 `{adopt_layer,duplicate,quality}`，故不能作为分诊题面的首发模型。
 
 ## 组装方式（后续流程层）
 
