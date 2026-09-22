@@ -118,7 +118,7 @@ public class CheckpointService {
         String slot = blankToNull(serveSlot);
         Page<DecisionCheckpointEntity> result = slot == null
                 ? repo.findAllByOrderByIdDesc(PageRequest.of(p, s))
-                : repo.pageByServeSlotOrderByIdDesc(slot, PageRequest.of(p, s));
+                : repo.findByServeSlotOrderByIdDesc(slot, PageRequest.of(p, s));
         return new PageView<>(result.getContent().stream().map(CheckpointViews::of).toList(),
                 result.getTotalElements(), p, s);
     }

@@ -18,10 +18,16 @@ public interface DecisionCheckpointRepository extends JpaRepository<DecisionChec
     /**
      * 分页版（列表页按槽位筛选）。
      *
-     * <p>名字不用 {@code findBy…} 重载：同一个名字两种返回（{@code List} / {@code Page}）虽然
-     * Spring Data 分得清，读代码的人却要停下来想"这里调的是哪个"。</p>
+     * <p><b>名字只能叫 {@code findBy…}</b>：Spring Data 4 只认
+     * {@code find/read/get/query/search/stream/count/exists/delete/remove} 这几个前缀，
+     * 自造一个 {@code pageBy…} 会被当成属性路径解析，启动期直接报
+     * {@code No property 'pageByServeSlot' found for type 'DecisionCheckpointEntity'}
+     * （CAP-56 E2E 抓到的：整模块因此起不来，而单测不引导全上下文，看不见）。</p>
+     *
+     * <p>与上面的 {@code List} 版同名重载：Spring Data 按参数签名分派，带 {@code Pageable} 的
+     * 那个返回 {@code Page}——同一个名字两种返回，调用处才分得清自己在翻页还是取全量。</p>
      */
-    Page<DecisionCheckpointEntity> pageByServeSlotOrderByIdDesc(String serveSlot, Pageable pageable);
+    Page<DecisionCheckpointEntity> findByServeSlotOrderByIdDesc(String serveSlot, Pageable pageable);
 
     /** 已通过验证的那些（正常情况下 ≤ 槽位数；供闸门与"当前放行的是谁"两处用） */
     List<DecisionCheckpointEntity> findByVerifiedTrueOrderByIdAsc();

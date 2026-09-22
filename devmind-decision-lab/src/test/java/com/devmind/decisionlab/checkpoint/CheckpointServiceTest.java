@@ -96,7 +96,7 @@ class CheckpointServiceTest {
             int to = Math.min(from + pageable.getPageSize(), all.size());
             return new PageImpl<>(all.subList(from, to), pageable, all.size());
         });
-        when(repo.pageByServeSlotOrderByIdDesc(anyString(), any(Pageable.class))).thenAnswer(inv -> {
+        when(repo.findByServeSlotOrderByIdDesc(anyString(), any(Pageable.class))).thenAnswer(inv -> {
             String slot = inv.getArgument(0);
             Pageable pageable = inv.getArgument(1);
             List<DecisionCheckpointEntity> hit = sortedDesc().stream()
