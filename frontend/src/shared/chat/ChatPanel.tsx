@@ -15,6 +15,7 @@ import type { ChatApiBase, ChatEvent, ChatImageAttachment, ChatSummaryBase, Stre
 import { useChatStream } from './useChatStream'
 import { ACTIVE_STATES } from './stateMeta'
 import ChatStream from './ChatStream'
+import WorkspacePanel from './workspace/WorkspacePanel'
 import { showError } from '../utils/showError'
 
 export default function ChatPanel({
@@ -45,7 +46,7 @@ export default function ChatPanel({
   const [baseEvents, setBaseEvents] = useState<ChatEvent[]>([])
 
   const isLive = ACTIVE_STATES.includes(summary.state)
-  const { events, connected, fatal, notice, input, interrupt, authorize: wsAuthorize } = useChatStream(
+  const { events, connected, fatal, notice, workspace, input, interrupt, authorize: wsAuthorize } = useChatStream(
     summary.id,
     apiBase,
     isLive,
@@ -181,7 +182,20 @@ export default function ChatPanel({
   const allowImg = allowImages && !isModel
 
   return (
-    <div style={maxHeight === null ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } : undefined}>
+    <div
+      style={
+        maxHeight === null
+          ? { display: 'flex', flex: 1, minHeight: 0 }
+          : { display: 'flex' }
+      }
+    >
+      <div
+        style={
+          maxHeight === null
+            ? { display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }
+            : { flex: 1, minWidth: 0 }
+        }
+      >
       {/* 授权请求条 */}
       {pendingReq && (
         <Card size="small" style={{ borderColor: '#fa8c16', background: '#fff7e6', marginBottom: 8 }}>
@@ -320,6 +334,17 @@ export default function ChatPanel({
           )}
         </Space.Compact>
       </div>
+      </div>
+
+      {/* CAP-54：工作区实时视图（变更/文件右栏）；模型执行体无 runner 工作区，整条隐藏 */}
+      {!isModel && (
+        <WorkspacePanel
+          apiBase={apiBase}
+          sessionId={summary.id}
+          snapshot={workspace}
+          canDiff={apiBase === '/sessions'}
+        />
+      )}
     </div>
   )
 }

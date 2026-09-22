@@ -2,7 +2,7 @@
 // 连接后先收 snapshot（环形缓冲回放），再收增量事件，按 seq 去重；断线指数退避重连。
 // enabled=false 时不建立连接；收到 error 帧视为致命（如会话已无运行时）不再重连。
 import { useEffect, useRef, useState } from 'react'
-import type { ChatApiBase, ChatEvent, ChatImageAttachment, WsServerFrame } from './types'
+import type { ChatApiBase, ChatEvent, ChatImageAttachment, WorkspaceSnapshot, WsServerFrame } from './types'
 
 function wsUrl(apiBase: ChatApiBase, id: string): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
@@ -16,6 +16,8 @@ export interface StreamState {
   maxSeq: number
   /** 非致命提示（上行动作被拒等）；n 递增，同一条文字再被拒也能再弹一次 */
   notice?: { text: string; n: number }
+  /** CAP-54：工作区 git 快照（旁路最新值；未推过/老 runner 为 undefined） */
+  workspace?: WorkspaceSnapshot
 }
 
 export function useChatStream(id: string | undefined, apiBase: ChatApiBase, enabled = true) {
@@ -53,6 +55,9 @@ export function useChatStream(id: string | undefined, apiBase: ChatApiBase, enab
       } else if (frame.type === 'notice') {
         // 只是这个动作没成（会话可能已删、模型问答不支持该动作…）：提示一下，连接照旧
         setState((p) => ({ ...p, notice: { text: frame.message, n: (p.notice?.n ?? 0) + 1 } }))
+      } else if (frame.type === 'workspace') {
+        // CAP-54：旁路快照只覆盖 workspace 字段，不碰事件流与连接状态
+        setState((p) => ({ ...p, workspace: frame.snapshot }))
       } else if (frame.type === 'error') {
         fatal = true
         setState((p) => ({ ...p, connected: false, fatal: true }))
@@ -107,6 +112,7 @@ export function useChatStream(id: string | undefined, apiBase: ChatApiBase, enab
     fatal: state.fatal,
     maxSeq: state.maxSeq,
     notice: state.notice,
+    workspace: state.workspace,
     send,
     input: (text: string, images?: ChatImageAttachment[]) =>
       send({ type: 'input', text, ...(images?.length ? { images } : {}) }),

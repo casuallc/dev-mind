@@ -38,14 +38,44 @@ export interface ChatEvent {
   payload?: Record<string, unknown>
 }
 
+/** CAP-54：单个变更文件（git porcelain + numstat 合并；未跟踪文件无 adds/dels） */
+export interface WorkspaceChange {
+  path: string
+  /** 原始 porcelain XY 状态码（如 'M '、' M'、'A '、'??'、'R '） */
+  code: string
+  adds?: number
+  dels?: number
+}
+
+/** CAP-54：一个仓库的变更快照（工作区可能是多仓聚合目录） */
+export interface WorkspaceRepoStatus {
+  /** 相对工作区根的库名（代码目录本身是库时为 ''） */
+  name: string
+  branch?: string
+  changes: WorkspaceChange[]
+  /** 该库采集失败（git 缺失/超时…），不拖垮整组 */
+  error?: string
+}
+
+/** CAP-54：工作区 git 变更快照（旁路最新值，不进事件回放；问答沙箱非 git 时 gitAvailable=false） */
+export interface WorkspaceSnapshot {
+  /** 采集时刻（epoch millis） */
+  ts?: number
+  gitAvailable: boolean
+  repos: WorkspaceRepoStatus[]
+  total?: { files: number; adds: number; dels: number }
+}
+
 // WebSocket 帧：服务端→客户端。error = 致命（会话已无运行时，前端关连接不再重连）；
 // notice = 非致命提示（CAP-49：某个上行动作被拒，如"没有正在生成的回答"），连接与事件流照旧。
+// workspace = CAP-54 工作区快照旁路（最新值语义，老前端忽略未知帧天然兼容）。
 export type WsServerFrame =
   | { type: 'snapshot'; sessionId: string; seq: number; events: ChatEvent[] }
   | { type: 'event'; seq: number; event: ChatEvent }
   | { type: 'error'; message: string }
   | { type: 'notice'; message: string }
   | { type: 'pong' }
+  | { type: 'workspace'; snapshot: WorkspaceSnapshot }
 
 /** ChatPanel 实时流连接状态（外层做徽标） */
 export interface StreamMeta {
