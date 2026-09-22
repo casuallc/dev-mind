@@ -108,6 +108,32 @@ class ContextMaterializerTest {
     }
 
     @Test
+    void splitMaterializationSeparatesSharedAndSessionParts() throws Exception {
+        // CAP-53：settings/skills 落 cwd（共享同构），注入块/docs/inputs 落代码目录（会话特定）
+        Path cwd = workDir.resolve("cwd");
+        Path code = workDir.resolve("code");
+        ContextPackage pkg = new ContextPackage(ContextPackage.CURRENT_SCHEMA, "## 任务\n", SETTINGS_JSON,
+                List.of(new ContextPackage.SkillPackage("review", Map.of("SKILL.md",
+                        Base64.getEncoder().encodeToString("# 评审\n".getBytes(StandardCharsets.UTF_8))))),
+                List.of(new ContextPackage.DocEntry("d1", "方案", "正文")),
+                List.of(new ContextPackage.InputFile("abc123-shot.png", "shot.png", "image/png",
+                        Base64.getEncoder().encodeToString(new byte[]{1, 2, 3}))));
+        ContextMaterializer.materializeShared(cwd, pkg);
+        ContextMaterializer.materializeSession(code, pkg);
+
+        assertTrue(Files.isRegularFile(cwd.resolve(".claude/settings.local.json")));
+        assertTrue(Files.isRegularFile(cwd.resolve(".claude/skills/review/SKILL.md")));
+        assertTrue(Files.notExists(cwd.resolve(ContextMaterializer.INJECTION_FILE)), "cwd 不得落会话注入块");
+        assertTrue(Files.notExists(cwd.resolve(".devmind")), "cwd 不得落 docs/inputs");
+
+        assertEquals("## 任务\n", Files.readString(code.resolve(ContextMaterializer.INJECTION_FILE),
+                StandardCharsets.UTF_8));
+        assertTrue(Files.isRegularFile(code.resolve(".devmind/docs/d1.md")));
+        assertTrue(Files.isRegularFile(code.resolve(".devmind/input/abc123-shot.png")));
+        assertTrue(Files.notExists(code.resolve(".claude")), "代码目录不得落 settings/skills");
+    }
+
+    @Test
     void manifestMatchesJsonBytes() {
         ContextPackage pkg = ContextPackage.of("md", "json");
         byte[] bytes = ContextPackages.toJsonBytes(pkg);

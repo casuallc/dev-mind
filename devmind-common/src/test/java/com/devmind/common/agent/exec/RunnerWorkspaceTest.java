@@ -26,6 +26,19 @@ class RunnerWorkspaceTest {
     Path tmp;
 
     @Test
+    void sessionCwdIsProjectUserRoot() {
+        // CAP-53：claude cwd = <root>/<proj>/<owner>/（幂等建目录），owner 校验与 prepare 同口径
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        Path cwd = ws.sessionCwd("proj1", "alice");
+        assertEquals(tmp.resolve("workspaces").resolve("proj1").resolve("alice")
+                .toAbsolutePath().normalize(), cwd);
+        assertTrue(Files.isDirectory(cwd));
+        assertEquals(cwd, ws.sessionCwd("proj1", "alice"), "重复调用幂等");
+        assertThrows(IllegalStateException.class, () -> ws.sessionCwd("proj1", "worktrees"));
+        assertThrows(IllegalStateException.class, () -> ws.sessionCwd("../evil", "alice"));
+    }
+
+    @Test
     void fullLifecycle() throws Exception {
         Path origin = tmp.resolve("origin.git");
         git(tmp, "init", "--bare", "-b", "main", origin.toString());

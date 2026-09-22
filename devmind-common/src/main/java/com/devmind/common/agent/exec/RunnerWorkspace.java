@@ -33,7 +33,7 @@ import java.util.regex.Pattern;
  * <p><b>CAP-51 需求粒度工作区</b>：launch 帧带 {@code workspaceKey}（服务端下发，runner 不推导）
  * 时工作树改落 {@code worktrees/}：
  * <pre>
- * &lt;workspaceRoot&gt;/&lt;projectId&gt;/&lt;workspaceOwner&gt;/worktrees/&lt;key&gt;/         工作树（claude cwd；多库时为聚合根）
+ * &lt;workspaceRoot&gt;/&lt;projectId&gt;/&lt;workspaceOwner&gt;/worktrees/&lt;key&gt;/         工作树（代码目录；CAP-53 前曾为 claude cwd）
  * &lt;workspaceRoot&gt;/&lt;projectId&gt;/&lt;workspaceOwner&gt;/worktrees/&lt;key&gt;/&lt;repo&gt;/ 多库子 worktree
  * </pre>
  * key = {@code req-<需求id>}（需求内多会话共用一棵工作树与一条分支，改动自然累积）或
@@ -42,6 +42,13 @@ import java.util.regex.Pattern;
  * 报错按目录/key 描述而非反查会话）；<b>收口保留工作树与分支</b>（需求可能继续开发），
  * 只在收口成功后 best-effort 把需求分支 ff 前进到新基线。key 为空 = 存量会话，走上面 CAP-42
  * 旧布局与旧语义（FR-11 兼容契约：服务端对存量会话不下发 key，不能视为错误）。</p>
+ *
+ * <p><b>CAP-53 claude cwd 上抬</b>：claude 启动目录不再是工作树，而是「项目+用户」粒度根
+ * {@code <workspaceRoot>/<projectId>/<workspaceOwner>/}（{@link #sessionCwd}）——claude 的
+ * memory/transcript 以启动 cwd 为归属键，cwd 共享后同项目同用户的 memory 跨需求积累。
+ * 工作树改称「代码目录」（布局不变），会话特定的上下文注入物化到代码目录、共享的
+ * settings/skills 物化到 cwd（见 ContextMaterializer 拆分）；pid 文件落点、产出扫描、
+ * 收口/释放/GC 仍以工作树（sessionDir）为基准，不受影响。</p>
  *
  * <p>CAP-34 FR-01：本类自 devmind-agent-runner 上移 common {@code agent.exec} 执行内核包
  * （该包只被 runner 引用，服务端不持有任何执行实现）。</p>
@@ -298,6 +305,27 @@ public class RunnerWorkspace {
 
     private Path userRoot(String projectId, String owner) {
         return workspaceRoot.resolve(projectId).resolve(owner).normalize();
+    }
+
+    /**
+     * CAP-53：repo 会话的 claude 启动目录（「项目+用户」粒度工作区根，幂等建目录）。
+     * claude 的 memory/transcript 以启动 cwd 为归属键——cwd 上抬后同项目同用户的所有
+     * 需求共享一份 claude 状态目录，memory 跨需求积累；代码仍在子目录（worktrees/&lt;key&gt;
+     * 或 work/），由路由注入告诉 agent 进去干活。
+     */
+    public Path sessionCwd(String projectId, String workspaceOwner) {
+        requireSafeId(projectId, "projectId");
+        String owner = requireOwner(workspaceOwner);
+        Path dir = userRoot(projectId, owner);
+        if (!dir.startsWith(workspaceRoot)) {
+            throw new IllegalStateException("工作区路径越界（.. 逃逸防护）: " + projectId);
+        }
+        try {
+            Files.createDirectories(dir);
+        } catch (IOException e) {
+            throw new IllegalStateException("创建会话工作目录失败: " + dir, e);
+        }
+        return dir;
     }
 
     /**

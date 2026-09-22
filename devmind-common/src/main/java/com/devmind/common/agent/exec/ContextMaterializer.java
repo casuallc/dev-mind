@@ -36,19 +36,41 @@ public final class ContextMaterializer {
     }
 
     public static void materialize(Path workDir, ContextPackage pkg) throws IOException {
+        materializeShared(workDir, pkg);
+        materializeSession(workDir, pkg);
+    }
+
+    /**
+     * CAP-53 共享部分物化（落 claude cwd = 「项目+用户」工作区根）：settings 权限白名单
+     * （全管线常量）与 skills（claude 只从 cwd 发现）。cwd 被同 (项目,用户) 的并发需求会话
+     * 共享——这两类内容跨会话同构，覆盖写无冲突；会话特定内容必须走 {@link #materializeSession}
+     * 落代码目录，否则并发会话互相覆盖、resume 读到别的需求的注入。
+     */
+    public static void materializeShared(Path dir, ContextPackage pkg) throws IOException {
         if (pkg == null) {
             return;
         }
-        writeClaudeMd(workDir, pkg.claudeMd());
-        writeSettingsLocal(workDir, pkg.settingsLocalJson());
+        writeSettingsLocal(dir, pkg.settingsLocalJson());
         for (ContextPackage.SkillPackage skill : pkg.skills() == null ? List.<ContextPackage.SkillPackage>of() : pkg.skills()) {
-            writeSkill(workDir, skill);
+            writeSkill(dir, skill);
         }
+    }
+
+    /**
+     * CAP-53 会话特定部分物化（落代码目录 = 需求工作树）：注入块 CLAUDE.local.md（场景背景
+     * +知识+当前任务）、.devmind/docs/、.devmind/input/。注入块内以相对路径引用 docs/inputs，
+     * 同目录解析；claude 读写代码目录文件时惰性加载嵌套 CLAUDE.local.md（路由注入再显式引导）。
+     */
+    public static void materializeSession(Path dir, ContextPackage pkg) throws IOException {
+        if (pkg == null) {
+            return;
+        }
+        writeClaudeMd(dir, pkg.claudeMd());
         for (ContextPackage.DocEntry doc : pkg.docs() == null ? List.<ContextPackage.DocEntry>of() : pkg.docs()) {
-            writeDoc(workDir, doc);
+            writeDoc(dir, doc);
         }
         for (ContextPackage.InputFile input : pkg.inputs() == null ? List.<ContextPackage.InputFile>of() : pkg.inputs()) {
-            writeInput(workDir, input);
+            writeInput(dir, input);
         }
     }
 
@@ -72,6 +94,7 @@ public final class ContextMaterializer {
         if (injection == null || injection.isBlank()) {
             return;
         }
+        Files.createDirectories(workDir); // 拆分物化时代码目录由 prepare 保证存在，这里兜底幂等
         Files.writeString(workDir.resolve(INJECTION_FILE),
                 injection.strip() + "\n", StandardCharsets.UTF_8);
     }
