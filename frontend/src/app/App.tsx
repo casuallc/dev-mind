@@ -34,6 +34,7 @@ import ExecutionPage from '../features/execution/pages/ExecutionPage'
 import IntegrationsPage from '../features/integrations/pages/IntegrationsPage'
 import ModelEndpointsPage from '../features/model/pages/ModelEndpointsPage'
 import DecisionRecordsPage from '../features/decision/pages/DecisionRecordsPage'
+import DecisionLabPage from '../features/decision/pages/DecisionLabPage'
 import ApiKeysPage from '../features/open-api/pages/ApiKeysPage'
 import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
@@ -164,6 +165,8 @@ export default function App() {
           <Route path="/admin/models" element={<ModelEndpointsPage />} />
           {/* CAP-55 决策记录（模型建议 vs 人工裁决 + 训练集导出） */}
           <Route path="/admin/decision-records" element={<DecisionRecordsPage />} />
+          {/* CAP-56 决策实验室（评测集 / 评测运行 / 微调任务 / 产物登记） */}
+          <Route path="/admin/decision-lab" element={<DecisionLabPage />} />
           {/* CAP-20 API 密钥（open-api HMAC 认证凭证） */}
           <Route path="/admin/keys" element={<ApiKeysPage />} />
           {/* CAP-21 Agent 节点（远程执行节点注册/在线状态） */}
