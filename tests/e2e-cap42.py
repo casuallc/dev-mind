@@ -4,16 +4,17 @@
 # 脚本自建节点并 Popen 起 runner（tmp/runner-cap42 独立 jar 副本），独立 E2E 用户确保
 # 工作区归属隔离；远端用 file:// bare 库（免凭证通道）。运行产物全部落 tmp/（gitignored）。
 #
-# 覆盖：
-#   1. 会话工作区落 <proj>/<user>/{main,work} 固定布局；结束（finish）不 push 不删；
-#   2. 占用冲突：同 (项目,用户) 未收口开新会话 → 409 引导收口；
-#   3. finalize：合并到基线 + push 基线与会话分支 + 删 worktree + workspace_state=FINALIZED；
-#      重复收口 409；
-#   4. 负例：脏工作区不 discard → 409；discard 后合并冲突 → 409 工作区保留；
+# 覆盖（2026-09-22 起适配 CAP-51 keyed 布局 worktrees/sid-<sid>；sid- 键独占，
+# 旧「同 (项目,用户) 占用冲突 409」语义已废——需求级互斥见 cap52_e2e.py）：
+#   1. 会话工作区落 <proj>/<user>/{main,worktrees/sid-*} 布局；结束（finish）不 push 不删；
+#   2. finalize：合并到基线 + push 基线与会话分支 + workspace_state=FINALIZED；
+#      keyed 收口保留工作树并 ff 前进到新基线；重复收口 409；
+#      收口 merge 提交署名 = 操作者身份（CAP-24 FR-06，未绑平台账号回退 displayName）；
+#   3. 负例：脏工作区不 discard → 409；discard 后合并冲突 → 409 工作区保留；
 #      本地解冲突后重试收口成功；
-#   5. 删除会话释放固定工作区（FR-09，协议 v9 workspace_release）：目录+本地分支释放、
-#      远端不动、占用锁解开可立即再开新会话；节点离线时删除 409 阻断（fail-visible）；
-#   6. 平台物化文件不进版本控制回归（2026-09-21 事故）：仓库跟踪的 CLAUDE.md 被注入改写
+#   4. 删除会话释放固定工作区（FR-09，协议 v9 workspace_release）：目录+本地分支释放、
+#      远端不动；节点离线时删除 409 阻断（fail-visible）；
+#   5. 平台物化文件不进版本控制回归（2026-09-21 事故）：仓库跟踪的 CLAUDE.md 被注入改写
 #      + .devmind/ 未跟踪 → 干净会话收口被「未提交改动」挡住。断言物化后 worktree 仍
 #      git 干净、CLAUDE.md 一字节不动、零改动会话不勾 discard 也能收口，基线无平台文件。
 import json
@@ -179,10 +180,10 @@ try:
 
     uroot = WS / pid / E2E_USER['username']
 
-    # 3. 会话 1：固定布局落盘（缓存 main + 固定 worktree work）
+    # 3. 会话 1：固定布局落盘（缓存 main + 固定 worktree worktrees/sid-<sid>，CAP-51 布局）
     _, s1 = call('POST', '/sessions', {'projectId': pid, 'taskSpec': 'CAP-42 E2E 会话1'}, user)
     sid1 = s1['id']
-    work1 = uroot / 'work'
+    work1 = uroot / 'worktrees' / f'sid-{sid1}'
     wait(lambda: (work1 / '.git').exists() or None, '固定 worktree 物化', 30)
     ok((uroot / 'main' / '.git').is_dir(), f'克隆缓存落 {uroot}/main')
     ok(s1.get('workspaceState') == 'OPEN', f'新会话 workspaceState=OPEN: {s1.get("workspaceState")}')
@@ -194,7 +195,8 @@ try:
        '注入块落 CLAUDE.local.md')
     ok((work1 / 'CLAUDE.md').read_text(encoding='utf-8').replace('\r\n', '\n') == SEED_CLAUDE_MD,
        '仓库自带的 CLAUDE.md 一字节不动（claude 自己会读它）')
-    ok((work1 / '.claude' / 'settings.local.json').is_file(), '权限白名单已物化')
+    # CAP-53：claude cwd 上抬到 <proj>/<user> 根，settings 落 cwd（共享）而非代码目录
+    ok((uroot / '.claude' / 'settings.local.json').is_file(), '权限白名单已物化（cwd 根 .claude）')
     dirty = git('status', '--porcelain', cwd=work1)
     ok(dirty == '', f'物化后 worktree 必须 git 干净（实际: {dirty!r}）')
     ok('CLAUDE.local.md' in git('check-ignore', '-v', 'CLAUDE.local.md', cwd=work1),
@@ -210,22 +212,28 @@ try:
     ls = git('ls-remote', ORIGIN, f'refs/heads/feature/{sid1}')
     ok(ls == '', 'finish 后远端无会话分支（未自动 push）')
 
-    # 5. 占用冲突：未收口开新会话 → 409 引导收口
-    st, r = call('POST', '/sessions', {'projectId': pid, 'taskSpec': 'CAP-42 E2E 占用冲突'}, user, expect=409)
-    ok(st == 409 and '收口' in json.dumps(r, ensure_ascii=False),
-       f'占用冲突 409: {json.dumps(r, ensure_ascii=False)[:120]}')
+    # 5.（CAP-51 后废止）无需求会话是 sid- 键独占工作树，同 (项目,用户) 不再互斥——
+    #    需求级互斥由 cap52_e2e.py 覆盖
 
-    # 6. 手动收口：合并 + push + 删 worktree + FINALIZED
+    # 6. 手动收口：合并 + push + FINALIZED；CAP-51 keyed 收口<b>保留</b>工作树并 ff 前进到新基线
     _, ack = call('POST', f'/sessions/{sid1}/finalize', {}, user)
     ok(ack.get('ok') is True, f"finalize ok: {ack.get('detail')}")
     ok(git('show', 'main:code.txt', cwd=ORIGIN).strip() == S1_CHANGE, '基线含会话产出 code.txt')
+    # CAP-24 FR-06：收口 merge 提交以操作者身份署名（未绑平台账号 → 回退 displayName；
+    # email 无署名 → runner 侧回退内置 devmind@runner.local）
+    merge_an = git('log', '-1', '--format=%an', 'main', cwd=ORIGIN)
+    ok(merge_an == E2E_USER['displayName'], f'收口 merge 作者=操作者 displayName（实际: {merge_an}）')
+    ok(git('log', '-1', '--format=%ae', 'main', cwd=ORIGIN) == 'devmind@runner.local',
+       '未绑署名邮箱时 merge email 回退内置 devmind@runner.local')
     tree = git('ls-tree', '-r', '--name-only', 'main', cwd=ORIGIN).split('\n')
     ok('CLAUDE.local.md' not in tree and not any(p.startswith('.devmind/') for p in tree),
        f'平台物化文件不得合入基线: {[p for p in tree if "CLAUDE" in p or p.startswith(".devmind")]}')
     ok(git('show', 'main:CLAUDE.md', cwd=ORIGIN).strip() == SEED_CLAUDE_MD.strip(),
        '基线 CLAUDE.md 仍为仓库自有内容')
     ok(git('ls-remote', ORIGIN, f'refs/heads/feature/{sid1}') != '', '会话分支已推送远端（diff 链路）')
-    ok(not work1.exists(), '收口后固定 worktree 已删')
+    # keyed 收口保留工作树且 ff 前进到新基线（HEAD = 收口合并提交）
+    ok(work1.is_dir(), 'keyed 收口后工作树保留（CAP-51）')
+    ok('收口' in git('log', '-1', '--format=%s', cwd=work1), '工作树已 ff 前进到收口合并提交')
     _, v1 = call('GET', f'/sessions/{sid1}', token=user)
     ok(v1.get('workspaceState') == 'FINALIZED', f"workspaceState=FINALIZED: {v1.get('workspaceState')}")
     st, r = call('POST', f'/sessions/{sid1}/finalize', {}, user, expect=409)
@@ -235,7 +243,7 @@ try:
     # 7. 会话 2：脏工作区 + 合并冲突两负例
     _, s2 = call('POST', '/sessions', {'projectId': pid, 'taskSpec': 'CAP-42 E2E 会话2'}, user)
     sid2 = s2['id']
-    work2 = uroot / 'work'
+    work2 = uroot / 'worktrees' / f'sid-{sid2}'
     wait(lambda: (work2 / '.git').exists() or None, '会话2 worktree 物化', 30)
     # 会话分支改 README（与基线冲突方向）；基线同时被他人推进
     (work2 / 'README.md').write_text('session-change\n', encoding='utf-8')
@@ -270,13 +278,12 @@ try:
     _, ack2 = call('POST', f'/sessions/{sid2}/finalize', {}, user)
     ok(ack2.get('ok') is True, f"解冲突后重试收口 ok: {ack2.get('detail')}")
     ok(git('show', 'main:README.md', cwd=ORIGIN).strip() == 'resolved', '基线含解冲突结果')
-    ok(not work2.exists(), '会话2 收口后 worktree 已删')
+    ok(work2.is_dir(), 'keyed 收口后工作树保留（CAP-51）')
 
-    # 8. 删除会话释放固定工作区（FR-09）：目录与本地分支释放、远端不动、同 (项目,用户)
-    #    可立即再开新会话——不释放则目录成孤儿，该用户在该项目永久开不了新会话
+    # 8. 删除会话释放固定工作区（FR-09）：目录与本地分支释放、远端不动
     _, s3 = call('POST', '/sessions', {'projectId': pid, 'taskSpec': 'CAP-42 E2E 会话3（删除释放）'}, user)
     sid3 = s3['id']
-    work3 = uroot / 'work'
+    work3 = uroot / 'worktrees' / f'sid-{sid3}'
     wait(lambda: (work3 / '.git').exists() or None, '会话3 worktree 物化', 30)
     ok(work3.is_dir(), '删除前固定 worktree 在')
     call('POST', f'/sessions/{sid3}/finish', token=user)
@@ -289,9 +296,9 @@ try:
        '本地会话分支已释放（残留分支同样会留成半成品）')
     ok(git('ls-remote', ORIGIN, f'refs/heads/feature/{sid3}') == '', '释放不 push：远端无会话分支')
     call('GET', f'/sessions/{sid3}', token=user, expect=404)
-    # 占用锁已解：同 (项目,用户) 立刻能再开会话（此前正是卡在这里永久死锁）
+    # 释放后再开会话不受残留目录影响（sid- 键独占，本就走新目录）
     _, s4 = call('POST', '/sessions', {'projectId': pid, 'taskSpec': 'CAP-42 E2E 会话4（释放后可开）'}, user)
-    work4 = uroot / 'work'
+    work4 = uroot / 'worktrees' / f'sid-{s4["id"]}'
     wait(lambda: (work4 / '.git').exists() or None, '会话4 worktree 物化', 30)
     ok(work4.is_dir(), '释放后同用户同项目可立即开新会话')
     call('POST', f'/sessions/{s4["id"]}/finish', token=user)
