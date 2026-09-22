@@ -26,12 +26,15 @@ package com.devmind.common.agent;
  * &lt;projectId&gt;/&lt;owner&gt;/work 改为 &lt;projectId&gt;/&lt;owner&gt;/worktrees/&lt;key&gt;
  * （key=req-&lt;需求id&gt; 或 sid-&lt;会话id&gt;）；老 runner 不认识该字段会落回 work/ 旧布局，
  * 把不同需求写进同一目录，故属「必须认识」需门控。**字段缺席 = 旧布局**（存量会话与
- * 未升级服务端），此时不门控——这是 FR-11 存量兼容的契约，不是降级）。</p>
+ * 未升级服务端），此时不门控——这是 FR-11 存量兼容的契约，不是降级）。v11 = CAP-54
+ * 会话工作区实时视图（workspace_status 上行帧 + workspace_query/workspace_query_ack
+ * 请求应答帧——老 runner 不认识 workspace_query 会静默忽略，REST 端点会等到超时，
+ * 故服务端先按版本门控直接 409 引导升级；上行 workspace_status 被老服务端忽略，不门控）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 10;
+    public static final int CURRENT = 11;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -59,6 +62,9 @@ public final class AgentProtocol {
      * 仅在确实要下发 {@code workspaceKey} 时门控：字段缺席表示旧布局（存量会话），走原版本门控。
      */
     public static final int REQUIREMENT_WORKSPACE = 10;
+
+    /** CAP-54 工作区实时视图（workspace_status / workspace_query 帧）所需最低版本 */
+    public static final int WORKSPACE_VIEW = 11;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;

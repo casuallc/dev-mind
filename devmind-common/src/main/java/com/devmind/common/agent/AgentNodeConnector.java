@@ -176,4 +176,17 @@ public interface AgentNodeConnector {
         throw new com.devmind.common.exception.DevMindException(
                 com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
     }
+
+    /**
+     * CAP-54：下发 workspace_query 帧并阻塞等 workspace_query_ack——runner 对会话代码目录执行
+     * 只读查询（action ∈ tree/file/diff/status；repo 为多库子目录名，单库传空；path 相对代码目录）。
+     * 节点离线/协议版本不足（需 v11+）/等待超时抛 DevMindException(CONFLICT)；
+     * 查询本身失败（路径越界/会话不在本节点/二进制文件等）不抛，看 {@link WorkspaceQueryResult#ok()}。
+     * 默认实现 = agent 模块未装配（无任何执行节点可用）。
+     */
+    default WorkspaceQueryResult workspaceQuery(String nodeId, String sessionId, String action,
+                                                String repo, String path) {
+        throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+    }
 }
