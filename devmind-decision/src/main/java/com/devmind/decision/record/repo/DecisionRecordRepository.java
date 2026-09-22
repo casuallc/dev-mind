@@ -46,4 +46,22 @@ public interface DecisionRecordRepository extends JpaRepository<DecisionRecordEn
             """)
     List<DecisionRecordEntity> findForExport(@Param("capability") String capability,
                                             @Param("since") Instant since);
+
+    /**
+     * CAP-56 收编候选：<b>不做"能不能训"的筛选</b>，范围内一律取出。
+     *
+     * <p>与 {@link #findForExport} 的区别正是收编这件事的意义所在：导出只要"能用的"，
+     * 收编还要能回答"<b>为什么这条不能用</b>"。SQL 里先把缺快照的行滤掉的话，
+     * 页面上就只剩一句"可收编 3 条"，而那 200 条为什么不收永远说不出来
+     * （见 {@code RecordIntake}）。筛掉不可用的行是调用方的事。</p>
+     */
+    @Query("""
+            select r from DecisionRecordEntity r
+            where (cast(:capability as string) is null or r.capability = :capability)
+              and (cast(:since as timestamp) is null or r.createdAt >= :since)
+            order by r.id asc
+            """)
+    Page<DecisionRecordEntity> findForIntake(@Param("capability") String capability,
+                                            @Param("since") Instant since,
+                                            Pageable pageable);
 }

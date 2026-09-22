@@ -47,4 +47,17 @@ public interface DecisionDatasetItemRepository extends JpaRepository<DecisionDat
     List<Object[]> countByQuestionSetVersion(@Param("datasetId") Long datasetId);
 
     void deleteByDatasetId(Long datasetId);
+
+    /**
+     * 本集已收编的决策记录 id（回流去重用）。
+     *
+     * <p>只取 id 不取整行：去重是典型的"判断在不在集合里"，几百条记录的 JSON 读进内存纯属浪费；
+     * 而且 {@code origin_record_id} 为空的样本（手工标注的）不该混进这个集合——
+     * 那会让"没标过"与"标过一次"分不开。</p>
+     */
+    @Query("""
+            select i.originRecordId from DecisionDatasetItemEntity i
+            where i.datasetId = :datasetId and i.originRecordId is not null
+            """)
+    List<Long> collectedRecordIds(@Param("datasetId") Long datasetId);
 }

@@ -5,6 +5,8 @@ import com.devmind.common.decision.TriageQuestions;
 import com.devmind.common.dto.PageView;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.decision.record.model.DecisionRecordEntity;
+import com.devmind.decision.record.repo.DecisionRecordRepository;
 import com.devmind.decisionlab.dataset.dto.DatasetDetail;
 import com.devmind.decisionlab.dataset.dto.DatasetItemDetail;
 import com.devmind.decisionlab.dataset.dto.DatasetItemRequest;
@@ -12,12 +14,19 @@ import com.devmind.decisionlab.dataset.dto.DatasetItemView;
 import com.devmind.decisionlab.dataset.dto.DatasetRequest;
 import com.devmind.decisionlab.dataset.dto.DatasetView;
 import com.devmind.decisionlab.dataset.dto.DatasetViews;
+import com.devmind.decisionlab.dataset.dto.RecordsIntakeRequest;
+import com.devmind.decisionlab.dataset.dto.RecordsIntakeResult;
+import com.devmind.decisionlab.dataset.dto.RecordsPreview;
 import com.devmind.decisionlab.dataset.model.DecisionDatasetEntity;
 import com.devmind.decisionlab.dataset.model.DecisionDatasetItemEntity;
 import com.devmind.decisionlab.dataset.repo.DecisionDatasetItemRepository;
 import com.devmind.decisionlab.dataset.repo.DecisionDatasetRepository;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,13 +69,16 @@ public class DatasetService {
 
     private final DecisionDatasetRepository repo;
     private final DecisionDatasetItemRepository itemRepo;
+    private final DecisionRecordRepository recordRepo;
     private final DatasetJson json;
     private final IdentityService identityService;
 
     public DatasetService(DecisionDatasetRepository repo, DecisionDatasetItemRepository itemRepo,
-                          DatasetJson json, IdentityService identityService) {
+                          DecisionRecordRepository recordRepo, DatasetJson json,
+                          IdentityService identityService) {
         this.repo = repo;
         this.itemRepo = itemRepo;
+        this.recordRepo = recordRepo;
         this.json = json;
         this.identityService = identityService;
     }
@@ -170,8 +182,7 @@ public class DatasetService {
         e.setDatasetId(dataset.getId());
         e.setSource(DecisionDatasetItemEntity.SOURCE_MANUAL);
         e.setCreatedAt(Instant.now());
-        validate(e, req);
-        DecisionDatasetItemEntity saved = itemRepo.save(e);
+        DecisionDatasetItemEntity saved = saveValidated(e, req);
         refreshCount(dataset);
         return DatasetViews.detail(saved, json);
     }
@@ -181,8 +192,7 @@ public class DatasetService {
     public DatasetItemDetail replaceItem(Long id, Long itemId, DatasetItemRequest req) {
         DecisionDatasetEntity dataset = requireDraft(id);
         DecisionDatasetItemEntity e = requireItem(id, itemId);
-        validate(e, req);
-        DecisionDatasetItemEntity saved = itemRepo.save(e);
+        DecisionDatasetItemEntity saved = saveValidated(e, req);
         refreshCount(dataset);
         return DatasetViews.detail(saved, json);
     }
@@ -192,6 +202,12 @@ public class DatasetService {
         DecisionDatasetEntity dataset = requireDraft(id);
         itemRepo.delete(requireItem(id, itemId));
         refreshCount(dataset);
+    }
+
+    /** 校验 + 落库（加/改/收编共用）；<b>不</b>刷条数——批量收编要在最后统一刷一次，不必逐条往返 */
+    private DecisionDatasetItemEntity saveValidated(DecisionDatasetItemEntity e, DatasetItemRequest req) {
+        validate(e, req);
+        return itemRepo.save(e);
     }
 
     // ---------------- 冻结 / 修订 ----------------
@@ -263,6 +279,217 @@ public class DatasetService {
         log.info("评测集修版: {} v{} → v{}（{} 条）by={}", saved.getName(), old.getVersion(), saved.getVersion(),
                 rows.size(), saved.getCreatedBy());
         return detail(saved.getId());
+    }
+
+    // ---------------- 从决策记录收编（FR-02 回流） ----------------
+
+    /**
+     * 收编预览：动手之前先说清"能收多少、收不了的为什么"。
+     *
+     * <p>预览与收编<b>共用同一套判定</b>（{@link RecordIntake} + {@link #judge}），所以预览不是估算，
+     * 而是"照这样收会发生什么"。两者若各写一份，用户就会遇到"预览说 120 条、收完只有 3 条"
+     * 这种事——预告与实际不符比没有预告更糟。</p>
+     *
+     * @param sampleLimit 逐条样例最多给几条（前端列表用）
+     */
+    public RecordsPreview previewFromRecords(Long id, String capability, String since, int sampleLimit) {
+        DecisionDatasetEntity dataset = requireIntakeTarget(id);
+        Instant from = parseSince(since);
+        Page<DecisionRecordEntity> page = recordRepo.findForIntake(blankToNull(capability), from,
+                PageRequest.of(0, RecordIntake.MAX_SCAN));
+        List<Judgement> judgements = judge(page.getContent(), collectedRecords(dataset.getId()));
+        int collectable = (int) judgements.stream().filter(Judgement::collectable).count();
+        return new RecordsPreview(blankToNull(capability), blankToNull(since), page.getTotalElements(),
+                judgements.size(), page.getTotalElements() > judgements.size(), collectable,
+                reasonCounts(judgements), groupCounts(judgements),
+                samples(judgements, Math.max(sampleLimit, 0)));
+    }
+
+    /**
+     * 收编：把范围内的决策记录收成样本。能收的收，不能收的逐条说清为什么不收。
+     *
+     * <p><b>可重复执行</b>：已收编过的记录按 {@code origin_record_id} 认出来并跳过，
+     * 所以"今天收一遍、明天再收一遍"只会补上新的那些，不会把旧样本翻倍
+     * （翻倍会直接污染指标的分母，而且看着像样本变多了）。</p>
+     *
+     * <p>事务：整批一次提交。中途失败时要么全收进来、要么一条没进——虽然靠去重重跑也不会坏，
+     * 但"收了 37 条"这种半截状态在报告里太难解释。</p>
+     */
+    @Transactional
+    public RecordsIntakeResult collectFromRecords(Long id, RecordsIntakeRequest req) {
+        DecisionDatasetEntity dataset = requireIntakeTarget(id);
+        Instant from = parseSince(req == null ? null : req.since());
+        Page<DecisionRecordEntity> page = recordRepo.findForIntake(
+                blankToNull(req == null ? null : req.capability()), from,
+                PageRequest.of(0, RecordIntake.MAX_SCAN));
+        List<Judgement> judgements = judge(page.getContent(), collectedRecords(dataset.getId()));
+        int added = 0;
+        for (Judgement j : judgements) {
+            if (!j.collectable()) {
+                continue;
+            }
+            DecisionDatasetItemEntity e = new DecisionDatasetItemEntity();
+            e.setDatasetId(dataset.getId());
+            e.setSource(DecisionDatasetItemEntity.SOURCE_RECORD);
+            e.setOriginRecordId(j.row().getId());
+            e.setCreatedAt(Instant.now());
+            saveValidated(e, intakeRequest(j));
+            added++;
+        }
+        if (added > 0) {
+            refreshCount(dataset);
+        }
+        Map<String, Long> skipped = reasonCounts(judgements);
+        skipped.remove(null); // 可收编的那些不在"跳过原因"里
+        log.info("决策记录收编: dataset={} v{} capability={} 命中={} 新增={} 跳过={}",
+                dataset.getName(), dataset.getVersion(), req == null ? null : req.capability(),
+                page.getTotalElements(), added, judgements.size() - added);
+        return new RecordsIntakeResult(added, judgements.size() - added, skipped, detail(dataset.getId()));
+    }
+
+    /**
+     * 收编目标必须是<b>草稿状态的 REPLAY 集</b>。
+     *
+     * <p>为什么认 kind：{@code BENCHMARK} 是对"这份基准是人一题一题标出来的"的声明。
+     * 把回流的样本倒进一个基准集，这份基准的可信度就再也说不清了（谁标的？标的什么？）。
+     * 而 REPLAY 集里本来就可以手工补样本（{@link #addItem} 不看 kind），所以这条限制
+     * 只是不许把回流集<b>叫成</b>基准集，不影响任何实际做法。</p>
+     */
+    private DecisionDatasetEntity requireIntakeTarget(Long id) {
+        DecisionDatasetEntity e = requireDraft(id);
+        if (!DecisionDatasetEntity.KIND_REPLAY.equals(e.getKind())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "「从决策记录收编」只能收进 " + DecisionDatasetEntity.KIND_REPLAY
+                            + " 集（「" + e.getName() + "」是 " + e.getKind()
+                            + "）——基准集是人一题一题标出来的，混进回流样本后它的可信度就说不清了；"
+                            + "要收编请新建一个 " + DecisionDatasetEntity.KIND_REPLAY + " 集");
+        }
+        return e;
+    }
+
+    /** 范围内逐条判定（已收编的在这里一并落定，因为它要查库而 {@link RecordIntake} 是纯函数） */
+    private List<Judgement> judge(List<DecisionRecordEntity> rows, Set<Long> collected) {
+        List<Judgement> out = new ArrayList<>(rows.size());
+        for (DecisionRecordEntity row : rows) {
+            if (collected.contains(row.getId())) {
+                out.add(new Judgement(row, RecordIntake.Disposition.skip(RecordIntake.REASON_COLLECTED, null)));
+                continue;
+            }
+            out.add(new Judgement(row, RecordIntake.classify(json.parse(row.getStateJson()),
+                    json.parseQuestions(row.getQuestionsJson()), json.parse(row.getGoldJson()))));
+        }
+        return out;
+    }
+
+    /** 收编时的落库请求：题面走标准题面（判定时已验过逐项相等），gold 用记录里的人工原值 */
+    private static DatasetItemRequest intakeRequest(Judgement j) {
+        DecisionRecordEntity row = j.row();
+        return new DatasetItemRequest(j.disposition().state(), null, j.disposition().gold(),
+                j.caseGroup(), provenance(row));
+    }
+
+    /** 样本上留一段人能读的来源说明（持久的追溯靠 origin_record_id，这段是让人不必回查就能看懂） */
+    private static String provenance(DecisionRecordEntity row) {
+        StringBuilder note = new StringBuilder("回流自决策记录 #").append(row.getId());
+        if (row.getHumanAction() != null && !row.getHumanAction().isBlank()) {
+            note.append("（人工动作 ").append(row.getHumanAction());
+            if (row.getDecidedBy() != null && !row.getDecidedBy().isBlank()) {
+                note.append(" · ").append(row.getDecidedBy());
+            }
+            note.append("）");
+        }
+        return note.toString();
+    }
+
+    private Set<Long> collectedRecords(Long datasetId) {
+        return new HashSet<>(itemRepo.collectedRecordIds(datasetId));
+    }
+
+    /** 原因码 → 条数；四个原因都出现（缺的记 0），可收编的记在 null 键上（调用方自行移除） */
+    private static Map<String, Long> reasonCounts(List<Judgement> judgements) {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        for (String reason : RecordIntake.REASON_ORDER) {
+            counts.put(reason, 0L);
+        }
+        for (Judgement j : judgements) {
+            counts.merge(j.reasonCode(), 1L, Long::sum);
+        }
+        return counts;
+    }
+
+    /** 可收编的样本会进哪些组（含按内容自动识别的对照组），与 {@link #caseGroupCounts} 同口径 */
+    private static Map<String, Long> groupCounts(List<Judgement> judgements) {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        for (String group : CaseGroups.ALL) {
+            counts.put(group, 0L);
+        }
+        for (Judgement j : judgements) {
+            if (j.collectable()) {
+                counts.merge(j.caseGroup(), 1L, Long::sum);
+            }
+        }
+        return counts;
+    }
+
+    /**
+     * 逐条样例：<b>先可收编的</b>（那是马上要写进去的东西，最该先核对），再补几条被留下的
+     * （让人看清筛出来的范围对不对——只看能收的容易误以为"就这几条"）。
+     */
+    private List<RecordsPreview.Candidate> samples(List<Judgement> judgements, int limit) {
+        List<RecordsPreview.Candidate> out = new ArrayList<>();
+        int quota = limit;
+        for (Judgement j : judgements) {
+            if (quota > 0 && j.collectable()) {
+                out.add(candidate(j));
+                quota--;
+            }
+        }
+        for (Judgement j : judgements) {
+            if (quota > 0 && !j.collectable()) {
+                out.add(candidate(j));
+                quota--;
+            }
+        }
+        return out;
+    }
+
+    private RecordsPreview.Candidate candidate(Judgement j) {
+        DecisionRecordEntity row = j.row();
+        return new RecordsPreview.Candidate(row.getId(), row.getCapability(), row.getSubjectId(),
+                DatasetViews.title(json.parse(row.getStateJson())), row.getHumanAction(),
+                j.caseGroup(), CaseGroups.label(j.caseGroup()),
+                j.collectable() ? "COLLECT" : "SKIP",
+                j.reasonCode(), j.collectable() ? null : RecordIntake.label(j.reasonCode()),
+                j.disposition().detail());
+    }
+
+    /** yyyy-MM-dd（本机时区当天 00:00 起，与记录页的日期筛选同口径）→ Instant；空 = 不限时间 */
+    private static Instant parseSince(String since) {
+        if (since == null || since.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(since.trim()).atStartOfDay(ZoneId.systemDefault()).toInstant();
+        } catch (DateTimeParseException e) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "since 期望 yyyy-MM-dd，收到「" + since + "」");
+        }
+    }
+
+    /** 一条记录的最终判定（{@link RecordIntake} 的内容判断 + "是否已收编"的库判断） */
+    private record Judgement(DecisionRecordEntity row, RecordIntake.Disposition disposition) {
+
+        boolean collectable() {
+            return disposition.collectable();
+        }
+
+        String reasonCode() {
+            return disposition.reasonCode();
+        }
+
+        /** 可收编时才有值；跳过时按普通样本报（它不会进集，组别只是展示用） */
+        String caseGroup() {
+            return disposition.caseGroup() == null ? CaseGroups.NORMAL : disposition.caseGroup();
+        }
     }
 
     // ---------------- 内部：校验 ----------------
@@ -353,7 +580,7 @@ public class DatasetService {
         }
 
         Map<String, Map<String, Object>> questions = questionsOf(req.questions());
-        List<String> diff = questionSetDiff(questions);
+        List<String> diff = QuestionSets.diff(questions);
         if (!diff.isEmpty()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "题面与当前标准题面不一致（" + String.join("；", diff) + "）——"
@@ -401,30 +628,6 @@ public class DatasetService {
             out.put(entry.getKey(), q);
         }
         return out;
-    }
-
-    /** 与标准题面逐项对比，返回人话差异（空 = 一致）。不直接 equals 是为了能说清差在哪 */
-    private List<String> questionSetDiff(Map<String, Map<String, Object>> actual) {
-        Map<String, Map<String, Object>> expected = TriageQuestions.standard();
-        List<String> diff = new ArrayList<>();
-        Set<String> missing = new TreeSet<>(expected.keySet());
-        missing.removeAll(actual.keySet());
-        Set<String> extra = new TreeSet<>(actual.keySet());
-        extra.removeAll(expected.keySet());
-        if (!missing.isEmpty()) {
-            diff.add("缺题 " + missing);
-        }
-        if (!extra.isEmpty()) {
-            diff.add("多题 " + extra);
-        }
-        for (String key : expected.keySet()) {
-            Map<String, Object> want = expected.get(key);
-            Map<String, Object> got = actual.get(key);
-            if (got != null && !want.equals(got)) {
-                diff.add("题 " + key + " 的定义不同（标准 type=" + want.get("type") + "）");
-            }
-        }
-        return diff;
     }
 
     // ---------------- 内部：统计 ----------------

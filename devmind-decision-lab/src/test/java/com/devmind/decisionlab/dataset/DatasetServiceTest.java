@@ -10,21 +10,32 @@ import com.devmind.decisionlab.dataset.dto.DatasetItemRequest;
 import com.devmind.decisionlab.dataset.dto.DatasetRequest;
 import com.devmind.decisionlab.dataset.model.DecisionDatasetEntity;
 import com.devmind.decisionlab.dataset.model.DecisionDatasetItemEntity;
+import com.devmind.decision.record.model.DecisionRecordEntity;
+import com.devmind.decision.record.repo.DecisionRecordRepository;
+import com.devmind.decisionlab.dataset.dto.RecordsIntakeResult;
+import com.devmind.decisionlab.dataset.dto.RecordsIntakeRequest;
+import com.devmind.decisionlab.dataset.dto.RecordsPreview;
 import com.devmind.decisionlab.dataset.repo.DecisionDatasetItemRepository;
 import com.devmind.decisionlab.dataset.repo.DecisionDatasetRepository;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -54,12 +65,14 @@ class DatasetServiceTest {
 
     private final DecisionDatasetRepository datasetRepo = mock(DecisionDatasetRepository.class);
     private final DecisionDatasetItemRepository itemRepo = mock(DecisionDatasetItemRepository.class);
+    private final DecisionRecordRepository recordRepo = mock(DecisionRecordRepository.class);
     private final IdentityService identity = mock(IdentityService.class);
     private final DatasetJson json = new DatasetJson(new ObjectMapper());
 
-    /** 内存里的两张"表"：够真实到能覆盖 save/find/delete 的往返，又不带 JPA 的启动成本 */
+    /** 内存里的三张"表"：够真实到能覆盖 save/find/delete 的往返，又不带 JPA 的启动成本 */
     private final Map<Long, DecisionDatasetEntity> datasets = new LinkedHashMap<>();
     private final Map<Long, DecisionDatasetItemEntity> items = new LinkedHashMap<>();
+    private final Map<Long, DecisionRecordEntity> records = new LinkedHashMap<>();
     private long datasetSeq;
     private long itemSeq;
 
@@ -108,8 +121,24 @@ class DatasetServiceTest {
             items.remove(((DecisionDatasetItemEntity) inv.getArgument(0)).getId());
             return null;
         }).when(itemRepo).delete(any(DecisionDatasetItemEntity.class));
+        when(itemRepo.collectedRecordIds(anyLong())).thenAnswer(inv -> rowsOf(inv.getArgument(0)).stream()
+                .map(DecisionDatasetItemEntity::getOriginRecordId)
+                .filter(Objects::nonNull)
+                .toList());
 
-        service = new DatasetService(datasetRepo, itemRepo, json, identity);
+        when(recordRepo.findForIntake(any(), any(), any(Pageable.class))).thenAnswer(inv -> {
+            String capability = inv.getArgument(0);
+            Instant since = inv.getArgument(1);
+            Pageable pageable = inv.getArgument(2);
+            List<DecisionRecordEntity> hit = records.values().stream()
+                    .filter(r -> capability == null || capability.equals(r.getCapability()))
+                    .filter(r -> since == null || (r.getCreatedAt() != null && !r.getCreatedAt().isBefore(since)))
+                    .sorted(Comparator.comparing(DecisionRecordEntity::getId))
+                    .toList();
+            return new PageImpl<>(hit, pageable, hit.size());
+        });
+
+        service = new DatasetService(datasetRepo, itemRepo, recordRepo, json, identity);
     }
 
     // ---------------- 建集 ----------------
@@ -384,11 +413,122 @@ class DatasetServiceTest {
         assertEquals(ErrorCode.NOT_FOUND, e.getErrorCode());
     }
 
+    // ---------------- 从决策记录收编 ----------------
+
+    @Test
+    void intakeCollectsUsableRecordsAndSaysWhyTheRestAreNot() {
+        Long id = replayDataset();
+        records.put(1L, record(1, emptyRecallState(), fullGold()));                       // 可用
+        records.put(2L, record(2, state(GOOD_CONTENT, "1. 《X》\n无关"), null));           // 只分诊过，没裁决
+        records.put(3L, recordWithOldQuestionSet(3));                                     // 旧题面测的记录
+        records.put(4L, record(4, state(GOOD_CONTENT, "1. 《X》\n无关"),
+                Map.of(TriageQuestions.Q_LAYER, "PROJECT")));                             // 人工动作落不上题面
+
+        RecordsPreview preview = service.previewFromRecords(id, null, null, 10);
+
+        assertEquals(4, preview.scanned());
+        assertEquals(1, preview.collectable());
+        assertEquals(1L, preview.skipReasons().get(RecordIntake.REASON_SNAPSHOT));
+        assertEquals(1L, preview.skipReasons().get(RecordIntake.REASON_QUESTION_SET));
+        assertEquals(1L, preview.skipReasons().get(RecordIntake.REASON_GOLD));
+        assertEquals(0L, preview.skipReasons().get(RecordIntake.REASON_COLLECTED), "缺的原因也要出现");
+        assertEquals(1L, preview.caseGroups().get(CaseGroups.EMPTY_RECALL), "空召回记录按内容自动进对照组");
+        assertFalse(preview.truncated());
+
+        RecordsIntakeResult result = service.collectFromRecords(id, new RecordsIntakeRequest(null, null));
+
+        assertEquals(1, result.added());
+        assertEquals(3, result.skipped());
+        DecisionDatasetItemEntity item = rowsOf(id).get(0);
+        assertEquals(DecisionDatasetItemEntity.SOURCE_RECORD, item.getSource());
+        assertEquals(1L, item.getOriginRecordId(), "溯源靠 origin_record_id，不是靠备注里的字");
+        assertEquals(CaseGroups.EMPTY_RECALL, item.getCaseGroup());
+        assertEquals(TriageQuestions.VERSION, item.getQuestionSetVersion());
+        assertTrue(item.getNote().contains("回流自决策记录 #1"), item.getNote());
+        assertEquals(1, result.dataset().dataset().itemCount());
+    }
+
+    @Test
+    void intakeIsRepeatableWithoutDuplicatingSamples() {
+        Long id = replayDataset();
+        records.put(1L, record(1, emptyRecallState(), fullGold()));
+        assertEquals(1, service.collectFromRecords(id, new RecordsIntakeRequest(null, null)).added());
+
+        RecordsIntakeResult again = service.collectFromRecords(id, new RecordsIntakeRequest(null, null));
+
+        assertEquals(0, again.added());
+        assertEquals(1L, again.skipReasons().get(RecordIntake.REASON_COLLECTED));
+        assertEquals(1, rowsOf(id).size(), "重复收编不该把样本翻倍——那会直接污染指标的分母");
+    }
+
+    @Test
+    void intakePreviewSamplesShowWhatWouldBeCollectedFirst() {
+        Long id = replayDataset();
+        records.put(1L, record(1, state(GOOD_CONTENT, "1. 《X》\n无关"), null));
+        records.put(2L, record(2, emptyRecallState(), fullGold()));
+
+        RecordsPreview preview = service.previewFromRecords(id, null, null, 5);
+
+        // 先给"马上要写进去的那条"（可核对自己要收的是不是它），再给一条被留下的
+        assertEquals(2, preview.samples().size());
+        assertEquals("COLLECT", preview.samples().get(0).outcome());
+        assertEquals(2L, preview.samples().get(0).recordId());
+        assertEquals("一些提案", preview.samples().get(0).title());
+        assertEquals("SKIP", preview.samples().get(1).outcome());
+        assertNotNull(preview.samples().get(1).reasonLabel());
+    }
+
+    @Test
+    void intakeRefusesABenchmarkDataset() {
+        Long id = service.create(new DatasetRequest("基准集", "BENCHMARK", null)).dataset().id();
+
+        DevMindException e = badRequest(() ->
+                service.collectFromRecords(id, new RecordsIntakeRequest(null, null)));
+        assertTrue(e.getMessage().contains("REPLAY"), "要说清该建什么样的集：" + e.getMessage());
+    }
+
+    @Test
+    void intakeRefusesAFrozenDataset() {
+        Long id = completeDataset("REPLAY");
+        service.freeze(id);
+
+        assertTrue(conflict(() -> service.collectFromRecords(id, new RecordsIntakeRequest(null, null)))
+                .getMessage().contains("已冻结"));
+    }
+
+    @Test
+    void intakeRejectsAMalformedSinceInsteadOfSilentlyIgnoringIt() {
+        Long id = replayDataset();
+
+        // 悄悄当"不限时间"是最坏的选择：用户以为只收了上周的，实际把全部历史都收进来了
+        DevMindException e = badRequest(() -> service.previewFromRecords(id, null, "2026/09/22", 10));
+        assertTrue(e.getMessage().contains("yyyy-MM-dd"), e.getMessage());
+    }
+
+    @Test
+    void intakeCanBeNarrowedByCapabilityAndDate() {
+        Long id = replayDataset();
+        records.put(1L, record(1, emptyRecallState(), fullGold(), "kb-proposal-triage", Instant.now()));
+        records.put(2L, record(2, emptyRecallState(), fullGold(), "other-capability", Instant.now()));
+        records.put(3L, record(3, emptyRecallState(), fullGold(), "kb-proposal-triage",
+                Instant.now().minus(30, ChronoUnit.DAYS)));
+        String lastWeek = LocalDate.now().minusDays(7).toString();
+
+        assertEquals(2, service.previewFromRecords(id, "kb-proposal-triage", null, 10).scanned());
+        assertEquals(2, service.previewFromRecords(id, null, lastWeek, 10).scanned());
+        // 两个条件叠起来才是"最近一周的本能力记录"
+        assertEquals(1, service.previewFromRecords(id, "kb-proposal-triage", lastWeek, 10).collectable());
+    }
+
     // ---------------- 夹具 ----------------
 
-    /** 三类对照组各一条的完整集（冻结的happy path） */
+    /** 三类对照组各一条的完整集 */
     private Long completeDataset() {
-        Long id = service.create(new DatasetRequest("集", "BENCHMARK", "测试用")).dataset().id();
+        return completeDataset("BENCHMARK");
+    }
+
+    private Long completeDataset(String kind) {
+        Long id = service.create(new DatasetRequest("集", kind, "测试用")).dataset().id();
         service.addItem(id, item(CaseGroups.EMPTY_RECALL, emptyRecallState(), fullGold()));
         service.addItem(id, item(CaseGroups.VERBATIM_DUP, verbatimState(), fullGold()));
         service.addItem(id, item(CaseGroups.IRRELEVANT, irrelevantState(), fullGold()));
@@ -431,6 +571,40 @@ class DatasetServiceTest {
 
     private static Map<String, Object> irrelevantState() {
         return state(GOOD_CONTENT, "1. 《容器网络》\n" + OTHER_CONTENT);
+    }
+
+    private Long replayDataset() {
+        return service.create(new DatasetRequest("回流集", DecisionDatasetEntity.KIND_REPLAY, null))
+                .dataset().id();
+    }
+
+    private DecisionRecordEntity record(long id, Map<String, Object> state, Map<String, Object> gold) {
+        return record(id, state, gold, "kb-proposal-triage", Instant.now());
+    }
+
+    /** 一条决策记录（CAP-55 的形状：三份快照 + 人工动作 + 裁决人） */
+    private DecisionRecordEntity record(long id, Map<String, Object> state, Map<String, Object> gold,
+                                        String capability, Instant createdAt) {
+        DecisionRecordEntity row = new DecisionRecordEntity();
+        row.setId(id);
+        row.setCapability(capability);
+        row.setSubjectId("kb-" + id);
+        row.setStateJson(state == null ? null : json.write(state));
+        row.setQuestionsJson(json.write(TriageQuestions.standard()));
+        row.setGoldJson(gold == null ? null : json.write(gold));
+        row.setHumanAction("adopt:project");
+        row.setDecidedBy("tester");
+        row.setCreatedAt(createdAt);
+        return row;
+    }
+
+    /** 旧题面时代留下的记录（题面比今天多一题）——回流时不该混进来 */
+    private DecisionRecordEntity recordWithOldQuestionSet(long id) {
+        DecisionRecordEntity row = record(id, emptyRecallState(), fullGold());
+        Map<String, Object> questions = new LinkedHashMap<>(TriageQuestions.standard());
+        questions.put("legacy_question", Map.of("type", "noul"));
+        row.setQuestionsJson(json.write(questions));
+        return row;
     }
 
     /** 直接落库（绕过标注校验）：摸拟"被改过的库""从别处导入的集"，用于验冻结的第二道网 */

@@ -7,6 +7,9 @@ import com.devmind.decisionlab.dataset.dto.DatasetItemRequest;
 import com.devmind.decisionlab.dataset.dto.DatasetItemView;
 import com.devmind.decisionlab.dataset.dto.DatasetRequest;
 import com.devmind.decisionlab.dataset.dto.DatasetView;
+import com.devmind.decisionlab.dataset.dto.RecordsIntakeRequest;
+import com.devmind.decisionlab.dataset.dto.RecordsIntakeResult;
+import com.devmind.decisionlab.dataset.dto.RecordsPreview;
 import java.util.List;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -84,6 +87,27 @@ public class DecisionDatasetController {
     @PostMapping("/{id}/revise")
     public DatasetDetail revise(@PathVariable Long id) {
         return service.revise(id);
+    }
+
+    /**
+     * 收编预览（FR-02 回流）。
+     *
+     * <p>{@code since} 用 {@code yyyy-MM-dd} 串收（空 = 不限时间），与下面的收编请求体同一个解析器
+     * ——两处口径若不同，预览就会预告一个不会发生的收编结果。</p>
+     */
+    @GetMapping("/{id}/from-records/preview")
+    public RecordsPreview previewFromRecords(@PathVariable Long id,
+                                             @RequestParam(required = false) String capability,
+                                             @RequestParam(required = false) String since,
+                                             @RequestParam(defaultValue = "50") int sampleLimit) {
+        return service.previewFromRecords(id, capability, since, sampleLimit);
+    }
+
+    /** 收编（可重复执行：已收编过的记录按 origin_record_id 跳过，不会把样本翻倍） */
+    @PostMapping("/{id}/from-records")
+    public RecordsIntakeResult collectFromRecords(@PathVariable Long id,
+                                                 @RequestBody(required = false) RecordsIntakeRequest req) {
+        return service.collectFromRecords(id, req);
     }
 
     // ---------------- 样本 ----------------

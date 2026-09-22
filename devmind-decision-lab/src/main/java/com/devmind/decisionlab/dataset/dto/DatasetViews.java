@@ -83,7 +83,13 @@ public final class DatasetViews {
                 CaseGroups.holds(group, state).orElse(null), e.getCreatedAt());
     }
 
-    private static String title(Map<String, Object> state) {
+    /**
+     * 列表行显示的标题（state 里的 {@code proposal_title}，压空白、截 60 字）。
+     *
+     * <p>公开是为了收编预览也能用同一口径：预览里那条标题与收进集之后列表上的标题
+     * 必须是同一个串，否则"我预览的是这条、收进来的是不是它"要靠人去认 id。</p>
+     */
+    public static String title(Map<String, Object> state) {
         Object title = state.get(TITLE_KEY);
         if (title == null || String.valueOf(title).isBlank()) {
             return "（无标题）";
