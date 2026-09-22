@@ -30,6 +30,8 @@ export default function AppLayout() {
   // 项目列表常驻引导（加载 + currentId 兜底），与切换器 UI 解耦
   const projectBootstrap = useProjectBootstrap()
   const projectPage = isProjectPage(location.pathname)
+  // 工作台为多列聚合卡，铺满全宽；其余页面维持 1400 居中
+  const fullWidth = location.pathname === '/home'
 
   // 启动全局通知实时流（铃铛角标/浏览器通知依赖它）
   useEffect(() => {
@@ -104,7 +106,7 @@ export default function AppLayout() {
       >
         <div
           style={{
-            maxWidth: 1400,
+            maxWidth: fullWidth ? 'none' : 1400,
             margin: '0 auto',
             width: '100%',
             flex: 1,
