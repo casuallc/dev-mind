@@ -1,7 +1,8 @@
 # CAP-55 决策引擎接入与知识库提案分诊（Decision Engine + Proposal Triage）
 
 > 状态：**需求定稿**（FR-01 边车 a834f19、FR-02 决策端点 d97ea56、FR-03 决策引擎 829bbe9、
-> FR-04 提案分诊 811f1f3、FR-05 落库 SPI 8b8e3a4 已落地；记录表/导出与前端 FR-05~07 进行中）｜ 日期：2026-09-22
+> FR-04 提案分诊 811f1f3、FR-05 落库 SPI 8b8e3a4 + 记录表/导出 f692e0f 已落地；
+> FR-06 降级链已含在上述 E2E 内验证、FR-07 前端进行中）｜ 日期：2026-09-22
 >
 > 新增能力。缘起：平台里大量「高频低风险的类型化判断」（提案采纳去哪层、是否重复、质量几分、通知紧急度、
 > 失败类别）目前要么靠人工、要么烧 claude token。Laya（Apache 2.0，非自回归 System 1 决策模型，
@@ -82,12 +83,24 @@
 model_endpoints：kind 枚举放开 DECISION（既有表，无结构变更）
 knowledge_proposals + triage_json CLOB?（模型 answers+routing 原文）
                   + triage_at TIMESTAMP?  + triage_degraded BOOLEAN 默认 false（初始值，禁 @ColumnDefault）
-decision_records(id, capability VARCHAR(64), subject_id VARCHAR(64)（如 proposalId）,
-                 state_json CLOB, questions_json CLOB, model_answer CLOB?,
-                 routing_json CLOB?, degraded BOOLEAN,
-                 human_decision VARCHAR(64)?, adopted_model_suggestion BOOLEAN?,
-                 decided_by VARCHAR(64)?, decided_at TIMESTAMP?, created_at)
+
+decision_records（唯一键 uk(capability, subject_id)：重诊/重裁 upsert 同一行，
+                 训练样本要的是「最后一次建议 + 最后一次裁决」这一对，堆历史行会出互相矛盾的样本）
+  id, capability VARCHAR(64), subject_id VARCHAR(64)（如 proposalId）,
+  state_json CLOB, questions_json CLOB, model_answer CLOB?, routing_json CLOB?,
+  degraded BOOLEAN, degraded_reason VARCHAR(512)?, latency_ms INT?,
+  gold_json CLOB?（人工裁决转成题 id→答案；空 = 这次裁决不构成任何题的 gold）,
+  human_action VARCHAR(64)?（adopt:global / adopt:project / reject）,
+  decided_by VARCHAR(64)?, decided_at TIMESTAMP?, suggested_at TIMESTAMP?,
+  created_at, updated_at
 ```
+
+**与初稿的差异（实现后回填）**：初稿设想的 `human_decision` + `adopted_model_suggestion`
+落成了 `human_action` + `gold_json`——**动作与 gold 分开记**（拒绝 ≠ 不值得沉淀，但也不给人
+没表的态编 gold），"模型建议是否被采纳"不进列而在读时按题逐项算（`agreement`），
+避免多一处会随口径漂移的冗余真相；另补 `degraded_reason`/`latency_ms`/`suggested_at`
+（降级率、延迟分布、人隔多久才裁决都靠它们）。**导出时**才把 gold 按题面 criteria 摊成
+分布（`GoldDistributions`，键序 = 题面顺序）：训练侧标签的下标对齐依赖这个顺序。
 
 红线：@ColumnDefault 字符串带引号；@Lob 必带 @JdbcTypeCode(SqlTypes.LONGVARCHAR)；
 Boolean 列禁 @ColumnDefault（实体初始值 + getter 兜底）；异步分诊方法禁 @Transactional。
@@ -97,8 +110,9 @@ Boolean 列禁 @ColumnDefault（实体初始值 + getter 兜底）；异步分�
 ```
 POST   /api/knowledge/proposals/{id}/triage      手动触发分诊（异步，202）
 GET    /api/knowledge/proposals                  列表返回附带 triage 摘要（徽标数据）
-GET    /api/decision/records                     决策记录列表（capability/时间筛选，分页）
-GET    /api/decision/records/export              导出训练 JSONL（capability/since 过滤）
+GET    /api/decision/records                     决策记录列表（capability/since 筛选，分页 size 1-200）
+GET    /api/decision/records/{id}                单条详情（多带 state/questions 快照，抽屉「查看依据」）
+GET    /api/decision/records/export              导出训练 JSONL（capability/since 过滤，attachment 下载）
 既有   /api/model-endpoints（kind=DECISION 放开）  端点登记 + 连接测试
 ```
 
@@ -109,6 +123,11 @@ GET    /api/decision/records/export              导出训练 JSONL（capability
 - 人工裁决后 decision_records 落行且 export 产出合法 laya JSONL（state/questions/gold 三字段齐全）；
 - 端点删除或边车关停后：inbox 无徽标不报错、分诊按钮置灰、知识库全流程回归绿；
 - E2E：mock 边车（固定 answers）跑通「提案入库→自动分诊→徽标→人工裁决→记录导出」全链。
+
+**E2E 落地**（脚本随 git，运行产物进 tmp/）：
+`tests/cap55_triage_verify.py`（FR-01~04，46 断言）｜ `tests/cap55_records_verify.py`
+（FR-05，58 断言：分诊留痕→裁决配对→JSONL 导出三字段/分布→重诊不抹裁决→查询与 size 边界→
+拒绝不产 gold 不进导出集→降级样本也留痕）。
 
 ## 8. 非目标
 
