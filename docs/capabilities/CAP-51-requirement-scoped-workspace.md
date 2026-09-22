@@ -6,6 +6,9 @@
 > **修订（CAP-53，2026-09-22）**：FR-01 布局中「工作树 = claude cwd」与 FR-12 的
 > 「一律在原 worktree 路径 resume」口径被 CAP-53 取代——claude cwd 上抬到 `<proj>/<owner>/`，
 > 工作树改为「代码目录」；工作树布局本身、分支、占用、收口/释放/GC 语义不变。
+> **修订（2026-09-22）**：FR-06 终态语义从「不自动释放」改为「自动释放 + 删远端需求分支」
+> （协议 v13 `deleteRemoteBranch`）——终态后收口 diff 与继续开发入口已关闭，远端
+> `feature/req-*` 分支留着只会堆积。
 
 ## 1. 目的
 
@@ -123,8 +126,15 @@ CAP-42 明确固定工作区「不参与 GC」，需求粒度下目录数会随�
   `WORKSPACE_RELEASE_FAILED` 通知、绝不外抛；残留目录由 FR-05 的 GC 兜底（条件 4 能兜住已收口的需求）。
 - **删除单个需求粒度会话（`req-` 键）不回收工作树**：那块树归需求所有，删其中一个会话就回收会把
   同需求其他人的改动一起丢掉；`sid-` 键维持「删会话即释放」。需求级目录只能靠需求删除或 GC 回收。
-- **需求进终态（DONE/CANCELLED）**：不自动释放（用户可能还要看），页面提示可释放；
-  超龄后由 GC 回收。
+- **需求进终态（DONE/CANCELLED）**：自动释放。project 模块发 `RequirementTerminalEvent`
+  （`updateStatus` 人工翻转 DONE/CANCELLED 时发布，带 `workspaceOwner`），session 模块监听后
+  走与需求删除同一条 `workspace_release` 链路（同 `releaseExecutor` 异步、失败只告警 +
+  `WORKSPACE_RELEASE_FAILED` 通知、绝不外抛），但帧携带 `deleteRemoteBranch: true`
+  （协议 v13 **可选字段不门控**）：runner 在「丢弃未提交改动 → 删 worktree → 删本地需求分支」
+  之外追加 `git push --delete <需求分支>` 清理远端（远端已不在视为成功，幂等）。
+  老 runner 忽略该字段 = 只释放本地、远端分支留存（优雅降级）；任一环节失败不阻断状态翻转
+  （需求已终态，不能让用户卡住），残留目录由 FR-05 GC 兜底、远端分支需人工清理。
+  被误终态的需求重新打开后可照常 resume：launch 重建工作树与分支，下次收口再推远端。
 
 ### FR-07 无需求会话回退
 
