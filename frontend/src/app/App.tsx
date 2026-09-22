@@ -33,6 +33,7 @@ import DocEditorPage from '../features/docs/pages/DocEditorPage'
 import ExecutionPage from '../features/execution/pages/ExecutionPage'
 import IntegrationsPage from '../features/integrations/pages/IntegrationsPage'
 import ModelEndpointsPage from '../features/model/pages/ModelEndpointsPage'
+import DecisionRecordsPage from '../features/decision/pages/DecisionRecordsPage'
 import ApiKeysPage from '../features/open-api/pages/ApiKeysPage'
 import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
@@ -161,6 +162,8 @@ export default function App() {
           <Route path="/admin/integrations" element={<IntegrationsPage />} />
           {/* CAP-48 模型接入（Embedding 端点：平台默认 + 库级覆盖） */}
           <Route path="/admin/models" element={<ModelEndpointsPage />} />
+          {/* CAP-55 决策记录（模型建议 vs 人工裁决 + 训练集导出） */}
+          <Route path="/admin/decision-records" element={<DecisionRecordsPage />} />
           {/* CAP-20 API 密钥（open-api HMAC 认证凭证） */}
           <Route path="/admin/keys" element={<ApiKeysPage />} />
           {/* CAP-21 Agent 节点（远程执行节点注册/在线状态） */}
