@@ -61,6 +61,7 @@
 | [CAP-51](CAP-51-requirement-scoped-workspace.md) | 需求粒度工作区与并行开发 | 底座 | runner 代码工作区粒度从「(项目,用户)」改为「需求」：一需求一工作树一分支（`<owner>/worktrees/req-<id>` + `feature/req-<id>`），需求内会话串行共用、跨需求零冲突并行；收口上移为需求级（合并+push+**保留工作树**），新增 worktrees 对账/超龄 GC（重构 CAP-42 FR-01~06/09，兼容存量旧布局会话） |
 | [CAP-53](CAP-53-project-user-claude-cwd.md) | claude 工作目录上抬与代码目录分离 | 底座 | claude cwd 从需求工作树上抬到「项目+用户」粒度（`<proj>/<owner>/`），代码仍在需求子目录：memory/transcript 跨需求共享；上下文物化拆分（settings/skills 落 cwd、会话特定注入落代码目录）+ 路由注入（恒定文件 + 首条消息【代码目录】前缀）+ resume transcript 一次性迁移（修订 CAP-51 的 cwd 设定） |
 | [CAP-54](CAP-54-workspace-live-view.md) | 会话工作区实时视图 | 底座 | 会话/问答页右侧工作区面板：git 变更实时推送（tool_result 事件触发采集+去抖+哈希去重，旁路内存快照不入事件流）+ 文件树/内容/单文件 diff 拉取（workspace_query 帧，协议 v11），补 RemoteDiffService 看不到未提交改动的盲区 |
+| [CAP-55](CAP-55-decision-engine.md) | 决策引擎接入与知识库提案分诊 | 底座 | Laya 非自回归决策模型（choice/score/noul，33ms 级）以 Python 边车服务接入：端点复用 CAP-48 体系放开 kind=DECISION，DecisionEngine SPI 入 common；首场景 inbox 提案 AI 分诊（采纳层级+重复判定+质量分，建议先行不自动执行），人工裁决落 decision_records 沉淀微调训练集（数据飞轮），边车不可用全链降级现状 |
 | [CAP-43](CAP-43-agent-node-proxy.md) | Agent 节点外网代理 | 底座 | 节点级 HTTP 代理配置（URL+按功能勾选 scope git/claude/exec），随 launch/worklog_push/exec/workspace_finalize 帧下发（协议 v8 门控），runner 进程级 holder 注入 git 命令行与子进程 env |
 | [CAP-44](CAP-44-knowledge-base-rag.md) | 知识库容器化与向量检索 | 管理 | 知识库成为一等容器（scope 归属+inject_mode FULL/RAG），条目重构归属并分块向量化（JSON CLOB+Java 余弦，无 pgvector），检索 SPI+降级 LIKE，shared MarkdownEditor（升级 CAP-04，打底 CAP-45/46） |
 | [CAP-45](CAP-45-feishu-knowledge-import.md) | 飞书文档对接 | 管理 | integrations 增 FEISHU（appId/appSecret 双行密文），wiki/docx/doc 拉取+blocks→markdown，手动选文档导入知识库（externalId 判重+contentHash 变更检测+手动重同步），条目走 CAP-44 摄入管线自动索引 |
@@ -129,6 +130,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
   同批把被 15 倍帧率放大的三处链路弱点一并加固：runner 出口串行化（并发 `sendText` 的 "Send pending" 会静默丢帧，
   丢 `exit` 帧即会话永卡 RUNNING）、回放环形缓冲排除增量（会话进行中刷新页面时它是唯一历史来源）、
   `/ws/sessions` 慢客户端装饰；`/sessions/{id}/events` 补拉上限（零表结构变更，增量行仍落 `session_events`）。
+- CAP-55 决策引擎依赖 CAP-48/44/04：`model_endpoints.kind` 放开 DECISION 登记 Python 边车服务（laya 决策模型，不进 Maven/dist），`DecisionEngine` SPI 入 common、devmind-decision 实现 HTTP 客户端（超时转 degraded），首场景 knowledge inbox 提案分诊（重复判定召回段复用 KnowledgeRetriever）；人工裁决落 `decision_records` 并可导出 laya 训练 JSONL，为后续「训练执行器 + checkpoint 发布闭环」（另立 CAP）攒数据。
 
 ## 组装方式（后续流程层）
 
