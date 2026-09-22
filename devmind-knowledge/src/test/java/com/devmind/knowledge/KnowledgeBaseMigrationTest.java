@@ -32,6 +32,26 @@ class KnowledgeBaseMigrationTest {
                 + " project_id VARCHAR(64), name VARCHAR(200), source VARCHAR(16), index_status VARCHAR(16),"
                 + " created_at TIMESTAMP)");
         jdbc.execute("CREATE TABLE projects(id VARCHAR(64) PRIMARY KEY, name VARCHAR(128))");
+        // CAP-55 FR-04：分诊列（存量行是 NULL——Hibernate 加列时新字段对旧行不生效）
+        jdbc.execute("CREATE TABLE knowledge_proposals("
+                + "id BIGINT AUTO_INCREMENT PRIMARY KEY, title VARCHAR(200), content_md CLOB,"
+                + " triage_json CLOB, triage_at TIMESTAMP, triage_degraded BOOLEAN)");
+    }
+
+    @Test
+    void backfillsTriageDegradedForLegacyProposals() {
+        jdbc.update("INSERT INTO knowledge_proposals(title, content_md) VALUES ('老提案', '正文')");
+        jdbc.update("INSERT INTO knowledge_proposals(title, content_md, triage_degraded)"
+                + " VALUES ('已分诊提案', '正文', true)");
+
+        new KnowledgeBaseMigration(jdbc).run(null);
+
+        Integer nullRows = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM knowledge_proposals WHERE triage_degraded IS NULL", Integer.class);
+        assertEquals(0, nullRows, "存量提案的 triage_degraded 补 false（NULL 不等于 false，按列筛会漏）");
+        Integer kept = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM knowledge_proposals WHERE triage_degraded = true", Integer.class);
+        assertEquals(1, kept, "已分诊的标记不能被兜底改掉");
     }
 
     private void insertEntry(String scope, String projectId, String name) {

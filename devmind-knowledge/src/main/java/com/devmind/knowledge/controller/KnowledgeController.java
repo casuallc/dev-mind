@@ -15,7 +15,11 @@ import com.devmind.knowledge.dto.PreviewResult;
 import com.devmind.knowledge.dto.ProposalRequest;
 import com.devmind.knowledge.dto.ProposalView;
 import com.devmind.knowledge.dto.ReindexResult;
+import com.devmind.knowledge.dto.TriageStatusView;
+import com.devmind.knowledge.triage.KnowledgeTriageListener;
+import com.devmind.knowledge.triage.KnowledgeTriageService;
 import java.util.List;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -36,12 +40,18 @@ public class KnowledgeController {
     private final KnowledgeBaseService service;
     private final KnowledgeRetriever retriever;
     private final FeishuImportService feishuImportService;
+    private final KnowledgeTriageService triageService;
+    private final KnowledgeTriageListener triageListener;
 
     public KnowledgeController(KnowledgeBaseService service, KnowledgeRetriever retriever,
-                               FeishuImportService feishuImportService) {
+                               FeishuImportService feishuImportService,
+                               KnowledgeTriageService triageService,
+                               KnowledgeTriageListener triageListener) {
         this.service = service;
         this.retriever = retriever;
         this.feishuImportService = feishuImportService;
+        this.triageService = triageService;
+        this.triageListener = triageListener;
     }
 
     // ---------------- 知识库（CAP-44 FR-07） ----------------
@@ -185,5 +195,22 @@ public class KnowledgeController {
     @PostMapping("/proposals/{id}/reject")
     public ProposalView reject(@PathVariable Long id) {
         return service.reject(id);
+    }
+
+    /** CAP-55 FR-04 分诊可用性（配置侧）：inbox 拿它决定「AI 分诊」按钮灰不灰 */
+    @GetMapping("/proposals/triage-status")
+    public TriageStatusView triageStatus() {
+        return triageService.status();
+    }
+
+    /**
+     * CAP-55 FR-04 手动分诊：只排队不等结果（202）——模型前向几百毫秒到 3 秒超时，
+     * 占着 HTTP 线程等不划算；前端拿 202 后轮询列表看徽标。
+     */
+    @PostMapping("/proposals/{id}/triage")
+    public ResponseEntity<Void> triage(@PathVariable Long id) {
+        service.requireProposalExists(id);
+        triageListener.submit(id);
+        return ResponseEntity.accepted().build();
     }
 }

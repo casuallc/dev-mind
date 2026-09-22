@@ -6,15 +6,19 @@ import com.devmind.common.model.ModelEndpointView;
 import com.devmind.knowledge.dto.EntryRequest;
 import com.devmind.knowledge.dto.EntryView;
 import com.devmind.knowledge.dto.KnowledgeBaseRequest;
+import com.devmind.knowledge.dto.ProposalRequest;
+import com.devmind.knowledge.dto.ProposalView;
 import com.devmind.knowledge.dto.ReindexResult;
 import com.devmind.knowledge.embedding.EmbeddingClient;
 import com.devmind.knowledge.embedding.EmbeddingResolver;
 import com.devmind.knowledge.model.KnowledgeBaseEntity;
 import com.devmind.knowledge.model.KnowledgeEntryEntity;
+import com.devmind.knowledge.model.KnowledgeProposalEntity;
 import com.devmind.knowledge.repo.KnowledgeBaseRepository;
 import com.devmind.knowledge.repo.KnowledgeChunkRepository;
 import com.devmind.knowledge.repo.KnowledgeEntryRepository;
 import com.devmind.knowledge.repo.KnowledgeProposalRepository;
+import com.devmind.knowledge.triage.ProposalCreatedEvent;
 import com.devmind.notification.NotificationPublisher;
 import com.devmind.project.ProjectService;
 import com.devmind.project.model.Project;
@@ -52,6 +56,7 @@ class KnowledgeBaseServiceTest {
     private KnowledgeBaseService service;
     private KnowledgeBaseRepository kbRepo;
     private KnowledgeEntryRepository entryRepo;
+    private KnowledgeProposalRepository proposalRepo;
     private EmbeddingResolver resolver;
     private ObjectProvider<ModelEndpointProvider> endpointProviders;
     private ApplicationEventPublisher eventPublisher;
@@ -66,7 +71,7 @@ class KnowledgeBaseServiceTest {
         kbRepo = mock(KnowledgeBaseRepository.class);
         entryRepo = mock(KnowledgeEntryRepository.class);
         KnowledgeChunkRepository chunkRepo = mock(KnowledgeChunkRepository.class);
-        KnowledgeProposalRepository proposalRepo = mock(KnowledgeProposalRepository.class);
+        proposalRepo = mock(KnowledgeProposalRepository.class);
         ProjectService projectService = mock(ProjectService.class);
         NotificationPublisher notificationPublisher = mock(NotificationPublisher.class);
         eventPublisher = mock(ApplicationEventPublisher.class);
@@ -252,6 +257,28 @@ class KnowledgeBaseServiceTest {
             assertNull(e.getIndexError(), "重建要清掉上一次的错误信息");
         }
         verify(eventPublisher, org.mockito.Mockito.times(2)).publishEvent(any(Object.class));
+    }
+
+    @Test
+    void createProposalAnnouncesItselfSoTriageCanRun() {
+        when(proposalRepo.save(any(KnowledgeProposalEntity.class))).thenAnswer(inv -> {
+            KnowledgeProposalEntity p = inv.getArgument(0);
+            if (p.getId() == null) {
+                p.setId(4711L);
+            }
+            return p;
+        });
+
+        ProposalView view = service.createProposal(new ProposalRequest(
+                "构建失败先看日志末尾", "九成环境类报错在日志最后 200 行", "project", "p1", "s1"));
+
+        assertEquals("open", view.status());
+        assertNull(view.triage(), "刚入库还没分诊：徽标要等异步分诊落库后才出现");
+        org.mockito.ArgumentCaptor<ProposalCreatedEvent> event =
+                org.mockito.ArgumentCaptor.forClass(ProposalCreatedEvent.class);
+        verify(eventPublisher).publishEvent(event.capture());
+        assertEquals(view.id(), event.getValue().proposalId(),
+                "事件带的是落库后的 id——异步线程按 id 读回，带实体引用就是过期快照");
     }
 
     @Test

@@ -41,7 +41,8 @@ public final class EntryViews {
         return new ProposalView(
                 p.getId(), p.getTitle(), p.getContentMd(), p.getTargetScope(),
                 p.getTargetProjectId(), p.getSourceSessionId(), p.getStatus(),
-                p.getAdoptedTo(), p.getAdoptedProjectId(), p.getCreatedAt(), p.getAdoptedAt());
+                p.getAdoptedTo(), p.getAdoptedProjectId(), p.getCreatedAt(), p.getAdoptedAt(),
+                TriageViews.of(p.getTriageJson(), p.getTriageAt(), p.isTriageDegraded()));
     }
 
     public static List<String> splitTags(String tags) {

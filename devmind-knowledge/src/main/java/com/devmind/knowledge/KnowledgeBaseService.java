@@ -22,6 +22,7 @@ import com.devmind.knowledge.repo.KnowledgeBaseRepository;
 import com.devmind.knowledge.repo.KnowledgeChunkRepository;
 import com.devmind.knowledge.repo.KnowledgeEntryRepository;
 import com.devmind.knowledge.repo.KnowledgeProposalRepository;
+import com.devmind.knowledge.triage.ProposalCreatedEvent;
 import com.devmind.notification.NotificationPublisher;
 import com.devmind.project.ProjectService;
 import com.devmind.project.model.Project;
@@ -609,6 +610,8 @@ public class KnowledgeBaseService {
         p.setStatus("open");
         p.setCreatedAt(Instant.now());
         p = proposalRepo.save(p);
+        // CAP-55 FR-04：自动分诊（监听方 AFTER_COMMIT 后异步跑，提交前发这里只是为了不漏发）
+        eventPublisher.publishEvent(new ProposalCreatedEvent(p.getId()));
         // P2 通知：静默进中心（FR-05 不打扰）
         try {
             notificationPublisher.publish(NotificationEvent.of(
@@ -706,5 +709,13 @@ public class KnowledgeBaseService {
     private KnowledgeProposalEntity requireProposal(Long id) {
         return proposalRepo.findById(id)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "提案不存在: " + id));
+    }
+
+    /**
+     * 分诊入口的存在性校验（CAP-55 FR-04）：分诊是异步的，先在这里拦住 404——
+     * 否则"不存在的提案"会静默变成一次无人知晓的空转。
+     */
+    public void requireProposalExists(Long id) {
+        requireProposal(id);
     }
 }

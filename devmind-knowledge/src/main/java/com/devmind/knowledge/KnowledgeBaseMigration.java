@@ -41,6 +41,7 @@ public class KnowledgeBaseMigration implements ApplicationRunner {
     }
 
     private void migrate() {
+        backfillProposalTriage();
         if (!tableExists("knowledge_entries") || !tableExists("knowledge_bases")) {
             return;
         }
@@ -73,6 +74,22 @@ public class KnowledgeBaseMigration implements ApplicationRunner {
         }
         log.info("知识库容器迁移完成：global {} 条、project {} 条（{} 个项目库）",
                 globalCount, projectCount, projectIds.size());
+    }
+
+    /**
+     * CAP-55 FR-04：分诊列兜底。存量提案行没有 triage_degraded（NULL），
+     * 而实体字段是 Boolean 包装 + getter 兜底（读得到 false），但"NULL 不等于 false"
+     * 会让按列筛选的 SQL（重跑降级行等）漏掉它们——所以显式补一次。
+     */
+    private void backfillProposalTriage() {
+        if (!tableExists("knowledge_proposals")) {
+            return;
+        }
+        int fixed = jdbc.update(
+                "UPDATE knowledge_proposals SET triage_degraded = false WHERE triage_degraded IS NULL");
+        if (fixed > 0) {
+            log.info("历史提案分诊标记兜底：{} 行 triage_degraded 补 false", fixed);
+        }
     }
 
     private String projectKbName(String projectId) {

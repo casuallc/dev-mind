@@ -16,6 +16,7 @@ import java.time.Instant;
  * @param adoptedProjectId 采纳到的项目
  * @param createdAt        创建时间
  * @param adoptedAt        采纳/丢弃时间
+ * @param triage           CAP-55 FR-04 AI 分诊建议（null = 从未分诊，前端不渲染徽标区块）
  */
 public record ProposalView(
         Long id,
@@ -28,5 +29,6 @@ public record ProposalView(
         String adoptedTo,
         String adoptedProjectId,
         Instant createdAt,
-        Instant adoptedAt) {
+        Instant adoptedAt,
+        TriageView triage) {
 }
