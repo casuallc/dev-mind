@@ -25,7 +25,7 @@ import com.devmind.knowledge.repo.KnowledgeEntryRepository;
 import com.devmind.knowledge.repo.KnowledgeProposalRepository;
 import com.devmind.knowledge.triage.ProposalCreatedEvent;
 import com.devmind.knowledge.triage.ProposalVerdictEvent;
-import com.devmind.knowledge.triage.TriageQuestions;
+import com.devmind.common.decision.TriageQuestions;
 import com.devmind.notification.NotificationPublisher;
 import com.devmind.project.ProjectService;
 import com.devmind.project.model.Project;

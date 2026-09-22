@@ -1,5 +1,6 @@
 package com.devmind.knowledge.triage;
 
+import com.devmind.common.decision.TriageQuestions;
 import com.devmind.common.knowledge.KnowledgeRetriever;
 import java.util.ArrayList;
 import java.util.List;
@@ -53,10 +54,16 @@ public record TriageEvidence(String retrieval, List<KnowledgeRetriever.Retrieved
         return chunks.isEmpty();
     }
 
-    /** 喂给模型的 state 片段（state 键 {@code similar_entries}） */
+    /**
+     * 喂给模型的 state 片段（state 键 {@code similar_entries}）。
+     *
+     * <p>空召回那句占位文案取自 {@link TriageQuestions#EMPTY_RECALL}，不在这里另写一份：
+     * CAP-56 的「空召回」对照组就是靠<b>逐字这个串</b>造的，生产侧与评测侧各写一份的话，
+     * 改一处就静默失配——对照组看着还在，其实已经不是同一段输入了。</p>
+     */
     public String stateText() {
         if (chunks.isEmpty()) {
-            String base = "（未召回到相似条目）";
+            String base = TriageQuestions.EMPTY_RECALL;
             return note == null || note.isBlank() ? base : base + " " + note;
         }
         StringBuilder sb = new StringBuilder();

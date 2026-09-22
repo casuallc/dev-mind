@@ -1,6 +1,7 @@
 package com.devmind.knowledge.triage;
 
 import com.devmind.common.decision.DecisionAnswer;
+import com.devmind.common.decision.TriageQuestions;
 import java.util.List;
 import java.util.Map;
 

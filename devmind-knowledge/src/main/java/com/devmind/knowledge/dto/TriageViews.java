@@ -1,7 +1,7 @@
 package com.devmind.knowledge.dto;
 
 import com.devmind.common.decision.DecisionAnswer;
-import com.devmind.knowledge.triage.TriageQuestions;
+import com.devmind.common.decision.TriageQuestions;
 import com.devmind.knowledge.triage.TriageSnapshot;
 import java.time.Instant;
 import java.util.ArrayList;

@@ -1,4 +1,4 @@
-package com.devmind.knowledge.triage;
+package com.devmind.common.decision;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,6 +17,12 @@ import java.util.Map;
  *
  * <p>laya 的 criteria 口径：choice 是 {@code {key: 说明}}（答案是 key），
  * score 是<b>列表</b>（下标即分值，"标签：说明" 写成一条便于模型理解）。</p>
+ *
+ * <p><b>为什么住在 common（CAP-56 §3.1 上提）</b>：题面是<b>模型契约</b>而非知识库的内部细节——
+ * 三处共用同一份：① 消费方分诊时发给模型；② CAP-56 评测时算指标要对齐 gold；③ CAP-56 微调时
+ * 它是训练目标。留在 devmind-knowledge 会让评测/微调模块只能反向依赖知识库。上提后
+ * {@code common.decision} 是题面、答案（{@link DecisionAnswer}）、引擎（{@link DecisionEngine}）
+ * 三者的共同住处。</p>
  */
 public final class TriageQuestions {
 
@@ -36,6 +42,24 @@ public final class TriageQuestions {
 
     /** noul 给的是"是"的概率；过半数才提示重复（阈值只影响徽标，不自动执行） */
     public static final double DUPLICATE_THRESHOLD = 0.5;
+
+    /**
+     * 题面版本：<b>改题面文案、选项或等级数都要 +1</b>。
+     *
+     * <p>CAP-56 §3 定的口径：题面版本进评测指标主键。题面是代码常量，历史指标若不记版本，
+     * 下一次改题面会让旧报告被无声地"对齐"到新题面上——指标看着没变，其实测的不是一回事。</p>
+     */
+    public static final String VERSION = "kb-proposal-triage@1";
+
+    /**
+     * state 里 {@code similar_entries} 的<b>空召回占位文案</b>。
+     *
+     * <p>CAP-56 FR-02 把「空召回」列为必须存在的对照组：没有它，「恒答重复」这种退化看起来
+     * 也"合理"（2026-09-22 实测 multilingual 在空召回组仍给 duplicate=0.988）。对照组靠
+     * <b>逐字这个串</b>来构造与识别，所以它必须是常量、由生产侧（{@code TriageEvidence}）
+     * 与评测侧共用——两边各写一份，改一处就静默失配。</p>
+     */
+    public static final String EMPTY_RECALL = "（未召回到相似条目）";
 
     /** 质量三级的题面文案（下标即分值，展示标签取冒号前那截） */
     public static final List<String> QUALITY_LEVELS = List.of(
