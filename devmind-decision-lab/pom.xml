@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.devmind</groupId>
+        <artifactId>devmind</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <artifactId>devmind-decision-lab</artifactId>
+    <name>devmind-decision-lab</name>
+    <description>CAP-56 决策模型评测与微调闭环：评测集/评测运行/微调任务/checkpoint 准入</description>
+    <dependencies>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-common</artifactId>
+        </dependency>
+        <!-- 微调与评测都走 runner exec 帧（节点调度/下发/日志 Hub 全在 execution） -->
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-execution</artifactId>
+        </dependency>
+        <!--
+          gold 换算口径（GoldDistributions）与 decision_records 都归 devmind-decision：
+          评测集的 gold 必须与训练集导出是同一份换算，回流集更是直接搬它的记录。
+          方向是单向的（lab → decision）：decision 侧要感知闸门走的是 common 的 SPI 探测，
+          不反向依赖本模块，所以不成环。
+        -->
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-decision</artifactId>
+        </dependency>
+        <!-- 登记人/验证人取 IdentityService.currentActor() -->
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-auth</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
