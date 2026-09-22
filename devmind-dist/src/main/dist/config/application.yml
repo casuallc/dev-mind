@@ -25,6 +25,16 @@ devmind:
   execution:
     shell: bash                # 本地构建/部署步骤的 shell（Windows 下为 Git Bash）
     step-timeout-ms: 1800000   # 单步超时 30 分钟，超时 kill
+  decision-lab:
+    # CAP-56 决策实验室：脚本目录（服务端打包执行包时读；相对路径跟随启动目录 APP_HOME）。
+    # 开发态（cwd=仓库根）用默认值 tools/laya-sidecar/lab；分发包里脚本在 APP_HOME/lab。
+    scripts-dir: lab
+    # 节点上 python 解释器（命令行首 token，必须单 token 无空白——runner execAllowlist 逐行取首 token 校验）。
+    # GPU 节点上通常是 venv 全路径，如 /opt/laya/venv/bin/python；留 python 则要求节点 PATH 里已装 laya。
+    python-path: python
+    max-concurrent-runs: 2     # 同时进行的评测/微调上限（一次运行独占一个节点许可）
+    default-timeout-sec: 3600  # 单次运行默认超时（秒）
+    max-timeout-sec: 86400     # 上限（秒，RLCD 训练可能跑整夜）
 
 # 数据库默认 H2 文件库（./data/devmind，跟随启动目录）；驱动已随包携带，切 MySQL/PostgreSQL 时覆盖：
 # spring:

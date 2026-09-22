@@ -51,6 +51,16 @@
             <outputDirectory>bin</outputDirectory>
             <fileMode>0755</fileMode>
         </fileSet>
+        <!-- lab/：CAP-56 评测/微调脚本（服务端打包执行包时读 devmind.decision-lab.scripts-dir，
+             默认值 tools/laya-sidecar/lab 只对开发态 cwd=仓库根成立；分发包里落 APP_HOME/lab，
+             由 config/application.yml 指向相对路径 lab）。__pycache__ 是开发机产物，排除 -->
+        <fileSet>
+            <directory>../tools/laya-sidecar/lab</directory>
+            <outputDirectory>lab</outputDirectory>
+            <includes>
+                <include>**/*.py</include>
+            </includes>
+        </fileSet>
         <!-- data/ 占位 -->
         <fileSet>
             <directory>src/main/dist/data</directory>
