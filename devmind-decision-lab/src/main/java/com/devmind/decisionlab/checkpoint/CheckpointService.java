@@ -246,7 +246,13 @@ public class CheckpointService {
 
     // ---------------- 内部 ----------------
 
-    private DecisionCheckpointEntity require(Long id) {
+    /**
+     * 取产物实体（不存在 → 404）。
+     *
+     * <p>public：同模块的评测/微调编排与打包供给都要按 id 取它，且应当复用同一句错误文案——
+     * 各写一份的话，"产物不存在"会在不同入口有不同说法。</p>
+     */
+    public DecisionCheckpointEntity require(Long id) {
         return repo.findById(id).orElseThrow(() ->
                 new DevMindException(ErrorCode.NOT_FOUND, "决策模型产物不存在: " + id));
     }

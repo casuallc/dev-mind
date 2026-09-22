@@ -3,6 +3,7 @@ package com.devmind.execution.runner;
 import com.devmind.common.agent.AgentExecCommand;
 import com.devmind.common.agent.AgentExecResult;
 import com.devmind.common.agent.AgentNodeConnector;
+import com.devmind.common.agent.AgentProtocol;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import org.springframework.beans.factory.ObjectProvider;
@@ -64,6 +65,22 @@ public class AgentNodeRouter {
 
     /** 节点在线且协议支持 exec 帧（v3+）；不满足抛 409 带可操作建议。 */
     public void requireExecCapable(String nodeId) {
+        requireProtocol(nodeId, AgentProtocol.EXEC_FRAMES, "exec");
+    }
+
+    /**
+     * CAP-56：节点在线且协议支持 exec 帧携带执行包（v14+）——决策实验室的评测/微调需要它。
+     *
+     * <p>在<b>触发阶段</b>查而不是等 exec 时再炸：运行是在后台线程里跑的，那时拒绝只会留下一条
+     * FAILED 记录和一串"协议版本过低"的日志，而人是在页面上按的按钮——按钮那一刻就该知道
+     * 节点不够新。判据与 {@code AgentConnectionRegistry.exec} 内的门控同源（同一个版本常量）。</p>
+     */
+    public void requireBundleCapable(String nodeId) {
+        requireProtocol(nodeId, AgentProtocol.EXEC_BUNDLE, "决策实验室评测/微调（执行包由 runner 拉取物化）");
+    }
+
+    /** 在线 + 协议版本双关：两处判据只写一份，离线/过低的报错才不会各说各话 */
+    private void requireProtocol(String nodeId, int minVersion, String what) {
         AgentNodeConnector connector = connectorProvider.getIfAvailable();
         if (connector == null) {
             throw new DevMindException(ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
@@ -71,10 +88,10 @@ public class AgentNodeRouter {
         if (!connector.isOnline(nodeId)) {
             throw new DevMindException(ErrorCode.CONFLICT, "节点不在线: " + nodeId);
         }
-        if (!connector.supports(nodeId, com.devmind.common.agent.AgentProtocol.EXEC_FRAMES)) {
+        if (!connector.supports(nodeId, minVersion)) {
             throw new DevMindException(ErrorCode.CONFLICT,
-                    "节点 " + nodeId + " 的 runner 协议版本过低（exec 需 v"
-                            + com.devmind.common.agent.AgentProtocol.EXEC_FRAMES + "+），请到节点页升级 runner");
+                    "节点 " + nodeId + " 的 runner 协议版本过低（" + what + " 需 v" + minVersion
+                            + "+），请到节点页升级 runner");
         }
     }
 }

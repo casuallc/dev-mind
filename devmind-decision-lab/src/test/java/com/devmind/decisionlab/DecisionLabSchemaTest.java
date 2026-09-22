@@ -3,6 +3,7 @@ package com.devmind.decisionlab;
 import com.devmind.decisionlab.checkpoint.model.DecisionCheckpointEntity;
 import com.devmind.decisionlab.dataset.model.DecisionDatasetEntity;
 import com.devmind.decisionlab.dataset.model.DecisionDatasetItemEntity;
+import com.devmind.decisionlab.eval.model.DecisionEvaluationEntity;
 import org.hibernate.boot.Metadata;
 import org.hibernate.boot.MetadataSources;
 import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
@@ -38,6 +39,10 @@ class DecisionLabSchemaTest {
     private static final String[] CHECKPOINT_LOB_COLUMNS =
             {"metrics_json", "calibration_json", "serve_check_json"};
 
+    /** FR-03 评测运行的证据列（命令行 / 报告 / 日志都是长文本） */
+    private static final String[] EVAL_LOB_COLUMNS =
+            {"command_text", "headline_json", "report_json", "logs_text"};
+
     private String exportDdl(Class<?> dialect) {
         var registry = new StandardServiceRegistryBuilder()
                 .applySetting("hibernate.dialect", dialect.getName())
@@ -46,6 +51,7 @@ class DecisionLabSchemaTest {
                 .addAnnotatedClass(DecisionDatasetEntity.class)
                 .addAnnotatedClass(DecisionDatasetItemEntity.class)
                 .addAnnotatedClass(DecisionCheckpointEntity.class)
+                .addAnnotatedClass(DecisionEvaluationEntity.class)
                 .buildMetadata();
         String ddl = String.join("\n", new SchemaCreatorImpl(registry)
                 .generateCreationCommands(metadata, false)).toLowerCase();
@@ -72,7 +78,7 @@ class DecisionLabSchemaTest {
     @Test
     void pgLobColumnsAreInlineTextNotOid() {
         String ddl = exportDdl(PostgreSQLDialect.class);
-        for (String column : concat(DATASET_LOB_COLUMNS, CHECKPOINT_LOB_COLUMNS)) {
+        for (String column : concat(concat(DATASET_LOB_COLUMNS, CHECKPOINT_LOB_COLUMNS), EVAL_LOB_COLUMNS)) {
             assertTrue(columnDef(ddl, column).contains(" text"),
                     "PG 上 " + column + " 应为 text（@Lob 必须配 @JdbcTypeCode(LONGVARCHAR)）");
         }
@@ -82,7 +88,7 @@ class DecisionLabSchemaTest {
     @Test
     void mysqlLobColumnsAreLongtext() {
         String ddl = exportDdl(MySQLDialect.class);
-        for (String column : concat(DATASET_LOB_COLUMNS, CHECKPOINT_LOB_COLUMNS)) {
+        for (String column : concat(concat(DATASET_LOB_COLUMNS, CHECKPOINT_LOB_COLUMNS), EVAL_LOB_COLUMNS)) {
             assertTrue(columnDef(ddl, column).contains("longtext"),
                     "MySQL 上 " + column + " 应为 longtext（依赖 @Column(length = 16_777_216)）");
         }
@@ -119,17 +125,33 @@ class DecisionLabSchemaTest {
     }
 
     @Test
-    void allThreeTablesAndTheirJoinKeysExist() {
+    void allFourTablesAndTheirJoinKeysExist() {
         String ddl = exportDdl(PostgreSQLDialect.class);
         assertTrue(ddl.contains("decision_datasets"));
         assertTrue(ddl.contains("decision_dataset_items"));
         assertTrue(ddl.contains("decision_checkpoints"));
+        assertTrue(ddl.contains("decision_evaluations"));
         assertTrue(columnDef(ddl, "dataset_id").contains("dataset_id"), "样本靠 dataset_id 挂在集上");
         // 列表页要显示"上次自检过了没有"，靠这一列免得逐行解析自检报告 JSON
         assertTrue(columnDef(ddl, "serve_check_status").contains("serve_check_status"));
         // 放行史三个字段（谁/何时/凭什么）在撤销后要留着，不能靠 verified 一个布尔承载
         for (String column : new String[] {"verified_by", "verified_at", "verified_note"}) {
             assertTrue(columnDef(ddl, column).contains(column), "产物表应有 " + column);
+        }
+    }
+
+    /**
+     * 评测行要能独立说清"这次是在什么上跑的、跑成什么样"——即便数据集被修订、产物登记被删掉。
+     * 所以名/版本/路径这些是<b>快照列</b>，不是外键 join 出来的。
+     */
+    @Test
+    void evaluationRowCarriesItsOwnSnapshotAndOutcome() {
+        String ddl = exportDdl(PostgreSQLDialect.class);
+        for (String column : new String[] {"dataset_name", "dataset_version", "question_set_version",
+                "checkpoint_name", "checkpoint_path", "base_checkpoint_path", "node_id",
+                "timeout_seconds", "report_status", "exit_code", "error_summary",
+                "started_at", "finished_at", "created_by"}) {
+            assertTrue(columnDef(ddl, column).contains(column), "评测表应有 " + column);
         }
     }
 
