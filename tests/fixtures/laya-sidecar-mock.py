@@ -13,12 +13,16 @@ choice → 第一个选项 0.9；score → 最高等级 0.8；noul → 0.2。
 用法：python tests/fixtures/laya-sidecar-mock.py [port]（默认 18195）
 
 端点：
-  GET  /healthz              存活 + 常驻 checkpoint + 设备（CAP-48 连接测试第一段）
+  GET  /healthz              存活 + 常驻 checkpoint + 设备（CAP-48 连接测试第一段）；
+                             经 /__sources 注入后另报 sources/source_origin（CAP-56 FR-01/06）
   POST /v1/predict           {"state":…,"questions":{…},"model"?} → laya 形状的 answers/routing/usage
   POST /__answers {"answers":{…}}   固定答案（传 null / {} 恢复按原语派生）
   POST /__checkpoint {"model":"…","reason":"…"}   改 routing（默认 multilingual + 中文脚本理由）
   POST /__health {"status":"loading"}   改 /healthz 的 status（验「边车未就绪」分支）
   POST /__status {"code":N,"detail":"…"}   让 /v1/predict 回该状态码与 detail（验调用方错误诊断）
+  POST /__sources {"sources":{槽位:{kind,path,repo,local,ready,missing,overridden,…}}}
+                             注入槽位→实际来源（CAP-56 FR-06 serve 自检的核对依据）；
+                             传 null 恢复「不上报」（= FR-01 之前的老边车形态，自检该报 WARN）
   POST /__reset              清空请求记录与故障注入
   GET  /__state              {"status","health","answers","checkpoint","requests":[…]}
                              requests[i] = {path,state,questions,model,auth,hasModelKey,rawLen}
@@ -36,7 +40,10 @@ DEFAULT_CHECKPOINT = {"model": "multilingual",
                       "repo": "convaiinnovations/laya"}
 
 STATE = {"status": 200, "detail": "", "health": "ok", "answers": None,
-         "checkpoint": dict(DEFAULT_CHECKPOINT), "requests": []}
+         "checkpoint": dict(DEFAULT_CHECKPOINT), "requests": [],
+         # CAP-56 FR-01：槽位→实际来源上报。默认不报（= FR-01 之前的老边车形态），
+         # 由 /__sources 注入；serve 自检的「来源一致」检查要在有/无两种形态下都验到
+         "sources": None}
 
 
 def derive_answer(question):
@@ -106,13 +113,23 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, STATE)
             return
         if urlparse(self.path).path == "/healthz":
-            self._send(200, {
+            doc = {
                 "status": STATE["health"],
                 "laya_version": "0.3.5-mock",
                 "loaded": ["multilingual"] if STATE["health"] == "ok" else [],
                 "devices": {"multilingual": "cpu"} if STATE["health"] == "ok" else {},
                 "cuda_available": False,
-            })
+            }
+            if STATE["sources"] is not None:
+                # 形状照真边车（tools/laya-sidecar/app.py 的 _slot_source_report）：
+                # 每个槽位一条 {kind, path/source, repo, local, ready, missing, device, overridden}
+                doc["sources"] = STATE["sources"]
+                doc["source_origin"] = "mock:/__sources"
+                doc["overridden_slots"] = sorted(n for n, s in STATE["sources"].items()
+                                                 if s.get("overridden"))
+                doc["unready_slots"] = sorted(n for n, s in STATE["sources"].items()
+                                             if s.get("local") and not s.get("ready", False))
+            self._send(200, doc)
             return
         self._send(404, {"detail": "Not Found"})
 
@@ -132,6 +149,11 @@ class Handler(BaseHTTPRequestHandler):
             STATE["health"] = self._body().get("status", "ok")
             self._send(200, {"status": STATE["health"]})
             return
+        if path == "/__sources":
+            # 传 {"sources": {...}} 注入槽位来源；传 null/{} 恢复「不报来源」（老边车形态）
+            STATE["sources"] = self._body().get("sources") or None
+            self._send(200, {"sources": STATE["sources"]})
+            return
         if path == "/__status":
             body = self._body()
             STATE["status"] = int(body.get("code", 200))
@@ -146,6 +168,7 @@ class Handler(BaseHTTPRequestHandler):
             STATE["answers"] = None
             STATE["checkpoint"] = dict(DEFAULT_CHECKPOINT)
             STATE["requests"] = []
+            STATE["sources"] = None
             self._send(200, {"ok": True})
             return
         if path != "/v1/predict":
