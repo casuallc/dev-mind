@@ -85,4 +85,20 @@ class ContextPullerTest {
         assertThrows(IOException.class, () -> ContextPuller.pullAndMaterialize(
                 configPointingAt(server), "s1", manifestOf(new byte[0]), workDir));
     }
+
+    @Test
+    void splitMaterializationTargetsSharedAndSessionDirs() throws Exception {
+        // CAP-53：5 参版本——settings 落 sharedDir（cwd），注入块落 sessionDir（代码目录）
+        byte[] body = ContextPackages.toJsonBytes(ContextPackage.of("## 会话任务\n", "{\"p\":1}"));
+        server = serve(200, body);
+        Path codeDir = workDir.resolve("worktrees/req-r1");
+        Files.createDirectories(codeDir);
+        ContextPuller.pullAndMaterialize(configPointingAt(server), "s1", manifestOf(body),
+                workDir, codeDir);
+        assertTrue(Files.isRegularFile(workDir.resolve(".claude/settings.local.json")));
+        assertTrue(Files.notExists(workDir.resolve("CLAUDE.local.md")), "cwd 不得落会话注入块");
+        assertTrue(Files.readString(codeDir.resolve("CLAUDE.local.md"), StandardCharsets.UTF_8)
+                .contains("## 会话任务"));
+        assertTrue(Files.notExists(codeDir.resolve(".claude")), "代码目录不得落 settings");
+    }
 }
