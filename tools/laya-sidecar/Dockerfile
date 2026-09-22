@@ -26,4 +26,8 @@ RUN if [ -n "$BAKE_MODELS" ]; then \
 EXPOSE 8377
 
 # workers=1：模型常驻单进程，多 worker 会各自加载一份 checkpoint（内存 ×N）
+#
+# 槽位来源覆盖（CAP-56 FR-01，`-e LAYA_SLOT_MODELS='{"typed-decisions": "/data/laya/ft7"}'`）：
+# 只认环境变量，**不 COPY models.json**——里面写的是节点上的本机路径，烘进镜像没有意义
+# （容器里还得是挂载进来的路径）。路径不可达时容器起不来，这是有意的，别加降级。
 CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT} --workers 1"]

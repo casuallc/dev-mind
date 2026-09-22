@@ -34,3 +34,6 @@ __pycache__/
 
 # Python（laya 边车本地虚拟环境）
 .venv/
+
+# laya 边车的槽位来源覆盖：写的是节点上的本机路径（模板见 tools/laya-sidecar/models.json.example）
+tools/laya-sidecar/models.json

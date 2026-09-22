@@ -81,6 +81,7 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 | cap52_e2e.py | 需求流程精简：三合一规划会话（一会话三产出）→ 自动开发会话（**复用同一棵需求工作树**，CAP-51 验收 5）→ 待验收；粒度护栏/入口互斥/无清单与终态 409（协议 v10）；终态自动清理（CAP-51 FR-06 修订：DONE 后需求工作树回收 + 本地/远端需求分支删除，协议 v13）。支持 `E2E_BASE` 指向非 8080 实例（如 `E2E_BASE=http://localhost:8090/api`），起隔离实例的姿势见下方「起独立实例跑 E2E」 |
 | cap54_e2e.py | 会话工作区实时视图（协议 v11）：status/tree/file/diff 四端点（含已跟踪 diff 与未跟踪 untracked）、路径逃逸 409/缺参 400、问答沙箱 gitAvailable=false 且无 diff 端点、终态经 runner recentDirs 仍可读（脚本自起 fake runner 节点） |
 | e2e-agent-node.py | CAP-21 节点全链路：注册→会话→授权→优雅退出→离线 409 |
+| cap56_sidecar_source.py | CAP-56 FR-01 边车槽位来源覆盖：真起边车（需 `tools/laya-sidecar/.venv` + `--artifact` 一份真实 checkpoint 目录），文件分支（`models.json` 的 `slots` 包裹/`_comment` 剔除）+ `/healthz.sources` 上报（kind/overridden/ready/missing/device/source_origin）+ **覆盖真被 serve**（真发一次 `/v1/predict`，断言响应 `routing.repo` 指向该产物）；五类坏配置（槽位名不认识/本地路径不存在/环境变量坏 JSON/来源文件坏 JSON/`LAYA_MODELS_FILE` 指了不存在的文件）一律启动即失败，与「没配覆盖」的正常降级划清界线。不起 app，纯边车侧，`python tests/cap56_sidecar_source.py --artifact <产物目录>` |
 | cap55_verify.py | CAP-55 FR-02 决策端点：DECISION 端点登记（provider 默认 laya、model=checkpoint 别名可空、不吃向量语义）、连接测试两段实调（/healthz→固定样例 /v1/predict，message 带常驻清单+样例答案+routing.reason）、边车未就绪不白跑样例题、样例失败透出边车 detail、mock provider 零网络自报、kind-provider 配对 400、同类型唯一的平台默认、无引用可删（脚本自起 fixtures/laya-sidecar-mock.py，默认 :18095 独立实例；真边车连通性由 FR-01 smoke 覆盖，这里只钉 Java 侧协议） |
 | e2e-cap41.py / b / c | CAP-41 工作日志空间：懒创建/守卫/种子模板/日报周报生成 |
 | e2e-cap41-m3-push.py | CAP-41 M3：worklog 远端绑定 + push（协议 v6，file:// bare 库） |
