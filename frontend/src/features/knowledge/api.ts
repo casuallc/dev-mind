@@ -12,6 +12,7 @@ import type {
   KnowledgeSearchResult,
   PreviewResult,
   ReindexResult,
+  TriageStatus,
 } from './types'
 
 // ---------------- 知识库（CAP-44） ----------------
@@ -94,3 +95,10 @@ export const adoptProposal = (id: number, target: 'project' | 'global', projectI
   return api.post<KnowledgeProposal>(`/knowledge/proposals/${id}/adopt?${q.toString()}`)
 }
 export const rejectProposal = (id: number) => api.post<KnowledgeProposal>(`/knowledge/proposals/${id}/reject`)
+
+/** CAP-55 FR-04 手动分诊：只排队不等结果（202）——结果由调用方轮询列表看徽标 */
+export const triageProposal = (id: number) =>
+  api.post<void>(`/knowledge/proposals/${id}/triage`)
+
+/** 分诊可用性（配置侧，不探活）：按钮灰不灰 + 灰掉的原因 */
+export const getTriageStatus = () => api.get<TriageStatus>('/knowledge/proposals/triage-status')

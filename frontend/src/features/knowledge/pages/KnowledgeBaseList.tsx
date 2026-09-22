@@ -28,10 +28,12 @@ import {
   createBase,
   createProposal,
   deleteBase,
+  getTriageStatus,
   listBases,
   listProposals,
   previewInjection,
   rejectProposal,
+  triageProposal,
   updateBase,
 } from '../api'
 import type {
@@ -40,7 +42,10 @@ import type {
   KnowledgeBaseInput,
   KnowledgeProposal,
   PreviewResult,
+  TriageStatus,
+  TriageView,
 } from '../types'
+import TriageEvidenceDrawer from '../components/TriageEvidenceDrawer'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
@@ -57,6 +62,31 @@ const statusTag = (s: string) =>
     : s === 'adopted' ? <Tag color="green">adopted</Tag> : s === 'rejected' ? <Tag>rejected</Tag>
     : s === 'deprecated' ? <Tag>deprecated</Tag> : <Tag color="orange">{s}</Tag>
 
+/** CAP-55 FR-04 徽标：层级 / 重复 / 质量三块，未分诊或降级各有对应的"没有建议"形态 */
+function TriageBadges({ triage }: { triage: TriageView | null }) {
+  if (!triage) return <Typography.Text type="secondary">未分诊</Typography.Text>
+  if (triage.degraded) {
+    return (
+      <Tooltip title={triage.degradedReason || '未拿到建议'}>
+        <Tag color="orange">降级</Tag>
+      </Tooltip>
+    )
+  }
+  return (
+    <Space size={4} wrap>
+      {triage.adoptLayer && <Tag color="blue">{triage.adoptLayer.label}</Tag>}
+      {triage.duplicate?.duplicate ? (
+        <Tooltip title={`与 ${triage.duplicate.similar?.length ?? 0} 条现有条目相似`}>
+          <Tag color="red">疑似重复</Tag>
+        </Tooltip>
+      ) : (
+        <Tag>不重复</Tag>
+      )}
+      {triage.quality && <Tag color="green">质量 {triage.quality.label}</Tag>}
+    </Space>
+  )
+}
+
 export default function KnowledgeBaseList() {
   const [projects, setProjects] = useState<Project[]>([])
   const [bases, setBases] = useState<KnowledgeBase[]>([])
@@ -68,6 +98,12 @@ export default function KnowledgeBaseList() {
   // 提案管理抽屉：引用实时列表数据，状态变化自动反映
   const [manageId, setManageId] = useState<number | null>(null)
   const manageProposal = manageId != null ? proposals.find((p) => p.id === manageId) ?? null : null
+
+  // CAP-55 FR-04 分诊：徽标数据来自列表本身（triage 字段），availability 只决定按钮灰不灰
+  const [triageStatus, setTriageStatus] = useState<TriageStatus | null>(null)
+  const [triagingId, setTriagingId] = useState<number | null>(null)
+  const [evidenceId, setEvidenceId] = useState<number | null>(null)
+  const evidenceProposal = evidenceId != null ? proposals.find((p) => p.id === evidenceId) ?? null : null
 
   // 库编辑
   const [baseModalOpen, setBaseModalOpen] = useState(false)
@@ -108,6 +144,10 @@ export default function KnowledgeBaseList() {
       .catch(() => undefined)
     loadBases()
     loadProposals()
+    // 分诊可用性只在配置变化时才变，进页面取一次即可（后端刻意不探活）
+    getTriageStatus()
+      .then(setTriageStatus)
+      .catch(() => undefined)
   }, [loadBases, loadProposals])
 
   const openCreateBase = () => {
@@ -215,6 +255,32 @@ export default function KnowledgeBaseList() {
     })
   }
 
+  /**
+   * CAP-55 FR-04 手动分诊：202 只代表排上队了，建议要等异步线程跑完才在列表上出现——
+   * 所以点完得盯着 `triage.at` 变（只看"有 at"会把上一次的结果当新的）。
+   */
+  const onTriage = async (p: KnowledgeProposal) => {
+    const previousAt = p.triage?.at ?? null
+    setTriagingId(p.id)
+    try {
+      await triageProposal(p.id)
+      message.info('已排队分诊，稍候徽标会刷新')
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 800))
+        const latest = (await listProposals()).find((x) => x.id === p.id)
+        if (latest && (latest.triage?.at ?? null) !== previousAt) {
+          setProposals(await listProposals())
+          return
+        }
+      }
+      message.warning('分诊结果尚未出现，可点「刷新」再看看')
+    } catch (e) {
+      showError(e, '分诊失败')
+    } finally {
+      setTriagingId(null)
+    }
+  }
+
   const onPreview = async () => {
     const v = await previewForm.validateFields()
     try {
@@ -313,6 +379,19 @@ export default function KnowledgeBaseList() {
     { title: '标题', dataIndex: 'title', ellipsis: true },
     { title: '去向', dataIndex: 'targetScope', width: 90, render: scopeTag },
     { title: '来源会话', dataIndex: 'sourceSessionId', width: 130, render: (v) => v ?? '-' },
+    {
+      title: 'AI 建议',
+      key: 'triage',
+      width: 260,
+      render: (_, r) => (
+        <Space size={8} wrap>
+          <TriageBadges triage={r.triage} />
+          {r.triage && !r.triage.degraded && (
+            <a onClick={() => setEvidenceId(r.id)}>查看依据</a>
+          )}
+        </Space>
+      ),
+    },
     { title: '状态', dataIndex: 'status', width: 100, render: statusTag },
     { title: '创建时间', dataIndex: 'createdAt', width: 170, render: (v) => fmtTime(v) },
     {
@@ -330,6 +409,7 @@ export default function KnowledgeBaseList() {
   ]
 
   const projectOptions = projects.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))
+  const triageUnavailable = triageStatus?.available === false
 
   return (
     <Card
@@ -504,6 +584,48 @@ export default function KnowledgeBaseList() {
             >
               {manageProposal.contentMd}
             </pre>
+
+            {/* CAP-55：AI 建议区块——降级时也要出现（"没给建议"和"没分诊过"是两回事） */}
+            <div>
+              <Space size={8} style={{ marginBottom: 8 }}>
+                <Typography.Text strong>AI 建议</Typography.Text>
+                {manageProposal.triage && (
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    {fmtTime(manageProposal.triage.at)}
+                  </Typography.Text>
+                )}
+              </Space>
+              <div style={{ marginBottom: 8 }}>
+                <TriageBadges triage={manageProposal.triage} />
+                {manageProposal.triage?.degraded && (
+                  <Typography.Text type="warning" style={{ marginLeft: 8, fontSize: 12 }}>
+                    {manageProposal.triage.degradedReason}
+                  </Typography.Text>
+                )}
+              </div>
+              <Space>
+                {/* 灰按钮必须自己套一层 span：disabled 的按钮不派发鼠标事件，Tooltip 挂在按钮上
+                    永远不弹——而"灰了为什么"正是这个 Tooltip 唯一要说的事 */}
+                <Tooltip title={triageUnavailable ? triageStatus?.reason : ''}>
+                  <span style={{ display: 'inline-block', cursor: triageUnavailable ? 'not-allowed' : undefined }}>
+                    <Button
+                      size="small"
+                      loading={triagingId === manageProposal.id}
+                      disabled={triageUnavailable}
+                      onClick={() => onTriage(manageProposal)}
+                    >
+                      {manageProposal.triage ? '重新分诊' : 'AI 分诊'}
+                    </Button>
+                  </span>
+                </Tooltip>
+                {manageProposal.triage && !manageProposal.triage.degraded && (
+                  <Button size="small" onClick={() => setEvidenceId(manageProposal.id)}>
+                    查看依据
+                  </Button>
+                )}
+              </Space>
+            </div>
+
             {manageProposal.status === 'open' ? (
               <Space>
                 <Button type="primary" onClick={() => onAdopt(manageProposal, 'project')}>
@@ -520,6 +642,9 @@ export default function KnowledgeBaseList() {
           </Space>
         </Drawer>
       )}
+
+      {/* CAP-55 FR-07「查看依据」：徽标只给结论，这里给来路（含 laya 应答原文） */}
+      <TriageEvidenceDrawer proposal={evidenceProposal} onClose={() => setEvidenceId(null)} />
 
       {/* 库编辑弹窗 */}
       <Modal

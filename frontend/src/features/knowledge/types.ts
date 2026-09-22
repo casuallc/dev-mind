@@ -120,6 +120,69 @@ export interface KnowledgeProposal {
   adoptedProjectId: string | null
   createdAt: string
   adoptedAt: string | null
+  /** CAP-55 FR-04 AI 分诊建议（null = 从未分诊，不渲染徽标区块） */
+  triage: TriageView | null
+}
+
+// ---------------- CAP-55 提案分诊（FR-04，inbox 徽标 + 「查看依据」抽屉） ----------------
+
+/**
+ * 分诊建议：后端已是**展示形状**（中文短标签、重复布尔判定都算好了），
+ * 前端不解析 laya 的 choice/score/noul，只在抽屉里把 answers 原文摊出来给人看。
+ */
+export interface TriageView {
+  /** 最近一次分诊时间 */
+  at: string
+  /** true = 没拿到建议（边车没配/连不上/应答不可解析），三块建议均为 null */
+  degraded: boolean
+  degradedReason: string
+  /** 边车实际选中的 checkpoint */
+  model: string | null
+  routingReason: string
+  latencyMs: number
+  adoptLayer: TriageChoice | null
+  duplicate: TriageDuplicate | null
+  quality: TriageScore | null
+  /** laya 应答原文（题 id → 答案），「查看依据」直接展示 */
+  answers: Record<string, unknown> | null
+}
+
+export interface TriageChoice {
+  /** 机器值 global|project|discard（与采纳 API 的 target 同域） */
+  value: string
+  label: string
+  confidence: number | null
+  probabilities: Record<string, number> | null
+}
+
+export interface TriageDuplicate {
+  duplicate: boolean
+  probability: number | null
+  confidence: number | null
+  similar: TriageSimilarEntry[]
+  /** 召回降级/失败的说明（有值时这个结论要打问号） */
+  note: string
+}
+
+export interface TriageSimilarEntry {
+  entryId: number | null
+  entryName: string
+  score: number
+}
+
+export interface TriageScore {
+  /** 等级下标（0 起） */
+  level: number | null
+  label: string
+  confidence: number | null
+  probabilities: Record<string, number> | null
+}
+
+/** CAP-55 FR-04 分诊可用性（配置侧）：inbox 拿它决定「AI 分诊」按钮灰不灰 */
+export interface TriageStatus {
+  available: boolean
+  /** 不可用原因（available=true 时空串），可直接展示 */
+  reason: string
 }
 
 export interface KnowledgeProposalInput {
