@@ -144,5 +144,12 @@ worklog 的 `.devmind/output/` 在其自有 cwd 下，不受影响。
 
 ## 7. 落地状态
 
-- **M1 —— 进行中**：CAP 文档 + runner 改造（cwd 上抬 / 物化拆分 / 路由注入 / transcript 迁移）
-  + Java 单测 + `tests/cap52_e2e.py` 补 CAP-53 断言。
+- **M1 —— 已完成**：CAP 文档 + runner 改造（cwd 上抬 `RunnerWorkspace.sessionCwd` /
+  物化拆分 `ContextMaterializer.materializeShared|materializeSession` / 路由注入
+  `CodeDirRouting` / transcript 迁移 `ClaudeStateSupport.migrateTranscripts`）+ Java 单测
+  （`ContextMaterializerTest`/`ContextPullerTest` 拆分用例、`ClaudeStateSupportTest`、
+  `CodeDirRoutingTest`、`RunnerWorkspaceTest.sessionCwd`）。`tests/cap52_e2e.py` 已补
+  CAP-53 断言并实跑通过：cwd 级路由文件存在、settings 落 cwd、代码目录无 settings、
+  工作树布局不变（验收 1/2/5/7）；CAP-52 全链路零回归。
+  **节点生效需重建 runner jar 并重启 runner 服务**（老 runner 维持 cwd=工作树旧行为，
+  协议无变更不报错，见 FR-06）。
