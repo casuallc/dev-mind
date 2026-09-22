@@ -12,13 +12,15 @@ import java.util.Map;
  * <pre>
  * {
  *   "schemaVersion": 1,
- *   "checkpoint": {"slot": "typed-decisions", "path": "…", "kind": "BASE"},
+ *   "checkpoint": {"id": 1, "name": "typed-decisions", "slot": "typed-decisions", "path": "…"},
  *   "dataset":    {"id": 7, "name": "基准集", "version": 2,
  *                  "questionSetVersion": "TriageQuestions@1", "itemCount": 60},
  *   "metrics":    {"items": 60,
- *                  "choice": {"accuracy": 0.72, "softAccuracy": 0.75, "brier": 0.31},
+ *                  "choice": {"questions": 60, "accuracy": 0.72, "softAccuracy": 0.75,
+ *                             "brier": 0.31, "ece": 0.21, "avgConfidence": 0.68,
+ *                             "answered": {"重复": 41, "采纳": 19}},
  *                  "score":  {"mae": 0.44, "within1Level": 0.9},
- *                  "noul":   {"rate": 0.05},
+ *                  "noul":   {"noulRate": 0.05},
  *                  "latencyMs": {"p50": 12.0, "p95": 30.0}},
  *   "baselines":  {"random": 0.33, "majority": 0.46},          ← FR-03：必须始终报
  *   "byCaseGroup": [{"caseGroup": "EMPTY_RECALL", "items": 10, "accuracy": 0.1}],
@@ -27,9 +29,13 @@ import java.util.Map;
  *                   "confidence": 0.99, "latencyMs": 11.2}],
  *   "compare":    {"baselineCheckpoint": "english", "win": 12, "lose": 30, "tie": 18},
  *   "calibration":{"mode": "heldout", "before": {"ece": 0.21}, "after": {"ece": 0.06},
- *                  "temperature": {"duplicate|3": 1.4}}
+ *                  "temperature": {"choice:3-5": 1.4}}      ← 桶名来自 laya 的 temp_bucket
  * }
  * </pre>
+ *
+ * <p><b>微调报告（{@code laya_train.py}）是同一套结构再加几段</b>：{@code train}（步数/loss/奖励/
+ * 是否冻结编码器）、{@code baseCheckpoint}、{@code split}，以及 {@code compare} 里多一个
+ * {@code baselineMetrics}（训练前基座在同一份验证集上的指标——退化就靠它显形）。</p>
  *
  * <p><b>服务端不重算指标</b>：指标由脚本用 {@code laya} 官方原语（{@code ece_score} 等）算出，
  * 服务端只做两件事——检查必报项在不在（FR-03 的基线是硬要求），以及把列表页要显示的几个
