@@ -475,4 +475,81 @@ class ModelEndpointServiceTest {
         assertEquals(32, v.batchSize());
         assertFalse(v.mock());
     }
+
+    // ---------------- CAP-55 决策端点（DECISION） ----------------
+
+    @Test
+    void decisionEndpointDefaultsToLayaProviderAndAcceptsEmptyModel() {
+        // 向量语义字段带越界值也不报错——它们对决策端点没有意义，只当没传（与 CHAT 同口径）
+        ModelEndpointApiView view = service.create(new ModelEndpointRequest("DECISION", "laya 边车",
+                null, "http://127.0.0.1:8377", null, null, 5, 999, 0, 1.5, null));
+
+        assertEquals(ModelEndpointEntity.KIND_DECISION, view.kind());
+        assertEquals(ModelEndpointEntity.PROVIDER_LAYA, view.provider(), "provider 省略时按 kind 落 laya");
+        assertNull(view.model(), "checkpoint 别名可空 = 由边车按语言自动路由");
+        assertNull(view.topK(), "决策端点不吃检索参数");
+        assertNull(view.threshold());
+        assertEquals(32, view.batchSize(), "batchSize 列 NOT NULL：保留默认值但不使用");
+        assertEquals(5, view.timeoutSeconds());
+    }
+
+    @Test
+    void decisionEndpointKeepsCheckpointAliasAsModel() {
+        ModelEndpointApiView view = service.create(new ModelEndpointRequest("DECISION", "laya 边车",
+                "laya", "http://127.0.0.1:8377", "sk-gw", "multilingual", 5, null, null, null, null));
+
+        assertEquals("multilingual", view.model(), "model 存的是 laya 的 checkpoint 别名，得原样带去边车");
+        assertTrue(view.hasApiKey(), "边车常在网关后面，凭据字段仍可用");
+    }
+
+    @Test
+    void decisionEndpointRequiresBaseUrl() {
+        DevMindException ex = assertThrows(DevMindException.class, () -> service.create(
+                new ModelEndpointRequest("DECISION", "laya 边车", "laya", null, null, null,
+                        5, null, null, null, null)));
+
+        assertTrue(ex.getMessage().contains("baseUrl"), ex.getMessage());
+    }
+
+    @Test
+    void decisionEndpointAcceptsMockProviderForOfflineTests() {
+        ModelEndpointApiView view = service.create(new ModelEndpointRequest("DECISION", "假决策",
+                "mock", null, null, null, 5, null, null, null, null));
+
+        assertEquals(ModelEndpointEntity.KIND_DECISION, view.kind());
+        assertEquals(ModelEndpointEntity.PROVIDER_MOCK, view.provider());
+    }
+
+    @Test
+    void providerMustMatchKind() {
+        // EMBEDDING + laya 落库了必错（探针会拿兜底路径去打 /embeddings），必须在入口拦住
+        assertThrows(DevMindException.class, () -> service.create(new ModelEndpointRequest(
+                "EMBEDDING", "向量", "laya", "http://127.0.0.1:8377", null, "bge-m3",
+                5, null, null, null, null)));
+        assertThrows(DevMindException.class, () -> service.create(new ModelEndpointRequest(
+                "CHAT", "对话", "laya", "https://api.example.com/v1", null, "gpt-4o-mini",
+                5, null, null, null, null)));
+        assertThrows(DevMindException.class, () -> service.create(new ModelEndpointRequest(
+                "DECISION", "决策", "openai-compatible", "http://127.0.0.1:8377", null, null,
+                5, null, null, null, null)));
+    }
+
+    @Test
+    void kindRejectionMessageNamesEveryOpenKind() {
+        DevMindException ex = assertThrows(DevMindException.class, () -> service.create(
+                new ModelEndpointRequest("RERANK", "重排", null, "https://api.example.com/v1", null,
+                        "bge-reranker", 5, null, null, null, null)));
+
+        assertTrue(ex.getMessage().contains("DECISION"), "白名单提示要跟着放开: " + ex.getMessage());
+    }
+
+    @Test
+    void decisionDefaultIsTrackedSeparatelyFromOtherKinds() {
+        stored(3L, ModelEndpointEntity.KIND_DECISION, ModelEndpointEntity.PROVIDER_LAYA, false,
+                ModelEndpointEntity.STATUS_ACTIVE);
+
+        service.setDefault(3L);
+
+        verify(repo).clearDefaultExcept(eq(ModelEndpointEntity.KIND_DECISION), eq(3L), any(Instant.class));
+    }
 }

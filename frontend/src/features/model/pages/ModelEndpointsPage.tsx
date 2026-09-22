@@ -1,7 +1,8 @@
 // CAP-48 模型接入管理页（仅 ADMIN）：端点登记 + 连接测试 + 平台默认 + 启停/删除。
-// 类型分两种：向量化（Embedding，知识库索引/检索用）与通用模型（CHAT，本期只登记 + 连接测试）。
+// 类型三种：向量化（Embedding，知识库索引/检索用）、通用模型（CHAT，问答执行体用）、
+// 决策（DECISION，CAP-55 laya 决策边车，提案分诊等 System 1 判断用）。
 // 维度是连接测试的产物而非人工输入——手填维度正是「换模型后检索静默全空」的成因，
-// 所以表单里没有这一项，只有测试结果里能看到它；对话端点没有维度这回事。
+// 所以表单里没有这一项，只有测试结果里能看到它；对话/决策端点没有维度这回事。
 import { useCallback, useEffect, useState } from 'react'
 import {
   Alert,
@@ -44,9 +45,11 @@ import { fmtTime } from '../../../shared/utils/format'
 const KIND_OPTIONS = [
   { value: 'EMBEDDING', label: 'Embedding（向量化，知识库检索用）' },
   { value: 'CHAT', label: '通用模型（对话，Chat Completions）' },
+  { value: 'DECISION', label: '决策（laya 决策边车，System 1 类型化判断）' },
 ]
 
-/** 提供方选项按类型走：同一个 openai-compatible，向量打 /embeddings，对话打 /chat/completions */
+/** 提供方选项按类型走：同一个 openai-compatible，向量打 /embeddings，对话打 /chat/completions；
+ *  决策端点走 laya 边车自己的 /healthz + /v1/predict */
 const PROVIDER_OPTIONS: Record<string, { value: string; label: string }[]> = {
   EMBEDDING: [
     { value: 'openai-compatible', label: 'OpenAI 兼容 /embeddings' },
@@ -56,11 +59,16 @@ const PROVIDER_OPTIONS: Record<string, { value: string; label: string }[]> = {
     { value: 'openai-compatible', label: 'OpenAI 兼容 /chat/completions' },
     { value: 'mock', label: 'Mock（假回复，测试用）' },
   ],
+  DECISION: [
+    { value: 'laya', label: 'laya 决策边车（/healthz + /v1/predict）' },
+    { value: 'mock', label: 'Mock（假决策，测试用）' },
+  ],
 }
 
 const KIND_META: Record<string, { label: string; color: string }> = {
   EMBEDDING: { label: '向量化', color: 'blue' },
   CHAT: { label: '通用模型', color: 'purple' },
+  DECISION: { label: '决策', color: 'cyan' },
 }
 
 const kindMeta = (kind: string) => KIND_META[kind] ?? { label: kind, color: 'default' }
@@ -71,6 +79,13 @@ const PROVIDER_COLOR: Record<string, string> = {
 }
 
 const isChatKind = (kind?: string | null) => kind === 'CHAT'
+const isDecisionKind = (kind?: string | null) => kind === 'DECISION'
+/** 只有向量端点吃批量/检索参数与维度：CHAT 与 DECISION 都不吃（服务端同样按 kind 收口） */
+const isVectorKind = (kind?: string | null) => kind === 'EMBEDDING'
+
+/** 端点「没有维度」的说法按类型走——写成同一个词会让用户以为对话端点的维度探测坏了 */
+const noDimensionHint = (kind?: string | null) =>
+  isDecisionKind(kind) ? '决策端点没有维度这回事' : '对话端点没有维度这回事'
 
 /** 测试成功 toast：只有向量端点才有「探测维度」可说 */
 const okToast = (r: EndpointTestResult) =>
@@ -129,6 +144,8 @@ export default function ModelEndpointsPage() {
   const formKind = Form.useWatch('kind', form)
   const isMock = formProvider === 'mock'
   const isChat = isChatKind(formKind)
+  const isDecision = isDecisionKind(formKind)
+  const isVector = isVectorKind(formKind)
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -185,8 +202,8 @@ export default function ModelEndpointsPage() {
         model: isMock ? undefined : values.model,
         apiKey: values.apiKey || undefined,
       }
-      if (isChat) {
-        // 对话端点不吃向量语义：表单里被隐藏的字段可能还留着切换类型前的值，别带上去
+      if (!isVector) {
+        // 对话/决策端点不吃向量语义：表单里被隐藏的字段可能还留着切换类型前的值，别带上去
         payload.batchSize = undefined
         payload.topK = undefined
         payload.threshold = undefined
@@ -197,7 +214,13 @@ export default function ModelEndpointsPage() {
         message.success('已更新')
       } else {
         await createModelEndpoint(payload)
-        message.success(isChat ? '已创建，建议先点「测试」发一条探针消息' : '已创建，建议先点「测试」探测维度')
+        message.success(
+          isDecision
+            ? '已创建，建议先点「测试」跑一次样例决策（会实调 /healthz 与 /v1/predict）'
+            : isChat
+              ? '已创建，建议先点「测试」发一条探针消息'
+              : '已创建，建议先点「测试」探测维度',
+        )
       }
       setEditOpen(false)
       reload()
@@ -210,9 +233,13 @@ export default function ModelEndpointsPage() {
 
   /** 表单内「测试连接」：新建/改了凭据走未保存预检；编辑且凭据未改时测已保存实例（探测结果会落库） */
   const onTestForm = async () => {
+    // 决策端点的模型名是 checkpoint 别名、可空（空 = 边车自己路由），故不参与必填校验
+    const probeRequired = isDecisionKind(form.getFieldValue('kind'))
+      ? ['kind', 'provider', 'baseUrl']
+      : ['kind', 'provider', 'baseUrl', 'model']
     try {
-      // 只校验探针非填不可的四项：名称之类的留给「保存」，不该挡住试连
-      await form.validateFields(['kind', 'provider', 'baseUrl', 'model'])
+      // 只校验探针非填不可的几项：名称之类的留给「保存」，不该挡住试连
+      await form.validateFields(probeRequired)
     } catch {
       return // 校验未过，错误已标红
     }
@@ -229,8 +256,8 @@ export default function ModelEndpointsPage() {
         baseUrl: isMock ? undefined : values.baseUrl,
         model: isMock ? undefined : values.model,
       }
-      if (isChat) {
-        // 与 onSave 一致：对话端点不吃向量语义，别把切类型前残留的检索参数发出去
+      if (!isVector) {
+        // 与 onSave 一致：对话/决策端点不吃向量语义，别把切类型前残留的检索参数发出去
         base.batchSize = undefined
         base.topK = undefined
         base.threshold = undefined
@@ -287,9 +314,11 @@ export default function ModelEndpointsPage() {
       await changeEndpointStatus(row.id, row.status === 'active' ? 'disabled' : 'active')
       message.success(
         row.status === 'active'
-          ? isChatKind(row.kind)
-            ? '已停用'
-            : '已停用（引用它的知识库自动回落到平台默认端点）'
+          ? isVectorKind(row.kind)
+            ? '已停用（引用它的知识库自动回落到平台默认端点）'
+            : isDecisionKind(row.kind)
+              ? '已停用（决策类能力降级为人工路径，不再出建议）'
+              : '已停用'
           : '已启用',
       )
       reload()
@@ -333,15 +362,17 @@ export default function ModelEndpointsPage() {
       <Typography.Paragraph type="secondary">
         登记模型服务端点。<b>向量化（Embedding）</b>端点供知识库索引与检索使用，解析链为：知识库指定的端点 →
         平台默认端点 → 皆无则降级（索引停用、检索退化为关键词匹配）；向量维度由「测试连接」实测探测并落库，
-        不可人工填写——维度填错会让检索静默搜不到东西。<b>通用模型（对话）</b>端点本期只支持登记与连接测试
-        （测试会实调一次 /chat/completions 并回显模型回复），暂无消费方。密钥加密存储，不回显。
+        不可人工填写——维度填错会让检索静默搜不到东西。<b>通用模型（对话）</b>端点供模型问答执行体使用。
+        <b>决策（DECISION）</b>端点指向 laya 决策边车（<code>tools/laya-sidecar</code>），供提案分诊这类
+        高频低风险的判断使用；连接测试会实调 <code>/healthz</code> 与一条固定样例 <code>/v1/predict</code>，
+        探不过或端点未配置时相关能力整体降级为人工路径。密钥加密存储，不回显。
       </Typography.Paragraph>
       <FitTable<ModelEndpoint>
         rowKey="id"
         loading={loading}
         dataSource={items}
         pagination={LIST_PAGINATION}
-        locale={{ emptyText: '还没有端点，点右上角「新建端点」接入 Embedding 或对话模型服务' }}
+        locale={{ emptyText: '还没有端点，点右上角「新建端点」接入 Embedding / 对话 / 决策模型服务' }}
         columns={[
           {
             title: '名称',
@@ -374,9 +405,9 @@ export default function ModelEndpointsPage() {
             dataIndex: 'dimensions',
             width: 90,
             render: (d: number | null, row) => {
-              if (isChatKind(row.kind)) {
+              if (!isVectorKind(row.kind)) {
                 return (
-                  <Tooltip title="对话端点没有维度这回事">
+                  <Tooltip title={noDimensionHint(row.kind)}>
                     <Typography.Text type="secondary">—</Typography.Text>
                   </Tooltip>
                 )
@@ -395,7 +426,7 @@ export default function ModelEndpointsPage() {
             key: 'limits',
             width: 110,
             render: (_, row) =>
-              isChatKind(row.kind) ? `${row.timeoutSeconds}s` : `${row.timeoutSeconds}s · ${row.batchSize}`,
+              isVectorKind(row.kind) ? `${row.timeoutSeconds}s · ${row.batchSize}` : `${row.timeoutSeconds}s`,
           },
           {
             title: '状态',
@@ -493,16 +524,29 @@ export default function ModelEndpointsPage() {
             extra={
               editing
                 ? '类型创建后不可变更，需要另一种类型请新建端点'
-                : '向量化端点用于知识库检索；通用模型端点本期只做登记与连接测试，暂无消费方'
+                : '向量化端点用于知识库检索；通用模型端点用于问答执行体；决策端点用于提案分诊等类型化判断'
             }
           >
-            <Select options={KIND_OPTIONS} disabled={!!editing} />
+            <Select
+              options={KIND_OPTIONS}
+              disabled={!!editing}
+              // 换类型时把提供方归位到该类型的默认值：否则切到「决策」会留着 openai-compatible，保存必被 400
+              onChange={(k: string) => form.setFieldValue('provider', PROVIDER_OPTIONS[k]?.[0]?.value)}
+            />
           </Form.Item>
           <Form.Item label="提供方" name="provider" rules={[{ required: true, message: '请选择提供方' }]}>
             <Select options={PROVIDER_OPTIONS[formKind ?? 'EMBEDDING'] ?? PROVIDER_OPTIONS.EMBEDDING} />
           </Form.Item>
           <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入名称' }]}>
-            <Input placeholder={isChat ? '如 公司通用模型 / 阿里云 qwen-plus' : '如 公司 BGE-M3 / 阿里云 text-embedding-v3'} />
+            <Input
+              placeholder={
+                isDecision
+                  ? '如 laya 决策边车（GPU 机 8377）'
+                  : isChat
+                    ? '如 公司通用模型 / 阿里云 qwen-plus'
+                    : '如 公司 BGE-M3 / 阿里云 text-embedding-v3'
+              }
+            />
           </Form.Item>
           {!isMock && (
             <>
@@ -511,35 +555,42 @@ export default function ModelEndpointsPage() {
                 name="baseUrl"
                 rules={[{ required: true, message: '请输入服务地址' }]}
                 extra={
-                  isChat
-                    ? 'OpenAI 兼容服务根地址，调用时自动拼 /chat/completions，如 https://api.openai.com/v1'
-                    : 'OpenAI 兼容服务根地址，调用时自动拼 /embeddings，如 https://api.openai.com/v1'
+                  isDecision
+                    ? 'laya 边车根地址，调用时自动拼 /healthz 与 /v1/predict，如 http://127.0.0.1:8377（注意不带 /v1）'
+                    : isChat
+                      ? 'OpenAI 兼容服务根地址，调用时自动拼 /chat/completions，如 https://api.openai.com/v1'
+                      : 'OpenAI 兼容服务根地址，调用时自动拼 /embeddings，如 https://api.openai.com/v1'
                 }
               >
-                <Input placeholder="https://api.openai.com/v1" />
+                <Input placeholder={isDecision ? 'http://127.0.0.1:8377' : 'https://api.openai.com/v1'} />
               </Form.Item>
               <Form.Item
                 label="API Key"
                 name="apiKey"
                 extra={
-                  editing
-                    ? '留空表示保持现有密钥不变'
-                    : '加密存储，不回显；本地服务无需鉴权时可留空'
+                  isDecision
+                    ? '边车协议本无鉴权；边车放在网关后面时才需要填'
+                    : editing
+                      ? '留空表示保持现有密钥不变'
+                      : '加密存储，不回显；本地服务无需鉴权时可留空'
                 }
               >
                 <Input.Password placeholder={editing ? '（不修改请留空）' : '粘贴 API Key（可留空）'} autoComplete="off" />
               </Form.Item>
               <Form.Item
-                label="模型名"
+                label={isDecision ? 'Checkpoint（可空）' : '模型名'}
                 name="model"
-                rules={[{ required: true, message: '请输入模型名' }]}
+                // 决策端点的 checkpoint 别名可空（空 = 边车按语言自己路由），不该逼用户填
+                rules={isDecision ? [] : [{ required: true, message: '请输入模型名' }]}
                 extra={
-                  isChat
-                    ? '传给 /chat/completions 的 model 字段，如 gpt-4o-mini / qwen-plus'
-                    : '传给 /embeddings 的 model 字段，如 text-embedding-3-small / bge-m3'
+                  isDecision
+                    ? '留空 = 由边车按语言/脚本自动选（english / multilingual / typed-decisions）；填了就钉死它'
+                    : isChat
+                      ? '传给 /chat/completions 的 model 字段，如 gpt-4o-mini / qwen-plus'
+                      : '传给 /embeddings 的 model 字段，如 text-embedding-3-small / bge-m3'
                 }
               >
-                <Input placeholder={isChat ? 'gpt-4o-mini' : 'bge-m3'} />
+                <Input placeholder={isDecision ? '（留空即自动路由）' : isChat ? 'gpt-4o-mini' : 'bge-m3'} />
               </Form.Item>
             </>
           )}
@@ -552,8 +603,8 @@ export default function ModelEndpointsPage() {
             >
               <InputNumber min={1} max={600} style={{ width: '100%' }} />
             </Form.Item>
-            {/* 对话端点没有分批/检索参数这回事，整块收敛掉，别让必填项看起来非填不可 */}
-            {!isChat && (
+            {/* 对话/决策端点都没有分批/检索参数这回事，整块收敛掉，别让必填项看起来非填不可 */}
+            {isVector && (
               <Form.Item
                 label="单批条数"
                 name="batchSize"
@@ -564,7 +615,7 @@ export default function ModelEndpointsPage() {
               </Form.Item>
             )}
           </Space>
-          {!isChat && (
+          {isVector && (
             <Collapse
               size="small"
               items={[
@@ -612,11 +663,13 @@ export default function ModelEndpointsPage() {
               </Descriptions.Item>
               <Descriptions.Item label="提供方">{managing.provider}</Descriptions.Item>
               <Descriptions.Item label="服务地址">{managing.baseUrl ?? '—'}</Descriptions.Item>
-              <Descriptions.Item label="模型">{managing.model ?? '—'}</Descriptions.Item>
+              <Descriptions.Item label={isDecisionKind(managing.kind) ? 'Checkpoint' : '模型'}>
+                {managing.model ?? (isDecisionKind(managing.kind) ? '自动路由' : '—')}
+              </Descriptions.Item>
               <Descriptions.Item label="凭据">
                 {managing.hasApiKey ? <Tag color="green">已配置</Tag> : <Tag>未配置</Tag>}
               </Descriptions.Item>
-              {!isChatKind(managing.kind) && (
+              {isVectorKind(managing.kind) && (
                 <>
                   <Descriptions.Item label="向量维度">
                     {managing.dimensions == null ? '未探测（点下方「测试连接」实测）' : managing.dimensions}
@@ -626,9 +679,9 @@ export default function ModelEndpointsPage() {
                   </Descriptions.Item>
                 </>
               )}
-              <Descriptions.Item label={isChatKind(managing.kind) ? '超时' : '超时 · 批量'}>
+              <Descriptions.Item label={isVectorKind(managing.kind) ? '超时 · 批量' : '超时'}>
                 {managing.timeoutSeconds}s
-                {isChatKind(managing.kind) ? '' : ` · ${managing.batchSize}`}
+                {isVectorKind(managing.kind) ? ` · ${managing.batchSize}` : ''}
               </Descriptions.Item>
               <Descriptions.Item label="状态">
                 <Tag color={managing.status === 'active' ? 'green' : 'default'}>
@@ -687,9 +740,11 @@ export default function ModelEndpointsPage() {
               </Button>
               <Tooltip
                 title={
-                  isChatKind(managing.kind)
-                    ? '设为默认后，将来接入的对话类能力在「未指定端点」时回落到它（本期还没有消费方）'
-                    : '调用解析链在「未指定端点」的知识库上回落到它'
+                  isDecisionKind(managing.kind)
+                    ? '设为默认后，未指定端点的决策类能力（如提案分诊）回落到它；不设则相关能力整体降级为人工路径'
+                    : isChatKind(managing.kind)
+                      ? '设为默认后，未指定端点的模型问答回落到它'
+                      : '调用解析链在「未指定端点」的知识库上回落到它'
                 }
               >
                 <Button disabled={managing.isDefault} onClick={() => onSetDefault(managing)}>
@@ -702,9 +757,11 @@ export default function ModelEndpointsPage() {
               <Popconfirm
                 title="删除该端点？"
                 description={
-                  isChatKind(managing.kind)
-                    ? '被知识库等资源引用时会被拒绝并列出引用方。'
-                    : '被知识库引用时会被拒绝并列出引用方；索引维度不会被回写，引用它的库需重建索引。'
+                  isVectorKind(managing.kind)
+                    ? '被知识库引用时会被拒绝并列出引用方；索引维度不会被回写，引用它的库需重建索引。'
+                    : isDecisionKind(managing.kind)
+                      ? '被决策类能力引用时会被拒绝并列出引用方；删掉后相关能力降级为人工路径。'
+                      : '被模型问答等资源引用时会被拒绝并列出引用方。'
                 }
                 okText="删除"
                 okButtonProps={{ danger: true }}

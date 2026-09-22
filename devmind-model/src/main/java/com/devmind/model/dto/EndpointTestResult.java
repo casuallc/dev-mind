@@ -6,7 +6,9 @@ package com.devmind.model.dto;
  *
  * <p>FR-11：{@code kind=CHAT} 的探针打 {@code /chat/completions}，没有维度这回事，
  * 所以 {@code dimensions} 与 {@code dimensionChanged} 恒为 null，模型回复摘要走 {@code message}
- * （不再新增字段——它已经流到 toast / Alert / 抽屉 / 落库，加一个只会重复）。</p>
+ * （不再新增字段——它已经流到 toast / Alert / 抽屉 / 落库，加一个只会重复）。
+ * CAP-55 的 {@code kind=DECISION} 同理：探针是 {@code /healthz} + 一条固定样例 {@code /v1/predict}，
+ * 常驻 checkpoint 清单、样例答案与 {@code routing.reason} 都压进 {@code message}。</p>
  *
  * @param ok               是否连通
  * @param latencyMs        往返耗时

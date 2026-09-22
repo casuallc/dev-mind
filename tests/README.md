@@ -40,6 +40,7 @@ E2E_BASE=http://localhost:8090/api python tests/cap52_e2e.py
 | `embedding-mock.py` | 假 OpenAI 兼容 embedding 端（`POST /v1/embeddings`，每行常量单位向量 → 余弦恒 1.0，与 LIKE 降级的 score=0 可区分），控制面 `/__dims` 改维度、`/__status` 注入故障（body 回显 Authorization 验凭据脱敏）、`/__state` 回看请求 | `python embedding-mock.py [port]`（默认 18193，cap48 脚本自动拉起） |
 | `jira-mock.py` | 假 Jira Server（`/rest/api/2`，创建 issue/任务类型/创建字段元数据（新旧两种端点）/优先级/可指派用户/单条读取/搜索），控制面 `/__state` 暴露收到的 payload、`/__createmeta` 注入字段目录并可按目录校验必填 | `python jira-mock.py [port]`（默认 18192，cap47 脚本自动拉起） |
 | `chat-mock.py` | 假 OpenAI 兼容对话端（`POST /v1/chat/completions` → `choices[0].message.content` 为当前回复文本），控制面 `/__reply` 改回复、`/__status` 注入故障（body 回显 Authorization 验凭据脱敏）、`/__state` 回看请求（model/prompt/role/auth/path/hasMaxTokens）。**刻意不实现 `/v1/embeddings`**：探针没按 kind 分派时会拿到 404 当场报错 | `python chat-mock.py [port]`（默认 18194，cap48 脚本自动拉起） |
+| `laya-sidecar-mock.py` | 假 laya 决策边车（CAP-55，`GET /healthz` + `POST /v1/predict`），**不实现 `/v1/embeddings` 与 `/chat/completions`**；答案按 questions 原语派生（choice→第一个选项 0.9、score→最高等级 0.8、noul→0.2，形状照 0.3.5 真机），控制面 `/__answers` 固定答案、`/__checkpoint` 改 routing、`/__health` 把 status 改成 loading（验「边车未就绪」）、`/__status` 注入故障码与 detail、`/__state` 回看请求（state/questions/model/hasModelKey/auth） | `python laya-sidecar-mock.py [port]`（默认 18195，cap55 脚本自动拉起） |
 
 TestSshServer 编译（Git Bash，一次性，产物 `.class` 已 gitignore）：
 
@@ -80,6 +81,7 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 | cap52_e2e.py | 需求流程精简：三合一规划会话（一会话三产出）→ 自动开发会话（**复用同一棵需求工作树**，CAP-51 验收 5）→ 待验收；粒度护栏/入口互斥/无清单与终态 409（协议 v10）；终态自动清理（CAP-51 FR-06 修订：DONE 后需求工作树回收 + 本地/远端需求分支删除，协议 v13）。支持 `E2E_BASE` 指向非 8080 实例（如 `E2E_BASE=http://localhost:8090/api`），起隔离实例的姿势见下方「起独立实例跑 E2E」 |
 | cap54_e2e.py | 会话工作区实时视图（协议 v11）：status/tree/file/diff 四端点（含已跟踪 diff 与未跟踪 untracked）、路径逃逸 409/缺参 400、问答沙箱 gitAvailable=false 且无 diff 端点、终态经 runner recentDirs 仍可读（脚本自起 fake runner 节点） |
 | e2e-agent-node.py | CAP-21 节点全链路：注册→会话→授权→优雅退出→离线 409 |
+| cap55_verify.py | CAP-55 FR-02 决策端点：DECISION 端点登记（provider 默认 laya、model=checkpoint 别名可空、不吃向量语义）、连接测试两段实调（/healthz→固定样例 /v1/predict，message 带常驻清单+样例答案+routing.reason）、边车未就绪不白跑样例题、样例失败透出边车 detail、mock provider 零网络自报、kind-provider 配对 400、同类型唯一的平台默认、无引用可删（脚本自起 fixtures/laya-sidecar-mock.py，默认 :18095 独立实例；真边车连通性由 FR-01 smoke 覆盖，这里只钉 Java 侧协议） |
 | e2e-cap41.py / b / c | CAP-41 工作日志空间：懒创建/守卫/种子模板/日报周报生成 |
 | e2e-cap41-m3-push.py | CAP-41 M3：worklog 远端绑定 + push（协议 v6，file:// bare 库） |
 | e2e-cap42.py | CAP-42 固定工作区 + 手动收口（CAP-51 keyed 布局 worktrees/sid-*）：布局落盘/finish 不 push 不删/收口闭环（合并+push+FINALIZED+保留工作树 ff 前进+重复 409+merge 署名=操作者身份 CAP-24 FR-06）/脏与合并冲突两负例重试/删除释放与离线 fail-visible（协议 v7+，file:// bare 库） |

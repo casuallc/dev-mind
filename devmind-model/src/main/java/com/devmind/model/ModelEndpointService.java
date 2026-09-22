@@ -2,6 +2,8 @@ package com.devmind.model;
 
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.common.model.DecisionAnswer;
+import com.devmind.common.model.LayaDecisionClient;
 import com.devmind.common.model.ModelCallException;
 import com.devmind.common.model.ModelEndpointProvider;
 import com.devmind.common.model.ModelEndpointUsageProvider;
@@ -82,7 +84,7 @@ public class ModelEndpointService implements ModelEndpointProvider {
     public ModelEndpointApiView create(ModelEndpointRequest req) {
         ModelEndpointEntity e = new ModelEndpointEntity();
         e.setKind(kind(req.kind()));
-        e.setProvider(provider(req.provider()));
+        e.setProvider(provider(e.getKind(), req.provider()));
         e.setName(requireName(req.name()));
         applyTransport(e, req, null);
         e.setApiKeyEnc(cipher.encrypt(blankToNull(req.apiKey())));
@@ -108,7 +110,8 @@ public class ModelEndpointService implements ModelEndpointProvider {
             }
         }
         if (req.provider() != null && !req.provider().isBlank()) {
-            e.setProvider(provider(req.provider()));
+            // kind 不可变更 → 用端点自己的 kind 校验 provider
+            e.setProvider(provider(e.getKind(), req.provider()));
         }
         if (req.name() != null && !req.name().isBlank()) {
             e.setName(req.name().trim());
@@ -199,36 +202,48 @@ public class ModelEndpointService implements ModelEndpointProvider {
     /** 草稿预检：凭据不落库（新建/编辑表单内先测再存）。kind 也要校验——否则预留类型（RERANK）的草稿会静默打到 /embeddings。 */
     public EndpointTestResult testDraft(ModelEndpointRequest req) {
         String k = kind(req.kind());
-        String p = provider(req.provider());
+        String p = provider(k, req.provider());
         return probe(k, p, blankToNull(req.baseUrl()), blankToNull(req.apiKey()), blankToNull(req.model()),
                 req.timeoutSeconds() == null ? DEFAULT_TIMEOUT_SECONDS : req.timeoutSeconds(), null);
     }
 
     /**
-     * 探针调用，按 kind 分派：{@code mock} 自报（无远端可探）；{@code openai-compatible} 实调一次。
-     * CHAT 没有维度概念——{@code dimensions} 恒 null，也就不会产生维度变化告警。
+     * 探针调用，按 kind 分派：{@code mock} 自报（无远端可探）；{@code openai-compatible} 实调一次；
+     * {@code laya} 实调边车。CHAT 与 DECISION 都没有维度概念——{@code dimensions} 恒 null，
+     * 也就不会产生维度变化告警。
      *
      * @param prevDimensions 已存端点的原维度；null = 新建/草稿（mock 分支据此决定自报值）
      */
     private EndpointTestResult probe(String kind, String provider, String baseUrl, String apiKey, String model,
                                      int timeoutSeconds, Integer prevDimensions) {
         boolean chat = ModelEndpointEntity.KIND_CHAT.equals(kind);
+        boolean decision = ModelEndpointEntity.KIND_DECISION.equals(kind);
         if (ModelEndpointEntity.PROVIDER_MOCK.equalsIgnoreCase(provider)) {
             if (chat) {
                 // 不复用 MODEL_MOCK（mock-embedding）——那是索引血缘的合同值，只对 EMBEDDING 有意义
                 return new EndpointTestResult(true, 0L, model, null,
                         "mock provider 假回复（无远端可探测）", null);
             }
+            if (decision) {
+                // 决策端点的 model 是 checkpoint 别名，可空 → 不冒用 mock-embedding
+                return new EndpointTestResult(true, 0L, model, null,
+                        "mock provider 假决策（无远端可探测）", null);
+            }
             int dims = prevDimensions != null ? prevDimensions : seed.getDimensions();
             return new EndpointTestResult(true, 0L, ModelEndpointView.MODEL_MOCK, dims,
                     "mock provider 自报维度 " + dims + "（无远端可探测）", null);
         }
-        if (baseUrl == null || model == null) {
+        // 决策端点的 model 是 checkpoint 别名、可空（空 = 边车自己路由），故不参与必填判定
+        if (baseUrl == null || (!decision && model == null)) {
             return new EndpointTestResult(false, 0L, model, null,
-                    "baseUrl 与 model 必填后才能测试 openai-compatible 端点", null);
+                    decision ? "baseUrl 必填后才能测试 laya 决策端点（模型名可空 = 由边车选 checkpoint）"
+                            : "baseUrl 与 model 必填后才能测试 openai-compatible 端点", null);
         }
         long t0 = System.nanoTime();
         try {
+            if (decision) {
+                return probeDecision(baseUrl, apiKey, model, timeoutSeconds, t0);
+            }
             if (chat) {
                 String reply = OpenAiCompatChat.chat(
                         new OpenAiCompatChat.Options(baseUrl, apiKey, model, timeoutSeconds), CHAT_PROBE_TEXT);
@@ -250,6 +265,52 @@ public class ModelEndpointService implements ModelEndpointProvider {
             long ms = (System.nanoTime() - t0) / 1_000_000;
             return new EndpointTestResult(false, ms, model, null, ex.getMessage(), null);
         }
+    }
+
+    /**
+     * 决策端点探针（CAP-55 FR-02）：两段实调——先 {@code GET /healthz} 确认边车活着且 checkpoint
+     * 已常驻，再发一条固定样例 {@code POST /v1/predict} 实测决策往返。
+     *
+     * <p>健康检查不过就<b>不再发样例题</b>：白跑一次前向没有意义，而"边车没起来"与"模型答不出来"
+     * 是两件事，报错必须能分开。<b>不重试</b>——探针由人盯着（与 CHAT 探针同口径），
+     * 运行时调用的一次重试是 {@code HttpDecisionEngine} 的事。</p>
+     */
+    private static EndpointTestResult probeDecision(String baseUrl, String apiKey, String model,
+                                                    int timeoutSeconds, long t0) {
+        LayaDecisionClient.Options opt =
+                new LayaDecisionClient.Options(baseUrl, apiKey, model, timeoutSeconds);
+        LayaDecisionClient.Health health = LayaDecisionClient.healthz(opt);
+        if (!health.ok()) {
+            return new EndpointTestResult(false, msSince(t0), model, null,
+                    "/healthz 返回 status=" + health.status() + "（边车未就绪）", null);
+        }
+        LayaDecisionClient.Reply reply = LayaDecisionClient.predict(
+                opt, LayaDecisionClient.sampleState(), LayaDecisionClient.sampleQuestions());
+        long ms = msSince(t0);
+        return new EndpointTestResult(true, ms, model, null,
+                "连接正常，" + health.summary() + "；样例决策往返 " + ms + " ms："
+                        + sampleOutcome(reply) + routingNote(reply), null);
+    }
+
+    /** 样例答案摘要（选项 + 概率）：让「边车通」与「模型真的答出了东西」在 message 里可区分 */
+    private static String sampleOutcome(LayaDecisionClient.Reply reply) {
+        DecisionAnswer answer = reply.answers().get(LayaDecisionClient.SAMPLE_QUESTION_ID);
+        if (answer == null) {
+            return "样例题无答案（返回了 " + String.join("、", reply.answers().keySet()) + "）";
+        }
+        Double p = answer.choiceProbability();
+        return LayaDecisionClient.SAMPLE_QUESTION_ID + "=" + answer.choice()
+                + (p == null ? "" : "（" + Math.round(p * 100) + "%）");
+    }
+
+    /** 边车选 checkpoint 的原因：连接测试就该把"为什么用了这个模型"摆出来（多半是语言不匹配） */
+    private static String routingNote(LayaDecisionClient.Reply reply) {
+        String reason = reply.routingReason();
+        return reason == null || reason.isBlank() ? "" : "；routing：" + reason;
+    }
+
+    private static long msSince(long t0) {
+        return (System.nanoTime() - t0) / 1_000_000;
     }
 
     /** 回复摘要：压成一行 + 截断。它会进 UI，也会落 last_test_message，别把千字回复原样塞进去 */
@@ -359,6 +420,7 @@ public class ModelEndpointService implements ModelEndpointProvider {
 
     /** baseUrl / model / 超时 / 批量 / 覆盖项的统一落值（existing 非空表示更新：空值沿用旧值） */
     private void applyTransport(ModelEndpointEntity e, ModelEndpointRequest req, ModelEndpointEntity existing) {
+        boolean decision = ModelEndpointEntity.KIND_DECISION.equals(e.getKind());
         String curBaseUrl = existing == null ? "" : nullToEmpty(existing.getBaseUrl());
         String curModel = existing == null ? "" : nullToEmpty(existing.getModel());
         String baseUrl = nullToEmpty(req.baseUrl()).trim();
@@ -374,23 +436,26 @@ public class ModelEndpointService implements ModelEndpointProvider {
             e.setModel(model.isEmpty() ? null : model);
         } else {
             if (baseUrl.isEmpty()) {
-                throw new DevMindException(ErrorCode.BAD_REQUEST, "baseUrl 必填（openai-compatible 端点）");
+                throw new DevMindException(ErrorCode.BAD_REQUEST, decision
+                        ? "baseUrl 必填（laya 决策端点只填边车根地址，如 http://host:8377，不带 /v1）"
+                        : "baseUrl 必填（openai-compatible 端点）");
             }
             if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
                 throw new DevMindException(ErrorCode.BAD_REQUEST, "baseUrl 必须是 http/https 地址");
             }
-            if (model.isEmpty()) {
+            // 决策端点的 model 是 checkpoint 别名（english/multilingual/typed-decisions），可空 = 边车自己路由
+            if (model.isEmpty() && !decision) {
                 throw new DevMindException(ErrorCode.BAD_REQUEST, "model 必填（openai-compatible 端点）");
             }
             e.setBaseUrl(baseUrl);
-            e.setModel(model);
+            e.setModel(model.isEmpty() ? null : model);
         }
         int curTimeout = existing == null ? DEFAULT_TIMEOUT_SECONDS : existing.getTimeoutSeconds();
         e.setTimeoutSeconds(bounded(req.timeoutSeconds(), curTimeout, 1, 600, "timeoutSeconds"));
-        if (ModelEndpointEntity.KIND_CHAT.equals(e.getKind())) {
-            // 对话端点不吃向量语义：批量/检索参数一律落 null，且不做范围校验——
+        if (!ModelEndpointEntity.KIND_EMBEDDING.equals(e.getKind())) {
+            // 对话/决策端点都不吃向量语义：批量/检索参数一律落 null，且不做范围校验——
             // 请求里带了越界 topK 也只当没传（报错会让前端必须为每种类型分叉校验，而这两个字段对
-            // CHAT 根本没有意义）。update 时同一个实例既是 target 又是 existing，先读旧值再置空即可。
+            // CHAT/DECISION 根本没有意义）。update 时同一个实例既是 target 又是 existing，先读旧值再置空即可。
             // batchSize 列 NOT NULL，保留旧值/默认值不使用。
             e.setBatchSize(existing == null ? DEFAULT_BATCH_SIZE : existing.getBatchSize());
             e.setTopK(null);
@@ -423,37 +488,59 @@ public class ModelEndpointService implements ModelEndpointProvider {
     }
 
     /**
-     * kind 白名单：EMBEDDING（向量化）与 CHAT（通用对话）已开放；RERANK 仍预留——没有消费方就开门，
-     * 只会多出一批"配了没人用"的端点。
+     * kind 白名单：EMBEDDING（向量化）、CHAT（通用对话）、DECISION（CAP-55 决策引擎）已开放；
+     * RERANK 仍预留——没有消费方就开门，只会多出一批"配了没人用"的端点。
      */
     private static String kind(String raw) {
         String k = raw == null || raw.isBlank() ? ModelEndpointEntity.KIND_EMBEDDING : raw.trim().toUpperCase();
-        if (!ModelEndpointEntity.KIND_EMBEDDING.equals(k) && !ModelEndpointEntity.KIND_CHAT.equals(k)) {
+        if (!ModelEndpointEntity.KIND_EMBEDDING.equals(k) && !ModelEndpointEntity.KIND_CHAT.equals(k)
+                && !ModelEndpointEntity.KIND_DECISION.equals(k)) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
-                    "kind 目前支持 EMBEDDING / CHAT（RERANK 预留，待消费方就绪后开放）");
+                    "kind 目前支持 EMBEDDING / CHAT / DECISION（RERANK 预留，待消费方就绪后开放）");
         }
         return k;
     }
 
     /**
      * 「没有平台默认端点」的后果按 kind 不同：向量端点缺默认 = 索引降级；对话端点缺默认 =
-     * 没显式指定端点的模型问答建不出来（CAP-49 的解析链第二级，落空即 409 不回落）。
+     * 没显式指定端点的模型问答建不出来（CAP-49 的解析链第二级，落空即 409 不回落）；
+     * 决策端点缺默认 = 决策类能力整体降级（CAP-55 FR-06，例如提案分诊退回纯人工）。
      */
     private static String missingDefaultHint(String kind) {
-        return ModelEndpointEntity.KIND_EMBEDDING.equals(kind)
-                ? "，在设置新的默认端点前索引将保持降级"
-                : "（未指定端点的模型问答将无法新建，需在新建时选择端点）";
+        if (ModelEndpointEntity.KIND_EMBEDDING.equals(kind)) {
+            return "，在设置新的默认端点前索引将保持降级";
+        }
+        if (ModelEndpointEntity.KIND_DECISION.equals(kind)) {
+            return "，决策类能力（如知识库提案智能分诊）将保持降级，只走人工路径";
+        }
+        return "（未指定端点的模型问答将无法新建，需在新建时选择端点）";
     }
 
-    private static String provider(String raw) {
-        String p = raw == null || raw.isBlank() ? ModelEndpointEntity.PROVIDER_OPENAI : raw.trim();
-        if (!ModelEndpointEntity.PROVIDER_OPENAI.equalsIgnoreCase(p)
-                && !ModelEndpointEntity.PROVIDER_MOCK.equalsIgnoreCase(p)) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST,
-                    "provider 只支持 openai-compatible / mock");
+    /**
+     * provider 白名单<b>按 kind 收口</b>：向量/对话端点走 OpenAI 兼容协议；决策端点走 laya 边车协议。
+     * 不按 kind 分开校验就会让"EMBEDDING + laya"这种组合落库，然后在探针里拿兜底路径去打
+     * {@code /embeddings}——必错，且错得晚（配的时候不报，测的时候才炸）。
+     */
+    private static String provider(String kind, String raw) {
+        String p = raw == null || raw.isBlank() ? defaultProvider(kind) : raw.trim();
+        if (ModelEndpointEntity.PROVIDER_MOCK.equalsIgnoreCase(p)) {
+            // mock 与 kind 无关：哪种类型都能用假应答自测（探针不发网络请求）
+            return ModelEndpointEntity.PROVIDER_MOCK;
         }
-        return ModelEndpointEntity.PROVIDER_MOCK.equalsIgnoreCase(p)
-                ? ModelEndpointEntity.PROVIDER_MOCK : ModelEndpointEntity.PROVIDER_OPENAI;
+        boolean decision = ModelEndpointEntity.KIND_DECISION.equals(kind);
+        if (decision && ModelEndpointEntity.PROVIDER_LAYA.equalsIgnoreCase(p)) {
+            return ModelEndpointEntity.PROVIDER_LAYA;
+        }
+        if (!decision && ModelEndpointEntity.PROVIDER_OPENAI.equalsIgnoreCase(p)) {
+            return ModelEndpointEntity.PROVIDER_OPENAI;
+        }
+        throw new DevMindException(ErrorCode.BAD_REQUEST,
+                "provider 只支持 " + (decision ? "laya / mock" : "openai-compatible / mock"));
+    }
+
+    private static String defaultProvider(String kind) {
+        return ModelEndpointEntity.KIND_DECISION.equals(kind)
+                ? ModelEndpointEntity.PROVIDER_LAYA : ModelEndpointEntity.PROVIDER_OPENAI;
     }
 
     private static String status(String raw) {

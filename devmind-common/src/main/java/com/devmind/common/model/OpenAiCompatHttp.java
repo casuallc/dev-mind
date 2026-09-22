@@ -9,10 +9,14 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * CAP-48 模型调用共用的 HTTP 与脱敏助手。包内可见——调用方只可能是本包的 OpenAI 兼容客户端。
+ * CAP-48 模型调用共用的 HTTP 与脱敏助手。包内可见——调用方是本包的模型客户端
+ * （OpenAI 兼容的 embedding/对话，以及 CAP-55 的 laya 决策边车）。
  *
  * <p>抽出来不是为了省几行，而是<b>脱敏正则只许存在一份</b>：它一旦被复制，密钥就会从第二条路径
  * 进 {@code last_test_message}（会落库）与 HTTP 响应，这正是 FR-02 要防的事。</p>
+ *
+ * <p>注意 {@link #failure} 的 404 提示是<b>OpenAI 兼容专有</b>的（"baseUrl 要带 /v1"）：
+ * laya 边车的 baseUrl 恰恰不能带 /v1，它的 404 提示见 {@link LayaDecisionClient}。</p>
  */
 final class OpenAiCompatHttp {
 

@@ -13,8 +13,9 @@ package com.devmind.common.model;
  * {@code {baseUrl}/embeddings}；{@code mock} 走确定性哈希向量（测试/E2E 用）。</p>
  *
  * @param id             端点 ID（索引血缘以此记录"用了谁"）
- * @param kind           EMBEDDING / CHAT / RERANK（CHAT 自 FR-11 起可登记；RERANK 仍是预留值）
- * @param provider       openai-compatible | mock
+ * @param kind           EMBEDDING / CHAT / DECISION（CHAT 自 FR-11 起可登记、DECISION 自 CAP-55 起可登记；
+ *                       RERANK 仍是预留值）
+ * @param provider       openai-compatible（EMBEDDING/CHAT）| laya（DECISION，见 {@link #PROVIDER_LAYA}）| mock
  * @param name           展示名
  * @param baseUrl        OpenAI 兼容服务根地址（mock 可空）
  * @param apiKey         解密后的密钥（可空；禁外泄）
@@ -45,7 +46,19 @@ public record ModelEndpointView(
      * <b>跨模块合同值</b>：实体侧与消费方都比对它，只许在此定义一份。
      */
     public static final String KIND_CHAT = "CHAT";
+    /**
+     * 决策端点（CAP-55 FR-02；消费方为 {@code DecisionEngine}）。协议是 laya 边车自己的
+     * {@code /healthz} + {@code /v1/predict}，<b>不是</b> OpenAI 兼容——所以它的 provider 是
+     * {@link #PROVIDER_LAYA} 而不是 {@code openai-compatible}。
+     * <b>跨模块合同值</b>：实体侧与消费方都比对它，只许在此定义一份。
+     */
+    public static final String KIND_DECISION = "DECISION";
     public static final String PROVIDER_OPENAI = "openai-compatible";
+    /**
+     * laya 决策边车协议（CAP-55 FR-01 的 {@code tools/laya-sidecar}）。仅 {@link #KIND_DECISION} 用它：
+     * 决策端点的 baseUrl 只填边车根地址（如 {@code http://host:8377}），<b>不带 /v1</b>。
+     */
+    public static final String PROVIDER_LAYA = "laya";
     public static final String PROVIDER_MOCK = "mock";
     /**
      * mock provider 的模型名。<b>跨模块合同值</b>：它会被写进索引血缘（indexed_model）并与
@@ -72,6 +85,14 @@ public record ModelEndpointView(
      */
     public boolean chat() {
         return KIND_CHAT.equals(kind);
+    }
+
+    /**
+     * 是否决策端点。CAP-55 的消费方（{@code HttpDecisionEngine}）用本方法过滤——
+     * 把向量/对话端点当决策端点用会拿 OpenAI 兼容地址去打 {@code /v1/predict}。
+     */
+    public boolean decision() {
+        return KIND_DECISION.equals(kind);
     }
 
     /** 平台默认端点无库级覆盖时的展示名 */

@@ -16,7 +16,10 @@ import java.time.Instant;
  * {@code dimensions} 是<b>连接测试实测探测的产物</b>，不接受人工提交——人工填错维度正是
  * FR-06 要防的事故源（换模型维度变化会让余弦恒 0、阈值过滤成"无命中"）。
  * 它（连带 {@code batchSize}/{@code topK}/{@code threshold}）只对 {@code EMBEDDING} 有意义，
- * {@code CHAT} 端点一律留空。</p>
+ * {@code CHAT} 与 {@code DECISION} 端点一律留空。
+ * {@code model} 的语义按 kind 走：向量/对话端点是 OpenAI 兼容服务的模型名；
+ * {@code DECISION} 端点是 laya 的 checkpoint 别名（english / multilingual / typed-decisions），
+ * 可空 = 由边车按语言自动路由。</p>
  *
  * <p>红线：{@code is_default}/{@code last_test_ok} 是布尔列 → <b>禁 @ColumnDefault</b>
  * （MySQL bit 列不接受 default 'false' 建列），靠实体初始值 + getter 兜底。</p>
@@ -28,9 +31,11 @@ public class ModelEndpointEntity {
     /** kind 合同值引自 SPI 视图（跨模块只许一份定义；RERANK 尚无消费方，留在本侧） */
     public static final String KIND_EMBEDDING = ModelEndpointView.KIND_EMBEDDING;
     public static final String KIND_CHAT = ModelEndpointView.KIND_CHAT;
+    public static final String KIND_DECISION = ModelEndpointView.KIND_DECISION;
     public static final String KIND_RERANK = "RERANK";
 
     public static final String PROVIDER_OPENAI = "openai-compatible";
+    public static final String PROVIDER_LAYA = ModelEndpointView.PROVIDER_LAYA;
     public static final String PROVIDER_MOCK = "mock";
 
     public static final String STATUS_ACTIVE = "active";
@@ -40,14 +45,14 @@ public class ModelEndpointEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** EMBEDDING（向量化，知识库检索用）/ CHAT（通用对话）；RERANK 预留，传值 400 */
+    /** EMBEDDING（向量化，知识库检索用）/ CHAT（通用对话）/ DECISION（CAP-55 决策）；RERANK 预留，传值 400 */
     @Column(nullable = false, length = 16)
     private String kind = KIND_EMBEDDING;
 
     @Column(nullable = false, length = 128)
     private String name;
 
-    /** openai-compatible | mock */
+    /** openai-compatible（EMBEDDING/CHAT）| laya（DECISION，laya 决策边车）| mock */
     @Column(nullable = false, length = 32)
     private String provider = PROVIDER_OPENAI;
 
