@@ -1,8 +1,9 @@
 # CAP-55 决策引擎接入与知识库提案分诊（Decision Engine + Proposal Triage）
 
 > 状态：**需求定稿**（FR-01 边车 a834f19、FR-02 决策端点 d97ea56、FR-03 决策引擎 829bbe9、
-> FR-04 提案分诊 811f1f3、FR-05 落库 SPI 8b8e3a4 + 记录表/导出 f692e0f 已落地；
-> FR-06 降级链已含在上述 E2E 内验证、FR-07 前端进行中）｜ 日期：2026-09-22
+> FR-04 提案分诊 811f1f3、FR-05 落库 SPI 8b8e3a4 + 记录表/导出 f692e0f、FR-07 决策记录页 8f1f3a5 +
+> inbox 徽标与查看依据 f23ade5 已落地；FR-06 降级链已含在上述 E2E 内验证，
+> 前端 E2E 51 项断言全通过 c6ec2b4）｜ 日期：2026-09-22
 >
 > 新增能力。缘起：平台里大量「高频低风险的类型化判断」（提案采纳去哪层、是否重复、质量几分、通知紧急度、
 > 失败类别）目前要么靠人工、要么烧 claude token。Laya（Apache 2.0，非自回归 System 1 决策模型，
@@ -47,8 +48,10 @@
   人工每次裁决 upsert 一条；提供 `GET /api/decision/records/export?capability=&since=`
   导出 laya 训练格式 JSONL（state/questions/gold 概率分布，人工裁决转 one-hot 分布）。
 - **FR-06 降级链（已定）**：未配置 DECISION 端点 / 边车超时或 5xx / 返回体解析失败 →
-  triage_degraded=true、UI 不显示建议徽标、分诊按钮置灰带原因；知识库其余功能零影响。
-- **FR-07 前端**：`features/decision` 自包含（决策记录列表页：能力筛选/模型建议 vs 人工裁决对比/
+  triage_degraded=true、UI 不摊建议徽标而是显一个「降级」徽标（悬停给降级原因）、
+  管理抽屉里的分诊按钮置灰且悬停说明灰掉的原因；知识库其余功能零影响。
+  「落过一条降级记录」与「从没分诊过」在按钮上是两种文案（重新分诊 / AI 分诊），都置灰。
+- **FR-07 前端（已落地）**：`features/decision` 自包含（决策记录列表页：能力筛选/模型建议 vs 人工裁决对比/
   导出按钮）；知识库 inbox 加分诊徽标与「查看依据」抽屉（answers + routing.reason 原文展示）；
   模型端点管理页 kind 选项加 DECISION。
 
