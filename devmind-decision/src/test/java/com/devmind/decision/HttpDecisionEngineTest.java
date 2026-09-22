@@ -311,6 +311,24 @@ class HttpDecisionEngineTest {
     }
 
     @Test
+    void endpointDeletedBetweenChecksDegradesInsteadOfThrowing() {
+        // 可用性判断说"有"、解析时说"没了"（两次解析之间端点被删/停用）：
+        // 契约是"永不上抛"，所以这里必须降级而不是把 NoSuchElementException 抛给分诊
+        ModelEndpointView ep = decision("http://127.0.0.1:1", null);
+        ModelEndpointProvider provider = mock(ModelEndpointProvider.class);
+        when(provider.defaultEndpoint(anyString()))
+                .thenReturn(Optional.of(ep), Optional.empty());
+        @SuppressWarnings("unchecked")
+        ObjectProvider<ModelEndpointProvider> docProvider = mock(ObjectProvider.class);
+        when(docProvider.getIfAvailable()).thenReturn(provider);
+
+        DecisionResult r = engine(docProvider, props(3, 1)).decide(state(), questions());
+
+        assertTrue(r.degraded());
+        assertTrue(paths.isEmpty());
+    }
+
+    @Test
     void missingEngineModuleDegrades() {
         DecisionResult r = engine(noProviderAtAll(), props(3, 1)).decide(state(), questions());
 

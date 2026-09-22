@@ -59,7 +59,13 @@ public class HttpDecisionEngine implements DecisionEngine {
         if (blocked.isPresent()) {
             return DecisionResult.degraded(blocked.get(), msSince(t0));
         }
-        ModelEndpointView ep = resolve().orElseThrow();
+        // 再解析一次拿端点（可用性判断只管"有没有"）：拿不到就降级，绝不 orElseThrow——
+        // 两次解析之间端点可能正好被删/停用，"永不上抛"这条契约不接受竞态窗口里的例外
+        Optional<ModelEndpointView> found = resolve();
+        if (found.isEmpty()) {
+            return DecisionResult.degraded(NO_ENDPOINT, msSince(t0));
+        }
+        ModelEndpointView ep = found.get();
         LayaDecisionClient.Options opt = new LayaDecisionClient.Options(
                 ep.baseUrl(), ep.apiKey(), ep.model(), props.getTimeoutSeconds());
 
