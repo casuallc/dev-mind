@@ -64,8 +64,15 @@ public final class LayaDecisionClient {
     public record Options(String baseUrl, String apiKey, String model, int timeoutSeconds) {
     }
 
-    /** {@code /healthz} 应答（FR-02 连接测试第一段） */
-    public record Health(String status, String layaVersion, List<String> loaded, Map<String, String> devices) {
+    /**
+     * {@code /healthz} 应答（FR-02 连接测试第一段）。
+     *
+     * @param sources 每个槽位的<b>实际来源</b>（CAP-56 FR-01 落地后边车才上报；老版本边车给空 Map）。
+     *                它是"这个槽位此刻加载的到底是哪个目录/仓库"的唯一凭据——CAP-56 FR-06 的 serve
+     *                自检拿它核对「准入闸门放行的那份 == 正在服务的那份」
+     */
+    public record Health(String status, String layaVersion, List<String> loaded, Map<String, String> devices,
+                         Map<String, SlotSource> sources) {
 
         public boolean ok() {
             return "ok".equalsIgnoreCase(status);
@@ -77,6 +84,30 @@ public final class LayaDecisionClient {
                     ? "未常驻任何 checkpoint" : "常驻 " + String.join("、", loaded);
             String version = layaVersion == null || layaVersion.isBlank() ? "（版本未知）" : layaVersion;
             return "laya " + version + "，" + list;
+        }
+    }
+
+    /**
+     * {@code /healthz.sources} 里一个槽位的实际来源（CAP-56 FR-01）。
+     *
+     * <p><b>字段可空表示"边车没报这一项"</b>，不是 false：{@code overridden}/{@code loaded}/{@code ready}
+     * 用包装类型，好让"老版本边车没报"与"报了 false"分得开——把前者读成后者就会凭空虚报一条结论。</p>
+     *
+     * @param source     人读的来源 id（本地绝对路径，或 {@code repo} / {@code repo/subfolder}）
+     * @param kind       {@code local}（节点上的目录，微调产物）/ {@code repo}（HF 仓库）
+     * @param overridden 与边车内置默认来源是否不同（true = 有人把这个槽位换成了别的产物）
+     * @param path       本地目录的绝对路径（kind=local 才有）
+     * @param subfolder  仓库子目录（{@code [repo, subfolder]} 形式才有）
+     * @param ready       本地目录是否齐备（有 {@code rl_agent_config.json} 与 {@code model.safetensors}）
+     * @param missing     {@code ready=false} 时缺的文件名
+     */
+    public record SlotSource(String source, String kind, Boolean overridden, Boolean loaded,
+                             String path, String subfolder, Boolean ready, List<String> missing,
+                             String repo, String device) {
+
+        /** 加载的是节点上的目录（微调产物），而不是 HF 仓库 */
+        public boolean local() {
+            return "local".equalsIgnoreCase(kind);
         }
     }
 
@@ -110,7 +141,23 @@ public final class LayaDecisionClient {
             ((ObjectNode) root.path("devices")).properties()
                     .forEach(e -> devices.put(e.getKey(), e.getValue().asText("")));
         }
-        return new Health(root.path("status").asText(""), root.path("laya_version").asText(""), loaded, devices);
+        // sources 同理（CAP-56 FR-01 才有的字段）：老版本边车没有这一项 → 空 Map，
+        // 由调用方（serve 自检）按"边车没报"处理，而不是在这里编一份出来
+        Map<String, SlotSource> sources = new LinkedHashMap<>();
+        if (root.path("sources").isObject()) {
+            ((ObjectNode) root.path("sources")).properties()
+                    .forEach(entry -> sources.put(entry.getKey(), slotSource(entry.getValue())));
+        }
+        return new Health(root.path("status").asText(""), root.path("laya_version").asText(""), loaded,
+                devices, sources);
+    }
+
+    private static SlotSource slotSource(JsonNode node) {
+        List<String> missing = new ArrayList<>();
+        node.path("missing").forEach(n -> missing.add(n.asText("")));
+        return new SlotSource(text(node, "source"), text(node, "kind"), bool(node, "overridden"),
+                bool(node, "loaded"), text(node, "path"), text(node, "subfolder"),
+                bool(node, "ready"), List.copyOf(missing), text(node, "repo"), text(node, "device"));
     }
 
     /** 一次决策调用；网络/非 2xx 抛 {@link LayaDecisionException}，答案缺失抛 {@link ModelCallException} */
@@ -212,6 +259,12 @@ public final class LayaDecisionClient {
     private static Double number(JsonNode node, String field) {
         JsonNode v = node.path(field);
         return v.isNumber() ? v.asDouble() : null;
+    }
+
+    /** 布尔字段：缺失或非布尔 → null（"边车没报"与"报了 false"必须分得开） */
+    private static Boolean bool(JsonNode node, String field) {
+        JsonNode v = node.path(field);
+        return v.isBoolean() ? v.asBoolean() : null;
     }
 
     // ---------------- HTTP ----------------

@@ -99,6 +99,45 @@ class LayaDecisionClientTest {
         assertTrue(health.summary().contains("未常驻任何 checkpoint"), health.summary());
     }
 
+    @Test
+    void healthzWithoutSourcesYieldsEmptyMapNotFabricatedEntries() throws IOException {
+        // FR-01 之前的老版本边车：没有 sources 字段。空 Map 是"边车没报"，不是"来源一致"
+        String baseUrl = serve(Map.of("/healthz", "{\"status\":\"ok\",\"loaded\":[\"multilingual\"]}"), 200);
+
+        LayaDecisionClient.Health health = LayaDecisionClient.healthz(opt(baseUrl));
+
+        assertTrue(health.sources().isEmpty(), health.sources().toString());
+    }
+
+    @Test
+    void healthzParsesSlotSourcesIncludingLocalReadiness() throws IOException {
+        String baseUrl = serve(Map.of("/healthz", "{\"status\":\"ok\",\"laya_version\":\"0.3.5\","
+                + "\"loaded\":[\"typed-decisions\"],"
+                + "\"sources\":{"
+                + "\"typed-decisions\":{\"source\":\"D:\\\\apusic\\\\laya\\\\ft7\",\"kind\":\"local\","
+                + "\"overridden\":true,\"loaded\":true,\"path\":\"D:\\\\apusic\\\\laya\\\\ft7\","
+                + "\"exists\":true,\"ready\":false,\"missing\":[\"model.safetensors\"],\"device\":\"cuda:0\"},"
+                + "\"multilingual\":{\"source\":\"convaiinnovations/laya/multilingual\",\"kind\":\"repo\","
+                + "\"overridden\":false,\"loaded\":false,\"repo\":\"convaiinnovations/laya\","
+                + "\"subfolder\":\"multilingual\"}}}"), 200);
+
+        Map<String, LayaDecisionClient.SlotSource> sources =
+                LayaDecisionClient.healthz(opt(baseUrl)).sources();
+
+        LayaDecisionClient.SlotSource ft = sources.get("typed-decisions");
+        assertTrue(ft.local());
+        assertTrue(ft.overridden());
+        assertTrue(ft.loaded());
+        assertFalse(ft.ready());                                   // 缺文件 = 没就绪，服务不成
+        assertEquals(List.of("model.safetensors"), ft.missing());
+        assertEquals("cuda:0", ft.device());
+        LayaDecisionClient.SlotSource repo = sources.get("multilingual");
+        assertFalse(repo.local());
+        assertEquals("convaiinnovations/laya", repo.repo());
+        assertEquals("multilingual", repo.subfolder());
+        assertNull(repo.ready());                                  // 仓库来源没有 ready 这一说，不许编成 false
+    }
+
     // ---------------- /v1/predict ----------------
 
     @Test
