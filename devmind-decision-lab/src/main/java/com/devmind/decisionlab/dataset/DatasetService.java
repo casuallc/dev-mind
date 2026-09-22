@@ -340,7 +340,6 @@ public class DatasetService {
             refreshCount(dataset);
         }
         Map<String, Long> skipped = reasonCounts(judgements);
-        skipped.remove(null); // 可收编的那些不在"跳过原因"里
         log.info("决策记录收编: dataset={} v{} capability={} 命中={} 新增={} 跳过={}",
                 dataset.getName(), dataset.getVersion(), req == null ? null : req.capability(),
                 page.getTotalElements(), added, judgements.size() - added);
@@ -405,14 +404,21 @@ public class DatasetService {
         return new HashSet<>(itemRepo.collectedRecordIds(datasetId));
     }
 
-    /** 原因码 → 条数；四个原因都出现（缺的记 0），可收编的记在 null 键上（调用方自行移除） */
+    /**
+     * 原因码 → 条数；四个原因都出现（缺的记 0）。可收编的那些<b>不进这张表</b>——
+     * 它们的"原因"是 null，而 null 键过不了 JSON 序列化（Jackson 3 直接抛
+     * "Null key for a Map not allowed in JSON"，整条预览变 500）。可收编的条数由
+     * {@code collectable} 单独给（见 {@link RecordsPreview}），本来也不需要塞进原因表。
+     */
     private static Map<String, Long> reasonCounts(List<Judgement> judgements) {
         Map<String, Long> counts = new LinkedHashMap<>();
         for (String reason : RecordIntake.REASON_ORDER) {
             counts.put(reason, 0L);
         }
         for (Judgement j : judgements) {
-            counts.merge(j.reasonCode(), 1L, Long::sum);
+            if (j.reasonCode() != null) {
+                counts.merge(j.reasonCode(), 1L, Long::sum);
+            }
         }
         return counts;
     }

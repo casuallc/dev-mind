@@ -432,6 +432,12 @@ class DatasetServiceTest {
         assertEquals(1L, preview.skipReasons().get(RecordIntake.REASON_QUESTION_SET));
         assertEquals(1L, preview.skipReasons().get(RecordIntake.REASON_GOLD));
         assertEquals(0L, preview.skipReasons().get(RecordIntake.REASON_COLLECTED), "缺的原因也要出现");
+        assertFalse(preview.skipReasons().containsKey(null),
+                "可收编的不能以 null 为键混进原因表：null 键连 JSON 都序列化不了（预览整条 500）");
+        assertFalse(preview.skipReasons().containsValue(null),
+                "原因表是「原因 → 条数」，值不该是 null");
+        assertEquals(3L, preview.skipReasons().values().stream().mapToLong(Long::longValue).sum(),
+                "原因表的合计 = 被跳过的条数（可收编的那条不在里面）");
         assertEquals(1L, preview.caseGroups().get(CaseGroups.EMPTY_RECALL), "空召回记录按内容自动进对照组");
         assertFalse(preview.truncated());
 
