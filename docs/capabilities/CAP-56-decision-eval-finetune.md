@@ -1,6 +1,11 @@
 # CAP-56 决策模型评测与微调闭环（Decision Model Evaluation & Fine-tuning Loop）
 
-> 状态：**需求定稿（待实现）**｜日期：2026-09-22
+> 状态：**需求定稿**（FR-01 边车槽位覆盖 5638823 + serve 自检消费端 f4896d9、FR-02 评测集与冻结校验 fe137fa
+> + 回流收编 0241cbd、FR-03 评测运行编排 7854f8e + 指标脚本 7f7725f、FR-04 温度校准（评测侧 `fitTemperature`，
+> 同 7854f8e/7f7725f）、FR-05 微调编排 2ae2dc3 + RLCD 脚本 7f7725f、FR-06 登记与指纹 9263697/2ae2dc3、
+> FR-07 准入闸门 9263697、FR-08 前端四视图 0bf4737 已落地；FR-09 口径更正见 c6ab1a0。
+> 承载机制：题面上提 95ec1c2、exec 帧 bundle 端点 + runner 协议 v14 e128cc1。
+> **待办**：`tests/cap56_e2e.py` E2E 未沉淀；172.20.140.88 GPU 节点真机全链未跑（SSH 未就绪））｜ 日期：2026-09-22
 >
 > 新增能力。缘起：CAP-55 把 laya 决策模型接进了产品路径（知识库提案分诊），但**没有任何"这套判断准不准"
 > 的环节**——没有评测集、没有指标、没有基线，接上就是"看起来在工作"。2026-09-22 真机实测坐实了这个洞：
@@ -93,7 +98,8 @@
   （**禁直接依赖 `devmind-agent`**，实现方经 `ObjectProvider<AgentNodeConnector>` 探测注入）。
 - `LayaTrainingJsonl` / `GoldDistributions`（既有，CAP-55）：微调数据集导出复用（`{state, questions, gold}`
   三字段已对齐官方训练格式形状）。
-- runner 侧配置（**必须同步，否则下发即被拒**）：`execAllowlist` 加 `python,torchrun,accelerate` 首 token 前缀
+- runner 侧配置（**必须同步，否则下发即被拒**；实操见 [guides/decision-lab-guide.md](../guides/decision-lab-guide.md) §4）：
+  `execAllowlist` 加 `python,torchrun,accelerate` 首 token 前缀
   （空值 = 拒绝一切 exec）；GPU 节点用 `labels=gpu,<型号>` 表达（`AgentNodeRouter.route(..., requiredLabels)` 消费），
   注意 runner 上报的 labels 会**覆盖**服务端值。
 

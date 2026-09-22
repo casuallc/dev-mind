@@ -52,9 +52,11 @@ Guidance for Claude Code when working in this repository.
 | devmind-server-adapter | CAP-07 服务器适配（SSH/HTTP + 命令模板白名单 + 凭证加密） |
 | devmind-execution | CAP-12 统一执行底座（StepRunner/日志 Hub/WS，**无统一 Job 表**） |
 | devmind-build / deploy / test / release | CAP-08~11 执行器（各自实体与状态机，共用执行底座） |
+| devmind-decision | CAP-55 决策引擎等（`DecisionEngine` SPI 实现、`decision_records` 记录与训练集导出；闸门经 `ObjectProvider<DecisionGate>` 探测） |
+| devmind-decision-lab | CAP-56 决策实验室（评测集/评测运行/微调任务/checkpoint 登记 + `DecisionGate` 实现 + 执行包端点内容；依赖 common+execution，**禁依赖 agent**） |
 | devmind-flow / integration / open-api | CAP-14 需求流程 / CAP-18·19 集成（GitLab/Jira）/ CAP-20 开放 API（HMAC） |
 | devmind-app | 组装入口（主类 + application.yml；瘦 jar，不含前端静态） |
-| devmind-dist | 分发包组装（bin/config/libs/ui/data → tar.gz，仅 `-Pdist` 触发） |
+| devmind-dist | 分发包组装（bin/config/libs/lab/ui/data → tar.gz，仅 `-Pdist` 触发；`lab/` 供 CAP-56 的 `scripts-dir`） |
 | frontend/ | `src/app`（壳/路由/当前项目设施）+ `src/features/<能力>`（自包含）+ `src/shared` |
 
 ## Architecture
