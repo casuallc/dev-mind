@@ -19,9 +19,17 @@
   **MVP 只出建议不自动执行**，人工仍一键确认；每次人工裁决落库为训练样本。
 - 边车不可用/未配置时全链路降级为现状（纯人工 inbox），绝不让知识库功能 5xx。
 
-**关键约束**：laya base checkpoint 零样本接近随机（官方自测 0.362 vs 0.318 随机线），首发用官方微调产物
-`laya-typed-decisions` + Router 自动选 checkpoint；中文走 multilingual（state 预算 ~768 token，须截断）。
-置信度门槛在温度校准前只作展示参考，不作自动执行依据。
+**关键约束**：laya base checkpoint 零样本接近随机（官方自测 0.362 vs 0.318 随机线）；中文走 multilingual
+（state 预算 ~768 token，须截断）。置信度门槛在温度校准前只作展示参考，不作自动执行依据。
+
+> **口径更正（2026-09-22，见 [CAP-56](CAP-56-decision-eval-finetune.md) FR-09）**：原文写的「首发用官方微调产物
+> `laya-typed-decisions` + Router 自动选 checkpoint」**作废**。该 checkpoint 的微调工作流只有四套
+> （`customer_service` / `invoice_processing` / `security_incidents` / `agent_trace_observability`），
+> 路由要求题 id 集合**精确匹配**（`laya/router.py` 的 `match_typed_decisions_workflow`），均不含本能力的
+> `{adopt_layer, duplicate, quality}`——既不会被 `auto_task_detection` 选中，拿它跑我们的题面也属跨任务迁移。
+> 真机实测佐证：`multilingual` 在分诊题面上 `duplicate` 三组对照（含空召回、不相关）全判「重复」
+> 0.988/0.931/0.972，`adopt_layer` 恒 `project`。**要提升只能在我们自己的 gold 上微调**，评测与微调闭环
+> 见 CAP-56；在本能力内不要指望换 checkpoint 就能变准。
 
 ## 2. 功能需求
 
