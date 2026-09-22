@@ -1,6 +1,7 @@
 package com.devmind.decision;
 
 import com.devmind.common.decision.DecisionEngine;
+import com.devmind.common.decision.DecisionGate;
 import com.devmind.common.decision.DecisionResult;
 import com.devmind.common.model.ModelEndpointProvider;
 import com.devmind.common.model.ModelEndpointView;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -134,7 +136,30 @@ class HttpDecisionEngineTest {
 
     private static DecisionEngine engine(ObjectProvider<ModelEndpointProvider> docProvider,
                                          DecisionProperties props) {
-        return new HttpDecisionEngine(docProvider, props);
+        return engine(docProvider, props, noGate());
+    }
+
+    private static DecisionEngine engine(ObjectProvider<ModelEndpointProvider> docProvider,
+                                         DecisionProperties props, ObjectProvider<DecisionGate> gates) {
+        return new HttpDecisionEngine(docProvider, gates, props);
+    }
+
+    /** 没装决策实验室的部署：没有闸门实现，一切照 CAP-55 的旧口径 */
+    @SuppressWarnings("unchecked")
+    private static ObjectProvider<DecisionGate> noGate() {
+        ObjectProvider<DecisionGate> provider = mock(ObjectProvider.class);
+        // 每次给一个新流：Stream 是一次性的，真实的 ObjectProvider 也是每次新建
+        when(provider.orderedStream()).thenAnswer(inv -> Stream.empty());
+        return provider;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ObjectProvider<DecisionGate> gate(String reason) {
+        DecisionGate gate = mock(DecisionGate.class);
+        when(gate.unavailableReason()).thenReturn(Optional.ofNullable(reason));
+        ObjectProvider<DecisionGate> provider = mock(ObjectProvider.class);
+        when(provider.orderedStream()).thenAnswer(inv -> Stream.of(gate));
+        return provider;
     }
 
     private static Map<String, Object> state() {
@@ -380,5 +405,48 @@ class HttpDecisionEngineTest {
         assertTrue(noModule.unavailableReason().orElse("").contains("未装配"));
         assertNotNull(ready);
         assertTrue(paths.isEmpty(), "可用性判断只读配置，不探活");
+    }
+
+    // ---------------- 准入闸门（CAP-56 FR-07） ----------------
+
+    @Test
+    void gateBlocksEvenWhenTheEndpointIsPerfectlyConfigured() throws IOException {
+        // 2026-09-22 的教训：路由通不等于可用——恒答「重复」的模型比连不上更危险，
+        // 它会把自信的错误写进 decision_records，而那份记录是微调的 gold 来源
+        String url = serve();
+        DecisionEngine engine = engine(providerOf(decision(url, null)), props(3, 1),
+                gate("决策模型尚未通过准入：请到「后台 → 决策实验室」登记并验证一个 checkpoint"));
+
+        assertTrue(engine.unavailableReason().orElse("").contains("决策实验室"));
+        DecisionResult r = engine.decide(state(), questions());
+
+        assertTrue(r.degraded());
+        assertTrue(r.degradedReason().contains("决策实验室"), r.degradedReason());
+        assertTrue(paths.isEmpty(), "闸门未过时一个请求都不该发出去");
+    }
+
+    @Test
+    void gateReasonComesFirstWhenBothTheGateAndTheEndpointAreMissing() {
+        // 两个都缺时先说闸门：把人引去查一个本来就配好的端点没有意义
+        DecisionEngine engine = engine(providerOf(null), props(3, 1), gate("还没有验证过的 checkpoint"));
+
+        assertEquals("还没有验证过的 checkpoint", engine.unavailableReason().orElse(""));
+    }
+
+    @Test
+    void aGateThatLetsItThroughDoesNotBlock() throws IOException {
+        String url = serve();
+        DecisionEngine engine = engine(providerOf(decision(url, null)), props(3, 1), gate(null));
+
+        assertTrue(engine.unavailableReason().isEmpty());
+        assertEquals("project", engine.decide(state(), questions()).answers()
+                .get("adopt_layer").choice());
+    }
+
+    @Test
+    void noGateImplementationKeepsCap55Behaviour() throws IOException {
+        // 没装决策实验室的部署没有闸门实现：一切照旧（那时也没有"验证过"这个概念）
+        String url = serve();
+        assertTrue(engine(providerOf(decision(url, null)), props(3, 1)).unavailableReason().isEmpty());
     }
 }

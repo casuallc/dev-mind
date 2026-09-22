@@ -1,5 +1,6 @@
 package com.devmind.decisionlab;
 
+import com.devmind.decisionlab.checkpoint.model.DecisionCheckpointEntity;
 import com.devmind.decisionlab.dataset.model.DecisionDatasetEntity;
 import com.devmind.decisionlab.dataset.model.DecisionDatasetItemEntity;
 import org.hibernate.boot.Metadata;
@@ -21,12 +22,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>为什么这几条必须钉住——它们全都是<b>只在某个库上才炸</b>的错误，本地 H2 跑得欢不代表线上能起：
  * <ul>
  *   <li>裸 {@code @Lob}：PG 落成 oid 大对象（auto-commit 读直接抛错），MySQL 落成 tinytext；</li>
- *   <li>{@code version} 当列名：H2 保留字，建表就失败（本模块用的是 {@code dataset_version}）；</li>
+ *   <li>{@code version} / {@code slot} 当列名：H2 保留字，建表就失败（本模块用 {@code dataset_version}、
+ *       {@code serve_slot}）；</li>
  *   <li>Boolean 列带 {@code @ColumnDefault}：MySQL 的 bit 列建不出来（项目已两次事故）。</li>
  * </ul>
  * 三个方言各导一遍：H2 是本地与 E2E 的库，PG 是 140.156/143/224 的库，MySQL 是历史共享库。</p>
  */
 class DecisionLabSchemaTest {
+
+    /** FR-02 评测集的 JSON 列 */
+    private static final String[] DATASET_LOB_COLUMNS =
+            {"state_json", "questions_json", "gold_json", "freeze_manifest"};
+
+    /** FR-06 产物登记的 JSON 列（指标 / 温度校准 / serve 自检报告） */
+    private static final String[] CHECKPOINT_LOB_COLUMNS =
+            {"metrics_json", "calibration_json", "serve_check_json"};
 
     private String exportDdl(Class<?> dialect) {
         var registry = new StandardServiceRegistryBuilder()
@@ -35,6 +45,7 @@ class DecisionLabSchemaTest {
         Metadata metadata = new MetadataSources(registry)
                 .addAnnotatedClass(DecisionDatasetEntity.class)
                 .addAnnotatedClass(DecisionDatasetItemEntity.class)
+                .addAnnotatedClass(DecisionCheckpointEntity.class)
                 .buildMetadata();
         String ddl = String.join("\n", new SchemaCreatorImpl(registry)
                 .generateCreationCommands(metadata, false)).toLowerCase();
@@ -61,7 +72,7 @@ class DecisionLabSchemaTest {
     @Test
     void pgLobColumnsAreInlineTextNotOid() {
         String ddl = exportDdl(PostgreSQLDialect.class);
-        for (String column : new String[] {"state_json", "questions_json", "gold_json", "freeze_manifest"}) {
+        for (String column : concat(DATASET_LOB_COLUMNS, CHECKPOINT_LOB_COLUMNS)) {
             assertTrue(columnDef(ddl, column).contains(" text"),
                     "PG 上 " + column + " 应为 text（@Lob 必须配 @JdbcTypeCode(LONGVARCHAR)）");
         }
@@ -71,41 +82,61 @@ class DecisionLabSchemaTest {
     @Test
     void mysqlLobColumnsAreLongtext() {
         String ddl = exportDdl(MySQLDialect.class);
-        for (String column : new String[] {"state_json", "questions_json", "gold_json", "freeze_manifest"}) {
+        for (String column : concat(DATASET_LOB_COLUMNS, CHECKPOINT_LOB_COLUMNS)) {
             assertTrue(columnDef(ddl, column).contains("longtext"),
                     "MySQL 上 " + column + " 应为 longtext（依赖 @Column(length = 16_777_216)）");
         }
     }
 
     @Test
-    void versionColumnIsRenamedSoH2CanCreateTheTable() {
+    void versionAndSlotColumnsAreRenamedSoH2CanCreateTheTables() {
         for (Class<?> dialect : new Class<?>[] {H2Dialect.class, PostgreSQLDialect.class, MySQLDialect.class}) {
             String ddl = exportDdl(dialect);
             assertTrue(columnDef(ddl, "dataset_version").contains("dataset_version"),
                     dialect.getSimpleName() + " 上评测集版本列应为 dataset_version（version 是 H2 保留字）");
             assertFalse(ddl.contains(" version "),
                     dialect.getSimpleName() + " 上不该有裸 version 列——建表会直接失败");
+            assertTrue(columnDef(ddl, "serve_slot").contains("serve_slot"),
+                    dialect.getSimpleName() + " 上服务槽位列应为 serve_slot");
+            assertFalse(ddl.contains(" slot "),
+                    dialect.getSimpleName() + " 上不该有裸 slot 列");
         }
     }
 
     @Test
     void booleanColumnsCarryNoDefaultClause() {
-        // frozen（以及 FR-07 的 verified）走实体初始值 + getter 兜底；
+        // frozen 与 verified 都走实体初始值 + getter 兜底（存量行由 DecisionLabMigration 补）；
         // 带 default 的话 MySQL 的 bit 列建不出来——项目已经出过两次这类事故
         for (Class<?> dialect : new Class<?>[] {MySQLDialect.class, PostgreSQLDialect.class}) {
             String ddl = exportDdl(dialect);
-            String line = columnDef(ddl, "frozen");
-            assertTrue(line.contains("frozen"), dialect.getSimpleName() + " 上应有 frozen 列");
-            assertFalse(line.contains("default"),
-                    dialect.getSimpleName() + " 上 frozen 不该有 default 子句：" + line);
+            for (String column : new String[] {"frozen", "verified"}) {
+                String def = columnDef(ddl, column);
+                assertTrue(def.contains(column), dialect.getSimpleName() + " 上应有 " + column + " 列");
+                assertFalse(def.contains("default"),
+                        dialect.getSimpleName() + " 上 " + column + " 不该有 default 子句：" + def);
+            }
         }
     }
 
     @Test
-    void bothTablesAndTheirJoinKeyExist() {
+    void allThreeTablesAndTheirJoinKeysExist() {
         String ddl = exportDdl(PostgreSQLDialect.class);
         assertTrue(ddl.contains("decision_datasets"));
         assertTrue(ddl.contains("decision_dataset_items"));
+        assertTrue(ddl.contains("decision_checkpoints"));
         assertTrue(columnDef(ddl, "dataset_id").contains("dataset_id"), "样本靠 dataset_id 挂在集上");
+        // 列表页要显示"上次自检过了没有"，靠这一列免得逐行解析自检报告 JSON
+        assertTrue(columnDef(ddl, "serve_check_status").contains("serve_check_status"));
+        // 放行史三个字段（谁/何时/凭什么）在撤销后要留着，不能靠 verified 一个布尔承载
+        for (String column : new String[] {"verified_by", "verified_at", "verified_note"}) {
+            assertTrue(columnDef(ddl, column).contains(column), "产物表应有 " + column);
+        }
+    }
+
+    private static String[] concat(String[] a, String[] b) {
+        String[] out = new String[a.length + b.length];
+        System.arraycopy(a, 0, out, 0, a.length);
+        System.arraycopy(b, 0, out, a.length, b.length);
+        return out;
     }
 }

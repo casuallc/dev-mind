@@ -1,6 +1,7 @@
 package com.devmind.decision;
 
 import com.devmind.common.decision.DecisionEngine;
+import com.devmind.common.decision.DecisionGate;
 import com.devmind.common.decision.DecisionResult;
 import com.devmind.common.model.LayaDecisionClient;
 import com.devmind.common.model.LayaDecisionException;
@@ -19,9 +20,9 @@ import org.springframework.stereotype.Component;
  * CAP-55 FR-03 决策引擎的 HTTP 实现：把 {@link DecisionEngine#decide} 落到 CAP-48 的
  * 平台默认 {@code kind=DECISION} 端点上（laya 边车协议，见 {@link LayaDecisionClient}）。
  *
- * <p><b>降级链（FR-06）</b>：模块没装配 / 没配 DECISION 端点 / 端点不完整 / 边车连不上超时 /
- * 应答不可解析 → 一律 {@link DecisionResult#degraded}（<b>永不上抛</b>）。决策是锦上添花的能力，
- * 边车挂了不能让知识库的写入变成 500。</p>
+ * <p><b>降级链（FR-06）</b>：准入闸门未通过（CAP-56 FR-07）/ 模块没装配 / 没配 DECISION 端点 /
+ * 端点不完整 / 边车连不上超时 / 应答不可解析 → 一律 {@link DecisionResult#degraded}
+ * （<b>永不上抛</b>）。决策是锦上添花的能力，边车挂了不能让知识库的写入变成 500。</p>
  *
  * <p><b>重试口径</b>：只对"看着像抖"的失败重试一次（连不上/读超时/5xx），
  * 4xx 与解析失败不重试（结果不会变，只把延迟翻倍）——判定在
@@ -42,11 +43,14 @@ public class HttpDecisionEngine implements DecisionEngine {
             "未配置平台默认决策端点：请在「后台 → 模型接入」登记 kind=决策 的端点并设为默认";
 
     private final ObjectProvider<ModelEndpointProvider> endpointProviders;
+    private final ObjectProvider<DecisionGate> gates;
     private final DecisionProperties props;
 
     public HttpDecisionEngine(ObjectProvider<ModelEndpointProvider> endpointProviders,
+                              ObjectProvider<DecisionGate> gates,
                               DecisionProperties props) {
         this.endpointProviders = endpointProviders;
+        this.gates = gates;
         this.props = props;
     }
 
@@ -92,6 +96,12 @@ public class HttpDecisionEngine implements DecisionEngine {
 
     @Override
     public Optional<String> unavailableReason() {
+        // 闸门先查（CAP-56 FR-07）：路由通但模型没通过准入时，最该说的是"这个模型还没被验证过"，
+        // 而不是先报端点配置——后者会把人引去查一个本来就没问题的配置项。
+        Optional<String> gated = gateReason();
+        if (gated.isPresent()) {
+            return gated;
+        }
         ModelEndpointProvider provider = endpointProviders.getIfAvailable();
         if (provider == null) {
             return Optional.of(NO_PROVIDER);
@@ -110,6 +120,25 @@ public class HttpDecisionEngine implements DecisionEngine {
                     + "）");
         }
         return Optional.empty();
+    }
+
+    /**
+     * 查准入闸门（CAP-56 FR-07 的落点）。
+     *
+     * <p>取 {@code orderedStream().findFirst()} 而不是 {@code getIfAvailable()}：后者在装配了
+     * 多个实现时直接抛 {@code NoUniqueBeanDefinitionException}——一个"可用性询问"的方法
+     * 反倒把调用方炸掉，是这条链上最不该有的失败方式。多个闸门按 {@code @Order} 取第一个；
+     * 一个都没有（没装决策实验室）就是放行。</p>
+     *
+     * <p>闸门内部要查库（有没有验证过的 checkpoint），于是每次分诊前会多一次计数查询。
+     * 不缓存的理由：这是"当前放行的是哪份模型"的唯一事实来源，缓存意味着人在实验室里
+     * 撤销验证之后按钮还亮着——准入失效必须立即生效。</p>
+     */
+    private Optional<String> gateReason() {
+        return gates.orderedStream()
+                .map(DecisionGate::unavailableReason)
+                .flatMap(Optional::stream)
+                .findFirst();
     }
 
     private Optional<ModelEndpointView> resolve() {
