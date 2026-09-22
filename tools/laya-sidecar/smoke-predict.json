@@ -1,0 +1,9 @@
+{
+  "state": {"proposal": "构建失败时先看 StepRunner 日志 Hub 的最后 200 行，九成的环境类报错在那里"},
+  "questions": {
+    "adopt_layer": {"type": "choice", "instructions": "这条经验应该沉淀到哪一层",
+      "criteria": {"global": "跨项目通用经验", "project": "仅本项目适用", "discard": "不值得沉淀"}},
+    "is_duplicate": {"type": "noul", "instructions": "与知识库现有条目是否实质重复"},
+    "quality": {"type": "score", "instructions": "内容质量", "criteria": ["含糊不可用", "可用需润色", "直接可用"]}
+  }
+}

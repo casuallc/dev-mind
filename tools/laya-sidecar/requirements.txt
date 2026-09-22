@@ -1,0 +1,6 @@
+# torch 由 Dockerfile 先行装 CPU 版（PyPI 默认轮子拖 CUDA 依赖，镜像多 5GB+）；
+# 本地开发若无 GPU，请先手工执行：
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+laya>=0.3.5
+fastapi>=0.115
+uvicorn[standard]>=0.30

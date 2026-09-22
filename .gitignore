@@ -31,3 +31,6 @@ tests/fixtures/*.class
 
 # Python 编译产物（tests/ 下的 E2E 脚本）
 __pycache__/
+
+# Python（laya 边车本地虚拟环境）
+.venv/
