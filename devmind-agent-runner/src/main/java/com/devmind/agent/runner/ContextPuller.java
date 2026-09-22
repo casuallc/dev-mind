@@ -33,13 +33,24 @@ public final class ContextPuller {
     }
 
     /**
-     * 拉包 → 校验（totalBytes/sha256 对照 manifest）→ 物化到 workDir。
+     * 拉包 → 校验（totalBytes/sha256 对照 manifest）→ 物化到 workDir（全量同目录，
+     * chat/worklog/兜底会话沿用）。
      *
      * @param manifest launch 帧的 contextManifest 节点（entries/totalBytes/sha256）
      * @throws IOException 拉取或物化失败
      */
     public static void pullAndMaterialize(RunnerConfig config, String sessionId,
                                           JsonNode manifest, Path workDir) throws IOException {
+        pullAndMaterialize(config, sessionId, manifest, workDir, null);
+    }
+
+    /**
+     * CAP-53 拆分物化版本：共享部分（settings/skills）落 sharedDir（claude cwd = 项目+用户
+     * 工作区根），会话特定部分（注入块/docs/inputs）落 sessionDir（代码目录 = 需求工作树）。
+     * sessionDir 为 null 或与 sharedDir 相同 = 全量落 sharedDir（同 4 参版本）。
+     */
+    public static void pullAndMaterialize(RunnerConfig config, String sessionId,
+                                          JsonNode manifest, Path sharedDir, Path sessionDir) throws IOException {
         long expectedBytes = manifest.path("totalBytes").asLong(-1);
         String expectedSha = manifest.path("sha256").asText("");
         String url = RunnerUpgrader.serverHttpBase(config)
@@ -74,7 +85,9 @@ public final class ContextPuller {
             throw new IOException("上下文包结构版本过新（schema=" + pkg.schemaVersion()
                     + "，本节点支持 " + ContextPackage.CURRENT_SCHEMA + "），请升级 runner 后重试");
         }
-        ContextMaterializer.materialize(workDir, pkg);
+        ContextMaterializer.materializeShared(sharedDir, pkg);
+        ContextMaterializer.materializeSession(
+                sessionDir == null || sessionDir.equals(sharedDir) ? sharedDir : sessionDir, pkg);
         log.info("上下文包物化完成: session={} entries={} bytes={}",
                 sessionId, manifest.path("entries").asInt(-1), body.length);
     }

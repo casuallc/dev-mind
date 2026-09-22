@@ -22,7 +22,8 @@ import java.util.stream.Stream;
 
 /**
  * CAP-37 FR-01 会话产出回传：会话进程退出后、finalizer 清理工作区之前，
- * 扫 {@code <sessionDir>/.devmind/output/}（CAP-14 输出契约目录，相对 claude cwd）
+ * 扫 {@code <sessionDir>/.devmind/output/}（CAP-14 输出契约目录；CAP-53 起相对代码目录=需求工作树，
+ * claude cwd 已上抬到项目+用户根）
  * 同步 POST 到服务端 {@code /api/agent/output/{sessionId}}。服务端响应前已落库，
  * 保证 exit 帧到达时流程引擎读产出无竞态。
  *

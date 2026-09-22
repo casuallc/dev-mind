@@ -43,6 +43,52 @@ final class ClaudeStateSupport {
     }
 
     /**
+     * claude 状态目录的归属键：cwd 绝对路径的非 [a-zA-Z0-9] 字符全替换为 '-'
+     * （与 claude 实现一致；官方另有超 200 字符截断+短哈希，平台路径不会触及，不实现）。
+     */
+    static String slug(Path cwd) {
+        return cwd.toAbsolutePath().normalize().toString().replaceAll("[^a-zA-Z0-9]", "-");
+    }
+
+    /**
+     * CAP-53 FR-04 resume transcript 迁移（best-effort）：cwd 从需求工作树上抬到
+     * 「项目+用户」根后，存量会话的 transcript 仍在旧 slug（工作树路径）目录下，
+     * {@code --resume} 在新 cwd 找不到即续接失败。带 resumeSessionId 的 launch 前调用：
+     * 旧 slug 目录存在且新目录缺该会话 jsonl → 整体复制（不覆盖既有文件）——jsonl、
+     * 同名 sidecar 目录、memory/ 一并随迁（需求粒度时期积累的 memory 借此并回项目级）。
+     * 复制而非移动（旧目录由 claude 自身保留期回收）；任何失败只告警，不阻断 launch。
+     */
+    static void migrateTranscripts(Path configDir, Path oldCwd, Path newCwd, String resumeSessionId) {
+        if (resumeSessionId == null || resumeSessionId.isBlank()
+                || oldCwd == null || newCwd == null || oldCwd.equals(newCwd)) {
+            return;
+        }
+        Path oldDir = configDir.resolve("projects").resolve(slug(oldCwd));
+        Path newDir = configDir.resolve("projects").resolve(slug(newCwd));
+        try {
+            if (!Files.isDirectory(oldDir)
+                    || Files.isRegularFile(newDir.resolve(resumeSessionId + ".jsonl"))) {
+                return; // 无旧状态，或已在新归属下（幂等）
+            }
+            Files.createDirectories(newDir);
+            try (var walk = Files.walk(oldDir)) {
+                for (Path src : walk.toList()) {
+                    Path dst = newDir.resolve(oldDir.relativize(src).toString());
+                    if (Files.isDirectory(src)) {
+                        Files.createDirectories(dst);
+                    } else if (!Files.exists(dst)) {
+                        Files.copy(src, dst);
+                    }
+                }
+            }
+            log.info("claude 状态已随 cwd 上抬迁移: {} -> {}", oldDir, newDir);
+        } catch (Exception e) {
+            log.warn("claude 状态迁移失败（resume 可能续不上，不阻断会话）: {} -> {} err={}",
+                    oldDir, newDir, e.getMessage());
+        }
+    }
+
+    /**
      * claude 配置目录：配置非空用配置值；空 = 平台专属目录 {@code {workspaceRoot}/../claude-config}
      * （与 worklog/工作区同级的 runner 私有地盘，不碰节点用户的 {@code ~/.claude}）。
      */

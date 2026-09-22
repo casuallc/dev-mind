@@ -333,6 +333,7 @@ public class AgentRunnerMain {
             // token 只进 RunnerWorkspace.RepoCtx（内存），严禁日志输出。
             Path workDir;
             Path sessionDir = null; // CAP-34 FR-04：pid 文件落点（legacy 映射路径为 null，不参与重启对账）
+            String codeDirRel = null; // CAP-53：代码目录相对 cwd 的路径（repo 会话专属，路由注入用）
             RunnerSessionRegistry.SessionFinalizer finalizer = null;
             String kind = frame.path("kind").asText("");
             // CAP-51：服务端下发的工作区键（req-<需求id> / sid-<会话id>）；空 = 存量会话旧布局
@@ -381,10 +382,13 @@ public class AgentRunnerMain {
                 }
                 RunnerWorkspace.MultiCtx mctx = workspace.prepareMulti(sessionId, projectId, wsOwner,
                         workspaceKey, specs);
-                workDir = mctx.aggRoot();
+                // CAP-53：cwd 上抬「项目+用户」根（memory/transcript 跨需求共享），聚合根降为代码目录
+                workDir = workspace.sessionCwd(projectId, wsOwner);
                 sessionDir = mctx.aggRoot();
+                codeDirRel = CodeDirRouting.relativize(workDir, sessionDir);
                 finalizer = sid -> workspace.finishMulti(mctx, msg -> sessions.reportSystem(sid, msg));
-                log.info("多库托管工作区就绪: session={} repos={} cwd={}", sessionId, specs.size(), workDir);
+                log.info("多库托管工作区就绪: session={} repos={} cwd={} codeDir={}", sessionId,
+                        specs.size(), workDir, codeDirRel);
             } else if (repoNode.isObject() && !repoNode.path("remoteUrl").asText("").isBlank()) {
                 if (projectId == null || projectId.isBlank()) {
                     throw new IllegalStateException("带 repo 块的 launch 必须携带 projectId");
@@ -401,10 +405,13 @@ public class AgentRunnerMain {
                         repoNode.path("token").asText(""));
                 RunnerWorkspace.RepoCtx ctx = workspace.prepare(sessionId, projectId, wsOwner,
                         workspaceKey, spec);
-                workDir = ctx.sessionDir();
+                // CAP-53：cwd 上抬「项目+用户」根，需求工作树降为代码目录（sessionDir 不变：
+                // pid 落点/产出扫描/收口仍以其为基准）
+                workDir = workspace.sessionCwd(projectId, wsOwner);
                 sessionDir = ctx.sessionDir();
+                codeDirRel = CodeDirRouting.relativize(workDir, sessionDir);
                 finalizer = sid -> workspace.finish(ctx, msg -> sessions.reportSystem(sid, msg));
-                log.info("托管工作区就绪: session={} cwd={}", sessionId, workDir);
+                log.info("托管工作区就绪: session={} cwd={} codeDir={}", sessionId, workDir, codeDirRel);
             } else {
                 workDir = config.resolveWorkDir(projectId);
                 // Windows CreateProcess error=267：cwd 不存在直接拉起失败。
@@ -421,12 +428,27 @@ public class AgentRunnerMain {
             log.info("拉起会话: session={} project={} cwd={} resume={}", sessionId, projectId, workDir,
                     resumeSessionId.isBlank() ? "-" : resumeSessionId);
 
+            // CAP-53 FR-03：repo 会话——cwd 级恒定路由文件（并发安全）+ 首条消息【代码目录】前缀
+            // （只本地拼接，不回写服务端；DB taskSpec 与 [flow:*] 首行标记分流不受影响）
+            if (codeDirRel != null) {
+                CodeDirRouting.writeRoutingFile(workDir);
+                taskSpec = CodeDirRouting.prefixTaskSpec(taskSpec, codeDirRel);
+            }
+
             // CAP-34 FR-03：launch 帧带 contextManifest → HTTP 拉包物化后再拉起；
-            // 拉取/校验/物化失败即 launch 失败（走 catch 回 launched{ok:false}），不静默降级为无上下文会话
+            // 拉取/校验/物化失败即 launch 失败（走 catch 回 launched{ok:false}），不静默降级为无上下文会话。
+            // CAP-53 FR-02：repo 会话拆分物化——settings/skills 落 cwd（共享同构），
+            // 注入块/docs/inputs 落代码目录（会话特定，并发会话互不覆盖）
             JsonNode manifestNode = frame.path("contextManifest");
             if (manifestNode.isObject() && !manifestNode.path("sha256").asText("").isBlank()) {
-                ContextPuller.pullAndMaterialize(config, sessionId, manifestNode, workDir);
+                ContextPuller.pullAndMaterialize(config, sessionId, manifestNode, workDir,
+                        codeDirRel != null ? sessionDir : null);
             }
+
+            // CAP-53 FR-04：cwd 上抬后存量会话的 transcript 仍在旧 slug（工作树路径）下，
+            // resume 前 best-effort 随迁（非 repo 会话 sessionDir==cwd 或为 null → 方法内 no-op）
+            ClaudeStateSupport.migrateTranscripts(ClaudeStateSupport.resolveConfigDir(config),
+                    sessionDir, workDir, resumeSessionId);
 
             // CAP-24：服务端下发的提交身份等附加 env（旧服务端无此字段 → 空）
             java.util.Map<String, String> env = new java.util.HashMap<>();

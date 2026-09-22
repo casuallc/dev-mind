@@ -31,6 +31,8 @@ import java.util.Properties;
  *                            # 子 worktree work/<repoName>、聚合根 work/ 作 claude cwd）；结束不删，页面手动收口。
  *                            # CAP-51 起带 workspaceKey 的会话改落 worktrees/<key>（需求内多会话共用一棵工作树，
  *                            # 收口保留工作树并前进到新基线），无 key 的存量会话仍走 work/ 旧布局。
+ *                            # CAP-53 起 claude cwd 上抬到 <root>/<projectId>/<owner>/（memory 跨需求共享），
+ *                            # 工作树降为「代码目录」（布局不变，由路由注入引导 agent 进入）。
  *                            # 构建工作区仍为共享 <root>/<projectId>/{main,builds}（owner 保留名防撞）；_chat 布局不变。
  * gcDays=14                  # CAP-34 FR-05：会话目录超龄清理阈值（天）
  * gcIntervalMinutes=360      # GC 巡检间隔（分钟）
