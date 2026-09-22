@@ -95,6 +95,13 @@ public class AgentRunnerMain {
         log.info("claude 配置目录: {}", claudeConfigDir);
         // CAP-36：exec 帧 handler（构建/部署/测试/发版下发执行；execAllowlist 空 = 全部拒绝）
         ExecHandler execHandler = new ExecHandler(config, workspace, frame -> connRef[0].send(frame));
+        // CAP-54：工作区实时视图——事件触发采集（tool_result/result）+ 兜底轮询 + 只读查询应答
+        GitStatusCollector gitCollector = new GitStatusCollector();
+        WorkspaceWatcher watcher = new WorkspaceWatcher(sessions, frame -> connRef[0].send(frame), gitCollector);
+        sessions.setEventTap(watcher);
+        watcher.start();
+        WorkspaceQueryHandler queryHandler = new WorkspaceQueryHandler(sessions, gitCollector,
+                frame -> connRef[0].send(frame));
 
         // CAP-34 FR-04：连接前先现场对账——强杀/崩溃残留的孤儿 claude 进程整树回收，
         // 无主目录登记（超龄删除归 FR-05 GC）。对账完再上线，hello 的 activeSessions 才是真实清单
@@ -118,7 +125,7 @@ public class AgentRunnerMain {
 
         ServerConnection conn = new ServerConnection(config, mapper,
                 frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, workspace,
-                        execHandler, connRef[0]),
+                        execHandler, watcher, queryHandler, connRef[0]),
                 () -> connRef[0].send(helloFrame(sessions, version, workspaceBytes.get(),
                         config.labels(), toolchain.get())));
         connRef[0] = conn;
@@ -155,6 +162,7 @@ public class AgentRunnerMain {
             log.info("runner 关闭中，终止全部会话/exec 进程");
             heartbeat.shutdownNow();
             gcTimer.shutdownNow();
+            watcher.shutdown();
             sessions.killAll();
             execHandler.killAll();
             conn.shutdown();
@@ -199,7 +207,8 @@ public class AgentRunnerMain {
     private static void handleFrame(JsonNode frame, RunnerConfig config, Path configFile,
                                     CliProcessLauncher protocol, SessionExecutor executor,
                                     RunnerSessionRegistry sessions, RunnerWorkspace workspace,
-                                    ExecHandler execHandler, ServerConnection conn) {
+                                    ExecHandler execHandler, WorkspaceWatcher watcher,
+                                    WorkspaceQueryHandler queryHandler, ServerConnection conn) {
         // CAP-43：帧携带 proxy{url,scopes}（协议 v8+，节点配了外网代理才带）→ 刷新进程级
         // NodeProxy holder，git/claude/exec 三 scope 消费点直接读 holder；帧无此字段不动 holder
         // （权威源在服务端，四类消费帧都带同一值，重复刷新幂等）
@@ -207,7 +216,7 @@ public class AgentRunnerMain {
         String type = frame.path("type").asText("");
         String sessionId = frame.path("sessionId").asText("");
         switch (type) {
-            case "launch" -> handleLaunch(frame, sessionId, config, executor, sessions, workspace, conn);
+            case "launch" -> handleLaunch(frame, sessionId, config, executor, sessions, workspace, watcher, conn);
             case "exec" -> execHandler.handle(frame); // CAP-36：构建/部署/测试/发版下发执行
             case "input" -> sessions.writeStdin(sessionId,
                     protocol.buildUserMessage(frame.path("text").asText(""), parseImages(frame)));
@@ -222,6 +231,7 @@ public class AgentRunnerMain {
             case "worklog_push" -> handleWorklogPush(frame, config, workspace, conn);
             case "workspace_finalize" -> handleWorkspaceFinalize(frame, config, sessions, workspace, conn);
             case "workspace_release" -> handleWorkspaceRelease(frame, sessions, workspace, conn);
+            case "workspace_query" -> queryHandler.handle(frame); // CAP-54：工作区只读查询
             default -> log.debug("未知指令类型: {}", type);
         }
     }
@@ -314,7 +324,8 @@ public class AgentRunnerMain {
 
     private static void handleLaunch(JsonNode frame, String sessionId, RunnerConfig config,
                                      SessionExecutor executor, RunnerSessionRegistry sessions,
-                                     RunnerWorkspace workspace, ServerConnection conn) {
+                                     RunnerWorkspace workspace, WorkspaceWatcher watcher,
+                                     ServerConnection conn) {
         try {
             if (sessions.size() >= config.maxConcurrent()) {
                 throw new IllegalStateException("runner 并发会话已达上限 " + config.maxConcurrent());
@@ -475,6 +486,8 @@ public class AgentRunnerMain {
                     sessionId, workDir, taskSpec, model, permissionMode, env, resumeSessionId));
             sessions.register(sessionId, proc, finalizer, sessionDir);
             conn.send(Map.of("type", "launched", "sessionId", sessionId, "ok", true));
+            // CAP-54：launch 后尽快推初始快照（面板可见「干净工作区」基线）
+            watcher.onLaunch(sessionId);
         } catch (Exception e) {
             log.warn("拉起会话失败: session={} err={}", sessionId, e.getMessage());
             conn.send(Map.of("type", "launched", "sessionId", sessionId,

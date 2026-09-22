@@ -41,10 +41,29 @@ public class RunnerSessionRegistry {
         void upload(String sessionId, java.nio.file.Path sessionDir);
     }
 
+    /** CAP-54 事件分接：事件上行后同步回调（WorkspaceWatcher 据此触发 git 状态采集）。 */
+    public interface EventTap {
+        void onEvent(String sessionId, SessionEvent ev);
+    }
+
     private final CliEventParser parser;
     private final FrameSender sender;
     private volatile OutputUploadHook outputHook;
+    /** CAP-54：事件分接（setter 注入，watcher 构造需要 registry 先行） */
+    private volatile EventTap eventTap;
     private final Map<String, RunnerSession> sessions = new ConcurrentHashMap<>();
+    /**
+     * CAP-54：已结束会话的目录记忆（sessionId → sessionDir，上限 200 条 FIFO）。
+     * CAP-51 收口后工作树保留，终态会话的文件浏览/状态查询靠它定位；进程重启即丢
+     * （内存信息，不持久化——重启后终态会话查询报「不在本节点运行」，可接受）。
+     */
+    private final Map<String, java.nio.file.Path> recentDirs =
+            java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<>() {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, java.nio.file.Path> eldest) {
+                    return size() > 200;
+                }
+            });
 
     public RunnerSessionRegistry(CliEventParser parser, FrameSender sender) {
         this.parser = parser;
@@ -54,6 +73,11 @@ public class RunnerSessionRegistry {
     /** CAP-37：装配产出回传挂钩（hook 内可能反向调用本表 reportSystem，故用 setter 而非构造器）。 */
     public void setOutputHook(OutputUploadHook outputHook) {
         this.outputHook = outputHook;
+    }
+
+    /** CAP-54：装配事件分接（事件上行后回调，watcher 触发采集用；异常在回调点吞掉不影响事件流）。 */
+    public void setEventTap(EventTap eventTap) {
+        this.eventTap = eventTap;
     }
 
     public int size() {
@@ -108,6 +132,15 @@ public class RunnerSessionRegistry {
     public java.util.Optional<java.nio.file.Path> sessionDirOf(String sessionId) {
         RunnerSession s = sessions.get(sessionId);
         return s == null ? java.util.Optional.empty() : java.util.Optional.ofNullable(s.sessionDir);
+    }
+
+    /**
+     * CAP-54：运行中或刚结束会话的工作目录（workspace_query 定位用——CAP-51 收口保留工作树，
+     * 终态会话仍可浏览）。运行中优先，其次 recentDirs；都不认识返回 empty。
+     */
+    public java.util.Optional<java.nio.file.Path> knownDirOf(String sessionId) {
+        var dir = sessionDirOf(sessionId);
+        return dir.isPresent() ? dir : java.util.Optional.ofNullable(recentDirs.get(sessionId));
     }
 
     /** 写一行 JSON 到会话 stdin（调用方已按 CLI 协议拼装）。 */
@@ -187,6 +220,9 @@ public class RunnerSessionRegistry {
             code = -1;
         }
         sessions.remove(s.sessionId, s);
+        if (s.sessionDir != null) {
+            recentDirs.put(s.sessionId, s.sessionDir); // CAP-54：终态会话查询定位用
+        }
         com.devmind.common.agent.exec.WorkspaceReconciler.clearPidFile(s.sessionDir);
         // CAP-37：产出回传必须在 finalizer（push + 删除工作区）之前，否则 .devmind/output 已被删
         if (outputHook != null && s.sessionDir != null) {
@@ -217,6 +253,15 @@ public class RunnerSessionRegistry {
         frame.put("timestamp", ev.timestamp());
         frame.put("payload", ev.payload());
         sender.send(frame);
+        // CAP-54：事件上行后分接给 watcher；分接异常不得影响事件流
+        EventTap tap = eventTap;
+        if (tap != null) {
+            try {
+                tap.onEvent(sessionId, ev);
+            } catch (Exception e) {
+                log.debug("事件分接异常: session={} err={}", sessionId, e.getMessage());
+            }
+        }
     }
 
     private static final class RunnerSession {
