@@ -58,6 +58,13 @@ CAP-18/23 的凭证模型是**平台级共享**：Integration 实例（PAT）由
   （按 username + repoHost 返回 GitAuthor(name, email)，email 可空 = 仅注入 name），
   devmind-integration 实现；消费方（devmind-session）以 `ObjectProvider` 探测注入，不成环。
   **token 不出 SPI**——会话侧只需要署名，push 用 token 在 integration 模块内部解析。
+- **FR-06 收口合并提交署名**：工作区收口（CAP-42/51 `workspace_finalize`）的 merge 提交
+  以**操作者**身份署名——服务端按 FR-03 同一条解析链（操作者 + 主库 host）解出
+  GitAuthor，随 finalize 帧以 `gitAuthorName/gitAuthorEmail` 下发（协议 v12 可选字段，
+  不门控：老 runner 忽略、字段缺席时 runner 逐值回退内置 devmind / devmind@runner.local，
+  双向优雅降级）。另：异步链路（需求流程分流/编排派发，actor 回退 local）创建会话时
+  按 WI.ownerId → 需求.ownerId → WI.createdBy → 需求.createdBy 回退真实归属用户，
+  createdBy 与身份解析不再落 local（否则 agent 提交署名退化为 runner 机系统 git 配置）。
 
 ## 4. 校验规则
 

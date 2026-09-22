@@ -22,6 +22,7 @@ import com.devmind.common.agent.WorkspaceStatusListener;
 import com.devmind.common.agent.WorklogPushResult;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.common.integration.GitIdentityProvider.GitAuthor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -675,6 +676,20 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
                                             String workspaceOwner,
                                             List<AgentLaunchCommand.RepoSpec> specs,
                                             boolean discardChanges, String workspaceKey) {
+        return finalizeWorkspace(nodeId, sessionId, projectId, workspaceOwner, specs, discardChanges,
+                workspaceKey, null);
+    }
+
+    /**
+     * CAP-24 FR-06：带操作者 git 身份的收口——帧非空才带 gitAuthorName/gitAuthorEmail
+     * （缺席 = runner 回退内置 devmind 署名；老 runner 忽略新字段，双向兼容不门控）。
+     */
+    @Override
+    public FinalizeResult finalizeWorkspace(String nodeId, String sessionId, String projectId,
+                                            String workspaceOwner,
+                                            List<AgentLaunchCommand.RepoSpec> specs,
+                                            boolean discardChanges, String workspaceKey,
+                                            GitAuthor operator) {
         WebSocketSession ws = requireConnection(nodeId); // 先判在线再判版本，同 releaseWorkspace
         if (!supports(nodeId, AgentProtocol.PER_USER_WORKSPACE)) {
             throw new DevMindException(ErrorCode.CONFLICT,
@@ -696,6 +711,15 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         // CAP-51 红线：workspaceKey 必须在此 put（缺席 = runner 收口旧布局 work/）
         if (workspaceKey != null && !workspaceKey.isBlank()) {
             frame.put("workspaceKey", workspaceKey);
+        }
+        // CAP-24 FR-06 红线：操作者身份非空才 put（缺席 = runner 回退内置 devmind 署名）
+        if (operator != null) {
+            if (operator.name() != null && !operator.name().isBlank()) {
+                frame.put("gitAuthorName", operator.name());
+            }
+            if (operator.email() != null && !operator.email().isBlank()) {
+                frame.put("gitAuthorEmail", operator.email());
+            }
         }
         List<Map<String, Object>> repos = new ArrayList<>();
         for (AgentLaunchCommand.RepoSpec spec : specs) {

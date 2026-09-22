@@ -8,6 +8,7 @@ import com.devmind.common.agent.WorkspaceReleaseResult;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.common.integration.GitIdentityProvider;
 import com.devmind.project.ProjectService;
 import com.devmind.project.RequirementService;
 import com.devmind.project.WorktreeManager;
@@ -184,6 +185,7 @@ class SessionRequirementWorkspaceTest {
         final List<AgentLaunchCommand.RepoSpec> finalizeSpecs = new ArrayList<>();
         String finalizeKey;
         String finalizeOwner;
+        GitIdentityProvider.GitAuthor finalizeOperator;
         String launchKey;
         final List<String> releasedKeys = new ArrayList<>();
         int releaseCalls;
@@ -232,9 +234,11 @@ class SessionRequirementWorkspaceTest {
         public FinalizeResult finalizeWorkspace(String nodeId, String sessionId, String projectId,
                                                 String workspaceOwner,
                                                 List<AgentLaunchCommand.RepoSpec> specs,
-                                                boolean discardChanges, String workspaceKey) {
+                                                boolean discardChanges, String workspaceKey,
+                                                GitIdentityProvider.GitAuthor operator) {
             finalizeOwner = workspaceOwner;
             finalizeKey = workspaceKey;
+            finalizeOperator = operator;
             finalizeSpecs.clear();
             finalizeSpecs.addAll(specs);
             return finalizeError != null ? FinalizeResult.failed(finalizeError) : FinalizeResult.ok("ok");

@@ -144,6 +144,21 @@ public interface AgentNodeConnector {
     }
 
     /**
+     * CAP-24 FR-06 收口署名：语义同上，帧额外携带操作者 git 身份（{@code gitAuthorName/gitAuthorEmail}，
+     * 仅非空才带），runner 的收口 merge 提交以此署名；{@code operator} 为 null 或字段缺席时
+     * runner 回退内置 devmind 署名（老 runner 忽略新字段，双向兼容，协议 v12 记录不门控）。
+     * 默认实现丢弃身份字段降级到 8 参重载（兼容未更新的实现/fake）。
+     */
+    default FinalizeResult finalizeWorkspace(String nodeId, String sessionId, String projectId,
+                                             String workspaceOwner,
+                                             List<AgentLaunchCommand.RepoSpec> specs,
+                                             boolean discardChanges, String workspaceKey,
+                                             com.devmind.common.integration.GitIdentityProvider.GitAuthor operator) {
+        return finalizeWorkspace(nodeId, sessionId, projectId, workspaceOwner, specs, discardChanges,
+                workspaceKey);
+    }
+
+    /**
      * CAP-42：下发 workspace_release 帧并阻塞等 workspace_release_ack——删除会话时释放固定工作区
      * {@code <workspaceRoot>/<projectId>/<workspaceOwner>/}：逐库丢弃未提交改动 → 删 worktree
      * → 删本地会话分支（<b>不合并不 push</b>，与 {@link #finalizeWorkspace} 的区别见

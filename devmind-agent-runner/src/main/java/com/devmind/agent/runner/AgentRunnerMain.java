@@ -7,6 +7,7 @@ import com.devmind.common.agent.runtime.RuntimeSettings;
 import com.devmind.common.agent.runtime.SessionExecutor;
 import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.exec.RunnerWorkspace;
+import com.devmind.common.integration.GitIdentityProvider.GitAuthor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
@@ -580,6 +581,11 @@ public class AgentRunnerMain {
         // CAP-51：非空 = 需求粒度工作区 worktrees/<key>；空 = 存量会话旧布局 work/（旧服务端不发此字段）
         String workspaceKey = frame.path("workspaceKey").asText("");
         boolean discardChanges = frame.path("discardChanges").asBoolean(false);
+        // CAP-24 FR-06：操作者 git 身份（协议 v12 可选字段，缺席/空 = merge 署名回退内置 devmind）
+        String gitName = frame.path("gitAuthorName").asText("");
+        String gitEmail = frame.path("gitAuthorEmail").asText("");
+        GitAuthor operator = gitName.isBlank() && gitEmail.isBlank() ? null
+                : new GitAuthor(gitName, gitEmail);
         java.util.List<RunnerWorkspace.RepoSpec> specs = new java.util.ArrayList<>();
         for (JsonNode rn : frame.path("repos")) {
             specs.add(new RunnerWorkspace.RepoSpec(
@@ -603,7 +609,7 @@ public class AgentRunnerMain {
                             "会话 " + sessionId + " 仍在本节点运行，请先结束会话再收口");
                 }
                 RunnerWorkspace.FinalizeOutcome r = workspace.finalize(projectId, owner, specs,
-                        discardChanges, workspaceKey);
+                        discardChanges, workspaceKey, operator);
                 if (r.exit() == 0) {
                     ack.put("ok", true);
                     ack.put("detail", r.output());

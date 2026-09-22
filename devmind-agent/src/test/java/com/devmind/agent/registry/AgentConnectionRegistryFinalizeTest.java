@@ -8,6 +8,7 @@ import com.devmind.agent.service.AgentNodeService;
 import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.FinalizeResult;
 import com.devmind.common.exception.DevMindException;
+import com.devmind.common.integration.GitIdentityProvider.GitAuthor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -73,12 +74,16 @@ class AgentConnectionRegistryFinalizeTest {
     }
 
     private Call startFinalize(String workspaceKey) throws Exception {
+        return startFinalize(workspaceKey, null);
+    }
+
+    private Call startFinalize(String workspaceKey, GitAuthor operator) throws Exception {
         AtomicReference<FinalizeResult> result = new AtomicReference<>();
         AtomicReference<Throwable> error = new AtomicReference<>();
         Thread t = new Thread(() -> {
             try {
                 result.set(registry.finalizeWorkspace("7", "s1", "proj1", "alice", specs(), true,
-                        workspaceKey));
+                        workspaceKey, operator));
             } catch (Throwable e) {
                 error.set(e);
             }
@@ -159,6 +164,33 @@ class AgentConnectionRegistryFinalizeTest {
         legacy.thread().join(10_000);
         assertTrue(legacy.result().get() != null && legacy.result().get().ok(),
                 String.valueOf(legacy.error().get()));
+    }
+
+    /** CAP-24 FR-06 红线回归：带操作者身份 → 帧必须带 gitAuthorName/gitAuthorEmail；不带 → 字段缺席。 */
+    @Test
+    void serializesGitIdentityOnlyWhenPresent() throws Exception {
+        Call withId = startFinalize(null, new GitAuthor("刘长青", "lcq@example.com"));
+        assertTrue(withId.payload().contains("\"gitAuthorName\":\"刘长青\""), withId.payload());
+        assertTrue(withId.payload().contains("\"gitAuthorEmail\":\"lcq@example.com\""), withId.payload());
+        registry.onWorkspaceFinalizeAck("7", requestIdOf(withId.payload()), true, "ok", null);
+        withId.thread().join(10_000);
+        assertTrue(withId.result().get() != null && withId.result().get().ok(),
+                String.valueOf(withId.error().get()));
+
+        // email 为空（无绑定仅回退 displayName）→ 只带 name 不带 email
+        Call nameOnly = startFinalize(null, new GitAuthor("管理员", null));
+        assertTrue(nameOnly.payload().contains("\"gitAuthorName\":\"管理员\""), nameOnly.payload());
+        assertFalse(nameOnly.payload().contains("gitAuthorEmail"), nameOnly.payload());
+        registry.onWorkspaceFinalizeAck("7", requestIdOf(nameOnly.payload()), true, "ok", null);
+        nameOnly.thread().join(10_000);
+
+        Call noId = startFinalize(null, null);
+        assertFalse(noId.payload().contains("gitAuthorName"), noId.payload());
+        assertFalse(noId.payload().contains("gitAuthorEmail"), noId.payload());
+        registry.onWorkspaceFinalizeAck("7", requestIdOf(noId.payload()), true, "ok", null);
+        noId.thread().join(10_000);
+        assertTrue(noId.result().get() != null && noId.result().get().ok(),
+                String.valueOf(noId.error().get()));
     }
 
     @Test

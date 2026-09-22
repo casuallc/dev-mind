@@ -29,12 +29,15 @@ package com.devmind.common.agent;
  * 未升级服务端），此时不门控——这是 FR-11 存量兼容的契约，不是降级）。v11 = CAP-54
  * 会话工作区实时视图（workspace_status 上行帧 + workspace_query/workspace_query_ack
  * 请求应答帧——老 runner 不认识 workspace_query 会静默忽略，REST 端点会等到超时，
- * 故服务端先按版本门控直接 409 引导升级；上行 workspace_status 被老服务端忽略，不门控）。</p>
+ * 故服务端先按版本门控直接 409 引导升级；上行 workspace_status 被老服务端忽略，不门控）。
+ * v12 = CAP-24 FR-06 收口署名（workspace_finalize 帧携带 gitAuthorName/gitAuthorEmail——
+ * 收口 merge 提交以操作者绑定身份署名；<b>可选字段不门控</b>：老 runner 忽略字段、字段
+ * 缺席时 runner 回退内置 devmind 署名，双向优雅降级）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 11;
+    public static final int CURRENT = 12;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -65,6 +68,9 @@ public final class AgentProtocol {
 
     /** CAP-54 工作区实时视图（workspace_status / workspace_query 帧）所需最低版本 */
     public static final int WORKSPACE_VIEW = 11;
+
+    /** CAP-24 FR-06 收口署名（workspace_finalize 帧 gitAuthorName/gitAuthorEmail）；可选字段不门控 */
+    public static final int FINALIZE_IDENTITY = 12;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;

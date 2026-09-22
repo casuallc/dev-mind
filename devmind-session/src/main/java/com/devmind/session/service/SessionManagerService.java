@@ -14,6 +14,7 @@ import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.auth.IdentityService;
 import com.devmind.common.integration.GitIdentityProvider;
+import com.devmind.common.integration.GitIdentityProvider.GitAuthor;
 import com.devmind.common.integration.RepoGitGateway;
 import com.devmind.common.notification.NotificationEvent;
 import com.devmind.notification.NotificationPublisher;
@@ -692,8 +693,11 @@ public class SessionManagerService {
         }
         String wsOwner = requireWorkspaceOwner(ent.getWorkspaceOwner() != null
                 && !ent.getWorkspaceOwner().isBlank() ? ent.getWorkspaceOwner() : ent.getCreatedBy());
+        // CAP-24 FR-06：收口 merge 提交署名 = 操作者绑定身份（null = 帧不带身份字段，
+        // runner 回退内置 devmind 署名；老 runner 忽略字段同样回退，双向兼容）
+        GitAuthor operator = resolveGitAuthor(identityService.currentActor(), proj);
         FinalizeResult result = connector.finalizeWorkspace(ent.getAgentNodeId(), id,
-                ent.getProjectId(), wsOwner, specs, discardChanges, ent.getWorkspaceKey());
+                ent.getProjectId(), wsOwner, specs, discardChanges, ent.getWorkspaceKey(), operator);
         if (!result.ok()) {
             throw new DevMindException(ErrorCode.CONFLICT,
                     "收口失败（工作区已保留，可处理后重试）: " + result.error());
@@ -1151,9 +1155,32 @@ public class SessionManagerService {
      * SPI 未装配/无项目/解析失败均返回空 Map（保持现状，系统 git 配置兜底）。
      */
     private Map<String, String> resolveGitEnv(String username, Project project) {
-        GitIdentityProvider provider = gitIdentityProvider.getIfAvailable();
-        if (provider == null || username == null || username.isBlank()) {
+        GitAuthor author = resolveGitAuthor(username, project);
+        if (author == null) {
             return Map.of();
+        }
+        Map<String, String> env = new java.util.HashMap<>();
+        if (author.name() != null && !author.name().isBlank()) {
+            env.put("GIT_AUTHOR_NAME", author.name());
+            env.put("GIT_COMMITTER_NAME", author.name());
+        }
+        if (author.email() != null && !author.email().isBlank()) {
+            env.put("GIT_AUTHOR_EMAIL", author.email());
+            env.put("GIT_COMMITTER_EMAIL", author.email());
+        }
+        return Map.copyOf(env);
+    }
+
+    /**
+     * CAP-24 身份解析本体（create 注入 env 与收口 merge 署名共用）：
+     * 用户在主库 remoteUrl host 的个人凭证署名 → 回退 displayName/username（仅 name）。
+     * SPI 未装配/无项目/解析失败均返回 null（调用方各自降级：create 不注入 env，
+     * 收口帧不带身份字段 → runner 回退内置 devmind 署名）。
+     */
+    private GitAuthor resolveGitAuthor(String username, Project project) {
+        GitIdentityProvider provider = gitIdentityProvider != null ? gitIdentityProvider.getIfAvailable() : null;
+        if (provider == null || username == null || username.isBlank()) {
+            return null;
         }
         try {
             String repoHost = null;
@@ -1161,24 +1188,11 @@ public class SessionManagerService {
                 String remoteUrl = projectService.primaryRepo(project.id()).getRemoteUrl();
                 repoHost = hostOf(remoteUrl);
             }
-            return provider.resolveAuthor(username, repoHost)
-                    .map(author -> {
-                        Map<String, String> env = new java.util.HashMap<>();
-                        if (author.name() != null && !author.name().isBlank()) {
-                            env.put("GIT_AUTHOR_NAME", author.name());
-                            env.put("GIT_COMMITTER_NAME", author.name());
-                        }
-                        if (author.email() != null && !author.email().isBlank()) {
-                            env.put("GIT_AUTHOR_EMAIL", author.email());
-                            env.put("GIT_COMMITTER_EMAIL", author.email());
-                        }
-                        return Map.copyOf(env);
-                    })
-                    .orElse(Map.of());
+            return provider.resolveAuthor(username, repoHost).orElse(null);
         } catch (Exception e) {
-            // 身份解析失败不阻塞会话创建
+            // 身份解析失败不阻塞会话创建/收口
             log.debug("Git 提交身份解析失败(忽略): user={} err={}", username, e.getMessage());
-            return Map.of();
+            return null;
         }
     }
 

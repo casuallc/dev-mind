@@ -1,5 +1,6 @@
 package com.devmind.common.agent.exec;
 
+import com.devmind.common.integration.GitIdentityProvider.GitAuthor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -595,6 +596,17 @@ public class RunnerWorkspace {
      */
     public FinalizeOutcome finalize(String projectId, String workspaceOwner,
                                     List<RepoSpec> specs, boolean discardChanges, String workspaceKey) {
+        return finalize(projectId, workspaceOwner, specs, discardChanges, workspaceKey, null);
+    }
+
+    /**
+     * CAP-24 FR-06：带操作者 git 身份的收口——收口 merge 提交以 {@code operator} 署名
+     * （逐值回退：name 空 → devmind、email 空 → devmind@runner.local；{@code operator} 为 null
+     * = 老服务端未下发身份，保持内置署名）。
+     */
+    public FinalizeOutcome finalize(String projectId, String workspaceOwner,
+                                    List<RepoSpec> specs, boolean discardChanges, String workspaceKey,
+                                    GitAuthor operator) {
         requireSafeId(projectId, "projectId");
         String owner = requireOwner(workspaceOwner);
         String key = requireKey(workspaceKey);
@@ -620,7 +632,7 @@ public class RunnerWorkspace {
             lock.lock();
             try {
                 String err = finalizeOne(cacheDir, workDir, userRoot, spec, discardChanges, label,
-                        summary, key);
+                        summary, key, operator);
                 if (err != null) {
                     allOk = false;
                     summary.append(label).append("失败: ").append(err).append('\n');
@@ -650,10 +662,12 @@ public class RunnerWorkspace {
     /**
      * 单库收口（finalize 逐库调用，调用方持 cacheLock）。成功返回 null 并向 summary 追加摘要；
      * 失败返回脱敏错误文案（固定 worktree 原样保留）。
+     *
+     * <p>CAP-24 FR-06：{@code operator} 非空时收口 merge 提交以其署名（逐值回退内置 devmind 身份）。</p>
      */
     private String finalizeOne(Path cacheDir, Path workDir, Path userRoot, RepoSpec spec,
                                boolean discardChanges, String label, StringBuilder summary,
-                               String key) {
+                               String key, GitAuthor operator) {
         if (!Files.isDirectory(cacheDir.resolve(".git"))) {
             return "克隆缓存缺失（工作区未初始化或已收口）: " + cacheDir;
         }
@@ -717,8 +731,13 @@ public class RunnerWorkspace {
             if (add.exit() != 0) {
                 return "临时合并工作区创建失败: " + tail(add.output());
             }
+            // CAP-24 FR-06：merge 提交署名 = 操作者绑定身份（逐值回退内置 devmind 身份）
+            String mergeName = operator != null && operator.name() != null && !operator.name().isBlank()
+                    ? operator.name() : "devmind";
+            String mergeEmail = operator != null && operator.email() != null && !operator.email().isBlank()
+                    ? operator.email() : "devmind@runner.local";
             Result merge = run(tmp, OP_TIMEOUT_SEC, spec.token(),
-                    "-c", "user.name=devmind", "-c", "user.email=devmind@runner.local",
+                    "-c", "user.name=" + mergeName, "-c", "user.email=" + mergeEmail,
                     "merge", "--no-ff", "-m", "merge: 会话分支 " + spec.branch() + " 收口", spec.branch());
             if (merge.exit() != 0) {
                 run(tmp, OP_TIMEOUT_SEC, spec.token(), "merge", "--abort");

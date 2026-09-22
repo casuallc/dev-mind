@@ -1,5 +1,6 @@
 package com.devmind.common.agent.exec;
 
+import com.devmind.common.integration.GitIdentityProvider.GitAuthor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -336,6 +337,9 @@ class RunnerWorkspaceTest {
         // 基线含合并提交（merge --no-ff + 收口消息）与会话产出
         assertEquals("change", git(origin, "show", "main:code.txt").trim());
         assertTrue(git(origin, "log", "--oneline", "main").contains("收口"), "基线应有收口合并提交");
+        // 无操作者身份（老服务端/未绑定）→ merge 提交回退内置 devmind 署名
+        assertEquals("devmind", git(origin, "log", "-1", "--format=%an", "main").trim());
+        assertEquals("devmind@runner.local", git(origin, "log", "-1", "--format=%ae", "main").trim());
         // 会话分支 best-effort 推送远端（供收口后 diff）
         assertFalse(gitOut(origin, "rev-parse", "--verify", "refs/heads/feature/s1").isBlank());
         // 固定 worktree 与本地分支已删；临时合并目录已清
@@ -351,6 +355,27 @@ class RunnerWorkspaceTest {
         assertEquals("feature/s2", gitOut(s2.sessionDir(), "branch", "--show-current"));
         // 新会话基线含已收口的产出
         assertEquals("change", Files.readString(s2.sessionDir().resolve("code.txt")));
+    }
+
+    /** CAP-24 FR-06：带操作者身份的收口——merge 提交以绑定署名（author 与 committer 都是）。 */
+    @Test
+    void finalizeMergeCommitUsesOperatorIdentity() throws Exception {
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s1", "");
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", spec);
+        Files.writeString(ctx.sessionDir().resolve("code.txt"), "change");
+        git(ctx.sessionDir(), "add", ".");
+        git(ctx.sessionDir(), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "work");
+
+        RunnerWorkspace.FinalizeOutcome r = ws.finalize("proj1", "alice", List.of(spec), false, null,
+                new GitAuthor("刘长青", "lcq@example.com"));
+        assertEquals(0, r.exit(), r.output());
+        assertEquals("刘长青", git(origin, "log", "-1", "--format=%an", "main").trim());
+        assertEquals("lcq@example.com", git(origin, "log", "-1", "--format=%ae", "main").trim());
+        assertEquals("刘长青", git(origin, "log", "-1", "--format=%cn", "main").trim());
     }
 
     @Test
