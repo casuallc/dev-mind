@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * CAP-30 通用问答 REST API。无 diff / worktree / template 端点（与项目会话完全分开）。
@@ -92,6 +93,26 @@ public class ChatController {
     @GetMapping(value = "/{id}/context", produces = "application/json")
     public String context(@PathVariable String id) {
         return service.contextManifest(id); // 落库的即合法 JSON 快照，原样透传
+    }
+
+    // ---------------- CAP-54 工作区视图（沙箱非 git：无 diff；推送走 /ws/chats/{id} 的 workspace 帧） ----------------
+
+    /** 最新快照：优先内存缓存；无缓存（未推过/终态）回 source 端点实时查询。 */
+    @GetMapping("/{id}/workspace/status")
+    public Map<String, Object> workspaceStatus(@PathVariable String id) {
+        Map<String, Object> cached = service.latestWorkspaceSnapshot(id);
+        return cached != null ? cached : service.workspaceQuery(id, "status", null);
+    }
+
+    @GetMapping("/{id}/workspace/tree")
+    public Map<String, Object> workspaceTree(@PathVariable String id,
+                                             @RequestParam(required = false) String path) {
+        return service.workspaceQuery(id, "tree", path);
+    }
+
+    @GetMapping("/{id}/workspace/file")
+    public Map<String, Object> workspaceFile(@PathVariable String id, @RequestParam String path) {
+        return service.workspaceQuery(id, "file", path);
     }
 
     @DeleteMapping("/{id}")

@@ -17,6 +17,7 @@ import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.ChatContextPreparer;
 import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.SessionEvent;
+import com.devmind.common.agent.WorkspaceQueryResult;
 import com.devmind.common.agent.exec.ContextManifest;
 import com.devmind.common.agent.runtime.AbstractSessionRuntime;
 import com.devmind.common.agent.runtime.ModelSessionRuntime;
@@ -47,6 +48,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
@@ -573,6 +575,79 @@ public class ChatManagerService {
         }
     }
 
+    // ---------------- CAP-54 工作区实时视图（旁路：最新值缓存 + WS 订阅，不入事件流/不落库） ----------------
+
+    /** chatId → 最新工作区快照（进程退出后保留最终态，删除问答时清除）。 */
+    private final Map<String, Map<String, Object>> workspaceSnapshots = new ConcurrentHashMap<>();
+    /** chatId → 工作区快照订阅者（浏览器 WS /ws/chats/{id} 的 workspace 帧）。 */
+    private final Map<String, Set<Consumer<Map<String, Object>>>> workspaceSubs = new ConcurrentHashMap<>();
+
+    /**
+     * runner 上行 workspace_status（ChatAgentBridge 路由至此）：认领本模块问答后缓存最新值
+     * 并推订阅者。运行时在册按节点匹配；刚退出的尾帧运行时已注销，按 DB 归属节点兜底认领。
+     */
+    public void onWorkspaceStatus(String nodeId, String sessionId, Map<String, Object> snapshot) {
+        SessionHandle h = runtimes.get(sessionId);
+        if (!(h instanceof RemoteSessionRuntime r) || !r.nodeId().equals(nodeId)) {
+            ChatSessionEntity ent = chatRepo.findById(sessionId).orElse(null);
+            if (ent == null || !nodeId.equals(ent.getAgentNodeId())) {
+                return; // 非本模块会话（项目会话等）或节点不符——忽略
+            }
+        }
+        workspaceSnapshots.put(sessionId, snapshot);
+        Set<Consumer<Map<String, Object>>> subs = workspaceSubs.get(sessionId);
+        if (subs != null) {
+            for (Consumer<Map<String, Object>> c : subs) {
+                try {
+                    c.accept(snapshot);
+                } catch (Exception e) {
+                    log.debug("workspace 快照推送失败: chat={} err={}", sessionId, e.getMessage());
+                }
+            }
+        }
+    }
+
+    /** 最新缓存快照（WS 连接建立时补发；无 = runner 未推过/版本过低）。 */
+    public Map<String, Object> latestWorkspaceSnapshot(String id) {
+        return workspaceSnapshots.get(id);
+    }
+
+    public void subscribeWorkspace(String id, Consumer<Map<String, Object>> consumer) {
+        workspaceSubs.computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet()).add(consumer);
+    }
+
+    public void unsubscribeWorkspace(String id, Consumer<Map<String, Object>> consumer) {
+        Set<Consumer<Map<String, Object>>> subs = workspaceSubs.get(id);
+        if (subs != null) {
+            subs.remove(consumer);
+            if (subs.isEmpty()) {
+                workspaceSubs.remove(id, subs);
+            }
+        }
+    }
+
+    /**
+     * 工作区只读查询透传（REST → workspace_query 帧 → runner 读盘）。
+     * 协议版本门控在 connector 内（老 runner 409 引导升级）；查询失败抛 CONFLICT 带 runner 原因。
+     * chat 沙箱无 git，不提供 diff action。
+     */
+    public Map<String, Object> workspaceQuery(String id, String action, String path) {
+        ChatSessionEntity ent = requireOwned(id);
+        if (ent.isModel() || ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "该问答无执行节点（模型执行体），工作区视图不可用");
+        }
+        AgentNodeConnector connector = connectorProvider.getIfAvailable();
+        if (connector == null) {
+            throw new DevMindException(ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+        }
+        WorkspaceQueryResult r = connector.workspaceQuery(ent.getAgentNodeId(), id, action, null, path);
+        if (!r.ok()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    r.error() == null || r.error().isBlank() ? "工作区查询失败" : r.error());
+        }
+        return r.payload();
+    }
+
     /** 删除问答：杀进程（若在跑）、删事件与记录；远程沙箱由 runner finalizer 负责。 */
     @Transactional
     public void deleteChat(String id) {
@@ -584,6 +659,8 @@ public class ChatManagerService {
         }
         eventRepo.deleteByChatId(id);
         chatRepo.delete(ent);
+        workspaceSnapshots.remove(id); // CAP-54：旁路缓存随记录清除
+        workspaceSubs.remove(id);
     }
 
     // ---------------- 启动/关闭 ----------------
