@@ -77,7 +77,7 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 | cap33_verify.py | 场景化会话与上下文装配（自建 fake runner） |
 | cap34_fr04_08_verify.py / cap34_reattach_verify.py | runner 调度：断连对账/服务端重启 reattach/exit 路由 |
 | cap37_e2e.py ~ cap40_e2e.py | 产出回传、流程串联、需求附件上下文投送（协议 v3/v4；cap37 链路已被 CAP-38/52 取代，cap40 已改用 flow/plan） |
-| cap52_e2e.py | 需求流程精简：三合一规划会话（一会话三产出）→ 自动开发会话（**复用同一棵需求工作树**，CAP-51 验收 5）→ 待验收；粒度护栏/入口互斥/无清单与终态 409（协议 v10）。支持 `E2E_BASE` 指向非 8080 实例（如 `E2E_BASE=http://localhost:8090/api`），起隔离实例的姿势见下方「起独立实例跑 E2E」 |
+| cap52_e2e.py | 需求流程精简：三合一规划会话（一会话三产出）→ 自动开发会话（**复用同一棵需求工作树**，CAP-51 验收 5）→ 待验收；粒度护栏/入口互斥/无清单与终态 409（协议 v10）；终态自动清理（CAP-51 FR-06 修订：DONE 后需求工作树回收 + 本地/远端需求分支删除，协议 v13）。支持 `E2E_BASE` 指向非 8080 实例（如 `E2E_BASE=http://localhost:8090/api`），起隔离实例的姿势见下方「起独立实例跑 E2E」 |
 | cap54_e2e.py | 会话工作区实时视图（协议 v11）：status/tree/file/diff 四端点（含已跟踪 diff 与未跟踪 untracked）、路径逃逸 409/缺参 400、问答沙箱 gitAvailable=false 且无 diff 端点、终态经 runner recentDirs 仍可读（脚本自起 fake runner 节点） |
 | e2e-agent-node.py | CAP-21 节点全链路：注册→会话→授权→优雅退出→离线 409 |
 | e2e-cap41.py / b / c | CAP-41 工作日志空间：懒创建/守卫/种子模板/日报周报生成 |

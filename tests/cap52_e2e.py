@@ -11,6 +11,8 @@
 **WI 不自动置 DONE**（人验收，避免 N 条一起 DONE 掀起 N 次构建）。
 链路 C（粒度护栏）：清单 6 条（> MAX_ITEMS=5）→ flow.plan.partial、不建 WI、不起开发会话。
 链路 D（入口门禁）：规划会话进行中再起规划 409；无清单起开发 409；终态需求起规划 409。
+链路 G（CAP-51 FR-06 修订，终态自动清理）：需求翻 DONE → 异步释放需求工作树（worktrees/req-<rid>
+整块回收 + 删本地需求分支）+ 删远端需求分支（协议 v13 deleteRemoteBranch）。
 链路 E（人工再跑一轮）：清单已就绪时 POST /flow/dev 再起一个开发会话。
 链路 F（CAP-53）：claude cwd 上抬「项目+用户」根——cwd 级恒定路由文件存在、settings 落 cwd
 （共享）而非代码目录（工作树布局不变，仍 worktrees/req-<rid>）。
@@ -265,11 +267,28 @@ def main():
         assert any(n["eventType"] == "flow.plan.partial" for n in notes), "缺 flow.plan.partial 通知"
         print("[10] 6 条清单被拒（不建 WI、不起开发会话、发部分产出通知）OK")
 
-        # ---- 链路 D：终态需求 409 ----
+        # ---- 链路 D + G：终态需求 409；终态自动清理（FR-06 修订）----
+        # 模拟已收口状态：需求分支先在远端存在（终态清理要删的就是它）
+        wt_a = session_dir(dev2["id"], rid)
+        branch_a = f"feature/req-{rid}"
+        subprocess.run(["git", "push", ORIGIN.as_uri(),
+                        f"refs/heads/{branch_a}:refs/heads/{branch_a}"],
+                       cwd=wt_a, check=True, capture_output=True)
         req("PUT", f"/projects/{pid}/requirements/{rid}/status", {"status": "DONE"}, tok)
         e = req("POST", f"/projects/{pid}/requirements/{rid}/flow/plan", None, tok, expect=409)
         assert "DONE" in json.dumps(e, ensure_ascii=False), f"409 文案不符: {e}"
         print("[11] 终态需求起规划 409 OK")
+
+        # 终态清理异步执行（releaseExecutor → WS 下发 → runner 释放）：等工作树目录消失
+        wait(lambda: (not wt_a.exists()) or None, "终态释放需求工作树", 60)
+        assert not (uroot / "worktrees" / f"req-{rid}").exists(), "需求工作树应整块回收"
+
+        def _remote_branch_gone():
+            out = subprocess.run(["git", "ls-remote", ORIGIN.as_uri(), f"refs/heads/{branch_a}"],
+                                 capture_output=True, text=True).stdout
+            return (branch_a not in out) or None
+        wait(_remote_branch_gone, "远端需求分支删除", 30)
+        print("[12] 终态自动清理：工作树已回收 + 本地/远端需求分支已删 OK")
     finally:
         kill_tree(runner.pid)
         try:
