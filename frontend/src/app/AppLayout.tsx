@@ -1,4 +1,4 @@
-// 个人工作台外壳：顶部导航（品牌 + 一级导航 + 通知/用户，布局恒定）+ 居中内容区。
+// 个人工作台外壳：顶部导航（品牌 + 一级导航 + 通知/用户，布局恒定）+ 全宽内容区。
 // 项目切换器放在 ProjectSubNav 二级页签条右端（仅项目上下文页），不进顶部导航——
 // 否则切 tab 时一级导航位置随切换器显隐左右移动。
 import { Button, Layout, Menu, Tooltip } from 'antd'
@@ -30,8 +30,6 @@ export default function AppLayout() {
   // 项目列表常驻引导（加载 + currentId 兜底），与切换器 UI 解耦
   const projectBootstrap = useProjectBootstrap()
   const projectPage = isProjectPage(location.pathname)
-  // 工作台为多列聚合卡，铺满全宽；其余页面维持 1400 居中
-  const fullWidth = location.pathname === '/home'
 
   // 启动全局通知实时流（铃铛角标/浏览器通知依赖它）
   useEffect(() => {
@@ -106,8 +104,6 @@ export default function AppLayout() {
       >
         <div
           style={{
-            maxWidth: fullWidth ? 'none' : 1400,
-            margin: '0 auto',
             width: '100%',
             flex: 1,
             minHeight: 0,
