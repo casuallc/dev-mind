@@ -28,6 +28,7 @@
         <module>devmind-model</module>
         <module>devmind-decision</module>
         <module>devmind-decision-lab</module>
+        <module>devmind-classify</module>
         <module>devmind-knowledge</module>
         <module>devmind-skill</module>
         <module>devmind-session</module>
@@ -94,6 +95,11 @@
             <dependency>
                 <groupId>com.devmind</groupId>
                 <artifactId>devmind-decision-lab</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.devmind</groupId>
+                <artifactId>devmind-classify</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

@@ -47,6 +47,10 @@
         </dependency>
         <dependency>
             <groupId>com.devmind</groupId>
+            <artifactId>devmind-classify</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
             <artifactId>devmind-knowledge</artifactId>
         </dependency>
         <dependency>
