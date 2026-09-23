@@ -148,7 +148,16 @@ public class DatasetService {
         return detail(e.getId());
     }
 
-    /** 删只允许草稿：冻结集可能已被评测引用（报告要指得回去），要放弃它请先确认没有报告在用 */
+    /**
+     * 删只允许草稿：冻结集可能已被评测引用（报告要指得回去），要放弃它请先确认没有报告在用。
+     *
+     * <p>{@code @Transactional} 不是可选项：{@code itemRepo.deleteByDatasetId} 是<b>派生删除</b>，
+     * Spring Data 逐个 {@code em.remove}——没有活事务就抛
+     * "No EntityManager with actual transaction available for current thread"，删带条目的集必 500。
+     * mock 仓储的单测看不见这个（它绕过 JPA），只有真起实例打 HTTP 才照得出来：
+     * 真机 E2E 发现，见 {@code tests/cap56_gpu_e2e.py} 的「删草稿集」断言。</p>
+     */
+    @Transactional
     public void delete(Long id) {
         DecisionDatasetEntity e = requireDraft(id);
         itemRepo.deleteByDatasetId(e.getId());

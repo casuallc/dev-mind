@@ -353,6 +353,28 @@ class DatasetServiceTest {
         }
     }
 
+    // ---------------- 删除 ----------------
+
+    @Test
+    void deletingADraftTakesItsItemsWithItAndLeavesOtherDatasetsAlone() {
+        Long doomed = completeDataset();
+        Long keeper = service.create(new DatasetRequest("别动我", "BENCHMARK", null)).dataset().id();
+        service.addItem(keeper, normalItem());
+
+        service.delete(doomed);
+
+        assertEquals(ErrorCode.NOT_FOUND,
+                assertThrows(DevMindException.class, () -> service.detail(doomed)).getErrorCode(),
+                "行没了");
+        assertEquals(0, rowsOf(doomed).size(), "条目跟着走——留下孤儿条目，它们会在别的集里冒出来");
+        assertEquals(1, rowsOf(keeper).size(), "只删点名的那个集");
+    }
+
+    // 注意这条测不出的那一半：`itemRepo.deleteByDatasetId` 是**派生删除**，Spring Data 逐个
+    // em.remove，因此调用方必须有活事务（缺 @Transactional 时真机会 500 "No EntityManager with
+    // actual transaction available"）。仓储在这里是 mock，事务根本不存在，所以这个缺陷只能靠
+    // 真起实例的 E2E 照出来（tests/cap56_gpu_e2e.py 的「删草稿集」断言）——mock 单测的边界写在这。
+
     // ---------------- 修订 ----------------
 
     @Test
