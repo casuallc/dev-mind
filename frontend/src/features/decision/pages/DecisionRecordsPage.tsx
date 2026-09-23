@@ -1,6 +1,7 @@
 // CAP-55 FR-07 决策记录（模型建议 vs 人工裁决）：按能力筛选、逐题比对、导出 laya 训练 JSONL。
 // 布局遵循 docs/core/前端内容区布局约定.md：Card 标题，extra 放操作按钮，FitTable 表内滚动。
 import { useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Button, Card, DatePicker, Descriptions, Drawer, Input, Space, Table, Tag, Typography, message } from 'antd'
 import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
@@ -43,12 +44,14 @@ function confidenceTag(a: DecisionAnswer | undefined) {
 }
 
 export default function DecisionRecordsPage() {
+  // 支持 ?capability=xxx 直达（试分类结果面板的「到决策记录页查证」链接，CAP-57）
+  const [searchParams] = useSearchParams()
   const [rows, setRows] = useState<DecisionRecord[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
   const [size, setSize] = useState(20)
   const [loading, setLoading] = useState(false)
-  const [capability, setCapability] = useState('')
+  const [capability, setCapability] = useState(() => searchParams.get('capability') ?? '')
   const [since, setSince] = useState<string>('')
   const [exporting, setExporting] = useState(false)
   const [detail, setDetail] = useState<DecisionRecordDetail | null>(null)
@@ -192,6 +195,7 @@ export default function DecisionRecordsPage() {
       <Space style={{ marginBottom: 12 }} wrap>
         <Input.Search
           allowClear
+          defaultValue={capability}
           placeholder="能力（如 kb-proposal-triage）"
           style={{ width: 260 }}
           onSearch={(v) => {
