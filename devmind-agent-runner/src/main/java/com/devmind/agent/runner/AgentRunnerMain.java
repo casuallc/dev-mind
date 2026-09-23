@@ -256,7 +256,9 @@ public class AgentRunnerMain {
             case "workspace_finalize" -> handleWorkspaceFinalize(frame, config, sessions, workspace, conn);
             case "workspace_release" -> handleWorkspaceRelease(frame, sessions, workspace, conn);
             case "workspace_query" -> queryHandler.handle(frame); // CAP-54：工作区只读查询
-            case "terminal_exec" -> terminalHandler.handle(frame); // CAP-58：终端单条命令执行
+            case "terminal_exec" -> terminalHandler.handle(frame); // CAP-58/59：终端单条命令执行（持久 shell）
+            case "terminal_complete" -> terminalHandler.handleComplete(frame); // CAP-59：Tab 补全
+            case "terminal_cancel" -> terminalHandler.handleCancel(frame); // CAP-59：取消执行中命令
             default -> log.debug("未知指令类型: {}", type);
         }
     }

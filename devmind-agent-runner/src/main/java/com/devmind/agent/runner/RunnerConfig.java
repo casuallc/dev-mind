@@ -60,6 +60,8 @@ import java.util.Properties;
  *                            # 显式配置（含空串）= 全覆盖（空串 = 拒绝一切终端命令）
  * terminalTimeoutSec=60      # CAP-58：单条终端命令超时（秒），超时整树杀
  * terminalAllowRedirect=false# CAP-58：是否放开 &gt;/&gt;&gt; 重定向写入（默认拒绝）
+ * terminalShellIdleMin=30    # CAP-59：持久 shell 空闲回收阈值（分钟），无命令超过即整树杀，
+ *                            # 下条命令自动重启新 shell
  * </pre>
  */
 public record RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -69,7 +71,23 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                            java.util.List<String> execAllowlist, String execShell, int buildGcHours,
                            String claudeConfigDir, String worklogRoot, boolean partialMessages,
                            int worktreeGcDays, java.util.List<String> terminalAllowlist,
-                           int terminalTimeoutSec, boolean terminalAllowRedirect) {
+                           int terminalTimeoutSec, boolean terminalAllowRedirect,
+                           int terminalShellIdleMin) {
+
+    /** 兼容构造（CAP-59 前的 23 参签名）：持久 shell 空闲回收默认 30 分钟。 */
+    public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
+                        Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
+                        String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes,
+                        int gcInitialDelayMinutes, java.util.List<String> labels,
+                        java.util.List<String> execAllowlist, String execShell, int buildGcHours,
+                        String claudeConfigDir, String worklogRoot, boolean partialMessages,
+                        int worktreeGcDays, java.util.List<String> terminalAllowlist,
+                        int terminalTimeoutSec, boolean terminalAllowRedirect) {
+        this(serverUrl, token, claudePath, permissionMode, workDir, projectPaths, maxConcurrent,
+                executor, workspaceRoot, gcDays, gcIntervalMinutes, gcInitialDelayMinutes, labels,
+                execAllowlist, execShell, buildGcHours, claudeConfigDir, worklogRoot, partialMessages,
+                worktreeGcDays, terminalAllowlist, terminalTimeoutSec, terminalAllowRedirect, 30);
+    }
 
     /** 兼容构造（CAP-58 前的 20 参签名）：终端白名单缺省只读档 + 60s 超时 + 禁重定向。 */
     public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -188,7 +206,8 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                 p.getProperty("terminalAllowlist") == null ? null
                         : parseLabels(p.getProperty("terminalAllowlist")),
                 Integer.parseInt(p.getProperty("terminalTimeoutSec", "60").strip()),
-                "true".equalsIgnoreCase(p.getProperty("terminalAllowRedirect", "false").strip()));
+                "true".equalsIgnoreCase(p.getProperty("terminalAllowRedirect", "false").strip()),
+                Integer.parseInt(p.getProperty("terminalShellIdleMin", "30").strip()));
     }
 
     /** CAP-41：worklog 持久工作区根目录——配置优先，空 = {user.home}/worklog。 */
