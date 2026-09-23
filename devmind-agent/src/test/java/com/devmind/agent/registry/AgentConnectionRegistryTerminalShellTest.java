@@ -5,7 +5,7 @@ import com.devmind.agent.dto.AgentHelloMeta;
 import com.devmind.agent.model.AgentNodeEntity;
 import com.devmind.agent.service.AgentConnLogService;
 import com.devmind.agent.service.AgentNodeService;
-import com.devmind.common.agent.TerminalExecResult;
+import com.devmind.common.agent.TerminalCompleteResult;
 import com.devmind.common.exception.DevMindException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,11 +27,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * CAP-58 terminal_exec 帧链路：组帧形状（command/cwd 全字段钉死，防静默丢失事故）→
- * ack 完成等待 → 协议 v16 门控（老 runner 静默忽略未知帧，必须 409 而不是挂到超时）→
+ * CAP-59 terminal_complete / terminal_cancel 帧链路：组帧形状（红线：字段一个不能少）→
+ * ack 完成等待 → 协议 v17 门控（老 runner 静默忽略未知帧，必须 409 而不是挂到超时/无效）→
  * 断连批量失败。
  */
-class AgentConnectionRegistryTerminalExecTest {
+class AgentConnectionRegistryTerminalShellTest {
 
     private AgentConnectionRegistry registry;
     private WebSocketSession ws;
@@ -52,21 +52,21 @@ class AgentConnectionRegistryTerminalExecTest {
         node.setId(7L);
         node.setName("n7");
         registry.onConnect(node, ws);
-        // v16 runner（hello 上报协议版本）
-        registry.onHello(node, new AgentHelloMeta("windows", "", "0.2.0", null, 16, null, null),
+        // v17 runner（hello 上报协议版本）
+        registry.onHello(node, new AgentHelloMeta("windows", "", "0.2.0", null, 17, null, null),
                 List.of());
     }
 
-    private record Call(AtomicReference<TerminalExecResult> result, AtomicReference<Throwable> error,
+    private record Call(AtomicReference<TerminalCompleteResult> result, AtomicReference<Throwable> error,
                         Thread thread, String payload) {
     }
 
-    private Call startExec(String command, String cwd) throws Exception {
-        AtomicReference<TerminalExecResult> result = new AtomicReference<>();
+    private Call startComplete(String input, String cwd) throws Exception {
+        AtomicReference<TerminalCompleteResult> result = new AtomicReference<>();
         AtomicReference<Throwable> error = new AtomicReference<>();
         Thread t = new Thread(() -> {
             try {
-                result.set(registry.terminalExec("7", "s1", command, cwd));
+                result.set(registry.terminalComplete("7", "s1", input, cwd));
             } catch (Throwable e) {
                 error.set(e);
             }
@@ -86,68 +86,66 @@ class AgentConnectionRegistryTerminalExecTest {
     }
 
     @Test
-    void frameShapeAndAckRouting() throws Exception {
-        Call call = startExec("git status", "frontend");
-        // 红线：组帧五个字段一个不能少（静默丢失已三次事故）
-        assertTrue(call.payload().contains("\"type\":\"terminal_exec\""), call.payload());
+    void completeFrameShapeAndAckRouting() throws Exception {
+        Call call = startComplete("git sta", "frontend");
+        // 红线：组帧五个字段一个不能少（同类静默丢失已三次事故）
+        assertTrue(call.payload().contains("\"type\":\"terminal_complete\""), call.payload());
         assertTrue(call.payload().contains("\"sessionId\":\"s1\""), call.payload());
-        assertTrue(call.payload().contains("\"command\":\"git status\""), call.payload());
+        assertTrue(call.payload().contains("\"input\":\"git sta\""), call.payload());
         assertTrue(call.payload().contains("\"cwd\":\"frontend\""), call.payload());
-        assertTrue(requestIdOf(call.payload()).startsWith("tx-"), call.payload());
+        assertTrue(requestIdOf(call.payload()).startsWith("tc-"), call.payload());
 
-        registry.onTerminalExecAck("7", requestIdOf(call.payload()), true, 0,
-                "On branch main", "", "frontend", false, false, null);
+        registry.onTerminalCompleteAck("7", requestIdOf(call.payload()), true, "sta",
+                List.of("stash", "status"), null);
         call.thread().join(10_000);
-        TerminalExecResult r = call.result().get();
+        TerminalCompleteResult r = call.result().get();
         assertTrue(r != null && r.ok(), String.valueOf(call.error().get()));
-        assertEquals(0, r.exitCode());
-        assertEquals("On branch main", r.stdout());
-        assertEquals("frontend", r.cwd());
+        assertEquals("sta", r.word());
+        assertEquals(List.of("stash", "status"), r.candidates());
     }
 
     @Test
-    void blankCwdSerializedAsEmpty() throws Exception {
-        Call call = startExec("ls", null);
-        assertTrue(call.payload().contains("\"cwd\":\"\""), call.payload());
-        registry.onTerminalExecAck("7", requestIdOf(call.payload()), true, 0, "a", "", "", false, false, null);
+    void completeErrorAckCompletesWithFailure() throws Exception {
+        Call call = startComplete("ls /", "");
+        registry.onTerminalCompleteAck("7", requestIdOf(call.payload()), false, "",
+                List.of(), "会话不在本节点运行或工作区已释放");
         call.thread().join(10_000);
-        assertTrue(call.result().get() != null && call.result().get().ok());
-    }
-
-    @Test
-    void errorAckCompletesWithFailure() throws Exception {
-        Call call = startExec("rm -rf .", "");
-        registry.onTerminalExecAck("7", requestIdOf(call.payload()), false, -1, "", "", null,
-                false, false, "命令不在 terminalAllowlist 白名单: rm");
-        call.thread().join(10_000);
-        TerminalExecResult r = call.result().get();
+        TerminalCompleteResult r = call.result().get();
         assertTrue(r != null && !r.ok());
-        assertEquals("命令不在 terminalAllowlist 白名单: rm", r.error());
+        assertEquals("会话不在本节点运行或工作区已释放", r.error());
     }
 
     @Test
-    void unknownRequestIdIgnored() {
-        // 迟到的 ack（等待已超时/断连清理后）不炸不攒
-        registry.onTerminalExecAck("7", "tx-nonexistent", true, 0, "", "", "", false, false, null);
+    void cancelFrameShape() throws Exception {
+        org.mockito.Mockito.clearInvocations(ws);
+        registry.terminalCancel("7", "s1");
+        ArgumentCaptor<TextMessage> captor = ArgumentCaptor.forClass(TextMessage.class);
+        verify(ws, timeout(5000).atLeastOnce()).sendMessage(captor.capture());
+        String payload = captor.getValue().getPayload();
+        // 红线：type + sessionId 一个不能少（fire-and-forget 无 requestId）
+        assertTrue(payload.contains("\"type\":\"terminal_cancel\""), payload);
+        assertTrue(payload.contains("\"sessionId\":\"s1\""), payload);
     }
 
     @Test
-    void legacyRunnerIsRejectedByVersionGate() {
-        // v15 runner 不认识 terminal_exec → 409 门控，不静默下发挂到超时
-        registry.onHello(node, new AgentHelloMeta("windows", "", "0.2.0", null, 15, null, null),
+    void legacyRunnerRejectedByVersionGate() {
+        // v16 runner 不认识 complete/cancel 帧 → 409 门控
+        registry.onHello(node, new AgentHelloMeta("windows", "", "0.2.0", null, 16, null, null),
                 List.of());
-        var e = assertThrows(DevMindException.class,
-                () -> registry.terminalExec("7", "s1", "ls", ""));
-        assertTrue(e.getMessage().contains("v16"), e.getMessage());
+        var e1 = assertThrows(DevMindException.class,
+                () -> registry.terminalComplete("7", "s1", "ls", ""));
+        assertTrue(e1.getMessage().contains("v17"), e1.getMessage());
+        var e2 = assertThrows(DevMindException.class,
+                () -> registry.terminalCancel("7", "s1"));
+        assertTrue(e2.getMessage().contains("v17"), e2.getMessage());
     }
 
     @Test
-    void disconnectFailsPendingExecs() throws Exception {
-        Call call = startExec("ls", "");
+    void disconnectFailsPendingCompletes() throws Exception {
+        Call call = startComplete("git", "");
         registry.onDisconnect(node, ws);
         call.thread().join(10_000);
-        // 断连清理完成一个失败结果（不抛异常）：REST 层把 error 透传为 409 文案
-        TerminalExecResult r = call.result().get();
+        TerminalCompleteResult r = call.result().get();
         assertTrue(r != null && !r.ok(), String.valueOf(call.error().get()));
         assertTrue(r.error() != null && !r.error().isBlank());
     }

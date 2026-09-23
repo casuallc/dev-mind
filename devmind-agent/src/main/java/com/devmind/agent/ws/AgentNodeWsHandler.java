@@ -196,12 +196,27 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
             case "pkg_ack" -> registry.onPkgAck(String.valueOf(node.getId()),
                     frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),
                     frame.path("installDir").asText(""), frame.path("error").asText(null));
-            // CAP-58：终端单条命令执行 ack
+            // CAP-58：终端单条命令执行 ack（CAP-59 增 cancelled 可选字段）
             case "terminal_exec_ack" -> registry.onTerminalExecAck(String.valueOf(node.getId()),
                     frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),
                     frame.path("exitCode").asInt(-1), frame.path("stdout").asText(""),
                     frame.path("stderr").asText(""), frame.path("cwd").asText(null),
-                    frame.path("timedOut").asBoolean(false), frame.path("error").asText(null));
+                    frame.path("timedOut").asBoolean(false), frame.path("cancelled").asBoolean(false),
+                    frame.path("error").asText(null));
+            // CAP-59：终端 Tab 补全 ack
+            case "terminal_complete_ack" -> {
+                List<String> candidates = new ArrayList<>();
+                JsonNode arr = frame.path("candidates");
+                if (arr.isArray()) {
+                    for (JsonNode n : arr) {
+                        candidates.add(n.asText(""));
+                    }
+                }
+                registry.onTerminalCompleteAck(String.valueOf(node.getId()),
+                        frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),
+                        frame.path("word").asText(""), candidates,
+                        frame.path("error").asText(null));
+            }
             default -> log.debug("未知 runner 帧类型: {}", type);
         }
     }

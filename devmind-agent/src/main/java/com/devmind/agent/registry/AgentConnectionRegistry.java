@@ -20,6 +20,7 @@ import com.devmind.common.agent.AgentProcResult;
 import com.devmind.common.agent.AgentProtocol;
 import com.devmind.common.agent.FinalizeResult;
 import com.devmind.common.agent.InputImage;
+import com.devmind.common.agent.TerminalCompleteResult;
 import com.devmind.common.agent.TerminalExecResult;
 import com.devmind.common.agent.WorkspaceQueryResult;
 import com.devmind.common.agent.WorkspaceReleaseResult;
@@ -103,6 +104,10 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private record TerminalExecWaiter(String nodeId, CompletableFuture<TerminalExecResult> done) {
     }
 
+    /** CAP-59 terminal_complete 等待者。 */
+    private record TerminalCompleteWaiter(String nodeId, CompletableFuture<TerminalCompleteResult> done) {
+    }
+
     private final AgentNodeService nodeService;
     private final AgentProperties props;
     private final ObjectMapper mapper;
@@ -134,7 +139,9 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     /** requestId → workspace_query 等待者（CAP-54 工作区只读查询） */
     private final Map<String, WorkspaceQueryWaiter> pendingWorkspaceQueries = new ConcurrentHashMap<>();
     /** CAP-58：requestId → 终端命令执行等待者 */
-    private final Map<String, TerminalExecWaiter> pendingTerminalExecs = new ConcurrentHashMap<>();    /** requestId → proc 等待者（CAP-57 服务实例进程管控） */
+    private final Map<String, TerminalExecWaiter> pendingTerminalExecs = new ConcurrentHashMap<>();
+    /** CAP-59：requestId → 终端补全等待者 */
+    private final Map<String, TerminalCompleteWaiter> pendingTerminalCompletes = new ConcurrentHashMap<>();    /** requestId → proc 等待者（CAP-57 服务实例进程管控） */
     private final Map<String, ProcWaiter> pendingProcs = new ConcurrentHashMap<>();
     /** requestId → pkg 等待者（CAP-57 安装包分发） */
     private final Map<String, PkgWaiter> pendingPkgs = new ConcurrentHashMap<>();
@@ -223,6 +230,12 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         for (Map.Entry<String, TerminalExecWaiter> e : pendingTerminalExecs.entrySet()) {
             if (e.getValue().nodeId().equals(nodeId) && pendingTerminalExecs.remove(e.getKey(), e.getValue())) {
                 e.getValue().done().complete(TerminalExecResult.failed("节点断连，终端命令中断"));
+            }
+        }
+        // CAP-59：断线即失败该节点进行中的终端补全（ack 不会再来）
+        for (Map.Entry<String, TerminalCompleteWaiter> e : pendingTerminalCompletes.entrySet()) {
+            if (e.getValue().nodeId().equals(nodeId) && pendingTerminalCompletes.remove(e.getKey(), e.getValue())) {
+                e.getValue().done().complete(TerminalCompleteResult.failed("节点断连，终端补全中断"));
             }
         }
         // CAP-57：断线即失败该节点进行中的进程管控/包分发（ack 不会再来）
@@ -359,15 +372,29 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         }
     }
 
-    /** CAP-58：terminal_exec_ack 上行帧 → 完成等待 future。 */
+    /** CAP-58：terminal_exec_ack 上行帧 → 完成等待 future（CAP-59 增 cancelled 可选字段）。 */
     public void onTerminalExecAck(String nodeId, String requestId, boolean ok, int exitCode,
-                                  String stdout, String stderr, String cwd, boolean timedOut, String error) {
+                                  String stdout, String stderr, String cwd, boolean timedOut,
+                                  boolean cancelled, String error) {
         touch(nodeId);
         TerminalExecWaiter w = pendingTerminalExecs.remove(requestId);
         if (w != null) {
             w.done().complete(ok
-                    ? TerminalExecResult.of(exitCode, stdout, stderr, cwd, timedOut)
+                    ? TerminalExecResult.of(exitCode, stdout, stderr, cwd, timedOut, cancelled)
                     : TerminalExecResult.failed(error));
+        }
+    }
+
+    /** CAP-59：terminal_complete_ack 上行帧 → 完成等待 future。 */
+    public void onTerminalCompleteAck(String nodeId, String requestId, boolean ok, String word,
+                                      List<String> candidates, String error) {
+        touch(nodeId);
+        TerminalCompleteWaiter w = pendingTerminalCompletes.remove(requestId);
+        if (w != null) {
+            w.done().complete(ok
+                    ? TerminalCompleteResult.of(word == null ? "" : word,
+                            candidates == null ? List.of() : candidates)
+                    : TerminalCompleteResult.failed(error));
         }
     }
 
@@ -1084,6 +1111,61 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         } finally {
             pendingTerminalExecs.remove(requestId);
         }
+    }
+
+    /**
+     * CAP-59：下发 terminal_complete 帧并阻塞等 terminal_complete_ack（镜像 terminalExec 模式）。
+     * 协议门控：runner 低于 v17 直接 409 提示升级——老 runner 静默忽略该帧会让 REST 空等超时。
+     * 等待上限 15s（runner 侧 compgen 5s 超时 + 余量）。
+     */
+    @Override
+    public TerminalCompleteResult terminalComplete(String nodeId, String sessionId, String input, String cwd) {
+        WebSocketSession ws = requireConnection(nodeId); // 先判在线再判版本，同 terminalExec
+        if (!supports(nodeId, AgentProtocol.TERMINAL_SHELL)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 的 runner 协议版本过低（终端 Tab 补全需 v"
+                            + AgentProtocol.TERMINAL_SHELL + "+），请到节点页升级 runner");
+        }
+        String requestId = "tc-" + System.currentTimeMillis() + "-" + sessionId;
+        CompletableFuture<TerminalCompleteResult> done = new CompletableFuture<>();
+        pendingTerminalCompletes.put(requestId, new TerminalCompleteWaiter(nodeId, done));
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "terminal_complete");
+        frame.put("requestId", requestId);
+        frame.put("sessionId", sessionId);
+        frame.put("input", input == null ? "" : input);
+        frame.put("cwd", cwd == null ? "" : cwd);
+        try {
+            send(ws, frame);
+            return done.get(15, TimeUnit.SECONDS);
+        } catch (DevMindException e) {
+            throw e;
+        } catch (java.util.concurrent.TimeoutException e) {
+            return TerminalCompleteResult.failed("等待 runner terminal_complete_ack 超时（runner 无响应）");
+        } catch (Exception e) {
+            throw new DevMindException(ErrorCode.CONFLICT, "终端补全下发异常: " + e.getMessage(), e);
+        } finally {
+            pendingTerminalCompletes.remove(requestId);
+        }
+    }
+
+    /**
+     * CAP-59：下发 terminal_cancel 帧（fire-and-forget）——runner 整树杀该会话执行中的终端命令，
+     * 进行中的 terminal_exec 以 cancelled=true 收口 ack。协议门控：老 runner 静默忽略会让
+     * 用户以为取消了实际还在跑，故低于 v17 直接 409。
+     */
+    @Override
+    public void terminalCancel(String nodeId, String sessionId) {
+        WebSocketSession ws = requireConnection(nodeId); // 先判在线再判版本
+        if (!supports(nodeId, AgentProtocol.TERMINAL_SHELL)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 的 runner 协议版本过低（终端命令取消需 v"
+                            + AgentProtocol.TERMINAL_SHELL + "+），请到节点页升级 runner");
+        }
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "terminal_cancel");
+        frame.put("sessionId", sessionId);
+        send(ws, frame);
     }
 
     /** 非强制升级（force=false），等价于 {@link #sendUpgrade(Long, String, String, long, boolean)}。 */    public UpgradeAck sendUpgrade(Long nodeDbId, String version, String sha256, long sizeBytes) {
