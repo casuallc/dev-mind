@@ -152,6 +152,27 @@ public class SessionController {
     public record TerminalExecRequest(String command, String cwd) {
     }
 
+    /**
+     * CAP-59：Tab 补全（body: input 当前输入行、cwd 可选=相对代码目录）。
+     * 老 runner（v17-）走 CONFLICT 引导升级，前端回落本地历史补全。
+     */
+    @PostMapping("/{id}/terminal/complete")
+    public com.devmind.common.agent.TerminalCompleteResult terminalComplete(@PathVariable String id,
+                                                                            @RequestBody TerminalCompleteRequest req) {
+        return service.terminalComplete(id, req == null ? null : req.input(),
+                req == null ? null : req.cwd());
+    }
+
+    /** CAP-59 补全请求体。 */
+    public record TerminalCompleteRequest(String input, String cwd) {
+    }
+
+    /** CAP-59：取消执行中的终端命令（无进行中命令 = no-op）。 */
+    @PostMapping("/{id}/terminal/cancel")
+    public void terminalCancel(@PathVariable String id) {
+        service.terminalCancel(id);
+    }
+
     @DeleteMapping("/{id}/worktree")
     public void removeWorktree(@PathVariable String id) {
         service.removeWorktree(id);

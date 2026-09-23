@@ -670,6 +670,38 @@ public class ChatManagerService {
         return r;
     }
 
+    /** CAP-59：Tab 补全透传（问答沙箱对称；门控口径同 {@link #terminalExec}）。 */
+    public com.devmind.common.agent.TerminalCompleteResult terminalComplete(String id, String input, String cwd) {
+        ChatSessionEntity ent = requireOwned(id);
+        if (ent.isModel() || ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "该问答无执行节点（模型执行体），远程终端不可用");
+        }
+        AgentNodeConnector connector = connectorProvider.getIfAvailable();
+        if (connector == null) {
+            throw new DevMindException(ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+        }
+        com.devmind.common.agent.TerminalCompleteResult r =
+                connector.terminalComplete(ent.getAgentNodeId(), id, input, cwd);
+        if (!r.ok()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    r.error() == null || r.error().isBlank() ? "终端补全失败" : r.error());
+        }
+        return r;
+    }
+
+    /** CAP-59：取消执行中的终端命令（问答沙箱对称，无进行中命令 runner 侧 no-op）。 */
+    public void terminalCancel(String id) {
+        ChatSessionEntity ent = requireOwned(id);
+        if (ent.isModel() || ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "该问答无执行节点（模型执行体），远程终端不可用");
+        }
+        AgentNodeConnector connector = connectorProvider.getIfAvailable();
+        if (connector == null) {
+            throw new DevMindException(ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+        }
+        connector.terminalCancel(ent.getAgentNodeId(), id);
+    }
+
     /** 删除问答：杀进程（若在跑）、删事件与记录；远程沙箱由 runner finalizer 负责。 */
     @Transactional
     public void deleteChat(String id) {

@@ -854,6 +854,41 @@ public class SessionManagerService {
         return r;
     }
 
+    /**
+     * CAP-59：Tab 补全透传（REST → terminal_complete 帧 → runner 在会话当前 cwd compgen）。
+     * 协议版本门控在 connector 内（老 runner 409 引导升级）；补全失败抛 CONFLICT 带 runner 原因。
+     */
+    public com.devmind.common.agent.TerminalCompleteResult terminalComplete(String id, String input, String cwd) {
+        SessionEntity ent = requireEntity(id);
+        if (ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "会话无执行节点记录，远程终端不可用");
+        }
+        AgentNodeConnector connector = connectorProvider.getIfAvailable();
+        if (connector == null) {
+            throw new DevMindException(ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+        }
+        com.devmind.common.agent.TerminalCompleteResult r =
+                connector.terminalComplete(ent.getAgentNodeId(), id, input, cwd);
+        if (!r.ok()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    r.error() == null || r.error().isBlank() ? "终端补全失败" : r.error());
+        }
+        return r;
+    }
+
+    /** CAP-59：取消执行中的终端命令（无进行中命令 runner 侧 no-op）。 */
+    public void terminalCancel(String id) {
+        SessionEntity ent = requireEntity(id);
+        if (ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "会话无执行节点记录，远程终端不可用");
+        }
+        AgentNodeConnector connector = connectorProvider.getIfAvailable();
+        if (connector == null) {
+            throw new DevMindException(ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+        }
+        connector.terminalCancel(ent.getAgentNodeId(), id);
+    }
+
     // ---------------- worktree / diff ----------------
 
     /**
