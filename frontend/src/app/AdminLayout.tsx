@@ -2,7 +2,6 @@ import { Layout, Menu } from 'antd'
 import type { MenuProps } from 'antd'
 import {
   ApiOutlined,
-  ArrowLeftOutlined,
   AuditOutlined,
   CodeOutlined,
   DashboardOutlined,
@@ -73,8 +72,6 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
       { key: '/admin/users', icon: <SafetyCertificateOutlined />, label: '用户管理' },
     ],
   },
-  { type: 'divider' as const },
-  { key: '/', icon: <ArrowLeftOutlined />, label: '返回工作台' },
 ]
 
 /** 按菜单 key 递归查 label（分组/分割线跳过），供顶栏展示当前选中菜单名 */

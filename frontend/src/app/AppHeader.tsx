@@ -1,5 +1,7 @@
-import { Layout, Space, Tag, Typography } from 'antd'
+import { Layout, Space, Tag, Typography, Button } from 'antd'
+import { ArrowLeftOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../shared/api/client'
 import NotificationBell from '../features/notifications/components/NotificationBell'
 import UserMenu from '../features/auth/components/UserMenu'
@@ -15,6 +17,7 @@ interface HealthInfo {
 
 /** 后台顶栏：当前选中菜单名 + 后端健康状态 + 通知铃铛 + 用户下拉（仅 AdminLayout 使用）。 */
 export default function AppHeader({ title }: { title: string }) {
+  const navigate = useNavigate()
   const [health, setHealth] = useState<HealthInfo | null>(null)
 
   useEffect(() => {
@@ -36,6 +39,9 @@ export default function AppHeader({ title }: { title: string }) {
       }}
     >
       <Space size={12}>
+        <Button type="link" icon={<ArrowLeftOutlined />} style={{ paddingInline: 0 }} onClick={() => navigate('/')}>
+          返回工作台
+        </Button>
         <Typography.Text strong>{title}</Typography.Text>
         <Tag color={health?.status === 'UP' ? 'green' : 'red'}>
           后端 {health ? `${health.status} · v${health.version}` : '未连接'}
