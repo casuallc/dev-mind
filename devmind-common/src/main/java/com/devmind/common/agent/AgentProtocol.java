@@ -39,12 +39,15 @@ package com.devmind.common.agent;
  * v14 = CAP-56 决策实验室评测/微调（exec 帧携带 {@code bundle{kind,id}}——执行包（脚本 + 数据）
  * 由 runner 凭节点 token 走 HTTP 拉取并物化到临时目录，env 注入
  * {@code DEVMIND_LAB_SCRIPT}/{@code DEVMIND_LAB_PAYLOAD}；老 runner 忽略该字段会拿不到脚本与
- * 数据，"照常执行"必然失败且失败原因指向脚本自身，故属「必须认识」需门控）。</p>
+ * 数据，"照常执行"必然失败且失败原因指向脚本自身，故属「必须认识」需门控）。
+ * v15 = CAP-57 分类服务（proc/proc_ack 进程管控帧 + pkg/pkg_ack 安装包分发帧——
+ * 老 runner 不认识这两类帧会静默忽略，管控台的起停/安装操作会空等超时，
+ * 故属「必须认识」需门控，409 话术引导到节点页升级 runner）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 14;
+    public static final int CURRENT = 15;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -84,6 +87,12 @@ public final class AgentProtocol {
 
     /** CAP-56 决策实验室执行包（exec 帧 bundle 块：runner 拉包物化后再跑）所需最低版本 */
     public static final int EXEC_BUNDLE = 14;
+
+    /** CAP-57 分类服务进程管控（proc/proc_ack 帧：长驻进程起停，argv 不过 shell）所需最低版本 */
+    public static final int PROC_FRAMES = 15;
+
+    /** CAP-57 分类服务安装包分发（pkg/pkg_ack 帧：节点拉取 + sha 校验 + 原子解包）所需最低版本 */
+    public static final int PKG_FRAMES = 15;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;

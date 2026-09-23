@@ -217,4 +217,29 @@ public interface AgentNodeConnector {
         throw new com.devmind.common.exception.DevMindException(
                 com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
     }
+
+    /**
+     * CAP-57：下发 proc 帧并阻塞等 proc_ack——runner 对受管长驻进程（服务实例，如分类边车）
+     * 执行 start/stop/restart/status（argv 不过 shell，目录收容校验，shutdown 不杀）。
+     * 节点离线/协议版本不足（需 v15+）/等待超时抛 DevMindException(CONFLICT)；
+     * 动作失败（启动即退出/pid 不存在等）不抛，看 {@link AgentProcResult#ok()}。
+     * 默认实现 = agent 模块未装配（无任何执行节点可用）。
+     */
+    default AgentProcResult proc(String nodeId, AgentProcCommand cmd) {
+        throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+    }
+
+    /**
+     * CAP-57：下发 pkg 帧并返回 future——runner 凭节点 token 拉取安装包（GB 级下载以分钟计，
+     * <b>异步 ack 不阻塞调用线程</b>）；下载 + sha256 校验 + 原子解包完成后 future 收口。
+     * 节点离线/协议版本不足（需 v15+）抛 DevMindException(CONFLICT)（下发前失败，同步抛）；
+     * 安装失败不抛，看 {@link AgentPkgResult#ok()}。等待超时由调用方自定（future.orTimeout）。
+     * 默认实现 = agent 模块未装配（无任何执行节点可用）。
+     */
+    default java.util.concurrent.CompletableFuture<AgentPkgResult> pkgInstallAsync(String nodeId,
+                                                                                   AgentPkgCommand cmd) {
+        throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+    }
 }
