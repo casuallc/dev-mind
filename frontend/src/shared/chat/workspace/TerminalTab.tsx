@@ -4,10 +4,22 @@
 // runner 侧持久 shell 持有 cwd/env（跨命令保持），ack 带回新 cwd 同步提示符；
 // 白名单在 runner 侧强制（缺省只读档：ls/cd/cat/git 只读等）。
 import { useEffect, useRef, useState } from 'react'
-import { Input, Spin, Tag, Typography } from 'antd'
+import { Button, Input, Spin, Tag, Typography } from 'antd'
 import type { InputRef } from 'antd'
 import type { ChatApiBase } from '../types'
 import { terminalCancel, terminalComplete, terminalExec } from './api'
+import { renderAnsi } from './AnsiText'
+
+/** CAP-60 编程等宽字体栈（本机没装自动回落 Consolas，不打 webfont） */
+const FONT_STACK = "'JetBrains Mono', 'Cascadia Code', 'Cascadia Mono', Consolas, Menlo, 'Courier New', monospace"
+const FONT_SIZE_KEY = 'devmind.terminal.fontSize'
+const FONT_SIZE_MIN = 10
+const FONT_SIZE_MAX = 20
+
+function loadFontSize(): number {
+  const n = Number(localStorage.getItem(FONT_SIZE_KEY))
+  return Number.isFinite(n) && n >= FONT_SIZE_MIN && n <= FONT_SIZE_MAX ? n : 12
+}
 
 interface TermEntry {
   id: number
@@ -47,6 +59,7 @@ export default function TerminalTab({
   const [cwd, setCwd] = useState('')
   const [input, setInput] = useState('')
   const [running, setRunning] = useState(false)
+  const [fontSize, setFontSize] = useState(loadFontSize)
   const [cands, setCands] = useState<string[]>([])
   const [candIndex, setCandIndex] = useState(0)
   const [hint, setHint] = useState('')
@@ -78,6 +91,14 @@ export default function TerminalTab({
   }, [hint])
 
   const closeCands = () => setCands([])
+
+  const adjustFontSize = (delta: number) => {
+    setFontSize((cur) => {
+      const next = Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, cur + delta))
+      localStorage.setItem(FONT_SIZE_KEY, String(next))
+      return next
+    })
+  }
 
   /** 替换输入行尾部的 word 为 replacement（word 为空串 = 行尾追加） */
   const applyCandidate = (value: string, word: string) => {
@@ -237,6 +258,17 @@ export default function TerminalTab({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, position: 'relative' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 2, marginBottom: 4 }}>
+        <Button size="small" type="text" title="减小字号" onClick={() => adjustFontSize(-1)}>
+          A−
+        </Button>
+        <Typography.Text type="secondary" style={{ fontSize: 11, minWidth: 22, textAlign: 'center' }}>
+          {fontSize}
+        </Typography.Text>
+        <Button size="small" type="text" title="增大字号" onClick={() => adjustFontSize(1)}>
+          A+
+        </Button>
+      </div>
       <div
         ref={bodyRef}
         onClick={() => inputRef.current?.focus()}
@@ -247,12 +279,13 @@ export default function TerminalTab({
           background: '#0f1115',
           borderRadius: 6,
           padding: '8px 10px',
-          fontFamily: 'Consolas, Menlo, monospace',
-          fontSize: 12,
+          fontFamily: FONT_STACK,
+          fontSize,
+          lineHeight: 1.5,
         }}
       >
         {entries.length === 0 && (
-          <Typography.Text style={{ color: '#8c8c8c', fontSize: 12 }}>
+          <Typography.Text style={{ color: '#8c8c8c', fontSize }}>
             在 runner 节点的会话工作区执行命令（env/cd 跨命令保持；Tab 补全、Ctrl+C 取消/清行、Ctrl+L 清屏）
           </Typography.Text>
         )}
@@ -263,12 +296,12 @@ export default function TerminalTab({
             </div>
             {e.stdout && (
               <pre style={{ margin: 0, color: '#d9d9d9', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                {e.stdout}
+                {renderAnsi(e.stdout)}
               </pre>
             )}
             {(e.stderr || e.error) && (
               <pre style={{ margin: 0, color: '#ff7875', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                {e.stderr}
+                {e.stderr ? renderAnsi(e.stderr) : null}
                 {e.error}
               </pre>
             )}
@@ -301,8 +334,8 @@ export default function TerminalTab({
             borderRadius: 6,
             padding: '4px 0',
             zIndex: 10,
-            fontFamily: 'Consolas, Menlo, monospace',
-            fontSize: 12,
+            fontFamily: FONT_STACK,
+            fontSize,
           }}
         >
           {cands.slice(0, 50).map((c, i) => (
@@ -330,7 +363,7 @@ export default function TerminalTab({
       )}
       <Input
         ref={inputRef}
-        style={{ marginTop: 8, flexShrink: 0, fontFamily: 'Consolas, Menlo, monospace' }}
+        style={{ marginTop: 8, flexShrink: 0, fontFamily: FONT_STACK, fontSize }}
         size="small"
         prefix={<Typography.Text style={{ color: '#597ef7', fontSize: 12 }}>{cwd || '/'}</Typography.Text>}
         placeholder="$ 输入命令，Enter 执行（Tab 补全 · ↑↓ 历史 · Ctrl+C 取消 · Ctrl+L 清屏）"
