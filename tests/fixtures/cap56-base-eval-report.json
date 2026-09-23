@@ -1,0 +1,1339 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-23 08:17:21",
+  "kind": "evaluation",
+  "checkpoint": {
+    "id": 1,
+    "name": "cap56gpu-0923-0817-base-multilingual",
+    "slot": "multilingual",
+    "path": "/home/liuchangqing/laya/multilingual-base"
+  },
+  "dataset": {
+    "id": 1,
+    "name": "cap56gpu-0923-0817-人工基准集",
+    "version": 1,
+    "questionSetVersion": "kb-proposal-triage@1",
+    "itemCount": 37
+  },
+  "metrics": {
+    "items": 37,
+    "questions": 111,
+    "latencyMs": {
+      "p50": 7.1,
+      "p95": 7.3
+    },
+    "choice": {
+      "questions": 37,
+      "accuracy": 0.21621621621621623,
+      "avgConfidence": 0.927264864864865,
+      "ece": 0.7308270270270271,
+      "softAccuracy": 0.21697850082116338,
+      "brier": 1.532538496855977,
+      "answered": {
+        "project": 37
+      }
+    },
+    "score": {
+      "questions": 37,
+      "accuracy": 0.6216216216216216,
+      "avgConfidence": 0.4265648648648649,
+      "ece": 0.22564054054054053,
+      "softAccuracy": 0.5593409603312477,
+      "brier": 0.5253083342270702,
+      "mae": 0.4363336097645253,
+      "within1Level": 0.972972972972973
+    },
+    "noul": {
+      "questions": 37,
+      "accuracy": 0.32432432432432434,
+      "avgConfidence": 0.901745945945946,
+      "ece": 0.648237837837838,
+      "softAccuracy": 0.3297675675675676,
+      "brier": 1.195963497297298,
+      "answered": {
+        "true": 31,
+        "false": 6
+      },
+      "noulRate": 0.8000594594594592
+    }
+  },
+  "baselines": {
+    "random": 0.38888888888888906,
+    "majority": 0.6756756756756757
+  },
+  "byCaseGroup": [
+    {
+      "caseGroup": "EMPTY_RECALL",
+      "items": 4,
+      "questions": 12,
+      "accuracy": 0.25
+    },
+    {
+      "caseGroup": "IRRELEVANT",
+      "items": 4,
+      "questions": 12,
+      "accuracy": 0.25
+    },
+    {
+      "caseGroup": "NORMAL",
+      "items": 25,
+      "questions": 75,
+      "accuracy": 0.4
+    },
+    {
+      "caseGroup": "VERBATIM_DUP",
+      "items": 4,
+      "questions": 12,
+      "accuracy": 0.5833333333333334
+    }
+  ],
+  "perItem": [
+    {
+      "id": 1,
+      "caseGroup": "EMPTY_RECALL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.5338,
+      "latencyMs": 72.6
+    },
+    {
+      "id": 1,
+      "caseGroup": "EMPTY_RECALL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.8029,
+      "latencyMs": 72.6
+    },
+    {
+      "id": 1,
+      "caseGroup": "EMPTY_RECALL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.4127,
+      "latencyMs": 72.6
+    },
+    {
+      "id": 2,
+      "caseGroup": "EMPTY_RECALL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.7318,
+      "latencyMs": 7.5
+    },
+    {
+      "id": 2,
+      "caseGroup": "EMPTY_RECALL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9419,
+      "latencyMs": 7.5
+    },
+    {
+      "id": 2,
+      "caseGroup": "EMPTY_RECALL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "1",
+      "pred": "2",
+      "correct": false,
+      "confidence": 0.4643,
+      "latencyMs": 7.5
+    },
+    {
+      "id": 3,
+      "caseGroup": "EMPTY_RECALL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.8322,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 3,
+      "caseGroup": "EMPTY_RECALL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.906,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 3,
+      "caseGroup": "EMPTY_RECALL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.3177,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 4,
+      "caseGroup": "EMPTY_RECALL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "project",
+      "pred": "project",
+      "correct": true,
+      "confidence": 0.9599,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 4,
+      "caseGroup": "EMPTY_RECALL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.8449,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 4,
+      "caseGroup": "EMPTY_RECALL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "1",
+      "pred": "2",
+      "correct": false,
+      "confidence": 0.3664,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 5,
+      "caseGroup": "VERBATIM_DUP",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "discard",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.8651,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 5,
+      "caseGroup": "VERBATIM_DUP",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "true",
+      "pred": "true",
+      "correct": true,
+      "confidence": 0.5268,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 5,
+      "caseGroup": "VERBATIM_DUP",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.3646,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 6,
+      "caseGroup": "VERBATIM_DUP",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "discard",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9752,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 6,
+      "caseGroup": "VERBATIM_DUP",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "true",
+      "pred": "true",
+      "correct": true,
+      "confidence": 0.9959,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 6,
+      "caseGroup": "VERBATIM_DUP",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.3097,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 7,
+      "caseGroup": "VERBATIM_DUP",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "discard",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9842,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 7,
+      "caseGroup": "VERBATIM_DUP",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "true",
+      "pred": "true",
+      "correct": true,
+      "confidence": 0.9053,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 7,
+      "caseGroup": "VERBATIM_DUP",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "1",
+      "pred": "2",
+      "correct": false,
+      "confidence": 0.3641,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 8,
+      "caseGroup": "VERBATIM_DUP",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "discard",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.8617,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 8,
+      "caseGroup": "VERBATIM_DUP",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "true",
+      "pred": "true",
+      "correct": true,
+      "confidence": 0.9939,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 8,
+      "caseGroup": "VERBATIM_DUP",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.2819,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 9,
+      "caseGroup": "IRRELEVANT",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9896,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 9,
+      "caseGroup": "IRRELEVANT",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9935,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 9,
+      "caseGroup": "IRRELEVANT",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.2593,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 10,
+      "caseGroup": "IRRELEVANT",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9986,
+      "latencyMs": 6.9
+    },
+    {
+      "id": 10,
+      "caseGroup": "IRRELEVANT",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9747,
+      "latencyMs": 6.9
+    },
+    {
+      "id": 10,
+      "caseGroup": "IRRELEVANT",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "1",
+      "pred": "2",
+      "correct": false,
+      "confidence": 0.5678,
+      "latencyMs": 6.9
+    },
+    {
+      "id": 11,
+      "caseGroup": "IRRELEVANT",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.974,
+      "latencyMs": 7.3
+    },
+    {
+      "id": 11,
+      "caseGroup": "IRRELEVANT",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9955,
+      "latencyMs": 7.3
+    },
+    {
+      "id": 11,
+      "caseGroup": "IRRELEVANT",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.5636,
+      "latencyMs": 7.3
+    },
+    {
+      "id": 12,
+      "caseGroup": "IRRELEVANT",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "project",
+      "pred": "project",
+      "correct": true,
+      "confidence": 0.9941,
+      "latencyMs": 6.8
+    },
+    {
+      "id": 12,
+      "caseGroup": "IRRELEVANT",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9944,
+      "latencyMs": 6.8
+    },
+    {
+      "id": 12,
+      "caseGroup": "IRRELEVANT",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "1",
+      "pred": "2",
+      "correct": false,
+      "confidence": 0.246,
+      "latencyMs": 6.8
+    },
+    {
+      "id": 13,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9959,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 13,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "false",
+      "correct": true,
+      "confidence": 0.8863,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 13,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.636,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 14,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9747,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 14,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.8891,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 14,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.6077,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 15,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9951,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 15,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9906,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 15,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.344,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 16,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "project",
+      "pred": "project",
+      "correct": true,
+      "confidence": 0.9684,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 16,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.592,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 16,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.5705,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 17,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "project",
+      "pred": "project",
+      "correct": true,
+      "confidence": 0.9567,
+      "latencyMs": 6.9
+    },
+    {
+      "id": 17,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9627,
+      "latencyMs": 6.9
+    },
+    {
+      "id": 17,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.6826,
+      "latencyMs": 6.9
+    },
+    {
+      "id": 18,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "project",
+      "pred": "project",
+      "correct": true,
+      "confidence": 0.6341,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 18,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9109,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 18,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "1",
+      "pred": "2",
+      "correct": false,
+      "confidence": 0.3642,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 19,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9918,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 19,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9938,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 19,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.5389,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 20,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.7594,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 20,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9956,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 20,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.5024,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 21,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9599,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 21,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9908,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 21,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.5604,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 22,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9316,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 22,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "false",
+      "correct": true,
+      "confidence": 0.728,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 22,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.4699,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 23,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "discard",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.8515,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 23,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.8333,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 23,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "0",
+      "pred": "2",
+      "correct": false,
+      "confidence": 0.0515,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 24,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "discard",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9887,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 24,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9898,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 24,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "0",
+      "pred": "2",
+      "correct": false,
+      "confidence": 0.3361,
+      "latencyMs": 7.2
+    },
+    {
+      "id": 25,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "discard",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9705,
+      "latencyMs": 7.0
+    },
+    {
+      "id": 25,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.5915,
+      "latencyMs": 7.0
+    },
+    {
+      "id": 25,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "1",
+      "pred": "0",
+      "correct": false,
+      "confidence": 0.1372,
+      "latencyMs": 7.0
+    },
+    {
+      "id": 26,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "discard",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9827,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 26,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9822,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 26,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "1",
+      "pred": "0",
+      "correct": false,
+      "confidence": 0.0179,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 27,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9939,
+      "latencyMs": 7.0
+    },
+    {
+      "id": 27,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "true",
+      "pred": "true",
+      "correct": true,
+      "confidence": 0.9937,
+      "latencyMs": 7.0
+    },
+    {
+      "id": 27,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.4317,
+      "latencyMs": 7.0
+    },
+    {
+      "id": 28,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9623,
+      "latencyMs": 7.0
+    },
+    {
+      "id": 28,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "true",
+      "pred": "true",
+      "correct": true,
+      "confidence": 0.9862,
+      "latencyMs": 7.0
+    },
+    {
+      "id": 28,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.4083,
+      "latencyMs": 7.0
+    },
+    {
+      "id": 29,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9865,
+      "latencyMs": 7.0
+    },
+    {
+      "id": 29,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9617,
+      "latencyMs": 7.0
+    },
+    {
+      "id": 29,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "1",
+      "pred": "2",
+      "correct": false,
+      "confidence": 0.6766,
+      "latencyMs": 7.0
+    },
+    {
+      "id": 30,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.8697,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 30,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9716,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 30,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.6644,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 31,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9965,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 31,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9949,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 31,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "1",
+      "pred": "2",
+      "correct": false,
+      "confidence": 0.3813,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 32,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "project",
+      "pred": "project",
+      "correct": true,
+      "confidence": 0.9203,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 32,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9874,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 32,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "1",
+      "pred": "2",
+      "correct": false,
+      "confidence": 0.5132,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 33,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "project",
+      "pred": "project",
+      "correct": true,
+      "confidence": 0.9837,
+      "latencyMs": 6.8
+    },
+    {
+      "id": 33,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "false",
+      "correct": true,
+      "confidence": 0.9355,
+      "latencyMs": 6.8
+    },
+    {
+      "id": 33,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.3444,
+      "latencyMs": 6.8
+    },
+    {
+      "id": 34,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "project",
+      "pred": "project",
+      "correct": true,
+      "confidence": 0.9795,
+      "latencyMs": 7.0
+    },
+    {
+      "id": 34,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "false",
+      "correct": true,
+      "confidence": 0.8963,
+      "latencyMs": 7.0
+    },
+    {
+      "id": 34,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "1",
+      "pred": "2",
+      "correct": false,
+      "confidence": 0.4917,
+      "latencyMs": 7.0
+    },
+    {
+      "id": 35,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9771,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 35,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "false",
+      "correct": true,
+      "confidence": 0.7712,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 35,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.482,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 36,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9844,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 36,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "true",
+      "correct": false,
+      "confidence": 0.9899,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 36,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.4808,
+      "latencyMs": 7.1
+    },
+    {
+      "id": 37,
+      "caseGroup": "NORMAL",
+      "question": "adopt_layer",
+      "qtype": "choice",
+      "gold": "global",
+      "pred": "project",
+      "correct": false,
+      "confidence": 0.9937,
+      "latencyMs": 6.8
+    },
+    {
+      "id": 37,
+      "caseGroup": "NORMAL",
+      "question": "duplicate",
+      "qtype": "noul",
+      "gold": "false",
+      "pred": "false",
+      "correct": true,
+      "confidence": 0.6639,
+      "latencyMs": 6.8
+    },
+    {
+      "id": 37,
+      "caseGroup": "NORMAL",
+      "question": "quality",
+      "qtype": "score",
+      "gold": "2",
+      "pred": "2",
+      "correct": true,
+      "confidence": 0.5711,
+      "latencyMs": 6.8
+    }
+  ],
+  "layaVersion": "0.3.6",
+  "calibration": {
+    "mode": "heldout",
+    "fitItems": 18,
+    "evalItems": 19,
+    "before": {
+      "ece": 0.529711
+    },
+    "after": {
+      "ece": 0.159442
+    },
+    "allItems": {
+      "before": {
+        "ece": 0.49655
+      },
+      "after": {
+        "ece": 0.174913
+      }
+    },
+    "temperature": {
+      "choice:3-5": 4.7,
+      "noul:2": 3.8,
+      "score:3-5": 0.7
+    }
+  },
+  "warnings": []
+}

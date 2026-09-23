@@ -42,6 +42,12 @@ E2E_BASE=http://localhost:8090/api python tests/cap52_e2e.py
 | `chat-mock.py` | 假 OpenAI 兼容对话端（`POST /v1/chat/completions` → `choices[0].message.content` 为当前回复文本），控制面 `/__reply` 改回复、`/__status` 注入故障（body 回显 Authorization 验凭据脱敏）、`/__state` 回看请求（model/prompt/role/auth/path/hasMaxTokens）。**刻意不实现 `/v1/embeddings`**：探针没按 kind 分派时会拿到 404 当场报错 | `python chat-mock.py [port]`（默认 18194，cap48 脚本自动拉起） |
 | `laya-sidecar-mock.py` | 假 laya 决策边车（CAP-55，`GET /healthz` + `POST /v1/predict`），**不实现 `/v1/embeddings` 与 `/chat/completions`**；答案按 questions 原语派生（choice→第一个选项 0.9、score→最高等级 0.8、noul→0.2，形状照 0.3.5 真机），控制面 `/__answers` 固定答案、`/__checkpoint` 改 routing、`/__health` 把 status 改成 loading（验「边车未就绪」）、`/__status` 注入故障码与 detail、**`/__sources` 注入槽位→实际来源**（CAP-56 FR-01 的 `/healthz` 上报形态：`sources`/`source_origin`/`overridden_slots`/`unready_slots`；传 null 恢复「不上报」= FR-01 之前的老边车，serve 自检该报 WARN）、`/__state` 回看请求（state/questions/model/hasModelKey/auth） | `python laya-sidecar-mock.py [port]`（默认 18195，cap55 脚本自动拉起；cap56_e2e.py 用 18196） |
 
+### 数据 fixtures（基准样本，不是测试双端）
+
+| 文件 | 用途 |
+|------|------|
+| `cap56-base-eval-report.json` | **CAP-56 基座评测基准样本**（2026-09-23 真机，140.88 上 `multilingual` base × 37 题人工基准集，111 题面）。存的是评测脚本吐给服务端的**完整报告原文**（`schemaVersion`/`metrics`/`baselines`/`byCaseGroup`/`perItem`/`calibration`），后续任何微调实验直接拿它当对照：不用重跑基座，也能逐题比。注意其中的 `checkpoint.id`/`dataset.id`/绝对路径是那次运行的留痕，不是可复现标识；可比的是 `metrics`/`perItem`/`calibration`。当时的关键读数：choice 准确率 0.216 @ 平均置信度 0.927（`answered` 全 project）、score 0.622（±1 级内 0.973）、noul 0.324；随机基线 0.389、多数类 0.676；温度校准 held-out 18 拟合 / 19 评估，ECE 0.5297 → 0.1594，桶 `choice:3-5=4.7`、`noul:2=3.8`、`score:3-5=0.7`。**改这个文件等于改基准**——要换基准就新加一个文件，别原地覆盖。 |
+
 TestSshServer 编译（Git Bash，一次性，产物 `.class` 已 gitignore）：
 
 ```bash
