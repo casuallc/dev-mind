@@ -292,15 +292,21 @@ def reinforce_step(model, batch: List[Task], args: argparse.Namespace, h: Dict[s
 
     b = h["collate_items"]([seqs], h["pad_id"])
     kmax = b["marker_mask"].size(1)
-    mask = b["marker_mask"]
-    target = torch.zeros((len(batch), kmax))
+    # 批是 `collate_items` 在 **CPU** 上拼出来的，模型却可能在 cuda（laya 的 Agent 按环境探测设备）——
+    # 一切张量一律搬到**模型自己的设备**上，别信批是从哪来的：真机全链第二轮就是这么炸的
+    # （`Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!`），
+    # 而且它只在"模型真的落在 cuda"时炸：显存被 vLLM 占满时 laya 会把模型退到 CPU，
+    # 那时 batch 与模型都在 CPU，反而"看起来能跑"——这就是同一份代码两次结果不同的原因。
+    device = next(model.parameters()).device
+    mask = b["marker_mask"].to(device)
+    target = torch.zeros((len(batch), kmax), device=device)
     for n, gold in enumerate(targets):
-        target[n, :len(gold)] = torch.tensor(gold, dtype=torch.float32)
-    qtype_t = torch.tensor(qtypes, dtype=torch.long)
+        target[n, :len(gold)] = torch.tensor(gold, dtype=torch.float32, device=device)
+    qtype_t = torch.tensor(qtypes, dtype=torch.long, device=device)
 
     logps, probs = [], []
     for _ in range(max(1, args.group_size)):
-        logits = forward(model, b)
+        logits = forward(model, b, device)
         canon = unpermute(logits, orders, kmax)
         z = (canon + torch.randn_like(canon) * args.exploration) / h["temp"]
         z = z.masked_fill(~mask, -1e4)
@@ -319,8 +325,13 @@ def reinforce_step(model, batch: List[Task], args: argparse.Namespace, h: Dict[s
     return loss, float(reward.mean().item())
 
 
-def forward(model, batch):
-    device = batch["input_ids"].device
+def forward(model, batch, device=None):
+    """一步前向；`device` 空缺时取**模型自己的**设备。
+
+    旧写法是 `device = batch["input_ids"].device`（批是 CPU 上拼的）——只有在模型也落 CPU 的
+    机器上碰巧对；模型在 cuda 时必炸 `Expected all tensors to be on the same device`。
+    """
+    device = device if device is not None else next(model.parameters()).device
     logits, _ = model(batch["input_ids"].to(device), batch["attention_mask"].to(device),
                       batch["marker_pos"].to(device), batch["marker_mask"].to(device),
                       batch["qtype"].to(device))
