@@ -178,13 +178,6 @@ export interface TriageScore {
   probabilities: Record<string, number> | null
 }
 
-/** CAP-55 FR-04 分诊可用性（配置侧）：inbox 拿它决定「AI 分诊」按钮灰不灰 */
-export interface TriageStatus {
-  available: boolean
-  /** 不可用原因（available=true 时空串），可直接展示 */
-  reason: string
-}
-
 export interface KnowledgeProposalInput {
   title: string
   contentMd: string

@@ -28,12 +28,10 @@ import {
   createBase,
   createProposal,
   deleteBase,
-  getTriageStatus,
   listBases,
   listProposals,
   previewInjection,
   rejectProposal,
-  triageProposal,
   updateBase,
 } from '../api'
 import type {
@@ -42,7 +40,6 @@ import type {
   KnowledgeBaseInput,
   KnowledgeProposal,
   PreviewResult,
-  TriageStatus,
   TriageView,
 } from '../types'
 import TriageEvidenceDrawer from '../components/TriageEvidenceDrawer'
@@ -99,9 +96,7 @@ export default function KnowledgeBaseList() {
   const [manageId, setManageId] = useState<number | null>(null)
   const manageProposal = manageId != null ? proposals.find((p) => p.id === manageId) ?? null : null
 
-  // CAP-55 FR-04 分诊：徽标数据来自列表本身（triage 字段），availability 只决定按钮灰不灰
-  const [triageStatus, setTriageStatus] = useState<TriageStatus | null>(null)
-  const [triagingId, setTriagingId] = useState<number | null>(null)
+  // CAP-57：分诊已与决策引擎解耦，徽标只读展示历史 triage 数据（不再发起新分诊）
   const [evidenceId, setEvidenceId] = useState<number | null>(null)
   const evidenceProposal = evidenceId != null ? proposals.find((p) => p.id === evidenceId) ?? null : null
 
@@ -144,10 +139,6 @@ export default function KnowledgeBaseList() {
       .catch(() => undefined)
     loadBases()
     loadProposals()
-    // 分诊可用性只在配置变化时才变，进页面取一次即可（后端刻意不探活）
-    getTriageStatus()
-      .then(setTriageStatus)
-      .catch(() => undefined)
   }, [loadBases, loadProposals])
 
   const openCreateBase = () => {
@@ -253,32 +244,6 @@ export default function KnowledgeBaseList() {
         }
       },
     })
-  }
-
-  /**
-   * CAP-55 FR-04 手动分诊：202 只代表排上队了，建议要等异步线程跑完才在列表上出现——
-   * 所以点完得盯着 `triage.at` 变（只看"有 at"会把上一次的结果当新的）。
-   */
-  const onTriage = async (p: KnowledgeProposal) => {
-    const previousAt = p.triage?.at ?? null
-    setTriagingId(p.id)
-    try {
-      await triageProposal(p.id)
-      message.info('已排队分诊，稍候徽标会刷新')
-      for (let i = 0; i < 20; i++) {
-        await new Promise((r) => setTimeout(r, 800))
-        const latest = (await listProposals()).find((x) => x.id === p.id)
-        if (latest && (latest.triage?.at ?? null) !== previousAt) {
-          setProposals(await listProposals())
-          return
-        }
-      }
-      message.warning('分诊结果尚未出现，可点「刷新」再看看')
-    } catch (e) {
-      showError(e, '分诊失败')
-    } finally {
-      setTriagingId(null)
-    }
   }
 
   const onPreview = async () => {
@@ -409,7 +374,6 @@ export default function KnowledgeBaseList() {
   ]
 
   const projectOptions = projects.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))
-  const triageUnavailable = triageStatus?.available === false
 
   return (
     <Card
@@ -604,20 +568,6 @@ export default function KnowledgeBaseList() {
                 )}
               </div>
               <Space>
-                {/* 灰按钮必须自己套一层 span：disabled 的按钮不派发鼠标事件，Tooltip 挂在按钮上
-                    永远不弹——而"灰了为什么"正是这个 Tooltip 唯一要说的事 */}
-                <Tooltip title={triageUnavailable ? triageStatus?.reason : ''}>
-                  <span style={{ display: 'inline-block', cursor: triageUnavailable ? 'not-allowed' : undefined }}>
-                    <Button
-                      size="small"
-                      loading={triagingId === manageProposal.id}
-                      disabled={triageUnavailable}
-                      onClick={() => onTriage(manageProposal)}
-                    >
-                      {manageProposal.triage ? '重新分诊' : 'AI 分诊'}
-                    </Button>
-                  </span>
-                </Tooltip>
                 {manageProposal.triage && !manageProposal.triage.degraded && (
                   <Button size="small" onClick={() => setEvidenceId(manageProposal.id)}>
                     查看依据
