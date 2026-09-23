@@ -49,8 +49,8 @@ public class ExecHandler {
     /** CAP-56 数据文件绝对路径的环境变量名（同上） */
     public static final String PAYLOAD_ENV = "DEVMIND_LAB_PAYLOAD";
 
-    /** 白名单豁免的 shell 内置命令/关键字（小写） */
-    private static final Set<String> SHELL_BUILTINS = Set.of(
+    /** 白名单豁免的 shell 内置命令/关键字（小写）；package 可见供 CAP-58 TerminalHandler 复用 */
+    static final Set<String> SHELL_BUILTINS = Set.of(
             "echo", "cd", "if", "then", "else", "elif", "fi", "for", "while", "do", "done", "case", "esac",
             "export", "set", "unset", "exit", "return", "test", "[", "[[", "local", "readonly", "shift",
             "source", ".", "true", "false", ":", "wait", "trap", "umask", "pwd", "pushd", "popd", "let",

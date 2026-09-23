@@ -111,6 +111,9 @@ public class AgentRunnerMain {
         watcher.start();
         WorkspaceQueryHandler queryHandler = new WorkspaceQueryHandler(sessions, gitCollector,
                 frame -> connRef[0].send(frame));
+        // CAP-58：终端帧 handler（会话工作区单条命令执行；terminalAllowlist 缺省只读档）
+        TerminalHandler terminalHandler = new TerminalHandler(config, sessions,
+                frame -> connRef[0].send(frame));
 
         // CAP-34 FR-04：连接前先现场对账——强杀/崩溃残留的孤儿 claude 进程整树回收，
         // 无主目录登记（超龄删除归 FR-05 GC）。对账完再上线，hello 的 activeSessions 才是真实清单
@@ -139,7 +142,8 @@ public class AgentRunnerMain {
 
         ServerConnection conn = new ServerConnection(config, mapper,
                 frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, workspace,
-                        execHandler, procHandler, pkgHandler, watcher, queryHandler, connRef[0]),
+                        execHandler, procHandler, pkgHandler, watcher, queryHandler, terminalHandler,
+                        connRef[0]),
                 () -> connRef[0].send(helloFrame(sessions, version, workspaceBytes.get(),
                         config.labels(), toolchain.get())));
         connRef[0] = conn;
@@ -180,6 +184,7 @@ public class AgentRunnerMain {
             watcher.shutdown();
             sessions.killAll();
             execHandler.killAll();
+            terminalHandler.killAll();
             conn.shutdown();
         }));
 
@@ -224,7 +229,8 @@ public class AgentRunnerMain {
                                     RunnerSessionRegistry sessions, RunnerWorkspace workspace,
                                     ExecHandler execHandler, ProcHandler procHandler, PkgHandler pkgHandler,
                                     WorkspaceWatcher watcher,
-                                    WorkspaceQueryHandler queryHandler, ServerConnection conn) {
+                                    WorkspaceQueryHandler queryHandler, TerminalHandler terminalHandler,
+                                    ServerConnection conn) {
         // CAP-43：帧携带 proxy{url,scopes}（协议 v8+，节点配了外网代理才带）→ 刷新进程级
         // NodeProxy holder，git/claude/exec 三 scope 消费点直接读 holder；帧无此字段不动 holder
         // （权威源在服务端，四类消费帧都带同一值，重复刷新幂等）
@@ -250,6 +256,7 @@ public class AgentRunnerMain {
             case "workspace_finalize" -> handleWorkspaceFinalize(frame, config, sessions, workspace, conn);
             case "workspace_release" -> handleWorkspaceRelease(frame, sessions, workspace, conn);
             case "workspace_query" -> queryHandler.handle(frame); // CAP-54：工作区只读查询
+            case "terminal_exec" -> terminalHandler.handle(frame); // CAP-58：终端单条命令执行
             default -> log.debug("未知指令类型: {}", type);
         }
     }

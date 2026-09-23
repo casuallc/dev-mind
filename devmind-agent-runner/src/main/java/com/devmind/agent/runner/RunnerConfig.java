@@ -54,6 +54,12 @@ import java.util.Properties;
  *                            # 比会话目录 gcDays 长——需求生命周期更长；未提交改动 / 分支未推远端永不删。
  *                            # 应与 claude 侧 transcript 保留期（cleanupPeriodDays，runner 落 180 天）
  *                            # 对齐：工作树还在而会话续不上是最难排查的半可用状态
+ * terminalAllowlist=         # CAP-58：终端帧（terminal_exec）命令白名单（CSV 前缀；按 |/&&/;/换行
+ *                            # 切段逐段校验首 token，git 默认只放行只读子命令，条目 git:* 全放行）。
+ *                            # 缺省（不配该项）= 内置只读档（ls/cat/head/tail/grep/find/git 只读等）；
+ *                            # 显式配置（含空串）= 全覆盖（空串 = 拒绝一切终端命令）
+ * terminalTimeoutSec=60      # CAP-58：单条终端命令超时（秒），超时整树杀
+ * terminalAllowRedirect=false# CAP-58：是否放开 &gt;/&gt;&gt; 重定向写入（默认拒绝）
  * </pre>
  */
 public record RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -62,7 +68,22 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                            int gcInitialDelayMinutes, java.util.List<String> labels,
                            java.util.List<String> execAllowlist, String execShell, int buildGcHours,
                            String claudeConfigDir, String worklogRoot, boolean partialMessages,
-                           int worktreeGcDays) {
+                           int worktreeGcDays, java.util.List<String> terminalAllowlist,
+                           int terminalTimeoutSec, boolean terminalAllowRedirect) {
+
+    /** 兼容构造（CAP-58 前的 20 参签名）：终端白名单缺省只读档 + 60s 超时 + 禁重定向。 */
+    public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
+                        Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
+                        String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes,
+                        int gcInitialDelayMinutes, java.util.List<String> labels,
+                        java.util.List<String> execAllowlist, String execShell, int buildGcHours,
+                        String claudeConfigDir, String worklogRoot, boolean partialMessages,
+                        int worktreeGcDays) {
+        this(serverUrl, token, claudePath, permissionMode, workDir, projectPaths, maxConcurrent,
+                executor, workspaceRoot, gcDays, gcIntervalMinutes, gcInitialDelayMinutes, labels,
+                execAllowlist, execShell, buildGcHours, claudeConfigDir, worklogRoot, partialMessages,
+                worktreeGcDays, null, 60, false);
+    }
 
     /** 兼容构造（CAP-51 前的 19 参签名）：需求工作树 GC 阈值默认 30 天。 */
     public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -162,7 +183,12 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                 p.getProperty("claudeConfigDir", "").strip(),
                 p.getProperty("worklogRoot", "").strip(),
                 !"false".equalsIgnoreCase(p.getProperty("partialMessages", "true").strip()),
-                Integer.parseInt(p.getProperty("worktreeGcDays", "30").strip()));
+                Integer.parseInt(p.getProperty("worktreeGcDays", "30").strip()),
+                // CAP-58：缺省（属性缺席）= null → TerminalHandler 用内置只读档；显式配置全覆盖
+                p.getProperty("terminalAllowlist") == null ? null
+                        : parseLabels(p.getProperty("terminalAllowlist")),
+                Integer.parseInt(p.getProperty("terminalTimeoutSec", "60").strip()),
+                "true".equalsIgnoreCase(p.getProperty("terminalAllowRedirect", "false").strip()));
     }
 
     /** CAP-41：worklog 持久工作区根目录——配置优先，空 = {user.home}/worklog。 */
