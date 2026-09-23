@@ -61,3 +61,11 @@ CAP-59 把终端能力补齐（持久 shell / Tab 补全 / 取消），但渲染
 ## 5. 落地状态
 
 - **M1 —— 需求定稿**：本文档。
+- **M2 —— 实现（2026-09-23）**：`shared/chat/workspace/ansi.ts` 纯函数解析器
+  （SGR 16/256/truecolor + bold/dim/italic/underline，OSC/CSI/字符集/`\r` 吞掉）+
+  `AnsiText.tsx` 渲染层（无样式段继承父色，stdout 浅灰/stderr 红口径不变）；
+  TerminalTab 接入：stdout/stderr 走 `renderAnsi`、字体栈 `'JetBrains Mono',
+  'Cascadia Code', …, Consolas, monospace`、顶部工具栏 A−/A+ 字号 10–20px
+  （localStorage `devmind.terminal.fontSize` 持久化，输入框/候选弹层跟随）。
+  验证：`npx tsc -b` 通过；解析器 node 冒烟（7 组断言：16 色/组合码/256 色/
+  truecolor/背景/控制序列吞掉/单独关闭码）全过。渲染层为纯展示，未做浏览器 UI E2E。
