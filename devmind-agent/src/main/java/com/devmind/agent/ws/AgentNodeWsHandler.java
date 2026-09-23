@@ -186,6 +186,16 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
                         frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),
                         payload, frame.path("error").asText(null));
             }
+            // CAP-57：受管进程操作 ack
+            case "proc_ack" -> registry.onProcAck(String.valueOf(node.getId()),
+                    frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),
+                    frame.path("action").asText(""), frame.path("status").asText(""),
+                    frame.has("pid") ? frame.path("pid").asLong() : null,
+                    frame.path("error").asText(null), frame.path("detail").asText(null));
+            // CAP-57：安装包分发 ack
+            case "pkg_ack" -> registry.onPkgAck(String.valueOf(node.getId()),
+                    frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),
+                    frame.path("installDir").asText(""), frame.path("error").asText(null));
             default -> log.debug("未知 runner 帧类型: {}", type);
         }
     }

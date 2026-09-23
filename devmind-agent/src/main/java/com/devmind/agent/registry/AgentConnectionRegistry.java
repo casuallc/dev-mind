@@ -13,6 +13,10 @@ import com.devmind.common.agent.AgentExecCommand;
 import com.devmind.common.agent.AgentExecResult;
 import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.AgentNodeConnector;
+import com.devmind.common.agent.AgentPkgCommand;
+import com.devmind.common.agent.AgentPkgResult;
+import com.devmind.common.agent.AgentProcCommand;
+import com.devmind.common.agent.AgentProcResult;
 import com.devmind.common.agent.AgentProtocol;
 import com.devmind.common.agent.FinalizeResult;
 import com.devmind.common.agent.InputImage;
@@ -86,6 +90,14 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private record WorkspaceQueryWaiter(String nodeId, CompletableFuture<WorkspaceQueryResult> done) {
     }
 
+    /** CAP-57：proc 等待者（受管进程起停/状态，阻塞等 ack） */
+    private record ProcWaiter(String nodeId, CompletableFuture<AgentProcResult> done) {
+    }
+
+    /** CAP-57：pkg 等待者（安装包分发，GB 下载以分钟计，future 异步收口） */
+    private record PkgWaiter(String nodeId, CompletableFuture<AgentPkgResult> done) {
+    }
+
     private final AgentNodeService nodeService;
     private final AgentProperties props;
     private final ObjectMapper mapper;
@@ -116,6 +128,10 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private final Map<String, ReleaseWaiter> pendingReleases = new ConcurrentHashMap<>();
     /** requestId → workspace_query 等待者（CAP-54 工作区只读查询） */
     private final Map<String, WorkspaceQueryWaiter> pendingWorkspaceQueries = new ConcurrentHashMap<>();
+    /** requestId → proc 等待者（CAP-57 服务实例进程管控） */
+    private final Map<String, ProcWaiter> pendingProcs = new ConcurrentHashMap<>();
+    /** requestId → pkg 等待者（CAP-57 安装包分发） */
+    private final Map<String, PkgWaiter> pendingPkgs = new ConcurrentHashMap<>();
 
     public AgentConnectionRegistry(AgentNodeService nodeService, AgentProperties props,
                                    ObjectMapper mapper, ObjectProvider<AgentEventListener> listenerProvider,
@@ -195,6 +211,18 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         for (Map.Entry<String, WorkspaceQueryWaiter> e : pendingWorkspaceQueries.entrySet()) {
             if (e.getValue().nodeId().equals(nodeId) && pendingWorkspaceQueries.remove(e.getKey(), e.getValue())) {
                 e.getValue().done().complete(WorkspaceQueryResult.failed("节点断连，工作区查询中断"));
+            }
+        }
+        // CAP-57：断线即失败该节点进行中的进程管控/包分发（ack 不会再来）
+        for (Map.Entry<String, ProcWaiter> e : pendingProcs.entrySet()) {
+            if (e.getValue().nodeId().equals(nodeId) && pendingProcs.remove(e.getKey(), e.getValue())) {
+                e.getValue().done().complete(AgentProcResult.fail("", AgentProcResult.UNKNOWN,
+                        "节点断连，进程管控操作中断"));
+            }
+        }
+        for (Map.Entry<String, PkgWaiter> e : pendingPkgs.entrySet()) {
+            if (e.getValue().nodeId().equals(nodeId) && pendingPkgs.remove(e.getKey(), e.getValue())) {
+                e.getValue().done().complete(AgentPkgResult.fail("节点断连，安装包分发中断"));
             }
         }
         // CAP-30：事件广播（原 getIfAvailable 单实现，chat 加入后有多实现）——各 bridge
@@ -316,6 +344,26 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         WorkspaceQueryWaiter w = pendingWorkspaceQueries.remove(requestId);
         if (w != null) {
             w.done().complete(ok ? WorkspaceQueryResult.ok(payload) : WorkspaceQueryResult.failed(error));
+        }
+    }
+
+    /** CAP-57：proc_ack 上行帧 → 完成等待 future（ok/status/pid 原样透传给 classify 模块判定）。 */
+    public void onProcAck(String nodeId, String requestId, boolean ok, String action, String status,
+                          Long pid, String error, String detail) {
+        touch(nodeId);
+        ProcWaiter w = pendingProcs.remove(requestId);
+        if (w != null) {
+            w.done().complete(new AgentProcResult(ok, action, status, pid,
+                    error == null ? "" : error, detail == null ? "" : detail));
+        }
+    }
+
+    /** CAP-57：pkg_ack 上行帧 → 完成等待 future（installDir 为节点侧绝对路径，落 installs 表）。 */
+    public void onPkgAck(String nodeId, String requestId, boolean ok, String installDir, String error) {
+        touch(nodeId);
+        PkgWaiter w = pendingPkgs.remove(requestId);
+        if (w != null) {
+            w.done().complete(ok ? AgentPkgResult.ok(installDir) : AgentPkgResult.fail(error));
         }
     }
 
@@ -620,6 +668,85 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
                             + AgentProtocol.EXEC_BUNDLE + "+，执行包要由 runner 拉取物化），"
                             + "请到节点页升级 runner");
         }
+    }
+
+    /**
+     * CAP-57：下发 proc 帧并阻塞等 proc_ack（镜像 launch/exec 的「发帧 + 等 ack」模式）。
+     * 协议门控：runner 低于 v15 会静默忽略 proc 帧，管控台空等超时，故直接 409 指向升级。
+     * 等待上限 60s（start 含 800ms 观察窗、stop 等树杀死透 10s，60s 足够；包下载不走这里）。
+     *
+     * <p><b>红线</b>：{@link AgentProcCommand} 全部字段必须在此 put——漏一行 runner 侧就拿到
+     * 空串/空表，现象是"实例起不来但帧看着发出去了"（本仓库 launch 帧三次同类事故）。
+     * AgentConnectionRegistryProcTest 钉住完整组帧。</p>
+     */
+    @Override
+    public AgentProcResult proc(String nodeId, AgentProcCommand cmd) {
+        if (!supports(nodeId, AgentProtocol.PROC_FRAMES)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 的 runner 协议版本过低（分类服务进程管控需 v"
+                            + AgentProtocol.PROC_FRAMES + "+），请到节点页升级 runner");
+        }
+        WebSocketSession ws = requireConnection(nodeId);
+        CompletableFuture<AgentProcResult> done = new CompletableFuture<>();
+        pendingProcs.put(cmd.requestId(), new ProcWaiter(nodeId, done));
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "proc");
+        frame.put("requestId", cmd.requestId());
+        frame.put("action", cmd.action());
+        frame.put("instanceId", cmd.instanceId());
+        frame.put("argv", cmd.argv() == null ? List.of() : cmd.argv());
+        frame.put("command", cmd.command() == null ? "" : cmd.command());
+        frame.put("env", cmd.env() == null ? Map.of() : cmd.env());
+        frame.put("workdir", cmd.workdir() == null ? "" : cmd.workdir());
+        frame.put("pidFile", cmd.pidFile() == null ? "" : cmd.pidFile());
+        frame.put("logFile", cmd.logFile() == null ? "" : cmd.logFile());
+        try {
+            send(ws, frame);
+            return done.get(60, TimeUnit.SECONDS);
+        } catch (DevMindException e) {
+            throw e;
+        } catch (java.util.concurrent.TimeoutException e) {
+            return AgentProcResult.fail(cmd.action(), AgentProcResult.UNKNOWN,
+                    "等待 runner proc_ack 超时（runner 无响应）");
+        } catch (Exception e) {
+            throw new DevMindException(ErrorCode.CONFLICT, "proc 下发异常: " + e.getMessage(), e);
+        } finally {
+            pendingProcs.remove(cmd.requestId());
+        }
+    }
+
+    /**
+     * CAP-57：下发 pkg 帧并返回 future——安装包 GB 级下载以分钟计，调用方（classify 安装流）
+     * 在虚拟线程上等 future，不阻塞 WS/REST 线程。协议门控同 proc：老 runner 静默忽略 pkg 帧。
+     *
+     * <p><b>红线</b>：{@link AgentPkgCommand} 全部字段必须在此 put，AgentConnectionRegistryPkgTest
+     * 钉住完整组帧。无等待超时：断连清理解约，下载耗时由调用方自行兜底。</p>
+     */
+    @Override
+    public CompletableFuture<AgentPkgResult> pkgInstallAsync(String nodeId, AgentPkgCommand cmd) {
+        if (!supports(nodeId, AgentProtocol.PKG_FRAMES)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 的 runner 协议版本过低（分类服务安装包分发需 v"
+                            + AgentProtocol.PKG_FRAMES + "+），请到节点页升级 runner");
+        }
+        WebSocketSession ws = requireConnection(nodeId);
+        CompletableFuture<AgentPkgResult> done = new CompletableFuture<>();
+        pendingPkgs.put(cmd.requestId(), new PkgWaiter(nodeId, done));
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "pkg");
+        frame.put("requestId", cmd.requestId());
+        frame.put("packageId", cmd.packageId());
+        frame.put("sha256", cmd.sha256());
+        frame.put("sizeBytes", cmd.sizeBytes());
+        frame.put("fileName", cmd.fileName() == null ? "" : cmd.fileName());
+        frame.put("installDir", cmd.installDir());
+        try {
+            send(ws, frame);
+        } catch (Exception e) {
+            pendingPkgs.remove(cmd.requestId());
+            done.complete(AgentPkgResult.fail("pkg 下发异常: " + e.getMessage()));
+        }
+        return done;
     }
 
     /**
