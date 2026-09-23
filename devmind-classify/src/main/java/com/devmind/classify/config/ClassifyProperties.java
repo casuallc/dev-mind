@@ -29,6 +29,9 @@ public class ClassifyProperties {
     /** healthz 单次调用超时（秒）：轮询不是流量路径，10s 足够分辨「没起」与「在忙」 */
     private int healthTimeoutSeconds = 10;
 
+    /** 试分类单次调用超时（秒）：批量/长 state 推理比 healthz 慢，给 60s */
+    private int playgroundTimeoutSeconds = 60;
+
     public String getStorageDir() { return storageDir; }
     public void setStorageDir(String storageDir) { this.storageDir = storageDir; }
     public long getHealthIntervalMs() { return healthIntervalMs; }
@@ -37,4 +40,6 @@ public class ClassifyProperties {
     public void setStartGraceMs(long startGraceMs) { this.startGraceMs = startGraceMs; }
     public int getHealthTimeoutSeconds() { return healthTimeoutSeconds; }
     public void setHealthTimeoutSeconds(int healthTimeoutSeconds) { this.healthTimeoutSeconds = healthTimeoutSeconds; }
+    public int getPlaygroundTimeoutSeconds() { return playgroundTimeoutSeconds; }
+    public void setPlaygroundTimeoutSeconds(int playgroundTimeoutSeconds) { this.playgroundTimeoutSeconds = playgroundTimeoutSeconds; }
 }
