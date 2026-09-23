@@ -92,7 +92,7 @@ tar xzf "$IN/$PKG" -C "$NEW" --strip-components=1
 
 rollback() {
   echo "[remote] !! start failed, rolling back to $BK"
-  for d in bin libs ui runner; do
+  for d in bin libs ui runner lab; do
     [ -d "$BK/$d" ] || continue
     rm -rf "$d"; mv "$BK/$d" "$d"
   done
@@ -104,8 +104,10 @@ rollback() {
   exit 1
 }
 
-# 换包：bin/libs/ui/runner 整体替换（libs 不合并，防旧 jar 残留）
-for d in bin libs ui runner; do
+# 换包：bin/libs/ui/runner/lab 整体替换（libs 不合并，防旧 jar 残留）。
+# lab/ 是 CAP-56 决策实验室的评测/微调脚本，服务端按 devmind.decision-lab.scripts-dir=lab 读它
+# （相对路径跟随 APP_HOME）——漏铺这个目录，发起评测/微调会被直接拒绝，所以与 libs 同级对待。
+for d in bin libs ui runner lab; do
   [ -d "$NEW/$d" ] || continue
   [ ! -d "$d" ] || mv "$d" "$BK/"
   mv "$NEW/$d" "$d"
