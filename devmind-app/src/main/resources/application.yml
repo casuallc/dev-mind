@@ -30,8 +30,8 @@ spring:
       path: /h2-console
   servlet:
     multipart:
-      max-file-size: 64MB        # CAP-21 FR-09 runner shaded jar 上传（Boot 默认 1MB 必超限）
-      max-request-size: 64MB
+      max-file-size: 4GB           # CAP-57 分类安装包（模型权重 GB 级，流式落盘不过内存）；原 64MB 为 CAP-21 runner jar
+      max-request-size: 4GB
 
 devmind:
   error:

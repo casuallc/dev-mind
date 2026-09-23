@@ -10,6 +10,9 @@ public interface ClassifyInstanceRepository extends JpaRepository<ClassifyInstan
 
     Optional<ClassifyInstanceEntity> findByName(String name);
 
+    /** 删包前查引用（应用包绑定） */
+    List<ClassifyInstanceEntity> findByAppPackageId(Long appPackageId);
+
     /** 健康轮询目标（STARTING/RUNNING/UNHEALTHY） */
     List<ClassifyInstanceEntity> findByStatusIn(Collection<String> statuses);
 }
