@@ -42,12 +42,15 @@ package com.devmind.common.agent;
  * 数据，"照常执行"必然失败且失败原因指向脚本自身，故属「必须认识」需门控）。
  * v15 = CAP-57 分类服务（proc/proc_ack 进程管控帧 + pkg/pkg_ack 安装包分发帧——
  * 老 runner 不认识这两类帧会静默忽略，管控台的起停/安装操作会空等超时，
- * 故属「必须认识」需门控，409 话术引导到节点页升级 runner）。</p>
+ * 故属「必须认识」需门控，409 话术引导到节点页升级 runner）。
+ * v16 = CAP-58 会话工作区远程终端（terminal_exec/terminal_exec_ack 请求应答帧——
+ * 老 runner 不认识 terminal_exec 会静默忽略，REST 端点会等到超时，
+ * 故服务端先按版本门控直接 409 引导升级；上行 ack 被老服务端忽略，不门控）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 15;
+    public static final int CURRENT = 16;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -93,6 +96,9 @@ public final class AgentProtocol {
 
     /** CAP-57 分类服务安装包分发（pkg/pkg_ack 帧：节点拉取 + sha 校验 + 原子解包）所需最低版本 */
     public static final int PKG_FRAMES = 15;
+
+    /** CAP-58 会话工作区远程终端（terminal_exec/terminal_exec_ack 帧）所需最低版本 */
+    public static final int TERMINAL_EXEC = 16;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;

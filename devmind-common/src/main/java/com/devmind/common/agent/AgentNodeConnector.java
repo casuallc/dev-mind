@@ -219,8 +219,21 @@ public interface AgentNodeConnector {
     }
 
     /**
-     * CAP-57：下发 proc 帧并阻塞等 proc_ack——runner 对受管长驻进程（服务实例，如分类边车）
-     * 执行 start/stop/restart/status（argv 不过 shell，目录收容校验，shutdown 不杀）。
+     * CAP-58：下发 terminal_exec 帧并阻塞等 terminal_exec_ack——runner 对会话代码目录执行
+     * 单条终端命令（ls/cd/cat/git 等探查类，runner 侧白名单强制，缺省只读档）。
+     * {@code cwd} 为相对代码目录的 POSIX 路径（空 = 代码目录根），ack 带回执行后的新 cwd。
+     * 节点离线/协议版本不足（需 v16+）/等待超时抛 DevMindException(CONFLICT)；
+     * 命令本身非零退出不抛，看 {@link TerminalExecResult#exitCode()}；
+     * 白名单拒绝/路径越界/会话不在本节点看 {@link TerminalExecResult#ok()}。
+     * 默认实现 = agent 模块未装配（无任何执行节点可用）。
+     */
+    default TerminalExecResult terminalExec(String nodeId, String sessionId, String command, String cwd) {
+        throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+    }
+
+    /**
+     * CAP-57：下发 proc 帧并阻塞等 proc_ack——runner 对受管长驻进程（服务实例，如分类边车）     * 执行 start/stop/restart/status（argv 不过 shell，目录收容校验，shutdown 不杀）。
      * 节点离线/协议版本不足（需 v15+）/等待超时抛 DevMindException(CONFLICT)；
      * 动作失败（启动即退出/pid 不存在等）不抛，看 {@link AgentProcResult#ok()}。
      * 默认实现 = agent 模块未装配（无任何执行节点可用）。
