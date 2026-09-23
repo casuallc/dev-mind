@@ -125,4 +125,4 @@ stdout/stderr/exit code 回显。**单条命令执行**（非交互式 PTY）：
   runner `TerminalHandler`（可配置白名单缺省只读档 + cwd 限定 + marker 取新 cwd）+
   服务端 registry/SPI/REST（session/chat 对称）+ 前端工作区面板终端 tab。
   单测：runner 白名单纯函数面、agent 帧链路面（组帧/ack 路由/v16 门控/断连清理）。
-  E2E：`tests/cap58_e2e.py`（fake runner + 独立实例）。
+  E2E：`tests/cap58_e2e.py`（fake runner + 独立实例）已实跑通过。
