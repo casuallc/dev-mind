@@ -1,6 +1,5 @@
 package com.devmind.knowledge;
 
-import com.devmind.auth.IdentityService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.model.ModelEndpointProvider;
@@ -23,9 +22,6 @@ import com.devmind.knowledge.repo.KnowledgeBaseRepository;
 import com.devmind.knowledge.repo.KnowledgeChunkRepository;
 import com.devmind.knowledge.repo.KnowledgeEntryRepository;
 import com.devmind.knowledge.repo.KnowledgeProposalRepository;
-import com.devmind.knowledge.triage.ProposalCreatedEvent;
-import com.devmind.knowledge.triage.ProposalVerdictEvent;
-import com.devmind.common.decision.TriageQuestions;
 import com.devmind.notification.NotificationPublisher;
 import com.devmind.project.ProjectService;
 import com.devmind.project.model.Project;
@@ -66,7 +62,6 @@ public class KnowledgeBaseService {
     private final ApplicationEventPublisher eventPublisher;
     private final EmbeddingResolver resolver;
     private final ObjectProvider<ModelEndpointProvider> endpointProviders;
-    private final IdentityService identityService;
 
     public KnowledgeBaseService(KnowledgeBaseRepository kbRepo,
                                 KnowledgeEntryRepository entryRepo,
@@ -76,8 +71,7 @@ public class KnowledgeBaseService {
                                 NotificationPublisher notificationPublisher,
                                 ApplicationEventPublisher eventPublisher,
                                 EmbeddingResolver resolver,
-                                ObjectProvider<ModelEndpointProvider> endpointProviders,
-                                IdentityService identityService) {
+                                ObjectProvider<ModelEndpointProvider> endpointProviders) {
         this.kbRepo = kbRepo;
         this.entryRepo = entryRepo;
         this.chunkRepo = chunkRepo;
@@ -87,7 +81,6 @@ public class KnowledgeBaseService {
         this.eventPublisher = eventPublisher;
         this.resolver = resolver;
         this.endpointProviders = endpointProviders;
-        this.identityService = identityService;
     }
 
     // ---------------- 知识库（CAP-44 FR-01/FR-07） ----------------
@@ -616,8 +609,6 @@ public class KnowledgeBaseService {
         p.setStatus("open");
         p.setCreatedAt(Instant.now());
         p = proposalRepo.save(p);
-        // CAP-55 FR-04：自动分诊（监听方 AFTER_COMMIT 后异步跑，提交前发这里只是为了不漏发）
-        eventPublisher.publishEvent(new ProposalCreatedEvent(p.getId()));
         // P2 通知：静默进中心（FR-05 不打扰）
         try {
             notificationPublisher.publish(NotificationEvent.of(
@@ -671,9 +662,6 @@ public class KnowledgeBaseService {
         p.setAdoptedProjectId("project".equals(target) ? kb.getProjectId() : null);
         p.setAdoptedAt(now);
         ProposalView view = EntryViews.proposal(proposalRepo.save(p));
-        // CAP-55 FR-05：采纳去向就是分诊"采纳层级"那题的人工 gold（选项 key 与 target 同域）；
-        // 提交后才落库（AFTER_COMMIT），事务回滚了就不会留下一条没发生过的"人工裁决"
-        publishVerdict(p.getId(), "adopt:" + target, Map.of(TriageQuestions.Q_LAYER, target));
         return view;
     }
 
@@ -686,16 +674,7 @@ public class KnowledgeBaseService {
         p.setStatus("rejected");
         p.setAdoptedAt(Instant.now());
         ProposalView view = EntryViews.proposal(proposalRepo.save(p));
-        // CAP-55 FR-05：拒绝**不**折算成"不值得沉淀"那题——"现在不采纳"和"这经验没价值"
-        // 是两回事，把人的动作硬塞进一个他没表的态就是往训练集里灌噪声。动作本身仍留痕。
-        publishVerdict(p.getId(), "reject", Map.of());
         return view;
-    }
-
-    /** 人工裁决留痕（FR-05）：谁做的、做了什么、构成哪道题的 gold（可能为空） */
-    private void publishVerdict(Long proposalId, String humanAction, Map<String, Object> gold) {
-        eventPublisher.publishEvent(new ProposalVerdictEvent(proposalId, humanAction, gold,
-                identityService.currentActor()));
     }
 
     private String defaultPath(KnowledgeEntryEntity e) {
@@ -729,13 +708,5 @@ public class KnowledgeBaseService {
     private KnowledgeProposalEntity requireProposal(Long id) {
         return proposalRepo.findById(id)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "提案不存在: " + id));
-    }
-
-    /**
-     * 分诊入口的存在性校验（CAP-55 FR-04）：分诊是异步的，先在这里拦住 404——
-     * 否则"不存在的提案"会静默变成一次无人知晓的空转。
-     */
-    public void requireProposalExists(Long id) {
-        requireProposal(id);
     }
 }

@@ -56,8 +56,8 @@ public final class TriageQuestions {
      *
      * <p>CAP-56 FR-02 把「空召回」列为必须存在的对照组：没有它，「恒答重复」这种退化看起来
      * 也"合理"（2026-09-22 实测 multilingual 在空召回组仍给 duplicate=0.988）。对照组靠
-     * <b>逐字这个串</b>来构造与识别，所以它必须是常量、由生产侧（{@code TriageEvidence}）
-     * 与评测侧共用——两边各写一份，改一处就静默失配。</p>
+     * <b>逐字这个串</b>来构造与识别，所以它必须是常量、由生产侧（CAP-57 解耦前为
+     * {@code TriageEvidence}，现由未来消费方沿用）与评测侧共用——两边各写一份，改一处就静默失配。</p>
      */
     public static final String EMPTY_RECALL = "（未召回到相似条目）";
 

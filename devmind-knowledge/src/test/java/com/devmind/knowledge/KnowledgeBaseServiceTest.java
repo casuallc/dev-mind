@@ -1,6 +1,5 @@
 package com.devmind.knowledge;
 
-import com.devmind.auth.IdentityService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.model.ModelEndpointProvider;
 import com.devmind.common.model.ModelEndpointView;
@@ -19,19 +18,15 @@ import com.devmind.knowledge.repo.KnowledgeBaseRepository;
 import com.devmind.knowledge.repo.KnowledgeChunkRepository;
 import com.devmind.knowledge.repo.KnowledgeEntryRepository;
 import com.devmind.knowledge.repo.KnowledgeProposalRepository;
-import com.devmind.knowledge.triage.ProposalCreatedEvent;
-import com.devmind.knowledge.triage.ProposalVerdictEvent;
 import com.devmind.notification.NotificationPublisher;
 import com.devmind.project.ProjectService;
 import com.devmind.project.model.Project;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 
@@ -117,12 +112,9 @@ class KnowledgeBaseServiceTest {
         when(projectService.requireProject(anyString())).thenAnswer(inv ->
                 new Project(inv.getArgument(0), "项目" + inv.getArgument(0), null, null, List.of(),
                         null, null, null));
-        IdentityService identityService = mock(IdentityService.class);
-        when(identityService.currentActor()).thenReturn("alice");
 
         service = new KnowledgeBaseService(kbRepo, entryRepo, chunkRepo, proposalRepo,
-                projectService, notificationPublisher, eventPublisher, resolver, endpointProviders,
-                identityService);
+                projectService, notificationPublisher, eventPublisher, resolver, endpointProviders);
     }
 
     private KnowledgeBaseEntity addKb(String scope, String projectId, String injectMode) {
@@ -268,7 +260,7 @@ class KnowledgeBaseServiceTest {
     }
 
     @Test
-    void createProposalAnnouncesItselfSoTriageCanRun() {
+    void createProposalStartsOpenWithoutTriage() {
         when(proposalRepo.save(any(KnowledgeProposalEntity.class))).thenAnswer(inv -> {
             KnowledgeProposalEntity p = inv.getArgument(0);
             if (p.getId() == null) {
@@ -281,15 +273,10 @@ class KnowledgeBaseServiceTest {
                 "构建失败先看日志末尾", "九成环境类报错在日志最后 200 行", "project", "p1", "s1"));
 
         assertEquals("open", view.status());
-        assertNull(view.triage(), "刚入库还没分诊：徽标要等异步分诊落库后才出现");
-        org.mockito.ArgumentCaptor<ProposalCreatedEvent> event =
-                org.mockito.ArgumentCaptor.forClass(ProposalCreatedEvent.class);
-        verify(eventPublisher).publishEvent(event.capture());
-        assertEquals(view.id(), event.getValue().proposalId(),
-                "事件带的是落库后的 id——异步线程按 id 读回，带实体引用就是过期快照");
+        assertNull(view.triage(), "CAP-57 解耦后不再有自动分诊：徽标只读历史数据");
     }
 
-    // ---------------- CAP-55 FR-05 人工裁决留痕 ----------------
+    // ---------------- 提案人工处置 ----------------
 
     private KnowledgeProposalEntity addOpenProposal() {
         KnowledgeProposalEntity p = new KnowledgeProposalEntity();
@@ -305,36 +292,18 @@ class KnowledgeBaseServiceTest {
         return p;
     }
 
-    private ProposalVerdictEvent capturedVerdict() {
-        ArgumentCaptor<ProposalVerdictEvent> captor = ArgumentCaptor.forClass(ProposalVerdictEvent.class);
-        verify(eventPublisher).publishEvent(captor.capture());
-        return captor.getValue();
-    }
-
     @Test
-    void adoptAnnouncesVerdictAsGoldForTheLayerQuestion() {
+    void adoptMarksProposalAdopted() {
         KnowledgeProposalEntity p = addOpenProposal();
 
-        ProposalView view = service.adopt(p.getId(), "global", null);
-
-        assertEquals("adopted", view.status());
-        ProposalVerdictEvent event = capturedVerdict();
-        assertEquals("adopt:global", event.humanAction());
-        assertEquals(Map.of("adopt_layer", "global"), event.gold(),
-                "采纳去向与题面选项 key 同域，导出才摊得出分布");
-        assertEquals("alice", event.by(), "留痕要带裁决人（IdentityService.currentActor）");
+        assertEquals("adopted", service.adopt(p.getId(), "global", null).status());
     }
 
     @Test
-    void rejectRecordsTheActionWithoutInventingGold() {
+    void rejectMarksProposalRejected() {
         KnowledgeProposalEntity p = addOpenProposal();
 
         assertEquals("rejected", service.reject(p.getId()).status());
-
-        ProposalVerdictEvent event = capturedVerdict();
-        assertEquals("reject", event.humanAction());
-        assertTrue(event.gold().isEmpty(),
-                "拒绝 ≠ 不值得沉淀（可能只是现在不采纳）：不给人没表的态编 gold，否则训练集里全是噪声");
     }
 
     @Test

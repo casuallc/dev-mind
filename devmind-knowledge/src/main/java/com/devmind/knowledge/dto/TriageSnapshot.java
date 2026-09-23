@@ -1,4 +1,4 @@
-package com.devmind.knowledge.triage;
+package com.devmind.knowledge.dto;
 
 import com.devmind.common.decision.DecisionAnswer;
 import com.devmind.common.decision.TriageQuestions;
