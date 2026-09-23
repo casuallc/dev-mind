@@ -1,31 +1,15 @@
-// CAP-54 会话工作区实时视图：对话面板右侧可折叠栏（变更 / 文件 / 终端 三个 tab）。
+// CAP-54 会话工作区实时视图：抽屉式（总内容区 70% 宽），终端 / 变更 两个 tab（终端在前）。
 // 变更 = WS 旁路推送的 git 快照（首次打开或终态无推送时 REST 兜底拉一次）；
-// 文件 = 懒加载目录树 + 文件内容抽屉；diff 仅项目会话（问答沙箱非 git）；
+// diff 仅项目会话（问答沙箱非 git）；
 // 终端 = CAP-58 单条命令执行（terminal_exec 帧，runner 侧白名单缺省只读档）。
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Badge, Button, Drawer, Empty, Spin, Tabs, Tag, Tree, Typography } from 'antd'
-import type { DataNode } from 'antd/es/tree'
-import {
-  FileTextOutlined,
-  FolderOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
-  ReloadOutlined,
-} from '@ant-design/icons'
+import { Badge, Button, Drawer, Empty, Spin, Tabs, Tag, Typography } from 'antd'
+import { FolderOutlined, MenuUnfoldOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ChatApiBase, WorkspaceChange, WorkspaceSnapshot } from '../types'
-import {
-  fetchWorkspaceDiff,
-  fetchWorkspaceFile,
-  fetchWorkspaceStatus,
-  fetchWorkspaceTree,
-} from './api'
+import { fetchWorkspaceDiff, fetchWorkspaceFile, fetchWorkspaceStatus } from './api'
 import TerminalTab from './TerminalTab'
 import { showError } from '../../utils/showError'
 import { fmtTime } from '../../utils/format'
-
-const WIDTH = 360
-/** CAP-58：终端 tab 需要更宽（命令+输出行长） */
-const TERMINAL_WIDTH = 560
 
 /** porcelain XY → 人类可读状态（取变化更显著的一侧：未跟踪 > 删除 > 新增 > 改名 > 修改） */
 function statusMeta(c: WorkspaceChange): { label: string; color: string } {
@@ -70,7 +54,9 @@ export default function WorkspacePanel({
   canDiff: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<'changes' | 'files' | 'terminal'>('changes')
+  /** 抽屉展开动画结束后才 true（此时把焦点交给终端输入框，避免被抽屉自身焦点抢占） */
+  const [drawerShown, setDrawerShown] = useState(false)
+  const [tab, setTab] = useState<'terminal' | 'changes'>('terminal')
   // WS 还没推过（终态会话/刚打开）时 REST 兜底拉一次；推送到达后以推送为准
   const [pulled, setPulled] = useState<WorkspaceSnapshot | null>(null)
   const [loadingStatus, setLoadingStatus] = useState(false)
@@ -133,7 +119,7 @@ export default function WorkspacePanel({
   const changesTab = useMemo(() => {
     if (loadingStatus && !snap) return <Spin style={{ display: 'block', margin: '48px auto' }} />
     if (!snap) return <Empty description="暂无工作区数据（老版本 runner 不支持实时推送）" />
-    if (!snap.gitAvailable) return <Empty description="沙箱目录不是 git 仓库，仅支持文件浏览" />
+    if (!snap.gitAvailable) return <Empty description="沙箱目录不是 git 仓库，仅支持命令执行" />
     const totalChanges = snap.repos.reduce((n, r) => n + r.changes.length, 0)
     if (totalChanges === 0) return <Empty description="工作区干净，暂无未提交变更" />
     return (
@@ -201,81 +187,11 @@ export default function WorkspacePanel({
     )
   }, [snap, loadingStatus, openChange])
 
-  // ---------------- 文件 tab ----------------
-  const [treeData, setTreeData] = useState<DataNode[]>([])
-  const [treeLoaded, setTreeLoaded] = useState(false)
-  const [fileOpen, setFileOpen] = useState(false)
-  const [fileTitle, setFileTitle] = useState('')
-  const [fileBody, setFileBody] = useState<React.ReactNode>(null)
+  const changeCount = snap?.repos.reduce((acc, r) => acc + r.changes.length, 0) ?? 0
 
-  const toNode = useCallback(
-    (e: { name: string; path: string; dir: boolean }): DataNode => ({
-      key: e.path,
-      title: e.name,
-      isLeaf: !e.dir,
-      icon: e.dir ? <FolderOutlined /> : <FileTextOutlined />,
-    }),
-    [],
-  )
-
-  const loadTree = useCallback(
-    (path?: string) =>
-      fetchWorkspaceTree(apiBase, sessionId, path).then((r) =>
-        r.entries.map((e) => toNode(e)),
-      ),
-    [apiBase, sessionId, toNode],
-  )
-
-  useEffect(() => {
-    if (!open || tab !== 'files' || treeLoaded) return
-    loadTree()
-      .then(setTreeData)
-      .then(() => setTreeLoaded(true))
-      .catch((e) => showError(e, '加载目录失败'))
-  }, [open, tab, treeLoaded, loadTree])
-
-  const onLoadData = useCallback(
-    (node: DataNode): Promise<void> =>
-      loadTree(String(node.key)).then((children) => {
-        setTreeData((prev) => {
-          const patch = (list: DataNode[]): DataNode[] =>
-            list.map((n) =>
-              n.key === node.key ? { ...n, children } : { ...n, children: n.children ? patch(n.children) : n.children },
-            )
-          return patch(prev)
-        })
-      }),
-    [loadTree],
-  )
-
-  const onSelectFile = useCallback(
-    (keys: React.Key[], info: { node: DataNode }) => {
-      if (keys.length === 0 || !info.node.isLeaf) return
-      const path = String(keys[0])
-      setFileTitle(path)
-      setFileOpen(true)
-      setFileBody(<Spin style={{ display: 'block', margin: '48px auto' }} />)
-      fetchWorkspaceFile(apiBase, sessionId, path)
-        .then((f) =>
-          setFileBody(
-            <pre style={{ fontSize: 12, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              {f.content}
-            </pre>,
-          ),
-        )
-        .catch((e) => {
-          setFileBody(null)
-          setFileOpen(false)
-          showError(e, '加载文件失败')
-        })
-    },
-    [apiBase, sessionId],
-  )
-
-  // 折叠态：窄条 + 展开按钮（变更数徽标提示有新东西可看）
-  if (!open) {
-    const n = snap?.repos.reduce((acc, r) => acc + r.changes.length, 0) ?? 0
-    return (
+  return (
+    <>
+      {/* 窄条入口（变更数徽标提示有新东西可看），点击展开抽屉 */}
       <div
         style={{
           width: 36,
@@ -287,80 +203,50 @@ export default function WorkspacePanel({
           paddingTop: 8,
         }}
       >
-        <Badge count={n} size="small" offset={[-4, 4]}>
+        <Badge count={changeCount} size="small" offset={[-4, 4]}>
           <Button type="text" size="small" icon={<MenuUnfoldOutlined />} onClick={() => setOpen(true)} title="工作区" />
         </Badge>
       </div>
-    )
-  }
 
-  return (
-    <div
-      style={{
-        width: tab === 'terminal' ? TERMINAL_WIDTH : WIDTH,
-        flexShrink: 0,
-        borderLeft: '1px solid #f0f0f0',
-        paddingLeft: 12,
-        marginLeft: 12,
-        display: 'flex',
-        flexDirection: 'column',
-        minHeight: 0,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8, flexShrink: 0 }}>
-        <Typography.Text strong style={{ flex: 1 }}>
-          工作区
-        </Typography.Text>
-        <Button type="text" size="small" icon={<ReloadOutlined />} onClick={pullStatus} title="刷新状态" />
-        <Button type="text" size="small" icon={<MenuFoldOutlined />} onClick={() => setOpen(false)} title="收起" />
-      </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <Drawer
+        title="工作区"
+        placement="right"
+        width="70%"
+        open={open}
+        onClose={() => setOpen(false)}
+        afterOpenChange={setDrawerShown}
+        extra={
+          <Button type="text" size="small" icon={<ReloadOutlined />} onClick={pullStatus} title="刷新状态" />
+        }
+        styles={{ body: { paddingTop: 8, display: 'flex', flexDirection: 'column' } }}
+      >
         {/* 终端 tab 要输入框钉底、输出区内部滚动 → Tabs 内容区填满高度，各 pane 自管滚动 */}
-        <style>{`.ws-tabs-fill{display:flex;flex-direction:column;height:100%}
+        <style>{`.ws-tabs-fill{flex:1;min-height:0;display:flex;flex-direction:column}
 .ws-tabs-fill .ant-tabs-content-holder{flex:1;min-height:0}
 .ws-tabs-fill .ant-tabs-content,.ws-tabs-fill .ant-tabs-tabpane{height:100%}`}</style>
         <Tabs
           size="small"
           className="ws-tabs-fill"
           activeKey={tab}
-          onChange={(k) => setTab(k as 'changes' | 'files' | 'terminal')}
+          onChange={(k) => setTab(k as 'terminal' | 'changes')}
           items={[
+            {
+              key: 'terminal',
+              label: '终端',
+              children: <TerminalTab apiBase={apiBase} sessionId={sessionId} active={drawerShown && tab === 'terminal'} />,
+            },
             {
               key: 'changes',
               label: '变更',
               children: <div style={{ height: '100%', overflow: 'auto' }}>{changesTab}</div>,
             },
-            {
-              key: 'files',
-              label: '文件',
-              children: (
-                <div style={{ height: '100%', overflow: 'auto' }}>
-                  <Tree
-                    showIcon
-                    blockNode
-                    treeData={treeData}
-                    loadData={onLoadData}
-                    onSelect={onSelectFile}
-                    selectedKeys={[]}
-                  />
-                </div>
-              ),
-            },
-            {
-              key: 'terminal',
-              label: '终端',
-              children: <TerminalTab apiBase={apiBase} sessionId={sessionId} />,
-            },
           ]}
         />
-      </div>
 
-      <Drawer title={diffTitle} open={diffOpen} onClose={() => setDiffOpen(false)} width={720}>
-        {diffLoading ? <Spin /> : diffBody}
+        <Drawer title={diffTitle} open={diffOpen} onClose={() => setDiffOpen(false)} width={720}>
+          {diffLoading ? <Spin /> : diffBody}
+        </Drawer>
       </Drawer>
-      <Drawer title={fileTitle} open={fileOpen} onClose={() => setFileOpen(false)} width={720}>
-        {fileBody}
-      </Drawer>
-    </div>
+    </>
   )
 }

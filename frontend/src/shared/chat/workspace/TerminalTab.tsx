@@ -3,6 +3,7 @@
 // 服务端无状态透传，白名单在 runner 侧强制（缺省只读档：ls/cd/cat/git 只读等）。
 import { useEffect, useRef, useState } from 'react'
 import { Input, Spin, Tag, Typography } from 'antd'
+import type { InputRef } from 'antd'
 import type { ChatApiBase } from '../types'
 import { terminalExec } from './api'
 
@@ -19,7 +20,16 @@ interface TermEntry {
   error?: string
 }
 
-export default function TerminalTab({ apiBase, sessionId }: { apiBase: ChatApiBase; sessionId: string }) {
+export default function TerminalTab({
+  apiBase,
+  sessionId,
+  /** 抽屉已展开且本 tab 在前台 = true；配合 running 回落把焦点钉在输入框（抽屉动画/命令执行都会抢焦点） */
+  active = true,
+}: {
+  apiBase: ChatApiBase
+  sessionId: string
+  active?: boolean
+}) {
   const [entries, setEntries] = useState<TermEntry[]>([])
   const [cwd, setCwd] = useState('')
   const [input, setInput] = useState('')
@@ -28,12 +38,18 @@ export default function TerminalTab({ apiBase, sessionId }: { apiBase: ChatApiBa
   const historyRef = useRef<string[]>([])
   const histRef = useRef(-1) // -1 = 未在翻历史
   const bodyRef = useRef<HTMLDivElement | null>(null)
+  const inputRef = useRef<InputRef | null>(null)
 
   // 新条目/新输出回到底部
   useEffect(() => {
     const el = bodyRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [entries])
+
+  // 自动聚焦：激活时/命令执行完（disabled 解禁）都把光标放回输入框
+  useEffect(() => {
+    if (active && !running) inputRef.current?.focus()
+  }, [active, running])
 
   const submit = () => {
     const command = input.trim()
@@ -127,6 +143,7 @@ export default function TerminalTab({ apiBase, sessionId }: { apiBase: ChatApiBa
         ))}
       </div>
       <Input
+        ref={inputRef}
         style={{ marginTop: 8, flexShrink: 0, fontFamily: 'Consolas, Menlo, monospace' }}
         size="small"
         prefix={<Typography.Text style={{ color: '#597ef7', fontSize: 12 }}>{cwd || '/'}</Typography.Text>}
