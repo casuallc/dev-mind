@@ -1,11 +1,13 @@
-// CAP-58 远程终端 tab：单条命令执行（POST {apiBase}/{id}/terminal/exec → runner 在会话代码目录跑）。
-// cwd 由本组件持有（初始空 = 代码目录根），随每条命令下发，ack 带回新 cwd 更新提示符；
-// 服务端无状态透传，白名单在 runner 侧强制（缺省只读档：ls/cd/cat/git 只读等）。
+// CAP-58/59 远程终端 tab：单条命令执行（POST {apiBase}/{id}/terminal/exec → runner 持久 shell 跑）。
+// CAP-59 增强：Tab 补全（terminal/complete，老 runner 409 回落本地历史补全）、
+// Ctrl+C 取消执行中命令（terminal/cancel，exit 130 已取消）/空闲清行、Ctrl+L 清屏。
+// runner 侧持久 shell 持有 cwd/env（跨命令保持），ack 带回新 cwd 同步提示符；
+// 白名单在 runner 侧强制（缺省只读档：ls/cd/cat/git 只读等）。
 import { useEffect, useRef, useState } from 'react'
 import { Input, Spin, Tag, Typography } from 'antd'
 import type { InputRef } from 'antd'
 import type { ChatApiBase } from '../types'
-import { terminalExec } from './api'
+import { terminalCancel, terminalComplete, terminalExec } from './api'
 
 interface TermEntry {
   id: number
@@ -16,8 +18,19 @@ interface TermEntry {
   stderr?: string
   exitCode?: number
   timedOut?: boolean
+  cancelled?: boolean
   /** HTTP 层失败（409 白名单/版本过低/超时等）整行标红 */
   error?: string
+}
+
+/** 候选列表公共前缀（多候选先补到公共前缀再出弹层，同 Xshell Tab 手感） */
+function commonPrefix(list: string[]): string {
+  if (list.length === 0) return ''
+  let p = list[0]
+  for (const s of list) {
+    while (!s.startsWith(p)) p = p.slice(0, -1)
+  }
+  return p
 }
 
 export default function TerminalTab({
@@ -34,9 +47,15 @@ export default function TerminalTab({
   const [cwd, setCwd] = useState('')
   const [input, setInput] = useState('')
   const [running, setRunning] = useState(false)
+  const [cands, setCands] = useState<string[]>([])
+  const [candIndex, setCandIndex] = useState(0)
+  const [hint, setHint] = useState('')
   const seqRef = useRef(0)
   const historyRef = useRef<string[]>([])
   const histRef = useRef(-1) // -1 = 未在翻历史
+  const completingRef = useRef(false)
+  /** 老 runner（补全 409）只提示一次，之后 Tab 静默走本地历史补全 */
+  const legacyRef = useRef(false)
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<InputRef | null>(null)
 
@@ -51,9 +70,70 @@ export default function TerminalTab({
     if (active && !running) inputRef.current?.focus()
   }, [active, running])
 
+  // 提示 3s 自动消
+  useEffect(() => {
+    if (!hint) return
+    const t = setTimeout(() => setHint(''), 3000)
+    return () => clearTimeout(t)
+  }, [hint])
+
+  const closeCands = () => setCands([])
+
+  /** 替换输入行尾部的 word 为 replacement（word 为空串 = 行尾追加） */
+  const applyCandidate = (value: string, word: string) => {
+    setInput((cur) => {
+      const tail = word && cur.endsWith(word) ? cur.slice(0, cur.length - word.length) : cur
+      return tail + value
+    })
+    closeCands()
+  }
+
+  const doComplete = async () => {
+    if (running || completingRef.current) return
+    completingRef.current = true
+    try {
+      const cur = input
+      if (legacyRef.current) {
+        completeFromHistory(cur)
+        return
+      }
+      const r = await terminalComplete(apiBase, sessionId, cur, cwd)
+      const list = r.candidates ?? []
+      if (list.length === 0) {
+        setHint('无候选')
+        return
+      }
+      if (list.length === 1) {
+        applyCandidate(list[0], r.word)
+        return
+      }
+      const prefix = commonPrefix(list)
+      if (prefix.length > r.word.length) {
+        applyCandidate(prefix, r.word)
+      }
+      setCandIndex(0)
+      setCands(list)
+    } catch (e) {
+      // 409 = 老 runner 不认识补全帧：回落本地历史补全并提示一次
+      legacyRef.current = true
+      setHint('runner 版本过低，补全已回落为本地历史（到节点页升级 runner 可用真补全）')
+      completeFromHistory(input)
+    } finally {
+      completingRef.current = false
+    }
+  }
+
+  /** 本地历史补全（老 runner 回落）：最近一条以当前输入开头的历史命令 */
+  const completeFromHistory = (cur: string) => {
+    if (!cur) return
+    const hit = [...historyRef.current].reverse().find((h) => h.startsWith(cur) && h !== cur)
+    if (hit) setInput(hit)
+  }
+
   const submit = () => {
     const command = input.trim()
     if (!command || running) return
+    closeCands()
     historyRef.current.push(command)
     histRef.current = -1
     setInput('')
@@ -66,7 +146,14 @@ export default function TerminalTab({
         setEntries((es) =>
           es.map((e) =>
             e.id === id
-              ? { ...e, stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, timedOut: r.timedOut }
+              ? {
+                  ...e,
+                  stdout: r.stdout,
+                  stderr: r.stderr,
+                  exitCode: r.exitCode,
+                  timedOut: r.timedOut,
+                  cancelled: r.cancelled,
+                }
               : e,
           ),
         )
@@ -79,6 +166,50 @@ export default function TerminalTab({
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // 候选弹层打开时：↑↓ 移动、Tab/Enter 选中、Esc 关闭（优先级最高）
+    if (cands.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setCandIndex((i) => (i + 1) % cands.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setCandIndex((i) => (i - 1 + cands.length) % cands.length)
+        return
+      }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault()
+        applyCandidate(cands[candIndex], lastWordOf(input))
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        closeCands()
+        return
+      }
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      void doComplete()
+      return
+    }
+    if (e.key === 'c' && e.ctrlKey) {
+      e.preventDefault()
+      if (running) {
+        terminalCancel(apiBase, sessionId).catch(() => {})
+      } else {
+        setInput('')
+        closeCands()
+      }
+      return
+    }
+    if (e.key === 'l' && e.ctrlKey) {
+      e.preventDefault()
+      setEntries([])
+      closeCands()
+      return
+    }
     const hist = historyRef.current
     if (e.key === 'ArrowUp' && hist.length > 0) {
       e.preventDefault()
@@ -96,10 +227,19 @@ export default function TerminalTab({
     }
   }
 
+  /** 输入行尾部词（弹层选中时定位替换区间；与服务端 parseCompletion 的行尾词口径一致） */
+  const lastWordOf = (line: string): string => {
+    if (!line || /\s$/.test(line)) return ''
+    const seg = line.split(/\|\||&&|[|;]/).pop() ?? ''
+    const tokens = seg.trim().split(/\s+/)
+    return tokens[tokens.length - 1] ?? ''
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, position: 'relative' }}>
       <div
         ref={bodyRef}
+        onClick={() => inputRef.current?.focus()}
         style={{
           flex: 1,
           minHeight: 0,
@@ -113,7 +253,7 @@ export default function TerminalTab({
       >
         {entries.length === 0 && (
           <Typography.Text style={{ color: '#8c8c8c', fontSize: 12 }}>
-            在 runner 节点的会话工作区执行单条命令（ls / cd / cat / git 等，runner 侧白名单缺省只读档）
+            在 runner 节点的会话工作区执行命令（env/cd 跨命令保持；Tab 补全、Ctrl+C 取消/清行、Ctrl+L 清屏）
           </Typography.Text>
         )}
         {entries.map((e) => (
@@ -132,7 +272,12 @@ export default function TerminalTab({
                 {e.error}
               </pre>
             )}
-            {e.exitCode !== undefined && e.exitCode !== 0 && (
+            {e.cancelled && (
+              <Tag color="orange" style={{ fontSize: 11 }}>
+                已取消 (exit 130)
+              </Tag>
+            )}
+            {!e.cancelled && e.exitCode !== undefined && e.exitCode !== 0 && (
               <Tag color="red" style={{ fontSize: 11 }}>
                 exit {e.exitCode}
                 {e.timedOut ? '（超时被终止）' : ''}
@@ -142,17 +287,68 @@ export default function TerminalTab({
           </div>
         ))}
       </div>
+      {cands.length > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 36,
+            left: 0,
+            right: 0,
+            maxHeight: 180,
+            overflow: 'auto',
+            background: '#1f232b',
+            border: '1px solid #30363f',
+            borderRadius: 6,
+            padding: '4px 0',
+            zIndex: 10,
+            fontFamily: 'Consolas, Menlo, monospace',
+            fontSize: 12,
+          }}
+        >
+          {cands.slice(0, 50).map((c, i) => (
+            <div
+              key={c}
+              onMouseDown={(e) => {
+                e.preventDefault() // 抢焦点前选中
+                applyCandidate(c, lastWordOf(input))
+              }}
+              onMouseEnter={() => setCandIndex(i)}
+              style={{
+                padding: '2px 10px',
+                cursor: 'pointer',
+                color: c.endsWith('/') ? '#95de64' : '#d9d9d9',
+                background: i === candIndex ? '#30405f' : 'transparent',
+              }}
+            >
+              {c}
+            </div>
+          ))}
+          {cands.length > 50 && (
+            <div style={{ padding: '2px 10px', color: '#8c8c8c' }}>… 共 {cands.length} 个候选</div>
+          )}
+        </div>
+      )}
       <Input
         ref={inputRef}
         style={{ marginTop: 8, flexShrink: 0, fontFamily: 'Consolas, Menlo, monospace' }}
         size="small"
         prefix={<Typography.Text style={{ color: '#597ef7', fontSize: 12 }}>{cwd || '/'}</Typography.Text>}
-        placeholder="$ 输入命令，Enter 执行（↑↓ 翻历史）"
+        placeholder="$ 输入命令，Enter 执行（Tab 补全 · ↑↓ 历史 · Ctrl+C 取消 · Ctrl+L 清屏）"
         value={input}
-        onChange={(e) => setInput(e.target.value)}
+        onChange={(e) => {
+          setInput(e.target.value)
+          closeCands()
+        }}
         onPressEnter={submit}
         onKeyDown={onKeyDown}
         disabled={running}
+        suffix={
+          hint ? (
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+              {hint}
+            </Typography.Text>
+          ) : null
+        }
       />
     </div>
   )

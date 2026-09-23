@@ -62,10 +62,32 @@ export interface TerminalExecResult {
   /** 命令执行后的新 cwd（相对代码目录 POSIX 路径；越界 cd 被拒时维持原值） */
   cwd: string | null
   timedOut?: boolean
+  /** CAP-59：被 Ctrl+C 取消（exitCode=130） */
+  cancelled?: boolean
   error?: string
 }
 
 /** CAP-58：终端单条命令执行（cwd 前端持有随命令下发，空 = 代码目录根） */
 export function terminalExec(apiBase: ChatApiBase, id: string, command: string, cwd: string) {
   return api.post<TerminalExecResult>(`${apiBase}/${id}/terminal/exec`, { command, cwd })
+}
+
+/** CAP-59 Tab 补全响应 */
+export interface TerminalCompleteResult {
+  ok: boolean
+  /** 被补全的词（输入行尾部等于 word 的片段，前端据此定位替换区间） */
+  word: string
+  /** 候选（目录带 / 后缀；上限 100） */
+  candidates: string[]
+  error?: string
+}
+
+/** CAP-59：Tab 补全（老 runner v17- 走 409，前端回落本地历史补全） */
+export function terminalComplete(apiBase: ChatApiBase, id: string, input: string, cwd: string) {
+  return api.post<TerminalCompleteResult>(`${apiBase}/${id}/terminal/complete`, { input, cwd })
+}
+
+/** CAP-59：取消执行中的终端命令（无进行中命令 = no-op） */
+export function terminalCancel(apiBase: ChatApiBase, id: string) {
+  return api.post<void>(`${apiBase}/${id}/terminal/cancel`, {})
 }
