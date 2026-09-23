@@ -1,5 +1,5 @@
 import { Layout, Space, Tag, Typography, Button, Tooltip } from 'antd'
-import { ArrowLeftOutlined } from '@ant-design/icons'
+import { HomeOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../shared/api/client'
@@ -47,7 +47,7 @@ export default function AppHeader({ title }: { title: string }) {
       <Space size={12}>
         {/* 与工作台顶栏「后台管理」入口同款：图标 + Tooltip */}
         <Tooltip title="返回工作台">
-          <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/')} />
+          <Button type="text" icon={<HomeOutlined />} onClick={() => navigate('/')} />
         </Tooltip>
         <NotificationBell />
         <UserMenu />
