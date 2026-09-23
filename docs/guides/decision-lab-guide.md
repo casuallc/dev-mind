@@ -201,7 +201,7 @@ python -m uvicorn app:app --port 8377
 
 | 现象 | 原因 / 处置 |
 |---|---|
-| 发起评测/微调就被拒，报 `scripts-dir` | 服务端没配脚本目录或目录不存在；按 §5 配 `devmind.decision-lab.scripts-dir` |
+| 发起评测/微调就被拒，报 `scripts-dir` | 服务端没配脚本目录或目录不存在；按 §5 配 `devmind.decision-lab.scripts-dir`。224 上真发生过的根因是**部署脚本不铺 `lab/`**（`deploy-224.sh` 只换 bin/libs/ui/runner，33295ba 已修） |
 | 发起被拒，报 pythonPath 含空白 | 解释器路径带空格；换成不含空格的 venv 全路径（§4） |
 | 节点报「命令不在 execAllowlist 白名单」 | 报错会列出允许前缀；把缺的首 token（`python` / `torchrun`）加进节点 `agent.properties` 并**重启 runner** |
 | 节点报拉包失败（404/401） | 边车/服务端地址或节点 token 不对；runner 用自身 `serverUrl` 拉包（§4 执行链） |
@@ -217,14 +217,42 @@ python -m uvicorn app:app --port 8377
 | 删评测集报 500 `No EntityManager with actual transaction available` | 历史缺陷（派生 `deleteByDatasetId` 缺活事务），已修；若在旧包上遇到，用「修订/新建」绕开 |
 | 微调「成功」但回评更差 | 正常结果，以回评为准（§2.3）；RLCD 收敛性只能靠真机验证，退化会被报告显式暴露 |
 
-## 8. 相关文档
+## 8. 生产环境（224）落地清单与实证
+
+在 172.20.140.224 上跑这套东西要过四道门，缺哪道就卡在哪一步（2026-09-23 实测，
+`tests/cap56_224_verify.py` 22 项断言全绿）：
+
+| 门 | 缺了会怎样 | 怎么补 |
+|---|---|---|
+| 服务端脚本目录 | **发起**评测/微调就被拒（报 `scripts-dir`） | `APP_HOME/lab` 下要有 3 个 `.py`；`deploy-224.sh` 自 33295ba 起会铺 `lab/`（此前只换 bin/libs/ui/runner，漏了它） |
+| `python-path` | 节点上 `python` 不在 PATH，下发即失败 | `config/application-local.yml` 写节点 venv **全路径**（单 token 无空白）：`python-path: /home/liuchangqing/laya-venv/bin/python`；改完**重启应用** |
+| 节点能跑 lab | 报「命令不在 execAllowlist 白名单」 | 节点 `agent.properties` 补 `execAllowlist=<venv python>` 与 `labels=gpu,A6000`；**改完必须重启 runner**（属性只在启动时读）。注意 `runner.pid` 可能是旧 pid，重启前按进程号核实——留着旧进程就是双实例互踢 |
+| 默认决策端点 | serve 自检 FAIL（「未配置平台默认决策端点」）；闸门开了分诊照样**整片降级** | 端点 `baseUrl` 指边车根地址、`model` 钉槽位、**设为平台默认** |
+| 边车槽位来源 | 自检「来源一致」FAIL（放行的不是在跑的那份） | 先把边车换到要放行的那份（如 `node_sidecar_base.sh`），**先自检、再放行** |
+
+实证结果（224 生产，节点 3 = 140.88 上的真 venv + 真 laya 0.3.6）：
+
+- 登记基座 → serve 自检六项全 OK（端点/可达/状态/槽位常驻/来源一致/设备）→ 放行 →
+  **闸门 False→True，224 的知识库分诊从「整体不可用」恢复可用**；
+- 37 条基准集冻结（对照 4/4/4 + 普通 25）→ 真评测 **13 秒**跑完 111 题：
+  accuracy **0.216** < 随机基线 0.389 < 多数类 0.676；`choice` 37/37 恒答 `project`（退化复现，
+  与 §0 那次数值同源）；温度校准 ECE **0.470 → 0.197**。
+
+> ⚠ **224 与 143 共用 PG `156/devmind`**：决策端点与放行的产物是**全平台一份**。改端点（尤其设默认）
+> 前先想清楚另一边的分诊——端点没有默认值时，那边即便闸门开着也会整片降级。
+> 闸门副作用在 224 上真实发生过一次：CAP-56 一上线、还没登记任何产物时，分诊按钮就是灰的。
+> 所以上线顺序只有两种：**先登记 + 自检 + 放行再上线**，或者接受这段窗口期分诊不可用。
+
+## 9. 相关文档
 
 - 需求与验收标准：[docs/capabilities/CAP-56-decision-eval-finetune.md](../capabilities/CAP-56-decision-eval-finetune.md)
 - 上游决策引擎与分诊：[docs/capabilities/CAP-55-decision-engine.md](../capabilities/CAP-55-decision-engine.md)
 - runner 部署：[runner-service-deploy.md](runner-service-deploy.md)、[admq-manager-cicd-guide.md](admq-manager-cicd-guide.md)（execAllowlist 实务）
 - 开发坑位（H2/Jackson/WS 等）：[docs/core/开发注意事项.md](../core/开发注意事项.md)
-- 回归脚本：[tests/cap56_e2e.py](../../tests/cap56_e2e.py)（全链，真 runner + mock 边车；起隔离实例与
-  stub 脚本的姿势在文件头注释）、[tests/cap56_sidecar_source.py](../../tests/cap56_sidecar_source.py)
+- 回归脚本：[tests/cap56_e2e.py](../../tests/cap56_e2e.py)（平台全链，真 runner + mock 边车；起隔离实例与
+  stub 脚本的姿势在文件头注释）、[tests/cap56_224_verify.py](../../tests/cap56_224_verify.py)
+  （**生产环境**最小可用段：登记→自检→放行→基准集→真评测，不跑微调，见 §8）、
+  [tests/cap56_sidecar_source.py](../../tests/cap56_sidecar_source.py)
   （边车槽位来源覆盖，不起 app）、[tests/cap56_gpu_e2e.py](../../tests/cap56_gpu_e2e.py)
   （**真机**全链：真 laya 模型 + 真 torch 训练 + 真边车，跑在 172.20.140.88；前置与两个必须钉住的
   东西（`LAYA_DEVICE`、端点 `model`）见脚本头注释与 §6）；闸门对既有脚本的影响见 §3
