@@ -137,6 +137,21 @@ public class SessionController {
         return service.workspaceQuery(id, "diff", repo, path);
     }
 
+    /**
+     * CAP-58：终端单条命令执行（body: command 必填、cwd 可选=相对代码目录）。
+     * 命令非零退出仍 200（exitCode 带回）；白名单拒绝/越界/老 runner 走 CONFLICT。
+     */
+    @PostMapping("/{id}/terminal/exec")
+    public com.devmind.common.agent.TerminalExecResult terminalExec(@PathVariable String id,
+                                                                    @RequestBody TerminalExecRequest req) {
+        return service.terminalExec(id, req == null ? null : req.command(),
+                req == null ? null : req.cwd());
+    }
+
+    /** CAP-58 终端请求体。 */
+    public record TerminalExecRequest(String command, String cwd) {
+    }
+
     @DeleteMapping("/{id}/worktree")
     public void removeWorktree(@PathVariable String id) {
         service.removeWorktree(id);

@@ -6,6 +6,7 @@ import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.AgentCollectResult;
 import com.devmind.common.agent.AgentProtocol;
 import com.devmind.common.agent.FinalizeResult;
+import com.devmind.common.agent.TerminalExecResult;
 import com.devmind.common.agent.WorkspaceQueryResult;
 import com.devmind.common.agent.WorkspaceReleaseResult;
 import com.devmind.common.event.DomainEventPublisher;
@@ -829,6 +830,28 @@ public class SessionManagerService {
                     r.error() == null || r.error().isBlank() ? "工作区查询失败" : r.error());
         }
         return r.payload();
+    }
+
+    /**
+     * CAP-58：终端单条命令透传（REST → terminal_exec 帧 → runner 在会话代码目录执行）。
+     * 协议版本门控在 connector 内（老 runner 409 引导升级）；命令非零退出不抛，
+     * 白名单拒绝/越界/会话不在本节点抛 CONFLICT 带 runner 原因。
+     */
+    public TerminalExecResult terminalExec(String id, String command, String cwd) {
+        SessionEntity ent = requireEntity(id);
+        if (ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "会话无执行节点记录，远程终端不可用");
+        }
+        AgentNodeConnector connector = connectorProvider.getIfAvailable();
+        if (connector == null) {
+            throw new DevMindException(ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+        }
+        TerminalExecResult r = connector.terminalExec(ent.getAgentNodeId(), id, command, cwd);
+        if (!r.ok()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    r.error() == null || r.error().isBlank() ? "终端命令执行失败" : r.error());
+        }
+        return r;
     }
 
     // ---------------- worktree / diff ----------------

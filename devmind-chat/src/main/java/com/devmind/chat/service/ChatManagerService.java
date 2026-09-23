@@ -648,6 +648,28 @@ public class ChatManagerService {
         return r.payload();
     }
 
+    /**
+     * CAP-58：终端单条命令透传（REST → terminal_exec 帧 → runner 在问答沙箱执行）。
+     * 门控口径同 {@link #workspaceQuery}（MODEL 执行体/无节点 409）；命令非零退出不抛。
+     */
+    public com.devmind.common.agent.TerminalExecResult terminalExec(String id, String command, String cwd) {
+        ChatSessionEntity ent = requireOwned(id);
+        if (ent.isModel() || ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "该问答无执行节点（模型执行体），远程终端不可用");
+        }
+        AgentNodeConnector connector = connectorProvider.getIfAvailable();
+        if (connector == null) {
+            throw new DevMindException(ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+        }
+        com.devmind.common.agent.TerminalExecResult r = connector.terminalExec(ent.getAgentNodeId(), id,
+                command, cwd);
+        if (!r.ok()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    r.error() == null || r.error().isBlank() ? "终端命令执行失败" : r.error());
+        }
+        return r;
+    }
+
     /** 删除问答：杀进程（若在跑）、删事件与记录；远程沙箱由 runner finalizer 负责。 */
     @Transactional
     public void deleteChat(String id) {

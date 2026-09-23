@@ -115,6 +115,18 @@ public class ChatController {
         return service.workspaceQuery(id, "file", path);
     }
 
+    /** CAP-58：终端单条命令执行（沙箱目录；body: command 必填、cwd 可选）。 */
+    @PostMapping("/{id}/terminal/exec")
+    public com.devmind.common.agent.TerminalExecResult terminalExec(@PathVariable String id,
+                                                                    @RequestBody TerminalExecRequest req) {
+        return service.terminalExec(id, req == null ? null : req.command(),
+                req == null ? null : req.cwd());
+    }
+
+    /** CAP-58 终端请求体。 */
+    public record TerminalExecRequest(String command, String cwd) {
+    }
+
     @DeleteMapping("/{id}")
     public void delete(@PathVariable String id) {
         service.deleteChat(id);
