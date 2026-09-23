@@ -96,6 +96,14 @@ public class AgentRunnerMain {
         log.info("claude 配置目录: {}", claudeConfigDir);
         // CAP-36：exec 帧 handler（构建/部署/测试/发版下发执行；execAllowlist 空 = 全部拒绝）
         ExecHandler execHandler = new ExecHandler(config, workspace, frame -> connRef[0].send(frame));
+        // CAP-57：proc/pkg 帧 handler（分类服务实例进程管控 + 安装包分发）。
+        // 受管进程刻意【不】纳入 shutdown killAll——它们的设计目标是比 runner 活得久
+        // （runner 重启/升级不该打断在服务的边车），重启后由 ProcRegistry 按 proc.json 对账回来
+        ProcRegistry procRegistry = new ProcRegistry(config.workspaceRoot().resolve("classify"));
+        ProcHandler procHandler = new ProcHandler(config.workspaceRoot(), procRegistry,
+                frame -> connRef[0].send(frame));
+        PkgHandler pkgHandler = new PkgHandler(config, config.workspaceRoot(),
+                frame -> connRef[0].send(frame));
         // CAP-54：工作区实时视图——事件触发采集（tool_result/result）+ 兜底轮询 + 只读查询应答
         GitStatusCollector gitCollector = new GitStatusCollector();
         WorkspaceWatcher watcher = new WorkspaceWatcher(sessions, frame -> connRef[0].send(frame), gitCollector);
@@ -109,6 +117,11 @@ public class AgentRunnerMain {
         var report = new com.devmind.common.agent.exec.WorkspaceReconciler(config.workspaceRoot()).reconcile();
         if (!report.ownerlessDirs().isEmpty()) {
             log.info("对账登记无主会话目录 {} 个（待 GC）: {}", report.ownerlessDirs().size(), report.ownerlessDirs());
+        }
+        // CAP-57：受管进程对账（runner 重启前拉起的边车，pid 活着的登记回来继续管控）
+        int procsRestored = procRegistry.reconcile();
+        if (procsRestored > 0) {
+            log.info("对账恢复受管进程 {} 个", procsRestored);
         }
 
         // CAP-34 FR-05：工作区磁盘占用（hello/heartbeat 上报）+ 超龄会话目录 GC 调度
@@ -126,7 +139,7 @@ public class AgentRunnerMain {
 
         ServerConnection conn = new ServerConnection(config, mapper,
                 frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, workspace,
-                        execHandler, watcher, queryHandler, connRef[0]),
+                        execHandler, procHandler, pkgHandler, watcher, queryHandler, connRef[0]),
                 () -> connRef[0].send(helloFrame(sessions, version, workspaceBytes.get(),
                         config.labels(), toolchain.get())));
         connRef[0] = conn;
@@ -160,7 +173,8 @@ public class AgentRunnerMain {
         }, config.gcInitialDelayMinutes(), config.gcIntervalMinutes(), TimeUnit.MINUTES);
 
         Runtime.getRuntime().addShutdownHook(Thread.ofPlatform().unstarted(() -> {
-            log.info("runner 关闭中，终止全部会话/exec 进程");
+            log.info("runner 关闭中，终止全部会话/exec 进程（CAP-57 受管进程刻意不在其列——"
+                    + "边车要比 runner 活得久，重启后由 ProcRegistry 对账收回）");
             heartbeat.shutdownNow();
             gcTimer.shutdownNow();
             watcher.shutdown();
@@ -208,7 +222,8 @@ public class AgentRunnerMain {
     private static void handleFrame(JsonNode frame, RunnerConfig config, Path configFile,
                                     CliProcessLauncher protocol, SessionExecutor executor,
                                     RunnerSessionRegistry sessions, RunnerWorkspace workspace,
-                                    ExecHandler execHandler, WorkspaceWatcher watcher,
+                                    ExecHandler execHandler, ProcHandler procHandler, PkgHandler pkgHandler,
+                                    WorkspaceWatcher watcher,
                                     WorkspaceQueryHandler queryHandler, ServerConnection conn) {
         // CAP-43：帧携带 proxy{url,scopes}（协议 v8+，节点配了外网代理才带）→ 刷新进程级
         // NodeProxy holder，git/claude/exec 三 scope 消费点直接读 holder；帧无此字段不动 holder
@@ -219,6 +234,8 @@ public class AgentRunnerMain {
         switch (type) {
             case "launch" -> handleLaunch(frame, sessionId, config, executor, sessions, workspace, watcher, conn);
             case "exec" -> execHandler.handle(frame); // CAP-36：构建/部署/测试/发版下发执行
+            case "proc" -> procHandler.handle(frame); // CAP-57：服务实例进程管控（起停/状态）
+            case "pkg" -> pkgHandler.handle(frame); // CAP-57：安装包分发（拉取+校验+解包）
             case "input" -> sessions.writeStdin(sessionId,
                     protocol.buildUserMessage(frame.path("text").asText(""), parseImages(frame)));
             case "authorize" -> sessions.writeStdin(sessionId, protocol.buildPermissionResult(
