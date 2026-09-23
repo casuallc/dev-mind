@@ -32,6 +32,7 @@ import {
 import FitTable from '../../../shared/components/FitTable'
 import { fmtBytes, fmtTime } from '../../../shared/utils/format'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import LayaViewSwitch from '../../laya/components/LayaViewSwitch'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
@@ -271,7 +272,7 @@ export default function ClassifyInstancesPage() {
     <Card
       style={pageCardStyle}
       styles={{ body: pageCardBodyFlexStyle }}
-      title="分类服务实例"
+      title={<LayaViewSwitch group="instances" value="instances" />}
       extra={
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load}>

@@ -20,6 +20,7 @@ import {
 } from 'antd'
 import { ClearOutlined, ExperimentOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
+import LayaViewSwitch from '../../laya/components/LayaViewSwitch'
 import type { DecisionAnswer } from '../../decision/types'
 import { listModelEndpoints } from '../../model/api'
 import {
@@ -149,8 +150,7 @@ export default function ClassifyPlaygroundPage() {
       style={pageCardStyle}
       styles={{ body: pageCardBodyFlexStyle }}
       title={
-        <Space size={12}>
-          <span>在线试分类</span>
+        <LayaViewSwitch group="records" value="playground">
           <Select
             style={{ width: 320 }}
             value={channel === 'instance' ? `i-${instanceId ?? ''}` : channel === 'endpoint' ? `e-${endpointId ?? ''}` : 'default'}
@@ -178,7 +178,7 @@ export default function ClassifyPlaygroundPage() {
               },
             ]}
           />
-        </Space>
+        </LayaViewSwitch>
       }
       extra={
         <Space>

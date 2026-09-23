@@ -9,9 +9,11 @@ import {
   DeploymentUnitOutlined,
   ExperimentOutlined,
   FileTextOutlined,
+  ForkOutlined,
   FolderOutlined,
   KeyOutlined,
   PaperClipOutlined,
+  PartitionOutlined,
   ReadOutlined,
   RobotOutlined,
   SafetyCertificateOutlined,
@@ -49,7 +51,9 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
     type: 'group' as const,
     label: '智能决策（laya）',
     children: [
-      { key: '/admin/laya', icon: <ExperimentOutlined />, label: '决策与分类' },
+      { key: '/admin/laya/records', icon: <ForkOutlined />, label: '决策记录' },
+      { key: '/admin/laya/instances', icon: <PartitionOutlined />, label: '服务实例' },
+      { key: '/admin/laya/lab', icon: <ExperimentOutlined />, label: '决策实验室' },
     ],
   },
   {

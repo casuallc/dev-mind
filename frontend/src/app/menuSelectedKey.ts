@@ -1,7 +1,9 @@
 // 菜单选中态：路径前缀 → 菜单 key（特殊的在前，遍历取首个匹配）。
 // 工作台（AppLayout）与后台（AdminLayout）共用，新增页面只需在此登记一行。
 const SELECT_PREFIXES: Array<[string, string]> = [
-  ['/admin/laya', '/admin/laya'], // 智能决策 Tab 子路由（records/lab/instances/packages/playground）
+  // 智能决策（laya）：在线试分类/安装包是「决策记录」「服务实例」菜单下的页内视图，高亮归属菜单
+  ['/admin/laya/playground', '/admin/laya/records'],
+  ['/admin/laya/packages', '/admin/laya/instances'],
   ['/admin/projects', '/admin/projects'], // 列表 + 设置子路由
   ['/admin/docs', '/admin/docs'], // 列表 + 编辑器
   ['/admin/knowledge', '/admin/knowledge'], // 列表 + 库详情（/admin/knowledge/bases/:id）

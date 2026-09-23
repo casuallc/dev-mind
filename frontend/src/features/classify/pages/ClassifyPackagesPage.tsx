@@ -30,6 +30,7 @@ import {
 import FitTable from '../../../shared/components/FitTable'
 import { fmtBytes, fmtTime } from '../../../shared/utils/format'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import LayaViewSwitch from '../../laya/components/LayaViewSwitch'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
@@ -278,14 +279,13 @@ export default function ClassifyPackagesPage() {
       style={pageCardStyle}
       styles={{ body: pageCardBodyFlexStyle }}
       title={
-        <Space size={12}>
-          <span>分类安装包</span>
+        <LayaViewSwitch group="instances" value="packages">
           <Segmented
             value={kind}
             onChange={(v) => setKind(v as ClassifyPackageKind)}
             options={(Object.keys(KIND_META) as ClassifyPackageKind[]).map((k) => ({ value: k, label: KIND_META[k] }))}
           />
-        </Space>
+        </LayaViewSwitch>
       }
       extra={
         <Space>

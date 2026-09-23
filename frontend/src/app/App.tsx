@@ -38,7 +38,6 @@ import DecisionLabPage from '../features/decision/pages/DecisionLabPage'
 import ClassifyInstancesPage from '../features/classify/pages/ClassifyInstancesPage'
 import ClassifyPackagesPage from '../features/classify/pages/ClassifyPackagesPage'
 import ClassifyPlaygroundPage from '../features/classify/pages/ClassifyPlaygroundPage'
-import LayaLayout from '../features/laya/pages/LayaLayout'
 import ApiKeysPage from '../features/open-api/pages/ApiKeysPage'
 import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
@@ -173,15 +172,14 @@ export default function App() {
           <Route path="/admin/integrations" element={<IntegrationsPage />} />
           {/* CAP-48 模型接入（Embedding 端点：平台默认 + 库级覆盖） */}
           <Route path="/admin/models" element={<ModelEndpointsPage />} />
-          {/* 智能决策（laya 专属：CAP-55 决策记录 / CAP-56 决策实验室 / CAP-57 分类服务）合并为 Tab 子路由 */}
-          <Route path="/admin/laya" element={<LayaLayout />}>
-            <Route index element={<Navigate to="records" replace />} />
-            <Route path="records" element={<DecisionRecordsPage />} />
-            <Route path="lab" element={<DecisionLabPage />} />
-            <Route path="instances" element={<ClassifyInstancesPage />} />
-            <Route path="packages" element={<ClassifyPackagesPage />} />
-            <Route path="playground" element={<ClassifyPlaygroundPage />} />
-          </Route>
+          {/* 智能决策（laya 专属：CAP-55 决策记录 / CAP-56 决策实验室 / CAP-57 分类服务）：
+              三个菜单页；决策记录↔在线试分类、服务实例↔安装包 在页内 Card 头部 Segmented 互跳（LayaViewSwitch） */}
+          <Route path="/admin/laya" element={<Navigate to="/admin/laya/records" replace />} />
+          <Route path="/admin/laya/records" element={<DecisionRecordsPage />} />
+          <Route path="/admin/laya/lab" element={<DecisionLabPage />} />
+          <Route path="/admin/laya/instances" element={<ClassifyInstancesPage />} />
+          <Route path="/admin/laya/packages" element={<ClassifyPackagesPage />} />
+          <Route path="/admin/laya/playground" element={<ClassifyPlaygroundPage />} />
           {/* 旧路径兼容（合并前各自独立菜单） */}
           <Route path="/admin/decision-records" element={<LegacyLayaRedirect tab="records" />} />
           <Route path="/admin/decision-lab" element={<LegacyLayaRedirect tab="lab" />} />

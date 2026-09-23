@@ -12,6 +12,7 @@ import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
+import LayaViewSwitch from '../../laya/components/LayaViewSwitch'
 
 /** 人工动作 → 中文（后端给的是机器值 adopt:global / adopt:project / reject） */
 const ACTION_LABEL: Record<string, string> = {
@@ -176,7 +177,7 @@ export default function DecisionRecordsPage() {
     <Card
       style={pageCardStyle}
       styles={{ body: pageCardBodyFlexStyle }}
-      title="决策记录"
+      title={<LayaViewSwitch group="records" value="records" />}
       extra={
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load}>
