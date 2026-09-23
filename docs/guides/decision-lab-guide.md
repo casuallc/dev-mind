@@ -56,7 +56,10 @@ CAP-55 把 laya 决策模型接进了产品路径（知识库提案分诊），�
   外加 `NORMAL` 普通样本。**没有对照组，「恒答重复」这种退化看起来也「合理」**——这是 CAP-56 的立身教训。
 - **从决策记录收编**（`from-records`）：按 capability + 时间窗拉线上已人工裁决的记录 → **先预览**
   （跳过原因 + 候选样本）→ 确认收编。跳过原因逐条给出（没裁决 / 题面不匹配 / 已有同题…），
-  不会静默丢样本。收编时能按内容**自动识别**对照组。
+  不会静默丢样本。收编时能按内容**自动识别**对照组——但**只认得出空召回与逐字重复**：
+  「不相关」判不出来（用「正文不在召回里」去推的话，每条普通样本都成了不相关，那一组就再也说明不了
+  任何事情）。所以**纯记录收编出来的集永远过不了冻结**——缺的那几类按同样题面手工补一条即可
+  （`addItem` 不看类型，正片补样本本来就是允许的）。
 - **冻结**：冻结后本集只读，成为「指标的分母」（改 = 修订为新版本，否则指标不可比）。
   冻结校验三条，任一不过直接拒绝并给原因：
   1. **非空**；
@@ -186,6 +189,14 @@ python -m uvicorn app:app --port 8377
   报的是 Router **此刻真正持有的 spec**，不是配置文件原文——两者不一致时，该信的是前者。
 - 页面的 **serve 自检** = 读 `/healthz` 的 `sources` 与登记信息比对。**先自检、再放行。**
 
+**两件上线前必须定的事**（真机全链踩出来的，排错表里有症状对照）：
+
+1. **设备**：与 vLLM 共卡时显式 `LAYA_DEVICE=cpu`。cuda 路径在显存吃满时不是"慢一点"，而是随机 500
+   或中途退 CPU → 平台侧整片超时降级；同一台机器上 CPU 路径 ~2.0s/条、零降级（模型很小）。
+2. **端点 `model` 钉到槽位**：CAP-48 的 DECISION 端点 `model` 留空 = 让边车按语言自己路由，
+   而 laya 0.3.6 的 `english` 槽位指向的仓库根不是 checkpoint → 偶发 `FileNotFoundError`（拉 HF 先卡几十秒）。
+   钉住槽位同时也是闸门的语义要求：放行的是哪份产物，跑的就得是哪份。
+
 ## 7. 排错速查
 
 | 现象 | 原因 / 处置 |
@@ -198,7 +209,12 @@ python -m uvicorn app:app --port 8377
 | 知识库分诊按钮置灰 | **闸门**：还没有 `verified=true` 的 checkpoint；去决策实验室登记 + 自检 + 验证通过（§3） |
 | 报告里指标是「—」 | 该项**没测**（不是 0）；如 `noul` 块只在题面含 noul 题时才有数 |
 | 分诊徽标置信度看着离谱 | 跑一次带温度校准的评测（FR-04），校准后 ECE 会降下来；校准参数随 checkpoint 元数据走 |
+| 分诊整片降级（徽标全空、记录里 `degraded=true`，原因是 `HttpTimeoutException`） | 边车与 vLLM 共卡、显存被吃满（`--gpu-memory-utilization 0.95`）时的 **cuda 路径不可靠**：加载完前向直接 500（`TypeError: 'NoneType' object is not subscriptable`）或中途退 CPU（日志 `GPU memory exceeded during inference. Falling back to CPU`），单条推理几十秒到分钟级 → 过平台 30s 超时。**处置：把边车钉在 CPU**（`LAYA_DEVICE=cpu`）——模型小，实测 ~2.0s/条、28 条零降级。降级本身不抹裁决，**重分诊即可恢复**；也可以给边车留显存 / 分诊换小槽位（`typed-decisions`） |
+| 分诊偶发失败，节点日志报 `FileNotFoundError: Incompatible model: 'convaiinnovations/laya' does not contain 'rl_agent_config.json'` | **边车按语言自己路由到了 `english` 槽位**，而 laya 0.3.6 内置的 english 槽位指的是 `convaiinnovations/laya` 的**仓库根**（不是 checkpoint），且失败前会先卡在拉 HF 上（几十秒到分钟级）。处置：把决策端点的 `model` 钉到槽位（`multilingual` / `typed-decisions`）——留空 = 交给边车路由，某些 state 会被判成英文。钉住也才对得上闸门语义：放行的是哪份产物跑的就该是哪份 |
 | 报告看不出模型退化 | 看 `byCaseGroup`：对照组全判同一个答案 = 恒答退化（这正是要对照组的原因） |
+| 微调失败，日志末尾 `RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!`（栈顶是 `laya/common.py` 的 encoder forward） | 训练脚本按**批自己的设备**搬张量（CPU），而模型在 cuda。已修：`laya_train.forward()` 取**模型参数的设备**，target/qtype/mask 一起搬（`tools/laya-sidecar/lab/laya_train.py`）。**这个报错"时好时坏"是有原因的**——显存被占满时 laya 会把模型退到 CPU，那时批与模型都在 CPU，反而跑得通；同款字样出现在**边车推理**里则是另一回事（上一行的显存退路），看栈顶是谁：边车 `agent.system_one`、训练 `laya_train.forward` |
+| 回流集冻结被拒，报「缺少对照组：[对照·不相关]」 | 收编认不出「不相关」（§2.1）；按模板补一条不相关样本再冻结——这份集同时也是回评集的话，对照组本来就该有 |
+| 删评测集报 500 `No EntityManager with actual transaction available` | 历史缺陷（派生 `deleteByDatasetId` 缺活事务），已修；若在旧包上遇到，用「修订/新建」绕开 |
 | 微调「成功」但回评更差 | 正常结果，以回评为准（§2.3）；RLCD 收敛性只能靠真机验证，退化会被报告显式暴露 |
 
 ## 8. 相关文档
@@ -209,4 +225,6 @@ python -m uvicorn app:app --port 8377
 - 开发坑位（H2/Jackson/WS 等）：[docs/core/开发注意事项.md](../core/开发注意事项.md)
 - 回归脚本：[tests/cap56_e2e.py](../../tests/cap56_e2e.py)（全链，真 runner + mock 边车；起隔离实例与
   stub 脚本的姿势在文件头注释）、[tests/cap56_sidecar_source.py](../../tests/cap56_sidecar_source.py)
-  （边车槽位来源覆盖，不起 app）；闸门对既有脚本的影响见 §3
+  （边车槽位来源覆盖，不起 app）、[tests/cap56_gpu_e2e.py](../../tests/cap56_gpu_e2e.py)
+  （**真机**全链：真 laya 模型 + 真 torch 训练 + 真边车，跑在 172.20.140.88；前置与两个必须钉住的
+  东西（`LAYA_DEVICE`、端点 `model`）见脚本头注释与 §6）；闸门对既有脚本的影响见 §3
