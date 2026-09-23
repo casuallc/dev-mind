@@ -40,9 +40,7 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
       { key: '/admin/repos', icon: <CodeOutlined />, label: '代码仓库' },
       { key: '/admin/agent-nodes', icon: <RobotOutlined />, label: 'Agent 节点' },
       { key: '/admin/execution', icon: <AuditOutlined />, label: '模板与审计' },
-      { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
       { key: '/admin/models', icon: <ThunderboltOutlined />, label: '模型接入' },
-      { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
       { key: '/admin/scenarios', icon: <DeploymentUnitOutlined />, label: '应用场景' },
     ],
   },
@@ -69,6 +67,8 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
     type: 'group' as const,
     label: '系统',
     children: [
+      { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
+      { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
       { key: '/admin/users', icon: <SafetyCertificateOutlined />, label: '用户管理' },
     ],
   },
