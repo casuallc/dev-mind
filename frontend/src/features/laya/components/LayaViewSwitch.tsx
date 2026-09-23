@@ -1,6 +1,6 @@
 // 智能决策（laya）页内视图切换器（布局约定：多视图切换放 Card title，禁 Card 内套 Tabs）。
-// 两个菜单页各自的兄弟视图：「决策记录 ↔ 在线试分类」「服务实例 ↔ 安装包」；切换 = 路由跳转（URL 可分享），
-// 各页保留自己的 Card 与 extra 操作按钮。参考实现 = SettingsViewSwitch。
+// 「决策记录 ↔ 在线试分类」、「服务实例 ↔ 三类安装包（边车程序/模型权重/语料数据）」；
+// 切换 = 路由跳转（URL 可分享），各页保留自己的 Card 与 extra 操作按钮。参考实现 = SettingsViewSwitch。
 import type { ReactNode } from 'react'
 import { Segmented } from 'antd'
 import { useNavigate } from 'react-router-dom'
@@ -18,7 +18,10 @@ const GROUPS = {
     title: '服务实例',
     options: [
       { value: 'instances', label: '服务实例', path: '/admin/laya/instances' },
-      { value: 'packages', label: '安装包', path: '/admin/laya/packages' },
+      // 三类安装包直接作页内视图（value = 后端的 ClassifyPackageKind，安装包页从 ?kind= 读取）
+      { value: 'SIDECAR_APP', label: '边车程序包', path: '/admin/laya/packages?kind=SIDECAR_APP' },
+      { value: 'MODEL_WEIGHTS', label: '模型权重包', path: '/admin/laya/packages?kind=MODEL_WEIGHTS' },
+      { value: 'CORPUS', label: '语料/数据包', path: '/admin/laya/packages?kind=CORPUS' },
     ],
   },
 } as const

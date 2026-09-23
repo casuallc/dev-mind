@@ -1,6 +1,8 @@
 // CAP-57 分类服务 · 安装包管理：三类包（边车程序/模型权重/语料数据）上传、按节点分发（拉取模式）、安装记录与重试。
 // 上传走 multipart（上限 4GB）；分发后节点经 HTTP 拉包物化，进度在 installs 子表轮询。
+// 包类型 = 页内视图（?kind=SIDECAR_APP|MODEL_WEIGHTS|CORPUS，由 LayaViewSwitch 驱动），默认边车程序包。
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Button,
@@ -12,7 +14,6 @@ import {
   message,
   Modal,
   Popconfirm,
-  Segmented,
   Select,
   Space,
   Table,
@@ -57,7 +58,10 @@ const INSTALL_STATUS: Record<string, { color: string; label: string }> = {
 }
 
 export default function ClassifyPackagesPage() {
-  const [kind, setKind] = useState<ClassifyPackageKind>('SIDECAR_APP')
+  const [searchParams] = useSearchParams()
+  // 包类型由 URL ?kind= 驱动（LayaViewSwitch 的三个包视图直接跳对应 kind），非法值回落边车程序包
+  const kindParam = searchParams.get('kind') ?? ''
+  const kind: ClassifyPackageKind = kindParam in KIND_META ? (kindParam as ClassifyPackageKind) : 'SIDECAR_APP'
   const [rows, setRows] = useState<ClassifyPackage[]>([])
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [loading, setLoading] = useState(false)
@@ -278,15 +282,7 @@ export default function ClassifyPackagesPage() {
     <Card
       style={pageCardStyle}
       styles={{ body: pageCardBodyFlexStyle }}
-      title={
-        <LayaViewSwitch group="instances" value="packages">
-          <Segmented
-            value={kind}
-            onChange={(v) => setKind(v as ClassifyPackageKind)}
-            options={(Object.keys(KIND_META) as ClassifyPackageKind[]).map((k) => ({ value: k, label: KIND_META[k] }))}
-          />
-        </LayaViewSwitch>
-      }
+      title={<LayaViewSwitch group="instances" value={kind} />}
       extra={
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load}>
