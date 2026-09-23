@@ -4,8 +4,9 @@ laya 决策边车的平台化管控：**服务实例起停**（proc 帧）、**�
 **在线试分类**（playground）。与业务流程完全解耦——知识分诊已不再调决策引擎，分类服务
 是面向未来工单分类/邮件分类的独立底座。
 
-后台入口：`/admin/classify/instances`（实例）、`/admin/classify/packages`（安装包）、
-`/admin/classify/playground`（试分类），AdminLayout「项目与资源」分组。
+后台入口：`/admin/laya/instances`（实例）、`/admin/laya/packages`（安装包）、
+`/admin/laya/playground`（试分类），AdminLayout「智能决策（laya）」分组「决策与分类」内的 Tab
+（旧 `/admin/classify/*` 路径自动跳转）。
 
 ## 1. 概念与链路
 

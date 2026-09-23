@@ -1,4 +1,4 @@
-// CAP-56 决策实验室页（/admin/decision-lab）：评测集 / 评测运行 / 微调任务 / 产物登记 四视图。
+// CAP-56 决策实验室页（/admin/laya/lab）：评测集 / 评测运行 / 微调任务 / 产物登记 四视图。
 // 外壳只管视图切换与 extra 按钮（经 tick 传给视图内组件），视图内容各自自包含。
 // 布局遵循 docs/core/前端内容区布局约定.md：Card 标题 + Segmented 切换视图，extra 随视图放操作按钮，
 // 表格默认密度并走 FitTable（表体内部滚动）。

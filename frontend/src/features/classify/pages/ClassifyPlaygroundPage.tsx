@@ -234,7 +234,7 @@ export default function ClassifyPlaygroundPage() {
               <Typography.Paragraph type="secondary" style={{ marginBottom: 4, fontSize: 12 }}>
                 路由：{result.routingModel ?? '-'}
                 {result.routingReason ? `（${result.routingReason}）` : ''} · 记录：
-                <Link to={`/admin/decision-records?capability=classify-playground`}>{result.recordRefId}</Link>
+                <Link to={`/admin/laya/records?capability=classify-playground`}>{result.recordRefId}</Link>
                 （到决策记录页按 refId 查证）
               </Typography.Paragraph>
               {Object.entries(result.answers).map(([qid, ans]) => (

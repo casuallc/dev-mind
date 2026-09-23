@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import { useEffect } from 'react'
 import AppLayout from './AppLayout'
 import AdminLayout from './AdminLayout'
@@ -38,6 +38,7 @@ import DecisionLabPage from '../features/decision/pages/DecisionLabPage'
 import ClassifyInstancesPage from '../features/classify/pages/ClassifyInstancesPage'
 import ClassifyPackagesPage from '../features/classify/pages/ClassifyPackagesPage'
 import ClassifyPlaygroundPage from '../features/classify/pages/ClassifyPlaygroundPage'
+import LayaLayout from '../features/laya/pages/LayaLayout'
 import ApiKeysPage from '../features/open-api/pages/ApiKeysPage'
 import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
@@ -72,6 +73,12 @@ function LegacySettingsTabRedirect() {
 function LegacyDocRedirect() {
   const { id } = useParams<{ id: string }>()
   return <Navigate to={`/admin/docs/${id}`} replace />
+}
+
+/** 旧链接兼容：/admin/decision-* 与 /admin/classify/* 已合并为 /admin/laya/:tab（保留 query，如 ?capability=） */
+function LegacyLayaRedirect({ tab }: { tab: string }) {
+  const location = useLocation()
+  return <Navigate to={{ pathname: `/admin/laya/${tab}`, search: location.search }} replace />
 }
 
 export default function App() {
@@ -166,14 +173,21 @@ export default function App() {
           <Route path="/admin/integrations" element={<IntegrationsPage />} />
           {/* CAP-48 模型接入（Embedding 端点：平台默认 + 库级覆盖） */}
           <Route path="/admin/models" element={<ModelEndpointsPage />} />
-          {/* CAP-55 决策记录（模型建议 vs 人工裁决 + 训练集导出） */}
-          <Route path="/admin/decision-records" element={<DecisionRecordsPage />} />
-          {/* CAP-56 决策实验室（评测集 / 评测运行 / 微调任务 / 产物登记） */}
-          <Route path="/admin/decision-lab" element={<DecisionLabPage />} />
-          {/* CAP-57 分类服务（laya 边车平台化：实例管控 / 安装包分发 / 在线试分类） */}
-          <Route path="/admin/classify/instances" element={<ClassifyInstancesPage />} />
-          <Route path="/admin/classify/packages" element={<ClassifyPackagesPage />} />
-          <Route path="/admin/classify/playground" element={<ClassifyPlaygroundPage />} />
+          {/* 智能决策（laya 专属：CAP-55 决策记录 / CAP-56 决策实验室 / CAP-57 分类服务）合并为 Tab 子路由 */}
+          <Route path="/admin/laya" element={<LayaLayout />}>
+            <Route index element={<Navigate to="records" replace />} />
+            <Route path="records" element={<DecisionRecordsPage />} />
+            <Route path="lab" element={<DecisionLabPage />} />
+            <Route path="instances" element={<ClassifyInstancesPage />} />
+            <Route path="packages" element={<ClassifyPackagesPage />} />
+            <Route path="playground" element={<ClassifyPlaygroundPage />} />
+          </Route>
+          {/* 旧路径兼容（合并前各自独立菜单） */}
+          <Route path="/admin/decision-records" element={<LegacyLayaRedirect tab="records" />} />
+          <Route path="/admin/decision-lab" element={<LegacyLayaRedirect tab="lab" />} />
+          <Route path="/admin/classify/instances" element={<LegacyLayaRedirect tab="instances" />} />
+          <Route path="/admin/classify/packages" element={<LegacyLayaRedirect tab="packages" />} />
+          <Route path="/admin/classify/playground" element={<LegacyLayaRedirect tab="playground" />} />
           {/* CAP-20 API 密钥（open-api HMAC 认证凭证） */}
           <Route path="/admin/keys" element={<ApiKeysPage />} />
           {/* CAP-21 Agent 节点（远程执行节点注册/在线状态） */}
