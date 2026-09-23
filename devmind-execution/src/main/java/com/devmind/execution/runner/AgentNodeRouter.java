@@ -79,6 +79,20 @@ public class AgentNodeRouter {
         requireProtocol(nodeId, AgentProtocol.EXEC_BUNDLE, "决策实验室评测/微调（执行包由 runner 拉取物化）");
     }
 
+    /**
+     * CAP-57：节点在线且协议支持 proc 帧（v15+）——分类服务实例的起停/状态管控需要它。
+     * 在操作触发阶段查：人是在管控台按的「启动」，那一刻就该知道节点不够新，而不是等
+     * 后台报一串"协议版本过低"。
+     */
+    public void requireProcCapable(String nodeId) {
+        requireProtocol(nodeId, AgentProtocol.PROC_FRAMES, "分类服务进程管控");
+    }
+
+    /** CAP-57：节点在线且协议支持 pkg 帧（v15+）——安装包分发到节点需要它。 */
+    public void requirePkgCapable(String nodeId) {
+        requireProtocol(nodeId, AgentProtocol.PKG_FRAMES, "分类服务安装包分发");
+    }
+
     /** 在线 + 协议版本双关：两处判据只写一份，离线/过低的报错才不会各说各话 */
     private void requireProtocol(String nodeId, int minVersion, String what) {
         AgentNodeConnector connector = connectorProvider.getIfAvailable();
