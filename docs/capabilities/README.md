@@ -69,6 +69,7 @@
 | [CAP-62](CAP-62-data-permission.md) | 数据权限：项目成员与个人归属 | 管理 | 项目可见性（PUBLIC/PRIVATE）+ project_members（OWNER/MEMBER）+ common SPI ProjectAccessChecker 一处收口查询过滤与 403/404 判定；个人数据（问答/工作日志/PAT/通知）接口层 owner 强制；默认 PUBLIC 存量零变化（CAP-63 硬前置） |
 | [CAP-56](CAP-56-decision-eval-finetune.md) | 决策模型评测与微调闭环 | 底座 | 先证明"这套判断准不准"再接模块：评测集（人工基准集+decision_records 回流，**强制含空召回/逐字重复/不相关对照组**）+ 官方口径指标（accuracy/ECE/Brier/score_mae，**必报随机与多数类基线**）+ 温度校准 + runner 编排微调（官方 RLCD recipe，2×T4 分钟级；权重留节点只回传指标指纹）+ **准入闸门**（只有验证通过的 checkpoint 才允许消费方启用）；同时更正 CAP-55「首发用 typed-decisions」口径 |
 | [CAP-43](CAP-43-agent-node-proxy.md) | Agent 节点外网代理 | 底座 | 节点级 HTTP 代理配置（URL+按功能勾选 scope git/claude/exec），随 launch/worklog_push/exec/workspace_finalize 帧下发（协议 v8 门控），runner 进程级 holder 注入 git 命令行与子进程 env |
+| [CAP-63](CAP-63-multi-tenant.md) | 多租户隔离 | 平台层 | 共享库共享表 + tenant_id 判别列（定稿策略，否决 schema/db-per-tenant 与 @Filter）；M1 租户登记+用户绑定+TenantContext（JWT tenant claim）+超管/租户管理员分层，M2 业务表分批铺 tenant_code 叠加进 CAP-62 过滤切面（硬前置），平台级资源（节点/模型端点）豁免共享 |
 | [CAP-44](CAP-44-knowledge-base-rag.md) | 知识库容器化与向量检索 | 管理 | 知识库成为一等容器（scope 归属+inject_mode FULL/RAG），条目重构归属并分块向量化（JSON CLOB+Java 余弦，无 pgvector），检索 SPI+降级 LIKE，shared MarkdownEditor（升级 CAP-04，打底 CAP-45/46） |
 | [CAP-45](CAP-45-feishu-knowledge-import.md) | 飞书文档对接 | 管理 | integrations 增 FEISHU（appId/appSecret 双行密文），wiki/docx/doc 拉取+blocks→markdown，手动选文档导入知识库（externalId 判重+contentHash 变更检测+手动重同步），条目走 CAP-44 摄入管线自动索引 |
 | [CAP-46](CAP-46-kb-chat.md) | 知识库 AI 会话 | 会话 | 通用问答绑定知识库：启动注入库概览、每轮提问经 KnowledgeRetriever 检索包 `<knowledge-context>` 前缀注入（无命中/异常原样降级），前端新问答库选择器+库详情发起会话入口 |
@@ -141,6 +142,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-57 分类服务依赖 CAP-21/34/36/48/55/56：laya 在知识分诊场景被 CAP-56 基准证伪后，决策链路与业务流程**完全解耦**（knowledge 摘除 triage 整包，SPI 留 common），降级为平台级独立「分类服务」（面向未来工单/邮件分类）；同时把 Python 边车平台化——新模块 `devmind-classify` 管**服务实例**（WS `proc` 帧协议 v15 起停，argv 数组不过 shell，runner 侧 pidfile 对账、shutdown 不杀、目录收容校验，崩溃不自动拉起）与**安装包**（程序/模型权重/语料三类，流式上传 multipart 4GB，WS `pkg` 帧下发 + 节点拉取 + sha 校验 + 原子解包，`${PKG_DIR:id}` env 占位符进实例配置），外加在线试分类 playground（三通道目标解析，调用经 DecisionRecordSink 落 `classify-playground` 记录）；devmind-decision/decision-lab 原样保留，DECISION 端点指向受管实例后 CAP-56 闸门照常工作。
 - CAP-61 菜单管理依赖 CAP-01（角色/登录链路/auth 端点位）：菜单目录注册表（menu_items，代码登记+启动比对落库）+ role_menu_grants 白名单授权（ADMIN 恒见、种子即现状），`/api/auth/menus` 下发驱动前端三个菜单位渲染与路由弱守卫；菜单=展示层管控，与后端角色链安全边界正交，不替代 CAP-01 过滤器链。
 - CAP-62 数据权限依赖 CAP-01/02（与 CAP-61 正交）：projects 增 visibility+owner_id、project_members（OWNER/MEMBER），common SPI `ProjectAccessChecker`（project 实现、各模块 ObjectProvider 探测，缺席=不过滤）一处收口列表过滤与详情 404/403；个人数据（问答/工作日志/PAT/通知/设置）接口层 owner 强制；存量默认 PUBLIC 零行为变化，WORKLOG 项目特例「仅归属用户」。
+- CAP-63 多租户依赖 CAP-01/61，**CAP-62 为硬前置**（过滤切面先收敛，tenant 条件同点叠加）：M1=tenants 表+users.tenant_code+TenantContext（JWT tenant claim，异步回退 default）+超管/租户管理员分层+租户管理页；M2=业务表分批铺 tenant_code（写路径服务端钉入、请求伪造忽略）、平台级资源（agent_nodes/model_endpoints/classify_*）豁免共享、role_menu_grants 按租户独立；隔离策略定稿共享库共享表，否决 schema/db-per-tenant 与 Hibernate @Filter。
 
 ## 组装方式（后续流程层）
 
