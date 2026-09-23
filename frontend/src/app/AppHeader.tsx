@@ -1,4 +1,4 @@
-import { Layout, Space, Tag, Typography, Button } from 'antd'
+import { Layout, Space, Tag, Typography, Button, Tooltip } from 'antd'
 import { ArrowLeftOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -39,15 +39,16 @@ export default function AppHeader({ title }: { title: string }) {
       }}
     >
       <Space size={12}>
-        <Button type="link" icon={<ArrowLeftOutlined />} style={{ paddingInline: 0 }} onClick={() => navigate('/')}>
-          返回工作台
-        </Button>
         <Typography.Text strong>{title}</Typography.Text>
         <Tag color={health?.status === 'UP' ? 'green' : 'red'}>
           后端 {health ? `${health.status} · v${health.version}` : '未连接'}
         </Tag>
       </Space>
       <Space size={12}>
+        {/* 与工作台顶栏「后台管理」入口同款：图标 + Tooltip */}
+        <Tooltip title="返回工作台">
+          <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/')} />
+        </Tooltip>
         <NotificationBell />
         <UserMenu />
       </Space>
