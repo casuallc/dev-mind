@@ -52,3 +52,20 @@ export function fetchWorkspaceFile(apiBase: ChatApiBase, id: string, path: strin
 export function fetchWorkspaceDiff(apiBase: ChatApiBase, id: string, path: string, repo?: string) {
   return api.get<WorkspaceDiffResult>(`${apiBase}/${id}/workspace/diff${qs({ path, repo })}`)
 }
+
+/** CAP-58 终端执行响应（白名单拒绝/越界等走 HTTP 409，不会出现在这里） */
+export interface TerminalExecResult {
+  ok: boolean
+  exitCode: number
+  stdout: string
+  stderr: string
+  /** 命令执行后的新 cwd（相对代码目录 POSIX 路径；越界 cd 被拒时维持原值） */
+  cwd: string | null
+  timedOut?: boolean
+  error?: string
+}
+
+/** CAP-58：终端单条命令执行（cwd 前端持有随命令下发，空 = 代码目录根） */
+export function terminalExec(apiBase: ChatApiBase, id: string, command: string, cwd: string) {
+  return api.post<TerminalExecResult>(`${apiBase}/${id}/terminal/exec`, { command, cwd })
+}

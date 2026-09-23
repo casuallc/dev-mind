@@ -1,6 +1,7 @@
-// CAP-54 会话工作区实时视图：对话面板右侧可折叠栏（变更 / 文件 两个 tab）。
+// CAP-54 会话工作区实时视图：对话面板右侧可折叠栏（变更 / 文件 / 终端 三个 tab）。
 // 变更 = WS 旁路推送的 git 快照（首次打开或终态无推送时 REST 兜底拉一次）；
-// 文件 = 懒加载目录树 + 文件内容抽屉；diff 仅项目会话（问答沙箱非 git）。
+// 文件 = 懒加载目录树 + 文件内容抽屉；diff 仅项目会话（问答沙箱非 git）；
+// 终端 = CAP-58 单条命令执行（terminal_exec 帧，runner 侧白名单缺省只读档）。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Badge, Button, Drawer, Empty, Spin, Tabs, Tag, Tree, Typography } from 'antd'
 import type { DataNode } from 'antd/es/tree'
@@ -18,10 +19,13 @@ import {
   fetchWorkspaceStatus,
   fetchWorkspaceTree,
 } from './api'
+import TerminalTab from './TerminalTab'
 import { showError } from '../../utils/showError'
 import { fmtTime } from '../../utils/format'
 
 const WIDTH = 360
+/** CAP-58：终端 tab 需要更宽（命令+输出行长） */
+const TERMINAL_WIDTH = 560
 
 /** porcelain XY → 人类可读状态（取变化更显著的一侧：未跟踪 > 删除 > 新增 > 改名 > 修改） */
 function statusMeta(c: WorkspaceChange): { label: string; color: string } {
@@ -66,7 +70,7 @@ export default function WorkspacePanel({
   canDiff: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<'changes' | 'files'>('changes')
+  const [tab, setTab] = useState<'changes' | 'files' | 'terminal'>('changes')
   // WS 还没推过（终态会话/刚打开）时 REST 兜底拉一次；推送到达后以推送为准
   const [pulled, setPulled] = useState<WorkspaceSnapshot | null>(null)
   const [loadingStatus, setLoadingStatus] = useState(false)
@@ -293,7 +297,7 @@ export default function WorkspacePanel({
   return (
     <div
       style={{
-        width: WIDTH,
+        width: tab === 'terminal' ? TERMINAL_WIDTH : WIDTH,
         flexShrink: 0,
         borderLeft: '1px solid #f0f0f0',
         paddingLeft: 12,
@@ -310,30 +314,42 @@ export default function WorkspacePanel({
         <Button type="text" size="small" icon={<ReloadOutlined />} onClick={pullStatus} title="刷新状态" />
         <Button type="text" size="small" icon={<MenuFoldOutlined />} onClick={() => setOpen(false)} title="收起" />
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        {/* 终端 tab 要输入框钉底、输出区内部滚动 → Tabs 内容区填满高度，各 pane 自管滚动 */}
+        <style>{`.ws-tabs-fill{display:flex;flex-direction:column;height:100%}
+.ws-tabs-fill .ant-tabs-content-holder{flex:1;min-height:0}
+.ws-tabs-fill .ant-tabs-content,.ws-tabs-fill .ant-tabs-tabpane{height:100%}`}</style>
         <Tabs
           size="small"
+          className="ws-tabs-fill"
           activeKey={tab}
-          onChange={(k) => setTab(k as 'changes' | 'files')}
+          onChange={(k) => setTab(k as 'changes' | 'files' | 'terminal')}
           items={[
             {
               key: 'changes',
               label: '变更',
-              children: changesTab,
+              children: <div style={{ height: '100%', overflow: 'auto' }}>{changesTab}</div>,
             },
             {
               key: 'files',
               label: '文件',
               children: (
-                <Tree
-                  showIcon
-                  blockNode
-                  treeData={treeData}
-                  loadData={onLoadData}
-                  onSelect={onSelectFile}
-                  selectedKeys={[]}
-                />
+                <div style={{ height: '100%', overflow: 'auto' }}>
+                  <Tree
+                    showIcon
+                    blockNode
+                    treeData={treeData}
+                    loadData={onLoadData}
+                    onSelect={onSelectFile}
+                    selectedKeys={[]}
+                  />
+                </div>
               ),
+            },
+            {
+              key: 'terminal',
+              label: '终端',
+              children: <TerminalTab apiBase={apiBase} sessionId={sessionId} />,
             },
           ]}
         />
