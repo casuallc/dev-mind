@@ -193,3 +193,20 @@ POST   /api/bookmarks/shared-with-me/copy   {bookmarkId, groupId|null}（复制�
 - v1：FR-01~08 全做；探测仅手动触发；分享仅平台内用户只读；
 - 留后续：浏览器书签导入、定时探测与失效通知（CAP-06）、favicon 抓取缓存、
   匿名分享链接、收藏进上下文装配（BookmarkCatalog SPI）、访问频次统计排序。
+
+## 9. 落地状态
+
+- **M1 —— 需求定稿**：本文档。
+- **M2 —— 实现 + E2E 通过（2026-09-24）**：新模块 `devmind-bookmark`（仅依赖 common + auth）
+  + `frontend/src/features/bookmarks`（顶部一级导航「收藏夹」）。单测 47 项（含真实网络探测、
+  DNS/CONNECT 分类回归）`mvn test` 全绿；`npx tsc -b` 通过；`tests/cap64_e2e.py` 51 项断言
+  闭环通过；全站布局巡检 `--only bookmarks` 四视图（1366×768）全过。
+- **规格未明确处的实现口径**（后续若要改口径，改这里 + 同步代码）：
+  1. 分组过滤含子树——选中父分组即含全部后代条目；
+  2. 未分组另设 `ungrouped=true` 布尔参数（`groupId=null` 在查询串无法表达 SQL NULL）；
+  3. 多标签过滤取 AND（需同时具备所选标签）；
+  4. 删除分组默认模式：子分组上提到被删分组的父级（不是拍平到根），组内条目转未分组；
+  5. 探测异常归一为 8 字符内同义码（DNS/CONNECT/SSL/TIMEOUT/IO/ERROR）落 `last_status_code`；
+     DNS 判定必须先于 CONNECT——JDK HttpClient 把域名解析失败包成
+     `ConnectException → UnresolvedAddressException`，只认 ConnectException 会误判；
+  6. 分享目标用户以用户名文本录入（平台暂无普通用户列表端点，CAP-61 菜单/用户体系就绪后可换选择器）。
