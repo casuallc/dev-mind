@@ -43,6 +43,7 @@ import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
 import HomePage from '../features/home/pages/HomePage'
 import WorklogPage from '../features/worklog/pages/WorklogPage'
+import BookmarksPage from '../features/bookmarks/pages/BookmarksPage'
 import ChatsBoard from '../features/chat/pages/ChatsBoard'
 import AttachmentsPage from '../features/attachments/pages/AttachmentsPage'
 import ReposAdminPage from '../features/repos/pages/ReposAdminPage'
@@ -108,6 +109,8 @@ export default function App() {
           <Route path="/worklog" element={<WorklogPage />} />
           {/* CAP-30 通用问答（个人级，不进项目上下文） */}
           <Route path="/chats" element={<ChatsBoard />} />
+          {/* CAP-64 收藏夹（个人级 owner 隔离，不进项目上下文） */}
+          <Route path="/bookmarks" element={<BookmarksPage />} />
           {/* 项目上下文页面（当前项目为主线，无项目时由 Gate 统一空态） */}
           <Route element={<ProjectContextGate />}>
             <Route path="/overview" element={<ProjectOverviewPage />} />

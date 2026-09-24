@@ -10,6 +10,7 @@ const SELECT_PREFIXES: Array<[string, string]> = [
   ['/projects/', '/requirements'], // /projects/:id/requirements/:rid → 需求
   ['/context', '/context'],
   ['/chats', '/chats'],
+  ['/bookmarks', '/bookmarks'],
   ['/worklog', '/worklog'],
   ['/settings', '/settings'], // 一级导航「设置」（旧 /me/settings 已重定向）
   ['/requirements', '/requirements'],
@@ -32,6 +33,7 @@ export function menuSelectedKey(pathname: string): string {
 const TOPNAV_PREFIXES: Array<[string, string]> = [
   ['/home', '/home'],
   ['/chats', '/chats'],
+  ['/bookmarks', '/bookmarks'],
   ['/worklog', '/worklog'],
   ['/settings', '/settings'], // 一级导航「设置」
   ['/overview', '/overview'],
