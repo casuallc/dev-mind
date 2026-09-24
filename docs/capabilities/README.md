@@ -78,6 +78,7 @@
 | [CAP-49](CAP-49-chat-model-executor.md) | 问答模型执行体 | 底座 | 通用问答新增 MODEL 执行体：服务端直连已接入 CHAT 端点（流式 SSE + 可中断），**零节点依赖**；多轮上下文每轮从事件表重建（重启可续），是 CAP-34「服务端零执行」的收敛性例外 |
 | [CAP-50](CAP-50-session-streaming.md) | CLI 会话流式输出 | 底座 | 给 CAP-49 的逐字打字机补上 CLI 执行体这一半：开 `--include-partial-messages` 让 `stream_event` 增量活起来（解析层命名空间白名单），每会话聚合器按 24字/120ms 节流保序收口，**前端零改动**（增量打底 + 全量覆盖收口复用既有渲染路径）；同批硬化链路：runner 出口改单写者队列（修并发 sendText 静默丢帧）、回放环形缓冲排除增量（否则刷屏冲掉历史）、`/ws/sessions` 加慢客户端装饰、`/sessions/{id}/events` 补 limit |
 | [CAP-64](CAP-64-bookmark-favorites.md) | 收藏夹 | 组装层 | 绑定到人的网址收藏：分组树/标签/批量转移分组/浏览器打开、HTTP 可用性探测（状态码/耗时落库）、关联账号速查（密码 SecretCipher 密文+按次取明文）、平台内用户只读分享（密码恒不分享），个人数据归属复用 CAP-62 owner 强制 |
+| [CAP-65](CAP-65-agent-node-file-browser.md) | Agent 节点文件浏览器 | 底座 | 节点级根目录白名单（服务端 DB 权威）下的文件浏览/预览/编辑/上传/下载/重命名/删除：小操作走 WS file 帧（协议 v18），≤100MB 大文件走 runner 主动 HTTP 中转（WS 零阻塞），全端点 ADMIN |
 
 ## 依赖关系
 
@@ -145,6 +146,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-62 数据权限依赖 CAP-01/02（与 CAP-61 正交）：projects 增 visibility+owner_id、project_members（OWNER/MEMBER），common SPI `ProjectAccessChecker`（project 实现、各模块 ObjectProvider 探测，缺席=不过滤）一处收口列表过滤与详情 404/403；个人数据（问答/工作日志/PAT/通知/设置）接口层 owner 强制；存量默认 PUBLIC 零行为变化，WORKLOG 项目特例「仅归属用户」。
 - CAP-63 多租户依赖 CAP-01/61，**CAP-62 为硬前置**（过滤切面先收敛，tenant 条件同点叠加）：M1=tenants 表+users.tenant_code+TenantContext（JWT tenant claim，异步回退 default）+超管/租户管理员分层+租户管理页；M2=业务表分批铺 tenant_code（写路径服务端钉入、请求伪造忽略）、平台级资源（agent_nodes/model_endpoints/classify_*）豁免共享、role_menu_grants 按租户独立；隔离策略定稿共享库共享表，否决 schema/db-per-tenant 与 Hibernate @Filter。
 - CAP-64 收藏夹依赖 CAP-01/61/62 与 CAP-48 抽取的 `SecretCipher`：纯个人数据能力（新模块 devmind-bookmark），分组树/标签/探测/关联账号/分享全部 keyed owner，归属防护照搬 CAP-62 FR-04 的 404 口径（分享为唯一例外通道，走独立命名空间只读出参）；不依赖 project/session/execution，v1 零对外 SPI、零 DomainEvent。
+- CAP-65 节点文件浏览器依赖 CAP-21（节点 WS 通道/token 认证）、CAP-34（协议版本门控 v18）、CAP-54（resolveConfined 路径限定先例）、CAP-37/57（runner 主动 HTTP 传字节先例）：白名单服务端 DB 单点权威随帧下发，小操作走 WS file 帧、≤100MB 大文件走 HTTP 中转，全部端点（含 GET）限 ADMIN。
 
 ## 组装方式（后续流程层）
 
