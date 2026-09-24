@@ -47,6 +47,7 @@
         <module>devmind-agent</module>
         <module>devmind-agent-runner</module>
         <module>devmind-worklog</module>
+        <module>devmind-bookmark</module>
         <module>devmind-app</module>
         <module>devmind-dist</module>
     </modules>
@@ -195,6 +196,11 @@
             <dependency>
                 <groupId>com.devmind</groupId>
                 <artifactId>devmind-worklog</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.devmind</groupId>
+                <artifactId>devmind-bookmark</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
