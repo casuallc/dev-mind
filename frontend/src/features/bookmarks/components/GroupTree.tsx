@@ -1,11 +1,15 @@
-import { Button, Dropdown, Empty, Space, Tag, Tooltip, Typography } from 'antd'
+import { Button, Dropdown, Empty, Tooltip, Typography } from 'antd'
 import {
+  AppstoreOutlined,
   DeleteOutlined,
   EditOutlined,
   FolderAddOutlined,
+  FolderOutlined,
+  InboxOutlined,
   MoreOutlined,
   ShareAltOutlined,
 } from '@ant-design/icons'
+import type { CSSProperties, ReactNode } from 'react'
 import type { BookmarkGroup } from '../types'
 
 /** 侧栏选中项：全部 / 未分组 / 某个分组（点分组 = 看到该子树内的收藏） */
@@ -23,23 +27,62 @@ interface Props {
   onShare: (g: BookmarkGroup) => void
 }
 
-const rowStyle = (active: boolean): React.CSSProperties => ({
+const rowStyle = (active: boolean): CSSProperties => ({
   display: 'flex',
   alignItems: 'center',
   gap: 6,
-  padding: '4px 8px',
+  height: 32,
+  padding: '0 8px',
   borderRadius: 6,
   cursor: 'pointer',
   background: active ? '#e6f4ff' : undefined,
   color: active ? '#1677ff' : undefined,
 })
 
-const nameStyle: React.CSSProperties = {
+const nameStyle: CSSProperties = {
   flex: 1,
   minWidth: 0,
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
+}
+
+const iconStyle: CSSProperties = { flexShrink: 0, color: 'inherit', opacity: 0.75 }
+
+const countStyle: CSSProperties = { flexShrink: 0, fontSize: 12, color: '#8c8c8c' }
+
+/** 侧栏一行：图标 + 名称 + 计数 + 尾随操作（hover 才显示，见 index.css 的 bm-group-row） */
+function Row({
+  active,
+  icon,
+  name,
+  count,
+  actions,
+  indent,
+  onClick,
+}: {
+  active: boolean
+  icon: ReactNode
+  name: string
+  count?: number
+  actions?: ReactNode
+  indent?: number
+  onClick: () => void
+}) {
+  return (
+    <div
+      className="bm-group-row"
+      style={{ ...rowStyle(active), paddingLeft: 8 + (indent ?? 0) * 14 }}
+      onClick={onClick}
+    >
+      <span style={iconStyle}>{icon}</span>
+      <Tooltip title={name} mouseEnterDelay={0.4}>
+        <span style={nameStyle}>{name}</span>
+      </Tooltip>
+      {count != null && count > 0 && <span style={countStyle}>{count}</span>}
+      {actions}
+    </div>
+  )
 }
 
 /**
@@ -57,18 +100,16 @@ export default function GroupTree({
   onDelete,
   onShare,
 }: Props) {
-  const renderNode = (g: BookmarkGroup, depth: number) => {
-    const active = selected.kind === 'group' && selected.id === g.id
-    return (
-      <div key={g.id}>
-        <div
-          style={{ ...rowStyle(active), paddingLeft: 8 + depth * 14 }}
-          onClick={() => onSelect({ kind: 'group', id: g.id })}
-        >
-          <Tooltip title={g.name} mouseEnterDelay={0.4}>
-            <span style={nameStyle}>{g.name}</span>
-          </Tooltip>
-          {g.bookmarkCount > 0 && <Tag style={{ marginInlineEnd: 0 }}>{g.bookmarkCount}</Tag>}
+  const renderNode = (g: BookmarkGroup, depth: number) => (
+    <div key={g.id}>
+      <Row
+        active={selected.kind === 'group' && selected.id === g.id}
+        icon={<FolderOutlined />}
+        name={g.name}
+        count={g.bookmarkCount}
+        indent={depth}
+        onClick={() => onSelect({ kind: 'group', id: g.id })}
+        actions={
           <Dropdown
             trigger={['click']}
             menu={{
@@ -89,37 +130,67 @@ export default function GroupTree({
             }}
           >
             <Button
+              className="bm-row-actions"
               type="text"
               size="small"
               icon={<MoreOutlined />}
               onClick={(e) => e.stopPropagation()}
             />
           </Dropdown>
-        </div>
-        {g.children.map((c) => renderNode(c, depth + 1))}
-      </div>
-    )
-  }
+        }
+      />
+      {g.children.map((c) => renderNode(c, depth + 1))}
+    </div>
+  )
 
   return (
-    <div style={{ width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div
+      style={{
+        width: 220,
+        flexShrink: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+        borderRight: '1px solid #f0f0f0',
+        paddingRight: 12,
+      }}
+    >
       <div style={{ flexShrink: 0 }}>
-        <div style={rowStyle(selected.kind === 'all')} onClick={() => onSelect({ kind: 'all' })}>
-          <span style={nameStyle}>全部收藏</span>
-          <Tag style={{ marginInlineEnd: 0 }}>{total}</Tag>
-        </div>
-        <div style={rowStyle(selected.kind === 'ungrouped')} onClick={() => onSelect({ kind: 'ungrouped' })}>
-          <span style={nameStyle}>未分组</span>
-          {ungroupedCount > 0 && <Tag style={{ marginInlineEnd: 0 }}>{ungroupedCount}</Tag>}
-        </div>
-        <Space style={{ display: 'flex', justifyContent: 'space-between', margin: '8px 0 4px' }}>
+        <Row
+          active={selected.kind === 'all'}
+          icon={<AppstoreOutlined />}
+          name="全部收藏"
+          count={total}
+          onClick={() => onSelect({ kind: 'all' })}
+        />
+        <Row
+          active={selected.kind === 'ungrouped'}
+          icon={<InboxOutlined />}
+          name="未分组"
+          count={ungroupedCount}
+          onClick={() => onSelect({ kind: 'ungrouped' })}
+        />
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            height: 28,
+            margin: '6px 0 2px',
+            padding: '0 8px',
+          }}
+        >
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             分组
           </Typography.Text>
-          <Button type="link" size="small" icon={<FolderAddOutlined />} onClick={() => onCreate(null)}>
-            新建
-          </Button>
-        </Space>
+          <Button
+            type="text"
+            size="small"
+            icon={<FolderAddOutlined />}
+            onClick={() => onCreate(null)}
+            title="新建分组"
+          />
+        </div>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         {groups.length === 0 ? (

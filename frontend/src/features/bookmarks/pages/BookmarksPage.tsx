@@ -13,7 +13,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, BarsOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   copyShared,
@@ -48,6 +48,7 @@ import type {
   BookmarkTagSummary,
   SharedWithMe,
 } from '../types'
+import BookmarkCardGrid from '../components/BookmarkCardGrid'
 import BookmarkDrawer, { type BookmarkFormValues } from '../components/BookmarkDrawer'
 import GroupModal from '../components/GroupModal'
 import GroupTree, { type GroupSelection } from '../components/GroupTree'
@@ -62,6 +63,9 @@ import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 type View = 'mine' | 'shared' | 'shares' | 'tags'
+type ViewMode = 'table' | 'card'
+
+const VIEW_MODE_KEY = 'bookmark.viewMode'
 
 const VIEWS = [
   { value: 'mine', label: '我的收藏' },
@@ -95,6 +99,9 @@ function flatten(groups: BookmarkGroup[]): BookmarkGroup[] {
  */
 export default function BookmarksPage() {
   const [view, setView] = useState<View>('mine')
+  const [viewMode, setViewMode] = useState<ViewMode>(() =>
+    localStorage.getItem(VIEW_MODE_KEY) === 'card' ? 'card' : 'table',
+  )
 
   const [groups, setGroups] = useState<BookmarkGroup[]>([])
   const [tags, setTags] = useState<BookmarkTagSummary[]>([])
@@ -479,7 +486,13 @@ export default function BookmarksPage() {
   }
 
   const ungroupedCount = allRows.filter((b) => b.groupId == null).length
-  const canBatch = view === 'mine' && selectedKeys.length > 0
+  const canBatch = view === 'mine' && viewMode === 'table' && selectedKeys.length > 0
+
+  const groupNameOf = (b: Bookmark) => flatten(groups).find((g) => g.id === b.groupId)?.name ?? '未分组'
+  const startCreate = () => {
+    setEditing(null)
+    setDrawerOpen(true)
+  }
 
   const extra = (
     <Space>
@@ -487,14 +500,7 @@ export default function BookmarksPage() {
         刷新
       </Button>
       {view === 'mine' && (
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            setEditing(null)
-            setDrawerOpen(true)
-          }}
-        >
+        <Button type="primary" icon={<PlusOutlined />} onClick={startCreate}>
           新建收藏
         </Button>
       )}
@@ -526,8 +532,7 @@ export default function BookmarksPage() {
       extra={extra}
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-        把团队常用的内网入口（控制台、流水线、监控、文档）收在一处：分组归类、打标签、探测可用性、
-        顺手记下登录账号；密码加密存储，只在你点开时按次解密。同事之间可只读分享（密码不外传）。
+        团队内网入口一处收纳：分组归类、标签筛选、可用性探测、账号加密备忘；支持只读分享（密码不外传）。
       </Typography.Paragraph>
 
       {view === 'mine' && (
@@ -544,11 +549,11 @@ export default function BookmarksPage() {
             onShare={(g) => setShareTarget({ kind: 'group', id: g.id, name: g.name })}
           />
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <Space wrap style={{ flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
               <Input.Search
                 allowClear
                 placeholder="搜名称 / 地址 / 备注"
-                style={{ width: 220 }}
+                style={{ flex: 1, minWidth: 180, maxWidth: 320 }}
                 value={keywordDraft}
                 onChange={(e) => setKeywordDraft(e.target.value)}
                 onSearch={(v) => setKeyword(v)}
@@ -557,13 +562,13 @@ export default function BookmarksPage() {
                 allowClear
                 mode="multiple"
                 placeholder="按标签筛"
-                style={{ minWidth: 180 }}
+                style={{ minWidth: 160 }}
                 value={tagIds}
                 onChange={setTagIds}
                 options={tags.map((t) => ({ value: t.id, label: t.name }))}
               />
               <Select
-                style={{ width: 130 }}
+                style={{ width: 120 }}
                 value={status}
                 onChange={(v) => setStatus(v as BookmarkStatus | 'ALL')}
                 options={STATUS_OPTIONS}
@@ -581,106 +586,161 @@ export default function BookmarksPage() {
                   </Button>
                 </>
               )}
-            </Space>
-            <FitTable<Bookmark>
-              rowKey="id"
-              loading={loading}
-              dataSource={rows}
-              pagination={LIST_PAGINATION}
-              rowSelection={{ selectedRowKeys: selectedKeys, onChange: (keys) => setSelectedKeys(keys as string[]) }}
-              locale={{
-                emptyText: (
-                  <Space direction="vertical">
-                    <span>这里还没有收藏</span>
-                    <Button
-                      type="primary"
-                      onClick={() => {
-                        setEditing(null)
-                        setDrawerOpen(true)
-                      }}
-                    >
-                      新建收藏
-                    </Button>
-                  </Space>
-                ),
-              }}
-              columns={[
-                { title: '', width: 28, render: (_, b) => <StatusDot bookmark={b} /> },
-                {
-                  title: '名称',
-                  dataIndex: 'title',
-                  ellipsis: true,
-                  render: (t: string, b) => (
-                    <Tooltip title={b.description || b.url} mouseEnterDelay={0.4}>
-                      <a onClick={() => openBookmark(b)}>{t}</a>
-                    </Tooltip>
-                  ),
-                },
-                { title: '地址', dataIndex: 'url', ellipsis: true, width: 280 },
-                {
-                  title: '标签',
-                  width: 180,
-                  render: (_, b) => (b.tags.length === 0 ? '-' : b.tags.map((t) => <Tag key={t.id}>{t.name}</Tag>)),
-                },
-                {
-                  title: '归属分组',
-                  width: 120,
-                  render: (_, b) => flatten(groups).find((g) => g.id === b.groupId)?.name ?? '未分组',
-                },
-                {
-                  title: '最近访问',
-                  dataIndex: 'lastVisitedAt',
-                  width: 170,
-                  render: (t: string) => fmtTime(t),
-                },
-                {
-                  title: '操作',
-                  width: 250,
-                  render: (_, b) => (
-                    <Space>
-                      <Button onClick={() => openBookmark(b)}>打开</Button>
-                      <Button onClick={() => probeOne(b)}>探测</Button>
-                      <Button
-                        onClick={() => {
-                          setEditing(b)
-                          setDrawerOpen(true)
-                        }}
-                      >
-                        编辑
+              <Segmented
+                style={{ marginLeft: 'auto' }}
+                value={viewMode}
+                onChange={(v) => {
+                  const mode = v as ViewMode
+                  setViewMode(mode)
+                  localStorage.setItem(VIEW_MODE_KEY, mode)
+                }}
+                options={[
+                  { value: 'table', icon: <BarsOutlined />, title: '表格视图' },
+                  { value: 'card', icon: <AppstoreOutlined />, title: '卡片视图' },
+                ]}
+              />
+            </div>
+            {viewMode === 'card' ? (
+              <BookmarkCardGrid
+                rows={rows}
+                loading={loading}
+                groupName={groupNameOf}
+                onOpen={openBookmark}
+                onProbe={probeOne}
+                onEdit={(b) => {
+                  setEditing(b)
+                  setDrawerOpen(true)
+                }}
+                onAccounts={(b) => {
+                  setSecrets({})
+                  setAccountsOf(b)
+                }}
+                onShare={(b) => setShareTarget({ kind: 'bookmark', id: Number(b.id), name: b.title })}
+                onMove={(b) => {
+                  setSelectedKeys([b.id])
+                  setMoveTarget(null)
+                  setMoveOpen(true)
+                }}
+                onDelete={confirmDeleteBookmark}
+                onCreate={startCreate}
+              />
+            ) : (
+              <FitTable<Bookmark>
+                rowKey="id"
+                loading={loading}
+                dataSource={rows}
+                pagination={LIST_PAGINATION}
+                rowSelection={{ selectedRowKeys: selectedKeys, onChange: (keys) => setSelectedKeys(keys as string[]) }}
+                locale={{
+                  emptyText: (
+                    <Space direction="vertical">
+                      <span>这里还没有收藏</span>
+                      <Button type="primary" onClick={startCreate}>
+                        新建收藏
                       </Button>
-                      <Dropdown
-                        trigger={['click']}
-                        menu={{
-                          items: [
-                            { key: 'accounts', label: `账号（${b.accounts.length}）` },
-                            { key: 'share', label: '分享给同事' },
-                            { key: 'move', label: '转移分组' },
-                            { type: 'divider' },
-                            { key: 'delete', label: '删除', danger: true },
-                          ],
-                          onClick: ({ key }) => {
-                            if (key === 'accounts') {
-                              setSecrets({})
-                              setAccountsOf(b)
-                            } else if (key === 'share') {
-                              setShareTarget({ kind: 'bookmark', id: Number(b.id), name: b.title })
-                            } else if (key === 'move') {
-                              setSelectedKeys([b.id])
-                              setMoveTarget(null)
-                              setMoveOpen(true)
-                            } else if (key === 'delete') {
-                              confirmDeleteBookmark(b)
-                            }
-                          },
-                        }}
-                      >
-                        <Button>管理</Button>
-                      </Dropdown>
                     </Space>
                   ),
-                },
-              ]}
-            />
+                }}
+                columns={[
+                  {
+                    title: '名称',
+                    dataIndex: 'title',
+                    ellipsis: true,
+                    render: (t: string, b) => (
+                      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                        <Space size={6} style={{ minWidth: 0 }}>
+                          <StatusDot bookmark={b} />
+                          <Tooltip title={b.description || undefined} mouseEnterDelay={0.4}>
+                            <a onClick={() => openBookmark(b)}>{t}</a>
+                          </Tooltip>
+                        </Space>
+                        <Typography.Text
+                          type="secondary"
+                          style={{ fontSize: 12, paddingLeft: 14 }}
+                          ellipsis
+                        >
+                          {b.url}
+                        </Typography.Text>
+                      </div>
+                    ),
+                  },
+                  {
+                    title: '标签',
+                    width: 180,
+                    render: (_, b) =>
+                      b.tags.length === 0 ? (
+                        <Typography.Text type="secondary">-</Typography.Text>
+                      ) : (
+                        <>
+                          {b.tags.slice(0, 3).map((t) => (
+                            <Tag key={t.id}>{t.name}</Tag>
+                          ))}
+                          {b.tags.length > 3 && (
+                            <Tooltip title={b.tags.slice(3).map((t) => t.name).join('、')}>
+                              <Tag>+{b.tags.length - 3}</Tag>
+                            </Tooltip>
+                          )}
+                        </>
+                      ),
+                  },
+                  { title: '归属分组', width: 120, render: (_, b) => groupNameOf(b) },
+                  {
+                    title: '最近访问',
+                    dataIndex: 'lastVisitedAt',
+                    width: 170,
+                    render: (t: string) => fmtTime(t),
+                  },
+                  {
+                    title: '操作',
+                    width: 200,
+                    render: (_, b) => (
+                      <Space>
+                        <Button onClick={() => openBookmark(b)}>打开</Button>
+                        <Button
+                          onClick={() => {
+                            setEditing(b)
+                            setDrawerOpen(true)
+                          }}
+                        >
+                          编辑
+                        </Button>
+                        <Dropdown
+                          trigger={['click']}
+                          menu={{
+                            items: [
+                              { key: 'probe', label: '探测' },
+                              { key: 'accounts', label: `账号（${b.accounts.length}）` },
+                              { key: 'share', label: '分享给同事' },
+                              { key: 'move', label: '转移分组' },
+                              { type: 'divider' },
+                              { key: 'delete', label: '删除', danger: true },
+                            ],
+                            onClick: ({ key }) => {
+                              if (key === 'probe') {
+                                void probeOne(b)
+                              } else if (key === 'accounts') {
+                                setSecrets({})
+                                setAccountsOf(b)
+                              } else if (key === 'share') {
+                                setShareTarget({ kind: 'bookmark', id: Number(b.id), name: b.title })
+                              } else if (key === 'move') {
+                                setSelectedKeys([b.id])
+                                setMoveTarget(null)
+                                setMoveOpen(true)
+                              } else if (key === 'delete') {
+                                confirmDeleteBookmark(b)
+                              }
+                            },
+                          }}
+                        >
+                          <Button>管理</Button>
+                        </Dropdown>
+                      </Space>
+                    ),
+                  },
+                ]}
+              />
+            )}
           </div>
         </div>
       )}

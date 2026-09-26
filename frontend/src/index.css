@@ -253,3 +253,8 @@ html, body, #root {
   overflow: auto;
 }
 .chat-logs-time { color: #d9d9d9; }
+
+/* 收藏夹：分组树行内「⋯」hover 才显示；卡片 hover 浮起 */
+.bm-group-row .bm-row-actions { opacity: 0; transition: opacity .15s; }
+.bm-group-row:hover .bm-row-actions { opacity: 1; }
+.bm-card:hover { border-color: #91caff !important; box-shadow: 0 2px 8px rgba(0, 0, 0, .08); }

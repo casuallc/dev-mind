@@ -36,7 +36,6 @@ export default function SharedWithMePane({ rows, onOpen, onCopy }: Props) {
           </Typography.Title>
           <Table<Bookmark>
             rowKey="id"
-            size="small"
             pagination={false}
             dataSource={r.bookmarks}
             locale={{ emptyText: '这个分享暂时没有可看的收藏' }}
