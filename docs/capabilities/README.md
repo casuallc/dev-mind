@@ -79,6 +79,7 @@
 | [CAP-50](CAP-50-session-streaming.md) | CLI 会话流式输出 | 底座 | 给 CAP-49 的逐字打字机补上 CLI 执行体这一半：开 `--include-partial-messages` 让 `stream_event` 增量活起来（解析层命名空间白名单），每会话聚合器按 24字/120ms 节流保序收口，**前端零改动**（增量打底 + 全量覆盖收口复用既有渲染路径）；同批硬化链路：runner 出口改单写者队列（修并发 sendText 静默丢帧）、回放环形缓冲排除增量（否则刷屏冲掉历史）、`/ws/sessions` 加慢客户端装饰、`/sessions/{id}/events` 补 limit |
 | [CAP-64](CAP-64-bookmark-favorites.md) | 收藏夹 | 组装层 | 绑定到人的网址收藏：分组树/标签/批量转移分组/浏览器打开、HTTP 可用性探测（状态码/耗时落库）、关联账号速查（密码 SecretCipher 密文+按次取明文）、平台内用户只读分享（密码恒不分享），个人数据归属复用 CAP-62 owner 强制 |
 | [CAP-65](CAP-65-agent-node-file-browser.md) | Agent 节点文件浏览器 | 底座 | 节点级根目录白名单（服务端 DB 权威）下的文件浏览/预览/编辑/上传/下载/重命名/删除：小操作走 WS file 帧（协议 v18），≤100MB 大文件走 runner 主动 HTTP 中转（WS 零阻塞），全端点 ADMIN |
+| [CAP-66](CAP-66-security-scan.md) | 安全漏洞扫描 | 执行器 | 多引擎（SCA=dependency-check / SAST=Semgrep / 密钥=Gitleaks）统一扫描底座：exec 帧下发节点执行+工具链标签调度，原始报告归一化统一发现模型（服务端解析），fingerprint 去重+跨任务基线 diff（NEW/EXISTING/FIXED）+误报抑制治理，密钥命中脱敏落库，高危通知+AI 复核会话 |
 
 ## 依赖关系
 
@@ -147,6 +148,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-63 多租户依赖 CAP-01/61，**CAP-62 为硬前置**（过滤切面先收敛，tenant 条件同点叠加）：M1=tenants 表+users.tenant_code+TenantContext（JWT tenant claim，异步回退 default）+超管/租户管理员分层+租户管理页；M2=业务表分批铺 tenant_code（写路径服务端钉入、请求伪造忽略）、平台级资源（agent_nodes/model_endpoints/classify_*）豁免共享、role_menu_grants 按租户独立；隔离策略定稿共享库共享表，否决 schema/db-per-tenant 与 Hibernate @Filter。
 - CAP-64 收藏夹依赖 CAP-01/61/62 与 CAP-48 抽取的 `SecretCipher`：纯个人数据能力（新模块 devmind-bookmark），分组树/标签/探测/关联账号/分享全部 keyed owner，归属防护照搬 CAP-62 FR-04 的 404 口径（分享为唯一例外通道，走独立命名空间只读出参）；不依赖 project/session/execution，v1 零对外 SPI、零 DomainEvent。
 - CAP-65 节点文件浏览器依赖 CAP-21（节点 WS 通道/token 认证）、CAP-34（协议版本门控 v18）、CAP-54（resolveConfined 路径限定先例）、CAP-37/57（runner 主动 HTTP 传字节先例）：白名单服务端 DB 单点权威随帧下发，小操作走 WS file 帧、≤100MB 大文件走 HTTP 中转，全部端点（含 GET）限 ADMIN。
+- CAP-66 安全漏洞扫描依赖 CAP-12/21/34/36（exec 帧+工具链标签调度+日志 Hub，引擎二进制节点预装随 `agent.properties` 配路径）、CAP-29/02/62（仓库归属与数据权限）、CAP-06/32/33（通知/报告附件/AI 复核场景装配）：`ScanEngineAdapter` SPI 注册引擎（MVP 三引擎 SCA/SAST/secrets），原始报告回传后**服务端**归一化统一发现模型（fingerprint 去重 + 基线 diff + 抑制表），门禁编排留 `SecurityGateQuery` 草约另立 CAP 消费。
 
 ## 组装方式（后续流程层）
 
