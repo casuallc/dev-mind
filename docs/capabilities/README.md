@@ -79,7 +79,7 @@
 | [CAP-50](CAP-50-session-streaming.md) | CLI 会话流式输出 | 底座 | 给 CAP-49 的逐字打字机补上 CLI 执行体这一半：开 `--include-partial-messages` 让 `stream_event` 增量活起来（解析层命名空间白名单），每会话聚合器按 24字/120ms 节流保序收口，**前端零改动**（增量打底 + 全量覆盖收口复用既有渲染路径）；同批硬化链路：runner 出口改单写者队列（修并发 sendText 静默丢帧）、回放环形缓冲排除增量（否则刷屏冲掉历史）、`/ws/sessions` 加慢客户端装饰、`/sessions/{id}/events` 补 limit |
 | [CAP-64](CAP-64-bookmark-favorites.md) | 收藏夹 | 组装层 | 绑定到人的网址收藏：分组树/标签/批量转移分组/浏览器打开、HTTP 可用性探测（状态码/耗时落库）、关联账号速查（密码 SecretCipher 密文+按次取明文）、平台内用户只读分享（密码恒不分享），个人数据归属复用 CAP-62 owner 强制 |
 | [CAP-65](CAP-65-agent-node-file-browser.md) | Agent 节点文件浏览器 | 底座 | 节点级根目录白名单（服务端 DB 权威）下的文件浏览/预览/编辑/上传/下载/重命名/删除：小操作走 WS file 帧（协议 v18），≤100MB 大文件走 runner 主动 HTTP 中转（WS 零阻塞），全端点 ADMIN |
-| [CAP-66](CAP-66-security-scan.md) | 安全漏洞扫描 | 执行器 | 多引擎（SCA=dependency-check / SAST=Semgrep / 密钥=Gitleaks）统一扫描底座：exec 帧下发节点执行+工具链标签调度，原始报告归一化统一发现模型（服务端解析），fingerprint 去重+跨任务基线 diff（NEW/EXISTING/FIXED）+误报抑制治理，密钥命中脱敏落库，高危通知+AI 复核会话 |
+| [CAP-66](CAP-66-security-scan.md) | 安全漏洞扫描 | 执行器 | 多引擎（SCA=dependency-check / SAST=Semgrep / 密钥=Gitleaks）统一扫描底座：exec 帧下发节点执行+工具链标签调度，原始报告归一化统一发现模型（服务端解析），fingerprint 去重+跨任务基线 diff+误报四层漏斗（内部构件白名单/scope 降权/CVE 抑制库/KEV·EPSS 情报排序），修复指导一等输出（引入链/最低安全版本/AI 修复会话），密钥命中脱敏落库 |
 
 ## 依赖关系
 
