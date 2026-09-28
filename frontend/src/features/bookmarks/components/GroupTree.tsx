@@ -1,4 +1,4 @@
-import { Button, Dropdown, Empty, Tooltip, Typography } from 'antd'
+import { Button, Dropdown, Empty, Tooltip } from 'antd'
 import {
   AppstoreOutlined,
   DeleteOutlined,
@@ -170,29 +170,9 @@ export default function GroupTree({
           count={ungroupedCount}
           onClick={() => onSelect({ kind: 'ungrouped' })}
         />
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            height: 28,
-            margin: '6px 0 2px',
-            padding: '0 8px',
-          }}
-        >
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            分组
-          </Typography.Text>
-          <Button
-            type="text"
-            size="small"
-            icon={<FolderAddOutlined />}
-            onClick={() => onCreate(null)}
-            title="新建分组"
-          />
-        </div>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+        {groups.map((g) => renderNode(g, 0))}
         {groups.length === 0 ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -204,7 +184,16 @@ export default function GroupTree({
             </Button>
           </Empty>
         ) : (
-          groups.map((g) => renderNode(g, 0))
+          <div
+            className="bm-group-row"
+            style={{ ...rowStyle(false), color: '#8c8c8c' }}
+            onClick={() => onCreate(null)}
+          >
+            <span style={iconStyle}>
+              <FolderAddOutlined />
+            </span>
+            <span style={nameStyle}>新建分组</span>
+          </div>
         )}
       </div>
     </div>
