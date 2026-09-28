@@ -12,7 +12,7 @@ import {
 import type { CSSProperties, ReactNode } from 'react'
 import type { BookmarkGroup } from '../types'
 
-/** 侧栏选中项：全部 / 未分组 / 某个分组（点分组 = 看到该子树内的收藏） */
+/** 侧栏选中项：全部 / 默认分组（group_id 为空的虚拟分组）/ 某个分组（点分组 = 看到该子树内的收藏） */
 export type GroupSelection = { kind: 'all' } | { kind: 'ungrouped' } | { kind: 'group'; id: number }
 
 interface Props {
@@ -166,7 +166,7 @@ export default function GroupTree({
         <Row
           active={selected.kind === 'ungrouped'}
           icon={<InboxOutlined />}
-          name="未分组"
+          name="默认分组"
           count={ungroupedCount}
           onClick={() => onSelect({ kind: 'ungrouped' })}
         />

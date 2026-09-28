@@ -35,7 +35,7 @@ interface Props {
   onSubmit: (values: BookmarkFormValues) => void
 }
 
-/** 分组下拉的可选项（缩进体现层级，未分组单列） */
+/** 分组下拉的可选项（缩进体现层级，默认分组单列） */
 function groupOptions(groups: BookmarkGroup[], depth = 0): { value: number; label: string }[] {
   return groups.flatMap((g) => [
     { value: g.id, label: `${'　'.repeat(depth)}${g.name}` },
@@ -128,7 +128,7 @@ export default function BookmarkDrawer({
         <Form.Item name="groupId" label="分组">
           <Select
             allowClear
-            placeholder="未分组"
+            placeholder="默认分组"
             options={groupOptions(groups)}
             style={{ maxWidth: 320 }}
           />

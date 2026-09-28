@@ -81,7 +81,7 @@ const STATUS_OPTIONS = [
   { value: 'UNKNOWN', label: '未探测' },
 ]
 
-/** 分组下拉的可选项（缩进体现层级；未分组用 null） */
+/** 分组下拉的可选项（缩进体现层级；默认分组用 null） */
 function groupOptions(groups: BookmarkGroup[], depth = 0): { value: number; label: string }[] {
   return groups.flatMap((g) => [
     { value: g.id, label: `${'　'.repeat(depth)}${g.name}` },
@@ -331,7 +331,7 @@ export default function BookmarksPage() {
       title: `删除分组「${g.name}」？`,
       content: (
         <Space direction="vertical" size={4}>
-          <span>组内收藏默认移到「未分组」，子分组上提一级。</span>
+          <span>组内收藏默认移到「默认分组」，子分组上提一级。</span>
           <label>
             <input type="checkbox" onChange={(e) => (cascade = e.target.checked)} /> 连组内收藏一起删（含子分组，不可恢复）
           </label>
@@ -342,7 +342,7 @@ export default function BookmarksPage() {
       onOk: () =>
         deleteGroup(g.id, cascade)
           .then(() => {
-            message.success(cascade ? '已级联删除' : '已删除，组内收藏移入未分组')
+            message.success(cascade ? '已级联删除' : '已删除，组内收藏移入默认分组')
             if (sel.kind === 'group' && sel.id === g.id) setSel({ kind: 'all' })
             return Promise.all([reloadGroups(), fetchMine(true)])
           })
@@ -488,7 +488,7 @@ export default function BookmarksPage() {
   const ungroupedCount = allRows.filter((b) => b.groupId == null).length
   const canBatch = view === 'mine' && viewMode === 'table' && selectedKeys.length > 0
 
-  const groupNameOf = (b: Bookmark) => flatten(groups).find((g) => g.id === b.groupId)?.name ?? '未分组'
+  const groupNameOf = (b: Bookmark) => flatten(groups).find((g) => g.id === b.groupId)?.name ?? '默认分组'
   const startCreate = () => {
     setEditing(null)
     setDrawerOpen(true)
@@ -858,7 +858,7 @@ export default function BookmarksPage() {
         <Select
           allowClear
           style={{ width: '100%' }}
-          placeholder="未分组"
+          placeholder="默认分组"
           value={moveTarget}
           onChange={(v) => setMoveTarget(v ?? null)}
           options={groupOptions(groups)}
@@ -882,7 +882,7 @@ export default function BookmarksPage() {
           <Select
             allowClear
             style={{ width: '100%' }}
-            placeholder="落到未分组"
+            placeholder="落到默认分组"
             value={copyGroup}
             onChange={(v) => setCopyGroup(v ?? null)}
             options={groupOptions(groups)}
