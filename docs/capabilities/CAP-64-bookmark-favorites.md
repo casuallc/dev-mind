@@ -209,4 +209,6 @@ POST   /api/bookmarks/shared-with-me/copy   {bookmarkId, groupId|null}（复制�
   5. 探测异常归一为 8 字符内同义码（DNS/CONNECT/SSL/TIMEOUT/IO/ERROR）落 `last_status_code`；
      DNS 判定必须先于 CONNECT——JDK HttpClient 把域名解析失败包成
      `ConnectException → UnresolvedAddressException`，只认 ConnectException 会误判；
-  6. 分享目标用户以用户名文本录入（平台暂无普通用户列表端点，CAP-61 菜单/用户体系就绪后可换选择器）。
+  6. 分享目标用户以用户名文本录入（平台暂无普通用户列表端点，CAP-61 菜单/用户体系就绪后可换选择器）；
+  7. 前端将 `group_id` 为空的集合统称「默认分组」（虚拟分组，非实体分组行，不可重命名/分享/删除）；
+     存储与 API 口径不变（`group_id IS NULL` / `ungrouped=true`）。
