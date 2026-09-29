@@ -40,7 +40,8 @@ const rowStyle = (active: boolean): CSSProperties => ({
 })
 
 const nameStyle: CSSProperties = {
-  flex: 1,
+  // 不 flex:1：短名称时计数紧跟名字（全部收藏（2）），长名称只截断自身、计数不被压缩
+  flex: '0 1 auto',
   minWidth: 0,
   overflow: 'hidden',
   textOverflow: 'ellipsis',
@@ -77,11 +78,10 @@ function Row({
     >
       <span style={iconStyle}>{icon}</span>
       <Tooltip title={name} mouseEnterDelay={0.4}>
-        <span style={nameStyle}>
-          {name}
-          {count != null && count > 0 && <span style={countStyle}>（{count}）</span>}
-        </span>
+        <span style={nameStyle}>{name}</span>
       </Tooltip>
+      {count != null && count > 0 && <span style={countStyle}>（{count}）</span>}
+      <span style={{ flex: 1 }} />
       {actions}
     </div>
   )
