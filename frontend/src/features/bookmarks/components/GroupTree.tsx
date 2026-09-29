@@ -77,9 +77,11 @@ function Row({
     >
       <span style={iconStyle}>{icon}</span>
       <Tooltip title={name} mouseEnterDelay={0.4}>
-        <span style={nameStyle}>{name}</span>
+        <span style={nameStyle}>
+          {name}
+          {count != null && count > 0 && <span style={countStyle}>（{count}）</span>}
+        </span>
       </Tooltip>
-      {count != null && count > 0 && <span style={countStyle}>{count}</span>}
       {actions}
     </div>
   )
@@ -185,14 +187,21 @@ export default function GroupTree({
           </Empty>
         ) : (
           <div
-            className="bm-group-row"
-            style={{ ...rowStyle(false), color: '#8c8c8c' }}
+            className="bm-new-group"
+            style={{
+              marginTop: 4,
+              height: 32,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: '1px dashed #d9d9d9',
+              borderRadius: 6,
+              cursor: 'pointer',
+              color: '#8c8c8c',
+            }}
             onClick={() => onCreate(null)}
           >
-            <span style={iconStyle}>
-              <FolderAddOutlined />
-            </span>
-            <span style={nameStyle}>新建分组</span>
+            新建分组
           </div>
         )}
       </div>

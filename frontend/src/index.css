@@ -258,3 +258,4 @@ html, body, #root {
 .bm-group-row .bm-row-actions { opacity: 0; transition: opacity .15s; }
 .bm-group-row:hover .bm-row-actions { opacity: 1; }
 .bm-card:hover { border-color: #91caff !important; box-shadow: 0 2px 8px rgba(0, 0, 0, .08); }
+.bm-new-group:hover { color: #1677ff; border-color: #91caff !important; }
