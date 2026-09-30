@@ -204,6 +204,11 @@ public class AgentNodeService {
         } else if (req.proxyScopes() != null && e.getProxyUrl() != null) {
             e.setProxyScopes(normalizeProxyScopes(req.proxyScopes()));
         }
+        // CAP-65：fileRoots 全量语义——null = 不动，空数组 = 清空（文件浏览不可用）；保存即时生效
+        // （下一个 file 帧即携带新白名单，无需 runner 重启）
+        if (req.fileRoots() != null) {
+            e.setFileRoots(AgentFileRoots.toJson(AgentFileRoots.validate(req.fileRoots())));
+        }
         return AgentNodeView.from(repo.save(e));
     }
 

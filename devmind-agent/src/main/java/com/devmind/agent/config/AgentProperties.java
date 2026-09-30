@@ -18,6 +18,10 @@ public class AgentProperties {
     private long upgradeAckTimeoutMs = 120_000;
     /** runner 包托管目录（相对应用工作目录，与 H2 data/ 同根） */
     private String runnerPackageDir = "data/agent-runner";
+    /** CAP-65：文件中转临时目录（相对应用工作目录；上传暂存 + 下载落盘，用后即删 + 过期 GC） */
+    private String fileTransferDir = "data/file-transfers";
+    /** CAP-65：中转临时文件过期时间（毫秒），超时未完成的传输由 GC 清理 */
+    private long fileTransferExpireMs = 600_000;
 
     public long getHeartbeatTimeoutMs() { return heartbeatTimeoutMs; }
     public void setHeartbeatTimeoutMs(long heartbeatTimeoutMs) { this.heartbeatTimeoutMs = heartbeatTimeoutMs; }
@@ -29,4 +33,8 @@ public class AgentProperties {
     public void setUpgradeAckTimeoutMs(long upgradeAckTimeoutMs) { this.upgradeAckTimeoutMs = upgradeAckTimeoutMs; }
     public String getRunnerPackageDir() { return runnerPackageDir; }
     public void setRunnerPackageDir(String runnerPackageDir) { this.runnerPackageDir = runnerPackageDir; }
+    public String getFileTransferDir() { return fileTransferDir; }
+    public void setFileTransferDir(String fileTransferDir) { this.fileTransferDir = fileTransferDir; }
+    public long getFileTransferExpireMs() { return fileTransferExpireMs; }
+    public void setFileTransferExpireMs(long fileTransferExpireMs) { this.fileTransferExpireMs = fileTransferExpireMs; }
 }

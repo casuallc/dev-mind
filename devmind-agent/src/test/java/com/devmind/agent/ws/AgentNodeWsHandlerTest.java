@@ -25,7 +25,8 @@ class AgentNodeWsHandlerTest {
         AgentNodeService nodeService = mock(AgentNodeService.class);
         AgentConnectionRegistry registry = mock(AgentConnectionRegistry.class);
         AgentNodeWsHandler handler = new AgentNodeWsHandler(nodeService, registry,
-                mock(AgentConnLogService.class), JsonMapper.builder().build());
+                mock(AgentConnLogService.class), JsonMapper.builder().build(),
+                mock(org.springframework.beans.factory.ObjectProvider.class));
 
         AgentNodeEntity node = new AgentNodeEntity();
         node.setId(3L);
@@ -61,7 +62,8 @@ class AgentNodeWsHandlerTest {
         AgentNodeService nodeService = mock(AgentNodeService.class);
         AgentConnectionRegistry registry = mock(AgentConnectionRegistry.class);
         AgentNodeWsHandler handler = new AgentNodeWsHandler(nodeService, registry,
-                mock(AgentConnLogService.class), JsonMapper.builder().build());
+                mock(AgentConnLogService.class), JsonMapper.builder().build(),
+                mock(org.springframework.beans.factory.ObjectProvider.class));
 
         AgentNodeEntity node = new AgentNodeEntity();
         node.setId(7L);
@@ -83,7 +85,8 @@ class AgentNodeWsHandlerTest {
         AgentConnectionRegistry registry = mock(AgentConnectionRegistry.class);
         AgentConnLogService connLogService = mock(AgentConnLogService.class);
         AgentNodeWsHandler handler = new AgentNodeWsHandler(nodeService, registry,
-                connLogService, JsonMapper.builder().build());
+                connLogService, JsonMapper.builder().build(),
+                mock(org.springframework.beans.factory.ObjectProvider.class));
 
         when(nodeService.resolveByToken("bad")).thenReturn(java.util.Optional.empty());
         WebSocketSession session = mock(WebSocketSession.class);

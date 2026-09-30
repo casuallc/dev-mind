@@ -47,6 +47,10 @@ public class AgentNodeEntity {
     @Column(name = "proxy_scopes", length = 64)
     private String proxyScopes;
 
+    /** CAP-65：文件访问根目录白名单（JSON 数组串，元素为节点侧绝对路径；null/空 = 文件浏览不可用） */
+    @Column(name = "file_roots", length = 4096)
+    private String fileRoots;
+
     /** 可用 agent 种类（逗号分隔，如 "claude"） */
     @Column(length = 256)
     private String capabilities;
@@ -97,6 +101,8 @@ public class AgentNodeEntity {
     public void setProxyUrl(String proxyUrl) { this.proxyUrl = proxyUrl; }
     public String getProxyScopes() { return proxyScopes; }
     public void setProxyScopes(String proxyScopes) { this.proxyScopes = proxyScopes; }
+    public String getFileRoots() { return fileRoots; }
+    public void setFileRoots(String fileRoots) { this.fileRoots = fileRoots; }
     public String getCapabilities() { return capabilities; }
     public void setCapabilities(String capabilities) { this.capabilities = capabilities; }
     public String getRunnerVersion() { return runnerVersion; }

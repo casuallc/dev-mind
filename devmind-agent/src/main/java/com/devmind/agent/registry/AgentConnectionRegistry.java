@@ -11,6 +11,8 @@ import com.devmind.common.agent.AgentEventFrame;
 import com.devmind.common.agent.AgentEventListener;
 import com.devmind.common.agent.AgentExecCommand;
 import com.devmind.common.agent.AgentExecResult;
+import com.devmind.common.agent.AgentFileRequest;
+import com.devmind.common.agent.AgentFileResult;
 import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.AgentPkgCommand;
@@ -108,6 +110,10 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private record TerminalCompleteWaiter(String nodeId, CompletableFuture<TerminalCompleteResult> done) {
     }
 
+    /** CAP-65 file 等待者（节点文件浏览 op，阻塞等 file_ack）。 */
+    private record FileWaiter(String nodeId, CompletableFuture<AgentFileResult> done) {
+    }
+
     private final AgentNodeService nodeService;
     private final AgentProperties props;
     private final ObjectMapper mapper;
@@ -145,6 +151,8 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private final Map<String, ProcWaiter> pendingProcs = new ConcurrentHashMap<>();
     /** requestId → pkg 等待者（CAP-57 安装包分发） */
     private final Map<String, PkgWaiter> pendingPkgs = new ConcurrentHashMap<>();
+    /** requestId → file 等待者（CAP-65 节点文件浏览） */
+    private final Map<String, FileWaiter> pendingFiles = new ConcurrentHashMap<>();
 
     public AgentConnectionRegistry(AgentNodeService nodeService, AgentProperties props,
                                    ObjectMapper mapper, ObjectProvider<AgentEventListener> listenerProvider,
@@ -248,6 +256,12 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         for (Map.Entry<String, PkgWaiter> e : pendingPkgs.entrySet()) {
             if (e.getValue().nodeId().equals(nodeId) && pendingPkgs.remove(e.getKey(), e.getValue())) {
                 e.getValue().done().complete(AgentPkgResult.fail("节点断连，安装包分发中断"));
+            }
+        }
+        // CAP-65：断线即失败该节点进行中的文件操作（ack 不会再来）
+        for (Map.Entry<String, FileWaiter> e : pendingFiles.entrySet()) {
+            if (e.getValue().nodeId().equals(nodeId) && pendingFiles.remove(e.getKey(), e.getValue())) {
+                e.getValue().done().complete(AgentFileResult.failed("节点断连，文件操作中断"));
             }
         }
         // CAP-30：事件广播（原 getIfAvailable 单实现，chat 加入后有多实现）——各 bridge
@@ -415,6 +429,16 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         PkgWaiter w = pendingPkgs.remove(requestId);
         if (w != null) {
             w.done().complete(ok ? AgentPkgResult.ok(installDir) : AgentPkgResult.fail(error));
+        }
+    }
+
+    /** CAP-65：file_ack 上行帧 → 完成等待 future。 */
+    public void onFileAck(String nodeId, String requestId, boolean ok,
+                          Map<String, Object> payload, String error) {
+        touch(nodeId);
+        FileWaiter w = pendingFiles.remove(requestId);
+        if (w != null) {
+            w.done().complete(ok ? AgentFileResult.ok(payload) : AgentFileResult.failed(error));
         }
     }
 
@@ -1166,6 +1190,92 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("type", "terminal_cancel");
         frame.put("sessionId", sessionId);
         send(ws, frame);
+    }
+
+    /** CAP-65：write/read 文本上限（512KB，与 WS 缓冲同档）；upload/download 走 HTTP 中转（100MB）。 */
+    static final long FILE_TEXT_CAP = 512L * 1024;
+    static final long FILE_TRANSFER_CAP = 100L * 1024 * 1024;
+
+    /**
+     * CAP-65：下发 file 帧并阻塞等 file_ack（镜像 workspaceQuery 模式）。白名单权威在服务端 DB：
+     * 组帧时从节点行读出 roots 全量随帧下发（runner 不做本地配置），并先做一道 root 命中与
+     * 大小预检（超限直接 400/409 不发帧）；runner 侧还会再校验一道（防直连 WS 伪造帧）。
+     * 协议门控：runner 低于 v18 直接 409 提示升级。等待上限：upload/download 300s（100MB 中转
+     * + 余量），其余 30s。
+     * 红线：组帧每个字段都必须 put，配套 AgentConnectionRegistryFileTest 钉死。
+     */
+    @Override
+    public AgentFileResult file(String nodeId, AgentFileRequest req) {
+        WebSocketSession ws = requireConnection(nodeId); // 先判在线再判版本，同 workspaceQuery
+        if (!supports(nodeId, AgentProtocol.FILE_FRAMES)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 的 runner 协议版本过低（文件浏览需 v"
+                            + AgentProtocol.FILE_FRAMES + "+），请到节点页升级 runner");
+        }
+        if (req == null || req.op() == null || !AgentFileRequest.ALL_OPS.contains(req.op())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "未知文件操作: " + (req == null ? null : req.op()));
+        }
+        AgentNodeEntity node = nodeService.require(Long.parseLong(nodeId));
+        List<String> roots = com.devmind.agent.service.AgentFileRoots.parse(node.getFileRoots());
+        if (roots.isEmpty()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点未配置文件访问根目录白名单，请先在节点详情配置（留空 = 文件浏览不可用）");
+        }
+        if (!com.devmind.agent.service.AgentFileRoots.containsRoot(roots, req.root())) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "root 不在节点文件访问白名单内: " + req.root());
+        }
+        // 大小服务端预检（runner 侧还会再校验一道）
+        if (AgentFileRequest.OP_WRITE.equals(req.op()) && req.content() != null
+                && req.content().getBytes(java.nio.charset.StandardCharsets.UTF_8).length > FILE_TEXT_CAP) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "文本保存超限（>512KB），请改用上传");
+        }
+        if (AgentFileRequest.OP_UPLOAD.equals(req.op())
+                && req.size() != null && req.size() > FILE_TRANSFER_CAP) {
+            throw new DevMindException(ErrorCode.CONFLICT, "上传文件超限（>100MB）");
+        }
+        String requestId = "fa-" + System.currentTimeMillis() + "-" + req.op();
+        CompletableFuture<AgentFileResult> done = new CompletableFuture<>();
+        pendingFiles.put(requestId, new FileWaiter(nodeId, done));
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "file");
+        frame.put("requestId", requestId);
+        frame.put("op", req.op());
+        frame.put("root", req.root() == null ? "" : req.root());
+        frame.put("path", req.path() == null ? "" : req.path());
+        frame.put("roots", roots); // DB 权威白名单全量下发（FR-01 信任模型）
+        if (req.newName() != null) {
+            frame.put("newName", req.newName());
+        }
+        if (req.content() != null) {
+            frame.put("content", req.content());
+        }
+        if (req.recursive() != null) {
+            frame.put("recursive", req.recursive());
+        }
+        if (req.transferId() != null) {
+            frame.put("transferId", req.transferId());
+        }
+        if (req.size() != null) {
+            frame.put("size", req.size());
+        }
+        if (req.sha256() != null) {
+            frame.put("sha256", req.sha256());
+        }
+        boolean transfer = AgentFileRequest.OP_UPLOAD.equals(req.op())
+                || AgentFileRequest.OP_DOWNLOAD.equals(req.op());
+        try {
+            send(ws, frame);
+            return done.get(transfer ? 300 : 30, TimeUnit.SECONDS);
+        } catch (DevMindException e) {
+            throw e;
+        } catch (java.util.concurrent.TimeoutException e) {
+            return AgentFileResult.failed("等待 runner file_ack 超时（runner 无响应）");
+        } catch (Exception e) {
+            throw new DevMindException(ErrorCode.CONFLICT, "文件操作下发异常: " + e.getMessage(), e);
+        } finally {
+            pendingFiles.remove(requestId);
+        }
     }
 
     /** 非强制升级（force=false），等价于 {@link #sendUpgrade(Long, String, String, long, boolean)}。 */    public UpgradeAck sendUpgrade(Long nodeDbId, String version, String sha256, long sizeBytes) {

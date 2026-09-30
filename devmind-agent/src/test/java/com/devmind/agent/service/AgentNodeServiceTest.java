@@ -94,15 +94,15 @@ class AgentNodeServiceTest {
         AgentNodeEntity a = addNode(1L, AgentNodeService.STATUS_ONLINE);
         // 合法 URL + 空 scope → 默认 git
         service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest(
-                null, "http://127.0.0.1:8443", null));
+                null, "http://127.0.0.1:8443", null, null));
         assertEquals("http://127.0.0.1:8443", a.getProxyUrl());
         assertEquals("git", a.getProxyScopes());
         // 白名单子集保序去重
         service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest(
-                null, null, "claude,git,claude"));
+                null, null, "claude,git,claude", null));
         assertEquals("claude,git", a.getProxyScopes());
         // 清空 URL → 连 scope 一起清
-        service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest(null, "", null));
+        service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest(null, "", null, null));
         assertNull(a.getProxyUrl());
         assertNull(a.getProxyScopes());
     }
@@ -111,15 +111,15 @@ class AgentNodeServiceTest {
     void proxyUrlRejectsBadSchemeUserinfoAndEmptyHost() {
         addNode(1L, AgentNodeService.STATUS_ONLINE);
         assertThrows(DevMindException.class, () -> service.update(1L,
-                new com.devmind.agent.dto.UpdateAgentNodeRequest(null, "socks5://127.0.0.1:1080", null)));
+                new com.devmind.agent.dto.UpdateAgentNodeRequest(null, "socks5://127.0.0.1:1080", null, null)));
         DevMindException userinfo = assertThrows(DevMindException.class, () -> service.update(1L,
-                new com.devmind.agent.dto.UpdateAgentNodeRequest(null, "http://u:p@127.0.0.1:8443", null)));
+                new com.devmind.agent.dto.UpdateAgentNodeRequest(null, "http://u:p@127.0.0.1:8443", null, null)));
         assertTrue(userinfo.getMessage().contains("userinfo"), userinfo.getMessage());
         assertThrows(DevMindException.class, () -> service.update(1L,
-                new com.devmind.agent.dto.UpdateAgentNodeRequest(null, "http://", null)));
+                new com.devmind.agent.dto.UpdateAgentNodeRequest(null, "http://", null, null)));
         // 未知 scope
         assertThrows(DevMindException.class, () -> service.update(1L,
-                new com.devmind.agent.dto.UpdateAgentNodeRequest(null, "http://127.0.0.1:8443", "git,ssh")));
+                new com.devmind.agent.dto.UpdateAgentNodeRequest(null, "http://127.0.0.1:8443", "git,ssh", null)));
     }
 
     @Test
@@ -127,9 +127,38 @@ class AgentNodeServiceTest {
         // labels-only 更新（proxyUrl=null）不动已有代理配置
         AgentNodeEntity a = addNode(1L, AgentNodeService.STATUS_ONLINE);
         service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest(
-                null, "http://127.0.0.1:8443", "git"));
-        service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest("windows", null, null));
+                null, "http://127.0.0.1:8443", "git", null));
+        service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest("windows", null, null, null));
         assertEquals("windows", a.getLabels());
         assertEquals("http://127.0.0.1:8443", a.getProxyUrl(), "labels 编辑不应清掉代理配置");
+    }
+
+    // ---- CAP-65 文件访问根目录白名单 ----
+
+    @Test
+    void fileRootsFullReplaceNullUntouchedEmptyClears() {
+        AgentNodeEntity a = addNode(1L, AgentNodeService.STATUS_ONLINE);
+        // 非空 → 校验 + JSON 落库
+        var view = service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest(
+                null, null, null, List.of("D:/data", "/var/log")));
+        assertEquals(List.of("D:/data", "/var/log"), view.fileRoots());
+        assertTrue(a.getFileRoots().contains("D:/data"));
+        // null = 不动
+        service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest("gpu", null, null, null));
+        assertEquals(List.of("D:/data", "/var/log"), AgentFileRoots.parse(a.getFileRoots()),
+                "fileRoots 字段缺席不应动已有白名单");
+        // 空数组 = 清空（落 null）
+        var cleared = service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest(
+                null, null, null, List.of()));
+        assertNull(cleared.fileRoots());
+        assertNull(a.getFileRoots());
+    }
+
+    @Test
+    void fileRootsValidationPropagates() {
+        addNode(1L, AgentNodeService.STATUS_ONLINE);
+        assertThrows(DevMindException.class, () -> service.update(1L,
+                new com.devmind.agent.dto.UpdateAgentNodeRequest(
+                        null, null, null, List.of("relative/path"))));
     }
 }

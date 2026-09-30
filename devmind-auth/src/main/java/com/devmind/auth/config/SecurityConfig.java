@@ -63,6 +63,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/agent/decision-lab/**").permitAll()
                         // CAP-57：分类安装包拉取 permitAll 放行，节点 token 由控制器内判定
                         .requestMatchers(HttpMethod.GET, "/api/agent/classify/**").permitAll()
+                        // CAP-65：文件中转端点 permitAll 放行，节点 token 由控制器内判定（归属校验在控制器）
+                        .requestMatchers(HttpMethod.GET, "/api/agent/files-transfer/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/agent/files-transfer/**").permitAll()
                         // CAP-37 FR-01：会话产出上传 permitAll 放行，节点 token 由控制器内判定
                         .requestMatchers(HttpMethod.POST, "/api/agent/output/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/agent-nodes", "/api/agent-nodes/**").hasRole("ADMIN")
@@ -80,6 +83,8 @@ public class SecurityConfig {
                         .hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/model-endpoints/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/model-endpoints/**").hasRole("ADMIN")
+                        // CAP-65：节点文件浏览 GET 也敏感（可读白名单内任意文件），须先于 GET /api/** 通用规则
+                        .requestMatchers(HttpMethod.GET, "/api/agent-nodes/*/files/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/**").authenticated()
                         // CAP-29：全局仓库登记写操作仅 ADMIN（含 fetch/clone 触发）；GET 走上方全认证
                         .requestMatchers(HttpMethod.POST, "/api/repos", "/api/repos/**").hasRole("ADMIN")

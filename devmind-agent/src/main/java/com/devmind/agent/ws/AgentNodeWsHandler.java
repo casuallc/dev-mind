@@ -39,13 +39,17 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
     private final AgentConnectionRegistry registry;
     private final AgentConnLogService connLogService;
     private final ObjectMapper mapper;
+    /** CAP-65：节点断连时作废其未完成文件中转（临时文件清理） */
+    private final org.springframework.beans.factory.ObjectProvider<com.devmind.agent.service.FileTransferStore> fileTransferStore;
 
     public AgentNodeWsHandler(AgentNodeService nodeService, AgentConnectionRegistry registry,
-                              AgentConnLogService connLogService, ObjectMapper mapper) {
+                              AgentConnLogService connLogService, ObjectMapper mapper,
+                              org.springframework.beans.factory.ObjectProvider<com.devmind.agent.service.FileTransferStore> fileTransferStore) {
         this.nodeService = nodeService;
         this.registry = registry;
         this.connLogService = connLogService;
         this.mapper = mapper;
+        this.fileTransferStore = fileTransferStore;
     }
 
     @Override
@@ -203,6 +207,15 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
                     frame.path("stderr").asText(""), frame.path("cwd").asText(null),
                     frame.path("timedOut").asBoolean(false), frame.path("cancelled").asBoolean(false),
                     frame.path("error").asText(null));
+            // CAP-65：节点文件操作 ack（payload 结构随 op 各异，原样透传）
+            case "file_ack" -> {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> payload = frame.has("payload")
+                        ? mapper.convertValue(frame.path("payload"), Map.class) : Map.of();
+                registry.onFileAck(String.valueOf(node.getId()),
+                        frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),
+                        payload, frame.path("error").asText(null));
+            }
             // CAP-59：终端 Tab 补全 ack
             case "terminal_complete_ack" -> {
                 List<String> candidates = new ArrayList<>();
@@ -226,6 +239,8 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
         AgentNodeEntity node = (AgentNodeEntity) session.getAttributes().get(ATTR_NODE);
         if (node != null) {
             registry.onDisconnect(node, session);
+            // CAP-65：作废该节点未完成的中转（临时文件用后即删兜底之外的断连兜底）
+            fileTransferStore.ifAvailable(s -> s.onNodeDisconnect(String.valueOf(node.getId())));
         }
     }
 
