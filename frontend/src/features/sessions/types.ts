@@ -24,6 +24,14 @@ export interface SessionSummary {
   createdBy?: string
   /** CAP-42：固定工作区收口状态（OPEN=占用中 / FINALIZED=已收口；空 = 旧会话或非代码会话） */
   workspaceState?: string | null
+  /** 用量账本：累计成本（null = 历史会话或老 runner 无上报，下同） */
+  costUsd?: number | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+  cacheReadTokens?: number | null
+  cacheCreationTokens?: number | null
+  /** 已入账回合数 */
+  turnCount?: number | null
   createdAt: string
   updatedAt: string
   finishedAt?: string

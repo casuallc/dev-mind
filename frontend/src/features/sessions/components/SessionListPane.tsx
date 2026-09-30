@@ -5,7 +5,7 @@ import { Button, Empty, Input, List, Select, Tag, Typography, theme } from 'antd
 import { PlusOutlined } from '@ant-design/icons'
 import type { SessionSummary } from '../types'
 import { stateColor, ACTIVE_STATES, STATE_OPTIONS } from '../stateMeta'
-import { fmtTime } from '../../../shared/utils/format'
+import { fmtTime, usageText } from '../../../shared/utils/format'
 
 export default function SessionListPane({
   sessions,
@@ -133,6 +133,7 @@ export default function SessionListPane({
             )}
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               {fmtTime(s.createdAt)}
+              {usageText(s) && ` · ${usageText(s)}`}
             </Typography.Text>
           </div>
         )}

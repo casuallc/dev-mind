@@ -29,4 +29,12 @@ export interface ChatSummary {
   modelEndpointName?: string | null
   /** CAP-49：端点当时配置的模型名 */
   modelEndpointModel?: string | null
+  /** 用量账本：累计成本（null = 历史问答或无用量上报的执行体，下同） */
+  costUsd?: number | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+  cacheReadTokens?: number | null
+  cacheCreationTokens?: number | null
+  /** 已入账回合数 */
+  turnCount?: number | null
 }

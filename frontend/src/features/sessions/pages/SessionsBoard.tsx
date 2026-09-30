@@ -1,7 +1,7 @@
 // 会话工作台：默认对话视图（左侧会话列表 + 右侧对话交互，类聊天应用），可切换表格列表视图。
 // CAP-39：会话详情页已裁撤——产出推送/更多操作（上下文/沉淀/清理 worktree）均在操作条，深链 /sessions?sid=<id>。
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Badge, Button, Card, Input, Modal, Segmented, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Badge, Button, Card, Input, Modal, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   CaretRightOutlined,
@@ -27,7 +27,7 @@ import SessionMoreActions from '../components/SessionMoreActions'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
 import { syncSessionReports } from '../../worklog/api'
-import { fmtTime } from '../../../shared/utils/format'
+import { fmtTime, fmtTokens, usageText } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { showError } from '../../../shared/utils/showError'
@@ -241,6 +241,22 @@ export default function SessionsBoard({
       dataIndex: 'summary',
       ellipsis: true,
       render: (s?: string) => s?.slice(0, 80) || '-',
+    },
+    {
+      title: '用量',
+      key: 'usage',
+      width: 150,
+      render: (_, r) => {
+        const text = usageText(r)
+        if (!text) return '-'
+        const detail = [
+          `输入 ${fmtTokens(r.inputTokens)} / 输出 ${fmtTokens(r.outputTokens)}`,
+          `缓存读 ${fmtTokens(r.cacheReadTokens)} / 缓存写 ${fmtTokens(r.cacheCreationTokens)}`,
+        ].join('\n')
+        return (
+          <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{detail}</span>}>{text}</Tooltip>
+        )
+      },
     },
     {
       title: '创建时间',

@@ -5,7 +5,7 @@ import { Button, Empty, Input, List, Select, Tag, Typography, theme } from 'antd
 import { PlusOutlined } from '@ant-design/icons'
 import type { ChatSummary } from '../types'
 import { stateColor, ACTIVE_STATES, STATE_OPTIONS } from '../../../shared/chat/stateMeta'
-import { fmtTime } from '../../../shared/utils/format'
+import { fmtTime, usageText } from '../../../shared/utils/format'
 
 export default function ChatListPane({
   chats,
@@ -111,6 +111,7 @@ export default function ChatListPane({
               {c.executor === 'MODEL' ? `模型 · ${c.modelEndpointName ?? `端点#${c.modelEndpointId ?? '?'}`}` : 'Agent'}
               {' · '}
               {fmtTime(c.createdAt)}
+              {usageText(c) && ` · ${usageText(c)}`}
             </Typography.Text>
           </div>
         )}
