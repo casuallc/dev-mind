@@ -43,13 +43,13 @@
 
 ### 2.4 断线语义
 - **断线期间上行帧丢弃**，重连后 `hello.activeSessions` 对账兜底（服务端据此把僵尸会话判 FAILED）。
-- 断连时服务端把该节点所有**等待中的请求-应答对**批量失败（exec/collect/push/finalize/release/query/proc/pkg/terminal）。
+- 断连时服务端把该节点所有**等待中的请求-应答对**批量失败（exec/collect/push/finalize/release/query/proc/pkg/terminal/file）；file 等待器失败同时使对应中转 transfer 失效（FR-03）。
 - 出口串行化（CAP-50）：runner 所有上行帧入队由**单条写线程**顺序落线（JDK WS 并发 sendText 会静默丢帧——丢 exit = 会话永久卡 RUNNING）。队列上限 10000，单帧写超时 10s。Go 实现同样必须保证上行帧顺序与可靠落线。
 
 ## 3. 协议版本协商
 
 - runner 在 `hello.protocolVersion` 上报版本；缺席按 **v1** 对待（`DEFAULT_WHEN_ABSENT`）。
-- 当前版本 **CURRENT = 17**（`AgentProtocol`）。
+- 当前版本 **CURRENT = 18**（`AgentProtocol`）。
 - 门控原则：**「必须认识」的帧/字段**在服务端 `supports(nodeId, v)` 拦截，不达标直接 409 引导升级（不静默发送）；**可选字段**不门控，老 runner 忽略即优雅降级。
 - 版本史（详见 `AgentProtocol` javadoc）：
 
@@ -72,6 +72,7 @@
 | v15 | CAP-57 | proc/proc_ack + pkg/pkg_ack（**门控**） |
 | v16 | CAP-58 | terminal_exec/terminal_exec_ack（**门控**） |
 | v17 | CAP-59 | terminal_complete + terminal_cancel（**门控**）；terminal_exec_ack 增 cancelled（可选，不门控） |
+| v18 | CAP-65 | file/file_ack（节点文件浏览器，**门控**——roots 全量随帧下发，大文件走 HTTP 中转 `files-transfer`） |
 
 ## 4. 下行帧（server → runner）
 
@@ -170,6 +171,11 @@ installDir 同样收容于 classify/ 根。ack：`{requestId, ok, installDir?(�
 ack：`{requestId, ok, word, candidates[](≤100, 目录带/后缀)|error?}`。
 
 ### 4.14 `terminal_cancel`（v17+，fire-and-forget）
+
+### 4.15 `file` ⏳ v18+（ack: `file_ack`，超时 `fileAckTimeoutMs`）
+CAP-65 节点文件浏览器。`{type:"file", requestId, op, root, path, newName?, recursive?, content?, transferId?, size?, sha256?, roots[]}`。
+`roots[]` 每帧携带**服务端 DB 全量白名单**（归一化精确匹配，runner 不持久化）。op：`list/read/write/rename/delete/upload/download`；
+upload/download（≤100MB）走 runner 主动 HTTP 中转（`GET/POST /api/agent/files-transfer/{id}?token=`，sha256 对账 + 原子落位），WS 只过指令与结果。安全边界（逃逸/越白名单/超限/二进制嗅探）服务端与 runner 双重校验。
 `{sessionId}`。整树杀该会话执行中的终端命令；进行中的 terminal_exec 以 `cancelled:true` 收口。
 
 ## 5. 上行帧（runner → server）
@@ -222,6 +228,7 @@ finalizer（push/清理）→ exit 帧。finalizer 失败不影响 exit 上行�
 | `pkg_ack` | pkg | `{requestId, ok, installDir?|error?}` |
 | `terminal_exec_ack` | terminal_exec | `{requestId, ok, exitCode, stdout, stderr, cwd, timedOut?, cancelled?(v17), error?}` |
 | `terminal_complete_ack` | terminal_complete | `{requestId, ok, word, candidates[], error?}` |
+| `file_ack` | file | `{requestId, ok, payload?(entries/content/size/sha256 按 op)|error?}` |
 
 ### 5.6 `workspace_status`（v11+，瞬态旁路，不门控）
 `{type:"workspace_status", sessionId, snapshot{}}`。事件触发（改文件类工具的 tool_result / 一轮 result）

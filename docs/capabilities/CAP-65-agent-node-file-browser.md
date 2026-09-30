@@ -176,3 +176,4 @@ WS 只过小 JSON 指令（≤512KB 场景），字节一律走 runner 主动发
 ## 7. 落地状态
 
 - **M1 —— 需求定稿**：本文档。
+- **M2 —— 全栈落地**（2026-09-30）：协议 v18（common DTO/SPI）+ 服务端（file_roots 白名单、file 帧调度与 FileWaiter、files REST、files-transfer 中转 + FileTransferStore、SecurityConfig 全端点 ADMIN 含 GET）+ runner（FileHandler 七类 op、双重逃逸/超限防御、HTTP 中转 sha256+原子落位）+ 前端（NodeDrawer 白名单编辑卡 + NodeFilesDrawer 浏览/预览编辑/改名/删除/上传下载）。验收全链见 `tests/cap65_e2e.py`（§6 十条全覆盖）。
