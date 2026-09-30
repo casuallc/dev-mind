@@ -202,6 +202,11 @@ public class WorkspaceQueryHandler {
      * realPath=true 时再经 toRealPath 防符号链接逃逸（目标必须存在）；深度 ≤{@link #MAX_DEPTH}。
      */
     static Path resolveConfined(Path base, String rel, boolean realPath) throws Exception {
+        return resolveConfined(base, rel, realPath, MAX_DEPTH);
+    }
+
+    /** 同 {@link #resolveConfined(Path, String, boolean)}，深度上限可配（CAP-65 文件浏览放到 32）。 */
+    static Path resolveConfined(Path base, String rel, boolean realPath, int maxDepth) throws Exception {
         Path baseNorm = base.toAbsolutePath().normalize();
         if (rel == null || rel.isBlank() || "/".equals(rel)) {
             return baseNorm;
@@ -211,8 +216,8 @@ public class WorkspaceQueryHandler {
             throw new IllegalStateException("只接受相对路径: " + rel);
         }
         long depth = clean.chars().filter(c -> c == '/').count() + 1;
-        if (depth > MAX_DEPTH) {
-            throw new IllegalStateException("路径深度超过上限 " + MAX_DEPTH + ": " + rel);
+        if (depth > maxDepth) {
+            throw new IllegalStateException("路径深度超过上限 " + maxDepth + ": " + rel);
         }
         Path p = baseNorm.resolve(clean).normalize();
         if (!p.startsWith(baseNorm)) {

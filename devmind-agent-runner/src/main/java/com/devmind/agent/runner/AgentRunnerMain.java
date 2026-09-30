@@ -114,6 +114,8 @@ public class AgentRunnerMain {
         // CAP-58：终端帧 handler（会话工作区单条命令执行；terminalAllowlist 缺省只读档）
         TerminalHandler terminalHandler = new TerminalHandler(config, sessions,
                 frame -> connRef[0].send(frame));
+        // CAP-65：file 帧 handler（节点文件浏览器——白名单内文件操作 + HTTP 中转上传下载）
+        FileHandler fileHandler = new FileHandler(config, frame -> connRef[0].send(frame));
 
         // CAP-34 FR-04：连接前先现场对账——强杀/崩溃残留的孤儿 claude 进程整树回收，
         // 无主目录登记（超龄删除归 FR-05 GC）。对账完再上线，hello 的 activeSessions 才是真实清单
@@ -143,7 +145,7 @@ public class AgentRunnerMain {
         ServerConnection conn = new ServerConnection(config, mapper,
                 frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, workspace,
                         execHandler, procHandler, pkgHandler, watcher, queryHandler, terminalHandler,
-                        connRef[0]),
+                        fileHandler, connRef[0]),
                 () -> connRef[0].send(helloFrame(sessions, version, workspaceBytes.get(),
                         config.labels(), toolchain.get())));
         connRef[0] = conn;
@@ -230,6 +232,7 @@ public class AgentRunnerMain {
                                     ExecHandler execHandler, ProcHandler procHandler, PkgHandler pkgHandler,
                                     WorkspaceWatcher watcher,
                                     WorkspaceQueryHandler queryHandler, TerminalHandler terminalHandler,
+                                    FileHandler fileHandler,
                                     ServerConnection conn) {
         // CAP-43：帧携带 proxy{url,scopes}（协议 v8+，节点配了外网代理才带）→ 刷新进程级
         // NodeProxy holder，git/claude/exec 三 scope 消费点直接读 holder；帧无此字段不动 holder
@@ -259,6 +262,7 @@ public class AgentRunnerMain {
             case "terminal_exec" -> terminalHandler.handle(frame); // CAP-58/59：终端单条命令执行（持久 shell）
             case "terminal_complete" -> terminalHandler.handleComplete(frame); // CAP-59：Tab 补全
             case "terminal_cancel" -> terminalHandler.handleCancel(frame); // CAP-59：取消执行中命令
+            case "file" -> fileHandler.handle(frame); // CAP-65：节点文件浏览（白名单内操作/中转）
             default -> log.debug("未知指令类型: {}", type);
         }
     }
