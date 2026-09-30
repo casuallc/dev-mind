@@ -20,6 +20,7 @@ import {
 } from 'antd'
 import {
   CodeOutlined,
+  FolderOpenOutlined,
   PlusOutlined,
   ReloadOutlined,
   RocketOutlined,
@@ -43,6 +44,7 @@ import type { AgentNode, IssuedNode, NodeActiveSession, RunnerPackage } from '..
 import RunnerPackagePanel from '../components/RunnerPackagePanel'
 import ConnLogsPanel from '../components/ConnLogsPanel'
 import ActiveSessionsCard, { activeSessionColumns } from '../components/ActiveSessionsCard'
+import NodeFilesDrawer from '../components/NodeFilesDrawer'
 import { buildLinuxInstallScript, buildWindowsInstallScript, downloadTextFile } from '../utils/installScript'
 import { fmtTime, fmtBytes } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
@@ -438,6 +440,10 @@ function NodeDrawer({
     setProxyUrlDraft(node.proxyUrl ?? '')
     setProxyScopesDraft(node.proxyScopes ? node.proxyScopes.split(',').filter(Boolean) : ['git'])
   }, [node.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  // CAP-65 文件访问根目录草稿：同 labels 的防轮询覆盖语义（每行一个绝对路径）
+  const [fileRootsDraft, setFileRootsDraft] = useState((node.fileRoots ?? []).join('\n'))
+  useEffect(() => setFileRootsDraft((node.fileRoots ?? []).join('\n')), [node.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  const [filesOpen, setFilesOpen] = useState(false)
   const outdated = !!(pkg && node.runnerVersion && node.runnerVersion !== pkg.version)
 
   // 强制升级弹窗：BUSY 时打开，异步拉活跃会话清单（null=加载中）
@@ -563,6 +569,15 @@ function NodeDrawer({
       onChanged()
     })
 
+  // CAP-65：每行一个绝对路径，空行忽略；全留空 = 清空白名单（文件浏览不可用）
+  const onSaveFileRoots = () =>
+    run(async () => {
+      const roots = fileRootsDraft.split('\n').map((l) => l.trim()).filter(Boolean)
+      await updateAgentNode(node.id, { fileRoots: roots })
+      message.success(roots.length ? `文件访问根目录已保存（${roots.length} 个）` : '文件访问根目录已清空，文件浏览不可用')
+      onChanged()
+    })
+
   const doDelete = () =>
     run(async () => {
       await deleteAgentNode(node.id)
@@ -671,6 +686,46 @@ function NodeDrawer({
             </Space>
           </Card>
 
+          <Card size="small" title="文件访问根目录（CAP-65）">
+            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+              <Typography.Text type="secondary">
+                每行一个绝对路径（Windows 如 D:/data，Linux 如 /var/log），最多 16 个。
+                文件浏览/读写仅限白名单根目录之内；<Typography.Text strong>留空 = 文件浏览不可用</Typography.Text>。
+                runner 协议版本需 ≥ v18（低于 v18 的操作会被服务端拒绝并提示升级）。
+              </Typography.Text>
+              <Input.TextArea
+                autoSize={{ minRows: 2, maxRows: 8 }}
+                placeholder={'D:/data\n/var/log'}
+                value={fileRootsDraft}
+                onChange={(e) => setFileRootsDraft(e.target.value)}
+              />
+              <Space>
+                <Button type="primary" onClick={onSaveFileRoots}>
+                  保存
+                </Button>
+                <Tooltip
+                  title={
+                    !(node.fileRoots?.length)
+                      ? '未配置文件访问根目录，文件浏览不可用'
+                      : node.status !== 'ONLINE'
+                        ? '节点不在线，无法浏览文件'
+                        : undefined
+                  }
+                >
+                  <span>
+                    <Button
+                      icon={<FolderOpenOutlined />}
+                      disabled={!(node.fileRoots?.length) || node.status !== 'ONLINE'}
+                      onClick={() => setFilesOpen(true)}
+                    >
+                      文件浏览
+                    </Button>
+                  </span>
+                </Tooltip>
+              </Space>
+            </Space>
+          </Card>
+
           <Card size="small" title="一键安装脚本">
             <Space direction="vertical" style={{ width: '100%' }} size={8}>
               <Typography.Text type="secondary">
@@ -749,6 +804,8 @@ function NodeDrawer({
           </Card>
         </Space>
       </Spin>
+
+      {filesOpen && <NodeFilesDrawer node={node} onClose={() => setFilesOpen(false)} />}
 
       {/* BUSY 后的强制升级确认：列出将被终止的活跃会话 */}
       <Modal

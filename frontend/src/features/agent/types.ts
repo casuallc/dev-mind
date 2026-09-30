@@ -24,6 +24,8 @@ export interface AgentNode {
   proxyUrl?: string
   /** 代理适用范围 CSV（git/claude/exec，CAP-43；配了代理空 scope 服务端默认 git） */
   proxyScopes?: string
+  /** 文件访问根目录白名单（CAP-65；空/缺席 = 文件浏览不可用） */
+  fileRoots?: string[]
   /** 活跃会话数（列表接口聚合各会话模块 SPI 填充；RUNNING/WAITING_INPUT/WAITING_AUTH 三态） */
   activeSessionCount?: number
   lastHeartbeatAt?: string
@@ -79,4 +81,26 @@ export interface AgentConnLog {
   remoteAddr?: string
   detail?: string
   createdAt?: string
+}
+
+/** CAP-65 节点文件浏览：目录一层条目 */
+export interface NodeFileEntry {
+  name: string
+  dir: boolean
+  /** 文件字节数（目录缺席） */
+  size?: number
+  /** 修改时间（ISO 串，渲染走 fmtTime） */
+  mtime?: string
+}
+
+/** GET /agent-nodes/{id}/files/list 响应 */
+export interface NodeFileList {
+  entries: NodeFileEntry[]
+  truncated: boolean
+}
+
+/** GET /agent-nodes/{id}/files/read 响应 */
+export interface NodeFileContent {
+  content: string
+  size: number
 }
