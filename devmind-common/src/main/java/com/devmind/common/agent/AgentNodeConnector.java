@@ -268,6 +268,19 @@ public interface AgentNodeConnector {
     }
 
     /**
+     * CAP-65：下发 file 帧并阻塞等 file_ack——runner 对节点白名单根目录（帧内携带 roots 全量，
+     * 服务端 DB 权威）执行文件操作（op 见 {@link AgentFileRequest}；upload/download 字节走
+     * HTTP 中转，帧内仅 transferId/size/sha256）。
+     * 节点离线/协议版本不足（需 v18+）/等待超时/roots 未配置抛 DevMindException(CONFLICT)；
+     * 操作本身失败（路径越界/二进制文件/目标已存在等）不抛，看 {@link AgentFileResult#ok()}。
+     * 默认实现 = agent 模块未装配（无任何执行节点可用）。
+     */
+    default AgentFileResult file(String nodeId, AgentFileRequest req) {
+        throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+    }
+
+    /**
      * CAP-57：下发 pkg 帧并返回 future——runner 凭节点 token 拉取安装包（GB 级下载以分钟计，
      * <b>异步 ack 不阻塞调用线程</b>）；下载 + sha256 校验 + 原子解包完成后 future 收口。
      * 节点离线/协议版本不足（需 v15+）抛 DevMindException(CONFLICT)（下发前失败，同步抛）；
