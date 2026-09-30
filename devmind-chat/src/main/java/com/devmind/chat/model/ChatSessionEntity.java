@@ -96,6 +96,27 @@ public class ChatSessionEntity {
     @Column(name = "created_at")
     private Instant createdAt;
 
+    // ---------------- 用量账本（result 事件累计；全 null = 历史问答或无用量上报的执行体） ----------------
+
+    @Column(name = "cost_usd")
+    private Double costUsd;
+
+    @Column(name = "input_tokens")
+    private Long inputTokens;
+
+    @Column(name = "output_tokens")
+    private Long outputTokens;
+
+    @Column(name = "cache_read_tokens")
+    private Long cacheReadTokens;
+
+    @Column(name = "cache_creation_tokens")
+    private Long cacheCreationTokens;
+
+    /** 已入账回合数（result 事件带用量信息才计；MODEL 执行体报 durationMs 也计） */
+    @Column(name = "turn_count")
+    private Integer turnCount;
+
     @Column(name = "updated_at")
     private Instant updatedAt;
 
@@ -132,6 +153,18 @@ public class ChatSessionEntity {
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+    public Double getCostUsd() { return costUsd; }
+    public void setCostUsd(Double costUsd) { this.costUsd = costUsd; }
+    public Long getInputTokens() { return inputTokens; }
+    public void setInputTokens(Long inputTokens) { this.inputTokens = inputTokens; }
+    public Long getOutputTokens() { return outputTokens; }
+    public void setOutputTokens(Long outputTokens) { this.outputTokens = outputTokens; }
+    public Long getCacheReadTokens() { return cacheReadTokens; }
+    public void setCacheReadTokens(Long cacheReadTokens) { this.cacheReadTokens = cacheReadTokens; }
+    public Long getCacheCreationTokens() { return cacheCreationTokens; }
+    public void setCacheCreationTokens(Long cacheCreationTokens) { this.cacheCreationTokens = cacheCreationTokens; }
+    public Integer getTurnCount() { return turnCount; }
+    public void setTurnCount(Integer turnCount) { this.turnCount = turnCount; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
     public Instant getFinishedAt() { return finishedAt; }

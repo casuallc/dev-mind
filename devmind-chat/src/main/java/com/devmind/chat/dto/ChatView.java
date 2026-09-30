@@ -16,5 +16,7 @@ public record ChatView(String id, String title, String status, SessionState stat
                        Instant createdAt, Instant updatedAt, Instant finishedAt,
                        Long knowledgeBaseId,
                        String executor, Long modelEndpointId, String modelEndpointName,
-                       String modelEndpointModel) {
+                       String modelEndpointModel,
+                       Double costUsd, Long inputTokens, Long outputTokens,
+                       Long cacheReadTokens, Long cacheCreationTokens, Integer turnCount) {
 }

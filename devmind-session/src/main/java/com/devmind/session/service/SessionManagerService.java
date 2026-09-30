@@ -54,6 +54,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import com.devmind.common.agent.runtime.RemoteSessionRuntime;
 import com.devmind.common.agent.runtime.RuntimeListener;
+import com.devmind.common.agent.runtime.TurnUsage;
 import com.devmind.session.runtime.SessionEventSaver;
 import com.devmind.common.agent.runtime.SessionHandle;
 import tools.jackson.databind.ObjectMapper;
@@ -200,6 +201,22 @@ public class SessionManagerService {
                                 + (ent.getRequirementId() != null ? "（需求 " + ent.getRequirementId() + "）" : ""),
                         "SESSION", sessionId, success));
             });
+        }
+
+        /** 回合用量入账：纯 SQL 累加（DB 层原子），失败只告警——账务问题不能打断会话事件流。 */
+        @Override
+        public void onTurnResult(String sessionId, TurnUsage usage) {
+            try {
+                sessionRepo.addUsage(sessionId,
+                        usage.costUsd() == null ? 0 : usage.costUsd(),
+                        usage.inputTokens() == null ? 0 : usage.inputTokens(),
+                        usage.outputTokens() == null ? 0 : usage.outputTokens(),
+                        usage.cacheReadTokens() == null ? 0 : usage.cacheReadTokens(),
+                        usage.cacheCreationTokens() == null ? 0 : usage.cacheCreationTokens(),
+                        Instant.now());
+            } catch (Exception e) {
+                log.warn("会话用量入账失败: session={} err={}", sessionId, e.getMessage());
+            }
         }
     };
 
@@ -1882,7 +1899,9 @@ public class SessionManagerService {
                 state.name(), state, ent.getWorktreePath(), ent.getPid(),
                 ent.getModel(), ent.getSummary(), ent.getAgentNodeId(), repoNames,
                 ent.getCreatedBy(), ent.getWorkspaceState(),
-                ent.getCreatedAt(), ent.getUpdatedAt(), ent.getFinishedAt());
+                ent.getCreatedAt(), ent.getUpdatedAt(), ent.getFinishedAt(),
+                ent.getCostUsd(), ent.getInputTokens(), ent.getOutputTokens(),
+                ent.getCacheReadTokens(), ent.getCacheCreationTokens(), ent.getTurnCount());
     }
 
     private void updateStatus(String id, SessionState st, String summary) {

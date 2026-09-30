@@ -150,6 +150,16 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
                 summary = ev.content() == null ? "" : ev.content();
                 transition(SessionState.WAITING_INPUT, "回合完成，可继续输入或结束会话");
                 scheduleIdleEnd();
+                // 用量账本：入账失败绝不能打断事件流，故这里兜底 catch（transition 的监听器调用
+                // 不兜底是刻意的——状态通知失败本身就是 bug，要炸出来）
+                TurnUsage usage = TurnUsage.from(ev.payload());
+                if (!usage.isEmpty()) {
+                    try {
+                        listener.onTurnResult(id, usage);
+                    } catch (Exception e) {
+                        log.warn("回合用量回调失败: session={}", id, e);
+                    }
+                }
             }
             default -> { }
         }

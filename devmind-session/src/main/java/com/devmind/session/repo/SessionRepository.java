@@ -2,7 +2,12 @@ package com.devmind.session.repo;
 
 import com.devmind.session.model.SessionEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 
 public interface SessionRepository extends JpaRepository<SessionEntity, String> {
@@ -34,4 +39,32 @@ public interface SessionRepository extends JpaRepository<SessionEntity, String> 
     List<SessionEntity> findByProjectIdAndWorkspaceOwnerAndWorkspaceState(String projectId,
                                                                           String workspaceOwner,
                                                                           String workspaceState);
+
+    /**
+     * 用量账本入账：回合 result 的用量累加进会话累计列。
+     *
+     * <p>用批量 UPDATE 而不是 {@code save(entity)}：入账发生在事件读取线程上，与 onExit/updateStatus
+     * 的读-改-写并发时整实体 save 会互踩（丢状态或丢用量）；纯 SQL 累加在 DB 层原子，且会话被并发
+     * 删除时命中 0 行自然落空，不会把行 merge 回来（与 chat 侧 updateLiveStatus 同款考量）。</p>
+     *
+     * @return 受影响行数（0 = 会话已不存在）
+     */
+    @Transactional
+    @Modifying
+    @Query("update SessionEntity e set "
+            + "e.costUsd = coalesce(e.costUsd, 0) + :cost, "
+            + "e.inputTokens = coalesce(e.inputTokens, 0) + :inputTokens, "
+            + "e.outputTokens = coalesce(e.outputTokens, 0) + :outputTokens, "
+            + "e.cacheReadTokens = coalesce(e.cacheReadTokens, 0) + :cacheReadTokens, "
+            + "e.cacheCreationTokens = coalesce(e.cacheCreationTokens, 0) + :cacheCreationTokens, "
+            + "e.turnCount = coalesce(e.turnCount, 0) + 1, "
+            + "e.updatedAt = :now "
+            + "where e.id = :id")
+    int addUsage(@Param("id") String id,
+                 @Param("cost") double cost,
+                 @Param("inputTokens") long inputTokens,
+                 @Param("outputTokens") long outputTokens,
+                 @Param("cacheReadTokens") long cacheReadTokens,
+                 @Param("cacheCreationTokens") long cacheCreationTokens,
+                 @Param("now") Instant now);
 }

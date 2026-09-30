@@ -124,7 +124,13 @@ public class CliEventParser {
                     payload.put("durationMs", node.path("duration_ms").asLong());
                 }
                 if (node.has("usage")) {
-                    payload.put("usage", node.path("usage").toString());
+                    JsonNode usage = node.path("usage");
+                    payload.put("usage", usage.toString());
+                    // 结构化 token 字段：服务端内核据以入账（会话用量账本），前端仍可用原始 usage
+                    putLongIfPresent(payload, "inputTokens", usage, "input_tokens");
+                    putLongIfPresent(payload, "outputTokens", usage, "output_tokens");
+                    putLongIfPresent(payload, "cacheReadTokens", usage, "cache_read_input_tokens");
+                    putLongIfPresent(payload, "cacheCreationTokens", usage, "cache_creation_input_tokens");
                 }
                 return List.of(SessionEvent.of(seq.getAsLong(), "result", truncate(result), source, payload));
             }
@@ -244,6 +250,14 @@ public class CliEventParser {
         String v = node.path(field).asText("");
         if (!v.isEmpty()) {
             payload.put(key, v);
+        }
+    }
+
+    /** 数值字段：缺席/非数值不入 payload（缺字段与 0 要区分——0 是真实用量，缺席是不上报）。 */
+    private void putLongIfPresent(Map<String, Object> payload, String key, JsonNode node, String field) {
+        JsonNode v = node.path(field);
+        if (v.isNumber()) {
+            payload.put(key, v.asLong());
         }
     }
 

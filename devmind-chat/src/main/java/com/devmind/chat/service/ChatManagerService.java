@@ -24,6 +24,7 @@ import com.devmind.common.agent.runtime.ModelSessionRuntime;
 import com.devmind.common.agent.runtime.RemoteSessionRuntime;
 import com.devmind.common.agent.runtime.RuntimeListener;
 import com.devmind.common.agent.runtime.RuntimeSettings;
+import com.devmind.common.agent.runtime.TurnUsage;
 import com.devmind.common.agent.runtime.SessionHandle;
 import com.devmind.common.agent.runtime.SessionState;
 import com.devmind.common.attachment.AttachmentContentResolver;
@@ -168,6 +169,22 @@ public class ChatManagerService {
                 ent.setUpdatedAt(Instant.now());
                 chatRepo.save(ent);
             });
+        }
+
+        /** 回合用量入账：纯 SQL 累加（DB 层原子），失败只告警——账务问题不能打断问答事件流。 */
+        @Override
+        public void onTurnResult(String sessionId, TurnUsage usage) {
+            try {
+                chatRepo.addUsage(sessionId,
+                        usage.costUsd() == null ? 0 : usage.costUsd(),
+                        usage.inputTokens() == null ? 0 : usage.inputTokens(),
+                        usage.outputTokens() == null ? 0 : usage.outputTokens(),
+                        usage.cacheReadTokens() == null ? 0 : usage.cacheReadTokens(),
+                        usage.cacheCreationTokens() == null ? 0 : usage.cacheCreationTokens(),
+                        Instant.now());
+            } catch (Exception e) {
+                log.warn("问答用量入账失败: chat={} err={}", sessionId, e.getMessage());
+            }
         }
     };
 
@@ -1210,7 +1227,9 @@ public class ChatManagerService {
                 ent.getModelEndpointId(),
                 // 端点被停用/删除后名字拿不到（视图仍可看历史；要继续提问会 409 并说明原因）
                 endpoint == null ? null : endpoint.display(),
-                endpoint == null ? null : endpoint.model());
+                endpoint == null ? null : endpoint.model(),
+                ent.getCostUsd(), ent.getInputTokens(), ent.getOutputTokens(),
+                ent.getCacheReadTokens(), ent.getCacheCreationTokens(), ent.getTurnCount());
     }
 
     /** 端点视图（视图层只用来显示名字与模型名；拿不到 = null，不影响会话本身可读）。 */

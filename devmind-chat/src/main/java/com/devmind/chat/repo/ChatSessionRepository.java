@@ -37,4 +37,29 @@ public interface ChatSessionRepository extends JpaRepository<ChatSessionEntity, 
     @Query("update ChatSessionEntity e set e.status = :status, e.updatedAt = :now, e.finishedAt = null "
             + "where e.id = :id")
     int updateLiveStatus(@Param("id") String id, @Param("status") String status, @Param("now") Instant now);
+
+    /**
+     * 用量账本入账：回合 result 的用量累加进问答累计列。批量 UPDATE 的理由同 {@link #updateLiveStatus}
+     * （生成线程并发 + 删除事务防 merge 回插）；AGENT 执行体报 cost/tokens，MODEL 执行体只计回合。
+     *
+     * @return 受影响行数（0 = 问答已不存在）
+     */
+    @Transactional
+    @Modifying
+    @Query("update ChatSessionEntity e set "
+            + "e.costUsd = coalesce(e.costUsd, 0) + :cost, "
+            + "e.inputTokens = coalesce(e.inputTokens, 0) + :inputTokens, "
+            + "e.outputTokens = coalesce(e.outputTokens, 0) + :outputTokens, "
+            + "e.cacheReadTokens = coalesce(e.cacheReadTokens, 0) + :cacheReadTokens, "
+            + "e.cacheCreationTokens = coalesce(e.cacheCreationTokens, 0) + :cacheCreationTokens, "
+            + "e.turnCount = coalesce(e.turnCount, 0) + 1, "
+            + "e.updatedAt = :now "
+            + "where e.id = :id")
+    int addUsage(@Param("id") String id,
+                 @Param("cost") double cost,
+                 @Param("inputTokens") long inputTokens,
+                 @Param("outputTokens") long outputTokens,
+                 @Param("cacheReadTokens") long cacheReadTokens,
+                 @Param("cacheCreationTokens") long cacheCreationTokens,
+                 @Param("now") Instant now);
 }

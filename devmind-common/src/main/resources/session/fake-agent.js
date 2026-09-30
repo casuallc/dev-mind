@@ -18,6 +18,12 @@ const MODEL = 'fake-opus';
 const readline = require('readline');
 const rl = readline.createInterface({ input: process.stdin });
 
+// 用量字段：与真实 claude result 帧同 schema（total_cost_usd + usage 四项 token），
+// 供会话用量账本链路（解析 → 内核回调 → 入账）的端到端断言。
+const USAGE = { input_tokens: 1200, output_tokens: 340, cache_read_input_tokens: 5600, cache_creation_input_tokens: 700 };
+const resultFrame = text => ({ type: 'result', subtype: 'success', is_error: false, result: text,
+  duration_ms: 2000, total_cost_usd: 0.0123, usage: USAGE });
+
 /** 相邻增量之间的间隔：> 服务端聚合器的 flushMs(120)，否则会被攒成一片、看不出逐字。 */
 const PIECE_MS = 130;
 /** 主正文切几片。片数由代码均分而非手写常量：断言「增量拼接 == 全量正文」才有意义。 */
@@ -89,7 +95,7 @@ function assistantMsg(blocks) {
 rl.on('close', () => {
   // 也走闸门：真实 CLI 是「把手头这一回合吐完再读 EOF 退出」，不会把 result 塞进正文中间
   serial(() => process.stdout.write(
-    JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: '任务完成（fake，stdin EOF）。', duration_ms: 2000 }) + '\n',
+    JSON.stringify(resultFrame('任务完成（fake，stdin EOF）。')) + '\n',
     () => process.exit(0)));
 });
 
@@ -107,7 +113,7 @@ rl.on('line', async line => {
   if (msg.type === 'input' || msg.type === 'user') {
     if (text === '__exit__') {
       emit({ type: 'user', message: { role: 'user', content: '__exit__' } });
-      emit({ type: 'result', subtype: 'success', is_error: false, result: '任务完成（fake）。', duration_ms: 2000 });
+      emit(resultFrame('任务完成（fake）。'));
       process.exit(0);
     }
     emit({ type: 'user', message: { role: 'user', content: text } });
@@ -143,7 +149,7 @@ async function main() {
   await assistantMsg([{ type: 'text', text: '请问是否允许我执行 npm install？' }]);
   if (mode === 'run') {
     await sleep(1000);
-    emit({ type: 'result', subtype: 'success', is_error: false, result: '任务完成（fake）。', duration_ms: 2000 });
+    emit(resultFrame('任务完成（fake）。'));
     process.exit(0);
   }
 }
