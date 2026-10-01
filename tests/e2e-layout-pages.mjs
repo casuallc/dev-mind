@@ -69,6 +69,7 @@ const ROUTES = [
   { path: '/admin/decision-lab', name: '后台-决策实验室' },
   { path: '/admin/keys', name: '后台-开放 API' },
   { path: '/admin/agent/nodes', name: '后台-节点' },
+  { path: '/admin/agent/nodes/{nid}', name: '后台-节点详情', nid: true },
   { path: '/admin/agent/files', name: '后台-节点文件' },
   { path: '/admin/agent/package', name: '后台-Runner包' },
   { path: '/admin/agent/logs', name: '后台-连接日志' },
@@ -258,6 +259,10 @@ async function main() {
   const kbList = await api('GET', '/knowledge/bases', undefined, accessToken).catch(() => [])
   const kb = KB_ID ? { id: KB_ID } : (kbList ?? [])[0]
   if (!kb) log('    （库里没有知识库，跳过知识库详情页）')
+  // 节点详情页取库里第一个节点（没有就跳过该路由，不算失败）
+  const nodeList = await api('GET', '/agent-nodes', undefined, accessToken).catch(() => [])
+  const agentNode = (nodeList ?? [])[0]
+  if (!agentNode) log('    （库里没有 Agent 节点，跳过节点详情页）')
 
   // ── 2. 起 headless Chrome ─────────────────────────────────
   if (!existsSync(CHROME)) throw new Error(`找不到浏览器：${CHROME}（用 CHROME_PATH 指定）`)
@@ -295,10 +300,11 @@ async function main() {
     // ── 3. 逐路由巡检 ──────────────────────────────────────
     const routes = ROUTES.filter((r) => !ONLY.length || ONLY.some((o) => r.path.includes(o)))
         .filter((r) => !r.kb || kb)
+        .filter((r) => !r.nid || agentNode)
     log(`[2] 巡检 ${routes.length} 个路由（窗口 ${WIN_W}x${WIN_H}，settle ${SETTLE}ms）`)
 
     for (const route of routes) {
-      const url = BASE + route.path.replace('{pid}', project.id).replace('{kid}', kb?.id ?? '')
+      const url = BASE + route.path.replace('{pid}', project.id).replace('{kid}', kb?.id ?? '').replace('{nid}', agentNode?.id ?? '')
       ws.reset()
       await ws.send('Page.navigate', { url })
       try {
