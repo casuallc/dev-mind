@@ -47,11 +47,14 @@ export default function WorkspacePanel({
   snapshot,
   /** 项目会话才支持单文件 diff（/chats 无此端点） */
   canDiff,
+  /** 入口形态：strip=对话框右侧窄条（默认，问答页）；button=操作条里的常规小按钮（会话工作台） */
+  entry = 'strip',
 }: {
   apiBase: ChatApiBase
   sessionId: string
   snapshot?: WorkspaceSnapshot
   canDiff: boolean
+  entry?: 'strip' | 'button'
 }) {
   const [open, setOpen] = useState(false)
   /** 抽屉展开动画结束后才 true（此时把焦点交给终端输入框，避免被抽屉自身焦点抢占） */
@@ -191,22 +194,31 @@ export default function WorkspacePanel({
 
   return (
     <>
-      {/* 窄条入口（变更数徽标提示有新东西可看），点击展开抽屉 */}
-      <div
-        style={{
-          width: 36,
-          flexShrink: 0,
-          borderLeft: '1px solid #f0f0f0',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          paddingTop: 8,
-        }}
-      >
-        <Badge count={changeCount} size="small" offset={[-4, 4]}>
-          <Button type="text" size="small" icon={<MenuUnfoldOutlined />} onClick={() => setOpen(true)} title="工作区" />
+      {/* 入口（变更数徽标提示有新东西可看），点击展开抽屉：
+          strip=对话框右侧窄条；button=操作条常规按钮（会话工作台，置于「更多」前） */}
+      {entry === 'button' ? (
+        <Badge count={changeCount} size="small">
+          <Button size="small" icon={<MenuUnfoldOutlined />} onClick={() => setOpen(true)}>
+            工作区
+          </Button>
         </Badge>
-      </div>
+      ) : (
+        <div
+          style={{
+            width: 36,
+            flexShrink: 0,
+            borderLeft: '1px solid #f0f0f0',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            paddingTop: 8,
+          }}
+        >
+          <Badge count={changeCount} size="small" offset={[-4, 4]}>
+            <Button type="text" size="small" icon={<MenuUnfoldOutlined />} onClick={() => setOpen(true)} title="工作区" />
+          </Badge>
+        </div>
+      )}
 
       <Drawer
         title="工作区"

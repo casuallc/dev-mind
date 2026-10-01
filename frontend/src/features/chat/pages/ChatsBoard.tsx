@@ -16,7 +16,8 @@ import { deleteChat, finishChat, killChat, listChats, resumeChat, suspendChat } 
 import type { ChatSummary } from '../types'
 import { stateColor, ACTIVE_STATES, STATE_OPTIONS } from '../../../shared/chat/stateMeta'
 import ChatPanel from '../../../shared/chat/ChatPanel'
-import type { StreamMeta } from '../../../shared/chat/types'
+import type { StreamMeta, WorkspaceSnapshot } from '../../../shared/chat/types'
+import WorkspacePanel from '../../../shared/chat/workspace/WorkspacePanel'
 import ChatListPane from '../components/ChatListPane'
 import NewChatDraft from '../components/NewChatDraft'
 import { listAgentNodes } from '../../agent/api'
@@ -49,6 +50,8 @@ export default function ChatsBoard() {
   const [draft, setDraft] = useState(false)
   const [draftKbId, setDraftKbId] = useState<number | undefined>(undefined)
   const [streamMeta, setStreamMeta] = useState<StreamMeta>({ connected: false, fatal: false })
+  // CAP-54：WS 旁路工作区快照（ChatPanel 上抛），右侧窄条入口的徽标/抽屉数据源
+  const [workspace, setWorkspace] = useState<WorkspaceSnapshot | undefined>(undefined)
   const autoPickedRef = useRef(false)
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -113,6 +116,11 @@ export default function ChatsBoard() {
   useEffect(() => {
     if (selectedId && !loading && !current) setSelectedId(undefined)
   }, [selectedId, current, loading])
+
+  // 切换问答：清工作区快照，避免旧问答变更数徽标带到新问答
+  useEffect(() => {
+    setWorkspace(undefined)
+  }, [selectedId])
 
   // ---- 生命周期操作（动作后靠轮询刷新状态标签）----
   const act = useCallback(
@@ -394,6 +402,13 @@ export default function ChatsBoard() {
                 allowImages
                 onChanged={load}
                 onStreamMeta={setStreamMeta}
+                onWorkspaceSnapshot={setWorkspace}
+                workspaceSlot={
+                  // 模型执行体无 runner 工作区，整条隐藏；其余保留右侧窄条入口
+                  isModelChat ? undefined : (
+                    <WorkspacePanel apiBase="/chats" sessionId={current.id} snapshot={workspace} canDiff={false} />
+                  )
+                }
               />
             </>
           ) : (

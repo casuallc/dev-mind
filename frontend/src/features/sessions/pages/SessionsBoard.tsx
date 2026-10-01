@@ -19,7 +19,8 @@ import { stateColor, ACTIVE_STATES, STATE_OPTIONS } from '../stateMeta'
 import { useSessionActions } from '../hooks/useSessionActions'
 import SessionListPane from '../components/SessionListPane'
 import ChatPanel from '../../../shared/chat/ChatPanel'
-import type { StreamMeta } from '../../../shared/chat/types'
+import type { StreamMeta, WorkspaceSnapshot } from '../../../shared/chat/types'
+import WorkspacePanel from '../../../shared/chat/workspace/WorkspacePanel'
 import NewSessionDraft from '../components/NewSessionDraft'
 import SessionDiffModal from '../components/SessionDiffModal'
 import SessionOutputsModal from '../components/SessionOutputsModal'
@@ -76,6 +77,8 @@ export default function SessionsBoard({
   const [draft, setDraft] = useState(false)
   const [outputsOpen, setOutputsOpen] = useState(false)
   const [streamMeta, setStreamMeta] = useState<StreamMeta>({ connected: false, fatal: false })
+  // CAP-54：WS 旁路工作区快照（ChatPanel 上抛），操作条「工作区」入口按钮的徽标/抽屉数据源
+  const [workspace, setWorkspace] = useState<WorkspaceSnapshot | undefined>(undefined)
   const autoPickedRef = useRef(false)
 
   const load = useCallback(async () => {
@@ -196,6 +199,11 @@ export default function SessionsBoard({
       },
     })
   }
+
+  // 切换会话：清工作区快照，避免旧会话变更数徽标带到新会话（新快照由 WS 推送/抽屉打开时 REST 兜底）
+  useEffect(() => {
+    setWorkspace(undefined)
+  }, [selectedId])
 
   const onSelect = (id: string) => {
     setDraft(false)
@@ -395,15 +403,25 @@ export default function SessionsBoard({
                       </Button>
                     )}
                     {worklog && (
-                      <Button
-                        size="small"
-                        type="primary"
-                        icon={<CloudSyncOutlined />}
-                        loading={syncingWorklog}
-                        onClick={onSyncWorklog}
-                      >
-                        推送工作日志
-                      </Button>
+                      <>
+                        <Button
+                          size="small"
+                          type="primary"
+                          icon={<CloudSyncOutlined />}
+                          loading={syncingWorklog}
+                          onClick={onSyncWorklog}
+                        >
+                          推送工作日志
+                        </Button>
+                        {/* CAP-54：worklog 会话也有 runner 持久工作区，入口按钮同样放操作条 */}
+                        <WorkspacePanel
+                          entry="button"
+                          apiBase="/sessions"
+                          sessionId={current.id}
+                          snapshot={workspace}
+                          canDiff
+                        />
+                      </>
                     )}
                     {!worklog && (
                       <>
@@ -413,6 +431,14 @@ export default function SessionsBoard({
                         <Button size="small" icon={<UploadOutlined />} onClick={() => setOutputsOpen(true)}>
                           推送产出
                         </Button>
+                        {/* CAP-54：工作区入口提到操作条，置于「更多」前 */}
+                        <WorkspacePanel
+                          entry="button"
+                          apiBase="/sessions"
+                          sessionId={current.id}
+                          snapshot={workspace}
+                          canDiff
+                        />
                         <SessionMoreActions session={current} canSuspend={canSuspend} onChanged={load} />
                       </>
                     )}
@@ -430,6 +456,7 @@ export default function SessionsBoard({
                   maxHeight={null}
                   onChanged={load}
                   onStreamMeta={setStreamMeta}
+                  onWorkspaceSnapshot={setWorkspace}
                 />
               </>
             ) : (

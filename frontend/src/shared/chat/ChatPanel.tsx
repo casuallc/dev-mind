@@ -5,17 +5,18 @@
 // CAP-49：模型执行体（summary.executor=MODEL）生成中不接受注入、可中断、不支持图片——
 // 三条都由这里按 summary 分派，页面不需要各写一遍。
 // effect 依赖只用 summary.id/summary.state 标量——summary 对象可能来自轮询，引用每次变化。
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+// CAP-54：工作区面板不再内嵌——快照经 onWorkspaceSnapshot 上抛，宿主页自决入口位置
+// （问答页传 workspaceSlot 放右侧窄条；会话工作台把入口按钮放操作条「更多」前）。
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button, Card, Image, Input, message, Space, Typography } from 'antd'
 import { CloseOutlined, PaperClipOutlined, SendOutlined, StopOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import { uploadAttachment, type AttachmentView } from '../attachments/api'
 import { attachmentRawUrl } from '../attachments/url'
-import type { ChatApiBase, ChatEvent, ChatImageAttachment, ChatSummaryBase, StreamMeta } from './types'
+import type { ChatApiBase, ChatEvent, ChatImageAttachment, ChatSummaryBase, StreamMeta, WorkspaceSnapshot } from './types'
 import { useChatStream } from './useChatStream'
 import { ACTIVE_STATES } from './stateMeta'
 import ChatStream from './ChatStream'
-import WorkspacePanel from './workspace/WorkspacePanel'
 import { showError } from '../utils/showError'
 
 export default function ChatPanel({
@@ -25,6 +26,8 @@ export default function ChatPanel({
   allowImages = false,
   onChanged,
   onStreamMeta,
+  onWorkspaceSnapshot,
+  workspaceSlot,
 }: {
   summary: ChatSummaryBase
   /** REST/WS 路径前缀：项目会话 '/sessions'，通用问答 '/chats' */
@@ -37,6 +40,10 @@ export default function ChatPanel({
   onChanged?: () => void
   /** 实时流连接状态回传（外层做徽标） */
   onStreamMeta?: (meta: StreamMeta) => void
+  /** CAP-54：WS 旁路工作区快照上抛（宿主页据此渲染 WorkspacePanel 入口徽标） */
+  onWorkspaceSnapshot?: (snap: WorkspaceSnapshot | undefined) => void
+  /** CAP-54：工作区面板入口（含抽屉），渲染在对话主列右侧；不传则无工作区入口 */
+  workspaceSlot?: ReactNode
 }) {
   const [pendingReq, setPendingReq] = useState<ChatEvent | null>(null)
   const [inputText, setInputText] = useState('')
@@ -60,6 +67,11 @@ export default function ChatPanel({
   useEffect(() => {
     onStreamMeta?.({ connected, fatal })
   }, [connected, fatal, onStreamMeta])
+
+  // 工作区快照上抛外层（入口徽标/抽屉数据源）
+  useEffect(() => {
+    onWorkspaceSnapshot?.(workspace)
+  }, [workspace, onWorkspaceSnapshot])
 
   // 非致命提示（动作被拒）：WS 帧只说"这一次没成"，不关连接
   useEffect(() => {
@@ -336,15 +348,8 @@ export default function ChatPanel({
       </div>
       </div>
 
-      {/* CAP-54：工作区实时视图（变更/文件右栏）；模型执行体无 runner 工作区，整条隐藏 */}
-      {!isModel && (
-        <WorkspacePanel
-          apiBase={apiBase}
-          sessionId={summary.id}
-          snapshot={workspace}
-          canDiff={apiBase === '/sessions'}
-        />
-      )}
+      {/* CAP-54：工作区入口由宿主页经 workspaceSlot 注入（模型执行体无 runner 工作区，宿主不传） */}
+      {workspaceSlot}
     </div>
   )
 }
