@@ -139,9 +139,10 @@ export default function AgentNodesPage() {
       title: '名称',
       dataIndex: 'name',
       width: 200,
+      // 名称即详情入口（操作列已去，列表只留观测）
       render: (s: string, r: AgentNode) => (
         <Space size={4}>
-          {s}
+          <a onClick={() => navigate(`/admin/agent/nodes/${r.id}`)}>{s}</a>
           {r.isDefault && (
             <Tooltip title="平台默认执行节点：会话/项目未指定节点时调度到此">
               <Tag color="blue">默认</Tag>
@@ -210,16 +211,6 @@ export default function AgentNodesPage() {
       dataIndex: 'lastHeartbeatAt',
       width: 170,
       render: (t?: string) => fmtTime(t),
-    },
-    {
-      title: '操作',
-      key: 'act',
-      width: 90,
-      render: (_: unknown, r: AgentNode) => (
-        <Button size="small" onClick={() => navigate(`/admin/agent/nodes/${r.id}`)}>
-          管理
-        </Button>
-      ),
     },
   ]
 
