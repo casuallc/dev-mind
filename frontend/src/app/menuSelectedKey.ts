@@ -4,6 +4,7 @@ const SELECT_PREFIXES: Array<[string, string]> = [
   // 智能决策（laya）：在线试分类/安装包是「决策记录」「服务实例」菜单下的页内视图，高亮归属菜单
   ['/admin/laya/playground', '/admin/laya/records'],
   ['/admin/laya/packages', '/admin/laya/instances'],
+  ['/admin/agent/nodes', '/admin/agent/nodes'], // 列表 + 节点详情（/admin/agent/nodes/:id）
   ['/admin/projects', '/admin/projects'], // 列表 + 设置子路由
   ['/admin/docs', '/admin/docs'], // 列表 + 编辑器
   ['/admin/knowledge', '/admin/knowledge'], // 列表 + 库详情（/admin/knowledge/bases/:id）

@@ -1,12 +1,12 @@
-// CAP-65 节点文件浏览抽屉：白名单根目录内的一层列表（目录优先排序、面包屑下钻），
+// CAP-65 节点文件浏览器：白名单根目录内的一层列表（目录优先排序、面包屑下钻），
 // 文本文件预览/编辑一体弹窗（等宽字体，CAP-60 字体栈），改名/删除/上传/下载。
 // 安全边界在服务端+runner 双重校验（白名单外/逃逸/超限一律 409/400），此处只做体验层预检。
+// 由 NodeFilesPage（全页）承载；自身为 flex 列容器，撑满父级剩余高度。
 import { useCallback, useEffect, useState } from 'react'
 import {
   Alert,
   Breadcrumb,
   Button,
-  Drawer,
   Input,
   Modal,
   Select,
@@ -17,7 +17,6 @@ import {
   message,
 } from 'antd'
 import {
-  DownloadOutlined,
   FileAddOutlined,
   FolderOutlined,
   ReloadOutlined,
@@ -47,7 +46,7 @@ const joinRel = (dir: string, name: string) => (dir ? `${dir}/${name}` : name)
 /** newName 前端校验（服务端/runner 仍终判）：非空、不含 / \ :、非点名 */
 const badName = (n: string) => !n.trim() || /[/\\:]/.test(n) || n === '.' || n === '..'
 
-export default function NodeFilesDrawer({ node, onClose }: { node: AgentNode; onClose: () => void }) {
+export default function NodeFilesBrowser({ node }: { node: AgentNode }) {
   const roots = node.fileRoots ?? []
   const [root, setRoot] = useState(roots[0] ?? '')
   const [dir, setDir] = useState('')
@@ -61,6 +60,12 @@ export default function NodeFilesDrawer({ node, onClose }: { node: AgentNode; on
   const [renameDraft, setRenameDraft] = useState('')
   const [newFileOpen, setNewFileOpen] = useState(false)
   const [newFileName, setNewFileName] = useState('')
+
+  // 切换节点时回到其第一个根目录（roots 随节点身份变化，不随轮询刷新重置用户下钻）
+  useEffect(() => {
+    setRoot(node.fileRoots?.[0] ?? '')
+    setDir('')
+  }, [node.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const reload = useCallback(async () => {
     setEntries(null)
@@ -202,13 +207,7 @@ export default function NodeFilesDrawer({ node, onClose }: { node: AgentNode; on
   ]
 
   return (
-    <Drawer
-      title={`文件浏览 · ${node.name}`}
-      open
-      onClose={onClose}
-      width={960}
-      styles={{ body: { display: 'flex', flexDirection: 'column', gap: 12 } }}
-    >
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
       <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
         <Space wrap>
           {roots.length > 1 ? (
@@ -247,7 +246,6 @@ export default function NodeFilesDrawer({ node, onClose }: { node: AgentNode; on
 
       <FitTable<NodeFileEntry>
         rowKey="name"
-        size="small"
         loading={entries === null}
         dataSource={entries ?? []}
         pagination={LIST_PAGINATION}
@@ -280,27 +278,16 @@ export default function NodeFilesDrawer({ node, onClose }: { node: AgentNode; on
             title: '操作',
             width: 210,
             render: (_, e) => (
-              <Space size={4}>
+              <Space>
                 {!e.dir && (
                   <>
-                    <Button size="small" type="link" onClick={() => openFile(e)}>
-                      预览/编辑
-                    </Button>
-                    <Button
-                      size="small"
-                      type="link"
-                      icon={<DownloadOutlined />}
-                      onClick={() =>
-                        run(() => downloadNodeFile(node.id, root, joinRel(dir, e.name), e.name))
-                      }
-                    >
+                    <Button onClick={() => openFile(e)}>预览/编辑</Button>
+                    <Button onClick={() => run(() => downloadNodeFile(node.id, root, joinRel(dir, e.name), e.name))}>
                       下载
                     </Button>
                   </>
                 )}
                 <Button
-                  size="small"
-                  type="link"
                   onClick={() => {
                     setRenaming(e)
                     setRenameDraft(e.name)
@@ -308,7 +295,7 @@ export default function NodeFilesDrawer({ node, onClose }: { node: AgentNode; on
                 >
                   改名
                 </Button>
-                <Button size="small" type="link" danger onClick={() => onDelete(e)}>
+                <Button danger onClick={() => onDelete(e)}>
                   删除
                 </Button>
               </Space>
@@ -377,6 +364,6 @@ export default function NodeFilesDrawer({ node, onClose }: { node: AgentNode; on
           onPressEnter={doCreateFile}
         />
       </Modal>
-    </Drawer>
+    </div>
   )
 }

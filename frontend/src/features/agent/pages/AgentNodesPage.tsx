@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Alert,
   Button,
@@ -9,7 +10,6 @@ import {
   Form,
   Input,
   Modal,
-  Segmented,
   Space,
   Spin,
   Table,
@@ -41,10 +41,7 @@ import {
   upgradeAgentNode,
 } from '../api'
 import type { AgentNode, IssuedNode, NodeActiveSession, RunnerPackage } from '../types'
-import RunnerPackagePanel from '../components/RunnerPackagePanel'
-import ConnLogsPanel from '../components/ConnLogsPanel'
 import ActiveSessionsCard, { activeSessionColumns } from '../components/ActiveSessionsCard'
-import NodeFilesDrawer from '../components/NodeFilesDrawer'
 import { buildLinuxInstallScript, buildWindowsInstallScript, downloadTextFile } from '../utils/installScript'
 import { fmtTime, fmtBytes } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
@@ -72,11 +69,10 @@ const downloadScripts = (token: string | null) => {
 }
 
 /**
- * CAP-21 后台页：Agent 节点管理（仅 ADMIN）。布局遵循 docs/core/前端内容区布局约定.md：
- * Card 标题 + Segmented 切换视图，表头 extra 放操作按钮，表格默认密度，行内「管理」开抽屉做全部操作。
+ * CAP-21 后台页：Agent 节点列表（仅 ADMIN）。Runner 包 / 连接日志 / 节点文件已拆为「Agent 执行」组独立菜单。
+ * 布局遵循 docs/core/前端内容区布局约定.md：Card 标题，表头 extra 放操作按钮，表格默认密度，行内「管理」开抽屉做全部操作。
  */
 export default function AgentNodesPage() {
-  const [view, setView] = useState<string>('nodes') // nodes | package
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [pkg, setPkg] = useState<RunnerPackage | null>(null)
   const [loading, setLoading] = useState(false)
@@ -261,78 +257,55 @@ export default function AgentNodesPage() {
     <Card
       style={pageCardStyle}
       styles={{ body: pageCardBodyFlexStyle }}
-      title={
-        <Space size={12}>
-          <span>Agent 节点</span>
-          <Segmented
-            value={view}
-            onChange={setView}
-            options={[
-              { value: 'nodes', label: '节点列表' },
-              { value: 'package', label: 'Runner 包' },
-              { value: 'logs', label: '连接日志' },
-            ]}
-          />
+      title="节点"
+      extra={
+        <Space>
+          {outdatedNodes.length > 0 && (
+            <>
+              <Tag color="orange">{outdatedNodes.length} 个节点可升级 → {pkg!.version}</Tag>
+              <Button
+                icon={<RocketOutlined />}
+                loading={batchBusy}
+                disabled={upgradableNodes.length === 0}
+                onClick={onUpgradeAll}
+              >
+                全部升级
+              </Button>
+            </>
+          )}
+          <Button icon={<ReloadOutlined />} onClick={reload}>
+            刷新
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+            新建节点
+          </Button>
         </Space>
       }
-      extra={
-        view === 'nodes' ? (
-          <Space>
-            {outdatedNodes.length > 0 && (
-              <>
-                <Tag color="orange">{outdatedNodes.length} 个节点可升级 → {pkg!.version}</Tag>
-                <Button
-                  icon={<RocketOutlined />}
-                  loading={batchBusy}
-                  disabled={upgradableNodes.length === 0}
-                  onClick={onUpgradeAll}
-                >
-                  全部升级
-                </Button>
-              </>
-            )}
-            <Button icon={<ReloadOutlined />} onClick={reload}>
-              刷新
-            </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-              新建节点
-            </Button>
-          </Space>
-        ) : undefined
-      }
     >
-      {view === 'nodes' ? (
-        <>
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-            节点 = 运行 devmind-agent-runner.jar 的远程机器。服务端不执行会话（零执行，CAP-34），务必注册节点并「设为默认」，未指定节点的会话即自动调度过去；无任何默认节点时创建会话会失败。
-          </Typography.Paragraph>
-          <FitTable<AgentNode>
-            rowKey="id"
-            loading={loading}
-            columns={columns}
-            dataSource={nodes}
-            pagination={LIST_PAGINATION}
-            locale={{
-              emptyText: (
-                <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
-                  <Typography.Text type="secondary">
-                    还没有 Agent 节点——先「新建节点」拿到 token，再在目标机执行一键安装脚本即可上线。
-                  </Typography.Text>
-                  <div>
-                    <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-                      新建节点
-                    </Button>
-                  </div>
-                </Space>
-              ),
-            }}
-          />
-        </>
-      ) : view === 'package' ? (
-        <RunnerPackagePanel />
-      ) : (
-        <ConnLogsPanel />
-      )}
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+        节点 = 运行 devmind-agent-runner.jar 的远程机器。服务端不执行会话（零执行，CAP-34），务必注册节点并「设为默认」，未指定节点的会话即自动调度过去；无任何默认节点时创建会话会失败。
+      </Typography.Paragraph>
+      <FitTable<AgentNode>
+        rowKey="id"
+        loading={loading}
+        columns={columns}
+        dataSource={nodes}
+        pagination={LIST_PAGINATION}
+        locale={{
+          emptyText: (
+            <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
+              <Typography.Text type="secondary">
+                还没有 Agent 节点——先「新建节点」拿到 token，再在目标机执行一键安装脚本即可上线。
+              </Typography.Text>
+              <div>
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+                  新建节点
+                </Button>
+              </div>
+            </Space>
+          ),
+        }}
+      />
 
       <Modal
         title="新建 Agent 节点"
@@ -443,7 +416,7 @@ function NodeDrawer({
   // CAP-65 文件访问根目录草稿：同 labels 的防轮询覆盖语义（每行一个绝对路径）
   const [fileRootsDraft, setFileRootsDraft] = useState((node.fileRoots ?? []).join('\n'))
   useEffect(() => setFileRootsDraft((node.fileRoots ?? []).join('\n')), [node.id]) // eslint-disable-line react-hooks/exhaustive-deps
-  const [filesOpen, setFilesOpen] = useState(false)
+  const navigate = useNavigate()
   const outdated = !!(pkg && node.runnerVersion && node.runnerVersion !== pkg.version)
 
   // 强制升级弹窗：BUSY 时打开，异步拉活跃会话清单（null=加载中）
@@ -716,7 +689,7 @@ function NodeDrawer({
                     <Button
                       icon={<FolderOpenOutlined />}
                       disabled={!(node.fileRoots?.length) || node.status !== 'ONLINE'}
-                      onClick={() => setFilesOpen(true)}
+                      onClick={() => navigate(`/admin/agent/files?nodeId=${node.id}`)}
                     >
                       文件浏览
                     </Button>
@@ -804,8 +777,6 @@ function NodeDrawer({
           </Card>
         </Space>
       </Spin>
-
-      {filesOpen && <NodeFilesDrawer node={node} onClose={() => setFilesOpen(false)} />}
 
       {/* BUSY 后的强制升级确认：列出将被终止的活跃会话 */}
       <Modal

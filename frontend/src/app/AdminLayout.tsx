@@ -3,11 +3,13 @@ import type { MenuProps } from 'antd'
 import {
   ApiOutlined,
   AuditOutlined,
+  CloudDownloadOutlined,
   CodeOutlined,
   DashboardOutlined,
   DeploymentUnitOutlined,
   ExperimentOutlined,
   FileTextOutlined,
+  FolderOpenOutlined,
   ForkOutlined,
   FolderOutlined,
   KeyOutlined,
@@ -38,9 +40,18 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
     children: [
       { key: '/admin/projects', icon: <FolderOutlined />, label: '项目管理' },
       { key: '/admin/repos', icon: <CodeOutlined />, label: '代码仓库' },
-      { key: '/admin/agent-nodes', icon: <RobotOutlined />, label: 'Agent 节点' },
       { key: '/admin/execution', icon: <AuditOutlined />, label: '模板与审计' },
       { key: '/admin/scenarios', icon: <DeploymentUnitOutlined />, label: '应用场景' },
+    ],
+  },
+  {
+    type: 'group' as const,
+    label: 'Agent 执行',
+    children: [
+      { key: '/admin/agent/nodes', icon: <RobotOutlined />, label: '节点' },
+      { key: '/admin/agent/files', icon: <FolderOpenOutlined />, label: '节点文件' },
+      { key: '/admin/agent/package', icon: <CloudDownloadOutlined />, label: 'Runner 包' },
+      { key: '/admin/agent/logs', icon: <FileTextOutlined />, label: '连接日志' },
     ],
   },
   {

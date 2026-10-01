@@ -40,6 +40,9 @@ import ClassifyPackagesPage from '../features/classify/pages/ClassifyPackagesPag
 import ClassifyPlaygroundPage from '../features/classify/pages/ClassifyPlaygroundPage'
 import ApiKeysPage from '../features/open-api/pages/ApiKeysPage'
 import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
+import NodeFilesPage from '../features/agent/pages/NodeFilesPage'
+import RunnerPackagePage from '../features/agent/pages/RunnerPackagePage'
+import ConnLogsPage from '../features/agent/pages/ConnLogsPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
 import HomePage from '../features/home/pages/HomePage'
 import WorklogPage from '../features/worklog/pages/WorklogPage'
@@ -191,8 +194,13 @@ export default function App() {
           <Route path="/admin/classify/playground" element={<LegacyLayaRedirect tab="playground" />} />
           {/* CAP-20 API 密钥（open-api HMAC 认证凭证） */}
           <Route path="/admin/keys" element={<ApiKeysPage />} />
-          {/* CAP-21 Agent 节点（远程执行节点注册/在线状态） */}
-          <Route path="/admin/agent-nodes" element={<AgentNodesPage />} />
+          {/* CAP-21 Agent 执行组：节点 / 节点文件 / Runner 包 / 连接日志 */}
+          <Route path="/admin/agent" element={<Navigate to="/admin/agent/nodes" replace />} />
+          <Route path="/admin/agent/nodes" element={<AgentNodesPage />} />
+          <Route path="/admin/agent/files" element={<NodeFilesPage />} />
+          <Route path="/admin/agent/package" element={<RunnerPackagePage />} />
+          <Route path="/admin/agent/logs" element={<ConnLogsPage />} />
+          <Route path="/admin/agent-nodes" element={<Navigate to="/admin/agent/nodes" replace />} />
           {/* CAP-33 场景（会话模板的升级形态；/admin/templates 旧路径重定向） */}
           <Route path="/admin/scenarios" element={<ScenariosPage />} />
           <Route path="/admin/templates" element={<Navigate to="/admin/scenarios" replace />} />
