@@ -131,7 +131,7 @@ export default function NodeFilesBrowser({ node }: { node: AgentNode }) {
         return
       }
       await renameNodeFile(node.id, root, joinRel(dir, renaming.name), name)
-      message.success('已改名')
+      message.success('已重命名')
       setRenaming(null)
       await reload()
     })
@@ -293,7 +293,7 @@ export default function NodeFilesBrowser({ node }: { node: AgentNode }) {
                     setRenameDraft(e.name)
                   }}
                 >
-                  改名
+                  重命名
                 </Button>
                 <Button danger onClick={() => onDelete(e)}>
                   删除
@@ -327,13 +327,13 @@ export default function NodeFilesBrowser({ node }: { node: AgentNode }) {
         )}
       </Modal>
 
-      {/* 改名弹窗 */}
+      {/* 重命名弹窗 */}
       <Modal
         centered
-        title={`改名 · ${renaming?.name ?? ''}`}
+        title={`重命名 · ${renaming?.name ?? ''}`}
         open={!!renaming}
         onCancel={() => setRenaming(null)}
-        okText="改名"
+        okText="重命名"
         cancelText="取消"
         confirmLoading={busy}
         onOk={doRename}
