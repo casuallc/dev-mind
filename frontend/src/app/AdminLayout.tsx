@@ -116,7 +116,8 @@ export default function AdminLayout() {
 
   return (
     <Layout style={{ height: '100vh' }}>
-      <Sider theme="light" width={200} style={{ borderRight: '1px solid #f0f0f0' }}>
+      {/* 菜单组增多后总高可能超视口：Sider 内部滚动，不溢出整页（layout 回归断言文档不溢出） */}
+      <Sider theme="light" width={200} style={{ borderRight: '1px solid #f0f0f0', overflowY: 'auto', overflowX: 'hidden' }}>
         <div style={{ padding: '16px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
           <img src="/logo.svg" alt="Dev-Mind" width={22} height={22} />
           Dev-Mind 后台
