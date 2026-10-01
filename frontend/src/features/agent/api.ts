@@ -136,8 +136,8 @@ export function uploadNodeFile(
   return api.uploadWithProgress(`/agent-nodes/${id}/files/upload?${fileQs(root, path)}`, form, onProgress)
 }
 
-/** 下载（≤100MB；api client 只解 JSON，二进制走原生 fetch + blob，照 downloadRunnerPackage 先例） */
-export async function downloadNodeFile(id: number, root: string, path: string, name: string): Promise<void> {
+/** 拉取文件二进制（≤100MB；api client 只解 JSON，二进制走原生 fetch） */
+export async function fetchNodeFileBlob(id: number, root: string, path: string): Promise<Blob> {
   const res = await fetch(`/api/agent-nodes/${id}/files/download?${fileQs(root, path)}`, {
     headers: { Authorization: `Bearer ${getAccessToken() ?? ''}` },
   })
@@ -146,7 +146,12 @@ export async function downloadNodeFile(id: number, root: string, path: string, n
     const { parseApiError } = await import('../../shared/api/error')
     throw parseApiError(res.status, text)
   }
-  const blob = await res.blob()
+  return res.blob()
+}
+
+/** 下载（照 downloadRunnerPackage 先例：blob → a[download]） */
+export async function downloadNodeFile(id: number, root: string, path: string, name: string): Promise<void> {
+  const blob = await fetchNodeFileBlob(id, root, path)
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
   a.download = name

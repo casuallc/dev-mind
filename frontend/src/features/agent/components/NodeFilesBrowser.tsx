@@ -1,5 +1,5 @@
 // CAP-65 节点文件浏览器：白名单根目录内的一层列表（目录优先排序、面包屑下钻），
-// 文本文件预览/编辑一体弹窗（等宽字体，CAP-60 字体栈），改名/删除/上传/下载。
+// 预览/编辑走 NodeFilePreviewModal（按类型渲染：markdown/图片/shell/txt，支持放大与查找），重命名/删除/上传/下载。
 // 安全边界在服务端+runner 双重校验（白名单外/逃逸/超限一律 409/400），此处只做体验层预检。
 // 由 NodeFilesPage（全页）承载；自身为 flex 列容器，撑满父级剩余高度。
 import { useCallback, useEffect, useState } from 'react'
@@ -32,14 +32,16 @@ import {
   uploadNodeFile,
   writeNodeFile,
 } from '../api'
+import NodeFilePreviewModal, { fileKindOf } from './NodeFilePreviewModal'
+import type { NodeFileKind } from './NodeFilePreviewModal'
 import { fmtBytes, fmtTime } from '../../../shared/utils/format'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
-/** 预览/编辑等宽字体栈（CAP-60 终端同款） */
-const MONO_FONT = "'JetBrains Mono', 'Cascadia Code', 'Cascadia Mono', Consolas, Menlo, 'Courier New', monospace"
 const TRANSFER_CAP = 100 * 1024 * 1024
+/** 图片预览走下载端点拉 blob，超 20MB 不内联，引导下载 */
+const IMAGE_PREVIEW_CAP = 20 * 1024 * 1024
 
 const joinRel = (dir: string, name: string) => (dir ? `${dir}/${name}` : name)
 
@@ -54,8 +56,8 @@ export default function NodeFilesBrowser({ node }: { node: AgentNode }) {
   const [truncated, setTruncated] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  // 预览/编辑一体弹窗：dirty 才放行保存
-  const [preview, setPreview] = useState<{ entry: NodeFileEntry; orig: string; draft: string } | null>(null)
+  // 预览/编辑弹窗（NodeFilePreviewModal）：文本类 content=已读内容，图片 content=null（弹窗自拉 blob）
+  const [preview, setPreview] = useState<{ entry: NodeFileEntry; kind: NodeFileKind; content: string | null } | null>(null)
   const [renaming, setRenaming] = useState<NodeFileEntry | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [newFileOpen, setNewFileOpen] = useState(false)
@@ -94,13 +96,29 @@ export default function NodeFilesBrowser({ node }: { node: AgentNode }) {
     }
   }
 
-  /** 文件点击：读成功开编辑弹窗；二进制/超限（409）降级为「下载查看」引导 */
+  /** 文件点击：图片直接开弹窗（超大引导下载）；文本读成功开弹窗，二进制/超限（409）降级「下载查看」 */
   const openFile = (entry: NodeFileEntry) =>
     run(async () => {
       const rel = joinRel(dir, entry.name)
+      const kind = fileKindOf(entry.name)
+      if (kind === 'image') {
+        if ((entry.size ?? 0) > IMAGE_PREVIEW_CAP) {
+          Modal.confirm({
+            centered: true,
+            title: entry.name,
+            content: `图片超过 20MB（${fmtBytes(entry.size)}），不内联预览——可下载到本地查看。`,
+            okText: '下载查看',
+            cancelText: '关闭',
+            onOk: () => downloadNodeFile(node.id, root, rel, entry.name),
+          })
+          return
+        }
+        setPreview({ entry, kind, content: null })
+        return
+      }
       try {
         const res = await readNodeFile(node.id, root, rel)
-        setPreview({ entry, orig: res.content, draft: res.content })
+        setPreview({ entry, kind, content: res.content })
       } catch (e) {
         Modal.confirm({
           centered: true,
@@ -111,15 +129,6 @@ export default function NodeFilesBrowser({ node }: { node: AgentNode }) {
           onOk: () => downloadNodeFile(node.id, root, rel, entry.name),
         })
       }
-    })
-
-  const savePreview = () =>
-    run(async () => {
-      if (!preview) return
-      await writeNodeFile(node.id, root, joinRel(dir, preview.entry.name), preview.draft)
-      message.success(`已保存 ${preview.entry.name}`)
-      setPreview(null)
-      await reload()
     })
 
   const doRename = () =>
@@ -304,28 +313,21 @@ export default function NodeFilesBrowser({ node }: { node: AgentNode }) {
         ]}
       />
 
-      {/* 预览/编辑一体弹窗：等宽 TextArea，内容未改时保存按钮置灰 */}
-      <Modal
-        centered
-        width={820}
-        title={preview ? `预览/编辑 · ${preview.entry.name}` : ''}
-        open={!!preview}
-        onCancel={() => setPreview(null)}
-        okText="保存"
-        cancelText="关闭"
-        confirmLoading={busy}
-        okButtonProps={{ disabled: !preview || preview.draft === preview.orig }}
-        onOk={savePreview}
-      >
-        {preview && (
-          <Input.TextArea
-            style={{ fontFamily: MONO_FONT, fontSize: 12 }}
-            autoSize={{ minRows: 12, maxRows: 24 }}
-            value={preview.draft}
-            onChange={(e) => setPreview({ ...preview, draft: e.target.value })}
-          />
-        )}
-      </Modal>
+      {/* 预览/编辑弹窗：按类型渲染 + 放大/查找（保存后刷新列表） */}
+      {preview && (
+        <NodeFilePreviewModal
+          node={node}
+          root={root}
+          dir={dir}
+          entry={preview.entry}
+          kind={preview.kind}
+          initialContent={preview.content}
+          onClose={(saved) => {
+            setPreview(null)
+            if (saved) void reload()
+          }}
+        />
+      )}
 
       {/* 重命名弹窗 */}
       <Modal
