@@ -109,7 +109,7 @@ echo '[install] 后台启动 runner(日志 runner.log)...'
 nohup java -jar devmind-agent-runner.jar agent.properties >> runner.log 2>&1 &
 echo $! > runner.pid
 echo "[install] 完成:pid=$(cat runner.pid),目录 $INSTALL_DIR"
-echo '[install] 到平台「Agent 节点」页确认节点已 ONLINE'
+echo '[install] 到平台「Agent 执行 → 节点」页确认节点已 ONLINE'
 `
 }
 
@@ -121,4 +121,19 @@ export function downloadTextFile(filename: string, content: string, bom = false)
   a.download = filename
   a.click()
   URL.revokeObjectURL(a.href)
+}
+
+/**
+ * 下载一键安装脚本（Windows/Linux 一对）。地址随当前访问入口走（同源部署/开发代理均适用）。
+ * token 为 null 时生成参数化脚本（运行时传入），否则内嵌 token。
+ */
+export const downloadInstallScripts = (token: string | null) => {
+  const wsUrl = location.origin.replace(/^http/, 'ws') + '/ws/agent'
+  const downloadUrl = location.origin + '/api/agent-nodes/runner-package/download'
+  return {
+    windows: () =>
+      downloadTextFile('install-runner.ps1', buildWindowsInstallScript({ serverUrl: wsUrl, downloadUrl, token }), true),
+    linux: () =>
+      downloadTextFile('install-runner.sh', buildLinuxInstallScript({ serverUrl: wsUrl, downloadUrl, token })),
+  }
 }

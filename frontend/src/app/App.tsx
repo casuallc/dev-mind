@@ -40,6 +40,7 @@ import ClassifyPackagesPage from '../features/classify/pages/ClassifyPackagesPag
 import ClassifyPlaygroundPage from '../features/classify/pages/ClassifyPlaygroundPage'
 import ApiKeysPage from '../features/open-api/pages/ApiKeysPage'
 import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
+import AgentNodeDetailPage from '../features/agent/pages/AgentNodeDetailPage'
 import NodeFilesPage from '../features/agent/pages/NodeFilesPage'
 import RunnerPackagePage from '../features/agent/pages/RunnerPackagePage'
 import ConnLogsPage from '../features/agent/pages/ConnLogsPage'
@@ -197,6 +198,7 @@ export default function App() {
           {/* CAP-21 Agent 执行组：节点 / 节点文件 / Runner 包 / 连接日志 */}
           <Route path="/admin/agent" element={<Navigate to="/admin/agent/nodes" replace />} />
           <Route path="/admin/agent/nodes" element={<AgentNodesPage />} />
+          <Route path="/admin/agent/nodes/:id" element={<AgentNodeDetailPage />} />
           <Route path="/admin/agent/files" element={<NodeFilesPage />} />
           <Route path="/admin/agent/package" element={<RunnerPackagePage />} />
           <Route path="/admin/agent/logs" element={<ConnLogsPage />} />

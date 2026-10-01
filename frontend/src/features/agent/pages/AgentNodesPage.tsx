@@ -5,14 +5,10 @@ import {
   Button,
   Card,
   Checkbox,
-  Descriptions,
-  Drawer,
   Form,
   Input,
   Modal,
   Space,
-  Spin,
-  Table,
   Tag,
   Tooltip,
   Typography,
@@ -20,29 +16,19 @@ import {
 } from 'antd'
 import {
   CodeOutlined,
-  FolderOpenOutlined,
   PlusOutlined,
   ReloadOutlined,
   RocketOutlined,
-  StarOutlined,
   WindowsOutlined,
 } from '@ant-design/icons'
 import {
   createAgentNode,
-  deleteAgentNode,
-  disableAgentNode,
-  enableAgentNode,
   getRunnerPackage,
   listAgentNodes,
-  listNodeActiveSessions,
-  setAgentNodeDefault,
-  unsetAgentNodeDefault,
-  updateAgentNode,
   upgradeAgentNode,
 } from '../api'
-import type { AgentNode, IssuedNode, NodeActiveSession, RunnerPackage } from '../types'
-import ActiveSessionsCard, { activeSessionColumns } from '../components/ActiveSessionsCard'
-import { buildLinuxInstallScript, buildWindowsInstallScript, downloadTextFile } from '../utils/installScript'
+import type { AgentNode, IssuedNode, RunnerPackage } from '../types'
+import { downloadInstallScripts } from '../utils/installScript'
 import { fmtTime, fmtBytes } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
@@ -55,30 +41,17 @@ const statusColor: Record<string, string> = {
   DISABLED: 'red',
 }
 
-// 安装脚本生成参数：地址随当前访问入口走（同源部署/开发代理均适用）。
-// token 为 null 时生成参数化脚本（运行时传入），否则内嵌 token。
-const downloadScripts = (token: string | null) => {
-  const wsUrl = location.origin.replace(/^http/, 'ws') + '/ws/agent'
-  const downloadUrl = location.origin + '/api/agent-nodes/runner-package/download'
-  return {
-    windows: () =>
-      downloadTextFile('install-runner.ps1', buildWindowsInstallScript({ serverUrl: wsUrl, downloadUrl, token }), true),
-    linux: () =>
-      downloadTextFile('install-runner.sh', buildLinuxInstallScript({ serverUrl: wsUrl, downloadUrl, token })),
-  }
-}
-
 /**
- * CAP-21 后台页：Agent 节点列表（仅 ADMIN）。Runner 包 / 连接日志 / 节点文件已拆为「Agent 执行」组独立菜单。
- * 布局遵循 docs/core/前端内容区布局约定.md：Card 标题，表头 extra 放操作按钮，表格默认密度，行内「管理」开抽屉做全部操作。
+ * CAP-21 后台页：Agent 节点列表（仅 ADMIN）。Runner 包 / 连接日志 / 节点文件已拆为「Agent 执行」组独立菜单；
+ * 单节点的观测/配置/运维操作收在详情页（/admin/agent/nodes/:id）。
  */
 export default function AgentNodesPage() {
+  const navigate = useNavigate()
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [pkg, setPkg] = useState<RunnerPackage | null>(null)
   const [loading, setLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [issued, setIssued] = useState<IssuedNode | null>(null)
-  const [drawerId, setDrawerId] = useState<number | null>(null)
   const [form] = Form.useForm<{ name: string; labels?: string }>()
 
   const reload = () => {
@@ -110,9 +83,6 @@ export default function AgentNodesPage() {
     }
   }
 
-  // 抽屉里的节点随 5s 轮询保持新鲜；节点被删后抽屉自动关闭
-  const drawerNode = drawerId != null ? nodes.find((n) => n.id === drawerId) ?? null : null
-
   // 与托管包版本比对：runnerVersion 不一致 = 可升级（版本串含构建时间戳，每次构建唯一）
   const outdatedNodes = pkg ? nodes.filter((n) => n.runnerVersion && n.runnerVersion !== pkg.version) : []
   const upgradableNodes = outdatedNodes.filter((n) => n.status === 'ONLINE')
@@ -135,7 +105,7 @@ export default function AgentNodesPage() {
       const busy = results.filter((r) => r.status === 'BUSY').length
       const failed = results.length - accepted - busy
       if (failed > 0) message.warning(`已下发 ${accepted} 个升级，${busy} 个忙推迟，${failed} 个失败`)
-      else if (busy > 0) message.info(`已下发 ${accepted} 个升级，${busy} 个忙推迟（有活跃会话，可在节点抽屉里强制升级）`)
+      else if (busy > 0) message.info(`已下发 ${accepted} 个升级，${busy} 个忙推迟（有活跃会话，可在节点详情页强制升级）`)
       else message.success(`已下发 ${accepted} 个升级`)
       reload()
     } finally {
@@ -223,12 +193,12 @@ export default function AgentNodesPage() {
       title: '活跃会话',
       dataIndex: 'activeSessionCount',
       width: 100,
-      // 有会话时数字可点开抽屉看清单；null = 无会话模块装配（不显示 0 误导）
+      // 有会话时数字可点进详情页看清单；null = 无会话模块装配（不显示 0 误导）
       render: (n: number | undefined, r: AgentNode) =>
         n == null ? (
           '-'
         ) : n > 0 ? (
-          <Button type="link" size="small" style={{ padding: 0 }} onClick={() => setDrawerId(r.id)}>
+          <Button type="link" size="small" style={{ padding: 0 }} onClick={() => navigate(`/admin/agent/nodes/${r.id}`)}>
             {n} 个
           </Button>
         ) : (
@@ -246,7 +216,7 @@ export default function AgentNodesPage() {
       key: 'act',
       width: 90,
       render: (_: unknown, r: AgentNode) => (
-        <Button size="small" onClick={() => setDrawerId(r.id)}>
+        <Button size="small" onClick={() => navigate(`/admin/agent/nodes/${r.id}`)}>
           管理
         </Button>
       ),
@@ -350,10 +320,10 @@ export default function AgentNodesPage() {
               <Typography.Text type="secondary">一键安装脚本（已内嵌 token，拷到目标机执行即上线）</Typography.Text>
               <div>
                 <Space>
-                  <Button icon={<WindowsOutlined />} onClick={downloadScripts(issued.token).windows}>
+                  <Button icon={<WindowsOutlined />} onClick={downloadInstallScripts(issued.token).windows}>
                     Windows (.ps1)
                   </Button>
-                  <Button icon={<CodeOutlined />} onClick={downloadScripts(issued.token).linux}>
+                  <Button icon={<CodeOutlined />} onClick={downloadInstallScripts(issued.token).linux}>
                     Linux (.sh)
                   </Button>
                 </Space>
@@ -368,476 +338,13 @@ export default function AgentNodesPage() {
                   type="warning"
                   showIcon
                   style={{ marginTop: 8 }}
-                  message="尚未上传 runner 包——脚本中的下载步骤会失败，请先在「Runner 包」页签上传。"
+                  message="尚未上传 runner 包——脚本中的下载步骤会失败，请先在「Runner 包」菜单上传。"
                 />
               )}
             </div>
           </Space>
         )}
       </Modal>
-
-      {drawerNode && (
-        <NodeDrawer
-          node={drawerNode}
-          pkg={pkg}
-          onClose={() => setDrawerId(null)}
-          onChanged={reload}
-        />
-      )}
     </Card>
   )
 }
-
-// ---------------- 节点管理抽屉 ----------------
-function NodeDrawer({
-  node,
-  pkg,
-  onClose,
-  onChanged,
-}: {
-  node: AgentNode
-  pkg: RunnerPackage | null
-  onClose: () => void
-  onChanged: () => void
-}) {
-  const [busy, setBusy] = useState(false)
-  // 标签草稿只在切换节点时重置——5s 轮询刷新 labels 不应覆盖用户正在编辑的输入
-  const [labelsDraft, setLabelsDraft] = useState(node.labels ?? '')
-  useEffect(() => setLabelsDraft(node.labels ?? ''), [node.id]) // eslint-disable-line react-hooks/exhaustive-deps
-  // CAP-43 外网代理草稿：同 labels 的防轮询覆盖语义
-  const [proxyUrlDraft, setProxyUrlDraft] = useState(node.proxyUrl ?? '')
-  const [proxyScopesDraft, setProxyScopesDraft] = useState<string[]>(
-    node.proxyScopes ? node.proxyScopes.split(',').filter(Boolean) : ['git'],
-  )
-  useEffect(() => {
-    setProxyUrlDraft(node.proxyUrl ?? '')
-    setProxyScopesDraft(node.proxyScopes ? node.proxyScopes.split(',').filter(Boolean) : ['git'])
-  }, [node.id]) // eslint-disable-line react-hooks/exhaustive-deps
-  // CAP-65 文件访问根目录草稿：同 labels 的防轮询覆盖语义（每行一个绝对路径）
-  const [fileRootsDraft, setFileRootsDraft] = useState((node.fileRoots ?? []).join('\n'))
-  useEffect(() => setFileRootsDraft((node.fileRoots ?? []).join('\n')), [node.id]) // eslint-disable-line react-hooks/exhaustive-deps
-  const navigate = useNavigate()
-  const outdated = !!(pkg && node.runnerVersion && node.runnerVersion !== pkg.version)
-
-  // 强制升级弹窗：BUSY 时打开，异步拉活跃会话清单（null=加载中）
-  const [forceOpen, setForceOpen] = useState(false)
-  const [activeSessions, setActiveSessions] = useState<NodeActiveSession[] | null>(null)
-
-  const run = async (fn: () => Promise<void>) => {
-    setBusy(true)
-    try {
-      await fn()
-    } catch (e) {
-      showError(e, '操作失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const showForceModal = () => {
-    setForceOpen(true)
-    setActiveSessions(null)
-    listNodeActiveSessions(node.id)
-      .then(setActiveSessions)
-      .catch(() => setActiveSessions([])) // 拉取失败降级为纯计数文案，不挡强制升级
-  }
-
-  const doUpgrade = (force = false) =>
-    run(async () => {
-      const res = await upgradeAgentNode(node.id, force)
-      if (res.status === 'ACCEPTED') message.success(res.message)
-      else if (res.status === 'BUSY') {
-        if (force) {
-          // 仍 busy：runner 版本过旧不认识 force 字段
-          message.warning(`${res.message}（节点 runner 过旧不支持强制升级，请先手工部署基线版本）`)
-        } else {
-          showForceModal()
-        }
-      }
-      else if (res.status === 'ALREADY_LATEST') message.info(res.message)
-      else message.error(res.message)
-      onChanged()
-    })
-
-  // 确认弹窗统一走平台通用的居中 Modal.confirm，不用贴按钮的 Popconfirm
-  const onUpgrade = () =>
-    Modal.confirm({
-      centered: true,
-      title: `升级节点「${node.name}」？`,
-      okText: '升级',
-      cancelText: '取消',
-      onOk: () => doUpgrade(false),
-    })
-
-  const doSetDefault = (isDefault: boolean) =>
-    run(async () => {
-      if (isDefault) {
-        await setAgentNodeDefault(node.id)
-        message.success(`已将 ${node.name} 设为平台默认节点`)
-      } else {
-        await unsetAgentNodeDefault(node.id)
-        message.success(`已取消 ${node.name} 的平台默认`)
-      }
-      onChanged()
-    })
-
-  // 默认节点影响全平台会话调度，设/取消都需二次确认
-  const onSetDefault = (isDefault: boolean) =>
-    Modal.confirm({
-      centered: true,
-      title: isDefault ? `将「${node.name}」设为平台默认节点？` : `取消「${node.name}」的平台默认？`,
-      content: isDefault
-        ? '会话/项目未指定节点时将调度到该节点（全平台至多一个，原有默认会被替换）。'
-        : '取消后未指定节点且项目也无默认节点的会话将创建失败（无可用执行节点）。',
-      okText: isDefault ? '设为默认' : '取消默认',
-      cancelText: '再想想',
-      onOk: () => doSetDefault(isDefault),
-    })
-
-  const doToggleEnable = () =>
-    run(async () => {
-      if (node.status === 'DISABLED') {
-        await enableAgentNode(node.id)
-        message.success(`已启用 ${node.name}`)
-      } else {
-        await disableAgentNode(node.id)
-        message.success(`已禁用 ${node.name}`)
-      }
-      onChanged()
-    })
-
-  // 启用无害直接执行；禁用会切断调度，需二次确认
-  const onToggleEnable = () => {
-    if (node.status === 'DISABLED') {
-      void doToggleEnable()
-      return
-    }
-    Modal.confirm({
-      centered: true,
-      title: `禁用节点「${node.name}」？`,
-      content: '禁用后新会话不再调度到该节点，其运行中会话不受影响。',
-      okText: '禁用',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: doToggleEnable,
-    })
-  }
-
-  const onSaveLabels = () =>
-    run(async () => {
-      await updateAgentNode(node.id, { labels: labelsDraft.trim() || undefined })
-      message.success('标签已保存')
-      onChanged()
-    })
-
-  // CAP-43：URL 留空 = 清空代理（连 scope 一起清）；只传代理字段，labels 不动
-  const onSaveProxy = () =>
-    run(async () => {
-      const url = proxyUrlDraft.trim()
-      await updateAgentNode(node.id, {
-        proxyUrl: url,
-        proxyScopes: url ? proxyScopesDraft.join(',') : undefined,
-      })
-      message.success(url ? '外网代理已保存（随下一指令帧生效）' : '外网代理已清空')
-      onChanged()
-    })
-
-  // CAP-65：每行一个绝对路径，空行忽略；全留空 = 清空白名单（文件浏览不可用）
-  const onSaveFileRoots = () =>
-    run(async () => {
-      const roots = fileRootsDraft.split('\n').map((l) => l.trim()).filter(Boolean)
-      await updateAgentNode(node.id, { fileRoots: roots })
-      message.success(roots.length ? `文件访问根目录已保存（${roots.length} 个）` : '文件访问根目录已清空，文件浏览不可用')
-      onChanged()
-    })
-
-  const doDelete = () =>
-    run(async () => {
-      await deleteAgentNode(node.id)
-      message.success('已删除')
-      onClose()
-      onChanged()
-    })
-
-  const onDelete = () =>
-    Modal.confirm({
-      centered: true,
-      title: `删除节点「${node.name}」？`,
-      content: '其运行中会话将失联。',
-      okText: '删除',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: doDelete,
-    })
-
-  return (
-    <Drawer title={`节点 · ${node.name}`} open onClose={onClose} width={760}>
-      <Spin spinning={busy}>
-        <Space direction="vertical" style={{ width: '100%' }} size={16}>
-          <Descriptions size="small" column={2}>
-            <Descriptions.Item label="ID">{node.id}</Descriptions.Item>
-            <Descriptions.Item label="状态">
-              <Tag color={statusColor[node.status] ?? 'default'}>{node.status}</Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="系统">{node.os || '-'}</Descriptions.Item>
-            <Descriptions.Item label="来源地址">
-              {node.remoteAddr ? <Typography.Text code>{node.remoteAddr}</Typography.Text> : '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="能力">{node.capabilities || '-'}</Descriptions.Item>
-            <Descriptions.Item label="runner 版本">
-              {node.runnerVersion ? (
-                outdated ? (
-                  <Tooltip title={`可升级 → ${pkg!.version}`}>
-                    <Tag color="orange">{node.runnerVersion} · 可升级</Tag>
-                  </Tooltip>
-                ) : (
-                  <Tag>{node.runnerVersion}</Tag>
-                )
-              ) : (
-                '-'
-              )}
-            </Descriptions.Item>
-            <Descriptions.Item label="工作区占用">{fmtBytes(node.workspaceBytes)}</Descriptions.Item>
-            <Descriptions.Item label="协议版本">
-              {node.protocolVersion != null ? `v${node.protocolVersion}` : 'v1（未上报）'}
-            </Descriptions.Item>
-            <Descriptions.Item label="最近心跳">{fmtTime(node.lastHeartbeatAt)}</Descriptions.Item>
-            <Descriptions.Item label="工具链" span={2}>
-              <ToolchainTags json={node.toolchain} />
-            </Descriptions.Item>
-            <Descriptions.Item label="标签" span={2}>
-              {node.labels || '-'}
-            </Descriptions.Item>
-          </Descriptions>
-
-          <ActiveSessionsCard nodeId={node.id} />
-
-          <Card size="small" title="标签（调度）">
-            <Space direction="vertical" style={{ width: '100%' }} size={8}>
-              <Typography.Text type="secondary">
-                创建会话时可填「标签要求」，仅标签全覆盖的节点可被调度。runner 的 agent.properties 配置了 labels 时，其 hello 会覆盖此处编辑值。
-              </Typography.Text>
-              <Space.Compact style={{ width: '100%' }}>
-                <Input
-                  placeholder="如 windows,office（逗号分隔；留空 = 清除）"
-                  value={labelsDraft}
-                  onChange={(e) => setLabelsDraft(e.target.value)}
-                />
-                <Button type="primary" onClick={onSaveLabels}>
-                  保存
-                </Button>
-              </Space.Compact>
-            </Space>
-          </Card>
-
-          <Card size="small" title="外网代理（CAP-43）">
-            <Space direction="vertical" style={{ width: '100%' }} size={8}>
-              <Typography.Text type="secondary">
-                节点上的 git 网络操作 / claude 会话进程 / exec 脚本经此代理访问外网（按下方勾选生效）。
-                保存后随下一指令帧即时生效；runner 协议版本需 ≥ v8，低于 v8 时下发会被服务端拒绝并提示升级。
-                不支持带账号密码的代理地址。
-              </Typography.Text>
-              <Input
-                placeholder="http://127.0.0.1:8443（留空 = 直连）"
-                value={proxyUrlDraft}
-                onChange={(e) => setProxyUrlDraft(e.target.value)}
-              />
-              <Checkbox.Group
-                options={[
-                  { label: 'git 代码库操作', value: 'git' },
-                  { label: 'claude 会话进程', value: 'claude' },
-                  { label: 'exec 脚本', value: 'exec' },
-                ]}
-                value={proxyScopesDraft}
-                onChange={(v) => setProxyScopesDraft(v as string[])}
-              />
-              <div>
-                <Button type="primary" onClick={onSaveProxy}>
-                  保存
-                </Button>
-              </div>
-            </Space>
-          </Card>
-
-          <Card size="small" title="文件访问根目录（CAP-65）">
-            <Space direction="vertical" style={{ width: '100%' }} size={8}>
-              <Typography.Text type="secondary">
-                每行一个绝对路径（Windows 如 D:/data，Linux 如 /var/log），最多 16 个。
-                文件浏览/读写仅限白名单根目录之内；<Typography.Text strong>留空 = 文件浏览不可用</Typography.Text>。
-                runner 协议版本需 ≥ v18（低于 v18 的操作会被服务端拒绝并提示升级）。
-              </Typography.Text>
-              <Input.TextArea
-                autoSize={{ minRows: 2, maxRows: 8 }}
-                placeholder={'D:/data\n/var/log'}
-                value={fileRootsDraft}
-                onChange={(e) => setFileRootsDraft(e.target.value)}
-              />
-              <Space>
-                <Button type="primary" onClick={onSaveFileRoots}>
-                  保存
-                </Button>
-                <Tooltip
-                  title={
-                    !(node.fileRoots?.length)
-                      ? '未配置文件访问根目录，文件浏览不可用'
-                      : node.status !== 'ONLINE'
-                        ? '节点不在线，无法浏览文件'
-                        : undefined
-                  }
-                >
-                  <span>
-                    <Button
-                      icon={<FolderOpenOutlined />}
-                      disabled={!(node.fileRoots?.length) || node.status !== 'ONLINE'}
-                      onClick={() => navigate(`/admin/agent/files?nodeId=${node.id}`)}
-                    >
-                      文件浏览
-                    </Button>
-                  </span>
-                </Tooltip>
-              </Space>
-            </Space>
-          </Card>
-
-          <Card size="small" title="一键安装脚本">
-            <Space direction="vertical" style={{ width: '100%' }} size={8}>
-              <Typography.Text type="secondary">
-                参数化脚本不含 token（token 仅创建节点时可见），下载后在目标机执行时传入；token 已丢失请重建节点。
-              </Typography.Text>
-              <Space>
-                <Button icon={<WindowsOutlined />} onClick={downloadScripts(null).windows}>
-                  Windows (.ps1)
-                </Button>
-                <Button icon={<CodeOutlined />} onClick={downloadScripts(null).linux}>
-                  Linux (.sh)
-                </Button>
-              </Space>
-              <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                Windows：
-                <Typography.Text code>powershell -ExecutionPolicy Bypass -File install-runner.ps1 -Token dmag_xxx</Typography.Text>
-              </Typography.Paragraph>
-              <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                Linux：
-                <Typography.Text code>bash install-runner.sh dmag_xxx</Typography.Text>
-              </Typography.Paragraph>
-            </Space>
-          </Card>
-
-          <Card size="small" title="调度">
-            <Space direction="vertical" style={{ width: '100%' }} size={8}>
-              <Typography.Text type="secondary">
-                平台默认执行节点：会话/项目未指定节点时调度到此（全平台至多一个）。
-              </Typography.Text>
-              <div>
-                {node.isDefault ? (
-                  <Button icon={<StarOutlined />} onClick={() => onSetDefault(false)}>
-                    取消平台默认
-                  </Button>
-                ) : (
-                  <Tooltip title={node.status === 'DISABLED' ? '已禁用节点不能设为默认' : undefined}>
-                    <Button
-                      icon={<StarOutlined />}
-                      disabled={node.status === 'DISABLED'}
-                      onClick={() => onSetDefault(true)}
-                    >
-                      设为平台默认
-                    </Button>
-                  </Tooltip>
-                )}
-              </div>
-            </Space>
-          </Card>
-
-          {node.status === 'ONLINE' && (
-            <Card size="small" title="升级 runner">
-              <Space direction="vertical" style={{ width: '100%' }} size={8}>
-                <Typography.Text type="secondary">
-                  {pkg
-                    ? `${node.runnerVersion ?? '-'} → ${pkg.version}；有活跃会话时将推迟执行（可选择强制升级，先终止会话）。`
-                    : '请先在「Runner 包」页签上传 runner 包。'}
-                </Typography.Text>
-                <div>
-                  <Button type="primary" icon={<RocketOutlined />} disabled={!pkg} onClick={onUpgrade}>
-                    升级
-                  </Button>
-                </div>
-              </Space>
-            </Card>
-          )}
-
-          <Card size="small" title="状态与删除">
-            <Space>
-              <Button onClick={onToggleEnable}>
-                {node.status === 'DISABLED' ? '启用' : '禁用'}
-              </Button>
-              <Button danger onClick={onDelete}>
-                删除节点
-              </Button>
-            </Space>
-          </Card>
-        </Space>
-      </Spin>
-
-      {/* BUSY 后的强制升级确认：列出将被终止的活跃会话 */}
-      <Modal
-        centered
-        title="节点有活跃会话，已推迟升级"
-        open={forceOpen}
-        onCancel={() => setForceOpen(false)}
-        okText="终止并升级"
-        okButtonProps={{ danger: true, loading: busy }}
-        cancelText="取消"
-        onOk={() => {
-          setForceOpen(false)
-          void doUpgrade(true)
-        }}
-      >
-        <Space direction="vertical" style={{ width: '100%' }} size={12}>
-          {activeSessions === null ? (
-            <Spin size="small" />
-          ) : activeSessions.length === 0 ? (
-            <Typography.Text type="secondary">
-              未查到会话清单（服务端会话模块未装配或已全部结束）——确认后 runner 将自行终止其本地会话进程。
-            </Typography.Text>
-          ) : (
-            <Table<NodeActiveSession>
-              rowKey="sessionId"
-              size="small"
-              pagination={false}
-              dataSource={activeSessions}
-              columns={activeSessionColumns}
-            />
-          )}
-          <Alert
-            type="warning"
-            showIcon
-            message="强制升级将终止以上会话：runner 先正常终止进程（托管工作区会尝试 push 未推送的改动），再下载换包并自动重启。"
-          />
-        </Space>
-      </Modal>
-    </Drawer>
-  )
-}
-
-// ---------------- 工具链标签（FR-07） ----------------
-/** toolchain JSON 对象串 → 「工具 版本」Tag 列表；解析失败原样展示。 */
-function ToolchainTags({ json }: { json?: string }) {
-  if (!json) return <>-</>
-  let entries: [string, string][]
-  try {
-    entries = Object.entries(JSON.parse(json) as Record<string, string>)
-  } catch {
-    return <Typography.Text code>{json}</Typography.Text>
-  }
-  if (entries.length === 0) return <>-</>
-  return (
-    <Space size={4} wrap>
-      {entries.map(([k, v]) => (
-        <Tag key={k}>
-          {k} {v}
-        </Tag>
-      ))}
-    </Space>
-  )
-}
-
