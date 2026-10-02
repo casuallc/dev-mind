@@ -8,6 +8,8 @@ import type {
   BookmarkPayload,
   BookmarkShare,
   BookmarkTagSummary,
+  ImportNode,
+  ImportResult,
   ProbeResult,
   SharedWithMe,
 } from './types'
@@ -39,6 +41,11 @@ export const probeBookmark = (id: string) => api.post<ProbeResult>(`/bookmarks/$
 /** 批量探测异步执行，返回受理条数；进度靠轮询列表的 lastCheckedAt 体现 */
 export const probeBookmarks = (ids: string[]) =>
   api.post<{ accepted: number }>('/bookmarks/probe-batch', { ids: ids.map(Number) })
+
+// ---- FR-09 导入 ----
+
+/** 导入浏览器书签树（Netscape HTML 已由 parseBookmarkFile 解析为结构化树） */
+export const importBookmarks = (nodes: ImportNode[]) => api.post<ImportResult>('/bookmarks/import', { nodes })
 
 // ---- FR-02 分组与转移 ----
 

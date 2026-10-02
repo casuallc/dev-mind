@@ -13,7 +13,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { AppstoreOutlined, BarsOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, BarsOutlined, ImportOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   copyShared,
@@ -26,6 +26,7 @@ import {
   deleteShare,
   deleteTag,
   getAccountSecret,
+  importBookmarks,
   listBookmarks,
   listGroups,
   listShares,
@@ -46,12 +47,14 @@ import type {
   BookmarkShare,
   BookmarkStatus,
   BookmarkTagSummary,
+  ImportNode,
   SharedWithMe,
 } from '../types'
 import BookmarkCardGrid from '../components/BookmarkCardGrid'
 import BookmarkDrawer, { type BookmarkFormValues } from '../components/BookmarkDrawer'
 import GroupModal from '../components/GroupModal'
 import GroupTree, { type GroupSelection } from '../components/GroupTree'
+import ImportModal from '../components/ImportModal'
 import ShareModal, { type ShareTarget } from '../components/ShareModal'
 import SharedWithMePane from '../components/SharedWithMePane'
 import StatusDot from '../components/StatusDot'
@@ -134,6 +137,8 @@ export default function BookmarksPage() {
   const [secrets, setSecrets] = useState<Record<string, string | null>>({})
   const [copying, setCopying] = useState<{ bookmark: Bookmark; owner: string } | null>(null)
   const [copyGroup, setCopyGroup] = useState<number | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
+  const [importSaving, setImportSaving] = useState(false)
 
   const dupAcknowledged = useRef(false)
   const [polling, setPolling] = useState(false)
@@ -305,6 +310,28 @@ export default function BookmarksPage() {
           })
           .catch((e) => showError(e, '删除失败')),
     })
+
+  // ---------------- FR-09 导入 ----------------
+
+  const submitImport = async (nodes: ImportNode[]) => {
+    setImportSaving(true)
+    try {
+      const r = await importBookmarks(nodes)
+      const skipped = [
+        r.skippedDuplicates ? `跳过重复 ${r.skippedDuplicates} 条` : '',
+        r.skippedInvalid ? `跳过无效地址 ${r.skippedInvalid} 条` : '',
+      ]
+        .filter(Boolean)
+        .join('，')
+      message.success(`导入完成：新增 ${r.createdBookmarks} 条收藏、${r.createdGroups} 个分组${skipped ? `，${skipped}` : ''}`)
+      setImportOpen(false)
+      await Promise.all([fetchMine(true), reloadGroups(), reloadTags()])
+    } catch (e) {
+      showError(e, '导入失败')
+    } finally {
+      setImportSaving(false)
+    }
+  }
 
   // ---------------- FR-02 分组 ----------------
 
@@ -500,9 +527,14 @@ export default function BookmarksPage() {
         刷新
       </Button>
       {view === 'mine' && (
-        <Button type="primary" icon={<PlusOutlined />} onClick={startCreate}>
-          新建收藏
-        </Button>
+        <>
+          <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
+            导入
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={startCreate}>
+            新建收藏
+          </Button>
+        </>
       )}
       {view === 'tags' && (
         <Button
@@ -831,6 +863,8 @@ export default function BookmarksPage() {
         onClose={() => setShareTarget(null)}
         onOk={submitShare}
       />
+
+      <ImportModal open={importOpen} saving={importSaving} onClose={() => setImportOpen(false)} onOk={submitImport} />
 
       <Modal
         title={tagModal?.editing ? `重命名标签：${tagModal.editing.name}` : '新建标签'}

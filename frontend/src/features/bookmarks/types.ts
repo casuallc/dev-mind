@@ -119,3 +119,22 @@ export interface BookmarkFilter {
 export function isOpenable(url: string): boolean {
   return /^https?:\/\//i.test(url.trim())
 }
+
+/** FR-09 导入树节点：folder 时 name/children 有效；bookmark 时 title/url/description/tags 有效 */
+export interface ImportNode {
+  type: 'folder' | 'bookmark'
+  name?: string
+  title?: string
+  url?: string
+  description?: string
+  tags?: string[]
+  children?: ImportNode[]
+}
+
+/** FR-09 导入结果汇报（与服务端 ImportResultView 对齐） */
+export interface ImportResult {
+  createdGroups: number
+  createdBookmarks: number
+  skippedDuplicates: number
+  skippedInvalid: number
+}

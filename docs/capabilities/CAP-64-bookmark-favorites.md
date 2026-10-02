@@ -21,7 +21,7 @@
 
 ### 非目标（v1 不做）
 
-- 浏览器插件/书签导入（Chrome bookmarks.html 解析）；
+- 浏览器插件（浏览器内一键收藏到平台；书签**文件**导入已落地，见 FR-09）；
 - 匿名公开分享链接（免登录访问）；
 - 网页快照/内容存档（只存元数据，不抓正文）；
 - 收藏内容进 RAG/知识库（与 CAP-04/44 无管道；后续如需经上下文装配另立 CAP）；
@@ -95,6 +95,22 @@
   命名空间读取，收藏主端点不因分享放行；
 - 菜单入口：顶部个人组「收藏夹」，菜单注册走 CAP-61 目录（默认全员可见）。
 
+### FR-09 浏览器书签导入
+
+- 入口：「我的收藏」工具条「导入」按钮，选择浏览器导出的书签 HTML
+  （Chrome / Edge / Firefox 书签管理器的导出格式，均为 Netscape Bookmark）；
+- **解析在前端**：Netscape HTML 由浏览器 DOMParser 解析成结构化树（文件夹 / 书签 / 备注 /
+  标签），服务端只接收 JSON 树，不在 Java 侧写 HTML 解析器（浏览器最懂自己的导出格式）；
+- 文件夹 → 同名分组（层级保留）：同父下同名分组**复用**不重建，重复导入同一文件幂等；
+- 书签 → 收藏条目：同 owner 已存在完全相同 URL（含本批次内重复）**跳过**并计数，不覆盖
+  既有条目的任何字段（与 FR-01「手工收藏不拦截同 URL」不冲突——导入是批量动作，幂等优先）；
+  非 http/https 或缺主机名的地址跳过并计数；标题为空回落用 URL 充当；
+- Firefox `TAGS` 属性按名 get-or-create 映射为标签（Chrome 导出无标签）；备注（`<DD>`）落
+  `description`；内嵌图标（ICON data URI）不导入（favicon 抓取仍是留后续项）；
+- 上限：单次 2000 条书签、文件夹 8 层，超限整体 400（单事务回滚，不残留半截导入）；
+- 返回 `{createdGroups, createdBookmarks, skippedDuplicates, skippedInvalid}`，前端 toast 汇报；
+- 归属口径同 FR-08：导入即逐条以 owner 身份创建，无新的权限面。
+
 ## 3. 插件化接口
 
 | SPI（devmind-common） | 实现方 | 消费方 |
@@ -151,6 +167,7 @@ POST   /api/bookmarks/{id}/visit            记录 last_visited_at（前端打�
 # 探测
 POST   /api/bookmarks/{id}/probe            单条探测（同步返回结果）
 POST   /api/bookmarks/probe-batch           {ids[]}（异步，202；上限 200）
+POST   /api/bookmarks/import                {nodes[]}（FR-09 结构化书签树；单事务，上限 2000 条/8 层）
 
 # 分组
 GET    /api/bookmark-groups                 我的分组树
@@ -190,8 +207,8 @@ POST   /api/bookmarks/shared-with-me/copy   {bookmarkId, groupId|null}（复制�
 
 ## 8. MVP 范围（v1 确认做 / 留后续）
 
-- v1：FR-01~08 全做；探测仅手动触发；分享仅平台内用户只读；
-- 留后续：浏览器书签导入、定时探测与失效通知（CAP-06）、favicon 抓取缓存、
+- v1：FR-01~09 全做；探测仅手动触发；分享仅平台内用户只读；
+- 留后续：定时探测与失效通知（CAP-06）、favicon 抓取缓存、
   匿名分享链接、收藏进上下文装配（BookmarkCatalog SPI）、访问频次统计排序。
 
 ## 9. 落地状态
@@ -212,3 +229,13 @@ POST   /api/bookmarks/shared-with-me/copy   {bookmarkId, groupId|null}（复制�
   6. 分享目标用户以用户名文本录入（平台暂无普通用户列表端点，CAP-61 菜单/用户体系就绪后可换选择器）；
   7. 前端将 `group_id` 为空的集合统称「默认分组」（虚拟分组，非实体分组行，不可重命名/分享/删除）；
      存储与 API 口径不变（`group_id IS NULL` / `ungrouped=true`）。
+
+- **M3 —— FR-09 浏览器书签导入（2026-10-02）**：`POST /api/bookmarks/import` 收结构化书签树
+  单事务落库；前端「我的收藏」工具条「导入」弹窗用 DOMParser 解析 Netscape HTML（书签管理器
+  导出文件），解析预览（文件夹/书签条数）后确认导入，toast 汇报新增/跳过计数。
+- **M3 实现口径**（同上，改口径先改这里）：
+  1. 导入分组复用键 = (owner, parentId, name)——重复导入同一文件幂等；手工建同名分组不受影响；
+  2. 导入去重 = owner 内完全相同 URL（normalize 后精确匹配，含批次内重复）跳过并计数；
+  3. 非法地址（非 http/https、缺主机名）跳过并计数，不阻塞整批；>64 字符的标签名同样跳过；
+  4. 标题/描述/组名超列宽（256/1024/128）截断而不报错——导入宁可截断不失败；
+  5. 书签 HTML 解析只在浏览器（DOMParser），服务端契约是结构化 JSON 树，E2E 直接打 JSON 契约。

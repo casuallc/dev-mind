@@ -11,6 +11,8 @@
    复制为自己的、撤销后立即不可见、重复分享 409；
 5. FR-08 归属：非 owner 直敲主端点一律 404（文案与「不存在」一致，不暴露存在性）。
 6. FR-02/03 分组与标签：分组删除二档、标签筛选与删除只解关联。
+7. FR-09 导入：结构化树 → 分组层级/备注/标签落库、非法地址跳过、重复导入幂等、
+   他人同 URL 不阻塞、空树与超 8 层 400。
 
 脚本自建分享接收方（username cap64-e2e-bob，密码每次随机重置），跑完清理本次创建的收藏/分组/标签。
 运行产物写 tmp/（本脚本只留一个 http 端口的日志）。
@@ -240,6 +242,64 @@ def main():
         req("DELETE", f"/bookmark-tags/{tag['id']}", token=admin)
         created_tags.remove(tag["id"])
         ok(req("GET", f"/bookmarks/{bid}", token=admin)["url"] == f"{base}/ok", "删标签不动收藏")
+
+        # ---------- FR-09 浏览器书签导入（服务端契约 = 结构化 JSON 树） ----------
+        import_tree = {"nodes": [
+            {"type": "folder", "name": f"e2e导入{TS}", "children": [
+                {"type": "bookmark", "title": f"E2E 导入A {TS}", "url": f"{base}/import-a",
+                 "description": "导入备注", "tags": [f"e2e导入标签{TS}"]},
+                {"type": "folder", "name": "子目录", "children": [
+                    {"type": "bookmark", "title": f"E2E 导入B {TS}", "url": "https://b.example.com/x"}]},
+            ]},
+            {"type": "bookmark", "title": f"E2E 导入散落 {TS}", "url": "https://loose.example.com"},
+            {"type": "bookmark", "title": "坏地址", "url": "javascript:alert(1)"},
+        ]}
+        r = req("POST", "/bookmarks/import", import_tree, token=admin)
+        ok(r["createdBookmarks"] == 3 and r["createdGroups"] == 2, f"导入新建 3 收藏 2 分组（实际 {r}）")
+        ok(r["skippedInvalid"] == 1, "非法地址跳过并计数")
+
+        gtree = req("GET", "/bookmark-groups", token=admin)
+        g_import = next(x for x in gtree if x["name"] == f"e2e导入{TS}")
+        created_groups.append(g_import["id"])
+        ok(g_import["children"][0]["name"] == "子目录", "导入保留文件夹层级")
+        sub_id = g_import["children"][0]["id"]
+
+        imported = req("GET", f"/bookmarks?keyword={quote('E2E 导入')}", token=admin)
+        ok(len(imported) == 3, "导入的 3 条收藏可按关键词查到")
+        created_bookmarks.extend(b["id"] for b in imported)
+        b_a = next(b for b in imported if b["title"] == f"E2E 导入A {TS}")
+        ok(b_a["groupId"] == g_import["id"], "导入书签落对应分组")
+        ok(b_a["description"] == "导入备注", "备注（DD）落 description")
+        ok(any(t["name"] == f"e2e导入标签{TS}" for t in b_a["tags"]), "Firefox TAGS 映射为标签")
+        ok(next(b for b in imported if b["title"] == f"E2E 导入B {TS}")["groupId"] == sub_id,
+           "子目录书签落子分组")
+        ok(next(b for b in imported if b["title"] == f"E2E 导入散落 {TS}")["groupId"] is None,
+           "松散书签落未分组")
+        tag_import = next(t for t in req("GET", "/bookmark-tags", token=admin)
+                          if t["name"] == f"e2e导入标签{TS}")
+        created_tags.append(tag_import["id"])
+
+        # 重复导入幂等：分组复用、同 URL 全跳过
+        r2 = req("POST", "/bookmarks/import", import_tree, token=admin)
+        ok(r2["createdBookmarks"] == 0 and r2["createdGroups"] == 0, "重复导入不重建分组/收藏")
+        ok(r2["skippedDuplicates"] == 3 and r2["skippedInvalid"] == 1, "重复导入同 URL 全部跳过")
+
+        # 归属隔离：bob 收藏同 URL 与 admin 互不干扰
+        r3 = req("POST", "/bookmarks/import", {"nodes": [
+            {"type": "bookmark", "title": "bob 的同名", "url": "https://loose.example.com"}]}, token=bob)
+        ok(r3["createdBookmarks"] == 1, "他人已有同 URL 不阻塞我的导入")
+        bob_copy = req("GET", "/bookmarks?keyword=bob", token=bob)
+        for b in bob_copy:
+            req("DELETE", f"/bookmarks/{b['id']}", token=bob)
+
+        # 上限与空树
+        req("POST", "/bookmarks/import", {"nodes": []}, token=admin, expect=400)
+        ok(True, "空导入树被拒（400）")
+        deep = {"type": "bookmark", "title": "deep", "url": "https://deep.example.com"}
+        for i in range(9):
+            deep = {"type": "folder", "name": f"d{i}", "children": [deep]}
+        req("POST", "/bookmarks/import", {"nodes": [deep]}, token=admin, expect=400)
+        ok(True, "文件夹超 8 层整体 400")
 
         # ---------- FR-02 分组 ----------
         g = req("POST", "/bookmark-groups", {"name": f"e2e环境{TS}"}, token=admin)

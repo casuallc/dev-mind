@@ -1,8 +1,10 @@
 package com.devmind.bookmark.controller;
 
+import com.devmind.bookmark.dto.BookmarkImportRequest;
 import com.devmind.bookmark.dto.BookmarkRequest;
 import com.devmind.bookmark.dto.BookmarkView;
 import com.devmind.bookmark.dto.CopySharedRequest;
+import com.devmind.bookmark.dto.ImportResultView;
 import com.devmind.bookmark.dto.MoveBookmarksRequest;
 import com.devmind.bookmark.dto.MoveResultView;
 import com.devmind.bookmark.dto.ProbeAcceptedView;
@@ -10,6 +12,7 @@ import com.devmind.bookmark.dto.ProbeBatchRequest;
 import com.devmind.bookmark.dto.ProbeResultView;
 import com.devmind.bookmark.dto.SecretView;
 import com.devmind.bookmark.dto.SharedWithMeView;
+import com.devmind.bookmark.service.BookmarkImportService;
 import com.devmind.bookmark.service.BookmarkProbeService;
 import com.devmind.bookmark.service.BookmarkService;
 import com.devmind.bookmark.service.BookmarkShareService;
@@ -41,13 +44,16 @@ public class BookmarkController {
     private final BookmarkService service;
     private final BookmarkProbeService probeService;
     private final BookmarkShareService shareService;
+    private final BookmarkImportService importService;
 
     public BookmarkController(BookmarkService service,
                               BookmarkProbeService probeService,
-                              BookmarkShareService shareService) {
+                              BookmarkShareService shareService,
+                              BookmarkImportService importService) {
         this.service = service;
         this.probeService = probeService;
         this.shareService = shareService;
+        this.importService = importService;
     }
 
     @GetMapping
@@ -87,6 +93,12 @@ public class BookmarkController {
     @ResponseStatus(HttpStatus.ACCEPTED)
     public ProbeAcceptedView probeBatch(@Valid @RequestBody ProbeBatchRequest req) {
         return new ProbeAcceptedView(probeService.probeBatch(req.ids()));
+    }
+
+    /** FR-09 导入浏览器书签（前端已解析为结构化树；单事务，同 URL 去重跳过）。 */
+    @PostMapping("/import")
+    public ImportResultView importBookmarks(@Valid @RequestBody BookmarkImportRequest req) {
+        return importService.importTree(req);
     }
 
     @GetMapping("/{id}")
