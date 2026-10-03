@@ -259,8 +259,11 @@ html, body, #root {
 .bm-group-row:hover .bm-row-actions { opacity: 1; }
 .bm-card:hover { border-color: #91caff !important; box-shadow: 0 2px 8px rgba(0, 0, 0, .08); }
 .bm-new-group:hover { color: #1677ff; border-color: #91caff !important; }
-/* 分组树（antd Tree）：标题铺满整行，选中/拖拽悬停沿用虚拟行的蓝色口径 */
-.bm-group-tree .ant-tree-node-content-wrapper { display: flex; align-items: center; min-width: 0; }
+/* 分组树（antd Tree）：无下拉箭头（点行折叠/展开，文件夹图标开合表状态），
+   缩进收窄到 12px 让三层分组名称仍可见；标题铺满整行，选中/拖拽悬停沿用虚拟行的蓝色口径 */
+.bm-group-tree .ant-tree-switcher { display: none; }
+.bm-group-tree .ant-tree-indent-unit { width: 12px !important; }
+.bm-group-tree .ant-tree-node-content-wrapper { display: flex; align-items: center; min-width: 0; cursor: pointer; }
 .bm-group-tree .ant-tree-title { flex: 1; min-width: 0; }
 .bm-group-tree .ant-tree-node-content-wrapper.ant-tree-node-selected { background: #e6f4ff; color: #1677ff; }
 .bm-group-tree .ant-tree-treenode { padding-bottom: 2px; }

@@ -1,8 +1,8 @@
 // CAP-64 分组树交互 UI E2E（M4：折叠记忆 + 拖拽改父分组）。
 // 前置：后端 + 前端 dev 已起（BASE 页面代理到 API）。
 // 断言：
-//   1) 分组树用 antd Tree 渲染（有折叠箭头），默认全展开；
-//   2) 点箭头折叠父分组 → 子分组行消失，折叠集写 localStorage；刷新页面后仍折叠（记忆生效）；
+//   1) 分组树用 antd Tree 渲染，默认全展开；无下拉箭头（点行即折叠/展开）；
+//   2) 点行折叠父分组 → 子分组行消失，折叠集写 localStorage；刷新页面后仍折叠（记忆生效）；
 //   3) 真鼠标拖拽子分组到目标分组上 → 服务端 parentId 变更（allowDrop/落点换算生效）；
 //   4) 把父分组拖进自己的子树 → allowDrop 拒绝，parentId 不变（前端防线；后端 400 由 cap64_e2e.py 覆盖）。
 // 用法：node tests/cap64_group_tree_ui.mjs   （BASE/API/CHROME_PATH 可覆盖）
@@ -189,14 +189,15 @@ async function main() {
     await waitFor(() => nodeRect(ws, C), '子分组行出现（默认全展开）')
     ok(true, '分组树 antd Tree 渲染，默认全展开（子分组可见）')
     ok(await evaluate(ws, `(() => {
-      const n = ${nodeJs(P)};
-      return !!n?.querySelector('.ant-tree-switcher:not(.ant-tree-switcher-noop)');
-    })()`), '父分组带折叠箭头')
+      const sw = document.querySelector('.bm-group-tree .ant-tree-switcher');
+      return !!sw && getComputedStyle(sw).display === 'none';
+    })()`), '无下拉箭头（switcher 隐藏，点行折叠）')
 
     // ── 2. 折叠 + 记忆 ────────────────────────────────────
-    await evaluate(ws, `${nodeJs(P)}.querySelector('.ant-tree-switcher').click()`)
+    // 无箭头：点行即折叠（行点击同时冒泡给 Tree 的选中，不影响本断言）
+    await evaluate(ws, `${nodeJs(P)}.querySelector('.bm-group-row').click()`)
     await waitFor(async () => !(await nodeRect(ws, C)), '折叠后子分组行移除')
-    ok(true, '点箭头折叠父分组，子分组行消失')
+    ok(true, '点行折叠父分组，子分组行消失')
     const collapsedStored = await evaluate(ws, `localStorage.getItem('bookmark.groupTree.collapsed')`)
     ok(collapsedStored?.includes(String(gP.id)), '折叠集写 localStorage（bookmark.groupTree.collapsed）')
 
@@ -212,8 +213,8 @@ async function main() {
     ok(!(await nodeRect(ws, C)), '刷新后仍折叠（本地记忆生效）')
     ok(!!(await nodeRect(ws, P)), '刷新后父分组仍在')
 
-    // 展开还原，进入拖拽用例
-    await evaluate(ws, `${nodeJs(P)}.querySelector('.ant-tree-switcher').click()`)
+    // 展开还原，进入拖拽用例（同样点行）
+    await evaluate(ws, `${nodeJs(P)}.querySelector('.bm-group-row').click()`)
     await waitFor(() => nodeRect(ws, C), '重新展开子分组行')
     // 展开是滑动动画：行出现≠到位，等目标行 rect 连续两拍不变（动画落定）再量坐标，
     // 否则拖拽起点量的是动画中途的位置，dragenter 时行已下移 → 纵坐标落进上半格误判

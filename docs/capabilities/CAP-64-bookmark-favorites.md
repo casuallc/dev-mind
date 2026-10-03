@@ -243,6 +243,8 @@ POST   /api/bookmarks/shared-with-me/copy   {bookmarkId, groupId|null}（复制�
   5. 书签 HTML 解析只在浏览器（DOMParser），服务端契约是结构化 JSON 树，E2E 直接打 JSON 契约。
 
 - **M4 —— 分组树折叠 + 拖拽改父级（2026-10-03）**：侧栏分组改用 antd Tree 渲染，
-  折叠集存 localStorage（记「收起的」，默认全展开，新建分组不会被藏住）；拖拽换父走既有
-  `PUT /bookmark-groups/{id}`（带原名只改 parentId），前端 `allowDrop` 禁拖入自己子树，
-  原地松手不发请求；「全部收藏/默认分组」两个虚拟行不进 Tree（不可拖、无折叠箭头）。
+  折叠集存 localStorage（记「收起的」，默认全展开，新建分组不会被藏住）；**点行即
+  折叠/展开，无下拉箭头**（文件夹图标开合表状态），缩进收窄到 12px + 侧栏加宽到
+  264px，三层分组名称仍可见；拖拽换父走既有 `PUT /bookmark-groups/{id}`（带原名
+  只改 parentId），前端 `allowDrop` 禁拖入自己子树，原地松手不发请求；
+  「全部收藏/默认分组」两个虚拟行不进 Tree（不可拖、无折叠交互）。

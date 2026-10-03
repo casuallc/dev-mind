@@ -5,6 +5,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   FolderAddOutlined,
+  FolderOpenOutlined,
   FolderOutlined,
   InboxOutlined,
   MoreOutlined,
@@ -151,6 +152,10 @@ export default function GroupTree({
     localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next))
   }
 
+  /** 点行即折叠/展开（无下拉箭头；有子分组才 toggle，叶子分组点了只是选中） */
+  const toggleCollapsed = (id: number) =>
+    persistCollapsed(collapsed.includes(id) ? collapsed.filter((x) => x !== id) : [...collapsed, id])
+
   const expandedKeys = allIds.filter((id) => !collapsed.includes(id))
   const onExpand = (keys: Key[]) => persistCollapsed(allIds.filter((id) => !keys.includes(id)))
 
@@ -184,19 +189,28 @@ export default function GroupTree({
     </Dropdown>
   )
 
-  const titleOf = (g: BookmarkGroup): ReactNode => (
-    <div className="bm-group-row" style={{ display: 'flex', alignItems: 'center', gap: 6, height: 28, minWidth: 0 }}>
-      <span style={iconStyle}>
-        <FolderOutlined />
-      </span>
-      <Tooltip title={g.name} mouseEnterDelay={0.4}>
-        <span style={nameStyle}>{g.name}</span>
-      </Tooltip>
-      {g.bookmarkCount > 0 && <span style={countStyle}>（{g.bookmarkCount}）</span>}
-      <span style={{ flex: 1 }} />
-      {actionsFor(g)}
-    </div>
-  )
+  const titleOf = (g: BookmarkGroup): ReactNode => {
+    const hasKids = g.children.length > 0
+    const expanded = hasKids && !collapsed.includes(g.id)
+    return (
+      // 点击行 = 选中（冒泡给 Tree 的 onSelect）；有子分组时同时折叠/展开
+      <div
+        className="bm-group-row"
+        style={{ display: 'flex', alignItems: 'center', gap: 6, height: 28, minWidth: 0 }}
+        onClick={() => {
+          if (hasKids) toggleCollapsed(g.id)
+        }}
+      >
+        <span style={iconStyle}>{expanded ? <FolderOpenOutlined /> : <FolderOutlined />}</span>
+        <Tooltip title={g.name} mouseEnterDelay={0.4}>
+          <span style={nameStyle}>{g.name}</span>
+        </Tooltip>
+        {g.bookmarkCount > 0 && <span style={countStyle}>（{g.bookmarkCount}）</span>}
+        <span style={{ flex: 1 }} />
+        {actionsFor(g)}
+      </div>
+    )
+  }
 
   const toNode = (g: BookmarkGroup): TreeDataNode => ({
     key: g.id,
@@ -234,7 +248,7 @@ export default function GroupTree({
   return (
     <div
       style={{
-        width: 220,
+        width: 264,
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
