@@ -53,7 +53,7 @@ import type {
 import BookmarkCardGrid from '../components/BookmarkCardGrid'
 import BookmarkDrawer, { type BookmarkFormValues } from '../components/BookmarkDrawer'
 import GroupModal from '../components/GroupModal'
-import GroupTree, { type GroupSelection } from '../components/GroupTree'
+import GroupTree, { findGroup, type GroupSelection } from '../components/GroupTree'
 import ImportModal from '../components/ImportModal'
 import ShareModal, { type ShareTarget } from '../components/ShareModal'
 import SharedWithMePane from '../components/SharedWithMePane'
@@ -377,6 +377,18 @@ export default function BookmarksPage() {
     })
   }
 
+  const moveGroup = async (g: BookmarkGroup, parentId: number | null) => {
+    try {
+      // 改名与换父共用一个 PUT：带上原名，只改 parentId；后端有成环校验（拖入自己子树 400）
+      await updateGroup(g.id, { name: g.name, parentId })
+      const parentName = parentId == null ? '顶级' : findGroup(groups, parentId)?.name
+      message.success(parentName ? `已移动到「${parentName}」下` : '已移动到顶级')
+      await Promise.all([reloadGroups(), fetchMine(true)])
+    } catch (e) {
+      showError(e, '移动分组失败')
+    }
+  }
+
   const submitMove = async () => {
     try {
       const { moved } = await moveBookmarks(selectedKeys, moveTarget)
@@ -579,6 +591,7 @@ export default function BookmarksPage() {
             onRename={(g) => setGroupModal({ editing: g, parent: null })}
             onDelete={confirmDeleteGroup}
             onShare={(g) => setShareTarget({ kind: 'group', id: g.id, name: g.name })}
+            onMove={moveGroup}
           />
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>

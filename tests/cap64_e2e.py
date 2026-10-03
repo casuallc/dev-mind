@@ -315,6 +315,19 @@ def main():
         root = next(x for x in tree if x["id"] == g["id"])
         ok(root["children"][0]["id"] == child["id"], "分组树按父子组装")
 
+        # 拖拽换父（M4）：前端落点 = PUT 带原名只改 parentId；成环校验在改父时兜底
+        req("PUT", f"/bookmark-groups/{g['id']}",
+            {"name": g["name"], "parentId": child["id"]}, token=admin, expect=400)
+        ok(True, "拖父分组进自己的子树被拒（400）")
+        moved = req("PUT", f"/bookmark-groups/{child['id']}",
+                    {"name": child["name"], "parentId": None}, token=admin)
+        ok(moved["parentId"] is None, "子分组可拖到顶级")
+        req("PUT", f"/bookmark-groups/{child['id']}",
+            {"name": child["name"], "parentId": g["id"]}, token=admin)
+        tree2 = req("GET", "/bookmark-groups", token=admin)
+        ok(next(x for x in tree2 if x["id"] == g["id"])["children"][0]["id"] == child["id"],
+           "拖回后父子关系还原")
+
         # ---------- FR-07 分享 ----------
         gid = None
         gtree = req("GET", "/bookmark-groups", token=admin)
