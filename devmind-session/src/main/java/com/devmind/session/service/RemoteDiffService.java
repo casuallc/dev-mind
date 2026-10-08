@@ -118,9 +118,10 @@ public class RemoteDiffService {
             GitCli.Result branchFetch = GitCli.run(cache, 120, "git", "fetch", "--no-tags", authUrl,
                     "+refs/heads/" + branch + ":" + REF_PREFIX + branch);
             if (branchFetch.exitCode() != 0) {
-                // CAP-42：会话分支在收口（页面手动触发「收口合并到基线」）时才推送远端，此前属正常时序
+                // CAP-42：会话分支在收口（页面手动触发「收口合并到基线」）时才推送远端，此前属正常时序；
+                // v19：收口勾选「删除远端分支」后分支已删，同样落在这里——两种情形一并说明
                 return RepoDiffView.error(name, primary,
-                        "会话分支尚未推送到远端（执行「更多 → 收口合并到基线」后可查看）");
+                        "会话分支不在远端（尚未收口，或收口时勾选了删除远端分支）");
             }
             String range = REF_PREFIX + baseBranch + "..." + REF_PREFIX + branch;
             GitCli.Result stat = GitCli.run(cache, 30, "git", "diff", "--stat", range);

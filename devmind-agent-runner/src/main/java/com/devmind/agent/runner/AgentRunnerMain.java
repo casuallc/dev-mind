@@ -611,6 +611,8 @@ public class AgentRunnerMain {
         // CAP-51：非空 = 需求粒度工作区 worktrees/<key>；空 = 存量会话旧布局 work/（旧服务端不发此字段）
         String workspaceKey = frame.path("workspaceKey").asText("");
         boolean discardChanges = frame.path("discardChanges").asBoolean(false);
+        // v19：收口成功后删除远端会话分支（可选字段，缺席/老服务端 = 维持 push 分支供 diff 的现状）
+        boolean deleteRemoteBranch = frame.path("deleteRemoteBranch").asBoolean(false);
         // CAP-24 FR-06：操作者 git 身份（协议 v12 可选字段，缺席/空 = merge 署名回退内置 devmind）
         String gitName = frame.path("gitAuthorName").asText("");
         String gitEmail = frame.path("gitAuthorEmail").asText("");
@@ -639,7 +641,7 @@ public class AgentRunnerMain {
                             "会话 " + sessionId + " 仍在本节点运行，请先结束会话再收口");
                 }
                 RunnerWorkspace.FinalizeOutcome r = workspace.finalize(projectId, owner, specs,
-                        discardChanges, workspaceKey, operator);
+                        discardChanges, workspaceKey, operator, deleteRemoteBranch);
                 if (r.exit() == 0) {
                     ack.put("ok", true);
                     ack.put("detail", r.output());

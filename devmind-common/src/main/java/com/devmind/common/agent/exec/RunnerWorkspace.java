@@ -607,6 +607,18 @@ public class RunnerWorkspace {
     public FinalizeOutcome finalize(String projectId, String workspaceOwner,
                                     List<RepoSpec> specs, boolean discardChanges, String workspaceKey,
                                     GitAuthor operator) {
+        return finalize(projectId, workspaceOwner, specs, discardChanges, workspaceKey, operator, false);
+    }
+
+    /**
+     * 收口删除远端会话分支（协议 v19）：{@code deleteRemoteBranch=true} 时逐库在合并+push 基线
+     * 成功后<b>跳过</b> best-effort push 会话分支，改为删除远端 {@code feature/*} 分支
+     * （复用 {@link #deleteRemoteBranch} 的幂等语义；删除失败只告警不阻断收口——基线已合并推送）。
+     * keyed（CAP-51）同样生效但只删远端——本地分支被保留的工作树检出，本就不删。
+     */
+    public FinalizeOutcome finalize(String projectId, String workspaceOwner,
+                                    List<RepoSpec> specs, boolean discardChanges, String workspaceKey,
+                                    GitAuthor operator, boolean deleteRemoteBranch) {
         requireSafeId(projectId, "projectId");
         String owner = requireOwner(workspaceOwner);
         String key = requireKey(workspaceKey);
@@ -632,7 +644,7 @@ public class RunnerWorkspace {
             lock.lock();
             try {
                 String err = finalizeOne(cacheDir, workDir, userRoot, spec, discardChanges, label,
-                        summary, key, operator);
+                        summary, key, operator, deleteRemoteBranch);
                 if (err != null) {
                     allOk = false;
                     summary.append(label).append("失败: ").append(err).append('\n');
@@ -664,10 +676,11 @@ public class RunnerWorkspace {
      * 失败返回脱敏错误文案（固定 worktree 原样保留）。
      *
      * <p>CAP-24 FR-06：{@code operator} 非空时收口 merge 提交以其署名（逐值回退内置 devmind 身份）。</p>
+     * <p>v19：{@code deleteRemoteBranch=true} 时合并推送后删远端会话分支（不再 push 供 diff）。</p>
      */
     private String finalizeOne(Path cacheDir, Path workDir, Path userRoot, RepoSpec spec,
                                boolean discardChanges, String label, StringBuilder summary,
-                               String key, GitAuthor operator) {
+                               String key, GitAuthor operator, boolean deleteRemoteBranch) {
         if (!Files.isDirectory(cacheDir.resolve(".git"))) {
             return "克隆缓存缺失（工作区未初始化或已收口）: " + cacheDir;
         }
@@ -763,15 +776,26 @@ public class RunnerWorkspace {
                 run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "worktree", "prune");
             }
         }
-        // best-effort push 会话分支（供收口后 diff 查看；失败不阻断收口）
-        Result pushBranch = run(cacheDir, PUSH_TIMEOUT_SEC, spec.token(), "push",
-                withToken(spec.remoteUrl(), spec.token()),
-                "refs/heads/" + spec.branch() + ":refs/heads/" + spec.branch());
-        if (pushBranch.exit() != 0) {
-            log.warn("会话分支推送失败（仅影响收口后 diff 查看）: branch={} err={}", spec.branch(),
-                    tail(pushBranch.output()));
-            summary.append(label).append("会话分支推送失败（仅影响收口后 diff 查看）: ")
-                    .append(tail(pushBranch.output())).append('\n');
+        if (deleteRemoteBranch) {
+            // v19：删远端会话分支（幂等，复用释放路径同款实现）。删除失败不阻断收口——
+            // 基线已合并推送，失败只告警（会话/需求行照常落 FINALIZED），残留分支可人工删
+            String delErr = deleteRemoteBranch(cacheDir, spec, label, summary);
+            if (delErr != null) {
+                log.warn("收口删除远端会话分支失败（不阻断收口）: branch={} err={}", spec.branch(), delErr);
+                summary.append(label).append("远端会话分支删除失败（请人工清理）: ")
+                        .append(delErr).append('\n');
+            }
+        } else {
+            // best-effort push 会话分支（供收口后 diff 查看；失败不阻断收口）
+            Result pushBranch = run(cacheDir, PUSH_TIMEOUT_SEC, spec.token(), "push",
+                    withToken(spec.remoteUrl(), spec.token()),
+                    "refs/heads/" + spec.branch() + ":refs/heads/" + spec.branch());
+            if (pushBranch.exit() != 0) {
+                log.warn("会话分支推送失败（仅影响收口后 diff 查看）: branch={} err={}", spec.branch(),
+                        tail(pushBranch.output()));
+                summary.append(label).append("会话分支推送失败（仅影响收口后 diff 查看）: ")
+                        .append(tail(pushBranch.output())).append('\n');
+            }
         }
         if (key != null) {
             // CAP-51：收口<b>保留</b>工作树与分支——需求可能还要继续开发，保留才能让后续会话

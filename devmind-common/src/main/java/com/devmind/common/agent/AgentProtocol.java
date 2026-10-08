@@ -54,12 +54,15 @@ package com.devmind.common.agent;
  * v18 = CAP-65 节点文件浏览器（file/file_ack 请求应答帧——白名单根目录内
  * list/read/write/rename/delete + upload/download 经 HTTP 中转；老 runner 不认识 file
  * 帧会静默忽略，REST 端点会等到超时，故属「必须认识」需门控；上行 file_ack 被老服务端
- * 忽略，不门控）。</p>
+ * 忽略，不门控）。
+ * v19 = 收口删除远端会话分支（workspace_finalize 帧携带 deleteRemoteBranch——勾选后
+ * 收口成功即删远端 feature 分支、不再 best-effort push 供 diff；<b>可选字段不门控</b>：
+ * 老 runner 忽略字段 = 维持 push 分支供 diff 的现状，优雅降级）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 18;
+    public static final int CURRENT = 19;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -114,6 +117,9 @@ public final class AgentProtocol {
 
     /** CAP-65 节点文件浏览器（file/file_ack 帧）所需最低版本 */
     public static final int FILE_FRAMES = 18;
+
+    /** 收口删除远端会话分支（workspace_finalize 帧 deleteRemoteBranch）；可选字段不门控 */
+    public static final int FINALIZE_DELETE_REMOTE = 19;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;

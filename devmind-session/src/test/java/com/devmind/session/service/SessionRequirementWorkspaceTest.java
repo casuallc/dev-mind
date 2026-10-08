@@ -187,6 +187,8 @@ class SessionRequirementWorkspaceTest {
         String finalizeKey;
         String finalizeOwner;
         GitIdentityProvider.GitAuthor finalizeOperator;
+        /** 最近一次 finalizeWorkspace 的 deleteRemoteBranch 标志（v19 删除远端分支断言用） */
+        boolean lastFinalizeDeleteRemote;
         String launchKey;
         final List<String> releasedKeys = new ArrayList<>();
         int releaseCalls;
@@ -238,10 +240,12 @@ class SessionRequirementWorkspaceTest {
                                                 String workspaceOwner,
                                                 List<AgentLaunchCommand.RepoSpec> specs,
                                                 boolean discardChanges, String workspaceKey,
-                                                GitIdentityProvider.GitAuthor operator) {
+                                                GitIdentityProvider.GitAuthor operator,
+                                                boolean deleteRemoteBranch) {
             finalizeOwner = workspaceOwner;
             finalizeKey = workspaceKey;
             finalizeOperator = operator;
+            lastFinalizeDeleteRemote = deleteRemoteBranch;
             finalizeSpecs.clear();
             finalizeSpecs.addAll(specs);
             return finalizeError != null ? FinalizeResult.failed(finalizeError) : FinalizeResult.ok("ok");
@@ -479,7 +483,7 @@ class SessionRequirementWorkspaceTest {
         store.get("s-done").setWorkspaceState(SessionEntity.WORKSPACE_FINALIZED); // 已收口
 
         DevMindException e = assertThrows(DevMindException.class,
-                () -> service.finalizeRequirementWorkspace(PROJECT, REQ, false));
+                () -> service.finalizeRequirementWorkspace(PROJECT, REQ, false, false));
         assertEquals(ErrorCode.CONFLICT, e.getErrorCode());
         assertTrue(e.getMessage().contains("该需求工作区未开启或已收口"), e.getMessage());
     }
@@ -493,7 +497,7 @@ class SessionRequirementWorkspaceTest {
         FakeConnector connector = new FakeConnector();
         build(connector);
 
-        FinalizeResult result = service.finalizeRequirementWorkspace(PROJECT, REQ, false);
+        FinalizeResult result = service.finalizeRequirementWorkspace(PROJECT, REQ, false, false);
 
         assertTrue(result.ok());
         assertEquals(REQ_KEY, connector.finalizeKey, "需求级收口必须带 workspaceKey（定位 worktrees/<key>）");
@@ -504,7 +508,22 @@ class SessionRequirementWorkspaceTest {
         assertEquals(SessionEntity.WORKSPACE_FINALIZED, store.get("s1").getWorkspaceState());
         // 重复收口 → 无 OPEN 会话 → 409（验收 3）
         assertThrows(DevMindException.class,
-                () -> service.finalizeRequirementWorkspace(PROJECT, REQ, false));
+                () -> service.finalizeRequirementWorkspace(PROJECT, REQ, false, false));
+    }
+
+    /** v19：deleteRemoteBranch=true 必须穿透到 connector（runner 据此删远端会话分支）。 */
+    @Test
+    void 需求级收口透传删除远端分支标志() {
+        requirement("u1", null);
+        session("s1", "DONE", REQ, REQ_KEY);
+        repoRows = List.of(repoRow("s1", REQ_BRANCH));
+        FakeConnector connector = new FakeConnector();
+        build(connector);
+
+        FinalizeResult result = service.finalizeRequirementWorkspace(PROJECT, REQ, false, true);
+
+        assertTrue(result.ok());
+        assertTrue(connector.lastFinalizeDeleteRemote, "deleteRemoteBranch=true 必须透传到 connector 帧");
     }
 
     /** runner 报错（脏工作区/冲突/push 失败）：透传不静默成功，需求状态保持 OPEN。 */
@@ -518,7 +537,7 @@ class SessionRequirementWorkspaceTest {
         build(connector);
 
         DevMindException e = assertThrows(DevMindException.class,
-                () -> service.finalizeRequirementWorkspace(PROJECT, REQ, false));
+                () -> service.finalizeRequirementWorkspace(PROJECT, REQ, false, false));
         assertTrue(e.getMessage().contains("未提交改动"), e.getMessage());
         assertEquals(RequirementEntity.WORKSPACE_OPEN,
                 requirementService.store.get(REQ).getWorkspaceState(), "收口失败不得置 FINALIZED");
@@ -533,7 +552,7 @@ class SessionRequirementWorkspaceTest {
         identity.actor = "u1";
 
         DevMindException e = assertThrows(DevMindException.class,
-                () -> service.finalizeRequirementWorkspace(PROJECT, REQ, false));
+                () -> service.finalizeRequirementWorkspace(PROJECT, REQ, false, false));
         assertEquals(ErrorCode.FORBIDDEN, e.getErrorCode());
     }
 
@@ -546,7 +565,7 @@ class SessionRequirementWorkspaceTest {
         build(new FakeConnector());
 
         DevMindException e = assertThrows(DevMindException.class,
-                () -> service.finalizeRequirementWorkspace(PROJECT, REQ, false));
+                () -> service.finalizeRequirementWorkspace(PROJECT, REQ, false, false));
         assertTrue(e.getMessage().contains("会话仍在运行中"), e.getMessage());
     }
 
@@ -580,7 +599,7 @@ class SessionRequirementWorkspaceTest {
         service.onRemoteExit(NODE, "s1", 0);
         assertEquals("DONE", store.get("s1").getStatus());
 
-        FinalizeResult again = service.finalizeRequirementWorkspace(PROJECT, REQ, false);
+        FinalizeResult again = service.finalizeRequirementWorkspace(PROJECT, REQ, false, false);
         assertTrue(again.ok(), "收口后继续对话的改动必须能再次收口");
         assertEquals(REQ_KEY, connector.finalizeKey);
     }

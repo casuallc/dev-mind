@@ -97,11 +97,13 @@ public class SessionController {
         service.finish(id);
     }
 
-    /** CAP-42：固定工作区手动收口（合并会话分支到基线 + push + 删 worktree；鉴权=创建者或 admin）。 */
+    /** CAP-42：固定工作区手动收口（合并会话分支到基线 + push + 删 worktree；鉴权=创建者或 admin）。
+     *  deleteRemoteBranch=true 时收口成功追加删除远端会话分支（协议 v19，diff 随之不可再查）。 */
     @PostMapping("/{id}/finalize")
     public com.devmind.common.agent.FinalizeResult finalize(@PathVariable String id,
                                                             @RequestBody FinalizeRequest req) {
-        return service.finalizeWorkspace(id, req != null && req.effectiveDiscardChanges());
+        return service.finalizeWorkspace(id, req != null && req.effectiveDiscardChanges(),
+                req != null && req.effectiveDeleteRemoteBranch());
     }
 
     /** CAP-31：按库返回 diff 摘要（本地逐库 worktree；远程经服务端克隆缓存 fetch 后 diff）。 */

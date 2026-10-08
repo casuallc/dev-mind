@@ -159,6 +159,23 @@ public interface AgentNodeConnector {
     }
 
     /**
+     * 收口删除远端会话分支（协议 v19）：语义同上，{@code deleteRemoteBranch=true} 时 runner
+     * 收口成功后删除远端 {@code feature/*} 会话分支、不再 best-effort push 供收口后 diff
+     * （keyed 需求级收口只删远端——本地分支被保留的工作树检出，本就不删）。
+     * <b>可选字段不门控</b>：老 runner 忽略字段 = 维持 push 分支供 diff 的现状。
+     * 默认实现丢弃该字段降级到 9 参重载（兼容未更新的实现/fake）。
+     */
+    default FinalizeResult finalizeWorkspace(String nodeId, String sessionId, String projectId,
+                                             String workspaceOwner,
+                                             List<AgentLaunchCommand.RepoSpec> specs,
+                                             boolean discardChanges, String workspaceKey,
+                                             com.devmind.common.integration.GitIdentityProvider.GitAuthor operator,
+                                             boolean deleteRemoteBranch) {
+        return finalizeWorkspace(nodeId, sessionId, projectId, workspaceOwner, specs, discardChanges,
+                workspaceKey, operator);
+    }
+
+    /**
      * CAP-42：下发 workspace_release 帧并阻塞等 workspace_release_ack——删除会话时释放固定工作区
      * {@code <workspaceRoot>/<projectId>/<workspaceOwner>/}：逐库丢弃未提交改动 → 删 worktree
      * → 删本地会话分支（<b>不合并不 push</b>，与 {@link #finalizeWorkspace} 的区别见

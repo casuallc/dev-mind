@@ -30,12 +30,14 @@ public class RequirementWorkspaceController {
     /**
      * 收口合并到基线：取该需求最近的 workspace OPEN 会话 → 按其仓库快照合并需求分支到基线并 push。
      * CAP-51 起<b>保留</b>工作树与分支（需求可能继续开发），成功后需求 workspace_state=FINALIZED。
-     * body {@code {discardChanges}} 缺省 = 脏工作区直接失败保留现场。
+     * body {@code {discardChanges}} 缺省 = 脏工作区直接失败保留现场；
+     * {@code deleteRemoteBranch=true} 时收口成功追加删除远端需求分支（本地分支随工作树保留）。
      */
     @PostMapping("/finalize")
     public FinalizeResult finalize(@PathVariable String projectId, @PathVariable String requirementId,
                                    @RequestBody(required = false) FinalizeRequest req) {
         return service.finalizeRequirementWorkspace(projectId, requirementId,
-                req != null && req.effectiveDiscardChanges());
+                req != null && req.effectiveDiscardChanges(),
+                req != null && req.effectiveDeleteRemoteBranch());
     }
 }

@@ -78,12 +78,17 @@ class AgentConnectionRegistryFinalizeTest {
     }
 
     private Call startFinalize(String workspaceKey, GitAuthor operator) throws Exception {
+        return startFinalize(workspaceKey, operator, false);
+    }
+
+    private Call startFinalize(String workspaceKey, GitAuthor operator,
+                               boolean deleteRemoteBranch) throws Exception {
         AtomicReference<FinalizeResult> result = new AtomicReference<>();
         AtomicReference<Throwable> error = new AtomicReference<>();
         Thread t = new Thread(() -> {
             try {
                 result.set(registry.finalizeWorkspace("7", "s1", "proj1", "alice", specs(), true,
-                        workspaceKey, operator));
+                        workspaceKey, operator, deleteRemoteBranch));
             } catch (Throwable e) {
                 error.set(e);
             }
@@ -191,6 +196,24 @@ class AgentConnectionRegistryFinalizeTest {
         noId.thread().join(10_000);
         assertTrue(noId.result().get() != null && noId.result().get().ok(),
                 String.valueOf(noId.error().get()));
+    }
+
+    /** v19 红线回归：deleteRemoteBranch=true → 帧带字段；false → 字段缺席（runner 维持 push 供 diff）。 */
+    @Test
+    void serializesDeleteRemoteBranchOnlyWhenTrue() throws Exception {
+        Call del = startFinalize(null, null, true);
+        assertTrue(del.payload().contains("\"deleteRemoteBranch\":true"), del.payload());
+        registry.onWorkspaceFinalizeAck("7", requestIdOf(del.payload()), true, "ok", null);
+        del.thread().join(10_000);
+        assertTrue(del.result().get() != null && del.result().get().ok(),
+                String.valueOf(del.error().get()));
+
+        Call keep = startFinalize(null, null, false);
+        assertFalse(keep.payload().contains("deleteRemoteBranch"), keep.payload());
+        registry.onWorkspaceFinalizeAck("7", requestIdOf(keep.payload()), true, "ok", null);
+        keep.thread().join(10_000);
+        assertTrue(keep.result().get() != null && keep.result().get().ok(),
+                String.valueOf(keep.error().get()));
     }
 
     @Test

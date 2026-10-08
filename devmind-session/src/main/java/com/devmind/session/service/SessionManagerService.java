@@ -651,7 +651,8 @@ public class SessionManagerService {
      * 成功同时把需求工作区置 FINALIZED）——收口从「会话级动作」上移为「需求级动作」，
      * 本端点保留给无需求会话（存量前端/脚本平滑过渡）。</p>
      */
-    public FinalizeResult finalizeWorkspace(String id, boolean discardChanges) {
+    public FinalizeResult finalizeWorkspace(String id, boolean discardChanges,
+                                            boolean deleteRemoteBranch) {
         SessionEntity ent = requireEntity(id);
         // 归属校验：创建人本人或 admin（仿 ChatManagerService 模式；固定工作区按创建者归属）
         String actor = identityService.currentActor();
@@ -665,7 +666,7 @@ public class SessionManagerService {
         if (SessionEntity.WORKSPACE_FINALIZED.equals(ent.getWorkspaceState())) {
             throw new DevMindException(ErrorCode.CONFLICT, "工作区已收口，无需重复操作");
         }
-        return doFinalizeWorkspace(ent, discardChanges);
+        return doFinalizeWorkspace(ent, discardChanges, deleteRemoteBranch);
     }
 
     /**
@@ -675,7 +676,8 @@ public class SessionManagerService {
      * 置 FINALIZED。无 OPEN 会话（未开工作区或已收口）→ 409；节点离线/老 runner → 409（不静默成功）。
      */
     public FinalizeResult finalizeRequirementWorkspace(String projectId, String requirementId,
-                                                      boolean discardChanges) {
+                                                      boolean discardChanges,
+                                                      boolean deleteRemoteBranch) {
         RequirementEntity req = requirementService.requireEntity(projectId, requirementId);
         // 归属校验（FR-04）：需求创建者/负责人或 admin
         String actor = identityService.currentActor();
@@ -689,7 +691,7 @@ public class SessionManagerService {
                 .findFirst()
                 .orElseThrow(() -> new DevMindException(ErrorCode.CONFLICT,
                         "该需求工作区未开启或已收口"));
-        return doFinalizeWorkspace(target, discardChanges);
+        return doFinalizeWorkspace(target, discardChanges, deleteRemoteBranch);
     }
 
     /**
@@ -699,7 +701,8 @@ public class SessionManagerService {
      * （runner 定位 {@code worktrees/<key>}，且收口后<b>保留</b>工作树——需求后续会话接着用）；
      * key 为空 = 存量 CAP-42 会话，仍是 v7 + 旧布局 {@code work/} 语义（FR-11）。</p>
      */
-    private FinalizeResult doFinalizeWorkspace(SessionEntity ent, boolean discardChanges) {
+    private FinalizeResult doFinalizeWorkspace(SessionEntity ent, boolean discardChanges,
+                                               boolean deleteRemoteBranch) {
         String id = ent.getId();
         if (SessionState.valueOf(ent.getStatus()).isActive() || runtimes.containsKey(id)) {
             throw new DevMindException(ErrorCode.CONFLICT, "会话仍在运行中，请先结束会话再收口");
@@ -722,7 +725,8 @@ public class SessionManagerService {
         // runner 回退内置 devmind 署名；老 runner 忽略字段同样回退，双向兼容）
         GitAuthor operator = resolveGitAuthor(identityService.currentActor(), proj);
         FinalizeResult result = connector.finalizeWorkspace(ent.getAgentNodeId(), id,
-                ent.getProjectId(), wsOwner, specs, discardChanges, ent.getWorkspaceKey(), operator);
+                ent.getProjectId(), wsOwner, specs, discardChanges, ent.getWorkspaceKey(), operator,
+                deleteRemoteBranch);
         if (!result.ok()) {
             throw new DevMindException(ErrorCode.CONFLICT,
                     "收口失败（工作区已保留，可处理后重试）: " + result.error());

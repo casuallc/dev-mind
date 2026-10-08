@@ -920,6 +920,20 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
                                             List<AgentLaunchCommand.RepoSpec> specs,
                                             boolean discardChanges, String workspaceKey,
                                             GitAuthor operator) {
+        return finalizeWorkspace(nodeId, sessionId, projectId, workspaceOwner, specs, discardChanges,
+                workspaceKey, operator, false);
+    }
+
+    /**
+     * 收口删除远端会话分支（协议 v19）：deleteRemoteBranch=true 才 put 该字段
+     * （缺席 = runner 维持 push 分支供 diff 的现状；老 runner 忽略字段，双向兼容不门控）。
+     */
+    @Override
+    public FinalizeResult finalizeWorkspace(String nodeId, String sessionId, String projectId,
+                                            String workspaceOwner,
+                                            List<AgentLaunchCommand.RepoSpec> specs,
+                                            boolean discardChanges, String workspaceKey,
+                                            GitAuthor operator, boolean deleteRemoteBranch) {
         WebSocketSession ws = requireConnection(nodeId); // 先判在线再判版本，同 releaseWorkspace
         if (!supports(nodeId, AgentProtocol.PER_USER_WORKSPACE)) {
             throw new DevMindException(ErrorCode.CONFLICT,
@@ -950,6 +964,10 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             if (operator.email() != null && !operator.email().isBlank()) {
                 frame.put("gitAuthorEmail", operator.email());
             }
+        }
+        // v19 红线：deleteRemoteBranch=true 才 put（缺席 = runner 维持 push 分支供 diff 的现状）
+        if (deleteRemoteBranch) {
+            frame.put("deleteRemoteBranch", true);
         }
         List<Map<String, Object>> repos = new ArrayList<>();
         for (AgentLaunchCommand.RepoSpec spec : specs) {

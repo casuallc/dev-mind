@@ -357,6 +357,39 @@ class RunnerWorkspaceTest {
         assertEquals("change", Files.readString(s2.sessionDir().resolve("code.txt")));
     }
 
+    /** v19：deleteRemoteBranch=true → 合并推送基线后删远端会话分支（不再 push 供 diff），不阻断收口。 */
+    @Test
+    void finalizeWithDeleteRemoteBranchDropsRemoteBranch() throws Exception {
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s1", "");
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", spec);
+        Files.writeString(ctx.sessionDir().resolve("code.txt"), "change");
+        git(ctx.sessionDir(), "add", ".");
+        git(ctx.sessionDir(), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "work");
+        // 模拟会话进行中已推过远端分支（删远端才有对象可删；幂等路径由释放测试覆盖）
+        git(ctx.sessionDir(), "push", origin.toUri().toString(),
+                "refs/heads/feature/s1:refs/heads/feature/s1");
+        assertFalse(gitOut(origin, "rev-parse", "--verify", "refs/heads/feature/s1").isBlank(),
+                "前置：远端会话分支已存在");
+
+        RunnerWorkspace.FinalizeOutcome r = ws.finalize("proj1", "alice", List.of(spec), false, null,
+                null, true);
+        assertEquals(0, r.exit(), r.output());
+        // 基线照常合并推送
+        assertEquals("change", git(origin, "show", "main:code.txt").trim());
+        // 远端会话分支已删（收口后 diff 不可看是勾选代价）
+        assertThrows(IllegalStateException.class,
+                () -> git(origin, "rev-parse", "--verify", "refs/heads/feature/s1"),
+                "deleteRemoteBranch=true 后远端会话分支必须删除");
+        assertTrue(r.output().contains("远端分支已删除"), r.output());
+        // 本地语义不变：worktree 与本地分支已删
+        assertFalse(Files.exists(ctx.sessionDir()), "收口后固定 worktree 删除");
+        assertEquals("", gitOut(ctx.cacheDir(), "branch", "--list", "feature/s1"));
+    }
+
     /** CAP-24 FR-06：带操作者身份的收口——merge 提交以绑定署名（author 与 committer 都是）。 */
     @Test
     void finalizeMergeCommitUsesOperatorIdentity() throws Exception {

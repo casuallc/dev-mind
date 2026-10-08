@@ -74,7 +74,8 @@ class RemoteDiffServiceTest {
                 List.of(row("backend", url, "main", "feature/s1")));
 
         assertEquals(1, views.size());
-        assertTrue(views.get(0).error() != null && views.get(0).error().contains("尚未推送"),
+        // v19：文案覆盖两种情形——尚未收口（未推送）/ 收口时勾选了删除远端分支
+        assertTrue(views.get(0).error() != null && views.get(0).error().contains("不在远端"),
                 views.get(0).error());
     }
 
