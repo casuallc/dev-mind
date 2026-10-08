@@ -118,6 +118,7 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 | e2e-install-script.sh | 一键安装脚本生成与执行（sh 实跑 + ps1 语法解析） |
 | e2e-integration-test.sh | 集成连通性测试端点（未保存试连） |
 | e2e-req-open-filter.sh | 需求列表 status=OPEN 伪状态筛选 |
+| e2e-worklog-auto-import.sh | CAP-28 FR-09 定时从 Git 导入工作条目：开关打开→当日提交定时导入（GIT/hours=0）、下一 tick 幂等不重复、关闭后不导入、重开补导入。需隔离实例带 `--devmind.worklog.git-import-cron` 覆盖（每 15s，cron 含空格走环境变量 `DEVMIND_WORKLOG_GITIMPORTCRON` 传入，姿势见脚本头） |
 | e2e-runner-upgrade{,-main,-force}.sh | CAP-21 FR-09 runner 自升级：BUSY 推迟/换包重启/强制升级 |
 | e2e-stacktrace.sh | 错误响应堆栈透传（local profile） |
 | verify-skill-import.sh | /api/skills/import 报错文案 + BOM 兼容 |

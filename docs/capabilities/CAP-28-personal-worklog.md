@@ -62,6 +62,16 @@ CAP-06 通知中心（站内提醒）
 - **FR-07 Jira 一键操作（MVP 后）**：条目按 jira_issue_key 直接 logWork
   （minutes→seconds）；未关联条目一键 createIssue 并回写 key。
   需 `IntegrationConnector` 新增 default `createIssue`。
+- **FR-09 定时自动 Git 导入（已实现，2026-10-08）**：设置页「工作日志」视图开关
+  `autoGitImport`（`worklog_user_settings.auto_git_import`，**严格 opt-in**：
+  null/false = 不参与，与 autoDaily/autoWeekly「无行默认开」不同——它直接产生
+  数据行，且署名解析失败的仓库在手动链路靠「预览人工勾选」兜底，自动链路没有
+  这个人工环节）。cron `devmind.worklog.git-import-cron`（默认每日 18:00，早于
+  日报生成的 18:30，当日条目先落库再进日报素材），总开关 `git-import-enabled`。
+  安全口径：**只导入署名过滤已生效的仓库**（扫描诊断 `SCANNED 且 authorFilter
+  非空`），未解析署名的仓库整仓跳过防混入他人提交；hours=0 事后编辑补工时；
+  幂等键与手动导入一致（user_id, repo_id, commit_sha），手动/自动混用不重复。
+  失败按 runBatch 既有模板发 P0 通知、不中断其他用户。
 - **FR-08 前端页面**：`features/worklog` 自包含——工作日志页
   （Card + Segmented[条目|日报|周报]）+ 代码仓库页（勾选 + ADMIN 管理）；
   裸路由 `/worklog`、`/worklog/repos`（不挂项目上下文）。
@@ -160,7 +170,7 @@ POST   /api/worklog/entries/{id}/jira/create-issue
 
 # 个人设置（工时/报表偏好；前端入口 = 设置页「工作日志」视图 /settings/worklog，
 # 2026-09-20 前是工作日志页 extra 的「工时设置」弹窗）
-GET/PUT /api/worklog/settings                   {autoDaily, autoWeekly, dailyMinutesTarget}
+GET/PUT /api/worklog/settings                   {autoDaily, autoWeekly, autoGitImport, dailyMinutesTarget}
 
 # 领域事件 → 通知中心
 worklog.daily.generated / worklog.weekly.generated / worklog.jira.worklogged
@@ -168,7 +178,8 @@ worklog.daily.generated / worklog.weekly.generated / worklog.jira.worklogged
 
 配置（application.yml `devmind.worklog`）：`daily-enabled`/`daily-cron`
 （默认 `0 30 18 * * *`）、`weekly-enabled`/`weekly-cron`
-（默认 `0 0 9 * * MON`）、`git-scan-max-commits`（默认 200）、
+（默认 `0 0 9 * * MON`）、`git-import-enabled`/`git-import-cron`
+（FR-09 定时导入，默认 `0 0 18 * * *`）、`git-scan-max-commits`（默认 200）、
 `oneshot-timeout-seconds`（默认 300）。
 
 ## 7. 验收标准
@@ -203,6 +214,7 @@ worklog.daily.generated / worklog.weekly.generated / worklog.jira.worklogged
 | 已确认（CONFIRMED）报告 force 重生成不生效 | 设计如此：force 仅覆盖 DRAFT；异步任务内抛 409 记 warn 日志，报告保持 CONFIRMED | 先确认无误再定稿；确需重生成需先改回草稿（当前未开放，走库操作） |
 | 并发触发报 409「已有报告生成任务在跑」 | AtomicBoolean 防重入，全局同一时刻只允许一个生成任务 | 稍后重试 |
 | 日报/周报定时没跑 | 检查 `devmind.worklog.daily-enabled/weekly-enabled` 与 cron；调度覆盖范围 = 有仓库订阅的用户 ∪ 有设置行的用户，显式 autoDaily=false 排除 | 在「工作日志 → 设置」确认开关；完全无订阅无设置的用户不在覆盖范围内 |
+| Git 定时导入没进条目 | FR-09 是严格 opt-in：设置页「每天定时从 Git 导入工作条目」没开（或开了但当日无可导入提交）；署名未解析的仓库被整仓跳过（防混入他人提交）；总开关 `git-import-enabled` 关闭 | 设置页打开开关；用「从 Git 导入」弹窗的预览诊断确认该仓库署名解析成功（诊断里 authorFilter 非空） |
 
 ## 10. 实现落点
 
