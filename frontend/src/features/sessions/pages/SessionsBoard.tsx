@@ -67,7 +67,9 @@ export default function SessionsBoard({
   const projectId = fixedProjectId ?? storeProjectId
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
-  const [loading, setLoading] = useState(false)
+  // 初始 true：首帧 loading 必须为 true，否则下方「自动选中」effect 在首趟加载完成前
+  // 就以空列表误判「无会话」→ setDraft(true)，把 ?sid= 深链选中的会话盖成草稿态
+  const [loading, setLoading] = useState(true)
   const [innerView, setInnerView] = useState<string>('chat') // chat | list（受控时以 controlledView 为准）
   const view = controlledView ?? innerView
   const setView = onViewChange ?? setInnerView
@@ -123,12 +125,13 @@ export default function SessionsBoard({
   }, [searchParams, loading, setSearchParams])
 
   // 首次加载后自动选中：有会话选排序第一个，否则直接进入新对话草稿态
+  // （?sid= 深链由上方专用 effect 选中，这里须让路，否则会回退覆盖成第一个会话）
   useEffect(() => {
-    if (autoPickedRef.current || loading) return
+    if (autoPickedRef.current || loading || searchParams.get('sid')) return
     autoPickedRef.current = true
     if (sessions.length > 0) setSelectedId(sortForBoard(sessions)[0].id)
     else setDraft(true)
-  }, [sessions, loading])
+  }, [sessions, loading, searchParams])
 
   // 草稿创建成功后：先等列表刷新拿到新会话行，再选中——否则「消失兜底」effect 会误清新 id
   const onDraftCreated = useCallback(
