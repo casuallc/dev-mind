@@ -4,6 +4,8 @@ import { useMemo } from 'react'
 import { Button, Empty, Input, List, Select, Tag, Typography, theme } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import type { SessionSummary } from '../types'
+import type { SessionRefs } from '../hooks/useSessionRefs'
+import SessionRefsTags from './SessionRefsTags'
 import { stateColor, ACTIVE_STATES, STATE_OPTIONS } from '../stateMeta'
 import { fmtTime, usageText } from '../../../shared/utils/format'
 
@@ -17,6 +19,7 @@ export default function SessionListPane({
   onStatusChange,
   keyword,
   onKeywordChange,
+  refs,
 }: {
   sessions: SessionSummary[]
   loading: boolean
@@ -27,6 +30,8 @@ export default function SessionListPane({
   onStatusChange: (s: string) => void
   keyword: string
   onKeywordChange: (k: string) => void
+  /** 需求/工作单元 id→对象映射（有关联的会话显示可跳需求页的链接） */
+  refs: SessionRefs
 }) {
   const { token } = theme.useToken()
 
@@ -129,6 +134,12 @@ export default function SessionListPane({
                     {n}
                   </Tag>
                 ))}
+              </div>
+            )}
+            {/* 关联需求/工作单元（需求可点跳详情页） */}
+            {(s.requirementId || s.workItemId) && (
+              <div style={{ marginTop: 2 }}>
+                <SessionRefsTags session={s} refs={refs} maxWidth={180} />
               </div>
             )}
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>

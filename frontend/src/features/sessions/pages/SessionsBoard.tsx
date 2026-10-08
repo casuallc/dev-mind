@@ -18,6 +18,8 @@ import type { SessionSummary } from '../types'
 import { stateColor, ACTIVE_STATES, STATE_OPTIONS } from '../stateMeta'
 import { useSessionActions } from '../hooks/useSessionActions'
 import SessionListPane from '../components/SessionListPane'
+import SessionRefsTags from '../components/SessionRefsTags'
+import { useSessionRefs } from '../hooks/useSessionRefs'
 import ChatPanel from '../../../shared/chat/ChatPanel'
 import type { StreamMeta, WorkspaceSnapshot } from '../../../shared/chat/types'
 import WorkspacePanel from '../../../shared/chat/workspace/WorkspacePanel'
@@ -67,6 +69,8 @@ export default function SessionsBoard({
   const projectId = fixedProjectId ?? storeProjectId
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
+  // 需求/工作单元 id→对象映射（会话关联展示 + 跳需求页）
+  const refs = useSessionRefs(projectId, sessions)
   // 初始 true：首帧 loading 必须为 true，否则下方「自动选中」effect 在首趟加载完成前
   // 就以空列表误判「无会话」→ setDraft(true)，把 ?sid= 深链选中的会话盖成草稿态
   const [loading, setLoading] = useState(true)
@@ -248,6 +252,13 @@ export default function SessionsBoard({
         ),
     },
     {
+      title: '关联',
+      key: 'refs',
+      width: 220,
+      render: (_, r) =>
+        r.requirementId || r.workItemId ? <SessionRefsTags session={r} refs={refs} /> : '-',
+    },
+    {
       title: '摘要',
       dataIndex: 'summary',
       ellipsis: true,
@@ -351,6 +362,7 @@ export default function SessionsBoard({
             onStatusChange={setStatus}
             keyword={keyword}
             onKeywordChange={setKeyword}
+            refs={refs}
           />
           {/* overflow:auto 是兜底：右侧「操作条 + 摘要卡 + 输入区」的固定高度在矮视口（≤1366x768）会超过卡片高度，
               不兜底就顶破内容区（实测 1280x720 溢 50px）；空间够时不会出现滚动条，行为与原先一致 */}
@@ -384,6 +396,7 @@ export default function SessionsBoard({
                   <Space size={8}>
                     <Typography.Text code>{current.id}</Typography.Text>
                     <Tag color={stateColor[current.state] ?? 'default'}>{current.state}</Tag>
+                    <SessionRefsTags session={current} refs={refs} />
                     <Badge
                       status={streamMeta.connected ? 'success' : streamMeta.fatal ? 'default' : 'processing'}
                       text={streamMeta.connected ? '实时' : streamMeta.fatal ? '历史(终态)' : '连接中…'}
