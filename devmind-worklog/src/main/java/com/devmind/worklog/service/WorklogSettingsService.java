@@ -42,6 +42,9 @@ public class WorklogSettingsService {
         if (req.autoWeekly() != null) {
             e.setAutoWeekly(req.autoWeekly());
         }
+        if (req.autoGitImport() != null) {
+            e.setAutoGitImport(req.autoGitImport());
+        }
         if (req.dailyMinutesTarget() != null) {
             e.setDailyMinutesTarget(req.dailyMinutesTarget());
         }

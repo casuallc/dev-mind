@@ -4,6 +4,7 @@ import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.worklog.config.WorklogProperties;
+import com.devmind.worklog.model.WorklogUserSettingsEntity;
 import com.devmind.worklog.repo.WorklogRepoSubscriptionRepository;
 import com.devmind.worklog.repo.WorklogUserSettingsRepository;
 import org.slf4j.Logger;
@@ -35,17 +36,20 @@ public class WorklogScheduler {
     private final AtomicBoolean running = new AtomicBoolean();
 
     private final ReportService reportService;
+    private final GitAutoImportService gitAutoImport;
     private final WorklogUserSettingsRepository settingsRepo;
     private final WorklogRepoSubscriptionRepository subRepo;
     private final WorklogProperties props;
     private final DomainEventPublisher eventPublisher;
 
     public WorklogScheduler(ReportService reportService,
+                            GitAutoImportService gitAutoImport,
                             WorklogUserSettingsRepository settingsRepo,
                             WorklogRepoSubscriptionRepository subRepo,
                             WorklogProperties props,
                             DomainEventPublisher eventPublisher) {
         this.reportService = reportService;
+        this.gitAutoImport = gitAutoImport;
         this.settingsRepo = settingsRepo;
         this.subRepo = subRepo;
         this.props = props;
@@ -70,6 +74,24 @@ public class WorklogScheduler {
         }
         LocalDate lastWeekStart = LocalDate.now().with(DayOfWeek.MONDAY).minusWeeks(1);
         runBatch("周报", coveredUsers(false), u -> reportService.generateWeekly(u, lastWeekStart, false));
+    }
+
+    /**
+     * CAP-28 FR-09：每日定时从 Git 导入工作条目（默认 18:00，早于日报生成的 18:30，
+     * 当日条目先落库再进日报素材）。严格 opt-in：仅设置行显式打开 autoGitImport 的用户参与
+     * （不看订阅——它直接产生数据行，且署名未解析的仓库没有人工预览兜底，由 GitAutoImportService 整仓跳过）。
+     */
+    @Scheduled(cron = "${devmind.worklog.git-import-cron:0 0 18 * * *}")
+    public void gitImportTick() {
+        if (!props.isGitImportEnabled()) {
+            return;
+        }
+        Set<String> users = settingsRepo.findAll().stream()
+                .filter(s -> Boolean.TRUE.equals(s.getAutoGitImport()))
+                .map(WorklogUserSettingsEntity::getUserId)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        LocalDate today = LocalDate.now();
+        runBatch("Git 导入", users, u -> gitAutoImport.importForDate(u, today));
     }
 
     // ---------------- 内部 ----------------

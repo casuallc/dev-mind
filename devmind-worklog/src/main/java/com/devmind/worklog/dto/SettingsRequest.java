@@ -5,6 +5,7 @@ package com.devmind.worklog.dto;
  * dailyTemplateMd/weeklyTemplateMd：null = 不变；空白串 = 清除自定义（回退内置默认）。
  * remoteUrl/remoteBranch：null = 不变；空白串 = 解绑远端备份。
  */
-public record SettingsRequest(Boolean autoDaily, Boolean autoWeekly, Integer dailyMinutesTarget,
+public record SettingsRequest(Boolean autoDaily, Boolean autoWeekly, Boolean autoGitImport,
+                              Integer dailyMinutesTarget,
                               String dailyTemplateMd, String weeklyTemplateMd,
                               String remoteUrl, String remoteBranch) {}

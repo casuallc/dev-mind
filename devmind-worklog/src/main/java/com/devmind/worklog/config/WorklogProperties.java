@@ -20,6 +20,12 @@ public class WorklogProperties {
     /** 周报生成 cron（默认周一 09:00，汇总上一周） */
     private String weeklyCron = "0 0 9 * * MON";
 
+    /** 每日定时从 Git 导入工作条目总开关（CAP-28 FR-09；用户级 auto_git_import 仍需各自打开） */
+    private boolean gitImportEnabled = true;
+
+    /** Git 定时导入 cron（默认每日 18:00，早于日报生成的 18:30，当日条目先落库再进日报素材） */
+    private String gitImportCron = "0 0 18 * * *";
+
     /** 单库单日 git log 扫描上限 */
     private int gitScanMaxCommits = 200;
 
@@ -31,6 +37,10 @@ public class WorklogProperties {
     public void setWeeklyEnabled(boolean weeklyEnabled) { this.weeklyEnabled = weeklyEnabled; }
     public String getWeeklyCron() { return weeklyCron; }
     public void setWeeklyCron(String weeklyCron) { this.weeklyCron = weeklyCron; }
+    public boolean isGitImportEnabled() { return gitImportEnabled; }
+    public void setGitImportEnabled(boolean gitImportEnabled) { this.gitImportEnabled = gitImportEnabled; }
+    public String getGitImportCron() { return gitImportCron; }
+    public void setGitImportCron(String gitImportCron) { this.gitImportCron = gitImportCron; }
     public int getGitScanMaxCommits() { return gitScanMaxCommits; }
     public void setGitScanMaxCommits(int gitScanMaxCommits) { this.gitScanMaxCommits = gitScanMaxCommits; }
 }

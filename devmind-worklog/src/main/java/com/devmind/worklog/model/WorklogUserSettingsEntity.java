@@ -34,6 +34,14 @@ public class WorklogUserSettingsEntity {
     @Column(name = "auto_weekly", nullable = false)
     private Boolean autoWeekly = Boolean.TRUE;
 
+    /**
+     * CAP-28 FR-09：每日定时从 Git 导入工作条目。与 autoDaily/autoWeekly 不同为严格 opt-in
+     * （它直接产生数据行，且署名未解析的仓库失去手动预览勾选这个兜底）——null/false = 不参与。
+     * 可空列 + getter 兜底（Boolean 列禁 @ColumnDefault，存量表平滑加列）。
+     */
+    @Column(name = "auto_git_import")
+    private Boolean autoGitImport;
+
     /** 每日目标工时（分钟，可空；前端展示参考） */
     @Column(name = "daily_minutes_target")
     private Integer dailyMinutesTarget;
@@ -67,6 +75,9 @@ public class WorklogUserSettingsEntity {
     public void setAutoDaily(Boolean autoDaily) { this.autoDaily = autoDaily; }
     public Boolean getAutoWeekly() { return autoWeekly; }
     public void setAutoWeekly(Boolean autoWeekly) { this.autoWeekly = autoWeekly; }
+    /** opt-in：null（存量行/未设置）按 false 处理 */
+    public Boolean getAutoGitImport() { return Boolean.TRUE.equals(autoGitImport); }
+    public void setAutoGitImport(Boolean autoGitImport) { this.autoGitImport = autoGitImport; }
     public Integer getDailyMinutesTarget() { return dailyMinutesTarget; }
     public void setDailyMinutesTarget(Integer dailyMinutesTarget) { this.dailyMinutesTarget = dailyMinutesTarget; }
     public String getDailyTemplateMd() { return dailyTemplateMd; }

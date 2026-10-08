@@ -70,6 +70,8 @@ devmind:
     daily-cron: "0 30 18 * * *"    # 每日 18:30 生成日报草稿
     weekly-enabled: true
     weekly-cron: "0 0 9 * * MON"   # 周一 09:00 生成上周周报草稿
+    git-import-enabled: true       # FR-09 定时 Git 导入总开关（用户级仍需在设置页打开）
+    git-import-cron: "0 0 18 * * *" # 每日 18:00 导入当日提交为条目（早于日报生成）
     git-scan-max-commits: 200      # 单库单日扫描上限
   worktree:
     root: ""                       # 空=项目内 .devmind/worktrees
