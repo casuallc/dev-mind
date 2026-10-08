@@ -56,6 +56,7 @@ const ROUTES = [
   { path: '/home', name: '工作台首页' },
   { path: '/chats', name: 'AI 问答' },
   { path: '/bookmarks', name: '收藏夹' },
+  { path: '/usage', name: '用量统计' },
   { path: '/worklog', name: '工作日志' },
   { path: '/settings/profile', name: '个人设置' },
   { path: '/notifications', name: '通知中心' },

@@ -3,6 +3,7 @@
 // 否则切 tab 时一级导航位置随切换器显隐左右移动。
 import { Button, Layout, Menu, Tooltip } from 'antd'
 import {
+  BarChartOutlined,
   CommentOutlined,
   FieldTimeOutlined,
   FolderOutlined,
@@ -76,6 +77,7 @@ export default function AppLayout() {
             { key: '/overview', icon: <FolderOutlined />, label: '项目' },
             { key: '/chats', icon: <CommentOutlined />, label: 'AI 问答' },
             { key: '/bookmarks', icon: <StarOutlined />, label: '收藏夹' },
+            { key: '/usage', icon: <BarChartOutlined />, label: '用量' },
             { key: '/worklog', icon: <FieldTimeOutlined />, label: '工作日志' },
             // 个人设置已从用户下拉上提为一级导航（页内视图切换在页面 Card 头部）
             { key: '/settings', icon: <SettingOutlined />, label: '设置' },
