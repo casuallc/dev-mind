@@ -233,6 +233,7 @@ export default function UsagePage() {
         >
           {dim === 'top' ? (
             <Table<UsageTopRow>
+              key="top"
               rowKey={r => `${r.source}:${r.id}`}
               size="small"
               loading={loading}
@@ -242,7 +243,10 @@ export default function UsagePage() {
             />
           ) : (
             <Table<UsageBreakdownRow>
-              rowKey={r => `${dim}:${r.key ?? '-'}`}
+              key={dim}
+              // 未归属桶 key 为 null，须用 label 兜底：会话/问答两桶同 key 会撞 rowKey，
+              // React 重复 key 协调漏删先出现的行纤维 → 切 tab 后残留行永久累积（224 实测）
+              rowKey={r => `${dim}:${r.key ?? r.label}`}
               size="small"
               loading={loading}
               columns={dimColumns}
