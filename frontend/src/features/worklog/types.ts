@@ -106,6 +106,8 @@ export type GitPreviewFilter = 'NEW' | 'IMPORTED' | 'ALL'
 export interface WorklogSettings {
   autoDaily: boolean
   autoWeekly: boolean
+  /** CAP-28 FR-09：每日定时从 Git 导入工作条目（严格 opt-in，默认关） */
+  autoGitImport?: boolean
   dailyMinutesTarget?: number
   /** CAP-41 FR-05：日报格式模板；null/undefined = 内置默认（见 TemplateDefaults） */
   dailyTemplateMd?: string | null

@@ -19,6 +19,7 @@ export interface WorklogSettingsPanelHandle {
 interface FormValues {
   autoDaily: boolean
   autoWeekly: boolean
+  autoGitImport: boolean
   dailyHoursTarget?: number
   dailyTemplateMd?: string
   weeklyTemplateMd?: string
@@ -37,6 +38,7 @@ export default function WorklogSettingsPanel({ ref }: { ref?: Ref<WorklogSetting
         form.setFieldsValue({
           autoDaily: s.autoDaily,
           autoWeekly: s.autoWeekly,
+          autoGitImport: s.autoGitImport ?? false,
           dailyHoursTarget: s.dailyMinutesTarget != null ? s.dailyMinutesTarget / 60 : undefined,
           dailyTemplateMd: s.dailyTemplateMd ?? '',
           weeklyTemplateMd: s.weeklyTemplateMd ?? '',
@@ -71,6 +73,7 @@ export default function WorklogSettingsPanel({ ref }: { ref?: Ref<WorklogSetting
       await updateSettings({
         autoDaily: v.autoDaily,
         autoWeekly: v.autoWeekly,
+        autoGitImport: v.autoGitImport,
         dailyMinutesTarget: v.dailyHoursTarget != null ? Math.round(v.dailyHoursTarget * 60) : undefined,
         dailyTemplateMd: v.dailyTemplateMd,
         weeklyTemplateMd: v.weeklyTemplateMd,
@@ -88,8 +91,8 @@ export default function WorklogSettingsPanel({ ref }: { ref?: Ref<WorklogSetting
   return (
     <div style={{ maxWidth: 640 }}>
       <Typography.Paragraph type="secondary">
-        日报/周报自动生成、每日工时目标、报表格式模板与工作日志空间的远程备份。
-        改动即时生效：自动生成由服务端定时任务触发，模板用于生成会话，远程备份供工作日志页的「推送远端」使用。
+        日报/周报自动生成、定时从 Git 导入工作条目、每日工时目标、报表格式模板与工作日志空间的远程备份。
+        改动即时生效：自动生成与定时导入由服务端定时任务触发，模板用于生成会话，远程备份供工作日志页的「推送远端」使用。
       </Typography.Paragraph>
       <Spin spinning={loading}>
         <Form form={form} layout="vertical">
@@ -97,6 +100,14 @@ export default function WorklogSettingsPanel({ ref }: { ref?: Ref<WorklogSetting
             <Switch />
           </Form.Item>
           <Form.Item name="autoWeekly" label="每周一自动生成上周周报草稿" valuePropName="checked" extra="默认周一 09:00">
+            <Switch />
+          </Form.Item>
+          <Form.Item
+            name="autoGitImport"
+            label="每天定时从 Git 导入工作条目"
+            valuePropName="checked"
+            extra="默认 18:00（服务端 cron 可配，早于日报生成）。扫描本人勾选仓库的当日提交，自动导入为新条目（工时 0，事后再补）；未能解析提交署名的仓库会跳过，防混入他人提交；已导入过的提交自动去重，与手动「从 Git 导入」不冲突。"
+          >
             <Switch />
           </Form.Item>
           <Form.Item name="dailyHoursTarget" label="每日工时目标（小时）">
