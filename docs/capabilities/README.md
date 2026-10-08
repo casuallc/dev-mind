@@ -80,6 +80,7 @@
 | [CAP-64](CAP-64-bookmark-favorites.md) | 收藏夹 | 组装层 | 绑定到人的网址收藏：分组树/标签/批量转移分组/浏览器打开、HTTP 可用性探测（状态码/耗时落库）、关联账号速查（密码 SecretCipher 密文+按次取明文）、平台内用户只读分享（密码恒不分享），个人数据归属复用 CAP-62 owner 强制 |
 | [CAP-65](CAP-65-agent-node-file-browser.md) | Agent 节点文件浏览器 | 底座 | 节点级根目录白名单（服务端 DB 权威）下的文件浏览/预览/编辑/上传/下载/重命名/删除：小操作走 WS file 帧（协议 v18），≤100MB 大文件走 runner 主动 HTTP 中转（WS 零阻塞），全端点 ADMIN |
 | [CAP-66](CAP-66-security-scan.md) | 安全漏洞扫描 | 执行器 | 多引擎（SCA=dependency-check / SAST=Semgrep / 密钥=Gitleaks）统一扫描底座：exec 帧下发节点执行+工具链标签调度，原始报告归一化统一发现模型（服务端解析），fingerprint 去重+跨任务基线 diff+误报四层漏斗（内部构件白名单/scope 降权/CVE 抑制库/KEV·EPSS 情报排序），修复指导一等输出（引入链/最低安全版本/AI 修复会话），密钥命中脱敏落库 |
+| [CAP-67](CAP-67-usage-statistics.md) | 用量统计 | 组装层 | 会话+问答 token/成本只读聚合：零新表直接 SUM 现有累计六列，总体汇总 + 需求/项目/模型/用户四维分组 + 每日趋势（Java 分桶避方言）+ 成本 Top 明细，/usage 一级导航页；个人数据 owner 强制（非 admin 强制本人、dim=user 仅 admin），时段按创建时间归属为已知近似 |
 
 ## 依赖关系
 
@@ -149,6 +150,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-64 收藏夹依赖 CAP-01/61/62 与 CAP-48 抽取的 `SecretCipher`：纯个人数据能力（新模块 devmind-bookmark），分组树/标签/探测/关联账号/分享全部 keyed owner，归属防护照搬 CAP-62 FR-04 的 404 口径（分享为唯一例外通道，走独立命名空间只读出参）；不依赖 project/session/execution，v1 零对外 SPI、零 DomainEvent。
 - CAP-65 节点文件浏览器依赖 CAP-21（节点 WS 通道/token 认证）、CAP-34（协议版本门控 v18）、CAP-54（resolveConfined 路径限定先例）、CAP-37/57（runner 主动 HTTP 传字节先例）：白名单服务端 DB 单点权威随帧下发，小操作走 WS file 帧、≤100MB 大文件走 HTTP 中转，全部端点（含 GET）限 ADMIN。
 - CAP-66 安全漏洞扫描依赖 CAP-12/21/34/36（exec 帧+工具链标签调度+日志 Hub，引擎二进制节点预装随 `agent.properties` 配路径）、CAP-29/02/62（仓库归属与数据权限）、CAP-06/32/33（通知/报告附件/AI 复核场景装配）：`ScanEngineAdapter` SPI 注册引擎（MVP 三引擎 SCA/SAST/secrets），原始报告回传后**服务端**归一化统一发现模型（fingerprint 去重 + 基线 diff + 抑制表），门禁编排留 `SecurityGateQuery` 草约另立 CAP 消费。
+- CAP-67 用量统计依赖 CAP-01（角色判定）与 CAP-05/30 的用量累计列、CAP-02/13 的标签补全——全部**只读**，与 CAP-16 同型的纯聚合能力：零新表、零写路径、零事件，不改被统计模块；个人数据可见范围照搬 CAP-62 owner 强制口径（非 admin 强制本人、`dim=user` 仅 admin）。
 
 ## 组装方式（后续流程层）
 
