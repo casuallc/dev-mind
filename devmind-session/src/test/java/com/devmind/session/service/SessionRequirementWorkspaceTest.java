@@ -550,6 +550,55 @@ class SessionRequirementWorkspaceTest {
         assertTrue(e.getMessage().contains("会话仍在运行中"), e.getMessage());
     }
 
+    // ---------------- ⑤ 收口后 resume 重开工作区（回归：二次收口 409） ----------------
+
+    /**
+     * 收口（会话行+需求行均 FINALIZED）后点「继续对话」：resume 必须把会话行 reopen 为 OPEN，
+     * 否则需求级收口找不到 OPEN 会话、会话级收口撞「已收口」——继续对话产出的新改动
+     * 两个收口入口都 409 合不进基线。全链路：resume → 进程再退出（DONE）→ 二次收口成功。
+     */
+    @Test
+    void 收口后resume重开工作区可二次收口() {
+        requirement("u1", null);
+        SessionEntity s = session("s1", "DONE", REQ, REQ_KEY);
+        s.setCliSessionId("cli-1"); // 终态 resume 依赖 CLI 会话记录
+        s.setWorkspaceState(SessionEntity.WORKSPACE_FINALIZED); // 已收口
+        requirementService.store.get(REQ).setWorkspaceState(RequirementEntity.WORKSPACE_FINALIZED);
+        repoRows = List.of(repoRow("s1", REQ_BRANCH));
+        FakeConnector connector = new FakeConnector();
+        build(connector);
+
+        service.resume("s1");
+
+        assertEquals(SessionEntity.WORKSPACE_OPEN, store.get("s1").getWorkspaceState(),
+                "resume 必须把会话行重新置 OPEN，否则二次收口两个入口都 409");
+        assertEquals(RequirementEntity.WORKSPACE_OPEN,
+                requirementService.store.get(REQ).getWorkspaceState());
+        assertEquals(REQ_KEY, connector.launchKey, "resume 必须带原 workspaceKey 重挂同一工作树");
+
+        // 继续对话结束（进程退出 → DONE）→ 二次收口应挑中 reopen 的会话行走通
+        service.onRemoteExit(NODE, "s1", 0);
+        assertEquals("DONE", store.get("s1").getStatus());
+
+        FinalizeResult again = service.finalizeRequirementWorkspace(PROJECT, REQ, false);
+        assertTrue(again.ok(), "收口后继续对话的改动必须能再次收口");
+        assertEquals(REQ_KEY, connector.finalizeKey);
+    }
+
+    /** 对照：未收口会话 resume 不动 workspaceState（一直 OPEN，幂等）。 */
+    @Test
+    void 未收口resume不动工作区状态() {
+        requirement("u1", null);
+        SessionEntity s = session("s1", "SUSPENDED", REQ, REQ_KEY);
+        s.setCliSessionId("cli-1");
+        repoRows = List.of(repoRow("s1", REQ_BRANCH));
+        build(new FakeConnector());
+
+        service.resume("s1");
+
+        assertEquals(SessionEntity.WORKSPACE_OPEN, store.get("s1").getWorkspaceState());
+    }
+
     // ---------------- ③ 需求删除 → 释放工作树 ----------------
 
     /** 节点离线：releaseWorkspace 抛 CONFLICT，释放路径只告警不外抛（不阻断需求删除）。 */

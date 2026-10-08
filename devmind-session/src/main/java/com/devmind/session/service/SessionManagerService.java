@@ -612,6 +612,12 @@ public class SessionManagerService {
                 throw new DevMindException(ErrorCode.CONFLICT, "恢复远程会话失败: " + e.getMessage(), e);
             }
             ent.setStatus(SessionState.RUNNING.name());
+            // CAP-51 收口后 resume：会话行同步 reopen（配套上方需求行 markWorkspaceOpen）——
+            // 不重置则需求级收口找不到 OPEN 会话、会话级收口撞「已收口」，
+            // 继续对话产出的新改动两个收口入口都 409 合不进基线
+            if (SessionEntity.WORKSPACE_FINALIZED.equals(ent.getWorkspaceState())) {
+                ent.setWorkspaceState(SessionEntity.WORKSPACE_OPEN);
+            }
             ent.setContextManifestJson(prepared != null ? prepared.snapshotJson() : null);
             ent.setFinishedAt(null);
             ent.setUpdatedAt(Instant.now());
