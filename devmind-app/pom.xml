@@ -121,6 +121,10 @@
             <groupId>com.devmind</groupId>
             <artifactId>devmind-bookmark</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-usage</artifactId>
+        </dependency>
 
         <!-- Spring Boot 基础 -->
         <dependency>
