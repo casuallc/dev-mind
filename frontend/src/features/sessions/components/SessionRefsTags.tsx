@@ -20,7 +20,18 @@ export default function SessionRefsTags({
   if (!session.requirementId && !session.workItemId) return null
   const reqText = req ? `${req.code} ${req.title}` : session.requirementId!
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+    // maxWidth:100% + overflow:hidden 兜住调用方列宽：需求链接省略号在单元格内截断，不溢出到下一列
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        minWidth: 0,
+        maxWidth: '100%',
+        overflow: 'hidden',
+        verticalAlign: 'middle',
+      }}
+    >
       {session.requirementId && (
         <Tooltip title={`需求：${reqText}`}>
           <Typography.Text style={{ maxWidth, fontSize: 12 }} ellipsis>

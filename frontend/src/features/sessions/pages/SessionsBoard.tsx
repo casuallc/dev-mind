@@ -231,8 +231,15 @@ export default function SessionsBoard({
     {
       title: '任务说明',
       dataIndex: 'taskSpec',
-      ellipsis: true,
-      render: (t: string) => t?.slice(0, 100) || '-',
+      ellipsis: { showTitle: false },
+      render: (t: string) =>
+        t ? (
+          <Tooltip placement="topLeft" title={t}>
+            {t}
+          </Tooltip>
+        ) : (
+          '-'
+        ),
     },
     {
       title: '状态',
@@ -254,15 +261,23 @@ export default function SessionsBoard({
     {
       title: '关联',
       key: 'refs',
-      width: 220,
+      width: 200,
       render: (_, r) =>
-        r.requirementId || r.workItemId ? <SessionRefsTags session={r} refs={refs} /> : '-',
+        // maxWidth 留给工作单元标签的余位（列宽 200 - 单元格 padding 32）
+        r.requirementId || r.workItemId ? <SessionRefsTags session={r} refs={refs} maxWidth={110} /> : '-',
     },
     {
       title: '摘要',
       dataIndex: 'summary',
-      ellipsis: true,
-      render: (s?: string) => s?.slice(0, 80) || '-',
+      ellipsis: { showTitle: false },
+      render: (s?: string) =>
+        s ? (
+          <Tooltip placement="topLeft" title={s}>
+            {s}
+          </Tooltip>
+        ) : (
+          '-'
+        ),
     },
     {
       title: '用量',
@@ -503,6 +518,8 @@ export default function SessionsBoard({
             columns={columns}
             dataSource={listFiltered}
             pagination={LIST_PAGINATION}
+            // fixed：声明的列宽才生效，ellipsis 列按剩余宽度均分，长文本不挤破相邻列
+            tableLayout="fixed"
             locale={{ emptyText: '暂无会话。切到「对话」视图点「新对话」创建第一个。' }}
           />
         </div>
