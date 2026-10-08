@@ -62,6 +62,13 @@ CAP-25/31 的 runner 工作区是「每会话独立目录」：克隆缓存 `<wo
   push 基线 → best-effort push 会话分支（供 diff）→ `worktree remove` + `branch -D`。
   合并冲突 `merge --abort` 并透传脱敏错误尾部，work/ 保留待人工/resume 处理。
   成功落 `sessions.workspace_state=FINALIZED`（新列，OPEN/FINALIZED，null=旧会话）。
+  - **FR-05a 删除远端会话分支（协议 v19，2026-10-08 补）**：收口弹窗新增
+    「删除远端 feature 分支」勾选（**默认勾选**，代价已注明：收口后 diff 不可再查）。
+    `deleteRemoteBranch=true` 时 runner 在合并+push 基线后**跳过** diff 用的会话分支 push、
+    改为幂等删除远端 feature 分支（复用 FR-06 释放路径同款实现，`remote ref does not exist`
+    视为成功）；删除失败只告警写进 detail、**不阻断** FINALIZED 落库（基线已合并推送）。
+    CAP-51 keyed 需求级收口同样生效但只删远端——本地分支被保留的工作树检出，本就不删。
+    可选字段不门控：老 runner 忽略字段 = 维持 push 分支供 diff 的现状。
 - **FR-06 归属人解析（编排链路）**：无登录态的自动派发（CAP-15/17）工作区归属按
   **WI.ownerId → 需求.ownerId → WI.createdBy → 需求.createdBy** 回退链解析真实用户名，
   解析不到 409 fail-visible（不落 "local" 兜底，防多 WI 并发全撞 `<proj>/local/work`）。
@@ -97,7 +104,8 @@ CAP-25/31 的 runner 工作区是「每会话独立目录」：克隆缓存 `<wo
   finally 清理（remove + 递归删兜底 + prune）。
 - **收口时顺带 push 会话分支**（已定）：不再自动 push 后 diff 链路（RemoteDiffService
   走远端分支）依赖分支在远端；finalize best-effort push `feature/<sid>` 使收口后
-  仍可查看 diff。代价是远端多留 feature 分支。
+  仍可查看 diff。代价是远端多留 feature 分支——v19 起收口弹窗默认勾选「删除远端
+  feature 分支」消除该残留（FR-05a；勾选后不再 push、收口后 diff 不可再查）。
 - **冲突恢复路径**：合并冲突 → work/ 保留。恢复两条路：(a) resume 该会话让 agent
   `git rebase <baseBranch>` 解冲突并提交后再收口；(b) 节点上手工处理。
   `discardChanges` 只清未提交脏文件，不解提交级冲突。

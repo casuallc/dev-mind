@@ -10,6 +10,7 @@
 #   2. finalize：合并到基线 + push 基线与会话分支 + workspace_state=FINALIZED；
 #      keyed 收口保留工作树并 ff 前进到新基线；重复收口 409；
 #      收口 merge 提交署名 = 操作者身份（CAP-24 FR-06，未绑平台账号回退 displayName）；
+#      （协议 v19）deleteRemoteBranch=true 收口后远端会话分支被删（不再为 diff 保留）；
 #   3. 负例：脏工作区不 discard → 409；discard 后合并冲突 → 409 工作区保留；
 #      本地解冲突后重试收口成功；
 #   4. 删除会话释放固定工作区（FR-09，协议 v9 workspace_release）：目录+本地分支释放、
@@ -279,6 +280,26 @@ try:
     ok(ack2.get('ok') is True, f"解冲突后重试收口 ok: {ack2.get('detail')}")
     ok(git('show', 'main:README.md', cwd=ORIGIN).strip() == 'resolved', '基线含解冲突结果')
     ok(work2.is_dir(), 'keyed 收口后工作树保留（CAP-51）')
+
+    # 7d.（协议 v19）deleteRemoteBranch=true：合并推送基线后远端会话分支被删
+    #     （对照：上面会话1/2 未传该字段 → 远端分支保留供 diff，见 [3] 断言）
+    _, s5 = call('POST', '/sessions', {'projectId': pid, 'taskSpec': 'CAP-42 E2E 会话5（删远端分支）'}, user)
+    sid5 = s5['id']
+    work5 = uroot / 'worktrees' / f'sid-{sid5}'
+    wait(lambda: (work5 / '.git').exists() or None, '会话5 worktree 物化', 30)
+    (work5 / 'code5.txt').write_text('change-s5 ' + MARK + '\n', encoding='utf-8')
+    commit(work5, 'work s5')
+    call('POST', f'/sessions/{sid5}/finish', token=user)
+    wait_terminal(sid5, user)
+    _, ack5 = call('POST', f'/sessions/{sid5}/finalize', {'deleteRemoteBranch': True}, user)
+    ok(ack5.get('ok') is True, f"勾选删除远端分支收口 ok: {ack5.get('detail')}")
+    ok(git('show', 'main:code5.txt', cwd=ORIGIN).strip() == 'change-s5 ' + MARK, '基线含会话5产出 code5.txt')
+    ok(git('ls-remote', ORIGIN, f'refs/heads/feature/{sid5}') == '',
+       '勾选后远端会话分支已删（不再为 diff 保留）')
+    _, v5 = call('GET', f'/sessions/{sid5}', token=user)
+    ok(v5.get('workspaceState') == 'FINALIZED', f"会话5 workspaceState=FINALIZED: {v5.get('workspaceState')}")
+    ok(work5.is_dir(), 'keyed 收口后工作树仍保留（只删远端分支）')
+    print('[3b] deleteRemoteBranch=true 收口删除远端分支 OK')
 
     # 8. 删除会话释放固定工作区（FR-09）：目录与本地分支释放、远端不动
     _, s3 = call('POST', '/sessions', {'projectId': pid, 'taskSpec': 'CAP-42 E2E 会话3（删除释放）'}, user)
