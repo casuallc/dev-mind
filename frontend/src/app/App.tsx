@@ -48,7 +48,6 @@ import DashboardPage from '../features/dashboard/pages/DashboardPage'
 import HomePage from '../features/home/pages/HomePage'
 import WorklogPage from '../features/worklog/pages/WorklogPage'
 import BookmarksPage from '../features/bookmarks/pages/BookmarksPage'
-import UsagePage from '../features/usage/UsagePage'
 import ChatsBoard from '../features/chat/pages/ChatsBoard'
 import AttachmentsPage from '../features/attachments/pages/AttachmentsPage'
 import ReposAdminPage from '../features/repos/pages/ReposAdminPage'
@@ -116,8 +115,8 @@ export default function App() {
           <Route path="/chats" element={<ChatsBoard />} />
           {/* CAP-64 收藏夹（个人级 owner 隔离，不进项目上下文） */}
           <Route path="/bookmarks" element={<BookmarksPage />} />
-          {/* CAP-67 用量统计（个人级，非 admin 服务端强制本人） */}
-          <Route path="/usage" element={<UsagePage />} />
+          {/* CAP-67 用量统计已并入工作台页内视图（/home?view=usage），旧 /usage 兼容跳转 */}
+          <Route path="/usage" element={<Navigate to="/home?view=usage" replace />} />
           {/* 项目上下文页面（当前项目为主线，无项目时由 Gate 统一空态） */}
           <Route element={<ProjectContextGate />}>
             <Route path="/overview" element={<ProjectOverviewPage />} />
