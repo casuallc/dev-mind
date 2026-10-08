@@ -33,6 +33,8 @@ export default function SessionMoreActions({
   const [sedimentOpen, setSedimentOpen] = useState(false)
   const [finalizeOpen, setFinalizeOpen] = useState(false)
   const [discard, setDiscard] = useState(false)
+  // v19：默认勾选——远端 feature 分支随收口删除（代价：收口后 diff 不可再查）
+  const [deleteBranch, setDeleteBranch] = useState(true)
   const [finalizing, setFinalizing] = useState(false)
 
   // CAP-42：固定工作区会话（workspaceState 非空）才显示收口入口；
@@ -60,10 +62,11 @@ export default function SessionMoreActions({
   const onFinalize = async () => {
     setFinalizing(true)
     try {
-      const ack = await finalizeSession(session.id, discard)
+      const ack = await finalizeSession(session.id, discard, deleteBranch)
       message.success(ack.detail ? `收口完成：${ack.detail}` : '收口完成：已合并到基线并推送')
       setFinalizeOpen(false)
       setDiscard(false)
+      setDeleteBranch(true)
       onChanged()
     } catch (e) {
       // 失败（冲突/脏工作区/push 失败）透传 runner 脱敏错误，工作区保留可重试
@@ -144,6 +147,7 @@ export default function SessionMoreActions({
         onCancel={() => {
           setFinalizeOpen(false)
           setDiscard(false)
+          setDeleteBranch(true)
         }}
       >
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -153,6 +157,9 @@ export default function SessionMoreActions({
           </Typography.Text>
           <Checkbox checked={discard} onChange={(e) => setDiscard(e.target.checked)}>
             丢弃未提交改动（reset --hard + clean -fd；仅清未提交文件，不解合并冲突）
+          </Checkbox>
+          <Checkbox checked={deleteBranch} onChange={(e) => setDeleteBranch(e.target.checked)}>
+            删除远端 feature 分支（勾选后收口完成将不可再查看该会话 diff）
           </Checkbox>
         </Space>
       </Modal>

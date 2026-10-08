@@ -82,9 +82,14 @@ export function finishSession(id: string): Promise<void> {
   return api.post(`/sessions/${id}/finish`)
 }
 
-/** CAP-42：固定工作区手动收口（合并会话分支到基线 + push + 删 worktree）。 */
-export function finalizeSession(id: string, discardChanges: boolean): Promise<FinalizeAck> {
-  return api.post<FinalizeAck>(`/sessions/${id}/finalize`, { discardChanges })
+/** CAP-42：固定工作区手动收口（合并会话分支到基线 + push + 删 worktree）。
+ *  deleteRemoteBranch=true 时收口成功删除远端会话分支（协议 v19，diff 随之不可再查）。 */
+export function finalizeSession(
+  id: string,
+  discardChanges: boolean,
+  deleteRemoteBranch: boolean,
+): Promise<FinalizeAck> {
+  return api.post<FinalizeAck>(`/sessions/${id}/finalize`, { discardChanges, deleteRemoteBranch })
 }
 
 export function sessionDiff(id: string): Promise<RepoDiffView[]> {
