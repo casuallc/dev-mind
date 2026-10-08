@@ -36,14 +36,20 @@ export default function RequirementListCard({ projectId }: { projectId: string }
   const [typeFilter, setTypeFilter] = useState<string>('')
   const [page, setPage] = useState(0)
   const [size, setSize] = useState(20)
+  // 服务端排序：undefined = 默认 seq 倒序（新建在前）；点「更新」列头切 updatedAt 升降序
+  const [sort, setSort] = useState<{ by: 'updatedAt'; dir: 'asc' | 'desc' } | undefined>()
   const [createOpen, setCreateOpen] = useState(false)
 
   const load = useCallback(async (
     p: number, s: number, source: string, kw: string, status: string, type: string,
+    so: { by: 'updatedAt'; dir: 'asc' | 'desc' } | undefined,
   ) => {
     setLoading(true)
     try {
-      const data = await listRequirements(projectId, { status, type, source, keyword: kw, page: p, size: s })
+      const data = await listRequirements(projectId, {
+        status, type, source, keyword: kw, page: p, size: s,
+        sortBy: so?.by, sortDir: so?.dir,
+      })
       setItems(data.items)
       setTotal(data.total)
     } catch (e) {
@@ -54,11 +60,11 @@ export default function RequirementListCard({ projectId }: { projectId: string }
   }, [projectId])
 
   useEffect(() => {
-    load(page, size, sourceView, keyword, statusFilter, typeFilter)
+    load(page, size, sourceView, keyword, statusFilter, typeFilter, sort)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [load, page, size, sourceView, keyword, statusFilter, typeFilter])
+  }, [load, page, size, sourceView, keyword, statusFilter, typeFilter, sort])
 
-  const reload = () => load(page, size, sourceView, keyword, statusFilter, typeFilter)
+  const reload = () => load(page, size, sourceView, keyword, statusFilter, typeFilter, sort)
 
   // 伪需求/无需工作单元的条目行内直接翻 DONE（不经工作单元 rollup 路径）
   const confirmDirectDone = (r: Requirement) => {
@@ -182,6 +188,8 @@ export default function RequirementListCard({ projectId }: { projectId: string }
       title: '更新',
       dataIndex: 'updatedAt',
       width: 150,
+      sorter: true, // 服务端排序（分页在服务端，不能本地排）
+      sortOrder: sort ? (sort.dir === 'asc' ? 'ascend' : 'descend') : null,
       render: (t: string) => (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           {fmtTime(t)}
@@ -276,6 +284,13 @@ export default function RequirementListCard({ projectId }: { projectId: string }
             onClick: () => navigate(`/projects/${projectId}/requirements/${r.id}`),
             style: { cursor: 'pointer' },
           })}
+          onChange={(_pg, _filters, sorter) => {
+            // 分页仍走 pagination.onChange；这里只接管排序（取消排序回退默认 seq 倒序）
+            const so = Array.isArray(sorter) ? sorter[0] : sorter
+            if (so?.column?.dataIndex !== 'updatedAt') return
+            setPage(0)
+            setSort(so.order ? { by: 'updatedAt', dir: so.order === 'ascend' ? 'asc' : 'desc' } : undefined)
+          }}
           pagination={{
             current: page + 1,
             pageSize: size,

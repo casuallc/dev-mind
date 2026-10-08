@@ -29,16 +29,19 @@ public class RequirementController {
         this.service = service;
     }
 
-    /** 分页列表：status/type/source 过滤（空=不限；status=OPEN 为伪值=未完结，排除 DONE/CANCELLED），keyword 匹配标题/Jira key，page 从 0 起，size 默认 20 */
+    /** 分页列表：status/type/source 过滤（空=不限；status=OPEN 为伪值=未完结，排除 DONE/CANCELLED），keyword 匹配标题/Jira key，
+     *  page 从 0 起，size 默认 20；sortBy 白名单 seq（默认）/updatedAt，sortDir asc/desc（默认 desc） */
     @GetMapping
     public PageView<RequirementView> list(@PathVariable String projectId,
                                           @RequestParam(required = false) String status,
                                           @RequestParam(required = false) String type,
                                           @RequestParam(required = false) String source,
                                           @RequestParam(required = false) String keyword,
+                                          @RequestParam(required = false) String sortBy,
+                                          @RequestParam(required = false) String sortDir,
                                           @RequestParam(defaultValue = "0") int page,
                                           @RequestParam(defaultValue = "20") int size) {
-        return service.list(projectId, status, type, source, keyword, page, size);
+        return service.list(projectId, status, type, source, keyword, sortBy, sortDir, page, size);
     }
 
     @PostMapping
