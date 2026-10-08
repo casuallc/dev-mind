@@ -1,5 +1,6 @@
 // CAP-67 用量统计页：总体卡（时段/用户筛选 + 指标）→ 每日趋势（纯 div 柱状图，零图表依赖）→
-// 维度卡（按需求/项目/模型/用户 分组表 + Top 明细）。多区块页根容器走 pageRootScrollStyle。
+// 维度卡（按需求/项目/模型/用户 分组表 + Top 明细）。
+// 仅作为 /home 的页内视图嵌入（/usage 重定向到 /home?view=usage）：外层 Card body 统一滚动，本页根不再自带滚动容器。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Card, Col, Row, Segmented, Select, Space, Statistic, Table, Tag, Tooltip, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -10,7 +11,6 @@ import { listUsers } from '../auth/api'
 import type { AuthUser } from '../auth/types'
 import { isAdmin } from '../auth/authStore'
 import { fmtCost, fmtTime, fmtTokens } from '../../shared/utils/format'
-import { pageRootScrollStyle } from '../../shared/utils/pageLayout'
 import { LIST_PAGINATION } from '../../shared/utils/table'
 import { getUsageBreakdown, getUsageDaily, getUsageSummary, getUsageTop } from './api'
 import type { UsageFilter } from './api'
@@ -177,7 +177,7 @@ export default function UsagePage() {
   ]
 
   return (
-    <div style={pageRootScrollStyle}>
+    <div>
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
         <Card
           title="用量统计"
