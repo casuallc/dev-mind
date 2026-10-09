@@ -38,6 +38,7 @@ import DeployDetailDrawer from '../components/DeployDetailDrawer'
 import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { workItemColumn } from '../../../shared/components/WorkItemCell'
+import WorkItemSelect from '../../../shared/components/WorkItemSelect'
 import { showError } from '../../../shared/utils/showError'
 
 export default function DeploymentsPage() {
@@ -64,6 +65,7 @@ function DeployCenter({ id }: { id: string }) {
   const [agentNodeId, setAgentNodeId] = useState<string | undefined>()
   const [environmentId, setEnvironmentId] = useState<number | undefined>()
   const [buildId, setBuildId] = useState<number | undefined>()
+  const [createWorkItemId, setCreateWorkItemId] = useState<string | undefined>()
   const [env, setEnv] = useState('test')
   const [confirmRequired, setConfirmRequired] = useState(false)
 
@@ -116,6 +118,7 @@ function DeployCenter({ id }: { id: string }) {
         agentNodeId: agentNodeId || undefined,
         environmentId: environmentId || undefined,
         buildId: buildId || undefined,
+        workItemId: createWorkItemId,
         env: environmentId ? undefined : env || 'test',
         confirmRequired,
       })
@@ -234,10 +237,18 @@ function DeployCenter({ id }: { id: string }) {
                 style={{ width: 220 }}
                 placeholder={artifactBuilds.length ? '选择构建（产物）' : '无已登记产物的构建'}
                 value={buildId}
-                onChange={setBuildId}
+                onChange={(v) => {
+                  setBuildId(v)
+                  // 选构建时若未手选工作单元，自动带出该构建关联的 WI（构建与部署的归集维度保持一致）
+                  const b = artifactBuilds.find((x) => x.id === v)
+                  if (v && !createWorkItemId && b?.workItemId) setCreateWorkItemId(b.workItemId)
+                }}
                 allowClear
                 options={artifactBuilds.map((b) => ({ value: b.id, label: `#${b.id} · ${b.artifactRef}` }))}
               />
+              <div style={{ width: 260 }}>
+                <WorkItemSelect projectId={id} value={createWorkItemId} onChange={(v) => setCreateWorkItemId(v)} />
+              </div>
               {environmentId == null && (
                 <Input placeholder="环境" value={env} onChange={(e) => setEnv(e.target.value)} style={{ width: 120 }} />
               )}

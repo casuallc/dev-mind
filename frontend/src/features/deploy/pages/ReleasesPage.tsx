@@ -29,6 +29,7 @@ import ReleaseDetailDrawer from '../components/ReleaseDetailDrawer'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { workItemColumn } from '../../../shared/components/WorkItemCell'
+import WorkItemSelect from '../../../shared/components/WorkItemSelect'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -37,6 +38,7 @@ interface CreateValues {
   version?: string
   executor?: string
   agentNodeId?: string
+  workItemId?: string
   force?: boolean
 }
 
@@ -73,6 +75,7 @@ function ReleaseCenter({ id }: { id: string }) {
         version: v.version,
         executor: v.executor,
         agentNodeId: v.agentNodeId,
+        workItemId: v.workItemId,
         force: v.force,
       }
       const r = await createRelease(input)
@@ -153,6 +156,9 @@ function ReleaseCenter({ id }: { id: string }) {
         <Form form={createForm} layout="vertical" onFinish={onCreate}>
           <Form.Item label="构建 id" name="buildId" extra="产物来源（可选，留空则模板自带制品）">
             <InputNumber min={1} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item label="关联工作单元" name="workItemId" extra="可选；选定后发版记录归集到对应需求">
+            <WorkItemSelect projectId={id} />
           </Form.Item>
           <Form.Item label="版本" name="version" extra="留空按版本规则自动 +1">
             <Input placeholder="如 1.0.1" />

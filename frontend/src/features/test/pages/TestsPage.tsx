@@ -18,7 +18,7 @@ import {
   message,
 } from 'antd'
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { ColumnsType } from 'antd/es/table'
 import {
   PlayCircleOutlined,
@@ -52,6 +52,7 @@ import RunSuiteModal from '../components/RunSuiteModal'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { workItemColumn } from '../../../shared/components/WorkItemCell'
+import WorkItemSelect from '../../../shared/components/WorkItemSelect'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -63,6 +64,7 @@ export default function TestsPage() {
 
 function TestCenter({ id }: { id: string }) {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [view, setView] = useState<string>('suites') // suites | runs
   const [suites, setSuites] = useState<TestSuite[]>([])
   const [scriptSuites, setScriptSuites] = useState<ScriptSuite[]>([])
@@ -74,6 +76,7 @@ function TestCenter({ id }: { id: string }) {
   // 新建运行弹窗表单
   const [runOpen, setRunOpen] = useState(false)
   const [suiteIds, setSuiteIds] = useState<number[]>([])
+  const [runWorkItemId, setRunWorkItemId] = useState<string | undefined>()
   const [environmentId, setEnvironmentId] = useState<number | undefined>()
   const [agentNodeId, setAgentNodeId] = useState<string | undefined>()
   const [baseUrl, setBaseUrl] = useState('')
@@ -121,6 +124,16 @@ function TestCenter({ id }: { id: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
+  // 深链（需求详情「触发测试」直达）：/tests?run=1&workItemId=<wi> 开新建运行弹窗并预填 WI，读后清参数
+  useEffect(() => {
+    if (searchParams.get('run') !== '1') return
+    const wi = searchParams.get('workItemId')
+    if (wi) setRunWorkItemId(wi)
+    setRunOpen(true)
+    setSearchParams({}, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
   const onDeleteSuite = (s: TestSuite) => {
     const isScript = s.kind === 'script'
     Modal.confirm({
@@ -155,11 +168,13 @@ function TestCenter({ id }: { id: string }) {
       const r = await createRun({
         projectId: id,
         suiteIds,
+        workItemId: runWorkItemId,
         agentNodeId: agentNodeId || undefined,
         environmentId: environmentId || undefined,
         baseUrl: baseUrl.trim() || undefined,
       })
       setRunOpen(false)
+      setRunWorkItemId(undefined)
       setDetail(r)
       refresh()
       message.success(`测试运行 #${r.id} 已创建`)
@@ -331,6 +346,7 @@ function TestCenter({ id }: { id: string }) {
             onChange={setSuiteIds}
             options={suites.filter((s) => s.kind !== 'script').map((s) => ({ value: s.id, label: `${s.name}（${s.caseCount} 用例）` }))}
           />
+          <WorkItemSelect projectId={id} value={runWorkItemId} onChange={(v) => setRunWorkItemId(v)} />
           <Select<number>
             style={{ width: '100%' }}
             placeholder="目标环境（可选）"

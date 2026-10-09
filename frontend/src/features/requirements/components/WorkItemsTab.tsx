@@ -194,10 +194,24 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
           <Dropdown
             menu={{
               items: [
+                { key: 'build', label: '触发构建' },
+                { key: 'test', label: '触发测试' },
                 { key: 'edit', label: '编辑' },
                 { key: 'delete', label: '删除', danger: true, disabled: locked },
               ],
-              onClick: ({ key }) => (key === 'edit' ? openEdit(w) : confirmDelete(w)),
+              onClick: ({ key }) => {
+                // 触发构建/测试：深链到执行器页并预填 WI（构建顺带预填工作分支 wi/<seq>-<slug>）
+                if (key === 'build') {
+                  const branch = `wi/${w.seq}${w.branchSlug ? `-${w.branchSlug}` : ''}`
+                  navigate(`/builds?trigger=1&workItemId=${w.id}&branch=${encodeURIComponent(branch)}`)
+                } else if (key === 'test') {
+                  navigate(`/tests?run=1&workItemId=${w.id}`)
+                } else if (key === 'edit') {
+                  openEdit(w)
+                } else {
+                  confirmDelete(w)
+                }
+              },
             }}
             trigger={['click']}
           >

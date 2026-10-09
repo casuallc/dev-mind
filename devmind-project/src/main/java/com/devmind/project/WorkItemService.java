@@ -244,6 +244,16 @@ public class WorkItemService {
         return result;
     }
 
+    /**
+     * 项目级工作单元摘要列表（执行器触发表单的关联选择器用）：按 seq 倒序，新 WI 在前。
+     * 数据量为项目内 WI 总量（几十到几百），选择器前端搜索不过滤接口。
+     */
+    public List<WorkItemBrief> briefsByProject(String projectId) {
+        List<WorkItemEntity> items = workItemRepo.findByProjectIdOrderBySeqDesc(projectId);
+        Map<String, WorkItemBrief> byId = briefsByIds(items.stream().map(WorkItemEntity::getId).toList());
+        return items.stream().map(w -> byId.get(w.getId())).filter(Objects::nonNull).toList();
+    }
+
     private String code(Long seq) {
         return "WI-" + seq;
     }

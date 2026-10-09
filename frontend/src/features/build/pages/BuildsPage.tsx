@@ -4,6 +4,7 @@
 // 布局遵循 docs/core/前端内容区布局约定.md：单 Card 默认尺寸，配置/触发表单收进 extra 按钮打开的 Modal。
 import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Modal, Select, Space, Tag, Typography, message } from 'antd'
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { ReloadOutlined, RocketOutlined, SettingOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { getBuild, getBuildConfig, getBuildLogs, listBuilds, saveBuildConfig, triggerBuild } from '../api'
@@ -17,6 +18,7 @@ import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import LogView from '../../../shared/components/LogView'
 import { workItemColumn } from '../../../shared/components/WorkItemCell'
+import WorkItemSelect from '../../../shared/components/WorkItemSelect'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 const STATUS_COLOR: Record<BuildStatus, string> = {
@@ -34,12 +36,14 @@ export default function BuildsPage() {
 }
 
 function BuildCenter({ id }: { id: string }) {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [cfg, setCfg] = useState<BuildConfig | null>(null)
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [builds, setBuilds] = useState<BuildRecord[]>([])
   const [loading, setLoading] = useState(false)
   const [commit, setCommit] = useState('')
   const [branch, setBranch] = useState('')
+  const [triggerWorkItemId, setTriggerWorkItemId] = useState<string | undefined>()
   const [triggerExecutor, setTriggerExecutor] = useState<'' | BuildExecutor>('')
   const [saving, setSaving] = useState(false)
   const [building, setBuilding] = useState(false)
@@ -61,6 +65,18 @@ function BuildCenter({ id }: { id: string }) {
     refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  // 深链（需求详情「触发构建」直达）：/builds?trigger=1&workItemId=<wi>&branch=<分支> 预填并开弹窗，读后清参数
+  useEffect(() => {
+    if (searchParams.get('trigger') !== '1') return
+    const wi = searchParams.get('workItemId')
+    const br = searchParams.get('branch')
+    if (wi) setTriggerWorkItemId(wi)
+    if (br) setBranch(br)
+    setTriggerOpen(true)
+    setSearchParams({}, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   const onlineNodes = nodes.filter((n) => n.status === 'ONLINE')
   const nodeOptions = (list: AgentNode[]) =>
@@ -93,10 +109,12 @@ function BuildCenter({ id }: { id: string }) {
         branch: branch || undefined,
         executor: triggerExecutor || undefined,
         agentNodeId: triggerExecutor === 'AGENT' ? cfg?.agentNodeId ?? undefined : undefined,
+        workItemId: triggerWorkItemId,
       })
       message.success(`构建 #${b.id} 已触发（${b.executor}）`)
       setCommit('')
       setBranch('')
+      setTriggerWorkItemId(undefined)
       setTriggerOpen(false)
       refresh()
     } catch (e) {
@@ -235,6 +253,7 @@ function BuildCenter({ id }: { id: string }) {
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
           <Input placeholder="分支（留空=当前分支）" value={branch} onChange={(e) => setBranch(e.target.value)} />
           <Input placeholder="commit（留空=当前 HEAD）" value={commit} onChange={(e) => setCommit(e.target.value)} />
+          <WorkItemSelect projectId={id} value={triggerWorkItemId} onChange={(v) => setTriggerWorkItemId(v)} />
           <Select<'' | BuildExecutor>
             style={{ width: '100%' }}
             value={triggerExecutor}
