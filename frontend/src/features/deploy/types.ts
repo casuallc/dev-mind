@@ -1,4 +1,6 @@
 // CAP-09 部署执行器 + CAP-11 发版执行器（发版归属交付域，与部署同模块）
+import type { WorkItemBrief } from '../../shared/types'
+
 export type DeployStatus = 'PLANNED' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'ROLLED_BACK'
 export type StepStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'SKIPPED'
 export type StepType = 'artifact' | 'backup' | 'deploy' | 'start' | 'health'
@@ -50,6 +52,8 @@ export interface DeploymentRecord {
   createdAt: string
   plan: DeployStepInput[]
   steps: DeployStep[]
+  /** 关联工作单元摘要（列表回链需求展示；未关联为 null） */
+  workItem?: WorkItemBrief | null
 }
 
 // ---- CAP-11 发版执行器（与后端 devmind-release / release_config 对齐） ----
@@ -96,6 +100,8 @@ export interface ReleaseRecord {
   startedAt?: string
   finishedAt?: string
   createdAt: string
+  /** 关联工作单元摘要（列表回链需求展示；未关联为 null） */
+  workItem?: WorkItemBrief | null
 }
 
 export interface CreateReleaseInput {

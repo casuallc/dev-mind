@@ -36,6 +36,8 @@ import com.devmind.notification.dto.NotificationDraft;
 import com.devmind.notification.model.NotificationLevel;
 import com.devmind.notification.service.NotificationService;
 import com.devmind.project.ProjectService;
+import com.devmind.project.WorkItemService;
+import com.devmind.project.dto.WorkItemBrief;
 import com.devmind.project.model.ProjectRepoEntity;
 import com.devmind.project.model.ReleaseConfigEntity;
 import com.devmind.project.repo.ReleaseConfigRepository;
@@ -70,6 +72,7 @@ public class ReleaseService {
     private final LocalStepRunner localRunner;
     private final NotificationService notificationService;
     private final ExecutionLogHub hub;
+    private final WorkItemService workItemService;
     /** CAP-18 FR-06 可选钩子：devmind-integration 装配时存在，发版成功后 push tag + 建平台 Release */
     private final org.springframework.beans.factory.ObjectProvider<PlatformIntegrationHook> integrationHook;
     /** CAP-26 可选 SPI：devmind-integration 装配时存在，tag 前 fetch 服务端 clone 保鲜 */
@@ -86,6 +89,7 @@ public class ReleaseService {
                           NotificationService notificationService,
                           ExecutionLogHub hub,
                            IdentityService identityService,
+                           WorkItemService workItemService,
                            org.springframework.beans.factory.ObjectProvider<PlatformIntegrationHook> integrationHook,
                            org.springframework.beans.factory.ObjectProvider<RepoGitGateway> repoGitGateway) {
         this.integrationHook = integrationHook;
@@ -101,6 +105,7 @@ public class ReleaseService {
         this.localRunner = localRunner;
         this.notificationService = notificationService;
         this.hub = hub;
+        this.workItemService = workItemService;
     }
 
     @PreDestroy
@@ -328,14 +333,16 @@ public class ReleaseService {
     }
 
     public ReleaseView get(Long id) {
-        return toView(require(id));
+        ReleaseEntity r = require(id);
+        return toView(r, brief(r.getWorkItemId()));
     }
 
     public List<ReleaseView> history(String projectId, String status) {
         List<ReleaseEntity> list = status == null || status.isBlank()
                 ? repo.findByProjectIdOrderByCreatedAtDesc(projectId)
                 : repo.findByProjectIdAndStatusOrderByCreatedAtDesc(projectId, status.trim().toUpperCase());
-        return list.stream().map(this::toView).toList();
+        Map<String, WorkItemBrief> briefs = briefsOf(list.stream().map(ReleaseEntity::getWorkItemId).toList());
+        return list.stream().map(r -> toView(r, briefs.get(r.getWorkItemId()))).toList();
     }
 
     public String logs(Long id) {
@@ -563,10 +570,25 @@ public class ReleaseService {
     }
 
     private ReleaseView toView(ReleaseEntity r) {
+        return toView(r, null);
+    }
+
+    private ReleaseView toView(ReleaseEntity r, WorkItemBrief workItem) {
         return new ReleaseView(r.getId(), r.getProjectId(), r.getWorkItemId(), r.getBuildId(),
                 r.getReleaseVersion(), r.getStatus(), r.getArtifactRef(), r.getNexusRef(), r.getTagName(),
                 r.getExecutor(), r.getAgentNodeId(), r.getRollbackOf(), r.getErrorSummary(), r.getCreatedBy(),
-                r.getStartedAt(), r.getFinishedAt(), r.getCreatedAt());
+                r.getStartedAt(), r.getFinishedAt(), r.getCreatedAt(), workItem);
+    }
+
+    /** 单条摘要（详情出参用）；workItemId 为空或已删除返回 null。 */
+    private WorkItemBrief brief(String workItemId) {
+        return workItemId == null ? null : briefsOf(List.of(workItemId)).get(workItemId);
+    }
+
+    /** 批量摘要（列表出参用）：一次批量查，避免逐行 N+1。 */
+    private Map<String, WorkItemBrief> briefsOf(List<String> workItemIds) {
+        List<String> ids = workItemIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        return ids.isEmpty() ? Map.of() : workItemService.briefsByIds(ids);
     }
 
     private String blankToNull(String s) {

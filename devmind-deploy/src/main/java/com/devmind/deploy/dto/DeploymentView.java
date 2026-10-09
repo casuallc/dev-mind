@@ -1,5 +1,7 @@
 package com.devmind.deploy.dto;
 
+import com.devmind.project.dto.WorkItemBrief;
+
 import java.time.Instant;
 import java.util.List;
 
@@ -24,5 +26,7 @@ public record DeploymentView(
         Instant finishedAt,
         Instant createdAt,
         List<DeployStepRequest> plan,
-        List<StepView> steps) {
+        List<StepView> steps,
+        /** 关联工作单元摘要（列表回链需求展示；未关联或已删除时为 null） */
+        WorkItemBrief workItem) {
 }

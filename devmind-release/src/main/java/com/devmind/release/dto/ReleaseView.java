@@ -1,5 +1,7 @@
 package com.devmind.release.dto;
 
+import com.devmind.project.dto.WorkItemBrief;
+
 import java.time.Instant;
 
 /**
@@ -23,5 +25,7 @@ public record ReleaseView(
         String createdBy,
         Instant startedAt,
         Instant finishedAt,
-        Instant createdAt) {
+        Instant createdAt,
+        /** 关联工作单元摘要（列表回链需求展示；未关联或已删除时为 null） */
+        WorkItemBrief workItem) {
 }

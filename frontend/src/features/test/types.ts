@@ -1,4 +1,6 @@
 // CAP-10 测试执行器类型，与后端 devmind-test 模块对齐
+import type { WorkItemBrief } from '../../shared/types'
+
 export type TestSuiteKind = 'api' | 'smoke' | 'script'
 export type TestSuiteSource = 'openapi' | 'manual'
 export type TestCaseKind = 'http' | 'health'
@@ -86,6 +88,8 @@ export interface TestRun {
   finishedAt: string | null
   createdAt: string
   results: CaseResult[]
+  /** 关联工作单元摘要（列表回链需求展示；未关联为 null） */
+  workItem?: WorkItemBrief | null
 }
 
 export interface CreateTestRunInput {

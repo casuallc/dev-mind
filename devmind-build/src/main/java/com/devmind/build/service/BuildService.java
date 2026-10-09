@@ -21,6 +21,7 @@ import com.devmind.execution.runner.LocalStepRunner;
 import com.devmind.execution.ws.ExecutionLogHub;
 import com.devmind.project.ProjectService;
 import com.devmind.project.WorkItemService;
+import com.devmind.project.dto.WorkItemBrief;
 import com.devmind.project.model.BuildStepEntity;
 import com.devmind.project.model.Project;
 import com.devmind.project.model.ProjectRepoEntity;
@@ -185,7 +186,7 @@ public class BuildService {
         b.setCreatedAt(Instant.now());
         BuildEntity saved = repo.save(b);
         buildExecutor.submit(() -> run(saved.getId()));
-        return toView(saved);
+        return toView(saved, brief(saved.getWorkItemId()));
     }
 
     // ---------------- 异步执行 ----------------
@@ -273,14 +274,16 @@ public class BuildService {
     }
 
     public BuildView get(Long id) {
-        return toView(requireBuild(id));
+        BuildEntity b = requireBuild(id);
+        return toView(b, brief(b.getWorkItemId()));
     }
 
     public List<BuildView> history(String projectId, String status) {
         List<BuildEntity> list = status == null || status.isBlank()
                 ? repo.findByProjectIdOrderByCreatedAtDesc(projectId)
                 : repo.findByProjectIdAndStatusOrderByCreatedAtDesc(projectId, status.trim().toUpperCase());
-        return list.stream().map(this::toView).toList();
+        Map<String, WorkItemBrief> briefs = briefsOf(list.stream().map(BuildEntity::getWorkItemId).toList());
+        return list.stream().map(b -> toView(b, briefs.get(b.getWorkItemId()))).toList();
     }
 
     public String logs(Long id) {
@@ -486,9 +489,24 @@ public class BuildService {
     }
 
     public BuildView toView(BuildEntity b) {
+        return toView(b, null);
+    }
+
+    public BuildView toView(BuildEntity b, WorkItemBrief workItem) {
         return new BuildView(b.getId(), b.getProjectId(), b.getWorkItemId(), b.getCommit(), b.getBranch(),
                 b.getExecutor(), b.getArtifactRef(), b.getStatus(), b.getExitCode(), b.getErrorSummary(),
-                b.getStartedAt(), b.getFinishedAt(), b.getCreatedAt());
+                b.getStartedAt(), b.getFinishedAt(), b.getCreatedAt(), workItem);
+    }
+
+    /** 单条摘要（详情/触发出参用）；workItemId 为空或已删除返回 null。 */
+    private WorkItemBrief brief(String workItemId) {
+        return workItemId == null ? null : briefsOf(List.of(workItemId)).get(workItemId);
+    }
+
+    /** 批量摘要（列表出参用）：一次批量查，避免逐行 N+1。 */
+    private Map<String, WorkItemBrief> briefsOf(List<String> workItemIds) {
+        List<String> ids = workItemIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        return ids.isEmpty() ? Map.of() : workItemService.briefsByIds(ids);
     }
 
     private String truncate(String s, int max) {

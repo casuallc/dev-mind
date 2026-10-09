@@ -1,4 +1,6 @@
 // CAP-08 构建执行器（CAP-36：REMOTE/SSH 已下线，远程执行统一走 runner 节点 exec 帧）
+import type { WorkItemBrief } from '../../shared/types'
+
 export type BuildExecutor = 'LOCAL' | 'AGENT'
 export type BuildStatus = 'QUEUED' | 'RUNNING' | 'SUCCESS' | 'FAILED'
 
@@ -32,4 +34,6 @@ export interface BuildRecord {
   startedAt: string | null
   finishedAt: string | null
   createdAt: string
+  /** 关联工作单元摘要（列表回链需求展示；未关联为 null） */
+  workItem?: WorkItemBrief | null
 }

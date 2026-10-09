@@ -16,6 +16,7 @@ import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/page
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import LogView from '../../../shared/components/LogView'
+import { workItemColumn } from '../../../shared/components/WorkItemCell'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 const STATUS_COLOR: Record<BuildStatus, string> = {
@@ -123,6 +124,7 @@ function BuildCenter({ id }: { id: string }) {
         </Space>
       ),
     },
+    workItemColumn<BuildRecord>(id),
     {
       title: '执行位置', dataIndex: 'executor', width: 100,
       render: (v: BuildExecutor) => <Tag color={v === 'AGENT' ? 'purple' : 'default'}>{v}</Tag>,

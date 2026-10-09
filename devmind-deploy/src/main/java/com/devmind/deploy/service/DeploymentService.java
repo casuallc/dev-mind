@@ -50,6 +50,8 @@ import com.devmind.notification.model.NotificationLevel;
 import com.devmind.notification.service.NotificationService;
 import com.devmind.project.EnvironmentService;
 import com.devmind.project.ProjectService;
+import com.devmind.project.WorkItemService;
+import com.devmind.project.dto.WorkItemBrief;
 import com.devmind.common.dto.PageView;
 import com.devmind.project.model.EnvironmentEntity;
 
@@ -82,6 +84,7 @@ public class DeploymentService {
     private final ObjectMapper mapper;
     private final DomainEventPublisher eventPublisher;
     private final EnvironmentService environmentService;
+    private final WorkItemService workItemService;
 
     public DeploymentService(DeploymentRepository repo,
                              DeploymentStepRepository stepRepo,
@@ -96,6 +99,7 @@ public class DeploymentService {
                              ObjectMapper mapper,
                              DomainEventPublisher eventPublisher,
                              EnvironmentService environmentService,
+                             WorkItemService workItemService,
                            IdentityService identityService) {
         this.identityService = identityService;
         this.repo = repo;
@@ -111,6 +115,7 @@ public class DeploymentService {
         this.mapper = mapper;
         this.eventPublisher = eventPublisher;
         this.environmentService = environmentService;
+        this.workItemService = workItemService;
     }
 
     @PreDestroy
@@ -511,7 +516,8 @@ public class DeploymentService {
     }
 
     public DeploymentView get(Long id) {
-        return toView(require(id));
+        DeploymentEntity d = require(id);
+        return toView(d, brief(d.getWorkItemId()));
     }
 
     /**
@@ -525,7 +531,10 @@ public class DeploymentService {
         Page<DeploymentEntity> result = status == null || status.isBlank()
                 ? repo.findByProjectId(projectId, pageable)
                 : repo.findByProjectIdAndStatus(projectId, status.trim().toUpperCase(), pageable);
-        return new PageView<>(result.getContent().stream().map(this::toView).toList(),
+        Map<String, WorkItemBrief> briefs = briefsOf(
+                result.getContent().stream().map(DeploymentEntity::getWorkItemId).toList());
+        return new PageView<>(result.getContent().stream()
+                .map(d -> toView(d, briefs.get(d.getWorkItemId()))).toList(),
                 result.getTotalElements(), p, s);
     }
 
@@ -545,6 +554,10 @@ public class DeploymentService {
     // ---------------- 视图 ----------------
 
     public DeploymentView toView(DeploymentEntity d) {
+        return toView(d, null);
+    }
+
+    public DeploymentView toView(DeploymentEntity d, WorkItemBrief workItem) {
         List<DeployStepRequest> planView = parseSteps(d.getPlanJson()).stream()
                 .map(s -> new DeployStepRequest(s.name(), s.type(), s.templateCode(), s.params()))
                 .toList();
@@ -554,7 +567,18 @@ public class DeploymentService {
                 d.getEnvironmentId(), d.getBuildId(),
                 d.getEnv(), d.getStatus(), d.getCurrentStep(), d.getBackupRef(), d.getRollbackOf(),
                 d.isConfirmRequired(), d.isConfirmed(), d.getErrorSummary(), d.getCreatedBy(),
-                d.getStartedAt(), d.getFinishedAt(), d.getCreatedAt(), planView, steps);
+                d.getStartedAt(), d.getFinishedAt(), d.getCreatedAt(), planView, steps, workItem);
+    }
+
+    /** 单条摘要（详情出参用）；workItemId 为空或已删除返回 null。 */
+    private WorkItemBrief brief(String workItemId) {
+        return workItemId == null ? null : briefsOf(List.of(workItemId)).get(workItemId);
+    }
+
+    /** 批量摘要（列表出参用）：一次批量查，避免逐行 N+1。 */
+    private Map<String, WorkItemBrief> briefsOf(List<String> workItemIds) {
+        List<String> ids = workItemIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        return ids.isEmpty() ? Map.of() : workItemService.briefsByIds(ids);
     }
 
     // ---------------- 内部 ----------------

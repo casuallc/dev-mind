@@ -37,6 +37,7 @@ import ConfigEditor from '../components/ConfigEditor'
 import DeployDetailDrawer from '../components/DeployDetailDrawer'
 import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
+import { workItemColumn } from '../../../shared/components/WorkItemCell'
 import { showError } from '../../../shared/utils/showError'
 
 export default function DeploymentsPage() {
@@ -141,6 +142,7 @@ function DeployCenter({ id }: { id: string }) {
       title: '构建', dataIndex: 'buildId', width: 80,
       render: (v: number | null) => (v ? `#${v}` : <span>-</span>),
     },
+    workItemColumn<DeploymentRecord>(id),
     {
       title: '环境', dataIndex: 'env', width: 90,
       render: (v: string) => <Tag color={v === 'prod' ? 'red' : v === 'staging' ? 'orange' : 'blue'}>{v || '-'}</Tag>,

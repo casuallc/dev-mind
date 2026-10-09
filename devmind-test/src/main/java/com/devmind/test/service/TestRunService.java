@@ -47,6 +47,7 @@ import com.devmind.project.ProjectService;
 import com.devmind.project.EnvironmentService;
 import com.devmind.project.WorkItemService;
 import com.devmind.project.dto.ProjectView;
+import com.devmind.project.dto.WorkItemBrief;
 import com.devmind.project.model.EnvironmentEntity;
 import com.devmind.test.dto.CaseResultView;
 import com.devmind.test.dto.CreateTestRunRequest;
@@ -627,14 +628,16 @@ public class TestRunService {
     }
 
     public TestRunView get(Long id) {
-        return toView(require(id));
+        TestRunEntity r = require(id);
+        return toView(r, brief(r.getWorkItemId()));
     }
 
     public List<TestRunView> history(String projectId, String status) {
         List<TestRunEntity> list = (status == null || status.isBlank())
                 ? repo.findByProjectIdOrderByCreatedAtDesc(projectId)
                 : repo.findByProjectIdAndStatusOrderByCreatedAtDesc(projectId, status.trim().toUpperCase());
-        return list.stream().map(this::toView).toList();
+        Map<String, WorkItemBrief> briefs = briefsOf(list.stream().map(TestRunEntity::getWorkItemId).toList());
+        return list.stream().map(r -> toView(r, briefs.get(r.getWorkItemId()))).toList();
     }
 
     public String report(Long id) {
@@ -683,6 +686,10 @@ public class TestRunService {
     // ---------------- 视图 ----------------
 
     public TestRunView toView(TestRunEntity r) {
+        return toView(r, null);
+    }
+
+    public TestRunView toView(TestRunEntity r, WorkItemBrief workItem) {
         List<Long> suiteIds = parseIds(r.getSuiteIdsJson());
         RunSummary summary = parseSummary(r.getSummaryJson());
         List<CaseResultView> results = resultRepo.findByRunIdOrderBySortAsc(r.getId()).stream()
@@ -690,7 +697,18 @@ public class TestRunService {
         return new TestRunView(r.getId(), r.getProjectId(), r.getWorkItemId(), suiteIds, r.getDeploymentId(),
                 r.getAgentNodeId(), r.getEnvironmentId(), r.getBaseUrl(), r.getStatus(), summary, r.getReportDocId(),
                 r.getErrorSummary(),
-                r.getTriggeredBy(), r.getStartedAt(), r.getFinishedAt(), r.getCreatedAt(), results);
+                r.getTriggeredBy(), r.getStartedAt(), r.getFinishedAt(), r.getCreatedAt(), results, workItem);
+    }
+
+    /** 单条摘要（详情出参用）；workItemId 为空或已删除返回 null。 */
+    private WorkItemBrief brief(String workItemId) {
+        return workItemId == null ? null : briefsOf(List.of(workItemId)).get(workItemId);
+    }
+
+    /** 批量摘要（列表出参用）：一次批量查，避免逐行 N+1。 */
+    private Map<String, WorkItemBrief> briefsOf(List<String> workItemIds) {
+        List<String> ids = workItemIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        return ids.isEmpty() ? Map.of() : workItemService.briefsByIds(ids);
     }
 
     // ---------------- 内部 ----------------

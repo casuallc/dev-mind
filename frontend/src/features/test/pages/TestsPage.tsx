@@ -51,6 +51,7 @@ import SuiteFormDrawer from '../components/SuiteFormDrawer'
 import RunSuiteModal from '../components/RunSuiteModal'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
+import { workItemColumn } from '../../../shared/components/WorkItemCell'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -215,6 +216,7 @@ function TestCenter({ id }: { id: string }) {
       ),
     },
     { title: '目标', dataIndex: 'baseUrl', width: 160, ellipsis: true, render: (v: string | null) => (v ? <Typography.Text code style={{ fontSize: 12 }}>{v}</Typography.Text> : <span>-</span>) },
+    workItemColumn<TestRun>(id),
     {
       title: '触发', dataIndex: 'triggeredBy', width: 90,
       render: (v: string) => (v === 'deploy' ? <Tag color="purple">自动回归</Tag> : <Tag>手动</Tag>),

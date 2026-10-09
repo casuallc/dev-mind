@@ -5,12 +5,14 @@ import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.project.dto.WorkItemBrief;
 import com.devmind.project.dto.WorkItemRequest;
 import com.devmind.project.dto.WorkItemView;
 import com.devmind.project.model.RequirementEntity;
 import com.devmind.project.model.WorkItemEntity;
 import com.devmind.project.repo.DesignRepository;
 import com.devmind.project.repo.RelationRepository;
+import com.devmind.project.repo.RequirementRepository;
 import com.devmind.project.repo.WorkItemRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,9 +20,14 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Work Item（CAP-13 研发主线）：工作单元，挂 Requirement 下，可派发给 agent/人执行。
@@ -49,12 +56,14 @@ public class WorkItemService {
     private final IdentityService identityService;
     private final RequirementService requirementService;
     private final WorkItemRepository workItemRepo;
+    private final RequirementRepository requirementRepo;
     private final DesignRepository designRepo;
     private final RelationRepository relationRepo;
     private final DomainEventPublisher eventPublisher;
 
     public WorkItemService(@Lazy RequirementService requirementService,
                            WorkItemRepository workItemRepo,
+                           RequirementRepository requirementRepo,
                            DesignRepository designRepo,
                            RelationRepository relationRepo,
                            DomainEventPublisher eventPublisher,
@@ -62,6 +71,7 @@ public class WorkItemService {
         this.identityService = identityService;
         this.requirementService = requirementService;
         this.workItemRepo = workItemRepo;
+        this.requirementRepo = requirementRepo;
         this.designRepo = designRepo;
         this.relationRepo = relationRepo;
         this.eventPublisher = eventPublisher;
@@ -206,6 +216,32 @@ public class WorkItemService {
                     "非法工作单元状态: " + status + "（可选 " + String.join("/", STATUSES) + "）");
         }
         return s;
+    }
+
+    /**
+     * 批量取工作单元摘要（执行器列表回链需求展示用）：key=workItemId，找不到的 id 不出现。
+     * 两次批量查询（WI + 需求），调用方按列表行数一次性传入，避免逐行 N+1。
+     */
+    public Map<String, WorkItemBrief> briefsByIds(Collection<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Map.of();
+        }
+        List<WorkItemEntity> items = workItemRepo.findAllById(ids.stream().filter(Objects::nonNull).distinct().toList());
+        Set<String> reqIds = items.stream().map(WorkItemEntity::getRequirementId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<String, RequirementEntity> reqs = reqIds.isEmpty()
+                ? Map.of()
+                : requirementRepo.findAllById(reqIds).stream()
+                        .collect(Collectors.toMap(RequirementEntity::getId, r -> r));
+        Map<String, WorkItemBrief> result = new HashMap<>();
+        for (WorkItemEntity w : items) {
+            RequirementEntity r = w.getRequirementId() == null ? null : reqs.get(w.getRequirementId());
+            result.put(w.getId(), new WorkItemBrief(w.getId(), code(w.getSeq()), w.getTitle(),
+                    w.getRequirementId(),
+                    r == null ? null : "REQ-" + r.getSeq(),
+                    r == null ? null : r.getTitle()));
+        }
+        return result;
     }
 
     private String code(Long seq) {

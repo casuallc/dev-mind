@@ -28,6 +28,7 @@ import { STATUS_COLOR } from '../constants'
 import ReleaseDetailDrawer from '../components/ReleaseDetailDrawer'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
+import { workItemColumn } from '../../../shared/components/WorkItemCell'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -102,6 +103,7 @@ function ReleaseCenter({ id }: { id: string }) {
     { title: 'tag', dataIndex: 'tagName', width: 120, render: (v: string) => v || '-' },
     { title: 'Nexus 引用', dataIndex: 'nexusRef', width: 160, ellipsis: true, render: (v: string) => v || '-' },
     { title: '构建', dataIndex: 'buildId', width: 70, render: (v: number) => (v ? `#${v}` : '-') },
+    workItemColumn<ReleaseRecord>(id),
     {
       title: '创建时间', dataIndex: 'createdAt', width: 170,
       render: (v: string) => fmtTime(v),
