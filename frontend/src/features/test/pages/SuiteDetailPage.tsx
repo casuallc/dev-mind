@@ -42,7 +42,7 @@ import { fmtTime, paramsToText, textToParams } from '../../../shared/utils/forma
 import { SUITE_KIND_COLOR } from '../constants'
 import ScriptSuiteFields, { toScriptSuiteInput } from '../components/ScriptSuiteFields'
 import RunSuiteModal from '../components/RunSuiteModal'
-import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 
@@ -333,7 +333,8 @@ export default function SuiteDetailPage() {
           <Spin />
         </div>
       ) : isScript ? (
-        <>
+        // 长表单超 body 高：pageCardBodyFlexStyle 下 body 不是滚动容器，须包 pagePaneScrollStyle 内部滚（否则溢出卡片、下半段无白底）
+        <div style={pagePaneScrollStyle}>
           <Descriptions size="small" column={3} style={{ marginBottom: 12 }}>
             <Descriptions.Item label="ID">#{suite.id}</Descriptions.Item>
             <Descriptions.Item label="类型">
@@ -350,7 +351,7 @@ export default function SuiteDetailPage() {
             </Form.Item>
             <ScriptSuiteFields nodes={nodes} />
           </Form>
-        </>
+        </div>
       ) : (
         <>
           <Descriptions size="small" column={3} style={{ marginBottom: 12 }}>
