@@ -27,6 +27,8 @@ import java.util.List;
  * @param extraSkillIds      CAP-33 FR-02 ③层请求级追加 skill ids（与场景绑定合并去重）
  * @param extraDocIds        CAP-33 FR-02 ③层请求级追加 doc ids
  * @param extraKnowledgeTags CAP-33 FR-02 ③层请求级追加知识 tags
+ * @param attachmentIds      CAP-68 创建会话即带附件（附件模块 id 列表；随上下文包 inputs
+ *                           物化到 .devmind/input/attachments/，agent 起手即可 Read）
  */
 public record CreateSessionRequest(
         String templateCode,
@@ -43,14 +45,15 @@ public record CreateSessionRequest(
         List<Long> repoIds,
         List<String> extraSkillIds,
         List<Long> extraDocIds,
-        List<String> extraKnowledgeTags) {
+        List<String> extraKnowledgeTags,
+        List<String> attachmentIds) {
 
     /** 兼容构造器：CAP-31 之前的调用点（repoIds=null → 主库）。 */
     public CreateSessionRequest(String templateCode, String projectId, String workItemId, String requirementId,
                                 String taskSpec, String baseBranch, String model, String permissionMode,
                                 String agentNodeId) {
         this(templateCode, null, projectId, workItemId, requirementId, taskSpec, baseBranch, model, permissionMode,
-                agentNodeId, null, null, null, null, null);
+                agentNodeId, null, null, null, null, null, null);
     }
 
     /** 兼容构造器：FR-07 之前的 10 参调用点（requiredLabels=null）。 */
@@ -58,6 +61,17 @@ public record CreateSessionRequest(
                                 String taskSpec, String baseBranch, String model, String permissionMode,
                                 String agentNodeId, List<Long> repoIds) {
         this(templateCode, null, projectId, workItemId, requirementId, taskSpec, baseBranch, model, permissionMode,
-                agentNodeId, null, repoIds, null, null, null);
+                agentNodeId, null, repoIds, null, null, null, null);
+    }
+
+    /** 兼容构造器：CAP-68 之前的 15 参调用点（attachmentIds=null）。 */
+    public CreateSessionRequest(String templateCode, String scenarioCode, String projectId, String workItemId,
+                                String requirementId, String taskSpec, String baseBranch, String model,
+                                String permissionMode, String agentNodeId, String requiredLabels,
+                                List<Long> repoIds, List<String> extraSkillIds, List<Long> extraDocIds,
+                                List<String> extraKnowledgeTags) {
+        this(templateCode, scenarioCode, projectId, workItemId, requirementId, taskSpec, baseBranch, model,
+                permissionMode, agentNodeId, requiredLabels, repoIds, extraSkillIds, extraDocIds,
+                extraKnowledgeTags, null);
     }
 }

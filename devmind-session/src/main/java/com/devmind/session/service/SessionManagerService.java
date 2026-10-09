@@ -348,7 +348,8 @@ public class SessionManagerService {
         SessionContextService.Prepared prepared = prepareContext(id, project, scenario, taskSpec,
                 req.extraSkillIds(), req.extraDocIds(), req.extraKnowledgeTags(),
                 requirement != null ? requirement.getId() : null,
-                SessionContextService.isExecutionSession(taskSpec, req.workItemId()));
+                SessionContextService.isExecutionSession(taskSpec, req.workItemId()),
+                req.attachmentIds());
         RemoteSessionRuntime remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector,
                 eventSaver, listener, props.toRuntimeSettings());
         // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
@@ -416,6 +417,9 @@ public class SessionManagerService {
         // CAP-33：场景 code 落库（resume 据此重渲染重装配；FR-07 快照在装配后落）
         ent.setScenarioCode(scenario != null ? scenario.getCode() : null);
         ent.setContextManifestJson(prepared != null ? prepared.snapshotJson() : null);
+        // CAP-68：创建附带附件落库（resume/TTL 重建按本列重装配，口径与创建一致）
+        ent.setAttachmentIds(req.attachmentIds() == null || req.attachmentIds().isEmpty()
+                ? null : String.join(",", req.attachmentIds()));
         ent.setCreatedAt(now);
         ent.setUpdatedAt(now);
         sessionRepo.save(ent);
@@ -660,7 +664,8 @@ public class SessionManagerService {
                         : ent.getTaskSpec();
                 prepared = prepareContext(id, proj, scenario, renderedTask, null, null, null,
                         ent.getRequirementId(),
-                        SessionContextService.isExecutionSession(ent.getTaskSpec(), ent.getWorkItemId()));
+                        SessionContextService.isExecutionSession(ent.getTaskSpec(), ent.getWorkItemId()),
+                        parseCsv(ent.getAttachmentIds()));
                 connector.launch(ent.getAgentNodeId(), new AgentLaunchCommand(
                         id, ent.getProjectId(), renderedTask, ent.getModel(),
                         pm,
@@ -1738,6 +1743,7 @@ public class SessionManagerService {
      * 向上传播 fail-visible；其它装配异常降级为 null = 无上下文启动（沿用注入不阻塞语义）。
      *
      * @param lean CAP-52 FR-05 瘦上下文开关，取 {@link SessionContextService#isExecutionSession}
+     * @param attachmentIds CAP-68 创建附带附件（create 取请求值，resume 取落库列；可空）
      */
     private SessionContextService.Prepared prepareContext(String sessionId, Project project,
                                                           SessionScenarioEntity scenario,
@@ -1746,10 +1752,12 @@ public class SessionManagerService {
                                                           List<Long> extraDocIds,
                                                           List<String> extraKnowledgeTags,
                                                           String requirementId,
-                                                          boolean lean) {
+                                                          boolean lean,
+                                                          List<String> attachmentIds) {
         try {
             return sessionContextService.prepare(sessionId, project, scenario, renderedTaskSpec,
-                    extraSkillIds, extraDocIds, extraKnowledgeTags, requirementId, lean);
+                    extraSkillIds, extraDocIds, extraKnowledgeTags, requirementId, lean,
+                    attachmentIds);
         } catch (DevMindException de) {
             throw de;
         } catch (Exception e) {

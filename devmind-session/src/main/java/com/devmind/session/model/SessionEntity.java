@@ -107,6 +107,10 @@ public class SessionEntity {
     @Column(name = "context_manifest_json", length = 16_777_216)
     private String contextManifestJson;
 
+    /** CAP-68：创建时附带附件 id（逗号分隔；resume/TTL 重建按本列重装配，口径与创建一致） */
+    @Column(name = "attachment_ids", length = 1024)
+    private String attachmentIds;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -178,6 +182,8 @@ public class SessionEntity {
     public void setScenarioCode(String scenarioCode) { this.scenarioCode = scenarioCode; }
     public String getContextManifestJson() { return contextManifestJson; }
     public void setContextManifestJson(String contextManifestJson) { this.contextManifestJson = contextManifestJson; }
+    public String getAttachmentIds() { return attachmentIds; }
+    public void setAttachmentIds(String attachmentIds) { this.attachmentIds = attachmentIds; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Double getCostUsd() { return costUsd; }

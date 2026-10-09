@@ -24,6 +24,13 @@ public interface AttachmentContentResolver {
         return resolve(attachmentId);
     }
 
-    /** @param attachmentId 附件 id；@param contentType 原始 mime；@param bytes 原始字节 */
-    record ResolvedAttachment(String attachmentId, String contentType, byte[] bytes) {}
+    /** @param attachmentId 附件 id；@param contentType 原始 mime；@param bytes 原始字节；
+     *  @param originalName 原始文件名（CAP-68 会话附件物化用；可为 null） */
+    record ResolvedAttachment(String attachmentId, String contentType, byte[] bytes, String originalName) {
+
+        /** 兼容构造：CAP-68 之前的三参调用点（originalName=null）。 */
+        public ResolvedAttachment(String attachmentId, String contentType, byte[] bytes) {
+            this(attachmentId, contentType, bytes, null);
+        }
+    }
 }

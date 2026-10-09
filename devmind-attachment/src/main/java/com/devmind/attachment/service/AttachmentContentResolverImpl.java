@@ -47,7 +47,7 @@ public class AttachmentContentResolverImpl implements AttachmentContentResolver 
         Path path = attachmentService.rootDir().resolve(ent.getStoragePath()).normalize();
         try {
             return Optional.of(new ResolvedAttachment(ent.getId(), ent.getContentType(),
-                    Files.readAllBytes(path)));
+                    Files.readAllBytes(path), ent.getOriginalName()));
         } catch (IOException e) {
             log.warn("附件盘文件读取失败: id={} path={} err={}", ent.getId(), path, e.getMessage());
             return Optional.empty();

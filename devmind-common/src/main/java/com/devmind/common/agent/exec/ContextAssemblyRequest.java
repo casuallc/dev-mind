@@ -22,15 +22,18 @@ import java.util.List;
  * @param projectAuto           ②项目自动命中开关（知识按项目 tags 命中 + 项目私有条目/skill 全带）
  * @param dryRun                预览模式：不 bumpHits、无任何副作用
  * @param requirementId         会话关联需求（CAP-40 附件投送 provider 用；无关联需求/chat 为 null）
+ * @param attachmentIds         CAP-68 创建会话即带附件（③请求级显式选择，不受瘦上下文影响；
+ *                              会话附件 provider @Order 50 物化为 .devmind/input/attachments/）
  */
 public record ContextAssemblyRequest(
         String projectId, List<String> projectTags,
         List<String> scenarioSkillIds, List<String> extraSkillIds,
         List<Long> scenarioDocIds, List<Long> extraDocIds,
         List<String> scenarioKnowledgeTags, List<String> extraKnowledgeTags,
-        boolean projectAuto, boolean dryRun, String requirementId) {
+        boolean projectAuto, boolean dryRun, String requirementId,
+        List<String> attachmentIds) {
 
-    /** 兼容构造：无关联需求（chat/预览等既有调用点）。 */
+    /** 兼容构造：无关联需求、无会话附件（chat/预览等既有调用点）。 */
     public ContextAssemblyRequest(
             String projectId, List<String> projectTags,
             List<String> scenarioSkillIds, List<String> extraSkillIds,
@@ -38,6 +41,17 @@ public record ContextAssemblyRequest(
             List<String> scenarioKnowledgeTags, List<String> extraKnowledgeTags,
             boolean projectAuto, boolean dryRun) {
         this(projectId, projectTags, scenarioSkillIds, extraSkillIds, scenarioDocIds, extraDocIds,
-                scenarioKnowledgeTags, extraKnowledgeTags, projectAuto, dryRun, null);
+                scenarioKnowledgeTags, extraKnowledgeTags, projectAuto, dryRun, null, null);
+    }
+
+    /** 兼容构造：CAP-68 之前的 11 参调用点（attachmentIds=null）。 */
+    public ContextAssemblyRequest(
+            String projectId, List<String> projectTags,
+            List<String> scenarioSkillIds, List<String> extraSkillIds,
+            List<Long> scenarioDocIds, List<Long> extraDocIds,
+            List<String> scenarioKnowledgeTags, List<String> extraKnowledgeTags,
+            boolean projectAuto, boolean dryRun, String requirementId) {
+        this(projectId, projectTags, scenarioSkillIds, extraSkillIds, scenarioDocIds, extraDocIds,
+                scenarioKnowledgeTags, extraKnowledgeTags, projectAuto, dryRun, requirementId, null);
     }
 }

@@ -104,7 +104,7 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
                             List<Long> extraDocIds, List<String> extraKnowledgeTags,
                             String requirementId) {
         return prepare(sessionId, project, scenario, renderedTaskSpec, extraSkillIds, extraDocIds,
-                extraKnowledgeTags, requirementId, false);
+                extraKnowledgeTags, requirementId, false, null);
     }
 
     /**
@@ -113,12 +113,25 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
      * 知识是纯浪费（每个执行会话都要重新装配一次全量知识）。权限白名单不受影响（见
      * {@link ContextAssembler}：只有 settings 也出包）。
      *
+     * <p>CAP-68：{@code attachmentIds}（创建时显式附带）<b>不受 lean 影响</b>——用户显式递的
+     * 材料不是「自动命中注入」，瘦身只砍自动层。create/resume/rebuild 三处都必须带上
+     * （落库 sessions.attachment_ids），否则 TTL 重建丢附件 = 同一会话两次拉包内容不同。</p>
+     *
      * @param lean 瘦上下文开关；规划会话/手工会话传 false（现状口径）
      */
     public Prepared prepare(String sessionId, Project project, SessionScenarioEntity scenario,
                             String renderedTaskSpec, List<String> extraSkillIds,
                             List<Long> extraDocIds, List<String> extraKnowledgeTags,
                             String requirementId, boolean lean) {
+        return prepare(sessionId, project, scenario, renderedTaskSpec, extraSkillIds, extraDocIds,
+                extraKnowledgeTags, requirementId, lean, null);
+    }
+
+    /** 全参版：attachmentIds = CAP-68 创建会话即带附件（可空）。 */
+    public Prepared prepare(String sessionId, Project project, SessionScenarioEntity scenario,
+                            String renderedTaskSpec, List<String> extraSkillIds,
+                            List<Long> extraDocIds, List<String> extraKnowledgeTags,
+                            String requirementId, boolean lean, List<String> attachmentIds) {
         ContextAssemblyRequest req = new ContextAssemblyRequest(
                 project != null ? project.id() : null,
                 project != null && project.tags() != null ? project.tags() : List.of(),
@@ -128,7 +141,8 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
                 lean || extraDocIds == null ? List.of() : extraDocIds,
                 lean || scenario == null ? List.of() : scenarioService.knowledgeTagsOf(scenario),
                 lean || extraKnowledgeTags == null ? List.of() : extraKnowledgeTags,
-                !lean, false, lean ? null : requirementId);
+                !lean, false, lean ? null : requirementId,
+                attachmentIds == null ? List.of() : attachmentIds);
         ContextAssembler.AssembledContext a = assembleAndCache(sessionId, req,
                 scenario != null ? scenario.getCode() : null,
                 scenario != null ? scenario.getName() : null,
@@ -224,8 +238,9 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
             // CAP-52 FR-05：重建必须与创建时同口径，否则 TTL 过期后 runner 重拉会把瘦上下文
             // 的执行会话重新灌满知识（同一个会话两次拉包内容不一致，最难受的一种 bug）
             boolean lean = isExecutionSession(ent.getTaskSpec(), ent.getWorkItemId());
+            // CAP-68：创建时附带的附件按落库列重装配（附件可能已被生命周期硬删，provider 跳过标注）
             prepare(ent.getId(), project, scenario, rendered, null, null, null,
-                    ent.getRequirementId(), lean); // 命中即入缓存
+                    ent.getRequirementId(), lean, parseCsv(ent.getAttachmentIds())); // 命中即入缓存
             Cached cached = cache.get(ent.getId());
             return cached != null ? Optional.of(cached.pkg()) : Optional.empty();
         } catch (Exception e) {
@@ -243,6 +258,21 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
         } catch (Exception e) {
             return null; // 需求已删：占位符置空，不阻塞重建
         }
+    }
+
+    /** 逗号分隔列 → 列表（sessions.attachment_ids 等 CSV 列读取口径）。 */
+    private static List<String> parseCsv(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return List.of();
+        }
+        List<String> out = new java.util.ArrayList<>();
+        for (String s : csv.split("[,，]")) {
+            String t = s.trim();
+            if (!t.isEmpty()) {
+                out.add(t);
+            }
+        }
+        return out;
     }
 
     /** 装配 + 缓存（供 prepare/find 共用）；空产出返回 null 不缓存。 */
