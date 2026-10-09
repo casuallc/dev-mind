@@ -310,7 +310,7 @@ public class TestRunService {
                     r.setErrorSummary(truncate(ex.getMessage(), 2000));
                 }
             } else {
-                String note = tap.markerLines() == 0
+                String note = tap.markerLines() == 0 || tap.payloadLines() == 0
                         ? "未回传 JUnit 报告（产物缺失或 junitPath 配置有误: " + s.getJunitPath() + "）"
                         : "JUnit 报告载荷解码失败（详见服务端 warn 日志）";
                 log.warn("脚本套件运行 #{}: {}", runId, note);

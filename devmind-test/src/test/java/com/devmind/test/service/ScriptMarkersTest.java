@@ -32,11 +32,13 @@ class ScriptMarkersTest {
 
     @Test
     void emptyPayloadMeansNoReportNotMalformed() {
-        // 命令包装里 junit 文件缺失时 p 为空 → marker 行带空载荷：这是"没有报告"，不该刷屏 warn
+        // 命令包装里 junit 文件缺失时 p 为空 → marker 行带空载荷：这是"没有报告"，不该刷屏 warn；
+        // 且必须与载荷打坏分开计数（payloadLines=0），否则收尾注记会把产物缺失误报成解码失败
         ScriptMarkers.Tap tap = new ScriptMarkers.Tap(null);
         tap.accept(ScriptMarkers.JUNIT + " ");
         assertTrue(tap.junitXml().isEmpty());
         assertEquals(1, tap.markerLines());
+        assertEquals(0, tap.payloadLines());
     }
 
     @Test
@@ -45,6 +47,7 @@ class ScriptMarkersTest {
         tap.accept(ScriptMarkers.JUNIT + " !!!not-base64!!!");
         assertTrue(tap.junitXml().isEmpty());
         assertEquals(1, tap.markerLines());
+        assertEquals(1, tap.payloadLines());
     }
 
     @Test

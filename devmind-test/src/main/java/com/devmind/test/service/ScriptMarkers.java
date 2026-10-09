@@ -87,6 +87,7 @@ public final class ScriptMarkers {
         private final StringBuilder logs = new StringBuilder();
         private String junitXml;
         private int markerLines;
+        private int payloadLines;
         private boolean truncated;
 
         public Tap(Consumer<String> downstream) {
@@ -98,6 +99,12 @@ public final class ScriptMarkers {
             String text = line == null ? "" : line;
             if (text.strip().startsWith(JUNIT)) {
                 markerLines++;
+                // 空载荷（junit 文件缺失时 gzip 产出为空）= "没有报告"，与"载荷打坏了"分开计数，
+                // 否则收尾注记会把产物缺失误报成解码失败
+                if (text.strip().length() > JUNIT.length()
+                        && !text.strip().substring(JUNIT.length()).strip().isEmpty()) {
+                    payloadLines++;
+                }
                 ScriptMarkers.decode(text).ifPresent(xml -> junitXml = xml);
                 return;
             }
@@ -132,6 +139,11 @@ public final class ScriptMarkers {
         /** 收到的 marker 行数（诊断用：报告缺失时先看它是不是压根没打） */
         public int markerLines() {
             return markerLines;
+        }
+
+        /** 带非空载荷的 marker 行数（0 = 打了 marker 但 junit 产物缺失，区别于载荷解码失败） */
+        public int payloadLines() {
+            return payloadLines;
         }
     }
 }
