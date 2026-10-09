@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
-  App as AntApp,
   Button,
   Card,
   Form,
@@ -14,6 +13,7 @@ import {
   Switch,
   Tag,
   Typography,
+  message,
 } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import FitTable from '../../../shared/components/FitTable'
@@ -38,7 +38,6 @@ const TUNNEL_PROTOCOL = 21
  * 未命中任何规则 = 直连零行为变化。协议 <v21 的节点保存时警告（老 runner 无隧道，引用即失败）。
  */
 export default function EgressRulesPage() {
-  const { message, modal } = AntApp.useApp()
   const [rows, setRows] = useState<EgressRule[]>([])
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [loading, setLoading] = useState(false)
@@ -57,7 +56,7 @@ export default function EgressRulesPage() {
     } finally {
       setLoading(false)
     }
-  }, [message])
+  }, [])
 
   useEffect(() => {
     void load()
@@ -108,7 +107,7 @@ export default function EgressRulesPage() {
     }
     // FR-08：协议 <v21 的 runner 无隧道能力，引用它出访必然失败——保存前显式警告
     if (protocol < TUNNEL_PROTOCOL) {
-      modal.confirm({
+      Modal.confirm({
         title: '节点协议版本过低',
         content: `节点「${node?.name ?? body.nodeId}」协议版本 v${protocol} < v${TUNNEL_PROTOCOL}，`
           + 'runner 无隧道能力，命中此规则的出访会失败。请升级 runner 后再用，确认仍要保存？',
