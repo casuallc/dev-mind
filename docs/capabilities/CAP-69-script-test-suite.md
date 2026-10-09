@@ -71,12 +71,17 @@ JUnit XML 解析为用例结果行。
 
 ### 前端（features/test）
 
-- **FR-06 项目「测试」页集成**（/tests，ProjectContextGate 内）：新建套件弹窗类型加
-  `script`，选中后带名跳 **ScriptSuiteDrawer**（git 源、命令多行、junitPath、env 键值
-  编辑器带 secret 开关与掩码回显、默认节点、超时、workspaceKey）；套件表格 script 行
-  操作 = 运行（**ScriptRunModal**：节点可空=套件默认→项目默认→平台默认、env/命令覆盖
-  仅本次生效）/编辑/删除；新建运行弹窗排除 script 套件（误收会 400）。script run 自动
-  出现在运行历史，详情复用 `RunDetailDrawer`（WS 流/报告/缺陷线索零改动）。
+- **FR-06 项目「测试」页集成**（/tests，ProjectContextGate 内；2026-10-09 交互统一后口径）：
+  三种套件类型（smoke/api/script）交互一致——新建走统一抽屉 **SuiteFormDrawer**
+  （类型选择在表单内，选 script 展开 git 源、命令多行、junitPath、env 键值编辑器带
+  secret 开关与掩码回显、默认节点、超时、workspaceKey，字段与编辑页共用
+  ScriptSuiteFields）；套件表格所有行操作统一 = 运行/编辑/删除，运行走统一
+  **RunSuiteModal** 按类型渲染字段（script = 节点可空=套件默认→项目默认→平台默认、
+  env/命令覆盖仅本次生效；api/smoke = 目标环境/执行节点/baseUrl），编辑统一跳内层页
+  `/tests/suites/:id`（SuiteDetailPage 按 kind 分支：api/smoke 用例编排，script 脚本
+  属性表单 updateScriptSuite）；顶部「新建运行」保留为多套件批量入口，排除 script
+  套件（误收会 400）。script run 自动出现在运行历史，详情复用 `RunDetailDrawer`
+  （WS 流/报告/缺陷线索零改动）。
 - **FR-07 类型与常量**：`TestSuiteKind` 加 `'script'`，SUITE_KIND_COLOR 补色；
   api.ts `listScriptSuites(projectId)` 必带项目参数。
 
