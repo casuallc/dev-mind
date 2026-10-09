@@ -1,10 +1,11 @@
 # Java / Maven（多模块：target 任意层级）
 target/
 data/
-# dist 的 data/ 目录放行 README（打包说明文档）；密钥文件（auth.key 等）仍忽略，禁入库
+# dist 的 data/ 目录放行 README 与固定默认密钥 auth.key（公开的初始值，等价默认口令，安装后 rotate-key 轮换）
 !devmind-dist/src/main/dist/data/
 devmind-dist/src/main/dist/data/*
 !devmind-dist/src/main/dist/data/README.txt
+!devmind-dist/src/main/dist/data/auth.key
 
 # 本机专属配置（devmind.project.default-path 等机器相关路径）
 devmind-app/src/main/resources/application-local.yml

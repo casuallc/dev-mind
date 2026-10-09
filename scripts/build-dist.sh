@@ -25,13 +25,12 @@ if [ ! -d frontend/dist ]; then
 fi
 
 echo "[dist] packaging (maven clean package, profile=dist, skip tests)..."
-# 安装包内置一份默认主密钥 data/auth.key（JWT 签名 + 各 enc1: 加密域派生源），首启不依赖运行时落盘。
-# 构建机本地生成一次后复用（gitignored，禁入库）；安装后可用 bin/dev-mind rotate-key 轮换。
+# 安装包内置固定默认主密钥 data/auth.key（入库的公开初始值，等价默认口令 admin/admin123；
+# 安装后务必 bin/dev-mind rotate-key 轮换为本机专属）。缺失说明仓库不完整，直接失败，禁静默打出无密钥包。
 DIST_DATA=devmind-dist/src/main/dist/data
 if [ ! -s "$DIST_DATA/auth.key" ]; then
-  echo "[dist] generating default data/auth.key (machine-local random, gitignored)..."
-  mkdir -p "$DIST_DATA"
-  head -c 32 /dev/urandom >"$DIST_DATA/auth.key"
+  echo "[dist] ERROR: $DIST_DATA/auth.key missing (tracked default key)" >&2
+  exit 1
 fi
 # server-crypto.key 是已下线 server-adapter 的遗物（无任何代码引用），落在这会被一起打进包
 rm -f "$DIST_DATA/server-crypto.key"
