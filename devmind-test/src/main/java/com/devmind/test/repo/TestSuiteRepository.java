@@ -12,8 +12,11 @@ public interface TestSuiteRepository extends JpaRepository<TestSuiteEntity, Long
     /** 事件触发批量跑用：保持创建顺序正序执行 */
     List<TestSuiteEntity> findByProjectIdOrderByCreatedAtAsc(String projectId);
 
-    /** CAP-69：按 kind 列独立套件（script 套件 projectId 为 NULL，不能按项目查） */
+    /** CAP-69：按 kind 列套件（script 套件全量列表用，含未绑项目的） */
     List<TestSuiteEntity> findByKindOrderByCreatedAtDesc(String kind);
+
+    /** CAP-69：项目绑定的脚本套件（项目「测试」页套件列表用） */
+    List<TestSuiteEntity> findByProjectIdAndKindOrderByCreatedAtDesc(String projectId, String kind);
 
     void deleteByProjectId(String projectId);
 }

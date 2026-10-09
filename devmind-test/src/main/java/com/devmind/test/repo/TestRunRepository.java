@@ -17,8 +17,5 @@ public interface TestRunRepository extends JpaRepository<TestRunEntity, Long> {
     /** CAP-13：需求概览按工作单元集合聚合 */
     List<TestRunEntity> findByWorkItemIdInOrderByCreatedAtDesc(java.util.Collection<String> workItemIds);
 
-    /** CAP-69：脚本套件运行历史（projectId 为 NULL 的 run） */
-    List<TestRunEntity> findByProjectIdIsNullOrderByCreatedAtDesc();
 
-    List<TestRunEntity> findByProjectIdIsNullAndStatusOrderByCreatedAtDesc(String status);
 }

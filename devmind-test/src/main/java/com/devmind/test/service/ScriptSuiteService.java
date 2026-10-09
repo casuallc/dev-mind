@@ -12,6 +12,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.project.ProjectService;
 import com.devmind.test.dto.ScriptSuiteEnv;
 import com.devmind.test.dto.ScriptSuiteRequest;
 import com.devmind.test.dto.ScriptSuiteView;
@@ -19,8 +20,9 @@ import com.devmind.test.model.TestSuiteEntity;
 import com.devmind.test.repo.TestSuiteRepository;
 
 /**
- * CAP-69 独立脚本套件 CRUD（kind=script，不绑项目）：自带 git 源 + 命令模板 + env（脱敏）+ 超时，
- * 触发运行见 {@link TestRunService#createScriptRun}。
+ * CAP-69 脚本套件 CRUD（kind=script，强制绑定项目）：自带 git 源 + 命令模板 + env（脱敏）+ 超时，
+ * 触发运行见 {@link TestRunService#createScriptRun}。入口 = 项目「测试」页新建套件选 script 类型；
+ * 绑定后 run 进项目运行历史、报告走 CAP-03 沉淀。
  *
  * <p>env 掩码语义（对齐 CAP-68）：secret=true 的值在视图层恒为 {@link ScriptSuiteEnv#MASK}；
  * PUT 整体替换时掩码原样回传 = 该条值不变（从旧实体取原值）。</p>
@@ -38,15 +40,22 @@ public class ScriptSuiteService {
     private static final int DEFAULT_TIMEOUT_SEC = 7200;
 
     private final TestSuiteRepository suiteRepo;
+    private final ProjectService projectService;
     private final ObjectMapper mapper;
 
-    public ScriptSuiteService(TestSuiteRepository suiteRepo, ObjectMapper mapper) {
+    public ScriptSuiteService(TestSuiteRepository suiteRepo, ProjectService projectService, ObjectMapper mapper) {
         this.suiteRepo = suiteRepo;
+        this.projectService = projectService;
         this.mapper = mapper;
     }
 
-    public List<ScriptSuiteView> list() {
-        return suiteRepo.findByKindOrderByCreatedAtDesc("script").stream().map(this::toView).toList();
+    /** 项目绑定的脚本套件列表（强制项目口径，无全局列表） */
+    public List<ScriptSuiteView> list(String projectId) {
+        if (projectId == null || projectId.isBlank()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "projectId 必填（脚本套件强制绑定项目）");
+        }
+        return suiteRepo.findByProjectIdAndKindOrderByCreatedAtDesc(projectId.strip(), "script")
+                .stream().map(this::toView).toList();
     }
 
     public ScriptSuiteView get(Long id) {
@@ -100,6 +109,7 @@ public class ScriptSuiteService {
         if (req == null) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "请求体为空");
         }
+        require(req.projectId(), "归属项目 projectId");
         require(req.name(), "套件名称");
         require(req.repoUrl(), "git 仓库地址 repoUrl");
         require(req.branch(), "分支 branch");
@@ -129,7 +139,9 @@ public class ScriptSuiteService {
     }
 
     private void apply(TestSuiteEntity e, ScriptSuiteRequest req, String oldEnvJson) {
-        e.setProjectId(null);
+        String projectId = req.projectId().strip(); // validate() 已保非空
+        projectService.requireProject(projectId); // 绑定前校验项目存在（404）
+        e.setProjectId(projectId);
         e.setName(req.name().strip());
         e.setRepoUrl(req.repoUrl().strip());
         e.setBranch(req.branch().strip());
@@ -164,7 +176,7 @@ public class ScriptSuiteService {
         List<ScriptSuiteEnv> env = readEnv(e.getEnvJson()).stream()
                 .map(v -> v.isSecret() ? new ScriptSuiteEnv(v.key(), ScriptSuiteEnv.MASK, true) : v)
                 .toList();
-        return new ScriptSuiteView(e.getId(), e.getName(), e.getRepoUrl(), e.getBranch(), e.getWorkSubdir(),
+        return new ScriptSuiteView(e.getId(), e.getProjectId(), e.getName(), e.getRepoUrl(), e.getBranch(), e.getWorkSubdir(),
                 e.getCommand(), e.getJunitPath(), env, e.getAgentNodeId(), e.getTimeoutSec(),
                 e.getWorkspaceKey(), e.getCreatedAt());
     }

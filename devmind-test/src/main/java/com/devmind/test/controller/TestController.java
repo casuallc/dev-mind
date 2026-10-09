@@ -89,14 +89,9 @@ public class TestController {
         return runService.get(id);
     }
 
-    /** CAP-69：kind=script 时返回独立于项目的脚本套件运行历史（projectId 忽略） */
     @GetMapping("/test-runs")
     public List<TestRunView> history(@RequestParam(required = false) String projectId,
-                                     @RequestParam(required = false) String status,
-                                     @RequestParam(required = false) String kind) {
-        if ("script".equalsIgnoreCase(kind == null ? "" : kind)) {
-            return runService.scriptHistory(status);
-        }
+                                     @RequestParam(required = false) String status) {
         return runService.history(projectId, status);
     }
 

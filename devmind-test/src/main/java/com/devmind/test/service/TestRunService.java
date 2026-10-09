@@ -156,6 +156,11 @@ public class TestRunService {
             if (!s.getProjectId().equals(projectId)) {
                 throw new DevMindException(ErrorCode.BAD_REQUEST, "套件 " + sid + " 不属于该项目");
             }
+            if ("script".equals(s.getKind())) {
+                // CAP-69：脚本套件自带 git 源与命令，不走用例编排执行；误混入会导致空跑 SUCCESS 假象
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "套件 " + sid + " 是脚本套件，请经 /api/script-suites/{id}/run 触发");
+            }
         }
         // 环境补全（CAP-36）：缺省 agentNodeId 取环境首个节点，缺省 baseUrl 取环境变量 baseUrl/BASE_URL
         String envBaseUrl = null;
@@ -197,8 +202,8 @@ public class TestRunService {
     static final String SCRIPT_PSEUDO_PROJECT = "script-tests";
 
     /**
-     * CAP-69 FR-02 触发脚本套件运行。路由链：显式 agentNodeId → 套件默认节点 → 平台默认 → 409
-     * （无项目，路由链没有"项目默认"一档）；env/命令触发时覆盖仅本次生效，不落库。
+     * CAP-69 FR-02 触发脚本套件运行。路由链：显式 agentNodeId → 套件默认节点 →（绑了项目时）
+     * 项目默认节点 → 平台默认 → 409；env/命令触发时覆盖仅本次生效，不落库。
      */
     public TestRunView createScriptRun(Long suiteId, ScriptSuiteRunRequest req) {
         TestSuiteEntity s = suiteRepo.findById(suiteId)
@@ -209,7 +214,12 @@ public class TestRunService {
         }
         String explicit = req != null && req.agentNodeId() != null && !req.agentNodeId().isBlank()
                 ? req.agentNodeId().strip() : null;
-        String nodeId = agentNodeRouter.route(explicit, s.getAgentNodeId(), null);
+        // route() 只有两档回退：套件默认优先；套件未配默认且绑了项目时，回退档让给项目默认节点
+        String fallback = s.getAgentNodeId();
+        if ((fallback == null || fallback.isBlank()) && s.getProjectId() != null) {
+            fallback = projectService.requireProject(s.getProjectId()).agentNodeId();
+        }
+        String nodeId = agentNodeRouter.route(explicit, fallback, null);
         agentNodeRouter.requireExecCapable(nodeId);
 
         // env 合并：套件存值（secret 原值就在 envJson）+ 触发覆盖；null 键值剔除（Map.copyOf 禁 null）
@@ -230,7 +240,8 @@ public class TestRunService {
                 ? req.command() : s.getCommand();
 
         TestRunEntity r = new TestRunEntity();
-        r.setProjectId(null); // CAP-69：脚本套件运行不属任何项目（报告文档沉淀随之跳过）
+        // 套件绑了项目 → run 归属该项目（进项目运行历史 + CAP-03 报告文档沉淀）；未绑保持 NULL
+        r.setProjectId(s.getProjectId());
         r.setSuiteIdsJson(writeIds(List.of(suiteId)));
         r.setAgentNodeId(nodeId);
         r.setStatus(TestRunEntity.RUNNING);
@@ -375,13 +386,6 @@ public class TestRunService {
         }
     }
 
-    /** CAP-69 脚本套件运行历史（projectId 为 NULL 的 run）。 */
-    public List<TestRunView> scriptHistory(String status) {
-        List<TestRunEntity> list = (status == null || status.isBlank())
-                ? repo.findByProjectIdIsNullOrderByCreatedAtDesc()
-                : repo.findByProjectIdIsNullAndStatusOrderByCreatedAtDesc(status.trim().toUpperCase());
-        return list.stream().map(this::toView).toList();
-    }
 
     private void run(Long runId) {
         TestRunEntity r = repo.findById(runId).orElse(null);
@@ -596,7 +600,9 @@ public class TestRunService {
             if (p.autoRegressionOnDeploy() == null || !p.autoRegressionOnDeploy()) {
                 return;
             }
-            List<TestSuiteEntity> suites = suiteRepo.findByProjectIdOrderByCreatedAtAsc(evt.projectId());
+            // CAP-69：脚本套件不进部署自动回归（自带 git 源/命令，非用例编排；要跑需显式触发）
+            List<TestSuiteEntity> suites = suiteRepo.findByProjectIdOrderByCreatedAtAsc(evt.projectId())
+                    .stream().filter(x -> !"script".equals(x.getKind())).toList();
             if (suites.isEmpty()) {
                 log.info("自动回归跳过：项目 {} 无测试套件", evt.projectId());
                 return;

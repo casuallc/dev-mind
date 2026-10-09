@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.devmind.test.dto.ScriptSuiteRequest;
@@ -19,7 +20,7 @@ import com.devmind.test.service.ScriptSuiteService;
 import com.devmind.test.service.TestRunService;
 
 /**
- * CAP-69 独立脚本套件 REST（不绑项目）：CRUD（env 视图层脱敏）+ 触发运行。
+ * CAP-69 脚本套件 REST（强制绑定项目）：CRUD（env 视图层脱敏）+ 触发运行。
  * 鉴权见 SecurityConfig：写操作 ADMIN，GET 与 /run 登录即可。
  */
 @RestController
@@ -35,8 +36,8 @@ public class ScriptSuiteController {
     }
 
     @GetMapping
-    public List<ScriptSuiteView> list() {
-        return suiteService.list();
+    public List<ScriptSuiteView> list(@RequestParam String projectId) {
+        return suiteService.list(projectId);
     }
 
     @PostMapping

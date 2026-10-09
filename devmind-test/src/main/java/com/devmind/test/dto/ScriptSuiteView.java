@@ -9,6 +9,7 @@ import java.util.List;
  */
 public record ScriptSuiteView(
         Long id,
+        String projectId,
         String name,
         String repoUrl,
         String branch,
