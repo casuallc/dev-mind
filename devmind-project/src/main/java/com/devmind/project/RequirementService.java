@@ -433,6 +433,11 @@ public class RequirementService {
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "需求不存在: " + requirementId));
     }
 
+    /** 按项目 + 序号直查（发版归集从 commit message 解析 REQ-<seq> 后定位用；找不到返回空）。 */
+    public java.util.Optional<RequirementEntity> findByProjectSeq(String projectId, long seq) {
+        return requirementRepo.findByProjectIdAndSeq(projectId, seq);
+    }
+
     private void requireProject(String projectId) {
         projectRepo.findById(projectId)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "项目不存在: " + projectId));

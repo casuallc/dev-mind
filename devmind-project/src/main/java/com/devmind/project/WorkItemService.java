@@ -175,6 +175,11 @@ public class WorkItemService {
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "工作单元不存在: " + workItemId));
     }
 
+    /** 按项目 + 序号直查（发版归集从 commit message 解析 WI-<seq> 后定位用；找不到返回空）。 */
+    public java.util.Optional<WorkItemEntity> findByProjectSeq(String projectId, long seq) {
+        return workItemRepo.findByProjectIdAndSeq(projectId, seq);
+    }
+
     private WorkItemEntity requireUnder(String projectId, String requirementId, String workItemId) {
         WorkItemEntity e = requireEntity(projectId, workItemId);
         if (!e.getRequirementId().equals(requirementId)) {

@@ -15,6 +15,9 @@ public interface RequirementRepository extends JpaRepository<RequirementEntity, 
 
     List<RequirementEntity> findByProjectIdAndStatusOrderBySeqDesc(String projectId, String status);
 
+    /** 按项目 + 序号直查（发版归集从 commit message 解析 REQ-<seq> 后定位用） */
+    java.util.Optional<RequirementEntity> findByProjectIdAndSeq(String projectId, Long seq);
+
     /**
      * 组合过滤搜索：status/type/source 可空（null=不限）；keyword 匹配 title/externalKey
      * （不匹配 description——@Lob 上 LIKE 跨库不稳且无索引意义）。

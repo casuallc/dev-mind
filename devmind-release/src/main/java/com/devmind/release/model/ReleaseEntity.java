@@ -76,6 +76,12 @@ public class ReleaseEntity {
     @Column(name = "logs_text", length = 16_777_216)
     private String logsText;
 
+    /** 发版归集引用（CSV：WI-<seq>/REQ-<seq>）；execute 成功时从上一 tag..本 tag 的 commit message 提取 */
+    @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @Column(name = "included_refs", length = 16_777_216)
+    private String includedRefs;
+
     @Column(name = "error_summary")
     private String errorSummary;
 
@@ -117,6 +123,8 @@ public class ReleaseEntity {
     public void setRollbackOf(Long rollbackOf) { this.rollbackOf = rollbackOf; }
     public String getLogsText() { return logsText; }
     public void setLogsText(String logsText) { this.logsText = logsText; }
+    public String getIncludedRefs() { return includedRefs; }
+    public void setIncludedRefs(String includedRefs) { this.includedRefs = includedRefs; }
     public String getErrorSummary() { return errorSummary; }
     public void setErrorSummary(String errorSummary) { this.errorSummary = errorSummary; }
     public Instant getStartedAt() { return startedAt; }

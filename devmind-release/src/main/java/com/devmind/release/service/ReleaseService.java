@@ -7,12 +7,15 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -39,12 +42,15 @@ import com.devmind.notification.dto.NotificationDraft;
 import com.devmind.notification.model.NotificationLevel;
 import com.devmind.notification.service.NotificationService;
 import com.devmind.project.ProjectService;
+import com.devmind.project.RequirementService;
 import com.devmind.project.WorkItemService;
 import com.devmind.project.dto.WorkItemBrief;
 import com.devmind.project.model.ProjectRepoEntity;
 import com.devmind.project.model.ReleaseConfigEntity;
+import com.devmind.project.model.RequirementEntity;
 import com.devmind.project.repo.ReleaseConfigRepository;
 import com.devmind.release.dto.CreateReleaseRequest;
+import com.devmind.release.dto.IncludedRequirement;
 import com.devmind.release.dto.ReleaseView;
 import com.devmind.release.model.ReleaseEntity;
 import com.devmind.release.repo.ReleaseRepository;
@@ -76,6 +82,7 @@ public class ReleaseService {
     private final NotificationService notificationService;
     private final ExecutionLogHub hub;
     private final WorkItemService workItemService;
+    private final RequirementService requirementService;
     /** CAP-18 FR-06 可选钩子：devmind-integration 装配时存在，发版成功后 push tag + 建平台 Release */
     private final org.springframework.beans.factory.ObjectProvider<PlatformIntegrationHook> integrationHook;
     /** CAP-26 可选 SPI：devmind-integration 装配时存在，tag 前 fetch 服务端 clone 保鲜 */
@@ -96,6 +103,7 @@ public class ReleaseService {
                           ExecutionLogHub hub,
                            IdentityService identityService,
                            WorkItemService workItemService,
+                           RequirementService requirementService,
                            org.springframework.beans.factory.ObjectProvider<PlatformIntegrationHook> integrationHook,
                            org.springframework.beans.factory.ObjectProvider<RepoGitGateway> repoGitGateway,
                            @Value("${devmind.release.stale-timeout:PT2H}") Duration staleTimeout) {
@@ -113,6 +121,7 @@ public class ReleaseService {
         this.notificationService = notificationService;
         this.hub = hub;
         this.workItemService = workItemService;
+        this.requirementService = requirementService;
         this.staleTimeout = staleTimeout;
     }
 
@@ -149,6 +158,10 @@ public class ReleaseService {
         }
 
         String version = resolveVersion(req.projectId(), cfg, req.version());
+        // 发版必须挂到一次构建：产物可溯（artifactRef 来自构建），需求归集以构建 commit 为 tag 基准
+        if (req.buildId() == null) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "发版必须关联构建（buildId 不能为空）");
+        }
         String artifact = null;
         if (req.buildId() != null) {
             BuildEntity b = buildService.requireBuild(req.buildId());
@@ -312,6 +325,11 @@ public class ReleaseService {
                 }
                 notify(r, NotificationLevel.P1, "发版成功 #" + r.getId() + " v" + r.getReleaseVersion(),
                         "项目 " + r.getProjectId() + (tagged ? " · tag " + tag : ""));
+                // 需求归集（tag 区间 commit → WI/REQ 引用落库）+ 验收中需求自动完结；失败均不阻断发版
+                if (tagged) {
+                    collectIncluded(r, repoPath, tag, sink);
+                }
+                autoCloseRequirements(r, sink);
             } else {
                 r.setStatus(ReleaseEntity.FAILED);
                 r.setErrorSummary(truncate(err, 2000));
@@ -587,6 +605,93 @@ public class ReleaseService {
         }
     }
 
+    /** commit message 中的工作单元/需求引用：WI-12 / wi/12-xxx（WI 分支约定）/ REQ-7 */
+    private static final Pattern REF_PATTERN = Pattern.compile("\\bWI-(\\d+)|\\bwi/(\\d+)|\\bREQ-(\\d+)");
+
+    /**
+     * 需求归集：以上一个 SUCCESS 发版 tag 为起点，提取区间 commit message 的 WI/REQ 引用，
+     * 解析为本项目工作单元/需求后存 included_refs（CSV）。无上一 tag / 主库不可用 / 无匹配时跳过（留日志，不阻断发版）。
+     */
+    private void collectIncluded(ReleaseEntity r, String repoPath, String tag, Consumer<String> sink) {
+        try {
+            String prevTag = repo.findByProjectIdOrderByCreatedAtDesc(r.getProjectId()).stream()
+                    .filter(x -> !x.getId().equals(r.getId()))
+                    .filter(x -> ReleaseEntity.SUCCESS.equals(x.getStatus()))
+                    .filter(x -> x.getTagName() != null && !x.getTagName().isBlank())
+                    .map(ReleaseEntity::getTagName)
+                    .findFirst().orElse(null);
+            if (prevTag == null) {
+                sink.accept("[归集] 无历史成功发版 tag，跳过需求归集");
+                return;
+            }
+            String messages = gitExecOut(repoPath, "log", prevTag + ".." + tag, "--format=%s");
+            if (messages == null || messages.isBlank()) {
+                sink.accept("[归集] " + prevTag + ".." + tag + " 区间内无提交");
+                return;
+            }
+            LinkedHashSet<String> refs = new LinkedHashSet<>();
+            Matcher m = REF_PATTERN.matcher(messages);
+            while (m.find()) {
+                if (m.group(3) != null) {
+                    long seq = Long.parseLong(m.group(3));
+                    requirementService.findByProjectSeq(r.getProjectId(), seq)
+                            .ifPresent(req -> refs.add("REQ-" + seq));
+                } else {
+                    long seq = Long.parseLong(m.group(1) != null ? m.group(1) : m.group(2));
+                    workItemService.findByProjectSeq(r.getProjectId(), seq)
+                            .ifPresent(wi -> refs.add("WI-" + seq));
+                }
+            }
+            if (refs.isEmpty()) {
+                sink.accept("[归集] " + prevTag + ".." + tag + " 未识别到 WI/REQ 引用");
+                return;
+            }
+            r.setIncludedRefs(String.join(",", refs));
+            sink.accept("[归集] 本次发版包含: " + String.join("、", refs));
+        } catch (Exception e) {
+            log.warn("发版需求归集异常（不阻断发版）: release={} err={}", r.getId(), e.getMessage());
+            sink.accept("[归集] 需求归集异常：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 发版成功 → 归集需求自动完结：仅推进 ACCEPTANCE（验收中）状态的需求到 DONE
+     * （复用 updateStatus 走 DONE 前置检查——仍有未完结工作单元的跳过留人工；异常不阻断发版）。
+     */
+    private void autoCloseRequirements(ReleaseEntity r, Consumer<String> sink) {
+        for (String reqId : includedRequirementIds(r)) {
+            try {
+                RequirementEntity req = requirementService.requireById(reqId);
+                if (!RequirementEntity.STATUS_ACCEPTANCE.equals(req.getStatus())) {
+                    continue;
+                }
+                requirementService.updateStatus(r.getProjectId(), reqId, RequirementEntity.STATUS_DONE);
+                sink.accept("[归集] 需求 REQ-" + req.getSeq() + " 验收中 → 已自动完结 DONE");
+            } catch (DevMindException e) {
+                sink.accept("[归集] 需求 " + reqId + " 自动完结跳过：" + e.getMessage());
+            } catch (Exception e) {
+                log.warn("发版自动完结需求异常（不阻断发版）: release={} req={} err={}", r.getId(), reqId, e.getMessage());
+            }
+        }
+    }
+
+    /** includedRefs CSV → 需求 id 集（WI 引用经工作单元反推需求，REQ 引用直取；保序去重）。 */
+    private List<String> includedRequirementIds(ReleaseEntity r) {
+        ParsedRefs refs = parseRefs(r.getIncludedRefs());
+        LinkedHashSet<String> reqIds = new LinkedHashSet<>();
+        for (Long seq : refs.wiSeqs()) {
+            workItemService.findByProjectSeq(r.getProjectId(), seq)
+                    .map(com.devmind.project.model.WorkItemEntity::getRequirementId)
+                    .ifPresent(reqIds::add);
+        }
+        for (Long seq : refs.reqSeqs()) {
+            requirementService.findByProjectSeq(r.getProjectId(), seq)
+                    .map(RequirementEntity::getId)
+                    .ifPresent(reqIds::add);
+        }
+        return List.copyOf(reqIds);
+    }
+
     /** 执行底座 WS topic：发版用 releaseId 字符串（与 /ws/releases/{id}/stream 对应） */
     private String topic(Long releaseId) {
         return String.valueOf(releaseId);
@@ -606,10 +711,51 @@ public class ReleaseService {
     }
 
     private ReleaseView toView(ReleaseEntity r, WorkItemBrief workItem) {
+        List<WorkItemBrief> includedWis = new ArrayList<>();
+        List<IncludedRequirement> includedReqs = new ArrayList<>();
+        ParsedRefs refs = parseRefs(r.getIncludedRefs());
+        if (!refs.wiSeqs().isEmpty()) {
+            List<String> wiIds = refs.wiSeqs().stream()
+                    .map(seq -> workItemService.findByProjectSeq(r.getProjectId(), seq))
+                    .flatMap(Optional::stream)
+                    .map(com.devmind.project.model.WorkItemEntity::getId)
+                    .toList();
+            includedWis = new ArrayList<>(briefsOf(wiIds).values());
+        }
+        for (Long seq : refs.reqSeqs()) {
+            requirementService.findByProjectSeq(r.getProjectId(), seq).ifPresent(req ->
+                    includedReqs.add(new IncludedRequirement(req.getId(), "REQ-" + req.getSeq(),
+                            req.getTitle(), req.getStatus())));
+        }
         return new ReleaseView(r.getId(), r.getProjectId(), r.getWorkItemId(), r.getBuildId(),
                 r.getReleaseVersion(), r.getStatus(), r.getArtifactRef(), r.getNexusRef(), r.getTagName(),
                 r.getExecutor(), r.getAgentNodeId(), r.getRollbackOf(), r.getErrorSummary(), r.getCreatedBy(),
-                r.getStartedAt(), r.getFinishedAt(), r.getCreatedAt(), workItem);
+                r.getStartedAt(), r.getFinishedAt(), r.getCreatedAt(), workItem, includedWis, includedReqs);
+    }
+
+    /** includedRefs CSV 解析结果（工作单元序号 / 需求序号，保序去重） */
+    private record ParsedRefs(List<Long> wiSeqs, List<Long> reqSeqs) {
+    }
+
+    private ParsedRefs parseRefs(String csv) {
+        List<Long> wiSeqs = new ArrayList<>();
+        List<Long> reqSeqs = new ArrayList<>();
+        if (csv == null || csv.isBlank()) {
+            return new ParsedRefs(wiSeqs, reqSeqs);
+        }
+        for (String code : csv.split(",")) {
+            String c = code.trim();
+            try {
+                if (c.startsWith("WI-")) {
+                    wiSeqs.add(Long.parseLong(c.substring(3)));
+                } else if (c.startsWith("REQ-")) {
+                    reqSeqs.add(Long.parseLong(c.substring(4)));
+                }
+            } catch (NumberFormatException ignore) {
+                // 坏引用跳过（历史脏数据不阻断视图）
+            }
+        }
+        return new ParsedRefs(wiSeqs, reqSeqs);
     }
 
     /** 单条摘要（详情出参用）；workItemId 为空或已删除返回 null。 */

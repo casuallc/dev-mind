@@ -13,6 +13,9 @@ public interface WorkItemRepository extends JpaRepository<WorkItemEntity, String
 
     List<WorkItemEntity> findByProjectIdOrderBySeqDesc(String projectId);
 
+    /** 按项目 + 序号直查（发版归集从 commit message 解析 WI-<seq> 后定位用） */
+    java.util.Optional<WorkItemEntity> findByProjectIdAndSeq(String projectId, Long seq);
+
     /** 项目内当前最大 seq（无工作项时 null） */
     @Query("select max(w.seq) from WorkItemEntity w where w.projectId = :projectId")
     Long findMaxSeqByProjectId(@Param("projectId") String projectId);
