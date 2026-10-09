@@ -11,6 +11,7 @@ import com.devmind.common.exception.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -63,7 +64,7 @@ public class BookmarkProbeService {
         return t;
     });
 
-    /** 无出口路由的便捷构造（测试与无 agent 模块装配场景；等价于 ObjectProvider 空） */
+    /** 无出口路由的便捷构造（仅测试用；等价于 ObjectProvider 空）。Spring 注入走下方 @Autowired 四参构造 */
     public BookmarkProbeService(BookmarkRepository repo,
                                 BookmarkProperties props,
                                 BookmarkOwnership ownership) {
@@ -80,6 +81,7 @@ public class BookmarkProbeService {
         });
     }
 
+    @Autowired // 双构造时 Spring 需显式注入点，否则回落默认构造启动即炸（NoSuchMethodException）
     public BookmarkProbeService(BookmarkRepository repo,
                                 BookmarkProperties props,
                                 BookmarkOwnership ownership,
