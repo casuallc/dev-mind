@@ -12,9 +12,12 @@ import urllib.error
 import urllib.request
 import websocket  # pip install websocket-client
 
-BASE = "http://localhost:8080/api"
+BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8080").rstrip("/") + "/api"
 REPO = "D:/apusic/dev-mind/tmp/cap11-repo"
 PASS, FAIL = [], []
+USER = sys.argv[2] if len(sys.argv) > 2 else "admin"
+PWD = sys.argv[3] if len(sys.argv) > 3 else "admin123"
+TOKEN = None
 
 
 def check(name, cond, detail=""):
@@ -31,6 +34,8 @@ def call(method, path, body=None):
     r = urllib.request.Request(BASE + path, data=data, method=method)
     if data is not None:
         r.add_header("Content-Type", "application/json")
+    if TOKEN:
+        r.add_header("Authorization", "Bearer " + TOKEN)
     try:
         with urllib.request.urlopen(r, timeout=30) as resp:
             txt = resp.read().decode()
@@ -60,6 +65,13 @@ open(os.path.join(REPO, "README.md"), "w").write("cap11 test\n")
 subprocess.run(["git", "-C", REPO, "add", "-A"], capture_output=True)
 subprocess.run(["git", "-C", REPO, "commit", "-m", "init"], capture_output=True)
 check("准备 git 仓库", os.path.isdir(os.path.join(REPO, ".git")))
+
+# ---------------- 0b. 登录（写操作需鉴权，CAP-01） ----------------
+code, login = call("POST", "/auth/login", {"username": USER, "password": PWD})
+TOKEN = (login.get("token") or login.get("accessToken")) if isinstance(login, dict) else None
+check("登录取得 token", code == 200 and bool(TOKEN), f"{code} {str(login)[:120]}")
+if not TOKEN:
+    sys.exit(1)
 
 # ---------------- 1. 项目 + 模板 + 发版配置 ----------------
 proj_name = "cap11-verify-" + str(int(time.time()))
@@ -92,8 +104,52 @@ code, cfg = call("POST", f"/projects/{PID}/release-config", {
     "versionRule": "1.0.0", "executor": "LOCAL"})
 check("保存发版配置(LOCAL)", code == 200 and cfg.get("executor") == "LOCAL", str(cfg)[:120])
 
+# ---------------- 1b. 需求 + 工作单元 + 构建（发版必须关联构建；归集依赖 tag 区间 commit 的 WI-<seq> 引用） ----------------
+code, req = call("POST", f"/projects/{PID}/requirements", {"title": "登录优化"})
+check("创建需求", code == 200 and req.get("id"), str(req)[:120])
+RID = req["id"]
+code, wi = call("POST", f"/projects/{PID}/requirements/{RID}/work-items",
+                {"title": "登录优化实现", "type": "DEVELOPMENT"})
+check("创建工作单元", code == 200 and wi.get("seq"), str(wi)[:120])
+WI_SEQ = wi["seq"]
+
+
+def commit_file(name, message):
+    open(os.path.join(REPO, name), "w", encoding="utf-8").write(message + "\n")
+    subprocess.run(["git", "-C", REPO, "add", "-A"], capture_output=True)
+    subprocess.run(["git", "-C", REPO, "commit", "-m", message], capture_output=True)
+
+
+def trigger_build():
+    st, b = call("POST", f"/projects/{PID}/builds", {})
+    assert st == 200 and b.get("id"), f"触发构建失败: {st} {str(b)[:160]}"
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        st, b = call("GET", f"/builds/{b['id']}")
+        if st == 200 and b["status"] in ("SUCCESS", "FAILED"):
+            return b
+        time.sleep(1)
+    raise TimeoutError("构建未在 90s 内结束")
+
+
+call("PUT", f"/projects/{PID}/build-config", {"executor": "LOCAL", "concurrencyLimit": 1})
+code, stp = call("POST", f"/projects/{PID}/build-steps", {
+    "name": "打包", "command": 'echo "artifact=cap11-demo.jar"',
+    "sortOrder": 0, "workingDir": "", "location": "LOCAL"})
+check("创建构建步骤(登记产物)", code == 200, str(stp)[:120])
+
+commit_file("wi-feature.txt", f"WI-{WI_SEQ} 登录优化实现")
+B1 = trigger_build()
+check("构建#1 SUCCESS + 产物登记", B1["status"] == "SUCCESS" and B1.get("artifactRef") == "cap11-demo.jar",
+      str(B1)[:160])
+B1ID = B1["id"]
+
+# 缺 buildId → 400（发版必须关联构建，产物可溯）
+code, nobuild = call("POST", "/releases", {"projectId": PID})
+check("缺 buildId 创建发版 → 400", code == 400, f"{code} {str(nobuild)[:120]}")
+
 # ---------------- 2. 发版 #1：版本自动 1.0.0，执行成功 + tag ----------------
-code, r1 = call("POST", "/releases", {"projectId": PID})
+code, r1 = call("POST", "/releases", {"projectId": PID, "buildId": B1ID})
 check("创建发版#1(自动版本)", code == 200 and r1.get("version") == "1.0.0" and r1.get("status") == "PLANNED", str(r1)[:160])
 R1 = r1["id"]
 
@@ -115,9 +171,22 @@ check("仓库存在 tag v1.0.0", "v1.0.0" in tags_of())
 # LOCAL 执行后目标文件落库
 check("LOCAL 执行写了 target/release-ref.txt",
       os.path.isfile(os.path.join(REPO, "target", "release-ref.txt")))
+# 首个发版无历史 tag，归集跳过
+check("发版#1 日志含[归集]无历史 tag 跳过",
+      (get(f"/releases/{R1}/logs")[1] or "").find("[归集] 无历史成功发版 tag") >= 0)
 
-# ---------------- 3. 发版 #2：版本自动 1.0.1 ----------------
-code, r2 = call("POST", "/releases", {"projectId": PID})
+# ---------------- 3. 发版 #2：版本自动 1.0.1 + 需求归集 + 验收中需求自动完结 ----------------
+# WI 完结 → 需求 rollup 到 ACCEPTANCE（验收中），发版成功后应被自动完结为 DONE
+code, wix = call("PUT", f"/projects/{PID}/requirements/{RID}/work-items/{wi['id']}/status", {"status": "DONE"})
+check("工作单元置 DONE", code == 200 and wix.get("status") == "DONE", str(wix)[:120])
+code, reqx = get(f"/projects/{PID}/requirements/{RID}")
+check("需求 rollup → ACCEPTANCE", code == 200 and reqx.get("status") == "ACCEPTANCE", str(reqx)[:160])
+
+commit_file("wi-fix.txt", f"WI-{WI_SEQ} 修复验收问题")
+B2 = trigger_build()
+check("构建#2 SUCCESS", B2["status"] == "SUCCESS", str(B2)[:160])
+
+code, r2 = call("POST", "/releases", {"projectId": PID, "buildId": B2["id"]})
 check("发版#2 自动版本 1.0.1", code == 200 and r2.get("version") == "1.0.1", str(r2)[:160])
 R2 = r2["id"]
 call("POST", f"/releases/{R2}/execute")
@@ -127,11 +196,18 @@ for _ in range(40):
     if code == 200 and r2f.get("status") not in ("PLANNED", "RUNNING"):
         break
 check("发版#2 SUCCESS + tag v1.0.1", r2f.get("status") == "SUCCESS" and "v1.0.1" in tags_of(), str(r2f)[:160])
+# 归集：v1.0.0..v1.0.1 区间 commit 含 WI-<seq> → includedWorkItems 带出；验收中需求自动完结 DONE
+inc_wi = [w.get("code") for w in (r2f.get("includedWorkItems") or [])]
+check("发版#2 归集工作单元 WI-" + str(WI_SEQ), f"WI-{WI_SEQ}" in inc_wi, str(r2f)[:200])
+code, reqy = get(f"/projects/{PID}/requirements/{RID}")
+check("发版成功 → 验收中需求自动完结 DONE", code == 200 and reqy.get("status") == "DONE", str(reqy)[:160])
+check("发版#2 日志含[归集]自动完结",
+      (get(f"/releases/{R2}/logs")[1] or "").find("[归集] 需求 REQ-") >= 0)
 
 # ---------------- 4. 发版 #3：WS 实时流 ----------------
-code, r3 = call("POST", "/releases", {"projectId": PID, "version": "1.0.2"})
+code, r3 = call("POST", "/releases", {"projectId": PID, "buildId": B2["id"], "version": "1.0.2"})
 R3 = r3["id"]
-ws = websocket.create_connection(f"ws://localhost:8080/ws/releases/{R3}/stream", timeout=20)
+ws = websocket.create_connection(f"ws://{BASE.split('://', 1)[1].split('/')[0]}/ws/releases/{R3}/stream", timeout=20)
 call("POST", f"/releases/{R3}/execute")
 frames = []
 deadline = time.time() + 30
@@ -155,7 +231,7 @@ check("发版#3 终态 SUCCESS + tag v1.0.2", "v1.0.2" in tags_of())
 call("POST", f"/projects/{PID}/release-config", {
     "nexusRepo": "releases", "scriptTemplateRef": "nexus_push_bad",
     "versionRule": "1.0.0", "executor": "LOCAL"})
-code, r4 = call("POST", "/releases", {"projectId": PID, "version": "2.0.0"})
+code, r4 = call("POST", "/releases", {"projectId": PID, "buildId": B1ID, "version": "2.0.0"})
 R4 = r4["id"]
 call("POST", f"/releases/{R4}/execute")
 for _ in range(40):
