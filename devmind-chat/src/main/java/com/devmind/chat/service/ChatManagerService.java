@@ -40,6 +40,7 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
@@ -393,6 +394,25 @@ public class ChatManagerService {
                 e.getCreatedAt().toEpochMilli(), payload);
     }
 
+    /**
+     * 重建的运行时回填 DB 历史（seq 续接最大值 + 回放窗口补最近一段）——reattach/resume/
+     * 模型懒重挂共用。不补的后果：活动态问答 WS snapshot 只回放内存环形缓冲，重启后页面
+     * 只剩一条"节点已重连"，且新事件 seq 从 1 重编与存量撞号。回填失败不阻塞主链路。
+     */
+    private void restoreRuntimeHistory(String id, AbstractSessionRuntime rt) {
+        try {
+            List<ChatEventEntity> rows = eventRepo.findByChatIdAndSeqLessThanOrderBySeqDesc(
+                    id, Long.MAX_VALUE, PageRequest.of(0, settings.ringBuffer()));
+            List<SessionEvent> history = new ArrayList<>(rows.size());
+            for (int i = rows.size() - 1; i >= 0; i--) {
+                history.add(toEvent(rows.get(i)));
+            }
+            rt.restoreFromHistory(history);
+        } catch (Exception e) {
+            log.warn("回填问答历史失败(不阻塞): chat={} err={}", id, e.getMessage());
+        }
+    }
+
     // ---------------- 交互 ----------------
 
     public void input(String id, String text) {
@@ -525,6 +545,7 @@ public class ChatManagerService {
         ContextManifest manifest = refreshScenarioContext(ent);
         RemoteSessionRuntime rt = new RemoteSessionRuntime(id, ent.getAgentNodeId(), connector,
                 eventSaver, listener, settings);
+        restoreRuntimeHistory(id, rt);
         runtimes.put(id, rt);
         try {
             connector.launch(ent.getAgentNodeId(), new AgentLaunchCommand(
@@ -858,6 +879,7 @@ public class ChatManagerService {
                 }
                 RemoteSessionRuntime rt = new RemoteSessionRuntime(ent.getId(), nodeId, connector,
                         eventSaver, listener, settings);
+                restoreRuntimeHistory(ent.getId(), rt);
                 runtimes.put(ent.getId(), rt);
                 rt.noteReconnected();
                 log.info("服务端重启后对账：问答 {} reattach 到节点 {}", ent.getId(), nodeId);
@@ -1085,6 +1107,7 @@ public class ChatManagerService {
         ModelEndpointView ep = requirePinnedEndpoint(ent);
         ModelSessionRuntime rt = newModelRuntime(ent.getId(), ep,
                 modelSystemPrompt(overviewOrNull(ent.getKnowledgeBaseId())));
+        restoreRuntimeHistory(ent.getId(), rt);
         runtimes.put(ent.getId(), rt);
         log.info("模型问答懒重挂: chat={} endpoint=#{} model={}", ent.getId(), ep.id(), ep.model());
         return rt;

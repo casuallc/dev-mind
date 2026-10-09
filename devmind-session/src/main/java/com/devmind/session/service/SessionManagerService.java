@@ -521,6 +521,19 @@ public class SessionManagerService {
                 e.getCreatedAt().toEpochMilli(), payload);
     }
 
+    /**
+     * 重建的远程运行时回填 DB 历史（seq 续接最大值 + 回放窗口补最近一段）——reattach/resume
+     * 共用。不补的后果：活动态会话 WS snapshot 只回放内存环形缓冲，重启/恢复后页面只剩
+     * 一条"节点已重连"，且新事件 seq 从 1 重编与存量撞号。回填失败不阻塞主链路。
+     */
+    private void restoreRuntimeHistory(String id, RemoteSessionRuntime rt) {
+        try {
+            rt.restoreFromHistory(events(id, -1, props.toRuntimeSettings().ringBuffer()));
+        } catch (Exception e) {
+            log.warn("回填会话历史失败(不阻塞): session={} err={}", id, e.getMessage());
+        }
+    }
+
     // ---------------- 交互 ----------------
 
     public void input(String id, String text) {
@@ -626,6 +639,7 @@ public class SessionManagerService {
             AgentNodeConnector connector = requireConnector();
             RemoteSessionRuntime rt = new RemoteSessionRuntime(id, ent.getAgentNodeId(), connector,
                     eventSaver, listener, props.toRuntimeSettings());
+            restoreRuntimeHistory(id, rt);
             runtimes.put(id, rt);
             SessionContextService.Prepared prepared = null;
             try {
@@ -1881,6 +1895,7 @@ public class SessionManagerService {
                 }
                 RemoteSessionRuntime rt = new RemoteSessionRuntime(ent.getId(), nodeId, connector,
                         eventSaver, listener, props.toRuntimeSettings());
+                restoreRuntimeHistory(ent.getId(), rt);
                 runtimes.put(ent.getId(), rt);
                 rt.noteReconnected();
                 log.info("服务端重启后对账：会话 {} reattach 到节点 {}", ent.getId(), nodeId);

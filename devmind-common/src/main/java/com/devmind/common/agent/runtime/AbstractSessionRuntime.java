@@ -376,6 +376,33 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
         }
     }
 
+    /**
+     * 重建运行时（服务端重启 reattach / resume 恢复）后回填 DB 历史：seq 续接已落库最大值
+     * （否则重编从 1 开始，与存量事件撞号——重启后新事件与历史同 seq，前端按 seq 去重直接丢），
+     * 并把最近一段非 {@code text_delta} 事件补进环形缓冲——活动态会话的 WS snapshot 只回放
+     * 环形缓冲（前端此时不走 REST 历史），不补则重启后打开会话页只剩一条"节点已重连"，
+     * 看起来就像会话没反应。只在重建后、产生新事件前调用；纯内存回填，不广播、不落库。
+     */
+    public void restoreFromHistory(List<SessionEvent> history) {
+        if (history == null || history.isEmpty()) {
+            return;
+        }
+        long max = 0;
+        synchronized (ring) {
+            for (SessionEvent e : history) {
+                max = Math.max(max, e.seq());
+                if ("text_delta".equals(e.type())) {
+                    continue; // 与 publish 同规约：增量不占回放窗口
+                }
+                ring.addLast(e);
+                while (ring.size() > settings.ringBuffer()) {
+                    ring.removeFirst();
+                }
+            }
+        }
+        seq.set(max);
+    }
+
     // ---------------- 生命周期 ----------------
 
     /** 进程/远端会话退出收口：DONE/FAILED 口径 = 有 result 看 isError，否则看退出码。 */
