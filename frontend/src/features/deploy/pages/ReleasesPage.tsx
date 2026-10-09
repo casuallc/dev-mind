@@ -165,7 +165,8 @@ function ReleaseCenter({ id }: { id: string }) {
         width={480}
       >
         <Form form={createForm} layout="vertical" onFinish={onCreate}>
-          <Form.Item label="构建 id" name="buildId" extra="产物来源（可选，留空则模板自带制品）">
+          <Form.Item label="构建 id" name="buildId" rules={[{ required: true, message: '请填写产物来源构建 id' }]}
+            extra="产物来源（必填；发版 tag 以该构建 commit 为基准，需求归集按 tag 区间统计）">
             <InputNumber min={1} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item label="关联工作单元" name="workItemId" extra="可选；选定后发版记录归集到对应需求">

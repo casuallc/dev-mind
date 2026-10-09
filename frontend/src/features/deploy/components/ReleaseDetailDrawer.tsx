@@ -1,6 +1,7 @@
 // 发版详情 Drawer：WS 实时日志 + 状态快照，承载单条发版的成套操作（执行/回滚/删除）。
 import { Alert, Button, Drawer, Modal, Space, Tag, Typography, message } from 'antd'
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   deleteRelease,
   executeRelease,
@@ -105,6 +106,26 @@ export default function ReleaseDetailDrawer({ record, onClose, onChanged }: {
             {d.rollbackOf && <Tag color="orange">回滚自 #{d.rollbackOf}</Tag>}
           </Space>
           {d.errorSummary && <Alert type="error" showIcon message="失败原因" description={d.errorSummary} />}
+          {((d.includedRequirements?.length ?? 0) > 0 || (d.includedWorkItems?.length ?? 0) > 0) && (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              本次归集：
+              {(d.includedRequirements ?? []).map((req) => (
+                <Link key={req.id} to={`/projects/${d.projectId}/requirements/${req.id}`} style={{ marginRight: 8 }}>
+                  {req.code} {req.title}
+                </Link>
+              ))}
+              {(d.includedWorkItems ?? []).map((w) => (
+                <Link
+                  key={w.id}
+                  to={w.requirementId ? `/projects/${d.projectId}/requirements/${w.requirementId}` : '#'}
+                  style={{ marginRight: 8 }}
+                  title={w.title}
+                >
+                  {w.code}
+                </Link>
+              ))}
+            </Typography.Text>
+          )}
           <Space>
             {d.status === 'PLANNED' && (
               <Button type="primary" loading={busy} onClick={() => act(() => executeRelease(d.id), '已开始执行')}>执行发版</Button>

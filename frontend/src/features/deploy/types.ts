@@ -102,6 +102,18 @@ export interface ReleaseRecord {
   createdAt: string
   /** 关联工作单元摘要（列表回链需求展示；未关联为 null） */
   workItem?: WorkItemBrief | null
+  /** 发版归集的工作单元（tag 区间 commit 解析 WI-<seq>；未归集为空） */
+  includedWorkItems?: WorkItemBrief[] | null
+  /** 发版归集的需求（tag 区间 commit 解析 REQ-<seq>；未归集为空） */
+  includedRequirements?: IncludedRequirement[] | null
+}
+
+/** 发版归集的需求引用（详情抽屉展示/回链用） */
+export interface IncludedRequirement {
+  id: string
+  code: string
+  title: string
+  status: string
 }
 
 export interface CreateReleaseInput {
