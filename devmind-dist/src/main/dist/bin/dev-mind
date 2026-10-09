@@ -7,6 +7,7 @@
 #   stop       Graceful stop (TERM, then KILL after timeout)
 #   restart    stop + start
 #   status     Show process status and health check result
+#   rotate-key Regenerate data/ secret keys (service must be stopped; --force skips confirm)
 #   install    Install systemd unit (requires root)
 #   uninstall  Remove systemd unit (requires root)
 #
@@ -193,8 +194,48 @@ do_status() {
     fi
 }
 
+# data/ 密钥轮换：auth.key（JWT 签名主密钥 + 各 enc1: 加密域派生源）与已存在的 *-crypto.key 全部重生成。
+# 后果：旧登录态全部失效；库中所有 enc1: 密文（集成 token / 模型 apiKey / 书签口令）随旧密钥作废，需重新录入。
+# 运行中禁轮换（JVM 持有旧密钥，磁盘换钥会造成签发/校验口径分裂）；旧密钥备份到 data/key-backup-<ts>/ 供回滚。
+do_rotate_key() {
+    if is_running; then
+        echo "ERROR: ${APP_NAME} is running (pid $(get_pid)); stop it first: bin/dev-mind stop" >&2
+        exit 1
+    fi
+    local data_dir="${APP_HOME}/data"
+    mkdir -p "$data_dir"
+    if [[ "${1:-}" != "--force" ]]; then
+        cat >&2 <<EOF
+WARNING: rotating keys will
+  - invalidate all login sessions (everyone must log in again)
+  - make every enc1: encrypted credential in the database undecryptable
+    (integration tokens, model endpoint apiKeys, bookmark secrets -- must be re-entered)
+EOF
+        local ans=""
+        read -r -p "type 'yes' to continue: " ans || true
+        [[ "$ans" == "yes" ]] || { echo "aborted"; exit 1; }
+    fi
+    local targets=("auth.key")
+    local f
+    for f in "$data_dir"/*-crypto.key; do
+        [[ -e "$f" ]] && targets+=("$(basename "$f")")
+    done
+    local backup="${data_dir}/key-backup-$(date +%Y%m%d-%H%M%S)"
+    local base
+    for base in "${targets[@]}"; do
+        if [[ -f "${data_dir}/${base}" ]]; then
+            mkdir -p "$backup"
+            mv "${data_dir}/${base}" "$backup/"
+        fi
+        head -c 32 /dev/urandom >"${data_dir}/${base}"
+        chmod 600 "${data_dir}/${base}" 2>/dev/null || true
+        echo "rotated: data/${base}"
+    done
+    [[ -d "$backup" ]] && echo "old keys backed up to ${backup} (delete after verifying the new install)"
+    echo "done; start again with: bin/dev-mind start"
+}
+
 print_unit() {
-    cat <<EOF
 [Unit]
 Description=Dev-Mind platform
 After=network.target
@@ -243,6 +284,7 @@ case "${1:-}" in
     stop) do_stop ;;
     restart) do_stop; do_start ;;
     status) do_status ;;
+    rotate-key) do_rotate_key "${2:-}" ;;
     install) do_install ;;
     uninstall) do_uninstall ;;
     *) usage; exit 1 ;;
