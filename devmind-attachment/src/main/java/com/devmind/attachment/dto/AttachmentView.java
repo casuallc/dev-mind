@@ -10,11 +10,12 @@ import java.time.Instant;
  */
 public record AttachmentView(String attachmentId, String originalName, String contentType,
                              Long sizeBytes, String scope, boolean image, String url,
-                             String description, String uploadedBy, Instant createdAt) {
+                             String description, String tags, Instant expiresAt,
+                             String uploadedBy, Instant createdAt) {
 
     public static AttachmentView of(AttachmentEntity e) {
         return new AttachmentView(e.getId(), e.getOriginalName(), e.getContentType(), e.getSizeBytes(),
                 e.getScope(), e.isImage(), "/api/attachments/" + e.getId() + "/raw",
-                e.getDescription(), e.getUploadedBy(), e.getCreatedAt());
+                e.getDescription(), e.getTags(), e.getExpiresAt(), e.getUploadedBy(), e.getCreatedAt());
     }
 }

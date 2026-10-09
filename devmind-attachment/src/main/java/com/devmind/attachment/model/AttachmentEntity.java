@@ -47,6 +47,14 @@ public class AttachmentEntity {
     @Column(name = "description", length = 512)
     private String description;
 
+    /** CAP-68：逗号分隔自由文本标签（如「设计稿,临时」），null=无标签 */
+    @Column(name = "tags", length = 512)
+    private String tags;
+
+    /** CAP-68：过期时间，null=永久；到期由 AttachmentCleanupTask 硬删（不做引用检查） */
+    @Column(name = "expires_at")
+    private Instant expiresAt;
+
     @Column(name = "uploaded_by", length = 64)
     private String uploadedBy;
 
@@ -77,6 +85,10 @@ public class AttachmentEntity {
     public void setStoragePath(String storagePath) { this.storagePath = storagePath; }
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
+    public String getTags() { return tags; }
+    public void setTags(String tags) { this.tags = tags; }
+    public Instant getExpiresAt() { return expiresAt; }
+    public void setExpiresAt(Instant expiresAt) { this.expiresAt = expiresAt; }
     public String getUploadedBy() { return uploadedBy; }
     public void setUploadedBy(String uploadedBy) { this.uploadedBy = uploadedBy; }
     public Instant getCreatedAt() { return createdAt; }

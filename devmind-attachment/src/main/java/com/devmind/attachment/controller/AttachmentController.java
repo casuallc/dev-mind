@@ -1,6 +1,8 @@
 package com.devmind.attachment.controller;
 
 import com.devmind.attachment.dto.AttachmentView;
+import com.devmind.attachment.dto.BatchDeleteRequest;
+import com.devmind.attachment.dto.MetaUpdateRequest;
 import com.devmind.attachment.dto.ScopeUpdateRequest;
 import com.devmind.attachment.service.AttachmentService;
 import jakarta.validation.Valid;
@@ -43,15 +45,18 @@ public class AttachmentController {
     @PostMapping
     public AttachmentView upload(@RequestParam("file") MultipartFile file,
                                  @RequestParam(required = false) String scope,
-                                 @RequestParam(required = false) String description) {
-        return service.upload(file, scope, description);
+                                 @RequestParam(required = false) String description,
+                                 @RequestParam(required = false) String tags,
+                                 @RequestParam(required = false) Integer expireDays) {
+        return service.upload(file, scope, description, tags, expireDays);
     }
 
     @GetMapping
     public List<AttachmentView> list(@RequestParam(required = false) String scope,
                                      @RequestParam(required = false) String keyword,
-                                     @RequestParam(required = false) String type) {
-        return service.list(scope, keyword, type);
+                                     @RequestParam(required = false) String type,
+                                     @RequestParam(required = false) String tag) {
+        return service.list(scope, keyword, type, tag);
     }
 
     @GetMapping("/{attachmentId}")
@@ -79,6 +84,19 @@ public class AttachmentController {
     public AttachmentView updateScope(@PathVariable String attachmentId,
                                       @Valid @RequestBody ScopeUpdateRequest req) {
         return service.updateScope(attachmentId, req.scope());
+    }
+
+    /** CAP-68：改 description/tags/expiresAt（null=不变，空白串=清除；expiresAt 格式 yyyy-MM-dd HH:mm:ss）。 */
+    @PutMapping("/{attachmentId}/meta")
+    public AttachmentView updateMeta(@PathVariable String attachmentId,
+                                     @RequestBody MetaUpdateRequest req) {
+        return service.updateMeta(attachmentId, req.description(), req.tags(), req.expiresAt());
+    }
+
+    /** CAP-68：批量删除（逐项 owner/ADMIN 校验，部分失败不整单回滚）。 */
+    @PostMapping("/batch-delete")
+    public List<AttachmentService.BatchDeleteItemResult> batchDelete(@RequestBody BatchDeleteRequest req) {
+        return service.batchDelete(req.ids());
     }
 
     @DeleteMapping("/{attachmentId}")

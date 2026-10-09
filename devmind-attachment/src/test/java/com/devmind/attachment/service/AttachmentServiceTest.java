@@ -93,6 +93,10 @@ class AttachmentServiceTest {
                     store.remove(((AttachmentEntity) args[0]).getId());
                     yield null;
                 }
+                case "findByExpiresAtBefore" -> store.values().stream()
+                        .filter(e -> e.getExpiresAt() != null
+                                && e.getExpiresAt().isBefore((java.time.Instant) args[0]))
+                        .toList();
                 default -> throw new UnsupportedOperationException(m.getName());
             });
         }
@@ -177,5 +181,93 @@ class AttachmentServiceTest {
         service.upload(new MockMultipartFile("file", "a.png", "image/png", new byte[]{1}), null, "需求封面图");
         uploadPng("b.png");
         assertEquals(1, service.list(null, "封面", null).size());
+    }
+
+    // ---------------- CAP-68 标签 / 过期 / 批量删 / 定时清理 ----------------
+
+    @Test
+    void uploadPersistsTagsAndExpireDays() {
+        AttachmentView v = service.upload(
+                new MockMultipartFile("file", "a.png", "image/png", new byte[]{1}),
+                null, null, "设计稿, 临时，,设计稿", 7);
+        assertEquals("设计稿,临时", v.tags());
+        assertTrue(v.expiresAt() != null && v.expiresAt().isAfter(java.time.Instant.now()));
+        // 不带=永久无标签
+        AttachmentView plain = uploadPng("b.png");
+        assertEquals(null, plain.tags());
+        assertEquals(null, plain.expiresAt());
+    }
+
+    @Test
+    void uploadRejectsNonPositiveExpireDays() {
+        assertThrows(DevMindException.class, () -> service.upload(
+                new MockMultipartFile("file", "a.png", "image/png", new byte[]{1}),
+                null, null, null, 0));
+    }
+
+    @Test
+    void tagFilterMatchesExactly() {
+        service.upload(new MockMultipartFile("file", "a.png", "image/png", new byte[]{1}),
+                null, null, "设计稿,v1", null);
+        service.upload(new MockMultipartFile("file", "b.png", "image/png", new byte[]{1}),
+                null, null, "设计稿修订", null);
+        uploadPng("c.png");
+        assertEquals(1, service.list(null, null, null, "设计稿").size());
+        assertEquals(3, service.list(null, null, null, null).size());
+    }
+
+    @Test
+    void updateMetaSemantics() {
+        AttachmentView v = uploadPng("a.png");
+        // null=不变
+        service.updateMeta(v.attachmentId(), null, null, null);
+        assertEquals(null, repo.store.get(v.attachmentId()).getTags());
+        // 覆盖
+        service.updateMeta(v.attachmentId(), "新描述", " x , y ", "2099-01-01 00:00:00");
+        AttachmentEntity ent = repo.store.get(v.attachmentId());
+        assertEquals("新描述", ent.getDescription());
+        assertEquals("x,y", ent.getTags());
+        assertTrue(ent.getExpiresAt() != null);
+        // 空白串=清除
+        service.updateMeta(v.attachmentId(), " ", "", " ");
+        ent = repo.store.get(v.attachmentId());
+        assertEquals(null, ent.getDescription());
+        assertEquals(null, ent.getTags());
+        assertEquals(null, ent.getExpiresAt());
+        // 坏格式 400
+        assertThrows(DevMindException.class,
+                () -> service.updateMeta(v.attachmentId(), null, null, "2099-01-01"));
+    }
+
+    @Test
+    void batchDeletePartialFailure() {
+        AttachmentView other = uploadPng("b.png"); // alice 的 PRIVATE
+        actor = "bob";
+        AttachmentView mine = uploadPng("a.png"); // bob 自己的
+        var results = service.batchDelete(java.util.List.of(mine.attachmentId(), other.attachmentId()));
+        assertEquals(2, results.size());
+        assertTrue(results.get(0).ok());
+        assertTrue(!results.get(1).ok());
+        assertTrue(repo.store.containsKey(other.attachmentId()));
+        assertTrue(!repo.store.containsKey(mine.attachmentId()));
+    }
+
+    @Test
+    void cleanupExpiredDeletesRowAndDisk() throws Exception {
+        AttachmentView expired = uploadPng("old.png");
+        AttachmentView future = service.upload(
+                new MockMultipartFile("file", "new.png", "image/png", new byte[]{1}),
+                null, null, null, 30);
+        AttachmentView permanent = uploadPng("keep.png");
+        repo.store.get(expired.attachmentId())
+                .setExpiresAt(java.time.Instant.now().minusSeconds(3600));
+        Path expiredPath = tempDir.resolve(repo.store.get(expired.attachmentId()).getStoragePath());
+
+        int n = service.cleanupExpired(java.time.Instant.now());
+        assertEquals(1, n);
+        assertTrue(!repo.store.containsKey(expired.attachmentId()));
+        assertTrue(Files.notExists(expiredPath));
+        assertTrue(repo.store.containsKey(future.attachmentId()));
+        assertTrue(repo.store.containsKey(permanent.attachmentId()));
     }
 }

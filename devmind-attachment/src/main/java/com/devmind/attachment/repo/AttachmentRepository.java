@@ -10,4 +10,7 @@ public interface AttachmentRepository extends JpaRepository<AttachmentEntity, St
 
     /** 普通用户可见集合：本人全部 + 他人 SHARED。 */
     List<AttachmentEntity> findByUploadedByOrScopeOrderByCreatedAtDesc(String uploadedBy, String scope);
+
+    /** CAP-68 定时清理：到期附件（expires_at 为 NULL 的永久附件天然不命中）。 */
+    List<AttachmentEntity> findByExpiresAtBefore(java.time.Instant now);
 }
