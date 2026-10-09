@@ -117,6 +117,18 @@ export interface WorklogSettings {
   remoteUrl?: string | null
   /** CAP-41 M3：远端备份目标分支；null/空白 = main */
   remoteBranch?: string | null
+  /** 个人日报执行时间 "HH:mm"；null/undefined = 跟随全局 */
+  dailyTime?: string | null
+  /** 个人周报执行星期（1=周一…7=周日）；null/undefined = 跟随全局；需与 weeklyTime 同时设置才覆盖 */
+  weeklyDay?: number | null
+  /** 个人周报执行时间 "HH:mm"；null/undefined = 跟随全局 */
+  weeklyTime?: string | null
+  /** 个人 Git 定时导入执行时间 "HH:mm"；null/undefined = 跟随全局 */
+  gitImportTime?: string | null
+  /** 全局兜底规则中文展示（如 "每天 18:30"），设置页 placeholder/extra 提示用；PUT 时忽略 */
+  globalDailyLabel?: string
+  globalWeeklyLabel?: string
+  globalGitImportLabel?: string
 }
 
 /** CAP-41 M3：远端备份推送回执（POST /worklog/workspace/push） */
