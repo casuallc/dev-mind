@@ -334,12 +334,11 @@ class RunnerWorkspaceTest {
 
         RunnerWorkspace.FinalizeOutcome r = ws.finalize("proj1", "alice", List.of(spec), false);
         assertEquals(0, r.exit(), r.output());
-        // 基线含合并提交（merge --no-ff + 收口消息）与会话产出
+        // 基线未分叉 → merge --ff 快进：含会话产出、不留收口合并提交（HEAD=会话提交，署名沿用）
         assertEquals("change", git(origin, "show", "main:code.txt").trim());
-        assertTrue(git(origin, "log", "--oneline", "main").contains("收口"), "基线应有收口合并提交");
-        // 无操作者身份（老服务端/未绑定）→ merge 提交回退内置 devmind 署名
-        assertEquals("devmind", git(origin, "log", "-1", "--format=%an", "main").trim());
-        assertEquals("devmind@runner.local", git(origin, "log", "-1", "--format=%ae", "main").trim());
+        assertEquals("work", git(origin, "log", "-1", "--format=%s", "main").trim());
+        assertEquals("t", git(origin, "log", "-1", "--format=%an", "main").trim());
+        assertFalse(git(origin, "log", "--oneline", "main").contains("收口"), "可快进时基线不落收口合并提交");
         // 会话分支 best-effort 推送远端（供收口后 diff）
         assertFalse(gitOut(origin, "rev-parse", "--verify", "refs/heads/feature/s1").isBlank());
         // 固定 worktree 与本地分支已删；临时合并目录已清
@@ -390,7 +389,7 @@ class RunnerWorkspaceTest {
         assertEquals("", gitOut(ctx.cacheDir(), "branch", "--list", "feature/s1"));
     }
 
-    /** CAP-24 FR-06：带操作者身份的收口——merge 提交以绑定署名（author 与 committer 都是）。 */
+    /** CAP-24 FR-06：基线分叉无法快进时收口落合并提交——以操作者绑定署名（author 与 committer 都是）。 */
     @Test
     void finalizeMergeCommitUsesOperatorIdentity() throws Exception {
         Path origin = tmp.resolve("origin.git");
@@ -402,13 +401,25 @@ class RunnerWorkspaceTest {
         Files.writeString(ctx.sessionDir().resolve("code.txt"), "change");
         git(ctx.sessionDir(), "add", ".");
         git(ctx.sessionDir(), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "work");
+        // 基线被他人推进（不冲突的新文件）→ 无法快进，收口才产生合并提交（--ff 语义）
+        Path other = tmp.resolve("other");
+        git(tmp, "clone", origin.toString(), other.toString());
+        Files.writeString(other.resolve("other.txt"), "other");
+        git(other, "add", ".");
+        git(other, "-c", "user.email=o@o", "-c", "user.name=o", "commit", "-m", "other");
+        git(other, "push", "origin", "main");
 
         RunnerWorkspace.FinalizeOutcome r = ws.finalize("proj1", "alice", List.of(spec), false, null,
                 new GitAuthor("刘长青", "lcq@example.com"));
         assertEquals(0, r.exit(), r.output());
+        assertTrue(git(origin, "log", "-1", "--format=%s", "main").contains("收口"),
+                "分叉收口应落合并提交");
         assertEquals("刘长青", git(origin, "log", "-1", "--format=%an", "main").trim());
         assertEquals("lcq@example.com", git(origin, "log", "-1", "--format=%ae", "main").trim());
         assertEquals("刘长青", git(origin, "log", "-1", "--format=%cn", "main").trim());
+        // 双方改动都在
+        assertEquals("change", git(origin, "show", "main:code.txt").trim());
+        assertEquals("other", git(origin, "show", "main:other.txt").trim());
     }
 
     @Test

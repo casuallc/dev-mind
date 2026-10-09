@@ -578,8 +578,9 @@ public class RunnerWorkspace {
      * + best-effort push 会话分支（供收口后 diff）→ 删 worktree + 删本地分支」。
      *
      * <p>合并<b>绝不动 main 缓存的检出分支</b>——在 userRoot 下的临时 detached worktree
-     * （.finalize-tmp[-&lt;key&gt;][-&lt;name&gt;]，建在新 fetch 的 FETCH_HEAD 上）里 merge --no-ff 后从那里
-     * push HEAD:&lt;baseBranch&gt;。合并冲突/脏工作区/push 失败 → 该库返回脱敏错误、worktree
+     * （.finalize-tmp[-&lt;key&gt;][-&lt;name&gt;]，建在新 fetch 的 FETCH_HEAD 上）里 merge --ff 后从那里
+     * push HEAD:&lt;baseBranch&gt;（基线未分叉则快进、<b>不留收口合并点</b>；已分叉才落合并提交）。
+     * 合并冲突/脏工作区/push 失败 → 该库返回脱敏错误、worktree
      * 原样保留可重试；{@code discardChanges=true} 先 reset --hard + clean -fd（只清未提交脏文件，
      * 不解提交级合并冲突）。多库逐库顺序执行：成功库即时收口，失败库保留，互不阻塞。</p>
      *
@@ -744,14 +745,15 @@ public class RunnerWorkspace {
             if (add.exit() != 0) {
                 return "临时合并工作区创建失败: " + tail(add.output());
             }
-            // CAP-24 FR-06：merge 提交署名 = 操作者绑定身份（逐值回退内置 devmind 身份）
+            // CAP-24 FR-06：合并提交署名 = 操作者绑定身份（逐值回退内置 devmind 身份）；
+            // --ff 可快进时不产生新提交（基线历史干净、不留收口合并点），署名仅分叉落合并提交时生效
             String mergeName = operator != null && operator.name() != null && !operator.name().isBlank()
                     ? operator.name() : "devmind";
             String mergeEmail = operator != null && operator.email() != null && !operator.email().isBlank()
                     ? operator.email() : "devmind@runner.local";
             Result merge = run(tmp, OP_TIMEOUT_SEC, spec.token(),
                     "-c", "user.name=" + mergeName, "-c", "user.email=" + mergeEmail,
-                    "merge", "--no-ff", "-m", "merge: 会话分支 " + spec.branch() + " 收口", spec.branch());
+                    "merge", "--ff", "-m", "merge: 会话分支 " + spec.branch() + " 收口", spec.branch());
             if (merge.exit() != 0) {
                 run(tmp, OP_TIMEOUT_SEC, spec.token(), "merge", "--abort");
                 return "合并到基线存在冲突（工作区已保留）: " + tail(merge.output())

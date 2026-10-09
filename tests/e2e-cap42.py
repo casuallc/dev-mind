@@ -9,7 +9,8 @@
 #   1. 会话工作区落 <proj>/<user>/{main,worktrees/sid-*} 布局；结束（finish）不 push 不删；
 #   2. finalize：合并到基线 + push 基线与会话分支 + workspace_state=FINALIZED；
 #      keyed 收口保留工作树并 ff 前进到新基线；重复收口 409；
-#      收口 merge 提交署名 = 操作者身份（CAP-24 FR-06，未绑平台账号回退 displayName）；
+#      merge --ff 收口：基线可快进则快进、不留收口合并点（分叉时的合并提交署名=操作者
+#      身份 CAP-24 FR-06，由 RunnerWorkspaceTest 钉死）；
 #      （协议 v19）deleteRemoteBranch=true 收口后远端会话分支被删（不再为 diff 保留）；
 #   3. 负例：脏工作区不 discard → 409；discard 后合并冲突 → 409 工作区保留；
 #      本地解冲突后重试收口成功；
@@ -220,21 +221,21 @@ try:
     _, ack = call('POST', f'/sessions/{sid1}/finalize', {}, user)
     ok(ack.get('ok') is True, f"finalize ok: {ack.get('detail')}")
     ok(git('show', 'main:code.txt', cwd=ORIGIN).strip() == S1_CHANGE, '基线含会话产出 code.txt')
-    # CAP-24 FR-06：收口 merge 提交以操作者身份署名（未绑平台账号 → 回退 displayName；
-    # email 无署名 → runner 侧回退内置 devmind@runner.local）
-    merge_an = git('log', '-1', '--format=%an', 'main', cwd=ORIGIN)
-    ok(merge_an == E2E_USER['displayName'], f'收口 merge 作者=操作者 displayName（实际: {merge_an}）')
-    ok(git('log', '-1', '--format=%ae', 'main', cwd=ORIGIN) == 'devmind@runner.local',
-       '未绑署名邮箱时 merge email 回退内置 devmind@runner.local')
+    # merge --ff 收口：基线未分叉 → 快进不留收口合并点（HEAD=会话工作提交，署名沿用）；
+    # 基线分叉时的合并提交以操作者身份署名（CAP-24 FR-06，RunnerWorkspaceTest 钉死）
+    head_s = git('log', '-1', '--format=%s', 'main', cwd=ORIGIN)
+    ok(head_s == 'work s1', f'基线快进后会话提交即 HEAD（实际: {head_s}）')
+    ok('收口' not in git('log', '--oneline', 'main', cwd=ORIGIN), '可快进时基线不留收口合并提交')
     tree = git('ls-tree', '-r', '--name-only', 'main', cwd=ORIGIN).split('\n')
     ok('CLAUDE.local.md' not in tree and not any(p.startswith('.devmind/') for p in tree),
        f'平台物化文件不得合入基线: {[p for p in tree if "CLAUDE" in p or p.startswith(".devmind")]}')
     ok(git('show', 'main:CLAUDE.md', cwd=ORIGIN).strip() == SEED_CLAUDE_MD.strip(),
        '基线 CLAUDE.md 仍为仓库自有内容')
     ok(git('ls-remote', ORIGIN, f'refs/heads/feature/{sid1}') != '', '会话分支已推送远端（diff 链路）')
-    # keyed 收口保留工作树且 ff 前进到新基线（HEAD = 收口合并提交）
+    # keyed 收口保留工作树且 ff 前进到新基线（HEAD = 新基线 = 会话工作提交）
     ok(work1.is_dir(), 'keyed 收口后工作树保留（CAP-51）')
-    ok('收口' in git('log', '-1', '--format=%s', cwd=work1), '工作树已 ff 前进到收口合并提交')
+    ok(git('rev-parse', 'HEAD', cwd=work1) == git('rev-parse', 'main', cwd=ORIGIN),
+       '工作树已 ff 前进到新基线')
     _, v1 = call('GET', f'/sessions/{sid1}', token=user)
     ok(v1.get('workspaceState') == 'FINALIZED', f"workspaceState=FINALIZED: {v1.get('workspaceState')}")
     st, r = call('POST', f'/sessions/{sid1}/finalize', {}, user, expect=409)

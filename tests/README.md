@@ -105,7 +105,7 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 | cap55_records_verify.py | CAP-55 FR-05 决策记录与训练集导出：自动分诊落 state/questions/model_answer/routing/延迟、人工裁决配对（gold/agreement 逐题算）、导出 JSONL 三字段与 gold one-hot、reject 行不进导出集、重分诊不抹裁决、查询过滤与 size 边界、降级样本也留痕（脚本自起 fixtures/laya-sidecar-mock.py，默认 :18095 独立实例，需干净 H2；同样先过 CAP-56 FR-07 闸门：§0 登记+验证一份产物，收尾撤销+删除） |
 | e2e-cap41.py / b / c | CAP-41 工作日志空间：懒创建/守卫/种子模板/日报周报生成 |
 | e2e-cap41-m3-push.py | CAP-41 M3：worklog 远端绑定 + push（协议 v6，file:// bare 库） |
-| e2e-cap42.py | CAP-42 固定工作区 + 手动收口（CAP-51 keyed 布局 worktrees/sid-*）：布局落盘/finish 不 push 不删/收口闭环（合并+push+FINALIZED+保留工作树 ff 前进+重复 409+merge 署名=操作者身份 CAP-24 FR-06）/勾选 deleteRemoteBranch 收口后远端会话分支删除（协议 v19）/脏与合并冲突两负例重试/删除释放与离线 fail-visible（协议 v7+，file:// bare 库） |
+| e2e-cap42.py | CAP-42 固定工作区 + 手动收口（CAP-51 keyed 布局 worktrees/sid-*）：布局落盘/finish 不 push 不删/收口闭环（merge --ff 快进不留合并点+push+FINALIZED+保留工作树 ff 前进+重复 409）/勾选 deleteRemoteBranch 收口后远端会话分支删除（协议 v19）/脏与合并冲突两负例重试/删除释放与离线 fail-visible（协议 v7+，file:// bare 库） |
 | e2e-git-import-range.py / e2e-worklog-keyword.py | git 导入范围扫描 / 工时条目关键字筛选（:8081） |
 | skill-import-e2e.py | skill zip 导入：root/包裹结构/409/overwrite（:8081） |
 
