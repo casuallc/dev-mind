@@ -75,7 +75,8 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 | cap08_verify.py | 构建执行器：多步骤/上下文 env/并发 409/远程构建/WS 日志流 |
 | cap09_verify.py | 部署执行器：幂等 409/备份/失败自动回滚/确认门 |
 | cap10_verify.py | 测试执行器：OpenAPI 套件/API 执行/报告/失败转缺陷（自动拉起 fixtures） |
-| cap11_verify.py | 发版执行器：tag/版本递增/回滚删 tag |
+| cap10_acceptance_e2e.py | 验收联动：WI 挂测试绿跑 → 需求 rollup ACCEPTANCE + 待验收通知（免 fixture，用例打应用自身 /api/health） |
+| cap11_verify.py | 发版执行器：tag/版本递增/回滚删 tag/强制 buildId/tag 区间归集需求与 WI/验收中需求自动完结（带登录，argv 传 base/user/pwd） |
 | cap21-project-default-node.py | 项目默认执行节点继承与覆盖 |
 | cap23_verify.py | 项目仓库 git 克隆：状态机/重试/WS 帧（配 cap23-ws-test.mjs） |
 | cap28_e2e.py / cap28_e2e2.py | 工时：仓库订阅/条目 CRUD/git 导入/日报周报（:8081） |
