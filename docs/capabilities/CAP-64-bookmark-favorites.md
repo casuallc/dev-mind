@@ -113,6 +113,17 @@
 - 返回 `{createdGroups, createdBookmarks, skippedDuplicates, skippedInvalid}`，前端 toast 汇报；
 - 归属口径同 FR-08：导入即逐条以 owner 身份创建，无新的权限面。
 
+### FR-10 浏览器书签导出
+
+- 入口：「我的收藏」工具条「导出」按钮（紧邻导入），下载 `devmind-bookmarks-yyyyMMdd.html`；
+- **生成在前端**：分组树 + 全量收藏在内存里拼 Netscape Bookmark HTML（与 FR-09 同格式，
+  Chrome「书签管理器 → 导入」直接认），不走服务端——导出只是既有列表数据的序列化，无新 API；
+- 结构：分组 → `<DT><H3>`+`<DL>`（层级保留，默认分组收藏落顶层），收藏 → `<DT><A HREF ADD_DATE>`，
+  备注写 `<DD>`、标签写 `TAGS` 属性——Chrome 忽略这两者，但**导回本平台往返无损**（FR-09 的
+  解析器原样读回）；标题/地址/备注统一 HTML 转义；
+- 账号与密码是平台私有数据，**不进导出文件**（导出件可被导入任意浏览器，视同明文外发）；
+- 导出范围恒为「我的收藏」全量（不做筛选导出，浏览器导入后用户自己整理）。
+
 ## 3. 插件化接口
 
 | SPI（devmind-common） | 实现方 | 消费方 |
@@ -248,3 +259,8 @@ POST   /api/bookmarks/shared-with-me/copy   {bookmarkId, groupId|null}（复制�
   264px，三层分组名称仍可见；拖拽换父走既有 `PUT /bookmark-groups/{id}`（带原名
   只改 parentId），前端 `allowDrop` 禁拖入自己子树，原地松手不发请求；
   「全部收藏/默认分组」两个虚拟行不进 Tree（不可拖、无折叠交互）。
+
+- **M5 —— FR-10 浏览器书签导出（2026-10-09）**：工具条「导出」按钮前端拼 Netscape HTML
+  下载（`buildBookmarkFile`，与 FR-09 解析器同文件对称维护）；分组层级/备注/标签往返无损，
+  账号密码不导出。E2E：`tests/cap64_export_ui.mjs`（真浏览器落盘 + 喂回 parseBookmarkFile
+  往返断言）。
