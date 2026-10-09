@@ -86,6 +86,21 @@ class GitRepoSyncServiceFetchTest {
 
     /** 远端 HEAD 固定返回 main；fetch/分支列表/ff 全成功。 */
     static class StubGitRemoteOps extends GitRemoteOps {
+        StubGitRemoteOps() {
+            // 全部网络方法已覆盖，出口路由器永不触达——传空 ObjectProvider 即可
+            super(new org.springframework.beans.factory.ObjectProvider<>() {
+                @Override
+                public com.devmind.common.egress.EgressProxyRouter getObject() {
+                    return null;
+                }
+
+                @Override
+                public com.devmind.common.egress.EgressProxyRouter getObject(Object... args) {
+                    return null;
+                }
+            });
+        }
+
         @Override
         public GitResult fetchAllRefs(String repoPath, String remoteUrl, String token) {
             return new GitResult(true, "");

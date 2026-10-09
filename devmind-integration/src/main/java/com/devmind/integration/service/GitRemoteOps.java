@@ -1,9 +1,11 @@
 package com.devmind.integration.service;
 
+import com.devmind.common.egress.EgressProxyRouter;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -12,12 +14,18 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * CAP-18 第 1 层 Git 远程操作（与平台无关）：push 分支 / push tag / clone 仓库（CAP-23）。
  * 凭据注入方式：HTTPS remote 在 URL 中内嵌 oauth2:&lt;token&gt;@，仅存在于进程参数，
  * 不落 .git/config 或 .git-credentials 明文；所有输出经脱敏（token → ***）后才允许外溢。
  * MVP 仅支持 http/https remote；ssh（git@）明确报错提示。
+ *
+ * <p>CAP-70 FR-05：网络类操作（push/fetch/ls-remote/clone）组命令时按 remote host 查
+ * {@link EgressProxyRouter}，命中出口规则即注入 {@code -c http.<scheme://host[:port]>.proxy=
+ * socks5h://127.0.0.1:<port>}（per-URL、命令级生命周期，不落 repo 配置）；命中但不可用
+ * 抛 CONFLICT 快速失败（禁静默回落直连）；未命中/无 router（agent 模块缺席）零行为变化。</p>
  */
 @Service
 public class GitRemoteOps {
@@ -27,18 +35,25 @@ public class GitRemoteOps {
     /** CAP-23：克隆超时（大库场景，独立于 push 超时） */
     private static final Duration CLONE_TIMEOUT = Duration.ofMinutes(30);
 
+    /** CAP-70：出口路由器（agent 模块实现，ObjectProvider 探测防模块缺席/循环依赖） */
+    private final ObjectProvider<EgressProxyRouter> egressRouterProvider;
+
+    public GitRemoteOps(ObjectProvider<EgressProxyRouter> egressRouterProvider) {
+        this.egressRouterProvider = egressRouterProvider;
+    }
+
     public record GitResult(boolean ok, String output) {}
 
     /** 推送本地分支到绑定远程（同名远端分支） */
     public GitResult pushBranch(String repoPath, String branch, String remoteUrl, String token) {
         String url = withToken(remoteUrl, token);
-        return exec(repoPath, token, List.of("push", url, branch + ":" + branch));
+        return exec(repoPath, token, remoteUrl, List.of("push", url, branch + ":" + branch));
     }
 
     /** CAP-24 FR-02 凭证连通性自检：git ls-remote（只读，repoPath 用当前目录不参与鉴权） */
     public GitResult lsRemote(String remoteUrl, String token) {
         String url = withToken(remoteUrl, token);
-        return exec(".", token, List.of("ls-remote", url, "HEAD"));
+        return exec(".", token, remoteUrl, List.of("ls-remote", url, "HEAD"));
     }
 
     /**
@@ -52,13 +67,13 @@ public class GitRemoteOps {
         if (ref != null && !ref.isBlank()) {
             args.add(ref.trim());
         }
-        return exec(repoPath, token, args);
+        return exec(repoPath, token, remoteUrl, args);
     }
 
     /** 推送 tag 到绑定远程 */
     public GitResult pushTag(String repoPath, String tag, String remoteUrl, String token) {
         String url = withToken(remoteUrl, token);
-        return exec(repoPath, token, List.of("push", url, "refs/tags/" + tag + ":refs/tags/" + tag));
+        return exec(repoPath, token, remoteUrl, List.of("push", url, "refs/tags/" + tag + ":refs/tags/" + tag));
     }
 
     /**
@@ -67,7 +82,7 @@ public class GitRemoteOps {
      */
     public GitResult fetchAllRefs(String repoPath, String remoteUrl, String token) {
         String url = token == null || token.isBlank() ? remoteUrl.trim() : withToken(remoteUrl, token);
-        return exec(repoPath, token,
+        return exec(repoPath, token, remoteUrl,
                 List.of("fetch", url, "+refs/heads/*:refs/remotes/origin/*", "--prune"));
     }
 
@@ -110,7 +125,10 @@ public class GitRemoteOps {
         } else {
             url = withToken(cleanUrl, token);
         }
-        List<String> cmd = new ArrayList<>(List.of("git", "clone", "--progress"));
+        // CAP-70 FR-05：-c 出口代理注入必须插在子命令（clone）之前
+        List<String> cmd = new ArrayList<>(List.of("git"));
+        cmd.addAll(egressProxyArgs(cleanUrl));
+        cmd.addAll(List.of("clone", "--progress"));
         if (branch != null && !branch.isBlank()) {
             cmd.add("--branch");
             cmd.add(branch.trim());
@@ -202,8 +220,16 @@ public class GitRemoteOps {
     }
 
     private GitResult exec(String repoPath, String token, List<String> args) {
+        return exec(repoPath, token, null, args);
+    }
+
+    /**
+     * @param cleanUrl 干净 remote URL（无 token），用于 CAP-70 出口规则查询；null = 纯本地操作不查
+     */
+    private GitResult exec(String repoPath, String token, String cleanUrl, List<String> args) {
         List<String> cmd = new ArrayList<>();
         cmd.add("git");
+        cmd.addAll(egressProxyArgs(cleanUrl));
         cmd.add("-C");
         cmd.add(repoPath);
         cmd.addAll(args);
@@ -231,6 +257,41 @@ public class GitRemoteOps {
             log.warn("git 远程操作失败: {}", e.getMessage());
             return new GitResult(false, "git 执行失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * CAP-70 FR-05：出口代理注入参数。cleanUrl（无 token）命中出口规则 →
+     * {@code [-c, http.<scheme://host[:port]>.proxy=socks5h://127.0.0.1:<port>]}；
+     * 未命中/cleanUrl 空/router 缺席 → 空表（零行为变化）。
+     * 命中但不可用（规则禁用/节点离线/协议&lt;v21/隧道断）由 router 抛 CONFLICT 快速失败。
+     * per-URL 配置键从 cleanUrl 解析（不含 userinfo/path），防 token 泄进配置键
+     * （-c 本就命令级不落盘，仍按干净 URL 取 host）。
+     */
+    List<String> egressProxyArgs(String cleanUrl) {
+        if (cleanUrl == null || cleanUrl.isBlank()) {
+            return List.of();
+        }
+        EgressProxyRouter router = egressRouterProvider.getIfAvailable();
+        if (router == null) {
+            return List.of();
+        }
+        Optional<String> proxyUrl = router.gitProxyUrl(cleanUrl);
+        if (proxyUrl.isEmpty()) {
+            return List.of();
+        }
+        URI uri;
+        try {
+            uri = URI.create(cleanUrl.trim());
+        } catch (IllegalArgumentException e) {
+            return List.of();
+        }
+        String authority = uri.getHost() == null ? null
+                : uri.getHost() + (uri.getPort() > 0 ? ":" + uri.getPort() : "");
+        if (uri.getScheme() == null || authority == null) {
+            return List.of();
+        }
+        String key = "http." + uri.getScheme() + "://" + authority + ".proxy";
+        return List.of("-c", key + "=" + proxyUrl.get());
     }
 
     /** 输出脱敏：token 与其 URL 编码形态都替换为 *** */

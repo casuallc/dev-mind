@@ -113,7 +113,7 @@ class RepoCloneServiceTest {
         // 本测试行 gitRepoId 均为空，不会触发已关联行的委派分支
         service = new RepoCloneService(repos.jpa(), new FakeProjectService(),
                 new CloneTokenResolver(integrations.jpa(), new FakeIntegrationService()),
-                new GitRemoteOps(), new ExecutionLogHub(new ObjectMapper()), null);
+                new GitRemoteOps(StubProvider.NONE), new ExecutionLogHub(new ObjectMapper()), null);
     }
 
     private ProjectRepoEntity cloneRow(String remoteUrl, Long integrationId) {
@@ -233,5 +233,27 @@ class RepoCloneServiceTest {
         service.requestClone("proj1", repo.getId());
         awaitDone(repo.getId());
         assertTrue(service.cloneLogs("proj1", repo.getId()).contains("git clone"));
+    }
+
+    /** ObjectProvider 空壳（无 EgressProxyRouter bean——CAP-70 零行为变化路径） */
+    @SuppressWarnings("NullableProblems")
+    private static final class StubProvider {
+        static final org.springframework.beans.factory.ObjectProvider<com.devmind.common.egress.EgressProxyRouter> NONE =
+                new org.springframework.beans.factory.ObjectProvider<>() {
+                    @Override
+                    public com.devmind.common.egress.EgressProxyRouter getObject() {
+                        return null;
+                    }
+
+                    @Override
+                    public com.devmind.common.egress.EgressProxyRouter getObject(Object... args) {
+                        return null;
+                    }
+
+                    @Override
+                    public com.devmind.common.egress.EgressProxyRouter getIfAvailable() {
+                        return null;
+                    }
+                };
     }
 }
