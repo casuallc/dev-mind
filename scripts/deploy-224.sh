@@ -15,12 +15,15 @@
 #   scripts/deploy-224.sh --no-restart          # 只换包不重启（人工起）
 #
 # 环境变量（可复用到 140.143 等同布局环境）：
-#   DEPLOY_HOST=root@172.20.140.224   DEPLOY_DIR=/apusic/dev-mind
+#   DEPLOY_HOST=root@172.20.140.224   DEPLOY_DIR=/apusic/dev-mind   DEPLOY_PORT=22（非标 SSH 端口时覆盖）
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DEPLOY_HOST="${DEPLOY_HOST:-root@172.20.140.224}"
 DEPLOY_DIR="${DEPLOY_DIR:-/apusic/dev-mind}"
+DEPLOY_PORT="${DEPLOY_PORT:-22}"
+SSH=(ssh -p "$DEPLOY_PORT")
+SCP=(scp -P "$DEPLOY_PORT")
 
 SKIP_FRONTEND=0
 SKIP_BUILD=0
@@ -61,29 +64,29 @@ echo "[deploy] package: $PKG_LOCAL"
 echo "[deploy] target : $DEPLOY_HOST:$DEPLOY_DIR  restart=$DO_RESTART config=${CONFIG_FILE:-none} sql=${SQL_FILE:-none}"
 
 # ---- 2. 上传包 / 配置 / SQL 到远端待应用目录 ----
-ssh "$DEPLOY_HOST" "mkdir -p '$DEPLOY_DIR/.deploy-incoming'"
-scp -q "$PKG_LOCAL" "$DEPLOY_HOST:$DEPLOY_DIR/.deploy-incoming/$PKG"
+"${SSH[@]}" "$DEPLOY_HOST" "mkdir -p '$DEPLOY_DIR/.deploy-incoming'"
+"${SCP[@]}" -q "$PKG_LOCAL" "$DEPLOY_HOST:$DEPLOY_DIR/.deploy-incoming/$PKG"
 DO_CONFIG=0
 DO_SQL=0
 if [ -n "$CONFIG_FILE" ]; then
-  scp -q "$CONFIG_FILE" "$DEPLOY_HOST:$DEPLOY_DIR/.deploy-incoming/application-local.yml"
+  "${SCP[@]}" -q "$CONFIG_FILE" "$DEPLOY_HOST:$DEPLOY_DIR/.deploy-incoming/application-local.yml"
   DO_CONFIG=1
 fi
 if [ -n "$SQL_FILE" ]; then
-  scp -q "$SQL_FILE" "$DEPLOY_HOST:$DEPLOY_DIR/.deploy-incoming/update.sql"
+  "${SCP[@]}" -q "$SQL_FILE" "$DEPLOY_HOST:$DEPLOY_DIR/.deploy-incoming/update.sql"
   DO_SQL=1
 fi
 echo "[deploy] uploaded; starting remote update..."
 
 # ---- 3. 远端更新（停服→备份→换包→配置/SQL→重启→失败回滚） ----
-ssh "$DEPLOY_HOST" "DEPLOY_DIR='$DEPLOY_DIR' PKG='$PKG' DO_CONFIG=$DO_CONFIG DO_SQL=$DO_SQL DO_RESTART=$DO_RESTART bash -s" <<'REMOTE'
+"${SSH[@]}" "$DEPLOY_HOST" "DEPLOY_DIR='$DEPLOY_DIR' PKG='$PKG' DO_CONFIG=$DO_CONFIG DO_SQL=$DO_SQL DO_RESTART=$DO_RESTART bash -s" <<'REMOTE'
 set -euo pipefail
 cd "$DEPLOY_DIR"
 TS="$(date +%Y%m%d-%H%M%S)"
 BK="backup/$TS"
 IN=".deploy-incoming"
 NEW=".deploy-new-$TS"
-mkdir -p "$BK/config" "$NEW"
+mkdir -p "$BK/config" "$NEW" config
 
 echo "[remote] stop dev-mind..."
 bin/dev-mind stop || true
@@ -195,4 +198,4 @@ ls -dt backup/*/ 2>/dev/null | tail -n +6 | xargs -r rm -rf
 echo "[remote] done: $PKG @ $TS"
 REMOTE
 
-echo "[deploy] OK — http://172.20.140.224:8088/"
+echo "[deploy] OK — http://${DEPLOY_HOST#*@}/（端口以远端 config 的 server.port 为准，默认 8080）"
