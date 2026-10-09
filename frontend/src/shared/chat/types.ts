@@ -17,6 +17,16 @@ export interface ChatImageAttachment {
   contentType?: string
 }
 
+/**
+ * CAP-68 消息文件附件引用（非图片）：随 input 帧 files 下发，runner 落盘
+ * 会话工作区 .devmind/incoming/ 并提示 agent 用 Read 查看。结构与图片引用相同。
+ */
+export interface ChatFileAttachment {
+  attachmentId: string
+  name?: string
+  contentType?: string
+}
+
 export interface ChatEvent {
   seq: number
   type:

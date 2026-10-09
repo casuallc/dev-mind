@@ -2,7 +2,7 @@
 // 连接后先收 snapshot（环形缓冲回放），再收增量事件，按 seq 去重；断线指数退避重连。
 // enabled=false 时不建立连接；收到 error 帧视为致命（如会话已无运行时）不再重连。
 import { useEffect, useRef, useState } from 'react'
-import type { ChatApiBase, ChatEvent, ChatImageAttachment, WorkspaceSnapshot, WsServerFrame } from './types'
+import type { ChatApiBase, ChatEvent, ChatFileAttachment, ChatImageAttachment, WorkspaceSnapshot, WsServerFrame } from './types'
 
 function wsUrl(apiBase: ChatApiBase, id: string): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
@@ -114,8 +114,14 @@ export function useChatStream(id: string | undefined, apiBase: ChatApiBase, enab
     notice: state.notice,
     workspace: state.workspace,
     send,
-    input: (text: string, images?: ChatImageAttachment[]) =>
-      send({ type: 'input', text, ...(images?.length ? { images } : {}) }),
+    input: (text: string, images?: ChatImageAttachment[], files?: ChatFileAttachment[]) =>
+      send({
+        type: 'input',
+        text,
+        ...(images?.length ? { images } : {}),
+        // CAP-68：非图片文件随 input 帧下发（服务端解析 base64 → runner 落盘工作区）
+        ...(files?.length ? { files } : {}),
+      }),
     /** CAP-49 FR：停止生成（仅模型执行体；Agent 执行体后端回 409） */
     interrupt: () => send({ type: 'interrupt' }),
     authorize: (accepted: boolean, scope: string, requestId?: string) =>

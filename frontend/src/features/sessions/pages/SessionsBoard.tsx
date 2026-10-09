@@ -485,6 +485,8 @@ export default function SessionsBoard({
                   summary={{ ...current, topic: current.taskSpec }}
                   apiBase="/sessions"
                   maxHeight={null}
+                  allowImages
+                  allowFiles
                   onChanged={load}
                   onStreamMeta={setStreamMeta}
                   onWorkspaceSnapshot={setWorkspace}
