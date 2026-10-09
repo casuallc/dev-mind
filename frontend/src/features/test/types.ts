@@ -109,7 +109,7 @@ export interface IssueDraft {
   status: string
 }
 
-// ---------------- CAP-69 独立脚本套件 ----------------
+// ---------------- CAP-69 脚本套件（强制绑定项目） ----------------
 
 /** env 条目：secret=true 的值在视图层恒为掩码 '******'，PUT 掩码原样回传 = 该条不变 */
 export interface ScriptSuiteEnv {
@@ -120,6 +120,7 @@ export interface ScriptSuiteEnv {
 
 export interface ScriptSuite {
   id: number
+  projectId: string
   name: string
   repoUrl: string
   branch: string
@@ -134,6 +135,7 @@ export interface ScriptSuite {
 }
 
 export interface ScriptSuiteInput {
+  projectId: string
   name: string
   repoUrl: string
   branch: string

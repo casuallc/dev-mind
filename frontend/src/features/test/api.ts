@@ -80,10 +80,14 @@ export function getRunLogs(id: number): Promise<string> {
   return api.getText(`/test-runs/${id}/logs`)
 }
 
-// ---------------- CAP-69 独立脚本套件 ----------------
+// ---------------- CAP-69 脚本套件（强制绑定项目） ----------------
 
-export function listScriptSuites(): Promise<ScriptSuite[]> {
-  return api.get<ScriptSuite[]>('/script-suites')
+export function listScriptSuites(projectId: string): Promise<ScriptSuite[]> {
+  return api.get<ScriptSuite[]>(`/script-suites?projectId=${projectId}`)
+}
+
+export function getScriptSuite(id: number): Promise<ScriptSuite> {
+  return api.get<ScriptSuite>(`/script-suites/${id}`)
 }
 
 export function createScriptSuite(input: ScriptSuiteInput): Promise<ScriptSuite> {
@@ -101,9 +105,4 @@ export function deleteScriptSuite(id: number): Promise<void> {
 /** FR-02 触发运行（input 可整体省略：全走套件默认） */
 export function runScriptSuite(id: number, input?: ScriptSuiteRunInput): Promise<TestRun> {
   return api.post<TestRun>(`/script-suites/${id}/run`, input)
-}
-
-/** 脚本套件运行历史（独立于项目） */
-export function listScriptRuns(status?: string): Promise<TestRun[]> {
-  return api.get<TestRun[]>(`/test-runs?kind=script${status ? `&status=${status}` : ''}`)
 }

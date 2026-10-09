@@ -25,7 +25,6 @@ import DeploymentsPage from '../features/deploy/pages/DeploymentsPage'
 import ReleasesPage from '../features/deploy/pages/ReleasesPage'
 import TestsPage from '../features/test/pages/TestsPage'
 import SuiteDetailPage from '../features/test/pages/SuiteDetailPage'
-import ScriptSuitesPage from '../features/test/pages/ScriptSuitesPage'
 import NotificationCenter from '../features/notifications/pages/NotificationCenter'
 import KnowledgeBaseList from '../features/knowledge/pages/KnowledgeBaseList'
 import KnowledgeBaseDetail from '../features/knowledge/pages/KnowledgeBaseDetail'
@@ -117,8 +116,6 @@ export default function App() {
           <Route path="/chats" element={<ChatsBoard />} />
           {/* CAP-64 收藏夹（个人级 owner 隔离，不进项目上下文） */}
           <Route path="/bookmarks" element={<BookmarksPage />} />
-          {/* CAP-69 脚本测试套件（独立于项目，不进项目上下文） */}
-          <Route path="/script-tests" element={<ScriptSuitesPage />} />
           {/* CAP-67 用量统计已并入工作台页内视图（/home?view=usage），旧 /usage 兼容跳转 */}
           <Route path="/usage" element={<Navigate to="/home?view=usage" replace />} />
           {/* 项目上下文页面（当前项目为主线，无项目时由 Gate 统一空态） */}

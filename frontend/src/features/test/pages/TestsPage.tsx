@@ -1,6 +1,8 @@
 // 测试记录页（/tests）：当前项目的套件列表与测试运行历史。
 // CAP-10 测试中心：套件（OpenAPI 生成/新建；编辑/沉淀/删除在内层页 /tests/suites/:id）→ 新建测试运行（选套件+目标环境/执行节点/baseUrl）→
 // 运行历史 → 详情 Drawer（WS 实时结果流）；失败运行可一键生成缺陷线索（FR-06）。
+// CAP-69 脚本套件作为第三种类型并入：新建套件选 script 跳脚本抽屉（git 源/命令/env），行操作走 运行/编辑/删除，
+// 触发后进本项目运行历史（新建运行弹窗不列 script 套件——它走自己的运行弹窗）。
 // 布局遵循 docs/core/前端内容区布局约定.md：单 Card + title 内 Segmented 切换视图，操作按钮收 extra，表格默认密度。
 import {
   Button,
@@ -19,6 +21,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ColumnsType } from 'antd/es/table'
 import {
+  PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
   SyncOutlined,
@@ -27,15 +30,17 @@ import {
   createRun,
   createSuite,
   deleteRun,
+  deleteScriptSuite,
   deleteSuite,
   generateSuite,
   getIssues,
   getRunLogs,
   getRunReport,
   listRuns,
+  listScriptSuites,
   listSuites,
 } from '../api'
-import type { IssueDraft, TestRun, TestRunStatus, TestSuite } from '../types'
+import type { IssueDraft, ScriptSuite, TestRun, TestRunStatus, TestSuite } from '../types'
 import type { ProjectEnvironment } from '../../projects/types'
 import type { AgentNode } from '../../agent/types'
 import { listEnvironments } from '../../projects/api'
@@ -45,6 +50,8 @@ import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { STATUS_COLOR, SUITE_KIND_COLOR } from '../constants'
 import RunDetailDrawer from '../components/RunDetailDrawer'
 import IssuesTable from '../components/IssuesTable'
+import ScriptSuiteDrawer from '../components/ScriptSuiteDrawer'
+import ScriptRunModal from '../components/ScriptRunModal'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
@@ -60,6 +67,7 @@ function TestCenter({ id }: { id: string }) {
   const navigate = useNavigate()
   const [view, setView] = useState<string>('suites') // suites | runs
   const [suites, setSuites] = useState<TestSuite[]>([])
+  const [scriptSuites, setScriptSuites] = useState<ScriptSuite[]>([])
   const [runs, setRuns] = useState<TestRun[]>([])
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [environments, setEnvironments] = useState<ProjectEnvironment[]>([])
@@ -77,6 +85,12 @@ function TestCenter({ id }: { id: string }) {
   const [newOpen, setNewOpen] = useState(false)
   const [newForm] = Form.useForm()
 
+  // CAP-69 脚本套件抽屉（scriptEditing=null 为新建）+ 运行弹窗
+  const [scriptEditOpen, setScriptEditOpen] = useState(false)
+  const [scriptEditing, setScriptEditing] = useState<ScriptSuite | null>(null)
+  const [scriptPrefill, setScriptPrefill] = useState('')
+  const [runFor, setRunFor] = useState<ScriptSuite | null>(null)
+
   // 详情 Drawer / 文本（报告·日志）/ 缺陷线索
   const [detail, setDetail] = useState<TestRun | null>(null)
   const [textModal, setTextModal] = useState<{ title: string; text: string } | null>(null)
@@ -89,16 +103,18 @@ function TestCenter({ id }: { id: string }) {
   const loadAll = async () => {
     setLoading(true)
     try {
-      const [s, r, nd, ev] = await Promise.all([
+      const [s, r, nd, ev, ss] = await Promise.all([
         listSuites(id),
         listRuns(id),
         listAgentNodes().catch(() => []),
         listEnvironments(id).catch(() => []),
+        listScriptSuites(id).catch(() => []),
       ])
       setSuites(s)
       setRuns(r)
       setNodes(nd)
       setEnvironments(ev)
+      setScriptSuites(ss)
     } catch (e) {
       showError(e, '加载失败')
     } finally {
@@ -121,7 +137,16 @@ function TestCenter({ id }: { id: string }) {
     }
   }
 
-  const onCreateSuite = async (v: { name: string; kind: 'api' | 'smoke' }) => {
+  const onCreateSuite = async (v: { name: string; kind: 'api' | 'smoke' | 'script' }) => {
+    // script 类型字段多（git 源/命令/env），不在小弹窗里填——带名跳入脚本套件抽屉
+    if (v.kind === 'script') {
+      setNewOpen(false)
+      newForm.resetFields()
+      setScriptEditing(null)
+      setScriptPrefill(v.name)
+      setScriptEditOpen(true)
+      return
+    }
     try {
       await createSuite(id, { name: v.name, kind: v.kind })
       setNewOpen(false)
@@ -174,25 +199,59 @@ function TestCenter({ id }: { id: string }) {
     }
   }
 
+  const scriptOf = (suiteId: number) => scriptSuites.find((x) => x.id === suiteId)
+
+  const onDeleteScriptSuite = (s: ScriptSuite) => {
+    Modal.confirm({
+      centered: true,
+      title: `删除脚本套件「${s.name}」？`,
+      content: '运行历史记录保留，仅删除套件定义，不可恢复。',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        await deleteScriptSuite(s.id)
+        setScriptSuites(await listScriptSuites(id))
+        setSuites(await listSuites(id))
+        message.success('已删除')
+      },
+    })
+  }
+
   // 列宽全部固定：名称不再吃掉剩余宽度，创建时间给足 170 不折行
   const suiteColumns: ColumnsType<TestSuite> = [
     { title: 'ID', dataIndex: 'id', width: 64, render: (v: number) => `#${v}` },
     { title: '名称', dataIndex: 'name', width: 240, ellipsis: true, render: (n: string) => n || '-' },
     { title: '类型', dataIndex: 'kind', width: 80, render: (v: string) => <Tag color={SUITE_KIND_COLOR[v]}>{v}</Tag> },
     { title: '来源', dataIndex: 'source', width: 100, render: (v: string) => (v === 'openapi' ? <Tag color="geekblue">OpenAPI</Tag> : <Tag>手动</Tag>) },
-    { title: '用例数', dataIndex: 'caseCount', width: 80 },
+    { title: '用例数', dataIndex: 'caseCount', width: 80, render: (v: number, s) => (s.kind === 'script' ? '-' : v) },
     { title: '沉淀文档', dataIndex: 'docId', width: 90, render: (v: number | null) => (v ? `#${v}` : <span>-</span>) },
     { title: '创建时间', dataIndex: 'createdAt', width: 170, render: (v: string) => fmtTime(v) },
     {
       title: '操作',
       key: 'action',
-      width: 110,
-      render: (_, s) => (
-        <Space size={4}>
-          <Button size="small" onClick={() => navigate(`/tests/suites/${s.id}`)}>编辑</Button>
-          <Button size="small" danger onClick={() => onDeleteSuite(s)}>删除</Button>
-        </Space>
-      ),
+      width: 160,
+      render: (_, s) => {
+        // CAP-69：script 套件无用例可编，操作走自己的运行弹窗/抽屉
+        const ss = s.kind === 'script' ? scriptOf(s.id) : undefined
+        if (s.kind === 'script') {
+          return (
+            <Space size={4}>
+              <Button size="small" type="primary" ghost icon={<PlayCircleOutlined />} disabled={!ss}
+                onClick={() => ss && setRunFor(ss)}>运行</Button>
+              <Button size="small" disabled={!ss}
+                onClick={() => { if (!ss) return; setScriptEditing(ss); setScriptEditOpen(true) }}>编辑</Button>
+              <Button size="small" danger disabled={!ss} onClick={() => ss && onDeleteScriptSuite(ss)}>删除</Button>
+            </Space>
+          )
+        }
+        return (
+          <Space size={4}>
+            <Button size="small" onClick={() => navigate(`/tests/suites/${s.id}`)}>编辑</Button>
+            <Button size="small" danger onClick={() => onDeleteSuite(s)}>删除</Button>
+          </Space>
+        )
+      },
     },
   ]
 
@@ -301,10 +360,11 @@ function TestCenter({ id }: { id: string }) {
       {view === 'suites' ? (
         <>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-            套件 = 一组用例；api 套件由 OpenAPI 生成（含未鉴权边界用例），smoke 冒烟套件用 health 用例做关键路径存活检查。
+            套件 = 一组用例；api 套件由 OpenAPI 生成（含未鉴权边界用例），smoke 冒烟套件用 health 用例做关键路径存活检查，
+            script 脚本套件自带 git 源与命令、下发执行节点跑（JUnit 自动解析进用例结果）。
           </Typography.Paragraph>
           <FitTable<TestSuite> rowKey="id" loading={loading} dataSource={suites} columns={suiteColumns}
-            pagination={LIST_PAGINATION} locale={{ emptyText: '暂无套件：先「从 OpenAPI 生成」，或新建冒烟套件（health 用例走执行节点健康检查）' }} />
+            pagination={LIST_PAGINATION} locale={{ emptyText: '暂无套件：先「从 OpenAPI 生成」，或新建冒烟套件（health 用例走执行节点健康检查）/ 脚本套件（git 源 + 命令）' }} />
         </>
       ) : (
         <>
@@ -324,7 +384,11 @@ function TestCenter({ id }: { id: string }) {
             <Input placeholder="如 冒烟套件 / 支付回归" />
           </Form.Item>
           <Form.Item label="类型" name="kind" rules={[{ required: true }]}>
-            <Select options={[{ value: 'smoke', label: 'smoke（冒烟：health 用例）' }, { value: 'api', label: 'api（手工编排 http 用例）' }]} />
+            <Select options={[
+              { value: 'smoke', label: 'smoke（冒烟：health 用例）' },
+              { value: 'api', label: 'api（手工编排 http 用例）' },
+              { value: 'script', label: 'script（脚本：git 源 + 命令，执行节点跑）' },
+            ]} />
           </Form.Item>
         </Form>
       </Modal>
@@ -339,7 +403,7 @@ function TestCenter({ id }: { id: string }) {
             placeholder="选择测试套件"
             value={suiteIds}
             onChange={setSuiteIds}
-            options={suites.map((s) => ({ value: s.id, label: `${s.name}（${s.caseCount} 用例）` }))}
+            options={suites.filter((s) => s.kind !== 'script').map((s) => ({ value: s.id, label: `${s.name}（${s.caseCount} 用例）` }))}
           />
           <Select<number>
             style={{ width: '100%' }}
@@ -373,6 +437,32 @@ function TestCenter({ id }: { id: string }) {
       </Modal>
 
       {/* 套件编辑已迁内层页面 /tests/suites/:id（SuiteDetailPage）：用例编辑/沉淀文档/删除 */}
+
+      {/* CAP-69 脚本套件：新建/编辑抽屉 + 运行弹窗 */}
+      <ScriptSuiteDrawer
+        open={scriptEditOpen}
+        projectId={id}
+        editing={scriptEditing}
+        prefillName={scriptPrefill}
+        nodes={nodes}
+        onClose={() => setScriptEditOpen(false)}
+        onSaved={async () => {
+          setScriptEditOpen(false)
+          setScriptSuites(await listScriptSuites(id))
+          setSuites(await listSuites(id))
+        }}
+      />
+      <ScriptRunModal
+        suite={runFor}
+        nodes={nodes}
+        onClose={() => setRunFor(null)}
+        onRan={(r) => {
+          setRunFor(null)
+          setDetail(r)
+          refresh()
+          message.success(`测试运行 #${r.id} 已创建`)
+        }}
+      />
 
       <RunDetailDrawer
         record={detail}

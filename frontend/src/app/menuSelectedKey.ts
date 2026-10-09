@@ -13,7 +13,6 @@ const SELECT_PREFIXES: Array<[string, string]> = [
   ['/chats', '/chats'],
   ['/bookmarks', '/bookmarks'],
   ['/worklog', '/worklog'],
-  ['/script-tests', '/script-tests'],
   ['/settings', '/settings'], // 一级导航「设置」（旧 /me/settings 已重定向）
   ['/requirements', '/requirements'],
   ['/builds', '/builds'],
@@ -37,7 +36,6 @@ const TOPNAV_PREFIXES: Array<[string, string]> = [
   ['/chats', '/chats'],
   ['/bookmarks', '/bookmarks'],
   ['/worklog', '/worklog'],
-  ['/script-tests', '/script-tests'],
   ['/settings', '/settings'], // 一级导航「设置」
   ['/overview', '/overview'],
   ['/sessions', '/overview'],
