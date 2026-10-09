@@ -50,8 +50,21 @@ detect_port() {
     echo 8080
 }
 
+# Scheme resolution: config 里出现 server.ssl key-store 即按 https 探活（自签证书 curl 需 -k）
+detect_scheme() {
+    local f
+    for f in "${APP_HOME}/config/application-local.yml" "${APP_HOME}/config/application.yml"; do
+        [[ -f "$f" ]] || continue
+        if grep -qE '^[[:space:]]*key-store:' "$f"; then
+            echo "https"
+            return
+        fi
+    done
+    echo "http"
+}
+
 health_url() {
-    echo "http://127.0.0.1:$(detect_port)/api/health"
+    echo "$(detect_scheme)://127.0.0.1:$(detect_port)/api/health"
 }
 
 DEFAULT_JVM_OPTS="-Xms512m -Xmx1024m -XX:+UseG1GC"
@@ -129,7 +142,7 @@ do_start() {
             rm -f "$PID_FILE"
             exit 1
         fi
-        if curl -s -o /dev/null -w '%{http_code}' "$(health_url)" 2>/dev/null | grep -q 200; then
+        if curl -sk -o /dev/null -w '%{http_code}' "$(health_url)" 2>/dev/null | grep -q 200; then
             echo "${APP_NAME} started (pid $(get_pid)), log: ${LOG_DIR}/dev-mind.log (console: $CONSOLE_LOG)"
             exit 0
         fi
@@ -166,7 +179,7 @@ do_status() {
     if is_running; then
         echo "${APP_NAME} is running (pid $(get_pid))"
         local health
-        if health="$(curl -s --max-time 3 "$(health_url)" 2>/dev/null)"; then
+        if health="$(curl -sk --max-time 3 "$(health_url)" 2>/dev/null)"; then
             echo "health: $health"
         else
             echo "health: not responding ($(health_url))"
