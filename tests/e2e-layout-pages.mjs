@@ -19,6 +19,8 @@ const USER = process.env.USER ?? 'admin'
 const PASS = process.env.PASS ?? 'admin123'
 /** 知识库详情页默认取库里第一个库；KB_ID 可指定（验特定状态：失配告警、无可用端点等） */
 const KB_ID = process.env.KB_ID
+/** 套件编辑页默认取当前项目第一个套件；SUITE_ID 可指定 */
+const SUITE_ID = process.env.SUITE_ID
 const CHROME = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 
 const argOf = (name, dflt) => {
@@ -53,6 +55,7 @@ const ROUTES = [
   { path: '/deployments', name: '部署', ctx: true },
   { path: '/releases', name: '发版', ctx: true },
   { path: '/tests', name: '测试', ctx: true },
+  { path: '/tests/suites/{sid}', name: '测试-套件编辑', ctx: true, sid: true },
   { path: '/home', name: '工作台首页' },
   { path: '/chats', name: 'AI 问答' },
   { path: '/bookmarks', name: '收藏夹' },
@@ -264,6 +267,10 @@ async function main() {
   const nodeList = await api('GET', '/agent-nodes', undefined, accessToken).catch(() => [])
   const agentNode = (nodeList ?? [])[0]
   if (!agentNode) log('    （库里没有 Agent 节点，跳过节点详情页）')
+  // 套件编辑页取当前项目第一个套件（没有就跳过该路由，不算失败）
+  const suiteList = await api('GET', `/projects/${project.id}/test-suites`, undefined, accessToken).catch(() => [])
+  const suite = SUITE_ID ? { id: SUITE_ID } : (suiteList ?? [])[0]
+  if (!suite) log('    （当前项目没有测试套件，跳过套件编辑页）')
 
   // ── 2. 起 headless Chrome ─────────────────────────────────
   if (!existsSync(CHROME)) throw new Error(`找不到浏览器：${CHROME}（用 CHROME_PATH 指定）`)
@@ -302,10 +309,11 @@ async function main() {
     const routes = ROUTES.filter((r) => !ONLY.length || ONLY.some((o) => r.path.includes(o)))
         .filter((r) => !r.kb || kb)
         .filter((r) => !r.nid || agentNode)
+        .filter((r) => !r.sid || suite)
     log(`[2] 巡检 ${routes.length} 个路由（窗口 ${WIN_W}x${WIN_H}，settle ${SETTLE}ms）`)
 
     for (const route of routes) {
-      const url = BASE + route.path.replace('{pid}', project.id).replace('{kid}', kb?.id ?? '').replace('{nid}', agentNode?.id ?? '')
+      const url = BASE + route.path.replace('{pid}', project.id).replace('{kid}', kb?.id ?? '').replace('{nid}', agentNode?.id ?? '').replace('{sid}', suite?.id ?? '')
       ws.reset()
       await ws.send('Page.navigate', { url })
       try {
