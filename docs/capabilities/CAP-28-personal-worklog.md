@@ -72,6 +72,14 @@ CAP-06 通知中心（站内提醒）
   非空`），未解析署名的仓库整仓跳过防混入他人提交；hours=0 事后编辑补工时；
   幂等键与手动导入一致（user_id, repo_id, commit_sha），手动/自动混用不重复。
   失败按 runBatch 既有模板发 P0 通知、不中断其他用户。
+- **FR-10 定时项个人执行时间（已实现，2026-10-09）**：日报/周报/Git 导入三个
+  定时项均可在设置页配**个人执行时间**（库存 `worklog_user_settings.daily_time` /
+  `weekly_time`+`weekly_day` / `git_import_time`，"HH:mm"），null = 跟随全局规则
+  （配置文件 `devmind.worklog.*-cron` 与 `*-enabled` 是全局兜底：个人没单独设置
+  就按全局跑）。调度改为**每分钟主 tick**（`schedule-cron`）逐用户解析生效 cron
+  （个人时间 → 简单 cron，未设 → 全局 cron，`CronExpression` 判本分钟到期）；
+  周报需星期+时间同时设置才覆盖（无法从任意全局 cron 反拆星期/时间）；错过触发
+  分钟（实例停机）即跳过该次，三任务均幂等，下一次正常触发不受影响。
 - **FR-08 前端页面**：`features/worklog` 自包含——工作日志页
   （Card + Segmented[条目|日报|周报]）+ 代码仓库页（勾选 + ADMIN 管理）；
   裸路由 `/worklog`、`/worklog/repos`（不挂项目上下文）。
@@ -87,7 +95,9 @@ CAP-06 通知中心（站内提醒）
   `devmind.session.oneshot-permission-mode=plan`（不复用全局 acceptEdits），
   prompt 显式声明"不读写任何文件，只输出 Markdown 正文"。
 - **调度照 CAP-19 模板**：独立 `WorklogSchedulingConfig`（@EnableScheduling 不侵
-  启动类）+ cron 配置化 + 全局 AtomicBoolean 防重入 + 手动/定时共用核心方法；
+  启动类）+ cron 配置化 + 防重入 + 手动/定时共用核心方法；**两级调度（FR-10）**：
+  每分钟主 tick 逐用户解析生效 cron（个人执行时间优先、全局兜底，WorklogSchedule），
+  防重入 AtomicBoolean 按任务分锁（用户可把三任务设到同一分钟）；
   调度方法禁 @Transactional，逐用户逐报告 save 即时提交；
   调度线程无 SecurityContext，归属一律显式传 username。
 - **分钟存储**：minutes int 列（0.25h=15），避免浮点；前端 InputNumber
@@ -133,8 +143,10 @@ weekly_reports(              -- unique(user_id, week_start)
   id PK, user_id, week_start, summary_md clob, next_plan_md clob,
   status default 'DRAFT', session_id?, created_at, updated_at)
 
-worklog_user_settings(       -- 个人开关
-  id PK, user_id unique, auto_daily bool, auto_weekly bool,
+worklog_user_settings(       -- 个人开关 + 个人执行时间（FR-10，null=跟随全局）
+  id PK, user_id unique, auto_daily bool, auto_weekly bool, auto_git_import bool?,
+  daily_time varchar(5)?, weekly_time varchar(5)?, weekly_day int?,  -- "HH:mm"；1=周一…7=周日
+  git_import_time varchar(5)?,
   daily_minutes_target int?, updated_at)
 ```
 
@@ -170,16 +182,23 @@ POST   /api/worklog/entries/{id}/jira/create-issue
 
 # 个人设置（工时/报表偏好；前端入口 = 设置页「工作日志」视图 /settings/worklog，
 # 2026-09-20 前是工作日志页 extra 的「工时设置」弹窗）
-GET/PUT /api/worklog/settings                   {autoDaily, autoWeekly, autoGitImport, dailyMinutesTarget}
+GET/PUT /api/worklog/settings                   {autoDaily, autoWeekly, autoGitImport, dailyMinutesTarget,
+                                                 dailyTime?, weeklyDay?, weeklyTime?, gitImportTime?}
+                                                 PUT 语义：时间字段 null=不变、空白串=清除跟随全局、
+                                                 "HH:mm"=设置；weeklyDay 0=清除、1~7=周一…周日；
+                                                 周报需星期+时间同时有值才覆盖全局
+                                                 （GET 另附 globalDailyLabel/globalWeeklyLabel/
+                                                 globalGitImportLabel 全局规则中文展示）
 
 # 领域事件 → 通知中心
 worklog.daily.generated / worklog.weekly.generated / worklog.jira.worklogged
 ```
 
-配置（application.yml `devmind.worklog`）：`daily-enabled`/`daily-cron`
-（默认 `0 30 18 * * *`）、`weekly-enabled`/`weekly-cron`
-（默认 `0 0 9 * * MON`）、`git-import-enabled`/`git-import-cron`
-（FR-09 定时导入，默认 `0 0 18 * * *`）、`git-scan-max-commits`（默认 200）、
+配置（application.yml `devmind.worklog`）：`schedule-cron`（FR-10 主 tick，默认
+`0 * * * * *` 每分钟）、`daily-enabled`/`daily-cron`（全局兜底，默认 `0 30 18 * * *`）、
+`weekly-enabled`/`weekly-cron`（全局兜底，默认 `0 0 9 * * MON`）、
+`git-import-enabled`/`git-import-cron`（FR-09 全局兜底，默认 `0 0 18 * * *`）——
+全局 cron 只对「没配个人执行时间」的用户生效；`git-scan-max-commits`（默认 200）、
 `oneshot-timeout-seconds`（默认 300）。
 
 ## 7. 验收标准
@@ -213,8 +232,8 @@ worklog.daily.generated / worklog.weekly.generated / worklog.jira.worklogged
 | git 提交中文主题乱码 | Windows git 默认按本地编码输出 log | 扫描已显式带 `-c i18n.logOutputEncoding=UTF-8 --encoding=UTF-8` 且按 UTF-8 字节解码；仍乱码检查仓库本身提交编码 |
 | 已确认（CONFIRMED）报告 force 重生成不生效 | 设计如此：force 仅覆盖 DRAFT；异步任务内抛 409 记 warn 日志，报告保持 CONFIRMED | 先确认无误再定稿；确需重生成需先改回草稿（当前未开放，走库操作） |
 | 并发触发报 409「已有报告生成任务在跑」 | AtomicBoolean 防重入，全局同一时刻只允许一个生成任务 | 稍后重试 |
-| 日报/周报定时没跑 | 检查 `devmind.worklog.daily-enabled/weekly-enabled` 与 cron；调度覆盖范围 = 有仓库订阅的用户 ∪ 有设置行的用户，显式 autoDaily=false 排除 | 在「工作日志 → 设置」确认开关；完全无订阅无设置的用户不在覆盖范围内 |
-| Git 定时导入没进条目 | FR-09 是严格 opt-in：设置页「每天定时从 Git 导入工作条目」没开（或开了但当日无可导入提交）；署名未解析的仓库被整仓跳过（防混入他人提交）；总开关 `git-import-enabled` 关闭 | 设置页打开开关；用「从 Git 导入」弹窗的预览诊断确认该仓库署名解析成功（诊断里 authorFilter 非空） |
+| 日报/周报定时没跑 | 检查 `devmind.worklog.daily-enabled/weekly-enabled`；调度覆盖范围 = 有仓库订阅的用户 ∪ 有设置行的用户，显式 autoDaily=false 排除；FR-10 起按个人执行时间触发（设置页可查），未配则按全局 cron；实例停机错过触发分钟即跳过该次 | 在「工作日志 → 设置」确认开关与执行时间；完全无订阅无设置的用户不在覆盖范围内 |
+| Git 定时导入没进条目 | FR-09 是严格 opt-in：设置页「每天定时从 Git 导入工作条目」没开（或开了但当日无可导入提交）；署名未解析的仓库被整仓跳过（防混入他人提交）；总开关 `git-import-enabled` 关闭；FR-10 起若设了个人执行时间则不再按全局 cron 跑 | 设置页打开开关并核对执行时间；用「从 Git 导入」弹窗的预览诊断确认该仓库署名解析成功（诊断里 authorFilter 非空） |
 
 ## 10. 实现落点
 
