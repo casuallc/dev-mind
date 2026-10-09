@@ -16,15 +16,25 @@ export default function RunDetailDrawer({ record, onClose, onChanged, onOpenText
 }) {
   const [d, setD] = useState<TestRun | null>(record)
   const [connected, setConnected] = useState(false)
+  // CAP-69：脚本套件运行的 exec 实时日志帧（{type:"log",line}）在此累积
+  const [logLines, setLogLines] = useState<string[]>([])
   const latestRef = useRef<TestRun | null>(record)
+  const logRef = useRef<HTMLPreElement | null>(null)
 
   useEffect(() => {
     latestRef.current = d
   }, [d])
 
+  // 日志面板自动滚到底
+  useEffect(() => {
+    const el = logRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [logLines])
+
   useEffect(() => {
     setD(record)
     setConnected(false)
+    setLogLines([])
     if (!record) return
     latestRef.current = record
 
@@ -40,6 +50,9 @@ export default function RunDetailDrawer({ record, onClose, onChanged, onOpenText
             setD((cur) => (cur ? { ...cur, status: f.status, baseUrl: f.baseUrl ?? cur.baseUrl, results: f.results ?? cur.results } : cur))
           } else if (f.type === 'result') {
             setD((cur) => (cur ? { ...cur, results: [...cur.results, f.result] } : cur))
+          } else if (f.type === 'log' && typeof f.line === 'string') {
+            // 封顶 3000 行，防长任务把抽屉撑爆
+            setLogLines((cur) => (cur.length >= 3000 ? [...cur.slice(-2999), f.line] : [...cur, f.line]))
           } else if (f.type === 'done') {
             setConnected(false)
             setD((cur) => (cur ? { ...cur, status: f.status } : cur))
@@ -123,6 +136,21 @@ export default function RunDetailDrawer({ record, onClose, onChanged, onOpenText
             )}
             {d.reportDocId && <Tag color="geekblue">报告文档 #{d.reportDocId}</Tag>}
           </Space>
+          {(connected || logLines.length > 0) && (
+            <>
+              <Typography.Text strong style={{ fontSize: 13 }}>实时日志</Typography.Text>
+              <pre
+                ref={logRef}
+                style={{
+                  background: '#0f1115', color: '#d0d7de', padding: 12, borderRadius: 6,
+                  fontSize: 12, lineHeight: 1.6, maxHeight: 240, overflow: 'auto',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0,
+                }}
+              >
+                {logLines.join('\n') || '等待输出…'}
+              </pre>
+            </>
+          )}
           <Typography.Text strong style={{ fontSize: 13 }}>用例结果（{d.results?.length ?? 0}）</Typography.Text>
           <Table<CaseResult> rowKey="id" size="small" columns={resultColumns} dataSource={d.results ?? []}
             pagination={false} locale={{ emptyText: '暂无结果（运行中或未配置目标）' }} />

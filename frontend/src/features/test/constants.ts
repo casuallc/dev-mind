@@ -14,4 +14,4 @@ export const RESULT_COLOR: Record<CaseResultStatus, string> = {
   skip: 'orange',
 }
 
-export const SUITE_KIND_COLOR: Record<string, string> = { api: 'blue', smoke: 'purple' }
+export const SUITE_KIND_COLOR: Record<string, string> = { api: 'blue', smoke: 'purple', script: 'cyan' }

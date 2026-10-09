@@ -10,6 +10,7 @@ import {
   SafetyCertificateOutlined,
   SettingOutlined,
   StarOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useSyncExternalStore } from 'react'
@@ -77,6 +78,7 @@ export default function AppLayout() {
             { key: '/chats', icon: <CommentOutlined />, label: 'AI 问答' },
             { key: '/bookmarks', icon: <StarOutlined />, label: '收藏夹' },
             { key: '/worklog', icon: <FieldTimeOutlined />, label: '工作日志' },
+            { key: '/script-tests', icon: <ThunderboltOutlined />, label: '脚本测试' },
             // 个人设置已从用户下拉上提为一级导航（页内视图切换在页面 Card 头部）
             { key: '/settings', icon: <SettingOutlined />, label: '设置' },
           ]}

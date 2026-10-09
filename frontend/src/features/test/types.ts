@@ -1,5 +1,5 @@
 // CAP-10 测试执行器类型，与后端 devmind-test 模块对齐
-export type TestSuiteKind = 'api' | 'smoke'
+export type TestSuiteKind = 'api' | 'smoke' | 'script'
 export type TestSuiteSource = 'openapi' | 'manual'
 export type TestCaseKind = 'http' | 'health'
 export type TestRunStatus = 'QUEUED' | 'RUNNING' | 'SUCCESS' | 'FAILED'
@@ -107,4 +107,48 @@ export interface IssueDraft {
   expected: string
   actual: string
   status: string
+}
+
+// ---------------- CAP-69 独立脚本套件 ----------------
+
+/** env 条目：secret=true 的值在视图层恒为掩码 '******'，PUT 掩码原样回传 = 该条不变 */
+export interface ScriptSuiteEnv {
+  key: string
+  value: string | null
+  secret: boolean
+}
+
+export interface ScriptSuite {
+  id: number
+  name: string
+  repoUrl: string
+  branch: string
+  workSubdir: string | null
+  command: string
+  junitPath: string
+  env: ScriptSuiteEnv[]
+  agentNodeId: string | null
+  timeoutSec: number | null
+  workspaceKey: string | null
+  createdAt: string
+}
+
+export interface ScriptSuiteInput {
+  name: string
+  repoUrl: string
+  branch: string
+  workSubdir?: string
+  command: string
+  junitPath: string
+  env?: ScriptSuiteEnv[]
+  agentNodeId?: string
+  timeoutSec?: number
+  workspaceKey?: string
+}
+
+/** 触发运行：三字段全可选（agentNodeId 空=套件默认→平台默认；env 覆盖仅本次生效） */
+export interface ScriptSuiteRunInput {
+  agentNodeId?: string
+  env?: Record<string, string>
+  command?: string
 }

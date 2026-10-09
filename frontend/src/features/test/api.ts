@@ -1,6 +1,15 @@
 // CAP-10 测试执行器接口封装
 import { api } from '../../shared/api/client'
-import type { CreateTestRunInput, IssueDraft, TestCaseInput, TestRun, TestSuite } from './types'
+import type {
+  CreateTestRunInput,
+  IssueDraft,
+  ScriptSuite,
+  ScriptSuiteInput,
+  ScriptSuiteRunInput,
+  TestCaseInput,
+  TestRun,
+  TestSuite,
+} from './types'
 
 // ---------------- 套件 ----------------
 
@@ -69,4 +78,32 @@ export function getRunReport(id: number): Promise<string> {
 
 export function getRunLogs(id: number): Promise<string> {
   return api.getText(`/test-runs/${id}/logs`)
+}
+
+// ---------------- CAP-69 独立脚本套件 ----------------
+
+export function listScriptSuites(): Promise<ScriptSuite[]> {
+  return api.get<ScriptSuite[]>('/script-suites')
+}
+
+export function createScriptSuite(input: ScriptSuiteInput): Promise<ScriptSuite> {
+  return api.post<ScriptSuite>('/script-suites', input)
+}
+
+export function updateScriptSuite(id: number, input: ScriptSuiteInput): Promise<ScriptSuite> {
+  return api.put<ScriptSuite>(`/script-suites/${id}`, input)
+}
+
+export function deleteScriptSuite(id: number): Promise<void> {
+  return api.del(`/script-suites/${id}`)
+}
+
+/** FR-02 触发运行（input 可整体省略：全走套件默认） */
+export function runScriptSuite(id: number, input?: ScriptSuiteRunInput): Promise<TestRun> {
+  return api.post<TestRun>(`/script-suites/${id}/run`, input)
+}
+
+/** 脚本套件运行历史（独立于项目） */
+export function listScriptRuns(status?: string): Promise<TestRun[]> {
+  return api.get<TestRun[]>(`/test-runs?kind=script${status ? `&status=${status}` : ''}`)
 }
