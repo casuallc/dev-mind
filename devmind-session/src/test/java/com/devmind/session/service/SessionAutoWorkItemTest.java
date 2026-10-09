@@ -35,7 +35,7 @@ class SessionAutoWorkItemTest {
         private int seq = 0;
 
         FakeWorkItemService() {
-            super(null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null);
         }
 
         @Override
