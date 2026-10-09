@@ -91,6 +91,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, "/api/script-suites/**").hasRole("ADMIN")
                         // CAP-65：节点文件浏览 GET 也敏感（可读白名单内任意文件），须先于 GET /api/** 通用规则
                         .requestMatchers(HttpMethod.GET, "/api/agent-nodes/*/files/**").hasRole("ADMIN")
+                        // CAP-70：出口规则表即内网出口白名单，全方法（含 GET）仅 ADMIN，须先于通用规则
+                        .requestMatchers("/api/egress-rules", "/api/egress-rules/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/**").authenticated()
                         // CAP-29：全局仓库登记写操作仅 ADMIN（含 fetch/clone 触发）；GET 走上方全认证
                         .requestMatchers(HttpMethod.POST, "/api/repos", "/api/repos/**").hasRole("ADMIN")
