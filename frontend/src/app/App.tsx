@@ -45,6 +45,7 @@ import AgentNodeDetailPage from '../features/agent/pages/AgentNodeDetailPage'
 import NodeFilesPage from '../features/agent/pages/NodeFilesPage'
 import RunnerPackagePage from '../features/agent/pages/RunnerPackagePage'
 import ConnLogsPage from '../features/agent/pages/ConnLogsPage'
+import EgressRulesPage from '../features/agent/pages/EgressRulesPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
 import HomePage from '../features/home/pages/HomePage'
 import WorklogPage from '../features/worklog/pages/WorklogPage'
@@ -206,6 +207,8 @@ export default function App() {
           <Route path="/admin/agent/files" element={<NodeFilesPage />} />
           <Route path="/admin/agent/package" element={<RunnerPackagePage />} />
           <Route path="/admin/agent/logs" element={<ConnLogsPage />} />
+          {/* CAP-70 出口规则（服务端出口反向隧道；仅 ADMIN） */}
+          <Route path="/admin/agent/egress-rules" element={<EgressRulesPage />} />
           <Route path="/admin/agent-nodes" element={<Navigate to="/admin/agent/nodes" replace />} />
           {/* CAP-33 场景（会话模板的升级形态；/admin/templates 旧路径重定向） */}
           <Route path="/admin/scenarios" element={<ScenariosPage />} />

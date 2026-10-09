@@ -12,6 +12,7 @@ import {
   FolderOpenOutlined,
   ForkOutlined,
   FolderOutlined,
+  GlobalOutlined,
   KeyOutlined,
   PaperClipOutlined,
   PartitionOutlined,
@@ -52,6 +53,7 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
       { key: '/admin/agent/files', icon: <FolderOpenOutlined />, label: '节点文件' },
       { key: '/admin/agent/package', icon: <CloudDownloadOutlined />, label: 'Runner 包' },
       { key: '/admin/agent/logs', icon: <FileTextOutlined />, label: '连接日志' },
+      { key: '/admin/agent/egress-rules', icon: <GlobalOutlined />, label: '出口规则' },
     ],
   },
   {

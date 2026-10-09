@@ -4,6 +4,9 @@ import { getAccessToken } from '../auth/authStore'
 import type {
   AgentConnLog,
   AgentNode,
+  EgressRule,
+  EgressRuleBody,
+  EgressTunnelStatus,
   IssuedNode,
   NodeActiveSession,
   NodeFileContent,
@@ -157,4 +160,27 @@ export async function downloadNodeFile(id: number, root: string, path: string, n
   a.download = name
   a.click()
   URL.revokeObjectURL(a.href)
+}
+
+// ---------------- CAP-70 出口规则（全端点仅 ADMIN；未命中规则 = 直连零变化） ----------------
+
+export function listEgressRules(): Promise<EgressRule[]> {
+  return api.get<EgressRule[]>('/egress-rules')
+}
+
+/** 各节点隧道在线徽标数据（协议版本/隧道状态，规则表行内徽标与保存警告共用） */
+export function listEgressTunnelStatus(): Promise<EgressTunnelStatus[]> {
+  return api.get<EgressTunnelStatus[]>('/egress-rules/status')
+}
+
+export function createEgressRule(body: EgressRuleBody): Promise<EgressRule> {
+  return api.post<EgressRule>('/egress-rules', body)
+}
+
+export function updateEgressRule(id: number, body: EgressRuleBody): Promise<EgressRule> {
+  return api.put<EgressRule>(`/egress-rules/${id}`, body)
+}
+
+export function deleteEgressRule(id: number): Promise<void> {
+  return api.del(`/egress-rules/${id}`)
 }

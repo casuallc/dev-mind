@@ -104,3 +104,42 @@ export interface NodeFileContent {
   content: string
   size: number
 }
+
+// ---------------- CAP-70 出口规则（egress_rules，仅 ADMIN 可见/可配） ----------------
+
+/** 出口规则：host glob 命中即经指定节点反向隧道出访（socks5h，runner 侧解析 DNS） */
+export interface EgressRule {
+  id: number
+  /** host glob：精确或 *.后缀，小写规范化入库 */
+  hostPattern: string
+  nodeId: number
+  nodeName?: string
+  enabled: boolean
+  sort: number
+  remark?: string
+  /** 节点 WS 协议版本（<21 = runner 太老无隧道能力，保存时前端警告） */
+  nodeProtocolVersion?: number
+  /** 隧道在线徽标（缺席 = 节点不在线或协议不支持） */
+  tunnelOnline?: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** GET /egress-rules/status：各节点隧道在线徽标数据 */
+export interface EgressTunnelStatus {
+  nodeId: number
+  nodeName?: string
+  nodeStatus?: string
+  protocolVersion?: number
+  supportsTunnel: boolean
+  tunnelOnline: boolean
+}
+
+/** 新建/编辑出口规则请求 */
+export interface EgressRuleBody {
+  hostPattern: string
+  nodeId: number
+  enabled?: boolean
+  sort?: number
+  remark?: string
+}
