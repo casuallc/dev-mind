@@ -78,6 +78,15 @@ function BuildCenter({ id }: { id: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 
+  // 深链（需求详情关联记录直达）：/builds?id=<构建id> 直接开日志抽屉，读后清参数
+  useEffect(() => {
+    const bid = Number(searchParams.get('id'))
+    if (!bid) return
+    setSearchParams({}, { replace: true })
+    getBuild(bid).then(setLogBuild).catch(() => message.warning(`构建 #${bid} 不存在或已删除`))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
   const onlineNodes = nodes.filter((n) => n.status === 'ONLINE')
   const nodeOptions = (list: AgentNode[]) =>
     list.map((n) => ({ value: String(n.id), label: `${n.name}${n.isDefault ? ' · 平台默认' : ''}` }))

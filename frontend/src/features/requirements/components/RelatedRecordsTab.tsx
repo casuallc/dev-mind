@@ -1,5 +1,6 @@
-// 需求详情页「关联记录」Tab：7 类只读记录（文档/会话/构建/测试/部署/发版/产物）合并为一个类型筛选 + 表格。
-// 会话行可点击跳 /sessions?sid=（CAP-39 详情页裁撤，工作台按参数选中）；其余类型无详情路由，保持只读。
+// 需求详情页「关联记录」Tab：7 类记录（文档/会话/构建/测试/部署/发版/产物）合并为一个类型筛选 + 表格。
+// 行点击深链到对应页面详情：会话 /sessions?sid=（CAP-39 工作台按参数选中）；
+// 构建/测试/部署/发版 → 各执行器页 ?id=（页面读参数直接开日志/详情抽屉）；文档/产物无详情路由保持只读。
 import { useState, type ReactNode } from 'react'
 import { Select, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -104,6 +105,11 @@ export default function RelatedRecordsTab({ overview }: { overview: RequirementO
   const navigate = useNavigate()
   const [type, setType] = useState<RecordType>('docs')
 
+  /** 行点击深链：四类执行器记录跳对应页 ?id= 开详情抽屉（构建开日志抽屉） */
+  const rowLink = <T extends { id: number }>(path: (id: number) => string) => ({
+    onRow: (r: T) => ({ onClick: () => navigate(path(r.id)), style: { cursor: 'pointer' } }),
+  })
+
   const renderers: Record<RecordType, (o: RequirementOverview) => ReactNode> = {
     docs: (o) => <Table rowKey="id" size="small" columns={docColumns} dataSource={o.docs} pagination={false} />,
     sessions: (o) => (
@@ -116,10 +122,10 @@ export default function RelatedRecordsTab({ overview }: { overview: RequirementO
         onRow={(s) => ({ onClick: () => navigate(`/sessions?sid=${s.id}`), style: { cursor: 'pointer' } })}
       />
     ),
-    builds: (o) => <Table rowKey="id" size="small" columns={buildColumns} dataSource={o.builds} pagination={false} />,
-    tests: (o) => <Table rowKey="id" size="small" columns={testColumns} dataSource={o.testRuns} pagination={false} />,
-    deploys: (o) => <Table rowKey="id" size="small" columns={deployColumns} dataSource={o.deployments} pagination={false} />,
-    releases: (o) => <Table rowKey="id" size="small" columns={releaseColumns} dataSource={o.releases} pagination={false} />,
+    builds: (o) => <Table rowKey="id" size="small" columns={buildColumns} dataSource={o.builds} pagination={false} {...rowLink((id) => `/builds?id=${id}`)} />,
+    tests: (o) => <Table rowKey="id" size="small" columns={testColumns} dataSource={o.testRuns} pagination={false} {...rowLink((id) => `/tests?id=${id}`)} />,
+    deploys: (o) => <Table rowKey="id" size="small" columns={deployColumns} dataSource={o.deployments} pagination={false} {...rowLink((id) => `/deployments?id=${id}`)} />,
+    releases: (o) => <Table rowKey="id" size="small" columns={releaseColumns} dataSource={o.releases} pagination={false} {...rowLink((id) => `/releases?id=${id}`)} />,
     artifacts: (o) => <Table rowKey="id" size="small" columns={artifactColumns} dataSource={o.artifacts} pagination={false} />,
   }
 

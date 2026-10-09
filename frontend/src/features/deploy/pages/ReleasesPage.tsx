@@ -16,9 +16,10 @@ import {
   message,
 } from 'antd'
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
-import { createRelease, executeRelease, listReleases } from '../api'
+import { createRelease, executeRelease, getRelease, listReleases } from '../api'
 import type { CreateReleaseInput, ReleaseRecord, ReleaseStatus } from '../types'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
@@ -49,6 +50,7 @@ export default function ReleasesPage() {
 }
 
 function ReleaseCenter({ id }: { id: string }) {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [rows, setRows] = useState<ReleaseRecord[]>([])
   const [detail, setDetail] = useState<ReleaseRecord | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
@@ -65,6 +67,15 @@ function ReleaseCenter({ id }: { id: string }) {
     listAgentNodes().then(setNodes).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  // 深链（需求详情关联记录直达）：/releases?id=<发版id> 直接开管理抽屉，读后清参数
+  useEffect(() => {
+    const rid = Number(searchParams.get('id'))
+    if (!rid) return
+    setSearchParams({}, { replace: true })
+    getRelease(rid).then(setDetail).catch(() => message.warning(`发版 #${rid} 不存在或已删除`))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   const onCreate = async (v: CreateValues) => {
     setCreateBusy(true)

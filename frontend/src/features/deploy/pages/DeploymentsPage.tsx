@@ -15,11 +15,13 @@ import {
   message,
 } from 'antd'
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import type { ColumnsType } from 'antd/es/table'
 import { ReloadOutlined } from '@ant-design/icons'
 import {
   createDeployment,
   getDeployConfig,
+  getDeployment,
   listDeployments,
   saveDeployConfig,
 } from '../api'
@@ -48,6 +50,7 @@ export default function DeploymentsPage() {
 }
 
 function DeployCenter({ id }: { id: string }) {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [view, setView] = useState<'history' | 'config'>('history')
   const [cfg, setCfg] = useState<DeployConfig | null>(null)
   const [nodes, setNodes] = useState<AgentNode[]>([])
@@ -91,6 +94,15 @@ function DeployCenter({ id }: { id: string }) {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  // 深链（需求详情关联记录直达）：/deployments?id=<部署id> 直接开详情抽屉，读后清参数
+  useEffect(() => {
+    const did = Number(searchParams.get('id'))
+    if (!did) return
+    setSearchParams({}, { replace: true })
+    getDeployment(did).then(setDetail).catch(() => message.warning(`部署 #${did} 不存在或已删除`))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   useEffect(() => {
     loadHistory()

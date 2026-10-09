@@ -31,6 +31,7 @@ import {
   deleteScriptSuite,
   deleteSuite,
   getIssues,
+  getRun,
   getRunLogs,
   getRunReport,
   listRuns,
@@ -131,6 +132,15 @@ function TestCenter({ id }: { id: string }) {
     if (wi) setRunWorkItemId(wi)
     setRunOpen(true)
     setSearchParams({}, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  // 深链（需求详情关联记录直达）：/tests?id=<运行id> 直接开详情抽屉，读后清参数
+  useEffect(() => {
+    const rid = Number(searchParams.get('id'))
+    if (!rid) return
+    setSearchParams({}, { replace: true })
+    getRun(rid).then(setDetail).catch(() => message.warning(`测试运行 #${rid} 不存在或已删除`))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 
