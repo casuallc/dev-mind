@@ -14,6 +14,10 @@ import java.time.Instant;
 /**
  * worklog_user_settings 表（CAP-28）：个人开关——是否参与定时自动日报/周报。
  * 无此行的用户默认开启（调度按"有订阅或有条目"判定覆盖范围）。
+ *
+ * <p>三个定时项（日报/周报/Git 导入）均可配个人执行时间：null = 跟随全局
+ * （application.yml 的 devmind.worklog.*-cron）。周报需 weeklyTime 与 weeklyDay
+ * 同时设置才覆盖全局（无法从任意全局 cron 反拆星期/时间）。</p>
  */
 @Entity
 @Table(name = "worklog_user_settings")
@@ -45,6 +49,22 @@ public class WorklogUserSettingsEntity {
     /** 每日目标工时（分钟，可空；前端展示参考） */
     @Column(name = "daily_minutes_target")
     private Integer dailyMinutesTarget;
+
+    /** 个人日报执行时间（"HH:mm"，null = 跟随全局 daily-cron） */
+    @Column(name = "daily_time", length = 5)
+    private String dailyTime;
+
+    /** 个人周报执行时间（"HH:mm"，null = 跟随全局；需与 weeklyDay 同时设置才覆盖） */
+    @Column(name = "weekly_time", length = 5)
+    private String weeklyTime;
+
+    /** 个人周报执行星期（1=周一 … 7=周日，null = 跟随全局 weekly-cron） */
+    @Column(name = "weekly_day")
+    private Integer weeklyDay;
+
+    /** 个人 Git 定时导入执行时间（"HH:mm"，null = 跟随全局 git-import-cron） */
+    @Column(name = "git_import_time", length = 5)
+    private String gitImportTime;
 
     /** CAP-41 FR-05：日报格式模板（null/空白 = 内置默认，见 WorklogTemplates） */
     @JdbcTypeCode(SqlTypes.LONGVARCHAR)
@@ -80,6 +100,14 @@ public class WorklogUserSettingsEntity {
     public void setAutoGitImport(Boolean autoGitImport) { this.autoGitImport = autoGitImport; }
     public Integer getDailyMinutesTarget() { return dailyMinutesTarget; }
     public void setDailyMinutesTarget(Integer dailyMinutesTarget) { this.dailyMinutesTarget = dailyMinutesTarget; }
+    public String getDailyTime() { return dailyTime; }
+    public void setDailyTime(String dailyTime) { this.dailyTime = dailyTime; }
+    public String getWeeklyTime() { return weeklyTime; }
+    public void setWeeklyTime(String weeklyTime) { this.weeklyTime = weeklyTime; }
+    public Integer getWeeklyDay() { return weeklyDay; }
+    public void setWeeklyDay(Integer weeklyDay) { this.weeklyDay = weeklyDay; }
+    public String getGitImportTime() { return gitImportTime; }
+    public void setGitImportTime(String gitImportTime) { this.gitImportTime = gitImportTime; }
     public String getDailyTemplateMd() { return dailyTemplateMd; }
     public void setDailyTemplateMd(String dailyTemplateMd) { this.dailyTemplateMd = dailyTemplateMd; }
     public String getWeeklyTemplateMd() { return weeklyTemplateMd; }

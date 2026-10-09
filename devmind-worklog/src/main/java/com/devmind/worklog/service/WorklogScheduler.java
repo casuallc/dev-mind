@@ -10,16 +10,29 @@ import com.devmind.worklog.repo.WorklogUserSettingsRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.ZonedDateTime;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
- * CAP-28 FR-05/06 定时调度（照 JiraSyncService 模板）：cron 配置化 + 全局 AtomicBoolean 防重入。
+ * CAP-28 FR-05/06/09 定时调度（照 JiraSyncService 模板）：cron 配置化 + 防重入。
+ *
+ * <p>两级调度（2026-10-09 起）：不再为每个任务挂固定 cron，而是主 tick 每分钟一跳，
+ * 逐用户解析生效 cron——个人执行时间（worklog_user_settings.daily_time 等）优先，
+ * 未设置跟随全局（devmind.worklog.*-cron），见 {@link WorklogSchedule}。
+ * 防重入按任务分锁（三个任务可被用户设到同一分钟，互不饿死）。</p>
  *
  * <p>CAP-41 FR-03 起生成 = 创建 worklog 会话（受理即返回，成稿由会话结束回传落镜像，
  * 见 {@link WorklogOutputMirror}），调度只需逐用户触发会话创建；并发冲突/节点离线等
@@ -33,7 +46,8 @@ public class WorklogScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(WorklogScheduler.class);
 
-    private final AtomicBoolean running = new AtomicBoolean();
+    /** 防重入按任务分锁：label → guard（三个任务可被用户设到同一分钟，共用一个锁会互相饿死） */
+    private final ConcurrentHashMap<String, AtomicBoolean> batchGuards = new ConcurrentHashMap<>();
 
     private final ReportService reportService;
     private final GitAutoImportService gitAutoImport;
@@ -56,50 +70,102 @@ public class WorklogScheduler {
         this.eventPublisher = eventPublisher;
     }
 
-    /** 每日生成日报草稿（默认 18:30）。 */
-    @Scheduled(cron = "${devmind.worklog.daily-cron:0 30 18 * * *}")
-    public void dailyTick() {
+    /** 主 tick：每分钟一跳，逐任务逐用户判定本分钟是否到期（个人时间优先、全局兜底）。 */
+    @Scheduled(cron = "${devmind.worklog.schedule-cron:0 * * * * *}")
+    public void masterTick() {
+        ZonedDateTime tick = ZonedDateTime.now();
+        Map<String, WorklogUserSettingsEntity> byUser = settingsRepo.findAll().stream()
+                .collect(Collectors.toMap(WorklogUserSettingsEntity::getUserId, Function.identity(),
+                        (a, b) -> a, LinkedHashMap::new));
+        dailyBatch(tick, byUser);
+        weeklyBatch(tick, byUser);
+        gitImportBatch(tick, byUser);
+    }
+
+    /** 每日生成日报草稿（个人 dailyTime 优先，全局默认 18:30）。 */
+    void dailyBatch(ZonedDateTime tick, Map<String, WorklogUserSettingsEntity> byUser) {
         if (!props.isDailyEnabled()) {
             return;
         }
+        CronExpression global = parseGlobalCron("日报", props.getDailyCron());
+        if (global == null) {
+            return;
+        }
+        Set<String> due = new LinkedHashSet<>();
+        for (String u : coveredUsers(true, byUser)) {
+            WorklogUserSettingsEntity s = byUser.get(u);
+            String userTime = s == null ? null : s.getDailyTime();
+            if (WorklogSchedule.dueThisMinute(WorklogSchedule.resolveDaily(userTime, global), tick)) {
+                due.add(u);
+            }
+        }
         LocalDate today = LocalDate.now();
-        runBatch("日报", coveredUsers(true), u -> reportService.generateDaily(u, today, false));
+        runBatch("日报", due, u -> reportService.generateDaily(u, today, false));
     }
 
-    /** 每周生成上周周报草稿（默认周一 09:00）。 */
-    @Scheduled(cron = "${devmind.worklog.weekly-cron:0 0 9 * * MON}")
-    public void weeklyTick() {
+    /** 每周生成上周周报草稿（个人 weeklyDay+weeklyTime 同时设置才覆盖，全局默认周一 09:00）。 */
+    void weeklyBatch(ZonedDateTime tick, Map<String, WorklogUserSettingsEntity> byUser) {
         if (!props.isWeeklyEnabled()) {
             return;
         }
+        CronExpression global = parseGlobalCron("周报", props.getWeeklyCron());
+        if (global == null) {
+            return;
+        }
+        Set<String> due = new LinkedHashSet<>();
+        for (String u : coveredUsers(false, byUser)) {
+            WorklogUserSettingsEntity s = byUser.get(u);
+            CronExpression effective = s == null ? global
+                    : WorklogSchedule.resolveWeekly(s.getWeeklyTime(), s.getWeeklyDay(), global);
+            if (WorklogSchedule.dueThisMinute(effective, tick)) {
+                due.add(u);
+            }
+        }
         LocalDate lastWeekStart = LocalDate.now().with(DayOfWeek.MONDAY).minusWeeks(1);
-        runBatch("周报", coveredUsers(false), u -> reportService.generateWeekly(u, lastWeekStart, false));
+        runBatch("周报", due, u -> reportService.generateWeekly(u, lastWeekStart, false));
     }
 
     /**
-     * CAP-28 FR-09：每日定时从 Git 导入工作条目（默认 18:00，早于日报生成的 18:30，
-     * 当日条目先落库再进日报素材）。严格 opt-in：仅设置行显式打开 autoGitImport 的用户参与
-     * （不看订阅——它直接产生数据行，且署名未解析的仓库没有人工预览兜底，由 GitAutoImportService 整仓跳过）。
+     * CAP-28 FR-09：每日定时从 Git 导入工作条目（全局默认 18:00，早于日报生成的 18:30，
+     * 当日条目先落库再进日报素材；个人 gitImportTime 可覆盖）。严格 opt-in：仅设置行显式
+     * 打开 autoGitImport 的用户参与（不看订阅——它直接产生数据行，且署名未解析的仓库
+     * 没有人工预览兜底，由 GitAutoImportService 整仓跳过）。
      */
-    @Scheduled(cron = "${devmind.worklog.git-import-cron:0 0 18 * * *}")
-    public void gitImportTick() {
+    void gitImportBatch(ZonedDateTime tick, Map<String, WorklogUserSettingsEntity> byUser) {
         if (!props.isGitImportEnabled()) {
             return;
         }
-        Set<String> users = settingsRepo.findAll().stream()
+        CronExpression global = parseGlobalCron("Git 导入", props.getGitImportCron());
+        if (global == null) {
+            return;
+        }
+        Set<String> due = byUser.values().stream()
                 .filter(s -> Boolean.TRUE.equals(s.getAutoGitImport()))
+                .filter(s -> WorklogSchedule.dueThisMinute(
+                        WorklogSchedule.resolveDaily(s.getGitImportTime(), global), tick))
                 .map(WorklogUserSettingsEntity::getUserId)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         LocalDate today = LocalDate.now();
-        runBatch("Git 导入", users, u -> gitAutoImport.importForDate(u, today));
+        runBatch("Git 导入", due, u -> gitAutoImport.importForDate(u, today));
     }
 
     // ---------------- 内部 ----------------
+
+    /** 全局 cron 解析失败 = 配置错误：error 日志 + 跳过该任务本 tick（不拖垮其余任务）。 */
+    private CronExpression parseGlobalCron(String label, String cron) {
+        try {
+            return CronExpression.parse(cron);
+        } catch (IllegalArgumentException e) {
+            log.error("{} 全局 cron 非法（devmind.worklog 配置检查）: {}", label, cron);
+            return null;
+        }
+    }
 
     private void runBatch(String label, Set<String> users, UserJob job) {
         if (users.isEmpty()) {
             return;
         }
+        AtomicBoolean running = batchGuards.computeIfAbsent(label, k -> new AtomicBoolean());
         if (!running.compareAndSet(false, true)) {
             log.warn("{} 定时生成上一批未跑完，本次跳过", label);
             return;
@@ -138,15 +204,15 @@ public class WorklogScheduler {
      * 调度覆盖用户：有订阅的用户 ∪ 有设置行的用户；设置行显式关掉对应开关的剔除
      * （无设置行默认开启）。
      */
-    private Set<String> coveredUsers(boolean daily) {
+    private Set<String> coveredUsers(boolean daily, Map<String, WorklogUserSettingsEntity> byUser) {
         Set<String> users = new LinkedHashSet<>(subRepo.findDistinctUserIds());
-        settingsRepo.findAll().forEach(s -> {
+        byUser.forEach((userId, s) -> {
             boolean on = daily ? !Boolean.FALSE.equals(s.getAutoDaily())
                     : !Boolean.FALSE.equals(s.getAutoWeekly());
             if (on) {
-                users.add(s.getUserId());
+                users.add(userId);
             } else {
-                users.remove(s.getUserId());
+                users.remove(userId);
             }
         });
         return users;
