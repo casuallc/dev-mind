@@ -24,6 +24,7 @@ import BuildsPage from '../features/build/pages/BuildsPage'
 import DeploymentsPage from '../features/deploy/pages/DeploymentsPage'
 import ReleasesPage from '../features/deploy/pages/ReleasesPage'
 import TestsPage from '../features/test/pages/TestsPage'
+import SuiteDetailPage from '../features/test/pages/SuiteDetailPage'
 import NotificationCenter from '../features/notifications/pages/NotificationCenter'
 import KnowledgeBaseList from '../features/knowledge/pages/KnowledgeBaseList'
 import KnowledgeBaseDetail from '../features/knowledge/pages/KnowledgeBaseDetail'
@@ -129,6 +130,7 @@ export default function App() {
             <Route path="/deployments" element={<DeploymentsPage />} />
             <Route path="/releases" element={<ReleasesPage />} />
             <Route path="/tests" element={<TestsPage />} />
+            <Route path="/tests/suites/:suiteId" element={<SuiteDetailPage />} />
           </Route>
           {/* CAP-02 项目：列表仅切换器底部入口；详情页保留双参数 URL（可分享，进入时同步当前项目） */}
           <Route path="/projects" element={<ProjectsPage />} />

@@ -1,25 +1,39 @@
-// 用例编辑 Drawer：整体替换保存（不在列表中的现有用例将被删除）。
+// 套件编辑页（/tests/suites/:suiteId）：套件信息 + 用例编辑，内层页面格式（取代原「管理」/「编辑用例」Drawer）。
+// 布局遵循 docs/core/前端内容区布局约定.md：单 Card 撑满内容区，操作集中 extra（添加用例/保存全部/沉淀为文档/删除/返回列表），
+// body 用 pageCardBodyFlexStyle + FitTable（表头吸顶、只表体滚）。
+// 用例整体替换保存：不在列表中的现有用例将被删除。
 import {
   Button,
-  Drawer,
+  Card,
+  Descriptions,
   Form,
   Input,
   Modal,
   Select,
   Space,
+  Spin,
   Switch,
-  Table,
   Tag,
   Typography,
   message,
 } from 'antd'
 import type { FormInstance } from 'antd'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { ColumnsType } from 'antd/es/table'
-import { PlusOutlined } from '@ant-design/icons'
-import { saveCases } from '../api'
+import { useNavigate, useParams } from 'react-router-dom'
+import {
+  ArrowLeftOutlined,
+  DeleteOutlined,
+  ExportOutlined,
+  PlusOutlined,
+  SaveOutlined,
+} from '@ant-design/icons'
+import { deleteSuite, getSuite, publishSuite, saveCases } from '../api'
 import type { TestCase, TestCaseInput, TestSuite } from '../types'
-import { paramsToText, textToParams } from '../../../shared/utils/format'
+import { fmtTime, paramsToText, textToParams } from '../../../shared/utils/format'
+import { SUITE_KIND_COLOR } from '../constants'
+import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
@@ -114,21 +128,35 @@ function fromView(c: TestCase): TestCaseInput {
   }
 }
 
-export default function CaseEditorDrawer({ suite, onClose, onChanged }: {
-  suite: TestSuite | null
-  onClose: () => void
-  onChanged: (s: TestSuite) => void
-}) {
+export default function SuiteDetailPage() {
+  const { suiteId } = useParams<{ suiteId: string }>()
+  const navigate = useNavigate()
+  const [suite, setSuite] = useState<TestSuite | null>(null)
+  const [loading, setLoading] = useState(true)
   const [cases, setCases] = useState<TestCaseInput[]>([])
   const [saving, setSaving] = useState(false)
+  const [publishing, setPublishing] = useState(false)
   const [editing, setEditing] = useState<TestCaseInput | null>(null)
   const [isNew, setIsNew] = useState(false)
   const [form] = Form.useForm<CaseFormValues>()
 
+  const load = useCallback(async () => {
+    if (!suiteId) return
+    setLoading(true)
+    try {
+      const s = await getSuite(Number(suiteId))
+      setSuite(s)
+      setCases(s.cases.map((c) => fromView(c)))
+    } catch (e) {
+      showError(e, '加载套件失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [suiteId])
+
   useEffect(() => {
-    if (!suite) return
-    setCases(suite.cases.map((c) => fromView(c)))
-  }, [suite])
+    load()
+  }, [load])
 
   const openEdit = (c: TestCaseInput | null) => {
     setIsNew(!c)
@@ -151,9 +179,9 @@ export default function CaseEditorDrawer({ suite, onClose, onChanged }: {
     setSaving(true)
     try {
       const updated = await saveCases(suite.id, cases)
-      onChanged(updated)
+      setSuite(updated)
+      setCases(updated.cases.map((c) => fromView(c)))
       message.success(`已保存 ${cases.length} 个用例`)
-      onClose()
     } catch (e) {
       showError(e, '保存失败')
     } finally {
@@ -161,16 +189,48 @@ export default function CaseEditorDrawer({ suite, onClose, onChanged }: {
     }
   }
 
+  const onPublish = async () => {
+    if (!suite) return
+    setPublishing(true)
+    try {
+      const updated = await publishSuite(suite.id)
+      setSuite({ ...suite, ...updated, cases: suite.cases })
+      message.success(`已沉淀为 api-suite 文档${updated.docId ? `（#${updated.docId}）` : ''}`)
+    } catch (e) {
+      showError(e, '沉淀失败')
+    } finally {
+      setPublishing(false)
+    }
+  }
+
+  const onDelete = () => {
+    if (!suite) return
+    const s = suite
+    Modal.confirm({
+      centered: true,
+      title: `删除套件「${s.name}」？`,
+      content: `将删除 ${s.caseCount} 个用例及对应结果记录，不可恢复。`,
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        await deleteSuite(s.id)
+        message.success('已删除')
+        navigate('/tests')
+      },
+    })
+  }
+
   const columns: ColumnsType<TestCaseInput> = [
-    { title: '#', dataIndex: 'sort', width: 44, render: (_, __, i) => i + 1 },
+    { title: '#', dataIndex: 'sort', width: 48, render: (_, __, i) => i + 1 },
     { title: '名称', dataIndex: 'name', ellipsis: true, render: (n: string) => n || '-' },
-    { title: '类型', dataIndex: 'kind', width: 70, render: (k: string) => <Tag color={k === 'health' ? 'purple' : 'blue'}>{k}</Tag> },
-    { title: '方法', dataIndex: 'method', width: 70, render: (m: string) => <Tag>{m}</Tag> },
+    { title: '类型', dataIndex: 'kind', width: 80, render: (k: string) => <Tag color={k === 'health' ? 'purple' : 'blue'}>{k}</Tag> },
+    { title: '方法', dataIndex: 'method', width: 80, render: (m: string) => <Tag>{m}</Tag> },
     { title: '路径', dataIndex: 'path', ellipsis: true, render: (p: string) => <code style={{ fontSize: 12 }}>{p}</code> },
-    { title: '期望', dataIndex: 'expected', width: 160, render: (e: Record<string, unknown>) => <span style={{ fontSize: 12 }}>{JSON.stringify(e ?? {})}</span> },
-    { title: '启用', dataIndex: 'enabled', width: 60, render: (v: boolean) => (v ? <Tag color="green">是</Tag> : <Tag>否</Tag>) },
+    { title: '期望', dataIndex: 'expected', width: 180, ellipsis: true, render: (e: Record<string, unknown>) => <span style={{ fontSize: 12 }}>{JSON.stringify(e ?? {})}</span> },
+    { title: '启用', dataIndex: 'enabled', width: 70, render: (v: boolean) => (v ? <Tag color="green">是</Tag> : <Tag>否</Tag>) },
     {
-      title: '',
+      title: '操作',
       key: 'act',
       width: 110,
       render: (_, c) => (
@@ -183,36 +243,56 @@ export default function CaseEditorDrawer({ suite, onClose, onChanged }: {
   ]
 
   return (
-    <Drawer
-      title={suite ? `编辑用例 · ${suite.name}（${suite.caseCount}）` : '编辑用例'}
-      width={900}
-      open={!!suite}
-      onClose={onClose}
+    <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyFlexStyle }}
+      title={suite ? `套件 · ${suite.name}` : '套件'}
       extra={
         <Space>
-          <Button size="small" onClick={onClose}>取消</Button>
-          <Button size="small" type="primary" loading={saving} onClick={onSaveAll}>保存全部</Button>
+          <Button icon={<PlusOutlined />} onClick={() => openEdit(null)} disabled={!suite}>添加用例</Button>
+          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSaveAll} disabled={!suite}>保存全部</Button>
+          <Button icon={<ExportOutlined />} loading={publishing} disabled={!suite || !suite.caseCount} onClick={onPublish}>
+            沉淀为文档
+          </Button>
+          <Button danger icon={<DeleteOutlined />} disabled={!suite} onClick={onDelete}>删除</Button>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/tests')}>返回列表</Button>
         </Space>
       }
     >
-      {suite && (
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Space wrap>
-            <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>添加用例</Button>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              整体替换保存：不在列表中的现有用例将被删除；http 用例由服务端直请求 baseUrl，health 用例的 command 型经 exec 帧下发执行节点。
-            </Typography.Text>
-          </Space>
-          <Table<TestCaseInput> rowKey={(c) => c.id ?? c.name + c.path} size="small" columns={columns}
-            dataSource={cases} pagination={false} locale={{ emptyText: '暂无用例' }} />
-
-          <Modal title={isNew ? '添加用例' : '编辑用例'} open={!!editing} onCancel={() => setEditing(null)}
-            onOk={() => form.submit()} okText="保存" width={640} destroyOnClose>
-            <CaseForm form={form} onFinish={saveCase} />
-          </Modal>
-        </Space>
+      {loading || !suite ? (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Spin />
+        </div>
+      ) : (
+        <>
+          <Descriptions size="small" column={3} style={{ marginBottom: 12 }}>
+            <Descriptions.Item label="ID">#{suite.id}</Descriptions.Item>
+            <Descriptions.Item label="类型">
+              <Tag color={SUITE_KIND_COLOR[suite.kind]}>{suite.kind}</Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="来源">
+              {suite.source === 'openapi' ? <Tag color="geekblue">OpenAPI</Tag> : <Tag>手动</Tag>}
+            </Descriptions.Item>
+            <Descriptions.Item label="用例数">{suite.caseCount}</Descriptions.Item>
+            <Descriptions.Item label="沉淀文档">
+              {suite.docId ? `#${suite.docId}` : '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="创建时间">{fmtTime(suite.createdAt)}</Descriptions.Item>
+          </Descriptions>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+            用例编辑为整体替换保存：改动先落在下方列表，点「保存全部」生效；不在列表中的现有用例将被删除。
+            http 用例由服务端直请求 baseUrl，health 用例的 command 型经 exec 帧下发执行节点。
+          </Typography.Paragraph>
+          <FitTable<TestCaseInput> rowKey={(c) => c.id ?? c.name + c.path} columns={columns}
+            dataSource={cases} pagination={false} locale={{ emptyText: '暂无用例：点右上角「添加用例」' }} />
+        </>
       )}
-    </Drawer>
+
+      <Modal title={isNew ? '添加用例' : '编辑用例'} open={!!editing} onCancel={() => setEditing(null)}
+        onOk={() => form.submit()} okText="确定" width={640} destroyOnClose>
+        <CaseForm form={form} onFinish={saveCase} />
+      </Modal>
+    </Card>
   )
 }
 

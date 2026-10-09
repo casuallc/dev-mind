@@ -1,12 +1,10 @@
-// 测试记录页（/tests）：当前项目的套件管理与测试运行历史。
-// CAP-10 测试中心：套件管理（OpenAPI 生成/新建/用例编辑/沉淀文档）→ 新建测试运行（选套件+目标环境/执行节点/baseUrl）→
+// 测试记录页（/tests）：当前项目的套件列表与测试运行历史。
+// CAP-10 测试中心：套件（OpenAPI 生成/新建；编辑/沉淀/删除在内层页 /tests/suites/:id）→ 新建测试运行（选套件+目标环境/执行节点/baseUrl）→
 // 运行历史 → 详情 Drawer（WS 实时结果流）；失败运行可一键生成缺陷线索（FR-06）。
 // 布局遵循 docs/core/前端内容区布局约定.md：单 Card + title 内 Segmented 切换视图，操作按钮收 extra，表格默认密度。
 import {
   Button,
   Card,
-  Descriptions,
-  Drawer,
   Form,
   Input,
   Modal,
@@ -18,10 +16,9 @@ import {
   message,
 } from 'antd'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { ColumnsType } from 'antd/es/table'
 import {
-  DeleteOutlined,
-  ExportOutlined,
   PlusOutlined,
   ReloadOutlined,
   SyncOutlined,
@@ -35,10 +32,8 @@ import {
   getIssues,
   getRunLogs,
   getRunReport,
-  getSuite,
   listRuns,
   listSuites,
-  publishSuite,
 } from '../api'
 import type { IssueDraft, TestRun, TestRunStatus, TestSuite } from '../types'
 import type { ProjectEnvironment } from '../../projects/types'
@@ -48,7 +43,6 @@ import { listAgentNodes } from '../../agent/api'
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { STATUS_COLOR, SUITE_KIND_COLOR } from '../constants'
-import CaseEditorDrawer from '../components/CaseEditorDrawer'
 import RunDetailDrawer from '../components/RunDetailDrawer'
 import IssuesTable from '../components/IssuesTable'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
@@ -63,6 +57,7 @@ export default function TestsPage() {
 }
 
 function TestCenter({ id }: { id: string }) {
+  const navigate = useNavigate()
   const [view, setView] = useState<string>('suites') // suites | runs
   const [suites, setSuites] = useState<TestSuite[]>([])
   const [runs, setRuns] = useState<TestRun[]>([])
@@ -81,10 +76,6 @@ function TestCenter({ id }: { id: string }) {
   // 套件弹窗（新建冒烟）
   const [newOpen, setNewOpen] = useState(false)
   const [newForm] = Form.useForm()
-
-  // 套件管理 Drawer / 用例编辑 Drawer
-  const [manageId, setManageId] = useState<number | null>(null)
-  const [editSuite, setEditSuite] = useState<TestSuite | null>(null)
 
   // 详情 Drawer / 文本（报告·日志）/ 缺陷线索
   const [detail, setDetail] = useState<TestRun | null>(null)
@@ -158,25 +149,6 @@ function TestCenter({ id }: { id: string }) {
     })
   }
 
-  const onPublish = async (s: TestSuite) => {
-    try {
-      const updated = await publishSuite(s.id)
-      setSuites(await listSuites(id))
-      message.success(`已沉淀为 api-suite 文档${updated.docId ? `（#${updated.docId}）` : ''}`)
-    } catch (e) {
-      showError(e, '沉淀失败')
-    }
-  }
-
-  // 列表接口 cases 为空，编辑前拉全量套件（含用例明细）
-  const openEditor = async (s: TestSuite) => {
-    try {
-      setEditSuite(await getSuite(s.id))
-    } catch (e) {
-      showError(e, '加载套件失败')
-    }
-  }
-
   const onCreate = async () => {
     if (!suiteIds.length) {
       message.warning('请选择测试套件')
@@ -202,23 +174,24 @@ function TestCenter({ id }: { id: string }) {
     }
   }
 
-  // 管理 Drawer 中的套件随列表刷新保持新鲜；被删后自动关闭
-  const manageSuite = manageId != null ? suites.find((s) => s.id === manageId) ?? null : null
-
+  // 列宽全部固定：名称不再吃掉剩余宽度，创建时间给足 170 不折行
   const suiteColumns: ColumnsType<TestSuite> = [
-    { title: 'ID', dataIndex: 'id', width: 60, render: (v: number) => `#${v}` },
-    { title: '名称', dataIndex: 'name', ellipsis: true, render: (n: string) => n || '-' },
+    { title: 'ID', dataIndex: 'id', width: 64, render: (v: number) => `#${v}` },
+    { title: '名称', dataIndex: 'name', width: 240, ellipsis: true, render: (n: string) => n || '-' },
     { title: '类型', dataIndex: 'kind', width: 80, render: (v: string) => <Tag color={SUITE_KIND_COLOR[v]}>{v}</Tag> },
-    { title: '来源', dataIndex: 'source', width: 90, render: (v: string) => (v === 'openapi' ? <Tag color="geekblue">OpenAPI</Tag> : <Tag>手动</Tag>) },
+    { title: '来源', dataIndex: 'source', width: 100, render: (v: string) => (v === 'openapi' ? <Tag color="geekblue">OpenAPI</Tag> : <Tag>手动</Tag>) },
     { title: '用例数', dataIndex: 'caseCount', width: 80 },
     { title: '沉淀文档', dataIndex: 'docId', width: 90, render: (v: number | null) => (v ? `#${v}` : <span>-</span>) },
-    { title: '创建时间', dataIndex: 'createdAt', width: 150, render: (v: string) => fmtTime(v) },
+    { title: '创建时间', dataIndex: 'createdAt', width: 170, render: (v: string) => fmtTime(v) },
     {
       title: '操作',
       key: 'action',
-      width: 90,
+      width: 110,
       render: (_, s) => (
-        <Button size="small" onClick={() => setManageId(s.id)}>管理</Button>
+        <Space size={4}>
+          <Button size="small" onClick={() => navigate(`/tests/suites/${s.id}`)}>编辑</Button>
+          <Button size="small" danger onClick={() => onDeleteSuite(s)}>删除</Button>
+        </Space>
       ),
     },
   ]
@@ -246,7 +219,7 @@ function TestCenter({ id }: { id: string }) {
       title: '触发', dataIndex: 'triggeredBy', width: 90,
       render: (v: string) => (v === 'deploy' ? <Tag color="purple">自动回归</Tag> : <Tag>手动</Tag>),
     },
-    { title: '创建时间', dataIndex: 'createdAt', width: 150, render: (v: string) => fmtTime(v) },
+    { title: '创建时间', dataIndex: 'createdAt', width: 170, render: (v: string) => fmtTime(v) },
     { title: '耗时', key: 'dur', width: 100, render: (_, r) => durationMs(r.startedAt, r.finishedAt) },
     {
       title: '操作',
@@ -399,48 +372,7 @@ function TestCenter({ id }: { id: string }) {
         </Space>
       </Modal>
 
-      {/* 套件管理：编辑用例 / 沉淀文档 / 删除 */}
-      <Drawer title={manageSuite ? `套件 · ${manageSuite.name}` : '套件'} open={!!manageSuite}
-        onClose={() => setManageId(null)} width={480}>
-        {manageSuite && (
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Descriptions size="small" column={2}>
-              <Descriptions.Item label="ID">#{manageSuite.id}</Descriptions.Item>
-              <Descriptions.Item label="类型">
-                <Tag color={SUITE_KIND_COLOR[manageSuite.kind]}>{manageSuite.kind}</Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label="来源">
-                {manageSuite.source === 'openapi' ? <Tag color="geekblue">OpenAPI</Tag> : <Tag>手动</Tag>}
-              </Descriptions.Item>
-              <Descriptions.Item label="用例数">{manageSuite.caseCount}</Descriptions.Item>
-              <Descriptions.Item label="沉淀文档">
-                {manageSuite.docId ? `#${manageSuite.docId}` : '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label="创建时间">{fmtTime(manageSuite.createdAt)}</Descriptions.Item>
-            </Descriptions>
-            <Space>
-              <Button icon={<SyncOutlined />} onClick={() => { const s = manageSuite; setManageId(null); openEditor(s) }}>
-                编辑用例
-              </Button>
-              <Button icon={<ExportOutlined />} disabled={!manageSuite.caseCount} onClick={() => onPublish(manageSuite)}>
-                沉淀为文档
-              </Button>
-              <Button danger icon={<DeleteOutlined />} onClick={() => { const s = manageSuite; setManageId(null); onDeleteSuite(s) }}>
-                删除
-              </Button>
-            </Space>
-          </Space>
-        )}
-      </Drawer>
-
-      <CaseEditorDrawer
-        suite={editSuite}
-        onClose={() => setEditSuite(null)}
-        onChanged={async (s) => {
-          setEditSuite(s)
-          setSuites(await listSuites(id))
-        }}
-      />
+      {/* 套件编辑已迁内层页面 /tests/suites/:id（SuiteDetailPage）：用例编辑/沉淀文档/删除 */}
 
       <RunDetailDrawer
         record={detail}
