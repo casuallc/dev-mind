@@ -30,12 +30,15 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -82,6 +85,8 @@ public class BuildService {
     private final ExecutionLogHub hub;
     private final ObjectMapper mapper;
     private final ObjectProvider<RepoGitGateway> repoGitGateway;
+    /** 僵尸运行阈值（devmind.build.stale-timeout）：QUEUED/RUNNING 超此时长无终态 → 收割置 FAILED */
+    private final Duration staleTimeout;
 
     public BuildService(ArtifactService artifactService,
                         IdentityService identityService,
@@ -97,7 +102,8 @@ public class BuildService {
                         LocalStepRunner localRunner,
                         ExecutionLogHub hub,
                         ObjectMapper mapper,
-                        ObjectProvider<RepoGitGateway> repoGitGateway) {
+                        ObjectProvider<RepoGitGateway> repoGitGateway,
+                        @Value("${devmind.build.stale-timeout:PT2H}") Duration staleTimeout) {
         this.artifactService = artifactService;
         this.identityService = identityService;
         this.eventPublisher = eventPublisher;
@@ -113,6 +119,7 @@ public class BuildService {
         this.hub = hub;
         this.mapper = mapper;
         this.repoGitGateway = repoGitGateway;
+        this.staleTimeout = staleTimeout;
     }
 
     @PreDestroy
@@ -267,6 +274,31 @@ public class BuildService {
     }
 
     // ---------------- 查询 ----------------
+
+    /**
+     * 僵尸运行收割：QUEUED/RUNNING 超过阈值（默认 2h）无终态 → 置 FAILED 并发 build.completed(false)
+     * （通知订阅转 P0）。典型来源：runner 掉线/进程被杀，执行线程一死了之，记录永远停在 RUNNING。
+     */
+    @Scheduled(fixedDelayString = "${devmind.build.stale-reaper-delay-ms:60000}",
+            initialDelayString = "${devmind.build.stale-reaper-initial-delay-ms:90000}")
+    public void reapStale() {
+        Instant before = Instant.now().minus(staleTimeout);
+        List<BuildEntity> stale = repo.findByStatusInAndCreatedAtBefore(
+                List.of(BuildEntity.QUEUED, BuildEntity.RUNNING), before);
+        for (BuildEntity b : stale) {
+            b.setStatus(BuildEntity.FAILED);
+            b.setErrorSummary("运行超时（" + staleTimeout.toMinutes() + " 分钟未出终态），系统判定僵尸并收割");
+            b.setFinishedAt(Instant.now());
+            repo.save(b);
+            hub.done(String.valueOf(b.getId()), BuildEntity.FAILED);
+            log.warn("僵尸构建已收割: #{} projectId={} createdAt={}", b.getId(), b.getProjectId(), b.getCreatedAt());
+            eventPublisher.publish(SimpleDomainEvent.of("build.completed", b.getProjectId(),
+                    b.getWorkItemId(), b.getCreatedBy(),
+                    "构建 #" + b.getId() + " FAILED（超时收割）"
+                            + (b.getBranch() == null ? "" : "（" + b.getBranch() + "）"),
+                    "BUILD", String.valueOf(b.getId()), false));
+        }
+    }
 
     public BuildEntity requireBuild(Long id) {
         return repo.findById(id)

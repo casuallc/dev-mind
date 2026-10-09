@@ -21,4 +21,7 @@ public interface ReleaseRepository extends JpaRepository<ReleaseEntity, Long> {
     List<ReleaseEntity> findByWorkItemIdInOrderByCreatedAtDesc(java.util.Collection<String> workItemIds);
 
     Optional<ReleaseEntity> findFirstByProjectIdOrderByCreatedAtDesc(String projectId);
+
+    /** 僵尸收割：指定状态集合且创建早于阈值（RUNNING 超时无终态） */
+    List<ReleaseEntity> findByStatusInAndCreatedAtBefore(java.util.Collection<String> statuses, java.time.Instant before);
 }

@@ -1,6 +1,7 @@
 package com.devmind.deploy.service;
 
 import com.devmind.auth.IdentityService;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -15,9 +16,11 @@ import java.util.regex.Pattern;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -85,6 +88,8 @@ public class DeploymentService {
     private final DomainEventPublisher eventPublisher;
     private final EnvironmentService environmentService;
     private final WorkItemService workItemService;
+    /** 僵尸运行阈值（devmind.deploy.stale-timeout）：RUNNING 超此时长无终态 → 收割置 FAILED */
+    private final Duration staleTimeout;
 
     public DeploymentService(DeploymentRepository repo,
                              DeploymentStepRepository stepRepo,
@@ -100,7 +105,8 @@ public class DeploymentService {
                              DomainEventPublisher eventPublisher,
                              EnvironmentService environmentService,
                              WorkItemService workItemService,
-                           IdentityService identityService) {
+                           IdentityService identityService,
+                           @Value("${devmind.deploy.stale-timeout:PT2H}") Duration staleTimeout) {
         this.identityService = identityService;
         this.repo = repo;
         this.stepRepo = stepRepo;
@@ -116,6 +122,7 @@ public class DeploymentService {
         this.eventPublisher = eventPublisher;
         this.environmentService = environmentService;
         this.workItemService = workItemService;
+        this.staleTimeout = staleTimeout;
     }
 
     @PreDestroy
@@ -509,6 +516,30 @@ public class DeploymentService {
     }
 
     // ---------------- 查询 ----------------
+
+    /**
+     * 僵尸运行收割：RUNNING 超过阈值（默认 2h）无终态 → 置 FAILED + P0 通知。
+     * PLANNED（待确认/待执行）是合法停留态，不收割。不发 DeploymentCompletedEvent——
+     * 收割是异常终态，不应触发 CAP-10 自动回归链路。
+     */
+    @Scheduled(fixedDelayString = "${devmind.deploy.stale-reaper-delay-ms:60000}",
+            initialDelayString = "${devmind.deploy.stale-reaper-initial-delay-ms:90000}")
+    public void reapStale() {
+        Instant before = Instant.now().minus(staleTimeout);
+        List<DeploymentEntity> stale = repo.findByStatusInAndCreatedAtBefore(
+                List.of(DeploymentEntity.RUNNING), before);
+        for (DeploymentEntity d : stale) {
+            d.setStatus(DeploymentEntity.FAILED);
+            d.setErrorSummary("运行超时（" + staleTimeout.toMinutes() + " 分钟未出终态），系统判定僵尸并收割");
+            d.setFinishedAt(Instant.now());
+            repo.save(d);
+            hub.done(topic(d.getId()), DeploymentEntity.FAILED);
+            log.warn("僵尸部署已收割: #{} projectId={} createdAt={}", d.getId(), d.getProjectId(), d.getCreatedAt());
+            notify(d, NotificationLevel.P0, "部署超时收割 #" + d.getId(),
+                    "RUNNING 超过 " + staleTimeout.toMinutes() + " 分钟未出终态，已置 FAILED；"
+                            + "请检查执行节点与部署日志后视情况重试或回滚");
+        }
+    }
 
     public DeploymentEntity require(Long id) {
         return repo.findById(id)

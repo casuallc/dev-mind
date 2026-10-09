@@ -20,4 +20,7 @@ public interface BuildRepository extends JpaRepository<BuildEntity, Long> {
 
     /** 并发限制：统计该项目的活动构建数 */
     long countByProjectIdAndStatusIn(String projectId, Collection<String> statuses);
+
+    /** 僵尸收割：指定状态集合且创建早于阈值（QUEUED/RUNNING 超时无终态） */
+    List<BuildEntity> findByStatusInAndCreatedAtBefore(Collection<String> statuses, java.time.Instant before);
 }

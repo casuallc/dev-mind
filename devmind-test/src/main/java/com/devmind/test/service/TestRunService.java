@@ -2,6 +2,7 @@ package com.devmind.test.service;
 
 import com.devmind.auth.IdentityService;
 import java.net.URI;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -15,11 +16,13 @@ import java.util.function.Consumer;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.HttpClientErrorException;
@@ -95,6 +98,8 @@ public class TestRunService {
     private final ExecutionLogHub hub;
     private final ObjectMapper mapper;
     private final EnvironmentService environmentService;
+    /** 僵尸运行阈值（devmind.test.stale-timeout）：QUEUED/RUNNING 超此时长无终态 → 收割置 FAILED */
+    private final Duration staleTimeout;
 
     public TestRunService(TestRunRepository repo,
                           TestCaseResultRepository resultRepo,
@@ -110,7 +115,8 @@ public class TestRunService {
                           ExecutionLogHub hub,
                           ObjectMapper mapper,
                           EnvironmentService environmentService,
-                           IdentityService identityService) {
+                           IdentityService identityService,
+                           @Value("${devmind.test.stale-timeout:PT2H}") Duration staleTimeout) {
         this.identityService = identityService;
         this.repo = repo;
         this.resultRepo = resultRepo;
@@ -126,6 +132,7 @@ public class TestRunService {
         this.hub = hub;
         this.mapper = mapper;
         this.environmentService = environmentService;
+        this.staleTimeout = staleTimeout;
     }
 
     @PreDestroy
@@ -621,6 +628,30 @@ public class TestRunService {
     }
 
     // ---------------- 查询 / 报告 / 缺陷线索 ----------------
+
+    /**
+     * 僵尸运行收割：QUEUED/RUNNING 超过阈值（默认 2h）无终态 → 置 FAILED + P0 通知。
+     * 典型来源：runner 掉线/服务重启，脚本运行线程中断，记录永远停在 RUNNING。
+     */
+    @Scheduled(fixedDelayString = "${devmind.test.stale-reaper-delay-ms:60000}",
+            initialDelayString = "${devmind.test.stale-reaper-initial-delay-ms:90000}")
+    public void reapStale() {
+        Instant before = Instant.now().minus(staleTimeout);
+        List<TestRunEntity> stale = repo.findByStatusInAndCreatedAtBefore(
+                List.of(TestRunEntity.QUEUED, TestRunEntity.RUNNING), before);
+        for (TestRunEntity r : stale) {
+            r.setStatus(TestRunEntity.FAILED);
+            r.setErrorSummary("运行超时（" + staleTimeout.toMinutes() + " 分钟未出终态），系统判定僵尸并收割");
+            r.setFinishedAt(Instant.now());
+            repo.save(r);
+            hub.done(topic(r.getId()), TestRunEntity.FAILED);
+            log.warn("僵尸测试运行已收割: #{} projectId={} createdAt={}", r.getId(), r.getProjectId(), r.getCreatedAt());
+            notificationService.emit(new NotificationDraft(NotificationLevel.P0, "TEST_RUN_STALE_REAPED",
+                    "测试运行超时收割 #" + r.getId(),
+                    "QUEUED/RUNNING 超过 " + staleTimeout.toMinutes() + " 分钟未出终态，已置 FAILED；请检查执行节点后重跑",
+                    "TEST_RUN", String.valueOf(r.getId()), r.getProjectId(), List.of()));
+        }
+    }
 
     public TestRunEntity require(Long id) {
         return repo.findById(id)

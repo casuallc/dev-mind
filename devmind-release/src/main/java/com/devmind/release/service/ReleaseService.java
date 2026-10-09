@@ -2,6 +2,7 @@ package com.devmind.release.service;
 
 import com.devmind.auth.IdentityService;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -16,6 +17,8 @@ import java.util.function.Consumer;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import com.devmind.build.model.BuildEntity;
@@ -78,6 +81,9 @@ public class ReleaseService {
     /** CAP-26 可选 SPI：devmind-integration 装配时存在，tag 前 fetch 服务端 clone 保鲜 */
     private final org.springframework.beans.factory.ObjectProvider<RepoGitGateway> repoGitGateway;
 
+    /** 僵尸运行阈值（devmind.release.stale-timeout）：RUNNING 超此时长无终态 → 收割置 FAILED */
+    private final Duration staleTimeout;
+
     public ReleaseService(ReleaseRepository repo,
                           ReleaseConfigRepository releaseConfigRepo,
                           ProjectService projectService,
@@ -91,7 +97,8 @@ public class ReleaseService {
                            IdentityService identityService,
                            WorkItemService workItemService,
                            org.springframework.beans.factory.ObjectProvider<PlatformIntegrationHook> integrationHook,
-                           org.springframework.beans.factory.ObjectProvider<RepoGitGateway> repoGitGateway) {
+                           org.springframework.beans.factory.ObjectProvider<RepoGitGateway> repoGitGateway,
+                           @Value("${devmind.release.stale-timeout:PT2H}") Duration staleTimeout) {
         this.integrationHook = integrationHook;
         this.repoGitGateway = repoGitGateway;
         this.identityService = identityService;
@@ -106,6 +113,7 @@ public class ReleaseService {
         this.notificationService = notificationService;
         this.hub = hub;
         this.workItemService = workItemService;
+        this.staleTimeout = staleTimeout;
     }
 
     @PreDestroy
@@ -326,6 +334,30 @@ public class ReleaseService {
     }
 
     // ---------------- 查询 ----------------
+
+    /**
+     * 僵尸运行收割：RUNNING 超过阈值（默认 2h）无终态 → 置 FAILED + P0 通知。
+     * 只收 RUNNING，不收 PLANNED（计划态是合法等待，可长期停留）。
+     * 典型来源：执行节点掉线/服务重启，推送线程中断，记录永远停在 RUNNING。
+     */
+    @Scheduled(fixedDelayString = "${devmind.release.stale-reaper-delay-ms:60000}",
+            initialDelayString = "${devmind.release.stale-reaper-initial-delay-ms:90000}")
+    public void reapStale() {
+        Instant before = Instant.now().minus(staleTimeout);
+        List<ReleaseEntity> stale = repo.findByStatusInAndCreatedAtBefore(
+                List.of(ReleaseEntity.RUNNING), before);
+        for (ReleaseEntity r : stale) {
+            r.setStatus(ReleaseEntity.FAILED);
+            r.setErrorSummary("运行超时（" + staleTimeout.toMinutes() + " 分钟未出终态），系统判定僵尸并收割");
+            r.setFinishedAt(Instant.now());
+            repo.save(r);
+            hub.done(topic(r.getId()), ReleaseEntity.FAILED);
+            log.warn("僵尸发版已收割: #{} projectId={} version={} createdAt={}",
+                    r.getId(), r.getProjectId(), r.getReleaseVersion(), r.getCreatedAt());
+            notify(r, NotificationLevel.P0, "发版超时收割 #" + r.getId(),
+                    "RUNNING 超过 " + staleTimeout.toMinutes() + " 分钟未出终态，已置 FAILED；请检查执行节点与推送结果后视情况重试或回滚");
+        }
+    }
 
     public ReleaseEntity require(Long id) {
         return repo.findById(id)
