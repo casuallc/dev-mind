@@ -1,13 +1,16 @@
 // 新会话草稿态：输入框直接开聊——首条消息即 taskSpec，发送即创建会话。
 // CAP-31：会话固定归属「当前项目」（侧边栏顶部切换，不再可选）；
 // 高级选项（仓库多选/节点/需求/工作单元/模板/模型/权限模式）收进 Popover，有非默认值时 Badge 点缀。
-import { useEffect, useMemo, useState } from 'react'
-import { Badge, Button, Empty, Form, Input, Popover, Select, Space, message } from 'antd'
-import { SendOutlined, SettingOutlined } from '@ant-design/icons'
+// CAP-68：附件区（回形针上传任意文件，chips 横条可移除）——创建即带附件，随上下文包
+// inputs 物化到工作区 .devmind/input/attachments/，agent 起手即可 Read。
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Badge, Button, Empty, Form, Input, Popover, Select, Space, Tag, message } from 'antd'
+import { FileOutlined, PaperClipOutlined, SendOutlined, SettingOutlined } from '@ant-design/icons'
 import { createSession } from '../api'
 import type { SessionSummary } from '../types'
 import { useSessionOptionData } from '../hooks/useSessionOptionData'
 import { useCurrentProject } from '../../../app/useCurrentProject'
+import { uploadAttachment, type AttachmentView } from '../../../shared/attachments/api'
 import { showError } from '../../../shared/utils/showError'
 
 const DEFAULTS = { permissionMode: 'acceptEdits' }
@@ -32,6 +35,10 @@ export default function NewSessionDraft({
   const [text, setText] = useState('')
   const [creating, setCreating] = useState(false)
   const [optionsOpen, setOptionsOpen] = useState(false)
+  // CAP-68：待带附件（入队即上传附件库，创建时只带 id 列表）
+  const [pendingAttachments, setPendingAttachments] = useState<AttachmentView[]>([])
+  const [uploading, setUploading] = useState(0)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   // preserve:true 必带：高级选项的 Form 住在 destroyOnHidden 的 Popover 里，弹层一关字段就卸载，
   // 默认口径（只取已注册字段）会看着像"什么都没选"——徽标点会灭
   const values = Form.useWatch([], { form, preserve: true }) ?? {}
@@ -66,6 +73,17 @@ export default function NewSessionDraft({
     [values, defaultRepoIds, project],
   )
 
+  // CAP-68：附件入队即上传（创建时只带 id 列表，随上下文包物化到工作区）
+  const addAttachments = (files: Iterable<File>) => {
+    for (const file of files) {
+      setUploading((n) => n + 1)
+      uploadAttachment(file, file.name)
+        .then((v) => setPendingAttachments((prev) => [...prev, v]))
+        .catch((e) => showError(e, '附件上传失败'))
+        .finally(() => setUploading((n) => n - 1))
+    }
+  }
+
   const onSend = async () => {
     const t = text.trim()
     if (!t || creating || !projectId) return
@@ -88,9 +106,11 @@ export default function NewSessionDraft({
         agentNodeId: worklog ? undefined : v.agentNodeId || undefined,
         requiredLabels: worklog ? undefined : v.requiredLabels?.trim() || undefined,
         repoIds: worklog ? undefined : v.repoIds?.length ? v.repoIds : undefined,
+        attachmentIds: pendingAttachments.length ? pendingAttachments.map((a) => a.attachmentId) : undefined,
       })
       message.success(`会话已创建：${s.id}`)
       setText('')
+      setPendingAttachments([])
       form.resetFields()
       onCreated(s)
     } catch (e) {
@@ -215,6 +235,26 @@ export default function NewSessionDraft({
         />
       </div>
       <div style={{ border: '1px solid #d9d9d9', borderRadius: 8, padding: 12 }}>
+        {/* CAP-68：待带附件 chips（创建即带，物化 .devmind/input/attachments/ 由 agent Read） */}
+        {pendingAttachments.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+            {pendingAttachments.map((a) => (
+              <Tag
+                key={a.attachmentId}
+                icon={<FileOutlined />}
+                closable
+                onClose={(e) => {
+                  e.preventDefault()
+                  setPendingAttachments((prev) => prev.filter((p) => p.attachmentId !== a.attachmentId))
+                }}
+                style={{ marginInlineEnd: 0, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                title={a.originalName}
+              >
+                {a.originalName}
+              </Tag>
+            ))}
+          </div>
+        )}
         <Input.TextArea
           autoSize={{ minRows: 3, maxRows: 8 }}
           variant="borderless"
@@ -244,6 +284,25 @@ export default function NewSessionDraft({
                 </Button>
               </Badge>
             </Popover>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => {
+                addAttachments(Array.from(e.target.files ?? []))
+                e.target.value = ''
+              }}
+            />
+            <Button
+              size="small"
+              icon={<PaperClipOutlined />}
+              loading={uploading > 0}
+              title="附带文件：创建会话时物化到工作区 .devmind/input/attachments/，agent 起手即可 Read"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              附件
+            </Button>
             {onCancel && (
               <Button size="small" type="text" onClick={onCancel}>
                 取消
@@ -254,7 +313,7 @@ export default function NewSessionDraft({
             type="primary"
             icon={<SendOutlined />}
             loading={creating}
-            disabled={!text.trim()}
+            disabled={!text.trim() || uploading > 0}
             onClick={onSend}
           >
             发送

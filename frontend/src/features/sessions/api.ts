@@ -44,6 +44,8 @@ export function createSession(body: {
   requiredLabels?: string
   /** CAP-31：关联仓库（project_repos id 列表）；空 = 主库；>1 = 多库聚合目录 */
   repoIds?: number[]
+  /** CAP-68：创建即带附件（附件模块 id 列表；物化到工作区 .devmind/input/attachments/） */
+  attachmentIds?: string[]
 }): Promise<SessionSummary> {
   return api.post<SessionSummary>('/sessions', body)
 }
