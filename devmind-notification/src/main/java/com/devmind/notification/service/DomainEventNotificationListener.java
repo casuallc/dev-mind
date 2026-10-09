@@ -24,8 +24,10 @@ public class DomainEventNotificationListener {
 
     private static final Logger log = LoggerFactory.getLogger(DomainEventNotificationListener.class);
 
-    /** 忽略清单：高频中性事件不转通知（workitem 状态翻转/拆分固化由 CAP-15 编排器自行发"已自动派发"通知，信息更明确）。 */
-    private static final Set<String> IGNORED_TYPES = Set.of("workitem.status.changed", "flow.split.confirmed");
+    /** 忽略清单：高频中性事件不转通知（workitem 状态翻转/拆分固化由 CAP-15 编排器自行发"已自动派发"通知；
+     *  test.completed 由 TestRunService 直发"测试通过/失败"通知，内容更具体，避免重复）。 */
+    private static final Set<String> IGNORED_TYPES = Set.of("workitem.status.changed", "flow.split.confirmed",
+            "test.completed");
 
     private final NotificationService notificationService;
 
@@ -59,6 +61,9 @@ public class DomainEventNotificationListener {
     }
 
     private String title(SimpleDomainEvent e) {
+        if ("requirement.acceptance.ready".equals(e.type())) {
+            return "回归通过 · 需求待验收";
+        }
         String label = domainLabel(e.type());
         if (Boolean.FALSE.equals(e.success())) {
             return label + "失败";
@@ -79,6 +84,7 @@ public class DomainEventNotificationListener {
             case "session" -> "会话";
             case "integration" -> "集成";
             case "worklog" -> "工时";
+            case "requirement" -> "需求";
             default -> "任务";
         };
     }

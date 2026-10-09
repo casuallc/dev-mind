@@ -32,9 +32,12 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import com.devmind.common.agent.AgentExecCommand;
+import com.devmind.common.event.DomainEventPublisher;
+import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.deploy.event.DeploymentCompletedEvent;
+import com.devmind.deploy.model.DeploymentEntity;
 import com.devmind.deploy.repo.DeploymentRepository;
 import com.devmind.docs.DocumentService;
 import com.devmind.docs.dto.DocDetail;
@@ -98,6 +101,7 @@ public class TestRunService {
     private final ExecutionLogHub hub;
     private final ObjectMapper mapper;
     private final EnvironmentService environmentService;
+    private final DomainEventPublisher eventPublisher;
     /** 僵尸运行阈值（devmind.test.stale-timeout）：QUEUED/RUNNING 超此时长无终态 → 收割置 FAILED */
     private final Duration staleTimeout;
 
@@ -116,6 +120,7 @@ public class TestRunService {
                           ObjectMapper mapper,
                           EnvironmentService environmentService,
                            IdentityService identityService,
+                           DomainEventPublisher eventPublisher,
                            @Value("${devmind.test.stale-timeout:PT2H}") Duration staleTimeout) {
         this.identityService = identityService;
         this.repo = repo;
@@ -132,6 +137,7 @@ public class TestRunService {
         this.hub = hub;
         this.mapper = mapper;
         this.environmentService = environmentService;
+        this.eventPublisher = eventPublisher;
         this.staleTimeout = staleTimeout;
     }
 
@@ -368,6 +374,7 @@ public class TestRunService {
         notify(r, bad ? NotificationLevel.P1 : NotificationLevel.P2,
                 "脚本测试" + (bad ? "失败" : "通过") + " #" + runId,
                 passed + " 通过 / " + failed + " 失败 / " + skipped + " 跳过 · " + s.getName());
+        publishCompleted(r);
     }
 
     /**
@@ -476,6 +483,7 @@ public class TestRunService {
                 "测试" + (failed > 0 ? "失败" : "通过") + " #" + runId,
                 passed + " 通过 / " + failed + " 失败 / " + skipped + " 跳过"
                         + (r.getBaseUrl() == null ? "" : " · " + r.getBaseUrl()));
+        publishCompleted(r);
     }
 
     /** http 用例：直请求 baseUrl+path，校验 expected.status（支持 "2XX"）与 contains。 */
@@ -650,6 +658,7 @@ public class TestRunService {
                     "测试运行超时收割 #" + r.getId(),
                     "QUEUED/RUNNING 超过 " + staleTimeout.toMinutes() + " 分钟未出终态，已置 FAILED；请检查执行节点后重跑",
                     "TEST_RUN", String.valueOf(r.getId()), r.getProjectId(), List.of()));
+            publishCompleted(r);
         }
     }
 
@@ -873,6 +882,26 @@ public class TestRunService {
                     "test_run", String.valueOf(r.getId()), r.getProjectId(), List.of()));
         } catch (Exception e) {
             log.warn("测试通知发送失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 终态广播 test.completed（P0-3 事件总线）：workItemId 缺省从来源部署继承（CAP-10 自动回归链）。
+     * 通知侧已直发 notify()，该事件在通知监听 IGNORED；订阅方是验收联动（回归全绿 → 需求进 ACCEPTANCE）。
+     */
+    private void publishCompleted(TestRunEntity r) {
+        try {
+            String workItemId = r.getWorkItemId();
+            if ((workItemId == null || workItemId.isBlank()) && r.getDeploymentId() != null) {
+                workItemId = deploymentRepo.findById(r.getDeploymentId())
+                        .map(DeploymentEntity::getWorkItemId).orElse(null);
+            }
+            eventPublisher.publish(SimpleDomainEvent.of("test.completed", r.getProjectId(), workItemId,
+                    r.getTriggeredBy(),
+                    "测试 #" + r.getId() + " " + r.getStatus(),
+                    "TEST_RUN", String.valueOf(r.getId()), TestRunEntity.SUCCESS.equals(r.getStatus())));
+        } catch (Exception e) {
+            log.warn("test.completed 事件发布失败(不阻塞): run={} err={}", r.getId(), e.getMessage());
         }
     }
 
