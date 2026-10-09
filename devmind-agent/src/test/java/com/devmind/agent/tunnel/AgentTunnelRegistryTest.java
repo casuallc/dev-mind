@@ -178,6 +178,33 @@ class AgentTunnelRegistryTest {
     }
 
     @Test
+    void openStreamTimeoutDropsSilentTunnel() throws Exception {
+        // OPEN_ACK 全静默超时 = 静默断链判定：隧道摘除（后续请求快速失败）+ 会话关闭等 runner 重连
+        AtomicReference<Throwable> error = new AtomicReference<>();
+        try (Socket socket = new Socket()) {
+            Thread t = new Thread(() -> {
+                try {
+                    registry.openStream(7L, "slow.corp.com", 443, socket);
+                } catch (Throwable e) {
+                    error.set(e);
+                }
+            });
+            t.start();
+            nextBinaryFrame();
+            t.join(5000);
+            assertInstanceOf(DevMindException.class, error.get());
+            assertTrue(!registry.tunnelOnline(7L), "超时静默应摘掉隧道");
+            verify(ws, timeout(5000)).close();
+            // 摘除后新请求走「隧道未连接」快速失败，不再各挂一个 OPEN 超时
+            try (Socket socket2 = new Socket()) {
+                DevMindException ex = assertThrows(DevMindException.class,
+                        () -> registry.openStream(7L, "x.corp.com", 443, socket2));
+                assertTrue(ex.getMessage().contains("隧道未连接"), ex.getMessage());
+            }
+        }
+    }
+
+    @Test
     void openStreamWithoutTunnelFailsFast() {
         try (Socket socket = new Socket()) {
             DevMindException ex = assertThrows(DevMindException.class,

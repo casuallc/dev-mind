@@ -154,6 +154,10 @@ public class AgentTunnelRegistry implements EgressTunnelStatus {
         } catch (TimeoutException e) {
             conn.streams().remove(streamId);
             conn.sendQuietly(TunnelFrame.rst(streamId, "OPEN_ACK 超时"));
+            // 健康 runner 对 OPEN 必在拨号超时（10s）内回 OPEN_ACK/RST；30s 全静默 = 隧道已
+            // 静默断链（NAT/云网关丢空闲 TCP 无 RST，WS 层感知不到）。摘掉隧道让后续请求
+            // 快速失败（FR-07）而非每单各挂 30s；runner 侧保活探到静默会自行重连顶回。
+            dropSilent(conn, "OPEN_ACK 超时");
             throw new DevMindException(ErrorCode.CONFLICT,
                     "隧道 OPEN 超时（" + props.getOpenTimeoutMs() + "ms 未收到 OPEN_ACK）");
         } catch (Exception e) {
@@ -209,6 +213,18 @@ public class AgentTunnelRegistry implements EgressTunnelStatus {
                     session.close();
                 } catch (IOException ignored) {
                 }
+            }
+        }
+    }
+
+    /** 静默断链判定后的隧道摘除：从注册表移除 + 全流中止 + 关会话（幂等，只摘当前登记的那条） */
+    private void dropSilent(TunnelConn conn, String reason) {
+        if (tunnels.remove(conn.nodeId(), conn)) {
+            log.warn("节点 {} 隧道判定静默断链（{}），摘除等 runner 重连", conn.nodeId(), reason);
+            abortAll(conn, reason);
+            try {
+                conn.session().close();
+            } catch (IOException ignored) {
             }
         }
     }

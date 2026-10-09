@@ -35,6 +35,10 @@ class TunnelConnectionTest {
     private TunnelConnection tunnel;
     /** 上行帧（已解码，sendBinary 顺序即帧序） */
     private final List<TunnelFrame> uplink = new CopyOnWriteArrayList<>();
+    private final java.util.concurrent.atomic.AtomicInteger pingCount =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger abortCount =
+            new java.util.concurrent.atomic.AtomicInteger();
     private ServerSocket echoServer;
 
     @BeforeEach
@@ -64,6 +68,14 @@ class TunnelConnectionTest {
                         buf.get(bytes);
                         uplink.add(TunnelFrame.decode(bytes));
                         yield CompletableFuture.completedFuture(proxy);
+                    }
+                    case "sendPing" -> {
+                        pingCount.incrementAndGet();
+                        yield CompletableFuture.completedFuture(proxy);
+                    }
+                    case "abort" -> {
+                        abortCount.incrementAndGet();
+                        yield null;
                     }
                     case "hashCode" -> System.identityHashCode(proxy);
                     case "equals" -> proxy == args[0];
@@ -117,6 +129,47 @@ class TunnelConnectionTest {
                 TunnelConnection.tunnelUrl("ws://h:8080/ws/agent"));
         assertEquals("wss://h/ws/agent-tunnel",
                 TunnelConnection.tunnelUrl("wss://h/ws/agent"));
+    }
+
+    @Test
+    void keepalivePingsWhenIdleAndAbortsOnSilence() throws Exception {
+        // 空闲隧道：周期 ping 保活；下行全静默（无帧无 pong）超阈值 → abort 触发重连
+        tunnel.keepaliveIntervalMs = 40;
+        tunnel.keepaliveTimeoutMs = 200;
+        tunnel.lastInboundAt.set(System.currentTimeMillis());
+        // keepaliveLoop 是阻塞循环，在后台跑
+        Thread t = Thread.ofVirtual().start(() -> tunnel.keepaliveLoop(tunnel.current.get()));
+        awaitTrue(() -> pingCount.get() >= 2, 5000, "空闲应周期 ping");
+        awaitTrue(() -> abortCount.get() >= 1, 5000, "静默超阈值应 abort");
+        t.join(5000);
+    }
+
+    @Test
+    void keepaliveDoesNotAbortWhileInboundAlive() throws Exception {
+        tunnel.keepaliveIntervalMs = 40;
+        tunnel.keepaliveTimeoutMs = 250;
+        Thread t = Thread.ofVirtual().start(() -> tunnel.keepaliveLoop(tunnel.current.get()));
+        // 模拟持续有下行（pong/业务帧）：800ms 内不断刷新 lastInboundAt
+        for (int i = 0; i < 20; i++) {
+            tunnel.lastInboundAt.set(System.currentTimeMillis());
+            Thread.sleep(40);
+        }
+        assertTrue(pingCount.get() >= 1, "存活期间仍在 ping");
+        assertEquals(0, abortCount.get(), "下行新鲜不得 abort");
+        tunnel.shutdown(); // 停循环
+        t.join(5000);
+    }
+
+    private void awaitTrue(java.util.function.BooleanSupplier cond, long timeoutMs, String what)
+            throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            if (cond.getAsBoolean()) {
+                return;
+            }
+            Thread.sleep(20);
+        }
+        throw new AssertionError("未等到: " + what);
     }
 
     @Test
