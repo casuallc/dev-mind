@@ -14,15 +14,19 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
 public class AgentWsConfig implements WebSocketConfigurer {
 
     private final AgentNodeWsHandler handler;
+    private final AgentTunnelWsHandler tunnelHandler;
 
-    public AgentWsConfig(AgentNodeWsHandler handler) {
+    public AgentWsConfig(AgentNodeWsHandler handler, AgentTunnelWsHandler tunnelHandler) {
         this.handler = handler;
+        this.tunnelHandler = tunnelHandler;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         // runner 非浏览器客户端，无 Origin 概念
         registry.addHandler(handler, "/ws/agent").setAllowedOrigins("*");
+        // CAP-70：专用隧道通道（二进制流帧），独立于控制通道——大库 clone 的字节流不占指令通道
+        registry.addHandler(tunnelHandler, "/ws/agent-tunnel").setAllowedOrigins("*");
     }
 
     /**
