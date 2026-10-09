@@ -1,5 +1,6 @@
 package com.devmind.session.service;
 
+import com.devmind.common.egress.EgressProxyRouter;
 import com.devmind.common.integration.RepoGitGateway;
 import com.devmind.common.util.GitCli;
 import com.devmind.project.GitRepoService;
@@ -21,6 +22,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -43,15 +45,19 @@ public class RemoteDiffService {
     private final GitRepoService gitRepoService;
     private final ProjectService projectService;
     private final ObjectProvider<RepoGitGateway> repoGitGateway;
+    /** CAP-70 FR-05：出口路由（agent 模块缺席 = 直连零行为变化；本类直调 GitCli 不经 GitRemoteOps） */
+    private final ObjectProvider<EgressProxyRouter> egressRouterProvider;
     /** 同一远端 URL 的 fetch 串行化（共享克隆缓存，并发 fetch 会互锁 .git） */
     private final Map<String, Object> locks = new ConcurrentHashMap<>();
 
     public RemoteDiffService(GitRepoService gitRepoService,
                              ProjectService projectService,
-                             ObjectProvider<RepoGitGateway> repoGitGateway) {
+                             ObjectProvider<RepoGitGateway> repoGitGateway,
+                             ObjectProvider<EgressProxyRouter> egressRouterProvider) {
         this.gitRepoService = gitRepoService;
         this.projectService = projectService;
         this.repoGitGateway = repoGitGateway;
+        this.egressRouterProvider = egressRouterProvider;
     }
 
     /**
@@ -109,14 +115,17 @@ public class RemoteDiffService {
         Object lock = locks.computeIfAbsent(key != null ? key : url, k -> new Object());
         synchronized (lock) {
             String authUrl = withToken(url, token);
-            GitCli.Result baseFetch = GitCli.run(cache, 120, "git", "fetch", "--no-tags", authUrl,
-                    "+refs/heads/" + baseBranch + ":" + REF_PREFIX + baseBranch);
+            // CAP-70 FR-05：命中出口规则 → -c http.<scheme://host[:port]>.proxy=socks5h://...
+            // （per-URL 键从干净 URL 解析，token 不进配置键）；命中不可用 → router 抛 CONFLICT 上行
+            List<String> proxyArgs = egressProxyArgs(url);
+            GitCli.Result baseFetch = GitCli.run(cache, 120, fetchCmd(proxyArgs, authUrl,
+                    "+refs/heads/" + baseBranch + ":" + REF_PREFIX + baseBranch));
             if (baseFetch.exitCode() != 0) {
                 return RepoDiffView.error(name, primary,
                         "拉取基线分支失败: " + sanitize(baseFetch.err(), token));
             }
-            GitCli.Result branchFetch = GitCli.run(cache, 120, "git", "fetch", "--no-tags", authUrl,
-                    "+refs/heads/" + branch + ":" + REF_PREFIX + branch);
+            GitCli.Result branchFetch = GitCli.run(cache, 120, fetchCmd(proxyArgs, authUrl,
+                    "+refs/heads/" + branch + ":" + REF_PREFIX + branch));
             if (branchFetch.exitCode() != 0) {
                 // CAP-42：会话分支在收口（页面手动触发「收口合并到基线」）时才推送远端，此前属正常时序；
                 // v19：收口勾选「删除远端分支」后分支已删，同样落在这里——两种情形一并说明
@@ -189,6 +198,41 @@ public class RemoteDiffService {
             sb.append('?').append(uri.getRawQuery());
         }
         return sb.toString();
+    }
+
+    /**
+     * CAP-70 FR-05：出口代理注入参数（与 GitRemoteOps.egressProxyArgs 同语义——本类直调
+     * GitCli 不经 GitRemoteOps，故自备一份）。命中规则 → [-c http.<scheme://host[:port]>.proxy=
+     * socks5h://...]；未命中/router 缺席 → 空表；命中不可用 → router 抛 CONFLICT 上行（fail-visible）。
+     */
+    List<String> egressProxyArgs(String cleanUrl) {
+        EgressProxyRouter router = egressRouterProvider.getIfAvailable();
+        if (router == null) {
+            return List.of();
+        }
+        Optional<String> proxyUrl = router.gitProxyUrl(cleanUrl);
+        if (proxyUrl.isEmpty()) {
+            return List.of();
+        }
+        URI uri;
+        try {
+            uri = URI.create(cleanUrl.trim());
+        } catch (Exception e) {
+            return List.of();
+        }
+        if (uri.getScheme() == null || uri.getHost() == null) {
+            return List.of();
+        }
+        String authority = uri.getHost() + (uri.getPort() > 0 ? ":" + uri.getPort() : "");
+        return List.of("-c", "http." + uri.getScheme() + "://" + authority + ".proxy=" + proxyUrl.get());
+    }
+
+    /** git [-c 代理] fetch --no-tags <url> <refspec>：-c 必须插在子命令之前 */
+    private static String[] fetchCmd(List<String> proxyArgs, String authUrl, String refspec) {
+        List<String> cmd = new ArrayList<>(List.of("git"));
+        cmd.addAll(proxyArgs);
+        cmd.addAll(List.of("fetch", "--no-tags", authUrl, refspec));
+        return cmd.toArray(String[]::new);
     }
 
     /** token 明文 + URL 编码形态一律替换为 ***（git 报错可能回显 URL） */

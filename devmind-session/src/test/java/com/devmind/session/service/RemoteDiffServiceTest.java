@@ -1,5 +1,6 @@
 package com.devmind.session.service;
 
+import com.devmind.common.egress.EgressProxyRouter;
 import com.devmind.common.integration.RepoGitGateway;
 import com.devmind.project.GitRepoService;
 import com.devmind.project.config.ProjectProperties;
@@ -16,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -40,7 +42,48 @@ class RemoteDiffServiceTest {
         props.setWorkspaceRoot(tmp.resolve("ws").toString());
         // deriveClonePath 只用 props（其余依赖本测试路径不触达）
         gitRepoService = new GitRepoService(null, null, props, null, null);
-        service = new RemoteDiffService(gitRepoService, null, emptyProvider());
+        service = new RemoteDiffService(gitRepoService, null, emptyProvider(), egressProvider(null));
+    }
+
+    /** CAP-70 FR-05：命中出口规则 → fetch 组命令带 -c http.<scheme://host>.proxy=socks5h://... */
+    @Test
+    void egressRuleInjectsProxyConfig() {
+        RemoteDiffService s = new RemoteDiffService(gitRepoService, null, emptyProvider(),
+                egressProvider(routerReturning(Optional.of("socks5h://127.0.0.1:18089"))));
+        List<String> args = s.egressProxyArgs("https://git.corp.com:8443/g/r.git");
+        assertEquals(List.of("-c", "http.https://git.corp.com:8443.proxy=socks5h://127.0.0.1:18089"), args);
+    }
+
+    /** CAP-70 FR-09：无 router / 未命中规则 → 空表零行为变化 */
+    @Test
+    void noRouterOrUnmatchedMeansNoProxyArgs() {
+        assertTrue(service.egressProxyArgs("https://git.corp.com/g/r.git").isEmpty());
+        RemoteDiffService s = new RemoteDiffService(gitRepoService, null, emptyProvider(),
+                egressProvider(routerReturning(Optional.empty())));
+        assertTrue(s.egressProxyArgs("https://git.corp.com/g/r.git").isEmpty());
+    }
+
+    /** CAP-70 FR-07：命中但不可用 → router 抛 CONFLICT 原样上行（fail-visible） */
+    @Test
+    void unavailableEgressFailsVisibly() {
+        EgressProxyRouter router = new EgressProxyRouter() {
+            @Override
+            public java.util.Optional<java.net.Proxy> proxyFor(String host) {
+                return java.util.Optional.empty();
+            }
+
+            @Override
+            public Optional<String> gitProxyUrl(String remoteUrl) {
+                throw new com.devmind.common.exception.DevMindException(
+                        com.devmind.common.exception.ErrorCode.CONFLICT, "出口规则 git.corp.com 隧道离线");
+            }
+        };
+        RemoteDiffService s = new RemoteDiffService(gitRepoService, null, emptyProvider(),
+                egressProvider(router));
+        var e = org.junit.jupiter.api.Assertions.assertThrows(
+                com.devmind.common.exception.DevMindException.class,
+                () -> s.egressProxyArgs("https://git.corp.com/g/r.git"));
+        assertTrue(e.getMessage().contains("隧道离线"));
     }
 
     @Test
@@ -166,6 +209,32 @@ class RemoteDiffServiceTest {
                     case "getIfAvailable", "getIfUnique" -> null;
                     default -> throw new UnsupportedOperationException(m.getName());
                 });
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ObjectProvider<EgressProxyRouter> egressProvider(EgressProxyRouter router) {
+        return (ObjectProvider<EgressProxyRouter>) Proxy.newProxyInstance(
+                RemoteDiffServiceTest.class.getClassLoader(),
+                new Class<?>[] { ObjectProvider.class },
+                (p, m, args) -> switch (m.getName()) {
+                    case "getIfAvailable", "getIfUnique" -> router;
+                    default -> throw new UnsupportedOperationException(m.getName());
+                });
+    }
+
+    /** 只实现 gitProxyUrl 的最小 router 桩 */
+    private static EgressProxyRouter routerReturning(Optional<String> gitProxy) {
+        return new EgressProxyRouter() {
+            @Override
+            public java.util.Optional<java.net.Proxy> proxyFor(String host) {
+                return java.util.Optional.empty();
+            }
+
+            @Override
+            public Optional<String> gitProxyUrl(String remoteUrl) {
+                return gitProxy;
+            }
+        };
     }
 
     private static void git(Path cwd, String... args) throws Exception {
