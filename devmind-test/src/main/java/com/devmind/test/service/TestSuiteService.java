@@ -47,6 +47,7 @@ import java.util.function.Supplier;
 public class TestSuiteService {
 
     private static final Logger log = LoggerFactory.getLogger(TestSuiteService.class);
+    // CAP-69 的 script 套件不走这里（无项目、字段族不同）——独立走 ScriptSuiteService，kind 由它直写
     private static final Set<String> KINDS = Set.of("api", "smoke");
     private static final Set<String> HTTP_METHODS = Set.of("get", "post", "put", "delete", "patch");
 

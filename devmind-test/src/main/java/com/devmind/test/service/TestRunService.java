@@ -28,6 +28,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import com.devmind.common.agent.AgentExecCommand;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.deploy.event.DeploymentCompletedEvent;
@@ -51,6 +52,8 @@ import com.devmind.test.dto.CaseResultView;
 import com.devmind.test.dto.CreateTestRunRequest;
 import com.devmind.test.dto.IssueDraftView;
 import com.devmind.test.dto.RunSummary;
+import com.devmind.test.dto.ScriptSuiteEnv;
+import com.devmind.test.dto.ScriptSuiteRunRequest;
 import com.devmind.test.dto.TestRunView;
 import com.devmind.test.model.TestCaseEntity;
 import com.devmind.test.model.TestCaseResultEntity;
@@ -186,6 +189,198 @@ public class TestRunService {
         TestRunEntity saved = repo.save(r);
         testExecutor.submit(() -> run(saved.getId()));
         return toView(saved);
+    }
+
+    // ---------------- CAP-69 脚本套件运行 ----------------
+
+    /** RunnerWorkspace.prepareBuild 要求非空 SAFE_ID 项目归属：脚本套件无项目，用固定伪 id */
+    static final String SCRIPT_PSEUDO_PROJECT = "script-tests";
+
+    /**
+     * CAP-69 FR-02 触发脚本套件运行。路由链：显式 agentNodeId → 套件默认节点 → 平台默认 → 409
+     * （无项目，路由链没有"项目默认"一档）；env/命令触发时覆盖仅本次生效，不落库。
+     */
+    public TestRunView createScriptRun(Long suiteId, ScriptSuiteRunRequest req) {
+        TestSuiteEntity s = suiteRepo.findById(suiteId)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "脚本套件不存在: " + suiteId));
+        if (!"script".equals(s.getKind())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "套件 " + suiteId + " 不是脚本套件（kind=" + s.getKind() + "）");
+        }
+        String explicit = req != null && req.agentNodeId() != null && !req.agentNodeId().isBlank()
+                ? req.agentNodeId().strip() : null;
+        String nodeId = agentNodeRouter.route(explicit, s.getAgentNodeId(), null);
+        agentNodeRouter.requireExecCapable(nodeId);
+
+        // env 合并：套件存值（secret 原值就在 envJson）+ 触发覆盖；null 键值剔除（Map.copyOf 禁 null）
+        Map<String, String> env = new LinkedHashMap<>();
+        for (ScriptSuiteEnv e : readScriptEnv(s.getEnvJson())) {
+            if (e.key() != null && !e.key().isBlank() && e.value() != null) {
+                env.put(e.key().strip(), e.value());
+            }
+        }
+        if (req != null && req.env() != null) {
+            req.env().forEach((k, v) -> {
+                if (k != null && !k.isBlank() && v != null) {
+                    env.put(k.strip(), v);
+                }
+            });
+        }
+        String command = req != null && req.command() != null && !req.command().isBlank()
+                ? req.command() : s.getCommand();
+
+        TestRunEntity r = new TestRunEntity();
+        r.setProjectId(null); // CAP-69：脚本套件运行不属任何项目（报告文档沉淀随之跳过）
+        r.setSuiteIdsJson(writeIds(List.of(suiteId)));
+        r.setAgentNodeId(nodeId);
+        r.setStatus(TestRunEntity.RUNNING);
+        r.setTriggeredBy(identityService.currentActor());
+        Instant now = Instant.now();
+        r.setStartedAt(now);
+        r.setCreatedAt(now);
+        TestRunEntity saved = repo.save(r);
+        Map<String, String> finalEnv = Map.copyOf(env);
+        String finalCommand = command;
+        testExecutor.submit(() -> runScript(saved.getId(), finalEnv, finalCommand));
+        return toView(saved);
+    }
+
+    /**
+     * CAP-69 FR-03/04 脚本执行：exec 帧整包下发 runner（repo 块 = 套件 git 源，workspaceKey 控工作区
+     * 复用），JUnit XML 经 DEVMIND_JUNIT stdout marker 回收解析进 test_case_results（caseId=null）。
+     * junit 缺失不炸：results 为空 + errorSummary 注记。收口：exit≠0 或用例 fail>0 → FAILED。
+     */
+    private void runScript(Long runId, Map<String, String> env, String command) {
+        TestRunEntity r = repo.findById(runId).orElse(null);
+        if (r == null) {
+            return;
+        }
+        Long suiteId = parseIds(r.getSuiteIdsJson()).stream().findFirst().orElse(null);
+        TestSuiteEntity s = suiteId == null ? null : suiteRepo.findById(suiteId).orElse(null);
+        if (s == null) {
+            r.setStatus(TestRunEntity.FAILED);
+            r.setErrorSummary("脚本套件不存在（可能运行前被删除）: " + suiteId);
+            r.setFinishedAt(Instant.now());
+            repo.save(r);
+            hub.done(topic(runId), r.getStatus());
+            return;
+        }
+        String topic = topic(runId);
+        // marker 行从人读日志剔除（载荷另有落点），人读行实时推 WS 供详情抽屉看进度
+        ScriptMarkers.Tap tap = new ScriptMarkers.Tap(line -> hub.publishLog(topic, line));
+        int total = 0, passed = 0, failed = 0, skipped = 0;
+        boolean execFailed = false;
+        try {
+            String wsKey = s.getWorkspaceKey() != null && !s.getWorkspaceKey().isBlank()
+                    ? s.getWorkspaceKey() : String.valueOf(s.getId());
+            StepResult res = agentNodeRunner.runStep(r.getAgentNodeId(), SCRIPT_PSEUDO_PROJECT,
+                    "stsuite-" + wsKey, 1,
+                    new StepSpec("script:" + s.getName(), wrapScriptCommand(command, s.getJunitPath()),
+                            s.getWorkSubdir(), "test"),
+                    env, new AgentExecCommand.Repo(s.getRepoUrl(), s.getBranch(), null, null),
+                    null, s.getTimeoutSec() == null ? 7200L : s.getTimeoutSec().longValue(), tap);
+
+            var xml = tap.junitXml();
+            if (xml.isPresent()) {
+                try {
+                    int sort = 1;
+                    for (JUnitXmlParser.ParsedCase c : JUnitXmlParser.parse(xml.get())) {
+                        TestCaseResultEntity re = new TestCaseResultEntity();
+                        re.setRunId(runId);
+                        re.setCaseId(null); // 脚本套件无 CAP-10 用例行，结果行即一等公民
+                        re.setSuiteId(suiteId);
+                        re.setSort(sort++);
+                        re.setName(c.name());
+                        re.setStatus(c.status());
+                        re.setError(truncate(c.error(), 1000));
+                        re.setDuration(c.durationMs());
+                        re.setCreatedAt(Instant.now());
+                        resultRepo.save(re);
+                        hub.publishEvent(topic, "result", toResultView(re));
+                        total++;
+                        switch (c.status()) {
+                            case "pass" -> passed++;
+                            case "fail" -> failed++;
+                            default -> skipped++;
+                        }
+                    }
+                } catch (DevMindException ex) {
+                    // XML 畸形 = 无法验证结果，fail-visible 按 FAILED 收口
+                    failed++;
+                    r.setErrorSummary(truncate(ex.getMessage(), 2000));
+                }
+            } else {
+                String note = tap.markerLines() == 0
+                        ? "未回传 JUnit 报告（产物缺失或 junitPath 配置有误: " + s.getJunitPath() + "）"
+                        : "JUnit 报告载荷解码失败（详见服务端 warn 日志）";
+                log.warn("脚本套件运行 #{}: {}", runId, note);
+                r.setErrorSummary(truncate(note, 2000));
+            }
+            if (!res.ok()) {
+                execFailed = true;
+                String err = res.error() == null || res.error().isBlank() ? "exit=" + res.exitCode() : res.error();
+                r.setErrorSummary(truncate("脚本执行失败: " + err, 2000));
+            }
+        } catch (Exception e) {
+            failed++;
+            r.setErrorSummary(truncate(rootMessage(e), 2000));
+            tap.accept("[运行异常] " + rootMessage(e));
+        }
+
+        boolean bad = failed > 0 || execFailed;
+        r.setStatus(bad ? TestRunEntity.FAILED : TestRunEntity.SUCCESS);
+        r.setSummaryJson(writeSummary(total, passed, failed, skipped));
+        r.setLogsText(tap.logText());
+        r.setFinishedAt(Instant.now());
+        repo.save(r);
+
+        // 无项目的脚本 run 跳过 CAP-03 报告文档沉淀（report 端点仍可按 results 重渲染）
+        if (r.getProjectId() != null) {
+            try {
+                Long docId = createReportDoc(r);
+                r.setReportDocId(docId);
+                repo.save(r);
+            } catch (Exception e) {
+                log.warn("测试报告文档创建失败: {}", e.getMessage());
+            }
+        }
+
+        hub.done(topic, r.getStatus());
+        notify(r, bad ? NotificationLevel.P1 : NotificationLevel.P2,
+                "脚本测试" + (bad ? "失败" : "通过") + " #" + runId,
+                passed + " 通过 / " + failed + " 失败 / " + skipped + " 跳过 · " + s.getName());
+    }
+
+    /**
+     * FR-03 命令包装：跑完把 junitPath 产物 gzip+base64 打成单行 DEVMIND_JUNIT marker 回传，
+     * 退出码原样透传。尾段必须<b>贴在命令末行同一行</b>——runner execAllowlist 逐行校验首 token，
+     * 独立行的 `ec=$?`/`p=$(gzip…)` 会被判为白名单外命令；贴行后行首仍是套件自己的命令
+     * （本来就该在白名单里），`{`/`}`/echo/exit 属 shell 内置豁免。
+     */
+    static String wrapScriptCommand(String command, String junitPath) {
+        return "{ " + command.strip()
+                + "; ec=$?; p=$(gzip -c " + junitPath + " 2>/dev/null | base64 | tr -d '\\n'); echo \""
+                + ScriptMarkers.JUNIT + " $p\"; exit $ec; }";
+    }
+
+    private List<ScriptSuiteEnv> readScriptEnv(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            return mapper.readValue(json,
+                    mapper.getTypeFactory().constructCollectionType(List.class, ScriptSuiteEnv.class));
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /** CAP-69 脚本套件运行历史（projectId 为 NULL 的 run）。 */
+    public List<TestRunView> scriptHistory(String status) {
+        List<TestRunEntity> list = (status == null || status.isBlank())
+                ? repo.findByProjectIdIsNullOrderByCreatedAtDesc()
+                : repo.findByProjectIdIsNullAndStatusOrderByCreatedAtDesc(status.trim().toUpperCase());
+        return list.stream().map(this::toView).toList();
     }
 
     private void run(Long runId) {
@@ -581,7 +776,11 @@ public class TestRunService {
         RunSummary s = parseSummary(r.getSummaryJson());
         StringBuilder md = new StringBuilder();
         md.append("# 测试报告 #").append(r.getId()).append("\n\n");
-        md.append("- 项目: `").append(r.getProjectId()).append("`\n");
+        if (r.getProjectId() != null) {
+            md.append("- 项目: `").append(r.getProjectId()).append("`\n");
+        } else {
+            md.append("- 类型: 脚本套件（CAP-69，独立于项目）\n");
+        }
         md.append("- 触发: ").append(r.getTriggeredBy() == null ? "user" : r.getTriggeredBy()).append("\n");
         md.append("- 状态: **").append(r.getStatus()).append("**\n");
         md.append("- 结果: ").append(s.total()).append(" 用例 / ").append(s.passed()).append(" 通过 / ")

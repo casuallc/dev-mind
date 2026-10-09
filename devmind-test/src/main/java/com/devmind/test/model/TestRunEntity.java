@@ -30,7 +30,8 @@ public class TestRunEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "project_id", nullable = false, length = 32)
+    /** CAP-69 起可空：脚本套件（kind=script）的运行不属任何项目 */
+    @Column(name = "project_id", length = 32)
     private String projectId;
 
     /** P0-6 关联约定：需求 id（可空 = 项目级回归） */

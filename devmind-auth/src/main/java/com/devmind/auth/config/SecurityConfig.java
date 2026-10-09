@@ -83,6 +83,12 @@ public class SecurityConfig {
                         .hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/model-endpoints/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/model-endpoints/**").hasRole("ADMIN")
+                        // CAP-69：脚本套件（自带 git 源与命令，定义变更=代码执行面）写操作仅 ADMIN；
+                        // /run 触发登录即可（对齐 /api/tests/runs），须先于上方 /** 规则命中
+                        .requestMatchers(HttpMethod.POST, "/api/script-suites/*/run").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/script-suites", "/api/script-suites/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/script-suites/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/script-suites/**").hasRole("ADMIN")
                         // CAP-65：节点文件浏览 GET 也敏感（可读白名单内任意文件），须先于 GET /api/** 通用规则
                         .requestMatchers(HttpMethod.GET, "/api/agent-nodes/*/files/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/**").authenticated()
