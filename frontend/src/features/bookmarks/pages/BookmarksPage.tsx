@@ -13,7 +13,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { AppstoreOutlined, BarsOutlined, ImportOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, BarsOutlined, ExportOutlined, ImportOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   copyShared,
@@ -64,6 +64,7 @@ import { fmtTime } from '../../../shared/utils/format'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { buildBookmarkFile } from '../utils/netscape'
 
 type View = 'mine' | 'shared' | 'shares' | 'tags'
 type ViewMode = 'table' | 'card'
@@ -333,8 +334,26 @@ export default function BookmarksPage() {
     }
   }
 
-  // ---------------- FR-02 分组 ----------------
+  // ---------------- 导出（FR-09 逆操作：Chrome 可直接导入的 Netscape HTML） ----------------
 
+  const exportBookmarks = () => {
+    if (allRows.length === 0 && groups.length === 0) {
+      message.info('还没有可导出的收藏')
+      return
+    }
+    const html = buildBookmarkFile(groups, allRows)
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }))
+    const a = document.createElement('a')
+    const d = new Date()
+    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+    a.href = url
+    a.download = `devmind-bookmarks-${stamp}.html`
+    a.click()
+    URL.revokeObjectURL(url)
+    message.success(`已导出 ${allRows.length} 条收藏，Chrome「书签管理器 → 导入」选这个文件即可`)
+  }
+
+  // ---------------- FR-02 分组 ----------------
   const submitGroup = async (name: string) => {
     const editingGroup = groupModal?.editing ?? null
     setSaving(true)
@@ -542,6 +561,9 @@ export default function BookmarksPage() {
         <>
           <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
             导入
+          </Button>
+          <Button icon={<ExportOutlined />} onClick={exportBookmarks}>
+            导出
           </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={startCreate}>
             新建收藏
