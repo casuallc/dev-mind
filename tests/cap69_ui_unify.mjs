@@ -225,6 +225,9 @@ async function main() {
     await waitFor(() => evaluate(ws, `!!document.querySelector('.ant-layout-content .ant-card .ant-table')`), '套件表格渲染')
     await evaluate(ws, HELPERS) // 导航后重新注入辅助函数
     await sleep(500)
+    // extra 只剩 刷新/新建套件：「从 OpenAPI 生成」已收进抽屉类型
+    const hasGenBtn = await evaluate(ws, `!!window.__btn(document.querySelector('.ant-layout-content .ant-card .ant-card-extra'), '从OpenAPI生成')`)
+    if (hasGenBtn) failures.push('extra 仍挂「从 OpenAPI 生成」入口（应收进新建抽屉类型）')
     console.log('[3] /tests 已加载')
 
     // ① 新建抽屉：类型选择在表单内；默认 smoke 无 git 字段
@@ -236,6 +239,21 @@ async function main() {
     }))()`)
     if (!probe.hasKind) failures.push('新建抽屉缺「类型」选择')
     if (probe.hasRepo) failures.push('默认 smoke 类型不应出现 git 仓库字段')
+
+    // ①b openapi 类型：收进同一抽屉，不填名称（服务端生成），提示文案出现；不真生成（项目无 apiDocSource 会 400）
+    await selectKind(ws, 'openapi')
+    probe = await evaluate(ws, `(() => ({
+      hasName: !!window.__formItem(window.__drawer(), '名称'),
+      hint: (window.__drawer().textContent ?? '').includes('OpenAPI'),
+      okText: window.__t(window.__btn(window.__drawer(), '生成')?.textContent),
+    }))()`)
+    if (probe.hasName) failures.push('openapi 类型不应要名称字段')
+    if (!probe.hint) failures.push('openapi 类型缺生成说明文案')
+    if (probe.okText !== '生成') failures.push(`openapi 类型确认键应为「生成」，实为 ${probe.okText}`)
+    // 切回 smoke 再建，确认名称字段恢复
+    await selectKind(ws, 'smoke')
+    probe = await evaluate(ws, `(() => ({ hasName: !!window.__formItem(window.__drawer(), '名称') }))()`)
+    if (!probe.hasName) failures.push('切回 smoke 后名称字段未恢复')
 
     // smoke：只填名称即建
     await fillField(ws, `window.__drawer()`, '名称', smokeName)
@@ -309,6 +327,35 @@ async function main() {
     const ss = (await api('GET', `/script-suites?projectId=${pid}`, undefined, accessToken)).find((x) => x.name === scriptName)
     if (ss?.command !== 'echo hi2') failures.push(`script 内层页保存未落库：command=${ss?.command}`)
     console.log('[8] script 编辑内层页 ok（含保存落库）')
+
+    // ⑥ 内层页「运行」按钮：extra 直发，弹窗字段与列表行内运行一致（script=env/命令覆盖）
+    await evaluate(ws, `window.__btn(document.querySelector('.ant-card-extra'), '运行').click()`)
+    await waitFor(() => evaluate(ws, `!!window.__modal()`), '内层页运行弹窗')
+    probe = await evaluate(ws, `(() => ({
+      env: !!window.__formItem(window.__modal(), 'env 覆盖'),
+      cmd: !!window.__formItem(window.__modal(), '命令覆盖'),
+      base: !!window.__formItem(window.__modal(), 'baseUrl'),
+    }))()`)
+    if (!probe.env || !probe.cmd || probe.base) failures.push(`内层页 script 运行弹窗字段错：${JSON.stringify(probe)}`)
+    await evaluate(ws, `window.__btn(window.__modal(), '取消').click()`)
+    await sleep(400)
+    console.log('[9] 内层页「运行」按钮 ok')
+
+    // ⑦ smoke 内层页也有「运行」（api/smoke 字段族）
+    await evaluate(ws, `window.__btn(document.querySelector('.ant-card-extra'), '返回列表').click()`)
+    await waitFor(() => evaluate(ws, `!!window.__row(${JSON.stringify(smokeName)})`), '回列表')
+    await clickRowButton(ws, smokeName, '编辑')
+    await waitFor(() => evaluate(ws, `location.pathname.startsWith('/tests/suites/') && !!document.querySelector('.ant-layout-content .ant-table')`), 'smoke 内层页用例表格')
+    await evaluate(ws, `window.__btn(document.querySelector('.ant-card-extra'), '运行').click()`)
+    await waitFor(() => evaluate(ws, `!!window.__modal()`), 'smoke 内层页运行弹窗')
+    probe = await evaluate(ws, `(() => ({
+      env: !!window.__formItem(window.__modal(), '目标环境'),
+      base: !!window.__formItem(window.__modal(), 'baseUrl'),
+      cmd: !!window.__formItem(window.__modal(), '命令覆盖'),
+    }))()`)
+    if (!probe.env || !probe.base || probe.cmd) failures.push(`内层页 smoke 运行弹窗字段错：${JSON.stringify(probe)}`)
+    await evaluate(ws, `window.__btn(window.__modal(), '取消').click()`)
+    console.log('[10] smoke 内层页「运行」按钮 ok')
   } finally {
     ws?.close()
     chrome.kill()
@@ -319,9 +366,9 @@ async function main() {
         await api('DELETE', s.kind === 'script' ? `/script-suites/${s.id}` : `/test-suites/${s.id}`, undefined, accessToken)
       }
       await api('DELETE', `/projects/${pid}`, undefined, accessToken)
-      console.log('[9] 临时项目与套件已清理')
+      console.log('[11] 临时项目与套件已清理')
     } catch (e) {
-      console.log(`[9] 清理失败（项目 ${pid} 需手工删）：${e.message}`)
+      console.log(`[11] 清理失败（项目 ${pid} 需手工删）：${e.message}`)
     }
   }
 

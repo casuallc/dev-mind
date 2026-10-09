@@ -1,6 +1,7 @@
 // 套件编辑页（/tests/suites/:suiteId）：内层页面格式，三种类型统一入口。
 // api/smoke = 套件信息 + 用例编辑（整体替换保存：不在列表中的现有用例将被删除）+ 沉淀文档；
 // script（CAP-69）= 脚本属性表单（git 源/命令/env 等，字段与新建抽屉共用 ScriptSuiteFields，updateScriptSuite 保存），无用例/沉淀语义。
+// extra 统一带「运行」（RunSuiteModal 按类型渲染字段，与列表行内运行同一组件），成功后回列表页看运行历史。
 // 布局遵循 docs/core/前端内容区布局约定.md：单 Card 撑满内容区，操作集中 extra，
 // body 用 pageCardBodyFlexStyle + FitTable（表头吸顶、只表体滚）。
 import {
@@ -26,16 +27,20 @@ import {
   ArrowLeftOutlined,
   DeleteOutlined,
   ExportOutlined,
+  PlayCircleOutlined,
   PlusOutlined,
   SaveOutlined,
 } from '@ant-design/icons'
 import { deleteScriptSuite, deleteSuite, getScriptSuite, getSuite, publishSuite, saveCases, updateScriptSuite } from '../api'
 import type { ScriptSuite, TestCase, TestCaseInput, TestSuite } from '../types'
 import type { AgentNode } from '../../agent/types'
+import type { ProjectEnvironment } from '../../projects/types'
 import { listAgentNodes } from '../../agent/api'
+import { listEnvironments } from '../../projects/api'
 import { fmtTime, paramsToText, textToParams } from '../../../shared/utils/format'
 import { SUITE_KIND_COLOR } from '../constants'
 import ScriptSuiteFields, { toScriptSuiteInput } from '../components/ScriptSuiteFields'
+import RunSuiteModal from '../components/RunSuiteModal'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
@@ -143,9 +148,12 @@ export default function SuiteDetailPage() {
   const [editing, setEditing] = useState<TestCaseInput | null>(null)
   const [isNew, setIsNew] = useState(false)
   const [form] = Form.useForm<CaseFormValues>()
-  // script 分支：脚本属性（字段族不同，走 /script-suites 端点）+ 节点选项
+  // script 分支：脚本属性（字段族不同，走 /script-suites 端点）
   const [script, setScript] = useState<ScriptSuite | null>(null)
+  // 运行弹窗（全类型统一 RunSuiteModal）：节点/环境选项
   const [nodes, setNodes] = useState<AgentNode[]>([])
+  const [environments, setEnvironments] = useState<ProjectEnvironment[]>([])
+  const [runOpen, setRunOpen] = useState(false)
   const [scriptForm] = Form.useForm()
 
   const isScript = suite?.kind === 'script'
@@ -157,13 +165,15 @@ export default function SuiteDetailPage() {
       const s = await getSuite(Number(suiteId))
       setSuite(s)
       setCases(s.cases.map((c) => fromView(c)))
+      const [nd, ev] = await Promise.all([
+        listAgentNodes().catch(() => []),
+        listEnvironments(s.projectId).catch(() => []),
+      ])
+      setNodes(nd)
+      setEnvironments(ev)
       if (s.kind === 'script') {
-        const [ss, nd] = await Promise.all([
-          getScriptSuite(s.id),
-          listAgentNodes().catch(() => []),
-        ])
+        const ss = await getScriptSuite(s.id)
         setScript(ss)
-        setNodes(nd)
         scriptForm.setFieldsValue({
           name: ss.name,
           repoUrl: ss.repoUrl,
@@ -299,12 +309,14 @@ export default function SuiteDetailPage() {
       title={suite ? `套件 · ${suite.name}` : '套件'}
       extra={isScript ? (
         <Space>
+          <Button type="primary" ghost icon={<PlayCircleOutlined />} disabled={!suite} onClick={() => setRunOpen(true)}>运行</Button>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSaveScript} disabled={!script}>保存</Button>
           <Button danger icon={<DeleteOutlined />} disabled={!suite} onClick={onDelete}>删除</Button>
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/tests')}>返回列表</Button>
         </Space>
       ) : (
         <Space>
+          <Button type="primary" ghost icon={<PlayCircleOutlined />} disabled={!suite} onClick={() => setRunOpen(true)}>运行</Button>
           <Button icon={<PlusOutlined />} onClick={() => openEdit(null)} disabled={!suite}>添加用例</Button>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSaveAll} disabled={!suite}>保存全部</Button>
           <Button icon={<ExportOutlined />} loading={publishing} disabled={!suite || !suite.caseCount} onClick={onPublish}>
@@ -367,6 +379,21 @@ export default function SuiteDetailPage() {
         onOk={() => form.submit()} okText="确定" width={640} destroyOnClose>
         <CaseForm form={form} onFinish={saveCase} />
       </Modal>
+
+      {/* 运行：与列表行内运行同一组件，按 kind 渲染字段；成功后回列表页看运行历史/详情 */}
+      <RunSuiteModal
+        suite={runOpen ? suite : null}
+        scriptSuite={script ?? undefined}
+        projectId={suite?.projectId ?? ''}
+        nodes={nodes}
+        environments={environments}
+        onClose={() => setRunOpen(false)}
+        onRan={(r) => {
+          setRunOpen(false)
+          message.success(`测试运行 #${r.id} 已创建`)
+          navigate('/tests')
+        }}
+      />
     </Card>
   )
 }
