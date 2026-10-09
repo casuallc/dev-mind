@@ -74,16 +74,29 @@ public final class ContextMaterializer {
         }
     }
 
-    /** CAP-40 需求附件：物化为 .devmind/input/<path>（path 白名单 + 越界校验，同 skill 文件）。 */
+    /** CAP-40 需求附件：物化为 .devmind/input/<path>（path 白名单 + 越界校验，同 skill 文件）。
+     *  CAP-68 起允许子目录（attachments/&lt;id&gt;-&lt;name&gt;）：逐段白名单 + 禁 .. / 绝对路径 /
+     *  反斜杠，normalize 越界校验兜底不变。 */
     private static void writeInput(Path workDir, ContextPackage.InputFile input) throws IOException {
-        requireSafe(input.path(), "附件路径");
+        requireSafePath(input.path());
         Path dir = workDir.resolve(".devmind").resolve("input");
         Path target = dir.resolve(input.path()).normalize();
         if (!target.startsWith(dir)) {
             throw new IllegalArgumentException("附件路径越界: " + input.path());
         }
-        Files.createDirectories(dir);
+        Files.createDirectories(target.getParent());
         Files.write(target, Base64.getDecoder().decode(input.base64()));
+    }
+
+    /** 相对路径逐段白名单校验：禁绝对路径、.. 段、反斜杠（Windows 分隔符防穿越）。 */
+    private static void requireSafePath(String path) {
+        if (path == null || path.isBlank() || path.contains("\\")
+                || path.startsWith("/") || path.contains("..")) {
+            throw new IllegalArgumentException("非法附件路径（禁绝对路径/反斜杠/..）: " + path);
+        }
+        for (String seg : path.split("/")) {
+            requireSafe(seg, "附件路径段");
+        }
     }
 
     /**

@@ -108,6 +108,25 @@ class ContextMaterializerTest {
     }
 
     @Test
+    void inputPathsAllowSubdirectoryButRejectTraversal() throws Exception {
+        // CAP-68：会话附件物化为 .devmind/input/attachments/<id>-<name>（带一级子目录）
+        ContextPackage nested = ContextPackage.of(null, null, List.of(), List.of(),
+                List.of(new ContextPackage.InputFile("attachments/a1-note.txt", "note.txt",
+                        "text/plain", Base64.getEncoder().encodeToString("hi".getBytes()))));
+        ContextMaterializer.materialize(workDir, nested);
+        assertEquals("hi", Files.readString(
+                workDir.resolve(".devmind/input/attachments/a1-note.txt")));
+        // 子目录形态下的越界/反斜杠/段名非法同样拒绝
+        for (String evil : List.of("attachments/../../evil.txt", "attachments\\evil.txt",
+                "attachments/非法.txt", "/abs/evil.txt")) {
+            ContextPackage bad = ContextPackage.of(null, null, List.of(), List.of(),
+                    List.of(new ContextPackage.InputFile(evil, "e.txt", "text/plain", "eA==")));
+            assertThrows(IllegalArgumentException.class,
+                    () -> ContextMaterializer.materialize(workDir, bad), "应拒绝: " + evil);
+        }
+    }
+
+    @Test
     void splitMaterializationSeparatesSharedAndSessionParts() throws Exception {
         // CAP-53：settings/skills 落 cwd（共享同构），注入块/docs/inputs 落代码目录（会话特定）
         Path cwd = workDir.resolve("cwd");
