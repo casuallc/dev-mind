@@ -22,8 +22,8 @@ JUnit XML 解析为用例结果行。
 
 ### 后端（devmind-test）
 
-- **FR-01 独立脚本套件 CRUD**：`test_suites` 放开 `project_id` 可空（ddl-auto 平滑
-  alter），kind 增加 `script`。脚本套件新增字段（均可空列平滑加列）：
+- **FR-01 独立脚本套件 CRUD**：`test_suites` 放开 `project_id` 可空（ddl-auto
+  只加列不改存量约束，存量库需手工 ALTER，见第 9 节），kind 增加 `script`。脚本套件新增字段（均可空列平滑加列）：
   `repo_url`/`branch`（git 源，必填）、`work_subdir`（仓库内子目录，如 `e2e`，可空=仓库根）、
   `command`（执行命令模板，多行脚本串，必填）、`junit_path`（JUnit XML 产出路径，相对
   workSubdir，必填）、`env_json`（`[{key,value,secret}]`，secret=true 的值在视图层掩码
@@ -161,3 +161,9 @@ GET    /api/test-runs?kind=script          脚本套件运行历史（projectId 
   用例级趋势对比；脚本套件进 CAP-10 FR-05 部署自动回归；取消运行（exec 无 cancel 帧）。
 - admq 仓库侧配套（另一仓库单独提交）：playwright.config.js 加 JUnit reporter、
   节点 Node 20+ 与 chromium 依赖。
+- **存量库手工 ALTER（部署必做）**：`ddl-auto=update` 只加列、不改存量列的
+  NOT NULL 约束——已存在 `test_suites`/`test_runs` 的库上 `project_id` 仍是
+  NOT NULL，script 套件写入报 `Column 'project_id' cannot be null`。上线前手工执行：
+  MySQL `ALTER TABLE test_suites MODIFY project_id BIGINT NULL;`（test_runs 同）；
+  PG `ALTER TABLE test_suites ALTER COLUMN project_id DROP NOT NULL;`（test_runs 同）。
+  全新库（H2/MySQL/PG 新建）无此问题。（2026-10-09 本机 dev 冒烟实测踩出）
