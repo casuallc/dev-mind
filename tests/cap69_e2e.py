@@ -5,12 +5,14 @@
 链路：真 runner jar（execAllowlist=bash）连隔离实例，fixture 是 tmp/ 下的 file:// git 仓库
 （fake 测试脚本按 SUITE_MODE 生成 pass/fail/skip 混合 junit.xml）。exec 帧整包下发、
 repo 克隆缓存、DEVMIND_JUNIT marker 回收、JUnit 解析全走真的。
+套件强制绑定项目：先建 LOCAL 项目（path=fixture 仓库），套件全带 projectId。
 
 验收覆盖（docs/capabilities/CAP-69-script-test-suite.md）：
   [1] 套件 CRUD：创建/列表/更新；secret env 视图层掩码 + 掩码回传=不变；
-      junitPath 穿越（../x.xml）与非法 env 键（1BAD）400
+      junitPath 穿越（../x.xml）与非法 env 键（1BAD）400；projectId 缺失 400、幽灵项目 404
   [2] 触发运行（显式节点）→ SUCCESS：results 三条（pass×2/skip×1，中文用例名
-      classname#name 拼接、time 秒→毫秒），summary 聚合
+      classname#name 拼接、time 秒→毫秒），summary 聚合；run.projectId=项目；
+      报告沉淀 CAP-03 文档（reportDocId 非空）
   [3] env 覆盖（SUITE_MODE=fail，仅本次生效）→ FAILED：fail 结果带 error 文本；
       失败转缺陷线索端点可用
   [4] junit 缺失（SUITE_MODE=nojunit）→ 不炸：SUCCESS + results 空 +
@@ -18,8 +20,9 @@ repo 克隆缓存、DEVMIND_JUNIT marker 回收、JUnit 解析全走真的。
   [5] 离线节点 → 触发 409
   [6] 共享 workspaceKey：套件 A 先跑留 .state-ran.txt，套件 B 同 key 跑
       check_state.sh 读到 → SUCCESS（工作区跨套件复用）
-  [7] 套件默认节点路由：套件 B/C 不传 agentNodeId（body 空）走套件默认
-  [8] GET /api/test-runs?kind=script 过滤（独立于项目的运行历史）
+  [7] 路由链：套件 B/C 走套件默认节点；套件 D 无默认 → 回落项目默认节点
+  [8] 项目运行历史：GET /test-runs?projectId= 全量含脚本运行且 projectId 一致
+  [9] createInternal 防护：/tests/runs 收 script 套件 → 400（误混入会空跑 SUCCESS 假象）
 
 前置（隔离实例不起就不算数，别拿 :8080 的 dev 实例跑）：
   export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
@@ -37,7 +40,7 @@ BASE = os.environ.get("E2E_BASE", "http://localhost:18099/api")
 ROOT = Path(__file__).resolve().parent.parent
 RUNNER_JAR = ROOT / "devmind-agent-runner/target/devmind-agent-runner.jar"
 TMP = ROOT / "tmp"
-REPO_DIR = TMP / "cap69-repo"        # fixture git 仓库（file:// 源）
+REPO_DIR = TMP / "cap69-repo"        # fixture git 仓库（file:// 源 + LOCAL 项目 path）
 WS_DIR = TMP / "cap69-ws"            # runner 工作区根
 PROPS = TMP / "cap69-runner.properties"
 MARK = f"e2e-cap69-{int(time.time())}"
@@ -165,28 +168,33 @@ def main():
     print("[0] 登录 OK")
 
     # 新鲜度护栏：防误指到在用的 dev 实例
-    assert req("GET", "/script-suites", token=tok) == [], "script-suites 非空——这不是干净实例，拒跑"
-    assert req("GET", "/test-runs?kind=script", token=tok) == [], "已有脚本运行记录——拒跑"
+    assert req("GET", "/projects", token=tok) == [], "projects 非空——这不是干净实例，拒跑"
 
     repo_url = make_fixture_repo()
     print(f"[0] fixture 仓库 OK（{repo_url}）")
 
-    # ---- [1] CRUD + env 掩码 ----
+    # 强制绑定项目：LOCAL 项目 path=fixture 仓库
+    proj = req("POST", "/projects", {"name": MARK, "path": str(REPO_DIR)}, tok)
+    pid = proj["id"]
+    print(f"[0] 项目 OK（id={pid}）")
+
+    # ---- [1] CRUD + env 掩码 + projectId 强制 ----
     suite_a = req("POST", "/script-suites", {
-        "name": MARK + " A", "repoUrl": repo_url, "branch": "master",
+        "projectId": pid, "name": MARK + " A", "repoUrl": repo_url, "branch": "master",
         "command": "bash run_tests.sh", "junitPath": "test-results/junit.xml",
         "env": [{"key": "BASE_URL", "value": "http://example.local", "secret": False},
                 {"key": "PASSWORD", "value": "s3cret", "secret": True}],
         "workspaceKey": "cap69-shared", "timeoutSec": 600,
     }, tok, expect=200)
     aid = suite_a["id"]
-    view = next(s for s in req("GET", "/script-suites", token=tok) if s["id"] == aid)
+    assert suite_a["projectId"] == pid, suite_a
+    view = next(s for s in req("GET", f"/script-suites?projectId={pid}", token=tok) if s["id"] == aid)
     env = {e["key"]: e for e in view["env"]}
     assert env["BASE_URL"]["value"] == "http://example.local", view["env"]
     assert env["PASSWORD"]["value"] == "******" and env["PASSWORD"]["secret"], view["env"]
     # 掩码回传 = 该条不变（同时改名验证 PUT 生效）
     req("PUT", f"/script-suites/{aid}", {
-        "name": MARK + " A2", "repoUrl": repo_url, "branch": "master",
+        "projectId": pid, "name": MARK + " A2", "repoUrl": repo_url, "branch": "master",
         "command": "bash run_tests.sh", "junitPath": "test-results/junit.xml",
         "env": [{"key": "BASE_URL", "value": "http://example.local", "secret": False},
                 {"key": "PASSWORD", "value": "******", "secret": True}],
@@ -196,15 +204,23 @@ def main():
     assert view["name"].endswith("A2")
     env = {e["key"]: e for e in view["env"]}
     assert env["PASSWORD"]["value"] == "******", "掩码回传后视图仍应掩码"
-    # 负例：junitPath 穿越 / env 非法键
+    # 负例：junitPath 穿越 / env 非法键 / projectId 缺失 / 幽灵项目
     req("POST", "/script-suites", {
-        "name": MARK + " bad", "repoUrl": repo_url, "branch": "master",
+        "projectId": pid, "name": MARK + " bad", "repoUrl": repo_url, "branch": "master",
         "command": "bash run_tests.sh", "junitPath": "../evil.xml"}, tok, expect=400)
     req("POST", "/script-suites", {
-        "name": MARK + " bad2", "repoUrl": repo_url, "branch": "master",
+        "projectId": pid, "name": MARK + " bad2", "repoUrl": repo_url, "branch": "master",
         "command": "bash run_tests.sh", "junitPath": "test-results/junit.xml",
         "env": [{"key": "1BAD", "value": "x", "secret": False}]}, tok, expect=400)
-    print("[1] CRUD + secret 掩码/掩码回传 + 路径与 env 键校验 OK")
+    req("POST", "/script-suites", {
+        "name": MARK + " bad3", "repoUrl": repo_url, "branch": "master",
+        "command": "bash run_tests.sh", "junitPath": "test-results/junit.xml"}, tok, expect=400)
+    req("POST", "/script-suites", {
+        "projectId": "ghost-no-such", "name": MARK + " bad4", "repoUrl": repo_url,
+        "branch": "master", "command": "bash run_tests.sh",
+        "junitPath": "test-results/junit.xml"}, tok, expect=404)
+    req("GET", "/script-suites", token=tok, expect=400)  # projectId 必填
+    print("[1] CRUD + secret 掩码/掩码回传 + 路径/env 键/projectId 强制校验 OK")
 
     # ---- 节点与 runner ----
     issued = req("POST", "/agent-nodes", {"name": MARK}, tok)
@@ -234,23 +250,33 @@ def main():
 
         # 套件 B/C 走套件默认节点（不随 run 传 agentNodeId）
         suite_b = req("POST", "/script-suites", {
-            "name": MARK + " B", "repoUrl": repo_url, "branch": "master",
+            "projectId": pid, "name": MARK + " B", "repoUrl": repo_url, "branch": "master",
             "command": "bash check_state.sh && bash run_tests.sh",
             "junitPath": "test-results/junit.xml",
             "agentNodeId": str(nid), "workspaceKey": "cap69-shared", "timeoutSec": 600,
         }, tok)
         suites_extra.append(suite_b["id"])
         suite_c = req("POST", "/script-suites", {
-            "name": MARK + " C", "repoUrl": repo_url, "branch": "master",
+            "projectId": pid, "name": MARK + " C", "repoUrl": repo_url, "branch": "master",
             "command": "bash run_tests.sh", "junitPath": "test-results/junit.xml",
             "env": [{"key": "SUITE_MODE", "value": "nojunit", "secret": False}],
             "agentNodeId": str(nid), "timeoutSec": 600,
         }, tok)
         suites_extra.append(suite_c["id"])
+        # 套件 D 无默认节点 → 回落项目默认节点（先把项目默认节点设为 nid）
+        req("PUT", f"/projects/{pid}", {"name": MARK, "path": str(REPO_DIR),
+                                        "agentNodeId": str(nid)}, tok)
+        suite_d = req("POST", "/script-suites", {
+            "projectId": pid, "name": MARK + " D", "repoUrl": repo_url, "branch": "master",
+            "command": "bash run_tests.sh", "junitPath": "test-results/junit.xml",
+            "timeoutSec": 600,
+        }, tok)
+        suites_extra.append(suite_d["id"])
 
         # ---- [2] 触发运行（显式节点）→ SUCCESS，三条结果逐一断言 ----
         run = req("POST", f"/script-suites/{aid}/run", {"agentNodeId": str(nid)}, tok)
         run_ids.append(run["id"])
+        assert run["projectId"] == pid, f"run 应归属项目: {run['projectId']}"
         r = wait_run(run["id"], tok)
         assert r["status"] == "SUCCESS", f"应 SUCCESS: {r['status']} {r.get('errorSummary')}"
         s = r["summary"]
@@ -262,7 +288,8 @@ def main():
         assert by_name["fake.Cluster#集群创建"]["duration"] == 500, by_name["fake.Cluster#集群创建"]
         assert by_name["fake.Cluster#扩容到三节点"]["duration"] == 1250
         assert by_name["fake.Cluster#缩容回单节点"]["status"] == "skip"
-        print(f"[2] 运行 #{run['id']} SUCCESS：3 条结果（pass×2/skip×1，中文名 + 耗时）OK")
+        assert r.get("reportDocId"), "绑定项目后报告应沉淀 CAP-03 文档"
+        print(f"[2] 运行 #{run['id']} SUCCESS：3 条结果 + run.projectId + 报告文档 #{r['reportDocId']} OK")
 
         # ---- [3] env 覆盖 → FAILED + 缺陷线索 ----
         run = req("POST", f"/script-suites/{aid}/run",
@@ -301,11 +328,24 @@ def main():
             f"共享工作区应读到 .state-ran.txt: {r['status']} {r.get('errorSummary')}"
         print(f"[6] 共享 workspaceKey 跨套件复用 OK（#{run['id']} SUCCESS）")
 
-        # ---- [8] kind=script 运行历史 ----
-        hist = req("GET", "/test-runs?kind=script", token=tok)
-        assert len(hist) == 4, f"应有 4 条脚本运行记录: {len(hist)}"
-        assert all(h["projectId"] is None for h in hist), "脚本运行应无项目归属"
-        print("[8] GET /test-runs?kind=script 过滤 OK（4 条，projectId 全空）")
+        # ---- [7] 套件 D 无默认节点 → 项目默认节点路由 ----
+        run = req("POST", f"/script-suites/{suite_d['id']}/run", None, tok)
+        run_ids.append(run["id"])
+        r = wait_run(run["id"], tok)
+        assert r["status"] == "SUCCESS", f"项目默认节点路由应跑通: {r['status']} {r.get('errorSummary')}"
+        assert str(r["agentNodeId"]) == str(nid), f"应落在项目默认节点 {nid}: {r['agentNodeId']}"
+        print(f"[7] 套件默认空 → 项目默认节点路由 OK（#{run['id']} 落在节点 {nid}）")
+
+        # ---- [8] 项目运行历史含全部脚本运行 ----
+        hist = req("GET", f"/test-runs?projectId={pid}", token=tok)
+        assert len(hist) == 5, f"项目历史应有 5 条脚本运行: {len(hist)}"
+        assert all(h["projectId"] == pid for h in hist), "脚本运行应全部归属本项目"
+        print("[8] GET /test-runs?projectId= 项目历史 OK（5 条，projectId 全一致）")
+
+        # ---- [9] createInternal 拒收 script 套件 ----
+        resp = req("POST", "/tests/runs", {"projectId": pid, "suiteIds": [aid]}, tok, expect=400)
+        assert resp is not None
+        print("[9] /tests/runs 收 script 套件 400 OK（误混入防护）")
     finally:
         try:
             for rid in run_ids:
@@ -314,6 +354,7 @@ def main():
                 req("DELETE", f"/script-suites/{sid}", token=tok)
             for n in (node, offline["node"]):
                 req("DELETE", f"/agent-nodes/{n['id']}", token=tok)
+            req("DELETE", f"/projects/{pid}", token=tok)
         except Exception as ex:
             print(f"[cleanup] {ex}")
         kill_tree(runner.pid)
