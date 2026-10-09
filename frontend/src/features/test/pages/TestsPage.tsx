@@ -1,8 +1,8 @@
 // 测试记录页（/tests）：当前项目的套件列表与测试运行历史。
 // CAP-10 测试中心 + CAP-69 脚本套件，三种类型（smoke/api/script）交互统一：
-// 新建 = 统一抽屉 SuiteFormDrawer（类型选择在表单内，script 展开 git/命令/env 字段）；
-// 行操作 = 运行/编辑/删除（运行走统一 RunSuiteModal 按类型渲染字段；编辑统一跳内层页 /tests/suites/:id）；
-// 顶部「新建运行」保留为多套件批量入口（不含 script，后端混入会 400）。
+// 新建 = 统一抽屉 SuiteFormDrawer（类型选择在表单内：smoke/api 填名称、openapi 由项目 OpenAPI 文档生成、
+// script 展开 git/命令/env 字段）；行操作 = 运行/编辑/删除（运行走统一 RunSuiteModal 按类型渲染字段；
+// 编辑统一跳内层页 /tests/suites/:id）；顶部「新建运行」保留为多套件批量入口（不含 script，后端混入会 400）。
 // 运行历史 → 详情 Drawer（WS 实时结果流）；失败运行可一键生成缺陷线索（FR-06）。
 // 布局遵循 docs/core/前端内容区布局约定.md：单 Card + title 内 Segmented 切换视图，操作按钮收 extra，表格默认密度。
 import {
@@ -24,14 +24,12 @@ import {
   PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
-  SyncOutlined,
 } from '@ant-design/icons'
 import {
   createRun,
   deleteRun,
   deleteScriptSuite,
   deleteSuite,
-  generateSuite,
   getIssues,
   getRunLogs,
   getRunReport,
@@ -121,16 +119,6 @@ function TestCenter({ id }: { id: string }) {
     loadAll()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
-
-  const onGenerate = async () => {
-    try {
-      const s = await generateSuite(id)
-      message.success(`已从 OpenAPI 生成套件「${s.name}」（${s.caseCount} 个用例）`)
-      setSuites(await listSuites(id))
-    } catch (e) {
-      showError(e, '生成失败')
-    }
-  }
 
   const onDeleteSuite = (s: TestSuite) => {
     const isScript = s.kind === 'script'
@@ -299,7 +287,6 @@ function TestCenter({ id }: { id: string }) {
         view === 'suites' ? (
           <Space>
             <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
-            <Button icon={<SyncOutlined />} onClick={onGenerate}>从 OpenAPI 生成</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建套件</Button>
           </Space>
         ) : (
@@ -317,7 +304,7 @@ function TestCenter({ id }: { id: string }) {
             script 脚本套件自带 git 源与命令、下发执行节点跑（JUnit 自动解析进用例结果）。
           </Typography.Paragraph>
           <FitTable<TestSuite> rowKey="id" loading={loading} dataSource={suites} columns={suiteColumns}
-            pagination={LIST_PAGINATION} locale={{ emptyText: '暂无套件：先「从 OpenAPI 生成」，或新建冒烟套件（health 用例走执行节点健康检查）/ 脚本套件（git 源 + 命令）' }} />
+            pagination={LIST_PAGINATION} locale={{ emptyText: '暂无套件：点右上角「新建套件」——冒烟（health 用例走执行节点健康检查）/ api（手工编排或选 openapi 由项目文档生成）/ 脚本（git 源 + 命令）' }} />
         </>
       ) : (
         <>
