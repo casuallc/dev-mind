@@ -58,7 +58,8 @@ CAP-25/31 的 runner 工作区是「每会话独立目录」：克隆缓存 `<wo
   `POST /api/sessions/{id}/finalize`（鉴权 = 会话创建者或管理员）→ 服务端下发
   `workspace_finalize` 帧（协议 v7，同步等 ack）→ runner 逐库执行：
   脏检查（`discardChanges=true` 时先 `reset --hard + clean -fd`）→ fetch 基线 →
-  **临时 detached worktree 合并**（不动 main 缓存检出分支）`merge --no-ff feature/<sid>` →
+  **临时 detached worktree 合并**（不动 main 缓存检出分支）`merge --ff feature/<sid>`
+  （基线未分叉则快进、**不留收口合并点**；已分叉才落合并提交）→
   push 基线 → best-effort push 会话分支（供 diff）→ `worktree remove` + `branch -D`。
   合并冲突 `merge --abort` 并透传脱敏错误尾部，work/ 保留待人工/resume 处理。
   成功落 `sessions.workspace_state=FINALIZED`（新列，OPEN/FINALIZED，null=旧会话）。
@@ -143,7 +144,7 @@ GET  /api/sessions...              SessionView + workspaceState（按钮态/Tag�
 1. 新会话在 runner 侧落 `<projectId>/<username>/{main,work}`；第二个同用户同项目会话
    launch 失败报占用分支；resume 同会话幂等复用；
 2. 会话结束目录保留、远端无自动 push；未提交改动有告警事件；
-3. 页面执行收口：远端基线含合并提交（--no-ff）、会话分支已推送、work 目录删除、
+3. 页面执行收口：远端基线含会话产出（`merge --ff`：可快进则快进不留合并点）、会话分支已推送、work 目录删除、
    workspace_state=FINALIZED；重复收口 409；
 4. 未提交改动收口失败提示 discardChanges；合并冲突失败透传且 work/ 保留，可 resume
    解冲突后收口成功；
