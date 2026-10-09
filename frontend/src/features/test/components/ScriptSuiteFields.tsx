@@ -1,6 +1,6 @@
 // script 脚本套件字段组：新建抽屉（SuiteFormDrawer）与内层编辑页（SuiteDetailPage）共用，
 // 保证两处字段/校验/文案一致。toScriptSuiteInput 按表单值组装提交体（空值转 undefined）。
-import { Form, Input, InputNumber, Select, Space } from 'antd'
+import { Flex, Form, Input, InputNumber, Select } from 'antd'
 import type { AgentNode } from '../../agent/types'
 import type { ScriptSuiteInput } from '../types'
 import EnvEditor from './EnvEditor'
@@ -46,7 +46,7 @@ export default function ScriptSuiteFields({ nodes }: { nodes: AgentNode[] }) {
         extra="节点凭自身 git 凭据 clone/pull（内网匿名读或节点 credential helper）">
         <Input placeholder="http://git.local/group/repo.git" />
       </Form.Item>
-      <Space size={12} style={{ display: 'flex' }}>
+      <Flex gap={12} align="start">
         <Form.Item label="分支" name="branch" rules={[{ required: true, message: '请输入分支' }]} style={{ flex: 1 }}>
           <Input placeholder="master" />
         </Form.Item>
@@ -54,7 +54,7 @@ export default function ScriptSuiteFields({ nodes }: { nodes: AgentNode[] }) {
           extra="命令在仓库内该子目录执行，如 e2e">
           <Input placeholder="e2e" />
         </Form.Item>
-      </Space>
+      </Flex>
       <Form.Item label="执行命令" name="command" rules={[{ required: true, message: '请输入执行命令' }]}
         extra="runner execAllowlist 逐行校验首词，npm/npx/git 等需先放行">
         <Input.TextArea rows={4} placeholder={'npm ci\nnpx playwright test'} style={{ fontFamily: 'monospace' }} />
@@ -63,7 +63,7 @@ export default function ScriptSuiteFields({ nodes }: { nodes: AgentNode[] }) {
         extra="相对工作子目录；缺失时不判失败，仅在备注中注记">
         <Input placeholder="test-results/junit.xml" />
       </Form.Item>
-      <Space size={12} style={{ display: 'flex' }}>
+      <Flex gap={12} align="start">
         <Form.Item label="超时（秒）" name="timeoutSec" style={{ flex: 1 }}>
           <InputNumber min={60} max={86400} style={{ width: '100%' }} />
         </Form.Item>
@@ -71,7 +71,7 @@ export default function ScriptSuiteFields({ nodes }: { nodes: AgentNode[] }) {
           extra="留空 = 项目默认节点 → 平台默认">
           <Select allowClear placeholder="项目默认 → 平台默认" options={nodeOptions} />
         </Form.Item>
-      </Space>
+      </Flex>
       <Form.Item label="工作区 key（可选）" name="workspaceKey"
         extra="默认 = 套件 id；多套件共享同一 key 即共享节点工作区目录（套件间状态文件跨运行保留）">
         <Input placeholder="如 admq-e2e" />

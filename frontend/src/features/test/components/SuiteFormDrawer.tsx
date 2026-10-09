@@ -2,7 +2,7 @@
 // smoke/api 只填名称直建（createSuite）；openapi 由项目 OpenAPI 文档生成（generateSuite，名称服务端定，不用填）；
 // script 展开 git 源/命令/env 等字段（createScriptSuite，字段与内层编辑页共用 ScriptSuiteFields）。
 // 编辑不走这里：所有类型统一跳内层页 /tests/suites/:id。
-import { Button, Drawer, Form, Input, Select, Space, message } from 'antd'
+import { Button, Drawer, Flex, Form, Input, Select, Space, message } from 'antd'
 import { useEffect, useState } from 'react'
 import { createScriptSuite, createSuite, generateSuite } from '../api'
 import type { AgentNode } from '../../agent/types'
@@ -71,7 +71,7 @@ export default function SuiteFormDrawer({ open, projectId, nodes, onClose, onSav
       }
     >
       <Form form={form} layout="vertical">
-        <Space size={12} style={{ display: 'flex' }} align="start">
+        <Flex gap={12} align="start">
           <Form.Item label="类型" name="kind" rules={[{ required: true }]} style={{ width: 260 }}>
             <Select options={[
               { value: 'smoke', label: 'smoke（冒烟：health 用例）' },
@@ -85,7 +85,7 @@ export default function SuiteFormDrawer({ open, projectId, nodes, onClose, onSav
               <Input placeholder={kind === 'script' ? '如 ADMQ Manager UI E2E' : '如 冒烟套件 / 支付回归'} />
             </Form.Item>
           )}
-        </Space>
+        </Flex>
         {kind === 'script' && <ScriptSuiteFields nodes={nodes} />}
         {kind === 'openapi' && (
           <div style={{ color: '#888', fontSize: 12 }}>

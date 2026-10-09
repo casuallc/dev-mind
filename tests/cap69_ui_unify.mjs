@@ -318,6 +318,16 @@ async function main() {
     await waitFor(() => evaluate(ws, `!!window.__formItem(document, 'git 仓库地址')`), 'script 属性表单渲染')
     const cmdVal = await evaluate(ws, `window.__formItem(document, '执行命令').querySelector('textarea').value`)
     if (cmdVal !== 'echo hi') failures.push(`script 内层页命令回显错：${cmdVal}`)
+    // ⑤a 并排字段布局回归：Space 会包一层 .ant-space-item 使子项 flex:1 失效（退回内容宽度、字段瘦长错位），
+    // 必须 Flex 直包——此处断言「分支」输入框宽度接近整行字段（git 仓库地址）的一半
+    const layoutProbe = await evaluate(ws, `(() => {
+      const w = (label) => window.__formItem(document, label)?.querySelector('input')?.getBoundingClientRect().width ?? 0
+      return { repo: w('git 仓库地址'), branch: w('分支'), subdir: w('工作子目录（可选）') }
+    })()`)
+    if (!(layoutProbe.repo > 0 && layoutProbe.branch > 0.35 * layoutProbe.repo && layoutProbe.branch < 0.65 * layoutProbe.repo
+      && Math.abs(layoutProbe.branch - layoutProbe.subdir) < 24)) {
+      failures.push(`script 内层页并排字段宽度异常：${JSON.stringify(layoutProbe)}`)
+    }
     const hasCaseTable = await evaluate(ws, `!!document.querySelector('.ant-layout-content .ant-table')`)
     if (hasCaseTable) failures.push('script 内层页不应有用例表格')
     // ⑤b 内层页保存：改命令 → 保存 → API 回读确认落库

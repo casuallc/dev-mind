@@ -8,6 +8,7 @@ import {
   Button,
   Card,
   Descriptions,
+  Flex,
   Form,
   Input,
   Modal,
@@ -403,7 +404,7 @@ function CaseForm({ form, onFinish }: { form: FormInstance<CaseFormValues>; onFi
   const healthMode = Form.useWatch('healthMode', form)
   return (
     <Form form={form} layout="vertical" onFinish={onFinish}>
-      <Space size={8} style={{ display: 'flex' }} align="start">
+      <Flex gap={8} align="start">
         <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入用例名' }]} style={{ flex: 1 }}>
           <Input placeholder="如 健康检查 / 登录接口" />
         </Form.Item>
@@ -413,9 +414,9 @@ function CaseForm({ form, onFinish }: { form: FormInstance<CaseFormValues>; onFi
         <Form.Item label="启用" name="enabled" valuePropName="checked">
           <Switch />
         </Form.Item>
-      </Space>
+      </Flex>
       {kind === 'health' ? (
-        <Space size={8} style={{ display: 'flex' }} align="start">
+        <Flex gap={8} align="start">
           <Form.Item label="检查方式" name="healthMode" style={{ width: 130 }}>
             <Select options={[{ value: 'command', label: '命令' }, { value: 'http', label: 'HTTP' }]} />
           </Form.Item>
@@ -424,47 +425,47 @@ function CaseForm({ form, onFinish }: { form: FormInstance<CaseFormValues>; onFi
               <Input placeholder="如 curl -sf http://…/health（exec 帧下发执行节点，受 runner 白名单约束）" />
             </Form.Item>
           ) : (
-            <Space size={8} style={{ display: 'flex' }}>
+            <>
               <Form.Item label="URL" name="healthUrl" style={{ width: 260 }}>
                 <Input placeholder="留空用运行 baseUrl+path" />
               </Form.Item>
               <Form.Item label="期望状态" name="expectedStatus" style={{ width: 130 }}>
                 <Input placeholder="如 200 或 2XX" />
               </Form.Item>
-            </Space>
+            </>
           )}
-        </Space>
+        </Flex>
       ) : (
-        <Space size={8} style={{ display: 'flex' }} align="start">
+        <Flex gap={8} align="start">
           <Form.Item label="方法" name="method" style={{ width: 110 }}>
             <Select options={METHODS.map((m) => ({ value: m, label: m }))} />
           </Form.Item>
           <Form.Item label="路径" name="path" rules={[{ required: true, message: '请输入路径' }]} style={{ flex: 1 }}>
             <Input placeholder="如 /api/users/{id}" />
           </Form.Item>
-        </Space>
+        </Flex>
       )}
       {kind !== 'health' && (
         <>
-          <Space size={8} style={{ display: 'flex' }}>
+          <Flex gap={8} align="start">
             <Form.Item label="Query 参数（每行 k=v）" name="paramsText" style={{ flex: 1 }}>
               <Input.TextArea rows={2} placeholder="name=test" />
             </Form.Item>
             <Form.Item label="Header（每行 k=v）" name="headersText" style={{ flex: 1 }}>
               <Input.TextArea rows={2} placeholder="X-Api-Key=xxx" />
             </Form.Item>
-          </Space>
+          </Flex>
           <Form.Item label="请求体（JSON）" name="body">
             <Input.TextArea rows={2} placeholder='{"name":"carol"}' />
           </Form.Item>
-          <Space size={8} style={{ display: 'flex' }}>
+          <Flex gap={8} align="start">
             <Form.Item label="期望状态" name="expectedStatus" style={{ width: 130 }}>
               <Input placeholder="如 200 或 2XX" />
             </Form.Item>
             <Form.Item label="期望包含（可选）" name="expectedContains" style={{ flex: 1 }}>
               <Input placeholder="响应体包含的子串" />
             </Form.Item>
-          </Space>
+          </Flex>
         </>
       )}
     </Form>
