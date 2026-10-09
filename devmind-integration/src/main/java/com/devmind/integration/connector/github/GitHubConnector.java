@@ -1,5 +1,7 @@
 package com.devmind.integration.connector.github;
 
+import com.devmind.common.egress.EgressProxyRouter;
+import com.devmind.common.egress.EgressProxySelector;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.integration.config.IntegrationProperties;
@@ -7,6 +9,7 @@ import com.devmind.integration.connector.IntegrationConnector;
 import com.devmind.integration.model.IntegrationEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -37,10 +40,14 @@ public class GitHubConnector implements IntegrationConnector {
 
     private final IntegrationProperties props;
     private final ObjectMapper mapper;
+    /** CAP-70 FR-06：出口路由（ObjectProvider 探测，agent 模块缺席 = 全直连） */
+    private final ObjectProvider<EgressProxyRouter> egressRouterProvider;
 
-    public GitHubConnector(IntegrationProperties props, ObjectMapper mapper) {
+    public GitHubConnector(IntegrationProperties props, ObjectMapper mapper,
+                           ObjectProvider<EgressProxyRouter> egressRouterProvider) {
         this.props = props;
         this.mapper = mapper;
+        this.egressRouterProvider = egressRouterProvider;
     }
 
     @Override
@@ -213,7 +220,11 @@ public class GitHubConnector implements IntegrationConnector {
 
     private RestClient client(String token) {
         HttpClient http = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofMillis(props.getConnectTimeoutMs())).build();
+                .connectTimeout(Duration.ofMillis(props.getConnectTimeoutMs()))
+                // CAP-70 FR-06：规则驱动 ProxySelector 显式挂载（不设 JVM 全局默认）；
+                // router 缺席 = 恒 DIRECT 零行为变化
+                .proxy(new EgressProxySelector(egressRouterProvider.getIfAvailable()))
+                .build();
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(http);
         factory.setReadTimeout(Duration.ofMillis(props.getReadTimeoutMs()));
         return RestClient.builder()

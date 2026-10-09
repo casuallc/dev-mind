@@ -1,21 +1,32 @@
 package com.devmind.integration.connector.feishu;
 
+import com.devmind.common.egress.EgressProxyRouter;
+import com.devmind.common.egress.EgressProxySelector;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.integration.connector.IntegrationConnector;
 import com.devmind.integration.model.IntegrationEntity;
 import java.util.List;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 /**
  * 飞书连接器（CAP-45）：无 git/MR/issue 能力，仅文档拉取；
  * 连接测试 = tenant_access_token 获取成功（校验 appId/appSecret 有效）。
  * secretEnc 密文内容为 "appId\nappSecret"（BASIC 双行惯例，token 形参即解密后双行文本）。
+ * CAP-70 FR-06：API 客户端显式挂载规则驱动 ProxySelector（router 缺席 = 直连）。
  */
 @Component
 public class FeishuConnector implements IntegrationConnector {
 
     public static final String DEFAULT_BASE_URL = "https://open.feishu.cn";
+
+    /** CAP-70：出口路由（ObjectProvider 探测，agent 模块缺席 = 全直连） */
+    private final ObjectProvider<EgressProxyRouter> egressRouterProvider;
+
+    public FeishuConnector(ObjectProvider<EgressProxyRouter> egressRouterProvider) {
+        this.egressRouterProvider = egressRouterProvider;
+    }
 
     @Override
     public String type() {
@@ -50,7 +61,8 @@ public class FeishuConnector implements IntegrationConnector {
     /** 从密文双行还原 appId/appSecret 构造 API 客户端 */
     public FeishuApiClient apiClient(IntegrationEntity e, String plaintextSecret) {
         String[] lines = splitSecret(plaintextSecret);
-        return new FeishuApiClient(e.getBaseUrl(), lines[0], lines[1]);
+        return new FeishuApiClient(e.getBaseUrl(), lines[0], lines[1],
+                new EgressProxySelector(egressRouterProvider.getIfAvailable()));
     }
 
     private static String[] splitSecret(String plaintextSecret) {

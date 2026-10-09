@@ -36,10 +36,23 @@ public class FeishuApiClient {
     private Instant tokenExpireAt = Instant.EPOCH;
 
     public FeishuApiClient(String baseUrl, String appId, String appSecret) {
+        this(baseUrl, appId, appSecret, null);
+    }
+
+    /**
+     * @param proxySelector CAP-70 FR-06：规则驱动出口选择器（{@code EgressProxySelector}），
+     *                      null = 直连零行为变化。显式挂载、不设 JVM 全局默认。
+     */
+    public FeishuApiClient(String baseUrl, String appId, String appSecret,
+                           java.net.ProxySelector proxySelector) {
         this.baseUrl = baseUrl.replaceAll("/+$", "");
         this.appId = appId;
         this.appSecret = appSecret;
-        this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+        HttpClient.Builder builder = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10));
+        if (proxySelector != null) {
+            builder.proxy(proxySelector);
+        }
+        this.http = builder.build();
     }
 
     /** tenant_access_token（缓存有效直接返回） */
