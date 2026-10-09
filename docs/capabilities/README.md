@@ -155,6 +155,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-67 用量统计依赖 CAP-01（角色判定）与 CAP-05/30 的用量累计列、CAP-02/13 的标签补全——全部**只读**，与 CAP-16 同型的纯聚合能力：零新表、零写路径、零事件，不改被统计模块；个人数据可见范围照搬 CAP-62 owner 强制口径（非 admin 强制本人、`dim=user` 仅 admin）。
 - CAP-68 会话附件依赖 CAP-32（附件底座 + `AttachmentContentResolver` SPI + images 帧先例）、CAP-21/34（远程 input 帧通道）、CAP-40（ContextPackage inputs 物化先例）：附件模块自身加标签/过期/批量删（零新依赖）；会话侧图片复用已全通的 images 帧，文件借 input 帧新增 `files` 字段内联 base64 由 runner 落盘工作区（协议版本 +1，旧 runner 丢文件不丢文本）；创建即带附件走 inputs 条目物化，限额对齐 CAP-40。
 - CAP-69 脚本测试套件依赖 CAP-10（套件/运行/报告/缺陷模型与 WS 流）、CAP-36（exec 帧 + repo 块 + 节点路由）、CAP-56（LabMarkers stdout marker 回传先例）：test_suites/test_runs 放开 project_id 可空承载独立套件，节点整包跑脚本后经单行 `DEVMIND_JUNIT` marker 回收 JUnit XML 解析进用例结果；零新协议帧、零 runner 改动。
+- CAP-70 服务端出口反向隧道依赖 CAP-21/34/43/65：「服务端在外网、代码在内网」部署形态下服务端直连类功能（GitRemoteOps 克隆/fetch/diff/push、Integration REST、书签探测）的通用解法——runner 出向建专用隧道 WS（独立于控制通道、流多路复用+窗口流控，协议 v21），服务端本机落成 127.0.0.1 SOCKS5 端点，平台级 `egress_rules` host glob 规则表（服务端 DB 权威、即白名单，runner 持快照二次校验）逐请求选出口；git 走 `-c http.<url>.proxy=socks5h://`（DNS 在 runner 侧解析）、Java 连接器挂规则驱动 ProxySelector；命中规则但隧道离线快速失败禁静默回落，无规则=功能关闭零行为变化；与 CAP-43（runner→外网）正交可叠加。
 
 ## 组装方式（后续流程层）
 
