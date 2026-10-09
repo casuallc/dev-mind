@@ -149,6 +149,9 @@ public class AgentRunnerMain {
                 () -> connRef[0].send(helloFrame(sessions, version, workspaceBytes.get(),
                         config.labels(), toolchain.get())));
         connRef[0] = conn;
+        // CAP-70：出口隧道通道（独立于控制通道的专用 WS，二进制流帧；隧道 URL 由 serverUrl 换尾段推导）。
+        // 与控制通道同一 token 认证；隧道断连不影响控制通道，重连自控
+        TunnelConnection tunnel = new TunnelConnection(config, mapper);
 
         ScheduledExecutorService heartbeat = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "heartbeat");
@@ -187,8 +190,19 @@ public class AgentRunnerMain {
             sessions.killAll();
             execHandler.killAll();
             terminalHandler.killAll();
+            tunnel.shutdown();
             conn.shutdown();
         }));
+
+        // CAP-70：隧道重连循环跑独立线程（与控制通道同模型，互不阻塞）
+        Thread tunnelThread = Thread.ofPlatform().name("egress-tunnel").unstarted(() -> {
+            try {
+                tunnel.run();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        tunnelThread.start();
 
         conn.run(); // 阻塞：断线重连循环
     }
