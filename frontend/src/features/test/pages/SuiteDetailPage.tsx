@@ -1,7 +1,8 @@
-// 套件编辑页（/tests/suites/:suiteId）：套件信息 + 用例编辑，内层页面格式（取代原「管理」/「编辑用例」Drawer）。
-// 布局遵循 docs/core/前端内容区布局约定.md：单 Card 撑满内容区，操作集中 extra（添加用例/保存全部/沉淀为文档/删除/返回列表），
+// 套件编辑页（/tests/suites/:suiteId）：内层页面格式，三种类型统一入口。
+// api/smoke = 套件信息 + 用例编辑（整体替换保存：不在列表中的现有用例将被删除）+ 沉淀文档；
+// script（CAP-69）= 脚本属性表单（git 源/命令/env 等，字段与新建抽屉共用 ScriptSuiteFields，updateScriptSuite 保存），无用例/沉淀语义。
+// 布局遵循 docs/core/前端内容区布局约定.md：单 Card 撑满内容区，操作集中 extra，
 // body 用 pageCardBodyFlexStyle + FitTable（表头吸顶、只表体滚）。
-// 用例整体替换保存：不在列表中的现有用例将被删除。
 import {
   Button,
   Card,
@@ -28,10 +29,13 @@ import {
   PlusOutlined,
   SaveOutlined,
 } from '@ant-design/icons'
-import { deleteSuite, getSuite, publishSuite, saveCases } from '../api'
-import type { TestCase, TestCaseInput, TestSuite } from '../types'
+import { deleteScriptSuite, deleteSuite, getScriptSuite, getSuite, publishSuite, saveCases, updateScriptSuite } from '../api'
+import type { ScriptSuite, TestCase, TestCaseInput, TestSuite } from '../types'
+import type { AgentNode } from '../../agent/types'
+import { listAgentNodes } from '../../agent/api'
 import { fmtTime, paramsToText, textToParams } from '../../../shared/utils/format'
 import { SUITE_KIND_COLOR } from '../constants'
+import ScriptSuiteFields, { toScriptSuiteInput } from '../components/ScriptSuiteFields'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
@@ -139,6 +143,12 @@ export default function SuiteDetailPage() {
   const [editing, setEditing] = useState<TestCaseInput | null>(null)
   const [isNew, setIsNew] = useState(false)
   const [form] = Form.useForm<CaseFormValues>()
+  // script 分支：脚本属性（字段族不同，走 /script-suites 端点）+ 节点选项
+  const [script, setScript] = useState<ScriptSuite | null>(null)
+  const [nodes, setNodes] = useState<AgentNode[]>([])
+  const [scriptForm] = Form.useForm()
+
+  const isScript = suite?.kind === 'script'
 
   const load = useCallback(async () => {
     if (!suiteId) return
@@ -147,12 +157,32 @@ export default function SuiteDetailPage() {
       const s = await getSuite(Number(suiteId))
       setSuite(s)
       setCases(s.cases.map((c) => fromView(c)))
+      if (s.kind === 'script') {
+        const [ss, nd] = await Promise.all([
+          getScriptSuite(s.id),
+          listAgentNodes().catch(() => []),
+        ])
+        setScript(ss)
+        setNodes(nd)
+        scriptForm.setFieldsValue({
+          name: ss.name,
+          repoUrl: ss.repoUrl,
+          branch: ss.branch,
+          workSubdir: ss.workSubdir ?? '',
+          command: ss.command,
+          junitPath: ss.junitPath,
+          timeoutSec: ss.timeoutSec ?? 7200,
+          workspaceKey: ss.workspaceKey ?? '',
+          agentNodeId: ss.agentNodeId ?? undefined,
+          env: ss.env,
+        })
+      }
     } catch (e) {
       showError(e, '加载套件失败')
     } finally {
       setLoading(false)
     }
-  }, [suiteId])
+  }, [suiteId, scriptForm])
 
   useEffect(() => {
     load()
@@ -203,18 +233,38 @@ export default function SuiteDetailPage() {
     }
   }
 
+  const onSaveScript = async () => {
+    if (!suite || !script) return
+    const v = await scriptForm.validateFields()
+    setSaving(true)
+    try {
+      const updated = await updateScriptSuite(script.id, toScriptSuiteInput(suite.projectId, v))
+      setScript(updated)
+      setSuite({ ...suite, name: updated.name })
+      message.success('套件已保存')
+    } catch (e) {
+      showError(e, '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const onDelete = () => {
     if (!suite) return
     const s = suite
+    const scriptKind = s.kind === 'script'
     Modal.confirm({
       centered: true,
       title: `删除套件「${s.name}」？`,
-      content: `将删除 ${s.caseCount} 个用例及对应结果记录，不可恢复。`,
+      content: scriptKind
+        ? '运行历史记录保留，仅删除套件定义，不可恢复。'
+        : `将删除 ${s.caseCount} 个用例及对应结果记录，不可恢复。`,
       okText: '删除',
       okButtonProps: { danger: true },
       cancelText: '取消',
       onOk: async () => {
-        await deleteSuite(s.id)
+        if (scriptKind) await deleteScriptSuite(s.id)
+        else await deleteSuite(s.id)
         message.success('已删除')
         navigate('/tests')
       },
@@ -247,7 +297,13 @@ export default function SuiteDetailPage() {
       style={pageCardStyle}
       styles={{ body: pageCardBodyFlexStyle }}
       title={suite ? `套件 · ${suite.name}` : '套件'}
-      extra={
+      extra={isScript ? (
+        <Space>
+          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSaveScript} disabled={!script}>保存</Button>
+          <Button danger icon={<DeleteOutlined />} disabled={!suite} onClick={onDelete}>删除</Button>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/tests')}>返回列表</Button>
+        </Space>
+      ) : (
         <Space>
           <Button icon={<PlusOutlined />} onClick={() => openEdit(null)} disabled={!suite}>添加用例</Button>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSaveAll} disabled={!suite}>保存全部</Button>
@@ -257,12 +313,31 @@ export default function SuiteDetailPage() {
           <Button danger icon={<DeleteOutlined />} disabled={!suite} onClick={onDelete}>删除</Button>
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/tests')}>返回列表</Button>
         </Space>
-      }
+      )}
     >
       {loading || !suite ? (
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Spin />
         </div>
+      ) : isScript ? (
+        <>
+          <Descriptions size="small" column={3} style={{ marginBottom: 12 }}>
+            <Descriptions.Item label="ID">#{suite.id}</Descriptions.Item>
+            <Descriptions.Item label="类型">
+              <Tag color={SUITE_KIND_COLOR[suite.kind]}>{suite.kind}</Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="创建时间">{fmtTime(suite.createdAt)}</Descriptions.Item>
+          </Descriptions>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+            脚本套件自带 git 源与命令，下发执行节点跑（JUnit 产出自动解析进用例结果）；保存即生效，下次运行使用新配置。
+          </Typography.Paragraph>
+          <Form form={scriptForm} layout="vertical" style={{ maxWidth: 720 }}>
+            <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入套件名' }]}>
+              <Input placeholder="如 ADMQ Manager UI E2E" />
+            </Form.Item>
+            <ScriptSuiteFields nodes={nodes} />
+          </Form>
+        </>
       ) : (
         <>
           <Descriptions size="small" column={3} style={{ marginBottom: 12 }}>

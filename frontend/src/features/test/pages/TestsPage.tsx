@@ -1,13 +1,13 @@
 // 测试记录页（/tests）：当前项目的套件列表与测试运行历史。
-// CAP-10 测试中心：套件（OpenAPI 生成/新建；编辑/沉淀/删除在内层页 /tests/suites/:id）→ 新建测试运行（选套件+目标环境/执行节点/baseUrl）→
+// CAP-10 测试中心 + CAP-69 脚本套件，三种类型（smoke/api/script）交互统一：
+// 新建 = 统一抽屉 SuiteFormDrawer（类型选择在表单内，script 展开 git/命令/env 字段）；
+// 行操作 = 运行/编辑/删除（运行走统一 RunSuiteModal 按类型渲染字段；编辑统一跳内层页 /tests/suites/:id）；
+// 顶部「新建运行」保留为多套件批量入口（不含 script，后端混入会 400）。
 // 运行历史 → 详情 Drawer（WS 实时结果流）；失败运行可一键生成缺陷线索（FR-06）。
-// CAP-69 脚本套件作为第三种类型并入：新建套件选 script 跳脚本抽屉（git 源/命令/env），行操作走 运行/编辑/删除，
-// 触发后进本项目运行历史（新建运行弹窗不列 script 套件——它走自己的运行弹窗）。
 // 布局遵循 docs/core/前端内容区布局约定.md：单 Card + title 内 Segmented 切换视图，操作按钮收 extra，表格默认密度。
 import {
   Button,
   Card,
-  Form,
   Input,
   Modal,
   Segmented,
@@ -28,7 +28,6 @@ import {
 } from '@ant-design/icons'
 import {
   createRun,
-  createSuite,
   deleteRun,
   deleteScriptSuite,
   deleteSuite,
@@ -50,8 +49,8 @@ import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { STATUS_COLOR, SUITE_KIND_COLOR } from '../constants'
 import RunDetailDrawer from '../components/RunDetailDrawer'
 import IssuesTable from '../components/IssuesTable'
-import ScriptSuiteDrawer from '../components/ScriptSuiteDrawer'
-import ScriptRunModal from '../components/ScriptRunModal'
+import SuiteFormDrawer from '../components/SuiteFormDrawer'
+import RunSuiteModal from '../components/RunSuiteModal'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
@@ -81,15 +80,11 @@ function TestCenter({ id }: { id: string }) {
   const [baseUrl, setBaseUrl] = useState('')
   const [creating, setCreating] = useState(false)
 
-  // 套件弹窗（新建冒烟）
-  const [newOpen, setNewOpen] = useState(false)
-  const [newForm] = Form.useForm()
+  // 新建套件统一抽屉（类型选择在表单内）
+  const [createOpen, setCreateOpen] = useState(false)
 
-  // CAP-69 脚本套件抽屉（scriptEditing=null 为新建）+ 运行弹窗
-  const [scriptEditOpen, setScriptEditOpen] = useState(false)
-  const [scriptEditing, setScriptEditing] = useState<ScriptSuite | null>(null)
-  const [scriptPrefill, setScriptPrefill] = useState('')
-  const [runFor, setRunFor] = useState<ScriptSuite | null>(null)
+  // 行内统一运行弹窗（runFor=null 为关闭；script 行附 scriptSuite 详情）
+  const [runFor, setRunFor] = useState<TestSuite | null>(null)
 
   // 详情 Drawer / 文本（报告·日志）/ 缺陷线索
   const [detail, setDetail] = useState<TestRun | null>(null)
@@ -137,37 +132,24 @@ function TestCenter({ id }: { id: string }) {
     }
   }
 
-  const onCreateSuite = async (v: { name: string; kind: 'api' | 'smoke' | 'script' }) => {
-    // script 类型字段多（git 源/命令/env），不在小弹窗里填——带名跳入脚本套件抽屉
-    if (v.kind === 'script') {
-      setNewOpen(false)
-      newForm.resetFields()
-      setScriptEditing(null)
-      setScriptPrefill(v.name)
-      setScriptEditOpen(true)
-      return
-    }
-    try {
-      await createSuite(id, { name: v.name, kind: v.kind })
-      setNewOpen(false)
-      newForm.resetFields()
-      setSuites(await listSuites(id))
-      message.success('套件已创建')
-    } catch (e) {
-      showError(e)
-    }
-  }
-
   const onDeleteSuite = (s: TestSuite) => {
+    const isScript = s.kind === 'script'
     Modal.confirm({
       centered: true,
       title: `删除套件「${s.name}」？`,
-      content: `将删除 ${s.caseCount} 个用例及对应结果记录，不可恢复。`,
+      content: isScript
+        ? '运行历史记录保留，仅删除套件定义，不可恢复。'
+        : `将删除 ${s.caseCount} 个用例及对应结果记录，不可恢复。`,
       okText: '删除',
       okButtonProps: { danger: true },
       cancelText: '取消',
       onOk: async () => {
-        await deleteSuite(s.id)
+        if (isScript) {
+          await deleteScriptSuite(s.id)
+          setScriptSuites(await listScriptSuites(id))
+        } else {
+          await deleteSuite(s.id)
+        }
         setSuites(await listSuites(id))
         message.success('已删除')
       },
@@ -201,23 +183,6 @@ function TestCenter({ id }: { id: string }) {
 
   const scriptOf = (suiteId: number) => scriptSuites.find((x) => x.id === suiteId)
 
-  const onDeleteScriptSuite = (s: ScriptSuite) => {
-    Modal.confirm({
-      centered: true,
-      title: `删除脚本套件「${s.name}」？`,
-      content: '运行历史记录保留，仅删除套件定义，不可恢复。',
-      okText: '删除',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: async () => {
-        await deleteScriptSuite(s.id)
-        setScriptSuites(await listScriptSuites(id))
-        setSuites(await listSuites(id))
-        message.success('已删除')
-      },
-    })
-  }
-
   // 列宽全部固定：名称不再吃掉剩余宽度，创建时间给足 170 不折行
   const suiteColumns: ColumnsType<TestSuite> = [
     { title: 'ID', dataIndex: 'id', width: 64, render: (v: number) => `#${v}` },
@@ -230,28 +195,16 @@ function TestCenter({ id }: { id: string }) {
     {
       title: '操作',
       key: 'action',
-      width: 160,
-      render: (_, s) => {
-        // CAP-69：script 套件无用例可编，操作走自己的运行弹窗/抽屉
-        const ss = s.kind === 'script' ? scriptOf(s.id) : undefined
-        if (s.kind === 'script') {
-          return (
-            <Space size={4}>
-              <Button size="small" type="primary" ghost icon={<PlayCircleOutlined />} disabled={!ss}
-                onClick={() => ss && setRunFor(ss)}>运行</Button>
-              <Button size="small" disabled={!ss}
-                onClick={() => { if (!ss) return; setScriptEditing(ss); setScriptEditOpen(true) }}>编辑</Button>
-              <Button size="small" danger disabled={!ss} onClick={() => ss && onDeleteScriptSuite(ss)}>删除</Button>
-            </Space>
-          )
-        }
-        return (
-          <Space size={4}>
-            <Button size="small" onClick={() => navigate(`/tests/suites/${s.id}`)}>编辑</Button>
-            <Button size="small" danger onClick={() => onDeleteSuite(s)}>删除</Button>
-          </Space>
-        )
-      },
+      width: 170,
+      // 三种类型行操作统一：运行（RunSuiteModal 按类型渲染字段）/ 编辑（统一跳内层页）/ 删除
+      render: (_, s) => (
+        <Space size={4}>
+          <Button size="small" type="primary" ghost icon={<PlayCircleOutlined />}
+            onClick={() => setRunFor(s)}>运行</Button>
+          <Button size="small" onClick={() => navigate(`/tests/suites/${s.id}`)}>编辑</Button>
+          <Button size="small" danger onClick={() => onDeleteSuite(s)}>删除</Button>
+        </Space>
+      ),
     },
   ]
 
@@ -347,7 +300,7 @@ function TestCenter({ id }: { id: string }) {
           <Space>
             <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
             <Button icon={<SyncOutlined />} onClick={onGenerate}>从 OpenAPI 生成</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setNewOpen(true)}>新建套件</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建套件</Button>
           </Space>
         ) : (
           <Space>
@@ -376,24 +329,8 @@ function TestCenter({ id }: { id: string }) {
         </>
       )}
 
-      {/* 新建套件 */}
-      <Modal title="新建套件" open={newOpen} onCancel={() => setNewOpen(false)}
-        onOk={() => newForm.submit()} okText="创建" width={420} destroyOnClose>
-        <Form form={newForm} layout="vertical" onFinish={onCreateSuite} initialValues={{ kind: 'smoke' }}>
-          <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入套件名' }]}>
-            <Input placeholder="如 冒烟套件 / 支付回归" />
-          </Form.Item>
-          <Form.Item label="类型" name="kind" rules={[{ required: true }]}>
-            <Select options={[
-              { value: 'smoke', label: 'smoke（冒烟：health 用例）' },
-              { value: 'api', label: 'api（手工编排 http 用例）' },
-              { value: 'script', label: 'script（脚本：git 源 + 命令，执行节点跑）' },
-            ]} />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* 新建测试运行 */}
+      {/* 新建套件（统一抽屉：类型选择在表单内，script 展开 git/命令/env 字段） */}
+      {/* 新建测试运行（批量多选入口；单套件行内运行走 RunSuiteModal） */}
       <Modal title="新建测试运行" open={runOpen} onCancel={() => setRunOpen(false)}
         onOk={onCreate} okText="执行测试" confirmLoading={creating} width={520} destroyOnClose>
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -436,25 +373,25 @@ function TestCenter({ id }: { id: string }) {
         </Space>
       </Modal>
 
-      {/* 套件编辑已迁内层页面 /tests/suites/:id（SuiteDetailPage）：用例编辑/沉淀文档/删除 */}
+      {/* 套件编辑统一走内层页 /tests/suites/:id（SuiteDetailPage 按 kind 分支：用例编排 / 脚本属性） */}
 
-      {/* CAP-69 脚本套件：新建/编辑抽屉 + 运行弹窗 */}
-      <ScriptSuiteDrawer
-        open={scriptEditOpen}
+      <SuiteFormDrawer
+        open={createOpen}
         projectId={id}
-        editing={scriptEditing}
-        prefillName={scriptPrefill}
         nodes={nodes}
-        onClose={() => setScriptEditOpen(false)}
+        onClose={() => setCreateOpen(false)}
         onSaved={async () => {
-          setScriptEditOpen(false)
+          setCreateOpen(false)
           setScriptSuites(await listScriptSuites(id))
           setSuites(await listSuites(id))
         }}
       />
-      <ScriptRunModal
+      <RunSuiteModal
         suite={runFor}
+        scriptSuite={runFor?.kind === 'script' ? scriptOf(runFor.id) : undefined}
+        projectId={id}
         nodes={nodes}
+        environments={environments}
         onClose={() => setRunFor(null)}
         onRan={(r) => {
           setRunFor(null)
