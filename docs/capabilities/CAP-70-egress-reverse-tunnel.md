@@ -1,6 +1,6 @@
 # CAP-70 服务端出口反向隧道（按域名规则经节点代理访问内网）
 
-> 能力 ID：CAP-70 ｜ 分类：底座 ｜ 状态：**需求定稿** ｜ 日期：2026-10-09
+> 能力 ID：CAP-70 ｜ 分类：底座 ｜ 状态：**已实现**（需求定稿 2026-10-09，实施+E2E 2026-10-09，tests/cap70_e2e.py）
 > 依赖 CAP-21（节点 WS 通道/token 认证）、CAP-34（协议版本门控）、CAP-43（节点侧代理的正交先例）、
 > CAP-65（file 帧 waiter/白名单服务端权威先例）。
 
@@ -74,6 +74,9 @@
   同 CAP-43 FR-05 的 `-c` 注入先例；file:// 与纯本地操作天然免疫）；未命中零改动。
 - 全部消费点零改动受益：CAP-23/29 克隆、CAP-29 定时 fetch、CAP-26 执行前同步、
   CAP-31 远程 diff、push 分支/tag、ls-remote 自检。
+  （实施偏差说明：CAP-31 `RemoteDiffService` 实际直调 `GitCli` 不经 `GitRemoteOps`，
+  已在该类自备同语义 `egressProxyArgs`/`fetchCmd` 注入——`-c` 仍插子命令前、
+  per-URL 键仍取干净 URL。）
 
 ### FR-06 Java HTTP 出口注入（ProxySelector）
 
