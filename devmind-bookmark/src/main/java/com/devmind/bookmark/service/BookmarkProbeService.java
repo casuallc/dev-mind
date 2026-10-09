@@ -4,10 +4,13 @@ import com.devmind.bookmark.config.BookmarkProperties;
 import com.devmind.bookmark.dto.ProbeResultView;
 import com.devmind.bookmark.model.BookmarkEntity;
 import com.devmind.bookmark.repo.BookmarkRepository;
+import com.devmind.common.egress.EgressProxyRouter;
+import com.devmind.common.egress.EgressProxySelector;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -60,9 +63,27 @@ public class BookmarkProbeService {
         return t;
     });
 
+    /** 无出口路由的便捷构造（测试与无 agent 模块装配场景；等价于 ObjectProvider 空） */
     public BookmarkProbeService(BookmarkRepository repo,
                                 BookmarkProperties props,
                                 BookmarkOwnership ownership) {
+        this(repo, props, ownership, new ObjectProvider<>() {
+            @Override
+            public EgressProxyRouter getObject() {
+                return null;
+            }
+
+            @Override
+            public EgressProxyRouter getObject(Object... args) {
+                return null;
+            }
+        });
+    }
+
+    public BookmarkProbeService(BookmarkRepository repo,
+                                BookmarkProperties props,
+                                BookmarkOwnership ownership,
+                                ObjectProvider<EgressProxyRouter> egressRouterProvider) {
         this.repo = repo;
         this.props = props;
         this.ownership = ownership;
@@ -72,6 +93,9 @@ public class BookmarkProbeService {
                 .followRedirects(HttpClient.Redirect.NEVER)
                 // 钉死 HTTP/1.1：新 JDK 默认发 Upgrade: h2c，落 body 的请求会被部分服务端丢（2026-09-20 实锤）
                 .version(HttpClient.Version.HTTP_1_1)
+                // CAP-70 FR-06：规则驱动 ProxySelector 显式挂载（不设 JVM 全局默认）；
+                // router 缺席（agent 模块未装配）= 恒 DIRECT 零行为变化
+                .proxy(new EgressProxySelector(egressRouterProvider.getIfAvailable()))
                 .build();
     }
 
