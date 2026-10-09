@@ -24,6 +24,14 @@ public interface SessionHandle extends AutoCloseable {
     /** CAP-32：注入用户消息（可带图片附件，附件引用记入 user 事件 payload）。 */
     void injectInput(String text, List<InputImage> images);
 
+    /**
+     * CAP-68：注入用户消息（图片 + 文件附件）。默认丢弃 files 降级到两参版本——
+     * 实现方应覆盖本方法；远程链路（runner）才有工作区落盘能力。
+     */
+    default void injectInput(String text, List<InputImage> images, List<com.devmind.common.agent.InputFile> files) {
+        injectInput(text, images);
+    }
+
     /** 授权响应。 */
     void authorize(String requestId, boolean accepted, String scope);
 

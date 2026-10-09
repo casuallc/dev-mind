@@ -96,15 +96,40 @@ public class SessionWsHandler extends TextWebSocketHandler {
         if (id == null) {
             return;
         }
-        switch (type) {
-            case "input" -> service.input(id, node.path("text").asText(""));
-            case "authorize" -> service.authorize(id,
-                    node.path("accepted").asBoolean(false),
-                    node.path("scope").asText("once"),
-                    node.path("requestId").asText(""));
-            case "ping" -> send(session, Map.of("type", "pong"));
-            default -> { }
+        // 上行动作失败（附件超限/附件不存在等）只回 notice 帧，不能把整条连接掀掉——
+        // 前端把 error 当致命处理（关连接不再重连），一次误触就把实时流打死。
+        try {
+            switch (type) {
+                // CAP-68：input 帧可携带 images/files 附件引用（只传引用，base64 由服务端经附件 SPI 解析）
+                case "input" -> service.input(id, node.path("text").asText(""),
+                        parseRefs(node.path("images")), parseRefs(node.path("files")));
+                case "authorize" -> service.authorize(id,
+                        node.path("accepted").asBoolean(false),
+                        node.path("scope").asText("once"),
+                        node.path("requestId").asText(""));
+                case "ping" -> send(session, Map.of("type", "pong"));
+                default -> { }
+            }
+        } catch (Exception e) {
+            log.debug("WS 上行动作失败: session={} type={} err={}", id, type, e.getMessage());
+            send(session, Map.of("type", "notice", "message", "操作未生效: " + e.getMessage()));
         }
+    }
+
+    /** CAP-68：input 帧附件引用数组 → AttachmentRef（只传引用，二进制本体由服务端经附件 SPI 解析）。 */
+    private List<com.devmind.session.dto.AttachmentRef> parseRefs(JsonNode arr) {
+        if (!arr.isArray() || arr.isEmpty()) {
+            return List.of();
+        }
+        List<com.devmind.session.dto.AttachmentRef> out = new java.util.ArrayList<>();
+        for (JsonNode item : arr) {
+            String attachmentId = item.path("attachmentId").asText("");
+            if (!attachmentId.isBlank()) {
+                out.add(new com.devmind.session.dto.AttachmentRef(attachmentId,
+                        item.path("name").asText(null), item.path("contentType").asText(null)));
+            }
+        }
+        return out;
     }
 
     @Override

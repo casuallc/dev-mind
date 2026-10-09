@@ -36,6 +36,16 @@ public interface AgentNodeConnector {
         sendInput(nodeId, sessionId, text);
     }
 
+    /**
+     * CAP-68：注入用户输入（图片 + 文件附件，文件随 input 帧 files 字段下发，runner 落盘
+     * 工作区并在消息尾部追加路径提示）。默认丢弃 files 降级——实现方应覆盖本方法；
+     * 旧 runner 忽略 files 字段优雅降级（丢文件不丢文本）。
+     */
+    default void sendInput(String nodeId, String sessionId, String text, List<InputImage> images,
+                           List<InputFile> files) {
+        sendInput(nodeId, sessionId, text, images);
+    }
+
     /** 授权响应。 */
     void sendAuthorize(String nodeId, String sessionId, String requestId, boolean accepted, String scope);
 

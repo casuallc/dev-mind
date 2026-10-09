@@ -1,5 +1,6 @@
 package com.devmind.common.agent.runtime;
 
+import com.devmind.common.agent.InputFile;
 import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.SessionEvent;
 import org.slf4j.Logger;
@@ -62,8 +63,11 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
 
     // ---------------- 平台差异钩子 ----------------
 
-    /** 写一条 user message 到 agent stdin（本地=管道 JSONL；远程=节点指令）。images 为 CAP-32 图片附件。 */
-    protected abstract void sendUserMessage(String text, List<InputImage> images);
+    /**
+     * 写一条 user message 到 agent stdin（本地=管道 JSONL；远程=节点指令）。
+     * images 为 CAP-32 图片附件；files 为 CAP-68 文件附件（仅远程链路支持落盘）。
+     */
+    protected abstract void sendUserMessage(String text, List<InputImage> images, List<InputFile> files);
 
     /** 写 permission_result 到 agent stdin。 */
     protected abstract void sendPermissionResult(String requestId, boolean accepted, String scope);
@@ -217,23 +221,36 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
      */
     @Override
     public void injectInput(String text, List<InputImage> images) {
+        injectInput(text, images, List.of());
+    }
+
+    /**
+     * CAP-68：注入用户消息（图片 + 文件附件）。文件引用一并记入 user 事件 payload
+     * （前端据 contentType 区分图片内联 / 文件下载链接）。
+     */
+    @Override
+    public void injectInput(String text, List<InputImage> images, List<InputFile> files) {
         boolean hasText = text != null && !text.isBlank();
         boolean hasImages = images != null && !images.isEmpty();
-        if ((!hasText && !hasImages) || !alive()) {
+        boolean hasFiles = files != null && !files.isEmpty();
+        if ((!hasText && !hasImages && !hasFiles) || !alive()) {
             return;
         }
         touchActivity();
         List<InputImage> imgs = hasImages ? images : List.of();
-        sendUserMessage(hasText ? text : "", imgs);
-        publish(SessionEvent.of(nextSeq(), "user", hasText ? text : "[图片]", "system", attachmentPayload(imgs)));
+        List<InputFile> fs = hasFiles ? files : List.of();
+        sendUserMessage(hasText ? text : "", imgs, fs);
+        publish(SessionEvent.of(nextSeq(), "user",
+                hasText ? text : (!fs.isEmpty() ? "[文件]" : "[图片]"), "system",
+                attachmentPayload(imgs, fs)));
         if (state == SessionState.WAITING_INPUT) {
             transition(SessionState.RUNNING, "收到用户输入，继续执行");
         }
     }
 
     /** user 事件 payload：附件引用（只放 id/name/contentType，不放 base64）。 */
-    private Map<String, Object> attachmentPayload(List<InputImage> images) {
-        if (images.isEmpty()) {
+    private Map<String, Object> attachmentPayload(List<InputImage> images, List<InputFile> files) {
+        if (images.isEmpty() && files.isEmpty()) {
             return Map.of();
         }
         List<Map<String, Object>> attachments = new ArrayList<>();
@@ -244,6 +261,17 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
                 a.put("name", img.name());
             }
             a.put("contentType", img.mediaType());
+            attachments.add(a);
+        }
+        for (InputFile f : files) {
+            Map<String, Object> a = new LinkedHashMap<>();
+            a.put("attachmentId", f.attachmentId());
+            if (f.name() != null) {
+                a.put("name", f.name());
+            }
+            if (f.mediaType() != null) {
+                a.put("contentType", f.mediaType());
+            }
             attachments.add(a);
         }
         return Map.of("attachments", attachments);

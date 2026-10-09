@@ -69,7 +69,8 @@ public class SessionController {
 
     @PostMapping("/{id}/input")
     public void input(@PathVariable String id, @RequestBody InputRequest req) {
-        service.input(id, req.effectiveText());
+        // CAP-68：REST 与 WS 同语义——附件引用（images/files）一并解析下发
+        service.input(id, req.effectiveText(), req.images(), req.files());
     }
 
     @PostMapping("/{id}/authorize")

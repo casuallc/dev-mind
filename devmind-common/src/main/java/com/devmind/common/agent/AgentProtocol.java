@@ -57,12 +57,15 @@ package com.devmind.common.agent;
  * 忽略，不门控）。
  * v19 = 收口删除远端会话分支（workspace_finalize 帧携带 deleteRemoteBranch——勾选后
  * 收口成功即删远端 feature 分支、不再 best-effort push 供 diff；<b>可选字段不门控</b>：
- * 老 runner 忽略字段 = 维持 push 分支供 diff 的现状，优雅降级）。</p>
+ * 老 runner 忽略字段 = 维持 push 分支供 diff 的现状，优雅降级）。
+     * v20 = CAP-68 会话文件附件（input 帧携带 files[{id,name,mediaType,data}]，base64 内联——
+     * runner 落盘会话工作区 .devmind/incoming/ 并在发给 claude 的消息尾部追加路径提示；
+     * <b>可选字段不门控</b>：老 runner 忽略字段 = 丢文件不丢文本，优雅降级）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 19;
+    public static final int CURRENT = 20;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -120,6 +123,9 @@ public final class AgentProtocol {
 
     /** 收口删除远端会话分支（workspace_finalize 帧 deleteRemoteBranch）；可选字段不门控 */
     public static final int FINALIZE_DELETE_REMOTE = 19;
+
+    /** CAP-68 会话文件附件（input 帧 files 字段，runner 落盘工作区）；可选字段不门控 */
+    public static final int INPUT_FILES = 20;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;

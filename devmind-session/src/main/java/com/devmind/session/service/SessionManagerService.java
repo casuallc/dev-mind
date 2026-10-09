@@ -6,9 +6,12 @@ import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.AgentCollectResult;
 import com.devmind.common.agent.AgentProtocol;
 import com.devmind.common.agent.FinalizeResult;
+import com.devmind.common.agent.InputFile;
+import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.TerminalExecResult;
 import com.devmind.common.agent.WorkspaceQueryResult;
 import com.devmind.common.agent.WorkspaceReleaseResult;
+import com.devmind.common.attachment.AttachmentContentResolver;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
@@ -34,6 +37,7 @@ import com.devmind.project.dto.WorkItemRequest;
 import com.devmind.project.dto.WorkItemView;
 import com.devmind.project.ProjectService;import com.devmind.session.config.SessionProperties;
 import com.devmind.session.dto.CreateSessionRequest;
+import com.devmind.session.dto.AttachmentRef;
 import com.devmind.session.dto.CollectResultView;
 import com.devmind.session.dto.OutputContentView;
 import com.devmind.session.dto.OutputFileView;
@@ -68,6 +72,7 @@ import org.springframework.stereotype.Service;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -89,6 +94,9 @@ public class SessionManagerService {
 
     /** CAP-50：事件补拉默认条数与硬上限（limit&lt;=0 走默认）。开流式后一轮就有几百条增量。 */
     static final int DEFAULT_EVENT_LIMIT = 2000;
+
+    /** CAP-68：单条消息文件附件上限（图片不限个数——附件模块本身已限单文件 20MB） */
+    static final int MAX_INPUT_FILES = 5;
     static final int MAX_EVENT_LIMIT = 20_000;
 
     private final IdentityService identityService;
@@ -122,6 +130,8 @@ public class SessionManagerService {
     private final PlatformTransactionManager txManager;
     /** CAP-39：会话产出读取（runner 回传的 session_outputs） */
     private final SessionOutputService outputService;
+    /** CAP-68：附件内容解析（devmind-attachment 装配时可用；未装配时带附件的输入报错，不静默丢） */
+    private final ObjectProvider<AttachmentContentResolver> attachmentResolverProvider;
 
     /** 运行中会话注册表（本地/远程统一句柄）。 */
     private final Map<String, SessionHandle> runtimes = new ConcurrentHashMap<>();
@@ -147,7 +157,8 @@ public class SessionManagerService {
                                  ObjectProvider<RepoGitGateway> repoGitGateway,
                                  RemoteDiffService remoteDiffService,
                                  PlatformTransactionManager txManager,
-                                 SessionOutputService outputService) {
+                                 SessionOutputService outputService,
+                                 ObjectProvider<AttachmentContentResolver> attachmentResolverProvider) {
         this.identityService = identityService;
         this.projectService = projectService;
         this.workItemService = workItemService;
@@ -170,6 +181,7 @@ public class SessionManagerService {
         this.remoteDiffService = remoteDiffService;
         this.txManager = txManager;
         this.outputService = outputService;
+        this.attachmentResolverProvider = attachmentResolverProvider;
     }
 
     private final RuntimeListener listener = new RuntimeListener() {
@@ -508,8 +520,67 @@ public class SessionManagerService {
     // ---------------- 交互 ----------------
 
     public void input(String id, String text) {
+        input(id, text, null, null);
+    }
+
+    /**
+     * CAP-68：注入用户输入（可带图片/文件附件）。附件经 AttachmentContentResolver 解析为
+     * base64 下发 runner：图片走 images 帧直读（image block）；文件随 input 帧 files 字段
+     * 由 runner 落盘工作区 {@code .devmind/incoming/}，agent 用 Read 自取。
+     */
+    public void input(String id, String text, List<AttachmentRef> images, List<AttachmentRef> files) {
+        if (files != null && files.size() > MAX_INPUT_FILES) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "单条消息文件附件最多 " + MAX_INPUT_FILES + " 个（收到 " + files.size() + " 个）");
+        }
         SessionHandle rt = requireRuntime(id);
-        rt.injectInput(text);
+        rt.injectInput(text, resolveImages(images), resolveFiles(files));
+    }
+
+    /** 附件引用 → InputImage（base64）；解析失败一律报错，不静默丢图（用户需要知道 claude 没看到图）。 */
+    private List<InputImage> resolveImages(List<AttachmentRef> images) {
+        if (images == null || images.isEmpty()) {
+            return List.of();
+        }
+        AttachmentContentResolver resolver = attachmentResolverProvider.getIfAvailable();
+        if (resolver == null) {
+            throw new DevMindException(ErrorCode.CONFLICT, "附件模块未装配，无法发送图片");
+        }
+        List<InputImage> out = new ArrayList<>();
+        for (AttachmentRef ref : images) {
+            if (ref == null || ref.attachmentId() == null || ref.attachmentId().isBlank()) {
+                continue;
+            }
+            AttachmentContentResolver.ResolvedAttachment resolved = resolver.resolve(ref.attachmentId())
+                    .orElseThrow(() -> new DevMindException(ErrorCode.BAD_REQUEST,
+                            "图片附件不存在或不是图片类型: " + ref.attachmentId()));
+            out.add(new InputImage(ref.attachmentId(), ref.name(), resolved.contentType(),
+                    Base64.getEncoder().encodeToString(resolved.bytes())));
+        }
+        return out;
+    }
+
+    /** CAP-68：附件引用 → InputFile（base64，不限 mime）；解析失败一律报错，不静默丢文件。 */
+    private List<InputFile> resolveFiles(List<AttachmentRef> files) {
+        if (files == null || files.isEmpty()) {
+            return List.of();
+        }
+        AttachmentContentResolver resolver = attachmentResolverProvider.getIfAvailable();
+        if (resolver == null) {
+            throw new DevMindException(ErrorCode.CONFLICT, "附件模块未装配，无法发送文件附件");
+        }
+        List<InputFile> out = new ArrayList<>();
+        for (AttachmentRef ref : files) {
+            if (ref == null || ref.attachmentId() == null || ref.attachmentId().isBlank()) {
+                continue;
+            }
+            AttachmentContentResolver.ResolvedAttachment resolved = resolver.resolveAny(ref.attachmentId())
+                    .orElseThrow(() -> new DevMindException(ErrorCode.BAD_REQUEST,
+                            "文件附件不存在: " + ref.attachmentId()));
+            out.add(new InputFile(ref.attachmentId(), ref.name(), resolved.contentType(),
+                    Base64.getEncoder().encodeToString(resolved.bytes())));
+        }
+        return out;
     }
 
     public void authorize(String id, boolean accepted, String scope, String requestId) {

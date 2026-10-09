@@ -245,8 +245,7 @@ public class AgentRunnerMain {
             case "exec" -> execHandler.handle(frame); // CAP-36：构建/部署/测试/发版下发执行
             case "proc" -> procHandler.handle(frame); // CAP-57：服务实例进程管控（起停/状态）
             case "pkg" -> pkgHandler.handle(frame); // CAP-57：安装包分发（拉取+校验+解包）
-            case "input" -> sessions.writeStdin(sessionId,
-                    protocol.buildUserMessage(frame.path("text").asText(""), parseImages(frame)));
+            case "input" -> handleInput(frame, sessionId, protocol, sessions);
             case "authorize" -> sessions.writeStdin(sessionId, protocol.buildPermissionResult(
                     frame.path("requestId").asText("unknown"),
                     frame.path("accepted").asBoolean(false),
@@ -280,6 +279,75 @@ public class AgentRunnerMain {
         java.util.Set<String> scopes = new java.util.HashSet<>();
         proxy.path("scopes").forEach(s -> scopes.add(s.asText("")));
         com.devmind.common.agent.exec.NodeProxy.set(proxy.path("url").asText(""), scopes);
+    }
+
+    /**
+     * CAP-32/68：input 帧 → claude stdin。文本 + 图片（images 帧字段，image block 内联）；
+     * 文件附件（files 字段，协议 v20 可选）先落盘工作区 .devmind/incoming/，再把相对路径
+     * 提示追加到消息尾部——agent 用 Read 自取，不占 CLI 协议的图片通道。
+     */
+    private static void handleInput(JsonNode frame, String sessionId, CliProcessLauncher protocol,
+                                    RunnerSessionRegistry sessions) {
+        String text = frame.path("text").asText("");
+        String note = materializeInputFiles(sessionId, frame, sessions);
+        String merged = text.isBlank() ? note.stripLeading() : text + note;
+        sessions.writeStdin(sessionId, protocol.buildUserMessage(merged, parseImages(frame)));
+    }
+
+    /**
+     * CAP-68：input 帧 files 字段（[{id,name,mediaType,data}]，base64 内联）落盘会话工作目录
+     * {@code .devmind/incoming/<attachmentId>-<净化文件名>}（.devmind/ 已在 PLATFORM_EXCLUDES，
+     * 不弄脏 git 工作区），返回追加进用户消息的提示文本。落盘失败的文件在提示里显式标注
+     * （不静默丢）；老服务端不带该字段时返回空串，行为不变。
+     */
+    private static String materializeInputFiles(String sessionId, JsonNode frame,
+                                                RunnerSessionRegistry sessions) {
+        JsonNode files = frame.path("files");
+        if (!files.isArray() || files.isEmpty()) {
+            return "";
+        }
+        var dirOpt = sessions.sessionDirOf(sessionId);
+        List<String> lines = new ArrayList<>();
+        for (JsonNode f : files) {
+            String name = sanitizeIncomingName(f.path("name").asText("file"));
+            String id = f.path("id").asText("");
+            String data = f.path("data").asText("");
+            if (data.isBlank() || dirOpt.isEmpty()) {
+                lines.add("- " + name + "（未能送达：会话工作区不可用）");
+                continue;
+            }
+            try {
+                Path dir = dirOpt.get().resolve(".devmind").resolve("incoming");
+                Files.createDirectories(dir);
+                String fileName = (id.isBlank() ? Long.toHexString(System.nanoTime()) : id) + "-" + name;
+                Files.write(dir.resolve(fileName), java.util.Base64.getDecoder().decode(data));
+                lines.add("- .devmind/incoming/" + fileName + "（可用 Read 查看）");
+            } catch (Exception e) {
+                log.warn("会话文件附件落盘失败: session={} name={} err={}", sessionId, name, e.toString());
+                lines.add("- " + name + "（落盘失败: " + e.getMessage() + "）");
+            }
+        }
+        if (lines.isEmpty()) {
+            return "";
+        }
+        StringBuilder note = new StringBuilder("\n\n用户附加文件已保存到工作区：\n");
+        for (String line : lines) {
+            note.append(line).append('\n');
+        }
+        note.append("请先用 Read 工具查看这些文件，再回应用户。");
+        return note.toString();
+    }
+
+    /**
+     * CAP-68：用户文件名净化——只取 basename 防路径穿越，去控制字符与 ".."，保留中文等
+     * Unicode 字符（不走 ContextMaterializer 的 ASCII 白名单，否则「设计稿.png」会被剥成 ".png"）。
+     * package-private 供单测驱动。
+     */
+    static String sanitizeIncomingName(String raw) {
+        String name = raw == null ? "" : raw.replace('\\', '/');
+        name = name.substring(name.lastIndexOf('/') + 1).trim();
+        name = name.replaceAll("\\p{Cntrl}+", "_").replace("..", "_");
+        return name.isBlank() || ".".equals(name) ? "file" : name;
     }
 
     /**

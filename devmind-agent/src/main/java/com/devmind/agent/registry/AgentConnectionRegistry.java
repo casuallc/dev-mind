@@ -624,6 +624,17 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     /** CAP-32：input 帧内嵌 base64 图片（images 字段）；旧 runner 忽略该字段优雅降级=丢图，远程用图需升级 runner。 */
     @Override
     public void sendInput(String nodeId, String sessionId, String text, List<InputImage> images) {
+        sendInput(nodeId, sessionId, text, images, List.of());
+    }
+
+    /**
+     * CAP-68：input 帧增 files 字段（[{id,name,mediaType,data}]，base64 内联），runner 落盘
+     * {@code .devmind/incoming/} 并在消息尾部追加路径提示；可选字段不门控（协议 v20），
+     * 旧 runner 忽略该字段优雅降级=丢文件不丢文本。
+     */
+    @Override
+    public void sendInput(String nodeId, String sessionId, String text, List<InputImage> images,
+                          List<com.devmind.common.agent.InputFile> files) {
         Map<String, Object> frame = new LinkedHashMap<>();
         frame.put("type", "input");
         frame.put("sessionId", sessionId);
@@ -637,6 +648,22 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
                 imgs.add(m);
             }
             frame.put("images", imgs);
+        }
+        if (files != null && !files.isEmpty()) {
+            List<Map<String, Object>> fs = new ArrayList<>();
+            for (com.devmind.common.agent.InputFile f : files) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("id", f.attachmentId());
+                if (f.name() != null) {
+                    m.put("name", f.name());
+                }
+                if (f.mediaType() != null) {
+                    m.put("mediaType", f.mediaType());
+                }
+                m.put("data", f.base64Data());
+                fs.add(m);
+            }
+            frame.put("files", fs);
         }
         send(requireConnection(nodeId), frame);
     }

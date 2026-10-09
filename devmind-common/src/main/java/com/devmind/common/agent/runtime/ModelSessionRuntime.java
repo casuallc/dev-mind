@@ -154,6 +154,20 @@ public class ModelSessionRuntime extends AbstractSessionRuntime {
         startTurn(text, userSeq);
     }
 
+    /**
+     * CAP-68：文件附件同样直接拒（模型执行体没有工作区落盘链路）。无文件则回到
+     * 两参实现（那里管图片拒绝与回合次序）。
+     */
+    @Override
+    public void injectInput(String text, List<InputImage> images,
+                            List<com.devmind.common.agent.InputFile> files) {
+        if (files != null && !files.isEmpty()) {
+            rejectWithError("模型执行体不支持文件附件：请去掉文件，或改用智能体（Agent）执行体");
+            return;
+        }
+        injectInput(text, images);
+    }
+
     /** 创建会话时的首轮提问（与 {@link #injectInput} 同一条路：新运行时状态即 RUNNING、alive 即为真）。 */
     public void startFirstTurn(String text) {
         injectInput(text, List.of());
@@ -335,7 +349,8 @@ public class ModelSessionRuntime extends AbstractSessionRuntime {
 
     /** 不做任何事：本实现自己起生成线程（见类注释的 injectInput 次序） */
     @Override
-    protected void sendUserMessage(String text, List<InputImage> images) {
+    protected void sendUserMessage(String text, List<InputImage> images,
+                                   List<com.devmind.common.agent.InputFile> files) {
     }
 
     /** 模型执行体无授权概念（能力层对 MODEL 会话的 authorize 直接 409） */

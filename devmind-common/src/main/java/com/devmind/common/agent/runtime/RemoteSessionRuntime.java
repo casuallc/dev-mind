@@ -56,8 +56,9 @@ public class RemoteSessionRuntime extends AbstractSessionRuntime {
     }
 
     @Override
-    protected void sendUserMessage(String text, List<InputImage> images) {
-        connector.sendInput(nodeId, id, text, images);
+    protected void sendUserMessage(String text, List<InputImage> images,
+                                   List<com.devmind.common.agent.InputFile> files) {
+        connector.sendInput(nodeId, id, text, images, files);
     }
 
     @Override

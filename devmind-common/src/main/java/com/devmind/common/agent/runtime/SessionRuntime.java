@@ -89,7 +89,18 @@ public class SessionRuntime extends AbstractSessionRuntime {
 
     /** 格式必须与 claude stream-json 一致：完整 user message，而非 {"type":"input"}。CAP-32 起组帧复用 CliProcessLauncher。 */
     @Override
-    protected void sendUserMessage(String text, List<InputImage> images) {
+    protected void sendUserMessage(String text, List<InputImage> images,
+                                   List<com.devmind.common.agent.InputFile> files) {
+        // CAP-68：本机执行体已下线（CAP-34），仅剩测试路径——文件附件没有落盘链路，
+        // 不静默丢：把文件名以文本形式写进 stdin，让阅读事件流的人知道文件没到 agent。
+        if (files != null && !files.isEmpty()) {
+            StringBuilder names = new StringBuilder();
+            for (com.devmind.common.agent.InputFile f : files) {
+                names.append(names.isEmpty() ? "" : "、").append(f.name() == null ? f.attachmentId() : f.name());
+            }
+            log.warn("本机执行体不支持文件附件落盘，降级为文本提示: session={} files={}", id, names);
+            text = (text == null ? "" : text) + "\n\n[平台提示] 本机执行体不支持文件附件，以下文件未送达 agent：" + names;
+        }
         writeLine(CliProcessLauncher.buildUserMessage(mapper, text, images));
     }
 
