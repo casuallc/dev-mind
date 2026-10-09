@@ -1,13 +1,16 @@
 // 附件管理页（CAP-32）：平台统一附件（图床+文件）的查看/上传/共享范围/删除，挂在后台「内容」分组。
 // 上传走弹窗：先选文件（可多选）再填描述，逐个上传并展示逐文件进度条。
 // 图片类附件内联预览，非图片仅提供下载；其他地方凭 attachmentId 引用。
+// CAP-68：标签（上传可带/编辑可改/列表过滤）、过期时间（到期定时硬删，不做引用检查）、批量删除。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Button,
   Card,
+  DatePicker,
   Dropdown,
   Image,
   Input,
+  InputNumber,
   message,
   Modal,
   Progress,
@@ -26,10 +29,13 @@ import {
   UploadOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
+import dayjs, { type Dayjs } from 'dayjs'
 import {
+  batchDeleteAttachments,
   deleteAttachment,
   isImageAttachment,
   listAttachments,
+  updateAttachmentMeta,
   updateAttachmentScope,
   uploadAttachment,
   type AttachmentView,
@@ -53,13 +59,25 @@ export default function AttachmentsPage() {
   const [scopeFilter, setScopeFilter] = useState<string>('ALL')
   const [typeFilter, setTypeFilter] = useState<string>('ALL')
   const [keyword, setKeyword] = useState('')
-  // 上传弹窗：暂存文件 + 描述 + 逐文件进度/失败信息
+  // CAP-68：标签过滤（tagInput 输入态 / tagFilter 生效态，回车或点标签生效）+ 批量删除选择
+  const [tagInput, setTagInput] = useState('')
+  const [tagFilter, setTagFilter] = useState('')
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([])
+  // 上传弹窗：暂存文件 + 描述/标签/保留天数 + 逐文件进度/失败信息
   const [uploadOpen, setUploadOpen] = useState(false)
   const [fileList, setFileList] = useState<UploadFile[]>([])
   const [description, setDescription] = useState('')
+  const [uploadTags, setUploadTags] = useState('')
+  const [expireDays, setExpireDays] = useState<number | null>(null)
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState<Record<string, number>>({})
   const [failed, setFailed] = useState<Record<string, string>>({})
+  // CAP-68：编辑元数据弹窗（描述/标签/过期时间；空白=清除，留空过期=永久）
+  const [metaTarget, setMetaTarget] = useState<AttachmentView | null>(null)
+  const [metaDescription, setMetaDescription] = useState('')
+  const [metaTags, setMetaTags] = useState('')
+  const [metaExpiresAt, setMetaExpiresAt] = useState<Dayjs | null>(null)
+  const [metaSaving, setMetaSaving] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -67,11 +85,12 @@ export default function AttachmentsPage() {
       scope: scopeFilter === 'ALL' ? undefined : scopeFilter,
       type: typeFilter === 'ALL' ? undefined : (typeFilter as 'image' | 'other'),
       keyword: keyword.trim() || undefined,
+      tag: tagFilter.trim() || undefined,
     })
       .then(setRows)
       .catch((e) => showError(e, '加载失败'))
       .finally(() => setLoading(false))
-  }, [scopeFilter, typeFilter, keyword])
+  }, [scopeFilter, typeFilter, keyword, tagFilter])
 
   useEffect(load, [load])
 
@@ -112,6 +131,8 @@ export default function AttachmentsPage() {
   const resetUpload = () => {
     setFileList([])
     setDescription('')
+    setUploadTags('')
+    setExpireDays(null)
     setProgress({})
     setFailed({})
   }
@@ -124,8 +145,14 @@ export default function AttachmentsPage() {
     let okCount = 0
     for (const f of files) {
       try {
-        await uploadAttachment(f as unknown as File, f.name, 'PRIVATE', description, (p) =>
-          setProgress((prev) => ({ ...prev, [f.uid]: p })),
+        await uploadAttachment(
+          f as unknown as File,
+          f.name,
+          'PRIVATE',
+          description,
+          (p) => setProgress((prev) => ({ ...prev, [f.uid]: p })),
+          uploadTags,
+          expireDays ?? undefined,
         )
         okCount++
         setFileList((prev) => prev.filter((x) => x.uid !== f.uid))
@@ -142,6 +169,57 @@ export default function AttachmentsPage() {
       setUploadOpen(false)
       resetUpload()
     }
+  }
+
+  // CAP-68：批量删除（逐项服务端校验，部分失败汇总提示）
+  const onBatchDelete = () => {
+    Modal.confirm({
+      centered: true,
+      title: `确认删除选中的 ${selectedKeys.length} 个附件？`,
+      content: '删除后不可恢复；被消息/文档引用的附件删除后引用处将 404。',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      onOk: () =>
+        batchDeleteAttachments(selectedKeys)
+          .then((results) => {
+            const fails = results.filter((r) => !r.ok)
+            if (fails.length === 0) {
+              message.success(`已删除 ${results.length} 个附件`)
+            } else {
+              message.warning(
+                `删除完成：成功 ${results.length - fails.length} 个，失败 ${fails.length} 个（${fails[0].message ?? '无权限'}）`,
+              )
+            }
+            setSelectedKeys([])
+            load()
+          })
+          .catch((e) => showError(e, '批量删除失败')),
+    })
+  }
+
+  const openMetaEdit = (r: AttachmentView) => {
+    setMetaTarget(r)
+    setMetaDescription(r.description ?? '')
+    setMetaTags(r.tags ?? '')
+    setMetaExpiresAt(r.expiresAt ? dayjs(r.expiresAt) : null)
+  }
+
+  const saveMeta = () => {
+    if (!metaTarget) return
+    setMetaSaving(true)
+    // 整表单提交：空白串=清除该字段（后端语义），过期留空=恢复永久
+    updateAttachmentMeta(metaTarget.attachmentId, {
+      description: metaDescription,
+      tags: metaTags,
+      expiresAt: metaExpiresAt ? metaExpiresAt.format('YYYY-MM-DD HH:mm:ss') : ' ',
+    })
+      .then(() => {
+        message.success('已保存')
+        setMetaTarget(null)
+        load()
+      })
+      .catch((e) => showError(e, '保存失败'))
+      .finally(() => setMetaSaving(false))
   }
 
   const columns = useMemo<ColumnsType<AttachmentView>>(
@@ -192,6 +270,34 @@ export default function AttachmentsPage() {
             </Typography.Text>
           ) : (
             <Typography.Text type="secondary">-</Typography.Text>
+          ),
+      },
+      {
+        title: '标签',
+        dataIndex: 'tags',
+        width: 160,
+        render: (v?: string) =>
+          v ? (
+            <Space size={2} wrap>
+              {v.split(',').map((t) => (
+                <Tag key={t} style={{ marginInlineEnd: 0, cursor: 'pointer' }} onClick={() => { setTagInput(t); setTagFilter(t) }}>
+                  {t}
+                </Tag>
+              ))}
+            </Space>
+          ) : (
+            <Typography.Text type="secondary">-</Typography.Text>
+          ),
+      },
+      {
+        title: '过期时间',
+        dataIndex: 'expiresAt',
+        width: 170,
+        render: (v?: string) =>
+          v ? (
+            <Typography.Text type="warning">{fmtTime(v)}</Typography.Text>
+          ) : (
+            <Typography.Text type="secondary">永久</Typography.Text>
           ),
       },
       {
@@ -249,11 +355,13 @@ export default function AttachmentsPage() {
             <Dropdown
               menu={{
                 items: [
+                  { key: 'edit-meta', label: '编辑描述/标签/过期' },
                   { key: 'copy-url', label: '复制访问 URL' },
                   { key: 'scope', label: r.scope === 'PRIVATE' ? '设为共享' : '设为私有' },
                 ],
                 onClick: ({ key }) => {
-                  if (key === 'copy-url')
+                  if (key === 'edit-meta') openMetaEdit(r)
+                  else if (key === 'copy-url')
                     copyText(`${location.origin}${attachmentRawUrl(r.attachmentId)}`, 'URL 已复制')
                   else if (key === 'scope') onToggleScope(r)
                 },
@@ -303,14 +411,29 @@ export default function AttachmentsPage() {
       }
       extra={
         <Space>
+          <Input
+            allowClear
+            placeholder="按标签过滤（回车生效）"
+            style={{ width: 170 }}
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            onPressEnter={() => setTagFilter(tagInput.trim())}
+            onClear={() => {
+              setTagInput('')
+              setTagFilter('')
+            }}
+          />
           <Input.Search
             allowClear
             placeholder="按文件名/描述搜索"
-            style={{ width: 220 }}
+            style={{ width: 200 }}
             onSearch={(v) => setKeyword(v)}
           />
           <Button icon={<ReloadOutlined />} onClick={load}>
             刷新
+          </Button>
+          <Button danger disabled={selectedKeys.length === 0} onClick={onBatchDelete}>
+            批量删除{selectedKeys.length > 0 ? `（${selectedKeys.length}）` : ''}
           </Button>
           <Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadOpen(true)}>
             上传附件
@@ -320,6 +443,7 @@ export default function AttachmentsPage() {
     >
       <Typography.Paragraph type="secondary">
         平台统一附件库（图床 + 文件）：图片可内联引用，其他类型仅下载；复制附件 id 即可在问答、文档等处引用。
+        设了过期时间的附件到期会被定时任务<strong>直接删除</strong>（不检查是否被消息/文档引用，引用处将 404）。
       </Typography.Paragraph>
       <FitTable
         rowKey="attachmentId"
@@ -327,6 +451,10 @@ export default function AttachmentsPage() {
         columns={columns}
         dataSource={rows}
         pagination={LIST_PAGINATION}
+        rowSelection={{
+          selectedRowKeys: selectedKeys,
+          onChange: (keys) => setSelectedKeys(keys as string[]),
+        }}
         locale={{
           emptyText: (
             <span>
@@ -358,6 +486,29 @@ export default function AttachmentsPage() {
             disabled={uploading}
             onChange={(e) => setDescription(e.target.value)}
           />
+          <Space style={{ width: '100%' }}>
+            <Input
+              style={{ flex: 1, minWidth: 220 }}
+              maxLength={512}
+              placeholder="标签（可选，逗号分隔，本批共用）"
+              value={uploadTags}
+              disabled={uploading}
+              onChange={(e) => setUploadTags(e.target.value)}
+            />
+            <InputNumber
+              min={1}
+              precision={0}
+              placeholder="保留天数"
+              addonAfter="天"
+              value={expireDays}
+              disabled={uploading}
+              onChange={(v) => setExpireDays(v)}
+              style={{ width: 150 }}
+            />
+          </Space>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            保留天数留空 = 永久；设了到期会被定时任务直接删除（不检查引用）。
+          </Typography.Text>
           <Upload.Dragger
             multiple
             fileList={fileList}
@@ -402,6 +553,45 @@ export default function AttachmentsPage() {
               )}
             </div>
           ))}
+        </Space>
+      </Modal>
+      {/* CAP-68：编辑描述/标签/过期时间 */}
+      <Modal
+        title={`编辑附件信息：${metaTarget?.originalName ?? ''}`}
+        open={metaTarget !== null}
+        okText="保存"
+        confirmLoading={metaSaving}
+        onOk={saveMeta}
+        onCancel={() => setMetaTarget(null)}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <div>
+            <Typography.Text type="secondary">描述（清空=删除描述）</Typography.Text>
+            <Input.TextArea
+              rows={2}
+              maxLength={512}
+              value={metaDescription}
+              onChange={(e) => setMetaDescription(e.target.value)}
+            />
+          </div>
+          <div>
+            <Typography.Text type="secondary">标签（逗号分隔，清空=删除标签）</Typography.Text>
+            <Input
+              maxLength={512}
+              value={metaTags}
+              onChange={(e) => setMetaTags(e.target.value)}
+            />
+          </div>
+          <div>
+            <Typography.Text type="secondary">过期时间（留空=永久；到期定时硬删，不检查引用）</Typography.Text>
+            <DatePicker
+              showTime
+              style={{ width: '100%' }}
+              value={metaExpiresAt}
+              onChange={(v) => setMetaExpiresAt(v)}
+              placeholder="选择过期时间"
+            />
+          </div>
         </Space>
       </Modal>
     </Card>

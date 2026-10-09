@@ -13,6 +13,10 @@ export interface AttachmentView {
   url: string
   /** 上传时可选的描述信息 */
   description?: string
+  /** CAP-68：逗号分隔自由文本标签 */
+  tags?: string
+  /** CAP-68：过期时间（到期定时硬删，不做引用检查）；空=永久 */
+  expiresAt?: string
   uploadedBy: string
   createdAt: string
 }
@@ -24,26 +28,51 @@ export function uploadAttachment(
   scope = 'PRIVATE',
   description?: string,
   onProgress?: (percent: number) => void,
+  /** CAP-68：逗号分隔标签 / 保留天数（undefined=永久） */
+  tags?: string,
+  expireDays?: number,
 ) {
   const form = new FormData()
   form.append('file', file, fileName)
   form.append('scope', scope)
   if (description?.trim()) form.append('description', description.trim())
+  if (tags?.trim()) form.append('tags', tags.trim())
+  if (expireDays) form.append('expireDays', String(expireDays))
   if (onProgress) return api.uploadWithProgress<AttachmentView>('/attachments', form, onProgress)
   return api.upload<AttachmentView>('/attachments', form)
 }
 
-export function listAttachments(params?: { scope?: string; keyword?: string; type?: 'image' | 'other' }) {
+export function listAttachments(params?: { scope?: string; keyword?: string; type?: 'image' | 'other'; tag?: string }) {
   const q = new URLSearchParams()
   if (params?.scope) q.set('scope', params.scope)
   if (params?.keyword) q.set('keyword', params.keyword)
   if (params?.type) q.set('type', params.type)
+  if (params?.tag) q.set('tag', params.tag)
   const qs = q.toString()
   return api.get<AttachmentView[]>(`/attachments${qs ? `?${qs}` : ''}`)
 }
 
 export function updateAttachmentScope(attachmentId: string, scope: 'PRIVATE' | 'SHARED') {
   return api.put<AttachmentView>(`/attachments/${attachmentId}/scope`, { scope })
+}
+
+/** CAP-68：改描述/标签/过期时间。字段语义：不传=不变，空白串=清除；expiresAt 格式 yyyy-MM-dd HH:mm:ss */
+export function updateAttachmentMeta(
+  attachmentId: string,
+  meta: { description?: string; tags?: string; expiresAt?: string },
+) {
+  return api.put<AttachmentView>(`/attachments/${attachmentId}/meta`, meta)
+}
+
+export interface BatchDeleteItemResult {
+  attachmentId: string
+  ok: boolean
+  message?: string
+}
+
+/** CAP-68：批量删除（逐项权限校验，部分失败不整单回滚） */
+export function batchDeleteAttachments(ids: string[]) {
+  return api.post<BatchDeleteItemResult[]>('/attachments/batch-delete', { ids })
 }
 
 export function deleteAttachment(attachmentId: string) {
