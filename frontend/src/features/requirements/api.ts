@@ -58,8 +58,14 @@ export function updateRequirementStatus(
   projectId: string,
   requirementId: string,
   status: RequirementStatus,
+  force?: boolean,
 ): Promise<Requirement> {
-  return api.put<Requirement>(`/projects/${projectId}/requirements/${requirementId}/status`, { status })
+  return api.put<Requirement>(`/projects/${projectId}/requirements/${requirementId}/status`, { status, force })
+}
+
+/** DONE 前置检查冲突（存在未完结工作单元）判定：后端 409 文案锚点 */
+export function isUnfinishedWorkItemsConflict(e: unknown): boolean {
+  return e instanceof Error && e.message.includes('未完结工作单元')
 }
 
 export function deleteRequirement(projectId: string, requirementId: string): Promise<void> {

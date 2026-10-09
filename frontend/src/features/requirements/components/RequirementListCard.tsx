@@ -6,7 +6,7 @@ import { Button, Card, Input, Modal, Segmented, Select, Space, Tag, Tooltip, Typ
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import { listRequirements, updateRequirementStatus } from '../api'
+import { listRequirements, isUnfinishedWorkItemsConflict, updateRequirementStatus } from '../api'
 import type { Requirement, RequirementSource, RequirementType } from '../types'
 import RequirementFormDrawer from './RequirementFormDrawer'
 import { fmtDuration, fmtTime } from '../../../shared/utils/format'
@@ -80,6 +80,27 @@ export default function RequirementListCard({ projectId }: { projectId: string }
           message.success(`${r.code} → DONE`)
           reload()
         } catch (e) {
+          // 存在未完结工作单元被后端拦下（409）→ 二次确认强制完成
+          if (isUnfinishedWorkItemsConflict(e)) {
+            Modal.confirm({
+              centered: true,
+              title: '仍有工作单元未完结',
+              content: `「${r.code} ${r.title}」下还有工作单元未完结。强制完成后，若工作单元再次活跃，需求会被自动顶回进行中。`,
+              okText: '强制完成',
+              okButtonProps: { danger: true },
+              cancelText: '返回',
+              onOk: async () => {
+                try {
+                  await updateRequirementStatus(projectId, r.id, 'DONE', true)
+                  message.success(`${r.code} → DONE（强制）`)
+                  reload()
+                } catch (e2) {
+                  showError(e2)
+                }
+              },
+            })
+            return
+          }
           showError(e)
         }
       },

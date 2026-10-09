@@ -64,7 +64,7 @@ public class RequirementController {
     @PutMapping("/{requirementId}/status")
     public RequirementView updateStatus(@PathVariable String projectId, @PathVariable String requirementId,
                                         @Valid @RequestBody StatusRequest req) {
-        return service.updateStatus(projectId, requirementId, req.status());
+        return service.updateStatus(projectId, requirementId, req.status(), req.force());
     }
 
     @DeleteMapping("/{requirementId}")

@@ -2,9 +2,11 @@ package com.devmind.project;
 
 import com.devmind.common.event.DomainEvent;
 import com.devmind.common.event.DomainEventPublisher;
+import com.devmind.common.exception.DevMindException;
 import com.devmind.auth.IdentityService;
 import com.devmind.project.event.RequirementTerminalEvent;
 import com.devmind.project.model.RequirementEntity;
+import com.devmind.project.model.WorkItemEntity;
 import com.devmind.project.repo.DesignRepository;
 import com.devmind.project.repo.ProjectRepository;
 import com.devmind.project.repo.RelationRepository;
@@ -22,6 +24,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -48,6 +51,7 @@ class RequirementServiceTerminalEventTest {
     }
 
     private final Map<String, RequirementEntity> store = new HashMap<>();
+    private final List<WorkItemEntity> workItems = new ArrayList<>();
     private FakeEventPublisher events;
     private RequirementService service;
 
@@ -64,6 +68,13 @@ class RequirementServiceTerminalEventTest {
                     case "findById" -> Optional.ofNullable(store.get((String) args[0]));
                     default -> throw new UnsupportedOperationException(m.getName());
                 });
+        WorkItemRepository workItemRepo = proxy(WorkItemRepository.class, (p, m, args) ->
+                switch (m.getName()) {
+                    case "findByRequirementIdOrderBySeqAsc" -> workItems.stream()
+                            .filter(w -> ((String) args[0]).equals(w.getRequirementId()))
+                            .toList();
+                    default -> throw new UnsupportedOperationException(m.getName());
+                });
         // updateStatus 链路不触达的依赖：任一调用即失败，防误碰
         InvocationHandler untouchable = (p, m, args) -> {
             throw new UnsupportedOperationException(m.getName());
@@ -71,7 +82,7 @@ class RequirementServiceTerminalEventTest {
         service = new RequirementService(
                 proxy(ProjectRepository.class, untouchable),
                 requirementRepo,
-                proxy(WorkItemRepository.class, untouchable),
+                workItemRepo,
                 proxy(DesignRepository.class, untouchable),
                 proxy(RelationRepository.class, untouchable),
                 new FakeIdentityService(),
@@ -140,5 +151,86 @@ class RequirementServiceTerminalEventTest {
 
         assertEquals(1, events.published.size());
         assertEquals(null, ((RequirementTerminalEvent) events.published.get(0)).workspaceOwner());
+    }
+
+    private WorkItemEntity workItem(String status) {
+        WorkItemEntity w = new WorkItemEntity();
+        w.setId("wi" + (workItems.size() + 1));
+        w.setRequirementId("req1");
+        w.setType(WorkItemEntity.TYPE_DEVELOPMENT);
+        w.setStatus(status);
+        workItems.add(w);
+        return w;
+    }
+
+    /** DONE 前置检查：存在未完结工作单元 → 409 拒绝，状态不变、不发终态事件。 */
+    @Test
+    void doneWithActiveWorkItemRejected() {
+        RequirementEntity e = requirement(RequirementEntity.STATUS_IN_PROGRESS, null);
+        workItem(WorkItemEntity.STATUS_IN_PROGRESS);
+
+        DevMindException ex = assertThrows(DevMindException.class,
+                () -> service.updateStatus("proj1", "req1", "DONE"));
+
+        assertTrue(ex.getMessage().contains("未完结工作单元"));
+        assertEquals(RequirementEntity.STATUS_IN_PROGRESS, e.getStatus());
+        assertTrue(events.published.isEmpty());
+    }
+
+    /** force=true 跳过 DONE 前置检查（前端二次确认后强制完成）。 */
+    @Test
+    void doneWithForceBypassesPrecondition() {
+        RequirementEntity e = requirement(RequirementEntity.STATUS_IN_PROGRESS, null);
+        workItem(WorkItemEntity.STATUS_IN_PROGRESS);
+
+        service.updateStatus("proj1", "req1", "DONE", true);
+
+        assertEquals(RequirementEntity.STATUS_DONE, e.getStatus());
+        assertEquals(1, events.published.size());
+    }
+
+    /** 工作单元全终态时 DONE 不受前置检查影响。 */
+    @Test
+    void doneWithAllTerminalWorkItemsPasses() {
+        RequirementEntity e = requirement(RequirementEntity.STATUS_ACCEPTANCE, null);
+        workItem(WorkItemEntity.STATUS_DONE);
+        workItem(WorkItemEntity.STATUS_CANCELLED);
+
+        service.updateStatus("proj1", "req1", "DONE");
+
+        assertEquals(RequirementEntity.STATUS_DONE, e.getStatus());
+    }
+
+    /** rollup 回滚：人工 DONE 后工作单元重新活跃 → 顶回 IN_PROGRESS。 */
+    @Test
+    void recomputeRollsBackDoneWhenWorkItemReactivated() {
+        RequirementEntity e = requirement(RequirementEntity.STATUS_DONE, null);
+        workItem(WorkItemEntity.STATUS_IN_PROGRESS);
+
+        service.recomputeStatus("req1");
+
+        assertEquals(RequirementEntity.STATUS_IN_PROGRESS, e.getStatus());
+    }
+
+    /** rollup 保持：人工 DONE 且工作单元全终态 → 不回退 ACCEPTANCE。 */
+    @Test
+    void recomputeKeepsDoneWhenAllTerminal() {
+        RequirementEntity e = requirement(RequirementEntity.STATUS_DONE, null);
+        workItem(WorkItemEntity.STATUS_DONE);
+
+        service.recomputeStatus("req1");
+
+        assertEquals(RequirementEntity.STATUS_DONE, e.getStatus());
+    }
+
+    /** rollup 保持：CANCELLED 永不回滚（即使工作单元重新活跃）。 */
+    @Test
+    void recomputeNeverRollsBackCancelled() {
+        RequirementEntity e = requirement(RequirementEntity.STATUS_CANCELLED, null);
+        workItem(WorkItemEntity.STATUS_IN_PROGRESS);
+
+        service.recomputeStatus("req1");
+
+        assertEquals(RequirementEntity.STATUS_CANCELLED, e.getStatus());
     }
 }

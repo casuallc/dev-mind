@@ -288,9 +288,26 @@ public class RequirementService {
 
     /** 人工状态翻转（验收 DONE / 取消 CANCELLED 等）；只校验状态值合法，不限制转换路径。 */
     public RequirementView updateStatus(String projectId, String requirementId, String status) {
+        return updateStatus(projectId, requirementId, status, null);
+    }
+
+    /**
+     * 人工状态翻转（带 force）。DONE 前置检查：存在未完结工作单元时拒绝（409），
+     * 防止 WI 还在跑需求却先完结（rollup 又会把它顶回 IN_PROGRESS，状态打架）；force=true 强制完成。
+     */
+    public RequirementView updateStatus(String projectId, String requirementId, String status, Boolean force) {
         RequirementEntity e = requireEntity(projectId, requirementId);
         String next = normalizeStatus(status);
         String prev = e.getStatus();
+        if (RequirementEntity.STATUS_DONE.equals(next) && !Boolean.TRUE.equals(force)) {
+            long active = workItemRepo.findByRequirementIdOrderBySeqAsc(requirementId).stream()
+                    .filter(w -> !isTerminal(w.getStatus()))
+                    .count();
+            if (active > 0) {
+                throw new DevMindException(ErrorCode.CONFLICT,
+                        "存在 " + active + " 个未完结工作单元，不能直接 DONE；请先完结工作单元，或确认强制完成");
+            }
+        }
         e.setStatus(next);
         e.setUpdatedAt(Instant.now());
         RequirementView view = toView(requirementRepo.save(e), refsFor(List.of(e.getId())).get(e.getId()),
@@ -363,12 +380,12 @@ public class RequirementService {
 
     /**
      * 派生状态重算（rollup）：Work Item 状态变化后调用。
-     * 人工终态 DONE / CANCELLED 不覆盖；无 Work Item 时保持现值（DRAFT/ANALYZING 由人工或分析会话推进）。
+     * 人工终态 CANCELLED 不覆盖；DONE 在工作单元重新活跃时回滚（→ DESIGNING/IN_PROGRESS），
+     * 全终态时保持 DONE 不回退 ACCEPTANCE；无 Work Item 时保持现值（DRAFT/ANALYZING 由人工或分析会话推进）。
      */
     public void recomputeStatus(String requirementId) {
         RequirementEntity e = requireById(requirementId);
-        if (RequirementEntity.STATUS_DONE.equals(e.getStatus())
-                || RequirementEntity.STATUS_CANCELLED.equals(e.getStatus())) {
+        if (RequirementEntity.STATUS_CANCELLED.equals(e.getStatus())) {
             return;
         }
         List<WorkItemEntity> items = workItemRepo.findByRequirementIdOrderBySeqAsc(requirementId);
@@ -379,6 +396,10 @@ public class RequirementService {
         boolean designing = items.stream().anyMatch(w -> WorkItemEntity.TYPE_DESIGN.equals(w.getType())
                 && !isTerminal(w.getStatus()));
         boolean active = items.stream().anyMatch(w -> !isTerminal(w.getStatus()));
+        if (RequirementEntity.STATUS_DONE.equals(e.getStatus()) && !designing && !active) {
+            // 人工 DONE 且工作单元全终态：保持 DONE（不回退 ACCEPTANCE）
+            return;
+        }
         if (designing) {
             next = RequirementEntity.STATUS_DESIGNING;
         } else if (active) {
