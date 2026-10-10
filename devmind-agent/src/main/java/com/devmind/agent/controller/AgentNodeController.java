@@ -155,8 +155,10 @@ public class AgentNodeController {
     @DeleteMapping("/{id}")
     public void delete(@PathVariable Long id) {
         registry.evict(id);
+        // 先取名字快照：删除后审计行只剩 nodeId 无法关键词检索
+        String name = service.require(id).getName();
         service.delete(id);
-        auditNode("DELETE", id, null, null);
+        auditNode("DELETE", id, name, null);
     }
 
     /** CAP-71：节点运维审计（NODE 分类，带操作人）。 */
