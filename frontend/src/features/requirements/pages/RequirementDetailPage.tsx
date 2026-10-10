@@ -538,9 +538,9 @@ export default function RequirementDetailPage() {
               label: attachCount == null ? '附件' : `附件（${attachCount}）`,
               children: (
                 <RequirementAttachmentPanel
-                  projectId={r.projectId}
-                  requirementId={r.id}
+                  requirement={r}
                   onCountChange={setAttachCount}
+                  onChanged={reloadAll}
                 />
               ),
             },

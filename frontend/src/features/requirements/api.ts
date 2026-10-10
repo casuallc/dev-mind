@@ -1,6 +1,5 @@
 // CAP-13/14 研发主线接口封装：Requirement / WorkItem / Design / 需求流程（flow）
 import { api } from '../../shared/api/client'
-import { deleteAttachment, uploadAttachment } from '../../shared/attachments/api'
 import type {
   Design,
   FlowSession,
@@ -12,9 +11,7 @@ import type {
   JiraPushTargets,
   JiraTransition,
   JiraTransitionResult,
-  RelationEdge,
   Requirement,
-  RequirementAttachment,
   RequirementInput,
   RequirementOverview,
   RequirementPage,
@@ -287,72 +284,4 @@ export function flowDev(projectId: string, requirementId: string): Promise<FlowS
 /** 工作单元起会话（spec 自动带入 taskSpec） */
 export function startWorkItemSession(projectId: string, workItemId: string): Promise<FlowSession> {
   return api.post<FlowSession>(`/projects/${projectId}/work-items/${workItemId}/start-session`)
-}
-
-// ---- 需求附件（绑定走 relations 稀疏边 attached：requirement → attachment，复用 CAP-32 附件底座，零后端改动） ----
-
-/** 需求附件绑定关系类型（relations 扩展类型，后端不强制预置词表） */
-export const REQUIREMENT_ATTACHMENT_RELATION = 'attached'
-
-/** 需求已绑附件列表：先取关系边再逐个回读附件元数据（文件已删的孤儿边容忍跳过） */
-export async function listRequirementAttachments(
-  projectId: string,
-  requirementId: string,
-): Promise<RequirementAttachment[]> {
-  const edges = await api.get<RelationEdge[]>(
-    `/projects/${projectId}/relations?fromType=requirement&fromId=${requirementId}`,
-  )
-  const binds = edges.filter(
-    (e) => e.relationType === REQUIREMENT_ATTACHMENT_RELATION && e.toType === 'attachment',
-  )
-  const rows = await Promise.all(
-    binds.map(async (e): Promise<RequirementAttachment | null> => {
-      try {
-        const attachment = await api.get<RequirementAttachment['attachment']>(`/attachments/${e.toId}`)
-        return { relationId: e.id, attachment }
-      } catch {
-        return null // 文件可能已在附件管理页被删，跳过孤儿边
-      }
-    }),
-  )
-  return rows.filter((r): r is RequirementAttachment => !!r)
-}
-
-/** 建绑定边：requirement --attached--> attachment */
-export function attachToRequirement(
-  projectId: string,
-  requirementId: string,
-  attachmentId: string,
-): Promise<void> {
-  return api.post(`/projects/${projectId}/relations`, {
-    fromType: 'requirement',
-    fromId: requirementId,
-    toType: 'attachment',
-    toId: attachmentId,
-    relationType: REQUIREMENT_ATTACHMENT_RELATION,
-  })
-}
-
-/** 上传并绑定（scope=SHARED 项目成员可见） */
-export async function uploadAndAttach(
-  projectId: string,
-  requirementId: string,
-  file: File,
-): Promise<void> {
-  const v = await uploadAttachment(file, file.name, 'SHARED')
-  await attachToRequirement(projectId, requirementId, v.attachmentId)
-}
-
-/** 移除需求附件：删绑定边 + 删文件本体（best-effort——owner 校验失败时至少边已删） */
-export async function detachAndDeleteAttachment(
-  projectId: string,
-  relationId: string,
-  attachmentId: string,
-): Promise<void> {
-  await api.del(`/projects/${projectId}/relations/${relationId}`)
-  try {
-    await deleteAttachment(attachmentId)
-  } catch {
-    // 文件删除失败（如非 owner）不阻断：边已删，需求上已不再展示
-  }
 }

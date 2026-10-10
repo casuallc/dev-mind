@@ -1,5 +1,4 @@
 // CAP-13 研发主线的类型定义：Requirement（业务目标）/ Design（解决方案）/ WorkItem（工作单元），与后端 devmind-project 模块对齐
-import type { AttachmentView } from '../../shared/attachments/api'
 
 export type RequirementStatus =
   | 'DRAFT' | 'ANALYZING' | 'DESIGNING' | 'IN_PROGRESS' | 'ACCEPTANCE' | 'DONE' | 'CANCELLED'
@@ -243,22 +242,4 @@ export interface RequirementOverview {
   releases: { id: number; version?: string; status: string; executor?: string; rollbackOf?: number; createdAt: string; finishedAt: string }[]
   artifacts: { id: number; type: string; name?: string; path?: string; producerType?: string; workItemId?: string; createdAt: string }[]
   timeline: { time: string; type: string; label: string; refId: string }[]
-}
-
-// ---- 需求附件（relations 稀疏边 attached：requirement → attachment，无独立表、零后端改动） ----
-
-/** relations 边（与后端 RelationView 对齐，只取本特性关心的字段） */
-export interface RelationEdge {
-  id: string
-  fromType: string
-  fromId: string
-  toType: string
-  toId: string
-  relationType: string
-}
-
-/** 需求附件 = 绑定边 id + 附件元数据（移除时边与文件本体都要删） */
-export interface RequirementAttachment {
-  relationId: string
-  attachment: AttachmentView
 }

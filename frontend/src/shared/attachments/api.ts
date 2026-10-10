@@ -42,6 +42,10 @@ export function uploadAttachment(
   return api.upload<AttachmentView>('/attachments', form)
 }
 
+export function getAttachment(attachmentId: string) {
+  return api.get<AttachmentView>(`/attachments/${attachmentId}`)
+}
+
 export function listAttachments(params?: { scope?: string; keyword?: string; type?: 'image' | 'other'; tag?: string }) {
   const q = new URLSearchParams()
   if (params?.scope) q.set('scope', params.scope)
