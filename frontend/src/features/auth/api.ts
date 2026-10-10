@@ -36,6 +36,10 @@ export function resetPassword(id: string, password: string) {
   return api.post<void>(`/auth/users/${id}/reset-password`, { password })
 }
 
+export function deleteUser(id: string) {
+  return api.del<void>(`/auth/users/${id}`)
+}
+
 // ---- 我的第三方账号（CAP-35） ----
 
 export interface PlatformAccountUpsertRequest {

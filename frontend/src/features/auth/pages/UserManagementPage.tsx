@@ -1,13 +1,14 @@
-import { Button, Card, Drawer, Form, Input, Modal, Select, Space, Tag, Typography, message } from 'antd'
+import { Button, Card, Form, Input, Modal, Select, Space, Tag, Typography, message } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
-import { createUser, listUsers, resetPassword, updateUser } from '../api'
+import { createUser, deleteUser, listUsers, resetPassword, updateUser } from '../api'
 import { getUserSnapshot } from '../authStore'
 import type { AuthUser } from '../types'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { fmtTime } from '../../../shared/utils/format'
 
 /** CAP-01 后台页：用户管理（仅 ADMIN，由 RequireAdmin 路由守卫保证）。 */
 export default function UserManagementPage() {
@@ -15,7 +16,8 @@ export default function UserManagementPage() {
   const [loading, setLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [resetTarget, setResetTarget] = useState<AuthUser | null>(null)
-  const [manageTarget, setManageTarget] = useState<AuthUser | null>(null)
+  const [roleTarget, setRoleTarget] = useState<AuthUser | null>(null)
+  const [roleValue, setRoleValue] = useState<string>('')
   const [createForm] = Form.useForm()
   const [resetForm] = Form.useForm()
   const me = getUserSnapshot()
@@ -56,11 +58,17 @@ export default function UserManagementPage() {
     }
   }
 
-  const changeRole = async (u: AuthUser, role: string) => {
+  const openRole = (u: AuthUser) => {
+    setRoleTarget(u)
+    setRoleValue(u.role)
+  }
+
+  const onSaveRole = async () => {
+    if (!roleTarget) return
     try {
-      await updateUser(u.id, { role })
-      message.success(`${u.username} 角色已改为 ${role}`)
-      setManageTarget((t) => (t && t.id === u.id ? { ...t, role } : t))
+      await updateUser(roleTarget.id, { role: roleValue })
+      message.success(`${roleTarget.username} 角色已改为 ${roleValue}`)
+      setRoleTarget(null)
       reload()
     } catch (e) {
       showError(e, '修改失败')
@@ -72,11 +80,29 @@ export default function UserManagementPage() {
     try {
       await updateUser(u.id, { status: next })
       message.success(`${u.username} 已${next === 'ACTIVE' ? '启用' : '禁用'}`)
-      setManageTarget((t) => (t && t.id === u.id ? { ...t, status: next } : t))
       reload()
     } catch (e) {
       showError(e, '操作失败')
     }
+  }
+
+  const confirmDelete = (u: AuthUser) => {
+    Modal.confirm({
+      title: `删除用户：${u.username}`,
+      content: '删除后该账号不可恢复，其登录态（refresh token）全部失效。确认删除？',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await deleteUser(u.id)
+          message.success(`已删除用户 ${u.username}`)
+          reload()
+        } catch (e) {
+          showError(e, '删除失败')
+          throw e
+        }
+      },
+    })
   }
 
   return (
@@ -131,54 +157,52 @@ export default function UserManagementPage() {
                 </Tag>
               ),
           },
+          { title: '创建时间', dataIndex: 'createdAt', width: 160, render: (v?: string) => fmtTime(v) },
           {
             title: '操作',
-            render: (_, u) => (
-              <Button size="small" onClick={() => setManageTarget(u)}>
-                管理
-              </Button>
-            ),
+            width: 280,
+            render: (_, u) => {
+              const isLocal = u.username === 'local'
+              const isSelf = u.username === me?.username
+              return (
+                <Space size={4}>
+                  <Button size="small" disabled={isLocal} onClick={() => openRole(u)}>
+                    角色
+                  </Button>
+                  <Button size="small" disabled={isLocal} onClick={() => setResetTarget(u)}>
+                    重置密码
+                  </Button>
+                  <Button size="small" disabled={isLocal || isSelf} onClick={() => toggleStatus(u)}>
+                    {u.status === 'DISABLED' ? '启用' : '禁用'}
+                  </Button>
+                  <Button size="small" danger disabled={isLocal || isSelf} onClick={() => confirmDelete(u)}>
+                    删除
+                  </Button>
+                </Space>
+              )
+            },
           },
         ]}
       />
 
-      <Drawer
-        title={`管理用户：${manageTarget?.username ?? ''}`}
-        open={!!manageTarget}
-        onClose={() => setManageTarget(null)}
-        width={360}
+      <Modal
+        title={`修改角色：${roleTarget?.username ?? ''}`}
+        open={!!roleTarget}
+        onOk={onSaveRole}
+        onCancel={() => setRoleTarget(null)}
+        destroyOnHidden
       >
-        {manageTarget && (
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <div>
-              <Typography.Text type="secondary">角色</Typography.Text>
-              <Select
-                value={manageTarget.role}
-                style={{ width: '100%', marginTop: 8 }}
-                disabled={manageTarget.username === 'local'}
-                onChange={(r) => changeRole(manageTarget, r)}
-                options={[
-                  { value: 'ADMIN', label: 'ADMIN（全权限）' },
-                  { value: 'DEVELOPER', label: 'DEVELOPER（业务读写）' },
-                  { value: 'VIEWER', label: 'VIEWER（只读）' },
-                ]}
-              />
-            </div>
-            <Button
-              onClick={() => setResetTarget(manageTarget)}
-              disabled={manageTarget.username === 'local'}
-            >
-              重置密码
-            </Button>
-            <Button
-              disabled={manageTarget.username === 'local' || manageTarget.username === me?.username}
-              onClick={() => toggleStatus(manageTarget)}
-            >
-              {manageTarget.status === 'DISABLED' ? '启用' : '禁用'}
-            </Button>
-          </Space>
-        )}
-      </Drawer>
+        <Select
+          value={roleValue}
+          style={{ width: '100%', marginTop: 8 }}
+          onChange={setRoleValue}
+          options={[
+            { value: 'ADMIN', label: 'ADMIN（全权限）' },
+            { value: 'DEVELOPER', label: 'DEVELOPER（业务读写）' },
+            { value: 'VIEWER', label: 'VIEWER（只读）' },
+          ]}
+        />
+      </Modal>
 
       <Modal
         title="新建用户"
