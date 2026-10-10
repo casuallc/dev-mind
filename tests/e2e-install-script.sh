@@ -50,12 +50,20 @@ fs.writeFileSync('$E2E/install-runner-param.sh', p)
 console.log('scripts generated')
 " || { echo "FAIL: 生成脚本"; exit 1; }
 
-echo "== 5. 跑生成的 sh(HOME 隔离到 $E2E/home) =="
-HOME="/d/apusic/dev-mind/$E2E/home" bash $E2E/install-runner.sh || { echo "FAIL: 安装脚本执行失败"; exit 1; }
+echo "== 5. 跑生成的 sh(HOME 隔离到 $E2E/home;--no-service 走后台路径,本机无 systemd) =="
+HOME="/d/apusic/dev-mind/$E2E/home" bash $E2E/install-runner.sh --no-service || { echo "FAIL: 安装脚本执行失败"; exit 1; }
 [ -f $E2E/home/devmind-runner/devmind-agent-runner.jar ] || { echo "FAIL: jar 未下载"; exit 1; }
 [ -f $E2E/home/devmind-runner/agent.properties ] || { echo "FAIL: 配置未生成"; exit 1; }
 [ -f $E2E/home/devmind-runner/runner.pid ] || { echo "FAIL: pid 文件缺失"; exit 1; }
 echo "jar/config/pid 齐备"
+
+echo "== 5b. 静态断言:默认服务路径已内嵌(systemd/WinSW + DEVMIND_RUNNER_SERVICE) =="
+grep -q 'DEVMIND_RUNNER_SERVICE=1' $E2E/install-runner.sh && grep -q 'systemctl' $E2E/install-runner.sh \
+  || { echo "FAIL: sh 缺 systemd 服务路径"; exit 1; }
+grep -q 'WinSW' $E2E/install-runner.ps1 && grep -q 'DEVMIND_RUNNER_SERVICE' $E2E/install-runner.ps1 \
+  || { echo "FAIL: ps1 缺 WinSW 服务路径"; exit 1; }
+grep -q -- '--no-service' $E2E/install-runner-param.sh || { echo "FAIL: 参数化 sh 缺 --no-service"; exit 1; }
+echo "服务路径断言 ok"
 
 echo "== 6. 断言节点 ONLINE 且 runnerVersion 非空 =="
 VER=""; ST=""

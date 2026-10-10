@@ -1,5 +1,7 @@
 # Agent Runner 服务化部署指南（Linux systemd / Windows 服务）
 
+> 2026-10-10 起，节点页下载的**一键安装脚本默认即注册系统服务**（下方同套机制），本指南适用于手工 dist 部署与运维排错。
+
 分发包（`devmind-<version>.tar.gz`）自带 `runner/devmind-agent-runner.jar`，两平台均可注册为系统服务：开机自启、崩溃自动拉起（`Restart=on-failure` / `<onfailure action="restart"/>`）。
 
 前置：解开分发包 → 参考 `config/agent.properties.example` 生成 `config/agent.properties` 并填入 token（后台 → Agent 节点 新建节点复制）。

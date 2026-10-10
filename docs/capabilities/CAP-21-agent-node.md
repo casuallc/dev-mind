@@ -56,8 +56,12 @@ Windows 办公机普遍在 NAT/防火墙后、入站不可达，因此采用**�
   下拉（默认本地）。**一键安装脚本**（2026-09-03 补做）：创建节点对话框直接下载
   Windows `.ps1` / Linux `.sh` 一键脚本（内嵌 serverUrl+token，前端生成，依赖下载端点的
   节点 token 认证，后端零改动）；节点行内另提供参数化脚本（token 运行时传参）。
-  脚本流程 = 检查 java(21+) → 下载 runner 包 → 写 agent.properties → 后台常驻启动
-  （Windows `Start-Process -WindowStyle Hidden`，Linux `nohup`，日志落 runner.log）。
+  脚本流程 = 解析 java(21+) → 下载 runner 包 → 写 agent.properties → **默认注册系统服务**
+  （2026-10-10 起：Windows 经 WinSW 注册服务（自动下载，`-WinSwUrl`/`WINSW_URL` 可离线覆盖）、
+  Linux 写 systemd unit `devmind-agent.service` 并 `enable --now`，均注入
+  `DEVMIND_RUNNER_SERVICE=1` 承接自升级退出码 42）；无管理员/root 权限自动降级后台常驻
+  （Windows `Start-Process -WindowStyle Hidden`，Linux `nohup`，日志落 runner.log），
+  `--no-service` / `-NoService` 可强制后台模式。
 - **FR-08 runner 瘦包**：独立可执行 jar（只含 session runtime 依赖子集 + WS 客户端），
   `java -jar devmind-agent-runner.jar [agent.properties]` 启动（args[0] 为配置文件路径，
   缺省 `./agent.properties`，properties 格式）；配置项 = serverUrl(必填) / token(必填) /
