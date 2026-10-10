@@ -68,6 +68,10 @@ class AgentInstallScriptControllerTest {
         assertFalse(s.contains("%DOWNLOAD_URL%"));
         assertTrue(s.contains("http://dev.example.com:8080/api/agent-nodes/runner-package/download"));
         assertTrue(s.contains("WinSW") && s.contains("DEVMIND_RUNNER_SERVICE"));
+        // https 自签支持：-Insecure 开关 + 校验失败自动降级跳过 + 记入 agent.properties
+        assertTrue(s.contains("[switch]$Insecure"));
+        assertTrue(s.contains("ServerCertificateValidationCallback"));
+        assertTrue(s.contains("$lines += 'insecure=true'"));
     }
 
     @Test
@@ -81,6 +85,10 @@ class AgentInstallScriptControllerTest {
         assertTrue(s.contains("TOKEN=\"dmag_x\""));
         assertTrue(s.contains("systemctl") && s.contains("Environment=DEVMIND_RUNNER_SERVICE=1"));
         assertTrue(s.contains("--no-service"));
+        // https 自签支持：--insecure 开关 + curl -k 降级重试 + 记入 agent.properties
+        assertTrue(s.contains("--insecure"));
+        assertTrue(s.contains("curl -fsSLk"));
+        assertTrue(s.contains("INSECURE_LINE=\"insecure=true\""));
         assertFalse(s.contains("%TOKEN%"));
         assertFalse(s.contains("%SERVER_URL%"));
         assertFalse(s.contains("%DOWNLOAD_URL%"));

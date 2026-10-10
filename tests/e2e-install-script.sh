@@ -2,7 +2,8 @@
 # 一键安装脚本 E2E(tmp/,gitignored):
 # 服务端按节点 token 下发脚本(GET /api/agent-nodes/{id}/install-script) → sh --no-service
 # 实跑(HOME 指向隔离目录) → 断言节点 ONLINE 且 runnerVersion 非空 → 静态断言服务路径
-# (systemd/WinSW + DEVMIND_RUNNER_SERVICE) → powershell parse 检查 ps1 → 负例(坏 token/匿名 401) → 清理。
+# (systemd/WinSW + DEVMIND_RUNNER_SERVICE)与 https 自签降级(--insecure/curl -k/insecure=true)
+# → powershell parse 检查 ps1 → 负例(坏 token/匿名 401) → 清理。
 set -uo pipefail
 BASE=http://localhost:8080
 E2E=tmp/install-e2e
@@ -67,6 +68,15 @@ grep -q 'WinSW' $E2E/install-runner.ps1 && grep -q 'DEVMIND_RUNNER_SERVICE' $E2E
   || { echo "FAIL: ps1 缺 WinSW 服务路径"; exit 1; }
 grep -q -- '--no-service' $E2E/install-runner-param.sh || { echo "FAIL: 参数化 sh 缺 --no-service"; exit 1; }
 echo "服务路径断言 ok"
+
+echo "== 5b. 静态断言:https 自签支持(--insecure/-Insecure + 降级重试 + insecure=true) =="
+grep -q -- '--insecure' $E2E/install-runner.sh && grep -q 'curl -fsSLk' $E2E/install-runner.sh \
+  && grep -q 'INSECURE_LINE="insecure=true"' $E2E/install-runner.sh \
+  || { echo "FAIL: sh 缺 insecure 降级路径"; exit 1; }
+grep -q -- '-Insecure' $E2E/install-runner.ps1 && grep -q 'ServerCertificateValidationCallback' $E2E/install-runner.ps1 \
+  && grep -q "insecure=true" $E2E/install-runner.ps1 \
+  || { echo "FAIL: ps1 缺 insecure 降级路径"; exit 1; }
+echo "insecure 断言 ok"
 
 echo "== 6. 断言节点 ONLINE 且 runnerVersion 非空 =="
 VER=""; ST=""

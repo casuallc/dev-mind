@@ -63,12 +63,19 @@ Windows 办公机普遍在 NAT/防火墙后、入站不可达，因此采用**�
   Linux 写 systemd unit `devmind-agent.service` 并 `enable --now`，均注入
   `DEVMIND_RUNNER_SERVICE=1` 承接自升级退出码 42）；无管理员/root 权限自动降级后台常驻
   （Windows `Start-Process -WindowStyle Hidden`，Linux `nohup`，日志落 runner.log），
-  `--no-service` / `-NoService` 可强制后台模式。
+  `--no-service` / `-NoService` 可强制后台模式。**https 自签证书部署**（2026-10-10 起）：
+  页面为 https 时一条命令自动带降级兜底（`curl` 失败重试 `-k`、ps1 try/catch 后置
+  `ServerCertificateValidationCallback`）；脚本内下载 runner 包同样校验失败自动降级并提示，
+  随后自动给 agent.properties 写入 `insecure=true` 承接 runner 运行期 wss/https 全链路
+  （`--insecure` / `-Insecure` 可显式强制）。CA 签名站点不受影响。
 - **FR-08 runner 瘦包**：独立可执行 jar（只含 session runtime 依赖子集 + WS 客户端），
   `java -jar devmind-agent-runner.jar [agent.properties]` 启动（args[0] 为配置文件路径，
   缺省 `./agent.properties`，properties 格式）；配置项 = serverUrl(必填) / token(必填) /
   workDir / permissionMode / executor / 项目路径映射(project.<id>) / claude 路径(claudePath) /
-  并发上限(maxConcurrent)。
+  并发上限(maxConcurrent) / insecure（2026-10-10 起，默认 false；=true 时对服务端的
+  wss/https 全链路信任一切证书并关闭主机名校验，仅供自签 https 内网部署；JDK HttpClient
+  关主机名校验只能靠内部系统属性 `jdk.internal.httpclient.disableHostnameVerification`，
+  由 AgentRunnerMain 加载配置后第一时间置位，统一走 `RunnerHttp.newClient(config)`）。
 - **FR-09 runner 版本维护与手动升级**（2026-09-03 补做）：节点页「Runner 包」页签上传
   `devmind-agent-runner.jar` 由服务端托管（**全局单份，上传即替换**；版本从包内
   `runner-version.txt` 提取、sha256 入库；强校验含 `SelfUpdater.class`，无自升级能力的

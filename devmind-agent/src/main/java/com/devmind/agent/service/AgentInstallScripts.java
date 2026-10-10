@@ -19,8 +19,8 @@ public final class AgentInstallScripts {
     public static String windows(String serverUrl, String downloadUrl, String token) {
         boolean embedded = token != null;
         String usage = embedded
-                ? "powershell -ExecutionPolicy Bypass -File install-runner.ps1 [-NoService] [-WinSwUrl <url>]"
-                : "powershell -ExecutionPolicy Bypass -File install-runner.ps1 -Token dmag_xxx [-NoService] [-WinSwUrl <url>]";
+                ? "powershell -ExecutionPolicy Bypass -File install-runner.ps1 [-NoService] [-Insecure] [-WinSwUrl <url>]"
+                : "powershell -ExecutionPolicy Bypass -File install-runner.ps1 -Token dmag_xxx [-NoService] [-Insecure] [-WinSwUrl <url>]";
         return Template.WINDOWS
                 .replace("%TOKEN%", embedded ? token : "")
                 .replace("%USAGE%", usage)
@@ -33,8 +33,8 @@ public final class AgentInstallScripts {
     public static String linux(String serverUrl, String downloadUrl, String token) {
         boolean embedded = token != null;
         String usage = embedded
-                ? "sudo bash install-runner.sh [--no-service]"
-                : "sudo bash install-runner.sh dmag_xxx [--no-service]";
+                ? "sudo bash install-runner.sh [--no-service] [--insecure]"
+                : "sudo bash install-runner.sh dmag_xxx [--no-service] [--insecure]";
         return Template.LINUX
                 .replace("%TOKEN%", embedded ? token : "")
                 .replace("%USAGE%", usage)
@@ -54,9 +54,17 @@ param(
   [string]$Token = '%TOKEN%',
   [string]$InstallDir = "$env:USERPROFILE\\devmind-runner",
   [string]$WinSwUrl,
-  [switch]$NoService
+  [switch]$NoService,
+  [switch]$Insecure
 )
 $ErrorActionPreference = 'Stop'
+
+# PS 5.1 无 -SkipCertificateCheck:进程内信任一切 TLS 证书(仅本脚本下载用;
+# runner 运行期由写入 agent.properties 的 insecure=true 承接)
+function Enable-InsecureTls {
+  [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+  [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+}
 
 # PS 5.1 坑:脚本级 EAP=Stop 时原生命令的 stderr 输出(java -version 版本行、winsw 诊断)
 # 经 2>&1 合并后会变成 ErrorRecord 直接终止脚本——原生命令统一走本函数。
@@ -92,14 +100,27 @@ function Resolve-Java {
 if (-not $Token) { throw '缺少节点 token,请传入 -Token <dmag_xxx>' }
 $java = Resolve-Java
 
-# 1. 下载 runner 包
+# 1. 下载 runner 包(https 自签:校验失败自动降级跳过证书校验并记入 insecure=true;-Insecure 直接跳过)
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 $jar = Join-Path $InstallDir 'devmind-agent-runner.jar'
+$insecureOn = $Insecure.IsPresent
+if ($insecureOn) { Enable-InsecureTls }
 Write-Host '[install] 下载 runner 包...'
 try {
   Invoke-WebRequest -Uri "%DOWNLOAD_URL%?token=$Token" -OutFile $jar
 } catch {
-  throw "下载失败(服务端是否已在「Runner 包」页签上传包?): $($_.Exception.Message)"
+  if ($insecureOn) {
+    throw "下载失败(服务端是否已在「Runner 包」页签上传包?): $($_.Exception.Message)"
+  }
+  Write-Host '[install] 下载失败,按 https 自签证书场景跳过证书校验重试...'
+  Enable-InsecureTls
+  try {
+    Invoke-WebRequest -Uri "%DOWNLOAD_URL%?token=$Token" -OutFile $jar
+    $insecureOn = $true
+    Write-Host '[install] 警告:服务端证书未通过校验,已跳过;runner 将以 insecure=true 运行(不校验 wss 证书)'
+  } catch {
+    throw "下载失败(服务端是否已在「Runner 包」页签上传包?): $($_.Exception.Message)"
+  }
 }
 
 # 2. 写配置(UTF-8 无 BOM;workDir 归一为正斜杠)
@@ -115,6 +136,7 @@ $lines = @(
   '#labels=    # 节点标签 CSV(CAP-34 FR-07,如 windows,office;非空时 hello 覆盖服务端编辑值)',
   '#claudeConfigDir=  # 服务化部署必配:指向已登录 claude 的 .claude 目录(如 C:/Users/<用户名>/.claude),服务账户读不到你本机登录态'
 )
+if ($insecureOn) { $lines += 'insecure=true' }
 [IO.File]::WriteAllLines($conf, $lines, (New-Object Text.UTF8Encoding($false)))
 
 # 3. 隐藏窗口后台启动(降级路径;日志: runner.log / runner.err.log)
@@ -191,10 +213,12 @@ Write-Host '[install] 到平台「Agent 节点」页确认节点已 ONLINE'
 set -euo pipefail
 
 NO_SERVICE=0
+INSECURE=0
 TOKEN="%TOKEN%"
 for a in "$@"; do
   case "$a" in
     --no-service) NO_SERVICE=1 ;;
+    --insecure) INSECURE=1 ;;
     *) TOKEN="$a" ;;
   esac
 done
@@ -223,17 +247,34 @@ mkdir -p "$INSTALL_DIR/work"
 cd "$INSTALL_DIR"
 
 echo '[install] 下载 runner 包...'
-if ! curl -fSL -o devmind-agent-runner.jar "%DOWNLOAD_URL%?token=$TOKEN"; then
-  echo '[install] 下载失败:服务端是否已在「Runner 包」页签上传 runner 包?' >&2
-  exit 1
+# https 自签:证书校验失败自动降级 -k 重试并记入 insecure=true;--insecure 直接全程 -k
+CURL_TLS=""
+[ "$INSECURE" = 1 ] && CURL_TLS="-k"
+if ! curl -fSL $CURL_TLS -o devmind-agent-runner.jar "%DOWNLOAD_URL%?token=$TOKEN"; then
+  if [ "$INSECURE" = 0 ]; then
+    echo '[install] 下载失败,按 https 自签证书场景跳过证书校验重试(-k)...' >&2
+    if curl -fsSLk -o devmind-agent-runner.jar "%DOWNLOAD_URL%?token=$TOKEN"; then
+      INSECURE=1
+      echo '[install] 警告:服务端证书未通过校验,已跳过;runner 将以 insecure=true 运行(不校验 wss 证书)' >&2
+    else
+      echo '[install] 下载失败:服务端是否已在「Runner 包」页签上传 runner 包?' >&2
+      exit 1
+    fi
+  else
+    echo '[install] 下载失败:服务端是否已在「Runner 包」页签上传 runner 包?' >&2
+    exit 1
+  fi
 fi
 
+INSECURE_LINE=""
+[ "$INSECURE" = 1 ] && INSECURE_LINE="insecure=true"
 cat > agent.properties <<EOF
 serverUrl=%SERVER_URL%
 token=$TOKEN
 workDir=$INSTALL_DIR/work
 maxConcurrent=4
 executor=claude
+$INSECURE_LINE
 #gcDays=14  # 会话工作区超龄回收天数(CAP-34 FR-05,默认 14)
 #labels=    # 节点标签 CSV(CAP-34 FR-07,如 windows,office;非空时 hello 覆盖服务端编辑值)
 #claudeConfigDir=  # 服务化部署必配:指向已登录 claude 的 .claude 目录(如 /home/<用户名>/.claude),服务账户读不到你本机登录态
