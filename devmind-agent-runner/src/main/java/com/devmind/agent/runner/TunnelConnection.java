@@ -50,9 +50,9 @@ public class TunnelConnection {
     static final int SEND_QUEUE_CAPACITY = 10_000;
     /** 单帧写完超时 */
     static final long SEND_TIMEOUT_MS = 10_000;
-    /** 保活 ping 间隔：隧道空闲时无任何业务帧，NAT/云网关会静默丢空闲 TCP（无 RST 双向都感知不到） */
+    /** 保活巡检间隔（只查下行静默，不发 ping——JDK client↔Tomcat server 链路 ping/pong 实测不投递） */
     static final long KEEPALIVE_INTERVAL_MS = 25_000;
-    /** 下行静默判定阈值（≈3 个保活周期）：超此判定静默断链，主动 abort 触发重连 */
+    /** 下行静默判定阈值（≈3 个心跳周期）：收到过服务端心跳后超此判定静默断链，主动 abort 触发重连 */
     static final long KEEPALIVE_TIMEOUT_MS = 75_000;
 
     private final RunnerConfig config;
@@ -65,6 +65,11 @@ public class TunnelConnection {
     /** 保活参数为实例字段（测试可调小），默认取常量 */
     volatile long keepaliveIntervalMs = KEEPALIVE_INTERVAL_MS;
     volatile long keepaliveTimeoutMs = KEEPALIVE_TIMEOUT_MS;
+    /**
+     * 本连接是否已收到过服务端心跳（tunnel_ping）：静默断链判定只在收到过心跳后启用——
+     * 老服务端没有心跳，无门槛启用会把健康隧道每 75s 误杀一次（兼容门）。
+     */
+    volatile boolean heartbeatSeen;
     private final Map<Integer, RunnerTunnelStream> streams = new ConcurrentHashMap<>();
     private volatile boolean running = true;
 
@@ -102,7 +107,8 @@ public class TunnelConnection {
                 long connectedAt = System.currentTimeMillis();
                 current.set(ws);
                 lastInboundAt.set(connectedAt);
-                Thread.ofVirtual().name("tunnel-keepalive").start(() -> keepaliveLoop(ws));
+                heartbeatSeen = false;
+                Thread.ofVirtual().name("tunnel-keepalive").start(() -> keepaliveLoop(ws, closed));
                 closed.await();
                 healthy = System.currentTimeMillis() - connectedAt >= ServerConnection.MIN_HEALTHY_MS;
             } catch (InterruptedException e) {
@@ -234,12 +240,15 @@ public class TunnelConnection {
     }
 
     /**
-     * 保活循环（每连接一条，随 {@link #run()} 建连启动）：周期 ping 保 TCP 热——隧道空闲时
-     * 没有任何业务帧，NAT/云网关会静默丢空闲连接（无 RST，双方都不感知），服务端 OPEN 永远
-     * 等不到 ACK。ping 顺带探测：下行静默超 {@link #keepaliveTimeoutMs}（pong 也算下行帧）
-     * 或 ping 写失败 = 连接已死，主动 abort 让 {@link #run()} 走重连。包内可见供测试直驱。
+     * 保活巡检循环（每连接一条，随 {@link #run()} 建连启动）：隧道空闲时没有任何业务帧，
+     * NAT/云网关会静默丢空闲连接（无 RST，双方都不感知），服务端 OPEN 永远等不到 ACK。
+     * 保活流量由服务端心跳（tunnel_ping 文本帧）提供，本循环只做下行静默判定：
+     * <b>收到过心跳的前提下</b>下行静默超 {@link #keepaliveTimeoutMs} = 连接已死，
+     * 主动 abort 并放行 {@link #closed} 闩锁让 {@link #run()} 走重连
+     * （JDK 的 {@code ws.abort()} 实测不一定回调 listener onError/onClose，必须手动放行，
+     * 否则 run() 永远挂在 closed.await() 上不再重连——2026-10-10 实锤）。包内可见供测试直驱。
      */
-    void keepaliveLoop(WebSocket ws) {
+    void keepaliveLoop(WebSocket ws, CountDownLatch closed) {
         while (running && current.get() == ws) {
             try {
                 Thread.sleep(keepaliveIntervalMs);
@@ -251,16 +260,10 @@ public class TunnelConnection {
                 return; // 连接已换/已断，旧循环退场
             }
             long silentMs = System.currentTimeMillis() - lastInboundAt.get();
-            if (silentMs > keepaliveTimeoutMs) {
-                log.warn("隧道 {}ms 无任何下行帧（含 pong），判定静默断链，主动断开重连", silentMs);
+            if (heartbeatSeen && silentMs > keepaliveTimeoutMs) {
+                log.warn("隧道 {}ms 无任何下行帧（含服务端心跳），判定静默断链，主动断开重连", silentMs);
                 ws.abort();
-                return;
-            }
-            try {
-                ws.sendPing(ByteBuffer.allocate(0)).get(SEND_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-            } catch (Exception e) {
-                log.warn("隧道保活 ping 发送失败（连接已死），主动断开重连: {}", e.getMessage());
-                ws.abort();
+                closed.countDown();
                 return;
             }
         }
@@ -318,15 +321,18 @@ public class TunnelConnection {
             return null;
         }
 
-        /** tunnel_hello（唯一文本下行帧）：刷新出口白名单快照 */
+        /** tunnel_hello（白名单快照）与 tunnel_ping（服务端心跳，静默断链判定的存活证据） */
         private void handleText(String text) {
             try {
                 JsonNode frame = mapper.readTree(text);
-                if ("tunnel_hello".equals(frame.path("type").asText(""))) {
+                String type = frame.path("type").asText("");
+                if ("tunnel_hello".equals(type)) {
                     List<String> allowed = new ArrayList<>();
                     frame.path("allowedHosts").forEach(h -> allowed.add(h.asText("")));
                     EgressHostAllowlist.set(allowed);
                     log.info("出口白名单快照已刷新（{} 条）", allowed.size());
+                } else if ("tunnel_ping".equals(type)) {
+                    heartbeatSeen = true; // lastInboundAt 已在 onText 入口刷新
                 } else {
                     log.debug("隧道未知文本帧: {}", text.length() > 200 ? text.substring(0, 200) : text);
                 }
@@ -357,7 +363,7 @@ public class TunnelConnection {
 
         @Override
         public CompletionStage<?> onPong(WebSocket webSocket, ByteBuffer message) {
-            // 保活探测的应答：pong 到达即连接活着（控制帧不占 request 额度，无需再 request）
+            // 协议级 pong（本端不主动 ping，服务端 Tomcat 也不会 ping；防御性刷新存活时间）
             lastInboundAt.set(System.currentTimeMillis());
             return null;
         }

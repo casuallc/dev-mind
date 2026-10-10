@@ -42,11 +42,18 @@
   快侧撑爆慢侧内存。
 - 协议版本门控：`AgentProtocol.EGRESS_TUNNEL = 21`，hello 的 protocolVersion 已上报，
   服务端据此判定节点能否建隧道（<21 不建、规则引用它时给出升级提示）。
-- **保活（静默断链对策，2026-10-10 实锤补办）**：隧道空闲时无任何业务帧，NAT/云网关
-  会静默丢空闲 TCP（无 RST，WS 层双向都不感知）——194 公网部署实测：隧道闲置 ~7 分钟后
-  服务端 OPEN 永远等不到 ACK、runner 永不重连。对策两侧配合：
-  - runner 侧每 25s 发 WS 协议级 ping（ping/pong 是协议帧，老服务端 Tomcat 自动应答，
-    无需协议版本升级）；下行静默（含 pong）超 75s 或 ping 写失败 → 主动 abort 走重连。
+- **保活（静默断链对策，2026-10-10 实锤补办并当日重构）**：隧道空闲时无任何业务帧，
+  NAT/云网关会静默丢空闲 TCP（无 RST，WS 层双向都不感知）——194 公网部署实测：隧道闲置
+  ~7 分钟后服务端 OPEN 永远等不到 ACK、runner 永不重连。对策两侧配合：
+  - **服务端心跳**：按 `devmind.egress.heartbeat-interval-ms`（默认 25s）向每条隧道下推
+    应用级文本帧 `{"type":"tunnel_ping"}`——WS 协议级 ping/pong 在 JDK client↔Tomcat
+    server 链路实测不投递（runner 首版用 sendPing 保活，上线后 pong 从不到达、健康隧道
+    被 75s 静默判定误杀），故保活流量必须由服务端应用帧提供；心跳发送失败（连接已死）
+    即摘除隧道等 runner 重连顶回。
+  - **runner 静默判定**：收到过心跳的隧道，下行全静默（含心跳）超 75s → 主动 abort 并
+    **手动放行 run() 的 closed 闩锁走重连**（JDK `ws.abort()` 实测不一定回调 listener
+    onError/onClose，首版只靠 abort 导致 run() 永挂 await、再不重连）；未收到过心跳
+    （老服务端）不启用静默判定，兼容不误杀。
   - 服务端侧 OPEN_ACK 超时（健康 runner 必在拨号超时 10s 内应答，30s 全静默即判定
     静默断链）→ 摘除隧道并关会话：后续请求按「隧道未连接」快速失败而非每单各挂 30s，
     runner 重连后自动顶回。

@@ -88,7 +88,36 @@ public class AgentTunnelRegistry implements EgressTunnelStatus {
             }
         }
         pushSnapshot(conn);
+        Thread.ofVirtual().name("tunnel-heartbeat-" + nodeId).start(() -> heartbeatLoop(conn));
         log.info("节点 {}（{}）隧道已建立", nodeId, node.getName());
+    }
+
+    /**
+     * 隧道心跳（每连接一条）：按 {@link EgressProperties#getHeartbeatIntervalMs()} 下推
+     * 应用级文本帧 tunnel_ping。隧道空闲时没有任何业务帧，NAT/云网关会静默丢空闲 TCP
+     * （无 RST，双方都不感知）——心跳既保 TCP 热又充当探活：runner 侧以下行静默超时判定
+     * 断链重连；本侧发送失败（连接已死）即摘除隧道等 runner 重连顶回。
+     * WS 协议级 ping/pong 在 JDK client↔Tomcat server 链路实测不投递（2026-10-10），不可用。
+     */
+    private void heartbeatLoop(TunnelConn conn) {
+        while (tunnels.get(conn.nodeId()) == conn) {
+            try {
+                Thread.sleep(props.getHeartbeatIntervalMs());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            if (tunnels.get(conn.nodeId()) != conn) {
+                return; // 已被新连接顶替/摘除
+            }
+            try {
+                sendText(conn, "{\"type\":\"tunnel_ping\"}");
+            } catch (Exception e) {
+                log.debug("节点 {} 隧道心跳发送失败: {}", conn.nodeId(), e.toString());
+                dropSilent(conn, "心跳发送失败");
+                return;
+            }
+        }
     }
 
     /** 隧道断开：该连接全部流中止（SOCKS 侧 socket 断开，客户端快速失败） */
@@ -122,11 +151,16 @@ public class AgentTunnelRegistry implements EgressTunnelStatus {
                     "type", "tunnel_hello",
                     "protocolVersion", AgentProtocol.EGRESS_TUNNEL,
                     "allowedHosts", allowed));
-            synchronized (conn.sendLock()) {
-                conn.session().sendMessage(new TextMessage(json));
-            }
+            sendText(conn, json);
         } catch (Exception e) {
             log.warn("节点 {} 隧道快照下发失败: {}", conn.nodeId(), e.toString());
+        }
+    }
+
+    /** 文本帧同步发送（与二进制帧共用 sendLock——同一会话并发 sendMessage 不安全） */
+    private void sendText(TunnelConn conn, String json) throws IOException {
+        synchronized (conn.sendLock()) {
+            conn.session().sendMessage(new TextMessage(json));
         }
     }
 

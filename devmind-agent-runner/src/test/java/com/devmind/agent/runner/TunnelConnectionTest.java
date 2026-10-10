@@ -19,6 +19,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -35,8 +37,6 @@ class TunnelConnectionTest {
     private TunnelConnection tunnel;
     /** 上行帧（已解码，sendBinary 顺序即帧序） */
     private final List<TunnelFrame> uplink = new CopyOnWriteArrayList<>();
-    private final java.util.concurrent.atomic.AtomicInteger pingCount =
-            new java.util.concurrent.atomic.AtomicInteger();
     private final java.util.concurrent.atomic.AtomicInteger abortCount =
             new java.util.concurrent.atomic.AtomicInteger();
     private ServerSocket echoServer;
@@ -69,10 +69,7 @@ class TunnelConnectionTest {
                         uplink.add(TunnelFrame.decode(bytes));
                         yield CompletableFuture.completedFuture(proxy);
                     }
-                    case "sendPing" -> {
-                        pingCount.incrementAndGet();
-                        yield CompletableFuture.completedFuture(proxy);
-                    }
+                    case "sendPing" -> CompletableFuture.completedFuture(proxy); // 不再主动 ping，防御性兼容
                     case "abort" -> {
                         abortCount.incrementAndGet();
                         yield null;
@@ -132,15 +129,32 @@ class TunnelConnectionTest {
     }
 
     @Test
-    void keepalivePingsWhenIdleAndAbortsOnSilence() throws Exception {
-        // 空闲隧道：周期 ping 保活；下行全静默（无帧无 pong）超阈值 → abort 触发重连
+    void silenceAfterHeartbeatAbortsAndReleasesClosedLatch() throws Exception {
+        // 收到过服务端心跳的连接：下行全静默超阈值 → abort + 放行 closed 闩锁（run() 走重连）
         tunnel.keepaliveIntervalMs = 40;
         tunnel.keepaliveTimeoutMs = 200;
         tunnel.lastInboundAt.set(System.currentTimeMillis());
-        // keepaliveLoop 是阻塞循环，在后台跑
-        Thread t = Thread.ofVirtual().start(() -> tunnel.keepaliveLoop(tunnel.current.get()));
-        awaitTrue(() -> pingCount.get() >= 2, 5000, "空闲应周期 ping");
+        tunnel.heartbeatSeen = true;
+        CountDownLatch closed = new CountDownLatch(1);
+        Thread t = Thread.ofVirtual().start(() -> tunnel.keepaliveLoop(tunnel.current.get(), closed));
         awaitTrue(() -> abortCount.get() >= 1, 5000, "静默超阈值应 abort");
+        assertTrue(closed.await(2, TimeUnit.SECONDS),
+                "abort 后必须放行 closed 闩锁，否则 run() 挂在 await 上永不重连");
+        t.join(5000);
+    }
+
+    @Test
+    void silenceWithoutHeartbeatNeverAborts() throws Exception {
+        // 老服务端无心跳（兼容门）：静默判定不启用，健康隧道不被误杀
+        tunnel.keepaliveIntervalMs = 40;
+        tunnel.keepaliveTimeoutMs = 120;
+        tunnel.lastInboundAt.set(System.currentTimeMillis());
+        tunnel.heartbeatSeen = false;
+        Thread t = Thread.ofVirtual().start(() ->
+                tunnel.keepaliveLoop(tunnel.current.get(), new CountDownLatch(1)));
+        Thread.sleep(500); // 远超 timeout，若误判必已 abort
+        assertEquals(0, abortCount.get(), "未收到过心跳不得启用静默断链判定");
+        tunnel.shutdown();
         t.join(5000);
     }
 
@@ -148,13 +162,14 @@ class TunnelConnectionTest {
     void keepaliveDoesNotAbortWhileInboundAlive() throws Exception {
         tunnel.keepaliveIntervalMs = 40;
         tunnel.keepaliveTimeoutMs = 250;
-        Thread t = Thread.ofVirtual().start(() -> tunnel.keepaliveLoop(tunnel.current.get()));
-        // 模拟持续有下行（pong/业务帧）：800ms 内不断刷新 lastInboundAt
+        tunnel.heartbeatSeen = true;
+        Thread t = Thread.ofVirtual().start(() ->
+                tunnel.keepaliveLoop(tunnel.current.get(), new CountDownLatch(1)));
+        // 模拟持续有下行（心跳/业务帧）：800ms 内不断刷新 lastInboundAt
         for (int i = 0; i < 20; i++) {
             tunnel.lastInboundAt.set(System.currentTimeMillis());
             Thread.sleep(40);
         }
-        assertTrue(pingCount.get() >= 1, "存活期间仍在 ping");
         assertEquals(0, abortCount.get(), "下行新鲜不得 abort");
         tunnel.shutdown(); // 停循环
         t.join(5000);

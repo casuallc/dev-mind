@@ -82,6 +82,46 @@ class AgentTunnelRegistryTest {
     }
 
     @Test
+    void heartbeatPushedPeriodically() throws Exception {
+        // FR-01 保活：隧道建连后按 heartbeatIntervalMs 周期下推 tunnel_ping 文本帧
+        EgressProperties fast = new EgressProperties();
+        fast.setHeartbeatIntervalMs(40);
+        AgentTunnelRegistry reg2 = new AgentTunnelRegistry(ruleService, fast, JsonMapper.builder().build());
+        WebSocketSession ws2 = mock(WebSocketSession.class);
+        when(ws2.isOpen()).thenReturn(true);
+        reg2.onConnect(node, ws2);
+        // verify(timeout) 抓到第一帧（tunnel_hello）即返回，心跳帧须轮询等后续调用
+        long deadline = System.currentTimeMillis() + 5000;
+        boolean seen = false;
+        while (!seen && System.currentTimeMillis() < deadline) {
+            ArgumentCaptor<WebSocketMessage<?>> captor = ArgumentCaptor.forClass(WebSocketMessage.class);
+            verify(ws2, org.mockito.Mockito.atLeastOnce()).sendMessage(captor.capture());
+            seen = captor.getAllValues().stream().anyMatch(m -> m instanceof TextMessage
+                    && ((TextMessage) m).getPayload().contains("tunnel_ping"));
+            Thread.sleep(20);
+        }
+        assertTrue(seen, "应周期下推 tunnel_ping 心跳帧");
+    }
+
+    @Test
+    void heartbeatSendFailureDropsTunnel() throws Exception {
+        // 心跳发送失败 = 连接已死：摘除隧道（后续请求快速失败）等 runner 重连顶回
+        EgressProperties fast = new EgressProperties();
+        fast.setHeartbeatIntervalMs(40);
+        AgentTunnelRegistry reg2 = new AgentTunnelRegistry(ruleService, fast, JsonMapper.builder().build());
+        WebSocketSession ws2 = mock(WebSocketSession.class);
+        when(ws2.isOpen()).thenReturn(true);
+        org.mockito.Mockito.doThrow(new java.io.IOException("broken pipe"))
+                .when(ws2).sendMessage(org.mockito.ArgumentMatchers.any());
+        reg2.onConnect(node, ws2); // pushSnapshot 失败只记日志，心跳失败才摘除
+        long deadline = System.currentTimeMillis() + 5000;
+        while (reg2.tunnelOnline(7L) && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+        assertTrue(!reg2.tunnelOnline(7L), "心跳发送失败应摘除隧道");
+    }
+
+    @Test
     void connectPushesTunnelHelloSnapshot() throws Exception {
         ArgumentCaptor<WebSocketMessage<?>> captor = ArgumentCaptor.forClass(WebSocketMessage.class);
         verify(ws, timeout(5000).atLeastOnce()).sendMessage(captor.capture());
