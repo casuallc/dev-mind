@@ -22,9 +22,11 @@ import com.devmind.notification.service.NotificationService;
 import com.devmind.project.WorkItemService;
 import com.devmind.project.dto.WorkItemView;
 import com.devmind.project.model.EnvironmentEntity;
+import com.devmind.project.model.ProjectEntity;
 import com.devmind.project.model.WorkItemEntity;
 import com.devmind.project.repo.BuildStepRepository;
 import com.devmind.project.repo.EnvironmentRepository;
+import com.devmind.project.repo.ProjectRepository;
 import com.devmind.project.repo.WorkItemRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,6 +45,9 @@ import java.util.Set;
  * <p>降级规则：缺一环就停（未配构建步骤/无产物/无 TEST 环境/无部署步骤 → 跳过或降级通知），
  * 不在事件总线上抛错。构建并发满（409）时本轮跳过，每次 build.completed 后补扫重试。</p>
  *
+ * <p>CAP-72：两个自动环节各有项目级开关（autoBuildOnWiDone / autoDeployTestOnBuild，
+ * 默认关），关闭时静默跳过（log.info，不发降级通知——是显式关的，不是前置不齐）。</p>
+ *
  * <p>分支假设：WI 验收前代码已由人合并回主干，自动构建走主库 HEAD（merge 自动化属后续能力）。</p>
  */
 @Component
@@ -60,6 +65,7 @@ public class PipelineOrchestrator {
     private final DeploymentRepository deploymentRepo;
     private final EnvironmentRepository environmentRepo;
     private final NotificationService notificationService;
+    private final ProjectRepository projectRepo;
 
     public PipelineOrchestrator(WorkItemService workItemService,
                                 WorkItemRepository workItemRepo,
@@ -70,7 +76,8 @@ public class PipelineOrchestrator {
                                 DeployConfigRepository deployConfigRepo,
                                 DeploymentRepository deploymentRepo,
                                 EnvironmentRepository environmentRepo,
-                                NotificationService notificationService) {
+                                NotificationService notificationService,
+                                ProjectRepository projectRepo) {
         this.workItemService = workItemService;
         this.workItemRepo = workItemRepo;
         this.buildStepRepo = buildStepRepo;
@@ -81,6 +88,7 @@ public class PipelineOrchestrator {
         this.deploymentRepo = deploymentRepo;
         this.environmentRepo = environmentRepo;
         this.notificationService = notificationService;
+        this.projectRepo = projectRepo;
     }
 
     /** FR-01：WI 翻转为 DONE → 幂等触发自动构建。 */
@@ -144,8 +152,22 @@ public class PipelineOrchestrator {
 
     // ---------------- 内部 ----------------
 
-    /** 触发自动构建：未配构建步骤/已有构建记录则跳过；并发满跳过等补扫。 */
+    /** CAP-72：项目开关读取，项目不存在/异常一律按关处理（安全侧）。 */
+    private boolean autoBuildEnabled(String projectId) {
+        return projectRepo.findById(projectId).map(ProjectEntity::isAutoBuildOnWiDone).orElse(false);
+    }
+
+    private boolean autoDeployTestEnabled(String projectId) {
+        return projectRepo.findById(projectId).map(ProjectEntity::isAutoDeployTestOnBuild).orElse(false);
+    }
+
+    /** 触发自动构建：项目开关关/未配构建步骤/已有构建记录则跳过；并发满跳过等补扫。 */
     private void tryTriggerBuild(String projectId, String workItemId, Long seq) {
+        // CAP-72 闸门：WI DONE 事件与补扫共用此入口，一处管住两路；关=静默跳过不降级通知
+        if (!autoBuildEnabled(projectId)) {
+            log.info("项目未开启 WI 完成自动构建，跳过: project={} wi={}", projectId, workItemId);
+            return;
+        }
         if (buildStepRepo.findByProjectIdOrderBySortOrderAsc(projectId).isEmpty()) {
             log.info("项目未配置构建步骤，跳过自动构建: project={} wi={}", projectId, workItemId);
             return;
@@ -168,6 +190,11 @@ public class PipelineOrchestrator {
 
     /** 构建成功 → 自动部署 TEST 环境；前置不齐降级为人工。 */
     private void autoDeployTestEnv(String projectId, String workItemId, Long buildId) {
+        // CAP-72 闸门：关=静默跳过不降级通知
+        if (!autoDeployTestEnabled(projectId)) {
+            log.info("项目未开启构建成功自动部署 TEST，跳过: project={} build={}", projectId, buildId);
+            return;
+        }
         WorkItemEntity wi = workItemService.requireById(workItemId);
         BuildEntity build = buildRepo.findById(buildId).orElse(null);
         if (build == null || build.getArtifactRef() == null || build.getArtifactRef().isBlank()) {
