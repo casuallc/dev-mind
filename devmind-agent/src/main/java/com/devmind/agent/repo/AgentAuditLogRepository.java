@@ -21,11 +21,11 @@ public interface AgentAuditLogRepository extends JpaRepository<AgentAuditLogEnti
               and (:event is null or a.event = :event)
               and (:nodeId is null or a.nodeId = :nodeId)
               and (:result is null or a.result = :result)
-              and (:keyword is null
-                   or lower(a.detail) like lower(concat('%', :keyword, '%'))
-                   or lower(a.nodeName) like lower(concat('%', :keyword, '%'))
-                   or lower(a.remoteAddr) like lower(concat('%', :keyword, '%'))
-                   or lower(a.target) like lower(concat('%', :keyword, '%')))
+              and (cast(:keyword as string) is null
+                   or lower(a.detail) like lower(concat('%', cast(:keyword as string), '%'))
+                   or lower(a.nodeName) like lower(concat('%', cast(:keyword as string), '%'))
+                   or lower(a.remoteAddr) like lower(concat('%', cast(:keyword as string), '%'))
+                   or lower(a.target) like lower(concat('%', cast(:keyword as string), '%')))
             order by a.createdAt desc, a.id desc
             """)
     Page<AgentAuditLogEntity> search(@Param("category") String category, @Param("event") String event,
