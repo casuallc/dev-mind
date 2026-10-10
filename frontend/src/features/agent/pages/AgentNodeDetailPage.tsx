@@ -461,6 +461,9 @@ export default function AgentNodeDetailPage() {
                   <Space direction="vertical" style={{ width: '100%' }} size={8}>
                     <Typography.Text type="secondary">
                       参数化脚本不含 token（token 仅创建节点时可见），下载后在目标机执行时传入；token 已丢失请重建节点。
+                      脚本默认注册系统服务（Windows 服务 / systemd），无权限自动降级后台运行，可加
+                      <Typography.Text code>-NoService</Typography.Text> / <Typography.Text code>--no-service</Typography.Text>
+                      强制后台模式。
                     </Typography.Text>
                     <Space>
                       <Button icon={<WindowsOutlined />} onClick={downloadInstallScripts(null).windows}>
@@ -471,12 +474,12 @@ export default function AgentNodeDetailPage() {
                       </Button>
                     </Space>
                     <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                      Windows：
+                      Windows（管理员 PowerShell）：
                       <Typography.Text code>powershell -ExecutionPolicy Bypass -File install-runner.ps1 -Token dmag_xxx</Typography.Text>
                     </Typography.Paragraph>
                     <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                      Linux：
-                      <Typography.Text code>bash install-runner.sh dmag_xxx</Typography.Text>
+                      Linux（注册服务需 root）：
+                      <Typography.Text code>sudo bash install-runner.sh dmag_xxx</Typography.Text>
                     </Typography.Paragraph>
                   </Space>
                 </Card>

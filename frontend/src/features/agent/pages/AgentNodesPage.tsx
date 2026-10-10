@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  Alert,
   Button,
   Card,
   Checkbox,
@@ -15,13 +14,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import {
-  CodeOutlined,
-  PlusOutlined,
-  ReloadOutlined,
-  RocketOutlined,
-  WindowsOutlined,
-} from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons'
 import {
   createAgentNode,
   getRunnerPackage,
@@ -30,7 +23,7 @@ import {
 } from '../api'
 import type { AgentNode, IssuedNode, RunnerPackage } from '../types'
 import RunnerPackagePanel from '../components/RunnerPackagePanel'
-import { downloadInstallScripts } from '../utils/installScript'
+import NodeCreatedModal from '../components/NodeCreatedModal'
 import { fmtTime, fmtBytes } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
@@ -317,56 +310,7 @@ export default function AgentNodesPage() {
         </Form>
       </Modal>
 
-      <Modal
-        title="节点已创建（token 仅此一次展示）"
-        open={!!issued}
-        footer={<Button type="primary" onClick={() => setIssued(null)}>我已保存</Button>}
-        onCancel={() => setIssued(null)}
-      >
-        {issued && (
-          <Space direction="vertical" style={{ width: '100%' }} size={8}>
-            <Alert type="warning" showIcon message="请立即复制保存 token——关闭后无法再次查看，只能重建节点。" />
-            <div>
-              <Typography.Text type="secondary">agent.properties 配置示例</Typography.Text>
-              <Typography.Paragraph
-                code
-                copyable={{
-                  text: `serverUrl=${location.origin.replace(/^http/, 'ws')}/ws/agent\ntoken=${issued.token}\n`,
-                }}
-                style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}
-              >
-                {`serverUrl=${location.origin.replace(/^http/, 'ws')}/ws/agent\ntoken=${issued.token}`}
-              </Typography.Paragraph>
-            </div>
-            <div>
-              <Typography.Text type="secondary">一键安装脚本（已内嵌 token，拷到目标机执行即上线）</Typography.Text>
-              <div>
-                <Space>
-                  <Button icon={<WindowsOutlined />} onClick={downloadInstallScripts(issued.token).windows}>
-                    Windows (.ps1)
-                  </Button>
-                  <Button icon={<CodeOutlined />} onClick={downloadInstallScripts(issued.token).linux}>
-                    Linux (.sh)
-                  </Button>
-                </Space>
-              </div>
-              <Typography.Paragraph type="secondary" style={{ marginTop: 4, marginBottom: 0 }}>
-                Windows：<Typography.Text code>powershell -ExecutionPolicy Bypass -File install-runner.ps1</Typography.Text>
-                ；Linux：<Typography.Text code>bash install-runner.sh</Typography.Text>
-                。脚本会检查 java(21+)、下载 runner 包、写配置并后台启动。
-              </Typography.Paragraph>
-              {!pkg && (
-                <Alert
-                  type="warning"
-                  showIcon
-                  style={{ marginTop: 8 }}
-                  message="尚未上传 runner 包——脚本中的下载步骤会失败，请切到「Runner 包」页签上传。"
-                />
-              )}
-            </div>
-          </Space>
-        )}
-      </Modal>
+      <NodeCreatedModal issued={issued} pkgMissing={!pkg} onClose={() => setIssued(null)} />
     </Card>
   )
 }
