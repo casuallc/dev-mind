@@ -3,6 +3,7 @@ package com.devmind.flow.verify;
 import com.devmind.auth.IdentityService;
 import com.devmind.build.model.BuildConfigEntity;
 import com.devmind.build.service.BuildConfigService;
+import com.devmind.common.agent.AgentProtocol;
 import com.devmind.common.agent.runtime.SessionState;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
@@ -75,8 +76,8 @@ public class VerifyService {
 
     private static final Logger log = LoggerFactory.getLogger(VerifyService.class);
 
-    /** runner 协议门控（与 AgentProtocol.VERIFY_FRAMES 对齐；经 gateway.supports 判） */
-    public static final int VERIFY_PROTOCOL = 22;
+    /** runner 协议门控（单点 = AgentProtocol.VERIFY_FRAMES） */
+    public static final int VERIFY_PROTOCOL = AgentProtocol.VERIFY_FRAMES;
 
     private final VerifyRunRepository runRepo;
     private final VerifyProperties props;

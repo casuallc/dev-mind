@@ -218,6 +218,16 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
                         frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),
                         payload, frame.path("error").asText(null));
             }
+            // CAP-73：验证链上行帧（verify_log 进度行 / verify_ack 收口，三类指令共用）
+            case "verify_log" -> registry.onVerifyLog(String.valueOf(node.getId()),
+                    frame.path("requestId").asText(""), frame.path("chunk").asText(""));
+            case "verify_ack" -> registry.onVerifyAck(String.valueOf(node.getId()),
+                    frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),
+                    frame.path("error").asText(null),
+                    frame.has("fileCount") && frame.path("fileCount").isNumber()
+                            ? frame.path("fileCount").asInt() : null,
+                    frame.has("filesChanged") && frame.path("filesChanged").isNumber()
+                            ? frame.path("filesChanged").asInt() : null);
             // CAP-59：终端 Tab 补全 ack
             case "terminal_complete_ack" -> {
                 List<String> candidates = new ArrayList<>();

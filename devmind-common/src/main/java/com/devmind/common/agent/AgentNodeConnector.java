@@ -319,4 +319,42 @@ public interface AgentNodeConnector {
         throw new com.devmind.common.exception.DevMindException(
                 com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
     }
+
+    /**
+     * CAP-73：下发 verify_push 帧并阻塞等 verify_ack——runner 对需求工作区执行 git push
+     * （token 仅随帧传输严禁进日志）。节点离线/协议版本不足（需 v22+）/等待超时抛
+     * DevMindException(CONFLICT)；push 非零退出不抛，看 {@link AgentVerifyResult#ok()}。
+     * 默认实现 = agent 模块未装配（无任何执行节点可用）。
+     */
+    default AgentVerifyResult verifyPush(String nodeId, AgentVerifyCommand.Push cmd,
+                                         java.util.function.Consumer<String> sink) {
+        throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+    }
+
+    /**
+     * CAP-73：下发 verify_pack 帧并阻塞等 verify_ack——runner 在可复用 verify 工作区
+     * fetch/checkout + 跑构建步骤 + 产物树 manifest + zip 经 HTTP 上传（字节不入帧）。
+     * 节点离线/协议版本不足（需 v22+）/等待超时抛 DevMindException(CONFLICT)；
+     * 步骤失败/产物缺失/包超限不抛，看 {@link AgentVerifyResult#ok()}。
+     * 默认实现 = agent 模块未装配（无任何执行节点可用）。
+     */
+    default AgentVerifyResult verifyPack(String nodeId, AgentVerifyCommand.Pack cmd,
+                                         java.util.function.Consumer<String> sink) {
+        throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+    }
+
+    /**
+     * CAP-73：下发 verify_patch 帧并阻塞等 verify_ack——runner 经 HTTP 拉产物包 +
+     * manifest 差量补丁 + pre/post 钩子（恢复闭环在 runner 侧）。
+     * 节点离线/协议版本不足（需 v22+）/等待超时抛 DevMindException(CONFLICT)；
+     * 拉包失败/钩子非零退出不抛，看 {@link AgentVerifyResult#ok()}。
+     * 默认实现 = agent 模块未装配（无任何执行节点可用）。
+     */
+    default AgentVerifyResult verifyPatch(String nodeId, AgentVerifyCommand.Patch cmd,
+                                          java.util.function.Consumer<String> sink) {
+        throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+    }
 }

@@ -20,6 +20,8 @@ import com.devmind.common.agent.AgentPkgResult;
 import com.devmind.common.agent.AgentProcCommand;
 import com.devmind.common.agent.AgentProcResult;
 import com.devmind.common.agent.AgentProtocol;
+import com.devmind.common.agent.AgentVerifyCommand;
+import com.devmind.common.agent.AgentVerifyResult;
 import com.devmind.common.agent.FinalizeResult;
 import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.TerminalCompleteResult;
@@ -114,6 +116,11 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private record FileWaiter(String nodeId, CompletableFuture<AgentFileResult> done) {
     }
 
+    /** CAP-73 verify 等待者：verify_log 帧实时推 sink，verify_ack 完成 future。 */
+    private record VerifyWaiter(String nodeId, java.util.function.Consumer<String> sink,
+                                CompletableFuture<AgentVerifyResult> done) {
+    }
+
     private final AgentNodeService nodeService;
     private final AgentProperties props;
     private final ObjectMapper mapper;
@@ -153,6 +160,8 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private final Map<String, PkgWaiter> pendingPkgs = new ConcurrentHashMap<>();
     /** requestId → file 等待者（CAP-65 节点文件浏览） */
     private final Map<String, FileWaiter> pendingFiles = new ConcurrentHashMap<>();
+    /** requestId → verify 等待者（CAP-73 验证链三阶段指令） */
+    private final Map<String, VerifyWaiter> pendingVerifies = new ConcurrentHashMap<>();
 
     public AgentConnectionRegistry(AgentNodeService nodeService, AgentProperties props,
                                    ObjectMapper mapper, ObjectProvider<AgentEventListener> listenerProvider,
@@ -267,6 +276,13 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         for (Map.Entry<String, FileWaiter> e : pendingFiles.entrySet()) {
             if (e.getValue().nodeId().equals(nodeId) && pendingFiles.remove(e.getKey(), e.getValue())) {
                 e.getValue().done().complete(AgentFileResult.failed("节点断连，文件操作中断"));
+            }
+        }
+        // CAP-73：断线即失败该节点进行中的验证指令（verify_ack 不会再来；
+        // runner 侧已落盘的补丁/已上传的包由编排端 FAILED 收口语义覆盖）
+        for (Map.Entry<String, VerifyWaiter> e : pendingVerifies.entrySet()) {
+            if (e.getValue().nodeId().equals(nodeId) && pendingVerifies.remove(e.getKey(), e.getValue())) {
+                e.getValue().done().complete(AgentVerifyResult.failed("节点断连，验证指令中断"));
             }
         }
         // CAP-30：事件广播（原 getIfAvailable 单实现，chat 加入后有多实现）——各 bridge
@@ -444,6 +460,30 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         FileWaiter w = pendingFiles.remove(requestId);
         if (w != null) {
             w.done().complete(ok ? AgentFileResult.ok(payload) : AgentFileResult.failed(error));
+        }
+    }
+
+    /** CAP-73：verify_log 上行帧 → 实时推给等待中的 sink（进度行进 run.logs_text）。 */
+    public void onVerifyLog(String nodeId, String requestId, String chunk) {
+        touch(nodeId);
+        VerifyWaiter w = pendingVerifies.get(requestId);
+        if (w == null || !w.nodeId().equals(nodeId)) {
+            return;
+        }
+        try {
+            w.sink().accept(chunk);
+        } catch (Exception e) {
+            log.debug("verify_log sink 异常: {}", e.getMessage());
+        }
+    }
+
+    /** CAP-73：verify_ack 上行帧 → 收口完成等待 future（fileCount/filesChanged 按指令类型填充）。 */
+    public void onVerifyAck(String nodeId, String requestId, boolean ok, String error,
+                            Integer fileCount, Integer filesChanged) {
+        touch(nodeId);
+        VerifyWaiter w = pendingVerifies.remove(requestId);
+        if (w != null) {
+            w.done().complete(new AgentVerifyResult(ok, error, fileCount, filesChanged));
         }
     }
 
@@ -776,6 +816,118 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             throw new DevMindException(ErrorCode.CONFLICT, "exec 下发异常: " + e.getMessage(), e);
         } finally {
             pendingExecs.remove(cmd.execId());
+        }
+    }
+
+    // ---------------- CAP-73 验证链（verify_push/verify_pack/verify_patch 帧） ----------------
+
+    /**
+     * <b>红线</b>：{@link AgentVerifyCommand} 全部字段必须在此 put——漏一行 runner 侧就拿到
+     * 空值，现象是"帧发出去了但 runner 缺东西"（本仓库 launch/exec 帧四次同类事故）。
+     * AgentConnectionRegistryVerifyTest 钉住三类帧的完整组帧。
+     */
+    @Override
+    public AgentVerifyResult verifyPush(String nodeId, AgentVerifyCommand.Push cmd,
+                                        java.util.function.Consumer<String> sink) {
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "verify_push");
+        frame.put("requestId", cmd.requestId());
+        frame.put("runId", cmd.runId());
+        frame.put("projectId", cmd.projectId());
+        frame.put("workspaceOwner", cmd.workspaceOwner());
+        frame.put("workspaceKey", cmd.workspaceKey());
+        frame.put("remoteUrl", cmd.remoteUrl());
+        frame.put("branch", cmd.branch());
+        frame.put("token", cmd.token());
+        frame.put("timeoutSec", cmd.timeoutSec());
+        return verify(nodeId, frame, cmd.requestId(), cmd.timeoutSec(), sink,
+                "VERIFY_PUSH", "branch=" + cmd.branch());
+    }
+
+    @Override
+    public AgentVerifyResult verifyPack(String nodeId, AgentVerifyCommand.Pack cmd,
+                                        java.util.function.Consumer<String> sink) {
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "verify_pack");
+        frame.put("requestId", cmd.requestId());
+        frame.put("runId", cmd.runId());
+        frame.put("projectId", cmd.projectId());
+        frame.put("workspaceKey", cmd.workspaceKey());
+        frame.put("remoteUrl", cmd.remoteUrl());
+        frame.put("branch", cmd.branch());
+        frame.put("commitSha", cmd.commitSha());
+        frame.put("token", cmd.token());
+        List<Map<String, Object>> steps = new ArrayList<>();
+        for (AgentVerifyCommand.Pack.Step s : cmd.steps()) {
+            Map<String, Object> step = new LinkedHashMap<>();
+            step.put("name", s.name());
+            step.put("command", s.command());
+            step.put("workingDir", s.workingDir());
+            steps.add(step);
+        }
+        frame.put("steps", steps);
+        frame.put("outputDir", cmd.outputDir());
+        if (cmd.env() != null && !cmd.env().isEmpty()) {
+            frame.put("env", cmd.env());
+        }
+        frame.put("timeoutSec", cmd.timeoutSec());
+        frame.put("bundleMaxBytes", cmd.bundleMaxBytes());
+        return verify(nodeId, frame, cmd.requestId(), cmd.timeoutSec(), sink,
+                "VERIFY_PACK", "commit=" + cmd.commitSha());
+    }
+
+    @Override
+    public AgentVerifyResult verifyPatch(String nodeId, AgentVerifyCommand.Patch cmd,
+                                         java.util.function.Consumer<String> sink) {
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "verify_patch");
+        frame.put("requestId", cmd.requestId());
+        frame.put("runId", cmd.runId());
+        frame.put("patchDir", cmd.patchDir());
+        frame.put("preHook", cmd.preHook());
+        frame.put("postHook", cmd.postHook());
+        frame.put("manifestKey", cmd.manifestKey());
+        frame.put("timeoutSec", cmd.timeoutSec());
+        return verify(nodeId, frame, cmd.requestId(), cmd.timeoutSec(), sink,
+                "VERIFY_PATCH", "patchDir=" + cmd.patchDir());
+    }
+
+    /**
+     * 验证指令公共骨架：协议门控（v22+，老 runner 静默忽略 verify_* 帧会空等超时）→
+     * 发帧 → 阻塞等 verify_ack（上限 = 指令超时 + 120s 余量，只兜 runner 无响应；
+     * runner 侧超时 kill 后仍回 verify_ack）。token 严禁进审计 detail（同 exec repo 块红线）。
+     */
+    private AgentVerifyResult verify(String nodeId, Map<String, Object> frame, String requestId,
+                                     long timeoutSec, java.util.function.Consumer<String> sink,
+                                     String auditEvent, String auditDetail) {
+        if (!supports(nodeId, AgentProtocol.VERIFY_FRAMES)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "VERIFY_RUNNER_UPGRADE_REQUIRED: 节点 " + nodeId + " 的 runner 协议版本过低"
+                            + "（验证链需 v" + AgentProtocol.VERIFY_FRAMES + "+），请到节点页升级 runner");
+        }
+        WebSocketSession ws = requireConnection(nodeId);
+        CompletableFuture<AgentVerifyResult> done = new CompletableFuture<>();
+        pendingVerifies.put(requestId, new VerifyWaiter(nodeId, sink, done));
+        putProxy(frame, nodeId);
+        long startMs = System.currentTimeMillis();
+        try {
+            send(ws, frame);
+            AgentVerifyResult r = done.get(timeoutSec + 120, TimeUnit.SECONDS);
+            auditCommand(auditEvent, nodeId, requestId, r.ok(), startMs,
+                    auditDetail + (r.ok() ? "" : " | err=" + r.error()));
+            return r;
+        } catch (DevMindException e) {
+            throw e;
+        } catch (java.util.concurrent.TimeoutException e) {
+            AgentVerifyResult r = AgentVerifyResult.failed("等待 runner verify_ack 超时（runner 无响应）");
+            auditCommand(auditEvent, nodeId, requestId, false, startMs, auditDetail + " | ack 超时");
+            return r;
+        } catch (Exception e) {
+            auditCommand(auditEvent, nodeId, requestId, false, startMs,
+                    auditDetail + " | 下发异常: " + e.getMessage());
+            throw new DevMindException(ErrorCode.CONFLICT, "验证指令下发异常: " + e.getMessage(), e);
+        } finally {
+            pendingVerifies.remove(requestId);
         }
     }
 

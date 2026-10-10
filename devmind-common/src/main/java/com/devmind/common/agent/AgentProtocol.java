@@ -65,12 +65,15 @@ package com.devmind.common.agent;
      * 通道：tunnel_hello 快照 + OPEN/OPEN_ACK/DATA/CLOSE/RST/WINDOW 流帧，服务端本机落成
      * SOCKS5 端点按 egress_rules 域名规则选出口——老 runner 根本不发隧道连接，服务端规则
      * 引用它时按「runner 需升级」快速失败，故老 runner 侧零感知；新 runner 必发隧道连接，
-     * 老服务端没有该端点 = 隧道连接连不上自动退避重试，控制通道不受影响，双向优雅降级）。</p>
+     * 老服务端没有该端点 = 隧道连接连不上自动退避重试，控制通道不受影响，双向优雅降级）。
+     * v22 = CAP-73 需求开发中验证（verify_push/verify_pack/verify_patch 下行帧 +
+     * verify_ack/verify_log 上行帧——构建产物包走 HTTP 上下行不入帧；老 runner 不认识
+     * verify_* 帧会静默忽略，编排端会空等超时，故属「必须认识」需门控，409 话术引导升级）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 21;
+    public static final int CURRENT = 22;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -134,6 +137,9 @@ public final class AgentProtocol {
 
     /** CAP-70 服务端出口反向隧道（/ws/agent-tunnel 专用二进制通道）所需最低版本 */
     public static final int EGRESS_TUNNEL = 21;
+
+    /** CAP-73 需求开发中验证（verify_push/verify_pack/verify_patch + verify_ack/verify_log 帧）所需最低版本 */
+    public static final int VERIFY_FRAMES = 22;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;
