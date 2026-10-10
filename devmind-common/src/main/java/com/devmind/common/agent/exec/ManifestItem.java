@@ -20,6 +20,8 @@ public record ManifestItem(String kind, String ref, String name, String scope, S
     public static final String KIND_DOC = "doc";
     /** CAP-40 需求附件投送（ref=attachmentId 或 jira:KEY:name）。 */
     public static final String KIND_ATTACHMENT = "attachment";
+    /** CAP-73 平台助手脚本投送（ref=requirementId，name=脚本名）。 */
+    public static final String KIND_TOOL = "tool";
 
     /** 场景显式绑定（FR-02 ①层）。 */
     public static final String SOURCE_SCENARIO = "scenario";

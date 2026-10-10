@@ -35,6 +35,13 @@ public class VerifyProperties {
     /** TEST 阶段超时（秒；冒烟套件运行轮询上限） */
     private long testTimeoutSec = 1800;
 
+    /**
+     * 平台对外 HTTP 基址（如 https://devmind.example.com，勿带尾斜杠）——物化进会话工作区的
+     * devmind-verify 助手脚本经它回连 {@code /api/verify/trigger}。空 = 不物化助手
+     * （验证链人工入口不受影响）。反向代理/自签 https 部署必须显式配置，服务端无法自知公网地址。
+     */
+    private String serverUrl = "";
+
     public int getBundleMaxMb() { return bundleMaxMb; }
     public void setBundleMaxMb(int bundleMaxMb) { this.bundleMaxMb = bundleMaxMb; }
     public String getTokenSecret() { return tokenSecret; }
@@ -53,4 +60,6 @@ public class VerifyProperties {
     public void setPatchTimeoutSec(long patchTimeoutSec) { this.patchTimeoutSec = patchTimeoutSec; }
     public long getTestTimeoutSec() { return testTimeoutSec; }
     public void setTestTimeoutSec(long testTimeoutSec) { this.testTimeoutSec = testTimeoutSec; }
+    public String getServerUrl() { return serverUrl; }
+    public void setServerUrl(String serverUrl) { this.serverUrl = serverUrl; }
 }

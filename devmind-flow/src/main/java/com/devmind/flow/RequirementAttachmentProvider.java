@@ -86,6 +86,11 @@ public class RequirementAttachmentProvider implements ContextProvider {
 
     @Override
     public ContextContribution contribute(ContextAssemblyRequest req) {
+        // CAP-52 瘦上下文豁免（CAP-73 起 requirementId 对 lean 会话也透传——验证链 provider
+        // 要用；附件投送仍按 lean 标志豁免，语义与「调用方置空 requirementId」时代一致）
+        if (req.lean()) {
+            return ContextContribution.empty();
+        }
         String requirementId = req.requirementId();
         if (requirementId == null || requirementId.isBlank()) {
             return ContextContribution.empty();

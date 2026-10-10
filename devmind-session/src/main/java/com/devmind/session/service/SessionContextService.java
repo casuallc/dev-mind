@@ -141,8 +141,10 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
                 lean || extraDocIds == null ? List.of() : extraDocIds,
                 lean || scenario == null ? List.of() : scenarioService.knowledgeTagsOf(scenario),
                 lean || extraKnowledgeTags == null ? List.of() : extraKnowledgeTags,
-                !lean, false, lean ? null : requirementId,
-                attachmentIds == null ? List.of() : attachmentIds);
+                // CAP-73：requirementId 不再随 lean 置空（验证链触发助手要为执行会话签发 token），
+                // 需求级投送的豁免改由 provider 读 lean 标志自行判定（CAP-40 附件已加守卫）
+                !lean, false, requirementId,
+                attachmentIds == null ? List.of() : attachmentIds, sessionId, lean);
         ContextAssembler.AssembledContext a = assembleAndCache(sessionId, req,
                 scenario != null ? scenario.getCode() : null,
                 scenario != null ? scenario.getName() : null,

@@ -21,9 +21,14 @@ import java.util.List;
  * @param extraKnowledgeTags    ③请求级追加的知识 tags
  * @param projectAuto           ②项目自动命中开关（知识按项目 tags 命中 + 项目私有条目/skill 全带）
  * @param dryRun                预览模式：不 bumpHits、无任何副作用
- * @param requirementId         会话关联需求（CAP-40 附件投送 provider 用；无关联需求/chat 为 null）
+ * @param requirementId         会话关联需求（CAP-40 附件投送 provider 用；无关联需求/chat 为 null。
+ *                              CAP-73 起 lean 会话也透传——附件投送改按 {@code lean} 标志自我豁免，
+ *                              验证链触发助手（VerifyContextProvider）恰恰需要瘦上下文的执行会话
+ *                              也能拿到需求绑定）
  * @param attachmentIds         CAP-68 创建会话即带附件（③请求级显式选择，不受瘦上下文影响；
  *                              会话附件 provider @Order 50 物化为 .devmind/input/attachments/）
+ * @param sessionId             装配目标会话/chat id（CAP-73 verify token 绑定用；预览/chat 兼容路径为 null）
+ * @param lean                  CAP-52 瘦上下文标志（执行会话）；provider 据此自我豁免需求级投送
  */
 public record ContextAssemblyRequest(
         String projectId, List<String> projectTags,
@@ -31,9 +36,9 @@ public record ContextAssemblyRequest(
         List<Long> scenarioDocIds, List<Long> extraDocIds,
         List<String> scenarioKnowledgeTags, List<String> extraKnowledgeTags,
         boolean projectAuto, boolean dryRun, String requirementId,
-        List<String> attachmentIds) {
+        List<String> attachmentIds, String sessionId, boolean lean) {
 
-    /** 兼容构造：无关联需求、无会话附件（chat/预览等既有调用点）。 */
+    /** 兼容构造：无关联需求、无会话附件、无会话 id（chat/预览等既有调用点）。 */
     public ContextAssemblyRequest(
             String projectId, List<String> projectTags,
             List<String> scenarioSkillIds, List<String> extraSkillIds,
@@ -53,5 +58,18 @@ public record ContextAssemblyRequest(
             boolean projectAuto, boolean dryRun, String requirementId) {
         this(projectId, projectTags, scenarioSkillIds, extraSkillIds, scenarioDocIds, extraDocIds,
                 scenarioKnowledgeTags, extraKnowledgeTags, projectAuto, dryRun, requirementId, null);
+    }
+
+    /** 兼容构造：CAP-73 之前的 12 参调用点（sessionId=null、lean=false）。 */
+    public ContextAssemblyRequest(
+            String projectId, List<String> projectTags,
+            List<String> scenarioSkillIds, List<String> extraSkillIds,
+            List<Long> scenarioDocIds, List<Long> extraDocIds,
+            List<String> scenarioKnowledgeTags, List<String> extraKnowledgeTags,
+            boolean projectAuto, boolean dryRun, String requirementId,
+            List<String> attachmentIds) {
+        this(projectId, projectTags, scenarioSkillIds, extraSkillIds, scenarioDocIds, extraDocIds,
+                scenarioKnowledgeTags, extraKnowledgeTags, projectAuto, dryRun, requirementId,
+                attachmentIds, null, false);
     }
 }

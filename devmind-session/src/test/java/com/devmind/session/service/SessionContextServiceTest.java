@@ -153,7 +153,10 @@ class SessionContextServiceTest {
         assertTrue(seen.get(0).scenarioKnowledgeTags().isEmpty());
         assertTrue(seen.get(0).extraKnowledgeTags().isEmpty());
         assertTrue(seen.get(0).scenarioSkillIds().isEmpty());
-        assertNull(seen.get(0).requirementId(), "执行会话不投送需求附件");
+        // CAP-73：requirementId 对 lean 会话也透传（验证链 provider 要用），
+        // 附件投送的豁免改由 provider 读 lean 标志——这里钉死 lean 标志本身
+        assertTrue(seen.get(0).lean(), "执行会话必须带 lean 标志（CAP-40 附件投送据此豁免）");
+        assertEquals(ent.getId(), seen.get(0).sessionId());
     }
 
     // ---------------- fake 工具 ----------------
