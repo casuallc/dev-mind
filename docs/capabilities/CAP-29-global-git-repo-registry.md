@@ -63,6 +63,9 @@ project_repos（项目关联行：role/primary/sortOrder，克隆状态由全局
 - fetch 内容：`git fetch +refs/heads/*:refs/remotes/origin/* --prune` →
   `remote set-head`/remoteHeadBranch 更新默认分支 → `for-each-ref` 写 branches →
   记 `last_fetch_at`；默认分支变化镜像回关联项目行。
+- **抓取自愈（2026-10-10 增补）**：doFetch 入口先查 `<localPath>/.git` 是否在位，
+  缺失（环境迁移只搬了 DB、磁盘清理等）时 fetch 自动转全量克隆重建（复用克隆执行体），
+  不再在缺失目录里跑 git 抛 `cannot change to ...`；手动端点与定时任务同享此逻辑。
 - 手动端点：`POST /api/repos/{id}/fetch`（立即抓取）、`POST /api/repos/{id}/clone`
   （FAILED 重克隆），均 ADMIN。
 

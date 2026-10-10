@@ -7,14 +7,19 @@ import com.devmind.project.repo.GitRepositoryRepository;
 import com.devmind.project.repo.ProjectRepoRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -31,6 +36,9 @@ class GitRepoSyncServiceFetchTest {
     private List<String> mirroredProjectIds;
     private GitRepoSyncService service;
     private StubGitRemoteOps gitOps;
+
+    @TempDir
+    Path tempDir;
 
     @SuppressWarnings("unchecked")
     private static <T> T proxy(Class<T> iface, InvocationHandler handler) {
@@ -84,8 +92,11 @@ class GitRepoSyncServiceFetchTest {
         }
     }
 
-    /** 远端 HEAD 固定返回 main；fetch/分支列表/ff 全成功。 */
+    /** 远端 HEAD 固定返回 main；fetch/克隆/分支列表/ff 全成功，记录调用次数供路由断言。 */
     static class StubGitRemoteOps extends GitRemoteOps {
+        int fetchCalls = 0;
+        int cloneCalls = 0;
+
         StubGitRemoteOps() {
             // 全部网络方法已覆盖，出口路由器永不触达——传空 ObjectProvider 即可
             super(new org.springframework.beans.factory.ObjectProvider<>() {
@@ -103,6 +114,14 @@ class GitRepoSyncServiceFetchTest {
 
         @Override
         public GitResult fetchAllRefs(String repoPath, String remoteUrl, String token) {
+            fetchCalls++;
+            return new GitResult(true, "");
+        }
+
+        @Override
+        public GitResult cloneRepo(String remoteUrl, String token, String targetDir, String branch,
+                                   Consumer<String> lineSink) {
+            cloneCalls++;
             return new GitResult(true, "");
         }
 
@@ -122,10 +141,12 @@ class GitRepoSyncServiceFetchTest {
         }
     }
 
-    private GitRepositoryEntity newReadyRepo(String defaultBranch, boolean manual) {
+    /** 建 READY 行并配真实存在的本地克隆目录（含 .git），走 fetch 路径。 */
+    private GitRepositoryEntity newReadyRepo(String defaultBranch, boolean manual) throws IOException {
+        Path dir = Files.createDirectories(tempDir.resolve("clone-" + gitRepos.store.size()).resolve(".git"));
         GitRepositoryEntity e = new GitRepositoryEntity();
         e.setName("r");
-        e.setLocalPath("D:/tmp/fake");
+        e.setLocalPath(dir.getParent().toString());
         e.setRemoteUrl("https://git.example.com/org/r.git");
         e.setSourceType(GitRepositoryEntity.SOURCE_CLONE);
         e.setCloneStatus(GitRepositoryEntity.CLONE_READY);
@@ -159,7 +180,7 @@ class GitRepoSyncServiceFetchTest {
     }
 
     @Test
-    void fetchKeepsManualDefaultBranch() {
+    void fetchKeepsManualDefaultBranch() throws IOException {
         // 用户把默认分支从 main 改成 dev，抓取后不得还原成远端 HEAD(main)
         GitRepositoryEntity repo = newReadyRepo("dev", true);
         ProjectRepoEntity linked = new ProjectRepoEntity();
@@ -177,7 +198,7 @@ class GitRepoSyncServiceFetchTest {
     }
 
     @Test
-    void fetchTracksRemoteHeadDriftWhenNotManual() {
+    void fetchTracksRemoteHeadDriftWhenNotManual() throws IOException {
         // 未手工指定：远端 HEAD master→main 漂移时自动更新并镜像关联行
         GitRepositoryEntity repo = newReadyRepo("master", false);
         ProjectRepoEntity linked = new ProjectRepoEntity();
@@ -194,12 +215,29 @@ class GitRepoSyncServiceFetchTest {
     }
 
     @Test
-    void fetchNoDriftLeavesBranchUntouched() {
+    void fetchNoDriftLeavesBranchUntouched() throws IOException {
         GitRepositoryEntity repo = newReadyRepo("main", false);
 
         service.fetchOne(repo.getId());
 
         assertEquals("main", gitRepos.store.get(repo.getId()).getDefaultBranch());
         assertEquals(List.of(), mirroredProjectIds);
+    }
+
+    @Test
+    void fetchWithMissingLocalCloneSelfHealsViaClone() throws IOException {
+        // 迁移只搬了 DB：CLONE_READY 行的 localPath 在磁盘上不存在，fetch 须自动转全量克隆
+        // 而不是在缺失目录里跑 git 抛 "cannot change to ..."（194 迁移后 deploy-flow 实测事故）
+        GitRepositoryEntity repo = newReadyRepo("main", false);
+        repo.setLocalPath(tempDir.resolve("gone").toString());
+
+        service.fetchOne(repo.getId());
+
+        assertEquals(1, gitOps.cloneCalls);
+        assertEquals(0, gitOps.fetchCalls);
+        GitRepositoryEntity after = gitRepos.store.get(repo.getId());
+        assertEquals(GitRepositoryEntity.CLONE_READY, after.getCloneStatus());
+        assertNull(after.getCloneError());
+        assertEquals("dev\nmain", after.getBranches());
     }
 }

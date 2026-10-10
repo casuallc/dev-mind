@@ -14,6 +14,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
@@ -25,7 +27,8 @@ import java.util.concurrent.Executors;
 /**
  * CAP-29 全局仓库克隆/抓取引擎：监听 project 模块的 {@code gitrepo.clone-requested} 事件
  * （反向触发防依赖环，同 CAP-23 先例），虚拟线程异步执行 git clone；
- * fetchOne 手动/定时抓取远端分支（refspec + prune）、刷新默认分支与分支列表。
+ * fetchOne 手动/定时抓取远端分支（refspec + prune）、刷新默认分支与分支列表；
+ * fetch 入口自愈——本地克隆目录缺失（迁移/清理）时自动转全量克隆重建。
  *
  * <p>状态机归全局行：NONE→CLONING→READY/FAILED；每次迁移<b>扇出镜像</b>到所有
  * {@code project_repos.git_repo_id} 关联行（cloneStatus/cloneError/clonedAt）并逐项目
@@ -104,43 +107,7 @@ public class GitRepoSyncService {
     /** 异步执行（禁 @Transactional：靠 save 自身事务即时提交，否则状态迁移对外不可见）。 */
     private void runClone(Long gitRepoId) {
         try {
-            GitRepositoryEntity repo = requireRepo(gitRepoId);
-            repo.setCloneStatus(GitRepositoryEntity.CLONE_CLONING);
-            repo.setCloneError(null);
-            repo.setUpdatedAt(Instant.now());
-            gitRepoRepo.save(repo);
-            mirrorToProjectRepos(repo);
-
-            GitRemoteOps.GitResult result;
-            try {
-                String token = tokenResolver.resolve(repo.getIntegrationId(), repo.getRemoteUrl());
-                result = gitOps.cloneRepo(repo.getRemoteUrl(), token, repo.getLocalPath(),
-                        repo.getDefaultBranch(), null);
-            } catch (DevMindException e) {
-                result = new GitRemoteOps.GitResult(false, e.getMessage());
-            }
-
-            if (result.ok()) {
-                // 未指定默认分支时探测 origin/HEAD 回写（同 CAP-23 FR-05）
-                if (repo.getDefaultBranch() == null || repo.getDefaultBranch().isBlank()) {
-                    GitRemoteOps.GitResult head = gitOps.remoteHeadBranch(repo.getLocalPath());
-                    if (head.ok()) {
-                        repo.setDefaultBranch(head.output());
-                    }
-                }
-                repo.setCloneStatus(GitRepositoryEntity.CLONE_READY);
-                repo.setCloneError(null);
-                refreshBranches(repo);
-                repo.setLastFetchAt(Instant.now());
-                repo.setLastFetchError(null);
-            } else {
-                repo.setCloneStatus(GitRepositoryEntity.CLONE_FAILED);
-                repo.setCloneError(truncate(result.output(), 1000));
-            }
-            repo.setUpdatedAt(Instant.now());
-            gitRepoRepo.save(repo);
-            mirrorToProjectRepos(repo);
-            log.info("全局仓库克隆结束: gitRepoId={} status={}", gitRepoId, repo.getCloneStatus());
+            doClone(requireRepo(gitRepoId));
         } catch (Exception e) {
             log.warn("全局仓库克隆异常: gitRepoId={} err={}", gitRepoId, e.getMessage());
             try {
@@ -158,6 +125,46 @@ public class GitRepoSyncService {
         } finally {
             inFlight.remove(gitRepoId);
         }
+    }
+
+    /** 克隆执行体（runClone 与 doFetch 自愈共用）：CLONING → READY/FAILED + 扇出镜像。 */
+    private void doClone(GitRepositoryEntity repo) {
+        repo.setCloneStatus(GitRepositoryEntity.CLONE_CLONING);
+        repo.setCloneError(null);
+        repo.setUpdatedAt(Instant.now());
+        gitRepoRepo.save(repo);
+        mirrorToProjectRepos(repo);
+
+        GitRemoteOps.GitResult result;
+        try {
+            String token = tokenResolver.resolve(repo.getIntegrationId(), repo.getRemoteUrl());
+            result = gitOps.cloneRepo(repo.getRemoteUrl(), token, repo.getLocalPath(),
+                    repo.getDefaultBranch(), null);
+        } catch (DevMindException e) {
+            result = new GitRemoteOps.GitResult(false, e.getMessage());
+        }
+
+        if (result.ok()) {
+            // 未指定默认分支时探测 origin/HEAD 回写（同 CAP-23 FR-05）
+            if (repo.getDefaultBranch() == null || repo.getDefaultBranch().isBlank()) {
+                GitRemoteOps.GitResult head = gitOps.remoteHeadBranch(repo.getLocalPath());
+                if (head.ok()) {
+                    repo.setDefaultBranch(head.output());
+                }
+            }
+            repo.setCloneStatus(GitRepositoryEntity.CLONE_READY);
+            repo.setCloneError(null);
+            refreshBranches(repo);
+            repo.setLastFetchAt(Instant.now());
+            repo.setLastFetchError(null);
+        } else {
+            repo.setCloneStatus(GitRepositoryEntity.CLONE_FAILED);
+            repo.setCloneError(truncate(result.output(), 1000));
+        }
+        repo.setUpdatedAt(Instant.now());
+        gitRepoRepo.save(repo);
+        mirrorToProjectRepos(repo);
+        log.info("全局仓库克隆结束: gitRepoId={} status={}", repo.getId(), repo.getCloneStatus());
     }
 
     // ---------------- 抓取（手动 + 定时） ----------------
@@ -205,6 +212,13 @@ public class GitRepoSyncService {
     }
 
     private void doFetch(GitRepositoryEntity repo) {
+        // 自愈：DB 行 CLONE_READY 但本地克隆目录缺失（环境迁移只搬了库、磁盘清理等）时，
+        // fetch 会在不存在的工作目录里跑 git 报 "cannot change to ..." —— 转全量克隆重建
+        if (!localClonePresent(repo.getLocalPath())) {
+            log.info("本地克隆目录缺失，抓取转全量克隆自愈: gitRepoId={} path={}", repo.getId(), repo.getLocalPath());
+            doClone(repo);
+            return;
+        }
         String token = tokenResolver.resolve(repo.getIntegrationId(), repo.getRemoteUrl());
         GitRemoteOps.GitResult result = gitOps.fetchAllRefs(repo.getLocalPath(), repo.getRemoteUrl(), token);
         if (result.ok()) {
@@ -295,6 +309,12 @@ public class GitRepoSyncService {
     private GitRepositoryEntity requireRepo(Long gitRepoId) {
         return gitRepoRepo.findById(gitRepoId)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "全局仓库不存在: " + gitRepoId));
+    }
+
+    /** 本地克隆是否在位：以 <localPath>/.git 目录为准（防半截克隆/空目录误判 READY）。 */
+    private static boolean localClonePresent(String localPath) {
+        return localPath != null && !localPath.isBlank()
+                && Files.isDirectory(Path.of(localPath).resolve(".git"));
     }
 
     private static String truncate(String s, int max) {
