@@ -1,24 +1,26 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""需求附件（relations 稀疏边绑定）E2E。
+"""需求附件（描述内联引用口径）E2E。
 
-背景：创建/编辑需求支持上传图片、文本等附件。绑定零后端改动——复用 CAP-32 附件底座
-（上传 scope=SHARED）+ relations 扩展边 requirement --attached--> attachment；
-需求删除时 RequirementService.delete 已双向清理 relations 边。
+背景：需求描述为 Markdown 富文本，附件以引用形式写进描述（![图](/api/attachments/{id}/raw)、
+[文件](/api/attachments/{id}/raw)）——描述文本是附件绑定的唯一事实源，与 CAP-40
+RequirementAttachmentProvider 会话投送同一扫描口径（agent 可读），不再走 relations 边。
+零后端改动：上传复用 CAP-32 附件底座（scope=SHARED），绑定即描述里的引用行。
 
 前置：隔离实例（:8090，姿势见 tests/README.md「起独立实例跑 E2E」）已启动
 （零后端改动，任意新构建均可；无需 runner）。E2E_BASE 可覆盖。
 
 覆盖：
   1. 建项目（本地 git origin）→ 建需求；
-  2. 上传 PNG + TXT 各一（scope=SHARED，回读 view.scope 断言）；
-  3. POST relations 建 attached 边 ×2 → GET relations?fromType=requirement&fromId=
-     过滤 attached+attachment 回读到 2 条；
+  2. 上传 PNG + TXT 各一（scope=SHARED，回读 view.scope/image 断言）；
+  3. PUT 需求把两条引用行追加进 description → GET 回读描述含 /api/attachments/{id}/raw
+     （CAP-40 本地分支的正则锚点，断言即证明会话投送可命中）；
   4. GET /attachments/{id} 元数据 + /raw 字节对账（PNG/TXT 各自一致）；
-  5. 移除其一：删边 + DELETE /attachments/{id} → GET 404、边列表只剩 1 条；
-  6. 删需求 → 该需求的 attached 边随删（级联清理），另一附件文件本体保留（不随删）。
+  5. 移除其一：PUT 描述剔除 TXT 引用行 + DELETE /attachments/{id} → GET 404、
+     描述中 PNG 引用仍在；
+  6. 删需求 → 清理 PNG 文件（附件库不受需求删除级联，测试收尾手工删）。
 """
-import json, os, shutil, subprocess, sys, time, urllib.request, urllib.error, urllib.parse
+import json, os, re, shutil, subprocess, sys, time, urllib.request, urllib.error
 from pathlib import Path
 
 BASE = os.environ.get("E2E_BASE", "http://localhost:8090/api")
@@ -33,6 +35,9 @@ PNG_BYTES = bytes.fromhex(
     "01f15c4890000000d49444154789c626001000000ffff030000060005"
     "57bfabd40000000049454e44ae426082")
 TXT_BYTES = "接口报文样例：{\"code\":0}\n第二行".encode("utf-8")
+
+# 与前端 attachmentRefs.LOCAL_REF_RE 同口径（粗校验引用行形态即可）
+LOCAL_REF_RE = re.compile(r"!?\[[^\]\n]*\]\(/api/attachments/([0-9a-f]{32})/raw[^)\n]*\)")
 
 
 def req(method, path, body=None, token=None, expect=200, raw=False):
@@ -82,10 +87,11 @@ def wait(cond, what, timeout=90):
     raise AssertionError(f"超时等待: {what}")
 
 
-def attached_edges(pid, rid, tok):
-    """前端 listRequirementAttachments 同口径：取边 → 过滤 attached+attachment。"""
-    edges = req("GET", f"/projects/{pid}/relations?fromType=requirement&fromId={rid}", token=tok)
-    return [e for e in edges if e["relationType"] == "attached" and e["toType"] == "attachment"]
+def requirement_input(reqm, description):
+    """用需求当前值构造 PUT 请求体（只换 description，其余字段原样回带）。"""
+    return {k: reqm.get(k) for k in (
+        "title", "ownerId", "docId", "type", "priority", "assignee",
+        "reporter", "labels", "fixVersions", "dueDate")} | {"description": description}
 
 
 def main():
@@ -109,6 +115,7 @@ def main():
                    capture_output=True, env=env)
 
     pid = None
+    png_id = None
     try:
         proj = req("POST", "/projects", {
             "name": MARK, "sourceType": "CLONE",
@@ -126,48 +133,62 @@ def main():
 
         png = upload(tok, "截图.png", PNG_BYTES, "image/png")
         txt = upload(tok, "报文.txt", TXT_BYTES, "text/plain")
+        png_id = png["attachmentId"]
         assert png["scope"] == "SHARED" and txt["scope"] == "SHARED", "scope 应为 SHARED"
         assert png["image"] is True and txt["image"] is False, "image 判定不符"
-        print(f"[3] 上传 OK（png={png['attachmentId']} txt={txt['attachmentId']}，均 SHARED）")
+        print(f"[3] 上传 OK（png={png_id} txt={txt['attachmentId']}，均 SHARED）")
 
-        for a in (png, txt):
-            req("POST", f"/projects/{pid}/relations", {
-                "fromType": "requirement", "fromId": rid,
-                "toType": "attachment", "toId": a["attachmentId"],
-                "relationType": "attached",
-            }, tok)
-        edges = attached_edges(pid, rid, tok)
-        assert len(edges) == 2, f"应读到 2 条 attached 边: {edges}"
-        print("[4] 绑定 OK（2 条 attached 边）")
+        # 绑定 = 引用行写进描述（前端 appendRefLines + buildRefLine 同款形态）
+        lines = [
+            f"![截图.png](/api/attachments/{png['attachmentId']}/raw)",
+            f"[报文.txt](/api/attachments/{txt['attachmentId']}/raw)",
+        ]
+        desc = reqm.get("description") or ""
+        new_desc = (desc.rstrip() + "\n\n" if desc.strip() else "") + "\n".join(lines)
+        req("PUT", f"/projects/{pid}/requirements/{rid}", requirement_input(reqm, new_desc), tok)
+        got = req("GET", f"/projects/{pid}/requirements/{rid}", token=tok)
+        refs = LOCAL_REF_RE.findall(got["description"] or "")
+        assert set(refs) == {png["attachmentId"], txt["attachmentId"]}, \
+            f"描述应含两条附件引用: {refs}"
+        print("[4] 引用写入描述 OK（CAP-40 锚点 /api/attachments/{id}/raw 命中）")
 
         for a, content in ((png, PNG_BYTES), (txt, TXT_BYTES)):
             meta = req("GET", f"/attachments/{a['attachmentId']}", token=tok)
             assert meta["originalName"] == a["originalName"]
-            got = req("GET", f"/attachments/{a['attachmentId']}/raw", token=tok, raw=True)
-            assert got == content, f"{a['originalName']} /raw 字节不一致"
+            body = req("GET", f"/attachments/{a['attachmentId']}/raw", token=tok, raw=True)
+            assert body == content, f"{a['originalName']} /raw 字节不一致"
         print("[5] 元数据 + /raw 字节对账 OK")
 
-        # 移除 TXT：删边 + 删文件本体
-        txt_edge = next(e for e in attached_edges(pid, rid, tok) if e["toId"] == txt["attachmentId"])
-        req("DELETE", f"/projects/{pid}/relations/{txt_edge['id']}", token=tok)
+        # 移除 TXT：描述剔除引用行（前端 stripAttachmentRef 同款语义）+ 删文件本体
+        cur = req("GET", f"/projects/{pid}/requirements/{rid}", token=tok)
+        kept = [l for l in (cur["description"] or "").split("\n")
+                if txt["attachmentId"] not in l]
+        req("PUT", f"/projects/{pid}/requirements/{rid}",
+            requirement_input(cur, "\n".join(kept)), tok)
         req("DELETE", f"/attachments/{txt['attachmentId']}", token=tok)
         req("GET", f"/attachments/{txt['attachmentId']}", token=tok, expect=404)
-        edges = attached_edges(pid, rid, tok)
-        assert len(edges) == 1 and edges[0]["toId"] == png["attachmentId"], "应只剩 PNG 边"
-        print("[6] 移除附件 OK（边+文件双删，剩 1 条）")
+        final = req("GET", f"/projects/{pid}/requirements/{rid}", token=tok)
+        refs = LOCAL_REF_RE.findall(final["description"] or "")
+        assert refs == [png["attachmentId"]], f"应只剩 PNG 引用: {refs}"
+        print("[6] 移除附件 OK（剔引用+删文件，PNG 引用保留）")
 
-        # 删需求：attached 边级联清理，PNG 文件本体保留
+        # 删需求：需求本体删除；附件文件不受级联（测试收尾手工清理）
         req("DELETE", f"/projects/{pid}/requirements/{rid}", token=tok)
-        edges = req("GET", f"/projects/{pid}/relations?fromType=requirement&fromId={rid}", token=tok)
-        assert not [e for e in edges if e["relationType"] == "attached"], "需求删除后 attached 边应清空"
-        req("GET", f"/attachments/{png['attachmentId']}", token=tok)  # 文件本体保留
-        print("[7] 删需求级联清边 OK（文件本体保留）")
+        req("GET", f"/attachments/{png['attachmentId']}", token=tok)  # 文件本体仍在
+        req("DELETE", f"/attachments/{png['attachmentId']}", token=tok)
+        png_id = None
+        print("[7] 删需求 OK（附件不随删，收尾已清理）")
 
         print("PASS: requirement attachments e2e")
     finally:
         if pid:
             try:
                 req("DELETE", f"/projects/{pid}", token=tok)
+            except Exception:
+                pass
+        if png_id:
+            try:
+                req("DELETE", f"/attachments/{png_id}", token=tok)
             except Exception:
                 pass
         shutil.rmtree(ORIGIN, ignore_errors=True)
