@@ -53,9 +53,11 @@ Windows 办公机普遍在 NAT/防火墙后、入站不可达，因此采用**�
   回退节点侧「项目 → 本地路径」映射（runner 配置文件），代码节点自理。
 - **FR-07 节点管理 UI**：`features/agent` 自包含目录——节点列表（在线状态/os/版本/
   最近心跳/运行中会话数）、生成注册 token、禁用/删除节点；创建会话表单加「执行节点」
-  下拉（默认本地）。**一键安装脚本**（2026-09-03 补做）：创建节点对话框直接下载
-  Windows `.ps1` / Linux `.sh` 一键脚本（内嵌 serverUrl+token，前端生成，依赖下载端点的
-  节点 token 认证，后端零改动）；节点行内另提供参数化脚本（token 运行时传参）。
+  下拉（默认本地）。**一键安装脚本**（2026-09-03 补做，2026-10-10 改服务端下发）：创建节点弹窗
+  给出「下载即装」一条命令（`curl | sudo bash` / `irm | ps1`），脚本由
+  `GET /api/agent-nodes/{id}/install-script?os=windows|linux&token=` 服务端生成
+  （`AgentInstallScripts` 单一来源；`?token=` 节点 token 自证且归属校验，登录态无 token 给参数化版；
+  serverUrl/downloadUrl 随请求入口推导，优先 X-Forwarded-Proto/Host 兼容反代），也可直接下载脚本文件。
   脚本流程 = 解析 java(21+) → 下载 runner 包 → 写 agent.properties → **默认注册系统服务**
   （2026-10-10 起：Windows 经 WinSW 注册服务（自动下载，`-WinSwUrl`/`WINSW_URL` 可离线覆盖）、
   Linux 写 systemd unit `devmind-agent.service` 并 `enable --now`，均注入

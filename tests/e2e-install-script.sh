@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 一键安装脚本 E2E(tmp/,gitignored):
-# esbuild 打包前端生成器 → 生成真实 sh/ps1 → bash 跑生成的 sh(HOME 指向隔离目录)
-# → 断言节点 ONLINE 且 runnerVersion 非空 → powershell parse 检查 ps1 → 清理。
+# 服务端按节点 token 下发脚本(GET /api/agent-nodes/{id}/install-script) → sh --no-service
+# 实跑(HOME 指向隔离目录) → 断言节点 ONLINE 且 runnerVersion 非空 → 静态断言服务路径
+# (systemd/WinSW + DEVMIND_RUNNER_SERVICE) → powershell parse 检查 ps1 → 负例(坏 token/匿名 401) → 清理。
 set -uo pipefail
 BASE=http://localhost:8080
 E2E=tmp/install-e2e
@@ -25,39 +26,41 @@ else
   echo "$PKG" | grep -q '"version"' || { echo "FAIL: 上传失败"; exit 1; }
 fi
 
-echo "== 2. esbuild 打包生成器,产出真实脚本 =="
-./frontend/node_modules/.bin/esbuild frontend/src/features/agent/utils/installScript.ts \
-  --bundle --format=cjs --outfile=$E2E/installScript.cjs --log-level=warning || { echo "FAIL: esbuild"; exit 1; }
-
-echo "== 3. 建节点拿 token =="
+echo "== 2. 建节点拿 token =="
 RESP=$(curl -s -X POST $BASE/api/agent-nodes -H "$AUTH" -H 'Content-Type: application/json' \
   -d "{\"name\":\"e2e-install-$(date +%s)\"}")
 NODE_ID=$(echo "$RESP" | py "d['node']['id']")
 NODE_TOKEN=$(echo "$RESP" | py "d['token']")
 echo "node id=$NODE_ID"
 
-echo "== 4. 用真实生成器产出内嵌 token 的 sh + ps1 =="
-NODE_TOKEN="$NODE_TOKEN" node -e "
-const g = require('./$E2E/installScript.cjs')
-const fs = require('fs')
-const opts = { serverUrl: 'ws://localhost:8080/ws/agent',
-  downloadUrl: 'http://localhost:8080/api/agent-nodes/runner-package/download',
-  token: process.env.NODE_TOKEN }
-fs.writeFileSync('$E2E/install-runner.sh', g.buildLinuxInstallScript(opts))
-fs.writeFileSync('$E2E/install-runner.ps1', '\uFEFF' + g.buildWindowsInstallScript(opts))
-const p = g.buildLinuxInstallScript({ ...opts, token: null })
-fs.writeFileSync('$E2E/install-runner-param.sh', p)
-console.log('scripts generated')
-" || { echo "FAIL: 生成脚本"; exit 1; }
+echo "== 3. 端点下发脚本(token 内嵌 sh/ps1 + 登录态参数化 sh) =="
+curl -fsSL "$BASE/api/agent-nodes/$NODE_ID/install-script?os=linux&token=$NODE_TOKEN" \
+  -o $E2E/install-runner.sh || { echo "FAIL: sh 下发失败"; exit 1; }
+curl -fsSL "$BASE/api/agent-nodes/$NODE_ID/install-script?os=windows&token=$NODE_TOKEN" \
+  -o $E2E/install-runner.ps1 || { echo "FAIL: ps1 下发失败"; exit 1; }
+curl -fsSL "$BASE/api/agent-nodes/$NODE_ID/install-script?os=linux" -H "$AUTH" \
+  -o $E2E/install-runner-param.sh || { echo "FAIL: 参数化 sh 下发失败"; exit 1; }
+grep -q "TOKEN=\"$NODE_TOKEN\"" $E2E/install-runner.sh || { echo "FAIL: sh 未内嵌 token"; exit 1; }
+grep -q 'TOKEN=""' $E2E/install-runner-param.sh || { echo "FAIL: 参数化 sh 不应内嵌 token"; exit 1; }
+echo "scripts downloaded"
 
-echo "== 5. 跑生成的 sh(HOME 隔离到 $E2E/home;--no-service 走后台路径,本机无 systemd) =="
+echo "== 3b. 负例:坏 token / 匿名 / 坏 os =="
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/agent-nodes/$NODE_ID/install-script?os=linux&token=dmag_bad")
+[ "$CODE" = "401" ] || { echo "FAIL: 坏 token 应 401,实得 $CODE"; exit 1; }
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/agent-nodes/$NODE_ID/install-script?os=linux")
+[ "$CODE" = "401" ] || { echo "FAIL: 匿名无 token 应 401,实得 $CODE"; exit 1; }
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/agent-nodes/$NODE_ID/install-script?os=macos&token=$NODE_TOKEN")
+[ "$CODE" = "400" ] || { echo "FAIL: 坏 os 应 400,实得 $CODE"; exit 1; }
+echo "负例 ok"
+
+echo "== 4. 跑下发的 sh(HOME 隔离到 $E2E/home;--no-service 走后台路径,本机无 systemd) =="
 HOME="/d/apusic/dev-mind/$E2E/home" bash $E2E/install-runner.sh --no-service || { echo "FAIL: 安装脚本执行失败"; exit 1; }
 [ -f $E2E/home/devmind-runner/devmind-agent-runner.jar ] || { echo "FAIL: jar 未下载"; exit 1; }
 [ -f $E2E/home/devmind-runner/agent.properties ] || { echo "FAIL: 配置未生成"; exit 1; }
 [ -f $E2E/home/devmind-runner/runner.pid ] || { echo "FAIL: pid 文件缺失"; exit 1; }
 echo "jar/config/pid 齐备"
 
-echo "== 5b. 静态断言:默认服务路径已内嵌(systemd/WinSW + DEVMIND_RUNNER_SERVICE) =="
+echo "== 5. 静态断言:默认服务路径已内嵌(systemd/WinSW + DEVMIND_RUNNER_SERVICE) =="
 grep -q 'DEVMIND_RUNNER_SERVICE=1' $E2E/install-runner.sh && grep -q 'systemctl' $E2E/install-runner.sh \
   || { echo "FAIL: sh 缺 systemd 服务路径"; exit 1; }
 grep -q 'WinSW' $E2E/install-runner.ps1 && grep -q 'DEVMIND_RUNNER_SERVICE' $E2E/install-runner.ps1 \

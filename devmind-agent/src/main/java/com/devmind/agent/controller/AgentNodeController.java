@@ -11,6 +11,7 @@ import com.devmind.agent.model.AgentNodeEntity;
 import com.devmind.agent.model.RunnerPackageEntity;
 import com.devmind.agent.registry.AgentConnectionRegistry;
 import com.devmind.agent.service.AgentAuditLogService;
+import com.devmind.agent.service.AgentInstallScripts;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.agent.service.RunnerPackageService;
 import com.devmind.auth.IdentityService;
@@ -19,6 +20,7 @@ import com.devmind.common.dto.PageView;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpHeaders;
@@ -38,6 +40,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
@@ -251,6 +254,92 @@ public class AgentNodeController {
             return new UpgradeResultView("REJECTED", "升级过程中节点断线（可能正在重启，请稍后核对版本）", null);
         }
         return new UpgradeResultView("REJECTED", "节点拒绝升级: " + ack.reason(), null);
+    }
+
+    /**
+     * 一键安装脚本下发（?os=windows|linux）。带 ?token= 且归属本节点 → 内嵌 token 版
+     * （目标机一条命令下载即装）；登录态无 token → 参数化版（token 运行时传入）。
+     * SecurityConfig permitAll，此处做「节点 token 或登录态」双认证（同 runner 包下载）。
+     * serverUrl/downloadUrl 随请求入口推导（优先 X-Forwarded-*，兼容反代），与浏览器地址栏一致。
+     */
+    @GetMapping("/{id}/install-script")
+    public ResponseEntity<byte[]> installScript(@PathVariable Long id,
+                                                @RequestParam String os,
+                                                @RequestParam(required = false) String token,
+                                                HttpServletRequest request) {
+        boolean windows;
+        if ("windows".equalsIgnoreCase(os)) {
+            windows = true;
+        } else if ("linux".equalsIgnoreCase(os)) {
+            windows = false;
+        } else {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "os 仅支持 windows/linux");
+        }
+        String embeddedToken = null;
+        if (token != null && !token.isBlank()) {
+            AgentNodeEntity node = service.resolveByToken(token)
+                    .filter(n -> n.getId().equals(id))
+                    .orElseThrow(() -> new DevMindException(ErrorCode.UNAUTHORIZED, "节点 token 无效或不属于该节点"));
+            embeddedToken = token;
+            auditLogService.record(AgentAuditLogService.Entry
+                    .of(AgentAuditLogEntity.CAT_PACKAGE, "INSTALL_SCRIPT")
+                    .node(node).target(os.toLowerCase()).result(AgentAuditLogEntity.RESULT_OK));
+        } else {
+            if (!isLoggedIn()) {
+                throw new DevMindException(ErrorCode.UNAUTHORIZED, "下载安装脚本需要节点 token 或登录态");
+            }
+            service.require(id); // 节点不存在 → 404
+            auditLogService.record(AgentAuditLogService.Entry
+                    .of(AgentAuditLogEntity.CAT_PACKAGE, "INSTALL_SCRIPT")
+                    .actor(identityService.currentActor()).target(os.toLowerCase())
+                    .result(AgentAuditLogEntity.RESULT_OK));
+        }
+        String base = baseUrl(request);
+        String wsUrl = base.replaceFirst("^http", "ws") + "/ws/agent";
+        String downloadUrl = base + "/api/agent-nodes/runner-package/download";
+        String script = windows
+                ? AgentInstallScripts.windows(wsUrl, downloadUrl, embeddedToken)
+                : AgentInstallScripts.linux(wsUrl, downloadUrl, embeddedToken);
+        // ps1 含中文必须带 BOM（PS 5.1 无 BOM 按 GBK 解析 → 乱码 + 语法错误）
+        byte[] body = windows ? withBom(script) : script.getBytes(StandardCharsets.UTF_8);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("text/plain; charset=utf-8"))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"install-runner." + (windows ? "ps1" : "sh") + "\"")
+                .body(body);
+    }
+
+    /** 请求入口基地址：反代场景优先 X-Forwarded-Proto/Host（取首值），否则走请求自身 scheme/Host。 */
+    private static String baseUrl(HttpServletRequest request) {
+        String proto = firstForwarded(request.getHeader("X-Forwarded-Proto"));
+        String host = firstForwarded(request.getHeader("X-Forwarded-Host"));
+        if (proto == null) {
+            proto = request.getScheme();
+        }
+        if (host == null) {
+            host = request.getHeader("Host");
+        }
+        if (host == null) {
+            host = request.getServerName() + ":" + request.getServerPort();
+        }
+        return proto + "://" + host;
+    }
+
+    private static String firstForwarded(String header) {
+        if (header == null || header.isBlank()) {
+            return null;
+        }
+        return header.split(",")[0].trim();
+    }
+
+    private static byte[] withBom(String text) {
+        byte[] raw = text.getBytes(StandardCharsets.UTF_8);
+        byte[] out = new byte[raw.length + 3];
+        out[0] = (byte) 0xEF;
+        out[1] = (byte) 0xBB;
+        out[2] = (byte) 0xBF;
+        System.arraycopy(raw, 0, out, 3, raw.length);
+        return out;
     }
 
     private boolean isNodeToken(String token) {

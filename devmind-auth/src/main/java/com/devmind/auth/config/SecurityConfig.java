@@ -57,6 +57,8 @@ public class SecurityConfig {
                         // CAP-21：Agent 节点管理（含注册 token 签发）写操作仅 ADMIN；/ws/agent 由节点 token 自证
                         // FR-09 runner 包下载：permitAll 放行，节点 token 或登录态由控制器内双重判定
                         .requestMatchers(HttpMethod.GET, "/api/agent-nodes/runner-package/download").permitAll()
+                        // CAP-21 一键安装脚本下发：permitAll 放行，?token= 归属校验或登录态由控制器内判定
+                        .requestMatchers(HttpMethod.GET, "/api/agent-nodes/*/install-script").permitAll()
                         // CAP-34 FR-03：上下文包拉取 permitAll 放行，节点 token 由控制器内判定
                         .requestMatchers(HttpMethod.GET, "/api/agent/context/**").permitAll()
                         // CAP-56：决策实验室执行包拉取 permitAll 放行，节点 token 由控制器内判定
