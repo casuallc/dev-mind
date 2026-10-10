@@ -1,12 +1,13 @@
 // 需求新建/编辑抽屉：项目列表卡（新建）与需求详情页（编辑）复用。
 // Jira 来源（source=JIRA）：托管字段（标题/类型/描述/优先级/标签/经办人/报告人/截止日期/修复版本）
 // 由同步维护、本地禁用，仅本地负责人可改（服务端同样强制忽略）。
-import { useEffect } from 'react'
-import { Button, DatePicker, Drawer, Form, Input, Select, Space, message } from 'antd'
+import { useEffect, useRef } from 'react'
+import { Button, DatePicker, Drawer, Form, Input, Select, Space, Typography, message } from 'antd'
 import dayjs from 'dayjs'
 import { createRequirement, updateRequirement } from '../api'
 import type { Requirement, RequirementInput } from '../types'
 import { ALL_PRIORITIES, ALL_TYPES, TYPE_LABEL } from './requirementMeta'
+import RequirementAttachmentPanel, { type RequirementAttachmentPanelHandle } from './RequirementAttachmentPanel'
 import { showError } from '../../../shared/utils/showError'
 
 /** 表单值形态：dueDate 在表单里是 dayjs，提交时转 'YYYY-MM-DD' */
@@ -23,6 +24,7 @@ export default function RequirementFormDrawer({ projectId, editing, open, onClos
 }) {
   const [form] = Form.useForm<FormValues>()
   const jiraManaged = editing?.source === 'JIRA'
+  const attachPanelRef = useRef<RequirementAttachmentPanelHandle>(null)
 
   useEffect(() => {
     if (open) {
@@ -49,6 +51,11 @@ export default function RequirementFormDrawer({ projectId, editing, open, onClos
       const saved = editing
         ? await updateRequirement(projectId, editing.id, input)
         : await createRequirement(projectId, input)
+      // 新建模式的暂存附件：需求建成后再上传+绑定；失败不阻塞主保存，仅提示（可编辑时再补传）
+      if (!editing) {
+        const failed = await attachPanelRef.current?.flush(saved.id)
+        if (failed) message.warning(`${failed} 个附件上传失败，可在编辑需求时补传`)
+      }
       message.success('已保存')
       onClose()
       onSaved(saved)
@@ -109,6 +116,20 @@ export default function RequirementFormDrawer({ projectId, editing, open, onClos
           tooltip={jiraManaged ? '平台侧流程负责人，与 Jira 经办人相互独立，本地可改' : undefined}>
           <Input placeholder="可选" />
         </Form.Item>
+        {/* 附件：非表单字段（React state 管理）。新建=暂存，保存后随需求一并上传；编辑=即传即绑 */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ marginBottom: 8 }}>
+            附件
+            <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+              {editing ? '增删即时生效' : '图片/文本等均可，保存需求后上传'}
+            </Typography.Text>
+          </div>
+          <RequirementAttachmentPanel
+            ref={attachPanelRef}
+            projectId={projectId}
+            requirementId={editing?.id ?? null}
+          />
+        </div>
       </Form>
     </Drawer>
   )
