@@ -69,18 +69,34 @@ export interface NodeActiveSession {
   createdAt?: string
 }
 
-/** 节点连接事件类型 */
-export type ConnLogEvent = 'CONNECT' | 'REJECT' | 'DISCONNECT'
+/** CAP-71 审计日志分类（九类） */
+export type AuditCategory =
+  | 'CONNECTION' | 'TUNNEL' | 'COMMAND' | 'PROXY' | 'CONTEXT'
+  | 'FILE_TRANSFER' | 'RULE' | 'PACKAGE' | 'NODE'
 
-/** 节点连接流水（REJECT 时 nodeId/nodeName 为空，只有来源地址） */
-export interface AgentConnLog {
+/** 审计结果 */
+export type AuditResult = 'OK' | 'FAIL' | 'REJECTED'
+
+/**
+ * CAP-71 节点审计日志（GET /agent-nodes/audit-logs，服务端真分页）。
+ * nodeId/nodeName 在 REJECTED、代理未命中规则时为空；actor 仅管理操作（规则/包/节点运维）有值。
+ */
+export interface AgentAuditLog {
   id: number
+  createdAt?: string
+  category: AuditCategory
+  event: string
   nodeId?: number
   nodeName?: string
-  event: ConnLogEvent
+  actor?: string
   remoteAddr?: string
+  /** 代理 host:port / sessionId / transferId / 规则 pattern 等 */
+  target?: string
+  result: AuditResult
+  bytesUp?: number
+  bytesDown?: number
+  durationMs?: number
   detail?: string
-  createdAt?: string
 }
 
 /** CAP-65 节点文件浏览：目录一层条目 */

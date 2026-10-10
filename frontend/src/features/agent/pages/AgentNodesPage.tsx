@@ -46,7 +46,7 @@ const statusColor: Record<string, string> = {
 /**
  * CAP-21 后台页：Agent 节点（仅 ADMIN）。页内 Segmented 两视图——「节点列表」与「Runner 包」（全局托管包，
  * 原独立菜单已并入此页，旧路径 /admin/agent/package 重定向 ?view=package）；
- * 连接日志 / 节点文件仍是「Agent 执行」组独立菜单；单节点的观测/配置/运维操作收在详情页（/admin/agent/nodes/:id）。
+ * 审计日志 / 节点文件仍是「Agent 执行」组独立菜单；单节点的观测/配置/运维操作收在详情页（/admin/agent/nodes/:id）。
  */
 export default function AgentNodesPage() {
   const navigate = useNavigate()

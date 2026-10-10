@@ -2,8 +2,10 @@
 import { api } from '../../shared/api/client'
 import { getAccessToken } from '../auth/authStore'
 import type {
-  AgentConnLog,
+  AgentAuditLog,
   AgentNode,
+  AuditCategory,
+  AuditResult,
   EgressRule,
   EgressRuleBody,
   EgressTunnelStatus,
@@ -19,9 +21,33 @@ export function listAgentNodes(): Promise<AgentNode[]> {
   return api.get<AgentNode[]>('/agent-nodes')
 }
 
-/** 节点连接流水（接入/拒绝/断线，倒序） */
-export function listConnLogs(limit = 200): Promise<AgentConnLog[]> {
-  return api.get<AgentConnLog[]>(`/agent-nodes/conn-logs?limit=${limit}`)
+/** CAP-71 审计分页响应（对应后端 PageView） */
+export interface AuditLogPage {
+  items: AgentAuditLog[]
+  total: number
+  page: number
+  size: number
+}
+
+/** 节点审计日志（CAP-71，服务端真分页 page 从 0 起；keyword 匹配详情/节点/来源/目标四列） */
+export function listAuditLogs(params: {
+  category?: AuditCategory
+  event?: string
+  nodeId?: number
+  result?: AuditResult
+  keyword?: string
+  page?: number
+  size?: number
+} = {}): Promise<AuditLogPage> {
+  const q = new URLSearchParams()
+  if (params.category) q.set('category', params.category)
+  if (params.event) q.set('event', params.event)
+  if (params.nodeId != null) q.set('nodeId', String(params.nodeId))
+  if (params.result) q.set('result', params.result)
+  if (params.keyword) q.set('keyword', params.keyword)
+  q.set('page', String(params.page ?? 0))
+  q.set('size', String(params.size ?? 20))
+  return api.get<AuditLogPage>(`/agent-nodes/audit-logs?${q.toString()}`)
 }
 
 export function createAgentNode(body: { name: string; labels?: string }): Promise<IssuedNode> {
