@@ -17,6 +17,7 @@ import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -97,5 +98,10 @@ public class AuthController {
     @PostMapping("/users/{id}/reset-password")
     public void resetPassword(@PathVariable String id, @Valid @RequestBody ResetPasswordRequest req) {
         userAdminService.resetPassword(id, req.password());
+    }
+
+    @DeleteMapping("/users/{id}")
+    public void deleteUser(@PathVariable String id, @AuthenticationPrincipal DevMindPrincipal principal) {
+        userAdminService.delete(id, principal == null ? null : principal.username());
     }
 }

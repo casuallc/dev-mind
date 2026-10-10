@@ -4,6 +4,7 @@ import com.devmind.auth.dto.CreateUserRequest;
 import com.devmind.auth.dto.UpdateUserRequest;
 import com.devmind.auth.dto.UserView;
 import com.devmind.auth.model.UserEntity;
+import com.devmind.auth.repo.RefreshTokenRepository;
 import com.devmind.auth.repo.UserRepository;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
@@ -37,11 +38,14 @@ public class UserAdminService {
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final UserRepository userRepo;
+    private final RefreshTokenRepository refreshTokenRepo;
     private final PasswordEncoder passwordEncoder;
     private final AuthService authService;
 
-    public UserAdminService(UserRepository userRepo, PasswordEncoder passwordEncoder, AuthService authService) {
+    public UserAdminService(UserRepository userRepo, RefreshTokenRepository refreshTokenRepo,
+                            PasswordEncoder passwordEncoder, AuthService authService) {
         this.userRepo = userRepo;
+        this.refreshTokenRepo = refreshTokenRepo;
         this.passwordEncoder = passwordEncoder;
         this.authService = authService;
     }
@@ -120,6 +124,23 @@ public class UserAdminService {
         userRepo.save(u);
     }
 
+    /** 删除用户：连带作废其全部 refresh token。护栏同 update：禁删系统身份 local、禁删自己、保留最后一个可登录 ADMIN。 */
+    @Transactional
+    public void delete(String id, String operator) {
+        UserEntity u = require(id);
+        if ("local".equals(u.getUsername())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "系统内置身份 local 不可删除");
+        }
+        if (u.getUsername().equals(operator)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "不能删除当前登录账号");
+        }
+        if (isLoginAdmin(u) && !anotherLoginAdminExists(u)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "系统至少保留一个可用的 ADMIN 账号");
+        }
+        refreshTokenRepo.deleteByUserId(u.getId());
+        userRepo.delete(u);
+    }
+
     private UserEntity require(String id) {
         return userRepo.findById(id)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "用户不存在: " + id));
@@ -135,20 +156,24 @@ public class UserAdminService {
 
     /** 目标用户若正从「可登录 ADMIN」变成不是，要求系统里还剩另一个可登录 ADMIN */
     private void guardLastAdmin(UserEntity target, String newRole, String newStatus) {
-        boolean wasLoginAdmin = UserEntity.ROLE_ADMIN.equals(target.getRole())
-                && target.getPasswordHash() != null && target.isActive();
+        boolean wasLoginAdmin = isLoginAdmin(target);
         boolean willBeLoginAdmin = UserEntity.ROLE_ADMIN.equals(newRole)
                 && target.getPasswordHash() != null && UserEntity.STATUS_ACTIVE.equals(newStatus);
         if (!wasLoginAdmin || willBeLoginAdmin) {
             return;
         }
-        boolean anotherAdmin = userRepo.findAll().stream()
-                .anyMatch(x -> !x.getId().equals(target.getId())
-                        && UserEntity.ROLE_ADMIN.equals(x.getRole())
-                        && x.getPasswordHash() != null && x.isActive());
-        if (!anotherAdmin) {
+        if (!anotherLoginAdminExists(target)) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "系统至少保留一个可用的 ADMIN 账号");
         }
+    }
+
+    private boolean isLoginAdmin(UserEntity u) {
+        return UserEntity.ROLE_ADMIN.equals(u.getRole()) && u.getPasswordHash() != null && u.isActive();
+    }
+
+    private boolean anotherLoginAdminExists(UserEntity target) {
+        return userRepo.findAll().stream()
+                .anyMatch(x -> !x.getId().equals(target.getId()) && isLoginAdmin(x));
     }
 
     private String shortId() {
