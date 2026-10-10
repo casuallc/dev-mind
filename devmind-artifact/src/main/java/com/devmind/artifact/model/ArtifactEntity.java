@@ -11,7 +11,7 @@ import java.time.Instant;
 
 /**
  * artifacts 表（CAP-13 工作产物一等实体）：覆盖构建产物与信息类产物。
- * type = PACKAGE / DOC / CODE_DIFF / TEST_REPORT / REVIEW / ANALYSIS（FILE 保留兼容历史数据）；
+ * type = PACKAGE / DOC / CODE_DIFF / TEST_REPORT / REVIEW / ANALYSIS / SUMMARY（FILE 保留兼容历史数据）；
  * producer_type = BUILD / SESSION / TEST_RUN / DOC / MANUAL；
  * 归属挂 work_item_id 或 requirement_id（分析产物直挂需求）；信息类产物无存储实体，
  * storage/path 可空，path 存引用（如 docId / sessionId）。
@@ -21,7 +21,7 @@ import java.time.Instant;
 @Table(name = "artifacts")
 public class ArtifactEntity {
 
-    /** FILE（历史兼容）/ PACKAGE / DOC / CODE_DIFF / TEST_REPORT / REVIEW / ANALYSIS */
+    /** FILE（历史兼容）/ PACKAGE / DOC / CODE_DIFF / TEST_REPORT / REVIEW / ANALYSIS / SUMMARY */
     public static final String TYPE_FILE = "FILE";
     public static final String TYPE_PACKAGE = "PACKAGE";
     public static final String TYPE_DOC = "DOC";
@@ -29,6 +29,8 @@ public class ArtifactEntity {
     public static final String TYPE_TEST_REPORT = "TEST_REPORT";
     public static final String TYPE_REVIEW = "REVIEW";
     public static final String TYPE_ANALYSIS = "ANALYSIS";
+    /** 开发会话收尾摘要（dev-summary.md 等）：path 存 "sessionId#fileName"，正文回读 session_outputs */
+    public static final String TYPE_SUMMARY = "SUMMARY";
 
     /** LOCAL / S3（存储 SPI 类型，见 ArtifactStorage）；信息类产物可空 */
     public static final String STORAGE_LOCAL = "LOCAL";

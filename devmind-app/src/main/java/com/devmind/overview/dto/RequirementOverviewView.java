@@ -47,9 +47,9 @@ public record RequirementOverviewView(
                               Long rollbackOf, Instant createdAt, Instant finishedAt) {
     }
 
-    /** CAP-13：工作产物条目 */
+    /** CAP-13：工作产物条目（workItemId 供「开发产出」Tab 按工作单元分组，null = 需求级） */
     public record ArtifactItem(Long id, String type, String name, String path, String producerType,
-                               Instant createdAt) {
+                               String workItemId, Instant createdAt) {
     }
 
     /** 时间线条目：type = REQUIREMENT / WORK_ITEM / DOC / SESSION / BUILD / TEST_RUN / DEPLOYMENT / RELEASE / ARTIFACT */

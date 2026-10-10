@@ -66,6 +66,7 @@ class RequirementFlowServiceTest {
     private FakeSessionOutputService sessionOutputService;
     private FakeDocumentService documentService;
     private FakeNotificationService notificationService;
+    private FakeArtifactService artifactService;
     private FakeEventPublisher eventPublisher;
     private Map<String, SessionEntity> sessionStore;
     private RequirementFlowService service;
@@ -272,6 +273,20 @@ class RequirementFlowServiceTest {
         public Optional<String> findContent(String sessionId, String fileName) {
             return Optional.ofNullable(outputs.get(sessionId + ":" + fileName));
         }
+
+        @Override
+        public List<com.devmind.session.model.SessionOutputEntity> list(String sessionId) {
+            return outputs.keySet().stream()
+                    .filter(k -> k.startsWith(sessionId + ":"))
+                    .map(k -> {
+                        com.devmind.session.model.SessionOutputEntity e =
+                                new com.devmind.session.model.SessionOutputEntity();
+                        e.setSessionId(sessionId);
+                        e.setFileName(k.substring(sessionId.length() + 1));
+                        return e;
+                    })
+                    .toList();
+        }
     }
 
     static class FakeDocumentService extends DocumentService {
@@ -321,6 +336,9 @@ class RequirementFlowServiceTest {
     }
 
     static class FakeArtifactService extends ArtifactService {
+        /** 记录的 registerInfo 调用：{projectId, requirementId, workItemId, type, name, path, producerType} */
+        final List<String[]> infoCalls = new ArrayList<>();
+
         FakeArtifactService() {
             super(null, null);
         }
@@ -329,7 +347,12 @@ class RequirementFlowServiceTest {
         public com.devmind.artifact.dto.ArtifactView registerInfo(String projectId, String requirementId,
                                                                   String workItemId, String type, String name,
                                                                   String path, String producerType) {
+            infoCalls.add(new String[]{projectId, requirementId, workItemId, type, name, path, producerType});
             return null;
+        }
+
+        List<String[]> ofType(String type) {
+            return infoCalls.stream().filter(c -> type.equals(c[3])).toList();
         }
     }
 
@@ -387,6 +410,7 @@ class RequirementFlowServiceTest {
         sessionOutputService = new FakeSessionOutputService();
         documentService = new FakeDocumentService();
         notificationService = new FakeNotificationService();
+        artifactService = new FakeArtifactService();
         eventPublisher = new FakeEventPublisher();
         sessionStore = new HashMap<>();
         SessionRepository sessionRepo = proxy(SessionRepository.class, (p, m, args) ->
@@ -400,7 +424,7 @@ class RequirementFlowServiceTest {
                 });
         service = new RequirementFlowService(requirementService, workItemService, designService,
                 relationService, sessionManager, sessionRepo, sessionOutputService, documentService,
-                new FakeArtifactService(), notificationService, eventPublisher, new ObjectMapper(),
+                artifactService, notificationService, eventPublisher, new ObjectMapper(),
                 new FakeIdentityService());
     }
 
@@ -648,6 +672,41 @@ class RequirementFlowServiceTest {
 
         assertEquals(RequirementEntity.STATUS_ACCEPTANCE, requirementService.requireById("r1").getStatus());
         assertTrue(notificationService.ofType("flow.dev.done").get(0).body().contains("dev-summary.md"));
+        // 无产出文件 → 不登记 SUMMARY 产物（避免指向不存在内容的引用行）
+        assertTrue(artifactService.ofType("SUMMARY").isEmpty());
+    }
+
+    @Test
+    void 开发产出_需求级会话摘要登记产物挂需求() {
+        requirementService.add("r1", RequirementEntity.STATUS_IN_PROGRESS);
+        addSession("s4", null, "r1", FlowOutputContract.MARKER_DEV + "\n开发任务");
+        sessionOutputService.put("s4", FlowOutputContract.DEV_SUMMARY_FILE, "## 完成情况\n- 都做完了");
+
+        fireCompleted("s4");
+
+        List<String[]> summaries = artifactService.ofType("SUMMARY");
+        assertEquals(1, summaries.size());
+        String[] call = summaries.get(0);
+        assertEquals("p1", call[0]);            // projectId
+        assertEquals("r1", call[1]);            // requirementId
+        assertNull(call[2]);                    // 需求级会话无 workItemId → 只挂需求
+        assertEquals("s4#dev-summary.md", call[5]); // path = sessionId#fileName，正文回读 session_outputs
+        assertEquals("SESSION", call[6]);
+    }
+
+    @Test
+    void 开发产出_工作单元会话摘要登记产物挂工作单元() {
+        requirementService.add("r1", RequirementEntity.STATUS_IN_PROGRESS);
+        workItemService.add("wi-1", WorkItemEntity.TYPE_DEVELOPMENT, WorkItemEntity.STATUS_IN_PROGRESS);
+        addSession("s5", "wi-1", "r1", FlowOutputContract.MARKER_DEV + "\n开发任务");
+        sessionOutputService.put("s5", FlowOutputContract.DEV_SUMMARY_FILE, "## 完成情况");
+
+        fireCompleted("s5");
+
+        List<String[]> summaries = artifactService.ofType("SUMMARY");
+        assertEquals(1, summaries.size());
+        assertEquals("wi-1", summaries.get(0)[2]);
+        assertEquals("r1", summaries.get(0)[1]);
     }
 
     // ---------------- CAP-52：入口收敛 ----------------

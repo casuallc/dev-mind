@@ -101,7 +101,7 @@ public class RequirementOverviewService {
         List<RequirementOverviewView.ArtifactItem> artifacts = artifactRepo
                 .findByProjectIdAndRequirementIdOrderByIdDesc(projectId, requirementId).stream()
                 .map(a -> new RequirementOverviewView.ArtifactItem(a.getId(), a.getType(), a.getName(),
-                        a.getPath(), a.getProducerType(), a.getCreatedAt()))
+                        a.getPath(), a.getProducerType(), a.getWorkItemId(), a.getCreatedAt()))
                 .toList();
 
         return new RequirementOverviewView(requirementView, workItems, docs, sessions, builds, testRuns,

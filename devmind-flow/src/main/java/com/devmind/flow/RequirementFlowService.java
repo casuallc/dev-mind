@@ -413,6 +413,10 @@ public class RequirementFlowService {
             WorkItemEntity wi = workItemService.requireById(session.getWorkItemId());
             if (WorkItemEntity.TYPE_DESIGN.equals(wi.getType())) {
                 handleDesignOutput(session, wi);
+            } else {
+                // 非 DESIGN 的工作单元会话：产出没有文档化通路（analysis/design 是需求级契约），
+                // 逐文件登记 SUMMARY 产物挂到该工作单元，供需求详情「开发产出」Tab 分组展示
+                registerWorkItemOutputs(session, wi);
             }
             return;
         }
@@ -544,6 +548,9 @@ public class RequirementFlowService {
     private void handleDevOutput(SessionEntity session) {
         RequirementEntity req = requirementService.requireById(session.getRequirementId());
         String summary = readOutput(session, FlowOutputContract.DEV_SUMMARY_FILE);
+        if (summary != null) {
+            registerDevSummary(req, session);
+        }
         if (!RequirementEntity.STATUS_DONE.equals(req.getStatus())
                 && !RequirementEntity.STATUS_CANCELLED.equals(req.getStatus())
                 && !RequirementEntity.STATUS_ACCEPTANCE.equals(req.getStatus())) {
@@ -557,10 +564,48 @@ public class RequirementFlowService {
         String body = summary == null
                 ? "开发会话已完成并提交改动，但未找到产出 " + FlowOutputContract.OUTPUT_DIR + "/"
                         + FlowOutputContract.DEV_SUMMARY_FILE + "；请到会话详情核对改动后再验收。"
-                : "开发会话已完成并提交改动。摘要：" + preview(summary, 400) + "（完整内容见会话产出）";
+                : "开发会话已完成并提交改动。摘要：" + preview(summary, 400) + "（完整内容见「开发产出」Tab）";
         notify(NotificationLevel.P1, "flow.dev.done",
                 "REQ-" + req.getSeq() + " 开发完成待验收",
                 body, req.getProjectId(), req.getId());
+    }
+
+    /**
+     * 开发摘要产物登记：type=SUMMARY，path="sessionId#fileName"（正文不回拷，展示时回读
+     * session_outputs）。归属：会话带 workItemId 挂工作单元，需求级 dev 会话（CAP-52）只挂需求。
+     * 幂等由 registerInfo 的 (projectId, type, path) 去重保证（同一会话重跑只留最新一行）。
+     */
+    private void registerDevSummary(RequirementEntity req, SessionEntity session) {
+        try {
+            artifactService.registerInfo(session.getProjectId(), req.getId(), session.getWorkItemId(),
+                    com.devmind.artifact.model.ArtifactEntity.TYPE_SUMMARY,
+                    "REQ-" + req.getSeq() + " 开发摘要",
+                    session.getId() + "#" + FlowOutputContract.DEV_SUMMARY_FILE,
+                    ArtifactService.PRODUCER_SESSION);
+        } catch (Exception e) {
+            log.warn("开发摘要产物登记失败(不阻塞通知): req={} session={} err={}",
+                    req.getId(), session.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 工作单元会话产出登记：非 DESIGN 型 WI 会话 DONE 后，把已回传的产出逐文件登记为
+     * SUMMARY 产物挂到该工作单元（path="sessionId#fileName"，正文回读 session_outputs）。
+     * 无产出则不动；登记失败不阻塞分流。
+     */
+    private void registerWorkItemOutputs(SessionEntity session, WorkItemEntity wi) {
+        try {
+            for (var output : sessionOutputService.list(session.getId())) {
+                artifactService.registerInfo(session.getProjectId(), wi.getRequirementId(), wi.getId(),
+                        com.devmind.artifact.model.ArtifactEntity.TYPE_SUMMARY,
+                        output.getFileName(),
+                        session.getId() + "#" + output.getFileName(),
+                        ArtifactService.PRODUCER_SESSION);
+            }
+        } catch (Exception e) {
+            log.warn("工作单元会话产出登记失败(不阻塞): session={} wi={} err={}",
+                    session.getId(), wi.getId(), e.getMessage());
+        }
     }
 
     /** 分析文档登记：已存在则版本化更新（重新分析不新建第二份），登记 ANALYSIS 产物。 */
