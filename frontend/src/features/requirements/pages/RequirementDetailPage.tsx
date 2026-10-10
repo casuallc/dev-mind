@@ -51,6 +51,7 @@ import {
 import JiraActions from '../components/JiraActions'
 import JiraDescription from '../components/JiraDescription'
 import JiraPushModal from '../components/JiraPushModal'
+import RequirementAttachmentPanel from '../components/RequirementAttachmentPanel'
 import AnalysisTab from '../components/flow/AnalysisTab'
 import DesignsTab from '../components/flow/DesignsTab'
 import RelatedRecordsTab from '../components/RelatedRecordsTab'
@@ -144,6 +145,8 @@ export default function RequirementDetailPage() {
   const [pushOpen, setPushOpen] = useState(false)
   const [refreshingJira, setRefreshingJira] = useState(false)
   const [designs, setDesigns] = useState<Design[]>([])
+  // 附件 Tab 计数（面板加载/增删后回调上抛；null=未加载过，标签不显示计数）
+  const [attachCount, setAttachCount] = useState<number | null>(null)
   // CAP-52 流程动作互斥：同一时刻只允许一个在飞（规划 / 开发）
   const [flowBusy, setFlowBusy] = useState<null | 'plan' | 'dev'>(null)
   // Tab 与 URL 同步（?tab=analysis/design/workItems）：流程通知深链直达对应 Tab，刷新/分享不丢位置
@@ -530,6 +533,17 @@ export default function RequirementDetailPage() {
               key: 'records',
               label: '关联记录',
               children: <RelatedRecordsTab overview={overview} />,
+            },
+            {
+              key: 'attachments',
+              label: attachCount == null ? '附件' : `附件（${attachCount}）`,
+              children: (
+                <RequirementAttachmentPanel
+                  projectId={r.projectId}
+                  requirementId={r.id}
+                  onCountChange={setAttachCount}
+                />
+              ),
             },
           ]}
         />
