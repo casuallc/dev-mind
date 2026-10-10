@@ -283,6 +283,11 @@ def main():
         subprocess.run(["git", "push", ORIGIN.as_uri(),
                         f"refs/heads/{branch_a}:refs/heads/{branch_a}"],
                        cwd=wt_a, check=True, capture_output=True)
+        # 需求 DONE 前置检查（5ec3d899）：存在未完结工作单元时直接 DONE 会被 409 拒绝，
+        # 走真实路径——先逐条把工作单元确认 DONE，再翻需求状态
+        for w in overview(tok, pid, rid)["workItems"]:
+            req("PUT", f"/projects/{pid}/requirements/{rid}/work-items/{w['id']}/status",
+                {"status": "DONE"}, tok)
         req("PUT", f"/projects/{pid}/requirements/{rid}/status", {"status": "DONE"}, tok)
         e = req("POST", f"/projects/{pid}/requirements/{rid}/flow/plan", None, tok, expect=409)
         assert "DONE" in json.dumps(e, ensure_ascii=False), f"409 文案不符: {e}"
