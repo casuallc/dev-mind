@@ -2,6 +2,10 @@
  * CAP-21 一键安装脚本地址拼装。脚本由服务端单一来源生成
  * （GET /api/agent-nodes/{id}/install-script，见后端 AgentInstallScripts），
  * 端点支持 ?token= 节点 token 自证——浏览器下载与目标机 curl/irm 直链通用。
+ *
+ * https 自签证书部署（如 194 38880）：页面为 https 时一条命令带「证书校验失败自动降级
+ * 跳过校验」兜底（curl -k / PS 5.1 改 ServicePointManager 回调），脚本内下载 runner 包同理，
+ * 并由脚本自动给 agent.properties 写入 insecure=true 承接 runner 运行期 wss。
  */
 
 export type InstallOs = 'windows' | 'linux'
@@ -13,7 +17,13 @@ export const installScriptUrl = (nodeId: number, os: InstallOs, token?: string |
 /** 目标机「下载即装」一行命令（token 内嵌在 URL 里；token 传 null 用 dmag_xxx 占位，用户自行替换）。 */
 export const installOneLiner = (nodeId: number, os: InstallOs, token: string | null): string => {
   const url = installScriptUrl(nodeId, os, token ?? 'dmag_xxx')
+  if (location.protocol !== 'https:') {
+    return os === 'linux'
+      ? `curl -fsSL '${url}' | sudo bash`
+      : `powershell -ExecutionPolicy Bypass -Command "irm '${url}' -OutFile install-runner.ps1; .\\install-runner.ps1"`
+  }
+  // https 可能自签：先正常拉，证书校验失败自动降级跳过校验（脚本内下载 runner 包同样自带降级）
   return os === 'linux'
-    ? `curl -fsSL '${url}' | sudo bash`
-    : `powershell -ExecutionPolicy Bypass -Command "irm '${url}' -OutFile install-runner.ps1; .\\install-runner.ps1"`
+    ? `(curl -fsSL '${url}' || curl -fsSLk '${url}') | sudo bash`
+    : `powershell -ExecutionPolicy Bypass -Command "try { irm '${url}' -OutFile install-runner.ps1 } catch { [Net.ServicePointManager]::ServerCertificateValidationCallback = {\`$true}; irm '${url}' -OutFile install-runner.ps1 }; .\\install-runner.ps1"`
 }
