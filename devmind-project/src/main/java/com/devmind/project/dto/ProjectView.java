@@ -29,6 +29,10 @@ public record ProjectView(
         String ownerId,
         /** CAP-41：项目种类（NORMAL/WORKLOG） */
         String kind,
+        /** CAP-73：需求开发中验证总开关 */
+        boolean verifyInDevEnabled,
+        /** CAP-73：验证日配额（0=不限） */
+        int verifyDailyQuota,
         Instant createdAt,
         Instant updatedAt) {
 }

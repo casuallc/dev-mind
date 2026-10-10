@@ -26,5 +26,9 @@ public record ProjectRequest(
         /** CAP-72：构建成功后自动部署 TEST 环境（不传=创建默认关/更新保持） */
         Boolean autoDeployTestOnBuild,
         /** CAP-21：默认执行节点 id（不传=保持不变，空串=清除回本机） */
-        String agentNodeId) {
+        String agentNodeId,
+        /** CAP-73：需求开发中验证总开关（不传=创建默认关/更新保持） */
+        Boolean verifyInDevEnabled,
+        /** CAP-73：验证日配额（不传=保持；0=不限；null 落库=默认 20） */
+        Integer verifyDailyQuota) {
 }

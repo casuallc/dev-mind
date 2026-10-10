@@ -231,6 +231,9 @@ public class ProjectService {
         e.setAutoRegressionOnDeploy(req.autoRegressionOnDeploy() != null && req.autoRegressionOnDeploy());
         e.setAutoBuildOnWiDone(req.autoBuildOnWiDone() != null && req.autoBuildOnWiDone());
         e.setAutoDeployTestOnBuild(req.autoDeployTestOnBuild() != null && req.autoDeployTestOnBuild());
+        // CAP-73：创建默认关；配额 null 落库 = 默认 20（getter 兜底）
+        e.setVerifyInDevEnabled(req.verifyInDevEnabled() != null && req.verifyInDevEnabled());
+        e.setVerifyDailyQuota(req.verifyDailyQuota());
         e.setAgentNodeId(blankToNull(req.agentNodeId()));
         e.setOwnerId(identityService.currentActor());
                 e.setCreatedBy(identityService.currentActor());
@@ -328,6 +331,14 @@ public class ProjectService {
         if (req.autoRegressionOnDeploy() != null) e.setAutoRegressionOnDeploy(req.autoRegressionOnDeploy());
         if (req.autoBuildOnWiDone() != null) e.setAutoBuildOnWiDone(req.autoBuildOnWiDone());
         if (req.autoDeployTestOnBuild() != null) e.setAutoDeployTestOnBuild(req.autoDeployTestOnBuild());
+        // CAP-73：不传 = 保持
+        if (req.verifyInDevEnabled() != null) e.setVerifyInDevEnabled(req.verifyInDevEnabled());
+        if (req.verifyDailyQuota() != null) {
+            if (req.verifyDailyQuota() < 0) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "verifyDailyQuota 不能为负（0 = 不限）");
+            }
+            e.setVerifyDailyQuota(req.verifyDailyQuota());
+        }
         // CAP-21：不传 = 保持，空串 = 清除默认节点回本机（同 apiDocSource 约定）
         if (req.agentNodeId() != null) e.setAgentNodeId(blankToNull(req.agentNodeId()));
         e.setUpdatedAt(Instant.now());
@@ -920,7 +931,8 @@ public class ProjectService {
                 e.getApiDocSource(),
                 e.getAutoRegressionOnDeploy(), e.isAutoBuildOnWiDone(), e.isAutoDeployTestOnBuild(),
                 e.getAgentNodeId(), e.getContextSummary(), e.getSummaryGeneratedAt(),
-                e.getOwnerId(), e.getKind(), e.getCreatedAt(), e.getUpdatedAt());
+                e.getOwnerId(), e.getKind(), e.isVerifyInDevEnabled(), e.getVerifyDailyQuota(),
+                e.getCreatedAt(), e.getUpdatedAt());
     }
 
     private RepoView toRepoView(ProjectRepoEntity r) {

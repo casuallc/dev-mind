@@ -41,5 +41,7 @@ public record RequirementView(
         /** CAP-38 FR-01：需求分析阶段已跳过 */
         Boolean analysisSkipped,
         /** CAP-38 FR-01：方案设计阶段已跳过 */
-        Boolean designSkipped) {
+        Boolean designSkipped,
+        /** CAP-73：验证环境绑定（environments.id，可空） */
+        Long verifyEnvironmentId) {
 }

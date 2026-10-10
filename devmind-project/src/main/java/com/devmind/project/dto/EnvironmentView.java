@@ -13,6 +13,10 @@ public record EnvironmentView(
         List<String> nodeIds,
         Map<String, String> variables,
         List<String> secrets,
+        /** CAP-73：补丁验证配置（可空三件套） */
+        String patchDir,
+        String patchPreHook,
+        String patchPostHook,
         Instant createdAt,
         Instant updatedAt) {
 }

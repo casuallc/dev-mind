@@ -10,9 +10,11 @@ import com.devmind.project.dto.RequirementRequest;
 import com.devmind.project.dto.RequirementView;
 import com.devmind.project.event.RequirementDeletedEvent;
 import com.devmind.project.event.RequirementTerminalEvent;
+import com.devmind.project.model.EnvironmentEntity;
 import com.devmind.project.model.RequirementEntity;
 import com.devmind.project.model.WorkItemEntity;
 import com.devmind.project.repo.DesignRepository;
+import com.devmind.project.repo.EnvironmentRepository;
 import com.devmind.project.repo.ProjectRepository;
 import com.devmind.project.repo.RelationRepository;
 import com.devmind.project.repo.RequirementRepository;
@@ -75,6 +77,8 @@ public class RequirementService {
     private final ObjectProvider<RequirementAgentTimeLookup> agentTimeLookup;
     /** CAP-51 FR-06：需求删除事件（session 模块据此释放需求工作树） */
     private final DomainEventPublisher eventPublisher;
+    /** CAP-73：验证环境绑定校验（同库 repo 直读，避免 service 间依赖） */
+    private final EnvironmentRepository environmentRepo;
 
     public RequirementService(ProjectRepository projectRepo,
                               RequirementRepository requirementRepo,
@@ -84,7 +88,8 @@ public class RequirementService {
                               IdentityService identityService,
                               ObjectProvider<RequirementExternalRefLookup> externalRefLookup,
                               ObjectProvider<RequirementAgentTimeLookup> agentTimeLookup,
-                              DomainEventPublisher eventPublisher) {
+                              DomainEventPublisher eventPublisher,
+                              EnvironmentRepository environmentRepo) {
         this.identityService = identityService;
         this.projectRepo = projectRepo;
         this.requirementRepo = requirementRepo;
@@ -94,6 +99,7 @@ public class RequirementService {
         this.externalRefLookup = externalRefLookup;
         this.agentTimeLookup = agentTimeLookup;
         this.eventPublisher = eventPublisher;
+        this.environmentRepo = environmentRepo;
     }
 
     /**
@@ -149,6 +155,9 @@ public class RequirementService {
         e.setSource(RequirementEntity.SOURCE_LOCAL);
         applyExtensionFields(e, req.priority(), req.assignee(), req.reporter(),
                 req.labels(), req.fixVersions(), parseDueDate(req.dueDate()));
+        if (req.verifyEnvironmentId() != null && req.verifyEnvironmentId() > 0) {
+            applyVerifyEnvironment(e, req.verifyEnvironmentId());
+        }
         requirementRepo.save(e);
         log.info("需求已创建: projectId={} code={} title={}", projectId, code(e.getSeq()), e.getTitle());
         return toView(e, null, null);
@@ -177,6 +186,14 @@ public class RequirementService {
         }
         if (req.ownerId() != null) e.setOwnerId(MainlineSupport.blankToNull(req.ownerId()));
         if (req.docId() != null) e.setDocId(req.docId());
+        // CAP-73：验证环境绑定（null=不变，0=解除绑定；本地字段对全部来源放行）
+        if (req.verifyEnvironmentId() != null) {
+            if (req.verifyEnvironmentId() <= 0) {
+                e.setVerifyEnvironmentId(null);
+            } else {
+                applyVerifyEnvironment(e, req.verifyEnvironmentId());
+            }
+        }
         e.setUpdatedAt(Instant.now());
         return toView(requirementRepo.save(e),
                 refsFor(List.of(e.getId())).get(e.getId()),
@@ -495,6 +512,19 @@ public class RequirementService {
         return "REQ-" + seq;
     }
 
+    /** CAP-73：绑定验证环境——必须同项目且非 PROD（红线：PROD 永远不可作为验证目标） */
+    private void applyVerifyEnvironment(RequirementEntity e, Long envId) {
+        EnvironmentEntity env = environmentRepo.findById(envId)
+                .orElseThrow(() -> new DevMindException(ErrorCode.BAD_REQUEST, "验证环境不存在: " + envId));
+        if (!e.getProjectId().equals(env.getProjectId())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "验证环境 " + envId + " 不属于本项目");
+        }
+        if (EnvironmentEntity.PROD.equals(env.getName())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "PROD 环境不可作为验证绑定目标");
+        }
+        e.setVerifyEnvironmentId(envId);
+    }
+
     private RequirementView toView(RequirementEntity e, RequirementExternalRefLookup.ExternalRef ref,
                                    Long agentSeconds) {
         return new RequirementView(e.getId(), e.getProjectId(), e.getSeq(), code(e.getSeq()), e.getTitle(),
@@ -505,6 +535,6 @@ public class RequirementService {
                 ref == null ? null : ref.remoteStatus(),
                 agentSeconds, e.getEstimatedSeconds(), e.getSpentSeconds(),
                 e.getCreatedBy(), e.getCreatedAt(), e.getUpdatedAt(),
-                e.getAnalysisSkipped(), e.getDesignSkipped());
+                e.getAnalysisSkipped(), e.getDesignSkipped(), e.getVerifyEnvironmentId());
     }
 }

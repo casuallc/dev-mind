@@ -97,6 +97,10 @@ public class EnvironmentService {
         e.setNodeIdsJson(json(normalizeNodeIds(req.nodeIds())));
         e.setVariablesJson(json(req.variables() == null ? Map.of() : req.variables()));
         e.setSecretsJson(json(req.secrets() == null ? List.of() : req.secrets()));
+        // CAP-73：补丁验证三件套（可空；patchDir 空 = 不可用于验证）
+        e.setPatchDir(blankToNull(req.patchDir()));
+        e.setPatchPreHook(blankToNull(req.patchPreHook()));
+        e.setPatchPostHook(blankToNull(req.patchPostHook()));
     }
 
     /** 节点 id 轻量校验（非空、去空白、去重）；节点存在性/在线状态由执行期路由校验。 */
@@ -162,6 +166,7 @@ public class EnvironmentService {
         List<String> secrets = parse(e.getSecretsJson(), List.class, List.of());
         return new EnvironmentView(e.getId(), e.getProjectId(), e.getName(), e.getDescription(),
                 nodeIdsOf(e), vars, secrets,
+                e.getPatchDir(), e.getPatchPreHook(), e.getPatchPostHook(),
                 e.getCreatedAt(), e.getUpdatedAt());
     }
 

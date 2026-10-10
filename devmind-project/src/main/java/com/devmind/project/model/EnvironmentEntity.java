@@ -61,6 +61,18 @@ public class EnvironmentEntity {
     @Column(name = "secrets_json", length = 16_777_216)
     private String secretsJson;
 
+    /** CAP-73：补丁验证部署目录（补丁覆盖目标；空 = 该环境不可用于验证） */
+    @Column(name = "patch_dir", length = 512)
+    private String patchDir;
+
+    /** CAP-73：覆盖文件前命令（停服/备份；空 = 直接覆盖） */
+    @Column(name = "patch_pre_hook", length = 1024)
+    private String patchPreHook;
+
+    /** CAP-73：覆盖文件后命令（启服/热加载；空 = 不动进程） */
+    @Column(name = "patch_post_hook", length = 1024)
+    private String patchPostHook;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -81,6 +93,12 @@ public class EnvironmentEntity {
     public void setVariablesJson(String variablesJson) { this.variablesJson = variablesJson; }
     public String getSecretsJson() { return secretsJson; }
     public void setSecretsJson(String secretsJson) { this.secretsJson = secretsJson; }
+    public String getPatchDir() { return patchDir; }
+    public void setPatchDir(String patchDir) { this.patchDir = patchDir; }
+    public String getPatchPreHook() { return patchPreHook; }
+    public void setPatchPreHook(String patchPreHook) { this.patchPreHook = patchPreHook; }
+    public String getPatchPostHook() { return patchPostHook; }
+    public void setPatchPostHook(String patchPostHook) { this.patchPostHook = patchPostHook; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

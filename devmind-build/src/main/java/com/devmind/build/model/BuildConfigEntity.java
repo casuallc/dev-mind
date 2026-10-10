@@ -35,6 +35,10 @@ public class BuildConfigEntity {
     @Column(name = "concurrency_limit")
     private int concurrencyLimit = 1;
 
+    /** CAP-73：部署物树目录（相对工作区根，与验证环境 patch_dir 同构；空 = 不可用于验证） */
+    @Column(name = "output_dir", length = 256)
+    private String outputDir;
+
     @Column(name = "updated_at")
     private Instant updatedAt;
 
@@ -48,6 +52,8 @@ public class BuildConfigEntity {
     public void setAgentNodeId(String agentNodeId) { this.agentNodeId = agentNodeId; }
     public int getConcurrencyLimit() { return concurrencyLimit; }
     public void setConcurrencyLimit(int concurrencyLimit) { this.concurrencyLimit = concurrencyLimit; }
+    public String getOutputDir() { return outputDir; }
+    public void setOutputDir(String outputDir) { this.outputDir = outputDir; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
 }

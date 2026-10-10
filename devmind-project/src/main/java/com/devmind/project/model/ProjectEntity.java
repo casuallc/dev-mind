@@ -73,6 +73,14 @@ public class ProjectEntity {
     @Column(name = "auto_deploy_test_on_build")
     private Boolean autoDeployTestOnBuild;
 
+    /** CAP-73：需求开发中验证总开关（null/false = 关，默认关） */
+    @Column(name = "verify_in_dev_enabled")
+    private Boolean verifyInDevEnabled;
+
+    /** CAP-73：验证日配额（受理即计；null = 默认 20，0 = 不限） */
+    @Column(name = "verify_daily_quota")
+    private Integer verifyDailyQuota;
+
     /** CAP-21：默认执行节点（agent_nodes.id；null = 本机），创建会话未显式指定节点时继承 */
     @Column(name = "agent_node_id", length = 64)
     private String agentNodeId;
@@ -129,6 +137,12 @@ public class ProjectEntity {
     public void setAutoBuildOnWiDone(Boolean autoBuildOnWiDone) { this.autoBuildOnWiDone = autoBuildOnWiDone; }
     public boolean isAutoDeployTestOnBuild() { return Boolean.TRUE.equals(autoDeployTestOnBuild); }
     public void setAutoDeployTestOnBuild(Boolean autoDeployTestOnBuild) { this.autoDeployTestOnBuild = autoDeployTestOnBuild; }
+    /** CAP-73：Boolean 列不加 @ColumnDefault（同 CAP-72 红线），存量行 null 兜底关 */
+    public boolean isVerifyInDevEnabled() { return Boolean.TRUE.equals(verifyInDevEnabled); }
+    public void setVerifyInDevEnabled(Boolean verifyInDevEnabled) { this.verifyInDevEnabled = verifyInDevEnabled; }
+    /** CAP-73：null = 默认 20；0 = 不限 */
+    public int getVerifyDailyQuota() { return verifyDailyQuota == null ? 20 : verifyDailyQuota; }
+    public void setVerifyDailyQuota(Integer verifyDailyQuota) { this.verifyDailyQuota = verifyDailyQuota; }
     public String getAgentNodeId() { return agentNodeId; }
     public void setAgentNodeId(String agentNodeId) { this.agentNodeId = agentNodeId; }
     public String getContextSummary() { return contextSummary; }

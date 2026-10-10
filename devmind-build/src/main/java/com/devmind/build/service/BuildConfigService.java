@@ -53,11 +53,24 @@ public class BuildConfigService {
         e.setExecutor(executor);
         e.setAgentNodeId(req.agentNodeId() == null || req.agentNodeId().isBlank() ? null : req.agentNodeId().strip());
         e.setConcurrencyLimit(limit);
+        // CAP-73：outputDir 可空（空 = 不可用于验证），相对工作区根，禁止绝对路径与 ..
+        String outputDir = req.outputDir() == null || req.outputDir().isBlank() ? null : req.outputDir().strip();
+        if (outputDir != null && (outputDir.startsWith("/") || outputDir.matches("^[A-Za-z]:.*")
+                || outputDir.contains(".."))) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "outputDir 必须是相对工作区根的目录（禁止绝对路径与 ..）");
+        }
+        e.setOutputDir(outputDir);
         e.setUpdatedAt(Instant.now());
         return toView(repo.save(e));
     }
 
+    /** CAP-73：读取实体（编排用）；无记录返回 null */
+    public BuildConfigEntity entityOrNull(String projectId) {
+        return repo.findByProjectId(projectId).orElse(null);
+    }
+
     private BuildConfigView toView(BuildConfigEntity e) {
-        return new BuildConfigView(e.getProjectId(), e.getExecutor(), e.getAgentNodeId(), e.getConcurrencyLimit());
+        return new BuildConfigView(e.getProjectId(), e.getExecutor(), e.getAgentNodeId(), e.getConcurrencyLimit(),
+                e.getOutputDir());
     }
 }

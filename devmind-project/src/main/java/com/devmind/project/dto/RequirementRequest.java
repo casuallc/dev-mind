@@ -23,5 +23,7 @@ public record RequirementRequest(
         List<String> labels,
         List<String> fixVersions,
         /** 截止日期 yyyy-MM-dd，非法值 BAD_REQUEST */
-        String dueDate) {
+        String dueDate,
+        /** CAP-73：验证环境绑定（environments.id；null=不绑定/更新时不变，0=解除绑定；必须同项目且非 PROD） */
+        Long verifyEnvironmentId) {
 }

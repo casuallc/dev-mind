@@ -132,6 +132,10 @@ public class RequirementEntity {
     @Column(name = "workspace_state", length = 16)
     private String workspaceState;
 
+    /** CAP-73：验证环境绑定（environments.id，可空 = 未绑定不可用验证；不设外键约束，环境删除后悬空引用按未绑定处理） */
+    @Column(name = "verify_environment_id")
+    private Long verifyEnvironmentId;
+
     /** CAP-38 FR-01：需求分析阶段已跳过（流程不可逆引导的持久化标记）。
      *  不带 @ColumnDefault：MySQL bit 列 default 'false' 建列失败；新行由 Hibernate 显式写 false，
      *  存量行 NULL 由 getter 兜底 false。 */
@@ -194,6 +198,8 @@ public class RequirementEntity {
     public void setWorkspaceOwner(String workspaceOwner) { this.workspaceOwner = workspaceOwner; }
     public String getWorkspaceState() { return workspaceState; }
     public void setWorkspaceState(String workspaceState) { this.workspaceState = workspaceState; }
+    public Long getVerifyEnvironmentId() { return verifyEnvironmentId; }
+    public void setVerifyEnvironmentId(Long verifyEnvironmentId) { this.verifyEnvironmentId = verifyEnvironmentId; }
     public Boolean getAnalysisSkipped() { return analysisSkipped != null && analysisSkipped; }
     public void setAnalysisSkipped(Boolean analysisSkipped) { this.analysisSkipped = analysisSkipped; }
     public Boolean getDesignSkipped() { return designSkipped != null && designSkipped; }
