@@ -7,7 +7,6 @@ import {
   Input,
   InputNumber,
   Modal,
-  Popconfirm,
   Select,
   Space,
   Switch,
@@ -49,7 +48,8 @@ export default function EgressRulesPage() {
     setLoading(true)
     try {
       const [rules, nodeList] = await Promise.all([listEgressRules(), listAgentNodes()])
-      setRows(rules)
+      // 按更新时间倒序：最近变更的规则排最前
+      setRows([...rules].sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')))
       setNodes(nodeList)
     } catch (e) {
       message.error(e instanceof Error ? e.message : '加载失败')
@@ -130,6 +130,18 @@ export default function EgressRulesPage() {
     }
   }
 
+  // 删除确认与其他页面一致走中间弹框（项目未挂 antd <App>，用静态 Modal.confirm）
+  const confirmRemove = (r: EgressRule) => {
+    Modal.confirm({
+      title: '删除出口规则',
+      content: `确认删除规则「${r.hostPattern}」？删除后命中该主机的出访将回落直连。`,
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: () => remove(r),
+    })
+  }
+
   const tunnelBadge = (r: EgressRule) => {
     if (r.tunnelOnline == null) {
       return <Tag>无隧道</Tag>
@@ -167,9 +179,7 @@ export default function EgressRulesPage() {
       render: (_: unknown, r: EgressRule) => (
         <Space>
           <Button onClick={() => openEdit(r)}>编辑</Button>
-          <Popconfirm title={`删除规则「${r.hostPattern}」？`} onConfirm={() => void remove(r)}>
-            <Button danger>删除</Button>
-          </Popconfirm>
+          <Button danger onClick={() => confirmRemove(r)}>删除</Button>
         </Space>
       ),
     },
