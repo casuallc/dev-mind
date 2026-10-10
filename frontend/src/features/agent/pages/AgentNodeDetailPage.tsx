@@ -29,6 +29,7 @@ import {
 import {
   deleteAgentNode,
   disableAgentNode,
+  downloadInstallScript,
   enableAgentNode,
   getRunnerPackage,
   listAgentNodes,
@@ -40,7 +41,7 @@ import {
 } from '../api'
 import type { AgentNode, NodeActiveSession, RunnerPackage } from '../types'
 import ActiveSessionsCard, { activeSessionColumns } from '../components/ActiveSessionsCard'
-import { downloadInstallScripts } from '../utils/installScript'
+import { installOneLiner } from '../utils/installScript'
 import { fmtTime, fmtBytes } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
@@ -460,27 +461,35 @@ export default function AgentNodeDetailPage() {
                 <Card size="small" title="一键安装脚本">
                   <Space direction="vertical" style={{ width: '100%' }} size={8}>
                     <Typography.Text type="secondary">
-                      参数化脚本不含 token（token 仅创建节点时可见），下载后在目标机执行时传入；token 已丢失请重建节点。
-                      脚本默认注册系统服务（Windows 服务 / systemd），无权限自动降级后台运行，可加
-                      <Typography.Text code>-NoService</Typography.Text> / <Typography.Text code>--no-service</Typography.Text>
+                      在目标机执行一条命令即完成安装（把 dmag_xxx 换成节点 token；token 仅创建节点时可见，
+                      已丢失请重建节点）。脚本默认注册系统服务（Windows 服务 / systemd），无权限自动降级后台运行，
+                      可加 <Typography.Text code>-NoService</Typography.Text> / <Typography.Text code>--no-service</Typography.Text>
                       强制后台模式。
                     </Typography.Text>
+                    <Typography.Paragraph
+                      code
+                      copyable
+                      type="secondary"
+                      style={{ marginBottom: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
+                    >
+                      {installOneLiner(node.id, 'windows', null)}
+                    </Typography.Paragraph>
+                    <Typography.Paragraph
+                      code
+                      copyable
+                      type="secondary"
+                      style={{ marginBottom: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
+                    >
+                      {installOneLiner(node.id, 'linux', null)}
+                    </Typography.Paragraph>
                     <Space>
-                      <Button icon={<WindowsOutlined />} onClick={downloadInstallScripts(null).windows}>
-                        Windows (.ps1)
+                      <Button icon={<WindowsOutlined />} onClick={() => downloadInstallScript(node.id, 'windows')}>
+                        下载参数化 .ps1
                       </Button>
-                      <Button icon={<CodeOutlined />} onClick={downloadInstallScripts(null).linux}>
-                        Linux (.sh)
+                      <Button icon={<CodeOutlined />} onClick={() => downloadInstallScript(node.id, 'linux')}>
+                        下载参数化 .sh
                       </Button>
                     </Space>
-                    <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                      Windows（管理员 PowerShell）：
-                      <Typography.Text code>powershell -ExecutionPolicy Bypass -File install-runner.ps1 -Token dmag_xxx</Typography.Text>
-                    </Typography.Paragraph>
-                    <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                      Linux（注册服务需 root）：
-                      <Typography.Text code>sudo bash install-runner.sh dmag_xxx</Typography.Text>
-                    </Typography.Paragraph>
                   </Space>
                 </Card>
               </Space>

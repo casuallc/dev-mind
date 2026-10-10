@@ -122,6 +122,20 @@ export async function downloadRunnerPackage(): Promise<void> {
   URL.revokeObjectURL(a.href)
 }
 
+/** 参数化安装脚本下载（登录态；token 运行时传入）。内嵌 token 版直接用 installScriptUrl 直链，无需走此函数。 */
+export async function downloadInstallScript(id: number, os: 'windows' | 'linux'): Promise<void> {
+  const res = await fetch(`/api/agent-nodes/${id}/install-script?os=${os}`, {
+    headers: { Authorization: `Bearer ${getAccessToken() ?? ''}` },
+  })
+  if (!res.ok) throw new Error(`下载失败: ${res.status}`)
+  const blob = await res.blob()
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = os === 'windows' ? 'install-runner.ps1' : 'install-runner.sh'
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
 // ---------------- CAP-65 节点文件浏览（全端点仅 ADMIN；节点离线/协议 <v18/未配白名单 后端 409） ----------------
 
 const fileQs = (root: string, path: string) =>
