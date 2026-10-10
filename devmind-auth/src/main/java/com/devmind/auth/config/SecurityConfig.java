@@ -70,6 +70,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/agent/files-transfer/**").permitAll()
                         // CAP-37 FR-01：会话产出上传 permitAll 放行，节点 token 由控制器内判定
                         .requestMatchers(HttpMethod.POST, "/api/agent/output/**").permitAll()
+                        // CAP-73：验证产物包上下行 permitAll 放行，节点 token + run↔节点绑定由控制器/SPI 判定
+                        .requestMatchers(HttpMethod.POST, "/api/agent/verify/runs/*/bundle").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/agent/verify/runs/*/bundle").permitAll()
+                        // CAP-73：agent 触发通道 permitAll 放行，verify 作用域 token 由服务内验签（绑会话+需求）
+                        .requestMatchers(HttpMethod.POST, "/api/verify/trigger").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/agent-nodes", "/api/agent-nodes/**").hasRole("ADMIN")
                         // CAP-34 FR-07：编辑节点标签
                         .requestMatchers(HttpMethod.PUT, "/api/agent-nodes/**").hasRole("ADMIN")

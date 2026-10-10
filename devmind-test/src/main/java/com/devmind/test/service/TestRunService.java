@@ -153,6 +153,15 @@ public class TestRunService {
                 req.agentNodeId(), req.environmentId(), req.baseUrl(), identityService.currentActor());
     }
 
+    /**
+     * CAP-73：编排线程以显式触发人身份创建（异步线程无 SecurityContext，
+     * {@link IdentityService#currentActor()} 会错误回落 local）。
+     */
+    public TestRunView createAs(CreateTestRunRequest req, String triggeredBy) {
+        return createInternal(req.projectId(), req.workItemId(), req.suiteIds(), req.deploymentId(),
+                req.agentNodeId(), req.environmentId(), req.baseUrl(), triggeredBy);
+    }
+
     private TestRunView createInternal(String projectId, String workItemId, List<Long> suiteIds,
                                        Long deploymentId, String agentNodeId, Long environmentId,
                                        String baseUrl, String triggeredBy) {

@@ -57,6 +57,16 @@ public class GitRemoteOps {
     }
 
     /**
+     * CAP-73：ls-remote 指定 ref（远端需求分支 HEAD 探测）。输出形如
+     * {@code <sha>\trefs/heads/<branch>}；ref 不存在 = ok(true) 且 output 为空
+     * （git ls-remote 对缺失 ref 退出码仍为 0，调用方按 output 判空）。
+     */
+    public GitResult lsRemote(String remoteUrl, String token, String ref) {
+        String url = withToken(remoteUrl, token);
+        return exec(".", token, remoteUrl, List.of("ls-remote", url, ref));
+    }
+
+    /**
      * CAP-26：fetch 指定 ref 到 FETCH_HEAD。token 非空走 withToken 显式 URL 注入
      * （不依赖 origin 凭据——CLONE 库的 origin 已被清成干净 URL）；token 空 = 匿名。
      * ref 空 = 不指定 refspec（fetch 全部）。

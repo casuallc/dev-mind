@@ -49,6 +49,19 @@
             <groupId>com.devmind</groupId>
             <artifactId>devmind-deploy</artifactId>
         </dependency>
+        <!-- CAP-73：验证链编排消费冒烟套件/TestRunService、节点路由与 GitRemoteOps（ls-remote） -->
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-test</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-execution</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-integration</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
