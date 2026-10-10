@@ -15,6 +15,10 @@ export interface Project {
   apiDocSource?: string
   /** CAP-10 FR-05：部署成功后自动对该项目全部套件做回归 */
   autoRegressionOnDeploy?: boolean
+  /** CAP-72：WI 翻 DONE 后自动触发构建 */
+  autoBuildOnWiDone?: boolean
+  /** CAP-72：构建成功后自动部署 TEST 环境 */
+  autoDeployTestOnBuild?: boolean
   /** CAP-21：默认执行节点 id（空 = 本机）；新建会话未显式选节点时继承 */
   agentNodeId?: string
   contextSummary?: string
@@ -42,6 +46,10 @@ export interface ProjectInput {
   status?: string
   apiDocSource?: string
   autoRegressionOnDeploy?: boolean
+  /** CAP-72：WI 翻 DONE 后自动触发构建（不传 = 创建默认关/更新保持） */
+  autoBuildOnWiDone?: boolean
+  /** CAP-72：构建成功后自动部署 TEST 环境（不传 = 创建默认关/更新保持） */
+  autoDeployTestOnBuild?: boolean
   /** CAP-21：默认执行节点 id；空串 = 清除回本机（不传 = 保持不变） */
   agentNodeId?: string
 }

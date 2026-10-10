@@ -60,6 +60,8 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
             status: 'ACTIVE',
             apiDocSource: '',
             autoRegressionOnDeploy: false,
+            autoBuildOnWiDone: false,
+            autoDeployTestOnBuild: false,
           },
     )
   }, [open, project, form])
@@ -191,6 +193,22 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
         </Form.Item>
         <Form.Item label="API 文档源" name="apiDocSource" extra="OpenAPI 文件路径，供测试套件生成（可选）">
           <Input placeholder="如 docs/openapi.yaml" />
+        </Form.Item>
+        <Form.Item
+          label="WI 完成后自动构建"
+          name="autoBuildOnWiDone"
+          valuePropName="checked"
+          extra="CAP-72：工作单元翻 DONE 后自动触发构建（需已配构建步骤）；生产部署与发版永远人工"
+        >
+          <Switch />
+        </Form.Item>
+        <Form.Item
+          label="构建成功后自动部署测试环境"
+          name="autoDeployTestOnBuild"
+          valuePropName="checked"
+          extra="CAP-72：构建成功且有产物时自动部署到 TEST 环境（需已配 TEST 环境与部署步骤）"
+        >
+          <Switch />
         </Form.Item>
         <Form.Item
           label="部署成功后自动回归"
