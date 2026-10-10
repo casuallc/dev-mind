@@ -26,6 +26,8 @@ Windows 办公机普遍在 NAT/防火墙后、入站不可达，因此采用**�
   runner 配置 `serverUrl + token`，启动时连 `WS /ws/agent` 注册：
   上报 name / os / labels / capabilities（可用 agent 种类，如 claude）/ runner 版本。
   非法 token 拒绝接入并落审计。
+  （连接流水已并入 [CAP-71](CAP-71-agent-audit-log.md) 节点审计日志：升级为全量交互
+  分类留痕 + 分页检索 + 可配保留期。）
 - **FR-02 心跳与在线状态**：runner 周期心跳（默认 15s）；超时未心跳标记 OFFLINE，
   该节点上的 RUNNING 会话标记失联（不直接判 FAILED，等节点重连上报真实结局）；
   断线自动重连（指数退避），重连后服务端按会话清单对账。

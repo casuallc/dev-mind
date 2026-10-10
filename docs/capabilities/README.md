@@ -83,6 +83,7 @@
 | [CAP-67](CAP-67-usage-statistics.md) | 用量统计 | 组装层 | 会话+问答 token/成本只读聚合：零新表直接 SUM 现有累计六列，总体汇总 + 需求/项目/模型/用户四维分组 + 每日趋势（Java 分桶避方言）+ 成本 Top 明细，/usage 一级导航页；个人数据 owner 强制（非 admin 强制本人、dim=user 仅 admin），时段按创建时间归属为已知近似 |
 | [CAP-68](CAP-68-session-attachments.md) | 会话附件注入与附件生命周期 | 底座 | 附件加自由标签/expiresAt 到期硬删（定时任务不做引用检查）/批量删除；/sessions 链路补齐图片（images 帧直读）与文件（input 帧 files 内联 → runner 落盘 .devmind/incoming/ 附路径 agent 自读）；创建会话即带附件随 ContextPackage inputs 物化（CAP-40 先例） |
 | [CAP-69](CAP-69-script-test-suite.md) | 脚本测试套件 | 执行器 | 独立于项目的 kind=script 套件：自带 git 源+命令+env（脱敏）+超时，exec 帧下发 runner 整包跑（工作区按 workspaceKey 复用、`.state` 跨运行保留），JUnit XML 走 stdout marker（CAP-56 先例 gzip+base64 单行）回收解析进 test_case_results，WS 流/报告/失败转缺陷零改动复用；Playwright/pytest 等整包脚本统一落点 |
+| [CAP-71](CAP-71-agent-audit-log.md) | Agent 节点审计日志 | 底座 | 连接日志升级为节点域全量审计（agent_audit_logs 九分类：连接/隧道/指令/代理逐条含字节耗时/上下文包/文件中转/规则/包/节点运维），旁路落库不阻塞主流程，服务端真分页+分类/节点/结果/关键词过滤，保留期 devmind.agent.audit-retention-days 默认 180 天可配；ServerTunnelStream 补统一终结点顺带修正常收尾不摘表缺口 |
 
 ## 依赖关系
 
@@ -156,6 +157,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-68 会话附件依赖 CAP-32（附件底座 + `AttachmentContentResolver` SPI + images 帧先例）、CAP-21/34（远程 input 帧通道）、CAP-40（ContextPackage inputs 物化先例）：附件模块自身加标签/过期/批量删（零新依赖）；会话侧图片复用已全通的 images 帧，文件借 input 帧新增 `files` 字段内联 base64 由 runner 落盘工作区（协议版本 +1，旧 runner 丢文件不丢文本）；创建即带附件走 inputs 条目物化，限额对齐 CAP-40。
 - CAP-69 脚本测试套件依赖 CAP-10（套件/运行/报告/缺陷模型与 WS 流）、CAP-36（exec 帧 + repo 块 + 节点路由）、CAP-56（LabMarkers stdout marker 回传先例）：test_suites/test_runs 放开 project_id 可空承载独立套件，节点整包跑脚本后经单行 `DEVMIND_JUNIT` marker 回收 JUnit XML 解析进用例结果；零新协议帧、零 runner 改动。
 - CAP-70 服务端出口反向隧道依赖 CAP-21/34/43/65：「服务端在外网、代码在内网」部署形态下服务端直连类功能（GitRemoteOps 克隆/fetch/diff/push、Integration REST、书签探测）的通用解法——runner 出向建专用隧道 WS（独立于控制通道、流多路复用+窗口流控，协议 v21），服务端本机落成 127.0.0.1 SOCKS5 端点，平台级 `egress_rules` host glob 规则表（服务端 DB 权威、即白名单，runner 持快照二次校验）逐请求选出口；git 走 `-c http.<url>.proxy=socks5h://`（DNS 在 runner 侧解析）、Java 连接器挂规则驱动 ProxySelector；命中规则但隧道离线快速失败禁静默回落，无规则=功能关闭零行为变化；与 CAP-43（runner→外网）正交可叠加。
+- CAP-71 节点审计日志演进自 CAP-21 FR-01（连接流水），覆盖 CAP-34/36/42/54/57/58/59/65/70 的全部节点交互面：新表 `agent_audit_logs` 九分类旁路落库（同步 repo.save try-catch 降级，不引队列），代理转发在 `ServerTunnelStream` 统一终结点逐条记字节/耗时；查询走 `/api/agent-nodes/audit-logs`（PageView 真分页 + 关键词四列 lower like），保留期 `devmind.agent.audit-retention-days` 默认 180 天；旧 `agent_conn_logs` 变死表可手工 DROP。
 
 ## 组装方式（后续流程层）
 
