@@ -85,6 +85,7 @@
 | [CAP-69](CAP-69-script-test-suite.md) | 脚本测试套件 | 执行器 | 独立于项目的 kind=script 套件：自带 git 源+命令+env（脱敏）+超时，exec 帧下发 runner 整包跑（工作区按 workspaceKey 复用、`.state` 跨运行保留），JUnit XML 走 stdout marker（CAP-56 先例 gzip+base64 单行）回收解析进 test_case_results，WS 流/报告/失败转缺陷零改动复用；Playwright/pytest 等整包脚本统一落点 |
 | [CAP-71](CAP-71-agent-audit-log.md) | Agent 节点审计日志 | 底座 | 连接日志升级为节点域全量审计（agent_audit_logs 九分类：连接/隧道/指令/代理逐条含字节耗时/上下文包/文件中转/规则/包/节点运维），旁路落库不阻塞主流程，服务端真分页+分类/节点/结果/关键词过滤，保留期 devmind.agent.audit-retention-days 默认 180 天可配；ServerTunnelStream 补统一终结点顺带修正常收尾不摘表缺口 |
 | [CAP-72](CAP-72-pipeline-project-switches.md) | 执行链自动化项目级开关 | 底座 | CAP-17 恒开的「WI DONE→自动构建→自动部署 TEST」加项目级开关（projects.auto_build_on_wi_done / auto_deploy_test_on_build，默认关、getter 兜底 false、不加 @ColumnDefault），PipelineOrchestrator 两处入口静默闸门；生产部署/发版仍永远人工；与已有 auto_regression_on_deploy 同处项目表单 |
+| [CAP-73](CAP-73-requirement-indev-verification.md) | 需求开发中验证 | 流程层 | 执行链下沉需求粒度：agent 自主触发（限额/互斥兜底）「推送 feature/req-<id> HEAD → 构建 → 部署到需求绑定验证环境（PROD 禁绑）→ 冒烟」，结果回灌进行中会话事件流供 agent 前置迭代；需求详情页验证 Tab + 人工同链触发，收口弹窗展示最近验证状态（不门禁） |
 
 ## 依赖关系
 
@@ -159,6 +160,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-69 脚本测试套件依赖 CAP-10（套件/运行/报告/缺陷模型与 WS 流）、CAP-36（exec 帧 + repo 块 + 节点路由）、CAP-56（LabMarkers stdout marker 回传先例）：test_suites/test_runs 放开 project_id 可空承载独立套件，节点整包跑脚本后经单行 `DEVMIND_JUNIT` marker 回收 JUnit XML 解析进用例结果；零新协议帧、零 runner 改动。
 - CAP-70 服务端出口反向隧道依赖 CAP-21/34/43/65：「服务端在外网、代码在内网」部署形态下服务端直连类功能（GitRemoteOps 克隆/fetch/diff/push、Integration REST、书签探测）的通用解法——runner 出向建专用隧道 WS（独立于控制通道、流多路复用+窗口流控，协议 v21），服务端本机落成 127.0.0.1 SOCKS5 端点，平台级 `egress_rules` host glob 规则表（服务端 DB 权威、即白名单，runner 持快照二次校验）逐请求选出口；git 走 `-c http.<url>.proxy=socks5h://`（DNS 在 runner 侧解析）、Java 连接器挂规则驱动 ProxySelector；命中规则但隧道离线快速失败禁静默回落，无规则=功能关闭零行为变化；与 CAP-43（runner→外网）正交可叠加。
 - CAP-71 节点审计日志演进自 CAP-21 FR-01（连接流水），覆盖 CAP-34/36/42/54/57/58/59/65/70 的全部节点交互面：新表 `agent_audit_logs` 九分类旁路落库（同步 repo.save try-catch 降级，不引队列），代理转发在 `ServerTunnelStream` 统一终结点逐条记字节/耗时；查询走 `/api/agent-nodes/audit-logs`（PageView 真分页 + 关键词四列 lower like），保留期 `devmind.agent.audit-retention-days` 默认 180 天；旧 `agent_conn_logs` 变死表可手工 DROP。
+- CAP-73 需求开发中验证依赖 CAP-13/51（需求模型与 `feature/req-<id>` 分支口径）、CAP-08/09/10/12（执行器与底座，编排落 devmind-flow 循 CAP-17 先例）、CAP-34/36（ContextPackage 物化 agent 触发助手 + exec 通道）、CAP-26/06/72：把执行链从「需求收口后」前移到「开发过程中」——agent 自主触发需求分支构建部署到需求绑定验证环境（PROD 禁绑守 CAP-17 红线），结果回灌进行中会话形成 AI 迭代闭环；`verify_runs` 新表追溯全链，项目级开关默认关 + 日配额限额。
 
 ## 组装方式（后续流程层）
 
