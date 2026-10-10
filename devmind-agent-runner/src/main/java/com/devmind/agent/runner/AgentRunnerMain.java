@@ -102,6 +102,8 @@ public class AgentRunnerMain {
         log.info("claude 配置目录: {}", claudeConfigDir);
         // CAP-36：exec 帧 handler（构建/部署/测试/发版下发执行；execAllowlist 空 = 全部拒绝）
         ExecHandler execHandler = new ExecHandler(config, workspace, frame -> connRef[0].send(frame));
+        // CAP-73：verify_* 帧 handler（需求验证链 PUSHING/BUILDING/PATCHING 三段 runner 侧执行）
+        VerifyHandler verifyHandler = new VerifyHandler(config, workspace, frame -> connRef[0].send(frame));
         // CAP-57：proc/pkg 帧 handler（分类服务实例进程管控 + 安装包分发）。
         // 受管进程刻意【不】纳入 shutdown killAll——它们的设计目标是比 runner 活得久
         // （runner 重启/升级不该打断在服务的边车），重启后由 ProcRegistry 按 proc.json 对账回来
@@ -150,8 +152,8 @@ public class AgentRunnerMain {
 
         ServerConnection conn = new ServerConnection(config, mapper,
                 frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, workspace,
-                        execHandler, procHandler, pkgHandler, watcher, queryHandler, terminalHandler,
-                        fileHandler, connRef[0]),
+                        execHandler, verifyHandler, procHandler, pkgHandler, watcher, queryHandler,
+                        terminalHandler, fileHandler, connRef[0]),
                 () -> connRef[0].send(helloFrame(sessions, version, workspaceBytes.get(),
                         config.labels(), toolchain.get())));
         connRef[0] = conn;
@@ -249,7 +251,8 @@ public class AgentRunnerMain {
     private static void handleFrame(JsonNode frame, RunnerConfig config, Path configFile,
                                     CliProcessLauncher protocol, SessionExecutor executor,
                                     RunnerSessionRegistry sessions, RunnerWorkspace workspace,
-                                    ExecHandler execHandler, ProcHandler procHandler, PkgHandler pkgHandler,
+                                    ExecHandler execHandler, VerifyHandler verifyHandler,
+                                    ProcHandler procHandler, PkgHandler pkgHandler,
                                     WorkspaceWatcher watcher,
                                     WorkspaceQueryHandler queryHandler, TerminalHandler terminalHandler,
                                     FileHandler fileHandler,
@@ -263,6 +266,9 @@ public class AgentRunnerMain {
         switch (type) {
             case "launch" -> handleLaunch(frame, sessionId, config, executor, sessions, workspace, watcher, conn);
             case "exec" -> execHandler.handle(frame); // CAP-36：构建/部署/测试/发版下发执行
+            case "verify_push" -> verifyHandler.handlePush(frame); // CAP-73：验证链 PUSHING（需求分支推远端）
+            case "verify_pack" -> verifyHandler.handlePack(frame); // CAP-73：验证链 BUILDING（构建+产物包上传）
+            case "verify_patch" -> verifyHandler.handlePatch(frame); // CAP-73：验证链 PATCHING（环境增量补丁）
             case "proc" -> procHandler.handle(frame); // CAP-57：服务实例进程管控（起停/状态）
             case "pkg" -> pkgHandler.handle(frame); // CAP-57：安装包分发（拉取+校验+解包）
             case "input" -> handleInput(frame, sessionId, protocol, sessions);

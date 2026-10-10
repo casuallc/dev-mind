@@ -408,6 +408,86 @@ public class RunnerWorkspace {
         }
     }
 
+    /** CAP-73：verify 工作区根目录名（&lt;root&gt;/&lt;projectId&gt;/verify/&lt;key&gt;，持久 clone，不进 GC 扫描桶） */
+    private static final String VERIFY_DIR = "verify";
+
+    /** CAP-73 PUSHING 结果（exit=0 成功；output 已 sanitize） */
+    public record PushOutcome(int exit, String output) {
+    }
+
+    /**
+     * CAP-73 PUSHING：把需求工作区（{@code worktrees/<key>}）的本地需求分支推到远端。
+     * 显式推 {@code refs/heads/<branch>} 而非 HEAD——agent 可能切了分支，推错代码比
+     * 报错更难查（分支不在本地时 git 报错即 FAILED PUSHING，由编排端回灌）。
+     * 凭证 = URL 内嵌 token（仅进程参数），推送输出经 {@link #sanitize} 后才外溢。
+     *
+     * @return exit=0 成功；目录不存在/推送失败 exit≠0（output 为原因）
+     */
+    public PushOutcome verifyPush(String projectId, String workspaceOwner, String workspaceKey,
+                                  String remoteUrl, String branch, String token, long timeoutSec) {
+        requireSafeId(projectId, "projectId");
+        String owner = requireOwner(workspaceOwner);
+        String key = requireKey(workspaceKey);
+        if (key == null) {
+            return new PushOutcome(-1, "verify_push 缺 workspaceKey（需求工作区按 key 寻址）");
+        }
+        if (remoteUrl == null || remoteUrl.isBlank() || branch == null || branch.isBlank()) {
+            return new PushOutcome(-1, "verify_push 缺 remoteUrl/branch");
+        }
+        Path workDir = worktreeRoot(userRoot(projectId, owner), key);
+        if (!Files.isDirectory(workDir)) {
+            return new PushOutcome(-1, "需求工作区不存在（可能已被收口/GC）: " + workDir);
+        }
+        long timeout = timeoutSec > 0 ? timeoutSec : PUSH_TIMEOUT_SEC;
+        Result r = run(workDir, timeout, token, "push", withToken(remoteUrl, token),
+                "refs/heads/" + branch + ":refs/heads/" + branch);
+        return new PushOutcome(r.exit(), r.output());
+    }
+
+    /**
+     * CAP-73 BUILDING：verify 工作区（{@code <root>/<projectId>/verify/<key>}，持久独立
+     * clone——不用 worktree：reset/clean/checkout 每次都做，与会话缓存互不干扰）。
+     * 不存在 → clone；存在 → fetch 后 {@code reset --hard <commitSha>}（游离目标，杜绝脏状态
+     * 累积）+ {@code clean -fd}（<b>不带 -x</b>：gitignore 的持久产物树 output_dir 必须留存，
+     * 它是增量组装「完整部署物树」的载体，见 CAP-73 FR-03 output_dir 语义红线）。
+     */
+    public Path prepareVerify(String projectId, String workspaceKey, String remoteUrl,
+                              String branch, String commitSha, String token) {
+        requireSafeId(projectId, "projectId");
+        if (workspaceKey == null || !SAFE_ID.matcher(workspaceKey).matches()
+                || RESERVED_DIRS.contains(workspaceKey)) {
+            throw new IllegalStateException("非法 verify 工作区键（白名单 [a-zA-Z0-9._-]）: " + workspaceKey);
+        }
+        if (remoteUrl == null || remoteUrl.isBlank()) {
+            throw new IllegalStateException("verify 工作区缺 remoteUrl");
+        }
+        Path dir = workspaceRoot.resolve(projectId).resolve(VERIFY_DIR).resolve(workspaceKey).normalize();
+        if (!dir.startsWith(workspaceRoot)) {
+            throw new IllegalStateException("工作区路径越界（.. 逃逸防护）: " + projectId);
+        }
+        RepoSpec spec = new RepoSpec(remoteUrl, branch, branch, token);
+        var lock = lockOf(dir);
+        lock.lock();
+        try {
+            ensureClone(dir, spec);
+            fetch(dir, spec);
+            String target = commitSha != null && !commitSha.isBlank() ? commitSha : "FETCH_HEAD";
+            Result reset = run(dir, OP_TIMEOUT_SEC * 3, token, "reset", "--hard", target);
+            if (reset.exit() != 0) {
+                throw new IllegalStateException("git reset --hard（" + target + "）失败: " + tail(reset.output()));
+            }
+            Result clean = run(dir, OP_TIMEOUT_SEC * 3, token, "clean", "-fd");
+            if (clean.exit() != 0) {
+                // clean 失败只留陈旧未跟踪文件（reset 已保证跟踪文件归位）——告警不阻断
+                log.warn("verify 工作区 clean 失败（可能有陈旧未跟踪文件）: {}", tail(clean.output()));
+            }
+        } finally {
+            lock.unlock();
+        }
+        log.info("verify 工作区就绪: {} ({})", dir, commitSha);
+        return dir;
+    }
+
     private static void deleteRecursively(Path dir) {
         try (var walk = Files.walk(dir)) {
             for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {

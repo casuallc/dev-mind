@@ -234,7 +234,11 @@ public class ExecHandler {
      * 白名单空 = 拒绝一切；逐行取首 token 校验前缀命中，shell 内置命令/关键字豁免。
      */
     void checkAllowlist(String command) {
-        List<String> allowed = config.execAllowlist();
+        checkAllowlist(config.execAllowlist(), command);
+    }
+
+    /** 静态版（CAP-73 VerifyHandler 复用同一校验语义——构建步骤/补丁钩子与 exec 同一防线）。 */
+    static void checkAllowlist(List<String> allowed, String command) {
         if (allowed == null || allowed.isEmpty()) {
             throw new IllegalStateException("runner 未配置 execAllowlist，拒绝一切 exec 指令");
         }
@@ -263,8 +267,8 @@ public class ExecHandler {
         }
     }
 
-    /** workingDir 相对基准目录解析（越界防护 + 必须已存在）。 */
-    private Path resolveCwd(Path base, String workingDir) {
+    /** workingDir 相对基准目录解析（越界防护 + 必须已存在）。静态化供 CAP-73 VerifyHandler 复用。 */
+    static Path resolveCwd(Path base, String workingDir) {
         if (workingDir == null || workingDir.isBlank()) {
             return base;
         }
