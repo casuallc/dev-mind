@@ -2,6 +2,7 @@ package com.devmind.agent.tunnel;
 
 import com.devmind.agent.config.EgressProperties;
 import com.devmind.agent.model.EgressRuleEntity;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.EgressRuleService;
 import com.devmind.common.egress.EgressHostMatcher;
 import org.slf4j.Logger;
@@ -52,15 +53,18 @@ public class HttpConnectProxyServer implements SmartLifecycle {
     private final EgressProperties props;
     private final EgressRuleService ruleService;
     private final AgentTunnelRegistry tunnelRegistry;
+    private final AgentAuditLogService auditLogService;
 
     private volatile ServerSocket serverSocket;
     private volatile boolean running;
 
     public HttpConnectProxyServer(EgressProperties props, EgressRuleService ruleService,
-                                  AgentTunnelRegistry tunnelRegistry) {
+                                  AgentTunnelRegistry tunnelRegistry,
+                                  AgentAuditLogService auditLogService) {
         this.props = props;
         this.ruleService = ruleService;
         this.tunnelRegistry = tunnelRegistry;
+        this.auditLogService = auditLogService;
     }
 
     @Override
@@ -129,13 +133,18 @@ public class HttpConnectProxyServer implements SmartLifecycle {
                 // 白名单语义：未命中不放行（同 Socks5Server rep=2）
                 respond(client, 403, "Forbidden");
                 log.info("HTTP 代理拒绝（未命中出口规则）: {}:{}", target.host(), target.port());
+                ProxyAudit.reject(auditLogService, "REJECTED_NO_RULE", null, target.host(),
+                        target.port(), proto(target), "未命中出口规则");
                 closeQuietly(client);
                 return;
             }
             EgressRuleEntity rule = route.get();
+            String proto = proto(target);
             try {
-                ServerTunnelStream stream =
-                        tunnelRegistry.openStream(rule.getNodeId(), target.host(), target.port(), client);
+                ServerTunnelStream stream = tunnelRegistry.openStream(rule.getNodeId(),
+                        target.host(), target.port(), client,
+                        s -> ProxyAudit.streamClosed(auditLogService, rule.getNodeId(),
+                                target.host(), target.port(), proto, s));
                 if (target.connect()) {
                     // CONNECT：200 即开始双向 relay（TLS 握手字节走 leftover/后续流）
                     client.getOutputStream().write(
@@ -158,6 +167,8 @@ public class HttpConnectProxyServer implements SmartLifecycle {
                 respond(client, 502, "Bad Gateway");
                 log.warn("HTTP 代理拒绝（规则「{}」命中但出口不可用）: {}:{} — {}",
                         rule.getHostPattern(), target.host(), target.port(), e.getMessage());
+                ProxyAudit.reject(auditLogService, "FAIL_UNAVAILABLE", rule.getNodeId(),
+                        target.host(), target.port(), proto, e.getMessage());
                 closeQuietly(client);
             }
         } catch (Exception e) {
@@ -262,6 +273,11 @@ public class HttpConnectProxyServer implements SmartLifecycle {
             s.close();
         } catch (IOException ignored) {
         }
+    }
+
+    /** 审计 detail 的协议形态：CONNECT 隧道 / absolute-form 明文转发 */
+    private static String proto(Request target) {
+        return target.connect() ? "http-connect" : "http-absolute";
     }
 
     /** 一次请求的解析结果：connect=true 走 CONNECT 语义；否则 rewrittenHead 为重写后的请求块 */

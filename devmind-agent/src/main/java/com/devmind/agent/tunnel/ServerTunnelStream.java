@@ -12,6 +12,10 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 /**
  * CAP-70 FR-01：服务端侧一条隧道流（SOCKS 本地 socket ↔ 隧道 streamId）。
@@ -24,11 +28,18 @@ import java.util.concurrent.Semaphore;
  *   写线程落 socket 后回 WINDOW credit；收到 CLOSE（毒丸）→ 排空后 shutdownOutput。</li>
  * </ul>
  * RST / 隧道断连 → {@link #abort}：关 socket（两线程随 socket 异常退出）、流表摘除。
+ * 正常收尾（双向 relay 各自 return）与 abort 统一汇入幂等 {@link #terminate}：
+ * 摘流表 + 关 socket + 触发一次终结回调（CAP-71 代理审计：字节数/耗时/结果）。
+ * 正常路径两条腿都走完才终结（半关语义：本端 EOF 发 CLOSE 后仍要排空对端在途数据）。
  */
 public class ServerTunnelStream {
 
     private static final Logger log = LoggerFactory.getLogger(ServerTunnelStream.class);
     private static final byte[] POISON = new byte[0];
+
+    /** CAP-71 流终结摘要：reason == null 为正常双向收尾，否则为中止原因 */
+    public record StreamSummary(int streamId, long bytesUp, long bytesDown, long durationMs,
+                                String reason) { }
 
     private final int streamId;
     private final AgentTunnelRegistry.TunnelConn conn;
@@ -37,14 +48,25 @@ public class ServerTunnelStream {
     private final BlockingQueue<byte[]> inbound = new LinkedBlockingQueue<>();
     /** OPEN_ACK waiter：正常收口 = null error；异常收口 = 错误文案 */
     private final CompletableFuture<String> openFuture = new CompletableFuture<>();
+    /** CAP-71 终结回调（审计写入点），openStream 调用方注入；为空不回调 */
+    private final Consumer<StreamSummary> onTerminate;
+    private final long openedAtMs = System.currentTimeMillis();
+    /** local→tunnel 字节数（含 injectOutbound 预注入） */
+    private final AtomicLong bytesUp = new AtomicLong();
+    /** tunnel→local 字节数 */
+    private final AtomicLong bytesDown = new AtomicLong();
+    private final AtomicBoolean terminated = new AtomicBoolean(false);
+    /** 正常走完的 relay 腿数（到 2 才按正常终结） */
+    private final AtomicInteger legsDone = new AtomicInteger(0);
     private volatile boolean aborted;
 
     public ServerTunnelStream(int streamId, AgentTunnelRegistry.TunnelConn conn, Socket socket,
-                              int windowBytes) {
+                              int windowBytes, Consumer<StreamSummary> onTerminate) {
         this.streamId = streamId;
         this.conn = conn;
         this.socket = socket;
         this.sendWindow = new Semaphore(windowBytes);
+        this.onTerminate = onTerminate;
     }
 
     public int streamId() { return streamId; }
@@ -93,20 +115,44 @@ public class ServerTunnelStream {
         }
         sendWindow.acquire(bytes.length);
         conn.send(TunnelFrame.data(streamId, bytes));
+        bytesUp.addAndGet(bytes.length);
     }
 
-    /** 中止：关 socket + 摘流表（幂等） */
+    /** 中止：关 socket + 摘流表（幂等），终结回调 reason 非空 */
     public void abort(String reason) {
-        if (aborted) {
+        aborted = true;
+        terminate(reason == null ? "aborted" : reason);
+    }
+
+    /**
+     * 统一终结点（幂等）：摘流表 + 关 socket + 触发一次终结回调。
+     * abort 与各 relay 腿全部正常 return 后汇入；正常终结 reason = null。
+     */
+    private void terminate(String reason) {
+        if (!terminated.compareAndSet(false, true)) {
             return;
         }
-        aborted = true;
-        openFuture.complete(reason == null ? "aborted" : reason);
+        openFuture.complete(reason);
         try {
             socket.close();
         } catch (IOException ignored) {
         }
         conn.streams().remove(streamId);
+        if (onTerminate != null) {
+            try {
+                onTerminate.accept(new StreamSummary(streamId, bytesUp.get(), bytesDown.get(),
+                        System.currentTimeMillis() - openedAtMs, reason));
+            } catch (Exception e) {
+                log.warn("隧道流 {} 终结回调失败: {}", streamId, e.toString());
+            }
+        }
+    }
+
+    /** 一条 relay 腿正常 return：两条腿都走完才按正常终结（半关语义） */
+    private void legDone() {
+        if (legsDone.incrementAndGet() >= 2) {
+            terminate(null);
+        }
     }
 
     private void localToTunnel() {
@@ -119,6 +165,7 @@ public class ServerTunnelStream {
                     sendWindow.acquire(buf.length);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
+                    legDone();
                     return;
                 }
                 try {
@@ -130,6 +177,7 @@ public class ServerTunnelStream {
                 if (n < 0) {
                     sendWindow.release(buf.length);
                     conn.send(TunnelFrame.close(streamId));
+                    legDone();
                     return;
                 }
                 if (n < buf.length) {
@@ -138,6 +186,7 @@ public class ServerTunnelStream {
                 byte[] payload = new byte[n];
                 System.arraycopy(buf, 0, payload, 0, n);
                 conn.send(TunnelFrame.data(streamId, payload));
+                bytesUp.addAndGet(n);
             }
         } catch (Exception e) {
             if (!aborted) {
@@ -157,6 +206,7 @@ public class ServerTunnelStream {
                     payload = inbound.take();
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
+                    legDone();
                     return;
                 }
                 if (payload == POISON) {
@@ -165,10 +215,12 @@ public class ServerTunnelStream {
                         socket.shutdownOutput();
                     } catch (IOException ignored) {
                     }
+                    legDone();
                     return;
                 }
                 out.write(payload);
                 out.flush();
+                bytesDown.addAndGet(payload.length);
                 conn.sendQuietly(TunnelFrame.window(streamId, payload.length));
             }
         } catch (Exception e) {

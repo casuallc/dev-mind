@@ -154,7 +154,7 @@ class AgentTunnelRegistryTest {
         try (Socket socket = new Socket()) {
             Thread t = new Thread(() -> {
                 try {
-                    opened.set(registry.openStream(7L, "gitlab.corp.com", 443, socket));
+                    opened.set(registry.openStream(7L, "gitlab.corp.com", 443, socket, null));
                 } catch (Throwable e) {
                     error.set(e);
                 }
@@ -179,7 +179,7 @@ class AgentTunnelRegistryTest {
         try (Socket socket = new Socket()) {
             Thread t = new Thread(() -> {
                 try {
-                    registry.openStream(7L, "evil.corp.com", 443, socket);
+                    registry.openStream(7L, "evil.corp.com", 443, socket, null);
                 } catch (Throwable e) {
                     error.set(e);
                 }
@@ -199,7 +199,7 @@ class AgentTunnelRegistryTest {
         try (Socket socket = new Socket()) {
             Thread t = new Thread(() -> {
                 try {
-                    registry.openStream(7L, "slow.corp.com", 443, socket);
+                    registry.openStream(7L, "slow.corp.com", 443, socket, null);
                 } catch (Throwable e) {
                     error.set(e);
                 }
@@ -225,7 +225,7 @@ class AgentTunnelRegistryTest {
         try (Socket socket = new Socket()) {
             Thread t = new Thread(() -> {
                 try {
-                    registry.openStream(7L, "slow.corp.com", 443, socket);
+                    registry.openStream(7L, "slow.corp.com", 443, socket, null);
                 } catch (Throwable e) {
                     error.set(e);
                 }
@@ -239,7 +239,7 @@ class AgentTunnelRegistryTest {
             // 摘除后新请求走「隧道未连接」快速失败，不再各挂一个 OPEN 超时
             try (Socket socket2 = new Socket()) {
                 DevMindException ex = assertThrows(DevMindException.class,
-                        () -> registry.openStream(7L, "x.corp.com", 443, socket2));
+                        () -> registry.openStream(7L, "x.corp.com", 443, socket2, null));
                 assertTrue(ex.getMessage().contains("隧道未连接"), ex.getMessage());
             }
         }
@@ -249,7 +249,7 @@ class AgentTunnelRegistryTest {
     void openStreamWithoutTunnelFailsFast() {
         try (Socket socket = new Socket()) {
             DevMindException ex = assertThrows(DevMindException.class,
-                    () -> registry.openStream(99L, "x.corp.com", 443, socket));
+                    () -> registry.openStream(99L, "x.corp.com", 443, socket, null));
             assertTrue(ex.getMessage().contains("隧道未连接"), ex.getMessage());
         } catch (java.io.IOException ignored) {
         }
@@ -281,7 +281,7 @@ class AgentTunnelRegistryTest {
         Socket socket = new Socket();
         Thread t = new Thread(() -> {
             try {
-                registry.openStream(7L, "pending.corp.com", 443, socket);
+                registry.openStream(7L, "pending.corp.com", 443, socket, null);
             } catch (Throwable e) {
                 error.set(e);
             }

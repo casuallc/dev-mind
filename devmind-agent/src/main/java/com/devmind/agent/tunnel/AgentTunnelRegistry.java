@@ -177,14 +177,17 @@ public class AgentTunnelRegistry implements EgressTunnelStatus {
     /**
      * 开一条流：OPEN → 等 OPEN_ACK（超时/被拒/断连抛 DevMindException，fail-visible）。
      * 成功返回未 start 的流——由调用方回复 REP_OK 后再 {@link ServerTunnelStream#start()}。
+     * onTerminate：CAP-71 流终结审计回调（恰好一次，reason==null 为正常双向收尾），可为 null。
      */
-    public ServerTunnelStream openStream(long nodeId, String host, int port, Socket socket) {
+    public ServerTunnelStream openStream(long nodeId, String host, int port, Socket socket,
+                                         java.util.function.Consumer<ServerTunnelStream.StreamSummary> onTerminate) {
         TunnelConn conn = tunnels.get(nodeId);
         if (conn == null || !conn.session().isOpen()) {
             throw new DevMindException(ErrorCode.CONFLICT, "出口节点 " + nodeId + " 的隧道未连接");
         }
         int streamId = conn.nextStreamId().incrementAndGet();
-        ServerTunnelStream stream = new ServerTunnelStream(streamId, conn, socket, props.getWindowBytes());
+        ServerTunnelStream stream =
+                new ServerTunnelStream(streamId, conn, socket, props.getWindowBytes(), onTerminate);
         conn.streams().put(streamId, stream);
         try {
             conn.send(TunnelFrame.open(streamId, host, port));

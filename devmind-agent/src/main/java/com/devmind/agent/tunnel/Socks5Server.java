@@ -1,7 +1,9 @@
 package com.devmind.agent.tunnel;
 
 import com.devmind.agent.config.EgressProperties;
+import com.devmind.agent.model.AgentAuditLogEntity;
 import com.devmind.agent.model.EgressRuleEntity;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.EgressRuleService;
 import com.devmind.common.egress.EgressHostMatcher;
 import org.slf4j.Logger;
@@ -42,15 +44,17 @@ public class Socks5Server implements SmartLifecycle {
     private final EgressProperties props;
     private final EgressRuleService ruleService;
     private final AgentTunnelRegistry tunnelRegistry;
+    private final AgentAuditLogService auditLogService;
 
     private volatile ServerSocket serverSocket;
     private volatile boolean running;
 
     public Socks5Server(EgressProperties props, EgressRuleService ruleService,
-                        AgentTunnelRegistry tunnelRegistry) {
+                        AgentTunnelRegistry tunnelRegistry, AgentAuditLogService auditLogService) {
         this.props = props;
         this.ruleService = ruleService;
         this.tunnelRegistry = tunnelRegistry;
+        this.auditLogService = auditLogService;
     }
 
     @Override
@@ -95,12 +99,15 @@ public class Socks5Server implements SmartLifecycle {
                 // FR-02：未命中规则 = 拒绝（白名单语义，不放行任何未配目标出隧道）
                 reply(out, REP_NOT_ALLOWED);
                 log.info("SOCKS5 拒绝（未命中出口规则）: {}:{}", host, port);
-                closeQuietly(client);
+                ProxyAudit.reject(auditLogService, "REJECTED_NO_RULE", null, host, port,
+                        "socks5", "未命中出口规则");                closeQuietly(client);
                 return;
             }
             EgressRuleEntity rule = route.get();
             try {
-                ServerTunnelStream stream = tunnelRegistry.openStream(rule.getNodeId(), host, port, client);
+                ServerTunnelStream stream = tunnelRegistry.openStream(rule.getNodeId(), host, port,
+                        client, s -> ProxyAudit.streamClosed(auditLogService, rule.getNodeId(),
+                                host, port, "socks5", s));
                 reply(out, REP_OK);
                 stream.start();
                 // 此后 socket 归流所有，流负责关闭
@@ -109,6 +116,8 @@ public class Socks5Server implements SmartLifecycle {
                 reply(out, REP_HOST_UNREACHABLE);
                 log.warn("SOCKS5 拒绝（规则「{}」命中但出口不可用）: {}:{} — {}",
                         rule.getHostPattern(), host, port, e.getMessage());
+                ProxyAudit.reject(auditLogService, "FAIL_UNAVAILABLE", rule.getNodeId(), host, port,
+                        "socks5", e.getMessage());
                 closeQuietly(client);
             }
         } catch (Exception e) {

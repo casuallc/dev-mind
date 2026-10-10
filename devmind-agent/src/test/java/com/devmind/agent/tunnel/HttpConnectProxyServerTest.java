@@ -1,6 +1,7 @@
 package com.devmind.agent.tunnel;
 
 import com.devmind.agent.config.EgressProperties;
+import com.devmind.agent.model.AgentAuditLogEntity;
 import com.devmind.agent.model.AgentNodeEntity;
 import com.devmind.agent.model.EgressRuleEntity;
 import com.devmind.agent.service.AgentAuditLogService;
@@ -43,6 +44,7 @@ import static org.mockito.Mockito.when;
 class HttpConnectProxyServerTest {
 
     private EgressRuleService ruleService;
+    private AgentAuditLogService auditLog;
     private AgentTunnelRegistry registry;
     private HttpConnectProxyServer server;
     private WebSocketSession ws;
@@ -54,8 +56,9 @@ class HttpConnectProxyServerTest {
         props.setHttpPort(0); // ephemeral，避免撞本机常驻 18090
         props.setOpenTimeoutMs(5000);
         props.setHeartbeatIntervalMs(60_000); // 心跳与本测试无关，拉长免干扰
+        auditLog = mock(AgentAuditLogService.class);
         registry = new AgentTunnelRegistry(ruleService, props, JsonMapper.builder().build(), mock(AgentAuditLogService.class));
-        server = new HttpConnectProxyServer(props, ruleService, registry);
+        server = new HttpConnectProxyServer(props, ruleService, registry, auditLog);
         when(ruleService.allowedHostsFor(anyLong())).thenReturn(List.of("*.corp.com"));
         ws = mock(WebSocketSession.class);
         when(ws.isOpen()).thenReturn(true);
@@ -162,6 +165,12 @@ class HttpConnectProxyServerTest {
             int code = exchangeStatusLine(client, "CONNECT direct.example.com:443 HTTP/1.1\r\n\r\n");
             assertEquals(403, code); // 白名单语义：未命中不放行
         }
+        // CAP-71：未命中记 PROXY/REJECTED_NO_RULE，detail 带 http-connect 形态
+        AgentAuditLogService.Entry e = awaitAudit("REJECTED_NO_RULE");
+        assertEquals(AgentAuditLogEntity.CAT_PROXY, e.category());
+        assertEquals(AgentAuditLogEntity.RESULT_REJECTED, e.result());
+        assertEquals("direct.example.com:443", e.target());
+        assertTrue(e.detail().contains("http-connect"), e.detail());
     }
 
     @Test
@@ -172,6 +181,27 @@ class HttpConnectProxyServerTest {
             int code = exchangeStatusLine(client, "CONNECT dead.corp.com:443 HTTP/1.1\r\n\r\n");
             assertEquals(502, code); // 命中但不可用：快速失败不挂起
         }
+        // CAP-71：命中但不可用记 PROXY/FAIL_UNAVAILABLE（result=FAIL）
+        AgentAuditLogService.Entry e = awaitAudit("FAIL_UNAVAILABLE");
+        assertEquals(AgentAuditLogEntity.RESULT_FAIL, e.result());
+        assertEquals(7L, e.nodeId());
+        assertEquals("dead.corp.com:443", e.target());
+    }
+
+    /** 轮询等一条指定事件的审计行（写入在代理连接的虚拟线程上异步发生） */
+    private AgentAuditLogService.Entry awaitAudit(String event) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 5000;
+        while (System.currentTimeMillis() < deadline) {
+            var found = org.mockito.Mockito.mockingDetails(auditLog).getInvocations().stream()
+                    .filter(i -> "record".equals(i.getMethod().getName()))
+                    .map(i -> (AgentAuditLogService.Entry) i.getArgument(0))
+                    .filter(x -> event.equals(x.event())).findFirst();
+            if (found.isPresent()) {
+                return found.get();
+            }
+            Thread.sleep(50);
+        }
+        throw new AssertionError("未等到审计事件 " + event);
     }
 
     @Test

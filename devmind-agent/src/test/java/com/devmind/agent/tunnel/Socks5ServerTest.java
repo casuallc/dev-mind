@@ -1,6 +1,7 @@
 package com.devmind.agent.tunnel;
 
 import com.devmind.agent.config.EgressProperties;
+import com.devmind.agent.model.AgentAuditLogEntity;
 import com.devmind.agent.model.AgentNodeEntity;
 import com.devmind.agent.model.EgressRuleEntity;
 import com.devmind.agent.service.AgentAuditLogService;
@@ -42,6 +43,7 @@ import static org.mockito.Mockito.when;
 class Socks5ServerTest {
 
     private EgressRuleService ruleService;
+    private AgentAuditLogService auditLog;
     private AgentTunnelRegistry registry;
     private Socks5Server server;
     private WebSocketSession ws;
@@ -52,8 +54,9 @@ class Socks5ServerTest {
         EgressProperties props = new EgressProperties();
         props.setSocksPort(0); // ephemeral，避免撞本机常驻 18089
         props.setOpenTimeoutMs(5000);
+        auditLog = mock(AgentAuditLogService.class);
         registry = new AgentTunnelRegistry(ruleService, props, JsonMapper.builder().build(), mock(AgentAuditLogService.class));
-        server = new Socks5Server(props, ruleService, registry);
+        server = new Socks5Server(props, ruleService, registry, auditLog);
         when(ruleService.allowedHostsFor(anyLong())).thenReturn(List.of("*.corp.com"));
         ws = mock(WebSocketSession.class);
         when(ws.isOpen()).thenReturn(true);
@@ -142,6 +145,16 @@ class Socks5ServerTest {
             int rep = handshake(client, "direct.example.com", 443);
             assertEquals(2, rep); // 规则表即白名单：未命中不放行
         }
+        // CAP-71：未命中记 PROXY/REJECTED_NO_RULE（nodeId 空、result=REJECTED）
+        ArgumentCaptor<AgentAuditLogService.Entry> cap =
+                ArgumentCaptor.forClass(AgentAuditLogService.Entry.class);
+        verify(auditLog, timeout(5000).atLeastOnce()).record(cap.capture());
+        AgentAuditLogService.Entry e = cap.getAllValues().stream()
+                .filter(x -> "REJECTED_NO_RULE".equals(x.event())).findFirst().orElseThrow();
+        assertEquals(AgentAuditLogEntity.CAT_PROXY, e.category());
+        assertEquals(AgentAuditLogEntity.RESULT_REJECTED, e.result());
+        assertEquals("direct.example.com:443", e.target());
+        assertTrue(e.detail().contains("socks5"));
     }
 
     @Test
@@ -155,6 +168,16 @@ class Socks5ServerTest {
             int rep = handshake(client, "dead.corp.com", 443);
             assertEquals(4, rep); // 命中但不可用：快速失败不挂起
         }
+        // CAP-71：命中但不可用记 PROXY/FAIL_UNAVAILABLE（nodeId=7、result=FAIL）
+        ArgumentCaptor<AgentAuditLogService.Entry> cap =
+                ArgumentCaptor.forClass(AgentAuditLogService.Entry.class);
+        verify(auditLog, timeout(5000).atLeastOnce()).record(cap.capture());
+        AgentAuditLogService.Entry e = cap.getAllValues().stream()
+                .filter(x -> "FAIL_UNAVAILABLE".equals(x.event())).findFirst().orElseThrow();
+        assertEquals(AgentAuditLogEntity.CAT_PROXY, e.category());
+        assertEquals(AgentAuditLogEntity.RESULT_FAIL, e.result());
+        assertEquals(7L, e.nodeId());
+        assertEquals("dead.corp.com:443", e.target());
     }
 
     /** 后台假 runner：等到 OPEN 帧后立即回 OPEN_ACK 成功，返回 OPEN 帧 */
@@ -238,6 +261,88 @@ class Socks5ServerTest {
             client.shutdownOutput();
             TunnelFrame close = awaitFrame(TunnelFrame.TYPE_CLOSE, 5000);
             assertEquals(streamId, close.streamId());
+        }
+    }
+
+    /** CAP-71：正常双向收尾后恰好记一条 PROXY/OPEN（字节数=两方向实际搬运量、result=OK）。 */
+    @Test
+    void normalCloseAuditsExactlyOnceWithByteCounts() throws Exception {
+        EgressRuleEntity rule = new EgressRuleEntity();
+        rule.setHostPattern("*.corp.com");
+        rule.setNodeId(7L);
+        when(ruleService.findRoute("echo.corp.com")).thenReturn(Optional.of(rule));
+
+        try (Socket client = new Socket("127.0.0.1", port())) {
+            clearInvocations(ws);
+            AtomicReference<TunnelFrame> openRef = new AtomicReference<>();
+            Thread acker = ackOnOpen(openRef);
+            assertEquals(0, handshake(client, "echo.corp.com", 9));
+            acker.join(5000);
+            int streamId = openRef.get().streamId();
+
+            // 上行 3 字节 + 下行 3 字节
+            client.getOutputStream().write("abc".getBytes(StandardCharsets.UTF_8));
+            client.getOutputStream().flush();
+            awaitFrame(TunnelFrame.TYPE_DATA, 5000);
+            registry.onFrame(7L, ws, TunnelFrame.data(streamId, "xyz".getBytes(StandardCharsets.UTF_8)));
+            new DataInputStream(client.getInputStream()).readNBytes(3);
+
+            // 双向收尾：本端 EOF → CLOSE；对端 CLOSE → POISON 排空 → terminate(null)
+            client.shutdownOutput();
+            awaitFrame(TunnelFrame.TYPE_CLOSE, 5000);
+            registry.onFrame(7L, ws, TunnelFrame.close(streamId));
+
+            ArgumentCaptor<AgentAuditLogService.Entry> cap =
+                    ArgumentCaptor.forClass(AgentAuditLogService.Entry.class);
+            verify(auditLog, timeout(5000).atLeastOnce()).record(cap.capture());
+            List<AgentAuditLogService.Entry> opens = cap.getAllValues().stream()
+                    .filter(x -> AgentAuditLogEntity.CAT_PROXY.equals(x.category())
+                            && "OPEN".equals(x.event())).toList();
+            assertEquals(1, opens.size(), "正常收尾应恰好记一条 PROXY/OPEN");
+            AgentAuditLogService.Entry e = opens.get(0);
+            assertEquals(AgentAuditLogEntity.RESULT_OK, e.result());
+            assertEquals(7L, e.nodeId());
+            assertEquals("echo.corp.com:9", e.target());
+            assertEquals(3L, e.bytesUp());
+            assertEquals(3L, e.bytesDown());
+            assertTrue(e.detail().contains("socks5"));
+        }
+    }
+
+    /** CAP-71：RST 中止也恰好记一条 PROXY/OPEN（result=FAIL、detail 带中止原因）。 */
+    @Test
+    void abortAuditsOnceWithFailResult() throws Exception {
+        EgressRuleEntity rule = new EgressRuleEntity();
+        rule.setHostPattern("*.corp.com");
+        rule.setNodeId(7L);
+        when(ruleService.findRoute("echo.corp.com")).thenReturn(Optional.of(rule));
+
+        try (Socket client = new Socket("127.0.0.1", port())) {
+            clearInvocations(ws);
+            AtomicReference<TunnelFrame> openRef = new AtomicReference<>();
+            Thread acker = ackOnOpen(openRef);
+            assertEquals(0, handshake(client, "echo.corp.com", 9));
+            acker.join(5000);
+            int streamId = openRef.get().streamId();
+
+            client.getOutputStream().write("ab".getBytes(StandardCharsets.UTF_8));
+            client.getOutputStream().flush();
+            awaitFrame(TunnelFrame.TYPE_DATA, 5000);
+
+            // runner 侧 RST → abort → 终结回调 FAIL
+            registry.onFrame(7L, ws, TunnelFrame.rst(streamId, "目标不可达"));
+
+            ArgumentCaptor<AgentAuditLogService.Entry> cap =
+                    ArgumentCaptor.forClass(AgentAuditLogService.Entry.class);
+            verify(auditLog, timeout(5000).atLeastOnce()).record(cap.capture());
+            List<AgentAuditLogService.Entry> opens = cap.getAllValues().stream()
+                    .filter(x -> AgentAuditLogEntity.CAT_PROXY.equals(x.category())
+                            && "OPEN".equals(x.event())).toList();
+            assertEquals(1, opens.size(), "RST 中止应恰好记一条 PROXY/OPEN");
+            AgentAuditLogService.Entry e = opens.get(0);
+            assertEquals(AgentAuditLogEntity.RESULT_FAIL, e.result());
+            assertEquals(2L, e.bytesUp());
+            assertTrue(e.detail() != null && e.detail().contains("socks5"));
         }
     }
 }
