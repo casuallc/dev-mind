@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Button,
@@ -8,6 +8,7 @@ import {
   Form,
   Input,
   Modal,
+  Segmented,
   Space,
   Tag,
   Tooltip,
@@ -28,6 +29,7 @@ import {
   upgradeAgentNode,
 } from '../api'
 import type { AgentNode, IssuedNode, RunnerPackage } from '../types'
+import RunnerPackagePanel from '../components/RunnerPackagePanel'
 import { downloadInstallScripts } from '../utils/installScript'
 import { fmtTime, fmtBytes } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
@@ -42,11 +44,17 @@ const statusColor: Record<string, string> = {
 }
 
 /**
- * CAP-21 后台页：Agent 节点列表（仅 ADMIN）。Runner 包 / 连接日志 / 节点文件已拆为「Agent 执行」组独立菜单；
- * 单节点的观测/配置/运维操作收在详情页（/admin/agent/nodes/:id）。
+ * CAP-21 后台页：Agent 节点（仅 ADMIN）。页内 Segmented 两视图——「节点列表」与「Runner 包」（全局托管包，
+ * 原独立菜单已并入此页，旧路径 /admin/agent/package 重定向 ?view=package）；
+ * 连接日志 / 节点文件仍是「Agent 执行」组独立菜单；单节点的观测/配置/运维操作收在详情页（/admin/agent/nodes/:id）。
  */
 export default function AgentNodesPage() {
   const navigate = useNavigate()
+  // 视图随 URL（?view=package）走：旧链接重定向/刷新后仍停在 Runner 包页签
+  const [searchParams, setSearchParams] = useSearchParams()
+  const view = searchParams.get('view') === 'package' ? 'package' : 'nodes'
+  const switchView = (v: string | number) =>
+    setSearchParams(v === 'package' ? { view: 'package' } : {}, { replace: true })
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [pkg, setPkg] = useState<RunnerPackage | null>(null)
   const [loading, setLoading] = useState(false)
@@ -64,10 +72,12 @@ export default function AgentNodesPage() {
   }
 
   useEffect(() => {
+    if (view !== 'nodes') return // Runner 包视图自有加载逻辑，不重复轮询
     reload()
     const timer = window.setInterval(reload, 5000) // 在线状态随心跳变化，轻轮询
     return () => window.clearInterval(timer)
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view])
 
   const onCreate = async () => {
     const v = await form.validateFields()
@@ -218,55 +228,76 @@ export default function AgentNodesPage() {
     <Card
       style={pageCardStyle}
       styles={{ body: pageCardBodyFlexStyle }}
-      title="节点"
-      extra={
-        <Space>
-          {outdatedNodes.length > 0 && (
-            <>
-              <Tag color="orange">{outdatedNodes.length} 个节点可升级 → {pkg!.version}</Tag>
-              <Button
-                icon={<RocketOutlined />}
-                loading={batchBusy}
-                disabled={upgradableNodes.length === 0}
-                onClick={onUpgradeAll}
-              >
-                全部升级
-              </Button>
-            </>
-          )}
-          <Button icon={<ReloadOutlined />} onClick={reload}>
-            刷新
-          </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            新建节点
-          </Button>
+      title={
+        <Space size={12}>
+          <span>节点</span>
+          <Segmented
+            value={view}
+            onChange={switchView}
+            options={[
+              { label: '节点列表', value: 'nodes' },
+              { label: 'Runner 包', value: 'package' },
+            ]}
+          />
         </Space>
       }
-    >
-      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-        节点 = 运行 devmind-agent-runner.jar 的远程机器。服务端不执行会话（零执行，CAP-34），务必注册节点并「设为默认」，未指定节点的会话即自动调度过去；无任何默认节点时创建会话会失败。
-      </Typography.Paragraph>
-      <FitTable<AgentNode>
-        rowKey="id"
-        loading={loading}
-        columns={columns}
-        dataSource={nodes}
-        pagination={LIST_PAGINATION}
-        locale={{
-          emptyText: (
-            <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
-              <Typography.Text type="secondary">
-                还没有 Agent 节点——先「新建节点」拿到 token，再在目标机执行一键安装脚本即可上线。
-              </Typography.Text>
-              <div>
-                <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-                  新建节点
+      extra={
+        // 操作随视图切换：Runner 包视图的上传/下载收在面板内，此处只放节点操作
+        view === 'nodes' && (
+          <Space>
+            {outdatedNodes.length > 0 && (
+              <>
+                <Tag color="orange">{outdatedNodes.length} 个节点可升级 → {pkg!.version}</Tag>
+                <Button
+                  icon={<RocketOutlined />}
+                  loading={batchBusy}
+                  disabled={upgradableNodes.length === 0}
+                  onClick={onUpgradeAll}
+                >
+                  全部升级
                 </Button>
-              </div>
-            </Space>
-          ),
-        }}
-      />
+              </>
+            )}
+            <Button icon={<ReloadOutlined />} onClick={reload}>
+              刷新
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              新建节点
+            </Button>
+          </Space>
+        )
+      }
+    >
+      {view === 'package' ? (
+        <RunnerPackagePanel />
+      ) : (
+        <>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+            节点 = 运行 devmind-agent-runner.jar 的远程机器。服务端不执行会话（零执行，CAP-34），务必注册节点并「设为默认」，未指定节点的会话即自动调度过去；无任何默认节点时创建会话会失败。
+          </Typography.Paragraph>
+          <FitTable<AgentNode>
+            rowKey="id"
+            loading={loading}
+            columns={columns}
+            dataSource={nodes}
+            pagination={LIST_PAGINATION}
+            locale={{
+              emptyText: (
+                <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
+                  <Typography.Text type="secondary">
+                    还没有 Agent 节点——先「新建节点」拿到 token，再在目标机执行一键安装脚本即可上线。
+                  </Typography.Text>
+                  <div>
+                    <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+                      新建节点
+                    </Button>
+                  </div>
+                </Space>
+              ),
+            }}
+          />
+        </>
+      )}
 
       <Modal
         title="新建 Agent 节点"
@@ -329,7 +360,7 @@ export default function AgentNodesPage() {
                   type="warning"
                   showIcon
                   style={{ marginTop: 8 }}
-                  message="尚未上传 runner 包——脚本中的下载步骤会失败，请先在「Runner 包」菜单上传。"
+                  message="尚未上传 runner 包——脚本中的下载步骤会失败，请切到「Runner 包」页签上传。"
                 />
               )}
             </div>

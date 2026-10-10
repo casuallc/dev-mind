@@ -307,7 +307,7 @@ export default function AgentNodeDetailPage() {
                     ? outdated
                       ? `${node.runnerVersion ?? '-'} → ${pkg.version}；有活跃会话时将推迟执行`
                       : '已是最新版本'
-                    : '请先在「Runner 包」页上传 runner 包'
+                    : '请先在节点页「Runner 包」页签上传 runner 包'
                 }
               >
                 <Button icon={<RocketOutlined />} disabled={!pkg || !outdated} onClick={onUpgrade}>

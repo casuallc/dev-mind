@@ -75,7 +75,7 @@ const ROUTES = [
   { path: '/admin/agent/nodes', name: '后台-节点' },
   { path: '/admin/agent/nodes/{nid}', name: '后台-节点详情', nid: true },
   { path: '/admin/agent/files', name: '后台-节点文件' },
-  { path: '/admin/agent/package', name: '后台-Runner包' },
+  { path: '/admin/agent/nodes?view=package', name: '后台-Runner包' },
   { path: '/admin/agent/logs', name: '后台-连接日志' },
   { path: '/admin/scenarios', name: '后台-场景' },
   { path: '/admin/knowledge', name: '后台-知识库' },

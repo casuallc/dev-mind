@@ -43,7 +43,6 @@ import ApiKeysPage from '../features/open-api/pages/ApiKeysPage'
 import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
 import AgentNodeDetailPage from '../features/agent/pages/AgentNodeDetailPage'
 import NodeFilesPage from '../features/agent/pages/NodeFilesPage'
-import RunnerPackagePage from '../features/agent/pages/RunnerPackagePage'
 import ConnLogsPage from '../features/agent/pages/ConnLogsPage'
 import EgressRulesPage from '../features/agent/pages/EgressRulesPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
@@ -200,12 +199,13 @@ export default function App() {
           <Route path="/admin/classify/playground" element={<LegacyLayaRedirect tab="playground" />} />
           {/* CAP-20 API 密钥（open-api HMAC 认证凭证） */}
           <Route path="/admin/keys" element={<ApiKeysPage />} />
-          {/* CAP-21 Agent 执行组：节点 / 节点文件 / Runner 包 / 连接日志 */}
+          {/* CAP-21 Agent 执行组：节点（页内含 Runner 包页签）/ 节点文件 / 连接日志 */}
           <Route path="/admin/agent" element={<Navigate to="/admin/agent/nodes" replace />} />
           <Route path="/admin/agent/nodes" element={<AgentNodesPage />} />
           <Route path="/admin/agent/nodes/:id" element={<AgentNodeDetailPage />} />
           <Route path="/admin/agent/files" element={<NodeFilesPage />} />
-          <Route path="/admin/agent/package" element={<RunnerPackagePage />} />
+          {/* Runner 包已并入节点页页签，旧路径重定向 */}
+          <Route path="/admin/agent/package" element={<Navigate to="/admin/agent/nodes?view=package" replace />} />
           <Route path="/admin/agent/logs" element={<ConnLogsPage />} />
           {/* CAP-70 出口规则（服务端出口反向隧道；仅 ADMIN） */}
           <Route path="/admin/agent/egress-rules" element={<EgressRulesPage />} />
