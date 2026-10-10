@@ -240,6 +240,6 @@ export interface RequirementOverview {
   testRuns: { id: number; status: string; summaryJson?: string; reportDocId?: number; triggeredBy?: string; workItemId?: string; createdAt: string; finishedAt?: string }[]
   deployments: { id: number; status: string; env?: string; agentNodeId?: string; buildId?: number; workItemId?: string; createdBy?: string; createdAt: string; finishedAt?: string }[]
   releases: { id: number; version?: string; status: string; executor?: string; rollbackOf?: number; createdAt: string; finishedAt: string }[]
-  artifacts: { id: number; type: string; name?: string; path?: string; producerType?: string; createdAt: string }[]
+  artifacts: { id: number; type: string; name?: string; path?: string; producerType?: string; workItemId?: string; createdAt: string }[]
   timeline: { time: string; type: string; label: string; refId: string }[]
 }

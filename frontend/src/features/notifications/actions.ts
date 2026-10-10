@@ -53,6 +53,8 @@ function viewPath(n: AppNotification): string | null {
 function flowTabParam(eventType: string): string {
   if (eventType.startsWith('flow.analysis.')) return '?tab=analysis'
   if (eventType.startsWith('flow.design.')) return '?tab=design'
+  // 开发完成/规划部分完成 → 「开发产出」Tab（dev-summary 等收尾产物的评审视图）
+  if (eventType.startsWith('flow.dev.')) return '?tab=outputs'
   if (eventType.startsWith('flow.split.') || eventType.startsWith('flow.dispatched')) return '?tab=workItems'
   return ''
 }

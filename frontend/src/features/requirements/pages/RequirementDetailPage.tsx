@@ -54,6 +54,7 @@ import JiraPushModal from '../components/JiraPushModal'
 import AnalysisTab from '../components/flow/AnalysisTab'
 import DesignsTab from '../components/flow/DesignsTab'
 import RelatedRecordsTab from '../components/RelatedRecordsTab'
+import OutputsTab from '../components/OutputsTab'
 import RequirementFormDrawer from '../components/RequirementFormDrawer'
 import TimelineTab from '../components/TimelineTab'
 import WorkItemsTab from '../components/WorkItemsTab'
@@ -500,6 +501,11 @@ export default function RequirementDetailPage() {
                   onChanged={reloadAll}
                 />
               ),
+            },
+            {
+              key: 'outputs',
+              label: `开发产出（${overview.artifacts.filter((a) => a.type === 'SUMMARY').length}）`,
+              children: <OutputsTab overview={overview} />,
             },
             {
               key: 'workItems',
