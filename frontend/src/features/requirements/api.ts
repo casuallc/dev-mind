@@ -16,6 +16,7 @@ import type {
   RequirementOverview,
   RequirementPage,
   RequirementStatus,
+  VerifyRun,
   WorkItem,
   WorkItemInput,
   WorkItemStatus,
@@ -193,8 +194,32 @@ export function refreshRequirementFromJira(
   )
 }
 
-// ---- Work Item ----
+// ---- CAP-73 需求开发中验证 ----
 
+/** 人工触发「立即验证」；force=true 跳过无新提交判定（修复环境后重试用） */
+export function triggerVerify(
+  projectId: string,
+  requirementId: string,
+  input?: { note?: string; modules?: string; force?: boolean },
+): Promise<VerifyRun> {
+  const q = input?.force ? '?force=true' : ''
+  return api.post<VerifyRun>(`/projects/${projectId}/requirements/${requirementId}/verify${q}`, {
+    note: input?.note || undefined,
+    modules: input?.modules || undefined,
+  })
+}
+
+/** 需求的验证 run 列表（新到旧；不含日志全文） */
+export function listVerifyRuns(projectId: string, requirementId: string): Promise<VerifyRun[]> {
+  return api.get<VerifyRun[]>(`/projects/${projectId}/requirements/${requirementId}/verify-runs`)
+}
+
+/** 单个 run 详情（含全链日志） */
+export function getVerifyRun(id: number): Promise<VerifyRun> {
+  return api.get<VerifyRun>(`/verify/runs/${id}`)
+}
+
+// ---- Work Item ----
 export function listWorkItems(projectId: string, requirementId: string): Promise<WorkItem[]> {
   return api.get<WorkItem[]>(`/projects/${projectId}/requirements/${requirementId}/work-items`)
 }

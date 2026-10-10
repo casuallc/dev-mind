@@ -19,6 +19,10 @@ export interface Project {
   autoBuildOnWiDone?: boolean
   /** CAP-72：构建成功后自动部署 TEST 环境 */
   autoDeployTestOnBuild?: boolean
+  /** CAP-73：需求开发中验证开关（默认关） */
+  verifyInDevEnabled?: boolean
+  /** CAP-73：验证日配额（默认 20，0 = 不限） */
+  verifyDailyQuota?: number
   /** CAP-21：默认执行节点 id（空 = 本机）；新建会话未显式选节点时继承 */
   agentNodeId?: string
   contextSummary?: string
@@ -50,6 +54,10 @@ export interface ProjectInput {
   autoBuildOnWiDone?: boolean
   /** CAP-72：构建成功后自动部署 TEST 环境（不传 = 创建默认关/更新保持） */
   autoDeployTestOnBuild?: boolean
+  /** CAP-73：需求开发中验证开关（不传 = 创建默认关/更新保持） */
+  verifyInDevEnabled?: boolean
+  /** CAP-73：验证日配额（默认 20，0 = 不限；不传 = 保持） */
+  verifyDailyQuota?: number
   /** CAP-21：默认执行节点 id；空串 = 清除回本机（不传 = 保持不变） */
   agentNodeId?: string
 }
@@ -117,6 +125,12 @@ export interface ProjectEnvironment {
   nodeIds: string[]
   variables: Record<string, string>
   secrets: string[]
+  /** CAP-73：补丁验证部署目录（空 = 该环境不可用于验证） */
+  patchDir?: string
+  /** CAP-73：覆盖文件前命令（停服/备份；空 = 直接覆盖） */
+  patchPreHook?: string
+  /** CAP-73：覆盖文件后命令（启服/热加载；空 = 不动进程） */
+  patchPostHook?: string
   createdAt: string
   updatedAt: string
 }
@@ -127,6 +141,9 @@ export interface EnvironmentInput {
   nodeIds: string[]
   variables: Record<string, string>
   secrets: string[]
+  patchDir?: string
+  patchPreHook?: string
+  patchPostHook?: string
 }
 
 export interface BuildStep {

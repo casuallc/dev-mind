@@ -11,6 +11,7 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd'
@@ -80,19 +81,32 @@ export default function ProjectEnvironmentsPage() {
     setEditing(e)
     form.setFieldsValue(
       e
-        ? { name: e.name, description: e.description, nodeIds: e.nodeIds, varsText: varsToText(e.variables), secrets: e.secrets }
-        : { name: 'DEV', description: '', nodeIds: [], varsText: '', secrets: [] },
+        ? {
+            name: e.name, description: e.description, nodeIds: e.nodeIds,
+            varsText: varsToText(e.variables), secrets: e.secrets,
+            patchDir: e.patchDir ?? '', patchPreHook: e.patchPreHook ?? '', patchPostHook: e.patchPostHook ?? '',
+          }
+        : {
+            name: 'DEV', description: '', nodeIds: [], varsText: '', secrets: [],
+            patchDir: '', patchPreHook: '', patchPostHook: '',
+          },
     )
     setOpen(true)
   }
 
-  const onSave = async (v: { name: string; description?: string; nodeIds: string[]; varsText: string; secrets: string[] }) => {
+  const onSave = async (v: {
+    name: string; description?: string; nodeIds: string[]; varsText: string; secrets: string[]
+    patchDir?: string; patchPreHook?: string; patchPostHook?: string
+  }) => {
     const input: EnvironmentInput = {
       name: v.name,
       description: v.description,
       nodeIds: v.nodeIds ?? [],
       variables: textToVars(v.varsText),
       secrets: v.secrets ?? [],
+      patchDir: v.patchDir?.trim() || undefined,
+      patchPreHook: v.patchPreHook?.trim() || undefined,
+      patchPostHook: v.patchPostHook?.trim() || undefined,
     }
     try {
       if (editing) {
@@ -148,6 +162,16 @@ export default function ProjectEnvironmentsPage() {
       dataIndex: 'secrets',
       width: 160,
       render: (sec: string[]) => sec?.length ? sec.map((x) => <Tag key={x} color="purple">{x}</Tag>) : '-',
+    },
+    {
+      title: '补丁验证',
+      dataIndex: 'patchDir',
+      width: 110,
+      render: (v?: string, r?: ProjectEnvironment) => v
+        ? <Tooltip title={`补丁目录：${v}${r?.patchPreHook ? `\n前置钩子：${r.patchPreHook}` : ''}${r?.patchPostHook ? `\n后置钩子：${r.patchPostHook}` : ''}`}>
+            <Tag color="green">可验证</Tag>
+          </Tooltip>
+        : <Tooltip title="未配补丁目录 = 该环境不可用于开发中验证（CAP-73）"><Tag>-</Tag></Tooltip>,
     },
     { title: '描述', dataIndex: 'description', ellipsis: true, render: (d?: string) => d || '-' },
     {
@@ -205,6 +229,18 @@ export default function ProjectEnvironmentsPage() {
           </Form.Item>
           <Form.Item label="描述" name="description">
             <Input />
+          </Form.Item>
+          <Form.Item label="补丁目录" name="patchDir"
+            extra="CAP-73 开发中验证：服务在该环境节点上的部署目录（补丁覆盖目标）。空 = 不可用于验证。内容形态必须与构建配置的产物目录同构（平台做两棵树文件级 diff）">
+            <Input placeholder="如 /opt/myapp 或 D:/apps/myapp" />
+          </Form.Item>
+          <Form.Item label="补丁前置钩子" name="patchPreHook"
+            extra="覆盖文件前执行（停服/备份现场），失败即终止不动现场；空 = 直接覆盖。过节点命令白名单（execAllowlist）">
+            <Input placeholder="如 systemctl stop myapp" />
+          </Form.Item>
+          <Form.Item label="补丁后置钩子" name="patchPostHook"
+            extra="覆盖文件后执行（启服/热加载）；空 = 仅覆盖文件不动进程。前置钩子一旦成功，后续任何失败仍会尽力执行本钩子拉起服务">
+            <Input placeholder="如 systemctl start myapp" />
           </Form.Item>
         </Form>
       </Modal>

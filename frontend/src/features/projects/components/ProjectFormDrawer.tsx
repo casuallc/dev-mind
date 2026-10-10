@@ -1,7 +1,7 @@
 // CAP-02 统一的新建/编辑项目表单：后台项目列表与项目设置页共用。
 // CAP-23：仓库来源支持 本地路径 / 从 Git 克隆（GitLab/GitHub，异步克隆到服务端工作区）。
 import { useEffect, useState } from 'react'
-import { Button, Drawer, Form, Input, Radio, Select, Space, Switch, message } from 'antd'
+import { Button, Drawer, Form, Input, InputNumber, Radio, Select, Space, Switch, message } from 'antd'
 import { createProject, updateProject } from '../api'
 import type { Project, ProjectInput } from '../types'
 import { useGitIntegrations } from '../hooks/useGitIntegrations'
@@ -62,6 +62,7 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
             autoRegressionOnDeploy: false,
             autoBuildOnWiDone: false,
             autoDeployTestOnBuild: false,
+            verifyInDevEnabled: false,
           },
     )
   }, [open, project, form])
@@ -217,6 +218,21 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
           extra="CAP-10 FR-05：部署单成功后自动对该项目全部套件跑一次回归"
         >
           <Switch />
+        </Form.Item>
+        <Form.Item
+          label="需求开发中验证"
+          name="verifyInDevEnabled"
+          valuePropName="checked"
+          extra="CAP-73：开启后需求可绑定验证环境，AI 在开发会话 commit 后可自主触发「推送→增量构建→补丁更新→冒烟」；还需环境配补丁目录 + 构建配置产物目录"
+        >
+          <Switch />
+        </Form.Item>
+        <Form.Item
+          label="验证日配额"
+          name="verifyDailyQuota"
+          extra="CAP-73：该项目每日已受理验证次数上限（防 AI 刷重试），0 = 不限"
+        >
+          <InputNumber min={0} max={10000} style={{ width: '100%' }} placeholder="默认 20" />
         </Form.Item>
         <Form.Item
           label="默认执行节点"

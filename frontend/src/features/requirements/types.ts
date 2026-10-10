@@ -43,6 +43,8 @@ export interface Requirement {
   analysisSkipped?: boolean
   /** CAP-38 FR-01：方案设计阶段已跳过 */
   designSkipped?: boolean
+  /** CAP-73：绑定的验证环境 id（可空；PROD 不可绑） */
+  verifyEnvironmentId?: number
   createdBy?: string
   createdAt: string
   updatedAt: string
@@ -176,6 +178,48 @@ export interface RequirementInput {
   labels?: string[]
   fixVersions?: string[]
   dueDate?: string // yyyy-MM-dd
+  /** CAP-73：验证环境绑定（后端语义：不传 = 保持不变，0 = 解绑，>0 = 绑定） */
+  verifyEnvironmentId?: number | null
+}
+
+// ---- CAP-73 需求开发中验证 ----
+
+export type VerifyRunStatus = 'RUNNING' | 'SUCCESS' | 'FAILED'
+export type VerifyStage = 'PUSHING' | 'BUILDING' | 'PATCHING' | 'TESTING'
+export type VerifyTriggerType = 'AGENT' | 'MANUAL'
+
+/** CAP-73 verify run（对应后端 VerifyRunView；列表接口 logsText 恒 null，详情接口带全文） */
+export interface VerifyRun {
+  id: number
+  requirementId: string
+  projectId: string
+  triggerType: VerifyTriggerType
+  /** 人工触发用户名；agent 触发为会话 id */
+  triggeredBy?: string
+  environmentId: number
+  /** 远端需求分支 HEAD */
+  commitSha?: string
+  /** PUSHED / SKIPPED（无会话工作区纯远端） */
+  pushStatus?: string
+  /** 当前/失败阶段 */
+  stage?: VerifyStage
+  status: VerifyRunStatus
+  /** devmind-verify --modules 透传值 */
+  modulesHint?: string
+  /** 补丁下发文件数 */
+  filesChanged?: number
+  durationMs?: number
+  /** 各阶段耗时 map（JSON 串） */
+  stageTimingsJson?: string
+  /** 失败阶段+日志尾部（脱敏截断） */
+  failureSummary?: string
+  note?: string
+  buildNodeId?: string
+  envNodeId?: string
+  testRunId?: number
+  logsText?: string
+  createdAt: string
+  finishedAt?: string
 }
 
 export type WorkItemType = 'DESIGN' | 'DEVELOPMENT' | 'TEST' | 'DOCUMENT' | 'REVIEW'

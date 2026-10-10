@@ -99,6 +99,7 @@ function BuildCenter({ id }: { id: string }) {
         executor: cfg.executor,
         agentNodeId: cfg.agentNodeId,
         concurrencyLimit: cfg.concurrencyLimit,
+        outputDir: cfg.outputDir?.trim() || null,
       })
       setCfg(saved)
       setConfigOpen(false)
@@ -245,6 +246,16 @@ function BuildCenter({ id }: { id: string }) {
             </Form.Item>
             <Form.Item label="并发上限">
               <InputNumber min={1} max={10} value={cfg.concurrencyLimit} onChange={(v) => setCfg({ ...cfg, concurrencyLimit: v ?? 1 })} />
+            </Form.Item>
+            <Form.Item
+              label="验证产物目录"
+              extra="CAP-73 开发中验证：构建脚本把产物组装成与验证环境补丁目录同构的完整部署物树（相对工作区根，须 gitignore），如 build/verify-out；前端项目直接填 dist。空 = 验证链不可用"
+            >
+              <Input
+                placeholder="如 build/verify-out 或 dist"
+                value={cfg.outputDir ?? ''}
+                onChange={(e) => setCfg({ ...cfg, outputDir: e.target.value })}
+              />
             </Form.Item>
           </Form>
         )}

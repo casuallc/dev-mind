@@ -10,6 +10,8 @@ export interface BuildConfig {
   /** AGENT 执行的目标节点 id（空 = 路由链：项目默认 → 平台默认 → 标签） */
   agentNodeId: string | null
   concurrencyLimit: number
+  /** CAP-73：部署物树目录（相对工作区根，与验证环境 patch_dir 同构；空 = 不可用于验证链） */
+  outputDir?: string | null
 }
 
 export interface TriggerInput {

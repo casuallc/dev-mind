@@ -44,6 +44,7 @@ import {
   flowPlan,
   getRequirementOverview,
   listDesigns,
+  listVerifyRuns,
   refreshRequirementFromJira,
   isUnfinishedWorkItemsConflict,
   updateRequirementStatus,
@@ -58,6 +59,7 @@ import RelatedRecordsTab from '../components/RelatedRecordsTab'
 import OutputsTab from '../components/OutputsTab'
 import RequirementFormDrawer from '../components/RequirementFormDrawer'
 import TimelineTab from '../components/TimelineTab'
+import VerifyTab from '../components/VerifyTab'
 import WorkItemsTab from '../components/WorkItemsTab'
 import { ACTIVE_SESSION_STATES, latestFlowSession } from '../components/flow/flowSessions'
 import { getCurrentProjectId, setCurrentProject } from '../../../app/currentProjectStore'
@@ -266,14 +268,35 @@ export default function RequirementDetailPage() {
   }
 
   // 需求翻 DONE（终态）：验收通过（ACCEPTANCE 主按钮）与直接完成（伪需求/无需工作单元，不经 rollup）共用，仅文案不同
-  const confirmMarkDone = (mode: 'accept' | 'direct') => {
+  // CAP-73 FR-07：验收弹窗展示最近一次 verify run 状态（仅提示不门禁）
+  const confirmMarkDone = async (mode: 'accept' | 'direct') => {
     const direct = mode === 'direct'
+    let verifyHint: ReactNode = null
+    if (!direct && projectId) {
+      const latest = await listVerifyRuns(projectId, r.id).then((runs) => runs[0]).catch(() => undefined)
+      verifyHint = (
+        <div style={{ marginTop: 8 }}>
+          开发中验证：{latest
+            ? latest.status === 'SUCCESS'
+              ? <Tag color="success">最近一次验证通过（{fmtTime(latest.createdAt)}）</Tag>
+              : latest.status === 'FAILED'
+                ? <Tag color="error">最近一次验证失败{latest.stage ? `（${latest.stage}）` : ''}（{fmtTime(latest.createdAt)}）</Tag>
+                : <Tag color="processing">验证进行中（#{latest.id}）</Tag>
+            : <Tag>从未验证</Tag>}
+        </div>
+      )
+    }
     Modal.confirm({
       centered: true,
       title: direct ? '直接完成需求？' : '验收通过？',
-      content: direct
-        ? `「${r.code} ${r.title}」将不经过工作单元直接标记为 DONE，适用于伪需求/无需开发处理的条目。`
-        : `「${r.code} ${r.title}」将标记为 DONE，工作单元与关联记录保留。`,
+      content: (
+        <div>
+          {direct
+            ? `「${r.code} ${r.title}」将不经过工作单元直接标记为 DONE，适用于伪需求/无需开发处理的条目。`
+            : `「${r.code} ${r.title}」将标记为 DONE，工作单元与关联记录保留。`}
+          {verifyHint}
+        </div>
+      ),
       okText: direct ? '直接完成' : '验收通过',
       cancelText: '返回',
       onOk: async () => {
@@ -522,6 +545,11 @@ export default function RequirementDetailPage() {
                   onChanged={reloadOverview}
                 />
               ),
+            },
+            {
+              key: 'verify',
+              label: '验证',
+              children: <VerifyTab requirement={r} />,
             },
             {
               key: 'timeline',
