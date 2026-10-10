@@ -136,10 +136,18 @@ public class GitRepoSyncService {
         mirrorToProjectRepos(repo);
 
         GitRemoteOps.GitResult result;
+        // 留 stderr 尾巴（cloneRepo 内已脱敏；进度行会刷屏，截头保尾）：失败时写进 cloneError，
+        // 否则 UI 只有 "exit=128" 无从排查（194 迁移后 GitHub 克隆失败即因此卡诊断）
+        StringBuilder stderrTail = new StringBuilder();
         try {
             String token = tokenResolver.resolve(repo.getIntegrationId(), repo.getRemoteUrl());
             result = gitOps.cloneRepo(repo.getRemoteUrl(), token, repo.getLocalPath(),
-                    repo.getDefaultBranch(), null);
+                    repo.getDefaultBranch(), line -> {
+                        stderrTail.append(line).append('\n');
+                        if (stderrTail.length() > 800) {
+                            stderrTail.delete(0, stderrTail.length() - 800);
+                        }
+                    });
         } catch (DevMindException e) {
             result = new GitRemoteOps.GitResult(false, e.getMessage());
         }
@@ -159,7 +167,9 @@ public class GitRepoSyncService {
             repo.setLastFetchError(null);
         } else {
             repo.setCloneStatus(GitRepositoryEntity.CLONE_FAILED);
-            repo.setCloneError(truncate(result.output(), 1000));
+            String detail = stderrTail.toString().trim();
+            repo.setCloneError(truncate(detail.isEmpty() ? result.output()
+                    : result.output() + " | " + detail, 1000));
         }
         repo.setUpdatedAt(Instant.now());
         gitRepoRepo.save(repo);
