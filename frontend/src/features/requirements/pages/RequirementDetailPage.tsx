@@ -62,6 +62,7 @@ import WorkItemsTab from '../components/WorkItemsTab'
 import { ACTIVE_SESSION_STATES, latestFlowSession } from '../components/flow/flowSessions'
 import { getCurrentProjectId, setCurrentProject } from '../../../app/currentProjectStore'
 import { fmtDuration, fmtTime } from '../../../shared/utils/format'
+import Markdown from '../../../shared/components/Markdown'
 import { pageRootScrollStyle } from '../../../shared/utils/pageLayout'
 import {
   requirementStatusColor,
@@ -469,9 +470,7 @@ export default function RequirementDetailPage() {
             {r.source === 'JIRA' ? (
               <JiraDescription description={r.description} pid={r.projectId} rid={r.id} />
             ) : (
-              <Typography.Paragraph style={{ fontSize: 13, marginBottom: 0, whiteSpace: 'pre-wrap' }}>
-                {r.description}
-              </Typography.Paragraph>
+              <Markdown content={r.description} />
             )}
           </CollapsibleDescription>
         )}
