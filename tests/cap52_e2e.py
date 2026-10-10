@@ -238,7 +238,16 @@ def main():
         assert all(w["status"] == "IN_PROGRESS" for w in wis), f"WI 不该自动 DONE（人验收）: {wis}"
         notes = req("GET", "/notifications", token=tok)
         assert any(n["eventType"] == "flow.dev.done" for n in notes), "缺 flow.dev.done 通知"
-        print("[8] 开发收尾 → 需求 ACCEPTANCE + WI 保持进行中（不自动 DONE）OK")
+        # dev-summary 登记为 SUMMARY 产物：需求级会话 workItemId 为空（只挂需求），
+        # path=sessionId#fileName 供「开发产出」Tab 回读 session_outputs 预览
+        summary_artifact = wait(lambda: next(
+            (a for a in overview(tok, pid, rid)["artifacts"] if a["type"] == "SUMMARY"), None),
+            "SUMMARY 产物登记", 30)
+        assert summary_artifact["path"] == f"{dev_sess[0]['id']}#dev-summary.md", \
+            f"产物 path 引用不符: {summary_artifact}"
+        assert not summary_artifact.get("workItemId"), f"需求级会话产物不该挂 WI: {summary_artifact}"
+        assert summary_artifact["producerType"] == "SESSION", f"producerType 不符: {summary_artifact}"
+        print("[8] 开发收尾 → 需求 ACCEPTANCE + WI 保持进行中（不自动 DONE）+ SUMMARY 产物登记 OK")
 
         # ---- 链路 E：人工再跑一轮开发 ----
         dev2 = req("POST", f"/projects/{pid}/requirements/{rid}/flow/dev", None, tok)
