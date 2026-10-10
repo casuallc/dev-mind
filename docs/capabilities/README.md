@@ -85,7 +85,7 @@
 | [CAP-69](CAP-69-script-test-suite.md) | 脚本测试套件 | 执行器 | 独立于项目的 kind=script 套件：自带 git 源+命令+env（脱敏）+超时，exec 帧下发 runner 整包跑（工作区按 workspaceKey 复用、`.state` 跨运行保留），JUnit XML 走 stdout marker（CAP-56 先例 gzip+base64 单行）回收解析进 test_case_results，WS 流/报告/失败转缺陷零改动复用；Playwright/pytest 等整包脚本统一落点 |
 | [CAP-71](CAP-71-agent-audit-log.md) | Agent 节点审计日志 | 底座 | 连接日志升级为节点域全量审计（agent_audit_logs 九分类：连接/隧道/指令/代理逐条含字节耗时/上下文包/文件中转/规则/包/节点运维），旁路落库不阻塞主流程，服务端真分页+分类/节点/结果/关键词过滤，保留期 devmind.agent.audit-retention-days 默认 180 天可配；ServerTunnelStream 补统一终结点顺带修正常收尾不摘表缺口 |
 | [CAP-72](CAP-72-pipeline-project-switches.md) | 执行链自动化项目级开关 | 底座 | CAP-17 恒开的「WI DONE→自动构建→自动部署 TEST」加项目级开关（projects.auto_build_on_wi_done / auto_deploy_test_on_build，默认关、getter 兜底 false、不加 @ColumnDefault），PipelineOrchestrator 两处入口静默闸门；生产部署/发版仍永远人工；与已有 auto_regression_on_deploy 同处项目表单 |
-| [CAP-73](CAP-73-requirement-indev-verification.md) | 需求开发中验证 | 流程层 | 验证前移到开发中且走增量补丁（非全量流水线）：agent 自主触发（限额/互斥兜底）「推送 feature/req-<id> HEAD → 增量构建 → 变更文件补丁覆盖既有环境部署目录+更新钩子 → 冒烟」，PROD 禁绑；结果回灌进行中会话供 agent 前置迭代；需求详情页验证 Tab + 人工同链触发，收口弹窗展示最近验证状态（不门禁） |
+| [CAP-73](CAP-73-requirement-indev-verification.md) | 需求开发中验证 | 流程层 | 验证前移到开发中且走增量补丁（非全量流水线）：agent 自主触发（限额/互斥兜底）「推送 feature/req-<id> HEAD → 增量构建 → 变更文件补丁覆盖既有环境部署目录（前后钩子夹住停启服）→ 冒烟」，PROD 禁绑；结果回灌进行中会话供 agent 前置迭代；需求详情页验证 Tab + 人工同链触发，收口弹窗展示最近验证状态（不门禁） |
 
 ## 依赖关系
 

@@ -43,14 +43,19 @@ environments 中**除 PROD 外**的全部环境（bug 类需求绑复现所在�
 ### FR-02 环境快速更新配置
 
 补丁验证要求环境**已有运行中的服务**且平台知道怎么更新它。environments 增补丁配置
-（可空三件套，缺任一 = 该环境不可用于验证）：
+（可空四件套，`patch_dir` 必填、钩子可空；缺 `patch_dir` = 该环境不可用于验证）：
 
 - `patch_dir`：服务在该环境节点上的部署目录（补丁覆盖的目标）；
-- `patch_hook`：更新后执行的命令（重启进程 / systemctl restart / 热加载脚本；
-  空 = 仅覆盖文件不重启，适用于热加载场景）；
+- `patch_pre_hook`：**覆盖文件前**执行的命令（停服 / systemctl stop / 备份现场；
+  空 = 直接覆盖）；
+- `patch_post_hook`：**覆盖文件后**执行的命令（启服 / systemctl start / 热加载脚本；
+  空 = 仅覆盖文件不动进程，适用于热加载场景）；
 - 执行节点取环境既有 `nodeIds` 首节点（CAP-36 口径）。
 
-绑定时不强校验；触发时缺配置报 `VERIFY_ENV_NOT_PATCHABLE` 并引导到环境配置页。
+典型搭配：Java 服务 = pre `systemctl stop xxx` + post `systemctl start xxx`；
+前端静态资源 = 双钩子都空（nginx 直接读新文件）；热加载应用 = 仅 post 触发刷新。
+
+绑定时不强校验；触发时缺 `patch_dir` 报 `VERIFY_ENV_NOT_PATCHABLE` 并引导到环境配置页。
 
 ### FR-03 增量验证链（verify run）
 
@@ -64,9 +69,10 @@ environments 中**除 PROD 外**的全部环境（bug 类需求绑复现所在�
    与依赖目录保留）checkout 需求分支 HEAD 执行项目构建脚本——增量收益来自
    工作区/依赖缓存复用（构建系统自身的增量编译是项目脚本职责，平台不介入）。
 3. **补丁下发**：构建输出与环境节点侧同步清单（`.devmind-verify-manifest.json`，
-   文件路径+哈希，存部署目录旁）比对，**仅把变更文件经 exec 帧下发覆盖**到
-   `patch_dir`，然后执行 `patch_hook`（可空则跳过）。manifest 缺失（首次验证/
-   节点重建）→ 退化为构建输出**文件级全量同步**一次，之后恢复增量。
+   文件路径+哈希，存部署目录旁）比对，然后按序执行：`patch_pre_hook`（可空跳过，
+   失败即终止不覆盖文件）→ **仅变更文件经 exec 帧下发覆盖**到 `patch_dir` →
+   `patch_post_hook`（可空跳过）。manifest 缺失（首次验证/节点重建）→ 退化为构建
+   输出**文件级全量同步**一次，之后恢复增量。
 4. **冒烟**：复用 CAP-10 该环境绑定的冒烟套件（无绑定则跳过并标注「未执行冒烟」）。
 
 触发即返回 runId，全链异步；状态机 QUEUED → PUSHING/BUILDING/PATCHING/TESTING →
@@ -135,8 +141,9 @@ CAP-06（通知）、CAP-72（项目级开关先例）。**不依赖 CAP-09 部�
 requirements 加列：verify_environment_id BIGINT NULL  -- environments.id
 
 environments 加列：
-  patch_dir   VARCHAR(512) NULL   -- 部署目录（补丁覆盖目标）
-  patch_hook  VARCHAR(1024) NULL  -- 更新后命令（空 = 不重启）
+  patch_dir        VARCHAR(512) NULL   -- 部署目录（补丁覆盖目标；缺 = 不可验证）
+  patch_pre_hook   VARCHAR(1024) NULL  -- 覆盖文件前命令（停服/备份；空 = 直接覆盖）
+  patch_post_hook  VARCHAR(1024) NULL  -- 覆盖文件后命令（启服/热加载；空 = 不动进程）
 
 projects 加列：
   verify_in_dev_enabled BIT NULL  -- 默认关（getter 兜底，不加 @ColumnDefault）
@@ -172,13 +179,15 @@ verify_runs(
 | GET | `/api/requirements/{id}/verify-runs` | 验证历史（分页） |
 | POST | `/api/verify/trigger?token=` | agent 通道（会话作用域 token 自证，免登录） |
 
-需求读写 DTO 增 `verifyEnvironmentId`；环境读写 DTO 增 `patchDir`/`patchHook`。
+需求读写 DTO 增 `verifyEnvironmentId`；环境读写 DTO 增 `patchDir`/`patchPreHook`/
+`patchPostHook`。
 
 ## 7. 验收标准
 
-1. 需求绑定已配补丁三件套的环境后，会话内 agent commit 改动并执行
-   `devmind-verify`：verify run 走完 推送→增量构建→补丁下发（仅变更文件）→钩子→
-   冒烟，进行中会话收到结果事件（含变更文件数与访问地址）。
+1. 需求绑定已配 `patch_dir` 的环境后，会话内 agent commit 改动并执行
+   `devmind-verify`：verify run 走完 推送→增量构建→pre 钩子→补丁下发（仅变更
+   文件）→post 钩子→冒烟，进行中会话收到结果事件（含变更文件数与访问地址）。
+2. pre 钩子失败：链终止且**文件未被覆盖**（现场保持旧版本），会话收到钩子错误输出。
 2. 第二次验证只下发**增量变更文件**（manifest 比对生效）；删掉节点侧 manifest 后
    第三次退化为全量同步一次，第四次恢复增量。
 3. 构建基准是需求分支**已 push 的 HEAD commit**；HEAD 与上次验证相同 = 409 拒绝
