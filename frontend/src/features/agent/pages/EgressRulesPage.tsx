@@ -34,7 +34,7 @@ const TUNNEL_PROTOCOL = 21
 
 /**
  * CAP-70 FR-08 出口规则管理：host glob 命中即经指定节点的反向隧道出访（服务端内嵌 SOCKS5
- * 只绑 127.0.0.1，git 走 -c http.<url>.proxy=socks5h://…，连接器挂规则驱动 ProxySelector）。
+ * 只绑 127.0.0.1 供 git 走 socks5h，HTTP CONNECT 代理供 Java 连接器挂 ProxySelector）。
  * 未命中任何规则 = 直连零行为变化。协议 <v21 的节点保存时警告（老 runner 无隧道，引用即失败）。
  */
 export default function EgressRulesPage() {

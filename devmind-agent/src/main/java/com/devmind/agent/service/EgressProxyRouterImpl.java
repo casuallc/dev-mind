@@ -22,7 +22,9 @@ import java.util.Locale;
 import java.util.Optional;
 
 /**
- * CAP-70 FR-05/06/07：{@link EgressProxyRouter} 实现（规则表 + 隧道状态 + SOCKS 端口）。
+ * CAP-70 FR-05/06/07：{@link EgressProxyRouter} 实现（规则表 + 隧道状态 + 代理端口）。
+ * Java HTTP 侧给 HTTP（CONNECT）代理（JDK HttpClient 静默丢弃 SOCKS，见 SPI javadoc）；
+ * git 侧给 socks5h（git 原生支持且 DNS 必须代理解析）。
  * 命中规则但不可用 = 抛 DevMindException(CONFLICT)，文案带规则与节点状态（fail-visible，
  * 禁静默回落直连）；未命中 = empty（直连，零行为变化）。
  */
@@ -54,8 +56,11 @@ public class EgressProxyRouterImpl implements EgressProxyRouter {
             return Optional.empty();
         }
         checkUsable(route.get(), host);
-        return Optional.of(new Proxy(Proxy.Type.SOCKS,
-                new InetSocketAddress("127.0.0.1", props.getSocksPort())));
+        // HTTP（CONNECT）代理而非 SOCKS：JDK HttpClient 只认 Proxy.Type.HTTP，SOCKS 代理会被
+        // 静默丢弃直连（java.net.http 源码零 socks 处理，2026-10-10 实锤）；CONNECT 与
+        // socks5h 同语义——目标主机名由隧道对端（runner）解析，服务端本机无需解析内网域名。
+        return Optional.of(new Proxy(Proxy.Type.HTTP,
+                new InetSocketAddress("127.0.0.1", props.getHttpPort())));
     }
 
     @Override

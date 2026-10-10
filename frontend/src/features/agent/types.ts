@@ -107,7 +107,7 @@ export interface NodeFileContent {
 
 // ---------------- CAP-70 出口规则（egress_rules，仅 ADMIN 可见/可配） ----------------
 
-/** 出口规则：host glob 命中即经指定节点反向隧道出访（socks5h，runner 侧解析 DNS） */
+/** 出口规则：host glob 命中即经指定节点反向隧道出访（socks5h/CONNECT，runner 侧解析 DNS） */
 export interface EgressRule {
   id: number
   /** host glob：精确或 *.后缀，小写规范化入库 */

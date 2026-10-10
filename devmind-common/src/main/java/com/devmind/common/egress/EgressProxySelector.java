@@ -8,8 +8,8 @@ import java.net.URI;
 import java.util.List;
 
 /**
- * CAP-70 FR-06：规则驱动 {@link ProxySelector}——命中 egress_rules → 本机 SOCKS5，
- * 未命中 → DIRECT。<b>显式挂载</b>到各连接器/探测客户端的 HttpClient.Builder，
+ * CAP-70 FR-06：规则驱动 {@link ProxySelector}——命中 egress_rules → 本机 HTTP（CONNECT）
+ * 代理，未命中 → DIRECT。<b>显式挂载</b>到各连接器/探测客户端的 HttpClient.Builder，
  * 不设 JVM 全局默认（防意外流量被全量导进隧道）。
  *
  * <p>router 为 null（agent 模块未装配）= 恒 DIRECT。命中但隧道不可用时

@@ -12,8 +12,11 @@ public class EgressProperties {
     /** 内嵌 SOCKS5 server 开关（false = 功能整体关闭，规则表仍在但不提供出口） */
     private boolean enabled = true;
 
-    /** SOCKS5 监听端口（只绑 127.0.0.1，消费方全是同机进程） */
+    /** SOCKS5 监听端口（只绑 127.0.0.1，消费方全是同机进程 git） */
     private int socksPort = 18089;
+
+    /** HTTP（CONNECT）代理监听端口（只绑 127.0.0.1，消费方 = 同机 JDK HttpClient 系连接器） */
+    private int httpPort = 18090;
 
     /** 每流每方向在途窗口字节数（默认 256KB，CAP-70 FR-01） */
     private int windowBytes = TunnelFrame.DEFAULT_WINDOW_BYTES;
@@ -32,6 +35,8 @@ public class EgressProperties {
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public int getSocksPort() { return socksPort; }
     public void setSocksPort(int socksPort) { this.socksPort = socksPort; }
+    public int getHttpPort() { return httpPort; }
+    public void setHttpPort(int httpPort) { this.httpPort = httpPort; }
     public int getWindowBytes() { return windowBytes; }
     public void setWindowBytes(int windowBytes) { this.windowBytes = windowBytes; }
     public long getOpenTimeoutMs() { return openTimeoutMs; }

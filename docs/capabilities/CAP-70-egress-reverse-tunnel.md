@@ -58,14 +58,20 @@
     静默断链）→ 摘除隧道并关会话：后续请求按「隧道未连接」快速失败而非每单各挂 30s，
     runner 重连后自动顶回。
 
-### FR-02 服务端 SOCKS5 端点（仅本机）
+### FR-02 服务端出口端点（仅本机，SOCKS5 + HTTP 双形态）
 
 - 服务端内嵌 SOCKS5 server，**只绑 `127.0.0.1`**（禁 0.0.0.0，无认证——消费方全是
-  同机进程）；端口 `devmind.egress.socks-port` 可配，默认 18089。
-- 收到 CONNECT：目标 host 查规则表 → 命中且对应节点隧道在线 → 经该隧道 OPEN →
-  双向 relay；命中但隧道离线 → 立即拒绝并记日志（不挂起等待）；**未命中 → 拒绝**
-  （SOCKS5 not-allowed），不放行任何未配规则的目标出隧道。
-- DNS 语义：客户端一律用 socks5h（主机名不透传解析，由 runner 侧解析）——
+  同机进程）；端口 `devmind.egress.socks-port` 可配，默认 18089。**消费方 = git**
+  （socks5h 原生支持且 DNS 必须代理解析）。
+- 服务端内嵌 HTTP 代理端点（CONNECT + absolute-form 重写），同样**只绑 `127.0.0.1`**，
+  端口 `devmind.egress.http-port` 默认 18090。**消费方 = Java HTTP 客户端**——
+  JDK HttpClient 只认 `Proxy.Type.HTTP`，SOCKS 代理被 `retrieveProxy` 静默丢弃直连
+  （java.net.http 模块无 SOCKS 实现，2026-10-10 实锤：挂 SOCKS selector 的 Jira 连接器
+  整片直连超时）；CONNECT 语义下目标主机名由隧道对端解析，与 socks5h 等价。
+- 两个端点同一白名单语义：目标 host 查规则表 → 命中且隧道在线 → 经该隧道 OPEN →
+  双向 relay；命中但隧道离线 → 立即拒绝（SOCKS rep=4 / HTTP 502）并记日志（不挂起
+  等待）；**未命中 → 拒绝**（SOCKS rep=2 / HTTP 403），不放行任何未配规则的目标出隧道。
+- DNS 语义：客户端一律 socks5h / CONNECT 主机名（不透传解析，由 runner 侧解析）——
   服务端在外网本就解析不了内网域名。
 
 ### FR-03 平台级规则表（服务端 DB 权威，即白名单）
@@ -95,7 +101,7 @@
 
 ### FR-06 Java HTTP 出口注入（ProxySelector）
 
-- 新增规则驱动 `ProxySelector`（命中 → 本机 SOCKS5，未命中 → DIRECT）；
+- 新增规则驱动 `ProxySelector`（命中 → 本机 HTTP CONNECT 代理，未命中 → DIRECT）；
   GitLab/GitHub/Jira/飞书连接器与 BookmarkProbeService 的 HttpClient/RestTemplate
   **显式挂载**，不设 JVM 全局默认（防意外流量被全量导进隧道）。
 - 由此零改动受益：testConnection/listProjects/createMR/createRelease、Jira 轮询同步、
@@ -125,9 +131,11 @@
   客户端共用一条通道。
 - **为什么反向**：runner 在 NAT/防火墙后只有出向连接，服务端无法主动 TCP 连 runner，
   正向代理物理不成立；隧道复用 runner 出向 WS，服务端侧落本机 SOCKS5 端点。
-- **为什么 SOCKS5 而非 HTTP CONNECT**：git `http.proxy` 原生支持 socks5h（DNS 在
-  代理侧解析，服务端无法解析内网域名这一点必须靠它）；Java `Proxy.Type.SOCKS`
-  原生支持；无需 UDP。
+- **为什么 SOCKS5 + HTTP CONNECT 双端点**：git `http.proxy` 原生支持 socks5h（DNS 在
+  代理侧解析，服务端无法解析内网域名这一点必须靠它）；而 JDK HttpClient 只认
+  `Proxy.Type.HTTP`（SOCKS 代理被静默丢弃直连，java.net.http 无 SOCKS 实现），Java 侧
+  必须 HTTP CONNECT——两者 DNS 都在代理对端解析，语义等价，故按消费方各给一个端点，
+  共用同一规则表白名单与隧道。无需 UDP。
 - **为什么独立 WS 通道**：控制通道是全节点共用指令通道（CAP-65 §3 已论证大字节
   不得占用），隧道是双向持续字节流，专用二进制连接 + 流多路复用，控制通道零阻塞。
 - **为什么自研 Java 隧道**：帧格式仅 OPEN/ACK/DATA/CLOSE/RST 五种 + 窗口流控，
@@ -146,7 +154,7 @@
   消费方 `ObjectProvider<EgressProxyRouter>` 探测注入，缺席 = 全直连（兼容无 agent
   模块的装配形态）。
 - devmind-agent：`egress_rules` 实体与 CRUD、`/ws/agent-tunnel` 端点与流复用/路由、
-  内嵌 SOCKS5 server、规则快照推送。
+  内嵌 SOCKS5 server（git 用）与 HTTP CONNECT 代理（Java HTTP 用）、规则快照推送。
 - devmind-agent-runner：隧道客户端（出向连接 + OPEN 时出向 TCP 拨号 + 窗口流控 +
   快照校验）。
 - devmind-integration：`GitRemoteOps` 组命令注入；各连接器 HttpClient 挂 selector。
@@ -197,8 +205,8 @@
 
 ## 8. 分期与 MVP 边界
 
-- **M1（本期）**：FR-01~09 全量——git 出口 + Integration REST + 书签探测；
-  单隧道单流窗口流控；规则仅平台级。
-- **演进**：模型端点/分类边车（CAP-48/49/57）HTTP 出口接入；HTTP CONNECT 端点
-  （兼容只支持 http proxy 的客户端）；按 Integration/仓库绑定出口节点的细粒度规则；
-  隧道带宽/流量统计（对接 CAP-67）；一节点多隧道并行提升大库吞吐。
+- **M1（本期）**：FR-01~09 全量——git 出口（SOCKS5）+ Integration REST/书签探测
+  （HTTP CONNECT，2026-10-10 补办：JDK HttpClient 静默丢弃 SOCKS 代理）；单隧道单流
+  窗口流控；规则仅平台级。
+- **演进**：模型端点/分类边车（CAP-48/49/57）HTTP 出口接入；按 Integration/仓库绑定
+  出口节点的细粒度规则；隧道带宽/流量统计（对接 CAP-67）；一节点多隧道并行提升大库吞吐。

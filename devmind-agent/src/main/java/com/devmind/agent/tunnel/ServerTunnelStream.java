@@ -82,6 +82,19 @@ public class ServerTunnelStream {
         Thread.ofVirtual().name("tunnel-" + streamId + "-tx").start(this::localToTunnel);
     }
 
+    /**
+     * 预注入本端→隧道方向的初始字节（HTTP 代理 absolute-form 重写后的请求头块 /
+     * CONNECT 头块尾随字节——这些字节已从本地 socket 消费掉，不经 localToTunnel），
+     * 占发送窗口与正常 DATA 同口径。须在 {@link #start()} 前调用。
+     */
+    public void injectOutbound(byte[] bytes) throws IOException, InterruptedException {
+        if (bytes == null || bytes.length == 0) {
+            return;
+        }
+        sendWindow.acquire(bytes.length);
+        conn.send(TunnelFrame.data(streamId, bytes));
+    }
+
     /** 中止：关 socket + 摘流表（幂等） */
     public void abort(String reason) {
         if (aborted) {

@@ -20,7 +20,8 @@ import java.util.Optional;
 
 /**
  * CAP-70 FR-02：内嵌 SOCKS5 server——<b>只绑 127.0.0.1</b>（禁 0.0.0.0）、无认证
- * （消费方全是同机进程 git/JDK HttpClient）。
+ * （消费方 = 同机 git 进程，socks5h 语义；Java HTTP 客户端走 {@link HttpConnectProxyServer}
+ * ——JDK HttpClient 静默丢弃 SOCKS 代理，见 EgressProxyRouter javadoc）。
  *
  * <p>CONNECT 处理：目标 host 查 {@link EgressRuleService} 规则表 →
  * 命中且隧道在线 → 经隧道 OPEN → 双向 relay（{@link ServerTunnelStream}）；

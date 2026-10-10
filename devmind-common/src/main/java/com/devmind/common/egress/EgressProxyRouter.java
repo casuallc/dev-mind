@@ -16,8 +16,14 @@ import java.util.Optional;
 public interface EgressProxyRouter {
 
     /**
-     * Java HTTP 客户端出口：host 命中规则且隧道可用 → 本机 SOCKS5 代理；未命中 → empty（直连）。
-     * 命中但不可用 → 抛 DevMindException（fail-visible）。
+     * Java HTTP 客户端出口：host 命中规则且隧道可用 → 本机 HTTP（CONNECT）代理；未命中 →
+     * empty（直连）。命中但不可用 → 抛 DevMindException（fail-visible）。
+     *
+     * <p><b>必须是 {@code Proxy.Type.HTTP} 而非 SOCKS</b>：JDK HttpClient 的
+     * {@code HttpRequestImpl.retrieveProxy} 只接受 Type.HTTP，SOCKS 代理被静默丢弃后直连
+     * （java.net.http 模块无 SOCKS 实现，SOCKS 仅 java.base 的 SocksSocketImpl 走
+     * {@code java.net.Socket} 路线）——挂 SOCKS selector 等于没挂。CONNECT 语义下目标主机名
+     * 由代理对端解析，与 socks5h 等价。</p>
      */
     Optional<Proxy> proxyFor(String host);
 
