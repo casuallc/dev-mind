@@ -2,6 +2,7 @@ package com.devmind.agent.service;
 
 import com.devmind.agent.config.AgentProperties;
 import com.devmind.agent.dto.RunnerPackageView;
+import com.devmind.agent.model.AgentAuditLogEntity;
 import com.devmind.agent.model.RunnerPackageEntity;
 import com.devmind.agent.repo.RunnerPackageRepository;
 import com.devmind.common.exception.DevMindException;
@@ -50,10 +51,13 @@ public class RunnerPackageService {
 
     private final RunnerPackageRepository repo;
     private final AgentProperties props;
+    private final AgentAuditLogService auditLogService;
 
-    public RunnerPackageService(RunnerPackageRepository repo, AgentProperties props) {
+    public RunnerPackageService(RunnerPackageRepository repo, AgentProperties props,
+                                AgentAuditLogService auditLogService) {
         this.repo = repo;
         this.props = props;
+        this.auditLogService = auditLogService;
     }
 
     /**
@@ -95,6 +99,10 @@ public class RunnerPackageService {
         e.setUploadedAt(Instant.now());
         e.setUploadedBy(uploadedBy);
         log.info("runner 包已更新: version={} size={} by={}", version, bytes.length, uploadedBy);
+        auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_PACKAGE, "UPLOAD")
+                .actor(uploadedBy).target(version).result(AgentAuditLogEntity.RESULT_OK)
+                .bytes(bytes.length, 0)
+                .detail(filename + (force ? "（force 降级放行）" : "")));
         return RunnerPackageView.from(repo.save(e));
     }
 

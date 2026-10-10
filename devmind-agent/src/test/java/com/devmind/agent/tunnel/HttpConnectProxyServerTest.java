@@ -3,6 +3,7 @@ package com.devmind.agent.tunnel;
 import com.devmind.agent.config.EgressProperties;
 import com.devmind.agent.model.AgentNodeEntity;
 import com.devmind.agent.model.EgressRuleEntity;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.EgressRuleService;
 import com.devmind.common.egress.TunnelFrame;
 import org.junit.jupiter.api.AfterEach;
@@ -53,7 +54,7 @@ class HttpConnectProxyServerTest {
         props.setHttpPort(0); // ephemeral，避免撞本机常驻 18090
         props.setOpenTimeoutMs(5000);
         props.setHeartbeatIntervalMs(60_000); // 心跳与本测试无关，拉长免干扰
-        registry = new AgentTunnelRegistry(ruleService, props, JsonMapper.builder().build());
+        registry = new AgentTunnelRegistry(ruleService, props, JsonMapper.builder().build(), mock(AgentAuditLogService.class));
         server = new HttpConnectProxyServer(props, ruleService, registry);
         when(ruleService.allowedHostsFor(anyLong())).thenReturn(List.of("*.corp.com"));
         ws = mock(WebSocketSession.class);

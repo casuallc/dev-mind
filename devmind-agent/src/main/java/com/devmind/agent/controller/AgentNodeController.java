@@ -73,7 +73,9 @@ public class AgentNodeController {
 
     @PostMapping
     public IssuedNodeView create(@Valid @RequestBody CreateAgentNodeRequest req) {
-        return service.create(req);
+        IssuedNodeView v = service.create(req);
+        auditNode("CREATE", v.node().id(), v.node().name(), null);
+        return v;
     }
 
     /** 节点列表：逐节点聚合各会话模块 SPI 得活跃会话数（节点数为个位数，逐点查询可接受）。 */
@@ -112,36 +114,57 @@ public class AgentNodeController {
     public AgentNodeView disable(@PathVariable Long id) {
         AgentNodeView view = service.setDisabled(id, true);
         registry.evict(id);
+        auditNode("DISABLE", view.id(), view.name(), null);
         return view;
     }
 
     @PostMapping("/{id}/enable")
     public AgentNodeView enable(@PathVariable Long id) {
-        return service.setDisabled(id, false);
+        AgentNodeView view = service.setDisabled(id, false);
+        auditNode("ENABLE", view.id(), view.name(), null);
+        return view;
     }
 
     /** FR-07 编辑节点标签（runner 配置非空 labels 时会被其 hello 覆盖）+ CAP-43 外网代理（proxyUrl/proxyScopes）。 */
     @org.springframework.web.bind.annotation.PutMapping("/{id}")
     public AgentNodeView update(@PathVariable Long id, @RequestBody com.devmind.agent.dto.UpdateAgentNodeRequest req) {
-        return service.update(id, req);
+        AgentNodeView view = service.update(id, req);
+        auditNode("UPDATE", view.id(), view.name(),
+                "labels=" + (req.labels() != null ? "改" : "不动")
+                        + " proxy=" + (req.proxyUrl() != null ? "改" : "不动")
+                        + " fileRoots=" + (req.fileRoots() != null ? "改" : "不动"));
+        return view;
     }
 
     /** 设为平台默认执行节点（FR-03）：会话/项目未指定节点时的最终远程兜底，全平台至多一个。 */
     @PostMapping("/{id}/default")
     public AgentNodeView setDefault(@PathVariable Long id) {
-        return service.setDefault(id, true);
+        AgentNodeView view = service.setDefault(id, true);
+        auditNode("SET_DEFAULT", view.id(), view.name(), null);
+        return view;
     }
 
     /** 取消平台默认执行节点：之后未指定节点的会话回落本机。 */
     @PostMapping("/{id}/unset-default")
     public AgentNodeView unsetDefault(@PathVariable Long id) {
-        return service.setDefault(id, false);
+        AgentNodeView view = service.setDefault(id, false);
+        auditNode("UNSET_DEFAULT", view.id(), view.name(), null);
+        return view;
     }
 
     @DeleteMapping("/{id}")
     public void delete(@PathVariable Long id) {
         registry.evict(id);
         service.delete(id);
+        auditNode("DELETE", id, null, null);
+    }
+
+    /** CAP-71：节点运维审计（NODE 分类，带操作人）。 */
+    private void auditNode(String event, Long nodeId, String nodeName, String detail) {
+        auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_NODE, event)
+                .actor(identityService.currentActor())
+                .nodeId(nodeId).nodeName(nodeName)
+                .result(AgentAuditLogEntity.RESULT_OK).detail(detail));
     }
 
     /**
@@ -178,6 +201,14 @@ public class AgentNodeController {
             throw new DevMindException(ErrorCode.UNAUTHORIZED, "下载 runner 包需要节点 token 或登录态");
         }
         RunnerPackageView meta = packageService.current();
+        // CAP-71：包下载审计——节点 token 下载记节点，登录态下载记操作人
+        var nodeOpt = service.resolveByToken(token);
+        var entry = AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_PACKAGE, "DOWNLOAD")
+                .target(meta.version()).result(AgentAuditLogEntity.RESULT_OK)
+                .bytes(0, meta.sizeBytes());
+        entry = nodeOpt.isPresent() ? entry.node(nodeOpt.get())
+                : entry.actor(identityService.currentActor());
+        auditLogService.record(entry);
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("application/java-archive"))
                 .contentLength(meta.sizeBytes())

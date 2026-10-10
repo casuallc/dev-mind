@@ -1,5 +1,8 @@
 package com.devmind.agent.controller;
 
+import com.devmind.agent.model.AgentAuditLogEntity;
+import com.devmind.agent.model.AgentNodeEntity;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.common.agent.ContextPackageProvider;
 import com.devmind.common.agent.exec.ContextPackage;
@@ -28,30 +31,48 @@ public class AgentContextController {
 
     private final AgentNodeService nodeService;
     private final ObjectProvider<ContextPackageProvider> packageProvider;
+    private final AgentAuditLogService auditLogService;
 
     public AgentContextController(AgentNodeService nodeService,
-                                  ObjectProvider<ContextPackageProvider> packageProvider) {
+                                  ObjectProvider<ContextPackageProvider> packageProvider,
+                                  AgentAuditLogService auditLogService) {
         this.nodeService = nodeService;
         this.packageProvider = packageProvider;
+        this.auditLogService = auditLogService;
     }
 
     @GetMapping("/{sessionId}")
     public ResponseEntity<byte[]> pull(@PathVariable String sessionId,
                                        @RequestParam(required = false) String token) {
-        if (nodeService.resolveByToken(token).isEmpty()) {
+        var nodeOpt = nodeService.resolveByToken(token);
+        if (nodeOpt.isEmpty()) {
+            auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_CONTEXT, "PULL")
+                    .target(sessionId).result(AgentAuditLogEntity.RESULT_REJECTED)
+                    .detail("节点 token 无效"));
             throw new DevMindException(ErrorCode.UNAUTHORIZED, "拉取上下文包需要有效节点 token");
         }
+        AgentNodeEntity node = nodeOpt.get();
         ContextPackageProvider provider = packageProvider.getIfAvailable();
         if (provider == null) {
             throw new DevMindException(ErrorCode.NOT_FOUND, "上下文包服务未装配");
         }
-        ContextPackage pkg = provider.find(sessionId)
-                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND,
-                        "会话无上下文包: " + sessionId));
-        byte[] body = ContextPackages.toJsonBytes(pkg);
-        return ResponseEntity.ok()
-                .contentType(MediaType.APPLICATION_JSON)
-                .contentLength(body.length)
-                .body(body);
+        try {
+            ContextPackage pkg = provider.find(sessionId)
+                    .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND,
+                            "会话无上下文包: " + sessionId));
+            byte[] body = ContextPackages.toJsonBytes(pkg);
+            auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_CONTEXT, "PULL")
+                    .node(node).target(sessionId).result(AgentAuditLogEntity.RESULT_OK)
+                    .bytes(0, body.length));
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .contentLength(body.length)
+                    .body(body);
+        } catch (DevMindException e) {
+            auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_CONTEXT, "PULL")
+                    .node(node).target(sessionId).result(AgentAuditLogEntity.RESULT_FAIL)
+                    .detail(e.getMessage()));
+            throw e;
+        }
     }
 }

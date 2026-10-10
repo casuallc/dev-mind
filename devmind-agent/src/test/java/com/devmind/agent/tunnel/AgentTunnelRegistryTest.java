@@ -2,6 +2,7 @@ package com.devmind.agent.tunnel;
 
 import com.devmind.agent.config.EgressProperties;
 import com.devmind.agent.model.AgentNodeEntity;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.EgressRuleService;
 import com.devmind.common.agent.AgentProtocol;
 import com.devmind.common.egress.TunnelFrame;
@@ -48,7 +49,7 @@ class AgentTunnelRegistryTest {
         ruleService = mock(EgressRuleService.class);
         props = new EgressProperties();
         props.setOpenTimeoutMs(800);
-        registry = new AgentTunnelRegistry(ruleService, props, JsonMapper.builder().build());
+        registry = new AgentTunnelRegistry(ruleService, props, JsonMapper.builder().build(), mock(AgentAuditLogService.class));
         when(ruleService.allowedHostsFor(7L)).thenReturn(List.of("*.corp.com", "gitlab.intra"));
         ws = mock(WebSocketSession.class);
         when(ws.isOpen()).thenReturn(true);
@@ -86,7 +87,7 @@ class AgentTunnelRegistryTest {
         // FR-01 保活：隧道建连后按 heartbeatIntervalMs 周期下推 tunnel_ping 文本帧
         EgressProperties fast = new EgressProperties();
         fast.setHeartbeatIntervalMs(40);
-        AgentTunnelRegistry reg2 = new AgentTunnelRegistry(ruleService, fast, JsonMapper.builder().build());
+        AgentTunnelRegistry reg2 = new AgentTunnelRegistry(ruleService, fast, JsonMapper.builder().build(), mock(AgentAuditLogService.class));
         WebSocketSession ws2 = mock(WebSocketSession.class);
         when(ws2.isOpen()).thenReturn(true);
         reg2.onConnect(node, ws2);
@@ -108,7 +109,7 @@ class AgentTunnelRegistryTest {
         // 心跳发送失败 = 连接已死：摘除隧道（后续请求快速失败）等 runner 重连顶回
         EgressProperties fast = new EgressProperties();
         fast.setHeartbeatIntervalMs(40);
-        AgentTunnelRegistry reg2 = new AgentTunnelRegistry(ruleService, fast, JsonMapper.builder().build());
+        AgentTunnelRegistry reg2 = new AgentTunnelRegistry(ruleService, fast, JsonMapper.builder().build(), mock(AgentAuditLogService.class));
         WebSocketSession ws2 = mock(WebSocketSession.class);
         when(ws2.isOpen()).thenReturn(true);
         org.mockito.Mockito.doThrow(new java.io.IOException("broken pipe"))

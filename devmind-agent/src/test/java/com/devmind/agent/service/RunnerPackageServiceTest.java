@@ -4,6 +4,7 @@ import com.devmind.agent.config.AgentProperties;
 import com.devmind.agent.dto.RunnerPackageView;
 import com.devmind.agent.model.RunnerPackageEntity;
 import com.devmind.agent.repo.RunnerPackageRepository;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.common.exception.DevMindException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -57,7 +58,7 @@ class RunnerPackageServiceTest {
         repo = new InMemoryRepo();
         AgentProperties props = new AgentProperties();
         props.setRunnerPackageDir(dir.toString());
-        service = new RunnerPackageService(repo.create(), props);
+        service = new RunnerPackageService(repo.create(), props, mock(AgentAuditLogService.class));
     }
 
     private static byte[] fakeJar(String version, boolean withSelfUpdater) throws Exception {

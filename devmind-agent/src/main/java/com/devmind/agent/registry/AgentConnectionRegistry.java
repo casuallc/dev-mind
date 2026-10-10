@@ -173,6 +173,9 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         WebSocketSession old = connections.put(nodeId, ws);
         if (old != null && old.isOpen()) {
             kickDuplicate(old); // 同节点重复接入：踢掉旧连接（专用关闭码 4000，runner 侧走长退避防互踢风暴）
+            auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_CONNECTION, "KICK_DUPLICATE")
+                    .node(node).remoteAddr(AgentAuditLogService.formatRemoteAddr(old.getRemoteAddress()))
+                    .result(AgentAuditLogEntity.RESULT_OK).detail("同节点重复接入，踢掉旧连接"));
         }
         lastSeen.put(nodeId, System.currentTimeMillis());
         String remoteAddr = AgentAuditLogService.formatRemoteAddr(ws.getRemoteAddress());
@@ -602,9 +605,13 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             frame.put("workspaceKey", cmd.workspaceKey());
         }
         putProxy(frame, nodeId);
+        long startMs = System.currentTimeMillis();
         try {
             send(ws, frame);
             LaunchAck ack = future.get(props.getLaunchAckTimeoutMs(), TimeUnit.MILLISECONDS);
+            auditCommand("LAUNCH", nodeId, cmd.sessionId(), ack.ok(), startMs,
+                    ack.ok() ? "kind=" + (cmd.kind() == null || cmd.kind().isBlank() ? "session" : cmd.kind())
+                            : "拉起失败: " + ack.error());
             if (!ack.ok()) {
                 throw new DevMindException(ErrorCode.INTERNAL,
                         "runner 拉起会话失败: " + (ack.error() == null ? "未知原因" : ack.error()));
@@ -614,6 +621,8 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             throw e;
         } catch (Exception e) {
             pendingLaunches.remove(cmd.sessionId());
+            auditCommand("LAUNCH", nodeId, cmd.sessionId(), false, startMs,
+                    "等待 runner 确认超时/异常: " + e.getMessage());
             throw new DevMindException(ErrorCode.CONFLICT, "等待 runner 确认超时/异常: " + e.getMessage(), e);
         }
     }
@@ -668,6 +677,11 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             frame.put("files", fs);
         }
         send(requireConnection(nodeId), frame);
+        // CAP-71：INPUT 只记规模不记内容（用户输入隐私红线）
+        auditCommand("INPUT", nodeId, sessionId, true, System.currentTimeMillis(),
+                "len=" + (text == null ? 0 : text.length())
+                        + ", images=" + (images == null ? 0 : images.size())
+                        + ", files=" + (files == null ? 0 : files.size()));
     }
 
     @Override
@@ -679,6 +693,8 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("accepted", accepted);
         frame.put("scope", scope);
         send(requireConnection(nodeId), frame);
+        auditCommand("AUTHORIZE", nodeId, sessionId, true, System.currentTimeMillis(),
+                "accepted=" + accepted + ", scope=" + scope);
     }
 
     @Override
@@ -742,18 +758,32 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             frame.put("bundle", bundle);
         }
         putProxy(frame, nodeId);
+        long startMs = System.currentTimeMillis();
         try {
             send(ws, frame);
-            return done.get(cmd.timeoutSec() + 120, TimeUnit.SECONDS);
+            AgentExecResult r = done.get(cmd.timeoutSec() + 120, TimeUnit.SECONDS);
+            auditCommand("EXEC", nodeId, cmd.execId(), r.ok(), startMs, execDetail(cmd.command(), r));
+            return r;
         } catch (DevMindException e) {
             throw e;
         } catch (java.util.concurrent.TimeoutException e) {
-            return new AgentExecResult(-1, true, "等待 runner exec_exit 超时（runner 无响应）");
+            AgentExecResult r = new AgentExecResult(-1, true, "等待 runner exec_exit 超时（runner 无响应）");
+            auditCommand("EXEC", nodeId, cmd.execId(), false, startMs, execDetail(cmd.command(), r));
+            return r;
         } catch (Exception e) {
+            auditCommand("EXEC", nodeId, cmd.execId(), false, startMs,
+                    "cmd=" + cmd.command() + " 下发异常: " + e.getMessage());
             throw new DevMindException(ErrorCode.CONFLICT, "exec 下发异常: " + e.getMessage(), e);
         } finally {
             pendingExecs.remove(cmd.execId());
         }
+    }
+
+    /** exec 审计摘要：命令全文（service 截断兜底）+ 退出码/超时/error；命令本身在执行日志本就对操作者可见。 */
+    private static String execDetail(String command, AgentExecResult r) {
+        return "cmd=" + command + " | exit=" + r.exitCode()
+                + (r.timedOut() ? " timedOut" : "")
+                + (r.error() != null ? " err=" + r.error() : "");
     }
 
     /**
@@ -804,15 +834,26 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("workdir", cmd.workdir() == null ? "" : cmd.workdir());
         frame.put("pidFile", cmd.pidFile() == null ? "" : cmd.pidFile());
         frame.put("logFile", cmd.logFile() == null ? "" : cmd.logFile());
+        long startMs = System.currentTimeMillis();
         try {
             send(ws, frame);
-            return done.get(60, TimeUnit.SECONDS);
+            AgentProcResult r = done.get(60, TimeUnit.SECONDS);
+            auditCommand("PROC", nodeId, cmd.instanceId(), r.ok(), startMs,
+                    "action=" + cmd.action() + " status=" + r.status()
+                            + (r.pid() != null ? " pid=" + r.pid() : "")
+                            + (r.error() != null && !r.error().isEmpty() ? " err=" + r.error() : ""));
+            return r;
         } catch (DevMindException e) {
             throw e;
         } catch (java.util.concurrent.TimeoutException e) {
-            return AgentProcResult.fail(cmd.action(), AgentProcResult.UNKNOWN,
+            AgentProcResult r = AgentProcResult.fail(cmd.action(), AgentProcResult.UNKNOWN,
                     "等待 runner proc_ack 超时（runner 无响应）");
+            auditCommand("PROC", nodeId, cmd.instanceId(), false, startMs,
+                    "action=" + cmd.action() + " err=" + r.error());
+            return r;
         } catch (Exception e) {
+            auditCommand("PROC", nodeId, cmd.instanceId(), false, startMs,
+                    "action=" + cmd.action() + " 下发异常: " + e.getMessage());
             throw new DevMindException(ErrorCode.CONFLICT, "proc 下发异常: " + e.getMessage(), e);
         } finally {
             pendingProcs.remove(cmd.requestId());
@@ -844,6 +885,12 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("sizeBytes", cmd.sizeBytes());
         frame.put("fileName", cmd.fileName() == null ? "" : cmd.fileName());
         frame.put("installDir", cmd.installDir());
+        long startMs = System.currentTimeMillis();
+        // CAP-71：安装包分钟级下载，收口审计挂 future 完成回调（不阻塞下发线程）
+        done.whenComplete((r, e) -> auditCommand("PKG", nodeId, cmd.fileName(),
+                e == null && r != null && r.ok(), startMs,
+                e != null ? "分发异常: " + e
+                        : r.ok() ? "installDir=" + r.installDir() : "err=" + r.error()));
         try {
             send(ws, frame);
         } catch (Exception e) {
@@ -871,12 +918,17 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         Map<String, Object> frame = new LinkedHashMap<>();
         frame.put("type", "collect_output");
         frame.put("sessionId", sessionId);
+        long startMs = System.currentTimeMillis();
         try {
             send(ws, frame);
-            return done.get(75, TimeUnit.SECONDS);
+            AgentCollectResult r = done.get(75, TimeUnit.SECONDS);
+            auditCommand("COLLECT", nodeId, sessionId, r.ok(), startMs, r.error());
+            return r;
         } catch (DevMindException e) {
             throw e;
         } catch (Exception e) {
+            auditCommand("COLLECT", nodeId, sessionId, false, startMs,
+                    "等待产出回传确认超时/异常: " + e.getMessage());
             throw new DevMindException(ErrorCode.CONFLICT,
                     "等待产出回传确认超时/异常: " + e.getMessage(), e);
         } finally {
@@ -911,14 +963,23 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             frame.put("token", token);
         }
         putProxy(frame, nodeId);
+        long startMs = System.currentTimeMillis();
         try {
             send(ws, frame);
-            return done.get(330, TimeUnit.SECONDS);
+            WorklogPushResult r = done.get(330, TimeUnit.SECONDS);
+            auditCommand("WORKLOG_PUSH", nodeId, worklogOwner, r.ok(), startMs,
+                    "branch=" + branch + (r.error() != null ? " err=" + r.error() : ""));
+            return r;
         } catch (DevMindException e) {
             throw e;
         } catch (java.util.concurrent.TimeoutException e) {
-            return WorklogPushResult.failed("等待 runner worklog_push_ack 超时（runner 无响应）");
+            WorklogPushResult r = WorklogPushResult.failed("等待 runner worklog_push_ack 超时（runner 无响应）");
+            auditCommand("WORKLOG_PUSH", nodeId, worklogOwner, false, startMs,
+                    "branch=" + branch + " err=" + r.error());
+            return r;
         } catch (Exception e) {
+            auditCommand("WORKLOG_PUSH", nodeId, worklogOwner, false, startMs,
+                    "branch=" + branch + " 下发异常: " + e.getMessage());
             throw new DevMindException(ErrorCode.CONFLICT, "worklog push 下发异常: " + e.getMessage(), e);
         } finally {
             pendingWorklogPushes.remove(requestId);
@@ -1011,14 +1072,22 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("repos", repos);
         putProxy(frame, nodeId);
         long timeoutSec = 60L + 310L * Math.max(1, specs.size());
+        long startMs = System.currentTimeMillis();
         try {
             send(ws, frame);
-            return done.get(timeoutSec, TimeUnit.SECONDS);
+            FinalizeResult r = done.get(timeoutSec, TimeUnit.SECONDS);
+            auditCommand("WS_FINALIZE", nodeId, sessionId, r.ok(), startMs,
+                    "discard=" + discardChanges + (deleteRemoteBranch ? " deleteRemoteBranch" : "")
+                            + (r.error() != null ? " err=" + r.error() : ""));
+            return r;
         } catch (DevMindException e) {
             throw e;
         } catch (java.util.concurrent.TimeoutException e) {
-            return FinalizeResult.failed("等待 runner workspace_finalize_ack 超时（runner 无响应）");
+            FinalizeResult r = FinalizeResult.failed("等待 runner workspace_finalize_ack 超时（runner 无响应）");
+            auditCommand("WS_FINALIZE", nodeId, sessionId, false, startMs, "err=" + r.error());
+            return r;
         } catch (Exception e) {
+            auditCommand("WS_FINALIZE", nodeId, sessionId, false, startMs, "下发异常: " + e.getMessage());
             throw new DevMindException(ErrorCode.CONFLICT, "工作区收口下发异常: " + e.getMessage(), e);
         } finally {
             pendingFinalizes.remove(requestId);
@@ -1091,14 +1160,22 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         }
         frame.put("repos", repos);
         long timeoutSec = 60L + 120L * Math.max(1, specs.size());
+        long startMs = System.currentTimeMillis();
         try {
             send(ws, frame);
-            return done.get(timeoutSec, TimeUnit.SECONDS);
+            WorkspaceReleaseResult r = done.get(timeoutSec, TimeUnit.SECONDS);
+            auditCommand("WS_RELEASE", nodeId, sessionId, r.ok(), startMs,
+                    (deleteRemoteBranch ? "deleteRemoteBranch " : "")
+                            + (r.error() != null ? "err=" + r.error() : ""));
+            return r;
         } catch (DevMindException e) {
             throw e;
         } catch (java.util.concurrent.TimeoutException e) {
-            return WorkspaceReleaseResult.failed("等待 runner workspace_release_ack 超时（runner 无响应）");
+            WorkspaceReleaseResult r = WorkspaceReleaseResult.failed("等待 runner workspace_release_ack 超时（runner 无响应）");
+            auditCommand("WS_RELEASE", nodeId, sessionId, false, startMs, "err=" + r.error());
+            return r;
         } catch (Exception e) {
+            auditCommand("WS_RELEASE", nodeId, sessionId, false, startMs, "下发异常: " + e.getMessage());
             throw new DevMindException(ErrorCode.CONFLICT, "工作区释放下发异常: " + e.getMessage(), e);
         } finally {
             pendingReleases.remove(requestId);
@@ -1133,14 +1210,23 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         if (path != null && !path.isBlank()) {
             frame.put("path", path);
         }
+        long startMs = System.currentTimeMillis();
         try {
             send(ws, frame);
-            return done.get(30, TimeUnit.SECONDS);
+            WorkspaceQueryResult r = done.get(30, TimeUnit.SECONDS);
+            auditCommand("WS_QUERY", nodeId, sessionId, r.ok(), startMs,
+                    "action=" + action + (path != null && !path.isBlank() ? " path=" + path : "")
+                            + (r.error() != null ? " err=" + r.error() : ""));
+            return r;
         } catch (DevMindException e) {
             throw e;
         } catch (java.util.concurrent.TimeoutException e) {
-            return WorkspaceQueryResult.failed("等待 runner workspace_query_ack 超时（runner 无响应）");
+            WorkspaceQueryResult r = WorkspaceQueryResult.failed("等待 runner workspace_query_ack 超时（runner 无响应）");
+            auditCommand("WS_QUERY", nodeId, sessionId, false, startMs, "action=" + action + " err=" + r.error());
+            return r;
         } catch (Exception e) {
+            auditCommand("WS_QUERY", nodeId, sessionId, false, startMs,
+                    "action=" + action + " 下发异常: " + e.getMessage());
             throw new DevMindException(ErrorCode.CONFLICT, "工作区查询下发异常: " + e.getMessage(), e);
         } finally {
             pendingWorkspaceQueries.remove(requestId);
@@ -1170,14 +1256,25 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("sessionId", sessionId);
         frame.put("command", command);
         frame.put("cwd", cwd == null ? "" : cwd);
+        long startMs = System.currentTimeMillis();
         try {
             send(ws, frame);
-            return done.get(90, TimeUnit.SECONDS);
+            TerminalExecResult r = done.get(90, TimeUnit.SECONDS);
+            auditCommand("TERMINAL_EXEC", nodeId, sessionId, r.ok(), startMs,
+                    "cmd=" + command + " | exit=" + r.exitCode()
+                            + (r.timedOut() ? " timedOut" : "") + (r.cancelled() ? " cancelled" : "")
+                            + (r.error() != null ? " err=" + r.error() : ""));
+            return r;
         } catch (DevMindException e) {
             throw e;
         } catch (java.util.concurrent.TimeoutException e) {
-            return TerminalExecResult.failed("等待 runner terminal_exec_ack 超时（runner 无响应）");
+            TerminalExecResult r = TerminalExecResult.failed("等待 runner terminal_exec_ack 超时（runner 无响应）");
+            auditCommand("TERMINAL_EXEC", nodeId, sessionId, false, startMs,
+                    "cmd=" + command + " | err=" + r.error());
+            return r;
         } catch (Exception e) {
+            auditCommand("TERMINAL_EXEC", nodeId, sessionId, false, startMs,
+                    "cmd=" + command + " | 下发异常: " + e.getMessage());
             throw new DevMindException(ErrorCode.CONFLICT, "终端命令下发异常: " + e.getMessage(), e);
         } finally {
             pendingTerminalExecs.remove(requestId);
@@ -1206,14 +1303,24 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("sessionId", sessionId);
         frame.put("input", input == null ? "" : input);
         frame.put("cwd", cwd == null ? "" : cwd);
+        long startMs = System.currentTimeMillis();
         try {
             send(ws, frame);
-            return done.get(15, TimeUnit.SECONDS);
+            TerminalCompleteResult r = done.get(15, TimeUnit.SECONDS);
+            auditCommand("TERMINAL_COMPLETE", nodeId, sessionId, r.ok(), startMs,
+                    "input=" + input + " candidates=" + r.candidates().size()
+                            + (r.error() != null ? " err=" + r.error() : ""));
+            return r;
         } catch (DevMindException e) {
             throw e;
         } catch (java.util.concurrent.TimeoutException e) {
-            return TerminalCompleteResult.failed("等待 runner terminal_complete_ack 超时（runner 无响应）");
+            TerminalCompleteResult r = TerminalCompleteResult.failed("等待 runner terminal_complete_ack 超时（runner 无响应）");
+            auditCommand("TERMINAL_COMPLETE", nodeId, sessionId, false, startMs,
+                    "input=" + input + " err=" + r.error());
+            return r;
         } catch (Exception e) {
+            auditCommand("TERMINAL_COMPLETE", nodeId, sessionId, false, startMs,
+                    "input=" + input + " 下发异常: " + e.getMessage());
             throw new DevMindException(ErrorCode.CONFLICT, "终端补全下发异常: " + e.getMessage(), e);
         } finally {
             pendingTerminalCompletes.remove(requestId);
@@ -1237,6 +1344,7 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("type", "terminal_cancel");
         frame.put("sessionId", sessionId);
         send(ws, frame);
+        auditCommand("TERMINAL_CANCEL", nodeId, sessionId, true, System.currentTimeMillis(), null);
     }
 
     /** CAP-65：write/read 文本上限（512KB，与 WS 缓冲同档）；upload/download 走 HTTP 中转（100MB）。 */
@@ -1311,14 +1419,23 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         }
         boolean transfer = AgentFileRequest.OP_UPLOAD.equals(req.op())
                 || AgentFileRequest.OP_DOWNLOAD.equals(req.op());
+        long startMs = System.currentTimeMillis();
         try {
             send(ws, frame);
-            return done.get(transfer ? 300 : 30, TimeUnit.SECONDS);
+            AgentFileResult r = done.get(transfer ? 300 : 30, TimeUnit.SECONDS);
+            auditCommand("FILE_OP", nodeId, req.path(), r.ok(), startMs,
+                    "op=" + req.op() + " root=" + req.root()
+                            + (r.error() != null ? " err=" + r.error() : ""));
+            return r;
         } catch (DevMindException e) {
             throw e;
         } catch (java.util.concurrent.TimeoutException e) {
-            return AgentFileResult.failed("等待 runner file_ack 超时（runner 无响应）");
+            AgentFileResult r = AgentFileResult.failed("等待 runner file_ack 超时（runner 无响应）");
+            auditCommand("FILE_OP", nodeId, req.path(), false, startMs, "op=" + req.op() + " err=" + r.error());
+            return r;
         } catch (Exception e) {
+            auditCommand("FILE_OP", nodeId, req.path(), false, startMs,
+                    "op=" + req.op() + " 下发异常: " + e.getMessage());
             throw new DevMindException(ErrorCode.CONFLICT, "文件操作下发异常: " + e.getMessage(), e);
         } finally {
             pendingFiles.remove(requestId);
@@ -1347,10 +1464,16 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("sha256", sha256);
         frame.put("sizeBytes", sizeBytes);
         frame.put("force", force); // 旧 runner 忽略未知字段，仍按非 force 处理（回 busy）
+        long startMs = System.currentTimeMillis();
         try {
             send(ws, frame);
-            return future.get(props.getUpgradeAckTimeoutMs(), TimeUnit.MILLISECONDS);
+            UpgradeAck ack = future.get(props.getUpgradeAckTimeoutMs(), TimeUnit.MILLISECONDS);
+            auditCommand("UPGRADE", nodeId, "v" + version, ack.ok(), startMs,
+                    (force ? "force " : "") + (ack.reason() != null ? "reason=" + ack.reason() : ""));
+            return ack;
         } catch (Exception e) {
+            auditCommand("UPGRADE", nodeId, "v" + version, false, startMs,
+                    "等待升级确认超时/异常: " + e.getMessage());
             throw new DevMindException(ErrorCode.CONFLICT,
                     "等待升级确认超时/异常（在线旧版本 runner 不认识 upgrade 帧，需先手工部署基线版本）: "
                             + e.getMessage(), e);
@@ -1364,6 +1487,30 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         WebSocketSession ws = connections.remove(String.valueOf(nodeDbId));
         if (ws != null) {
             closeQuietly(ws);
+            auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_CONNECTION, "EVICT")
+                    .nodeId(nodeDbId).remoteAddr(AgentAuditLogService.formatRemoteAddr(ws.getRemoteAddress()))
+                    .result(AgentAuditLogEntity.RESULT_OK).detail("节点删除/禁用，主动断开连接"));
+        }
+    }
+
+    // ---------------- CAP-71 指令审计（COMMAND 分类；旁路落库，失败只降级 log.warn） ----------------
+
+    /** 指令收口统一记录：result 取 OK/FAIL，durationMs 从 startMs 起算。 */
+    private void auditCommand(String event, String nodeId, String target, boolean ok,
+                              long startMs, String detail) {
+        auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_COMMAND, event)
+                .nodeId(parseNodeId(nodeId))
+                .target(target)
+                .result(ok ? AgentAuditLogEntity.RESULT_OK : AgentAuditLogEntity.RESULT_FAIL)
+                .durationMs(System.currentTimeMillis() - startMs)
+                .detail(detail));
+    }
+
+    private static Long parseNodeId(String nodeId) {
+        try {
+            return Long.valueOf(nodeId);
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -1372,6 +1519,8 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("type", type);
         frame.put("sessionId", sessionId);
         send(requireConnection(nodeId), frame);
+        auditCommand(type.toUpperCase(java.util.Locale.ROOT), nodeId, sessionId, true,
+                System.currentTimeMillis(), null);
     }
 
     private WebSocketSession requireConnection(String nodeId) {
@@ -1425,6 +1574,12 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
                 continue;
             }
             log.warn("agent 节点心跳超时，主动断开: nodeId={}", e.getKey());
+            auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_CONNECTION, "WATCHDOG_TIMEOUT")
+                    .nodeId(parseNodeId(e.getKey()))
+                    .remoteAddr(AgentAuditLogService.formatRemoteAddr(
+                            e.getValue().getRemoteAddress()))
+                    .result(AgentAuditLogEntity.RESULT_OK)
+                    .detail("超过 " + props.getHeartbeatTimeoutMs() + "ms 未收到任何帧，主动断开"));
             closeQuietly(e.getValue()); // close 事件触发 onDisconnect 统一收尾
         }
     }

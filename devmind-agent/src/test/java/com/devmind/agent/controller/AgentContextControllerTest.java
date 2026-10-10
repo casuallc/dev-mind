@@ -1,6 +1,7 @@
 package com.devmind.agent.controller;
 
 import com.devmind.agent.model.AgentNodeEntity;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.common.agent.ContextPackageProvider;
 import com.devmind.common.agent.exec.ContextPackage;
@@ -22,11 +23,12 @@ import static org.mockito.Mockito.when;
 class AgentContextControllerTest {
 
     private final AgentNodeService nodeService = mock(AgentNodeService.class);
+    private final AgentAuditLogService auditLog = mock(AgentAuditLogService.class);
 
     @Test
     void rejectsInvalidToken() {
         when(nodeService.resolveByToken("bad")).thenReturn(Optional.empty());
-        AgentContextController ctl = new AgentContextController(nodeService, providerOf(null));
+        AgentContextController ctl = new AgentContextController(nodeService, providerOf(null), auditLog);
         DevMindException e = assertThrows(DevMindException.class, () -> ctl.pull("s1", "bad"));
         assertEquals(401, e.getErrorCode().getStatus());
     }
@@ -36,7 +38,7 @@ class AgentContextControllerTest {
         when(nodeService.resolveByToken("tok")).thenReturn(Optional.of(new AgentNodeEntity()));
         ContextPackage pkg = ContextPackage.of("## 经验", "{}");
         AgentContextController ctl = new AgentContextController(nodeService,
-                providerOf(sessionId -> Optional.of(pkg)));
+                providerOf(sessionId -> Optional.of(pkg)), auditLog);
         ResponseEntity<byte[]> resp = ctl.pull("s1", "tok");
         assertEquals(200, resp.getStatusCode().value());
         assertEquals(pkg, ContextPackages.fromJson(resp.getBody()));
@@ -46,7 +48,7 @@ class AgentContextControllerTest {
     void notFoundWhenNoPackage() {
         when(nodeService.resolveByToken("tok")).thenReturn(Optional.of(new AgentNodeEntity()));
         AgentContextController ctl = new AgentContextController(nodeService,
-                providerOf(sessionId -> Optional.empty()));
+                providerOf(sessionId -> Optional.empty()), auditLog);
         DevMindException e = assertThrows(DevMindException.class, () -> ctl.pull("s1", "tok"));
         assertEquals(404, e.getErrorCode().getStatus());
     }

@@ -1,5 +1,7 @@
 package com.devmind.agent.controller;
 
+import com.devmind.agent.model.AgentAuditLogEntity;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.agent.service.FileTransferStore;
 import com.devmind.agent.service.FileTransferStore.Transfer;
@@ -50,21 +52,28 @@ public class AgentFileTransferController {
 
     private final AgentNodeService nodeService;
     private final FileTransferStore transfers;
+    private final AgentAuditLogService auditLogService;
 
-    public AgentFileTransferController(AgentNodeService nodeService, FileTransferStore transfers) {
+    public AgentFileTransferController(AgentNodeService nodeService, FileTransferStore transfers,
+                                       AgentAuditLogService auditLogService) {
         this.nodeService = nodeService;
         this.transfers = transfers;
+        this.auditLogService = auditLogService;
     }
 
     /** upload：runner 拉取暂存字节（用后即删由 REST 链路 ack 收口 + GC 兜底，此处只读）。 */
     @GetMapping("/{transferId}")
     public ResponseEntity<Resource> pull(@PathVariable String transferId,
                                          @RequestParam(required = false) String token) {
+        long startMs = System.currentTimeMillis();
         Transfer t = authorize(transferId, token, true);
         FileSystemResource res = new FileSystemResource(t.file());
         if (!res.exists()) {
+            audit(transferId, t, "UPLOAD", AgentAuditLogEntity.RESULT_FAIL, 0, startMs,
+                    "中转文件不存在或已过期");
             throw new DevMindException(ErrorCode.NOT_FOUND, "中转文件不存在或已过期: " + transferId);
         }
+        audit(transferId, t, "UPLOAD", AgentAuditLogEntity.RESULT_OK, t.size(), startMs, null);
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .contentLength(t.size())
@@ -77,6 +86,7 @@ public class AgentFileTransferController {
                                     @RequestParam(required = false) String token,
                                     @RequestHeader(value = "X-SHA256", required = false) String sha256,
                                     HttpServletRequest req) throws IOException {
+        long startMs = System.currentTimeMillis();
         Transfer t = authorize(transferId, token, false);
         MessageDigest md = newDigest();
         long size;
@@ -86,19 +96,39 @@ public class AgentFileTransferController {
             size = copyCapped(din, out);
         } catch (IOException | RuntimeException e) {
             transfers.complete(transferId); // 收流失败：删半截文件，等待侧以 ack 超时/断连收口
+            audit(transferId, t, "DOWNLOAD", AgentAuditLogEntity.RESULT_FAIL, 0, startMs,
+                    "收流失败: " + e.getMessage());
             throw e;
         }
         String actual = HexFormat.of().formatHex(md.digest());
         if (sha256 != null && !sha256.isBlank() && !sha256.equalsIgnoreCase(actual)) {
             transfers.complete(transferId);
+            audit(transferId, t, "DOWNLOAD", AgentAuditLogEntity.RESULT_FAIL, size, startMs,
+                    "sha256 不一致（声明 " + sha256 + "，实收 " + actual + "）");
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "中转文件 sha256 不一致（runner 声明 " + sha256 + "，实收 " + actual + "）");
         }
         transfers.markReceived(transferId, size, actual);
+        audit(transferId, t, "DOWNLOAD", AgentAuditLogEntity.RESULT_OK, size, startMs, null);
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("size", size);
         resp.put("sha256", actual);
         return resp;
+    }
+
+    /** CAP-71：文件中转审计（UPLOAD=runner 拉字节 / DOWNLOAD=runner 推字节；bytes 计下行/上行）。 */
+    private void audit(String transferId, Transfer t, String event, String result, long bytes,
+                       long startMs, String detail) {
+        Long nodeId = null;
+        try {
+            nodeId = Long.valueOf(t.nodeId());
+        } catch (Exception ignored) {
+        }
+        var entry = AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_FILE_TRANSFER, event)
+                .nodeId(nodeId).target(transferId).result(result)
+                .durationMs(System.currentTimeMillis() - startMs).detail(detail);
+        entry = "UPLOAD".equals(event) ? entry.bytes(0, bytes) : entry.bytes(bytes, 0);
+        auditLogService.record(entry);
     }
 
     /** token → 节点 → 中转登记三段鉴权：节点有效、中转存在、类型与归属匹配。 */

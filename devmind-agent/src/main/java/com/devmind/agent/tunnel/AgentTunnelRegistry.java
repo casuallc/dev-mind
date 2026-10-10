@@ -1,7 +1,9 @@
 package com.devmind.agent.tunnel;
 
 import com.devmind.agent.config.EgressProperties;
+import com.devmind.agent.model.AgentAuditLogEntity;
 import com.devmind.agent.model.AgentNodeEntity;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.EgressRuleService;
 import com.devmind.agent.service.EgressTunnelStatus;
 import com.devmind.common.agent.AgentProtocol;
@@ -66,11 +68,14 @@ public class AgentTunnelRegistry implements EgressTunnelStatus {
     private final EgressRuleService ruleService;
     private final EgressProperties props;
     private final ObjectMapper mapper;
+    private final AgentAuditLogService auditLogService;
 
-    public AgentTunnelRegistry(EgressRuleService ruleService, EgressProperties props, ObjectMapper mapper) {
+    public AgentTunnelRegistry(EgressRuleService ruleService, EgressProperties props, ObjectMapper mapper,
+                               AgentAuditLogService auditLogService) {
         this.ruleService = ruleService;
         this.props = props;
         this.mapper = mapper;
+        this.auditLogService = auditLogService;
     }
 
     /** 隧道连接建立：登记 + 下发 tunnel_hello（一节点一条，新顶旧） */
@@ -89,6 +94,9 @@ public class AgentTunnelRegistry implements EgressTunnelStatus {
         }
         pushSnapshot(conn);
         Thread.ofVirtual().name("tunnel-heartbeat-" + nodeId).start(() -> heartbeatLoop(conn));
+        auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_TUNNEL, "CONNECT")
+                .node(node).remoteAddr(AgentAuditLogService.formatRemoteAddr(session.getRemoteAddress()))
+                .result(AgentAuditLogEntity.RESULT_OK));
         log.info("节点 {}（{}）隧道已建立", nodeId, node.getName());
     }
 
@@ -128,6 +136,8 @@ public class AgentTunnelRegistry implements EgressTunnelStatus {
         }
         tunnels.remove(nodeId, conn);
         abortAll(conn, "隧道断开");
+        auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_TUNNEL, "DISCONNECT")
+                .nodeId(nodeId).result(AgentAuditLogEntity.RESULT_OK));
         log.info("节点 {} 隧道断开", nodeId);
     }
 
@@ -243,6 +253,9 @@ public class AgentTunnelRegistry implements EgressTunnelStatus {
             default -> {
                 // OPEN 只应由服务端发起；runner 发来即伪造帧（FR-04 对称面），断隧道自保
                 log.warn("节点 {} 隧道收到非法帧类型 {}，断开隧道", nodeId, frame.type());
+                auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_TUNNEL, "ILLEGAL_FRAME")
+                        .nodeId(nodeId).result(AgentAuditLogEntity.RESULT_REJECTED)
+                        .detail("非法帧类型 " + frame.type() + "（OPEN 只应由服务端发起），断开隧道自保"));
                 try {
                     session.close();
                 } catch (IOException ignored) {
@@ -255,6 +268,8 @@ public class AgentTunnelRegistry implements EgressTunnelStatus {
     private void dropSilent(TunnelConn conn, String reason) {
         if (tunnels.remove(conn.nodeId(), conn)) {
             log.warn("节点 {} 隧道判定静默断链（{}），摘除等 runner 重连", conn.nodeId(), reason);
+            auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_TUNNEL, "DROP_SILENT")
+                    .nodeId(conn.nodeId()).result(AgentAuditLogEntity.RESULT_FAIL).detail(reason));
             abortAll(conn, reason);
             try {
                 conn.session().close();
