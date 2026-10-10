@@ -1,8 +1,11 @@
 // 共享 Markdown 编辑器（CAP-44）：工具栏按选区包裹/行前缀（借鉴 WeKnora manual-knowledge-editor
 // 的 selectionStart/End + setSelectionRange 手法）+ 编辑/预览切换（预览复用 shared Markdown）。
 // 受控组件：props 与 Input.TextArea 同型（value/onChange），可直接被 Form.Item 托管。
+// attachmentUpload 开启图片/附件内联：工具栏按钮 + 粘贴/拖拽 → 上传附件库（占位符防并发错位，
+// 同 DocEditorPage 姿势），文中写裸路径 /api/attachments/{id}/raw（token 渲染期由 Markdown 组件补，
+// 烤进文本会过期失效）；与 CAP-40 需求附件装配同一引用口径，需求描述里的引用会被投送到会话。
 import { useRef, useState } from 'react'
-import { Button, Input, Segmented, Space, Tooltip } from 'antd'
+import { Button, Input, Segmented, Space, Tooltip, message } from 'antd'
 import {
   BoldOutlined,
   CodeOutlined,
@@ -10,12 +13,16 @@ import {
   LinkOutlined,
   MinusOutlined,
   OrderedListOutlined,
+  PaperClipOutlined,
+  PictureOutlined,
   StrikethroughOutlined,
   TableOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons'
 import type { TextAreaRef } from 'antd/es/input/TextArea'
 import Markdown from './Markdown'
+import { uploadAttachment } from '../attachments/api'
+import { showError } from '../utils/showError'
 
 export interface MarkdownEditorProps {
   value?: string
@@ -23,6 +30,8 @@ export interface MarkdownEditorProps {
   height?: number
   placeholder?: string
   disabled?: boolean
+  /** 开启图片/附件上传内联；scope 默认 PRIVATE（需求描述等成员共享场景传 SHARED） */
+  attachmentUpload?: { scope?: 'PRIVATE' | 'SHARED' }
 }
 
 interface ToolbarAction {
@@ -38,9 +47,16 @@ export default function MarkdownEditor({
   height = 360,
   placeholder,
   disabled,
+  attachmentUpload,
 }: MarkdownEditorProps) {
   const [mode, setMode] = useState<string>('edit')
   const areaRef = useRef<TextAreaRef>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const uploadSeqRef = useRef(0)
+  // 异步上传回调拿到的是闭包旧值，用 ref 镜最新文本做占位符替换
+  const valueRef = useRef(value)
+  valueRef.current = value
 
   const textarea = (): HTMLTextAreaElement | null => {
     const r = areaRef.current as unknown as { resizableTextArea?: { textArea?: HTMLTextAreaElement } } | null
@@ -87,6 +103,53 @@ export default function MarkdownEditor({
     const needLeading = s > 0 && !value.slice(0, s).endsWith('\n\n')
     const text = (needLeading ? (value[s - 1] === '\n' ? '\n' : '\n\n') : '') + block
     emit(value.slice(0, s) + text + value.slice(s), s + text.length + cursorOffset, s + text.length + cursorOffset)
+  }
+
+  /** 在光标处插入代码片段（图片/附件引用），无焦点时追加到文末 */
+  const insertSnippet = (snippet: string) => {
+    const ta = textarea()
+    const s = ta?.selectionStart ?? value.length
+    emit(value.slice(0, s) + snippet + value.slice(s), s + snippet.length, s + snippet.length)
+  }
+
+  /** 上传附件库后光标处插入引用：图片 `![名](裸路径)`、其他 `[名](裸路径)`；占位符上传中占位，失败剔除 */
+  const uploadFiles = (files: File[], imagesOnly: boolean) => {
+    for (const f of files) {
+      if (imagesOnly && !f.type.startsWith('image/')) {
+        message.warning(`仅支持插入图片，已忽略：${f.name}`)
+        continue
+      }
+      const image = f.type.startsWith('image/')
+      const placeholder = `${image ? '!' : ''}[${f.name}](uploading://${++uploadSeqRef.current})`
+      insertSnippet(placeholder)
+      uploadAttachment(f, f.name, attachmentUpload?.scope ?? 'PRIVATE')
+        .then((v) => {
+          onChange?.(valueRef.current.replace(placeholder,
+            `${image ? '!' : ''}[${v.originalName}](/api/attachments/${v.attachmentId}/raw)`))
+        })
+        .catch((e) => {
+          showError(e, '附件上传失败')
+          onChange?.(valueRef.current.replace(placeholder, ''))
+        })
+    }
+  }
+
+  const onAreaPaste = (e: React.ClipboardEvent) => {
+    if (!attachmentUpload) return
+    const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'))
+    if (files.length > 0) {
+      e.preventDefault()
+      uploadFiles(files, true)
+    }
+  }
+
+  const onAreaDrop = (e: React.DragEvent) => {
+    if (!attachmentUpload) return
+    const files = Array.from(e.dataTransfer?.files ?? [])
+    if (files.length > 0) {
+      e.preventDefault()
+      uploadFiles(files, false)
+    }
   }
 
   const heading = (level: number) => () => {
@@ -144,7 +207,57 @@ export default function MarkdownEditor({
               </Button>
             </Tooltip>
           ))}
+          {attachmentUpload && (
+            <>
+              <Tooltip title="插入图片（也可直接粘贴/拖拽）">
+                <Button
+                  size="small"
+                  type="text"
+                  disabled={disabled || mode === 'preview'}
+                  icon={<PictureOutlined />}
+                  onClick={() => imageInputRef.current?.click()}
+                />
+              </Tooltip>
+              <Tooltip title="插入附件">
+                <Button
+                  size="small"
+                  type="text"
+                  disabled={disabled || mode === 'preview'}
+                  icon={<PaperClipOutlined />}
+                  onClick={() => fileInputRef.current?.click()}
+                />
+              </Tooltip>
+            </>
+          )}
         </Space>
+        {/* 隐藏 input 即选即传；value 清空保证同名文件可重复选 */}
+        {attachmentUpload && (
+          <>
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? [])
+                e.target.value = ''
+                if (files.length) uploadFiles(files, true)
+              }}
+            />
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? [])
+                e.target.value = ''
+                if (files.length) uploadFiles(files, false)
+              }}
+            />
+          </>
+        )}
         <Segmented
           size="small"
           value={mode}
@@ -160,6 +273,8 @@ export default function MarkdownEditor({
           ref={areaRef}
           value={value}
           onChange={(e) => onChange?.(e.target.value)}
+          onPaste={onAreaPaste}
+          onDrop={onAreaDrop}
           placeholder={placeholder}
           disabled={disabled}
           style={{ height, resize: 'vertical', border: 'none', borderRadius: 0, boxShadow: 'none' }}
