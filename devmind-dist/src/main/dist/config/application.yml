@@ -35,6 +35,11 @@ devmind:
     max-concurrent-runs: 2     # 同时进行的评测/微调上限（一次运行独占一个节点许可）
     default-timeout-sec: 3600  # 单次运行默认超时（秒）
     max-timeout-sec: 86400     # 上限（秒，RLCD 训练可能跑整夜）
+  verify:
+    # CAP-73 开发中验证：平台对外基址（如 https://devmind.example.com，勿带尾斜杠）。
+    # 物化进会话工作区的 devmind-verify 助手经它回连；反向代理/自签 https 部署必须显式配置，
+    # 空=不向会话物化助手（人工触发不受影响）。
+    server-url: ""
 
 # 数据库默认 H2 文件库（./data/devmind，跟随启动目录）；驱动已随包携带，切 MySQL/PostgreSQL 时覆盖：
 # spring:

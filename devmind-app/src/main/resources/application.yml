@@ -77,6 +77,13 @@ devmind:
   worktree:
     root: ""                       # 空=项目内 .devmind/worktrees
     base-branch: master
+  verify:                          # CAP-73 需求开发中验证（此处只列常调项；超时等其余键用代码默认值）
+    # 平台对外 HTTP 基址（如 https://devmind.example.com，勿带尾斜杠）——物化进会话工作区的
+    # devmind-verify 助手脚本经它回连 /api/verify/trigger。空=不物化助手（人工触发不受影响）。
+    # 反向代理/自签 https 部署必须显式配置，服务端无法自知公网地址。
+    server-url: ""
+    bundle-max-mb: 512             # 产物包上限，超限构建侧失败 VERIFY_BUNDLE_TOO_LARGE
+    token-ttl-hours: 24            # agent 触发 token 有效期（绑会话+需求，过期 runner 重拉装配自动重签）
   knowledge:
     repo-path: ""                  # 填 knowledge-repo 本地路径后可启用注入
     enabled: true

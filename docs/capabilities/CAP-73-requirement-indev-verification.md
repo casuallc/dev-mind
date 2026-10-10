@@ -1,6 +1,6 @@
 # CAP-73 需求开发中验证（需求分支增量补丁 → 既有环境快速更新 → 冒烟 → 结果回灌会话）
 
-> 能力 ID：CAP-73 ｜ 分类：流程层 ｜ 状态：草案 v3（2026-10-11，评审修订：产物同构约定 / 模块级构建透传 / manifest 分键与存放 / 失败恢复闭环 / runner 同步逻辑立项）
+> 能力 ID：CAP-73 ｜ 分类：流程层 ｜ 状态：实施中 v4（2026-10-11，MVP 后端+runner 全链已落地；本节标注的 ⚠️ 条目为落地与 v3 草案的差异口径，以 ⚠️ 为准）
 > 演进自 CAP-17（执行链编排）与 CAP-51（需求粒度工作区）；消费 CAP-08/10 与 CAP-34/36 执行通道。
 
 ## 1. 目的
@@ -84,7 +84,9 @@ Windows 环境节点提示：进程运行中覆盖 jar/dll 会被文件锁挡住
 - **会话节点**：需求工作区 `worktrees/req-<id>` 所在 runner（该需求进行中/最近会话的
   agent_node_id）；
 - **构建节点**：`build_configs.executor=AGENT` 时取其 `agentNodeId`（空走路由链：
-  项目默认节点 → 平台默认节点）；`executor=LOCAL` 时在服务端本地执行；
+  项目默认节点 → 平台默认节点）；⚠️ **v1 仅支持 executor=AGENT**（服务端本地构建腿
+  未实现——CAP-34 已废本机执行，服务端零执行原则下本地构建腿亦无必要；配置为
+  LOCAL 时触发按不支持处理）；
 - **环境节点**：环境 `nodeIds` 首节点。
 
 **阶段容错总则**：每阶段有默认超时（PUSH 5min / BUILD 30min / PATCH 10min / TEST 走
@@ -93,10 +95,11 @@ CAP-10 既有口径，平台配置可调）；执行中节点心跳丢失 → �
 
 #### 步骤 1 推送需求分支（PUSHING）
 
-构建基准 = **远端 `feature/req-<id>` HEAD**。会话节点存在且在线时，经 exec 帧在需求
-工作区执行 `git push origin feature/req-<id>`（凭证环境同 CAP-42 收口 push；push 只发
-已提交内容，天然满足「不支持未提交改动」）。push 失败（agent 切了分支/远端拒绝等）→
-run FAILED（PUSHING）错误输出回灌。
+构建基准 = **远端 `feature/req-<id>` HEAD**。会话节点存在且在线时，经 ⚠️ **协议 v22 专用
+`verify_push` 帧**（非通用 exec 帧——push 语义固定，runner 侧 `VerifyHandler.handlePush` →
+`RunnerWorkspace.verifyPush` 显式 ref 推送）在需求工作区执行 `git push origin
+feature/req-<id>`（凭证环境同 CAP-42 收口 push；push 只发已提交内容，天然满足「不支持
+未提交改动」）。push 失败（agent 切了分支/远端拒绝等）→ run FAILED（PUSHING）错误输出回灌。
 
 降级与拒绝口径（不静默验错代码）：
 
@@ -114,17 +117,17 @@ run FAILED（PUSHING）错误输出回灌。
 
 #### 步骤 2 增量构建（BUILDING）
 
-构建节点上使用**独立 verify 工作区**（runner 节点 = `worktrees/verify-req-<id>`；
-`executor=LOCAL` = 服务端 `data/verify-workspaces/req-<id>/`，同语义同布局）——
+构建节点上使用**独立 verify 工作区**（⚠️ runner 侧布局 `<workspaceRoot>/<projectId>/verify/<workspaceKey>`，
+经 `verify_pack` 帧下发、runner `RunnerWorkspace.prepareVerify` 物化）——
 CAP-51 同姿势物化，与会话工作树并列、互不影响 agent 现场（会话工作树含未提交改动，
 绝不在其中构建）：
 
 1. 工作区不存在 → 按 CAP-51 同姿势建 clone；存在则复用（增量收益来自工作区/依赖
    缓存复用，构建系统自身的增量编译是项目脚本职责）；
-2. `git fetch origin` → `git checkout --detach origin/feature/req-<id>`（游离 HEAD，
-   不建本地分支，杜绝脏状态累积；checkout 前 `git reset --hard` + `clean` 兜底——
-   注意 reset/clean 只及 git 跟踪范围，`output_dir` 产物树须 gitignore 才不致被
-   clean 掉，见下）；
+2. `git fetch origin` → `git reset --hard <commitSha>`（服务端 `ls-remote` 探测到的远端
+   HEAD SHA 显式下发）→ `git clean -fd`（⚠️ 不带 `-x`——gitignore 的产物目录
+   （如 `build/verify-out/`）必须留存，持久产物树增量组装才有意义；checkout 前
+   reset/clean 兜底语义不变）；
 3. 执行项目 `build_steps`（CAP-08 配置，**复用配置但不起 BuildEntity、不进 CAP-08
    构建历史**——verify 构建是验证链内部步骤，追溯落 verify_runs）。触发带的
    `--modules` 值经环境变量 **`VERIFY_MODULES`** 原样透传进 build_steps 执行环境
@@ -156,10 +159,10 @@ cp <本次编出的模块 jar> build/verify-out/libs/   # 增量覆盖持久树�
 前端示例：构建直接产出 `dist/` 即部署形态，`output_dir=dist`，无需组装。
 
 5. 对产物树生成同步清单（相对路径 + sha256 + size），连同产物打 zip 经
-   `POST /api/verify/runs/{id}/bundle` 上传服务端暂存（节点 token 认证，
-   同 CAP-34 产出上传先例）。**包大小上限**平台配置 `devmind.verify.bundle-max-mb`
-   （默认 512），超限构建侧直接失败 `VERIFY_BUNDLE_TOO_LARGE`，run 记 FAILED
-   （BUILDING）并引导精简 output_dir。
+   ⚠️ `POST /api/agent/verify/runs/{id}/bundle`（节点 token 认证，同 CAP-34 产出上传
+   先例；**产物字节一律走 HTTP 不入帧**）上传服务端暂存。**包大小上限**平台配置
+   `devmind.verify.bundle-max-mb`（默认 512），超限构建侧直接失败
+   `VERIFY_BUNDLE_TOO_LARGE`，run 记 FAILED（BUILDING）并引导精简 output_dir。
 
 #### 步骤 3 补丁下发（PATCHING）
 
@@ -169,12 +172,13 @@ token，下载只接受指定环境节点的 token（节点 token 是长寿命�
 节点可拉任意产物包）。
 
 **补丁同步是 runner 侧新逻辑**（环境节点 runner 内实现，非服务端 exec 逐文件下发——
-exec 帧无字节通道）。环境节点 runner 按序执行：
+exec 帧无字节通道）。环境节点 runner 按序执行（⚠️ 经协议 v22 专用 `verify_patch` 帧
+下发，`verify_log` 流式回传进度）：
 
 1. `patch_pre_hook`（可空跳过；**失败即终止，不覆盖任何文件**，现场保持旧版本。
    一旦 pre_hook **执行成功即登记**——此后任何失败都必须尝试 post_hook 恢复，
-   见失败恢复）；
-2. 反向拉取 `GET /api/verify/runs/{id}/bundle`（节点 token）下载到
+   见失败恢复；⚠️ pre/post_hook 与 build_steps 一样过 runner `execAllowlist` 白名单）；
+2. 反向拉取 ⚠️ `GET /api/agent/verify/runs/{id}/bundle`（节点 token）下载到
    `patch_dir/.devmind-verify-staging/`，校验清单哈希（前端静态场景 staging 目录
    短暂暴露在 web root 下、逐文件 mv 期间 nginx 会服务新旧混合资源——验证环境
    可接受）；
@@ -183,7 +187,8 @@ exec 帧无字节通道）。环境节点 runner 按序执行：
 4. 写入新 manifest 替换旧文件（先写 tmp 再 mv，防半截清单）；
 5. `patch_post_hook`（可空跳过）。
 
-**manifest 存放与分键**：存 **runner 侧状态目录** `<runner-state>/verify-manifests/<envId>-req<reqId>.json`——runner 是唯一读写者，不依赖部署目录父级可写、
+**manifest 存放与分键**：存 **runner 侧状态目录** ⚠️ `<workspaceRoot>/_verify/manifests/<manifestKey>.json`
+（manifestKey = 服务端生成的环境×需求键）——runner 是唯一读写者，不依赖部署目录父级可写、
 不会被当静态资源暴露；服务端不存。**按需求分键**：同环境被多个需求绑定时，各自
 manifest 独立，删除语义只及本需求下发过的文件（覆盖冲突仍可能存在，见 §8 已知限制，
 但不再互删）。
@@ -208,8 +213,9 @@ manifest 缺失（首次验证/节点重建）→ 退化为产物树**文件级�
 
 #### 状态机与追溯
 
-`status`：QUEUED → RUNNING → SUCCESS/FAILED；`stage` 记录当前/失败阶段
-（PUSHING/BUILDING/PATCHING/TESTING，QUEUED 时 stage 为 null）。触发即返回
+`status`：⚠️ RUNNING → SUCCESS/FAILED（**无 QUEUED**——受理即虚拟线程上链，
+需求互斥由应用层分段锁挡在受理前，不需要排队态；僵尸 run 由巡检收口判 FAILED）；
+`stage` 记录当前/失败阶段（PUSHING/BUILDING/PATCHING/TESTING）。触发即返回
 runId，全链异步。`commit_sha`（远端 HEAD）、`push_status`（PUSHED/SKIPPED）、
 变更文件数（`files_changed`，全量同步 = 全量文件数）、`stage_timings_json`
 （各阶段耗时 map）落 verify_runs 追溯。
@@ -217,11 +223,26 @@ runId，全链异步。`commit_sha`（远端 HEAD）、`push_status`（PUSHED/SK
 ### FR-04 Agent 自主触发通道
 
 会话上下文装配（CAP-33/34 ContextPackage）为挂需求且已绑定验证环境的会话物化
-助手脚本 `.devmind/bin/devmind-verify`（POSIX sh；Windows 节点同目录物化
-`devmind-verify.bat` 配套）。平台物化路径照旧写进 worktree `info/exclude`，不占 git
-跟踪文件。脚本内嵌 **verify 作用域 token**——签发管线复用 CAP-34 token 机制，但
-scope 独立（绑 sessionId + requirementId，仅授权 verify 触发，与只读的拉包 token
-分离；会话结束即失效）。
+助手脚本 ⚠️ `.devmind/input/verify/devmind-verify`（POSIX sh；Windows 节点同目录物化
+`devmind-verify.bat` 配套）。⚠️ **物化通道 = ContextPackage 既有 `inputs` 机制**
+（flow 侧 `VerifyContextProvider`，节序 60）——不动包 schema，老 runner 无感；
+`.devmind` 目录本就在平台物化路径 `info/exclude` 排除集内，不占 git 跟踪文件。
+三件套门控：需求已绑验证环境 + 项目 `verify_in_dev_enabled` 开 +
+`devmind.verify.server-url` 已配（缺任一项不物化；server-url 缺失是常态部署默认，
+脚本无法猜反向代理后的回连地址）。⚠️ **瘦上下文例外**：lean 执行会话正是验证链
+受用者，`SessionContextService` 对 lean 不再置空 requirementId，CAP-40 附件投送
+的豁免改由 provider 读 `lean` 标志自行判定；token 重建路径（TTL 过期 runner 重拉）
+重跑装配即重签续期。
+
+脚本内嵌 **verify 作用域 token**——⚠️ `VerifyTokenService`（common）HMAC 签发
+`dmv_<base64url(sid.rid.exp)>.<hex hmac>`，绑 sessionId + requirementId + 过期
+（`devmind.verify.token-ttl-hours` 默认 24h），密钥落 `data/verify.key`（仿 auth.key）；
+仅授权 `POST /api/verify/trigger`（permitAll + 服务内验签），会话结束即失效由触发端
+存活检查兜底。
+
+⚠️ 平台对外基址由 **`devmind.verify.server-url`**（新增配置，空 = 不物化助手；人工
+触发入口不受影响）显式给出——反向代理/自签 https 部署（如 8.135.37.194:38880）
+服务端无法自知公网地址。
 
 agent 经 Bash 调用 `devmind-verify [--note "..."] [--modules "user-service,common"]`：
 
@@ -237,7 +258,15 @@ agent 经 Bash 调用 `devmind-verify [--note "..."] [--modules "user-service,co
 
 skill 注入块（CLAUDE.local.md）同步广告该命令的存在与使用时机
 （「完成一个可验证的改动并 commit 后，运行 devmind-verify 验证；只改了部分模块时
-可带 --modules 加速构建」）。
+可带 --modules 加速构建；受理后不轮询，结果自动回灌」）。
+
+⚠️ **协议 v22 帧**（runner 必须认识，否则触发报 `VERIFY_RUNNER_UPGRADE_REQUIRED`
+引导升级）：
+
+| 方向 | 帧 | 说明 |
+|---|---|---|
+| 下行 | `verify_push` / `verify_pack` / `verify_patch` | 三阶段指令（产物字节不入帧，走 HTTP） |
+| 上行 | `verify_log` / `verify_ack` | 流式日志 / 终态应答（ok、error、fileCount、filesChanged） |
 
 ### FR-05 限额与互斥
 
@@ -278,19 +307,23 @@ verify run 终态时：
 
 无新增 SPI。编排落 **devmind-flow**（CAP-17 PipelineOrchestrator 先例：flow 已直接
 依赖 devmind-build/deploy/test 实现）；会话注入走 common 会话内核
-`AbstractSessionRuntime.injectInput`；agent 触发物化复用 CAP-34 ContextPackage 管线；
-钩子执行复用 CAP-36 exec 帧通道；产物上传/下载复用节点 token 认证的 HTTP 端点
-（产出上传/拉包先例）。
+`AbstractSessionRuntime.injectInput`；agent 触发物化复用 CAP-34 ContextPackage 管线
+（⚠️ 既有 `inputs` 通道，不改包 schema）；帧通道 ⚠️ 走协议 v22 专用 verify 帧
+（`AgentNodeConnector` SPI 三个默认方法挂在 common，flow 不依赖 agent；bundle 字节
+走节点 token 认证的 HTTP 端点——产出上传/拉包先例）。
 
-**runner 侧新逻辑显式立项**（瘦 jar 无 Spring，均为新增）：
+**runner 侧新逻辑显式立项**（瘦 jar 无 Spring，均为新增，⚠️ 落 `VerifyHandler` +
+`RunnerWorkspace.verifyPush/prepareVerify`）：
 
-- **构建节点**：verify 工作区物化与 `checkout --detach` 维护、build_steps 执行
-  （含 `VERIFY_MODULES` 注入）、产物树 manifest 生成（sha256）、zip 上传；
+- **构建节点**：verify 工作区物化与 `reset --hard <commitSha>` 维护、build_steps 执行
+  （含 `VERIFY_MODULES` 注入、⚠️ execAllowlist 白名单同一防线）、产物树 manifest
+  生成（sha256）、zip 上传；
 - **环境节点**：bundle 下载与哈希校验、staging 区管理、manifest 比对、逐文件 mv
-  覆盖与删除、manifest tmp+mv 原子写、pre/post 钩子执行与失败恢复闭环；
-- **版本协商**：节点注册握手增能力版本位；低于本能力要求版本的 runner 被选中时，
-  触发报 `VERIFY_RUNNER_UPGRADE_REQUIRED`（引导升级，不静默异常）。dist 打包与
-  runner 托管自升级（退出码 42）配套发布。
+  覆盖与删除、manifest tmp+mv 原子写、pre/post 钩子执行（⚠️ 过 execAllowlist）
+  与失败恢复闭环；
+- **版本协商**：⚠️ 服务端 `AgentConnectionRegistry.supports(nodeId, VERIFY_FRAMES)`
+  探测帧能力；不认识的 runner 被选中时触发报 `VERIFY_RUNNER_UPGRADE_REQUIRED`
+  （引导升级，不静默异常）。dist 打包与 runner 托管自升级（退出码 42）配套发布。
 
 ## 4. 依赖关系
 
@@ -321,15 +354,15 @@ projects 加列：
 
 verify_runs(
   id                BIGINT PK,
-  requirement_id    BIGINT NOT NULL,
+  requirement_id    VARCHAR(32) NOT NULL,   -- ⚠️ requirements.id 是字符串主键
   project_id        VARCHAR(32) NOT NULL,
   trigger_type      VARCHAR(8) NOT NULL,     -- AGENT / MANUAL
   triggered_by      VARCHAR(64),             -- 人工触发用户名；agent 触发为会话 id
   environment_id    BIGINT NOT NULL,
   commit_sha        VARCHAR(64),             -- 远端需求分支 HEAD
   push_status       VARCHAR(8),              -- PUSHED / SKIPPED（无会话工作区纯远端）
-  stage             VARCHAR(16),             -- PUSHING/BUILDING/PATCHING/TESTING（当前/失败阶段；QUEUED 时为 null）
-  status            VARCHAR(16),             -- QUEUED/RUNNING/SUCCESS/FAILED
+  stage             VARCHAR(16),             -- PUSHING/BUILDING/PATCHING/TESTING（当前/失败阶段）
+  status            VARCHAR(16),             -- ⚠️ RUNNING/SUCCESS/FAILED（无 QUEUED，受理即上链）
   modules_hint      VARCHAR(512),            -- devmind-verify --modules 透传值（追溯用）
   files_changed     INT,                     -- 补丁下发文件数（全量同步 = 全量文件数）
   duration_ms       BIGINT,                  -- 全链总耗时
@@ -341,7 +374,7 @@ verify_runs(
 ```
 
 同步清单 manifest（文件路径+哈希）存**环境节点 runner 侧状态目录**
-（`verify-manifests/<envId>-req<reqId>.json`，按需求分键），服务端不存——节点清单
+（⚠️ `<workspaceRoot>/_verify/manifests/<manifestKey>.json`，按需求分键），服务端不存——节点清单
 丢失只导致该需求一次全量同步，无正确性风险。产物暂存包
 `data/verify-bundles/<runId>/` 成功即删、失败留 7 天。
 
@@ -349,12 +382,12 @@ verify_runs(
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/requirements/{id}/verify?force=` | 人工触发（限额/互斥/开关同 agent 通道；force 跳过无新提交校验） |
-| GET | `/api/requirements/{id}/verify-runs` | 验证历史（分页） |
+| POST | ⚠️ `/api/projects/{pid}/requirements/{rid}/verify?force=` | 人工触发（项目作用域端点；限额/互斥/开关同 agent 通道；force 跳过无新提交校验） |
+| GET | ⚠️ `/api/projects/{pid}/requirements/{rid}/verify-runs` | 验证历史（分页） |
 | GET | `/api/verify/runs/{id}` | run 详情（阶段耗时/failure_summary 全文/日志 Hub 入口） |
-| POST | `/api/verify/trigger?token=` | agent 通道（verify 作用域 token 自证，免登录；body 带 note/modules） |
-| POST | `/api/verify/runs/{id}/bundle?token=` | 构建节点上传产物包（multipart，节点 token，校验 run↔构建节点绑定，大小上限） |
-| GET | `/api/verify/runs/{id}/bundle?token=` | 环境节点拉取产物包（节点 token，校验 run↔环境节点绑定） |
+| POST | `/api/verify/trigger?token=` | agent 通道（verify 作用域 token 自证，permitAll+服务内验签；body 带 note/modules） |
+| POST | ⚠️ `/api/agent/verify/runs/{id}/bundle?token=` | 构建节点上传产物包（节点 token，校验 run↔构建节点绑定，大小上限） |
+| GET | ⚠️ `/api/agent/verify/runs/{id}/bundle?token=` | 环境节点拉取产物包（节点 token，校验 run↔环境节点绑定） |
 
 需求读写 DTO 增 `verifyEnvironmentId`；环境读写 DTO 增 `patchDir`/`patchPreHook`/
 `patchPostHook`；构建配置读写 DTO 增 `outputDir`。
