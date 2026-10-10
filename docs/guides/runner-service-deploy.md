@@ -8,6 +8,8 @@
 
 > **claude 登录态（服务化必配）**：服务以 LocalSystem（Windows）/ root（Linux）运行，其 HOME 不是安装用户的，claude 默认读 `<服务账户HOME>/.claude`，读不到你本机登录态 → 会话回 `Not logged in · Please run /login`。在 `agent.properties` 配 `claudeConfigDir=` 指向**已完成 claude 登录**（或 settings.json 里配好 `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`）的 `.claude` 目录（Windows 如 `C:/Users/<用户名>/.claude`，Linux 如 `/home/<用户名>/.claude`），runner 会把它以 `CLAUDE_CONFIG_DIR` 注入 claude 子进程。
 
+> **https 自签证书部署**：平台以自签证书 https/wss 提供服务时（如 38880 自签），在 `agent.properties` 加 `insecure=true`——runner 对服务端全链路信任一切证书并关闭主机名校验。一键安装脚本探测到证书校验失败会自动写入，无需手工配置。
+
 ## Linux（systemd）
 
 ```bash

@@ -103,7 +103,7 @@ public final class OutputUploader {
         body.put("files", items);
         try {
             String json = JsonMapper.builder().build().writeValueAsString(body);
-            HttpResponse<Void> resp = HttpClient.newHttpClient().send(
+            HttpResponse<Void> resp = RunnerHttp.newClient(config).send(
                     HttpRequest.newBuilder(URI.create(url)).timeout(TIMEOUT)
                             .header("Content-Type", "application/json")
                             .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))

@@ -101,7 +101,7 @@ public class TunnelConnection {
             try {
                 URI uri = URI.create(tunnelUrl(config.serverUrl()) + "?token=" + config.token());
                 log.info("连接出口隧道: {}", tunnelUrl(config.serverUrl()));
-                WebSocket ws = HttpClient.newHttpClient().newWebSocketBuilder()
+                WebSocket ws = RunnerHttp.newClient(config).newWebSocketBuilder()
                         .buildAsync(uri, listener)
                         .join();
                 long connectedAt = System.currentTimeMillis();

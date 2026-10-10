@@ -316,7 +316,7 @@ public class FileHandler {
         String url = transferUrl(transferId);
         Path tmp = target.resolveSibling(target.getFileName() + ".devmind-dl");
         try {
-            RunnerUpgrader.downloadAndVerify(url, sha256, tmp);
+            RunnerUpgrader.downloadAndVerify(config, url, sha256, tmp);
             moveAtomic(tmp, target);
         } finally {
             Files.deleteIfExists(tmp);
@@ -344,7 +344,7 @@ public class FileHandler {
             throw new IllegalStateException("文件超限（" + size + " 字节 > 100MB 上限），不支持下载");
         }
         String sha256 = sha256Hex(src);
-        HttpResponse<Void> resp = HttpClient.newHttpClient().send(
+        HttpResponse<Void> resp = RunnerHttp.newClient(config).send(
                 HttpRequest.newBuilder(URI.create(transferUrl(transferId)))
                         .header("Content-Type", "application/octet-stream")
                         .header("X-SHA256", sha256)

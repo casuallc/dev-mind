@@ -60,6 +60,12 @@ public class AgentRunnerMain {
     public static void main(String[] args) throws Exception {
         Path configFile = args.length > 0 ? Path.of(args[0]) : Path.of("agent.properties");
         RunnerConfig config = RunnerConfig.load(configFile);
+        // https 自签部署：insecure=true 时尽早关 JVM 级主机名校验（内部属性一次性读定，
+        // 必须先于任何 HttpClient 使用；RunnerHttp 构建 insecure 客户端时同样会设，双保险）
+        if (config.insecure()) {
+            RunnerHttp.disableHostnameVerificationJvmWide();
+            log.warn("insecure=true：已关闭对服务端的 TLS 证书与主机名校验（仅限自签 https 内网部署使用）");
+        }
         String version = resolveVersion();
         log.info("devmind-agent-runner {} 启动，配置: {}", version, configFile.toAbsolutePath());
 
@@ -413,7 +419,7 @@ public class AgentRunnerMain {
                     .orElseThrow(() -> new IllegalStateException("非 jar 启动，无法自升级"));
             newJar = target.resolveSibling(target.getFileName() + ".new");
             log.info("开始下载升级包: version={}", frame.path("version").asText(""));
-            RunnerUpgrader.downloadAndVerify(RunnerUpgrader.downloadUrl(config),
+            RunnerUpgrader.downloadAndVerify(config, RunnerUpgrader.downloadUrl(config),
                     frame.path("sha256").asText(""), newJar);
         } catch (Exception e) {
             log.warn("升级包下载/校验失败: {}", e.getMessage());

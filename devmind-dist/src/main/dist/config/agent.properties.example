@@ -4,6 +4,9 @@
 
 # 服务端 WS 接入地址（wss 也行，路径固定 /ws/agent）
 serverUrl=ws://127.0.0.1:8080/ws/agent
+# 平台为自签证书 https/wss 部署时置 true：信任一切证书并关闭主机名校验
+# （一键安装脚本探测到证书校验失败会自动写入；CA 签名站点保持 false）
+insecure=false
 # 节点 token：服务端 后台 → Agent 节点 新建节点后复制（dmag_ 开头）；建议将该节点设为平台默认
 token=dmag_待填
 

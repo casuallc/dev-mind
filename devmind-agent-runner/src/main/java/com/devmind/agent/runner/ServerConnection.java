@@ -90,7 +90,7 @@ public class ServerConnection {
             try {
                 URI uri = URI.create(config.serverUrl() + "?token=" + config.token());
                 log.info("连接服务端: {}", config.serverUrl());
-                HttpClient client = HttpClient.newHttpClient();
+                HttpClient client = RunnerHttp.newClient(config);
                 WebSocket ws = client.newWebSocketBuilder()
                         .buildAsync(uri, listener)
                         .join();

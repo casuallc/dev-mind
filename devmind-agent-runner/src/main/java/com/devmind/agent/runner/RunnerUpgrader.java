@@ -71,9 +71,10 @@ public final class RunnerUpgrader {
         return "1".equals(System.getenv("DEVMIND_RUNNER_SERVICE"));
     }
 
-    /** 同步下载到 newFile 并校验 sha256（不匹配删除残渣并抛异常）。 */
-    public static void downloadAndVerify(String url, String sha256, Path newFile) throws Exception {
-        HttpClient client = HttpClient.newHttpClient();
+    /** 同步下载到 newFile 并校验 sha256（不匹配删除残渣并抛异常）；insecure 配置走信任一切证书的客户端。 */
+    public static void downloadAndVerify(RunnerConfig config, String url, String sha256, Path newFile)
+            throws Exception {
+        HttpClient client = RunnerHttp.newClient(config);
         HttpResponse<InputStream> resp = client.send(
                 HttpRequest.newBuilder(URI.create(url)).GET().build(),
                 HttpResponse.BodyHandlers.ofInputStream());

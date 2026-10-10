@@ -68,7 +68,7 @@ public final class LabBundlePuller {
         byte[] body;
         String fileName = kind + "-" + id + ".zip";
         try {
-            HttpResponse<byte[]> resp = HttpClient.newHttpClient().send(
+            HttpResponse<byte[]> resp = RunnerHttp.newClient(config).send(
                     HttpRequest.newBuilder(URI.create(url)).timeout(TIMEOUT).GET().build(),
                     HttpResponse.BodyHandlers.ofByteArray());
             if (resp.statusCode() != 200) {

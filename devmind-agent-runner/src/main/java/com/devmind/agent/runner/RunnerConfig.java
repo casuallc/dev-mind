@@ -62,6 +62,9 @@ import java.util.Properties;
  * terminalAllowRedirect=false# CAP-58：是否放开 &gt;/&gt;&gt; 重定向写入（默认拒绝）
  * terminalShellIdleMin=30    # CAP-59：持久 shell 空闲回收阈值（分钟），无命令超过即整树杀，
  *                            # 下条命令自动重启新 shell
+ * insecure=false             # CAP-21：https 自签证书部署时置 true——runner 对服务端的一切
+ *                            # wss/https 调用（长连接/隧道/升级与上下文下载/文件上传）信任一切证书
+ *                            # 并关主机名校验；一键安装脚本探测到证书校验失败会自动写入 true
  * </pre>
  */
 public record RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -72,9 +75,9 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                            String claudeConfigDir, String worklogRoot, boolean partialMessages,
                            int worktreeGcDays, java.util.List<String> terminalAllowlist,
                            int terminalTimeoutSec, boolean terminalAllowRedirect,
-                           int terminalShellIdleMin) {
+                           int terminalShellIdleMin, boolean insecure) {
 
-    /** 兼容构造（CAP-59 前的 23 参签名）：持久 shell 空闲回收默认 30 分钟。 */
+    /** 兼容构造（CAP-59 前的 23 参签名）：持久 shell 空闲回收默认 30 分钟，insecure 缺省关。 */
     public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
                         Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
                         String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes,
@@ -86,7 +89,7 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
         this(serverUrl, token, claudePath, permissionMode, workDir, projectPaths, maxConcurrent,
                 executor, workspaceRoot, gcDays, gcIntervalMinutes, gcInitialDelayMinutes, labels,
                 execAllowlist, execShell, buildGcHours, claudeConfigDir, worklogRoot, partialMessages,
-                worktreeGcDays, terminalAllowlist, terminalTimeoutSec, terminalAllowRedirect, 30);
+                worktreeGcDays, terminalAllowlist, terminalTimeoutSec, terminalAllowRedirect, 30, false);
     }
 
     /** 兼容构造（CAP-58 前的 20 参签名）：终端白名单缺省只读档 + 60s 超时 + 禁重定向。 */
@@ -207,7 +210,8 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                         : parseLabels(p.getProperty("terminalAllowlist")),
                 Integer.parseInt(p.getProperty("terminalTimeoutSec", "60").strip()),
                 "true".equalsIgnoreCase(p.getProperty("terminalAllowRedirect", "false").strip()),
-                Integer.parseInt(p.getProperty("terminalShellIdleMin", "30").strip()));
+                Integer.parseInt(p.getProperty("terminalShellIdleMin", "30").strip()),
+                "true".equalsIgnoreCase(p.getProperty("insecure", "false").strip()));
     }
 
     /** CAP-41：worklog 持久工作区根目录——配置优先，空 = {user.home}/worklog。 */

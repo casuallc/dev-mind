@@ -78,7 +78,7 @@ public class PkgHandler {
         Path old = installDir.resolveSibling(installDir.getFileName() + ".old");
         try {
             log.info("开始拉取安装包: package={} file={} dir={}", packageId, fileName, installDir);
-            RunnerUpgrader.downloadAndVerify(url, sha256, download);
+            RunnerUpgrader.downloadAndVerify(config, url, sha256, download);
             deleteQuietly(tmp);
             extract(download, tmp);
             // 原子换版：旧版挪 .old → .tmp 上位 → 删 .old；上位失败尽力把旧版挪回来

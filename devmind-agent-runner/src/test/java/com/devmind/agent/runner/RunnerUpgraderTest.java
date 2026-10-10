@@ -56,7 +56,7 @@ class RunnerUpgraderTest {
         var server = serve(content);
         try {
             Path dst = dir.resolve("sub").resolve("runner.jar.new");
-            RunnerUpgrader.downloadAndVerify(
+            RunnerUpgrader.downloadAndVerify(config("ws://127.0.0.1/ws/agent"),
                     "http://127.0.0.1:" + server.getAddress().getPort() + "/dl", sha, dst);
             assertEquals(content.length, Files.size(dst));
         } finally {
@@ -69,7 +69,7 @@ class RunnerUpgraderTest {
         var server = serve("abc".getBytes());
         try {
             Path dst = dir.resolve("runner.jar.new");
-            assertThrows(Exception.class, () -> RunnerUpgrader.downloadAndVerify(
+            assertThrows(Exception.class, () -> RunnerUpgrader.downloadAndVerify(config("ws://127.0.0.1/ws/agent"),
                     "http://127.0.0.1:" + server.getAddress().getPort() + "/dl", "00".repeat(32), dst));
             assertFalse(Files.exists(dst), "校验失败应删除 .new 残渣");
         } finally {
@@ -87,7 +87,7 @@ class RunnerUpgraderTest {
         server.start();
         try {
             Path dst = dir.resolve("runner.jar.new");
-            assertThrows(Exception.class, () -> RunnerUpgrader.downloadAndVerify(
+            assertThrows(Exception.class, () -> RunnerUpgrader.downloadAndVerify(config("ws://127.0.0.1/ws/agent"),
                     "http://127.0.0.1:" + server.getAddress().getPort() + "/dl", "x", dst));
         } finally {
             server.stop(0);
