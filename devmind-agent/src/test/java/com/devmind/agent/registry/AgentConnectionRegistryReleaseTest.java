@@ -3,7 +3,7 @@ package com.devmind.agent.registry;
 import com.devmind.agent.config.AgentProperties;
 import com.devmind.agent.dto.AgentHelloMeta;
 import com.devmind.agent.model.AgentNodeEntity;
-import com.devmind.agent.service.AgentConnLogService;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.WorkspaceReleaseResult;
@@ -45,7 +45,7 @@ class AgentConnectionRegistryReleaseTest {
         ObjectProvider<com.devmind.common.agent.AgentEventListener> listenerProvider =
                 mock(ObjectProvider.class);
         registry = new AgentConnectionRegistry(nodeService, new AgentProperties(),
-                JsonMapper.builder().build(), listenerProvider, mock(ObjectProvider.class), mock(AgentConnLogService.class));
+                JsonMapper.builder().build(), listenerProvider, mock(ObjectProvider.class), mock(AgentAuditLogService.class));
         ws = mock(WebSocketSession.class);
         when(ws.isOpen()).thenReturn(true);
         node = new AgentNodeEntity();
@@ -203,7 +203,7 @@ class AgentConnectionRegistryReleaseTest {
         // 目录留在磁盘成孤儿，该 (项目,用户) 之后所有会话 launch 都失败且无 UI 恢复入口
         AgentConnectionRegistry v8 = new AgentConnectionRegistry(mock(AgentNodeService.class),
                 new AgentProperties(), JsonMapper.builder().build(),
-                mock(ObjectProvider.class), mock(ObjectProvider.class), mock(AgentConnLogService.class));
+                mock(ObjectProvider.class), mock(ObjectProvider.class), mock(AgentAuditLogService.class));
         WebSocketSession ws2 = mock(WebSocketSession.class);
         when(ws2.isOpen()).thenReturn(true);
         AgentNodeEntity n2 = new AgentNodeEntity();

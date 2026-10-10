@@ -2,7 +2,7 @@ package com.devmind.agent.ws;
 
 import com.devmind.agent.model.AgentNodeEntity;
 import com.devmind.agent.registry.AgentConnectionRegistry;
-import com.devmind.agent.service.AgentConnLogService;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.AgentNodeService;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.socket.TextMessage;
@@ -25,7 +25,7 @@ class AgentNodeWsHandlerTest {
         AgentNodeService nodeService = mock(AgentNodeService.class);
         AgentConnectionRegistry registry = mock(AgentConnectionRegistry.class);
         AgentNodeWsHandler handler = new AgentNodeWsHandler(nodeService, registry,
-                mock(AgentConnLogService.class), JsonMapper.builder().build(),
+                mock(AgentAuditLogService.class), JsonMapper.builder().build(),
                 mock(org.springframework.beans.factory.ObjectProvider.class));
 
         AgentNodeEntity node = new AgentNodeEntity();
@@ -62,7 +62,7 @@ class AgentNodeWsHandlerTest {
         AgentNodeService nodeService = mock(AgentNodeService.class);
         AgentConnectionRegistry registry = mock(AgentConnectionRegistry.class);
         AgentNodeWsHandler handler = new AgentNodeWsHandler(nodeService, registry,
-                mock(AgentConnLogService.class), JsonMapper.builder().build(),
+                mock(AgentAuditLogService.class), JsonMapper.builder().build(),
                 mock(org.springframework.beans.factory.ObjectProvider.class));
 
         AgentNodeEntity node = new AgentNodeEntity();
@@ -78,14 +78,14 @@ class AgentNodeWsHandlerTest {
         verify(registry).onUpgradeAck("7", false, "busy", 3);
     }
 
-    /** token 无效/节点禁用：拒绝并记录 REJECT 流水（节点为 null、带来源地址）。 */
+    /** token 无效/节点禁用：拒绝并记录 CONNECTION/REJECT 审计（节点为 null、带来源地址）。 */
     @Test
     void rejectsUnknownTokenAndLogs() throws Exception {
         AgentNodeService nodeService = mock(AgentNodeService.class);
         AgentConnectionRegistry registry = mock(AgentConnectionRegistry.class);
-        AgentConnLogService connLogService = mock(AgentConnLogService.class);
+        AgentAuditLogService auditLogService = mock(AgentAuditLogService.class);
         AgentNodeWsHandler handler = new AgentNodeWsHandler(nodeService, registry,
-                connLogService, JsonMapper.builder().build(),
+                auditLogService, JsonMapper.builder().build(),
                 mock(org.springframework.beans.factory.ObjectProvider.class));
 
         when(nodeService.resolveByToken("bad")).thenReturn(java.util.Optional.empty());
@@ -96,7 +96,12 @@ class AgentNodeWsHandlerTest {
         handler.afterConnectionEstablished(session);
 
         verify(session).close(org.springframework.web.socket.CloseStatus.POLICY_VIOLATION);
-        verify(connLogService).record(com.devmind.agent.model.AgentConnLogEntity.EVENT_REJECT,
-                null, "172.21.61.60:11422", "token 无效或节点已禁用");
+        var captor = org.mockito.ArgumentCaptor.forClass(AgentAuditLogService.Entry.class);
+        verify(auditLogService).record(captor.capture());
+        AgentAuditLogService.Entry entry = captor.getValue();
+        org.junit.jupiter.api.Assertions.assertEquals(com.devmind.agent.model.AgentAuditLogEntity.CAT_CONNECTION, entry.category());
+        org.junit.jupiter.api.Assertions.assertEquals("REJECT", entry.event());
+        org.junit.jupiter.api.Assertions.assertEquals("172.21.61.60:11422", entry.remoteAddr());
+        org.junit.jupiter.api.Assertions.assertEquals(com.devmind.agent.model.AgentAuditLogEntity.RESULT_REJECTED, entry.result());
     }
 }

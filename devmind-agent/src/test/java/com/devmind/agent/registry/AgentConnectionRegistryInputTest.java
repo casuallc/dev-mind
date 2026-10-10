@@ -3,7 +3,7 @@ package com.devmind.agent.registry;
 import com.devmind.agent.config.AgentProperties;
 import com.devmind.agent.dto.AgentHelloMeta;
 import com.devmind.agent.model.AgentNodeEntity;
-import com.devmind.agent.service.AgentConnLogService;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.common.agent.InputFile;
 import com.devmind.common.agent.InputImage;
@@ -44,7 +44,7 @@ class AgentConnectionRegistryInputTest {
         ObjectProvider<com.devmind.common.agent.AgentEventListener> listenerProvider =
                 mock(ObjectProvider.class);
         registry = new AgentConnectionRegistry(nodeService, new AgentProperties(),
-                MAPPER, listenerProvider, mock(ObjectProvider.class), mock(AgentConnLogService.class));
+                MAPPER, listenerProvider, mock(ObjectProvider.class), mock(AgentAuditLogService.class));
         ws = mock(WebSocketSession.class);
         when(ws.isOpen()).thenReturn(true);
         AgentNodeEntity node = new AgentNodeEntity();

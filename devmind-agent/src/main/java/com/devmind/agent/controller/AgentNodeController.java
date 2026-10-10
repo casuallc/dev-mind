@@ -1,23 +1,26 @@
 package com.devmind.agent.controller;
 
-import com.devmind.agent.dto.AgentConnLogView;
+import com.devmind.agent.dto.AgentAuditLogView;
 import com.devmind.agent.dto.AgentNodeView;
 import com.devmind.agent.dto.CreateAgentNodeRequest;
 import com.devmind.agent.dto.IssuedNodeView;
 import com.devmind.agent.dto.RunnerPackageView;
 import com.devmind.agent.dto.UpgradeResultView;
+import com.devmind.agent.model.AgentAuditLogEntity;
 import com.devmind.agent.model.AgentNodeEntity;
 import com.devmind.agent.model.RunnerPackageEntity;
 import com.devmind.agent.registry.AgentConnectionRegistry;
-import com.devmind.agent.service.AgentConnLogService;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.agent.service.RunnerPackageService;
 import com.devmind.auth.IdentityService;
 import com.devmind.common.agent.AgentNodeSessionsProvider;
+import com.devmind.common.dto.PageView;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import jakarta.validation.Valid;
 import org.springframework.core.io.Resource;
+import org.springframework.data.domain.Page;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -51,19 +54,19 @@ public class AgentNodeController {
     private final AgentNodeService service;
     private final AgentConnectionRegistry registry;
     private final RunnerPackageService packageService;
-    private final AgentConnLogService connLogService;
+    private final AgentAuditLogService auditLogService;
     private final IdentityService identityService;
     /** 会话持有方（session/chat 模块）的活跃会话 SPI，Spring 聚合注入，无实现时为空表 */
     private final List<AgentNodeSessionsProvider> sessionsProviders;
 
     public AgentNodeController(AgentNodeService service, AgentConnectionRegistry registry,
-                               RunnerPackageService packageService, AgentConnLogService connLogService,
+                               RunnerPackageService packageService, AgentAuditLogService auditLogService,
                                IdentityService identityService,
                                List<AgentNodeSessionsProvider> sessionsProviders) {
         this.service = service;
         this.registry = registry;
         this.packageService = packageService;
-        this.connLogService = connLogService;
+        this.auditLogService = auditLogService;
         this.identityService = identityService;
         this.sessionsProviders = sessionsProviders;
     }
@@ -87,10 +90,22 @@ public class AgentNodeController {
                 .sum();
     }
 
-    /** 节点连接流水（接入/拒绝/断线，倒序，默认 200 条）——排查频繁重连/认证拒绝来源。 */
-    @GetMapping("/conn-logs")
-    public List<AgentConnLogView> connLogs(@RequestParam(defaultValue = "200") int limit) {
-        return connLogService.latest(limit).stream().map(AgentConnLogView::from).toList();
+    /**
+     * CAP-71 节点审计日志（替代旧 /conn-logs 流水）：全量交互分类留痕，
+     * 服务端真分页 + category/event/nodeId/result/keyword 过滤（page 0 起、size≤200）。
+     */
+    @GetMapping("/audit-logs")
+    public PageView<AgentAuditLogView> auditLogs(@RequestParam(required = false) String category,
+                                                 @RequestParam(required = false) String event,
+                                                 @RequestParam(required = false) Long nodeId,
+                                                 @RequestParam(required = false) String result,
+                                                 @RequestParam(required = false) String keyword,
+                                                 @RequestParam(defaultValue = "0") int page,
+                                                 @RequestParam(defaultValue = "20") int size) {
+        Page<AgentAuditLogEntity> data = auditLogService.search(category, event, nodeId, result,
+                keyword, page, size);
+        return new PageView<>(data.getContent().stream().map(AgentAuditLogView::from).toList(),
+                data.getTotalElements(), data.getNumber(), data.getSize());
     }
 
     @PostMapping("/{id}/disable")

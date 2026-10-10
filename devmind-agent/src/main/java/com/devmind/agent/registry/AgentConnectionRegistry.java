@@ -2,9 +2,9 @@ package com.devmind.agent.registry;
 
 import com.devmind.agent.config.AgentProperties;
 import com.devmind.agent.dto.AgentHelloMeta;
-import com.devmind.agent.model.AgentConnLogEntity;
+import com.devmind.agent.model.AgentAuditLogEntity;
 import com.devmind.agent.model.AgentNodeEntity;
-import com.devmind.agent.service.AgentConnLogService;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.common.agent.AgentCollectResult;
 import com.devmind.common.agent.AgentEventFrame;
@@ -120,7 +120,7 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private final ObjectProvider<AgentEventListener> listenerProvider;
     /** CAP-54：workspace_status 上行帧广播（session/chat 各自认领，独立于会话事件流） */
     private final ObjectProvider<WorkspaceStatusListener> workspaceListenerProvider;
-    private final AgentConnLogService connLogService;
+    private final AgentAuditLogService auditLogService;
 
     /** nodeId(字符串) → runner WS 连接 */
     private final Map<String, WebSocketSession> connections = new ConcurrentHashMap<>();
@@ -157,13 +157,13 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     public AgentConnectionRegistry(AgentNodeService nodeService, AgentProperties props,
                                    ObjectMapper mapper, ObjectProvider<AgentEventListener> listenerProvider,
                                    ObjectProvider<WorkspaceStatusListener> workspaceListenerProvider,
-                                   AgentConnLogService connLogService) {
+                                   AgentAuditLogService auditLogService) {
         this.nodeService = nodeService;
         this.props = props;
         this.mapper = mapper;
         this.listenerProvider = listenerProvider;
         this.workspaceListenerProvider = workspaceListenerProvider;
-        this.connLogService = connLogService;
+        this.auditLogService = auditLogService;
     }
 
     // ---------------- 连接生命周期（AgentNodeWsHandler 回调） ----------------
@@ -175,9 +175,10 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
             kickDuplicate(old); // 同节点重复接入：踢掉旧连接（专用关闭码 4000，runner 侧走长退避防互踢风暴）
         }
         lastSeen.put(nodeId, System.currentTimeMillis());
-        String remoteAddr = AgentConnLogService.formatRemoteAddr(ws.getRemoteAddress());
+        String remoteAddr = AgentAuditLogService.formatRemoteAddr(ws.getRemoteAddress());
         nodeService.markOnline(node.getId(), remoteAddr);
-        connLogService.record(AgentConnLogEntity.EVENT_CONNECT, node, remoteAddr, null);
+        auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_CONNECTION, "CONNECT")
+                .node(node).remoteAddr(remoteAddr).result(AgentAuditLogEntity.RESULT_OK));
         log.info("agent 节点上线: id={} name={} remote={}", nodeId, node.getName(), remoteAddr);
     }
 
@@ -190,8 +191,9 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         lastSeen.remove(nodeId);
         protocolVersions.remove(nodeId);
         nodeService.markOffline(node.getId());
-        connLogService.record(AgentConnLogEntity.EVENT_DISCONNECT, node,
-                AgentConnLogService.formatRemoteAddr(ws.getRemoteAddress()), null);
+        auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_CONNECTION, "DISCONNECT")
+                .node(node).remoteAddr(AgentAuditLogService.formatRemoteAddr(ws.getRemoteAddress()))
+                .result(AgentAuditLogEntity.RESULT_OK));
         log.info("agent 节点离线: id={} name={}", nodeId, node.getName());
         // 断线即失败进行中的升级等待（升级中的 runner 断连属预期：换包重启）
         CompletableFuture<UpgradeAck> pending = pendingUpgrades.remove(nodeId);

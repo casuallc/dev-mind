@@ -2,7 +2,7 @@ package com.devmind.agent.registry;
 
 import com.devmind.agent.config.AgentProperties;
 import com.devmind.agent.model.AgentNodeEntity;
-import com.devmind.agent.service.AgentConnLogService;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.exec.ContextManifest;
@@ -39,7 +39,7 @@ class AgentConnectionRegistryLaunchTest {
         ObjectProvider<com.devmind.common.agent.AgentEventListener> listenerProvider =
                 mock(ObjectProvider.class);
         registry = new AgentConnectionRegistry(nodeService, new AgentProperties(),
-                JsonMapper.builder().build(), listenerProvider, mock(ObjectProvider.class), mock(AgentConnLogService.class));
+                JsonMapper.builder().build(), listenerProvider, mock(ObjectProvider.class), mock(AgentAuditLogService.class));
 
         ws = mock(WebSocketSession.class);
         when(ws.isOpen()).thenReturn(true);

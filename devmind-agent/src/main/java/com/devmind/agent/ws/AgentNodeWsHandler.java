@@ -1,10 +1,10 @@
 package com.devmind.agent.ws;
 
-import com.devmind.agent.model.AgentConnLogEntity;
+import com.devmind.agent.model.AgentAuditLogEntity;
 import com.devmind.agent.model.AgentNodeEntity;
 import com.devmind.agent.dto.AgentHelloMeta;
 import com.devmind.agent.registry.AgentConnectionRegistry;
-import com.devmind.agent.service.AgentConnLogService;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.common.agent.AgentEventFrame;
 import org.slf4j.Logger;
@@ -37,17 +37,17 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
 
     private final AgentNodeService nodeService;
     private final AgentConnectionRegistry registry;
-    private final AgentConnLogService connLogService;
+    private final AgentAuditLogService auditLogService;
     private final ObjectMapper mapper;
     /** CAP-65：节点断连时作废其未完成文件中转（临时文件清理） */
     private final org.springframework.beans.factory.ObjectProvider<com.devmind.agent.service.FileTransferStore> fileTransferStore;
 
     public AgentNodeWsHandler(AgentNodeService nodeService, AgentConnectionRegistry registry,
-                              AgentConnLogService connLogService, ObjectMapper mapper,
+                              AgentAuditLogService auditLogService, ObjectMapper mapper,
                               org.springframework.beans.factory.ObjectProvider<com.devmind.agent.service.FileTransferStore> fileTransferStore) {
         this.nodeService = nodeService;
         this.registry = registry;
-        this.connLogService = connLogService;
+        this.auditLogService = auditLogService;
         this.mapper = mapper;
         this.fileTransferStore = fileTransferStore;
     }
@@ -58,9 +58,11 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
                 .getQueryParams().getFirst("token");
         var nodeOpt = nodeService.resolveByToken(token);
         if (nodeOpt.isEmpty()) {
-            String remote = AgentConnLogService.formatRemoteAddr(session.getRemoteAddress());
+            String remote = AgentAuditLogService.formatRemoteAddr(session.getRemoteAddress());
             log.warn("runner 接入被拒绝（token 无效或节点已禁用）: remote={}", remote);
-            connLogService.record(AgentConnLogEntity.EVENT_REJECT, null, remote, "token 无效或节点已禁用");
+            auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_CONNECTION, "REJECT")
+                    .remoteAddr(remote).result(AgentAuditLogEntity.RESULT_REJECTED)
+                    .detail("token 无效或节点已禁用"));
             session.close(CloseStatus.POLICY_VIOLATION);
             return;
         }

@@ -1,8 +1,8 @@
 package com.devmind.agent.ws;
 
-import com.devmind.agent.model.AgentConnLogEntity;
+import com.devmind.agent.model.AgentAuditLogEntity;
 import com.devmind.agent.model.AgentNodeEntity;
-import com.devmind.agent.service.AgentConnLogService;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.agent.tunnel.AgentTunnelRegistry;
 import com.devmind.common.egress.TunnelFrame;
@@ -28,13 +28,13 @@ public class AgentTunnelWsHandler extends AbstractWebSocketHandler {
 
     private final AgentNodeService nodeService;
     private final AgentTunnelRegistry registry;
-    private final AgentConnLogService connLogService;
+    private final AgentAuditLogService auditLogService;
 
     public AgentTunnelWsHandler(AgentNodeService nodeService, AgentTunnelRegistry registry,
-                                AgentConnLogService connLogService) {
+                                AgentAuditLogService auditLogService) {
         this.nodeService = nodeService;
         this.registry = registry;
-        this.connLogService = connLogService;
+        this.auditLogService = auditLogService;
     }
 
     @Override
@@ -43,9 +43,11 @@ public class AgentTunnelWsHandler extends AbstractWebSocketHandler {
                 .getQueryParams().getFirst("token");
         var nodeOpt = nodeService.resolveByToken(token);
         if (nodeOpt.isEmpty()) {
-            String remote = AgentConnLogService.formatRemoteAddr(session.getRemoteAddress());
+            String remote = AgentAuditLogService.formatRemoteAddr(session.getRemoteAddress());
             log.warn("runner 隧道接入被拒绝（token 无效或节点已禁用）: remote={}", remote);
-            connLogService.record(AgentConnLogEntity.EVENT_REJECT, null, remote, "隧道 token 无效或节点已禁用");
+            auditLogService.record(AgentAuditLogService.Entry.of(AgentAuditLogEntity.CAT_TUNNEL, "REJECT")
+                    .remoteAddr(remote).result(AgentAuditLogEntity.RESULT_REJECTED)
+                    .detail("隧道 token 无效或节点已禁用"));
             session.close(CloseStatus.POLICY_VIOLATION);
             return;
         }

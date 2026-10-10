@@ -3,7 +3,7 @@ package com.devmind.agent.registry;
 import com.devmind.agent.config.AgentProperties;
 import com.devmind.agent.dto.AgentHelloMeta;
 import com.devmind.agent.model.AgentNodeEntity;
-import com.devmind.agent.service.AgentConnLogService;
+import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.common.agent.WorkspaceQueryResult;
 import com.devmind.common.exception.DevMindException;
@@ -46,7 +46,7 @@ class AgentConnectionRegistryWorkspaceQueryTest {
                 mock(ObjectProvider.class);
         registry = new AgentConnectionRegistry(nodeService, new AgentProperties(),
                 JsonMapper.builder().build(), listenerProvider, mock(ObjectProvider.class),
-                mock(AgentConnLogService.class));
+                mock(AgentAuditLogService.class));
         ws = mock(WebSocketSession.class);
         when(ws.isOpen()).thenReturn(true);
         node = new AgentNodeEntity();

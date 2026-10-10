@@ -22,6 +22,8 @@ public class AgentProperties {
     private String fileTransferDir = "data/file-transfers";
     /** CAP-65：中转临时文件过期时间（毫秒），超时未完成的传输由 GC 清理 */
     private long fileTransferExpireMs = 600_000;
+    /** CAP-71：审计日志保留天数（默认半年，到期由清理任务硬删） */
+    private int auditRetentionDays = 180;
 
     public long getHeartbeatTimeoutMs() { return heartbeatTimeoutMs; }
     public void setHeartbeatTimeoutMs(long heartbeatTimeoutMs) { this.heartbeatTimeoutMs = heartbeatTimeoutMs; }
@@ -37,4 +39,6 @@ public class AgentProperties {
     public void setFileTransferDir(String fileTransferDir) { this.fileTransferDir = fileTransferDir; }
     public long getFileTransferExpireMs() { return fileTransferExpireMs; }
     public void setFileTransferExpireMs(long fileTransferExpireMs) { this.fileTransferExpireMs = fileTransferExpireMs; }
+    public int getAuditRetentionDays() { return auditRetentionDays; }
+    public void setAuditRetentionDays(int auditRetentionDays) { this.auditRetentionDays = auditRetentionDays; }
 }
