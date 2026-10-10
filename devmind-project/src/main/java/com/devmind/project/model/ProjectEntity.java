@@ -65,6 +65,14 @@ public class ProjectEntity {
     @Column(name = "auto_regression_on_deploy")
     private Boolean autoRegressionOnDeploy;
 
+    /** CAP-72：WI 翻 DONE 后自动触发构建（执行链第一环；null/false = 关，默认关） */
+    @Column(name = "auto_build_on_wi_done")
+    private Boolean autoBuildOnWiDone;
+
+    /** CAP-72：构建成功后自动部署 TEST 环境（执行链第二环；null/false = 关，默认关） */
+    @Column(name = "auto_deploy_test_on_build")
+    private Boolean autoDeployTestOnBuild;
+
     /** CAP-21：默认执行节点（agent_nodes.id；null = 本机），创建会话未显式指定节点时继承 */
     @Column(name = "agent_node_id", length = 64)
     private String agentNodeId;
@@ -116,6 +124,11 @@ public class ProjectEntity {
     public void setApiDocSource(String apiDocSource) { this.apiDocSource = apiDocSource; }
     public Boolean getAutoRegressionOnDeploy() { return autoRegressionOnDeploy; }
     public void setAutoRegressionOnDeploy(Boolean autoRegressionOnDeploy) { this.autoRegressionOnDeploy = autoRegressionOnDeploy; }
+    /** CAP-72：Boolean 列不加 @ColumnDefault（MySQL bit 事故先例），存量行 null 兜底关 */
+    public boolean isAutoBuildOnWiDone() { return Boolean.TRUE.equals(autoBuildOnWiDone); }
+    public void setAutoBuildOnWiDone(Boolean autoBuildOnWiDone) { this.autoBuildOnWiDone = autoBuildOnWiDone; }
+    public boolean isAutoDeployTestOnBuild() { return Boolean.TRUE.equals(autoDeployTestOnBuild); }
+    public void setAutoDeployTestOnBuild(Boolean autoDeployTestOnBuild) { this.autoDeployTestOnBuild = autoDeployTestOnBuild; }
     public String getAgentNodeId() { return agentNodeId; }
     public void setAgentNodeId(String agentNodeId) { this.agentNodeId = agentNodeId; }
     public String getContextSummary() { return contextSummary; }

@@ -21,6 +21,10 @@ public record ProjectRequest(
         String status,
         String apiDocSource,
         Boolean autoRegressionOnDeploy,
+        /** CAP-72：WI 翻 DONE 后自动触发构建（不传=创建默认关/更新保持） */
+        Boolean autoBuildOnWiDone,
+        /** CAP-72：构建成功后自动部署 TEST 环境（不传=创建默认关/更新保持） */
+        Boolean autoDeployTestOnBuild,
         /** CAP-21：默认执行节点 id（不传=保持不变，空串=清除回本机） */
         String agentNodeId) {
 }

@@ -229,6 +229,8 @@ public class ProjectService {
         e.setCloneStatus(clone ? globalRepo.getCloneStatus() : null);
         e.setApiDocSource(blankToNull(req.apiDocSource()));
         e.setAutoRegressionOnDeploy(req.autoRegressionOnDeploy() != null && req.autoRegressionOnDeploy());
+        e.setAutoBuildOnWiDone(req.autoBuildOnWiDone() != null && req.autoBuildOnWiDone());
+        e.setAutoDeployTestOnBuild(req.autoDeployTestOnBuild() != null && req.autoDeployTestOnBuild());
         e.setAgentNodeId(blankToNull(req.agentNodeId()));
         e.setOwnerId(identityService.currentActor());
                 e.setCreatedBy(identityService.currentActor());
@@ -324,6 +326,8 @@ public class ProjectService {
         }
         if (req.apiDocSource() != null) e.setApiDocSource(blankToNull(req.apiDocSource()));
         if (req.autoRegressionOnDeploy() != null) e.setAutoRegressionOnDeploy(req.autoRegressionOnDeploy());
+        if (req.autoBuildOnWiDone() != null) e.setAutoBuildOnWiDone(req.autoBuildOnWiDone());
+        if (req.autoDeployTestOnBuild() != null) e.setAutoDeployTestOnBuild(req.autoDeployTestOnBuild());
         // CAP-21：不传 = 保持，空串 = 清除默认节点回本机（同 apiDocSource 约定）
         if (req.agentNodeId() != null) e.setAgentNodeId(blankToNull(req.agentNodeId()));
         e.setUpdatedAt(Instant.now());
@@ -914,7 +918,8 @@ public class ProjectService {
         return new ProjectView(e.getId(), e.getName(), e.getPath(), e.getDefaultBranch(),
                 splitTags(e.getTags()), e.getDescription(), e.getStatus(), e.getSourceType(), e.getCloneStatus(),
                 e.getApiDocSource(),
-                e.getAutoRegressionOnDeploy(), e.getAgentNodeId(), e.getContextSummary(), e.getSummaryGeneratedAt(),
+                e.getAutoRegressionOnDeploy(), e.isAutoBuildOnWiDone(), e.isAutoDeployTestOnBuild(),
+                e.getAgentNodeId(), e.getContextSummary(), e.getSummaryGeneratedAt(),
                 e.getOwnerId(), e.getKind(), e.getCreatedAt(), e.getUpdatedAt());
     }
 

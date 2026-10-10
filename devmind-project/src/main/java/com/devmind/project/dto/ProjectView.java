@@ -18,6 +18,10 @@ public record ProjectView(
         String cloneStatus,
         String apiDocSource,
         Boolean autoRegressionOnDeploy,
+        /** CAP-72：WI 翻 DONE 后自动触发构建 */
+        boolean autoBuildOnWiDone,
+        /** CAP-72：构建成功后自动部署 TEST 环境 */
+        boolean autoDeployTestOnBuild,
         /** CAP-21：默认执行节点 id（null = 本机） */
         String agentNodeId,
         String contextSummary,
