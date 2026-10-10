@@ -7,6 +7,7 @@ import com.devmind.auth.IdentityService;
 import com.devmind.project.model.RequirementEntity;
 import com.devmind.project.model.WorkItemEntity;
 import com.devmind.project.repo.DesignRepository;
+import com.devmind.project.repo.EnvironmentRepository;
 import com.devmind.project.repo.ProjectRepository;
 import com.devmind.project.repo.RelationRepository;
 import com.devmind.project.repo.RequirementRepository;
@@ -89,7 +90,8 @@ class RequirementAcceptanceListenerTest {
                         (p, m, args) -> "getIfAvailable".equals(m.getName()) ? null : null),
                 proxy(org.springframework.beans.factory.ObjectProvider.class,
                         (p, m, args) -> "getIfAvailable".equals(m.getName()) ? null : null),
-                events);
+                events,
+                proxy(EnvironmentRepository.class, untouchable));
         WorkItemService workItemService = new WorkItemService(requirementService, workItemRepo,
                 null, null, null, events, new FakeIdentityService());
         listener = new RequirementAcceptanceListener(requirementService, workItemService, events);

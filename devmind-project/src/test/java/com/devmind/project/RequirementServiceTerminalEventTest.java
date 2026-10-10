@@ -90,7 +90,8 @@ class RequirementServiceTerminalEventTest {
                         (p, m, args) -> "getIfAvailable".equals(m.getName()) ? null : null),
                 proxy(org.springframework.beans.factory.ObjectProvider.class,
                         (p, m, args) -> "getIfAvailable".equals(m.getName()) ? null : null),
-                events);
+                events,
+                proxy(com.devmind.project.repo.EnvironmentRepository.class, untouchable));
     }
 
     private RequirementEntity requirement(String status, String workspaceOwner) {

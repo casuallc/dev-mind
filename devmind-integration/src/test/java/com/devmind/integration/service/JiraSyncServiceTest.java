@@ -93,7 +93,7 @@ class JiraSyncServiceTest {
         private int seq = 0;
 
         FakeRequirementService() {
-            super(null, null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null, null);
         }
 
         /** 与 RequirementService.applyJiraFields 同款的 fake 落库（标题截 240） */
@@ -152,7 +152,7 @@ class JiraSyncServiceTest {
                     e.getSource(), e.getPriority(), e.getAssignee(), e.getReporter(),
                     List.of(), List.of(), e.getDueDate(), e.getExternalKey(), null, null,
                     null, e.getEstimatedSeconds(), e.getSpentSeconds(),
-                    "test", Instant.now(), Instant.now(), false, false);
+                    "test", Instant.now(), Instant.now(), false, false, null);
         }
     }
 

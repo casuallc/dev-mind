@@ -123,7 +123,7 @@ class SessionRequirementWorkspaceTest {
         final List<String> finalized = new ArrayList<>();
 
         FakeRequirementService() {
-            super(null, null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null, null);
         }
 
         void add(RequirementEntity e) {
