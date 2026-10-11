@@ -10,6 +10,7 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref
 import {
   Alert,
   Button,
+  Drawer,
   Form,
   Input,
   Modal,
@@ -43,6 +44,7 @@ import JiraDynamicField, { fromJiraValue, toJiraValue } from './JiraDynamicField
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { DRAWER_WIDE } from '../../../shared/utils/overlay'
 
 const EMPTY_OPTIONS: JiraPushOptions = { jiraProjects: [], issueTypes: [], priorities: [] }
 
@@ -390,17 +392,20 @@ function TemplateEditModal({ open, template, onClose, onSaved }: {
   const hiddenFixed = Object.keys(FIXED_FIELD_LABEL).filter((id) => !shows(id))
 
   return (
-    <Modal
-      centered
-      width={640}
+    <Drawer
+      width={DRAWER_WIDE}
       open={open}
       title={editing ? `编辑模板：${template.jiraProjectKey} · ${template.issueTypeId}` : '新建推送模板'}
-      okText="保存"
-      cancelText="取消"
-      confirmLoading={saving}
-      onOk={() => form.submit()}
-      onCancel={onClose}
+      onClose={onClose}
       destroyOnHidden
+      footer={
+        <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" loading={saving} onClick={() => form.submit()}>
+            保存
+          </Button>
+        </Space>
+      }
     >
       {instances.length === 0 ? (
         <Alert
@@ -551,6 +556,6 @@ function TemplateEditModal({ open, template, onClose, onSaved }: {
           )}
         </Form>
       )}
-    </Modal>
+    </Drawer>
   )
 }
