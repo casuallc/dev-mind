@@ -19,6 +19,8 @@ export interface Scenario {
   model?: string
   permissionMode?: string
   agentNodeId?: string
+  /** 自动结束（秒）：回合完成后空闲 N 秒自动结束会话；空 = 跟随全局，0 = 永不（CAP-33 FR-08） */
+  autoFinishSec?: number | null
   scope: 'GLOBAL' | 'PROJECT'
   projectId?: string
   enabled: boolean

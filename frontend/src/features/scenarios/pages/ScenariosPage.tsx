@@ -370,9 +370,16 @@ export default function ScenariosPage() {
               <Select allowClear options={nodeOptions} placeholder="留空 = 默认路由" />
             </Form.Item>
           </Space>
-          <Space size="large">
+          <Space size="large" wrap>
             <Form.Item label="排序" name="sortOrder">
               <InputNumber min={0} style={{ width: 100 }} />
+            </Form.Item>
+            <Form.Item
+              label="自动结束（秒）"
+              name="autoFinishSec"
+              extra="回合完成后空闲 N 秒自动结束会话并回传产出；0=永不，留空=跟随全局/不修改"
+            >
+              <InputNumber min={0} style={{ width: 140 }} placeholder="留空 = 跟随全局" />
             </Form.Item>
             <Form.Item label="启用" name="enabled" valuePropName="checked" extra="停用后不出现在创建表单（旧 code 仍可解析）">
               <Switch />
