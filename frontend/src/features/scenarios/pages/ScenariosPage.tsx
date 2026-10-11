@@ -36,6 +36,7 @@ import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/page
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { DRAWER_FORM, DRAWER_FULL } from '../../../shared/utils/overlay'
 
 const SOURCE_LABEL: Record<string, string> = {
   scenario: '场景绑定',
@@ -268,7 +269,7 @@ export default function ScenariosPage() {
         title={editing ? `场景：${editing.name}` : '新建场景'}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        width={560}
+        width={DRAWER_FORM}
         footer={
           <Space style={{ display: 'flex', justifyContent: 'space-between' }}>
             <Space>
@@ -380,12 +381,11 @@ export default function ScenariosPage() {
         </Form>
       </Drawer>
 
-      <Modal
+      <Drawer
         title={`装配预览：${editing?.code ?? ''}`}
         open={preview != null}
-        onCancel={() => setPreview(null)}
-        footer={null}
-        width={760}
+        onClose={() => setPreview(null)}
+        width={DRAWER_FULL}
       >
         {preview && (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -441,7 +441,7 @@ export default function ScenariosPage() {
             )}
           </Space>
         )}
-      </Modal>
+      </Drawer>
     </Card>
   )
 }
