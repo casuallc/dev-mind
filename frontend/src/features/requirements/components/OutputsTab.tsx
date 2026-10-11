@@ -2,7 +2,7 @@
 // 分组规则：产物带 workItemId 归到对应工作单元小节，否则进「需求级」小节（CAP-52 需求级开发会话）；
 // 产物正文不复制——path 存 sessionId#fileName，点开预览时回读 session_outputs。
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Button, Empty, Modal, Space, Spin, Tag, Typography } from 'antd'
+import { Button, Drawer, Empty, Space, Spin, Tag, Typography } from 'antd'
 import { FileTextOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import type { RequirementOverview } from '../types'
@@ -10,6 +10,7 @@ import { getSessionOutput } from '../../sessions/api'
 import Markdown from '../../../shared/components/Markdown'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_WIDE } from '../../../shared/utils/overlay'
 
 type SummaryItem = RequirementOverview['artifacts'][number]
 
@@ -135,22 +136,19 @@ export default function OutputsTab({ overview }: { overview: RequirementOverview
       {groups.requirementLevel.length > 0 &&
         renderGroup(<Typography.Text strong>需求级</Typography.Text>, groups.requirementLevel)}
 
-      <Modal
+      <Drawer
         title={preview?.fileName ?? ''}
         open={!!preview}
-        onCancel={() => setPreview(null)}
-        footer={null}
-        width={820}
+        onClose={() => setPreview(null)}
+        width={DRAWER_WIDE}
         destroyOnHidden
       >
         {loading ? (
           <Spin style={{ display: 'block', margin: '60px auto' }} />
         ) : (
-          <div style={{ maxHeight: 520, overflow: 'auto' }}>
-            <Markdown content={content} />
-          </div>
+          <Markdown content={content} />
         )}
-      </Modal>
+      </Drawer>
     </div>
   )
 }

@@ -51,7 +51,7 @@ import {
 } from '../api'
 import JiraActions from '../components/JiraActions'
 import JiraDescription from '../components/JiraDescription'
-import JiraPushModal from '../components/JiraPushModal'
+import JiraPushDrawer from '../components/JiraPushDrawer'
 import RequirementAttachmentPanel from '../components/RequirementAttachmentPanel'
 import AnalysisTab from '../components/flow/AnalysisTab'
 import DesignsTab from '../components/flow/DesignsTab'
@@ -665,7 +665,7 @@ export default function RequirementDetailPage() {
 
       {/* CAP-47：仅自建需求渲染（推送成功后 source 翻 JIRA，入口自然消失、改由「Jira 操作」接管） */}
       {!isJira && (
-        <JiraPushModal
+        <JiraPushDrawer
           requirement={r}
           open={pushOpen}
           onClose={() => setPushOpen(false)}

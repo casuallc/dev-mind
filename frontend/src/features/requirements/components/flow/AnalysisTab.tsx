@@ -4,7 +4,7 @@
 import { Button, Card, Space, Tag, Typography } from 'antd'
 import { FileSearchOutlined } from '@ant-design/icons'
 import type { Requirement, RequirementOverview } from '../../types'
-import DocPreviewModal from './DocPreviewModal'
+import DocPreviewDrawer from './DocPreviewDrawer'
 import { ACTIVE_SESSION_STATES, SessionTag, latestFlowSession } from './flowSessions'
 import { useDesignActions } from './useDesignActions'
 
@@ -51,7 +51,7 @@ export default function AnalysisTab({ projectId, requirement, overview, onChange
           起会话请用页面右上角「开启 AI 规划」。
         </Typography.Text>
       </Card>
-      <DocPreviewModal preview={preview} onClose={closePreview} />
+      <DocPreviewDrawer preview={preview} onClose={closePreview} />
     </Space>
   )
 }

@@ -18,11 +18,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert,
+  Button,
   DatePicker,
   Empty,
   Form,
+  Drawer,
   Input,
-  Modal,
   Select,
   Space,
   Spin,
@@ -51,6 +52,7 @@ import JiraDynamicField, { fromJiraValue, toJiraValue } from '../../integrations
 import { isAdmin } from '../../auth/authStore'
 import { isApiRequestError } from '../../../shared/api/error'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_WIDE } from '../../../shared/utils/overlay'
 
 /** 表单值形态：dueDate 在表单里是 dayjs，提交时转 'YYYY-MM-DD'；extraFields 按字段 id 分组 */
 type FormValues = Omit<JiraPushInput, 'integrationId' | 'dueDate' | 'extraFields'> & {
@@ -74,7 +76,7 @@ const FIXED_FIELD_LABEL: Record<string, string> = {
   duedate: '截止日期',
 }
 
-export default function JiraPushModal({ requirement, open, onClose, onPushed }: {
+export default function JiraPushDrawer({ requirement, open, onClose, onPushed }: {
   requirement: Requirement
   open: boolean
   onClose: () => void
@@ -338,18 +340,20 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
     : [])
 
   return (
-    <Modal
-      centered
-      width={680}
+    <Drawer
+      width={DRAWER_WIDE}
       open={open}
       title={`推送到 Jira · ${requirement.code}`}
-      okText="推送并关联"
-      cancelText="返回"
-      confirmLoading={busy}
-      okButtonProps={{ disabled: blocked }}
-      onOk={() => form.submit()}
-      onCancel={onClose}
+      onClose={onClose}
       destroyOnHidden
+      footer={
+        <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button onClick={onClose}>返回</Button>
+          <Button type="primary" loading={busy} disabled={blocked} onClick={() => form.submit()}>
+            推送并关联
+          </Button>
+        </Space>
+      }
     >
       {loading && <Spin style={{ display: 'block', marginBottom: 12 }} />}
       {!loading && noInstance ? (
@@ -589,6 +593,6 @@ export default function JiraPushModal({ requirement, open, onClose, onPushed }: 
           </Form>
         </Space>
       )}
-    </Modal>
+    </Drawer>
   )
 }

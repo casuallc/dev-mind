@@ -10,7 +10,7 @@ import type { Design, DesignStatus, Requirement } from '../../types'
 import { fmtTime } from '../../../../shared/utils/format'
 import { showError } from '../../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../../shared/utils/table'
-import DocPreviewModal from './DocPreviewModal'
+import DocPreviewDrawer from './DocPreviewDrawer'
 import { designStatusColor, useDesignActions } from './useDesignActions'
 
 export default function DesignsTab({ projectId, requirement, onChanged }: {
@@ -94,7 +94,7 @@ export default function DesignsTab({ projectId, requirement, onChanged }: {
         <Button size="small" icon={<ReloadOutlined />} onClick={load} loading={loading} />
       </Space>
       <Table rowKey="id" size="small" columns={columns} dataSource={designs} loading={loading} pagination={LIST_PAGINATION} />
-      <DocPreviewModal preview={preview} onClose={closePreview} />
+      <DocPreviewDrawer preview={preview} onClose={closePreview} />
     </Space>
   )
 }
