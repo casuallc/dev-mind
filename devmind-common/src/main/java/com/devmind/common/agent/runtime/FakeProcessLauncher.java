@@ -44,6 +44,12 @@ public class FakeProcessLauncher implements SessionExecutor {
         cmd.add(script.toString());
         cmd.add(ctx.sessionId());
         cmd.add("hold");
+        // argv[4]=steps 占位（脚本默认 3），permissionMode 必须在 argv[5]——错位会把
+        // permissionMode 解析成 steps=NaN（主流程整段跳过）
+        cmd.add("3");
+        // argv[5] = permissionMode：bypassPermissions 时 fake 不发 permission_request、
+        // 每回合结束出 result 帧（与真实 claude 一致），WAITING_INPUT 可达，空闲自动结束可测
+        cmd.add(ctx.permissionMode() == null ? "" : ctx.permissionMode());
         log.info("启动 fake 会话: {}  cwd={}", ctx.sessionId(), cwd);
 
         ProcessBuilder pb = new ProcessBuilder(cmd);

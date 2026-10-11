@@ -1,8 +1,11 @@
 // Dev-Mind 假 Agent：模拟 claude stream-json 输出，供全链路自测（无 claude 环境时）。
-// 用法: node fake-agent.js <sessionId> hold [steps]
+// 用法: node fake-agent.js <sessionId> hold [steps] [permissionMode]
 // 行为：发 init → N 轮 assistant/tool_use/tool_result → permission_request → 等待 stdin：
 //   {"type":"input","text":"..."}             → 收到并回复；text 为 "__exit__" 时发 result 正常退出
 //   {"type":"permission_result","permission_request_id":"...","permission":"allow"} → 继续
+// permissionMode = bypassPermissions 时与真实 claude 一致：不发 permission_request，
+// 每回合（初始流程与每条 stdin 输入的回复）结束即出 result 帧并继续保活等输入——
+// WAITING_INPUT 由此可达，场景级空闲自动结束（CAP-33 FR-08）等链路可端到端覆盖。
 // CAP-50：每条 assistant 正文之前先按 --include-partial-messages 的形态吐一片 stream_event
 // 增量（见 streamText），完整 assistant 照旧紧跟其后——真实 CLI 两者都发，前端增量打底、
 // 全量覆盖收口。缺少这一片则该路径只有单测覆盖，链路（聚合 → 出口 → 落库）没有回归网。
@@ -11,6 +14,8 @@
 const sessionId = process.argv[2] || 'fake';
 const mode = process.argv[3] || 'hold';
 const steps = parseInt(process.argv[4] || '3', 10);
+const permissionMode = process.argv[5] || '';
+const bypass = permissionMode === 'bypassPermissions';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const emit = obj => process.stdout.write(JSON.stringify(obj) + '\n');
@@ -118,6 +123,8 @@ rl.on('line', async line => {
     }
     emit({ type: 'user', message: { role: 'user', content: text } });
     await assistantMsg([{ type: 'text', text: '收到：' + text + '（fake 回复）\n\n- 要点一\n- 要点二\n\n```js\nconsole.log("markdown ok")\n```' }]);
+    // bypass 下与真实 CLI 一致：每回合结束出 result 帧（→ WAITING_INPUT），继续保活等下一条输入
+    if (bypass) emit(resultFrame('回合完成（fake，bypass）。'));
   } else if (msg.type === 'permission_result') {
     emit({ type: 'permission_result', permission_request_id: msg.permission_request_id, permission: msg.permission });
     await assistantMsg([{ type: 'text', text: '权限已' + msg.permission + '，继续执行（fake）' }]);
@@ -145,8 +152,13 @@ async function main() {
     await sleep(300);
     emit({ type: 'tool_result', tool_use_id: `tool-${i}`, content: [{ type: 'text', text: `step ${i} output` }], is_error: false });
   }
-  emit({ type: 'permission_request', request_id: 'perm-fake', action: 'ask', tool_name: 'Bash', input: 'npm install', options: [{ type: 'allowOnce', label: '允许一次' }] });
-  await assistantMsg([{ type: 'text', text: '请问是否允许我执行 npm install？' }]);
+  if (bypass && mode !== 'run') {
+    // bypassPermissions：无授权环节，初始流程跑完即回合完成（→ WAITING_INPUT），保活等输入
+    emit(resultFrame('回合完成（fake，bypass）。'));
+  } else {
+    emit({ type: 'permission_request', request_id: 'perm-fake', action: 'ask', tool_name: 'Bash', input: 'npm install', options: [{ type: 'allowOnce', label: '允许一次' }] });
+    await assistantMsg([{ type: 'text', text: '请问是否允许我执行 npm install？' }]);
+  }
   if (mode === 'run') {
     await sleep(1000);
     emit(resultFrame('任务完成（fake）。'));

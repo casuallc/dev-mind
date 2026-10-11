@@ -41,12 +41,16 @@ def ok(cond, msg):
 
 
 def drive_session(sid, token, timeout=90):
-    """fake-agent hold 模式：喂一条输入，授权 permission_request，最后 finish。"""
+    """fake-agent hold 模式：喂一条输入；bypass 场景下每回合出 result → 见到 WAITING_INPUT
+    即回合完成可 finish（CAP-33 FR-08：worklog 场景带 60s 自动结束，不能无限轮询否则
+    finish 撞上自动结束的 409）；非 bypass 场景仍兼容授权 WAITING_AUTH 后等超时再 finish。"""
     call('POST', f'/sessions/{sid}/input', {'text': 'go'}, token)
     deadline = time.time() + timeout
     while time.time() < deadline:
         _, so = call('GET', f'/sessions/{sid}', token=token)
         st = so.get('status')
+        if st == 'WAITING_INPUT':
+            break
         if st == 'WAITING_AUTH':
             call('POST', f'/sessions/{sid}/authorize',
                  {'accepted': True, 'scope': 'once', 'requestId': 'perm-fake'}, token)
