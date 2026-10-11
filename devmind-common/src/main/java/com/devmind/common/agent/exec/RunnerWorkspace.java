@@ -584,8 +584,11 @@ public class RunnerWorkspace {
     /**
      * CAP-41 M3 工作日志空间远端备份（手动触发）：把持久工作区 push 到用户绑定的远端仓库。
      * remote 幂等绑定 origin=cleanUrl（防 token 残留 .git/config，CAP-23 同款），
-     * push HEAD:&lt;branch&gt; 并 -u 建跟踪。节点亲和单写入，冲突罕见——非快进不自动 rebase，
-     * 把 sanitized 错误尾部抛给调用方引导人工处理。
+     * push HEAD:&lt;branch&gt; 并 -u 建跟踪。push 前先 fetch 对齐：远端分支领先/分叉
+     * （建仓自带 README、他机推过）自动 --no-edit 合并（--allow-unrelated-histories，
+     * 日志按日期键控天然低冲突；-X ours 冲突偏向本地——工作区是备份权威源，远端
+     * 独有文件仍保留）；合并仍失败则 abort 回滚，把 sanitized 错误抛给调用方
+     * 引导人工处理，工作区不留 MERGING 状态。
      *
      * <p>URL 口径同 GitRemoteOps：仅 http/https（token 内嵌注入）与 file://（本地/测试，
      * token 忽略）；ssh 明确报错。</p>
@@ -630,6 +633,31 @@ public class RunnerWorkspace {
             Result set = run(dir, OP_TIMEOUT_SEC, effectiveToken, "remote", "set-url", "origin", cleanUrl);
             if (set.exit() != 0) {
                 return new WorklogPushOutcome(set.exit(), "git remote set-url 失败: " + tail(set.output()));
+            }
+        }
+
+        // push 前对齐远端：fetch 目标分支（远端尚无该分支 = 首推，fetch 失败跳过对齐直接建支）。
+        // 远端领先/分叉（本地不含 FETCH_HEAD）→ 自动合并（-X ours：冲突偏向本地，工作区是
+        // 备份权威源，远端独有文件仍保留）；合并仍失败 abort 回滚后报人工处理。
+        Result fetch = run(dir, PUSH_TIMEOUT_SEC, effectiveToken, "fetch",
+                withToken(cleanUrl, effectiveToken), targetBranch);
+        if (fetch.exit() == 0) {
+            Result ancestor = run(dir, OP_TIMEOUT_SEC, effectiveToken,
+                    "merge-base", "--is-ancestor", "FETCH_HEAD", "HEAD");
+            if (ancestor.exit() == 1) {
+                Result merge = run(dir, OP_TIMEOUT_SEC, effectiveToken,
+                        "-c", "user.name=devmind", "-c", "user.email=devmind@worklog.local",
+                        "merge", "--no-edit", "--allow-unrelated-histories", "-X", "ours",
+                        "-m", "merge: 对齐远端 " + targetBranch + " 后推送备份（冲突以本地为准）", "FETCH_HEAD");
+                if (merge.exit() != 0) {
+                    run(dir, OP_TIMEOUT_SEC, effectiveToken, "merge", "--abort");
+                    String mout = tail(merge.output());
+                    log.warn("worklog 远端备份自动合并失败: dir={} branch={} err={}", dir, targetBranch, mout);
+                    return new WorklogPushOutcome(merge.exit(),
+                            "远端分支 " + targetBranch + " 与本地分叉，自动合并失败（已回滚合并，请到节点工作区人工处理）: "
+                                    + mout);
+                }
+                log.info("worklog 远端备份已自动合并远端分叉: dir={} branch={}", dir, targetBranch);
             }
         }
 

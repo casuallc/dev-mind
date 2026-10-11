@@ -178,7 +178,10 @@ GET/PUT /api/worklog/settings               + dailyTemplateMd / weeklyTemplateMd
   → `POST /api/worklog/workspace/push` → 服务端下发 `worklog_push` 帧（协议 v6，
   `supports()` 门控，老 runner 409 提示升级）→ runner 对持久工作区执行
   `origin` 幂等绑定（cleanUrl 防 token 残留 .git/config）+ `push -u HEAD:<branch>`。
-  阻塞等 `worklog_push_ack`（330s）；非快进不自动 rebase，sanitized 错误透传引导。
+  阻塞等 `worklog_push_ack`（330s）；push 前先 fetch 对齐——远端分支领先/分叉
+  （建仓自带 README、他机推过）自动 `merge --no-edit --allow-unrelated-histories -X ours`
+  （冲突以本地工作区为准，远端独有文件保留），合并仍失败则 abort 回滚 +
+  sanitized 错误透传引导人工处理，工作区不留 MERGING 状态。
   agent 侧契约不变：只 commit 不 push（skill 种子文案已同步；存量环境 skill 行
   「不存在才建」不覆盖，需在管控台 skill 管理页手工同步文案）。
 

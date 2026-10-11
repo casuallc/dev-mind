@@ -759,6 +759,59 @@ class RunnerWorkspaceTest {
     }
 
     @Test
+    void worklogPushMergesRemoteDivergence() throws Exception {
+        // 远端分叉自愈：首推后另一处向同分支推了一笔（模拟他机推送/网页端改动），
+        // pushWorklog 应先 fetch 合并再推，远端同时保留两边内容，工作区不留 MERGING 状态
+        Path origin = tmp.resolve("worklog-origin-diverge.git");
+        git(tmp, "init", "--bare", "-b", "main", origin.toString());
+
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        Path dir = ws.prepareWorklog(tmp.resolve("worklog-d"), "carol");
+        RunnerWorkspace.WorklogPushOutcome first =
+                ws.pushWorklog(dir, origin.toUri().toString(), "main", null);
+        assertEquals(0, first.exit(), first.output());
+
+        // 另一处克隆推一笔本地没有的提交
+        Path other = tmp.resolve("other-clone");
+        git(tmp, "clone", origin.toString(), other.toString());
+        Files.writeString(other.resolve("REMOTE.md"), "remote-only");
+        git(other, "add", ".");
+        git(other, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "remote commit");
+        git(other, "push", "origin", "main");
+
+        // 本地再推：非快进 → 自动合并后成功
+        RunnerWorkspace.WorklogPushOutcome r =
+                ws.pushWorklog(dir, origin.toUri().toString(), "main", null);
+        assertEquals(0, r.exit(), r.output());
+        assertEquals("remote-only", git(origin, "show", "main:REMOTE.md").trim());
+        assertTrue(git(origin, "show", "main:README.md").contains("工作日志空间"));
+        assertFalse(Files.exists(dir.resolve(".git").resolve("MERGING_HEAD")), "不得残留 MERGING 状态");
+    }
+
+    @Test
+    void worklogPushMergesUnrelatedRemoteReadme() throws Exception {
+        // GitHub 建仓自带 README 场景：远端已有独立 root commit，首推走
+        // --allow-unrelated-histories 合并；同名 README 冲突 -X ours 以本地骨架为准
+        Path origin = tmp.resolve("worklog-origin-readme.git");
+        git(tmp, "init", "--bare", "-b", "main", origin.toString());
+        Path seed = tmp.resolve("seed-readme");
+        git(tmp, "clone", origin.toString(), seed.toString());
+        Files.writeString(seed.resolve("README.md"), "# 建仓自带");
+        git(seed, "add", ".");
+        git(seed, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init readme");
+        git(seed, "push", "origin", "main");
+
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        Path dir = ws.prepareWorklog(tmp.resolve("worklog-u"), "dave");
+        RunnerWorkspace.WorklogPushOutcome r =
+                ws.pushWorklog(dir, origin.toUri().toString(), "main", null);
+        assertEquals(0, r.exit(), r.output());
+        assertTrue(git(origin, "show", "main:README.md").contains("工作日志空间"),
+                "同名冲突以本地骨架为准");
+        assertFalse(Files.exists(dir.resolve(".git").resolve("MERGING_HEAD")), "不得残留 MERGING 状态");
+    }
+
+    @Test
     void worklogPushNeverLeaksToken() throws Exception {
         RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
         Path dir = ws.prepareWorklog(tmp.resolve("worklog"), "bob");
