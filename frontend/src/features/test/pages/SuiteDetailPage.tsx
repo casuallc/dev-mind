@@ -8,6 +8,7 @@ import {
   Button,
   Card,
   Descriptions,
+  Drawer,
   Flex,
   Form,
   Input,
@@ -39,6 +40,7 @@ import type { ProjectEnvironment } from '../../projects/types'
 import { listAgentNodes } from '../../agent/api'
 import { listEnvironments } from '../../projects/api'
 import { fmtTime, paramsToText, textToParams } from '../../../shared/utils/format'
+import { DRAWER_FORM } from '../../../shared/utils/overlay'
 import { SUITE_KIND_COLOR } from '../constants'
 import ScriptSuiteFields, { toScriptSuiteInput } from '../components/ScriptSuiteFields'
 import RunSuiteModal from '../components/RunSuiteModal'
@@ -377,10 +379,17 @@ export default function SuiteDetailPage() {
         </>
       )}
 
-      <Modal title={isNew ? '添加用例' : '编辑用例'} open={!!editing} onCancel={() => setEditing(null)}
-        onOk={() => form.submit()} okText="确定" width={640} destroyOnClose>
+      <Drawer title={isNew ? '添加用例' : '编辑用例'} open={!!editing} onClose={() => setEditing(null)}
+        width={DRAWER_FORM} destroyOnHidden
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setEditing(null)}>取消</Button>
+            <Button type="primary" onClick={() => form.submit()}>确定</Button>
+          </Space>
+        }
+      >
         <CaseForm form={form} onFinish={saveCase} />
-      </Modal>
+      </Drawer>
 
       {/* 运行：与列表行内运行同一组件，按 kind 渲染字段；成功后回列表页看运行历史/详情 */}
       <RunSuiteModal

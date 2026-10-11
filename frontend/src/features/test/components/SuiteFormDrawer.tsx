@@ -8,6 +8,7 @@ import { createScriptSuite, createSuite, generateSuite } from '../api'
 import type { AgentNode } from '../../agent/types'
 import ScriptSuiteFields, { toScriptSuiteInput } from './ScriptSuiteFields'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_SM } from '../../../shared/utils/overlay'
 
 interface Props {
   open: boolean
@@ -57,7 +58,7 @@ export default function SuiteFormDrawer({ open, projectId, nodes, onClose, onSav
   return (
     <Drawer
       title="新建套件"
-      width={640}
+      width={DRAWER_SM}
       open={open}
       onClose={onClose}
       destroyOnHidden

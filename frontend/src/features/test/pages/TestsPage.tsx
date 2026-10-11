@@ -8,6 +8,7 @@
 import {
   Button,
   Card,
+  Drawer,
   Input,
   Modal,
   Segmented,
@@ -45,6 +46,7 @@ import { listEnvironments } from '../../projects/api'
 import { listAgentNodes } from '../../agent/api'
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { durationMs, fmtTime } from '../../../shared/utils/format'
+import { DRAWER_FULL, DRAWER_WIDE } from '../../../shared/utils/overlay'
 import { STATUS_COLOR, SUITE_KIND_COLOR } from '../constants'
 import RunDetailDrawer from '../components/RunDetailDrawer'
 import IssuesTable from '../components/IssuesTable'
@@ -346,7 +348,7 @@ function TestCenter({ id }: { id: string }) {
       {/* 新建套件（统一抽屉：类型选择在表单内，script 展开 git/命令/env 字段） */}
       {/* 新建测试运行（批量多选入口；单套件行内运行走 RunSuiteModal） */}
       <Modal title="新建测试运行" open={runOpen} onCancel={() => setRunOpen(false)}
-        onOk={onCreate} okText="执行测试" confirmLoading={creating} width={520} destroyOnClose>
+        onOk={onCreate} okText="执行测试" confirmLoading={creating} width={520} destroyOnHidden>
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Select<number[]>
             mode="multiple"
@@ -427,17 +429,17 @@ function TestCenter({ id }: { id: string }) {
         onIssues={openIssues}
       />
 
-      <Modal title={textModal?.title} open={!!textModal} footer={null} width={760}
-        onCancel={() => setTextModal(null)}>
-        <pre style={{ background: '#0f1115', color: '#d0d7de', padding: 12, borderRadius: 6, fontSize: 12, lineHeight: 1.6, maxHeight: '60vh', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+      <Drawer title={textModal?.title} open={!!textModal} width={DRAWER_WIDE}
+        onClose={() => setTextModal(null)}>
+        <pre style={{ background: '#0f1115', color: '#d0d7de', padding: 12, borderRadius: 6, fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
           {textModal?.text || '（空）'}
         </pre>
-      </Modal>
+      </Drawer>
 
-      <Modal title="缺陷线索" open={!!issuesModal} footer={null} width={760}
-        onCancel={() => setIssuesModal(null)}>
+      <Drawer title="缺陷线索" open={!!issuesModal} width={DRAWER_FULL}
+        onClose={() => setIssuesModal(null)}>
         <IssuesTable issues={issuesModal ?? []} />
-      </Modal>
+      </Drawer>
     </Card>
   )
 }

@@ -6,6 +6,7 @@ import { BugOutlined } from '@ant-design/icons'
 import { getRun } from '../api'
 import type { CaseResult, CaseResultStatus, TestRun } from '../types'
 import { RESULT_COLOR, STATUS_COLOR } from '../constants'
+import { DRAWER_WIDE } from '../../../shared/utils/overlay'
 
 export default function RunDetailDrawer({ record, onClose, onChanged, onOpenText, onIssues }: {
   record: TestRun | null
@@ -109,7 +110,7 @@ export default function RunDetailDrawer({ record, onClose, onChanged, onOpenText
           {connected && <Tag color="cyan">实时</Tag>}
         </Space>
       ) : '测试详情'}
-      width={820}
+      width={DRAWER_WIDE}
       open={!!record}
       onClose={onClose}
     >
