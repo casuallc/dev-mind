@@ -74,6 +74,7 @@
 | v17 | CAP-59 | terminal_complete + terminal_cancel（**门控**）；terminal_exec_ack 增 cancelled（可选，不门控） |
 | v18 | CAP-65 | file/file_ack（节点文件浏览器，**门控**——roots 全量随帧下发，大文件走 HTTP 中转 `files-transfer`） |
 | v19 | CAP-42 补丁 | workspace_finalize 携带 deleteRemoteBranch（可选，不门控——老 runner 忽略 = 维持 push 分支供 diff 的现状） |
+| v23 | CAP-41 M3 补丁 | worklog_push 携带 gitAuthorName/gitAuthorEmail（自动合并署名，可选，不门控——老 runner 忽略/缺席 = 回退内置 devmind 署名） |
 
 ## 4. 下行帧（server → runner）
 
@@ -119,7 +120,9 @@ force=true 先 killAll 排空（上限 30s）再下载。ack 落线后 spawn Sel
 `{sessionId}`。运行中会话即时扫描 `.devmind/output/` 上传（先上传后 ack，服务端 ack 后回读无竞态）。
 
 ### 4.5 `worklog_push` ⏳ v6+（ack: `worklog_push_ack`，等 330s）
-`{requestId:"wp-<ms>-<owner>", worklogOwner, remoteUrl, branch, token?, proxy?}`。
+`{requestId:"wp-<ms>-<owner>", worklogOwner, remoteUrl, branch, token?, gitAuthorName?(v23), gitAuthorEmail?(v23), proxy?}`。
+push 前先 fetch 对齐：远端领先/分叉自动 `merge --no-edit --allow-unrelated-histories -X ours`
+（署名 = 帧身份，缺席回退内置 devmind），合并失败 abort 回滚、工作区不留 MERGING 状态。
 ack：`{requestId, ok, detail?|error?}`。
 
 ### 4.6 `workspace_finalize` ⏳ v7+（ack: `workspace_finalize_ack`，等 60+310×库数 s）

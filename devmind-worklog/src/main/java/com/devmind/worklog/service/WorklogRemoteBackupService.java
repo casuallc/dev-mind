@@ -5,6 +5,7 @@ import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.WorklogPushResult;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.common.integration.GitIdentityProvider;
 import com.devmind.common.integration.RepoGitGateway;
 import com.devmind.project.ProjectService;
 import com.devmind.project.model.ProjectEntity;
@@ -32,16 +33,19 @@ public class WorklogRemoteBackupService {
     private final ProjectService projectService;
     private final ObjectProvider<AgentNodeConnector> connectorProvider;
     private final ObjectProvider<RepoGitGateway> gitGatewayProvider;
+    private final ObjectProvider<GitIdentityProvider> gitIdentityProvider;
 
     public WorklogRemoteBackupService(WorklogUserSettingsRepository settingsRepo,
                                       IdentityService identity, ProjectService projectService,
                                       ObjectProvider<AgentNodeConnector> connectorProvider,
-                                      ObjectProvider<RepoGitGateway> gitGatewayProvider) {
+                                      ObjectProvider<RepoGitGateway> gitGatewayProvider,
+                                      ObjectProvider<GitIdentityProvider> gitIdentityProvider) {
         this.settingsRepo = settingsRepo;
         this.identity = identity;
         this.projectService = projectService;
         this.connectorProvider = connectorProvider;
         this.gitGatewayProvider = gitGatewayProvider;
+        this.gitIdentityProvider = gitIdentityProvider;
     }
 
     /** 推送本人工作日志空间到已绑定远端。各前置不满足抛 400/409；push 失败不抛，看 ok。 */
@@ -69,7 +73,27 @@ public class WorklogRemoteBackupService {
         }
         log.info("worklog 远端备份下发: user={} node={} url={} branch={}",
                 me, project.getAgentNodeId(), remoteUrl, branch);
-        return connector.pushWorklog(project.getAgentNodeId(), me, remoteUrl, branch, token);
+        return connector.pushWorklog(project.getAgentNodeId(), me, remoteUrl, branch, token,
+                resolveAuthor(me, remoteUrl));
+    }
+
+    /**
+     * push 前自动合并的署名身份：CAP-35 第三方账号按 host 的 git user/email
+     * （无绑定回退 displayName/username）。解析失败/模块未装配 → null（帧不带身份字段，
+     * runner 回退内置 devmind 署名），不阻塞推送。
+     */
+    private GitIdentityProvider.GitAuthor resolveAuthor(String me, String remoteUrl) {
+        GitIdentityProvider provider = gitIdentityProvider.getIfAvailable();
+        if (provider == null) {
+            return null;
+        }
+        try {
+            String host = URI.create(remoteUrl).getHost();
+            return provider.resolveAuthor(me, host).orElse(null);
+        } catch (Exception e) {
+            log.debug("worklog 推送署名解析失败(忽略): user={} err={}", me, e.getMessage());
+            return null;
+        }
     }
 
     /** file:// 无凭证语义；http/https 按 host 经 CAP-35 个人 PAT 解析，缺失即 409 引导。 */

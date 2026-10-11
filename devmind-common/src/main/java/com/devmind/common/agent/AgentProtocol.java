@@ -73,7 +73,7 @@ package com.devmind.common.agent;
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 22;
+    public static final int CURRENT = 23;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -140,6 +140,9 @@ public final class AgentProtocol {
 
     /** CAP-73 需求开发中验证（verify_push/verify_pack/verify_patch + verify_ack/verify_log 帧）所需最低版本 */
     public static final int VERIFY_FRAMES = 22;
+
+    /** CAP-41 M3 补丁：worklog_push 帧 gitAuthorName/gitAuthorEmail（自动合并署名）；可选字段不门控 */
+    public static final int WORKLOG_PUSH_IDENTITY = 23;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;

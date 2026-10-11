@@ -110,12 +110,15 @@ public interface AgentNodeConnector {
      * CAP-41 M3：下发 worklog_push 帧并阻塞等 worklog_push_ack——runner 对持久工作区
      * `{worklogRoot}/<worklogOwner>/` 执行 git push（remote 幂等绑定 origin=cleanUrl，
      * push HEAD:&lt;branch&gt;，token 仅随帧传输严禁进日志）。
+     * operator = push 前自动合并的署名身份（CAP-35 第三方账号 git user/email；null/老 runner
+     * 忽略字段 = 回退内置 devmind 署名，双向兼容不门控，见 AgentProtocol.WORKLOG_PUSH_IDENTITY）。
      * 节点离线/协议版本不足（需 v6+）/等待超时抛 DevMindException(CONFLICT)；
-     * push 非零退出（坏 URL/鉴权失败/非快进）不抛，看 {@link WorklogPushResult#ok()}。
+     * push 非零退出（坏 URL/鉴权失败/合并失败）不抛，看 {@link WorklogPushResult#ok()}。
      * 默认实现 = agent 模块未装配（无任何执行节点可用）。
      */
     default WorklogPushResult pushWorklog(String nodeId, String worklogOwner, String remoteUrl,
-                                          String branch, String token) {
+                                          String branch, String token,
+                                          com.devmind.common.integration.GitIdentityProvider.GitAuthor operator) {
         throw new com.devmind.common.exception.DevMindException(
                 com.devmind.common.exception.ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
     }

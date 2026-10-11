@@ -657,6 +657,11 @@ public class AgentRunnerMain {
         String remoteUrl = frame.path("remoteUrl").asText("");
         String branch = frame.path("branch").asText("");
         String token = frame.path("token").asText(null);
+        // v23：自动合并署名（可选字段，缺席/空 = 回退内置 devmind 署名）
+        String gitName = frame.path("gitAuthorName").asText("");
+        String gitEmail = frame.path("gitAuthorEmail").asText("");
+        GitAuthor operator = gitName.isBlank() && gitEmail.isBlank() ? null
+                : new GitAuthor(gitName, gitEmail);
         Thread.ofVirtual().name("worklog-push-" + requestId).start(() -> {
             Map<String, Object> ack = new java.util.LinkedHashMap<>();
             ack.put("type", "worklog_push_ack");
@@ -671,7 +676,7 @@ public class AgentRunnerMain {
                 if (!dir.startsWith(root)) {
                     throw new IllegalStateException("worklog 工作区路径越界: " + owner);
                 }
-                RunnerWorkspace.WorklogPushOutcome r = workspace.pushWorklog(dir, remoteUrl, branch, token);
+                RunnerWorkspace.WorklogPushOutcome r = workspace.pushWorklog(dir, remoteUrl, branch, token, operator);
                 if (r.exit() == 0) {
                     ack.put("ok", true);
                     ack.put("detail", r.output());

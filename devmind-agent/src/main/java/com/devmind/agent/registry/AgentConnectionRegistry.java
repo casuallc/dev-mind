@@ -1095,7 +1095,7 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
      */
     @Override
     public WorklogPushResult pushWorklog(String nodeId, String worklogOwner, String remoteUrl,
-                                         String branch, String token) {
+                                         String branch, String token, GitAuthor operator) {
         if (!supports(nodeId, AgentProtocol.WORKLOG_PUSH_FRAMES)) {
             throw new DevMindException(ErrorCode.CONFLICT,
                     "节点 " + nodeId + " 的 runner 协议版本过低（worklog 远端备份需 v"
@@ -1113,6 +1113,15 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         frame.put("branch", branch);
         if (token != null && !token.isBlank()) {
             frame.put("token", token);
+        }
+        // v23：自动合并署名（可选字段不门控；老 runner 忽略回退内置署名）
+        if (operator != null) {
+            if (operator.name() != null && !operator.name().isBlank()) {
+                frame.put("gitAuthorName", operator.name());
+            }
+            if (operator.email() != null && !operator.email().isBlank()) {
+                frame.put("gitAuthorEmail", operator.email());
+            }
         }
         putProxy(frame, nodeId);
         long startMs = System.currentTimeMillis();

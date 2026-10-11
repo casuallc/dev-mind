@@ -779,12 +779,19 @@ class RunnerWorkspaceTest {
         git(other, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "remote commit");
         git(other, "push", "origin", "main");
 
-        // 本地再推：非快进 → 自动合并后成功
-        RunnerWorkspace.WorklogPushOutcome r =
-                ws.pushWorklog(dir, origin.toUri().toString(), "main", null);
+        // 本地也落一笔（真分叉；否则 merge 退化为快进、不产生合并提交）
+        Files.writeString(dir.resolve("daily").resolve("2026-09-15.md"), "# 本地日报");
+        git(dir, "add", "-A");
+        git(dir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "docs: daily 2026-09-15");
+
+        // 本地再推：非快进 → 自动合并后成功；合并提交以 frame 下发的第三方账号身份署名
+        RunnerWorkspace.WorklogPushOutcome r = ws.pushWorklog(
+                dir, origin.toUri().toString(), "main", null, new GitAuthor("刘长青", "lcq@example.com"));
         assertEquals(0, r.exit(), r.output());
         assertEquals("remote-only", git(origin, "show", "main:REMOTE.md").trim());
         assertTrue(git(origin, "show", "main:README.md").contains("工作日志空间"));
+        assertEquals("刘长青|lcq@example.com",
+                git(origin, "log", "-1", "--format=%an|%ae", "main").trim());
         assertFalse(Files.exists(dir.resolve(".git").resolve("MERGING_HEAD")), "不得残留 MERGING 状态");
     }
 

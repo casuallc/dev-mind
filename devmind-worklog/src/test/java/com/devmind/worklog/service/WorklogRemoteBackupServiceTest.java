@@ -4,6 +4,7 @@ import com.devmind.auth.IdentityService;
 import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.WorklogPushResult;
 import com.devmind.common.exception.DevMindException;
+import com.devmind.common.integration.GitIdentityProvider;
 import com.devmind.common.integration.RepoGitGateway;
 import com.devmind.project.ProjectService;
 import com.devmind.project.model.ProjectEntity;
@@ -34,6 +35,7 @@ class WorklogRemoteBackupServiceTest {
     private ProjectService projectService;
     private AgentNodeConnector connector;
     private RepoGitGateway gateway;
+    private GitIdentityProvider gitIdentity;
     private WorklogRemoteBackupService service;
 
     @BeforeEach
@@ -43,10 +45,11 @@ class WorklogRemoteBackupServiceTest {
         projectService = mock(ProjectService.class);
         connector = mock(AgentNodeConnector.class);
         gateway = mock(RepoGitGateway.class);
+        gitIdentity = mock(GitIdentityProvider.class);
         ObjectProvider<AgentNodeConnector> connectorProvider = mockProvider(connector);
         ObjectProvider<RepoGitGateway> gatewayProvider = mockProvider(gateway);
         service = new WorklogRemoteBackupService(settingsRepo, identity, projectService,
-                connectorProvider, gatewayProvider);
+                connectorProvider, gatewayProvider, mockProvider(gitIdentity));
         when(identity.currentActor()).thenReturn("alice");
     }
 
@@ -107,14 +110,35 @@ class WorklogRemoteBackupServiceTest {
                 .thenReturn(Optional.of(boundSettings("https://git.example.com/u/w.git", null)));
         when(gateway.resolveToken(eq("alice"), eq("git.example.com"), any()))
                 .thenReturn(Optional.of("tok"));
+        when(gitIdentity.resolveAuthor("alice", "git.example.com"))
+                .thenReturn(Optional.of(new GitIdentityProvider.GitAuthor("Alice 爱丽", "alice@gl.com")));
         when(projectService.findWorklogByOwner("alice")).thenReturn(Optional.of(worklogProject()));
-        when(connector.pushWorklog("1", "alice", "https://git.example.com/u/w.git", "main", "tok"))
+        when(connector.pushWorklog(eq("1"), eq("alice"), eq("https://git.example.com/u/w.git"),
+                eq("main"), eq("tok"), any()))
                 .thenReturn(WorklogPushResult.ok("分支 main：Everything up-to-date"));
 
         WorklogPushResult r = service.pushToRemote();
         assertTrue(r.ok());
-        // 分支空 → 默认 main；token 来自个人 PAT
-        verify(connector).pushWorklog("1", "alice", "https://git.example.com/u/w.git", "main", "tok");
+        // 分支空 → 默认 main；token 来自个人 PAT；署名 = 第三方账号 git user/email
+        verify(connector).pushWorklog("1", "alice", "https://git.example.com/u/w.git", "main", "tok",
+                new GitIdentityProvider.GitAuthor("Alice 爱丽", "alice@gl.com"));
+    }
+
+    @Test
+    void authorResolutionFailureDoesNotBlockPush() {
+        // 署名解析异常 → operator=null 帧不带身份字段（runner 回退内置署名），不阻塞推送
+        when(settingsRepo.findByUserId("alice"))
+                .thenReturn(Optional.of(boundSettings("https://git.example.com/u/w.git", "main")));
+        when(gateway.resolveToken(eq("alice"), eq("git.example.com"), any()))
+                .thenReturn(Optional.of("tok"));
+        when(gitIdentity.resolveAuthor(any(), any())).thenThrow(new RuntimeException("boom"));
+        when(projectService.findWorklogByOwner("alice")).thenReturn(Optional.of(worklogProject()));
+        when(connector.pushWorklog("1", "alice", "https://git.example.com/u/w.git", "main", "tok", null))
+                .thenReturn(WorklogPushResult.ok("ok"));
+
+        WorklogPushResult r = service.pushToRemote();
+        assertTrue(r.ok());
+        verify(connector).pushWorklog("1", "alice", "https://git.example.com/u/w.git", "main", "tok", null);
     }
 
     @Test
@@ -122,12 +146,12 @@ class WorklogRemoteBackupServiceTest {
         when(settingsRepo.findByUserId("alice"))
                 .thenReturn(Optional.of(boundSettings("file:///tmp/worklog-origin.git", "main")));
         when(projectService.findWorklogByOwner("alice")).thenReturn(Optional.of(worklogProject()));
-        when(connector.pushWorklog("1", "alice", "file:///tmp/worklog-origin.git", "main", null))
+        when(connector.pushWorklog("1", "alice", "file:///tmp/worklog-origin.git", "main", null, null))
                 .thenReturn(WorklogPushResult.ok("ok"));
 
         WorklogPushResult r = service.pushToRemote();
         assertTrue(r.ok());
-        verify(connector).pushWorklog("1", "alice", "file:///tmp/worklog-origin.git", "main", null);
+        verify(connector).pushWorklog("1", "alice", "file:///tmp/worklog-origin.git", "main", null, null);
         // file:// 无凭证语义，不得触碰 gateway
         org.mockito.Mockito.verifyNoInteractions(gateway);
     }

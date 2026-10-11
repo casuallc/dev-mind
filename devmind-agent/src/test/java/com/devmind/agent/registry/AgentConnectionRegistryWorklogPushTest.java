@@ -6,6 +6,7 @@ import com.devmind.agent.model.AgentNodeEntity;
 import com.devmind.agent.service.AgentAuditLogService;
 import com.devmind.agent.service.AgentNodeService;
 import com.devmind.common.agent.WorklogPushResult;
+import com.devmind.common.integration.GitIdentityProvider.GitAuthor;
 import com.devmind.common.exception.DevMindException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -59,7 +60,7 @@ class AgentConnectionRegistryWorklogPushTest {
         helloWithProtocol(6);
         // 两段式：另一线程发帧并阻塞等 ack；本线程抓到下行帧里的 requestId 后回 ack
         Thread caller = new Thread(() ->
-                registry.pushWorklog("7", "alice", "https://git.example.com/u/worklog.git", "main", "tok123"));
+                registry.pushWorklog("7", "alice", "https://git.example.com/u/worklog.git", "main", "tok123", new GitAuthor("刘长青", "lcq@example.com")));
         caller.start();
         Thread.sleep(100);
         ArgumentCaptor<TextMessage> captor = ArgumentCaptor.forClass(TextMessage.class);
@@ -70,6 +71,9 @@ class AgentConnectionRegistryWorklogPushTest {
         assertTrue(payload.contains("\"remoteUrl\":\"https://git.example.com/u/worklog.git\""), payload);
         assertTrue(payload.contains("\"branch\":\"main\""), payload);
         assertTrue(payload.contains("\"token\":\"tok123\""), payload);
+        // v23：自动合并署名随帧（非空才带）
+        assertTrue(payload.contains("\"gitAuthorName\":\"刘长青\""), payload);
+        assertTrue(payload.contains("\"gitAuthorEmail\":\"lcq@example.com\""), payload);
         String requestId = payload.replaceAll(".*\"requestId\":\"([^\"]+)\".*", "$1");
         registry.onWorklogPushAck("7", requestId, true, "分支 main：Everything up-to-date", null);
         caller.join(10_000);
@@ -92,7 +96,7 @@ class AgentConnectionRegistryWorklogPushTest {
         helloWithProtocol(8);
         when(nodeService.require(7L)).thenReturn(proxiedNode("git,claude"));
         Thread caller = new Thread(() ->
-                registry.pushWorklog("7", "alice", "https://git.example.com/u/worklog.git", "main", null));
+                registry.pushWorklog("7", "alice", "https://git.example.com/u/worklog.git", "main", null, null));
         caller.start();
         Thread.sleep(100);
         ArgumentCaptor<TextMessage> captor = ArgumentCaptor.forClass(TextMessage.class);
@@ -113,7 +117,7 @@ class AgentConnectionRegistryWorklogPushTest {
         helloWithProtocol(7);
         when(nodeService.require(7L)).thenReturn(proxiedNode("git"));
         DevMindException e = assertThrows(DevMindException.class,
-                () -> registry.pushWorklog("7", "alice", "https://x/y.git", "main", null));
+                () -> registry.pushWorklog("7", "alice", "https://x/y.git", "main", null, null));
         assertTrue(e.getMessage().contains("代理"), e.getMessage());
         assertTrue(e.getMessage().contains("升级"), e.getMessage());
     }
@@ -124,13 +128,15 @@ class AgentConnectionRegistryWorklogPushTest {
         // 「字段缺席 = 不动 holder」，缺席会让「先配后清」清不掉 runner 已生效的代理
         helloWithProtocol(8);
         Thread caller = new Thread(() ->
-                registry.pushWorklog("7", "alice", "https://git.example.com/u/worklog.git", "main", null));
+                registry.pushWorklog("7", "alice", "https://git.example.com/u/worklog.git", "main", null, null));
         caller.start();
         Thread.sleep(100);
         ArgumentCaptor<TextMessage> captor = ArgumentCaptor.forClass(TextMessage.class);
         verify(ws, atLeastOnce()).sendMessage(captor.capture());
         String payload = captor.getValue().getPayload();
         assertTrue(payload.contains("\"proxy\":{\"url\":\"\",\"scopes\":[]}"), payload);
+        // operator=null → 帧不带署名字段（runner 回退内置署名）
+        assertFalse(payload.contains("gitAuthorName"), payload);
         String requestId = payload.replaceAll(".*\"requestId\":\"([^\"]+)\".*", "$1");
         registry.onWorklogPushAck("7", requestId, true, "ok", null);
         caller.join(10_000);
@@ -141,7 +147,7 @@ class AgentConnectionRegistryWorklogPushTest {
     void ackErrorPropagates() {
         helloWithProtocol(6);
         Thread caller = new Thread(() ->
-                registry.pushWorklog("7", "alice", "https://git.example.com/u/worklog.git", "main", null));
+                registry.pushWorklog("7", "alice", "https://git.example.com/u/worklog.git", "main", null, null));
         caller.start();
         try {
             Thread.sleep(100);
@@ -161,12 +167,12 @@ class AgentConnectionRegistryWorklogPushTest {
     void rejectsOldRunnerByProtocolGate() {
         // 无 hello 版本记录按 v1 对待
         DevMindException e = assertThrows(DevMindException.class,
-                () -> registry.pushWorklog("7", "alice", "https://x/y.git", "main", null));
+                () -> registry.pushWorklog("7", "alice", "https://x/y.git", "main", null, null));
         assertTrue(e.getMessage().contains("升级"), e.getMessage());
         // hello 报 v5（worklog 会话时代 runner）同样被拒
         helloWithProtocol(5);
         assertThrows(DevMindException.class,
-                () -> registry.pushWorklog("7", "alice", "https://x/y.git", "main", null));
+                () -> registry.pushWorklog("7", "alice", "https://x/y.git", "main", null, null));
     }
 
     @Test
@@ -174,7 +180,7 @@ class AgentConnectionRegistryWorklogPushTest {
         helloWithProtocol(6);
         Thread caller = new Thread(() -> {
             try {
-                registry.pushWorklog("7", "alice", "https://x/y.git", "main", null);
+                registry.pushWorklog("7", "alice", "https://x/y.git", "main", null, null);
             } catch (DevMindException ignored) {
                 // 断连 ack(ok=false) 不抛，这里只兜异常路径
             }

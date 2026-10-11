@@ -600,6 +600,16 @@ public class RunnerWorkspace {
      * @return exit=0 成功（含 up-to-date），否则输出尾部为错误原因
      */
     public WorklogPushOutcome pushWorklog(Path dir, String remoteUrl, String branch, String token) {
+        return pushWorklog(dir, remoteUrl, branch, token, null);
+    }
+
+    /**
+     * 带署名身份的远端备份：operator = 自动合并提交署名（逐值回退：name 空 → devmind、
+     * email 空 → devmind@worklog.local；operator 为 null = 老服务端未下发身份，保持内置署名，
+     * 口径同 {@link #finalize} 的 CAP-24 FR-06）。
+     */
+    public WorklogPushOutcome pushWorklog(Path dir, String remoteUrl, String branch, String token,
+                                          GitAuthor operator) {
         if (dir == null || !Files.isDirectory(dir.resolve(".git"))) {
             return new WorklogPushOutcome(-1, "worklog 工作区未初始化（无 .git）: " + dir);
         }
@@ -645,8 +655,12 @@ public class RunnerWorkspace {
             Result ancestor = run(dir, OP_TIMEOUT_SEC, effectiveToken,
                     "merge-base", "--is-ancestor", "FETCH_HEAD", "HEAD");
             if (ancestor.exit() == 1) {
+                String mergeName = operator != null && operator.name() != null && !operator.name().isBlank()
+                        ? operator.name() : "devmind";
+                String mergeEmail = operator != null && operator.email() != null && !operator.email().isBlank()
+                        ? operator.email() : "devmind@worklog.local";
                 Result merge = run(dir, OP_TIMEOUT_SEC, effectiveToken,
-                        "-c", "user.name=devmind", "-c", "user.email=devmind@worklog.local",
+                        "-c", "user.name=" + mergeName, "-c", "user.email=" + mergeEmail,
                         "merge", "--no-edit", "--allow-unrelated-histories", "-X", "ours",
                         "-m", "merge: 对齐远端 " + targetBranch + " 后推送备份（冲突以本地为准）", "FETCH_HEAD");
                 if (merge.exit() != 0) {
