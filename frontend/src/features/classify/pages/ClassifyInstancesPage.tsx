@@ -12,7 +12,6 @@ import {
   Input,
   InputNumber,
   message,
-  Modal,
   Popconfirm,
   Select,
   Space,
@@ -31,6 +30,7 @@ import {
 } from '@ant-design/icons'
 import FitTable from '../../../shared/components/FitTable'
 import { fmtBytes, fmtTime } from '../../../shared/utils/format'
+import { DRAWER_FORM, DRAWER_WIDE } from '../../../shared/utils/overlay'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import LayaViewSwitch from '../../laya/components/LayaViewSwitch'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
@@ -304,16 +304,20 @@ export default function ClassifyInstancesPage() {
         }}
       />
 
-      <Modal
+      <Drawer
         title={editing ? `编辑实例「${editing.name}」` : '新建实例'}
         open={editorOpen}
-        onOk={save}
-        onCancel={() => setEditorOpen(false)}
-        confirmLoading={saving}
-        okText="保存"
-        cancelText="取消"
-        width={640}
+        onClose={() => setEditorOpen(false)}
+        width={DRAWER_WIDE}
         destroyOnHidden={false}
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setEditorOpen(false)}>取消</Button>
+            <Button type="primary" loading={saving} onClick={save}>
+              保存
+            </Button>
+          </Space>
+        }
       >
         <Form form={form} layout="vertical" preserve>
           <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入名称' }]}>
@@ -396,13 +400,13 @@ export default function ClassifyInstancesPage() {
             )}
           </Form.List>
         </Form>
-      </Modal>
+      </Drawer>
 
       <Drawer
         title={managing ? `实例「${managing.name}」` : ''}
         open={!!managing}
         onClose={() => setManaging(null)}
-        width={560}
+        width={DRAWER_FORM}
       >
         {managing ? (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
