@@ -44,6 +44,7 @@ import type {
 } from '../types'
 import { fmtBytes, fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_FULL, DRAWER_WIDE } from '../../../shared/utils/overlay'
 import FitTable from '../../../shared/components/FitTable'
 import { CHECK_STATUS_COLOR, CP_KIND_LABEL } from './labCommon'
 import { CalibrationBlock, JsonBlock, MetricsTable } from './ReportBlocks'
@@ -339,7 +340,7 @@ export default function CheckpointView({ refreshTick = 0, createTick = 0 }: { re
       />
 
       {createOpen && (
-        <RegisterModal
+        <RegisterDrawer
           onClose={() => setCreateOpen(false)}
           onDone={async (created) => {
             setCreateOpen(false)
@@ -362,17 +363,17 @@ export default function CheckpointView({ refreshTick = 0, createTick = 0 }: { re
       )}
 
       {checkResult && (
-        <Modal
+        <Drawer
           title={`serve 自检 · ${checkResult.row.name}`}
           open
-          width={900}
+          width={DRAWER_FULL}
           footer={<Button onClick={() => setCheckResult(null)}>关闭</Button>}
-          onCancel={() => setCheckResult(null)}
+          onClose={() => setCheckResult(null)}
         >
           <ServeCheckBlock result={checkResult.result} />
           <Typography.Text strong>自检原始应答（边车 /healthz）</Typography.Text>
           <JsonBlock value={checkResult.result.report} maxHeight={260} />
-        </Modal>
+        </Drawer>
       )}
 
       {detailId != null && <CheckpointDetailDrawer id={detailId} onClose={() => setDetailId(null)} />}
@@ -384,7 +385,7 @@ export default function CheckpointView({ refreshTick = 0, createTick = 0 }: { re
 
 const SOURCE_HINT = '节点上的权重目录绝对路径（微调产物）或 HF 仓库名（官方基础模型，如 convaiinnovations/laya）'
 
-function RegisterModal({
+function RegisterDrawer({
   onClose,
   onDone,
 }: {
@@ -421,7 +422,21 @@ function RegisterModal({
   }
 
   return (
-    <Modal title="登记产物" open width={720} onCancel={onClose} onOk={onOk} okText="登记" confirmLoading={busy} destroyOnHidden>
+    <Drawer
+      title="登记产物"
+      open
+      width={DRAWER_WIDE}
+      onClose={onClose}
+      destroyOnHidden
+      footer={
+        <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" loading={busy} onClick={onOk}>
+            登记
+          </Button>
+        </Space>
+      }
+    >
       <Form form={form} layout="vertical" preserve={false} initialValues={{ kind: 'BASE' }}>
         <Form.Item name="name" label="名称" rules={[{ required: true, message: '名称必填' }]} extra="同一份产物重训要换名字（名字唯一）">
           <Input placeholder="如 laya-base-typed 或 ft7-分诊回流" />
@@ -471,7 +486,7 @@ function RegisterModal({
           <Input />
         </Form.Item>
       </Form>
-    </Modal>
+    </Drawer>
   )
 }
 
@@ -552,7 +567,7 @@ function CheckpointDetailDrawer({ id, onClose }: { id: number; onClose: () => vo
   const c = detail?.checkpoint
   const report = detail?.metrics
   return (
-    <Drawer title={c ? `产物「${c.name}」` : '产物详情'} width={1000} open onClose={onClose}>
+    <Drawer title={c ? `产物「${c.name}」` : '产物详情'} width={DRAWER_FULL} open onClose={onClose}>
       {detail && c ? (
         <>
           <Descriptions size="small" column={3} style={{ marginBottom: 12 }}>

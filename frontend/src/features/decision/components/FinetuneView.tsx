@@ -13,7 +13,6 @@ import {
   Form,
   Input,
   InputNumber,
-  Modal,
   Popconfirm,
   Select,
   Space,
@@ -35,6 +34,7 @@ import {
 import type { CheckpointView, DatasetView, FinetuneDetail, FinetuneTriggerRequest, FinetuneView } from '../types'
 import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_FULL, DRAWER_WIDE } from '../../../shared/utils/overlay'
 import FitTable from '../../../shared/components/FitTable'
 import LabLogDrawer from './LabLogDrawer'
 import { ReportStatusTag, RunStatusTag, runActive } from './labCommon'
@@ -257,7 +257,7 @@ export default function FinetuneView({ refreshTick = 0, createTick = 0 }: { refr
       />
 
       {triggerOpen && (
-        <TriggerModal
+        <TriggerDrawer
           datasets={datasets}
           onClose={() => setTriggerOpen(false)}
           onDone={async (id) => {
@@ -286,7 +286,7 @@ export default function FinetuneView({ refreshTick = 0, createTick = 0 }: { refr
 
 // ---------------- 发起微调 ----------------
 
-function TriggerModal({
+function TriggerDrawer({
   datasets,
   onClose,
   onDone,
@@ -334,7 +334,21 @@ function TriggerModal({
   }
 
   return (
-    <Modal title="发起微调" open width={820} onCancel={onClose} onOk={onOk} okText="发起" confirmLoading={busy} destroyOnHidden>
+    <Drawer
+      title="发起微调"
+      open
+      width={DRAWER_WIDE}
+      onClose={onClose}
+      destroyOnHidden
+      footer={
+        <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" loading={busy} onClick={onOk}>
+            发起
+          </Button>
+        </Space>
+      }
+    >
       <Form
         form={form}
         layout="vertical"
@@ -427,7 +441,7 @@ function TriggerModal({
           </Form.Item>
         </Space>
       </Form>
-    </Modal>
+    </Drawer>
   )
 }
 
@@ -444,7 +458,7 @@ function FinetuneDetailDrawer({ id, onClose }: { id: number; onClose: () => void
 
   const v = detail?.view
   return (
-    <Drawer title={v ? `微调 #${v.id} 详情` : '微调详情'} width={1080} open onClose={onClose}>
+    <Drawer title={v ? `微调 #${v.id} 详情` : '微调详情'} width={DRAWER_FULL} open onClose={onClose}>
       {detail && v ? (
         <>
           <Descriptions size="small" column={3} style={{ marginBottom: 12 }}>

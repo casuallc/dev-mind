@@ -12,6 +12,7 @@ import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_WIDE } from '../../../shared/utils/overlay'
 import LayaViewSwitch from '../../laya/components/LayaViewSwitch'
 
 /** 人工动作 → 中文（后端给的是机器值 adopt:global / adopt:project / reject） */
@@ -240,7 +241,7 @@ export default function DecisionRecordsPage() {
         title={detail ? `决策记录 · ${detail.record.capability} #${detail.record.refId}` : ''}
         open={detail != null}
         onClose={() => setDetail(null)}
-        width={860}
+        width={DRAWER_WIDE}
       >
         {detail && <DetailBody detail={detail} />}
       </Drawer>

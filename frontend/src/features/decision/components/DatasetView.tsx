@@ -58,6 +58,7 @@ import type { DecisionQuestion } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { DRAWER_FULL, DRAWER_WIDE } from '../../../shared/utils/overlay'
 import FitTable from '../../../shared/components/FitTable'
 import { CASE_GROUP_LABEL, CaseGroupTag, CONTROL_GROUPS, SKIP_REASON_LABEL, SOURCE_LABEL } from './labCommon'
 import { JsonBlock } from './ReportBlocks'
@@ -405,7 +406,7 @@ function DatasetDrawer({ id, onClose, onChanged }: { id: number; onClose: () => 
     <>
       <Drawer
         title={ds ? `评测集「${ds.name}」v${ds.version}` : '评测集'}
-        width={1000}
+        width={DRAWER_FULL}
         open
         onClose={onClose}
         extra={
@@ -576,7 +577,7 @@ function DatasetDrawer({ id, onClose, onChanged }: { id: number; onClose: () => 
       )}
 
       {intakeOpen && (
-        <IntakeModal
+        <IntakeDrawer
           datasetId={id}
           onClose={() => setIntakeOpen(false)}
           onDone={async () => {
@@ -704,15 +705,20 @@ function ItemEditor({
   }
 
   return (
-    <Modal
+    <Drawer
       title={itemId == null ? '添加样本' : `样本 #${itemId}`}
       open
-      width={860}
-      onCancel={onClose}
-      onOk={onSave}
-      okText="保存"
-      confirmLoading={saving}
-      okButtonProps={{ disabled: frozen }}
+      width={DRAWER_WIDE}
+      onClose={onClose}
+      destroyOnHidden
+      footer={
+        <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" loading={saving} disabled={frozen} onClick={onSave}>
+            保存
+          </Button>
+        </Space>
+      }
     >
       <Form layout="vertical">
         <Space size={12} wrap style={{ marginBottom: 4 }}>
@@ -756,13 +762,13 @@ function ItemEditor({
           />
         ) : null}
       </Form>
-    </Modal>
+    </Drawer>
   )
 }
 
 // ---------------- 从决策记录收编 ----------------
 
-function IntakeModal({
+function IntakeDrawer({
   datasetId,
   onClose,
   onDone,
@@ -809,13 +815,14 @@ function IntakeModal({
   }
 
   return (
-    <Modal
+    <Drawer
       title="从决策记录收编样本"
       open
-      width={1000}
-      onCancel={onClose}
+      width={DRAWER_FULL}
+      onClose={onClose}
+      destroyOnHidden
       footer={
-        <Space>
+        <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button onClick={onClose}>关闭</Button>
           <Button onClick={onPreview} loading={busy}>
             预览
@@ -931,6 +938,6 @@ function IntakeModal({
           message={`已收编 ${result.added} 条（跳过 ${result.skipped} 条），本集现有 ${result.dataset.dataset.itemCount} 条`}
         />
       )}
-    </Modal>
+    </Drawer>
   )
 }
