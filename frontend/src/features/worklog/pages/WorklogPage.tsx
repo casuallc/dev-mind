@@ -43,8 +43,8 @@ import type {
 import { ENTRY_SOURCES, ENTRY_TYPES } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import EntryFormDrawer from '../components/EntryFormDrawer'
-import GitImportModal from '../components/GitImportModal'
-import RepoSubscriptionModal from '../components/RepoSubscriptionModal'
+import GitImportDrawer from '../components/GitImportDrawer'
+import RepoSubscriptionDrawer from '../components/RepoSubscriptionDrawer'
 import ReportEditor from '../components/ReportEditor'
 import WeekDayStrip from '../components/WeekDayStrip'
 import RecentWeekStrip from '../components/RecentWeekStrip'
@@ -744,12 +744,12 @@ export default function WorklogPage() {
         onCancel={() => setEditOpen(false)}
         onSave={onSaveEntry}
       />
-      <GitImportModal
+      <GitImportDrawer
         open={importOpen}
         onCancel={() => setImportOpen(false)}
         onImported={loadEntries}
       />
-      <RepoSubscriptionModal open={reposOpen} onCancel={() => setReposOpen(false)} />
+      <RepoSubscriptionDrawer open={reposOpen} onCancel={() => setReposOpen(false)} />
     </Card>
   )
 }

@@ -1,10 +1,11 @@
-import { Button, Checkbox, Collapse, DatePicker, Empty, Modal, Segmented, Space, Table, Tag, Typography, message } from 'antd'
+import { Button, Checkbox, Collapse, DatePicker, Drawer, Empty, Segmented, Space, Table, Tag, Typography, message } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useEffect, useState } from 'react'
 import { importGit, previewGit } from '../api'
 import type { GitCommit, GitPreviewFilter, GitScanRepoDiag } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_FULL } from '../../../shared/utils/overlay'
 
 interface Props {
   open: boolean
@@ -32,7 +33,7 @@ const RANGE_PRESETS: { label: string; value: [Dayjs, Dayjs] }[] = (() => {
 })()
 
 /** CAP-28 FR-04 git 提交导入：预览范围内（按本人 git author 过滤）提交，勾选后按提交实际日期落成工作条目。 */
-export default function GitImportModal({ open, onCancel, onImported }: Props) {
+export default function GitImportDrawer({ open, onCancel, onImported }: Props) {
   const [range, setRange] = useState<[Dayjs, Dayjs]>(RANGE_PRESETS[0].value)
   const [filter, setFilter] = useState<GitPreviewFilter>('NEW')
   const [rows, setRows] = useState<GitCommit[]>([])
@@ -90,14 +91,14 @@ export default function GitImportModal({ open, onCancel, onImported }: Props) {
   }
 
   return (
-    <Modal
+    <Drawer
       title="从 Git 导入"
       open={open}
-      onCancel={onCancel}
-      width={860}
+      onClose={onCancel}
+      width={DRAWER_FULL}
       destroyOnHidden
       footer={
-        <Space>
+        <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button onClick={load} disabled={loading}>
             重新扫描
           </Button>
@@ -215,6 +216,6 @@ export default function GitImportModal({ open, onCancel, onImported }: Props) {
           },
         ]}
       />
-    </Modal>
+    </Drawer>
   )
 }

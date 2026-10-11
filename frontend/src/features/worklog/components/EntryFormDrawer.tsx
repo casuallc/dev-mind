@@ -3,6 +3,7 @@ import dayjs, { type Dayjs } from 'dayjs'
 import { useEffect } from 'react'
 import type { EntryPayload, WorklogEntry } from '../types'
 import { ENTRY_TYPES } from '../types'
+import { DRAWER_SM } from '../../../shared/utils/overlay'
 
 interface Props {
   open: boolean
@@ -57,7 +58,7 @@ export default function EntryFormDrawer({ open, target, defaultDate, saving, onC
       title={target ? '编辑工作条目' : '新建工作条目'}
       open={open}
       onClose={onCancel}
-      width={480}
+      width={DRAWER_SM}
       destroyOnHidden
       footer={
         <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>

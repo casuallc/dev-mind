@@ -1,4 +1,4 @@
-import { Button, Checkbox, Modal, Select, Table, Tag, Typography, message } from 'antd'
+import { Button, Checkbox, Drawer, Select, Table, Tag, Typography, message } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -6,6 +6,7 @@ import { listRepos, setSubscription } from '../api'
 import type { WorklogRepo } from '../types'
 import { isAdmin } from '../../auth/authStore'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_FULL } from '../../../shared/utils/overlay'
 
 interface Props {
   open: boolean
@@ -14,10 +15,10 @@ interface Props {
 
 /**
  * CAP-28 FR-02 订阅勾选：勾选哪些全局仓库参与自己的 git log 扫描。
- * CAP-29 起登记 CRUD 移到后台 /admin/repos（仅 ADMIN）；原独立订阅页并入工作日志页弹窗。
+ * CAP-29 起登记 CRUD 移到后台 /admin/repos（仅 ADMIN）；原独立订阅页并入工作日志页抽屉。
  * 勾选仓库后可再选一个或多个扫描分支；留空 = 跟随仓库默认分支。
  */
-export default function RepoSubscriptionModal({ open, onCancel }: Props) {
+export default function RepoSubscriptionDrawer({ open, onCancel }: Props) {
   const [rows, setRows] = useState<WorklogRepo[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -54,11 +55,11 @@ export default function RepoSubscriptionModal({ open, onCancel }: Props) {
   }
 
   return (
-    <Modal
+    <Drawer
       title="仓库订阅"
       open={open}
-      onCancel={onCancel}
-      width={960}
+      onClose={onCancel}
+      width={DRAWER_FULL}
       destroyOnHidden
       footer={
         <Button icon={<ReloadOutlined />} onClick={reload} disabled={loading}>
@@ -137,6 +138,6 @@ export default function RepoSubscriptionModal({ open, onCancel }: Props) {
           },
         ]}
       />
-    </Modal>
+    </Drawer>
   )
 }
