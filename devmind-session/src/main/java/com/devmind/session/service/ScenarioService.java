@@ -130,6 +130,12 @@ public class ScenarioService {
             s.setPermissionMode(req.permissionMode().isBlank() ? null : req.permissionMode().strip());
         }
         if (req.agentNodeId() != null) s.setAgentNodeId(req.agentNodeId().isBlank() ? null : req.agentNodeId().strip());
+        if (req.autoFinishSec() != null) {
+            if (req.autoFinishSec() < 0) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "autoFinishSec 不能为负（0=永不自动结束）");
+            }
+            s.setAutoFinishSec(req.autoFinishSec());
+        }
         s.setScope(scope);
         s.setProjectId(projectId);
         if (req.enabled() != null) s.setEnabled(req.enabled());
@@ -178,7 +184,7 @@ public class ScenarioService {
                 s.getPromptSkeleton(), skillIdsOf(s), docIdsOf(s), knowledgeTagsOf(s),
                 s.getExtraContextMd(), s.getModel(), s.getPermissionMode(), s.getAgentNodeId(),
                 s.getScope(), s.getProjectId(), s.isEnabled(), s.getSortOrder(),
-                s.getCreatedAt(), s.getUpdatedAt());
+                s.getCreatedAt(), s.getUpdatedAt(), s.getAutoFinishSec());
     }
 
     // ---------------- 启动期迁移（FR-01：模板行转场景行） ----------------

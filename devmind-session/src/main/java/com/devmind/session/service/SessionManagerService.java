@@ -351,7 +351,7 @@ public class SessionManagerService {
                 SessionContextService.isExecutionSession(taskSpec, req.workItemId()),
                 req.attachmentIds());
         RemoteSessionRuntime remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector,
-                eventSaver, listener, props.toRuntimeSettings());
+                eventSaver, listener, runtimeSettingsFor(scenario));
         // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
         runtimes.put(id, remoteRt);
         // CAP-42：repo 会话固定工作区归属用户名（launch 帧 workspaceOwner；try 内解析后供落库）
@@ -637,8 +637,11 @@ public class SessionManagerService {
         // CAP-21 远程会话恢复：重新向节点下发 launch（workdir 仍由 runner 项目路径映射解析）
         if (ent.getAgentNodeId() != null && !ent.getAgentNodeId().isBlank()) {
             AgentNodeConnector connector = requireConnector();
+            // 场景解析提前到 runtime 构造之前：FR-08 自动结束预设要进 RuntimeSettings
+            // （下方重渲染重装配复用同一引用，不重复查）
+            SessionScenarioEntity scenario = resumeScenario(ent);
             RemoteSessionRuntime rt = new RemoteSessionRuntime(id, ent.getAgentNodeId(), connector,
-                    eventSaver, listener, props.toRuntimeSettings());
+                    eventSaver, listener, runtimeSettingsFor(scenario));
             restoreRuntimeHistory(id, rt);
             runtimes.put(id, rt);
             SessionContextService.Prepared prepared = null;
@@ -672,7 +675,6 @@ public class SessionManagerService {
                 // CAP-33：resume 按落库 scenarioCode 重渲染重装配（修复此前用未渲染原文重装配的
                 // 偏差；场景已删降级按原文；③层请求追加为创建时一次性，resume 不重放）；
                 // resume = 重新注入（hitCount 再累计一次，与创建同语义）
-                SessionScenarioEntity scenario = resumeScenario(ent);
                 String renderedTask = scenario != null
                         ? scenarioService.render(scenario, ent.getTaskSpec(), proj, requirementTitleOf(ent))
                         : ent.getTaskSpec();
@@ -1794,6 +1796,18 @@ public class SessionManagerService {
         }
     }
 
+    /**
+     * CAP-33 FR-08：runtime 参数按场景「自动结束（秒）」预设覆盖全局 idleTimeout
+     * （场景无预设 = 跟随全局；0 = 永不自动结束）。创建/resume/reattach 三处构造点共用。
+     */
+    private com.devmind.common.agent.runtime.RuntimeSettings runtimeSettingsFor(SessionScenarioEntity scenario) {
+        com.devmind.common.agent.runtime.RuntimeSettings settings = props.toRuntimeSettings();
+        if (scenario != null && scenario.getAutoFinishSec() != null) {
+            settings = settings.withIdleTimeoutSec(scenario.getAutoFinishSec());
+        }
+        return settings;
+    }
+
     /** {{requirement}} 占位符的需求标题（best-effort，需求已删除 = 置空）。 */
     private String requirementTitleOf(SessionEntity ent) {
         if (ent.getRequirementId() == null || ent.getRequirementId().isBlank()) {
@@ -1894,7 +1908,7 @@ public class SessionManagerService {
                     continue;
                 }
                 RemoteSessionRuntime rt = new RemoteSessionRuntime(ent.getId(), nodeId, connector,
-                        eventSaver, listener, props.toRuntimeSettings());
+                        eventSaver, listener, runtimeSettingsFor(resumeScenario(ent)));
                 restoreRuntimeHistory(ent.getId(), rt);
                 runtimes.put(ent.getId(), rt);
                 rt.noteReconnected();

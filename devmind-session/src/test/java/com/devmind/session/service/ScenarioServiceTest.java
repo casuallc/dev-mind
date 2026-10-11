@@ -107,7 +107,31 @@ class ScenarioServiceTest {
 
     private static ScenarioRequest req(String code, String name, String scope, String projectId) {
         return new ScenarioRequest(code, name, null, null, null, null, null, null, null, null, null,
-                scope, projectId, null, null);
+                scope, projectId, null, null, null);
+    }
+
+    // ---------------- CAP-33 FR-08 自动结束预设 ----------------
+
+    @Test
+    void 自动结束预设_保存往返与校验() {
+        Map<Long, SessionScenarioEntity> store = new LinkedHashMap<>();
+        ScenarioService svc = service(store, List.of());
+
+        // 新建带预设 → 视图往返
+        var view = svc.save(null, new ScenarioRequest("af", "自动结束", null, null,
+                null, null, null, null, null, null, null, "GLOBAL", null, null, null, 60));
+        assertEquals(60, view.autoFinishSec());
+
+        // 负数非法
+        assertThrows(DevMindException.class, () -> svc.save(null, new ScenarioRequest("af2", "负", null,
+                null, null, null, null, null, null, null, null, "GLOBAL", null, null, null, -1)));
+
+        // 更新 null = 不动（补丁语义）；0 = 显式永不自动结束
+        var keep = svc.save(view.id(), req("af", "自动结束", null, null));
+        assertEquals(60, keep.autoFinishSec());
+        var off = svc.save(view.id(), new ScenarioRequest(null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, 0));
+        assertEquals(0, off.autoFinishSec());
     }
 
     // ---------------- 渲染 ----------------

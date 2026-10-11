@@ -12,11 +12,12 @@ import java.util.List;
  * @param knowledgeTags  ①层绑定知识 tags
  * @param extraContextMd 场景背景（业务背景/口径约定 → CLAUDE.md「场景背景」节）
  * @param scope          GLOBAL | PROJECT
+ * @param autoFinishSec  自动结束（秒）：回合完成后空闲 N 秒自动结束会话；null=跟随全局，0=永不
  */
 public record ScenarioView(
         Long id, String code, String name, String description, String promptSkeleton,
         List<String> skillIds, List<Long> docIds, List<String> knowledgeTags,
         String extraContextMd, String model, String permissionMode, String agentNodeId,
         String scope, String projectId, boolean enabled, int sortOrder,
-        Instant createdAt, Instant updatedAt) {
+        Instant createdAt, Instant updatedAt, Integer autoFinishSec) {
 }

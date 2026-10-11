@@ -73,6 +73,14 @@ public class SessionScenarioEntity {
     @Column(name = "agent_node_id", length = 64)
     private String agentNodeId;
 
+    /**
+     * CAP-33 FR-08 自动结束（秒）：回合完成（WAITING_INPUT）后空闲 N 秒自动结束会话
+     * （runner 随 exit 自动回传产出，日报/周报等一次性生成会话免手动收口）。
+     * null = 跟随全局 devmind.session.idle-timeout；0 = 永不自动结束。
+     */
+    @Column(name = "auto_finish_sec")
+    private Integer autoFinishSec;
+
     /** GLOBAL | PROJECT（PROJECT 需 projectId；chat 挂 PROJECT 场景 = 以该项目身份问答） */
     @Column(length = 16)
     private String scope;
@@ -116,6 +124,8 @@ public class SessionScenarioEntity {
     public void setPermissionMode(String permissionMode) { this.permissionMode = permissionMode; }
     public String getAgentNodeId() { return agentNodeId; }
     public void setAgentNodeId(String agentNodeId) { this.agentNodeId = agentNodeId; }
+    public Integer getAutoFinishSec() { return autoFinishSec; }
+    public void setAutoFinishSec(Integer autoFinishSec) { this.autoFinishSec = autoFinishSec; }
     public String getScope() { return scope; }
     public void setScope(String scope) { this.scope = scope; }
     public String getProjectId() { return projectId; }

@@ -10,5 +10,6 @@ public record ScenarioRequest(
         String code, String name, String description, String promptSkeleton,
         List<String> skillIds, List<Long> docIds, List<String> knowledgeTags,
         String extraContextMd, String model, String permissionMode, String agentNodeId,
-        String scope, String projectId, Boolean enabled, Integer sortOrder) {
+        String scope, String projectId, Boolean enabled, Integer sortOrder,
+        Integer autoFinishSec) {
 }

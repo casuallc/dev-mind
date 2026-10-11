@@ -43,6 +43,12 @@ public record RuntimeSettings(int ringBuffer, long idleTimeoutSec, int maxEventB
                 includePartialMessages);
     }
 
+    /** 场景级自动结束覆盖（CAP-33 FR-08）：回合完成后空闲 N 秒自动 finish，0=不自动结束。 */
+    public RuntimeSettings withIdleTimeoutSec(long sec) {
+        return new RuntimeSettings(ringBuffer, sec, maxEventBytes, defaultPermissionMode,
+                claudePath, includePartialMessages);
+    }
+
     /** CAP-50：agent.properties 的 {@code partialMessages}（默认 true）由此注入。 */
     public RuntimeSettings withIncludePartialMessages(boolean enabled) {
         return new RuntimeSettings(ringBuffer, idleTimeoutSec, maxEventBytes, defaultPermissionMode,
