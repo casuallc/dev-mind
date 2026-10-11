@@ -757,7 +757,8 @@ public class TestRunService {
     /** 批量摘要（列表出参用）：一次批量查，避免逐行 N+1。 */
     private Map<String, WorkItemBrief> briefsOf(List<String> workItemIds) {
         List<String> ids = workItemIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
-        return ids.isEmpty() ? Map.of() : workItemService.briefsByIds(ids);
+        // 空表禁 Map.of()：历史记录可未关联工作单元，调用方 get(null) 时 MapN 抛 NPE
+        return ids.isEmpty() ? new java.util.HashMap<>() : workItemService.briefsByIds(ids);
     }
 
     // ---------------- 内部 ----------------
