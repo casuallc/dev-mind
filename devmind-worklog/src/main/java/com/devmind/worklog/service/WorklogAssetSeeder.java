@@ -28,6 +28,13 @@ public class WorklogAssetSeeder {
 
     private static final Logger log = LoggerFactory.getLogger(WorklogAssetSeeder.class);
 
+    /**
+     * 内置生成场景的自动结束预设（CAP-33 FR-08）：回合完成后空闲 60s 自动结束会话，
+     * runner 随 exit 自动回传成稿、服务端镜像落库——定时无人值守链路不再需要
+     * 手动「推送工作日志」+「结束会话」。
+     */
+    static final int AUTO_FINISH_SEC = 60;
+
     /** skill 正文（SKILL.md frontmatter 之后的部分；frontmatter 由结构化字段自动拼装） */
     static final String SKILL_CONTENT = """
             # 工作日志工作区约定
@@ -124,16 +131,23 @@ public class WorklogAssetSeeder {
         return view.id();
     }
 
-    /** 场景：code 存在则跳过（用户可能已改，种子不覆盖）。 */
+    /** 场景：code 存在则跳过正文（用户可能已改，种子不覆盖）；autoFinishSec 为 null 才回填默认值。 */
     private void ensureScenario(String code, String name, String description,
                                 String skeleton, String skillId, int sortOrder) {
-        if (scenarioRepo.existsByCode(code)) {
+        var existing = scenarioRepo.findByCode(code).orElse(null);
+        if (existing != null) {
+            // 存量行回填自动结束预设（新列首启为 null；用户显式设过的值——含 0=永不——不覆盖）
+            if (existing.getAutoFinishSec() == null) {
+                existing.setAutoFinishSec(AUTO_FINISH_SEC);
+                scenarioRepo.save(existing);
+                log.info("worklog 场景回填自动结束预设: code={} autoFinishSec={}", code, AUTO_FINISH_SEC);
+            }
             return;
         }
         scenarioService.save(null, new ScenarioRequest(code, name, description, skeleton,
                 List.of(skillId), null, null, EXTRA_CONTEXT,
                 null, "bypassPermissions", null,
-                ScenarioService.SCOPE_GLOBAL, null, Boolean.TRUE, sortOrder));
+                ScenarioService.SCOPE_GLOBAL, null, Boolean.TRUE, sortOrder, AUTO_FINISH_SEC));
         log.info("worklog 场景种子已创建: code={}", code);
     }
 }
