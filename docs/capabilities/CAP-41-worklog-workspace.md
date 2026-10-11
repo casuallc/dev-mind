@@ -65,7 +65,10 @@ runner：{user.home}/worklog/<console-username>/   ← 持久目录，本地 git
 - **FR-04 skill 与场景种子**：启动时种子（不存在才建，之后用户可编辑）：
   - GLOBAL skill `worklog`：目录契约、文件命名、`git add/commit` 规范、成稿同步到
     `.devmind/output/` 的回传约定、隐私与口吻要求；
-  - GLOBAL 场景 `worklog-daily` / `worklog-weekly`：绑定该 skill + prompt 骨架。
+  - GLOBAL 场景 `worklog-daily` / `worklog-weekly`：绑定该 skill + prompt 骨架，
+    并带 `autoFinishSec=60` 自动结束预设（CAP-33 FR-08，2026-10-11 增补）——回合完成
+    空闲 60s 自动结束会话，成稿随 exit 自动回传落镜像（FR-06），定时无人值守链路不再
+    需要手动「推送工作日志」+「结束会话」；存量行首启回填（仅填 null，用户显式值不覆盖）。
   均走现有 skill/场景管理页维护，管控台可见可改。
 - **FR-05 格式模板可配置**：`worklog_user_settings` 增 `daily_template_md` /
   `weekly_template_md`（LONGVARCHAR，null=内置默认模板）。占位符：`{{date}}` /

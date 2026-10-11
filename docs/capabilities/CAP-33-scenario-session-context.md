@@ -58,6 +58,12 @@ docs（CAP-03）/ knowledge（CAP-04）/ skills 三类资产目前挂在 /admin 
     编辑器含资产多选与 prompt 骨架预览）。
 - **FR-07 注入可追溯**：会话详情页展示「已注入上下文」清单（场景名/知识条目/skills/docs，
   来源 = 装配时的 ContextPackage manifest 快照落库），本机/远程口径一致。
+- **FR-08 场景级自动结束**（2026-10-11 增补）：`session_scenarios` 增 `auto_finish_sec` 列——
+  回合完成（WAITING_INPUT）后空闲 N 秒自动 `finish()` 会话（复用内核 idleTimeout 机制，
+  按场景覆盖全局 `devmind.session.idle-timeout`），runner 随 exit 自动回传产出。
+  语义：`null` = 跟随全局；`0` = 永不自动结束；`>0` = 空闲秒数。创建/resume/服务端重启
+  reattach 三处 runtime 构造点同生效（均经 `SessionManagerService.runtimeSettingsFor`）。
+  典型用法：日报/周报等一次性生成会话免手动收口（见 CAP-41 FR-04 种子默认 60s）。
 
 ## 3. 插件化接口
 
@@ -78,7 +84,7 @@ docs（CAP-03）/ knowledge（CAP-04）/ skills 三类资产目前挂在 /admin 
 ```
 session_scenarios(id, code unique, name, description, prompt_skeleton,
                   skill_ids JSON, doc_ids JSON, knowledge_tags, extra_context_md,
-                  model, permission_mode, agent_node_id,
+                  model, permission_mode, agent_node_id, auto_finish_sec(FR-08),
                   scope[GLOBAL|PROJECT], project_id, enabled, sort_order)
 sessions      ── + scenario_code + context_manifest (JSON 快照，FR-07)
 chat_sessions ── + scenario_code + context_manifest (JSON 快照)
