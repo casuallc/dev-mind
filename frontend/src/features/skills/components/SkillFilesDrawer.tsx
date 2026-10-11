@@ -15,6 +15,7 @@ import {
 import type { Skill, SkillFileMeta } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_FORM, DRAWER_WIDE } from '../../../shared/utils/overlay'
 
 // UTF-8 安全的 Base64 编解码（内容可能含中文，不能直接用 btoa/atob）
 const b64encode = (text: string) => {
@@ -174,7 +175,7 @@ export default function SkillFilesDrawer({ open, skill, onClose }: {
       title={skill ? `附件文件 — ${skill.name}` : '附件文件'}
       open={open}
       onClose={onClose}
-      width={760}
+      width={DRAWER_WIDE}
     >
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Typography.Text type="secondary">
@@ -222,14 +223,18 @@ export default function SkillFilesDrawer({ open, skill, onClose }: {
         />
       </Space>
 
-      <Modal
+      <Drawer
         title={editingFile ? `编辑附件「${editingFile.path}」` : '新增文本文件'}
         open={editOpen}
-        onCancel={() => setEditOpen(false)}
-        onOk={() => form.submit()}
-        okText="保存"
-        width={720}
+        onClose={() => setEditOpen(false)}
+        width={DRAWER_FORM}
         destroyOnHidden
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setEditOpen(false)}>取消</Button>
+            <Button type="primary" onClick={() => form.submit()}>保存</Button>
+          </Space>
+        }
       >
         <Form form={form} layout="vertical" onFinish={onSave} preserve={false}>
           <Form.Item
@@ -247,7 +252,7 @@ export default function SkillFilesDrawer({ open, skill, onClose }: {
             <Input.TextArea rows={14} />
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
     </Drawer>
   )
 }
