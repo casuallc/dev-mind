@@ -3,6 +3,7 @@
 import { Descriptions, Drawer, Space, Tag, Typography } from 'antd'
 import type { KnowledgeProposal, TriageView } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { DRAWER_SM } from '../../../shared/utils/overlay'
 
 const pct = (v: number | null | undefined) => (v == null ? '-' : `${Math.round(v * 100)}%`)
 
@@ -19,7 +20,7 @@ export default function TriageEvidenceDrawer({
       title={proposal ? `分诊依据 · ${proposal.title}` : ''}
       open={proposal != null}
       onClose={onClose}
-      width={640}
+      width={DRAWER_SM}
     >
       {triage && <Body triage={triage} />}
     </Drawer>

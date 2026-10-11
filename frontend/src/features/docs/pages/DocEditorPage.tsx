@@ -32,6 +32,7 @@ import { uploadAttachment } from '../../../shared/attachments/api'
 import { attachmentRawUrl } from '../../../shared/attachments/url'
 import { pageRootScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_WIDE } from '../../../shared/utils/overlay'
 
 const statusTag = (s: string) => (
   <Tag color={s === 'draft' ? 'default' : s === 'pending_confirm' ? 'gold' : 'green'}>{STATUS_LABEL[s as keyof typeof STATUS_LABEL] ?? s}</Tag>
@@ -429,7 +430,7 @@ export default function DocEditorPage() {
         title={diffFor ? `v${diffFor} → 当前版本的差异` : '版本差异'}
         open={!!diff}
         onClose={() => setDiff(null)}
-        width={640}
+        width={DRAWER_WIDE}
       >
         {diff && (
           <>

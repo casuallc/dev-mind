@@ -62,6 +62,7 @@ import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../..
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { DRAWER_WIDE } from '../../../shared/utils/overlay'
 
 const sourceTag = (s: string) =>
   s === 'feishu' ? <Tag color="cyan">飞书</Tag> : <Tag>手动</Tag>
@@ -793,7 +794,7 @@ export default function KnowledgeBaseDetail() {
         title={editingEntry ? `编辑条目 · ${editingEntry.name}` : '新增条目'}
         open={entryDrawerOpen}
         onClose={() => setEntryDrawerOpen(false)}
-        width={760}
+        width={DRAWER_WIDE}
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button onClick={() => setEntryDrawerOpen(false)}>取消</Button>

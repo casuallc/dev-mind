@@ -8,6 +8,7 @@ import type { AgentAuditLog, AgentNode, AuditCategory, AuditResult } from '../ty
 import { fmtBytes, fmtTime } from '../../../shared/utils/format'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_FORM } from '../../../shared/utils/overlay'
 
 const CATEGORY_LABEL: Record<AuditCategory, string> = {
   CONNECTION: '连接',
@@ -167,7 +168,7 @@ export default function AuditLogsPanel({ refreshTick = 0 }: { refreshTick?: numb
         locale={{ emptyText: '暂无审计日志。节点接入、指令下发、代理转发、文件中转等交互发生后自动留痕。' }}
       />
 
-      <Drawer title="审计详情" open={!!detail} onClose={() => setDetail(null)} width={640}>
+      <Drawer title="审计详情" open={!!detail} onClose={() => setDetail(null)} width={DRAWER_FORM}>
         {detail && (
           <Space direction="vertical" style={{ width: '100%' }} size={12}>
             <Descriptions column={2} size="small" bordered>

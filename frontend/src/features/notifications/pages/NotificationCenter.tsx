@@ -36,6 +36,7 @@ import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/page
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { DRAWER_SM } from '../../../shared/utils/overlay'
 
 export default function NotificationCenter() {
   const navigate = useNavigate()
@@ -273,7 +274,7 @@ export default function NotificationCenter() {
       {/* 通道 + 偏好设置 */}
       <Drawer
         title="通道与偏好设置"
-        width={520}
+        width={DRAWER_SM}
         open={prefsOpen}
         onClose={() => setPrefsOpen(false)}
         extra={

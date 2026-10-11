@@ -10,6 +10,7 @@ import type { AgentNode } from '../../agent/types'
 import { listAudit } from '../api'
 import type { AuditView } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
+import { DRAWER_FORM } from '../../../shared/utils/overlay'
 
 const ACTIONS = ['execute', 'connect_test', 'upload', 'download', 'health_check']
 const ACTION_LABEL: Record<string, string> = {
@@ -122,7 +123,7 @@ export default function AuditTab({ refreshTick = 0 }: { refreshTick?: number }) 
         locale={{ emptyText: '暂无审计记录。构建/部署/发版/健康检查等经 exec 帧下发节点执行后自动留痕。' }}
       />
 
-      <Drawer title="审计详情" open={!!detail} onClose={() => setDetail(null)} width={640}>
+      <Drawer title="审计详情" open={!!detail} onClose={() => setDetail(null)} width={DRAWER_FORM}>
         {detail && (
           <Space direction="vertical" style={{ width: '100%' }}>
             <Typography.Paragraph type="secondary">

@@ -33,6 +33,7 @@ import { fmtBytes, fmtTime } from '../../../shared/utils/format'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import LayaViewSwitch from '../../laya/components/LayaViewSwitch'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { DRAWER_FORM } from '../../../shared/utils/overlay'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
 import {
@@ -397,7 +398,7 @@ export default function ClassifyPackagesPage() {
         title={installsFor ? `「${installsFor.name} ${installsFor.pkgVersion}」安装记录` : ''}
         open={!!installsFor}
         onClose={() => setInstallsFor(null)}
-        width={640}
+        width={DRAWER_FORM}
       >
         <Table<ClassifyPackageInstall>
           rowKey="id"

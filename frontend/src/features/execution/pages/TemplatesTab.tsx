@@ -9,6 +9,7 @@ import { createTemplate, deleteTemplate, listTemplates, updateTemplate } from '.
 import type { TemplateInput, TemplateView } from '../types'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { DRAWER_FORM } from '../../../shared/utils/overlay'
 
 const CAPABILITIES = ['build', 'deploy', 'release', 'test', 'logs', 'exec']
 
@@ -162,7 +163,7 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
         title={editing ? `编辑模板 ${editing.code}` : '新建命令模板'}
         open={open}
         onClose={() => setOpen(false)}
-        width={720}
+        width={DRAWER_FORM}
         destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>

@@ -41,6 +41,7 @@ import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { fmtTime } from '../../../shared/utils/format'
+import { DRAWER_FORM } from '../../../shared/utils/overlay'
 
 const KIND_OPTIONS = [
   { value: 'EMBEDDING', label: 'Embedding（向量化，知识库检索用）' },
@@ -486,7 +487,7 @@ export default function ModelEndpointsPage() {
         title={editing ? `编辑端点「${editing.name}」` : '新建端点'}
         open={editOpen}
         onClose={() => setEditOpen(false)}
-        width={620}
+        width={DRAWER_FORM}
         destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
@@ -652,7 +653,7 @@ export default function ModelEndpointsPage() {
         title={managing ? `端点「${managing.name}」` : ''}
         open={!!managing}
         onClose={() => setManaging(null)}
-        width={560}
+        width={DRAWER_FORM}
         destroyOnHidden
       >
         {managing && (

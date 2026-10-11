@@ -24,6 +24,7 @@ import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_FORM } from '../../../shared/utils/overlay'
 
 const scopeTag = (s: string) =>
   s === 'GLOBAL' ? <Tag color="blue">全局</Tag> : <Tag color="purple">项目</Tag>
@@ -282,7 +283,7 @@ export default function SkillsPage() {
         open={manageSkill != null}
         onClose={() => setManageSkill(null)}
         // 与抽屉内「编辑」打开的 SkillFormDrawer 同宽，切换时不跳宽度
-        width={720}
+        width={DRAWER_FORM}
       >
         {manageSkill && (
           <Space direction="vertical" style={{ width: '100%' }} size={16}>

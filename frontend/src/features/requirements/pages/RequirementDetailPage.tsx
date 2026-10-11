@@ -77,6 +77,7 @@ import {
 } from '../components/requirementMeta'
 import type { Design, RequirementOverview } from '../types'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_SM } from '../../../shared/utils/overlay'
 
 /** 描述收起高度（超出才显示展开/收起；留 24px 余量避免刚好贴线也出按钮） */
 const DESC_COLLAPSED_HEIGHT = 168
@@ -578,7 +579,7 @@ export default function RequirementDetailPage() {
 
       <Drawer
         title={`属性 · ${r.code}`}
-        width={520}
+        width={DRAWER_SM}
         open={propsOpen}
         onClose={() => setPropsOpen(false)}
       >

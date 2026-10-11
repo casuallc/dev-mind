@@ -10,6 +10,7 @@ import { fetchWorkspaceDiff, fetchWorkspaceFile, fetchWorkspaceStatus } from './
 import TerminalTab from './TerminalTab'
 import { showError } from '../../utils/showError'
 import { fmtTime } from '../../utils/format'
+import { DRAWER_WIDE } from '../../utils/overlay'
 
 /** porcelain XY → 人类可读状态（取变化更显著的一侧：未跟踪 > 删除 > 新增 > 改名 > 修改） */
 function statusMeta(c: WorkspaceChange): { label: string; color: string } {
@@ -255,7 +256,7 @@ export default function WorkspacePanel({
           ]}
         />
 
-        <Drawer title={diffTitle} open={diffOpen} onClose={() => setDiffOpen(false)} width={720}>
+        <Drawer title={diffTitle} open={diffOpen} onClose={() => setDiffOpen(false)} width={DRAWER_WIDE}>
           {diffLoading ? <Spin /> : diffBody}
         </Drawer>
       </Drawer>

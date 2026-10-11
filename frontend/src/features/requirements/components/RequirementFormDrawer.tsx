@@ -13,6 +13,7 @@ import { listEnvironments } from '../../projects/api'
 import type { ProjectEnvironment } from '../../projects/types'
 import MarkdownEditor from '../../../shared/components/MarkdownEditor'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_WIDE } from '../../../shared/utils/overlay'
 
 /** 表单值形态：dueDate 在表单里是 dayjs，提交时转 'YYYY-MM-DD' */
 type FormValues = Omit<RequirementInput, 'dueDate'> & { dueDate?: dayjs.Dayjs | null }
@@ -87,7 +88,7 @@ export default function RequirementFormDrawer({ projectId, editing, open, onClos
       title={editing ? `编辑需求 ${editing.code}` : '新建需求'}
       open={open}
       onClose={onClose}
-      width={960}
+      width={DRAWER_WIDE}
       destroyOnHidden
       footer={
         <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
