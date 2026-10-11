@@ -153,14 +153,17 @@ public class AgentTunnelRegistry implements EgressTunnelStatus {
         tunnels.values().forEach(this::pushSnapshot);
     }
 
-    /** 下发 tunnel_hello（文本 JSON 帧：{type, protocolVersion, allowedHosts[]}） */
+    /** 下发 tunnel_hello（文本 JSON 帧：{type, protocolVersion, allowedHosts[], heartbeatIntervalMs}） */
     public void pushSnapshot(TunnelConn conn) {
         List<String> allowed = ruleService.allowedHostsFor(conn.nodeId());
         try {
             String json = mapper.writeValueAsString(Map.of(
                     "type", "tunnel_hello",
                     "protocolVersion", AgentProtocol.EGRESS_TUNNEL,
-                    "allowedHosts", allowed));
+                    "allowedHosts", allowed,
+                    // 心跳能力广告：runner 以此字段在场判定服务端有心跳，建连即启用下行静默
+                    // 断链判定（不等首个 tunnel_ping——连接若死在首次心跳前，老口径永不重连）
+                    "heartbeatIntervalMs", props.getHeartbeatIntervalMs()));
             sendText(conn, json);
         } catch (Exception e) {
             log.warn("节点 {} 隧道快照下发失败: {}", conn.nodeId(), e.toString());

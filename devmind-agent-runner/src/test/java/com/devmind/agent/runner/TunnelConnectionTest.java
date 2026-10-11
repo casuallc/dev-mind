@@ -159,6 +159,44 @@ class TunnelConnectionTest {
     }
 
     @Test
+    void tunnelHelloWithHeartbeatAdvertEnablesSilenceDetection() throws Exception {
+        // 新服务端 tunnel_hello 携带 heartbeatIntervalMs：建连即启用静默判定——
+        // 不等首个 tunnel_ping（连接死在首次心跳前的场景必须也能自愈，2026-10-11 事故）
+        tunnel.onTunnelText("{\"type\":\"tunnel_hello\",\"protocolVersion\":21,"
+                + "\"allowedHosts\":[\"*.apusic.com\"],\"heartbeatIntervalMs\":25000}");
+        assertTrue(tunnel.heartbeatSeen, "心跳能力广告应立即启用静默断链判定");
+        assertTrue(com.devmind.agent.runner.EgressHostAllowlist.allows("jira.apusic.com"),
+                "白名单快照照常生效");
+
+        tunnel.keepaliveIntervalMs = 40;
+        tunnel.keepaliveTimeoutMs = 200;
+        tunnel.lastInboundAt.set(System.currentTimeMillis());
+        CountDownLatch closed = new CountDownLatch(1);
+        Thread t = Thread.ofVirtual().start(() -> tunnel.keepaliveLoop(tunnel.current.get(), closed));
+        awaitTrue(() -> abortCount.get() >= 1, 5000, "广告心跳后静默超阈值应 abort");
+        assertTrue(closed.await(2, TimeUnit.SECONDS), "abort 后必须放行 closed 闩锁");
+        t.join(5000);
+    }
+
+    @Test
+    void tunnelHelloWithoutHeartbeatAdvertKeepsGateClosed() throws Exception {
+        // 老服务端 tunnel_hello 无 heartbeatIntervalMs：兼容门不放开，静默不误杀
+        tunnel.onTunnelText("{\"type\":\"tunnel_hello\",\"protocolVersion\":21,"
+                + "\"allowedHosts\":[\"*.apusic.com\"]}");
+        assertTrue(!tunnel.heartbeatSeen, "无心跳能力广告不得启用静默断链判定");
+
+        tunnel.keepaliveIntervalMs = 40;
+        tunnel.keepaliveTimeoutMs = 120;
+        tunnel.lastInboundAt.set(System.currentTimeMillis());
+        Thread t = Thread.ofVirtual().start(() ->
+                tunnel.keepaliveLoop(tunnel.current.get(), new CountDownLatch(1)));
+        Thread.sleep(500);
+        assertEquals(0, abortCount.get(), "老服务端健康隧道不得被误杀");
+        tunnel.shutdown();
+        t.join(5000);
+    }
+
+    @Test
     void keepaliveDoesNotAbortWhileInboundAlive() throws Exception {
         tunnel.keepaliveIntervalMs = 40;
         tunnel.keepaliveTimeoutMs = 250;

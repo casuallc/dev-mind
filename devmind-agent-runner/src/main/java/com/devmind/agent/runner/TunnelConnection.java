@@ -66,8 +66,11 @@ public class TunnelConnection {
     volatile long keepaliveIntervalMs = KEEPALIVE_INTERVAL_MS;
     volatile long keepaliveTimeoutMs = KEEPALIVE_TIMEOUT_MS;
     /**
-     * 本连接是否已收到过服务端心跳（tunnel_ping）：静默断链判定只在收到过心跳后启用——
-     * 老服务端没有心跳，无门槛启用会把健康隧道每 75s 误杀一次（兼容门）。
+     * 本连接的服务端是否具备心跳能力：老口径是「收到过 tunnel_ping」才启用下行静默判定
+     * （兼容无心跳的老服务端），但连接若死在首个心跳之前（NAT/云网关丢空闲 TCP），静默
+     * 判定永不启用 = 隧道永离线（2026-10-11 实锤：隧道建连 59s 内 TCP 静默死，runner
+     * 25 分钟不自愈）。新口径：tunnel_hello 携带 heartbeatIntervalMs 即视为有心跳，
+     * 建连瞬间启用判定；老服务端的 tunnel_hello 无此字段，兼容门依旧成立。
      */
     volatile boolean heartbeatSeen;
     private final Map<Integer, RunnerTunnelStream> streams = new ConcurrentHashMap<>();
@@ -292,6 +295,32 @@ public class TunnelConnection {
         return streams.size();
     }
 
+    /**
+     * tunnel_hello（白名单快照 + 心跳能力广告）与 tunnel_ping（服务端心跳，静默断链判定
+     * 的存活证据）。包内可见供测试直驱。
+     */
+    void onTunnelText(String text) {
+        try {
+            JsonNode frame = mapper.readTree(text);
+            String type = frame.path("type").asText("");
+            if ("tunnel_hello".equals(type)) {
+                List<String> allowed = new ArrayList<>();
+                frame.path("allowedHosts").forEach(h -> allowed.add(h.asText("")));
+                EgressHostAllowlist.set(allowed);
+                if (frame.path("heartbeatIntervalMs").asLong(0) > 0) {
+                    heartbeatSeen = true; // 服务端广告了心跳能力：建连即启用静默判定
+                }
+                log.info("出口白名单快照已刷新（{} 条）", allowed.size());
+            } else if ("tunnel_ping".equals(type)) {
+                heartbeatSeen = true; // lastInboundAt 已在 onText 入口刷新
+            } else {
+                log.debug("隧道未知文本帧: {}", text.length() > 200 ? text.substring(0, 200) : text);
+            }
+        } catch (Exception e) {
+            log.warn("隧道文本帧处理失败: {}", e.getMessage());
+        }
+    }
+
     private class Listener implements WebSocket.Listener {
         private final CountDownLatch closed;
         private final StringBuilder partialText = new StringBuilder();
@@ -321,24 +350,9 @@ public class TunnelConnection {
             return null;
         }
 
-        /** tunnel_hello（白名单快照）与 tunnel_ping（服务端心跳，静默断链判定的存活证据） */
+        /** tunnel_hello / tunnel_ping 文本帧 → 外层统一处理 */
         private void handleText(String text) {
-            try {
-                JsonNode frame = mapper.readTree(text);
-                String type = frame.path("type").asText("");
-                if ("tunnel_hello".equals(type)) {
-                    List<String> allowed = new ArrayList<>();
-                    frame.path("allowedHosts").forEach(h -> allowed.add(h.asText("")));
-                    EgressHostAllowlist.set(allowed);
-                    log.info("出口白名单快照已刷新（{} 条）", allowed.size());
-                } else if ("tunnel_ping".equals(type)) {
-                    heartbeatSeen = true; // lastInboundAt 已在 onText 入口刷新
-                } else {
-                    log.debug("隧道未知文本帧: {}", text.length() > 200 ? text.substring(0, 200) : text);
-                }
-            } catch (Exception e) {
-                log.warn("隧道文本帧处理失败: {}", e.getMessage());
-            }
+            onTunnelText(text);
         }
 
         @Override

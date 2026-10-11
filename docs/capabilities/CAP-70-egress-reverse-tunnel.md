@@ -175,8 +175,10 @@
 | created_at / updated_at | timestamp | |
 
 **隧道握手**：runner 连 `/ws/agent-tunnel?token=` → 服务端下发 `tunnel_hello
-{protocolVersion, allowedHosts[]}` → 之后纯流帧。规则变更 → 重发 `tunnel_hello`
-（全量快照，量小无需增量）。
+{protocolVersion, allowedHosts[], heartbeatIntervalMs}` → 之后纯流帧。规则变更 → 重发
+`tunnel_hello`（全量快照，量小无需增量）。`heartbeatIntervalMs` 是心跳能力广告：
+runner 凭它在建连瞬间启用下行静默断链判定（老口径「收到过 tunnel_ping 才启用」在
+连接死于首次心跳前时永不自愈——2026-10-11 事故）；老服务端的 hello 无此字段，兼容门不变。
 
 ## 6. API 概要
 

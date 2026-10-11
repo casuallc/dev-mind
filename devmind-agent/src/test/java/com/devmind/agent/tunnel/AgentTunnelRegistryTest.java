@@ -133,6 +133,8 @@ class AgentTunnelRegistryTest {
         String json = hello.getPayload();
         assertTrue(json.contains("\"type\":\"tunnel_hello\""), json);
         assertTrue(json.contains("\"protocolVersion\":" + AgentProtocol.EGRESS_TUNNEL), json);
+        // 心跳能力广告：runner 凭此字段建连即启用下行静默判定（不等首个 tunnel_ping）
+        assertTrue(json.contains("\"heartbeatIntervalMs\":"), json);
         assertTrue(json.contains("*.corp.com"), json);
         assertTrue(json.contains("gitlab.intra"), json);
     }
