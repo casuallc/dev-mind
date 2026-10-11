@@ -1,9 +1,10 @@
-// 需求详情页「工作单元」Tab：WI 表格（中文状态/会话列/起会话/编辑/删除）+ 新建/编辑弹窗 + 全部完成。
-// 行内操作统一居中 Modal 二次确认（编辑走弹窗表单本身）；需求完结（DONE/CANCELLED）后锁定。
+// 需求详情页「工作单元」Tab：WI 表格（中文状态/会话列/起会话/编辑/删除）+ 新建/编辑抽屉 + 全部完成。
+// 行内操作统一居中 Modal 二次确认（编辑走抽屉表单本身）；需求完结（DONE/CANCELLED）后锁定。
+// spec 用共享 MarkdownEditor（CAP-44，附件上传 scope=SHARED 与需求描述同口径，引用可被投送到会话）。
 // CAP-52：清单由规划会话自动固化（不再是「AI 拆分」按钮），开发会话也不自动把 WI 置 DONE——
 // 人核对改动后点「全部完成」一次性收口（逐个置 DONE 会连带触发 N 次构建）。
 import { useState } from 'react'
-import { Button, Dropdown, Empty, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
+import { Button, Drawer, Dropdown, Empty, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { CheckCircleOutlined, DownOutlined, PlusOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -24,6 +25,8 @@ import { SessionTag, latestSessionOfWorkItem } from './flow/flowSessions'
 import type { RequirementOverview, WorkItem, WorkItemInput, WorkItemStatus, WorkItemType } from '../types'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import MarkdownEditor from '../../../shared/components/MarkdownEditor'
+import { DRAWER_WIDE } from '../../../shared/utils/overlay'
 
 const WI_STATUS_FLOW: WorkItemStatus[] = ['TODO', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED']
 const WI_TYPES: WorkItemType[] = ['DESIGN', 'DEVELOPMENT', 'TEST', 'DOCUMENT', 'REVIEW']
@@ -263,9 +266,22 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
         <Table rowKey="id" size="small" columns={columns} dataSource={workItems} pagination={LIST_PAGINATION} />
       )}
 
-      <Modal title={editing ? `编辑工作单元 ${editing.code}` : '新建工作单元'} open={editOpen}
-        onCancel={() => setEditOpen(false)} onOk={() => form.submit()} okText="保存" width={560}>
-        <Form form={form} layout="vertical" onFinish={onSave}>
+      <Drawer
+        title={editing ? `编辑工作单元 ${editing.code}` : '新建工作单元'}
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        width={DRAWER_WIDE}
+        destroyOnHidden
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setEditOpen(false)}>取消</Button>
+            <Button type="primary" onClick={() => form.submit()}>
+              保存
+            </Button>
+          </Space>
+        }
+      >
+        <Form form={form} layout="vertical" onFinish={onSave} preserve={false}>
           <Form.Item label="类型" name="type" rules={[{ required: true }]}>
             <Select options={WI_TYPES.map((t) => ({ value: t, label: WI_TYPE_LABEL[t] }))} />
           </Form.Item>
@@ -273,7 +289,11 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
             <Input placeholder="如 登录页扫码组件开发" />
           </Form.Item>
           <Form.Item label="执行输入 spec" name="spec" extra="起会话时作为 taskSpec 注入，可后续编辑">
-            <Input.TextArea rows={4} />
+            <MarkdownEditor
+              height={260}
+              placeholder="支持 Markdown；粘贴/拖拽图片或点工具栏按钮上传附件，内联进 spec（AI 会话可读）"
+              attachmentUpload={{ scope: 'SHARED' }}
+            />
           </Form.Item>
           <Form.Item label="负责人" name="ownerId">
             <Input placeholder="可选" />
@@ -282,7 +302,7 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
             <Input placeholder="如 login-qrcode" />
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
     </Space>
   )
 }
