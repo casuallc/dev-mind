@@ -87,7 +87,7 @@ export default function RequirementFormDrawer({ projectId, editing, open, onClos
       title={editing ? `编辑需求 ${editing.code}` : '新建需求'}
       open={open}
       onClose={onClose}
-      width={600}
+      width={960}
       destroyOnHidden
       footer={
         <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
