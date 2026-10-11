@@ -3,6 +3,7 @@
 // 每文件可「推送为需求文档」（关联需求 + 文档类型 + 新建/更新现有版本）。
 import { useCallback, useEffect, useState } from 'react'
 import {
+  Drawer,
   Alert,
   Button,
   Empty,
@@ -26,6 +27,7 @@ import type { DocMeta } from '../../docs/types'
 import Markdown from '../../../shared/components/Markdown'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_FULL } from '../../../shared/utils/overlay'
 
 const KIND_OPTIONS: { value: PublishDocKind; label: string }[] = [
   { value: 'analysis', label: '需求分析' },
@@ -259,12 +261,11 @@ export default function SessionOutputsModal({
   }, [open, sessionId, selected])
 
   return (
-    <Modal
+    <Drawer
       title={`会话产出（.devmind/output）${session ? ` - ${session.id}` : ''}`}
       open={open}
-      onCancel={onClose}
-      footer={null}
-      width={920}
+      onClose={onClose}
+      width={DRAWER_FULL}
       destroyOnHidden
     >
       {syncMessage && (
@@ -328,8 +329,6 @@ export default function SessionOutputsModal({
             style={{
               flex: 1,
               minWidth: 0,
-              maxHeight: 480,
-              overflow: 'auto',
               border: '1px solid rgba(128,128,128,0.25)',
               borderRadius: 8,
               padding: '8px 16px',
@@ -346,6 +345,6 @@ export default function SessionOutputsModal({
         </div>
       )}
       {session && <PublishDocModal fileName={publishFile} session={session} onClose={() => setPublishFile(null)} />}
-    </Modal>
+    </Drawer>
   )
 }

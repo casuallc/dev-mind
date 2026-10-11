@@ -1,7 +1,7 @@
 // CAP-39：会话「更多」操作（原会话详情页迁入工作台）：已注入上下文 / 沉淀经验 / 清理 worktree。
 // CAP-42：收口合并到基线（固定工作区手动收口：合并+push+删 worktree）。
 import { useState } from 'react'
-import { Button, Checkbox, Descriptions, Dropdown, message, Modal, Space, Table, Tag, Typography } from 'antd'
+import { Button, Checkbox, Descriptions, Drawer, Dropdown, message, Modal, Space, Table, Tag, Typography } from 'antd'
 import {
   BulbOutlined,
   DeleteOutlined,
@@ -16,6 +16,7 @@ import type { ContextSnapshot } from '../../scenarios/types'
 import SedimentExperienceModal from '../../knowledge/components/SedimentExperienceModal'
 import { getUserSnapshot, isAdmin } from '../../auth/authStore'
 import { fmtTime } from '../../../shared/utils/format'
+import { DRAWER_WIDE } from '../../../shared/utils/overlay'
 import { showError } from '../../../shared/utils/showError'
 
 export default function SessionMoreActions({
@@ -165,12 +166,11 @@ export default function SessionMoreActions({
       </Modal>
 
       {/* 已注入上下文（CAP-33 FR-07 快照：场景 + 三层来源清单） */}
-      <Modal
+      <Drawer
         title={`已注入上下文${ctx?.scenarioName ? `：${ctx.scenarioName}` : ''}`}
         open={contextOpen}
-        onCancel={() => setContextOpen(false)}
-        footer={null}
-        width={720}
+        onClose={() => setContextOpen(false)}
+        width={DRAWER_WIDE}
       >
         {ctx && (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -209,7 +209,7 @@ export default function SessionMoreActions({
             />
           </Space>
         )}
-      </Modal>
+      </Drawer>
 
       {/* 沉淀经验（CAP-04） */}
       <SedimentExperienceModal

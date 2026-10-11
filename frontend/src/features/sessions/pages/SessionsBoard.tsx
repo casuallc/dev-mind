@@ -24,7 +24,7 @@ import ChatPanel from '../../../shared/chat/ChatPanel'
 import type { StreamMeta, WorkspaceSnapshot } from '../../../shared/chat/types'
 import WorkspacePanel from '../../../shared/chat/workspace/WorkspacePanel'
 import NewSessionDraft from '../components/NewSessionDraft'
-import SessionDiffModal from '../components/SessionDiffModal'
+import SessionDiffDrawer from '../components/SessionDiffDrawer'
 import SessionOutputsModal from '../components/SessionOutputsModal'
 import SessionMoreActions from '../components/SessionMoreActions'
 import { listAgentNodes } from '../../agent/api'
@@ -527,7 +527,7 @@ export default function SessionsBoard({
         </div>
       )}
 
-      <SessionDiffModal open={diff.open} diff={diff.data} onClose={diff.close} />
+      <SessionDiffDrawer open={diff.open} diff={diff.data} onClose={diff.close} />
       <SessionOutputsModal open={outputsOpen} onClose={() => setOutputsOpen(false)} session={current ?? null} />
     </Card>
   )

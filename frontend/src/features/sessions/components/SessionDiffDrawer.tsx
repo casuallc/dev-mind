@@ -1,9 +1,10 @@
-// 会话 Diff 弹窗：CAP-31 起按库分组（每库独立 stat/文件清单/错误行）。
+// 会话 Diff 抽屉：CAP-31 起按库分组（每库独立 stat/文件清单/错误行）。
 // 受控组件，SessionsBoard 操作条与 SessionDetail 共用。
-import { Alert, Empty, Modal, Space, Tag, Typography } from 'antd'
+import { Alert, Drawer, Empty, Space, Tag, Typography } from 'antd'
+import { DRAWER_FULL } from '../../../shared/utils/overlay'
 import type { RepoDiffView } from '../types'
 
-export default function SessionDiffModal({
+export default function SessionDiffDrawer({
   open,
   diff,
   onClose,
@@ -13,7 +14,7 @@ export default function SessionDiffModal({
   onClose: () => void
 }) {
   return (
-    <Modal title="会话 Diff" open={open} onCancel={onClose} footer={null} width={760}>
+    <Drawer title="会话 Diff" open={open} onClose={onClose} width={DRAWER_FULL}>
       {diff && diff.length === 0 && (
         <Empty description="无工作区可 diff（会话未关联仓库或 worktree 已清理）" />
       )}
@@ -44,6 +45,6 @@ export default function SessionDiffModal({
           )}
         </div>
       ))}
-    </Modal>
+    </Drawer>
   )
 }
