@@ -9,6 +9,7 @@ import CloneAuthHint from './CloneAuthHint'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_FORM } from '../../../shared/utils/overlay'
 
 const STATUS_OPTIONS = [
   { value: 'ACTIVE', label: 'ACTIVE' },
@@ -108,7 +109,7 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
       title={project ? '编辑项目' : '新建项目'}
       open={open}
       onClose={onCancel}
-      width={600}
+      width={DRAWER_FORM}
       destroyOnHidden
       footer={
         <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>

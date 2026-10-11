@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
   Card,
+  Drawer,
   Form,
   Input,
   Modal,
@@ -25,6 +26,7 @@ import type { AgentNode } from '../../../agent/types'
 import { envColor } from '../../components/utils'
 import { showError } from '../../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../../shared/utils/table'
+import { DRAWER_FORM } from '../../../../shared/utils/overlay'
 
 const ENV_NAME_OPTIONS = ['DEV', 'TEST', 'STAGING', 'PROD']
 
@@ -212,8 +214,15 @@ export default function ProjectEnvironmentsPage() {
         pagination={LIST_PAGINATION}
         locale={{ emptyText: '暂无环境。点击「添加环境」创建第一个。' }}
       />
-      <Modal title={editing ? `编辑环境 ${editing.name}` : '添加环境'} open={open} onCancel={() => setOpen(false)}
-        onOk={() => form.submit()} okText="保存" width={560}>
+      <Drawer title={editing ? `编辑环境 ${editing.name}` : '添加环境'} open={open} onClose={() => setOpen(false)}
+        width={DRAWER_FORM} destroyOnHidden
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setOpen(false)}>取消</Button>
+            <Button type="primary" onClick={() => form.submit()}>保存</Button>
+          </Space>
+        }
+      >
         <Form form={form} layout="vertical" onFinish={onSave}>
           <Form.Item label="名称" name="name" rules={[{ required: true }]}>
             <Select options={ENV_NAME_OPTIONS.map((v) => ({ value: v, label: v }))} />
@@ -243,7 +252,7 @@ export default function ProjectEnvironmentsPage() {
             <Input placeholder="如 systemctl start myapp" />
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
     </Card>
   )
 }
