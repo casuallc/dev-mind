@@ -29,6 +29,9 @@ public class WorklogProperties {
     /** 单库单日 git log 扫描上限 */
     private int gitScanMaxCommits = 200;
 
+    /** CAP-74：服务端工作日志仓根目录（本机路径只走配置不入库；仓物理路径 = repoRoot + repo_key） */
+    private String repoRoot = "./data/worklog/repos";
+
     public boolean isDailyEnabled() { return dailyEnabled; }
     public void setDailyEnabled(boolean dailyEnabled) { this.dailyEnabled = dailyEnabled; }
     public String getDailyCron() { return dailyCron; }
@@ -43,4 +46,6 @@ public class WorklogProperties {
     public void setGitImportCron(String gitImportCron) { this.gitImportCron = gitImportCron; }
     public int getGitScanMaxCommits() { return gitScanMaxCommits; }
     public void setGitScanMaxCommits(int gitScanMaxCommits) { this.gitScanMaxCommits = gitScanMaxCommits; }
+    public String getRepoRoot() { return repoRoot; }
+    public void setRepoRoot(String repoRoot) { this.repoRoot = repoRoot; }
 }

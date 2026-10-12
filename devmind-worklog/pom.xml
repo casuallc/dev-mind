@@ -36,6 +36,11 @@
             <groupId>com.devmind</groupId>
             <artifactId>devmind-skill</artifactId>
         </dependency>
+        <!-- CAP-74：服务端 git 仓写侧操作（GitRemoteOps，对照 flow 模块先例直接依赖 integration） -->
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-integration</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>

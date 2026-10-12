@@ -84,6 +84,10 @@ public class WorklogUserSettingsEntity {
     @Column(name = "remote_branch", length = 128)
     private String remoteBranch;
 
+    /** CAP-74 FR-01：写入路由——活动仓 repo_key（null = 个人仓；团队仓绑定后设置页切换） */
+    @Column(name = "active_repo_key", length = 64)
+    private String activeRepoKey;
+
     @Column(name = "updated_at")
     private Instant updatedAt;
 
@@ -116,6 +120,8 @@ public class WorklogUserSettingsEntity {
     public void setRemoteUrl(String remoteUrl) { this.remoteUrl = remoteUrl; }
     public String getRemoteBranch() { return remoteBranch; }
     public void setRemoteBranch(String remoteBranch) { this.remoteBranch = remoteBranch; }
+    public String getActiveRepoKey() { return activeRepoKey; }
+    public void setActiveRepoKey(String activeRepoKey) { this.activeRepoKey = activeRepoKey; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
 }
