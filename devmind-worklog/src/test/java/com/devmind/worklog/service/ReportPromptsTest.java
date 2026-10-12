@@ -1,7 +1,6 @@
 package com.devmind.worklog.service;
 
 import com.devmind.worklog.dto.GitCommitView;
-import com.devmind.worklog.model.DailyReportEntity;
 import com.devmind.worklog.model.WorklogEntryEntity;
 import org.junit.jupiter.api.Test;
 
@@ -50,10 +49,7 @@ class ReportPromptsTest {
 
     @Test
     void 周报优先以日报为素材并含周区间() {
-        DailyReportEntity d = new DailyReportEntity();
-        d.setUserId("u1");
-        d.setWorkDate(LocalDate.of(2026, 9, 8));
-        d.setContentMd("- 完成登录改造");
+        var d = new ReportPrompts.DailyMaterial(LocalDate.of(2026, 9, 8), "- 完成登录改造");
         String prompt = ReportPrompts.weekly(LocalDate.of(2026, 9, 7),
                 List.of(d), List.of(entry("不该出现", 1)), List.of(), WorklogTemplates.DEFAULT_WEEKLY);
         assertTrue(prompt.contains("2026-09-07 ~ 2026-09-13"), "缺周区间");

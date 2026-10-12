@@ -30,64 +30,53 @@ public class WorklogAssetSeeder {
 
     /**
      * 内置生成场景的自动结束预设（CAP-33 FR-08）：回合完成后空闲 60s 自动结束会话，
-     * runner 随 exit 自动回传成稿、服务端镜像落库——定时无人值守链路不再需要
+     * runner 随 exit 自动回传成稿、服务端写仓——定时无人值守链路不再需要
      * 手动「推送工作日志」+「结束会话」。
      */
     static final int AUTO_FINISH_SEC = 60;
 
     /** skill 正文（SKILL.md frontmatter 之后的部分；frontmatter 由结构化字段自动拼装） */
     static final String SKILL_CONTENT = """
-            # 工作日志工作区约定
+            # 工作日志草稿区约定
 
-            你在一个持久的工作日志工作区中工作（本地 git 仓库，所有产出必须提交）。
-
-            ## 目录契约
-            - `daily/yyyy-MM-dd.md` —— 日报，按日期命名（如 daily/2026-09-14.md）
-            - `weekly/yyyy-Www.md` —— 周报，按 ISO 周命名（如 weekly/2026-W37.md）
-            - `entries/` —— 素材与零散记录（预留，可按需维护）
-            - `.devmind/output/` —— 平台回传目录（见末节，生成任务必须写）
+            你在一个一次性的工作日志草稿区中工作（普通目录，非 git 仓库；会话结束后可能被清理）。
+            事实源是平台服务端的工作日志仓——成稿不落在草稿区持久保存，写完必须复制到回传目录上交平台。
 
             ## 写作要求
             - 中文、事实导向的工作口吻，每条一句话说清做了什么与结果
             - 内容可能进入团队周报与绩效材料：不要写入密码、密钥、token、内部地址等敏感信息
-            - 动笔前先回读 daily/ 与 weekly/ 下的近期文件，保持口径连续；
-              写周报时必须真实翻阅本周（必要时含上周）的日报文件，不得凭空概括
-
-            ## git 规范
-            - 每次成稿后 `git add` 相关文件并 commit，message 形如 `docs: daily 2026-09-14`
-            - 只提交、不 push（远端备份由管控台「推送远端」按钮统一执行，agent 不自行 push）；不删除历史文件
+            - 素材以 prompt 中携带的快照为准（周报任务的本周日报全文已在任务说明里），不得凭空概括；
+              草稿区没有历史文件可回读，不要尝试找旧稿
 
             ## 成稿回传（平台契约，必须执行）
-            - 日报成稿同时复制一份到 `.devmind/output/daily-yyyy-MM-dd.md`
-            - 周报成稿同时复制一份到 `.devmind/output/weekly-yyyy-Www.md`
-            - 平台在会话结束时自动采集该目录落库展示；缺文件则本次生成判失败
+            - 日报成稿写到 `.devmind/output/daily-yyyy-MM-dd.md`
+            - 周报成稿写到 `.devmind/output/weekly-yyyy-Www.md`
+            - 平台在会话结束时自动采集该目录写入服务端工作日志仓（git 历史留痕）；缺文件则本次生成判失败
             """;
 
     /** 场景背景（装配进 CLAUDE.md「场景背景」节） */
     static final String EXTRA_CONTEXT = """
-            本工作区是「工作日志空间」：runner 本机的持久 git 目录（{user.home}/worklog/<用户名>）。
-            事实源是工作区文件（git 历史即修改记录），平台数据库只是用于展示/通知的镜像。
-            所有产出按 worklog skill 的目录契约落盘并 commit。
+            本工作区是「工作日志空间」的会话草稿区：runner 侧的临时工作目录（非 git 仓库，无持久性承诺）。
+            事实源是平台服务端的工作日志 git 仓；你的唯一交付方式是把成稿写进 .devmind/output/ 回传目录，
+            由平台在会话结束时写仓留痕。草稿区内不做 git 操作。
             """;
 
     static final String DAILY_SKELETON = """
             {{task}}
 
             ## 执行要求（遵循 worklog skill 约定）
-            1. 可先回读 daily/ 下近日日报，保持口吻与格式连续；
-            2. 成稿写入 daily/<日期>.md（日期见上方任务说明），随后 git add + commit；
-            3. 把同一份成稿复制到 .devmind/output/daily-<日期>.md（平台回传契约，缺文件判失败）；
-            4. 最后一句话确认已完成。
+            1. 素材以上方任务说明为准（当日条目与 git 提交已附上）；
+            2. 成稿写入 .devmind/output/daily-<日期>.md（日期见上方任务说明；平台回传契约，缺文件判失败）；
+            3. 最后一句话确认已完成。
             """;
 
     static final String WEEKLY_SKELETON = """
             {{task}}
 
             ## 执行要求（遵循 worklog skill 约定）
-            1. 先真实翻阅 daily/ 下本周（必要时含上周）的日报文件再动笔；
-            2. 成稿写入 weekly/<yyyy-Www>.md（ISO 周，见上方任务说明），随后 git add + commit；
-            3. 把同一份成稿复制到 .devmind/output/weekly-<yyyy-Www>.md（平台回传契约，缺文件判失败）；
-            4. 最后一句话确认已完成。
+            1. 先通读上方任务说明里附带的本周日报全文再动笔，不得凭空概括；
+            2. 成稿写入 .devmind/output/weekly-<yyyy-Www>.md（ISO 周，见上方任务说明；平台回传契约，缺文件判失败）；
+            3. 最后一句话确认已完成。
             """;
 
     private final SkillRepository skillRepo;
@@ -108,9 +97,9 @@ public class WorklogAssetSeeder {
         try {
             String skillId = ensureSkill();
             ensureScenario(WorklogScenarios.DAILY, "工作日志·日报",
-                    "生成当日工作日志（工作日志空间内落盘 + 回传）", DAILY_SKELETON, skillId, 90);
+                    "生成当日工作日志（草稿区成稿回传服务端仓）", DAILY_SKELETON, skillId, 90);
             ensureScenario(WorklogScenarios.WEEKLY, "工作日志·周报",
-                    "生成一周工作周报（回读日报文件 + 落盘 + 回传）", WEEKLY_SKELETON, skillId, 91);
+                    "生成一周工作周报（素材随 prompt 携带，成稿回传服务端仓）", WEEKLY_SKELETON, skillId, 91);
         } catch (Exception e) {
             log.warn("worklog skill/场景种子失败（不阻断启动）: {}", e.getMessage());
         }
@@ -125,7 +114,7 @@ public class WorklogAssetSeeder {
         }
         var view = skillService.create(new SkillRequest(SkillEntity.SCOPE_GLOBAL, null,
                 WorklogScenarios.SKILL_NAME,
-                "工作日志空间工作约定：目录契约、git 提交规范、成稿回传与写作口吻（日报/周报生成场景默认绑定）",
+                "工作日志草稿区工作约定：成稿回传契约与写作口吻（日报/周报生成场景默认绑定）",
                 SKILL_CONTENT, null, List.of("worklog"), SkillEntity.STATUS_ACTIVE));
         log.info("worklog skill 种子已创建: id={}", view.id());
         return view.id();

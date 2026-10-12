@@ -1,15 +1,12 @@
 package com.devmind.worklog.dto;
 
-import com.devmind.worklog.model.WeeklyReportEntity;
-
 import java.time.Instant;
 import java.time.LocalDate;
 
-public record WeeklyReportView(Long id, LocalDate weekStart, String summaryMd, String nextPlanMd,
-                               String status, String sessionId, Instant createdAt, Instant updatedAt) {
-
-    public static WeeklyReportView of(WeeklyReportEntity e) {
-        return new WeeklyReportView(e.getId(), e.getWeekStart(), e.getSummaryMd(), e.getNextPlanMd(),
-                e.getStatus(), e.getSessionId(), e.getCreatedAt(), e.getUpdatedAt());
-    }
+/**
+ * CAP-74：周报视图改服务端仓口径——无 DB id/status；summaryMd/nextPlanMd 由仓文件全文
+ * 按分节标题拆分而来（{@code ReportService.splitWeekly}）。
+ */
+public record WeeklyReportView(boolean exists, LocalDate weekStart, String summaryMd, String nextPlanMd,
+                               String sessionId, Instant createdAt, Instant updatedAt) {
 }

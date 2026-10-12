@@ -28,8 +28,9 @@ import java.time.LocalDate;
 import java.util.List;
 
 /**
- * CAP-28 FR-05/06：日报/周报查询、手动创建空白草稿、编辑确认；
- * CAP-41 FR-03：AI 触发生成 = 创建 worklog 会话（同步受理返回 sessionId，前端轮询报告镜像）。
+ * CAP-28 FR-05/06：日报/周报查询、手动创建空白稿、编辑保存；
+ * CAP-41 FR-03：AI 触发生成 = 创建 worklog 会话（同步受理返回 sessionId，前端轮询报告）；
+ * CAP-74：编辑保存按日期/周一寻址（PUT /daily/{date}、/weekly/{weekStart}），状态机删除。
  */
 @RestController
 @RequestMapping("/api/worklog")
@@ -69,7 +70,7 @@ public class WorklogReportController {
         return reportService.weekDaily(identity.currentActor(), weekStart);
     }
 
-    /** 手动触发生成（CAP-41：创建 worklog 会话，立即返回 sessionId；成稿随会话结束回传落镜像）。 */
+    /** 手动触发生成（CAP-41：创建 worklog 会话，立即返回 sessionId；成稿随会话结束回传写仓）。 */
     @PostMapping("/daily/generate")
     public ReportLaunch generateDaily(@Valid @RequestBody GenerateDailyRequest req) {
         String actor = identity.currentActor();
@@ -78,19 +79,18 @@ public class WorklogReportController {
         return reportService.generateDaily(actor, req.date(), force);
     }
 
-    /**
-     * 手动创建空白日报草稿（不经 AI、不要求素材）：已存在幂等返回。
-     * 返回的 DRAFT 走 PUT /daily/{id} 编辑、确认，与 AI 草稿同一生命周期。
-     */
+    /** 手动创建空白日报（不经 AI、不要求素材）：已存在幂等返回。 */
     @PostMapping("/daily")
     public DailyReportView createDaily(@Valid @RequestBody CreateDailyRequest req) {
         return reportService.createDaily(identity.currentActor(), req.date());
     }
 
-    @PutMapping("/daily/{id}")
-    public DailyReportView updateDaily(@PathVariable Long id,
-                                       @Valid @RequestBody UpdateDailyRequest req) {
-        return reportService.updateDaily(id, identity.currentActor(), req);
+    /** CAP-74：按日期寻址保存（保存即生效写仓 + commit）；status 字段已废弃，传了 400。 */
+    @PutMapping("/daily/{date}")
+    public DailyReportView updateDaily(
+            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @Valid @RequestBody UpdateDailyRequest req) {
+        return reportService.updateDaily(identity.currentActor(), date, req);
     }
 
     // ---------------- 周报 ----------------
@@ -115,23 +115,25 @@ public class WorklogReportController {
         return reportService.generateWeekly(actor, req.weekStart(), force);
     }
 
-    /** 手动创建空白周报草稿：同 POST /daily，幂等。 */
+    /** 手动创建空白周报：同 POST /daily，幂等。 */
     @PostMapping("/weekly")
     public WeeklyReportView createWeekly(@Valid @RequestBody CreateWeeklyRequest req) {
         return reportService.createWeekly(identity.currentActor(), req.weekStart());
     }
 
-    @PutMapping("/weekly/{id}")
-    public WeeklyReportView updateWeekly(@PathVariable Long id,
-                                         @Valid @RequestBody UpdateWeeklyRequest req) {
-        return reportService.updateWeekly(id, identity.currentActor(), req);
+    /** CAP-74：按周一寻址保存（分节字段重组正文写仓）；status 传了 400。 */
+    @PutMapping("/weekly/{weekStart}")
+    public WeeklyReportView updateWeekly(
+            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart,
+            @Valid @RequestBody UpdateWeeklyRequest req) {
+        return reportService.updateWeekly(identity.currentActor(), weekStart, req);
     }
 
     // ---------------- 会话成稿同步 ----------------
 
     /**
-     * CAP-41：把工作日志空间某会话的成稿产出（.devmind/output 的 daily-/weekly- 文件）
-     * 同步为日报/周报镜像（幂等；已确认不覆盖）。前端对话页「推送工作日志」用，
+     * 把工作日志空间某会话的成稿产出（.devmind/output 的 daily-/weekly- 文件）
+     * 写进服务端仓（幂等；同内容零 commit）。前端对话页「推送工作日志」用，
      * 调用前通常先 POST /sessions/{id}/outputs/collect 让 runner 即时回传。
      */
     @PostMapping("/reports/sync")

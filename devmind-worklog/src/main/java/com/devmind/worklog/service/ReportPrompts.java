@@ -1,7 +1,6 @@
 package com.devmind.worklog.service;
 
 import com.devmind.worklog.dto.GitCommitView;
-import com.devmind.worklog.model.DailyReportEntity;
 import com.devmind.worklog.model.WorklogEntryEntity;
 
 import java.time.LocalDate;
@@ -11,12 +10,16 @@ import java.util.Map;
 /**
  * CAP-41 FR-03/05 生成 prompt 组装：渲染后的格式模板 + 当日/当周素材。
  *
- * <p>素材直接填进模板占位符（{{entries}}/{{commits}}），claude 在 runner 持久工作区内
- * 还能回读历史日报/周报文件，prompt 只承担「本次任务 + 素材快照」。</p>
+ * <p>CAP-74：草稿区无历史文件可回读，prompt 携带的素材快照是唯一素材口径——
+ * 周报素材改由服务端仓读出的日报全文（{@link DailyMaterial}）组成。</p>
  */
 final class ReportPrompts {
 
     private ReportPrompts() {
+    }
+
+    /** 周报素材中的一篇日报（服务端仓读出：日期 + 全文）。 */
+    record DailyMaterial(LocalDate date, String contentMd) {
     }
 
     static String daily(LocalDate date, List<GitCommitView> commits,
@@ -28,7 +31,7 @@ final class ReportPrompts {
                 "commits", formatCommits(commits)));
     }
 
-    static String weekly(LocalDate weekStart, List<DailyReportEntity> dailies,
+    static String weekly(LocalDate weekStart, List<DailyMaterial> dailies,
                          List<WorklogEntryEntity> entries, List<GitCommitView> commits, String template) {
         String material = !dailies.isEmpty() ? formatDailies(dailies) : formatEntries(entries);
         return WorklogTemplates.render(template, Map.of(
@@ -67,14 +70,14 @@ final class ReportPrompts {
         return sb.toString().strip();
     }
 
-    static String formatDailies(List<DailyReportEntity> dailies) {
+    static String formatDailies(List<DailyMaterial> dailies) {
         if (dailies == null || dailies.isEmpty()) {
             return "（无）";
         }
         StringBuilder sb = new StringBuilder();
-        for (DailyReportEntity d : dailies) {
-            sb.append("### ").append(d.getWorkDate()).append('\n')
-                    .append(d.getContentMd() == null ? "" : d.getContentMd()).append("\n\n");
+        for (DailyMaterial d : dailies) {
+            sb.append("### ").append(d.date()).append('\n')
+                    .append(d.contentMd() == null ? "" : d.contentMd()).append("\n\n");
         }
         return sb.toString().strip();
     }
