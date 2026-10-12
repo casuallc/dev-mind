@@ -11,8 +11,6 @@ import com.devmind.worklog.dto.ReportLaunch;
 import com.devmind.worklog.dto.UpdateDailyRequest;
 import com.devmind.worklog.dto.UpdateWeeklyRequest;
 import com.devmind.worklog.dto.WeeklyReportView;
-import com.devmind.worklog.model.WorklogEntryEntity;
-import com.devmind.worklog.repo.WorklogEntryRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -44,20 +42,20 @@ public class ReportService {
     /** 周报视图/周报素材读全文的上限（一人一周一文件，量级小；截断只是兜底防爆） */
     private static final int FULL_READ_CHARS = 500_000;
 
-    private final WorklogEntryRepository entryRepo;
+    private final WorklogEntryService entryService;
     private final GitLogScanner gitScanner;
     private final WorklogSettingsService settingsService;
     private final WorklogWorkspaceService workspaceService;
     private final SessionManagerService sessionManager;
     private final WorklogRepoService repoService;
 
-    public ReportService(WorklogEntryRepository entryRepo,
+    public ReportService(WorklogEntryService entryService,
                          GitLogScanner gitScanner,
                          WorklogSettingsService settingsService,
                          WorklogWorkspaceService workspaceService,
                          SessionManagerService sessionManager,
                          WorklogRepoService repoService) {
-        this.entryRepo = entryRepo;
+        this.entryService = entryService;
         this.gitScanner = gitScanner;
         this.settingsService = settingsService;
         this.workspaceService = workspaceService;
@@ -106,7 +104,7 @@ public class ReportService {
             return; // 已有报告且非 force：generate 直接复用，无需素材
         }
         if (gitScanner.scan(username, date).isEmpty()
-                && entryRepo.findByUserIdAndWorkDateOrderByIdAsc(username, date).isEmpty()) {
+                && entryService.listDayEntries(username, date).isEmpty()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     date + " 无工作素材（无条目且无 git 提交），日报未生成");
         }
@@ -124,7 +122,8 @@ public class ReportService {
         }
 
         List<GitCommitView> commits = gitScanner.scan(username, date);
-        List<WorklogEntryEntity> entries = entryRepo.findByUserIdAndWorkDateOrderByIdAsc(username, date);
+        List<WorklogEntryService.DatedEntry> entries = entryService.listDayEntries(username, date)
+                .stream().map(e -> new WorklogEntryService.DatedEntry(date, e)).toList();
         if (commits.isEmpty() && entries.isEmpty()) {
             log.info("日报无素材，跳过: user={} date={}", username, date);
             return new ReportLaunch(null, exists);
@@ -187,8 +186,7 @@ public class ReportService {
         LocalDate weekEnd = weekStart.plusDays(6);
         boolean noDaily = repoService.listReports(username, WorklogRepoService.ReportKind.DAILY,
                 weekStart, weekEnd, 1).isEmpty();
-        boolean noEntry = entryRepo
-                .findByUserIdAndWorkDateBetweenOrderByWorkDateAscIdAsc(username, weekStart, weekEnd).isEmpty();
+        boolean noEntry = entryService.listRangeEntries(username, weekStart, weekEnd).isEmpty();
         if (noDaily && noEntry) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     weekStart + " 周无工作素材（无日报且无条目），周报未生成");
@@ -213,10 +211,9 @@ public class ReportService {
                 .sorted(Comparator.comparing(WorklogRepoService.ReportSummary::date))
                 .map(s -> new ReportPrompts.DailyMaterial(s.date(), s.preview()))
                 .toList();
-        List<WorklogEntryEntity> entries = List.of();
+        List<WorklogEntryService.DatedEntry> entries = List.of();
         if (dailies.isEmpty()) {
-            entries = entryRepo.findByUserIdAndWorkDateBetweenOrderByWorkDateAscIdAsc(
-                    username, weekStart, weekEnd);
+            entries = entryService.listRangeEntries(username, weekStart, weekEnd);
         }
         if (dailies.isEmpty() && entries.isEmpty()) {
             log.info("周报无素材，跳过: user={} weekStart={}", username, weekStart);

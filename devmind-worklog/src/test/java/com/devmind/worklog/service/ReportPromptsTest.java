@@ -1,31 +1,28 @@
 package com.devmind.worklog.service;
 
 import com.devmind.worklog.dto.GitCommitView;
-import com.devmind.worklog.model.WorklogEntryEntity;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** ReportPrompts：模板渲染 + 素材格式化（日报/周报）。 */
+/** ReportPrompts：模板渲染 + 素材格式化（日报/周报）。CAP-74 M3：条目素材 = 仓文件解析结果。 */
 class ReportPromptsTest {
 
     private static GitCommitView commit(String repo, String subject) {
         return new GitCommitView(1L, repo, "0123456789abcdef", "n", "n@x", Instant.now(), subject, false);
     }
 
-    private static WorklogEntryEntity entry(String title, Integer minutes) {
-        WorklogEntryEntity e = new WorklogEntryEntity();
-        e.setUserId("u1");
-        e.setWorkDate(LocalDate.of(2026, 9, 14));
-        e.setEntryType("DEV");
-        e.setTitle(title);
-        e.setMinutes(minutes);
-        return e;
+    private static WorklogEntryService.DatedEntry entry(String title, int minutes) {
+        WorklogEntryFile.ParsedEntry e = new WorklogEntryFile.ParsedEntry(
+                "id1", "DEV", minutes, "MANUAL", null, null, null, null,
+                Instant.now(), title, null, Map.of());
+        return new WorklogEntryService.DatedEntry(LocalDate.of(2026, 9, 14), e);
     }
 
     @Test
