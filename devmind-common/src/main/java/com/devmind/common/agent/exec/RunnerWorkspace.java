@@ -520,8 +520,12 @@ public class RunnerWorkspace {
     /**
      * CAP-41 工作日志持久工作区：&lt;worklogRoot&gt;/&lt;owner&gt;/（owner = 管控台用户名）。
      * 与代码会话根本不同——同一用户的所有 worklog 会话<b>共享同一目录</b>（日志是连续积累的
-     * 工作区）：首次 git init + 骨架 commit，之后幂等复用；无 worktree、无 push、永不删除，
-     * 不在 workspaceRoot 下因此天然不参与 GC/重启对账扫描。
+     * 工作区）：幂等物化骨架（README/.gitignore/daily/weekly/entries 占位，已存在不覆盖）；
+     * 无 worktree、无 push、永不删除，不在 workspaceRoot 下因此天然不参与 GC/重启对账扫描。
+     *
+     * <p><b>CAP-74 起为纯草稿工作目录</b>：不再 git init/骨架 commit——日报/周报的事实源是
+     * 管控台服务端仓，成稿经 .devmind/output/ 回传写仓，「推送远端」由服务端直推。
+     * 存量 git 空间（CAP-74 前初始化）保留 .git 不动，仅幂等补写 .gitignore 忽略行。</p>
      *
      * @param worklogRoot 根目录（调用方解析：配置 worklogRoot 或默认 {user.home}/worklog）
      */
@@ -540,46 +544,19 @@ public class RunnerWorkspace {
             throw new IllegalStateException("创建 worklog 工作区目录失败: " + dir, e);
         }
         if (Files.isDirectory(dir.resolve(".git"))) {
-            ensureGitignore(dir); // 存量空间幂等补写（.gitignore 为后加骨架能力，老空间没有）
-            return dir; // 幂等复用：已有空间直接进
+            // 存量 git 空间（CAP-74 前初始化）：补写缺失忽略行并代提交一次；除此之外不再做 git 操作
+            ensureGitignore(dir);
         }
-        Result init = run(dir, OP_TIMEOUT_SEC, null, "init");
-        if (init.exit() != 0) {
-            throw new IllegalStateException("git init 失败: " + tail(init.output()));
-        }
-        writeSkeleton(dir);
-        run(dir, OP_TIMEOUT_SEC, null, "add", "-A");
-        // 骨架 commit 不依赖节点全局 git 身份配置（内联 -c 指定）
-        Result commit = run(dir, OP_TIMEOUT_SEC, null,
-                "-c", "user.name=devmind", "-c", "user.email=devmind@worklog.local",
-                "commit", "-m", "chore: init worklog workspace");
-        if (commit.exit() != 0) {
-            throw new IllegalStateException("worklog 骨架 commit 失败: " + tail(commit.output()));
-        }
-        log.info("worklog 持久工作区已初始化: owner={} dir={}", owner, dir);
+        writeSkeleton(dir); // 幂等：已存在的文件一律不覆盖
+        log.info("worklog 草稿工作区就绪: owner={} dir={}", owner, dir);
         return dir;
     }
 
     /**
-     * CAP-41 worklog 会话结束收口（best-effort）：只检查未提交改动并上报告警——
-     * 目录永不删除、无 push（纯本地 git，commit 由 agent 按 skill 约定执行）。
+     * CAP-41 的 worklog 收口曾检查未提交改动并上报告警；CAP-74 起草稿区去 git 化，
+     * 「未提交」概念不复存在，收口无事可做——方法删除，runner 侧不再挂 finalizer。
+     * （pushWorklog 协议帧处理已改 no-op ack，方法本体留 M3 统一下线。）
      */
-    public void finishWorklog(Path dir, java.util.function.Consumer<String> sink) {
-        if (dir == null || !Files.isDirectory(dir.resolve(".git"))) {
-            return;
-        }
-        try {
-            Result status = run(dir, OP_TIMEOUT_SEC, null, "status", "--porcelain");
-            if (status.exit() == 0 && !status.output().isBlank()) {
-                long n = status.output().lines().filter(l -> !l.isBlank()).count();
-                sink.accept("[工作区] 工作日志空间存在 " + n + " 处未提交改动（agent 未自行 commit），"
-                        + "可在节点上进入 " + dir + " 查看");
-                log.warn("worklog 空间存在未提交改动: dir={} files={}", dir, n);
-            }
-        } catch (Exception e) {
-            log.warn("worklog 收口检查异常: {} err={}", dir, e.getMessage());
-        }
-    }
 
     /**
      * CAP-41 M3 工作日志空间远端备份（手动触发）：把持久工作区 push 到用户绑定的远端仓库。
@@ -593,7 +570,8 @@ public class RunnerWorkspace {
      * <p>URL 口径同 GitRemoteOps：仅 http/https（token 内嵌注入）与 file://（本地/测试，
      * token 忽略）；ssh 明确报错。</p>
      *
-     * @param dir       持久工作区（须已 git init，见 {@link #prepareWorklog}）
+     * @param dir       持久工作区（须含 .git——CAP-74 起 prepareWorklog 不再 init，
+     *                  本方法仅服务存量 git 空间与旧服务端帧，M3 统一下线）
      * @param remoteUrl 远端仓库 URL（不含凭证）
      * @param branch    目标分支（空 = main）
      * @param token     PAT（可空 = 匿名/file://；仅进程参数，输出经 sanitize）
@@ -1157,9 +1135,9 @@ public class RunnerWorkspace {
         }
     }
 
-    /** worklog 空间骨架：目录契约说明 + daily/weekly/entries 占位。 */
-    /** worklog 空间 .gitignore：平台托管文件（上下文装配/物化设置/回传产物）不入库，
-     *  否则 agent 按 README「git add -A」会把它提交并随远端备份推上公网仓库。
+    /** worklog 空间骨架：目录契约说明 + daily/weekly/entries 占位。幂等——已存在的文件一律不覆盖。 */
+    /** worklog 空间 .gitignore：平台托管文件（上下文装配/物化设置/回传产物）不入库——CAP-74 起
+     *  草稿区不再维护 git，规则主要服务存量 git 空间（.devmind/ 回传产物等仍不该被手工提交推走）。
      *  CLAUDE.md 是 CAP-34 旧注入落点（现为 {@link ContextMaterializer#INJECTION_FILE}），
      *  存量空间可能已提交过，规则保留。 */
     private static final String WORKLOG_GITIGNORE = String.join("\n",
@@ -1173,26 +1151,32 @@ public class RunnerWorkspace {
         String readme = """
                 # 工作日志空间
 
-                本目录由 DevMind runner 托管（本地 git 维护；远端备份由管控台「推送远端」统一执行，agent 不自行 push）。
+                本目录由 DevMind runner 托管，是纯草稿工作目录（CAP-74 起不再维护 git 仓库，
+                无需 commit/push）。日报/周报的事实源是管控台服务端仓：成稿写进 `.devmind/output/`
+                即自动回传写仓，「推送远端」备份由服务端直接执行。
 
                 ## 目录契约
-                - `daily/yyyy-MM-dd.md`   日报（一天一份）
-                - `weekly/yyyy-Www.md`    周报（ISO 周，如 2026-W37）
+                - `daily/yyyy-MM-dd.md`   日报草稿（一天一份）
+                - `weekly/yyyy-Www.md`    周报草稿（ISO 周，如 2026-W37）
                 - `entries/`              工作条目素材（可选）
-                - `.devmind/output/`      会话成稿回传目录（写这里的内容会自动回传管控台落库）
-
-                改动完成后请 `git add -A && git commit`。
+                - `.devmind/output/`      会话成稿回传目录（写这里的内容会自动回传管控台写入服务端仓）
                 """;
         try {
-            Files.writeString(dir.resolve("README.md"), readme, StandardCharsets.UTF_8);
-            Files.writeString(dir.resolve(".gitignore"), WORKLOG_GITIGNORE, StandardCharsets.UTF_8);
+            writeIfAbsent(dir.resolve("README.md"), readme);
+            writeIfAbsent(dir.resolve(".gitignore"), WORKLOG_GITIGNORE);
             for (String sub : new String[]{"daily", "weekly", "entries"}) {
                 Path d = dir.resolve(sub);
                 Files.createDirectories(d);
-                Files.writeString(d.resolve(".gitkeep"), "", StandardCharsets.UTF_8);
+                writeIfAbsent(d.resolve(".gitkeep"), "");
             }
         } catch (IOException e) {
             throw new IllegalStateException("写 worklog 骨架文件失败: " + dir, e);
+        }
+    }
+
+    private static void writeIfAbsent(Path file, String content) throws IOException {
+        if (!Files.exists(file)) {
+            Files.writeString(file, content, StandardCharsets.UTF_8);
         }
     }
 

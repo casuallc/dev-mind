@@ -718,16 +718,24 @@ class RunnerWorkspaceTest {
         git(seed, "push", "origin", "main");
     }
 
+    /** CAP-74 起 prepareWorklog 不再 git init；pushWorklog 仅服务存量 git 空间，测试自行初始化 */
+    private static void initLegacyGitSpace(Path dir) throws Exception {
+        git(dir, "init", "-b", "main");
+        git(dir, "add", "-A");
+        git(dir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init");
+    }
+
     @Test
     void worklogPushLifecycle() throws Exception {
         // CAP-41 M3：file:// bare 库当远端（匿名通道），覆盖 绑定 origin → 首次 push →
-        // 增量 push → up-to-date → ssh 拒绝
+        // 增量 push → up-to-date → ssh 拒绝（CAP-74 起 pushWorklog 仅服务存量 git 空间，M3 下线）
         Path origin = tmp.resolve("worklog-origin.git");
         git(tmp, "init", "--bare", "-b", "main", origin.toString());
 
         RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
         Path dir = ws.prepareWorklog(tmp.resolve("worklog"), "alice");
-        assertTrue(Files.isDirectory(dir.resolve(".git")));
+        assertFalse(Files.exists(dir.resolve(".git")), "CAP-74 起为纯草稿区，不再 git init");
+        initLegacyGitSpace(dir); // 模拟 CAP-74 前的存量 git 空间
 
         // 首次 push：origin 幂等绑定 + main 分支建立，骨架提交上远端
         RunnerWorkspace.WorklogPushOutcome first =
@@ -767,6 +775,7 @@ class RunnerWorkspaceTest {
 
         RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
         Path dir = ws.prepareWorklog(tmp.resolve("worklog-d"), "carol");
+        initLegacyGitSpace(dir);
         RunnerWorkspace.WorklogPushOutcome first =
                 ws.pushWorklog(dir, origin.toUri().toString(), "main", null);
         assertEquals(0, first.exit(), first.output());
@@ -810,6 +819,7 @@ class RunnerWorkspaceTest {
 
         RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
         Path dir = ws.prepareWorklog(tmp.resolve("worklog-u"), "dave");
+        initLegacyGitSpace(dir);
         RunnerWorkspace.WorklogPushOutcome r =
                 ws.pushWorklog(dir, origin.toUri().toString(), "main", null);
         assertEquals(0, r.exit(), r.output());
@@ -822,6 +832,7 @@ class RunnerWorkspaceTest {
     void worklogPushNeverLeaksToken() throws Exception {
         RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
         Path dir = ws.prepareWorklog(tmp.resolve("worklog"), "bob");
+        initLegacyGitSpace(dir);
         // 打不通的 https 远端 + token：失败输出不得含 token 明文/URL 编码形态
         RunnerWorkspace.WorklogPushOutcome r = ws.pushWorklog(
                 dir, "https://127.0.0.1:1/x/y.git", "main", "tok+abc123");
@@ -833,14 +844,22 @@ class RunnerWorkspaceTest {
     }
 
     @Test
-    void worklogSkeletonGitignoresPlatformFiles() throws Exception {
+    void worklogSkeletonMaterializesWithoutGit() throws Exception {
+        // CAP-74：草稿区幂等物化骨架但不再 git init/commit；.gitignore 规则留给存量 git 空间
         RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
         Path dir = ws.prepareWorklog(tmp.resolve("worklog"), "alice");
-        // 骨架含 .gitignore 且随骨架 commit 入库（忽略规则随远端备份一起走）
-        assertTrue(Files.exists(dir.resolve(".gitignore")));
-        assertEquals("", gitOut(dir, "status", "--porcelain"));
-        assertFalse(gitOut(dir, "ls-files", ".gitignore").isBlank());
-        // 平台托管文件（上下文装配/物化设置/回传产物）被忽略：agent「git add -A」扫不进仓库
+        assertFalse(Files.exists(dir.resolve(".git")), "纯草稿区不再 git init");
+        assertTrue(Files.readString(dir.resolve("README.md")).contains("工作日志空间"));
+        assertTrue(Files.readString(dir.resolve(".gitignore")).contains(".devmind/"));
+        for (String sub : new String[]{"daily", "weekly", "entries"}) {
+            assertTrue(Files.exists(dir.resolve(sub).resolve(".gitkeep")), sub);
+        }
+        // 幂等复用：已存在（含用户改过）的文件不被覆盖
+        Files.writeString(dir.resolve("README.md"), "# 我自己的说明");
+        ws.prepareWorklog(tmp.resolve("worklog"), "alice");
+        assertEquals("# 我自己的说明", Files.readString(dir.resolve("README.md")));
+        // 存量 git 空间语义：init 后平台托管文件仍被 .gitignore 挡住（agent 误「git add -A」扫不进）
+        git(dir, "init", "-b", "main");
         Files.writeString(dir.resolve(ContextMaterializer.INJECTION_FILE), "<!-- 注入块 -->");
         Files.writeString(dir.resolve("CLAUDE.md"), "<!-- 旧注入落点（CAP-34） -->");
         Files.createDirectories(dir.resolve(".claude"));
@@ -848,7 +867,11 @@ class RunnerWorkspaceTest {
         Files.createDirectories(dir.resolve(".devmind").resolve("output"));
         Files.writeString(dir.resolve(".devmind").resolve("output").resolve("daily-2026-09-16.md"), "# 日报");
         git(dir, "add", "-A");
-        assertEquals("", gitOut(dir, "status", "--porcelain"));
+        String status = gitOut(dir, "status", "--porcelain");
+        assertFalse(status.contains(".devmind"), status);
+        assertFalse(status.contains(ContextMaterializer.INJECTION_FILE), status);
+        assertFalse(status.contains("CLAUDE.md"), status);
+        assertFalse(status.contains("settings.local.json"), status);
     }
 
     @Test
@@ -867,8 +890,8 @@ class RunnerWorkspaceTest {
         assertTrue(merged.startsWith("custom-rule\n"), merged);
         assertTrue(merged.contains(ContextMaterializer.INJECTION_FILE), merged);
         assertTrue(merged.contains(".devmind/"), merged);
-        // 补写只对 .gitignore 代提交 → 空间仍然干净（否则下次 agent 会连脏状态一起带走）
-        assertEquals("", gitOut(dir, "status", "--porcelain"));
+        // 补写只对 .gitignore 代提交（CAP-74 起骨架幂等物化会产生未跟踪占位文件，不计入该断言）
+        assertFalse(gitOut(dir, "ls-files", ".gitignore").isBlank());
     }
 
     @Test
@@ -1030,6 +1053,7 @@ class RunnerWorkspaceTest {
             Path wlOrigin = tmp.resolve("proxy-worklog-origin.git");
             git(tmp, "init", "--bare", "-b", "main", wlOrigin.toString());
             Path dir = ws.prepareWorklog(tmp.resolve("worklog"), "carol");
+            initLegacyGitSpace(dir);
             RunnerWorkspace.WorklogPushOutcome push =
                     ws.pushWorklog(dir, wlOrigin.toUri().toString(), "main", null);
             assertEquals(0, push.exit(), push.output());

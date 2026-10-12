@@ -280,7 +280,7 @@ public class AgentRunnerMain {
             case "kill", "suspend" -> sessions.kill(sessionId);
             case "upgrade" -> handleUpgrade(frame, config, configFile, sessions, conn);
             case "collect_output" -> handleCollectOutput(sessionId, config, sessions, conn);
-            case "worklog_push" -> handleWorklogPush(frame, config, workspace, conn);
+            case "worklog_push" -> handleWorklogPush(frame, conn);
             case "workspace_finalize" -> handleWorkspaceFinalize(frame, config, sessions, workspace, conn);
             case "workspace_release" -> handleWorkspaceRelease(frame, sessions, workspace, conn);
             case "workspace_query" -> queryHandler.handle(frame); // CAP-54：工作区只读查询
@@ -484,16 +484,14 @@ public class AgentRunnerMain {
                 log.info("问答沙箱就绪: session={} cwd={}", sessionId, workDir);
             } else if ("worklog".equals(kind)) {
                 // CAP-41：工作日志持久工作区——{worklogRoot}/<owner>/（默认 {user.home}/worklog），
-                // 同一用户的会话共享同一目录（幂等复用，首次 git init + 骨架 commit）；
-                // 永不删除、无 push，finalizer 只查未提交改动上报告警
+                // 同一用户的会话共享同一目录（幂等复用）；CAP-74 起为纯草稿区（无 git init/commit、
+                // 无收口检查），永不删除、无 push、无 finalizer
                 String owner = frame.path("worklogOwner").asText("");
                 if (owner.isBlank()) {
                     throw new IllegalStateException("worklog 会话缺少 worklogOwner（服务端组帧缺失）");
                 }
                 workDir = workspace.prepareWorklog(config.resolvedWorklogRoot(), owner);
                 sessionDir = workDir;
-                Path wlDir = workDir;
-                finalizer = sid -> workspace.finishWorklog(wlDir, msg -> sessions.reportSystem(sid, msg));
                 log.info("worklog 工作区就绪: session={} owner={} cwd={}", sessionId, owner, workDir);
             } else if (reposNode.isArray() && reposNode.size() > 1) {
                 // CAP-31 多库会话：repos 数组 >1 → 聚合目录模式（cwd=聚合根，各库子目录 <name>/）
@@ -646,51 +644,15 @@ public class AgentRunnerMain {
     }
 
     /**
-     * CAP-41 M3：worklog 远端备份（手动触发）——对持久工作区 {worklogRoot}/<owner>/ 执行
-     * git push（origin 幂等绑定 cleanUrl、push HEAD:branch）。虚拟线程异步执行，不阻塞
-     * WS listener（push 上限 300s）；token 仅内存持有，ack 输出已由 pushWorklog sanitize。
+     * CAP-74：worklog 远端备份已服务端化（服务端仓 fetch+merge+push 直推，见
+     * WorklogRemoteBackupService），runner 侧不再执行任何 git 操作。协议帧保留兼容
+     * （CAP-74 前的旧服务端可能仍下发）：直接回 ok ack，detail 说明去向。
+     * RunnerWorkspace.pushWorklog 本体留 M3 统一下线。
      */
-    private static void handleWorklogPush(JsonNode frame, RunnerConfig config,
-                                          RunnerWorkspace workspace, ServerConnection conn) {
+    private static void handleWorklogPush(JsonNode frame, ServerConnection conn) {
         String requestId = frame.path("requestId").asText("");
-        String owner = frame.path("worklogOwner").asText("");
-        String remoteUrl = frame.path("remoteUrl").asText("");
-        String branch = frame.path("branch").asText("");
-        String token = frame.path("token").asText(null);
-        // v23：自动合并署名（可选字段，缺席/空 = 回退内置 devmind 署名）
-        String gitName = frame.path("gitAuthorName").asText("");
-        String gitEmail = frame.path("gitAuthorEmail").asText("");
-        GitAuthor operator = gitName.isBlank() && gitEmail.isBlank() ? null
-                : new GitAuthor(gitName, gitEmail);
-        Thread.ofVirtual().name("worklog-push-" + requestId).start(() -> {
-            Map<String, Object> ack = new java.util.LinkedHashMap<>();
-            ack.put("type", "worklog_push_ack");
-            ack.put("requestId", requestId);
-            try {
-                // owner 白名单 + 越界防护（与 RunnerWorkspace.prepareWorklog 同口径）
-                if (!owner.matches("[a-zA-Z0-9._-]+")) {
-                    throw new IllegalStateException("非法 worklog 归属用户名: " + owner);
-                }
-                Path root = config.resolvedWorklogRoot().toAbsolutePath().normalize();
-                Path dir = root.resolve(owner).normalize();
-                if (!dir.startsWith(root)) {
-                    throw new IllegalStateException("worklog 工作区路径越界: " + owner);
-                }
-                RunnerWorkspace.WorklogPushOutcome r = workspace.pushWorklog(dir, remoteUrl, branch, token, operator);
-                if (r.exit() == 0) {
-                    ack.put("ok", true);
-                    ack.put("detail", r.output());
-                } else {
-                    ack.put("ok", false);
-                    ack.put("error", r.output());
-                }
-            } catch (Exception e) {
-                log.warn("worklog 远端备份失败: owner={} err={}", owner, e.getMessage());
-                ack.put("ok", false);
-                ack.put("error", String.valueOf(e.getMessage()));
-            }
-            conn.send(ack);
-        });
+        conn.send(Map.of("type", "worklog_push_ack", "requestId", requestId, "ok", true,
+                "detail", "CAP-74 起工作日志推送由服务端直推，runner 侧为 no-op（帧已废弃）"));
     }
 
     /**
