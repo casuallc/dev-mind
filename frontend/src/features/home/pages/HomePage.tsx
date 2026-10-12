@@ -1,5 +1,5 @@
 // 个人工作台首页（/home）：约定骨架单 Card——title=工作台+概览/用量 Segmented，extra=快捷操作。
-// 概览视图：问候行 + 统计带（进行中会话/未读通知/今日成本/今日 tokens）+ 双栏列表（进行中会话/未读通知）。
+// 概览视图：问候行 + 统计带（进行中会话/未读通知/今日回合/今日 tokens）+ 双栏列表（进行中会话/未读通知）。
 // 用量视图：嵌入 CAP-67 UsagePage（?view=usage 深链，/usage 重定向至此）。各数据源独立加载、失败静默置空。
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { Button, Card, Col, Empty, List, Row, Segmented, Space, Statistic, Tag, Typography } from 'antd'
@@ -18,7 +18,7 @@ import type { SessionSummary } from '../../sessions/types'
 import { ACTIVE_STATES, stateColor } from '../../../shared/chat/stateMeta'
 import { listNotifications, unreadCount } from '../../notifications/api'
 import type { AppNotification } from '../../notifications/types'
-import { fmtCost, fmtTime, fmtTokens } from '../../../shared/utils/format'
+import { fmtTime, fmtTokens } from '../../../shared/utils/format'
 import { pageCardBodyScrollStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import UsagePage from '../../usage/UsagePage'
 import { getUsageSummary } from '../../usage/api'
@@ -68,7 +68,7 @@ export default function HomePage() {
   const stats = [
     { title: '进行中会话', value: activeSessions.length, suffix: '个' },
     { title: '未读通知', value: unread, suffix: '条' },
-    { title: '今日成本', value: fmtCost(todayUsage?.costUsd ?? 0) },
+    { title: '今日回合', value: todayUsage?.turnCount ?? 0, suffix: '次' },
     {
       title: '今日 tokens',
       value: fmtTokens((todayUsage?.inputTokens ?? 0) + (todayUsage?.outputTokens ?? 0)),

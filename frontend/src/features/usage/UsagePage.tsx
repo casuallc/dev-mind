@@ -10,7 +10,7 @@ import { useNavigate } from 'react-router-dom'
 import { listUsers } from '../auth/api'
 import type { AuthUser } from '../auth/types'
 import { isAdmin } from '../auth/authStore'
-import { fmtCost, fmtTime, fmtTokens } from '../../shared/utils/format'
+import { fmtTime, fmtTokens } from '../../shared/utils/format'
 import { LIST_PAGINATION } from '../../shared/utils/table'
 import { getUsageBreakdown, getUsageDaily, getUsageSummary, getUsageTop } from './api'
 import type { UsageFilter } from './api'
@@ -34,17 +34,18 @@ function rangeFilter(range: RangeKey): UsageFilter & { days: number } {
 
 const tokenSum = (r: { inputTokens: number; outputTokens: number }) => r.inputTokens + r.outputTokens
 
-/** 纯 div 柱状图：无图表库依赖；每根柱 Tooltip 显示当日数值 */
-function DailyBars({ points, metric }: { points: UsageDailyPoint[]; metric: 'cost' | 'tokens' }) {
-  const values = points.map(p => (metric === 'cost' ? p.costUsd : p.tokens))
+/** 纯 div 柱状图：无图表库依赖；每根柱 Tooltip 显示当日数值（另一指标附在括号里） */
+function DailyBars({ points, metric }: { points: UsageDailyPoint[]; metric: 'tokens' | 'turns' }) {
+  const values = points.map(p => (metric === 'tokens' ? p.tokens : p.turns))
   const max = Math.max(...values, 0)
-  const fmt = metric === 'cost' ? fmtCost : fmtTokens
+  const tip = (p: UsageDailyPoint, v: number) =>
+    metric === 'tokens' ? `${p.date}：${fmtTokens(v)}（${p.turns} 回合）` : `${p.date}：${v} 回合（${fmtTokens(p.tokens)}）`
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 160, paddingTop: 8 }}>
       {points.map((p, i) => (
         <Tooltip
           key={p.date}
-          title={`${p.date}：${fmt(values[i])}（${p.turns} 回合）`}
+          title={tip(p, values[i])}
         >
           <div style={{ flex: 1, minWidth: 4, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%' }}>
             <div
@@ -74,7 +75,7 @@ export default function UsagePage() {
   const [loading, setLoading] = useState(false)
   const [summary, setSummary] = useState<UsageSummary | null>(null)
   const [daily, setDaily] = useState<UsageDailyPoint[]>([])
-  const [metric, setMetric] = useState<'cost' | 'tokens'>('cost')
+  const [metric, setMetric] = useState<'tokens' | 'turns'>('tokens')
   const [dim, setDim] = useState<UsageDim | 'top'>('requirement')
   const [rows, setRows] = useState<UsageBreakdownRow[]>([])
   const [topRows, setTopRows] = useState<UsageTopRow[]>([])
@@ -133,7 +134,6 @@ export default function UsagePage() {
       { title: '会话数', dataIndex: 'sessionCount', width: 90, align: 'right' },
       { title: '问答数', dataIndex: 'chatCount', width: 90, align: 'right' },
       { title: '回合', dataIndex: 'turnCount', width: 90, align: 'right' },
-      { title: '成本', dataIndex: 'costUsd', width: 110, align: 'right', render: (v: number) => fmtCost(v) },
       {
         title: '总 tokens', key: 'tokens', width: 110, align: 'right',
         render: (_, r) => fmtTokens(tokenSum(r)),
@@ -168,7 +168,6 @@ export default function UsagePage() {
     { title: '模型', dataIndex: 'model', width: 140, ellipsis: true, render: (v: string | null) => v || '默认' },
     { title: '创建人', dataIndex: 'createdBy', width: 110, render: (v: string | null) => v || '-' },
     { title: '回合', dataIndex: 'turnCount', width: 80, align: 'right' },
-    { title: '成本', dataIndex: 'costUsd', width: 100, align: 'right', render: (v: number) => fmtCost(v) },
     {
       title: '总 tokens', key: 'tokens', width: 100, align: 'right',
       render: (_, r) => fmtTokens(tokenSum(r)),
@@ -203,12 +202,22 @@ export default function UsagePage() {
         >
           {summary && (
             <Row gutter={[24, 16]}>
-              <Col flex="auto"><Statistic title="总成本" value={fmtCost(summary.costUsd)} /></Col>
               <Col flex="auto"><Statistic title="总 tokens" value={fmtTokens(summary.inputTokens + summary.outputTokens)} /></Col>
               <Col flex="auto"><Statistic title="输入" value={fmtTokens(summary.inputTokens)} /></Col>
               <Col flex="auto"><Statistic title="输出" value={fmtTokens(summary.outputTokens)} /></Col>
               <Col flex="auto"><Statistic title="缓存读" value={fmtTokens(summary.cacheReadTokens)} /></Col>
               <Col flex="auto"><Statistic title="缓存写" value={fmtTokens(summary.cacheCreationTokens)} /></Col>
+              {/* 缓存命中率 = 缓存读/(输入+缓存读)，前端派生零后端改动；分母 0（无记录）显示 - */}
+              <Col flex="auto">
+                <Statistic
+                  title="缓存命中率"
+                  value={
+                    summary.inputTokens + summary.cacheReadTokens > 0
+                      ? `${((summary.cacheReadTokens / (summary.inputTokens + summary.cacheReadTokens)) * 100).toFixed(1)}%`
+                      : '-'
+                  }
+                />
+              </Col>
               <Col flex="auto"><Statistic title="回合" value={summary.turnCount} /></Col>
               <Col flex="auto"><Statistic title="会话数" value={summary.sessionCount} /></Col>
               <Col flex="auto"><Statistic title="问答数" value={summary.chatCount} /></Col>
@@ -219,9 +228,9 @@ export default function UsagePage() {
         <Card
           title={
             <Segmented
-              options={[{ label: '成本', value: 'cost' }, { label: 'Tokens', value: 'tokens' }]}
+              options={[{ label: 'Tokens', value: 'tokens' }, { label: '请求数', value: 'turns' }]}
               value={metric}
-              onChange={v => setMetric(v as 'cost' | 'tokens')}
+              onChange={v => setMetric(v as 'tokens' | 'turns')}
             />
           }
         >

@@ -50,15 +50,8 @@ export function fmtTokens(n: number | null | undefined): string {
   return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
 }
 
-/** 美元成本 → '$0.0123' / '$1.24'（用量账本；小额保 4 位，避免一片 $0.00） */
-export function fmtCost(n: number | null | undefined): string {
-  if (n == null) return '-'
-  if (n <= 0) return '$0'
-  if (n < 0.01) return `$${n.toFixed(4)}`
-  return `$${n.toFixed(2)}`
-}
-
-/** 会话/问答用量一句话 → '3 回合 · $0.04 · 1.5k tok'；无任何记录返回 ''（历史行不显示） */
+/** 会话/问答用量一句话 → '3 回合 · 1.5k tok'；无任何记录返回 ''（历史行不显示）。
+ * 成本段已移除：订阅/中继场景成本失真，只去展示不删入账。 */
 export function usageText(u: {
   turnCount?: number | null
   costUsd?: number | null
@@ -70,7 +63,6 @@ export function usageText(u: {
   if (turns <= 0 && (u.costUsd == null || u.costUsd <= 0) && tokens <= 0) return ''
   const parts: string[] = []
   if (turns > 0) parts.push(`${turns} 回合`)
-  if (u.costUsd != null && u.costUsd > 0) parts.push(fmtCost(u.costUsd))
   if (tokens > 0) parts.push(`${fmtTokens(tokens)} tok`)
   return parts.join(' · ')
 }
