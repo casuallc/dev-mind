@@ -86,6 +86,7 @@
 | [CAP-71](CAP-71-agent-audit-log.md) | Agent 节点审计日志 | 底座 | 连接日志升级为节点域全量审计（agent_audit_logs 九分类：连接/隧道/指令/代理逐条含字节耗时/上下文包/文件中转/规则/包/节点运维），旁路落库不阻塞主流程，服务端真分页+分类/节点/结果/关键词过滤，保留期 devmind.agent.audit-retention-days 默认 180 天可配；ServerTunnelStream 补统一终结点顺带修正常收尾不摘表缺口 |
 | [CAP-72](CAP-72-pipeline-project-switches.md) | 执行链自动化项目级开关 | 底座 | CAP-17 恒开的「WI DONE→自动构建→自动部署 TEST」加项目级开关（projects.auto_build_on_wi_done / auto_deploy_test_on_build，默认关、getter 兜底 false、不加 @ColumnDefault），PipelineOrchestrator 两处入口静默闸门；生产部署/发版仍永远人工；与已有 auto_regression_on_deploy 同处项目表单 |
 | [CAP-73](CAP-73-requirement-indev-verification.md) | 需求开发中验证 | 流程层 | 验证前移到开发中且走增量补丁（非全量流水线）：agent 自主触发（限额/互斥兜底）「推送 feature/req-<id> HEAD → 增量构建 → 变更文件补丁覆盖既有环境部署目录（前后钩子夹住停启服）→ 冒烟」，PROD 禁绑；结果回灌进行中会话供 agent 前置迭代；需求详情页验证 Tab + 人工同链触发，收口弹窗展示最近验证状态（不门禁） |
+| [CAP-74](CAP-74-worklog-server-git-repo.md) | 工作日志事实源服务端化 | 组装层 | 消除「runner 文件⇄DB 镜像」单向同步的结构性分叉：事实源收敛为服务端本地 git 仓（JGit 单写者收口，不碰 CAP-34 红线），DB 报告表与 DRAFT/CONFIRMED 状态机退役（防覆盖=自动路径不覆盖已有文件+force 显式+git log 回溯）；按仓建模（个人仓=成员 1 的团队仓，per-user 子目录路径不相交零冲突），远端备份改服务端 push（CAP-70 出口规则接入），平台外编辑合法输入（写前 fetch+merge、冲突 fail-visible）；否决 index.json 派生索引（文件名+git log+commit trailer 全覆盖） |
 
 ## 依赖关系
 
@@ -161,6 +162,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-70 服务端出口反向隧道依赖 CAP-21/34/43/65：「服务端在外网、代码在内网」部署形态下服务端直连类功能（GitRemoteOps 克隆/fetch/diff/push、Integration REST、书签探测）的通用解法——runner 出向建专用隧道 WS（独立于控制通道、流多路复用+窗口流控，协议 v21），服务端本机落成 127.0.0.1 SOCKS5 端点，平台级 `egress_rules` host glob 规则表（服务端 DB 权威、即白名单，runner 持快照二次校验）逐请求选出口；git 走 `-c http.<url>.proxy=socks5h://`（DNS 在 runner 侧解析）、Java 连接器挂规则驱动 ProxySelector；命中规则但隧道离线快速失败禁静默回落，无规则=功能关闭零行为变化；与 CAP-43（runner→外网）正交可叠加。
 - CAP-71 节点审计日志演进自 CAP-21 FR-01（连接流水），覆盖 CAP-34/36/42/54/57/58/59/65/70 的全部节点交互面：新表 `agent_audit_logs` 九分类旁路落库（同步 repo.save try-catch 降级，不引队列），代理转发在 `ServerTunnelStream` 统一终结点逐条记字节/耗时；查询走 `/api/agent-nodes/audit-logs`（PageView 真分页 + 关键词四列 lower like），保留期 `devmind.agent.audit-retention-days` 默认 180 天；旧 `agent_conn_logs` 变死表可手工 DROP。
 - CAP-73 需求开发中验证依赖 CAP-13/51（需求模型与 `feature/req-<id>` 分支口径）、CAP-08/10/12（构建/测试执行器与底座，编排落 devmind-flow 循 CAP-17 先例；**不依赖 CAP-09**——补丁更新不走部署计划）、CAP-34/36（ContextPackage 物化 agent 触发助手 + exec 帧文件下发/钩子执行）、CAP-26/06/72：把验证从「需求收口后的全量流水线」前移到「开发过程中的增量补丁」——agent 自主触发需求分支增量构建、变更文件经 manifest 比对覆盖到需求绑定的既有环境部署目录（PROD 禁绑守 CAP-17 红线）+ 更新钩子 + 冒烟，结果回灌进行中会话形成 AI 快速迭代闭环；`verify_runs` 新表追溯，项目级开关默认关 + 日配额限额。
+- CAP-74 工作日志事实源服务端化依赖 CAP-41（生成会话链路与模板，重构其存储/同步口径）、CAP-28（条目/git 扫描素材源不动）、CAP-29/35（服务端 JGit 与个人 PAT 凭证链）、CAP-70（push 出口规则接入）、CAP-37（outputs 回传消费点改仓写入）：事实源从 runner 持久工作区收敛为服务端本地 git 仓（`WorklogRepoService` 单写者 + 仓级锁），消除「手改不进 git / DRAFT 被镜像冲掉」的双数据源分叉；DB 报告表迁移后退役、DRAFT/CONFIRMED 状态机删除（保存即生效，自动生成文件已存在即跳过）；runner 侧目录降级为会话草稿区、节点离线不再阻塞日志页读写与推送（亲和红线松绑）；按仓建模支持团队共享仓（per-user 子目录 + 各人 PAT 署名推送），commit message trailer（DevMind-Source/Session）承载来源审计。
 
 ## 组装方式（后续流程层）
 
