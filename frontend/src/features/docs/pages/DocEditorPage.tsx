@@ -343,6 +343,16 @@ export default function DocEditorPage() {
               </Space>
             }
           >
+            {/* 版本历史（置顶，与基础信息同卡） */}
+            <Typography.Text strong style={{ fontSize: 13 }}>版本历史</Typography.Text>
+            <Table
+              size="small"
+              rowKey="versionNo"
+              columns={versionColumns}
+              dataSource={versions}
+              pagination={{ pageSize: 5, showSizeChanger: false, showTotal: (total) => `共 ${total} 个版本` }}
+              style={{ marginTop: 8, marginBottom: 12 }}
+            />
             <Space style={{ marginBottom: 8 }} wrap>
               {statusTag(doc.status)}
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -390,16 +400,6 @@ export default function DocEditorPage() {
             </Card>
           )}
 
-          {/* 版本历史 */}
-          <Card size="small" title="版本历史">
-            <Table
-              size="small"
-              rowKey="versionNo"
-              columns={versionColumns}
-              dataSource={versions}
-              pagination={false}
-            />
-          </Card>
         </>
       )}
 
