@@ -257,9 +257,12 @@ public class UsageStatsService {
                     c.getCreatedAt(), nz(c.getTurnCount()), nz(c.getCostUsd()), nz(c.getInputTokens()),
                     nz(c.getOutputTokens()), nz(c.getCacheReadTokens()), nz(c.getCacheCreationTokens())));
         }
-        // 内存合并排序与 topByTokens 同键（input+output+cacheRead），勿改回成本
+        // 内存合并排序与 topByTokens 同键（input+output+cacheRead desc, createdAt desc），勿改回成本；
+        // 缺 createdAt 决胜键时稳定排序会让 SESSION 块恒压 CHAT 块（同 tokens 时问答必垫底）
         rows.sort(Comparator.comparingLong(
-                (UsageTopRow r) -> r.inputTokens() + r.outputTokens() + r.cacheReadTokens()).reversed());
+                        (UsageTopRow r) -> r.inputTokens() + r.outputTokens() + r.cacheReadTokens()).reversed()
+                .thenComparing(UsageTopRow::createdAt,
+                        Comparator.nullsLast(Comparator.reverseOrder())));
         rows = rows.stream().limit(limit).collect(Collectors.toCollection(ArrayList::new));
         // 需求标题补全（内存 join，不 N+1）
         Map<String, String> titles = requirementRepo.findAllById(rows.stream()
