@@ -50,6 +50,18 @@ class AgentOutputControllerTest {
     }
 
     @Test
+    void acceptsCjkFileNames() {
+        when(nodeService.resolveByToken("tok")).thenReturn(Optional.of(new AgentNodeEntity()));
+        List<SessionOutputSink.OutputFile> captured = new ArrayList<>();
+        SessionOutputSink sink = (sessionId, files) -> captured.addAll(files);
+        AgentOutputController ctl = new AgentOutputController(nodeService, providerOf(sink));
+        ctl.upload("s1", "tok", new OutputUploadRequest(List.of(
+                new FileItem("20261012-复扫报告处理状态.md", "# 处理状态"))));
+        assertEquals(1, captured.size());
+        assertEquals("20261012-复扫报告处理状态.md", captured.get(0).fileName());
+    }
+
+    @Test
     void rejectsOversizedOrBadName() {
         when(nodeService.resolveByToken("tok")).thenReturn(Optional.of(new AgentNodeEntity()));
         AgentOutputController ctl = new AgentOutputController(nodeService,

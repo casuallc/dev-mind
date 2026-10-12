@@ -40,8 +40,16 @@ public final class OutputUploader {
     private static final long MAX_TOTAL_BYTES = 4L * 1_048_576;
     /** 契约目录（同步于服务端 FlowOutputContract.OUTPUT_DIR，runner 不依赖 flow 模块） */
     private static final String OUTPUT_DIR = ".devmind/output";
+    /** 文件名白名单（与服务端 AgentOutputController.NAME_PATTERN 对齐）：Unicode 字母/数字 + . _ -，防路径逃逸 */
+    private static final java.util.regex.Pattern NAME_PATTERN =
+            java.util.regex.Pattern.compile("[\\p{L}\\p{N}._-]{1,64}");
 
     private OutputUploader() {
+    }
+
+    /** 产出文件名合法性（白名单内 = 可回传；中文文件名合法，路径分隔符/控制符非法） */
+    static boolean isValidOutputName(String name) {
+        return name != null && NAME_PATTERN.matcher(name).matches();
     }
 
     /**
@@ -57,7 +65,13 @@ public final class OutputUploader {
         List<Path> files;
         try (Stream<Path> s = Files.list(dir)) {
             files = s.filter(Files::isRegularFile)
-                    .filter(p -> p.getFileName().toString().matches("[A-Za-z0-9._-]{1,64}"))
+                    .filter(p -> {
+                        if (isValidOutputName(p.getFileName().toString())) {
+                            return true;
+                        }
+                        log.warn("产出文件名不在白名单，跳过回传: {}", p.getFileName());
+                        return false;
+                    })
                     .sorted()
                     .limit(MAX_FILES + 1L)
                     .toList();

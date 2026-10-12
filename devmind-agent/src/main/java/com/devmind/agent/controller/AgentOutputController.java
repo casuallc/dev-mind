@@ -30,9 +30,9 @@ public class AgentOutputController {
     static final int MAX_FILE_CHARS = 1_048_576;
     /** 单次上传文件数上限 */
     static final int MAX_FILES = 16;
-    /** 文件名白名单（纯文件名，防路径逃逸） */
+    /** 文件名白名单（纯文件名，防路径逃逸）：Unicode 字母/数字 + . _ -（中文产出文件名合法） */
     private static final java.util.regex.Pattern NAME_PATTERN =
-            java.util.regex.Pattern.compile("[A-Za-z0-9._-]{1,64}");
+            java.util.regex.Pattern.compile("[\\p{L}\\p{N}._-]{1,64}");
 
     private final AgentNodeService nodeService;
     private final ObjectProvider<SessionOutputSink> outputSink;

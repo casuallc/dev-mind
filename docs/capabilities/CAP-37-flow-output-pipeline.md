@@ -30,7 +30,8 @@
   `SessionOutputSink` SPI 落 `session_outputs` 表（同 sessionId+fileName 覆盖）。
   上传失败不阻塞 exit 帧（log + system 事件告知）；老 runner 不上传时服务端走既有降级通知。
   纯 HTTP 旁路通道，AgentProtocol 不升版。限制：单文件 ≤1MB、文件数 ≤16、总量 ≤4MB、
-  文件名白名单 `[A-Za-z0-9._-]{1,64}`。
+  文件名白名单 `[\p{L}\p{N}._-]{1,64}`（Unicode 字母/数字 + `.` `_` `-`，中文文件名合法，
+  路径分隔符仍拒；2026-10-12 由 ASCII 白名单放宽，runner 对名单外文件记 warn 不再静默丢弃）。
 - **FR-02 分析产出文档化**：docs 新增 `kind=analysis`；分析会话 DONE 且产出存在时，
   流程引擎把 analysis.md 落成该需求的分析文档（**重新分析走既有文档版本化**，不新建第二份），
   ANALYSIS 产物 ref 由本地文件路径改为 docId；通知指向「流程」Tab。
