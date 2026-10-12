@@ -1,6 +1,8 @@
 # CAP-74 工作日志事实源服务端化（服务端 git 仓 + 去镜像去状态机 + 团队共享仓）
 
 > 能力 ID：CAP-74 ｜ 分类：组装层 ｜ 状态：**需求定稿（待实现）** ｜ 日期：2026-10-12
+> （2026-10-12 评审修订：技术选型定稿 git CLI 否决 JGit、M1 纳入最小服务端 push、
+> 补 active_repo_key 写入路由、迁移幂等判据与冲突解决 API、周报文件名定稿 yyyy-Www）
 > 重构 CAP-41 的存储与同步链路；条目管理/git 扫描导入（CAP-28 FR-03/04）、模板（CAP-41 FR-05）、
 > 生成会话链路（CAP-41 FR-03/04）保留为素材源与生成通道不动。
 
@@ -21,15 +23,20 @@ CAP-41 定了「runner 工作区文件 = 事实源、DB = 镜像」，但实际�
 泛化为「团队共享仓」（成员为 1 的仓即个人仓）：
 
 ```
-写入路径①：AI 成稿 —— 会话 outputs 回传（CAP-37 既有链路）→ 服务端写文件 + JGit commit
-写入路径②：手动编辑 —— PUT 直接写文件 + JGit commit（保存即生效，无确认态）
-事实源：data 下服务端本地 git 仓（JGit，无 claude 执行，不碰 CAP-34 红线）
+写入路径①：AI 成稿 —— 会话 outputs 回传（CAP-37 既有链路）→ 服务端写文件 + git commit
+写入路径②：手动编辑 —— PUT 直接写文件 + git commit（保存即生效，无确认态）
+事实源：data 下服务端本地 git 仓（git CLI 子进程，无 claude 执行，不碰 CAP-34 红线）
 远端备份：服务端 GitRemoteOps push（直连优先，命中 CAP-70 egress_rules 走隧道）
 历史/审计：git log + commit message trailer（取代状态机与镜像）
 ```
 
-git 操作不是 claude 执行——integration 模块的服务端 JGit 链路（CAP-29 克隆、
+git 操作不是 claude 执行——integration 模块的服务端 git 链路（CAP-29 克隆、
 GitRemoteOps、CAP-70 出口）本来就在服务端跑，CAP-34「服务端零执行」红线不受影响。
+**技术选型（评审定稿）：沿用 git CLI 子进程**——GitRemoteOps 扩展 `add/commit/log/merge`
+四个方法（现状仅读侧操作 + ffOnly），与 CAP-29 同栈零新依赖，egress 代理注入
+（`-c http.<host>.proxy=socks5h://…`，GitRemoteOpsEgressTest 已覆盖）现成；
+**否决引入 JGit**——全仓无 JGit 依赖，引入即第二套 git 栈，且其 push 走隧道需另辟
+HTTP CONNECT 代理挂载路径，相对 CLI 方案无收益。
 
 ## 2. 功能需求
 
@@ -38,17 +45,23 @@ GitRemoteOps、CAP-70 出口）本来就在服务端跑，CAP-34「服务端零�
   git 工作仓 + 可选远端绑定；仓内成员各写各的 `<username>/` 子目录。首次进
   /worklog 或首次生成时按当前用户懒创建个人仓（成员=本人，remote_url=null 纯本地）。
   存量 `worklog_user_settings.remote_url/remote_branch` 迁移进 repos 表后列废弃。
-  **本机路径不入库**：本地仓根目录走配置 `devmind.worklog.repo-root`
-  （默认 `./data/worklog/repos`），DB 只存 `repo_key`，物理路径由根目录 + key 派生。
+  **写入路由**：用户可同时是多个仓的成员（个人仓 + 团队仓），所有写入路径
+  （AI 成稿/手动 PUT/生成）一律写该用户**活动仓**下的本人子目录——活动仓 =
+  `worklog_user_settings.active_repo_key`（null = 个人仓）；MVP 每人仅个人仓路由
+  无歧义，团队仓绑定（M2）后由设置页切换。**本机路径不入库**：本地仓根目录走配置
+  `devmind.worklog.repo-root`（默认 `./data/worklog/repos`），DB 只存 `repo_key`，
+  物理路径由根目录 + key 派生。仓目录是服务端本地磁盘状态，随 `data/` 一起备份；
+  平台按单实例语义运行（多实例共库部署会产生分叉仓，属非支持形态）。
 - **FR-02 目录契约**：仓内布局
   `<username>/daily/yyyy-MM-dd.md`、`<username>/weekly/yyyy-Www.md`
-  （周文件名口径沿用既有 `weekly-<yyyy>-W<ww>`，落子目录后前缀可省，迁移时统一直接
-  用 `Www` 形式——实现时定稿并写进 README 骨架）。首次建仓/成员加入时写骨架
+  （周文件名**定稿 `yyyy-Www.md`**：落 weekly/ 子目录后既有 `weekly-` 前缀省略，
+  迁移时统一改写为该形式，并写进仓 README 骨架）。首次建仓/成员加入时写骨架
   commit（子目录 + README 说明契约）。**否决 index.json 派生索引**（见 §3）。
 - **FR-03 写入路径收口（单写者）**：仓的所有平台写入只经服务端 `WorklogRepoService`
-  一处：仓级锁（按 repo_key striped lock）串行化 → 写文件 → JGit add/commit。
+  一处：仓级锁（按 repo_key striped lock）串行化 → 写文件 → git add/commit
+  （GitRemoteOps 扩展方法）。写入目标 = 操作人/会话归属用户的活动仓（FR-01）。
   - AI 成稿：`WorklogOutputMirror` 改造——outputs 命中 daily/weekly 成稿后不再
-    upsert DB，改为写入**会话归属用户**的子目录并 commit；
+    upsert DB，改为写入**会话归属用户**活动仓的本人子目录并 commit；
   - 手动编辑：报告 PUT 直接写文件并 commit；
   - commit message 规范：`worklog: daily 2026-10-12` 一行摘要 + trailer
     `DevMind-Source: ai|manual` / `DevMind-Session: <sessionId>`（AI 生成时），
@@ -63,19 +76,24 @@ GitRemoteOps、CAP-70 出口）本来就在服务端跑，CAP-34「服务端零�
 - **FR-05 读路径**：日报/周报列表与详情**从服务端仓读**——目录扫描（文件名编码
   日期，天然有序）+ 限定路径的 git log 取最近提交时间与 trailer + 按需读文件内容
   （列表 preview 取前 N 字；周报 summary/nextPlan 分节读时解析，沿用
-  `ReportService.splitWeekly`）。数据量级为一人一年数百小文件，不做缓存；将来成
-  瓶颈只准加服务端内存缓存，**禁止落盘索引/回建 DB 镜像**。
+  `ReportService.splitWeekly`）。git log 取时间/trailer 用**一次调用批量解析多路径**
+  （`git log --format` 全路径），禁 per-file 逐条 fork 进程。数据量级为一人一年数百
+  小文件，不做缓存；将来成瓶颈只准加服务端内存缓存，**禁止落盘索引/回建 DB 镜像**。
 - **FR-06 远端备份与同步（服务端 push）**：「推送远端」改为服务端
   GitRemoteOps push：凭证按 remote host 经 CAP-35 `resolveToken` 解析（缺失 409
   引导），署名 FR-03；出口按 CAP-70 `egress_rules` 逐请求选择（直连/socks5h 隧道，
   命中规则但隧道离线快速失败），公网部署够不到内网 git 时配规则即可，零新协议。
   - **写前 fetch + merge**：任何 push 前先 fetch；远端领先/分叉自动
-    `merge --no-edit`（成员子目录路径不相交，跨人恒干净）；merge 冲突=**同一人
+    `merge --no-edit`（GitRemoteOps 新增 merge 方法，现状仅有 ffOnly；成员子目录
+    路径不相交，跨人恒干净）；merge 冲突=**同一人
     多端改同一文件**，fail-visible 报给用户并提供「以平台为准 / 以远端为准」
-    两个显式动作，不静默覆盖任何一侧，仓不留 MERGING 状态；
+    两个显式动作（`POST /api/worklog/repos/{key}/resolve?strategy=ours|theirs`），
+    不静默覆盖任何一侧，仓不留 MERGING 状态；
   - **平台外编辑是合法输入**：用户可在平台外 clone 团队仓直改 markdown。读路径
     带 TTL 节流的后台 fetch（如 60s），fetch 失败用本地内容降级并可见提示
-    （fail-visible），不阻塞渲染。
+    （fail-visible），不阻塞渲染。**fetch 凭证 = 仓级 fetch 身份**：仓主
+    （created_by）的 PAT 优先，任一持有效 PAT 的成员兜底；均无凭证则跳过 fetch
+    仅用本地内容。
 - **FR-07 生成链路适配**：生成会话仍在 runner 上跑（CAP-34），WORKLOG 项目保留为
   会话调度载体，但：
   - **节点亲和红线松绑**：runner 侧目录降级为纯会话草稿区（skill/上下文物化与
@@ -91,6 +109,9 @@ GitRemoteOps、CAP-70 出口）本来就在服务端跑，CAP-34「服务端零�
 - **FR-08 迁移**：启动迁移任务（幂等）——以 **DB 镜像内容为准**（它含镜像+手改的
   并集，是最新真相）把 daily_reports/weekly_reports 逐条写入本人个人仓并 commit
   （message 标 `DevMind-Source: migration`）；已确认/草稿不加区分（状态机废除）。
+  **幂等判据**：按 `(用户, 日期/周)` 映射目标文件，内容一致即跳过、不一致才
+  写+commit——重复启动不产生新 commit。迁移 commit 的 author/committer date 回填
+  报告的 `updated_at`，保证 git log 时间列（FR-05 的 updatedAt 来源）迁移后不失真。
   迁移完成后 daily_reports/weekly_reports 变死表（手工 DROP，同 agent_conn_logs
   先例）；runner 侧旧工作区文件留现场不删，不再消费。
 - **FR-09 前端**：/worklog 页日报/周报 Tab 去确认态交互；「推送远端」按钮改调
@@ -129,7 +150,8 @@ worklog_repos        ── id, repo_key UK, remote_url NULL, remote_branch defa
 worklog_repo_members ── id, repo_id FK, user_id, subdir（=username，UK(repo_id,subdir)），
                          UK(repo_id,user_id)
 daily_reports / weekly_reports   迁移后变死表（手工 DROP）
-worklog_user_settings ── remote_url / remote_branch 列废弃（迁入 worklog_repos）
+worklog_user_settings ── remote_url / remote_branch 列废弃（迁入 worklog_repos）；
+                         新增 active_repo_key（null=个人仓，M2 团队仓后切换写入目标）
 ```
 
 WS 协议：`worklog_push` 帧退役（不下发；runner 侧保留处理做 no-op 兼容）；launch
@@ -143,6 +165,7 @@ GET/PUT /api/worklog/daily|weekly ...      对外契约基本不变（读改写�
 POST    /api/worklog/daily|weekly/generate 不变（已存在跳过；force 显式）
 POST    /api/worklog/reports/sync          保留（语义=collect outputs → 写仓）
 POST    /api/worklog/workspace/push        改服务端 push（不再下发 runner；入参出参不变）
+POST    /api/worklog/repos/{key}/resolve   push 冲突显式解决（strategy=ours|theirs，M2）
 GET     /api/worklog/workspace             空间信息改为仓信息（repo_key/remote/最近提交）
 POST    /api/worklog/repos/{key}/remotes   团队仓绑定/成员管理（M2，MVP 仅个人仓自动建）
 条目/repos/git preview/import、settings GET/PUT（模板部分）  全部不变
@@ -157,20 +180,24 @@ POST    /api/worklog/repos/{key}/remotes   团队仓绑定/成员管理（M2，M
    推送远端后远端仓可见该内容（手改进 git，本能力的立项动机）；
 3. 定时自动生成在文件已存在时跳过（不覆盖手改）；force 重新生成覆盖后旧版本可从
    git log 找回；
-4. 亲和节点离线时：日志页读/编辑/推送远端全部正常，仅生成/对话 409 提示；
+4. 亲和节点离线时：日志页读/编辑/推送远端全部正常，仅生成/对话 409 提示（M1 起可验）；
 5. 两人绑定同一远端仓：各自推送后双方子目录齐全、merge 无冲突；同一人平台外改
    文件 push 后，平台读路径 TTL 内看到新内容；同一人双侧改同一文件产生冲突时
    报错并提供两个显式解决动作，仓不留 MERGING；
 6. 出口规则命中（host glob → 隧道节点）时 push 走隧道成功；隧道离线快速失败；
-7. 迁移：存量 DB 报告（含手改过的）全部落仓且内容一致，重复启动不重复 commit；
+7. 迁移：存量 DB 报告（含手改过的）全部落仓且内容一致；重复启动不产生新 commit
+   （内容一致即跳过），迁移 commit 时间回填报告 updated_at；
 8. 无 DRAFT/CONFIRMED 残留：前端无确认按钮/徽标，PUT 传 status 被忽略或 400。
 
 ## 8. 分期与 MVP 边界
 
-- **M1 服务端仓 + 去镜像**：repos/members 建模 + WorklogRepoService 单写者 +
-  读改写仓 + 去状态机 + 输出镜像改造 + 迁移任务 + 前端去确认态；
-- **M2 远端与团队**：服务端 push（egress 接入）+ 写前 fetch/merge + 冲突显式解决
-  + 团队仓绑定与成员管理 + 平台外编辑 TTL fetch；
+- **M1 服务端仓 + 去镜像 + 最小 push**：repos/members 建模 + WorklogRepoService 单写者 +
+  读改写仓 + 去状态机 + 输出镜像改造 + 迁移任务 + 前端去确认态 + **服务端最小 push**
+  （fetch + ff-only + push，走 egress；推不动即 409 fail-visible，不做 merge）——
+  push 必须进 M1：否则 M1→M2 缝隙期「推送远端」推的是 runner 侧彻底停滞的旧稿，
+  比现状更坏；
+- **M2 远端完整化与团队**：写前 fetch + `merge --no-edit` + 冲突显式解决（resolve 端点）
+  + 团队仓绑定与成员管理（active_repo_key 切换）+ 平台外编辑 TTL fetch；
 - **M3 演进**：团队成员只读视图、条目文件化（`entries/` 由 claude 维护，素材口径
   从 DB 条目切到文件）、runner 草稿区清理代码下线。
 
