@@ -54,21 +54,21 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
   },
   {
     type: 'group' as const,
-    label: '智能决策（laya）',
-    children: [
-      { key: '/admin/laya/records', icon: <ForkOutlined />, label: '决策记录' },
-      { key: '/admin/laya/instances', icon: <PartitionOutlined />, label: '服务实例' },
-      { key: '/admin/laya/lab', icon: <ExperimentOutlined />, label: '决策实验室' },
-    ],
-  },
-  {
-    type: 'group' as const,
     label: '内容',
     children: [
       { key: '/admin/knowledge', icon: <ReadOutlined />, label: '知识库' },
       { key: '/admin/skills', icon: <ToolOutlined />, label: 'Skill 管理' },
       { key: '/admin/docs', icon: <FileTextOutlined />, label: '文档管理' },
       { key: '/admin/attachments', icon: <PaperClipOutlined />, label: '附件管理' },
+    ],
+  },
+  {
+    type: 'group' as const,
+    label: '智能决策（laya）',
+    children: [
+      { key: '/admin/laya/records', icon: <ForkOutlined />, label: '决策记录' },
+      { key: '/admin/laya/instances', icon: <PartitionOutlined />, label: '服务实例' },
+      { key: '/admin/laya/lab', icon: <ExperimentOutlined />, label: '决策实验室' },
     ],
   },
   {
@@ -98,7 +98,7 @@ function menuLabel(items: AdminMenuItem[], key: string): string | undefined {
   return undefined
 }
 
-/** 管理后台布局（仅 ADMIN，由 RequireAdmin 守卫）：指挥中心 / 项目与资源 / 内容 / 系统。 */
+/** 管理后台布局（仅 ADMIN，由 RequireAdmin 守卫）：指挥中心 / 项目与资源 / Agent 执行 / 内容 / 智能决策 / 系统。 */
 export default function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()
