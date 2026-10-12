@@ -157,7 +157,7 @@ export default function SessionsBoard({
   const { onFinish, onSuspend, onResume, onKill, diff } = useSessionActions(selectedId, onUpdated)
 
   // CAP-41 worklog 模式：「推送工作日志」——先让 runner 即时回传产出（进行中的会话也可），
-  // 再把 daily-/weekly- 成稿同步为日报/周报镜像（幂等；已确认不覆盖）
+  // 再把 daily-/weekly- 成稿写入服务端仓（幂等：同内容零 commit；CAP-74 起无确认态，skipped 恒空）
   const [syncingWorklog, setSyncingWorklog] = useState(false)
   const onSyncWorklog = async () => {
     if (!current) return
@@ -167,9 +167,7 @@ export default function SessionsBoard({
       if (collect.message) message.warning(collect.message)
       const r = await syncSessionReports(current.id)
       if (r.mirrored.length > 0) {
-        message.success(
-          `已同步：${r.mirrored.join('、')}${r.skipped.length ? `；未覆盖：${r.skipped.join('、')}` : ''}`,
-        )
+        message.success(`已写入工作日志仓：${r.mirrored.join('、')}`)
       } else if (r.skipped.length > 0) {
         message.info(`未覆盖：${r.skipped.join('、')}`)
       } else {

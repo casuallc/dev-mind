@@ -91,6 +91,11 @@ public class WorklogRemoteBackupService {
         });
     }
 
+    /** 个人仓冲突的快捷解决入口（POST /worklog/workspace/resolve）：key 由当前用户推导，免前端拼 personal-<username>。 */
+    public WorklogPushResult resolvePersonalConflict(String strategy) {
+        return resolveConflict(WorklogRepoService.personalRepoKey(identity.currentActor()), strategy);
+    }
+
     // ---------------- 内部 ----------------
 
     /** fetch + merge + push 主链（调用方已持仓锁）。 */
@@ -137,7 +142,7 @@ public class WorklogRemoteBackupService {
     private static String requireRemote(WorklogRepoEntity repo) {
         if (repo.getRemoteUrl() == null || repo.getRemoteUrl().isBlank()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
-                    "未绑定远程仓库（在工时设置-远程仓库备份里配置 URL 后再推送）");
+                    "未绑定远程仓库（在「设置 → 工作日志」的远程仓库备份里配置 URL 后再推送）");
         }
         return repo.getRemoteUrl();
     }

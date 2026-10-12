@@ -22,7 +22,7 @@ const SWIPE_THRESHOLD = 60
 const DRAG_MIN = 8
 
 /**
- * 周报视图的 7 周选择条：左旧右新，每格显当周报告状态（● 已确认 / ◐ 草稿 / ○ 无），
+ * 周报视图的 7 周选择条：左旧右新，每格显当周是否有报告（● 有 / ○ 无），
  * 点击切换到该周。支持在整条上水平滑动（触摸/鼠标拖拽）或点两侧箭头整页翻窗看更早/更近的 7 周；
  * 窗口最右不越过本周（weeksBack=0 时隐藏右箭头、左滑不生效），即不可查看未来周。
  * 滑动手势用 Pointer Events 统一触摸与鼠标；touchAction: pan-y 保留纵向滚动。
@@ -163,10 +163,8 @@ export default function RecentWeekStrip({ reports, selected, onSelect, weeksBack
               <div style={{ fontSize: 12, marginTop: 2 }}>
                 {!report ? (
                   <Typography.Text type="secondary">○ 无</Typography.Text>
-                ) : report.status === 'CONFIRMED' ? (
-                  <Typography.Text style={{ color: '#52c41a' }}>● 已确认</Typography.Text>
                 ) : (
-                  <Typography.Text style={{ color: '#faad14' }}>◐ 草稿</Typography.Text>
+                  <Typography.Text style={{ color: '#52c41a' }}>● 有</Typography.Text>
                 )}
               </div>
             </div>

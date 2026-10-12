@@ -22,13 +22,13 @@ import {
   generateDaily,
   generateWeekly,
   getDaily,
-  getSettings,
   getWeekly,
   getWorkspace,
   listDailyWeek,
   listEntries,
   listWeeklyRecent,
   pushWorkspace,
+  resolvePushConflict,
   updateDaily,
   updateEntry,
   updateWeekly,
@@ -54,6 +54,7 @@ import ProjectContextPage from '../../scenarios/pages/ProjectContextPage'
 import { pageCardBodyFlexStyle, pageCardBodyScrollStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
+import { isApiRequestError } from '../../../shared/api/error'
 
 type View = WorklogView
 
@@ -68,33 +69,56 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 export default function WorklogPage() {
   const [view, setView] = useState<View>('entries')
 
-  // ---- CAP-41 工作日志空间：WORKLOG 项目 + runner 持久工作区状态条 ----
+  // ---- CAP-41/74 工作日志空间：事实源=服务端仓（repoKey/remote/lastCommitAt 随视图带下），
+  // WORKLOG 项目与亲和节点只用于「AI 生成/对话」链路（离线不影响读/编辑/推送） ----
   const [workspace, setWorkspace] = useState<WorkspaceView | null>(null)
   const [ensuring, setEnsuring] = useState(false)
-  // CAP-41 M3：远端备份绑定状态（决定「推送远端」按钮可用性；详细编辑在设置 Modal）
-  const [remoteUrl, setRemoteUrl] = useState<string | null>(null)
   const [pushing, setPushing] = useState(false)
+  // push 409 冲突：弹显式解决 Modal（以平台为准 / 以远端为准）
+  const [conflictMsg, setConflictMsg] = useState<string | null>(null)
+  const [resolving, setResolving] = useState<'ours' | 'theirs' | null>(null)
   const loadWorkspace = useCallback(() => {
     getWorkspace()
       .then(setWorkspace)
       .catch(() => setWorkspace(null))
-    getSettings()
-      .then((s) => setRemoteUrl(s.remoteUrl ?? null))
-      .catch(() => setRemoteUrl(null))
   }, [])
   useEffect(loadWorkspace, [loadWorkspace])
 
-  /** CAP-41 M3：手动推送远端（runner 侧 git push；结果回执 ok/detail/error） */
+  /** CAP-74：手动推送远端（服务端直推个人仓；409 分叉冲突弹显式解决） */
   const onPushRemote = async () => {
     setPushing(true)
     try {
       const ack = await pushWorkspace()
-      if (ack.ok) message.success(ack.detail ? `已推送远端：${ack.detail}` : '已推送远端')
-      else Modal.error({ centered: true, title: '推送远端失败', content: ack.error || '未知原因' })
+      if (ack.ok) {
+        message.success(ack.detail ? `已推送远端：${ack.detail}` : '已推送远端')
+        loadWorkspace()
+      } else {
+        Modal.error({ centered: true, title: '推送远端失败', content: ack.error || '未知原因' })
+      }
     } catch (e) {
-      showError(e, '推送远端失败')
+      if (isApiRequestError(e) && e.status === 409) setConflictMsg(e.message)
+      else showError(e, '推送远端失败')
     } finally {
       setPushing(false)
+    }
+  }
+
+  /** 冲突显式解决：ours=以平台仓为准 / theirs=以远端为准（另一侧内容留在 git 历史可找回） */
+  const onResolveConflict = async (strategy: 'ours' | 'theirs') => {
+    setResolving(strategy)
+    try {
+      const ack = await resolvePushConflict(strategy)
+      if (ack.ok) {
+        message.success(ack.detail ?? '冲突已解决并推送')
+        setConflictMsg(null)
+        loadWorkspace()
+      } else {
+        Modal.error({ centered: true, title: '冲突解决失败', content: ack.error || '未知原因' })
+      }
+    } catch (e) {
+      showError(e, '冲突解决失败')
+    } finally {
+      setResolving(null)
     }
   }
 
@@ -264,8 +288,8 @@ export default function WorklogPage() {
     setPage(1)
   }
 
-  // 生成 = 创建 worklog 会话（CAP-41）：受理返回 {sessionId, reused}，成稿随会话结束回传落镜像，
-  // 前端轮询 GET 报告直到镜像出现（reused 表示已有报告未重新生成）
+  // 生成 = 创建 worklog 会话（CAP-41）：受理返回 {sessionId, reused}，成稿随会话结束回传写服务端仓，
+  // 前端轮询 GET 报告直到仓文件出现（reused 表示已有报告未重新生成）
   const onGenerate = async (kind: 'daily' | 'weekly', force: boolean) => {
     setGenerating(true)
     const prevDailyUpdatedAt = daily?.updatedAt
@@ -299,7 +323,7 @@ export default function WorklogPage() {
     }
   }
 
-  // 手动创建空白草稿（不经 AI）：创建后进入编辑态，保存/确认与 AI 草稿同一路径
+  // 手动创建空白稿（不经 AI）：创建后进入编辑态，保存与 AI 草稿同一路径（PUT by date/weekStart 写仓）
   const onCreateDaily = async () => {
     const r = await createDaily(dayStr)
     setDailyWeek((m) => ({ ...m, [dayStr]: r }))
@@ -416,7 +440,7 @@ export default function WorklogPage() {
             type="info"
             showIcon
             message="工作日志空间尚未初始化"
-            description="对话与知识视图依赖日志空间（runner 节点上按用户隔离的持久 git 工作区），初始化后可用。"
+            description="对话与知识视图依赖日志空间的 runner 执行链路（按用户隔离的持久工作区）；初始化空间且默认节点在线后可用。"
             action={
               <Button type="primary" loading={ensuring} onClick={onEnsure}>
                 初始化空间
@@ -466,7 +490,7 @@ export default function WorklogPage() {
           showIcon
           style={{ marginBottom: 12 }}
           message="工作日志空间尚未初始化"
-          description="在 runner 节点上按用户隔离的持久 git 工作区（工作日志/日报/周报由 AI 会话直接写入）。初始化后可在「对话」页签与 claude 对话记日志。"
+          description="事实源是服务端 git 仓（日报/周报直接写在仓里，历史走 git log）；初始化后即可读/编辑/推送，「对话」页签与 AI 生成另需 runner 节点在线。"
           action={
             <Button type="primary" loading={ensuring} onClick={onEnsure}>
               初始化空间
@@ -476,16 +500,29 @@ export default function WorklogPage() {
       )}
       {workspace?.exists && (
         <Alert
-          type={workspace.nodeOnline ? 'success' : 'warning'}
+          type={workspace.fetchStale ? 'warning' : 'success'}
           showIcon
           style={{ marginBottom: 12 }}
           message={
             <Space size={8} wrap>
               <span>工作日志空间已就绪</span>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                亲和节点 {workspace.agentNodeId}
-                {workspace.nodeOnline ? '（在线）' : '（离线，会话暂不可用）'}
+                仓 {workspace.repoKey}
+                {workspace.remoteUrl
+                  ? ` · 备份 ${workspace.remoteUrl}${workspace.remoteBranch ? `@${workspace.remoteBranch}` : ''}`
+                  : ' · 未绑定远端备份'}
+                {workspace.lastCommitAt ? ` · 最近提交 ${fmtTime(workspace.lastCommitAt)}` : ''}
               </Typography.Text>
+              {workspace.fetchStale && (
+                <Typography.Text type="warning" style={{ fontSize: 12 }}>
+                  远端拉取失败，展示的可能不是最新（不影响读/编辑/推送，可点刷新重试）
+                </Typography.Text>
+              )}
+              {workspace.nodeOnline === false && (
+                <Typography.Text type="warning" style={{ fontSize: 12 }}>
+                  亲和节点 {workspace.agentNodeId} 离线：仅影响 AI 生成与对话
+                </Typography.Text>
+              )}
             </Space>
           }
           action={
@@ -493,18 +530,16 @@ export default function WorklogPage() {
               <Button size="small" icon={<ReloadOutlined />} onClick={loadWorkspace} />
               <Tooltip
                 title={
-                  !remoteUrl
+                  !workspace.remoteUrl
                     ? '未绑定远程仓库：在「设置 → 工作日志」的「远程仓库备份」里配置后可用'
-                    : !workspace.nodeOnline
-                      ? '亲和节点离线，暂不可推送'
-                      : `推送到 ${remoteUrl}`
+                    : `服务端直推到 ${workspace.remoteUrl}`
                 }
               >
                 <Button
                   size="small"
                   icon={<CloudUploadOutlined />}
                   loading={pushing}
-                  disabled={!remoteUrl || !workspace.nodeOnline}
+                  disabled={!workspace.remoteUrl}
                   onClick={onPushRemote}
                 >
                   推送远端
@@ -639,7 +674,7 @@ export default function WorklogPage() {
       {view === 'daily' && (
         <>
           <Typography.Paragraph type="secondary">
-            按周浏览日报（周一至周日），在周日条上左右滑动或点两侧箭头切换上一周/下一周，点某天查看/编辑；可「手动填写」直接写，或由 AI 汇总当日条目与 git 提交生成草稿，人工修订后「确认定稿」（已确认不可再重新生成）。
+            按周浏览日报（周一至周日），在周日条上左右滑动或点两侧箭头切换上一周/下一周，点某天查看/编辑；可「手动填写」直接写，或由 AI 汇总当日条目与 git 提交生成草稿，人工修订后保存即生效（服务端仓 commit，历史走 git log）。
           </Typography.Paragraph>
           <WeekDayStrip
             weekStart={dailyWeekStart}
@@ -650,11 +685,7 @@ export default function WorklogPage() {
               if (future) return <Typography.Text type="secondary">—</Typography.Text>
               const r = dailyWeek[key]
               if (!r) return <Typography.Text type="secondary">○ 无</Typography.Text>
-              return r.status === 'CONFIRMED' ? (
-                <Typography.Text style={{ color: '#52c41a' }}>● 已确认</Typography.Text>
-              ) : (
-                <Typography.Text style={{ color: '#faad14' }}>◐ 草稿</Typography.Text>
-              )
+              return <Typography.Text style={{ color: '#52c41a' }}>● 有</Typography.Text>
             }}
           />
           <div style={{ textAlign: 'center', marginTop: -8, marginBottom: 12 }}>
@@ -666,22 +697,15 @@ export default function WorklogPage() {
           <div style={pagePaneScrollStyle}>
             <ReportEditor
               key={dayStr}
-              id={daily?.id}
-              status={daily?.status}
+              exists={daily?.exists}
               updatedAt={daily?.updatedAt}
               generating={generating}
               fields={[{ key: 'contentMd', label: `日报内容（${dayStr}，Markdown）`, value: daily?.contentMd ?? '' }]}
               onCreateManual={onCreateDaily}
               onGenerate={(force) => onGenerate('daily', force)}
               onSave={async (values) => {
-                if (daily) {
-                  const updated = await updateDaily(daily.id, { contentMd: values.contentMd })
-                  setDailyWeek((m) => ({ ...m, [dayStr]: updated }))
-                }
-              }}
-              onConfirm={async () => {
-                if (daily) {
-                  const updated = await updateDaily(daily.id, { status: 'CONFIRMED' })
+                if (daily?.exists) {
+                  const updated = await updateDaily(dayStr, { contentMd: values.contentMd })
                   setDailyWeek((m) => ({ ...m, [dayStr]: updated }))
                 }
               }}
@@ -693,7 +717,7 @@ export default function WorklogPage() {
       {view === 'weekly' && (
         <>
           <Typography.Paragraph type="secondary">
-            点下方周条切换周，左右滑动或点两侧箭头整页翻看更早的 7 周；可「手动填写」直接写，或由 AI 汇总该周（周一 {weekStartStr} 起）条目与日报产出「上周总结 + 下周计划」草稿；人工修订后确认定稿。
+            点下方周条切换周，左右滑动或点两侧箭头整页翻看更早的 7 周；可「手动填写」直接写，或由 AI 汇总该周（周一 {weekStartStr} 起）条目与日报产出「上周总结 + 下周计划」草稿；人工修订后保存即生效。
           </Typography.Paragraph>
           <RecentWeekStrip
             reports={recentWeeks}
@@ -705,8 +729,7 @@ export default function WorklogPage() {
           <div style={pagePaneScrollStyle}>
             <ReportEditor
               key={weekStartStr}
-              id={weekly?.id}
-              status={weekly?.status}
+              exists={weekly?.exists}
               updatedAt={weekly?.updatedAt}
               generating={generating}
               fields={[
@@ -716,15 +739,8 @@ export default function WorklogPage() {
               onCreateManual={onCreateWeekly}
               onGenerate={(force) => onGenerate('weekly', force)}
               onSave={async (values) => {
-                if (weekly) {
-                  const updated = await updateWeekly(weekly.id, { summaryMd: values.summaryMd, nextPlanMd: values.nextPlanMd })
-                  setWeekly(updated)
-                  setRecentWeeks((m) => ({ ...m, [weekStartStr]: updated }))
-                }
-              }}
-              onConfirm={async () => {
-                if (weekly) {
-                  const updated = await updateWeekly(weekly.id, { status: 'CONFIRMED' })
+                if (weekly?.exists) {
+                  const updated = await updateWeekly(weekStartStr, { summaryMd: values.summaryMd, nextPlanMd: values.nextPlanMd })
                   setWeekly(updated)
                   setRecentWeeks((m) => ({ ...m, [weekStartStr]: updated }))
                 }
@@ -750,6 +766,35 @@ export default function WorklogPage() {
         onImported={loadEntries}
       />
       <RepoSubscriptionDrawer open={reposOpen} onCancel={() => setReposOpen(false)} />
+      {/* push 409 分叉冲突：显式二选一（组件 Modal 三个按钮，静态 Modal.confirm 只有 ok/cancel 表达不了） */}
+      <Modal
+        open={conflictMsg != null}
+        centered
+        title="推送远端冲突"
+        onCancel={() => setConflictMsg(null)}
+        footer={[
+          <Button key="cancel" onClick={() => setConflictMsg(null)}>
+            暂不处理
+          </Button>,
+          <Button key="theirs" loading={resolving === 'theirs'} onClick={() => onResolveConflict('theirs')}>
+            以远端为准
+          </Button>,
+          <Button
+            key="ours"
+            type="primary"
+            loading={resolving === 'ours'}
+            onClick={() => onResolveConflict('ours')}
+          >
+            以平台为准
+          </Button>,
+        ]}
+      >
+        <Typography.Paragraph>{conflictMsg}</Typography.Paragraph>
+        <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+          以平台为准 = 保留服务端仓内容覆盖远端；以远端为准 = 采用远端内容覆盖服务端仓。
+          无论选哪侧，另一侧内容都保留在 git 历史里可找回。
+        </Typography.Paragraph>
+      </Modal>
     </Card>
   )
 }

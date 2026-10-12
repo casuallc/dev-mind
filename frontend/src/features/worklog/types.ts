@@ -51,22 +51,22 @@ export interface EntryPayload {
   jiraIssueKey?: string
 }
 
+/** CAP-74：日报视图改服务端仓口径——无 DB id/status（状态机已删），exists 恒 true（GET 不存在返回 undefined） */
 export interface DailyReport {
-  id: number
+  exists: boolean
   workDate: string
   contentMd: string
-  status: string
   sessionId?: string
   createdAt?: string
   updatedAt?: string
 }
 
+/** CAP-74：周报视图改服务端仓口径——无 DB id/status；summary/nextPlan 由仓文件分节拆分 */
 export interface WeeklyReport {
-  id: number
+  exists: boolean
   weekStart: string
   summaryMd: string
   nextPlanMd: string
-  status: string
   sessionId?: string
   createdAt?: string
   updatedAt?: string
@@ -113,10 +113,12 @@ export interface WorklogSettings {
   dailyTemplateMd?: string | null
   /** CAP-41 FR-05：周报格式模板；null/undefined = 内置默认 */
   weeklyTemplateMd?: string | null
-  /** CAP-41 M3：远端备份仓库 URL（http/https/file）；null/undefined = 未绑定 */
+  /** CAP-41 M3 / CAP-74：远端备份仓库 URL（http/https/file），写路由到个人仓行；null/undefined = 未绑定 */
   remoteUrl?: string | null
   /** CAP-41 M3：远端备份目标分支；null/空白 = main */
   remoteBranch?: string | null
+  /** CAP-74 M2：活动仓（写入路由）；null/undefined = 个人仓；PUT 传空白串 = 回个人仓 */
+  activeRepoKey?: string | null
   /** 个人日报执行时间 "HH:mm"；null/undefined = 跟随全局 */
   dailyTime?: string | null
   /** 个人周报执行星期（1=周一…7=周日）；null/undefined = 跟随全局；需与 weeklyTime 同时设置才覆盖 */
@@ -150,22 +152,49 @@ export interface GenerateAck {
   reused?: boolean
 }
 
-/** CAP-41：会话成稿同步结果（POST /worklog/reports/sync） */
+/** CAP-41 / CAP-74：会话成稿同步结果（POST /worklog/reports/sync） */
 export interface WorklogSyncResult {
-  /** 已落镜像的报告（如 "日报 2026-09-16"） */
+  /** 已写入服务端仓的报告（如 "日报 2026-09-16"） */
   mirrored: string[]
-  /** 命中但未覆盖（已确认为大） */
+  /** CAP-74 起恒空（状态机已删，同内容幂等跳过不进此列）；字段保留兼容 */
   skipped: string[]
 }
 
-/** CAP-41 工作日志空间：WORKLOG 项目 + runner 持久工作区状态 */
+/** CAP-74：工作日志空间视图改服务端仓口径——仓是事实源；项目/节点只用于 AI 生成与对话链路 */
 export interface WorkspaceView {
   exists: boolean
+  /** 活动仓键（写入路由后的仓；个人仓 personal-<username>） */
+  repoKey?: string
+  /** 个人仓绑定的远端备份 URL（null = 未绑定） */
+  remoteUrl?: string
+  remoteBranch?: string
+  /** 活动仓 HEAD 最近提交时间 */
+  lastCommitAt?: string
+  /** 读路径后台 fetch 失败/冲突降级（fail-visible 提示；undefined/false = 正常或未绑远端） */
+  fetchStale?: boolean
+  /** WORKLOG 项目 id（null = 未建——无默认节点时仓先行、项目降级缺位） */
   projectId?: string
-  projectName?: string
-  path?: string
+  /** 亲和节点 id（创建时固化） */
   agentNodeId?: string
+  /** 亲和节点当前是否在线（离线仅影响 AI 生成与对话，不影响读/编辑/推送） */
   nodeOnline?: boolean
+}
+
+/** CAP-74 M2：我所属的工作日志仓（GET /worklog/repos/mine；设置页「活动仓」切换数据源） */
+export interface WorklogRepoInfo {
+  repoKey: string
+  createdBy: string
+  /** true = 我的个人仓 */
+  personal: boolean
+  remoteUrl?: string
+  remoteBranch?: string
+  lastCommitAt?: string
+}
+
+/** CAP-74 M2：仓成员行（owner 标记供前端控制删除按钮显隐） */
+export interface WorklogRepoMember {
+  username: string
+  owner: boolean
 }
 
 export const ENTRY_TYPES: Record<string, string> = {

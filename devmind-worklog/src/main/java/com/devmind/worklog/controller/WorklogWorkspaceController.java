@@ -39,4 +39,14 @@ public class WorklogWorkspaceController {
     public com.devmind.common.agent.WorklogPushResult push() {
         return backupService.pushToRemote();
     }
+
+    /**
+     * push 409 冲突后的显式解决（个人仓快捷入口，strategy=ours 以平台为准 / theirs 以远端为准）：
+     * 与 POST /api/worklog/repos/{key}/resolve 同逻辑，key 由当前用户推导，免前端拼 personal-<username>。
+     */
+    @PostMapping("/resolve")
+    public com.devmind.common.agent.WorklogPushResult resolve(
+            @org.springframework.web.bind.annotation.RequestParam("strategy") String strategy) {
+        return backupService.resolvePersonalConflict(strategy);
+    }
 }
