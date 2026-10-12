@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Button,
-  Card,
+  Flex,
   Form,
   Input,
   InputNumber,
@@ -17,7 +17,6 @@ import {
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import FitTable from '../../../shared/components/FitTable'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
-import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import { fmtTime } from '../../../shared/utils/format'
 import {
   createEgressRule,
@@ -32,11 +31,12 @@ import type { AgentNode, EgressRule, EgressRuleBody } from '../types'
 const TUNNEL_PROTOCOL = 21
 
 /**
- * CAP-70 FR-08 出口规则管理：host glob 命中即经指定节点的反向隧道出访（服务端内嵌 SOCKS5
- * 只绑 127.0.0.1 供 git 走 socks5h，HTTP CONNECT 代理供 Java 连接器挂 ProxySelector）。
+ * CAP-70 FR-08 出口规则面板（节点页页签）：host glob 命中即经指定节点的反向隧道出访（服务端内嵌
+ * SOCKS5 只绑 127.0.0.1 供 git 走 socks5h，HTTP CONNECT 代理供 Java 连接器挂 ProxySelector）。
  * 未命中任何规则 = 直连零行为变化。协议 <v21 的节点保存时警告（老 runner 无隧道，引用即失败）。
+ * 操作按钮（刷新/新建）收在面板工具行，与 Runner 包页签同例（页面 extra 只放节点视图操作）。
  */
-export default function EgressRulesPage() {
+export default function EgressRulesPanel() {
   const [rows, setRows] = useState<EgressRule[]>([])
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [loading, setLoading] = useState(false)
@@ -186,21 +186,17 @@ export default function EgressRulesPage() {
   ]
 
   return (
-    <Card
-      style={pageCardStyle}
-      styles={{ body: pageCardBodyFlexStyle }}
-      title="出口规则"
-      extra={
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={() => void load()}>刷新</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新建规则</Button>
-        </Space>
-      }
-    >
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
         服务端在外网、研发系统在内网时，命中主机规则的出访（git 克隆/抓取/diff、集成 API、书签探测）
         经指定节点的反向隧道出访；未命中任何规则保持直连。规则按顺序先命中先生效。
       </Typography.Paragraph>
+      <Flex justify="end" style={{ marginBottom: 12 }}>
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={() => void load()}>刷新</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新建规则</Button>
+        </Space>
+      </Flex>
       <FitTable
         rowKey="id"
         loading={loading}
@@ -254,6 +250,6 @@ export default function EgressRulesPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </Card>
+    </div>
   )
 }

@@ -23,6 +23,8 @@ import {
 } from '../api'
 import type { AgentNode, IssuedNode, RunnerPackage } from '../types'
 import RunnerPackagePanel from '../components/RunnerPackagePanel'
+import AuditLogsPanel from '../components/AuditLogsPanel'
+import EgressRulesPanel from '../components/EgressRulesPanel'
 import NodeCreatedModal from '../components/NodeCreatedModal'
 import { fmtTime, fmtBytes } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
@@ -37,22 +39,28 @@ const statusColor: Record<string, string> = {
 }
 
 /**
- * CAP-21 后台页：Agent 节点（仅 ADMIN）。页内 Segmented 两视图——「节点列表」与「Runner 包」（全局托管包，
- * 原独立菜单已并入此页，旧路径 /admin/agent/package 重定向 ?view=package）；
- * 审计日志 / 节点文件仍是「Agent 执行」组独立菜单；单节点的观测/配置/运维操作收在详情页（/admin/agent/nodes/:id）。
+ * CAP-21 后台页：Agent 节点（仅 ADMIN）。页内 Segmented 四视图——「节点列表」「Runner 包」（全局托管包）、
+ * 「出口规则」（CAP-70）与「审计日志」（CAP-71），原独立菜单均已并入此页（旧路径 /admin/agent/package、
+ * /admin/agent/audit-logs、/admin/agent/egress-rules 重定向 ?view=…）；节点文件仍是「Agent 执行」组
+ * 独立菜单；单节点的观测/配置/运维操作收在详情页（/admin/agent/nodes/:id）。
  */
+type NodesView = 'nodes' | 'package' | 'audit' | 'egress'
+const VIEWS: NodesView[] = ['nodes', 'package', 'audit', 'egress']
+
 export default function AgentNodesPage() {
   const navigate = useNavigate()
-  // 视图随 URL（?view=package）走：旧链接重定向/刷新后仍停在 Runner 包页签
+  // 视图随 URL（?view=…）走：旧链接重定向/刷新后仍停在原页签
   const [searchParams, setSearchParams] = useSearchParams()
-  const view = searchParams.get('view') === 'package' ? 'package' : 'nodes'
+  const rawView = searchParams.get('view') as NodesView | null
+  const view: NodesView = rawView && VIEWS.includes(rawView) ? rawView : 'nodes'
   const switchView = (v: string | number) =>
-    setSearchParams(v === 'package' ? { view: 'package' } : {}, { replace: true })
+    setSearchParams(v === 'nodes' ? {} : { view: String(v) }, { replace: true })
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [pkg, setPkg] = useState<RunnerPackage | null>(null)
   const [loading, setLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [issued, setIssued] = useState<IssuedNode | null>(null)
+  const [auditTick, setAuditTick] = useState(0) // 审计日志页签刷新信号（分页语义下面板不轮询）
   const [form] = Form.useForm<{ name: string; labels?: string }>()
 
   const reload = () => {
@@ -65,7 +73,7 @@ export default function AgentNodesPage() {
   }
 
   useEffect(() => {
-    if (view !== 'nodes') return // Runner 包视图自有加载逻辑，不重复轮询
+    if (view !== 'nodes') return // 其余页签各有加载逻辑，不重复轮询
     reload()
     const timer = window.setInterval(reload, 5000) // 在线状态随心跳变化，轻轮询
     return () => window.clearInterval(timer)
@@ -230,13 +238,20 @@ export default function AgentNodesPage() {
             options={[
               { label: '节点列表', value: 'nodes' },
               { label: 'Runner 包', value: 'package' },
+              { label: '出口规则', value: 'egress' },
+              { label: '审计日志', value: 'audit' },
             ]}
           />
         </Space>
       }
       extra={
-        // 操作随视图切换：Runner 包视图的上传/下载收在面板内，此处只放节点操作
-        view === 'nodes' && (
+        // 操作随视图切换：Runner 包/出口规则的操作收在各自面板内，此处只放节点与审计视图操作
+        view === 'audit' ? (
+          <Button icon={<ReloadOutlined />} onClick={() => setAuditTick((t) => t + 1)}>
+            刷新
+          </Button>
+        ) : (
+          view === 'nodes' && (
           <Space>
             {outdatedNodes.length > 0 && (
               <>
@@ -258,11 +273,22 @@ export default function AgentNodesPage() {
               新建节点
             </Button>
           </Space>
+          )
         )
       }
     >
       {view === 'package' ? (
         <RunnerPackagePanel />
+      ) : view === 'egress' ? (
+        <EgressRulesPanel />
+      ) : view === 'audit' ? (
+        <>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+            节点全量交互审计（连接/隧道/指令/代理/上下文/文件中转/规则/包/节点运维）；代理转发逐条记录目标、字节数与耗时。
+            默认保留 180 天（devmind.agent.audit-retention-days 可配）。
+          </Typography.Paragraph>
+          <AuditLogsPanel refreshTick={auditTick} />
+        </>
       ) : (
         <>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>

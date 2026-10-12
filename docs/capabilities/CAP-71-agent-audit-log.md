@@ -86,6 +86,8 @@ size≤200，与 /api/audit-logs 同约定）。
   流量(↑↓) / 详情（ellipsis，点击 Drawer 看全文）；
 - 路由改 `/admin/agent/audit-logs`，旧 `/admin/agent/logs` 重定向保留；
   菜单文案「连接日志」→「审计日志」。
+  （2026-10-12 起并入「节点」页内页签 `/admin/agent/nodes?view=audit`，
+  独立菜单取消，旧路径重定向保留。）
 
 ## 3. 关键设计（已定）
 
