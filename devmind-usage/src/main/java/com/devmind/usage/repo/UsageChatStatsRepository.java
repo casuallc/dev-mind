@@ -16,34 +16,41 @@ import java.util.List;
  */
 public interface UsageChatStatsRepository extends JpaRepository<ChatSessionEntity, String> {
 
-    /** PG 无法推断裸 'Instant 参数 is null' 的类型，时间可空筛选必须 cast（JpqlNullableParamCastTest 钉死）。 */
+    /** PG 无法推断裸 'Instant 参数 is null' 的类型，时间可空筛选必须 cast（JpqlNullableParamCastTest 钉死）；
+     * :user/:model 裸 is null 安全的前提是与字符串列成对比较（PG 推断 text），保持成对写法。 */
     String FILTER = " where (cast(:start as timestamp) is null or e.createdAt >= :start)"
             + " and (cast(:end as timestamp) is null or e.createdAt < :end)"
-            + " and (:user is null or e.createdBy = :user)";
+            + " and (:user is null or e.createdBy = :user)"
+            + " and (:model is null or e.model = :model)";
 
     String AGGS = "count(e), coalesce(sum(e.turnCount), 0), coalesce(sum(e.costUsd), 0),"
             + " coalesce(sum(e.inputTokens), 0), coalesce(sum(e.outputTokens), 0),"
             + " coalesce(sum(e.cacheReadTokens), 0), coalesce(sum(e.cacheCreationTokens), 0)";
 
     @Query("select new com.devmind.usage.repo.UsageTotals(" + AGGS + ") from ChatSessionEntity e" + FILTER)
-    UsageTotals totals(@Param("start") Instant start, @Param("end") Instant end, @Param("user") String user);
+    UsageTotals totals(@Param("start") Instant start, @Param("end") Instant end,
+                       @Param("user") String user, @Param("model") String model);
 
     @Query("select new com.devmind.usage.repo.UsageGroupRow(e.model, " + AGGS + ")"
             + " from ChatSessionEntity e" + FILTER + " group by e.model")
     List<UsageGroupRow> groupByModel(@Param("start") Instant start, @Param("end") Instant end,
-                                     @Param("user") String user);
+                                     @Param("user") String user, @Param("model") String model);
 
     @Query("select new com.devmind.usage.repo.UsageGroupRow(e.createdBy, " + AGGS + ")"
             + " from ChatSessionEntity e" + FILTER + " group by e.createdBy")
     List<UsageGroupRow> groupByUser(@Param("start") Instant start, @Param("end") Instant end,
-                                    @Param("user") String user);
+                                    @Param("user") String user, @Param("model") String model);
 
     @Query("select new com.devmind.usage.repo.UsageLiteRow(e.createdAt, e.costUsd, e.inputTokens,"
             + " e.outputTokens, e.turnCount) from ChatSessionEntity e" + FILTER)
     List<UsageLiteRow> liteRows(@Param("start") Instant start, @Param("end") Instant end,
-                                @Param("user") String user);
+                                @Param("user") String user, @Param("model") String model);
 
-    @Query("select e from ChatSessionEntity e" + FILTER + " order by coalesce(e.costUsd, 0) desc")
-    List<ChatSessionEntity> topByCost(@Param("start") Instant start, @Param("end") Instant end,
-                                      @Param("user") String user, Pageable pageable);
+    /** 排序键口径同 {@link UsageSessionStatsRepository#topByTokens} 注释，勿改。 */
+    @Query("select e from ChatSessionEntity e" + FILTER
+            + " order by coalesce(e.inputTokens, 0) + coalesce(e.outputTokens, 0)"
+            + " + coalesce(e.cacheReadTokens, 0) desc, e.createdAt desc")
+    List<ChatSessionEntity> topByTokens(@Param("start") Instant start, @Param("end") Instant end,
+                                        @Param("user") String user, @Param("model") String model,
+                                        Pageable pageable);
 }

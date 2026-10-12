@@ -145,7 +145,7 @@ class UsageStatsServiceTest {
     void summaryMergesBothSourcesForAdmin() {
         seed();
         admin = true;
-        UsageSummary sum = service.summary(null, null, null);
+        UsageSummary sum = service.summary(null, null, null, null);
         assertEquals(0.17, sum.costUsd(), 1e-9);
         assertEquals(1800, sum.inputTokens());
         assertEquals(360, sum.outputTokens());
@@ -158,7 +158,7 @@ class UsageStatsServiceTest {
     void summaryForcesSelfForNonAdmin() {
         seed();
         // 非 admin 传 userId=他人也必须被忽略
-        UsageSummary sum = service.summary(null, null, "bob");
+        UsageSummary sum = service.summary(null, null, "bob", null);
         assertEquals(0.12, sum.costUsd(), 1e-9);
         assertEquals(1, sum.sessionCount());
         assertEquals(1, sum.chatCount());
@@ -169,7 +169,7 @@ class UsageStatsServiceTest {
         seed();
         admin = true;
         Instant todayStart = LocalDate.now().atStartOfDay(ZONE).toInstant();
-        UsageSummary sum = service.summary(todayStart, null, null);
+        UsageSummary sum = service.summary(todayStart, null, null, null);
         assertEquals(0.12, sum.costUsd(), 1e-9); // 只有今天的 s1 + c1
         assertEquals(1, sum.sessionCount());
         assertEquals(1, sum.chatCount());
@@ -179,9 +179,9 @@ class UsageStatsServiceTest {
     void breakdownRequirementEnrichesLabelsAndAddsChatBucket() {
         seed();
         admin = true;
-        List<UsageBreakdownRow> rows = service.breakdown("requirement", null, null, null);
+        List<UsageBreakdownRow> rows = service.breakdown("requirement", null, null, null, null);
         assertEquals(3, rows.size());
-        UsageBreakdownRow first = rows.get(0); // 成本降序：r1 0.10 居首
+        UsageBreakdownRow first = rows.get(0); // tokens 降序：r1（1200）居首
         assertEquals("r1", first.key());
         assertEquals("需求一", first.label());
         assertEquals("p1", first.projectId());
@@ -197,7 +197,7 @@ class UsageStatsServiceTest {
     void breakdownProjectEnrichesNames() {
         seed();
         admin = true;
-        List<UsageBreakdownRow> rows = service.breakdown("project", null, null, null);
+        List<UsageBreakdownRow> rows = service.breakdown("project", null, null, null, null);
         UsageBreakdownRow first = rows.get(0);
         assertEquals("p1", first.key());
         assertEquals("项目一", first.label());
@@ -207,7 +207,7 @@ class UsageStatsServiceTest {
     void breakdownModelMergesBothSourcesAndDefaultsBlank() {
         seed();
         admin = true;
-        List<UsageBreakdownRow> rows = service.breakdown("model", null, null, null);
+        List<UsageBreakdownRow> rows = service.breakdown("model", null, null, null, null);
         assertEquals(2, rows.size());
         UsageBreakdownRow sonnet = rows.stream().filter(r -> "sonnet".equals(r.key())).findFirst().orElseThrow();
         assertEquals(1, sonnet.sessionCount());
@@ -220,14 +220,14 @@ class UsageStatsServiceTest {
     @Test
     void breakdownUserRequiresAdmin() {
         seed();
-        assertThrows(DevMindException.class, () -> service.breakdown("user", null, null, null));
+        assertThrows(DevMindException.class, () -> service.breakdown("user", null, null, null, null));
     }
 
     @Test
     void breakdownUserMergesBothSourcesWithDisplayNames() {
         seed();
         admin = true;
-        List<UsageBreakdownRow> rows = service.breakdown("user", null, null, null);
+        List<UsageBreakdownRow> rows = service.breakdown("user", null, null, null, null);
         assertEquals(2, rows.size());
         UsageBreakdownRow alice = rows.stream().filter(r -> "alice".equals(r.key())).findFirst().orElseThrow();
         assertEquals("爱丽丝", alice.label());
@@ -240,14 +240,14 @@ class UsageStatsServiceTest {
     @Test
     void breakdownRejectsUnknownDim() {
         admin = true;
-        assertThrows(DevMindException.class, () -> service.breakdown("node", null, null, null));
+        assertThrows(DevMindException.class, () -> service.breakdown("node", null, null, null, null));
     }
 
     @Test
     void dailyBucketsByCreatedDayAndFillsZeros() {
         seed();
         admin = true;
-        List<UsageDailyPoint> points = service.daily(3, null);
+        List<UsageDailyPoint> points = service.daily(3, null, null);
         assertEquals(3, points.size());
         UsageDailyPoint today = points.get(2);
         assertEquals(LocalDate.now().toString(), today.date());
@@ -261,10 +261,10 @@ class UsageStatsServiceTest {
     }
 
     @Test
-    void topMergesBothSourcesSortedByCostWithRequirementTitle() {
+    void topMergesBothSourcesSortedByTokensWithRequirementTitle() {
         seed();
         admin = true;
-        List<UsageTopRow> rows = service.top(10, null, null, null);
+        List<UsageTopRow> rows = service.top(10, null, null, null, null);
         assertEquals(3, rows.size());
         assertEquals("SESSION", rows.get(0).source());
         assertEquals("任务 s1", rows.get(0).title());
@@ -276,10 +276,41 @@ class UsageStatsServiceTest {
     }
 
     @Test
+    void topSortsByTokensNotCost() {
+        seed();
+        admin = true;
+        // 低成本高 tokens：成本排序下垫底，tokens 排序下必须居首
+        repos.chats.add(FakeUsageRepos.chat("c9", "opus", "alice", day(0), 0.001, 9000, 500, 1));
+        List<UsageTopRow> rows = service.top(10, null, null, null, null);
+        assertEquals("问答 c9", rows.get(0).title(), "排序键必须是 input+output+cacheRead 而非成本");
+    }
+
+    @Test
+    void modelFilterNarrowsAllFourEndpoints() {
+        seed();
+        admin = true;
+        UsageSummary sum = service.summary(null, null, null, "sonnet");
+        assertEquals(1, sum.sessionCount());
+        assertEquals(1, sum.chatCount());
+        assertEquals(1300, sum.inputTokens());
+        List<UsageBreakdownRow> byModel = service.breakdown("model", null, null, null, "sonnet");
+        assertEquals(1, byModel.size());
+        assertEquals("sonnet", byModel.get(0).key());
+        List<UsageDailyPoint> daily = service.daily(3, null, "sonnet");
+        assertEquals(1560, daily.get(2).tokens());
+        assertEquals(0, daily.get(1).tokens(), "s2 无模型被过滤");
+        List<UsageTopRow> top = service.top(10, null, null, null, "sonnet");
+        assertEquals(2, top.size());
+        assertTrue(top.stream().allMatch(r -> "sonnet".equals(r.model())));
+        // 未知模型 → 全空而非报错
+        assertEquals(0, service.summary(null, null, null, "gpt-x").turnCount());
+    }
+
+    @Test
     void topHonorsLimit() {
         seed();
         admin = true;
-        List<UsageTopRow> rows = service.top(2, null, null, null);
+        List<UsageTopRow> rows = service.top(2, null, null, null, null);
         assertEquals(2, rows.size());
         assertEquals(0.10, rows.get(0).costUsd(), 1e-9);
     }

@@ -31,14 +31,18 @@ class FakeUsageRepos {
         return iface.cast(Proxy.newProxyInstance(iface.getClassLoader(), new Class<?>[]{iface}, handler));
     }
 
-    private static boolean hit(Instant createdAt, String createdBy, Instant start, Instant end, String user) {
+    private static boolean hit(Instant createdAt, String createdBy, Instant start, Instant end,
+                               String user, String model, String entityModel) {
         if (start != null && (createdAt == null || createdAt.isBefore(start))) {
             return false;
         }
         if (end != null && (createdAt == null || !createdAt.isBefore(end))) {
             return false;
         }
-        return user == null || user.equals(createdBy);
+        if (user != null && !user.equals(createdBy)) {
+            return false;
+        }
+        return model == null || model.equals(entityModel);
     }
 
     private static long nz(Number n) {
@@ -75,12 +79,18 @@ class FakeUsageRepos {
         return new UsageLiteRow(createdAt, cost, in, out, turns);
     }
 
+    /** topByTokens 排序键（与 JPQL order by 同语义：input+output+cacheRead 降序，createdAt 次之）。 */
+    private static long tokenSortKey(Long in, Long out, Long cacheRead) {
+        return nz(in) + nz(out) + nz(cacheRead);
+    }
+
     UsageSessionStatsRepository sessionRepo() {
         return proxy(UsageSessionStatsRepository.class, (p, m, args) -> {
             Instant start = (Instant) args[0], end = (Instant) args[1];
-            String user = (String) args[2];
+            String user = (String) args[2], model = (String) args[3];
             List<SessionEntity> hits = sessions.stream()
-                    .filter(s -> hit(s.getCreatedAt(), s.getCreatedBy(), start, end, user)).toList();
+                    .filter(s -> hit(s.getCreatedAt(), s.getCreatedBy(), start, end, user, model, s.getModel()))
+                    .toList();
             List<UsageLiteRow> lites = hits.stream()
                     .map(s -> lite(s.getCreatedAt(), s.getCostUsd(), s.getInputTokens(),
                             s.getOutputTokens(), s.getTurnCount())).toList();
@@ -91,10 +101,13 @@ class FakeUsageRepos {
                 case "groupByModel" -> group(lites, hits.stream().map(SessionEntity::getModel).toList());
                 case "groupByUser" -> group(lites, hits.stream().map(SessionEntity::getCreatedBy).toList());
                 case "liteRows" -> lites;
-                case "topByCost" -> hits.stream()
-                        .sorted(Comparator.comparingDouble((SessionEntity s) ->
-                                s.getCostUsd() == null ? 0 : s.getCostUsd()).reversed())
-                        .limit(((Pageable) args[3]).getPageSize()).toList();
+                case "topByTokens" -> hits.stream()
+                        .sorted(Comparator.comparingLong((SessionEntity s) ->
+                                        tokenSortKey(s.getInputTokens(), s.getOutputTokens(), s.getCacheReadTokens()))
+                                .reversed()
+                                .thenComparing(SessionEntity::getCreatedAt,
+                                        Comparator.nullsLast(Comparator.reverseOrder())))
+                        .limit(((Pageable) args[4]).getPageSize()).toList();
                 default -> throw new UnsupportedOperationException(m.getName());
             };
         });
@@ -103,9 +116,10 @@ class FakeUsageRepos {
     UsageChatStatsRepository chatRepo() {
         return proxy(UsageChatStatsRepository.class, (p, m, args) -> {
             Instant start = (Instant) args[0], end = (Instant) args[1];
-            String user = (String) args[2];
+            String user = (String) args[2], model = (String) args[3];
             List<ChatSessionEntity> hits = chats.stream()
-                    .filter(c -> hit(c.getCreatedAt(), c.getCreatedBy(), start, end, user)).toList();
+                    .filter(c -> hit(c.getCreatedAt(), c.getCreatedBy(), start, end, user, model, c.getModel()))
+                    .toList();
             List<UsageLiteRow> lites = hits.stream()
                     .map(c -> lite(c.getCreatedAt(), c.getCostUsd(), c.getInputTokens(),
                             c.getOutputTokens(), c.getTurnCount())).toList();
@@ -114,10 +128,13 @@ class FakeUsageRepos {
                 case "groupByModel" -> group(lites, hits.stream().map(ChatSessionEntity::getModel).toList());
                 case "groupByUser" -> group(lites, hits.stream().map(ChatSessionEntity::getCreatedBy).toList());
                 case "liteRows" -> lites;
-                case "topByCost" -> hits.stream()
-                        .sorted(Comparator.comparingDouble((ChatSessionEntity c) ->
-                                c.getCostUsd() == null ? 0 : c.getCostUsd()).reversed())
-                        .limit(((Pageable) args[3]).getPageSize()).toList();
+                case "topByTokens" -> hits.stream()
+                        .sorted(Comparator.comparingLong((ChatSessionEntity c) ->
+                                        tokenSortKey(c.getInputTokens(), c.getOutputTokens(), c.getCacheReadTokens()))
+                                .reversed()
+                                .thenComparing(ChatSessionEntity::getCreatedAt,
+                                        Comparator.nullsLast(Comparator.reverseOrder())))
+                        .limit(((Pageable) args[4]).getPageSize()).toList();
                 default -> throw new UnsupportedOperationException(m.getName());
             };
         });

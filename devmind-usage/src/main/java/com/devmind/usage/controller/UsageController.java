@@ -37,8 +37,9 @@ public class UsageController {
     public UsageSummary summary(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
-            @RequestParam(required = false) String userId) {
-        return service.summary(from, to, userId);
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String model) {
+        return service.summary(from, to, userId, model);
     }
 
     @GetMapping("/breakdown")
@@ -46,14 +47,16 @@ public class UsageController {
             @RequestParam String dim,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
-            @RequestParam(required = false) String userId) {
-        return service.breakdown(dim, from, to, userId);
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String model) {
+        return service.breakdown(dim, from, to, userId, model);
     }
 
     @GetMapping("/daily")
     public List<UsageDailyPoint> daily(@RequestParam(defaultValue = "30") int days,
-                                       @RequestParam(required = false) String userId) {
-        return service.daily(Math.max(1, Math.min(days, 90)), userId);
+                                       @RequestParam(required = false) String userId,
+                                       @RequestParam(required = false) String model) {
+        return service.daily(Math.max(1, Math.min(days, 90)), userId, model);
     }
 
     @GetMapping("/top")
@@ -61,8 +64,9 @@ public class UsageController {
             @RequestParam(defaultValue = "20") int limit,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
-            @RequestParam(required = false) String userId) {
-        return service.top(Math.max(1, Math.min(limit, 100)), from, to, userId);
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String model) {
+        return service.top(Math.max(1, Math.min(limit, 100)), from, to, userId, model);
     }
 
     /** 请求日志：逐回合账本时间倒序分页（账本只含上线后的新数据，不回填存量）。 */

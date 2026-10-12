@@ -70,10 +70,11 @@ public class UsageStatsService {
 
     // ---------------- FR-01 总体汇总 ----------------
 
-    public UsageSummary summary(Instant start, Instant end, String userId) {
+    public UsageSummary summary(Instant start, Instant end, String userId, String model) {
         String user = resolveUser(userId);
-        UsageTotals s = sessionRepo.totals(start, end, user);
-        UsageTotals c = chatRepo.totals(start, end, user);
+        model = norm(model);
+        UsageTotals s = sessionRepo.totals(start, end, user, model);
+        UsageTotals c = chatRepo.totals(start, end, user, model);
         return new UsageSummary(s.costUsd() + c.costUsd(),
                 s.inputTokens() + c.inputTokens(), s.outputTokens() + c.outputTokens(),
                 s.cacheReadTokens() + c.cacheReadTokens(), s.cacheCreationTokens() + c.cacheCreationTokens(),
@@ -82,29 +83,35 @@ public class UsageStatsService {
 
     // ---------------- FR-02 多维分组 ----------------
 
-    public List<UsageBreakdownRow> breakdown(String dim, Instant start, Instant end, String userId) {
+    public List<UsageBreakdownRow> breakdown(String dim, Instant start, Instant end, String userId,
+                                             String model) {
         String user = resolveUser(userId);
+        model = norm(model);
         List<UsageBreakdownRow> rows = switch (dim == null ? "" : dim) {
-            case "requirement" -> breakdownRequirement(start, end, user);
-            case "project" -> breakdownProject(start, end, user);
+            case "requirement" -> breakdownRequirement(start, end, user, model);
+            case "project" -> breakdownProject(start, end, user, model);
             case "model" -> breakdownMerged(start, end, user,
-                    sessionRepo.groupByModel(start, end, user), chatRepo.groupByModel(start, end, user),
+                    sessionRepo.groupByModel(start, end, user, model),
+                    chatRepo.groupByModel(start, end, user, model),
                     k -> (k == null || k.isBlank()) ? LABEL_DEFAULT_MODEL : k);
             case "user" -> {
                 requireAdmin();
                 yield breakdownMerged(start, end, user,
-                        sessionRepo.groupByUser(start, end, user), chatRepo.groupByUser(start, end, user),
+                        sessionRepo.groupByUser(start, end, user, model),
+                        chatRepo.groupByUser(start, end, user, model),
                         this::userLabel);
             }
             default -> throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "dim 仅支持 requirement/project/model/user: " + dim);
         };
-        rows.sort(Comparator.comparingDouble(UsageBreakdownRow::costUsd).reversed());
+        // 排序键 = input+output+cacheRead（成本不可信不参展；口径同 topByTokens，勿改）
+        rows.sort(Comparator.comparingLong(
+                (UsageBreakdownRow r) -> r.inputTokens() + r.outputTokens() + r.cacheReadTokens()).reversed());
         return rows;
     }
 
-    private List<UsageBreakdownRow> breakdownRequirement(Instant start, Instant end, String user) {
-        List<UsageGroupRow> groups = sessionRepo.groupByRequirement(start, end, user);
+    private List<UsageBreakdownRow> breakdownRequirement(Instant start, Instant end, String user, String model) {
+        List<UsageGroupRow> groups = sessionRepo.groupByRequirement(start, end, user, model);
         Map<String, RequirementEntity> reqs = requirementRepo.findAllById(
                         groups.stream().map(UsageGroupRow::key).filter(k -> k != null && !k.isBlank()).toList())
                 .stream().collect(Collectors.toMap(RequirementEntity::getId, Function.identity()));
@@ -118,7 +125,7 @@ public class UsageStatsService {
                         r != null ? r.getProjectId() : null, g, true));
             }
         }
-        UsageTotals chats = chatRepo.totals(start, end, user);
+        UsageTotals chats = chatRepo.totals(start, end, user, model);
         if (chats.count() > 0) {
             rows.add(toRow(null, BUCKET_CHATS, null,
                     new UsageGroupRow(null, chats.count(), chats.turnCount(), chats.costUsd(),
@@ -128,8 +135,8 @@ public class UsageStatsService {
         return rows;
     }
 
-    private List<UsageBreakdownRow> breakdownProject(Instant start, Instant end, String user) {
-        List<UsageGroupRow> groups = sessionRepo.groupByProject(start, end, user);
+    private List<UsageBreakdownRow> breakdownProject(Instant start, Instant end, String user, String model) {
+        List<UsageGroupRow> groups = sessionRepo.groupByProject(start, end, user, model);
         Map<String, String> names = projectRepo.findAllById(
                         groups.stream().map(UsageGroupRow::key).filter(k -> k != null && !k.isBlank()).toList())
                 .stream().collect(Collectors.toMap(ProjectEntity::getId, ProjectEntity::getName));
@@ -140,7 +147,7 @@ public class UsageStatsService {
                     unassigned ? BUCKET_SESSIONS : names.getOrDefault(g.key(), g.key()),
                     unassigned ? null : g.key(), g, true));
         }
-        UsageTotals chats = chatRepo.totals(start, end, user);
+        UsageTotals chats = chatRepo.totals(start, end, user, model);
         if (chats.count() > 0) {
             rows.add(toRow(null, BUCKET_CHATS, null,
                     new UsageGroupRow(null, chats.count(), chats.turnCount(), chats.costUsd(),
@@ -149,7 +156,6 @@ public class UsageStatsService {
         }
         return rows;
     }
-
     /** 两源同 key 分组合并（model/user 维度会话与问答都参与）。labeler 负责空 key 与显示名。 */
     private List<UsageBreakdownRow> breakdownMerged(Instant start, Instant end, String user,
                                                     List<UsageGroupRow> sessionGroups,
@@ -200,15 +206,16 @@ public class UsageStatsService {
 
     // ---------------- FR-03 每日趋势 ----------------
 
-    public List<UsageDailyPoint> daily(int days, String userId) {
+    public List<UsageDailyPoint> daily(int days, String userId, String model) {
         String user = resolveUser(userId);
+        model = norm(model);
         ZoneId zone = ZoneId.systemDefault();
         LocalDate first = LocalDate.now().minusDays(days - 1L);
         Instant start = first.atStartOfDay(zone).toInstant();
         Map<LocalDate, double[]> cost = new HashMap<>();
         Map<LocalDate, long[]> tokensAndTurns = new HashMap<>();
-        List<UsageLiteRow> rows = new ArrayList<>(sessionRepo.liteRows(start, null, user));
-        rows.addAll(chatRepo.liteRows(start, null, user));
+        List<UsageLiteRow> rows = new ArrayList<>(sessionRepo.liteRows(start, null, user, model));
+        rows.addAll(chatRepo.liteRows(start, null, user, model));
         for (UsageLiteRow r : rows) {
             if (r.createdAt() == null) {
                 continue;
@@ -233,23 +240,26 @@ public class UsageStatsService {
 
     // ---------------- FR-04 用量 Top 明细 ----------------
 
-    public List<UsageTopRow> top(int limit, Instant start, Instant end, String userId) {
+    public List<UsageTopRow> top(int limit, Instant start, Instant end, String userId, String model) {
         String user = resolveUser(userId);
+        model = norm(model);
         PageRequest page = PageRequest.of(0, limit);
         List<UsageTopRow> rows = new ArrayList<>();
-        for (SessionEntity s : sessionRepo.topByCost(start, end, user, page)) {
+        for (SessionEntity s : sessionRepo.topByTokens(start, end, user, model, page)) {
             rows.add(new UsageTopRow("SESSION", s.getId(), s.getTaskSpec(),
                     s.getRequirementId(), null, s.getProjectId(), s.getModel(), s.getCreatedBy(),
                     s.getCreatedAt(), nz(s.getTurnCount()), nz(s.getCostUsd()), nz(s.getInputTokens()),
                     nz(s.getOutputTokens()), nz(s.getCacheReadTokens()), nz(s.getCacheCreationTokens())));
         }
-        for (ChatSessionEntity c : chatRepo.topByCost(start, end, user, page)) {
+        for (ChatSessionEntity c : chatRepo.topByTokens(start, end, user, model, page)) {
             rows.add(new UsageTopRow("CHAT", c.getId(), c.getTitle(),
                     null, null, null, c.getModel(), c.getCreatedBy(),
                     c.getCreatedAt(), nz(c.getTurnCount()), nz(c.getCostUsd()), nz(c.getInputTokens()),
                     nz(c.getOutputTokens()), nz(c.getCacheReadTokens()), nz(c.getCacheCreationTokens())));
         }
-        rows.sort(Comparator.comparingDouble(UsageTopRow::costUsd).reversed());
+        // 内存合并排序与 topByTokens 同键（input+output+cacheRead），勿改回成本
+        rows.sort(Comparator.comparingLong(
+                (UsageTopRow r) -> r.inputTokens() + r.outputTokens() + r.cacheReadTokens()).reversed());
         rows = rows.stream().limit(limit).collect(Collectors.toCollection(ArrayList::new));
         // 需求标题补全（内存 join，不 N+1）
         Map<String, String> titles = requirementRepo.findAllById(rows.stream()
@@ -278,6 +288,10 @@ public class UsageStatsService {
 
     private boolean isAdmin() {
         return UsageVisibility.isAdmin(identityService);
+    }
+
+    private static String norm(String v) {
+        return v == null || v.isBlank() ? null : v;
     }
 
     private static long nz(Number n) {
