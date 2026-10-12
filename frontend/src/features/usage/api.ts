@@ -7,6 +7,7 @@ export interface UsageFilter {
   from?: string
   to?: string
   userId?: string
+  model?: string
 }
 
 function query(p: Record<string, string | number | undefined>): string {
@@ -19,13 +20,17 @@ function query(p: Record<string, string | number | undefined>): string {
 }
 
 export const getUsageSummary = (f: UsageFilter = {}) =>
-  api.get<UsageSummary>(`/usage/summary${query({ from: f.from, to: f.to, userId: f.userId })}`)
+  api.get<UsageSummary>(`/usage/summary${query({ from: f.from, to: f.to, userId: f.userId, model: f.model })}`)
 
 export const getUsageBreakdown = (dim: UsageDim, f: UsageFilter = {}) =>
-  api.get<UsageBreakdownRow[]>(`/usage/breakdown${query({ dim, from: f.from, to: f.to, userId: f.userId })}`)
+  api.get<UsageBreakdownRow[]>(
+    `/usage/breakdown${query({ dim, from: f.from, to: f.to, userId: f.userId, model: f.model })}`,
+  )
 
 export const getUsageDaily = (days: number, f: UsageFilter = {}) =>
-  api.get<UsageDailyPoint[]>(`/usage/daily${query({ days, userId: f.userId })}`)
+  api.get<UsageDailyPoint[]>(`/usage/daily${query({ days, userId: f.userId, model: f.model })}`)
 
 export const getUsageTop = (limit: number, f: UsageFilter = {}) =>
-  api.get<UsageTopRow[]>(`/usage/top${query({ limit, from: f.from, to: f.to, userId: f.userId })}`)
+  api.get<UsageTopRow[]>(
+    `/usage/top${query({ limit, from: f.from, to: f.to, userId: f.userId, model: f.model })}`,
+  )

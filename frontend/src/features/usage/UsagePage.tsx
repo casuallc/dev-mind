@@ -2,7 +2,7 @@
 // 维度卡（按需求/项目/模型/用户 分组表 + Top 明细）。
 // 仅作为 /home 的页内视图嵌入（/usage 重定向到 /home?view=usage）：外层 Card body 统一滚动，本页根不再自带滚动容器。
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Card, Col, Row, Segmented, Select, Space, Statistic, Table, Tag, Tooltip, message } from 'antd'
+import { Button, Card, Col, Row, Segmented, Select, Space, Statistic, Table, Tag, Tooltip, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ReloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
@@ -23,6 +23,13 @@ const RANGE_OPTIONS = [
   { label: '近7天', value: '7d' },
   { label: '近30天', value: '30d' },
   { label: '全部', value: 'all' },
+]
+
+/** 自动刷新档位（秒），0=关 */
+const REFRESH_OPTIONS = [
+  { label: '刷新:关', value: 0 },
+  { label: '30s', value: 30 },
+  { label: '60s', value: 60 },
 ]
 
 /** 时段 → 筛选参数（from 含/to 不含，省略 to 即到当前；用量按 createdAt 归属） */
@@ -71,7 +78,11 @@ export default function UsagePage() {
   const admin = isAdmin()
   const [range, setRange] = useState<RangeKey>('30d')
   const [userId, setUserId] = useState<string | undefined>()
+  const [model, setModel] = useState<string | undefined>()
+  const [modelOptions, setModelOptions] = useState<string[]>([])
   const [users, setUsers] = useState<AuthUser[]>([])
+  const [refreshSec, setRefreshSec] = useState(0)
+  const [lastSync, setLastSync] = useState<dayjs.Dayjs | null>(null)
   const [loading, setLoading] = useState(false)
   const [summary, setSummary] = useState<UsageSummary | null>(null)
   const [daily, setDaily] = useState<UsageDailyPoint[]>([])
@@ -80,10 +91,10 @@ export default function UsagePage() {
   const [rows, setRows] = useState<UsageBreakdownRow[]>([])
   const [topRows, setTopRows] = useState<UsageTopRow[]>([])
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     const { days, ...filter } = rangeFilter(range)
-    const f: UsageFilter = { ...filter, userId }
+    const f: UsageFilter = { ...filter, userId, model }
     try {
       const [s, d] = await Promise.all([getUsageSummary(f), getUsageDaily(days, f)])
       setSummary(s)
@@ -93,14 +104,31 @@ export default function UsagePage() {
       } else {
         setRows(await getUsageBreakdown(dim, f))
       }
+      setLastSync(dayjs())
+      // 模型下拉的候选值（不带 model 过滤的全量分组；空模型「默认」桶不可筛选故排除）
+      if (!silent) {
+        getUsageBreakdown('model', { ...filter, userId })
+          .then(list => setModelOptions(list.map(r => r.key).filter((k): k is string => !!k)))
+          .catch(() => { /* 候选失败不挡主流程 */ })
+      }
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '加载用量统计失败')
+      if (!silent) message.error(e instanceof Error ? e.message : '加载用量统计失败')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
-  }, [range, userId, dim])
+  }, [range, userId, model, dim])
 
   useEffect(() => { void load() }, [load])
+
+  // 自动刷新：静默加载不闪 loading；页签隐藏时跳过（切回后下一拍自然补上）；
+  // 档位变更/切视图/卸载都会经依赖清理旧定时器
+  useEffect(() => {
+    if (refreshSec <= 0) return
+    const timer = setInterval(() => {
+      if (!document.hidden) void load(true)
+    }, refreshSec * 1000)
+    return () => clearInterval(timer)
+  }, [refreshSec, load])
 
   useEffect(() => {
     if (!admin) return
@@ -184,6 +212,15 @@ export default function UsagePage() {
           extra={
             <Space>
               <Segmented options={RANGE_OPTIONS} value={range} onChange={v => setRange(v as RangeKey)} />
+              <Select
+                allowClear
+                showSearch
+                placeholder="全部模型"
+                style={{ width: 150 }}
+                value={model}
+                onChange={setModel}
+                options={modelOptions.map(m => ({ label: m, value: m }))}
+              />
               {admin && (
                 <Select
                   allowClear
@@ -195,6 +232,16 @@ export default function UsagePage() {
                   options={users.map(u => ({ label: `${u.displayName || u.username}（${u.username}）`, value: u.username }))}
                   optionFilterProp="label"
                 />
+              )}
+              <Segmented
+                options={REFRESH_OPTIONS}
+                value={refreshSec}
+                onChange={v => setRefreshSec(v as number)}
+              />
+              {lastSync && (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  上次同步 {lastSync.format('HH:mm:ss')}
+                </Typography.Text>
               )}
               <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading} />
             </Space>
