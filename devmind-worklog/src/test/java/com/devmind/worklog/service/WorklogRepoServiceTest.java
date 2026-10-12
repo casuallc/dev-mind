@@ -311,4 +311,42 @@ class WorklogRepoServiceTest {
                 null, null, 100).isEmpty());
         assertTrue(repos.isEmpty());
     }
+
+    // ---------------- CAP-74 M3：通用文件原语 ----------------
+
+    @Test
+    void 文件原语_条目读写零变更跳过与日期扫描() throws Exception {
+        service.ensurePersonalRepo("alice");
+        var out = service.writeFile("alice", "entries/2026-10-12.md", "# x\n",
+                "worklog: entries 2026-10-12", WorklogRepoService.CommitSource.MANUAL, null, null);
+        assertTrue(out.committed());
+        assertEquals("alice/entries/2026-10-12.md", out.relPath());
+        assertEquals("# x\n", service.readFileIn("alice", "entries/2026-10-12.md").orElseThrow());
+        // 内容一致 → 零 commit
+        assertFalse(service.writeFile("alice", "entries/2026-10-12.md", "# x\n",
+                "worklog: entries 2026-10-12", WorklogRepoService.CommitSource.MANUAL, null, null).committed());
+        // GIT_IMPORT trailer 落 git log
+        service.writeFile("alice", "entries/2026-10-11.md", "# y\n",
+                "worklog: entries 2026-10-11 (git import)",
+                WorklogRepoService.CommitSource.GIT_IMPORT, null, null);
+        String log = runGit(aliceRepoDir(), "log", "--format=%B", "-1");
+        assertTrue(log.contains("DevMind-Source: git-import"));
+        // 日期扫描升序 + 范围过滤；无仓用户读路径不建仓
+        assertEquals(List.of(LocalDate.parse("2026-10-11"), LocalDate.parse("2026-10-12")),
+                service.listEntryDates("alice", null, null));
+        assertEquals(List.of(LocalDate.parse("2026-10-12")),
+                service.listEntryDates("alice", LocalDate.parse("2026-10-12"), null));
+        assertTrue(service.listEntryDates("bob", null, null).isEmpty());
+        assertTrue(service.readFileIn("bob", "entries/2026-10-12.md").isEmpty());
+    }
+
+    @Test
+    void 文件原语_非法相对路径拒绝() {
+        service.ensurePersonalRepo("alice");
+        assertThrows(DevMindException.class, () -> service.writeFile("alice", "../x.md", "x",
+                "s", WorklogRepoService.CommitSource.MANUAL, null, null));
+        assertThrows(DevMindException.class, () -> service.writeFile("alice", "..\\x.md", "x",
+                "s", WorklogRepoService.CommitSource.MANUAL, null, null));
+        assertThrows(DevMindException.class, () -> service.readFileIn("alice", "/abs.md"));
+    }
 }

@@ -61,7 +61,7 @@ public class WorklogRepoService {
 
     /** 提交来源（commit trailer DevMind-Source 取值） */
     public enum CommitSource {
-        AI("ai"), MANUAL("manual"), MIGRATION("migration"), INIT("init");
+        AI("ai"), MANUAL("manual"), MIGRATION("migration"), INIT("init"), GIT_IMPORT("git-import");
         private final String trailer;
         CommitSource(String trailer) { this.trailer = trailer; }
         public String trailer() { return trailer; }
@@ -476,15 +476,112 @@ public class WorklogRepoService {
                                       String sessionId, Instant commitDate) {
         String subdir = subdirOf(repo, username);
         String relPath = reportRelPath(subdir, kind, dateOrWeekStart);
+        return writeAndCommit(repo, username, relPath, contentMd,
+                commitMessage(kind, dateOrWeekStart, source, sessionId), commitDate);
+    }
+
+    // ---------------- 通用文件原语（CAP-74 M3 条目文件化；subdir 内相对名，如 entries/2026-10-12.md） ----------------
+
+    /** 写 subdir 内文件到操作人活动仓（条目 CRUD/导入统一入口）。 */
+    public WriteOutcome writeFile(String username, String relName, String content, String commitSubject,
+                                  CommitSource source, String sessionId, Instant commitDate) {
+        return writeFileTo(activeRepoFor(username), username, relName, content,
+                commitSubject, source, sessionId, commitDate);
+    }
+
+    /** 写 subdir 内文件到指定仓：与报告同语义（仓级锁内字节写 + commit，零变更跳过）。 */
+    public WriteOutcome writeFileTo(WorklogRepoEntity repo, String username, String relName, String content,
+                                    String commitSubject, CommitSource source, String sessionId,
+                                    Instant commitDate) {
+        String subdir = subdirOf(repo, username);
+        String relPath = safeRelName(subdir, relName);
+        return writeAndCommit(repo, username, relPath, content,
+                messageWithTrailers(commitSubject, source, sessionId), commitDate);
+    }
+
+    /** 读 subdir 内文件（不建仓；无仓/无文件 → empty）。读路径镜像 readReport（TTL fetch 在 findActiveRepo 内）。 */
+    public Optional<String> readFileIn(String username, String relName) {
+        Optional<WorklogRepoEntity> repo = findActiveRepo(username);
+        if (repo.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<String> subdir = memberRepository
+                .findByRepoIdAndUserId(repo.get().getId(), username)
+                .map(WorklogRepoMemberEntity::getSubdir);
+        if (subdir.isEmpty()) {
+            return Optional.empty();
+        }
+        Path file = repoDir(repo.get().getRepoKey()).resolve(safeRelName(subdir.get(), relName));
+        if (!Files.exists(file)) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(Files.readString(file, StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw new UncheckedIOException("工作日志读取失败: " + relName, e);
+        }
+    }
+
+    /** entries 目录日期扫描（升序；无仓/无目录 → 空）。from/to 闭区间可空。 */
+    public List<LocalDate> listEntryDates(String username, LocalDate from, LocalDate to) {
+        Optional<WorklogRepoEntity> repo = findActiveRepo(username);
+        if (repo.isEmpty()) {
+            return List.of();
+        }
+        Optional<String> subdir = memberRepository
+                .findByRepoIdAndUserId(repo.get().getId(), username)
+                .map(WorklogRepoMemberEntity::getSubdir);
+        if (subdir.isEmpty()) {
+            return List.of();
+        }
+        Path base = repoDir(repo.get().getRepoKey()).resolve(subdir.get()).resolve("entries");
+        if (!Files.isDirectory(base)) {
+            return List.of();
+        }
+        List<LocalDate> dates = new ArrayList<>();
+        try (Stream<Path> stream = Files.list(base)) {
+            for (Path f : stream.filter(Files::isRegularFile).toList()) {
+                Matcher m = DAILY_NAME.matcher(f.getFileName().toString());
+                if (!m.matches()) {
+                    continue;
+                }
+                LocalDate date = LocalDate.of(Integer.parseInt(m.group(1)),
+                        Integer.parseInt(m.group(2)), Integer.parseInt(m.group(3)));
+                if (from != null && date.isBefore(from)) {
+                    continue;
+                }
+                if (to != null && date.isAfter(to)) {
+                    continue;
+                }
+                dates.add(date);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("工作日志条目目录扫描失败: " + base, e);
+        }
+        dates.sort(Comparator.naturalOrder());
+        return dates;
+    }
+
+    /** subdir 内相对名校验（防 `..`/绝对路径逃逸），返回仓内完整相对路径。 */
+    private static String safeRelName(String subdir, String relName) {
+        if (relName == null || relName.isBlank()
+                || relName.contains("..") || relName.contains("\\") || relName.startsWith("/")) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "非法仓内相对路径: " + relName);
+        }
+        return subdir + "/" + relName;
+    }
+
+    /** 锁内字节写 + add/commit 共用骨架（报告/条目/骨架之外的全部平台写入收口于此）。 */
+    private WriteOutcome writeAndCommit(WorklogRepoEntity repo, String username, String relPath,
+                                        String content, String commitMessage, Instant commitDate) {
         return withLock(repo.getRepoKey(), () -> {
             Path dir = repoDir(repo.getRepoKey());
             Path file = dir.resolve(relPath);
             try {
                 Files.createDirectories(file.getParent());
-                Files.writeString(file, contentMd, StandardCharsets.UTF_8);
+                Files.writeString(file, content, StandardCharsets.UTF_8);
                 Path msgFile = dir.resolve(COMMIT_MSG_FILE);
-                Files.writeString(msgFile, commitMessage(kind, dateOrWeekStart, source, sessionId),
-                        StandardCharsets.UTF_8);
+                Files.writeString(msgFile, commitMessage, StandardCharsets.UTF_8);
                 try {
                     GitIdentityProvider.GitAuthor author = resolveAuthor(username, repo.getRemoteUrl());
                     GitRemoteOps.GitResult r = git.addCommit(dir.toString(), List.of(relPath), msgFile,
@@ -756,6 +853,11 @@ public class WorklogRepoService {
         String subject = kind == ReportKind.DAILY
                 ? "worklog: daily " + dateOrWeekStart
                 : "worklog: weekly " + weekFileName(dateOrWeekStart);
+        return messageWithTrailers(subject, source, sessionId);
+    }
+
+    /** commit message = 一行摘要 + trailer DevMind-Source/DevMind-Session（sessionId 空时不写）。 */
+    private static String messageWithTrailers(String subject, CommitSource source, String sessionId) {
         StringBuilder msg = new StringBuilder(subject).append("\n\nDevMind-Source: ")
                 .append(source.trailer()).append('\n');
         if (sessionId != null && !sessionId.isBlank()) {
