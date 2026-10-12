@@ -1,8 +1,10 @@
 # CAP-74 工作日志事实源服务端化（服务端 git 仓 + 去镜像去状态机 + 团队共享仓）
 
-> 能力 ID：CAP-74 ｜ 分类：组装层 ｜ 状态：**需求定稿（待实现）** ｜ 日期：2026-10-12
+> 能力 ID：CAP-74 ｜ 分类：组装层 ｜ 状态：**已实现（M1+M2 + runner 去 git 化）** ｜ 日期：2026-10-12
 > （2026-10-12 评审修订：技术选型定稿 git CLI 否决 JGit、M1 纳入最小服务端 push、
 > 补 active_repo_key 写入路由、迁移幂等判据与冲突解决 API、周报文件名定稿 yyyy-Www）
+> （2026-10-12 实现完毕：M1+M2 同批落地 + runner 草稿区去 git 化；M3 未做。
+> 实施偏差见文末 §9）
 > 重构 CAP-41 的存储与同步链路；条目管理/git 扫描导入（CAP-28 FR-03/04）、模板（CAP-41 FR-05）、
 > 生成会话链路（CAP-41 FR-03/04）保留为素材源与生成通道不动。
 
@@ -203,3 +205,38 @@ POST    /api/worklog/repos/{key}/remotes   团队仓绑定/成员管理（M2，M
 
 MVP 明确不做：index.json 或任何落盘索引（否决，见 §3）、团队仓的细粒度权限
 （交给远端 git 平台）、报告全文搜索（成瓶颈时另立 CAP 评估内存索引）。
+
+## 9. 实施偏差与运维说明（2026-10-12 实现后补记）
+
+相对 §5/§6 定稿口径的实际落地差异：
+
+1. **PUT 寻址由 id 改为日期/周**：`PUT /api/worklog/daily/{date}`、
+   `PUT /api/worklog/weekly/{weekStart}`（无 DB 后 Long id 无载体）。视图 DTO 删
+   `id`/`status`、增 `exists`；请求传 `status` 字段一律 400（防旧前端误以为确认生效）。
+2. **WorkspaceView 形态**：`exists/repoKey/remoteUrl/remoteBranch/lastCommitAt/
+   fetchStale/projectId/agentNodeId/nodeOnline`；remoteUrl/remoteBranch 恒展示个人仓
+   口径（push 只推个人仓）；nodeOnline 仅用于「离线仅影响 AI 生成与对话」提示。
+3. **settings 的 remote 两列废弃留存**：`worklog_user_settings.remote_url/remote_branch`
+   停读写（读写改路由 worklog_repos），ddl-auto 不删列，存量库手工清理口径：
+   `ALTER TABLE worklog_user_settings DROP COLUMN remote_url, DROP COLUMN remote_branch;`
+   （不清理无害）。`daily_reports`/`weekly_reports` 迁移后变死表，手工 DROP 同理。
+4. **active_repo_key 语义**：null=不变、空白串=回个人仓、其他=必须是本人所属仓
+   （成员校验失败 400）；写入目标随之切换，推送仍只推个人仓。
+5. **冲突解决双入口**：`POST /api/worklog/repos/{key}/resolve?strategy=ours|theirs`
+   之外，另有个人仓快捷端点 `POST /api/worklog/workspace/resolve?strategy=...`
+   （key 由当前用户推导，免前端拼 `personal-<username>`）。resolve = 锁内重新 fetch
+   + `merge -X ours|theirs --no-edit` + push，不留 MERGING。
+6. **成员/仓列表端点**：`GET /api/worklog/repos/mine`（我所属的仓，供设置页切换）、
+   `POST/DELETE /api/worklog/repos/{key}/members[/ {username}]`（仓主操作；§6 写的
+   `POST .../remotes` 未做——远端绑定沿用 settings 入口，写在个人仓行上）。
+7. **skill 种子不覆盖存量**：`WorklogAssetSeeder` 只在新装时落「不再自行 commit
+   工作区」的新版 skill/场景内容；存量部署需在管控台 Skill 页手工同步一次
+   （ seeds 幂等不覆盖是历史约定）。
+8. **runner 去 git 化随 jar 生效**：`prepareWorklog` 不再 git init（存量 git 草稿区
+   只补写 .gitignore）、`finishWorklog` 删除、`worklog_push` 帧 runner 侧改 no-op ack
+   （协议帧保留兼容）。**runner jar 重建后必须重启所有 runner 节点**（本机 WinSW
+   服务 devmind-agent / devmind-agent-194 及 140.88 等远程节点），否则运行中 jar
+   被覆盖会新旧类混装。
+9. **验收 6（egress 隧道）** 由 `GitRemoteOpsEgressTest` 单测覆盖（CAP-70 既有回归网），
+   E2E 不起真实隧道；验收 7 的带行迁移幂等由 `WorklogReportMigrationTest` 覆盖，
+   E2E（tests/e2e-cap74.py）钉「重启零新 commit」。
