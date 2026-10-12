@@ -1158,7 +1158,7 @@ public class RunnerWorkspace {
                 ## 目录契约
                 - `daily/yyyy-MM-dd.md`   日报草稿（一天一份）
                 - `weekly/yyyy-Www.md`    周报草稿（ISO 周，如 2026-W37）
-                - `entries/`              工作条目素材（可选）
+                - `entries/yyyy-MM-dd.md` 工作条目（每天一文件，条目以 `<!-- devmind:entry ... -->` 注释行定界；格式见 worklog skill）
                 - `.devmind/output/`      会话成稿回传目录（写这里的内容会自动回传管控台写入服务端仓）
                 """;
         try {

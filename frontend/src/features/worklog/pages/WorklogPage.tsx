@@ -357,7 +357,7 @@ export default function WorklogPage() {
       okText: '删除',
       okButtonProps: { danger: true },
       onOk: () =>
-        deleteEntry(e.id)
+        deleteEntry(e.workDate, e.id)
           .then(() => {
             message.success('已删除')
             // 删空当日当前页且非首页时回退一页，避免空白页

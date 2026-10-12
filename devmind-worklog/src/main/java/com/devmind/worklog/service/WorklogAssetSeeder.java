@@ -52,6 +52,18 @@ public class WorklogAssetSeeder {
             - 日报成稿写到 `.devmind/output/daily-yyyy-MM-dd.md`
             - 周报成稿写到 `.devmind/output/weekly-yyyy-Www.md`
             - 平台在会话结束时自动采集该目录写入服务端工作日志仓（git 历史留痕）；缺文件则本次生成判失败
+
+            ## 追加工作条目（如需）
+            工作条目也在服务端仓里，每天一个文件 `<你的目录>/entries/yyyy-MM-dd.md`。追加格式：
+            ```
+            <!-- devmind:entry id=<32位小写hex> type=DEV hours=1.5 source=AGENT repo=- sha=- req=- jira=- created=<ISO-8601 UTC 秒级> -->
+            ## 条目标题
+            正文（可空）。
+            ```
+            - id 用新生成的 32 位小写 hex（uuid 去横线）；type ∈ DEV/SUPPORT/MEETING/RESEARCH/OTHER；
+              hours 按 0.25 步进（15 分钟=0.25）；空值属性写 `-`
+            - 只在文件尾部追加新条目块，不要改动已有条目注释行与 preamble（首个注释之前的内容）
+            - 条目块之间空一行；正文里可以随便用 markdown（含 `##` 标题与代码块）
             """;
 
     /** 场景背景（装配进 CLAUDE.md「场景背景」节） */

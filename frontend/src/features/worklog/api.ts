@@ -32,9 +32,11 @@ export const listEntries = (from: string, to: string, page = 0, size = 20, keywo
       (keyword ? `&keyword=${encodeURIComponent(keyword)}` : ''),
   )
 export const createEntry = (body: EntryPayload) => api.post<WorklogEntry>('/worklog/entries', body)
-export const updateEntry = (id: number, body: EntryPayload) =>
+/** CAP-74 M3：id 为 uuid 字符串；寻址靠请求体 workDate（改期由后端跨文件搬移） */
+export const updateEntry = (id: string, body: EntryPayload) =>
   api.put<WorklogEntry>(`/worklog/entries/${id}`, body)
-export const deleteEntry = (id: number) => api.del(`/worklog/entries/${id}`)
+/** CAP-74 M3：删除按日期寻址（date 定位 day 文件） */
+export const deleteEntry = (date: string, id: string) => api.del(`/worklog/entries/${date}/${id}`)
 
 // ---- git 扫描导入 ----
 /** filter：NEW（仅未导入，弹窗默认）/ IMPORTED（仅已导入）/ ALL（后端缺省值）；诊断不受 filter 影响 */

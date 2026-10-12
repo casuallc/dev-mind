@@ -15,9 +15,9 @@ export interface WorklogRepo {
   subscribedBranches?: string[]
 }
 
-/** 工作条目（一天多条；工时按条目记，单位小时） */
+/** 工作条目（一天多条；工时按条目记，单位小时）。CAP-74 M3：id 从 DB 自增改为 uuid 字符串（仓文件元数据） */
 export interface WorklogEntry {
-  id: number
+  id: string
   workDate: string
   title: string
   content?: string
