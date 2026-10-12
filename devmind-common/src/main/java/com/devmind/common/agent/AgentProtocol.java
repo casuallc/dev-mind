@@ -84,7 +84,13 @@ public final class AgentProtocol {
     /** CAP-41 launch kind:"worklog"（runner 持久工作区）所需最低版本 */
     public static final int WORKLOG_KIND = 5;
 
-    /** CAP-41 M3 worklog_push 帧（工作日志持久工作区手动 push 远端）所需最低版本 */
+    /**
+     * CAP-41 M3 worklog_push 帧（工作日志持久工作区手动 push 远端）所需最低版本。
+     *
+     * @deprecated CAP-74 M3 起 worklog_push 下发链路整体下线（服务端仓直推取代 runner 侧 push；
+     *             runner 侧帧处理为 no-op ack 仅兼容旧服务端）。常量保留仅供版本表考古，勿再引用。
+     */
+    @Deprecated
     public static final int WORKLOG_PUSH_FRAMES = 6;
 
     /** CAP-42 每用户固定工作区（launch workspaceOwner）与 workspace_finalize 帧所需最低版本 */
@@ -141,7 +147,13 @@ public final class AgentProtocol {
     /** CAP-73 需求开发中验证（verify_push/verify_pack/verify_patch + verify_ack/verify_log 帧）所需最低版本 */
     public static final int VERIFY_FRAMES = 22;
 
-    /** CAP-41 M3 补丁：worklog_push 帧 gitAuthorName/gitAuthorEmail（自动合并署名）；可选字段不门控 */
+    /**
+     * CAP-41 M3 补丁：worklog_push 帧 gitAuthorName/gitAuthorEmail（自动合并署名）；可选字段不门控。
+     *
+     * @deprecated CAP-74 M3 起 worklog_push 下发链路整体下线；CURRENT 仍为 23 不回退
+     *             （版本号单调递增，废弃的只是该版本引入的字段语义）。
+     */
+    @Deprecated
     public static final int WORKLOG_PUSH_IDENTITY = 23;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */

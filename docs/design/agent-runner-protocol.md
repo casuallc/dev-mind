@@ -60,7 +60,7 @@
 | v3 | CAP-36 | exec/exec_log/exec_exit |
 | v4 | CAP-39 | collect_output/output_collected |
 | v5 | CAP-41 | launch `kind:"worklog"` + worklogOwner（**门控**） |
-| v6 | CAP-41 M3 | worklog_push/worklog_push_ack（**门控**） |
+| v6 | CAP-41 M3 | worklog_push/worklog_push_ack（**门控**；CAP-74 M3 起已下线，见 §4.5 废弃注） |
 | v7 | CAP-42 | launch `workspaceOwner` + workspace_finalize（**门控**） |
 | v8 | CAP-43 | 帧携带 `proxy{url,scopes}`（节点配了代理时**门控**） |
 | v9 | CAP-42 补丁 | workspace_release/workspace_release_ack（**门控**） |
@@ -74,7 +74,7 @@
 | v17 | CAP-59 | terminal_complete + terminal_cancel（**门控**）；terminal_exec_ack 增 cancelled（可选，不门控） |
 | v18 | CAP-65 | file/file_ack（节点文件浏览器，**门控**——roots 全量随帧下发，大文件走 HTTP 中转 `files-transfer`） |
 | v19 | CAP-42 补丁 | workspace_finalize 携带 deleteRemoteBranch（可选，不门控——老 runner 忽略 = 维持 push 分支供 diff 的现状） |
-| v23 | CAP-41 M3 补丁 | worklog_push 携带 gitAuthorName/gitAuthorEmail（自动合并署名，可选，不门控——老 runner 忽略/缺席 = 回退内置 devmind 署名） |
+| v23 | CAP-41 M3 补丁 | worklog_push 携带 gitAuthorName/gitAuthorEmail（可选，不门控；随 v6 帧于 CAP-74 M3 一并下线，CURRENT 仍为 23 不回退） |
 
 ## 4. 下行帧（server → runner）
 
@@ -119,7 +119,10 @@ force=true 先 killAll 排空（上限 30s）再下载。ack 落线后 spawn Sel
 ### 4.4 `collect_output` ⏳ v4+（ack: `output_collected`，等 75s）
 `{sessionId}`。运行中会话即时扫描 `.devmind/output/` 上传（先上传后 ack，服务端 ack 后回读无竞态）。
 
-### 4.5 `worklog_push` ⏳ v6+（ack: `worklog_push_ack`，等 330s）
+### 4.5 `worklog_push` ⏳ v6+（ack: `worklog_push_ack`，等 330s）——⚠️ CAP-74 M3 起已下线
+> **废弃注（2026-10-12）**：工作日志推送改服务端仓直推（fetch+merge+push，见 `WorklogRemoteBackupService`），
+> 服务端不再下发本帧，runner 侧帧处理为 no-op ack 仅兼容 CAP-74 前的旧服务端。本节保留供考古。
+
 `{requestId:"wp-<ms>-<owner>", worklogOwner, remoteUrl, branch, token?, gitAuthorName?(v23), gitAuthorEmail?(v23), proxy?}`。
 push 前先 fetch 对齐：远端领先/分叉自动 `merge --no-edit --allow-unrelated-histories -X ours`
 （署名 = 帧身份，缺席回退内置 devmind），合并失败 abort 回滚、工作区不留 MERGING 状态。
@@ -224,7 +227,7 @@ finalizer（push/清理）→ exit 帧。finalizer 失败不影响 exit 上行�
 | `launched` | launch | `{sessionId, ok, error?}` |
 | `upgrade_ack` | upgrade | `{ok, reason?, activeSessions?}`（reason="busy" 时带活跃数） |
 | `output_collected` | collect_output | `{sessionId, ok, error?}` |
-| `worklog_push_ack` | worklog_push | `{requestId, ok, detail?|error?}` |
+| `worklog_push_ack` | worklog_push | `{requestId, ok, detail?|error?}`（CAP-74 M3 起下线，旧 runner 残留 ack 落服务端 debug 日志） |
 | `workspace_finalize_ack` | workspace_finalize | `{requestId, ok, detail?|error?}` |
 | `workspace_release_ack` | workspace_release | `{requestId, ok, detail?|error?}` |
 | `workspace_query_ack` | workspace_query | `{requestId, ok, payload?|error?}` |

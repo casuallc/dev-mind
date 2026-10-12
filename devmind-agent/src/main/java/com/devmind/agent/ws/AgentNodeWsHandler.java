@@ -164,10 +164,7 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
             // CAP-39：产出按需回传 ack
             case "output_collected" -> registry.onOutputCollectedAck(frame.path("sessionId").asText(""),
                     frame.path("ok").asBoolean(false), frame.path("error").asText(null));
-            // CAP-41 M3：worklog 远端备份 ack
-            case "worklog_push_ack" -> registry.onWorklogPushAck(String.valueOf(node.getId()),
-                    frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),
-                    frame.path("detail").asText(null), frame.path("error").asText(null));
+            // CAP-41 M3 worklog_push_ack：CAP-74 M3 起下发链路已下线，旧 runner 残留 ack 落 default debug 日志
             // CAP-42：固定工作区手动收口 ack
             case "workspace_finalize_ack" -> registry.onWorkspaceFinalizeAck(String.valueOf(node.getId()),
                     frame.path("requestId").asText(""), frame.path("ok").asBoolean(false),

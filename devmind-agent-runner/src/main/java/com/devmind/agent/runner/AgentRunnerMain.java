@@ -647,7 +647,8 @@ public class AgentRunnerMain {
      * CAP-74：worklog 远端备份已服务端化（服务端仓 fetch+merge+push 直推，见
      * WorklogRemoteBackupService），runner 侧不再执行任何 git 操作。协议帧保留兼容
      * （CAP-74 前的旧服务端可能仍下发）：直接回 ok ack，detail 说明去向。
-     * RunnerWorkspace.pushWorklog 本体留 M3 统一下线。
+     * CAP-74 M3：服务端下发链路已整体下线（worklog_push 帧不再发出），本分支仅作
+     * 考古兜底保留——旧服务端残留下发的帧仍回 ok ack 不炸连接。
      */
     private static void handleWorklogPush(JsonNode frame, ServerConnection conn) {
         String requestId = frame.path("requestId").asText("");

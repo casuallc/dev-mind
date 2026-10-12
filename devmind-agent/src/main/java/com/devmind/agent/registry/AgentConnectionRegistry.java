@@ -29,7 +29,6 @@ import com.devmind.common.agent.TerminalExecResult;
 import com.devmind.common.agent.WorkspaceQueryResult;
 import com.devmind.common.agent.WorkspaceReleaseResult;
 import com.devmind.common.agent.WorkspaceStatusListener;
-import com.devmind.common.agent.WorklogPushResult;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.integration.GitIdentityProvider.GitAuthor;
@@ -78,10 +77,6 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
 
     /** CAP-39 collect_output 等待者：带 nodeId 供断连时批量失败。 */
     private record CollectWaiter(String nodeId, CompletableFuture<AgentCollectResult> done) {
-    }
-
-    /** CAP-41 M3 worklog_push 等待者：带 nodeId 供断连时批量失败。 */
-    private record WorklogPushWaiter(String nodeId, CompletableFuture<WorklogPushResult> done) {
     }
 
     /** CAP-42 workspace_finalize 等待者：带 nodeId 供断连时批量失败。 */
@@ -143,8 +138,6 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
     private final Map<String, ExecWaiter> pendingExecs = new ConcurrentHashMap<>();
     /** sessionId → collect_output 等待者（CAP-39） */
     private final Map<String, CollectWaiter> pendingCollects = new ConcurrentHashMap<>();
-    /** requestId → worklog_push 等待者（CAP-41 M3） */
-    private final Map<String, WorklogPushWaiter> pendingWorklogPushes = new ConcurrentHashMap<>();
     /** requestId → workspace_finalize 等待者（CAP-42） */
     private final Map<String, FinalizeWaiter> pendingFinalizes = new ConcurrentHashMap<>();
     /** requestId → workspace_release 等待者（CAP-42 删除会话释放固定工作区） */
@@ -222,12 +215,6 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         for (Map.Entry<String, CollectWaiter> e : pendingCollects.entrySet()) {
             if (e.getValue().nodeId().equals(nodeId) && pendingCollects.remove(e.getKey(), e.getValue())) {
                 e.getValue().done().complete(new AgentCollectResult(false, "节点断连，产出回传中断"));
-            }
-        }
-        // CAP-41 M3：断线即失败该节点进行中的 worklog push（ack 不会再来）
-        for (Map.Entry<String, WorklogPushWaiter> e : pendingWorklogPushes.entrySet()) {
-            if (e.getValue().nodeId().equals(nodeId) && pendingWorklogPushes.remove(e.getKey(), e.getValue())) {
-                e.getValue().done().complete(WorklogPushResult.failed("节点断连，远端备份中断"));
             }
         }
         // CAP-42：断线即失败该节点进行中的工作区收口（ack 不会再来）
@@ -357,15 +344,6 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         CollectWaiter w = pendingCollects.remove(sessionId);
         if (w != null) {
             w.done().complete(new AgentCollectResult(ok, error));
-        }
-    }
-
-    /** CAP-41 M3：worklog_push_ack 上行帧 → 完成等待 future。 */
-    public void onWorklogPushAck(String nodeId, String requestId, boolean ok, String detail, String error) {
-        touch(nodeId);
-        WorklogPushWaiter w = pendingWorklogPushes.remove(requestId);
-        if (w != null) {
-            w.done().complete(ok ? WorklogPushResult.ok(detail) : WorklogPushResult.failed(error));
         }
     }
 
@@ -1085,65 +1063,6 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
                     "等待产出回传确认超时/异常: " + e.getMessage(), e);
         } finally {
             pendingCollects.remove(sessionId);
-        }
-    }
-
-    /**
-     * CAP-41 M3：下发 worklog_push 帧并阻塞等 worklog_push_ack（镜像 collect_output 模式）。
-     * 协议门控：runner 低于 v6 直接 409 提示升级；等待上限 330s（runner 侧 git push 超时
-     * 300s + 余量）。token 仅随帧传输，严禁进日志（同 CAP-25 launch repo 块红线）。
-     */
-    @Override
-    public WorklogPushResult pushWorklog(String nodeId, String worklogOwner, String remoteUrl,
-                                         String branch, String token, GitAuthor operator) {
-        if (!supports(nodeId, AgentProtocol.WORKLOG_PUSH_FRAMES)) {
-            throw new DevMindException(ErrorCode.CONFLICT,
-                    "节点 " + nodeId + " 的 runner 协议版本过低（worklog 远端备份需 v"
-                            + AgentProtocol.WORKLOG_PUSH_FRAMES + "+），请到节点页升级 runner");
-        }
-        WebSocketSession ws = requireConnection(nodeId);
-        String requestId = "wp-" + System.currentTimeMillis() + "-" + worklogOwner;
-        CompletableFuture<WorklogPushResult> done = new CompletableFuture<>();
-        pendingWorklogPushes.put(requestId, new WorklogPushWaiter(nodeId, done));
-        Map<String, Object> frame = new LinkedHashMap<>();
-        frame.put("type", "worklog_push");
-        frame.put("requestId", requestId);
-        frame.put("worklogOwner", worklogOwner);
-        frame.put("remoteUrl", remoteUrl);
-        frame.put("branch", branch);
-        if (token != null && !token.isBlank()) {
-            frame.put("token", token);
-        }
-        // v23：自动合并署名（可选字段不门控；老 runner 忽略回退内置署名）
-        if (operator != null) {
-            if (operator.name() != null && !operator.name().isBlank()) {
-                frame.put("gitAuthorName", operator.name());
-            }
-            if (operator.email() != null && !operator.email().isBlank()) {
-                frame.put("gitAuthorEmail", operator.email());
-            }
-        }
-        putProxy(frame, nodeId);
-        long startMs = System.currentTimeMillis();
-        try {
-            send(ws, frame);
-            WorklogPushResult r = done.get(330, TimeUnit.SECONDS);
-            auditCommand("WORKLOG_PUSH", nodeId, worklogOwner, r.ok(), startMs,
-                    "branch=" + branch + (r.error() != null ? " err=" + r.error() : ""));
-            return r;
-        } catch (DevMindException e) {
-            throw e;
-        } catch (java.util.concurrent.TimeoutException e) {
-            WorklogPushResult r = WorklogPushResult.failed("等待 runner worklog_push_ack 超时（runner 无响应）");
-            auditCommand("WORKLOG_PUSH", nodeId, worklogOwner, false, startMs,
-                    "branch=" + branch + " err=" + r.error());
-            return r;
-        } catch (Exception e) {
-            auditCommand("WORKLOG_PUSH", nodeId, worklogOwner, false, startMs,
-                    "branch=" + branch + " 下发异常: " + e.getMessage());
-            throw new DevMindException(ErrorCode.CONFLICT, "worklog push 下发异常: " + e.getMessage(), e);
-        } finally {
-            pendingWorklogPushes.remove(requestId);
         }
     }
 
