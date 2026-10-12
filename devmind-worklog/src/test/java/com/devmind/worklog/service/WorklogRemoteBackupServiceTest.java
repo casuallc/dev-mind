@@ -97,7 +97,7 @@ class WorklogRemoteBackupServiceTest {
         when(settingsRepository.findByUserId(anyString())).thenReturn(Optional.empty());
 
         repoService = new WorklogRepoService(props, repoRepository, memberRepository,
-                settingsRepository, git, nullIdentityProvider());
+                settingsRepository, git, nullIdentityProvider(), mockProvider(null));
 
         IdentityService identity = mock(IdentityService.class);
         when(identity.currentActor()).thenReturn("alice");

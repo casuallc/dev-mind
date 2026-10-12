@@ -11,15 +11,16 @@ import java.time.Instant;
  * @param remoteUrl    个人仓绑定的远端备份 URL（null = 未绑定）
  * @param remoteBranch 远端目标分支
  * @param lastCommitAt 活动仓 HEAD 最近提交时间（null = 空仓/未知）
+ * @param fetchStale   读路径后台 fetch 失败/冲突降级（fail-visible 提示；null/false = 正常或未绑远端）
  * @param projectId    WORKLOG 项目 id（null = 未建——无默认节点时仓先行、项目降级缺位）
  * @param agentNodeId  亲和节点 id（创建时固化，不可改）
  * @param nodeOnline   亲和节点当前是否在线（null = 未知/无节点；离线仅影响 AI 生成与对话）
  */
 public record WorkspaceView(boolean exists, String repoKey, String remoteUrl, String remoteBranch,
-                            Instant lastCommitAt, String projectId, String agentNodeId,
-                            Boolean nodeOnline) {
+                            Instant lastCommitAt, Boolean fetchStale,
+                            String projectId, String agentNodeId, Boolean nodeOnline) {
 
     public static WorkspaceView absent() {
-        return new WorkspaceView(false, null, null, null, null, null, null, null);
+        return new WorkspaceView(false, null, null, null, null, null, null, null, null);
     }
 }

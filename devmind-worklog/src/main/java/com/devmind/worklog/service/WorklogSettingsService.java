@@ -98,6 +98,24 @@ public class WorklogSettingsService {
         if (remoteTouched) {
             repoService.saveRepo(repo);
         }
+        // CAP-74 M2：活动仓切换（null = 不变；空白串 = 回个人仓；否则必须仓存在且本人是成员）
+        if (req.activeRepoKey() != null) {
+            String key = req.activeRepoKey().trim();
+            if (key.isEmpty()) {
+                e.setActiveRepoKey(null);
+            } else {
+                var target = repoService.findRepo(key)
+                        .orElseThrow(() -> new com.devmind.common.exception.DevMindException(
+                                com.devmind.common.exception.ErrorCode.BAD_REQUEST,
+                                "工作日志仓不存在: " + key));
+                if (!repoService.isMember(target, me)) {
+                    throw new com.devmind.common.exception.DevMindException(
+                            com.devmind.common.exception.ErrorCode.BAD_REQUEST,
+                            "你不是仓 " + key + " 的成员，不能设为活动仓");
+                }
+                e.setActiveRepoKey(key);
+            }
+        }
         e.setUpdatedAt(Instant.now());
         SettingsView saved = SettingsView.of(settingsRepo.save(e));
         return withGlobalLabels(repo != null

@@ -87,7 +87,8 @@ class WorklogRepoServiceTest {
         WorklogProperties props = new WorklogProperties();
         props.setRepoRoot(repoRoot.toString());
         ops = new GitRemoteOps(nullIdentityProvider());
-        service = new WorklogRepoService(props, repoRepo, memberRepo, settingsRepo, ops, nullIdentityProvider());
+        service = new WorklogRepoService(props, repoRepo, memberRepo, settingsRepo, ops,
+                nullIdentityProvider(), nullIdentityProvider());
     }
 
     @SuppressWarnings("unchecked")

@@ -91,6 +91,7 @@ public class WorklogWorkspaceService {
                 repo == null ? null : repo.getRepoKey(),
                 remoteUrl, remoteBranch,
                 repo == null ? null : repoService.lastCommitAt(repo),
+                repo == null ? null : repoService.isFetchStale(repo.getRepoKey()),
                 project == null ? null : project.getId(),
                 nodeId, online);
     }

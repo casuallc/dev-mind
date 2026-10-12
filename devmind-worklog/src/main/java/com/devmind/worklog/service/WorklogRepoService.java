@@ -3,6 +3,7 @@ package com.devmind.worklog.service;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.integration.GitIdentityProvider;
+import com.devmind.common.integration.RepoGitGateway;
 import com.devmind.integration.service.GitRemoteOps;
 import com.devmind.worklog.config.WorklogProperties;
 import com.devmind.worklog.model.WorklogRepoEntity;
@@ -94,22 +95,37 @@ public class WorklogRepoService {
     private final WorklogUserSettingsRepository settingsRepository;
     private final GitRemoteOps git;
     private final ObjectProvider<GitIdentityProvider> identityProvider;
+    private final ObjectProvider<RepoGitGateway> gitGatewayProvider;
 
     /** 仓级锁（单实例语义；仓数量有限不清理） */
     private final ConcurrentHashMap<String, ReentrantLock> locks = new ConcurrentHashMap<>();
+
+    /** 读路径 TTL fetch 状态（C6）：仓绑定远端后读操作触发后台 fetch+merge，60s 节流 */
+    private static final long FETCH_TTL_MS = 60_000;
+    private final ConcurrentHashMap<String, FetchState> fetchStates = new ConcurrentHashMap<>();
+    /** 测试钩子：覆盖 TTL（默认 {@link #FETCH_TTL_MS}），否则 60s 无法单测 */
+    private long fetchTtlMs = FETCH_TTL_MS;
+
+    void overrideFetchTtlForTest(long ttlMs) {
+        this.fetchTtlMs = ttlMs;
+    }
+
+    private record FetchState(long at, boolean stale) {}
 
     public WorklogRepoService(WorklogProperties properties,
                               WorklogRepoRepository repoRepository,
                               WorklogRepoMemberRepository memberRepository,
                               WorklogUserSettingsRepository settingsRepository,
                               GitRemoteOps git,
-                              ObjectProvider<GitIdentityProvider> identityProvider) {
+                              ObjectProvider<GitIdentityProvider> identityProvider,
+                              ObjectProvider<RepoGitGateway> gitGatewayProvider) {
         this.properties = properties;
         this.repoRepository = repoRepository;
         this.memberRepository = memberRepository;
         this.settingsRepository = settingsRepository;
         this.git = git;
         this.identityProvider = identityProvider;
+        this.gitGatewayProvider = gitGatewayProvider;
     }
 
     // ---------------- 仓锁 ----------------
@@ -203,7 +219,7 @@ public class WorklogRepoService {
         return ensurePersonalRepo(username);
     }
 
-    /** 读路径用：活动仓查找（不建仓——个人仓未建 = 尚无报告） */
+    /** 读路径用：活动仓查找（不建仓——个人仓未建 = 尚无报告）；绑定远端的仓顺带触发 TTL 后台 fetch */
     public Optional<WorklogRepoEntity> findActiveRepo(String username) {
         String activeKey = settingsRepository.findByUserId(username)
                 .map(WorklogUserSettingsEntity::getActiveRepoKey)
@@ -211,10 +227,18 @@ public class WorklogRepoService {
         if (activeKey != null) {
             Optional<WorklogRepoEntity> active = repoRepository.findByRepoKey(activeKey.trim());
             if (active.isPresent()) {
+                maybeFetchAsync(active.get());
                 return active;
             }
         }
-        return repoRepository.findByRepoKey(personalRepoKey(username));
+        Optional<WorklogRepoEntity> personal = repoRepository.findByRepoKey(personalRepoKey(username));
+        personal.ifPresent(this::maybeFetchAsync);
+        return personal;
+    }
+
+    /** 按键查仓（不建仓；设置校验等读路径用） */
+    public Optional<WorklogRepoEntity> findRepo(String repoKey) {
+        return repoRepository.findByRepoKey(repoKey);
     }
 
     /** 个人仓查找（不建仓；设置页读远端绑定用） */
@@ -246,6 +270,188 @@ public class WorklogRepoService {
         }
         try {
             return Instant.parse(r.output().trim());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ---------------- 团队仓（CAP-74 M2） ----------------
+
+    /** 仓列表行（设置页「活动仓」切换用） */
+    public record RepoSummary(String repoKey, String createdBy, boolean personal,
+                              String remoteUrl, String remoteBranch, Instant lastCommitAt) {}
+
+    /** 成员行（成员管理展示用） */
+    public record RepoMemberView(String username, boolean owner) {}
+
+    /** 我所属的仓列表（成员关系驱动，含个人仓与团队仓） */
+    public List<RepoSummary> listMyRepos(String username) {
+        List<RepoSummary> out = new ArrayList<>();
+        for (WorklogRepoMemberEntity m : memberRepository.findByUserId(username)) {
+            Optional<WorklogRepoEntity> repo = repoRepository.findById(m.getRepoId());
+            if (repo.isEmpty()) {
+                continue;
+            }
+            WorklogRepoEntity r = repo.get();
+            out.add(new RepoSummary(r.getRepoKey(), r.getCreatedBy(),
+                    r.getRepoKey().equals(personalRepoKey(username)),
+                    r.getRemoteUrl(), r.getRemoteBranch(), lastCommitAt(r)));
+        }
+        out.sort(Comparator.comparing(RepoSummary::repoKey));
+        return out;
+    }
+
+    /** 仓成员列表（仓成员可看） */
+    public List<RepoMemberView> listMembers(String repoKey, String actor) {
+        WorklogRepoEntity repo = requireRepo(repoKey);
+        if (!isMember(repo, actor)) {
+            throw new DevMindException(ErrorCode.FORBIDDEN, "你不是仓 " + repoKey + " 的成员");
+        }
+        return memberRepository.findByRepoId(repo.getId()).stream()
+                .map(m -> new RepoMemberView(m.getUserId(), m.getUserId().equals(repo.getCreatedBy())))
+                .sorted(Comparator.comparing(RepoMemberView::username))
+                .toList();
+    }
+
+    /**
+     * 仓主加成员（按 username）：锁内先写该成员骨架子目录（daily/weekly .gitkeep）并 commit，
+     * 再落成员行——目录先存在于仓，读路径即时可见。
+     */
+    public void addMember(String repoKey, String actor, String username) {
+        WorklogRepoEntity repo = requireRepo(repoKey);
+        requireOwner(repo, actor);
+        if (username == null || username.isBlank()
+                || username.contains("..") || username.contains("/") || username.contains("\\")) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "非法成员用户名: " + username);
+        }
+        withLock(repoKey, () -> {
+            if (memberRepository.findByRepoIdAndUserId(repo.getId(), username).isPresent()) {
+                throw new DevMindException(ErrorCode.CONFLICT,
+                        "用户 " + username + " 已是仓 " + repoKey + " 的成员");
+            }
+            commitMemberSkeleton(repoDir(repoKey), username);
+            WorklogRepoMemberEntity m = new WorklogRepoMemberEntity();
+            m.setRepoId(repo.getId());
+            m.setUserId(username);
+            m.setSubdir(username);
+            m.setCreatedAt(Instant.now());
+            memberRepository.save(m);
+            log.info("工作日志仓加成员: repo={} member={} by={}", repoKey, username, actor);
+            return null;
+        });
+    }
+
+    /** 仓主移除成员（仅删成员行，仓内历史文件保留——git log 审计不受影响） */
+    public void removeMember(String repoKey, String actor, String username) {
+        WorklogRepoEntity repo = requireRepo(repoKey);
+        requireOwner(repo, actor);
+        if (repo.getCreatedBy().equals(username)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "不能移除仓主本人");
+        }
+        WorklogRepoMemberEntity m = memberRepository.findByRepoIdAndUserId(repo.getId(), username)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND,
+                        "用户 " + username + " 不是仓 " + repoKey + " 的成员"));
+        memberRepository.delete(m);
+        log.info("工作日志仓移除成员: repo={} member={} by={}", repoKey, username, actor);
+    }
+
+    private static void requireOwner(WorklogRepoEntity repo, String actor) {
+        if (!repo.getCreatedBy().equals(actor)) {
+            throw new DevMindException(ErrorCode.FORBIDDEN,
+                    "只有仓主 " + repo.getCreatedBy() + " 能管理仓 " + repo.getRepoKey() + " 的成员");
+        }
+    }
+
+    // ---------------- 读路径 TTL fetch（C6） ----------------
+
+    /** 空间视图 fail-visible 提示位：后台 fetch 失败/冲突降级后置 true */
+    public boolean isFetchStale(String repoKey) {
+        FetchState s = fetchStates.get(repoKey);
+        return s != null && s.stale();
+    }
+
+    /** 读操作触发：绑定远端且距上次 fetch 超 TTL → 虚拟线程后台 fetch+merge（不阻塞渲染） */
+    private void maybeFetchAsync(WorklogRepoEntity repo) {
+        if (repo.getRemoteUrl() == null || repo.getRemoteUrl().isBlank()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        FetchState s = fetchStates.get(repo.getRepoKey());
+        if (s != null && now - s.at() < fetchTtlMs) {
+            return;
+        }
+        // 先占位节流（并发读只放一个后台任务）；终态由 backgroundFetch 覆写
+        fetchStates.put(repo.getRepoKey(), new FetchState(now, s != null && s.stale()));
+        Thread.ofVirtual().start(() -> backgroundFetch(repo));
+    }
+
+    /** 锁内 fetchAllRefs + mergeNoEdit；冲突/失败 abort 降级并置 stale（fail-visible，不阻塞读） */
+    private void backgroundFetch(WorklogRepoEntity repo) {
+        String key = repo.getRepoKey();
+        boolean stale;
+        try {
+            String url = repo.getRemoteUrl();
+            String branch = repo.getRemoteBranch() == null || repo.getRemoteBranch().isBlank()
+                    ? LOCAL_BRANCH : repo.getRemoteBranch().trim();
+            Optional<String> token = resolveFetchToken(repo, url);
+            if (token == null) {
+                // 无任何成员持该 host 的有效 PAT：跳过（保留原 stale 位，不告警）
+                return;
+            }
+            stale = withLock(key, () -> {
+                String dir = repoDir(key).toString();
+                GitRemoteOps.GitResult fetch = git.fetchAllRefs(dir, url, token.orElse(null));
+                if (!fetch.ok()) {
+                    log.warn("工作日志仓后台 fetch 失败: repo={} err={}", key, fetch.output());
+                    return true;
+                }
+                GitRemoteOps.GitResult merge = git.mergeNoEdit(dir, "origin/" + branch);
+                if (!merge.ok()) {
+                    git.mergeAbort(dir); // 冲突降级：清 MERGING，等 push 侧显式 resolve
+                    log.warn("工作日志仓后台合并冲突（已 abort，push 时需显式解决）: repo={}", key);
+                    return true;
+                }
+                return false;
+            });
+        } catch (Exception e) {
+            log.warn("工作日志仓后台 fetch 异常: repo={} err={}", key, e.getMessage());
+            stale = true;
+        }
+        fetchStates.put(key, new FetchState(System.currentTimeMillis(), stale));
+    }
+
+    /**
+     * fetch 凭证：file:// 匿名（empty）；http/https 按 host 经 CAP-35 个人 PAT 解析——
+     * 仓主优先、任一持有效 PAT 的成员兜底；均无 → null（跳过 fetch）。均在后台线程调用，无 SecurityContext。
+     */
+    private Optional<String> resolveFetchToken(WorklogRepoEntity repo, String url) {
+        try {
+            URI uri = URI.create(url.trim());
+            if ("file".equalsIgnoreCase(uri.getScheme())) {
+                return Optional.empty();
+            }
+            String host = uri.getHost();
+            if (host == null) {
+                return null;
+            }
+            RepoGitGateway gateway = gitGatewayProvider.getIfAvailable();
+            if (gateway == null) {
+                return null;
+            }
+            Optional<String> ownerToken = gateway.resolveToken(repo.getCreatedBy(), host, null);
+            if (ownerToken.isPresent()) {
+                return ownerToken;
+            }
+            for (WorklogRepoMemberEntity m : memberRepository.findByRepoId(repo.getId())) {
+                if (m.getUserId().equals(repo.getCreatedBy())) {
+                    continue;
+                }
+                Optional<String> t = gateway.resolveToken(m.getUserId(), host, null);
+                if (t.isPresent()) {
+                    return t;
+                }
+            }
+            return null;
         } catch (Exception e) {
             return null;
         }
@@ -473,6 +679,35 @@ public class WorklogRepoService {
                 .map(WorklogRepoMemberEntity::getSubdir)
                 .orElseThrow(() -> new DevMindException(ErrorCode.CONFLICT,
                         "用户 " + username + " 不是仓 " + repo.getRepoKey() + " 的成员"));
+    }
+
+    /** 成员骨架子目录 commit（加成员/建仓共用）：daily/weekly .gitkeep + 一次性提交 */
+    private void commitMemberSkeleton(Path dir, String username) {
+        try {
+            Path dailyKeep = dir.resolve(username + "/daily/.gitkeep");
+            Path weeklyKeep = dir.resolve(username + "/weekly/.gitkeep");
+            Files.createDirectories(dailyKeep.getParent());
+            Files.createDirectories(weeklyKeep.getParent());
+            Files.writeString(dailyKeep, "", StandardCharsets.UTF_8);
+            Files.writeString(weeklyKeep, "", StandardCharsets.UTF_8);
+            Path msgFile = dir.resolve(COMMIT_MSG_FILE);
+            Files.writeString(msgFile, "worklog: add member " + username + "\n\nDevMind-Source: init\n",
+                    StandardCharsets.UTF_8);
+            try {
+                GitIdentityProvider.GitAuthor author = resolveAuthor(username, null);
+                GitRemoteOps.GitResult r = git.addCommit(dir.toString(), List.of(
+                                username + "/daily/.gitkeep",
+                                username + "/weekly/.gitkeep"),
+                        msgFile, author.name(), author.email(), null);
+                if (!r.ok()) {
+                    throw new DevMindException(ErrorCode.INTERNAL, "成员骨架提交失败: " + r.output());
+                }
+            } finally {
+                Files.deleteIfExists(msgFile);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("成员骨架写入失败: " + username, e);
+        }
     }
 
     /** 骨架 commit：README（目录契约）+ 本人 daily/weekly .gitkeep */
