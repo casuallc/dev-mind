@@ -718,131 +718,6 @@ class RunnerWorkspaceTest {
         git(seed, "push", "origin", "main");
     }
 
-    /** CAP-74 起 prepareWorklog 不再 git init；pushWorklog 仅服务存量 git 空间，测试自行初始化 */
-    private static void initLegacyGitSpace(Path dir) throws Exception {
-        git(dir, "init", "-b", "main");
-        git(dir, "add", "-A");
-        git(dir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init");
-    }
-
-    @Test
-    void worklogPushLifecycle() throws Exception {
-        // CAP-41 M3：file:// bare 库当远端（匿名通道），覆盖 绑定 origin → 首次 push →
-        // 增量 push → up-to-date → ssh 拒绝（CAP-74 起 pushWorklog 仅服务存量 git 空间，M3 下线）
-        Path origin = tmp.resolve("worklog-origin.git");
-        git(tmp, "init", "--bare", "-b", "main", origin.toString());
-
-        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
-        Path dir = ws.prepareWorklog(tmp.resolve("worklog"), "alice");
-        assertFalse(Files.exists(dir.resolve(".git")), "CAP-74 起为纯草稿区，不再 git init");
-        initLegacyGitSpace(dir); // 模拟 CAP-74 前的存量 git 空间
-
-        // 首次 push：origin 幂等绑定 + main 分支建立，骨架提交上远端
-        RunnerWorkspace.WorklogPushOutcome first =
-                ws.pushWorklog(dir, origin.toUri().toString(), "main", null);
-        assertEquals(0, first.exit(), first.output());
-        assertTrue(git(origin, "show", "main:README.md").contains("工作日志空间"));
-        // origin URL 为 cleanUrl（本测试无 token，验证绑定逻辑本身）
-        assertEquals(origin.toUri().toString(), gitOut(dir, "remote", "get-url", "origin"));
-
-        // 增量：新成稿 commit 后 push，远端可见
-        Files.writeString(dir.resolve("daily").resolve("2026-09-14.md"), "# 日报");
-        git(dir, "add", "-A");
-        git(dir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "docs: daily 2026-09-14");
-        RunnerWorkspace.WorklogPushOutcome second =
-                ws.pushWorklog(dir, origin.toUri().toString(), "main", null);
-        assertEquals(0, second.exit(), second.output());
-        assertEquals("# 日报", git(origin, "show", "main:daily/2026-09-14.md").trim());
-
-        // up-to-date 也算成功
-        RunnerWorkspace.WorklogPushOutcome third =
-                ws.pushWorklog(dir, origin.toUri().toString(), "main", null);
-        assertEquals(0, third.exit(), third.output());
-
-        // 未初始化目录 / ssh URL 明确拒绝
-        assertTrue(ws.pushWorklog(tmp.resolve("nope"), origin.toUri().toString(), "main", null).exit() != 0);
-        RunnerWorkspace.WorklogPushOutcome ssh = ws.pushWorklog(dir, "git@example.com:a/b.git", "main", null);
-        assertTrue(ssh.exit() != 0);
-        assertTrue(ssh.output().contains("http"), ssh.output());
-    }
-
-    @Test
-    void worklogPushMergesRemoteDivergence() throws Exception {
-        // 远端分叉自愈：首推后另一处向同分支推了一笔（模拟他机推送/网页端改动），
-        // pushWorklog 应先 fetch 合并再推，远端同时保留两边内容，工作区不留 MERGING 状态
-        Path origin = tmp.resolve("worklog-origin-diverge.git");
-        git(tmp, "init", "--bare", "-b", "main", origin.toString());
-
-        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
-        Path dir = ws.prepareWorklog(tmp.resolve("worklog-d"), "carol");
-        initLegacyGitSpace(dir);
-        RunnerWorkspace.WorklogPushOutcome first =
-                ws.pushWorklog(dir, origin.toUri().toString(), "main", null);
-        assertEquals(0, first.exit(), first.output());
-
-        // 另一处克隆推一笔本地没有的提交
-        Path other = tmp.resolve("other-clone");
-        git(tmp, "clone", origin.toString(), other.toString());
-        Files.writeString(other.resolve("REMOTE.md"), "remote-only");
-        git(other, "add", ".");
-        git(other, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "remote commit");
-        git(other, "push", "origin", "main");
-
-        // 本地也落一笔（真分叉；否则 merge 退化为快进、不产生合并提交）
-        Files.writeString(dir.resolve("daily").resolve("2026-09-15.md"), "# 本地日报");
-        git(dir, "add", "-A");
-        git(dir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "docs: daily 2026-09-15");
-
-        // 本地再推：非快进 → 自动合并后成功；合并提交以 frame 下发的第三方账号身份署名
-        RunnerWorkspace.WorklogPushOutcome r = ws.pushWorklog(
-                dir, origin.toUri().toString(), "main", null, new GitAuthor("刘长青", "lcq@example.com"));
-        assertEquals(0, r.exit(), r.output());
-        assertEquals("remote-only", git(origin, "show", "main:REMOTE.md").trim());
-        assertTrue(git(origin, "show", "main:README.md").contains("工作日志空间"));
-        assertEquals("刘长青|lcq@example.com",
-                git(origin, "log", "-1", "--format=%an|%ae", "main").trim());
-        assertFalse(Files.exists(dir.resolve(".git").resolve("MERGING_HEAD")), "不得残留 MERGING 状态");
-    }
-
-    @Test
-    void worklogPushMergesUnrelatedRemoteReadme() throws Exception {
-        // GitHub 建仓自带 README 场景：远端已有独立 root commit，首推走
-        // --allow-unrelated-histories 合并；同名 README 冲突 -X ours 以本地骨架为准
-        Path origin = tmp.resolve("worklog-origin-readme.git");
-        git(tmp, "init", "--bare", "-b", "main", origin.toString());
-        Path seed = tmp.resolve("seed-readme");
-        git(tmp, "clone", origin.toString(), seed.toString());
-        Files.writeString(seed.resolve("README.md"), "# 建仓自带");
-        git(seed, "add", ".");
-        git(seed, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init readme");
-        git(seed, "push", "origin", "main");
-
-        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
-        Path dir = ws.prepareWorklog(tmp.resolve("worklog-u"), "dave");
-        initLegacyGitSpace(dir);
-        RunnerWorkspace.WorklogPushOutcome r =
-                ws.pushWorklog(dir, origin.toUri().toString(), "main", null);
-        assertEquals(0, r.exit(), r.output());
-        assertTrue(git(origin, "show", "main:README.md").contains("工作日志空间"),
-                "同名冲突以本地骨架为准");
-        assertFalse(Files.exists(dir.resolve(".git").resolve("MERGING_HEAD")), "不得残留 MERGING 状态");
-    }
-
-    @Test
-    void worklogPushNeverLeaksToken() throws Exception {
-        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
-        Path dir = ws.prepareWorklog(tmp.resolve("worklog"), "bob");
-        initLegacyGitSpace(dir);
-        // 打不通的 https 远端 + token：失败输出不得含 token 明文/URL 编码形态
-        RunnerWorkspace.WorklogPushOutcome r = ws.pushWorklog(
-                dir, "https://127.0.0.1:1/x/y.git", "main", "tok+abc123");
-        assertTrue(r.exit() != 0);
-        assertFalse(r.output().contains("tok+abc123"), r.output());
-        assertFalse(r.output().contains("tok%2Babc123"), r.output());
-        // 失败也不许把 token 写进 .git/config
-        assertEquals("https://127.0.0.1:1/x/y.git", gitOut(dir, "remote", "get-url", "origin"));
-    }
-
     @Test
     void worklogSkeletonMaterializesWithoutGit() throws Exception {
         // CAP-74：草稿区幂等物化骨架但不再 git init/commit；.gitignore 规则留给存量 git 空间
@@ -872,26 +747,6 @@ class RunnerWorkspaceTest {
         assertFalse(status.contains(ContextMaterializer.INJECTION_FILE), status);
         assertFalse(status.contains("CLAUDE.md"), status);
         assertFalse(status.contains("settings.local.json"), status);
-    }
-
-    @Test
-    void worklogPrepareBackfillsGitignoreForLegacySpace() throws Exception {
-        // 存量空间（老骨架无 .gitignore）幂等复用时补写
-        Path dir = tmp.resolve("worklog").resolve("bob");
-        Files.createDirectories(dir);
-        git(dir, "init");
-        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
-        ws.prepareWorklog(tmp.resolve("worklog"), "bob");
-        assertTrue(Files.readString(dir.resolve(".gitignore")).contains(".devmind/"));
-        // 用户自行加过规则 → 原样保留，同时补回平台行（老骨架可能缺新落点规则）
-        Files.writeString(dir.resolve(".gitignore"), "custom-rule\n");
-        ws.prepareWorklog(tmp.resolve("worklog"), "bob");
-        String merged = Files.readString(dir.resolve(".gitignore"));
-        assertTrue(merged.startsWith("custom-rule\n"), merged);
-        assertTrue(merged.contains(ContextMaterializer.INJECTION_FILE), merged);
-        assertTrue(merged.contains(".devmind/"), merged);
-        // 补写只对 .gitignore 代提交（CAP-74 起骨架幂等物化会产生未跟踪占位文件，不计入该断言）
-        assertFalse(gitOut(dir, "ls-files", ".gitignore").isBlank());
     }
 
     @Test
@@ -1049,14 +904,6 @@ class RunnerWorkspaceTest {
             RunnerWorkspace.RepoCtx ctx = ws.prepare("px1", "proj1", "alice",
                     new RunnerWorkspace.RepoSpec(origin.toUri().toString(), "main", "feature/p1", ""));
             assertTrue(Files.exists(ctx.sessionDir().resolve("README.md")));
-            // worklog push 走同一 run() 注入点
-            Path wlOrigin = tmp.resolve("proxy-worklog-origin.git");
-            git(tmp, "init", "--bare", "-b", "main", wlOrigin.toString());
-            Path dir = ws.prepareWorklog(tmp.resolve("worklog"), "carol");
-            initLegacyGitSpace(dir);
-            RunnerWorkspace.WorklogPushOutcome push =
-                    ws.pushWorklog(dir, wlOrigin.toUri().toString(), "main", null);
-            assertEquals(0, push.exit(), push.output());
         } finally {
             NodeProxy.clear();
         }

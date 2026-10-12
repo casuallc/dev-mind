@@ -525,7 +525,7 @@ public class RunnerWorkspace {
      *
      * <p><b>CAP-74 起为纯草稿工作目录</b>：不再 git init/骨架 commit——日报/周报的事实源是
      * 管控台服务端仓，成稿经 .devmind/output/ 回传写仓，「推送远端」由服务端直推。
-     * 存量 git 空间（CAP-74 前初始化）保留 .git 不动，仅幂等补写 .gitignore 忽略行。</p>
+     * 存量 git 空间（CAP-74 前初始化）保留 .git 不动（M3 起连 .gitignore 补写也不再代做）。</p>
      *
      * @param worklogRoot 根目录（调用方解析：配置 worklogRoot 或默认 {user.home}/worklog）
      */
@@ -543,10 +543,6 @@ public class RunnerWorkspace {
         } catch (IOException e) {
             throw new IllegalStateException("创建 worklog 工作区目录失败: " + dir, e);
         }
-        if (Files.isDirectory(dir.resolve(".git"))) {
-            // 存量 git 空间（CAP-74 前初始化）：补写缺失忽略行并代提交一次；除此之外不再做 git 操作
-            ensureGitignore(dir);
-        }
         writeSkeleton(dir); // 幂等：已存在的文件一律不覆盖
         log.info("worklog 草稿工作区就绪: owner={} dir={}", owner, dir);
         return dir;
@@ -555,119 +551,9 @@ public class RunnerWorkspace {
     /**
      * CAP-41 的 worklog 收口曾检查未提交改动并上报告警；CAP-74 起草稿区去 git 化，
      * 「未提交」概念不复存在，收口无事可做——方法删除，runner 侧不再挂 finalizer。
-     * （pushWorklog 协议帧处理已改 no-op ack，方法本体留 M3 统一下线。）
+     * CAP-74 M3 起 pushWorklog 链路整体下线（帧处理早改 no-op ack；服务端直推取代
+     * runner 侧 push，存量 git 空间保留 .git 不再维护）。
      */
-
-    /**
-     * CAP-41 M3 工作日志空间远端备份（手动触发）：把持久工作区 push 到用户绑定的远端仓库。
-     * remote 幂等绑定 origin=cleanUrl（防 token 残留 .git/config，CAP-23 同款），
-     * push HEAD:&lt;branch&gt; 并 -u 建跟踪。push 前先 fetch 对齐：远端分支领先/分叉
-     * （建仓自带 README、他机推过）自动 --no-edit 合并（--allow-unrelated-histories，
-     * 日志按日期键控天然低冲突；-X ours 冲突偏向本地——工作区是备份权威源，远端
-     * 独有文件仍保留）；合并仍失败则 abort 回滚，把 sanitized 错误抛给调用方
-     * 引导人工处理，工作区不留 MERGING 状态。
-     *
-     * <p>URL 口径同 GitRemoteOps：仅 http/https（token 内嵌注入）与 file://（本地/测试，
-     * token 忽略）；ssh 明确报错。</p>
-     *
-     * @param dir       持久工作区（须含 .git——CAP-74 起 prepareWorklog 不再 init，
-     *                  本方法仅服务存量 git 空间与旧服务端帧，M3 统一下线）
-     * @param remoteUrl 远端仓库 URL（不含凭证）
-     * @param branch    目标分支（空 = main）
-     * @param token     PAT（可空 = 匿名/file://；仅进程参数，输出经 sanitize）
-     * @return exit=0 成功（含 up-to-date），否则输出尾部为错误原因
-     */
-    public WorklogPushOutcome pushWorklog(Path dir, String remoteUrl, String branch, String token) {
-        return pushWorklog(dir, remoteUrl, branch, token, null);
-    }
-
-    /**
-     * 带署名身份的远端备份：operator = 自动合并提交署名（逐值回退：name 空 → devmind、
-     * email 空 → devmind@worklog.local；operator 为 null = 老服务端未下发身份，保持内置署名，
-     * 口径同 {@link #finalize} 的 CAP-24 FR-06）。
-     */
-    public WorklogPushOutcome pushWorklog(Path dir, String remoteUrl, String branch, String token,
-                                          GitAuthor operator) {
-        if (dir == null || !Files.isDirectory(dir.resolve(".git"))) {
-            return new WorklogPushOutcome(-1, "worklog 工作区未初始化（无 .git）: " + dir);
-        }
-        if (remoteUrl == null || remoteUrl.isBlank()) {
-            return new WorklogPushOutcome(-1, "未绑定远程仓库");
-        }
-        String cleanUrl = remoteUrl.trim();
-        // scp 风格 ssh（git@host:path）URI 解析直接失败，按「不支持的协议」统一拒绝
-        String scheme;
-        try {
-            scheme = URI.create(cleanUrl).getScheme();
-        } catch (IllegalArgumentException e) {
-            scheme = null;
-        }
-        boolean fileScheme = "file".equalsIgnoreCase(scheme);
-        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme) && !fileScheme) {
-            return new WorklogPushOutcome(-1,
-                    "仅支持 http/https 远端仓库（ssh 不支持）: " + cleanUrl);
-        }
-        String effectiveToken = fileScheme ? null : token; // file:// 无凭证语义
-        String targetBranch = (branch == null || branch.isBlank()) ? "main" : branch.trim();
-
-        // 幂等绑定 origin=cleanUrl（不存在→add；变了→set-url）
-        Result getUrl = run(dir, OP_TIMEOUT_SEC, effectiveToken, "remote", "get-url", "origin");
-        if (getUrl.exit() != 0) {
-            Result add = run(dir, OP_TIMEOUT_SEC, effectiveToken, "remote", "add", "origin", cleanUrl);
-            if (add.exit() != 0) {
-                return new WorklogPushOutcome(add.exit(), "git remote add 失败: " + tail(add.output()));
-            }
-        } else if (!getUrl.output().trim().equals(cleanUrl)) {
-            Result set = run(dir, OP_TIMEOUT_SEC, effectiveToken, "remote", "set-url", "origin", cleanUrl);
-            if (set.exit() != 0) {
-                return new WorklogPushOutcome(set.exit(), "git remote set-url 失败: " + tail(set.output()));
-            }
-        }
-
-        // push 前对齐远端：fetch 目标分支（远端尚无该分支 = 首推，fetch 失败跳过对齐直接建支）。
-        // 远端领先/分叉（本地不含 FETCH_HEAD）→ 自动合并（-X ours：冲突偏向本地，工作区是
-        // 备份权威源，远端独有文件仍保留）；合并仍失败 abort 回滚后报人工处理。
-        Result fetch = run(dir, PUSH_TIMEOUT_SEC, effectiveToken, "fetch",
-                withToken(cleanUrl, effectiveToken), targetBranch);
-        if (fetch.exit() == 0) {
-            Result ancestor = run(dir, OP_TIMEOUT_SEC, effectiveToken,
-                    "merge-base", "--is-ancestor", "FETCH_HEAD", "HEAD");
-            if (ancestor.exit() == 1) {
-                String mergeName = operator != null && operator.name() != null && !operator.name().isBlank()
-                        ? operator.name() : "devmind";
-                String mergeEmail = operator != null && operator.email() != null && !operator.email().isBlank()
-                        ? operator.email() : "devmind@worklog.local";
-                Result merge = run(dir, OP_TIMEOUT_SEC, effectiveToken,
-                        "-c", "user.name=" + mergeName, "-c", "user.email=" + mergeEmail,
-                        "merge", "--no-edit", "--allow-unrelated-histories", "-X", "ours",
-                        "-m", "merge: 对齐远端 " + targetBranch + " 后推送备份（冲突以本地为准）", "FETCH_HEAD");
-                if (merge.exit() != 0) {
-                    run(dir, OP_TIMEOUT_SEC, effectiveToken, "merge", "--abort");
-                    String mout = tail(merge.output());
-                    log.warn("worklog 远端备份自动合并失败: dir={} branch={} err={}", dir, targetBranch, mout);
-                    return new WorklogPushOutcome(merge.exit(),
-                            "远端分支 " + targetBranch + " 与本地分叉，自动合并失败（已回滚合并，请到节点工作区人工处理）: "
-                                    + mout);
-                }
-                log.info("worklog 远端备份已自动合并远端分叉: dir={} branch={}", dir, targetBranch);
-            }
-        }
-
-        Result push = run(dir, PUSH_TIMEOUT_SEC, effectiveToken, "push", "-u",
-                withToken(cleanUrl, effectiveToken), "HEAD:" + targetBranch);
-        String out = tail(push.output());
-        if (push.exit() != 0) {
-            log.warn("worklog 远端备份 push 失败: dir={} branch={} err={}", dir, targetBranch, out);
-            return new WorklogPushOutcome(push.exit(), "git push 失败: " + out);
-        }
-        log.info("worklog 远端备份完成: dir={} branch={}", dir, targetBranch);
-        return new WorklogPushOutcome(0, out.isBlank() ? "已推送至远端分支 " + targetBranch
-                : "分支 " + targetBranch + "：" + out);
-    }
-
-    /** worklog 远端备份结果：exit=0 成功（含 up-to-date），output 为摘要或错误尾部（已脱敏）。 */
-    public record WorklogPushOutcome(int exit, String output) {
-    }
 
     /** CAP-42 手动收口结果：exit=0 全部库成功；output 为逐库摘要/错误（已脱敏，多库带 [name] 前缀）。 */
     public record FinalizeOutcome(int exit, String output) {
@@ -1177,45 +1063,6 @@ public class RunnerWorkspace {
     private static void writeIfAbsent(Path file, String content) throws IOException {
         if (!Files.exists(file)) {
             Files.writeString(file, content, StandardCharsets.UTF_8);
-        }
-    }
-
-    /**
-     * 存量 worklog 空间补写 .gitignore 缺失行（已有行与用户自行加过的规则一律不动），
-     * 并只对 .gitignore 做一次平台代提交：该文件在骨架 commit 里是被跟踪的，只改不提交
-     * 会让空间恒脏（agent 下次「git add -A」又会把它连同脏状态一起带走）。提交失败只告警
-     * ——忽略规则读的是工作区文件，即使没提交也照样生效。
-     */
-    private void ensureGitignore(Path dir) {
-        Path gitignore = dir.resolve(".gitignore");
-        try {
-            String content = Files.isRegularFile(gitignore)
-                    ? Files.readString(gitignore, StandardCharsets.UTF_8) : "";
-            var existing = content.lines().map(String::strip).toList();
-            StringBuilder missing = new StringBuilder();
-            for (String line : WORKLOG_GITIGNORE.lines().map(String::strip).toList()) {
-                if (!line.isEmpty() && !existing.contains(line)) {
-                    missing.append(line).append('\n');
-                }
-            }
-            if (missing.isEmpty()) {
-                return;
-            }
-            Files.writeString(gitignore,
-                    content + (content.isEmpty() || content.endsWith("\n") ? "" : "\n") + missing,
-                    StandardCharsets.UTF_8);
-            log.info("worklog 存量空间已补写 .gitignore 缺失行: dir={}", dir);
-            if (run(dir, OP_TIMEOUT_SEC, null, "add", ".gitignore").exit() == 0) {
-                Result commit = run(dir, OP_TIMEOUT_SEC, null,
-                        "-c", "user.name=devmind", "-c", "user.email=devmind@worklog.local",
-                        "commit", "-m", "chore: 补平台托管 .gitignore 规则", "--", ".gitignore");
-                if (commit.exit() != 0) {
-                    log.warn("worklog .gitignore 代提交失败（规则仍生效，可手工提交）: {}", tail(commit.output()));
-                }
-            }
-        } catch (IOException e) {
-            // best-effort：迁移失败不该让用户开不了会话（忽略规则读工作区文件，缺行只影响增量补写）
-            log.warn("补写 worklog .gitignore 失败（可人工补行）: dir={} err={}", dir, e.getMessage());
         }
     }
 
