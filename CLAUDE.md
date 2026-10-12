@@ -98,7 +98,7 @@ Guidance for Claude Code when working in this repository.
 
 ### 提交前验证 (MUST)
 - 后端改动：`mvn -q test` 通过。前端改动：`npx tsc -b` 通过。
-- 端到端验证脚本沉淀 `tests/`（运行产物仍写 tmp/），不起服务跑一遍不算完成；起停姿势见「开发注意事项」。
+- 端到端验证脚本沉淀 `tests/`（运行产物仍写 tmp/），不起服务跑一遍不算完成；**E2E 跑完必须清理自起进程**（隔离 app/runner/mock，残留 runner 会锁 target jar 挡住后续打包），起停与清理姿势见「开发注意事项」与 tests/README.md。
 
 ### 文档规则 (MUST)
 - 新能力先在 `docs/capabilities/` 立 CAP 需求文档，再动手实现。

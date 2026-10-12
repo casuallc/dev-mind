@@ -8,6 +8,11 @@
 - **前置看脚本头注释**：多数要 app 已起（:8080，个别 :8081/:18090）；涉及 runner 的先 `mvn -q install -DskipTests` 出 `devmind-agent-runner.jar`。
 - Python 脚本只用标准库（Windows 控制台已处理 UTF-8）；`.mjs` 需 Node 18+（原生 WebSocket/fetch）；`.sh` 用 Git Bash；从仓库根目录跑。
 - 新脚本命名 `capXX_*.py` / `e2e-<主题>.sh`，头部注明前置与覆盖点，禁硬编码密钥/本机密码。
+- **E2E 跑完必须清理环境（MUST）**：脚本自起的隔离 app 实例、runner、mock/fixture 进程全部杀掉，不留后台残留。尤其 runner 若从 `devmind-agent-runner/target/` 起，运行中会**锁住 jar**——后续 `mvn package/clean`（含 deploy 构建）直接报 "Failed to delete ... devmind-agent-runner.jar"（2026-10-11 更新 194 环境时实踩）。杀 runner 按命令行特征（无监听端口可查）：
+  ```bash
+  powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name like 'java%'\" | ? { \$_.CommandLine -match 'devmind-agent-runner/target' } | % { Stop-Process -Id \$_.ProcessId -Force }"
+  ```
+  注意只匹配 `devmind-agent-runner/target` 路径——别误杀 WinSW 服务化的 runner（`C:\Users\kingdee\devmind-runner*` 独立目录）。隔离 app 实例按端口查 PID 再 taskkill（姿势见 docs/core/开发注意事项.md「停后端」）。
 
 ## 起独立实例跑 E2E（不碰本机 dev 实例与库）
 
