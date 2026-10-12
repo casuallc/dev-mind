@@ -92,13 +92,25 @@ export default function ChatsBoard() {
     setSearchParams({}, { replace: true })
   }, [searchParams, setSearchParams])
 
-  // 首次加载后自动选中：有问答选排序第一个，否则直接进入新问答草稿态
+  // 深链 ?cid=<id>（用量请求日志等入口，对齐 /sessions?sid= 先例）：
+  // 列表加载后选中目标问答并清参数（防粘性选中；目标不在列表时由消失兜底清选中态）
   useEffect(() => {
-    if (autoPickedRef.current || loading) return
+    const cid = searchParams.get('cid')
+    if (!cid || loading) return
+    setDraft(false)
+    setSelectedId(cid)
+    searchParams.delete('cid')
+    setSearchParams(searchParams, { replace: true })
+  }, [searchParams, loading, setSearchParams])
+
+  // 首次加载后自动选中：有问答选排序第一个，否则直接进入新问答草稿态
+  // （?cid= 深链由上方专用 effect 选中，这里须让路，否则会回退覆盖成第一个问答）
+  useEffect(() => {
+    if (autoPickedRef.current || loading || searchParams.get('cid')) return
     autoPickedRef.current = true
     if (chats.length > 0) setSelectedId(sortForBoard(chats)[0].id)
     else setDraft(true)
-  }, [chats, loading])
+  }, [chats, loading, searchParams])
 
   // 草稿创建成功后：先等列表刷新拿到新问答行，再选中——否则「消失兜底」effect 会误清新 id
   const onDraftCreated = useCallback(

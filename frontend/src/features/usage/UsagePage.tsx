@@ -12,9 +12,17 @@ import type { AuthUser } from '../auth/types'
 import { isAdmin } from '../auth/authStore'
 import { fmtTime, fmtTokens } from '../../shared/utils/format'
 import { LIST_PAGINATION } from '../../shared/utils/table'
-import { getUsageBreakdown, getUsageDaily, getUsageSummary, getUsageTop } from './api'
+import { getUsageBreakdown, getUsageDaily, getUsageHourly, getUsageRecords, getUsageSummary, getUsageTop } from './api'
 import type { UsageFilter } from './api'
-import type { UsageBreakdownRow, UsageDailyPoint, UsageDim, UsageSummary, UsageTopRow } from './types'
+import type {
+  UsageBreakdownRow,
+  UsageDailyPoint,
+  UsageDim,
+  UsageHourlyPoint,
+  UsageRecordRow,
+  UsageSummary,
+  UsageTopRow,
+} from './types'
 
 type RangeKey = 'today' | '7d' | '30d' | 'all'
 
@@ -41,30 +49,32 @@ function rangeFilter(range: RangeKey): UsageFilter & { days: number } {
 
 const tokenSum = (r: { inputTokens: number; outputTokens: number }) => r.inputTokens + r.outputTokens
 
-/** 纯 div 柱状图：无图表库依赖；每根柱 Tooltip 显示当日数值（另一指标附在括号里） */
-function DailyBars({ points, metric }: { points: UsageDailyPoint[]; metric: 'tokens' | 'turns' }) {
-  const values = points.map(p => (metric === 'tokens' ? p.tokens : p.turns))
-  const max = Math.max(...values, 0)
-  const tip = (p: UsageDailyPoint, v: number) =>
-    metric === 'tokens' ? `${p.date}：${fmtTokens(v)}（${p.turns} 回合）` : `${p.date}：${v} 回合（${fmtTokens(p.tokens)}）`
+/** 趋势柱通用数据点：label 横轴标签（日='MM-DD'/小时='HH:00'），hint 为 Tooltip 全文 */
+export interface BarPoint {
+  key: string
+  label: string
+  value: number
+  hint: string
+}
+
+/** 纯 div 柱状图：无图表库依赖；每根柱 Tooltip 显示 hint。数据源无关（日/小时皆可用） */
+function DailyBars({ bars }: { bars: BarPoint[] }) {
+  const max = Math.max(...bars.map(b => b.value), 0)
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 160, paddingTop: 8 }}>
-      {points.map((p, i) => (
-        <Tooltip
-          key={p.date}
-          title={tip(p, values[i])}
-        >
+      {bars.map((b, i) => (
+        <Tooltip key={b.key} title={`${b.label}：${b.hint}`}>
           <div style={{ flex: 1, minWidth: 4, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%' }}>
             <div
               style={{
-                height: max > 0 ? `${Math.max((values[i] / max) * 100, values[i] > 0 ? 2 : 0)}%` : 0,
+                height: max > 0 ? `${Math.max((b.value / max) * 100, b.value > 0 ? 2 : 0)}%` : 0,
                 background: 'var(--ant-color-primary, #1677ff)',
                 borderRadius: '2px 2px 0 0',
-                opacity: values[i] > 0 ? 1 : 0.15,
+                opacity: b.value > 0 ? 1 : 0.15,
               }}
             />
             <div style={{ fontSize: 10, color: '#999', textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-              {points.length <= 10 || i % Math.ceil(points.length / 10) === 0 ? dayjs(p.date).format('MM-DD') : ''}
+              {bars.length <= 10 || i % Math.ceil(bars.length / 10) === 0 ? b.label : ''}
             </div>
           </div>
         </Tooltip>
@@ -86,22 +96,36 @@ export default function UsagePage() {
   const [loading, setLoading] = useState(false)
   const [summary, setSummary] = useState<UsageSummary | null>(null)
   const [daily, setDaily] = useState<UsageDailyPoint[]>([])
+  const [hourly, setHourly] = useState<UsageHourlyPoint[]>([])
   const [metric, setMetric] = useState<'tokens' | 'turns'>('tokens')
-  const [dim, setDim] = useState<UsageDim | 'top'>('requirement')
+  const [dim, setDim] = useState<UsageDim | 'top' | 'records'>('requirement')
   const [rows, setRows] = useState<UsageBreakdownRow[]>([])
   const [topRows, setTopRows] = useState<UsageTopRow[]>([])
+  // 请求日志视图：服务端分页受控（LIST_PAGINATION 仅供全量加载的表）
+  const [recRows, setRecRows] = useState<UsageRecordRow[]>([])
+  const [recTotal, setRecTotal] = useState(0)
+  const [recPage, setRecPage] = useState(1)
+  const [recSize, setRecSize] = useState(20)
+  const [recSource, setRecSource] = useState<'SESSION' | 'CHAT' | undefined>()
+  const [recLoading, setRecLoading] = useState(false)
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
     const { days, ...filter } = rangeFilter(range)
     const f: UsageFilter = { ...filter, userId, model }
     try {
-      const [s, d] = await Promise.all([getUsageSummary(f), getUsageDaily(days, f)])
+      // 今日走逐回合账本的按小时趋势（上线前无账本数据，24 桶全零属已知口径）；
+      // 其余时段走累计列的每日趋势
+      const [s, d] = await Promise.all([
+        getUsageSummary(f),
+        range === 'today' ? getUsageHourly(f) : getUsageDaily(days, f),
+      ])
       setSummary(s)
-      setDaily(d)
+      if (range === 'today') setHourly(d as UsageHourlyPoint[])
+      else setDaily(d as UsageDailyPoint[])
       if (dim === 'top') {
         setTopRows(await getUsageTop(50, f))
-      } else {
+      } else if (dim !== 'records') {
         setRows(await getUsageBreakdown(dim, f))
       }
       setLastSync(dayjs())
@@ -118,17 +142,42 @@ export default function UsagePage() {
     }
   }, [range, userId, model, dim])
 
+  const loadRecords = useCallback(async (silent = false) => {
+    if (dim !== 'records') return
+    if (!silent) setRecLoading(true)
+    const { days: _days, ...filter } = rangeFilter(range)
+    try {
+      const pv = await getUsageRecords({
+        ...filter, userId, model, source: recSource, page: recPage - 1, size: recSize,
+      })
+      setRecRows(pv.items)
+      setRecTotal(pv.total)
+      if (!silent) setLastSync(dayjs())
+    } catch (e) {
+      if (!silent) message.error(e instanceof Error ? e.message : '加载请求日志失败')
+    } finally {
+      if (!silent) setRecLoading(false)
+    }
+  }, [dim, range, userId, model, recSource, recPage, recSize])
+
   useEffect(() => { void load() }, [load])
+  useEffect(() => { void loadRecords() }, [loadRecords])
+
+  // 筛选变更回第一页（页码与筛选同帧变更时 React 合并为一次加载）
+  useEffect(() => { setRecPage(1) }, [range, userId, model, recSource])
 
   // 自动刷新：静默加载不闪 loading；页签隐藏时跳过（切回后下一拍自然补上）；
   // 档位变更/切视图/卸载都会经依赖清理旧定时器
   useEffect(() => {
     if (refreshSec <= 0) return
     const timer = setInterval(() => {
-      if (!document.hidden) void load(true)
+      if (!document.hidden) {
+        void load(true)
+        void loadRecords(true)
+      }
     }, refreshSec * 1000)
     return () => clearInterval(timer)
-  }, [refreshSec, load])
+  }, [refreshSec, load, loadRecords])
 
   useEffect(() => {
     if (!admin) return
@@ -143,8 +192,29 @@ export default function UsagePage() {
     ]
     if (admin) opts.push({ label: '按用户', value: 'user' })
     opts.push({ label: 'Top', value: 'top' })
+    opts.push({ label: '请求日志', value: 'records' })
     return opts
   }, [admin])
+
+  /** 趋势柱数据：今日=按小时（账本），其余=按日（累计列）；两口径并存见 load 注释 */
+  const bars = useMemo<BarPoint[]>(() => {
+    const hint = (tokens: number, turns: number) =>
+      metric === 'tokens' ? `${fmtTokens(tokens)}（${turns} 回合）` : `${turns} 回合（${fmtTokens(tokens)}）`
+    if (range === 'today') {
+      return hourly.map(h => ({
+        key: h.hour,
+        label: `${h.hour}:00`,
+        value: metric === 'tokens' ? h.tokens : h.turns,
+        hint: hint(h.tokens, h.turns),
+      }))
+    }
+    return daily.map(p => ({
+      key: p.date,
+      label: dayjs(p.date).format('MM-DD'),
+      value: metric === 'tokens' ? p.tokens : p.turns,
+      hint: hint(p.tokens, p.turns),
+    }))
+  }, [range, hourly, daily, metric])
 
   const dimColumns: ColumnsType<UsageBreakdownRow> = useMemo(() => {
     const nameTitle = { requirement: '需求', project: '项目', model: '模型', user: '用户' }[dim as UsageDim] ?? '名称'
@@ -201,6 +271,41 @@ export default function UsagePage() {
       render: (_, r) => fmtTokens(tokenSum(r)),
     },
     { title: '创建时间', dataIndex: 'createdAt', width: 160, render: (v: string | null) => fmtTime(v) },
+  ]
+
+  const recColumns: ColumnsType<UsageRecordRow> = [
+    { title: '时间', dataIndex: 'createdAt', width: 160, render: (v: string | null) => fmtTime(v) },
+    {
+      title: '来源', dataIndex: 'source', width: 80,
+      render: (v: string) => (v === 'CHAT' ? <Tag>问答</Tag> : <Tag color="blue">会话</Tag>),
+    },
+    {
+      title: '标题', dataIndex: 'title', ellipsis: true,
+      render: (v: string | null, r) => {
+        const text = v || '-'
+        // 深链对齐 /sessions?sid= 先例；问答侧 ?cid= 由 ChatsBoard 消费
+        const href = r.source === 'CHAT' ? `/chats?cid=${r.sessionId}` : `/sessions?sid=${r.sessionId}`
+        return <a onClick={() => navigate(href)}>{text}</a>
+      },
+    },
+    { title: '模型', dataIndex: 'model', width: 140, ellipsis: true, render: (v: string | null) => v || '默认' },
+    { title: '创建人', dataIndex: 'owner', width: 110, render: (v: string | null) => v || '-' },
+    {
+      title: '耗时', dataIndex: 'durationMs', width: 90, align: 'right',
+      render: (v: number | null) => (v == null ? '-' : `${(v / 1000).toFixed(1)}s`),
+    },
+    { title: '输入', dataIndex: 'inputTokens', width: 90, align: 'right', render: (v: number | null) => (v == null ? '-' : fmtTokens(v)) },
+    { title: '输出', dataIndex: 'outputTokens', width: 90, align: 'right', render: (v: number | null) => (v == null ? '-' : fmtTokens(v)) },
+    { title: '缓存读', dataIndex: 'cacheReadTokens', width: 90, align: 'right', render: (v: number | null) => (v == null ? '-' : fmtTokens(v)) },
+    { title: '缓存写', dataIndex: 'cacheCreationTokens', width: 90, align: 'right', render: (v: number | null) => (v == null ? '-' : fmtTokens(v)) },
+    {
+      title: '总 tokens', key: 'tokens', width: 100, align: 'right',
+      render: (_, r) => (r.inputTokens == null && r.outputTokens == null ? '-' : fmtTokens((r.inputTokens ?? 0) + (r.outputTokens ?? 0))),
+    },
+    {
+      title: '速度', dataIndex: 'tokensPerSec', width: 110, align: 'right',
+      render: (v: number | null) => (v == null ? '-' : `${v.toFixed(1)} tok/s`),
+    },
   ]
 
   return (
@@ -281,13 +386,47 @@ export default function UsagePage() {
             />
           }
         >
-          <DailyBars points={daily} metric={metric} />
+          <DailyBars bars={bars} />
         </Card>
 
         <Card
-          title={<Segmented options={dimOptions} value={dim} onChange={v => setDim(v as UsageDim | 'top')} />}
+          title={<Segmented options={dimOptions} value={dim} onChange={v => setDim(v as UsageDim | 'top' | 'records')} />}
+          extra={
+            dim === 'records' ? (
+              <Select
+                allowClear
+                placeholder="全部来源"
+                style={{ width: 120 }}
+                value={recSource}
+                onChange={setRecSource}
+                options={[
+                  { label: '会话', value: 'SESSION' },
+                  { label: '问答', value: 'CHAT' },
+                ]}
+              />
+            ) : undefined
+          }
         >
-          {dim === 'top' ? (
+          {dim === 'records' ? (
+            <Table<UsageRecordRow>
+              rowKey={r => String(r.id)}
+              size="small"
+              loading={recLoading}
+              columns={recColumns}
+              dataSource={recRows}
+              pagination={{
+                current: recPage,
+                pageSize: recSize,
+                total: recTotal,
+                showSizeChanger: true,
+                showTotal: t => `共 ${t} 条`,
+              }}
+              onChange={p => {
+                setRecPage(p.current ?? 1)
+                setRecSize(p.pageSize ?? 20)
+              }}
+            />
+          ) : dim === 'top' ? (
             <Table<UsageTopRow>
               key="top"
               rowKey={r => `${r.source}:${r.id}`}
