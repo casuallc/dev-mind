@@ -22,15 +22,17 @@ import {
   SaveOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { deleteDoc, docDiff, getDoc, listDocVersions, revertDoc, saveDocVersion, transitionDoc } from '../api'
 import { KIND_LABEL, STATUS_LABEL } from '../types'
 import type { DiffResult, DocDetail, DocVersion } from '../types'
+import { getProject } from '../../projects/api'
+import { getRequirement } from '../../requirements/api'
 import Markdown from '../../../shared/components/Markdown'
 import { fmtTime } from '../../../shared/utils/format'
 import { uploadAttachment } from '../../../shared/attachments/api'
 import { attachmentRawUrl } from '../../../shared/attachments/url'
-import { pageRootScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
 import { DRAWER_WIDE } from '../../../shared/utils/overlay'
 
@@ -46,6 +48,9 @@ export default function DocEditorPage() {
   const [doc, setDoc] = useState<DocDetail | null>(null)
   const [versions, setVersions] = useState<DocVersion[]>([])
   const [loading, setLoading] = useState(true)
+  // 归属名称解析：详情只带 projectId/requirementId，另查名称便于阅读关联（查不到回退显示 id）
+  const [projectName, setProjectName] = useState<string | null>(null)
+  const [requirementTitle, setRequirementTitle] = useState<string | null>(null)
 
   const [mode, setMode] = useState<'view' | 'edit'>('view')
   const [editText, setEditText] = useState('')
@@ -70,6 +75,12 @@ export default function DocEditorPage() {
         setDoc(d)
         setEditText(d.contentMd)
         setViewing(null)
+        setProjectName(null)
+        setRequirementTitle(null)
+        if (d.projectId) getProject(d.projectId).then((p) => setProjectName(p.name)).catch(() => {})
+        if (d.projectId && d.requirementId) {
+          getRequirement(d.projectId, d.requirementId).then((r) => setRequirementTitle(r.title)).catch(() => {})
+        }
       }
       setVersions(vs)
     } catch (e) {
@@ -266,8 +277,57 @@ export default function DocEditorPage() {
   const currentContent = viewing ? viewing.contentMd : doc?.contentMd ?? ''
   const displayTitle = viewing ? `${doc?.title ?? '文档'}（历史 v${viewing.versionNo}）` : doc?.title
 
+  // 内容操作（预览/编辑、保存、状态机流转、删除）均针对内容生效，集中放在内容卡片标题栏；顶部只留「返回列表」
+  const contentActions = viewing ? (
+    <Button type="primary" onClick={() => load()}>
+      回到当前版本
+    </Button>
+  ) : (
+    <Space>
+      <Segmented
+        value={mode}
+        onChange={(v) => {
+          setMode(v as 'view' | 'edit')
+          if (v === 'edit' && doc) setEditText(doc.contentMd)
+        }}
+        options={[
+          { label: '预览', value: 'view' },
+          { label: '编辑', value: 'edit' },
+        ]}
+      />
+      {mode === 'edit' && (
+        <Button
+          type="primary"
+          icon={<SaveOutlined />}
+          disabled={!dirty}
+          onClick={() => setSaveOpen(true)}
+        >
+          保存新版本
+        </Button>
+      )}
+      {doc?.status === 'draft' && (
+        <Button onClick={() => onTransition('submit', '提交确认', '进入待确认状态，可进一步冻结为基线。')}>
+          提交确认
+        </Button>
+      )}
+      {doc?.status === 'pending_confirm' && (
+        <Button onClick={() => onTransition('freeze', '冻结', '冻结后为基线，后续变更必须生成新版本并填写变更说明。')}>
+          冻结
+        </Button>
+      )}
+      {doc?.status === 'frozen' && (
+        <Button onClick={() => onTransition('unfreeze', '解除冻结', '回到草稿态，可随意编辑。')}>
+          解除冻结
+        </Button>
+      )}
+      <Button danger onClick={onDelete}>
+        删除
+      </Button>
+    </Space>
+  )
+
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%', ...pageRootScrollStyle }}>
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
       {loading ? (
         <Card>
           <Spin />
@@ -280,98 +340,48 @@ export default function DocEditorPage() {
         <>
           <Card
             title={
-              <Space>
+              <Space wrap size={8}>
                 <Typography.Text strong>{displayTitle}</Typography.Text>
                 <Tag color={doc.kind === 'requirement' ? 'blue' : doc.kind === 'design' ? 'geekblue' : doc.kind === 'analysis' ? 'gold' : doc.kind === 'api-suite' ? 'purple' : 'cyan'}>
                   {KIND_LABEL[doc.kind]}
                 </Tag>
-              </Space>
-            }
-            extra={
-              <Space>
-                {viewing ? (
-                  <>
-                    <Button type="primary" onClick={() => load()}>
-                      回到当前版本
-                    </Button>
-                    <Button onClick={() => navigate('/admin/docs')}>返回列表</Button>
-                  </>
-                ) : (
-                  <>
-                    <Segmented
-                      value={mode}
-                      onChange={(v) => {
-                        setMode(v as 'view' | 'edit')
-                        if (v === 'edit') setEditText(doc.contentMd)
-                      }}
-                      options={[
-                        { label: '预览', value: 'view' },
-                        { label: '编辑', value: 'edit' },
-                      ]}
-                    />
-                    {mode === 'edit' && (
-                      <Button
-                        type="primary"
-                        icon={<SaveOutlined />}
-                        disabled={!dirty}
-                        onClick={() => setSaveOpen(true)}
-                      >
-                        保存新版本
-                      </Button>
-                    )}
-                    {doc.status === 'draft' && (
-                      <Button onClick={() => onTransition('submit', '提交确认', '进入待确认状态，可进一步冻结为基线。')}>
-                        提交确认
-                      </Button>
-                    )}
-                    {doc.status === 'pending_confirm' && (
-                      <Button onClick={() => onTransition('freeze', '冻结', '冻结后为基线，后续变更必须生成新版本并填写变更说明。')}>
-                        冻结
-                      </Button>
-                    )}
-                    {doc.status === 'frozen' && (
-                      <Button onClick={() => onTransition('unfreeze', '解除冻结', '回到草稿态，可随意编辑。')}>
-                        解除冻结
-                      </Button>
-                    )}
-                    <Button danger onClick={onDelete}>
-                      删除
-                    </Button>
-                    <Button onClick={() => navigate('/admin/docs')}>返回列表</Button>
-                  </>
+                {statusTag(doc.status)}
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  v{doc.currentVersion}
+                  {viewing && <Badge status="processing" text={`查看历史 v${viewing.versionNo}`} />}
+                </Typography.Text>
+                {doc.projectId && (
+                  <Link to={`/projects/${doc.projectId}`}>
+                    <Tag style={{ cursor: 'pointer' }}>项目: {projectName ?? doc.projectId}</Tag>
+                  </Link>
                 )}
+                {doc.requirementId && (
+                  <Link to={doc.projectId ? `/projects/${doc.projectId}/requirements/${doc.requirementId}` : '#'}>
+                    <Tag style={{ cursor: doc.projectId ? 'pointer' : undefined }}>需求: {requirementTitle ?? doc.requirementId}</Tag>
+                  </Link>
+                )}
+                {doc.tags.map((t) => <Tag key={t}>{t}</Tag>)}
               </Space>
             }
+            extra={<Button onClick={() => navigate('/admin/docs')}>返回列表</Button>}
           >
-            {/* 版本历史（置顶，与基础信息同卡） */}
-            <Typography.Text strong style={{ fontSize: 13 }}>版本历史</Typography.Text>
+            {/* 版本历史（置顶卡正文，无小标题保持紧凑） */}
             <Table
               size="small"
               rowKey="versionNo"
               columns={versionColumns}
               dataSource={versions}
               pagination={{ pageSize: 5, showSizeChanger: false, showTotal: (total) => `共 ${total} 个版本` }}
-              style={{ marginTop: 8, marginBottom: 12 }}
             />
-            <Space style={{ marginBottom: 8 }} wrap>
-              {statusTag(doc.status)}
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                v{doc.currentVersion}
-                {viewing && <Badge status="processing" text={`查看历史 v${viewing.versionNo}`} />}
-              </Typography.Text>
-              {doc.projectId && <Tag>项目: {doc.projectId}</Tag>}
-              {doc.requirementId && <Tag>需求: {doc.requirementId}</Tag>}
-              {doc.tags.map((t) => <Tag key={t}>{t}</Tag>)}
-            </Space>
           </Card>
 
-          {/* 正文：编辑/预览 */}
+          {/* 正文：编辑/预览（卡片撑满剩余高度，滚动只发生在卡片内部，整页不出滚动条） */}
           {mode === 'edit' && !viewing ? (
-            <Card size="small" title="编辑 + 实时预览">
-              <div style={{ display: 'flex', gap: 12 }}>
+            <Card size="small" title="编辑 + 实时预览" style={pageCardStyle} styles={{ body: pageCardBodyFlexStyle }} extra={contentActions}>
+              <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 12 }}>
                 <div
                   ref={editorWrapRef}
-                  style={{ flex: 1, display: 'flex' }}
+                  style={{ flex: 1, minHeight: 0, display: 'flex' }}
                   onPaste={onEditorPaste}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={onEditorDrop}
@@ -382,21 +392,18 @@ export default function DocEditorPage() {
                       setEditText(e.target.value)
                       setDirty(e.target.value !== doc.contentMd)
                     }}
-                    autoSize={{ minRows: 18, maxRows: 40 }}
-                    style={{ flex: 1, fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 13 }}
+                    style={{ flex: 1, resize: 'none', fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 13 }}
                     placeholder="Markdown…（可直接粘贴/拖拽图片插入）"
                   />
                 </div>
-                <div style={{ flex: 1, maxHeight: 560, overflow: 'auto', padding: '0 4px' }}>
+                <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '0 4px' }}>
                   <Markdown content={editText} />
                 </div>
               </div>
             </Card>
           ) : (
-            <Card size="small" title="内容">
-              <div style={{ maxHeight: 600, overflow: 'auto' }}>
-                <Markdown content={currentContent} />
-              </div>
+            <Card size="small" title="内容" style={pageCardStyle} styles={{ body: pagePaneScrollStyle }} extra={contentActions}>
+              <Markdown content={currentContent} />
             </Card>
           )}
 
@@ -453,6 +460,6 @@ export default function DocEditorPage() {
           </>
         )}
       </Drawer>
-    </Space>
+    </div>
   )
 }

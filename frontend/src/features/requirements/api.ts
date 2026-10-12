@@ -73,6 +73,11 @@ export function deleteRequirement(projectId: string, requirementId: string): Pro
   return api.del(`/projects/${projectId}/requirements/${requirementId}`)
 }
 
+/** 单条需求（轻量详情，区别于 overview 聚合；用于跨 feature 关联展示标题） */
+export function getRequirement(projectId: string, requirementId: string): Promise<Requirement> {
+  return api.get<Requirement>(`/projects/${projectId}/requirements/${requirementId}`)
+}
+
 /** 需求主线聚合（CAP-13）：工作单元 + 文档/会话/构建/测试/部署/发版/产物 + 时间线 */
 export function getRequirementOverview(
   projectId: string,
