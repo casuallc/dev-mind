@@ -1,7 +1,6 @@
 package com.devmind.usage.service;
 
 import com.devmind.auth.IdentityService;
-import com.devmind.auth.model.UserEntity;
 import com.devmind.auth.repo.UserRepository;
 import com.devmind.chat.model.ChatSessionEntity;
 import com.devmind.common.exception.DevMindException;
@@ -268,10 +267,7 @@ public class UsageStatsService {
 
     /** 非 ADMIN 忽略入参强制本人；ADMIN 传值按值、缺省看全部。 */
     private String resolveUser(String requested) {
-        if (!isAdmin()) {
-            return identityService.currentActor();
-        }
-        return requested == null || requested.isBlank() ? null : requested;
+        return UsageVisibility.resolveUser(identityService, requested);
     }
 
     private void requireAdmin() {
@@ -281,9 +277,7 @@ public class UsageStatsService {
     }
 
     private boolean isAdmin() {
-        return identityService.currentUser()
-                .map(u -> UserEntity.ROLE_ADMIN.equals(u.getRole()))
-                .orElse(false);
+        return UsageVisibility.isAdmin(identityService);
     }
 
     private static long nz(Number n) {

@@ -11,7 +11,7 @@
     </parent>
     <artifactId>devmind-usage</artifactId>
     <name>devmind-usage</name>
-    <description>CAP-67 用量统计：会话+问答 token/成本只读聚合（总体/四维分组/每日趋势/Top），零新表复用累计列</description>
+    <description>CAP-67 用量统计：会话+问答 token/成本只读聚合（总体/四维分组/每日趋势/Top）+ usage_records 逐回合账本（请求日志/按小时趋势）</description>
     <dependencies>
         <dependency>
             <groupId>com.devmind</groupId>
