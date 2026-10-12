@@ -44,10 +44,201 @@ public class GitRemoteOps {
 
     public record GitResult(boolean ok, String output) {}
 
-    /** 推送本地分支到绑定远程（同名远端分支） */
+    /** CAP-74：批量 log 单路径命中结果（committedAt=最近一次提交，firstCommittedAt=窗口内最旧一次，作 createdAt） */
+    public record PathCommit(String path, String sha, java.time.Instant committedAt,
+                             java.time.Instant firstCommittedAt, String subject,
+                             java.util.Map<String, String> trailers) {}
+
+    /** 推送本地分支到绑定远程（同名远端分支）。token 空 = 匿名（含 file:// 本地验证通道） */
     public GitResult pushBranch(String repoPath, String branch, String remoteUrl, String token) {
-        String url = withToken(remoteUrl, token);
+        String url = token == null || token.isBlank() ? anonymousUrl(remoteUrl) : withToken(remoteUrl, token);
         return exec(repoPath, token, remoteUrl, List.of("push", url, branch + ":" + branch));
+    }
+
+    /** CAP-74：本地分支与远端分支不同名的 refspec 推送（服务端仓本地恒 main，远端分支可配） */
+    public GitResult pushBranch(String repoPath, String localBranch, String remoteBranch,
+                                String remoteUrl, String token) {
+        String url = token == null || token.isBlank() ? anonymousUrl(remoteUrl) : withToken(remoteUrl, token);
+        return exec(repoPath, token, remoteUrl, List.of("push", url, localBranch + ":" + remoteBranch));
+    }
+
+    /** 匿名 push 的 URL 校验（http/https/file://；ssh 明确报错） */
+    private String anonymousUrl(String remoteUrl) {
+        if (remoteUrl == null || remoteUrl.isBlank()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "仓库未配置 remote_url，无法推送（请在设置中绑定远端地址）");
+        }
+        String url = remoteUrl.trim();
+        if (url.startsWith("git@") || url.startsWith("ssh://")) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "MVP 仅支持 http/https 远端（PAT 注入），当前 remote_url 为 ssh 形式：" + url);
+        }
+        if (!(url.startsWith("http://") || url.startsWith("https://") || url.startsWith("file://"))) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "remote_url 协议仅支持 http/https/file://（匿名）：" + url);
+        }
+        return url;
+    }
+
+    /** CAP-74：初始化本地仓（目录不存在则创建；已有 .git 幂等返回 ok） */
+    public GitResult initRepo(String repoPath, String defaultBranch) {
+        java.nio.file.Path dir = java.nio.file.Path.of(repoPath);
+        if (java.nio.file.Files.exists(dir.resolve(".git"))) {
+            return new GitResult(true, "仓库已存在，跳过 init");
+        }
+        try {
+            java.nio.file.Files.createDirectories(dir);
+        } catch (IOException e) {
+            return new GitResult(false, "创建仓库目录失败: " + e.getMessage());
+        }
+        String branch = defaultBranch == null || defaultBranch.isBlank() ? "main" : defaultBranch.trim();
+        return exec(repoPath, null, List.of("init", "-b", branch));
+    }
+
+    /**
+     * CAP-74：stage 指定路径并提交（单写者场景，pathspec 相对 repoPath）。
+     * message 经 {@code -F messageFile} 读取（UTF-8 文件，Windows 中文/引号不走 argv 防乱码）；
+     * 署名经 {@code -c user.name/user.email}（committer）+ {@code --author}（author）命令级注入，
+     * 不改 .git/config；authorDate 非空经 env GIT_AUTHOR_DATE/GIT_COMMITTER_DATE 回填（迁移用）。
+     * 无可提交变更（暂存为空）返回 ok(true) 且 output 含 "nothing to commit"，调用方视为幂等跳过。
+     */
+    public GitResult addCommit(String repoPath, List<String> paths, java.nio.file.Path messageFile,
+                               String authorName, String authorEmail, java.time.Instant authorDate) {
+        if (paths == null || paths.isEmpty()) {
+            return new GitResult(false, "paths 为空");
+        }
+        if (authorName == null || authorName.isBlank() || authorEmail == null || authorEmail.isBlank()) {
+            throw new IllegalArgumentException("authorName/authorEmail 必填（调用方负责回退兜底）");
+        }
+        List<String> addArgs = new ArrayList<>(List.of("add", "--"));
+        addArgs.addAll(paths);
+        GitResult add = exec(repoPath, null, addArgs);
+        if (!add.ok()) {
+            return add;
+        }
+        List<String> diffArgs = new ArrayList<>(List.of("diff", "--cached", "--quiet", "--"));
+        diffArgs.addAll(paths);
+        if (exec(repoPath, null, diffArgs).ok()) {
+            return new GitResult(true, "nothing to commit");
+        }
+        List<String> commitArgs = new ArrayList<>(List.of(
+                "-c", "user.name=" + authorName, "-c", "user.email=" + authorEmail,
+                "commit", "-F", messageFile.toAbsolutePath().toString(),
+                "--author=" + authorName + " <" + authorEmail + ">"));
+        java.util.Map<String, String> env = null;
+        if (authorDate != null) {
+            env = java.util.Map.of("GIT_AUTHOR_DATE", authorDate.toString(),
+                    "GIT_COMMITTER_DATE", authorDate.toString());
+        }
+        return exec(repoPath, null, null, commitArgs, env);
+    }
+
+    /**
+     * CAP-74 M2：merge --no-edit（写前 fetch 后收敛远端改动）。merge 可能产生合并提交，
+     * 命令级注入兜底身份防无全局 git 配置报错；冲突返回 ok(false)，output 含 CONFLICT 行，
+     * 调用方负责 {@link #mergeAbort} 清理 MERGING 状态。
+     */
+    public GitResult mergeNoEdit(String repoPath, String ref) {
+        return exec(repoPath, null, List.of(
+                "-c", "user.name=DevMind", "-c", "user.email=devmind@local",
+                "merge", "--no-edit", ref));
+    }
+
+    /** CAP-74 M2：冲突后中止合并（仓不留 MERGING 状态） */
+    public GitResult mergeAbort(String repoPath) {
+        return exec(repoPath, null, List.of("merge", "--abort"));
+    }
+
+    /**
+     * CAP-74：一次调用批量取多路径各自的提交信息（禁 per-file fork）。
+     * 命令：{@code git -c i18n.logOutputEncoding=UTF-8 log --encoding=UTF-8
+     * --format=%x1e%H%x1f%aI%x1f%s%x1f%b%x1e --name-only -n <cap> -- <paths...>}
+     * （%x1f/%x1e 分隔符 + UTF-8 编码强制，GitLogScanner 先例防 Windows GBK 乱码）。
+     * 按时间倒序：每路径首次命中 = 最近一次提交；窗口内末次命中 = firstCommittedAt（作 createdAt，
+     * cap 截断时退化为最近次，可接受）。无提交的路径不出现在结果中。
+     */
+    public List<PathCommit> lastCommitByPath(String repoPath, List<String> paths, int maxCommits) {
+        if (paths == null || paths.isEmpty()) {
+            return List.of();
+        }
+        int cap = Math.max(1, maxCommits);
+        List<String> args = new ArrayList<>(List.of(
+                "-c", "i18n.logOutputEncoding=UTF-8",
+                "log", "--encoding=UTF-8",
+                "--format=%x1e%H%x1f%aI%x1f%s%x1f%b%x1e", "--name-only",
+                "-n", String.valueOf(cap), "--"));
+        args.addAll(paths);
+        GitResult r = exec(repoPath, null, args);
+        if (!r.ok() || r.output() == null || r.output().isBlank()) {
+            return List.of();
+        }
+        java.util.Set<String> wanted = new java.util.HashSet<>(paths);
+        // split 后段交替：[前缀空, 字段, 文件名, 字段, 文件名, ...]
+        String[] segs = r.output().split("\u001e", -1);
+        var latest = new java.util.LinkedHashMap<String, PathCommit>();
+        var oldestAt = new java.util.HashMap<String, java.time.Instant>();
+        for (int i = 1; i < segs.length; i += 2) {
+            // 注意：禁 strip()——\u001f ≤ U+0020 会被 strip 吃掉，空 body 时尾部分隔符丢失导致字段数不足
+            String fields = trimWs(segs[i]);
+            if (fields.isEmpty()) {
+                continue;
+            }
+            String[] f = fields.split("\u001f", 4);
+            if (f.length < 4) {
+                continue;
+            }
+            java.time.Instant at;
+            try {
+                at = java.time.Instant.parse(f[1].strip());
+            } catch (Exception e) {
+                continue;
+            }
+            String names = i + 1 < segs.length ? segs[i + 1] : "";
+            for (String line : names.split("\n")) {
+                String p = line.strip();
+                if (p.isEmpty() || !wanted.contains(p)) {
+                    continue;
+                }
+                latest.putIfAbsent(p, new PathCommit(p, f[0].strip(), at, at,
+                        f[2].strip(), parseTrailers(f[3])));
+                oldestAt.put(p, at);
+            }
+        }
+        List<PathCommit> out = new ArrayList<>();
+        for (var e : latest.entrySet()) {
+            PathCommit pc = e.getValue();
+            out.add(new PathCommit(pc.path(), pc.sha(), pc.committedAt(),
+                    oldestAt.getOrDefault(e.getKey(), pc.committedAt()), pc.subject(), pc.trailers()));
+        }
+        return out;
+    }
+
+    /** 仅去首尾空白（空格/制表/换行），保留 \u001f/\u001e 控制符（strip 会误吃） */
+    private static String trimWs(String s) {
+        int b = 0, e = s.length();
+        while (b < e && (s.charAt(b) == ' ' || s.charAt(b) == '\t' || s.charAt(b) == '\n' || s.charAt(b) == '\r')) {
+            b++;
+        }
+        while (e > b && (s.charAt(e - 1) == ' ' || s.charAt(e - 1) == '\t' || s.charAt(e - 1) == '\n' || s.charAt(e - 1) == '\r')) {
+            e--;
+        }
+        return s.substring(b, e);
+    }
+
+    /** commit body 提取 trailer（Key: Value 行，同名后写覆盖） */
+    private static java.util.Map<String, String> parseTrailers(String body) {
+        var map = new java.util.LinkedHashMap<String, String>();
+        if (body == null) {
+            return map;
+        }
+        for (String line : body.split("\n")) {
+            String l = line.strip();
+            int colon = l.indexOf(':');
+            if (colon > 0 && l.substring(0, colon).matches("[A-Za-z0-9-]+")) {
+                map.put(l.substring(0, colon), l.substring(colon + 1).strip());
+            }
+        }
+        return map;
     }
 
     /** CAP-24 FR-02 凭证连通性自检：git ls-remote（只读，repoPath 用当前目录不参与鉴权） */
@@ -62,7 +253,7 @@ public class GitRemoteOps {
      * （git ls-remote 对缺失 ref 退出码仍为 0，调用方按 output 判空）。
      */
     public GitResult lsRemote(String remoteUrl, String token, String ref) {
-        String url = withToken(remoteUrl, token);
+        String url = token == null || token.isBlank() ? anonymousUrl(remoteUrl) : withToken(remoteUrl, token);
         return exec(".", token, remoteUrl, List.of("ls-remote", url, ref));
     }
 
@@ -237,6 +428,15 @@ public class GitRemoteOps {
      * @param cleanUrl 干净 remote URL（无 token），用于 CAP-70 出口规则查询；null = 纯本地操作不查
      */
     private GitResult exec(String repoPath, String token, String cleanUrl, List<String> args) {
+        return exec(repoPath, token, cleanUrl, args, null);
+    }
+
+    /**
+     * @param cleanUrl 干净 remote URL（无 token），用于 CAP-70 出口规则查询；null = 纯本地操作不查
+     * @param env 额外环境变量（如 GIT_AUTHOR_DATE/GIT_COMMITTER_DATE 回填）；null = 不加
+     */
+    private GitResult exec(String repoPath, String token, String cleanUrl, List<String> args,
+                           java.util.Map<String, String> env) {
         List<String> cmd = new ArrayList<>();
         cmd.add("git");
         cmd.addAll(egressProxyArgs(cleanUrl));
@@ -244,7 +444,11 @@ public class GitRemoteOps {
         cmd.add(repoPath);
         cmd.addAll(args);
         try {
-            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            ProcessBuilder pb = new ProcessBuilder(cmd).redirectErrorStream(true);
+            if (env != null) {
+                pb.environment().putAll(env);
+            }
+            Process p = pb.start();
             // 读输出与等待分离，防缓冲满死锁
             var outFuture = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
                 try {
