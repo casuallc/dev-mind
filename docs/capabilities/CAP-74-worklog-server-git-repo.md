@@ -240,3 +240,31 @@ MVP 明确不做：index.json 或任何落盘索引（否决，见 §3）、团�
 9. **验收 6（egress 隧道）** 由 `GitRemoteOpsEgressTest` 单测覆盖（CAP-70 既有回归网），
    E2E 不起真实隧道；验收 7 的带行迁移幂等由 `WorklogReportMigrationTest` 覆盖，
    E2E（tests/e2e-cap74.py）钉「重启零新 commit」。
+
+## 10. M3 条目文件化与 runner 清理（2026-10-12 落地）
+
+1. **条目从 DB 迁仓内文件**：`<subdir>/entries/yyyy-MM-dd.md` 每日一文件，条目以
+   `<!-- devmind:entry id=<32hex> type=.. hours=.. source=.. repo=.. sha=.. req=.. jira=.. created=.. -->`
+   注释行定界 + `## 标题` + 正文；preamble（首个注释前内容）与未知 `k=v` 属性逐字节/原序
+   无损往返，平台外手改不丢。条目 id 从 DB 自增 Long 改 uuid 字符串（破坏性变更，前后端同发布）。
+2. **API 变更**：`EntryView.id` 为 String；删除改 `DELETE /entries/{date}/{id}`
+   （date 定位 day 文件免全目录扫）；`updatedAt` 口径 = `createdAt`（条目粒度无独立
+   更新时间，历史走 git log）。
+3. **素材口径切换**：日报/周报生成预检与素材（ReportService/ReportPrompts/GitLogScanner
+   判重）全部改读仓文件；`WorklogEntryEntity`/`WorklogEntryRepository` 已删，
+   `worklog_entries` 表 ddl-auto 不删，手工清理口径：`DROP TABLE worklog_entries;`（不清理无害）。
+4. **存量迁移幂等**：`WorklogEntryMigration`（ApplicationRunner）按 (user, date) 分组，
+   幂等键 = 条目元数据 `legacy=<db id>`，commit 时间回填组内最新 updated_at；一律写
+   **个人仓**（已切团队仓的用户其个人仓历史条目不跨仓聚合，与报告迁移同款已知限制）。
+5. **skill 教追加格式**：worklog skill 种子增「追加工作条目」节（source=AGENT、hours
+   0.25 步进、只尾部追加不动他人 marker/preamble）；存量部署需在管控台 Skill 页手工同步。
+6. **runner push 链路整体下线**：`RunnerWorkspace.pushWorklog/ensureGitignore` 与存量
+   .git 补写分支删除（骨架/.gitignore 初写保留）；服务端 `worklog_push` 下发链路删除
+   （AgentConnectionRegistry/AgentNodeWsHandler/AgentNodeConnector），协议常量
+   `WORKLOG_PUSH_FRAMES`/`WORKLOG_PUSH_IDENTITY` 标 @Deprecated，`CURRENT=23` 不回退；
+   runner 侧 `worklog_push` no-op ack 分支按 §5 保留兼容旧服务端。**运维**：runner jar
+   重建后重启所有节点（WinSW devmind-agent/devmind-agent-194、140.88），新旧两侧任意
+   组合均安全。
+7. **E2E**：`tests/e2e-cap74-m3.py`（32 断言）——H2 URL INIT 预植 legacy 表真迁移、
+   条目文件字节/trailer、平台外手改存活、删除寻址、git 导入判重走文件、生成预检
+   文件化通路、重启迁移幂等。
