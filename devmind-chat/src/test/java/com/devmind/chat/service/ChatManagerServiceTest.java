@@ -382,7 +382,9 @@ class ChatManagerServiceTest {
                 emptyObjectProvider(),
                 // 无 knowledge 模块：getIfAvailable 恒 null → 绑库创建 409
                 emptyObjectProvider(),
-                objectProviderOf(endpoints));
+                objectProviderOf(endpoints),
+                // 无 usage 模块：逐回合账本跳过，只记累计列
+                emptyObjectProvider());
     }
 
     /** 换上带指定检索器的服务实例（CAP-46 用例重建 service 专用）。 */
@@ -393,7 +395,7 @@ class ChatManagerServiceTest {
         service = new ChatManagerService(fakeIdentity(), (NotificationEvent e) -> { },
                 chats.jpa(), events.jpa(), saver, props, JsonMapper.builder().build(),
                 objectProviderOf(runner), emptyObjectProvider(), emptyObjectProvider(),
-                objectProviderOf(retriever), objectProviderOf(endpoints));
+                objectProviderOf(retriever), objectProviderOf(endpoints), emptyObjectProvider());
     }
 
     @SuppressWarnings("unchecked")
@@ -544,7 +546,7 @@ class ChatManagerServiceTest {
         service = new ChatManagerService(fakeIdentity(), (NotificationEvent e) -> { },
                 chats.jpa(), events.jpa(), saver, props, JsonMapper.builder().build(),
                 objectProviderOf(runner), emptyObjectProvider(), objectProviderOf(preparer),
-                emptyObjectProvider(), emptyObjectProvider());
+                emptyObjectProvider(), emptyObjectProvider(), emptyObjectProvider());
 
         // 显式全空 → 场景预设的 model/pm/node 生效
         ChatView v = service.create(new CreateChatRequest("你好", null, null, null, "qa"));
@@ -959,7 +961,7 @@ class ChatManagerServiceTest {
         service = new ChatManagerService(fakeIdentity(), (NotificationEvent e) -> { },
                 chats.jpa(), events.jpa(), saver, p, JsonMapper.builder().build(),
                 objectProviderOf(runner), emptyObjectProvider(), emptyObjectProvider(),
-                emptyObjectProvider(), emptyObjectProvider());
+                emptyObjectProvider(), emptyObjectProvider(), emptyObjectProvider());
         assertThrows(DevMindException.class, () -> service.create(modelRequest("x", null)));
     }
 

@@ -34,6 +34,7 @@ import com.devmind.common.knowledge.KnowledgeRetriever;
 import com.devmind.common.model.ModelEndpointProvider;
 import com.devmind.common.model.ModelEndpointView;
 import com.devmind.common.notification.NotificationEvent;
+import com.devmind.common.usage.UsageRecordSink;
 import com.devmind.notification.NotificationPublisher;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -106,6 +107,8 @@ public class ChatManagerService {
     private final ObjectProvider<KnowledgeRetriever> retrieverProvider;
     /** CAP-49：模型端点解析（devmind-model 装配时可用）；未装配即无法建模型问答（409） */
     private final ObjectProvider<ModelEndpointProvider> endpointProvider;
+    /** 逐回合用量账本（devmind-usage 装配时可用；未装配时只记累计列） */
+    private final ObjectProvider<UsageRecordSink> usageRecordSinkProvider;
 
     /** 运行中问答注册表（本地/远程统一句柄）。 */
     private final Map<String, SessionHandle> runtimes = new ConcurrentHashMap<>();
@@ -131,7 +134,8 @@ public class ChatManagerService {
                               ObjectProvider<AttachmentContentResolver> attachmentResolverProvider,
                               ObjectProvider<ChatContextPreparer> contextPreparerProvider,
                               ObjectProvider<KnowledgeRetriever> retrieverProvider,
-                              ObjectProvider<ModelEndpointProvider> endpointProvider) {
+                              ObjectProvider<ModelEndpointProvider> endpointProvider,
+                              ObjectProvider<UsageRecordSink> usageRecordSinkProvider) {
         this.identityService = identityService;
         this.notificationPublisher = notificationPublisher;
         this.chatRepo = chatRepo;
@@ -144,6 +148,7 @@ public class ChatManagerService {
         this.contextPreparerProvider = contextPreparerProvider;
         this.retrieverProvider = retrieverProvider;
         this.endpointProvider = endpointProvider;
+        this.usageRecordSinkProvider = usageRecordSinkProvider;
         this.settings = props.toRuntimeSettings();
     }
 
@@ -183,6 +188,11 @@ public class ChatManagerService {
                         usage.cacheReadTokens() == null ? 0 : usage.cacheReadTokens(),
                         usage.cacheCreationTokens() == null ? 0 : usage.cacheCreationTokens(),
                         Instant.now());
+                // 逐回合账本（usage 模块装配时）：sink 自吞异常，外层 catch 双保险
+                UsageRecordSink sink = usageRecordSinkProvider.getIfAvailable();
+                if (sink != null) {
+                    sink.record(UsageRecordSink.SOURCE_CHAT, sessionId, usage);
+                }
             } catch (Exception e) {
                 log.warn("问答用量入账失败: chat={} err={}", sessionId, e.getMessage());
             }

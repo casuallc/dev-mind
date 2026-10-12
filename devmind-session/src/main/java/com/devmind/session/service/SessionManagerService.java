@@ -59,6 +59,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.devmind.common.agent.runtime.RemoteSessionRuntime;
 import com.devmind.common.agent.runtime.RuntimeListener;
 import com.devmind.common.agent.runtime.TurnUsage;
+import com.devmind.common.usage.UsageRecordSink;
 import com.devmind.session.runtime.SessionEventSaver;
 import com.devmind.common.agent.runtime.SessionHandle;
 import tools.jackson.databind.ObjectMapper;
@@ -132,6 +133,8 @@ public class SessionManagerService {
     private final SessionOutputService outputService;
     /** CAP-68：附件内容解析（devmind-attachment 装配时可用；未装配时带附件的输入报错，不静默丢） */
     private final ObjectProvider<AttachmentContentResolver> attachmentResolverProvider;
+    /** 逐回合用量账本（devmind-usage 装配时可用；未装配时只记累计列） */
+    private final ObjectProvider<UsageRecordSink> usageRecordSinkProvider;
 
     /** 运行中会话注册表（本地/远程统一句柄）。 */
     private final Map<String, SessionHandle> runtimes = new ConcurrentHashMap<>();
@@ -158,7 +161,8 @@ public class SessionManagerService {
                                  RemoteDiffService remoteDiffService,
                                  PlatformTransactionManager txManager,
                                  SessionOutputService outputService,
-                                 ObjectProvider<AttachmentContentResolver> attachmentResolverProvider) {
+                                 ObjectProvider<AttachmentContentResolver> attachmentResolverProvider,
+                                 ObjectProvider<UsageRecordSink> usageRecordSinkProvider) {
         this.identityService = identityService;
         this.projectService = projectService;
         this.workItemService = workItemService;
@@ -182,6 +186,7 @@ public class SessionManagerService {
         this.txManager = txManager;
         this.outputService = outputService;
         this.attachmentResolverProvider = attachmentResolverProvider;
+        this.usageRecordSinkProvider = usageRecordSinkProvider;
     }
 
     private final RuntimeListener listener = new RuntimeListener() {
@@ -226,6 +231,11 @@ public class SessionManagerService {
                         usage.cacheReadTokens() == null ? 0 : usage.cacheReadTokens(),
                         usage.cacheCreationTokens() == null ? 0 : usage.cacheCreationTokens(),
                         Instant.now());
+                // 逐回合账本（usage 模块装配时）：sink 自吞异常，外层 catch 双保险
+                UsageRecordSink sink = usageRecordSinkProvider.getIfAvailable();
+                if (sink != null) {
+                    sink.record(UsageRecordSink.SOURCE_SESSION, sessionId, usage);
+                }
             } catch (Exception e) {
                 log.warn("会话用量入账失败: session={} err={}", sessionId, e.getMessage());
             }
