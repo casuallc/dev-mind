@@ -265,6 +265,11 @@ public class ReportService {
      */
     private ReportLaunch launch(String username, String scenarioCode, String prompt) {
         String projectId = workspaceService.ensureFor(username).projectId();
+        if (projectId == null || projectId.isBlank()) {
+            // CAP-74：仓初始化不再被节点阻断，409 推迟到这里 fail-visible
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "无平台默认执行节点，无法创建工作日志生成会话（请先注册 runner 节点并设为默认；读/编辑/推送不受影响）");
+        }
         SessionView s = sessionManager.create(new CreateSessionRequest(
                 null, scenarioCode, projectId, null, null, prompt,
                 null, null, null, null, null, null, null, null, null));

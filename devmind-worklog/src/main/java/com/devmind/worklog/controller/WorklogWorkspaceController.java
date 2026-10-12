@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** CAP-41：工作日志空间（WORKLOG 特殊项目）查询与懒初始化；M3：远端备份手动推送。 */
+/** CAP-41：工作日志空间查询与懒初始化；CAP-74：事实源改服务端仓，push 改服务端直推（不再下发 runner）。 */
 @RestController
 @RequestMapping("/api/worklog/workspace")
 public class WorklogWorkspaceController {
@@ -31,7 +31,10 @@ public class WorklogWorkspaceController {
         return service.ensure();
     }
 
-    /** CAP-41 M3：把本人工作日志空间 push 到设置里绑定的远端仓库（阻塞等 runner ack）。 */
+    /**
+     * CAP-74：服务端直推个人仓到已绑定远端（fetch+merge+push；分叉冲突 409，
+     * 走 POST /api/worklog/repos/{key}/resolve 显式解决）。未绑定远端 400、缺凭证 409。
+     */
     @PostMapping("/push")
     public com.devmind.common.agent.WorklogPushResult push() {
         return backupService.pushToRemote();

@@ -18,18 +18,25 @@ public class WorklogSettingsService {
     private final WorklogUserSettingsRepository settingsRepo;
     private final IdentityService identity;
     private final com.devmind.worklog.config.WorklogProperties props;
+    private final WorklogRepoService repoService;
 
     public WorklogSettingsService(WorklogUserSettingsRepository settingsRepo, IdentityService identity,
-                                  com.devmind.worklog.config.WorklogProperties props) {
+                                  com.devmind.worklog.config.WorklogProperties props,
+                                  WorklogRepoService repoService) {
         this.settingsRepo = settingsRepo;
         this.identity = identity;
         this.props = props;
+        this.repoService = repoService;
     }
 
     public SettingsView get() {
-        SettingsView v = settingsRepo.findByUserId(identity.currentActor())
+        String me = identity.currentActor();
+        SettingsView v = settingsRepo.findByUserId(me)
                 .map(SettingsView::of).orElseGet(SettingsView::defaults);
-        return withGlobalLabels(v);
+        // CAP-74 D5：remoteUrl/remoteBranch 路由 worklog_repos 个人仓行（读不建仓，未建=未绑定）
+        return withGlobalLabels(repoService.findPersonalRepo(me)
+                .map(r -> v.withRemote(r.getRemoteUrl(), r.getRemoteBranch()))
+                .orElseGet(() -> v.withRemote(null, null)));
     }
 
     @Transactional
@@ -73,15 +80,31 @@ public class WorklogSettingsService {
         if (req.weeklyTemplateMd() != null) {
             e.setWeeklyTemplateMd(normalizeTemplate(req.weeklyTemplateMd()));
         }
-        // CAP-41 M3：远端备份绑定（null = 不变；空白串 = 解绑）
+        // CAP-74 D5：远端备份绑定改写 worklog_repos 个人仓行（null = 不变；空白串 = 解绑）；
+        // worklog_user_settings.remote_url/remote_branch 列废弃停读写（存量由 CAP-74 C5 迁移搬走）
+        boolean remoteTouched = false;
+        com.devmind.worklog.model.WorklogRepoEntity repo = null;
+        if (req.remoteUrl() != null || req.remoteBranch() != null) {
+            repo = repoService.ensurePersonalRepo(me);
+            remoteTouched = true;
+        }
         if (req.remoteUrl() != null) {
-            e.setRemoteUrl(normalizeRemoteUrl(req.remoteUrl()));
+            repo.setRemoteUrl(normalizeRemoteUrl(req.remoteUrl()));
         }
         if (req.remoteBranch() != null) {
-            e.setRemoteBranch(normalizeTemplate(req.remoteBranch()));
+            String branch = normalizeTemplate(req.remoteBranch());
+            repo.setRemoteBranch(branch == null ? "main" : branch);
+        }
+        if (remoteTouched) {
+            repoService.saveRepo(repo);
         }
         e.setUpdatedAt(Instant.now());
-        return withGlobalLabels(SettingsView.of(settingsRepo.save(e)));
+        SettingsView saved = SettingsView.of(settingsRepo.save(e));
+        return withGlobalLabels(repo != null
+                ? saved.withRemote(repo.getRemoteUrl(), repo.getRemoteBranch())
+                : repoService.findPersonalRepo(me)
+                        .map(r -> saved.withRemote(r.getRemoteUrl(), r.getRemoteBranch()))
+                        .orElseGet(() -> saved.withRemote(null, null)));
     }
 
     /** 全局兜底规则的中文展示标签（前端 placeholder/extra 提示用）。 */

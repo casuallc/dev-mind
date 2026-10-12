@@ -217,6 +217,40 @@ public class WorklogRepoService {
         return repoRepository.findByRepoKey(personalRepoKey(username));
     }
 
+    /** 个人仓查找（不建仓；设置页读远端绑定用） */
+    public Optional<WorklogRepoEntity> findPersonalRepo(String username) {
+        return repoRepository.findByRepoKey(personalRepoKey(username));
+    }
+
+    /** 按键取仓（不存在 404；resolve/成员管理端点用） */
+    public WorklogRepoEntity requireRepo(String repoKey) {
+        return repoRepository.findByRepoKey(repoKey)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "工作日志仓不存在: " + repoKey));
+    }
+
+    /** 成员判定（resolve/成员管理端点鉴权用） */
+    public boolean isMember(WorklogRepoEntity repo, String username) {
+        return memberRepository.findByRepoIdAndUserId(repo.getId(), username).isPresent();
+    }
+
+    /** 仓行更新（远端绑定等字段变更；写路径之外的 DB 单行保存不加锁） */
+    public WorklogRepoEntity saveRepo(WorklogRepoEntity repo) {
+        return repoRepository.save(repo);
+    }
+
+    /** HEAD 最近提交时间（空间视图 lastCommitAt；空仓/异常 → null） */
+    public Instant lastCommitAt(WorklogRepoEntity repo) {
+        GitRemoteOps.GitResult r = git.headCommitAt(repoDir(repo.getRepoKey()).toString());
+        if (!r.ok() || r.output() == null || r.output().isBlank()) {
+            return null;
+        }
+        try {
+            return Instant.parse(r.output().trim());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     // ---------------- 写路径 ----------------
 
     /** 写报告到操作人活动仓（AI 成稿/手动 PUT 统一入口） */

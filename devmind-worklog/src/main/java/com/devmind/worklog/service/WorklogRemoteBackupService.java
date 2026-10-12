@@ -1,99 +1,150 @@
 package com.devmind.worklog.service;
 
 import com.devmind.auth.IdentityService;
-import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.WorklogPushResult;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
-import com.devmind.common.integration.GitIdentityProvider;
 import com.devmind.common.integration.RepoGitGateway;
-import com.devmind.project.ProjectService;
-import com.devmind.project.model.ProjectEntity;
-import com.devmind.worklog.repo.WorklogUserSettingsRepository;
+import com.devmind.integration.service.GitRemoteOps;
+import com.devmind.worklog.model.WorklogRepoEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
+import java.util.stream.Collectors;
 
 /**
- * CAP-41 M3：工作日志空间远端备份（手动触发）。绑定信息存个人设置
- * （remote_url/remote_branch）；凭证复用 CAP-35 个人 PAT 链——按远端 URL 的 host 经
- * {@link RepoGitGateway#resolveToken} 解析（token 解密不出 integration 模块边界，
- * 仅随 worklog_push 帧下发 runner，不进日志）。push 实际在 runner 侧持久工作区执行。
+ * CAP-74 M1：工作日志服务端 push（事实源在服务端仓，不再下发 runner）。
+ * 全程仓级锁内：远端分支不存在 → 直接 push；否则 fetch → merge --no-edit（分叉自动合，
+ * 跨人路径不相交恒干净）→ 冲突 mergeAbort 清 MERGING + 409 带冲突文件清单（显式
+ * {@link #resolveConflict} 端点解决，不静默覆盖）→ push（本地恒 main，远端分支可配，refspec）。
+ *
+ * <p>绑定信息存 worklog_repos 个人仓行（remote_url/remote_branch）；凭证复用 CAP-35 个人
+ * PAT 链——按远端 host 经 {@link RepoGitGateway#resolveToken} 解析（token 仅进程参数注入，
+ * 不落盘不进日志）；file:// 本地验证通道免凭证。</p>
  */
 @Service
 public class WorklogRemoteBackupService {
 
     private static final Logger log = LoggerFactory.getLogger(WorklogRemoteBackupService.class);
 
-    private final WorklogUserSettingsRepository settingsRepo;
-    private final IdentityService identity;
-    private final ProjectService projectService;
-    private final ObjectProvider<AgentNodeConnector> connectorProvider;
-    private final ObjectProvider<RepoGitGateway> gitGatewayProvider;
-    private final ObjectProvider<GitIdentityProvider> gitIdentityProvider;
+    private static final String LOCAL_BRANCH = "main";
 
-    public WorklogRemoteBackupService(WorklogUserSettingsRepository settingsRepo,
-                                      IdentityService identity, ProjectService projectService,
-                                      ObjectProvider<AgentNodeConnector> connectorProvider,
-                                      ObjectProvider<RepoGitGateway> gitGatewayProvider,
-                                      ObjectProvider<GitIdentityProvider> gitIdentityProvider) {
-        this.settingsRepo = settingsRepo;
+    private final IdentityService identity;
+    private final WorklogRepoService repoService;
+    private final GitRemoteOps git;
+    private final ObjectProvider<RepoGitGateway> gitGatewayProvider;
+
+    public WorklogRemoteBackupService(IdentityService identity, WorklogRepoService repoService,
+                                      GitRemoteOps git, ObjectProvider<RepoGitGateway> gitGatewayProvider) {
         this.identity = identity;
-        this.projectService = projectService;
-        this.connectorProvider = connectorProvider;
+        this.repoService = repoService;
+        this.git = git;
         this.gitGatewayProvider = gitGatewayProvider;
-        this.gitIdentityProvider = gitIdentityProvider;
     }
 
-    /** 推送本人工作日志空间到已绑定远端。各前置不满足抛 400/409；push 失败不抛，看 ok。 */
+    /** 推送本人个人仓到已绑定远端。各前置不满足抛 400/409；传输层失败不抛，看 ok。 */
     public WorklogPushResult pushToRemote() {
         String me = identity.currentActor();
-        var settings = settingsRepo.findByUserId(me)
-                .filter(s -> s.getRemoteUrl() != null && !s.getRemoteUrl().isBlank())
-                .orElseThrow(() -> new DevMindException(ErrorCode.BAD_REQUEST,
-                        "未绑定远程仓库（在工时设置-远程仓库备份里配置 URL 后再推送）"));
-        String remoteUrl = settings.getRemoteUrl();
-        String branch = settings.getRemoteBranch() == null || settings.getRemoteBranch().isBlank()
-                ? "main" : settings.getRemoteBranch().trim();
-
+        WorklogRepoEntity repo = repoService.ensurePersonalRepo(me);
+        String remoteUrl = requireRemote(repo);
+        String branch = remoteBranch(repo);
         String token = resolveToken(me, remoteUrl);
-
-        ProjectEntity project = projectService.findWorklogByOwner(me)
-                .orElseThrow(() -> new DevMindException(ErrorCode.CONFLICT,
-                        "工作日志空间未初始化（先点「初始化空间」再推送）"));
-        if (project.getAgentNodeId() == null || project.getAgentNodeId().isBlank()) {
-            throw new DevMindException(ErrorCode.CONFLICT, "工作日志空间无亲和节点，无法推送");
-        }
-        AgentNodeConnector connector = connectorProvider.getIfAvailable();
-        if (connector == null) {
-            throw new DevMindException(ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
-        }
-        log.info("worklog 远端备份下发: user={} node={} url={} branch={}",
-                me, project.getAgentNodeId(), remoteUrl, branch);
-        return connector.pushWorklog(project.getAgentNodeId(), me, remoteUrl, branch, token,
-                resolveAuthor(me, remoteUrl));
+        log.info("worklog 服务端 push: user={} repo={} url={} branch={}", me, repo.getRepoKey(), remoteUrl, branch);
+        return repoService.withLock(repo.getRepoKey(), () -> fetchMergePush(repo, remoteUrl, branch, token));
     }
 
     /**
-     * push 前自动合并的署名身份：CAP-35 第三方账号按 host 的 git user/email
-     * （无绑定回退 displayName/username）。解析失败/模块未装配 → null（帧不带身份字段，
-     * runner 回退内置 devmind 署名），不阻塞推送。
+     * 冲突显式解决（push 409 后前端二选一）：strategy=ours 以平台仓为准 / theirs 以远端为准。
+     * 锁内重新 fetch（远端可能已动）→ merge -X strategy → push。actor 必须是仓成员。
      */
-    private GitIdentityProvider.GitAuthor resolveAuthor(String me, String remoteUrl) {
-        GitIdentityProvider provider = gitIdentityProvider.getIfAvailable();
-        if (provider == null) {
-            return null;
+    public WorklogPushResult resolveConflict(String repoKey, String strategy) {
+        String me = identity.currentActor();
+        WorklogRepoEntity repo = repoService.requireRepo(repoKey);
+        if (!repoService.isMember(repo, me)) {
+            throw new DevMindException(ErrorCode.FORBIDDEN, "你不是仓 " + repoKey + " 的成员");
         }
-        try {
-            String host = URI.create(remoteUrl).getHost();
-            return provider.resolveAuthor(me, host).orElse(null);
-        } catch (Exception e) {
-            log.debug("worklog 推送署名解析失败(忽略): user={} err={}", me, e.getMessage());
-            return null;
+        String remoteUrl = requireRemote(repo);
+        String branch = remoteBranch(repo);
+        String token = resolveToken(me, remoteUrl);
+        return repoService.withLock(repoKey, () -> {
+            String dir = repoService.repoDir(repoKey).toString();
+            GitRemoteOps.GitResult fetch = git.fetchAllRefs(dir, remoteUrl, token);
+            if (!fetch.ok()) {
+                return WorklogPushResult.failed("fetch 失败: " + fetch.output());
+            }
+            GitRemoteOps.GitResult merge = git.mergeWithStrategy(dir, "origin/" + branch, strategy);
+            if (!merge.ok()) {
+                git.mergeAbort(dir);
+                throw new DevMindException(ErrorCode.CONFLICT,
+                        "策略合并仍失败（" + strategy + "），已回滚合并状态: " + merge.output());
+            }
+            GitRemoteOps.GitResult push = git.pushBranch(dir, LOCAL_BRANCH, branch, remoteUrl, token);
+            if (!push.ok()) {
+                return WorklogPushResult.failed("push 失败: " + push.output());
+            }
+            log.info("worklog 冲突已解决并推送: user={} repo={} strategy={}", me, repoKey, strategy);
+            return WorklogPushResult.ok("已按「" + ("ours".equals(strategy) ? "平台仓为准" : "远端为准")
+                    + "」合并并推送到 " + branch);
+        });
+    }
+
+    // ---------------- 内部 ----------------
+
+    /** fetch + merge + push 主链（调用方已持仓锁）。 */
+    private WorklogPushResult fetchMergePush(WorklogRepoEntity repo, String remoteUrl,
+                                             String branch, String token) {
+        String dir = repoService.repoDir(repo.getRepoKey()).toString();
+        // 远端分支不存在 → 首次直推
+        GitRemoteOps.GitResult ls = git.lsRemote(remoteUrl, token, "refs/heads/" + branch);
+        if (!ls.ok()) {
+            return WorklogPushResult.failed("远端探测失败: " + ls.output());
         }
+        if (!ls.output().isBlank()) {
+            GitRemoteOps.GitResult fetch = git.fetchAllRefs(dir, remoteUrl, token);
+            if (!fetch.ok()) {
+                return WorklogPushResult.failed("fetch 失败: " + fetch.output());
+            }
+            GitRemoteOps.GitResult merge = git.mergeNoEdit(dir, "origin/" + branch);
+            if (!merge.ok()) {
+                git.mergeAbort(dir); // 清 MERGING，仓不留半合并状态
+                throw new DevMindException(ErrorCode.CONFLICT,
+                        "与远端分支 " + branch + " 合并冲突，请显式选择解决方向（以平台为准/以远端为准）。冲突文件: "
+                                + conflictFiles(merge.output()));
+            }
+        }
+        GitRemoteOps.GitResult push = git.pushBranch(dir, LOCAL_BRANCH, branch, remoteUrl, token);
+        if (!push.ok()) {
+            return WorklogPushResult.failed("push 失败: " + push.output());
+        }
+        return WorklogPushResult.ok("已推送到远端分支 " + branch);
+    }
+
+    /** 从 merge 输出提取 CONFLICT 行（冲突文件清单，随 409 给前端展示）。 */
+    private static String conflictFiles(String output) {
+        if (output == null) {
+            return "（未识别）";
+        }
+        String files = output.lines()
+                .filter(l -> l.contains("CONFLICT"))
+                .map(l -> l.replaceFirst(".*Merge conflict in ", "").trim())
+                .collect(Collectors.joining(", "));
+        return files.isBlank() ? "（未识别）" : files;
+    }
+
+    private static String requireRemote(WorklogRepoEntity repo) {
+        if (repo.getRemoteUrl() == null || repo.getRemoteUrl().isBlank()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "未绑定远程仓库（在工时设置-远程仓库备份里配置 URL 后再推送）");
+        }
+        return repo.getRemoteUrl();
+    }
+
+    private static String remoteBranch(WorklogRepoEntity repo) {
+        return repo.getRemoteBranch() == null || repo.getRemoteBranch().isBlank()
+                ? "main" : repo.getRemoteBranch().trim();
     }
 
     /** file:// 无凭证语义；http/https 按 host 经 CAP-35 个人 PAT 解析，缺失即 409 引导。 */

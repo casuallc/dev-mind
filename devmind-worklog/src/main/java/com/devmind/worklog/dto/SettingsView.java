@@ -39,4 +39,12 @@ public record SettingsView(Boolean autoDaily, Boolean autoWeekly, Boolean autoGi
                 dailyTime, weeklyDay, weeklyTime, gitImportTime,
                 dailyLabel, weeklyLabel, gitImportLabel);
     }
+
+    /** CAP-74 D5：remoteUrl/remoteBranch 改路由 worklog_repos 个人仓行，视图层覆盖实体列值。 */
+    public SettingsView withRemote(String url, String branch) {
+        return new SettingsView(autoDaily, autoWeekly, autoGitImport, dailyMinutesTarget,
+                dailyTemplateMd, weeklyTemplateMd, url, branch,
+                dailyTime, weeklyDay, weeklyTime, gitImportTime,
+                globalDailyLabel, globalWeeklyLabel, globalGitImportLabel);
+    }
 }

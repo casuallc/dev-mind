@@ -150,6 +150,25 @@ public class GitRemoteOps {
     }
 
     /**
+     * CAP-74 M2：冲突显式解决合并（merge -X ours|theirs --no-edit）——push 冲突 409 后由
+     * resolve 端点按用户选择执行（ours=以平台仓为准，theirs=以远端为准），不静默覆盖。
+     */
+    public GitResult mergeWithStrategy(String repoPath, String ref, String strategy) {
+        if (!"ours".equals(strategy) && !"theirs".equals(strategy)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "非法合并策略（仅 ours/theirs）: " + strategy);
+        }
+        return exec(repoPath, null, List.of(
+                "-c", "user.name=DevMind", "-c", "user.email=devmind@local",
+                "merge", "--no-edit", "-X", strategy, ref));
+    }
+
+    /** CAP-74：HEAD 最近提交时间（ISO-8601，空间视图 lastCommitAt；空仓/失败返回 ok=false） */
+    public GitResult headCommitAt(String repoPath) {
+        return exec(repoPath, null, List.of("log", "-1", "--format=%aI"));
+    }
+
+    /**
      * CAP-74：一次调用批量取多路径各自的提交信息（禁 per-file fork）。
      * 命令：{@code git -c i18n.logOutputEncoding=UTF-8 log --encoding=UTF-8
      * --format=%x1e%H%x1f%aI%x1f%s%x1f%b%x1e --name-only -n <cap> -- <paths...>}
