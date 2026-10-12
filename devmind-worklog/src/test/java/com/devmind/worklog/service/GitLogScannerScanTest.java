@@ -6,16 +6,15 @@ import com.devmind.common.util.GitCli;
 import com.devmind.worklog.config.WorklogProperties;
 import com.devmind.worklog.dto.GitPreviewResponse;
 import com.devmind.worklog.dto.GitScanRepoDiag;
-import com.devmind.worklog.repo.WorklogEntryRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.ObjectProvider;
 
-import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -23,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * scanDetailed 端到端（真实 git 仓库）：诊断产出 + author 过滤链的本地 user.email 回退。
- * 无 mockito 依赖：CodeRepoService 匿名子类覆写、WorklogEntryRepository 用 JDK 代理。
+ * 无 mockito 依赖：CodeRepoService/WorklogEntryService 匿名子类覆写（CAP-74 M3 起已导入判定走仓文件）。
  */
 class GitLogScannerScanTest {
 
@@ -43,15 +42,12 @@ class GitLogScannerScanTest {
                 return subs;
             }
         };
-        WorklogEntryRepository entryRepo = (WorklogEntryRepository) Proxy.newProxyInstance(
-                getClass().getClassLoader(),
-                new Class<?>[]{WorklogEntryRepository.class},
-                (proxy, method, args) -> {
-                    if ("existsByUserIdAndRepoIdAndCommitSha".equals(method.getName())) {
-                        return false;
-                    }
-                    throw new UnsupportedOperationException(method.getName());
-                });
+        WorklogEntryService entryService = new WorklogEntryService(null, null, null) {
+            @Override
+            public Set<String> importedShas(String username) {
+                return Set.of();
+            }
+        };
         // integration 缺席场景：无 GitIdentityProvider，走仓库本地 user.email 回退
         ObjectProvider<GitIdentityProvider> noProvider = new ObjectProvider<>() {
             @Override
@@ -64,7 +60,7 @@ class GitLogScannerScanTest {
                 return null;
             }
         };
-        return new GitLogScanner(codeRepoService, entryRepo, new WorklogProperties(), noProvider);
+        return new GitLogScanner(codeRepoService, entryService, new WorklogProperties(), noProvider);
     }
 
     private void git(String... args) {

@@ -7,7 +7,6 @@ import com.devmind.worklog.dto.GitPreviewResponse;
 import com.devmind.worklog.dto.GitScanRepoDiag;
 import com.devmind.common.integration.GitRepoCatalog;
 import com.devmind.common.util.GitCli;
-import com.devmind.worklog.repo.WorklogEntryRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -47,16 +46,16 @@ public class GitLogScanner {
     private static final String FORMAT = "--format=%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1e";
 
     private final CodeRepoService codeRepoService;
-    private final WorklogEntryRepository entryRepo;
+    private final WorklogEntryService entryService;
     private final WorklogProperties props;
     private final ObjectProvider<GitIdentityProvider> identityProvider;
 
     public GitLogScanner(CodeRepoService codeRepoService,
-                         WorklogEntryRepository entryRepo,
+                         WorklogEntryService entryService,
                          WorklogProperties props,
                          ObjectProvider<GitIdentityProvider> identityProvider) {
         this.codeRepoService = codeRepoService;
-        this.entryRepo = entryRepo;
+        this.entryService = entryService;
         this.props = props;
         this.identityProvider = identityProvider;
     }
@@ -75,6 +74,8 @@ public class GitLogScanner {
     public GitPreviewResponse scanDetailed(String username, LocalDate from, LocalDate to) {
         List<GitCommitView> out = new ArrayList<>();
         List<GitScanRepoDiag> diags = new ArrayList<>();
+        // CAP-74 M3：已导入判定 = 仓内条目文件 sha，一次构建全扫描共用（避免 per-commit 扫目录）
+        Set<String> imported = entryService.importedShas(username);
         for (CodeRepoService.SubscribedRepo sub : codeRepoService.subscribedRepos(username)) {
             GitRepoCatalog.RepoRef repo = sub.repo();
             // 状态常量归 project 模块实体，此处用字面量防跨模块依赖
@@ -89,7 +90,7 @@ public class GitLogScanner {
                 continue;
             }
             try {
-                RepoScan r = scanRepo(username, repo, sub.branches(), from, to);
+                RepoScan r = scanRepo(username, repo, sub.branches(), from, to, imported);
                 out.addAll(r.commits());
                 diags.add(r.diag());
             } catch (Exception e) {
@@ -113,7 +114,7 @@ public class GitLogScanner {
      * 非空则逐分支扫描并按 sha 去重（同一提交常被多个分支同时包含）。
      */
     private RepoScan scanRepo(String username, GitRepoCatalog.RepoRef repo, List<String> selectedBranches,
-                              LocalDate from, LocalDate to) {
+                              LocalDate from, LocalDate to, Set<String> imported) {
         String author = resolveAuthorFilter(username, repo);
         // 待扫描的分支名：空选择 → 默认分支（null 表示不限定 rev，扫 HEAD）
         List<String> branches = selectedBranches.isEmpty()
@@ -123,7 +124,7 @@ public class GitLogScanner {
         Set<String> seenSha = new LinkedHashSet<>();
         List<String> notes = new ArrayList<>();
         for (String branch : branches) {
-            BranchScan b = scanBranch(username, repo, branch, author, from, to, seenSha);
+            BranchScan b = scanBranch(username, repo, branch, author, from, to, seenSha, imported);
             commits.addAll(b.commits());
             if (b.note() != null) {
                 notes.add(b.note());
@@ -153,7 +154,7 @@ public class GitLogScanner {
      * 其余分支只有远程跟踪引用）；都不存在记 note 跳过。
      */
     private BranchScan scanBranch(String username, GitRepoCatalog.RepoRef repo, String branch, String author,
-                                  LocalDate from, LocalDate to, Set<String> seenSha) {
+                                  LocalDate from, LocalDate to, Set<String> seenSha, Set<String> imported) {
         Path dir = Path.of(repo.localPath());
         String rev = null;
         if (branch != null && !branch.isBlank()) {
@@ -190,7 +191,7 @@ public class GitLogScanner {
             }
             commits.add(new GitCommitView(repo.id(), repo.name(), f[0], f[1], f[2],
                     Instant.parse(f[3]), f[4],
-                    entryRepo.existsByUserIdAndRepoIdAndCommitSha(username, repo.id(), f[0])));
+                    imported.contains(repo.id() + ":" + f[0])));
         }
         return new BranchScan(commits, null);
     }

@@ -51,12 +51,14 @@ public class WorklogEntryController {
     }
 
     @PutMapping("/{id}")
-    public EntryView update(@PathVariable Long id, @Valid @RequestBody EntryRequest req) {
+    public EntryView update(@PathVariable String id, @Valid @RequestBody EntryRequest req) {
         return service.update(id, req);
     }
 
-    @DeleteMapping("/{id}")
-    public void delete(@PathVariable Long id) {
-        service.delete(id);
+    /** CAP-74 M3：删除按日期寻址（date 定位 day 文件，避免全目录扫描）。 */
+    @DeleteMapping("/{date}/{id}")
+    public void delete(@PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+                       @PathVariable String id) {
+        service.delete(date, id);
     }
 }
