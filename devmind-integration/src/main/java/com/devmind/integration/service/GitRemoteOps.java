@@ -80,10 +80,11 @@ public class GitRemoteOps {
         return url;
     }
 
-    /** CAP-74：初始化本地仓（目录不存在则创建；已有 .git 幂等返回 ok） */
+    /** CAP-74：初始化本地仓（目录不存在则创建；已有完整 .git（含 HEAD）幂等返回 ok；
+     *  .git 残缺（如只读对象文件逃过清理留下的半截目录）照常走 init 修补，git init 本身幂等） */
     public GitResult initRepo(String repoPath, String defaultBranch) {
         java.nio.file.Path dir = java.nio.file.Path.of(repoPath);
-        if (java.nio.file.Files.exists(dir.resolve(".git"))) {
+        if (java.nio.file.Files.exists(dir.resolve(".git").resolve("HEAD"))) {
             return new GitResult(true, "仓库已存在，跳过 init");
         }
         try {
