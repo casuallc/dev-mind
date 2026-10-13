@@ -42,3 +42,7 @@ __pycache__/
 
 # laya 边车的槽位来源覆盖：写的是节点上的本机路径（模板见 tools/laya-sidecar/models.json.example）
 tools/laya-sidecar/models.json
+
+# 本机起 runner（cwd=仓库根）产生的运行产物：会话工作区与 claude 平台专属配置（红线：不纳库）
+/workspaces/
+/claude-config/
