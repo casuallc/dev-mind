@@ -36,7 +36,7 @@ const TYPE_OPTIONS = [
   { value: 'GITLAB', label: 'GitLab（代码平台）' },
   { value: 'GITHUB', label: 'GitHub（代码平台，含 GHE）' },
   { value: 'JIRA', label: 'Jira（任务/Bug 同步）' },
-  { value: 'FEISHU', label: '飞书（知识库文档导入）' },
+  { value: 'FEISHU', label: '飞书（知识库导入 + 双向机器人）' },
 ]
 
 const AUTH_OPTIONS = [
@@ -255,7 +255,7 @@ export default function IntegrationsPage() {
     >
       <Typography.Paragraph type="secondary">
         登记 GitLab/GitHub/Jira/飞书 平台实例。平台凭证（机器人）选填：供克隆、Jira 轮询同步、打 tag/Release、
-        飞书文档导入知识库等自动化使用；人触发的写操作（推送分支、建 MR/PR、Jira 状态/工时回写）优先使用操作人在
+        飞书文档导入知识库、飞书双向机器人（CAP-75，同一集成填 App ID/App Secret 即启用）等自动化使用；人触发的写操作（推送分支、建 MR/PR、Jira 状态/工时回写）优先使用操作人在
         「设置 → 第三方账号」绑定的个人账号。实例启用后，用户即可在「设置」中绑定自己的账号。
       </Typography.Paragraph>
       <FitTable<Integration>
@@ -460,7 +460,7 @@ export default function IntegrationsPage() {
               editing
                 ? '留空表示保持现有凭据不变'
                 : isFeishu
-                  ? '飞书自建应用的 App Secret（加密存储）。需给应用开通「云文档」读取权限并把文档分享给应用。留空 = 纯实例登记，知识库导入不可用'
+                  ? '飞书自建应用的 App Secret（加密存储）。知识库导入需「云文档」读取权限并把文档分享给应用；双向机器人需机器人能力 + im:message / im:message:send_as_bot 权限 + im.message.receive_v1 长连接订阅（配好后重启应用生效）。留空 = 纯实例登记'
                   : isBasic
                     ? 'Jira 登录密码（加密存储）。留空 = 纯实例登记，自动化（轮询同步等）将不可用'
                     : isGitHub
