@@ -65,7 +65,7 @@ results.append((uc["count"] == 0, "read-all zeroes unread"))
 # 8. 通道 CRUD
 st, chs = req("GET", "/notification-channels")
 codes = {c["code"] for c in chs}
-results.append((st == 200 and codes == {"ws", "log", "bark", "wecom"}, f"channels seeded {sorted(codes)}"))
+results.append((st == 200 and codes == {"ws", "log", "bark", "wecom", "feishu"}, f"channels seeded {sorted(codes)}"))
 bark = next(c for c in chs if c["code"] == "bark")
 st, bark2 = req("PUT", f"/notification-channels/{bark['id']}",
                 {"enabled": True, "levelThreshold": "P1", "config": {"server": "https://api.day.app"}})
@@ -78,6 +78,20 @@ st, np0 = req("POST", "/notifications/emit", {"eventType": "SESSION_FAILED", "ti
                                               "entityId": "test-fail-" + str(__import__("time").time())})
 cs = (np0 or {}).get("channelStatus", {})
 results.append((cs.get("bark", "").startswith("FAILED"), f"bark empty-key failed gracefully (cs={cs})"))
+
+# 9b. CAP-75 FR-01/02：feishu 通道已种子；config 合并（只传 secret，webhookUrl 仍在）；
+# 启用但 webhookUrl 空 → P0 emit 应 FAILED（优雅降级）
+feishu = next(c for c in chs if c["code"] == "feishu")
+st, fs1 = req("PUT", f"/notification-channels/{feishu['id']}",
+              {"enabled": True, "config": {"secret": "sec-x"}})
+results.append((fs1 and fs1["config"].get("secret") == "sec-x"
+                and "webhookUrl" in fs1["config"], f"feishu config merge (cfg={fs1 and fs1['config']})"))
+st, nf = req("POST", "/notifications/emit", {"eventType": "SESSION_FAILED", "title": "失败-f",
+                                             "body": "err", "level": "P0", "entityType": "SESSION",
+                                             "entityId": "test-fail-fs-" + str(__import__("time").time())})
+cs = (nf or {}).get("channelStatus", {})
+results.append((cs.get("feishu", "").startswith("FAILED"), f"feishu empty-webhook failed gracefully (cs={cs})"))
+req("PUT", f"/notification-channels/{feishu['id']}", {"enabled": False})
 
 # 10. 免打扰时段：P1 在 00:00-23:59 内被 quiet 跳过（阈值先调成 P1 以通过 threshold 检查）
 req("PUT", "/notification-prefs", {"quietStart": "00:00", "quietEnd": "23:59"})

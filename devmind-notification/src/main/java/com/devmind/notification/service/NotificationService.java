@@ -80,15 +80,16 @@ public class NotificationService implements NotificationPublisher {
 
     @PostConstruct
     void seed() {
-        if (channelRepo.count() == 0) {
-            seedChannel("ws", "站内（WebSocket）", true, NotificationLevel.P2, Map.of());
-            seedChannel("log", "日志", true, NotificationLevel.P2, Map.of());
-            seedChannel("bark", "Bark（iPhone 推送）", false, NotificationLevel.P0,
-                    Map.of("server", "https://api.day.app", "key", ""));
-            seedChannel("wecom", "企业微信 Webhook", false, NotificationLevel.P0,
-                    Map.of("webhookUrl", ""));
-            log.info("通知通道已初始化（ws/log/bark/wecom）");
-        }
+        // CAP-75 FR-02：逐 code 兜底插入（原为 count()==0 整段守卫，存量库永不补插新通道）。
+        // 既有行一律不动，不重置用户配置。
+        seedChannelIfAbsent("ws", "站内（WebSocket）", true, NotificationLevel.P2, Map.of());
+        seedChannelIfAbsent("log", "日志", true, NotificationLevel.P2, Map.of());
+        seedChannelIfAbsent("bark", "Bark（iPhone 推送）", false, NotificationLevel.P0,
+                Map.of("server", "https://api.day.app", "key", ""));
+        seedChannelIfAbsent("wecom", "企业微信 Webhook", false, NotificationLevel.P0,
+                Map.of("webhookUrl", ""));
+        seedChannelIfAbsent("feishu", "飞书自定义机器人", false, NotificationLevel.P0,
+                Map.of("webhookUrl", "", "secret", ""));
         if (prefsRepo.findById(LOCAL_USER).isEmpty()) {
             NotificationPrefsEntity p = new NotificationPrefsEntity();
             p.setUserId(LOCAL_USER);
@@ -405,8 +406,11 @@ public class NotificationService implements NotificationPublisher {
         }
     }
 
-    private void seedChannel(String code, String name, boolean enabled,
-                             NotificationLevel threshold, Map<String, Object> config) {
+    private void seedChannelIfAbsent(String code, String name, boolean enabled,
+                                     NotificationLevel threshold, Map<String, Object> config) {
+        if (channelRepo.findByCode(code).isPresent()) {
+            return;
+        }
         NotificationChannelEntity e = new NotificationChannelEntity();
         e.setCode(code);
         e.setName(name);
