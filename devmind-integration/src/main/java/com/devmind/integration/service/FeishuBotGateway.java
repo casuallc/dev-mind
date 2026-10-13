@@ -58,10 +58,10 @@ public class FeishuBotGateway {
         }
         String plaintext = integrationService.tokenOf(e);
         FeishuConnector.AppCredentials cred = feishuConnector.credentials(plaintext);
-        return Optional.of(new FeishuBotHandle(cred.appId(), cred.appSecret(),
-                e.getBaseUrl() == null || e.getBaseUrl().isBlank()
-                        ? FeishuConnector.DEFAULT_BASE_URL : e.getBaseUrl(),
-                botDefaultActor(e), feishuConnector.apiClient(e, plaintext)));
+        String baseUrl = e.getBaseUrl() == null || e.getBaseUrl().isBlank()
+                ? FeishuConnector.DEFAULT_BASE_URL : e.getBaseUrl();
+        return Optional.of(new FeishuBotHandle(cred.appId(), cred.appSecret(), baseUrl,
+                botDefaultActor(e), feishuConnector.apiClient(baseUrl, plaintext)));
     }
 
     /** configJson 扩展槽 {"bot":{"defaultActor":"..."}} */

@@ -58,10 +58,16 @@ public class FeishuConnector implements IntegrationConnector {
         throw new DevMindException(ErrorCode.BAD_REQUEST, "飞书集成无 git 能力");
     }
 
-    /** 从密文双行还原 appId/appSecret 构造 API 客户端 */
+    /** 从密文双行还原 appId/appSecret 构造 API 客户端（baseUrl 空兜底默认域名，防 NPE） */
     public FeishuApiClient apiClient(IntegrationEntity e, String plaintextSecret) {
+        return apiClient(e.getBaseUrl() == null || e.getBaseUrl().isBlank()
+                ? DEFAULT_BASE_URL : e.getBaseUrl(), plaintextSecret);
+    }
+
+    /** 显式 baseUrl 版（CAP-75 机器人网关统一兜底口径后传入） */
+    public FeishuApiClient apiClient(String baseUrl, String plaintextSecret) {
         String[] lines = splitSecret(plaintextSecret);
-        return new FeishuApiClient(e.getBaseUrl(), lines[0], lines[1],
+        return new FeishuApiClient(baseUrl, lines[0], lines[1],
                 new EgressProxySelector(egressRouterProvider.getIfAvailable()));
     }
 

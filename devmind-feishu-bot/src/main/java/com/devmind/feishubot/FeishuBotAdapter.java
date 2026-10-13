@@ -55,7 +55,7 @@ public class FeishuBotAdapter implements BotAdapter, BotChannelConfigProvider {
 
     @Override
     public String defaultActor() {
-        FeishuBotGateway.FeishuBotHandle h = handle;
+        FeishuBotGateway.FeishuBotHandle h = handleOrNull();
         return h == null ? null : h.defaultActor();
     }
 
@@ -98,7 +98,7 @@ public class FeishuBotAdapter implements BotAdapter, BotChannelConfigProvider {
 
     @Override
     public void reply(BotMessage origin, String text) {
-        FeishuBotGateway.FeishuBotHandle h = handle;
+        FeishuBotGateway.FeishuBotHandle h = handleOrNull();
         if (h == null) {
             throw new IllegalStateException("飞书机器人未启用（无启用的飞书集成）");
         }
@@ -108,6 +108,15 @@ public class FeishuBotAdapter implements BotAdapter, BotChannelConfigProvider {
             // 兜底：无 reply 锚点（理论上不会来）按会话直发
             h.api().sendText(origin.externalChatId(), "chat_id", text);
         }
+    }
+
+    /**
+     * 句柄优先用 start 时缓存，未启动/后配集成时惰性现取——回推链路不依赖长连接已建立
+     * （集成后配/改配无需重启即可回推；长连接收事件仍需重启生效）。
+     */
+    private FeishuBotGateway.FeishuBotHandle handleOrNull() {
+        FeishuBotGateway.FeishuBotHandle h = handle;
+        return h != null ? h : gateway.botHandle().orElse(null);
     }
 
     // ---------------- 事件归一化 ----------------
