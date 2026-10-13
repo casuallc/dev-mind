@@ -153,6 +153,63 @@ check("检索内容命中 v1 文档", any(obj(x).get("id") == id2 for x in rows(
 st, sr = call("GET", "/documents/search?q=登录改造", token=token)
 check("检索标题命中", any(obj(x).get("id") == id2 for x in rows(sr)), f"{st} {sr}")
 
+# ---------- 5b. 标签维护与过滤（FR-08/FR-09） ----------
+st, td = call("POST", "/documents", {"kind": "report", "title": "标签验证文档",
+                                     "contentMd": "# 标签", "tags": ["评审", "alpha"]}, token)
+td = obj(td)
+tid = td.get("id")
+check("创建带标签文档", st == 200 and td.get("tags") == ["评审", "alpha"], f"{st} {td}")
+
+st, r = call("PUT", f"/documents/{tid}", {"tags": ["beta", "gamma"]}, token)
+r = obj(r)
+check("PUT 改标签：已换且标题未变", st == 200 and r.get("tags") == ["beta", "gamma"]
+      and r.get("title") == "标签验证文档", f"{st} {r}")
+check("改标签不产生新版本", r.get("versionNo") == 1, f"{r}")
+st, lr = call("GET", "/documents?tag=beta", token=token)
+check("改标签后列表 currentVersion 仍 1", any(obj(x).get("id") == tid and obj(x).get("currentVersion") == 1
+      for x in rows(lr)), f"{st} {lr}")
+
+st, r = call("PUT", f"/documents/{tid}", {"title": "标签验证文档V2"}, token)
+r = obj(r)
+check("PUT 只改标题：标签保留（null=不修改）", st == 200 and r.get("title") == "标签验证文档V2"
+      and r.get("tags") == ["beta", "gamma"], f"{st} {r}")
+
+st, r = call("PUT", f"/documents/{tid}", {"tags": []}, token)
+check("PUT 空数组清空标签", st == 200 and obj(r).get("tags") == [], f"{st} {r}")
+st, r = call("PUT", f"/documents/{tid}", {"tags": ["beta"]}, token)
+check("恢复标签供过滤用例", st == 200 and obj(r).get("tags") == ["beta"], f"{st} {r}")
+
+st, r = call("PUT", f"/documents/{tid}", {"title": "   "}, token)
+check("PUT 空白标题 → 400", st == 400, f"{st}")
+long_tag = "x" * 490
+st, r = call("PUT", f"/documents/{tid}", {"tags": [long_tag]}, token)
+check("PUT 超长标签 → 400", st == 400, f"{st}")
+
+st, lr = call("GET", "/documents?tag=beta", token=token)
+check("按标签过滤命中", any(obj(x).get("id") == tid for x in rows(lr)), f"{st} {lr}")
+st, lr = call("GET", "/documents?tag=BETA", token=token)
+check("标签过滤忽略大小写", any(obj(x).get("id") == tid for x in rows(lr)), f"{st} {lr}")
+st, lr = call("GET", "/documents?tag=不存在的标签", token=token)
+check("按标签过滤不误中", all(obj(x).get("id") != tid for x in rows(lr)), f"{st} {lr}")
+
+# 合取过滤（FR-09）：kind+status 同时生效（原互斥实现会吞掉 status）
+st, ld = call("POST", "/documents", {"kind": "report", "title": "合取过滤验证",
+                                     "contentMd": "# 合取", "tags": ["beta"]}, token)
+cid = obj(ld).get("id")
+check("合取用文档就绪", st == 200 and bool(cid), f"{st} {ld}")
+st, lr = call("GET", "/documents?kind=report&status=draft&tag=beta", token=token)
+got = rows(lr)
+check("合取过滤三维同时生效", any(obj(x).get("id") == cid for x in got)
+      and all(obj(x).get("kind") == "report" and obj(x).get("status") == "draft"
+              and "beta" in obj(x).get("tags", []) for x in got), f"{st} {lr}")
+st, lr = call("GET", "/documents?kind=design&status=draft&tag=beta", token=token)
+check("合取过滤排除不匹配维度", all(obj(x).get("id") != cid for x in rows(lr)), f"{st} {lr}")
+
+st, sr = call("GET", "/documents/search?q=gamma", token=token)
+check("检索命中历史标签已失效（gamma 已改）", all(obj(x).get("id") != tid for x in rows(sr)), f"{st}")
+st, sr = call("GET", "/documents/search?q=beta", token=token)
+check("检索命中标签", any(obj(x).get("id") == tid for x in rows(sr)), f"{st} {sr}")
+
 # ---------- 6. 状态机（FR-04） ----------
 st, _ = call("POST", f"/documents/{id2}/status", {"action": "freeze"}, token)
 check("草稿直接冻结 → 409", st == 409, f"{st}")
@@ -184,8 +241,12 @@ check("push 端点已移除（405）", st == 405, f"{st} {body}")
 st, body = call("GET", "/documents/repo", token=token)
 check("repo 端点已移除（400）", st == 400, f"{st} {body}")
 
-# ---------- 清理：删除模板文档 ----------
+# ---------- 清理：删除模板文档与标签用例文档 ----------
 call("DELETE", f"/documents/{did}", token=token)
+if tid:
+    call("DELETE", f"/documents/{tid}", token=token)
+if cid:
+    call("DELETE", f"/documents/{cid}", token=token)
 
 print(f"\n== CAP-03 验证结果: {passed} passed, {failed} failed ==")
 sys.exit(1 if failed else 0)
