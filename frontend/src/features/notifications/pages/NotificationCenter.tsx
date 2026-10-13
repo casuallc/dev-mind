@@ -5,6 +5,7 @@ import {
   Card,
   Drawer,
   Empty,
+  Input,
   Segmented,
   Select,
   Space,
@@ -37,6 +38,22 @@ import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { DRAWER_SM } from '../../../shared/utils/overlay'
+
+/** CAP-75 FR-03：按 code 的声明式 config 字段注册表（有字段定义的通道在抽屉里渲染配置表单）。 */
+const CHANNEL_CONFIG_FIELDS: Record<
+  string,
+  { key: string; label: string; password?: boolean; placeholder?: string }[]
+> = {
+  bark: [
+    { key: 'server', label: 'Server', placeholder: 'https://api.day.app' },
+    { key: 'key', label: 'Key', password: true },
+  ],
+  wecom: [{ key: 'webhookUrl', label: 'Webhook URL', placeholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…' }],
+  feishu: [
+    { key: 'webhookUrl', label: 'Webhook URL', placeholder: 'https://open.feishu.cn/open-apis/bot/v2/hook/…' },
+    { key: 'secret', label: '加签密钥（可选）', password: true },
+  ],
+}
 
 export default function NotificationCenter() {
   const navigate = useNavigate()
@@ -133,7 +150,13 @@ export default function NotificationCenter() {
     setSavingPrefs(true)
     try {
       for (const ch of channels) {
-        await updateChannel(ch.id, { enabled: ch.enabled, levelThreshold: ch.levelThreshold })
+        // config 为合并语义（后端 putAll），有字段注册表的通道把表单值一并提交
+        const hasConfigForm = (CHANNEL_CONFIG_FIELDS[ch.code] ?? []).length > 0
+        await updateChannel(ch.id, {
+          enabled: ch.enabled,
+          levelThreshold: ch.levelThreshold,
+          ...(hasConfigForm ? { config: ch.config } : {}),
+        })
       }
       await updatePrefs({
         mutes: prefs.mutes,
@@ -290,45 +313,75 @@ export default function NotificationCenter() {
             <div>
               <Typography.Title level={5}>通知通道（FR-03）</Typography.Title>
               <Space direction="vertical" style={{ width: '100%' }}>
-                {channels.map((ch) => (
-                  <div
-                    key={ch.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 12,
-                      padding: '8px 12px',
-                      border: '1px solid #f0f0f0',
-                      borderRadius: 8,
-                    }}
-                  >
-                    <Switch
-                      checked={ch.enabled}
-                      onChange={(v) =>
-                        setChannels((prev) => prev.map((x) => (x.id === ch.id ? { ...x, enabled: v } : x)))
-                      }
-                    />
-                    <span style={{ flex: 1 }}>{ch.name}</span>
-                    <Select
-                      size="small"
-                      value={ch.levelThreshold}
-                      onChange={(v) =>
-                        setChannels((prev) =>
-                          prev.map((x) => (x.id === ch.id ? { ...x, levelThreshold: v } : x)),
-                        )
-                      }
-                      style={{ width: 90 }}
-                      options={[
-                        { value: 'P0', label: '仅 P0' },
-                        { value: 'P1', label: '≥ P1' },
-                        { value: 'P2', label: '≥ P2' },
-                      ]}
-                    />
-                  </div>
-                ))}
+                {channels.map((ch) => {
+                  const fields = CHANNEL_CONFIG_FIELDS[ch.code] ?? []
+                  return (
+                    <div
+                      key={ch.id}
+                      style={{
+                        padding: '8px 12px',
+                        border: '1px solid #f0f0f0',
+                        borderRadius: 8,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <Switch
+                          checked={ch.enabled}
+                          onChange={(v) =>
+                            setChannels((prev) => prev.map((x) => (x.id === ch.id ? { ...x, enabled: v } : x)))
+                          }
+                        />
+                        <span style={{ flex: 1 }}>{ch.name}</span>
+                        <Select
+                          size="small"
+                          value={ch.levelThreshold}
+                          onChange={(v) =>
+                            setChannels((prev) =>
+                              prev.map((x) => (x.id === ch.id ? { ...x, levelThreshold: v } : x)),
+                            )
+                          }
+                          style={{ width: 90 }}
+                          options={[
+                            { value: 'P0', label: '仅 P0' },
+                            { value: 'P1', label: '≥ P1' },
+                            { value: 'P2', label: '≥ P2' },
+                          ]}
+                        />
+                      </div>
+                      {fields.length > 0 && (
+                        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {fields.map((f) => {
+                            const Comp = f.password ? Input.Password : Input
+                            return (
+                              <div key={f.key}>
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                  {f.label}
+                                </Typography.Text>
+                                <Comp
+                                  size="small"
+                                  placeholder={f.placeholder ?? f.label}
+                                  value={String(ch.config?.[f.key] ?? '')}
+                                  onChange={(e) =>
+                                    setChannels((prev) =>
+                                      prev.map((x) =>
+                                        x.id === ch.id
+                                          ? { ...x, config: { ...x.config, [f.key]: e.target.value } }
+                                          : x,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </Space>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                外部通道（Bark/企微）需在数据库中填入 key/webhookUrl 后开启。
+                外部通道（Bark/企微/飞书）填齐配置后开启即可；保存走合并语义，未改动的配置项不受影响。
               </Typography.Text>
             </div>
 
