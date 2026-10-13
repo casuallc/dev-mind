@@ -33,7 +33,6 @@ import Markdown from '../../../shared/components/Markdown'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_FULL, DRAWER_WIDE } from '../../../shared/utils/overlay'
 
 const statusTag = (s: string) => (
   <Tag color={s === 'draft' ? 'default' : s === 'pending_confirm' ? 'gold' : 'green'}>{STATUS_LABEL[s as keyof typeof STATUS_LABEL] ?? s}</Tag>
@@ -403,7 +402,7 @@ export default function DocEditorPage() {
         title="版本历史"
         open={versionOpen}
         onClose={() => setVersionOpen(false)}
-        width={DRAWER_WIDE}
+        width="70%"
       >
         <Table
           size="small"
@@ -419,7 +418,7 @@ export default function DocEditorPage() {
         title={diffFor ? `v${diffFor} → 当前版本的差异` : '版本差异'}
         open={!!diff}
         onClose={() => setDiff(null)}
-        width={DRAWER_FULL}
+        width="70%"
       >
         {diff && (
           <>
