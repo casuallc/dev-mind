@@ -231,15 +231,18 @@ export default function AttachmentsPage() {
       {
         title: '附件',
         key: 'name',
+        width: 300,
         render: (_, r) => (
-          <Space>
+          // 不用 Space：.ant-space-item 包装层不传播约束，ellipsis 失效内容会溢出列宽；
+          // flex 直包 + 文本 minWidth:0 才能随列宽收缩省略
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {isImageAttachment(r.contentType) ? (
               <Image
                 src={attachmentRawUrl(r.attachmentId)}
                 alt={r.originalName}
                 width={48}
                 height={48}
-                style={{ objectFit: 'cover', borderRadius: 4, border: '1px solid #f0f0f0' }}
+                style={{ objectFit: 'cover', borderRadius: 4, border: '1px solid #f0f0f0', flexShrink: 0 }}
               />
             ) : (
               <span
@@ -247,6 +250,7 @@ export default function AttachmentsPage() {
                   display: 'inline-flex',
                   width: 48,
                   height: 48,
+                  flexShrink: 0,
                   alignItems: 'center',
                   justifyContent: 'center',
                   background: '#fafafa',
@@ -258,10 +262,10 @@ export default function AttachmentsPage() {
                 <PictureOutlined />
               </span>
             )}
-            <Typography.Text style={{ maxWidth: 260 }} ellipsis={{ tooltip: r.originalName }}>
+            <Typography.Text style={{ minWidth: 0 }} ellipsis={{ tooltip: r.originalName }}>
               {r.originalName}
             </Typography.Text>
-          </Space>
+          </div>
         ),
       },
       {
