@@ -219,6 +219,13 @@ public class DocumentService {
             e.setTitle(req.title().strip());
             changed = true;
         }
+        if (req.kind() != null) {
+            if (!KINDS.contains(req.kind())) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "kind 必须是 requirement/design/analysis/api-suite/report");
+            }
+            e.setKind(req.kind());
+            changed = true;
+        }
         if (req.tags() != null) {
             e.setTags(joinTagsChecked(req.tags()));
             changed = true;
@@ -228,7 +235,7 @@ public class DocumentService {
         }
         e.setUpdatedAt(Instant.now());
         docRepo.save(e);
-        log.info("文档元数据已更新: id={} title={} tags={}", id, e.getTitle(), e.getTags());
+        log.info("文档元数据已更新: id={} kind={} title={} tags={}", id, e.getKind(), e.getTitle(), e.getTags());
         return get(id, null);
     }
 
