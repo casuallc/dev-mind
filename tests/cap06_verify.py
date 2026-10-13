@@ -1,13 +1,17 @@
-import json, urllib.request, urllib.error, sys
+import json, urllib.request, urllib.error, sys, os
 
-BASE = "http://localhost:8080/api"
+# 默认打本机 :8080；起隔离实例时用 E2E_BASE 覆盖（如 http://localhost:8090/api，见 tests/README.md）
+BASE = os.environ.get("E2E_BASE", "http://localhost:8080/api")
 results = []
+TOKEN = None
 
 def req(method, path, body=None, expect=200):
     url = BASE + path
     data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
     r = urllib.request.Request(url, data=data, method=method,
                                headers={"Content-Type": "application/json"})
+    if TOKEN:
+        r.add_header("Authorization", "Bearer " + TOKEN)
     try:
         with urllib.request.urlopen(r) as resp:
             raw = resp.read().decode("utf-8")
@@ -21,6 +25,12 @@ def req(method, path, body=None, expect=200):
         return status, (json.loads(raw) if raw and raw.strip() != "null" else None)
     except Exception:
         return status, raw
+
+# 0. 登录（/api/** 需认证；e2e profile 种子 admin/admin123，可用 E2E_USER/E2E_PASS 覆盖）
+st, login = req("POST", "/auth/login", {"username": os.environ.get("E2E_USER", "admin"),
+                                        "password": os.environ.get("E2E_PASS", "admin123")})
+TOKEN = (login or {}).get("token") or (login or {}).get("accessToken")
+assert TOKEN, f"登录失败: {login}"
 
 # 1. 初始为空
 st, lst = req("GET", "/notifications?limit=50")
