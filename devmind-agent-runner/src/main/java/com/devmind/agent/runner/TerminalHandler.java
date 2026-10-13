@@ -391,7 +391,8 @@ public class TerminalHandler {
     /**
      * terminalAllowlist 校验（纯函数，可单测）：configured == null = 缺省只读档；显式配置
      * （含空表 = 拒绝一切）全覆盖。切段逐段取首 token 前缀命中；git 走子命令白名单，
-     * 条目 {@code git:*} 放行全部子命令；重定向写入默认拒绝。
+     * 条目 {@code git:*} 放行全部子命令；CAP-58 FR-07 条目 {@code git:<sub>}（如
+     * {@code git:fetch}）与内置只读集取并集放行该子命令；重定向写入默认拒绝。
      */
     static void checkAllowlist(List<String> configured, boolean allowRedirect, String command) {
         List<String> allowed = configured != null ? configured : DEFAULT_ALLOWLIST;
@@ -406,6 +407,12 @@ public class TerminalHandler {
                     + "（节点配置 terminalAllowRedirect=true 可放开）");
         }
         boolean gitAll = allowed.stream().anyMatch("git:*"::equals);
+        // FR-07：git:<sub> 细粒度条目（git:* 已由 gitAll 兜走，不入此集）
+        java.util.Set<String> gitSubs = allowed.stream()
+                .filter(a -> a.startsWith("git:") && !"git:*".equals(a))
+                .map(a -> a.substring("git:".length()).toLowerCase())
+                .filter(s -> !s.isEmpty())
+                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
         List<String> offenders = new ArrayList<>();
         for (String seg : SEGMENTS.split(command)) {
             String stripped = seg.strip();
@@ -418,17 +425,20 @@ public class TerminalHandler {
             if (ExecHandler.SHELL_BUILTINS.contains(lower)) {
                 continue;
             }
-            boolean hit = allowed.stream().anyMatch(a -> !a.endsWith(":*")
+            // git:* / git:<sub> 条目不参与首 token 前缀命中（语义在子命令层判定）
+            boolean hit = allowed.stream().anyMatch(a -> !a.startsWith("git:") && !a.endsWith(":*")
                     && (first.equals(a) || first.startsWith(a)));
             if ("git".equalsIgnoreCase(first)) {
                 if (gitAll) {
                     hit = true;
-                } else if (hit) {
+                } else if (hit || !gitSubs.isEmpty()) {
                     String sub = gitSubcommand(tokens);
-                    if (sub == null || !GIT_READONLY_SUBCOMMANDS.contains(sub.toLowerCase())) {
+                    if (sub == null || (!GIT_READONLY_SUBCOMMANDS.contains(sub.toLowerCase())
+                            && !gitSubs.contains(sub.toLowerCase()))) {
                         offenders.add("git " + (sub == null ? "?" : sub));
                         continue;
                     }
+                    hit = true; // 仅有 git:<sub> 条目（无裸 git 前缀）时也算命中
                 }
             }
             if (!hit) {

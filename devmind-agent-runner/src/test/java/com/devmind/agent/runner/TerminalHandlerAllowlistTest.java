@@ -70,6 +70,30 @@ class TerminalHandlerAllowlistTest {
     }
 
     @Test
+    void gitSubGranularEntries() {
+        // FR-07：git:<sub> 与内置只读集取并集——fetch 放行，push 仍拒
+        assertDoesNotThrow(() -> TerminalHandler.checkAllowlist(List.of("git:fetch"), false,
+                "git fetch origin"));
+        assertDoesNotThrow(() -> TerminalHandler.checkAllowlist(List.of("git:fetch", "git:pull"), false,
+                "git pull --rebase"));
+        // 只读集仍在（并集而非覆盖）
+        assertDoesNotThrow(() -> TerminalHandler.checkAllowlist(List.of("git:fetch"), false,
+                "git status"));
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> TerminalHandler.checkAllowlist(List.of("git:fetch"), false, "git push"));
+        assertTrue(e.getMessage().contains("git push"), e.getMessage());
+        // 全局选项前置不影响子命令识别
+        assertDoesNotThrow(() -> TerminalHandler.checkAllowlist(List.of("git:fetch"), false,
+                "git -C subdir fetch"));
+        // git:<sub> 条目不参与首 token 前缀命中（git 之外的 gitX 命令不放行）
+        assertThrows(IllegalStateException.class,
+                () -> TerminalHandler.checkAllowlist(List.of("git:fetch"), false, "gitx foo"));
+        // git:* 与 git:<sub> 并存时 git:* 语义不变（全放）
+        assertDoesNotThrow(() -> TerminalHandler.checkAllowlist(List.of("git:*", "git:fetch"), false,
+                "git push"));
+    }
+
+    @Test
     void redirectRejectedByDefault() {
         assertThrows(IllegalStateException.class,
                 () -> TerminalHandler.checkAllowlist(null, false, "echo hi > a.txt"));
