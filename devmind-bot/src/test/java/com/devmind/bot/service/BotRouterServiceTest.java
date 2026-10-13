@@ -98,7 +98,7 @@ class BotRouterServiceTest {
         when(provider.getIfAvailable()).thenAnswer(inv -> registryRef.get());
 
         router = new BotRouterService(bindingRepo, chatManager, sessionManager, projectService,
-                buildService, deploymentService, props, provider);
+                buildService, deploymentService, props, provider, List.of());
         registryRef.set(new BotAdapterRegistry(List.of(adapter), router));
     }
 

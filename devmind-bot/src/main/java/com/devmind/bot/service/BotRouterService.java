@@ -5,6 +5,7 @@ import com.devmind.bot.config.BotProperties;
 import com.devmind.bot.model.BotBindingEntity;
 import com.devmind.bot.repo.BotBindingRepository;
 import com.devmind.bot.spi.BotAdapter;
+import com.devmind.bot.spi.BotChannelConfigProvider;
 import com.devmind.bot.spi.BotMessage;
 import com.devmind.bot.spi.BotMessageHandler;
 import com.devmind.build.dto.BuildView;
@@ -25,7 +26,9 @@ import com.devmind.session.service.SessionManagerService;
 import jakarta.annotation.PreDestroy;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -65,6 +68,7 @@ public class BotRouterService implements BotMessageHandler {
     private final DeploymentService deploymentService;
     private final BotProperties props;
     private final ObjectProvider<BotAdapterRegistry> registryProvider;
+    private final Map<String, BotChannelConfigProvider> channelConfigs = new HashMap<>();
     private final EventDedup dedup = new EventDedup();
     private final ExecutorService botExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -75,7 +79,8 @@ public class BotRouterService implements BotMessageHandler {
                             BuildService buildService,
                             DeploymentService deploymentService,
                             BotProperties props,
-                            ObjectProvider<BotAdapterRegistry> registryProvider) {
+                            ObjectProvider<BotAdapterRegistry> registryProvider,
+                            List<BotChannelConfigProvider> channelConfigProviders) {
         this.bindingRepo = bindingRepo;
         this.chatManager = chatManager;
         this.sessionManager = sessionManager;
@@ -84,6 +89,9 @@ public class BotRouterService implements BotMessageHandler {
         this.deploymentService = deploymentService;
         this.props = props;
         this.registryProvider = registryProvider;
+        for (BotChannelConfigProvider p : channelConfigProviders) {
+            channelConfigs.put(p.channel(), p);
+        }
     }
 
     @PreDestroy
@@ -114,11 +122,9 @@ public class BotRouterService implements BotMessageHandler {
         BotBindingEntity binding = null;
         try {
             binding = findOrCreateBinding(msg);
-            String actor = binding.getActor() != null && !binding.getActor().isBlank()
-                    ? binding.getActor() : props.getDefaultActor();
             SecurityContextHolder.getContext().setAuthentication(
-                    new UsernamePasswordAuthenticationToken(new DevMindPrincipal(actor, "USER"),
-                            null, List.of()));
+                    new UsernamePasswordAuthenticationToken(
+                            new DevMindPrincipal(actorOf(msg, binding), "USER"), null, List.of()));
             String reply = route(msg, binding);
             reply(msg, reply);
         } catch (DevMindException e) {
@@ -133,6 +139,18 @@ public class BotRouterService implements BotMessageHandler {
     }
 
     // ---------------- 路由 ----------------
+
+    /** 身份优先级：binding.actor → channel defaultActor → 平台默认。 */
+    private String actorOf(BotMessage msg, BotBindingEntity binding) {
+        if (binding.getActor() != null && !binding.getActor().isBlank()) {
+            return binding.getActor();
+        }
+        BotChannelConfigProvider cc = channelConfigs.get(msg.channel());
+        if (cc != null && cc.defaultActor() != null && !cc.defaultActor().isBlank()) {
+            return cc.defaultActor();
+        }
+        return props.getDefaultActor();
+    }
 
     private String route(BotMessage msg, BotBindingEntity binding) {
         CommandParser.Command cmd = CommandParser.parse(msg.text());

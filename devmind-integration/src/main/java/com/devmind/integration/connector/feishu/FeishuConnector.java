@@ -65,6 +65,16 @@ public class FeishuConnector implements IntegrationConnector {
                 new EgressProxySelector(egressRouterProvider.getIfAvailable()));
     }
 
+    /** CAP-75：机器人凭据（appId/appSecret 明文对），供长连接建连；密文不出本模块。 */
+    public record AppCredentials(String appId, String appSecret) {
+    }
+
+    /** 从密文双行拆出 appId/appSecret（与 apiClient 同一解密口径）。 */
+    public AppCredentials credentials(String plaintextSecret) {
+        String[] lines = splitSecret(plaintextSecret);
+        return new AppCredentials(lines[0], lines[1]);
+    }
+
     private static String[] splitSecret(String plaintextSecret) {
         if (plaintextSecret == null || !plaintextSecret.contains("\n")) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,

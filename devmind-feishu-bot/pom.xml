@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.devmind</groupId>
+        <artifactId>devmind</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <artifactId>devmind-feishu-bot</artifactId>
+    <name>devmind-feishu-bot</name>
+    <description>CAP-75 飞书机器人适配器：长连接（lark-oapi SDK ws.Client）接入 im.message.receive_v1，
+        归一化为 BotMessage 回调底座；回复经 integration 模块的 FeishuApiClient 回推（凭证不出 integration）。</description>
+    <dependencies>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-bot</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-integration</artifactId>
+        </dependency>
+        <!-- 飞书官方 SDK：仅本模块依赖（长连接 + 事件模型；HTTP 回推走 integration 既有客户端） -->
+        <dependency>
+            <groupId>com.larksuite.oapi</groupId>
+            <artifactId>oapi-sdk</artifactId>
+            <version>2.8.6</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

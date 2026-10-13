@@ -113,6 +113,34 @@ public class FeishuApiClient {
     public record WikiNode(String objType, String objToken, String title) {
     }
 
+    // ---------------- CAP-75：机器人消息回推 ----------------
+
+    /** 回复指定消息（im/v1 reply）：机器人回答回推主路径。 */
+    public void replyText(String messageId, String text) {
+        var body = mapper.createObjectNode();
+        body.put("msg_type", "text");
+        var content = mapper.createObjectNode();
+        content.put("text", text);
+        body.set("content", content);
+        JsonNode resp = request("POST", "/open-apis/im/v1/messages/" + encode(messageId) + "/reply",
+                mapper.writeValueAsString(body), tenantToken());
+        ensureOk(resp, "回复消息");
+    }
+
+    /** 主动发文本消息（reply 锚点缺失时的兜底，如重连后补推）。 */
+    public void sendText(String receiveId, String receiveIdType, String text) {
+        var body = mapper.createObjectNode();
+        body.put("receive_id", receiveId);
+        body.put("msg_type", "text");
+        var content = mapper.createObjectNode();
+        content.put("text", text);
+        body.set("content", content);
+        JsonNode resp = request("POST",
+                "/open-apis/im/v1/messages?receive_id_type=" + encode(receiveIdType),
+                mapper.writeValueAsString(body), tenantToken());
+        ensureOk(resp, "发送消息");
+    }
+
     // ---------------- 底层 ----------------
 
     /** GET + 业务 code 校验，返回 data 节点 */
