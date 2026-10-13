@@ -96,6 +96,11 @@ public class RunnerWorkspace {
 
     private final Path workspaceRoot;
     /**
+     * CAP-58 FR-06：git 代理凭据登记簿（setter 注入，runner 侧装配；null = 代理未启用，
+     * worktree origin 保持裸 URL 旧行为）。不设构造参——下游测试桩按既有构造器签名实例化。
+     */
+    private volatile GitProxyBroker gitProxyBroker;
+    /**
      * CAP-34 FR-04：同克隆缓存（key=cacheDir 绝对路径）的 fetch/worktree/push 互斥——
      * 并发会话同库不再踩同一缓存。锁条目不清理（项目×库数量级小，无泄漏）。
      */
@@ -104,6 +109,11 @@ public class RunnerWorkspace {
 
     public RunnerWorkspace(Path workspaceRoot) {
         this.workspaceRoot = workspaceRoot.toAbsolutePath().normalize();
+    }
+
+    /** CAP-58 FR-06：装配 git 代理登记簿后，prepare/prepareMulti 会把 worktree origin 重写为代理 URL。 */
+    public void setGitProxyBroker(GitProxyBroker broker) {
+        this.gitProxyBroker = broker;
     }
 
     private java.util.concurrent.locks.ReentrantLock lockOf(Path cacheDir) {
@@ -139,6 +149,7 @@ public class RunnerWorkspace {
             ensureClone(cacheDir, spec);
             fetch(cacheDir, spec);
             ensureUserWorktree(cacheDir, workDir, spec, key);
+            ensureProxyOrigin(cacheDir, workDir, spec); // CAP-58 FR-06：本地 git 凭据代理接入
         } finally {
             lock.unlock();
         }
@@ -194,6 +205,7 @@ public class RunnerWorkspace {
                     ensureClone(cacheDir, spec);
                     fetch(cacheDir, spec);
                     fresh = ensureUserWorktree(cacheDir, workDir, spec, key);
+                    ensureProxyOrigin(cacheDir, workDir, spec); // CAP-58 FR-06
                 } finally {
                     lock.unlock();
                 }
@@ -793,6 +805,7 @@ public class RunnerWorkspace {
             return null;
         }
         // 删固定 worktree + 本地会话分支（best-effort：目录删不掉则兜底递归删 + prune）
+        revokeProxyOriginQuietly(workDir, spec.token()); // CAP-58 FR-06：worktree 没了，代理凭据同步吊销
         Result rm = run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "worktree", "remove", "--force",
                 workDir.toString());
         if (rm.exit() != 0) {
@@ -956,6 +969,7 @@ public class RunnerWorkspace {
         long dirty = status.exit() == 0 && !status.output().isBlank()
                 ? status.output().lines().count() : 0;
         long onlyLocal = countLocalOnlyCommits(workDir, spec);
+        revokeProxyOriginQuietly(workDir, spec.token()); // CAP-58 FR-06：删 worktree 前吊销代理凭据
         Result rm = run(cacheDir, OP_TIMEOUT_SEC, spec.token(),
                 "worktree", "remove", "--force", workDir.toString());
         if (rm.exit() != 0) {
@@ -1248,6 +1262,79 @@ public class RunnerWorkspace {
     private static String occupantOf(String branch) {
         return branch != null && branch.startsWith("feature/") && branch.length() > "feature/".length()
                 ? branch.substring("feature/".length()) : String.valueOf(branch);
+    }
+
+    /**
+     * CAP-58 FR-06：把会话 worktree 的 origin 重写为 runner 回环代理 URL（best-effort，
+     * 失败只告警不挡 launch——退化为上线前「本地 git 无凭据」的旧行为）。
+     * 触发条件：broker 已装配 + spec 带 token（匿名通道不重写）+ http(s) 远端。
+     * 幂等：origin 已是本代理 URL → 复用 key 仅刷新 token（同需求多会话共用工作树，
+     * 后到的 launch 用新 token 覆盖登记，config 不重写）。
+     * per-worktree 隔离靠 {@code extensions.worktreeConfig}（缓存库共享 config 一次性开启）：
+     * 同缓存克隆的不同需求工作树各自持有独立 key，互不串凭据；缓存库自身的 origin 不动
+     * （平台操作全走 withToken 显式 URL，不依赖 origin）。
+     */
+    void ensureProxyOrigin(Path cacheDir, Path workDir, RepoSpec spec) {
+        GitProxyBroker broker = gitProxyBroker;
+        if (broker == null || spec.token() == null || spec.token().isBlank()) {
+            return;
+        }
+        String remoteUrl = spec.remoteUrl() == null ? "" : spec.remoteUrl().trim();
+        if (!remoteUrl.startsWith("http://") && !remoteUrl.startsWith("https://")) {
+            return;
+        }
+        try {
+            Result ext = run(cacheDir, OP_TIMEOUT_SEC, spec.token(),
+                    "config", "extensions.worktreeConfig", "true");
+            if (ext.exit() != 0) {
+                log.warn("开启 extensions.worktreeConfig 失败（git 代理 origin 不重写）: {}",
+                        tail(ext.output()));
+                return;
+            }
+            Result cur = run(workDir, OP_TIMEOUT_SEC, spec.token(),
+                    "config", "--get", "remote.origin.url");
+            String current = cur.exit() == 0 ? cur.output().trim() : "";
+            String key = broker.extractKey(current);
+            if (key == null) {
+                key = broker.newKey();
+            }
+            broker.register(key, remoteUrl, spec.token());
+            String proxyUrl = broker.proxyUrlFor(key, remoteUrl);
+            if (!proxyUrl.equals(current)) {
+                // --worktree 需要 git 2.20+；老 git 报错即放弃重写（不影响平台自身操作）
+                Result set = run(workDir, OP_TIMEOUT_SEC, spec.token(),
+                        "config", "--worktree", "remote.origin.url", proxyUrl);
+                if (set.exit() != 0) {
+                    log.warn("git 代理 origin 重写失败（会话内本地 git 仍无凭据）: dir={} err={}",
+                            workDir, tail(set.output()));
+                } else {
+                    log.info("会话 worktree origin 已接入 git 代理: dir={}", workDir);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("git 代理 origin 重写异常（不影响 launch）: dir={} err={}", workDir, e.toString());
+        }
+    }
+
+    /** CAP-58 FR-06：worktree 删除前吊销其代理凭据（读 --worktree 级 origin 取 key；未重写过的 no-op）。 */
+    private void revokeProxyOriginQuietly(Path workDir, String token) {
+        GitProxyBroker broker = gitProxyBroker;
+        if (broker == null || !Files.isDirectory(workDir)) {
+            return;
+        }
+        try {
+            Result cur = run(workDir, OP_TIMEOUT_SEC, token,
+                    "config", "--worktree", "--get", "remote.origin.url");
+            if (cur.exit() == 0) {
+                String key = broker.extractKey(cur.output().trim());
+                if (key != null) {
+                    broker.revoke(key);
+                    log.info("git 代理凭据已随 worktree 吊销: dir={}", workDir);
+                }
+            }
+        } catch (Exception e) {
+            log.debug("git 代理凭据吊销异常（忽略）: {}", e.toString());
+        }
     }
 
     /** best-effort 移除 worktree（prepareMulti 失败回滚专用；异常只记日志） */
