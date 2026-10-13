@@ -1,4 +1,5 @@
-// CAP-03 文档详情页：只读渲染 / 编辑抽屉（类型/标题/标签/正文，见 DocEditDrawer）/ 版本历史 / diff / 回退 / 状态机。
+// CAP-03 文档详情页：单卡片布局（对齐 Skill 详情），顶部标题栏集中所有操作；
+// 只读渲染正文 / 编辑抽屉（DocEditDrawer）/ 版本历史抽屉 / 左右对照 diff / 回退 / 状态机。
 import { useCallback, useEffect, useState } from 'react'
 import {
   Badge,
@@ -15,6 +16,7 @@ import {
   Typography,
 } from 'antd'
 import {
+  DeleteOutlined,
   EditOutlined,
   HistoryOutlined,
 } from '@ant-design/icons'
@@ -29,13 +31,121 @@ import { getProject } from '../../projects/api'
 import { getRequirement } from '../../requirements/api'
 import Markdown from '../../../shared/components/Markdown'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_WIDE } from '../../../shared/utils/overlay'
+import { DRAWER_FULL, DRAWER_WIDE } from '../../../shared/utils/overlay'
 
 const statusTag = (s: string) => (
   <Tag color={s === 'draft' ? 'default' : s === 'pending_confirm' ? 'gold' : 'green'}>{STATUS_LABEL[s as keyof typeof STATUS_LABEL] ?? s}</Tag>
 )
+
+// ---------- 左右对照 diff ----------
+// 后端给的是简化 unified 行（首字符 +/-/空格），前端解析成双栏行：
+// 连续的 - 块紧跟 + 块视为「修改」逐行配对，落单的行另一侧留空。
+
+type SideCell = { text: string; kind: 'ctx' | 'add' | 'del' | 'empty' }
+interface DiffRow {
+  key: number
+  left: SideCell
+  right: SideCell
+}
+
+function toSideBySide(lines: string[]): DiffRow[] {
+  const rows: DiffRow[] = []
+  let i = 0
+  while (i < lines.length) {
+    const c = lines[i].charAt(0)
+    if (c === '-') {
+      const dels: string[] = []
+      while (i < lines.length && lines[i].startsWith('-')) dels.push(lines[i++].slice(1))
+      const adds: string[] = []
+      while (i < lines.length && lines[i].startsWith('+')) adds.push(lines[i++].slice(1))
+      for (let k = 0; k < Math.max(dels.length, adds.length); k++) {
+        rows.push({
+          key: rows.length,
+          left: k < dels.length ? { text: dels[k], kind: 'del' } : { text: '', kind: 'empty' },
+          right: k < adds.length ? { text: adds[k], kind: 'add' } : { text: '', kind: 'empty' },
+        })
+      }
+    } else if (c === '+') {
+      rows.push({ key: rows.length, left: { text: '', kind: 'empty' }, right: { text: lines[i++].slice(1), kind: 'add' } })
+    } else {
+      const text = c === ' ' ? lines[i].slice(1) : lines[i]
+      i++
+      rows.push({ key: rows.length, left: { text, kind: 'ctx' }, right: { text, kind: 'ctx' } })
+    }
+  }
+  return rows
+}
+
+// 行内差异标记：配对的删/增两行取公共前后缀，仅高亮中间变化段
+function splitChange(a: string, b: string): { prefix: string; aMid: string; bMid: string; suffix: string } {
+  let p = 0
+  while (p < a.length && p < b.length && a[p] === b[p]) p++
+  let s = 0
+  while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++
+  return {
+    prefix: a.slice(0, p),
+    aMid: a.slice(p, a.length - s),
+    bMid: b.slice(p, b.length - s),
+    suffix: a.slice(a.length - s),
+  }
+}
+
+const CELL_BG: Record<SideCell['kind'], string> = {
+  ctx: 'transparent',
+  add: '#f6ffed',
+  del: '#fff1f0',
+  empty: '#fafafa',
+}
+
+function DiffCell({ cell, other }: { cell: SideCell; other: SideCell }) {
+  // 删/增配对时做行内高亮；整行新增/删除无需对比
+  const paired = (cell.kind === 'del' && other.kind === 'add') || (cell.kind === 'add' && other.kind === 'del')
+  let content: React.ReactNode = cell.text || ' '
+  if (paired) {
+    const del = cell.kind === 'del' ? cell : other
+    const add = cell.kind === 'add' ? cell : other
+    const { prefix, aMid, bMid, suffix } = splitChange(del.text, add.text)
+    const mid = cell.kind === 'del' ? aMid : bMid
+    content = (
+      <>
+        {prefix}
+        <span style={{ background: cell.kind === 'del' ? '#ffa39e' : '#95de64', borderRadius: 2 }}>{mid || ' '}</span>
+        {suffix}
+      </>
+    )
+  }
+  return (
+    <div
+      style={{
+        flex: 1,
+        minWidth: 0,
+        padding: '0 8px',
+        background: CELL_BG[cell.kind],
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-all',
+      }}
+    >
+      {content}
+    </div>
+  )
+}
+
+function SideBySideDiff({ diff }: { diff: DiffResult }) {
+  const rows = toSideBySide(diff.lines)
+  return (
+    <div style={{ fontFamily: 'monospace', fontSize: 12, lineHeight: '22px', border: '1px solid #f0f0f0', borderRadius: 4 }}>
+      {rows.map((r) => (
+        <div key={r.key} style={{ display: 'flex', borderBottom: '1px solid #f5f5f5' }}>
+          <DiffCell cell={r.left} other={r.right} />
+          <div style={{ width: 1, background: '#f0f0f0', flex: 'none' }} />
+          <DiffCell cell={r.right} other={r.left} />
+        </div>
+      ))}
+    </div>
+  )
+}
 
 export default function DocEditorPage() {
   const { id } = useParams<{ id: string }>()
@@ -157,18 +267,21 @@ export default function DocEditorPage() {
       title: '版本',
       dataIndex: 'versionNo',
       width: 70,
-      render: (v) => <Typography.Text strong>v{v}</Typography.Text>,
+      render: (v: number, r) =>
+        v === doc?.currentVersion ? (
+          <Typography.Text strong>v{v}</Typography.Text>
+        ) : (
+          // 点版本号直接查看该历史版本（关闭抽屉、正文切换）
+          <a onClick={() => { setVersionOpen(false); load(r.versionNo) }}>v{v}</a>
+        ),
     },
     { title: '变更说明', dataIndex: 'changeNote', ellipsis: true, render: (n) => n || <Typography.Text type="secondary">-</Typography.Text> },
     { title: '时间', dataIndex: 'createdAt', width: 170, render: (t) => fmtTime(t) },
     {
       title: '操作',
-      width: 300,
+      width: 200,
       render: (_, r) => (
         <Space size={4}>
-          <Button onClick={() => { setVersionOpen(false); load(r.versionNo) }}>
-            查看
-          </Button>
           <Button onClick={() => onDiff(r.versionNo)}>
             与当前 diff
           </Button>
@@ -186,13 +299,13 @@ export default function DocEditorPage() {
   const currentContent = viewing ? viewing.contentMd : doc?.contentMd ?? ''
   const displayTitle = viewing ? `${doc?.title ?? '文档'}（历史 v${viewing.versionNo}）` : doc?.title
 
-  // 内容操作（编辑、状态机流转、删除）均针对内容生效，集中放在内容卡片标题栏；顶部只留「返回列表」
-  const contentActions = viewing ? (
+  // 所有操作集中在顶部标题栏；查看历史版本时只留「回到当前版本」
+  const actions = viewing ? (
     <Button type="primary" onClick={() => load()}>
       回到当前版本
     </Button>
   ) : (
-    <Space>
+    <>
       {canWrite() && (
         <Button type="primary" icon={<EditOutlined />} onClick={() => setEditOpen(true)}>
           编辑
@@ -213,10 +326,12 @@ export default function DocEditorPage() {
           解除冻结
         </Button>
       )}
-      <Button danger onClick={onDelete}>
-        删除
-      </Button>
-    </Space>
+      {canWrite() && (
+        <Button danger icon={<DeleteOutlined />} onClick={onDelete}>
+          删除
+        </Button>
+      )}
+    </>
   )
 
   return (
@@ -230,58 +345,60 @@ export default function DocEditorPage() {
           <Empty description="文档不存在" />
         </Card>
       ) : (
-        <>
-          <Card
-            title={
-              <Space wrap size={8}>
-                <Typography.Text strong>{displayTitle}</Typography.Text>
-                <Tag color={doc.kind === 'requirement' ? 'blue' : doc.kind === 'design' ? 'geekblue' : doc.kind === 'analysis' ? 'gold' : doc.kind === 'api-suite' ? 'purple' : 'cyan'}>
-                  {KIND_LABEL[doc.kind]}
-                </Tag>
-                {statusTag(doc.status)}
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  v{doc.currentVersion}
-                  {viewing && <Badge status="processing" text={`查看历史 v${viewing.versionNo}`} />}
-                </Typography.Text>
-                {doc.projectId && (
-                  <Link to={`/projects/${doc.projectId}`}>
-                    <Tag style={{ cursor: 'pointer' }}>项目: {projectName ?? doc.projectId}</Tag>
-                  </Link>
-                )}
-                {doc.requirementId && (
-                  <Link to={doc.projectId ? `/projects/${doc.projectId}/requirements/${doc.requirementId}` : '#'}>
-                    <Tag style={{ cursor: doc.projectId ? 'pointer' : undefined }}>需求: {requirementTitle ?? doc.requirementId}</Tag>
-                  </Link>
-                )}
-                {doc.tags.map((t) => <Tag key={t}>{t}</Tag>)}
-              </Space>
-            }
-            extra={
-              <Space>
-                <Button icon={<HistoryOutlined />} onClick={() => setVersionOpen(true)}>
-                  历史版本 ({versions.length})
-                </Button>
-                <Button onClick={() => navigate('/admin/docs')}>返回列表</Button>
-              </Space>
-            }
-            styles={{ body: { display: 'none' } }}
-          />
-
-          {/* 正文：只读预览（卡片撑满剩余高度，滚动只发生在卡片内部，整页不出滚动条）；编辑走抽屉 */}
-          <Card size="small" title="内容" style={pageCardStyle} styles={{ body: pagePaneScrollStyle }} extra={contentActions}>
+        <Card
+          style={pageCardStyle}
+          styles={{ body: pageCardBodyFlexStyle }}
+          title={
+            <Space wrap size={8}>
+              <Typography.Text strong>{displayTitle}</Typography.Text>
+              <Tag color={doc.kind === 'requirement' ? 'blue' : doc.kind === 'design' ? 'geekblue' : doc.kind === 'analysis' ? 'gold' : doc.kind === 'api-suite' ? 'purple' : 'cyan'}>
+                {KIND_LABEL[doc.kind]}
+              </Tag>
+              {statusTag(doc.status)}
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                v{doc.currentVersion}
+                {viewing && <Badge status="processing" text={`查看历史 v${viewing.versionNo}`} />}
+              </Typography.Text>
+              {doc.projectId && (
+                <Link to={`/projects/${doc.projectId}`}>
+                  <Tag style={{ cursor: 'pointer' }}>项目: {projectName ?? doc.projectId}</Tag>
+                </Link>
+              )}
+              {doc.requirementId && (
+                <Link to={doc.projectId ? `/projects/${doc.projectId}/requirements/${doc.requirementId}` : '#'}>
+                  <Tag style={{ cursor: doc.projectId ? 'pointer' : undefined }}>需求: {requirementTitle ?? doc.requirementId}</Tag>
+                </Link>
+              )}
+              {doc.tags.map((t) => <Tag key={t}>{t}</Tag>)}
+            </Space>
+          }
+          extra={
+            <Space wrap>
+              {actions}
+              <Button icon={<HistoryOutlined />} onClick={() => setVersionOpen(true)}>
+                历史版本 ({versions.length})
+              </Button>
+              <Button onClick={() => navigate('/admin/docs')}>返回列表</Button>
+            </Space>
+          }
+        >
+          {/* 正文：只读预览，滚动只发生在卡片内部；编辑走抽屉 */}
+          <div style={pagePaneScrollStyle}>
             <Markdown content={currentContent} />
-          </Card>
-
-          <DocEditDrawer
-            open={editOpen}
-            doc={doc}
-            onClose={() => setEditOpen(false)}
-            onSaved={() => load()}
-          />
-        </>
+          </div>
+        </Card>
       )}
 
-      {/* 版本历史抽屉（查看/diff/回退；查看后关闭抽屉、正文切到历史版本） */}
+      {doc && (
+        <DocEditDrawer
+          open={editOpen}
+          doc={doc}
+          onClose={() => setEditOpen(false)}
+          onSaved={() => load()}
+        />
+      )}
+
+      {/* 版本历史抽屉（点版本号查看历史 / diff / 回退） */}
       <Drawer
         title="版本历史"
         open={versionOpen}
@@ -297,12 +414,12 @@ export default function DocEditorPage() {
         />
       </Drawer>
 
-      {/* diff 抽屉 */}
+      {/* diff 抽屉：左右对照 */}
       <Drawer
         title={diffFor ? `v${diffFor} → 当前版本的差异` : '版本差异'}
         open={!!diff}
         onClose={() => setDiff(null)}
-        width={DRAWER_WIDE}
+        width={DRAWER_FULL}
       >
         {diff && (
           <>
@@ -311,15 +428,9 @@ export default function DocEditorPage() {
             ) : (
               <>
                 <Typography.Paragraph type="secondary">
-                  新增 {diff.additions} 行 / 删除 {diff.deletions} 行
+                  左：v{diffFor}（红=删除）· 右：当前版本（绿=新增）· 新增 {diff.additions} 行 / 删除 {diff.deletions} 行
                 </Typography.Paragraph>
-                <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, background: '#f6f6f6', padding: 12, borderRadius: 4, maxHeight: 560, overflow: 'auto' }}>
-                  {diff.lines.map((l, i) => (
-                    <div key={i} style={{ color: l.startsWith('+') ? '#237804' : l.startsWith('-') ? '#a8071a' : '#595959', background: l.startsWith('+') ? '#f6ffed' : l.startsWith('-') ? '#fff1f0' : 'transparent' }}>
-                      {l}
-                    </div>
-                  ))}
-                </pre>
+                <SideBySideDiff diff={diff} />
               </>
             )}
           </>
