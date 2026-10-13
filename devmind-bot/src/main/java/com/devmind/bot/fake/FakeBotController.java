@@ -25,13 +25,16 @@ public class FakeBotController {
         this.adapter = adapter;
     }
 
-    public record Incoming(String externalChatId, String chatType, String senderId,
+    public record Incoming(String channel, String externalChatId, String chatType, String senderId,
                            String text, Boolean mentioned, String messageId, String eventId) {
     }
 
     @PostMapping("/message")
     public void message(@RequestBody Incoming in) {
-        adapter.emit(new BotMessage("fake", in.externalChatId(),
+        // channel 可指定其他适配器（如 feishu）驱动其回推链路；默认 fake 不出网
+        adapter.emit(new BotMessage(
+                in.channel() == null || in.channel().isBlank() ? "fake" : in.channel(),
+                in.externalChatId(),
                 in.chatType() == null ? BotMessage.CHAT_TYPE_P2P : in.chatType(),
                 in.senderId(), in.text(), Boolean.TRUE.equals(in.mentioned()),
                 in.messageId(), in.eventId()));
