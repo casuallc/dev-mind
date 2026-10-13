@@ -142,6 +142,8 @@ rollback() {
   exit 1
 }
 
+tar xzf "$IN/$PKG" -C "$NEW" --strip-components=1
+
 # 换包：bin/libs/ui/runner/lab 整体替换（libs 不合并，防旧 jar 残留）。
 # lab/ 是 CAP-56 决策实验室的评测/微调脚本，服务端按 devmind.decision-lab.scripts-dir=lab 读它
 # （相对路径跟随 APP_HOME）——漏铺这个目录，发起评测/微调会被直接拒绝，所以与 libs 同级对待。
@@ -153,12 +155,15 @@ done
 chmod +x bin/dev-mind bin/dev-mind-agent 2>/dev/null || true
 
 # config：只更新随包默认配置，application-local.yml 是机器专属覆盖，永远保留
-for f in "$NEW"/config/*; do
-  base="$(basename "$f")"
-  [ "$base" = "application-local.yml" ] && continue
-  [ ! -f "config/$base" ] || cp "config/$base" "$BK/config/"
-  cp "$f" "config/$base"
-done
+# （包内无 config/ 时跳过：glob 不命中会保留字面模式，cp 直接炸在换包中途）
+if [ -d "$NEW/config" ]; then
+  for f in "$NEW"/config/*; do
+    base="$(basename "$f")"
+    [ "$base" = "application-local.yml" ] && continue
+    [ ! -f "config/$base" ] || cp "config/$base" "$BK/config/"
+    cp "$f" "config/$base"
+  done
+fi
 rm -rf "$NEW"
 
 # 上传的 application-local.yml（--config）
