@@ -76,6 +76,39 @@ stdout/stderr/exit code 回显。**单条命令执行**（非交互式 PTY）：
   - 错误（409 版本过低 / 410 工作区已释放 / 超时）渲染为红色输出行，话术透传服务端；
   - MODEL 执行体（CAP-49，无 runner）整个工作区面板隐藏（既有门控），无额外处理。
 
+### FR-06 会话内本地 git 的凭据注入（localhost git 代理）
+
+**背景澄清**：会话里 agent（Claude Code Bash 工具）执行的 git 命令是 runner 主机上的
+**本地进程调用，不经过 runner WS 协议**——FR-01~05 的终端链路只覆盖面板/REST 入口，
+管不到 agent 自己跑的 git。而 launch 下发的 repo.token 按凭据红线仅存内存、只注入
+runner 自己发起的 git 进程参数，worktree 的 origin 是裸 URL → agent 裸跑
+`git fetch/push` 走本机凭据链（runner 服务账户下通常无凭据、非交互弹不了窗）必失败，
+只能人工兜底（2026-10-13 req-jybc5fmg 合并冲突卡 fetch 即此因）。
+
+- runner 内置 **localhost git 代理**：`127.0.0.1:gitProxyPort`（默认 18377，仅回环），
+  JDK HttpServer 实现，smart-HTTP 透传（`GET /info/refs?service=*` 与
+  `POST /git-upload-pack|git-receive-pack`），按 URL 路径首段 sessionKey 查内存中的
+  （upstream base, token），注入 `Authorization` 后转发真实 remote，响应流式回写。
+  匿名通道会话（token 为空）origin 不重写、代理查不到 key 直接 404，不静默降级。
+- **per-worktree origin 重写**：物化工作区时缓存仓库一次性开 `extensions.worktreeConfig`，
+  每个会话 worktree 写 `git config --worktree remote.origin.url =
+  http://127.0.0.1:<port>/<sessionKey>/<host>/<path>`。收口推送
+  （RunnerWorkspace.pushToRemote 显式 withToken URL）与平台自身 git 操作全部照旧，不受影响。
+- **sessionKey = 会话级随机串**，随 RepoCtx 生命周期存活：会话释放（token map 清）即
+  代理 404。key 只让本机进程能用代理推拉该会话的库，**取不到 PAT 本体**。
+- **token 零落盘不变**：代理转发全在内存；agent 能读到的只有 worktree config 里的
+  代理 URL（无凭据）。
+- v1 不支持 LFS；ssh 远端沿用 buildRepoSpec 既有降级（不支持）。
+- 存量 worktree（本能力上线前创建）origin 未重写：runner 启动时对在册会话补写一次；
+  找不到 ctx 的保持原样。
+
+### FR-07 终端白名单 git 子命令细粒度
+
+- `terminalAllowlist` 支持 `git:<sub>` 条目（如 `git:fetch`、`git:pull`、`git:merge`），
+  命中的子命令与只读集取并集放行；`git:*` 仍全放。面板链路跑 fetch 不再被迫全开。
+- 此白名单只管 FR-01 终端链路；agent 本地 git 由 Claude Code 自身权限体系约束，
+  不过此白名单。
+
 ## 3. 关键设计
 
 - **为什么单条命令而非 PTY**：交互式 PTY（xterm.js + 常驻 shell + 双向流式帧 + resize）
@@ -87,13 +120,28 @@ stdout/stderr/exit code 回显。**单条命令执行**（非交互式 PTY）：
   （服务端被绕过/误配也不失守）。缺省只读档让新节点开箱即用且安全。
 - **为什么 cwd 不落服务端**：cwd 是「这个浏览器面板当前逛到哪」的 UI 状态，无共享
   与追溯价值；前端持有 + runner 强制限定，服务端零状态，重启/多端打开互不干扰。
+- **为什么本地 git 凭据用 localhost 代理而非 env/config 注入**：agent 的 git 是本地
+  进程执行、不过协议，要让本地 git 有凭据只有三条路——进程 env
+  （`GIT_CONFIG_*`/`GIT_ASKPASS`）、落盘 config/helper、代理。前两条 agent 都能读
+  （env、`git config --get`、helper 脚本），token 会进对话记录与上行日志，触碰
+  CAP-34 凭据红线；代理让 token 只存在于 runner 内存与上游连接里，agent
+  「可用不可取」。服务端零改动（协议不 bump，纯 runner 内部实现）。
+- **为什么 per-worktree origin 重写而非 shared config**：同一缓存克隆的多个会话
+  worktree 共享 `.git/config`，而 token 按 actor 解析可能不同；
+  `extensions.worktreeConfig` 的 config.worktree 天然按 worktree 隔离。
+- **为什么代理端口固定而非随机**：worktree config 里的代理 URL 要比 runner 进程
+  长寿（重启后续命），随机端口会让存量工作树的 origin 失效。
 
 ## 4. 插件化接口
 
 - common：`AgentProtocol.TERMINAL_EXEC`（v16）；`AgentNodeConnector.terminalExec(...)`
   default 方法；`TerminalExecResult` DTO。
 - runner：`TerminalHandler`（白名单校验 + cwd 限定 + 临时 .sh 执行 + marker 取新 cwd），
-  `RunnerConfig` 增 `terminalAllowlist`/`terminalTimeoutSec`/`terminalAllowRedirect`。
+  `RunnerConfig` 增 `terminalAllowlist`/`terminalTimeoutSec`/`terminalAllowRedirect`；
+  FR-06 增 `GitAuthProxy`（回环 smart-HTTP 透传 + Authorization 注入）、
+  `RunnerConfig` 增 `gitProxyPort`/`gitProxyEnabled`，`RunnerSessionRegistry` 挂
+  sessionKey→（upstream base, token），`RunnerWorkspace.ensureWorktree` 重写
+  per-worktree origin；FR-07 为 `TerminalHandler` 白名单解析增 `git:<sub>` 条目。
 - 服务端：`AgentConnectionRegistry.terminalExec(...)`（门控 + waiter + 断连清理），
   `AgentNodeWsHandler` 加 `terminal_exec_ack` case；session/chat 各加 REST 端点。
 
@@ -104,6 +152,7 @@ stdout/stderr/exit code 回显。**单条命令执行**（非交互式 PTY）：
 | `terminal_exec` / `terminal_exec_ack` | 双向 | 单条命令请求应答（协议 v16 门控） |
 | `POST /api/sessions/{id}/terminal/exec` | REST | 会话终端执行，body `{command, cwd?}`，返回 `{exitCode, stdout, stderr, cwd}` |
 | `POST /api/chats/{id}/terminal/exec` | REST | 问答沙箱对称端点 |
+| `GET/POST http://127.0.0.1:18377/<sessionKey>/**` | runner 回环 | FR-06 smart-HTTP 透传 + Authorization 注入，仅 runner 内部使用 |
 
 ## 6. 验收标准
 
@@ -116,7 +165,13 @@ stdout/stderr/exit code 回显。**单条命令执行**（非交互式 PTY）：
    老服务端 + 新 runner 无异常；
 5. 命令超 60s：整树杀并回 timedOut；输出超 128KB 截尾标注；
 6. 问答沙箱会话：终端可用（非 git 目录 git 命令报 exitCode≠0 即可）；MODEL 执行体无面板；
-7. 终态会话（工作树未释放）：终端仍可探查（recentDirs 定位）。
+7. 终态会话（工作树未释放）：终端仍可探查（recentDirs 定位）；
+8. 会话内 agent 裸跑 `git fetch`/`git ls-remote origin` 成功（代理注入凭据）；
+   `git remote -v` 只见代理 URL 无 token；会话释放后再跑代理 404 清晰失败；
+   进程 env 与磁盘文件中 grep 不到 PAT；
+9. `terminalAllowlist` 配 `git:fetch` 后面板 `git fetch` 可用、`git push` 仍拒；
+   配 `git:*` 两者皆可；
+10. 代理端口被占：runner 启动报错提示改 `gitProxyPort`；匿名通道会话 origin 不重写。
 
 ## 7. 落地状态
 
@@ -126,3 +181,7 @@ stdout/stderr/exit code 回显。**单条命令执行**（非交互式 PTY）：
   服务端 registry/SPI/REST（session/chat 对称）+ 前端工作区面板终端 tab。
   单测：runner 白名单纯函数面、agent 帧链路面（组帧/ack 路由/v16 门控/断连清理）。
   E2E：`tests/cap58_e2e.py`（fake runner + 独立实例）已实跑通过。
+- **M3 —— 补充需求定稿（2026-10-13，待实现）**：FR-06 会话内本地 git 凭据注入
+  （localhost git 代理 + per-worktree origin 重写）+ FR-07 白名单 git 子命令细粒度。
+  起因：req-jybc5fmg 会话 agent 本地 `git fetch` 无凭据卡合并（平台 token 只注入
+  runner 自己发起的 git 操作，agent 本地执行不过协议、本机凭据链为空）。
