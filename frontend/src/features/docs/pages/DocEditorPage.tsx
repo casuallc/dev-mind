@@ -16,6 +16,7 @@ import {
 } from 'antd'
 import {
   EditOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { Link, useNavigate, useParams } from 'react-router-dom'
@@ -49,6 +50,7 @@ export default function DocEditorPage() {
   const [requirementTitle, setRequirementTitle] = useState<string | null>(null)
 
   const [editOpen, setEditOpen] = useState(false)
+  const [versionOpen, setVersionOpen] = useState(false)
 
   const [viewing, setViewing] = useState<DocDetail | null>(null) // 历史版本只读视图
   const [diff, setDiff] = useState<DiffResult | null>(null)
@@ -164,7 +166,7 @@ export default function DocEditorPage() {
       width: 300,
       render: (_, r) => (
         <Space size={4}>
-          <Button onClick={() => load(r.versionNo)}>
+          <Button onClick={() => { setVersionOpen(false); load(r.versionNo) }}>
             查看
           </Button>
           <Button onClick={() => onDiff(r.versionNo)}>
@@ -254,17 +256,16 @@ export default function DocEditorPage() {
                 {doc.tags.map((t) => <Tag key={t}>{t}</Tag>)}
               </Space>
             }
-            extra={<Button onClick={() => navigate('/admin/docs')}>返回列表</Button>}
-          >
-            {/* 版本历史（置顶卡正文，无小标题保持紧凑） */}
-            <Table
-              size="small"
-              rowKey="versionNo"
-              columns={versionColumns}
-              dataSource={versions}
-              pagination={{ pageSize: 5, showSizeChanger: false, showTotal: (total) => `共 ${total} 个版本` }}
-            />
-          </Card>
+            extra={
+              <Space>
+                <Button icon={<HistoryOutlined />} onClick={() => setVersionOpen(true)}>
+                  历史版本 ({versions.length})
+                </Button>
+                <Button onClick={() => navigate('/admin/docs')}>返回列表</Button>
+              </Space>
+            }
+            styles={{ body: { display: 'none' } }}
+          />
 
           {/* 正文：只读预览（卡片撑满剩余高度，滚动只发生在卡片内部，整页不出滚动条）；编辑走抽屉 */}
           <Card size="small" title="内容" style={pageCardStyle} styles={{ body: pagePaneScrollStyle }} extra={contentActions}>
@@ -279,6 +280,22 @@ export default function DocEditorPage() {
           />
         </>
       )}
+
+      {/* 版本历史抽屉（查看/diff/回退；查看后关闭抽屉、正文切到历史版本） */}
+      <Drawer
+        title="版本历史"
+        open={versionOpen}
+        onClose={() => setVersionOpen(false)}
+        width={DRAWER_WIDE}
+      >
+        <Table
+          size="small"
+          rowKey="versionNo"
+          columns={versionColumns}
+          dataSource={versions}
+          pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 个版本` }}
+        />
+      </Drawer>
 
       {/* diff 抽屉 */}
       <Drawer
