@@ -87,6 +87,7 @@
 | [CAP-72](CAP-72-pipeline-project-switches.md) | 执行链自动化项目级开关 | 底座 | CAP-17 恒开的「WI DONE→自动构建→自动部署 TEST」加项目级开关（projects.auto_build_on_wi_done / auto_deploy_test_on_build，默认关、getter 兜底 false、不加 @ColumnDefault），PipelineOrchestrator 两处入口静默闸门；生产部署/发版仍永远人工；与已有 auto_regression_on_deploy 同处项目表单 |
 | [CAP-73](CAP-73-requirement-indev-verification.md) | 需求开发中验证 | 流程层 | 验证前移到开发中且走增量补丁（非全量流水线）：agent 自主触发（限额/互斥兜底）「推送 feature/req-<id> HEAD → 增量构建 → 变更文件补丁覆盖既有环境部署目录（前后钩子夹住停启服）→ 冒烟」，PROD 禁绑；结果回灌进行中会话供 agent 前置迭代；需求详情页验证 Tab + 人工同链触发，收口弹窗展示最近验证状态（不门禁） |
 | [CAP-74](CAP-74-worklog-server-git-repo.md) | 工作日志事实源服务端化 | 组装层 | 消除「runner 文件⇄DB 镜像」单向同步的结构性分叉：事实源收敛为服务端本地 git 仓（JGit 单写者收口，不碰 CAP-34 红线），DB 报告表与 DRAFT/CONFIRMED 状态机退役（防覆盖=自动路径不覆盖已有文件+force 显式+git log 回溯）；按仓建模（个人仓=成员 1 的团队仓，per-user 子目录路径不相交零冲突），远端备份改服务端 push（CAP-70 出口规则接入），平台外编辑合法输入（写前 fetch+merge、冲突 fail-visible）；否决 index.json 派生索引（文件名+git log+commit trailer 全覆盖） |
+| [CAP-75](CAP-75-feishu-integration.md) | 飞书集成（通知通道 + 双向机器人网关） | 组装层 | M1 补 feishu 自定义机器人通知通道（可选加签）+ 通道种子逐 code 兜底修存量库不补插 + 前端声明式 config 表单；M2 机器人网关底座接口化（devmind-bot：BotAdapter SPI/绑定表/指令路由/回答回推，零飞书代码）+ 飞书适配器（长连接收事件免公网域名证书，SDK 封装鉴权解密），群内 @机器人 问答（CAP-30 MODEL 执行体）+ /bind /session /build /deploy 项目操作 |
 
 ## 依赖关系
 
@@ -163,6 +164,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-71 节点审计日志演进自 CAP-21 FR-01（连接流水），覆盖 CAP-34/36/42/54/57/58/59/65/70 的全部节点交互面：新表 `agent_audit_logs` 九分类旁路落库（同步 repo.save try-catch 降级，不引队列），代理转发在 `ServerTunnelStream` 统一终结点逐条记字节/耗时；查询走 `/api/agent-nodes/audit-logs`（PageView 真分页 + 关键词四列 lower like），保留期 `devmind.agent.audit-retention-days` 默认 180 天；旧 `agent_conn_logs` 变死表可手工 DROP。
 - CAP-73 需求开发中验证依赖 CAP-13/51（需求模型与 `feature/req-<id>` 分支口径）、CAP-08/10/12（构建/测试执行器与底座，编排落 devmind-flow 循 CAP-17 先例；**不依赖 CAP-09**——补丁更新不走部署计划）、CAP-34/36（ContextPackage 物化 agent 触发助手 + exec 帧文件下发/钩子执行）、CAP-26/06/72：把验证从「需求收口后的全量流水线」前移到「开发过程中的增量补丁」——agent 自主触发需求分支增量构建、变更文件经 manifest 比对覆盖到需求绑定的既有环境部署目录（PROD 禁绑守 CAP-17 红线）+ 更新钩子 + 冒烟，结果回灌进行中会话形成 AI 快速迭代闭环；`verify_runs` 新表追溯，项目级开关默认关 + 日配额限额。
 - CAP-74 工作日志事实源服务端化依赖 CAP-41（生成会话链路与模板，重构其存储/同步口径）、CAP-28（条目/git 扫描素材源不动）、CAP-29/35（服务端 JGit 与个人 PAT 凭证链）、CAP-70（push 出口规则接入）、CAP-37（outputs 回传消费点改仓写入）：事实源从 runner 持久工作区收敛为服务端本地 git 仓（`WorklogRepoService` 单写者 + 仓级锁），消除「手改不进 git / DRAFT 被镜像冲掉」的双数据源分叉；DB 报告表迁移后退役、DRAFT/CONFIRMED 状态机删除（保存即生效，自动生成文件已存在即跳过）；runner 侧目录降级为会话草稿区、节点离线不再阻塞日志页读写与推送（亲和红线松绑）；按仓建模支持团队共享仓（per-user 子目录 + 各人 PAT 署名推送），commit message trailer（DevMind-Source/Session）承载来源审计。
+- CAP-75 飞书集成依赖 CAP-06（通知通道 SPI，feishu 为第五个通道实现）、CAP-45（integrations 表 FEISHU 类型 appId/appSecret 密文与 FeishuApiClient tenant_token 管理，新增 im/v1 reply/send 方法）、CAP-30/49（通用问答与 MODEL 执行体，机器人问答复用 create/input/subscribe 链路）、CAP-05/08/09（/session /build /deploy 项目操作复用既有服务）、CAP-70（出站代理出口规则）：M1 通知通道走自定义机器人 webhook（可选加签）；M2 机器人网关底座接口化（BotAdapter SPI 仿 NotificationChannel 按 code 注册），飞书适配器用 lark-oapi 长连接收事件（免公网域名/受信证书，否决 webhook 回调主路径），绑定表 (channel, external_chat_id) 唯一支持多 bot 平台共表。
 
 ## 组装方式（后续流程层）
 

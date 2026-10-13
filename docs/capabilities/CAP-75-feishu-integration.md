@@ -1,0 +1,142 @@
+# CAP-75 飞书集成（通知通道 + 双向机器人网关）
+
+> 能力 ID：CAP-75 ｜ 分类：组装层 ｜ 状态：设计定稿 ｜ 日期：2026-10-13
+> 决策记录：事件接入定稿**长连接模式**（lark-oapi SDK WebSocket）——无需公网域名/受信证书，
+> SDK 封装建连鉴权与事件解密；194 裸 IP+自签证书走 webhook 回调必被飞书拒绝，域名+ICP 备案
+> 成本高，单实例部署下长连接无短板。机器人网关**底座接口化**（devmind-bot），飞书只是第一个
+> 适配器（devmind-feishu-bot），未来企微/钉钉 bot 按同一 SPI 接入。
+
+## 1. 目的
+
+两个独立但同源的需求：
+
+- **通知侧**：通知中心（CAP-06 FR-03 通道插件化）现有 ws/log/bark/wecom 四通道，缺飞书。
+  补飞书自定义机器人 webhook 通道；顺带根治「外部通道需手工写库填 config」痛点
+  （前端声明式 config 表单），并修复种子逻辑 `count()==0` 导致存量库永不补插新通道的缺陷。
+- **机器人侧**：在飞书群内 @机器人 完成「问答 + 项目操作」——裸文本走 CAP-30 通用问答，
+  斜杠指令做项目绑定、起开发会话、查构建/部署状态，回答回推飞书。
+
+两套飞书实体相互独立：通知通道用**自定义机器人 webhook**（群内向，只发不收）；
+双向机器人用**企业自建应用**（appId/appSecret，收发双向）。可分别配置、分别启用。
+
+## 2. 功能需求
+
+### 通知通道（M1）
+
+- **FR-01 feishu 通知通道**：新增 `NotificationChannel` 实现 code=feishu，
+  configJson 约定 `{"webhookUrl":"…","secret":"…"}`；secret 非空时按飞书加签规范
+  （`HmacSHA256(key=timestamp+"\n"+secret, data="")` → Base64）附带 timestamp/sign。
+- **FR-02 通道种子逐 code 兜底**：seed 从 `count()==0` 整段守卫改为逐 code `findByCode`
+  兜底插入，存量库升级只补插缺失 code、不覆盖既有配置。
+- **FR-03 前端通道 config 声明式表单**：通知设置抽屉按 code 注册表渲染 config 字段
+  （bark: server/key；wecom: webhookUrl；feishu: webhookUrl/secret 密码框），保存走既有
+  PUT 合并语义；删除「需在数据库中填入」提示文案。
+
+### 双向机器人（M2）
+
+- **FR-04 长连接事件接入**：飞书适配器用 lark-oapi SDK ws.Client 建连，订阅
+  `im.message.receive_v1`，标准化为 BotMessage 回调底座；处理器内零业务（3s 窗口约束），
+  断线重连由 SDK 负责。
+- **FR-05 事件去重**：底座维护 event_id 内存去重表（1h TTL），防 SDK/飞书重推重复执行。
+- **FR-06 身份口径**：binding.actor 覆盖优先，否则用该 channel 配置的 defaultActor
+  （默认 local）；botExecutor 任务内合成 SecurityContext（仿 OpenApiAuthFilter），
+  机器人行为的权限边界 = 该账号既有平台权限，不做第二套授权。
+- **FR-07 消息路由与绑定表**：`bot_bindings` 以 (channel, external_chat_id) 唯一；
+  懒创建绑定 DevMind 问答 chat（MODEL 执行体优先），`/bind` 绑定项目。
+- **FR-08 指令语法**：`/help` `/bind [项目]` `/new` `/session <需求描述>` `/build` `/deploy`；
+  裸文本 = 问答。群聊只响应 @机器人，私聊全响应。
+- **FR-09 回答回推**：订阅 chat 事件流收集 assistant/result，回合完成（或 120s 超时）后
+  一次性 reply；>3500 字符截断 + 平台链接尾注。失败分档 fail-visible 文案
+  （未绑定/查无记录/DevMindException/未知异常）。
+- **FR-10 凭证纪律**：appId/appSecret 密文不出 devmind-integration；适配器经
+  `FeishuConnector.botClient()` 拿客户端句柄。无启用中的 FEISHU 集成时适配器降级禁用。
+
+## 3. 否决方案
+
+- **webhook 回调端点为主路径**：需受信证书+域名（+国内 ECS 的 ICP 备案），194 自签证书
+  必被拒；且要自写验签/AES 解密/重放层。留作 M3 第二接入路径（底座接口化后路由零改动）。
+- **open_id ↔ 平台用户映射表入 MVP**：绑定流程成本高，单实例小团队群即信任边界；挪 M3。
+- **流式 patch 更新回答**：频率限制+状态机复杂度；MVP 一次性回，「正在思考…」可裁剪。
+- **机器人塞进 devmind-integration**：会让凭证/连接器模块反向依赖 chat/session/build/deploy
+  全部业务模块，职责错位。
+
+## 4. 架构与模块归属
+
+```
+devmind-bot（网关底座，零飞书代码）
+  SPI：BotAdapter(code/start/stop/reply) · BotMessage · BotMessageHandler
+  路由：BotRouterService（指令解析/绑定/问答/项目操作/回推编排）
+  设施：botExecutor(虚拟线程) · event_id 去重表 · bot_bindings 表 · SecurityContext 装配
+  依赖：common/auth/chat/session/build/deploy
+
+devmind-feishu-bot（第一个适配器）
+  FeishuBotAdapter implements BotAdapter：lark-oapi ws.Client 长连接接入、
+    事件标准化、replyText 发送
+  依赖：devmind-bot + devmind-integration（FeishuConnector.botClient()）
+```
+
+适配器不碰业务，底座不碰协议。新 bot 平台 = 新适配器模块实现 BotAdapter，底座零改动。
+（与通知中心 NotificationChannel 按 code 注册同一套路。）
+
+## 5. 数据模型
+
+```
+bot_bindings(
+  id varchar pk,
+  channel varchar(32),          -- feishu / wecom / …
+  external_chat_id varchar(64), -- 飞书 chat_id（群=群 id，私聊=p2p id）
+  chat_type varchar(16),        -- p2p / group
+  owner_sender_id varchar(64),  -- 首个触发者 open_id
+  chat_session_id varchar(64),  -- 绑定的 DevMind 问答 id（懒创建，/new 重开）
+  project_id varchar(64),       -- /bind 绑定项目（null=未绑定）
+  actor varchar(64),            -- 覆盖运行账号（null=channel defaultActor）
+  created_at / updated_at,
+  unique(channel, external_chat_id)
+)
+```
+
+integrations.configJson 扩展槽（FEISHU 类型）：`{"bot":{"defaultActor":"admin"}}`。
+
+## 6. API 概要
+
+M2 无平台侧新 REST——绑定与操作全部经飞书指令驱动。M1 复用既有
+`GET/PUT /api/notification-channels`、`POST /api/notifications/emit`。
+
+## 7. 安全
+
+- 长连接建连鉴权由 SDK 完成（appId/appSecret），无明文回调端点暴露面。
+- appId/appSecret 密文不出 integration 模块（IntegrationCipher，enc1: AES-GCM）。
+- 机器人权限 = defaultActor/binding.actor 的平台既有权限（FR-06）。
+- event_id 去重防重推重复执行（FR-05）。
+- 飞书侧限制（记录在案）：仅企业自建应用、每应用最多 50 连接、集群推送（单实例无影响）、
+  不支持卡片回调（MVP 纯文本不需要）、3s 处理窗（处理器内零业务，投递即返）。
+
+## 8. 里程碑
+
+- **M1 飞书通知通道**：FR-01~03。
+- **M2 双向机器人**：FR-04~10（网关底座 + 飞书适配器）。
+- **M3 展望**：open_id↔平台用户映射、webhook 回调第二接入路径、机器人主动推送会话进展、
+  「正在思考…」占位消息 patch。
+
+## 9. 验收标准
+
+- M1：新库种子出 5 通道含 feishu；存量库（预置部分通道）启动后补插缺失 code 且不覆盖
+  既有配置；feishu 启用但 webhookUrl 空时 emit P0 后 channelStatus.feishu 以 FAILED 开头；
+  前端可界面配置 webhookUrl/secret 并保存（合并语义不丢其他 key）；`tests/cap06_verify.py` 全绿。
+- M2：单测覆盖指令解析矩阵、路由（绑定懒创建/失败文案）、去重 TTL、飞书事件标准化；
+  `tests/cap75_bot_verify.py`（FakeBotAdapter 驱动全路由 + 飞书出站打 mock server）全绿；
+  部署机真实联调：飞书后台选长连接保存通过 → 群内 /help → /bind → 问答 → /build。
+
+## 10. 风险与开放问题
+
+| # | 项 | 口径 |
+|---|---|---|
+| R1 | 机器人 = defaultActor 全权限 | MVP 接受（群=信任边界）；M3 映射表/指令白名单 |
+| R2 | 绑定 chat 上下文无限膨胀 | `/new` 重开；M3 自动轮换 |
+| R3 | MODEL 执行体额度占用 | 机器人问答与 Web 问答同一额度；120s 超时兜底 |
+| R4 | seed 兜底改造影响存量库 | 逐 code findByCode 幂等；旧库启动验证 |
+| R5 | im/v1 API 频率限制 | MVP 单条 reply 无压力；patch 增强需限流 |
+| R6 | 飞书后台选长连接需客户端在线 | 部署顺序：先上线 M2 再配后台 |
+| O1 | 一群一项目是否够用 | M3 `/bind` 切换/多项目群 |
+| O2 | bot 配置（defaultActor）放 configJson 明文槽 | 非登录凭证，MVP 接受；评审可收紧 |
+| O3 | 私聊多用户共享 defaultActor 审计粒度 | M3 映射表解决 |
