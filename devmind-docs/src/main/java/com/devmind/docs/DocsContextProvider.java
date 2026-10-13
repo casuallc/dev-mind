@@ -85,7 +85,7 @@ public class DocsContextProvider implements ContextProvider, ProjectAssetsProvid
     /** 项目「上下文」页签文档视图：该项目全部文档（元数据，与 /api/documents?projectId= 同口径）。 */
     @Override
     public List<ProjectAssetItem> listByProject(String projectId) {
-        return documentService.list(null, projectId, null).stream()
+        return documentService.list(null, projectId, null, null).stream()
                 .map(this::toAssetItem)
                 .toList();
     }

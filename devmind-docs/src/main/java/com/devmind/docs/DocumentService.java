@@ -8,6 +8,7 @@ import com.devmind.docs.dto.DiffView;
 import com.devmind.docs.dto.DocDetail;
 import com.devmind.docs.dto.DocRequest;
 import com.devmind.docs.dto.DocView;
+import com.devmind.docs.dto.DocUpdateRequest;
 import com.devmind.docs.dto.DocVersionView;
 import com.devmind.docs.dto.DocViews;
 import com.devmind.docs.dto.SaveVersionRequest;
@@ -69,7 +70,7 @@ public class DocumentService {
 
     // ---------------- 列表 / 详情 ----------------
 
-    public List<DocView> list(String kind, String projectId, String status) {
+    public List<DocView> list(String kind, String projectId, String status, String tag) {
         // 主查询沿用优先级取一个 repo 方法，其余维度内存合取过滤
         // （原为三选一互斥 if/else，前端同时传 kind+status 时 status 被静默吞掉，FR-09 修正）
         List<DocumentEntity> list;
@@ -86,7 +87,13 @@ public class DocumentService {
                 .filter(e -> kind == null || kind.isBlank() || kind.equals(e.getKind()))
                 .filter(e -> projectId == null || projectId.isBlank() || projectId.equals(e.getProjectId()))
                 .filter(e -> status == null || status.isBlank() || status.equals(e.getStatus()))
+                .filter(e -> tag == null || tag.isBlank() || hasTag(e, tag))
                 .map(DocViews::doc).toList();
+    }
+
+    /** 标签过滤（FR-09）：单值、切分后精确匹配、忽略大小写。 */
+    private boolean hasTag(DocumentEntity e, String tag) {
+        return DocViews.splitTags(e.getTags()).stream().anyMatch(t -> t.equalsIgnoreCase(tag.strip()));
     }
 
     public DocDetail get(Long id, Integer version) {
@@ -164,7 +171,7 @@ public class DocumentService {
         e.setTitle(req.title().strip());
         e.setCurrentVersion(1);
         e.setStatus("draft");
-        e.setTags(DocViews.joinTags(req.tags()));
+        e.setTags(joinTagsChecked(req.tags()));
         e.setCreatedBy(actor());
         Instant now = Instant.now();
         e.setCreatedAt(now);
@@ -195,6 +202,43 @@ public class DocumentService {
         e.setUpdatedAt(Instant.now());
         docRepo.save(e);
         return get(e.getId(), newVer);
+    }
+
+    /**
+     * 元数据更新（FR-08）：title/tags 部分更新（null=不修改，tags 空列表=清空）。
+     * 不产生新版本、不受 frozen 限制（冻结只管正文基线），仅刷 updatedAt。
+     */
+    @Transactional
+    public DocDetail update(Long id, DocUpdateRequest req) {
+        DocumentEntity e = requireDoc(id);
+        boolean changed = false;
+        if (req.title() != null) {
+            if (req.title().isBlank()) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "文档标题不可为空白");
+            }
+            e.setTitle(req.title().strip());
+            changed = true;
+        }
+        if (req.tags() != null) {
+            e.setTags(joinTagsChecked(req.tags()));
+            changed = true;
+        }
+        if (!changed) {
+            return get(id, null); // 幂等空更新：不刷 updatedAt
+        }
+        e.setUpdatedAt(Instant.now());
+        docRepo.save(e);
+        log.info("文档元数据已更新: id={} title={} tags={}", id, e.getTitle(), e.getTags());
+        return get(id, null);
+    }
+
+    /** joinTags + 长度护栏：tags 列 VARCHAR(500)，留 20 字符余量。 */
+    private String joinTagsChecked(List<String> tags) {
+        String joined = DocViews.joinTags(tags);
+        if (joined.length() > 480) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "标签总长超限（拼接后 >480 字符）");
+        }
+        return joined;
     }
 
     /** 回退到指定历史版本：内容回填并生成新版本（FR-02，保留历史）。 */

@@ -4,6 +4,7 @@ import com.devmind.docs.DocumentService;
 import com.devmind.docs.dto.DiffView;
 import com.devmind.docs.dto.DocDetail;
 import com.devmind.docs.dto.DocRequest;
+import com.devmind.docs.dto.DocUpdateRequest;
 import com.devmind.docs.dto.DocVersionView;
 import com.devmind.docs.dto.DocView;
 import com.devmind.docs.dto.SaveVersionRequest;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -40,8 +42,14 @@ public class DocumentController {
     @GetMapping
     public List<DocView> list(@RequestParam(required = false) String kind,
                               @RequestParam(required = false) String projectId,
-                              @RequestParam(required = false) String status) {
-        return service.list(kind, projectId, status);
+                              @RequestParam(required = false) String status,
+                              @RequestParam(required = false) String tag) {
+        return service.list(kind, projectId, status, tag);
+    }
+
+    @PutMapping("/{id}")
+    public DocDetail update(@PathVariable Long id, @RequestBody DocUpdateRequest req) {
+        return service.update(id, req);
     }
 
     @GetMapping("/search")
