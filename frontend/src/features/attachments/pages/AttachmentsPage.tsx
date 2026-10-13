@@ -145,8 +145,12 @@ export default function AttachmentsPage() {
     let okCount = 0
     for (const f of files) {
       try {
+        // UploadFile 只是包装壳（有 uid/status 等元数据），真 File 在 originFileObj；
+        // 直接把壳 append 进 FormData 会抛 "parameter 2 is not of type 'Blob'"
+        const raw = f.originFileObj as File | undefined
+        if (!raw) throw new Error('文件句柄已失效，请重新选择')
         await uploadAttachment(
-          f as unknown as File,
+          raw,
           f.name,
           'PRIVATE',
           description,
