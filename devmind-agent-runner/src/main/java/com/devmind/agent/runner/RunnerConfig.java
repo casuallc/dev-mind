@@ -55,13 +55,19 @@ import java.util.Properties;
  *                            # 应与 claude 侧 transcript 保留期（cleanupPeriodDays，runner 落 180 天）
  *                            # 对齐：工作树还在而会话续不上是最难排查的半可用状态
  * terminalAllowlist=         # CAP-58：终端帧（terminal_exec）命令白名单（CSV 前缀；按 |/&&/;/换行
- *                            # 切段逐段校验首 token，git 默认只放行只读子命令，条目 git:* 全放行）。
+ *                            # 切段逐段校验首 token，git 默认只放行只读子命令，条目 git:* 全放行，
+ *                            # 条目 git:&lt;sub&gt;（如 git:fetch）与只读集取并集放行该子命令）。
  *                            # 缺省（不配该项）= 内置只读档（ls/cat/head/tail/grep/find/git 只读等）；
  *                            # 显式配置（含空串）= 全覆盖（空串 = 拒绝一切终端命令）
  * terminalTimeoutSec=60      # CAP-58：单条终端命令超时（秒），超时整树杀
  * terminalAllowRedirect=false# CAP-58：是否放开 &gt;/&gt;&gt; 重定向写入（默认拒绝）
  * terminalShellIdleMin=30    # CAP-59：持久 shell 空闲回收阈值（分钟），无命令超过即整树杀，
  *                            # 下条命令自动重启新 shell
+ * gitProxyEnabled=true     # CAP-58 FR-06：会话内本地 git 凭据注入——内置 localhost git
+ *                            # 代理（worktree origin 重写为 http://127.0.0.1:<port>/git/<key>/...，
+ *                            # 代理按 key 查内存凭据注入 Authorization 转发真实远端，token 零落盘）
+ * gitProxyPort=18377        # CAP-58 FR-06：git 代理监听端口（仅回环）。端口被占 runner
+ *                            # 启动报错；改端口后存量 worktree 的代理 URL 失效（下次 launch 重写）
  * insecure=false             # CAP-21：https 自签证书部署时置 true——runner 对服务端的一切
  *                            # wss/https 调用（长连接/隧道/升级与上下文下载/文件上传）信任一切证书
  *                            # 并关主机名校验；一键安装脚本探测到证书校验失败会自动写入 true
@@ -75,7 +81,25 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                            String claudeConfigDir, String worklogRoot, boolean partialMessages,
                            int worktreeGcDays, java.util.List<String> terminalAllowlist,
                            int terminalTimeoutSec, boolean terminalAllowRedirect,
-                           int terminalShellIdleMin, boolean insecure) {
+                           int terminalShellIdleMin, boolean insecure,
+                           boolean gitProxyEnabled, int gitProxyPort) {
+
+    /** 兼容构造（CAP-58 FR-06 前的 26 参签名）：git 代理默认开启、端口 18377。 */
+    public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
+                        Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
+                        String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes,
+                        int gcInitialDelayMinutes, java.util.List<String> labels,
+                        java.util.List<String> execAllowlist, String execShell, int buildGcHours,
+                        String claudeConfigDir, String worklogRoot, boolean partialMessages,
+                        int worktreeGcDays, java.util.List<String> terminalAllowlist,
+                        int terminalTimeoutSec, boolean terminalAllowRedirect,
+                        int terminalShellIdleMin, boolean insecure) {
+        this(serverUrl, token, claudePath, permissionMode, workDir, projectPaths, maxConcurrent,
+                executor, workspaceRoot, gcDays, gcIntervalMinutes, gcInitialDelayMinutes, labels,
+                execAllowlist, execShell, buildGcHours, claudeConfigDir, worklogRoot, partialMessages,
+                worktreeGcDays, terminalAllowlist, terminalTimeoutSec, terminalAllowRedirect,
+                terminalShellIdleMin, insecure, true, 18377);
+    }
 
     /** 兼容构造（CAP-59 前的 23 参签名）：持久 shell 空闲回收默认 30 分钟，insecure 缺省关。 */
     public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -211,7 +235,9 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                 Integer.parseInt(p.getProperty("terminalTimeoutSec", "60").strip()),
                 "true".equalsIgnoreCase(p.getProperty("terminalAllowRedirect", "false").strip()),
                 Integer.parseInt(p.getProperty("terminalShellIdleMin", "30").strip()),
-                "true".equalsIgnoreCase(p.getProperty("insecure", "false").strip()));
+                "true".equalsIgnoreCase(p.getProperty("insecure", "false").strip()),
+                !"false".equalsIgnoreCase(p.getProperty("gitProxyEnabled", "true").strip()),
+                Integer.parseInt(p.getProperty("gitProxyPort", "18377").strip()));
     }
 
     /** CAP-41：worklog 持久工作区根目录——配置优先，空 = {user.home}/worklog。 */

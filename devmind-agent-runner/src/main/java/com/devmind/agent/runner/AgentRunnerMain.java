@@ -95,6 +95,24 @@ public class AgentRunnerMain {
             }
         });
         RunnerWorkspace workspace = new RunnerWorkspace(config.workspaceRoot());
+        // CAP-58 FR-06：localhost git 代理（会话内 agent 本地 git 的凭据注入点）——
+        // 绑失败（端口被占）直接启动失败并给出改配置指引，不静默降级成「代理 URL 已写但无人应答」
+        GitAuthProxy gitProxy = null;
+        if (config.gitProxyEnabled()) {
+            com.devmind.common.agent.exec.GitProxyBroker broker =
+                    new com.devmind.common.agent.exec.GitProxyBroker(
+                            "http://127.0.0.1:" + config.gitProxyPort() + GitAuthProxy.CONTEXT);
+            gitProxy = new GitAuthProxy(broker, config);
+            try {
+                gitProxy.start(config.gitProxyPort());
+            } catch (java.io.IOException e) {
+                throw new IllegalStateException("git 代理监听 127.0.0.1:" + config.gitProxyPort()
+                        + " 失败（端口被占？改 agent.properties 的 gitProxyPort，或 gitProxyEnabled=false 关闭）: "
+                        + e.getMessage(), e);
+            }
+            workspace.setGitProxyBroker(broker);
+        }
+
         // CAP-51 FR-12：claude 状态目录与 transcript 保留期（默认 30 天会扫掉静置超期的需求会话，
         // 造成「工作树还在、resume 失效」；清扫遍历整机 projects/，只能设在 runner 专属配置里）
         Path claudeConfigDir = ClaudeStateSupport.resolveConfigDir(config);
@@ -189,9 +207,14 @@ public class AgentRunnerMain {
             }
         }, config.gcInitialDelayMinutes(), config.gcIntervalMinutes(), TimeUnit.MINUTES);
 
+        // 供 shutdown hook 关停 git 代理（可能因 gitProxyEnabled=false 为 null）
+        final GitAuthProxy gitProxyFinal = gitProxy;
         Runtime.getRuntime().addShutdownHook(Thread.ofPlatform().unstarted(() -> {
             log.info("runner 关闭中，终止全部会话/exec 进程（CAP-57 受管进程刻意不在其列——"
                     + "边车要比 runner 活得久，重启后由 ProcRegistry 对账收回）");
+            if (gitProxyFinal != null) {
+                gitProxyFinal.stop();
+            }
             heartbeat.shutdownNow();
             gcTimer.shutdownNow();
             watcher.shutdown();
@@ -604,6 +627,10 @@ public class AgentRunnerMain {
                 env.putIfAbsent("HTTPS_PROXY", claudeProxy);
                 env.putIfAbsent("http_proxy", claudeProxy);
                 env.putIfAbsent("https_proxy", claudeProxy);
+                // CAP-58 FR-06：worktree origin 重写为 127.0.0.1 git 代理后，agent 的本地
+                // git 必须直连回环，不能被上面的 claude 代理拦走出网（CAP-43 语义只管外网）
+                env.putIfAbsent("NO_PROXY", "127.0.0.1,localhost");
+                env.putIfAbsent("no_proxy", "127.0.0.1,localhost");
             }
             Process proc = executor.launch(new SessionExecutor.LaunchContext(
                     sessionId, workDir, taskSpec, model, permissionMode, env, resumeSessionId));

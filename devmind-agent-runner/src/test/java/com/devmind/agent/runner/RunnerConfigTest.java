@@ -25,6 +25,21 @@ class RunnerConfigTest {
         assertTrue(load("insecure=true\n").insecure());
     }
 
+    @Test
+    void gitProxyDefaults() throws Exception {
+        // CAP-58 FR-06：缺省开启、端口 18377
+        RunnerConfig c = load("");
+        assertTrue(c.gitProxyEnabled());
+        org.junit.jupiter.api.Assertions.assertEquals(18377, c.gitProxyPort());
+    }
+
+    @Test
+    void gitProxyParsed() throws Exception {
+        RunnerConfig c = load("gitProxyEnabled=false\ngitProxyPort=19377\n");
+        assertFalse(c.gitProxyEnabled());
+        org.junit.jupiter.api.Assertions.assertEquals(19377, c.gitProxyPort());
+    }
+
     private RunnerConfig load(String extra) throws Exception {
         Path f = dir.resolve("agent.properties");
         Files.writeString(f, "serverUrl=ws://127.0.0.1:8080/ws/agent\ntoken=dmag_t\n" + extra,

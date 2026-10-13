@@ -31,6 +31,40 @@ public final class RunnerHttp {
         return insecure ? InsecureHolder.CLIENT : HttpClient.newHttpClient();
     }
 
+    /**
+     * CAP-58 FR-06：git 代理上行客户端工厂——版本钉死 HTTP/1.1（JDK HttpClient 默认对
+     * 明文 http 发 Upgrade: h2c，uvicorn 类上游会丢请求体；GitLab smart-HTTP 也走 1.1 语义），
+     * 可选叠加 CAP-43 节点外网代理（git scope）与 insecure 信任一切证书（自签 GitLab）。
+     *
+     * @param httpProxyUrl CAP-43 节点代理 URL（http://host:port），null/空 = 直连
+     */
+    public static HttpClient newProxyUpstreamClient(RunnerConfig config, String httpProxyUrl) {
+        HttpClient.Builder b = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(java.time.Duration.ofSeconds(15));
+        if (config.insecure()) {
+            disableHostnameVerificationJvmWide(); // 必须先于任何 HttpClient 使用（幂等）
+            b.sslContext(trustAllContext());
+        }
+        if (httpProxyUrl != null && !httpProxyUrl.isBlank()) {
+            java.net.URI uri = java.net.URI.create(httpProxyUrl.trim());
+            b.proxy(java.net.ProxySelector.of(
+                    new java.net.InetSocketAddress(uri.getHost(), uri.getPort() > 0 ? uri.getPort() : 8080)));
+        }
+        return b.build();
+    }
+
+    /** 信任一切证书的 SSLContext（insecure 部署用）。 */
+    private static SSLContext trustAllContext() {
+        try {
+            SSLContext ctx = SSLContext.getInstance("TLS");
+            ctx.init(null, new TrustManager[]{TRUST_ALL}, new SecureRandom());
+            return ctx;
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("insecure SSLContext 初始化失败", e);
+        }
+    }
+
     /** 信任一切证书的 X509TrustManager。 */
     private static final X509TrustManager TRUST_ALL = new X509TrustManager() {
         @Override
@@ -66,13 +100,7 @@ public final class RunnerHttp {
 
         private static HttpClient build() {
             disableHostnameVerificationJvmWide(); // 必须先于任何 HttpClient/内部类初始化
-            try {
-                SSLContext ctx = SSLContext.getInstance("TLS");
-                ctx.init(null, new TrustManager[]{TRUST_ALL}, new SecureRandom());
-                return HttpClient.newBuilder().sslContext(ctx).build();
-            } catch (GeneralSecurityException e) {
-                throw new IllegalStateException("insecure HttpClient 初始化失败", e);
-            }
+            return HttpClient.newBuilder().sslContext(trustAllContext()).build();
         }
     }
 }
