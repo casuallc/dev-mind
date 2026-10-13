@@ -1,0 +1,27 @@
+package com.devmind.bot.spi;
+
+/**
+ * Bot 平台适配器 SPI（CAP-75 FR-04）：一个实现 = 一个 bot 平台（飞书/企微/钉钉…）。
+ * 与通知中心 NotificationChannel 同套路：Spring 收集全部实现按 code 注册，
+ * {@code BotAdapterRegistry}（SmartLifecycle）随应用启停统一驱动。
+ *
+ * <p>实现只负责协议面：接入事件（长连接/webhook）→ 归一化为 {@link BotMessage} 回调 handler；
+ * 把底座产出的回复文本发回平台。不得碰业务服务。</p>
+ */
+public interface BotAdapter {
+
+    /** 平台 code（feishu/wecom/…），路由按它找回适配器做回推。 */
+    String code();
+
+    /**
+     * 启动接入（建连/注册回调），事件到达时回调 handler。
+     * 实现必须容忍配置缺失：降级为禁用 + 告警日志，不得抛异常拖垮应用启动。
+     */
+    void start(BotMessageHandler handler);
+
+    /** 停止接入（断连/注销），应用关闭时调用。 */
+    void stop();
+
+    /** 把回复文本发回消息来源会话。失败抛异常由底座兜底记日志（不再重试）。 */
+    void reply(BotMessage origin, String text);
+}

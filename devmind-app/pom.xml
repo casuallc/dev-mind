@@ -67,6 +67,10 @@
         </dependency>
         <dependency>
             <groupId>com.devmind</groupId>
+            <artifactId>devmind-bot</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
             <artifactId>devmind-attachment</artifactId>
         </dependency>
         <dependency>
