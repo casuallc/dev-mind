@@ -236,6 +236,7 @@ EOF
 }
 
 print_unit() {
+cat <<EOF
 [Unit]
 Description=Dev-Mind platform
 After=network.target
