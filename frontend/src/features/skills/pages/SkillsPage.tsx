@@ -1,4 +1,4 @@
-// Skill 管理（基础模块）：skill 包列表 + 筛选；行内「管理」跳转详情页（页面模式，交互对齐文档管理），新建走 SkillFormDrawer。
+// Skill 管理（基础模块）：skill 包列表 + 筛选；名称链接跳转详情页（页面模式，交互对齐文档管理），新建走 SkillFormDrawer。
 // 布局遵循 docs/core/前端内容区布局约定.md：Card 标题，extra 放操作按钮，表格默认密度。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Card, Input, Select, Space, Tag, Typography } from 'antd'
@@ -108,15 +108,6 @@ export default function SkillsPage() {
     { title: '附件', dataIndex: 'fileCount', width: 70 },
     { title: '状态', dataIndex: 'status', width: 80, render: statusTag },
     { title: '更新时间', dataIndex: 'updatedAt', width: 165, render: (v) => fmtTime(v) },
-    {
-      title: '操作',
-      width: 90,
-      render: (_, r) => (
-        <Button size="small" onClick={() => navigate(`/admin/skills/${r.id}`)}>
-          管理
-        </Button>
-      ),
-    },
   ]
 
   return (
