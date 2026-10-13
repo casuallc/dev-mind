@@ -99,8 +99,9 @@ runner 自己发起的 git 进程参数，worktree 的 origin 是裸 URL → age
 - **token 零落盘不变**：代理转发全在内存；agent 能读到的只有 worktree config 里的
   代理 URL（无凭据）。
 - v1 不支持 LFS；ssh 远端沿用 buildRepoSpec 既有降级（不支持）。
-- 存量 worktree（本能力上线前创建）origin 未重写：runner 启动时对在册会话补写一次；
-  找不到 ctx 的保持原样。
+- 存量 worktree（本能力上线前创建）origin 未重写：token 只随 launch 帧存活，runner
+  重启后内存登记簿即空、无从补写；这些工作树在**下次 launch/resume**（prepare 链路）
+  时重写接入代理，此前 agent 本地 git 维持「无凭据」旧行为（平台自身操作不受影响）。
 
 ### FR-07 终端白名单 git 子命令细粒度
 
@@ -181,7 +182,19 @@ runner 自己发起的 git 进程参数，worktree 的 origin 是裸 URL → age
   服务端 registry/SPI/REST（session/chat 对称）+ 前端工作区面板终端 tab。
   单测：runner 白名单纯函数面、agent 帧链路面（组帧/ack 路由/v16 门控/断连清理）。
   E2E：`tests/cap58_e2e.py`（fake runner + 独立实例）已实跑通过。
-- **M3 —— 补充需求定稿（2026-10-13，待实现）**：FR-06 会话内本地 git 凭据注入
-  （localhost git 代理 + per-worktree origin 重写）+ FR-07 白名单 git 子命令细粒度。
+- **M3 —— FR-06/FR-07 实现（2026-10-13）**：FR-06 会话内本地 git 凭据注入——common
+  `GitProxyBroker`（key→(upstreamOrigin, token) 纯内存登记簿）+ `RunnerWorkspace`
+  prepare/prepareMulti 链路 `ensureProxyOrigin`（缓存库开 extensions.worktreeConfig +
+  per-worktree origin 重写为代理 URL，幂等刷新 token；finalize/release 删 worktree 前
+  revoke）；runner `GitAuthProxy`（回环 smart-HTTP 透传 + Authorization 注入，上行钉死
+  HTTP/1.1 + 叠加 CAP-43 节点代理 git scope）+ `RunnerConfig` 增
+  `gitProxyEnabled`（默认 true）/`gitProxyPort`（默认 18377）+ `AgentRunnerMain` 装配
+  （端口被占启动报错指引改配置）与 claude 代理分支补 `NO_PROXY=127.0.0.1,localhost`
+  （防 agent 回环 git 被 CAP-43 claude 代理拦走出网）。FR-07：`TerminalHandler` 白名单
+  解析增 `git:<sub>` 条目（与只读集并集；不参与首 token 前缀命中）。
+  单测：`GitProxyBrokerTest`（key/登记/吊销/URL 正反解）、`RunnerWorkspaceProxyOriginTest`
+  （真 git：重写/缓存库不动/幂等刷新/双工作树 key 隔离/release 吊销）、
+  `GitAuthProxyTest`（假上游：Authorization 注入/query/POST 字节无损/404）、
+  `TerminalHandlerAllowlistTest`+`RunnerConfigTest` 增补。
   起因：req-jybc5fmg 会话 agent 本地 `git fetch` 无凭据卡合并（平台 token 只注入
   runner 自己发起的 git 操作，agent 本地执行不过协议、本机凭据链为空）。
