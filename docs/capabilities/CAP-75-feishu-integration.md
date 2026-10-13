@@ -140,3 +140,25 @@ M2 无平台侧新 REST——绑定与操作全部经飞书指令驱动。M1 复
 | O1 | 一群一项目是否够用 | M3 `/bind` 切换/多项目群 |
 | O2 | bot 配置（defaultActor）放 configJson 明文槽 | 非登录凭证，MVP 接受；评审可收紧 |
 | O3 | 私聊多用户共享 defaultActor 审计粒度 | M3 映射表解决 |
+
+## 附录 A：真机联调 checklist（M2）
+
+部署顺序有硬约束：飞书后台「事件与回调」选长连接方式时**需客户端在线**才能保存（R6），
+所以先上线再配后台。
+
+1. **飞书后台**（open.feishu.cn → 企业自建应用）：
+   - 建应用拿 App ID / App Secret；启用「机器人」能力。
+   - 权限：`im:message`（收消息）、`im:message:send_as_bot`（回推）。
+   - 事件订阅：添加 `im.message.receive_v1`，接收方式选「使用长连接接收事件」
+     （此步要求平台侧已在线，先做第 2 步再回来保存）。
+   - 发布版本并等企业管理员审批通过。
+2. **平台侧**：设置 → 平台集成 → 新建 FEISHU 集成：baseUrl 留空（默认 open.feishu.cn），
+   BASIC 双行凭据 = App ID + App Secret；`configJson` 可配 `{"bot":{"defaultActor":"liuchangqing"}}`
+   （不配则回落 `devmind.bot.default-actor=local`）。**改配后重启应用**——长连接只在启动时建立
+   （回推链路免重启，收事件要重启）。
+3. **验证**：启动日志见 `飞书机器人长连接已启动`（无 ENABLED 集成时是降级 WARN）→
+   群内 @机器人 `/help` → `/bind <项目名>` → 裸文本问答 → `/build`。
+4. **排错**：收不到事件查后台事件订阅是否保存成功（长连接须在线）；
+  有事件无回复查 `bot 回复发送失败` 日志（多为缺 `im:message:send_as_bot` 权限）；
+  回复内容异常查 `bot 消息处理失败`（带 eventId）。
+
