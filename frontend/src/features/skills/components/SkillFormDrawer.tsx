@@ -6,7 +6,6 @@ import type { SkillDetail, SkillInput } from '../types'
 import type { Project } from '../../projects/types'
 import MarkdownEditor from '../../../shared/components/MarkdownEditor'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_FORM } from '../../../shared/utils/overlay'
 
 const NAME_RULE = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
@@ -60,7 +59,7 @@ export default function SkillFormDrawer({ open, editing, projects, onClose, onSa
       title={editing ? `编辑 Skill「${editing.skill.name}」` : '新增 Skill'}
       open={open}
       onClose={onClose}
-      width={DRAWER_FORM}
+      width="70%"
       destroyOnHidden
       footer={
         <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
