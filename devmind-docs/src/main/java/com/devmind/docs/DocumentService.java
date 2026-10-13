@@ -70,6 +70,8 @@ public class DocumentService {
     // ---------------- 列表 / 详情 ----------------
 
     public List<DocView> list(String kind, String projectId, String status) {
+        // 主查询沿用优先级取一个 repo 方法，其余维度内存合取过滤
+        // （原为三选一互斥 if/else，前端同时传 kind+status 时 status 被静默吞掉，FR-09 修正）
         List<DocumentEntity> list;
         if (kind != null && !kind.isBlank()) {
             list = docRepo.findByKindOrderByCreatedAtDesc(kind);
@@ -80,7 +82,11 @@ public class DocumentService {
         } else {
             list = docRepo.findAllByOrderByCreatedAtDesc();
         }
-        return list.stream().map(DocViews::doc).toList();
+        return list.stream()
+                .filter(e -> kind == null || kind.isBlank() || kind.equals(e.getKind()))
+                .filter(e -> projectId == null || projectId.isBlank() || projectId.equals(e.getProjectId()))
+                .filter(e -> status == null || status.isBlank() || status.equals(e.getStatus()))
+                .map(DocViews::doc).toList();
     }
 
     public DocDetail get(Long id, Integer version) {
