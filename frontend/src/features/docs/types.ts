@@ -45,6 +45,7 @@ export interface DocInput {
 
 /** 元数据更新（FR-08）：字段 undefined = 不修改；tags: [] = 清空标签 */
 export interface DocUpdateInput {
+  kind?: DocKind
   title?: string
   tags?: string[]
 }

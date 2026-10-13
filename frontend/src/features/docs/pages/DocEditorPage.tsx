@@ -1,19 +1,13 @@
-// CAP-03 文档编辑页：只读渲染 / Markdown 编辑+实时预览 / 保存新版本 / 版本历史 / diff / 回退 / 状态机。
-// CAP-32：编辑态支持粘贴/拖拽图片，上传附件库后在光标处插入 ![](附件URL)。
-import { useCallback, useEffect, useRef, useState } from 'react'
+// CAP-03 文档详情页：只读渲染 / 编辑抽屉（类型/标题/标签/正文，见 DocEditDrawer）/ 版本历史 / diff / 回退 / 状态机。
+import { useCallback, useEffect, useState } from 'react'
 import {
   Badge,
   Button,
   Card,
   Drawer,
   Empty,
-  Form,
-  Input,
   message,
   Modal,
-  Popover,
-  Segmented,
-  Select,
   Space,
   Spin,
   Table,
@@ -21,22 +15,20 @@ import {
   Typography,
 } from 'antd'
 import {
-  SaveOutlined,
-  TagsOutlined,
+  EditOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { canWrite } from '../../auth/authStore'
-import { deleteDoc, docDiff, getDoc, listDocVersions, revertDoc, saveDocVersion, transitionDoc, updateDoc } from '../api'
+import { deleteDoc, docDiff, getDoc, listDocVersions, revertDoc, transitionDoc } from '../api'
 import { KIND_LABEL, STATUS_LABEL } from '../types'
 import type { DiffResult, DocDetail, DocVersion } from '../types'
+import DocEditDrawer from '../components/DocEditDrawer'
 import { getProject } from '../../projects/api'
 import { getRequirement } from '../../requirements/api'
 import Markdown from '../../../shared/components/Markdown'
 import { fmtTime } from '../../../shared/utils/format'
-import { uploadAttachment } from '../../../shared/attachments/api'
-import { attachmentRawUrl } from '../../../shared/attachments/url'
-import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
 import { DRAWER_WIDE } from '../../../shared/utils/overlay'
 
@@ -56,37 +48,11 @@ export default function DocEditorPage() {
   const [projectName, setProjectName] = useState<string | null>(null)
   const [requirementTitle, setRequirementTitle] = useState<string | null>(null)
 
-  const [mode, setMode] = useState<'view' | 'edit'>('view')
-  const [editText, setEditText] = useState('')
-  const [dirty, setDirty] = useState(false)
-  const editorWrapRef = useRef<HTMLDivElement>(null)
-  const uploadSeqRef = useRef(0)
+  const [editOpen, setEditOpen] = useState(false)
 
   const [viewing, setViewing] = useState<DocDetail | null>(null) // 历史版本只读视图
   const [diff, setDiff] = useState<DiffResult | null>(null)
   const [diffFor, setDiffFor] = useState<number | null>(null)
-
-  const [saveOpen, setSaveOpen] = useState(false)
-  const [saveForm] = Form.useForm<{ changeNote?: string }>()
-
-  // FR-08 标签维护：置顶卡标题栏就地编辑（Popover 轻量弹层）
-  const [tagEditOpen, setTagEditOpen] = useState(false)
-  const [editTags, setEditTags] = useState<string[]>([])
-  const [tagSaving, setTagSaving] = useState(false)
-
-  const onSaveTags = async () => {
-    setTagSaving(true)
-    try {
-      await updateDoc(docId, { tags: editTags })
-      message.success('标签已更新')
-      setTagEditOpen(false)
-      load()
-    } catch (e) {
-      showError(e, '标签更新失败')
-    } finally {
-      setTagSaving(false)
-    }
-  }
 
   const load = useCallback(async (version?: number) => {
     if (!docId) return
@@ -96,7 +62,6 @@ export default function DocEditorPage() {
         setViewing(d)
       } else {
         setDoc(d)
-        setEditText(d.contentMd)
         setViewing(null)
         setProjectName(null)
         setRequirementTitle(null)
@@ -117,87 +82,6 @@ export default function DocEditorPage() {
     setLoading(true)
     load()
   }, [load])
-
-  const frozen = doc?.status === 'frozen'
-
-  // CAP-32：光标处插入文本（无焦点时追加到文末），保持 dirty 判定一致
-  const insertAtCursor = (snippet: string) => {
-    const ta = editorWrapRef.current?.querySelector('textarea')
-    setEditText((prev) => {
-      const p = ta?.selectionStart ?? prev.length
-      const next = prev.slice(0, p) + snippet + prev.slice(p)
-      setDirty(next !== doc?.contentMd)
-      requestAnimationFrame(() => {
-        if (ta) {
-          ta.focus()
-          const np = p + snippet.length
-          ta.setSelectionRange(np, np)
-        }
-      })
-      return next
-    })
-  }
-
-  // CAP-32：粘贴/拖拽图片 → 上传附件库 → 占位符替换为 ![](附件URL)（上传中先占位，防并发错位）
-  const insertImages = (files: Iterable<File>) => {
-    for (const file of files) {
-      if (!file.type.startsWith('image/')) {
-        message.warning(`仅支持插入图片，已忽略：${file.name}`)
-        continue
-      }
-      const seq = ++uploadSeqRef.current
-      const placeholder = `![${file.name}](uploading://${seq})`
-      insertAtCursor(`\n${placeholder}\n`)
-      uploadAttachment(file, file.name)
-        .then((v) => {
-          setEditText((prev) => {
-            const next = prev.replace(placeholder, `![${v.originalName}](${attachmentRawUrl(v.attachmentId)})`)
-            setDirty(next !== doc?.contentMd)
-            return next
-          })
-        })
-        .catch((e) => {
-          showError(e, '图片上传失败')
-          setEditText((prev) => prev.replace(placeholder, ''))
-        })
-    }
-  }
-
-  const onEditorPaste = (e: React.ClipboardEvent) => {
-    const files = Array.from(e.clipboardData?.files ?? [])
-    if (files.length > 0) {
-      e.preventDefault()
-      insertImages(files)
-    }
-  }
-
-  const onEditorDrop = (e: React.DragEvent) => {
-    const files = Array.from(e.dataTransfer?.files ?? [])
-    if (files.length > 0) {
-      e.preventDefault()
-      insertImages(files)
-    }
-  }
-
-  const onSave = async () => {
-    if (!doc) return
-    if (!dirty && !frozen) {
-      message.info('内容未变更')
-      return
-    }
-    const v = await saveForm.validateFields()
-    try {
-      const updated = await saveDocVersion(docId, { contentMd: editText, changeNote: v.changeNote })
-      message.success(`已保存为 v${updated.versionNo}`)
-      setSaveOpen(false)
-      saveForm.resetFields()
-      setDirty(false)
-      setMode('view')
-      await load()
-    } catch (e) {
-      showError(e, '保存失败')
-    }
-  }
 
   const onTransition = async (action: string, okText: string, tip: string) => {
     Modal.confirm({
@@ -300,32 +184,16 @@ export default function DocEditorPage() {
   const currentContent = viewing ? viewing.contentMd : doc?.contentMd ?? ''
   const displayTitle = viewing ? `${doc?.title ?? '文档'}（历史 v${viewing.versionNo}）` : doc?.title
 
-  // 内容操作（预览/编辑、保存、状态机流转、删除）均针对内容生效，集中放在内容卡片标题栏；顶部只留「返回列表」
+  // 内容操作（编辑、状态机流转、删除）均针对内容生效，集中放在内容卡片标题栏；顶部只留「返回列表」
   const contentActions = viewing ? (
     <Button type="primary" onClick={() => load()}>
       回到当前版本
     </Button>
   ) : (
     <Space>
-      <Segmented
-        value={mode}
-        onChange={(v) => {
-          setMode(v as 'view' | 'edit')
-          if (v === 'edit' && doc) setEditText(doc.contentMd)
-        }}
-        options={[
-          { label: '预览', value: 'view' },
-          { label: '编辑', value: 'edit' },
-        ]}
-      />
-      {mode === 'edit' && (
-        <Button
-          type="primary"
-          icon={<SaveOutlined />}
-          disabled={!dirty}
-          onClick={() => setSaveOpen(true)}
-        >
-          保存新版本
+      {canWrite() && (
+        <Button type="primary" icon={<EditOutlined />} onClick={() => setEditOpen(true)}>
+          编辑
         </Button>
       )}
       {doc?.status === 'draft' && (
@@ -384,39 +252,6 @@ export default function DocEditorPage() {
                   </Link>
                 )}
                 {doc.tags.map((t) => <Tag key={t}>{t}</Tag>)}
-                {canWrite() && (
-                  <Popover
-                    open={tagEditOpen}
-                    onOpenChange={setTagEditOpen}
-                    trigger="click"
-                    title="编辑标签"
-                    content={
-                      <Space direction="vertical" style={{ width: 260 }}>
-                        <Select
-                          mode="tags"
-                          open={false}
-                          placeholder="回车添加标签"
-                          style={{ width: '100%' }}
-                          value={editTags}
-                          onChange={setEditTags}
-                        />
-                        <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                          <Button size="small" onClick={() => setTagEditOpen(false)}>取消</Button>
-                          <Button size="small" type="primary" loading={tagSaving} onClick={onSaveTags}>确定</Button>
-                        </Space>
-                      </Space>
-                    }
-                  >
-                    <Button
-                      size="small"
-                      type="text"
-                      icon={<TagsOutlined />}
-                      onClick={() => { setEditTags(doc.tags); setTagEditOpen(true) }}
-                    >
-                      标签
-                    </Button>
-                  </Popover>
-                )}
               </Space>
             }
             extra={<Button onClick={() => navigate('/admin/docs')}>返回列表</Button>}
@@ -431,64 +266,21 @@ export default function DocEditorPage() {
             />
           </Card>
 
-          {/* 正文：编辑/预览（卡片撑满剩余高度，滚动只发生在卡片内部，整页不出滚动条） */}
-          {mode === 'edit' && !viewing ? (
-            <Card size="small" title="编辑 + 实时预览" style={pageCardStyle} styles={{ body: pageCardBodyFlexStyle }} extra={contentActions}>
-              <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 12 }}>
-                <div
-                  ref={editorWrapRef}
-                  style={{ flex: 1, minHeight: 0, display: 'flex' }}
-                  onPaste={onEditorPaste}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={onEditorDrop}
-                >
-                  <Input.TextArea
-                    value={editText}
-                    onChange={(e) => {
-                      setEditText(e.target.value)
-                      setDirty(e.target.value !== doc.contentMd)
-                    }}
-                    style={{ flex: 1, resize: 'none', fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 13 }}
-                    placeholder="Markdown…（可直接粘贴/拖拽图片插入）"
-                  />
-                </div>
-                <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '0 4px' }}>
-                  <Markdown content={editText} />
-                </div>
-              </div>
-            </Card>
-          ) : (
-            <Card size="small" title="内容" style={pageCardStyle} styles={{ body: pagePaneScrollStyle }} extra={contentActions}>
-              <Markdown content={currentContent} />
-            </Card>
-          )}
+          {/* 正文：只读预览（卡片撑满剩余高度，滚动只发生在卡片内部，整页不出滚动条）；编辑走抽屉 */}
+          <Card size="small" title="内容" style={pageCardStyle} styles={{ body: pagePaneScrollStyle }} extra={contentActions}>
+            <Markdown content={currentContent} />
+          </Card>
 
+          <DocEditDrawer
+            open={editOpen}
+            doc={doc}
+            onClose={() => setEditOpen(false)}
+            onSaved={() => load()}
+          />
         </>
       )}
 
-      {/* 保存新版本弹窗（frozen 必填变更说明） */}
-      <Modal
-        title={`保存新版本 v${(doc?.currentVersion ?? 0) + 1}`}
-        open={saveOpen}
-        onCancel={() => setSaveOpen(false)}
-        onOk={onSave}
-        okText="保存"
-        width={520}
-      >
-        <Form form={saveForm} layout="vertical">
-          <Form.Item
-            name="changeNote"
-            label="变更说明"
-            required={frozen}
-            rules={frozen ? [{ required: true, message: '文档已冻结，必须填写变更说明' }] : []}
-            extra={frozen ? '文档已冻结（FR-04），必须说明本次变更' : '可选'}
-          >
-            <Input.TextArea rows={3} placeholder="本次改了什么" />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* diff 弹窗 */}
+      {/* diff 抽屉 */}
       <Drawer
         title={diffFor ? `v${diffFor} → 当前版本的差异` : '版本差异'}
         open={!!diff}
