@@ -11,7 +11,9 @@ import {
   Input,
   message,
   Modal,
+  Popover,
   Segmented,
+  Select,
   Space,
   Spin,
   Table,
@@ -20,10 +22,12 @@ import {
 } from 'antd'
 import {
   SaveOutlined,
+  TagsOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { deleteDoc, docDiff, getDoc, listDocVersions, revertDoc, saveDocVersion, transitionDoc } from '../api'
+import { canWrite } from '../../auth/authStore'
+import { deleteDoc, docDiff, getDoc, listDocVersions, revertDoc, saveDocVersion, transitionDoc, updateDoc } from '../api'
 import { KIND_LABEL, STATUS_LABEL } from '../types'
 import type { DiffResult, DocDetail, DocVersion } from '../types'
 import { getProject } from '../../projects/api'
@@ -64,6 +68,25 @@ export default function DocEditorPage() {
 
   const [saveOpen, setSaveOpen] = useState(false)
   const [saveForm] = Form.useForm<{ changeNote?: string }>()
+
+  // FR-08 标签维护：置顶卡标题栏就地编辑（Popover 轻量弹层）
+  const [tagEditOpen, setTagEditOpen] = useState(false)
+  const [editTags, setEditTags] = useState<string[]>([])
+  const [tagSaving, setTagSaving] = useState(false)
+
+  const onSaveTags = async () => {
+    setTagSaving(true)
+    try {
+      await updateDoc(docId, { tags: editTags })
+      message.success('标签已更新')
+      setTagEditOpen(false)
+      load()
+    } catch (e) {
+      showError(e, '标签更新失败')
+    } finally {
+      setTagSaving(false)
+    }
+  }
 
   const load = useCallback(async (version?: number) => {
     if (!docId) return
@@ -361,6 +384,39 @@ export default function DocEditorPage() {
                   </Link>
                 )}
                 {doc.tags.map((t) => <Tag key={t}>{t}</Tag>)}
+                {canWrite() && (
+                  <Popover
+                    open={tagEditOpen}
+                    onOpenChange={setTagEditOpen}
+                    trigger="click"
+                    title="编辑标签"
+                    content={
+                      <Space direction="vertical" style={{ width: 260 }}>
+                        <Select
+                          mode="tags"
+                          open={false}
+                          placeholder="回车添加标签"
+                          style={{ width: '100%' }}
+                          value={editTags}
+                          onChange={setEditTags}
+                        />
+                        <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                          <Button size="small" onClick={() => setTagEditOpen(false)}>取消</Button>
+                          <Button size="small" type="primary" loading={tagSaving} onClick={onSaveTags}>确定</Button>
+                        </Space>
+                      </Space>
+                    }
+                  >
+                    <Button
+                      size="small"
+                      type="text"
+                      icon={<TagsOutlined />}
+                      onClick={() => { setEditTags(doc.tags); setTagEditOpen(true) }}
+                    >
+                      标签
+                    </Button>
+                  </Popover>
+                )}
               </Space>
             }
             extra={<Button onClick={() => navigate('/admin/docs')}>返回列表</Button>}

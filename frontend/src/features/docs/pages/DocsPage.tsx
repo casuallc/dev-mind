@@ -1,5 +1,5 @@
 // CAP-03 文档列表：筛选/检索 + 新建文档（模板一键预填）。
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { canWrite } from '../../auth/authStore'
 import {
   Button,
@@ -44,26 +44,33 @@ export default function DocsPage() {
   const [loading, setLoading] = useState(false)
   const [kindFilter, setKindFilter] = useState<string>('')
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [tagFilter, setTagFilter] = useState<string>('')
   const [searchQ, setSearchQ] = useState('')
   const [projects, setProjects] = useState<Project[]>([])
   const [templates, setTemplates] = useState<DocTemplate[]>([])
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm] = Form.useForm<DocInput & { template?: string }>()
 
-  const load = useCallback(async (kind = kindFilter, status = statusFilter, q = searchQ) => {
+  // 标签筛选选项从当前列表派生（CAP-03 FR-09；聚合端点暂不做，选项随过滤缩窄可接受）
+  const tagOptions = useMemo(
+    () => [...new Set(docs.flatMap((d) => d.tags ?? []))].sort().map((t) => ({ value: t, label: t })),
+    [docs],
+  )
+
+  const load = useCallback(async (kind = kindFilter, status = statusFilter, q = searchQ, tag = tagFilter) => {
     setLoading(true)
     try {
       if (q.trim()) {
         setDocs(await searchDocs(q.trim()))
       } else {
-        setDocs(await listDocs({ kind: kind || undefined, status: status || undefined }))
+        setDocs(await listDocs({ kind: kind || undefined, status: status || undefined, tag: tag || undefined }))
       }
     } catch (e) {
       showError(e, '加载文档失败')
     } finally {
       setLoading(false)
     }
-  }, [kindFilter, statusFilter, searchQ])
+  }, [kindFilter, statusFilter, searchQ, tagFilter])
 
   useEffect(() => {
     load()
@@ -157,8 +164,17 @@ export default function DocsPage() {
             placeholder="状态"
             style={{ width: 110 }}
             value={statusFilter || undefined}
-            onChange={(v) => { setStatusFilter(v ?? ''); load(kindFilter, v ?? '') }}
+            onChange={(v) => { setStatusFilter(v ?? ''); load(kindFilter, v ?? '', searchQ, tagFilter) }}
             options={Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label }))}
+          />
+          <Select
+            allowClear
+            showSearch
+            placeholder="标签"
+            style={{ width: 140 }}
+            value={tagFilter || undefined}
+            onChange={(v) => { setTagFilter(v ?? ''); load(kindFilter, statusFilter, searchQ, v ?? '') }}
+            options={tagOptions}
           />
           <Button icon={<ReloadOutlined />} onClick={() => load()}>
             刷新

@@ -43,6 +43,12 @@ export interface DocInput {
   contentMd?: string
 }
 
+/** 元数据更新（FR-08）：字段 undefined = 不修改；tags: [] = 清空标签 */
+export interface DocUpdateInput {
+  title?: string
+  tags?: string[]
+}
+
 export interface SaveVersionInput {
   contentMd: string
   changeNote?: string

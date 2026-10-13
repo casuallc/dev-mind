@@ -6,15 +6,17 @@ import type {
   DocInput,
   DocMeta,
   DocTemplate,
+  DocUpdateInput,
   DocVersion,
   SaveVersionInput,
 } from './types'
 
-export const listDocs = (params: { kind?: string; projectId?: string; status?: string } = {}) => {
+export const listDocs = (params: { kind?: string; projectId?: string; status?: string; tag?: string } = {}) => {
   const q = new URLSearchParams()
   if (params.kind) q.set('kind', params.kind)
   if (params.projectId) q.set('projectId', params.projectId)
   if (params.status) q.set('status', params.status)
+  if (params.tag) q.set('tag', params.tag)
   const s = q.toString()
   return api.get<DocMeta[]>(`/documents${s ? '?' + s : ''}`)
 }
@@ -24,6 +26,8 @@ export const searchDocs = (q: string) =>
 
 export const listTemplates = () => api.get<DocTemplate[]>('/documents/templates')
 export const createDoc = (input: DocInput) => api.post<DocDetail>('/documents', input)
+export const updateDoc = (id: number, input: DocUpdateInput) =>
+  api.put<DocDetail>(`/documents/${id}`, input)
 export const getDoc = (id: number, version?: number) =>
   api.get<DocDetail>(`/documents/${id}${version ? `?version=${version}` : ''}`)
 export const listDocVersions = (id: number) => api.get<DocVersion[]>(`/documents/${id}/versions`)
