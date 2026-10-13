@@ -15,6 +15,8 @@
 - **FR-05 版本存储**：正文存 `document_versions.content_md`，DB 即唯一副本；保存/回退只写库，不落外部文件、不依赖 git，无任何本机路径配置。
 - **FR-06 全文检索**：按标题/内容/标签检索文档。
 - **FR-07 文档模板**：按 kind 预置模板（如需求文档模板、方案模板），一键新建。
+- **FR-08 标签维护**：标签存 `documents.tags`（逗号分隔）；创建与元数据更新（`PUT /documents/{id}`）均可改标签；改标签属元数据变更，不生成新版本、不受 frozen 限制，仅刷 `updated_at`。
+- **FR-09 列表合取过滤**：`GET /documents` 支持 `kind` / `projectId` / `status` / `tag` 合取过滤（原实现为三选一互斥，2026-10-13 修正）；`tag` 为单值，切分后精确匹配、忽略大小写。
 
 ## 3. 插件化接口
 
@@ -30,10 +32,12 @@
 
 ```
 documents(id, kind, requirement_id, work_item_id, project_id, title, current_version,
-          status, template, created_by, created_at)
+          status, tags, created_by, created_at, updated_at)
 document_versions(id, document_id, version_no, content_md,
                   change_note, created_by, created_at)
 ```
+
+`tags` 为逗号分隔字符串列（VARCHAR(500)，写入前校验总长）。
 
 建模约定：文档挂 `requirement_id`（需求主线，CAP-13）；`work_item_id` 可再细到工作单元，`project_id` 用于不挂需求的独立文档。每版本存**全量正文**（非增量），diff 在读取时计算。
 
@@ -41,6 +45,8 @@ document_versions(id, document_id, version_no, content_md,
 
 ```
 CRUD   /documents
+PUT    /documents/{id}                 元数据更新（title/tags，null=不修改，tags:[]=清空）
+GET    /documents?kind=&projectId=&status=&tag=   合取过滤（tag 单值精确匹配，忽略大小写）
 GET    /documents/{id}?version=v2      按版本读
 GET    /documents/{id}/versions        版本列表
 GET    /documents/{id}/versions/{v}/diff   与指定版本 diff
@@ -58,9 +64,15 @@ GET    /documents/search?q=…
 
 ## 8. MVP 范围（暂不做）
 
-多人会签审批流（属流程层）、富文本（先 Markdown）、图表编辑。
+多人会签审批流（属流程层）、富文本（先 Markdown）、图表编辑、标签聚合端点（`GET /documents/tags`）、多标签交集过滤。
 
 ## 9. 变更记录
+
+- **2026-10-13 标签能力补全**：新增 FR-08 标签维护（`PUT /documents/{id}` 改 title/tags，
+  不产生新版本、不受 frozen 限制）与 FR-09 列表合取过滤；列表查询由 kind/projectId/status
+  三选一互斥修正为合取（原实现会静默吞掉同时传入的其余维度），并新增 `tag` 过滤维度
+  （单值精确匹配、忽略大小写）。数据模型节补 `tags`、`updated_at` 列（tags 列实体早已存在，
+  本节此前漏记；`template` 列实际不存在——模板是 DocTemplates 预置而非落库，一并修正）。
 
 - **2026-09-21 去 git 化**：FR-05 由「git 同步 docs-repo」改为「正文存 DB 单副本」，
   删除 `DocStore` SPI、git 实现、`DocPaths` 路径映射与 `/documents/push`、`/documents/repo`
