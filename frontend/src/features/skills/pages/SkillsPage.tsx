@@ -1,30 +1,26 @@
-// Skill 管理（基础模块）：skill 包列表 + 筛选 + 启停/删除；新建/编辑走 SkillFormDrawer，附件走 SkillFilesDrawer。
-// 布局遵循 docs/core/前端内容区布局约定.md：Card 标题，extra 放操作按钮，表格默认密度，行内「管理」开抽屉承载成套操作。
+// Skill 管理（基础模块）：skill 包列表 + 筛选；行内「管理」跳转详情页（页面模式，交互对齐文档管理），新建走 SkillFormDrawer。
+// 布局遵循 docs/core/前端内容区布局约定.md：Card 标题，extra 放操作按钮，表格默认密度。
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Card, Drawer, Input, message, Modal, Select, Space, Tag, Typography } from 'antd'
+import { Button, Card, Input, Select, Space, Tag, Typography } from 'antd'
 import {
-  DeleteOutlined,
-  EditOutlined,
-  FolderOpenOutlined,
   ImportOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
+import { useNavigate } from 'react-router-dom'
 import { canWrite } from '../../auth/authStore'
 import { listProjects } from '../../projects/api'
 import type { Project } from '../../projects/types'
-import { deleteSkill, getSkill, listSkills, updateSkillStatus } from '../api'
-import type { Skill, SkillDetail } from '../types'
+import { listSkills } from '../api'
+import type { Skill } from '../types'
 import SkillFormDrawer from '../components/SkillFormDrawer'
-import SkillFilesDrawer from '../components/SkillFilesDrawer'
 import SkillImportModal from '../components/SkillImportModal'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_FORM } from '../../../shared/utils/overlay'
 
 const scopeTag = (s: string) =>
   s === 'GLOBAL' ? <Tag color="blue">全局</Tag> : <Tag color="purple">项目</Tag>
@@ -32,6 +28,7 @@ const statusTag = (s: string) =>
   s === 'ACTIVE' ? <Tag color="green">启用</Tag> : <Tag>停用</Tag>
 
 export default function SkillsPage() {
+  const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
   const [items, setItems] = useState<Skill[]>([])
   const [total, setTotal] = useState(0)
@@ -44,10 +41,7 @@ export default function SkillsPage() {
   const [size, setSize] = useState(20)
 
   const [formOpen, setFormOpen] = useState(false)
-  const [editing, setEditing] = useState<SkillDetail | null>(null)
-  const [filesSkill, setFilesSkill] = useState<Skill | null>(null)
   const [importOpen, setImportOpen] = useState(false)
-  const [manageSkill, setManageSkill] = useState<Skill | null>(null)
 
   const projectName = useMemo(() => {
     const m = new Map(projects.map((p) => [p.id, p.name]))
@@ -83,47 +77,7 @@ export default function SkillsPage() {
   }, [])
 
   const openCreate = () => {
-    setEditing(null)
     setFormOpen(true)
-  }
-
-  const openEdit = async (s: Skill) => {
-    try {
-      setEditing(await getSkill(s.id))
-      setFormOpen(true)
-    } catch (e) {
-      showError(e, '加载详情失败')
-    }
-  }
-
-  const onToggleStatus = async (s: Skill) => {
-    try {
-      await updateSkillStatus(s.id, s.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE')
-      message.success(s.status === 'ACTIVE' ? '已停用' : '已启用')
-      load()
-    } catch (e) {
-      showError(e, '操作失败')
-    }
-  }
-
-  const onDelete = (s: Skill) => {
-    Modal.confirm({
-      centered: true,
-      title: `删除 skill「${s.name}」？`,
-      content: '将同时删除其全部附件文件，删除后无法恢复。',
-      okText: '删除',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          await deleteSkill(s.id)
-          message.success('已删除')
-          load()
-        } catch (e) {
-          showError(e, '删除失败')
-        }
-      },
-    })
   }
 
   const columns: ColumnsType<Skill> = [
@@ -133,7 +87,9 @@ export default function SkillsPage() {
       ellipsis: true,
       render: (name: string, r) => (
         <Space direction="vertical" size={0}>
-          <Typography.Text code>{name}</Typography.Text>
+          <Typography.Text code>
+            <a onClick={() => navigate(`/admin/skills/${r.id}`)}>{name}</a>
+          </Typography.Text>
           <Typography.Text type="secondary" style={{ fontSize: 12 }} ellipsis>
             {r.description}
           </Typography.Text>
@@ -156,7 +112,7 @@ export default function SkillsPage() {
       title: '操作',
       width: 90,
       render: (_, r) => (
-        <Button size="small" onClick={() => setManageSkill(r)}>
+        <Button size="small" onClick={() => navigate(`/admin/skills/${r.id}`)}>
           管理
         </Button>
       ),
@@ -278,87 +234,12 @@ export default function SkillsPage() {
         }}
       />
 
-      <Drawer
-        title={manageSkill ? `Skill · ${manageSkill.name}` : ''}
-        open={manageSkill != null}
-        onClose={() => setManageSkill(null)}
-        // 与抽屉内「编辑」打开的 SkillFormDrawer 同宽，切换时不跳宽度
-        width={DRAWER_FORM}
-      >
-        {manageSkill && (
-          <Space direction="vertical" style={{ width: '100%' }} size={16}>
-            <Space size={8} wrap>
-              {scopeTag(manageSkill.scope)}
-              {statusTag(manageSkill.status)}
-              <Typography.Text type="secondary">
-                项目：{projectName(manageSkill.projectId)} · 更新于 {fmtTime(manageSkill.updatedAt)}
-              </Typography.Text>
-            </Space>
-            <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-              {manageSkill.description || '（无描述）'}
-            </Typography.Paragraph>
-            <Space wrap>
-              {canWrite() && (
-                <Button
-                  icon={<EditOutlined />}
-                  onClick={() => {
-                    const s = manageSkill
-                    setManageSkill(null)
-                    openEdit(s)
-                  }}
-                >
-                  编辑
-                </Button>
-              )}
-              <Button
-                icon={<FolderOpenOutlined />}
-                onClick={() => {
-                  setFilesSkill(manageSkill)
-                  setManageSkill(null)
-                }}
-              >
-                附件
-              </Button>
-              {canWrite() && (
-                <>
-                  <Button
-                    onClick={() => {
-                      const s = manageSkill
-                      setManageSkill(null)
-                      onToggleStatus(s)
-                    }}
-                  >
-                    {manageSkill.status === 'ACTIVE' ? '停用' : '启用'}
-                  </Button>
-                  <Button
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={() => {
-                      const s = manageSkill
-                      setManageSkill(null)
-                      onDelete(s)
-                    }}
-                  >
-                    删除
-                  </Button>
-                </>
-              )}
-            </Space>
-          </Space>
-        )}
-      </Drawer>
-
       <SkillFormDrawer
         open={formOpen}
-        editing={editing}
+        editing={null}
         projects={projects}
         onClose={() => setFormOpen(false)}
         onSaved={load}
-      />
-      <SkillFilesDrawer
-        open={filesSkill != null}
-        skill={filesSkill}
-        onClose={() => setFilesSkill(null)}
       />
       <SkillImportModal
         open={importOpen}

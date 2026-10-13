@@ -29,6 +29,7 @@ import NotificationCenter from '../features/notifications/pages/NotificationCent
 import KnowledgeBaseList from '../features/knowledge/pages/KnowledgeBaseList'
 import KnowledgeBaseDetail from '../features/knowledge/pages/KnowledgeBaseDetail'
 import SkillsPage from '../features/skills/pages/SkillsPage'
+import SkillDetailPage from '../features/skills/pages/SkillDetailPage'
 import DocsPage from '../features/docs/pages/DocsPage'
 import DocEditorPage from '../features/docs/pages/DocEditorPage'
 import ExecutionPage from '../features/execution/pages/ExecutionPage'
@@ -214,8 +215,9 @@ export default function App() {
           {/* CAP-04 知识库（CAP-44 库容器化：列表 + 详情） */}
           <Route path="/admin/knowledge" element={<KnowledgeBaseList />} />
           <Route path="/admin/knowledge/bases/:id" element={<KnowledgeBaseDetail />} />
-          {/* Skill 管理（基础模块，供其他业务引用） */}
+          {/* Skill 管理（基础模块，供其他业务引用；详情页交互对齐文档管理） */}
           <Route path="/admin/skills" element={<SkillsPage />} />
+          <Route path="/admin/skills/:id" element={<SkillDetailPage />} />
           {/* CAP-03 文档 */}
           <Route path="/admin/docs" element={<DocsPage />} />
           <Route path="/admin/docs/:id" element={<DocEditorPage />} />
