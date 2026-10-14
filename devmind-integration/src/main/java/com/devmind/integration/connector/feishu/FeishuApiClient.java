@@ -169,15 +169,20 @@ public class FeishuApiClient {
                     : HttpRequest.BodyPublishers.ofString(body));
             HttpResponse<String> resp = http.send(req.build(), HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() / 100 != 2) {
+                // 带上有效 URL 与返回体截断：HTTP 层失败（多非飞书业务 code，而是 baseUrl 配错
+                // 指到 webhook/网关对未知路径的 400）只有返回体能区分根因，不带就是盲猜
                 throw new DevMindException(ErrorCode.INTERNAL,
-                        "飞书接口 HTTP " + resp.statusCode() + "（" + path + "）");
+                        "飞书接口 HTTP " + resp.statusCode() + "（" + baseUrl + path + "）"
+                                + truncateBody(resp.body()));
             }
             return mapper.readTree(resp.body());
         } catch (DevMindException e) {
             throw e;
         } catch (Exception e) {
+            // 出口代理/隧道失败走这里（ProxySelector 内的 fail-visible 异常被 JDK 包进连接异常链），
+            // 带上有效 URL 便于分辨「打到哪去了」
             throw new DevMindException(ErrorCode.INTERNAL,
-                    "飞书接口调用失败（" + path + "）: " + e.getMessage());
+                    "飞书接口调用失败（" + baseUrl + path + "）: " + e.getMessage());
         }
     }
 
@@ -187,6 +192,15 @@ public class FeishuApiClient {
             throw new DevMindException(ErrorCode.INTERNAL,
                     action + "失败：飞书 code=" + code + " msg=" + resp.path("msg").asText(""));
         }
+    }
+
+    /** 错误消息附返回体截断（空体不附；上限防 512 列被无意义长体挤掉 URL） */
+    private static String truncateBody(String body) {
+        if (body == null || body.isBlank()) {
+            return "";
+        }
+        String trimmed = body.strip();
+        return ": " + (trimmed.length() > 200 ? trimmed.substring(0, 200) + "…" : trimmed);
     }
 
     private static String encode(String s) {
