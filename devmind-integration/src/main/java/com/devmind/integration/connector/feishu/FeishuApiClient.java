@@ -117,28 +117,34 @@ public class FeishuApiClient {
 
     /** 回复指定消息（im/v1 reply）：机器人回答回推主路径。 */
     public void replyText(String messageId, String text) {
-        var body = mapper.createObjectNode();
-        body.put("msg_type", "text");
-        var content = mapper.createObjectNode();
-        content.put("text", text);
-        body.set("content", content);
         JsonNode resp = request("POST", "/open-apis/im/v1/messages/" + encode(messageId) + "/reply",
-                mapper.writeValueAsString(body), tenantToken());
+                textBody(null, text), tenantToken());
         ensureOk(resp, "回复消息");
     }
 
     /** 主动发文本消息（reply 锚点缺失时的兜底，如重连后补推）。 */
     public void sendText(String receiveId, String receiveIdType, String text) {
+        JsonNode resp = request("POST",
+                "/open-apis/im/v1/messages?receive_id_type=" + encode(receiveIdType),
+                textBody(receiveId, text), tenantToken());
+        ensureOk(resp, "发送消息");
+    }
+
+    /**
+     * 消息体拼装：飞书 im/v1 的 content 必须是**内嵌 JSON 字符串**
+     * （{"msg_type":"text","content":"{\"text\":\"…\"}"}），发对象形态真机必拒
+     * （E2E mock 曾照单全收掩盖了这一点，勿退回对象形态）。
+     */
+    private String textBody(String receiveId, String text) {
         var body = mapper.createObjectNode();
-        body.put("receive_id", receiveId);
+        if (receiveId != null) {
+            body.put("receive_id", receiveId);
+        }
         body.put("msg_type", "text");
         var content = mapper.createObjectNode();
         content.put("text", text);
-        body.set("content", content);
-        JsonNode resp = request("POST",
-                "/open-apis/im/v1/messages?receive_id_type=" + encode(receiveIdType),
-                mapper.writeValueAsString(body), tenantToken());
-        ensureOk(resp, "发送消息");
+        body.put("content", mapper.writeValueAsString(content));
+        return mapper.writeValueAsString(body);
     }
 
     // ---------------- 底层 ----------------

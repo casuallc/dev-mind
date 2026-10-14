@@ -297,6 +297,8 @@ try:
         body = json.loads(hits[0]["body"] or "{}")
         check("reply 正文含帮助文本", "可用指令" in json.dumps(body, ensure_ascii=False),
               f"{body}")
+        check("reply content 为内嵌 JSON 字符串（飞书真机契约）",
+              isinstance(body.get("content"), str), f"{body}")
         check("reply 带 tenant_token 鉴权头", hits[0]["auth"] == "Bearer t-e2e-token",
               f"{hits[0]['auth']}")
     check("mock 先收到 tenant_access_token 申请",
@@ -311,15 +313,13 @@ try:
     E2E_USER = os.environ.get("E2E_USER", "admin")
 
     def feishu_text(hit):
-        """reply 请求体 {msg_type, content}；content 实测为对象（非内嵌 JSON 字符串），两种形态都兼容"""
+        """reply 请求体 {msg_type, content}；飞书真机要求 content 为**内嵌 JSON 字符串**
+        （对象形态真机必拒——本函数对对象形态返回标记串让断言失败，勿兼容放宽）"""
         body = json.loads(hit["body"] or "{}")
         content = body.get("content")
-        if isinstance(content, dict):
-            return str(content.get("text", ""))
-        try:
-            return json.loads(content or "{}").get("text", "")
-        except Exception:
-            return ""
+        if not isinstance(content, str):
+            return f"<content 非字符串形态: {type(content).__name__}>"
+        return json.loads(content).get("text", "")
 
     def wait_feishu_text(message_id, timeout=30):
         hits = wait_feishu(lambda r: r["path"] == f"/open-apis/im/v1/messages/{message_id}/reply",
