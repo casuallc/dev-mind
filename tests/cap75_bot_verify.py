@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""CAP-75 M2 双向机器人 E2E：fake 适配器驱动全路由 + 飞书出站回推到本地 mock。
+"""CAP-75 M2+M3 双向机器人 E2E：fake 适配器驱动全路由 + 飞书出站回推到本地 mock +
+个人身份流（/bindme 取码 → 门禁 → 绑定放行）+ 运维端点断言。
 
 运行前提（仿 cap49）：
 1. 依赖已构建：`mvn -q install -DskipTests`。
@@ -23,6 +24,12 @@
     → 断言 mock 收到 tenant_access_token 与 im/v1 messages/{id}/reply 回推（正文含帮助文本、
     Authorization 头正确）。长连接收事件方向不在 E2E 范围（要真飞书租户），归一化由
     FeishuBotAdapterNormalizeTest 单测覆盖。
+  G M3 个人身份流（feishu channel——门禁只作用于支持身份映射的渠道，fake 不受门禁）：
+    /bindme 回复身份码+指引 → 未绑定发 /build 门禁拒绝、问答放行 →
+    admin 经 /api/me/platform-accounts 绑 open_id → /whoami 命中个人绑定 → /build 过门禁
+  H M3 运维端点：/api/bot/admin/interactions 含 OK/DEDUPED/REJECTED 行且过滤生效；
+    /bindings 可见；/api/admin/user-platform-accounts?type=FEISHU 含刚绑定的身份码；
+    非 ADMIN 访问两类管理端点均 403
 """
 import json
 import os
@@ -297,7 +304,115 @@ try:
                 if r["path"] == "/open-apis/auth/v3/tenant_access_token/internal"]),
           f"{[r['path'] for r in feishu_requests]}")
 
-    print(f"\n== CAP-75 M2 bot E2E: {passed} passed, {failed} failed ==")
+    # ---------- G. M3 个人身份流：/bindme 取码 → 门禁拒绝 → 绑定放行 ----------
+    print("\n[G] M3 个人身份流（feishu channel；fake channel 不支持身份映射，门禁不拦）")
+    ALICE = f"ou_e2e_{RUN}"
+    INT_ID = (integ or {}).get("id")
+    E2E_USER = os.environ.get("E2E_USER", "admin")
+
+    def feishu_text(hit):
+        """reply 请求体 {msg_type, content}；content 实测为对象（非内嵌 JSON 字符串），两种形态都兼容"""
+        body = json.loads(hit["body"] or "{}")
+        content = body.get("content")
+        if isinstance(content, dict):
+            return str(content.get("text", ""))
+        try:
+            return json.loads(content or "{}").get("text", "")
+        except Exception:
+            return ""
+
+    def wait_feishu_text(message_id, timeout=30):
+        hits = wait_feishu(lambda r: r["path"] == f"/open-apis/im/v1/messages/{message_id}/reply",
+                           timeout=timeout)
+        return feishu_text(hits[0]) if hits else ""
+
+    send("oc_e2e_id", "/bindme", "g-bm-1", channel="feishu",
+         message_id=f"om_g_bm_{RUN}", sender=ALICE)
+    t = wait_feishu_text(f"om_g_bm_{RUN}")
+    check("/bindme 回复身份码与绑定指引", ALICE in t and "第三方账号" in t, t)
+
+    send("oc_e2e_id", "/build", "g-gate-1", channel="feishu",
+         message_id=f"om_g_gate_{RUN}", sender=ALICE)
+    t = wait_feishu_text(f"om_g_gate_{RUN}")
+    check("未绑定发 /build → 门禁拒绝文案", "需要先绑定个人身份" in t, t)
+
+    send("oc_e2e_id", "什么是蓝绿部署", "g-qa-1", channel="feishu",
+         message_id=f"om_g_qa_{RUN}", sender=ALICE)
+    t = wait_feishu_text(f"om_g_qa_{RUN}", timeout=90)
+    check("未绑定问答放行（门禁不拦问答）", full_answer in t, t[:200])
+
+    st, pa = call("PUT", f"/me/platform-accounts/{INT_ID}", {"username": ALICE})
+    check("平台侧绑定飞书身份码（设置→第三方账号，authType 强制 IDENTITY）",
+          st == 200 and (pa or {}).get("authType") == "IDENTITY", f"{st} {pa}")
+
+    send("oc_e2e_id", "/whoami", "g-wa-1", channel="feishu",
+         message_id=f"om_g_wa_{RUN}", sender=ALICE)
+    t = wait_feishu_text(f"om_g_wa_{RUN}")
+    check("/whoami 命中个人绑定", "个人绑定" in t and ALICE in t, t)
+
+    send("oc_e2e_id", "/build", "g-gate-2", channel="feishu",
+         message_id=f"om_g_gate2_{RUN}", sender=ALICE)
+    t = wait_feishu_text(f"om_g_gate2_{RUN}")
+    check("绑定后 /build 过门禁（落到未绑项目提示而非门禁文案）",
+          "需要先绑定个人身份" not in t and "请先" in t, t)
+
+    # ---------- H. M3 运维端点：交互日志 / 群绑定 / 用户映射 + 权限 ----------
+    print("\n[H] M3 运维端点（/api/bot/admin/** 与 /api/admin/user-platform-accounts，仅 ADMIN）")
+    # DEDUPED 行走 botExecutor 异步落库，轮询等其出现
+    items = []
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        st, page = call("GET", "/bot/admin/interactions?size=100")
+        if st == 200:
+            items = (page or {}).get("items") or []
+            if {"OK", "DEDUPED", "REJECTED"} <= {r.get("status") for r in items}:
+                break
+        time.sleep(0.5)
+    statuses = {r.get("status") for r in items}
+    check("交互日志分页可查且含 OK 行", "OK" in statuses, f"{statuses}")
+    check("交互日志含 DEDUPED 行（B 节重发）", "DEDUPED" in statuses, f"{statuses}")
+    check("交互日志含 REJECTED 行（G 节门禁）", "REJECTED" in statuses, f"{statuses}")
+    check("REJECTED 行记了指令/发送者/渠道",
+          any(r.get("command") == "build" and r.get("senderId") == ALICE
+              and r.get("channel") == "feishu" for r in items),
+          f"{[r for r in items if r.get('status') == 'REJECTED']}")
+
+    st, page = call("GET", "/bot/admin/interactions?channel=feishu&status=REJECTED")
+    filtered = (page or {}).get("items") or []
+    check("channel+status 过滤生效",
+          st == 200 and bool(filtered)
+          and all(r.get("channel") == "feishu" and r.get("status") == "REJECTED"
+                  for r in filtered),
+          f"{st} n={len(filtered)}")
+
+    st, bs = call("GET", "/bot/admin/bindings")
+    check("群绑定列表含本项目会话",
+          st == 200 and any(b.get("externalChatId") == cid("c-ops") for b in (bs or [])),
+          f"{st} {[b.get('externalChatId') for b in (bs or [])]}")
+
+    st, maps = call("GET", "/admin/user-platform-accounts?type=FEISHU")
+    check("用户映射含刚绑定的身份码",
+          st == 200 and any(m.get("externalUsername") == ALICE
+                            and m.get("username") == E2E_USER for m in (maps or [])),
+          f"{st} {maps}")
+
+    DEV = f"cap75dev{RUN}"
+    st, _ = call("POST", "/auth/users",
+                 {"username": DEV, "password": "dev123456", "role": "DEVELOPER",
+                  "displayName": "E2E开发者"})
+    check("建 DEVELOPER 用户", st == 200, f"{st}")
+    st, dlogin = call("POST", "/auth/login", {"username": DEV, "password": "dev123456"})
+    dev_token = (dlogin or {}).get("token") or (dlogin or {}).get("accessToken")
+    check("DEVELOPER 登录", st == 200 and bool(dev_token), f"{st}")
+    admin_token = TOKEN
+    TOKEN = dev_token
+    st403a, _ = call("GET", "/bot/admin/interactions")
+    st403b, _ = call("GET", "/admin/user-platform-accounts?type=FEISHU")
+    TOKEN = admin_token
+    check("非 ADMIN 访问交互日志 403", st403a == 403, f"{st403a}")
+    check("非 ADMIN 访问用户映射 403", st403b == 403, f"{st403b}")
+
+    print(f"\n== CAP-75 M2+M3 bot E2E: {passed} passed, {failed} failed ==")
 finally:
     if mock_proc:
         mock_proc.terminate()
