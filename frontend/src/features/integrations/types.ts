@@ -3,7 +3,7 @@
 /** 集成平台实例（凭据不明文回显，仅 hasToken） */
 export interface Integration {
   id: number
-  type: 'GITLAB' | 'GITHUB' | 'JIRA'
+  type: 'GITLAB' | 'GITHUB' | 'JIRA' | 'FEISHU'
   name: string
   baseUrl: string
   authType: string

@@ -11,6 +11,7 @@ import {
   Input,
   Select,
   Space,
+  Switch,
   Tag,
   Tooltip,
   Typography,
@@ -54,6 +55,57 @@ const TYPE_COLOR: Record<string, string> = {
 /** 飞书自建应用默认开放平台地址（CAP-45） */
 const FEISHU_DEFAULT_BASE_URL = 'https://open.feishu.cn'
 
+/** 表单值 = 集成字段 + 飞书机器人槽（botEnabled/botDefaultActor 仅表单态，保存时折进 configJson） */
+type IntegrationFormValues = IntegrationInput & {
+  botEnabled?: boolean
+  botDefaultActor?: string
+}
+
+/** 从 configJson 解析飞书 bot 槽（口径同 FeishuBotGateway.botEnabled：槽存在即启用，enabled:false 显式关闭） */
+function parseFeishuBot(configJson?: string | null): { enabled: boolean; defaultActor?: string } {
+  if (!configJson) return { enabled: false }
+  try {
+    const bot = JSON.parse(configJson)?.bot
+    if (!bot || typeof bot !== 'object') return { enabled: false }
+    return {
+      enabled: bot.enabled !== false,
+      defaultActor: typeof bot.defaultActor === 'string' ? bot.defaultActor : undefined,
+    }
+  } catch {
+    return { enabled: false }
+  }
+}
+
+/** 组装飞书 configJson：保留既有扩展槽，覆写 bot 槽；未启用且无既有 bot 槽时不动 configJson */
+function buildFeishuConfigJson(
+  existing: string | null | undefined,
+  botEnabled?: boolean,
+  botDefaultActor?: string,
+): string | undefined {
+  let cfg: Record<string, unknown> = {}
+  if (existing) {
+    try {
+      const parsed = JSON.parse(existing)
+      if (parsed && typeof parsed === 'object') cfg = parsed
+    } catch {
+      /* 既有 configJson 非法不阻断保存，覆写 bot 槽即可 */
+    }
+  }
+  const hadBot = cfg.bot !== null && typeof cfg.bot === 'object'
+  if (botEnabled) {
+    cfg.bot = {
+      ...(hadBot ? (cfg.bot as object) : {}),
+      enabled: true,
+      ...(botDefaultActor?.trim() ? { defaultActor: botDefaultActor.trim() } : {}),
+    }
+  } else if (hadBot) {
+    cfg.bot = { ...(cfg.bot as object), enabled: false }
+  } else {
+    return undefined
+  }
+  return JSON.stringify(cfg)
+}
+
 /** 列表连通性实时探测结果（逐行异步更新） */
 type ConnState =
   | { phase: 'probing' }
@@ -68,7 +120,7 @@ export default function IntegrationsPage() {
   const [testingForm, setTestingForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [conn, setConn] = useState<Record<number, ConnState>>({})
-  const [form] = Form.useForm<IntegrationInput>()
+  const [form] = Form.useForm<IntegrationFormValues>()
   const formType = Form.useWatch('type', form)
   const formAuthType = Form.useWatch('authType', form)
   const formToken = Form.useWatch('token', form)
@@ -116,6 +168,7 @@ export default function IntegrationsPage() {
 
   useEffect(() => {
     if (!editOpen) return
+    const bot = editing?.type === 'FEISHU' ? parseFeishuBot(editing.configJson) : undefined
     form.setFieldsValue(
       editing
         ? {
@@ -125,19 +178,26 @@ export default function IntegrationsPage() {
             authType: editing.authType ?? 'PAT',
             username: '',
             token: '',
+            botEnabled: bot?.enabled ?? false,
+            botDefaultActor: bot?.defaultActor,
           }
-        : { type: 'JIRA', name: '', baseUrl: '', authType: 'PAT', username: '', token: '' },
+        : { type: 'JIRA', name: '', baseUrl: '', authType: 'PAT', username: '', token: '', botEnabled: false },
     )
   }, [editOpen, editing, form])
 
-  const onSave = async (values: IntegrationInput) => {
+  const onSave = async (values: IntegrationFormValues) => {
     setSaving(true)
     try {
       // GitLab/GitHub 仅 PAT，不下发 authType；飞书固定 BASIC 双行（username=App ID, token=App Secret）
+      const { botEnabled, botDefaultActor, ...rest } = values
       const payload: IntegrationInput = {
-        ...values,
+        ...rest,
         authType: isJira ? values.authType : isFeishu ? 'BASIC' : undefined,
         username: isBasic && values.username ? values.username : undefined,
+        // 飞书机器人槽折进 configJson（bot 槽 = 机器人启用开关，多飞书应用并存时网关只挑带槽的）
+        configJson: isFeishu
+          ? buildFeishuConfigJson(editing?.configJson, botEnabled, botDefaultActor)
+          : undefined,
       }
       if (editing) {
         // token 留空 = 保持不变
@@ -473,6 +533,34 @@ export default function IntegrationsPage() {
               autoComplete="off"
             />
           </Form.Item>
+          {isFeishu && (
+            <>
+              <Form.Item
+                label="双向机器人（CAP-75）"
+                name="botEnabled"
+                valuePropName="checked"
+                extra="启用后此集成作为机器人网关凭据（启动时长连接收事件，需重启应用生效）。多个飞书应用并存时，只有勾选此项的集成会被机器人选中；纯文档导入的集成不要勾"
+              >
+                <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+              </Form.Item>
+              <Form.Item
+                noStyle
+                shouldUpdate={(prev, cur) => prev.botEnabled !== cur.botEnabled}
+              >
+                {({ getFieldValue }) =>
+                  getFieldValue('botEnabled') ? (
+                    <Form.Item
+                      label="机器人默认操作身份"
+                      name="botDefaultActor"
+                      extra="机器人在群内执行问答/构建查询时使用的平台账号，权限 = 该账号既有权限；留空回落平台默认（devmind.bot.default-actor）"
+                    >
+                      <Input placeholder="平台用户名，如 liuchangqing（可留空）" autoComplete="off" />
+                    </Form.Item>
+                  ) : null
+                }
+              </Form.Item>
+            </>
+          )}
         </Form>
       </Drawer>
     </Card>
