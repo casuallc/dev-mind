@@ -570,7 +570,8 @@ public class BotRouterService implements BotMessageHandler {
 
     /** 需求编号解析：REQ-3 / req-3 / 3 按项目内 seq 查，否则按原始 id 查。 */
     private RequirementView resolveRequirement(String projectId, String key) {
-        var m = java.util.regex.Pattern.compile("(?i)REQ-?(\\d+)").matcher(key);
+        // 前缀整体可选：REQ-? 只让短横可选，纯数字 3 会落进 id 直查分支（NOT_FOUND/NPE）
+        var m = java.util.regex.Pattern.compile("(?i)(?:REQ-?)?(\\d+)").matcher(key);
         if (m.matches()) {
             long seq = Long.parseLong(m.group(1));
             return requirementService.findByProjectSeq(projectId, seq)

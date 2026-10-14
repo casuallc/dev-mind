@@ -357,6 +357,23 @@ class BotRouterServiceTest {
     }
 
     @Test
+    void reqDetailAcceptsPlainSeqNumber() throws Exception {
+        bindP1();
+        RequirementEntity e = new RequirementEntity();
+        e.setId("r1");
+        e.setProjectId("p1");
+        e.setSeq(3L);
+        when(requirementService.findByProjectSeq("p1", 3L)).thenReturn(Optional.of(e));
+        when(requirementService.get("p1", "r1"))
+                .thenReturn(reqView("r1", 3, "登录加验证码", "IN_PROGRESS", null));
+
+        // 纯数字形态：前缀 REQ 整体可选（曾只有短横可选 → 落 id 直查分支）
+        router.onMessage(msg("/req 3", "e-rq-plain"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("REQ-3 登录加验证码"), reply);
+    }
+
+    @Test
     void devCreatesSessionLinkedToRequirement() throws Exception {
         bindP1();
         RequirementEntity e = new RequirementEntity();
