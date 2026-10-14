@@ -24,6 +24,8 @@ import com.devmind.common.dto.PageView;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.deploy.dto.DeploymentView;
 import com.devmind.deploy.service.DeploymentService;
+import com.devmind.docs.DocumentService;
+import com.devmind.project.DesignService;
 import com.devmind.project.ProjectService;
 import com.devmind.project.RequirementService;
 import com.devmind.project.WorkItemService;
@@ -73,7 +75,7 @@ public class BotRouterService implements BotMessageHandler {
     /** FR-12 敏感操作：支持身份映射的 channel 上要求已绑定个人身份（IMAGE=FR-17 入站截图） */
     private static final java.util.Set<String> SENSITIVE_COMMANDS =
             java.util.Set.of("bind", "session", "build", "deploy", "reqs", "req", "dev", "IMAGE",
-                    "status", "stop");
+                    "status", "stop", "wi", "design");
 
     /** FR-16 出站图片：需求描述中的本地附件引用（CAP-68 形态） */
     private static final java.util.regex.Pattern ATTACHMENT_REF =
@@ -99,6 +101,8 @@ public class BotRouterService implements BotMessageHandler {
     private final ObjectProvider<BotAdapterRegistry> registryProvider;
     private final ObjectProvider<AttachmentContentResolver> attachmentResolverProvider;
     private final AttachmentService attachmentService;
+    private final DesignService designService;
+    private final DocumentService documentService;
     private final Map<String, BotChannelConfigProvider> channelConfigs = new HashMap<>();
     private final EventDedup dedup = new EventDedup();
     /** FR-17 入站截图暂存：发图 → 10 分钟内 /dev /session 消费 */
@@ -118,6 +122,8 @@ public class BotRouterService implements BotMessageHandler {
                             ObjectProvider<BotAdapterRegistry> registryProvider,
                             ObjectProvider<AttachmentContentResolver> attachmentResolverProvider,
                             AttachmentService attachmentService,
+                            DesignService designService,
+                            DocumentService documentService,
                             List<BotChannelConfigProvider> channelConfigProviders) {
         this.bindingRepo = bindingRepo;
         this.interactionRepo = interactionRepo;
@@ -132,6 +138,8 @@ public class BotRouterService implements BotMessageHandler {
         this.registryProvider = registryProvider;
         this.attachmentResolverProvider = attachmentResolverProvider;
         this.attachmentService = attachmentService;
+        this.designService = designService;
+        this.documentService = documentService;
         for (BotChannelConfigProvider p : channelConfigProviders) {
             channelConfigs.put(p.channel(), p);
         }
@@ -301,6 +309,8 @@ public class BotRouterService implements BotMessageHandler {
             case "dev" -> RouteReply.text(devSession(msg, binding, cmd.args()));
             case "status" -> RouteReply.text(sessionStatus(binding));
             case "stop" -> RouteReply.text(stopSession(binding, cmd.args()));
+            case "wi" -> RouteReply.text(wiList(binding, cmd.args()));
+            case "design" -> RouteReply.text(designDetail(binding, cmd.args()));
             case "build" -> RouteReply.text(lastBuild(binding));
             case "deploy" -> RouteReply.text(lastDeploys(binding));
             case "new" -> RouteReply.text(newChat(binding));
@@ -348,6 +358,8 @@ public class BotRouterService implements BotMessageHandler {
                 /new —— 重开问答（丢弃当前问答上下文）
                 /reqs —— 进行中的需求列表（需绑定个人身份）
                 /req <编号> —— 需求详情（编号如 REQ-3；需绑定个人身份）
+                /wi <编号> —— 需求下工作单元列表（需绑定个人身份）
+                /design <编号> —— 需求下方案列表 + 最新方案正文（需绑定个人身份）
                 /dev <编号> [补充说明] —— 以需求起开发会话，挂研发主线（需绑定个人身份）
                 /session <需求描述> —— 起自由文本开发会话（需绑定个人身份）
                 /build —— 最近一条构建状态（需绑定个人身份）
@@ -729,6 +741,62 @@ public class BotRouterService implements BotMessageHandler {
         SessionView killed = sessionManager.kill(target.id());
         return "已停止会话 " + shortId(killed.id()) + "\n任务：" + previewOf(killed.taskSpec(), 40)
                 + "\n状态：" + killed.status() + footer("/projects/" + projectId);
+    }
+
+    // ---------------- 主线查看（M5 FR-19） ----------------
+
+    /** /wi <编号>：需求下工作单元全量列表（前 20 条：编号+状态+类型+标题）。 */
+    private String wiList(BotBindingEntity binding, String args) {
+        String projectId = requireProject(binding);
+        if (args == null || args.isBlank()) {
+            return "用法：/wi <需求编号>（编号见 /reqs，如 REQ-3）";
+        }
+        RequirementView r = resolveRequirement(projectId, args.trim());
+        List<WorkItemView> wis = workItemService.list(projectId, r.id());
+        if (wis.isEmpty()) {
+            return r.code() + " 下暂无工作单元" + footer("/projects/" + projectId);
+        }
+        StringBuilder sb = new StringBuilder(r.code() + " 工作单元（" + wis.size() + " 个）：");
+        wis.stream().limit(20).forEach(w -> sb.append("\n- ").append(w.code())
+                .append(" [").append(w.status()).append("] ")
+                .append(w.type() == null ? "" : w.type() + " ").append(w.title()));
+        if (wis.size() > 20) {
+            sb.append("\n  …（其余 ").append(wis.size() - 20).append(" 个到平台查看）");
+        }
+        return sb.toString();
+    }
+
+    /** /design <编号>：需求下方案列表 + 最新方案正文截断 1500 字。 */
+    private String designDetail(BotBindingEntity binding, String args) {
+        String projectId = requireProject(binding);
+        if (args == null || args.isBlank()) {
+            return "用法：/design <需求编号>（编号见 /reqs，如 REQ-3）";
+        }
+        RequirementView r = resolveRequirement(projectId, args.trim());
+        List<com.devmind.project.dto.DesignView> designs = designService.list(projectId, r.id());
+        if (designs.isEmpty()) {
+            return r.code() + " 下暂无方案" + footer("/projects/" + projectId);
+        }
+        StringBuilder sb = new StringBuilder(r.code() + " 方案（" + designs.size() + " 个）：");
+        for (com.devmind.project.dto.DesignView d : designs) {
+            sb.append("\n- v").append(d.version()).append(" [").append(d.status()).append("]");
+            if (d.updatedAt() != null) {
+                sb.append(" ").append(TIME_FMT.format(d.updatedAt()));
+            }
+        }
+        com.devmind.project.dto.DesignView latest = designs.stream()
+                .max(java.util.Comparator.comparing(d ->
+                        d.updatedAt() != null ? d.updatedAt() : java.time.Instant.EPOCH))
+                .orElse(designs.get(designs.size() - 1));
+        if (latest.docId() != null) {
+            String content = documentService.get(latest.docId(), null).contentMd();
+            if (content != null && !content.isBlank()) {
+                String body = content.strip();
+                sb.append("\n\n最新方案 v").append(latest.version()).append(" 正文：\n")
+                        .append(body.length() > 1500 ? body.substring(0, 1500) + "…" : body);
+            }
+        }
+        return sb.append(footer("/projects/" + projectId)).toString();
     }
 
     private static String shortId(String id) {

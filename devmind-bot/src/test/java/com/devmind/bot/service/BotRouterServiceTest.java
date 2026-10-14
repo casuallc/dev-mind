@@ -113,6 +113,10 @@ class BotRouterServiceTest {
     private final DeploymentService deploymentService = mock(DeploymentService.class);
     private final com.devmind.attachment.service.AttachmentService attachmentService =
             mock(com.devmind.attachment.service.AttachmentService.class);
+    private final com.devmind.project.DesignService designService =
+            mock(com.devmind.project.DesignService.class);
+    private final com.devmind.docs.DocumentService documentService =
+            mock(com.devmind.docs.DocumentService.class);
     private final CapturingAdapter adapter = new CapturingAdapter();
     private final Map<String, BotBindingEntity> bindings = new HashMap<>();
     private final List<BotInteractionEntity> interactions = new ArrayList<>();
@@ -167,7 +171,7 @@ class BotRouterServiceTest {
         router = new BotRouterService(bindingRepo, interactionRepo, chatManager, sessionManager,
                 projectService, requirementService, workItemService, buildService,
                 deploymentService, props, provider, attachmentProvider(), attachmentService,
-                List.of());
+                designService, documentService, List.of());
         registryRef.set(new BotAdapterRegistry(List.of(adapter), router));
     }
 
@@ -665,6 +669,74 @@ class BotRouterServiceTest {
         assertTrue(awaitReply().contains("无需停止"));
     }
 
+    // ---------------- CAP-75 FR-19 主线查看 /wi /design ----------------
+
+    @Test
+    void wiListsAllWorkItems() throws Exception {
+        bindP1();
+        RequirementEntity e = new RequirementEntity();
+        e.setId("r1");
+        e.setProjectId("p1");
+        e.setSeq(3L);
+        when(requirementService.findByProjectSeq("p1", 3L)).thenReturn(Optional.of(e));
+        when(requirementService.get("p1", "r1"))
+                .thenReturn(reqView("r1", 3, "登录加验证码", "IN_PROGRESS", null));
+        when(workItemService.list("p1", "r1")).thenReturn(List.of(
+                new WorkItemView("w1", "p1", "r1", null, 1L, "WI-1", "BACKEND",
+                        "登录接口", null, "DOING", null, null, "admin", null, null),
+                new WorkItemView("w2", "p1", "r1", null, 2L, "WI-2", "FRONTEND",
+                        "验证码组件", null, "TODO", null, null, "admin", null, null)));
+
+        router.onMessage(msg("/wi 3", "e-wi-1"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("REQ-3 工作单元（2 个）"), reply);
+        assertTrue(reply.contains("WI-1 [DOING] BACKEND 登录接口"), reply);
+        assertTrue(reply.contains("WI-2 [TODO] FRONTEND 验证码组件"), reply);
+    }
+
+    @Test
+    void designShowsLatestDocContent() throws Exception {
+        bindP1();
+        RequirementEntity e = new RequirementEntity();
+        e.setId("r1");
+        e.setProjectId("p1");
+        e.setSeq(3L);
+        when(requirementService.findByProjectSeq("p1", 3L)).thenReturn(Optional.of(e));
+        when(requirementService.get("p1", "r1"))
+                .thenReturn(reqView("r1", 3, "登录加验证码", "IN_PROGRESS", null));
+        com.devmind.project.dto.DesignView d1 = new com.devmind.project.dto.DesignView(
+                "d1", "p1", "r1", 5L, 1, "DRAFT", "admin",
+                Instant.now().minusSeconds(3600), Instant.now().minusSeconds(3600));
+        com.devmind.project.dto.DesignView d2 = new com.devmind.project.dto.DesignView(
+                "d2", "p1", "r1", 6L, 2, "CONFIRMED", "admin", Instant.now(), Instant.now());
+        when(designService.list("p1", "r1")).thenReturn(List.of(d1, d2));
+        com.devmind.docs.dto.DocDetail doc = mock(com.devmind.docs.dto.DocDetail.class);
+        when(doc.contentMd()).thenReturn("## 方案\n滑块验证码接极验，图形验证码自绘");
+        when(documentService.get(6L, null)).thenReturn(doc);
+
+        router.onMessage(msg("/design REQ-3", "e-ds-1"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("REQ-3 方案（2 个）"), reply);
+        assertTrue(reply.contains("v1 [DRAFT]") && reply.contains("v2 [CONFIRMED]"), reply);
+        assertTrue(reply.contains("最新方案 v2 正文"), reply);
+        assertTrue(reply.contains("滑块验证码接极验"), reply);
+    }
+
+    @Test
+    void designEmpty() throws Exception {
+        bindP1();
+        RequirementEntity e = new RequirementEntity();
+        e.setId("r1");
+        e.setProjectId("p1");
+        e.setSeq(3L);
+        when(requirementService.findByProjectSeq("p1", 3L)).thenReturn(Optional.of(e));
+        when(requirementService.get("p1", "r1"))
+                .thenReturn(reqView("r1", 3, "登录加验证码", "IN_PROGRESS", null));
+        when(designService.list("p1", "r1")).thenReturn(List.of());
+        router.onMessage(msg("/design 3", "e-ds-2"));
+        assertTrue(awaitReply().contains("暂无方案"));
+    }
+
     // ---------------- CAP-75 FR-11/12 个人身份与门禁 ----------------
 
     /** 支持身份映射的 channel 配置桩（仿飞书：senderId → 平台用户名）。 */
@@ -703,7 +775,7 @@ class BotRouterServiceTest {
         feishuRouter = new BotRouterService(bindingRepo, interactionRepo, chatManager,
                 sessionManager, projectService, requirementService, workItemService,
                 buildService, deploymentService, props, provider, attachmentProvider(),
-                attachmentService, List.of(identityConfig));
+                attachmentService, designService, documentService, List.of(identityConfig));
         registryRef.set(new BotAdapterRegistry(List.of(feishuAdapter), feishuRouter));
     }
 
