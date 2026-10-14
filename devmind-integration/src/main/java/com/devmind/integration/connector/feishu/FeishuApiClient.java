@@ -130,6 +130,59 @@ public class FeishuApiClient {
         ensureOk(resp, "发送消息");
     }
 
+    // ---------------- CAP-75 FR-16：图片消息（出站） ----------------
+
+    /**
+     * 上传图片（multipart POST /im/v1/images，image_type=message）→ image_key。
+     * 需 `im:resource` 权限（缺则 code=99991672 类鉴权错误，改权限须重新发布版本）。
+     */
+    public String uploadImage(byte[] bytes, String fileName) {
+        String boundary = "----devmind" + Long.toHexString(System.nanoTime());
+        byte[] head = ("--" + boundary + "\r\n"
+                + "Content-Disposition: form-data; name=\"image_type\"\r\n\r\nmessage\r\n"
+                + "--" + boundary + "\r\n"
+                + "Content-Disposition: form-data; name=\"image\"; filename=\""
+                + fileName.replace("\"", "_") + "\"\r\n"
+                + "Content-Type: application/octet-stream\r\n\r\n").getBytes(StandardCharsets.UTF_8);
+        byte[] tail = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
+        byte[] body = new byte[head.length + bytes.length + tail.length];
+        System.arraycopy(head, 0, body, 0, head.length);
+        System.arraycopy(bytes, 0, body, head.length, bytes.length);
+        System.arraycopy(tail, 0, body, head.length + bytes.length, tail.length);
+        JsonNode resp = requestRaw("POST", "/open-apis/im/v1/images", body,
+                "multipart/form-data; boundary=" + boundary, tenantToken());
+        ensureOk(resp, "上传图片");
+        return resp.path("data").path("image_key").asText();
+    }
+
+    /** 回复图片消息（image_key 须先经 {@link #uploadImage} 取得）。 */
+    public void replyImage(String messageId, String imageKey) {
+        JsonNode resp = request("POST", "/open-apis/im/v1/messages/" + encode(messageId) + "/reply",
+                imageBody(null, imageKey), tenantToken());
+        ensureOk(resp, "回复图片消息");
+    }
+
+    /** 主动发图片消息（reply 锚点缺失时的兜底，与 sendText 同口径）。 */
+    public void sendImage(String receiveId, String receiveIdType, String imageKey) {
+        JsonNode resp = request("POST",
+                "/open-apis/im/v1/messages?receive_id_type=" + encode(receiveIdType),
+                imageBody(receiveId, imageKey), tenantToken());
+        ensureOk(resp, "发送图片消息");
+    }
+
+    /** 图片消息体：与 textBody 同一契约——content 必须是内嵌 JSON 字符串。 */
+    private String imageBody(String receiveId, String imageKey) {
+        var body = mapper.createObjectNode();
+        if (receiveId != null) {
+            body.put("receive_id", receiveId);
+        }
+        body.put("msg_type", "image");
+        var content = mapper.createObjectNode();
+        content.put("image_key", imageKey);
+        body.put("content", mapper.writeValueAsString(content));
+        return mapper.writeValueAsString(body);
+    }
+
     /**
      * 消息体拼装：飞书 im/v1 的 content 必须是**内嵌 JSON 字符串**
      * （{"msg_type":"text","content":"{\"text\":\"…\"}"}），发对象形态真机必拒
@@ -157,16 +210,24 @@ public class FeishuApiClient {
     }
 
     private JsonNode request(String method, String path, String body, String bearer) {
+        return requestRaw(method, path,
+                body == null ? null : body.getBytes(StandardCharsets.UTF_8),
+                "application/json; charset=utf-8", bearer);
+    }
+
+    /** 原始字节请求（JSON 与 multipart 共用）；非 2xx 带有效 URL+返回体截断抛错。 */
+    private JsonNode requestRaw(String method, String path, byte[] body, String contentType,
+                                String bearer) {
         try {
             HttpRequest.Builder req = HttpRequest.newBuilder(URI.create(baseUrl + path))
                     .timeout(Duration.ofSeconds(30))
-                    .header("Content-Type", "application/json; charset=utf-8");
+                    .header("Content-Type", contentType);
             if (bearer != null) {
                 req.header("Authorization", "Bearer " + bearer);
             }
             req.method(method, body == null
                     ? HttpRequest.BodyPublishers.noBody()
-                    : HttpRequest.BodyPublishers.ofString(body));
+                    : HttpRequest.BodyPublishers.ofByteArray(body));
             HttpResponse<String> resp = http.send(req.build(), HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() / 100 != 2) {
                 // 带上有效 URL 与返回体截断：HTTP 层失败（多非飞书业务 code，而是 baseUrl 配错

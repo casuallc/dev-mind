@@ -16,6 +16,7 @@ import com.devmind.chat.dto.ChatView;
 import com.devmind.chat.dto.CreateChatRequest;
 import com.devmind.chat.service.ChatManagerService;
 import com.devmind.common.agent.SessionEvent;
+import com.devmind.common.attachment.AttachmentContentResolver;
 import com.devmind.common.dto.PageView;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.deploy.dto.DeploymentView;
@@ -70,6 +71,13 @@ public class BotRouterService implements BotMessageHandler {
     private static final java.util.Set<String> SENSITIVE_COMMANDS =
             java.util.Set.of("bind", "session", "build", "deploy", "reqs", "req", "dev");
 
+    /** FR-16 出站图片：需求描述中的本地附件引用（CAP-68 形态） */
+    private static final java.util.regex.Pattern ATTACHMENT_REF =
+            java.util.regex.Pattern.compile("/api/attachments/([0-9a-f]{32})/raw");
+    /** FR-16 出站图片上限：最多回推 5 张、单张 ≤5MB（防刷屏/防飞书单图上限） */
+    private static final int MAX_OUT_IMAGES = 5;
+    private static final long MAX_OUT_IMAGE_BYTES = 5L * 1024 * 1024;
+
     /** 门禁拒绝时的绑定指引（同时落 REJECTED 交互日志） */
     static final String BIND_GUIDANCE = "该操作需要先绑定个人身份：给我发 /bindme 获取你的身份码，"
             + "然后登录平台 设置 → 第三方账号，在飞书集成上粘贴身份码保存";
@@ -85,6 +93,7 @@ public class BotRouterService implements BotMessageHandler {
     private final DeploymentService deploymentService;
     private final BotProperties props;
     private final ObjectProvider<BotAdapterRegistry> registryProvider;
+    private final ObjectProvider<AttachmentContentResolver> attachmentResolverProvider;
     private final Map<String, BotChannelConfigProvider> channelConfigs = new HashMap<>();
     private final EventDedup dedup = new EventDedup();
     private final ExecutorService botExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -100,6 +109,7 @@ public class BotRouterService implements BotMessageHandler {
                             DeploymentService deploymentService,
                             BotProperties props,
                             ObjectProvider<BotAdapterRegistry> registryProvider,
+                            ObjectProvider<AttachmentContentResolver> attachmentResolverProvider,
                             List<BotChannelConfigProvider> channelConfigProviders) {
         this.bindingRepo = bindingRepo;
         this.interactionRepo = interactionRepo;
@@ -112,6 +122,7 @@ public class BotRouterService implements BotMessageHandler {
         this.deploymentService = deploymentService;
         this.props = props;
         this.registryProvider = registryProvider;
+        this.attachmentResolverProvider = attachmentResolverProvider;
         for (BotChannelConfigProvider p : channelConfigProviders) {
             channelConfigs.put(p.channel(), p);
         }
@@ -148,6 +159,7 @@ public class BotRouterService implements BotMessageHandler {
         long t0 = System.currentTimeMillis();
         BotInteractionEntity rec = newRecord(msg, null, null);
         String replyText;
+        RouteReply routeResult = null;
         try {
             BotBindingEntity binding = findOrCreateBinding(msg);
             String actor = actorOf(msg, binding);
@@ -161,7 +173,8 @@ public class BotRouterService implements BotMessageHandler {
                 rec.setStatus(BotInteractionEntity.STATUS_REJECTED);
                 replyText = BIND_GUIDANCE;
             } else {
-                replyText = route(msg, binding, cmd);
+                routeResult = route(msg, binding, cmd);
+                replyText = routeResult.text();
                 rec.setStatus(BotInteractionEntity.STATUS_OK);
             }
         } catch (DevMindException e) {
@@ -185,6 +198,9 @@ public class BotRouterService implements BotMessageHandler {
             rec.setStatus(BotInteractionEntity.STATUS_FAILED);
             rec.setError(cut("回复发送失败: " + replyError, 512));
             saveInteraction(rec, replyText);
+        } else if (routeResult != null && !routeResult.images().isEmpty()) {
+            // FR-16：文本回推成功后逐张发图（失败补文字提示，不翻 FAILED——主回答已送达）
+            sendImages(msg, routeResult.images());
         }
     }
 
@@ -242,24 +258,36 @@ public class BotRouterService implements BotMessageHandler {
         return cc == null ? java.util.Optional.empty() : cc.resolveActor(msg.senderId());
     }
 
-    private String route(BotMessage msg, BotBindingEntity binding, CommandParser.Command cmd) {
+    /** 路由产出：回复文本 + 待回推的出站图片（FR-16；仅 /req 详情产图）。 */
+    private record RouteReply(String text, List<OutImage> images) {
+        static RouteReply text(String text) {
+            return new RouteReply(text, List.of());
+        }
+    }
+
+    /** 出站图片（已解析好字节，适配器直接上传发送）。 */
+    private record OutImage(String fileName, String contentType, byte[] bytes) {
+    }
+
+    private RouteReply route(BotMessage msg, BotBindingEntity binding, CommandParser.Command cmd) {
         if (cmd == null) {
-            return ask(binding, msg.text().trim());
+            return RouteReply.text(ask(binding, msg.text().trim()));
         }
         return switch (cmd.name()) {
-            case "help" -> helpText();
-            case "bindme" -> bindme(msg);
-            case "whoami" -> whoami(msg, binding);
-            case "unbindme" -> "解绑请登录平台：设置 → 第三方账号，删除对应飞书集成的身份码绑定即可";
-            case "bind" -> bind(binding, cmd.args());
-            case "session" -> startSession(binding, cmd.args());
-            case "reqs" -> listRequirements(binding);
+            case "help" -> RouteReply.text(helpText());
+            case "bindme" -> RouteReply.text(bindme(msg));
+            case "whoami" -> RouteReply.text(whoami(msg, binding));
+            case "unbindme" -> RouteReply.text(
+                    "解绑请登录平台：设置 → 第三方账号，删除对应飞书集成的身份码绑定即可");
+            case "bind" -> RouteReply.text(bind(binding, cmd.args()));
+            case "session" -> RouteReply.text(startSession(binding, cmd.args()));
+            case "reqs" -> RouteReply.text(listRequirements(binding));
             case "req" -> requirementDetail(binding, cmd.args());
-            case "dev" -> devSession(binding, cmd.args());
-            case "build" -> lastBuild(binding);
-            case "deploy" -> lastDeploys(binding);
-            case "new" -> newChat(binding);
-            default -> "未知指令 /" + cmd.name() + "，发 /help 查看可用指令";
+            case "dev" -> RouteReply.text(devSession(binding, cmd.args()));
+            case "build" -> RouteReply.text(lastBuild(binding));
+            case "deploy" -> RouteReply.text(lastDeploys(binding));
+            case "new" -> RouteReply.text(newChat(binding));
+            default -> RouteReply.text("未知指令 /" + cmd.name() + "，发 /help 查看可用指令");
         };
     }
 
@@ -514,11 +542,11 @@ public class BotRouterService implements BotMessageHandler {
         return sb.toString();
     }
 
-    /** /req <编号>：需求详情（描述截断 500）+ 工作单元前 5 条。 */
-    private String requirementDetail(BotBindingEntity binding, String args) {
+    /** /req <编号>：需求详情（描述截断 500）+ 工作单元前 5 条 + 描述图片逐张回推（FR-16）。 */
+    private RouteReply requirementDetail(BotBindingEntity binding, String args) {
         String projectId = requireProject(binding);
         if (args == null || args.isBlank()) {
-            return "用法：/req <需求编号>（编号见 /reqs，如 REQ-3）";
+            return RouteReply.text("用法：/req <需求编号>（编号见 /reqs，如 REQ-3）");
         }
         RequirementView r = resolveRequirement(projectId, args.trim());
         StringBuilder sb = new StringBuilder();
@@ -540,7 +568,53 @@ public class BotRouterService implements BotMessageHandler {
             }
         }
         sb.append("\n发 /dev ").append(r.code()).append(" 以该需求起开发会话");
-        return sb.toString();
+        List<OutImage> images = collectOutImages(r.description());
+        if (!images.isEmpty()) {
+            sb.append("\n（附 ").append(images.size()).append(" 张需求截图，见下）");
+        }
+        return new RouteReply(sb.toString(), images);
+    }
+
+    /**
+     * FR-16：解析描述中的本地附件引用（去重保序），经 AttachmentContentResolver 拉字节。
+     * 仅 image/* 且 ≤5MB，最多 5 张；attachment 模块未装配/单张失效静默跳过（文本已带引用路径，
+     * 平台链接可兜底查看）。
+     */
+    private List<OutImage> collectOutImages(String description) {
+        if (description == null || description.isBlank()) {
+            return List.of();
+        }
+        AttachmentContentResolver resolver = attachmentResolverProvider.getIfAvailable();
+        if (resolver == null) {
+            return List.of();
+        }
+        List<String> ids = new java.util.ArrayList<>();
+        var m = ATTACHMENT_REF.matcher(description);
+        while (m.find() && ids.size() < MAX_OUT_IMAGES) {
+            if (!ids.contains(m.group(1))) {
+                ids.add(m.group(1));
+            }
+        }
+        List<OutImage> out = new java.util.ArrayList<>();
+        for (String id : ids) {
+            try {
+                var resolved = resolver.resolve(id);
+                if (resolved.isEmpty()) {
+                    continue;
+                }
+                var a = resolved.get();
+                if (a.contentType() == null || !a.contentType().startsWith("image/")
+                        || a.bytes() == null || a.bytes().length > MAX_OUT_IMAGE_BYTES) {
+                    continue;
+                }
+                String name = a.originalName() == null || a.originalName().isBlank()
+                        ? "requirement-" + id.substring(0, 8) + ".png" : a.originalName();
+                out.add(new OutImage(name, a.contentType(), a.bytes()));
+            } catch (Exception e) {
+                log.warn("bot 出站图片解析失败，跳过: attachment={} err={}", id, e.getMessage());
+            }
+        }
+        return out;
     }
 
     /**
@@ -619,14 +693,8 @@ public class BotRouterService implements BotMessageHandler {
 
     /** 回推回复；返回 null=成功，否则为失败原因（调用方据此把交互行改落 FAILED）。 */
     private String reply(BotMessage msg, String text) {
-        BotAdapterRegistry registry = registryProvider.getIfAvailable();
-        if (registry == null) {
-            log.warn("bot 注册表未装配，回复丢弃: channel={}", msg.channel());
-            return "bot 注册表未装配";
-        }
-        BotAdapter adapter = registry.get(msg.channel()).orElse(null);
+        BotAdapter adapter = adapterOf(msg.channel());
         if (adapter == null) {
-            log.warn("无 bot 适配器 {}，回复丢弃", msg.channel());
             return "无 bot 适配器 " + msg.channel();
         }
         try {
@@ -637,6 +705,48 @@ public class BotRouterService implements BotMessageHandler {
                     msg.channel(), msg.externalChatId(), e.getMessage(), e);
             return e.getMessage() == null ? e.toString() : e.getMessage();
         }
+    }
+
+    /**
+     * FR-16 出站图片逐张回推：单张失败记日志继续；有失败补一条文字提示
+     * （主回答已送达，图片属增强信息，不翻交互行 FAILED）。
+     */
+    private void sendImages(BotMessage msg, List<OutImage> images) {
+        BotAdapter adapter = adapterOf(msg.channel());
+        if (adapter == null) {
+            return;
+        }
+        int failed = 0;
+        for (OutImage img : images) {
+            try {
+                adapter.replyImage(msg, img.fileName(), img.contentType(), img.bytes());
+            } catch (Exception e) {
+                failed++;
+                log.error("bot 图片回推失败: channel={} chat={} name={} err={}",
+                        msg.channel(), msg.externalChatId(), img.fileName(), e.getMessage(), e);
+            }
+        }
+        if (failed > 0) {
+            try {
+                adapter.reply(msg, "⚠️ " + failed + " 张需求截图发送失败，请到平台需求页查看");
+            } catch (Exception e) {
+                log.error("bot 图片失败提示发送失败: channel={} err={}", msg.channel(), e.getMessage());
+            }
+        }
+    }
+
+    /** 按 channel 找适配器；找不到记告警返回 null（调用方各自决定兜底文案）。 */
+    private BotAdapter adapterOf(String channel) {
+        BotAdapterRegistry registry = registryProvider.getIfAvailable();
+        if (registry == null) {
+            log.warn("bot 注册表未装配，回复丢弃: channel={}", channel);
+            return null;
+        }
+        BotAdapter adapter = registry.get(channel).orElse(null);
+        if (adapter == null) {
+            log.warn("无 bot 适配器 {}，回复丢弃", channel);
+        }
+        return adapter;
     }
 
     private String truncate(String text) {

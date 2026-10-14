@@ -24,4 +24,13 @@ public interface BotAdapter {
 
     /** 把回复文本发回消息来源会话。失败抛异常由底座兜底记日志（不再重试）。 */
     void reply(BotMessage origin, String text);
+
+    /**
+     * CAP-75 FR-16：把图片发回消息来源会话（需求描述截图等出站图片）。
+     * 默认 no-op——不支持图片的平台零改动；底座会在失败时补一条文字提示，
+     * 实现不得静默吞错（发送失败抛异常）。
+     */
+    default void replyImage(BotMessage origin, String fileName, String contentType, byte[] bytes) {
+        // 平台不支持图片回推：丢弃（底座日志可见）
+    }
 }

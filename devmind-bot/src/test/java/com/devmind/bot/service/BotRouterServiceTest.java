@@ -24,6 +24,7 @@ import com.devmind.chat.dto.ChatView;
 import com.devmind.chat.dto.CreateChatRequest;
 import com.devmind.chat.service.ChatManagerService;
 import com.devmind.common.agent.SessionEvent;
+import com.devmind.common.attachment.AttachmentContentResolver;
 import com.devmind.common.dto.PageView;
 import com.devmind.deploy.service.DeploymentService;
 import com.devmind.project.ProjectService;
@@ -61,6 +62,8 @@ class BotRouterServiceTest {
     /** 捕获回复的测试适配器（默认 code=fake）；failOnReply 非空时 reply 抛错（模拟回推失败）。 */
     static class CapturingAdapter implements BotAdapter {
         final BlockingQueue<String> replies = new LinkedBlockingQueue<>();
+        /** FR-16 出站图片捕获：fileName|contentType|bytes.length */
+        final BlockingQueue<String> images = new LinkedBlockingQueue<>();
         volatile RuntimeException failOnReply;
         private final String code;
 
@@ -84,6 +87,11 @@ class BotRouterServiceTest {
             }
             replies.add(text);
         }
+
+        @Override
+        public void replyImage(BotMessage origin, String fileName, String contentType, byte[] bytes) {
+            images.add(fileName + "|" + contentType + "|" + bytes.length);
+        }
     }
 
     private final BotBindingRepository bindingRepo = mock(BotBindingRepository.class);
@@ -98,6 +106,9 @@ class BotRouterServiceTest {
     private final CapturingAdapter adapter = new CapturingAdapter();
     private final Map<String, BotBindingEntity> bindings = new HashMap<>();
     private final List<BotInteractionEntity> interactions = new ArrayList<>();
+    /** FR-16：attachment 解析 SPI（null=模块未装配）；测试按需 set */
+    private final AtomicReference<AttachmentContentResolver> attachmentResolverRef =
+            new AtomicReference<>();
 
     private BotRouterService router;
 
@@ -107,7 +118,9 @@ class BotRouterServiceTest {
         bindings.clear();
         interactions.clear();
         adapter.replies.clear();
+        adapter.images.clear();
         adapter.failOnReply = null;
+        attachmentResolverRef.set(null);
         when(bindingRepo.findByChannelAndExternalChatId(anyString(), anyString()))
                 .thenAnswer(inv -> Optional.ofNullable(
                         bindings.get(inv.getArgument(0) + "|" + inv.getArgument(1))));
@@ -133,8 +146,16 @@ class BotRouterServiceTest {
 
         router = new BotRouterService(bindingRepo, interactionRepo, chatManager, sessionManager,
                 projectService, requirementService, workItemService, buildService,
-                deploymentService, props, provider, List.of());
+                deploymentService, props, provider, attachmentProvider(), List.of());
         registryRef.set(new BotAdapterRegistry(List.of(adapter), router));
+    }
+
+    /** FR-16：attachmentResolverProvider 桩——getIfAvailable 读 attachmentResolverRef。 */
+    @SuppressWarnings("unchecked")
+    private ObjectProvider<AttachmentContentResolver> attachmentProvider() {
+        ObjectProvider<AttachmentContentResolver> p = mock(ObjectProvider.class);
+        when(p.getIfAvailable()).thenAnswer(inv -> attachmentResolverRef.get());
+        return p;
     }
 
     private static BotMessage msg(String text, String eventId) {
@@ -402,6 +423,67 @@ class BotRouterServiceTest {
         assertTrue(req.taskSpec().contains("补充说明：先做图形验证码"), req.taskSpec());
     }
 
+    // ---------------- CAP-75 FR-16 出站图片 ----------------
+
+    @Test
+    void reqDetailRepliesDescriptionImages() throws Exception {
+        bindP1();
+        String a1 = "0123456789abcdef0123456789abcdef";
+        String a2 = "fedcba9876543210fedcba9876543210";
+        RequirementEntity e = new RequirementEntity();
+        e.setId("r1");
+        e.setProjectId("p1");
+        e.setSeq(3L);
+        when(requirementService.findByProjectSeq("p1", 3L)).thenReturn(Optional.of(e));
+        when(requirementService.get("p1", "r1")).thenReturn(reqView("r1", 3, "登录加验证码",
+                "IN_PROGRESS", "流程见 ![流程图](/api/attachments/" + a1 + "/raw)"
+                        + " 与 ![b](https://x/api/attachments/" + a2 + "/raw?access_token=t)"));
+        AttachmentContentResolver resolver = mock(AttachmentContentResolver.class);
+        when(resolver.resolve(a1)).thenReturn(Optional.of(
+                new AttachmentContentResolver.ResolvedAttachment(
+                        a1, "image/png", new byte[]{1, 2, 3}, "流程图.png")));
+        when(resolver.resolve(a2)).thenReturn(Optional.of(
+                new AttachmentContentResolver.ResolvedAttachment(
+                        a2, "image/jpeg", new byte[]{4, 5}, "b.jpg")));
+        attachmentResolverRef.set(resolver);
+
+        router.onMessage(msg("/req 3", "e-img-1"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("附 2 张需求截图"), reply);
+        String img1 = adapter.images.poll(15, TimeUnit.SECONDS);
+        String img2 = adapter.images.poll(15, TimeUnit.SECONDS);
+        assertTrue(img1 != null && img1.startsWith("流程图.png|image/png|3"), String.valueOf(img1));
+        assertTrue(img2 != null && img2.startsWith("b.jpg|image/jpeg|2"), String.valueOf(img2));
+    }
+
+    @Test
+    void reqDetailSkipsNonImageAndMissingAttachments() throws Exception {
+        bindP1();
+        String a1 = "0123456789abcdef0123456789abcdef";
+        String a2 = "fedcba9876543210fedcba9876543210";
+        RequirementEntity e = new RequirementEntity();
+        e.setId("r1");
+        e.setProjectId("p1");
+        e.setSeq(3L);
+        when(requirementService.findByProjectSeq("p1", 3L)).thenReturn(Optional.of(e));
+        when(requirementService.get("p1", "r1")).thenReturn(reqView("r1", 3, "登录加验证码",
+                "IN_PROGRESS", "附件 ![spec](/api/attachments/" + a1 + "/raw)"
+                        + " ![gone](/api/attachments/" + a2 + "/raw)"));
+        AttachmentContentResolver resolver = mock(AttachmentContentResolver.class);
+        // pdf 不是图片跳过；a2 解析不到跳过——文本照常回，不带「附 N 张」
+        when(resolver.resolve(a1)).thenReturn(Optional.of(
+                new AttachmentContentResolver.ResolvedAttachment(
+                        a1, "application/pdf", new byte[]{1}, "spec.pdf")));
+        when(resolver.resolve(a2)).thenReturn(Optional.empty());
+        attachmentResolverRef.set(resolver);
+
+        router.onMessage(msg("/req 3", "e-img-2"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("REQ-3 登录加验证码"), reply);
+        assertTrue(!reply.contains("需求截图"), reply);
+        assertTrue(adapter.images.poll(2, TimeUnit.SECONDS) == null, "非图片附件不应回推图片");
+    }
+
     // ---------------- CAP-75 FR-11/12 个人身份与门禁 ----------------
 
     /** 支持身份映射的 channel 配置桩（仿飞书：senderId → 平台用户名）。 */
@@ -439,7 +521,7 @@ class BotRouterServiceTest {
         when(provider.getIfAvailable()).thenAnswer(inv -> registryRef.get());
         feishuRouter = new BotRouterService(bindingRepo, interactionRepo, chatManager,
                 sessionManager, projectService, requirementService, workItemService,
-                buildService, deploymentService, props, provider,
+                buildService, deploymentService, props, provider, attachmentProvider(),
                 List.of(identityConfig));
         registryRef.set(new BotAdapterRegistry(List.of(feishuAdapter), feishuRouter));
     }

@@ -133,6 +133,21 @@ public class FeishuBotAdapter implements BotAdapter, BotChannelConfigProvider {
         return h != null ? h : gateway.botHandle().orElse(null);
     }
 
+    /** CAP-75 FR-16：出站图片——先上传拿 image_key 再按消息/会话回推。 */
+    @Override
+    public void replyImage(BotMessage origin, String fileName, String contentType, byte[] bytes) {
+        FeishuBotGateway.FeishuBotHandle h = handleOrNull();
+        if (h == null) {
+            throw new IllegalStateException("飞书机器人未启用（无启用的飞书集成）");
+        }
+        String imageKey = h.api().uploadImage(bytes, fileName);
+        if (origin.messageId() != null && !origin.messageId().isBlank()) {
+            h.api().replyImage(origin.messageId(), imageKey);
+        } else {
+            h.api().sendImage(origin.externalChatId(), "chat_id", imageKey);
+        }
+    }
+
     // ---------------- 事件归一化 ----------------
 
     private void onEvent(P2MessageReceiveV1 event, BotMessageHandler handler) {
