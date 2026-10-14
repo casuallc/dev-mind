@@ -41,6 +41,7 @@ import ClassifyInstancesPage from '../features/classify/pages/ClassifyInstancesP
 import ClassifyPackagesPage from '../features/classify/pages/ClassifyPackagesPage'
 import ClassifyPlaygroundPage from '../features/classify/pages/ClassifyPlaygroundPage'
 import ApiKeysPage from '../features/open-api/pages/ApiKeysPage'
+import BotOpsPage from '../features/bot/pages/BotOpsPage'
 import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
 import AgentNodeDetailPage from '../features/agent/pages/AgentNodeDetailPage'
 import NodeFilesPage from '../features/agent/pages/NodeFilesPage'
@@ -198,6 +199,8 @@ export default function App() {
           <Route path="/admin/classify/playground" element={<LegacyLayaRedirect tab="playground" />} />
           {/* CAP-20 API 密钥（open-api HMAC 认证凭证） */}
           <Route path="/admin/keys" element={<ApiKeysPage />} />
+          {/* CAP-75 M3 机器人运维（交互日志/群绑定/用户映射） */}
+          <Route path="/admin/bot" element={<BotOpsPage />} />
           {/* CAP-21 Agent 执行组：节点（页内含 Runner 包/出口规则/审计日志页签）/ 节点文件 */}
           <Route path="/admin/agent" element={<Navigate to="/admin/agent/nodes" replace />} />
           <Route path="/admin/agent/nodes" element={<AgentNodesPage />} />

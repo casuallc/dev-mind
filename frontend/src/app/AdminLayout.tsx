@@ -4,6 +4,7 @@ import {
   ApiOutlined,
   AuditOutlined,
   CodeOutlined,
+  CommentOutlined,
   DashboardOutlined,
   DeploymentUnitOutlined,
   ExperimentOutlined,
@@ -76,6 +77,7 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
     label: '系统',
     children: [
       { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
+      { key: '/admin/bot', icon: <CommentOutlined />, label: '机器人运维' },
       { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
       { key: '/admin/models', icon: <ThunderboltOutlined />, label: '模型接入' },
       { key: '/admin/users', icon: <SafetyCertificateOutlined />, label: '用户管理' },

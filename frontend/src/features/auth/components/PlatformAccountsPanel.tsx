@@ -13,8 +13,8 @@ import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
-const TYPE_COLOR: Record<string, string> = { GITLAB: 'orange', GITHUB: 'default', JIRA: 'blue' }
-const TYPE_LABEL: Record<string, string> = { GITLAB: 'GitLab', GITHUB: 'GitHub', JIRA: 'Jira' }
+const TYPE_COLOR: Record<string, string> = { GITLAB: 'orange', GITHUB: 'default', JIRA: 'blue', FEISHU: 'cyan' }
+const TYPE_LABEL: Record<string, string> = { GITLAB: 'GitLab', GITHUB: 'GitHub', JIRA: 'Jira', FEISHU: '飞书' }
 
 /** 页面壳（SettingsPage）工具栏在 Card extra，靠该句柄触发刷新 */
 export interface PlatformAccountsPanelHandle {
@@ -25,6 +25,7 @@ export interface PlatformAccountsPanelHandle {
  * CAP-35 我的第三方账号（设置页「第三方账号」视图）：一行 = 一个已启用的平台实例 + 我的绑定状态。
  * 绑定个人账号后，WI push / 建 MR·PR / Jira 状态转换 / 登记工时以本人身份执行；
  * git 平台账号同时决定会话内 Agent 提交的 author/committer 署名。
+ * CAP-75 M3：飞书集成绑定的是身份码（open_id，无凭据），机器人敏感操作据此以你的平台身份执行。
  */
 export default function PlatformAccountsPanel({ ref }: { ref?: Ref<PlatformAccountsPanelHandle> }) {
   const [items, setItems] = useState<PlatformAccount[]>([])
@@ -36,6 +37,7 @@ export default function PlatformAccountsPanel({ ref }: { ref?: Ref<PlatformAccou
   const formAuthType = Form.useWatch('authType', form)
   const isGit = editTarget?.integrationType === 'GITLAB' || editTarget?.integrationType === 'GITHUB'
   const isJira = editTarget?.integrationType === 'JIRA'
+  const isFeishu = editTarget?.integrationType === 'FEISHU'
 
   const reload = () => {
     setLoading(true)
@@ -66,13 +68,16 @@ export default function PlatformAccountsPanel({ ref }: { ref?: Ref<PlatformAccou
     const v = await form.validateFields()
     setSaving(true)
     try {
-      const payload: PlatformAccountUpsertRequest = {
-        ...v,
-        // git 平台固定 PAT，不下发 authType/username
-        authType: isJira ? v.authType : undefined,
-        username: isJira && v.authType === 'BASIC' ? v.username : undefined,
-        secret: v.secret || undefined,
-      }
+      const payload: PlatformAccountUpsertRequest = isFeishu
+        ? // 飞书身份码绑定：只发 username（open_id），后端强制 authType=IDENTITY、无 secret
+          { username: v.username }
+        : {
+            ...v,
+            // git 平台固定 PAT，不下发 authType/username
+            authType: isJira ? v.authType : undefined,
+            username: isJira && v.authType === 'BASIC' ? v.username : undefined,
+            secret: v.secret || undefined,
+          }
       await upsertPlatformAccount(editTarget.integrationId, payload)
       message.success(editTarget.bound ? `「${editTarget.integrationName}」账号已更新` : `「${editTarget.integrationName}」绑定成功`)
       setEditTarget(null)
@@ -88,7 +93,10 @@ export default function PlatformAccountsPanel({ ref }: { ref?: Ref<PlatformAccou
   const onUnbind = (row: PlatformAccount) => {
     Modal.confirm({
       title: `解绑「${row.integrationName}」的我的账号？`,
-      content: '解绑后写操作将回退平台（机器人）凭证',
+      content:
+        row.integrationType === 'FEISHU'
+          ? '解绑后群内 /bind /session /build /deploy 将被机器人门禁拒绝（问答不受影响）'
+          : '解绑后写操作将回退平台（机器人）凭证',
       centered: true,
       okText: '解绑',
       okButtonProps: { danger: true },
@@ -124,7 +132,8 @@ export default function PlatformAccountsPanel({ ref }: { ref?: Ref<PlatformAccou
       <Typography.Paragraph type="secondary">
         绑定你在各平台实例上的个人账号：会话内 Agent 提交以 git 平台账号的署名落 author/committer；
         WI 分支推送、创建 MR/PR、Jira 状态转换与工时登记优先以你的个人身份执行，
-        未绑定时回退实例的平台（机器人）凭证。
+        未绑定时回退实例的平台（机器人）凭证。飞书集成绑定的是身份码（open_id）：
+        在飞书给机器人发 /bindme 获取，绑定后群内 /bind /session /build /deploy 以你的平台身份执行。
       </Typography.Paragraph>
       <Table<PlatformAccount>
         rowKey="integrationId"
@@ -154,17 +163,29 @@ export default function PlatformAccountsPanel({ ref }: { ref?: Ref<PlatformAccou
             dataIndex: 'bound',
             width: 140,
             onCell: () => ({ style: { whiteSpace: 'nowrap' } }),
-            render: (bound: boolean, row) =>
-              bound ? (
+            render: (bound: boolean, row) => {
+              if (!bound) return <Badge status="default" text="未绑定" />
+              // 飞书身份映射：展示脱敏身份码（前 8 位），无凭据类型
+              if (row.integrationType === 'FEISHU') {
+                const code = row.username ?? ''
+                return (
+                  <Space size={4} wrap={false}>
+                    <Badge status="success" text="已绑定" />
+                    <Tooltip title="飞书身份码（open_id）">
+                      <Tag color="cyan">{code.length > 8 ? `${code.slice(0, 8)}…` : code}</Tag>
+                    </Tooltip>
+                  </Space>
+                )
+              }
+              return (
                 <Space size={4} wrap={false}>
                   <Badge status="success" text="已绑定" />
                   <Tooltip title={row.authType === 'BASIC' ? `账号密码（${row.username}）` : 'PAT'}>
                     <Tag>{row.authType === 'BASIC' ? '账号密码' : 'PAT'}</Tag>
                   </Tooltip>
                 </Space>
-              ) : (
-                <Badge status="default" text="未绑定" />
-              ),
+              )
+            },
           },
           {
             title: '提交署名',
@@ -218,6 +239,16 @@ export default function PlatformAccountsPanel({ ref }: { ref?: Ref<PlatformAccou
         destroyOnHidden
       >
         <Form form={form} layout="vertical">
+          {isFeishu && (
+            <Form.Item
+              name="username"
+              label="飞书身份码（open_id）"
+              rules={[{ required: true, message: '请输入飞书身份码' }]}
+              extra="在飞书给机器人发 /bindme 获取你的身份码；身份码无凭据、不加密存储，仅用于把机器人消息映射到你的平台身份"
+            >
+              <Input placeholder="ou_xxxxxxxx" autoComplete="off" />
+            </Form.Item>
+          )}
           {isJira && (
             <Form.Item
               name="authType"
@@ -245,21 +276,23 @@ export default function PlatformAccountsPanel({ ref }: { ref?: Ref<PlatformAccou
               <Input placeholder="Jira 登录用户名" autoComplete="off" />
             </Form.Item>
           )}
-          <Form.Item
-            name="secret"
-            label={isJira && formAuthType === 'BASIC' ? '密码' : '访问令牌（PAT）'}
-            rules={editTarget?.bound ? [] : [{ required: true, message: '请输入凭据' }]}
-            extra={
-              editTarget?.bound
-                ? '留空表示保持不变（认证方式或用户名变更时需重填）'
-                : '加密存储，仅用于以你的身份调用平台 API'
-            }
-          >
-            <Input.Password
-              placeholder={editTarget?.bound ? '（不修改请留空）' : '粘贴 token / 输入密码'}
-              autoComplete="new-password"
-            />
-          </Form.Item>
+          {!isFeishu && (
+            <Form.Item
+              name="secret"
+              label={isJira && formAuthType === 'BASIC' ? '密码' : '访问令牌（PAT）'}
+              rules={editTarget?.bound ? [] : [{ required: true, message: '请输入凭据' }]}
+              extra={
+                editTarget?.bound
+                  ? '留空表示保持不变（认证方式或用户名变更时需重填）'
+                  : '加密存储，仅用于以你的身份调用平台 API'
+              }
+            >
+              <Input.Password
+                placeholder={editTarget?.bound ? '（不修改请留空）' : '粘贴 token / 输入密码'}
+                autoComplete="new-password"
+              />
+            </Form.Item>
+          )}
           {isGit && (
             <>
               <Form.Item
