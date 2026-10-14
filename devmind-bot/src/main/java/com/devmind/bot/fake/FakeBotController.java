@@ -26,7 +26,8 @@ public class FakeBotController {
     }
 
     public record Incoming(String channel, String externalChatId, String chatType, String senderId,
-                           String text, Boolean mentioned, String messageId, String eventId) {
+                           String text, Boolean mentioned, String messageId, String eventId,
+                           String imageKey) {
     }
 
     @PostMapping("/message")
@@ -37,12 +38,20 @@ public class FakeBotController {
                 in.externalChatId(),
                 in.chatType() == null ? BotMessage.CHAT_TYPE_P2P : in.chatType(),
                 in.senderId(), in.text(), Boolean.TRUE.equals(in.mentioned()),
-                in.messageId(), in.eventId()));
+                in.messageId(), in.eventId(), in.imageKey()));
     }
 
     @GetMapping("/replies")
     public List<FakeBotAdapter.Reply> replies(@RequestParam(required = false) String chatId) {
         return adapter.replies().stream()
+                .filter(r -> chatId == null || chatId.equals(r.externalChatId()))
+                .toList();
+    }
+
+    /** M5：出站图片捕获拉取（/req 详情回推的需求截图）。 */
+    @GetMapping("/images")
+    public List<FakeBotAdapter.ImageReply> images(@RequestParam(required = false) String chatId) {
+        return adapter.images().stream()
                 .filter(r -> chatId == null || chatId.equals(r.externalChatId()))
                 .toList();
     }

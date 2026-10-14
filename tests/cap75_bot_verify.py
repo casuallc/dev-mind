@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-"""CAP-75 M2+M3 双向机器人 E2E：fake 适配器驱动全路由 + 飞书出站回推到本地 mock +
-个人身份流（/bindme 取码 → 门禁 → 绑定放行）+ 运维端点断言。
+"""CAP-75 M2+M3+M5 双向机器人 E2E：fake 适配器驱动全路由 + 飞书出站回推到本地 mock +
+个人身份流（/bindme 取码 → 门禁 → 绑定放行）+ 运维端点断言 + M5 聊天开发闭环
+（出站图片 / 入站图片 / /status /stop / /wi /design）。
 
 运行前提（仿 cap49）：
 1. 依赖已构建：`mvn -q install -DskipTests`。
@@ -33,6 +34,14 @@
   H M3 运维端点：/api/bot/admin/interactions 含 OK/DEDUPED/REJECTED 行且过滤生效；
     /bindings 可见；/api/admin/user-platform-accounts?type=FEISHU 含刚绑定的身份码；
     非 ADMIN 访问两类管理端点均 403
+  I M5 出站图片（FR-16）：multipart 上传附件 → 建含 ![](/api/attachments/<id>/raw)
+    引用的需求 → /req 详情回「附 1 张需求截图」且 /e2e/bot/images 捕获该图
+  J M5 入站图片（FR-17）：注入 imageKey 消息 → 「已收到截图」回执 + 附件库出现
+    「bot 用户 u-e2e 发送的截图」行 + 交互日志记 IMAGE 指令；feishu 未绑定用户发图
+    → 门禁拒绝（与敏感操作同口径）。截图→会话消费挂 attachmentIds 由单测覆盖
+    （E2E 无 runner，起会话恒 409，消费不可观测）
+  K M5 /status /stop 空态：无成功会话 → 「暂无开发会话」/「没有运行中的会话」
+  L M5 /wi /design：API 建工作单元 → /wi 列出；无方案 → /design 回「暂无方案」
 """
 import json
 import os
@@ -95,16 +104,50 @@ def check(name, cond, detail=""):
 # ---------------- bot 驱动与回复断言 ----------------
 
 def send(chat, text, event_id, chat_type="p2p", mentioned=False, channel=None,
-         message_id=None, sender="u-e2e"):
+         message_id=None, sender="u-e2e", image_key=None):
     event_id = f"{event_id}-{RUN}"
     body = {"externalChatId": cid(chat), "chatType": chat_type, "senderId": sender,
             "text": text, "mentioned": mentioned, "eventId": event_id,
             "messageId": message_id or ("m-" + event_id)}
     if channel:
         body["channel"] = channel
+    if image_key:
+        body["imageKey"] = image_key
     st, resp = call("POST", "/e2e/bot/message", body)
     if st != 200:
         check(f"注入消息 {event_id}", False, f"{st} {resp}")
+
+
+def images(chat):
+    st, rs = call("GET", f"/e2e/bot/images?chatId={cid(chat)}")
+    return rs if st == 200 and isinstance(rs, list) else []
+
+
+def upload_attachment(filename, content, content_type, description=""):
+    """手工拼 multipart（urllib 无原生支持）：POST /attachments，返回 (status, view)"""
+    boundary = f"----cap75e2e{RUN}"
+    body = b""
+
+    def field(name, value):
+        return (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\""
+                f"\r\n\r\n{value}\r\n").encode("utf-8")
+
+    body += field("scope", "SHARED")
+    if description:
+        body += field("description", description)
+    body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
+             f"filename=\"{filename}\"\r\nContent-Type: {content_type}\r\n\r\n").encode("utf-8")
+    body += content + b"\r\n"
+    body += f"--{boundary}--\r\n".encode("utf-8")
+    req = urllib.request.Request(
+        BASE + "/attachments", data=body, method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
+                 "Authorization": "Bearer " + TOKEN})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")
 
 
 def replies(chat):
@@ -454,7 +497,99 @@ try:
     check("非 ADMIN 访问交互日志 403", st403a == 403, f"{st403a}")
     check("非 ADMIN 访问用户映射 403", st403b == 403, f"{st403b}")
 
-    print(f"\n== CAP-75 M2+M3 bot E2E: {passed} passed, {failed} failed ==")
+    # ---------- I. M5 出站图片：/req 详情把需求描述里的截图逐张回推（FR-16） ----------
+    print("\n[I] M5 出站图片：附件引用 → /req 回推图片")
+    PNG = b"\x89PNG\r\n\x1a\n" + bytes(range(64))
+    FNAME = f"e2e-shot-{RUN}.png"
+    st, att = upload_attachment(FNAME, PNG, "image/png", description="E2E 出站图片")
+    AID = (att or {}).get("attachmentId") if isinstance(att, dict) else None
+    check("multipart 上传附件", st == 200 and bool(AID) and len(AID) == 32, f"{st} {att}")
+
+    st, req2 = call("POST", f"/projects/{PID}/requirements",
+                    {"title": f"页面报错截图修复-{RUN}",
+                     "description": f"复现步骤见图\n![截图](/api/attachments/{AID}/raw)"})
+    check("建带附件引用的需求 REQ-2", st == 200 and (req2 or {}).get("code") == "REQ-2",
+          f"{st} {req2}")
+
+    send("c-ops", "/req REQ-2", "i-req-1")
+    rs = wait_reply("c-ops", 10)
+    check("/req 详情提示附图", len(rs) >= 10 and "附 1 张需求截图" in rs[9]["text"],
+          f"{rs[-1:] if rs else None}")
+    imgs = []
+    deadline = time.time() + 20
+    while time.time() < deadline and not imgs:
+        imgs = images("c-ops")
+        if not imgs:
+            time.sleep(0.3)
+    check("fake 捕获 1 张出站图片（原字节/原名/原类型）",
+          len(imgs) == 1 and imgs[0]["size"] == len(PNG)
+          and imgs[0]["fileName"] == FNAME and imgs[0]["contentType"] == "image/png",
+          f"{imgs}")
+
+    # ---------- J. M5 入站图片：发截图给 bot → 存平台附件 + 门禁（FR-17） ----------
+    print("\n[J] M5 入站图片：截图收执 + 附件落库 + feishu 未绑定门禁")
+    send("c-img", None, "j-img-1", image_key="img_v3_e2e_a")
+    rs = wait_reply("c-img")
+    check("收到截图回执（暂存 1 张）",
+          bool(rs) and "已收到截图（暂存 1 张" in rs[0]["text"], f"{rs}")
+
+    st, atts = call("GET", "/attachments?scope=SHARED")
+    check("附件库出现 bot 截图行（SHARED 域）",
+          st == 200 and any("bot 用户 u-e2e 发送的截图" in (a.get("description") or "")
+                            for a in (atts or [])),
+          f"{st} {[(a.get('originalName'), a.get('description')) for a in (atts or [])]}")
+
+    deadline = time.time() + 20
+    img_rows = []
+    while time.time() < deadline:
+        st, page = call("GET", "/bot/admin/interactions?size=200")
+        img_rows = [r for r in ((page or {}).get("items") or [])
+                    if r.get("command") == "IMAGE" and r.get("status") == "OK"]
+        if img_rows:
+            break
+        time.sleep(0.5)
+    check("交互日志记 IMAGE 指令（OK）", bool(img_rows), f"{img_rows}")
+
+    IMG_SENDER = f"ou_img_{RUN}"
+    send("oc_e2e_img", None, "j-gate-1", channel="feishu",
+         message_id=f"om_j_gate_{RUN}", sender=IMG_SENDER, image_key="img_v3_e2e_gate")
+    t = wait_feishu_text(f"om_j_gate_{RUN}")
+    check("feishu 未绑定发图 → 门禁拒绝文案（同敏感操作）", "需要先绑定个人身份" in t, t)
+
+    # ---------- K. M5 会话控制空态：/status /stop（FR-18） ----------
+    print("\n[K] M5 /status /stop（无成功会话的空态）")
+    send("c-ops", "/status", "k-status-1")
+    rs = wait_reply("c-ops", 11)
+    check("/status 空态回复", len(rs) >= 11 and "暂无开发会话" in rs[10]["text"],
+          f"{rs[-1:] if rs else None}")
+
+    send("c-ops", "/stop", "k-stop-1")
+    rs = wait_reply("c-ops", 12)
+    check("/stop 无运行中会话 → 明确提示（不静默）",
+          len(rs) >= 12 and "没有运行中的会话" in rs[11]["text"],
+          f"{rs[-1:] if rs else None}")
+
+    # ---------- L. M5 主线查看：/wi /design（FR-19） ----------
+    print("\n[L] M5 /wi /design（研发主线查看）")
+    # 注意：D2 的 /dev REQ-1 已按 CAP-38 自动建了一个 DEVELOPMENT 工作单元（WI-1，
+    # create 无事务，409 不回滚），所以这里新建的是 WI-2，/wi 共 2 个
+    st, wi = call("POST", f"/projects/{PID}/requirements/{req1['id']}/work-items",
+                  {"title": f"登录接口-{RUN}", "type": "DEVELOPMENT"})
+    check("API 建工作单元", st == 200 and (wi or {}).get("code") == "WI-2", f"{st} {wi}")
+
+    send("c-ops", "/wi REQ-1", "l-wi-1")
+    rs = wait_reply("c-ops", 13)
+    check("/wi 列出工作单元（含 /dev 自动建的 WI-1）",
+          len(rs) >= 13 and "工作单元（2 个）" in rs[12]["text"]
+          and "WI-1" in rs[12]["text"] and "WI-2" in rs[12]["text"],
+          f"{rs[-1:] if rs else None}")
+
+    send("c-ops", "/design REQ-1", "l-design-1")
+    rs = wait_reply("c-ops", 14)
+    check("/design 空态回复（暂无方案）",
+          len(rs) >= 14 and "暂无方案" in rs[13]["text"], f"{rs[-1:] if rs else None}")
+
+    print(f"\n== CAP-75 M2+M3+M5 bot E2E: {passed} passed, {failed} failed ==")
 finally:
     if mock_proc:
         mock_proc.terminate()
