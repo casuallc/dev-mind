@@ -268,6 +268,13 @@ try:
 
     # ---------- F. 飞书出站回推 ----------
     print("\n[F] 飞书出站：集成 baseUrl 指向本地 mock，断言 reply 请求到达")
+    # 多飞书应用并存口径：无 bot 槽的文档专用集成必须被机器人网关跳过（botEnabled 过滤）
+    st, doc_only = call("POST", "/integrations", {
+        "type": "FEISHU", "name": f"CAP75-E2E-飞书文档专用-{RUN}",
+        "baseUrl": "http://127.0.0.1:18199",  # 无服务监听：若误选它，回推必失败
+        "authType": "BASIC", "username": "cli_docs_only", "token": "secret_docs_only"})
+    check("创建文档专用飞书集成（无 bot 槽）", st == 200, f"{st} {doc_only}")
+
     st, integ = call("POST", "/integrations", {
         "type": "FEISHU", "name": f"CAP75-E2E-飞书-{RUN}", "baseUrl": FEISHU_BASE,
         "authType": "BASIC", "username": "cli_e2e_bot", "token": "secret_e2e_bot",
