@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -26,7 +27,14 @@ import com.devmind.common.agent.SessionEvent;
 import com.devmind.common.dto.PageView;
 import com.devmind.deploy.service.DeploymentService;
 import com.devmind.project.ProjectService;
+import com.devmind.project.RequirementService;
+import com.devmind.project.WorkItemService;
 import com.devmind.project.dto.ProjectView;
+import com.devmind.project.dto.RequirementView;
+import com.devmind.project.dto.WorkItemView;
+import com.devmind.project.model.RequirementEntity;
+import com.devmind.session.dto.CreateSessionRequest;
+import com.devmind.session.dto.SessionView;
 import com.devmind.session.service.SessionManagerService;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -83,6 +91,8 @@ class BotRouterServiceTest {
     private final ChatManagerService chatManager = mock(ChatManagerService.class);
     private final SessionManagerService sessionManager = mock(SessionManagerService.class);
     private final ProjectService projectService = mock(ProjectService.class);
+    private final RequirementService requirementService = mock(RequirementService.class);
+    private final WorkItemService workItemService = mock(WorkItemService.class);
     private final BuildService buildService = mock(BuildService.class);
     private final DeploymentService deploymentService = mock(DeploymentService.class);
     private final CapturingAdapter adapter = new CapturingAdapter();
@@ -122,7 +132,8 @@ class BotRouterServiceTest {
         when(provider.getIfAvailable()).thenAnswer(inv -> registryRef.get());
 
         router = new BotRouterService(bindingRepo, interactionRepo, chatManager, sessionManager,
-                projectService, buildService, deploymentService, props, provider, List.of());
+                projectService, requirementService, workItemService, buildService,
+                deploymentService, props, provider, List.of());
         registryRef.set(new BotAdapterRegistry(List.of(adapter), router));
     }
 
@@ -291,6 +302,89 @@ class BotRouterServiceTest {
         assertTrue("c2".equals(bindings.get("fake|chat-1").getChatSessionId()));
     }
 
+    // ---------------- CAP-75 FR-15 研发主线指令 ----------------
+
+    private static RequirementView reqView(String id, long seq, String title, String status, String desc) {
+        return new RequirementView(id, "p1", seq, "REQ-" + seq, title, desc, status,
+                "FEATURE", null, null, "LOCAL", null, null, null, null, null, null, null,
+                null, null, null, null, null, "admin", null, null, null, null, null);
+    }
+
+    private void bindP1() throws Exception {
+        ProjectView p = mock(ProjectView.class);
+        when(p.id()).thenReturn("p1");
+        when(p.name()).thenReturn("演示项目");
+        when(projectService.get("p1")).thenReturn(p);
+        router.onMessage(msg("/bind p1", "e-bindp1-" + System.nanoTime()));
+        awaitReply();
+    }
+
+    @Test
+    void reqsListsOpenRequirements() throws Exception {
+        bindP1();
+        when(requirementService.list(eq("p1"), eq("OPEN"), isNull(), isNull(), isNull(),
+                eq("seq"), eq("desc"), eq(0), eq(10)))
+                .thenReturn(new PageView<>(List.of(
+                        reqView("r1", 3, "登录加验证码", "IN_PROGRESS", null),
+                        reqView("r2", 2, "导出 CSV", "DESIGNING", null)), 2, 0, 10));
+
+        router.onMessage(msg("/reqs", "e-rq-1"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("REQ-3") && reply.contains("登录加验证码"), reply);
+        assertTrue(reply.contains("REQ-2") && reply.contains("导出 CSV"), reply);
+        assertTrue(reply.contains("共 2"), reply);
+    }
+
+    @Test
+    void reqDetailResolvesSeqAndShowsWorkItems() throws Exception {
+        bindP1();
+        RequirementEntity e = new RequirementEntity();
+        e.setId("r1");
+        e.setProjectId("p1");
+        e.setSeq(3L);
+        when(requirementService.findByProjectSeq("p1", 3L)).thenReturn(Optional.of(e));
+        when(requirementService.get("p1", "r1"))
+                .thenReturn(reqView("r1", 3, "登录加验证码", "IN_PROGRESS", "支持图形验证码与滑块"));
+        when(workItemService.list("p1", "r1")).thenReturn(List.of(
+                new WorkItemView("w1", "p1", "r1", null, 1L, "WI-1", "BACKEND",
+                        "登录接口", null, "DOING", null, null, "admin", null, null)));
+
+        router.onMessage(msg("/req req-3", "e-rq-2"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("REQ-3 登录加验证码"), reply);
+        assertTrue(reply.contains("滑块"), reply);
+        assertTrue(reply.contains("WI-1 [DOING] 登录接口"), reply);
+    }
+
+    @Test
+    void devCreatesSessionLinkedToRequirement() throws Exception {
+        bindP1();
+        RequirementEntity e = new RequirementEntity();
+        e.setId("r1");
+        e.setProjectId("p1");
+        e.setSeq(3L);
+        when(requirementService.findByProjectSeq("p1", 3L)).thenReturn(Optional.of(e));
+        when(requirementService.get("p1", "r1"))
+                .thenReturn(reqView("r1", 3, "登录加验证码", "IN_PROGRESS", "支持图形验证码"));
+        AtomicReference<CreateSessionRequest> captured = new AtomicReference<>();
+        SessionView sv = mock(SessionView.class);
+        when(sv.id()).thenReturn("s-1");
+        when(sv.status()).thenReturn("QUEUED");
+        when(sessionManager.create(any())).thenAnswer(inv -> {
+            captured.set(inv.getArgument(0));
+            return sv;
+        });
+
+        router.onMessage(msg("/dev REQ-3 先做图形验证码", "e-rq-3"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("s-1") && reply.contains("REQ-3"), reply);
+        CreateSessionRequest req = captured.get();
+        assertTrue("r1".equals(req.requirementId()), String.valueOf(req.requirementId()));
+        assertTrue(req.taskSpec().contains("【REQ-3】登录加验证码"), req.taskSpec());
+        assertTrue(req.taskSpec().contains("支持图形验证码"), req.taskSpec());
+        assertTrue(req.taskSpec().contains("补充说明：先做图形验证码"), req.taskSpec());
+    }
+
     // ---------------- CAP-75 FR-11/12 个人身份与门禁 ----------------
 
     /** 支持身份映射的 channel 配置桩（仿飞书：senderId → 平台用户名）。 */
@@ -327,7 +421,8 @@ class BotRouterServiceTest {
         ObjectProvider<BotAdapterRegistry> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenAnswer(inv -> registryRef.get());
         feishuRouter = new BotRouterService(bindingRepo, interactionRepo, chatManager,
-                sessionManager, projectService, buildService, deploymentService, props, provider,
+                sessionManager, projectService, requirementService, workItemService,
+                buildService, deploymentService, props, provider,
                 List.of(identityConfig));
         registryRef.set(new BotAdapterRegistry(List.of(feishuAdapter), feishuRouter));
     }
@@ -367,6 +462,11 @@ class BotRouterServiceTest {
         feishuRouter.onMessage(feishuMsg("ou_alice", "/whoami", "e-g-4"));
         String whoamiReply = awaitFeishuReply();
         assertTrue(whoamiReply.contains("bot-admin（机器人默认身份"), whoamiReply);
+        // M4 研发主线指令同口径门禁
+        feishuRouter.onMessage(feishuMsg("ou_alice", "/reqs", "e-g-5"));
+        assertTrue(awaitFeishuReply().contains("需要先绑定个人身份"));
+        feishuRouter.onMessage(feishuMsg("ou_alice", "/dev REQ-1", "e-g-6"));
+        assertTrue(awaitFeishuReply().contains("需要先绑定个人身份"));
     }
 
     @Test

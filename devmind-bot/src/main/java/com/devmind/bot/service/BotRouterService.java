@@ -21,7 +21,11 @@ import com.devmind.common.exception.DevMindException;
 import com.devmind.deploy.dto.DeploymentView;
 import com.devmind.deploy.service.DeploymentService;
 import com.devmind.project.ProjectService;
+import com.devmind.project.RequirementService;
+import com.devmind.project.WorkItemService;
 import com.devmind.project.dto.ProjectView;
+import com.devmind.project.dto.RequirementView;
+import com.devmind.project.dto.WorkItemView;
 import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.SessionView;
 import com.devmind.session.service.SessionManagerService;
@@ -64,7 +68,7 @@ public class BotRouterService implements BotMessageHandler {
 
     /** FR-12 敏感操作：支持身份映射的 channel 上要求已绑定个人身份 */
     private static final java.util.Set<String> SENSITIVE_COMMANDS =
-            java.util.Set.of("bind", "session", "build", "deploy");
+            java.util.Set.of("bind", "session", "build", "deploy", "reqs", "req", "dev");
 
     /** 门禁拒绝时的绑定指引（同时落 REJECTED 交互日志） */
     static final String BIND_GUIDANCE = "该操作需要先绑定个人身份：给我发 /bindme 获取你的身份码，"
@@ -75,6 +79,8 @@ public class BotRouterService implements BotMessageHandler {
     private final ChatManagerService chatManager;
     private final SessionManagerService sessionManager;
     private final ProjectService projectService;
+    private final RequirementService requirementService;
+    private final WorkItemService workItemService;
     private final BuildService buildService;
     private final DeploymentService deploymentService;
     private final BotProperties props;
@@ -88,6 +94,8 @@ public class BotRouterService implements BotMessageHandler {
                             ChatManagerService chatManager,
                             SessionManagerService sessionManager,
                             ProjectService projectService,
+                            RequirementService requirementService,
+                            WorkItemService workItemService,
                             BuildService buildService,
                             DeploymentService deploymentService,
                             BotProperties props,
@@ -98,6 +106,8 @@ public class BotRouterService implements BotMessageHandler {
         this.chatManager = chatManager;
         this.sessionManager = sessionManager;
         this.projectService = projectService;
+        this.requirementService = requirementService;
+        this.workItemService = workItemService;
         this.buildService = buildService;
         this.deploymentService = deploymentService;
         this.props = props;
@@ -243,6 +253,9 @@ public class BotRouterService implements BotMessageHandler {
             case "unbindme" -> "解绑请登录平台：设置 → 第三方账号，删除对应飞书集成的身份码绑定即可";
             case "bind" -> bind(binding, cmd.args());
             case "session" -> startSession(binding, cmd.args());
+            case "reqs" -> listRequirements(binding);
+            case "req" -> requirementDetail(binding, cmd.args());
+            case "dev" -> devSession(binding, cmd.args());
             case "build" -> lastBuild(binding);
             case "deploy" -> lastDeploys(binding);
             case "new" -> newChat(binding);
@@ -288,7 +301,10 @@ public class BotRouterService implements BotMessageHandler {
                 /whoami —— 查看当前身份
                 /bind <项目id或名称> —— 绑定项目（无参查看当前绑定；需先绑定个人身份）
                 /new —— 重开问答（丢弃当前问答上下文）
-                /session <需求描述> —— 在绑定项目起开发会话（需绑定个人身份）
+                /reqs —— 进行中的需求列表（需绑定个人身份）
+                /req <编号> —— 需求详情（编号如 REQ-3；需绑定个人身份）
+                /dev <编号> [补充说明] —— 以需求起开发会话，挂研发主线（需绑定个人身份）
+                /session <需求描述> —— 起自由文本开发会话（需绑定个人身份）
                 /build —— 最近一条构建状态（需绑定个人身份）
                 /deploy —— 最近 5 条部署状态（需绑定个人身份）
                 其余文字直接当作问答（私聊直接问，群聊 @我）""";
@@ -476,6 +492,94 @@ public class BotRouterService implements BotMessageHandler {
         String preview = desc.length() > 60 ? desc.substring(0, 60) + "…" : desc;
         return "已起开发会话 " + s.id() + "\n需求：" + preview + "\n状态：" + s.status()
                 + footer("/projects/" + projectId);
+    }
+
+    // ---------------- 研发主线（M4 FR-15） ----------------
+
+    /** /reqs：未完结需求（OPEN 伪状态），seq 倒序前 10 条。 */
+    private String listRequirements(BotBindingEntity binding) {
+        String projectId = requireProject(binding);
+        PageView<RequirementView> page = requirementService.list(
+                projectId, "OPEN", null, null, null, "seq", "desc", 0, 10);
+        if (page.items().isEmpty()) {
+            return "暂无进行中的需求" + footer("/projects/" + projectId);
+        }
+        StringBuilder sb = new StringBuilder("进行中的需求（前 " + page.items().size()
+                + " 条，共 " + page.total() + "）：");
+        for (RequirementView r : page.items()) {
+            sb.append("\n- ").append(r.code()).append(" [").append(r.status()).append("] ")
+                    .append(r.title());
+        }
+        sb.append("\n发 /req <编号> 看详情，/dev <编号> 以该需求起开发会话");
+        return sb.toString();
+    }
+
+    /** /req <编号>：需求详情（描述截断 500）+ 工作单元前 5 条。 */
+    private String requirementDetail(BotBindingEntity binding, String args) {
+        String projectId = requireProject(binding);
+        if (args == null || args.isBlank()) {
+            return "用法：/req <需求编号>（编号见 /reqs，如 REQ-3）";
+        }
+        RequirementView r = resolveRequirement(projectId, args.trim());
+        StringBuilder sb = new StringBuilder();
+        sb.append(r.code()).append(" ").append(r.title())
+                .append("\n状态：").append(r.status())
+                .append(r.type() == null ? "" : " ｜ 类型：" + r.type())
+                .append(r.assignee() == null ? "" : " ｜ 负责人：" + r.assignee());
+        if (r.description() != null && !r.description().isBlank()) {
+            String d = r.description().strip();
+            sb.append("\n描述：").append(d.length() > 500 ? d.substring(0, 500) + "…" : d);
+        }
+        List<WorkItemView> wis = workItemService.list(projectId, r.id());
+        if (!wis.isEmpty()) {
+            sb.append("\n工作单元（").append(wis.size()).append("）：");
+            wis.stream().limit(5).forEach(w -> sb.append("\n- ").append(w.code())
+                    .append(" [").append(w.status()).append("] ").append(w.title()));
+            if (wis.size() > 5) {
+                sb.append("\n  …");
+            }
+        }
+        sb.append("\n发 /dev ").append(r.code()).append(" 以该需求起开发会话");
+        return sb.toString();
+    }
+
+    /**
+     * /dev <编号> [补充说明]：以需求起开发会话——taskSpec = 需求标题+描述+补充，
+     * 挂 requirementId 进研发主线（平台需求页可追溯其下会话）。
+     */
+    private String devSession(BotBindingEntity binding, String args) {
+        String projectId = requireProject(binding);
+        if (args == null || args.isBlank()) {
+            return "用法：/dev <需求编号> [补充说明]（编号见 /reqs）";
+        }
+        String[] parts = args.trim().split("\\s+", 2);
+        RequirementView r = resolveRequirement(projectId, parts[0]);
+        String extra = parts.length > 1 ? parts[1].trim() : "";
+        StringBuilder spec = new StringBuilder("【").append(r.code()).append("】").append(r.title());
+        if (r.description() != null && !r.description().isBlank()) {
+            spec.append("\n\n").append(r.description().strip());
+        }
+        if (!extra.isEmpty()) {
+            spec.append("\n\n补充说明：").append(extra);
+        }
+        SessionView s = sessionManager.create(new CreateSessionRequest(
+                null, projectId, null, r.id(), spec.toString(), null, null, null, null));
+        return "已起开发会话 " + s.id() + "（需求 " + r.code() + "）\n标题：" + r.title()
+                + "\n状态：" + s.status() + footer("/projects/" + projectId);
+    }
+
+    /** 需求编号解析：REQ-3 / req-3 / 3 按项目内 seq 查，否则按原始 id 查。 */
+    private RequirementView resolveRequirement(String projectId, String key) {
+        var m = java.util.regex.Pattern.compile("(?i)REQ-?(\\d+)").matcher(key);
+        if (m.matches()) {
+            long seq = Long.parseLong(m.group(1));
+            return requirementService.findByProjectSeq(projectId, seq)
+                    .map(e -> requirementService.get(projectId, e.getId()))
+                    .orElseThrow(() -> new DevMindException(
+                            com.devmind.common.exception.ErrorCode.NOT_FOUND,
+                            "需求不存在: " + key));
+        }
+        return requirementService.get(projectId, key);
     }
 
     private String lastBuild(BotBindingEntity binding) {
