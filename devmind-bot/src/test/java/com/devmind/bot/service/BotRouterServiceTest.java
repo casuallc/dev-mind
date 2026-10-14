@@ -603,6 +603,68 @@ class BotRouterServiceTest {
         assertTrue(awaitFeishuReply().contains("已收到截图"));
     }
 
+    // ---------------- CAP-75 FR-18 会话控制 /status /stop ----------------
+
+    private static SessionView sessView(String id, String status, String taskSpec, String summary) {
+        SessionView s = mock(SessionView.class);
+        when(s.id()).thenReturn(id);
+        when(s.status()).thenReturn(status);
+        when(s.taskSpec()).thenReturn(taskSpec);
+        when(s.summary()).thenReturn(summary);
+        when(s.createdAt()).thenReturn(Instant.now());
+        return s;
+    }
+
+    @Test
+    void statusListsRecentSessions() throws Exception {
+        bindP1();
+        // sessView 内部也是 when() 打桩，必须先建视图再 stub list（否则 UnfinishedStubbing）
+        SessionView s1 = sessView("s-abcdef123456", "RUNNING", "修复登录页样式错位问题", "已改完 css");
+        SessionView s2 = sessView("s-000000999999", "FINISHED", "导出 CSV", null);
+        when(sessionManager.list(isNull(), eq("p1"), isNull(), isNull())).thenReturn(List.of(s1, s2));
+        router.onMessage(msg("/status", "e-st-1"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("s-abcdef") && reply.contains("RUNNING"), reply);
+        assertTrue(reply.contains("修复登录页样式错位问题"), reply);
+        assertTrue(reply.contains("进展：已改完 css"), reply);
+        assertTrue(reply.contains("s-000000") && reply.contains("FINISHED"), reply);
+    }
+
+    @Test
+    void stopWithoutArgKillsLatestRunning() throws Exception {
+        bindP1();
+        SessionView running = sessView("s-run12345678", "RUNNING", "做导出", null);
+        SessionView killed = sessView("s-run12345678", "TERMINATED", "做导出", null);
+        when(sessionManager.list(eq("RUNNING"), eq("p1"), isNull(), isNull()))
+                .thenReturn(List.of(running));
+        when(sessionManager.kill("s-run12345678")).thenReturn(killed);
+        router.onMessage(msg("/stop", "e-st-2"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("已停止会话 s-run123") && reply.contains("TERMINATED"), reply);
+    }
+
+    @Test
+    void stopByUniquePrefix() throws Exception {
+        bindP1();
+        SessionView a = sessView("s-aaaa11112222", "RUNNING", "任务A", null);
+        SessionView b = sessView("s-bbbb33334444", "FINISHED", "任务B", null);
+        SessionView killed = sessView("s-aaaa11112222", "TERMINATED", "任务A", null);
+        when(sessionManager.list(isNull(), eq("p1"), isNull(), isNull())).thenReturn(List.of(a, b));
+        when(sessionManager.kill("s-aaaa11112222")).thenReturn(killed);
+        router.onMessage(msg("/stop s-aaaa", "e-st-3"));
+        assertTrue(awaitReply().contains("已停止会话 s-aaaa11"));
+    }
+
+    @Test
+    void stopFinishedSessionShortCircuits() throws Exception {
+        bindP1();
+        SessionView dead = sessView("s-dead11112222", "FINISHED", "任务X", null);
+        when(sessionManager.list(isNull(), eq("p1"), isNull(), isNull()))
+                .thenReturn(List.of(dead));
+        router.onMessage(msg("/stop s-dead", "e-st-4"));
+        assertTrue(awaitReply().contains("无需停止"));
+    }
+
     // ---------------- CAP-75 FR-11/12 个人身份与门禁 ----------------
 
     /** 支持身份映射的 channel 配置桩（仿飞书：senderId → 平台用户名）。 */

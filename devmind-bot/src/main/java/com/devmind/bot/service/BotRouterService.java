@@ -72,7 +72,8 @@ public class BotRouterService implements BotMessageHandler {
 
     /** FR-12 敏感操作：支持身份映射的 channel 上要求已绑定个人身份（IMAGE=FR-17 入站截图） */
     private static final java.util.Set<String> SENSITIVE_COMMANDS =
-            java.util.Set.of("bind", "session", "build", "deploy", "reqs", "req", "dev", "IMAGE");
+            java.util.Set.of("bind", "session", "build", "deploy", "reqs", "req", "dev", "IMAGE",
+                    "status", "stop");
 
     /** FR-16 出站图片：需求描述中的本地附件引用（CAP-68 形态） */
     private static final java.util.regex.Pattern ATTACHMENT_REF =
@@ -298,6 +299,8 @@ public class BotRouterService implements BotMessageHandler {
             case "reqs" -> RouteReply.text(listRequirements(binding));
             case "req" -> requirementDetail(binding, cmd.args());
             case "dev" -> RouteReply.text(devSession(msg, binding, cmd.args()));
+            case "status" -> RouteReply.text(sessionStatus(binding));
+            case "stop" -> RouteReply.text(stopSession(binding, cmd.args()));
             case "build" -> RouteReply.text(lastBuild(binding));
             case "deploy" -> RouteReply.text(lastDeploys(binding));
             case "new" -> RouteReply.text(newChat(binding));
@@ -349,6 +352,8 @@ public class BotRouterService implements BotMessageHandler {
                 /session <需求描述> —— 起自由文本开发会话（需绑定个人身份）
                 /build —— 最近一条构建状态（需绑定个人身份）
                 /deploy —— 最近 5 条部署状态（需绑定个人身份）
+                /status —— 最近 5 条开发会话状态（需绑定个人身份）
+                /stop [会话id] —— 停止会话（无参停最新运行中的；需绑定个人身份）
                 直接发截图给我 —— 10 分钟内发 /dev 或 /session 起会话自动带上（需绑定个人身份）
                 其余文字直接当作问答（私聊直接问，群聊 @我）""";
     }
@@ -664,6 +669,78 @@ public class BotRouterService implements BotMessageHandler {
                 + "\n状态：" + s.status()
                 + (attachmentIds.isEmpty() ? "" : "\n（已附 " + attachmentIds.size() + " 张截图）")
                 + footer("/projects/" + projectId);
+    }
+
+    // ---------------- 会话控制（M5 FR-18） ----------------
+
+    /** /status：绑定项目最近 5 条会话（createdAt 倒序），RUNNING 附摘要。 */
+    private String sessionStatus(BotBindingEntity binding) {
+        String projectId = requireProject(binding);
+        List<SessionView> all = sessionManager.list(null, projectId, null, null);
+        if (all.isEmpty()) {
+            return "暂无开发会话" + footer("/projects/" + projectId);
+        }
+        StringBuilder sb = new StringBuilder("最近会话（前 " + Math.min(5, all.size())
+                + " 条，共 " + all.size() + "）：");
+        for (SessionView s : all.stream().limit(5).toList()) {
+            sb.append("\n- ").append(shortId(s.id())).append(" [").append(s.status()).append("] ")
+                    .append(previewOf(s.taskSpec(), 40));
+            if (s.createdAt() != null) {
+                sb.append(" ｜ ").append(TIME_FMT.format(s.createdAt()));
+            }
+            if ("RUNNING".equals(s.status()) && s.summary() != null && !s.summary().isBlank()) {
+                sb.append("\n  进展：").append(previewOf(s.summary(), 60));
+            }
+        }
+        sb.append("\n发 /stop <会话id前几位> 停止会话");
+        return sb.toString();
+    }
+
+    /** /stop [id|唯一前缀]：无参停最新 RUNNING；kill 只受理存活会话（requireRuntime）。 */
+    private String stopSession(BotBindingEntity binding, String args) {
+        String projectId = requireProject(binding);
+        SessionView target;
+        if (args == null || args.isBlank()) {
+            target = sessionManager.list("RUNNING", projectId, null, null).stream().findFirst()
+                    .orElseThrow(() -> new DevMindException(
+                            com.devmind.common.exception.ErrorCode.BAD_REQUEST,
+                            "当前没有运行中的会话"));
+        } else {
+            String key = args.trim();
+            List<SessionView> hits = sessionManager.list(null, projectId, null, null).stream()
+                    .filter(s -> s.id().equals(key) || s.id().startsWith(key)).toList();
+            if (hits.isEmpty()) {
+                throw new DevMindException(com.devmind.common.exception.ErrorCode.NOT_FOUND,
+                        "会话不存在: " + key);
+            }
+            if (hits.size() > 1) {
+                StringBuilder sb = new StringBuilder("「" + key + "」匹配到多个会话，请补全 id：");
+                hits.stream().limit(5).forEach(s ->
+                        sb.append("\n- ").append(shortId(s.id())).append(" [").append(s.status())
+                                .append("] ").append(previewOf(s.taskSpec(), 30)));
+                throw new DevMindException(com.devmind.common.exception.ErrorCode.BAD_REQUEST,
+                        sb.toString());
+            }
+            target = hits.get(0);
+        }
+        if (!"RUNNING".equals(target.status()) && !"QUEUED".equals(target.status())) {
+            return "会话 " + shortId(target.id()) + " 已是 " + target.status() + "，无需停止";
+        }
+        SessionView killed = sessionManager.kill(target.id());
+        return "已停止会话 " + shortId(killed.id()) + "\n任务：" + previewOf(killed.taskSpec(), 40)
+                + "\n状态：" + killed.status() + footer("/projects/" + projectId);
+    }
+
+    private static String shortId(String id) {
+        return id == null ? "-" : id.substring(0, Math.min(8, id.length()));
+    }
+
+    private static String previewOf(String text, int max) {
+        if (text == null || text.isBlank()) {
+            return "-";
+        }
+        String oneLine = text.strip().replace('\n', ' ');
+        return oneLine.length() <= max ? oneLine : oneLine.substring(0, max) + "…";
     }
 
     /** 需求编号解析：REQ-3 / req-3 / 3 按项目内 seq 查，否则按原始 id 查。 */
