@@ -81,11 +81,33 @@ class FeishuBotAdapterNormalizeTest {
     }
 
     @Test
-    void nonTextIgnored() {
-        assertNull(FeishuBotAdapter.normalize(
-                event("user", "image", "{\"image_key\":\"img\"}", "p2p", null)));
+    void nonTextNonImageIgnored() {
+        // FR-17 前 image 也被忽略；现在 image 归一化为 imageKey 消息（见 imageNormalized）
         assertNull(FeishuBotAdapter.normalize(
                 event("user", "post", "{}", "p2p", null)));
+        assertNull(FeishuBotAdapter.normalize(
+                event("user", "sticker", "{\"file_key\":\"f\"}", "p2p", null)));
+    }
+
+    @Test
+    void imageNormalized() {
+        // FR-17：图片消息只抽 image_key（text=null），下载留给底座 botExecutor
+        BotMessage msg = FeishuBotAdapter.normalize(
+                event("user", "image", "{\"image_key\":\"img_v3_abc\"}", "p2p", null));
+        assertEquals("img_v3_abc", msg.imageKey());
+        assertNull(msg.text());
+        assertEquals("oc_456", msg.externalChatId());
+        assertEquals("ou_abc", msg.senderId());
+        assertEquals("om_123", msg.messageId());
+        assertEquals("evt-1", msg.eventId());
+    }
+
+    @Test
+    void imageWithoutKeyIgnored() {
+        assertNull(FeishuBotAdapter.normalize(
+                event("user", "image", "{}", "p2p", null)));
+        assertNull(FeishuBotAdapter.normalize(
+                event("user", "image", "not-json", "p2p", null)));
     }
 
     @Test

@@ -148,6 +148,16 @@ public class FeishuBotAdapter implements BotAdapter, BotChannelConfigProvider {
         }
     }
 
+    /** CAP-75 FR-17：入站图片——按 image_key 拉字节（底座在 botExecutor 调用，不占事件窗口）。 */
+    @Override
+    public byte[] downloadImage(String imageKey) {
+        FeishuBotGateway.FeishuBotHandle h = handleOrNull();
+        if (h == null) {
+            throw new IllegalStateException("飞书机器人未启用（无启用的飞书集成）");
+        }
+        return h.api().downloadImage(imageKey);
+    }
+
     // ---------------- 事件归一化 ----------------
 
     private void onEvent(P2MessageReceiveV1 event, BotMessageHandler handler) {
@@ -163,7 +173,7 @@ public class FeishuBotAdapter implements BotAdapter, BotChannelConfigProvider {
     }
 
     /**
-     * 飞书事件 → BotMessage。返回 null = 忽略（非用户发送/非文本/缺字段）。
+     * 飞书事件 → BotMessage。返回 null = 忽略（非用户发送/非文本非图片/缺字段）。
      * 静态独立便于单测（不依赖 Spring 与网络）。
      */
     static BotMessage normalize(P2MessageReceiveV1 event) {
@@ -175,12 +185,23 @@ public class FeishuBotAdapter implements BotAdapter, BotChannelConfigProvider {
             return null; // 机器人/应用自己的消息不回，防回环
         }
         EventMessage m = event.getEvent().getMessage();
-        if (m == null || !"text".equals(m.getMessageType())
-                || m.getChatId() == null || m.getMessageId() == null) {
+        if (m == null || m.getChatId() == null || m.getMessageId() == null) {
             return null;
         }
-        String text = extractText(m);
-        if (text == null || text.isBlank()) {
+        // FR-17：text 抽正文；image 只抽 image_key（下载留给底座 botExecutor，不占 3s 窗口）
+        String text = null;
+        String imageKey = null;
+        if ("text".equals(m.getMessageType())) {
+            text = extractText(m);
+            if (text == null || text.isBlank()) {
+                return null;
+            }
+        } else if ("image".equals(m.getMessageType())) {
+            imageKey = extractImageKey(m);
+            if (imageKey == null || imageKey.isBlank()) {
+                return null;
+            }
+        } else {
             return null;
         }
         boolean mentioned = m.getMentions() != null && m.getMentions().length > 0;
@@ -189,7 +210,21 @@ public class FeishuBotAdapter implements BotAdapter, BotChannelConfigProvider {
         String eventId = event.getHeader() == null ? null : event.getHeader().getEventId();
         return new BotMessage("feishu", m.getChatId(),
                 m.getChatType() == null ? BotMessage.CHAT_TYPE_P2P : m.getChatType(),
-                senderId, text, mentioned, m.getMessageId(), eventId);
+                senderId, text, mentioned, m.getMessageId(), eventId, imageKey);
+    }
+
+    /** 图片消息 content {"image_key":"img_v3_xxx"} 抽键。 */
+    static String extractImageKey(EventMessage m) {
+        String content = m.getContent();
+        if (content == null || content.isBlank()) {
+            return null;
+        }
+        try {
+            return MAPPER.readTree(content).path("image_key").asText("");
+        } catch (Exception e) {
+            log.warn("飞书图片消息 content 解析失败: {}", content);
+            return null;
+        }
     }
 
     /** content 是 JSON 字符串 {"text":"@_user_1 你好"}；剥离 @ 占位（mentions[].key）。 */

@@ -1,6 +1,9 @@
 package com.devmind.bot.service;
 
 import com.devmind.auth.security.DevMindPrincipal;
+import com.devmind.attachment.dto.AttachmentView;
+import com.devmind.attachment.model.AttachmentEntity;
+import com.devmind.attachment.service.AttachmentService;
 import com.devmind.bot.config.BotProperties;
 import com.devmind.bot.model.BotBindingEntity;
 import com.devmind.bot.model.BotInteractionEntity;
@@ -67,9 +70,9 @@ public class BotRouterService implements BotMessageHandler {
     private static final DateTimeFormatter TIME_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault());
 
-    /** FR-12 敏感操作：支持身份映射的 channel 上要求已绑定个人身份 */
+    /** FR-12 敏感操作：支持身份映射的 channel 上要求已绑定个人身份（IMAGE=FR-17 入站截图） */
     private static final java.util.Set<String> SENSITIVE_COMMANDS =
-            java.util.Set.of("bind", "session", "build", "deploy", "reqs", "req", "dev");
+            java.util.Set.of("bind", "session", "build", "deploy", "reqs", "req", "dev", "IMAGE");
 
     /** FR-16 出站图片：需求描述中的本地附件引用（CAP-68 形态） */
     private static final java.util.regex.Pattern ATTACHMENT_REF =
@@ -94,8 +97,11 @@ public class BotRouterService implements BotMessageHandler {
     private final BotProperties props;
     private final ObjectProvider<BotAdapterRegistry> registryProvider;
     private final ObjectProvider<AttachmentContentResolver> attachmentResolverProvider;
+    private final AttachmentService attachmentService;
     private final Map<String, BotChannelConfigProvider> channelConfigs = new HashMap<>();
     private final EventDedup dedup = new EventDedup();
+    /** FR-17 入站截图暂存：发图 → 10 分钟内 /dev /session 消费 */
+    private final PendingImageStore pendingImages = new PendingImageStore();
     private final ExecutorService botExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     public BotRouterService(BotBindingRepository bindingRepo,
@@ -110,6 +116,7 @@ public class BotRouterService implements BotMessageHandler {
                             BotProperties props,
                             ObjectProvider<BotAdapterRegistry> registryProvider,
                             ObjectProvider<AttachmentContentResolver> attachmentResolverProvider,
+                            AttachmentService attachmentService,
                             List<BotChannelConfigProvider> channelConfigProviders) {
         this.bindingRepo = bindingRepo;
         this.interactionRepo = interactionRepo;
@@ -123,6 +130,7 @@ public class BotRouterService implements BotMessageHandler {
         this.props = props;
         this.registryProvider = registryProvider;
         this.attachmentResolverProvider = attachmentResolverProvider;
+        this.attachmentService = attachmentService;
         for (BotChannelConfigProvider p : channelConfigProviders) {
             channelConfigs.put(p.channel(), p);
         }
@@ -138,7 +146,7 @@ public class BotRouterService implements BotMessageHandler {
     @Override
     public void onMessage(BotMessage msg) {
         if (msg == null || msg.channel() == null || msg.externalChatId() == null
-                || msg.text() == null || msg.text().isBlank()) {
+                || ((msg.text() == null || msg.text().isBlank()) && msg.imageKey() == null)) {
             return;
         }
         if (!dedup.markIfFirst(msg.channel(), msg.eventId())) {
@@ -167,9 +175,11 @@ public class BotRouterService implements BotMessageHandler {
             SecurityContextHolder.getContext().setAuthentication(
                     new UsernamePasswordAuthenticationToken(
                             new DevMindPrincipal(actor, "USER"), null, List.of()));
-            CommandParser.Command cmd = CommandParser.parse(msg.text());
-            rec.setCommand(cmd == null ? "QA" : cmd.name());
-            if (cmd != null && SENSITIVE_COMMANDS.contains(cmd.name()) && rejectedByGate(msg)) {
+            CommandParser.Command cmd = msg.imageKey() != null ? null : CommandParser.parse(msg.text());
+            rec.setCommand(msg.imageKey() != null ? "IMAGE" : (cmd == null ? "QA" : cmd.name()));
+            boolean gated = msg.imageKey() != null
+                    || (cmd != null && SENSITIVE_COMMANDS.contains(cmd.name()));
+            if (gated && rejectedByGate(msg)) {
                 rec.setStatus(BotInteractionEntity.STATUS_REJECTED);
                 replyText = BIND_GUIDANCE;
             } else {
@@ -222,7 +232,8 @@ public class BotRouterService implements BotMessageHandler {
         r.setChatType(msg.chatType());
         r.setSenderId(msg.senderId());
         r.setCommand(command);
-        r.setInputText(cut(msg.text(), 2000));
+        r.setInputText(msg.imageKey() != null
+                ? cut("[图片] " + msg.imageKey(), 2000) : cut(msg.text(), 2000));
         r.setStatus(status != null ? status : BotInteractionEntity.STATUS_OK);
         return r;
     }
@@ -270,6 +281,9 @@ public class BotRouterService implements BotMessageHandler {
     }
 
     private RouteReply route(BotMessage msg, BotBindingEntity binding, CommandParser.Command cmd) {
+        if (msg.imageKey() != null) {
+            return RouteReply.text(receiveImage(msg));
+        }
         if (cmd == null) {
             return RouteReply.text(ask(binding, msg.text().trim()));
         }
@@ -280,10 +294,10 @@ public class BotRouterService implements BotMessageHandler {
             case "unbindme" -> RouteReply.text(
                     "解绑请登录平台：设置 → 第三方账号，删除对应飞书集成的身份码绑定即可");
             case "bind" -> RouteReply.text(bind(binding, cmd.args()));
-            case "session" -> RouteReply.text(startSession(binding, cmd.args()));
+            case "session" -> RouteReply.text(startSession(msg, binding, cmd.args()));
             case "reqs" -> RouteReply.text(listRequirements(binding));
             case "req" -> requirementDetail(binding, cmd.args());
-            case "dev" -> RouteReply.text(devSession(binding, cmd.args()));
+            case "dev" -> RouteReply.text(devSession(msg, binding, cmd.args()));
             case "build" -> RouteReply.text(lastBuild(binding));
             case "deploy" -> RouteReply.text(lastDeploys(binding));
             case "new" -> RouteReply.text(newChat(binding));
@@ -335,6 +349,7 @@ public class BotRouterService implements BotMessageHandler {
                 /session <需求描述> —— 起自由文本开发会话（需绑定个人身份）
                 /build —— 最近一条构建状态（需绑定个人身份）
                 /deploy —— 最近 5 条部署状态（需绑定个人身份）
+                直接发截图给我 —— 10 分钟内发 /dev 或 /session 起会话自动带上（需绑定个人身份）
                 其余文字直接当作问答（私聊直接问，群聊 @我）""";
     }
 
@@ -510,15 +525,19 @@ public class BotRouterService implements BotMessageHandler {
 
     // ---------------- 项目操作 ----------------
 
-    private String startSession(BotBindingEntity binding, String desc) {
+    private String startSession(BotMessage msg, BotBindingEntity binding, String desc) {
         String projectId = requireProject(binding);
         if (desc == null || desc.isBlank()) {
             return "用法：/session <需求描述>";
         }
+        List<String> attachmentIds = pendingImages.drain(pendingKey(msg));
         SessionView s = sessionManager.create(new CreateSessionRequest(
-                null, projectId, null, null, desc, null, null, null, null));
+                null, null, projectId, null, null, desc, null, null, null, null,
+                null, null, null, null, null,
+                attachmentIds.isEmpty() ? null : attachmentIds));
         String preview = desc.length() > 60 ? desc.substring(0, 60) + "…" : desc;
         return "已起开发会话 " + s.id() + "\n需求：" + preview + "\n状态：" + s.status()
+                + (attachmentIds.isEmpty() ? "" : "\n（已附 " + attachmentIds.size() + " 张截图）")
                 + footer("/projects/" + projectId);
     }
 
@@ -621,7 +640,7 @@ public class BotRouterService implements BotMessageHandler {
      * /dev <编号> [补充说明]：以需求起开发会话——taskSpec = 需求标题+描述+补充，
      * 挂 requirementId 进研发主线（平台需求页可追溯其下会话）。
      */
-    private String devSession(BotBindingEntity binding, String args) {
+    private String devSession(BotMessage msg, BotBindingEntity binding, String args) {
         String projectId = requireProject(binding);
         if (args == null || args.isBlank()) {
             return "用法：/dev <需求编号> [补充说明]（编号见 /reqs）";
@@ -636,10 +655,15 @@ public class BotRouterService implements BotMessageHandler {
         if (!extra.isEmpty()) {
             spec.append("\n\n补充说明：").append(extra);
         }
+        List<String> attachmentIds = pendingImages.drain(pendingKey(msg));
         SessionView s = sessionManager.create(new CreateSessionRequest(
-                null, projectId, null, r.id(), spec.toString(), null, null, null, null));
+                null, null, projectId, null, r.id(), spec.toString(), null, null, null, null,
+                null, null, null, null, null,
+                attachmentIds.isEmpty() ? null : attachmentIds));
         return "已起开发会话 " + s.id() + "（需求 " + r.code() + "）\n标题：" + r.title()
-                + "\n状态：" + s.status() + footer("/projects/" + projectId);
+                + "\n状态：" + s.status()
+                + (attachmentIds.isEmpty() ? "" : "\n（已附 " + attachmentIds.size() + " 张截图）")
+                + footer("/projects/" + projectId);
     }
 
     /** 需求编号解析：REQ-3 / req-3 / 3 按项目内 seq 查，否则按原始 id 查。 */
@@ -687,6 +711,156 @@ public class BotRouterService implements BotMessageHandler {
                     .append(d.createdAt() == null ? "" : TIME_FMT.format(d.createdAt()));
         }
         return sb.toString();
+    }
+
+    // ---------------- 入站图片（M5 FR-17） ----------------
+
+    /**
+     * 收图：botExecutor 里下载（不占事件回调 3s 窗口）→ 魔数嗅探 contentType →
+     * 存平台附件（SHARED，全项目可引）→ 暂存 10 分钟，等下一条 /dev /session 消费。
+     */
+    private String receiveImage(BotMessage msg) {
+        BotAdapter adapter = adapterOf(msg.channel());
+        if (adapter == null) {
+            return "当前平台不可用，请稍后再试";
+        }
+        byte[] bytes;
+        try {
+            bytes = adapter.downloadImage(msg.imageKey());
+        } catch (Exception e) {
+            throw new DevMindException(com.devmind.common.exception.ErrorCode.INTERNAL,
+                    "图片下载失败：" + e.getMessage());
+        }
+        if (bytes == null) {
+            return "当前平台不支持发送图片给机器人";
+        }
+        String contentType = sniffImageType(bytes);
+        if (contentType == null) {
+            return "收到的不是可识别的图片（支持 png/jpeg/gif/webp），请重发截图";
+        }
+        String name = "bot-" + msg.senderId() + "-" + System.currentTimeMillis()
+                + switch (contentType) {
+                    case "image/jpeg" -> ".jpg";
+                    case "image/gif" -> ".gif";
+                    case "image/webp" -> ".webp";
+                    default -> ".png";
+                };
+        AttachmentView view = attachmentService.upload(
+                new InMemoryMultipartFile(name, contentType, bytes),
+                AttachmentEntity.SCOPE_SHARED, "bot 用户 " + msg.senderId() + " 发送的截图");
+        int n = pendingImages.add(pendingKey(msg), view.attachmentId());
+        return "已收到截图（暂存 " + n + " 张，10 分钟内有效）\n"
+                + "发 /dev <需求编号> 或 /session <描述> 起开发会话会自动带上";
+    }
+
+    private String pendingKey(BotMessage msg) {
+        return msg.channel() + "|" + msg.externalChatId() + "|" + msg.senderId();
+    }
+
+    /** 图片魔数嗅探（不信任平台声明的 contentType）；不识别返回 null。 */
+    static String sniffImageType(byte[] b) {
+        if (b == null || b.length < 4) {
+            return null;
+        }
+        if ((b[0] & 0xFF) == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) {
+            return "image/png";
+        }
+        if ((b[0] & 0xFF) == 0xFF && (b[1] & 0xFF) == 0xD8 && (b[2] & 0xFF) == 0xFF) {
+            return "image/jpeg";
+        }
+        if (b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x38) {
+            return "image/gif";
+        }
+        if (b.length >= 12 && b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46
+                && b[8] == 0x57 && b[9] == 0x45 && b[10] == 0x42 && b[11] == 0x50) {
+            return "image/webp";
+        }
+        return null;
+    }
+
+    /** 内存字节包装的 MultipartFile（AttachmentService 只认 MultipartFile；MockMultipartFile 是 test 包不可用）。 */
+    private record InMemoryMultipartFile(String name, String contentType, byte[] bytes)
+            implements org.springframework.web.multipart.MultipartFile {
+        @Override
+        public String getName() {
+            return "image";
+        }
+
+        @Override
+        public String getOriginalFilename() {
+            return name;
+        }
+
+        @Override
+        public String getContentType() {
+            return contentType;
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return bytes.length == 0;
+        }
+
+        @Override
+        public long getSize() {
+            return bytes.length;
+        }
+
+        @Override
+        public byte[] getBytes() {
+            return bytes;
+        }
+
+        @Override
+        public java.io.InputStream getInputStream() {
+            return new java.io.ByteArrayInputStream(bytes);
+        }
+
+        @Override
+        public void transferTo(java.io.File dest) throws java.io.IOException {
+            java.nio.file.Files.write(dest.toPath(), bytes);
+        }
+    }
+
+    /**
+     * FR-17 暂存区：key=channel|chat|sender，TTL 10 分钟，单人最多攒 5 张（超出挤掉最旧）。
+     * 纯内存（重启即清，截图时效短、丢了重发即可）；惰性过期（add/drain 时才清理）。
+     */
+    private static final class PendingImageStore {
+        private static final long TTL_MS = 10 * 60 * 1000;
+        private static final int MAX_PER_USER = 5;
+        private final Map<String, java.util.Deque<Entry>> store =
+                new java.util.concurrent.ConcurrentHashMap<>();
+
+        private record Entry(String attachmentId, long expireAt) {
+        }
+
+        synchronized int add(String key, String attachmentId) {
+            java.util.Deque<Entry> q = store.computeIfAbsent(key, k -> new java.util.ArrayDeque<>());
+            purgeExpired(q);
+            while (q.size() >= MAX_PER_USER) {
+                q.pollFirst();
+            }
+            q.addLast(new Entry(attachmentId, System.currentTimeMillis() + TTL_MS));
+            return q.size();
+        }
+
+        /** 消费并清空（即使会话创建失败也算消费——截图时效短，不让失败请求反复挂旧图）。 */
+        synchronized List<String> drain(String key) {
+            java.util.Deque<Entry> q = store.remove(key);
+            if (q == null) {
+                return List.of();
+            }
+            purgeExpired(q);
+            return q.stream().map(Entry::attachmentId).toList();
+        }
+
+        private void purgeExpired(java.util.Deque<Entry> q) {
+            long now = System.currentTimeMillis();
+            while (!q.isEmpty() && q.peekFirst().expireAt() < now) {
+                q.pollFirst();
+            }
+        }
     }
 
     // ---------------- 回推 ----------------

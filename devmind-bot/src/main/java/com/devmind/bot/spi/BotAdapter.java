@@ -33,4 +33,12 @@ public interface BotAdapter {
     default void replyImage(BotMessage origin, String fileName, String contentType, byte[] bytes) {
         // 平台不支持图片回推：丢弃（底座日志可见）
     }
+
+    /**
+     * CAP-75 FR-17：按平台图片键下载图片字节（入站）。默认 null = 平台不支持收图，
+     * 底座回「当前平台不支持发送图片给机器人」。实现不得吞错（失败抛异常由底座兜底）。
+     */
+    default byte[] downloadImage(String imageKey) {
+        return null;
+    }
 }

@@ -183,6 +183,35 @@ public class FeishuApiClient {
         return mapper.writeValueAsString(body);
     }
 
+    // ---------------- CAP-75 FR-17：图片下载（入站） ----------------
+
+    /**
+     * 下载用户发给机器人的图片（GET /im/v1/images/{key}）：成功返回原始字节，
+     * 失败（权限/过期）飞书回 JSON——非 2xx 或 content-type 为 json 时按错误抛出。
+     */
+    public byte[] downloadImage(String imageKey) {
+        String path = "/open-apis/im/v1/images/" + encode(imageKey);
+        try {
+            HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + path))
+                    .timeout(Duration.ofSeconds(30))
+                    .header("Authorization", "Bearer " + tenantToken())
+                    .GET().build();
+            HttpResponse<byte[]> resp = http.send(req, HttpResponse.BodyHandlers.ofByteArray());
+            String type = resp.headers().firstValue("Content-Type").orElse("");
+            if (resp.statusCode() / 100 != 2 || type.contains("json")) {
+                throw new DevMindException(ErrorCode.INTERNAL,
+                        "下载图片失败：飞书 HTTP " + resp.statusCode()
+                                + truncateBody(new String(resp.body(), StandardCharsets.UTF_8)));
+            }
+            return resp.body();
+        } catch (DevMindException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new DevMindException(ErrorCode.INTERNAL,
+                    "飞书接口调用失败（" + baseUrl + path + "）: " + e.getMessage());
+        }
+    }
+
     /**
      * 消息体拼装：飞书 im/v1 的 content 必须是**内嵌 JSON 字符串**
      * （{"msg_type":"text","content":"{\"text\":\"…\"}"}），发对象形态真机必拒

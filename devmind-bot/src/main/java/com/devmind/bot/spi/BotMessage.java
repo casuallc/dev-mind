@@ -12,11 +12,19 @@ package com.devmind.bot.spi;
  * @param mentioned      群聊里是否 @ 了机器人（群聊只响应 mentioned=true；私聊恒处理）
  * @param messageId      平台侧消息 id（reply API 的锚点）
  * @param eventId        平台事件 id（底座去重键；可空 = 不去重）
+ * @param imageKey       CAP-75 FR-17 入站图片：平台侧图片键（飞书 image_key；text 消息恒 null）。
+ *                       图片消息 text 为 null——底座在 botExecutor 里惰性下载，不占事件回调窗口
  */
 public record BotMessage(String channel, String externalChatId, String chatType,
                          String senderId, String text, boolean mentioned,
-                         String messageId, String eventId) {
+                         String messageId, String eventId, String imageKey) {
 
     public static final String CHAT_TYPE_P2P = "p2p";
     public static final String CHAT_TYPE_GROUP = "group";
+
+    /** 兼容构造器：FR-17 之前的文本消息调用点（imageKey=null）。 */
+    public BotMessage(String channel, String externalChatId, String chatType, String senderId,
+                      String text, boolean mentioned, String messageId, String eventId) {
+        this(channel, externalChatId, chatType, senderId, text, mentioned, messageId, eventId, null);
+    }
 }

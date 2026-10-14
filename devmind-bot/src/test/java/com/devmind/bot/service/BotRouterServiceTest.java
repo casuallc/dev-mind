@@ -92,6 +92,14 @@ class BotRouterServiceTest {
         public void replyImage(BotMessage origin, String fileName, String contentType, byte[] bytes) {
             images.add(fileName + "|" + contentType + "|" + bytes.length);
         }
+
+        /** FR-17 入站图片：非 null 时 downloadImage 返回该字节（null=平台不支持收图）。 */
+        volatile byte[] downloadResult;
+
+        @Override
+        public byte[] downloadImage(String imageKey) {
+            return downloadResult;
+        }
     }
 
     private final BotBindingRepository bindingRepo = mock(BotBindingRepository.class);
@@ -103,6 +111,8 @@ class BotRouterServiceTest {
     private final WorkItemService workItemService = mock(WorkItemService.class);
     private final BuildService buildService = mock(BuildService.class);
     private final DeploymentService deploymentService = mock(DeploymentService.class);
+    private final com.devmind.attachment.service.AttachmentService attachmentService =
+            mock(com.devmind.attachment.service.AttachmentService.class);
     private final CapturingAdapter adapter = new CapturingAdapter();
     private final Map<String, BotBindingEntity> bindings = new HashMap<>();
     private final List<BotInteractionEntity> interactions = new ArrayList<>();
@@ -121,6 +131,16 @@ class BotRouterServiceTest {
         adapter.images.clear();
         adapter.failOnReply = null;
         attachmentResolverRef.set(null);
+        adapter.downloadResult = null;
+        java.util.concurrent.atomic.AtomicInteger uploadSeq = new java.util.concurrent.atomic.AtomicInteger();
+        when(attachmentService.upload(any(), anyString(), anyString())).thenAnswer(inv -> {
+            String id = String.format("%032x", uploadSeq.incrementAndGet());
+            org.springframework.web.multipart.MultipartFile f = inv.getArgument(0);
+            return new com.devmind.attachment.dto.AttachmentView(id, f.getOriginalFilename(),
+                    f.getContentType(), f.getSize(), inv.getArgument(1), true,
+                    "/api/attachments/" + id + "/raw", inv.getArgument(2), null, null,
+                    "u-1", Instant.now());
+        });
         when(bindingRepo.findByChannelAndExternalChatId(anyString(), anyString()))
                 .thenAnswer(inv -> Optional.ofNullable(
                         bindings.get(inv.getArgument(0) + "|" + inv.getArgument(1))));
@@ -146,7 +166,8 @@ class BotRouterServiceTest {
 
         router = new BotRouterService(bindingRepo, interactionRepo, chatManager, sessionManager,
                 projectService, requirementService, workItemService, buildService,
-                deploymentService, props, provider, attachmentProvider(), List.of());
+                deploymentService, props, provider, attachmentProvider(), attachmentService,
+                List.of());
         registryRef.set(new BotAdapterRegistry(List.of(adapter), router));
     }
 
@@ -484,6 +505,104 @@ class BotRouterServiceTest {
         assertTrue(adapter.images.poll(2, TimeUnit.SECONDS) == null, "非图片附件不应回推图片");
     }
 
+    // ---------------- CAP-75 FR-17 入站图片 ----------------
+
+    /** PNG 魔数头（sniffImageType 只认头 4-12 字节）。 */
+    private static final byte[] PNG_BYTES = {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+
+    private static BotMessage imageMsg(String channel, String chatId, String sender,
+                                       String imageKey, String eventId) {
+        return new BotMessage(channel, chatId, BotMessage.CHAT_TYPE_P2P, sender,
+                null, false, "m-" + eventId, eventId, imageKey);
+    }
+
+    @Test
+    void imageReceiptThenSessionConsumesPending() throws Exception {
+        bindP1();
+        adapter.downloadResult = PNG_BYTES;
+        router.onMessage(imageMsg("fake", "chat-1", "u-1", "img_v3_a", "e-in-1"));
+        String receipt = awaitReply();
+        assertTrue(receipt.contains("已收到截图") && receipt.contains("暂存 1 张"), receipt);
+
+        // 连发第二张 → 累计 2 张
+        router.onMessage(imageMsg("fake", "chat-1", "u-1", "img_v3_b", "e-in-2"));
+        assertTrue(awaitReply().contains("暂存 2 张"));
+
+        AtomicReference<CreateSessionRequest> captured = new AtomicReference<>();
+        SessionView sv = mock(SessionView.class);
+        when(sv.id()).thenReturn("s-9");
+        when(sv.status()).thenReturn("QUEUED");
+        when(sessionManager.create(any())).thenAnswer(inv -> {
+            captured.set(inv.getArgument(0));
+            return sv;
+        });
+        router.onMessage(msg("/session 修登录页样式错位", "e-in-3"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("已附 2 张截图"), reply);
+        assertTrue(captured.get().attachmentIds() != null
+                        && captured.get().attachmentIds().size() == 2,
+                String.valueOf(captured.get().attachmentIds()));
+    }
+
+    @Test
+    void imageReceiptThenDevConsumesPending() throws Exception {
+        bindP1();
+        RequirementEntity e = new RequirementEntity();
+        e.setId("r1");
+        e.setProjectId("p1");
+        e.setSeq(3L);
+        when(requirementService.findByProjectSeq("p1", 3L)).thenReturn(Optional.of(e));
+        when(requirementService.get("p1", "r1"))
+                .thenReturn(reqView("r1", 3, "登录加验证码", "IN_PROGRESS", null));
+        adapter.downloadResult = PNG_BYTES;
+        router.onMessage(imageMsg("fake", "chat-1", "u-1", "img_v3_c", "e-in-4"));
+        awaitReply();
+
+        AtomicReference<CreateSessionRequest> captured = new AtomicReference<>();
+        SessionView sv = mock(SessionView.class);
+        when(sv.id()).thenReturn("s-10");
+        when(sv.status()).thenReturn("QUEUED");
+        when(sessionManager.create(any())).thenAnswer(inv -> {
+            captured.set(inv.getArgument(0));
+            return sv;
+        });
+        router.onMessage(msg("/dev REQ-3 样式见截图", "e-in-5"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("已附 1 张截图"), reply);
+        assertTrue(captured.get().attachmentIds() != null
+                && captured.get().attachmentIds().size() == 1, "附件未挂上");
+    }
+
+    @Test
+    void imageUnsupportedPlatformAndNonImageBytes() throws Exception {
+        // 平台不支持收图（downloadImage 默认 null）
+        router.onMessage(imageMsg("fake", "chat-1", "u-1", "img_x", "e-in-6"));
+        assertTrue(awaitReply().contains("当前平台不支持发送图片给机器人"));
+
+        // 下载到非图片字节 → 提示重发（魔数嗅探，不信平台声明）
+        adapter.downloadResult = "not an image".getBytes();
+        router.onMessage(imageMsg("fake", "chat-1", "u-1", "img_y", "e-in-7"));
+        assertTrue(awaitReply().contains("不是可识别的图片"));
+    }
+
+    @Test
+    void imageGatedWhenUnboundAndReceiptWhenBound() throws Exception {
+        setupFeishuRouter();
+        feishuAdapter.downloadResult = PNG_BYTES;
+        // 未绑定个人身份：图片同敏感操作门禁，落 REJECTED（command=IMAGE）
+        feishuRouter.onMessage(imageMsg("feishu", "oc-1", "ou_alice", "img_v3_g", "e-in-8"));
+        assertTrue(awaitFeishuReply().contains("需要先绑定个人身份"));
+        List<BotInteractionEntity> rows = awaitInteractions(1);
+        assertTrue("IMAGE".equals(rows.get(0).getCommand()), rows.get(0).getCommand());
+        assertTrue(BotInteractionEntity.STATUS_REJECTED.equals(rows.get(0).getStatus()),
+                rows.get(0).getStatus());
+
+        // 绑定后正常收图
+        identityConfig.mappings.put("ou_alice", "alice");
+        feishuRouter.onMessage(imageMsg("feishu", "oc-1", "ou_alice", "img_v3_h", "e-in-9"));
+        assertTrue(awaitFeishuReply().contains("已收到截图"));
+    }
+
     // ---------------- CAP-75 FR-11/12 个人身份与门禁 ----------------
 
     /** 支持身份映射的 channel 配置桩（仿飞书：senderId → 平台用户名）。 */
@@ -522,7 +641,7 @@ class BotRouterServiceTest {
         feishuRouter = new BotRouterService(bindingRepo, interactionRepo, chatManager,
                 sessionManager, projectService, requirementService, workItemService,
                 buildService, deploymentService, props, provider, attachmentProvider(),
-                List.of(identityConfig));
+                attachmentService, List.of(identityConfig));
         registryRef.set(new BotAdapterRegistry(List.of(feishuAdapter), feishuRouter));
     }
 
