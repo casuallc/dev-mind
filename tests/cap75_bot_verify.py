@@ -19,6 +19,8 @@
   C 群聊免打扰：未 @ 机器人不回，@ 才回
   D /bind 项目（含无参查当前绑定）→ /build、/deploy 空态回复 → /session 无节点 409 失败文案
     （有记录的构建状态格式见 BotRouterServiceTest 单测，E2E 起真构建要 git+节点，不划算）
+  D2 研发主线（M4 FR-15）：API 建需求 → /reqs 列出 → /req req-1 详情（兼容小写/无前缀编号）
+    → /dev REQ-1 起会话（无节点 409 失败文案，证明需求已解析、挂在会话创建阶段失败）
   E 裸文本问答：懒建 MODEL 问答 → chat-mock 全量正文回推；/new 重开后下一轮仍是新问答；
     绑定问答在平台侧被删 → 续问自愈重建（不回「问答不存在」，本轮消息不丢，绑定换挂新问答）
   F 飞书出站：建 ENABLED 飞书集成（baseUrl 指向本地 mock）→ 注入 channel=feishu 消息
@@ -254,6 +256,28 @@ try:
     rs = wait_reply("c-ops", 6)
     check("/session 无可用节点 → 失败文案（不静默）",
           len(rs) >= 6 and "操作失败" in rs[5]["text"], f"{rs[-1:]}")
+
+    # ---------- D2. 研发主线指令（M4 FR-15） ----------
+    print("\n[D2] /reqs /req /dev（研发主线）")
+    st, req1 = call("POST", f"/projects/{PID}/requirements",
+                    {"title": f"登录加验证码-{RUN}", "description": "支持图形验证码与滑块"})
+    check("API 建需求", st == 200 and (req1 or {}).get("code") == "REQ-1", f"{st} {req1}")
+
+    send("c-ops", "/reqs", "e-reqs-1")
+    rs = wait_reply("c-ops", 7)
+    check("/reqs 列出未完结需求",
+          len(rs) >= 7 and "REQ-1" in rs[6]["text"] and "登录加验证码" in rs[6]["text"],
+          f"{rs[-1:]}")
+
+    send("c-ops", "/req req-1", "e-req-1")
+    rs = wait_reply("c-ops", 8)
+    check("/req 按编号出详情（兼容 req-1 小写形态）",
+          len(rs) >= 8 and "REQ-1" in rs[7]["text"] and "滑块" in rs[7]["text"], f"{rs[-1:]}")
+
+    send("c-ops", "/dev REQ-1 先做图形验证码", "e-dev-1")
+    rs = wait_reply("c-ops", 9)
+    check("/dev 需求已解析、起会话撞无节点 409 → 失败文案（不静默）",
+          len(rs) >= 9 and "操作失败" in rs[8]["text"], f"{rs[-1:]}")
 
     # ---------- E. 问答 ----------
     print("\n[E] 裸文本问答（MODEL 执行体懒建 + /new 重开 + 绑定问答被删自愈重建）")
