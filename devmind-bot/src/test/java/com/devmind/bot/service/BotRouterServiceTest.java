@@ -50,9 +50,10 @@ import org.springframework.beans.factory.ObjectProvider;
  */
 class BotRouterServiceTest {
 
-    /** 捕获回复的测试适配器（默认 code=fake）。 */
+    /** 捕获回复的测试适配器（默认 code=fake）；failOnReply 非空时 reply 抛错（模拟回推失败）。 */
     static class CapturingAdapter implements BotAdapter {
         final BlockingQueue<String> replies = new LinkedBlockingQueue<>();
+        volatile RuntimeException failOnReply;
         private final String code;
 
         CapturingAdapter() { this("fake"); }
@@ -70,6 +71,9 @@ class BotRouterServiceTest {
 
         @Override
         public void reply(BotMessage origin, String text) {
+            if (failOnReply != null) {
+                throw failOnReply;
+            }
             replies.add(text);
         }
     }
@@ -93,6 +97,7 @@ class BotRouterServiceTest {
         bindings.clear();
         interactions.clear();
         adapter.replies.clear();
+        adapter.failOnReply = null;
         when(bindingRepo.findByChannelAndExternalChatId(anyString(), anyString()))
                 .thenAnswer(inv -> Optional.ofNullable(
                         bindings.get(inv.getArgument(0) + "|" + inv.getArgument(1))));
@@ -256,6 +261,36 @@ class BotRouterServiceTest {
         return ref.get();
     }
 
+    @Test
+    void qaDeletedChatSelfHeals() throws Exception {
+        // 绑定上挂着已被平台删除的问答：续问撞 NOT_FOUND → 丢弃引用原地重建，本轮消息不丢
+        BotBindingEntity b = new BotBindingEntity();
+        b.setChannel("fake");
+        b.setExternalChatId("chat-1");
+        b.setChatSessionId("gone");
+        bindings.put("fake|chat-1", b);
+        when(chatManager.subscribe(eq("gone"), any())).thenThrow(
+                new com.devmind.common.exception.DevMindException(
+                        com.devmind.common.exception.ErrorCode.NOT_FOUND, "问答不存在: gone"));
+
+        ChatView view = mock(ChatView.class);
+        when(view.id()).thenReturn("c2");
+        when(chatManager.create(any(CreateChatRequest.class))).thenReturn(view);
+        AtomicReference<Consumer<SessionEvent>> consumerRef = new AtomicReference<>();
+        doAnswer(inv -> {
+            consumerRef.set(inv.getArgument(1));
+            return List.of();
+        }).when(chatManager).subscribe(eq("c2"), any());
+
+        router.onMessage(msg("接着问", "e-heal"));
+        Consumer<SessionEvent> consumer = awaitConsumer(consumerRef);
+        consumer.accept(SessionEvent.of(1, "assistant", "新问答的回答", "stdout"));
+        consumer.accept(SessionEvent.of(2, "result", "摘要", "stdout", Map.of("isError", false)));
+
+        assertTrue(awaitReply().contains("新问答的回答"));
+        assertTrue("c2".equals(bindings.get("fake|chat-1").getChatSessionId()));
+    }
+
     // ---------------- CAP-75 FR-11/12 个人身份与门禁 ----------------
 
     /** 支持身份映射的 channel 配置桩（仿飞书：senderId → 平台用户名）。 */
@@ -415,5 +450,27 @@ class BotRouterServiceTest {
             Thread.sleep(20);
         }
         throw new AssertionError("交互日志落库不足: 期望>=" + n + " 实际=" + interactions.size());
+    }
+
+    @Test
+    void replyFailureMarksInteractionFailed() throws Exception {
+        // 回推失败 = 用户视角的失败（群里什么都收不到），行状态必须改落 FAILED 而非留着 OK
+        adapter.failOnReply = new IllegalStateException("飞书 code=230001 msg=param invalid");
+        router.onMessage(msg("/help", "e-rf-1"));
+
+        List<BotInteractionEntity> rows = awaitInteractions(1);
+        long deadline = System.currentTimeMillis() + 10_000;
+        while (System.currentTimeMillis() < deadline) {
+            BotInteractionEntity r = rows.get(0);
+            if (BotInteractionEntity.STATUS_FAILED.equals(r.getStatus())) {
+                assertTrue(r.getError() != null && r.getError().contains("回复发送失败")
+                        && r.getError().contains("230001"), r.getError());
+                assertTrue(r.getReplyText() != null && r.getReplyText().contains("可用指令"),
+                        "回复文本应保留（便于排查该发什么）: " + r.getReplyText());
+                return;
+            }
+            Thread.sleep(20);
+        }
+        throw new AssertionError("回推失败未把交互行改落 FAILED: status=" + rows.get(0).getStatus());
     }
 }

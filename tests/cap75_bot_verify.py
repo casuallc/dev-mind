@@ -19,7 +19,8 @@
   C 群聊免打扰：未 @ 机器人不回，@ 才回
   D /bind 项目（含无参查当前绑定）→ /build、/deploy 空态回复 → /session 无节点 409 失败文案
     （有记录的构建状态格式见 BotRouterServiceTest 单测，E2E 起真构建要 git+节点，不划算）
-  E 裸文本问答：懒建 MODEL 问答 → chat-mock 全量正文回推；/new 重开后下一轮仍是新问答
+  E 裸文本问答：懒建 MODEL 问答 → chat-mock 全量正文回推；/new 重开后下一轮仍是新问答；
+    绑定问答在平台侧被删 → 续问自愈重建（不回「问答不存在」，本轮消息不丢，绑定换挂新问答）
   F 飞书出站：建 ENABLED 飞书集成（baseUrl 指向本地 mock）→ 注入 channel=feishu 消息
     → 断言 mock 收到 tenant_access_token 与 im/v1 messages/{id}/reply 回推（正文含帮助文本、
     Authorization 头正确）。长连接收事件方向不在 E2E 范围（要真飞书租户），归一化由
@@ -255,7 +256,7 @@ try:
           len(rs) >= 6 and "操作失败" in rs[5]["text"], f"{rs[-1:]}")
 
     # ---------- E. 问答 ----------
-    print("\n[E] 裸文本问答（MODEL 执行体懒建 + /new 重开）")
+    print("\n[E] 裸文本问答（MODEL 执行体懒建 + /new 重开 + 绑定问答被删自愈重建）")
     with urllib.request.urlopen(f"http://127.0.0.1:{CHAT_PORT}/__state", timeout=10) as r:
         full_answer = "".join(json.loads(r.read())["chunks"])
     check("chat-mock 就绪", bool(full_answer), "chunks 为空")
@@ -272,6 +273,23 @@ try:
     send("c-qa", "再来一轮", "e-qa-2")
     rs = wait_reply("c-qa", 3, timeout=90)
     check("重开后新一轮照常回答", len(rs) >= 3 and full_answer in rs[2]["text"], f"{rs[-1:]}")
+
+    # 绑定问答在平台侧被删 → 续问自愈重建（不得回「问答不存在」，本轮消息不丢）
+    st, bl = call("GET", "/bot/admin/bindings")
+    chat_id = next((b.get("chatSessionId") for b in (bl or [])
+                    if b.get("channel") == "fake" and b.get("externalChatId") == cid("c-qa")), None)
+    check("群绑定上挂着问答会话", bool(chat_id), f"{bl}")
+    if chat_id:
+        st, _ = call("DELETE", f"/chats/{chat_id}")
+        check("平台侧删除绑定问答", st == 200, f"{st}")
+        send("c-qa", "会话被删后再问", "e-qa-3")
+        rs = wait_reply("c-qa", 4, timeout=90)
+        check("问答被删后自愈重建（本轮消息不丢）",
+              len(rs) >= 4 and full_answer in rs[3]["text"], f"{rs[-1:] if rs else None}")
+        st, bl2 = call("GET", "/bot/admin/bindings")
+        new_id = next((b.get("chatSessionId") for b in (bl2 or [])
+                       if b.get("channel") == "fake" and b.get("externalChatId") == cid("c-qa")), None)
+        check("绑定换挂新问答会话", bool(new_id) and new_id != chat_id, f"{new_id} vs {chat_id}")
 
     # ---------- F. 飞书出站回推 ----------
     print("\n[F] 飞书出站：集成 baseUrl 指向本地 mock，断言 reply 请求到达")

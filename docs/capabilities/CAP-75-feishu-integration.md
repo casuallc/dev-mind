@@ -47,7 +47,9 @@
   裸文本 = 问答。群聊只响应 @机器人，私聊全响应。
 - **FR-09 回答回推**：订阅 chat 事件流收集 assistant/result，回合完成（或 120s 超时）后
   一次性 reply；>3500 字符截断 + 平台链接尾注。失败分档 fail-visible 文案
-  （未绑定/查无记录/DevMindException/未知异常）。
+  （未绑定/查无记录/DevMindException/未知异常）。绑定问答在平台被删（或群内换人撞归属
+  校验）时续问命中 NOT_FOUND → 丢弃失效引用原地重建新问答，本轮消息不丢（不自愈则
+  该群问答永久卡死，只能 /new 手动救）。
 - **FR-10 凭证纪律**：appId/appSecret 密文不出 devmind-integration；适配器经
   `FeishuConnector.botClient()` 拿客户端句柄。无启用中的 FEISHU 集成时适配器降级禁用。
 
@@ -65,7 +67,9 @@
   未绑定回复引导文案并落 REJECTED；`/help` `/new` `/bindme` `/whoami` 与裸文本问答放行。
 - **FR-13 交互日志**：`bot_interactions` 表全量记录处理过的事件（channel/chat/sender/actor/
   command/出入站文本截断/status OK|FAILED|DEDUPED|REJECTED/error/duration_ms）；
-  群内未 @ 消息不落库（噪音），dedup 命中落 DEDUPED。
+  群内未 @ 消息不落库（噪音），dedup 命中落 DEDUPED。**回推失败也把行改落 FAILED**
+  （error 前缀「回复发送失败」）——问答算出来了但群里没收到，在用户视角就是失败，
+  只记日志不改状态会让运维页谎报「成功」。
 - **FR-14 界面**：设置页第三方账号面板支持 FEISHU 身份码字段；新增管理页
   「机器人运维」（/admin/bot）：交互日志（分页+筛选+详情）、群绑定（可解绑）、
   用户映射（可解绑）三视图。
@@ -106,7 +110,7 @@ bot_bindings(
   external_chat_id varchar(64), -- 飞书 chat_id（群=群 id，私聊=p2p id）
   chat_type varchar(16),        -- p2p / group
   owner_sender_id varchar(64),  -- 首个触发者 open_id
-  chat_session_id varchar(64),  -- 绑定的 DevMind 问答 id（懒创建，/new 重开）
+  chat_session_id varchar(64),  -- 绑定的 DevMind 问答 id（懒创建，/new 重开；引用失效自愈重建）
   project_id varchar(64),       -- /bind 绑定项目（null=未绑定）
   actor varchar(64),            -- 覆盖运行账号（null=channel defaultActor）
   created_at / updated_at,

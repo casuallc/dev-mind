@@ -169,7 +169,13 @@ public class BotRouterService implements BotMessageHandler {
         }
         rec.setDurationMs(System.currentTimeMillis() - t0);
         saveInteraction(rec, replyText);
-        reply(msg, replyText);
+        String replyError = reply(msg, replyText);
+        if (replyError != null) {
+            // 回推失败 = 用户视角的失败（群里什么都没收到），行状态必须改 FAILED，不能只记日志
+            rec.setStatus(BotInteractionEntity.STATUS_FAILED);
+            rec.setError(cut("回复发送失败: " + replyError, 512));
+            saveInteraction(rec, replyText);
+        }
     }
 
     /** FR-13 落库（replyText 截断 4000 一并写入）；落库失败只告警，不影响回推。 */
@@ -372,6 +378,9 @@ public class BotRouterService implements BotMessageHandler {
     /**
      * 问答（CAP-30 复用）：绑定无问答会话则建 MODEL 执行体问答（首条消息即本次提问）；
      * 否则续问。订阅事件流等 result 事件收口回答，超时回复提示（问答仍在平台跑）。
+     *
+     * <p>续问撞 NOT_FOUND（绑定问答在平台被删，或群内换人导致归属校验不通过）时自愈：
+     * 丢弃失效引用原地重建新问答，本轮消息不丢。</p>
      */
     private String ask(BotBindingEntity binding, String text) {
         String chatId = binding.getChatSessionId();
@@ -402,6 +411,26 @@ public class BotRouterService implements BotMessageHandler {
             }
         };
         try {
+            if (chatId != null) {
+                try {
+                    List<SessionEvent> replay = chatManager.subscribe(chatId, consumer);
+                    baseline[0] = replay.stream().mapToLong(SessionEvent::seq).max().orElse(-1);
+                    chatManager.input(chatId, text);
+                } catch (DevMindException e) {
+                    if (e.getErrorCode() != com.devmind.common.exception.ErrorCode.NOT_FOUND) {
+                        throw e;
+                    }
+                    log.info("bot 绑定问答已失效（{}），丢弃引用重建: chat={}",
+                            e.getMessage(), chatId);
+                    try {
+                        chatManager.unsubscribe(chatId, consumer); // subscribe 成功而 input 撞删的竞态
+                    } catch (Exception ignored) {
+                        // 问答已删，无订阅可清
+                    }
+                    binding.setChatSessionId(null);
+                    chatId = null;
+                }
+            }
             if (chatId == null) {
                 ChatView view = chatManager.create(new CreateChatRequest(
                         text, null, null, null, null, null, "MODEL", null));
@@ -411,10 +440,6 @@ public class BotRouterService implements BotMessageHandler {
                 bindingRepo.save(binding);
                 List<SessionEvent> replay = chatManager.subscribe(chatId, consumer);
                 replay.forEach(consumer); // 新建问答：回放全属本轮
-            } else {
-                List<SessionEvent> replay = chatManager.subscribe(chatId, consumer);
-                baseline[0] = replay.stream().mapToLong(SessionEvent::seq).max().orElse(-1);
-                chatManager.input(chatId, text);
             }
             String answer0 = done.get(props.getQaTimeoutSeconds(), TimeUnit.SECONDS);
             return truncate(answer0) + footer("/chats/" + chatId);
@@ -487,22 +512,25 @@ public class BotRouterService implements BotMessageHandler {
 
     // ---------------- 回推 ----------------
 
-    private void reply(BotMessage msg, String text) {
+    /** 回推回复；返回 null=成功，否则为失败原因（调用方据此把交互行改落 FAILED）。 */
+    private String reply(BotMessage msg, String text) {
         BotAdapterRegistry registry = registryProvider.getIfAvailable();
         if (registry == null) {
             log.warn("bot 注册表未装配，回复丢弃: channel={}", msg.channel());
-            return;
+            return "bot 注册表未装配";
         }
         BotAdapter adapter = registry.get(msg.channel()).orElse(null);
         if (adapter == null) {
             log.warn("无 bot 适配器 {}，回复丢弃", msg.channel());
-            return;
+            return "无 bot 适配器 " + msg.channel();
         }
         try {
             adapter.reply(msg, truncate(text));
+            return null;
         } catch (Exception e) {
             log.error("bot 回复发送失败: channel={} chat={} err={}",
                     msg.channel(), msg.externalChatId(), e.getMessage(), e);
+            return e.getMessage() == null ? e.toString() : e.getMessage();
         }
     }
 
