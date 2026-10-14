@@ -84,6 +84,43 @@
   `REQ-3`/`req-3`/`3`（按项目内 seq 解析）或原始 id。三个指令均列入敏感操作门禁
   （FR-12 同口径：查看项目数据与起会话都要求已绑定个人身份）。
 
+### 聊天开发闭环（M5）
+
+目标：高频操作不出聊天窗口——看图、发图报 bug、盯会话、查主线。
+
+- **FR-16 出站图片（看需求里的图）**：`/req <编号>` 详情解析描述中
+  `![](/api/attachments/{32hex}/raw)` 本地附件引用（复用 CAP-68 引用形态），经
+  `AttachmentContentResolver` SPI（common，ObjectProvider 探测，bot 不依赖 attachment 实现）
+  拉字节，文本回复后逐张以图片消息回推。仅 `image/*`、单张 ≤5MB、最多 5 张
+  （超出以文字提示实际张数，防刷屏）。SPI 扩展：`BotAdapter` 加
+  `default replyImage(origin, fileName, contentType, bytes)`（默认 no-op 记日志，
+  不支持图片的平台零改动）。飞书侧：`FeishuApiClient` 加 `uploadImage`
+  （multipart POST `/im/v1/images`，image_type=message → image_key）与
+  `replyImage`（msg_type=image，content 仍为内嵌 JSON 字符串契约）。
+  **需新增权限 `im:resource`**（图片上传/下载），改权限须重新发布版本。
+- **FR-17 入站图片（发截图起会话报 bug）**：适配器放行 image 消息——
+  `BotMessage` 加 `imageKey` 字段（平台图片资源句柄，非空=图片消息；保留 8 参兼容构造），
+  飞书 normalize 从 content 取 image_key，**3s 窗口内不下载**。底座在 botExecutor 里
+  `adapter.downloadImage(imageKey)`（SPI 默认方法返回 null = 平台不支持）拉字节，
+  存平台附件（`AttachmentService.upload`，scope=SHARED，内存 MultipartFile 包装，
+  contentType 按魔数嗅探 png/jpeg/gif/webp，缺省 image/png），进
+  `PendingImageStore` 内存缓存（key = channel+chatId+senderId，TTL 10 分钟，
+  同人可累积多张）；下一条 `/dev` 或 `/session` 消费并挂
+  `CreateSessionRequest.attachmentIds`（CAP-68 既有物化链路 `.devmind/input/attachments/`，
+  claude 直接看图）。收图回执：「已收到截图 N 张，10 分钟内发 /dev 或 /session 会自动带上」。
+  收图=写平台数据，同敏感门禁（FR-12：未绑定个人身份拒并落 REJECTED）；
+  图片消息 command 落 `IMAGE`。问答（MODEL 执行体）不支持图片输入，挂在绑定问答上的
+  截图不会被问答消费（仅 /dev /session 消费）。
+- **FR-18 会话控制 /status /stop**：`/status` 列绑定项目最近 5 条会话
+  （id 前 8 位 + status + taskSpec 截断 40 + 创建时间），RUNNING 的附 summary（有则）；
+  `/stop [会话id或唯一前缀]` 终止会话——无参取绑定项目最近一条 RUNNING，有参按
+  id 精确/项目内唯一前缀解析，调 `SessionManagerService.kill`（仅运行中可停，
+  无运行中会话回明确文案）。两指令列入敏感门禁。
+- **FR-19 主线查看 /wi /design**：`/wi <编号>` 需求下工作单元全量列表
+  （前 20 条：编号+状态+类型+标题）；`/design <编号>` 需求下方案列表
+  （版本+状态+时间）+ 最新方案正文截断 1500 字（`DocumentService.get(docId)`），
+  附平台链接。两指令列入敏感门禁。
+
 ## 3. 否决方案
 
 - **webhook 回调端点为主路径**：需受信证书+域名（+国内 ECS 的 ICP 备案），194 自签证书
@@ -179,8 +216,9 @@ M3 新增：
 - **M3 个人身份与可视化**：FR-11~14（个人身份映射复用第三方账号、敏感操作门禁、
   交互日志、机器人运维页）。
 - **M4 研发主线指令**：FR-15（/reqs /req /dev，需求查看 + 需求起会话挂主线）。
-- **M5 展望**：webhook 回调第二接入路径、机器人主动推送会话进展、
-  「正在思考…」占位消息 patch、交互日志保留期清理。
+- **M5 聊天开发闭环**：FR-16~19（出站/入站图片、会话控制 /status /stop、主线查看 /wi /design）。
+- **M6 展望**：webhook 回调第二接入路径、机器人主动推送会话进展、需求状态推进、
+  发版触发、危险操作二次确认、飞书交互卡片、交互日志保留期清理。
 
 ## 9. 验收标准
 
@@ -197,6 +235,11 @@ M3 新增：
 - M4：`/reqs` 列出未完结需求；`/req REQ-1`（兼容 `1`/`req-1` 形态）回详情含工作单元；
   `/dev REQ-1 补充` 起会话且挂 requirementId、taskSpec 含需求标题与补充说明；
   未绑定个人身份发三个指令均落 REJECTED。
+- M5：`/req` 命中含图片附件引用的需求时先回文本再逐张回推图片（适配器 replyImage
+  收到与描述一致的张数）；发图片消息回执「已收到截图」且附件表出现 SHARED 记录，
+  随后 `/dev` 起会话挂 attachmentIds；`/status` 列会话、`/stop` 停 RUNNING；
+  `/wi` / `/design` 回工作单元与方案正文截断；四个指令 + 图片消息未绑定身份均落 REJECTED；
+  `tests/cap75_bot_verify.py` M5 段全绿。
 
 ## 10. 风险与开放问题
 
@@ -220,7 +263,9 @@ M3 新增：
 
 1. **飞书后台**（open.feishu.cn → 企业自建应用）：
    - 建应用拿 App ID / App Secret；启用「机器人」能力。
-   - 权限：`im:message`（收消息）、`im:message:send_as_bot`（回推）。
+   - 权限：`im:message`（收消息）、`im:message:send_as_bot`（回推）；
+     群聊接收另需 `im:message.group_at_msg`、私聊接收另需 `im:message.p2p_msg`
+     （缺哪个对应场景事件静默不投递）；M5 起图片收发需 `im:resource`。
    - 事件订阅：添加 `im.message.receive_v1`，接收方式选「使用长连接接收事件」
      （此步要求平台侧已在线，先做第 2 步再回来保存）。
    - 发布版本并等企业管理员审批通过。
@@ -241,4 +286,6 @@ M3 新增：
   HTTP 层失败（`飞书接口 HTTP <status>`）消息带**有效 URL + 飞书返回体截断**：
   真机 400 多为 baseUrl 配错（误填 webhook 地址/多余前缀，飞书网关对未知路径回 400），
   看 URL 一眼定位；返回体是飞书错误 JSON 时按 code/msg 查开放平台文档。
+  图片回推/收图失败（多为缺 `im:resource` 权限或上传类型不符）查 `bot 回复发送失败` /
+  `bot 消息处理失败` 日志，权限改动后须重新发布版本才生效。
 
