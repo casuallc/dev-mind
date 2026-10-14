@@ -140,8 +140,12 @@ public class BotRouterService implements BotMessageHandler {
 
     // ---------------- 路由 ----------------
 
-    /** 身份优先级：binding.actor → channel defaultActor → 平台默认。 */
+    /** 身份优先级（CAP-75 FR-11 四级链）：个人映射 → binding.actor → channel defaultActor → 平台默认。 */
     private String actorOf(BotMessage msg, BotBindingEntity binding) {
+        java.util.Optional<String> personal = resolvePersonal(msg);
+        if (personal.isPresent()) {
+            return personal.get();
+        }
         if (binding.getActor() != null && !binding.getActor().isBlank()) {
             return binding.getActor();
         }
@@ -152,6 +156,12 @@ public class BotRouterService implements BotMessageHandler {
         return props.getDefaultActor();
     }
 
+    /** 个人身份映射（channel 适配器侧实现，如飞书 open_id → 第三方账号绑定）；不支持/未绑定为空。 */
+    private java.util.Optional<String> resolvePersonal(BotMessage msg) {
+        BotChannelConfigProvider cc = channelConfigs.get(msg.channel());
+        return cc == null ? java.util.Optional.empty() : cc.resolveActor(msg.senderId());
+    }
+
     private String route(BotMessage msg, BotBindingEntity binding) {
         CommandParser.Command cmd = CommandParser.parse(msg.text());
         if (cmd == null) {
@@ -159,24 +169,64 @@ public class BotRouterService implements BotMessageHandler {
         }
         return switch (cmd.name()) {
             case "help" -> helpText();
-            case "bind" -> bind(binding, cmd.args());
+            case "bindme" -> bindme(msg);
+            case "whoami" -> whoami(msg, binding);
+            case "unbindme" -> "解绑请登录平台：设置 → 第三方账号，删除对应飞书集成的身份码绑定即可";
+            // FR-12 敏感操作门禁：支持身份映射的 channel 必须先绑定个人身份
+            case "bind" -> gated(msg, () -> bind(binding, cmd.args()));
+            case "session" -> gated(msg, () -> startSession(binding, cmd.args()));
+            case "build" -> gated(msg, () -> lastBuild(binding));
+            case "deploy" -> gated(msg, () -> lastDeploys(binding));
             case "new" -> newChat(binding);
-            case "session" -> startSession(binding, cmd.args());
-            case "build" -> lastBuild(binding);
-            case "deploy" -> lastDeploys(binding);
             default -> "未知指令 /" + cmd.name() + "，发 /help 查看可用指令";
         };
+    }
+
+    /** FR-12 门禁：channel 支持身份映射且 sender 未绑定 → 拒绝并给绑定指引。 */
+    private String gated(BotMessage msg, java.util.function.Supplier<String> action) {
+        BotChannelConfigProvider cc = channelConfigs.get(msg.channel());
+        if (cc != null && cc.supportsIdentity() && resolvePersonal(msg).isEmpty()) {
+            return "该操作需要先绑定个人身份：给我发 /bindme 获取你的身份码，"
+                    + "然后登录平台 设置 → 第三方账号，在飞书集成上粘贴身份码保存";
+        }
+        return action.get();
+    }
+
+    /** FR-11 绑定入口：回 senderId 身份码 + 平台侧绑定指引（数据权威在第三方账号，bot 不写）。 */
+    private String bindme(BotMessage msg) {
+        return "你的身份码：" + msg.senderId()
+                + "\n绑定方式：登录平台 → 设置 → 第三方账号 → 找到飞书集成 → 粘贴身份码保存"
+                + "\n绑定后 /bind /session /build /deploy 将以你的平台身份执行";
+    }
+
+    /** FR-11 身份自查：回当前命中的身份级别。 */
+    private String whoami(BotMessage msg, BotBindingEntity binding) {
+        java.util.Optional<String> personal = resolvePersonal(msg);
+        if (personal.isPresent()) {
+            return "当前身份：" + personal.get() + "（个人绑定，身份码 " + msg.senderId() + "）";
+        }
+        if (binding.getActor() != null && !binding.getActor().isBlank()) {
+            return "当前身份：" + binding.getActor() + "（群绑定身份；未绑定个人身份，发 /bindme 绑定）";
+        }
+        BotChannelConfigProvider cc = channelConfigs.get(msg.channel());
+        String channelDefault = cc != null ? cc.defaultActor() : null;
+        if (channelDefault != null && !channelDefault.isBlank()) {
+            return "当前身份：" + channelDefault + "（机器人默认身份；未绑定个人身份，发 /bindme 绑定）";
+        }
+        return "当前身份：" + props.getDefaultActor() + "（平台默认身份；未绑定个人身份，发 /bindme 绑定）";
     }
 
     private String helpText() {
         return """
                 可用指令：
                 /help —— 本帮助
-                /bind <项目id或名称> —— 绑定项目（无参查看当前绑定）
+                /bindme —— 获取你的身份码（到 设置→第三方账号 绑定后，操作以你的身份执行）
+                /whoami —— 查看当前身份
+                /bind <项目id或名称> —— 绑定项目（无参查看当前绑定；需先绑定个人身份）
                 /new —— 重开问答（丢弃当前问答上下文）
-                /session <需求描述> —— 在绑定项目起开发会话
-                /build —— 最近一条构建状态
-                /deploy —— 最近 5 条部署状态
+                /session <需求描述> —— 在绑定项目起开发会话（需绑定个人身份）
+                /build —— 最近一条构建状态（需绑定个人身份）
+                /deploy —— 最近 5 条部署状态（需绑定个人身份）
                 其余文字直接当作问答（私聊直接问，群聊 @我）""";
     }
 

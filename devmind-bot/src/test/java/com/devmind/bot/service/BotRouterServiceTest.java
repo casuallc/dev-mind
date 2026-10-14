@@ -12,6 +12,7 @@ import com.devmind.bot.config.BotProperties;
 import com.devmind.bot.model.BotBindingEntity;
 import com.devmind.bot.repo.BotBindingRepository;
 import com.devmind.bot.spi.BotAdapter;
+import com.devmind.bot.spi.BotChannelConfigProvider;
 import com.devmind.bot.spi.BotMessage;
 import com.devmind.bot.spi.BotMessageHandler;
 import com.devmind.build.dto.BuildView;
@@ -46,12 +47,17 @@ import org.springframework.beans.factory.ObjectProvider;
  */
 class BotRouterServiceTest {
 
-    /** 捕获回复的测试适配器（code=fake）。 */
+    /** 捕获回复的测试适配器（默认 code=fake）。 */
     static class CapturingAdapter implements BotAdapter {
         final BlockingQueue<String> replies = new LinkedBlockingQueue<>();
+        private final String code;
+
+        CapturingAdapter() { this("fake"); }
+
+        CapturingAdapter(String code) { this.code = code; }
 
         @Override
-        public String code() { return "fake"; }
+        public String code() { return code; }
 
         @Override
         public void start(BotMessageHandler handler) { }
@@ -235,5 +241,119 @@ class BotRouterServiceTest {
             throw new AssertionError("路由线程未订阅问答事件");
         }
         return ref.get();
+    }
+
+    // ---------------- CAP-75 FR-11/12 个人身份与门禁 ----------------
+
+    /** 支持身份映射的 channel 配置桩（仿飞书：senderId → 平台用户名）。 */
+    static class IdentityChannelConfig implements BotChannelConfigProvider {
+        final Map<String, String> mappings = new HashMap<>();
+
+        @Override
+        public String channel() { return "feishu"; }
+
+        @Override
+        public String defaultActor() { return "bot-admin"; }
+
+        @Override
+        public boolean supportsIdentity() { return true; }
+
+        @Override
+        public Optional<String> resolveActor(String senderId) {
+            return Optional.ofNullable(mappings.get(senderId));
+        }
+    }
+
+    private IdentityChannelConfig identityConfig;
+    private CapturingAdapter feishuAdapter;
+    private BotRouterService feishuRouter;
+
+    /** 搭一个带身份映射 channel 的独立路由（共享 mock 仓储与服务）。 */
+    private void setupFeishuRouter() {
+        identityConfig = new IdentityChannelConfig();
+        feishuAdapter = new CapturingAdapter("feishu");
+        BotProperties props = new BotProperties();
+        props.setQaTimeoutSeconds(10);
+        AtomicReference<BotAdapterRegistry> registryRef = new AtomicReference<>();
+        @SuppressWarnings("unchecked")
+        ObjectProvider<BotAdapterRegistry> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenAnswer(inv -> registryRef.get());
+        feishuRouter = new BotRouterService(bindingRepo, chatManager, sessionManager,
+                projectService, buildService, deploymentService, props, provider,
+                List.of(identityConfig));
+        registryRef.set(new BotAdapterRegistry(List.of(feishuAdapter), feishuRouter));
+    }
+
+    private static BotMessage feishuMsg(String sender, String text, String eventId) {
+        return new BotMessage("feishu", "oc-1", BotMessage.CHAT_TYPE_P2P, sender,
+                text, false, "m-" + eventId, eventId);
+    }
+
+    private String awaitFeishuReply() throws InterruptedException {
+        String r = feishuAdapter.replies.poll(15, TimeUnit.SECONDS);
+        if (r == null) {
+            throw new AssertionError("等待回复超时");
+        }
+        return r;
+    }
+
+    @Test
+    void bindmeReturnsSenderIdentityCode() throws Exception {
+        setupFeishuRouter();
+        feishuRouter.onMessage(feishuMsg("ou_alice", "/bindme", "e-bm-1"));
+        String reply = awaitFeishuReply();
+        assertTrue(reply.contains("ou_alice"), reply);
+        assertTrue(reply.contains("第三方账号"), reply);
+    }
+
+    @Test
+    void sensitiveOpsRejectedWhenUnbound() throws Exception {
+        setupFeishuRouter();
+        feishuRouter.onMessage(feishuMsg("ou_alice", "/build", "e-g-1"));
+        assertTrue(awaitFeishuReply().contains("需要先绑定个人身份"));
+        feishuRouter.onMessage(feishuMsg("ou_alice", "/bind 某项目", "e-g-2"));
+        assertTrue(awaitFeishuReply().contains("需要先绑定个人身份"));
+        // 放行项：/help /whoami /bindme 不受门禁
+        feishuRouter.onMessage(feishuMsg("ou_alice", "/help", "e-g-3"));
+        assertTrue(awaitFeishuReply().contains("可用指令"));
+        feishuRouter.onMessage(feishuMsg("ou_alice", "/whoami", "e-g-4"));
+        String whoamiReply = awaitFeishuReply();
+        assertTrue(whoamiReply.contains("bot-admin（机器人默认身份"), whoamiReply);
+    }
+
+    @Test
+    void boundSenderRunsSensitiveOpsAndWhoamiHitsPersonal() throws Exception {
+        setupFeishuRouter();
+        identityConfig.mappings.put("ou_alice", "alice");
+        ProjectView p = mock(ProjectView.class);
+        when(p.id()).thenReturn("p1");
+        when(p.name()).thenReturn("演示项目");
+        when(projectService.get("p1")).thenReturn(p);
+
+        feishuRouter.onMessage(feishuMsg("ou_alice", "/whoami", "e-b-1"));
+        assertTrue(awaitFeishuReply().contains("alice（个人绑定"));
+
+        feishuRouter.onMessage(feishuMsg("ou_alice", "/bind p1", "e-b-2"));
+        assertTrue(awaitFeishuReply().contains("已绑定项目：演示项目"));
+
+        // 个人身份优先于 binding.actor（四级链第一级）
+        bindings.get("feishu|oc-1").setActor("group-admin");
+        feishuRouter.onMessage(feishuMsg("ou_alice", "/whoami", "e-b-3"));
+        assertTrue(awaitFeishuReply().contains("alice（个人绑定"));
+    }
+
+    @Test
+    void unboundFallsBackToBindingActor() throws Exception {
+        setupFeishuRouter();
+        // 先绑定 ou_alice 占住 binding，再预置 binding.actor，换未绑定 sender 提问
+        BotBindingEntity b = new BotBindingEntity();
+        b.setChannel("feishu");
+        b.setExternalChatId("oc-1");
+        b.setActor("group-admin");
+        bindings.put("feishu|oc-1", b);
+
+        feishuRouter.onMessage(feishuMsg("ou_bob", "/whoami", "e-f-1"));
+        String whoamiReply = awaitFeishuReply();
+        assertTrue(whoamiReply.contains("group-admin（群绑定身份"), whoamiReply);
     }
 }

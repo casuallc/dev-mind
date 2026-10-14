@@ -5,6 +5,7 @@ import com.devmind.bot.spi.BotChannelConfigProvider;
 import com.devmind.bot.spi.BotMessage;
 import com.devmind.bot.spi.BotMessageHandler;
 import com.devmind.integration.service.FeishuBotGateway;
+import com.devmind.integration.service.FeishuBotIdentityService;
 import com.lark.oapi.event.EventDispatcher;
 import com.lark.oapi.service.im.ImService;
 import com.lark.oapi.service.im.v1.model.EventMessage;
@@ -35,12 +36,14 @@ public class FeishuBotAdapter implements BotAdapter, BotChannelConfigProvider {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final FeishuBotGateway gateway;
+    private final FeishuBotIdentityService identityService;
 
     private volatile FeishuBotGateway.FeishuBotHandle handle;
     private volatile Client client;
 
-    public FeishuBotAdapter(FeishuBotGateway gateway) {
+    public FeishuBotAdapter(FeishuBotGateway gateway, FeishuBotIdentityService identityService) {
         this.gateway = gateway;
+        this.identityService = identityService;
     }
 
     @Override
@@ -57,6 +60,17 @@ public class FeishuBotAdapter implements BotAdapter, BotChannelConfigProvider {
     public String defaultActor() {
         FeishuBotGateway.FeishuBotHandle h = handleOrNull();
         return h == null ? null : h.defaultActor();
+    }
+
+    /** CAP-75 FR-11：飞书支持个人身份映射（open_id → user_platform_accounts IDENTITY 绑定）。 */
+    @Override
+    public boolean supportsIdentity() {
+        return true;
+    }
+
+    @Override
+    public java.util.Optional<String> resolveActor(String senderId) {
+        return identityService.resolveUsername(senderId);
     }
 
     @Override
