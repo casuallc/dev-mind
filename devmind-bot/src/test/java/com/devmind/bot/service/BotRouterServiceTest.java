@@ -10,7 +10,9 @@ import static org.mockito.Mockito.when;
 
 import com.devmind.bot.config.BotProperties;
 import com.devmind.bot.model.BotBindingEntity;
+import com.devmind.bot.model.BotInteractionEntity;
 import com.devmind.bot.repo.BotBindingRepository;
+import com.devmind.bot.repo.BotInteractionRepository;
 import com.devmind.bot.spi.BotAdapter;
 import com.devmind.bot.spi.BotChannelConfigProvider;
 import com.devmind.bot.spi.BotMessage;
@@ -27,6 +29,7 @@ import com.devmind.project.ProjectService;
 import com.devmind.project.dto.ProjectView;
 import com.devmind.session.service.SessionManagerService;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -72,6 +75,7 @@ class BotRouterServiceTest {
     }
 
     private final BotBindingRepository bindingRepo = mock(BotBindingRepository.class);
+    private final BotInteractionRepository interactionRepo = mock(BotInteractionRepository.class);
     private final ChatManagerService chatManager = mock(ChatManagerService.class);
     private final SessionManagerService sessionManager = mock(SessionManagerService.class);
     private final ProjectService projectService = mock(ProjectService.class);
@@ -79,13 +83,15 @@ class BotRouterServiceTest {
     private final DeploymentService deploymentService = mock(DeploymentService.class);
     private final CapturingAdapter adapter = new CapturingAdapter();
     private final Map<String, BotBindingEntity> bindings = new HashMap<>();
+    private final List<BotInteractionEntity> interactions = new ArrayList<>();
 
     private BotRouterService router;
 
     @BeforeEach
     void setUp() {
-        Mockito.reset(bindingRepo);
+        Mockito.reset(bindingRepo, interactionRepo);
         bindings.clear();
+        interactions.clear();
         adapter.replies.clear();
         when(bindingRepo.findByChannelAndExternalChatId(anyString(), anyString()))
                 .thenAnswer(inv -> Optional.ofNullable(
@@ -95,6 +101,13 @@ class BotRouterServiceTest {
             bindings.put(b.getChannel() + "|" + b.getExternalChatId(), b);
             return b;
         });
+        when(interactionRepo.save(any())).thenAnswer(inv -> {
+            BotInteractionEntity r = inv.getArgument(0);
+            synchronized (interactions) {
+                interactions.add(r);
+            }
+            return r;
+        });
 
         BotProperties props = new BotProperties();
         props.setQaTimeoutSeconds(10);
@@ -103,8 +116,8 @@ class BotRouterServiceTest {
         ObjectProvider<BotAdapterRegistry> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenAnswer(inv -> registryRef.get());
 
-        router = new BotRouterService(bindingRepo, chatManager, sessionManager, projectService,
-                buildService, deploymentService, props, provider, List.of());
+        router = new BotRouterService(bindingRepo, interactionRepo, chatManager, sessionManager,
+                projectService, buildService, deploymentService, props, provider, List.of());
         registryRef.set(new BotAdapterRegistry(List.of(adapter), router));
     }
 
@@ -278,8 +291,8 @@ class BotRouterServiceTest {
         @SuppressWarnings("unchecked")
         ObjectProvider<BotAdapterRegistry> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenAnswer(inv -> registryRef.get());
-        feishuRouter = new BotRouterService(bindingRepo, chatManager, sessionManager,
-                projectService, buildService, deploymentService, props, provider,
+        feishuRouter = new BotRouterService(bindingRepo, interactionRepo, chatManager,
+                sessionManager, projectService, buildService, deploymentService, props, provider,
                 List.of(identityConfig));
         registryRef.set(new BotAdapterRegistry(List.of(feishuAdapter), feishuRouter));
     }
@@ -355,5 +368,52 @@ class BotRouterServiceTest {
         feishuRouter.onMessage(feishuMsg("ou_bob", "/whoami", "e-f-1"));
         String whoamiReply = awaitFeishuReply();
         assertTrue(whoamiReply.contains("group-admin（群绑定身份"), whoamiReply);
+    }
+
+    @Test
+    void interactionLoggedOkDedupedRejected() throws Exception {
+        setupFeishuRouter();
+        feishuRouter.onMessage(feishuMsg("ou_alice", "/help", "e-l-1"));
+        awaitFeishuReply();
+        // 同 eventId 重发 → DEDUPED 落库（无回复）
+        feishuRouter.onMessage(feishuMsg("ou_alice", "/help", "e-l-1"));
+        // 未绑定发敏感指令 → REJECTED
+        feishuRouter.onMessage(feishuMsg("ou_alice", "/build", "e-l-2"));
+        awaitFeishuReply();
+
+        List<BotInteractionEntity> rows = awaitInteractions(3);
+        BotInteractionEntity ok = rows.stream()
+                .filter(r -> BotInteractionEntity.STATUS_OK.equals(r.getStatus())).findFirst()
+                .orElseThrow(() -> new AssertionError("缺 OK 行: " + rows.size()));
+        BotInteractionEntity dup = rows.stream()
+                .filter(r -> BotInteractionEntity.STATUS_DEDUPED.equals(r.getStatus())).findFirst()
+                .orElseThrow(() -> new AssertionError("缺 DEDUPED 行"));
+        BotInteractionEntity rej = rows.stream()
+                .filter(r -> BotInteractionEntity.STATUS_REJECTED.equals(r.getStatus())).findFirst()
+                .orElseThrow(() -> new AssertionError("缺 REJECTED 行"));
+
+        assertTrue("help".equals(ok.getCommand()), ok.getCommand());
+        assertTrue(ok.getReplyText() != null && ok.getReplyText().contains("可用指令"),
+                ok.getReplyText());
+        assertTrue("bot-admin".equals(ok.getActor()), ok.getActor());
+        assertTrue("ou_alice".equals(ok.getSenderId()), ok.getSenderId());
+        assertTrue(ok.getDurationMs() != null, "durationMs 未记录");
+        assertTrue("DEDUPED".equals(dup.getCommand()), dup.getCommand());
+        assertTrue("build".equals(rej.getCommand()), rej.getCommand());
+        assertTrue(rej.getReplyText() != null && rej.getReplyText().contains("需要先绑定个人身份"),
+                rej.getReplyText());
+    }
+
+    private List<BotInteractionEntity> awaitInteractions(int n) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 10_000;
+        while (System.currentTimeMillis() < deadline) {
+            synchronized (interactions) {
+                if (interactions.size() >= n) {
+                    return new ArrayList<>(interactions);
+                }
+            }
+            Thread.sleep(20);
+        }
+        throw new AssertionError("交互日志落库不足: 期望>=" + n + " 实际=" + interactions.size());
     }
 }

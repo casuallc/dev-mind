@@ -3,7 +3,9 @@ package com.devmind.bot.service;
 import com.devmind.auth.security.DevMindPrincipal;
 import com.devmind.bot.config.BotProperties;
 import com.devmind.bot.model.BotBindingEntity;
+import com.devmind.bot.model.BotInteractionEntity;
 import com.devmind.bot.repo.BotBindingRepository;
+import com.devmind.bot.repo.BotInteractionRepository;
 import com.devmind.bot.spi.BotAdapter;
 import com.devmind.bot.spi.BotChannelConfigProvider;
 import com.devmind.bot.spi.BotMessage;
@@ -60,7 +62,16 @@ public class BotRouterService implements BotMessageHandler {
     private static final DateTimeFormatter TIME_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault());
 
+    /** FR-12 敏感操作：支持身份映射的 channel 上要求已绑定个人身份 */
+    private static final java.util.Set<String> SENSITIVE_COMMANDS =
+            java.util.Set.of("bind", "session", "build", "deploy");
+
+    /** 门禁拒绝时的绑定指引（同时落 REJECTED 交互日志） */
+    static final String BIND_GUIDANCE = "该操作需要先绑定个人身份：给我发 /bindme 获取你的身份码，"
+            + "然后登录平台 设置 → 第三方账号，在飞书集成上粘贴身份码保存";
+
     private final BotBindingRepository bindingRepo;
+    private final BotInteractionRepository interactionRepo;
     private final ChatManagerService chatManager;
     private final SessionManagerService sessionManager;
     private final ProjectService projectService;
@@ -73,6 +84,7 @@ public class BotRouterService implements BotMessageHandler {
     private final ExecutorService botExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     public BotRouterService(BotBindingRepository bindingRepo,
+                            BotInteractionRepository interactionRepo,
                             ChatManagerService chatManager,
                             SessionManagerService sessionManager,
                             ProjectService projectService,
@@ -82,6 +94,7 @@ public class BotRouterService implements BotMessageHandler {
                             ObjectProvider<BotAdapterRegistry> registryProvider,
                             List<BotChannelConfigProvider> channelConfigProviders) {
         this.bindingRepo = bindingRepo;
+        this.interactionRepo = interactionRepo;
         this.chatManager = chatManager;
         this.sessionManager = sessionManager;
         this.projectService = projectService;
@@ -109,6 +122,9 @@ public class BotRouterService implements BotMessageHandler {
         }
         if (!dedup.markIfFirst(msg.channel(), msg.eventId())) {
             log.info("bot 事件去重丢弃: channel={} eventId={}", msg.channel(), msg.eventId());
+            // FR-13：dedup 命中也落库（DEDUPED），投递虚拟线程不占事件回调的 3s 窗口
+            botExecutor.execute(() -> saveInteraction(newRecord(msg, "DEDUPED",
+                    BotInteractionEntity.STATUS_DEDUPED), null));
             return;
         }
         if (BotMessage.CHAT_TYPE_GROUP.equals(msg.chatType()) && !msg.mentioned()) {
@@ -117,25 +133,73 @@ public class BotRouterService implements BotMessageHandler {
         botExecutor.execute(() -> dispatch(msg));
     }
 
-    /** 单条消息完整处理（独立虚拟线程）：装配身份 → 路由 → 回推。 */
+    /** 单条消息完整处理（独立虚拟线程）：装配身份 → 门禁/路由 → 落交互日志 → 回推。 */
     private void dispatch(BotMessage msg) {
-        BotBindingEntity binding = null;
+        long t0 = System.currentTimeMillis();
+        BotInteractionEntity rec = newRecord(msg, null, null);
+        String replyText;
         try {
-            binding = findOrCreateBinding(msg);
+            BotBindingEntity binding = findOrCreateBinding(msg);
+            String actor = actorOf(msg, binding);
+            rec.setActor(actor);
             SecurityContextHolder.getContext().setAuthentication(
                     new UsernamePasswordAuthenticationToken(
-                            new DevMindPrincipal(actorOf(msg, binding), "USER"), null, List.of()));
-            String reply = route(msg, binding);
-            reply(msg, reply);
+                            new DevMindPrincipal(actor, "USER"), null, List.of()));
+            CommandParser.Command cmd = CommandParser.parse(msg.text());
+            rec.setCommand(cmd == null ? "QA" : cmd.name());
+            if (cmd != null && SENSITIVE_COMMANDS.contains(cmd.name()) && rejectedByGate(msg)) {
+                rec.setStatus(BotInteractionEntity.STATUS_REJECTED);
+                replyText = BIND_GUIDANCE;
+            } else {
+                replyText = route(msg, binding, cmd);
+                rec.setStatus(BotInteractionEntity.STATUS_OK);
+            }
         } catch (DevMindException e) {
-            reply(msg, "操作失败：" + e.getMessage());
+            rec.setStatus(BotInteractionEntity.STATUS_FAILED);
+            rec.setError(cut(e.getMessage(), 512));
+            replyText = "操作失败：" + e.getMessage();
         } catch (Exception e) {
             log.error("bot 消息处理失败: channel={} eventId={} err={}",
                     msg.channel(), msg.eventId(), e.getMessage(), e);
-            reply(msg, "处理失败，请稍后再试或到平台查看日志");
+            rec.setStatus(BotInteractionEntity.STATUS_FAILED);
+            rec.setError(cut(e.toString(), 512));
+            replyText = "处理失败，请稍后再试或到平台查看日志";
         } finally {
             SecurityContextHolder.clearContext();
         }
+        rec.setDurationMs(System.currentTimeMillis() - t0);
+        saveInteraction(rec, replyText);
+        reply(msg, replyText);
+    }
+
+    /** FR-13 落库（replyText 截断 4000 一并写入）；落库失败只告警，不影响回推。 */
+    private void saveInteraction(BotInteractionEntity rec, String replyText) {
+        rec.setReplyText(cut(replyText, 4000));
+        try {
+            interactionRepo.save(rec);
+        } catch (Exception e) {
+            log.warn("bot 交互日志落库失败: channel={} eventErr={}", rec.getChannel(), e.getMessage());
+        }
+    }
+
+    /** 交互日志行骨架：基础字段 + 入站截断；command/status 由调用方定（null=dispatch 内定）。 */
+    private BotInteractionEntity newRecord(BotMessage msg, String command, String status) {
+        BotInteractionEntity r = new BotInteractionEntity();
+        r.setChannel(msg.channel());
+        r.setExternalChatId(msg.externalChatId());
+        r.setChatType(msg.chatType());
+        r.setSenderId(msg.senderId());
+        r.setCommand(command);
+        r.setInputText(cut(msg.text(), 2000));
+        r.setStatus(status != null ? status : BotInteractionEntity.STATUS_OK);
+        return r;
+    }
+
+    private static String cut(String text, int max) {
+        if (text == null) {
+            return null;
+        }
+        return text.length() <= max ? text : text.substring(0, max);
     }
 
     // ---------------- 路由 ----------------
@@ -162,8 +226,7 @@ public class BotRouterService implements BotMessageHandler {
         return cc == null ? java.util.Optional.empty() : cc.resolveActor(msg.senderId());
     }
 
-    private String route(BotMessage msg, BotBindingEntity binding) {
-        CommandParser.Command cmd = CommandParser.parse(msg.text());
+    private String route(BotMessage msg, BotBindingEntity binding, CommandParser.Command cmd) {
         if (cmd == null) {
             return ask(binding, msg.text().trim());
         }
@@ -172,24 +235,19 @@ public class BotRouterService implements BotMessageHandler {
             case "bindme" -> bindme(msg);
             case "whoami" -> whoami(msg, binding);
             case "unbindme" -> "解绑请登录平台：设置 → 第三方账号，删除对应飞书集成的身份码绑定即可";
-            // FR-12 敏感操作门禁：支持身份映射的 channel 必须先绑定个人身份
-            case "bind" -> gated(msg, () -> bind(binding, cmd.args()));
-            case "session" -> gated(msg, () -> startSession(binding, cmd.args()));
-            case "build" -> gated(msg, () -> lastBuild(binding));
-            case "deploy" -> gated(msg, () -> lastDeploys(binding));
+            case "bind" -> bind(binding, cmd.args());
+            case "session" -> startSession(binding, cmd.args());
+            case "build" -> lastBuild(binding);
+            case "deploy" -> lastDeploys(binding);
             case "new" -> newChat(binding);
             default -> "未知指令 /" + cmd.name() + "，发 /help 查看可用指令";
         };
     }
 
-    /** FR-12 门禁：channel 支持身份映射且 sender 未绑定 → 拒绝并给绑定指引。 */
-    private String gated(BotMessage msg, java.util.function.Supplier<String> action) {
+    /** FR-12 门禁判定：channel 支持身份映射且 sender 未绑定个人身份。 */
+    private boolean rejectedByGate(BotMessage msg) {
         BotChannelConfigProvider cc = channelConfigs.get(msg.channel());
-        if (cc != null && cc.supportsIdentity() && resolvePersonal(msg).isEmpty()) {
-            return "该操作需要先绑定个人身份：给我发 /bindme 获取你的身份码，"
-                    + "然后登录平台 设置 → 第三方账号，在飞书集成上粘贴身份码保存";
-        }
-        return action.get();
+        return cc != null && cc.supportsIdentity() && resolvePersonal(msg).isEmpty();
     }
 
     /** FR-11 绑定入口：回 senderId 身份码 + 平台侧绑定指引（数据权威在第三方账号，bot 不写）。 */
