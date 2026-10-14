@@ -51,6 +51,25 @@
 - **FR-10 凭证纪律**：appId/appSecret 密文不出 devmind-integration；适配器经
   `FeishuConnector.botClient()` 拿客户端句柄。无启用中的 FEISHU 集成时适配器降级禁用。
 
+### 个人身份与可视化（M3）
+
+- **FR-11 个人身份映射（复用第三方账号）**：飞书身份 = `user_platform_accounts` 一条
+  authType=`IDENTITY`（无 secret）记录，(user_id, integration_id=飞书集成, username=open_id)。
+  绑定流程：飞书发 `/bindme` → 机器人回身份码（senderId/open_id）→ 用户在
+  「设置 → 第三方账号」对该 FEISHU 集成粘贴身份码保存。身份链四级：
+  `channel.resolveActor(senderId)`（个人映射）→ binding.actor → channel defaultActor →
+  平台默认。`/whoami` 回当前命中级；解绑在设置页/运维页进行（bot 不删数据）。
+  SPI 侧：`BotChannelConfigProvider.resolveActor(senderId)` 由适配器实现，bot 底座保持
+  不依赖 integration 模块。
+- **FR-12 敏感操作门禁**：`/bind` `/session` `/build` `/deploy` 要求已绑定个人身份，
+  未绑定回复引导文案并落 REJECTED；`/help` `/new` `/bindme` `/whoami` 与裸文本问答放行。
+- **FR-13 交互日志**：`bot_interactions` 表全量记录处理过的事件（channel/chat/sender/actor/
+  command/出入站文本截断/status OK|FAILED|DEDUPED|REJECTED/error/duration_ms）；
+  群内未 @ 消息不落库（噪音），dedup 命中落 DEDUPED。
+- **FR-14 界面**：设置页第三方账号面板支持 FEISHU 身份码字段；新增管理页
+  「机器人运维」（/admin/bot）：交互日志（分页+筛选+详情）、群绑定（可解绑）、
+  用户映射（可解绑）三视图。
+
 ## 3. 否决方案
 
 - **webhook 回调端点为主路径**：需受信证书+域名（+国内 ECS 的 ICP 备案），194 自签证书
@@ -101,10 +120,34 @@ integrations.configJson 扩展槽（FEISHU 类型）：`{"bot":{"enabled":true,"
 纯文档集成本来就没有 bot 槽，天然不会被机器人选中。前端集成表单对 FEISHU 类型提供
 「启用双向机器人」开关 + 默认操作身份输入，保存时自动折进 configJson（保留其他扩展槽）。
 
+M3 新增：
+
+```
+bot_interactions(                  -- FR-13 交互日志
+  id bigint pk auto,
+  channel varchar(32), external_chat_id varchar(128), chat_type varchar(16),
+  sender_id varchar(128), actor varchar(64),      -- actor=实际执行身份（四级链命中结果）
+  command varchar(16),             -- 指令名 / QA / DEDUPED
+  input_text varchar(2000), reply_text varchar(4000),   -- 截断落库
+  status varchar(16),              -- OK / FAILED / DEDUPED / REJECTED
+  error varchar(512), duration_ms bigint, created_at,
+  index(channel, created_at)
+)
+```
+
+个人身份**不建新表**：复用 `user_platform_accounts`（CAP-35），authType=`IDENTITY`、
+username=open_id（FR-11）。
+
 ## 6. API 概要
 
 M2 无平台侧新 REST——绑定与操作全部经飞书指令驱动。M1 复用既有
 `GET/PUT /api/notification-channels`、`POST /api/notifications/emit`。
+
+M3 新增：
+- 个人：`/api/me/platform-accounts` 复用（FEISHU 集成走 IDENTITY 形态，无需新端点）。
+- 管理：`GET/DELETE /api/admin/user-platform-accounts`（用户映射，按 type 过滤，ADMIN）；
+  `GET/DELETE /api/bot/admin/bindings`（群绑定，ADMIN）；
+  `GET /api/bot/admin/interactions`（交互日志分页，channel/status/keyword 过滤，ADMIN）。
 
 ## 7. 安全
 
@@ -117,10 +160,12 @@ M2 无平台侧新 REST——绑定与操作全部经飞书指令驱动。M1 复
 
 ## 8. 里程碑
 
-- **M1 飞书通知通道**：FR-01~03。
-- **M2 双向机器人**：FR-04~10（网关底座 + 飞书适配器）。
-- **M3 展望**：open_id↔平台用户映射、webhook 回调第二接入路径、机器人主动推送会话进展、
-  「正在思考…」占位消息 patch。
+- **M1 飞书通知通道**：FR-01~03。（已交付）
+- **M2 双向机器人**：FR-04~10（网关底座 + 飞书适配器）。（已交付）
+- **M3 个人身份与可视化**：FR-11~14（个人身份映射复用第三方账号、敏感操作门禁、
+  交互日志、机器人运维页）。
+- **M4 展望**：webhook 回调第二接入路径、机器人主动推送会话进展、
+  「正在思考…」占位消息 patch、交互日志保留期清理。
 
 ## 9. 验收标准
 
@@ -130,20 +175,25 @@ M2 无平台侧新 REST——绑定与操作全部经飞书指令驱动。M1 复
 - M2：单测覆盖指令解析矩阵、路由（绑定懒创建/失败文案）、去重 TTL、飞书事件标准化；
   `tests/cap75_bot_verify.py`（FakeBotAdapter 驱动全路由 + 飞书出站打 mock server）全绿；
   部署机真实联调：飞书后台选长连接保存通过 → 群内 /help → /bind → 问答 → /build。
+- M3：`/bindme` 回身份码指引；未绑定发敏感指令被拒并落 REJECTED、问答放行；
+  设置页绑定身份码后 `/whoami` 命中个人身份、敏感操作放行；`/api/bot/admin/interactions`
+  可见 OK/DEDUPED/REJECTED 行、非 ADMIN 403；运维页三视图可查可解绑；
+  `tests/cap75_bot_verify.py` G/H 段全绿。
 
 ## 10. 风险与开放问题
 
 | # | 项 | 口径 |
 |---|---|---|
-| R1 | 机器人 = defaultActor 全权限 | MVP 接受（群=信任边界）；M3 映射表/指令白名单 |
-| R2 | 绑定 chat 上下文无限膨胀 | `/new` 重开；M3 自动轮换 |
+| R1 | 未绑定用户问答走 defaultActor 身份 | M3 起敏感操作须绑定（FR-12）；问答额度与 Web 同口径，接受 |
+| R2 | 绑定 chat 上下文无限膨胀 | `/new` 重开；M4 自动轮换 |
 | R3 | MODEL 执行体额度占用 | 机器人问答与 Web 问答同一额度；120s 超时兜底 |
 | R4 | seed 兜底改造影响存量库 | 逐 code findByCode 幂等；旧库启动验证 |
 | R5 | im/v1 API 频率限制 | MVP 单条 reply 无压力；patch 增强需限流 |
 | R6 | 飞书后台选长连接需客户端在线 | 部署顺序：先上线 M2 再配后台 |
-| O1 | 一群一项目是否够用 | M3 `/bind` 切换/多项目群 |
-| O2 | bot 配置（defaultActor）放 configJson 明文槽 | 非登录凭证，MVP 接受；评审可收紧 |
-| O3 | 私聊多用户共享 defaultActor 审计粒度 | M3 映射表解决 |
+| R7 | open_id 冒填他人身份 | open_id 不可猜（ou_+随机串），只能填自己从 /bindme 拿到的；管理员可在运维页解绑。接受 |
+| O1 | 一群一项目是否够用 | M4 `/bind` 切换/多项目群 |
+| O2 | bot 配置（defaultActor）放 configJson 明文槽 | 非登录凭证，接受 |
+| O3 | 交互日志无保留期 | 量级小（未 @ 不落库）；M4 加 retention |
 
 ## 附录 A：真机联调 checklist（M2）
 
@@ -163,7 +213,11 @@ M2 无平台侧新 REST——绑定与操作全部经飞书指令驱动。M1 复
    （回推链路免重启，收事件要重启）。
 3. **验证**：启动日志见 `飞书机器人长连接已启动`（无 ENABLED 集成时是降级 WARN）→
    群内 @机器人 `/help` → `/bind <项目名>` → 裸文本问答 → `/build`。
-4. **排错**：收不到事件查后台事件订阅是否保存成功（长连接须在线）；
+4. **个人绑定（M3）**：每位开发者在飞书给机器人发 `/bindme` 拿到自己的身份码 →
+   平台「设置 → 第三方账号」对该 FEISHU 集成粘贴身份码保存 → 之后其敏感操作
+   （/bind /session /build /deploy）以个人身份执行；未绑定发敏感指令会被拒并收到绑定引导。
+   管理员在「机器人运维」页查看交互日志/绑定关系/用户映射。
+5. **排错**：收不到事件查后台事件订阅是否保存成功（长连接须在线）；
   有事件无回复查 `bot 回复发送失败` 日志（多为缺 `im:message:send_as_bot` 权限）；
   回复内容异常查 `bot 消息处理失败`（带 eventId）。
 
