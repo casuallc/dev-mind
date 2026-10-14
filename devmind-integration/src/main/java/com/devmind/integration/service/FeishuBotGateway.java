@@ -21,6 +21,7 @@ import tools.jackson.databind.ObjectMapper;
 public class FeishuBotGateway {
 
     private static final Logger log = LoggerFactory.getLogger(FeishuBotGateway.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /**
      * @param appId/appSecret 建连凭据明文（内存传递，不落库不写日志）
@@ -35,7 +36,6 @@ public class FeishuBotGateway {
     private final IntegrationRepository integrationRepo;
     private final IntegrationService integrationService;
     private final FeishuConnector feishuConnector;
-    private final ObjectMapper mapper = new ObjectMapper();
 
     public FeishuBotGateway(IntegrationRepository integrationRepo,
                             IntegrationService integrationService,
@@ -45,16 +45,17 @@ public class FeishuBotGateway {
         this.feishuConnector = feishuConnector;
     }
 
-    /** 取第一个 ENABLED 的飞书集成构造机器人句柄；无则 empty。 */
+    /** 取启用了机器人的飞书集成构造句柄；无则 empty。多飞书应用并存时只挑 configJson 带 bot 槽的（botEnabled）。 */
     public Optional<FeishuBotHandle> botHandle() {
         List<IntegrationEntity> list = integrationRepo.findByTypeAndStatus(
-                IntegrationEntity.TYPE_FEISHU, IntegrationEntity.STATUS_ENABLED);
+                IntegrationEntity.TYPE_FEISHU, IntegrationEntity.STATUS_ENABLED)
+                .stream().filter(FeishuBotGateway::botEnabled).toList();
         if (list.isEmpty()) {
             return Optional.empty();
         }
         IntegrationEntity e = list.get(0);
         if (list.size() > 1) {
-            log.warn("存在多个启用的飞书集成，机器人用第一个: {}", e.getName());
+            log.warn("存在多个启用机器人的飞书集成，用第一个: {}", e.getName());
         }
         String plaintext = integrationService.tokenOf(e);
         FeishuConnector.AppCredentials cred = feishuConnector.credentials(plaintext);
@@ -64,13 +65,30 @@ public class FeishuBotGateway {
                 botDefaultActor(e), feishuConnector.apiClient(baseUrl, plaintext)));
     }
 
+    /**
+     * configJson 的 "bot" 槽 = 机器人启用开关（多飞书应用并存时文档专用集成不带此槽，天然跳过）；
+     * 槽内 enabled:false 为显式关闭。configJson 缺省/非法 = 未启用。
+     */
+    static boolean botEnabled(IntegrationEntity e) {
+        if (e.getConfigJson() == null || e.getConfigJson().isBlank()) {
+            return false;
+        }
+        try {
+            JsonNode bot = MAPPER.readTree(e.getConfigJson()).path("bot");
+            return bot.isObject() && bot.path("enabled").asBoolean(true);
+        } catch (Exception ex) {
+            log.warn("飞书集成 {} 的 configJson 解析失败，按未启用机器人处理: {}", e.getName(), ex.getMessage());
+            return false;
+        }
+    }
+
     /** configJson 扩展槽 {"bot":{"defaultActor":"..."}} */
     private String botDefaultActor(IntegrationEntity e) {
         if (e.getConfigJson() == null || e.getConfigJson().isBlank()) {
             return null;
         }
         try {
-            JsonNode bot = mapper.readTree(e.getConfigJson()).path("bot");
+            JsonNode bot = MAPPER.readTree(e.getConfigJson()).path("bot");
             String actor = bot.path("defaultActor").asText("");
             return actor.isBlank() ? null : actor;
         } catch (Exception ex) {

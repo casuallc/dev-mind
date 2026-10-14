@@ -95,7 +95,11 @@ bot_bindings(
 )
 ```
 
-integrations.configJson 扩展槽（FEISHU 类型）：`{"bot":{"defaultActor":"admin"}}`。
+integrations.configJson 扩展槽（FEISHU 类型）：`{"bot":{"enabled":true,"defaultActor":"admin"}}`。
+**bot 槽 = 机器人启用开关**：多飞书应用并存（有的只管文档导入、有的只管机器人）时，
+`FeishuBotGateway` 只挑 configJson 带 bot 槽且未显式 `enabled:false` 的 ENABLED 集成；
+纯文档集成本来就没有 bot 槽，天然不会被机器人选中。前端集成表单对 FEISHU 类型提供
+「启用双向机器人」开关 + 默认操作身份输入，保存时自动折进 configJson（保留其他扩展槽）。
 
 ## 6. API 概要
 
@@ -153,7 +157,8 @@ M2 无平台侧新 REST——绑定与操作全部经飞书指令驱动。M1 复
      （此步要求平台侧已在线，先做第 2 步再回来保存）。
    - 发布版本并等企业管理员审批通过。
 2. **平台侧**：设置 → 平台集成 → 新建 FEISHU 集成：baseUrl 留空（默认 open.feishu.cn），
-   BASIC 双行凭据 = App ID + App Secret；`configJson` 可配 `{"bot":{"defaultActor":"liuchangqing"}}`
+   BASIC 双行凭据 = App ID + App Secret；**勾选「启用双向机器人」**（保存为 configJson 的
+   bot 槽，多飞书应用并存时机器人只认带槽的集成），可填「机器人默认操作身份」
    （不配则回落 `devmind.bot.default-actor=local`）。**改配后重启应用**——长连接只在启动时建立
    （回推链路免重启，收事件要重启）。
 3. **验证**：启动日志见 `飞书机器人长连接已启动`（无 ENABLED 集成时是降级 WARN）→
