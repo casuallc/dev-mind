@@ -12,4 +12,7 @@ public interface UserPlatformAccountRepository extends JpaRepository<UserPlatfor
     List<UserPlatformAccountEntity> findByUserIdOrderByCreatedAtDesc(String userId);
 
     Optional<UserPlatformAccountEntity> findByUserIdAndIntegrationId(String userId, Long integrationId);
+
+    /** CAP-75 FR-11：按集成 + 第三方用户名（FEISHU=open_id）反查绑定，机器人身份解析用 */
+    Optional<UserPlatformAccountEntity> findByIntegrationIdAndUsername(Long integrationId, String username);
 }

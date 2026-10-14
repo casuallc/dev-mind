@@ -85,6 +85,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/integrations", "/api/integrations/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/integrations/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/integrations/**").hasRole("ADMIN")
+                        // CAP-75 FR-14：用户平台账号管理端点（跨用户查看/解绑）仅 ADMIN
+                        .requestMatchers("/api/admin/user-platform-accounts",
+                                "/api/admin/user-platform-accounts/**").hasRole("ADMIN")
                         // CAP-48：模型端点（含凭据、决定全平台索引行为）的写操作仅 ADMIN；读列表走下方全认证
                         .requestMatchers(HttpMethod.POST, "/api/model-endpoints", "/api/model-endpoints/**")
                         .hasRole("ADMIN")

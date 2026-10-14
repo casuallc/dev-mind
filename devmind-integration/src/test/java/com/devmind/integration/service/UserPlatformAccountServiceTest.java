@@ -298,6 +298,41 @@ class UserPlatformAccountServiceTest {
     }
 
     @Test
+    void 飞书身份绑定() {
+        // CAP-75 FR-11：FEISHU = IDENTITY 身份映射（open_id），无 secret/署名
+        IntegrationEntity fs = addIntegration("FEISHU", "飞书", "https://open.feishu.cn");
+        addUser("u1", "alice", "Alice");
+        loginAs("alice");
+
+        // 身份码必填
+        assertThrows(DevMindException.class, () -> service.upsert(fs.getId(),
+                new PlatformAccountUpsertRequest(null, null, null, null, null)));
+        assertThrows(DevMindException.class, () -> service.upsert(fs.getId(),
+                new PlatformAccountUpsertRequest("IDENTITY", "  ", null, null, null)));
+
+        // 绑定：authType 固定 IDENTITY，secret/署名即使传了也忽略
+        PlatformAccountView v = service.upsert(fs.getId(),
+                new PlatformAccountUpsertRequest("PAT", "ou_abc123", "ignored", "A", "a@b.com"));
+        assertTrue(v.bound());
+        assertEquals(IntegrationEntity.AUTH_IDENTITY, v.authType());
+        assertEquals("ou_abc123", v.username());
+        assertFalse(v.hasSecret());
+        UserPlatformAccountEntity e = accounts.values().iterator().next();
+        assertNull(e.getSecretEnc());
+        assertNull(e.getGitAuthorName());
+        assertNull(e.getGitAuthorEmail());
+
+        // 更新换身份码照常（无 secret 重填要求）
+        service.upsert(fs.getId(),
+                new PlatformAccountUpsertRequest(null, "ou_def456", null, null, null));
+        assertEquals("ou_def456", e.getUsername());
+        assertEquals(IntegrationEntity.AUTH_IDENTITY, e.getAuthType());
+
+        // 自检：IDENTITY 无凭据，直接成功不碰连接器
+        assertTrue(service.test(fs.getId()).ok());
+    }
+
+    @Test
     void 解绑与本人隔离() {
         IntegrationEntity gl = addIntegration("GITLAB", "GL", "https://gitlab.example.com");
         addUser("u1", "alice", "Alice");

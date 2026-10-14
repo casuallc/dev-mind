@@ -8,6 +8,7 @@ import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.integration.GitIdentityProvider;
 import com.devmind.integration.config.IntegrationCipher;
 import com.devmind.integration.connector.IntegrationConnector;
+import com.devmind.integration.dto.AdminPlatformAccountView;
 import com.devmind.integration.dto.PlatformAccountUpsertRequest;
 import com.devmind.integration.dto.PlatformAccountView;
 import com.devmind.integration.model.IntegrationEntity;
@@ -121,6 +122,11 @@ public class UserPlatformAccountService implements GitIdentityProvider {
         IntegrationEntity integration = requireEnabledIntegration(integrationId);
         UserPlatformAccountEntity account = accountRepo.findByUserIdAndIntegrationId(userId, integrationId)
                 .orElseThrow(() -> new DevMindException(ErrorCode.BAD_REQUEST, "请先绑定该实例的账号再自检"));
+        // CAP-75 FR-11：IDENTITY 身份映射无凭据，自检无意义（也不依赖连接器存在）
+        if (IntegrationEntity.AUTH_IDENTITY.equals(account.getAuthType())) {
+            return new IntegrationConnector.TestResult(true,
+                    "身份映射（open_id）无凭据，无需连通性自检", integration.getBaseUrl());
+        }
         IntegrationConnector connector = connectors.get(integration.getType());
         if (connector == null) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
@@ -178,10 +184,60 @@ public class UserPlatformAccountService implements GitIdentityProvider {
                 .map(a -> cipher.decrypt(a.getSecretEnc()));
     }
 
+    // ---------------- CAP-75 FR-14 管理端（跨用户，SecurityConfig 限 ADMIN） ----------------
+
+    /** 全量绑定列表（可按集成类型过滤，大小写不敏感），联查实例名与平台用户名/displayName */
+    public List<AdminPlatformAccountView> listAll(String integrationType) {
+        Map<Long, IntegrationEntity> integById = integrationRepo.findAllByOrderByCreatedAtDesc()
+                .stream().collect(Collectors.toMap(IntegrationEntity::getId, Function.identity()));
+        Map<String, UserEntity> userById = userRepo.findAll().stream()
+                .collect(Collectors.toMap(UserEntity::getId, Function.identity()));
+        return accountRepo.findAll().stream()
+                .filter(a -> {
+                    IntegrationEntity i = integById.get(a.getIntegrationId());
+                    return i != null && (integrationType == null || integrationType.isBlank()
+                            || integrationType.trim().equalsIgnoreCase(i.getType()));
+                })
+                .map(a -> {
+                    IntegrationEntity i = integById.get(a.getIntegrationId());
+                    UserEntity u = userById.get(a.getUserId());
+                    return new AdminPlatformAccountView(a.getId(), a.getIntegrationId(),
+                            i.getType(), i.getName(), a.getUserId(),
+                            u != null ? u.getUsername() : a.getUserId(),
+                            u != null ? u.getDisplayName() : null,
+                            a.getUsername(), a.getAuthType(), a.getCreatedAt(), a.getUpdatedAt());
+                })
+                .toList();
+    }
+
+    /** 管理端解绑（按绑定行 id；运维页纠错/处置冒填用） */
+    public void adminUnbind(Long id) {
+        UserPlatformAccountEntity e = accountRepo.findById(id)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "绑定记录不存在: " + id));
+        accountRepo.delete(e);
+        log.info("管理员解绑用户平台账号: id={} userId={} integrationId={}",
+                id, e.getUserId(), e.getIntegrationId());
+    }
+
     // ---------------- 内部 ----------------
 
     private void applyEditable(UserPlatformAccountEntity e, IntegrationEntity integration,
                                PlatformAccountUpsertRequest req, boolean isCreate) {
+        // CAP-75 FR-11：FEISHU 走身份映射——authType 固定 IDENTITY（无 secret/署名），
+        // username = 飞书 open_id（用户在飞书给机器人发 /bindme 取得后粘贴）
+        if (IntegrationEntity.TYPE_FEISHU.equals(integration.getType())) {
+            String openId = req.username() == null ? "" : req.username().trim();
+            if (openId.isEmpty()) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "飞书身份码不能为空：在飞书给机器人发 /bindme 获取自己的身份码");
+            }
+            e.setAuthType(IntegrationEntity.AUTH_IDENTITY);
+            e.setUsername(openId);
+            e.setSecretEnc(null);
+            e.setGitAuthorName(null);
+            e.setGitAuthorEmail(null);
+            return;
+        }
         String oldAuthType = isCreate ? null : e.getAuthType();
         String oldUsername = isCreate ? null : e.getUsername();
         boolean isGit = IntegrationEntity.TYPE_GITLAB.equals(integration.getType())

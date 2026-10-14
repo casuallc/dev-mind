@@ -33,6 +33,9 @@ public class IntegrationEntity {
     public static final String AUTH_PAT = "PAT";
     /** 用户名 + 密码（Jira Server/DC 8.13 及更早无 PAT，走 Basic Auth） */
     public static final String AUTH_BASIC = "BASIC";
+    /** CAP-75 FR-11：身份映射（无凭据），仅用于 user_platform_accounts 的 FEISHU open_id 绑定；
+     *  integrations 实例本身不收此值（IntegrationService.normalizeAuthType 不放行） */
+    public static final String AUTH_IDENTITY = "IDENTITY";
 
     public static final String STATUS_ENABLED = "ENABLED";
     public static final String STATUS_DISABLED = "DISABLED";
