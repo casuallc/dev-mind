@@ -121,6 +121,48 @@
   （版本+状态+时间）+ 最新方案正文截断 1500 字（`DocumentService.get(docId)`），
   附平台链接。两指令列入敏感门禁。
 
+### 运行闭环（M6）
+
+目标：会话结束不用刷 /status、状态推进与发版不出聊天窗口、危险操作有刹车、日志表不膨胀。
+
+- **FR-20 会话进展主动推送**：`/session` `/dev` 起会话成功后登记
+  `bot_session_watches`（session_id 唯一，记 channel/chatId/taskSpec 截断）；
+  `BotSessionWatchListener` 监听统一事件总线 `session.completed`
+  （SimpleDomainEvent，entityType=SESSION，entityId=sessionId）命中 watch 即向来源
+  聊天推送「会话 xxxx 已完成/失败 + 任务 + 摘要截断 + 平台链接」，推完删 watch
+  （一次性推送，失败记日志不补推）。SPI 扩展：`BotAdapter` 加
+  `default void send(String externalChatId, String text)`（无 origin 的主动发，
+  默认 no-op；飞书实现走既有 `sendText(chatId, "chat_id", text)`）。推送在独立
+  虚拟线程执行（事件监听线程是会话 runtime 事件线程，网络 I/O 不占道）。
+  bot `/stop` 停掉的会话顺手删 watch（用户已在场无需再推）；平台侧 kill/自然结束
+  照样推（onExit 都会广播 session.completed）。watch 残留由 FR-24 清理任务
+  顺带删 7 天前行。
+- **FR-21 危险操作二次确认**：`PendingConfirmStore`（内存，key=channel|chatId|senderId，
+  单人单槽，TTL 10 分钟，新危险指令覆盖旧 pending）。受保护动作：**/stop、
+  /release 执行形态、/flow 目标 DONE/CANCELLED**。拦截在 route 内：先解析出动作
+  描述（停哪个会话/发哪个版本/推进到哪个状态），stash pending（存原指令名+args+
+  描述），回「⚠️ 将xxx。回复 确认 执行，回复 取消 放弃（10 分钟内有效）」。
+  裸文本「确认」（精确匹配去空白）消费 pending 重放原指令（dispatch 正常走，
+  身份重新装配，指令本身已过敏感门禁）；「取消」清除回「已取消」；其他文本不动
+  pending（可插话问答）；无 pending 的「确认/取消」落 QA 不特殊处理。
+- **FR-22 需求状态推进 /flow**：`/flow <编号>` 无目标回当前状态+可选目标手册；
+  `/flow <编号> <状态> [force]` 调 `RequirementService.updateStatus`（DONE 撞未完结
+  工作单元的 409 文案原样透传，提示加 force 强制）。状态别名中英都收：
+  草稿=DRAFT、分析中=ANALYZING、设计中=DESIGNING、开发中=IN_PROGRESS、
+  验收=ACCEPTANCE、完结=DONE、取消=CANCELLED。目标 DONE/CANCELLED 走 FR-21 确认。
+  列入敏感门禁。
+- **FR-23 发版触发 /release**：`/release` 无参回最近 5 条发版记录；
+  `/release <版本号> [buildId]` 发版——buildId 缺省取最近一条**带产物**的 SUCCESS
+  构建（没有则明确文案「没有带产物的成功构建」），先预检（版本/构建解析、
+  发版配置存在性经 create 校验文案透传）→ FR-21 确认 → `ReleaseService.create`
+  + `execute`（PLANNED→RUNNING 异步，结果由通知中心/平台页跟踪）。列入敏感门禁。
+  devmind-bot pom 加 devmind-release 依赖。
+- **FR-24 交互日志保留期清理**：`devmind.bot.interaction-retention-days`（默认 30，
+  0=不清理）+ `devmind.bot.cleanup-cron`（默认 `0 50 3 * * *`，错开附件清理 03:40）。
+  `BotSchedulingConfig` 独立 @EnableScheduling（attachment 同模板），
+  `BotInteractionCleanupTask` 硬删 created_at 超期行（派生 deleteBy + @Transactional），
+  并顺带删 7 天前的 bot_session_watches 残留（FR-20 兜底）。
+
 ## 3. 否决方案
 
 - **webhook 回调端点为主路径**：需受信证书+域名（+国内 ECS 的 ICP 备案），194 自签证书
@@ -189,6 +231,18 @@ bot_interactions(                  -- FR-13 交互日志
 个人身份**不建新表**：复用 `user_platform_accounts`（CAP-35），authType=`IDENTITY`、
 username=open_id（FR-11）。
 
+M6 新增：
+
+```
+bot_session_watches(               -- FR-20 会话终态推送订阅
+  id bigint pk auto,
+  session_id varchar(64) unique,   -- 推送命中即删；7 天前残留由清理任务顺带删
+  channel varchar(32), external_chat_id varchar(128),
+  task_spec varchar(200),          -- 起会话时的描述截断（推送文案用）
+  created_at
+)
+```
+
 ## 6. API 概要
 
 M2 无平台侧新 REST——绑定与操作全部经飞书指令驱动。M1 复用既有
@@ -217,8 +271,9 @@ M3 新增：
   交互日志、机器人运维页）。
 - **M4 研发主线指令**：FR-15（/reqs /req /dev，需求查看 + 需求起会话挂主线）。
 - **M5 聊天开发闭环**：FR-16~19（出站/入站图片、会话控制 /status /stop、主线查看 /wi /design）。
-- **M6 展望**：webhook 回调第二接入路径、机器人主动推送会话进展、需求状态推进、
-  发版触发、危险操作二次确认、飞书交互卡片、交互日志保留期清理。
+- **M6 运行闭环**：FR-20~24（会话终态主动推送、危险操作二次确认、/flow 需求状态推进、
+  /release 发版触发、交互日志保留期清理）。
+- **M7 展望**：webhook 回调第二接入路径、飞书交互卡片。
 
 ## 9. 验收标准
 
@@ -240,6 +295,12 @@ M3 新增：
   随后 `/dev` 起会话挂 attachmentIds；`/status` 列会话、`/stop` 停 RUNNING；
   `/wi` / `/design` 回工作单元与方案正文截断；四个指令 + 图片消息未绑定身份均落 REJECTED；
   `tests/cap75_bot_verify.py` M5 段全绿。
+- M6：`/flow REQ-x 验收` 状态推进成功；`/flow REQ-x 完结` 先回确认提示、回「确认」才落 DONE、
+  回「取消」不动；`/stop` 有运行中会话时先确认再停（E2E 无 runner 仅覆盖空态与文案，
+  确认流由单测覆盖）；`/release` 无参回空态、带参无成功构建回明确文案（发版全链路
+  由单测 + 平台既有 CAP-11 验收覆盖）；bot 起的会话进终态后来源聊天收到推送且 watch 删除
+  （单测覆盖，E2E 无 runner 不产生 session.completed）；清理任务删除超期交互行与
+  7 天前 watch 残留（单测覆盖）。
 
 ## 10. 风险与开放问题
 
@@ -254,7 +315,8 @@ M3 新增：
 | R7 | open_id 冒填他人身份 | open_id 不可猜（ou_+随机串），只能填自己从 /bindme 拿到的；管理员可在运维页解绑。接受 |
 | O1 | 一群一项目是否够用 | M4 `/bind` 切换/多项目群 |
 | O2 | bot 配置（defaultActor）放 configJson 明文槽 | 非登录凭证，接受 |
-| O3 | 交互日志无保留期 | 量级小（未 @ 不落库）；M4 加 retention |
+| O3 | 交互日志无保留期 | M6 已交付：`interaction-retention-days` 默认 30 天定时硬删（FR-24） |
+| O4 | 终态推送一次性（失败不补推） | 推送属增强提醒，/status 与平台页可兜底；接受 |
 
 ## 附录 A：真机联调 checklist（M2）
 
