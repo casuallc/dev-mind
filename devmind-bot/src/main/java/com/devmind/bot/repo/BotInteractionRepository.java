@@ -1,6 +1,7 @@
 package com.devmind.bot.repo;
 
 import com.devmind.bot.model.BotInteractionEntity;
+import java.time.Instant;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -24,4 +25,8 @@ public interface BotInteractionRepository extends JpaRepository<BotInteractionEn
             """)
     Page<BotInteractionEntity> search(@Param("channel") String channel, @Param("status") String status,
                                       @Param("keyword") String keyword, Pageable pageable);
+
+    /** FR-24 保留期清理：硬删 created_at 早于截止点的行，返回删除行数。
+     *  派生 delete 自带不了事务，调用方（BotInteractionCleanupService.purge）必须已在事务内。 */
+    long deleteByCreatedAtBefore(Instant cutoff);
 }

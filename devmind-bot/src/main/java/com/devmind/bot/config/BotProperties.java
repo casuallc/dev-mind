@@ -20,6 +20,9 @@ public class BotProperties {
     /** 平台外部访问地址（回复尾注链接用；空 = 不带链接） */
     private String platformBaseUrl = "";
 
+    /** FR-24 交互日志保留天数（0 = 不清理）；清理 cron 见 devmind.bot.cleanup-cron */
+    private int interactionRetentionDays = 30;
+
     public String getDefaultActor() { return defaultActor; }
     public void setDefaultActor(String defaultActor) { this.defaultActor = defaultActor; }
     public int getQaTimeoutSeconds() { return qaTimeoutSeconds; }
@@ -28,4 +31,8 @@ public class BotProperties {
     public void setReplyMaxChars(int replyMaxChars) { this.replyMaxChars = replyMaxChars; }
     public String getPlatformBaseUrl() { return platformBaseUrl; }
     public void setPlatformBaseUrl(String platformBaseUrl) { this.platformBaseUrl = platformBaseUrl; }
+    public int getInteractionRetentionDays() { return interactionRetentionDays; }
+    public void setInteractionRetentionDays(int interactionRetentionDays) {
+        this.interactionRetentionDays = interactionRetentionDays;
+    }
 }
