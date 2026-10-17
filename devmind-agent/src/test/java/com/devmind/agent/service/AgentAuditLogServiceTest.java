@@ -105,4 +105,16 @@ class AgentAuditLogServiceTest {
         long days = java.time.Duration.between(cap.getValue(), before).toDays();
         assertEquals(180L, days);
     }
+
+    /**
+     * 回归网：purge 必须带 @Transactional。上面那条用的是 mock 仓库，走不到真实 EntityManager，
+     * 派生 deleteBy 缺事务时只会在运行时（定时任务、真实库）抛 TransactionRequiredException，
+     * 单测与 E2E 都看不见 —— 只能把注解本身钉住。
+     */
+    @Test
+    void purgeCarriesTransaction() throws Exception {
+        assertTrue(AgentAuditLogService.class.getMethod("purge", int.class)
+                        .isAnnotationPresent(org.springframework.transaction.annotation.Transactional.class),
+                "purge 缺 @Transactional：派生 delete 在 @Scheduled 入口（无事务）会空跑");
+    }
 }

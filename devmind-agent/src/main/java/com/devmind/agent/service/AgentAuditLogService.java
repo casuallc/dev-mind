@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.net.InetSocketAddress;
 import java.time.Instant;
@@ -134,7 +135,10 @@ public class AgentAuditLogService {
                 blankToNull(result), blankToNull(keyword), PageRequest.of(p, s));
     }
 
-    /** 按保留期硬删（定时任务调用），返回删除数。 */
+    /** 按保留期硬删（定时任务调用），返回删除数。
+     *  @Transactional 不能省：派生 deleteBy 查询需要事务上下文，而 @Scheduled 入口
+     *  （AgentAuditCleanupTask）不持有事务——省了就在夜里抛 TransactionRequiredException 空跑。 */
+    @Transactional
     public long purge(int retentionDays) {
         long deleted = repo.deleteByCreatedAtBefore(Instant.now().minus(retentionDays, ChronoUnit.DAYS));
         if (deleted > 0) {
