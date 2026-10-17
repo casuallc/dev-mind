@@ -7,6 +7,9 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.devmind.bot.config.BotProperties;
@@ -642,7 +645,10 @@ class BotRouterServiceTest {
         when(sessionManager.list(eq("RUNNING"), eq("p1"), isNull(), isNull()))
                 .thenReturn(List.of(running));
         when(sessionManager.kill("s-run12345678")).thenReturn(killed);
+        // FR-21：先回确认提示，回「确认」后才真正 kill
         router.onMessage(msg("/stop", "e-st-2"));
+        assertTrue(awaitReply().contains("危险操作确认"));
+        router.onMessage(msg("确认", "e-st-2b"));
         String reply = awaitReply();
         assertTrue(reply.contains("已停止会话 s-run123") && reply.contains("TERMINATED"), reply);
     }
@@ -656,6 +662,8 @@ class BotRouterServiceTest {
         when(sessionManager.list(isNull(), eq("p1"), isNull(), isNull())).thenReturn(List.of(a, b));
         when(sessionManager.kill("s-aaaa11112222")).thenReturn(killed);
         router.onMessage(msg("/stop s-aaaa", "e-st-3"));
+        assertTrue(awaitReply().contains("危险操作确认"));
+        router.onMessage(msg("确认", "e-st-3b"));
         assertTrue(awaitReply().contains("已停止会话 s-aaaa11"));
     }
 
@@ -666,7 +674,127 @@ class BotRouterServiceTest {
         when(sessionManager.list(isNull(), eq("p1"), isNull(), isNull()))
                 .thenReturn(List.of(dead));
         router.onMessage(msg("/stop s-dead", "e-st-4"));
+        // 终态短路无副作用，不进二次确认
         assertTrue(awaitReply().contains("无需停止"));
+        verify(sessionManager, never()).kill(anyString());
+    }
+
+    // ---------------- CAP-75 FR-21 危险操作二次确认 ----------------
+
+    /** QA 桩：建问答并捕获事件订阅（配合 awaitConsumer + 喂 result 收口回答）。 */
+    private AtomicReference<Consumer<SessionEvent>> stubQa() {
+        ChatView view = mock(ChatView.class);
+        String id = "c-qa-" + System.nanoTime();
+        when(view.id()).thenReturn(id);
+        when(chatManager.create(any(CreateChatRequest.class))).thenReturn(view);
+        AtomicReference<Consumer<SessionEvent>> ref = new AtomicReference<>();
+        doAnswer(inv -> {
+            ref.set(inv.getArgument(1));
+            return List.of();
+        }).when(chatManager).subscribe(eq(id), any());
+        return ref;
+    }
+
+    private void feedQaAnswer(AtomicReference<Consumer<SessionEvent>> ref, String answer)
+            throws InterruptedException {
+        Consumer<SessionEvent> consumer = awaitConsumer(ref);
+        consumer.accept(SessionEvent.of(1, "assistant", answer, "stdout"));
+        consumer.accept(SessionEvent.of(2, "result", "摘要", "stdout", Map.of("isError", false)));
+    }
+
+    @Test
+    void stopConfirmExecutesOnceAndLogsOriginalCommand() throws Exception {
+        bindP1();
+        SessionView running = sessView("s-cf11112222", "RUNNING", "做导出", null);
+        SessionView killed = sessView("s-cf11112222", "TERMINATED", "做导出", null);
+        when(sessionManager.list(eq("RUNNING"), eq("p1"), isNull(), isNull()))
+                .thenReturn(List.of(running));
+        when(sessionManager.kill("s-cf11112222")).thenReturn(killed);
+
+        router.onMessage(msg("/stop", "e-cf-1"));
+        String prompt = awaitReply();
+        assertTrue(prompt.contains("危险操作确认") && prompt.contains("s-cf1111"), prompt);
+        verify(sessionManager, never()).kill(anyString());
+
+        router.onMessage(msg("确认", "e-cf-2"));
+        String done = awaitReply();
+        assertTrue(done.contains("已停止会话 s-cf1111") && done.contains("TERMINATED"), done);
+        verify(sessionManager).kill("s-cf11112222");
+        // 「确认」落库的指令名记原操作 stop，不是 QA
+        List<BotInteractionEntity> rows = awaitInteractions(3);
+        assertTrue("stop".equals(rows.get(2).getCommand()), rows.get(2).getCommand());
+
+        // 暂存已消费：再发 确认 落 QA，不会重复 kill
+        AtomicReference<Consumer<SessionEvent>> ref = stubQa();
+        router.onMessage(msg("确认", "e-cf-3"));
+        feedQaAnswer(ref, "QA 回答");
+        assertTrue(awaitReply().contains("QA 回答"));
+        verify(sessionManager, times(1)).kill(anyString());
+    }
+
+    @Test
+    void stopCancelDiscardsPending() throws Exception {
+        bindP1();
+        SessionView running = sessView("s-cc11112222", "RUNNING", "做导出", null);
+        when(sessionManager.list(eq("RUNNING"), eq("p1"), isNull(), isNull()))
+                .thenReturn(List.of(running));
+        router.onMessage(msg("/stop", "e-cc-1"));
+        assertTrue(awaitReply().contains("危险操作确认"));
+
+        router.onMessage(msg("取消", "e-cc-2"));
+        assertTrue(awaitReply().contains("已取消"));
+        verify(sessionManager, never()).kill(anyString());
+
+        // 取消后再发 确认：无暂存落 QA
+        AtomicReference<Consumer<SessionEvent>> ref = stubQa();
+        router.onMessage(msg("确认", "e-cc-3"));
+        feedQaAnswer(ref, "QA 回答");
+        assertTrue(awaitReply().contains("QA 回答"));
+        verify(sessionManager, never()).kill(anyString());
+    }
+
+    @Test
+    void stopConfirmExpiredFallsToQa() throws Exception {
+        bindP1();
+        java.util.concurrent.atomic.AtomicLong now =
+                new java.util.concurrent.atomic.AtomicLong(1_000_000);
+        router.setPendingConfirms(new BotRouterService.PendingConfirmStore(5_000, now::get));
+        SessionView running = sessView("s-ex11112222", "RUNNING", "做导出", null);
+        when(sessionManager.list(eq("RUNNING"), eq("p1"), isNull(), isNull()))
+                .thenReturn(List.of(running));
+        router.onMessage(msg("/stop", "e-ex-1"));
+        assertTrue(awaitReply().contains("危险操作确认"));
+
+        now.addAndGet(10_000); // 超过 5s 测试 TTL
+        AtomicReference<Consumer<SessionEvent>> ref = stubQa();
+        router.onMessage(msg("确认", "e-ex-2"));
+        feedQaAnswer(ref, "QA 回答");
+        assertTrue(awaitReply().contains("QA 回答"));
+        verify(sessionManager, never()).kill(anyString());
+    }
+
+    @Test
+    void stopNewPendingOverwritesOld() throws Exception {
+        bindP1();
+        SessionView a = sessView("s-aa11112222", "RUNNING", "任务A", null);
+        SessionView b = sessView("s-bb11112222", "RUNNING", "任务B", null);
+        SessionView killedB = sessView("s-bb11112222", "TERMINATED", "任务B", null);
+        when(sessionManager.list(eq("RUNNING"), eq("p1"), isNull(), isNull()))
+                .thenReturn(List.of(a, b));
+        when(sessionManager.kill("s-bb11112222")).thenReturn(killedB);
+        // 无参 /stop 取最新 RUNNING（list 首条）；连发两次，第二次覆盖第一次
+        router.onMessage(msg("/stop", "e-ow-1"));
+        assertTrue(awaitReply().contains("危险操作确认"));
+        when(sessionManager.list(eq("RUNNING"), eq("p1"), isNull(), isNull()))
+                .thenReturn(List.of(b));
+        router.onMessage(msg("/stop", "e-ow-2"));
+        String prompt2 = awaitReply();
+        assertTrue(prompt2.contains("s-bb1111"), prompt2);
+
+        router.onMessage(msg("确认", "e-ow-3"));
+        String done = awaitReply();
+        assertTrue(done.contains("已停止会话 s-bb1111"), done);
+        verify(sessionManager, never()).kill("s-aa11112222");
     }
 
     // ---------------- CAP-75 FR-19 主线查看 /wi /design ----------------

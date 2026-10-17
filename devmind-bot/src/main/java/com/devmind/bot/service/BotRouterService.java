@@ -107,6 +107,8 @@ public class BotRouterService implements BotMessageHandler {
     private final EventDedup dedup = new EventDedup();
     /** FR-17 入站截图暂存：发图 → 10 分钟内 /dev /session 消费 */
     private final PendingImageStore pendingImages = new PendingImageStore();
+    /** FR-21 危险操作二次确认暂存：/stop（及 M6 后续 /flow 终态 /release）→ 确认/取消 */
+    private volatile PendingConfirmStore pendingConfirms = new PendingConfirmStore();
     private final ExecutorService botExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     public BotRouterService(BotBindingRepository bindingRepo,
@@ -150,6 +152,11 @@ public class BotRouterService implements BotMessageHandler {
         botExecutor.close();
     }
 
+    /** 测试钩子：注入短 TTL/可控时钟的确认暂存区。 */
+    void setPendingConfirms(PendingConfirmStore store) {
+        this.pendingConfirms = store;
+    }
+
     // ---------------- 入口 ----------------
 
     @Override
@@ -185,7 +192,15 @@ public class BotRouterService implements BotMessageHandler {
                     new UsernamePasswordAuthenticationToken(
                             new DevMindPrincipal(actor, "USER"), null, List.of()));
             CommandParser.Command cmd = msg.imageKey() != null ? null : CommandParser.parse(msg.text());
-            rec.setCommand(msg.imageKey() != null ? "IMAGE" : (cmd == null ? "QA" : cmd.name()));
+            String command = msg.imageKey() != null ? "IMAGE" : (cmd == null ? "QA" : cmd.name());
+            if (cmd == null && msg.imageKey() == null) {
+                // FR-21：裸文本「确认/取消」命中暂存时，交互行记原指令名（确认）或 cancel
+                String pendingName = pendingConfirms.peekName(pendingKey(msg), msg.text().trim());
+                if (pendingName != null) {
+                    command = pendingName;
+                }
+            }
+            rec.setCommand(command);
             boolean gated = msg.imageKey() != null
                     || (cmd != null && SENSITIVE_COMMANDS.contains(cmd.name()));
             if (gated && rejectedByGate(msg)) {
@@ -294,6 +309,10 @@ public class BotRouterService implements BotMessageHandler {
             return RouteReply.text(receiveImage(msg));
         }
         if (cmd == null) {
+            RouteReply confirmed = confirmReply(msg, binding);
+            if (confirmed != null) {
+                return confirmed;
+            }
             return RouteReply.text(ask(binding, msg.text().trim()));
         }
         return switch (cmd.name()) {
@@ -308,13 +327,39 @@ public class BotRouterService implements BotMessageHandler {
             case "req" -> requirementDetail(binding, cmd.args());
             case "dev" -> RouteReply.text(devSession(msg, binding, cmd.args()));
             case "status" -> RouteReply.text(sessionStatus(binding));
-            case "stop" -> RouteReply.text(stopSession(binding, cmd.args()));
+            case "stop" -> RouteReply.text(stopWithConfirm(msg, binding, cmd.args()));
             case "wi" -> RouteReply.text(wiList(binding, cmd.args()));
             case "design" -> RouteReply.text(designDetail(binding, cmd.args()));
             case "build" -> RouteReply.text(lastBuild(binding));
             case "deploy" -> RouteReply.text(lastDeploys(binding));
             case "new" -> RouteReply.text(newChat(binding));
             default -> RouteReply.text("未知指令 /" + cmd.name() + "，发 /help 查看可用指令");
+        };
+    }
+
+    /**
+     * FR-21 二次确认应答：裸文本「确认」消费暂存并执行原操作，「取消」丢弃；
+     * 无暂存（或已过期）返回 null 落 QA 不特殊处理。暂存 key 含 senderId，
+     * 他人无法替你确认。
+     */
+    private RouteReply confirmReply(BotMessage msg, BotBindingEntity binding) {
+        String text = msg.text().trim();
+        if ("确认".equals(text)) {
+            PendingConfirmStore.Entry e = pendingConfirms.poll(pendingKey(msg));
+            return e == null ? null : RouteReply.text(executeConfirmed(binding, e));
+        }
+        if ("取消".equals(text)) {
+            return pendingConfirms.removeFresh(pendingKey(msg))
+                    ? RouteReply.text("已取消，操作未执行") : null;
+        }
+        return null;
+    }
+
+    /** 确认通过后的原操作执行（各指令重校验当前状态，不盲信暂存时的快照）。 */
+    private String executeConfirmed(BotBindingEntity binding, PendingConfirmStore.Entry e) {
+        return switch (e.name()) {
+            case "stop" -> stopConfirmed(binding, e.args());
+            default -> "暂存的操作已失效，请重新发起（/" + e.name() + "）";
         };
     }
 
@@ -365,7 +410,7 @@ public class BotRouterService implements BotMessageHandler {
                 /build —— 最近一条构建状态（需绑定个人身份）
                 /deploy —— 最近 5 条部署状态（需绑定个人身份）
                 /status —— 最近 5 条开发会话状态（需绑定个人身份）
-                /stop [会话id] —— 停止会话（无参停最新运行中的；需绑定个人身份）
+                /stop [会话id] —— 停止会话（危险操作需二次确认；无参停最新运行中的；需绑定个人身份）
                 直接发截图给我 —— 10 分钟内发 /dev 或 /session 起会话自动带上（需绑定个人身份）
                 其余文字直接当作问答（私聊直接问，群聊 @我）""";
     }
@@ -708,39 +753,62 @@ public class BotRouterService implements BotMessageHandler {
         return sb.toString();
     }
 
-    /** /stop [id|唯一前缀]：无参停最新 RUNNING；kill 只受理存活会话（requireRuntime）。 */
-    private String stopSession(BotBindingEntity binding, String args) {
+    /**
+     * /stop [id|唯一前缀]（FR-21 危险操作）：先解析目标并暂存，用户回「确认」才真正 kill。
+     * 终态会话直接短路回复（无副作用，不需确认）；解析失败（空态/不存在/多匹配）照样抛错。
+     */
+    private String stopWithConfirm(BotMessage msg, BotBindingEntity binding, String args) {
         String projectId = requireProject(binding);
-        SessionView target;
-        if (args == null || args.isBlank()) {
-            target = sessionManager.list("RUNNING", projectId, null, null).stream().findFirst()
-                    .orElseThrow(() -> new DevMindException(
-                            com.devmind.common.exception.ErrorCode.BAD_REQUEST,
-                            "当前没有运行中的会话"));
-        } else {
-            String key = args.trim();
-            List<SessionView> hits = sessionManager.list(null, projectId, null, null).stream()
-                    .filter(s -> s.id().equals(key) || s.id().startsWith(key)).toList();
-            if (hits.isEmpty()) {
-                throw new DevMindException(com.devmind.common.exception.ErrorCode.NOT_FOUND,
-                        "会话不存在: " + key);
-            }
-            if (hits.size() > 1) {
-                StringBuilder sb = new StringBuilder("「" + key + "」匹配到多个会话，请补全 id：");
-                hits.stream().limit(5).forEach(s ->
-                        sb.append("\n- ").append(shortId(s.id())).append(" [").append(s.status())
-                                .append("] ").append(previewOf(s.taskSpec(), 30)));
-                throw new DevMindException(com.devmind.common.exception.ErrorCode.BAD_REQUEST,
-                        sb.toString());
-            }
-            target = hits.get(0);
+        SessionView target = resolveStopTarget(projectId, args);
+        if (isTerminal(target)) {
+            return "会话 " + shortId(target.id()) + " 已是 " + target.status() + "，无需停止";
         }
-        if (!"RUNNING".equals(target.status()) && !"QUEUED".equals(target.status())) {
+        String desc = "停止会话 " + shortId(target.id())
+                + "（任务：" + previewOf(target.taskSpec(), 40) + "）";
+        pendingConfirms.put(pendingKey(msg), "stop", args, desc);
+        return "⚠️ 危险操作确认：将" + desc + "\n回复 确认 执行，回复 取消 放弃（10 分钟内有效）";
+    }
+
+    /** 确认通过后执行：重解析目标（暂存期间状态可能已变化），存活才 kill（requireRuntime 兜底）。 */
+    private String stopConfirmed(BotBindingEntity binding, String args) {
+        String projectId = requireProject(binding);
+        SessionView target = resolveStopTarget(projectId, args);
+        if (isTerminal(target)) {
             return "会话 " + shortId(target.id()) + " 已是 " + target.status() + "，无需停止";
         }
         SessionView killed = sessionManager.kill(target.id());
         return "已停止会话 " + shortId(killed.id()) + "\n任务：" + previewOf(killed.taskSpec(), 40)
                 + "\n状态：" + killed.status() + footer("/projects/" + projectId);
+    }
+
+    private static boolean isTerminal(SessionView s) {
+        return !"RUNNING".equals(s.status()) && !"QUEUED".equals(s.status());
+    }
+
+    /** /stop 目标解析：无参取最新 RUNNING；有参按 id 精确/唯一前缀匹配。 */
+    private SessionView resolveStopTarget(String projectId, String args) {
+        if (args == null || args.isBlank()) {
+            return sessionManager.list("RUNNING", projectId, null, null).stream().findFirst()
+                    .orElseThrow(() -> new DevMindException(
+                            com.devmind.common.exception.ErrorCode.BAD_REQUEST,
+                            "当前没有运行中的会话"));
+        }
+        String key = args.trim();
+        List<SessionView> hits = sessionManager.list(null, projectId, null, null).stream()
+                .filter(s -> s.id().equals(key) || s.id().startsWith(key)).toList();
+        if (hits.isEmpty()) {
+            throw new DevMindException(com.devmind.common.exception.ErrorCode.NOT_FOUND,
+                    "会话不存在: " + key);
+        }
+        if (hits.size() > 1) {
+            StringBuilder sb = new StringBuilder("「" + key + "」匹配到多个会话，请补全 id：");
+            hits.stream().limit(5).forEach(s ->
+                    sb.append("\n- ").append(shortId(s.id())).append(" [").append(s.status())
+                            .append("] ").append(previewOf(s.taskSpec(), 30)));
+            throw new DevMindException(com.devmind.common.exception.ErrorCode.BAD_REQUEST,
+                    sb.toString());
+        }
+        return hits.get(0);
     }
 
     // ---------------- 主线查看（M5 FR-19） ----------------
@@ -1005,6 +1073,58 @@ public class BotRouterService implements BotMessageHandler {
             while (!q.isEmpty() && q.peekFirst().expireAt() < now) {
                 q.pollFirst();
             }
+        }
+    }
+
+    /**
+     * FR-21 危险操作二次确认暂存：key=channel|chat|sender，单槽（新暂存覆盖旧暂存，旧的视为放弃），
+     * TTL 10 分钟。纯内存（重启即清，危险操作本就不该跨重启悬而未决）；惰性过期。
+     */
+    static final class PendingConfirmStore {
+        private static final long DEFAULT_TTL_MS = 10 * 60 * 1000;
+        private final long ttlMillis;
+        private final java.util.function.LongSupplier clock;
+        private final Map<String, Entry> store = new java.util.concurrent.ConcurrentHashMap<>();
+
+        /** 暂存的一次操作：指令名 + 原参数 + 给「取消」回显用的描述。 */
+        record Entry(String name, String args, String description, long expireAt) {
+        }
+
+        PendingConfirmStore() {
+            this(DEFAULT_TTL_MS, System::currentTimeMillis);
+        }
+
+        /** 测试用：短 TTL / 可控时钟。 */
+        PendingConfirmStore(long ttlMillis, java.util.function.LongSupplier clock) {
+            this.ttlMillis = ttlMillis;
+            this.clock = clock;
+        }
+
+        synchronized void put(String key, String name, String args, String description) {
+            store.put(key, new Entry(name, args, description, clock.getAsLong() + ttlMillis));
+        }
+
+        /** 取出并清除；无暂存或已过期返回 null（过期即视为没有，落 QA）。 */
+        synchronized Entry poll(String key) {
+            Entry e = store.remove(key);
+            return e != null && e.expireAt() >= clock.getAsLong() ? e : null;
+        }
+
+        /** 「取消」用：存在且未过期才消费并返回 true。 */
+        synchronized boolean removeFresh(String key) {
+            return poll(key) != null;
+        }
+
+        /** 交互日志打标用：裸文本是确认/取消且有未过期暂存时，回指令名（确认）或 cancel。 */
+        synchronized String peekName(String key, String text) {
+            if (!"确认".equals(text) && !"取消".equals(text)) {
+                return null;
+            }
+            Entry e = store.get(key);
+            if (e == null || e.expireAt() < clock.getAsLong()) {
+                return null;
+            }
+            return "确认".equals(text) ? e.name() : "cancel";
         }
     }
 
