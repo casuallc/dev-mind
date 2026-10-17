@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-"""CAP-75 M2+M3+M5 双向机器人 E2E：fake 适配器驱动全路由 + 飞书出站回推到本地 mock +
+"""CAP-75 M2+M3+M5+M6 双向机器人 E2E：fake 适配器驱动全路由 + 飞书出站回推到本地 mock +
 个人身份流（/bindme 取码 → 门禁 → 绑定放行）+ 运维端点断言 + M5 聊天开发闭环
-（出站图片 / 入站图片 / /status /stop / /wi /design）。
+（出站图片 / 入站图片 / /status /stop / /wi /design）+ M6 运行闭环
+（/flow 状态推进与二次确认 / /release 发版与空态）。
 
 运行前提（仿 cap49）：
 1. 依赖已构建：`mvn -q install -DskipTests`。
@@ -42,6 +43,11 @@
     （E2E 无 runner，起会话恒 409，消费不可观测）
   K M5 /status /stop 空态：无成功会话 → 「暂无开发会话」/「没有运行中的会话」
   L M5 /wi /design：API 建工作单元 → /wi 列出；无方案 → /design 回「暂无方案」
+  M M6 运行闭环（FR-21/22/23）：/flow 无目标回当前状态 → 非终态直接推进 → 完结走
+    二次确认（回复「确认」落库）→ 取消走二次确认（回复「取消」丢弃且状态不变，
+    经 API 复核）→ DONE 撞未完结工作单元提前给 force 提示；/release 无参空态 +
+    缺省构建无带产物成功构建的明确文案。FR-20 终态推送与 /stop 确认流在本 E2E
+    不可观测（无 runner → 起会话恒 409 → 无 session.completed 事件），由单测覆盖。
 """
 import json
 import os
@@ -589,7 +595,77 @@ try:
     check("/design 空态回复（暂无方案）",
           len(rs) >= 14 and "暂无方案" in rs[13]["text"], f"{rs[-1:] if rs else None}")
 
-    print(f"\n== CAP-75 M2+M3+M5 bot E2E: {passed} passed, {failed} failed ==")
+    # ---------- M. M6 运行闭环：/flow /release（FR-22 / FR-23 + FR-21 二次确认） ----------
+    print("\n[M] M6 /flow /release（状态推进 / 二次确认 / 发版空态）")
+    # REQ-2 无工作单元：完结不会被平台 409 挡；REQ-1 有 2 个未完结 WI，用来验 force 提示
+    send("c-ops", "/flow REQ-2", "m-flow-1")
+    rs = wait_reply("c-ops", 15)
+    check("/flow 无目标 → 当前状态 + 可选目标手册",
+          len(rs) >= 15 and "当前状态：草稿（DRAFT）" in rs[14]["text"]
+          and "可推进到：" in rs[14]["text"] and "/flow REQ-2 <目标状态>" in rs[14]["text"],
+          f"{rs[-1:] if rs else None}")
+
+    send("c-ops", "/flow REQ-2 验收", "m-flow-2")
+    rs = wait_reply("c-ops", 16)
+    check("/flow 非终态直接推进（不打扰确认）",
+          len(rs) >= 16 and "REQ-2 状态已更新：验收（ACCEPTANCE）" in rs[15]["text"],
+          f"{rs[-1:] if rs else None}")
+
+    send("c-ops", "/flow REQ-2 完结", "m-flow-3")
+    rs = wait_reply("c-ops", 17)
+    check("/flow 推进到完结 → 二次确认（FR-21）",
+          len(rs) >= 17 and "危险操作确认" in rs[16]["text"]
+          and "推进到 完结（DONE）" in rs[16]["text"], f"{rs[-1:] if rs else None}")
+    # 确认 = 原指令重放（同 chat 同 sender），身份重新装配
+    send("c-ops", "确认", "m-flow-4")
+    rs = wait_reply("c-ops", 18)
+    check("回复「确认」→ 完结落库",
+          len(rs) >= 18 and "REQ-2 状态已更新：完结（DONE）" in rs[17]["text"],
+          f"{rs[-1:] if rs else None}")
+
+    send("c-ops", "/flow REQ-1 取消", "m-flow-5")
+    rs = wait_reply("c-ops", 19)
+    check("/flow 取消 → 二次确认", len(rs) >= 19 and "危险操作确认" in rs[18]["text"],
+          f"{rs[-1:] if rs else None}")
+    # 取消要"没落库"：拿平台当前状态做参照（/dev REQ-1 已按 CAP-38 推着需求进了开发中，
+    # 所以基准不是草稿，只能前后比对）
+    st, page = call("GET", f"/projects/{PID}/requirements?size=50")
+    before = next((r.get("status") for r in ((page or {}).get("items") or [])
+                   if r.get("code") == "REQ-1"), None)
+    check("取消前取到 REQ-1 基准状态（非终态）",
+          st == 200 and before not in (None, "DONE", "CANCELLED"), f"{st} {before}")
+    send("c-ops", "取消", "m-flow-6")
+    rs = wait_reply("c-ops", 20)
+    check("回复「取消」→ 丢弃不落库",
+          len(rs) >= 20 and "已取消，操作未执行" in rs[19]["text"],
+          f"{rs[-1:] if rs else None}")
+    st, page = call("GET", f"/projects/{PID}/requirements?size=50")
+    after = next((r.get("status") for r in ((page or {}).get("items") or [])
+                  if r.get("code") == "REQ-1"), None)
+    check("取消后 REQ-1 状态未变（未被推进到取消）", after == before,
+          f"{st} before={before} after={after}")
+
+    send("c-ops", "/flow REQ-1 完结", "m-flow-7")
+    rs = wait_reply("c-ops", 21)
+    check("DONE 撞未完结工作单元 → 提前给 force 提示（不白确认一轮）",
+          len(rs) >= 21 and "还有 2 个未完结工作单元" in rs[20]["text"]
+          and "/flow REQ-1 完结 force" in rs[20]["text"], f"{rs[-1:] if rs else None}")
+
+    send("c-ops", "/release", "m-rel-1")
+    rs = wait_reply("c-ops", 22)
+    check("/release 无参 → 空态（暂无发版记录）",
+          len(rs) >= 22 and "暂无发版记录" in rs[21]["text"], f"{rs[-1:] if rs else None}")
+
+    send("c-ops", "/release 1.0.0", "m-rel-2")
+    rs = wait_reply("c-ops", 23)
+    check("/release 缺省构建无带产物成功构建 → 明确文案（不静默）",
+          len(rs) >= 23 and "操作失败" in rs[22]["text"]
+          and "没有带产物的成功构建" in rs[22]["text"], f"{rs[-1:] if rs else None}")
+
+    # FR-20 终态推送与 /stop 确认流在本 E2E 不可观测：无 runner → 起会话恒 409 → 无
+    # session.completed 事件（前者由 BotSessionWatchListenerTest 覆盖，后者 BotRouterServiceTest）
+
+    print(f"\n== CAP-75 M2+M3+M5+M6 bot E2E: {passed} passed, {failed} failed ==")
 finally:
     if mock_proc:
         mock_proc.terminate()
