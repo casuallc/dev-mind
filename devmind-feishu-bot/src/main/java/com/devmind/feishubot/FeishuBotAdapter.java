@@ -125,6 +125,19 @@ public class FeishuBotAdapter implements BotAdapter, BotChannelConfigProvider {
     }
 
     /**
+     * CAP-75 FR-20：无入站消息 origin 的主动推送（会话终态进展）——按 chat_id 直发。
+     * 失败抛异常，由监听器记日志（订阅在推送前已消费，不补推）。
+     */
+    @Override
+    public void send(String externalChatId, String text) {
+        FeishuBotGateway.FeishuBotHandle h = handleOrNull();
+        if (h == null) {
+            throw new IllegalStateException("飞书机器人未启用（无启用的飞书集成）");
+        }
+        h.api().sendText(externalChatId, "chat_id", text);
+    }
+
+    /**
      * 句柄优先用 start 时缓存，未启动/后配集成时惰性现取——回推链路不依赖长连接已建立
      * （集成后配/改配无需重启即可回推；长连接收事件仍需重启生效）。
      */

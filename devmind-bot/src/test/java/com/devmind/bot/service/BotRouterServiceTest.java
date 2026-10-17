@@ -118,6 +118,7 @@ class BotRouterServiceTest {
     private final DeploymentService deploymentService = mock(DeploymentService.class);
     private final com.devmind.release.service.ReleaseService releaseService =
             mock(com.devmind.release.service.ReleaseService.class);
+    private final BotSessionWatchService watchService = mock(BotSessionWatchService.class);
     private final com.devmind.attachment.service.AttachmentService attachmentService =
             mock(com.devmind.attachment.service.AttachmentService.class);
     private final com.devmind.project.DesignService designService =
@@ -135,7 +136,7 @@ class BotRouterServiceTest {
 
     @BeforeEach
     void setUp() {
-        Mockito.reset(bindingRepo, interactionRepo);
+        Mockito.reset(bindingRepo, interactionRepo, watchService);
         bindings.clear();
         interactions.clear();
         adapter.replies.clear();
@@ -177,8 +178,9 @@ class BotRouterServiceTest {
 
         router = new BotRouterService(bindingRepo, interactionRepo, chatManager, sessionManager,
                 projectService, requirementService, workItemService, buildService,
-                deploymentService, releaseService, props, provider, attachmentProvider(),
-                attachmentService, designService, documentService, List.of());
+                deploymentService, releaseService, watchService, props, provider,
+                attachmentProvider(), attachmentService, designService, documentService,
+                List.of());
         registryRef.set(new BotAdapterRegistry(List.of(adapter), router));
     }
 
@@ -453,6 +455,61 @@ class BotRouterServiceTest {
         assertTrue(req.taskSpec().contains("【REQ-3】登录加验证码"), req.taskSpec());
         assertTrue(req.taskSpec().contains("支持图形验证码"), req.taskSpec());
         assertTrue(req.taskSpec().contains("补充说明：先做图形验证码"), req.taskSpec());
+    }
+
+    // ---------------- CAP-75 FR-20 会话终态推送订阅 ----------------
+
+    @Test
+    void sessionRegistersTerminalPushWatch() throws Exception {
+        bindP1();
+        SessionView sv = mock(SessionView.class);
+        when(sv.id()).thenReturn("s-watch1a2b3c");
+        when(sv.status()).thenReturn("QUEUED");
+        when(sessionManager.create(any())).thenReturn(sv);
+
+        router.onMessage(msg("/session 修登录页样式错位", "e-w-1"));
+        assertTrue(awaitReply().contains("已起开发会话 s-watch1a2b3c"));
+        verify(watchService).register("s-watch1a2b3c", "fake", "chat-1", "修登录页样式错位");
+    }
+
+    @Test
+    void devRegistersTerminalPushWatchWithTaskSpec() throws Exception {
+        bindP1();
+        RequirementEntity e = new RequirementEntity();
+        e.setId("r1");
+        e.setProjectId("p1");
+        e.setSeq(3L);
+        when(requirementService.findByProjectSeq("p1", 3L)).thenReturn(Optional.of(e));
+        when(requirementService.get("p1", "r1"))
+                .thenReturn(reqView("r1", 3, "登录加验证码", "IN_PROGRESS", "支持图形验证码"));
+        SessionView sv = mock(SessionView.class);
+        when(sv.id()).thenReturn("s-watch2d4e5f");
+        when(sv.status()).thenReturn("QUEUED");
+        when(sessionManager.create(any())).thenReturn(sv);
+
+        router.onMessage(msg("/dev REQ-3", "e-w-2"));
+        assertTrue(awaitReply().contains("已起开发会话 s-watch2d4e5f"));
+        verify(watchService).register(eq("s-watch2d4e5f"), eq("fake"), eq("chat-1"),
+                org.mockito.ArgumentMatchers.contains("【REQ-3】登录加验证码"));
+    }
+
+    @Test
+    void stopConfirmedRemovesTerminalPushWatch() throws Exception {
+        bindP1();
+        SessionView running = sessView("s-w33334444", "RUNNING", "做导出", null);
+        SessionView killed = sessView("s-w33334444", "TERMINATED", "做导出", null);
+        when(sessionManager.list(eq("RUNNING"), eq("p1"), isNull(), isNull()))
+                .thenReturn(List.of(running));
+        when(sessionManager.kill("s-w33334444")).thenReturn(killed);
+
+        router.onMessage(msg("/stop", "e-w-3"));
+        assertTrue(awaitReply().contains("危险操作确认"));
+        verify(watchService, never()).remove(anyString());
+
+        router.onMessage(msg("确认", "e-w-4"));
+        assertTrue(awaitReply().contains("已停止会话 s-w3333"));
+        // 用户在场主动停的会话不再推终态
+        verify(watchService).remove("s-w33334444");
     }
 
     // ---------------- CAP-75 FR-16 出站图片 ----------------
@@ -1199,7 +1256,7 @@ class BotRouterServiceTest {
         when(provider.getIfAvailable()).thenAnswer(inv -> registryRef.get());
         feishuRouter = new BotRouterService(bindingRepo, interactionRepo, chatManager,
                 sessionManager, projectService, requirementService, workItemService,
-                buildService, deploymentService, releaseService, props, provider,
+                buildService, deploymentService, releaseService, watchService, props, provider,
                 attachmentProvider(), attachmentService, designService, documentService,
                 List.of(identityConfig));
         registryRef.set(new BotAdapterRegistry(List.of(feishuAdapter), feishuRouter));

@@ -26,6 +26,8 @@ public class FakeBotAdapter implements BotAdapter {
 
     private volatile BotMessageHandler handler;
     private final List<Reply> replies = new CopyOnWriteArrayList<>();
+    /** M6 FR-20：主动推送捕获（无 origin，仅 chatId） */
+    private final List<Reply> pushes = new CopyOnWriteArrayList<>();
     private final List<ImageReply> images = new CopyOnWriteArrayList<>();
     /** M5：入站图片下载结果（默认一张合法 PNG 魔数头；null = 平台不支持收图）。 */
     private volatile byte[] downloadResult = {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
@@ -61,6 +63,12 @@ public class FakeBotAdapter implements BotAdapter {
         return downloadResult;
     }
 
+    /** FR-20：主动推送（会话终态等），无入站 origin 可回推时走这条。 */
+    @Override
+    public void send(String externalChatId, String text) {
+        pushes.add(new Reply(externalChatId, text, System.currentTimeMillis()));
+    }
+
     /** 注入一条入站消息（同步走底座入口；业务仍在底座异步线程）。 */
     public void emit(BotMessage msg) {
         BotMessageHandler h = handler;
@@ -78,12 +86,18 @@ public class FakeBotAdapter implements BotAdapter {
         return List.copyOf(images);
     }
 
+    /** FR-20：主动推送列表（会话终态进展断言用）。 */
+    public List<Reply> pushes() {
+        return List.copyOf(pushes);
+    }
+
     public void setDownloadResult(byte[] downloadResult) {
         this.downloadResult = downloadResult;
     }
 
     public void reset() {
         replies.clear();
+        pushes.clear();
         images.clear();
     }
 }

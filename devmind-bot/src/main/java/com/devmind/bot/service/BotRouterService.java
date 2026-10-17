@@ -127,6 +127,7 @@ public class BotRouterService implements BotMessageHandler {
     private final BuildService buildService;
     private final DeploymentService deploymentService;
     private final ReleaseService releaseService;
+    private final BotSessionWatchService watchService;
     private final BotProperties props;
     private final ObjectProvider<BotAdapterRegistry> registryProvider;
     private final ObjectProvider<AttachmentContentResolver> attachmentResolverProvider;
@@ -151,6 +152,7 @@ public class BotRouterService implements BotMessageHandler {
                             BuildService buildService,
                             DeploymentService deploymentService,
                             ReleaseService releaseService,
+                            BotSessionWatchService watchService,
                             BotProperties props,
                             ObjectProvider<BotAdapterRegistry> registryProvider,
                             ObjectProvider<AttachmentContentResolver> attachmentResolverProvider,
@@ -168,6 +170,7 @@ public class BotRouterService implements BotMessageHandler {
         this.buildService = buildService;
         this.deploymentService = deploymentService;
         this.releaseService = releaseService;
+        this.watchService = watchService;
         this.props = props;
         this.registryProvider = registryProvider;
         this.attachmentResolverProvider = attachmentResolverProvider;
@@ -444,6 +447,7 @@ public class BotRouterService implements BotMessageHandler {
                 /flow <编号> [目标状态] [force] —— 查看/推进需求状态（完结/取消需二次确认；需绑定个人身份）
                 /dev <编号> [补充说明] —— 以需求起开发会话，挂研发主线（需绑定个人身份）
                 /session <需求描述> —— 起自由文本开发会话（需绑定个人身份）
+                （/dev /session 起的会话结束时，进展会自动推回本聊天）
                 /build —— 最近一条构建状态（需绑定个人身份）
                 /release [版本号] [构建id] —— 查看最近发版 / 发起发版（需二次确认；需绑定个人身份）
                 /deploy —— 最近 5 条部署状态（需绑定个人身份）
@@ -635,6 +639,8 @@ public class BotRouterService implements BotMessageHandler {
                 null, null, projectId, null, null, desc, null, null, null, null,
                 null, null, null, null, null,
                 attachmentIds.isEmpty() ? null : attachmentIds));
+        // FR-20：订阅终态推送——会话结束（含失败）时把进展推回这个聊天
+        watchService.register(s.id(), msg.channel(), msg.externalChatId(), desc);
         String preview = desc.length() > 60 ? desc.substring(0, 60) + "…" : desc;
         return "已起开发会话 " + s.id() + "\n需求：" + preview + "\n状态：" + s.status()
                 + (attachmentIds.isEmpty() ? "" : "\n（已附 " + attachmentIds.size() + " 张截图）")
@@ -760,6 +766,8 @@ public class BotRouterService implements BotMessageHandler {
                 null, null, projectId, null, r.id(), spec.toString(), null, null, null, null,
                 null, null, null, null, null,
                 attachmentIds.isEmpty() ? null : attachmentIds));
+        // FR-20：订阅终态推送（taskSpec 用需求标题+描述的首段，推送文案够读）
+        watchService.register(s.id(), msg.channel(), msg.externalChatId(), spec.toString());
         return "已起开发会话 " + s.id() + "（需求 " + r.code() + "）\n标题：" + r.title()
                 + "\n状态：" + s.status()
                 + (attachmentIds.isEmpty() ? "" : "\n（已附 " + attachmentIds.size() + " 张截图）")
@@ -815,6 +823,8 @@ public class BotRouterService implements BotMessageHandler {
             return "会话 " + shortId(target.id()) + " 已是 " + target.status() + "，无需停止";
         }
         SessionView killed = sessionManager.kill(target.id());
+        // FR-20：用户已在场主动停的会话不再推终态；平台侧 kill/自然结束照样推（onExit 都广播）
+        watchService.remove(killed.id());
         return "已停止会话 " + shortId(killed.id()) + "\n任务：" + previewOf(killed.taskSpec(), 40)
                 + "\n状态：" + killed.status() + footer("/projects/" + projectId);
     }

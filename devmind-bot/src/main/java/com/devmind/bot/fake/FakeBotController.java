@@ -56,6 +56,14 @@ public class FakeBotController {
                 .toList();
     }
 
+    /** M6 FR-20：主动推送捕获拉取（会话终态进展；与 replies 分开——推送无入站 origin）。 */
+    @GetMapping("/pushes")
+    public List<FakeBotAdapter.Reply> pushes(@RequestParam(required = false) String chatId) {
+        return adapter.pushes().stream()
+                .filter(r -> chatId == null || chatId.equals(r.externalChatId()))
+                .toList();
+    }
+
     @PostMapping("/reset")
     public void reset() {
         adapter.reset();

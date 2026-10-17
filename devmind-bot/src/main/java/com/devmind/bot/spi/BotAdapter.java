@@ -41,4 +41,12 @@ public interface BotAdapter {
     default byte[] downloadImage(String imageKey) {
         return null;
     }
+
+    /**
+     * CAP-75 FR-20：主动向会话推送文本（无入站消息 origin，如会话终态进展）。
+     * 默认 no-op——不支持主动发送的平台零改动；实现不得吞错（失败抛异常由调用方记日志）。
+     */
+    default void send(String externalChatId, String text) {
+        // 平台不支持主动推送：丢弃（调用方日志可见）
+    }
 }
