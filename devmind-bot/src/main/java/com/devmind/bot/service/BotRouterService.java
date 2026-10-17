@@ -31,6 +31,7 @@ import com.devmind.project.RequirementService;
 import com.devmind.project.WorkItemService;
 import com.devmind.project.dto.ProjectView;
 import com.devmind.project.dto.RequirementView;
+import com.devmind.project.model.RequirementEntity;
 import com.devmind.project.dto.WorkItemView;
 import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.SessionView;
@@ -75,7 +76,32 @@ public class BotRouterService implements BotMessageHandler {
     /** FR-12 敏感操作：支持身份映射的 channel 上要求已绑定个人身份（IMAGE=FR-17 入站截图） */
     private static final java.util.Set<String> SENSITIVE_COMMANDS =
             java.util.Set.of("bind", "session", "build", "deploy", "reqs", "req", "dev", "IMAGE",
-                    "status", "stop", "wi", "design");
+                    "status", "stop", "wi", "design", "flow");
+
+    /** FR-22 需求状态别名（中英都收）：键=小写形态，值=平台状态码。 */
+    private static final Map<String, String> FLOW_STATUS_ALIASES = Map.ofEntries(
+            Map.entry("草稿", "DRAFT"), Map.entry("draft", "DRAFT"),
+            Map.entry("分析中", "ANALYZING"), Map.entry("analyzing", "ANALYZING"),
+            Map.entry("设计中", "DESIGNING"), Map.entry("designing", "DESIGNING"),
+            Map.entry("开发中", "IN_PROGRESS"), Map.entry("in_progress", "IN_PROGRESS"),
+            Map.entry("inprogress", "IN_PROGRESS"),
+            Map.entry("验收", "ACCEPTANCE"), Map.entry("acceptance", "ACCEPTANCE"),
+            Map.entry("完结", "DONE"), Map.entry("done", "DONE"),
+            Map.entry("取消", "CANCELLED"), Map.entry("cancelled", "CANCELLED"),
+            Map.entry("canceled", "CANCELLED"));
+
+    /** FR-22 状态中文标签（回显用；未知码原样返回）。 */
+    private static final Map<String, String> FLOW_STATUS_LABELS = Map.of(
+            "DRAFT", "草稿", "ANALYZING", "分析中", "DESIGNING", "设计中",
+            "IN_PROGRESS", "开发中", "ACCEPTANCE", "验收", "DONE", "完结", "CANCELLED", "取消");
+
+    /** FR-22 推进到终态需二次确认（FR-21）。 */
+    private static final java.util.Set<String> FLOW_CONFIRM_TARGETS =
+            java.util.Set.of("DONE", "CANCELLED");
+
+    private static final String FLOW_STATUS_MENU =
+            "草稿 / 分析中 / 设计中 / 开发中 / 验收 / 完结 / 取消（英文 DRAFT/ANALYZING/DESIGNING/"
+                    + "IN_PROGRESS/ACCEPTANCE/DONE/CANCELLED 同义）";
 
     /** FR-16 出站图片：需求描述中的本地附件引用（CAP-68 形态） */
     private static final java.util.regex.Pattern ATTACHMENT_REF =
@@ -330,6 +356,7 @@ public class BotRouterService implements BotMessageHandler {
             case "stop" -> RouteReply.text(stopWithConfirm(msg, binding, cmd.args()));
             case "wi" -> RouteReply.text(wiList(binding, cmd.args()));
             case "design" -> RouteReply.text(designDetail(binding, cmd.args()));
+            case "flow" -> RouteReply.text(flow(msg, binding, cmd.args()));
             case "build" -> RouteReply.text(lastBuild(binding));
             case "deploy" -> RouteReply.text(lastDeploys(binding));
             case "new" -> RouteReply.text(newChat(binding));
@@ -359,6 +386,7 @@ public class BotRouterService implements BotMessageHandler {
     private String executeConfirmed(BotBindingEntity binding, PendingConfirmStore.Entry e) {
         return switch (e.name()) {
             case "stop" -> stopConfirmed(binding, e.args());
+            case "flow" -> flowConfirmed(binding, e.args());
             default -> "暂存的操作已失效，请重新发起（/" + e.name() + "）";
         };
     }
@@ -405,6 +433,7 @@ public class BotRouterService implements BotMessageHandler {
                 /req <编号> —— 需求详情（编号如 REQ-3；需绑定个人身份）
                 /wi <编号> —— 需求下工作单元列表（需绑定个人身份）
                 /design <编号> —— 需求下方案列表 + 最新方案正文（需绑定个人身份）
+                /flow <编号> [目标状态] [force] —— 查看/推进需求状态（完结/取消需二次确认；需绑定个人身份）
                 /dev <编号> [补充说明] —— 以需求起开发会话，挂研发主线（需绑定个人身份）
                 /session <需求描述> —— 起自由文本开发会话（需绑定个人身份）
                 /build —— 最近一条构建状态（需绑定个人身份）
@@ -865,6 +894,102 @@ public class BotRouterService implements BotMessageHandler {
             }
         }
         return sb.append(footer("/projects/" + projectId)).toString();
+    }
+
+    // ---------------- 需求状态推进（M6 FR-22） ----------------
+
+    /**
+     * /flow &lt;编号&gt; [状态] [force]：无状态回当前状态 + 可选目标手册；
+     * 推进到 DONE/CANCELLED 走 FR-21 二次确认；DONE 撞未完结工作单元时给 force 提示。
+     */
+    private String flow(BotMessage msg, BotBindingEntity binding, String args) {
+        String projectId = requireProject(binding);
+        if (args == null || args.isBlank()) {
+            return "用法：/flow <需求编号> [目标状态] [force]\n可选状态：" + FLOW_STATUS_MENU;
+        }
+        String[] parts = args.trim().split("\\s+");
+        RequirementView r = resolveRequirement(projectId, parts[0]);
+        if (parts.length == 1) {
+            return r.code() + " " + r.title()
+                    + "\n当前状态：" + statusLabel(r.status())
+                    + "\n可推进到：" + FLOW_STATUS_MENU
+                    + "\n用法：/flow " + r.code() + " <目标状态> [force]";
+        }
+        String target = normalizeFlowStatus(parts[1]);
+        boolean force = parts.length > 2 && "force".equalsIgnoreCase(parts[2]);
+        if (target.equals(r.status())) {
+            return r.code() + " 已是 " + statusLabel(target) + "，无需推进";
+        }
+        if (RequirementEntity.STATUS_DONE.equals(target) && !force) {
+            long active = activeWorkItemCount(projectId, r.id());
+            if (active > 0) {
+                // 提前把平台的 409 语义摊开说，别让用户白确认一轮才被拒
+                return r.code() + " 还有 " + active + " 个未完结工作单元，直接完结会被平台拒绝。\n"
+                        + "如确认强制完结，请发送：/flow " + r.code() + " 完结 force";
+            }
+        }
+        if (FLOW_CONFIRM_TARGETS.contains(target)) {
+            String desc = "把 " + r.code() + "（" + r.title() + "）从 " + statusLabel(r.status())
+                    + " 推进到 " + statusLabel(target) + (force ? "（强制）" : "");
+            pendingConfirms.put(pendingKey(msg), "flow", args.trim(), desc);
+            return "⚠️ 危险操作确认：将" + desc + "\n回复 确认 执行，回复 取消 放弃（10 分钟内有效）";
+        }
+        return applyFlow(projectId, r, target, force);
+    }
+
+    /** 确认通过后的 /flow 重放：状态可能已变，重新校验后落库（撞 409 给 force 提示）。 */
+    private String flowConfirmed(BotBindingEntity binding, String args) {
+        String projectId = requireProject(binding);
+        String[] parts = args.trim().split("\\s+");
+        RequirementView r = resolveRequirement(projectId, parts[0]);
+        String target = normalizeFlowStatus(parts[1]);
+        boolean force = parts.length > 2 && "force".equalsIgnoreCase(parts[2]);
+        if (target.equals(r.status())) {
+            return r.code() + " 已是 " + statusLabel(target) + "，无需推进";
+        }
+        return applyFlow(projectId, r, target, force);
+    }
+
+    /** 落库（确认前后同路径）：撞 409 且目标是 DONE 时附 force 提示，其余原样抛。 */
+    private String applyFlow(String projectId, RequirementView r, String target, boolean force) {
+        try {
+            RequirementView updated = requirementService.updateStatus(projectId, r.id(), target, force);
+            return r.code() + " 状态已更新：" + statusLabel(updated.status())
+                    + footer("/projects/" + projectId);
+        } catch (DevMindException e) {
+            if (e.getErrorCode() == com.devmind.common.exception.ErrorCode.CONFLICT
+                    && RequirementEntity.STATUS_DONE.equals(target) && !force) {
+                return r.code() + " 推进失败：" + e.getMessage()
+                        + "\n如确认强制完结，请发送：/flow " + r.code() + " 完结 force";
+            }
+            throw e;
+        }
+    }
+
+    /** 未完结工作单元数（DONE 前置检查的本地预览，与 RequirementService 同口径）。 */
+    private long activeWorkItemCount(String projectId, String requirementId) {
+        return workItemService.list(projectId, requirementId).stream()
+                .filter(w -> !"DONE".equals(w.status()) && !"CANCELLED".equals(w.status()))
+                .count();
+    }
+
+    /** 状态别名归一（中英都收，大小写不敏感）；不识别报错并附可选清单。 */
+    private static String normalizeFlowStatus(String raw) {
+        String key = raw.trim().toLowerCase(java.util.Locale.ROOT);
+        String code = FLOW_STATUS_ALIASES.get(key);
+        if (code == null) {
+            throw new DevMindException(com.devmind.common.exception.ErrorCode.BAD_REQUEST,
+                    "不认识的状态「" + raw + "」，可选：" + FLOW_STATUS_MENU);
+        }
+        return code;
+    }
+
+    private static String statusLabel(String code) {
+        if (code == null) {
+            return "-";
+        }
+        String label = FLOW_STATUS_LABELS.get(code);
+        return label == null ? code : label + "（" + code + "）";
     }
 
     private static String shortId(String id) {

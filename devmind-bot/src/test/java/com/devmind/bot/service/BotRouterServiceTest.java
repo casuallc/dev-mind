@@ -850,6 +850,141 @@ class BotRouterServiceTest {
         assertTrue(reply.contains("滑块验证码接极验"), reply);
     }
 
+    // ---------------- CAP-75 FR-22 需求状态推进 /flow ----------------
+
+    /** 预置需求 REQ-3（IN_PROGRESS）+ 返回其 RequirementView。 */
+    private RequirementView stubReq3() {
+        RequirementEntity e = new RequirementEntity();
+        e.setId("r1");
+        e.setProjectId("p1");
+        e.setSeq(3L);
+        when(requirementService.findByProjectSeq("p1", 3L)).thenReturn(Optional.of(e));
+        RequirementView view = reqView("r1", 3, "登录加验证码", "IN_PROGRESS", null);
+        when(requirementService.get("p1", "r1")).thenReturn(view);
+        return view;
+    }
+
+    @Test
+    void flowShowsCurrentStatusAndMenu() throws Exception {
+        bindP1();
+        stubReq3();
+        router.onMessage(msg("/flow REQ-3", "e-fl-1"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("REQ-3 登录加验证码"), reply);
+        assertTrue(reply.contains("当前状态：开发中（IN_PROGRESS）"), reply);
+        assertTrue(reply.contains("完结") && reply.contains("取消"), reply);
+        verify(requirementService, never()).updateStatus(anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void flowNonTerminalUpdatesDirectly() throws Exception {
+        bindP1();
+        stubReq3();
+        when(requirementService.updateStatus("p1", "r1", "ACCEPTANCE", false))
+                .thenReturn(reqView("r1", 3, "登录加验证码", "ACCEPTANCE", null));
+        router.onMessage(msg("/flow REQ-3 验收", "e-fl-2"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("REQ-3 状态已更新：验收（ACCEPTANCE）"), reply);
+    }
+
+    @Test
+    void flowEnglishAliasAccepted() throws Exception {
+        bindP1();
+        stubReq3();
+        when(requirementService.updateStatus("p1", "r1", "DESIGNING", false))
+                .thenReturn(reqView("r1", 3, "登录加验证码", "DESIGNING", null));
+        router.onMessage(msg("/flow 3 designing", "e-fl-3"));
+        assertTrue(awaitReply().contains("设计中（DESIGNING）"));
+    }
+
+    @Test
+    void flowUnknownStatusRejected() throws Exception {
+        bindP1();
+        stubReq3();
+        router.onMessage(msg("/flow REQ-3 上线", "e-fl-4"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("不认识的状态"), reply);
+        assertTrue(reply.contains("开发中"), reply);
+    }
+
+    @Test
+    void flowDoneRequiresConfirm() throws Exception {
+        bindP1();
+        stubReq3();
+        when(workItemService.list("p1", "r1")).thenReturn(List.of(
+                new WorkItemView("w1", "p1", "r1", null, 1L, "WI-1", "BACKEND",
+                        "登录接口", null, "DONE", null, null, "admin", null, null)));
+        when(requirementService.updateStatus("p1", "r1", "DONE", false))
+                .thenReturn(reqView("r1", 3, "登录加验证码", "DONE", null));
+
+        router.onMessage(msg("/flow REQ-3 完结", "e-fl-5"));
+        String prompt = awaitReply();
+        assertTrue(prompt.contains("危险操作确认") && prompt.contains("推进到 完结（DONE）"), prompt);
+        verify(requirementService, never()).updateStatus(anyString(), anyString(), anyString(), any());
+
+        router.onMessage(msg("确认", "e-fl-6"));
+        assertTrue(awaitReply().contains("REQ-3 状态已更新：完结（DONE）"));
+        verify(requirementService).updateStatus("p1", "r1", "DONE", false);
+    }
+
+    @Test
+    void flowDoneWithActiveWorkItemsHintsForce() throws Exception {
+        bindP1();
+        stubReq3();
+        when(workItemService.list("p1", "r1")).thenReturn(List.of(
+                new WorkItemView("w1", "p1", "r1", null, 1L, "WI-1", "BACKEND",
+                        "登录接口", null, "DOING", null, null, "admin", null, null)));
+        // 未完结工作单元：不 stash 确认，直接给 force 提示
+        router.onMessage(msg("/flow REQ-3 完结", "e-fl-7"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("还有 1 个未完结工作单元"), reply);
+        assertTrue(reply.contains("/flow REQ-3 完结 force"), reply);
+        verify(requirementService, never()).updateStatus(anyString(), anyString(), anyString(), any());
+
+        when(requirementService.updateStatus("p1", "r1", "DONE", true))
+                .thenReturn(reqView("r1", 3, "登录加验证码", "DONE", null));
+        router.onMessage(msg("/flow REQ-3 完结 force", "e-fl-8"));
+        String prompt = awaitReply();
+        assertTrue(prompt.contains("危险操作确认") && prompt.contains("（强制）"), prompt);
+        router.onMessage(msg("确认", "e-fl-9"));
+        assertTrue(awaitReply().contains("完结（DONE）"));
+        verify(requirementService).updateStatus("p1", "r1", "DONE", true);
+    }
+
+    @Test
+    void flowConfirmedConflictHintsForce() throws Exception {
+        bindP1();
+        stubReq3();
+        // 预检时以为没活跃 WI，确认时平台侧已冒出未完结工作单元 → 409 文案透传 + force 提示
+        when(workItemService.list("p1", "r1")).thenReturn(List.of());
+        when(requirementService.updateStatus("p1", "r1", "DONE", false))
+                .thenThrow(new com.devmind.common.exception.DevMindException(
+                        com.devmind.common.exception.ErrorCode.CONFLICT,
+                        "存在 2 个未完结工作单元，不能直接 DONE；请先完结工作单元，或确认强制完成"));
+        router.onMessage(msg("/flow REQ-3 完结", "e-fl-10"));
+        assertTrue(awaitReply().contains("危险操作确认"));
+        router.onMessage(msg("确认", "e-fl-11"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("存在 2 个未完结工作单元"), reply);
+        assertTrue(reply.contains("/flow REQ-3 完结 force"), reply);
+    }
+
+    @Test
+    void flowAlreadyAtTargetShortCircuits() throws Exception {
+        bindP1();
+        stubReq3();
+        router.onMessage(msg("/flow REQ-3 开发中", "e-fl-12"));
+        assertTrue(awaitReply().contains("已是 开发中（IN_PROGRESS），无需推进"));
+        verify(requirementService, never()).updateStatus(anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void flowRejectedWhenUnbound() throws Exception {
+        setupFeishuRouter();
+        feishuRouter.onMessage(feishuMsg("ou_alice", "/flow REQ-1 完结", "e-fl-13"));
+        assertTrue(awaitFeishuReply().contains("需要先绑定个人身份"));
+    }
+
     @Test
     void designEmpty() throws Exception {
         bindP1();
