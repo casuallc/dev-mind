@@ -33,6 +33,9 @@ import com.devmind.project.dto.ProjectView;
 import com.devmind.project.dto.RequirementView;
 import com.devmind.project.model.RequirementEntity;
 import com.devmind.project.dto.WorkItemView;
+import com.devmind.release.dto.CreateReleaseRequest;
+import com.devmind.release.dto.ReleaseView;
+import com.devmind.release.service.ReleaseService;
 import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.SessionView;
 import com.devmind.session.service.SessionManagerService;
@@ -76,7 +79,7 @@ public class BotRouterService implements BotMessageHandler {
     /** FR-12 敏感操作：支持身份映射的 channel 上要求已绑定个人身份（IMAGE=FR-17 入站截图） */
     private static final java.util.Set<String> SENSITIVE_COMMANDS =
             java.util.Set.of("bind", "session", "build", "deploy", "reqs", "req", "dev", "IMAGE",
-                    "status", "stop", "wi", "design", "flow");
+                    "status", "stop", "wi", "design", "flow", "release");
 
     /** FR-22 需求状态别名（中英都收）：键=小写形态，值=平台状态码。 */
     private static final Map<String, String> FLOW_STATUS_ALIASES = Map.ofEntries(
@@ -123,6 +126,7 @@ public class BotRouterService implements BotMessageHandler {
     private final WorkItemService workItemService;
     private final BuildService buildService;
     private final DeploymentService deploymentService;
+    private final ReleaseService releaseService;
     private final BotProperties props;
     private final ObjectProvider<BotAdapterRegistry> registryProvider;
     private final ObjectProvider<AttachmentContentResolver> attachmentResolverProvider;
@@ -146,6 +150,7 @@ public class BotRouterService implements BotMessageHandler {
                             WorkItemService workItemService,
                             BuildService buildService,
                             DeploymentService deploymentService,
+                            ReleaseService releaseService,
                             BotProperties props,
                             ObjectProvider<BotAdapterRegistry> registryProvider,
                             ObjectProvider<AttachmentContentResolver> attachmentResolverProvider,
@@ -162,6 +167,7 @@ public class BotRouterService implements BotMessageHandler {
         this.workItemService = workItemService;
         this.buildService = buildService;
         this.deploymentService = deploymentService;
+        this.releaseService = releaseService;
         this.props = props;
         this.registryProvider = registryProvider;
         this.attachmentResolverProvider = attachmentResolverProvider;
@@ -357,6 +363,7 @@ public class BotRouterService implements BotMessageHandler {
             case "wi" -> RouteReply.text(wiList(binding, cmd.args()));
             case "design" -> RouteReply.text(designDetail(binding, cmd.args()));
             case "flow" -> RouteReply.text(flow(msg, binding, cmd.args()));
+            case "release" -> RouteReply.text(release(msg, binding, cmd.args()));
             case "build" -> RouteReply.text(lastBuild(binding));
             case "deploy" -> RouteReply.text(lastDeploys(binding));
             case "new" -> RouteReply.text(newChat(binding));
@@ -387,6 +394,7 @@ public class BotRouterService implements BotMessageHandler {
         return switch (e.name()) {
             case "stop" -> stopConfirmed(binding, e.args());
             case "flow" -> flowConfirmed(binding, e.args());
+            case "release" -> releaseConfirmed(binding, e.args());
             default -> "暂存的操作已失效，请重新发起（/" + e.name() + "）";
         };
     }
@@ -437,6 +445,7 @@ public class BotRouterService implements BotMessageHandler {
                 /dev <编号> [补充说明] —— 以需求起开发会话，挂研发主线（需绑定个人身份）
                 /session <需求描述> —— 起自由文本开发会话（需绑定个人身份）
                 /build —— 最近一条构建状态（需绑定个人身份）
+                /release [版本号] [构建id] —— 查看最近发版 / 发起发版（需二次确认；需绑定个人身份）
                 /deploy —— 最近 5 条部署状态（需绑定个人身份）
                 /status —— 最近 5 条开发会话状态（需绑定个人身份）
                 /stop [会话id] —— 停止会话（危险操作需二次确认；无参停最新运行中的；需绑定个人身份）
@@ -894,6 +903,103 @@ public class BotRouterService implements BotMessageHandler {
             }
         }
         return sb.append(footer("/projects/" + projectId)).toString();
+    }
+
+    // ---------------- 发版触发（M6 FR-23） ----------------
+
+    /**
+     * /release [版本号] [构建id]：无参回最近 5 条发版记录；有参走发版——
+     * 预检（构建产物解析；无构建 id 时取最近一条带产物的 SUCCESS 构建）→ FR-21 确认 →
+     * create + execute（PLANNED→RUNNING 异步，后续进展由通知中心/平台发版页跟踪）。
+     *
+     * <p>发版配置缺失、版本幂等等 create 侧校验失败在确认后透传（不在预检期试跑 create，
+     * 否则取消会留下一条 PLANNED 记录）。</p>
+     */
+    private String release(BotMessage msg, BotBindingEntity binding, String args) {
+        String projectId = requireProject(binding);
+        if (args == null || args.isBlank()) {
+            return releaseHistory(projectId);
+        }
+        String[] parts = args.trim().split("\\s+");
+        String version = parts[0].trim();
+        Long buildId = null;
+        if (parts.length > 1) {
+            try {
+                buildId = Long.parseLong(parts[1].trim());
+            } catch (NumberFormatException e) {
+                throw new DevMindException(com.devmind.common.exception.ErrorCode.BAD_REQUEST,
+                        "构建 id 必须是数字：" + parts[1]);
+            }
+        }
+        BuildView build = buildId != null
+                ? requireArtifactBuild(projectId, buildId) : latestArtifactBuild(projectId);
+        String desc = "发版 " + version + "（构建 #" + build.id() + "，产物 "
+                + previewOf(build.artifactRef(), 40) + "）";
+        pendingConfirms.put(pendingKey(msg), "release", version + " " + build.id(), desc);
+        return "⚠️ 危险操作确认：将" + desc + "\n回复 确认 执行，回复 取消 放弃（10 分钟内有效）";
+    }
+
+    /** 确认通过后执行：重解析构建（暂存期间可能已删除/换产物）→ create → execute。 */
+    private String releaseConfirmed(BotBindingEntity binding, String args) {
+        String projectId = requireProject(binding);
+        String[] parts = args.trim().split("\\s+");
+        String version = parts[0];
+        Long buildId = Long.parseLong(parts[1]);
+        requireArtifactBuild(projectId, buildId);
+        // 配置缺失/版本幂等等 create 侧校验失败统一抛给 dispatch（「操作失败：」+ 原文案透传）
+        ReleaseView created = releaseService.create(new CreateReleaseRequest(
+                projectId, null, buildId, version, null, null, null));
+        ReleaseView running = releaseService.execute(created.id());
+        return "已发起发版 #" + running.id() + " " + running.version()
+                + "\n状态：" + running.status() + "（异步执行中）"
+                + "\n产物：" + (running.artifactRef() == null ? "-" : running.artifactRef())
+                + footer("/projects/" + projectId);
+    }
+
+    /** 最近 5 条发版记录（createdAt 倒序）。 */
+    private String releaseHistory(String projectId) {
+        List<ReleaseView> history = releaseService.history(projectId, null);
+        if (history.isEmpty()) {
+            return "暂无发版记录" + footer("/projects/" + projectId);
+        }
+        StringBuilder sb = new StringBuilder("最近发版（前 " + Math.min(5, history.size())
+                + " 条，共 " + history.size() + "）：");
+        for (ReleaseView r : history.stream().limit(5).toList()) {
+            sb.append("\n- #").append(r.id()).append(" ").append(r.version())
+                    .append(" [").append(r.status()).append("] ");
+            if (r.createdAt() != null) {
+                sb.append(TIME_FMT.format(r.createdAt())).append(" ");
+            }
+            if (r.errorSummary() != null && !r.errorSummary().isBlank()) {
+                sb.append("\n  错误：").append(previewOf(r.errorSummary(), 60));
+            }
+        }
+        sb.append("\n发版：/release <版本号> [构建id]（缺省构建取最近一条带产物的成功构建）");
+        return sb.toString();
+    }
+
+    /** 最近一条带产物的 SUCCESS 构建；没有明确告知（不静默退化成任意构建）。 */
+    private BuildView latestArtifactBuild(String projectId) {
+        return buildService.history(projectId, "SUCCESS").stream()
+                .filter(b -> b.artifactRef() != null && !b.artifactRef().isBlank())
+                .findFirst()
+                .orElseThrow(() -> new DevMindException(
+                        com.devmind.common.exception.ErrorCode.BAD_REQUEST,
+                        "没有带产物的成功构建，无法发版（先跑一次成功构建，或用 /release <版本号> <构建id> 指定）"));
+    }
+
+    /** 指定构建 id：必须存在、属于本项目且已登记产物（确认期复核走这里，不依赖预检用的是哪条查询）。 */
+    private BuildView requireArtifactBuild(String projectId, Long buildId) {
+        BuildView b = buildService.get(buildId);
+        if (!projectId.equals(b.projectId())) {
+            throw new DevMindException(com.devmind.common.exception.ErrorCode.NOT_FOUND,
+                    "构建 #" + buildId + " 不属于当前绑定项目");
+        }
+        if (b.artifactRef() == null || b.artifactRef().isBlank()) {
+            throw new DevMindException(com.devmind.common.exception.ErrorCode.BAD_REQUEST,
+                    "构建 #" + buildId + " 未登记产物，无法发版");
+        }
+        return b;
     }
 
     // ---------------- 需求状态推进（M6 FR-22） ----------------

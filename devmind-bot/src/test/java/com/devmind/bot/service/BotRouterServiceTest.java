@@ -29,6 +29,8 @@ import com.devmind.chat.service.ChatManagerService;
 import com.devmind.common.agent.SessionEvent;
 import com.devmind.common.attachment.AttachmentContentResolver;
 import com.devmind.common.dto.PageView;
+import com.devmind.common.exception.DevMindException;
+import com.devmind.common.exception.ErrorCode;
 import com.devmind.deploy.service.DeploymentService;
 import com.devmind.project.ProjectService;
 import com.devmind.project.RequirementService;
@@ -114,6 +116,8 @@ class BotRouterServiceTest {
     private final WorkItemService workItemService = mock(WorkItemService.class);
     private final BuildService buildService = mock(BuildService.class);
     private final DeploymentService deploymentService = mock(DeploymentService.class);
+    private final com.devmind.release.service.ReleaseService releaseService =
+            mock(com.devmind.release.service.ReleaseService.class);
     private final com.devmind.attachment.service.AttachmentService attachmentService =
             mock(com.devmind.attachment.service.AttachmentService.class);
     private final com.devmind.project.DesignService designService =
@@ -173,8 +177,8 @@ class BotRouterServiceTest {
 
         router = new BotRouterService(bindingRepo, interactionRepo, chatManager, sessionManager,
                 projectService, requirementService, workItemService, buildService,
-                deploymentService, props, provider, attachmentProvider(), attachmentService,
-                designService, documentService, List.of());
+                deploymentService, releaseService, props, provider, attachmentProvider(),
+                attachmentService, designService, documentService, List.of());
         registryRef.set(new BotAdapterRegistry(List.of(adapter), router));
     }
 
@@ -850,6 +854,164 @@ class BotRouterServiceTest {
         assertTrue(reply.contains("滑块验证码接极验"), reply);
     }
 
+    // ---------------- CAP-75 FR-23 发版触发 /release ----------------
+
+    private static BuildView buildView(long id, String status, String artifactRef) {
+        return new BuildView(id, "p1", null, "abcdef123456", "main", null, artifactRef,
+                status, 0, null, null, null, Instant.now(), null);
+    }
+
+    private static com.devmind.release.dto.ReleaseView releaseView(long id, String version,
+                                                                  String status, String artifact) {
+        return new com.devmind.release.dto.ReleaseView(id, "p1", null, 7L, version, status,
+                artifact, null, "v" + version, "LOCAL", null, null, null, "admin", null, null,
+                Instant.now(), null, List.of(), List.of());
+    }
+
+    @Test
+    void releaseNoArgsListsHistory() throws Exception {
+        bindP1();
+        when(releaseService.history("p1", null)).thenReturn(List.of(
+                releaseView(9L, "1.2.0", "SUCCESS", "nexus:1.2.0"),
+                releaseView(8L, "1.1.0", "FAILED", "nexus:1.1.0")));
+        router.onMessage(msg("/release", "e-rl-1"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("#9 1.2.0 [SUCCESS]"), reply);
+        assertTrue(reply.contains("#8 1.1.0 [FAILED]"), reply);
+    }
+
+    @Test
+    void releaseNoArgsEmpty() throws Exception {
+        bindP1();
+        when(releaseService.history("p1", null)).thenReturn(List.of());
+        router.onMessage(msg("/release", "e-rl-2"));
+        assertTrue(awaitReply().contains("暂无发版记录"));
+    }
+
+    @Test
+    void releaseRequiresConfirmThenCreateAndExecute() throws Exception {
+        bindP1();
+        when(buildService.history("p1", "SUCCESS")).thenReturn(List.of(
+                buildView(7L, "SUCCESS", "target/app-1.0.0.jar")));
+        when(buildService.get(7L)).thenReturn(buildView(7L, "SUCCESS", "target/app-1.0.0.jar"));
+        when(releaseService.create(any(com.devmind.release.dto.CreateReleaseRequest.class)))
+                .thenReturn(releaseView(11L, "1.0.0", "PLANNED", "target/app-1.0.0.jar"));
+        when(releaseService.execute(11L))
+                .thenReturn(releaseView(11L, "1.0.0", "RUNNING", "target/app-1.0.0.jar"));
+
+        router.onMessage(msg("/release 1.0.0", "e-rl-3"));
+        String prompt = awaitReply();
+        assertTrue(prompt.contains("危险操作确认") && prompt.contains("发版 1.0.0"), prompt);
+        assertTrue(prompt.contains("构建 #7"), prompt);
+        verify(releaseService, never()).create(any(com.devmind.release.dto.CreateReleaseRequest.class));
+
+        router.onMessage(msg("确认", "e-rl-4"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("已发起发版 #11 1.0.0") && reply.contains("RUNNING"), reply);
+        org.mockito.ArgumentCaptor<com.devmind.release.dto.CreateReleaseRequest> cap =
+                org.mockito.ArgumentCaptor.forClass(com.devmind.release.dto.CreateReleaseRequest.class);
+        verify(releaseService).create(cap.capture());
+        assertTrue("p1".equals(cap.getValue().projectId()), String.valueOf(cap.getValue()));
+        assertTrue(Long.valueOf(7L).equals(cap.getValue().buildId()), String.valueOf(cap.getValue()));
+        assertTrue("1.0.0".equals(cap.getValue().version()), String.valueOf(cap.getValue()));
+        verify(releaseService).execute(11L);
+    }
+
+    @Test
+    void releaseCancelSkipsCreate() throws Exception {
+        bindP1();
+        when(buildService.history("p1", "SUCCESS")).thenReturn(List.of(
+                buildView(7L, "SUCCESS", "target/app-1.0.0.jar")));
+        router.onMessage(msg("/release 1.0.0", "e-rl-5"));
+        assertTrue(awaitReply().contains("危险操作确认"));
+        router.onMessage(msg("取消", "e-rl-6"));
+        assertTrue(awaitReply().contains("已取消"));
+        verify(releaseService, never()).create(any(com.devmind.release.dto.CreateReleaseRequest.class));
+    }
+
+    @Test
+    void releaseWithoutArtifactBuildRejected() throws Exception {
+        bindP1();
+        when(buildService.history("p1", "SUCCESS")).thenReturn(List.of(
+                buildView(6L, "SUCCESS", "  "), buildView(5L, "SUCCESS", null)));
+        router.onMessage(msg("/release 1.0.0", "e-rl-7"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("没有带产物的成功构建"), reply);
+        verify(releaseService, never()).create(any(com.devmind.release.dto.CreateReleaseRequest.class));
+    }
+
+    @Test
+    void releaseWithExplicitBuildId() throws Exception {
+        bindP1();
+        when(buildService.get(3L)).thenReturn(buildView(3L, "SUCCESS", "target/app-0.9.0.jar"));
+        when(releaseService.create(any(com.devmind.release.dto.CreateReleaseRequest.class)))
+                .thenReturn(releaseView(12L, "0.9.0", "PLANNED", "target/app-0.9.0.jar"));
+        when(releaseService.execute(12L))
+                .thenReturn(releaseView(12L, "0.9.0", "RUNNING", "target/app-0.9.0.jar"));
+        router.onMessage(msg("/release 0.9.0 3", "e-rl-8"));
+        assertTrue(awaitReply().contains("构建 #3"));
+        router.onMessage(msg("确认", "e-rl-9"));
+        assertTrue(awaitReply().contains("已发起发版 #12 0.9.0"));
+    }
+
+    @Test
+    void releaseBuildWithoutArtifactRejected() throws Exception {
+        bindP1();
+        when(buildService.get(4L)).thenReturn(buildView(4L, "FAILED", null));
+        router.onMessage(msg("/release 1.0.0 4", "e-rl-10"));
+        assertTrue(awaitReply().contains("未登记产物"));
+    }
+
+    @Test
+    void releaseUnknownBuildRejected() throws Exception {
+        bindP1();
+        when(buildService.get(99L)).thenThrow(new DevMindException(ErrorCode.NOT_FOUND, "构建记录不存在: 99"));
+        router.onMessage(msg("/release 1.0.0 99", "e-rl-11"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("操作失败") && reply.contains("构建记录不存在"), reply);
+    }
+
+    @Test
+    void releaseBuildOfOtherProjectRejected() throws Exception {
+        bindP1();
+        when(buildService.get(7L)).thenReturn(new BuildView(7L, "p-other", null, "abcdef123456",
+                "main", null, "target/x.jar", "SUCCESS", 0, null, null, null, Instant.now(), null));
+        router.onMessage(msg("/release 1.0.0 7", "e-rl-16"));
+        assertTrue(awaitReply().contains("不属于当前绑定项目"));
+    }
+
+    @Test
+    void releaseNonNumericBuildIdRejected() throws Exception {
+        bindP1();
+        router.onMessage(msg("/release 1.0.0 abc", "e-rl-12"));
+        assertTrue(awaitReply().contains("构建 id 必须是数字"));
+    }
+
+    @Test
+    void releaseCreateFailurePassthrough() throws Exception {
+        bindP1();
+        when(buildService.history("p1", "SUCCESS")).thenReturn(List.of(
+                buildView(7L, "SUCCESS", "target/app-1.0.0.jar")));
+        when(buildService.get(7L)).thenReturn(buildView(7L, "SUCCESS", "target/app-1.0.0.jar"));
+        when(releaseService.create(any(com.devmind.release.dto.CreateReleaseRequest.class)))
+                .thenThrow(new com.devmind.common.exception.DevMindException(
+                        com.devmind.common.exception.ErrorCode.BAD_REQUEST,
+                        "项目未配置发版（请在发版配置页填写 Nexus 仓库/推送模板/版本规则）"));
+        router.onMessage(msg("/release 1.0.0", "e-rl-13"));
+        assertTrue(awaitReply().contains("危险操作确认"));
+        router.onMessage(msg("确认", "e-rl-14"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("操作失败") && reply.contains("项目未配置发版"), reply);
+        verify(releaseService, never()).execute(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    void releaseRejectedWhenUnbound() throws Exception {
+        setupFeishuRouter();
+        feishuRouter.onMessage(feishuMsg("ou_alice", "/release 1.0.0", "e-rl-15"));
+        assertTrue(awaitFeishuReply().contains("需要先绑定个人身份"));
+    }
+
     // ---------------- CAP-75 FR-22 需求状态推进 /flow ----------------
 
     /** 预置需求 REQ-3（IN_PROGRESS）+ 返回其 RequirementView。 */
@@ -1037,8 +1199,9 @@ class BotRouterServiceTest {
         when(provider.getIfAvailable()).thenAnswer(inv -> registryRef.get());
         feishuRouter = new BotRouterService(bindingRepo, interactionRepo, chatManager,
                 sessionManager, projectService, requirementService, workItemService,
-                buildService, deploymentService, props, provider, attachmentProvider(),
-                attachmentService, designService, documentService, List.of(identityConfig));
+                buildService, deploymentService, releaseService, props, provider,
+                attachmentProvider(), attachmentService, designService, documentService,
+                List.of(identityConfig));
         registryRef.set(new BotAdapterRegistry(List.of(feishuAdapter), feishuRouter));
     }
 

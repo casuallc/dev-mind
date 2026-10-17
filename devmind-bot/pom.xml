@@ -44,6 +44,10 @@
         </dependency>
         <dependency>
             <groupId>com.devmind</groupId>
+            <artifactId>devmind-release</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
             <artifactId>devmind-attachment</artifactId>
         </dependency>
         <dependency>
