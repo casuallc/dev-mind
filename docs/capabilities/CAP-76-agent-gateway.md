@@ -724,9 +724,17 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 `ToolAccessPolicy` 是否接入；`devmind.copilot.enabled=false` 时 bot 不调用 AgentGateway，
 裸文本回落 CAP-75 问答；已在执行的轮次自然结束，不做强制中断。
 
-## 6. 工具目录（M1/M2）
+## 6. 工具目录（M1/M2/M6）
 
 命名约定：`<domain>_<action>`；参数中的 id 一律字符串；所有列表工具必须支持 `limit`（默认 20，上限 50）。
+
+**需求/工作项寻址（M6 统一口径）**：凡是接受 `requirementId` / `workItemId` 的工具，都必须同时接受
+内部 id、用户可见的展示编号 `REQ-<seq>` / `WI-<seq>` 以及纯数字 `seq`（`get_requirement` /
+`update_requirement` / `update_requirement_status` 另有独立 `seq` 参数）。编号只在项目内唯一，
+解析时用参数 `projectId`，缺省用会话绑定项目；两者都没有时报 `PROJECT_REQUIRED` 语义的错误，
+找不到编号时报 `NOT_FOUND` 并提示先调 `list_requirements` / `list_work_items` 确认。
+实现统一走 `RequirementService.resolveRef(projectId, ref, seq)` 与
+`WorkItemService.resolveRef(projectId, ref)`，工具不得各自拼 Repository 查询。
 
 工具归属：项目/需求/工作项/设计/环境 → `devmind-project`；会话 → `devmind-session`；构建/部署/发版 →
 各自模块；知识/文档/节点/用量 → 各自模块。跨域聚合工具不下沉到 copilot，避免编排层反向依赖：
@@ -761,6 +769,11 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 | `get_document` | `docId` | 文档元数据 + 最新版本摘要 |
 | `list_agent_nodes` | `limit` | 节点 id/名称/在线/默认（不泄露 token） |
 | `get_usage_summary` | `days?`（默认 7，1~90）, `userId?`（仅 ADMIN；缺省全平台）, `model?` | token/成本聚合（M4 交付；非 ADMIN 强制本人；`usage_records` 无 project 列，不提供 projectId） |
+| `list_notifications` | `level?`（P0/P1/P2）, `unreadOnly?`, `limit` | 通知中心列表（分级/标题/摘要/已读/关联对象）与未读总数（M6） |
+| `count_unread_notifications` | — | 当前未读通知数（M6） |
+| `list_worklog_entries` | `from?`, `to?`（yyyy-MM-dd，缺省最近 7 天）, `keyword?`, `limit` | 本人工作日志条目、合计工时（M6） |
+| `list_jira_transitions` | `projectId?`, `requirementId` 或 `seq` | 需求关联 Jira issue 当前可用的工作流转换（M6） |
+| `list_jira_sync_configs` | `projectId` | 项目 Jira 同步配置、上次同步时间/计数/错误（M6） |
 
 > `list_agent_nodes` 暴露节点名称/在线状态，`minRole` 定为 `DEVELOPER`（不对外泄露 token 与主机细节）；
 > `list_projects` / `get_usage_summary` 的可见范围在 CAP-62 落地后由 `ToolAccessPolicy` 收紧。
@@ -778,6 +791,11 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 | `send_session_input` | `sessionId`, `text` | DANGEROUS |
 | `stop_session` | `sessionId` | WRITE |
 | `trigger_build` | `projectId`, `branch?` | WRITE（工具超时 90s，覆盖同步 fetch） |
+| `mark_notifications_read` | `id` 或 `all=true` | WRITE（批量已读需 `all` 显式声明；M6） |
+| `create_worklog_entry` | `workDate?`, `title`, `hours`, `content?`, `entryType?`, `requirementId?`, `jiraIssueKey?` | WRITE（本人日志；工时 0~24 小时；M6） |
+| `transit_jira_issue` | `projectId?`, `requirementId` 或 `seq`, `transitionId` | WRITE（只回写远端与托管字段，本地需求 status 不动；M6） |
+| `log_jira_worklog` | `projectId?`, `requirementId` 或 `seq`, `hours`, `comment?` | WRITE（写远端 Jira worklog，个人账号优先；M6） |
+| `run_jira_sync` | `projectId`, `configId` | WRITE（同步执行，工具超时 180s；全局同一时间只允许一个同步；M6） |
 
 > `send_session_input` 等于让 runner 的 coding agent 执行一句话，定为 DANGEROUS：预览必须展示
 > 目标会话、节点与**完整输入文本**（不截断），且必须文本短码确认（卡片不提供执行按钮）。
@@ -800,6 +818,8 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 | `devmind-docs` | keyword 用 `search(q)`，再按 projectId 过滤（结果集小） | `list_documents` |
 | `devmind-app` | 新增跨域聚合工具 `get_project_overview`（project + session + build 计数） | 唯一允许跨模块聚合的位置 |
 | `devmind-usage` | 无 project 维度；工具参数去掉 projectId，非 ADMIN 强制本人 | `get_usage_summary` |
+| `devmind-project` | `RequirementService.resolveRef(projectId, ref, seq)` / `WorkItemService.resolveRef(projectId, ref)`：接受内部 id、`REQ-<seq>`/`WI-<seq>`、纯数字 | 所有需求/工作项工具的统一寻址（M6） |
+| `devmind-integration` | 工具直接复用 `JiraIssueActionService.listTransitions/transit/logWork` 与 `JiraSyncService.list/syncNow`（同步执行是既有 Service，不下探 Repository） | Jira 工具（M6） |
 
 > 工具实现的统一结构：① 参数校验（`ToolArgs`）→ ② 反查对象所属 projectId →
 > ③ `ToolAccessPolicy` → ④ 合成 `SecurityContext` 调 Service → ⑤ 映射 `ToolResult`。
@@ -954,6 +974,17 @@ devmind:
 - [ ] 流式回答 + 卡片增量更新
 - [ ] 定时/事件触发的主动摘要（每日站会、构建失败汇总）——仍需人工确认写操作
 - [ ] MCP/外部 Agent 接入评估（不作为 v1 路径）
+
+### M6 工具目录补齐（通知/工时/Jira/编号寻址）
+
+- [x] 需求/工作项统一寻址：工具接受内部 id、`REQ-<seq>` / `WI-<seq>`、纯数字 seq
+      （修复"机器人验收 REQ-12 提示需求不存在"）
+- [x] 通知域工具：`list_notifications` / `count_unread_notifications` / `mark_notifications_read`
+- [x] 工时域工具：`list_worklog_entries` / `create_worklog_entry`
+- [x] Jira 域工具：`list_jira_transitions` / `transit_jira_issue` / `log_jira_worklog` /
+      `list_jira_sync_configs` / `run_jira_sync`
+- [x] 契约快照（`docs/capabilities/tools/cap76-tools.yaml`）与 E2E 用例随工具更新
+- [ ] 飞书真机验收：自然语言"把 REQ-12 验收掉"走通编号寻址
 
 ## 11. 验收标准
 
