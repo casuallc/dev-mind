@@ -3,8 +3,10 @@
 > 能力 ID：CAP-76 ｜ 分类：组装层 ｜ 状态：设计定稿 ｜ 日期：2026-10-18
 >
 > 决策记录：
-> 1. **工具在进程内调用平台服务，不经 HTTP**——权限、事务、归属校验、审计全部复用既有服务层；
->    对外 REST/开放 API 仍是给外部系统用的，不拿来给模型当"万能接口"。
+> 1. **工具契约是一等 API，但执行不走对外 Open API**——每个工具先有稳定的
+>    名称/描述/JSON Schema/风险级别/最低角色（登记表可导出 OpenAPI 3.0 文档），v1 由工具所属
+>    能力模块在进程内直接调本模块 Service。对外 Open API 是独立能力，不拿来给模型当"万能接口"；
+>    也不让智能体持服务账号令牌去回调自己的 REST（那会变成越权后门）。
 > 2. **写操作两级闸门：服务端持久化确认单 + 人工确认**。模型永远不能直接落库；
 >    确认时执行的是**服务端存下的参数**，不是模型或卡片回传的参数。
 > 3. **飞书只是第一个入口**。网关编排（devmind-copilot）与 bot 协议底座（devmind-bot）解耦，
@@ -55,6 +57,7 @@ CAP-75 的飞书机器人已经能问答、绑定项目、起会话、查构建�
 | P7 | 可审计 | 对话/工具调用/确认单三张表；参数与结果脱敏+截断 |
 | P8 | 失败可见 | 不编造成功、不静默降级；错误码与原因回给用户，同时落审计 |
 | P9 | 可一键回退 | `devmind.copilot.enabled=false` 恢复 CAP-75 原有路由（裸文本走问答） |
+| P10 | 契约先行 | 工具规格（名称/描述/schema/风险/角色）先于实现登记，可导出 OpenAPI；模型与未来扩展消费同一份契约 |
 
 ## 3. 总体架构
 
@@ -68,18 +71,17 @@ CAP-75 的飞书机器人已经能问答、绑定项目、起会话、查构建�
         ├─ event 去重 / 群聊 @ 判定
         ├─ bot_bindings + 四级身份链
         ├─ 斜杠指令（保留的快速路径）
-        └─ 裸文本 ──ObjectProvider<BotAgentHandler>──▶ devmind-copilot AgentGateway
+        └─ 裸文本 ──ObjectProvider<AgentGateway>──▶ devmind-copilot AgentGateway
                                                         │
                                      ┌──────────────────┼───────────────────┐
                                      ▼                  ▼                   ▼
                               ConversationStore   AgentModelClient      ToolRegistry
-                              (历史/压缩)          (tools + tool_calls)  (PlatformTool)
+                              (历史/压缩)          (tools + tool_calls)  (PlatformTool 契约)
                                      │                  │                   │
-                                     │        原生 tools / JSON 协议          │
+                                     │        原生 tools / JSON 协议          │ 导出 OpenAPI
                                      │                  ▼                   ▼
-                                     │           模型端点(CAP-48)   ProjectService / SessionManager /
-                                     │                              BuildService / DeploymentService /
-                                     │                              ReleaseService / DocService / …
+                                     │           模型端点(CAP-48)   各能力模块的工具实现
+                                     │                              （工具内调本模块 Service）
                                      ▼                                      │
                               copilot_turns / copilot_messages               ▼
                               copilot_tool_calls / copilot_actions    既有权限与事务边界
@@ -91,7 +93,10 @@ CAP-75 的飞书机器人已经能问答、绑定项目、起会话、查构建�
 关键点：
 
 - **网关同步**于 bot 的 `botExecutor` 虚拟线程；飞书事件线程仍然只做归一化与投递。
-- **工具执行在服务端进程内**，直接调 Service（不绕 Controller），所以归属校验、状态机、审计钩子全部生效。
+- **工具契约先行**：`ToolRegistry` 是工具的权威目录，可导出 OpenAPI 3.0；模型看到的
+  `tools` 与运维页/未来外部消费者看到的是同一份契约。
+- **工具执行在服务端进程内**，由**工具所属能力模块**直接调本模块 Service（不绕 Controller），
+  所以归属校验、状态机、审计钩子全部生效；copilot 只做编排，不跨模块调 Service。
 - **写操作不进入模型循环**：模型提出写工具调用 → 网关落确认单 → 结束本轮 → 用户确认 → 网关另行执行。
 - **卡片回调用 action id 找回确认单**，执行路径与对话路径共用同一个 `ActionExecutionService`。
 
@@ -102,49 +107,65 @@ CAP-75 的飞书机器人已经能问答、绑定项目、起会话、查构建�
 职责：
 
 - Agent 运行循环、模型调用、工具注册与执行、确认单、审计；
-- 内置工具实现（`tool/builtin/<domain>`）；
-- 管理 API（工具目录/审计查询/确认单管理）。
+- 管理 API（工具目录/OpenAPI 导出/审计查询/确认单管理）；
+- **不实现业务工具**（工具随能力模块交付，见 4.2）。
 
-依赖（与 `devmind-bot` 同为组装层，向下依赖能力模块，无反向依赖）：
+依赖（编排层，零业务模块依赖）：
 
 ```text
-devmind-common（工具 SPI、模型视图、异常）
+devmind-common（工具 SPI、agent.gateway SPI、模型视图、异常）
 devmind-auth（角色解析）
 devmind-model（ModelEndpointProvider）
-devmind-bot（BotAgentHandler / BotCardAction SPI）
-devmind-project / session / build / deploy / release / docs / knowledge / agent / usage
 spring-boot-starter-web / data-jpa / jackson-databind
 ```
 
-> 依赖方向：`copilot → bot`（实现 bot 定义的扩展点），`bot` 不依赖 copilot。
-> 这样移除 copilot 模块时 bot 仍可独立运行（裸文本回落问答），编译期无环。
+> 不依赖 bot、不依赖 project/session/build/…：工具由各能力模块实现，
+> bot 通过 common 的 `AgentGateway` SPI 以 ObjectProvider 发现 copilot。
+> 依赖方向永远是「能力模块 → common ← copilot」，编译期无环。
 
 ### 4.2 `devmind-common`：工具 SPI
 
-新增 `com.devmind.common.agent.tool`：
+新增两组契约：
 
-- `PlatformTool` / `ToolSpec` / `ToolCall` / `ToolContext` / `ToolResult` / `ToolRisk`
-- `ToolArgs`（JSON Schema 子集校验 + 截断 + 长度限制）
-- `ToolAccessPolicy`（可选 SPI，见 FR-21）
+- `com.devmind.common.agent.tool`：`PlatformTool` / `ToolSpec` / `ToolCall` / `ToolContext` /
+  `ToolResult` / `ToolRisk`；`ToolArgs`（JSON Schema 子集校验 + 截断 + 长度限制）；
+  `ToolAccessPolicy`（可选 SPI，见 FR-21）。
+- `com.devmind.common.agent.gateway`：`AgentGateway` / `AgentRequest` / `AgentReply` /
+  `AgentCard` / `AgentCardButton` / `AgentCardAction`（bot 与 copilot 的唯一耦合面；
+  bot 只依赖 common）。
+  - `AgentGateway`：`handle(AgentRequest)` + `onCardAction(AgentCardAction)`；
+  - `AgentRequest`：channel / chat / sender / actor / text / 默认项目 / messageId / eventId；
+  - `AgentReply`：text + 可选中性 `AgentCard`；
+  - `AgentCard`：title / template（INFO·SUCCESS·WARNING·DANGER）/ markdown / buttons / footer，
+    带 `toPlainText()` 供纯文本渠道降级，**不含任何平台专有 JSON**；
+  - `AgentCardButton`：label / operation（CONFIRM·CANCEL·LINK）/ actionId / url；
+  - `AgentCardAction`：渠道无关的 `CONFIRM` / `CANCEL` + actionId（由 bot 归一化）。
 
-**为什么放 common**：业务能力模块将来可自行贡献工具（Spring 收集 `List<PlatformTool>`），
-不需要反向依赖 copilot；copilot 只是内置工具的第一个提供方。
+**工具归属**：每个能力模块实现并 `@Component` 暴露自己域内的工具
+（如 project 模块提供 `list_requirements`/`create_requirement`），工具内部直接调用本模块
+Service。copilot 不跨模块调 Service，只负责编排；`ToolRegistry` 由 Spring 注入
+`List<PlatformTool>` 收集。新增能力时工具随模块一起交付，删除模块时工具自动消失。
 
 ### 4.3 `devmind-bot`：扩展点
 
 新增（不改既有实现类）：
 
-- `spi/BotAgentHandler`：`AgentReply handle(AgentRequest request)`；
+- 复用 common 的 `AgentGateway` SPI（不新增 bot 自有 agent 接口）；
 - `spi/BotCardAction`：卡片回调归一化记录；
 - `BotMessageHandler` 增加 `default void onCardAction(BotCardAction action) {}`；
 - `BotAdapter` 增加 `default` 的卡片能力（见 FR-23）；
-- `BotRouterService` 裸文本改走 `ObjectProvider<BotAgentHandler>`，缺席或 `copilot.enabled=false` 时回落 `ask()`。
+- `BotRouterService` 裸文本改走 `ObjectProvider<AgentGateway>`，缺席或
+  `copilot.enabled=false` 时回落 `ask()`；bot 仍是唯一把 `BotMessage` 翻译成
+  `AgentRequest` 的地方（含默认项目/身份/渠道上下文）；
+- 卡片回调同样经 bot 转发：`BotCardAction` → `AgentCardAction` → `AgentGateway.onCardAction`，
+  copilot 不感知任何 bot 平台类型。
 
 ### 4.4 `devmind-feishu-bot` + `devmind-integration`
 
 - `FeishuBotAdapter` 订阅 `card.action.trigger`，归一化为 `BotCardAction`；
 - `FeishuApiClient` 增加 `replyCard` / `sendCard` / `updateCard`；
-- 卡片 JSON 由 copilot 生成，适配器只做协议转换。
+- **中性 `AgentCard` → 飞书卡片 JSON 的渲染只在飞书适配器**（template 映射 header 颜色、
+  buttons 映射 `actions[].value`）；copilot 与 bot 底座零飞书专有代码。
 
 ### 4.5 `devmind-app` / 前端
 
@@ -157,8 +178,8 @@ spring-boot-starter-web / data-jpa / jackson-databind
 ### 5.1 网关与工具底座
 
 **FR-01 网关扩展点**：`BotRouterService` 对裸文本（非斜杠指令、非确认/取消）优先调用
-`BotAgentHandler`；`ObjectProvider` 无实现或 `devmind.copilot.enabled=false` 时走 CAP-75 的
-`ask()`。智能体异常不得让整条消息丢日志——失败仍落 `bot_interactions`（status=FAILED）。
+common 的 `AgentGateway`；`ObjectProvider` 无实现或 `devmind.copilot.enabled=false` 时走
+CAP-75 的 `ask()`。智能体异常不得让整条消息丢日志——失败仍落 `bot_interactions`（status=FAILED）。
 
 **FR-02 工具契约**：
 
@@ -169,13 +190,15 @@ public interface PlatformTool {
 }
 
 public record ToolSpec(
-        String name,            // snake_case，稳定，只增不改；如 list_requirements
+        String name,            // snake_case，稳定；如 list_requirements
         String title,           // 中文展示名，用于确认卡与审计
         String description,     // 给模型看的能力说明（何时用/返回什么）
         String parametersSchema,// JSON Schema 子集（object/properties/required/enum/type）
         ToolRisk risk,          // READ | WRITE | DANGEROUS
         String minRole,         // VIEWER | DEVELOPER | ADMIN
-        boolean requiresProject // 无项目上下文时是否必须先问用户
+        boolean requiresProject,// 无项目上下文时是否必须先问用户
+        String ownerModule,     // 归属模块，如 devmind-project
+        String since            // 首次交付版本，如 CAP-76 M1
 ) {
     /** 动态风险：默认等于 risk；部署到 PROD、状态改 DONE 等由工具覆盖为 DANGEROUS */
     public ToolRisk riskFor(Map<String, Object> args) { return risk; }
@@ -192,9 +215,18 @@ public record ToolSpec(
 | `data` | 结构化结果（不直接给模型；供卡片/链接生成） |
 | `sensitive` | true 时 result 不落库原文，只记成功/失败与摘要哈希 |
 
-**FR-03 注册与目录**：`ToolRegistry` Spring 注入 `List<PlatformTool>`，按 `name` 唯一注册；
-重名启动失败（fail-fast）。工具名大小写敏感、只允许 `[a-z][a-z0-9_]*`。
+**FR-03 注册、目录与 OpenAPI 导出**：`ToolRegistry` Spring 注入 `List<PlatformTool>`，按
+`name` 唯一注册；重名启动失败（fail-fast）。工具名大小写敏感、只允许 `[a-z][a-z0-9_]*`。
 启动日志输出工具数量与名字；`GET /api/copilot/admin/tools` 返回目录（按当前角色过滤后的视图）。
+
+工具契约即 API：
+
+- `GET /api/copilot/admin/openapi.json` 导出 OpenAPI 3.0：每个工具 = 一个 operation，
+  `requestBody` 由 `parametersSchema` 生成，`summary` 取 `title`，扩展字段记录
+  `x-tool-risk` / `x-min-role` / `x-owner-module`；
+- **版本纪律**：工具名稳定，schema 只做加法（新增可选字段）；破坏性变更必须换名
+  （`<name>_v2`）并保留旧工具一个发布周期，避免模型/外部消费者静默失效；
+- `ToolSpec` 增加 `since`（首次交付版本）与 `ownerModule`（归属模块），供目录页与审计定位。
 
 **FR-04 参数校验**：执行前用 `ToolArgs.validate(spec.parametersSchema, args)` 校验：
 必填、类型、枚举、字符串长度上限、数组条数上限、未知字段拒绝。校验失败不执行，
@@ -335,9 +367,10 @@ PENDING ──确认──▶ EXECUTING ──▶ SUCCEEDED
 
 **FR-21 项目解析与数据权限**：
 
-- `ToolContext.projectId` 默认取 `bot_bindings.project_id`；工具参数可显式覆盖。
-- 系统提示注入当前 actor 可见项目清单（id + 名称，最多 30 个）；模型必须用
-  `list_projects` 或清单中的 id，禁止猜测。
+- `ToolContext.projectId` 默认取 `bot_bindings.project_id`（bot 解析出 id + 名称放进
+  `AgentRequest`）；工具参数可显式覆盖。
+- 系统提示只注入**当前默认项目**；需要跨项目查找时模型必须调用 `list_projects`
+  （project 模块工具）拿 id，禁止猜测或编造。
 - 需要项目但上下文没有 → 返回 `PROJECT_REQUIRED`，模型向用户追问，不默认选第一个。
 - 项目级数据权限：定义 `ToolAccessPolicy`（common SPI）：
 
@@ -364,12 +397,16 @@ CAP-62 落地后无需改 copilot。
 **FR-23 卡片出站**：`BotAdapter` 新增默认方法：
 
 ```java
-default String replyCard(BotMessage origin, String cardJson) { reply(origin, cardJson); return null; }
-default void updateCard(String messageId, String cardJson) { }
-default void sendCard(String externalChatId, String cardJson) { send(externalChatId, cardJson); }
+default String replyCard(BotMessage origin, AgentCard card) {
+    reply(origin, card.toPlainText());   // 不支持卡片的平台退化为文本
+    return null;
+}
+default void updateCard(String messageId, AgentCard card) { }
+default void sendCard(String externalChatId, AgentCard card) { }
 ```
 
-默认实现退化为文本（保证不支持卡片的平台仍可用）。飞书实现：
+默认实现退化为文本（保证不支持卡片的平台仍可用；确认卡退化为带短码的文本）。
+飞书实现负责把中性 `AgentCard` 渲染成飞书卡片 JSON。飞书侧约束：
 
 - `msg_type=interactive`，`content` 按飞书契约是**内嵌 JSON 字符串**；
 - 卡片 `config.update_multi=true`（后续才能 update）；
@@ -385,6 +422,9 @@ public record BotCardAction(String channel, String externalChatId, String chatTy
                             Map<String, Object> value, String rawEventId) {}
 ```
 
+bot 把按钮 value 翻译成 common 的 `AgentCardAction(operation, actionId)`，
+调 `AgentGateway.onCardAction`；**params 只取 action id，其他字段一律忽略**。
+
 约束：
 
 - 回调 3s 窗口内**只做 ACK**（toast "已确认，执行中…"）+ 投递到 botExecutor；
@@ -392,15 +432,17 @@ public record BotCardAction(String channel, String externalChatId, String chatTy
 - 去重键 `event_id`；
 - 订阅 `card.action.trigger` 需要飞书开放平台配置 + 发布版本，上线检查项见 §12。
 
-**FR-25 卡片模板**（copilot 生成，适配器无感）：
+**FR-25 卡片模板**（copilot 产出中性 `AgentCard`，飞书适配器渲染）：
 
 1. **进度卡**：收到消息先回"正在处理…"（可选，默认开启），完成后更新为答案卡；
 2. **答案卡**：蓝色 header + Markdown 正文 + 平台链接按钮 + 尾注（模型/步数/耗时）；
 3. **确认卡**：橙色 header（DANGEROUS 红色）+ 计划正文 + `确认执行`/`取消` 按钮
-   （value 只含 `{"devmind":"copilot_confirm","id":"<actionId>"}`）；
+   （`AgentCardButton.operation=CONFIRM/CANCEL` + actionId；飞书适配器渲染成
+   `value={"devmind":"copilot_confirm","id":"<actionId>"}`）；
 4. **结果卡**：执行结果摘要 + 对象链接 + action id。
 
-卡片 Markdown 只允许飞书支持子集；用户输入与工具结果做转义，避免把聊天内容渲染成卡片结构。
+`AgentCard.markdown` 由 copilot 产出，飞书适配器按飞书支持的 Markdown 子集渲染；
+用户输入与工具结果做转义，避免把聊天内容渲染成卡片结构。
 
 **FR-26 降级**：卡片发送失败 → 回落文本回复（含短码确认方式）并记 WARN；
 卡片更新失败不影响业务结果（确认单状态已落库）。无卡片权限/未订阅回调时，文本确认路径保持可用。
@@ -430,7 +472,8 @@ public record BotCardAction(String channel, String externalChatId, String chatTy
 
 | 端点 | 说明 |
 |---|---|
-| `GET /api/copilot/admin/tools` | 工具目录（名称/风险/角色/说明） |
+| `GET /api/copilot/admin/tools` | 工具目录（名称/风险/角色/归属模块/说明） |
+| `GET /api/copilot/admin/openapi.json` | 工具契约导出为 OpenAPI 3.0（见 FR-03） |
 | `GET /api/copilot/admin/turns` | 真分页；筛选 actor/channel/status/时间/关键词 |
 | `GET /api/copilot/admin/turns/{id}` | 一轮详情 + 工具调用链 |
 | `GET /api/copilot/admin/actions` | 确认单列表（状态/actor/时间） |
@@ -449,12 +492,15 @@ public record BotCardAction(String channel, String externalChatId, String chatTy
 - 工具执行沿用各自服务的并发限制；智能体不得绕过会话/构建的既有互斥。
 
 **FR-32 健康与开关**：`GET /api/copilot/health` 返回 enabled、端点是否可用（不实际调用模型）、
-工具数量、待确认数；`devmind.copilot.enabled=false` 时不注册 BotAgentHandler 行为，
+工具数量、待确认数；`devmind.copilot.enabled=false` 时 bot 不调用 AgentGateway，
 裸文本回落 CAP-75 问答。
 
 ## 6. 工具目录（M1/M2）
 
 命名约定：`<domain>_<action>`；参数中的 id 一律字符串；所有列表工具必须支持 `limit`（默认 20，上限 50）。
+
+工具归属：项目/需求/工作项/设计 → `devmind-project`；会话 → `devmind-session`；构建/部署/发版 →
+各自模块；知识/文档/节点/用量 → 各自模块。跨域聚合工具不下沉到 copilot，避免编排层反向依赖。
 
 ### 6.1 只读（READ，VIEWER 起）
 
@@ -562,8 +608,8 @@ M4 候选：文档新版本、知识提案采纳、需求流程阶段动作、�
 - v1 不提供面向普通用户的 HTTP 对话端点；飞书是唯一交互入口。
 - M5 预留 `POST /api/copilot/chat`（登录用户 + JSON 请求/响应，复用同一 AgentGateway），
   本期只设计不实现。
-- 内部 SPI：`BotAgentHandler`（bot）、`PlatformTool` / `ToolAccessPolicy`（common）、
-  `ModelEndpointProvider`（既有）。
+- 内部 SPI：`AgentGateway` / `PlatformTool` / `ToolAccessPolicy`（common）、
+  `BotCardAction`（bot）、`ModelEndpointProvider`（既有）。
 
 ## 9. 配置
 
@@ -596,7 +642,8 @@ devmind:
 
 ### M1 只读智能体（可用）
 
-- [ ] `devmind-copilot` 模块、工具 SPI、ToolRegistry、审计三表（turns/tool_calls）
+- [ ] `devmind-copilot` 模块、common 工具/网关 SPI、ToolRegistry、OpenAPI 导出、审计三表
+- [ ] 只读工具随各自能力模块交付（project/session/build/deploy/release/knowledge/docs/agent/usage）
 - [ ] `OpenAiCompatToolChat`（native + json + auto）
 - [ ] AgentGateway 循环、历史、预算、步数、限流、kill switch
 - [ ] 只读工具：项目/需求/工作项/设计/会话/构建/部署/发版/环境/知识/文档/节点
@@ -647,6 +694,7 @@ devmind:
 7. 脱敏：apiKey/token/password 不进 args_json/result/turn 记录。
 8. 循环保护：max-steps、重复调用上限、超时。
 9. 卡片：按钮 value 只含 action id；回调 3s 内返回；重复 event_id 去重。
+10. OpenAPI：导出 operation 数与注册工具数一致、可被标准 OpenAPI 解析；重名/非法名启动失败。
 
 ### E2E（`tests/cap76_copilot_verify.py`，产物写 `tmp/`）
 
@@ -696,9 +744,11 @@ devmind:
 | 给模型一个通用 HTTP 工具调开放 API | 等价于把全部 API 暴露给模型；无法按工具做风险分级/预览/确认；提示词注入爆炸半径大 |
 | 内存 PendingConfirmStore 扩展 | 重启丢确认单、无法审计、无法多实例；CAP-75 现有实现只用于轻量两步确认 |
 | 无确认自动执行写操作 | 生产误操作不可接受；与 CAP-17 人工门禁红线冲突 |
-| 每个业务模块直接依赖 copilot 提供工具 | 反向依赖；能力模块被迫感知智能体。改为 common SPI + copilot 内置工具 |
+| 每个业务模块直接依赖 copilot 提供工具 | 反向依赖；能力模块被迫感知智能体。改为 common SPI + 工具随能力模块交付 |
 | 只做 function calling、不设 JSON 兜底 | 本地 vLLM/网关对 tools 支持不一致，会导致能力完全不可用 |
 | 用卡片按钮确认所有写操作（含 DANGEROUS） | 误点风险；危险操作强制文本短码，确保操作者看过计划 |
+| 先做一套对外 Open API，让智能体持服务令牌回调 | 智能体必须以「当前用户」身份操作，服务令牌会变成越权后门；确认/风险/预览语义也不属于公开 API。对外开放接口应独立立项，复用同一 Service 与工具契约 |
+| copilot 直接依赖全部业务模块、内置实现所有工具 | 编排层耦合全部能力，新增能力都要改 copilot；也违背「能力模块自包含」。改为工具随能力模块交付 |
 
 ## 14. 与既有能力的关系
 
@@ -710,3 +760,5 @@ devmind:
 - **CAP-62**：通过 `ToolAccessPolicy` 预留接入点；未实现期间明确标注降级。
 - **CAP-13/05/08/09/11**：写工具只是这些服务的人工确认入口，不改变其状态机与门禁。
 - **CAP-71**：审计风格与保留期清理保持一致；独立表，避免与节点审计混用。
+- **CAP-20 开放 API**：不混用。对外 HMAC API 与智能体工具是两套边界；工具契约稳定后可选择性
+  导出为对外 API，但需单独鉴权、限流与版本治理。
