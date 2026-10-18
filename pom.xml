@@ -34,6 +34,7 @@
         <module>devmind-session</module>
         <module>devmind-chat</module>
         <module>devmind-bot</module>
+        <module>devmind-copilot</module>
         <module>devmind-feishu-bot</module>
         <module>devmind-attachment</module>
         <module>devmind-notification</module>
@@ -129,6 +130,11 @@
             <dependency>
                 <groupId>com.devmind</groupId>
                 <artifactId>devmind-bot</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.devmind</groupId>
+                <artifactId>devmind-copilot</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
