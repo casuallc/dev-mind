@@ -71,10 +71,18 @@ public class UsageStatsService {
     // ---------------- FR-01 总体汇总 ----------------
 
     public UsageSummary summary(Instant start, Instant end, String userId, String model) {
-        String user = resolveUser(userId);
-        model = norm(model);
-        UsageTotals s = sessionRepo.totals(start, end, user, model);
-        UsageTotals c = chatRepo.totals(start, end, user, model);
+        return summaryForUser(start, end, resolveUser(userId), model);
+    }
+
+    /**
+     * CAP-76 工具入口：bot 轮次没有 SecurityContext，调用方直接给出已解析的可见范围
+     * （非 ADMIN 强制本人、ADMIN 传值按值/缺省全部），口径与 {@link #summary} 一致。
+     */
+    public UsageSummary summaryForUser(Instant start, Instant end, String userId, String model) {
+        String user = norm(userId);
+        String m = norm(model);
+        UsageTotals s = sessionRepo.totals(start, end, user, m);
+        UsageTotals c = chatRepo.totals(start, end, user, m);
         return new UsageSummary(s.costUsd() + c.costUsd(),
                 s.inputTokens() + c.inputTokens(), s.outputTokens() + c.outputTokens(),
                 s.cacheReadTokens() + c.cacheReadTokens(), s.cacheCreationTokens() + c.cacheCreationTokens(),
