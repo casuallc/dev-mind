@@ -23,6 +23,12 @@ public class BotProperties {
     /** FR-24 交互日志保留天数（0 = 不清理）；清理 cron 见 devmind.bot.cleanup-cron */
     private int interactionRetentionDays = 30;
 
+    /**
+     * CAP-77 平台自项目 id：`/issue` 固定把平台自身问题登记到此项目。
+     * 空 = 未启用（/issue 回配置指引），不回落聊天绑定项目，防误记到客户项目。
+     */
+    private String selfProjectId = "";
+
     public String getDefaultActor() { return defaultActor; }
     public void setDefaultActor(String defaultActor) { this.defaultActor = defaultActor; }
     public int getQaTimeoutSeconds() { return qaTimeoutSeconds; }
@@ -35,4 +41,6 @@ public class BotProperties {
     public void setInteractionRetentionDays(int interactionRetentionDays) {
         this.interactionRetentionDays = interactionRetentionDays;
     }
+    public String getSelfProjectId() { return selfProjectId; }
+    public void setSelfProjectId(String selfProjectId) { this.selfProjectId = selfProjectId; }
 }

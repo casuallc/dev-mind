@@ -1,5 +1,6 @@
 package com.devmind.bot.service;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -36,6 +37,7 @@ import com.devmind.project.ProjectService;
 import com.devmind.project.RequirementService;
 import com.devmind.project.WorkItemService;
 import com.devmind.project.dto.ProjectView;
+import com.devmind.project.dto.RequirementRequest;
 import com.devmind.project.dto.RequirementView;
 import com.devmind.project.dto.WorkItemView;
 import com.devmind.project.model.RequirementEntity;
@@ -171,17 +173,25 @@ class BotRouterServiceTest {
 
         BotProperties props = new BotProperties();
         props.setQaTimeoutSeconds(10);
+        props.setSelfProjectId("p-self");
+
+        router = newRouter(props, adapter, List.of());
+    }
+
+    /** 按给定配置搭一个路由（适配器回推捕获共用各自传参）。 */
+    private BotRouterService newRouter(BotProperties props, CapturingAdapter ad,
+                                       List<BotChannelConfigProvider> providers) {
         AtomicReference<BotAdapterRegistry> registryRef = new AtomicReference<>();
         @SuppressWarnings("unchecked")
         ObjectProvider<BotAdapterRegistry> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenAnswer(inv -> registryRef.get());
-
-        router = new BotRouterService(bindingRepo, interactionRepo, chatManager, sessionManager,
-                projectService, requirementService, workItemService, buildService,
+        BotRouterService r = new BotRouterService(bindingRepo, interactionRepo, chatManager,
+                sessionManager, projectService, requirementService, workItemService, buildService,
                 deploymentService, releaseService, watchService, props, provider,
                 emptyGatewayProvider(), attachmentProvider(), attachmentService, designService,
-                documentService, List.of());
-        registryRef.set(new BotAdapterRegistry(List.of(adapter), router));
+                documentService, providers);
+        registryRef.set(new BotAdapterRegistry(List.of(ad), r));
+        return r;
     }
 
     /** FR-16：attachmentResolverProvider 桩——getIfAvailable 读 attachmentResolverRef。 */
@@ -463,6 +473,113 @@ class BotRouterServiceTest {
         assertTrue(req.taskSpec().contains("【REQ-3】登录加验证码"), req.taskSpec());
         assertTrue(req.taskSpec().contains("支持图形验证码"), req.taskSpec());
         assertTrue(req.taskSpec().contains("补充说明：先做图形验证码"), req.taskSpec());
+    }
+
+    // ---------------- CAP-77 平台自举反馈 /issue ----------------
+
+    /** /issue 回执读的是平台返回的需求视图，类型必须与登记时一致。 */
+    private static RequirementView issueView(String id, long seq, String title, String type) {
+        return new RequirementView(id, "p-self", seq, "REQ-" + seq, title, null, "DRAFT",
+                type, null, null, "LOCAL", null, null, null, null, null, null, null,
+                null, null, null, null, null, "local", null, null, null, null, null);
+    }
+
+    private void stubSelfProject() {
+        ProjectView p = mock(ProjectView.class);
+        when(p.id()).thenReturn("p-self");
+        when(p.name()).thenReturn("dev-mind");
+        when(projectService.get("p-self")).thenReturn(p);
+    }
+
+    @Test
+    void issueCreatesBugInSelfProjectWithSourceMetadata() throws Exception {
+        stubSelfProject();
+        AtomicReference<RequirementRequest> captured = new AtomicReference<>();
+        when(requirementService.create(eq("p-self"), any())).thenAnswer(inv -> {
+            captured.set(inv.getArgument(1));
+            return issueView("r7", 7, captured.get().title(), captured.get().type());
+        });
+
+        router.onMessage(msg("/issue 飞书查本周工作日志恒为空\n194 上有数据", "e-issue-1"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("已登记 BUG REQ-7"), reply);
+        assertTrue(reply.contains("dev-mind（p-self）"), reply);
+        assertTrue(reply.contains("/dev REQ-7"), reply);
+
+        RequirementRequest req = captured.get();
+        assertEquals("BUG", req.type());
+        assertEquals("飞书查本周工作日志恒为空", req.title());
+        assertTrue(req.description().contains("194 上有数据"), req.description());
+        assertTrue(req.description().contains("来源：fake 机器人 /issue"), req.description());
+        assertTrue(req.description().contains("会话：chat-1"), req.description());
+        assertTrue(req.description().contains("发送者：u-1"), req.description());
+        assertTrue(req.description().contains("登记人：local"), req.description());
+        assertEquals(List.of("bot-feedback"), req.labels());
+    }
+
+    @Test
+    void issueParsesImprovementPrefixAndDefaultsToBug() throws Exception {
+        stubSelfProject();
+        List<RequirementRequest> created = new ArrayList<>();
+        when(requirementService.create(eq("p-self"), any())).thenAnswer(inv -> {
+            RequirementRequest req = inv.getArgument(1);
+            created.add(req);
+            return issueView("r" + created.size(), created.size(), req.title(), req.type());
+        });
+
+        router.onMessage(msg("/issue 优化 工作日志页加本周筛选", "e-issue-2"));
+        assertTrue(awaitReply().contains("已登记 优化 REQ-1"));
+        assertEquals("IMPROVEMENT", created.get(0).type());
+        assertEquals("工作日志页加本周筛选", created.get(0).title());
+
+        // 无类型前缀：整段当描述，类型缺省 BUG
+        router.onMessage(msg("/issue 导出按钮点了没反应", "e-issue-3"));
+        assertTrue(awaitReply().contains("已登记 BUG REQ-2"));
+        assertEquals("BUG", created.get(1).type());
+        assertEquals("导出按钮点了没反应", created.get(1).title());
+    }
+
+    @Test
+    void issueIgnoresChatBindingProject() throws Exception {
+        bindP1();
+        stubSelfProject();
+        when(requirementService.create(eq("p-self"), any()))
+                .thenReturn(issueView("r9", 9, "平台缺陷", "BUG"));
+
+        router.onMessage(msg("/issue bug 平台缺陷", "e-issue-4"));
+        assertTrue(awaitReply().contains("已登记 BUG REQ-9"));
+        // FR-05：聊天绑定的是 p1，但 /issue 只投自项目
+        verify(requirementService).create(eq("p-self"), any());
+        verify(requirementService, never()).create(eq("p1"), any());
+    }
+
+    @Test
+    void issueWithoutArgsShowsUsage() throws Exception {
+        router.onMessage(msg("/issue", "e-issue-5"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("用法：/issue"), reply);
+        verify(requirementService, never()).create(anyString(), any());
+    }
+
+    @Test
+    void issueWithoutSelfProjectConfigGuidesSetup() throws Exception {
+        BotProperties noSelf = new BotProperties();
+        noSelf.setQaTimeoutSeconds(10);
+        CapturingAdapter ad = new CapturingAdapter();
+        BotRouterService noSelfRouter = newRouter(noSelf, ad, List.of());
+
+        noSelfRouter.onMessage(new BotMessage("fake", "chat-1", BotMessage.CHAT_TYPE_P2P,
+                "u-1", "/issue bug 某某问题", false, "m-e-issue-6", "e-issue-6"));
+        String reply = ad.replies.poll(15, TimeUnit.SECONDS);
+        assertTrue(reply != null && reply.contains("devmind.bot.self-project-id"), reply);
+        verify(requirementService, never()).create(anyString(), any());
+    }
+
+    @Test
+    void issueRejectedWhenUnbound() throws Exception {
+        setupFeishuRouter();
+        feishuRouter.onMessage(feishuMsg("ou_alice", "/issue bug 某某问题", "e-issue-7"));
+        assertTrue(awaitFeishuReply().contains("需要先绑定个人身份"));
     }
 
     // ---------------- CAP-75 FR-20 会话终态推送订阅 ----------------
@@ -1258,16 +1375,8 @@ class BotRouterServiceTest {
         feishuAdapter = new CapturingAdapter("feishu");
         BotProperties props = new BotProperties();
         props.setQaTimeoutSeconds(10);
-        AtomicReference<BotAdapterRegistry> registryRef = new AtomicReference<>();
-        @SuppressWarnings("unchecked")
-        ObjectProvider<BotAdapterRegistry> provider = mock(ObjectProvider.class);
-        when(provider.getIfAvailable()).thenAnswer(inv -> registryRef.get());
-        feishuRouter = new BotRouterService(bindingRepo, interactionRepo, chatManager,
-                sessionManager, projectService, requirementService, workItemService,
-                buildService, deploymentService, releaseService, watchService, props, provider,
-                emptyGatewayProvider(), attachmentProvider(), attachmentService, designService,
-                documentService, List.of(identityConfig));
-        registryRef.set(new BotAdapterRegistry(List.of(feishuAdapter), feishuRouter));
+        props.setSelfProjectId("p-self");
+        feishuRouter = newRouter(props, feishuAdapter, List.of(identityConfig));
     }
 
     private static BotMessage feishuMsg(String sender, String text, String eventId) {

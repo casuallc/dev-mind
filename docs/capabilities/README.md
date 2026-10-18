@@ -89,6 +89,7 @@
 | [CAP-74](CAP-74-worklog-server-git-repo.md) | 工作日志事实源服务端化 | 组装层 | 消除「runner 文件⇄DB 镜像」单向同步的结构性分叉：事实源收敛为服务端本地 git 仓（JGit 单写者收口，不碰 CAP-34 红线），DB 报告表与 DRAFT/CONFIRMED 状态机退役（防覆盖=自动路径不覆盖已有文件+force 显式+git log 回溯）；按仓建模（个人仓=成员 1 的团队仓，per-user 子目录路径不相交零冲突），远端备份改服务端 push（CAP-70 出口规则接入），平台外编辑合法输入（写前 fetch+merge、冲突 fail-visible）；否决 index.json 派生索引（文件名+git log+commit trailer 全覆盖） |
 | [CAP-75](CAP-75-feishu-integration.md) | 飞书集成（通知通道 + 双向机器人网关） | 组装层 | M1 补 feishu 自定义机器人通知通道（可选加签）+ 通道种子逐 code 兜底修存量库不补插 + 前端声明式 config 表单；M2 机器人网关底座接口化（devmind-bot：BotAdapter SPI/绑定表/指令路由/回答回推，零飞书代码）+ 飞书适配器（长连接收事件免公网域名证书，SDK 封装鉴权解密），群内 @机器人 问答（CAP-30 MODEL 执行体）+ /bind /session /build /deploy 项目操作 |
 | [CAP-76](CAP-76-agent-gateway.md) | 平台智能体网关（飞书自然语言管理） | 组装层 | 飞书裸文本 → 智能体网关 → LLM 工具选择 → 平台工具受控执行 → 卡片回复：工具契约先行（名称/schema/风险/角色，可导出 OpenAPI 3.0），工具随能力模块交付并在进程内调本模块 Service（权限/事务/归属复用），读直查、写必确认（DB 确认单 + 一次性消费 + 确认时重校验），白名单无任意 HTTP/SQL/shell；新增 devmind-copilot 编排模块 + common 工具/网关 SPI + bot 卡片扩展，CAP-62 数据权限以 ToolAccessPolicy 预留接入 |
+| [CAP-77](CAP-77-self-feedback-loop.md) | 平台自举反馈闭环（/issue 快捷登记） | 组装层 | Dev-Mind 自身注册为普通项目 + `/issue [类型] <描述>` 任意飞书会话快捷登记（固定投自项目，不受聊天绑定影响），自动附渠道/会话/发送者/登记人/时间，回执给 REQ 编号与 `/dev` 修复入口；复用需求主线与 CAP-34 会话，不新增存储；自动自更新（deploy_platform）列为后续能力 |
 
 ## 依赖关系
 
@@ -167,6 +168,7 @@ CAP-01 认证  ─┬─ CAP-02 项目 ─┬─ CAP-03 文档
 - CAP-74 工作日志事实源服务端化依赖 CAP-41（生成会话链路与模板，重构其存储/同步口径）、CAP-28（条目/git 扫描素材源不动）、CAP-29/35（服务端 JGit 与个人 PAT 凭证链）、CAP-70（push 出口规则接入）、CAP-37（outputs 回传消费点改仓写入）：事实源从 runner 持久工作区收敛为服务端本地 git 仓（`WorklogRepoService` 单写者 + 仓级锁），消除「手改不进 git / DRAFT 被镜像冲掉」的双数据源分叉；DB 报告表迁移后退役、DRAFT/CONFIRMED 状态机删除（保存即生效，自动生成文件已存在即跳过）；runner 侧目录降级为会话草稿区、节点离线不再阻塞日志页读写与推送（亲和红线松绑）；按仓建模支持团队共享仓（per-user 子目录 + 各人 PAT 署名推送），commit message trailer（DevMind-Source/Session）承载来源审计。
 - CAP-75 飞书集成依赖 CAP-06（通知通道 SPI，feishu 为第五个通道实现）、CAP-45（integrations 表 FEISHU 类型 appId/appSecret 密文与 FeishuApiClient tenant_token 管理，新增 im/v1 reply/send 方法）、CAP-30/49（通用问答与 MODEL 执行体，机器人问答复用 create/input/subscribe 链路）、CAP-05/08/09（/session /build /deploy 项目操作复用既有服务）、CAP-70（出站代理出口规则）：M1 通知通道走自定义机器人 webhook（可选加签）；M2 机器人网关底座接口化（BotAdapter SPI 仿 NotificationChannel 按 code 注册），飞书适配器用 lark-oapi 长连接收事件（免公网域名/受信证书，否决 webhook 回调主路径），绑定表 (channel, external_chat_id) 唯一支持多 bot 平台共表。
 - CAP-76 平台智能体网关依赖 CAP-75（bot 绑定/四级身份链/事件去重/交互日志，复用 common `AgentGateway` SPI + 新增卡片 SPI）、CAP-48（平台默认 CHAT 端点 + ModelEndpointProvider，新增 tools/tool_calls 调用客户端）、CAP-01（角色实时解析）、CAP-13/05/08/09/11（工具随各能力模块交付，在进程内调本模块 Service，权限与状态机不绕过）、CAP-30/49（copilot 关闭时裸文本回落问答）、CAP-62（以 common `ToolAccessPolicy` 预留项目数据权限，未落地前仅 RBAC 并显式标注）：新模块 devmind-copilot 只做编排（Agent 循环/ToolRegistry/确认单/审计），零业务模块依赖，工具 SPI 放 common 由各能力模块自包含实现，登记表可导出 OpenAPI 3.0；写操作走 `copilot_actions` 持久化确认单（PENDING→EXECUTING 原子抢占、10 分钟过期、确认时重解析 actor/角色/参数），飞书卡片经 lark-oapi `card.action.trigger` 长连接回调、3s 内只 ACK 后异步执行并 PATCH 原地更新；`devmind.copilot.enabled=false` 一键回退 CAP-75 路由。
+- CAP-77 平台自举反馈闭环依赖 CAP-75（`/issue` 复用指令路由、四级身份链、敏感指令门禁与交互日志）、CAP-13（需求主线与 `REQ-<seq>` 寻址）、CAP-34（修复会话在 runner worktree 内执行）：只改 `devmind-bot`，新增 `devmind.bot.self-project-id` 配置与 `/issue` 路由，登记固定投自项目（不受聊天 `/bind` 影响），描述尾部自动附来源元信息；自动自更新（`deploy_platform`）不在本期，列为后续能力。
 
 ## 组装方式（后续流程层）
 

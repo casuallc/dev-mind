@@ -37,6 +37,7 @@ import com.devmind.project.ProjectService;
 import com.devmind.project.RequirementService;
 import com.devmind.project.WorkItemService;
 import com.devmind.project.dto.ProjectView;
+import com.devmind.project.dto.RequirementRequest;
 import com.devmind.project.dto.RequirementView;
 import com.devmind.project.model.RequirementEntity;
 import com.devmind.project.dto.WorkItemView;
@@ -47,10 +48,12 @@ import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.SessionView;
 import com.devmind.session.service.SessionManagerService;
 import jakarta.annotation.PreDestroy;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -86,7 +89,7 @@ public class BotRouterService implements BotMessageHandler {
     /** FR-12 敏感操作：支持身份映射的 channel 上要求已绑定个人身份（IMAGE=FR-17 入站截图） */
     private static final java.util.Set<String> SENSITIVE_COMMANDS =
             java.util.Set.of("bind", "session", "build", "deploy", "reqs", "req", "dev", "IMAGE",
-                    "status", "stop", "wi", "design", "flow", "release");
+                    "status", "stop", "wi", "design", "flow", "release", "issue");
 
     /** FR-22 需求状态别名（中英都收）：键=小写形态，值=平台状态码。 */
     private static final Map<String, String> FLOW_STATUS_ALIASES = Map.ofEntries(
@@ -385,6 +388,7 @@ public class BotRouterService implements BotMessageHandler {
                     "解绑请登录平台：设置 → 第三方账号，删除对应飞书集成的身份码绑定即可");
             case "bind" -> RouteReply.text(bind(binding, cmd.args()));
             case "session" -> RouteReply.text(startSession(msg, binding, cmd.args()));
+            case "issue" -> RouteReply.text(createIssue(msg, cmd.args()));
             case "reqs" -> RouteReply.text(listRequirements(binding));
             case "req" -> requirementDetail(binding, cmd.args());
             case "dev" -> RouteReply.text(devSession(msg, binding, cmd.args()));
@@ -460,6 +464,99 @@ public class BotRouterService implements BotMessageHandler {
         return "当前身份：" + props.getDefaultActor() + "（平台默认身份；未绑定个人身份，发 /bindme 绑定）";
     }
 
+    // ---------------- CAP-77 平台自举反馈 ----------------
+
+    /** 类型别名（大小写不敏感）：前缀命中才消费，未命中整段当描述。 */
+    private static final Map<String, String> ISSUE_TYPE_ALIASES = Map.ofEntries(
+            Map.entry("bug", RequirementEntity.TYPE_BUG),
+            Map.entry("缺陷", RequirementEntity.TYPE_BUG),
+            Map.entry("优化", RequirementEntity.TYPE_IMPROVEMENT),
+            Map.entry("改进", RequirementEntity.TYPE_IMPROVEMENT),
+            Map.entry("improvement", RequirementEntity.TYPE_IMPROVEMENT),
+            Map.entry("需求", RequirementEntity.TYPE_FEATURE),
+            Map.entry("feature", RequirementEntity.TYPE_FEATURE),
+            Map.entry("任务", RequirementEntity.TYPE_TASK),
+            Map.entry("task", RequirementEntity.TYPE_TASK));
+
+    private record IssueInput(String type, String text) {
+    }
+
+    /**
+     * CAP-77 `/issue [类型] <描述>`：固定登记到 `devmind.bot.self-project-id` 指向的自项目，
+     * 不读聊天绑定项目（防在客户项目群里把平台缺陷记到客户项目）。
+     */
+    private String createIssue(BotMessage msg, String args) {
+        String projectId = props.getSelfProjectId();
+        if (projectId == null || projectId.isBlank()) {
+            return "未启用平台反馈登记：请先在配置中填写 devmind.bot.self-project-id"
+                    + "（平台自项目 id），重启后重试";
+        }
+        if (args == null || args.isBlank()) {
+            return "用法：/issue [类型] <问题或建议>\n"
+                    + "例：/issue bug 飞书查本周工作日志恒为空，194 上有数据\n"
+                    + "类型：bug/优化/需求/任务（缺省 bug）\n"
+                    + "登记后回 REQ-<编号>，可用 /dev REQ-<编号> 起修复会话";
+        }
+        IssueInput input = parseIssue(args);
+        String title = issueTitle(input.text());
+        String description = input.text()
+                + "\n\n---\n来源：" + msg.channel() + " 机器人 /issue"
+                + "\n会话：" + msg.externalChatId()
+                + "\n发送者：" + (msg.senderId() == null ? "-" : msg.senderId())
+                + "\n登记人：" + currentActor()
+                + "\n时间：" + TIME_FMT.format(Instant.now());
+        RequirementView created = requirementService.create(projectId, new RequirementRequest(
+                title, description, null, null, input.type(), "Medium", null, null,
+                List.of("bot-feedback"), null, null, null));
+        ProjectView project = projectService.get(projectId);
+        String code = created.code() != null ? created.code() : "REQ-" + created.seq();
+        return "已登记 " + issueTypeLabel(created.type()) + " " + code + "：" + created.title()
+                + "\n项目：" + project.name() + "（" + projectId + "）"
+                + "\n继续：/dev " + code + " [补充说明] 起修复会话";
+    }
+
+    /** 首个空白（含全角空格）前若是类型别名则消费，剩余部分为描述。 */
+    private static IssueInput parseIssue(String args) {
+        String text = args.trim();
+        int split = -1;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == ' ' || c == '\t' || c == '　') {
+                split = i;
+                break;
+            }
+        }
+        if (split > 0) {
+            String head = text.substring(0, split).toLowerCase(Locale.ROOT);
+            String rest = text.substring(split).trim();
+            String type = ISSUE_TYPE_ALIASES.get(head);
+            if (type != null && !rest.isEmpty()) {
+                return new IssueInput(type, rest);
+            }
+        }
+        return new IssueInput(RequirementEntity.TYPE_BUG, text);
+    }
+
+    private static String issueTitle(String text) {
+        String first = text.lines().findFirst().orElse(text).trim();
+        return first.length() <= 120 ? first : first.substring(0, 120);
+    }
+
+    private static String issueTypeLabel(String type) {
+        return switch (type == null ? "" : type) {
+            case RequirementEntity.TYPE_BUG -> "BUG";
+            case RequirementEntity.TYPE_IMPROVEMENT -> "优化";
+            case RequirementEntity.TYPE_TASK -> "任务";
+            default -> "需求";
+        };
+    }
+
+    private static String currentActor() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth != null && auth.getPrincipal() instanceof DevMindPrincipal p
+                ? p.username() : "unknown";
+    }
+
     private String helpText() {
         return """
                 可用指令：
@@ -467,6 +564,7 @@ public class BotRouterService implements BotMessageHandler {
                 /bindme —— 获取你的身份码（到 设置→第三方账号 绑定后，操作以你的身份执行）
                 /whoami —— 查看当前身份
                 /bind <项目id或名称> —— 绑定项目（无参查看当前绑定；需先绑定个人身份）
+                /issue [类型] <描述> —— 登记平台自身问题/优化到自项目（类型：bug/优化/需求/任务，缺省 bug；需先绑定个人身份）
                 /new —— 重开问答（丢弃当前问答与智能体会话上下文）
                 /cancel [短码] —— 取消待确认的智能体操作（无参=取消当前唯一/暂存的危险操作）
                 /reqs —— 进行中的需求列表（需绑定个人身份）
