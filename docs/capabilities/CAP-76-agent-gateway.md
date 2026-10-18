@@ -30,8 +30,8 @@ CAP-75 的飞书机器人已经能问答、绑定项目、起会话、查构建�
 
 目标：
 
-- **自然语言管理平台**：项目、需求、工作项、设计、会话、构建、部署、发版、文档、知识、节点、用量，
-  都能用一句话查/办。
+- **自然语言管理平台**：项目、需求、工作项、设计、会话、构建、部署/发版记录、文档、知识、节点、用量，
+  都能用一句话查；写操作 v1 覆盖需求/工作项/会话/构建，部署与发版的关键动作暂不提供。
 - **写操作安全可控**：任何变更先出计划，人工确认后才执行；确认单可审计、可过期、可撤销。
 - **权限不另起一套**：机器人行为 = 该用户既有平台权限；ADMIN/DEVELOPER/VIEWER 边界不变。
 - **全链路可追溯**：每一轮对话、每一次工具调用、每一张确认单都落库，能回答"谁在什么时候让机器人做了什么"。
@@ -41,7 +41,7 @@ CAP-75 的飞书机器人已经能问答、绑定项目、起会话、查构建�
 - 不做"自由编码 Agent"：不在服务端跑 shell/任意 HTTP/任意 SQL，不让模型读写服务器文件。
   coding agent 的职责仍归 CAP-34 runner 会话。
 - 不替代 CAP-05/08/09/11 的执行器与人工门禁；智能体只是这些能力的自然语言入口。
-- 不做无确认的自主多步写操作（"帮我自动把这一批需求都发版"明确禁止）。
+- 不做无确认的自主多步写操作（"帮我自动把这一批需求都处理掉"明确禁止）。
 - v1 不做语音、不做飞书文档/表格深度编辑、不做跨租户操作。
 
 ## 2. 设计原则（红线）
@@ -137,6 +137,7 @@ spring-boot-starter-web / data-jpa / jackson-databind
   `AgentCard` / `AgentCardButton` / `AgentCardAction`（bot 与 copilot 的唯一耦合面；
   bot 只依赖 common）。
   - `AgentGateway`：`AgentReply handle(AgentRequest)` + `AgentReply onCardAction(AgentCardAction)`
+    + `AgentReply cancel(AgentRequest, String shortCode)`（`/cancel`；shortCode 可为空）
     + `default void reset(AgentRequest)`；`onCardAction` 同步执行并在返回的 `AgentReply` 里给出
     卡片更新内容（null = 不更新）；`reset` 供 `/new` 清空该 sender 的会话上下文（默认 no-op）；
   - `AgentRequest`：channel / chatType / externalChatId / senderId / actor /
@@ -196,7 +197,7 @@ Service。copilot 不跨模块调 Service，只负责编排；`ToolRegistry` 由
 
 **FR-01 网关扩展点**：`BotRouterService` 的路由顺序固定为：
 
-1. 斜杠指令（CAP-75 快速路径，含 `/new`）；
+1. 斜杠指令（CAP-75 快速路径，含 `/new`；CAP-76 新增 `/cancel`，见 FR-16）；
 2. CAP-75 暂存确认（裸「确认/取消」命中 `PendingConfirmStore` 即消费）；
 3. common 的 `AgentGateway`（其余裸文本，**包括未命中暂存的「确认/取消」**）；
 4. `ObjectProvider` 无实现或 `devmind.copilot.enabled=false` 时走 CAP-75 `ask()`。
@@ -273,8 +274,9 @@ public record ToolSpec(
   须按 CAP-20 单独立项鉴权/限流/版本治理，不能默认这份文档可以直接打；
 - 契约快照由 `tests/cap76_tools_contract.py`（起隔离 app 后拉取该端点）生成到
   `docs/capabilities/tools/cap76-tools.yaml` 并随代码评审，契约变更在 diff 里可见；
-  CI 校验可被标准 OpenAPI 解析、operation 集合与注册表一致。**不要在建包过程写源码树**
-  （构建有副作用，且需要完整 Spring 上下文才能收集全部模块的工具）；
+  脚本内自检可被标准 OpenAPI 解析、operation 集合与注册表一致，**不接入 CI**（本期无 CI
+  流水线，靠脚本 + 评审把关）。**不要在建包过程写源码树**（构建有副作用，且需要完整
+  Spring 上下文才能收集全部模块的工具）；
 - **版本纪律**：工具名稳定，schema 只做加法（新增可选字段）；破坏性变更必须换名
   （`<name>_v2`）并保留旧工具一个发布周期，避免模型/外部消费者静默失效；
 - `ToolSpec` 增加 `since`（首次交付版本）与 `ownerModule`（归属模块），供目录页与审计定位。
@@ -329,11 +331,12 @@ public record ToolSpec(
 5. 达到 `max-steps`（默认 8）→ 停止并回"已执行 N 步，请缩小范围或补充条件"，落审计。
 
 同一轮内禁止同一 `(tool, args)` 重复调用超过 2 次（防模型死循环）。
-每次工具执行有独立超时 `tool-timeout-seconds`（默认 30）；构建/部署/发版类工具
-只做**异步触发**并立即返回受理结果，不在工具内等作业完成。整轮另有
-`turn-timeout-seconds`（默认 180，含全部模型与工具调用）：超时立即终止循环、按失败回执
-并落审计，不得让单轮无限占用 botExecutor。**网关的 turn 处理方法禁标 `@Transactional`**：
-工具可能触发构建/部署/发版等异步任务，外层事务会让异步线程看不到未提交行（CAP-71 红线）。
+每次工具执行有独立超时 `tool-timeout-seconds`（默认 30）；构建类工具
+只做**异步触发**并立即返回受理结果，不在工具内等作业完成（将来若交付部署/发版写工具同理）。
+整轮另有 `turn-timeout-seconds`（默认 180，含全部模型与工具调用）：超时立即终止循环、
+按失败回执并落审计，不得让单轮无限占用 botExecutor。**网关的 turn 处理方法禁标
+`@Transactional`**：工具可能触发构建等异步任务，外层事务会让异步线程看不到未提交行
+（CAP-71 红线）。
 
 **FR-08 上下文与历史**：
 
@@ -370,15 +373,17 @@ public record ToolSpec(
 `devmind.copilot.max-writes-per-turn`（默认 3）：同一模型响应中的多个写调用一次性生成多张
 确认单，共用一个短码前缀（例如 `A7K2-1`、`A7K2-2`），确认时顺序执行并逐项回执。
 
-**FR-11 危险操作**：`DANGEROUS` 包括但不限于：生产环境部署、发版、回滚、需求置 DONE/CANCELLED、
-删除（v1 无删除工具）、跨项目批量写（v1 不提供，见 FR-22）。规则：
+**FR-11 危险操作**：`DANGEROUS` 包括但不限于：`send_session_input`（等于让 runner 的 coding
+agent 执行任意输入）、需求置 DONE/CANCELLED、工作项 CANCELLED、删除（v1 无删除工具）、
+跨项目批量写（v1 不提供，见 FR-22）。规则：
 
 - 必须使用**文本确认短码**（`确认 A7K2`）；卡片按钮不作为执行途径。
   即使该 sender 只有一张 PENDING，裸「确认」也不得执行 DANGEROUS（见 FR-17）；
 - DANGEROUS 确认卡**不渲染执行按钮**，只展示计划、短码提示与「取消」按钮；
-- 确认卡/文本必须展示目标环境、制品、版本号、影响范围；
-- 部署/回滚/发版一律 DANGEROUS（`trigger_deploy` / `rollback_deployment` / `trigger_release`），
-  不依赖 `riskFor(Map)` 去数据库判断环境——该签名拿不到上下文，无法可靠识别 PROD。
+- 确认卡/文本必须展示目标对象与影响范围；`send_session_input` 必须展示目标会话、节点与
+  **完整输入文本**（不截断）；
+- 部署/回滚/发版写工具 **v1 不交付**（只保留只读记录查询，见 §6.2）。将来交付时一律
+  DANGEROUS，且不得用 `riskFor(Map)` 去数据库判断环境——该签名拿不到上下文，无法可靠识别 PROD。
 
 **FR-12 失败呈现**：统一分档：未绑定身份 / 无权限 / 未找到对象 / 参数不合法 / 执行失败 /
 模型不可用。错误必须含可操作建议（如"请先 /bindme 绑定身份"），不回堆栈、不回内部路径。
@@ -398,8 +403,8 @@ PENDING ──确认──▶ EXECUTING ──▶ SUCCEEDED
 `tool_name`、`args_json`、`risk`、`preview_text`、`status`、`short_code`、`card_message_id`、
 `created_at`、`expires_at`、`executed_at`、`result_json`、`error`。
 
-`SUCCEEDED` 语义是**工具调用被受理且未报错**，不是异步作业完成：`trigger_build` /
-`trigger_deploy` / `trigger_release` 返回的是"已提交"，真正的作业状态仍看构建/部署/发版记录。
+`SUCCEEDED` 语义是**工具调用被受理且未报错**，不是异步作业完成：`trigger_build` 返回的是
+"已提交"，真正的作业状态仍看构建记录（将来交付部署/发版写工具时同理）。
 确认后的执行**另起一条 `copilot_turns`**（`trigger_type=CONFIRM` 或 `CARD_ACTION`），
 `copilot_tool_calls.turn_id` 指向它；原对话轮通过 `action.turn_id` 关联，审计链不断。
 确认执行的结果摘要同时作为 assistant 消息写入该会话历史（后续追问能接上），
@@ -428,10 +433,22 @@ PENDING ──确认──▶ EXECUTING ──▶ SUCCEEDED
 4. 执行时使用**服务端存的 args_json**，绝不使用回调 payload 里的参数；
 5. 任一校验失败 → 确认单 FAILED（error 记原因），回执原因，不重试。
 
-**FR-16 过期与取消**：`confirm-ttl-minutes` 默认 10；`取消 <短码>` 或卡片"取消"
-→ CANCELLED。M2 若增加 `/cancel` 斜杠指令，需同步登记到 `CommandParser` 与 `/help`
-（v1 只保留文本取消路径也可）。过期清理任务把 PENDING 改为 EXPIRED
-（派生 update 需要事务，见 FR-29）。
+**FR-16 过期与取消**：`confirm-ttl-minutes` 默认 10；`取消 <短码>`、`/cancel [短码]` 或
+卡片"取消" → CANCELLED。
+
+`/cancel` 从 M2 起提供，走斜杠快速路径：
+
+- 无参：先取消 CAP-75 暂存的危险指令（`PendingConfirmStore` 单人单槽，若有）；
+  没有暂存则查当前 `(channel, external_chat_id, sender_id)` 的 copilot PENDING——恰好一张 →
+  取消；多张 → 列出短码、风险与摘要且**不取消**；零张 → 回"没有待取消的确认单"；
+- 带短码：只按 FR-17 的范围查找并取消该单（任意风险），不碰 CAP-75 暂存；不存在/已过期/
+  已执行 → 直接回执明确原因（已过期/已取消/已执行，或不存在），不重新发起。
+
+bot 侧在 `BotRouterService` 的指令 switch 注册 `cancel` 并补 `/help` 文案；copilot 实现
+`AgentGateway.cancel(AgentRequest, shortCode)`（不调模型、不新建对话轮，把对应的
+`copilot_tool_calls` PENDING_CONFIRM 行置为 CANCELLED）。copilot 未启用时（无实现或
+`enabled=false`）无参 `/cancel` 仍可取消 CAP-75 暂存；带短码则回"智能体未启用"。
+过期清理任务把 PENDING 改为 EXPIRED（派生 update 需要事务，见 FR-29）。
 
 **FR-17 文本确认兜底**：`AgentGateway.handle` 在组装模型请求**之前**先解析文本确认/取消指令；
 命中即走确认执行路径并记 `trigger_type=CONFIRM` 的 turn，不调用模型。短码不存在/已过期时直接回
@@ -443,7 +460,8 @@ PENDING ──确认──▶ EXECUTING ──▶ SUCCEEDED
 - 零张 → 走正常智能体对话（"确认"可能只是聊天内容）；
 - 裸 `取消`：恰好一张 PENDING → CANCELLED（任何风险）；多于一张 → 提示列出短码；
   零张 → 正常智能体对话；
-- `取消 <短码>` 对任意风险均有效（取消不需要加码）。
+- `取消 <短码>` 对任意风险均有效（取消不需要加码）；`/cancel [短码]` 走 FR-16 的斜杠路径，
+  语义相同但优先于本段文本兜底。
 
 ### 5.4 权限与数据边界
 
@@ -494,7 +512,7 @@ CAP-62 落地后无需改 copilot。
 - 删除项目/需求/工作项/会话/文档/用户；
 - 用户管理、角色变更、集成/凭证/模型端点配置；
 - 任意终端命令、文件读写、SQL、HTTP 请求；
-- 跨项目批量操作、批量发版；
+- 跨项目批量操作；
 - 修改流程模板/构建步骤等"配置面"写操作（M4 再评估）。
 
 ### 5.5 飞书卡片
@@ -672,15 +690,16 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 | `create_work_item` | `projectId`, `requirementId`, `title`, `spec?`, `type?` | WRITE |
 | `update_work_item_status` | `workItemId`, `status` | WRITE；CANCELLED → DANGEROUS |
 | `start_session` | `projectId`, `taskSpec`, `requirementId?`, `workItemId?`, `agentNodeId?` | WRITE（起会话即产生费用） |
-| `send_session_input` | `sessionId`, `text` | WRITE |
+| `send_session_input` | `sessionId`, `text` | DANGEROUS |
 | `stop_session` | `sessionId` | WRITE |
 | `trigger_build` | `projectId`, `branch?` | WRITE |
-| `trigger_deploy` | `projectId`, `environmentId`, `buildId?` | DANGEROUS（PROD 强制） |
-| `rollback_deployment` | `deploymentId` | DANGEROUS |
-| `trigger_release` | `projectId`, `buildId`, `version` | DANGEROUS |
 
-> `send_session_input` 等于让 runner 的 coding agent 执行一句话，是 v1 风险最高的 WRITE 工具：
-> 预览必须展示目标会话、节点与**完整输入文本**（不截断），并在 M4 评估是否提升为 DANGEROUS。
+> `send_session_input` 等于让 runner 的 coding agent 执行一句话，定为 DANGEROUS：预览必须展示
+> 目标会话、节点与**完整输入文本**（不截断），且必须文本短码确认（卡片不提供执行按钮）。
+>
+> **部署/发版/回滚写工具 v1 不提供**：`trigger_deploy` / `rollback_deployment` / `trigger_release`
+> 均不交付，本期只保留 §6.1 的只读记录查询。避免在 CAP-62 数据权限与产品级二次门禁就绪前
+> 开放生产变更；将来立项时一律按 DANGEROUS + 文本短码设计。
 
 M4 候选：文档新版本、知识提案采纳、需求流程阶段动作、节点默认切换（ADMIN）。
 
@@ -796,8 +815,9 @@ devmind:
 ### M2 写操作与确认
 
 - [ ] `copilot_actions` + 确认单状态机 + 原子消费 + 过期
-- [ ] 文本确认/取消、短码、多写动作
-- [ ] 写工具：需求/工作项创建与状态、起停会话、输入、构建、部署、回滚、发版
+- [ ] 文本确认/取消、`/cancel [短码]`、短码、多写动作
+- [ ] 写工具：需求/工作项创建与状态、起停会话、输入（DANGEROUS）、构建
+      （部署/回滚/发版写工具本期不交付）
 - [ ] 权限：角色实时解析、个人绑定门禁、项目校验、动态风险
 - [ ] 验收：写操作未确认不落库；他人不能确认；重复点击只执行一次；过期失败可见
 
@@ -830,7 +850,8 @@ devmind:
 
 1. 工具 schema 校验：类型错误、未知字段、超长、缺必填 → 不执行。
 2. 风险闸门：READ 执行；WRITE 不执行且生成 PENDING 确认单；DANGEROUS 不接受卡片按钮。
-3. 确认单：过期、重复确认、他人确认、取消、执行中崩溃后状态不重复执行。
+3. 确认单：过期、重复确认、他人确认、文本取消、`/cancel`（无参/带短码/多张不误取消）、
+   执行中崩溃后状态不重复执行。
 4. 权限：VIEWER 看不到写工具；DEVELOPER 看不到 ADMIN 工具；未绑定个人身份写操作被拒。
 5. 角色实时解析：合成 principal 的 `"USER"` 不被当作权限来源。
 6. JSON 协议解析：合法/非法/多工具/最终回答；非法纠正一次后失败。
@@ -848,9 +869,9 @@ devmind:
   2. 写：用户说"建一个需求" → 生成确认单 → 未确认前需求不存在 → 确认后创建成功；
   3. 越权：VIEWER 发起写 → 拒绝且无确认单；
   4. 他人确认 → 不执行（他人查不到该短码），原确认单仍 PENDING；
-  5. 过期确认 → EXPIRED 且不执行；
+  5. 过期确认 → EXPIRED 且不执行；`/cancel` 后确认单为 CANCELLED 且再确认不执行；
   6. 卡片回调（`POST /api/e2e/bot/card-action` 注入）→ 执行且 `updateCard` 被调用；
-  7. DANGEROUS（如 `trigger_deploy`）：裸「确认」被拒；回复短码后才执行；
+  7. DANGEROUS（`update_requirement_status` 置 DONE）：裸「确认」被拒；回复短码后才执行；
   8. kill switch → 裸文本回落到 CAP-75 问答；
   9. 管理 API：非 ADMIN 403，ADMIN 200；
   10. 契约：`tests/cap76_tools_contract.py` 生成的 `cap76-tools.yaml` 与注册表一致
