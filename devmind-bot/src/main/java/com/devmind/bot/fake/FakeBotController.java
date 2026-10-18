@@ -1,7 +1,9 @@
 package com.devmind.bot.fake;
 
+import com.devmind.bot.spi.BotCardAction;
 import com.devmind.bot.spi.BotMessage;
 import java.util.List;
+import java.util.Map;
 import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -61,6 +63,28 @@ public class FakeBotController {
     public List<FakeBotAdapter.Reply> pushes(@RequestParam(required = false) String chatId) {
         return adapter.pushes().stream()
                 .filter(r -> chatId == null || chatId.equals(r.externalChatId()))
+                .toList();
+    }
+
+    // ---------------- CAP-76 卡片 ----------------
+
+    public record CardActionIn(String channel, String externalChatId, String chatType, String senderId,
+                               String messageId, String eventId, Map<String, Object> value) {
+    }
+
+    /** 注入卡片按钮回调（模拟飞书 card.action.trigger）。 */
+    @PostMapping("/card-action")
+    public void cardAction(@RequestBody CardActionIn in) {
+        adapter.emitCardAction(new BotCardAction(
+                in.channel() == null || in.channel().isBlank() ? "fake" : in.channel(),
+                in.externalChatId(), in.chatType(), in.senderId(), in.messageId(), in.eventId(), in.value()));
+    }
+
+    /** 卡片出站捕获（发卡/更新卡）。 */
+    @GetMapping("/cards")
+    public List<FakeBotAdapter.CardReply> cards(@RequestParam(required = false) String chatId) {
+        return adapter.cards().stream()
+                .filter(c -> chatId == null || chatId.equals(c.externalChatId()))
                 .toList();
     }
 

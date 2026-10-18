@@ -10,9 +10,16 @@ import com.devmind.bot.model.BotInteractionEntity;
 import com.devmind.bot.repo.BotBindingRepository;
 import com.devmind.bot.repo.BotInteractionRepository;
 import com.devmind.bot.spi.BotAdapter;
+import com.devmind.bot.spi.BotCardAction;
 import com.devmind.bot.spi.BotChannelConfigProvider;
 import com.devmind.bot.spi.BotMessage;
 import com.devmind.bot.spi.BotMessageHandler;
+import com.devmind.common.agent.gateway.AgentCard;
+import com.devmind.common.agent.gateway.AgentCardAction;
+import com.devmind.common.agent.gateway.AgentCardButton;
+import com.devmind.common.agent.gateway.AgentGateway;
+import com.devmind.common.agent.gateway.AgentReply;
+import com.devmind.common.agent.gateway.AgentRequest;
 import com.devmind.build.dto.BuildView;
 import com.devmind.build.service.BuildService;
 import com.devmind.chat.dto.ChatView;
@@ -130,6 +137,7 @@ public class BotRouterService implements BotMessageHandler {
     private final BotSessionWatchService watchService;
     private final BotProperties props;
     private final ObjectProvider<BotAdapterRegistry> registryProvider;
+    private final ObjectProvider<AgentGateway> gatewayProvider;
     private final ObjectProvider<AttachmentContentResolver> attachmentResolverProvider;
     private final AttachmentService attachmentService;
     private final DesignService designService;
@@ -155,6 +163,7 @@ public class BotRouterService implements BotMessageHandler {
                             BotSessionWatchService watchService,
                             BotProperties props,
                             ObjectProvider<BotAdapterRegistry> registryProvider,
+                            ObjectProvider<AgentGateway> gatewayProvider,
                             ObjectProvider<AttachmentContentResolver> attachmentResolverProvider,
                             AttachmentService attachmentService,
                             DesignService designService,
@@ -173,6 +182,7 @@ public class BotRouterService implements BotMessageHandler {
         this.watchService = watchService;
         this.props = props;
         this.registryProvider = registryProvider;
+        this.gatewayProvider = gatewayProvider;
         this.attachmentResolverProvider = attachmentResolverProvider;
         this.attachmentService = attachmentService;
         this.designService = designService;
@@ -233,6 +243,9 @@ public class BotRouterService implements BotMessageHandler {
                 String pendingName = pendingConfirms.peekName(pendingKey(msg), msg.text().trim());
                 if (pendingName != null) {
                     command = pendingName;
+                } else if (agentEnabled()) {
+                    // CAP-76 FR-01：裸文本由智能体接管，交互日志打 agent 标
+                    command = "agent";
                 }
             }
             rec.setCommand(command);
@@ -261,7 +274,9 @@ public class BotRouterService implements BotMessageHandler {
         }
         rec.setDurationMs(System.currentTimeMillis() - t0);
         saveInteraction(rec, replyText);
-        String replyError = reply(msg, replyText);
+        // CAP-76：智能体路径的卡片/分段已在路由内送达（sent=true），只记日志不再补发
+        String replyError = routeResult != null && routeResult.sent()
+                ? null : reply(msg, replyText);
         if (replyError != null) {
             // 回推失败 = 用户视角的失败（群里什么都没收到），行状态必须改 FAILED，不能只记日志
             rec.setStatus(BotInteractionEntity.STATUS_FAILED);
@@ -324,14 +339,25 @@ public class BotRouterService implements BotMessageHandler {
 
     /** 个人身份映射（channel 适配器侧实现，如飞书 open_id → 第三方账号绑定）；不支持/未绑定为空。 */
     private java.util.Optional<String> resolvePersonal(BotMessage msg) {
-        BotChannelConfigProvider cc = channelConfigs.get(msg.channel());
-        return cc == null ? java.util.Optional.empty() : cc.resolveActor(msg.senderId());
+        return resolvePersonal(msg.channel(), msg.senderId());
     }
 
-    /** 路由产出：回复文本 + 待回推的出站图片（FR-16；仅 /req 详情产图）。 */
-    private record RouteReply(String text, List<OutImage> images) {
+    private java.util.Optional<String> resolvePersonal(String channel, String senderId) {
+        BotChannelConfigProvider cc = channelConfigs.get(channel);
+        return cc == null ? java.util.Optional.empty() : cc.resolveActor(senderId);
+    }
+
+    /**
+     * 路由产出：回复文本 + 待回推的出站图片（FR-16；仅 /req 详情产图）。
+     * {@code sent=true} 表示卡片/分段已在路由内直接送达，dispatch 不再补发文本（text 仅用于日志）。
+     */
+    private record RouteReply(String text, List<OutImage> images, boolean sent) {
         static RouteReply text(String text) {
-            return new RouteReply(text, List.of());
+            return new RouteReply(text, List.of(), false);
+        }
+
+        static RouteReply delivered(String logText) {
+            return new RouteReply(logText, List.of(), true);
         }
     }
 
@@ -348,7 +374,8 @@ public class BotRouterService implements BotMessageHandler {
             if (confirmed != null) {
                 return confirmed;
             }
-            return RouteReply.text(ask(binding, msg.text().trim()));
+            // CAP-76 FR-01：未命中 CAP-75 暂存的裸文本（含「确认/取消」）交给智能体
+            return agentOrAsk(msg, binding, msg.text().trim());
         }
         return switch (cmd.name()) {
             case "help" -> RouteReply.text(helpText());
@@ -369,7 +396,8 @@ public class BotRouterService implements BotMessageHandler {
             case "release" -> RouteReply.text(release(msg, binding, cmd.args()));
             case "build" -> RouteReply.text(lastBuild(binding));
             case "deploy" -> RouteReply.text(lastDeploys(binding));
-            case "new" -> RouteReply.text(newChat(binding));
+            case "cancel" -> RouteReply.text(cancelCommand(msg, binding, cmd.args()));
+            case "new" -> RouteReply.text(newChat(msg, binding));
             default -> RouteReply.text("未知指令 /" + cmd.name() + "，发 /help 查看可用指令");
         };
     }
@@ -439,7 +467,8 @@ public class BotRouterService implements BotMessageHandler {
                 /bindme —— 获取你的身份码（到 设置→第三方账号 绑定后，操作以你的身份执行）
                 /whoami —— 查看当前身份
                 /bind <项目id或名称> —— 绑定项目（无参查看当前绑定；需先绑定个人身份）
-                /new —— 重开问答（丢弃当前问答上下文）
+                /new —— 重开问答（丢弃当前问答与智能体会话上下文）
+                /cancel [短码] —— 取消待确认的智能体操作（无参=取消当前唯一/暂存的危险操作）
                 /reqs —— 进行中的需求列表（需绑定个人身份）
                 /req <编号> —— 需求详情（编号如 REQ-3；需绑定个人身份）
                 /wi <编号> —— 需求下工作单元列表（需绑定个人身份）
@@ -454,7 +483,8 @@ public class BotRouterService implements BotMessageHandler {
                 /status —— 最近 5 条开发会话状态（需绑定个人身份）
                 /stop [会话id] —— 停止会话（危险操作需二次确认；无参停最新运行中的；需绑定个人身份）
                 直接发截图给我 —— 10 分钟内发 /dev 或 /session 起会话自动带上（需绑定个人身份）
-                其余文字直接当作问答（私聊直接问，群聊 @我）""";
+                其余文字直接当作问答（私聊直接问，群聊 @我）；
+                智能体开启时，也可以用自然语言让我查询/操作项目（写操作会先发确认单）""";
     }
 
     // ---------------- 绑定 ----------------
@@ -529,12 +559,274 @@ public class BotRouterService implements BotMessageHandler {
         return binding.getProjectId();
     }
 
+    // ---------------- 智能体（CAP-76 FR-01） ----------------
+
+    private boolean agentEnabled() {
+        AgentGateway gateway = gatewayProvider.getIfAvailable();
+        return gateway != null && gateway.enabled();
+    }
+
+    /**
+     * 裸文本路由（CAP-76 FR-01 第 2~4 步）：CAP-75 暂存确认已在上游处理；
+     * 有启用的 AgentGateway 就交给智能体，否则回落 CAP-75 问答。
+     *
+     * <p>进度卡由 bot 侧发（FR-23）：成功则原地更新为结果卡；卡片不可用/更新失败
+     * 一律回落文本，智能体异常时先把进度卡改成失败态再抛给 dispatch 记 FAILED。</p>
+     */
+    private RouteReply agentOrAsk(BotMessage msg, BotBindingEntity binding, String text) {
+        AgentGateway gateway = gatewayProvider.getIfAvailable();
+        if (gateway == null || !gateway.enabled()) {
+            return RouteReply.text(ask(binding, text));
+        }
+        BotAdapter adapter = adapterOf(msg.channel());
+        AgentRequest req = agentRequest(msg, binding, text);
+        String progressId = null;
+        if (adapter != null && adapter.supportsCard() && gateway.replyProgressCard()) {
+            try {
+                progressId = adapter.replyCard(msg, progressCard());
+            } catch (Exception e) {
+                log.warn("进度卡发送失败，继续处理: channel={} err={}", msg.channel(), e.getMessage());
+            }
+        }
+        AgentReply reply;
+        try {
+            reply = gateway.handle(req);
+        } catch (RuntimeException e) {
+            failProgressCard(adapter, progressId);
+            throw e;
+        }
+        if (reply == null) {
+            reply = AgentReply.text("智能体没有返回内容，请换个说法再试");
+        }
+        if (adapter == null) {
+            return RouteReply.text(reply.plainText());
+        }
+        deliverAgentReply(adapter, msg, reply, progressId);
+        return RouteReply.delivered(reply.plainText());
+    }
+
+    /** 卡片/分段送达：分段原样逐条发送（不套 reply-max-chars），卡片成功则不再补发同内容文本。 */
+    private void deliverAgentReply(BotAdapter adapter, BotMessage msg, AgentReply reply, String progressId) {
+        for (String chunk : reply.chunks()) {
+            adapter.reply(msg, chunk);
+        }
+        AgentCard card = reply.card();
+        boolean cardDelivered = card != null && deliverCard(adapter, msg, card, progressId);
+        String text = reply.text();
+        if (text != null && !text.isBlank() && !cardDelivered) {
+            adapter.reply(msg, truncate(text));
+        }
+        if (text == null && card == null && reply.chunks().isEmpty()) {
+            adapter.reply(msg, "（本轮没有可展示的内容）");
+        }
+    }
+
+    /** 优先原地更新进度卡；失败或没有进度卡则发新卡。返回 false = 卡片不可用（调用方回落文本）。 */
+    private boolean deliverCard(BotAdapter adapter, BotMessage msg, AgentCard card, String progressId) {
+        if (progressId != null) {
+            try {
+                adapter.updateCard(progressId, card);
+                return true;
+            } catch (Exception e) {
+                log.warn("卡片更新失败，改发新卡: messageId={} err={}", progressId, e.getMessage());
+            }
+        }
+        try {
+            adapter.replyCard(msg, card);
+            return true;
+        } catch (Exception e) {
+            log.warn("卡片发送失败，回落文本: channel={} err={}", msg.channel(), e.getMessage());
+            return false;
+        }
+    }
+
+    /** 智能体异常时把进度卡收敛为失败态，避免永久「正在处理…」（FR-26）。 */
+    private void failProgressCard(BotAdapter adapter, String progressId) {
+        if (adapter == null || progressId == null) {
+            return;
+        }
+        try {
+            adapter.updateCard(progressId, AgentCard.of("智能体处理失败", AgentCard.DANGER,
+                    "处理失败，请稍后重试或到平台查看日志。"));
+        } catch (Exception e) {
+            log.warn("失败态卡片更新失败: messageId={} err={}", progressId, e.getMessage());
+        }
+    }
+
+    private static AgentCard progressCard() {
+        return AgentCard.of("Dev-Mind 智能体", AgentCard.INFO, "正在处理，请稍候…");
+    }
+
+    private static String plainTextOf(AgentReply reply, String fallback) {
+        return reply == null ? fallback : reply.plainText();
+    }
+
+    /** bot → copilot 请求装配（bot 是唯一把 BotMessage 翻译成 AgentRequest 的地方）。 */
+    private AgentRequest agentRequest(BotMessage msg, BotBindingEntity binding, String text) {
+        java.util.Optional<String> personal = resolvePersonal(msg);
+        BotChannelConfigProvider cc = channelConfigs.get(msg.channel());
+        return new AgentRequest(msg.channel(), msg.chatType(), msg.externalChatId(), msg.senderId(),
+                actorOf(msg, binding), personal.orElse(null),
+                cc != null && cc.supportsIdentity(), text,
+                binding.getProjectId(), projectNameOf(binding.getProjectId()),
+                msg.messageId(), msg.eventId());
+    }
+
+    /** 默认项目名（链接展示用）；项目不存在/查询失败按无处理，不影响本轮。 */
+    private String projectNameOf(String projectId) {
+        if (projectId == null || projectId.isBlank()) {
+            return null;
+        }
+        try {
+            return projectService.get(projectId).name();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * /cancel [短码]（CAP-76 FR-16）：无参先取消 CAP-75 暂存；没有暂存再取消 sender 的
+     * copilot 待确认单。带短码只查 copilot（任何风险），不碰 CAP-75 暂存。
+     */
+    private String cancelCommand(BotMessage msg, BotBindingEntity binding, String args) {
+        String code = args == null ? "" : args.trim();
+        AgentGateway gateway = gatewayProvider.getIfAvailable();
+        boolean enabled = gateway != null && gateway.enabled();
+        if (code.isEmpty()) {
+            if (pendingConfirms.removeFresh(pendingKey(msg))) {
+                return "已取消，操作未执行";
+            }
+            if (!enabled) {
+                return "没有待取消的确认单";
+            }
+            return plainTextOf(gateway.cancel(agentRequest(msg, binding, "/cancel"), null),
+                    "没有待取消的确认单");
+        }
+        if (!enabled) {
+            return "智能体未启用，无法按短码取消确认单";
+        }
+        return plainTextOf(gateway.cancel(agentRequest(msg, binding, "/cancel " + code), code),
+                "取消请求已处理");
+    }
+
+    // ---------------- 卡片回调（CAP-76 FR-24） ----------------
+
+    @Override
+    public void onCardAction(BotCardAction action) {
+        if (action == null || action.channel() == null || action.externalChatId() == null
+                || action.value() == null) {
+            return;
+        }
+        String kind = String.valueOf(action.value().get("devmind"));
+        if (!"copilot_confirm".equals(kind) && !"copilot_cancel".equals(kind)) {
+            // 非本能力卡片：静默忽略，不报错、不落审计（FR-24）
+            log.debug("忽略非智能体卡片回调: channel={} value={}", action.channel(), action.value());
+            return;
+        }
+        if (!dedup.markIfFirst(action.channel(), action.eventId())) {
+            log.info("bot 卡片事件去重丢弃: channel={} eventId={}", action.channel(), action.eventId());
+            return;
+        }
+        botExecutor.execute(() -> dispatchCardAction(action, kind));
+    }
+
+    /**
+     * 卡片回调（botExecutor 内）：身份链实时重解析后转发 {@link AgentGateway#onCardAction}；
+     * 结果优先原地更新被点击的卡片，更新失败回文本。
+     */
+    private void dispatchCardAction(BotCardAction action, String kind) {
+        BotMessage origin = cardMessage(action);
+        try {
+            BotBindingEntity binding = findOrCreateBinding(origin);
+            String actor = actorOf(origin, binding);
+            SecurityContextHolder.getContext().setAuthentication(
+                    new UsernamePasswordAuthenticationToken(
+                            new DevMindPrincipal(actor, "USER"), null, List.of()));
+            AgentGateway gateway = gatewayProvider.getIfAvailable();
+            if (gateway == null || !gateway.enabled()) {
+                replyToCardAction(action, "智能体未启用");
+                return;
+            }
+            Object rawId = action.value().get("id");
+            if (rawId == null || String.valueOf(rawId).isBlank()) {
+                replyToCardAction(action, "卡片操作缺少确认单编号，请重新发起");
+                return;
+            }
+            java.util.Optional<String> personal = resolvePersonal(action.channel(), action.senderId());
+            BotChannelConfigProvider cc = channelConfigs.get(action.channel());
+            AgentCardAction cardAction = new AgentCardAction(
+                    "copilot_confirm".equals(kind) ? AgentCardButton.CONFIRM : AgentCardButton.CANCEL,
+                    String.valueOf(rawId), action.channel(), action.externalChatId(),
+                    action.senderId(), action.eventId(), actor, personal.orElse(null),
+                    cc != null && cc.supportsIdentity());
+            AgentReply reply = gateway.onCardAction(cardAction);
+            deliverCardActionResult(action, origin, reply);
+        } catch (Exception e) {
+            log.error("卡片回调处理失败: channel={} eventId={} err={}",
+                    action.channel(), action.eventId(), e.getMessage(), e);
+            replyToCardAction(action, "操作失败，请稍后再试或到平台查看确认单状态");
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+    }
+
+    private void deliverCardActionResult(BotCardAction action, BotMessage origin, AgentReply reply) {
+        if (reply == null) {
+            replyToCardAction(action, "操作已处理");
+            return;
+        }
+        BotAdapter adapter = adapterOf(action.channel());
+        if (adapter == null) {
+            return;
+        }
+        if (reply.card() != null && action.messageId() != null) {
+            try {
+                adapter.updateCard(action.messageId(), reply.card());
+                return;
+            } catch (Exception e) {
+                log.warn("卡片结果更新失败，回落文本: messageId={} err={}",
+                        action.messageId(), e.getMessage());
+            }
+        }
+        try {
+            adapter.reply(origin, truncate(reply.plainText()));
+        } catch (Exception e) {
+            log.error("卡片结果回推失败: channel={} err={}", action.channel(), e.getMessage(), e);
+        }
+    }
+
+    private void replyToCardAction(BotCardAction action, String text) {
+        BotAdapter adapter = adapterOf(action.channel());
+        if (adapter == null) {
+            return;
+        }
+        try {
+            adapter.reply(cardMessage(action), truncate(text));
+        } catch (Exception e) {
+            log.error("卡片提示回推失败: channel={} err={}", action.channel(), e.getMessage(), e);
+        }
+    }
+
+    /** 卡片回调 → BotMessage 投影（仅用于身份链与适配器回推，正文为空）。 */
+    private static BotMessage cardMessage(BotCardAction action) {
+        return new BotMessage(action.channel(), action.externalChatId(), action.chatType(),
+                action.senderId(), "", false, action.messageId(), action.eventId());
+    }
+
     // ---------------- 问答 ----------------
 
-    private String newChat(BotBindingEntity binding) {
+    private String newChat(BotMessage msg, BotBindingEntity binding) {
         binding.setChatSessionId(null);
         binding.touch();
         bindingRepo.save(binding);
+        AgentGateway gateway = gatewayProvider.getIfAvailable();
+        if (gateway != null && gateway.enabled()) {
+            try {
+                gateway.reset(agentRequest(msg, binding, "/new"));
+            } catch (Exception e) {
+                log.warn("智能体会话重置失败: channel={} err={}", msg.channel(), e.getMessage());
+            }
+        }
         return "已重开问答，下一条消息起新上下文";
     }
 
@@ -697,7 +989,7 @@ public class BotRouterService implements BotMessageHandler {
         if (!images.isEmpty()) {
             sb.append("\n（附 ").append(images.size()).append(" 张需求截图，见下）");
         }
-        return new RouteReply(sb.toString(), images);
+        return new RouteReply(sb.toString(), images, false);
     }
 
     /**

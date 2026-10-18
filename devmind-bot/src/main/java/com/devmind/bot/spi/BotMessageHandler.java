@@ -7,4 +7,11 @@ package com.devmind.bot.spi;
 public interface BotMessageHandler {
 
     void onMessage(BotMessage message);
+
+    /**
+     * 卡片按钮回调（CAP-76 FR-24）：默认 no-op，既有实现零改动。
+     * 与 onMessage 同约定：必须快速返回（去重后投递异步执行器，3s ACK 由事件线程返回）。
+     */
+    default void onCardAction(BotCardAction action) {
+    }
 }

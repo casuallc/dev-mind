@@ -179,8 +179,8 @@ class BotRouterServiceTest {
         router = new BotRouterService(bindingRepo, interactionRepo, chatManager, sessionManager,
                 projectService, requirementService, workItemService, buildService,
                 deploymentService, releaseService, watchService, props, provider,
-                attachmentProvider(), attachmentService, designService, documentService,
-                List.of());
+                emptyGatewayProvider(), attachmentProvider(), attachmentService, designService,
+                documentService, List.of());
         registryRef.set(new BotAdapterRegistry(List.of(adapter), router));
     }
 
@@ -189,6 +189,14 @@ class BotRouterServiceTest {
     private ObjectProvider<AttachmentContentResolver> attachmentProvider() {
         ObjectProvider<AttachmentContentResolver> p = mock(ObjectProvider.class);
         when(p.getIfAvailable()).thenAnswer(inv -> attachmentResolverRef.get());
+        return p;
+    }
+
+    /** CAP-76：默认无智能体（裸文本回落 CAP-75 问答）。 */
+    @SuppressWarnings("unchecked")
+    private static ObjectProvider<com.devmind.common.agent.gateway.AgentGateway> emptyGatewayProvider() {
+        ObjectProvider<com.devmind.common.agent.gateway.AgentGateway> p = mock(ObjectProvider.class);
+        when(p.getIfAvailable()).thenReturn(null);
         return p;
     }
 
@@ -1257,8 +1265,8 @@ class BotRouterServiceTest {
         feishuRouter = new BotRouterService(bindingRepo, interactionRepo, chatManager,
                 sessionManager, projectService, requirementService, workItemService,
                 buildService, deploymentService, releaseService, watchService, props, provider,
-                attachmentProvider(), attachmentService, designService, documentService,
-                List.of(identityConfig));
+                emptyGatewayProvider(), attachmentProvider(), attachmentService, designService,
+                documentService, List.of(identityConfig));
         registryRef.set(new BotAdapterRegistry(List.of(feishuAdapter), feishuRouter));
     }
 

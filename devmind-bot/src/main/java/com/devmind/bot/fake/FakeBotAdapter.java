@@ -1,10 +1,13 @@
 package com.devmind.bot.fake;
 
 import com.devmind.bot.spi.BotAdapter;
+import com.devmind.bot.spi.BotCardAction;
 import com.devmind.bot.spi.BotMessage;
 import com.devmind.bot.spi.BotMessageHandler;
+import com.devmind.common.agent.gateway.AgentCard;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
@@ -31,6 +34,21 @@ public class FakeBotAdapter implements BotAdapter {
     private final List<ImageReply> images = new CopyOnWriteArrayList<>();
     /** M5：入站图片下载结果（默认一张合法 PNG 魔数头；null = 平台不支持收图）。 */
     private volatile byte[] downloadResult = {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+
+    /**
+     * CAP-76：卡片出站捕获。
+     *
+     * @param kind      SEND / REPLY / UPDATE
+     * @param messageId 卡片消息 id（SEND/REPLY 为返回的新 id，UPDATE 为被更新 id）
+     * @param buttons   按钮数
+     */
+    public record CardReply(String kind, String externalChatId, String messageId, String title,
+                            String template, String markdown, int buttons, boolean footer,
+                            long at) {
+    }
+
+    private final List<CardReply> cards = new CopyOnWriteArrayList<>();
+    private final AtomicInteger cardSeq = new AtomicInteger();
 
     @Override
     public String code() {
@@ -69,6 +87,54 @@ public class FakeBotAdapter implements BotAdapter {
         pushes.add(new Reply(externalChatId, text, System.currentTimeMillis()));
     }
 
+    // ---------------- CAP-76 卡片 ----------------
+
+    @Override
+    public boolean supportsCard() {
+        return true;
+    }
+
+    @Override
+    public String replyCard(BotMessage origin, AgentCard card) {
+        String id = nextCardId();
+        cards.add(cardOf("REPLY", origin.externalChatId(), id, card));
+        return id;
+    }
+
+    @Override
+    public void updateCard(String messageId, AgentCard card) {
+        cards.add(cardOf("UPDATE", null, messageId, card));
+    }
+
+    @Override
+    public void sendCard(String externalChatId, AgentCard card) {
+        cards.add(cardOf("SEND", externalChatId, nextCardId(), card));
+    }
+
+    private String nextCardId() {
+        return "fake-card-" + cardSeq.incrementAndGet();
+    }
+
+    private static CardReply cardOf(String kind, String chatId, String messageId, AgentCard card) {
+        return new CardReply(kind, chatId, messageId, card.title(), card.template(),
+                card.markdown(), card.buttons().size(),
+                card.footer() != null && !card.footer().isBlank(),
+                System.currentTimeMillis());
+    }
+
+    public List<CardReply> cards() {
+        return List.copyOf(cards);
+    }
+
+    /** 注入一次卡片按钮回调（CAP-76 FR-24）。 */
+    public void emitCardAction(BotCardAction action) {
+        BotMessageHandler h = handler;
+        if (h == null) {
+            throw new IllegalStateException("fake 适配器未启动");
+        }
+        h.onCardAction(action);
+    }
+
     /** 注入一条入站消息（同步走底座入口；业务仍在底座异步线程）。 */
     public void emit(BotMessage msg) {
         BotMessageHandler h = handler;
@@ -99,5 +165,6 @@ public class FakeBotAdapter implements BotAdapter {
         replies.clear();
         pushes.clear();
         images.clear();
+        cards.clear();
     }
 }
