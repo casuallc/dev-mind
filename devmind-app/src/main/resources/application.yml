@@ -62,6 +62,17 @@ devmind:
     stream-flush-ms: 120           # 增量合并窗口：攒够时间或字数才发一条 text_delta
     stream-flush-chars: 24
     answer-max-chars: 100000       # 单轮回答上限，超出截断并在 result 里标 truncated
+  copilot:                         # CAP-76 平台智能体网关（此处只列常调项；其余键用代码默认值）
+    enabled: false                 # 首次部署默认关闭；配置 CHAT 端点并在 /admin/copilot 健康检查通过后开启
+    endpoint-id: ""                # 空=平台默认 CHAT 端点
+    tool-mode: auto                # native | json | auto（auto=native 不支持工具时自动降级 json）
+    max-steps: 8                   # 单轮最多模型回调轮数
+    max-writes-per-turn: 3         # 单轮最多生成确认单数（超出要求用户分次）
+    turn-timeout-seconds: 180      # 单轮总时限，超时中止并回执
+    confirm-ttl-minutes: 10        # 确认单有效期
+    action-sweep-cron: "0 * * * * *"       # 分钟级状态收敛（PENDING→EXPIRED / 中断 EXECUTING→FAILED）；空=关闭
+    cleanup-cron: "0 40 3 * * *"           # 每日审计保留期清理
+    audit-retention-days: 180
   attachment:                      # CAP-32 公共附件管理
     root-dir: ""                   # 空=${user.dir}/data/attachments
     max-size-mb: 20                # 单附件上限（同时受 spring.servlet.multipart 64MB 约束）

@@ -90,6 +90,8 @@ public class SecurityConfig {
                                 "/api/admin/user-platform-accounts/**").hasRole("ADMIN")
                         // CAP-75 FR-14：机器人运维端点（交互日志/群绑定）仅 ADMIN
                         .requestMatchers("/api/bot/admin", "/api/bot/admin/**").hasRole("ADMIN")
+                        // CAP-76 FR-30：智能体运维端点（工具目录/审计/确认单兜底取消/健康）仅 ADMIN
+                        .requestMatchers("/api/copilot/admin", "/api/copilot/admin/**").hasRole("ADMIN")
                         // CAP-48：模型端点（含凭据、决定全平台索引行为）的写操作仅 ADMIN；读列表走下方全认证
                         .requestMatchers(HttpMethod.POST, "/api/model-endpoints", "/api/model-endpoints/**")
                         .hasRole("ADMIN")

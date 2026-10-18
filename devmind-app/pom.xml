@@ -70,6 +70,11 @@
             <artifactId>devmind-bot</artifactId>
         </dependency>
         <dependency>
+            <!-- CAP-76 平台智能体网关：工具注册表 + 模型循环 + 确认单 -->
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-copilot</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.devmind</groupId>
             <artifactId>devmind-feishu-bot</artifactId>
         </dependency>
