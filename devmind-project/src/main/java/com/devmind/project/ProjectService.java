@@ -183,6 +183,22 @@ public class ProjectService {
         return entities.stream().filter(e -> kindMatches(e, kind)).map(this::toView).toList();
     }
 
+    /**
+     * CAP-76 工具用：在 {@link #list(String, String)} 基础上做 keyword 过滤与 limit 截断。
+     * 项目数量级小（几十），内存过滤可接受（§6.3）。
+     */
+    public List<ProjectView> list(String status, String kind, String keyword, int limit) {
+        String kw = keyword == null ? null : keyword.trim().toLowerCase(java.util.Locale.ROOT);
+        int cap = Math.min(Math.max(limit, 1), 50);
+        return list(status, kind).stream()
+                .filter(p -> kw == null || kw.isEmpty()
+                        || (p.name() != null && p.name().toLowerCase(java.util.Locale.ROOT).contains(kw))
+                        || (p.tags() != null && p.tags().stream()
+                        .anyMatch(t -> t != null && t.toLowerCase(java.util.Locale.ROOT).contains(kw))))
+                .limit(cap)
+                .toList();
+    }
+
     private static boolean kindMatches(ProjectEntity e, String kind) {
         if (kind == null || kind.isBlank()) {
             return !ProjectEntity.KIND_WORKLOG.equals(e.getKind());
