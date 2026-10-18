@@ -144,7 +144,8 @@ spring-boot-starter-web / data-jpa / jackson-databind
     **personalActor（个人绑定命中结果，空 = 未绑定）** / **identitySupported（该渠道是否支持
     个人身份映射，由 bot 按渠道能力填入）** / text / 默认项目 id+名称 /
     messageId / eventId；
-  - `AgentReply`：text + 可选卡片 `AgentCard`；
+  - `AgentReply`：text + 可选卡片 `AgentCard` + 可选 `chunks`（危险操作完整预览的分段长文本，
+    非空时 bot 逐段原样发送、不得套 `reply-max-chars` 截断）；
   - `AgentCard`：title / template（INFO·SUCCESS·WARNING·DANGER）/ markdown / buttons / footer，
     带 `toPlainText()` 供纯文本渠道降级，**不含任何平台专有 JSON**；
   - `AgentCardButton`：label / operation（CONFIRM·CANCEL·LINK）/ actionId / url；
