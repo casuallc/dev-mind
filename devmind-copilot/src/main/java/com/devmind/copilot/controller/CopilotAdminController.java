@@ -214,8 +214,8 @@ public class CopilotAdminController {
         return out;
     }
 
-    /** FR-32 健康检查：不调用模型，只报告装配/配置/积压。 */
-    @GetMapping("/admin/health")
+    /** FR-32 健康检查：`/health` 登录用户可读（bot 自检），`/admin/health` 供运维页复用同一实现。 */
+    @GetMapping({"/health", "/admin/health"})
     public Map<String, Object> health() {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("enabled", props.isEnabled());

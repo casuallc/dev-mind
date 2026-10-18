@@ -606,6 +606,11 @@ def scenario_9_admin_rbac():
     check("DEVELOPER 访问管理 API 403", status == 403)
     status, _ = api("GET", "/copilot/admin/health", token=TOKEN)
     check("ADMIN 健康检查 200", status == 200)
+    # FR-32：/copilot/health 登录用户可读（非 ADMIN）
+    status, body = api("GET", "/copilot/health", token=dev_token)
+    check("DEVELOPER 健康检查 200", status == 200 and isinstance(body, dict), f"{status} {body}")
+    if isinstance(body, dict):
+        check("健康检查含开关/工具数", "enabled" in body and int(body.get("tools") or 0) > 0, str(body))
 
 
 def scenario_3_viewer_denied():
