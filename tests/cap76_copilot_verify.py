@@ -57,7 +57,7 @@ U2 = "u2"
 passed, failed = [], []
 TOKEN = None
 PID = None          # 项目 id
-REQ1_ID = None      # REQ-1 的 id（假模型回填给 update_requirement_status）
+REQ1_ID = None      # REQ-1 的 id（仅断言用；假模型按用户可见编号 REQ-1 调用工具）
 _event_seq = 0
 
 
@@ -65,7 +65,7 @@ _event_seq = 0
 # 假 OpenAI 服务（tools/tool_calls + SSE）
 # ----------------------------------------------------------------------
 
-MOCK = {"requirementId": "", "requests": []}
+MOCK = {"requests": []}
 
 
 def _mock_decision(messages):
@@ -76,7 +76,7 @@ def _mock_decision(messages):
     text = str(last.get("content") or "")
     if "标记为完成" in text:
         return ("tool", "update_requirement_status",
-                {"requirementId": MOCK["requirementId"], "status": "DONE"})
+                {"requirementId": "REQ-1", "status": "DONE"})
     if "REQ-1 什么状态" in text:
         return ("tool", "get_requirement", {"seq": 1})
     if "建一个需求" in text:
@@ -131,9 +131,7 @@ class MockHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
         if path == "/__config":
-            body = self._body()
-            if "requirementId" in body:
-                MOCK["requirementId"] = body["requirementId"]
+            self._body()
             self._send(200, {"ok": True})
             return
         if path == "/__reset":
@@ -679,7 +677,6 @@ def main():
         REQ1_ID = (requirement or {}).get("id")
         check("项目与 REQ-1 已建", bool(PID) and (requirement or {}).get("code") == "REQ-1",
               f"{PID} {requirement}")
-        MOCK["requirementId"] = REQ1_ID
         _, endpoint = api("POST", "/model-endpoints",
                           {"kind": "CHAT", "name": f"CAP76-E2E-对话-{int(time.time())}",
                            "provider": "openai-compatible", "baseUrl": MOCK_BASE,
