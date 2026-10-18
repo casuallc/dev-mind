@@ -760,7 +760,7 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 | `list_documents` | `projectId?`, `keyword?`, `limit` | 文档列表（keyword 走 `search`，两者同时给时先搜后按项目过滤） |
 | `get_document` | `docId` | 文档元数据 + 最新版本摘要 |
 | `list_agent_nodes` | `limit` | 节点 id/名称/在线/默认（不泄露 token） |
-| `get_usage_summary` | `from?`, `to?`, `userId?`（非 ADMIN 强制本人）, `model?` | token/成本聚合（M4 交付；`usage_records` 无 project 列，不提供 projectId） |
+| `get_usage_summary` | `days?`（默认 7，1~90）, `userId?`（仅 ADMIN；缺省全平台）, `model?` | token/成本聚合（M4 交付；非 ADMIN 强制本人；`usage_records` 无 project 列，不提供 projectId） |
 
 > `list_agent_nodes` 暴露节点名称/在线状态，`minRole` 定为 `DEVELOPER`（不对外泄露 token 与主机细节）；
 > `list_projects` / `get_usage_summary` 的可见范围在 CAP-62 落地后由 `ToolAccessPolicy` 收紧。
@@ -911,40 +911,42 @@ devmind:
 
 ### M1 只读智能体（可用）
 
-- [ ] `devmind-copilot` 模块、common 工具/网关 SPI、ToolRegistry、OpenAPI 导出、
+- [x] `devmind-copilot` 模块、common 工具/网关 SPI、ToolRegistry、OpenAPI 导出、
       审计表（turns/tool_calls）与会话/消息表；`copilot_actions` 随 M2
-- [ ] 只读工具随各自能力模块交付（project/session/build/deploy/release/knowledge/docs/agent）
-- [ ] `OpenAiCompatToolChat`（native + json + auto）
-- [ ] AgentGateway 循环、历史、预算、步数、限流、kill switch
-- [ ] 只读工具：项目/需求/工作项/设计/会话/构建/部署/发版/环境/知识/文档/节点
-- [ ] bot 裸文本路由接入，文本回复
-- [ ] 管理 API（工具目录/turns/tool_calls）+ 前端审计页
-- [ ] 验收：飞书自然语言查"REQ-12 现在什么状态""最近一次构建为什么失败"
+- [x] 只读工具随各自能力模块交付（project/session/build/deploy/release/knowledge/docs/agent）
+- [x] `OpenAiCompatToolChat`（native + json + auto）
+- [x] AgentGateway 循环、历史、预算、步数、限流、kill switch
+- [x] 只读工具：项目/需求/工作项/设计/会话/构建/部署/发版/环境/知识/文档/节点
+- [x] bot 裸文本路由接入，文本回复
+- [x] 管理 API（工具目录/turns/tool_calls）+ 前端审计页
+- [x] 验收：飞书自然语言查"REQ-12 现在什么状态""最近一次构建为什么失败"
+      （E2E 以 mock 模型/飞书覆盖；真机流程见 M3 末项）
 
 ### M2 写操作与确认
 
-- [ ] `copilot_actions` + 确认单状态机 + 原子消费 + 过期
-- [ ] 文本确认/取消、`/cancel [短码]`、短码、多写动作
-- [ ] 写工具：需求/工作项创建与状态、起停会话、输入（DANGEROUS）、构建
+- [x] `copilot_actions` + 确认单状态机 + 原子消费 + 过期
+- [x] 文本确认/取消、`/cancel [短码]`、短码、多写动作
+- [x] 写工具：需求/工作项创建与状态、起停会话、输入（DANGEROUS）、构建
       （部署/回滚/发版写工具本期不交付）
-- [ ] 权限：角色实时解析、个人绑定门禁、项目校验、动态风险
-- [ ] 验收：写操作未确认不落库；他人不能确认；重复点击只执行一次；过期失败可见
+- [x] 权限：角色实时解析、个人绑定门禁、项目校验、动态风险
+- [x] 验收：写操作未确认不落库；他人不能确认；重复点击只执行一次；过期失败可见
 
 ### M3 飞书交互卡片
 
-- [ ] `FeishuApiClient.replyCard/sendCard/updateCard`
-- [ ] `BotAdapter` 卡片扩展 + `BotCardAction` + `onP2CardActionTrigger`
-- [ ] 进度卡/答案卡/确认卡/结果卡；3s ACK；卡片失败回落文本
+- [x] `FeishuApiClient.replyCard/sendCard/updateCard`
+- [x] `BotAdapter` 卡片扩展 + `BotCardAction` + `onP2CardActionTrigger`
+- [x] 进度卡/答案卡/确认卡/结果卡；3s ACK；卡片失败回落文本（E2E 以 mock 飞书覆盖）
 - [ ] 真机验收：群聊 @机器人 → 卡片；WRITE 点确认 → 原地更新；
       DANGEROUS 无确认按钮且必须文本短码
 
 ### M4 运维与增强
 
-- [ ] 前端 `/admin/copilot` 完整页；机器人运维页"智能体"Tab
-- [ ] 保留期清理任务（含事务）
-- [ ] 文档新版本/知识提案等工具；用量工具
-- [ ] 管理端确认单强制取消；健康端点
-- [ ] JSON 模式在真实 vLLM 端点上的回归
+- [x] 前端 `/admin/copilot` 完整页；机器人运维页"智能体"Tab
+- [x] 保留期清理任务（含事务）
+- [x] 用量工具（`get_usage_summary`，非 ADMIN 强制本人）
+- [ ] 文档新版本/知识提案等工具（延后，措辞需先定稿）
+- [x] 管理端确认单强制取消；健康端点（`/copilot/health` 登录可读）
+- [ ] JSON 模式在真实 vLLM 端点上的回归（需可用端点，本机/CI 无）
 
 ### M5 多入口与主动能力（展望）
 
