@@ -59,3 +59,38 @@ export interface BotInteractionPage {
   page: number
   size: number
 }
+
+/** CAP-76 智能体运行时配置只读视图（/api/copilot/admin/config，仅 ADMIN） */
+export interface CopilotConfigView {
+  enabled: boolean
+  endpointId?: string | null
+  toolMode: string
+  maxSteps: number
+  maxToolCallsPerStep: number
+  maxWritesPerTurn: number
+  turnTimeoutSeconds: number
+  modelTimeoutSeconds: number
+  toolTimeoutSeconds: number
+  confirmTtlMinutes: number
+  confirmPreviewChunkChars: number
+  confirmPreviewMaxChunks: number
+  maxTurnsPerMinute: number
+  maxConcurrentModel: number
+  replyProgressCard: boolean
+  allowDefaultActorWrites: boolean
+  auditRetentionDays: number
+  actionSweepCron?: string | null
+  cleanupCron?: string | null
+}
+
+/** CAP-76 智能体健康检查（/api/copilot/admin/health） */
+export interface CopilotHealthView {
+  enabled: boolean
+  tools: number
+  policyPresent: boolean
+  endpointConfigured: boolean
+  endpointFailure?: string | null
+  pendingActions: number
+  pendingToolConfirmations: number
+  executingActions: number
+}

@@ -11,6 +11,7 @@ import {
   FileTextOutlined,
   FolderOpenOutlined,
   ForkOutlined,
+  InteractionOutlined,
   FolderOutlined,
   KeyOutlined,
   PaperClipOutlined,
@@ -78,6 +79,7 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
     children: [
       { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
       { key: '/admin/bot', icon: <CommentOutlined />, label: '机器人运维' },
+      { key: '/admin/copilot', icon: <InteractionOutlined />, label: '智能体运维' },
       { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
       { key: '/admin/models', icon: <ThunderboltOutlined />, label: '模型接入' },
       { key: '/admin/users', icon: <SafetyCertificateOutlined />, label: '用户管理' },

@@ -1,5 +1,11 @@
 import { api } from '../../shared/api/client'
-import type { AdminPlatformAccount, BotBinding, BotInteractionPage } from './types'
+import type {
+  AdminPlatformAccount,
+  BotBinding,
+  BotInteractionPage,
+  CopilotConfigView,
+  CopilotHealthView,
+} from './types'
 
 // ---- CAP-75 M3 机器人运维端点（/api/bot/admin/**，仅 ADMIN） ----
 
@@ -35,4 +41,14 @@ export function listUserPlatformAccounts(integrationType: string): Promise<Admin
 
 export function adminUnbindPlatformAccount(id: number): Promise<void> {
   return api.del<void>(`/admin/user-platform-accounts/${id}`)
+}
+
+// ---- CAP-76 智能体网关运维（/api/copilot/admin/**，仅 ADMIN；配置只读） ----
+
+export function getCopilotConfig(): Promise<CopilotConfigView> {
+  return api.get<CopilotConfigView>('/copilot/admin/config')
+}
+
+export function getCopilotHealth(): Promise<CopilotHealthView> {
+  return api.get<CopilotHealthView>('/copilot/admin/health')
 }

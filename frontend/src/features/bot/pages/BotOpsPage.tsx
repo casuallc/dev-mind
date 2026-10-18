@@ -5,16 +5,17 @@ import { ReloadOutlined } from '@ant-design/icons'
 import InteractionsPanel from '../components/InteractionsPanel'
 import BindingsPanel from '../components/BindingsPanel'
 import UserMappingsPanel from '../components/UserMappingsPanel'
+import CopilotPanel from '../components/CopilotPanel'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 
 /**
  * CAP-75 M3 机器人运维页（仅 ADMIN）：飞书等 IM 机器人的运行观测与治理。
- * 页内 Segmented 三视图（随 URL ?view=… 走，刷新后停在原页签）——
+ * 页内 Segmented 视图（随 URL ?view=… 走，刷新后停在原页签）——
  * 「交互日志」（全量留痕，含门禁拒绝/去重）、「群绑定」（会话→项目/问答，可解绑）、
- * 「用户映射」（飞书 open_id ↔ 平台用户，可解绑）。
+ * 「用户映射」（飞书 open_id ↔ 平台用户，可解绑）、「智能体」（CAP-76 网关运行时配置只读视图）。
  */
-type BotView = 'interactions' | 'bindings' | 'mappings'
-const VIEWS: BotView[] = ['interactions', 'bindings', 'mappings']
+type BotView = 'interactions' | 'bindings' | 'mappings' | 'copilot'
+const VIEWS: BotView[] = ['interactions', 'bindings', 'mappings', 'copilot']
 
 export default function BotOpsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -39,6 +40,7 @@ export default function BotOpsPage() {
               { value: 'interactions', label: '交互日志' },
               { value: 'bindings', label: '群绑定' },
               { value: 'mappings', label: '用户映射' },
+              { value: 'copilot', label: '智能体' },
             ]}
           />
         </Space>
@@ -52,6 +54,7 @@ export default function BotOpsPage() {
       {view === 'interactions' && <InteractionsPanel refreshTick={refreshTick} />}
       {view === 'bindings' && <BindingsPanel refreshTick={refreshTick} />}
       {view === 'mappings' && <UserMappingsPanel refreshTick={refreshTick} />}
+      {view === 'copilot' && <CopilotPanel refreshTick={refreshTick} />}
     </Card>
   )
 }

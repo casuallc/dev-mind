@@ -42,6 +42,7 @@ import ClassifyPackagesPage from '../features/classify/pages/ClassifyPackagesPag
 import ClassifyPlaygroundPage from '../features/classify/pages/ClassifyPlaygroundPage'
 import ApiKeysPage from '../features/open-api/pages/ApiKeysPage'
 import BotOpsPage from '../features/bot/pages/BotOpsPage'
+import CopilotOpsPage from '../features/copilot/pages/CopilotOpsPage'
 import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
 import AgentNodeDetailPage from '../features/agent/pages/AgentNodeDetailPage'
 import NodeFilesPage from '../features/agent/pages/NodeFilesPage'
@@ -201,6 +202,8 @@ export default function App() {
           <Route path="/admin/keys" element={<ApiKeysPage />} />
           {/* CAP-75 M3 机器人运维（交互日志/群绑定/用户映射） */}
           <Route path="/admin/bot" element={<BotOpsPage />} />
+          {/* CAP-76 智能体运维（工具目录/对话审计/确认单） */}
+          <Route path="/admin/copilot" element={<CopilotOpsPage />} />
           {/* CAP-21 Agent 执行组：节点（页内含 Runner 包/出口规则/审计日志页签）/ 节点文件 */}
           <Route path="/admin/agent" element={<Navigate to="/admin/agent/nodes" replace />} />
           <Route path="/admin/agent/nodes" element={<AgentNodesPage />} />
