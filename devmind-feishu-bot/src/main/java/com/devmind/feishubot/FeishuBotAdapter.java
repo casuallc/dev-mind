@@ -1,12 +1,22 @@
 package com.devmind.feishubot;
 
 import com.devmind.bot.spi.BotAdapter;
+import com.devmind.bot.spi.BotCardAction;
 import com.devmind.bot.spi.BotChannelConfigProvider;
 import com.devmind.bot.spi.BotMessage;
 import com.devmind.bot.spi.BotMessageHandler;
+import com.devmind.common.agent.gateway.AgentCard;
+import com.devmind.common.agent.gateway.AgentCardButton;
 import com.devmind.integration.service.FeishuBotGateway;
 import com.devmind.integration.service.FeishuBotIdentityService;
 import com.lark.oapi.event.EventDispatcher;
+import com.lark.oapi.event.cardcallback.P2CardActionTriggerHandler;
+import com.lark.oapi.event.cardcallback.model.CallBackAction;
+import com.lark.oapi.event.cardcallback.model.CallBackContext;
+import com.lark.oapi.event.cardcallback.model.CallBackOperator;
+import com.lark.oapi.event.cardcallback.model.P2CardActionTrigger;
+import com.lark.oapi.event.cardcallback.model.P2CardActionTriggerData;
+import com.lark.oapi.event.cardcallback.model.P2CardActionTriggerResponse;
 import com.lark.oapi.service.im.ImService;
 import com.lark.oapi.service.im.v1.model.EventMessage;
 import com.lark.oapi.service.im.v1.model.EventSender;
@@ -18,6 +28,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * 飞书机器人适配器（CAP-75 FR-04/05）：长连接模式收 im.message.receive_v1 事件，
@@ -86,6 +98,14 @@ public class FeishuBotAdapter implements BotAdapter, BotChannelConfigProvider {
                     @Override
                     public void handle(P2MessageReceiveV1 event) {
                         onEvent(event, handler);
+                    }
+                })
+                // CAP-76 FR-24：卡片按钮回调（需在开放平台订阅 card.action.trigger 并重新发布版本）
+                .onP2CardActionTrigger(new P2CardActionTriggerHandler() {
+                    @Override
+                    public P2CardActionTriggerResponse handle(P2CardActionTrigger event) {
+                        onCardActionEvent(event, handler);
+                        return new P2CardActionTriggerResponse();
                     }
                 })
                 .build();
@@ -164,11 +184,148 @@ public class FeishuBotAdapter implements BotAdapter, BotChannelConfigProvider {
     /** CAP-75 FR-17：入站图片——按 image_key 拉字节（底座在 botExecutor 调用，不占事件窗口）。 */
     @Override
     public byte[] downloadImage(String imageKey) {
+        return requireHandle().api().downloadImage(imageKey);
+    }
+
+    // ---------------- CAP-76 FR-23：交互卡片 ----------------
+
+    @Override
+    public boolean supportsCard() {
+        return true;
+    }
+
+    @Override
+    public String replyCard(BotMessage origin, AgentCard card) {
+        String json = renderCard(card);
+        if (origin.messageId() != null && !origin.messageId().isBlank()) {
+            return requireHandle().api().replyCard(origin.messageId(), json);
+        }
+        return requireHandle().api().sendCard(origin.externalChatId(), "chat_id", json);
+    }
+
+    @Override
+    public void updateCard(String messageId, AgentCard card) {
+        if (messageId == null || messageId.isBlank()) {
+            throw new IllegalArgumentException("更新卡片缺少消息 id");
+        }
+        requireHandle().api().updateCard(messageId, renderCard(card));
+    }
+
+    @Override
+    public void sendCard(String externalChatId, AgentCard card) {
+        requireHandle().api().sendCard(externalChatId, "chat_id", renderCard(card));
+    }
+
+    private FeishuBotGateway.FeishuBotHandle requireHandle() {
         FeishuBotGateway.FeishuBotHandle h = handleOrNull();
         if (h == null) {
             throw new IllegalStateException("飞书机器人未启用（无启用的飞书集成）");
         }
-        return h.api().downloadImage(imageKey);
+        return h;
+    }
+
+    // ---------------- CAP-76 卡片渲染与回调归一化 ----------------
+
+    /** 中性卡片 → 飞书 interactive 卡片 JSON（2.0 之前 message card 结构，PATCH 可更新）。 */
+    static String renderCard(AgentCard card) {
+        ObjectNode root = MAPPER.createObjectNode();
+        // update_multi=true 是 PATCH /im/v1/messages/{id} 原地更新的前提
+        ObjectNode config = root.putObject("config");
+        config.put("wide_screen_mode", true);
+        config.put("update_multi", true);
+        ObjectNode header = root.putObject("header");
+        header.put("template", templateOf(card.template()));
+        ObjectNode title = header.putObject("title");
+        title.put("tag", "plain_text");
+        title.put("content", card.title() == null ? "" : card.title());
+        ArrayNode elements = root.putArray("elements");
+        if (!card.markdown().isBlank()) {
+            ObjectNode md = elements.addObject();
+            md.put("tag", "markdown");
+            md.put("content", card.markdown());
+        }
+        if (!card.buttons().isEmpty()) {
+            ObjectNode action = elements.addObject();
+            action.put("tag", "action");
+            ArrayNode actions = action.putArray("actions");
+            for (AgentCardButton b : card.buttons()) {
+                ObjectNode btn = actions.addObject();
+                btn.put("tag", "button");
+                ObjectNode text = btn.putObject("text");
+                text.put("tag", "plain_text");
+                text.put("content", b.label() == null || b.label().isBlank() ? "查看" : b.label());
+                if (b.isLink()) {
+                    btn.put("type", "default");
+                    btn.put("url", b.url() == null ? "" : b.url());
+                } else {
+                    btn.put("type", AgentCardButton.CANCEL.equals(b.operation())
+                            ? "default" : "primary");
+                    // value 只带操作与确认单 id；身份/会话一律以回调事件为准（FR-24）
+                    ObjectNode value = btn.putObject("value");
+                    value.put("devmind", AgentCardButton.CONFIRM.equals(b.operation())
+                            ? "copilot_confirm" : "copilot_cancel");
+                    value.put("id", b.actionId() == null ? "" : b.actionId());
+                }
+            }
+        }
+        if (card.footer() != null && !card.footer().isBlank()) {
+            ObjectNode note = elements.addObject();
+            note.put("tag", "note");
+            ObjectNode txt = note.putArray("elements").addObject();
+            txt.put("tag", "plain_text");
+            txt.put("content", card.footer());
+        }
+        return MAPPER.writeValueAsString(root);
+    }
+
+    private static String templateOf(String template) {
+        if (AgentCard.SUCCESS.equals(template)) {
+            return "green";
+        }
+        if (AgentCard.WARNING.equals(template)) {
+            return "orange";
+        }
+        if (AgentCard.DANGER.equals(template)) {
+            return "red";
+        }
+        return "blue";
+    }
+
+    /** 卡片回调入口（SDK 事件线程）：归一化后投递底座，异常必须兜住防 SDK 重推风暴。 */
+    private void onCardActionEvent(P2CardActionTrigger event, BotMessageHandler handler) {
+        try {
+            BotCardAction action = normalizeCardAction(event);
+            if (action != null) {
+                handler.onCardAction(action);
+            }
+        } catch (Exception e) {
+            log.error("飞书卡片回调处理失败: err={}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 飞书 card.action.trigger → BotCardAction。返回 null = 忽略（缺会话/动作/value）。
+     * 回调里没有 chat_type，chatType 置空（绑定已在消息阶段建立）。
+     */
+    static BotCardAction normalizeCardAction(P2CardActionTrigger event) {
+        if (event == null || event.getEvent() == null) {
+            return null;
+        }
+        P2CardActionTriggerData data = event.getEvent();
+        CallBackAction action = data.getAction();
+        if (action == null || action.getValue() == null) {
+            return null;
+        }
+        CallBackContext ctx = data.getContext();
+        if (ctx == null || ctx.getOpenChatId() == null || ctx.getOpenChatId().isBlank()) {
+            return null;
+        }
+        CallBackOperator operator = data.getOperator();
+        String senderId = operator == null || operator.getOpenId() == null
+                ? "" : operator.getOpenId();
+        String eventId = event.getHeader() == null ? null : event.getHeader().getEventId();
+        return new BotCardAction("feishu", ctx.getOpenChatId(), null, senderId,
+                ctx.getOpenMessageId(), eventId, action.getValue());
     }
 
     // ---------------- 事件归一化 ----------------

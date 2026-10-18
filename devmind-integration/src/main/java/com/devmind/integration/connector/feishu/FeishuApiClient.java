@@ -170,6 +170,48 @@ public class FeishuApiClient {
         ensureOk(resp, "发送图片消息");
     }
 
+    // ---------------- CAP-76：交互卡片 ----------------
+
+    /**
+     * 回复交互卡片（msg_type=interactive），返回新卡片消息 id（后续原地更新的锚点）。
+     * cardJson 为卡片 JSON（不含外层 content 包装）。
+     */
+    public String replyCard(String messageId, String cardJson) {
+        JsonNode resp = request("POST", "/open-apis/im/v1/messages/" + encode(messageId) + "/reply",
+                cardBody(null, cardJson), tenantToken());
+        ensureOk(resp, "回复卡片");
+        return resp.path("data").path("message_id").asText("");
+    }
+
+    /** 主动发交互卡片，返回卡片消息 id。 */
+    public String sendCard(String receiveId, String receiveIdType, String cardJson) {
+        JsonNode resp = request("POST",
+                "/open-apis/im/v1/messages?receive_id_type=" + encode(receiveIdType),
+                cardBody(receiveId, cardJson), tenantToken());
+        ensureOk(resp, "发送卡片");
+        return resp.path("data").path("message_id").asText("");
+    }
+
+    /** 原地更新卡片（PATCH /im/v1/messages/{id}，卡片需 update_multi=true）。 */
+    public void updateCard(String messageId, String cardJson) {
+        var body = mapper.createObjectNode();
+        body.put("content", cardJson);
+        JsonNode resp = request("PATCH", "/open-apis/im/v1/messages/" + encode(messageId),
+                mapper.writeValueAsString(body), tenantToken());
+        ensureOk(resp, "更新卡片");
+    }
+
+    /** 卡片消息体：content 是卡片 JSON 字符串本身（与 text 的内嵌 {"text":…} 不同）。 */
+    private String cardBody(String receiveId, String cardJson) {
+        var body = mapper.createObjectNode();
+        if (receiveId != null) {
+            body.put("receive_id", receiveId);
+        }
+        body.put("msg_type", "interactive");
+        body.put("content", cardJson);
+        return mapper.writeValueAsString(body);
+    }
+
     /** 图片消息体：与 textBody 同一契约——content 必须是内嵌 JSON 字符串。 */
     private String imageBody(String receiveId, String imageKey) {
         var body = mapper.createObjectNode();
