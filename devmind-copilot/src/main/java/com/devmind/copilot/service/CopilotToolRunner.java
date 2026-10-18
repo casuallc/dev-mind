@@ -18,6 +18,7 @@ import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
@@ -39,11 +40,19 @@ public class CopilotToolRunner {
     public ToolResult run(PlatformTool tool, ToolCall call, ToolContext ctx) {
         ToolSpec spec = tool.spec();
         int timeout = spec.timeoutSeconds() > 0 ? spec.timeoutSeconds() : props.getToolTimeoutSeconds();
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(
-                        new DevMindPrincipal(ctx.actor(), ctx.role()), null, List.of()));
+        // 身份必须合成在工具线程内：SecurityContextHolder 默认 THREADLOCAL 不跨线程，
+        // 只在调用线程设置会让 identity.currentActor() 在工具体里回退 local（按 actor 取数的工具读空）。
+        Authentication auth = new UsernamePasswordAuthenticationToken(
+                new DevMindPrincipal(ctx.actor(), ctx.role()), null, List.of());
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            Future<ToolResult> future = executor.submit(() -> tool.execute(call, ctx));
+            Future<ToolResult> future = executor.submit(() -> {
+                SecurityContextHolder.getContext().setAuthentication(auth);
+                try {
+                    return tool.execute(call, ctx);
+                } finally {
+                    SecurityContextHolder.clearContext();
+                }
+            });
             return future.get(timeout, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             // 超时不等于未执行：投递/构建类工具可能已受理，回执必须说明
@@ -56,8 +65,6 @@ public class CopilotToolRunner {
             return mapException(e.getCause());
         } catch (Exception e) {
             return mapException(e);
-        } finally {
-            SecurityContextHolder.clearContext();
         }
     }
 
