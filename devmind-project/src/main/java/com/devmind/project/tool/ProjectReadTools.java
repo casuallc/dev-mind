@@ -158,8 +158,8 @@ public class ProjectReadTools {
     @Bean
     public PlatformTool getRequirementTool() {
         ToolSpec spec = new ToolSpec("get_requirement", "查询需求详情",
-                "按 requirementId 或项目内编号 seq 查询需求详情，含状态、描述、工作项与设计摘要。"
-                        + "用户说「REQ-12」时用 seq=12（此时必须能确定 projectId）。",
+                "按 requirementId 或项目内编号查询需求详情，含状态、描述、工作项与设计摘要。"
+                        + "requirementId 可直接传展示编号（如 REQ-12），也可用 seq=12；用编号时必须能确定 projectId。",
                 """
                         {
                           "type": "object",
@@ -174,26 +174,14 @@ public class ProjectReadTools {
         return PlatformTool.of(spec, (call, ctx) -> {
             Map<String, Object> args = call.args();
             String requirementId = ToolText.str(args, "requirementId");
-            String projectId;
-            RequirementView view;
-            if (requirementId != null) {
-                RequirementEntity entity = requirements.requireById(requirementId);
-                projectId = entity.getProjectId();
-                view = requirements.get(projectId, requirementId);
-            } else {
-                Object seq = args.get("seq");
-                projectId = projectId(args, ctx);
-                if (projectId == null || !(seq instanceof Number n)) {
-                    return ToolResult.fail(ToolResult.INVALID_ARGUMENTS,
-                            "请提供 requirementId，或提供项目与项目内编号 seq（如 REQ-12 → seq=12）");
-                }
-                RequirementEntity entity = requirements.findByProjectSeq(projectId, n.longValue())
-                        .orElse(null);
-                if (entity == null) {
-                    return ToolResult.fail(ToolResult.NOT_FOUND, "该项目下不存在 REQ-" + n.longValue());
-                }
-                view = requirements.get(projectId, entity.getId());
+            Long seq = args.get("seq") instanceof Number n ? n.longValue() : null;
+            if (requirementId == null && seq == null) {
+                return ToolResult.fail(ToolResult.INVALID_ARGUMENTS,
+                        "请提供 requirementId（内部 id 或 REQ-12），或提供项目与项目内编号 seq");
             }
+            RequirementEntity entity = requirements.resolveRef(projectId(args, ctx), requirementId, seq);
+            String projectId = entity.getProjectId();
+            RequirementView view = requirements.get(projectId, entity.getId());
             List<WorkItemView> wis = workItems.list(projectId, view.id());
             List<DesignView> ds = designs.list(projectId, view.id());
 
@@ -240,24 +228,14 @@ public class ProjectReadTools {
             data.put("workItemCount", wis.size());
             data.put("designCount", ds.size());
             return ToolResult.ok(sb.toString(), sb.toString(), data);
-        }, args -> {
-            String requirementId = ToolText.str(args, "requirementId");
-            if (requirementId == null) {
-                return ToolText.str(args, "projectId");
-            }
-            try {
-                // 网关在 schema 校验后调用；找不到对象交给 execute 报 NOT_FOUND，不能让权限反查炸整轮
-                return requirements.requireById(requirementId).getProjectId();
-            } catch (RuntimeException e) {
-                return null;
-            }
-        });
+        }, args -> requirementProject(requirements, args));
     }
 
     @Bean
     public PlatformTool listWorkItemsTool() {
         ToolSpec spec = new ToolSpec("list_work_items", "查询工作项列表",
-                "列出某需求下的工作项（code/标题/状态/类型）。必须同时提供 projectId 与 requirementId。",
+                "列出某需求下的工作项（code/标题/状态/类型）。必须同时提供 projectId 与 requirementId"
+                        + "（requirementId 可用展示编号 REQ-<seq>）。",
                 """
                         {
                           "type": "object",
@@ -275,10 +253,11 @@ public class ProjectReadTools {
         return PlatformTool.of(spec, (call, ctx) -> {
             Map<String, Object> args = call.args();
             String projectId = projectId(args, ctx);
-            String requirementId = ToolText.str(args, "requirementId");
-            if (projectId == null || requirementId == null) {
+            String requirementRef = ToolText.str(args, "requirementId");
+            if (projectId == null || requirementRef == null) {
                 return ToolResult.fail(ToolResult.INVALID_ARGUMENTS, "请提供项目与需求");
             }
+            String requirementId = requirements.resolveRef(projectId, requirementRef, null).getId();
             String status = ToolText.str(args, "status");
             String keyword = ToolText.str(args, "keyword");
             List<WorkItemView> all = workItems.list(projectId, requirementId);
@@ -311,7 +290,8 @@ public class ProjectReadTools {
     @Bean
     public PlatformTool getWorkItemTool() {
         ToolSpec spec = new ToolSpec("get_work_item", "查询工作项详情",
-                "查询工作项详情（状态/说明/类型）及关联会话。需 projectId、requirementId、workItemId。",
+                "查询工作项详情（状态/说明/类型）及关联会话。需 projectId、requirementId、workItemId；"
+                        + "后两者都可用展示编号（REQ-<seq> / WI-<seq>）。",
                 """
                         {
                           "type": "object",
@@ -327,11 +307,13 @@ public class ProjectReadTools {
         return PlatformTool.of(spec, (call, ctx) -> {
             Map<String, Object> args = call.args();
             String projectId = projectId(args, ctx);
-            String requirementId = ToolText.str(args, "requirementId");
-            String workItemId = ToolText.str(args, "workItemId");
-            if (projectId == null || requirementId == null || workItemId == null) {
+            String requirementRef = ToolText.str(args, "requirementId");
+            String workItemRef = ToolText.str(args, "workItemId");
+            if (projectId == null || requirementRef == null || workItemRef == null) {
                 return ToolResult.fail(ToolResult.INVALID_ARGUMENTS, "请提供项目、需求与工作项");
             }
+            String requirementId = requirements.resolveRef(projectId, requirementRef, null).getId();
+            String workItemId = workItems.resolveRef(projectId, workItemRef).getId();
             WorkItemView w = workItems.get(projectId, requirementId, workItemId);
             StringBuilder sb = new StringBuilder();
             sb.append(w.code()).append(" ").append(w.title())
@@ -373,7 +355,8 @@ public class ProjectReadTools {
     @Bean
     public PlatformTool listDesignsTool() {
         ToolSpec spec = new ToolSpec("list_designs", "查询设计版本列表",
-                "列出某需求下的设计版本（版本号/状态/文档 id）。必须同时提供 projectId 与 requirementId。",
+                "列出某需求下的设计版本（版本号/状态/文档 id）。必须同时提供 projectId 与 requirementId"
+                        + "（requirementId 可用展示编号 REQ-<seq>）。",
                 """
                         {
                           "type": "object",
@@ -389,10 +372,11 @@ public class ProjectReadTools {
         return PlatformTool.of(spec, (call, ctx) -> {
             Map<String, Object> args = call.args();
             String projectId = projectId(args, ctx);
-            String requirementId = ToolText.str(args, "requirementId");
-            if (projectId == null || requirementId == null) {
+            String requirementRef = ToolText.str(args, "requirementId");
+            if (projectId == null || requirementRef == null) {
                 return ToolResult.fail(ToolResult.INVALID_ARGUMENTS, "请提供项目与需求");
             }
+            String requirementId = requirements.resolveRef(projectId, requirementRef, null).getId();
             List<DesignView> list = designs.list(projectId, requirementId).stream()
                     .limit(ToolText.limit(args)).toList();
             if (list.isEmpty()) {
@@ -465,5 +449,19 @@ public class ProjectReadTools {
     static ToolResult projectRequired() {
         return ToolResult.fail(ToolResult.PROJECT_REQUIRED,
                 "该操作需要项目上下文。请先询问用户要操作哪个项目，或调用 list_projects 查询；禁止猜测项目 id。");
+    }
+
+    /**
+     * 网关写前/确认前的对象归属反查（FR-21）：requirementId 支持内部 id 与展示编号 REQ-&lt;seq&gt;。
+     * 找不到时返回参数里的 projectId（再没有就 null，由 execute 统一报 NOT_FOUND），不能让反查炸整轮。
+     */
+    static String requirementProject(RequirementService service, Map<String, Object> args) {
+        String projectId = ToolText.str(args, "projectId");
+        try {
+            Long seq = args != null && args.get("seq") instanceof Number n ? n.longValue() : null;
+            return service.resolveRef(projectId, ToolText.str(args, "requirementId"), seq).getProjectId();
+        } catch (RuntimeException e) {
+            return projectId;
+        }
     }
 }

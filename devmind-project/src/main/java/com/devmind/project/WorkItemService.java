@@ -180,6 +180,37 @@ public class WorkItemService {
         return workItemRepo.findByProjectIdAndSeq(projectId, seq);
     }
 
+    /**
+     * CAP-76：工具/机器人入口的统一工作项寻址——内部 id、展示编号 {@code WI-<seq>}、纯数字 seq 三种写法都接受。
+     * 编号解析需要项目上下文；找不到时抛 NOT_FOUND 并提示下一步。
+     */
+    public WorkItemEntity resolveRef(String projectId, String workItemId) {
+        String ref = workItemId == null ? null : workItemId.trim();
+        if (ref != null && !ref.isEmpty()) {
+            var byId = workItemRepo.findById(ref);
+            if (byId.isPresent()) {
+                return byId.get();
+            }
+            java.util.regex.Matcher m = WI_REF.matcher(ref);
+            if (m.matches()) {
+                long n = Long.parseLong(m.group(1));
+                if (projectId == null || projectId.isBlank()) {
+                    throw new DevMindException(ErrorCode.BAD_REQUEST,
+                            "按工作项编号 WI-" + n + " 操作需要项目上下文，请提供 projectId 或先绑定项目");
+                }
+                return findByProjectSeq(projectId, n)
+                        .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND,
+                                "项目内不存在工作项 WI-" + n + "；请先调用 list_work_items 确认编号"));
+            }
+        }
+        throw new DevMindException(ErrorCode.NOT_FOUND,
+                "工作项不存在: " + (ref == null || ref.isEmpty() ? "(空)" : ref)
+                        + "；请传内部 id 或项目内编号 WI-<seq>（可先调用 list_work_items）");
+    }
+
+    private static final java.util.regex.Pattern WI_REF =
+            java.util.regex.Pattern.compile("(?i)^(?:WI-?)?(\\d+)$");
+
     private WorkItemEntity requireUnder(String projectId, String requirementId, String workItemId) {
         WorkItemEntity e = requireEntity(projectId, workItemId);
         if (!e.getRequirementId().equals(requirementId)) {

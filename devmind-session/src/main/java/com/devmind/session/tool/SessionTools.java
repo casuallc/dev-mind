@@ -8,6 +8,8 @@ import com.devmind.common.agent.tool.ToolResult;
 import com.devmind.common.agent.tool.ToolRisk;
 import com.devmind.common.agent.tool.ToolSpec;
 import com.devmind.common.agent.tool.ToolText;
+import com.devmind.project.RequirementService;
+import com.devmind.project.WorkItemService;
 import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.SessionView;
 import com.devmind.session.service.SessionManagerService;
@@ -29,9 +31,14 @@ public class SessionTools {
     private static final String M2 = "M2";
 
     private final SessionManagerService sessions;
+    private final RequirementService requirements;
+    private final WorkItemService workItems;
 
-    public SessionTools(SessionManagerService sessions) {
+    public SessionTools(SessionManagerService sessions, RequirementService requirements,
+                        WorkItemService workItems) {
         this.sessions = sessions;
+        this.requirements = requirements;
+        this.workItems = workItems;
     }
 
     @Bean
@@ -183,7 +190,8 @@ public class SessionTools {
     public PlatformTool startSessionTool() {
         ToolSpec spec = new ToolSpec("start_session", "启动 coding 会话",
                 "在项目下创建并启动 coding 会话（会下发 runner、产生模型费用）。taskSpec 写清要做什么；"
-                        + "可关联 requirementId/workItemId。调用后生成确认单，用户确认后才真正启动。",
+                        + "可关联 requirementId/workItemId（也接受展示编号 REQ-<seq> / WI-<seq>）。"
+                        + "调用后生成确认单，用户确认后才真正启动。",
                 """
                         {
                           "type": "object",
@@ -208,9 +216,15 @@ public class SessionTools {
             if (taskSpec == null) {
                 return ToolResult.fail(ToolResult.INVALID_ARGUMENTS, "请提供任务说明 taskSpec");
             }
+            String requirementRef = ToolText.str(args, "requirementId");
+            String workItemRef = ToolText.str(args, "workItemId");
+            String requirementId = requirementRef == null ? null
+                    : requirements.resolveRef(projectId, requirementRef, null).getId();
+            String workItemId = workItemRef == null ? null
+                    : workItems.resolveRef(projectId, workItemRef).getId();
             CreateSessionRequest req = new CreateSessionRequest(
-                    null, null, projectId, ToolText.str(args, "workItemId"),
-                    ToolText.str(args, "requirementId"), taskSpec, null, null, null,
+                    null, null, projectId, workItemId,
+                    requirementId, taskSpec, null, null, null,
                     ToolText.str(args, "agentNodeId"), null, null, null, null, null, null);
             SessionView view = sessions.create(req);
             String text = "已启动会话 " + shortId(view.id()) + "（状态 " + view.status() + "）";

@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 
 /**
  * Requirement（CAP-13 研发主线）：业务目标，主线关系的根。只做"身份 + 状态 + 关联"。
@@ -454,6 +455,48 @@ public class RequirementService {
     public java.util.Optional<RequirementEntity> findByProjectSeq(String projectId, long seq) {
         return requirementRepo.findByProjectIdAndSeq(projectId, seq);
     }
+
+    /**
+     * CAP-76：工具/机器人入口的统一需求寻址——内部 id、展示编号 {@code REQ-<seq>}、纯数字 seq 三种写法都接受。
+     * 先按 id 直查（id 为短字符串，不会与数字编号冲突），未命中再按项目内编号解析；
+     * 编号解析需要项目上下文（缺省项目由调用方从会话绑定补齐）。找不到时抛 NOT_FOUND 并提示下一步。
+     */
+    public RequirementEntity resolveRef(String projectId, String requirementId, Long seq) {
+        String ref = requirementId == null ? null : requirementId.trim();
+        if (ref != null && !ref.isEmpty()) {
+            var byId = requirementRepo.findById(ref);
+            if (byId.isPresent()) {
+                return byId.get();
+            }
+        }
+        Long n = seq;
+        if (n == null && ref != null) {
+            Matcher m = SEQ_REF.matcher(ref);
+            if (m.matches()) {
+                try {
+                    n = Long.parseLong(m.group(1));
+                } catch (NumberFormatException ignored) {
+                    n = null;
+                }
+            }
+        }
+        if (n != null) {
+            if (projectId == null || projectId.isBlank()) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "按需求编号 REQ-" + n + " 操作需要项目上下文，请提供 projectId 或先绑定项目");
+            }
+            long target = n;
+            return findByProjectSeq(projectId, target)
+                    .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND,
+                            "项目内不存在需求 REQ-" + target + "；请先调用 list_requirements 确认编号"));
+        }
+        throw new DevMindException(ErrorCode.NOT_FOUND,
+                "需求不存在: " + (ref == null || ref.isEmpty() ? "(空)" : ref)
+                        + "；请传内部 id 或项目内编号 REQ-<seq>（可先调用 list_requirements）");
+    }
+
+    private static final java.util.regex.Pattern SEQ_REF =
+            java.util.regex.Pattern.compile("(?i)^(?:REQ-?)?(\\d+)$");
 
     private void requireProject(String projectId) {
         projectRepo.findById(projectId)
