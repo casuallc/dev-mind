@@ -141,14 +141,15 @@ spring-boot-starter-web / data-jpa / jackson-databind
     + `default void reset(AgentRequest)`；`onCardAction` 同步执行并在返回的 `AgentReply` 里给出
     卡片更新内容（null = 不更新）；`reset` 供 `/new` 清空该 sender 的会话上下文（默认 no-op）；
   - `AgentRequest`：channel / chatType / externalChatId / senderId / actor /
-    **personalActor（个人绑定命中结果，空 = 未绑定）** / text / 默认项目 id+名称 /
+    **personalActor（个人绑定命中结果，空 = 未绑定）** / **identitySupported（该渠道是否支持
+    个人身份映射，由 bot 按渠道能力填入）** / text / 默认项目 id+名称 /
     messageId / eventId；
   - `AgentReply`：text + 可选卡片 `AgentCard`；
   - `AgentCard`：title / template（INFO·SUCCESS·WARNING·DANGER）/ markdown / buttons / footer，
     带 `toPlainText()` 供纯文本渠道降级，**不含任何平台专有 JSON**；
   - `AgentCardButton`：label / operation（CONFIRM·CANCEL·LINK）/ actionId / url；
   - `AgentCardAction`：operation（`CONFIRM` / `CANCEL`）+ actionId + **channel / externalChatId /
-    senderId / eventId / actor / personalActor**。senderId 取自回调事件本身
+    senderId / eventId / actor / personalActor / identitySupported**。senderId 取自回调事件本身
     （`operator.open_id`），actor/personalActor 由 bot 用当前身份链实时解析后填入，**绝不取按钮
     value**。没有这些字段，FR-15 的「只有发起人本人能确认」与确认时的个人绑定重校验都无法执行。
 
@@ -237,11 +238,18 @@ public record ToolSpec(
         String minRole,         // VIEWER | DEVELOPER | ADMIN
         boolean requiresProject,// 无项目上下文时是否必须先问用户
         String ownerModule,     // 归属模块，如 devmind-project
-        String since            // 首次交付版本，如 CAP-76 M1
+        String since,           // 首次交付版本，如 CAP-76 M1
+        int timeoutSeconds      // 0 = 用全局 tool-timeout-seconds；慢写工具可单独放宽（FR-07）
 ) {
     /**
      * 动态风险：默认等于 risk。只允许基于 args 判断（如目标状态 DONE/CANCELLED）；
      * 需要查库才能判断的风险（如环境是否 PROD）不要放这里——直接把工具静态定为 DANGEROUS。
+     *
+     * <p>求值时机：参数 schema 校验通过之后；`args` 必须是**校验后的规范化值**。
+     * 参与风险判断的枚举/字符串必须按目标 Service 的归一化规则处理（如状态
+     * `trim().toUpperCase(Locale.ROOT)`），否则 `"done"` / `" DONE "` 会把 DANGEROUS 降成 WRITE
+     * 从而被裸「确认」绕过。网关落 `copilot_actions.risk` 时记录 `riskFor(args)` 的结果，
+     * 不记录 `spec.risk()`。</p>
      */
     public ToolRisk riskFor(Map<String, Object> args) { return risk; }
 }
@@ -297,6 +305,8 @@ public record ToolSpec(
 
 - 端点选择：`devmind.copilot.endpoint-id` 显式指定 → `ModelEndpointProvider.defaultEndpoint(KIND_CHAT)`
   → 皆无则 fail-visible（"未配置智能体对话端点"），不回落 mock、不回落嵌入端点。
+  显式 id 必须校验 `activeEndpoint(id)` 存在、`kind == KIND_CHAT` 且状态 ACTIVE，
+  否则按"端点不存在/不是对话端点/已停用"失败，**不得**拿嵌入端点去拼 `/chat/completions`。
 - 调用：`POST {baseUrl}/chat/completions`，新增 `OpenAiCompatToolChat`。**必须放在
   `devmind-common` 的 `com.devmind.common.model` 包内**：`OpenAiCompatHttp` 是包内可见
   （`final class`），跨模块无法复用其超时/脱敏逻辑；协议客户端也本就属于 common。
@@ -331,7 +341,10 @@ public record ToolSpec(
 5. 达到 `max-steps`（默认 8）→ 停止并回"已执行 N 步，请缩小范围或补充条件"，落审计。
 
 同一轮内禁止同一 `(tool, args)` 重复调用超过 2 次（防模型死循环）。
-每次工具执行有独立超时 `tool-timeout-seconds`（默认 30）；构建类工具
+每次工具执行有独立超时 `tool-timeout-seconds`（默认 30）；`ToolSpec.timeoutSeconds > 0` 时优先取
+工具自报值（如 `trigger_build` 会同步做一次 git fetch，可放宽到 90）。**超时只终止等待，不能撤销
+已经开始的副作用**：写工具超时后不得自动重试，回执必须写明"可能已提交，请先查询确认"，
+避免重复触发（`trigger_build` 尤其如此）。构建类工具
 只做**异步触发**并立即返回受理结果，不在工具内等作业完成（将来若交付部署/发版写工具同理）。
 整轮另有 `turn-timeout-seconds`（默认 180，含全部模型与工具调用）：超时立即终止循环、
 按失败回执并落审计，不得让单轮无限占用 botExecutor。**网关的 turn 处理方法禁标
@@ -371,7 +384,16 @@ public record ToolSpec(
    执行记录——确认路径的审计链不能缺环。
 
 `devmind.copilot.max-writes-per-turn`（默认 3）：同一模型响应中的多个写调用一次性生成多张
-确认单，共用一个短码前缀（例如 `A7K2-1`、`A7K2-2`），确认时顺序执行并逐项回执。
+确认单，共用一个短码前缀（例如 `A7K2-1`、`A7K2-2`），确认时顺序执行并逐项回执。批量规则：
+
+- **同一批次只允许一个项目**：写调用解析出的 `projectId` 必须一致，否则整批拒绝并提示
+  "跨项目批量写不支持，请分开确认"（FR-22 的运行时兜底，不能只靠提示词）；
+- 短码查找**只接受完整短码**（`A7K2-1`）；裸 `确认 A7K2` 是前缀，**不是**批量确认指令，
+  一律回"请使用完整短码，如 确认 A7K2-1"。避免用前缀一次确认多张、绕过危险操作逐张确认；
+- 顺序执行，某一项失败**不阻断**后续项（用户需要看到整批结果）；每项独立回执并写各自的
+  `copilot_tool_calls`；
+- 批次内任意一张为 `DANGEROUS` 时，该张仍必须用它自己的完整短码单独确认；批里其余 WRITE
+  不因危险项存在而升级/降级。
 
 **FR-11 危险操作**：`DANGEROUS` 包括但不限于：`send_session_input`（等于让 runner 的 coding
 agent 执行任意输入）、需求置 DONE/CANCELLED、工作项 CANCELLED、删除（v1 无删除工具）、
@@ -381,7 +403,12 @@ agent 执行任意输入）、需求置 DONE/CANCELLED、工作项 CANCELLED、�
   即使该 sender 只有一张 PENDING，裸「确认」也不得执行 DANGEROUS（见 FR-17）；
 - DANGEROUS 确认卡**不渲染执行按钮**，只展示计划、短码提示与「取消」按钮；
 - 确认卡/文本必须展示目标对象与影响范围；`send_session_input` 必须展示目标会话、节点与
-  **完整输入文本**（不截断）；
+  **完整输入文本**（不截断）。传输层不得套用问答回复的 `reply-max-chars`（3500）截断：
+  预览走独立的原始发送路径，超过单条平台上限时按 `confirm-preview-chunk-chars`（默认 3000）
+  分段为多条文本，每段都带 `[短码 i/n]` 前缀，最后一段给出确认指令；卡片装不下完整文本时
+  卡片只放摘要 + "完整计划已分 N 条文本发送"，**执行按钮与短码提示以文本消息为准**；
+  分段数超过 `confirm-preview-max-chunks`（默认 10）则拒绝创建确认单并回 `INVALID_ARGUMENTS`
+  （"输入过长，请拆分后重试"），**绝不截断后执行**；
 - 部署/回滚/发版写工具 **v1 不交付**（只保留只读记录查询，见 §6.2）。将来交付时一律
   DANGEROUS，且不得用 `riskFor(Map)` 去数据库判断环境——该签名拿不到上下文，无法可靠识别 PROD。
 
@@ -403,6 +430,14 @@ PENDING ──确认──▶ EXECUTING ──▶ SUCCEEDED
 `tool_name`、`args_json`、`risk`、`preview_text`、`status`、`short_code`、`card_message_id`、
 `created_at`、`expires_at`、`executed_at`、`result_json`、`error`。
 
+- `id` 是 32 字符 Base32 随机串（与 `actionId` 同一生成器，大小写不敏感查找时统一转大写）；
+  **不是** `UUID.toString()`（36 字符，会超列宽）。
+- `copilot_actions.args_json` / `preview_text` / `result_json` 均为 LONGVARCHAR，且
+  `args_json` 是**执行权威快照**：存规范化后的原始参数，不掩码、不截断（见 FR-28），
+  仅 ADMIN 审计可见；`copilot_tool_calls.args_json` 才存脱敏截断副本。
+- 卡片确认产生的 turn，`copilot_turns.user_text` 固定写 `CARD_CONFIRM:<short_code>` 或
+  `CARD_CANCEL:<short_code>`，便于审计筛选（不写 null）。
+
 `SUCCEEDED` 语义是**工具调用被受理且未报错**，不是异步作业完成：`trigger_build` 返回的是
 "已提交"，真正的作业状态仍看构建记录（将来交付部署/发版写工具时同理）。
 确认后的执行**另起一条 `copilot_turns`**（`trigger_type=CONFIRM` 或 `CARD_ACTION`），
@@ -420,6 +455,11 @@ PENDING ──确认──▶ EXECUTING ──▶ SUCCEEDED
 - `EXECUTING` 不是终态：进程若在工具执行中途退出，确认单会停在 `EXECUTING`。清理任务把超过
   `turn-timeout-seconds` 仍为 `EXECUTING` 的单据标记为 FAILED（error=执行中断），
   **不自动重试**；用户可重新发起。
+- **过期清扫与保留期清理分离**：`action-sweep-cron`（默认每分钟）只做 PENDING→EXPIRED 与
+  EXECUTING→FAILED；`cleanup-cron`（每日）只做保留期删除。TTL 是 10 分钟，不能等到次日凌晨
+  才把过期单置 EXPIRED——所有"是否有 PENDING"的判断仍必须带 `expires_at > now` 双重保险。
+- `copilot_tool_calls` 增加 `EXPIRED` 状态：确认单过期/被取消时，其 `PENDING_CONFIRM`
+  行同步置 `EXPIRED`/`CANCELLED`，审计链不得停在中间态。
 
 **FR-15 确认时重校验**（关键防线）：
 
@@ -430,8 +470,13 @@ PENDING ──确认──▶ EXECUTING ──▶ SUCCEEDED
    确认单创建时记录的不一致 → 拒绝并提示「身份已变更，请重新发起」；一致则重新执行
    RBAC / 项目权限 / 个人绑定校验；
 3. 重新校验参数 schema 与目标对象仍然存在、状态仍允许该操作；
-4. 执行时使用**服务端存的 args_json**，绝不使用回调 payload 里的参数；
-5. 任一校验失败 → 确认单 FAILED（error 记原因），回执原因，不重试。
+4. **卡片路径必须重新校验风险**：即使适配器没有渲染确认按钮，`onCardAction(CONFIRM)`
+   也必须检查 `action.risk == DANGEROUS` 并拒绝（"危险操作请回复文本短码"）。渲染层约束
+   不是授权边界；
+5. 重新解析目标对象所属 `projectId` 并调用 `ToolAccessPolicy`（FR-21），不得只信
+   `copilot_actions.project_id`；
+6. 执行时使用**服务端存的 args_json**，绝不使用回调 payload 里的参数；
+7. 任一校验失败 → 确认单 FAILED（error 记原因），回执原因，不重试。
 
 **FR-16 过期与取消**：`confirm-ttl-minutes` 默认 10；`取消 <短码>`、`/cancel [短码]` 或
 卡片"取消" → CANCELLED。
@@ -462,6 +507,8 @@ bot 侧在 `BotRouterService` 的指令 switch 注册 `cancel` 并补 `/help` �
   零张 → 正常智能体对话；
 - `取消 <短码>` 对任意风险均有效（取消不需要加码）；`/cancel [短码]` 走 FR-16 的斜杠路径，
   语义相同但优先于本段文本兜底。
+- 短码解析**大小写不敏感**（入参统一 `trim().toUpperCase(Locale.ROOT)` 后匹配）；只接受完整
+  短码，前缀（`A7K2` 之于 `A7K2-1`）不命中，见 FR-10。
 
 ### 5.4 权限与数据边界
 
@@ -480,9 +527,15 @@ bot 侧在 `BotRouterService` 的指令 switch 注册 `cancel` 并补 `/help` �
 - bot 在 `AgentRequest.personalActor` 里给出 `BotChannelConfigProvider.resolveActor(senderId)`
   的命中结果；`WRITE`/`DANGEROUS` 要求该字段非空。仅靠 binding.actor / defaultActor
   **不允许写**（否则群内任何人都能以默认管理员身份操作）。
-- 渠道 `supportsIdentity()=false` 时默认禁用写工具；确需启用须显式配置
-  `devmind.copilot.allow-default-actor-writes=true`（默认 false）并在运维页红字提示。
-- copilot 不依赖 bot 的 `BotChannelConfigProvider`；它只信 `personalActor` 字段。
+- bot 同时在 `AgentRequest.identitySupported` / `AgentCardAction.identitySupported` 填入渠道的
+  `supportsIdentity()`。copilot 的判定顺序：
+  1. `personalActor` 非空 → 允许（个人绑定已命中）；
+  2. `personalActor` 为空且 `identitySupported=true` → **拒绝写**（该渠道支持绑定但此人没绑）；
+  3. `personalActor` 为空且 `identitySupported=false` → 仅当
+     `devmind.copilot.allow-default-actor-writes=true` 才允许写，并在运维页红字提示。
+  **不能只凭 `personalActor` 为空就套用开关**——否则给一个无身份渠道打开开关，会连带放开
+  飞书上所有未绑定用户。
+- copilot 不依赖 bot 的 `BotChannelConfigProvider`；它只信 `personalActor` + `identitySupported`。
 
 **FR-20 工具可见性**：角色序 `VIEWER < DEVELOPER < ADMIN`；工具 `minRole` 高于当前角色
 即不可见也不可执行。`VIEWER` 只读；`DEVELOPER` 可读写非 ADMIN 工具；`ADMIN` 全部。
@@ -499,13 +552,24 @@ bot 侧在 `BotRouterService` 的指令 switch 注册 `cancel` 并补 `/help` �
 
 ```java
 public interface ToolAccessPolicy {
-    boolean canAccess(String actor, String projectId, String toolName);
+    /** risk 由本次调用的 ToolSpec.riskFor(args) 决定；CAP-62 实现据此映射 canRead/canWrite。 */
+    boolean canAccess(String actor, String projectId, ToolRisk risk, String toolName);
 }
 ```
 
-由 CAP-62 的 `ProjectAccessChecker` 实现（尚未落地）；copilot 以 `ObjectProvider<ToolAccessPolicy>`
+由 CAP-62 的 `ProjectAccessChecker` 适配实现（尚未落地）；copilot 以 `ObjectProvider<ToolAccessPolicy>`
 探测，**缺席 = 仅 RBAC（当前现状）**，并在工具目录响应与运维页标注"数据权限未启用"。
-CAP-62 落地后无需改 copilot。
+CAP-62 落地后无需改 copilot——但 CAP-62 的 `ProjectAccessChecker` 形态是
+`canRead/canWrite/filterReadable`，需要一个 copilot 侧或 CAP-62 侧的**适配器**把
+`ToolRisk -> canRead/canWrite` 映射起来（不是直接实现同签名），文档与实现都要明确这一点。
+
+- **对象 → 项目解析是强制点**：`ToolContext.projectId` 只是默认值，不是授权依据。所有按对象 id
+  操作的工具（`get_session` / `get_build` / `get_work_item` / `get_deployment` / `get_release` /
+  `get_document` / `send_session_input` / `stop_session` 等）必须**先从对象反查其 projectId**，
+  再以该 projectId 调 `ToolAccessPolicy`；反查不到 → `NOT_FOUND`，不许拿默认项目顶上。
+  确认执行路径（FR-15）同样按对象重新解析，不能直接复用下单时的 `copilot_actions.project_id`。
+  网关在调用工具前做一次 RBAC；对象级 policy 由工具在命中对象后立即执行（工具实现模板固化，
+  见 §6.3）。
 
 **FR-22 禁止能力面**（v1 明确不提供）：
 
@@ -564,6 +628,8 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
   `updateCard` 原地改成"成功/失败"；返回 null 或更新失败则回文本结果；
 - 去重键 `event_id`（bot 层去重后再交给 copilot）；
 - value 缺少 `devmind` 标记（非本能力卡片）的回调直接忽略并返回空 toast，不报错、不落审计；
+- **服务端复核**：copilot 收到 CONFIRM 后必须检查确认单风险；DANGEROUS 一律拒绝卡片确认
+  （见 FR-15 第 4 条），不能以"适配器没渲染按钮"代替授权；
 - 订阅 `card.action.trigger` 需要飞书开放平台配置 + 发布版本，上线检查项见 §11 真机检查；
 - e2e profile 下 `FakeBotAdapter` 同样实现 `replyCard/updateCard/sendCard`（记录卡片供断言），
   `FakeBotController` 增加 `POST /api/e2e/bot/card-action` 注入 `BotCardAction`。
@@ -598,10 +664,21 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 `bot_interactions` 仍记录消息级出入站（CAP-75 既有），`command=agent` 便于筛选。
 工具内部产生的业务审计（如部署记录）由各业务模块自己负责，不重复造。
 
-**FR-28 脱敏**：参数/结果/用户输入/assistant 输出**落库前与回灌模型前**都要处理
-（两处，不能只做落库）：
+**FR-28 脱敏与存储分层**（关键：掩码**不得**污染执行源）：
+
+| 数据 | 存储/用途 | 处理 |
+|---|---|---|
+| `copilot_actions.args_json` | **执行权威快照**（FR-15 第 6 条） | 规范化原文，**不掩码、不截断**；仅 ADMIN 审计查询可见 |
+| `copilot_actions.preview_text` | 确认展示 | 完整原文；传输分段见 FR-11 |
+| `copilot_tool_calls.args_json` | 审计副本 | 掩码 + 截断 |
+| `copilot_turns.user_text/assistant_text` | 会话历史 | 掩码 + 截断 |
+| 回灌模型的 tool 结果 | 模型上下文 | 掩码 + 截断 |
+
 - 键名匹配 `password|secret|token|apiKey|authorization|cookie` 的值替换为 `***`；
   自由文本再跑一遍 `sk-…` / `Bearer …` 正则（复用模型客户端的脱敏约定）；
+- 掩码/截断只作用于**展示、审计副本与模型上下文**。`copilot_actions.args_json` 是确认后真正
+  执行的参数，若在这里掩码，用户确认的"输入原文"到 runner 时会变成 `***`——
+  这直接违背 P3 与 FR-15；审计需要脱敏就查 `copilot_tool_calls`；
 - 自由文本按 `max-tool-result-chars`（默认 4000）截断；结果 `sensitive=true` 时只存摘要长度与哈希；
 - `get_session_events` / `get_build(logTail)` 等日志类工具默认只回尾部 200 行并脱敏，
   防止 runner 日志里的环境变量、密钥进入外部模型 prompt；
@@ -611,6 +688,9 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 每日定时任务清理 turns/tool_calls/actions（终态且过期），并同步清理
 `copilot_messages` 与无消息的 `copilot_conversations`（否则历史表只增不减）。
 清理方法必须 `@Transactional`（CAP-71 教训：派生 delete 在无事务的定时入口空跑）。
+过期状态清扫（PENDING→EXPIRED、EXECUTING→FAILED）走独立的 `action-sweep-cron`
+（默认每分钟），不得只挂在日任务上（见 FR-14）。两个定时入口分别可配置 cron，
+`action-sweep-cron` 置空可关闭（单测/低配环境）。
 
 **FR-30 管理 API 与页面**：
 
@@ -647,35 +727,39 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 
 命名约定：`<domain>_<action>`；参数中的 id 一律字符串；所有列表工具必须支持 `limit`（默认 20，上限 50）。
 
-工具归属：项目/需求/工作项/设计 → `devmind-project`；会话 → `devmind-session`；构建/部署/发版 →
-各自模块；知识/文档/节点/用量 → 各自模块。跨域聚合工具不下沉到 copilot，避免编排层反向依赖。
+工具归属：项目/需求/工作项/设计/环境 → `devmind-project`；会话 → `devmind-session`；构建/部署/发版 →
+各自模块；知识/文档/节点/用量 → 各自模块。跨域聚合工具不下沉到 copilot，避免编排层反向依赖：
+`get_project_overview` 需要 project/session/build 三方计数，归属 `devmind-app`（组装层唯一能
+同时依赖三者的位置）；copilot 只注册它，不实现它。
 
 ### 6.1 只读（READ，默认 VIEWER 起；`list_agent_nodes` 为 DEVELOPER）
 
+所有列表工具统一带 `limit`（默认 20，上限 50）；`output_mode` 只列关键参数。
+
 | 工具 | 关键参数 | 返回 |
 |---|---|---|
-| `list_projects` | `keyword?` | 可见项目 id/名称/状态/默认分支 |
-| `get_project_overview` | `projectId` | 项目信息 + 需求/会话/构建计数 + 最近失败 |
-| `list_requirements` | `projectId?`, `status?`, `keyword?`, `limit` | 需求摘要列表 |
+| `list_projects` | `keyword?`, `status?`, `limit` | 可见项目 id/名称/状态/默认分支 |
+| `get_project_overview` | `projectId` | 项目信息 + 需求/会话/构建计数 + 最近失败（`devmind-app` 实现） |
+| `list_requirements` | `projectId`, `status?`, `keyword?`, `limit` | 需求摘要列表 |
 | `get_requirement` | `projectId`（用 `seq` 时必填）, `requirementId` 或 `seq` | 需求详情 + 工作项/设计摘要 + 阶段 |
-| `list_work_items` | `projectId?`, `requirementId?`, `status?`, `keyword?` | 工作项列表 |
-| `get_work_item` | `workItemId` | 工作项详情与关联会话 |
-| `list_designs` | `projectId?`, `requirementId?` | 设计版本列表 |
+| `list_work_items` | `projectId`, `requirementId`, `status?`, `keyword?`, `limit` | 工作项列表（Service 要求两者都传） |
+| `get_work_item` | `projectId`, `requirementId`, `workItemId` | 工作项详情与关联会话 |
+| `list_designs` | `projectId`, `requirementId`, `limit` | 设计版本列表（Service 要求两者都传） |
 | `list_sessions` | `projectId?`, `status?`, `limit` | 会话摘要（id/状态/任务/节点） |
 | `get_session` | `sessionId` | 会话详情、token 用量、摘要 |
 | `get_session_events` | `sessionId`, `tail?` | 最近事件文本（截断） |
-| `list_builds` | `projectId`, `limit` | 构建列表 |
+| `list_builds` | `projectId`, `status?`, `limit` | 构建列表 |
 | `get_build` | `buildId`, `logTail?` | 构建状态/错误摘要/日志尾部 |
-| `list_deployments` | `projectId`, `environmentId?`, `limit` | 部署记录 |
+| `list_deployments` | `projectId`, `status?`, `limit` | 部署记录（按环境过滤 v1 不提供） |
 | `get_deployment` | `deploymentId` | 部署详情/步骤/错误 |
-| `list_releases` | `projectId`, `limit` | 发版记录 |
+| `list_releases` | `projectId`, `status?`, `limit` | 发版记录 |
 | `get_release` | `releaseId` | 发版详情/制品/tag |
-| `list_environments` | `projectId` | 可部署环境（id/名称/是否 PROD） |
-| `search_knowledge` | `query`, `projectId?` | 知识片段（带来源） |
-| `list_documents` | `projectId?`, `keyword?` | 文档列表 |
+| `list_environments` | `projectId` | 可部署环境（id/名称/是否 PROD；归属 devmind-project） |
+| `search_knowledge` | `query`, `projectId?`, `limit` | 知识片段（带来源） |
+| `list_documents` | `projectId?`, `keyword?`, `limit` | 文档列表（keyword 走 `search`，两者同时给时先搜后按项目过滤） |
 | `get_document` | `docId` | 文档元数据 + 最新版本摘要 |
-| `list_agent_nodes` | - | 节点 id/名称/在线/默认（不泄露 token） |
-| `get_usage_summary` | `projectId?`, `from?`, `to?` | token/成本聚合（非 ADMIN 限本人；M4 交付） |
+| `list_agent_nodes` | `limit` | 节点 id/名称/在线/默认（不泄露 token） |
+| `get_usage_summary` | `from?`, `to?`, `userId?`（非 ADMIN 强制本人）, `model?` | token/成本聚合（M4 交付；`usage_records` 无 project 列，不提供 projectId） |
 
 > `list_agent_nodes` 暴露节点名称/在线状态，`minRole` 定为 `DEVELOPER`（不对外泄露 token 与主机细节）；
 > `list_projects` / `get_usage_summary` 的可见范围在 CAP-62 落地后由 `ToolAccessPolicy` 收紧。
@@ -684,15 +768,15 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 
 | 工具 | 关键参数 | 风险 |
 |---|---|---|
-| `create_requirement` | `projectId`, `title`, `description?`, `type?`, `priority?` | WRITE |
-| `update_requirement` | `requirementId`, `title?/description?/priority?/assignee?` | WRITE |
-| `update_requirement_status` | `requirementId`, `status` | WRITE；目标 DONE/CANCELLED → DANGEROUS |
+| `create_requirement` | `projectId`, `title`, `description?`, `type?`, `priority?`, `assignee?` | WRITE |
+| `update_requirement` | `requirementId`, `title?/description?/priority?/assignee?` | WRITE（读-合并-写，projectId 由工具反查） |
+| `update_requirement_status` | `requirementId`, `status` | WRITE；目标 `DONE`/`CANCELLED` → DANGEROUS（大小写/空白归一化后判断） |
 | `create_work_item` | `projectId`, `requirementId`, `title`, `spec?`, `type?` | WRITE |
-| `update_work_item_status` | `workItemId`, `status` | WRITE；CANCELLED → DANGEROUS |
+| `update_work_item_status` | `projectId`, `requirementId`, `workItemId`, `status` | WRITE；`CANCELLED` → DANGEROUS |
 | `start_session` | `projectId`, `taskSpec`, `requirementId?`, `workItemId?`, `agentNodeId?` | WRITE（起会话即产生费用） |
 | `send_session_input` | `sessionId`, `text` | DANGEROUS |
 | `stop_session` | `sessionId` | WRITE |
-| `trigger_build` | `projectId`, `branch?` | WRITE |
+| `trigger_build` | `projectId`, `branch?` | WRITE（工具超时 90s，覆盖同步 fetch） |
 
 > `send_session_input` 等于让 runner 的 coding agent 执行一句话，定为 DANGEROUS：预览必须展示
 > 目标会话、节点与**完整输入文本**（不截断），且必须文本短码确认（卡片不提供执行按钮）。
@@ -700,6 +784,25 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 > **部署/发版/回滚写工具 v1 不提供**：`trigger_deploy` / `rollback_deployment` / `trigger_release`
 > 均不交付，本期只保留 §6.1 的只读记录查询。避免在 CAP-62 数据权限与产品级二次门禁就绪前
 > 开放生产变更；将来立项时一律按 DANGEROUS + 文本短码设计。
+
+### 6.3 随工具交付的 Service 扩展（禁止下探 Repository）
+
+§6.1/6.2 的参数已尽量对齐现有签名；以下差异必须由工具所属模块**同期扩展 Service**，
+不得让工具直接拿 Repository 拼查询（FR-05）：
+
+| 模块 | 扩展 | 用途 |
+|---|---|---|
+| `devmind-project` | `ProjectService.list(status, kind, keyword, limit)` 重载（或工具调用后内存过滤，项目数少时可接受，但需注明） | `list_projects(keyword)` |
+| `devmind-project` | `list_work_items`/`get_work_item`/`update_work_item_status` 直接用现有三参方法 | §6 已改为必传 projectId+requirementId |
+| `devmind-project` | `DesignService.list(projectId, requirementId)` 直接用现有两参方法 | §6 已改为必传 |
+| `devmind-deploy` | `DeploymentService.history(projectId, status, limit)` 直接用现有方法 | 环境过滤 v1 不提供 |
+| `devmind-docs` | keyword 用 `search(q)`，再按 projectId 过滤（结果集小） | `list_documents` |
+| `devmind-app` | 新增跨域聚合工具 `get_project_overview`（project + session + build 计数） | 唯一允许跨模块聚合的位置 |
+| `devmind-usage` | 无 project 维度；工具参数去掉 projectId，非 ADMIN 强制本人 | `get_usage_summary` |
+
+> 工具实现的统一结构：① 参数校验（`ToolArgs`）→ ② 反查对象所属 projectId →
+> ③ `ToolAccessPolicy` → ④ 合成 `SecurityContext` 调 Service → ⑤ 映射 `ToolResult`。
+> 第 ② 步必须存在于每个按对象 id 操作的工具里（FR-21）。
 
 M4 候选：文档新版本、知识提案采纳、需求流程阶段动作、节点默认切换（ADMIN）。
 
@@ -716,7 +819,7 @@ M4 候选：文档新版本、知识提案采纳、需求流程阶段动作、�
 
 | 列 | 类型 | 说明 |
 |---|---|---|
-| `id` | varchar(32) PK | UUID |
+| `id` | varchar(32) PK | 32 字符 Base32（`CopilotIds.newId()`；禁止 `UUID.toString()`，36 字符放不下） |
 | `channel` | varchar(32) | feishu/… |
 | `external_chat_id` | varchar(128) | 会话 |
 | `sender_id` | varchar(128) | 平台用户 id |
@@ -737,7 +840,7 @@ M4 候选：文档新版本、知识提案采纳、需求流程阶段动作、�
 
 ### `copilot_turns`
 
-`id` varchar(32)、`conversation_id`、`channel`、`external_chat_id`、`sender_id`、`actor`、
+`id` varchar(32)（同 `CopilotIds.newId()`，非 UUID）、`conversation_id`、`channel`、`external_chat_id`、`sender_id`、`actor`、
 `project_id`、`user_text`(4000)、`assistant_text`(LONGVARCHAR)、`status`
 (OK/FAILED/REJECTED/PENDING_CONFIRM)、`trigger_type`(USER/CONFIRM/CARD_ACTION；
 **不用 `trigger`——MySQL 保留字**)、
@@ -747,15 +850,17 @@ M4 候选：文档新版本、知识提案采纳、需求流程阶段动作、�
 
 ### `copilot_tool_calls`
 
-`id` bigint identity、`turn_id`、`action_id?`、`tool_name`、`args_json`(LONGVARCHAR)、
-`risk`、`status`(OK/FAILED/REJECTED/PENDING_CONFIRM/CONFIRMED/CANCELLED)、
+`id` bigint identity、`turn_id`、`action_id?`、`tool_name`、`args_json`(LONGVARCHAR；**脱敏截断副本**)、
+`risk`、`status`(OK/FAILED/REJECTED/PENDING_CONFIRM/CONFIRMED/**EXPIRED**/CANCELLED)、
 `result_summary`(4000)、`error`(2000)、`duration_ms`、`created_at`。
 索引 `(turn_id)`、`(tool_name, created_at)`。
 
 ### `copilot_actions`
 
-见 FR-13。额外：`short_code` varchar(12) 索引、`card_message_id` varchar(128)、
-`idempotency_key` varchar(64) 可空。索引 `(status, expires_at)`、`(sender_id, channel, external_chat_id, status)`。
+见 FR-13。额外：`short_code` varchar(12) 索引、`card_message_id` varchar(128)。
+`id` 即幂等键（`clientRequestId=actionId`），**不另设 `idempotency_key`**（字段已删除，
+避免两个事实源）。`args_json`/`preview_text`/`result_json` 均 LONGVARCHAR。
+索引 `(status, expires_at)`、`(sender_id, channel, external_chat_id, status)`。
 
 **存储量**：`args_json`/`assistant_text` 用 LONGVARCHAR，不裸 `@Lob`（PG 会落 oid，踩过事故）。
 
@@ -773,7 +878,7 @@ M4 候选：文档新版本、知识提案采纳、需求流程阶段动作、�
 ```yaml
 devmind:
   copilot:
-    enabled: true
+    enabled: false         # 首次部署默认关闭；配置并验证 CHAT 端点后显式开启（上线检查见 §11）
     endpoint-id:           # 空 = 平台默认 CHAT 端点
     tool-mode: auto        # native | json | auto
     max-steps: 8
@@ -787,12 +892,15 @@ devmind:
     model-timeout-seconds: 90
     turn-timeout-seconds: 180
     confirm-ttl-minutes: 10
+    confirm-preview-chunk-chars: 3000   # 危险操作完整预览的分段长度（不受 reply-max-chars 约束）
+    confirm-preview-max-chunks: 10      # 超过则拒绝创建确认单（不截断执行）
     max-turns-per-minute: 10
     max-concurrent-model: 4
     reply-progress-card: true
     allow-default-actor-writes: false
     audit-retention-days: 180
-    cleanup-cron: "0 40 3 * * *"
+    cleanup-cron: "0 40 3 * * *"       # 仅保留期删除
+    action-sweep-cron: "0 * * * * *"   # 每分钟：PENDING→EXPIRED / EXECUTING→FAILED；空=关闭
 ```
 
 配置放 `application.yml` 默认值；生产差异写 `application-local.yml`（禁入库）。
@@ -902,6 +1010,9 @@ devmind:
 | R9 | 群聊隐私：A 的智能体会话在群里可见 | 回复仍发群（与 CAP-75 一致）；会话上下文按 sender 隔离；敏感结果可配置仅私聊返回（M4） |
 | R10 | 写工具与既有状态机冲突（如需求已 DONE 再改状态） | 执行前重校验对象状态；服务层状态机最终把关，失败回执原样呈现 |
 | R11 | 自动工具调用与人工确认之间对象已变化 | 确认时重校验 + 参数快照；必要时提示"目标已变更，请重新发起" |
+| R12 | 确认单参数若被掩码/截断，确认后执行的内容与用户看到的原文不一致 | `copilot_actions.args_json` 存执行原文，掩码副本另存 `copilot_tool_calls`；危险预览分段发送、超限拒绝（FR-11/FR-28） |
+| R13 | 工具目录与既有 Service 签名不一致，实现被迫下探 Repository | §6.3 列出随工具交付的 Service 扩展；评审时逐工具对照签名 |
+| R14 | 对象级跨项目越权（只按对象 id 查） | 每个按对象 id 操作的工具强制反查 projectId 并调 `ToolAccessPolicy`（FR-21） |
 
 ## 13. 被否方案
 
