@@ -8,7 +8,7 @@ import type { CopilotTool } from '../types'
 import { RISK_OPTIONS, RiskTag } from './tags'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_FORM } from '../../../shared/utils/overlay'
+import { DRAWER_WIDE } from '../../../shared/utils/overlay'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 export default function ToolsPanel({ refreshTick = 0 }: { refreshTick?: number }) {
@@ -89,7 +89,7 @@ export default function ToolsPanel({ refreshTick = 0 }: { refreshTick?: number }
         locale={{ emptyText: '暂无已注册工具。能力模块提供 PlatformTool Bean 后会自动出现在这里。' }}
       />
 
-      <Drawer title="工具契约" open={!!detail} onClose={() => setDetail(null)} width={DRAWER_FORM}>
+      <Drawer title="工具契约" open={!!detail} onClose={() => setDetail(null)} width={DRAWER_WIDE}>
         {detail && (
           <Space direction="vertical" style={{ width: '100%' }} size={12}>
             <Descriptions column={2} size="small" bordered>

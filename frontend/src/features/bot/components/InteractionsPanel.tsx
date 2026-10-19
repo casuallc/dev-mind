@@ -1,5 +1,5 @@
 // CAP-75 M3 交互日志面板：bot 底座处理过的每条事件留痕（OK/FAILED/DEDUPED/REJECTED）。
-// 服务端真分页 + 渠道/状态/关键词过滤；行点击开抽屉看入站/出站全文（落库已截断 2000/4000）。
+// 服务端真分页 + 渠道/状态/关键词过滤；整行可点击开抽屉看入站/出站全文（落库已截断 2000/4000）。
 import { useCallback, useEffect, useState } from 'react'
 import { Badge, Descriptions, Drawer, Input, Select, Space, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -8,7 +8,7 @@ import type { BotInteraction } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_FORM } from '../../../shared/utils/overlay'
+import { DRAWER_WIDE } from '../../../shared/utils/overlay'
 
 const STATUS_LABEL: Record<string, string> = {
   OK: '成功',
@@ -97,7 +97,7 @@ export default function InteractionsPanel({ refreshTick = 0 }: { refreshTick?: n
       title: '入站',
       dataIndex: 'inputText',
       ellipsis: true,
-      render: (t: string | undefined, r) => (t ? <a onClick={() => setDetail(r)}>{t}</a> : '-'),
+      render: (t?: string) => t || '-',
     },
   ]
 
@@ -127,6 +127,7 @@ export default function InteractionsPanel({ refreshTick = 0 }: { refreshTick?: n
         loading={loading}
         columns={columns}
         dataSource={rows}
+        onRow={(r) => ({ onClick: () => setDetail(r), style: { cursor: 'pointer' } })}
         pagination={{
           current: page + 1,
           pageSize: size,
@@ -141,7 +142,7 @@ export default function InteractionsPanel({ refreshTick = 0 }: { refreshTick?: n
         locale={{ emptyText: '暂无交互记录。机器人收到并处理消息（含被门禁拒绝/去重命中）后自动留痕。' }}
       />
 
-      <Drawer title="交互详情" open={!!detail} onClose={() => setDetail(null)} width={DRAWER_FORM}>
+      <Drawer title="交互详情" open={!!detail} onClose={() => setDetail(null)} width={DRAWER_WIDE}>
         {detail && (
           <Space direction="vertical" style={{ width: '100%' }} size={12}>
             <Descriptions column={2} size="small" bordered>
