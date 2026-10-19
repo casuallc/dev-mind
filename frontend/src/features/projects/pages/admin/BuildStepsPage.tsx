@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
   Card,
+  Drawer,
   Form,
   Input,
   InputNumber,
@@ -28,6 +29,7 @@ import {
 import type { BuildStep, BuildStepInput } from '../../types'
 import { showError } from '../../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../../shared/utils/table'
+import { DRAWER_FORM } from '../../../../shared/utils/overlay'
 
 const LOCATION_OPTIONS = ['LOCAL', 'AGENT']
 
@@ -153,8 +155,21 @@ export default function BuildStepsPage() {
         pagination={LIST_PAGINATION}
         locale={{ emptyText: '暂无构建步骤。点击「添加步骤」创建第一个。' }}
       />
-      <Modal title={editing ? '编辑构建步骤' : '添加构建步骤'} open={open} onCancel={() => setOpen(false)}
-        onOk={() => form.submit()} okText="保存" width={560}>
+      <Drawer
+        title={editing ? '编辑构建步骤' : '添加构建步骤'}
+        open={open}
+        onClose={() => setOpen(false)}
+        width={DRAWER_FORM}
+        destroyOnHidden
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setOpen(false)}>取消</Button>
+            <Button type="primary" onClick={() => form.submit()}>
+              保存
+            </Button>
+          </Space>
+        }
+      >
         <Form form={form} layout="vertical" onFinish={onSave}>
           <Form.Item label="名称" name="name">
             <Input placeholder="如 编译打包" />
@@ -172,7 +187,7 @@ export default function BuildStepsPage() {
             <InputNumber min={0} />
           </Form.Item>
         </Form>
-      </Modal>
+      </Drawer>
     </Card>
   )
 }
