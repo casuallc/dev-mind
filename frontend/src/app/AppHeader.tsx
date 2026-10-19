@@ -1,31 +1,15 @@
-import { Layout, Space, Tag, Typography, Button, Tooltip } from 'antd'
+import { Layout, Space, Typography, Button, Tooltip } from 'antd'
 import { HomeOutlined } from '@ant-design/icons'
-import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../shared/api/client'
 import NotificationBell from '../features/notifications/components/NotificationBell'
 import UserMenu from '../features/auth/components/UserMenu'
 
 const { Header } = Layout
 
-interface HealthInfo {
-  status: string
-  service: string
-  version: string
-  time: string
-}
-
-/** 后台顶栏：当前选中菜单名 + 后端健康状态 + 通知铃铛 + 用户下拉（仅 AdminLayout 使用）。 */
+/** 后台顶栏：当前选中菜单名 + 通知铃铛 + 用户下拉（仅 AdminLayout 使用）。
+ * 版本/构建信息见用户下拉「关于」弹框。 */
 export default function AppHeader({ title }: { title: string }) {
   const navigate = useNavigate()
-  const [health, setHealth] = useState<HealthInfo | null>(null)
-
-  useEffect(() => {
-    api
-      .get<HealthInfo>('/health')
-      .then(setHealth)
-      .catch(() => setHealth(null))
-  }, [])
 
   return (
     <Header
@@ -38,12 +22,7 @@ export default function AppHeader({ title }: { title: string }) {
         gap: 12,
       }}
     >
-      <Space size={12}>
-        <Typography.Text strong>{title}</Typography.Text>
-        <Tag color={health?.status === 'UP' ? 'green' : 'red'}>
-          后端 {health ? `${health.status} · v${health.version}` : '未连接'}
-        </Tag>
-      </Space>
+      <Typography.Text strong>{title}</Typography.Text>
       <Space size={12}>
         {/* 与工作台顶栏「后台管理」入口同款：图标 + Tooltip */}
         <Tooltip title="返回工作台">

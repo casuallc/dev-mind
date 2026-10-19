@@ -210,6 +210,14 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <executions>
                     <execution>
+                        <!-- 生成 META-INF/build-info.properties（name/version/build.time），
+                             供 /api/about 展示产品版本与构建时间 -->
+                        <id>build-info</id>
+                        <goals>
+                            <goal>build-info</goal>
+                        </goals>
+                    </execution>
+                    <execution>
                         <!-- 仅跳过 repackage（瘦 jar，依赖散 jar 由 devmind-dist 收进 libs/）；
                              插件级 skip 会把 spring-boot:run 也跳过，必须收窄到执行上 -->
                         <id>repackage</id>
@@ -218,6 +226,15 @@
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+            <plugin>
+                <!-- 生成 git.properties（commit/branch/提交时间），供 /api/about 展示构建来源；
+                     无 .git 目录（如源码快照构建）时跳过不失败 -->
+                <groupId>io.github.git-commit-id</groupId>
+                <artifactId>git-commit-id-maven-plugin</artifactId>
+                <configuration>
+                    <failOnNoGitDirectory>false</failOnNoGitDirectory>
+                </configuration>
             </plugin>
         </plugins>
     </build>
