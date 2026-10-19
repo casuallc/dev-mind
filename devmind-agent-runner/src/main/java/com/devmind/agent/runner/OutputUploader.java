@@ -58,6 +58,23 @@ public final class OutputUploader {
      * @return null = 成功或无产出；非 null = 失败原因（调用方 log + system 事件告知）
      */
     public static String upload(RunnerConfig config, String sessionId, Path sessionDir) {
+        return upload(config, sessionId, sessionDir, null);
+    }
+
+    /**
+     * 扫描并上传会话产出（带归属过滤）。
+     *
+     * <p>CAP-74 修订（2026-10-19）：worklog 持久草稿区 {worklogRoot}/&lt;owner&gt;/ 跨会话共享
+     * 且永不删除，不过滤会把历史会话攒下的旧稿全部扫进本会话回传（"一推好多天"的根因）。
+     * {@code notBefore} 非空时只回传 mtime ≥ 该时刻的文件（= 本会话产出），旧稿原地保留、
+     * 不再重复上行；误纳无碍（服务端镜像有同内容零写/手改保护两道闸兜底），漏纳才丢数据，
+     * 故调用方传入的时刻应带宽限略早于真实启动点。</p>
+     *
+     * @param notBefore 只回传该时刻之后修改的文件；null = 不过滤（repo/chat 会话目录本会话独占，无需过滤）
+     * @return null = 成功或无产出；非 null = 失败原因（调用方 log + system 事件告知）
+     */
+    public static String upload(RunnerConfig config, String sessionId, Path sessionDir,
+                                java.time.Instant notBefore) {
         Path dir = sessionDir.resolve(OUTPUT_DIR);
         if (!Files.isDirectory(dir)) {
             return null;
@@ -66,11 +83,22 @@ public final class OutputUploader {
         try (Stream<Path> s = Files.list(dir)) {
             files = s.filter(Files::isRegularFile)
                     .filter(p -> {
-                        if (isValidOutputName(p.getFileName().toString())) {
-                            return true;
+                        if (!isValidOutputName(p.getFileName().toString())) {
+                            log.warn("产出文件名不在白名单，跳过回传: {}", p.getFileName());
+                            return false;
                         }
-                        log.warn("产出文件名不在白名单，跳过回传: {}", p.getFileName());
-                        return false;
+                        if (notBefore != null) {
+                            try {
+                                if (Files.getLastModifiedTime(p).toInstant().isBefore(notBefore)) {
+                                    log.debug("产出文件早于本会话启动，视为历史遗留跳过: {}", p.getFileName());
+                                    return false;
+                                }
+                            } catch (IOException e) {
+                                log.warn("读产出文件 mtime 失败跳过: {} err={}", p.getFileName(), e.getMessage());
+                                return false;
+                            }
+                        }
+                        return true;
                     })
                     .sorted()
                     .limit(MAX_FILES + 1L)

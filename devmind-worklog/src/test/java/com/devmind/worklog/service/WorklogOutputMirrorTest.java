@@ -155,17 +155,18 @@ class WorklogOutputMirrorTest {
     }
 
     @Test
-    void mirrorAll多天日报只推最新一天() {
-        // 同一对话跨天攒下 3 天旧稿：只写日期最新的 09-17，更早的一律不动
+    void mirrorAll镜像本会话全部成稿() {
+        // 2026-10-19 口径：镜像单位 = 当前会话产出的全部成稿（runner 侧回传已按会话过滤，
+        // 进来的每一份都算本会话产出），多天日报逐份写仓而非只挑日期最新的一份
         var r = mirror.mirrorAll(session("s1"), "u1", List.of(
                 output("daily-2026-09-15.md", "15号稿"),
                 output("daily-2026-09-17.md", "17号稿"),
                 output("daily-2026-09-16.md", "16号稿")));
-        assertEquals(List.of("日报 2026-09-17"), r.mirrored());
+        assertEquals(3, r.mirrored().size());
         assertTrue(r.skipped().isEmpty());
-        verify(repoService, times(1)).writeReport(eq("u1"),
+        verify(repoService, times(3)).writeReport(eq("u1"),
                 eq(WorklogRepoService.ReportKind.DAILY),
-                eq(LocalDate.of(2026, 9, 17)), eq("17号稿"), any(), any(), isNull());
+                any(), any(), any(), any(), isNull());
     }
 
     @Test

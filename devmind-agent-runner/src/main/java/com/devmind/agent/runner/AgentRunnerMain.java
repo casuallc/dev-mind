@@ -40,6 +40,9 @@ public class AgentRunnerMain {
     /** 强制升级时等待会话排空的上限（exit 帧 + finalizer push/清理）；须小于服务端 upgradeAckTimeoutMs */
     private static final long DRAIN_TIMEOUT_MS = 30_000;
 
+    /** worklog 产出归属过滤的宽限（防预写产出/时钟偏差被 mtime 截止点误滤） */
+    private static final java.time.Duration WORKLOG_OUTPUT_SKEW = java.time.Duration.ofMinutes(10);
+
     /** 轮询等会话表排空（进程退出收口在 readLoop 线程，含 finalizer 收尾）；超时不再等。 */
     private static void awaitSessionsDrained(RunnerSessionRegistry sessions) {
         long deadline = System.currentTimeMillis() + DRAIN_TIMEOUT_MS;
@@ -86,10 +89,14 @@ public class AgentRunnerMain {
 
         ServerConnection[] connRef = new ServerConnection[1];
         RunnerSessionRegistry sessions = new RunnerSessionRegistry(parser, frame -> connRef[0].send(frame));
+        // CAP-74 修订：worklog 持久草稿区跨会话共享，产出回传按会话过滤——launch 时记截止
+        // 时刻（含 10min 宽限防预写/时钟偏差，误纳由服务端镜像闸兜底），exit/collect 只回传
+        // 本会话产出的文件；exit 后移除防泄漏
+        java.util.Map<String, java.time.Instant> worklogOutputCutoff = new java.util.concurrent.ConcurrentHashMap<>();
         // CAP-37：进程退出后、finalizer 清理工作区前回传 .devmind/output 产出；
         // 失败仅 system 事件告知，不阻塞 exit 帧（setter 注入：hook 内需反向引用 registry）
         sessions.setOutputHook((sid, dir) -> {
-            String err = OutputUploader.upload(config, sid, dir);
+            String err = OutputUploader.upload(config, sid, dir, worklogOutputCutoff.remove(sid));
             if (err != null) {
                 sessions.reportSystem(sid, "[runner] " + err);
             }
@@ -171,7 +178,7 @@ public class AgentRunnerMain {
         ServerConnection conn = new ServerConnection(config, mapper,
                 frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, workspace,
                         execHandler, verifyHandler, procHandler, pkgHandler, watcher, queryHandler,
-                        terminalHandler, fileHandler, connRef[0]),
+                        terminalHandler, fileHandler, worklogOutputCutoff, connRef[0]),
                 () -> connRef[0].send(helloFrame(sessions, version, workspaceBytes.get(),
                         config.labels(), toolchain.get())));
         connRef[0] = conn;
@@ -279,6 +286,7 @@ public class AgentRunnerMain {
                                     WorkspaceWatcher watcher,
                                     WorkspaceQueryHandler queryHandler, TerminalHandler terminalHandler,
                                     FileHandler fileHandler,
+                                    java.util.Map<String, java.time.Instant> worklogOutputCutoff,
                                     ServerConnection conn) {
         // CAP-43：帧携带 proxy{url,scopes}（协议 v8+，节点配了外网代理才带）→ 刷新进程级
         // NodeProxy holder，git/claude/exec 三 scope 消费点直接读 holder；帧无此字段不动 holder
@@ -287,7 +295,8 @@ public class AgentRunnerMain {
         String type = frame.path("type").asText("");
         String sessionId = frame.path("sessionId").asText("");
         switch (type) {
-            case "launch" -> handleLaunch(frame, sessionId, config, executor, sessions, workspace, watcher, conn);
+            case "launch" -> handleLaunch(frame, sessionId, config, executor, sessions, workspace,
+                    watcher, worklogOutputCutoff, conn);
             case "exec" -> execHandler.handle(frame); // CAP-36：构建/部署/测试/发版下发执行
             case "verify_push" -> verifyHandler.handlePush(frame); // CAP-73：验证链 PUSHING（需求分支推远端）
             case "verify_pack" -> verifyHandler.handlePack(frame); // CAP-73：验证链 BUILDING（构建+产物包上传）
@@ -302,7 +311,7 @@ public class AgentRunnerMain {
             case "finish" -> sessions.closeStdin(sessionId);
             case "kill", "suspend" -> sessions.kill(sessionId);
             case "upgrade" -> handleUpgrade(frame, config, configFile, sessions, conn);
-            case "collect_output" -> handleCollectOutput(sessionId, config, sessions, conn);
+            case "collect_output" -> handleCollectOutput(sessionId, config, sessions, worklogOutputCutoff, conn);
             case "worklog_push" -> handleWorklogPush(frame, conn);
             case "workspace_finalize" -> handleWorkspaceFinalize(frame, config, sessions, workspace, conn);
             case "workspace_release" -> handleWorkspaceRelease(frame, sessions, workspace, conn);
@@ -473,6 +482,7 @@ public class AgentRunnerMain {
     private static void handleLaunch(JsonNode frame, String sessionId, RunnerConfig config,
                                      SessionExecutor executor, RunnerSessionRegistry sessions,
                                      RunnerWorkspace workspace, WorkspaceWatcher watcher,
+                                     java.util.Map<String, java.time.Instant> worklogOutputCutoff,
                                      ServerConnection conn) {
         try {
             if (sessions.size() >= config.maxConcurrent()) {
@@ -632,6 +642,12 @@ public class AgentRunnerMain {
                 env.putIfAbsent("NO_PROXY", "127.0.0.1,localhost");
                 env.putIfAbsent("no_proxy", "127.0.0.1,localhost");
             }
+            if ("worklog".equals(kind)) {
+                // CAP-74 修订：共享草稿区的产出归属截止点——只回传本会话启动后写出的文件
+                // （10min 宽限防预写/时钟偏差误滤；误纳旧稿无碍，服务端镜像有同内容零写+手改保护）
+                worklogOutputCutoff.put(sessionId,
+                        java.time.Instant.now().minus(WORKLOG_OUTPUT_SKEW));
+            }
             Process proc = executor.launch(new SessionExecutor.LaunchContext(
                     sessionId, workDir, taskSpec, model, permissionMode, env, resumeSessionId));
             sessions.register(sessionId, proc, finalizer, sessionDir);
@@ -639,6 +655,7 @@ public class AgentRunnerMain {
             // CAP-54：launch 后尽快推初始快照（面板可见「干净工作区」基线）
             watcher.onLaunch(sessionId);
         } catch (Exception e) {
+            worklogOutputCutoff.remove(sessionId); // 未注册不会有 exit 钩子，防泄漏
             log.warn("拉起会话失败: session={} err={}", sessionId, e.getMessage());
             conn.send(Map.of("type", "launched", "sessionId", sessionId,
                     "ok", false, "error", String.valueOf(e.getMessage())));
@@ -652,7 +669,9 @@ public class AgentRunnerMain {
      * 会话不在本节点运行（已退出/不认得）→ ok:false（退出时已自动回传，不视为故障）。
      */
     private static void handleCollectOutput(String sessionId, RunnerConfig config,
-                                            RunnerSessionRegistry sessions, ServerConnection conn) {
+                                            RunnerSessionRegistry sessions,
+                                            java.util.Map<String, java.time.Instant> worklogOutputCutoff,
+                                            ServerConnection conn) {
         Thread.ofVirtual().name("collect-output-" + sessionId).start(() -> {
             var dir = sessions.sessionDirOf(sessionId);
             if (dir.isEmpty()) {
@@ -660,7 +679,9 @@ public class AgentRunnerMain {
                         "ok", false, "error", "会话不在本节点运行（退出时已自动回传产出）"));
                 return;
             }
-            String err = OutputUploader.upload(config, sessionId, dir.get());
+            // worklog 共享草稿区同样按会话归属过滤（会话在跑，只读不 remove）
+            String err = OutputUploader.upload(config, sessionId, dir.get(),
+                    worklogOutputCutoff.get(sessionId));
             if (err != null) {
                 conn.send(Map.of("type", "output_collected", "sessionId", sessionId,
                         "ok", false, "error", err));

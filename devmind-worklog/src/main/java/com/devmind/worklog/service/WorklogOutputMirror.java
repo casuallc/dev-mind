@@ -33,13 +33,14 @@ import java.util.regex.Pattern;
  * 发降级通知；空间内手工对话（无场景）有成稿静默写仓、缺文件不告警。另提供
  * {@link #syncSession} 手动同步（前端对话页「推送工作日志」）。</p>
  *
- * <p>镜像写仓口径（2026-10-19 修订：「只推当前的一份」+ 手改保护）：仓是唯一事实源，
+ * <p>镜像写仓口径（2026-10-19 修订：「只推当前会话产生的」+ 手改保护）：仓是唯一事实源，
  * 成稿只是待上交的草稿。场景生成（{@link #mirrorDaily}/{@link #mirrorWeekly}）无条件写仓
  * ——generate 非 force 已在文件存在时跳过，force 是显式覆盖意图。手工对话与「推送工作
- * 日志」走的 {@link #mirrorAll} 先收窄再设闸：<strong>每种只取日期最新的一份</strong>
- * （同一对话跨天攒下的旧稿不搬运）；选中的那份内容一致不写不提示（旧稿重复搬运零 commit
- * 也不再刷"已写入"）；仓内最后提交是手动编辑（DevMind-Source=manual）且内容有差异 →
- * 跳过进 skipped（手改永不被成稿静默覆盖，要覆盖走日志页 force 重新生成）。</p>
+ * 日志」走的 {@link #mirrorAll} 镜像本会话产出的全部成稿：runner 侧产出回传已按会话过滤
+ * （worklog 共享草稿区只回传本会话启动后写出的文件，session_outputs 不再混入历史会话旧稿），
+ * 这里逐份过两道闸：内容与仓一致不写不提示（重复推送零 commit 也不再刷"已写入"）；仓内
+ * 最后提交是手动编辑（DevMind-Source=manual）且内容有差异 → 跳过进 skipped（手改永不被
+ * 成稿静默覆盖，要覆盖走日志页 force 重新生成）。</p>
  */
 @Component
 public class WorklogOutputMirror {
@@ -125,19 +126,15 @@ public class WorklogOutputMirror {
     private enum MirrorGuard { WRITE, UNCHANGED, MANUAL_EDITED }
 
     /**
-     * 手工对话/手动同步镜像（2026-10-19 口径定稿：「只推当前的一份」）——同一对话跨天使用
-     * 会在 outputs 里攒下多天旧稿，镜像不是全量搬运：<strong>每种只取日期最新的一份</strong>
-     * （日报取最大日期、周报取最大周，更早日期的旧成稿一律不动）。选中的那份再过两道闸：
-     * 内容与仓一致不写不提示；仓内最后提交是手动编辑且内容有差异 → 跳过进 skipped
-     * （仓是事实源，手改永不被成稿静默覆盖）。场景生成不走本类镜像（见类注释）。
+     * 手工对话/手动同步镜像（2026-10-19 口径定稿：「镜像当前会话产生的全部成稿」）——
+     * runner 侧产出回传已按会话过滤（共享草稿区的历史旧稿不进 session_outputs），这里对
+     * outputs 里每一份命中的日报/周报逐个过闸：内容与仓一致不写不提示；仓内最后提交是
+     * 手动编辑且内容有差异 → 跳过进 skipped（仓是事实源，手改永不被成稿静默覆盖）。
+     * 场景生成不走本类镜像（见类注释）。
      */
     public WorklogSyncResult mirrorAll(SessionEntity s, String owner, List<SessionOutputEntity> outputs) {
         List<String> mirrored = new ArrayList<>();
         List<String> skipped = new ArrayList<>();
-        SessionOutputEntity latestDaily = null;
-        LocalDate latestDailyDate = null;
-        SessionOutputEntity latestWeekly = null;
-        LocalDate latestWeekStart = null;
         for (SessionOutputEntity o : outputs) {
             String fileName = o.getFileName();
             if (fileName == null) {
@@ -147,33 +144,19 @@ public class WorklogOutputMirror {
             Matcher wm = WEEKLY_FILE.matcher(fileName);
             if (dm.matches()) {
                 LocalDate date = LocalDate.parse(dm.group(1));
-                if (latestDailyDate == null || date.isAfter(latestDailyDate)) {
-                    latestDaily = o;
-                    latestDailyDate = date;
+                switch (mirrorGuard(owner, WorklogRepoService.ReportKind.DAILY, date, o.getContent())) {
+                    case UNCHANGED -> { }
+                    case MANUAL_EDITED -> skipped.add("日报 " + date + "（仓内已被手动修改，未覆盖）");
+                    case WRITE -> mirrored.add(writeDaily(s, owner, o));
                 }
             } else if (wm.matches()) {
                 LocalDate weekStart = WorklogRepoService.weekStartOf(
                         Integer.parseInt(wm.group(1)), Integer.parseInt(wm.group(2)));
-                if (latestWeekStart == null || weekStart.isAfter(latestWeekStart)) {
-                    latestWeekly = o;
-                    latestWeekStart = weekStart;
+                switch (mirrorGuard(owner, WorklogRepoService.ReportKind.WEEKLY, weekStart, o.getContent())) {
+                    case UNCHANGED -> { }
+                    case MANUAL_EDITED -> skipped.add("周报 " + weekStart + " 周（仓内已被手动修改，未覆盖）");
+                    case WRITE -> mirrored.add(writeWeekly(s, owner, o));
                 }
-            }
-        }
-        if (latestDaily != null) {
-            switch (mirrorGuard(owner, WorklogRepoService.ReportKind.DAILY, latestDailyDate,
-                    latestDaily.getContent())) {
-                case UNCHANGED -> { }
-                case MANUAL_EDITED -> skipped.add("日报 " + latestDailyDate + "（仓内已被手动修改，未覆盖）");
-                case WRITE -> mirrored.add(writeDaily(s, owner, latestDaily));
-            }
-        }
-        if (latestWeekly != null) {
-            switch (mirrorGuard(owner, WorklogRepoService.ReportKind.WEEKLY, latestWeekStart,
-                    latestWeekly.getContent())) {
-                case UNCHANGED -> { }
-                case MANUAL_EDITED -> skipped.add("周报 " + latestWeekStart + " 周（仓内已被手动修改，未覆盖）");
-                case WRITE -> mirrored.add(writeWeekly(s, owner, latestWeekly));
             }
         }
         return new WorklogSyncResult(mirrored, skipped);
