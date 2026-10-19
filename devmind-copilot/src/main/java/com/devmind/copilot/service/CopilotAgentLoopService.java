@@ -74,6 +74,15 @@ public class CopilotAgentLoopService implements AgentGateway {
 
     private static final Pattern CONFIRM = Pattern.compile("^确认(?:\\s+([A-Za-z0-9-]+))?$");
     private static final Pattern CANCEL = Pattern.compile("^取消(?:\\s+([A-Za-z0-9-]+))?$");
+    /**
+     * 平台确认单文本指纹（ confirmations() 下发格式）：单行/多行/分片三种形态。
+     * 用于两处：历史回放消毒 + 模型幻觉识别（弱模型抄历史里的格式编造假短码，用户确认查无此单）。
+     */
+    private static final Pattern CONFIRM_FORMAT = Pattern.compile(
+            "(?m)^[\\s>#*-]*待确认\\s*(\\[|\\d+\\s*个操作)|回复「确认|请使用完整短码逐张确认");
+    /** 历史回放时确认单原文的替身：保留事实、抹掉可模仿的格式与短码。 */
+    private static final String CONFIRM_PLACEHOLDER =
+            "（平台已下发写操作确认单并等待用户确认；确认单与短码由平台生成，无需关注其格式）";
     private static final int MAX_LINKS = 5;
     private static final int MAX_MESSAGE_QUERY = 100;
 
@@ -529,7 +538,12 @@ public class CopilotAgentLoopService implements AgentGateway {
             }
             recordUsage(run, completion);
             if (!completion.hasToolCalls()) {
-                return finishAnswer(run, completion.content());
+                AgentReply guarded = guardHallucinatedConfirmation(run, completion.content(),
+                        completion.content());
+                if (guarded != null) {
+                    return guarded;
+                }
+                continue;
             }
             run.messages.add(Message.assistant(completion.content(), completion.toolCalls()));
             AgentReply pending = processToolCalls(run, completion.toolCalls());
@@ -575,7 +589,12 @@ public class CopilotAgentLoopService implements AgentGateway {
                 continue;
             }
             if (decision.answer() != null) {
-                return finishAnswer(run, decision.answer());
+                AgentReply guarded = guardHallucinatedConfirmation(run, completion.content(),
+                        decision.answer());
+                if (guarded != null) {
+                    return guarded;
+                }
+                continue;
             }
             ToolCall call = new ToolCall("json_" + CopilotIds.newId(), decision.tool(), decision.args());
             run.messages.add(Message.assistant(completion.content()));
@@ -1012,7 +1031,7 @@ public class CopilotAgentLoopService implements AgentGateway {
             if ("user".equals(m.getRole())) {
                 out.add(Message.user(content));
             } else if ("assistant".equals(m.getRole())) {
-                out.add(Message.assistant(content));
+                out.add(Message.assistant(sanitizeHistoryContent(content)));
             }
         }
         // 本轮用户消息在 turn 创建时已入历史表，这里去掉最后一条自身，避免重复
@@ -1023,6 +1042,16 @@ public class CopilotAgentLoopService implements AgentGateway {
             }
         }
         return out;
+    }
+
+    /** 文本是否长得像平台确认单（「待确认 [短码]」「回复「确认 …」」等下发格式）。 */
+    static boolean looksLikeConfirmation(String text) {
+        return text != null && CONFIRM_FORMAT.matcher(text).find();
+    }
+
+    /** 历史里的确认单原文替换为无格式占位，防模型模仿编造假确认单（真机事故：假短码确认查无此单）。 */
+    static String sanitizeHistoryContent(String content) {
+        return looksLikeConfirmation(content) ? CONFIRM_PLACEHOLDER : content;
     }
 
     private String runTextSafe(Run run) {
@@ -1044,6 +1073,8 @@ public class CopilotAgentLoopService implements AgentGateway {
         sb.append("规则：\n");
         sb.append("- 只使用下方工具；需要跨项目查找时先调用 list_projects，禁止猜测或编造项目/对象 id。\n");
         sb.append("- 写操作会在平台生成确认单，必须由用户本人确认后才会执行；不要声称已经执行。\n");
+        sb.append("- 确认单与短码由平台在你调用写操作工具后自动生成并下发；禁止自己编写「待确认 […]」"
+                + "样式的文本，禁止编造短码或让用户回复确认。\n");
         sb.append("- 工具失败时如实转述原因，不要伪造结果；不要透露密钥、内部 URL、堆栈。\n");
         sb.append("- 回答使用简体中文，简洁、可操作；必要时给出下一步建议。\n\n");
         sb.append("可用工具：\n");
@@ -1074,6 +1105,33 @@ public class CopilotAgentLoopService implements AgentGateway {
     // ------------------------------------------------------------------
     // 结果收口
     // ------------------------------------------------------------------
+
+    /**
+     * 幻觉确认单护栏（FR-13 配套）：模型未调用写工具却输出确认单格式文本（编造短码）。
+     * 存在真实确认单（本轮已建或 scope 内有 PENDING）时不拦——模型可能只是在指引用户确认既有单。
+     *
+     * @return 非 null = 终止回复（正常回答或护栏失败）；null = 已追加校正消息，调用方继续循环重试
+     */
+    private AgentReply guardHallucinatedConfirmation(Run run, String assistantRaw, String answer) {
+        boolean faked = looksLikeConfirmation(answer)
+                && actionRepo.findByTurnIdOrderByCreatedAtAsc(run.turn.getId()).isEmpty()
+                && actions.pendingInScope(run.req.channel(), run.req.externalChatId(),
+                        run.req.senderId()).isEmpty();
+        if (!faked) {
+            return finishAnswer(run, answer);
+        }
+        run.confirmHallucinations++;
+        if (run.confirmHallucinations > 1) {
+            log.warn("模型二次输出幻觉确认单，终止本轮: turn={} model={}", run.turn.getId(), run.turn.getModel());
+            return failTurn(run, "模型未能正确发起写操作（输出了无效确认单），请换个说法重试，或直接在平台操作");
+        }
+        log.warn("模型输出幻觉确认单（未调用写工具），校正重试: turn={}", run.turn.getId());
+        run.messages.add(Message.assistant(assistantRaw));
+        run.messages.add(Message.user("系统校正：你刚才输出了「待确认」样式的确认单文本，但并未调用任何写操作工具。"
+                + "确认单与短码由平台在工具调用后自动生成，禁止手写编造。"
+                + "请重新处理用户请求：要么调用对应工具，要么如实回答。"));
+        return null;
+    }
 
     private AgentReply finishAnswer(Run run, String rawContent) {
         String text = CopilotJson.maskText(rawContent == null ? "" : rawContent.trim());
@@ -1374,6 +1432,7 @@ public class CopilotAgentLoopService implements AgentGateway {
         int steps;
         int promptTokens;
         int completionTokens;
+        int confirmHallucinations;
         String mode = "native";
 
         Run(AgentRequest req, CopilotIdentityService.Identity identity,
