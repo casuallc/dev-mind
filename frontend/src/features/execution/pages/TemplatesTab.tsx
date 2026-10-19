@@ -11,6 +11,7 @@ import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { DRAWER_FORM } from '../../../shared/utils/overlay'
 import FitTable from '../../../shared/components/FitTable'
+import CopyableLongText from '../../../shared/components/CopyableLongText'
 
 const CAPABILITIES = ['build', 'deploy', 'release', 'test', 'logs', 'exec']
 
@@ -113,19 +114,26 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
   }
 
   const columns: ColumnsType<TemplateView> = [
-    { title: '编码', dataIndex: 'code', width: 120, render: (c) => <Typography.Text code>{c}</Typography.Text> },
-    { title: '名称', dataIndex: 'name' },
+    { title: '编码', dataIndex: 'code', width: 180, render: (c) => <Typography.Text code>{c}</Typography.Text> },
+    { title: '名称', dataIndex: 'name', width: 220 },
+    {
+      title: '模板正文',
+      dataIndex: 'templateText',
+      render: (t: string, r) => (
+        <CopyableLongText text={t} maxWidth={360} modalTitle={`模板正文 · ${r.name || r.code}`} />
+      ),
+    },
     {
       title: '允许能力',
       dataIndex: 'allowed',
-      width: 220,
+      width: 160,
       render: (a: string[]) =>
         a && a.length > 0 ? a.map((x) => <Tag key={x} color="blue">{x}</Tag>) : <Typography.Text type="secondary">全部</Typography.Text>,
     },
     {
       title: '参数',
       dataIndex: 'params',
-      width: 140,
+      width: 240,
       render: (p: TemplateView['params']) =>
         p && p.length > 0 ? p.map((x) => <Tag key={x.name}>{x.name}{x.required ? '*' : ''}</Tag>) : '-',
     },
