@@ -33,6 +33,10 @@ public class UserEntity {
     @Column(name = "display_name", length = 128)
     private String displayName;
 
+    /** 描述/备注（如人员职责），管理页可编辑 */
+    @Column(length = 512)
+    private String description;
+
     /** BCrypt 哈希；null = 不可密码登录（系统身份） */
     @Column(name = "password_hash", length = 128)
     private String passwordHash;
@@ -58,6 +62,8 @@ public class UserEntity {
     public void setUsername(String username) { this.username = username; }
     public String getDisplayName() { return displayName; }
     public void setDisplayName(String displayName) { this.displayName = displayName; }
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
     public String getPasswordHash() { return passwordHash; }
     public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
     public String getRole() { return role; }

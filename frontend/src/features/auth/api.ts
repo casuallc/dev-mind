@@ -24,11 +24,20 @@ export function listUsers() {
   return api.get<AuthUser[]>('/auth/users')
 }
 
-export function createUser(req: { username: string; displayName?: string; password: string; role: string }) {
+export function createUser(req: {
+  username: string
+  displayName?: string
+  description?: string
+  password: string
+  role: string
+}) {
   return api.post<AuthUser>('/auth/users', req)
 }
 
-export function updateUser(id: string, req: { displayName?: string; role?: string; status?: string }) {
+export function updateUser(
+  id: string,
+  req: { displayName?: string; description?: string; role?: string; status?: string },
+) {
   return api.put<AuthUser>(`/auth/users/${id}`, req)
 }
 

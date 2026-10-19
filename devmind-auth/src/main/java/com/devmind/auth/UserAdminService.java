@@ -73,6 +73,7 @@ public class UserAdminService {
         u.setUsername(username);
         u.setDisplayName(req.displayName() == null || req.displayName().isBlank()
                 ? username : req.displayName().trim());
+        u.setDescription(trimToNull(req.description()));
         u.setRole(requireRole(req.role()));
         u.setStatus(UserEntity.STATUS_ACTIVE);
         u.setPasswordHash(passwordEncoder.encode(req.password()));
@@ -85,6 +86,9 @@ public class UserAdminService {
         UserEntity u = require(id);
         if (req.displayName() != null && !req.displayName().isBlank()) {
             u.setDisplayName(req.displayName().trim());
+        }
+        if (req.description() != null) {
+            u.setDescription(trimToNull(req.description()));
         }
         if (req.role() != null && !req.role().isBlank()) {
             String role = requireRole(req.role());
@@ -144,6 +148,14 @@ public class UserAdminService {
     private UserEntity require(String id) {
         return userRepo.findById(id)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "用户不存在: " + id));
+    }
+
+    private static String trimToNull(String s) {
+        if (s == null) {
+            return null;
+        }
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
     }
 
     private String requireRole(String role) {

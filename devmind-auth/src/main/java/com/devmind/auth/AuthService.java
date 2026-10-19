@@ -78,8 +78,8 @@ public class AuthService {
     }
 
     public UserView toView(UserEntity u) {
-        return new UserView(u.getId(), u.getUsername(), u.getDisplayName(), u.getRole(), u.getStatus(),
-                u.getCreatedAt());
+        return new UserView(u.getId(), u.getUsername(), u.getDisplayName(), u.getDescription(), u.getRole(),
+                u.getStatus(), u.getCreatedAt());
     }
 
     private LoginResponse issueTokens(UserEntity u) {

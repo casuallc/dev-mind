@@ -2,6 +2,7 @@ export interface AuthUser {
   id: string
   username: string
   displayName: string
+  description?: string | null
   role: string
   status: string
   createdAt?: string

@@ -15,10 +15,12 @@ export default function UserManagementPage() {
   const [users, setUsers] = useState<AuthUser[]>([])
   const [loading, setLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+  const [editTarget, setEditTarget] = useState<AuthUser | null>(null)
   const [resetTarget, setResetTarget] = useState<AuthUser | null>(null)
   const [roleTarget, setRoleTarget] = useState<AuthUser | null>(null)
   const [roleValue, setRoleValue] = useState<string>('')
   const [createForm] = Form.useForm()
+  const [editForm] = Form.useForm()
   const [resetForm] = Form.useForm()
   const me = getUserSnapshot()
 
@@ -42,6 +44,25 @@ export default function UserManagementPage() {
       reload()
     } catch (e) {
       showError(e, '创建失败')
+    }
+  }
+
+  const openEdit = (u: AuthUser) => {
+    setEditTarget(u)
+    editForm.setFieldsValue({ displayName: u.displayName, description: u.description ?? '' })
+  }
+
+  const onSaveEdit = async () => {
+    const v = await editForm.validateFields()
+    if (!editTarget) return
+    try {
+      await updateUser(editTarget.id, { displayName: v.displayName, description: v.description })
+      message.success(`已保存 ${editTarget.username} 的资料`)
+      setEditTarget(null)
+      editForm.resetFields()
+      reload()
+    } catch (e) {
+      showError(e, '保存失败')
     }
   }
 
@@ -134,6 +155,12 @@ export default function UserManagementPage() {
           { title: '用户名', dataIndex: 'username' },
           { title: '显示名', dataIndex: 'displayName' },
           {
+            title: '描述',
+            dataIndex: 'description',
+            ellipsis: true,
+            render: (v?: string | null) => v || <Typography.Text type="secondary">—</Typography.Text>,
+          },
+          {
             title: '角色',
             dataIndex: 'role',
             render: (role: string) =>
@@ -160,12 +187,15 @@ export default function UserManagementPage() {
           { title: '创建时间', dataIndex: 'createdAt', width: 160, render: (v?: string) => fmtTime(v) },
           {
             title: '操作',
-            width: 280,
+            width: 340,
             render: (_, u) => {
               const isLocal = u.username === 'local'
               const isSelf = u.username === me?.username
               return (
                 <Space size={4}>
+                  <Button size="small" disabled={isLocal} onClick={() => openEdit(u)}>
+                    编辑
+                  </Button>
                   <Button size="small" disabled={isLocal} onClick={() => openRole(u)}>
                     角色
                   </Button>
@@ -205,6 +235,27 @@ export default function UserManagementPage() {
       </Modal>
 
       <Modal
+        title={`编辑用户：${editTarget?.username ?? ''}`}
+        open={!!editTarget}
+        onOk={onSaveEdit}
+        onCancel={() => setEditTarget(null)}
+        destroyOnHidden
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item
+            name="displayName"
+            label="显示名"
+            rules={[{ required: true, message: '请输入显示名' }, { max: 128 }]}
+          >
+            <Input placeholder="展示用名称" />
+          </Form.Item>
+          <Form.Item name="description" label="描述" rules={[{ max: 512 }]}>
+            <Input.TextArea rows={3} placeholder="选填，如职责/备注；留空则清空" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
         title="新建用户"
         open={createOpen}
         onOk={onCreate}
@@ -217,6 +268,9 @@ export default function UserManagementPage() {
           </Form.Item>
           <Form.Item name="displayName" label="显示名">
             <Input placeholder="留空则同用户名" />
+          </Form.Item>
+          <Form.Item name="description" label="描述" rules={[{ max: 512 }]}>
+            <Input.TextArea rows={2} placeholder="选填，如职责/备注" />
           </Form.Item>
           <Form.Item
             name="password"
