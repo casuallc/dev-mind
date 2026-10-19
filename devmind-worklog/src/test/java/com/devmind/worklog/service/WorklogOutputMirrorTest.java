@@ -140,17 +140,77 @@ class WorklogOutputMirrorTest {
     }
 
     @Test
-    void 手工对话mirrorAll静默写仓全部成稿() {
+    void 手工对话mirrorAll写仓有闸全部成稿() {
+        // readReport 默认返回 Optional.empty()（Mockito 默认答案）→ 全部 WRITE
         var r = mirror.mirrorAll(session("s1"), "u1", List.of(
                 output("daily-2026-09-15.md", "日报v1"),
                 output("notes.md", "非契约文件忽略"),
                 output("weekly-2026-W38.md", "周报v1")));
         assertEquals(2, r.mirrored().size());
-        assertTrue(r.skipped().isEmpty(), "CAP-74 无确认态，skipped 恒空");
+        assertTrue(r.skipped().isEmpty(), "仓内无既有文件时无跳过");
         verify(repoService).writeReport(eq("u1"), eq(WorklogRepoService.ReportKind.DAILY),
                 eq(LocalDate.of(2026, 9, 15)), eq("日报v1"), any(), any(), isNull());
         verify(repoService).writeReport(eq("u1"), eq(WorklogRepoService.ReportKind.WEEKLY),
                 eq(LocalDate.of(2026, 9, 14)), eq("周报v1"), any(), any(), isNull());
+    }
+
+    @Test
+    void mirrorAll多天日报只推最新一天() {
+        // 同一对话跨天攒下 3 天旧稿：只写日期最新的 09-17，更早的一律不动
+        var r = mirror.mirrorAll(session("s1"), "u1", List.of(
+                output("daily-2026-09-15.md", "15号稿"),
+                output("daily-2026-09-17.md", "17号稿"),
+                output("daily-2026-09-16.md", "16号稿")));
+        assertEquals(List.of("日报 2026-09-17"), r.mirrored());
+        assertTrue(r.skipped().isEmpty());
+        verify(repoService, times(1)).writeReport(eq("u1"),
+                eq(WorklogRepoService.ReportKind.DAILY),
+                eq(LocalDate.of(2026, 9, 17)), eq("17号稿"), any(), any(), isNull());
+    }
+
+    @Test
+    void mirrorAll内容一致不写仓不提示() {
+        // 仓里已有同内容日报（旧稿重复搬运）→ 不写、不进 mirrored/skipped
+        org.mockito.Mockito.when(repoService.readReport(eq("u1"),
+                        eq(WorklogRepoService.ReportKind.DAILY), eq(LocalDate.of(2026, 9, 15))))
+                .thenReturn(java.util.Optional.of(new WorklogRepoService.ReportContent(
+                        "personal-u1", "u1/daily/2026-09-15.md", "日报v1",
+                        null, null, "ai", "s0")));
+        var r = mirror.mirrorAll(session("s1"), "u1", List.of(output("daily-2026-09-15.md", "日报v1")));
+        assertTrue(r.mirrored().isEmpty(), "内容一致零写仓，消除「推了好多天」的假象");
+        assertTrue(r.skipped().isEmpty());
+        verify(repoService, times(0)).writeReport(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void mirrorAll手改文件跳过不覆盖() {
+        // 仓内最后提交是 manual 且内容与成稿不同 → 跳过，手改不被静默覆盖
+        org.mockito.Mockito.when(repoService.readReport(eq("u1"),
+                        eq(WorklogRepoService.ReportKind.DAILY), eq(LocalDate.of(2026, 9, 15))))
+                .thenReturn(java.util.Optional.of(new WorklogRepoService.ReportContent(
+                        "personal-u1", "u1/daily/2026-09-15.md", "手动改过的内容",
+                        null, null, "manual", null)));
+        var r = mirror.mirrorAll(session("s1"), "u1", List.of(output("daily-2026-09-15.md", "旧成稿")));
+        assertTrue(r.mirrored().isEmpty());
+        assertEquals(1, r.skipped().size());
+        assertTrue(r.skipped().get(0).contains("2026-09-15") && r.skipped().get(0).contains("手动修改"),
+                "skipped 带原因: " + r.skipped());
+        verify(repoService, times(0)).writeReport(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void mirrorAllAI稿覆盖AI稿正常写() {
+        // 仓内是 AI 稿（非手改）且内容有差异 → 正常覆盖写仓
+        org.mockito.Mockito.when(repoService.readReport(eq("u1"),
+                        eq(WorklogRepoService.ReportKind.DAILY), eq(LocalDate.of(2026, 9, 15))))
+                .thenReturn(java.util.Optional.of(new WorklogRepoService.ReportContent(
+                        "personal-u1", "u1/daily/2026-09-15.md", "旧AI稿",
+                        null, null, "ai", "s0")));
+        var r = mirror.mirrorAll(session("s1"), "u1", List.of(output("daily-2026-09-15.md", "新AI稿")));
+        assertEquals(1, r.mirrored().size());
+        assertTrue(r.skipped().isEmpty());
+        verify(repoService).writeReport(eq("u1"), eq(WorklogRepoService.ReportKind.DAILY),
+                eq(LocalDate.of(2026, 9, 15)), eq("新AI稿"), any(), any(), isNull());
     }
 
     private static SessionOutputEntity findMatch(List<SessionOutputEntity> outputs, java.util.regex.Pattern p) {

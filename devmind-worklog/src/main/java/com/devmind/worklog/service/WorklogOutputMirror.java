@@ -33,8 +33,13 @@ import java.util.regex.Pattern;
  * 发降级通知；空间内手工对话（无场景）有成稿静默写仓、缺文件不告警。另提供
  * {@link #syncSession} 手动同步（前端对话页「推送工作日志」）。</p>
  *
- * <p>CAP-74 覆盖口径：DRAFT/CONFIRMED 状态机已删除，会话成稿与手动编辑同权覆盖写仓
- * （防误覆盖靠 git 历史回溯 + 生成侧「非 force 已存在跳过」），skipped 恒空。</p>
+ * <p>镜像写仓口径（2026-10-19 修订：「只推当前的一份」+ 手改保护）：仓是唯一事实源，
+ * 成稿只是待上交的草稿。场景生成（{@link #mirrorDaily}/{@link #mirrorWeekly}）无条件写仓
+ * ——generate 非 force 已在文件存在时跳过，force 是显式覆盖意图。手工对话与「推送工作
+ * 日志」走的 {@link #mirrorAll} 先收窄再设闸：<strong>每种只取日期最新的一份</strong>
+ * （同一对话跨天攒下的旧稿不搬运）；选中的那份内容一致不写不提示（旧稿重复搬运零 commit
+ * 也不再刷"已写入"）；仓内最后提交是手动编辑（DevMind-Source=manual）且内容有差异 →
+ * 跳过进 skipped（手改永不被成稿静默覆盖，要覆盖走日志页 force 重新生成）。</p>
  */
 @Component
 public class WorklogOutputMirror {
@@ -116,21 +121,81 @@ public class WorklogOutputMirror {
         return mirrorAll(s, actor, outputService.list(sessionId));
     }
 
-    /** 把产出列表里全部命中的日报/周志成稿写仓（幂等：同内容零 commit；skipped 恒空）。 */
+    /** 镜像前置闸（{@link #mirrorAll} 专用）判定结果 */
+    private enum MirrorGuard { WRITE, UNCHANGED, MANUAL_EDITED }
+
+    /**
+     * 手工对话/手动同步镜像（2026-10-19 口径定稿：「只推当前的一份」）——同一对话跨天使用
+     * 会在 outputs 里攒下多天旧稿，镜像不是全量搬运：<strong>每种只取日期最新的一份</strong>
+     * （日报取最大日期、周报取最大周，更早日期的旧成稿一律不动）。选中的那份再过两道闸：
+     * 内容与仓一致不写不提示；仓内最后提交是手动编辑且内容有差异 → 跳过进 skipped
+     * （仓是事实源，手改永不被成稿静默覆盖）。场景生成不走本类镜像（见类注释）。
+     */
     public WorklogSyncResult mirrorAll(SessionEntity s, String owner, List<SessionOutputEntity> outputs) {
         List<String> mirrored = new ArrayList<>();
+        List<String> skipped = new ArrayList<>();
+        SessionOutputEntity latestDaily = null;
+        LocalDate latestDailyDate = null;
+        SessionOutputEntity latestWeekly = null;
+        LocalDate latestWeekStart = null;
         for (SessionOutputEntity o : outputs) {
             String fileName = o.getFileName();
             if (fileName == null) {
                 continue;
             }
-            if (DAILY_FILE.matcher(fileName).matches()) {
-                mirrored.add(writeDaily(s, owner, o));
-            } else if (WEEKLY_FILE.matcher(fileName).matches()) {
-                mirrored.add(writeWeekly(s, owner, o));
+            Matcher dm = DAILY_FILE.matcher(fileName);
+            Matcher wm = WEEKLY_FILE.matcher(fileName);
+            if (dm.matches()) {
+                LocalDate date = LocalDate.parse(dm.group(1));
+                if (latestDailyDate == null || date.isAfter(latestDailyDate)) {
+                    latestDaily = o;
+                    latestDailyDate = date;
+                }
+            } else if (wm.matches()) {
+                LocalDate weekStart = WorklogRepoService.weekStartOf(
+                        Integer.parseInt(wm.group(1)), Integer.parseInt(wm.group(2)));
+                if (latestWeekStart == null || weekStart.isAfter(latestWeekStart)) {
+                    latestWeekly = o;
+                    latestWeekStart = weekStart;
+                }
             }
         }
-        return new WorklogSyncResult(mirrored, List.of());
+        if (latestDaily != null) {
+            switch (mirrorGuard(owner, WorklogRepoService.ReportKind.DAILY, latestDailyDate,
+                    latestDaily.getContent())) {
+                case UNCHANGED -> { }
+                case MANUAL_EDITED -> skipped.add("日报 " + latestDailyDate + "（仓内已被手动修改，未覆盖）");
+                case WRITE -> mirrored.add(writeDaily(s, owner, latestDaily));
+            }
+        }
+        if (latestWeekly != null) {
+            switch (mirrorGuard(owner, WorklogRepoService.ReportKind.WEEKLY, latestWeekStart,
+                    latestWeekly.getContent())) {
+                case UNCHANGED -> { }
+                case MANUAL_EDITED -> skipped.add("周报 " + latestWeekStart + " 周（仓内已被手动修改，未覆盖）");
+                case WRITE -> mirrored.add(writeWeekly(s, owner, latestWeekly));
+            }
+        }
+        return new WorklogSyncResult(mirrored, skipped);
+    }
+
+    /**
+     * 镜像前置闸：仓内不存在 → WRITE；内容一致 → UNCHANGED（零写零提示）；
+     * 最后提交是手动编辑且内容有差异 → MANUAL_EDITED（手改优先，成稿不静默覆盖）。
+     */
+    private MirrorGuard mirrorGuard(String owner, WorklogRepoService.ReportKind kind,
+                                    LocalDate date, String content) {
+        var current = repoService.readReport(owner, kind, date);
+        if (current.isEmpty()) {
+            return MirrorGuard.WRITE;
+        }
+        if (java.util.Objects.equals(current.get().contentMd(), content)) {
+            return MirrorGuard.UNCHANGED;
+        }
+        if (WorklogRepoService.CommitSource.MANUAL.trailer().equals(current.get().source())) {
+            return MirrorGuard.MANUAL_EDITED;
+        }
+        return MirrorGuard.WRITE;
     }
 
     /** 日报写仓（生成场景 exit 路径）：缺回传发降级通知，命中走 {@link #writeDaily}。 */

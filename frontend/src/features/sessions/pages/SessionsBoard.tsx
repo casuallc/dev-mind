@@ -157,7 +157,8 @@ export default function SessionsBoard({
   const { onFinish, onSuspend, onResume, onKill, diff } = useSessionActions(selectedId, onUpdated)
 
   // CAP-41 worklog 模式：「推送工作日志」——先让 runner 即时回传产出（进行中的会话也可），
-  // 再把 daily-/weekly- 成稿写入服务端仓（幂等：同内容零 commit；CAP-74 起无确认态，skipped 恒空）
+  // 再把 daily-/weekly- 成稿写入服务端仓（2026-10-19 起：内容一致不写不提示；仓内被手动
+  // 编辑过的文件跳过不覆盖，进 skipped 警示——仓是事实源，手改优先）
   const [syncingWorklog, setSyncingWorklog] = useState(false)
   const onSyncWorklog = async () => {
     if (!current) return
@@ -168,9 +169,12 @@ export default function SessionsBoard({
       const r = await syncSessionReports(current.id)
       if (r.mirrored.length > 0) {
         message.success(`已写入工作日志仓：${r.mirrored.join('、')}`)
-      } else if (r.skipped.length > 0) {
-        message.info(`未覆盖：${r.skipped.join('、')}`)
-      } else {
+      }
+      // 手改保护拦下的成稿必须恒可见（即使同时有 mirrored）——用户要知道哪天的手改没被覆盖
+      if (r.skipped.length > 0) {
+        message.warning(`未覆盖：${r.skipped.join('、')}`)
+      }
+      if (r.mirrored.length === 0 && r.skipped.length === 0) {
         message.info('该会话暂无日志成稿（让 claude 把日报/周报写入 .devmind/output/ 后再推送）')
       }
     } catch (e) {
