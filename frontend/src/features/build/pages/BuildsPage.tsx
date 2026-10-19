@@ -297,16 +297,20 @@ function BuildCenter({ id }: { id: string }) {
 function LogDrawer({ build, onClose }: { build: BuildRecord | null; onClose: () => void }) {
   const [text, setText] = useState('')
   const [connected, setConnected] = useState(false)
+  // 标题状态/产物随构建结束刷新（本地态，不换 build 引用——避免 [build] 效应重跑清空日志/重连 WS）
+  const [latest, setLatest] = useState<BuildRecord | null>(build)
   const wsRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
     if (!build) {
       setText('')
       setConnected(false)
+      setLatest(null)
       return
     }
     setText('')
     setConnected(false)
+    setLatest(build)
     getBuildLogs(build.id)
       .then(setText)
       .catch(() => setText(''))
@@ -326,6 +330,8 @@ function LogDrawer({ build, onClose }: { build: BuildRecord | null; onClose: () 
             setText((t) => (t ? `${t}\n${f.line}` : f.line))
           } else if (f.type === 'done') {
             setConnected(false)
+            // 终态落定：刷新标题状态/产物（抽屉保持打开，用户可能正读日志）
+            getBuild(build.id).then(setLatest).catch(() => {})
             ws.close()
           }
         } catch {
@@ -338,31 +344,29 @@ function LogDrawer({ build, onClose }: { build: BuildRecord | null; onClose: () 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [build])
 
-  // 构建可能中途结束，周期性刷新状态以拿到终态/产物
+  // 构建可能中途结束，周期性刷新标题状态/产物——只更新展示，不关抽屉（用户可能正读日志）
   useEffect(() => {
     if (!build) return
     const timer = setInterval(() => {
       getBuild(build.id)
-        .then((latest) => {
-          if (latest.status !== build.status && latest.status !== 'RUNNING' && latest.status !== 'QUEUED') {
-            onClose()
-          }
-        })
+        .then((b) => setLatest((cur) => (JSON.stringify(b) !== JSON.stringify(cur) ? b : cur)))
         .catch(() => {})
     }, 5000)
     return () => clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [build])
 
+  const shown = latest ?? build
+
   return (
     <Drawer
       title={
-        build ? (
+        shown ? (
           <Space>
-            <span>构建 #{build.id} 日志</span>
-            <Tag color={STATUS_COLOR[build.status]}>{build.status}</Tag>
+            <span>构建 #{shown.id} 日志</span>
+            <Tag color={STATUS_COLOR[shown.status]}>{shown.status}</Tag>
             {connected && <Tag color="cyan">实时</Tag>}
-            {build.artifactRef && <Tag color="gold">产物: {build.artifactRef}</Tag>}
+            {shown.artifactRef && <Tag color="gold">产物: {shown.artifactRef}</Tag>}
           </Space>
         ) : '构建日志'
       }
@@ -370,8 +374,8 @@ function LogDrawer({ build, onClose }: { build: BuildRecord | null; onClose: () 
       open={!!build}
       onClose={onClose}
     >
-      {build?.errorSummary && (
-        <Alert type="error" showIcon style={{ marginBottom: 12 }} message={build.errorSummary} />
+      {shown?.errorSummary && (
+        <Alert type="error" showIcon style={{ marginBottom: 12 }} message={shown.errorSummary} />
       )}
       {/* key 保证切换构建时搜索/滚动状态重置 */}
       {build && <LogView key={build.id} text={text} downloadName={`build-${build.id}`} />}
