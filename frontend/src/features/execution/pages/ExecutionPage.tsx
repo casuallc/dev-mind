@@ -7,7 +7,7 @@ import { Button, Card, Segmented, Space, Typography } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import TemplatesTab from './TemplatesTab'
 import AuditTab from './AuditTab'
-import { pageCardStyle, pageCardBodyScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 
 const VIEW_DESC: Record<string, string> = {
   templates: '命令模板白名单：构建/部署/发版等执行器只允许使用项目内登记的模板，可按能力限定可用范围、声明参数 schema；模板在服务端渲染后随 exec 帧下发 runner 节点执行。',
@@ -23,7 +23,7 @@ export default function ExecutionPage() {
   return (
     <Card
       style={pageCardStyle}
-      styles={{ body: pageCardBodyScrollStyle }}
+      styles={{ body: pageCardBodyFlexStyle }}
       title={
         <Space size={12}>
           <span>模板与审计</span>

@@ -1,7 +1,7 @@
 // CAP-36 执行审计查看（视图内容组件；外壳 Card / extra 按钮在 ExecutionPage）
 // exec 帧下发 runner 节点的每次执行全量留痕（domain=agent_exec）；历史 CAP-07 SSH/HTTP 记录同表可查。
 import { useCallback, useEffect, useState } from 'react'
-import { Badge, Drawer, Select, Space, Table, Tag, Typography } from 'antd'
+import { Badge, Drawer, Select, Space, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { Project } from '../../projects/types'
 import { listProjects } from '../../projects/api'
@@ -11,6 +11,7 @@ import { listAudit } from '../api'
 import type { AuditView } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { DRAWER_FORM } from '../../../shared/utils/overlay'
+import FitTable from '../../../shared/components/FitTable'
 
 const ACTIONS = ['execute', 'connect_test', 'upload', 'download', 'health_check']
 const ACTION_LABEL: Record<string, string> = {
@@ -69,7 +70,7 @@ export default function AuditTab({ refreshTick = 0 }: { refreshTick?: number }) 
     },
     { title: '模板', dataIndex: 'templateCode', width: 100, render: (c) => c ? <Typography.Text code>{c}</Typography.Text> : '-' },
     { title: '能力', dataIndex: 'capability', width: 80, render: (c) => c || '-' },
-    { title: '退出码', dataIndex: 'exitCode', width: 70, render: (c) => c ?? '-' },
+    { title: '退出码', dataIndex: 'exitCode', width: 84, render: (c) => c ?? '-' },
     {
       title: '结果',
       dataIndex: 'success',
@@ -86,8 +87,8 @@ export default function AuditTab({ refreshTick = 0 }: { refreshTick?: number }) 
   ]
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size={12}>
-      <Space>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
+      <Space wrap>
         <Select
           allowClear placeholder="项目" style={{ width: 180 }}
           value={projectId} onChange={(v) => { setProjectId(v); setNodeId(undefined); setPage(0) }}
@@ -104,7 +105,7 @@ export default function AuditTab({ refreshTick = 0 }: { refreshTick?: number }) 
           options={ACTIONS.map((a) => ({ label: ACTION_LABEL[a] ?? a, value: a }))}
         />
       </Space>
-      <Table
+      <FitTable
         rowKey="id"
         loading={loading}
         columns={columns}
@@ -142,6 +143,6 @@ export default function AuditTab({ refreshTick = 0 }: { refreshTick?: number }) 
           </Space>
         )}
       </Drawer>
-    </Space>
+    </div>
   )
 }

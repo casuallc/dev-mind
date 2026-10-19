@@ -1,7 +1,7 @@
 // CAP-36 命令模板白名单管理（视图内容组件；外壳 Card / extra 按钮在 ExecutionPage）
 // 模板由服务端渲染后经 exec 帧下发 runner 节点执行；本地与远程执行共用同一份白名单。
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button, Checkbox, Drawer, Form, Input, message, Modal, Select, Space, Table, Tag, Typography } from 'antd'
+import { Button, Checkbox, Drawer, Empty, Flex, Form, Input, message, Modal, Select, Space, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { Project } from '../../projects/types'
 import { listProjects } from '../../projects/api'
@@ -10,6 +10,7 @@ import type { TemplateInput, TemplateView } from '../types'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { DRAWER_FORM } from '../../../shared/utils/overlay'
+import FitTable from '../../../shared/components/FitTable'
 
 const CAPABILITIES = ['build', 'deploy', 'release', 'test', 'logs', 'exec']
 
@@ -113,10 +114,11 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
 
   const columns: ColumnsType<TemplateView> = [
     { title: '编码', dataIndex: 'code', width: 120, render: (c) => <Typography.Text code>{c}</Typography.Text> },
-    { title: '名称', dataIndex: 'name', width: 160 },
+    { title: '名称', dataIndex: 'name' },
     {
       title: '允许能力',
       dataIndex: 'allowed',
+      width: 220,
       render: (a: string[]) =>
         a && a.length > 0 ? a.map((x) => <Tag key={x} color="blue">{x}</Tag>) : <Typography.Text type="secondary">全部</Typography.Text>,
     },
@@ -132,16 +134,16 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
       width: 140,
       render: (_, r) => (
         <Space>
-          <Button size="small" onClick={() => openEdit(r)}>编辑</Button>
-          <Button size="small" danger onClick={() => onDelete(r.id)}>删除</Button>
+          <Button onClick={() => openEdit(r)}>编辑</Button>
+          <Button danger onClick={() => onDelete(r.id)}>删除</Button>
         </Space>
       ),
     },
   ]
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size={12}>
-      <Space>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
+      <div>
         <Select
           style={{ width: 220 }}
           placeholder="选择项目"
@@ -149,14 +151,20 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
           onChange={setProjectId}
           options={projects.map((p) => ({ label: `${p.name} (${p.id})`, value: p.id }))}
         />
-      </Space>
-      <Table
+      </div>
+      <FitTable
         rowKey="id"
         loading={loading}
         columns={columns}
         dataSource={templates}
         pagination={LIST_PAGINATION}
-        locale={{ emptyText: '暂无模板。点击右上角「新建模板」登记——构建/部署/发版等执行器只允许使用白名单内的模板。' }}
+        locale={{
+          emptyText: (
+            <Empty description="暂无模板。构建/部署/发版等执行器只允许使用白名单内的模板。">
+              <Button type="primary" onClick={openCreate}>新建模板</Button>
+            </Empty>
+          ),
+        }}
       />
 
       <Drawer
@@ -173,7 +181,7 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
         }
       >
         <Form form={form} layout="vertical">
-          <Space style={{ width: '100%' }} size={12}>
+          <Flex gap={12}>
             <Form.Item name="projectId" label="项目" rules={[{ required: true }]} style={{ width: 200 }}>
               <Select options={projects.map((p) => ({ label: `${p.name} (${p.id})`, value: p.id }))} />
             </Form.Item>
@@ -183,7 +191,7 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
             <Form.Item name="name" label="名称" rules={[{ required: true, message: '必填' }]} style={{ flex: 1 }}>
               <Input placeholder="部署脚本" />
             </Form.Item>
-          </Space>
+          </Flex>
           <Form.Item
             name="templateText"
             label="模板正文（shell，用 ${参数名} 占位）"
@@ -224,6 +232,6 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
           </Form.Item>
         </Form>
       </Drawer>
-    </Space>
+    </div>
   )
 }
