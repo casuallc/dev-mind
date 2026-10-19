@@ -30,6 +30,7 @@ import type { BuildStep, BuildStepInput } from '../../types'
 import { showError } from '../../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../../shared/utils/table'
 import { DRAWER_FORM } from '../../../../shared/utils/overlay'
+import CopyableLongText from '../../../../shared/components/CopyableLongText'
 
 const LOCATION_OPTIONS = ['LOCAL', 'AGENT']
 
@@ -108,7 +109,7 @@ export default function BuildStepsPage() {
   const columns: ColumnsType<BuildStep> = [
     { title: '顺序', dataIndex: 'sortOrder', width: 70 },
     { title: '名称', dataIndex: 'name', width: 140, render: (n?: string) => n || '-' },
-    { title: '命令', dataIndex: 'command', render: (c: string) => <code style={{ fontSize: 12 }}>{c}</code> },
+    { title: '命令', dataIndex: 'command', render: (c: string) => <CopyableLongText text={c} maxWidth={360} modalTitle="构建命令" /> },
     { title: '目录', dataIndex: 'workingDir', width: 120, render: (d?: string) => d || '-' },
     { title: '位置', dataIndex: 'location', width: 90, render: (l: string) => <Tag color={l === 'AGENT' ? 'purple' : 'default'}>{l}</Tag> },
     {
