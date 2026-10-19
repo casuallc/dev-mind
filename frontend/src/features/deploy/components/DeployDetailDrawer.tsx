@@ -42,6 +42,12 @@ export default function DeployDetailDrawer({ record, onClose, onChanged }: {
   const [connected, setConnected] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const [busy, setBusy] = useState(false)
+  // 当前展示值（轮询比较基准）：直接读 state 闭包会拿到旧值，导致每轮都误判"有变化"
+  const latestRef = useRef<DeploymentRecord | null>(record)
+
+  useEffect(() => {
+    latestRef.current = d
+  }, [d])
 
   useEffect(() => {
     setD(record)
@@ -85,22 +91,25 @@ export default function DeployDetailDrawer({ record, onClose, onChanged }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record])
 
-  // 终态轮询刷新（步骤/备份引用落库）
+  // 终态轮询刷新（步骤/备份引用落库）：WS 在线时以实时帧为准不轮询；
+  // 只在真有变化时采纳并通知父级——父级按 id 守卫不重建 record 引用，
+  // 否则 [record] 效应重跑会清空日志并重连 WS（表现为日志弹窗被周期性"刷新"打断）
   useEffect(() => {
-    if (!record) return
+    if (!record || connected) return
     const timer = setInterval(() => {
       getDeployment(record.id)
         .then((latest) => {
-          if (JSON.stringify(latest) !== JSON.stringify(d)) {
-            setD(latest)
-            onChanged(latest)
-          }
+          const cur = latestRef.current
+          if (!cur || JSON.stringify(latest) === JSON.stringify(cur)) return
+          latestRef.current = latest
+          setD(latest)
+          onChanged(latest)
         })
         .catch(() => {})
     }, 4000)
     return () => clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [record])
+  }, [record, connected])
 
   const act = async (fn: () => Promise<DeploymentRecord>, ok: string) => {
     if (!d) return

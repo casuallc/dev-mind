@@ -308,7 +308,9 @@ function DeployCenter({ id }: { id: string }) {
         record={detail}
         onClose={() => setDetail(null)}
         onChanged={(d) => {
-          setDetail(d)
+          // 同一条部署不重建 record 引用：引用一变，抽屉 [record] 效应就会重跑
+          // （清空日志、重连 WS），日志弹窗被周期性打断；回滚产生新部署单（id 不同）仍替换以重绑
+          setDetail((cur) => (cur?.id === d.id ? cur : d))
           loadHistory()
         }}
       />
