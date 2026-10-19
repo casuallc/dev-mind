@@ -22,6 +22,8 @@ tmp/cap74-e2e/，三个定时生成开关关掉防干扰）+ fake runner（execu
   [6] 重启 app 后 git rev-list --count 不变（启动迁移幂等；带行迁移幂等由
       WorklogReportMigrationTest 覆盖——E2E 独立 H2 无存量表，此处钉「重启零新 commit」）
   [8] PUT 带 status 字段 → 400（旧前端防误确认）
+  [9] 写后自动推送（2026-10-19 修订）：force 覆盖写仓 / 离线编辑保存后，远端无需
+      手动 push 即见新内容
 """
 import json
 import os
@@ -95,6 +97,21 @@ def git(*args, cwd=None, check_ok=True):
 
 def bare_show(path_in_repo):
     return norm(git("--git-dir", str(REMOTE), "show", f"main:{path_in_repo}"))
+
+
+def wait_bare(path_in_repo, expect, timeout=30):
+    """轮询 bare 远端直到文件内容==expect（自动推送是后台异步，给 30s 窗口）。"""
+    deadline = time.time() + timeout
+    last = ""
+    while time.time() < deadline:
+        try:
+            last = bare_show(path_in_repo)
+        except AssertionError:
+            last = ""
+        if last.strip() == expect.strip():
+            return True
+        time.sleep(1)
+    return False
 
 
 def rev_count():
@@ -256,7 +273,9 @@ def main():
         props.write_text(
             f"serverUrl=ws://localhost:{PORT}/ws/agent\ntoken={node_token}\nexecutor=fake\n"
             f"workDir={(TMP / 'runner-work').as_posix()}\nworkspaceRoot={(TMP / 'ws').as_posix()}\n"
-            f"worklogRoot={WORKLOG_ROOT.as_posix()}\nmaxConcurrent=4\ngcDays=7\n", encoding="utf-8")
+            f"worklogRoot={WORKLOG_ROOT.as_posix()}\nmaxConcurrent=4\ngcDays=7\n"
+            # 本机常驻 runner（WinSW devmind-agent）占着 18377，fake 执行器不需要 git 代理
+            f"gitProxyEnabled=false\n", encoding="utf-8")
         runner_log = open(RUNNER_LOG, "w", encoding="utf-8")
         runner = subprocess.Popen([JAVA, "-jar", str(RUNNER_JAR), str(props)],
                                   stdout=runner_log, stderr=subprocess.STDOUT)
@@ -328,6 +347,8 @@ def main():
         wait_daily(token, sid2)
         check("force 覆盖后仓文件==v2",
               norm((REPO_DIR / DAILY_REL).read_text(encoding="utf-8")) == ai_v2)
+        check("[9a] AI 成稿写仓后自动推送远端（无需手动 push）",
+              wait_bare(DAILY_REL, ai_v2), bare_show(DAILY_REL)[-80:])
         revs = git("-C", str(REPO_DIR), "log", "--format=%H", "--", DAILY_REL).split()
         old = norm(git("-C", str(REPO_DIR), "show", f"{revs[1]}:{DAILY_REL}")) if len(revs) > 1 else ""
         check("旧稿（manual 版）git log 可找回", old.strip() == manual_v1.strip(), old[:120])
@@ -351,6 +372,8 @@ def main():
         offline_v1 = ai_v2 + "\n节点离线期间的手工编辑\n"
         req("PUT", f"/worklog/daily/{TODAY}", {"contentMd": offline_v1}, token)
         check("节点离线编辑正常", norm(req("GET", f"/worklog/daily?date={TODAY}", token=token)["contentMd"]) == offline_v1)
+        check("[9b] 编辑保存后自动推送远端（无需手动 push）",
+              wait_bare(DAILY_REL, offline_v1), bare_show(DAILY_REL)[-80:])
         push = req("POST", "/worklog/workspace/push", {}, token)
         check("节点离线服务端 push 正常", push.get("ok") is True, str(push))
         check("bare 仓==离线编辑版", bare_show(DAILY_REL).strip() == offline_v1.strip())

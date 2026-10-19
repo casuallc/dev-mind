@@ -5,6 +5,9 @@
 > 补 active_repo_key 写入路由、迁移幂等判据与冲突解决 API、周报文件名定稿 yyyy-Www）
 > （2026-10-12 实现完毕：M1+M2 同批落地 + runner 草稿区去 git 化；M3 未做。
 > 实施偏差见文末 §9）
+> （2026-10-19 修订：**写后自动推送**——每次写仓产生新 commit 且仓已绑定远端时，
+> 服务端后台自动 fetch+merge+push 被写入的仓（含团队仓），见 FR-06 末段；
+> §6 口径 4「推送只推个人仓」随之修订为「手动 push 仍只推个人仓，自动推送推被写入的仓」）
 > 重构 CAP-41 的存储与同步链路；条目管理/git 扫描导入（CAP-28 FR-03/04）、模板（CAP-41 FR-05）、
 > 生成会话链路（CAP-41 FR-03/04）保留为素材源与生成通道不动。
 
@@ -96,6 +99,19 @@ HTTP CONNECT 代理挂载路径，相对 CLI 方案无收益。
     （fail-visible），不阻塞渲染。**fetch 凭证 = 仓级 fetch 身份**：仓主
     （created_by）的 PAT 优先，任一持有效 PAT 的成员兜底；均无凭证则跳过 fetch
     仅用本地内容。
+  - **写后自动推送（2026-10-19 修订）**：`WorklogRepoService` 每次写产生新 commit
+    且该仓已绑定远端时，锁外触发后台自动 push（`WorklogRemoteBackupService.autoPushAsync`）
+    ——AI 成稿回传、手动 PUT 保存、条目写入全部走同一收口，生成/保存完成即远端可见，
+    不再依赖手动「推送远端」。语义：
+    - 推的是**被写入的仓**（含团队仓；手动 push 入口仍只推个人仓）；
+    - 复用同一条 fetch+merge+push 链与冲突处理：传输失败/无可用凭证 → 置同步异常位
+      （空间视图 fail-visible 复用 C6 提示位）+ warn，不阻断写；merge 冲突**不自动
+      选边**——abort + 置位 + P0 通知仓主，仍走显式 resolve；推送/resolve 成功复位异常位；
+    - 凭证走「仓主优先、成员兜底」链（事件/调度线程无 SecurityContext，不能
+      `currentActor()`）；
+    - 按仓飞行中合并：推送期间又有新 commit 只记 pending，推送线程结束前补推一轮，
+      连续编辑/批量迁移不打出一串 push；
+    - 零变更写（committed=false）不触发；未绑定远端直接跳过。
 - **FR-07 生成链路适配**：生成会话仍在 runner 上跑（CAP-34），WORKLOG 项目保留为
   会话调度载体，但：
   - **节点亲和红线松绑**：runner 侧目录降级为纯会话草稿区（skill/上下文物化与
@@ -180,6 +196,8 @@ POST    /api/worklog/repos/{key}/remotes   团队仓绑定/成员管理（M2，M
    `DevMind-Source: ai` + sessionId trailer；
 2. 手动编辑日报保存后：仓文件内容更新 + 新 commit（`DevMind-Source: manual`）；
    推送远端后远端仓可见该内容（手改进 git，本能力的立项动机）；
+   绑定远端后保存/生成**无需手动推送**即自动同步远端（2026-10-19 写后自动推送，
+   传输失败置同步异常位、冲突 P0 通知仓主走显式 resolve）；
 3. 定时自动生成在文件已存在时跳过（不覆盖手改）；force 重新生成覆盖后旧版本可从
    git log 找回；
 4. 亲和节点离线时：日志页读/编辑/推送远端全部正常，仅生成/对话 409 提示（M1 起可验）；
@@ -221,7 +239,10 @@ MVP 明确不做：index.json 或任何落盘索引（否决，见 §3）、团�
    `ALTER TABLE worklog_user_settings DROP COLUMN remote_url, DROP COLUMN remote_branch;`
    （不清理无害）。`daily_reports`/`weekly_reports` 迁移后变死表，手工 DROP 同理。
 4. **active_repo_key 语义**：null=不变、空白串=回个人仓、其他=必须是本人所属仓
-   （成员校验失败 400）；写入目标随之切换，推送仍只推个人仓。
+   （成员校验失败 400）；写入目标随之切换。推送口径（2026-10-19 修订）：手动
+   「推送远端」仍只推个人仓；写后自动推送推被写入的仓（个人/团队均可），
+   团队仓成员各写各的子目录、自动推送各推各的（凭证各自兜底解析），路径不相交
+   结构性免冲突。
 5. **冲突解决双入口**：`POST /api/worklog/repos/{key}/resolve?strategy=ours|theirs`
    之外，另有个人仓快捷端点 `POST /api/worklog/workspace/resolve?strategy=...`
    （key 由当前用户推导，免前端拼 `personal-<username>`）。resolve = 锁内重新 fetch

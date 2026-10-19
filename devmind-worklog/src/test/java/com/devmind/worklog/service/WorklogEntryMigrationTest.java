@@ -101,7 +101,7 @@ class WorklogEntryMigrationTest {
 
         GitRemoteOps git = new GitRemoteOps(nullEgressProvider());
         repoService = new WorklogRepoService(props, repoRepository, memberRepository,
-                settingsRepository, git, nullIdentityProvider(), nullGatewayProvider());
+                settingsRepository, git, nullIdentityProvider(), nullGatewayProvider(), nullGatewayProvider());
         migration = new WorklogEntryMigration(jdbc, repoService);
     }
 
@@ -251,12 +251,12 @@ class WorklogEntryMigrationTest {
         };
     }
 
-    private static ObjectProvider<com.devmind.common.integration.RepoGitGateway> nullGatewayProvider() {
+    private static <T> ObjectProvider<T> nullGatewayProvider() {
         return new ObjectProvider<>() {
-            public com.devmind.common.integration.RepoGitGateway getObject() { return null; }
-            public com.devmind.common.integration.RepoGitGateway getObject(Object... args) { return null; }
-            public com.devmind.common.integration.RepoGitGateway getIfAvailable() { return null; }
-            public com.devmind.common.integration.RepoGitGateway getIfUnique() { return null; }
+            public T getObject() { return null; }
+            public T getObject(Object... args) { return null; }
+            public T getIfAvailable() { return null; }
+            public T getIfUnique() { return null; }
         };
     }
 }

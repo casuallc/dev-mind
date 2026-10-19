@@ -87,7 +87,7 @@ class WorklogEntryServiceFileTest {
         props.setRepoRoot(repoRoot.toString());
         GitRemoteOps ops = new GitRemoteOps(nullIdentityProvider());
         repoService = new WorklogRepoService(props, repoRepo, memberRepo, settingsRepo, ops,
-                nullIdentityProvider(), nullIdentityProvider());
+                nullIdentityProvider(), nullIdentityProvider(), nullIdentityProvider());
 
         IdentityService identity = mock(IdentityService.class);
         when(identity.currentActor()).thenReturn("alice");

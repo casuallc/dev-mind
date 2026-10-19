@@ -112,7 +112,7 @@ class WorklogTeamRepoTest {
         });
 
         repoService = new WorklogRepoService(props, repoRepository, memberRepository,
-                settingsRepository, git, nullIdentityProvider(), nullGatewayProvider());
+                settingsRepository, git, nullIdentityProvider(), nullGatewayProvider(), nullGatewayProvider());
     }
 
     // ---------------- 成员管理 ----------------
@@ -336,12 +336,12 @@ class WorklogTeamRepoTest {
         };
     }
 
-    private static ObjectProvider<RepoGitGateway> nullGatewayProvider() {
+    private static <T> ObjectProvider<T> nullGatewayProvider() {
         return new ObjectProvider<>() {
-            public RepoGitGateway getObject() { return null; }
-            public RepoGitGateway getObject(Object... args) { return null; }
-            public RepoGitGateway getIfAvailable() { return null; }
-            public RepoGitGateway getIfUnique() { return null; }
+            public T getObject() { return null; }
+            public T getObject(Object... args) { return null; }
+            public T getIfAvailable() { return null; }
+            public T getIfUnique() { return null; }
         };
     }
 }

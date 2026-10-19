@@ -53,6 +53,9 @@ import java.util.stream.Stream;
  * 仓内禁止任何派生态索引文件。</p>
  *
  * <p>全程不用 {@code identity.currentActor()}——scheduler/迁移无 SecurityContext，username 显式传参。</p>
+ *
+ * <p>写后自动推送（2026-10-19 修订）：{@link #writeAndCommit} 产生新 commit 且仓已绑定远端时，
+ * 锁外触发 {@link WorklogRemoteBackupService#autoPushAsync} 后台推送（被写入的仓，含团队仓）。</p>
  */
 @Service
 public class WorklogRepoService {
@@ -96,6 +99,8 @@ public class WorklogRepoService {
     private final GitRemoteOps git;
     private final ObjectProvider<GitIdentityProvider> identityProvider;
     private final ObjectProvider<RepoGitGateway> gitGatewayProvider;
+    /** 写后自动推送（ObjectProvider 探测防循环依赖：RemoteBackupService 反向依赖本服务） */
+    private final ObjectProvider<WorklogRemoteBackupService> remoteBackupProvider;
 
     /** 仓级锁（单实例语义；仓数量有限不清理） */
     private final ConcurrentHashMap<String, ReentrantLock> locks = new ConcurrentHashMap<>();
@@ -118,7 +123,8 @@ public class WorklogRepoService {
                               WorklogUserSettingsRepository settingsRepository,
                               GitRemoteOps git,
                               ObjectProvider<GitIdentityProvider> identityProvider,
-                              ObjectProvider<RepoGitGateway> gitGatewayProvider) {
+                              ObjectProvider<RepoGitGateway> gitGatewayProvider,
+                              ObjectProvider<WorklogRemoteBackupService> remoteBackupProvider) {
         this.properties = properties;
         this.repoRepository = repoRepository;
         this.memberRepository = memberRepository;
@@ -126,6 +132,7 @@ public class WorklogRepoService {
         this.git = git;
         this.identityProvider = identityProvider;
         this.gitGatewayProvider = gitGatewayProvider;
+        this.remoteBackupProvider = remoteBackupProvider;
     }
 
     // ---------------- 仓锁 ----------------
@@ -370,6 +377,16 @@ public class WorklogRepoService {
         return s != null && s.stale();
     }
 
+    /** 同步异常置位（自动推送失败/无可用凭证；空间视图 fail-visible 复用 C6 展示位） */
+    void markSyncStale(String repoKey) {
+        fetchStates.put(repoKey, new FetchState(System.currentTimeMillis(), true));
+    }
+
+    /** 同步异常复位（手动/自动推送成功） */
+    void clearSyncStale(String repoKey) {
+        fetchStates.put(repoKey, new FetchState(System.currentTimeMillis(), false));
+    }
+
     /** 读操作触发：绑定远端且距上次 fetch 超 TTL → 虚拟线程后台 fetch+merge（不阻塞渲染） */
     private void maybeFetchAsync(WorklogRepoEntity repo) {
         if (repo.getRemoteUrl() == null || repo.getRemoteUrl().isBlank()) {
@@ -421,10 +438,11 @@ public class WorklogRepoService {
     }
 
     /**
-     * fetch 凭证：file:// 匿名（empty）；http/https 按 host 经 CAP-35 个人 PAT 解析——
-     * 仓主优先、任一持有效 PAT 的成员兜底；均无 → null（跳过 fetch）。均在后台线程调用，无 SecurityContext。
+     * fetch/push 凭证：file:// 匿名（empty）；http/https 按 host 经 CAP-35 个人 PAT 解析——
+     * 仓主优先、任一持有效 PAT 的成员兜底；均无 → null（跳过）。均在后台线程调用，无 SecurityContext。
+     * （包私有：{@link WorklogRemoteBackupService} 自动推送复用同一兜底链）
      */
-    private Optional<String> resolveFetchToken(WorklogRepoEntity repo, String url) {
+    Optional<String> resolveFetchToken(WorklogRepoEntity repo, String url) {
         try {
             URI uri = URI.create(url.trim());
             if ("file".equalsIgnoreCase(uri.getScheme())) {
@@ -574,7 +592,7 @@ public class WorklogRepoService {
     /** 锁内字节写 + add/commit 共用骨架（报告/条目/骨架之外的全部平台写入收口于此）。 */
     private WriteOutcome writeAndCommit(WorklogRepoEntity repo, String username, String relPath,
                                         String content, String commitMessage, Instant commitDate) {
-        return withLock(repo.getRepoKey(), () -> {
+        WriteOutcome outcome = withLock(repo.getRepoKey(), () -> {
             Path dir = repoDir(repo.getRepoKey());
             Path file = dir.resolve(relPath);
             try {
@@ -598,6 +616,14 @@ public class WorklogRepoService {
                 throw new UncheckedIOException("工作日志仓写文件失败: " + relPath, e);
             }
         });
+        // 写后自动推送（锁外异步，不阻塞写路径；未绑定远端/模块缺席自动跳过）
+        if (outcome.committed()) {
+            WorklogRemoteBackupService backup = remoteBackupProvider.getIfAvailable();
+            if (backup != null) {
+                backup.autoPushAsync(repo);
+            }
+        }
+        return outcome;
     }
 
     // ---------------- 读路径 ----------------

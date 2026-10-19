@@ -3,6 +3,8 @@ package com.devmind.worklog.service;
 import com.devmind.auth.IdentityService;
 import com.devmind.common.agent.WorklogPushResult;
 import com.devmind.common.egress.EgressProxyRouter;
+import com.devmind.common.event.DomainEventPublisher;
+import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.integration.GitIdentityProvider;
@@ -34,11 +36,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -57,6 +63,9 @@ class WorklogRemoteBackupServiceTest {
     private WorklogRepoService repoService;
     private WorklogRemoteBackupService service;
     private RepoGitGateway gateway;
+    private DomainEventPublisher eventPublisher;
+    /** 自动推送开关（null=关闭）：只在自动推送专项测试里挂上 service，存量测试不受异步推送干扰 */
+    private volatile WorklogRemoteBackupService autoPushBean;
     private final Map<String, WorklogRepoEntity> repoRows = new HashMap<>();
     private final List<WorklogRepoMemberEntity> memberRows = new ArrayList<>();
     private final AtomicLong ids = new AtomicLong(1);
@@ -97,12 +106,14 @@ class WorklogRemoteBackupServiceTest {
         when(settingsRepository.findByUserId(anyString())).thenReturn(Optional.empty());
 
         repoService = new WorklogRepoService(props, repoRepository, memberRepository,
-                settingsRepository, git, nullIdentityProvider(), mockProvider(null));
+                settingsRepository, git, nullIdentityProvider(), mockProvider(null), autoPushProvider());
 
         IdentityService identity = mock(IdentityService.class);
         when(identity.currentActor()).thenReturn("alice");
         gateway = mock(RepoGitGateway.class);
-        service = new WorklogRemoteBackupService(identity, repoService, git, mockProvider(gateway));
+        eventPublisher = mock(DomainEventPublisher.class);
+        service = new WorklogRemoteBackupService(identity, repoService, git, mockProvider(gateway),
+                eventPublisher);
     }
 
     // ---------------- 前置校验 ----------------
@@ -246,6 +257,92 @@ class WorklogRemoteBackupServiceTest {
         assertTrue(git.lsRemote(url, null, "refs/heads/main").output().isBlank());
     }
 
+    // ---------------- 写后自动推送 ----------------
+
+    @Test
+    void autoPushAfterWriteReachesRemote() throws Exception {
+        String url = bareRemote("auto1");
+        bindRemote(url, null);
+        autoPushBean = service;
+
+        repoService.writeReport("alice", WorklogRepoService.ReportKind.DAILY,
+                LocalDate.of(2026, 10, 12), "# 自动推送\n",
+                WorklogRepoService.CommitSource.AI, "s1", null);
+
+        // 异步推送：等远端出现 main 分支再克隆校验内容
+        awaitTrue(() -> !git.lsRemote(url, null, "refs/heads/main").output().isBlank());
+        Path clone = tmp.resolve("verify-auto1");
+        assertTrue(git.cloneRepo(url, null, clone.toString(), "main", null).ok());
+        assertEquals("# 自动推送\n", readNorm(clone.resolve("alice/daily/2026-10-12.md")));
+        assertFalse(repoService.isFetchStale(WorklogRepoService.personalRepoKey("alice")));
+    }
+
+    @Test
+    void autoPushConflictMarksStaleAndNotifiesOwner() throws Exception {
+        String url = bareRemote("auto2");
+        bindRemote(url, null);
+        // 共同祖先先手动推上去（自动推送尚未开启，不干扰布景）
+        repoService.writeReport("alice", WorklogRepoService.ReportKind.DAILY,
+                LocalDate.of(2026, 10, 12), "共同祖先\n",
+                WorklogRepoService.CommitSource.MANUAL, null, null);
+        assertTrue(service.pushToRemote().ok());
+
+        // 远端侧：外部 clone 改同一文件并推回
+        Path external = tmp.resolve("auto2-external");
+        assertTrue(git.cloneRepo(url, null, external.toString(), "main", null).ok());
+        Files.writeString(external.resolve("alice/daily/2026-10-12.md"), "远端版\n", StandardCharsets.UTF_8);
+        runGit(external, "-c", "user.name=ext", "-c", "user.email=ext@x.com",
+                "commit", "-am", "external edit");
+        runGit(external, "push", url, "main:main");
+
+        // 本地写触发自动推送 → 分叉冲突：置同步异常位 + P0 通知，不自动选边
+        autoPushBean = service;
+        repoService.writeReport("alice", WorklogRepoService.ReportKind.DAILY,
+                LocalDate.of(2026, 10, 12), "平台版 v2\n",
+                WorklogRepoService.CommitSource.MANUAL, null, null);
+
+        String key = WorklogRepoService.personalRepoKey("alice");
+        awaitTrue(() -> repoService.isFetchStale(key));
+        verify(eventPublisher, timeout(10_000).atLeastOnce()).publish(any(SimpleDomainEvent.class));
+        assertFalse(Files.exists(repoDir().resolve(".git/MERGE_HEAD")));
+
+        // 冲突未推送：远端仍是远端版
+        Path clone = tmp.resolve("verify-auto2");
+        assertTrue(git.cloneRepo(url, null, clone.toString(), "main", null).ok());
+        assertEquals("远端版\n", readNorm(clone.resolve("alice/daily/2026-10-12.md")));
+
+        // 手动 resolve 后推送成功，同步异常位复位
+        autoPushBean = null;
+        assertTrue(service.resolveConflict(key, "ours").ok());
+        assertFalse(repoService.isFetchStale(key));
+    }
+
+    @Test
+    void writeWithoutRemoteSkipsAutoPush() {
+        autoPushBean = service;
+        WorklogRepoService.WriteOutcome out = repoService.writeReport("alice",
+                WorklogRepoService.ReportKind.DAILY, LocalDate.of(2026, 10, 12), "x\n",
+                WorklogRepoService.CommitSource.MANUAL, null, null);
+        assertTrue(out.committed());
+        assertFalse(repoService.isFetchStale(WorklogRepoService.personalRepoKey("alice")));
+    }
+
+    /** 异步断言：200ms 步长轮询，20s 超时。 */
+    private static void awaitTrue(Check check) throws Exception {
+        long deadline = System.currentTimeMillis() + 20_000;
+        while (System.currentTimeMillis() < deadline) {
+            if (check.ok()) {
+                return;
+            }
+            Thread.sleep(200);
+        }
+        fail("异步等待超时（20s）");
+    }
+
+    private interface Check {
+        boolean ok() throws Exception;
+    }
+
     // ---------------- 工装 ----------------
 
     /** 制造冲突：本地与远端双侧改同一文件后的分叉状态（尚未 push），返回远端 URL。 */
@@ -332,5 +429,15 @@ class WorklogRemoteBackupServiceTest {
         ObjectProvider<T> p = mock(ObjectProvider.class);
         when(p.getIfAvailable()).thenReturn(bean);
         return p;
+    }
+
+    /** 自动推送 bean 提供者：读 autoPushBean 字段（null=关闭，专项测试里挂 service 开启）。 */
+    private ObjectProvider<WorklogRemoteBackupService> autoPushProvider() {
+        return new ObjectProvider<>() {
+            public WorklogRemoteBackupService getObject() { return autoPushBean; }
+            public WorklogRemoteBackupService getObject(Object... args) { return autoPushBean; }
+            public WorklogRemoteBackupService getIfAvailable() { return autoPushBean; }
+            public WorklogRemoteBackupService getIfUnique() { return autoPushBean; }
+        };
     }
 }
