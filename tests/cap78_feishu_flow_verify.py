@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""CAP-78 飞书对话式需求开发全流程 E2E（M1 copilot 工具主路径）。
+"""CAP-78 飞书对话式需求开发全流程 E2E（M1 copilot 工具主路径 + M2 斜杠指令快速路径）。
 
 组合两套既有 harness：
 - cap76：自起隔离 app（e2e profile 独立 H2）+ 内嵌假 OpenAI（原生 tools/tool_calls）
@@ -11,7 +11,7 @@
   1. `mvn -q install -DskipTests`（app 依赖与 devmind-agent-runner.jar）；
   2. JDK 21：JAVA_HOME 未设时回落 Eclipse Adoptium jdk-21.0.12.101。
 
-验收（CAP-78 §6 E2E 场景 1/2/3/4/6；M2 斜杠指令场景 5 不在本脚本）：
+验收（CAP-78 §6 E2E 场景 1/2/3/4/5/6）：
   [1] 对话式「给 REQ-1 开启 AI 规划」→ WRITE 确认单（预览点名 REQ-1、首规划无「整体重跑」）
       → 他人确认被拒（场景 6c）→ 本人文本确认 → [flow:plan] 会话真拉起
       （sessions 行 requirementId 正确、taskSpec 首行 [flow:plan]、需求 → ANALYZING）；
@@ -22,11 +22,17 @@
   [4] 「收口 REQ-1」→ DANGEROUS 确认单（卡片无确认按钮、预览含危险操作/REQ-1/基线分支）
       → 裸「确认」被拒 → 完整短码 → 需求全部会话 workspaceState=FINALIZED
       （真 runner 真 git merge --ff + push file:// origin）；
+  [5] M2 斜杠指令快速路径（独立 REQ-2）：/plan 首规划直执行（无确认）→ 产出登记 +
+      自动开发会话 → /finish REQ-2（REQ 编号解析活跃会话）→ /plan 再规划
+      「已有规划产出/整体重跑」裸「确认」二次确认（PendingConfirmStore，不经 copilot 确认单）
+      → 再规划 finish 复用工作树旧产出再登记、自动起第二条开发会话（CAP-52 既有语义）
+      → /finish 再收 → /finalize REQ-2 必二次确认（文案含危险操作/基线 main）
+      → 全部会话 FINALIZED；
   [6] 门禁：phase B VIEWER 发起写 → 拒绝且无确认单；
       phase C（allow-default-actor-writes=false）未绑定身份写 → /bindme 引导且无确认单。
 
 阶段（同一套 H2 顺序重启，runner 全程在线自动重连）：
-  A. default-actor=admin  + allow-default-actor-writes=true  → 场景 1~4、6c
+  A. default-actor=admin  + allow-default-actor-writes=true  → 场景 1~5、6c
   B. default-actor=viewer + allow-default-actor-writes=true  → 场景 6b
   C. default-actor=admin  + allow-default-actor-writes=false → 场景 6a
 
@@ -512,6 +518,15 @@ def overview():
     return api("GET", f"/projects/{PID}/requirements/{REQ1_ID}/overview")[1]
 
 
+def overview_req(req_id):
+    return api("GET", f"/projects/{PID}/requirements/{req_id}/overview")[1]
+
+
+def sessions_of_req(req_id, task_spec_marker):
+    return [s for s in overview_req(req_id)["sessions"]
+            if (s.get("taskSpec") or "").startswith(task_spec_marker)]
+
+
 def sessions_of(task_spec_marker):
     return [s for s in overview()["sessions"]
             if (s.get("taskSpec") or "").startswith(task_spec_marker)]
@@ -675,6 +690,101 @@ def scenario_4_finalize():
           plan_view.get("workspaceState") == "FINALIZED", str(plan_view.get("workspaceState")))
 
 
+def scenario_5_slash_commands():
+    """场景 5（M2）：斜杠指令快速路径——/plan 首规划直执行、再规划裸「确认」二次确认、
+    /finish REQ 编号解析、/finalize 必二次确认（走 PendingConfirmStore，不经 copilot 确认单）。
+    独立 REQ-2 不与场景 1~4 的 REQ-1 互相污染。"""
+    print("\n[5] 斜杠指令：/plan 直执行 → 产出登记 → /finish → /plan 再规划确认 → /finalize 确认链")
+    req2 = api("POST", f"/projects/{PID}/requirements",
+               {"title": "CAP78 斜杠指令验收", "description": "M2 快速路径"})[1]
+    req2_id = req2["id"]
+    check("REQ-2 已建", req2.get("code") == "REQ-2", str(req2))
+
+    # /plan 首规划：与 /dev 同口径起会话类指令，不二次确认
+    reply = send_and_wait_reply("/plan REQ-2", "已启动 AI 规划会话")
+    check("/plan 首规划直执行", "已启动 AI 规划会话" in (reply.get("text") or ""), str(reply))
+    plan1 = wait(lambda: sessions_of_req(req2_id, "[flow:plan]") or None,
+                 "REQ-2 [flow:plan] 会话出现", 60)
+    plan1_sid = plan1[0]["id"]
+    wait(lambda: session_view(plan1_sid)
+         if session_view(plan1_sid).get("status") == "RUNNING" else None,
+         "REQ-2 规划会话 RUNNING", 60)
+    req2_view = api("GET", f"/projects/{PID}/requirements/{req2_id}")[1]
+    check("REQ-2 → ANALYZING", req2_view.get("status") == "ANALYZING",
+          str(req2_view.get("status")))
+
+    # 产出登记 + 自动开发会话（为「已有规划产出」铺垫）
+    write_output(plan1_sid, req2_id, "analysis.md", "# 分析\n斜杠路径分析（CAP78-S5）\n")
+    write_output(plan1_sid, req2_id, "design.md", "# 方案\n斜杠路径方案（CAP78-S5）\n")
+    write_output(plan1_sid, req2_id, "wi-plan.json", json.dumps([
+        {"type": "DEVELOPMENT", "title": "斜杠工作单元", "spec": "s5 spec", "dependsOn": []},
+    ], ensure_ascii=False))
+    finish_via_rest(plan1_sid, "REQ-2 规划会话")
+    dev1 = wait(lambda: sessions_of_req(req2_id, "[flow:dev]") or None,
+                "REQ-2 自动开发会话", 60)
+    dev1_sid = dev1[0]["id"]
+    wait(lambda: session_view(dev1_sid)
+         if session_view(dev1_sid).get("status") == "RUNNING" else None,
+         "REQ-2 开发会话 RUNNING", 60)
+
+    # /finish REQ-2：REQ 编号解析到活跃开发会话（FR-04 口径）
+    reply = send_and_wait_reply("/finish REQ-2", "优雅结束指令")
+    check("/finish REQ 解析到开发会话", dev1_sid[:8] in (reply.get("text") or ""), str(reply))
+    wait(lambda: session_view(dev1_sid).get("status") == "DONE" or None,
+         "REQ-2 开发会话 DONE", 90)
+    check("/finish 后开发会话 DONE", True, "")
+
+    # /plan 再规划：已有产出 → 裸「确认」二次确认（整体重跑，已有 WI 保留）
+    reply = send_and_wait_reply("/plan REQ-2", "已有规划产出")
+    text = reply.get("text") or ""
+    check("再规划提示已有产出+整体重跑+WI 保留",
+          "已有规划产出" in text and "整体重跑" in text and "已有工作单元保留" in text, text)
+    check("确认前未起新规划会话",
+          len(sessions_of_req(req2_id, "[flow:plan]")) == 1,
+          str([s["id"] for s in sessions_of_req(req2_id, "[flow:plan]")]))
+    reply = send_and_wait_reply("确认", "已启动 AI 规划会话")
+    check("裸「确认」触发再规划", "已启动 AI 规划会话" in (reply.get("text") or ""), str(reply))
+    plan2 = wait(lambda: [s for s in sessions_of_req(req2_id, "[flow:plan]")
+                          if s["id"] != plan1_sid] or None,
+                 "REQ-2 第二条规划会话", 60)
+    plan2_sid = plan2[0]["id"]
+    wait(lambda: session_view(plan2_sid)
+         if session_view(plan2_sid).get("status") == "RUNNING" else None,
+         "REQ-2 再规划会话 RUNNING", 60)
+
+    # /finish 再规划会话。注意：共享需求工作树里首轮产出文件仍在，再规划会话 finish 会
+    # 再次登记产出并自动起第二条开发会话（CAP-52 既有语义）——/finish 需再收掉它才能收口。
+    send_and_wait_reply("/finish REQ-2", "优雅结束指令")
+    wait(lambda: session_view(plan2_sid).get("status") == "DONE" or None,
+         "REQ-2 再规划会话 DONE", 90)
+    dev2 = wait(lambda: [s for s in sessions_of_req(req2_id, "[flow:dev]")
+                         if s["id"] != dev1_sid] or None,
+                "REQ-2 第二条开发会话（再规划产出再登记）", 60)
+    dev2_sid = dev2[0]["id"]
+    check("再规划再登记自动起第二条开发会话", True, "")
+    reply = send_and_wait_reply("/finish REQ-2", "优雅结束指令")
+    check("/finish 再解析到新开发会话", dev2_sid[:8] in (reply.get("text") or ""), str(reply))
+    wait(lambda: session_view(dev2_sid).get("status") == "DONE" or None,
+         "REQ-2 第二开发会话 DONE", 90)
+
+    # /finalize：必二次确认；文案带基线分支；裸「确认」执行
+    reply = send_and_wait_reply("/finalize REQ-2", "危险操作确认")
+    text = reply.get("text") or ""
+    check("/finalize 确认文案含危险操作/REQ-2/基线 main",
+          "危险操作确认" in text and "REQ-2" in text and "基线 main" in text, text)
+    check("确认前未收口",
+          session_view(dev1_sid).get("workspaceState") != "FINALIZED",
+          str(session_view(dev1_sid).get("workspaceState")))
+    reply = send_and_wait_reply("确认", "已收口")
+    check("裸「确认」执行收口", "已收口" in (reply.get("text") or ""), str(reply))
+    wait(lambda: session_view(dev1_sid).get("workspaceState") == "FINALIZED" or None,
+         "REQ-2 开发会话 FINALIZED", 30)
+    check("REQ-2 开发会话 workspaceState=FINALIZED", True, "")
+    check("REQ-2 全部会话一并 FINALIZED",
+          all(session_view(sid).get("workspaceState") == "FINALIZED"
+              for sid in (plan1_sid, plan2_sid, dev1_sid, dev2_sid)), "")
+
+
 def scenario_6b_viewer_denied():
     """场景 6b：VIEWER 发起写 → 拒绝且无确认单（phase B）。"""
     print("\n[6b] VIEWER 发起写 → 拒绝且无确认单")
@@ -767,6 +877,7 @@ def main():
         scenario_2_plan_outputs()
         scenario_3_finish_resume()
         scenario_4_finalize()
+        scenario_5_slash_commands()
 
         # ---------- phase B：VIEWER ----------
         stop_app(app, app_log)
