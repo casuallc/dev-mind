@@ -20,11 +20,14 @@ tmp/cap76-e2e/，三个 worklog 定时开关关掉），假 OpenAI 服务内嵌�
   [7] DANGEROUS（需求置 DONE）：裸「确认」被拒，完整短码才执行；
   [8] kill switch → 裸文本回落 CAP-75 问答（流式）；
   [9] 管理 API：非 ADMIN 403，ADMIN 200；
-  [10] 多步计划（M7）：submit_plan 一张确认单 → 确认后按序执行 + ${stepN.field} 替换
-       + 步骤级审计；第二步失败即停、已完成步骤不回滚。
+  [10] 多步计划（M7/M8）：submit_plan 一张确认单 → 确认回执秒回「已开始执行」→
+       异步按序执行 + ${stepN.field} 替换 + 步骤级审计 + 终态推送；第二步失败即停、
+       已完成步骤不回滚。
+  [12] 异步计划 await（M8）：假 BUILD 探针（/e2e/plan-jobs 翻转）验证 等待→继续 与
+       作业失败→中断；/copilot/admin/plans 进度口径、步骤行 step_seq 轨迹、终态推送落 pushes。
 
 阶段划分（同一套 H2 顺序重启）：
-  A. enabled=true / default-actor=admin / allow-default-actor-writes=true → 场景 1~7、9、10
+  A. enabled=true / default-actor=admin / allow-default-actor-writes=true → 场景 1~7、9、10、12
   B. enabled=true / default-actor=viewer → 场景 3
   C. enabled=false → 场景 8
 """
@@ -104,6 +107,28 @@ def _mock_decision(messages):
                 {"tool": "create_work_item", "args": {"projectId": pid,
                                                       "requirementId": "REQ-999",
                                                       "title": "挂在不存在的需求上"}},
+            ]})
+    if "异步计划等待成功" in text:
+        pid = _project_id_from(messages)
+        return ("tool", "submit_plan", {
+            "goal": "异步计划等待成功",
+            "steps": [
+                {"tool": "create_requirement", "args": {"title": "异步计划甲"},
+                 "await": {"kind": "BUILD", "idField": "requirementId", "timeoutMinutes": 3}},
+                {"tool": "create_work_item", "args": {"projectId": pid,
+                                                      "requirementId": "${step1.requirementId}",
+                                                      "title": "异步计划甲工作项"}},
+            ]})
+    if "异步计划作业失败" in text:
+        pid = _project_id_from(messages)
+        return ("tool", "submit_plan", {
+            "goal": "异步计划作业失败",
+            "steps": [
+                {"tool": "create_requirement", "args": {"title": "异步计划乙"},
+                 "await": {"kind": "BUILD", "idField": "requirementId", "timeoutMinutes": 3}},
+                {"tool": "create_work_item", "args": {"projectId": pid,
+                                                      "requirementId": "${step1.requirementId}",
+                                                      "title": "异步计划乙工作项"}},
             ]})
     if "标记为完成" in text:
         return ("tool", "update_requirement_status",
@@ -368,7 +393,9 @@ def app_args(phase):
         f'--devmind.worklog.weekly-enabled=false '
         f'--devmind.worklog.git-import-enabled=false '
         f'--devmind.copilot.max-turns-per-minute=1000 '
-        f'--devmind.copilot.confirm-ttl-minutes=1'
+        f'--devmind.copilot.confirm-ttl-minutes=1 '
+        # 场景 12：await 轮询加速（默认 10s 太慢）
+        f'--devmind.copilot.plan-await-poll-seconds=1'
     )
     if phase == "C":
         return common + ' --devmind.copilot.enabled=false'
@@ -502,6 +529,63 @@ def requirement_by_keyword(keyword):
     return (page or {}).get("items") or []
 
 
+def pushes(chat=CHAT):
+    _, data = api("GET", f"/e2e/bot/pushes?chatId={urllib.parse.quote(chat)}")
+    return data or []
+
+
+def wait_push(contains, chat=CHAT, timeout=90):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for r in pushes(chat):
+            if contains in (r.get("text") or ""):
+                return r
+        time.sleep(0.5)
+    raise AssertionError(f"{timeout}s 内未等到推送包含 {contains!r}；最近推送="
+                         + repr([r.get("text") for r in pushes(chat)[-6:]]))
+
+
+def plan_by_code(code):
+    _, data = api("GET", "/copilot/admin/plans?keyword=" + urllib.parse.quote(code)
+                  + "&size=50", token=TOKEN)
+    for item in (data or {}).get("items") or []:
+        if item.get("shortCode") == code:
+            return item
+    return None
+
+
+def plan_detail(plan_id):
+    _, data = api("GET", f"/copilot/admin/plans/{plan_id}", token=TOKEN)
+    return (data or {}).get("plan")
+
+
+def wait_plan(code, status, timeout=90):
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        last = plan_by_code(code)
+        if last and last.get("status") == status:
+            return last
+        time.sleep(1)
+    raise AssertionError(f"{timeout}s 内计划 {code} 未变为 {status}；最后={last}")
+
+
+def wait_plan_step(code, seq, status, timeout=60):
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        plan = plan_by_code(code)
+        if plan:
+            detail = plan_detail(plan["id"])
+            for s in (detail or {}).get("steps") or []:
+                if s.get("seq") == seq:
+                    last = s
+                    if s.get("status") == status:
+                        return s
+        time.sleep(0.5)
+    raise AssertionError(f"{timeout}s 内计划 {code} 步骤 {seq} 未变为 {status}；最后={last}")
+
+
 def login(username, password="admin123"):
     status, body = api("POST", "/auth/login", {"username": username, "password": password})
     return (body or {}).get("token") or (body or {}).get("accessToken")
@@ -624,7 +708,7 @@ def scenario_7_dangerous():
 
 
 def scenario_10_plan():
-    print("\n[10] 多步计划（FR-33，M7）：submit_plan → 一张确认单 → 确认后按序执行 + 占位符替换 + 失败即停")
+    print("\n[10] 多步计划（FR-33/34）：submit_plan → 一张确认单 → 确认回执秒回 → 异步按序执行 + 占位符替换 + 失败即停")
     code, card = write_confirmation("建需求并挂工作项", expect_title="提交多步计划")
     action = action_by_code(code)
     check("整份计划=一张确认单（toolName=submit_plan，PENDING）",
@@ -633,8 +717,12 @@ def scenario_10_plan():
     check("确认前需求不存在（计划未执行）",
           len(requirement_by_keyword("计划联调需求")) == 0)
 
-    send_and_wait_reply(f"确认 {code}", "计划已完成")
-    check("计划确认单 SUCCEEDED", (action_by_code(code) or {}).get("status") == "SUCCEEDED")
+    reply = send_and_wait_reply(f"确认 {code}", "计划已开始执行")
+    check("确认回执秒回（FR-34 异步分发，不阻塞等执行完）",
+          "计划已开始执行" in (reply.get("text") or ""), str(reply))
+    wait_push("计划《建需求并挂一个工作项》已完成")
+    check("计划终态推送（✅ 已完成）", True)
+    check("计划确认单 SUCCEEDED", wait_action_status(code, "SUCCEEDED").get("status") == "SUCCEEDED")
     reqs = requirement_by_keyword("计划联调需求")
     check("步骤1需求已落库", len(reqs) == 1, str(reqs))
     if reqs:
@@ -657,12 +745,87 @@ def scenario_10_plan():
               str(calls))
 
     code2, _ = write_confirmation("计划失败用例", expect_title="提交多步计划")
-    reply = send_and_wait_reply(f"确认 {code2}", "计划执行中断")
-    check("失败即停回执（已完成 1/2 步，剩余未执行）",
-          "计划执行中断：已完成 1/2 步" in (reply.get("text") or ""), str(reply))
-    check("失败计划确认单 FAILED", (action_by_code(code2) or {}).get("status") == "FAILED")
+    reply = send_and_wait_reply(f"确认 {code2}", "计划已开始执行")
+    check("失败用例确认回执同样秒回", "计划已开始执行" in (reply.get("text") or ""), str(reply))
+    push = wait_push("计划《第二步必失败》执行中断")
+    check("失败终态推送（❌ 执行中断，含 1/2 步进度）",
+          "执行中断" in (push.get("text") or "") and "1/2" in (push.get("text") or ""),
+          str(push))
+    check("失败计划确认单 FAILED", wait_action_status(code2, "FAILED").get("status") == "FAILED")
     check("已完成的步骤不回滚（需求仍在）",
           len(requirement_by_keyword("计划失败需求")) == 1)
+
+
+def scenario_12_async_plan_await():
+    print("\n[12] 异步计划 await（FR-34~36）：假 BUILD 探针 等待→继续 / 作业失败→中断 + 进度视图口径 + 终态推送")
+
+    # ---- 12a 等待→继续 ----
+    code, _ = write_confirmation("异步计划等待成功", expect_title="提交多步计划")
+    reply = send_and_wait_reply(f"确认 {code}", "计划已开始执行")
+    check("确认回执秒回", "计划已开始执行" in (reply.get("text") or ""), str(reply))
+    # 假探针：未知 id 恒 RUNNING → 步骤1 停在 WAITING 直到翻转
+    step = wait_plan_step(code, 1, "WAITING", timeout=60)
+    check("步骤1 进入 WAITING（等 BUILD 作业终态）", step.get("status") == "WAITING", str(step))
+    reqs = requirement_by_keyword("异步计划甲")
+    check("await 前步骤1 已执行（需求落库）", len(reqs) == 1, str(reqs))
+    rid = reqs[0]["id"]
+    plan = plan_by_code(code)
+    check("执行中计划进度 0/2（步骤1 等终态未计完成）",
+          plan.get("status") == "EXECUTING" and plan.get("totalSteps") == 2, str(plan))
+    api("POST", "/e2e/plan-jobs", {"id": rid, "state": "SUCCEEDED"})
+    plan = wait_plan(code, "SUCCEEDED", timeout=60)
+    check("翻转作业 SUCCEEDED 后计划收口 SUCCEEDED 且进度 2/2",
+          plan.get("completedSteps") == 2 and plan.get("totalSteps") == 2, str(plan))
+    detail = plan_detail(plan["id"])
+    statuses = {s.get("seq"): s.get("status") for s in (detail or {}).get("steps") or []}
+    check("步骤轨迹：步骤1 WAITING→OK、步骤2 OK", statuses.get(1) == "OK" and statuses.get(2) == "OK",
+          str(statuses))
+    await_marks = {s.get("seq"): s.get("await") for s in (detail or {}).get("steps") or []}
+    check("步骤1 详情带 await 声明（BUILD/requirementId）",
+          (await_marks.get(1) or {}).get("kind") == "BUILD"
+          and (await_marks.get(1) or {}).get("idField") == "requirementId", str(await_marks))
+    wait_push("计划《异步计划等待成功》已完成")
+    check("终态推送落入 fake pushes", True)
+    # 步骤审计 step_seq 落库（确认执行轮次的 toolCalls：步骤行带 1/2，汇总行 null）
+    _, turns = api("GET", "/copilot/admin/turns?channel=fake&actor=admin&keyword="
+                   + urllib.parse.quote(f"确认 {code}"), token=TOKEN)
+    rows = (turns or {}).get("items") or []
+    check("确认执行轮次有审计", len(rows) >= 1, str(turns))
+    if rows:
+        _, tdetail = api("GET", f"/copilot/admin/turns/{rows[0]['id']}", token=TOKEN)
+        seqs = sorted(c.get("stepSeq") for c in (tdetail or {}).get("toolCalls") or []
+                      if c.get("stepSeq") is not None)
+        check("步骤审计行带 step_seq=[1,2]", seqs == [1, 2], str(seqs))
+        summary = [c for c in (tdetail or {}).get("toolCalls") or []
+                   if c.get("toolName") == "submit_plan"]
+        check("计划收口写汇总审计行（submit_plan=OK）",
+              len(summary) == 1 and summary[0].get("status") == "OK", str(summary))
+    _, items = api("GET", f"/projects/{PID}/requirements/{rid}/work-items", token=TOKEN)
+    check("步骤2 工作项落库（等待→继续后执行）",
+          "异步计划甲工作项" in [w.get("title") for w in (items or [])], str(items))
+
+    # ---- 12b 作业失败→中断 ----
+    code2, _ = write_confirmation("异步计划作业失败", expect_title="提交多步计划")
+    send_and_wait_reply(f"确认 {code2}", "计划已开始执行")
+    wait_plan_step(code2, 1, "WAITING", timeout=60)
+    reqs2 = requirement_by_keyword("异步计划乙")
+    check("12b 步骤1 需求已落库", len(reqs2) == 1, str(reqs2))
+    api("POST", "/e2e/plan-jobs", {"id": reqs2[0]["id"], "state": "FAILED"})
+    plan2 = wait_plan(code2, "FAILED", timeout=60)
+    check("翻转作业 FAILED 后计划 FAILED", plan2.get("status") == "FAILED", str(plan2))
+    detail2 = plan_detail(plan2["id"])
+    statuses2 = {s.get("seq"): s.get("status") for s in (detail2 or {}).get("steps") or []}
+    check("步骤1 FAILED、步骤2 REJECTED（未执行）",
+          statuses2.get(1) == "FAILED" and statuses2.get(2) == "REJECTED", str(statuses2))
+    step1 = next((s for s in (detail2 or {}).get("steps") or [] if s.get("seq") == 1), {})
+    check("步骤1 错误含作业失败摘要", "失败" in (step1.get("error") or ""), str(step1))
+    push = wait_push("计划《异步计划作业失败》执行中断")
+    check("失败终态推送（❌）", "❌" in (push.get("text") or ""), str(push))
+    check("12b 步骤2 工作项未落库",
+          "异步计划乙工作项" not in [w.get("title")
+                                     for w in (api("GET", f"/projects/{PID}/requirements/"
+                                                   + reqs2[0]["id"] + "/work-items",
+                                                   token=TOKEN)[1] or [])])
 
 
 def scenario_9_admin_rbac():
@@ -769,6 +932,7 @@ def main():
         scenario_6_card_callback()
         scenario_7_dangerous()
         scenario_10_plan()
+        scenario_12_async_plan_await()
         scenario_9_admin_rbac()
 
         # ---------- phase B：VIEWER ----------

@@ -8,6 +8,7 @@ import com.devmind.common.agent.plan.JobTerminalProbe;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Profile;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -16,8 +17,10 @@ import org.springframework.stereotype.Component;
 /**
  * 构建作业终态探针（CAP-76 FR-35）：BUILD kind。读模型复用 {@link BuildService#get(Long)}，
  * SecurityContext 在探测调用内合成（默认 THREADLOCAL 不跨线程；探针跑在计划虚拟线程上）。
+ * e2e profile 下由 copilot 的假探针顶替（kind 唯一，避免真构建翻作业状态）。
  */
 @Component
+@Profile("!e2e")
 public class BuildJobTerminalProbe implements JobTerminalProbe {
 
     private static final Logger log = LoggerFactory.getLogger(BuildJobTerminalProbe.class);

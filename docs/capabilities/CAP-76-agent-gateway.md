@@ -1139,12 +1139,12 @@ devmind:
 
 ### M8 计划异步执行与进度视图（FR-34/35/36）
 
-- [ ] `submit_plan` 确认后异步执行（虚拟线程），确认回执秒回；终态收口 + 汇总审计 + 聊天推送
-- [ ] EXECUTING 清扫分流：计划单按 `plan-execution-timeout-minutes`，非计划单不变
-- [ ] 步骤 `await`：common `JobTerminalProbe` SPI + BUILD/SESSION 探针实现 + 提交期校验
-- [ ] `copilot_tool_calls.step_seq` + RUNNING/WAITING 中间态；plans 管理 API
-- [ ] 前端「计划」视图（进度表 + 步骤展开 + EXECUTING 轮询）
-- [ ] 验收：异步分发/await 成败与超时/进度页数据口径（单测 + E2E 场景 12）
+- [x] `submit_plan` 确认后异步执行（虚拟线程），确认回执秒回；终态收口 + 汇总审计 + 聊天推送
+- [x] EXECUTING 清扫分流：计划单按 `plan-execution-timeout-minutes`，非计划单不变
+- [x] 步骤 `await`：common `JobTerminalProbe` SPI + BUILD/SESSION 探针实现 + 提交期校验
+- [x] `copilot_tool_calls.step_seq` + RUNNING/WAITING 中间态；plans 管理 API
+- [x] 前端「计划」视图（进度表 + 步骤展开 + EXECUTING 轮询）
+- [x] 验收：异步分发/await 成败与超时/进度页数据口径（单测 + E2E 场景 12）
 
 ## 11. 验收标准
 
