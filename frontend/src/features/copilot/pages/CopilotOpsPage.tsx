@@ -9,11 +9,12 @@ import type { CopilotHealth } from '../types'
 import ToolsPanel from '../components/ToolsPanel'
 import TurnsPanel from '../components/TurnsPanel'
 import ActionsPanel from '../components/ActionsPanel'
+import PlansPanel from '../components/PlansPanel'
 import { showError } from '../../../shared/utils/showError'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 
-type CopilotView = 'tools' | 'turns' | 'actions'
-const VIEWS: CopilotView[] = ['tools', 'turns', 'actions']
+type CopilotView = 'tools' | 'turns' | 'actions' | 'plans'
+const VIEWS: CopilotView[] = ['tools', 'turns', 'actions', 'plans']
 
 export default function CopilotOpsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -49,6 +50,7 @@ export default function CopilotOpsPage() {
               { value: 'tools', label: '工具目录' },
               { value: 'turns', label: '对话审计' },
               { value: 'actions', label: '确认单' },
+              { value: 'plans', label: '计划' },
             ]}
           />
         </Space>
@@ -95,6 +97,7 @@ export default function CopilotOpsPage() {
         {view === 'tools' && <ToolsPanel refreshTick={refreshTick} />}
         {view === 'turns' && <TurnsPanel refreshTick={refreshTick} />}
         {view === 'actions' && <ActionsPanel refreshTick={refreshTick} />}
+        {view === 'plans' && <PlansPanel refreshTick={refreshTick} />}
       </div>
     </Card>
   )

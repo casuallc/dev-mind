@@ -41,6 +41,11 @@ export interface CopilotConfig {
   auditRetentionDays: number
   actionSweepCron?: string
   cleanupCron?: string
+  /** FR-33~35 计划编排（M7/M8） */
+  planMaxSteps?: number
+  planExecutionTimeoutMinutes?: number
+  planAwaitPollSeconds?: number
+  planAwaitMaxTimeoutMinutes?: number
 }
 
 /** 工具目录行（/admin/tools） */
@@ -87,6 +92,8 @@ export interface CopilotToolCall {
   id: number
   turnId: string
   actionId?: string | null
+  /** FR-36 计划步骤序号（非步骤行为 null） */
+  stepSeq?: number | null
   toolName: string
   argsJson?: string | null
   risk: string
@@ -124,4 +131,39 @@ export interface CopilotTurnDetail {
   turn: CopilotTurn | null
   toolCalls: CopilotToolCall[]
   actions: CopilotAction[]
+}
+
+/** FR-36 计划列表行（submit_plan 确认单 + 步骤进度聚合计数） */
+export interface CopilotPlan {
+  id: string
+  shortCode: string
+  goal: string
+  status: 'PENDING' | 'EXECUTING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | 'EXPIRED' | string
+  risk: string
+  actor?: string | null
+  projectId?: string | null
+  totalSteps: number
+  completedSteps: number
+  error?: string | null
+  createdAt: string
+  executedAt?: string | null
+}
+
+/** FR-36 计划步骤（步骤快照 join 步骤审计行） */
+export interface CopilotPlanStep {
+  seq: number
+  tool?: string | null
+  title?: string | null
+  await?: { kind?: string; idField?: string; timeoutMinutes?: number } | null
+  argsJson?: string | null
+  /** PENDING（未开始）/RUNNING/WAITING/OK/FAILED/REJECTED */
+  status: string
+  resultSummary?: string | null
+  error?: string | null
+  durationMs?: number
+  startedAt?: string | null
+}
+
+export interface CopilotPlanDetail {
+  plan: (CopilotPlan & { steps: CopilotPlanStep[] }) | null
 }

@@ -3,6 +3,8 @@ import type {
   CopilotAction,
   CopilotConfig,
   CopilotHealth,
+  CopilotPlan,
+  CopilotPlanDetail,
   CopilotTool,
   CopilotTurn,
   CopilotTurnDetail,
@@ -72,4 +74,26 @@ export function cancelCopilotAction(id: string): Promise<{ ok: boolean; message:
   return api.post<{ ok: boolean; message: string }>(
     `/copilot/admin/actions/${encodeURIComponent(id)}/cancel`,
   )
+}
+
+/** FR-36 计划列表（submit_plan 确认单 + 步骤进度） */
+export function listCopilotPlans(params: {
+  status?: string
+  actor?: string
+  keyword?: string
+  page?: number
+  size?: number
+} = {}): Promise<PageView<CopilotPlan>> {
+  const q = new URLSearchParams()
+  if (params.status) q.set('status', params.status)
+  if (params.actor) q.set('actor', params.actor)
+  if (params.keyword) q.set('keyword', params.keyword)
+  q.set('page', String(params.page ?? 0))
+  q.set('size', String(params.size ?? 20))
+  return api.get<PageView<CopilotPlan>>(`/copilot/admin/plans?${q.toString()}`)
+}
+
+/** FR-36 计划详情：确认单 + 步骤快照 join 步骤审计 */
+export function getCopilotPlan(id: string): Promise<CopilotPlanDetail> {
+  return api.get<CopilotPlanDetail>(`/copilot/admin/plans/${encodeURIComponent(id)}`)
 }
