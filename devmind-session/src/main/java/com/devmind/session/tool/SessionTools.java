@@ -45,6 +45,8 @@ public class SessionTools {
     public PlatformTool listSessionsTool() {
         ToolSpec spec = new ToolSpec("list_sessions", "查询会话列表",
                 "列出项目下的 coding 会话（id 前 8 位/状态/任务摘要/执行节点）。status 可过滤 RUNNING/DONE 等；"
+                        + "requirementId 可按需求过滤（支持 REQ-<seq>/内部 id）。"
+                        + "回答「REQ-x 跑到哪了」类问题时先用本工具按 requirementId 过滤，再按需 get_session_events 看最近事件；"
                         + "未指定 projectId 时使用当前绑定项目。",
                 """
                         {
@@ -52,6 +54,7 @@ public class SessionTools {
                           "properties": {
                             "projectId": {"type": "string", "maxLength": 64},
                             "status": {"type": "string", "maxLength": 32},
+                            "requirementId": {"type": "string", "maxLength": 64},
                             "limit": {"type": "integer", "default": 20, "minimum": 1, "maximum": 50}
                           }
                         }
@@ -60,7 +63,17 @@ public class SessionTools {
         return PlatformTool.of(spec, (call, ctx) -> {
             Map<String, Object> args = call.args();
             String projectId = projectId(args, ctx);
-            List<SessionView> all = sessions.list(ToolText.str(args, "status"), projectId, null, null);
+            String requirementRef = ToolText.str(args, "requirementId");
+            String requirementId = null;
+            if (requirementRef != null) {
+                // 编号形态（REQ-<seq>/纯数字）解析需要项目上下文；内部 id 直查不需要（resolveRef 先按 id 查）
+                if (projectId == null && requirementRef.matches("(?i)^(REQ-?)?\\d+$")) {
+                    return projectRequired();
+                }
+                requirementId = requirements.resolveRef(projectId, requirementRef, null).getId();
+            }
+            List<SessionView> all = sessions.list(ToolText.str(args, "status"), projectId,
+                    null, requirementId);
             if (projectId == null) {
                 // 无项目上下文时只列本人创建的会话，避免跨项目越权浏览（项目可见范围收紧见 CAP-62）
                 String actor = ctx.actor();
