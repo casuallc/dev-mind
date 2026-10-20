@@ -32,6 +32,7 @@ import com.devmind.common.exception.DevMindException;
 import com.devmind.deploy.dto.DeploymentView;
 import com.devmind.deploy.service.DeploymentService;
 import com.devmind.docs.DocumentService;
+import com.devmind.flow.RequirementFlowService;
 import com.devmind.project.DesignService;
 import com.devmind.project.ProjectService;
 import com.devmind.project.RequirementService;
@@ -40,6 +41,7 @@ import com.devmind.project.dto.ProjectView;
 import com.devmind.project.dto.RequirementRequest;
 import com.devmind.project.dto.RequirementView;
 import com.devmind.project.model.RequirementEntity;
+import com.devmind.project.model.WorkItemEntity;
 import com.devmind.project.dto.WorkItemView;
 import com.devmind.release.dto.CreateReleaseRequest;
 import com.devmind.release.dto.ReleaseView;
@@ -89,7 +91,8 @@ public class BotRouterService implements BotMessageHandler {
     /** FR-12 敏感操作：支持身份映射的 channel 上要求已绑定个人身份（IMAGE=FR-17 入站截图） */
     private static final java.util.Set<String> SENSITIVE_COMMANDS =
             java.util.Set.of("bind", "session", "build", "deploy", "reqs", "req", "dev", "IMAGE",
-                    "status", "stop", "wi", "design", "flow", "release", "issue");
+                    "status", "stop", "wi", "design", "flow", "release", "issue",
+                    "plan", "finish", "resume", "finalize");
 
     /** FR-22 需求状态别名（中英都收）：键=小写形态，值=平台状态码。 */
     private static final Map<String, String> FLOW_STATUS_ALIASES = Map.ofEntries(
@@ -134,6 +137,7 @@ public class BotRouterService implements BotMessageHandler {
     private final ProjectService projectService;
     private final RequirementService requirementService;
     private final WorkItemService workItemService;
+    private final RequirementFlowService flowService;
     private final BuildService buildService;
     private final DeploymentService deploymentService;
     private final ReleaseService releaseService;
@@ -160,6 +164,7 @@ public class BotRouterService implements BotMessageHandler {
                             ProjectService projectService,
                             RequirementService requirementService,
                             WorkItemService workItemService,
+                            RequirementFlowService flowService,
                             BuildService buildService,
                             DeploymentService deploymentService,
                             ReleaseService releaseService,
@@ -179,6 +184,7 @@ public class BotRouterService implements BotMessageHandler {
         this.projectService = projectService;
         this.requirementService = requirementService;
         this.workItemService = workItemService;
+        this.flowService = flowService;
         this.buildService = buildService;
         this.deploymentService = deploymentService;
         this.releaseService = releaseService;
@@ -391,7 +397,11 @@ public class BotRouterService implements BotMessageHandler {
             case "issue" -> RouteReply.text(createIssue(msg, cmd.args()));
             case "reqs" -> RouteReply.text(listRequirements(binding));
             case "req" -> requirementDetail(binding, cmd.args());
+            case "plan" -> RouteReply.text(planCommand(msg, binding, cmd.args()));
             case "dev" -> RouteReply.text(devSession(msg, binding, cmd.args()));
+            case "finish" -> RouteReply.text(finishCommand(binding, cmd.args()));
+            case "resume" -> RouteReply.text(resumeCommand(binding, cmd.args()));
+            case "finalize" -> RouteReply.text(finalizeCommand(msg, binding, cmd.args()));
             case "status" -> RouteReply.text(sessionStatus(binding));
             case "stop" -> RouteReply.text(stopWithConfirm(msg, binding, cmd.args()));
             case "wi" -> RouteReply.text(wiList(binding, cmd.args()));
@@ -415,7 +425,7 @@ public class BotRouterService implements BotMessageHandler {
         String text = msg.text().trim();
         if ("确认".equals(text)) {
             PendingConfirmStore.Entry e = pendingConfirms.poll(pendingKey(msg));
-            return e == null ? null : RouteReply.text(executeConfirmed(binding, e));
+            return e == null ? null : RouteReply.text(executeConfirmed(msg, binding, e));
         }
         if ("取消".equals(text)) {
             return pendingConfirms.removeFresh(pendingKey(msg))
@@ -425,11 +435,14 @@ public class BotRouterService implements BotMessageHandler {
     }
 
     /** 确认通过后的原操作执行（各指令重校验当前状态，不盲信暂存时的快照）。 */
-    private String executeConfirmed(BotBindingEntity binding, PendingConfirmStore.Entry e) {
+    private String executeConfirmed(BotMessage msg, BotBindingEntity binding,
+                                    PendingConfirmStore.Entry e) {
         return switch (e.name()) {
             case "stop" -> stopConfirmed(binding, e.args());
             case "flow" -> flowConfirmed(binding, e.args());
             case "release" -> releaseConfirmed(binding, e.args());
+            case "plan" -> planConfirmed(msg, binding, e.args());
+            case "finalize" -> finalizeConfirmed(binding, e.args());
             default -> "暂存的操作已失效，请重新发起（/" + e.name() + "）";
         };
     }
@@ -572,9 +585,13 @@ public class BotRouterService implements BotMessageHandler {
                 /wi <编号> —— 需求下工作单元列表（需绑定个人身份）
                 /design <编号> —— 需求下方案列表 + 最新方案正文（需绑定个人身份）
                 /flow <编号> [目标状态] [force] —— 查看/推进需求状态（完结/取消需二次确认；需绑定个人身份）
-                /dev <编号> [补充说明] —— 以需求起开发会话，挂研发主线（需绑定个人身份）
+                /plan <需求编号> —— 开启 AI 规划（分析+方案+工作单元拆分；已有产出时二次确认整体重跑；需绑定个人身份）
+                /dev <需求编号|WI编号> [补充说明] —— 以需求起开发会话挂研发主线；WI-<编号> = 单个工作单元起会话（需绑定个人身份）
                 /session <需求描述> —— 起自由文本开发会话（需绑定个人身份）
-                （/dev /session 起的会话结束时，进展会自动推回本聊天）
+                /finish <会话id|需求编号> —— 优雅结束会话（agent 处理完当前轮自然退出，工作区保留；需绑定个人身份）
+                /resume <会话id|需求编号> —— 继续已结束/挂起的会话（需绑定个人身份）
+                /finalize <需求编号> [discard] —— 需求级收口：合并进基线并 push（危险操作必二次确认；需绑定个人身份）
+                （/plan /dev /session 起的会话结束时，进展会自动推回本聊天）
                 /build —— 最近一条构建状态（需绑定个人身份）
                 /release [版本号] [构建id] —— 查看最近发版 / 发起发版（需二次确认；需绑定个人身份）
                 /deploy —— 最近 5 条部署状态（需绑定个人身份）
@@ -1135,13 +1152,17 @@ public class BotRouterService implements BotMessageHandler {
     /**
      * /dev <编号> [补充说明]：以需求起开发会话——taskSpec = 需求标题+描述+补充，
      * 挂 requirementId 进研发主线（平台需求页可追溯其下会话）。
+     * CAP-78 FR-08 扩展：编号是 WI-<seq> 形态时走单个工作单元起会话（FR-03）。
      */
     private String devSession(BotMessage msg, BotBindingEntity binding, String args) {
         String projectId = requireProject(binding);
         if (args == null || args.isBlank()) {
-            return "用法：/dev <需求编号> [补充说明]（编号见 /reqs）";
+            return "用法：/dev <需求编号|WI编号> [补充说明]（编号见 /reqs、/wi）";
         }
         String[] parts = args.trim().split("\\s+", 2);
+        if (WI_REF.matcher(parts[0]).matches()) {
+            return devWorkItemSession(msg, binding, projectId, parts[0]);
+        }
         RequirementView r = resolveRequirement(projectId, parts[0]);
         String extra = parts.length > 1 ? parts[1].trim() : "";
         StringBuilder spec = new StringBuilder("【").append(r.code()).append("】").append(r.title());
@@ -1162,6 +1183,183 @@ public class BotRouterService implements BotMessageHandler {
                 + "\n状态：" + s.status()
                 + (attachmentIds.isEmpty() ? "" : "\n（已附 " + attachmentIds.size() + " 张截图）")
                 + footer("/projects/" + projectId);
+    }
+
+    // ---------------- CAP-78 需求开发全流程（M2 斜杠指令快速路径） ----------------
+
+    /** WI 编号形态（WI-2 / wi-2 / WI2）；纯数字维持 /dev 需求口径不抢。 */
+    private static final java.util.regex.Pattern WI_REF =
+            java.util.regex.Pattern.compile("(?i)^WI-?\\d+$");
+
+    /**
+     * /plan &lt;REQ编号&gt;（FR-08）：= copilot 工具 start_requirement_plan（FR-01），
+     * 与 /dev 同口径起会话类指令不二次确认；已有规划产出（WI 或方案）时走
+     * PendingConfirmStore 二次确认（整体重跑，已有 WI 保留）。
+     */
+    private String planCommand(BotMessage msg, BotBindingEntity binding, String args) {
+        String projectId = requireProject(binding);
+        if (args == null || args.isBlank()) {
+            return "用法：/plan <需求编号>（编号见 /reqs，如 REQ-3）";
+        }
+        RequirementView r = resolveRequirement(projectId, args.trim().split("\\s+")[0]);
+        if (hasPlanOutput(projectId, r.id())) {
+            String desc = "对 " + r.code() + "（" + r.title() + "）重新规划："
+                    + "分析/方案/工作单元拆分整体重跑（产出落新版本），已有工作单元保留不删除";
+            pendingConfirms.put(pendingKey(msg), "plan", r.code(), desc);
+            return "⚠️ " + r.code() + " 已有规划产出，将" + desc
+                    + "\n回复 确认 继续，回复 取消 放弃（10 分钟内有效）";
+        }
+        return doPlan(msg, binding, r);
+    }
+
+    /** 已有规划产出判定（与 FlowTools 重新规划预览同口径：有 WI 或有方案即算）。 */
+    private boolean hasPlanOutput(String projectId, String requirementId) {
+        return !workItemService.list(projectId, requirementId).isEmpty()
+                || !designService.list(projectId, requirementId).isEmpty();
+    }
+
+    /** 确认通过后的 /plan 重放：重新解析需求，状态校验由 startPlan 既有前置把关。 */
+    private String planConfirmed(BotMessage msg, BotBindingEntity binding, String args) {
+        String projectId = requireProject(binding);
+        RequirementView r = resolveRequirement(projectId, args.trim());
+        return doPlan(msg, binding, r);
+    }
+
+    /** 起规划会话 + FR-10 终态推送登记（首规划与确认后重放同路径）。 */
+    private String doPlan(BotMessage msg, BotBindingEntity binding, RequirementView r) {
+        String projectId = requireProject(binding);
+        SessionView s = flowService.startPlan(projectId, r.id());
+        watchService.register(s.id(), msg.channel(), msg.externalChatId(),
+                "【" + r.code() + "】" + r.title());
+        return "已启动 AI 规划会话 " + shortId(s.id()) + "（" + r.code() + " " + r.title() + "）"
+                + "\n状态：" + s.status()
+                + "\n规划完成会自动登记分析/方案/工作单元并起开发会话，进展会推送到这里"
+                + footer("/sessions?sid=" + s.id());
+    }
+
+    /** /dev WI-&lt;seq&gt;（FR-08 扩展）：= FR-03 单个工作单元起会话（WI.spec 作 taskSpec）。 */
+    private String devWorkItemSession(BotMessage msg, BotBindingEntity binding,
+                                      String projectId, String wiRef) {
+        WorkItemEntity wi = workItemService.resolveRef(projectId, wiRef);
+        SessionView s = flowService.startWorkItemSession(projectId, wi.getId());
+        String code = "WI-" + wi.getSeq();
+        watchService.register(s.id(), msg.channel(), msg.externalChatId(),
+                "【" + code + "】" + wi.getTitle());
+        return "已为工作单元 " + code + "（" + wi.getTitle() + "）起开发会话 " + shortId(s.id())
+                + "\n状态：" + s.status()
+                + footer("/sessions?sid=" + s.id());
+    }
+
+    /** /finish &lt;sid|REQ编号&gt;（FR-08）：优雅结束（关 stdin 自然退出），区别于 /stop 强杀。 */
+    private String finishCommand(BotBindingEntity binding, String args) {
+        String projectId = requireProject(binding);
+        if (args == null || args.isBlank()) {
+            return "用法：/finish <会话id|需求编号>（需求编号解析到该需求最近活跃的会话）";
+        }
+        SessionView target = resolveSessionRef(projectId, args.trim());
+        sessionManager.finish(target.id());
+        return "已向会话 " + shortId(target.id()) + " 发送优雅结束指令："
+                + "agent 处理完当前轮后自然退出（DONE/FAILED），工作区与改动保留"
+                + footer("/sessions?sid=" + target.id());
+    }
+
+    /** /resume &lt;sid|REQ编号&gt;（FR-08）：继续已结束/挂起的会话（claude --resume 续历史）。 */
+    private String resumeCommand(BotBindingEntity binding, String args) {
+        String projectId = requireProject(binding);
+        if (args == null || args.isBlank()) {
+            return "用法：/resume <会话id|需求编号>";
+        }
+        SessionView target = resolveSessionRef(projectId, args.trim());
+        SessionView resumed = sessionManager.resume(target.id());
+        return "已继续会话 " + shortId(resumed.id()) + "（状态 " + resumed.status() + "）"
+                + footer("/sessions?sid=" + resumed.id());
+    }
+
+    /**
+     * /finish /resume 目标解析（FR-04 口径）：需求编号（REQ-&lt;seq&gt;/纯数字）→ 该需求
+     * 最近活跃会话（无活跃取最近非终态，再无取最近一条，供 resume 终态会话）；否则按
+     * 会话 id 精确/唯一前缀（项目范围内，与 /stop 同口径）；解析不到报错不猜。
+     */
+    private SessionView resolveSessionRef(String projectId, String key) {
+        if (REQ_REF.matcher(key).matches()) {
+            RequirementView r = resolveRequirement(projectId, key);
+            List<SessionView> sessions = sessionManager.list(null, projectId, null, r.id());
+            if (sessions.isEmpty()) {
+                throw new DevMindException(com.devmind.common.exception.ErrorCode.NOT_FOUND,
+                        r.code() + " 下没有可操作的会话");
+            }
+            // list 为 createdAt 倒序（/status 同口径）：第一个命中即"最近"
+            return sessions.stream().filter(BotRouterService::isActiveSession).findFirst()
+                    .orElseGet(() -> sessions.stream().filter(s -> !isTerminal(s)).findFirst()
+                            .orElse(sessions.get(0)));
+        }
+        List<SessionView> hits = sessionManager.list(null, projectId, null, null).stream()
+                .filter(s -> s.id().equals(key) || s.id().startsWith(key)).toList();
+        if (hits.isEmpty()) {
+            throw new DevMindException(com.devmind.common.exception.ErrorCode.NOT_FOUND,
+                    "会话不存在: " + key);
+        }
+        if (hits.size() > 1) {
+            StringBuilder sb = new StringBuilder("「" + key + "」匹配到多个会话，请补全 id：");
+            hits.stream().limit(5).forEach(s ->
+                    sb.append("\n- ").append(shortId(s.id())).append(" [").append(s.status())
+                            .append("] ").append(previewOf(s.taskSpec(), 30)));
+            throw new DevMindException(com.devmind.common.exception.ErrorCode.BAD_REQUEST,
+                    sb.toString());
+        }
+        return hits.get(0);
+    }
+
+    private static final java.util.regex.Pattern REQ_REF =
+            java.util.regex.Pattern.compile("(?i)(?:REQ-?)?\\d+");
+
+    /** 活跃态（SessionState.isActive 同口径：RUNNING/WAITING_INPUT/WAITING_AUTH）。 */
+    private static boolean isActiveSession(SessionView s) {
+        return "RUNNING".equals(s.status()) || "WAITING_INPUT".equals(s.status())
+                || "WAITING_AUTH".equals(s.status());
+    }
+
+    /**
+     * /finalize &lt;REQ编号&gt; [discard]（FR-08）：需求级收口（CAP-51），始终二次确认；
+     * 确认文案带基线分支与 discard 红字警示。
+     */
+    private String finalizeCommand(BotMessage msg, BotBindingEntity binding, String args) {
+        String projectId = requireProject(binding);
+        if (args == null || args.isBlank()) {
+            return "用法：/finalize <需求编号> [discard]（discard=丢弃未提交改动；收口必二次确认）";
+        }
+        String[] parts = args.trim().split("\\s+");
+        RequirementView r = resolveRequirement(projectId, parts[0]);
+        boolean discard = parts.length > 1 && "discard".equalsIgnoreCase(parts[1]);
+        String desc = "收口 " + r.code() + "（" + r.title() + "）工作区：需求分支合并进基线 "
+                + baseBranchOf(projectId) + " 并 push，工作树保留"
+                + (discard ? "；🔴 丢弃工作区全部未提交改动（不可恢复）" : "");
+        pendingConfirms.put(pendingKey(msg), "finalize",
+                r.code() + (discard ? " discard" : ""), desc);
+        return "⚠️ 危险操作确认：将" + desc
+                + "\n若有未提交改动收口会失败并保留工作区（可先 /resume 提交后重试，或加 discard 丢弃改动）"
+                + "\n回复 确认 执行，回复 取消 放弃（10 分钟内有效）";
+    }
+
+    /** 确认通过后的 /finalize 重放：重新解析需求；活跃会话/脏工作区由 Service 既有校验把关。 */
+    private String finalizeConfirmed(BotBindingEntity binding, String args) {
+        String projectId = requireProject(binding);
+        String[] parts = args.trim().split("\\s+");
+        RequirementView r = resolveRequirement(projectId, parts[0]);
+        boolean discard = parts.length > 1 && "discard".equalsIgnoreCase(parts[1]);
+        sessionManager.finalizeRequirementWorkspace(projectId, r.id(), discard, false);
+        return r.code() + "（" + r.title() + "）工作区已收口：需求分支已合并进基线并推送，工作树保留"
+                + footer("/projects/" + projectId);
+    }
+
+    /** 基线分支展示（确认文案用）：取项目默认分支，查不到按「默认分支」。 */
+    private String baseBranchOf(String projectId) {
+        try {
+            String b = projectService.get(projectId).defaultBranch();
+            return b == null || b.isBlank() ? "默认分支" : b;
+        } catch (Exception e) {
+            return "默认分支";
+        }
     }
 
     // ---------------- 会话控制（M5 FR-18） ----------------

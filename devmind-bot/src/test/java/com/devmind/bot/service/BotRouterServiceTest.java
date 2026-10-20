@@ -3,6 +3,7 @@ package com.devmind.bot.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -41,6 +42,7 @@ import com.devmind.project.dto.RequirementRequest;
 import com.devmind.project.dto.RequirementView;
 import com.devmind.project.dto.WorkItemView;
 import com.devmind.project.model.RequirementEntity;
+import com.devmind.project.model.WorkItemEntity;
 import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.SessionView;
 import com.devmind.session.service.SessionManagerService;
@@ -116,6 +118,8 @@ class BotRouterServiceTest {
     private final ProjectService projectService = mock(ProjectService.class);
     private final RequirementService requirementService = mock(RequirementService.class);
     private final WorkItemService workItemService = mock(WorkItemService.class);
+    private final com.devmind.flow.RequirementFlowService flowService =
+            mock(com.devmind.flow.RequirementFlowService.class);
     private final BuildService buildService = mock(BuildService.class);
     private final DeploymentService deploymentService = mock(DeploymentService.class);
     private final com.devmind.release.service.ReleaseService releaseService =
@@ -186,8 +190,8 @@ class BotRouterServiceTest {
         ObjectProvider<BotAdapterRegistry> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenAnswer(inv -> registryRef.get());
         BotRouterService r = new BotRouterService(bindingRepo, interactionRepo, chatManager,
-                sessionManager, projectService, requirementService, workItemService, buildService,
-                deploymentService, releaseService, watchService, props, provider,
+                sessionManager, projectService, requirementService, workItemService, flowService,
+                buildService, deploymentService, releaseService, watchService, props, provider,
                 emptyGatewayProvider(), attachmentProvider(), attachmentService, designService,
                 documentService, providers);
         registryRef.set(new BotAdapterRegistry(List.of(ad), r));
@@ -473,6 +477,147 @@ class BotRouterServiceTest {
         assertTrue(req.taskSpec().contains("【REQ-3】登录加验证码"), req.taskSpec());
         assertTrue(req.taskSpec().contains("支持图形验证码"), req.taskSpec());
         assertTrue(req.taskSpec().contains("补充说明：先做图形验证码"), req.taskSpec());
+    }
+
+    // ---------------- CAP-78 需求开发全流程斜杠指令（M2） ----------------
+
+    @Test
+    void planFirstTimeRunsDirectly() throws Exception {
+        bindP1();
+        stubReq3();
+        when(workItemService.list("p1", "r1")).thenReturn(List.of());
+        when(designService.list("p1", "r1")).thenReturn(List.of());
+        SessionView plan = sessView("s-plan-001", "RUNNING", "[flow:plan] REQ-3", null);
+        when(flowService.startPlan("p1", "r1")).thenReturn(plan);
+
+        router.onMessage(msg("/plan REQ-3", "e78-plan-1"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("已启动 AI 规划会话") && reply.contains("REQ-3"), reply);
+        verify(flowService).startPlan("p1", "r1");
+        verify(watchService).register(eq("s-plan-001"), eq("fake"), eq("chat-1"), anyString());
+    }
+
+    @Test
+    void planWithExistingOutputConfirmsThenReruns() throws Exception {
+        bindP1();
+        stubReq3();
+        when(workItemService.list("p1", "r1")).thenReturn(List.of(
+                new WorkItemView("w1", "p1", "r1", null, 1L, "WI-1", "BACKEND",
+                        "登录接口", null, "DOING", null, null, "admin", null, null)));
+        when(designService.list("p1", "r1")).thenReturn(List.of());
+        SessionView replan = sessView("s-plan-002", "RUNNING", "[flow:plan] REQ-3", null);
+        when(flowService.startPlan("p1", "r1")).thenReturn(replan);
+
+        router.onMessage(msg("/plan REQ-3", "e78-plan-2"));
+        String prompt = awaitReply();
+        assertTrue(prompt.contains("已有规划产出"), prompt);
+        assertTrue(prompt.contains("整体重跑") && prompt.contains("已有工作单元保留"), prompt);
+        verify(flowService, never()).startPlan(anyString(), anyString());
+
+        router.onMessage(msg("确认", "e78-plan-2-cf"));
+        String done = awaitReply();
+        assertTrue(done.contains("已启动 AI 规划会话"), done);
+        verify(flowService).startPlan("p1", "r1");
+        verify(watchService).register(eq("s-plan-002"), eq("fake"), eq("chat-1"), anyString());
+    }
+
+    @Test
+    void devWiNumberStartsWorkItemSession() throws Exception {
+        bindP1();
+        WorkItemEntity wi = new WorkItemEntity();
+        wi.setId("w2");
+        wi.setProjectId("p1");
+        wi.setSeq(2L);
+        wi.setTitle("登录接口");
+        when(workItemService.resolveRef("p1", "WI-2")).thenReturn(wi);
+        SessionView wiSession = sessView("s-wi-00001", "RUNNING", "[flow:dev] WI-2", null);
+        when(flowService.startWorkItemSession("p1", "w2")).thenReturn(wiSession);
+
+        router.onMessage(msg("/dev WI-2", "e78-dev-wi"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("WI-2") && reply.contains("s-wi-000"), reply);
+        verify(flowService).startWorkItemSession("p1", "w2");
+        verify(sessionManager, never()).create(any());
+        verify(watchService).register(eq("s-wi-00001"), eq("fake"), eq("chat-1"), anyString());
+    }
+
+    @Test
+    void finishByReqResolvesActiveSession() throws Exception {
+        bindP1();
+        stubReq3();
+        // createdAt 倒序：DONE 更新但 RUNNING 更老 → 活跃优先选 RUNNING（FR-04 口径）
+        SessionView done = sessView("s-done-new1", "DONE", "任务新", null);
+        SessionView running = sessView("s-run-old1", "RUNNING", "任务老", null);
+        when(sessionManager.list(isNull(), eq("p1"), isNull(), eq("r1")))
+                .thenReturn(List.of(done, running));
+
+        router.onMessage(msg("/finish REQ-3", "e78-fin-1"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("优雅结束") && reply.contains("s-run-ol"), reply);
+        verify(sessionManager).finish("s-run-old1");
+    }
+
+    @Test
+    void resumeByIdPrefix() throws Exception {
+        bindP1();
+        SessionView finished = sessView("abc123def456", "DONE", "任务", null);
+        when(sessionManager.list(isNull(), eq("p1"), isNull(), isNull()))
+                .thenReturn(List.of(finished));
+        SessionView resumed = sessView("abc123def456", "RUNNING", "任务", null);
+        when(sessionManager.resume("abc123def456")).thenReturn(resumed);
+
+        router.onMessage(msg("/resume abc123", "e78-res-1"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("已继续会话") && reply.contains("RUNNING"), reply);
+        verify(sessionManager).resume("abc123def456");
+    }
+
+    @Test
+    void finalizeAlwaysConfirmsWithBaseBranch() throws Exception {
+        bindP1();
+        stubReq3();
+        ProjectView boundProject = projectService.get("p1");
+        when(boundProject.defaultBranch()).thenReturn("main");
+
+        router.onMessage(msg("/finalize REQ-3", "e78-fz-1"));
+        String prompt = awaitReply();
+        assertTrue(prompt.contains("危险操作确认"), prompt);
+        assertTrue(prompt.contains("REQ-3") && prompt.contains("main"), prompt);
+        verify(sessionManager, never()).finalizeRequirementWorkspace(anyString(), anyString(),
+                anyBoolean(), anyBoolean());
+
+        router.onMessage(msg("确认", "e78-fz-1-cf"));
+        String done = awaitReply();
+        assertTrue(done.contains("已收口"), done);
+        verify(sessionManager).finalizeRequirementWorkspace("p1", "r1", false, false);
+    }
+
+    @Test
+    void finalizeDiscardShowsInConfirmAndPropagates() throws Exception {
+        bindP1();
+        stubReq3();
+        ProjectView boundProject = projectService.get("p1");
+        when(boundProject.defaultBranch()).thenReturn("main");
+
+        router.onMessage(msg("/finalize REQ-3 discard", "e78-fz-2"));
+        String prompt = awaitReply();
+        assertTrue(prompt.contains("丢弃") && prompt.contains("不可恢复"), prompt);
+
+        router.onMessage(msg("确认", "e78-fz-2-cf"));
+        assertTrue(awaitReply().contains("已收口"));
+        verify(sessionManager).finalizeRequirementWorkspace("p1", "r1", true, false);
+    }
+
+    @Test
+    void finishReqWithoutSessionsNotFound() throws Exception {
+        bindP1();
+        stubReq3();
+        when(sessionManager.list(isNull(), eq("p1"), isNull(), eq("r1"))).thenReturn(List.of());
+
+        router.onMessage(msg("/finish REQ-3", "e78-fin-2"));
+        String reply = awaitReply();
+        assertTrue(reply.contains("没有可操作的会话"), reply);
+        verify(sessionManager, never()).finish(anyString());
     }
 
     // ---------------- CAP-77 平台自举反馈 /issue ----------------
