@@ -19,10 +19,12 @@ tmp/cap76-e2e/，三个 worklog 定时开关关掉），假 OpenAI 服务内嵌�
   [6] 卡片回调 → 执行且 updateCard 被调用（按钮 value 带确认单 id）；
   [7] DANGEROUS（需求置 DONE）：裸「确认」被拒，完整短码才执行；
   [8] kill switch → 裸文本回落 CAP-75 问答（流式）；
-  [9] 管理 API：非 ADMIN 403，ADMIN 200。
+  [9] 管理 API：非 ADMIN 403，ADMIN 200；
+  [10] 多步计划（M7）：submit_plan 一张确认单 → 确认后按序执行 + ${stepN.field} 替换
+       + 步骤级审计；第二步失败即停、已完成步骤不回滚。
 
 阶段划分（同一套 H2 顺序重启）：
-  A. enabled=true / default-actor=admin / allow-default-actor-writes=true → 场景 1~7、9
+  A. enabled=true / default-actor=admin / allow-default-actor-writes=true → 场景 1~7、9、10
   B. enabled=true / default-actor=viewer → 场景 3
   C. enabled=false → 场景 8
 """
@@ -68,12 +70,41 @@ _event_seq = 0
 MOCK = {"requests": []}
 
 
+def _project_id_from(messages):
+    """从系统提示里提取当前默认项目 id（/bind 后系统提示含「当前默认项目：…（id）」）。"""
+    for m in messages:
+        match = re.search(r"当前默认项目：[^\n]*（([A-Za-z0-9]+)）", str(m.get("content") or ""))
+        if match:
+            return match.group(1)
+    return ""
+
+
 def _mock_decision(messages):
     """按最后一条消息决定：tool 结果 → 收口；否则按用户文本选工具或直接回答。"""
     last = messages[-1] if messages else {}
     if last.get("role") == "tool":
         return ("answer", "工具执行结果：\n" + str(last.get("content") or ""))
     text = str(last.get("content") or "")
+    if "建需求并挂工作项" in text:
+        pid = _project_id_from(messages)
+        return ("tool", "submit_plan", {
+            "goal": "建需求并挂一个工作项",
+            "steps": [
+                {"tool": "create_requirement", "args": {"title": "计划联调需求"}},
+                {"tool": "create_work_item", "args": {"projectId": pid,
+                                                      "requirementId": "${step1.requirementId}",
+                                                      "title": "计划联调工作项"}},
+            ]})
+    if "计划失败用例" in text:
+        pid = _project_id_from(messages)
+        return ("tool", "submit_plan", {
+            "goal": "第二步必失败",
+            "steps": [
+                {"tool": "create_requirement", "args": {"title": "计划失败需求"}},
+                {"tool": "create_work_item", "args": {"projectId": pid,
+                                                      "requirementId": "REQ-999",
+                                                      "title": "挂在不存在的需求上"}},
+            ]})
     if "标记为完成" in text:
         return ("tool", "update_requirement_status",
                 {"requirementId": "REQ-1", "status": "DONE"})
@@ -592,6 +623,48 @@ def scenario_7_dangerous():
     check("REQ-1 实际状态 DONE", (detail or {}).get("status") == "DONE", str(detail))
 
 
+def scenario_10_plan():
+    print("\n[10] 多步计划（FR-33，M7）：submit_plan → 一张确认单 → 确认后按序执行 + 占位符替换 + 失败即停")
+    code, card = write_confirmation("建需求并挂工作项", expect_title="提交多步计划")
+    action = action_by_code(code)
+    check("整份计划=一张确认单（toolName=submit_plan，PENDING）",
+          bool(action) and action.get("toolName") == "submit_plan"
+          and action.get("status") == "PENDING", str(action))
+    check("确认前需求不存在（计划未执行）",
+          len(requirement_by_keyword("计划联调需求")) == 0)
+
+    send_and_wait_reply(f"确认 {code}", "计划已完成")
+    check("计划确认单 SUCCEEDED", (action_by_code(code) or {}).get("status") == "SUCCEEDED")
+    reqs = requirement_by_keyword("计划联调需求")
+    check("步骤1需求已落库", len(reqs) == 1, str(reqs))
+    if reqs:
+        _, items = api("GET", f"/projects/{PID}/requirements/{reqs[0]['id']}/work-items",
+                       token=TOKEN)
+        titles = [w.get("title") for w in (items or [])]
+        check("步骤2按 ${step1.requirementId} 挂到新建需求下",
+              "计划联调工作项" in titles, str(titles))
+    # 步骤级审计：确认执行 turn 下 create_requirement/create_work_item 各一行 OK
+    _, turns = api("GET", "/copilot/admin/turns?channel=fake&actor=admin&keyword="
+                   + urllib.parse.quote(f"确认 {code}"), token=TOKEN)
+    rows = (turns or {}).get("items") or []
+    check("确认执行轮次有审计", len(rows) >= 1, str(turns))
+    if rows:
+        _, detail = api("GET", f"/copilot/admin/turns/{rows[0]['id']}", token=TOKEN)
+        calls = {c.get("toolName"): c.get("status")
+                 for c in (detail or {}).get("toolCalls") or []}
+        check("步骤级审计 create_requirement/create_work_item=OK",
+              calls.get("create_requirement") == "OK" and calls.get("create_work_item") == "OK",
+              str(calls))
+
+    code2, _ = write_confirmation("计划失败用例", expect_title="提交多步计划")
+    reply = send_and_wait_reply(f"确认 {code2}", "计划执行中断")
+    check("失败即停回执（已完成 1/2 步，剩余未执行）",
+          "计划执行中断：已完成 1/2 步" in (reply.get("text") or ""), str(reply))
+    check("失败计划确认单 FAILED", (action_by_code(code2) or {}).get("status") == "FAILED")
+    check("已完成的步骤不回滚（需求仍在）",
+          len(requirement_by_keyword("计划失败需求")) == 1)
+
+
 def scenario_9_admin_rbac():
     print("\n[9] 管理 API：非 ADMIN 403 / ADMIN 200")
     status, _ = api("GET", "/copilot/admin/tools", token=TOKEN)
@@ -695,6 +768,7 @@ def main():
         scenario_5_cancel_and_expiry()
         scenario_6_card_callback()
         scenario_7_dangerous()
+        scenario_10_plan()
         scenario_9_admin_rbac()
 
         # ---------- phase B：VIEWER ----------

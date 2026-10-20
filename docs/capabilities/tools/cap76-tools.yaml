@@ -6,6 +6,946 @@
     "title": "Dev-Mind 平台智能体工具契约"
   },
   "paths": {
+    "/tools/transit_jira_issue": {
+      "post": {
+        "operationId": "transit_jira_issue",
+        "summary": "执行 Jira 状态转换",
+        "description": "对需求关联的 Jira issue 执行一次工作流转换（transitionId 取 list_jira_transitions 返回的 id）。只回写远端与托管字段，不改本地需求 status。调用后生成确认单，用户确认后才执行。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-integration",
+        "x-tool-since": "CAP-76 M6",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "requirementId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "seq": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "transitionId": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "transitionId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/finalize_requirement_workspace": {
+      "post": {
+        "operationId": "finalize_requirement_workspace",
+        "summary": "收口需求工作区",
+        "description": "收口整个需求的工作区（CAP-51，等同网页需求详情页「收口」）：取该需求最近一个工作区 OPEN 的会话，feature/req-<id> 分支合并进基线（merge --ff）并 push、保留工作树；需求与同需求全部 OPEN 会话行置 FINALIZED。**会 push 共享基线分支，等同生产变更，必须用户文本短码确认**（确认卡无执行按钮）。有未提交改动时收口失败并保留工作区（可 resume 会话提交后重试，或 discardChanges=true 丢弃改动重试）。requirementId 支持 REQ-<seq>/内部 id/纯数字。",
+        "x-tool-risk": "DANGEROUS",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-session",
+        "x-tool-since": "CAP-78 M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "requirementId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "discardChanges": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "deleteRemoteBranch": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                },
+                "required": [
+                  "requirementId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/get_project_overview": {
+      "post": {
+        "operationId": "get_project_overview",
+        "summary": "项目总览",
+        "description": "汇总项目基本信息、需求总数/未完结数、会话数、构建数与最近失败构建/部署。用户问「项目现在什么情况」「有什么在跑/失败」时优先调用。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-app",
+        "x-tool-since": "M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "projectId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/list_work_items": {
+      "post": {
+        "operationId": "list_work_items",
+        "summary": "查询工作项列表",
+        "description": "列出某需求下的工作项（code/标题/状态/类型）。必须同时提供 projectId 与 requirementId（requirementId 可用展示编号 REQ-<seq>）。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-project",
+        "x-tool-since": "M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "requirementId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "status": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "keyword": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 50
+                  }
+                },
+                "required": [
+                  "projectId",
+                  "requirementId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/run_jira_sync": {
+      "post": {
+        "operationId": "run_jira_sync",
+        "summary": "手动触发 Jira 同步",
+        "description": "立即执行一次指定配置的 Jira 同步（拉取 JQL 命中的 issue，新建/刷新需求）。configId 取 list_jira_sync_configs 返回的 id；同步期间同一时间只允许一个任务。调用后生成确认单，用户确认后才执行。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-integration",
+        "x-tool-since": "CAP-76 M6",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "configId": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "configId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/list_releases": {
+      "post": {
+        "operationId": "list_releases",
+        "summary": "查询发版记录",
+        "description": "列出发版记录（id/版本/状态/tag/关联工作项）。status 可过滤 SUCCESS/FAILED/RUNNING 等。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-release",
+        "x-tool-since": "M3",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "status": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 50
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/list_projects": {
+      "post": {
+        "operationId": "list_projects",
+        "summary": "查询项目列表",
+        "description": "查询当前账号可见的项目（id/名称/状态/默认分支）。用户提到模糊项目名、或写操作需要 projectId 但尚未确定项目时先调用。可用 keyword 按名称/标签过滤。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-project",
+        "x-tool-since": "M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "keyword": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "status": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 50
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/create_work_item": {
+      "post": {
+        "operationId": "create_work_item",
+        "summary": "创建工作项",
+        "description": "在需求下创建工作项（TODO 起步）。必须提供 projectId 与 requirementId（可用编号 REQ-<seq>）；spec 为工作说明，type 可空（默认 DEVELOPMENT）。调用后生成确认单。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-project",
+        "x-tool-since": "M2",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "requirementId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 240
+                  },
+                  "spec": {
+                    "type": "string",
+                    "maxLength": 20000
+                  },
+                  "type": {
+                    "type": "string",
+                    "maxLength": 32
+                  }
+                },
+                "required": [
+                  "projectId",
+                  "requirementId",
+                  "title"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/update_requirement": {
+      "post": {
+        "operationId": "update_requirement",
+        "summary": "修改需求",
+        "description": "修改需求的标题/描述/优先级/负责人（只改传入字段）。projectId 由服务端按需求反查；requirementId 可直接传展示编号（如 REQ-12，此时用当前绑定项目）。JIRA 来源需求的托管字段本地只读。调用后生成确认单。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-project",
+        "x-tool-since": "M2",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "requirementId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "seq": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 240
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 20000
+                  },
+                  "priority": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "assignee": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/get_document": {
+      "post": {
+        "operationId": "get_document",
+        "summary": "读取文档正文",
+        "description": "读取文档正文（默认当前版本，可指定 version）。长文档会截断展示。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-docs",
+        "x-tool-since": "M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "docId": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "docId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/send_session_input": {
+      "post": {
+        "operationId": "send_session_input",
+        "summary": "向会话发送输入",
+        "description": "把一段话注入运行中的 coding 会话，等于让 runner 的 agent 立即执行该指令（危险操作）。必须由用户文本短码确认，卡片不提供执行按钮；预览会展示完整输入文本。",
+        "x-tool-risk": "DANGEROUS",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-session",
+        "x-tool-since": "M2",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "text": {
+                    "type": "string",
+                    "maxLength": 20000
+                  }
+                },
+                "required": [
+                  "sessionId",
+                  "text"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/list_environments": {
+      "post": {
+        "operationId": "list_environments",
+        "summary": "查询可部署环境",
+        "description": "列出项目配置的环境（DEV/TEST/STAGING/PROD）。用于回答能否部署到某环境；本期不提供部署写操作。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-project",
+        "x-tool-since": "M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/list_requirements": {
+      "post": {
+        "operationId": "list_requirements",
+        "summary": "查询需求列表",
+        "description": "列出某项目下的需求（code/标题/状态/类型/优先级）。status 支持 OPEN=未完结；keyword 匹配标题或外部编号。需要项目 id，默认取当前绑定项目。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-project",
+        "x-tool-since": "M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "status": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "keyword": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 50
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/get_session_events": {
+      "post": {
+        "operationId": "get_session_events",
+        "summary": "查询会话最近事件",
+        "description": "查看会话最近的事件（状态变化/工具输出/错误），用于回答「卡在哪了」「为什么失败」。tail 默认 20，最大 100；每条内容会截断。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-session",
+        "x-tool-since": "M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "tail": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 100
+                  }
+                },
+                "required": [
+                  "sessionId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/list_jira_transitions": {
+      "post": {
+        "operationId": "list_jira_transitions",
+        "summary": "查询 Jira 可用转换",
+        "description": "列出需求关联 Jira issue 当前可用的工作流转换（id/名称/目标状态）。requirementId 可用展示编号（如 REQ-12）或 seq；用于回答「这张单能流转到哪些状态」。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-integration",
+        "x-tool-since": "CAP-76 M6",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "requirementId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "seq": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/search_knowledge": {
+      "post": {
+        "operationId": "search_knowledge",
+        "summary": "检索知识库",
+        "description": "按关键词检索知识库（全局库 + 当前项目库），返回条目摘要与片段。回答规范/流程/历史经验类问题前先检索；query 必填。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-knowledge",
+        "x-tool-since": "M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 30
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/list_deployments": {
+      "post": {
+        "operationId": "list_deployments",
+        "summary": "查询部署记录",
+        "description": "列出项目最近的部署（id/环境/状态/关联工作项/时间）。status 可过滤 SUCCESS/FAILED/RUNNING 等。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-deploy",
+        "x-tool-since": "M3",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "status": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 50
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/resume_session": {
+      "post": {
+        "operationId": "resume_session",
+        "summary": "继续会话",
+        "description": "继续已结束的 coding 会话（SUSPENDED/DONE/FAILED/TERMINATED → RUNNING，claude --resume 续接对话历史）。若该会话/需求的工作区已收口，继续会重新打开工作区（状态置回 OPEN）。sessionId 支持会话 id 或需求编号 REQ-<seq>（解析为该需求最近的会话）。调用后生成确认单，用户确认后才执行。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-session",
+        "x-tool-since": "CAP-78 M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "sessionId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/create_requirement": {
+      "post": {
+        "operationId": "create_requirement",
+        "summary": "创建需求",
+        "description": "在指定项目下创建需求（DRAFT 起步）。调用后生成确认单，用户确认后才落库。description 用纯文本即可；type 可空（默认 FEATURE）。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-project",
+        "x-tool-since": "M2",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 240
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 20000
+                  },
+                  "type": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "priority": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "assignee": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "title"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/list_agent_nodes": {
+      "post": {
+        "operationId": "list_agent_nodes",
+        "summary": "查询执行节点",
+        "description": "列出平台注册的 runner 节点（id/名称/在线状态/标签/版本/活跃会话数）。用户问「有哪些节点」「节点在线吗」或需要指定 agentNodeId 时调用。",
+        "x-tool-risk": "READ",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-agent",
+        "x-tool-since": "M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 50
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/get_requirement": {
+      "post": {
+        "operationId": "get_requirement",
+        "summary": "查询需求详情",
+        "description": "按 requirementId 或项目内编号查询需求详情，含状态、描述、工作项与设计摘要。requirementId 可直接传展示编号（如 REQ-12），也可用 seq=12；用编号时必须能确定 projectId。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-project",
+        "x-tool-since": "M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "requirementId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "seq": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/list_jira_sync_configs": {
+      "post": {
+        "operationId": "list_jira_sync_configs",
+        "summary": "查询 Jira 同步配置",
+        "description": "列出项目下 Jira 同步配置（配置 id/集成/Jira 项目 key/JQL/是否启用/上次同步时间与计数/最近错误）。用于回答「Jira 同步配了哪些、跑得怎么样」。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-integration",
+        "x-tool-since": "CAP-76 M6",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
     "/tools/create_worklog_entry": {
       "post": {
         "operationId": "create_worklog_entry",
@@ -16,7 +956,6 @@
         "x-owner-module": "devmind-worklog",
         "x-tool-since": "CAP-76 M6",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -64,7 +1003,8 @@
                 ]
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -73,17 +1013,51 @@
         }
       }
     },
-    "/tools/list_designs": {
+    "/tools/suspend_session": {
       "post": {
-        "operationId": "list_designs",
-        "summary": "查询设计版本列表",
-        "description": "列出某需求下的设计版本（版本号/状态/文档 id）。必须同时提供 projectId 与 requirementId（requirementId 可用展示编号 REQ-<seq>）。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-project",
-        "x-tool-since": "M1",
+        "operationId": "suspend_session",
+        "summary": "挂起会话",
+        "description": "挂起运行中的 coding 会话：停止进程但保留工作区与对话历史，之后可用 resume_session 继续。sessionId 支持会话 id 或需求编号 REQ-<seq>（解析为该需求最近活跃的会话）。调用后生成确认单，用户确认后才执行。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-session",
+        "x-tool-since": "CAP-78 M1",
         "requestBody": {
-          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "sessionId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/start_requirement_dev": {
+      "post": {
+        "operationId": "start_requirement_dev",
+        "summary": "重新开发（需求级开发会话）",
+        "description": "对已有工作单元清单的需求启动 [flow:dev] 需求级开发会话（等同网页「重新开发」）：整份 TODO 工作单元清单交给一个会话一次做完，全部 TODO 工作单元置 IN_PROGRESS。需求还没有工作单元时会失败并提示先「开启 AI 规划」。调用后生成确认单，用户确认后才真正启动。requirementId 支持 REQ-<seq>/内部 id/纯数字。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-flow",
+        "x-tool-since": "CAP-78 M1",
+        "requestBody": {
           "content": {
             "application/json": {
               "schema": {
@@ -96,119 +1070,15 @@
                   "requirementId": {
                     "type": "string",
                     "maxLength": 64
-                  },
-                  "limit": {
-                    "type": "integer",
-                    "default": 20,
-                    "minimum": 1,
-                    "maximum": 50
                   }
                 },
                 "required": [
-                  "projectId",
                   "requirementId"
                 ]
               }
             }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/list_releases": {
-      "post": {
-        "operationId": "list_releases",
-        "summary": "查询发版记录",
-        "description": "列出发版记录（id/版本/状态/tag/关联工作项）。status 可过滤 SUCCESS/FAILED/RUNNING 等。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-release",
-        "x-tool-since": "M3",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "status": {
-                    "type": "string",
-                    "maxLength": 32
-                  },
-                  "limit": {
-                    "type": "integer",
-                    "default": 10,
-                    "minimum": 1,
-                    "maximum": 50
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/update_requirement": {
-      "post": {
-        "operationId": "update_requirement",
-        "summary": "修改需求",
-        "description": "修改需求的标题/描述/优先级/负责人（只改传入字段）。projectId 由服务端按需求反查；requirementId 可直接传展示编号（如 REQ-12，此时用当前绑定项目）。JIRA 来源需求的托管字段本地只读。调用后生成确认单。",
-        "x-tool-risk": "WRITE",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-project",
-        "x-tool-since": "M2",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "requirementId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "seq": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "title": {
-                    "type": "string",
-                    "maxLength": 240
-                  },
-                  "description": {
-                    "type": "string",
-                    "maxLength": 20000
-                  },
-                  "priority": {
-                    "type": "string",
-                    "maxLength": 32
-                  },
-                  "assignee": {
-                    "type": "string",
-                    "maxLength": 64
-                  }
-                }
-              }
-            }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -227,7 +1097,6 @@
         "x-owner-module": "devmind-build",
         "x-tool-since": "M3",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -249,7 +1118,8 @@
                 ]
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -258,17 +1128,16 @@
         }
       }
     },
-    "/tools/list_deployments": {
+    "/tools/update_requirement_status": {
       "post": {
-        "operationId": "list_deployments",
-        "summary": "查询部署记录",
-        "description": "列出项目最近的部署（id/环境/状态/关联工作项/时间）。status 可过滤 SUCCESS/FAILED/RUNNING 等。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-deploy",
-        "x-tool-since": "M3",
+        "operationId": "update_requirement_status",
+        "summary": "变更需求状态",
+        "description": "把需求推进到指定状态（DRAFT/ANALYZING/DESIGNING/IN_PROGRESS/ACCEPTANCE/DONE/CANCELLED）。requirementId 可直接传用户可见的展示编号（如 REQ-12；此时用当前绑定项目），也可用 seq。DONE/CANCELLED 属于终态，必须由用户文本短码确认；DONE 前若有未完结工作项会被拒绝。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-project",
+        "x-tool-since": "M2",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -278,9 +1147,219 @@
                     "type": "string",
                     "maxLength": 64
                   },
+                  "requirementId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "seq": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
                   "status": {
                     "type": "string",
                     "maxLength": 32
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/start_requirement_plan": {
+      "post": {
+        "operationId": "start_requirement_plan",
+        "summary": "开启 AI 规划",
+        "description": "对需求启动 AI 规划会话（等同网页「开启 AI 规划」按钮）：一个 [flow:plan] 会话一次产出分析/方案/工作单元清单（不改代码），完成后自动登记产出并自动启动开发会话。已有规划产出时再调用 = 重新规划（整体重跑，已有工作单元保留）。会创建 coding 会话产生模型费用；调用后生成确认单，用户确认后才真正启动。requirementId 支持 REQ-<seq>/内部 id/纯数字。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-flow",
+        "x-tool-since": "CAP-78 M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "requirementId": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "requirementId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/update_work_item_status": {
+      "post": {
+        "operationId": "update_work_item_status",
+        "summary": "变更工作项状态",
+        "description": "把工作项推进到 TODO/IN_PROGRESS/BLOCKED/DONE/CANCELLED。CANCELLED 属于危险操作，必须由用户文本短码确认。需 projectId、requirementId、workItemId；后两者可用展示编号（REQ-<seq> / WI-<seq>）。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-project",
+        "x-tool-since": "M2",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "requirementId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "workItemId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "status": {
+                    "type": "string",
+                    "maxLength": 32
+                  }
+                },
+                "required": [
+                  "projectId",
+                  "requirementId",
+                  "workItemId",
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/get_release": {
+      "post": {
+        "operationId": "get_release",
+        "summary": "查询发版详情",
+        "description": "查询单次发版详情（版本/状态/制品/tag/归集的工作项与需求/失败原因）。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-release",
+        "x-tool-since": "M3",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "releaseId": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "releaseId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/finish_session": {
+      "post": {
+        "operationId": "finish_session",
+        "summary": "优雅结束会话",
+        "description": "向运行中的 coding 会话发送优雅结束指令（关 stdin，agent 处理完当前轮后自然退出 → DONE/FAILED，工作区保留）。用户说「结束会话」默认用这个；要强杀（立即终止）用 stop_session。sessionId 支持会话 id 或需求编号 REQ-<seq>（解析为该需求最近活跃的会话）。调用后生成确认单，用户确认后才执行。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-session",
+        "x-tool-since": "CAP-78 M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "sessionId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/list_documents": {
+      "post": {
+        "operationId": "list_documents",
+        "summary": "检索文档",
+        "description": "按关键词检索文档库（标题/正文/标签），返回文档 id、标题、类型与版本。给定 projectId 时只返回该项目文档；不给 keyword 时列出项目最近文档。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-docs",
+        "x-tool-since": "M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "keyword": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
                   },
                   "limit": {
                     "type": "integer",
@@ -291,7 +1370,8 @@
                 }
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -300,76 +1380,33 @@
         }
       }
     },
-    "/tools/get_document": {
+    "/tools/stop_session": {
       "post": {
-        "operationId": "get_document",
-        "summary": "读取文档正文",
-        "description": "读取文档正文（默认当前版本，可指定 version）。长文档会截断展示。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-docs",
-        "x-tool-since": "M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "docId": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "version": {
-                    "type": "integer",
-                    "minimum": 1
-                  }
-                },
-                "required": [
-                  "docId"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/start_work_item_session": {
-      "post": {
-        "operationId": "start_work_item_session",
-        "summary": "工作单元起会话",
-        "description": "对单个工作单元启动开发会话（人工逃生通道）：工作单元的 spec（执行说明）作为任务说明注入，TODO 状态推进为 IN_PROGRESS。缺 spec 的工作单元不能起会话（先在网页补充执行说明）。调用后生成确认单，用户确认后才真正启动。workItemId 支持 WI-<seq>/内部 id。",
+        "operationId": "stop_session",
+        "summary": "停止会话",
+        "description": "立即终止运行中的 coding 会话（等同 kill）。调用后生成确认单；用于用户明确要求停止时。",
         "x-tool-risk": "WRITE",
         "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-flow",
-        "x-tool-since": "CAP-78 M1",
+        "x-owner-module": "devmind-session",
+        "x-tool-since": "M2",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "workItemId": {
+                  "sessionId": {
                     "type": "string",
                     "maxLength": 64
                   }
                 },
                 "required": [
-                  "workItemId"
+                  "sessionId"
                 ]
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -388,7 +1425,6 @@
         "x-owner-module": "devmind-usage",
         "x-tool-since": "M4",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -412,7 +1448,51 @@
                 }
               }
             }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
           }
+        }
+      }
+    },
+    "/tools/finalize_session_workspace": {
+      "post": {
+        "operationId": "finalize_session_workspace",
+        "summary": "收口会话工作区",
+        "description": "收口单个会话的固定工作区（CAP-42）：feature 分支合并进基线（merge --ff）并 push，删除 worktree。会话仍在运行时不能收口（先 finish/stop）；有未提交改动时收口会失败并保留工作区（可 resume 提交后重试，或 discardChanges=true 丢弃改动重试）。sessionId 支持会话 id 或需求编号 REQ-<seq>。调用后生成确认单，用户确认后才执行。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-session",
+        "x-tool-since": "CAP-78 M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "discardChanges": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "deleteRemoteBranch": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                },
+                "required": [
+                  "sessionId"
+                ]
+              }
+            }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -431,7 +1511,6 @@
         "x-owner-module": "devmind-worklog",
         "x-tool-since": "CAP-76 M6",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -458,7 +1537,8 @@
                 }
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -467,17 +1547,52 @@
         }
       }
     },
-    "/tools/list_builds": {
+    "/tools/mark_notifications_read": {
       "post": {
-        "operationId": "list_builds",
-        "summary": "查询构建记录",
-        "description": "列出项目最近的构建（id/分支/commit/状态/耗时/关联工作项）。status 可过滤 SUCCESS/FAILED/RUNNING 等；未指定 projectId 用当前绑定项目。",
+        "operationId": "mark_notifications_read",
+        "summary": "标记通知已读",
+        "description": "把一条通知（id）或全部未读通知标记为已读。id 与 all 二选一；all=true 时忽略 id。调用后生成确认单，用户确认后才执行。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-notification",
+        "x-tool-since": "CAP-76 M6",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "all": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/list_sessions": {
+      "post": {
+        "operationId": "list_sessions",
+        "summary": "查询会话列表",
+        "description": "列出项目下的 coding 会话（id 前 8 位/状态/任务摘要/执行节点）。status 可过滤 RUNNING/DONE 等；requirementId 可按需求过滤（支持 REQ-<seq>/内部 id）。回答「REQ-x 跑到哪了」类问题时先用本工具按 requirementId 过滤，再按需 get_session_events 看最近事件；未指定 projectId 时使用当前绑定项目。",
         "x-tool-risk": "READ",
         "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-build",
-        "x-tool-since": "M3",
+        "x-owner-module": "devmind-session",
+        "x-tool-since": "M1",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -491,83 +1606,21 @@
                     "type": "string",
                     "maxLength": 32
                   },
+                  "requirementId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
                   "limit": {
                     "type": "integer",
-                    "default": 10,
+                    "default": 20,
                     "minimum": 1,
                     "maximum": 50
                   }
                 }
               }
             }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/list_jira_sync_configs": {
-      "post": {
-        "operationId": "list_jira_sync_configs",
-        "summary": "查询 Jira 同步配置",
-        "description": "列出项目下 Jira 同步配置（配置 id/集成/Jira 项目 key/JQL/是否启用/上次同步时间与计数/最近错误）。用于回答「Jira 同步配了哪些、跑得怎么样」。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-integration",
-        "x-tool-since": "CAP-76 M6",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/get_project_overview": {
-      "post": {
-        "operationId": "get_project_overview",
-        "summary": "项目总览",
-        "description": "汇总项目基本信息、需求总数/未完结数、会话数、构建数与最近失败构建/部署。用户问「项目现在什么情况」「有什么在跑/失败」时优先调用。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-app",
-        "x-tool-since": "M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  }
-                },
-                "required": [
-                  "projectId"
-                ]
-              }
-            }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -586,7 +1639,6 @@
         "x-owner-module": "devmind-integration",
         "x-tool-since": "CAP-76 M6",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -619,1317 +1671,8 @@
                 ]
               }
             }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/count_unread_notifications": {
-      "post": {
-        "operationId": "count_unread_notifications",
-        "summary": "查询未读通知数",
-        "description": "返回通知中心当前未读条数，用于回答「有多少未读通知」。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-notification",
-        "x-tool-since": "CAP-76 M6",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {}
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/list_notifications": {
-      "post": {
-        "operationId": "list_notifications",
-        "summary": "查询通知列表",
-        "description": "查询通知中心的通知（分级 P0/P1/P2、标题、正文摘要、关联对象、已读状态）。unreadOnly=true 只看未读；level 可过滤分级。用于回答「最近有什么通知/有没有未读」。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-notification",
-        "x-tool-since": "CAP-76 M6",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "level": {
-                    "type": "string",
-                    "enum": [
-                      "P0",
-                      "P1",
-                      "P2"
-                    ]
-                  },
-                  "unreadOnly": {
-                    "type": "boolean",
-                    "default": false
-                  },
-                  "limit": {
-                    "type": "integer",
-                    "default": 20,
-                    "minimum": 1,
-                    "maximum": 50
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/get_work_item": {
-      "post": {
-        "operationId": "get_work_item",
-        "summary": "查询工作项详情",
-        "description": "查询工作项详情（状态/说明/类型）及关联会话。需 projectId、requirementId、workItemId；后两者都可用展示编号（REQ-<seq> / WI-<seq>）。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-project",
-        "x-tool-since": "M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "requirementId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "workItemId": {
-                    "type": "string",
-                    "maxLength": 64
-                  }
-                },
-                "required": [
-                  "projectId",
-                  "requirementId",
-                  "workItemId"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/get_deployment": {
-      "post": {
-        "operationId": "get_deployment",
-        "summary": "查询部署详情",
-        "description": "查询部署单详情（环境/状态/步骤进度/失败原因/日志尾部）。用于回答「部署到哪一步了」。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-deploy",
-        "x-tool-since": "M3",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "deploymentId": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "logLines": {
-                    "type": "integer",
-                    "default": 40,
-                    "minimum": 0,
-                    "maximum": 200
-                  }
-                },
-                "required": [
-                  "deploymentId"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/create_work_item": {
-      "post": {
-        "operationId": "create_work_item",
-        "summary": "创建工作项",
-        "description": "在需求下创建工作项（TODO 起步）。必须提供 projectId 与 requirementId（可用编号 REQ-<seq>）；spec 为工作说明，type 可空（默认 DEVELOPMENT）。调用后生成确认单。",
-        "x-tool-risk": "WRITE",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-project",
-        "x-tool-since": "M2",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "requirementId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "title": {
-                    "type": "string",
-                    "maxLength": 240
-                  },
-                  "spec": {
-                    "type": "string",
-                    "maxLength": 20000
-                  },
-                  "type": {
-                    "type": "string",
-                    "maxLength": 32
-                  }
-                },
-                "required": [
-                  "projectId",
-                  "requirementId",
-                  "title"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/mark_notifications_read": {
-      "post": {
-        "operationId": "mark_notifications_read",
-        "summary": "标记通知已读",
-        "description": "把一条通知（id）或全部未读通知标记为已读。id 与 all 二选一；all=true 时忽略 id。调用后生成确认单，用户确认后才执行。",
-        "x-tool-risk": "WRITE",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-notification",
-        "x-tool-since": "CAP-76 M6",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "all": {
-                    "type": "boolean",
-                    "default": false
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/get_requirement": {
-      "post": {
-        "operationId": "get_requirement",
-        "summary": "查询需求详情",
-        "description": "按 requirementId 或项目内编号查询需求详情，含状态、描述、工作项与设计摘要。requirementId 可直接传展示编号（如 REQ-12），也可用 seq=12；用编号时必须能确定 projectId。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-project",
-        "x-tool-since": "M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "requirementId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "seq": {
-                    "type": "integer",
-                    "minimum": 1
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/get_release": {
-      "post": {
-        "operationId": "get_release",
-        "summary": "查询发版详情",
-        "description": "查询单次发版详情（版本/状态/制品/tag/归集的工作项与需求/失败原因）。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-release",
-        "x-tool-since": "M3",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "releaseId": {
-                    "type": "integer",
-                    "minimum": 1
-                  }
-                },
-                "required": [
-                  "releaseId"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/get_session": {
-      "post": {
-        "operationId": "get_session",
-        "summary": "查询会话详情",
-        "description": "查询单个会话的状态、任务说明、执行节点、token 用量与摘要。sessionId 支持完整 id。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-session",
-        "x-tool-since": "M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "sessionId": {
-                    "type": "string",
-                    "maxLength": 64
-                  }
-                },
-                "required": [
-                  "sessionId"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/suspend_session": {
-      "post": {
-        "operationId": "suspend_session",
-        "summary": "挂起会话",
-        "description": "挂起运行中的 coding 会话：停止进程但保留工作区与对话历史，之后可用 resume_session 继续。sessionId 支持会话 id 或需求编号 REQ-<seq>（解析为该需求最近活跃的会话）。调用后生成确认单，用户确认后才执行。",
-        "x-tool-risk": "WRITE",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-session",
-        "x-tool-since": "CAP-78 M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "sessionId": {
-                    "type": "string",
-                    "maxLength": 64
-                  }
-                },
-                "required": [
-                  "sessionId"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/list_requirements": {
-      "post": {
-        "operationId": "list_requirements",
-        "summary": "查询需求列表",
-        "description": "列出某项目下的需求（code/标题/状态/类型/优先级）。status 支持 OPEN=未完结；keyword 匹配标题或外部编号。需要项目 id，默认取当前绑定项目。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-project",
-        "x-tool-since": "M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "status": {
-                    "type": "string",
-                    "maxLength": 32
-                  },
-                  "keyword": {
-                    "type": "string",
-                    "maxLength": 100
-                  },
-                  "limit": {
-                    "type": "integer",
-                    "default": 20,
-                    "minimum": 1,
-                    "maximum": 50
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/create_requirement": {
-      "post": {
-        "operationId": "create_requirement",
-        "summary": "创建需求",
-        "description": "在指定项目下创建需求（DRAFT 起步）。调用后生成确认单，用户确认后才落库。description 用纯文本即可；type 可空（默认 FEATURE）。",
-        "x-tool-risk": "WRITE",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-project",
-        "x-tool-since": "M2",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "title": {
-                    "type": "string",
-                    "maxLength": 240
-                  },
-                  "description": {
-                    "type": "string",
-                    "maxLength": 20000
-                  },
-                  "type": {
-                    "type": "string",
-                    "maxLength": 32
-                  },
-                  "priority": {
-                    "type": "string",
-                    "maxLength": 32
-                  },
-                  "assignee": {
-                    "type": "string",
-                    "maxLength": 64
-                  }
-                },
-                "required": [
-                  "title"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/finalize_session_workspace": {
-      "post": {
-        "operationId": "finalize_session_workspace",
-        "summary": "收口会话工作区",
-        "description": "收口单个会话的固定工作区（CAP-42）：feature 分支合并进基线（merge --ff）并 push，删除 worktree。会话仍在运行时不能收口（先 finish/stop）；有未提交改动时收口会失败并保留工作区（可 resume 提交后重试，或 discardChanges=true 丢弃改动重试）。sessionId 支持会话 id 或需求编号 REQ-<seq>。调用后生成确认单，用户确认后才执行。",
-        "x-tool-risk": "WRITE",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-session",
-        "x-tool-since": "CAP-78 M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "sessionId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "discardChanges": {
-                    "type": "boolean",
-                    "default": false
-                  },
-                  "deleteRemoteBranch": {
-                    "type": "boolean",
-                    "default": true
-                  }
-                },
-                "required": [
-                  "sessionId"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/list_agent_nodes": {
-      "post": {
-        "operationId": "list_agent_nodes",
-        "summary": "查询执行节点",
-        "description": "列出平台注册的 runner 节点（id/名称/在线状态/标签/版本/活跃会话数）。用户问「有哪些节点」「节点在线吗」或需要指定 agentNodeId 时调用。",
-        "x-tool-risk": "READ",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-agent",
-        "x-tool-since": "M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "status": {
-                    "type": "string",
-                    "maxLength": 32
-                  },
-                  "limit": {
-                    "type": "integer",
-                    "default": 20,
-                    "minimum": 1,
-                    "maximum": 50
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/list_sessions": {
-      "post": {
-        "operationId": "list_sessions",
-        "summary": "查询会话列表",
-        "description": "列出项目下的 coding 会话（id 前 8 位/状态/任务摘要/执行节点）。status 可过滤 RUNNING/DONE 等；requirementId 可按需求过滤（支持 REQ-<seq>/内部 id）。回答「REQ-x 跑到哪了」类问题时先用本工具按 requirementId 过滤，再按需 get_session_events 看最近事件；未指定 projectId 时使用当前绑定项目。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-session",
-        "x-tool-since": "M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "status": {
-                    "type": "string",
-                    "maxLength": 32
-                  },
-                  "requirementId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "limit": {
-                    "type": "integer",
-                    "default": 20,
-                    "minimum": 1,
-                    "maximum": 50
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/update_requirement_status": {
-      "post": {
-        "operationId": "update_requirement_status",
-        "summary": "变更需求状态",
-        "description": "把需求推进到指定状态（DRAFT/ANALYZING/DESIGNING/IN_PROGRESS/ACCEPTANCE/DONE/CANCELLED）。requirementId 可直接传用户可见的展示编号（如 REQ-12；此时用当前绑定项目），也可用 seq。DONE/CANCELLED 属于终态，必须由用户文本短码确认；DONE 前若有未完结工作项会被拒绝。",
-        "x-tool-risk": "WRITE",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-project",
-        "x-tool-since": "M2",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "requirementId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "seq": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "status": {
-                    "type": "string",
-                    "maxLength": 32
-                  }
-                },
-                "required": [
-                  "status"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/list_documents": {
-      "post": {
-        "operationId": "list_documents",
-        "summary": "检索文档",
-        "description": "按关键词检索文档库（标题/正文/标签），返回文档 id、标题、类型与版本。给定 projectId 时只返回该项目文档；不给 keyword 时列出项目最近文档。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-docs",
-        "x-tool-since": "M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "query": {
-                    "type": "string",
-                    "maxLength": 200
-                  },
-                  "keyword": {
-                    "type": "string",
-                    "maxLength": 200
-                  },
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "limit": {
-                    "type": "integer",
-                    "default": 10,
-                    "minimum": 1,
-                    "maximum": 50
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/list_environments": {
-      "post": {
-        "operationId": "list_environments",
-        "summary": "查询可部署环境",
-        "description": "列出项目配置的环境（DEV/TEST/STAGING/PROD）。用于回答能否部署到某环境；本期不提供部署写操作。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-project",
-        "x-tool-since": "M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/list_work_items": {
-      "post": {
-        "operationId": "list_work_items",
-        "summary": "查询工作项列表",
-        "description": "列出某需求下的工作项（code/标题/状态/类型）。必须同时提供 projectId 与 requirementId（requirementId 可用展示编号 REQ-<seq>）。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-project",
-        "x-tool-since": "M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "requirementId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "status": {
-                    "type": "string",
-                    "maxLength": 32
-                  },
-                  "keyword": {
-                    "type": "string",
-                    "maxLength": 100
-                  },
-                  "limit": {
-                    "type": "integer",
-                    "default": 20,
-                    "minimum": 1,
-                    "maximum": 50
-                  }
-                },
-                "required": [
-                  "projectId",
-                  "requirementId"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/start_requirement_dev": {
-      "post": {
-        "operationId": "start_requirement_dev",
-        "summary": "重新开发（需求级开发会话）",
-        "description": "对已有工作单元清单的需求启动 [flow:dev] 需求级开发会话（等同网页「重新开发」）：整份 TODO 工作单元清单交给一个会话一次做完，全部 TODO 工作单元置 IN_PROGRESS。需求还没有工作单元时会失败并提示先「开启 AI 规划」。调用后生成确认单，用户确认后才真正启动。requirementId 支持 REQ-<seq>/内部 id/纯数字。",
-        "x-tool-risk": "WRITE",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-flow",
-        "x-tool-since": "CAP-78 M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "requirementId": {
-                    "type": "string",
-                    "maxLength": 64
-                  }
-                },
-                "required": [
-                  "requirementId"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/start_session": {
-      "post": {
-        "operationId": "start_session",
-        "summary": "启动 coding 会话",
-        "description": "在项目下创建并启动 coding 会话（会下发 runner、产生模型费用）。taskSpec 写清要做什么；可关联 requirementId/workItemId（也接受展示编号 REQ-<seq> / WI-<seq>）。调用后生成确认单，用户确认后才真正启动。",
-        "x-tool-risk": "WRITE",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-session",
-        "x-tool-since": "M2",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "taskSpec": {
-                    "type": "string",
-                    "maxLength": 20000
-                  },
-                  "requirementId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "workItemId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "agentNodeId": {
-                    "type": "string",
-                    "maxLength": 64
-                  }
-                },
-                "required": [
-                  "taskSpec"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/resume_session": {
-      "post": {
-        "operationId": "resume_session",
-        "summary": "继续会话",
-        "description": "继续已结束的 coding 会话（SUSPENDED/DONE/FAILED/TERMINATED → RUNNING，claude --resume 续接对话历史）。若该会话/需求的工作区已收口，继续会重新打开工作区（状态置回 OPEN）。sessionId 支持会话 id 或需求编号 REQ-<seq>（解析为该需求最近的会话）。调用后生成确认单，用户确认后才执行。",
-        "x-tool-risk": "WRITE",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-session",
-        "x-tool-since": "CAP-78 M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "sessionId": {
-                    "type": "string",
-                    "maxLength": 64
-                  }
-                },
-                "required": [
-                  "sessionId"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/finalize_requirement_workspace": {
-      "post": {
-        "operationId": "finalize_requirement_workspace",
-        "summary": "收口需求工作区",
-        "description": "收口整个需求的工作区（CAP-51，等同网页需求详情页「收口」）：取该需求最近一个工作区 OPEN 的会话，feature/req-<id> 分支合并进基线（merge --ff）并 push、保留工作树；需求与同需求全部 OPEN 会话行置 FINALIZED。**会 push 共享基线分支，等同生产变更，必须用户文本短码确认**（确认卡无执行按钮）。有未提交改动时收口失败并保留工作区（可 resume 会话提交后重试，或 discardChanges=true 丢弃改动重试）。requirementId 支持 REQ-<seq>/内部 id/纯数字。",
-        "x-tool-risk": "DANGEROUS",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-session",
-        "x-tool-since": "CAP-78 M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "requirementId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "discardChanges": {
-                    "type": "boolean",
-                    "default": false
-                  },
-                  "deleteRemoteBranch": {
-                    "type": "boolean",
-                    "default": false
-                  }
-                },
-                "required": [
-                  "requirementId"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/search_knowledge": {
-      "post": {
-        "operationId": "search_knowledge",
-        "summary": "检索知识库",
-        "description": "按关键词检索知识库（全局库 + 当前项目库），返回条目摘要与片段。回答规范/流程/历史经验类问题前先检索；query 必填。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-knowledge",
-        "x-tool-since": "M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "query": {
-                    "type": "string",
-                    "maxLength": 200
-                  },
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "limit": {
-                    "type": "integer",
-                    "default": 10,
-                    "minimum": 1,
-                    "maximum": 30
-                  }
-                },
-                "required": [
-                  "query"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/transit_jira_issue": {
-      "post": {
-        "operationId": "transit_jira_issue",
-        "summary": "执行 Jira 状态转换",
-        "description": "对需求关联的 Jira issue 执行一次工作流转换（transitionId 取 list_jira_transitions 返回的 id）。只回写远端与托管字段，不改本地需求 status。调用后生成确认单，用户确认后才执行。",
-        "x-tool-risk": "WRITE",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-integration",
-        "x-tool-since": "CAP-76 M6",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "requirementId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "seq": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "transitionId": {
-                    "type": "string",
-                    "maxLength": 64
-                  }
-                },
-                "required": [
-                  "transitionId"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/stop_session": {
-      "post": {
-        "operationId": "stop_session",
-        "summary": "停止会话",
-        "description": "立即终止运行中的 coding 会话（等同 kill）。调用后生成确认单；用于用户明确要求停止时。",
-        "x-tool-risk": "WRITE",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-session",
-        "x-tool-since": "M2",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "sessionId": {
-                    "type": "string",
-                    "maxLength": 64
-                  }
-                },
-                "required": [
-                  "sessionId"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/update_work_item_status": {
-      "post": {
-        "operationId": "update_work_item_status",
-        "summary": "变更工作项状态",
-        "description": "把工作项推进到 TODO/IN_PROGRESS/BLOCKED/DONE/CANCELLED。CANCELLED 属于危险操作，必须由用户文本短码确认。需 projectId、requirementId、workItemId；后两者可用展示编号（REQ-<seq> / WI-<seq>）。",
-        "x-tool-risk": "WRITE",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-project",
-        "x-tool-since": "M2",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "requirementId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "workItemId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "status": {
-                    "type": "string",
-                    "maxLength": 32
-                  }
-                },
-                "required": [
-                  "projectId",
-                  "requirementId",
-                  "workItemId",
-                  "status"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/run_jira_sync": {
-      "post": {
-        "operationId": "run_jira_sync",
-        "summary": "手动触发 Jira 同步",
-        "description": "立即执行一次指定配置的 Jira 同步（拉取 JQL 命中的 issue，新建/刷新需求）。configId 取 list_jira_sync_configs 返回的 id；同步期间同一时间只允许一个任务。调用后生成确认单，用户确认后才执行。",
-        "x-tool-risk": "WRITE",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-integration",
-        "x-tool-since": "CAP-76 M6",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "configId": {
-                    "type": "integer",
-                    "minimum": 1
-                  }
-                },
-                "required": [
-                  "configId"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/send_session_input": {
-      "post": {
-        "operationId": "send_session_input",
-        "summary": "向会话发送输入",
-        "description": "把一段话注入运行中的 coding 会话，等于让 runner 的 agent 立即执行该指令（危险操作）。必须由用户文本短码确认，卡片不提供执行按钮；预览会展示完整输入文本。",
-        "x-tool-risk": "DANGEROUS",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-session",
-        "x-tool-since": "M2",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "sessionId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "text": {
-                    "type": "string",
-                    "maxLength": 20000
-                  }
-                },
-                "required": [
-                  "sessionId",
-                  "text"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/list_projects": {
-      "post": {
-        "operationId": "list_projects",
-        "summary": "查询项目列表",
-        "description": "查询当前账号可见的项目（id/名称/状态/默认分支）。用户提到模糊项目名、或写操作需要 projectId 但尚未确定项目时先调用。可用 keyword 按名称/标签过滤。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-project",
-        "x-tool-since": "M1",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "keyword": {
-                    "type": "string",
-                    "maxLength": 100
-                  },
-                  "status": {
-                    "type": "string",
-                    "maxLength": 32
-                  },
-                  "limit": {
-                    "type": "integer",
-                    "default": 20,
-                    "minimum": 1,
-                    "maximum": 50
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "工具结果（ToolResult）"
-          }
-        }
-      }
-    },
-    "/tools/list_jira_transitions": {
-      "post": {
-        "operationId": "list_jira_transitions",
-        "summary": "查询 Jira 可用转换",
-        "description": "列出需求关联 Jira issue 当前可用的工作流转换（id/名称/目标状态）。requirementId 可用展示编号（如 REQ-12）或 seq；用于回答「这张单能流转到哪些状态」。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
-        "x-owner-module": "devmind-integration",
-        "x-tool-since": "CAP-76 M6",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "requirementId": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "seq": {
-                    "type": "integer",
-                    "minimum": 1
-                  }
-                }
-              }
-            }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -1948,7 +1691,6 @@
         "x-owner-module": "devmind-build",
         "x-tool-since": "M3",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -1980,7 +1722,8 @@
                 }
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -1989,17 +1732,58 @@
         }
       }
     },
-    "/tools/finish_session": {
+    "/tools/list_builds": {
       "post": {
-        "operationId": "finish_session",
-        "summary": "优雅结束会话",
-        "description": "向运行中的 coding 会话发送优雅结束指令（关 stdin，agent 处理完当前轮后自然退出 → DONE/FAILED，工作区保留）。用户说「结束会话」默认用这个；要强杀（立即终止）用 stop_session。sessionId 支持会话 id 或需求编号 REQ-<seq>（解析为该需求最近活跃的会话）。调用后生成确认单，用户确认后才执行。",
-        "x-tool-risk": "WRITE",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-session",
-        "x-tool-since": "CAP-78 M1",
+        "operationId": "list_builds",
+        "summary": "查询构建记录",
+        "description": "列出项目最近的构建（id/分支/commit/状态/耗时/关联工作项）。status 可过滤 SUCCESS/FAILED/RUNNING 等；未指定 projectId 用当前绑定项目。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-build",
+        "x-tool-since": "M3",
         "requestBody": {
-          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "status": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 50
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/get_session": {
+      "post": {
+        "operationId": "get_session",
+        "summary": "查询会话详情",
+        "description": "查询单个会话的状态、任务说明、执行节点、token 用量与摘要。sessionId 支持完整 id。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-session",
+        "x-tool-since": "M1",
+        "requestBody": {
           "content": {
             "application/json": {
               "schema": {
@@ -2015,7 +1799,8 @@
                 ]
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -2024,17 +1809,130 @@
         }
       }
     },
-    "/tools/start_requirement_plan": {
+    "/tools/list_notifications": {
       "post": {
-        "operationId": "start_requirement_plan",
-        "summary": "开启 AI 规划",
-        "description": "对需求启动 AI 规划会话（等同网页「开启 AI 规划」按钮）：一个 [flow:plan] 会话一次产出分析/方案/工作单元清单（不改代码），完成后自动登记产出并自动启动开发会话。已有规划产出时再调用 = 重新规划（整体重跑，已有工作单元保留）。会创建 coding 会话产生模型费用；调用后生成确认单，用户确认后才真正启动。requirementId 支持 REQ-<seq>/内部 id/纯数字。",
-        "x-tool-risk": "WRITE",
-        "x-min-role": "DEVELOPER",
-        "x-owner-module": "devmind-flow",
-        "x-tool-since": "CAP-78 M1",
+        "operationId": "list_notifications",
+        "summary": "查询通知列表",
+        "description": "查询通知中心的通知（分级 P0/P1/P2、标题、正文摘要、关联对象、已读状态）。unreadOnly=true 只看未读；level 可过滤分级。用于回答「最近有什么通知/有没有未读」。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-notification",
+        "x-tool-since": "CAP-76 M6",
         "requestBody": {
-          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "level": {
+                    "type": "string",
+                    "enum": [
+                      "P0",
+                      "P1",
+                      "P2"
+                    ]
+                  },
+                  "unreadOnly": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 50
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/get_deployment": {
+      "post": {
+        "operationId": "get_deployment",
+        "summary": "查询部署详情",
+        "description": "查询部署单详情（环境/状态/步骤进度/失败原因/日志尾部）。用于回答「部署到哪一步了」。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-deploy",
+        "x-tool-since": "M3",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deploymentId": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "logLines": {
+                    "type": "integer",
+                    "default": 40,
+                    "minimum": 0,
+                    "maximum": 200
+                  }
+                },
+                "required": [
+                  "deploymentId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/count_unread_notifications": {
+      "post": {
+        "operationId": "count_unread_notifications",
+        "summary": "查询未读通知数",
+        "description": "返回通知中心当前未读条数，用于回答「有多少未读通知」。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-notification",
+        "x-tool-since": "CAP-76 M6",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/list_designs": {
+      "post": {
+        "operationId": "list_designs",
+        "summary": "查询设计版本列表",
+        "description": "列出某需求下的设计版本（版本号/状态/文档 id）。必须同时提供 projectId 与 requirementId（requirementId 可用展示编号 REQ-<seq>）。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-project",
+        "x-tool-since": "M1",
+        "requestBody": {
           "content": {
             "application/json": {
               "schema": {
@@ -2047,14 +1945,22 @@
                   "requirementId": {
                     "type": "string",
                     "maxLength": 64
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 50
                   }
                 },
                 "required": [
+                  "projectId",
                   "requirementId"
                 ]
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -2063,39 +1969,194 @@
         }
       }
     },
-    "/tools/get_session_events": {
+    "/tools/start_session": {
       "post": {
-        "operationId": "get_session_events",
-        "summary": "查询会话最近事件",
-        "description": "查看会话最近的事件（状态变化/工具输出/错误），用于回答「卡在哪了」「为什么失败」。tail 默认 20，最大 100；每条内容会截断。",
-        "x-tool-risk": "READ",
-        "x-min-role": "VIEWER",
+        "operationId": "start_session",
+        "summary": "启动 coding 会话",
+        "description": "在项目下创建并启动 coding 会话（会下发 runner、产生模型费用）。taskSpec 写清要做什么；可关联 requirementId/workItemId（也接受展示编号 REQ-<seq> / WI-<seq>）。调用后生成确认单，用户确认后才真正启动。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
         "x-owner-module": "devmind-session",
-        "x-tool-since": "M1",
+        "x-tool-since": "M2",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "sessionId": {
+                  "projectId": {
                     "type": "string",
                     "maxLength": 64
                   },
-                  "tail": {
-                    "type": "integer",
-                    "default": 20,
-                    "minimum": 1,
-                    "maximum": 100
+                  "taskSpec": {
+                    "type": "string",
+                    "maxLength": 20000
+                  },
+                  "requirementId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "workItemId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "agentNodeId": {
+                    "type": "string",
+                    "maxLength": 64
                   }
                 },
                 "required": [
-                  "sessionId"
+                  "taskSpec"
                 ]
               }
             }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
           }
+        }
+      }
+    },
+    "/tools/start_work_item_session": {
+      "post": {
+        "operationId": "start_work_item_session",
+        "summary": "工作单元起会话",
+        "description": "对单个工作单元启动开发会话（人工逃生通道）：工作单元的 spec（执行说明）作为任务说明注入，TODO 状态推进为 IN_PROGRESS。缺 spec 的工作单元不能起会话（先在网页补充执行说明）。调用后生成确认单，用户确认后才真正启动。workItemId 支持 WI-<seq>/内部 id。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-flow",
+        "x-tool-since": "CAP-78 M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "workItemId": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "workItemId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/get_work_item": {
+      "post": {
+        "operationId": "get_work_item",
+        "summary": "查询工作项详情",
+        "description": "查询工作项详情（状态/说明/类型）及关联会话。需 projectId、requirementId、workItemId；后两者都可用展示编号（REQ-<seq> / WI-<seq>）。",
+        "x-tool-risk": "READ",
+        "x-min-role": "VIEWER",
+        "x-owner-module": "devmind-project",
+        "x-tool-since": "M1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "requirementId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "workItemId": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "projectId",
+                  "requirementId",
+                  "workItemId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "工具结果（ToolResult）"
+          }
+        }
+      }
+    },
+    "/tools/submit_plan": {
+      "post": {
+        "operationId": "submit_plan",
+        "summary": "提交多步计划",
+        "description": "提交一份多步计划：把 2 步及以上的写操作、或步骤间有数据依赖的操作打包成有序步骤，整份计划经一次人工确认后按序执行，任一步失败即停（已完成步骤不回滚）。步骤间引用：args 里写 ${stepN.field} 引用第 N 步（从 1 开始、只能引用更早的步骤）返回的字段，例如 create_requirement 产出 requirementId/code、create_work_item 产出 workItemId/code、start_session 产出 sessionId。整份计划所有步骤必须在同一个项目内。单步操作直接调对应工具，不要用本工具。",
+        "x-tool-risk": "WRITE",
+        "x-min-role": "DEVELOPER",
+        "x-owner-module": "devmind-copilot",
+        "x-tool-since": "CAP-76 M7",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "goal": {
+                    "type": "string",
+                    "description": "计划目标（≤500字，一句话说明要达成什么）"
+                  },
+                  "steps": {
+                    "type": "array",
+                    "description": "有序步骤（2~plan-max-steps 步），按顺序执行，任一步失败即停、已完成步骤不回滚",
+                    "maxItems": 8,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "tool": {
+                          "type": "string",
+                          "description": "工具名（工具目录里的 snake_case 名，禁 submit_plan）"
+                        },
+                        "args": {
+                          "description": "该工具的参数对象，键名与目标工具 schema 一致；可用 ${stepN.field} 引用第 N 步返回的字段"
+                        },
+                        "title": {
+                          "type": "string",
+                          "description": "步骤一句话说明（可选，给人看）"
+                        }
+                      },
+                      "required": [
+                        "tool",
+                        "args"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "goal",
+                  "steps"
+                ]
+              }
+            }
+          },
+          "required": true
         },
         "responses": {
           "200": {
