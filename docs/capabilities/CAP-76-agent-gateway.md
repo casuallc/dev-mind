@@ -17,6 +17,12 @@
 > 6. **多步计划复用确认单机制，不新增计划表**（M7）——`submit_plan` 是 copilot 自有的编排工具，
 >    整份计划作为**一张**确认单落 `copilot_actions.args_json`（全部步骤参数快照），步骤级审计落
 >    `copilot_tool_calls`；短码/原子抢占/过期/取消全套机制直接继承，计划与单写操作在审计页同构。
+> 7. **计划异步执行 + 作业终态等待用轮询探针，不用事件订阅**（M8）——M7 同步执行的上限
+>    （步骤数×工具超时+60s）装不下「构建→等终态→下一步」链条；确认后计划调度到虚拟线程
+>    异步执行（FR-34），步骤可用 `await` 声明等待前序异步作业到终态（FR-35）。终态判定走
+>    common 的 `JobTerminalProbe` 轮询探针（幂等、进程重启后状态可查、copilot 不感知各模块
+>    事件类型），不订阅 DomainEvent（一次性、重启丢等待态、反向依赖）。进度视图仍不新增表：
+>    步骤快照在 `copilot_actions.args_json`，实时进度在 `copilot_tool_calls`（+`step_seq`）。
 
 ## 1. 目的
 
@@ -137,6 +143,10 @@ spring-boot-starter-web / data-jpa / jackson-databind
 - `com.devmind.common.agent.tool`：`PlatformTool` / `ToolSpec` / `ToolCall` / `ToolContext` /
   `ToolResult` / `ToolRisk`；`ToolArgs`（JSON Schema 子集校验 + 截断 + 长度限制）；
   `ToolAccessPolicy`（可选 SPI，见 FR-21）。
+- `com.devmind.common.agent.plan`（M8，FR-35）：`JobTerminalProbe` / `JobState`——
+  异步作业终态轮询探针，实现随能力模块交付，copilot 以 `ObjectProvider` 收集。
+- `com.devmind.common.notification`（M8，FR-34）：`AgentChatPush`——向来源聊天推文本的
+  最小 SPI，devmind-bot 实现（按 channel 找适配器发送），copilot 以 `ObjectProvider` 探测。
 - `com.devmind.common.agent.gateway`：`AgentGateway` / `AgentRequest` / `AgentReply` /
   `AgentCard` / `AgentCardButton` / `AgentCardAction`（bot 与 copilot 的唯一耦合面；
   bot 只依赖 common）。
@@ -450,6 +460,94 @@ agent 执行任意输入）、需求置 DONE/CANCELLED、工作项 CANCELLED、�
 - `submit_plan` 归属 `devmind-copilot`（编排层工具，实现只允许调 ToolRegistry/执行器，
   不碰业务 Service），`minRole=DEVELOPER`；系统提示词补一条规划规则引导模型使用。
 
+> M8 起计划改为**异步执行**、步骤可声明 `await` 等待前序异步作业终态、并新增计划进度视图，
+> 见 FR-34 / FR-35 / FR-36。本节的校验、占位符、一次确认、失败即停语义不变。
+
+**FR-34 计划异步执行（M8）**：M7 的同步执行上限是 `PlanTool` 超时（步骤数 × 工具超时 + 60s，
+默认 210s），装不下「触发异步作业 → 等终态 → 下一步」的链条（构建/会话动辄分钟级）。
+M8 起 `submit_plan` 确认后**异步执行**：
+
+- 确认路径（FR-15）全部校验通过后不再经 `CopilotToolRunner` 同步执行：确认单保持
+  `EXECUTING`，计划调度到**虚拟线程**执行（执行入口禁 `@Transactional`，靠各次 save
+  自身事务提交，CAP-71 红线），确认回执立即返回「计划已开始执行（共 N 步），完成后推送结果；
+  进度见智能体运维页『计划』视图」。确认 turn 记 OK（受理语义，同 FR-13），审计链
+  PENDING_CONFIRM→CONFIRMED 不变；非计划确认单维持同步执行不变。
+- **终态收口在计划线程**：全部步骤成功 → `SUCCEEDED`；失败即停 → `FAILED`（error 写中断
+  原因）；`result_json` 存步骤报告（completed/total/failedStep/steps[]，同 M7 data）；另写
+  一条 `submit_plan` 汇总 `copilot_tool_calls`（OK/FAILED，`step_seq` 为空）。
+  计划线程异常兜底：未捕获异常一律收口 FAILED + 落汇总审计，不允许计划单悬挂 EXECUTING。
+- **EXECUTING 清扫分流**（FR-14 修订）：非计划单仍按 `turn-timeout-seconds`（180s）判中断；
+  `submit_plan` 单按 `plan-execution-timeout-minutes`（默认 120）判中断——进程重启/崩溃
+  遗留的 EXECUTING 计划由此收口为 FAILED（error=执行中断），**不自动重试**，步骤审计保留
+  断点供进度页展示。
+- **终态推送**：计划收口后经 common 的 `AgentChatPush` SPI 向来源聊天推一条结果文本
+  （✅/❌ 计划《goal》：完成 k/n 步，失败附第几步与原因）；仅 bot 来源轮
+  （channel/externalChatId 非空）；SPI 缺席静默跳过，推送失败只记日志不影响状态。
+- 执行中的计划**不可取消**（`/cancel` 只处理 PENDING，口径不变）；并发上限复用 FR-31
+  （确认路径的轮次锁在分发后即释放，计划线程不占锁）。
+
+**FR-35 步骤级作业终态等待（`await`，M8）**：受理语义的链条里「构建 → 部署新制品」会在
+构建未终态时就触发部署。步骤可声明 `await` 等本步产出的异步作业到终态：
+
+```json
+{"tool": "trigger_build", "args": {"projectId": "…"},
+ "await": {"kind": "BUILD", "idField": "buildId", "timeoutMinutes": 30}}
+```
+
+- `kind` ∈ `BUILD`/`SESSION`/`DEPLOYMENT`/`TEST_RUN`；`idField` = 该步 `ToolResult.data`
+  里作业 id 的键；`timeoutMinutes` 1 ~ `plan-await-max-timeout-minutes`（默认 120），缺省 30。
+- **提交期校验**（不合法回灌模型自纠，不落确认单）：`await` 结构不合法 / `kind` 不在枚举 /
+  `idField` 空 / 超时超上限 → `INVALID_ARGUMENTS`；**该 kind 的探针缺席**（能力模块未装配
+  或未实现）→ 校验失败"该类作业暂不支持等待"（fail-visible，不静默降级为不等）。
+- **执行期**：步骤 OK 且带 `await` → 从该步 `data` 取 `idField`（缺失/为空按
+  `INVALID_ARGUMENTS` 中断），步骤审计行置 `WAITING`，按 `plan-await-poll-seconds`
+  （默认 10，下限 5）轮询探针：`SUCCEEDED` → 步骤完成继续；`FAILED` → 该步按 FAILED
+  中断，错误附探针 `failureSummary`；`UNKNOWN`（记录不存在/无法判定）按 RUNNING 继续等；
+  超时按 `TIMEOUT` 中断，错误写明作业 id 与已等时长，提示到平台核实、不自动重试。
+- **探针 SPI**（common，`com.devmind.common.agent.plan`）：
+
+```java
+public interface JobTerminalProbe {
+    String kind();                                  // BUILD / SESSION / DEPLOYMENT / TEST_RUN
+    JobState probe(String entityId, String actor);  // UNKNOWN = 记录不存在/无法判定
+    default String failureSummary(String entityId) { return null; }  // FAILED 时的错误摘要
+}
+
+public enum JobState { RUNNING, SUCCEEDED, FAILED, UNKNOWN }
+```
+
+- 实现随能力模块交付（同工具归属原则）：`BUILD` → devmind-build（QUEUED/RUNNING→RUNNING，
+  SUCCESS→SUCCEEDED，FAILED/CANCELLED→FAILED）；`SESSION` → devmind-session
+  （RUNNING/WAITING_INPUT/WAITING_AUTH/SUSPENDED→RUNNING，DONE→SUCCEEDED，
+  FAILED/TERMINATED→FAILED）。探针实现内部用入参 `actor` 合成 `SecurityContext`
+  （姿势同 `CopilotToolRunner`），只读查询。`DEPLOYMENT`/`TEST_RUN` 探针待对应触发类
+  工具交付时同期补。
+- copilot 以 `ObjectProvider<JobTerminalProbe>` 收集，kind 重复注册启动失败（fail-fast，
+  同 FR-03 工具重名）。
+- `submit_plan` 工具描述补 `await` 引导：后续步骤依赖前序异步作业的**完成**（不是受理）时
+  必须声明 `await`；未声明的步骤只保证受理。
+- 等待时长计入 `plan-execution-timeout-minutes` 总预算（FR-34 的 sweep 阈值）；轮询在
+  虚拟线程里 `sleep`，不占平台线程。
+
+**FR-36 计划进度视图（M8）**：智能体运维页第四个视图「计划」，回答"这份计划跑到哪一步了"：
+
+- `copilot_tool_calls` 加 `step_seq` 列（INTEGER 可空，`ddl-auto=update` 演进；M7 存量行
+  为 null，按 `id` 升序兜底对应步骤序号）。**仍不新增计划表**（决策 #7）。
+- **步骤审计生命周期**：步骤开始即写 `RUNNING` 行（`step_seq` + 脱敏 args 副本）→ 进入
+  `await` 更新 `WAITING` → 结束更新 `OK`/`FAILED`；中断后未执行步骤补 `REJECTED`
+  （沿用 FR-33 halt 语义）。`copilot_tool_calls.status` 新增 `RUNNING`/`WAITING` 两个值。
+- 管理 API（ADMIN，FR-30 增补）：
+  - `GET /api/copilot/admin/plans`：`tool_name=submit_plan` 的分页列表（id/goal/shortCode/
+    risk/status/actor/projectId/总步数/已完成步数/createdAt/executedAt），筛选
+    status/actor/keyword（goal）；
+  - `GET /api/copilot/admin/plans/{id}`：计划详情 = `args_json` 步骤快照（goal/steps[]
+    的 tool/title/args/await）join 步骤审计行（按 `step_seq` 对应），每步给出
+    status/summary/error/durationMs。
+- 前端 `/admin/copilot` Segmented 增「计划」视图（`features/copilot/PlansPanel`）：表格列
+  目标/进度（已完成/总数）/状态/发起人/项目/创建时间/耗时；行展开逐步骤进度
+  （状态/摘要/错误/耗时）；列表存在 EXECUTING 行时 5s 轮询；遵循
+  `docs/core/前端内容区布局约定.md`。
+
 ### 5.3 确认与执行
 
 **FR-13 确认单模型**：`copilot_actions` 字段与状态机：
@@ -489,7 +587,8 @@ PENDING ──确认──▶ EXECUTING ──▶ SUCCEEDED
   不支持的模块至少保证"确认单只执行一次"）。
 - `EXECUTING` 不是终态：进程若在工具执行中途退出，确认单会停在 `EXECUTING`。清理任务把超过
   `turn-timeout-seconds` 仍为 `EXECUTING` 的单据标记为 FAILED（error=执行中断），
-  **不自动重试**；用户可重新发起。
+  **不自动重试**；用户可重新发起。M8 起 `submit_plan` 计划单分流到
+  `plan-execution-timeout-minutes`（默认 120 分钟）阈值（FR-34）。
 - **过期清扫与保留期清理分离**：`action-sweep-cron`（默认每分钟）只做 PENDING→EXPIRED 与
   EXECUTING→FAILED；`cleanup-cron`（每日）只做保留期删除。TTL 是 10 分钟，不能等到次日凌晨
   才把过期单置 EXPIRED——所有"是否有 PENDING"的判断仍必须带 `expires_at > now` 双重保险。
@@ -737,6 +836,8 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 | `GET /api/copilot/admin/turns/{id}` | 一轮详情 + 工具调用链 |
 | `GET /api/copilot/admin/actions` | 确认单列表（状态/actor/时间） |
 | `POST /api/copilot/admin/actions/{id}/cancel` | 管理员强制取消 PENDING |
+| `GET /api/copilot/admin/plans` | 计划列表（submit_plan 单：目标/进度/状态/发起人；M8，FR-36） |
+| `GET /api/copilot/admin/plans/{id}` | 计划详情（步骤快照 join 步骤审计；M8，FR-36） |
 | `GET /api/copilot/admin/config` | 运行时配置只读视图（端点名、模式、步数、保留期） |
 
 全部 ADMIN。关键词检索 `assistant_text`（LONGVARCHAR/CLOB）时禁直接 `lower()`，
@@ -830,7 +931,7 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 | `transit_jira_issue` | `projectId?`, `requirementId` 或 `seq`, `transitionId` | WRITE（只回写远端与托管字段，本地需求 status 不动；M6） |
 | `log_jira_worklog` | `projectId?`, `requirementId` 或 `seq`, `hours`, `comment?` | WRITE（写远端 Jira worklog，个人账号优先；M6） |
 | `run_jira_sync` | `projectId`, `configId` | WRITE（同步执行，工具超时 180s；全局同一时间只允许一个同步；M6） |
-| `submit_plan` | `goal`, `steps[]`（每步 `tool`+`args`+`title?`，2~`plan-max-steps` 步） | WRITE；任一步 DANGEROUS → 整单 DANGEROUS（M7，归属 devmind-copilot，见 FR-33） |
+| `submit_plan` | `goal`, `steps[]`（每步 `tool`+`args`+`title?`+`await?`，2~`plan-max-steps` 步；M8 起异步执行，`await` 见 FR-35） | WRITE；任一步 DANGEROUS → 整单 DANGEROUS（M7，归属 devmind-copilot，见 FR-33~35） |
 
 > `send_session_input` 等于让 runner 的 coding agent 执行一句话，定为 DANGEROUS：预览必须展示
 > 目标会话、节点与**完整输入文本**（不截断），且必须文本短码确认（卡片不提供执行按钮）。
@@ -907,9 +1008,10 @@ M4 候选：文档新版本、知识提案采纳、需求流程阶段动作、�
 ### `copilot_tool_calls`
 
 `id` bigint identity、`turn_id`、`action_id?`、`tool_name`、`args_json`(LONGVARCHAR；**脱敏截断副本**)、
-`risk`、`status`(OK/FAILED/REJECTED/PENDING_CONFIRM/CONFIRMED/**EXPIRED**/CANCELLED)、
-`result_summary`(4000)、`error`(2000)、`duration_ms`、`created_at`。
-索引 `(turn_id)`、`(tool_name, created_at)`。
+`risk`、`status`(OK/FAILED/REJECTED/PENDING_CONFIRM/CONFIRMED/**EXPIRED**/CANCELLED；M8 增
+**RUNNING**/**WAITING**，仅计划步骤行使用，见 FR-36)、`step_seq`(INTEGER 可空，M8 增：
+计划步骤序号；非步骤行为 null)、`result_summary`(4000)、`error`(2000)、`duration_ms`、`created_at`。
+索引 `(turn_id)`、`(tool_name, created_at)`、`(action_id, step_seq)`（M8 增）。
 
 ### `copilot_actions`
 
@@ -956,6 +1058,9 @@ devmind:
     max-turns-per-minute: 10
     max-concurrent-model: 4
     plan-max-steps: 5        # submit_plan 单计划最大步骤数（M7，FR-33）
+    plan-execution-timeout-minutes: 120  # submit_plan 异步执行整体上限（M8，FR-34 sweep 分流阈值）
+    plan-await-poll-seconds: 10          # await 终态轮询间隔（M8，FR-35；下限 5）
+    plan-await-max-timeout-minutes: 120  # await timeoutMinutes 上限（M8，FR-35）
     reply-progress-card: true
     allow-default-actor-writes: false
     audit-retention-days: 180
@@ -1032,6 +1137,15 @@ devmind:
       卡片回调命中 DANGEROUS 计划拒绝）
 - [x] 系统提示词规划规则；契约快照与 E2E 场景 10 更新
 
+### M8 计划异步执行与进度视图（FR-34/35/36）
+
+- [ ] `submit_plan` 确认后异步执行（虚拟线程），确认回执秒回；终态收口 + 汇总审计 + 聊天推送
+- [ ] EXECUTING 清扫分流：计划单按 `plan-execution-timeout-minutes`，非计划单不变
+- [ ] 步骤 `await`：common `JobTerminalProbe` SPI + BUILD/SESSION 探针实现 + 提交期校验
+- [ ] `copilot_tool_calls.step_seq` + RUNNING/WAITING 中间态；plans 管理 API
+- [ ] 前端「计划」视图（进度表 + 步骤展开 + EXECUTING 轮询）
+- [ ] 验收：异步分发/await 成败与超时/进度页数据口径（单测 + E2E 场景 12）
+
 ## 11. 验收标准
 
 ### 单元/集成测试
@@ -1065,6 +1179,10 @@ devmind:
   10. 多步计划（M7，FR-33）：`submit_plan` 整份计划一张确认单 → 确认后按序执行、
       `${stepN.field}` 占位符替换生效、步骤级 `copilot_tool_calls` 审计；第二步失败即停、
       已完成步骤不回滚；
+  12. 异步计划（M8，FR-34~36）：`submit_plan` 确认回执秒回「已开始执行」→ 轮询
+      `/api/copilot/admin/plans` 至 SUCCEEDED、步骤行带 `step_seq` 与 RUNNING→OK 轨迹；
+      `await` 用 e2e profile 的假 BUILD 探针（fake 控制器翻转作业状态）验证 等待→继续
+      与 作业失败→中断 两条路径；终态推送落入 fake adapter 的 pushes。
   11. 契约：`tests/cap76_tools_contract.py` 生成的 `cap76-tools.yaml` 与注册表一致
       （operation 数、schema 可被标准 OpenAPI 解析）。
 - 跑完清理 app/mock 进程（见 `docs/core/开发注意事项.md` 与 `tests/README.md`）。
@@ -1096,6 +1214,7 @@ devmind:
 | R12 | 确认单参数若被掩码/截断，确认后执行的内容与用户看到的原文不一致 | `copilot_actions.args_json` 存执行原文，掩码副本另存 `copilot_tool_calls`；危险预览分段发送、超限拒绝（FR-11/FR-28） |
 | R13 | 工具目录与既有 Service 签名不一致，实现被迫下探 Repository | §6.3 列出随工具交付的 Service 扩展；评审时逐工具对照签名 |
 | R14 | 对象级跨项目越权（只按对象 id 查） | 每个按对象 id 操作的工具强制反查 projectId 并调 `ToolAccessPolicy`（FR-21） |
+| R15 | 异步计划堆积：虚拟线程计划泄漏或 await 死等拖住资源 | `plan-execution-timeout-minutes` 总预算 + sweep 收口 FAILED；await 轮询间隔下限 5s；探针只读查询、单次耗时有工具超时口径 |
 
 ## 13. 被否方案
 
@@ -1110,6 +1229,9 @@ devmind:
 | 用卡片按钮确认所有写操作（含 DANGEROUS） | 误点风险；危险操作强制文本短码，确保操作者看过计划 |
 | 先做一套对外 Open API，让智能体持服务令牌回调 | 智能体必须以「当前用户」身份操作，服务令牌会变成越权后门；确认/风险/预览语义也不属于公开 API。对外开放接口应独立立项，复用同一 Service 与工具契约 |
 | copilot 直接依赖全部业务模块、内置实现所有工具 | 编排层耦合全部能力，新增能力都要改 copilot；也违背「能力模块自包含」。改为工具随能力模块交付 |
+| 计划继续同步执行、靠调高超时容纳异步作业链条（M8 评估） | 超时调到分钟级会占死确认路径的轮次锁与 botExecutor 配额，且仍无法表达「等作业终态」语义；改异步执行 + await 探针 |
+| await 用事件订阅（监听 build.completed 等 DomainEvent）替代轮询探针（M8 评估） | 事件一次性、进程重启丢等待态；copilot 需感知各模块事件类型（反向依赖）。轮询探针幂等、可随时恢复判定，SPI 形态与工具体系一致 |
+| 计划进度新增独立计划表（M8 评估） | 步骤快照已在 `copilot_actions.args_json`、步骤审计已在 `copilot_tool_calls`，加表即双事实源；进度视图只做 join 查询 |
 
 ## 14. 与既有能力的关系
 
