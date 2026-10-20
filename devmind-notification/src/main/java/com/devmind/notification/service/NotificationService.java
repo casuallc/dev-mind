@@ -300,7 +300,9 @@ public class NotificationService implements NotificationPublisher {
     public ChannelView updateChannel(Long id, ChannelRequest req) {
         NotificationChannelEntity ent = channelRepo.findById(id)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "通道不存在: " + id));
-        ent.setEnabled(req.enabled());
+        if (req.enabled() != null) {
+            ent.setEnabled(req.enabled());
+        }
         if (req.levelThreshold() != null && !req.levelThreshold().isBlank()) {
             ent.setLevelThreshold(req.levelThreshold().toUpperCase());
         }
