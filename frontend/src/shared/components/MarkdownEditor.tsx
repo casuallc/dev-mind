@@ -32,6 +32,10 @@ export interface MarkdownEditorProps {
   disabled?: boolean
   /** 开启图片/附件上传内联；scope 默认 PRIVATE（需求描述等成员共享场景传 SHARED） */
   attachmentUpload?: { scope?: 'PRIVATE' | 'SHARED' }
+  /** 初始模式，默认 edit；受控用 mode + onModeChange */
+  defaultMode?: 'edit' | 'preview'
+  mode?: 'edit' | 'preview'
+  onModeChange?: (m: 'edit' | 'preview') => void
 }
 
 interface ToolbarAction {
@@ -48,8 +52,16 @@ export default function MarkdownEditor({
   placeholder,
   disabled,
   attachmentUpload,
+  defaultMode,
+  mode: controlledMode,
+  onModeChange,
 }: MarkdownEditorProps) {
-  const [mode, setMode] = useState<string>('edit')
+  const [innerMode, setInnerMode] = useState<'edit' | 'preview'>(defaultMode ?? 'edit')
+  const mode = controlledMode ?? innerMode
+  const setMode = (m: 'edit' | 'preview') => {
+    setInnerMode(m)
+    onModeChange?.(m)
+  }
   const areaRef = useRef<TextAreaRef>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -261,7 +273,7 @@ export default function MarkdownEditor({
         <Segmented
           size="small"
           value={mode}
-          onChange={setMode}
+          onChange={(v) => setMode(v as 'edit' | 'preview')}
           options={[
             { value: 'edit', label: '编辑' },
             { value: 'preview', label: '预览' },
