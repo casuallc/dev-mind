@@ -163,6 +163,35 @@
   `BotInteractionCleanupTask` 硬删 created_at 超期行（派生 deleteBy + @Transactional），
   并顺带删 7 天前的 bot_session_watches 残留（FR-20 兜底）。
 
+### 作业主动汇报（M7）
+
+目标：经 CAP-76 智能体在 bot 聊天里触发的异步作业（构建/部署/测试/会话），
+终态自动回来源聊天——此前 FR-20 只覆盖 `/session` `/dev` 指令路径，
+智能体路径（trigger_build 受理、start_session 系起会话）完成后聊天里无感知。
+
+- **FR-25 作业终态主动推送**：
+  - **SPI（devmind-common）**：`BotCompletionWatch.watch(entityType, entityId,
+    channel, externalChatId, label)`——执行侧登记、bot 模块实现；SPI 缺席
+    （bot 未装配）调用方静默跳过，登记失败不阻断作业受理回执（推送是增强能力）。
+  - **登记点（CAP-76 工具执行漏斗）**：`CopilotToolRunner` 成功后置钩子
+    `CopilotCompletionWatchHook`，按**工具名白名单**映射（data 键 → 实体类型）：
+    `trigger_build`→buildId→BUILD；`trigger_deploy`→deploymentId→DEPLOYMENT、
+    `run_test`/`trigger_test`→testRunId→TEST_RUN（预留：工具未实现，映射先行）；
+    `start_session`/`start_work_item_session`/`start_requirement_dev`/
+    `start_requirement_plan`/`resume_session`→sessionId→SESSION（补 FR-20 缺口：
+    智能体起的会话此前无 watch）。仅当 ToolContext.channel/externalChatId 非空
+    （bot 来源轮）才登记；READ 工具（get_build 等同样带 id）不在白名单不登记；
+    计划（submit_plan）步骤天然过同一漏斗，无需特例。
+  - **bot 实现**：SESSION 路由进既有 `bot_session_watches`（复用 FR-20 富文案推送，
+    label=任务描述）；其余入新表 `bot_job_watches`（entity_type+entity_id 唯一，
+    重复登记覆盖旧行，一次性语义同 FR-20）。
+  - **推送**：`BotJobWatchListener` 监听 `build.completed`/`test.completed`
+    （SimpleDomainEvent，entityType 匹配 entityId）与 `deploy.completed`
+    （DeploymentCompletedEvent）→ take 消费 → `adapter.send` 推
+    「✅/❌ {操作名} 已完成/失败 + 事件摘要 + 平台链接」，失败记日志不补推，
+    推送在独立虚拟线程执行（同 FR-20 口径）。
+  - **清理**：FR-24 清理任务顺带删 7 天前 bot_job_watches 残留。
+
 ## 3. 否决方案
 
 - **webhook 回调端点为主路径**：需受信证书+域名（+国内 ECS 的 ICP 备案），194 自签证书
@@ -243,6 +272,20 @@ bot_session_watches(               -- FR-20 会话终态推送订阅
 )
 ```
 
+M7 新增：
+
+```
+bot_job_watches(                   -- FR-25 作业终态推送订阅
+  id bigint pk auto,
+  entity_type varchar(32),         -- BUILD/DEPLOYMENT/TEST_RUN
+  entity_id varchar(64),
+  channel varchar(32), external_chat_id varchar(128),
+  label varchar(200),              -- 受理时的操作名（推送文案用）
+  created_at,
+  unique(entity_type, entity_id)   -- 推送命中即删；7 天前残留由清理任务顺带删
+)
+```
+
 ## 6. API 概要
 
 M2 无平台侧新 REST——绑定与操作全部经飞书指令驱动。M1 复用既有
@@ -273,7 +316,9 @@ M3 新增：
 - **M5 聊天开发闭环**：FR-16~19（出站/入站图片、会话控制 /status /stop、主线查看 /wi /design）。（已交付）
 - **M6 运行闭环**：FR-20~24（会话终态主动推送、危险操作二次确认、/flow 需求状态推进、
   /release 发版触发、交互日志保留期清理）。（已交付）
-- **M7 展望**：webhook 回调第二接入路径、飞书交互卡片。
+- **M7 作业主动汇报**：FR-25（智能体触发的构建/部署/测试/会话终态回来源聊天，
+  BotCompletionWatch SPI + 工具漏斗白名单登记 + bot_job_watches）。
+- **M8 展望**：webhook 回调第二接入路径、飞书交互卡片。
 
 ## 9. 验收标准
 
@@ -301,6 +346,11 @@ M3 新增：
   由单测 + 平台既有 CAP-11 验收覆盖）；bot 起的会话进终态后来源聊天收到推送且 watch 删除
   （单测覆盖，E2E 无 runner 不产生 session.completed）；清理任务删除超期交互行与
   7 天前 watch 残留（单测覆盖）。
+- M7：白名单工具（trigger_build/start_session 系）在 bot 来源轮执行成功后登记 watch
+  （READ 工具、无 channel 的 Web 轮不登记）；build.completed/test.completed/deploy.completed
+  命中 watch 后来源聊天收到「✅/❌ + 操作名 + 事件摘要 + 平台链接」且行删除（一次性）；
+  无 watch 不推、推送失败不补推；SESSION 实体路由进 FR-20 会话 watch；清理任务删
+  7 天前 job watch 残留（以上单测覆盖）。
 
 ## 10. 风险与开放问题
 
