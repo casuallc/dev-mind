@@ -19,7 +19,8 @@ import { topNavKey } from './menuSelectedKey'
 import NotificationBell from '../features/notifications/components/NotificationBell'
 import UserMenu from '../features/auth/components/UserMenu'
 import { startNotificationStream, stopNotificationStream } from '../features/notifications/store'
-import { getUserSnapshot, isAdmin, subscribeAuth } from '../features/auth/authStore'
+import { getUserSnapshot, isAdmin, setUser, subscribeAuth } from '../features/auth/authStore'
+import { fetchMe } from '../features/auth/api'
 
 const { Header, Content } = Layout
 
@@ -36,6 +37,12 @@ export default function AppLayout() {
   useEffect(() => {
     startNotificationStream()
     return () => stopNotificationStream()
+  }, [])
+
+  // 用户快照只在登录时写入 localStorage；显示名/描述可能被管理员在用户管理中改过，
+  // 挂载时拉一次 /auth/me 刷新，保证顶栏显示名与个人信息页是最新的（失败静默沿用缓存）
+  useEffect(() => {
+    fetchMe().then(setUser).catch(() => {})
   }, [])
 
   return (

@@ -34,13 +34,14 @@ export default function ProfilePanel() {
   return (
     <div style={{ maxWidth: 480 }}>
       <Typography.Paragraph type="secondary">
-        你的账号信息（用户名 / 显示名 / 角色）与登录密码修改入口。
+        你的账号信息（用户名 / 显示名 / 描述 / 角色）与登录密码修改入口；显示名与描述由管理员在用户管理中维护。
       </Typography.Paragraph>
       <Descriptions
         column={1}
         items={[
           { key: 'username', label: '用户名', children: user.username },
           { key: 'displayName', label: '显示名', children: user.displayName || '—' },
+          { key: 'description', label: '描述', children: user.description || '—' },
           { key: 'role', label: '角色', children: <Tag color={role.color}>{role.text}</Tag> },
         ]}
       />
