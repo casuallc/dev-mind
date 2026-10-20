@@ -1,6 +1,6 @@
 // CAP-06 通知中心 API
 import { api } from '../../shared/api/client'
-import type { AppNotification, NotificationChannel, NotificationPrefs } from './types'
+import type { AppNotification, NotificationChannel, NotificationLevel, NotificationPrefs } from './types'
 
 export interface ListParams {
   level?: string
@@ -32,3 +32,11 @@ export const updateChannel = (
 export const getPrefs = () => api.get<NotificationPrefs>('/notification-prefs')
 export const updatePrefs = (body: Partial<NotificationPrefs>) =>
   api.put<NotificationPrefs>('/notification-prefs', body)
+
+/** 设置页「发送测试通知」：走真实分发链（去重/免打扰/通道阈值全生效），结果见通知中心的 channelStatus */
+export const emitTest = (level: NotificationLevel) =>
+  api.post<AppNotification>('/notifications/emit', {
+    level,
+    title: '测试通知',
+    body: '来自通知设置的连通性测试；各通道投递结果见通知中心该条通知。',
+  })
