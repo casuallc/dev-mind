@@ -14,6 +14,9 @@
 > 4. **模型不可信**：工具白名单、参数白名单校验、工具结果只当数据不当指令、权限由服务端钉死。
 > 5. **降级优先于静默**：未配模型端点/未绑身份/工具不存在，一律 fail-visible；保留
 >    `devmind.copilot.enabled=false` 一键回到 CAP-75 的斜杠指令 + 问答。
+> 6. **多步计划复用确认单机制，不新增计划表**（M7）——`submit_plan` 是 copilot 自有的编排工具，
+>    整份计划作为**一张**确认单落 `copilot_actions.args_json`（全部步骤参数快照），步骤级审计落
+>    `copilot_tool_calls`；短码/原子抢占/过期/取消全套机制直接继承，计划与单写操作在审计页同构。
 
 ## 1. 目的
 
@@ -41,7 +44,8 @@ CAP-75 的飞书机器人已经能问答、绑定项目、起会话、查构建�
 - 不做"自由编码 Agent"：不在服务端跑 shell/任意 HTTP/任意 SQL，不让模型读写服务器文件。
   coding agent 的职责仍归 CAP-34 runner 会话。
 - 不替代 CAP-05/08/09/11 的执行器与人工门禁；智能体只是这些能力的自然语言入口。
-- 不做无确认的自主多步写操作（"帮我自动把这一批需求都处理掉"明确禁止）。
+- 不做无确认的自主多步写操作（"帮我自动把这一批需求都处理掉"明确禁止）。多步写必须以
+  `submit_plan` 计划形式提交、整份计划经一次人工确认后才按序执行（FR-33，M7）。
 - v1 不做语音、不做飞书文档/表格深度编辑、不做跨租户操作。
 
 ## 2. 设计原则（红线）
@@ -415,6 +419,36 @@ agent 执行任意输入）、需求置 DONE/CANCELLED、工作项 CANCELLED、�
 
 **FR-12 失败呈现**：统一分档：未绑定身份 / 无权限 / 未找到对象 / 参数不合法 / 执行失败 /
 模型不可用。错误必须含可操作建议（如"请先 /bindme 绑定身份"），不回堆栈、不回内部路径。
+
+**FR-33 多步计划（`submit_plan`，M7）**：FR-07 的循环里写工具一出现就结束本轮，导致
+「步骤间有依赖的多步任务」（如"建好需求后直接挂上工作项"）断链——确认完第一步，后续步骤
+要靠用户再发一条消息。为此引入编排工具 `submit_plan`：模型遇到**需要 ≥2 个写操作**或
+**步骤间有数据依赖**的任务时，不逐个发起写工具，而是提交一份**有序计划**：
+
+- 参数：`goal`（计划目的，≤500 字）+ `steps[]`（2 ~ `plan-max-steps` 步，默认 5），每步
+  `{tool, args, title?}`；`args` 在外层 schema 中透传，内容按**目标工具自己的 schema** 校验。
+- **提交期校验**（不合法直接把原因回灌模型自纠，不落确认单、不计写配额）：步骤数 2~上限；
+  工具必须存在、对当前角色可见、不允许嵌套 `submit_plan`；每步参数过目标工具 schema 校验；
+  所有步骤解析出的 projectId 必须同项目（FR-10 单项目规则的整计划版，运行时兜底不只靠提示词）；
+  占位符必须指向排序在前的步骤。
+- **步骤间数据依赖**：步骤参数字符串里可写 `${step<N>.<field>}`，执行时替换为第 N 步
+  `ToolResult.data` 的顶层字段（整串恰好是占位符时保留原值类型；嵌入更长字符串时按文本替换）。
+  引用的字段不存在 → 该步按 `INVALID_ARGUMENTS` 失败并中断。常用产出字段写进 `submit_plan` 的
+  工具描述（`create_requirement → requirementId/code`、`create_work_item → workItemId/code`、
+  `start_session → sessionId`），模型不得臆造其它字段。
+- **一次确认**：整份计划 = **一张**确认单（复用 FR-13 状态机、短码、原子抢占、过期清扫与
+  `/cancel`），`args_json` 存全部步骤的参数快照（执行权威，同 FR-28 不掩码不截断）；预览为
+  编号步骤列表，每步带工具标题与该工具自己的 preview。计划风险 = 各步最高风险：任一步
+  DANGEROUS → 整单 DANGEROUS，按 FR-11 走文本短码、卡片不渲染执行按钮；确认执行路径（FR-15）
+  对计划**重算风险**，卡片回调命中 DANGEROUS 计划一律拒绝（渲染层约束不是授权边界）。
+- **按序执行、失败即停**：每步执行前重新做占位符替换 → schema 校验 → 对象项目反查 →
+  `ToolAccessPolicy` → 角色校验；任一步失败即中断，剩余步骤不执行，回执写明「已完成 k 步、
+  第 k+1 步失败原因、剩余未执行」。已完成的步骤**不回滚**（与 FR-13 `SUCCEEDED`=受理语义一致；
+  计划确认单的终态由最后一步决定：全部成功 `SUCCEEDED`，任一失败 `FAILED`）。
+- **审计**：确认执行 turn 下每步写一条 `copilot_tool_calls`（OK / FAILED / REJECTED=前序失败
+  未执行），另有 `submit_plan` 自身一条汇总记录；**不新增表**。
+- `submit_plan` 归属 `devmind-copilot`（编排层工具，实现只允许调 ToolRegistry/执行器，
+  不碰业务 Service），`minRole=DEVELOPER`；系统提示词补一条规划规则引导模型使用。
 
 ### 5.3 确认与执行
 
@@ -796,6 +830,7 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 | `transit_jira_issue` | `projectId?`, `requirementId` 或 `seq`, `transitionId` | WRITE（只回写远端与托管字段，本地需求 status 不动；M6） |
 | `log_jira_worklog` | `projectId?`, `requirementId` 或 `seq`, `hours`, `comment?` | WRITE（写远端 Jira worklog，个人账号优先；M6） |
 | `run_jira_sync` | `projectId`, `configId` | WRITE（同步执行，工具超时 180s；全局同一时间只允许一个同步；M6） |
+| `submit_plan` | `goal`, `steps[]`（每步 `tool`+`args`+`title?`，2~`plan-max-steps` 步） | WRITE；任一步 DANGEROUS → 整单 DANGEROUS（M7，归属 devmind-copilot，见 FR-33） |
 
 > `send_session_input` 等于让 runner 的 coding agent 执行一句话，定为 DANGEROUS：预览必须展示
 > 目标会话、节点与**完整输入文本**（不截断），且必须文本短码确认（卡片不提供执行按钮）。
@@ -883,6 +918,9 @@ M4 候选：文档新版本、知识提案采纳、需求流程阶段动作、�
 避免两个事实源）。`args_json`/`preview_text`/`result_json` 均 LONGVARCHAR。
 索引 `(status, expires_at)`、`(sender_id, channel, external_chat_id, status)`。
 
+> M7 多步计划（FR-33）**不新增表**：整份计划是一张 `copilot_actions` 行（`tool_name=submit_plan`，
+> `args_json` 存全部步骤快照），步骤级执行审计是确认执行 turn 下的多条 `copilot_tool_calls`。
+
 **存储量**：`args_json`/`assistant_text` 用 LONGVARCHAR，不裸 `@Lob`（PG 会落 oid，踩过事故）。
 
 ## 8. API 概要
@@ -917,6 +955,7 @@ devmind:
     confirm-preview-max-chunks: 10      # 超过则拒绝创建确认单（不截断执行）
     max-turns-per-minute: 10
     max-concurrent-model: 4
+    plan-max-steps: 5        # submit_plan 单计划最大步骤数（M7，FR-33）
     reply-progress-card: true
     allow-default-actor-writes: false
     audit-retention-days: 180
@@ -986,6 +1025,13 @@ devmind:
 - [x] 契约快照（`docs/capabilities/tools/cap76-tools.yaml`）与 E2E 用例随工具更新
 - [ ] 飞书真机验收：自然语言"把 REQ-12 验收掉"走通编号寻址
 
+### M7 多步计划（submit_plan，FR-33）
+
+- [x] 编排工具 `submit_plan`：有序计划一次确认、按序执行、失败即停、步骤间 `${stepN.field}` 占位符引用
+- [x] 提交期校验（步骤数/嵌套/角色可见性/单项目/占位符合法性）与确认执行期全量重校验（含计划风险重算，
+      卡片回调命中 DANGEROUS 计划拒绝）
+- [x] 系统提示词规划规则；契约快照与 E2E 场景 10 更新
+
 ## 11. 验收标准
 
 ### 单元/集成测试
@@ -1016,7 +1062,10 @@ devmind:
   7. DANGEROUS（`update_requirement_status` 置 DONE）：裸「确认」被拒；回复短码后才执行；
   8. kill switch → 裸文本回落到 CAP-75 问答；
   9. 管理 API：非 ADMIN 403，ADMIN 200；
-  10. 契约：`tests/cap76_tools_contract.py` 生成的 `cap76-tools.yaml` 与注册表一致
+  10. 多步计划（M7，FR-33）：`submit_plan` 整份计划一张确认单 → 确认后按序执行、
+      `${stepN.field}` 占位符替换生效、步骤级 `copilot_tool_calls` 审计；第二步失败即停、
+      已完成步骤不回滚；
+  11. 契约：`tests/cap76_tools_contract.py` 生成的 `cap76-tools.yaml` 与注册表一致
       （operation 数、schema 可被标准 OpenAPI 解析）。
 - 跑完清理 app/mock 进程（见 `docs/core/开发注意事项.md` 与 `tests/README.md`）。
 
