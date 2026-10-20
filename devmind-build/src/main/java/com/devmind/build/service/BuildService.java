@@ -338,7 +338,9 @@ public class BuildService {
                                                      Consumer<String> sink, StringBuilder logs) {
         // CAP-36：AGENT 执行的工作区描述整条链共用（同 workspaceId 后续步骤幂等复用，不再 fetch）
         AgentExecCommand.Repo execRepo = "AGENT".equals(b.getExecutor()) ? buildExecRepo(b, project, sink) : null;
-        return chainRunner.run(steps, (i, step, stepSink) -> {
+        // 每步命令首部注入 Node 环境初始化与 npm 缺失诊断（exit=127 修复；前导幂等，不改产物与 commit 逻辑）
+        List<StepSpec> wrappedSteps = steps.stream().map(BuildShellEnv::wrap).toList();
+        return chainRunner.run(wrappedSteps, (i, step, stepSink) -> {
             if ("AGENT".equals(b.getExecutor())) {
                 Map<String, String> env = new HashMap<>();
                 env.put("BUILD_PROJECT_ID", b.getProjectId() == null ? "" : b.getProjectId());
