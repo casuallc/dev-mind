@@ -19,10 +19,11 @@ class BotInteractionCleanupTaskTest {
     private final BotInteractionCleanupService cleanupService =
             mock(BotInteractionCleanupService.class);
     private final BotSessionWatchService watchService = mock(BotSessionWatchService.class);
+    private final BotJobWatchService jobWatchService = mock(BotJobWatchService.class);
     private final BotProperties props = new BotProperties();
 
     private BotInteractionCleanupTask task() {
-        return new BotInteractionCleanupTask(cleanupService, watchService, props);
+        return new BotInteractionCleanupTask(cleanupService, watchService, jobWatchService, props);
     }
 
     @Test
@@ -30,11 +31,13 @@ class BotInteractionCleanupTaskTest {
         props.setInteractionRetentionDays(30);
         task().cleanup();
         verify(cleanupService).purge(30);
-        // watch 残留固定 7 天：订阅本该在会话结束时就消费掉
+        // watch 残留固定 7 天：订阅本该在实体终态时就消费掉
         ArgumentCaptor<Instant> cutoff = ArgumentCaptor.forClass(Instant.class);
         verify(watchService).sweepOlderThan(cutoff.capture());
         long days = Duration.between(cutoff.getValue(), Instant.now()).toDays();
         assertTrue(days == 6 || days == 7, "sweep 截止点应为 7 天前，实际 " + days + " 天");
+        // FR-25：作业 watch 同口径兜底
+        verify(jobWatchService).sweepOlderThan(any(Instant.class));
     }
 
     @Test
@@ -43,6 +46,7 @@ class BotInteractionCleanupTaskTest {
         task().cleanup();
         verify(cleanupService, never()).purge(anyInt());
         verify(watchService).sweepOlderThan(any(Instant.class));
+        verify(jobWatchService).sweepOlderThan(any(Instant.class));
     }
 
     @Test
