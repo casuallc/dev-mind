@@ -12,6 +12,8 @@ import com.devmind.common.agent.tool.ToolRisk;
 import com.devmind.common.agent.tool.ToolSpec;
 import com.devmind.copilot.config.CopilotProperties;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
@@ -28,7 +30,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
  */
 class CopilotToolRunnerTest {
 
-    private final CopilotToolRunner runner = new CopilotToolRunner(new CopilotProperties());
+    private final CopilotToolRunner runner =
+            new CopilotToolRunner(new CopilotProperties(), TestWatchHooks.none());
 
     @AfterEach
     void clear() {
@@ -54,6 +57,40 @@ class CopilotToolRunnerTest {
         PlatformTool tool = PlatformTool.of(spec(), (call, ctx) -> ToolResult.ok("ok"));
         runner.run(tool, new ToolCall("call-2", "whoami", Map.of()), context());
         assertEquals(null, SecurityContextHolder.getContext().getAuthentication());
+    }
+
+    /** CAP-75 FR-25：白名单工具在 bot 来源轮执行成功 → 经漏斗登记终态推送订阅。 */
+    @Test
+    void runRegistersWatchForWhitelistedTool() {
+        List<TestWatchHooks.Captured> sink = new ArrayList<>();
+        CopilotToolRunner watching =
+                new CopilotToolRunner(new CopilotProperties(), TestWatchHooks.capturing(sink));
+        ToolSpec triggerSpec = new ToolSpec("trigger_build", "触发构建", "测试用",
+                "{\"type\":\"object\",\"properties\":{}}",
+                ToolRisk.WRITE, "DEVELOPER", true, "test", "test");
+        PlatformTool tool = PlatformTool.of(triggerSpec, (call, ctx) ->
+                ToolResult.ok("已触发构建 #12", null, ToolResult.data("buildId", 12L)));
+
+        ToolResult result = watching.run(tool, new ToolCall("call-3", "trigger_build", Map.of()), context());
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, sink.size());
+        assertEquals("BUILD", sink.get(0).entityType());
+        assertEquals("12", sink.get(0).entityId());
+        assertEquals("chat-1", sink.get(0).externalChatId());
+    }
+
+    /** FR-25：非白名单工具（READ）执行成功也不登记。 */
+    @Test
+    void runSkipsWatchForReadTool() {
+        List<TestWatchHooks.Captured> sink = new ArrayList<>();
+        CopilotToolRunner watching =
+                new CopilotToolRunner(new CopilotProperties(), TestWatchHooks.capturing(sink));
+        PlatformTool tool = PlatformTool.of(spec(), (call, ctx) -> ToolResult.ok("ok"));
+
+        watching.run(tool, new ToolCall("call-4", "whoami", Map.of()), context());
+
+        assertTrue(sink.isEmpty());
     }
 
     private static ToolSpec spec() {

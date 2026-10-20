@@ -80,7 +80,7 @@ class PlanServiceTest {
         List<PlatformTool> tools = new ArrayList<>(List.of(createAlpha, createBeta, explode, dangerThing));
         tools.addAll(List.of(extra));
         ToolRegistry registry = new ToolRegistry(tools, new ObjectMapper());
-        return new PlanService(provider(registry), new CopilotToolRunner(props),
+        return new PlanService(provider(registry), new CopilotToolRunner(props, TestWatchHooks.none()),
                 fakeRepo(audited), props, noPolicy());
     }
 

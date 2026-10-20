@@ -32,9 +32,11 @@ public class CopilotToolRunner {
     private static final Logger log = LoggerFactory.getLogger(CopilotToolRunner.class);
 
     private final CopilotProperties props;
+    private final CopilotCompletionWatchHook watchHook;
 
-    public CopilotToolRunner(CopilotProperties props) {
+    public CopilotToolRunner(CopilotProperties props, CopilotCompletionWatchHook watchHook) {
         this.props = props;
+        this.watchHook = watchHook;
     }
 
     public ToolResult run(PlatformTool tool, ToolCall call, ToolContext ctx) {
@@ -53,9 +55,11 @@ public class CopilotToolRunner {
                     SecurityContextHolder.clearContext();
                 }
             });
-            return future.get(timeout, TimeUnit.SECONDS);
-        } catch (TimeoutException e) {
-            // 超时不等于未执行：投递/构建类工具可能已受理，回执必须说明
+            ToolResult result = future.get(timeout, TimeUnit.SECONDS);
+            // CAP-75 FR-25：受理了异步作业的工具成功后登记 bot 终态推送订阅（白名单工具 + bot 来源轮才生效）
+            watchHook.afterSuccess(spec.name(), spec.title(), call.args(), ctx, result);
+            return result;
+        } catch (TimeoutException e) {            // 超时不等于未执行：投递/构建类工具可能已受理，回执必须说明
             return ToolResult.fail(ToolResult.TIMEOUT,
                     "工具执行超时（可能已提交，请到平台确认状态，勿直接重试）");
         } catch (InterruptedException e) {
