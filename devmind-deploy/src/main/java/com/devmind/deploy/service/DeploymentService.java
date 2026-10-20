@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
@@ -45,6 +46,7 @@ import com.devmind.execution.model.StepResult;
 import com.devmind.execution.model.StepSpec;
 import com.devmind.execution.runner.AgentNodeRouter;
 import com.devmind.execution.runner.AgentNodeStepRunner;
+import com.devmind.execution.template.ScriptTemplate;
 import com.devmind.execution.template.ScriptTemplateService;
 import com.devmind.execution.ws.ExecutionLogHub;
 import com.devmind.notification.dto.ActionDef;
@@ -70,6 +72,9 @@ public class DeploymentService {
 
     private static final Logger log = LoggerFactory.getLogger(DeploymentService.class);
     private static final Pattern BACKUP = Pattern.compile("(?im)^backup[:=]\\s*(.+)$");
+    /** execStep 内置注入的参数名（与环境变量/步骤参数同级，不参与「无来源」判定） */
+    private static final Set<String> BUILTIN_STEP_PARAMS =
+            Set.of("env", "projectId", "agentNodeId", "serverId", "artifact", "backup");
 
     private final IdentityService identityService;
     private final ExecutorService deployExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -197,6 +202,35 @@ public class DeploymentService {
         }
         if (plan.isEmpty()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "部署计划为空");
+        }
+        // fail-fast：未选环境时没有环境变量基底，模板参数若无其他来源会在渲染期被静默替换为空串
+        // （事故：dm_backup 的 DEPLOY_HOST/DEPLOY_PORT 渲染为空，ssh 把整段命令当端口报 Bad port，exit=255）
+        if (req.environmentId() == null) {
+            List<String> dangling = new ArrayList<>();
+            for (DeployStep s : plan) {
+                if (s.templateCode() == null || s.templateCode().isBlank()) {
+                    continue;
+                }
+                ScriptTemplate tpl = templateService.requireTemplate(projectId, s.templateCode(), "deploy");
+                for (ScriptTemplate.ParamSpec ps : tpl.params()) {
+                    if (ps.name() == null || BUILTIN_STEP_PARAMS.contains(ps.name())) {
+                        continue;
+                    }
+                    String stepVal = s.params() == null ? null : s.params().get(ps.name());
+                    if (stepVal != null && !stepVal.isBlank()) {
+                        continue;
+                    }
+                    if (ps.defaultValue() != null && !ps.defaultValue().isBlank()) {
+                        continue;
+                    }
+                    dangling.add(tpl.code() + " 的 " + ps.name());
+                }
+            }
+            if (!dangling.isEmpty()) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "未选择环境（environmentId），以下模板参数无来源（环境变量/步骤参数/默认值），将渲染为空串: "
+                                + String.join("、", dangling) + "。请选择环境或在步骤 params 中显式提供");
+            }
         }
 
         DeploymentEntity d = new DeploymentEntity();
