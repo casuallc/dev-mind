@@ -17,6 +17,11 @@
 - **FR-04 快捷动作**：通知携带 `actions`（如 确认下一步 / 跳过 / 继续 / 允许授权）；Web 端一键执行；手机端打开链接在页面上一键处理——支持**远程回复**。
 - **FR-05 防打扰**：免打扰时段、同类型 N 分钟内去重、单会话静默、按项目/会话设置通知偏好。
 - **FR-06 通知中心**：未读列表、历史、按类型筛选；点击通知跳转对应实体（会话/文档/部署单）。
+- **FR-07 通知设置**：设置页「通知」视图（/settings/notifications）——
+  - 通道配置：每通道启用开关 + 推送最低级别（P0/P1/P2）+ 通道专属配置（Bark server/key、企微 webhookUrl、飞书 webhookUrl/secret）；站内中心常驻不可关（不走阈值/免打扰/静默，关掉铃铛即停更）；
+  - 防打扰：免打扰时段（"HH:mm" 起止，跨天支持，留空=不启用，时段内仅 P0 推外部通道）、按事件类型静默、单会话静默清单（通知上快捷入口累积，可移除恢复）；
+  - 「发送测试通知」走真实分发链（去重/免打扰/阈值全生效），投递结果看通知中心该条的 channelStatus；
+  - 安全口径：webhook/key/secret 以 Password 输入防瞟屏；GET 返回明文属已知折衷（单人平台，列 MVP 外）。
 
 ## 3. 插件化接口
 
@@ -44,9 +49,11 @@ notification_prefs(user_id, mutes(json), quiet_hours, per_session_silence)
 GET    /notifications?level=&unreadOnly=    通知中心
 POST   /notifications/{id}/read             标记已读
 POST   /notifications/{id}/action          执行快捷动作 {action: "confirm"|"skip"|...}
+POST   /notifications/emit                 测试 emit（设置页「发送测试通知」）
 WS     /notifications/stream               实时推送（前端）
-CRUD   /notification-channels              通道配置
-GET/PUT /notification-prefs                通知偏好
+GET    /notification-channels              通道列表（含 config）
+PUT    /notification-channels/{id}         通道更新（enabled 可空=不变 / levelThreshold / config 合并更新）
+GET/PUT /notification-prefs                通知偏好（mutes.eventTypes / quiet 时段 / perSessionSilence）
 ```
 
 ## 7. 验收标准
@@ -58,4 +65,10 @@ GET/PUT /notification-prefs                通知偏好
 
 ## 8. MVP 范围（暂不做）
 
-邮件通道、多语言模板、通知统计报表。
+邮件通道、多语言模板、通知统计报表、通道 config 密文掩码返回。
+
+## 9. 落地现状（2026-10-20）
+
+- 已实现：FR-01~03、FR-05、FR-06、FR-07（设置页「通知」视图：通道开关/阈值/配置 + 免打扰/静默 + 测试发送）。
+- 通道种子：ws/log 默认开（P2），bark/wecom/feishu 默认关（P0）；逐 code 兜底补插，不覆盖用户配置。
+- 未实现：FR-02 的 P1 聚合推送、浏览器 Service Worker 通道、FR-04 手机端快捷动作（Web 端已有）。
