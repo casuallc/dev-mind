@@ -150,6 +150,8 @@ export default function SuiteDetailPage() {
   const [publishing, setPublishing] = useState(false)
   const [editing, setEditing] = useState<TestCaseInput | null>(null)
   const [isNew, setIsNew] = useState(false)
+  // 抽屉开合独立于 editing：新增时 editing 为 null（要表示「无 id 可改」），不能再用 !!editing 当 open（曾致添加用例点了没反应）
+  const [caseDrawerOpen, setCaseDrawerOpen] = useState(false)
   const [form] = Form.useForm<CaseFormValues>()
   // script 分支：脚本属性（字段族不同，走 /script-suites 端点）
   const [script, setScript] = useState<ScriptSuite | null>(null)
@@ -204,7 +206,13 @@ export default function SuiteDetailPage() {
   const openEdit = (c: TestCaseInput | null) => {
     setIsNew(!c)
     setEditing(c)
+    setCaseDrawerOpen(true)
     form.setFieldsValue(c ? caseToForm(c) : { kind: 'http', method: 'GET', enabled: true, healthMode: 'command' })
+  }
+
+  const closeCaseDrawer = () => {
+    setCaseDrawerOpen(false)
+    setEditing(null)
   }
 
   const saveCase = async (v: CaseFormValues) => {
@@ -214,7 +222,7 @@ export default function SuiteDetailPage() {
     } else {
       setCases([...cases, next])
     }
-    setEditing(null)
+    closeCaseDrawer()
   }
 
   const onSaveAll = async () => {
@@ -379,11 +387,11 @@ export default function SuiteDetailPage() {
         </>
       )}
 
-      <Drawer title={isNew ? '添加用例' : '编辑用例'} open={!!editing} onClose={() => setEditing(null)}
+      <Drawer title={isNew ? '添加用例' : '编辑用例'} open={caseDrawerOpen} onClose={closeCaseDrawer}
         width={DRAWER_FORM} destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <Button onClick={() => setEditing(null)}>取消</Button>
+            <Button onClick={closeCaseDrawer}>取消</Button>
             <Button type="primary" onClick={() => form.submit()}>确定</Button>
           </Space>
         }
