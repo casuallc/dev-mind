@@ -64,6 +64,9 @@ public class CopilotProperties {
     /** PENDING→EXPIRED / EXECUTING→FAILED；空 = 关闭 */
     private String actionSweepCron = "0 * * * * *";
 
+    /** submit_plan 单计划最大步骤数（FR-33，M7） */
+    private int planMaxSteps = 5;
+
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public String getEndpointId() { return endpointId; }
@@ -116,4 +119,6 @@ public class CopilotProperties {
     public void setCleanupCron(String cleanupCron) { this.cleanupCron = cleanupCron; }
     public String getActionSweepCron() { return actionSweepCron; }
     public void setActionSweepCron(String actionSweepCron) { this.actionSweepCron = actionSweepCron; }
+    public int getPlanMaxSteps() { return planMaxSteps; }
+    public void setPlanMaxSteps(int planMaxSteps) { this.planMaxSteps = planMaxSteps; }
 }

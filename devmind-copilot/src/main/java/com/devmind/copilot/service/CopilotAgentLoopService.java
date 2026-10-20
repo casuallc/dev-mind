@@ -98,6 +98,7 @@ public class CopilotAgentLoopService implements AgentGateway {
     private final CopilotConversationRepository conversations;
     private final CopilotToolCallRepository toolCalls;
     private final ObjectProvider<ToolAccessPolicy> policies;
+    private final PlanService plans;
     private final ObjectMapper mapper = new ObjectMapper();
 
     /** FR-31：同一 (channel, chat, sender) 同时只允许一轮。按会话键分段，进程内有效。 */
@@ -116,7 +117,8 @@ public class CopilotAgentLoopService implements AgentGateway {
                                    CopilotMessageRepository messages,
                                    CopilotConversationRepository conversations,
                                    CopilotToolCallRepository toolCalls,
-                                   ObjectProvider<ToolAccessPolicy> policies) {
+                                   ObjectProvider<ToolAccessPolicy> policies,
+                                   PlanService plans) {
         this.props = props;
         this.identities = identities;
         this.endpoints = endpoints;
@@ -129,6 +131,7 @@ public class CopilotAgentLoopService implements AgentGateway {
         this.conversations = conversations;
         this.toolCalls = toolCalls;
         this.policies = policies;
+        this.plans = plans;
         this.modelSlots = new Semaphore(Math.max(1, props.getMaxConcurrentModel()), true);
     }
 
@@ -694,6 +697,19 @@ public class CopilotAgentLoopService implements AgentGateway {
                 auditRejected(run, call, "重复调用超过上限");
                 continue;
             }
+            // FR-33：submit_plan 先做计划级全量校验（步骤存在性/嵌套/占位符/单项目），
+            // 不合法把中文原因回灌模型自纠；风险与项目仍走通用 riskFor/resolveProjectId
+            if (PlanService.TOOL_NAME.equals(tool.spec().name())) {
+                try {
+                    plans.validate(args, run.identity.role(), run.req.projectId(),
+                            toolContext(run, null, run.req.projectId()));
+                } catch (ToolArgs.InvalidArgumentException e) {
+                    appendToolMessage(run, call, errorText("计划不合法：" + e.getMessage()));
+                    auditToolCall(run, call, tool.spec().name(), args, tool.spec().risk(),
+                            CopilotToolCallEntity.REJECTED, null, "计划不合法：" + e.getMessage(), 0);
+                    continue;
+                }
+            }
             ToolRisk risk = tool.spec().riskFor(args);
             String projectId = resolveProject(tool, args, run);
             if (tool.spec().requiresProject() && isBlank(projectId)) {
@@ -1076,6 +1092,8 @@ public class CopilotAgentLoopService implements AgentGateway {
         sb.append("- 确认单与短码由平台在你调用写操作工具后自动生成并下发；禁止自己编写「待确认 […]」"
                 + "样式的文本，禁止编造短码或让用户回复确认。\n");
         sb.append("- 工具失败时如实转述原因，不要伪造结果；不要透露密钥、内部 URL、堆栈。\n");
+        sb.append("- 多步任务（2 个及以上写操作，或步骤间有数据依赖）调用 submit_plan 提交一份有序计划，"
+                + "整份计划一次确认后按序执行；不要逐个发起写工具。单步操作直接调对应工具。\n");
         sb.append("- 回答使用简体中文，简洁、可操作；必要时给出下一步建议。\n\n");
         sb.append("可用工具：\n");
         for (PlatformTool tool : registry.visibleTo(run.identity.role())) {

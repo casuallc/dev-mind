@@ -198,6 +198,7 @@ public class CopilotAdminController {
         out.put("maxSteps", props.getMaxSteps());
         out.put("maxToolCallsPerStep", props.getMaxToolCallsPerStep());
         out.put("maxWritesPerTurn", props.getMaxWritesPerTurn());
+        out.put("planMaxSteps", props.getPlanMaxSteps());
         out.put("turnTimeoutSeconds", props.getTurnTimeoutSeconds());
         out.put("modelTimeoutSeconds", props.getModelTimeoutSeconds());
         out.put("toolTimeoutSeconds", props.getToolTimeoutSeconds());

@@ -68,6 +68,7 @@ devmind:
     tool-mode: auto                # native | json | auto（auto=native 不支持工具时自动降级 json）
     max-steps: 8                   # 单轮最多模型回调轮数
     max-writes-per-turn: 3         # 单轮最多生成确认单数（超出要求用户分次）
+    plan-max-steps: 5              # submit_plan 单计划最大步骤数（M7，FR-33）
     turn-timeout-seconds: 180      # 单轮总时限，超时中止并回执
     confirm-ttl-minutes: 10        # 确认单有效期
     action-sweep-cron: "0 * * * * *"       # 分钟级状态收敛（PENDING→EXPIRED / 中断 EXECUTING→FAILED）；空=关闭
