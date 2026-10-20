@@ -13,6 +13,7 @@ import com.devmind.copilot.repo.CopilotToolCallRepository;
 import com.devmind.copilot.repo.CopilotTurnRepository;
 import com.devmind.copilot.service.CopilotActionService;
 import com.devmind.copilot.service.CopilotEndpointService;
+import com.devmind.copilot.service.PlanViewService;
 import com.devmind.copilot.tool.ToolRegistry;
 import jakarta.persistence.criteria.Predicate;
 import java.util.ArrayList;
@@ -48,6 +49,7 @@ public class CopilotAdminController {
     private final CopilotActionRepository actionRepo;
     private final CopilotToolCallRepository toolCalls;
     private final ObjectProvider<ToolAccessPolicy> policies;
+    private final PlanViewService planViews;
 
     public CopilotAdminController(CopilotProperties props,
                                   ToolRegistry registry,
@@ -56,7 +58,8 @@ public class CopilotAdminController {
                                   CopilotTurnRepository turns,
                                   CopilotActionRepository actionRepo,
                                   CopilotToolCallRepository toolCalls,
-                                  ObjectProvider<ToolAccessPolicy> policies) {
+                                  ObjectProvider<ToolAccessPolicy> policies,
+                                  PlanViewService planViews) {
         this.props = props;
         this.registry = registry;
         this.endpoints = endpoints;
@@ -65,6 +68,7 @@ public class CopilotAdminController {
         this.actionRepo = actionRepo;
         this.toolCalls = toolCalls;
         this.policies = policies;
+        this.planViews = planViews;
     }
 
     @GetMapping("/admin/tools")
@@ -189,6 +193,22 @@ public class CopilotAdminController {
         return Map.of("ok", reason == null, "message", reason == null ? "已取消" : reason);
     }
 
+    /** 计划列表（FR-36）：submit_plan 确认单 + 步骤进度，status/actor/keyword 过滤。 */
+    @GetMapping("/admin/plans")
+    public PageView<Map<String, Object>> plans(@RequestParam(required = false) String status,
+                                               @RequestParam(required = false) String actor,
+                                               @RequestParam(required = false) String keyword,
+                                               @RequestParam(defaultValue = "0") int page,
+                                               @RequestParam(defaultValue = "20") int size) {
+        return planViews.listPlans(status, actor, keyword, page, size);
+    }
+
+    /** 计划详情（FR-36）：确认单 + 步骤快照 join 步骤审计行。 */
+    @GetMapping("/admin/plans/{id}")
+    public Map<String, Object> plan(@PathVariable String id) {
+        return planViews.planDetail(id);
+    }
+
     @GetMapping("/admin/config")
     public Map<String, Object> config() {
         Map<String, Object> out = new LinkedHashMap<>();
@@ -199,6 +219,9 @@ public class CopilotAdminController {
         out.put("maxToolCallsPerStep", props.getMaxToolCallsPerStep());
         out.put("maxWritesPerTurn", props.getMaxWritesPerTurn());
         out.put("planMaxSteps", props.getPlanMaxSteps());
+        out.put("planExecutionTimeoutMinutes", props.getPlanExecutionTimeoutMinutes());
+        out.put("planAwaitPollSeconds", props.getPlanAwaitPollSeconds());
+        out.put("planAwaitMaxTimeoutMinutes", props.getPlanAwaitMaxTimeoutMinutes());
         out.put("turnTimeoutSeconds", props.getTurnTimeoutSeconds());
         out.put("modelTimeoutSeconds", props.getModelTimeoutSeconds());
         out.put("toolTimeoutSeconds", props.getToolTimeoutSeconds());

@@ -205,7 +205,17 @@ public class CopilotActionService {
             action.setProjectId(projectId);
         }
 
-        // 7) 执行（服务端参数快照；SecurityContext 在 runner 内合成）
+        // 7) 计划单分流（M8 FR-34）：确认校验全部通过后不在确认请求里同步跑计划——
+        // 确认单保持 EXECUTING，由对话循环在事务提交后 dispatchAsync 到虚拟线程；
+        // 终态由 PlanService 收口（SUCCEEDED/FAILED + 汇总审计 + 聊天推送）。
+        if (PlanService.TOOL_NAME.equals(tool.spec().name())) {
+            toolCalls.closePendingByActionId(action.getId(), CopilotToolCallEntity.CONFIRMED);
+            int total = args.get("steps") instanceof List<?> steps ? steps.size() : 0;
+            return new Outcome(true, "计划已开始执行（共 " + total + " 步），完成后会推送结果；"
+                    + "进度见平台「智能体运维 → 计划」", action, null);
+        }
+
+        // 8) 执行（服务端参数快照；SecurityContext 在 runner 内合成）
         long t0 = System.currentTimeMillis();
         ToolResult result;
         try {
@@ -316,15 +326,19 @@ public class CopilotActionService {
         return code == null ? "" : code.trim().toUpperCase(Locale.ROOT);
     }
 
-    /** 分钟级清扫：PENDING→EXPIRED、EXECUTING→FAILED（FR-14/FR-29）。 */
+    /** 分钟级清扫：PENDING→EXPIRED、EXECUTING→FAILED（FR-14/FR-29）；计划单分流到更长阈值（FR-34）。 */
     @Transactional
     public int sweep() {
         Instant now = Instant.now();
         int expired = actions.expirePending(now);
         int interrupted = actions.failInterrupted(
-                now.minusSeconds(props.getTurnTimeoutSeconds()), "执行中断");
+                now.minusSeconds(props.getTurnTimeoutSeconds()), "执行中断", PlanService.TOOL_NAME);
+        int interruptedPlans = actions.failInterruptedPlans(
+                now.minus(props.getPlanExecutionTimeoutMinutes(), ChronoUnit.MINUTES), "执行中断",
+                PlanService.TOOL_NAME);
         toolCalls.closeExpiredActions();
-        return expired + interrupted;
+        toolCalls.failStaleSteps(now.minus(props.getPlanExecutionTimeoutMinutes(), ChronoUnit.MINUTES));
+        return expired + interrupted + interruptedPlans;
     }
 
     public List<CopilotActionEntity> allPendingForDisplay(String channel, String externalChatId, String senderId) {

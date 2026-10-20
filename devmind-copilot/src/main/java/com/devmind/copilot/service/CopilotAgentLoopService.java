@@ -429,6 +429,16 @@ public class CopilotAgentLoopService implements AgentGateway {
         turns.save(turn);
         saveMessage(conv.getId(), "assistant", CopilotJson.maskText(CopilotJson.truncate(receipt, 4000)));
 
+        // M8 FR-34：计划单确认后异步执行。此处 actions.execute 事务已提交（代理方法返回），
+        // 虚拟线程才能读到 EXECUTING 状态的确认单。
+        if (outcome.success() && PlanService.TOOL_NAME.equals(action.getToolName())) {
+            try {
+                plans.dispatchAsync(action.getId(), ctx);
+            } catch (Exception e) {
+                log.error("计划异步分发失败: actionId={} err={}", action.getId(), e.toString(), e);
+            }
+        }
+
         String footer = "确认单 " + action.getShortCode() + " · " + ctx.actor();
         if (cardPath) {
             AgentCard card = new AgentCard(

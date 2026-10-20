@@ -51,11 +51,19 @@ public interface CopilotActionRepository
             + "where a.status = 'PENDING' and a.expiresAt <= :now")
     int expirePending(@Param("now") Instant now);
 
-    /** 进程中断遗留的 EXECUTING → FAILED（不自动重试）。 */
+    /** 进程中断遗留的 EXECUTING → FAILED（不自动重试）。M8 起计划单分流到更长阈值，见下。 */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update CopilotActionEntity a set a.status = 'FAILED', a.error = :error "
-            + "where a.status = 'EXECUTING' and a.executedAt <= :cutoff")
-    int failInterrupted(@Param("cutoff") Instant cutoff, @Param("error") String error);
+            + "where a.status = 'EXECUTING' and a.executedAt <= :cutoff and a.toolName <> :planTool")
+    int failInterrupted(@Param("cutoff") Instant cutoff, @Param("error") String error,
+                        @Param("planTool") String planTool);
+
+    /** 异步计划（submit_plan）的中断收口：阈值用 plan-execution-timeout-minutes（FR-34）。 */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update CopilotActionEntity a set a.status = 'FAILED', a.error = :error "
+            + "where a.status = 'EXECUTING' and a.executedAt <= :cutoff and a.toolName = :planTool")
+    int failInterruptedPlans(@Param("cutoff") Instant cutoff, @Param("error") String error,
+                             @Param("planTool") String planTool);
 
     long deleteByStatusInAndCreatedAtBefore(Collection<String> statuses, Instant cutoff);
 }

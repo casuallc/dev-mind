@@ -67,6 +67,15 @@ public class CopilotProperties {
     /** submit_plan 单计划最大步骤数（FR-33，M7） */
     private int planMaxSteps = 5;
 
+    /** submit_plan 异步执行整体上限（分钟，FR-34，M8）：sweep 判 EXECUTING 计划中断的阈值 */
+    private int planExecutionTimeoutMinutes = 120;
+
+    /** await 终态轮询间隔（秒，FR-35；下限 5） */
+    private int planAwaitPollSeconds = 10;
+
+    /** await timeoutMinutes 上限（FR-35） */
+    private int planAwaitMaxTimeoutMinutes = 120;
+
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public String getEndpointId() { return endpointId; }
@@ -121,4 +130,10 @@ public class CopilotProperties {
     public void setActionSweepCron(String actionSweepCron) { this.actionSweepCron = actionSweepCron; }
     public int getPlanMaxSteps() { return planMaxSteps; }
     public void setPlanMaxSteps(int planMaxSteps) { this.planMaxSteps = planMaxSteps; }
+    public int getPlanExecutionTimeoutMinutes() { return planExecutionTimeoutMinutes; }
+    public void setPlanExecutionTimeoutMinutes(int v) { this.planExecutionTimeoutMinutes = v; }
+    public int getPlanAwaitPollSeconds() { return planAwaitPollSeconds; }
+    public void setPlanAwaitPollSeconds(int v) { this.planAwaitPollSeconds = v; }
+    public int getPlanAwaitMaxTimeoutMinutes() { return planAwaitMaxTimeoutMinutes; }
+    public void setPlanAwaitMaxTimeoutMinutes(int v) { this.planAwaitMaxTimeoutMinutes = v; }
 }

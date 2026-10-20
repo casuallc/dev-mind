@@ -19,7 +19,8 @@ import org.hibernate.type.SqlTypes;
 @Entity
 @Table(name = "copilot_tool_calls", indexes = {
         @Index(name = "idx_copilot_tool_calls_turn", columnList = "turn_id"),
-        @Index(name = "idx_copilot_tool_calls_name_created", columnList = "tool_name,created_at")
+        @Index(name = "idx_copilot_tool_calls_name_created", columnList = "tool_name,created_at"),
+        @Index(name = "idx_copilot_tool_calls_action_step", columnList = "action_id,step_seq")
 })
 public class CopilotToolCallEntity {
 
@@ -30,6 +31,9 @@ public class CopilotToolCallEntity {
     public static final String CONFIRMED = "CONFIRMED";
     public static final String EXPIRED = "EXPIRED";
     public static final String CANCELLED = "CANCELLED";
+    /** 计划步骤中间态（M8，FR-36）：步骤开始执行 / 等待作业终态。 */
+    public static final String RUNNING = "RUNNING";
+    public static final String WAITING = "WAITING";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -40,6 +44,10 @@ public class CopilotToolCallEntity {
 
     @Column(name = "action_id", length = 32)
     private String actionId;
+
+    /** 计划步骤序号（M8，FR-36）：submit_plan 的步骤行 1 起；非步骤行为 null。 */
+    @Column(name = "step_seq")
+    private Integer stepSeq;
 
     @Column(name = "tool_name", nullable = false, length = 64)
     private String toolName;
@@ -72,6 +80,8 @@ public class CopilotToolCallEntity {
     public void setTurnId(String turnId) { this.turnId = turnId; }
     public String getActionId() { return actionId; }
     public void setActionId(String actionId) { this.actionId = actionId; }
+    public Integer getStepSeq() { return stepSeq; }
+    public void setStepSeq(Integer stepSeq) { this.stepSeq = stepSeq; }
     public String getToolName() { return toolName; }
     public void setToolName(String toolName) { this.toolName = toolName; }
     public String getArgsJson() { return argsJson; }
