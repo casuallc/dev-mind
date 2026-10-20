@@ -91,7 +91,7 @@
 | [CAP-76](CAP-76-agent-gateway.md) | 平台智能体网关（飞书自然语言管理） | 组装层 | 飞书裸文本 → 智能体网关 → LLM 工具选择 → 平台工具受控执行 → 卡片回复：工具契约先行（名称/schema/风险/角色，可导出 OpenAPI 3.0），工具随能力模块交付并在进程内调本模块 Service（权限/事务/归属复用），读直查、写必确认（DB 确认单 + 一次性消费 + 确认时重校验），白名单无任意 HTTP/SQL/shell；新增 devmind-copilot 编排模块 + common 工具/网关 SPI + bot 卡片扩展，CAP-62 数据权限以 ToolAccessPolicy 预留接入 |
 | [CAP-77](CAP-77-self-feedback-loop.md) | 平台自举反馈闭环（/issue 快捷登记） | 组装层 | Dev-Mind 自身注册为普通项目 + `/issue [类型] <描述>` 任意飞书会话快捷登记（固定投自项目，不受聊天绑定影响），自动附渠道/会话/发送者/登记人/时间，回执给 REQ 编号与 `/dev` 修复入口；复用需求主线与 CAP-34 会话，不新增存储；自动自更新（deploy_platform）列为后续能力 |
 | [CAP-78](CAP-78-feishu-requirement-dev-flow.md) | 飞书对话式需求开发全流程 | 组装层 | 需求开发全流程搬进飞书对话：copilot 工具化 startPlan/startDev/WI 起会话（devmind-flow）+ finish/suspend/resume/会话级·需求级收口（devmind-session，需求级收口 DANGEROUS 文本短码），斜杠快速路径 /plan /dev WI /finish /resume /finalize；只调 CAP-52/42/51 既有 Service，零新表零新端点零前端改动 |
-| [CAP-79](CAP-79-agent-memory-loop.md) | Agent 记忆闭环增强 | 流程层 | 三里程碑补记忆/知识/规划短板：M1 会话经验自动回流（devSpec 收尾增 lessons.md 可选产出→自动登记知识提案 inbox，FAILED/反复拒授权会话产【待回顾】占位提案，人工闸门从「发起」收敛到「采纳」）；M2 执行会话 search_knowledge 调用统计表+聚合报表（只度量不改瘦上下文行为）；M3 verify 连续失败→人触发增量重规划（[flow:replan] 会话产 replan.json diff，applySplitPlan 增 diff 模式，旧会话挂起起新 dev 会话） |
+| [CAP-79](CAP-79-agent-memory-loop.md) | Agent 记忆闭环增强 | 流程层 | 三里程碑补记忆/知识/规划短板：M1 会话经验自动回流（devSpec 收尾增 lessons.md 可选产出→自动登记知识提案 inbox，FAILED/反复拒授权会话产【待回顾】占位提案，人工闸门从「发起」收敛到「采纳」）；M2 建 runner→平台会话作用域知识检索通道（节点 token+sessionId 反查归属，只读）+ search 调用统计表与聚合报表（不改瘦上下文与 copilot 侧工具行为）；M3 verify 连续失败→人触发增量重规划（[flow:replan] 会话产 replan.json diff，add 带 type、dependsOn 用 WI-<seq>/new:<i> 标识空间，applySplitPlan 增 diff 模式+合并全图环检测，旧会话活动态才挂起、起新 dev 会话不 resume） |
 
 ## 依赖关系
 
