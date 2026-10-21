@@ -39,6 +39,7 @@
         <module>devmind-attachment</module>
         <module>devmind-notification</module>
         <module>devmind-execution</module>
+        <module>devmind-task</module>
         <module>devmind-artifact</module>
         <module>devmind-build</module>
         <module>devmind-deploy</module>
@@ -160,6 +161,11 @@
             <dependency>
                 <groupId>com.devmind</groupId>
                 <artifactId>devmind-execution</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.devmind</groupId>
+                <artifactId>devmind-task</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

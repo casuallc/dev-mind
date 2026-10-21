@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.devmind</groupId>
+        <artifactId>devmind</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <artifactId>devmind-task</artifactId>
+    <name>devmind-task</name>
+    <description>CAP-80 通用异步任务框架：任务登记/调度/重试/僵尸收割 + 统一执行日志（复用 CAP-12 枢纽）</description>
+    <dependencies>
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-common</artifactId>
+        </dependency>
+        <!-- 实时日志/WS 复用统一执行底座的 ExecutionLogHub + ExecutionWsHandler -->
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-execution</artifactId>
+        </dependency>
+        <!-- actor 归属与非 admin 强制过滤走 IdentityService/SecurityContext 既有口径 -->
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-auth</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-websocket</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
