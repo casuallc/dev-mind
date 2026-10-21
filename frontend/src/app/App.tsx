@@ -34,6 +34,7 @@ import SkillDetailPage from '../features/skills/pages/SkillDetailPage'
 import DocsPage from '../features/docs/pages/DocsPage'
 import DocEditorPage from '../features/docs/pages/DocEditorPage'
 import ExecutionPage from '../features/execution/pages/ExecutionPage'
+import AdminAsyncTasksPage from '../features/async-task/pages/AdminAsyncTasksPage'
 import IntegrationsPage from '../features/integrations/pages/IntegrationsPage'
 import ModelEndpointsPage from '../features/model/pages/ModelEndpointsPage'
 import DecisionRecordsPage from '../features/decision/pages/DecisionRecordsPage'
@@ -182,6 +183,8 @@ export default function App() {
           <Route path="/admin/users" element={<UserManagementPage />} />
           {/* CAP-36 执行底座：命令模板 + 执行审计（CAP-07 服务器运维已下线，旧路径兼容） */}
           <Route path="/admin/execution" element={<ExecutionPage />} />
+          {/* CAP-80 通用异步任务框架管理面 */}
+          <Route path="/admin/async-tasks" element={<AdminAsyncTasksPage />} />
           <Route path="/admin/servers" element={<Navigate to="/admin/execution" replace />} />
           {/* CAP-18/19 平台集成（GitLab / Jira） */}
           <Route path="/admin/integrations" element={<IntegrationsPage />} />
