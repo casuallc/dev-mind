@@ -482,6 +482,16 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         return nodeService.defaultNodeId();
     }
 
+    /** CAP-80 M4：节点 id 非数字（任务侧的字符串入参）按不存在处理，不抛 NumberFormatException。 */
+    @Override
+    public boolean nodeExists(String nodeId) {
+        try {
+            return nodeService.exists(Long.parseLong(nodeId));
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
     /** FR-08：无 hello 版本记录（老 runner / 未装配）按 {@link AgentProtocol#DEFAULT_WHEN_ABSENT} 对待。 */
     @Override
     public boolean supports(String nodeId, int minVersion) {

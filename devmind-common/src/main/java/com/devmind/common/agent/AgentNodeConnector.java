@@ -20,6 +20,14 @@ public interface AgentNodeConnector {
     String defaultNodeId();
 
     /**
+     * CAP-80 M4：节点登记存在性探测（任务创建/编辑指定 agent_node_id 的 400 校验用，
+     * 不查在线性——在线性留执行时判定）。默认 false（未装配 agent 模块 = 无任何节点登记）。
+     */
+    default boolean nodeExists(String nodeId) {
+        return false;
+    }
+
+    /**
      * 下发 launch 并阻塞等 runner ack（超时/失败/离线抛 DevMindException）。
      * 成功返回表示 runner 侧子进程已拉起。
      */

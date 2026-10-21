@@ -116,6 +116,11 @@ public class AgentNodeService {
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "节点不存在: " + id));
     }
 
+    /** CAP-80 M4：登记存在性探测（任务指定执行节点的创建期校验用，不查在线性）。 */
+    public boolean exists(Long id) {
+        return id != null && repo.existsById(id);
+    }
+
     /** 连接建立：ONLINE + 心跳时间戳 + 远端地址（IP:端口）。 */
     public void markOnline(Long id, String remoteAddr) {
         repo.findById(id).ifPresent(e -> {
