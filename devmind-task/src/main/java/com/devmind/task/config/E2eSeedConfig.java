@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
  * E2E 靠这里预置验证样本——
  * <ul>
  *   <li>即时回显（~4s 睡眠窗口，供 WS 实时 attach）</li>
+ *   <li>长睡眠即时回显（30s 窗口，供 WS 实时 attach 稳定复现 RUNNING）</li>
  *   <li>FIXED_DELAY 周期回显（dedup 幂等登记）</li>
  *   <li>必失败可重试（attempt 1→2 后 FAILED，任务 DONE）</li>
  *   <li>不可重试失败（一次 FAILED 即终）</li>
@@ -38,6 +39,9 @@ public class E2eSeedConfig implements ApplicationRunner {
         String immediateId = service.submit(EchoTaskHandler.TYPE,
                 "{\"message\":\"e2e-immediate\",\"lines\":4,\"sleepMs\":4000}",
                 TaskOptions.builder().name("e2e-即时回显").build());
+        String liveId = service.submit(EchoTaskHandler.TYPE,
+                "{\"message\":\"e2e-live\",\"lines\":6,\"sleepMs\":30000}",
+                TaskOptions.builder().name("e2e-实时窗口").build());
         String retryId = service.submit(EchoTaskHandler.TYPE,
                 "{\"message\":\"e2e-retry\",\"lines\":1,\"fail\":true}",
                 TaskOptions.builder().name("e2e-重试失败").retryMaxAttempts(2)
@@ -48,7 +52,7 @@ public class E2eSeedConfig implements ApplicationRunner {
         String periodicId = service.ensureScheduled("e2e-fixed-delay", EchoTaskHandler.TYPE,
                 "{\"message\":\"e2e-periodic\",\"lines\":1}",
                 ScheduleSpec.fixedDelay(10_000L).name("e2e-周期回显").build());
-        log.info("CAP-80 E2E 种子就绪: immediate={} retry={} nonRetry={} periodic={}",
-                immediateId, retryId, nonRetryId, periodicId);
+        log.info("CAP-80 E2E 种子就绪: immediate={} live={} retry={} nonRetry={} periodic={}",
+                immediateId, liveId, retryId, nonRetryId, periodicId);
     }
 }

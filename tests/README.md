@@ -120,6 +120,7 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 | e2e-cap41.py / b / c | CAP-41 工作日志空间：懒创建/守卫/种子模板/日报周报生成 |
 | e2e-cap74.py | CAP-74 工作日志事实源服务端化（自起隔离 app :18097 + fake runner，全自起自清）：懒建仓骨架 commit/会话产出直写仓+trailer/PUT 手改 manual commit/file:// 远端 push 一致/非 force 跳过+force 旧稿可找回/节点离线读改推正常 generate 409/平台外改动 TTL 合并/双侧冲突 409+resolve ours-theirs 不留 MERGING/重启 rev-list 不变/PUT 带 status 400。前置 `mvn -q install -DskipTests`（app 走 .m2 jar） |
 | e2e-cap74-m3.py | CAP-74 M3 条目文件化（自起隔离 app :18098 + fake runner，全自起自清）：H2 URL INIT 预植 legacy 表真迁移（legacy= 幂等键/migration trailer/rev-list==2）/无素材 generate 400/建条目 day 文件字节+manual trailer+id 32hex/平台外手改 preamble 与自由文本在平台重写后存活/删除按日期寻址+重复删 404/git 导入判重走文件二次全 skipped+git-import trailer+alreadyImported 翻转/有素材 generate 起会话/重启迁移二跑零新 commit+列表 API 读回迁移条目。前置 `mvn -q install -DskipTests`；INIT 含空格走 SPRING_DATASOURCE_URL 环境变量宽松绑定 |
+| cap80_verify.py | CAP-80 通用异步任务框架（自起隔离 app :18098 + 全新 H2 + e2e profile 种子五任务，无需 runner——任务在服务端虚拟线程执行，全自起自清）：种子可见/即时任务 DONE+日志/WS 实时 attach（30s RUNNING 窗口）与终态快照回放（`cap80-ws-test.mjs`）/重试 attempt 1→2 同 runSeq 后 DONE/不可重试一次即终/pause→trigger 409→resume→trigger 200→cancel 级联清未终态 run/非 admin 列表按 actor 过滤空、他人任务与 run 详情 404、控制操作与执行记录横查 403。前置 `mvn -q install -DskipTests` + node |
 | e2e-cap42.py | CAP-42 固定工作区 + 手动收口（CAP-51 keyed 布局 worktrees/sid-*）：布局落盘/finish 不 push 不删/收口闭环（merge --ff 快进不留合并点+push+FINALIZED+保留工作树 ff 前进+重复 409）/勾选 deleteRemoteBranch 收口后远端会话分支删除（协议 v19）/脏与合并冲突两负例重试/删除释放与离线 fail-visible（协议 v7+，file:// bare 库） |
 | e2e-git-import-range.py / e2e-worklog-keyword.py | git 导入范围扫描 / 工时条目关键字筛选（:8081） |
 | skill-import-e2e.py | skill zip 导入：root/包裹结构/409/overwrite（:8081） |
@@ -158,7 +159,7 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 
 ### WS 帧探针（Node，被 verify 脚本调用或手工）
 
-`ws_check.mjs`（通知流）、`cap08-ws-test.mjs <buildId>`、`cap09-ws-test.mjs <depId>`、`cap10-ws-test.mjs <runId>`、`cap23-ws-test.mjs <repoId>`
+`ws_check.mjs`（通知流）、`cap08-ws-test.mjs <buildId>`、`cap09-ws-test.mjs <depId>`、`cap10-ws-test.mjs <runId>`、`cap23-ws-test.mjs <repoId>`、`cap80-ws-test.mjs <port> <runId> <live|replay>`
 
 ### PowerShell
 
