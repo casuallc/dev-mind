@@ -92,6 +92,7 @@
 | [CAP-77](CAP-77-self-feedback-loop.md) | 平台自举反馈闭环（/issue 快捷登记） | 组装层 | Dev-Mind 自身注册为普通项目 + `/issue [类型] <描述>` 任意飞书会话快捷登记（固定投自项目，不受聊天绑定影响），自动附渠道/会话/发送者/登记人/时间，回执给 REQ 编号与 `/dev` 修复入口；复用需求主线与 CAP-34 会话，不新增存储；自动自更新（deploy_platform）列为后续能力 |
 | [CAP-78](CAP-78-feishu-requirement-dev-flow.md) | 飞书对话式需求开发全流程 | 组装层 | 需求开发全流程搬进飞书对话：copilot 工具化 startPlan/startDev/WI 起会话（devmind-flow）+ finish/suspend/resume/会话级·需求级收口（devmind-session，需求级收口 DANGEROUS 文本短码），斜杠快速路径 /plan /dev WI /finish /resume /finalize；只调 CAP-52/42/51 既有 Service，零新表零新端点零前端改动 |
 | [CAP-79](CAP-79-agent-memory-loop.md) | Agent 记忆闭环增强 | 流程层 | 三里程碑补记忆/知识/规划短板：M1 会话经验自动回流（devSpec 收尾增 lessons.md 可选产出→自动登记知识提案 inbox，FAILED/反复拒授权会话产【待回顾】占位提案，人工闸门从「发起」收敛到「采纳」）；M2 建 runner→平台会话作用域知识检索通道（节点 token+sessionId 反查归属，只读）+ search 调用统计表与聚合报表（不改瘦上下文与 copilot 侧工具行为）；M3 verify 连续失败→人触发增量重规划（[flow:replan] 会话产 replan.json diff，add 带 type、dependsOn 用 WI-<seq>/new:<i> 标识空间，applySplitPlan 增 diff 模式+合并全图环检测，旧会话活动态才挂起、起新 dev 会话不 resume） |
+| [CAP-80](CAP-80-async-task-framework.md) | 通用异步任务框架 | 底座 | 新模块 devmind-task 收敛「私有线程池+自有记录表+散点 @Scheduled」多份同构拷贝：`async_tasks`/`async_task_runs` 两表 + AsyncTaskHandler SPI（按 type 注册分发）+ 主 tick 乐观认领调度（IMMEDIATE/DELAY/FIXED_INTERVAL/CRON 四形态，max_runs 次数上限，SKIP/QUEUE 重叠策略）；重试策略化（FIXED/EXPONENTIAL 退避 + NonRetryable 分类）；日志复用 CAP-12 枢纽（topic=task-run:{runId}）；僵尸收割 + 重启续跑；后台系统组管理页；四大执行器与存量 @Scheduled 不迁移 |
 
 ## 依赖关系
 
