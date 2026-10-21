@@ -92,6 +92,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/bot/admin", "/api/bot/admin/**").hasRole("ADMIN")
                         // CAP-76 FR-30：智能体运维端点（工具目录/审计/确认单兜底取消/健康）仅 ADMIN
                         .requestMatchers("/api/copilot/admin", "/api/copilot/admin/**").hasRole("ADMIN")
+                        // CAP-06 FR-07：通知通道为平台级全局配置（含 webhook/key 密文），读写均仅 ADMIN
+                        // （唯一的 GET 消费者是后台通知管理页；通知中心抽屉入口已随设置迁出一并精简）
+                        .requestMatchers("/api/notification-channels", "/api/notification-channels/**")
+                        .hasRole("ADMIN")
                         // CAP-48：模型端点（含凭据、决定全平台索引行为）的写操作仅 ADMIN；读列表走下方全认证
                         .requestMatchers(HttpMethod.POST, "/api/model-endpoints", "/api/model-endpoints/**")
                         .hasRole("ADMIN")

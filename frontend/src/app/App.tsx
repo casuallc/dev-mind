@@ -26,6 +26,7 @@ import ReleasesPage from '../features/deploy/pages/ReleasesPage'
 import TestsPage from '../features/test/pages/TestsPage'
 import SuiteDetailPage from '../features/test/pages/SuiteDetailPage'
 import NotificationCenter from '../features/notifications/pages/NotificationCenter'
+import AdminNotificationsPage from '../features/notifications/pages/AdminNotificationsPage'
 import KnowledgeBaseList from '../features/knowledge/pages/KnowledgeBaseList'
 import KnowledgeBaseDetail from '../features/knowledge/pages/KnowledgeBaseDetail'
 import SkillsPage from '../features/skills/pages/SkillsPage'
@@ -139,6 +140,8 @@ export default function App() {
           <Route path="/projects/:id/requirements/:rid" element={<RequirementDetailPage />} />
           {/* CAP-06 通知 */}
           <Route path="/notifications" element={<NotificationCenter />} />
+          {/* 通知设置已迁入后台「系统」组（通道为全局配置），旧路径兼容 */}
+          <Route path="/settings/notifications" element={<Navigate to="/admin/notifications" replace />} />
           {/* 旧路径兼容：指挥中心/知识库/文档已迁入 /admin 后台 */}
           <Route path="/dashboard" element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="/knowledge" element={<Navigate to="/admin/knowledge" replace />} />
@@ -200,6 +203,8 @@ export default function App() {
           <Route path="/admin/classify/playground" element={<LegacyLayaRedirect tab="playground" />} />
           {/* CAP-20 API 密钥（open-api HMAC 认证凭证） */}
           <Route path="/admin/keys" element={<ApiKeysPage />} />
+          {/* CAP-06 FR-07 通知管理（全局通道配置 + 防打扰，页内 Segmented 视图） */}
+          <Route path="/admin/notifications" element={<AdminNotificationsPage />} />
           {/* CAP-75 M3 机器人运维（交互日志/群绑定/用户映射） */}
           <Route path="/admin/bot" element={<BotOpsPage />} />
           {/* CAP-76 智能体运维（工具目录/对话审计/确认单） */}

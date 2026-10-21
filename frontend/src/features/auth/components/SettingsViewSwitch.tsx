@@ -4,7 +4,7 @@ import { Segmented } from 'antd'
 import ScrollRow from '../../../shared/components/ScrollRow'
 
 /** 页内视图 = 路由 /settings/:tab 的 tab 段（可分享/可收藏），未知值回落 profile */
-export const SETTINGS_TAB_KEYS = ['profile', 'accounts', 'jira-templates', 'worklog', 'notifications'] as const
+export const SETTINGS_TAB_KEYS = ['profile', 'accounts', 'jira-templates', 'worklog'] as const
 export type SettingsTab = (typeof SETTINGS_TAB_KEYS)[number]
 
 const TAB_LABELS: Record<SettingsTab, string> = {
@@ -15,8 +15,7 @@ const TAB_LABELS: Record<SettingsTab, string> = {
   'jira-templates': 'Jira 推送模板',
   // CAP-28/41：工作日志偏好（原工作日志页「工时设置」Modal）
   worklog: '工作日志',
-  // CAP-06：通知通道（Bark/企微/飞书 Webhook）与防打扰偏好
-  notifications: '通知',
+  // CAP-06 通知设置已迁入后台「系统」组（/admin/notifications）：通道为平台级全局配置
 }
 
 export function asSettingsTab(raw: string | undefined): SettingsTab {

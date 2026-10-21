@@ -13,9 +13,6 @@ import JiraPushTemplatesPanel, {
 import WorklogSettingsPanel, {
   type WorklogSettingsPanelHandle,
 } from '../../worklog/components/WorklogSettingsPanel'
-import NotificationSettingsPanel, {
-  type NotificationSettingsPanelHandle,
-} from '../../notifications/components/NotificationSettingsPanel'
 import SettingsViewSwitch, { asSettingsTab, type SettingsTab } from '../components/SettingsViewSwitch'
 import { pageCardBodyScrollStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 
@@ -27,9 +24,7 @@ export default function SettingsPage() {
   const accountsRef = useRef<PlatformAccountsPanelHandle>(null)
   const templatesRef = useRef<JiraPushTemplatesPanelHandle>(null)
   const worklogRef = useRef<WorklogSettingsPanelHandle>(null)
-  const notificationsRef = useRef<NotificationSettingsPanelHandle>(null)
   const [savingWorklog, setSavingWorklog] = useState(false)
-  const [savingNotifications, setSavingNotifications] = useState(false)
 
   const onSaveWorklog = async () => {
     setSavingWorklog(true)
@@ -37,15 +32,6 @@ export default function SettingsPage() {
       await worklogRef.current?.save()
     } finally {
       setSavingWorklog(false)
-    }
-  }
-
-  const onSaveNotifications = async () => {
-    setSavingNotifications(true)
-    try {
-      await notificationsRef.current?.save()
-    } finally {
-      setSavingNotifications(false)
     }
   }
 
@@ -75,21 +61,6 @@ export default function SettingsPage() {
         </Button>
       </>
     ),
-    notifications: (
-      <>
-        <Button icon={<ReloadOutlined />} onClick={() => notificationsRef.current?.reload()}>
-          刷新
-        </Button>
-        <Button
-          type="primary"
-          icon={<SaveOutlined />}
-          loading={savingNotifications}
-          onClick={onSaveNotifications}
-        >
-          保存
-        </Button>
-      </>
-    ),
   }
 
   return (
@@ -103,7 +74,6 @@ export default function SettingsPage() {
       {view === 'accounts' && <PlatformAccountsPanel ref={accountsRef} />}
       {view === 'jira-templates' && <JiraPushTemplatesPanel ref={templatesRef} />}
       {view === 'worklog' && <WorklogSettingsPanel ref={worklogRef} />}
-      {view === 'notifications' && <NotificationSettingsPanel ref={notificationsRef} />}
     </Card>
   )
 }

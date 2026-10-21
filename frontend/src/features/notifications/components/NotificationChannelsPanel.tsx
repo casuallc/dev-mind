@@ -1,15 +1,15 @@
-// 设置页「通知」视图（/settings/notifications）：CAP-06 通知中心的个人设置——
-// 通道开关/分级阈值/通道配置（Bark/企微/飞书 Webhook），防打扰偏好（免打扰时段、按事件类型静默、
-// 单会话静默清单）。操作按钮在页面 Card extra，故以 ref 暴露 reload/save。
-import { Button, Form, Input, Select, Spin, Switch, Tag, TimePicker, Typography, message } from 'antd'
-import dayjs, { type Dayjs } from 'dayjs'
+// 后台「通知管理」通道视图（/admin/notifications?view=channels）：CAP-06 FR-03/07——
+// 全局通知通道（站内/Bark/企微/飞书 Webhook）的启用开关、推送最低级别与通道专属配置。
+// 通道配置是平台级全局数据（notification_channels 无属主），故归后台管理；写端点仅 ADMIN。
+// 操作按钮在页面 Card extra，故以 ref 暴露 reload/save。
+import { Button, Form, Input, Select, Spin, Switch, Typography, message } from 'antd'
 import { useCallback, useEffect, useImperativeHandle, useState, type Ref } from 'react'
-import { emitTest, getPrefs, listChannels, updateChannel, updatePrefs } from '../api'
-import { EVENT_TYPES, type NotificationChannel, type NotificationLevel } from '../types'
+import { emitTest, listChannels, updateChannel } from '../api'
+import { type NotificationChannel, type NotificationLevel } from '../types'
 import { showError } from '../../../shared/utils/showError'
 
-/** 页面壳（SettingsPage）工具栏在 Card extra，靠该句柄触发刷新 / 保存 */
-export interface NotificationSettingsPanelHandle {
+/** 页面壳（AdminNotificationsPage）工具栏在 Card extra，靠该句柄触发刷新 / 保存 */
+export interface NotificationChannelsPanelHandle {
   reload: () => void
   /** 校验失败直接 resolve（antd 已高亮），保存失败已在内部 toast */
   save: () => Promise<void>
@@ -20,17 +20,6 @@ interface ChannelFormValue {
   levelThreshold: NotificationLevel
   config: Record<string, string>
 }
-
-/** 表单值形态：通道按 code 分组编辑；免打扰时段为 TimePicker 的 Dayjs（null = 不启用），提交时格式化为 "HH:mm" */
-interface FormValues {
-  channels: Record<string, ChannelFormValue>
-  quietStart?: Dayjs | null
-  quietEnd?: Dayjs | null
-  mutedEventTypes: string[]
-}
-
-/** 后端 "HH:mm" → TimePicker 值（ISO 拼接解析，免 customParseFormat 插件） */
-const parseTime = (t?: string | null): Dayjs | null => (t ? dayjs(`2000-01-01T${t}`) : null)
 
 const LEVEL_OPTIONS = [
   { value: 'P0', label: 'P0（仅等待/失败类）' },
@@ -57,21 +46,18 @@ const CHANNEL_CONFIG_FIELDS: Record<
 /** 站内中心是常驻通道：不走阈值/免打扰/静默，关掉铃铛就不更新了 → 禁编辑 */
 const CENTER_CODE = 'ws'
 
-export default function NotificationSettingsPanel({ ref }: { ref?: Ref<NotificationSettingsPanelHandle> }) {
-  const [form] = Form.useForm<FormValues>()
+export default function NotificationChannelsPanel({ ref }: { ref?: Ref<NotificationChannelsPanelHandle> }) {
+  const [form] = Form.useForm<{ channels: Record<string, ChannelFormValue> }>()
   const [loading, setLoading] = useState(false)
   const [testing, setTesting] = useState(false)
   // 通道元数据（id/code/name）与表单无关，渲染数据源
   const [channels, setChannels] = useState<NotificationChannel[]>([])
-  // 单会话静默清单（从通知上「静默该会话」快捷入口累积），独立保存不进主表单
-  const [silencedSessions, setSilencedSessions] = useState<string[]>([])
 
   const reload = useCallback(() => {
     setLoading(true)
-    Promise.all([listChannels(), getPrefs()])
-      .then(([chs, prefs]) => {
+    listChannels()
+      .then((chs) => {
         setChannels(chs)
-        setSilencedSessions(prefs.perSessionSilence ?? [])
         const channelValues: Record<string, ChannelFormValue> = {}
         for (const ch of chs) {
           const config: Record<string, string> = {}
@@ -81,21 +67,16 @@ export default function NotificationSettingsPanel({ ref }: { ref?: Ref<Notificat
           }
           channelValues[ch.code] = { enabled: ch.enabled, levelThreshold: ch.levelThreshold, config }
         }
-        form.setFieldsValue({
-          channels: channelValues,
-          quietStart: parseTime(prefs.quietStart),
-          quietEnd: parseTime(prefs.quietEnd),
-          mutedEventTypes: prefs.mutes?.eventTypes ?? [],
-        })
+        form.setFieldsValue({ channels: channelValues })
       })
-      .catch((e) => showError(e, '加载通知设置失败'))
+      .catch((e) => showError(e, '加载通知通道失败'))
       .finally(() => setLoading(false))
   }, [form])
 
   useEffect(reload, [reload])
 
   const save = async () => {
-    let v: FormValues
+    let v: { channels: Record<string, ChannelFormValue> }
     try {
       v = await form.validateFields()
     } catch {
@@ -111,13 +92,7 @@ export default function NotificationSettingsPanel({ ref }: { ref?: Ref<Notificat
           ...(Object.keys(cv.config ?? {}).length > 0 ? { config: cv.config } : {}),
         })
       }
-      await updatePrefs({
-        mutes: { eventTypes: v.mutedEventTypes ?? [] },
-        // 空 = 清除免打扰时段（后端空白串语义）
-        quietStart: v.quietStart ? v.quietStart.format('HH:mm') : '',
-        quietEnd: v.quietEnd ? v.quietEnd.format('HH:mm') : '',
-      })
-      message.success('通知设置已保存')
+      message.success('通知通道已保存')
     } catch (e) {
       showError(e, '保存失败')
     }
@@ -137,25 +112,14 @@ export default function NotificationSettingsPanel({ ref }: { ref?: Ref<Notificat
     }
   }
 
-  const onRemoveSilence = (sessionId: string) => {
-    const next = silencedSessions.filter((id) => id !== sessionId)
-    updatePrefs({ perSessionSilence: next })
-      .then(() => {
-        setSilencedSessions(next)
-        message.success('已恢复该会话的通知')
-      })
-      .catch((e) => showError(e, '操作失败'))
-  }
-
   return (
     <div style={{ maxWidth: 720 }}>
       <Typography.Paragraph type="secondary">
-        通知通道决定「什么级别的事件推到哪里」：站内中心常驻，外部通道（Bark/企微/飞书）建议只开 P0，
-        避免被打扰；防打扰偏好对本人生效。改完点右上角「保存」统一生效。
+        通知通道决定「什么级别的事件推到哪里」，为全平台全局配置：站内中心常驻，外部通道（Bark/企微/飞书）
+        建议只开 P0，避免被打扰。改完点右上角「保存」统一生效。
       </Typography.Paragraph>
       <Spin spinning={loading}>
         <Form form={form} layout="vertical">
-          <Typography.Title level={5}>通知通道</Typography.Title>
           {channels.map((ch) => {
             const fields = CHANNEL_CONFIG_FIELDS[ch.code] ?? []
             const isCenter = ch.code === CENTER_CODE
@@ -198,51 +162,10 @@ export default function NotificationSettingsPanel({ ref }: { ref?: Ref<Notificat
               </div>
             )
           })}
-          <Button loading={testing} onClick={onSendTest} style={{ marginBottom: 24 }}>
-            发送测试通知（P0）
-          </Button>
-
-          <Typography.Title level={5}>防打扰</Typography.Title>
-          <Form.Item
-            label="免打扰时段"
-            extra="时段内仅 P0 推送外部通道，其余静默进通知中心；开始时间晚于结束时间视为跨天（如 23:00 ~ 07:30）。两端都留空 = 不启用。"
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Form.Item name="quietStart" noStyle>
-                <TimePicker format="HH:mm" allowClear placeholder="开始" changeOnBlur />
-              </Form.Item>
-              <span>~</span>
-              <Form.Item name="quietEnd" noStyle>
-                <TimePicker format="HH:mm" allowClear placeholder="结束" changeOnBlur />
-              </Form.Item>
-            </div>
-          </Form.Item>
-          <Form.Item
-            name="mutedEventTypes"
-            label="按事件类型静默"
-            extra="勾选的事件类型不再推送外部通道，仍会进通知中心。"
-          >
-            <Select
-              mode="multiple"
-              allowClear
-              placeholder="选择要静默的事件类型"
-              options={EVENT_TYPES.map((t) => ({ value: t, label: t }))}
-            />
-          </Form.Item>
-          <Form.Item label="已静默的会话" extra="来自通知上的「静默该会话」快捷入口；移除后立即恢复该会话的推送。">
-            {silencedSessions.length === 0 ? (
-              <Typography.Text type="secondary">无</Typography.Text>
-            ) : (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {silencedSessions.map((id) => (
-                  <Tag key={id} closable onClose={() => onRemoveSilence(id)}>
-                    {id}
-                  </Tag>
-                ))}
-              </div>
-            )}
-          </Form.Item>
         </Form>
+        <Button loading={testing} onClick={onSendTest}>
+          发送测试通知（P0）
+        </Button>
       </Spin>
     </div>
   )

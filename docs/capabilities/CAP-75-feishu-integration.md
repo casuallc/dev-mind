@@ -28,9 +28,10 @@
   （`HmacSHA256(key=timestamp+"\n"+secret, data="")` → Base64）附带 timestamp/sign。
 - **FR-02 通道种子逐 code 兜底**：seed 从 `count()==0` 整段守卫改为逐 code `findByCode`
   兜底插入，存量库升级只补插缺失 code、不覆盖既有配置。
-- **FR-03 前端通道 config 声明式表单**：通知设置抽屉按 code 注册表渲染 config 字段
+- **FR-03 前端通道 config 声明式表单**：通知设置按 code 注册表渲染 config 字段
   （bark: server/key；wecom: webhookUrl；feishu: webhookUrl/secret 密码框），保存走既有
   PUT 合并语义；删除「需在数据库中填入」提示文案。
+  （现承载于后台「系统 → 通知管理」通道视图，原通知中心抽屉已随 CAP-06 FR-07 迁移精简。）
 
 ### 双向机器人（M2）
 

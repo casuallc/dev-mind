@@ -5,6 +5,7 @@ const SELECT_PREFIXES: Array<[string, string]> = [
   ['/admin/laya/playground', '/admin/laya/records'],
   ['/admin/laya/packages', '/admin/laya/instances'],
   ['/admin/agent/nodes', '/admin/agent/nodes'], // 列表 + 节点详情（/admin/agent/nodes/:id）
+  ['/admin/notifications', '/admin/notifications'], // 通知管理（页内视图 ?view=channels/prefs）
   ['/admin/projects', '/admin/projects'], // 列表 + 设置子路由
   ['/admin/docs', '/admin/docs'], // 列表 + 编辑器
   ['/admin/knowledge', '/admin/knowledge'], // 列表 + 库详情（/admin/knowledge/bases/:id）

@@ -3,6 +3,7 @@ import type { MenuProps } from 'antd'
 import {
   ApiOutlined,
   AuditOutlined,
+  BellOutlined,
   CodeOutlined,
   CommentOutlined,
   DashboardOutlined,
@@ -78,6 +79,8 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
     label: '系统',
     children: [
       { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
+      // CAP-06 FR-07：通知通道为全局配置（页内视图：通道/防打扰）
+      { key: '/admin/notifications', icon: <BellOutlined />, label: '通知管理' },
       { key: '/admin/bot', icon: <CommentOutlined />, label: '机器人运维' },
       { key: '/admin/copilot', icon: <InteractionOutlined />, label: '智能体运维' },
       { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
