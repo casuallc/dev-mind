@@ -102,3 +102,4 @@ Guidance for Claude Code when working in this repository.
 
 ### 文档规则 (MUST)
 - 新能力先在 `docs/capabilities/` 立 CAP 需求文档，再动手实现。
+- CAP 文档格式以 [CAP-75](docs/capabilities/CAP-75-feishu-integration.md) 为范式：头部元信息块（能力 ID｜分类｜状态｜日期 + 决策记录）→ 目的 / 功能需求（FR-xx 按里程碑分组）/ 否决方案 / 架构与模块归属 / 数据模型 / API 概要 / 安全 / 里程碑 / 验收标准 / 风险与开放问题 十节，编号固定（详见 [docs/capabilities/README.md](docs/capabilities/README.md) 文档模板说明）。
