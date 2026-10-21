@@ -448,7 +448,7 @@ export default function AgentNodeDetailPage() {
                           <Button
                             icon={<FolderOpenOutlined />}
                             disabled={!(node.fileRoots?.length) || node.status !== 'ONLINE'}
-                            onClick={() => navigate(`/admin/agent/files?nodeId=${node.id}`)}
+                            onClick={() => navigate(`/admin/agent/nodes?view=files&nodeId=${node.id}`)}
                           >
                             文件浏览
                           </Button>

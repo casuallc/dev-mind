@@ -1,17 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Empty, Select, Typography } from 'antd'
+import { Alert, Button, Empty, Flex, Select, Typography } from 'antd'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { listAgentNodes } from '../api'
 import type { AgentNode } from '../types'
-import NodeFilesBrowser from '../components/NodeFilesBrowser'
-import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
+import NodeFilesBrowser from './NodeFilesBrowser'
 import { showError } from '../../../shared/utils/showError'
 
 /**
- * CAP-65 节点文件浏览（全页）：选择在线且已配白名单根目录的节点后进入文件浏览器。
- * 支持 ?nodeId= 直达（节点详情页「文件浏览」按钮跳入）；节点状态变化不轮询，手动刷新节点列表。
+ * CAP-65 节点文件浏览面板（节点页 ?view=files 页签）：选择在线且已配白名单根目录的节点后进入文件浏览器。
+ * ?nodeId= 直达（节点详情页「文件浏览」按钮跳入）；nodeId 写回 URL 时保留 view 等既有参数。
  */
-export default function NodeFilesPage() {
+export default function NodeFilesPanel() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const [nodes, setNodes] = useState<AgentNode[] | null>(null) // null=加载中
@@ -34,12 +33,22 @@ export default function NodeFilesPage() {
   // nodeId 参数存在但节点不可浏览（离线/未配白名单/已删除）时给出原因提示
   const invalidParam = nodes != null && params.get('nodeId') != null && !selected
 
+  const selectNode = (id: number) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.set('nodeId', String(id))
+        return next
+      },
+      { replace: true },
+    )
+
   return (
-    <Card
-      style={pageCardStyle}
-      styles={{ body: pageCardBodyFlexStyle }}
-      title="节点文件"
-      extra={
+    <>
+      <Flex align="flex-start" gap={12} style={{ marginBottom: 12 }}>
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 0, flex: 1 }}>
+          浏览/编辑节点白名单根目录内的文件（CAP-65）。可选节点需在详情页配置「文件访问根目录」且保持在线。
+        </Typography.Paragraph>
         <Select
           style={{ minWidth: 260 }}
           placeholder="选择节点（在线且已配文件根目录）"
@@ -50,13 +59,9 @@ export default function NodeFilesPage() {
             label: `${n.name}${eligible(n) ? '' : n.status !== 'ONLINE' ? '（离线）' : '（未配根目录）'}`,
             disabled: !eligible(n),
           }))}
-          onChange={(id) => setParams({ nodeId: String(id) })}
+          onChange={selectNode}
         />
-      }
-    >
-      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-        浏览/编辑节点白名单根目录内的文件（CAP-65）。可选节点需在详情页配置「文件访问根目录」且保持在线。
-      </Typography.Paragraph>
+      </Flex>
       {invalidParam && (
         <Alert
           type="warning"
@@ -85,6 +90,6 @@ export default function NodeFilesPage() {
           )}
         </Empty>
       )}
-    </Card>
+    </>
   )
 }

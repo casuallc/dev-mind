@@ -25,6 +25,7 @@ import type { AgentNode, IssuedNode, RunnerPackage } from '../types'
 import RunnerPackagePanel from '../components/RunnerPackagePanel'
 import AuditLogsPanel from '../components/AuditLogsPanel'
 import EgressRulesPanel from '../components/EgressRulesPanel'
+import NodeFilesPanel from '../components/NodeFilesPanel'
 import NodeCreatedModal from '../components/NodeCreatedModal'
 import { fmtTime, fmtBytes } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
@@ -39,13 +40,13 @@ const statusColor: Record<string, string> = {
 }
 
 /**
- * CAP-21 后台页：Agent 节点（仅 ADMIN）。页内 Segmented 四视图——「节点列表」「Runner 包」（全局托管包）、
- * 「出口规则」（CAP-70）与「审计日志」（CAP-71），原独立菜单均已并入此页（旧路径 /admin/agent/package、
- * /admin/agent/audit-logs、/admin/agent/egress-rules 重定向 ?view=…）；节点文件仍是「Agent 执行」组
- * 独立菜单；单节点的观测/配置/运维操作收在详情页（/admin/agent/nodes/:id）。
+ * CAP-21 后台页：Agent 节点（仅 ADMIN）。页内 Segmented 五视图——「节点列表」「Runner 包」（全局托管包）、
+ * 「出口规则」（CAP-70）、「审计日志」（CAP-71）与「文件浏览」（CAP-65，?view=files&nodeId= 直达），
+ * 原独立菜单均已并入此页（旧路径 /admin/agent/package、/admin/agent/audit-logs、/admin/agent/egress-rules、
+ * /admin/agent/files 重定向 ?view=…）；单节点的观测/配置/运维操作收在详情页（/admin/agent/nodes/:id）。
  */
-type NodesView = 'nodes' | 'package' | 'audit' | 'egress'
-const VIEWS: NodesView[] = ['nodes', 'package', 'audit', 'egress']
+type NodesView = 'nodes' | 'package' | 'audit' | 'egress' | 'files'
+const VIEWS: NodesView[] = ['nodes', 'package', 'audit', 'egress', 'files']
 
 export default function AgentNodesPage() {
   const navigate = useNavigate()
@@ -240,6 +241,7 @@ export default function AgentNodesPage() {
               { label: 'Runner 包', value: 'package' },
               { label: '出口规则', value: 'egress' },
               { label: '审计日志', value: 'audit' },
+              { label: '文件浏览', value: 'files' },
             ]}
           />
         </Space>
@@ -281,6 +283,8 @@ export default function AgentNodesPage() {
         <RunnerPackagePanel />
       ) : view === 'egress' ? (
         <EgressRulesPanel />
+      ) : view === 'files' ? (
+        <NodeFilesPanel />
       ) : view === 'audit' ? (
         <>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>

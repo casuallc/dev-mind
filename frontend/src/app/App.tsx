@@ -47,7 +47,6 @@ import BotOpsPage from '../features/bot/pages/BotOpsPage'
 import CopilotOpsPage from '../features/copilot/pages/CopilotOpsPage'
 import AgentNodesPage from '../features/agent/pages/AgentNodesPage'
 import AgentNodeDetailPage from '../features/agent/pages/AgentNodeDetailPage'
-import NodeFilesPage from '../features/agent/pages/NodeFilesPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
 import HomePage from '../features/home/pages/HomePage'
 import WorklogPage from '../features/worklog/pages/WorklogPage'
@@ -87,6 +86,14 @@ function LegacyDocRedirect() {
 function LegacyLayaRedirect({ tab }: { tab: string }) {
   const location = useLocation()
   return <Navigate to={{ pathname: `/admin/laya/${tab}`, search: location.search }} replace />
+}
+
+/** 旧链接兼容：/admin/agent/files 已并入节点页 ?view=files（保留 nodeId 等 query） */
+function LegacyNodeFilesRedirect() {
+  const location = useLocation()
+  const search = new URLSearchParams(location.search)
+  search.set('view', 'files')
+  return <Navigate to={{ pathname: '/admin/agent/nodes', search: `?${search}` }} replace />
 }
 
 export default function App() {
@@ -213,11 +220,11 @@ export default function App() {
           <Route path="/admin/bot" element={<BotOpsPage />} />
           {/* CAP-76 智能体运维（工具目录/对话审计/确认单） */}
           <Route path="/admin/copilot" element={<CopilotOpsPage />} />
-          {/* CAP-21 Agent 执行组：节点（页内含 Runner 包/出口规则/审计日志页签）/ 节点文件 */}
+          {/* CAP-21 Agent 执行组：节点（页内含 Runner 包/出口规则/审计日志/文件浏览页签） */}
           <Route path="/admin/agent" element={<Navigate to="/admin/agent/nodes" replace />} />
           <Route path="/admin/agent/nodes" element={<AgentNodesPage />} />
           <Route path="/admin/agent/nodes/:id" element={<AgentNodeDetailPage />} />
-          <Route path="/admin/agent/files" element={<NodeFilesPage />} />
+          <Route path="/admin/agent/files" element={<LegacyNodeFilesRedirect />} />
           {/* Runner 包/出口规则/审计日志已并入节点页页签，旧路径重定向（/admin/agent/logs 为更早的连接日志路径） */}
           <Route path="/admin/agent/package" element={<Navigate to="/admin/agent/nodes?view=package" replace />} />
           <Route path="/admin/agent/egress-rules" element={<Navigate to="/admin/agent/nodes?view=egress" replace />} />
