@@ -109,9 +109,12 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, "/api/script-suites/**").hasRole("ADMIN")
                         // CAP-65：节点文件浏览 GET 也敏感（可读白名单内任意文件），须先于 GET /api/** 通用规则
                         .requestMatchers(HttpMethod.GET, "/api/agent-nodes/*/files/**").hasRole("ADMIN")
-                        // CAP-80：异步任务控制操作（pause/resume/cancel/trigger）仅 ADMIN；查询走下方通用规则
+                        // CAP-80：异步任务写操作（创建/编辑/控制）与类型清单仅 ADMIN——M4 起 REST 可建
+                        // RUNNER 类任务 = 节点远程代码执行面，与节点管理同档；查询走下方通用规则
                         // （非 admin 查询在服务层按本人 actor 过滤），须先于 GET /api/** 通用规则
+                        .requestMatchers(HttpMethod.GET, "/api/async-tasks/types").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/async-tasks", "/api/async-tasks/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/async-tasks/**").hasRole("ADMIN")
                         // CAP-70：出口规则表即内网出口白名单，全方法（含 GET）仅 ADMIN，须先于通用规则
                         .requestMatchers("/api/egress-rules", "/api/egress-rules/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/**").authenticated()
