@@ -7,6 +7,7 @@ import { KIND_LABEL } from '../types'
 import type { DocDetail, DocKind } from '../types'
 import MarkdownEditor from '../../../shared/components/MarkdownEditor'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_SCREEN } from '../../../shared/utils/overlay'
 
 interface DocEditForm {
   kind: DocKind
@@ -69,7 +70,7 @@ export default function DocEditDrawer({ open, doc, onClose, onSaved }: {
       title={`编辑文档「${doc.title}」`}
       open={open}
       onClose={onClose}
-      width="70%"
+      width={DRAWER_SCREEN}
       destroyOnHidden
       footer={
         <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>

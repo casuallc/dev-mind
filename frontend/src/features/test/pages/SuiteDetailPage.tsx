@@ -40,7 +40,7 @@ import type { ProjectEnvironment } from '../../projects/types'
 import { listAgentNodes } from '../../agent/api'
 import { listEnvironments } from '../../projects/api'
 import { fmtTime, paramsToText, textToParams } from '../../../shared/utils/format'
-import { DRAWER_FORM } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import { SUITE_KIND_COLOR } from '../constants'
 import ScriptSuiteFields, { toScriptSuiteInput } from '../components/ScriptSuiteFields'
 import RunSuiteModal from '../components/RunSuiteModal'
@@ -388,7 +388,7 @@ export default function SuiteDetailPage() {
       )}
 
       <Drawer title={isNew ? '添加用例' : '编辑用例'} open={caseDrawerOpen} onClose={closeCaseDrawer}
-        width={DRAWER_FORM} destroyOnHidden
+        width={DRAWER_DEFAULT} destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button onClick={closeCaseDrawer}>取消</Button>

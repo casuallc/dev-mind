@@ -8,6 +8,7 @@ import { evaluationLogs, finetuneLogs } from '../api'
 import LogView from '../../../shared/components/LogView'
 import { CaseGroupTag, RunStatusTag, runActive } from './labCommon'
 import { num } from './ReportBlocks'
+import { DRAWER_SCREEN } from '../../../shared/utils/overlay'
 
 /** WS 逐题事件（脚本 DEVMIND_ITEM 载荷；不落库，刷新后靠报告里的 perItem 补） */
 interface ItemEvent {
@@ -94,7 +95,7 @@ export default function LabLogDrawer({
           {connected && <Tag color="cyan">实时</Tag>}
         </Space>
       }
-      width="70%"
+      width={DRAWER_SCREEN}
       open={open}
       onClose={onClose}
     >

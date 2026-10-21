@@ -26,7 +26,7 @@ import type { AgentNode } from '../../../agent/types'
 import { envColor } from '../../components/utils'
 import { showError } from '../../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../../shared/utils/table'
-import { DRAWER_FORM } from '../../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../../shared/utils/overlay'
 
 const ENV_NAME_OPTIONS = ['DEV', 'TEST', 'STAGING', 'PROD']
 
@@ -215,7 +215,7 @@ export default function ProjectEnvironmentsPage() {
         locale={{ emptyText: '暂无环境。点击「添加环境」创建第一个。' }}
       />
       <Drawer title={editing ? `编辑环境 ${editing.name}` : '添加环境'} open={open} onClose={() => setOpen(false)}
-        width={DRAWER_FORM} destroyOnHidden
+        width={DRAWER_DEFAULT} destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button onClick={() => setOpen(false)}>取消</Button>

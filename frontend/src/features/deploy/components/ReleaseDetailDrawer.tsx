@@ -14,6 +14,7 @@ import { fmtTime } from '../../../shared/utils/format'
 import { STATUS_COLOR } from '../constants'
 import { showError } from '../../../shared/utils/showError'
 import LogView from '../../../shared/components/LogView'
+import { DRAWER_SCREEN } from '../../../shared/utils/overlay'
 
 export default function ReleaseDetailDrawer({ record, onClose, onChanged }: {
   record: ReleaseRecord | null
@@ -92,7 +93,7 @@ export default function ReleaseDetailDrawer({ record, onClose, onChanged }: {
   }
 
   return (
-    <Drawer title={d ? `发版 v${d.version} #${d.id}` : '发版详情'} width="70%" open={!!d} onClose={onClose}>
+    <Drawer title={d ? `发版 v${d.version} #${d.id}` : '发版详情'} width={DRAWER_SCREEN} open={!!d} onClose={onClose}>
       {d && (
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
           <Space wrap>

@@ -52,7 +52,7 @@ import JiraDynamicField, { fromJiraValue, toJiraValue } from '../../integrations
 import { isAdmin } from '../../auth/authStore'
 import { isApiRequestError } from '../../../shared/api/error'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_WIDE } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 /** 表单值形态：dueDate 在表单里是 dayjs，提交时转 'YYYY-MM-DD'；extraFields 按字段 id 分组 */
 type FormValues = Omit<JiraPushInput, 'integrationId' | 'dueDate' | 'extraFields'> & {
@@ -341,7 +341,7 @@ export default function JiraPushDrawer({ requirement, open, onClose, onPushed }:
 
   return (
     <Drawer
-      width={DRAWER_WIDE}
+      width={DRAWER_DEFAULT}
       open={open}
       title={`推送到 Jira · ${requirement.code}`}
       onClose={onClose}

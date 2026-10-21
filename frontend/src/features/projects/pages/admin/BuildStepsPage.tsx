@@ -29,7 +29,7 @@ import {
 import type { BuildStep, BuildStepInput } from '../../types'
 import { showError } from '../../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../../shared/utils/table'
-import { DRAWER_FORM } from '../../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../../shared/utils/overlay'
 import CopyableLongText from '../../../../shared/components/CopyableLongText'
 
 const LOCATION_OPTIONS = ['LOCAL', 'AGENT']
@@ -160,7 +160,7 @@ export default function BuildStepsPage() {
         title={editing ? '编辑构建步骤' : '添加构建步骤'}
         open={open}
         onClose={() => setOpen(false)}
-        width={DRAWER_FORM}
+        width={DRAWER_DEFAULT}
         destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>

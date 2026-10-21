@@ -6,7 +6,7 @@ import { listRepos, setSubscription } from '../api'
 import type { WorklogRepo } from '../types'
 import { isAdmin } from '../../auth/authStore'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_FULL } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 interface Props {
   open: boolean
@@ -59,7 +59,7 @@ export default function RepoSubscriptionDrawer({ open, onCancel }: Props) {
       title="仓库订阅"
       open={open}
       onClose={onCancel}
-      width={DRAWER_FULL}
+      width={DRAWER_DEFAULT}
       destroyOnHidden
       footer={
         <Button icon={<ReloadOutlined />} onClick={reload} disabled={loading}>

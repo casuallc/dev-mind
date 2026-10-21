@@ -10,7 +10,7 @@ import { ACTION_STATUS_OPTIONS, ActionStatusBadge, RiskTag, StepStatusBadge } fr
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { fmtTime } from '../../../shared/utils/format'
-import { DRAWER_FORM } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 export default function PlansPanel({ refreshTick = 0 }: { refreshTick?: number }) {
   const [status, setStatus] = useState<string>()
@@ -141,7 +141,7 @@ export default function PlansPanel({ refreshTick = 0 }: { refreshTick?: number }
         title={detail ? `计划：${detail.goal || '（未填写目标）'}` : '计划详情'}
         open={!!detailId}
         onClose={() => { setDetailId(null); setDetail(null) }}
-        width={DRAWER_FORM}
+        width={DRAWER_DEFAULT}
       >
         {detail && (
           <Space direction="vertical" style={{ width: '100%' }} size={12}>

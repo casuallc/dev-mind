@@ -16,7 +16,7 @@ import type { ContextSnapshot } from '../../scenarios/types'
 import SedimentExperienceModal from '../../knowledge/components/SedimentExperienceModal'
 import { getUserSnapshot, isAdmin } from '../../auth/authStore'
 import { fmtTime } from '../../../shared/utils/format'
-import { DRAWER_WIDE } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import { showError } from '../../../shared/utils/showError'
 
 export default function SessionMoreActions({
@@ -170,7 +170,7 @@ export default function SessionMoreActions({
         title={`已注入上下文${ctx?.scenarioName ? `：${ctx.scenarioName}` : ''}`}
         open={contextOpen}
         onClose={() => setContextOpen(false)}
-        width={DRAWER_WIDE}
+        width={DRAWER_DEFAULT}
       >
         {ctx && (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>

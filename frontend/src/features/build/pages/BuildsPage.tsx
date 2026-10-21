@@ -20,6 +20,7 @@ import LogView from '../../../shared/components/LogView'
 import { workItemColumn } from '../../../shared/components/WorkItemCell'
 import WorkItemSelect from '../../../shared/components/WorkItemSelect'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { DRAWER_SCREEN } from '../../../shared/utils/overlay'
 
 const STATUS_COLOR: Record<BuildStatus, string> = {
   QUEUED: 'blue',
@@ -370,7 +371,7 @@ function LogDrawer({ build, onClose }: { build: BuildRecord | null; onClose: () 
           </Space>
         ) : '构建日志'
       }
-      width="70%"
+      width={DRAWER_SCREEN}
       open={!!build}
       onClose={onClose}
     >

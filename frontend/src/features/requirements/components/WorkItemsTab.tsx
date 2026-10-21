@@ -26,7 +26,7 @@ import type { RequirementOverview, WorkItem, WorkItemInput, WorkItemStatus, Work
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import MarkdownEditor from '../../../shared/components/MarkdownEditor'
-import { DRAWER_WIDE } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 const WI_STATUS_FLOW: WorkItemStatus[] = ['TODO', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED']
 const WI_TYPES: WorkItemType[] = ['DESIGN', 'DEVELOPMENT', 'TEST', 'DOCUMENT', 'REVIEW']
@@ -270,7 +270,7 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
         title={editing ? `编辑工作单元 ${editing.code}` : '新建工作单元'}
         open={editOpen}
         onClose={() => setEditOpen(false)}
-        width={DRAWER_WIDE}
+        width={DRAWER_DEFAULT}
         destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>

@@ -44,7 +44,7 @@ import type {
 } from '../types'
 import { fmtBytes, fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_FULL, DRAWER_WIDE } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import FitTable from '../../../shared/components/FitTable'
 import { CHECK_STATUS_COLOR, CP_KIND_LABEL } from './labCommon'
 import { CalibrationBlock, JsonBlock, MetricsTable } from './ReportBlocks'
@@ -366,7 +366,7 @@ export default function CheckpointView({ refreshTick = 0, createTick = 0 }: { re
         <Drawer
           title={`serve 自检 · ${checkResult.row.name}`}
           open
-          width={DRAWER_FULL}
+          width={DRAWER_DEFAULT}
           footer={<Button onClick={() => setCheckResult(null)}>关闭</Button>}
           onClose={() => setCheckResult(null)}
         >
@@ -425,7 +425,7 @@ function RegisterDrawer({
     <Drawer
       title="登记产物"
       open
-      width={DRAWER_WIDE}
+      width={DRAWER_DEFAULT}
       onClose={onClose}
       destroyOnHidden
       footer={
@@ -567,7 +567,7 @@ function CheckpointDetailDrawer({ id, onClose }: { id: number; onClose: () => vo
   const c = detail?.checkpoint
   const report = detail?.metrics
   return (
-    <Drawer title={c ? `产物「${c.name}」` : '产物详情'} width={DRAWER_FULL} open onClose={onClose}>
+    <Drawer title={c ? `产物「${c.name}」` : '产物详情'} width={DRAWER_DEFAULT} open onClose={onClose}>
       {detail && c ? (
         <>
           <Descriptions size="small" column={3} style={{ marginBottom: 12 }}>

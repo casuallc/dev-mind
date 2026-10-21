@@ -58,7 +58,7 @@ import type { DecisionQuestion } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
-import { DRAWER_FULL, DRAWER_WIDE } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import FitTable from '../../../shared/components/FitTable'
 import { CASE_GROUP_LABEL, CaseGroupTag, CONTROL_GROUPS, SKIP_REASON_LABEL, SOURCE_LABEL } from './labCommon'
 import { JsonBlock } from './ReportBlocks'
@@ -406,7 +406,7 @@ function DatasetDrawer({ id, onClose, onChanged }: { id: number; onClose: () => 
     <>
       <Drawer
         title={ds ? `评测集「${ds.name}」v${ds.version}` : '评测集'}
-        width={DRAWER_FULL}
+        width={DRAWER_DEFAULT}
         open
         onClose={onClose}
         extra={
@@ -708,7 +708,7 @@ function ItemEditor({
     <Drawer
       title={itemId == null ? '添加样本' : `样本 #${itemId}`}
       open
-      width={DRAWER_WIDE}
+      width={DRAWER_DEFAULT}
       onClose={onClose}
       destroyOnHidden
       footer={
@@ -818,7 +818,7 @@ function IntakeDrawer({
     <Drawer
       title="从决策记录收编样本"
       open
-      width={DRAWER_FULL}
+      width={DRAWER_DEFAULT}
       onClose={onClose}
       destroyOnHidden
       footer={

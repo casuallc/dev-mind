@@ -2,7 +2,7 @@ import { Button, Checkbox, Divider, Drawer, Form, Input, Select, Space, Typograp
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useEffect } from 'react'
 import type { Bookmark, BookmarkGroup } from '../types'
-import { DRAWER_SM } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 /** FR-01/05 表单口径：账号整组提交（带 id 更新 / 无 id 新建 / 未出现即删除），密码留空 = 不修改 */
 export interface BookmarkFormValues {
@@ -93,7 +93,7 @@ export default function BookmarkDrawer({
   return (
     <Drawer
       title={bookmark ? `编辑收藏：${bookmark.title}` : '新建收藏'}
-      width={DRAWER_SM}
+      width={DRAWER_DEFAULT}
       open={open}
       onClose={onClose}
       destroyOnHidden

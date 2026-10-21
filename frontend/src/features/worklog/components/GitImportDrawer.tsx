@@ -5,7 +5,7 @@ import { importGit, previewGit } from '../api'
 import type { GitCommit, GitPreviewFilter, GitScanRepoDiag } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_FULL } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 interface Props {
   open: boolean
@@ -95,7 +95,7 @@ export default function GitImportDrawer({ open, onCancel, onImported }: Props) {
       title="从 Git 导入"
       open={open}
       onClose={onCancel}
-      width={DRAWER_FULL}
+      width={DRAWER_DEFAULT}
       destroyOnHidden
       footer={
         <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>

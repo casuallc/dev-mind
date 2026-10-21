@@ -15,7 +15,7 @@ import {
 import type { Skill, SkillFileMeta } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_FORM, DRAWER_WIDE } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 // UTF-8 安全的 Base64 编解码（内容可能含中文，不能直接用 btoa/atob）
 const b64encode = (text: string) => {
@@ -175,7 +175,7 @@ export default function SkillFilesDrawer({ open, skill, onClose }: {
       title={skill ? `附件文件 — ${skill.name}` : '附件文件'}
       open={open}
       onClose={onClose}
-      width={DRAWER_WIDE}
+      width={DRAWER_DEFAULT}
     >
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Typography.Text type="secondary">
@@ -227,7 +227,7 @@ export default function SkillFilesDrawer({ open, skill, onClose }: {
         title={editingFile ? `编辑附件「${editingFile.path}」` : '新增文本文件'}
         open={editOpen}
         onClose={() => setEditOpen(false)}
-        width={DRAWER_FORM}
+        width={DRAWER_DEFAULT}
         destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>

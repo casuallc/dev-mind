@@ -10,7 +10,7 @@ import { fetchWorkspaceDiff, fetchWorkspaceFile, fetchWorkspaceStatus } from './
 import TerminalTab from './TerminalTab'
 import { showError } from '../../utils/showError'
 import { fmtTime } from '../../utils/format'
-import { DRAWER_WIDE } from '../../utils/overlay'
+import { DRAWER_NESTED, DRAWER_SCREEN } from '../../utils/overlay'
 
 /** porcelain XY → 人类可读状态（取变化更显著的一侧：未跟踪 > 删除 > 新增 > 改名 > 修改） */
 function statusMeta(c: WorkspaceChange): { label: string; color: string } {
@@ -224,7 +224,7 @@ export default function WorkspacePanel({
       <Drawer
         title="工作区"
         placement="right"
-        width="70%"
+        width={DRAWER_SCREEN}
         open={open}
         onClose={() => setOpen(false)}
         afterOpenChange={setDrawerShown}
@@ -256,7 +256,7 @@ export default function WorkspacePanel({
           ]}
         />
 
-        <Drawer title={diffTitle} open={diffOpen} onClose={() => setDiffOpen(false)} width={DRAWER_WIDE}>
+        <Drawer title={diffTitle} open={diffOpen} onClose={() => setDiffOpen(false)} width={DRAWER_NESTED}>
           {diffLoading ? <Spin /> : diffBody}
         </Drawer>
       </Drawer>

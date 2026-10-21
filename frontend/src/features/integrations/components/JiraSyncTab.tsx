@@ -37,7 +37,7 @@ import type { ExternalProject, Integration, JiraSyncConfig, JiraSyncConfigInput,
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
-import { DRAWER_FORM } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 interface Props {
   projectId: string
@@ -330,7 +330,7 @@ export default function JiraSyncTab({ projectId }: Props) {
         title={editing ? `编辑 Jira 同步「${editing.jiraProjectKey}」` : '新建 Jira 同步'}
         open={editOpen}
         onClose={() => setEditOpen(false)}
-        width={DRAWER_FORM}
+        width={DRAWER_DEFAULT}
         destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>

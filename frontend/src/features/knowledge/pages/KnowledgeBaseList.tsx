@@ -48,7 +48,7 @@ import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../..
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
-import { DRAWER_FORM } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 const scopeTag = (s: string) => (s === 'global' ? <Tag color="blue">global</Tag> : <Tag>project</Tag>)
 const injectModeTag = (m: InjectMode) =>
@@ -526,7 +526,7 @@ export default function KnowledgeBaseList() {
           title={`提案 · ${manageProposal.title}`}
           open
           onClose={() => setManageId(null)}
-          width={DRAWER_FORM}
+          width={DRAWER_DEFAULT}
         >
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Descriptions size="small" column={2}>

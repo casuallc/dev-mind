@@ -37,7 +37,7 @@ import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/page
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
-import { DRAWER_SM } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 /** CAP-75 FR-03：按 code 的声明式 config 字段注册表（有字段定义的通道在抽屉里渲染配置表单）。 */
 const CHANNEL_CONFIG_FIELDS: Record<
@@ -297,7 +297,7 @@ export default function NotificationCenter() {
       {/* 通道 + 偏好设置 */}
       <Drawer
         title="通道与偏好设置"
-        width={DRAWER_SM}
+        width={DRAWER_DEFAULT}
         open={prefsOpen}
         onClose={() => setPrefsOpen(false)}
         extra={

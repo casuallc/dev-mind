@@ -10,7 +10,7 @@ import { ActionStatusBadge, RiskTag, TURN_STATUS_OPTIONS, TurnStatusBadge } from
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { fmtTime } from '../../../shared/utils/format'
-import { DRAWER_FULL } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 const CHANNEL_LABEL: Record<string, string> = { feishu: '飞书', fake: '假渠道' }
 
@@ -147,7 +147,7 @@ export default function TurnsPanel({ refreshTick = 0 }: { refreshTick?: number }
         locale={{ emptyText: '暂无智能体对话记录。机器人在智能体模式下处理消息后自动留痕。' }}
       />
 
-      <Drawer title="轮次详情" open={!!detail || detailLoading} onClose={() => setDetail(null)} width={DRAWER_FULL}>
+      <Drawer title="轮次详情" open={!!detail || detailLoading} onClose={() => setDetail(null)} width={DRAWER_DEFAULT}>
         {detail?.turn && (
           <Space direction="vertical" style={{ width: '100%' }} size={16}>
             <Descriptions column={2} size="small" bordered>

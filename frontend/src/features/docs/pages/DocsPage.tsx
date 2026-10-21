@@ -31,7 +31,7 @@ import FitTable from '../../../shared/components/FitTable'
 import MarkdownEditor from '../../../shared/components/MarkdownEditor'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
-import { DRAWER_FORM } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 const kindTag = (k: DocKind) => <Tag color={k === 'requirement' ? 'blue' : k === 'design' ? 'geekblue' : k === 'analysis' ? 'gold' : k === 'api-suite' ? 'purple' : 'cyan'}>{KIND_LABEL[k] ?? k}</Tag>
 const statusTag = (s: DocStatus) => (
@@ -218,7 +218,7 @@ export default function DocsPage() {
         title="新建文档"
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        width={DRAWER_FORM}
+        width={DRAWER_DEFAULT}
         destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>

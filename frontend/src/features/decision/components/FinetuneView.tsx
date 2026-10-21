@@ -34,7 +34,7 @@ import {
 import type { CheckpointView, DatasetView, FinetuneDetail, FinetuneTriggerRequest, FinetuneView } from '../types'
 import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_FULL, DRAWER_WIDE } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import FitTable from '../../../shared/components/FitTable'
 import LabLogDrawer from './LabLogDrawer'
 import { ReportStatusTag, RunStatusTag, runActive } from './labCommon'
@@ -337,7 +337,7 @@ function TriggerDrawer({
     <Drawer
       title="发起微调"
       open
-      width={DRAWER_WIDE}
+      width={DRAWER_DEFAULT}
       onClose={onClose}
       destroyOnHidden
       footer={
@@ -458,7 +458,7 @@ function FinetuneDetailDrawer({ id, onClose }: { id: number; onClose: () => void
 
   const v = detail?.view
   return (
-    <Drawer title={v ? `微调 #${v.id} 详情` : '微调详情'} width={DRAWER_FULL} open onClose={onClose}>
+    <Drawer title={v ? `微调 #${v.id} 详情` : '微调详情'} width={DRAWER_DEFAULT} open onClose={onClose}>
       {detail && v ? (
         <>
           <Descriptions size="small" column={3} style={{ marginBottom: 12 }}>

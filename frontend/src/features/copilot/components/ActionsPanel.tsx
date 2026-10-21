@@ -10,7 +10,7 @@ import { ACTION_STATUS_OPTIONS, ActionStatusBadge, RISK_OPTIONS, RiskTag } from 
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { fmtTime } from '../../../shared/utils/format'
-import { DRAWER_FORM } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 const CHANNEL_LABEL: Record<string, string> = { feishu: '飞书', fake: '假渠道' }
 
@@ -170,7 +170,7 @@ export default function ActionsPanel({ refreshTick = 0 }: { refreshTick?: number
         locale={{ emptyText: '暂无确认单。智能体提出写操作后需用户确认，才会在这里留下记录。' }}
       />
 
-      <Drawer title="确认单详情" open={!!detail} onClose={() => setDetail(null)} width={DRAWER_FORM}>
+      <Drawer title="确认单详情" open={!!detail} onClose={() => setDetail(null)} width={DRAWER_DEFAULT}>
         {detail && (
           <Space direction="vertical" style={{ width: '100%' }} size={12}>
             <Descriptions column={2} size="small" bordered>

@@ -29,7 +29,7 @@ import CloneAuthHint from '../../components/CloneAuthHint'
 import { useGitIntegrations } from '../../hooks/useGitIntegrations'
 import { showError } from '../../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../../shared/utils/table'
-import { DRAWER_FORM } from '../../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../../shared/utils/overlay'
 
 const ROLE_OPTIONS = ['CODE', 'DOCS', 'CONFIG']
 
@@ -283,7 +283,7 @@ export default function ReposPage() {
         locale={{ emptyText: '暂无仓库。点击「添加仓库」登记本地路径或从 Git 克隆。' }}
       />
       <Drawer title={editing ? '编辑仓库' : '添加仓库'} open={open} onClose={() => setOpen(false)}
-        width={DRAWER_FORM} destroyOnHidden
+        width={DRAWER_DEFAULT} destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button onClick={() => setOpen(false)}>取消</Button>

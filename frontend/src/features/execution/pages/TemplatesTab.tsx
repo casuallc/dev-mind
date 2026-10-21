@@ -9,7 +9,7 @@ import { createTemplate, deleteTemplate, listTemplates, updateTemplate } from '.
 import type { TemplateInput, TemplateView } from '../types'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
-import { DRAWER_FORM } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import FitTable from '../../../shared/components/FitTable'
 import CopyableLongText from '../../../shared/components/CopyableLongText'
 
@@ -179,7 +179,7 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
         title={editing ? `编辑模板 ${editing.code}` : '新建命令模板'}
         open={open}
         onClose={() => setOpen(false)}
-        width={DRAWER_FORM}
+        width={DRAWER_DEFAULT}
         destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>

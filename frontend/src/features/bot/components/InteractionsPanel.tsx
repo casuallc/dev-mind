@@ -8,7 +8,7 @@ import type { BotInteraction } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_WIDE } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 const STATUS_LABEL: Record<string, string> = {
   OK: '成功',
@@ -142,7 +142,7 @@ export default function InteractionsPanel({ refreshTick = 0 }: { refreshTick?: n
         locale={{ emptyText: '暂无交互记录。机器人收到并处理消息（含被门禁拒绝/去重命中）后自动留痕。' }}
       />
 
-      <Drawer title="交互详情" open={!!detail} onClose={() => setDetail(null)} width={DRAWER_WIDE}>
+      <Drawer title="交互详情" open={!!detail} onClose={() => setDetail(null)} width={DRAWER_DEFAULT}>
         {detail && (
           <Space direction="vertical" style={{ width: '100%' }} size={12}>
             <Descriptions column={2} size="small" bordered>

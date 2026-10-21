@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Alert, Drawer, Space, Tag } from 'antd'
 import { getCloneLogs } from '../api'
 import type { ProjectRepo } from '../types'
-import { DRAWER_WIDE } from '../../../shared/utils/overlay'
+import { DRAWER_SCREEN } from '../../../shared/utils/overlay'
 
 export const CLONE_STATUS_COLOR: Record<string, string> = {
   NONE: 'default',
@@ -81,7 +81,7 @@ export default function CloneLogDrawer({ projectId, repo, onClose, onDone }: Pro
           '克隆日志'
         )
       }
-      width={DRAWER_WIDE}
+      width={DRAWER_SCREEN}
       open={!!repo}
       onClose={onClose}
     >

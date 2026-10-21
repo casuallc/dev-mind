@@ -46,7 +46,7 @@ import { listEnvironments } from '../../projects/api'
 import { listAgentNodes } from '../../agent/api'
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { durationMs, fmtTime } from '../../../shared/utils/format'
-import { DRAWER_FULL, DRAWER_WIDE } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT, DRAWER_SCREEN } from '../../../shared/utils/overlay'
 import { STATUS_COLOR, SUITE_KIND_COLOR } from '../constants'
 import RunDetailDrawer from '../components/RunDetailDrawer'
 import IssuesTable from '../components/IssuesTable'
@@ -429,14 +429,14 @@ function TestCenter({ id }: { id: string }) {
         onIssues={openIssues}
       />
 
-      <Drawer title={textModal?.title} open={!!textModal} width={DRAWER_WIDE}
+      <Drawer title={textModal?.title} open={!!textModal} width={DRAWER_SCREEN}
         onClose={() => setTextModal(null)}>
         <pre style={{ background: '#0f1115', color: '#d0d7de', padding: 12, borderRadius: 6, fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
           {textModal?.text || '（空）'}
         </pre>
       </Drawer>
 
-      <Drawer title="缺陷线索" open={!!issuesModal} width={DRAWER_FULL}
+      <Drawer title="缺陷线索" open={!!issuesModal} width={DRAWER_DEFAULT}
         onClose={() => setIssuesModal(null)}>
         <IssuesTable issues={issuesModal ?? []} />
       </Drawer>

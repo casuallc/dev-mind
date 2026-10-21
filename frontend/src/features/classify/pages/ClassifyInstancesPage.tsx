@@ -30,7 +30,7 @@ import {
 } from '@ant-design/icons'
 import FitTable from '../../../shared/components/FitTable'
 import { fmtBytes, fmtTime } from '../../../shared/utils/format'
-import { DRAWER_FORM, DRAWER_WIDE } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import LayaViewSwitch from '../../laya/components/LayaViewSwitch'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
@@ -308,7 +308,7 @@ export default function ClassifyInstancesPage() {
         title={editing ? `编辑实例「${editing.name}」` : '新建实例'}
         open={editorOpen}
         onClose={() => setEditorOpen(false)}
-        width={DRAWER_WIDE}
+        width={DRAWER_DEFAULT}
         destroyOnHidden={false}
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -406,7 +406,7 @@ export default function ClassifyInstancesPage() {
         title={managing ? `实例「${managing.name}」` : ''}
         open={!!managing}
         onClose={() => setManaging(null)}
-        width={DRAWER_FORM}
+        width={DRAWER_DEFAULT}
       >
         {managing ? (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>

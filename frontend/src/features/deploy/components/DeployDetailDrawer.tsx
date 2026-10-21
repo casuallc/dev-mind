@@ -23,6 +23,7 @@ import { durationMs } from '../../../shared/utils/format'
 import { STATUS_COLOR } from '../constants'
 import { showError } from '../../../shared/utils/showError'
 import LogView from '../../../shared/components/LogView'
+import { DRAWER_SCREEN } from '../../../shared/utils/overlay'
 
 const STEP_STATUS_COLOR: Record<string, string> = {
   PENDING: 'default',
@@ -160,7 +161,7 @@ export default function DeployDetailDrawer({ record, onClose, onChanged }: {
           </Space>
         ) : '部署详情'
       }
-      width="70%"
+      width={DRAWER_SCREEN}
       open={!!record}
       onClose={onClose}
     >

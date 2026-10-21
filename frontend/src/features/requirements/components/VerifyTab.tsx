@@ -25,7 +25,7 @@ import { listEnvironments } from '../../projects/api'
 import type { ProjectEnvironment } from '../../projects/types'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_WIDE } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 const STATUS_COLOR: Record<VerifyRunStatus, string> = {
@@ -260,7 +260,7 @@ export default function VerifyTab({ requirement }: { requirement: Requirement })
 
       <Drawer
         title={detail ? `验证详情 #${detail.id}` : '验证详情'}
-        width={DRAWER_WIDE}
+        width={DRAWER_DEFAULT}
         open={detail != null}
         onClose={() => setDetail(null)}
       >

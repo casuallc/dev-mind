@@ -31,7 +31,7 @@ import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/page
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
-import { DRAWER_FORM } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 const TYPE_OPTIONS = [
   { value: 'GITLAB', label: 'GitLab（代码平台）' },
@@ -414,7 +414,7 @@ export default function IntegrationsPage() {
         title={editing ? `编辑集成「${editing.name}」` : '新建集成'}
         open={editOpen}
         onClose={() => setEditOpen(false)}
-        width={DRAWER_FORM}
+        width={DRAWER_DEFAULT}
         destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>

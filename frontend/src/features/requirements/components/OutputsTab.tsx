@@ -10,7 +10,7 @@ import { getSessionOutput } from '../../sessions/api'
 import Markdown from '../../../shared/components/Markdown'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_WIDE } from '../../../shared/utils/overlay'
+import { DRAWER_SCREEN } from '../../../shared/utils/overlay'
 
 type SummaryItem = RequirementOverview['artifacts'][number]
 
@@ -140,7 +140,7 @@ export default function OutputsTab({ overview }: { overview: RequirementOverview
         title={preview?.fileName ?? ''}
         open={!!preview}
         onClose={() => setPreview(null)}
-        width={DRAWER_WIDE}
+        width={DRAWER_SCREEN}
         destroyOnHidden
       >
         {loading ? (
