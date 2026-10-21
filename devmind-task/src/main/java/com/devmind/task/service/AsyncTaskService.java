@@ -233,7 +233,8 @@ public class AsyncTaskService {
         t.setIntervalMs(AsyncTaskEntity.KIND_FIXED_DELAY.equals(kind) ? req.intervalMs() : null);
         t.setCronExpr(AsyncTaskEntity.KIND_CRON.equals(kind) ? req.cronExpr() : null);
         boolean oneShot = AsyncTaskEntity.KIND_IMMEDIATE.equals(kind) || AsyncTaskEntity.KIND_DELAY.equals(kind);
-        t.setMaxRuns(oneShot ? 1 : req.maxRuns());
+        // 三元两侧须同型：int 字面量会逼 Integer 拆箱 → maxRuns 省略时 NPE（E2E 踩出）
+        t.setMaxRuns(oneShot ? Integer.valueOf(1) : req.maxRuns());
         t.setProjectId(req.projectId());
         t.setAgentNodeId(isRunnerType(req.type()) ? blankToNull(req.agentNodeId()) : null);
         applyPolicies(t, req.retryMaxAttempts(), req.retryBackoff(), req.retryIntervalMs(),
