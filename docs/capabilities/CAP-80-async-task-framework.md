@@ -1,6 +1,6 @@
-# CAP-80 通用异步任务框架（Async Task Framework）
+# CAP-80 通用任务框架（任务管理 / Async Task Framework）
 
-> 能力 ID：CAP-80 ｜ 分类：底座 ｜ 状态：设计定稿 ｜ 日期：2026-10-21
+> 能力 ID：CAP-80 ｜ 分类：底座 ｜ 状态：设计定稿 ｜ 日期：2026-10-21（M4 增补同日定稿）
 > 决策记录：**独立新模块 devmind-task**（积木式底座，依赖 devmind-execution 复用日志枢纽），
 > 不并入 devmind-execution——CAP-12 是「步骤链执行原语」层，本能力是「任务登记/调度/重试」层，
 > 职责正交；**不迁移四大执行器**（build/deploy/test/release 保留自有记录表与状态机，CAP-12
@@ -10,7 +10,12 @@
 > 在跑任务不被 tick 重扫、规避时间戳精度等值比较、status 条件堵 PAUSED 穿透），
 > 终态按形态重算回填；**dedup_key + ensureScheduled 幂等登记**（评审定稿：存量
 > @Scheduled 迁移的启动期登记不产生重复任务）；**重启即收割在途 RUNNING**
-> （不等 timeout×2，消除恢复盲窗）。
+> （不等 timeout×2，消除恢复盲窗）。**M4 增补（任务管理化）**：管理面正名「任务管理」，
+> **开放 REST 创建/编辑**（O2 关闭落地，ADMIN-only）；**runner 执行位置**——
+> `async_tasks.agent_node_id` + handler 元数据声明执行位置（LOCAL/RUNNER），
+> RUNNER 类经 `AgentNodeRouter` 路由链（显式→项目默认→平台默认→409，无本机回落）；
+> **builtin.shell 复用 CAP-36 `exec` 帧族**（评审定稿：协议 v3 起全量存量 runner 已支持，
+> 零协议改动零 runner 发版；不另起 task_exec 帧族），runner 侧 execAllowlist 防线不变。
 
 ## 1. 目的
 
@@ -108,12 +113,57 @@
 - **FR-11 REST 端点**：任务列表（类型/状态/关键词过滤 + 分页）、任务详情、
   暂停/恢复/取消/立即触发、执行历史分页、run 详情含日志（详见 §6）。
   管理操作仅 ADMIN；列表/详情/run 详情 admin 全量、非 admin 仅见 actor=本人。
-- **FR-12 前端管理页**：后台「系统」组新增「异步任务」页（`/admin/async-tasks`），
-  Segmented 分「任务 / 执行记录」两视图：任务列表（类型/名称/调度摘要/状态/
-  下次执行/已跑次数/操作：暂停·恢复·取消·立即触发）+ 执行记录列表（关联任务/
+- **FR-12 前端管理页**：后台「系统」组新增「任务管理」页（`/admin/tasks`），
+  Segmented 分「任务 / 执行记录」两视图：任务列表（类型/名称/调度摘要/执行位置/状态/
+  下次执行/已跑次数/操作：暂停·恢复·取消·立即触发·编辑）+ 执行记录列表（关联任务/
   状态/第几轮·第几次/耗时/错误），行点击开抽屉展示 run 详情与实时日志
   （订阅 `/ws/async-tasks/{runId}`）。布局遵循 docs/core/前端内容区布局约定.md，
   路由登记进布局巡检。
+
+### M4 任务管理化（页面创建 + runner 执行位置）
+
+- **FR-13 REST 创建与编辑（管理面闭环）**：
+  - `POST /api/async-tasks`：创建任务（四形态全支持），body 承载
+    taskType/name/payload/scheduleKind/runAt/intervalMs/cronExpr/maxRuns/
+    retry*/timeoutMs/overlapPolicy/agentNodeId；校验与 Java API 同口径
+    （未知 type 400、非法 cron 400、FIXED_DELAY 缺 intervalMs 400）；
+  - `PUT /api/async-tasks/{id}`：编辑策略与 payload——终态（DONE/CANCELLED）409；
+    payload 替换只影响后续轮次（在途 run 持创建时快照语义不变）；
+    PAUSED 任务只改配置不复活调度；ACTIVE 任务调度字段变更即重算 next_run_at；
+  - `GET /api/async-tasks/types`：已注册 handler 元数据清单
+    `[{type, description, executor, payloadTemplate}]`，供新建表单下拉
+    （executor=RUNNER 的类型表单才显示节点选择）；
+  - 三个端点均仅 ADMIN（shell 任务 = 节点远程代码执行面，与节点管理同档），
+    既有 `POST /api/async-tasks/**` ADMIN 规则覆盖创建；PUT 规则同档补齐。
+- **FR-14 执行位置（executor）**：`AsyncTaskHandler` 增 default 元数据方法
+  `description()` / `payloadTemplate()` / `executor()`（`LOCAL`=服务端虚拟线程，
+  默认；`RUNNER`=下发 agent 节点执行）。任务落库增 `agent_node_id` 列（可空）：
+  RUNNER 类任务执行时经 `AgentNodeRouter.route(task.agentNodeId,
+  项目默认(projectId 非空), null)` 选节点——显式→项目默认→平台默认→皆无 409
+  （对齐 CAP-34 会话路由语义，无本机回落）；节点离线/协议版本不足（exec 需 v3+）
+  在执行时以可重试失败落 error（任务级 409 只在创建/编辑校验显式指定节点的
+  存在性，在线性留给执行时判定——周期任务起止跨越节点上下线是常态）。
+  LOCAL 类任务的 agent_node_id 一律忽略（创建不拒绝，避免表单态复杂化）。
+  TaskOptions/ScheduleSpec 同步增 `agentNodeId`（Java API 与 REST 同能力）。
+- **FR-15 builtin.shell（runner shell 命令）**：type=`builtin.shell`，
+  executor=RUNNER；payload `{"command": "<多行脚本>", "workingDir": "<可选>",
+  "env": {...}, "timeoutSec": <可选>}`。执行经
+  `ObjectProvider<AgentNodeConnector>.exec(nodeId, AgentExecCommand, sink)`：
+  execId=runId（帧路由键即 run，排障直达）、projectId=任务归属（可空）、
+  repo=null（不备代码，runner 本地 workDir 执行）、timeoutSec 默认取
+  `min(task.timeoutMs/1000, 1800)`；`exec_log` 行实时入 `ctx.log()`
+  （复用 FR-05 日志枢纽/WS 链路零改动）；exit 0=成功，非零/超时/拉起失败
+  抛异常按 FR-04 重试（非零退出视为可重试——远程环境抖动与脚本失败同路径）。
+  **已知限制**：exec 帧族无取消协议——任务 cancel/超时只中断服务端等待线程
+  （run 判 CANCELLED/FAILED），runner 侧进程由 exec 帧自身 timeoutSec 兜底
+  整树 kill，最长残留 = timeoutSec；v1 接受（进程有界自死，不泄漏）。
+- **FR-16 前端创建/编辑**：「任务管理」页 extra 增「新建任务」（ADMIN 可见）：
+  Modal 表单——类型（types 端点下拉，带描述）、名称、执行节点（仅 RUNNER 类
+  显示，ONLINE 过滤 + 平台默认标记，复用会话新建页的 Select 模式；空=走路由链
+  兜底）、命令/payload（builtin.shell 渲染多行命令编辑框；其余类型 JSON
+  textarea 预填 payloadTemplate）、调度形态（立即/定时 DatePicker/固定间隔秒/
+  cron）、高级区（重试次数/退避/超时/重叠/maxRuns）。非终态任务行内「编辑」
+  复用同一表单回读改 PUT。任务列表加「执行位置」列（节点名/服务端）。
 
 ## 3. 否决方案
 
@@ -128,28 +178,41 @@
   次数上限），与「策略可配」目标相悖；框架内统一表驱动。
 - **一次性迁移存量 15+ 处 @Scheduled**：清理/轮询/看门狗各有既定口径（防重入锁、
   心跳超时等），批量迁移风险大于收益；后续按需逐个迁入（清理类最适合先行）。
+- **（M4）新增 task_exec 帧族替代复用 exec**：exec 帧族（v3）语义即「非会话 shell
+  下发 + 行流回传 + 退出码收口」，存量 runner 全量支持；另起帧族要动
+  common/agent/runner 三侧 + 全环境 runner 升级后才可用，收益仅是去掉取消语义
+  缺口与项目向字段，不成比例。取消缺口以 exec 自带 timeoutSec 兜底（FR-15）。
+- **（M4）任务创建走「脚本库引用」而非内联命令**：脚本入库再引用多一层实体与
+  版本管理；v1 内联 command 快照落 payload（创建即固化，FR-02 语义天然覆盖），
+  复用脚本库留待真实复用诉求出现。
 
 ## 4. 架构与模块归属
 
 ```
 devmind-task（新模块，统一异步任务层）
-  api：AsyncTaskHandler(type/execute) · TaskContext(log/runId/runSeq/attempt) ·
-      NonRetryableTaskException · TaskOptions/ScheduleSpec（Builder）
+  api：AsyncTaskHandler(type/execute + description/payloadTemplate/executor 元数据) ·
+      TaskContext(log/runId/runSeq/attempt) ·
+      NonRetryableTaskException · TaskOptions/ScheduleSpec（Builder，含 agentNodeId）
   engine：AsyncTaskScheduler（主 tick + 乐观认领 + 僵尸收割）·
       AsyncTaskExecutor（虚拟线程池 + 超时中断）· TaskDispatcher（按 type 分发）
-  service：AsyncTaskService（submit/schedule/pause/resume/cancel/triggerNow/query）
+  builtin：EchoTaskHandler（自测/E2E）· ShellTaskHandler（builtin.shell，RUNNER 类——
+      ObjectProvider<AgentNodeConnector> 下发 exec 帧 + AgentNodeRouter 选节点，
+      两设施均在既有依赖 common/execution 内，零新 Maven 依赖）
+  service：AsyncTaskService（submit/schedule/ensureScheduled/create/update/
+      pause/resume/cancel/triggerNow/query）
   model：AsyncTaskEntity / AsyncTaskRunEntity + Repository
   ws：/ws/async-tasks/{runId}（ExecutionWsHandler + run 表 snapshot provider）
-  controller：/api/async-tasks/**（FR-11）
-  依赖：devmind-common + devmind-execution（日志枢纽/WS Handler）；
-      devmind-auth 角色判定走 SecurityContext 既有口径
+  controller：/api/async-tasks/**（FR-11/FR-13）
+  依赖：devmind-common + devmind-execution（日志枢纽/WS Handler/AgentNodeRouter）；
+      devmind-auth 角色判定走 SecurityContext 既有口径；
+      agent 模块经 common SPI ObjectProvider 探测，未装配 = RUNNER 类任务执行 409
 
 业务模块（任务类型拥有方）
   实现 AsyncTaskHandler 注册 Spring bean + pom 依赖 devmind-task，
   提交走 AsyncTaskService —— 同「执行器依赖 execution」的既有依赖方向
 
 devmind-app：装配依赖 +1；frontend/src/features/async-task/ 自包含 +
-  App.tsx 注册路由 + 后台「系统」组菜单登记
+  App.tsx 注册路由 + 后台「系统」组菜单登记（「任务管理」/admin/tasks）
 ```
 
 任务执行语义归 handler 实现方，框架只管「何时跑、跑几次、败了怎么办、日志在哪」。
@@ -174,6 +237,7 @@ async_tasks(                        -- 任务登记 + 调度配置一体
   retry_interval_ms bigint,
   timeout_ms bigint,
   overlap_policy varchar(8),        -- SKIP / QUEUE
+  agent_node_id varchar(64),        -- M4：执行节点（RUNNER 类任务显式指定；空=路由链兜底；LOCAL 类忽略）
   next_run_at timestamp,            -- 认领即置 NULL（FR-06），终态重算回填
   status varchar(16),               -- ACTIVE / PAUSED / DONE / CANCELLED
   actor varchar(64),
@@ -208,6 +272,10 @@ async_task_runs(                    -- 每次执行一行（含每次重试 atte
 
 - `GET /api/async-tasks`：任务列表，参数 `type/status/keyword/page/size`；
   admin 全量、非 admin 强制 actor=本人过滤。
+- `POST /api/async-tasks`：创建任务（FR-13，仅 ADMIN）。
+- `PUT /api/async-tasks/{id}`：编辑策略/payload/调度（FR-13，仅 ADMIN，终态 409）。
+- `GET /api/async-tasks/types`：已注册 handler 元数据清单（FR-13，仅 ADMIN，
+  供新建表单类型下拉）。
 - `GET /api/async-tasks/{id}`：任务详情（含策略字段与 run_count）。
 - `POST /api/async-tasks/{id}/pause|resume|cancel|trigger`：生命周期操作，仅 ADMIN；
   trigger 仅 ACTIVE 任务可用，PAUSED/DONE/CANCELLED 均 409（先恢复再触发）。
@@ -216,13 +284,17 @@ async_task_runs(                    -- 每次执行一行（含每次重试 atte
   非 admin 强制 join task.actor 校验属主（同任务详情口径，防猜 runId 越权看日志）。
 - WS：`/ws/async-tasks/{runId}`——CAP-12 通用 Handler，snapshot 帧回放历史日志，
   终态补 done。
-- 任务的**创建/改策略只走 Java API**（业务方代码提交），REST 不提供创建端点
-  （任务类型是代码注册的，开放 REST 创建无意义且扩大攻击面）。
+- 任务创建双通道：Java API（业务方代码登记，FR-10）+ REST（管理面手工创建，
+  FR-13）；两者同走 AsyncTaskService 同一校验与落库路径。
 
 ## 7. 安全
 
-- 管理操作（pause/resume/cancel/trigger）仅 ADMIN；查询非 admin 强制本人 actor 过滤
-  （对齐 CAP-62 owner 强制口径，不在前端藏按钮代替后端校验）。
+- 管理操作（pause/resume/cancel/trigger）与**创建/编辑/类型清单**（FR-13）仅 ADMIN——
+  builtin.shell 任务是节点远程代码执行面，与节点管理（/api/agent-nodes 写操作）同档收敛；
+  查询非 admin 强制本人 actor 过滤（对齐 CAP-62 owner 强制口径，不在前端藏按钮代替后端校验）。
+- **runner 侧双层防线**：builtin.shell 命令到达节点后仍过 runner 本地
+  `execAllowlist` 逐行前缀校验（空=拒绝一切，shell 内置命令豁免）——服务端 ADMIN
+  认证是第一层，节点运维白名单是第二层，任一缺失即 fail-visible（错误入 run 日志）。
 - handler 执行在框架线程内合成 SecurityContext（actor=任务登记人），handler 内调
   业务 Service 的权限边界 = 登记人既有权限，不做第二套授权（对齐 CAP-75 FR-06 口径）。
 - payload 落库即 JSON 快照，框架不解析不执行其中代码；handler 自行做参数校验。
@@ -235,8 +307,11 @@ async_task_runs(                    -- 每次执行一行（含每次重试 atte
 - **M2 调度与生命周期**：FR-06~10（主 tick 乐观认领 + 四形态调度 + 重叠策略 +
   僵尸收割/重启续跑 + Java 提交 API）。
 - **M3 管理面**：FR-11~12（REST + 后台管理页 + WS 日志查看）。
+- **M4 任务管理化**：FR-13~16（REST 创建/编辑 + handler 元数据/types 端点 +
+  agent_node_id 执行位置 + builtin.shell runner 执行 + 前端创建/编辑表单与改名）。
 - **展望**：存量散点 @Scheduled 逐个迁入（清理类先行）；重试耗尽接通知；
-  多实例部署时的选主/分片；任务依赖编排（流程层域）。
+  多实例部署时的选主/分片；任务依赖编排（流程层域）；exec 取消帧（task 级
+  cancel 直达 runner 杀进程）。
 
 ## 9. 验收标准
 
@@ -256,8 +331,14 @@ async_task_runs(                    -- 每次执行一行（含每次重试 atte
   管理页两视图可查、抽屉日志实时滚动终态定格；路由登记进布局巡检；
   E2E（隔离 app + e2e profile）submit→WS 看日志→查 run 记录全链通过，
   跑完清理自起进程。
+- M4：REST 创建四形态任务（非法 type/cron/interval 400）；编辑终态任务 409；
+  types 端点返回全部已注册 handler 含 executor 标记；非 admin 创建/编辑 403；
+  builtin.shell 指定在线节点执行成功（exit 0 → run SUCCESS、runner 行流实时入
+  WS/日志落库）；非零退出按策略重试；无可用节点执行时 run FAILED 且 error 可读；
+  创建指定不存在节点 400；E2E 起真实 runner（execAllowlist 配置）全链通过；
+  页面改名「任务管理」/admin/tasks 过布局巡检。
 - 全量 `mvn -q test` 与 `npx tsc -b` 绿；单测覆盖重试退避计算、乐观认领并发、
-  四形态 next_run_at 推进、权限过滤。
+  四形态 next_run_at 推进、权限过滤、shell payload 解析与节点选择路由。
 
 ## 10. 风险与开放问题
 
@@ -268,6 +349,8 @@ async_task_runs(                    -- 每次执行一行（含每次重试 atte
 | R3 | cron 解析库选型 | 复用 Spring `CronExpression`（spring-context 既有），不引新依赖 |
 | R4 | 乐观认领在 H2/PG/MySQL 三库语义 | 标准 UPDATE WHERE 全库通用；E2E 覆盖 H2，存量 PG/MySQL 部署验证 |
 | R5 | 存量 @Scheduled 长期并存两套调度视图 | 非目标已声明不迁移；管理页注明只覆盖框架任务 |
+| R6 | （M4）exec 帧族无取消协议：任务 cancel 后 runner 侧进程残留 | exec 帧自带 timeoutSec 整树 kill 兜底，残留有界；builtin.shell 的 timeoutSec 默认 ≤30min；根治留「exec 取消帧」展望项 |
+| R7 | （M4）builtin.shell 命令经 execAllowlist 拒绝时用户体验 | 白名单拒绝是 runner 运维防线（安全语义正确），错误文本直达 run 日志与 error 列，运维按提示配 execAllowlist 即可 |
 | O1 | 任务是否需要项目归属强隔离 | v1 project_id 仅过滤展示用；CAP-62 数据权限落地后再收紧 |
-| O2 | 是否开放 REST 创建任务 | v1 否（§6）；如未来需要「页面手工建一次性任务」再评估 |
+| ~~O2~~ | ~~是否开放 REST 创建任务~~ | **M4 已落地**（FR-13：ADMIN-only + handler 元数据驱动表单） |
 | O3 | 四大执行器是否最终迁入 | 留待执行器记录语义稳定后单独评估，不在本期 |
