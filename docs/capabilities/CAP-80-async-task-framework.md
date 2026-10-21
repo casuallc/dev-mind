@@ -6,7 +6,11 @@
 > 职责正交；**不迁移四大执行器**（build/deploy/test/release 保留自有记录表与状态机，CAP-12
 > 迁移约定不变），框架面向「无自有执行记录语义的通用异步/定时任务」；调度采用
 > **主 tick + next_run_at 到期判定 + 乐观认领**（参照 CAP-28 WorklogScheduler 现有范例），
-> 单实例部署前提下不引分布式调度框架。
+> 单实例部署前提下不引分布式调度框架；**认领即置 next_run_at=NULL**（评审定稿：
+> 在跑任务不被 tick 重扫、规避时间戳精度等值比较、status 条件堵 PAUSED 穿透），
+> 终态按形态重算回填；**dedup_key + ensureScheduled 幂等登记**（评审定稿：存量
+> @Scheduled 迁移的启动期登记不产生重复任务）；**重启即收割在途 RUNNING**
+> （不等 timeout×2，消除恢复盲窗）。
 
 ## 1. 目的
 
@@ -32,7 +36,9 @@
   `String type()` + `void execute(String payload, TaskContext ctx)`；
   `TaskContext` 提供 `log(String)`（实时推 WS + 攒入 run 日志）、
   `runId/taskId/runSeq/attempt` 与进度回写。各业务模块以实现类 Spring bean 注册，
-  框架按 type 分发；未知 type 提交即 400。
+  框架按 type 分发；未知 type 提交即 400；启动期同 type 注册多个 bean 即
+  fail-fast 报冲突。handler 契约：`execute` 实现须响应线程中断（或周期检查
+  `ctx.isCancelled()`），长阻塞点不响应中断时该 run 只能等超时收割（FR-09）。
 - **FR-02 任务与执行记录落库**：任务登记与调度配置一体落 `async_tasks`；
   每次执行（含重试的每次 attempt）落 `async_task_runs` 一行。payload 在创建时
   固化为 JSON 快照，后续业务配置变更不影响在途任务。列名避让 H2/PG 保留字，
@@ -40,7 +46,10 @@
 - **FR-03 执行内核**：框架自持虚拟线程池（`newVirtualThreadPerTaskExecutor`，
   @PreDestroy 关闭）；认领即更新 run=RUNNING + started_at，执行 handler，
   捕获全部异常转 FAILED（堆栈摘要入 error）；单 run 超时（timeout_ms，默认 30 分钟）
-  中断并判 FAILED（可重试）。**触发/认领方法禁 @Transactional**，靠 save 自身事务
+  中断并判 FAILED（可重试）。中断是**协作式**的：handler 不响应中断时线程继续
+  存活，须靠 FR-09 收割兜底；为防收割器与迟到的 handler 双写同一 run，run 的
+  一切终态流转（成功/失败/取消/收割）都带 `WHERE status IN ('QUEUED','RUNNING')`
+  乐观条件，后到者丢弃。**触发/认领方法禁 @Transactional**，靠 save 自身事务
   即时提交（沿用执行器红线）。
 - **FR-04 重试策略**：run 失败后 `attempt < retry_max_attempts` 时按退避策略计算
   下次执行时刻重排新 attempt 的 run：FIXED=固定 `retry_interval_ms`；
@@ -56,31 +65,49 @@
 
 - **FR-06 调度器主 tick**：`@Scheduled(fixedDelay)`（默认 5s，
   `devmind.task.tick-delay-ms`）扫描 `status=ACTIVE AND next_run_at<=now` 的任务，
-  **乐观认领**（`UPDATE ... WHERE id=? AND next_run_at=?`，0 行=已被认领跳过）
-  防 tick 与手动触发并发重复；@EnableScheduling 独立配置类自持，不侵启动类。
+  **乐观认领**：`UPDATE async_tasks SET next_run_at=NULL WHERE id=? AND
+  status='ACTIVE' AND next_run_at IS NOT NULL`，0 行=已被认领或已被暂停，跳过。
+  三个设计要点：① 认领即置 NULL——RUNNING 期间 next_run_at 恒空，tick 不会
+  重复扫到在跑任务，终态时按 FR-07 重算回填（DONE/CANCELLED 保持 NULL）；
+  ② WHERE 不依赖时间戳等值比较，规避 PG timestamp(micros) 与 Java nanos 的
+  精度差导致的首轮 0 行；③ 带 status 条件，堵住扫描后、认领前被 PAUSED 的
+  穿透窗口。@EnableScheduling 独立配置类自持，不侵启动类；单 tick 认领上限
+  `devmind.task.tick-max-claim`（默认 50），防重启后积压任务单 tick 全部起跑。
 - **FR-07 调度四形态**：
   - IMMEDIATE：创建即 next_run_at=now，跑一次后 status=DONE；
   - DELAY：指定 `run_at`（或 delayMs 换算），跑一次 DONE；
-  - FIXED_INTERVAL：每次终态后 `next_run_at = finished + interval_ms`；
+  - FIXED_DELAY：每次终态后 `next_run_at = finished + interval_ms`（fixed-delay
+    语义：随执行耗时逐轮漂移，非固定速率，使用方勿按整点对齐心智排程）；
   - CRON：每次终态后按 `cron_expr` 算下次；表达式非法创建即 400。
   - 任何形态跑满 `max_runs`（null=不限）→ status=DONE；PAUSED 不调度，
-    恢复时 next_run_at 已过期则立即补跑一次（cron 不补历史漏跑轮次）。
-- **FR-08 重叠策略**：同任务上一 run 未终态时按 `overlap_policy`：
-  SKIP=本轮跳过顺延（run_count 不增），QUEUE=保持到期即补跑。
+    恢复时 next_run_at 已过期则立即补跑一次——跨多个漏跑轮次也只补一次
+    （cron 不补历史漏跑轮次，interval 同理）。
+- **FR-08 重叠策略**：tick 命中到期任务先查「未终态 run」（QUEUED/RUNNING）：
+  存在则按 `overlap_policy`——SKIP=本轮作废，直接按 FR-07 规则把 next_run_at
+  推进到下一轮（run_count 不增、不建 run）；QUEUE=什么都不动，next_run_at
+  保持原到期时刻，上一 run 终态后下一 tick 自然补跑。不存在未终态 run 才走
+  FR-06 认领建 run。
 - **FR-09 僵尸收割与重启续跑**：内置 stale-reaper（`devmind.task.stale-reaper-*`，
   默认 60s）：RUNNING 超 `timeout_ms×2`（或 >2h 兜底）的 run 判 FAILED，按 FR-04
-  重试策略重排；服务重启后 ACTIVE 任务 next_run_at 到期即自然续跑，无需特殊恢复流程。
+  重试策略重排。**启动时立即将全量 RUNNING run 判 FAILED 并按 FR-04 重排**——
+  重启后所有 RUNNING 按定义皆僵尸（线程随 JVM 消亡），不等 timeout×2，
+  消除最长 1h 的恢复盲窗；此后 ACTIVE 任务 next_run_at 到期即自然续跑。
 - **FR-10 提交与控制 API（Java 侧）**：`AsyncTaskService`：
   `submit(type, payload, TaskOptions)`（IMMEDIATE/DELAY）、
-  `schedule(type, payload, ScheduleSpec)`（FIXED_INTERVAL/CRON）、
+  `schedule(type, payload, ScheduleSpec)`（FIXED_DELAY/CRON）、
+  `ensureScheduled(dedupKey, type, payload, ScheduleSpec)`（按 dedup_key upsert：
+  不存在则创建，已存在仅更新调度策略与 payload，不重置 run_count/status——
+  供存量 @Scheduled 迁移在启动期幂等登记，重启不产生重复任务）、
   `pause/resume/cancel/triggerNow(taskId)`、`query`。
+  `cancel` 级联：在途 run 协作式中断并判 CANCELLED（run CANCELLED 状态的
+  唯一生产者）；`triggerNow` 仅 ACTIVE 任务可用。
   TaskOptions/ScheduleSpec 承载全部策略字段（重试/超时/次数/重叠），Builder 装配。
 
 ### M3 管理面（REST + 前端管理页）
 
 - **FR-11 REST 端点**：任务列表（类型/状态/关键词过滤 + 分页）、任务详情、
   暂停/恢复/取消/立即触发、执行历史分页、run 详情含日志（详见 §6）。
-  管理操作仅 ADMIN；列表/详情 admin 全量、非 admin 仅见 actor=本人。
+  管理操作仅 ADMIN；列表/详情/run 详情 admin 全量、非 admin 仅见 actor=本人。
 - **FR-12 前端管理页**：后台「系统」组新增「异步任务」页（`/admin/async-tasks`），
   Segmented 分「任务 / 执行记录」两视图：任务列表（类型/名称/调度摘要/状态/
   下次执行/已跑次数/操作：暂停·恢复·取消·立即触发）+ 执行记录列表（关联任务/
@@ -135,9 +162,10 @@ async_tasks(                        -- 任务登记 + 调度配置一体
   task_type varchar(64),            -- handler type，分发键
   name varchar(200),
   payload clob,                     -- JSON 快照，LONGVARCHAR + length
-  schedule_kind varchar(16),        -- IMMEDIATE / DELAY / FIXED_INTERVAL / CRON
+  schedule_kind varchar(16),        -- IMMEDIATE / DELAY / FIXED_DELAY / CRON
+  dedup_key varchar(128),           -- 幂等登记键（ensureScheduled upsert），可空
   run_at timestamp,                 -- DELAY 指定时刻（其余形态 null）
-  interval_ms bigint,               -- FIXED_INTERVAL 间隔
+  interval_ms bigint,               -- FIXED_DELAY 间隔
   cron_expr varchar(128),           -- CRON 表达式
   max_runs int,                     -- 执行次数上限（null=不限）
   run_count int default 0,
@@ -146,11 +174,12 @@ async_tasks(                        -- 任务登记 + 调度配置一体
   retry_interval_ms bigint,
   timeout_ms bigint,
   overlap_policy varchar(8),        -- SKIP / QUEUE
-  next_run_at timestamp,
+  next_run_at timestamp,            -- 认领即置 NULL（FR-06），终态重算回填
   status varchar(16),               -- ACTIVE / PAUSED / DONE / CANCELLED
   actor varchar(64),
   project_id varchar(64),           -- 可空，归属过滤用
   created_at / updated_at,
+  unique(dedup_key),                -- 幂等登记防重
   index(status, next_run_at)        -- tick 扫描主路径
 )
 
@@ -181,9 +210,10 @@ async_task_runs(                    -- 每次执行一行（含每次重试 atte
   admin 全量、非 admin 强制 actor=本人过滤。
 - `GET /api/async-tasks/{id}`：任务详情（含策略字段与 run_count）。
 - `POST /api/async-tasks/{id}/pause|resume|cancel|trigger`：生命周期操作，仅 ADMIN；
-  trigger 对已 DONE/CANCELLED 任务 409。
+  trigger 仅 ACTIVE 任务可用，PAUSED/DONE/CANCELLED 均 409（先恢复再触发）。
 - `GET /api/async-tasks/{id}/runs`：执行历史分页（run_seq 倒序）。
-- `GET /api/async-task-runs/{runId}`：run 详情（状态/attempt/耗时/error/logs）。
+- `GET /api/async-task-runs/{runId}`：run 详情（状态/attempt/耗时/error/logs）；
+  非 admin 强制 join task.actor 校验属主（同任务详情口径，防猜 runId 越权看日志）。
 - WS：`/ws/async-tasks/{runId}`——CAP-12 通用 Handler，snapshot 帧回放历史日志，
   终态补 done。
 - 任务的**创建/改策略只走 Java API**（业务方代码提交），REST 不提供创建端点
@@ -214,11 +244,15 @@ async_task_runs(                    -- 每次执行一行（含每次重试 atte
   终态 logs 持久化、任务转 DONE；handler 抛普通异常 + retry_max_attempts=3/
   EXPONENTIAL 时产生 3 条 attempt run、间隔递增、终 FAILED，抛
   NonRetryableTaskException 只跑 1 次；提交未知 type 400；payload 创建时固化。
-- M2：DELAY 到点才跑；FIXED_INTERVAL 按间隔连跑、max_runs=3 后 DONE；
-  cron 非法 400；PAUSED 不跑、恢复立即补跑一次；overlap=SKIP 时上一 run
-  未终态跳过本轮且 run_count 不增；手造 RUNNING 超时 run 被收割并按策略重排；
-  服务重启后到期任务自动续跑。
-- M3：非 admin 查列表只见本人任务、管理操作 403；admin 全量可操作；
+- M2：DELAY 到点才跑；FIXED_DELAY 按间隔连跑、max_runs=3 后 DONE；
+  cron 非法 400；PAUSED 不跑、恢复跨多轮也只补跑一次；overlap=SKIP 时上一 run
+  未终态跳过本轮且 run_count 不增、QUEUE 时上一 run 终态后下一 tick 补跑；
+  认领后 next_run_at 置 NULL，在跑任务不被后续 tick 重复扫到；手造 RUNNING
+  超时 run 被收割并按策略重排；**重启即收割在途 RUNNING 并按 FR-04 重排**，
+  到期任务自动续跑；`ensureScheduled` 重启二次登记不产生新任务、仅更新策略；
+  trigger 对 PAUSED 任务 409。
+- M3：非 admin 查列表只见本人任务、查他人 run 详情 403、管理操作 403；
+  admin 全量可操作；
   管理页两视图可查、抽屉日志实时滚动终态定格；路由登记进布局巡检；
   E2E（隔离 app + e2e profile）submit→WS 看日志→查 run 记录全链通过，
   跑完清理自起进程。
@@ -229,8 +263,8 @@ async_task_runs(                    -- 每次执行一行（含每次重试 atte
 
 | # | 项 | 口径 |
 |---|---|---|
-| R1 | 主 tick 5s 粒度，cron 最小生效粒度受限 | 平台任务均为分钟级以上周期；接受，秒级需求走 FIXED_INTERVAL 或后续降 tick |
-| R2 | 虚拟线程池无界，并发任务暴涨拖垮 DB | M1 执行靠重叠策略 + 超时兜底；后续可加全局并发闸（信号量） |
+| R1 | 主 tick 5s 粒度，cron 最小生效粒度受限 | 平台任务均为分钟级以上周期；接受，秒级需求走 FIXED_DELAY 或后续降 tick |
+| R2 | 虚拟线程池无界，并发任务暴涨拖垮 DB | M1 执行靠重叠策略 + 超时兜底 + 单 tick 认领上限（FR-06）防重启积压风暴；后续可加全局并发闸（信号量） |
 | R3 | cron 解析库选型 | 复用 Spring `CronExpression`（spring-context 既有），不引新依赖 |
 | R4 | 乐观认领在 H2/PG/MySQL 三库语义 | 标准 UPDATE WHERE 全库通用；E2E 覆盖 H2，存量 PG/MySQL 部署验证 |
 | R5 | 存量 @Scheduled 长期并存两套调度视图 | 非目标已声明不迁移；管理页注明只覆盖框架任务 |
