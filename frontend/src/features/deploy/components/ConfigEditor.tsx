@@ -142,7 +142,7 @@ function StepListEditor({ title, steps, templates, onChange }: {
             <Select options={STEP_TYPES.map((t) => ({ value: t, label: t }))} />
           </Form.Item>
           <Form.Item label="模板（CAP-07 白名单）" name="templateCode" rules={[{ required: true, message: '请选择命令模板' }]}
-            extra={templates.length === 0 ? '当前项目暂无命令模板，请到「系统管理 → 模板与审计」先创建' : undefined}>
+            extra={templates.length === 0 ? '当前项目暂无命令模板，请到「后台 → Agent 执行 → 执行管控」先创建' : undefined}>
             <Select
               showSearch
               placeholder="选择命令模板"

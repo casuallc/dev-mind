@@ -61,7 +61,7 @@ export default function ReleaseConfigForm({ id }: { id: string }) {
         <Form.Item
           label="推送模板 code"
           name="scriptTemplateRef"
-          extra="执行底座白名单模板 code（后台「模板与审计」登记），服务端渲染后执行推送"
+          extra="执行底座白名单模板 code（后台「执行管控」登记），服务端渲染后执行推送"
         >
           <Input placeholder="如 nexus_push" />
         </Form.Item>

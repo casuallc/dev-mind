@@ -10,7 +10,6 @@ import {
   DeploymentUnitOutlined,
   ExperimentOutlined,
   FileTextOutlined,
-  FolderOpenOutlined,
   ForkOutlined,
   InteractionOutlined,
   FolderOutlined,
@@ -43,7 +42,6 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
     children: [
       { key: '/admin/projects', icon: <FolderOutlined />, label: '项目管理' },
       { key: '/admin/repos', icon: <CodeOutlined />, label: '代码仓库' },
-      { key: '/admin/execution', icon: <AuditOutlined />, label: '模板与审计' },
       { key: '/admin/scenarios', icon: <DeploymentUnitOutlined />, label: '应用场景' },
     ],
   },
@@ -51,9 +49,10 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
     type: 'group' as const,
     label: 'Agent 执行',
     children: [
+      // 节点页内页签：节点列表 / Runner 包 / 出口规则 / 审计日志 / 文件浏览（原独立菜单均已并入）
       { key: '/admin/agent/nodes', icon: <RobotOutlined />, label: '节点' },
-      { key: '/admin/agent/files', icon: <FolderOpenOutlined />, label: '节点文件' },
-      // 出口规则 / 审计日志已并入「节点」页内页签（AgentNodesPage ?view=egress/audit）
+      { key: '/admin/tasks', icon: <ScheduleOutlined />, label: '任务管理' },
+      { key: '/admin/execution', icon: <AuditOutlined />, label: '执行管控' },
     ],
   },
   {
@@ -77,16 +76,21 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
   },
   {
     type: 'group' as const,
-    label: '系统',
+    label: '运行观测',
     children: [
-      { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
       // CAP-06 FR-07：通知通道为全局配置（页内视图：通道/防打扰）
       { key: '/admin/notifications', icon: <BellOutlined />, label: '通知管理' },
       { key: '/admin/bot', icon: <CommentOutlined />, label: '机器人运维' },
       { key: '/admin/copilot', icon: <InteractionOutlined />, label: '智能体运维' },
-      { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
+    ],
+  },
+  {
+    type: 'group' as const,
+    label: '系统',
+    children: [
+      { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
       { key: '/admin/models', icon: <ThunderboltOutlined />, label: '模型接入' },
-      { key: '/admin/tasks', icon: <ScheduleOutlined />, label: '任务管理' },
+      { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
       { key: '/admin/users', icon: <SafetyCertificateOutlined />, label: '用户管理' },
     ],
   },
@@ -107,7 +111,7 @@ function menuLabel(items: AdminMenuItem[], key: string): string | undefined {
   return undefined
 }
 
-/** 管理后台布局（仅 ADMIN，由 RequireAdmin 守卫）：指挥中心 / 项目与资源 / Agent 执行 / 内容 / 智能决策 / 系统。 */
+/** 管理后台布局（仅 ADMIN，由 RequireAdmin 守卫）：指挥中心 / 项目与资源 / Agent 执行 / 内容 / 智能决策 / 运行观测 / 系统。 */
 export default function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()

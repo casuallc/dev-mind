@@ -26,7 +26,7 @@ export default function ExecutionPage() {
       styles={{ body: pageCardBodyFlexStyle }}
       title={
         <Space size={12}>
-          <span>模板与审计</span>
+          <span>执行管控</span>
           <Segmented
             value={view}
             onChange={setView}
