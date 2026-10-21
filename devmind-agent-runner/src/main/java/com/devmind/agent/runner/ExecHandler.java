@@ -150,6 +150,9 @@ public class ExecHandler {
                 emit(execId, "stdout", "[runner] 构建工作区就绪: " + cwd, token);
             } else {
                 cwd = config.resolveWorkDir(projectId);
+                // 纯 exec 用途的 runner 可能从未建过 workDir（无会话/构建流量），
+                // ProcessBuilder 要求 cwd 必须存在（否则 Windows error=267）
+                Files.createDirectories(cwd);
             }
             cwd = resolveCwd(cwd, workingDir);
 
