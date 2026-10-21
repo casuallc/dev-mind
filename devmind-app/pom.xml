@@ -91,6 +91,11 @@
             <artifactId>devmind-execution</artifactId>
         </dependency>
         <dependency>
+            <!-- CAP-80 通用异步任务框架 -->
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-task</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.devmind</groupId>
             <artifactId>devmind-artifact</artifactId>
         </dependency>
