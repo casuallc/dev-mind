@@ -2,10 +2,14 @@ package com.devmind.task.service;
 
 import com.devmind.auth.IdentityService;
 import com.devmind.auth.model.UserEntity;
+import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.task.api.AsyncTaskHandler;
 import com.devmind.task.api.ScheduleSpec;
 import com.devmind.task.api.TaskOptions;
+import com.devmind.task.api.TaskTypeView;
+import com.devmind.task.api.TaskUpsertRequest;
 import com.devmind.task.engine.AsyncTaskExecutor;
 import com.devmind.task.engine.RunLifecycleService;
 import com.devmind.task.engine.TaskDispatcher;
@@ -16,13 +20,17 @@ import com.devmind.task.repo.AsyncTaskRepository;
 import com.devmind.task.repo.AsyncTaskRunRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
 import java.time.ZonedDateTime;
+import java.util.Comparator;
+import java.util.List;
 
 /**
  * CAP-80 FR-10 任务提交与控制服务（Java 侧统一入口；REST 管理面也走这里）。
@@ -41,16 +49,22 @@ public class AsyncTaskService {
     private final RunLifecycleService lifecycle;
     private final AsyncTaskExecutor executor;
     private final IdentityService identityService;
+    private final ObjectMapper mapper;
+    /** M4：节点存在性校验用（agent 模块未装配 = 无节点可指定） */
+    private final ObjectProvider<AgentNodeConnector> connectorProvider;
 
     public AsyncTaskService(AsyncTaskRepository taskRepo, AsyncTaskRunRepository runRepo,
                             TaskDispatcher dispatcher, RunLifecycleService lifecycle,
-                            AsyncTaskExecutor executor, IdentityService identityService) {
+                            AsyncTaskExecutor executor, IdentityService identityService,
+                            ObjectMapper mapper, ObjectProvider<AgentNodeConnector> connectorProvider) {
         this.taskRepo = taskRepo;
         this.runRepo = runRepo;
         this.dispatcher = dispatcher;
         this.lifecycle = lifecycle;
         this.executor = executor;
         this.identityService = identityService;
+        this.mapper = mapper;
+        this.connectorProvider = connectorProvider;
     }
 
     /** 一次性任务提交（IMMEDIATE/DELAY，固定 max_runs=1）。返回任务 id。 */
@@ -74,6 +88,7 @@ public class AsyncTaskService {
         t.setStatus(AsyncTaskEntity.STATUS_ACTIVE);
         t.setActor(identityService.currentActor());
         t.setProjectId(o.getProjectId());
+        t.setAgentNodeId(o.getAgentNodeId());
         t.setCreatedAt(now);
         t.touch();
         taskRepo.save(t);
@@ -116,6 +131,7 @@ public class AsyncTaskService {
         existing.setCronExpr(spec.getCronExpr());
         existing.setMaxRuns(spec.getMaxRuns());
         existing.setProjectId(spec.getProjectId());
+        existing.setAgentNodeId(spec.getAgentNodeId());
         applyPolicies(existing, spec.getRetryMaxAttempts(), spec.getRetryBackoff(),
                 spec.getRetryIntervalMs(), spec.getTimeoutMs(), spec.getOverlapPolicy());
         existing.touch();
@@ -183,6 +199,178 @@ public class AsyncTaskService {
         t.setNextRunAt(Instant.now());
         t.touch();
         taskRepo.save(t);
+    }
+
+    /**
+     * CAP-80 M4 REST 创建（仅 ADMIN，SecurityConfig 收敛）。四形态共用一份请求：
+     * IMMEDIATE/DELAY 走 {@link #submit}（固定 max_runs=1），FIXED_DELAY/CRON 走 {@link #schedule}。
+     */
+    public String create(TaskUpsertRequest req) {
+        String kind = validateUpsert(req);
+        if (AsyncTaskEntity.KIND_FIXED_DELAY.equals(kind) || AsyncTaskEntity.KIND_CRON.equals(kind)) {
+            return schedule(req.type(), req.payload(), toSpec(req, kind));
+        }
+        return submit(req.type(), req.payload(), toOptions(req));
+    }
+
+    /**
+     * CAP-80 M4 REST 编辑（仅 ADMIN）。终态（DONE/CANCELLED）409；ACTIVE 且当前无在途 run
+     * （next_run_at 非空）按新调度规格即时重排；PAUSED 保持原 next_run_at（恢复语义不变）。
+     * LOCAL 类任务的 agent_node_id 一律不落库（忽略语义，避免误读为生效）。
+     */
+    public void update(String taskId, TaskUpsertRequest req) {
+        AsyncTaskEntity t = requireTask(taskId);
+        if (AsyncTaskEntity.STATUS_DONE.equals(t.getStatus())
+                || AsyncTaskEntity.STATUS_CANCELLED.equals(t.getStatus())) {
+            throw new DevMindException(ErrorCode.CONFLICT, "终态任务不可编辑（" + t.getStatus() + "）");
+        }
+        String kind = validateUpsert(req);
+        t.setTaskType(req.type());
+        t.setName(req.name() == null || req.name().isBlank() ? req.type() : req.name());
+        t.setPayload(req.payload());
+        t.setScheduleKind(kind);
+        t.setRunAt(AsyncTaskEntity.KIND_DELAY.equals(kind) ? req.runAt() : null);
+        t.setIntervalMs(AsyncTaskEntity.KIND_FIXED_DELAY.equals(kind) ? req.intervalMs() : null);
+        t.setCronExpr(AsyncTaskEntity.KIND_CRON.equals(kind) ? req.cronExpr() : null);
+        boolean oneShot = AsyncTaskEntity.KIND_IMMEDIATE.equals(kind) || AsyncTaskEntity.KIND_DELAY.equals(kind);
+        t.setMaxRuns(oneShot ? 1 : req.maxRuns());
+        t.setProjectId(req.projectId());
+        t.setAgentNodeId(isRunnerType(req.type()) ? blankToNull(req.agentNodeId()) : null);
+        applyPolicies(t, req.retryMaxAttempts(), req.retryBackoff(), req.retryIntervalMs(),
+                req.timeoutMs(), req.overlapPolicy());
+        if (AsyncTaskEntity.STATUS_ACTIVE.equals(t.getStatus()) && t.getNextRunAt() != null) {
+            t.setNextRunAt(recomputeAfterEdit(t, kind, req));
+        }
+        t.touch();
+        taskRepo.save(t);
+        log.info("任务已编辑: {} [{}] {}", t.getId(), t.getScheduleKind(), t.getTaskType());
+    }
+
+    /** CAP-80 M4 types 端点：已注册 handler 元数据（页面类型下拉/模板/执行位置）。 */
+    public List<TaskTypeView> listTypes() {
+        return dispatcher.all().stream()
+                .map(h -> new TaskTypeView(h.type(), h.description(), h.payloadTemplate(), h.executor()))
+                .sorted(Comparator.comparing(TaskTypeView::type))
+                .toList();
+    }
+
+    /** 创建/编辑共用校验：type 已注册、payload 合法 JSON、形态必填项、节点已登记（仅 RUNNER 类）。 */
+    private String validateUpsert(TaskUpsertRequest req) {
+        if (req == null || req.type() == null || req.type().isBlank()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "任务类型 type 不能为空");
+        }
+        dispatcher.require(req.type());
+        if (req.payload() != null && !req.payload().isBlank()) {
+            try {
+                mapper.readTree(req.payload());
+            } catch (Exception e) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "payload 不是合法 JSON: " + e.getMessage());
+            }
+        }
+        String kind = req.scheduleKind() == null || req.scheduleKind().isBlank()
+                ? AsyncTaskEntity.KIND_IMMEDIATE : req.scheduleKind();
+        switch (kind) {
+            case AsyncTaskEntity.KIND_IMMEDIATE -> { /* 无额外必填 */ }
+            case AsyncTaskEntity.KIND_DELAY -> {
+                if (req.runAt() == null) {
+                    throw new DevMindException(ErrorCode.BAD_REQUEST, "DELAY 必须提供 runAt");
+                }
+            }
+            case AsyncTaskEntity.KIND_FIXED_DELAY -> {
+                if (req.intervalMs() == null || req.intervalMs() <= 0) {
+                    throw new DevMindException(ErrorCode.BAD_REQUEST, "FIXED_DELAY 必须提供正数 intervalMs");
+                }
+            }
+            case AsyncTaskEntity.KIND_CRON -> {
+                if (req.cronExpr() == null || !CronExpression.isValidExpression(req.cronExpr())) {
+                    throw new DevMindException(ErrorCode.BAD_REQUEST, "非法 cron 表达式: " + req.cronExpr());
+                }
+            }
+            default -> throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "调度形态仅支持 IMMEDIATE/DELAY/FIXED_DELAY/CRON: " + kind);
+        }
+        if (req.maxRuns() != null && req.maxRuns() < 1) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "maxRuns 必须 >= 1");
+        }
+        if (isRunnerType(req.type()) && req.agentNodeId() != null && !req.agentNodeId().isBlank()) {
+            AgentNodeConnector connector = connectorProvider.getIfAvailable();
+            if (connector == null || !connector.nodeExists(req.agentNodeId().strip())) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "执行节点不存在: " + req.agentNodeId());
+            }
+        }
+        return kind;
+    }
+
+    private boolean isRunnerType(String type) {
+        AsyncTaskHandler h = dispatcher.handlerOrNull(type);
+        return h != null && AsyncTaskHandler.EXECUTOR_RUNNER.equals(h.executor());
+    }
+
+    /** 编辑后重排（仅 ACTIVE 且无在途 run 时调用）：一次性形态立即/按时刻，周期形态按规格算下一轮。 */
+    private Instant recomputeAfterEdit(AsyncTaskEntity t, String kind, TaskUpsertRequest req) {
+        if (AsyncTaskEntity.KIND_IMMEDIATE.equals(kind)) {
+            return Instant.now();
+        }
+        if (AsyncTaskEntity.KIND_DELAY.equals(kind)) {
+            return req.runAt();
+        }
+        return lifecycle.computeNext(t, Instant.now());
+    }
+
+    private TaskOptions toOptions(TaskUpsertRequest req) {
+        TaskOptions.Builder b = TaskOptions.builder()
+                .name(req.name()).projectId(req.projectId())
+                .agentNodeId(isRunnerType(req.type()) ? blankToNull(req.agentNodeId()) : null);
+        if (req.runAt() != null) {
+            b.runAt(req.runAt());
+        }
+        if (req.retryMaxAttempts() != null) {
+            b.retryMaxAttempts(req.retryMaxAttempts());
+        }
+        if (req.retryBackoff() != null) {
+            b.retryBackoff(req.retryBackoff());
+        }
+        if (req.retryIntervalMs() != null) {
+            b.retryIntervalMs(req.retryIntervalMs());
+        }
+        if (req.timeoutMs() != null) {
+            b.timeoutMs(req.timeoutMs());
+        }
+        if (req.overlapPolicy() != null) {
+            b.overlapPolicy(req.overlapPolicy());
+        }
+        return b.build();
+    }
+
+    private ScheduleSpec toSpec(TaskUpsertRequest req, String kind) {
+        ScheduleSpec.Builder b = ScheduleSpec.builder(kind)
+                .name(req.name()).projectId(req.projectId())
+                .agentNodeId(isRunnerType(req.type()) ? blankToNull(req.agentNodeId()) : null);
+        if (req.intervalMs() != null) {
+            b.intervalMs(req.intervalMs());
+        }
+        if (req.cronExpr() != null) {
+            b.cronExpr(req.cronExpr());
+        }
+        if (req.maxRuns() != null) {
+            b.maxRuns(req.maxRuns());
+        }
+        if (req.retryMaxAttempts() != null) {
+            b.retryMaxAttempts(req.retryMaxAttempts());
+        }
+        if (req.retryBackoff() != null) {
+            b.retryBackoff(req.retryBackoff());
+        }
+        if (req.retryIntervalMs() != null) {
+            b.retryIntervalMs(req.retryIntervalMs());
+        }
+        if (req.timeoutMs() != null) {
+            b.timeoutMs(req.timeoutMs());
+        }
+        if (req.overlapPolicy() != null) {
+            b.overlapPolicy(req.overlapPolicy());
+        }
+        return b.build();
     }
 
     public Page<AsyncTaskEntity> query(String type, String status, String keyword,
@@ -253,6 +441,7 @@ public class AsyncTaskService {
         t.setStatus(AsyncTaskEntity.STATUS_ACTIVE);
         t.setActor(actor);
         t.setProjectId(spec.getProjectId());
+        t.setAgentNodeId(spec.getAgentNodeId());
         t.setCreatedAt(now);
         t.touch();
         return t;

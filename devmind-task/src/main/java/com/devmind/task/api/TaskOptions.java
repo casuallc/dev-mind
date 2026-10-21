@@ -11,6 +11,7 @@ public final class TaskOptions {
     private final String name;
     private final Instant runAt;
     private final String projectId;
+    private final String agentNodeId;
     private final Integer retryMaxAttempts;
     private final String retryBackoff;
     private final Long retryIntervalMs;
@@ -21,6 +22,7 @@ public final class TaskOptions {
         this.name = b.name;
         this.runAt = b.runAt;
         this.projectId = b.projectId;
+        this.agentNodeId = b.agentNodeId;
         this.retryMaxAttempts = b.retryMaxAttempts;
         this.retryBackoff = b.retryBackoff;
         this.retryIntervalMs = b.retryIntervalMs;
@@ -36,6 +38,8 @@ public final class TaskOptions {
     /** 非空 = DELAY 形态；空 = IMMEDIATE */
     public Instant getRunAt() { return runAt; }
     public String getProjectId() { return projectId; }
+    /** CAP-80 M4：执行节点（RUNNER 类任务显式指定；空=路由链兜底；LOCAL 类忽略） */
+    public String getAgentNodeId() { return agentNodeId; }
     public Integer getRetryMaxAttempts() { return retryMaxAttempts; }
     public String getRetryBackoff() { return retryBackoff; }
     public Long getRetryIntervalMs() { return retryIntervalMs; }
@@ -46,6 +50,7 @@ public final class TaskOptions {
         private String name;
         private Instant runAt;
         private String projectId;
+        private String agentNodeId;
         private Integer retryMaxAttempts;
         private String retryBackoff;
         private Long retryIntervalMs;
@@ -58,6 +63,8 @@ public final class TaskOptions {
         /** 相对延迟毫秒（换算为 runAt，DELAY） */
         public Builder delayMs(long ms) { runAt = Instant.now().plusMillis(ms); return this; }
         public Builder projectId(String v) { projectId = v; return this; }
+        /** CAP-80 M4：显式执行节点（RUNNER 类任务；LOCAL 类忽略） */
+        public Builder agentNodeId(String v) { agentNodeId = v; return this; }
         /** 每轮最大尝试次数（含首次），默认 1=不重试 */
         public Builder retryMaxAttempts(int v) { retryMaxAttempts = v; return this; }
         /** FIXED / EXPONENTIAL（见 RetryPolicy） */

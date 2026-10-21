@@ -104,6 +104,10 @@ public class AsyncTaskEntity {
     @Column(name = "overlap_policy", length = 8)
     private String overlapPolicy = OVERLAP_SKIP;
 
+    /** M4：执行节点（RUNNER 类任务显式指定；空=路由链兜底；LOCAL 类忽略） */
+    @Column(name = "agent_node_id", length = 64)
+    private String agentNodeId;
+
     @Column(name = "next_run_at")
     private Instant nextRunAt;
 
@@ -164,6 +168,8 @@ public class AsyncTaskEntity {
     public void setTimeoutMs(Long timeoutMs) { this.timeoutMs = timeoutMs; }
     public String getOverlapPolicy() { return overlapPolicy == null ? OVERLAP_SKIP : overlapPolicy; }
     public void setOverlapPolicy(String overlapPolicy) { this.overlapPolicy = overlapPolicy; }
+    public String getAgentNodeId() { return agentNodeId; }
+    public void setAgentNodeId(String agentNodeId) { this.agentNodeId = agentNodeId; }
     public Instant getNextRunAt() { return nextRunAt; }
     public void setNextRunAt(Instant nextRunAt) { this.nextRunAt = nextRunAt; }
     public String getStatus() { return status; }

@@ -39,6 +39,11 @@ public class TaskDispatcher {
         return handlers.containsKey(type);
     }
 
+    /** CAP-80 M4：全部已注册 handler（types 端点元数据来源） */
+    public java.util.Collection<AsyncTaskHandler> all() {
+        return handlers.values();
+    }
+
     public AsyncTaskHandler handlerOrNull(String type) {
         return handlers.get(type);
     }

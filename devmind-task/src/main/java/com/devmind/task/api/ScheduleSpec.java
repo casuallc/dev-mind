@@ -13,6 +13,7 @@ public final class ScheduleSpec {
     private final String cronExpr;
     private final Integer maxRuns;
     private final String projectId;
+    private final String agentNodeId;
     private final Integer retryMaxAttempts;
     private final String retryBackoff;
     private final Long retryIntervalMs;
@@ -26,6 +27,7 @@ public final class ScheduleSpec {
         this.cronExpr = b.cronExpr;
         this.maxRuns = b.maxRuns;
         this.projectId = b.projectId;
+        this.agentNodeId = b.agentNodeId;
         this.retryMaxAttempts = b.retryMaxAttempts;
         this.retryBackoff = b.retryBackoff;
         this.retryIntervalMs = b.retryIntervalMs;
@@ -52,6 +54,8 @@ public final class ScheduleSpec {
     /** 执行次数上限（null=不限） */
     public Integer getMaxRuns() { return maxRuns; }
     public String getProjectId() { return projectId; }
+    /** CAP-80 M4：执行节点（RUNNER 类任务显式指定；空=路由链兜底；LOCAL 类忽略） */
+    public String getAgentNodeId() { return agentNodeId; }
     public Integer getRetryMaxAttempts() { return retryMaxAttempts; }
     public String getRetryBackoff() { return retryBackoff; }
     public Long getRetryIntervalMs() { return retryIntervalMs; }
@@ -65,6 +69,7 @@ public final class ScheduleSpec {
         private String cronExpr;
         private Integer maxRuns;
         private String projectId;
+        private String agentNodeId;
         private Integer retryMaxAttempts;
         private String retryBackoff;
         private Long retryIntervalMs;
@@ -80,6 +85,8 @@ public final class ScheduleSpec {
         public Builder cronExpr(String v) { cronExpr = v; return this; }
         public Builder maxRuns(int v) { maxRuns = v; return this; }
         public Builder projectId(String v) { projectId = v; return this; }
+        /** CAP-80 M4：显式执行节点（RUNNER 类任务；LOCAL 类忽略） */
+        public Builder agentNodeId(String v) { agentNodeId = v; return this; }
         public Builder retryMaxAttempts(int v) { retryMaxAttempts = v; return this; }
         public Builder retryBackoff(String v) { retryBackoff = v; return this; }
         public Builder retryIntervalMs(long v) { retryIntervalMs = v; return this; }

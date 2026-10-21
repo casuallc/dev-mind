@@ -2,10 +2,14 @@ package com.devmind.task.service;
 
 import com.devmind.auth.IdentityService;
 import com.devmind.auth.model.UserEntity;
+import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.task.api.AsyncTaskHandler;
 import com.devmind.task.api.ScheduleSpec;
 import com.devmind.task.api.TaskOptions;
+import com.devmind.task.api.TaskTypeView;
+import com.devmind.task.api.TaskUpsertRequest;
 import com.devmind.task.engine.AsyncTaskExecutor;
 import com.devmind.task.engine.RunLifecycleService;
 import com.devmind.task.engine.TaskDispatcher;
@@ -15,6 +19,8 @@ import com.devmind.task.repo.AsyncTaskRepository;
 import com.devmind.task.repo.AsyncTaskRunRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -46,6 +52,7 @@ class AsyncTaskServiceTest {
     private final RunLifecycleService lifecycle = mock(RunLifecycleService.class);
     private final AsyncTaskExecutor executor = mock(AsyncTaskExecutor.class);
     private final IdentityService identity = mock(IdentityService.class);
+    private final AgentNodeConnector connector = mock(AgentNodeConnector.class);
     private final Map<String, AsyncTaskEntity> tasks = new LinkedHashMap<>();
 
     private AsyncTaskService service;
@@ -64,8 +71,8 @@ class AsyncTaskServiceTest {
         when(runRepo.findByStatus(AsyncTaskRunEntity.RUNNING)).thenReturn(List.of());
         when(identity.currentActor()).thenReturn("tester");
         when(identity.currentUser()).thenReturn(Optional.empty());
-        // 真实分发器（内置一个 stub type），真实 next_run_at 计算（纯函数）
-        TaskDispatcher dispatcher = new TaskDispatcher(List.of(stubHandler("echo")));
+        // 真实分发器（内置 LOCAL stub + RUNNER stub），真实 next_run_at 计算（纯函数）
+        TaskDispatcher dispatcher = new TaskDispatcher(List.of(stubHandler("echo"), runnerHandler("remote.shell")));
         when(lifecycle.computeNext(any(AsyncTaskEntity.class), any(Instant.class)))
                 .thenAnswer(inv -> {
                     AsyncTaskEntity t = inv.getArgument(0);
@@ -73,11 +80,15 @@ class AsyncTaskServiceTest {
                     return AsyncTaskEntity.KIND_FIXED_DELAY.equals(t.getScheduleKind())
                             ? base.plusMillis(t.getIntervalMs()) : null;
                 });
-        service = new AsyncTaskService(taskRepo, runRepo, dispatcher, lifecycle, executor, identity);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<AgentNodeConnector> connectorProvider = mock(ObjectProvider.class);
+        when(connectorProvider.getIfAvailable()).thenReturn(connector);
+        service = new AsyncTaskService(taskRepo, runRepo, dispatcher, lifecycle, executor, identity,
+                new ObjectMapper(), connectorProvider);
     }
 
-    private static com.devmind.task.api.AsyncTaskHandler stubHandler(String type) {
-        return new com.devmind.task.api.AsyncTaskHandler() {
+    private static AsyncTaskHandler stubHandler(String type) {
+        return new AsyncTaskHandler() {
             @Override
             public String type() {
                 return type;
@@ -85,6 +96,25 @@ class AsyncTaskServiceTest {
 
             @Override
             public void execute(String payload, com.devmind.task.api.TaskContext ctx) {
+            }
+        };
+    }
+
+    /** RUNNER 类 stub（executor 元数据 = RUNNER，创建期触发节点存在性校验） */
+    private static AsyncTaskHandler runnerHandler(String type) {
+        return new AsyncTaskHandler() {
+            @Override
+            public String type() {
+                return type;
+            }
+
+            @Override
+            public void execute(String payload, com.devmind.task.api.TaskContext ctx) {
+            }
+
+            @Override
+            public String executor() {
+                return AsyncTaskHandler.EXECUTOR_RUNNER;
             }
         };
     }
@@ -223,5 +253,95 @@ class AsyncTaskServiceTest {
         when(identity.currentActor()).thenReturn("root");
         assertTrue(service.isAdmin());
         assertNull(service.actorFilterForCurrentUser());
+    }
+
+    // ---------------- M4：REST 创建/编辑/types ----------------
+
+    private static TaskUpsertRequest upsert(String type, String payload, String kind) {
+        return new TaskUpsertRequest(null, type, payload, kind, null, null, null, null,
+                null, null, null, null, null, null, null);
+    }
+
+    @Test
+    void createImmediateViaRestShape() {
+        String id = service.create(upsert("echo", "{}", null)); // kind 空 = IMMEDIATE
+        AsyncTaskEntity t = tasks.get(id);
+        assertNotNull(t);
+        assertEquals(AsyncTaskEntity.KIND_IMMEDIATE, t.getScheduleKind());
+        assertEquals(1, t.getMaxRuns());
+        assertEquals("echo", t.getName(), "name 空回落 type");
+    }
+
+    @Test
+    void createRejectsInvalidPayloadAndBadSchedule() {
+        DevMindException badJson = assertThrows(DevMindException.class,
+                () -> service.create(upsert("echo", "not-json", null)));
+        assertEquals(ErrorCode.BAD_REQUEST, badJson.getErrorCode());
+        DevMindException delayNoAt = assertThrows(DevMindException.class,
+                () -> service.create(upsert("echo", "{}", "DELAY")));
+        assertEquals(ErrorCode.BAD_REQUEST, delayNoAt.getErrorCode());
+        DevMindException badCron = assertThrows(DevMindException.class,
+                () -> service.create(new TaskUpsertRequest(null, "echo", "{}", "CRON", null, null,
+                        "not-a-cron", null, null, null, null, null, null, null, null)));
+        assertEquals(ErrorCode.BAD_REQUEST, badCron.getErrorCode());
+        DevMindException badKind = assertThrows(DevMindException.class,
+                () -> service.create(upsert("echo", "{}", "HOURLY")));
+        assertEquals(ErrorCode.BAD_REQUEST, badKind.getErrorCode());
+    }
+
+    @Test
+    void createRunnerTaskValidatesNodeExistence() {
+        when(connector.nodeExists("9")).thenReturn(false);
+        DevMindException e = assertThrows(DevMindException.class, () -> service.create(
+                new TaskUpsertRequest(null, "remote.shell", "{}", null, null, null, null, null,
+                        "9", null, null, null, null, null, null)));
+        assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
+
+        when(connector.nodeExists("9")).thenReturn(true);
+        String id = service.create(new TaskUpsertRequest(null, "remote.shell", "{}", null, null, null,
+                null, null, "9", null, null, null, null, null, null));
+        assertEquals("9", tasks.get(id).getAgentNodeId());
+    }
+
+    @Test
+    void createLocalTaskIgnoresAgentNodeId() {
+        // LOCAL 类任务：agent_node_id 不校验也不落库（忽略语义）
+        String id = service.create(new TaskUpsertRequest(null, "echo", "{}", null, null, null,
+                null, null, "9", null, null, null, null, null, null));
+        assertNull(tasks.get(id).getAgentNodeId());
+    }
+
+    @Test
+    void updateTerminalTaskIs409() {
+        String id = service.submit("echo", "{}", null);
+        service.cancel(id);
+        DevMindException e = assertThrows(DevMindException.class,
+                () -> service.update(id, upsert("echo", "{}", null)));
+        assertEquals(ErrorCode.CONFLICT, e.getErrorCode());
+    }
+
+    @Test
+    void updateActiveTaskRecomputesNextRunAt() {
+        String id = service.schedule("echo", "{}",
+                ScheduleSpec.fixedDelay(60_000L).name("p1").build());
+        AsyncTaskEntity before = tasks.get(id);
+        Instant oldNext = before.getNextRunAt();
+        service.update(id, new TaskUpsertRequest("p1-改", "echo", "{\"v\":2}", "FIXED_DELAY", null,
+                120_000L, null, 5, null, null, null, null, null, null, null));
+        AsyncTaskEntity t = tasks.get(id);
+        assertEquals(120_000L, t.getIntervalMs());
+        assertEquals("{\"v\":2}", t.getPayload());
+        assertEquals(5, t.getMaxRuns());
+        assertNotNull(t.getNextRunAt());
+        assertTrue(t.getNextRunAt().isAfter(oldNext), "间隔拉长后下一轮应晚于原排期");
+    }
+
+    @Test
+    void listTypesCarriesExecutorMetadata() {
+        List<TaskTypeView> types = service.listTypes();
+        TaskTypeView echo = types.stream().filter(v -> v.type().equals("echo")).findFirst().orElseThrow();
+        TaskTypeView shell = types.stream().filter(v -> v.type().equals("remote.shell")).findFirst().orElseThrow();
+        assertEquals(AsyncTaskHandler.EXECUTOR_LOCAL, echo.executor());
+        assertEquals(AsyncTaskHandler.EXECUTOR_RUNNER, shell.executor());
     }
 }
