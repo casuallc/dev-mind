@@ -1,7 +1,7 @@
-// CAP-80 异步任务管理面 API：/async-tasks（任务）+ /async-task-runs（执行记录）。
-// 任务创建没有 REST 端点（FR-10 走 Java API），这里只有查询与生命周期控制。
+// CAP-80 任务管理面 API：/async-tasks（任务）+ /async-task-runs（执行记录）。
+// M4 起双通道创建：Java API（后端模块登记）+ REST POST/PUT（页面创建/编辑，仅 ADMIN）。
 import { api } from '../../shared/api/client'
-import type { AsyncTaskPage, AsyncTaskRunView, AsyncTaskView } from './types'
+import type { AsyncTaskPage, AsyncTaskRunView, AsyncTaskView, TaskTypeView, TaskUpsertBody } from './types'
 
 function qs(params: Record<string, string | number | undefined>): string {
   const q = new URLSearchParams()
@@ -10,6 +10,16 @@ function qs(params: Record<string, string | number | undefined>): string {
   }
   return q.toString()
 }
+
+/** M4：已注册任务类型元数据（新建表单的类型下拉/模板/执行位置），仅 ADMIN */
+export const listTaskTypes = () => api.get<TaskTypeView[]>('/async-tasks/types')
+
+/** M4：创建任务（仅 ADMIN） */
+export const createTask = (body: TaskUpsertBody) => api.post<{ id: string }>('/async-tasks', body)
+
+/** M4：编辑任务（终态 409，仅 ADMIN） */
+export const updateTask = (id: string, body: TaskUpsertBody) =>
+  api.put<AsyncTaskView>(`/async-tasks/${id}`, body)
 
 export const listTasks = (params: {
   type?: string

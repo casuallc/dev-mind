@@ -86,7 +86,7 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
       { key: '/admin/copilot', icon: <InteractionOutlined />, label: '智能体运维' },
       { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
       { key: '/admin/models', icon: <ThunderboltOutlined />, label: '模型接入' },
-      { key: '/admin/async-tasks', icon: <ScheduleOutlined />, label: '异步任务' },
+      { key: '/admin/tasks', icon: <ScheduleOutlined />, label: '任务管理' },
       { key: '/admin/users', icon: <SafetyCertificateOutlined />, label: '用户管理' },
     ],
   },

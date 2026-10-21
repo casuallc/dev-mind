@@ -1,22 +1,24 @@
-// CAP-80 通用异步任务管理页（/admin/async-tasks）：任务视图（暂停/恢复/触发/取消 + 查记录）
+// CAP-80 任务管理页（/admin/tasks）：任务视图（新建/编辑/暂停/恢复/触发/取消 + 查记录）
 // + 执行记录横查视图（admin 专用；行内开日志抽屉，未终态接 WS 实时流）。
-// 布局遵循 docs/core/前端内容区布局约定.md：Card 标题 + Segmented 切换视图，extra 放刷新，FitTable 撑满。
+// 布局遵循 docs/core/前端内容区布局约定.md：Card 标题 + Segmented 切换视图，extra 放新建/刷新，FitTable 撑满。
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Button, Card, Drawer, Input, Modal, Segmented, Select, Space, Tag, Typography, message } from 'antd'
-import { ReloadOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import {
   cancelTask,
   listRuns,
   listTaskRuns,
   listTasks,
+  listTaskTypes,
   pauseTask,
   resumeTask,
   triggerTask,
 } from '../api'
-import type { AsyncTaskRunView, AsyncTaskView } from '../types'
+import type { AsyncTaskRunView, AsyncTaskView, TaskTypeView } from '../types'
 import RunLogDrawer, { RunStatusTag } from '../components/RunLogDrawer'
+import TaskFormModal from '../components/TaskFormModal'
 import FitTable from '../../../shared/components/FitTable'
 import { fmtTime } from '../../../shared/utils/format'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
@@ -47,6 +49,8 @@ export default function AdminAsyncTasksPage() {
   const view = searchParams.get('view') === 'runs' ? 'runs' : 'tasks'
   const setView = (v: string) => setSearchParams(v === 'runs' ? { view: 'runs' } : {}, { replace: true })
   const [refreshTick, setRefreshTick] = useState(0)
+  /** undefined=关闭；null=新建；否则编辑 */
+  const [editing, setEditing] = useState<AsyncTaskView | null | undefined>(undefined)
 
   return (
     <Card
@@ -54,7 +58,7 @@ export default function AdminAsyncTasksPage() {
       styles={{ body: pageCardBodyFlexStyle }}
       title={
         <Space size={12}>
-          <span>异步任务</span>
+          <span>任务管理</span>
           <Segmented
             value={view}
             onChange={setView}
@@ -66,22 +70,30 @@ export default function AdminAsyncTasksPage() {
         </Space>
       }
       extra={
-        <Button icon={<ReloadOutlined />} onClick={() => setRefreshTick((t) => t + 1)}>
-          刷新
-        </Button>
+        <Space>
+          {view === 'tasks' && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditing(null)}>
+              新建任务
+            </Button>
+          )}
+          <Button icon={<ReloadOutlined />} onClick={() => setRefreshTick((t) => t + 1)}>
+            刷新
+          </Button>
+        </Space>
       }
     >
       <Typography.Paragraph type="secondary">
         {view === 'tasks'
-          ? '通用异步任务框架（CAP-80）登记的全部任务：一次性/定时/固定间隔/Cron。任务由后端模块经 Java API 登记，这里做观测与生命周期控制（暂停/恢复/立即触发/取消）。'
+          ? '通用任务框架（CAP-80）登记的全部任务：即时/定时/固定间隔/Cron。可在本页直接创建（builtin.shell 类任务选择 runner 节点执行），也可由后端模块经 Java API 登记；此处统一做观测与生命周期控制（编辑/暂停/恢复/立即触发/取消）。'
           : '全部任务的执行记录（轮次×尝试），行内开日志抽屉；未终态的运行可实时看输出。'}
       </Typography.Paragraph>
-      {view === 'tasks' ? <TasksTab refreshTick={refreshTick} /> : <RunsTab refreshTick={refreshTick} />}
+      {view === 'tasks' ? <TasksTab refreshTick={refreshTick} onEdit={setEditing} /> : <RunsTab refreshTick={refreshTick} />}
+      <TaskFormModal editing={editing} onClose={(saved) => { setEditing(undefined); if (saved) setRefreshTick((t) => t + 1) }} />
     </Card>
   )
 }
 
-function TasksTab({ refreshTick }: { refreshTick: number }) {
+function TasksTab({ refreshTick, onEdit }: { refreshTick: number; onEdit: (t: AsyncTaskView) => void }) {
   const [rows, setRows] = useState<AsyncTaskView[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
@@ -91,6 +103,7 @@ function TasksTab({ refreshTick }: { refreshTick: number }) {
   const [loading, setLoading] = useState(false)
   const [runsTask, setRunsTask] = useState<AsyncTaskView | null>(null)
   const [logRun, setLogRun] = useState<AsyncTaskRunView | null>(null)
+  const [typeMap, setTypeMap] = useState<Map<string, TaskTypeView>>(new Map())
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -106,6 +119,12 @@ function TasksTab({ refreshTick }: { refreshTick: number }) {
   }, [status, keyword, page, size])
 
   useEffect(() => { load() }, [load, refreshTick])
+  // 类型元数据（执行位置列的 LOCAL/RUNNER 标记）；失败降级为只显示节点 id
+  useEffect(() => {
+    listTaskTypes()
+      .then((ts) => setTypeMap(new Map(ts.map((t) => [t.type, t]))))
+      .catch(() => setTypeMap(new Map()))
+  }, [])
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     try {
@@ -147,6 +166,25 @@ function TasksTab({ refreshTick }: { refreshTick: number }) {
       render: (s) => <Tag color={TASK_STATUS_COLOR[s] ?? 'default'}>{s}</Tag>,
     },
     {
+      title: '执行位置',
+      key: 'executor',
+      width: 150,
+      render: (_, r) => {
+        const t = typeMap.get(r.taskType)
+        if (t?.executor === 'RUNNER') {
+          return (
+            <Space size={4}>
+              <Tag color="blue">runner</Tag>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {r.agentNodeId ? `节点 ${r.agentNodeId}` : '平台默认'}
+              </Typography.Text>
+            </Space>
+          )
+        }
+        return <Tag>本机</Tag>
+      },
+    },
+    {
       title: '已跑',
       key: 'runs',
       width: 90,
@@ -162,6 +200,7 @@ function TasksTab({ refreshTick }: { refreshTick: number }) {
       render: (_, r) => (
         <Space>
           {r.status === 'ACTIVE' && <a onClick={() => act(() => triggerTask(r.id), '已触发（重叠策略照常生效）')}>触发</a>}
+          {(r.status === 'ACTIVE' || r.status === 'PAUSED') && <a onClick={() => onEdit(r)}>编辑</a>}
           {r.status === 'ACTIVE' && <a onClick={() => act(() => pauseTask(r.id), '已暂停')}>暂停</a>}
           {r.status === 'PAUSED' && <a onClick={() => act(() => resumeTask(r.id), '已恢复')}>恢复</a>}
           <a onClick={() => setRunsTask(r)}>记录</a>
@@ -216,7 +255,7 @@ function TasksTab({ refreshTick }: { refreshTick: number }) {
             setSize(s)
           },
         }}
-        locale={{ emptyText: '暂无任务。任务由后端模块经 AsyncTaskService 登记（见 CAP-80）。' }}
+        locale={{ emptyText: '暂无任务。点右上「新建任务」创建，或由后端模块经 AsyncTaskService 登记（见 CAP-80）。' }}
       />
       <TaskRunsDrawer
         task={runsTask}

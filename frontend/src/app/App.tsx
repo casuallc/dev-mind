@@ -183,8 +183,9 @@ export default function App() {
           <Route path="/admin/users" element={<UserManagementPage />} />
           {/* CAP-36 执行底座：命令模板 + 执行审计（CAP-07 服务器运维已下线，旧路径兼容） */}
           <Route path="/admin/execution" element={<ExecutionPage />} />
-          {/* CAP-80 通用异步任务框架管理面 */}
-          <Route path="/admin/async-tasks" element={<AdminAsyncTasksPage />} />
+          {/* CAP-80 任务管理（M4 正名；旧路径兼容跳转） */}
+          <Route path="/admin/tasks" element={<AdminAsyncTasksPage />} />
+          <Route path="/admin/async-tasks" element={<Navigate to="/admin/tasks" replace />} />
           <Route path="/admin/servers" element={<Navigate to="/admin/execution" replace />} />
           {/* CAP-18/19 平台集成（GitLab / Jira） */}
           <Route path="/admin/integrations" element={<IntegrationsPage />} />
