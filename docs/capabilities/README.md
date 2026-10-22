@@ -95,6 +95,7 @@
 | [CAP-80](CAP-80-async-task-framework.md) | 通用异步任务框架 | 底座 | 新模块 devmind-task 收敛「私有线程池+自有记录表+散点 @Scheduled」多份同构拷贝：`async_tasks`/`async_task_runs` 两表 + AsyncTaskHandler SPI（按 type 注册分发）+ 主 tick 乐观认领调度（IMMEDIATE/DELAY/FIXED_INTERVAL/CRON 四形态，max_runs 次数上限，SKIP/QUEUE 重叠策略）；重试策略化（FIXED/EXPONENTIAL 退避 + NonRetryable 分类）；日志复用 CAP-12 枢纽（topic=task-run:{runId}）；僵尸收割 + 重启续跑；后台系统组管理页；四大执行器与存量 @Scheduled 不迁移 |
 | [CAP-81](CAP-81-computer-use.md) | 远程桌面（节点 GUI 观测与控制） | Agent 域 | runner 补 GUI 原语（computer_req/ack 帧，Robot 截屏/键鼠/剪贴板），截图走 HTTP 中转不挤 WS；Windows Session 0 服务截不到用户桌面 → 计划任务拉起用户态 desktop-helper（loopback token），Linux X11 直做；三里程碑：M1 截屏只读观看 / M2 交互键鼠 / M3 审计限频运维；缺省关闭 + 只读档 + 动作全量审计脱敏 |
 | [CAP-82](CAP-82-llm-computer-use.md) | LLM Computer-Use 循环 | Agent 域 | 复用 CAP-81 computer 原语，服务端编排视觉模型循环操作 GUI：computer_use_tasks/steps、动作 JSON 协议、dryRun、人工接管；前置=视觉模型接入（扩 common 多模态 + 模型端点视觉位）+ 明确驱动场景 |
+| [CAP-83](CAP-83-binary-session-outputs.md) | 会话产出二进制文件回传 | Agent 域 | CAP-37 产出链路补二进制（xlsx 等曾 UTF-8 解码失败被静默跳过）：严格 UTF-8 解码判定文本/二进制，二进制走独立裸字节 POST 通道进附件管理（CAP-32：归属会话创建者+PRIVATE+tags=session-output，下载/图片预览复用 attachments raw），session_outputs 加 attachment_id 引用列（文本通道与消费零改动），同名覆盖删旧附件，上限沿用附件 20MB；前端弹窗附件项下载/禁推送，publish 兜底 400；部署先服务端后 runner |
 
 ## 文档模板说明
 
