@@ -1,10 +1,10 @@
 // 项目管理聚合页（/admin/projects）：单一 Card，title 内 Segmented 切换六个视图（?tab= 驱动，URL 可分享）。
-// 六个视图均为「项目管理」域下的收口入口：项目列表 / 经验提案 / 命令模板 / 代码库 / 场景 / 执行审计（注入预览是经验提案视图 extra 的抽屉按钮，不再是视图）。
+// 六个视图均为「项目管理」域下的收口入口：项目列表 / 经验提案 / 命令模板 / 代码库 / 场景 / 执行审计。
 // 布局遵循 docs/core/前端内容区布局约定.md：Card title + Segmented（ScrollRow 包裹），extra 随视图切换，表格默认密度。
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button, Card, Segmented, Space } from 'antd'
-import { BulbOutlined, EyeOutlined, PlusOutlined, ReloadOutlined, RobotOutlined } from '@ant-design/icons'
+import { BulbOutlined, PlusOutlined, ReloadOutlined, RobotOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
 import ScrollRow from '../../../shared/components/ScrollRow'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
@@ -33,7 +33,6 @@ export default function AdminProjectsHub() {
   const [refreshTick, setRefreshTick] = useState(0)
   const [createTick, setCreateTick] = useState(0)
   const [onboardTick, setOnboardTick] = useState(0)
-  const [previewTick, setPreviewTick] = useState(0)
 
   const setView = (v: string) => {
     setSearchParams(v === 'projects' ? {} : { tab: v }, { replace: true })
@@ -58,9 +57,6 @@ export default function AdminProjectsHub() {
     extra = (
       <Space>
         {refreshBtn}
-        <Button icon={<EyeOutlined />} onClick={() => setPreviewTick((t) => t + 1)}>
-          注入预览
-        </Button>
         <Button type="primary" icon={<BulbOutlined />} onClick={() => setCreateTick((t) => t + 1)}>
           手动沉淀经验
         </Button>
@@ -120,9 +116,7 @@ export default function AdminProjectsHub() {
       {view === 'projects' && (
         <ProjectsView refreshTick={refreshTick} createTick={createTick} onboardTick={onboardTick} />
       )}
-      {view === 'proposals' && (
-        <ProposalsView refreshTick={refreshTick} createTick={createTick} previewTick={previewTick} />
-      )}
+      {view === 'proposals' && <ProposalsView refreshTick={refreshTick} createTick={createTick} />}
       {view === 'templates' && <TemplatesTab refreshTick={refreshTick} createTick={createTick} />}
       {view === 'repos' && <ReposView refreshTick={refreshTick} createTick={createTick} />}
       {view === 'scenarios' && <ScenariosView refreshTick={refreshTick} createTick={createTick} />}

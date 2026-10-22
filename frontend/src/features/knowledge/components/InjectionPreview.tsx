@@ -1,5 +1,5 @@
-// 注入内容预览面板：选择项目与任务说明，预览会话启动时实际注入的知识内容。
-// 内嵌在经验提案页（ProposalsView 的「注入预览」抽屉），不再是独立 tab；抽屉 body 自带滚动，预览长文不写 maxHeight 内滚。
+// 注入内容预览面板：选择项目与任务说明，预览会话启动时实际注入的知识内容（FULL 库条目）。
+// 内嵌在知识库列表页（/admin/knowledge）的「注入预览」抽屉；抽屉 body 自带滚动，预览长文不写 maxHeight 内滚。
 import { useEffect, useState } from 'react'
 import { Button, Form, Input, Select, Space, Tag, Typography } from 'antd'
 import { listProjects } from '../../projects/api'

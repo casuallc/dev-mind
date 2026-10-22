@@ -1,5 +1,5 @@
-// CAP-44 知识库列表：库容器管理（新建/编辑/删除）。
-// 经验提案 inbox（内嵌注入预览）已迁入「项目管理」聚合页（features/knowledge/pages/ProposalsView）。
+// CAP-44 知识库列表：库容器管理（新建/编辑/删除）+ extra「注入预览」抽屉（预览 FULL 库条目实际注入内容）。
+// 经验提案 inbox 在「项目管理」聚合页（features/knowledge/pages/ProposalsView）。
 // 条目管理与检索测试在库详情页（/admin/knowledge/bases/:id）。
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -7,6 +7,7 @@ import { canWrite } from '../../auth/authStore'
 import {
   Button,
   Card,
+  Drawer,
   Form,
   Input,
   message,
@@ -17,17 +18,19 @@ import {
   Tooltip,
   Typography,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { EyeOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { listProjects } from '../../projects/api'
 import type { Project } from '../../projects/types'
 import { createBase, deleteBase, listBases, updateBase } from '../api'
 import type { InjectMode, KnowledgeBase, KnowledgeBaseInput } from '../types'
+import InjectionPreview from '../components/InjectionPreview'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { DRAWER_SCREEN } from '../../../shared/utils/overlay'
 
 const scopeTag = (s: string) => (s === 'global' ? <Tag color="blue">global</Tag> : <Tag>project</Tag>)
 const injectModeTag = (m: InjectMode) =>
@@ -44,6 +47,9 @@ export default function KnowledgeBaseList() {
   const [baseModalOpen, setBaseModalOpen] = useState(false)
   const [editingBase, setEditingBase] = useState<KnowledgeBase | null>(null)
   const [baseForm] = Form.useForm<KnowledgeBaseInput>()
+
+  // 注入预览抽屉（预览 FULL 库条目实际注入内容）
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   const loadBases = useCallback(async () => {
     setBasesLoading(true)
@@ -202,6 +208,9 @@ export default function KnowledgeBaseList() {
           <Button icon={<ReloadOutlined />} onClick={loadBases}>
             刷新
           </Button>
+          <Button icon={<EyeOutlined />} onClick={() => setPreviewOpen(true)}>
+            注入预览
+          </Button>
           {canWrite() && (
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreateBase}>
               新建知识库
@@ -212,7 +221,7 @@ export default function KnowledgeBaseList() {
     >
       <Typography.Paragraph type="secondary" style={{ marginTop: 0, marginBottom: 12 }}>
         知识库是条目的容器：FULL 库（经验库）在会话启动时全量注入 CLAUDE.local.md，RAG 库只做向量检索按召回内容。
-        点库名进入条目管理与检索测试。
+        点库名进入条目管理与检索测试；点右上角「注入预览」可试算 FULL 库条目实际注入的内容。
       </Typography.Paragraph>
       <FitTable
         rowKey="id"
@@ -237,6 +246,16 @@ export default function KnowledgeBaseList() {
           ),
         }}
       />
+
+      {/* 注入预览大抽屉：选项目+任务说明 → 预览会话启动时实际注入的知识内容（FULL 库条目） */}
+      <Drawer
+        title="注入预览"
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        width={DRAWER_SCREEN}
+      >
+        <InjectionPreview />
+      </Drawer>
 
       {/* 库编辑弹窗 */}
       <Modal
