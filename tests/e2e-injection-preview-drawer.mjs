@@ -1,8 +1,8 @@
-// 注入预览抽屉 CDP 真浏览器验证：
-//   1) /admin/projects?tab=proposals 的 extra 有「注入预览」按钮（不再是 Segmented 独立 tab）；
+// 注入预览抽屉 CDP 真浏览器验证（预览对象是 FULL 库条目，入口在知识库列表页）：
+//   1) /admin/knowledge 的 extra 有「注入预览」按钮；
 //   2) 点击后打开大抽屉（70% 宽）：内含项目选择与「预览注入内容」按钮；
 //   3) 不选项目直接预览 → 结果区出现「命中条目」（接口允许空 projectId=只看全局）；
-//   4) 关闭抽屉后提案列表仍在（抽屉不顶替页面内容）。
+//   4) 关闭抽屉后知识库表格仍在（抽屉不顶替页面内容）。
 // 前置：app 隔离实例 + 前端 dev 同时起：
 //   mvn -pl devmind-app spring-boot:run -Dspring-boot.run.profiles=e2e \
 //     "-Dspring-boot.run.arguments=--server.port=18103 --spring.datasource.url=jdbc:h2:file:<tmp>/db/devmind;AUTO_SERVER=TRUE"
@@ -135,16 +135,13 @@ async function main() {
       localStorage.setItem('devmind.user', ${JSON.stringify(JSON.stringify(user))});
       return 'ok';
     })()`)
-    await ws.send('Page.navigate', { url: `${BASE}/admin/projects?tab=proposals` })
-    await waitFor(() => evaluate(ws, `!!document.querySelector('.ant-card')`), '聚合页 Card 渲染', 30000)
+    await ws.send('Page.navigate', { url: `${BASE}/admin/knowledge` })
+    await waitFor(() => evaluate(ws, `!!document.querySelector('.ant-card')`), '知识库列表页 Card 渲染', 30000)
 
-    // ── 1. extra 有「注入预览」按钮，Segmented 里不再有该 tab ──
+    // ── 1. extra 有「注入预览」按钮 ──────────────────────────
     await waitFor(() => evaluate(ws, `!!${btnJs('.ant-card-head .ant-card-extra', '注入预览')}`),
-      '经验提案 extra「注入预览」按钮渲染', 30000)
-    ok(await evaluate(ws, `(() => {
-      const items = [...document.querySelectorAll('.ant-segmented-item')].map((i) => i.textContent);
-      return !items.includes('注入预览') && items.includes('经验提案');
-    })()`), 'Segmented 视图清单无「注入预览」tab（已并入经验提案）')
+      '知识库列表 extra「注入预览」按钮渲染', 30000)
+    ok(true, '知识库列表 extra 有「注入预览」按钮')
 
     // ── 2. 点击开大抽屉 ─────────────────────────────────────
     await evaluate(ws, `${btnJs('.ant-card-head .ant-card-extra', '注入预览')}.click()`)
@@ -167,10 +164,10 @@ async function main() {
     })()`), '预览结果渲染（命中条目 + 内容 pre）')
     ok(true, '点击「预览注入内容」后结果区出现（命中条目 + pre 内容块）')
 
-    // ── 4. 关闭抽屉，提案列表仍在 ────────────────────────────
+    // ── 4. 关闭抽屉，知识库表格仍在 ──────────────────────────
     await evaluate(ws, `document.querySelector('.ant-drawer-close').click()`)
     await waitFor(async () => !(await evaluate(ws, drawerVisibleJs)), '抽屉关闭')
-    ok(await evaluate(ws, `!!document.querySelector('.ant-table')`), '抽屉关闭后提案表格仍在')
+    ok(await evaluate(ws, `!!document.querySelector('.ant-table')`), '抽屉关闭后知识库表格仍在')
   } catch (e) {
     // 失败诊断：落截图 + 打印当前地址与正文片段（多数超时是「没登进去/页面没渲染」）
     try {
