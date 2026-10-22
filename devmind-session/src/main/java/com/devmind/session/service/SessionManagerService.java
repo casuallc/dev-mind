@@ -1950,25 +1950,42 @@ public class SessionManagerService {
 
     // ---------------- CAP-39 会话产出读取/按需回传 ----------------
 
-    /** 列出已回传的产出文件（session_outputs 落库内容，按文件名排序）。 */
+    /** 列出已回传的产出文件（session_outputs 落库内容，按文件名排序）。
+     *  CAP-83：附件产出带 attachmentId/contentType，sizeBytes 取附件元数据（附件已被用户
+     *  从管理页删除时 meta 缺失 → sizeBytes=0，行仍展示，下载会 404）。 */
     public List<OutputFileView> listOutputs(String id) {
         requireEntity(id);
+        var resolver = attachmentResolverProvider.getIfAvailable();
         return outputService.list(id).stream()
-                .map(e -> new OutputFileView(e.getFileName(),
-                        e.getContent() == null ? 0
-                                : e.getContent().getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
-                        e.getCreatedAt()))
+                .map(e -> {
+                    if (e.isAttachment()) {
+                        var meta = resolver == null ? java.util.Optional
+                                .<com.devmind.common.attachment.AttachmentContentResolver.AttachmentMeta>empty()
+                                : resolver.meta(e.getAttachmentId());
+                        return new OutputFileView(e.getFileName(),
+                                meta.map(m -> m.sizeBytes()).orElse(0L), e.getCreatedAt(),
+                                e.getAttachmentId(), meta.map(m -> m.contentType()).orElse(null));
+                    }
+                    return new OutputFileView(e.getFileName(),
+                            e.getContent() == null ? 0
+                                    : e.getContent().getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
+                            e.getCreatedAt(), null, null);
+                })
                 .sorted(java.util.Comparator.comparing(OutputFileView::fileName))
                 .toList();
     }
 
-    /** 读产出内容；会话/产出不存在 404。 */
+    /** 读产出内容；会话/产出不存在 404，附件产出（CAP-83）400 提示走 attachments raw 下载。 */
     public OutputContentView getOutputContent(String id, String fileName) {
         requireEntity(id);
-        String content = outputService.findContent(id, fileName)
+        var entity = outputService.find(id, fileName)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND,
                         "产出不存在: " + fileName + "（可尝试「从节点同步」后再查看）"));
-        return new OutputContentView(fileName, content);
+        if (entity.isAttachment()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "二进制产出不支持文本预览: " + fileName + "（请下载查看）");
+        }
+        return new OutputContentView(fileName, entity.getContent());
     }
 
     /**

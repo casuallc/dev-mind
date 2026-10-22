@@ -596,6 +596,9 @@ public class RequirementFlowService {
     private void registerWorkItemOutputs(SessionEntity session, WorkItemEntity wi) {
         try {
             for (var output : sessionOutputService.list(session.getId())) {
+                if (output.isAttachment()) {
+                    continue; // CAP-83：附件产出正文回读为空，登 SUMMARY 会误导，跳过（产物化留待后续 CAP）
+                }
                 artifactService.registerInfo(session.getProjectId(), wi.getRequirementId(), wi.getId(),
                         com.devmind.artifact.model.ArtifactEntity.TYPE_SUMMARY,
                         output.getFileName(),
@@ -683,9 +686,15 @@ public class RequirementFlowService {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "不支持的文档类型: " + req.kind() + "（仅 analysis/design/requirement）");
         }
-        String content = sessionOutputService.findContent(sessionId, req.fileName())
+        // CAP-83 FR-06：附件产出（xlsx 等二进制）不能推送为 Markdown 文档，前端已隐藏入口，此为直调兜底
+        var outputEntity = sessionOutputService.find(sessionId, req.fileName())
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND,
                         "产出不存在: " + req.fileName() + "（请先在会话工作台「推送产出」中同步）"));
+        if (outputEntity.isAttachment()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "二进制产出不能推送为文档: " + req.fileName() + "（请下载使用）");
+        }
+        String content = outputEntity.getContent();
         RequirementEntity requirement = requirementService.requireById(req.requirementId());
         // WI 仅当同属目标需求时透传（DocRequest 有 WI→需求一致性校验，跨需求推送传了会报错）
         String workItemId = session.getWorkItemId() != null && !session.getWorkItemId().isBlank()

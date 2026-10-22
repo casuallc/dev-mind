@@ -260,13 +260,19 @@ class RequirementFlowServiceTest {
 
     static class FakeSessionOutputService extends SessionOutputService {
         final Map<String, String> outputs = new HashMap<>(); // sessionId:fileName -> content
+        final java.util.Set<String> binaries = new java.util.HashSet<>(); // sessionId:fileName（CAP-83 附件行）
 
         FakeSessionOutputService() {
-            super(null);
+            super(null, null, null);
         }
 
         void put(String sessionId, String fileName, String content) {
             outputs.put(sessionId + ":" + fileName, content);
+        }
+
+        /** CAP-83 登记附件产出（无文本正文，isAttachment=true）。 */
+        void putBinary(String sessionId, String fileName) {
+            binaries.add(sessionId + ":" + fileName);
         }
 
         @Override
@@ -275,16 +281,28 @@ class RequirementFlowServiceTest {
         }
 
         @Override
+        public Optional<com.devmind.session.model.SessionOutputEntity> find(String sessionId, String fileName) {
+            String key = sessionId + ":" + fileName;
+            if (!outputs.containsKey(key) && !binaries.contains(key)) {
+                return Optional.empty();
+            }
+            com.devmind.session.model.SessionOutputEntity e =
+                    new com.devmind.session.model.SessionOutputEntity();
+            e.setSessionId(sessionId);
+            e.setFileName(fileName);
+            if (binaries.contains(key)) {
+                e.setAttachmentId("att-fake");
+            } else {
+                e.setContent(outputs.get(key));
+            }
+            return Optional.of(e);
+        }
+
+        @Override
         public List<com.devmind.session.model.SessionOutputEntity> list(String sessionId) {
-            return outputs.keySet().stream()
+            return java.util.stream.Stream.concat(outputs.keySet().stream(), binaries.stream())
                     .filter(k -> k.startsWith(sessionId + ":"))
-                    .map(k -> {
-                        com.devmind.session.model.SessionOutputEntity e =
-                                new com.devmind.session.model.SessionOutputEntity();
-                        e.setSessionId(sessionId);
-                        e.setFileName(k.substring(sessionId.length() + 1));
-                        return e;
-                    })
+                    .map(k -> find(sessionId, k.substring(sessionId.length() + 1)).orElseThrow())
                     .toList();
         }
     }
@@ -867,5 +885,17 @@ class RequirementFlowServiceTest {
                 new com.devmind.flow.dto.PublishOutputRequest(
                         "a.md", "wiki", "r1", "create", null, null, null)));
         assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
+    }
+
+    @Test
+    void 推送二进制产出400() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+        addSession("s1", null, "r1", "任务");
+        sessionOutputService.putBinary("s1", "指标清单.xlsx");
+
+        DevMindException e = assertThrows(DevMindException.class, () -> service.publishOutput("s1",
+                new com.devmind.flow.dto.PublishOutputRequest(
+                        "指标清单.xlsx", "analysis", "r1", "create", null, null, null)));
+        assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode(), "CAP-83 附件产出不能推送为文档");
     }
 }

@@ -49,6 +49,33 @@ public class AgentOutputController {
     public record OutputUploadRequest(List<FileItem> files) {
     }
 
+    /** CAP-83 二进制产出裸字节上传：body = 文件原始字节，文件名/mime 走 query；
+     *  大小闸在附件存储层流式卡（读超即 400，防无界 body）。返回 attachmentId。 */
+    @PostMapping("/{sessionId}/attachment")
+    public java.util.Map<String, String> uploadAttachment(@PathVariable String sessionId,
+                                                          @RequestParam(required = false) String token,
+                                                          @RequestParam(required = false) String name,
+                                                          @RequestParam(required = false) String contentType,
+                                                          jakarta.servlet.http.HttpServletRequest request)
+            throws java.io.IOException {
+        if (nodeService.resolveByToken(token).isEmpty()) {
+            throw new DevMindException(ErrorCode.UNAUTHORIZED, "上传会话产出需要有效节点 token");
+        }
+        SessionOutputSink sink = outputSink.getIfAvailable();
+        if (sink == null) {
+            throw new DevMindException(ErrorCode.INTERNAL, "产出存储服务未装配");
+        }
+        if (name == null || !NAME_PATTERN.matcher(name).matches()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "非法产出文件名: " + name);
+        }
+        if (contentType != null && contentType.length() > 128) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "非法 contentType（超 128 字符）");
+        }
+        String attachmentId = sink.storeBinary(sessionId, name, request.getInputStream(),
+                request.getContentLengthLong(), contentType);
+        return java.util.Map.of("attachmentId", attachmentId);
+    }
+
     @PostMapping("/{sessionId}")
     public void upload(@PathVariable String sessionId,
                        @RequestParam(required = false) String token,

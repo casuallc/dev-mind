@@ -39,6 +39,11 @@ public class SessionOutputEntity {
     @Column(length = 16_777_216)
     private String content;
 
+    /** CAP-83 附件产出（xlsx 等二进制）：attachments.id 引用；null = 文本产出（正文在
+     *  content）。与 content 恰一非空；同名互覆时清另一列并删旧附件。 */
+    @Column(name = "attachment_id", length = 32)
+    private String attachmentId;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -50,6 +55,10 @@ public class SessionOutputEntity {
     public void setFileName(String fileName) { this.fileName = fileName; }
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
+    public String getAttachmentId() { return attachmentId; }
+    public void setAttachmentId(String attachmentId) { this.attachmentId = attachmentId; }
+    /** CAP-83：是否附件产出（正文在 attachments 表，content 恒 null）。 */
+    public boolean isAttachment() { return attachmentId != null && !attachmentId.isBlank(); }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 }

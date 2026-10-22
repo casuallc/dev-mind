@@ -19,6 +19,19 @@ public interface SessionOutputSink {
      */
     void store(String sessionId, List<OutputFile> files);
 
+    /**
+     * CAP-83 二进制产出存储（xlsx 等）：实现方把字节流存为附件（attachments）并写引用行，
+     * 同 sessionId+fileName 覆盖旧值（旧附件删除）。返回 attachmentId。
+     *
+     * @param in           内容流（实现方负责关闭）
+     * @param declaredSize 声明字节数（-1 = 未知，实现方按拷贝实际计数卡上限）
+     * @param contentType  mime（可 null，实现方兜底 octet-stream）
+     */
+    default String storeBinary(String sessionId, String fileName, java.io.InputStream in,
+                               long declaredSize, String contentType) {
+        throw new UnsupportedOperationException("二进制会话产出存储未装配");
+    }
+
     /** 单个产出文件：fileName 为纯文件名（不含路径），content 为 UTF-8 文本。 */
     record OutputFile(String fileName, String content) {
     }
