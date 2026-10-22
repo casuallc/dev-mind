@@ -17,7 +17,7 @@ import {
   Spin,
   Typography,
 } from 'antd'
-import { CloudSyncOutlined, SendOutlined } from '@ant-design/icons'
+import { CloudSyncOutlined, DownloadOutlined, SendOutlined } from '@ant-design/icons'
 import { collectSessionOutputs, getSessionOutput, publishSessionOutput } from '../api'
 import type { PublishDocKind, SessionOutputFile, SessionSummary } from '../types'
 import { listRequirements } from '../../requirements/api'
@@ -25,6 +25,7 @@ import type { Requirement } from '../../requirements/types'
 import { listDocs } from '../../docs/api'
 import type { DocMeta } from '../../docs/types'
 import Markdown from '../../../shared/components/Markdown'
+import { attachmentRawUrl } from '../../../shared/attachments/url'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
@@ -220,6 +221,7 @@ export default function SessionOutputsModal({
   // 依赖会话 id 而非整个 session 对象：列表页每 3s 轮询会重建 session，
   // 按对象引用做依赖会把这里变成定时刷新（每次都重新 collect 回传并清空预览）
   const sessionId = session?.id ?? null
+  const selectedFile = files.find((f) => f.fileName === selected) ?? null
 
   const sync = useCallback(async () => {
     if (!sessionId) return
@@ -253,12 +255,18 @@ export default function SessionOutputsModal({
       setContent('')
       return
     }
+    // CAP-83：附件产出（xlsx 等二进制）无文本正文，内容端点会 400——预览走附件 raw 端点
+    if (selectedFile?.attachmentId) {
+      setContent('')
+      setContentLoading(false)
+      return
+    }
     setContentLoading(true)
     getSessionOutput(sessionId, selected)
       .then((r) => setContent(r.content))
       .catch((e) => showError(e, '读取产出失败'))
       .finally(() => setContentLoading(false))
-  }, [open, sessionId, selected])
+  }, [open, sessionId, selected, selectedFile?.attachmentId])
 
   return (
     <Drawer
@@ -307,20 +315,33 @@ export default function SessionOutputsModal({
                   <Typography.Text code style={{ fontSize: 12 }}>
                     {f.fileName}
                   </Typography.Text>
-                  <Button
-                    size="small"
-                    type="link"
-                    icon={<SendOutlined />}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setPublishFile(f.fileName)
-                    }}
-                  >
-                    推送
-                  </Button>
+                  {f.attachmentId ? (
+                    <Button
+                      size="small"
+                      type="link"
+                      icon={<DownloadOutlined />}
+                      href={attachmentRawUrl(f.attachmentId)}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      下载
+                    </Button>
+                  ) : (
+                    <Button
+                      size="small"
+                      type="link"
+                      icon={<SendOutlined />}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setPublishFile(f.fileName)
+                      }}
+                    >
+                      推送
+                    </Button>
+                  )}
                 </Space>
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   {fmtSize(f.sizeBytes)} · {fmtTime(f.updatedAt)}
+                  {f.attachmentId ? ' · 附件' : ''}
                 </Typography.Text>
               </div>
             ))}
@@ -336,6 +357,30 @@ export default function SessionOutputsModal({
           >
             {contentLoading ? (
               <Spin style={{ display: 'block', margin: '60px auto' }} />
+            ) : selectedFile?.attachmentId ? (
+              selectedFile.contentType?.startsWith('image/') ? (
+                <img
+                  src={attachmentRawUrl(selectedFile.attachmentId)}
+                  alt={selectedFile.fileName}
+                  style={{ maxWidth: '100%', display: 'block', margin: '12px auto' }}
+                />
+              ) : (
+                <Empty
+                  style={{ marginTop: 60 }}
+                  description={
+                    <Space direction="vertical" size={8}>
+                      <span>二进制产出不支持文本预览</span>
+                      <Button
+                        type="primary"
+                        icon={<DownloadOutlined />}
+                        href={attachmentRawUrl(selectedFile.attachmentId)}
+                      >
+                        下载 {selectedFile.fileName}
+                      </Button>
+                    </Space>
+                  }
+                />
+              )
             ) : selected ? (
               <Markdown content={content} />
             ) : (

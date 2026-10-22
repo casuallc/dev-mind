@@ -59,6 +59,10 @@ export interface SessionOutputFile {
   fileName: string
   sizeBytes: number
   updatedAt: string
+  /** CAP-83：非空 = 附件产出（xlsx 等二进制，下载/预览走 attachments raw 端点）；null = 文本产出 */
+  attachmentId?: string | null
+  /** CAP-83：附件 mime（附件产出时给出；图片可内联预览） */
+  contentType?: string | null
 }
 
 export interface SessionOutputContent {
