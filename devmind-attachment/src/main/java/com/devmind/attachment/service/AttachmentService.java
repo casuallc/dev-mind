@@ -69,8 +69,40 @@ public class AttachmentService {
         if (file == null || file.isEmpty()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "附件内容为空");
         }
+        try {
+            AttachmentEntity ent = storeStream(file.getInputStream(), file.getSize(),
+                    file.getOriginalFilename(), file.getContentType(), scope, tags, description,
+                    expireDays, identityService.currentActor());
+            return AttachmentView.of(ent);
+        } catch (IOException e) {
+            throw new DevMindException(ErrorCode.INTERNAL, "附件读取失败: " + e.getMessage(), e);
+        }
+    }
+
+    // ---------------- CAP-83 AttachmentStore SPI 系统写路径（AttachmentStoreImpl 调用） ----------------
+
+    /** 系统链路存储（无 SecurityContext，uploadedBy 显式传入）；返回 attachmentId。 */
+    String storeForSystem(InputStream in, long size, String originalName, String contentType,
+                          String scope, String uploadedBy, String tags, String description) {
+        return storeStream(in, size, originalName, contentType, scope, tags, description,
+                null, uploadedBy).getId();
+    }
+
+    /** 系统内部删除（bypass 用户校验）：仅限系统编排路径（产出附件覆盖删旧）；不存在静默忽略。 */
+    void deleteForSystem(String attachmentId) {
+        repo.findById(attachmentId).ifPresent(this::deleteEntity);
+    }
+
+    /**
+     * 上传核心：大小闸 → 落盘（tmp + 原子 move + sha256）→ 元数据登记。upload 与
+     * CAP-83 系统写路径共用。拷贝全程计数，声明 size 之外的超额字节同样触发上限
+     * （防调用方谎报 size 绕过大小闸），超限即废 tmp。
+     */
+    private AttachmentEntity storeStream(InputStream in, long size, String originalName,
+                                         String contentType, String scope, String tags,
+                                         String description, Integer expireDays, String uploadedBy) {
         long maxBytes = (long) props.getMaxSizeMb() * 1024 * 1024;
-        if (file.getSize() > maxBytes) {
+        if (size > maxBytes) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "附件超过大小上限 " + props.getMaxSizeMb() + "MB");
         }
@@ -78,40 +110,50 @@ public class AttachmentService {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "保留天数必须为正整数");
         }
         String id = newAttachmentId();
-        String contentType = file.getContentType() != null ? file.getContentType() : "application/octet-stream";
-        String originalName = file.getOriginalFilename() != null ? file.getOriginalFilename() : id;
+        String ct = contentType != null && !contentType.isBlank() ? contentType : "application/octet-stream";
+        String name = originalName != null && !originalName.isBlank() ? originalName : id;
         String relPath = MONTH_DIR.format(Instant.now().atZone(ZoneId.systemDefault()))
-                + "/" + id + extOf(originalName, contentType);
+                + "/" + id + extOf(name, ct);
 
         Path target = rootDir().resolve(relPath).normalize();
         if (!target.startsWith(rootDir())) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "非法存储路径");
         }
         String sha256;
+        long stored;
         try {
             Files.createDirectories(target.getParent());
             Path tmp = target.resolveSibling(id + ".tmp");
             MessageDigest md = MessageDigest.getInstance("SHA-256");
-            try (InputStream in = file.getInputStream();
-                 var out = Files.newOutputStream(tmp)) {
+            long total = 0;
+            try (in; var out = Files.newOutputStream(tmp)) {
                 byte[] buf = new byte[64 * 1024];
                 int n;
                 while ((n = in.read(buf)) >= 0) {
+                    total += n;
+                    if (total > maxBytes) {
+                        throw new DevMindException(ErrorCode.BAD_REQUEST,
+                                "附件超过大小上限 " + props.getMaxSizeMb() + "MB");
+                    }
                     out.write(buf, 0, n);
                     md.update(buf, 0, n);
                 }
+            } catch (DevMindException | IOException e) {
+                Files.deleteIfExists(tmp);
+                throw e;
             }
             Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             sha256 = HexFormat.of().formatHex(md.digest());
+            stored = total;
         } catch (IOException | java.security.NoSuchAlgorithmException e) {
             throw new DevMindException(ErrorCode.INTERNAL, "附件落盘失败: " + e.getMessage(), e);
         }
 
         AttachmentEntity ent = new AttachmentEntity();
         ent.setId(id);
-        ent.setOriginalName(originalName);
-        ent.setContentType(contentType);
-        ent.setSizeBytes(file.getSize());
+        ent.setOriginalName(name);
+        ent.setContentType(ct);
+        ent.setSizeBytes(stored);
         ent.setSha256(sha256);
         ent.setScope(AttachmentEntity.SCOPE_SHARED.equals(scope)
                 ? AttachmentEntity.SCOPE_SHARED : AttachmentEntity.SCOPE_PRIVATE);
@@ -120,12 +162,12 @@ public class AttachmentService {
         ent.setTags(normalizeTags(tags));
         ent.setExpiresAt(expireDays == null ? null
                 : Instant.now().plus(expireDays, java.time.temporal.ChronoUnit.DAYS));
-        ent.setUploadedBy(identityService.currentActor());
+        ent.setUploadedBy(uploadedBy);
         ent.setCreatedAt(Instant.now());
         repo.save(ent);
         log.info("附件已上传: id={} name={} size={} scope={} by={}",
-                id, originalName, file.getSize(), ent.getScope(), ent.getUploadedBy());
-        return AttachmentView.of(ent);
+                id, name, stored, ent.getScope(), ent.getUploadedBy());
+        return ent;
     }
 
     // ---------------- 查询 ----------------

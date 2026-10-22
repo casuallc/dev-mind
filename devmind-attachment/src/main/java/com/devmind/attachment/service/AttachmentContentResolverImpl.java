@@ -43,6 +43,14 @@ public class AttachmentContentResolverImpl implements AttachmentContentResolver 
         return repo.findById(attachmentId).flatMap(this::readBytes);
     }
 
+    /** CAP-83：元数据查询（不读字节、无权限判定——调用方负责业务鉴权）。 */
+    @Override
+    public Optional<AttachmentMeta> meta(String attachmentId) {
+        return repo.findById(attachmentId)
+                .map(e -> new AttachmentMeta(e.getId(), e.getOriginalName(), e.getContentType(),
+                        e.getSizeBytes() == null ? 0 : e.getSizeBytes()));
+    }
+
     private Optional<ResolvedAttachment> readBytes(AttachmentEntity ent) {
         Path path = attachmentService.rootDir().resolve(ent.getStoragePath()).normalize();
         try {

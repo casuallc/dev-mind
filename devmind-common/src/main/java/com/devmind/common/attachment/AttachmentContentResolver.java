@@ -24,6 +24,18 @@ public interface AttachmentContentResolver {
         return resolve(attachmentId);
     }
 
+    /**
+     * CAP-83：附件元数据查询（大小/mime，列表展示用，不读字节）；未装配/不存在返回 empty。
+     * 无权限判定（同 resolve，调用方负责业务鉴权）。
+     */
+    default Optional<AttachmentMeta> meta(String attachmentId) {
+        return Optional.empty();
+    }
+
+    /** 附件元数据：attachmentId / 原始文件名 / mime / 字节数。 */
+    record AttachmentMeta(String attachmentId, String originalName, String contentType, long sizeBytes) {
+    }
+
     /** @param attachmentId 附件 id；@param contentType 原始 mime；@param bytes 原始字节；
      *  @param originalName 原始文件名（CAP-68 会话附件物化用；可为 null） */
     record ResolvedAttachment(String attachmentId, String contentType, byte[] bytes, String originalName) {
