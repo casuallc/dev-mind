@@ -1,10 +1,9 @@
 // 经验提案视图（项目管理聚合页的「经验提案」tab）：会话「沉淀经验」/手动提交 → inbox → 采纳/拒绝/删除。
-// 注入预览以折叠面板内嵌在本页顶部（不再是聚合页的独立 tab）。
+// 注入预览由外壳 extra 的「注入预览」按钮开大抽屉（previewTick 驱动），不再是聚合页的独立 tab。
 // 外壳 Card / extra 按钮在 AdminProjectsHub（refreshTick/createTick 驱动）。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Button,
-  Collapse,
   Descriptions,
   Drawer,
   Form,
@@ -28,7 +27,7 @@ import { fmtTime } from '../../../shared/utils/format'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
-import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT, DRAWER_SCREEN } from '../../../shared/utils/overlay'
 
 const scopeTag = (s: string) => (s === 'global' ? <Tag color="blue">global</Tag> : <Tag>project</Tag>)
 const statusTag = (s: string) =>
@@ -64,9 +63,11 @@ function TriageBadges({ triage }: { triage: TriageView | null }) {
 export default function ProposalsView({
   refreshTick = 0,
   createTick = 0,
+  previewTick = 0,
 }: {
   refreshTick?: number
   createTick?: number
+  previewTick?: number
 }) {
   const [projects, setProjects] = useState<Project[]>([])
   const [proposals, setProposals] = useState<KnowledgeProposal[]>([])
@@ -83,6 +84,9 @@ export default function ProposalsView({
   // 提案弹窗（手动沉淀）
   const [proposalModalOpen, setProposalModalOpen] = useState(false)
   const [proposalForm] = Form.useForm()
+
+  // 注入预览抽屉（外壳 extra「注入预览」按钮驱动）
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   const loadProposals = useCallback(async () => {
     setProposalsLoading(true)
@@ -109,6 +113,14 @@ export default function ProposalsView({
     if (createTick > 0) setProposalModalOpen(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [createTick])
+
+  // 外壳 extra「注入预览」经 previewTick 触发；挂载首帧不触发
+  const firstPreview = useRef(true)
+  useEffect(() => {
+    if (firstPreview.current) { firstPreview.current = false; return }
+    if (previewTick > 0) setPreviewOpen(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewTick])
 
   const onAdopt = (p: KnowledgeProposal, target: 'project' | 'global') => {
     Modal.confirm({
@@ -235,16 +247,6 @@ export default function ProposalsView({
       <Typography.Paragraph type="secondary" style={{ margin: 0, marginBottom: 12 }}>
         会话中「沉淀经验」或手动提交的经验，审核采纳后进入对应经验库（inbox）。
       </Typography.Paragraph>
-      <Collapse
-        style={{ marginBottom: 12 }}
-        items={[
-          {
-            key: 'preview',
-            label: '注入预览：会话启动时实际注入哪些知识内容',
-            children: <InjectionPreview />,
-          },
-        ]}
-      />
       <FitTable
         rowKey="id"
         loading={proposalsLoading}
@@ -337,6 +339,16 @@ export default function ProposalsView({
 
       {/* CAP-55 FR-07「查看依据」：徽标只给结论，这里给来路（含 laya 应答原文） */}
       <TriageEvidenceDrawer proposal={evidenceProposal} onClose={() => setEvidenceId(null)} />
+
+      {/* 注入预览大抽屉：选项目+任务说明 → 预览会话启动时实际注入的知识内容 */}
+      <Drawer
+        title="注入预览"
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        width={DRAWER_SCREEN}
+      >
+        <InjectionPreview />
+      </Drawer>
 
       {/* 手动沉淀经验弹窗 */}
       <Modal

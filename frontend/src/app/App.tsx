@@ -169,7 +169,7 @@ export default function App() {
           <Route path="/admin" element={<Navigate to="/admin/projects" replace />} />
           {/* CAP-16 指挥中心（全局视角，仅 ADMIN） */}
           <Route path="/admin/dashboard" element={<DashboardPage />} />
-          {/* CAP-02 项目管理（六视图聚合页：项目/经验提案（内嵌注入预览）/命令模板/代码库/场景/执行审计；项目配置为嵌套子路由） */}
+          {/* CAP-02 项目管理（六视图聚合页：项目/经验提案/命令模板/代码库/场景/执行审计；项目配置为嵌套子路由） */}
           <Route path="/admin/projects" element={<AdminProjectsHub />} />
           <Route path="/admin/projects/:id" element={<ProjectSettingsLayout />}>
             <Route index element={<Navigate to="repos" replace />} />
