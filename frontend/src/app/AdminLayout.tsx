@@ -2,12 +2,9 @@ import { Layout, Menu } from 'antd'
 import type { MenuProps } from 'antd'
 import {
   ApiOutlined,
-  AuditOutlined,
   BellOutlined,
-  CodeOutlined,
   CommentOutlined,
   DashboardOutlined,
-  DeploymentUnitOutlined,
   ExperimentOutlined,
   FileTextOutlined,
   ForkOutlined,
@@ -40,58 +37,42 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
     type: 'group' as const,
     label: '项目与资源',
     children: [
+      // 项目管理为七视图聚合页：项目/经验提案/注入预览/命令模板/代码库/场景/执行审计
       { key: '/admin/projects', icon: <FolderOutlined />, label: '项目管理' },
-      { key: '/admin/repos', icon: <CodeOutlined />, label: '代码仓库' },
-      { key: '/admin/scenarios', icon: <DeploymentUnitOutlined />, label: '应用场景' },
-    ],
-  },
-  {
-    type: 'group' as const,
-    label: 'Agent 执行',
-    children: [
-      // 节点页内页签：节点列表 / Runner 包 / 出口规则 / 审计日志 / 文件浏览（原独立菜单均已并入）
-      { key: '/admin/agent/nodes', icon: <RobotOutlined />, label: '节点' },
-      { key: '/admin/tasks', icon: <ScheduleOutlined />, label: '任务管理' },
-      { key: '/admin/execution', icon: <AuditOutlined />, label: '执行管控' },
-    ],
-  },
-  {
-    type: 'group' as const,
-    label: '内容',
-    children: [
       { key: '/admin/knowledge', icon: <ReadOutlined />, label: '知识库' },
-      { key: '/admin/skills', icon: <ToolOutlined />, label: 'Skill 管理' },
       { key: '/admin/docs', icon: <FileTextOutlined />, label: '文档管理' },
       { key: '/admin/attachments', icon: <PaperClipOutlined />, label: '附件管理' },
+      { key: '/admin/skills', icon: <ToolOutlined />, label: '技能管理' },
+      { key: '/admin/agent/nodes', icon: <RobotOutlined />, label: 'Agent 节点' },
     ],
   },
   {
     type: 'group' as const,
-    label: '智能决策（laya）',
+    label: '智能体',
     children: [
-      { key: '/admin/laya/records', icon: <ForkOutlined />, label: '决策记录' },
-      { key: '/admin/laya/instances', icon: <PartitionOutlined />, label: '服务实例' },
-      { key: '/admin/laya/lab', icon: <ExperimentOutlined />, label: '决策实验室' },
-    ],
-  },
-  {
-    type: 'group' as const,
-    label: '运行观测',
-    children: [
-      // CAP-06 FR-07：通知通道为全局配置（页内视图：通道/防打扰）
-      { key: '/admin/notifications', icon: <BellOutlined />, label: '通知管理' },
       { key: '/admin/bot', icon: <CommentOutlined />, label: '机器人运维' },
       { key: '/admin/copilot', icon: <InteractionOutlined />, label: '智能体运维' },
     ],
   },
   {
     type: 'group' as const,
+    label: '智能决策',
+    children: [
+      { key: '/admin/laya/instances', icon: <PartitionOutlined />, label: '服务实例' },
+      { key: '/admin/laya/records', icon: <ForkOutlined />, label: '决策记录' },
+      { key: '/admin/laya/lab', icon: <ExperimentOutlined />, label: '决策实验室' },
+    ],
+  },
+  {
+    type: 'group' as const,
     label: '系统',
     children: [
+      { key: '/admin/tasks', icon: <ScheduleOutlined />, label: '任务调度' },
       { key: '/admin/integrations', icon: <ApiOutlined />, label: '平台集成' },
       { key: '/admin/models', icon: <ThunderboltOutlined />, label: '模型接入' },
       { key: '/admin/keys', icon: <KeyOutlined />, label: 'API 密钥' },
       { key: '/admin/users', icon: <SafetyCertificateOutlined />, label: '用户管理' },
+      { key: '/admin/notifications', icon: <BellOutlined />, label: '通知管理' },
     ],
   },
 ]
@@ -111,7 +92,7 @@ function menuLabel(items: AdminMenuItem[], key: string): string | undefined {
   return undefined
 }
 
-/** 管理后台布局（仅 ADMIN，由 RequireAdmin 守卫）：指挥中心 / 项目与资源 / Agent 执行 / 内容 / 智能决策 / 运行观测 / 系统。 */
+/** 管理后台布局（仅 ADMIN，由 RequireAdmin 守卫）：指挥中心 / 项目与资源 / 智能体 / 智能决策 / 系统。 */
 export default function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()

@@ -1,8 +1,8 @@
-// CAP-02 后台项目列表：表格 + 新建/编辑（ProjectFormDrawer）+ 居中确认删除。仅 ADMIN（RequireAdmin 守卫）。
-import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Card, Input, Modal, Select, Space, Tag, Typography, message } from 'antd'
+// CAP-02 项目列表视图（项目管理聚合页的「项目」tab）：表格 + 新建/编辑（ProjectFormDrawer）+ 居中确认删除。
+// 外壳 Card / extra 按钮在 AdminProjectsHub（refreshTick/createTick/onboardTick 驱动）。
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Alert, Button, Input, Modal, Select, Space, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { PlusOutlined, ReloadOutlined, RobotOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { deleteProject, listProjects } from '../api'
 import { onboardProject } from '../../open-api/api'
@@ -12,7 +12,6 @@ import ProjectFormDrawer from '../components/ProjectFormDrawer'
 import { CLONE_STATUS_COLOR } from '../components/CloneLogDrawer'
 import type { Project } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
@@ -22,7 +21,15 @@ const STATUS_OPTIONS = [
   { value: 'ARCHIVED', label: 'ARCHIVED', color: 'default' },
 ]
 
-export default function AdminProjectsPage() {
+export default function ProjectsView({
+  refreshTick = 0,
+  createTick = 0,
+  onboardTick = 0,
+}: {
+  refreshTick?: number
+  createTick?: number
+  onboardTick?: number
+}) {
   const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
   const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
@@ -48,11 +55,30 @@ export default function AdminProjectsPage() {
   }, [status])
 
   useEffect(() => {
-    load()
     listAgentNodes()
       .then(setAgentNodes)
       .catch(() => setAgentNodes([]))
-  }, [load])
+  }, [])
+
+  useEffect(() => {
+    load()
+  }, [load, refreshTick])
+
+  // 外壳 extra「新建项目」经 createTick 触发；挂载首帧不触发
+  const firstCreate = useRef(true)
+  useEffect(() => {
+    if (firstCreate.current) { firstCreate.current = false; return }
+    if (createTick > 0) openEdit(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createTick])
+
+  // 外壳 extra「AI 智能接入」经 onboardTick 触发；挂载首帧不触发
+  const firstOnboard = useRef(true)
+  useEffect(() => {
+    if (firstOnboard.current) { firstOnboard.current = false; return }
+    if (onboardTick > 0) setOnboardOpen(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onboardTick])
 
   const openEdit = (p: Project | null) => {
     setEditing(p)
@@ -183,12 +209,9 @@ export default function AdminProjectsPage() {
   ]
 
   return (
-    <Card
-      style={pageCardStyle}
-      styles={{ body: pageCardBodyFlexStyle }}
-      title="项目管理"
-      extra={
-        <Space>
+    <>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
+        <div>
           <Select
             value={status}
             onChange={(v) => {
@@ -198,30 +221,20 @@ export default function AdminProjectsPage() {
             options={[{ value: 'ALL', label: '全部' }, ...STATUS_OPTIONS.map((o) => ({ value: o.value, label: o.label }))]}
             style={{ width: 130 }}
           />
-          <Button icon={<ReloadOutlined />} onClick={() => load()}>
-            刷新
-          </Button>
-          <Button icon={<RobotOutlined />} onClick={() => setOnboardOpen(true)}>
-            AI 智能接入
-          </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-            新建项目
-          </Button>
-        </Space>
-      }
-    >
-      <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-        注册本地 git 仓库作为项目，作为会话/构建/发版/测试能力的挂载点。worktree 约定在
-        <Typography.Text code>path/.devmind/worktrees/&lt;sessionId&gt;</Typography.Text>。
-      </Typography.Paragraph>
-      <FitTable
-        rowKey="id"
-        loading={loading}
-        columns={columns}
-        dataSource={projects}
-        pagination={LIST_PAGINATION}
-        locale={{ emptyText: '暂无项目。点击「新建项目」注册一个本地 git 仓库。' }}
-      />
+        </div>
+        <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
+          注册本地 git 仓库作为项目，作为会话/构建/发版/测试能力的挂载点。worktree 约定在
+          <Typography.Text code>path/.devmind/worktrees/&lt;sessionId&gt;</Typography.Text>。
+        </Typography.Paragraph>
+        <FitTable
+          rowKey="id"
+          loading={loading}
+          columns={columns}
+          dataSource={projects}
+          pagination={LIST_PAGINATION}
+          locale={{ emptyText: '暂无项目。点击「新建项目」注册一个本地 git 仓库。' }}
+        />
+      </div>
 
       <ProjectFormDrawer
         open={editOpen}
@@ -256,6 +269,6 @@ export default function AdminProjectsPage() {
           placeholder={'例如：\n项目仓库 D:\\apusic\\ctyunmanager，构建脚本 build.ps1\n部署到 runner 节点 local-dev，部署目录 /apusic/ctyun\n发布脚本 push.sh'}
         />
       </Modal>
-    </Card>
+    </>
   )
 }

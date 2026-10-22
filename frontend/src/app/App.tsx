@@ -4,14 +4,13 @@ import AppLayout from './AppLayout'
 import AdminLayout from './AdminLayout'
 // 各能力 feature 在此注册路由（积木式组装点）
 import SessionsBoard from '../features/sessions/pages/SessionsBoard'
-import ScenariosPage from '../features/scenarios/pages/ScenariosPage'
 import ProjectContextPage from '../features/scenarios/pages/ProjectContextPage'
 import ProjectsPage from '../features/projects/pages/ProjectsPage'
 import ProjectOverviewPage from '../features/projects/pages/ProjectOverviewPage'
 import RequirementsPage from '../features/requirements/pages/RequirementsPage'
 import ProjectContextGate from './ProjectContextGate'
 import RequirementDetailPage from '../features/requirements/pages/RequirementDetailPage'
-import AdminProjectsPage from '../features/projects/pages/AdminProjectsPage'
+import AdminProjectsHub from '../features/projects/pages/AdminProjectsHub'
 import ProjectSettingsLayout from '../features/projects/pages/admin/ProjectSettingsLayout'
 import ReposPage from '../features/projects/pages/admin/ReposPage'
 import SummaryPage from '../features/projects/pages/admin/SummaryPage'
@@ -33,7 +32,6 @@ import SkillsPage from '../features/skills/pages/SkillsPage'
 import SkillDetailPage from '../features/skills/pages/SkillDetailPage'
 import DocsPage from '../features/docs/pages/DocsPage'
 import DocEditorPage from '../features/docs/pages/DocEditorPage'
-import ExecutionPage from '../features/execution/pages/ExecutionPage'
 import AdminAsyncTasksPage from '../features/async-task/pages/AdminAsyncTasksPage'
 import IntegrationsPage from '../features/integrations/pages/IntegrationsPage'
 import ModelEndpointsPage from '../features/model/pages/ModelEndpointsPage'
@@ -53,7 +51,6 @@ import WorklogPage from '../features/worklog/pages/WorklogPage'
 import BookmarksPage from '../features/bookmarks/pages/BookmarksPage'
 import ChatsBoard from '../features/chat/pages/ChatsBoard'
 import AttachmentsPage from '../features/attachments/pages/AttachmentsPage'
-import ReposAdminPage from '../features/repos/pages/ReposAdminPage'
 import LoginPage from '../features/auth/pages/LoginPage'
 import UserManagementPage from '../features/auth/pages/UserManagementPage'
 import SettingsPage from '../features/auth/pages/SettingsPage'
@@ -172,8 +169,8 @@ export default function App() {
           <Route path="/admin" element={<Navigate to="/admin/projects" replace />} />
           {/* CAP-16 指挥中心（全局视角，仅 ADMIN） */}
           <Route path="/admin/dashboard" element={<DashboardPage />} />
-          {/* CAP-02 项目管理（增删改 + 项目配置；配置为嵌套子路由，各自独立加载） */}
-          <Route path="/admin/projects" element={<AdminProjectsPage />} />
+          {/* CAP-02 项目管理（七视图聚合页：项目/经验提案/注入预览/命令模板/代码库/场景/执行审计；项目配置为嵌套子路由） */}
+          <Route path="/admin/projects" element={<AdminProjectsHub />} />
           <Route path="/admin/projects/:id" element={<ProjectSettingsLayout />}>
             <Route index element={<Navigate to="repos" replace />} />
             <Route path="repos" element={<ReposPage />} />
@@ -184,16 +181,16 @@ export default function App() {
             <Route path="jira" element={<JiraSyncPage />} />
             <Route path="lock" element={<LockPage />} />
           </Route>
-          {/* CAP-29 全局代码仓库登记（仅 ADMIN；项目仓库关联的单一数据源） */}
-          <Route path="/admin/repos" element={<ReposAdminPage />} />
+          {/* CAP-29 全局代码仓库登记已并入项目管理「代码库」tab，旧路径兼容 */}
+          <Route path="/admin/repos" element={<Navigate to="/admin/projects?tab=repos" replace />} />
           {/* CAP-01 用户管理 */}
           <Route path="/admin/users" element={<UserManagementPage />} />
-          {/* CAP-36 执行底座：命令模板 + 执行审计（CAP-07 服务器运维已下线，旧路径兼容） */}
-          <Route path="/admin/execution" element={<ExecutionPage />} />
+          {/* CAP-36 执行底座（命令模板 + 执行审计）已并入项目管理 tab，旧路径兼容 */}
+          <Route path="/admin/execution" element={<Navigate to="/admin/projects?tab=templates" replace />} />
           {/* CAP-80 任务管理（M4 正名；旧路径兼容跳转） */}
           <Route path="/admin/tasks" element={<AdminAsyncTasksPage />} />
           <Route path="/admin/async-tasks" element={<Navigate to="/admin/tasks" replace />} />
-          <Route path="/admin/servers" element={<Navigate to="/admin/execution" replace />} />
+          <Route path="/admin/servers" element={<Navigate to="/admin/projects?tab=templates" replace />} />
           {/* CAP-18/19 平台集成（GitLab / Jira） */}
           <Route path="/admin/integrations" element={<IntegrationsPage />} />
           {/* CAP-48 模型接入（Embedding 端点：平台默认 + 库级覆盖） */}
@@ -231,9 +228,9 @@ export default function App() {
           <Route path="/admin/agent/audit-logs" element={<Navigate to="/admin/agent/nodes?view=audit" replace />} />
           <Route path="/admin/agent/logs" element={<Navigate to="/admin/agent/nodes?view=audit" replace />} />
           <Route path="/admin/agent-nodes" element={<Navigate to="/admin/agent/nodes" replace />} />
-          {/* CAP-33 场景（会话模板的升级形态；/admin/templates 旧路径重定向） */}
-          <Route path="/admin/scenarios" element={<ScenariosPage />} />
-          <Route path="/admin/templates" element={<Navigate to="/admin/scenarios" replace />} />
+          {/* CAP-33 场景已并入项目管理「场景」tab（会话模板的升级形态；/admin/templates 旧路径重定向） */}
+          <Route path="/admin/scenarios" element={<Navigate to="/admin/projects?tab=scenarios" replace />} />
+          <Route path="/admin/templates" element={<Navigate to="/admin/projects?tab=scenarios" replace />} />
           {/* CAP-04 知识库（CAP-44 库容器化：列表 + 详情） */}
           <Route path="/admin/knowledge" element={<KnowledgeBaseList />} />
           <Route path="/admin/knowledge/bases/:id" element={<KnowledgeBaseDetail />} />

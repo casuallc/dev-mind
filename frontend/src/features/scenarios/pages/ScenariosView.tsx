@@ -1,9 +1,9 @@
-// 场景管理（CAP-33 FR-06）：场景 = prompt 骨架 + 预装配上下文包（skills/docs/知识 tags/场景背景）。
+// 场景管理视图（项目管理聚合页的「场景」tab，CAP-33 FR-06）：场景 = prompt 骨架 + 预装配上下文包。
+// 外壳 Card / extra 按钮在 AdminProjectsHub（refreshTick/createTick 驱动）。
 // 成套操作收进「管理」Drawer；预览走 dryRun 装配（不 bumpHits）。
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Button,
-  Card,
   Drawer,
   Form,
   Input,
@@ -17,7 +17,6 @@ import {
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import {
   createScenario,
@@ -32,7 +31,6 @@ import { listDocs } from '../../docs/api'
 import { listProjects } from '../../projects/api'
 import { listAgentNodes } from '../../agent/api'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
@@ -45,7 +43,13 @@ const SOURCE_LABEL: Record<string, string> = {
 }
 const KIND_LABEL: Record<string, string> = { knowledge: '知识', skill: 'Skill', doc: '文档' }
 
-export default function ScenariosPage() {
+export default function ScenariosView({
+  refreshTick = 0,
+  createTick = 0,
+}: {
+  refreshTick?: number
+  createTick?: number
+}) {
   const [rows, setRows] = useState<Scenario[]>([])
   const [loading, setLoading] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -74,7 +78,16 @@ export default function ScenariosPage() {
 
   useEffect(() => {
     load()
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshTick])
+
+  // 外壳 extra「新建场景」经 createTick 触发；挂载首帧不触发
+  const firstCreate = useRef(true)
+  useEffect(() => {
+    if (firstCreate.current) { firstCreate.current = false; return }
+    if (createTick > 0) openEditor(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createTick])
 
   const openEditor = (s: Scenario | null) => {
     setEditing(s)
@@ -233,22 +246,8 @@ export default function ScenariosPage() {
   ]
 
   return (
-    <Card
-      style={pageCardStyle}
-      styles={{ body: pageCardBodyFlexStyle }}
-      title="场景"
-      extra={
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={load}>
-            刷新
-          </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor(null)}>
-            新建场景
-          </Button>
-        </Space>
-      }
-    >
-      <Typography.Paragraph type="secondary">
+    <>
+      <Typography.Paragraph type="secondary" style={{ marginTop: 0, marginBottom: 12 }}>
         场景 = prompt 骨架 + 预装配上下文包（skills / 文档 / 知识标签 / 场景背景）。新建会话或问答时选择场景，
         骨架渲染为首条 prompt，绑定资产随上下文包注入沙箱。占位符：
         <Typography.Text code>{'{{task}}'}</Typography.Text>、
@@ -449,6 +448,6 @@ export default function ScenariosPage() {
           </Space>
         )}
       </Drawer>
-    </Card>
+    </>
   )
 }

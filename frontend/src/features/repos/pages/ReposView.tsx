@@ -1,6 +1,9 @@
+// CAP-29 全局代码仓库登记视图（项目管理聚合页的「代码库」tab）：平台级独立资源，项目仓库只关联不复制。
+// 外壳 Card / extra 按钮在 AdminProjectsHub（refreshTick/createTick 驱动）。
+// CLONE = 服务端克隆（支持定时/手动 fetch）；LOCAL = 服务端本地路径登记。
+import { useEffect, useRef, useState } from 'react'
 import {
   Button,
-  Card,
   Form,
   Input,
   Modal,
@@ -13,24 +16,23 @@ import {
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
-import { useEffect, useState } from 'react'
 import { createRepo, deleteRepo, fetchRepo, listRepos, recloneRepo, updateRepo } from '../api'
 import type { GitRepo } from '../types'
 import { CLONE_STATUS_COLOR } from '../types'
 // 集成实例列表为平台设施（projects feature 同样直接引用 integrations/api）
 import { listIntegrations } from '../../integrations/api'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
-/**
- * CAP-29 全局代码仓库登记（仅 ADMIN，/admin/repos）：平台级独立资源，项目仓库只关联不复制。
- * CLONE = 服务端克隆（支持定时/手动 fetch）；LOCAL = 服务端本地路径登记。
- */
-export default function ReposAdminPage() {
+export default function ReposView({
+  refreshTick = 0,
+  createTick = 0,
+}: {
+  refreshTick?: number
+  createTick?: number
+}) {
   const [rows, setRows] = useState<GitRepo[]>([])
   const [loading, setLoading] = useState(false)
   const [editTarget, setEditTarget] = useState<GitRepo | null>(null)
@@ -47,7 +49,7 @@ export default function ReposAdminPage() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(reload, [])
+  useEffect(reload, [refreshTick])
 
   useEffect(() => {
     listIntegrations()
@@ -59,6 +61,14 @@ export default function ReposAdminPage() {
         // 集成列表加载失败不阻断表单（匿名克隆仍可用）
       })
   }, [])
+
+  // 外壳 extra「登记仓库」经 createTick 触发；挂载首帧不触发
+  const firstCreate = useRef(true)
+  useEffect(() => {
+    if (firstCreate.current) { firstCreate.current = false; return }
+    if (createTick > 0) openCreate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createTick])
 
   // 有克隆中的行时轮询刷新（同项目仓库页交互）
   const polling = rows.some((r) => r.cloneStatus === 'CLONING')
@@ -125,22 +135,8 @@ export default function ReposAdminPage() {
   }
 
   return (
-    <Card
-      style={pageCardStyle}
-      styles={{ body: pageCardBodyFlexStyle }}
-      title="代码仓库"
-      extra={
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={reload}>
-            刷新
-          </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            登记仓库
-          </Button>
-        </Space>
-      }
-    >
-      <Typography.Paragraph type="secondary">
+    <>
+      <Typography.Paragraph type="secondary" style={{ marginTop: 0, marginBottom: 12 }}>
         平台级全局仓库：项目添加仓库时按远端地址自动关联到此处（不复制）；工时日志的 git 扫描也读取这里的服务端克隆。
         CLONE 行由服务端定时抓取（默认 30 分钟），也可手动「立即抓取」。
       </Typography.Paragraph>
@@ -336,6 +332,6 @@ export default function ReposAdminPage() {
           )}
         </Form>
       </Modal>
-    </Card>
+    </>
   )
 }

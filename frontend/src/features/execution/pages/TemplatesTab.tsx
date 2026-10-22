@@ -1,4 +1,4 @@
-// CAP-36 命令模板白名单管理（视图内容组件；外壳 Card / extra 按钮在 ExecutionPage）
+// CAP-36 命令模板白名单管理（视图内容组件；外壳 Card / extra 按钮在 AdminProjectsHub「命令模板」tab）
 // 模板由服务端渲染后经 exec 帧下发 runner 节点执行；本地与远程执行共用同一份白名单。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Checkbox, Drawer, Empty, Flex, Form, Input, message, Modal, Select, Space, Tag, Typography } from 'antd'

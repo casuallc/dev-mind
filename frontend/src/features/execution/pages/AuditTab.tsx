@@ -1,4 +1,4 @@
-// CAP-36 执行审计查看（视图内容组件；外壳 Card / extra 按钮在 ExecutionPage）
+// CAP-36 执行审计查看（视图内容组件；外壳 Card / extra 按钮在 AdminProjectsHub「执行审计」tab）
 // exec 帧下发 runner 节点的每次执行全量留痕（domain=agent_exec）；历史 CAP-07 SSH/HTTP 记录同表可查。
 import { useCallback, useEffect, useState } from 'react'
 import { Badge, Drawer, Select, Space, Tag, Typography } from 'antd'

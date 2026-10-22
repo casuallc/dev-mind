@@ -1,4 +1,5 @@
-// CAP-44 知识库列表：库容器管理（新建/编辑/删除）+ 经验提案 inbox + 注入内容预览。
+// CAP-44 知识库列表：库容器管理（新建/编辑/删除）。
+// 经验提案 inbox 与注入预览已迁入「项目管理」聚合页（features/knowledge/pages/ProposalsView、InjectionPreviewView）。
 // 条目管理与检索测试在库详情页（/admin/knowledge/bases/:id）。
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -6,111 +7,43 @@ import { canWrite } from '../../auth/authStore'
 import {
   Button,
   Card,
-  Descriptions,
-  Drawer,
   Form,
   Input,
   message,
   Modal,
-  Segmented,
   Select,
   Space,
   Tag,
   Tooltip,
   Typography,
 } from 'antd'
-import { BulbOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { listProjects } from '../../projects/api'
 import type { Project } from '../../projects/types'
-import {
-  adoptProposal,
-  createBase,
-  createProposal,
-  deleteBase,
-  listBases,
-  listProposals,
-  previewInjection,
-  rejectProposal,
-  updateBase,
-} from '../api'
-import type {
-  InjectMode,
-  KnowledgeBase,
-  KnowledgeBaseInput,
-  KnowledgeProposal,
-  PreviewResult,
-  TriageView,
-} from '../types'
-import TriageEvidenceDrawer from '../components/TriageEvidenceDrawer'
+import { createBase, deleteBase, listBases, updateBase } from '../api'
+import type { InjectMode, KnowledgeBase, KnowledgeBaseInput } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
-import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
-import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 const scopeTag = (s: string) => (s === 'global' ? <Tag color="blue">global</Tag> : <Tag>project</Tag>)
 const injectModeTag = (m: InjectMode) =>
   m === 'FULL' ? <Tag color="geekblue">FULL 全量注入</Tag> : <Tag color="purple">RAG 检索</Tag>
 const baseStatusTag = (s: string) =>
   s === 'active' ? <Tag color="green">active</Tag> : <Tag>archived</Tag>
-const statusTag = (s: string) =>
-  s === 'active' ? <Tag color="green">active</Tag> : s === 'open' ? <Tag color="gold">open</Tag>
-    : s === 'adopted' ? <Tag color="green">adopted</Tag> : s === 'rejected' ? <Tag>rejected</Tag>
-    : s === 'deprecated' ? <Tag>deprecated</Tag> : <Tag color="orange">{s}</Tag>
-
-/** CAP-55 FR-04 徽标：层级 / 重复 / 质量三块，未分诊或降级各有对应的"没有建议"形态 */
-function TriageBadges({ triage }: { triage: TriageView | null }) {
-  if (!triage) return <Typography.Text type="secondary">未分诊</Typography.Text>
-  if (triage.degraded) {
-    return (
-      <Tooltip title={triage.degradedReason || '未拿到建议'}>
-        <Tag color="orange">降级</Tag>
-      </Tooltip>
-    )
-  }
-  return (
-    <Space size={4} wrap>
-      {triage.adoptLayer && <Tag color="blue">{triage.adoptLayer.label}</Tag>}
-      {triage.duplicate?.duplicate ? (
-        <Tooltip title={`与 ${triage.duplicate.similar?.length ?? 0} 条现有条目相似`}>
-          <Tag color="red">疑似重复</Tag>
-        </Tooltip>
-      ) : (
-        <Tag>不重复</Tag>
-      )}
-      {triage.quality && <Tag color="green">质量 {triage.quality.label}</Tag>}
-    </Space>
-  )
-}
 
 export default function KnowledgeBaseList() {
   const [projects, setProjects] = useState<Project[]>([])
   const [bases, setBases] = useState<KnowledgeBase[]>([])
   const [basesLoading, setBasesLoading] = useState(false)
-  const [proposals, setProposals] = useState<KnowledgeProposal[]>([])
-  const [proposalsLoading, setProposalsLoading] = useState(false)
-  const [view, setView] = useState<string>('bases') // bases | proposals | preview
-
-  // 提案管理抽屉：引用实时列表数据，状态变化自动反映
-  const [manageId, setManageId] = useState<number | null>(null)
-  const manageProposal = manageId != null ? proposals.find((p) => p.id === manageId) ?? null : null
-
-  // CAP-57：分诊已与决策引擎解耦，徽标只读展示历史 triage 数据（不再发起新分诊）
-  const [evidenceId, setEvidenceId] = useState<number | null>(null)
-  const evidenceProposal = evidenceId != null ? proposals.find((p) => p.id === evidenceId) ?? null : null
 
   // 库编辑
   const [baseModalOpen, setBaseModalOpen] = useState(false)
   const [editingBase, setEditingBase] = useState<KnowledgeBase | null>(null)
   const [baseForm] = Form.useForm<KnowledgeBaseInput>()
-  const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null)
-  const [previewForm] = Form.useForm()
-
-  // 提案弹窗（手动沉淀）
-  const [proposalModalOpen, setProposalModalOpen] = useState(false)
-  const [proposalForm] = Form.useForm()
 
   const loadBases = useCallback(async () => {
     setBasesLoading(true)
@@ -123,24 +56,12 @@ export default function KnowledgeBaseList() {
     }
   }, [])
 
-  const loadProposals = useCallback(async (status?: string) => {
-    setProposalsLoading(true)
-    try {
-      setProposals(await listProposals(status))
-    } catch (e) {
-      showError(e, '加载提案失败')
-    } finally {
-      setProposalsLoading(false)
-    }
-  }, [])
-
   useEffect(() => {
     listProjects()
       .then(setProjects)
       .catch(() => undefined)
     loadBases()
-    loadProposals()
-  }, [loadBases, loadProposals])
+  }, [loadBases])
 
   const openCreateBase = () => {
     setEditingBase(null)
@@ -200,78 +121,6 @@ export default function KnowledgeBaseList() {
         }
       },
     })
-  }
-
-  const onAdopt = (p: KnowledgeProposal, target: 'project' | 'global') => {
-    Modal.confirm({
-      centered: true,
-      title: `采纳「${p.title}」${target === 'global' ? '到全局' : '到项目'}`,
-      content:
-        target === 'global'
-          ? '将作为全局经验条目进入经验库，后续所有项目会话都可能注入。'
-          : `将进入项目经验库（项目 ${p.targetProjectId ?? '待定'}）。`,
-      okText: '采纳',
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          await adoptProposal(p.id, target, p.targetProjectId ?? undefined)
-          message.success('已采纳为知识条目')
-          setManageId(null)
-          loadProposals()
-          loadBases()
-        } catch (err) {
-          showError(err, '采纳失败')
-        }
-      },
-    })
-  }
-
-  const onReject = (p: KnowledgeProposal) => {
-    Modal.confirm({
-      centered: true,
-      title: `拒绝提案「${p.title}」？`,
-      content: '提案将被标记为 rejected，不会进入知识库。',
-      okText: '拒绝',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          await rejectProposal(p.id)
-          message.success('已拒绝')
-          setManageId(null)
-          loadProposals()
-        } catch (err) {
-          showError(err, '操作失败')
-        }
-      },
-    })
-  }
-
-  const onPreview = async () => {
-    const v = await previewForm.validateFields()
-    try {
-      setPreviewResult(await previewInjection(v.projectId, v.taskSpec))
-    } catch (e) {
-      showError(e, '预览失败')
-    }
-  }
-
-  const onManualProposal = async () => {
-    const v = await proposalForm.validateFields()
-    try {
-      await createProposal({
-        title: v.title,
-        contentMd: v.contentMd,
-        targetScope: v.targetScope ?? 'project',
-        targetProjectId: v.targetProjectId,
-      })
-      message.success('提案已提交，等待审核')
-      setProposalModalOpen(false)
-      proposalForm.resetFields()
-      loadProposals()
-    } catch (e) {
-      showError(e, '提交失败')
-    }
   }
 
   const baseColumns: ColumnsType<KnowledgeBase> = [
@@ -341,261 +190,53 @@ export default function KnowledgeBaseList() {
     },
   ]
 
-  const proposalColumns: ColumnsType<KnowledgeProposal> = [
-    { title: '标题', dataIndex: 'title', ellipsis: true },
-    { title: '去向', dataIndex: 'targetScope', width: 90, render: scopeTag },
-    { title: '来源会话', dataIndex: 'sourceSessionId', width: 130, render: (v) => v ?? '-' },
-    {
-      title: 'AI 建议',
-      key: 'triage',
-      width: 260,
-      render: (_, r) => (
-        <Space size={8} wrap>
-          <TriageBadges triage={r.triage} />
-          {r.triage && !r.triage.degraded && (
-            <a onClick={() => setEvidenceId(r.id)}>查看依据</a>
-          )}
-        </Space>
-      ),
-    },
-    { title: '状态', dataIndex: 'status', width: 100, render: statusTag },
-    { title: '创建时间', dataIndex: 'createdAt', width: 170, render: (v) => fmtTime(v) },
-    {
-      title: '操作',
-      width: 90,
-      render: (_, r) =>
-        r.status === 'open' ? (
-          <Button size="small" onClick={() => setManageId(r.id)}>
-            管理
-          </Button>
-        ) : (
-          <Typography.Text type="secondary">已处理</Typography.Text>
-        ),
-    },
-  ]
-
   const projectOptions = projects.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))
 
   return (
     <Card
       style={pageCardStyle}
       styles={{ body: pageCardBodyFlexStyle }}
-      title={
-        <Space size={12}>
-          <span>知识库</span>
-          <Segmented
-            value={view}
-            onChange={setView}
-            options={[
-              { value: 'bases', label: '知识库' },
-              { value: 'proposals', label: '经验提案' },
-              { value: 'preview', label: '注入预览' },
-            ]}
-          />
-        </Space>
-      }
+      title="知识库"
       extra={
-        <Space wrap>
-          {view === 'bases' && (
-            <>
-              <Button icon={<ReloadOutlined />} onClick={loadBases}>
-                刷新
-              </Button>
-              {canWrite() && (
-                <Button type="primary" icon={<PlusOutlined />} onClick={openCreateBase}>
-                  新建知识库
-                </Button>
-              )}
-            </>
-          )}
-          {view === 'proposals' && (
-            <>
-              <Button icon={<ReloadOutlined />} onClick={() => loadProposals()}>
-                刷新
-              </Button>
-              <Button type="primary" icon={<BulbOutlined />} onClick={() => setProposalModalOpen(true)}>
-                手动沉淀经验
-              </Button>
-            </>
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={loadBases}>
+            刷新
+          </Button>
+          {canWrite() && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateBase}>
+              新建知识库
+            </Button>
           )}
         </Space>
       }
     >
-      {view === 'bases' && (
-        <>
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-            知识库是条目的容器：FULL 库（经验库）在会话启动时全量注入 CLAUDE.local.md，RAG 库只做向量检索按召回内容。
-            点库名进入条目管理与检索测试。
-          </Typography.Paragraph>
-          <FitTable
-            rowKey="id"
-            loading={basesLoading}
-            columns={baseColumns}
-            dataSource={bases}
-            pagination={LIST_PAGINATION}
-            locale={{
-              emptyText: (
-                <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
-                  <Typography.Text type="secondary">
-                    暂无知识库——点击「新建知识库」创建一个 RAG 库沉淀文档，或在「经验提案」采纳沉淀的经验。
-                  </Typography.Text>
-                  {canWrite() && (
-                    <div>
-                      <Button type="primary" icon={<PlusOutlined />} onClick={openCreateBase}>
-                        新建知识库
-                      </Button>
-                    </div>
-                  )}
-                </Space>
-              ),
-            }}
-          />
-        </>
-      )}
-
-      {view === 'proposals' && (
-        <>
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-            会话中「沉淀经验」或手动提交的经验，审核采纳后进入对应经验库（inbox）。
-          </Typography.Paragraph>
-          <FitTable
-            rowKey="id"
-            loading={proposalsLoading}
-            columns={proposalColumns}
-            dataSource={proposals}
-            pagination={LIST_PAGINATION}
-            locale={{
-              emptyText:
-                '暂无待审核经验——在会话中点「沉淀经验」，或点击右上角「手动沉淀经验」提交一条。',
-            }}
-          />
-        </>
-      )}
-
-      {view === 'preview' && (
-        <>
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-            选择项目与任务说明，预览会话启动时实际注入的知识内容（FULL 库条目）。
-          </Typography.Paragraph>
-          <Space direction="vertical" style={{ width: '100%', ...pagePaneScrollStyle }}>
-            <Form form={previewForm} layout="inline">
-              <Form.Item name="projectId" label="项目">
-                <Select allowClear placeholder="选择项目" style={{ width: 240 }} options={projectOptions} />
-              </Form.Item>
-              <Form.Item name="taskSpec" label="任务说明" style={{ flex: 1, minWidth: 240 }}>
-                <Input placeholder="本次会话要做什么？（将写入 ## 当前任务）" />
-              </Form.Item>
-              <Button type="primary" onClick={onPreview}>
-                预览注入内容
-              </Button>
-            </Form>
-            {previewResult && (
-              <>
-                <Typography.Text>
-                  命中条目（{previewResult.entriesUsed.length}）：
-                  {previewResult.entriesUsed.length
-                    ? previewResult.entriesUsed.map((e) => (
-                        <Tag key={e.id} color={e.scope === 'global' ? 'blue' : undefined}>
-                          {e.name}
-                        </Tag>
-                      ))
-                    : '无'}
-                </Typography.Text>
-                <pre
-                  style={{
-                    whiteSpace: 'pre-wrap',
-                    background: '#f6f6f6',
-                    padding: 12,
-                    borderRadius: 4,
-                    fontSize: 12,
-                    maxHeight: 480,
-                    overflow: 'auto',
-                  }}
-                >
-                  {previewResult.content || '(空)'}
-                </pre>
-              </>
-            )}
-          </Space>
-        </>
-      )}
-
-      {/* 提案管理抽屉：采纳到项目/晋升全局/拒绝 */}
-      {manageProposal && (
-        <Drawer
-          title={`提案 · ${manageProposal.title}`}
-          open
-          onClose={() => setManageId(null)}
-          width={DRAWER_DEFAULT}
-        >
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Descriptions size="small" column={2}>
-              <Descriptions.Item label="去向">{scopeTag(manageProposal.targetScope)}</Descriptions.Item>
-              <Descriptions.Item label="状态">{statusTag(manageProposal.status)}</Descriptions.Item>
-              <Descriptions.Item label="来源会话">{manageProposal.sourceSessionId ?? '-'}</Descriptions.Item>
-              <Descriptions.Item label="创建时间">{fmtTime(manageProposal.createdAt)}</Descriptions.Item>
-            </Descriptions>
-            <pre
-              style={{
-                whiteSpace: 'pre-wrap',
-                background: '#f6f6f6',
-                padding: 12,
-                borderRadius: 4,
-                fontSize: 12,
-                maxHeight: 320,
-                overflow: 'auto',
-                margin: 0,
-              }}
-            >
-              {manageProposal.contentMd}
-            </pre>
-
-            {/* CAP-55：AI 建议区块——降级时也要出现（"没给建议"和"没分诊过"是两回事） */}
-            <div>
-              <Space size={8} style={{ marginBottom: 8 }}>
-                <Typography.Text strong>AI 建议</Typography.Text>
-                {manageProposal.triage && (
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    {fmtTime(manageProposal.triage.at)}
-                  </Typography.Text>
-                )}
-              </Space>
-              <div style={{ marginBottom: 8 }}>
-                <TriageBadges triage={manageProposal.triage} />
-                {manageProposal.triage?.degraded && (
-                  <Typography.Text type="warning" style={{ marginLeft: 8, fontSize: 12 }}>
-                    {manageProposal.triage.degradedReason}
-                  </Typography.Text>
-                )}
-              </div>
-              <Space>
-                {manageProposal.triage && !manageProposal.triage.degraded && (
-                  <Button size="small" onClick={() => setEvidenceId(manageProposal.id)}>
-                    查看依据
+      <Typography.Paragraph type="secondary" style={{ marginTop: 0, marginBottom: 12 }}>
+        知识库是条目的容器：FULL 库（经验库）在会话启动时全量注入 CLAUDE.local.md，RAG 库只做向量检索按召回内容。
+        点库名进入条目管理与检索测试。
+      </Typography.Paragraph>
+      <FitTable
+        rowKey="id"
+        loading={basesLoading}
+        columns={baseColumns}
+        dataSource={bases}
+        pagination={LIST_PAGINATION}
+        locale={{
+          emptyText: (
+            <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
+              <Typography.Text type="secondary">
+                暂无知识库——点击「新建知识库」创建一个 RAG 库沉淀文档，或到「项目管理 · 经验提案」采纳沉淀的经验。
+              </Typography.Text>
+              {canWrite() && (
+                <div>
+                  <Button type="primary" icon={<PlusOutlined />} onClick={openCreateBase}>
+                    新建知识库
                   </Button>
-                )}
-              </Space>
-            </div>
-
-            {manageProposal.status === 'open' ? (
-              <Space>
-                <Button type="primary" onClick={() => onAdopt(manageProposal, 'project')}>
-                  采纳到项目
-                </Button>
-                <Button onClick={() => onAdopt(manageProposal, 'global')}>晋升全局</Button>
-                <Button danger onClick={() => onReject(manageProposal)}>
-                  拒绝
-                </Button>
-              </Space>
-            ) : (
-              <Typography.Text type="secondary">该提案已处理。</Typography.Text>
-            )}
-          </Space>
-        </Drawer>
-      )}
-
-      {/* CAP-55 FR-07「查看依据」：徽标只给结论，这里给来路（含 laya 应答原文） */}
-      <TriageEvidenceDrawer proposal={evidenceProposal} onClose={() => setEvidenceId(null)} />
+                </div>
+              )}
+            </Space>
+          ),
+        }}
+      />
 
       {/* 库编辑弹窗 */}
       <Modal
@@ -655,40 +296,6 @@ export default function KnowledgeBaseList() {
               />
             </Form.Item>
           )}
-        </Form>
-      </Modal>
-
-      {/* 手动沉淀经验弹窗 */}
-      <Modal
-        title="沉淀经验"
-        open={proposalModalOpen}
-        onCancel={() => setProposalModalOpen(false)}
-        onOk={onManualProposal}
-      >
-        <Form form={proposalForm} labelCol={{ span: 5 }} wrapperCol={{ span: 18 }}>
-          <Form.Item name="title" label="标题" rules={[{ required: true, message: '请填写标题' }]}>
-            <Input placeholder="如：Maven 多模块增量编译实践" />
-          </Form.Item>
-          <Form.Item name="targetScope" label="去向" initialValue="project">
-            <Select
-              options={[
-                { value: 'project', label: '项目经验' },
-                { value: 'global', label: '全局经验' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item noStyle shouldUpdate>
-            {({ getFieldValue }) =>
-              getFieldValue('targetScope') === 'project' && (
-                <Form.Item name="targetProjectId" label="目标项目">
-                  <Select allowClear showSearch optionFilterProp="label" placeholder="选择项目" options={projectOptions} />
-                </Form.Item>
-              )
-            }
-          </Form.Item>
-          <Form.Item name="contentMd" label="内容" rules={[{ required: true, message: '请填写内容' }]}>
-            <Input.TextArea rows={6} placeholder="经验内容（Markdown），审核采纳后成为知识条目" />
-          </Form.Item>
         </Form>
       </Modal>
     </Card>
