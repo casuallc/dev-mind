@@ -307,6 +307,15 @@ class KnowledgeBaseServiceTest {
     }
 
     @Test
+    void deleteProposalRemovesRow() {
+        KnowledgeProposalEntity p = addOpenProposal();
+
+        service.deleteProposal(p.getId());
+
+        verify(proposalRepo).delete(p);
+    }
+
+    @Test
     void reindexBaseOnlyMismatchedSkipsWithoutProbedDimensions() {
         KnowledgeBaseEntity kb = addKb("global", null, "RAG");
         when(kbRepo.findById(kb.getId())).thenReturn(java.util.Optional.of(kb));

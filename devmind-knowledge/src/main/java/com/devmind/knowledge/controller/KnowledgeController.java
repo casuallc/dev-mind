@@ -186,4 +186,9 @@ public class KnowledgeController {
     public ProposalView reject(@PathVariable Long id) {
         return service.reject(id);
     }
+
+    @DeleteMapping("/proposals/{id}")
+    public void deleteProposal(@PathVariable Long id) {
+        service.deleteProposal(id);
+    }
 }

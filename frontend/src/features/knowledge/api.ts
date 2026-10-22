@@ -94,3 +94,4 @@ export const adoptProposal = (id: number, target: 'project' | 'global', projectI
   return api.post<KnowledgeProposal>(`/knowledge/proposals/${id}/adopt?${q.toString()}`)
 }
 export const rejectProposal = (id: number) => api.post<KnowledgeProposal>(`/knowledge/proposals/${id}/reject`)
+export const deleteProposal = (id: number) => api.del(`/knowledge/proposals/${id}`)

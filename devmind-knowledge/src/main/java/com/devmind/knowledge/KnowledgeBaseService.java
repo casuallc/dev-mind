@@ -677,6 +677,12 @@ public class KnowledgeBaseService {
         return view;
     }
 
+    /** 删除提案（硬删除，不限状态；已采纳生成的知识条目不受影响）。 */
+    @Transactional
+    public void deleteProposal(Long id) {
+        proposalRepo.delete(requireProposal(id));
+    }
+
     private String defaultPath(KnowledgeEntryEntity e) {
         String name = e.getName() == null ? "entry" : e.getName().replaceAll("[\\\\/:*?\"<>|\\s]+", "-");
         return e.getScope() + "/" + name + ".md";
