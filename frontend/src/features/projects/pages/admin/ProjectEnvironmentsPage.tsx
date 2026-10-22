@@ -147,7 +147,15 @@ export default function ProjectEnvironmentsPage() {
     {
       title: '执行节点',
       dataIndex: 'nodeIds',
-      render: (ids: string[]) => ids?.length ? ids.map((nid) => <Tag key={nid}>{nodeName(nid)}</Tag>) : '-',
+      // 节点名可能超列宽：Tag 由 index.css 全局省略号截断，Tooltip 展示完整名
+      render: (ids: string[]) =>
+        ids?.length
+          ? ids.map((nid) => (
+              <Tooltip key={nid} title={nodeName(nid)}>
+                <Tag>{nodeName(nid)}</Tag>
+              </Tooltip>
+            ))
+          : '-',
     },
     {
       title: '变量',

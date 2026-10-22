@@ -34,6 +34,18 @@ html, body, #root {
   display: none;
 }
 
+/* 表格内 Tag 防溢出：列宽固定（width: 110 等）而 Tag 内容（节点名/标签名）更长时，
+   td 默认 overflow: visible 会越界压到右侧列；限制在单元格内容盒内并省略号截断，
+   完整内容靠列 render 里的 Tooltip 展示 */
+.ant-table .ant-tag {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* overflow 非 visible 的 inline-block 基线会塌到盒底，显式对齐避免与同行文字错位 */
+  vertical-align: middle;
+}
+
 /* ScrollRow 通用横向滚动行（shared/components/ScrollRow）：
    children 超宽时容器内横向滑动，箭头 + 渐变遮罩提示可滚方向，滚动条隐藏 */
 .scroll-row {

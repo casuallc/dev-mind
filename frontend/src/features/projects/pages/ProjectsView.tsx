@@ -1,7 +1,7 @@
 // CAP-02 项目列表视图（项目管理聚合页的「项目」tab）：表格 + 新建/编辑（ProjectFormDrawer）+ 居中确认删除。
 // 外壳 Card / extra 按钮在 AdminProjectsHub（refreshTick/createTick/onboardTick 驱动）。
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Alert, Button, Input, Modal, Select, Space, Tag, Typography, message } from 'antd'
+import { Alert, Button, Input, Modal, Select, Space, Tag, Tooltip, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate } from 'react-router-dom'
 import { deleteProject, listProjects } from '../api'
@@ -156,12 +156,16 @@ export default function ProjectsView({
       title: '执行节点',
       dataIndex: 'agentNodeId',
       width: 110,
-      render: (v?: string) =>
-        v ? (
-          <Tag color="purple">{agentNodes.find((n) => String(n.id) === v)?.name ?? `节点${v}`}</Tag>
-        ) : (
-          '跟随平台默认'
-        ),
+      render: (v?: string) => {
+        if (!v) return '跟随平台默认'
+        const name = agentNodes.find((n) => String(n.id) === v)?.name ?? `节点${v}`
+        // 节点名常超列宽：Tag 由 index.css 全局省略号截断，Tooltip 展示完整名
+        return (
+          <Tooltip title={name}>
+            <Tag color="purple">{name}</Tag>
+          </Tooltip>
+        )
+      },
     },
     {
       title: '标签',
