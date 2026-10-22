@@ -37,7 +37,7 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
     type: 'group' as const,
     label: '项目与资源',
     children: [
-      // 项目管理为七视图聚合页：项目/经验提案/注入预览/命令模板/代码库/场景/执行审计
+      // 项目管理为六视图聚合页：项目/经验提案（内嵌注入预览）/命令模板/代码库/场景/执行审计
       { key: '/admin/projects', icon: <FolderOutlined />, label: '项目管理' },
       { key: '/admin/knowledge', icon: <ReadOutlined />, label: '知识库' },
       { key: '/admin/docs', icon: <FileTextOutlined />, label: '文档管理' },

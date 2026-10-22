@@ -1,5 +1,5 @@
 // CAP-44 知识库列表：库容器管理（新建/编辑/删除）。
-// 经验提案 inbox 与注入预览已迁入「项目管理」聚合页（features/knowledge/pages/ProposalsView、InjectionPreviewView）。
+// 经验提案 inbox（内嵌注入预览）已迁入「项目管理」聚合页（features/knowledge/pages/ProposalsView）。
 // 条目管理与检索测试在库详情页（/admin/knowledge/bases/:id）。
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'

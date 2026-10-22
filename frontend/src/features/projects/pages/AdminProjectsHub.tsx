@@ -1,5 +1,5 @@
-// 项目管理聚合页（/admin/projects）：单一 Card，title 内 Segmented 切换七个视图（?tab= 驱动，URL 可分享）。
-// 七个视图均为「项目管理」域下的收口入口：项目列表 / 经验提案 / 注入预览 / 命令模板 / 代码库 / 场景 / 执行审计。
+// 项目管理聚合页（/admin/projects）：单一 Card，title 内 Segmented 切换六个视图（?tab= 驱动，URL 可分享）。
+// 六个视图均为「项目管理」域下的收口入口：项目列表 / 经验提案（内嵌注入预览）/ 命令模板 / 代码库 / 场景 / 执行审计。
 // 布局遵循 docs/core/前端内容区布局约定.md：Card title + Segmented（ScrollRow 包裹），extra 随视图切换，表格默认密度。
 import { useState } from 'react'
 import type { ReactNode } from 'react'
@@ -10,7 +10,6 @@ import ScrollRow from '../../../shared/components/ScrollRow'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import ProjectsView from './ProjectsView'
 import ProposalsView from '../../knowledge/pages/ProposalsView'
-import InjectionPreviewView from '../../knowledge/pages/InjectionPreviewView'
 import TemplatesTab from '../../execution/pages/TemplatesTab'
 import AuditTab from '../../execution/pages/AuditTab'
 import ReposView from '../../repos/pages/ReposView'
@@ -19,7 +18,6 @@ import ScenariosView from '../../scenarios/pages/ScenariosView'
 const TABS = [
   { key: 'projects', label: '项目' },
   { key: 'proposals', label: '经验提案' },
-  { key: 'preview', label: '注入预览' },
   { key: 'templates', label: '命令模板' },
   { key: 'repos', label: '代码库' },
   { key: 'scenarios', label: '场景' },
@@ -119,7 +117,6 @@ export default function AdminProjectsHub() {
         <ProjectsView refreshTick={refreshTick} createTick={createTick} onboardTick={onboardTick} />
       )}
       {view === 'proposals' && <ProposalsView refreshTick={refreshTick} createTick={createTick} />}
-      {view === 'preview' && <InjectionPreviewView />}
       {view === 'templates' && <TemplatesTab refreshTick={refreshTick} createTick={createTick} />}
       {view === 'repos' && <ReposView refreshTick={refreshTick} createTick={createTick} />}
       {view === 'scenarios' && <ScenariosView refreshTick={refreshTick} createTick={createTick} />}

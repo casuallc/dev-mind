@@ -1,8 +1,10 @@
-// 经验提案视图（项目管理聚合页的「经验提案」tab）：会话「沉淀经验」/手动提交 → inbox → 采纳/拒绝。
+// 经验提案视图（项目管理聚合页的「经验提案」tab）：会话「沉淀经验」/手动提交 → inbox → 采纳/拒绝/删除。
+// 注入预览以折叠面板内嵌在本页顶部（不再是聚合页的独立 tab）。
 // 外壳 Card / extra 按钮在 AdminProjectsHub（refreshTick/createTick 驱动）。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Button,
+  Collapse,
   Descriptions,
   Drawer,
   Form,
@@ -18,9 +20,10 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import { listProjects } from '../../projects/api'
 import type { Project } from '../../projects/types'
-import { adoptProposal, createProposal, listProposals, rejectProposal } from '../api'
+import { adoptProposal, createProposal, deleteProposal, listProposals, rejectProposal } from '../api'
 import type { KnowledgeProposal, TriageView } from '../types'
 import TriageEvidenceDrawer from '../components/TriageEvidenceDrawer'
+import InjectionPreview from '../components/InjectionPreview'
 import { fmtTime } from '../../../shared/utils/format'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
@@ -151,6 +154,27 @@ export default function ProposalsView({
     })
   }
 
+  const onDelete = (p: KnowledgeProposal) => {
+    Modal.confirm({
+      centered: true,
+      title: `删除提案「${p.title}」？`,
+      content: '删除后无法恢复；已采纳生成的知识条目不受影响。',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await deleteProposal(p.id)
+          message.success('已删除')
+          setManageId(null)
+          loadProposals()
+        } catch (err) {
+          showError(err, '删除失败')
+        }
+      },
+    })
+  }
+
   const onManualProposal = async () => {
     const v = await proposalForm.validateFields()
     try {
@@ -197,7 +221,9 @@ export default function ProposalsView({
             管理
           </Button>
         ) : (
-          <Typography.Text type="secondary">已处理</Typography.Text>
+          <Button size="small" danger onClick={() => onDelete(r)}>
+            删除
+          </Button>
         ),
     },
   ]
@@ -209,6 +235,16 @@ export default function ProposalsView({
       <Typography.Paragraph type="secondary" style={{ margin: 0, marginBottom: 12 }}>
         会话中「沉淀经验」或手动提交的经验，审核采纳后进入对应经验库（inbox）。
       </Typography.Paragraph>
+      <Collapse
+        style={{ marginBottom: 12 }}
+        items={[
+          {
+            key: 'preview',
+            label: '注入预览：会话启动时实际注入哪些知识内容',
+            children: <InjectionPreview />,
+          },
+        ]}
+      />
       <FitTable
         rowKey="id"
         loading={proposalsLoading}
@@ -290,6 +326,11 @@ export default function ProposalsView({
             ) : (
               <Typography.Text type="secondary">该提案已处理。</Typography.Text>
             )}
+            <div>
+              <Button size="small" danger onClick={() => onDelete(manageProposal)}>
+                删除提案
+              </Button>
+            </div>
           </Space>
         </Drawer>
       )}
