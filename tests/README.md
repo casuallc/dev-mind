@@ -154,6 +154,7 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
 | e2e-model-form-probe.mjs | 「模型接入」抽屉内「测试连接」：**填进表单的凭据与超时必须真的进探针请求**（浏览器里那条「表单取值 → 草稿请求」的路径，cap48_verify.py 走接口测不到）。自起一个强制鉴权的假端点（Bearer 不匹配一律 401，与 vLLM 行为一致），无头 Chrome 开抽屉、选类型、填表、点「测试连接」，逐项断言：探针打对路径、**带上 apiKey**、提示条成功、表单填的超时生效（拖 5 秒的假端点按 2 秒超时失败）。只读，不点「保存」。前置同上一行（app + 前端 dev），另需前端 origin 在后端 CORS 白名单内（默认只放 5173/8080，Vite 因端口占用换到 5174 时脚本会直接报错并给处置办法）。报告与失败截图落 `tmp/e2e-model-form-probe/` |
 | e2e-table-tag-ellipsis.mjs | 表格内 Tag 溢出（执行节点列）：备超长名节点（脚本自起 fake runner 上线）+ LOCAL 项目指它当默认节点，无头 Chrome 开 /admin/projects 断言 Tag 计算样式 ellipsis/hidden/nowrap（index.css 全局兜底）、Tag 右缘不越出单元格、td 无横向溢出、内容真被截断（scrollWidth>clientWidth）、悬停出完整名 Tooltip。前置：app 隔离实例（默认 :18102，**CORS 白名单带前端 origin**）+ `VITE_BACKEND_URL` 指向它的前端 dev（默认 :5199）+ runner jar 已构建；跑完删项目/节点、杀 runner，全自清 |
 | e2e-injection-preview-drawer.mjs | 注入预览抽屉（知识库列表页 extra 按钮，预览对象是 FULL 库条目）：extra 有按钮、点开 70% 大抽屉（表单+「预览注入内容」）、不选项目直接预览出结果区（命中条目+pre）、关抽屉后库表格仍在。只读不落数据。前置：app 隔离实例（默认 :18103）+ `VITE_BACKEND_URL` 指向它的前端 dev（默认 :5199）；Chrome 按 spawn PID 杀树，勿按窗口标题（误杀真实浏览器） |
+| e2e-context-asset-viewer.mjs | 项目「知识」页资产查看（此前只有列表）：脚本自造项目+文档+全局知识条目，/context 断言知识条目名可点、70% 抽屉标题=条目名且正文可见，切「文档」视图后文档名可点、正文与类型标签可见，关抽屉列表仍在。数据落隔离 H2。前置：app 隔离实例（默认 :18103）+ `VITE_BACKEND_URL` 指向它的前端 dev（默认 :5199） |
 
 ### 前端 UI E2E（Node + 无头 Chrome，需 app 隔离实例 + 前端 dev server 同时起）
 
