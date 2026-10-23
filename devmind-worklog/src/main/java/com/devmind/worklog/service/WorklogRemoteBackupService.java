@@ -23,7 +23,8 @@ import java.util.stream.Collectors;
 /**
  * CAP-74 M1：工作日志服务端 push（事实源在服务端仓，不再下发 runner）。
  * 全程仓级锁内：远端分支不存在 → 直接 push；否则 fetch → merge --no-edit（分叉自动合，
- * 跨人路径不相交恒干净）→ 冲突 mergeAbort 清 MERGING + 409 带冲突文件清单（显式
+ * 跨人路径不相交恒干净；远端历史与本仓不相交时走 --allow-unrelated-histories -X ours，
+ * 平台内容优先、远端独有文件保留）→ 冲突 mergeAbort 清 MERGING + 409 带冲突文件清单（显式
  * {@link #resolveConflict} 端点解决，不静默覆盖）→ push（本地恒 main，远端分支可配，refspec）。
  *
  * <p>绑定信息存 worklog_repos 个人仓行（remote_url/remote_branch）；凭证复用 CAP-35 个人
@@ -187,8 +188,7 @@ public class WorklogRemoteBackupService {
             }
         } catch (DevMindException e) {
             repoService.markSyncStale(repoKey);
-            if (e.getErrorCode() == ErrorCode.CONFLICT && e.getMessage() != null
-                    && e.getMessage().contains("合并冲突")) {
+            if (e.getErrorCode() == ErrorCode.CONFLICT) {
                 notifyConflict(repo, e.getMessage());
             } else {
                 log.warn("worklog 自动推送异常: repo={} err={}", repoKey, e.getMessage());
@@ -227,12 +227,20 @@ public class WorklogRemoteBackupService {
             if (!fetch.ok()) {
                 return WorklogPushResult.failed("fetch 失败: " + fetch.output());
             }
-            GitRemoteOps.GitResult merge = git.mergeNoEdit(dir, "origin/" + branch);
+            String originRef = "origin/" + branch;
+            // 远端建仓自带初始提交（如 README）时历史不相交，裸 merge 必败；改走
+            // --allow-unrelated-histories -X ours（平台优先、远端独有文件保留）
+            boolean unrelated = !git.hasCommonAncestor(dir, originRef);
+            GitRemoteOps.GitResult merge = unrelated
+                    ? git.mergeUnrelatedOurs(dir, originRef)
+                    : git.mergeNoEdit(dir, originRef);
             if (!merge.ok()) {
                 git.mergeAbort(dir); // 清 MERGING，仓不留半合并状态
                 throw new DevMindException(ErrorCode.CONFLICT,
-                        "与远端分支 " + branch + " 合并冲突，请显式选择解决方向（以平台为准/以远端为准）。冲突文件: "
-                                + conflictFiles(merge.output()));
+                        (unrelated
+                                ? "与远端分支 " + branch + " 历史不相交，自动合并失败（已回滚），请显式选择解决方向（以平台为准/以远端为准）。"
+                                : "与远端分支 " + branch + " 合并冲突，请显式选择解决方向（以平台为准/以远端为准）。")
+                                + "冲突文件: " + conflictFiles(merge.output()));
             }
         }
         GitRemoteOps.GitResult push = git.pushBranch(dir, LOCAL_BRANCH, branch, remoteUrl, token);

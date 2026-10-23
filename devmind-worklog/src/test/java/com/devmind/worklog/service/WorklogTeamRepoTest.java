@@ -253,6 +253,28 @@ class WorklogTeamRepoTest {
     }
 
     @Test
+    void backgroundFetchOnEmptyRemoteDoesNotMarkStale() throws Exception {
+        WorklogRepoEntity repo = repoService.ensurePersonalRepo("alice");
+        String url = bareRemote("ttl-empty");
+        repo.setRemoteUrl(url);
+        repoService.saveRepo(repo);
+        repoService.writeReport("alice", WorklogRepoService.ReportKind.DAILY,
+                LocalDate.of(2026, 10, 12), "v1\n",
+                WorklogRepoService.CommitSource.MANUAL, null, null);
+
+        // 远端尚无 main：fetch 成功但无可合并，不能把「首次推送前」误判成合并冲突
+        repoService.overrideFetchTtlForTest(0);
+        repoService.findActiveRepo("alice");
+        Path fetchHead = repoService.repoDir(repo.getRepoKey()).resolve(".git/FETCH_HEAD");
+        awaitTrue(() -> Files.exists(fetchHead), 10_000);
+        // FETCH_HEAD 由 fetch 子进程写出，状态回写在虚拟线程末尾；留落定窗口
+        Thread.sleep(300);
+        repoService.overrideFetchTtlForTest(Long.MAX_VALUE);
+        assertFalse(repoService.isFetchStale(repo.getRepoKey()));
+        assertFalse(Files.exists(repoService.repoDir(repo.getRepoKey()).resolve(".git/MERGE_HEAD")));
+    }
+
+    @Test
     void backgroundFetchFailureIsFailVisibleNotBlocking() throws Exception {
         WorklogRepoEntity repo = repoService.ensurePersonalRepo("alice");
         String url = bareRemote("ttl-origin2");

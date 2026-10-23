@@ -100,8 +100,11 @@ HTTP CONNECT 代理挂载路径，相对 CLI 方案无收益。
   命中规则但隧道离线快速失败），公网部署够不到内网 git 时配规则即可，零新协议。
   - **写前 fetch + merge**：任何 push 前先 fetch；远端领先/分叉自动
     `merge --no-edit`（GitRemoteOps 新增 merge 方法，现状仅有 ffOnly；成员子目录
-    路径不相交，跨人恒干净）；merge 冲突=**同一人
-    多端改同一文件**，fail-visible 报给用户并提供「以平台为准 / 以远端为准」
+    路径不相交，跨人恒干净）；远端历史与本仓不相交（建仓自带 README 等初始提交）
+    时改用 `--allow-unrelated-histories -X ours` 自动合并——重叠路径以平台为准、
+    远端独有文件保留，不再把首次推送误报成合并冲突；仅共同祖先下的真实冲突
+    （merge 冲突=**同一人多端改同一文件**）才 fail-visible 报给用户，
+    并提供「以平台为准 / 以远端为准」
     两个显式动作（`POST /api/worklog/repos/{key}/resolve?strategy=ours|theirs`），
     不静默覆盖任何一侧，仓不留 MERGING 状态；
   - **平台外编辑是合法输入**：用户可在平台外 clone 团队仓直改 markdown。读路径

@@ -422,10 +422,19 @@ public class WorklogRepoService {
                     log.warn("工作日志仓后台 fetch 失败: repo={} err={}", key, fetch.output());
                     return true;
                 }
-                GitRemoteOps.GitResult merge = git.mergeNoEdit(dir, "origin/" + branch);
+                String originRef = "origin/" + branch;
+                if (!git.refExists(dir, "refs/remotes/" + originRef)) {
+                    // 远端尚无该分支（空仓/首次绑定）：无可合并，不是异常
+                    return false;
+                }
+                // 历史不相交（远端自带初始提交）不能裸 merge；平台优先合并，远端独有文件保留
+                GitRemoteOps.GitResult merge = git.hasCommonAncestor(dir, originRef)
+                        ? git.mergeNoEdit(dir, originRef)
+                        : git.mergeUnrelatedOurs(dir, originRef);
                 if (!merge.ok()) {
                     git.mergeAbort(dir); // 冲突降级：清 MERGING，等 push 侧显式 resolve
-                    log.warn("工作日志仓后台合并冲突（已 abort，push 时需显式解决）: repo={}", key);
+                    log.warn("工作日志仓后台合并失败（已 abort，push 时需显式解决）: repo={} err={}",
+                            key, merge.output());
                     return true;
                 }
                 return false;

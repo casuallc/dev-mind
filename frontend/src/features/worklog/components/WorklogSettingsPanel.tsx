@@ -193,7 +193,7 @@ export default function WorklogSettingsPanel({ ref }: { ref?: Ref<WorklogSetting
       <Typography.Paragraph type="secondary">
         日报/周报自动生成、定时从 Git 导入工作条目、每日工时目标、报表格式模板与工作日志空间的远程备份。
         三个定时项的执行时间可按个人覆盖全局规则，留空 = 跟随全局；
-        改动即时生效：自动生成与定时导入由服务端定时任务触发，模板用于生成会话，远程备份供工作日志页的「推送远端」使用。
+        改动即时生效：自动生成与定时导入由服务端定时任务触发，模板用于生成会话，远程备份绑定后每次保存/生成自动推送（工作日志页的「推送远端」可手动补推）。
       </Typography.Paragraph>
       <Spin spinning={loading}>
         <Form form={form} layout="vertical">
@@ -273,7 +273,7 @@ export default function WorklogSettingsPanel({ ref }: { ref?: Ref<WorklogSetting
           <Form.Item
             name="remoteUrl"
             label="远程仓库备份（URL）"
-            extra="把日报/周报所在的工作日志仓备份到该远端（点工作日志页空间条上的「推送远端」由服务端直接 push，无需 runner 在线）。http/https 凭证按 URL host 匹配「设置 → 第三方账号」的个人访问令牌；file:// 免凭证。留空 = 解绑。"
+            extra="把日报/周报所在的工作日志仓备份到该远端：绑定后每次保存/生成自动推送，工作日志页的「推送远端」可手动补推（服务端直接 push，无需 runner 在线）。http/https 凭证按 URL host 匹配「设置 → 第三方账号」的个人访问令牌；file:// 免凭证。留空 = 解绑。"
           >
             <Input placeholder="https://git.example.com/<你>/worklog.git" allowClear />
           </Form.Item>

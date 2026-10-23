@@ -517,7 +517,7 @@ export default function WorklogPage() {
               </Typography.Text>
               {workspace.fetchStale && (
                 <Typography.Text type="warning" style={{ fontSize: 12 }}>
-                  远端拉取失败，展示的可能不是最新（不影响读/编辑/推送，可点刷新重试）
+                  远端同步异常（拉取或自动推送失败）：本地报告已保存，远端备份可能落后，可点刷新重试
                 </Typography.Text>
               )}
               {workspace.nodeOnline === false && (

@@ -318,6 +318,29 @@ class WorklogRemoteBackupServiceTest {
     }
 
     @Test
+    void autoPushMergesUnrelatedRemoteHistory() throws Exception {
+        // 远端建仓自带 README（历史不相交）——首次自动推送不应失败
+        String url = bareRemoteWithUnrelatedHistory("auto3");
+        bindRemote(url, null);
+        String seedRef = git.lsRemote(url, null, "refs/heads/main").output().trim();
+        autoPushBean = service;
+
+        repoService.writeReport("alice", WorklogRepoService.ReportKind.DAILY,
+                LocalDate.of(2026, 10, 12), "# 首次推送\n",
+                WorklogRepoService.CommitSource.AI, "s1", null);
+
+        // 远端 main 前移 = 合并 + 推送完成
+        awaitTrue(() -> !git.lsRemote(url, null, "refs/heads/main").output().trim().equals(seedRef));
+        Path clone = tmp.resolve("verify-auto3");
+        assertTrue(git.cloneRepo(url, null, clone.toString(), "main", null).ok());
+        assertEquals("# 首次推送\n", readNorm(clone.resolve("alice/daily/2026-10-12.md")));
+        // -X ours：重叠的 README 保留平台版，远端独有文件不丢
+        assertTrue(readNorm(clone.resolve("README.md")).contains("DevMind 工作日志仓"));
+        assertEquals("远端独有文件\n", readNorm(clone.resolve("remote-only.md")));
+        assertFalse(repoService.isFetchStale(WorklogRepoService.personalRepoKey("alice")));
+    }
+
+    @Test
     void writeWithoutRemoteSkipsAutoPush() {
         autoPushBean = service;
         WorklogRepoService.WriteOutcome out = repoService.writeReport("alice",
@@ -375,6 +398,20 @@ class WorklogRemoteBackupServiceTest {
         Path origin = tmp.resolve(name + ".git");
         runGit(tmp, "init", "--bare", "-b", "main", origin.toString());
         return "file://" + origin.toString().replace('\\', '/');
+    }
+
+    /** 建 bare 远端并由独立历史占据 main（README + 独有文件），模拟建仓勾选 README。 */
+    private String bareRemoteWithUnrelatedHistory(String name) throws Exception {
+        String url = bareRemote(name);
+        Path seed = tmp.resolve(name + "-seed");
+        Files.createDirectories(seed);
+        runGit(seed, "init", "-b", "main");
+        Files.writeString(seed.resolve("README.md"), "# 远端已有 README\n", StandardCharsets.UTF_8);
+        Files.writeString(seed.resolve("remote-only.md"), "远端独有文件\n", StandardCharsets.UTF_8);
+        runGit(seed, "-c", "user.name=seed", "-c", "user.email=seed@x.com", "add", ".");
+        runGit(seed, "-c", "user.name=seed", "-c", "user.email=seed@x.com", "commit", "-m", "seed");
+        runGit(seed, "push", url, "main:main");
+        return url;
     }
 
     /** 建仓并绑定远端（保存回内存表）。 */

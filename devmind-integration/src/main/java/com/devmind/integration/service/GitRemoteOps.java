@@ -145,9 +145,32 @@ public class GitRemoteOps {
                 "merge", "--no-edit", ref));
     }
 
+    /**
+     * CAP-74：本地与 ref 无共同祖先时的自动合并（远端建仓自带 README 等初始提交的常见场景）。
+     * {@code --allow-unrelated-histories} 放行历史不相交，{@code -X ours} 保证重叠路径以平台为准、
+     * 远端独有文件保留；不静默丢弃平台内容。
+     */
+    public GitResult mergeUnrelatedOurs(String repoPath, String ref) {
+        return exec(repoPath, null, List.of(
+                "-c", "user.name=DevMind", "-c", "user.email=devmind@local",
+                "merge", "--no-edit", "--allow-unrelated-histories", "-X", "ours", ref));
+    }
+
     /** CAP-74 M2：冲突后中止合并（仓不留 MERGING 状态） */
     public GitResult mergeAbort(String repoPath) {
         return exec(repoPath, null, List.of("merge", "--abort"));
+    }
+
+    /** 本地 ref 是否存在（如 refs/remotes/origin/main；空输出 + 非零退出 = 不存在） */
+    public boolean refExists(String repoPath, String ref) {
+        GitResult r = exec(repoPath, null, List.of("rev-parse", "--verify", "--quiet", ref));
+        return r.ok() && r.output() != null && !r.output().isBlank();
+    }
+
+    /** HEAD 与 ref 是否有共同祖先（无祖先 = 历史不相交，禁止裸 merge） */
+    public boolean hasCommonAncestor(String repoPath, String ref) {
+        GitResult r = exec(repoPath, null, List.of("merge-base", "HEAD", ref));
+        return r.ok() && r.output() != null && !r.output().isBlank();
     }
 
     /**
@@ -161,7 +184,7 @@ public class GitRemoteOps {
         }
         return exec(repoPath, null, List.of(
                 "-c", "user.name=DevMind", "-c", "user.email=devmind@local",
-                "merge", "--no-edit", "-X", strategy, ref));
+                "merge", "--no-edit", "--allow-unrelated-histories", "-X", strategy, ref));
     }
 
     /** CAP-74：HEAD 最近提交时间（ISO-8601，空间视图 lastCommitAt；空仓/失败返回 ok=false） */
