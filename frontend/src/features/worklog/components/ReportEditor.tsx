@@ -29,7 +29,7 @@ interface Props {
  * CAP-74：去 DRAFT/CONFIRMED 状态机——事实源是服务端仓，保存即 commit，历史走 git log，
  * 不再有「确认定稿/只读」概念。编辑态复用共享 MarkdownEditor 的极简模式（showToolbar=false：
  * Qoder 文档式顶栏，字段标题通过 title 进入顶栏，只有源码/分栏/预览切换，默认预览；日报以读为主，
- * 不摆格式工具栏）。周报两字段用 layout=horizontal 左右等宽并排。
+ * 不摆格式工具栏）。周报两字段用 layout=horizontal 左右等宽并排，与日报一样 fill 撑满并底部对齐。
  * 全部字段处于预览时不显示「保存修改」；保存需二次确认。
  */
 export default function ReportEditor({
@@ -138,7 +138,9 @@ export default function ReportEditor({
       </Space>
       <div
         style={horizontal
-          ? { display: 'flex', gap: 16, alignItems: 'flex-start' }
+          ? fill
+            ? { flex: 1, minHeight: 0, display: 'flex', gap: 16, alignItems: 'stretch' }
+            : { display: 'flex', gap: 16, alignItems: 'flex-start' }
           : fill
             ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 16 }
             : undefined}
@@ -151,7 +153,9 @@ export default function ReportEditor({
             <div
               key={f.key}
               style={horizontal
-                ? { flex: '1 1 0', minWidth: 0 }
+                ? fill
+                  ? { flex: '1 1 0', minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }
+                  : { flex: '1 1 0', minWidth: 0 }
                 : fill
                   ? { flex: 1, minHeight: 220, display: 'flex', flexDirection: 'column' }
                   : { marginBottom: 16 }}
