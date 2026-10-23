@@ -18,6 +18,8 @@ interface Props {
   onGenerate: (force: boolean) => void
   /** 保存即生效写仓（CAP-74：无确认态，保存后仍可随时再改） */
   onSave: (values: Record<string, string>) => Promise<void>
+  /** 撑满父容器剩余高度（日报页要求编辑器底部与页面底部对齐） */
+  fill?: boolean
 }
 
 /**
@@ -35,6 +37,7 @@ export default function ReportEditor({
   onCreateManual,
   onGenerate,
   onSave,
+  fill,
 }: Props) {
   const [values, setValues] = useState<Record<string, string>>({})
   const [modes, setModes] = useState<Record<string, SimpleMarkdownEditorMode>>({})
@@ -108,8 +111,10 @@ export default function ReportEditor({
   }
 
   return (
-    <div>
-      <Space style={{ marginBottom: 12 }} wrap>
+    <div
+      style={fill ? { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 } : undefined}
+    >
+      <Space style={{ marginBottom: 12, flex: 'none' }} wrap>
         <Typography.Text type="secondary">更新于 {fmtTime(updatedAt)}</Typography.Text>
         <Button size="small" icon={<RobotOutlined />} loading={generating} onClick={() => onGenerate(true)}>
           重新生成
@@ -120,26 +125,42 @@ export default function ReportEditor({
           </Button>
         )}
       </Space>
-      {fields.map((f) => {
-        const content = values[f.key] || ''
-        const rows = Math.max(6, content.split('\n').length + 1)
-        // 编辑区高度随内容行数伸缩（下限 220）
-        const boxHeight = Math.max(220, rows * 22 + 12)
-        return (
-          <div key={f.key} style={{ marginBottom: 16 }}>
-            <Typography.Text strong>{f.label}</Typography.Text>
-            <div style={{ marginTop: 8 }}>
-              <SimpleMarkdownEditor
-                height={boxHeight}
-                value={content}
-                onChange={(v) => setValues({ ...values, [f.key]: v })}
-                mode={modeOf(f.key)}
-                onModeChange={(m) => setModes({ ...modes, [f.key]: m })}
-              />
+      <div
+        style={fill
+          ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 16 }
+          : undefined}
+      >
+        {fields.map((f) => {
+          const content = values[f.key] || ''
+          const rows = Math.max(6, content.split('\n').length + 1)
+          // 普通模式高度随内容行数伸缩（下限 220）；fill 模式由 flex 撑满页面剩余高度
+          const boxHeight = Math.max(220, rows * 22 + 12)
+          return (
+            <div
+              key={f.key}
+              style={fill
+                ? { flex: 1, minHeight: 220, display: 'flex', flexDirection: 'column' }
+                : { marginBottom: 16 }}
+            >
+              <Typography.Text strong style={{ flex: 'none' }}>{f.label}</Typography.Text>
+              <div
+                style={fill
+                  ? { marginTop: 8, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }
+                  : { marginTop: 8 }}
+              >
+                <SimpleMarkdownEditor
+                  fill={fill}
+                  height={boxHeight}
+                  value={content}
+                  onChange={(v) => setValues({ ...values, [f.key]: v })}
+                  mode={modeOf(f.key)}
+                  onModeChange={(m) => setModes({ ...modes, [f.key]: m })}
+                />
+              </div>
             </div>
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
     </div>
   )
 }

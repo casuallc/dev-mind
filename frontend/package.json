@@ -11,6 +11,12 @@
   "dependencies": {
     "@ant-design/icons": "^5.6.0",
     "@ant-design/v5-patch-for-react-19": "^1.0.3",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "@lezer/highlight": "^1.2.5",
     "antd": "^5.24.0",
     "dayjs": "^1.11.13",
     "react": "^19.0.0",

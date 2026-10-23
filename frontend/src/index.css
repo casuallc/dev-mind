@@ -221,8 +221,10 @@ html, body, #root {
 /* 空内容占位 */
 .doc-md.md-empty { color: #bfbfbf; font-size: 13px; padding: 16px 0; text-align: center; }
 
-/* 极简 Markdown 编辑器（shared/components/SimpleMarkdownEditor）：Qoder 文档式顶栏，只有编辑/预览切换 */
+/* 极简 Markdown 编辑器（shared/components/SimpleMarkdownEditor）：Qoder 文档式顶栏，只有源码/预览切换 */
 .md-simple {
+  display: flex;
+  flex-direction: column;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #fff;
@@ -235,6 +237,7 @@ html, body, #root {
 }
 .md-simple-head {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -254,8 +257,12 @@ html, body, #root {
 .md-simple-modes .ant-btn { color: #8c8c8c; }
 .md-simple-modes .ant-btn:hover:not(:disabled) { color: #1677ff; background: rgba(0, 0, 0, 0.04); }
 .md-simple-modes .ant-btn.is-active { color: #1677ff; background: #e6f4ff; }
-.md-simple-area { padding: 12px 14px; font-size: 13px; line-height: 1.7; }
-.md-simple-preview { overflow: auto; padding: 12px 16px; }
+.md-simple-source { min-height: 0; overflow: hidden; }
+.md-simple-preview { min-height: 0; overflow: auto; padding: 12px 16px; }
+/* 撑满父容器：报告页阅读区一直落到页面底部，源码/预览各自内部滚动 */
+.md-simple-fill { flex: 1; min-height: 220px; }
+.md-simple-fill .md-simple-source,
+.md-simple-fill .md-simple-preview { flex: 1; }
 
 /* highlight.js 常见 token 配色（GitHub Light 口径，只落 .doc-md 作用域） */
 .doc-md .hljs { color: #24292e; }

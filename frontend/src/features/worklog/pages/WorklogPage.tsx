@@ -697,6 +697,7 @@ export default function WorklogPage() {
           <div style={pagePaneScrollStyle}>
             <ReportEditor
               key={dayStr}
+              fill
               exists={daily?.exists}
               updatedAt={daily?.updatedAt}
               generating={generating}
