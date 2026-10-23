@@ -111,9 +111,10 @@ export default function ProjectContextPage({
 
   const columns = [
     {
+      // 名称是主列：不限宽吃掉剩余空间，摘要/属性固定窄列（文档标题常带文件名，260px 会截断）
       title: '名称',
       dataIndex: 'name',
-      width: 260,
+      minWidth: 320,
       ellipsis: true,
       render: (name: string, r: ProjectAssetItem) =>
         activeKind === 'doc' || activeKind === 'knowledge' ? (
@@ -127,13 +128,14 @@ export default function ProjectContextPage({
     {
       title: '摘要',
       dataIndex: 'summary',
+      width: 400,
       ellipsis: true,
       render: (s?: string) => <Typography.Text type="secondary">{s || '-'}</Typography.Text>,
     },
     {
       title: '属性',
       key: 'extra',
-      width: 280,
+      width: 240,
       render: (_: unknown, r: ProjectAssetItem) => <ExtraTags extra={r.extra} />,
     },
   ]
