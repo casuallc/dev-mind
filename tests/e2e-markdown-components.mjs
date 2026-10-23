@@ -6,7 +6,7 @@
 //   极简模式（showToolbar=false）：工作日志日报默认预览、顶栏只有源码/分栏/预览三个图标、
 //         字段标题通过 title 进入顶栏（上方无独立标签）、撑满页面底部，源码态行号/当前行/
 //         Markdown 语法高亮、可编辑；分栏左源码右实时预览，输入后右侧即时更新，
-//         两栏滚动条按比例双向联动。
+//         两栏滚动条按比例双向联动；周报两字段左右等宽、等高并排。
 // 前置：app 隔离实例 + 指向它的前端 dev 同时起（数据自造，落隔离 H2，无需 runner）：
 //   mvn -pl devmind-app spring-boot:run -Dspring-boot.run.profiles=e2e \
 //     "-Dspring-boot.run.arguments=--server.port=18103 --spring.datasource.url=jdbc:h2:file:<tmp>/markdown-components/db/devmind;AUTO_SERVER=TRUE"
@@ -270,6 +270,23 @@ plain text ${MARK}
     },
   })
   ok(true, '日报造数完成')
+
+  // 周报：本周一为 weekStart，造周总结 / 下周计划两段，供左右布局断言
+  const todayDate = new Date(`${today}T00:00:00`)
+  todayDate.setDate(todayDate.getDate() - (todayDate.getDay() + 6) % 7)
+  const weekStart = todayDate.toLocaleDateString('sv-SE')
+  try {
+    await api('/worklog/weekly', { token: accessToken, body: { weekStart } })
+  } catch { /* 已存在 */ }
+  await api(`/worklog/weekly/${weekStart}`, {
+    method: 'PUT',
+    token: accessToken,
+    body: {
+      summaryMd: `# 周总结 ${MARK}\n\n- 完成甲\n- 完成乙\n\n${dailyBody}\n`,
+      nextPlanMd: `# 下周计划 ${MARK}\n\n- 计划甲\n- 计划乙\n`,
+    },
+  })
+  ok(true, '周报造数完成')
 
   if (!existsSync(CHROME)) throw new Error(`找不到浏览器：${CHROME}（用 CHROME_PATH 指定）`)
   chrome = spawn(CHROME, [
@@ -595,6 +612,35 @@ plain text ${MARK}
       const shot = await ws.send('Page.captureScreenshot', { format: 'png' })
       writeFileSync(join(TMP, 'daily-report-split.png'), Buffer.from(shot.data, 'base64'))
       console.log(`  截图 → ${join(TMP, 'daily-report-split.png')}`)
+    }
+
+    // ── 9. 周报：周总结 / 下周计划左右等宽并排，编辑器顶栏各自带字段标题 ──
+    ok(await evaluate(ws, clickPageSegJs('周报')), '切到周报视图')
+    await waitFor(() => evaluate(ws, `document.querySelectorAll('.md-editor-minimal').length === 2`), '周报两个编辑器')
+    const weeklyLayout = await evaluate(ws, `(() => {
+      const els = [...document.querySelectorAll('.md-editor-minimal')];
+      const rects = els.map((e) => e.getBoundingClientRect());
+      return {
+        titles: els.map((e) => e.querySelector('.md-editor-title')?.textContent ?? ''),
+        sideBySide: rects.length === 2
+          && Math.abs(rects[0].top - rects[1].top) < 2
+          && rects[0].right <= rects[1].left + 1,
+        equalSize: rects.length === 2
+          && Math.abs(rects[0].width - rects[1].width) < 2
+          && Math.abs(rects[0].height - rects[1].height) < 2,
+        heights: rects.map((r) => Math.round(r.height)),
+      };
+    })()`)
+    ok(weeklyLayout.titles.length === 2 && weeklyLayout.titles[0].startsWith('周总结（')
+      && weeklyLayout.titles[1].startsWith('下周计划（'),
+      `周报两字段标题在各自编辑器顶栏（${weeklyLayout.titles.join(' / ')}）`)
+    ok(weeklyLayout.sideBySide && weeklyLayout.equalSize,
+      `周总结与下周计划左右并排、等宽等高（高 ${weeklyLayout.heights.join(' / ')}px）`)
+
+    if (process.argv.includes('--shots')) {
+      const shot = await ws.send('Page.captureScreenshot', { format: 'png' })
+      writeFileSync(join(TMP, 'weekly-report.png'), Buffer.from(shot.data, 'base64'))
+      console.log(`  截图 → ${join(TMP, 'weekly-report.png')}`)
     }
   } catch (e) {
     try {
