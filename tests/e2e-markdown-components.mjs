@@ -1,7 +1,8 @@
 // 共享 Markdown 阅读/编辑组件（shared/components/Markdown、MarkdownEditor）真浏览器验证。
 // 覆盖：
 //   阅读：代码块语言标签 + 高亮 token + 一键复制、表格横向滚动容器、图片点击预览、任务列表；
-//   编辑：字符统计、Ctrl+B 加粗、Tab 缩进、编辑/分栏/预览三态、分栏预览高亮、全屏与 Esc 退出（不连带关抽屉）。
+//   编辑：字符统计、Ctrl+B 加粗、Tab 缩进、编辑/分栏/预览三态、分栏预览高亮、全屏与 Esc 退出（不连带关抽屉）；
+//   极简编辑器：工作日志日报默认预览、顶栏只有编辑/预览两个图标（无格式工具栏），源码态可编辑。
 // 前置：app 隔离实例 + 指向它的前端 dev 同时起（数据自造，落隔离 H2，无需 runner）：
 //   mvn -pl devmind-app spring-boot:run -Dspring-boot.run.profiles=e2e \
 //     "-Dspring-boot.run.arguments=--server.port=18103 --spring.datasource.url=jdbc:h2:file:<tmp>/markdown-components/db/devmind;AUTO_SERVER=TRUE"
@@ -132,6 +133,13 @@ const clickSegJs = (text) => `(() => {
   el.click();
   return true;
 })()`
+const clickPageSegJs = (text) => `(() => {
+  const el = [...document.querySelectorAll('.ant-segmented-item')]
+    .find((e) => e.textContent.replace(/\\s/g, '') === ${JSON.stringify(text)});
+  if (!el) return false;
+  el.click();
+  return true;
+})()`
 const javaCodeBlockJs = `(() => {
   return [...document.querySelectorAll('.ant-drawer .md-code, .md-code')]
     .find((b) => b.querySelector('.md-code-lang')?.textContent.trim() === 'Java') ?? null;
@@ -204,6 +212,21 @@ plain text ${MARK}
     body: { kind: 'design', title, tags: ['e2e'], contentMd },
   })
   ok(!!doc.id && !!attachment.attachmentId, '造数完成（文档 + 图片附件）')
+
+  // 工作日志日报：初始化日志空间 + 造当天日报，供极简编辑器断言
+  const today = new Date().toLocaleDateString('sv-SE')
+  await api('/worklog/workspace/ensure', { token: accessToken, body: {} })
+  try {
+    await api('/worklog/daily', { token: accessToken, body: { date: today } })
+  } catch { /* 已存在 */ }
+  await api(`/worklog/daily/${today}`, {
+    method: 'PUT',
+    token: accessToken,
+    body: {
+      contentMd: `# 日报 ${MARK}\n\n- 完成甲\n- 完成乙\n\n\`\`\`java\nclass Daily { }\n\`\`\`\n`,
+    },
+  })
+  ok(true, '日报造数完成')
 
   if (!existsSync(CHROME)) throw new Error(`找不到浏览器：${CHROME}（用 CHROME_PATH 指定）`)
   chrome = spawn(CHROME, [
@@ -390,6 +413,49 @@ plain text ${MARK}
     await waitFor(async () => !(await evaluate(ws, drawerOpenJs)), '编辑抽屉关闭')
     const reloaded = await api(`/documents/${doc.id}`, { method: 'GET', token: accessToken })
     ok(reloaded.contentMd === contentMd, '取消编辑后正文未落库')
+
+    // ── 7. 工作日志日报：极简编辑器（只有编辑/预览，无格式工具栏） ──
+    await ws.send('Page.navigate', { url: `${BASE}/worklog` })
+    await waitFor(() => evaluate(ws, `!![...document.querySelectorAll('.ant-segmented-item')].find((e) => e.textContent.replace(/\\s/g, '') === '日报')`), '工作日志页', 30000)
+    ok(await evaluate(ws, clickPageSegJs('日报')), '切到日报视图')
+    await waitFor(() => evaluate(ws, `!!document.querySelector('.md-simple')`), '日报极简编辑器')
+
+    const simplePreview = await evaluate(ws, `(() => {
+      const el = document.querySelector('.md-simple');
+      return {
+        modes: [...el.querySelectorAll('.md-simple-modes button')].map((b) => b.getAttribute('aria-label')),
+        hasEditor: !!el.querySelector('textarea'),
+        previewOn: el.querySelector('button[aria-label="预览"]')?.getAttribute('aria-pressed') === 'true',
+        title: el.querySelector('.doc-md h1')?.textContent ?? '',
+        items: el.querySelectorAll('.doc-md li').length,
+        highlight: !!el.querySelector('.doc-md .hljs-keyword'),
+      };
+    })()`)
+    ok(simplePreview.modes.join() === '编辑源码,预览', '日报顶栏只有编辑/预览两个图标（无格式工具栏）')
+    ok(!simplePreview.hasEditor && simplePreview.previewOn, '日报默认预览态（无编辑框）')
+    ok(simplePreview.title.includes(MARK) && simplePreview.items === 2 && simplePreview.highlight,
+      '日报预览走共享 Markdown 渲染（标题/列表/代码高亮）')
+
+    if (process.argv.includes('--shots')) {
+      const shot = await ws.send('Page.captureScreenshot', { format: 'png' })
+      writeFileSync(join(TMP, 'daily-report.png'), Buffer.from(shot.data, 'base64'))
+      console.log(`  截图 → ${join(TMP, 'daily-report.png')}`)
+    }
+
+    await evaluate(ws, `document.querySelector('.md-simple button[aria-label="编辑源码"]').click()`)
+    await waitFor(() => evaluate(ws, `(() => {
+      const ta = document.querySelector('.md-simple textarea');
+      return !!ta && ta.value.includes(${JSON.stringify(MARK)});
+    })()`), '日报源码态')
+    const simpleEdit = await evaluate(ws, `(() => {
+      const el = document.querySelector('.md-simple');
+      return {
+        modes: el.querySelectorAll('.md-simple-modes button').length,
+        noToolbar: ![...el.querySelectorAll('button')].some((b) => /^H[1-3]$/.test(b.textContent)),
+        noStats: !el.innerText.includes('字符'),
+      };
+    })()`)
+    ok(simpleEdit.modes === 2 && simpleEdit.noToolbar && simpleEdit.noStats, '源码态同样无格式工具栏/字符统计')
   } catch (e) {
     try {
       const diag = await evaluate(ws, `location.href + ' | ' + document.body.innerText.slice(0, 300)`)
