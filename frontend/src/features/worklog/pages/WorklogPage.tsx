@@ -290,11 +290,13 @@ export default function WorklogPage() {
 
   // 生成 = 创建 worklog 会话（CAP-41）：受理返回 {sessionId, reused}，成稿随会话结束回传写服务端仓，
   // 前端轮询 GET 报告直到仓文件出现（reused 表示已有报告未重新生成）
-  const onGenerate = async (kind: 'daily' | 'weekly', force: boolean) => {
+  const onGenerate = async (kind: 'daily' | 'weekly', force: boolean, hint?: string) => {
     setGenerating(true)
     const prevDailyUpdatedAt = daily?.updatedAt
     try {
-      const ack = kind === 'daily' ? await generateDaily(dayStr, force) : await generateWeekly(weekStartStr, force)
+      const ack = kind === 'daily'
+        ? await generateDaily(dayStr, force, hint)
+        : await generateWeekly(weekStartStr, force, hint)
       if (ack.reused) {
         message.info('已存在该报告，未重复生成（如需重生成请使用强制重新生成）')
         return
@@ -703,7 +705,7 @@ export default function WorklogPage() {
               generating={generating}
               fields={[{ key: 'contentMd', label: `日报内容（${dayStr}，Markdown）`, value: daily?.contentMd ?? '' }]}
               onCreateManual={onCreateDaily}
-              onGenerate={(force) => onGenerate('daily', force)}
+              onGenerate={(force, hint) => onGenerate('daily', force, hint)}
               onSave={async (values) => {
                 if (daily?.exists) {
                   const updated = await updateDaily(dayStr, { contentMd: values.contentMd })
@@ -740,7 +742,7 @@ export default function WorklogPage() {
                 { key: 'nextPlanMd', label: '下周计划（Markdown）', value: weekly?.nextPlanMd ?? '' },
               ]}
               onCreateManual={onCreateWeekly}
-              onGenerate={(force) => onGenerate('weekly', force)}
+              onGenerate={(force, hint) => onGenerate('weekly', force, hint)}
               onSave={async (values) => {
                 if (weekly?.exists) {
                   const updated = await updateWeekly(weekStartStr, { summaryMd: values.summaryMd, nextPlanMd: values.nextPlanMd })

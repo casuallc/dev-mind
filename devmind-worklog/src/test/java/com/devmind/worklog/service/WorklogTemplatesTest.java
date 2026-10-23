@@ -58,6 +58,16 @@ class WorklogTemplatesTest {
     }
 
     @Test
+    void 内置模板包含去流水账结构与自查() {
+        for (String marker : new String[]{"事实依据，不是写作模板", "今日重点", "其他进展", "成稿自查", "不要照抄"}) {
+            assertTrue(WorklogTemplates.DEFAULT_DAILY.contains(marker), "日报模板缺去流水账约定: " + marker);
+        }
+        for (String marker : new String[]{"事实依据，不是写作模板", "本周重点成果", "跨天合并", "风险与阻塞", "成稿自查"}) {
+            assertTrue(WorklogTemplates.DEFAULT_WEEKLY.contains(marker), "周报模板缺去流水账约定: " + marker);
+        }
+    }
+
+    @Test
     void 周报计划外工作块必须落在上周总结内() {
         // 用 lastIndexOf：模板开头交代「## 下周计划」标题约定的那句在分节指令之前，不能当分节位置
         int summary = WorklogTemplates.DEFAULT_WEEKLY.indexOf(ReportService.SUMMARY_HEADING);

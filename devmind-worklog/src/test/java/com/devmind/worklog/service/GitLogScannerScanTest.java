@@ -4,6 +4,7 @@ import com.devmind.common.integration.GitIdentityProvider;
 import com.devmind.common.integration.GitRepoCatalog;
 import com.devmind.common.util.GitCli;
 import com.devmind.worklog.config.WorklogProperties;
+import com.devmind.worklog.dto.GitCommitView;
 import com.devmind.worklog.dto.GitPreviewResponse;
 import com.devmind.worklog.dto.GitScanRepoDiag;
 import org.junit.jupiter.api.Test;
@@ -94,6 +95,27 @@ class GitLogScannerScanTest {
         // 无个人凭证时回退到仓库本地 git config user.email
         assertEquals("me@example.com", diag.authorFilter());
         assertEquals(1, diag.commitCount());
+    }
+
+    @Test
+    void scansCommitBodyAndDiffStat() throws Exception {
+        Path repo = initRepoWithCommit();
+        Files.writeString(repoDir.resolve("b.txt"), "line1\nline2\n");
+        git("git", "add", "b.txt");
+        git("git", "commit", "-m", "feat: 增加改动规模", "-m", "补充正文用于主题归并");
+        GitLogScanner scanner = scannerWith(List.of(
+                new GitRepoCatalog.RepoRef(1, "demo", repo.toString(), null, null, "ACTIVE", "NONE", List.of())));
+
+        GitPreviewResponse res = scanner.scanDetailed("u1", LocalDate.now());
+
+        assertEquals(2, res.commits().size());
+        GitCommitView latest = res.commits().stream()
+                .filter(c -> "feat: 增加改动规模".equals(c.subject()))
+                .findFirst().orElseThrow();
+        assertEquals("补充正文用于主题归并", latest.body());
+        assertEquals(1, latest.filesChanged());
+        assertEquals(2, latest.insertions());
+        assertEquals(0, latest.deletions());
     }
 
     @Test

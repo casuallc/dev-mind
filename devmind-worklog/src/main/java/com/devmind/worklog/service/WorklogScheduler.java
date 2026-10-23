@@ -100,7 +100,7 @@ public class WorklogScheduler {
             }
         }
         LocalDate today = LocalDate.now();
-        runBatch("日报", due, u -> reportService.generateDaily(u, today, false));
+        runBatch("日报", due, u -> reportService.generateDaily(u, today, false, null));
     }
 
     /** 每周生成上周周报草稿（个人 weeklyDay+weeklyTime 同时设置才覆盖，全局默认周一 09:00）。 */
@@ -122,7 +122,7 @@ public class WorklogScheduler {
             }
         }
         LocalDate lastWeekStart = LocalDate.now().with(DayOfWeek.MONDAY).minusWeeks(1);
-        runBatch("周报", due, u -> reportService.generateWeekly(u, lastWeekStart, false));
+        runBatch("周报", due, u -> reportService.generateWeekly(u, lastWeekStart, false, null));
     }
 
     /**

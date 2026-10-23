@@ -25,7 +25,8 @@ class GitAutoImportServiceTest {
     private static final LocalDate DAY = LocalDate.now();
 
     private static GitCommitView commit(long repoId, String sha, boolean imported, Instant at) {
-        return new GitCommitView(repoId, "repo" + repoId, sha, "n", "n@e", at, "subject-" + sha, imported);
+        return new GitCommitView(repoId, "repo" + repoId, sha, "n", "n@e", at,
+                "subject-" + sha, "", 1, 1, 0, imported);
     }
 
     private static GitAutoImportService service(GitPreviewResponse scan, AtomicReference<GitImportRequest> captured,

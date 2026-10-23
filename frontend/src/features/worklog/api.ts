@@ -52,8 +52,9 @@ export const getDaily = (date: string) => api.get<DailyReport | undefined>(`/wor
 export const listDailyWeek = (weekStart: string) =>
   api.get<DailyReport[]>(`/worklog/daily/week?weekStart=${weekStart}`)
 export const createDaily = (date: string) => api.post<DailyReport>('/worklog/daily', { date })
-export const generateDaily = (date: string, force = false) =>
-  api.post<GenerateAck>('/worklog/daily/generate', { date, force })
+/** hint：本人补充说明（重点/影响/数字），作为高优先级事实进入生成 prompt；空则不传 */
+export const generateDaily = (date: string, force = false, hint?: string) =>
+  api.post<GenerateAck>('/worklog/daily/generate', { date, force, hint })
 /** CAP-74：按日期寻址保存（保存即写仓 commit）；status 字段已废弃，传了后端 400 */
 export const updateDaily = (date: string, body: { contentMd?: string }) =>
   api.put<DailyReport>(`/worklog/daily/${date}`, body)
@@ -64,8 +65,9 @@ export const getWeekly = (weekStart: string) =>
 export const listWeeklyRecent = (weeks = 7) =>
   api.get<WeeklyReport[]>(`/worklog/weekly/recent?weeks=${weeks}`)
 export const createWeekly = (weekStart: string) => api.post<WeeklyReport>('/worklog/weekly', { weekStart })
-export const generateWeekly = (weekStart: string, force = false) =>
-  api.post<GenerateAck>('/worklog/weekly/generate', { weekStart, force })
+/** hint：本人补充说明（重点/影响/数字），作为高优先级事实进入生成 prompt；空则不传 */
+export const generateWeekly = (weekStart: string, force = false, hint?: string) =>
+  api.post<GenerateAck>('/worklog/weekly/generate', { weekStart, force, hint })
 /** CAP-74：按周一寻址保存（分节字段重组正文写仓）；status 传了 400 */
 export const updateWeekly = (weekStart: string, body: { summaryMd?: string; nextPlanMd?: string }) =>
   api.put<WeeklyReport>(`/worklog/weekly/${weekStart}`, body)

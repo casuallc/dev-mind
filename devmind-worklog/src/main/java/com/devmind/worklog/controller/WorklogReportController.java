@@ -76,7 +76,7 @@ public class WorklogReportController {
         String actor = identity.currentActor();
         boolean force = Boolean.TRUE.equals(req.force());
         reportService.precheckDaily(actor, req.date(), force);
-        return reportService.generateDaily(actor, req.date(), force);
+        return reportService.generateDaily(actor, req.date(), force, req.hint());
     }
 
     /** 手动创建空白日报（不经 AI、不要求素材）：已存在幂等返回。 */
@@ -112,7 +112,7 @@ public class WorklogReportController {
         String actor = identity.currentActor();
         boolean force = Boolean.TRUE.equals(req.force());
         reportService.precheckWeekly(actor, req.weekStart(), force);
-        return reportService.generateWeekly(actor, req.weekStart(), force);
+        return reportService.generateWeekly(actor, req.weekStart(), force, req.hint());
     }
 
     /** 手动创建空白周报：同 POST /daily，幂等。 */

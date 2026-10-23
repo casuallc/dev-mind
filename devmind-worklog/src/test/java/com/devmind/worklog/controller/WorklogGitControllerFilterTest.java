@@ -30,7 +30,7 @@ class WorklogGitControllerFilterTest {
 
     private static GitCommitView commit(boolean imported) {
         return new GitCommitView(1L, "repo", imported ? "aaa" : "bbb", "n", "e",
-                Instant.parse("2026-09-17T01:00:00Z"), "s", imported);
+                Instant.parse("2026-09-17T01:00:00Z"), "s", "", 1, 1, 0, imported);
     }
 
     private void stubPreview() {

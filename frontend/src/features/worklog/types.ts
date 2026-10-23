@@ -72,7 +72,7 @@ export interface WeeklyReport {
   updatedAt?: string
 }
 
-/** git 扫描预览条目（不落库） */
+/** git 扫描预览条目（不落库）。body/改动规模随扫描返回，供日报/周报生成做主题归并 */
 export interface GitCommit {
   repoId: number
   repoName: string
@@ -81,6 +81,10 @@ export interface GitCommit {
   authorEmail: string
   committedAt: string
   subject: string
+  body?: string
+  filesChanged?: number
+  insertions?: number
+  deletions?: number
   alreadyImported: boolean
 }
 

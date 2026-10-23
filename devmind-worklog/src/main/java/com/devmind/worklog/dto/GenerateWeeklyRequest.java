@@ -1,8 +1,13 @@
 package com.devmind.worklog.dto;
 
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 import java.time.LocalDate;
 
-/** 周报生成请求。weekStart 为该周周一；force=true 时覆盖已有 DRAFT。 */
-public record GenerateWeeklyRequest(@NotNull LocalDate weekStart, Boolean force) {}
+/**
+ * 周报生成请求。weekStart 为该周周一；force=true 时显式覆盖已有成稿。
+ * hint 为本人补充说明（重点/影响/数字），作为高优先级事实注入生成 prompt；null/空白 = 不使用。
+ */
+public record GenerateWeeklyRequest(@NotNull LocalDate weekStart, Boolean force,
+                                    @Size(max = 2000) String hint) {}

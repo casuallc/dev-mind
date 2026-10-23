@@ -115,7 +115,7 @@ public class ReportService {
      * 成稿随会话结束回传写仓（{@link WorklogOutputMirror}）。
      * 已存在：非 force 复用（reused=true，不起会话）；force 显式覆盖（旧稿 git log 可找回）。
      */
-    public ReportLaunch generateDaily(String username, LocalDate date, boolean force) {
+    public ReportLaunch generateDaily(String username, LocalDate date, boolean force, String hint) {
         boolean exists = repoService.reportExists(username, WorklogRepoService.ReportKind.DAILY, date);
         if (exists && !force) {
             return new ReportLaunch(null, true);
@@ -131,7 +131,8 @@ public class ReportService {
 
         String template = WorklogTemplates.orDefault(
                 settingsService.templateOf(username, true), WorklogTemplates.DEFAULT_DAILY);
-        return launch(username, WorklogScenarios.DAILY, ReportPrompts.daily(date, commits, entries, template));
+        return launch(username, WorklogScenarios.DAILY,
+                ReportPrompts.daily(date, commits, entries, template, hint));
     }
 
     /** 手动创建空白日报（不经 AI、不要求素材）。幂等：已存在直接返回，不覆盖已有内容。 */
@@ -198,7 +199,7 @@ public class ReportService {
      * 草稿区无历史文件可回读，prompt 携带的日报全文是唯一素材口径；无日报回退该周原始条目）
      * + 该周 git 提交。
      */
-    public ReportLaunch generateWeekly(String username, LocalDate weekStart, boolean force) {
+    public ReportLaunch generateWeekly(String username, LocalDate weekStart, boolean force, String hint) {
         boolean exists = repoService.reportExists(username, WorklogRepoService.ReportKind.WEEKLY, weekStart);
         if (exists && !force) {
             return new ReportLaunch(null, true);
@@ -224,7 +225,7 @@ public class ReportService {
         String template = WorklogTemplates.orDefault(
                 settingsService.templateOf(username, false), WorklogTemplates.DEFAULT_WEEKLY);
         return launch(username, WorklogScenarios.WEEKLY,
-                ReportPrompts.weekly(weekStart, dailies, entries, commits, template));
+                ReportPrompts.weekly(weekStart, dailies, entries, commits, template, hint));
     }
 
     /** 手动创建空白周报：同 {@link #createDaily}，幂等。 */

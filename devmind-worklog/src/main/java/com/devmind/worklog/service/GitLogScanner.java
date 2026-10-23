@@ -17,9 +17,11 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * CAP-28 FR-04：本地 git log 扫描。遍历用户勾选的 ACTIVE 仓库，按用户署名过滤当日提交。
@@ -40,10 +42,16 @@ public class GitLogScanner {
 
     private static final Logger log = LoggerFactory.getLogger(GitLogScanner.class);
 
-    /** %x1f 字段分隔 / %x1e 记录分隔：H an ae aI s */
+    /**
+     * %x1e 记录分隔放在 format 开头（--numstat 的改行归属当前记录）/ %x1f 字段分隔：
+     * H an ae aI s b。正文在末位，numstat 行跟在记录末尾，由 {@link #parseTail} 剥离。
+     */
     private static final String RECORD_SEP = "";
     private static final String FIELD_SEP = "";
-    private static final String FORMAT = "--format=%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1e";
+    private static final String FORMAT = "--format=%x1e%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b";
+
+    /** numstat 行：added \t deleted \t path（二进制为 -）。 */
+    private static final Pattern NUMSTAT_LINE = Pattern.compile("^(-|\\d+)\\t(-|\\d+)\\t.*");
 
     private final CodeRepoService codeRepoService;
     private final WorklogEntryService entryService;
@@ -166,7 +174,7 @@ public class GitLogScanner {
         }
         List<String> args = new ArrayList<>(List.of(
                 "git", "-c", "i18n.logOutputEncoding=UTF-8",
-                "log", "--encoding=UTF-8", "--no-merges", FORMAT,
+                "log", "--encoding=UTF-8", "--no-merges", "--numstat", FORMAT,
                 "--since=" + from + " 00:00:00", "--until=" + to + " 23:59:59",
                 "-n", String.valueOf(props.getGitScanMaxCommits())));
         if (author != null) {
@@ -185,15 +193,55 @@ public class GitLogScanner {
         }
         List<GitCommitView> commits = new ArrayList<>();
         for (String rec : r.out().split(RECORD_SEP)) {
-            String[] f = rec.strip().split(FIELD_SEP, -1);
-            if (f.length < 5 || f[0].isBlank() || !seenSha.add(f[0])) {
+            if (rec.isBlank()) {
                 continue;
             }
+            String[] f = rec.split(FIELD_SEP, -1);
+            if (f.length < 6 || f[0].isBlank() || !seenSha.add(f[0])) {
+                continue;
+            }
+            CommitTail tail = parseTail(f[5]);
             commits.add(new GitCommitView(repo.id(), repo.name(), f[0], f[1], f[2],
-                    Instant.parse(f[3]), f[4],
+                    Instant.parse(f[3]), f[4], tail.body(),
+                    tail.filesChanged(), tail.insertions(), tail.deletions(),
                     imported.contains(repo.id() + ":" + f[0])));
         }
         return new BranchScan(commits, null);
+    }
+
+    private record CommitTail(String body, int filesChanged, int insertions, int deletions) {}
+
+    /**
+     * 从记录末位字段剥离 numstat 行：正文 + 空行 + 「added\tdeleted\tpath」若干。
+     * 从尾部向前收，遇到第一行非 numstat 即正文边界（二进制改动记为 0 行）。
+     */
+    private static CommitTail parseTail(String raw) {
+        String[] lines = raw.replace("\r\n", "\n").split("\n", -1);
+        int end = lines.length;
+        while (end > 0 && lines[end - 1].isBlank()) {
+            end--;
+        }
+        int start = end;
+        int files = 0;
+        int insertions = 0;
+        int deletions = 0;
+        while (start > 0) {
+            String line = lines[start - 1];
+            if (!NUMSTAT_LINE.matcher(line).matches()) {
+                break;
+            }
+            String[] parts = line.split("\t", 3);
+            if (!"-".equals(parts[0])) {
+                insertions += Integer.parseInt(parts[0]);
+            }
+            if (!"-".equals(parts[1])) {
+                deletions += Integer.parseInt(parts[1]);
+            }
+            files++;
+            start--;
+        }
+        String body = String.join("\n", Arrays.copyOfRange(lines, 0, start)).strip();
+        return new CommitTail(body, files, insertions, deletions);
     }
 
     /** 分支 → rev：本地分支存在用本地名；否则 origin/&lt;branch&gt; 存在用远程跟踪引用；都无返回 null。 */

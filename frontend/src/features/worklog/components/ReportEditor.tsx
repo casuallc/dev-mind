@@ -1,4 +1,4 @@
-import { Button, Empty, Modal, Space, Typography, message } from 'antd'
+import { Button, Empty, Input, Modal, Space, Typography, message } from 'antd'
 import { RobotOutlined, EditOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { fmtTime } from '../../../shared/utils/format'
@@ -14,8 +14,8 @@ interface Props {
   generating: boolean
   /** 手动创建空白稿（不经 AI），创建后进入编辑态 */
   onCreateManual: () => Promise<void>
-  /** 触发 AI 生成（非 force 已存在由后端跳过；force=显式覆盖旧稿，git log 可找回） */
-  onGenerate: (force: boolean) => void
+  /** 触发 AI 生成（非 force 已存在由后端跳过；force=显式覆盖旧稿，git log 可找回）；hint 为可选补充说明 */
+  onGenerate: (force: boolean, hint?: string) => void
   /** 保存即生效写仓（CAP-74：无确认态，保存后仍可随时再改） */
   onSave: (values: Record<string, string>) => Promise<void>
   /** 撑满父容器剩余高度（日报页要求编辑器底部与页面底部对齐） */
@@ -47,6 +47,9 @@ export default function ReportEditor({
   const [modes, setModes] = useState<Record<string, MarkdownEditorMode>>({})
   const [saving, setSaving] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [genOpen, setGenOpen] = useState(false)
+  const [genForce, setGenForce] = useState(false)
+  const [hint, setHint] = useState('')
 
   useEffect(() => {
     const next: Record<string, string> = {}
@@ -89,35 +92,74 @@ export default function ReportEditor({
     })
   }
 
+  const openGenerate = (force: boolean) => {
+    setGenForce(force)
+    setHint('')
+    setGenOpen(true)
+  }
+  const submitGenerate = () => {
+    const h = hint.trim()
+    setGenOpen(false)
+    onGenerate(genForce, h || undefined)
+  }
+
+  // 补充说明只影响本次生成；素材里的影响与数字模型推不出来，由本人补最快
+  const generateDialog = (
+    <Modal
+      open={genOpen}
+      title={genForce ? '重新生成报告' : 'AI 生成报告'}
+      okText="开始生成"
+      cancelText="取消"
+      confirmLoading={generating}
+      onOk={submitGenerate}
+      onCancel={() => setGenOpen(false)}
+    >
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
+        可选：补充今天/本周的重点、影响或数字。补充内容会作为高优先级事实参与生成，能明显提升报告质量。
+      </Typography.Paragraph>
+      <Input.TextArea
+        value={hint}
+        onChange={(e) => setHint(e.target.value)}
+        placeholder="例如：登录改造已上线，覆盖 3 条业务线；本周还协助排查了 2 个线上问题……"
+        maxLength={2000}
+        showCount
+        autoSize={{ minRows: 3, maxRows: 6 }}
+      />
+    </Modal>
+  )
+
   if (!exists) {
     return (
-      <Empty
-        description="还没有报告：可「手动填写」直接写，或点「AI 生成」根据当天/当周工作条目与 git 提交生成草稿"
-        style={{ padding: '48px 0' }}
-      >
-        <Space>
-          <Button
-            type="primary"
-            icon={<EditOutlined />}
-            loading={creating}
-            onClick={async () => {
-              setCreating(true)
-              try {
-                await onCreateManual()
-              } catch (e) {
-                showError(e, '创建失败')
-              } finally {
-                setCreating(false)
-              }
-            }}
-          >
-            手动填写
-          </Button>
-          <Button icon={<RobotOutlined />} loading={generating} onClick={() => onGenerate(false)}>
-            AI 生成
-          </Button>
-        </Space>
-      </Empty>
+      <>
+        <Empty
+          description="还没有报告：可「手动填写」直接写，或点「AI 生成」根据当天/当周工作条目与 git 提交生成草稿"
+          style={{ padding: '48px 0' }}
+        >
+          <Space>
+            <Button
+              type="primary"
+              icon={<EditOutlined />}
+              loading={creating}
+              onClick={async () => {
+                setCreating(true)
+                try {
+                  await onCreateManual()
+                } catch (e) {
+                  showError(e, '创建失败')
+                } finally {
+                  setCreating(false)
+                }
+              }}
+            >
+              手动填写
+            </Button>
+            <Button icon={<RobotOutlined />} loading={generating} onClick={() => openGenerate(false)}>
+              AI 生成
+            </Button>
+          </Space>
+        </Empty>
+        {generateDialog}
+      </>
     )
   }
 
@@ -127,7 +169,7 @@ export default function ReportEditor({
     >
       <Space style={{ marginBottom: 12, flex: 'none' }} wrap>
         <Typography.Text type="secondary">更新于 {fmtTime(updatedAt)}</Typography.Text>
-        <Button size="small" icon={<RobotOutlined />} loading={generating} onClick={() => onGenerate(true)}>
+        <Button size="small" icon={<RobotOutlined />} loading={generating} onClick={() => openGenerate(true)}>
           重新生成
         </Button>
         {anyEditing && (
@@ -174,6 +216,7 @@ export default function ReportEditor({
           )
         })}
       </div>
+      {generateDialog}
     </div>
   )
 }
