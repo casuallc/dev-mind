@@ -2,7 +2,7 @@ import { Button, Empty, Modal, Space, Typography, message } from 'antd'
 import { RobotOutlined, EditOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { fmtTime } from '../../../shared/utils/format'
-import MarkdownEditor from '../../../shared/components/MarkdownEditor'
+import MarkdownEditor, { type MarkdownEditorMode } from '../../../shared/components/MarkdownEditor'
 import { showError } from '../../../shared/utils/showError'
 
 interface Props {
@@ -23,7 +23,7 @@ interface Props {
 /**
  * CAP-28 报告编辑卡：空白手填 / AI 草稿 → 人工修订 → 保存。
  * CAP-74：去 DRAFT/CONFIRMED 状态机——事实源是服务端仓，保存即 commit，历史走 git log，
- * 不再有「确认定稿/只读」概念。编辑态复用知识库 MarkdownEditor（工具栏 + 编辑/预览切换）。
+ * 不再有「确认定稿/只读」概念。编辑态复用知识库 MarkdownEditor（工具栏 + 编辑/分栏/预览切换）。
  * 默认预览模式（防止阅读时误改）；全部字段处于预览时不显示「保存修改」；保存需二次确认。
  */
 export default function ReportEditor({
@@ -36,7 +36,7 @@ export default function ReportEditor({
   onSave,
 }: Props) {
   const [values, setValues] = useState<Record<string, string>>({})
-  const [modes, setModes] = useState<Record<string, 'edit' | 'preview'>>({})
+  const [modes, setModes] = useState<Record<string, MarkdownEditorMode>>({})
   const [saving, setSaving] = useState(false)
   const [creating, setCreating] = useState(false)
 
@@ -49,8 +49,8 @@ export default function ReportEditor({
   }, [fields])
 
   const modeOf = (key: string) => modes[key] ?? 'preview'
-  // 任一字段在编辑态才显示保存按钮（全预览=纯阅读，隐藏保存防误触）
-  const anyEditing = fields.some((f) => modeOf(f.key) === 'edit')
+  // 任一字段在编辑/分栏态才显示保存按钮（全预览=纯阅读，隐藏保存防误触）
+  const anyEditing = fields.some((f) => modeOf(f.key) !== 'preview')
 
   const doSave = async () => {
     setSaving(true)

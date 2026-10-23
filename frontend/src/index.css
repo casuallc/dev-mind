@@ -122,22 +122,50 @@ html, body, #root {
   background: linear-gradient(to left, #fff, rgba(255, 255, 255, 0));
 }
 
-/* CAP-03 只读 Markdown 渲染样式 */
-.doc-md h1, .doc-md h2, .doc-md h3, .doc-md h4 {
-  margin: 0.8em 0 0.4em;
-  line-height: 1.3;
+/* 共享 Markdown（shared/components/Markdown）阅读排版：标题/列表/引用/表格/图片/代码高亮 */
+.doc-md {
+  color: rgba(0, 0, 0, 0.88);
+  overflow-wrap: anywhere;
 }
-.doc-md h1 { font-size: 1.6em; border-bottom: 1px solid #eee; padding-bottom: 0.2em; }
-.doc-md h2 { font-size: 1.3em; }
-.doc-md h3 { font-size: 1.1em; }
-.doc-md p { margin: 0.5em 0; }
-.doc-md ul, .doc-md ol { padding-left: 1.6em; }
+.doc-md > :first-child { margin-top: 0; }
+.doc-md > :last-child { margin-bottom: 0; }
+.doc-md h1, .doc-md h2, .doc-md h3, .doc-md h4,
+.doc-md h5, .doc-md h6 {
+  margin: 0.9em 0 0.45em;
+  line-height: 1.35;
+  font-weight: 600;
+}
+.doc-md h1 { font-size: 1.6em; border-bottom: 1px solid #f0f0f0; padding-bottom: 0.25em; }
+.doc-md h2 { font-size: 1.35em; }
+.doc-md h3 { font-size: 1.15em; }
+.doc-md h4 { font-size: 1em; }
+.doc-md h5, .doc-md h6 { font-size: 0.95em; color: #595959; }
+.doc-md p { margin: 0.55em 0; }
+.doc-md ul, .doc-md ol { margin: 0.55em 0; padding-left: 1.7em; }
+.doc-md li + li { margin-top: 0.2em; }
+.doc-md li > p { margin: 0.2em 0; }
+.doc-md blockquote {
+  margin: 0.8em 0;
+  padding: 0.3em 1em;
+  border-left: 3px solid #d9d9d9;
+  background: #fafafa;
+  color: #595959;
+}
+.doc-md hr { border: none; border-top: 1px solid #f0f0f0; margin: 1.2em 0; }
+.doc-md a { color: #1677ff; text-decoration: none; }
+.doc-md a:hover { text-decoration: underline; }
+.doc-md img { max-width: 100%; }
+.doc-md .md-img-block { margin: 0.55em 0; }
+/* antd Image 预览容器：Markdown 图片随内容宽度收缩，不撑破正文 */
+.doc-md .ant-image { max-width: 100%; }
+.doc-md .ant-image-img { max-width: 100%; height: auto; border-radius: 4px; }
+/* 行内代码与代码块外壳 */
 .doc-md code {
   background: #f2f3f5;
-  padding: 0.1em 0.35em;
-  border-radius: 3px;
+  padding: 0.12em 0.38em;
+  border-radius: 4px;
   font-family: ui-monospace, Consolas, monospace;
-  font-size: 0.92em;
+  font-size: 0.9em;
 }
 .doc-md pre {
   background: #f6f6f6;
@@ -145,16 +173,71 @@ html, body, #root {
   border-radius: 4px;
   overflow: auto;
 }
-.doc-md pre code { background: transparent; padding: 0; }
-.doc-md blockquote {
-  margin: 0.5em 0;
-  padding: 0.1em 1em;
-  border-left: 3px solid #d9d9d9;
-  color: #595959;
+.doc-md pre code { background: transparent; padding: 0; border-radius: 0; font-size: inherit; }
+.doc-md .md-code {
+  margin: 0.8em 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f6f8fa;
+  overflow: hidden;
 }
-.doc-md table { border-collapse: collapse; margin: 0.6em 0; }
-.doc-md th, .doc-md td { border: 1px solid #d9d9d9; padding: 4px 10px; }
-.doc-md a { color: #1677ff; }
+.doc-md .md-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 32px;
+  padding: 0 4px 0 12px;
+  background: #f1f3f5;
+  border-bottom: 1px solid #e5e7eb;
+}
+.doc-md .md-code-lang {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  color: #8c8c8c;
+  letter-spacing: 0.02em;
+}
+.doc-md .md-code-head .ant-btn { color: #8c8c8c; padding-inline: 6px; }
+.doc-md .md-code-head .ant-btn:hover:not(:disabled) { color: #1677ff; background: rgba(0, 0, 0, 0.04); }
+.doc-md .md-code pre {
+  margin: 0;
+  padding: 12px 14px;
+  background: transparent;
+  border-radius: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+/* 表格：横向滚动容器（宽表不撑破内容区），表头浅底 */
+.doc-md table { border-collapse: collapse; margin: 0.8em 0; font-size: 0.95em; }
+.doc-md .md-table-wrap { margin: 0.8em 0; overflow-x: auto; }
+.doc-md .md-table-wrap table { margin: 0; min-width: 100%; }
+.doc-md th, .doc-md td { border: 1px solid #e5e7eb; padding: 6px 12px; text-align: left; }
+.doc-md th { background: #fafafa; font-weight: 600; white-space: nowrap; }
+.doc-md tbody tr:nth-child(2n) { background: #fcfcfc; }
+/* GFM 任务列表 */
+.doc-md .contains-task-list { padding-left: 1.2em; }
+.doc-md .task-list-item { list-style: none; }
+.doc-md .task-list-item input { margin-right: 6px; }
+/* 空内容占位 */
+.doc-md.md-empty { color: #bfbfbf; font-size: 13px; padding: 16px 0; text-align: center; }
+/* highlight.js 常见 token 配色（GitHub Light 口径，只落 .doc-md 作用域） */
+.doc-md .hljs { color: #24292e; }
+.doc-md .hljs-comment, .doc-md .hljs-quote { color: #6a737d; }
+.doc-md .hljs-keyword, .doc-md .hljs-selector-tag, .doc-md .hljs-subst { color: #d73a49; }
+.doc-md .hljs-number, .doc-md .hljs-literal, .doc-md .hljs-variable,
+.doc-md .hljs-template-variable, .doc-md .hljs-tag .hljs-attr { color: #005cc5; }
+.doc-md .hljs-string, .doc-md .hljs-doctag { color: #032f62; }
+.doc-md .hljs-title, .doc-md .hljs-section, .doc-md .hljs-selector-id,
+.doc-md .hljs-selector-class { color: #6f42c1; }
+.doc-md .hljs-type, .doc-md .hljs-built_in, .doc-md .hljs-builtin-name { color: #e36209; }
+.doc-md .hljs-attr, .doc-md .hljs-attribute, .doc-md .hljs-name,
+.doc-md .hljs-tag, .doc-md .hljs-selector-attr, .doc-md .hljs-selector-pseudo { color: #22863a; }
+.doc-md .hljs-meta { color: #005cc5; }
+.doc-md .hljs-symbol, .doc-md .hljs-bullet, .doc-md .hljs-link { color: #e36209; }
+.doc-md .hljs-addition { color: #22863a; background: #f0fff4; }
+.doc-md .hljs-deletion { color: #b31d28; background: #ffeef0; }
+.doc-md .hljs-emphasis { font-style: italic; }
+.doc-md .hljs-strong { font-weight: 600; }
 
 /* CAP-05 会话对话视图（ChatStream） */
 .chat-row { margin: 10px 0; }

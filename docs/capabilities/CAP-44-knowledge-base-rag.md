@@ -9,7 +9,8 @@
 - 知识库（KnowledgeBase）成为一等容器：多库并存，条目归属库；库带归属语义（global/project）与消费方式
   （FULL=全量注入 CLAUDE.md，即原经验库语义｜RAG=仅检索）。
 - 条目内容分块 + embedding 向量化，提供语义检索 API（topK + 阈值），支撑检索测试页与后续 KB 会话。
-- 借鉴 WeKnora 前端编辑器，沉淀 shared MarkdownEditor 组件（工具栏 + 编辑/预览）。
+- 借鉴 WeKnora 前端编辑器，沉淀 shared MarkdownEditor 组件（工具栏 + 编辑/分栏/预览 + 全屏）；
+  阅读侧统一走 shared Markdown（代码高亮/复制、表格横滚、图片预览）。
 
 **关键约束**：本机 H2 / 线上 PG，不依赖 pgvector——向量存 JSON CLOB，Java 内存余弦（KB 规模小）。
 平台无模型管理体系，embedding 走 OpenAI 兼容端点配置（application-local.yml，密钥禁入库）。
@@ -36,9 +37,15 @@
 - **FR-07 库/条目管理 API**：`/api/knowledge/bases` CRUD、`/bases/{id}/entries` 条目 CRUD（沿用既有
   条目字段 tags/status/contentMd，新增 source/external_id/content_hash/index_status 列，
   飞书字段 CAP-45 才写值）。
-- **FR-08 前端**：shared `MarkdownEditor`（工具栏包裹选区 + 编辑/预览 Segmented，预览复用
+- **FR-08 前端**：shared `MarkdownEditor`（工具栏包裹选区 + 编辑/分栏/预览 Segmented，预览复用
   `shared/components/Markdown.tsx`）；知识库页重构为库列表（含提案 inbox 视图）→ 库详情
   （条目｜检索测试｜设置；飞书导入页签 CAP-45 加）。
+- **FR-09 Markdown 阅读/编辑组件升级**（2026-10-23）：阅读侧 `shared/components/Markdown.tsx`
+  接入 rehype-highlight（只认显式围栏语言，避免自动识别误标），代码块带语言标签与一键复制、
+  表格横向滚动、图片 antd 预览、空内容占位；编辑侧 `MarkdownEditor` 增加分栏（`useDeferredValue`
+  抑制输入卡顿）、全屏（portal + Esc，不连带关外层抽屉）、Ctrl/⌘+B/I/K 与 Tab 缩进、
+  字符/行统计，`value/onChange` 受控口径与附件上传保持不变。全站既有 `<Markdown>` /
+  `MarkdownEditor` 消费方无需改调用即继承。E2E：`tests/e2e-markdown-components.mjs`。
 
 ## 3. 关键设计
 
@@ -89,7 +96,8 @@ POST   /api/knowledge/search {kbIds, query, topK} 检索测试（降级时返回
 - 存量经验条目迁移后，会话注入预览内容逐字不变（E2E 断言）；
 - 建库 → 建条目 → index_status=ready → search 语义命中且 score 有序；
 - embedding 未配置时 search 降级 LIKE 且 degraded 标记，全程无 5xx；
-- MarkdownEditor 在条目编辑/提案两处复用，工具栏语法插入与预览渲染正确。
+- MarkdownEditor 在条目编辑/提案两处复用，工具栏语法插入与预览渲染正确；
+- FR-09 阅读组件代码高亮/复制/表格/图片预览、编辑组件分栏/全屏/快捷键由 E2E 真浏览器断言。
 
 ## 8. 非目标
 
