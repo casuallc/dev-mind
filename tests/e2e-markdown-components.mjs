@@ -6,7 +6,7 @@
 //   极简模式（showToolbar=false）：工作日志日报默认预览、顶栏只有源码/分栏/预览三个图标、
 //         字段标题通过 title 进入顶栏（上方无独立标签）、撑满页面底部，源码态行号/当前行/
 //         Markdown 语法高亮、可编辑；分栏左源码右实时预览，输入后右侧即时更新，
-//         两栏滚动条按比例双向联动；周报两字段左右等宽、等高并排。
+//         两栏滚动条按比例双向联动；周报两字段左右等宽、等高并排，并撑满到页面底部。
 // 前置：app 隔离实例 + 指向它的前端 dev 同时起（数据自造，落隔离 H2，无需 runner）：
 //   mvn -pl devmind-app spring-boot:run -Dspring-boot.run.profiles=e2e \
 //     "-Dspring-boot.run.arguments=--server.port=18103 --spring.datasource.url=jdbc:h2:file:<tmp>/markdown-components/db/devmind;AUTO_SERVER=TRUE"
@@ -620,6 +620,8 @@ plain text ${MARK}
     const weeklyLayout = await evaluate(ws, `(() => {
       const els = [...document.querySelectorAll('.md-editor-minimal')];
       const rects = els.map((e) => e.getBoundingClientRect());
+      const body = els[0]?.closest('.ant-card-body');
+      const br = body?.getBoundingClientRect();
       return {
         titles: els.map((e) => e.querySelector('.md-editor-title')?.textContent ?? ''),
         sideBySide: rects.length === 2
@@ -629,6 +631,8 @@ plain text ${MARK}
           && Math.abs(rects[0].width - rects[1].width) < 2
           && Math.abs(rects[0].height - rects[1].height) < 2,
         heights: rects.map((r) => Math.round(r.height)),
+        bottomGap: br ? br.bottom - Math.max(...rects.map((r) => r.bottom)) : -1,
+        paddingBottom: body ? parseFloat(getComputedStyle(body).paddingBottom) : 0,
       };
     })()`)
     ok(weeklyLayout.titles.length === 2 && weeklyLayout.titles[0].startsWith('周总结（')
@@ -636,6 +640,9 @@ plain text ${MARK}
       `周报两字段标题在各自编辑器顶栏（${weeklyLayout.titles.join(' / ')}）`)
     ok(weeklyLayout.sideBySide && weeklyLayout.equalSize,
       `周总结与下周计划左右并排、等宽等高（高 ${weeklyLayout.heights.join(' / ')}px）`)
+    ok(weeklyLayout.heights[0] > 280
+      && Math.abs(weeklyLayout.bottomGap - weeklyLayout.paddingBottom) < 2,
+      `周报编辑器撑满到页面底部（高 ${weeklyLayout.heights[0]}px，底部留白 ${Math.round(weeklyLayout.bottomGap)}px = padding ${weeklyLayout.paddingBottom}px）`)
 
     if (process.argv.includes('--shots')) {
       const shot = await ws.send('Page.captureScreenshot', { format: 'png' })
