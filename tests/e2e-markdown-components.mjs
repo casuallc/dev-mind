@@ -2,8 +2,9 @@
 // 覆盖：
 //   阅读：代码块语言标签 + 高亮 token + 一键复制、表格横向滚动容器、图片点击预览、任务列表；
 //   编辑：字符统计、Ctrl+B 加粗、Tab 缩进、编辑/分栏/预览三态、分栏预览高亮、全屏与 Esc 退出（不连带关抽屉）；
-//   极简编辑器：工作日志日报默认预览、顶栏只有源码/预览两个图标（无格式工具栏）、撑满页面底部，
-//               源码态 CodeMirror 行号/当前行/Markdown 语法高亮、可编辑，预览态走共享高亮渲染。
+//   极简编辑器：工作日志日报默认预览、顶栏只有源码/分栏/预览三个图标（无格式工具栏）、撑满页面底部，
+//               源码态 CodeMirror 行号/当前行/Markdown 语法高亮、可编辑；分栏左源码右实时预览，
+//               输入后右侧即时更新，两栏滚动条按比例双向联动。
 // 前置：app 隔离实例 + 指向它的前端 dev 同时起（数据自造，落隔离 H2，无需 runner）：
 //   mvn -pl devmind-app spring-boot:run -Dspring-boot.run.profiles=e2e \
 //     "-Dspring-boot.run.arguments=--server.port=18103 --spring.datasource.url=jdbc:h2:file:<tmp>/markdown-components/db/devmind;AUTO_SERVER=TRUE"
@@ -216,6 +217,7 @@ plain text ${MARK}
 
   // 工作日志日报：初始化日志空间 + 造当天日报，供极简编辑器断言
   const today = new Date().toLocaleDateString('sv-SE')
+  const dailyBody = Array.from({ length: 30 }, (_, i) => `第 ${i + 1} 段：用于验证分栏滚动联动与实时预览。`).join('\n\n')
   await api('/worklog/workspace/ensure', { token: accessToken, body: {} })
   try {
     await api('/worklog/daily', { token: accessToken, body: { date: today } })
@@ -224,7 +226,7 @@ plain text ${MARK}
     method: 'PUT',
     token: accessToken,
     body: {
-      contentMd: `# 日报 ${MARK}\n\n- 完成甲\n- 完成乙\n\n\`\`\`java\nclass Daily { }\n\`\`\`\n`,
+      contentMd: `# 日报 ${MARK}\n\n- 完成甲\n- 完成乙\n\n## 明细\n\n${dailyBody}\n\n\`\`\`java\nclass Daily { }\n\`\`\`\n`,
     },
   })
   ok(true, '日报造数完成')
@@ -432,7 +434,7 @@ plain text ${MARK}
         highlight: !!el.querySelector('.doc-md .hljs-keyword'),
       };
     })()`)
-    ok(simplePreview.modes.join() === '编辑源码,预览', '日报顶栏只有源码/预览两个图标（无格式工具栏）')
+    ok(simplePreview.modes.join() === '编辑源码,分栏,预览', '日报顶栏只有源码/分栏/预览三个图标（无格式工具栏）')
     ok(!simplePreview.hasEditor && simplePreview.previewOn, '日报默认预览态（无编辑器）')
     ok(simplePreview.title.includes(MARK) && simplePreview.items === 2 && simplePreview.highlight,
       '日报预览走共享 Markdown 渲染（标题/列表/代码高亮）')
@@ -483,7 +485,7 @@ plain text ${MARK}
         editorHeight: el.querySelector('.cm-editor')?.getBoundingClientRect().height ?? 0,
       };
     })()`)
-    ok(simpleEdit.modes === 2 && simpleEdit.noToolbar && simpleEdit.noStats, '源码态同样无格式工具栏/字符统计')
+    ok(simpleEdit.modes === 3 && simpleEdit.noToolbar && simpleEdit.noStats, '源码态同样无格式工具栏/字符统计')
     ok(simpleEdit.editable && simpleEdit.lineNumbers >= 3 && simpleEdit.activeLine,
       `源码态为带行号/当前行的可编辑编辑器（${simpleEdit.lineNumbers} 行号）`)
     ok(simpleEdit.headingHighlighted, `Markdown 标题语法高亮（${simpleEdit.headingColors.join(' / ')}）`)
@@ -493,6 +495,69 @@ plain text ${MARK}
       const shot = await ws.send('Page.captureScreenshot', { format: 'png' })
       writeFileSync(join(TMP, 'daily-report-source.png'), Buffer.from(shot.data, 'base64'))
       console.log(`  截图 → ${join(TMP, 'daily-report-source.png')}`)
+    }
+
+    // ── 8. 分栏：左源码实时驱动右侧预览，两栏滚动条按比例双向联动 ──
+    await evaluate(ws, `document.querySelector('.md-simple button[aria-label="分栏"]').click()`)
+    await waitFor(() => evaluate(ws, `(() => {
+      const el = document.querySelector('.md-simple');
+      return !!el?.querySelector('.cm-scroller') && !!el?.querySelector('.md-simple-preview');
+    })()`), '分栏两栏渲染')
+
+    const splitLayout = await evaluate(ws, `(() => {
+      const el = document.querySelector('.md-simple');
+      const src = el.querySelector('.cm-scroller');
+      const prev = el.querySelector('.md-simple-preview');
+      const sr = src.getBoundingClientRect();
+      const pr = prev.getBoundingClientRect();
+      return {
+        sideBySide: pr.left >= sr.right - 1 && Math.abs(sr.height - pr.height) < 4,
+        srcScrollable: src.scrollHeight > src.clientHeight,
+        prevScrollable: prev.scrollHeight > prev.clientHeight,
+        srcOverflow: getComputedStyle(src).overflowY,
+        prevOverflow: getComputedStyle(prev).overflowY,
+      };
+    })()`)
+    ok(splitLayout.sideBySide, '分栏左右并排且两栏等高')
+    ok(splitLayout.srcScrollable && splitLayout.prevScrollable
+      && splitLayout.srcOverflow === 'auto' && splitLayout.prevOverflow === 'auto',
+      '分栏两栏都有独立滚动条')
+
+    // 左侧改字，右侧预览实时更新（分栏的核心目的）
+    const realtimeMark = `实时预览-${MARK}`
+    await evaluate(ws, `document.querySelector('.md-simple .cm-content').focus()`)
+    await ws.send('Input.insertText', { text: realtimeMark })
+    await waitFor(() => evaluate(ws, `document.querySelector('.md-simple .md-simple-preview')?.innerText.includes(${JSON.stringify(realtimeMark)})`), '分栏实时预览')
+    ok(true, '源码输入后右侧预览实时更新')
+
+    const syncDown = await evaluate(ws, `(async () => {
+      const el = document.querySelector('.md-simple');
+      const src = el.querySelector('.cm-scroller');
+      const prev = el.querySelector('.md-simple-preview');
+      const maxSrc = src.scrollHeight - src.clientHeight;
+      const maxPrev = prev.scrollHeight - prev.clientHeight;
+      src.scrollTop = maxSrc * 0.6;
+      await new Promise((r) => setTimeout(r, 300));
+      return { maxSrc, maxPrev, srcTop: src.scrollTop, prevTop: prev.scrollTop };
+    })()`)
+    ok(syncDown.maxSrc > 0 && syncDown.maxPrev > 0
+      && Math.abs(syncDown.srcTop / syncDown.maxSrc - syncDown.prevTop / syncDown.maxPrev) < 0.15,
+      `源码滚动带动右侧按比例联动（${Math.round(syncDown.srcTop / syncDown.maxSrc * 100)}% → ${Math.round(syncDown.prevTop / syncDown.maxPrev * 100)}%）`)
+
+    const syncUp = await evaluate(ws, `(async () => {
+      const el = document.querySelector('.md-simple');
+      const src = el.querySelector('.cm-scroller');
+      const prev = el.querySelector('.md-simple-preview');
+      prev.scrollTop = 0;
+      await new Promise((r) => setTimeout(r, 300));
+      return { srcTop: src.scrollTop, prevTop: prev.scrollTop };
+    })()`)
+    ok(syncUp.prevTop === 0 && syncUp.srcTop < 5, '右侧滚动条回顶时左侧跟随')
+
+    if (process.argv.includes('--shots')) {
+      const shot = await ws.send('Page.captureScreenshot', { format: 'png' })
+      writeFileSync(join(TMP, 'daily-report-split.png'), Buffer.from(shot.data, 'base64'))
+      console.log(`  截图 → ${join(TMP, 'daily-report-split.png')}`)
     }
   } catch (e) {
     try {
