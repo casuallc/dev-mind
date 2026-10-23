@@ -4,8 +4,9 @@
 //   编辑：CodeMirror 源码、字符统计、Ctrl+B 加粗、Tab 缩进、编辑/分栏/预览三态、分栏预览高亮、
 //         全屏与 Esc 退出（不连带关抽屉）；
 //   极简模式（showToolbar=false）：工作日志日报默认预览、顶栏只有源码/分栏/预览三个图标、
-//         撑满页面底部，源码态行号/当前行/Markdown 语法高亮、可编辑；分栏左源码右实时预览，
-//         输入后右侧即时更新，两栏滚动条按比例双向联动。
+//         字段标题通过 title 进入顶栏（上方无独立标签）、撑满页面底部，源码态行号/当前行/
+//         Markdown 语法高亮、可编辑；分栏左源码右实时预览，输入后右侧即时更新，
+//         两栏滚动条按比例双向联动。
 // 前置：app 隔离实例 + 指向它的前端 dev 同时起（数据自造，落隔离 H2，无需 runner）：
 //   mvn -pl devmind-app spring-boot:run -Dspring-boot.run.profiles=e2e \
 //     "-Dspring-boot.run.arguments=--server.port=18103 --spring.datasource.url=jdbc:h2:file:<tmp>/markdown-components/db/devmind;AUTO_SERVER=TRUE"
@@ -459,6 +460,9 @@ plain text ${MARK}
         modes: [...el.querySelectorAll('.md-editor-modes button')].map((b) => b.getAttribute('aria-label')),
         hasEditor: !!el.querySelector('.cm-editor'),
         previewOn: el.querySelector('button[aria-label="预览"]')?.getAttribute('aria-pressed') === 'true',
+        topTitle: el.querySelector('.md-editor-title')?.textContent ?? '',
+        standaloneLabel: el.parentElement.children.length > 1
+          || !!el.parentElement.querySelector(':scope > .ant-typography'),
         title: el.querySelector('.doc-md h1')?.textContent ?? '',
         items: el.querySelectorAll('.doc-md li').length,
         highlight: !!el.querySelector('.doc-md .hljs-keyword'),
@@ -466,6 +470,9 @@ plain text ${MARK}
     })()`)
     ok(simplePreview.modes.join() === '编辑源码,分栏,预览', '日报顶栏只有源码/分栏/预览三个图标（无格式工具栏）')
     ok(!simplePreview.hasEditor && simplePreview.previewOn, '日报默认预览态（无编辑器）')
+    ok(/^日报内容（\d{4}-\d{2}-\d{2}，Markdown）$/.test(simplePreview.topTitle),
+      `字段标题进入编辑器顶栏（${simplePreview.topTitle}）`)
+    ok(!simplePreview.standaloneLabel, '编辑器上方不再有独立字段标签')
     ok(simplePreview.title.includes(MARK) && simplePreview.items === 2 && simplePreview.highlight,
       '日报预览走共享 Markdown 渲染（标题/列表/代码高亮）')
 
