@@ -137,12 +137,14 @@ HTTP CONNECT 代理挂载路径，相对 CLI 方案无收益。
     已携带该周日报全文（`ReportPrompts.weekly` 现成），以此为唯一素材口径；
   - runner 侧 `worklog_push` 帧与远端备份逻辑退役（协议字段保留不删，老 runner
     收到即 no-op；新版服务端不再下发）。
-- **FR-08 迁移**：启动迁移任务（幂等）——以 **DB 镜像内容为准**（它含镜像+手改的
-  并集，是最新真相）把 daily_reports/weekly_reports 逐条写入本人个人仓并 commit
-  （message 标 `DevMind-Source: migration`）；已确认/草稿不加区分（状态机废除）。
-  **幂等判据**：按 `(用户, 日期/周)` 映射目标文件，内容一致即跳过、不一致才
-  写+commit——重复启动不产生新 commit。迁移 commit 的 author/committer date 回填
-  报告的 `updated_at`，保证 git log 时间列（FR-05 的 updatedAt 来源）迁移后不失真。
+- **FR-08 迁移**：启动迁移任务（一次性补缺）——daily_reports/weekly_reports 逐条
+  写入本人个人仓并 commit（message 标 `DevMind-Source: migration`）；已确认/草稿
+  不加区分（状态机废除）。**只补缺**：按 `(用户, 日期/周)` 映射目标文件，文件不存在
+  才写入，已存在一律跳过——CAP-74 起 git 是事实源，重启不得用旧 DB 镜像覆盖 AI
+  成稿/平台内外编辑，否则会回滚内容并经自动推送把旧版推到远端（2026-10-23 修正）。
+  迁移 commit 的 author/committer date 回填报告的 `updated_at`，保证 git log 时间列
+  （FR-05 的 updatedAt 来源）迁移后不失真。远端绑定只回填到尚不存在的个人仓行
+  （仓行已存在=已接管，含主动解绑），遗留 settings 列迁移后清空，防重启复活。
   迁移完成后 daily_reports/weekly_reports 变死表（手工 DROP，同 agent_conn_logs
   先例）；runner 侧旧工作区文件留现场不删，不再消费。
 - **FR-09 前端**：/worklog 页日报/周报 Tab 去确认态交互；「推送远端」按钮改调

@@ -40,9 +40,10 @@ import static org.mockito.Mockito.when;
 
 /**
  * CAP-74 C5 {@link WorklogReportMigration}：H2 mem 建存量表插行 + @TempDir 真仓。
- * 钉死：内容一致（字节级）、commit 时间回填 updated_at、二次运行零新 commit（幂等）、
- * 周报重组与 {@link ReportService#splitWeekly} 往返一致、settings 远端绑定搬到 repos 行、
- * 旧表缺席时不炸（新库）。
+ * 钉死：补缺写入（commit 时间回填 updated_at、trailer 追溯 source/session）、二次运行零新
+ * commit（幂等）、周报重组与 {@link ReportService#splitWeekly} 往返一致、settings 远端绑定
+ * 搬到 repos 行且遗留列清空、旧表缺席时不炸（新库）。
+ * 重启回归：git 已有报告（AI 成稿/平台内外编辑）绝不被旧 DB 镜像覆盖；已解绑仓不复活远端。
  */
 class WorklogReportMigrationTest {
 
@@ -191,6 +192,9 @@ class WorklogReportMigrationTest {
         WorklogRepoEntity bobAfter = repoRows.get("personal-bob");
         assertEquals("https://git.example.com/bob.git", bobAfter.getRemoteUrl());
         assertEquals("main", bobAfter.getRemoteBranch());
+        // 一次性迁移：遗留列清空，后续重启不再参与
+        assertNull(legacyRemoteUrl("alice"));
+        assertNull(legacyRemoteUrl("bob"));
     }
 
     @Test
@@ -202,7 +206,61 @@ class WorklogReportMigrationTest {
         assertNull(repoRows.get("personal-alice"));
     }
 
+    @Test
+    void restartDoesNotOverwriteExistingAiWeekly() throws Exception {
+        Instant updated = Instant.parse("2026-10-23T08:00:00Z");
+        jdbc.update("INSERT INTO weekly_reports (user_id, week_start, summary_md, next_plan_md,"
+                        + " session_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+                "alice", java.sql.Date.valueOf("2026-10-19"), "旧 DB 镜像", "", "legacy-s1",
+                Timestamp.from(updated), Timestamp.from(updated));
+
+        repoService.ensurePersonalRepo("alice");
+        String aiContent = ReportService.assembleWeekly("AI 生成的总结", "AI 生成的计划");
+        repoService.writeReport("alice", WorklogRepoService.ReportKind.WEEKLY,
+                LocalDate.of(2026, 10, 19), aiContent, WorklogRepoService.CommitSource.AI,
+                "sess-ai", null);
+        long commitsBefore = commitCount("personal-alice");
+
+        migration.run(null);
+
+        var after = repoService.readReport("alice", WorklogRepoService.ReportKind.WEEKLY,
+                LocalDate.of(2026, 10, 19)).orElseThrow();
+        assertEquals(aiContent, after.contentMd());
+        assertEquals("ai", after.source());
+        assertEquals(commitsBefore, commitCount("personal-alice"));
+    }
+
+    @Test
+    void existingUnboundRepoIsNotReboundOnRestart() {
+        repoService.ensurePersonalRepo("alice"); // 用户已解绑：仓行存在但 remote 为空
+        jdbc.update("INSERT INTO worklog_user_settings (user_id, remote_url, remote_branch)"
+                + " VALUES (?,?,?)", "alice", "file:///tmp/old.git", "main");
+
+        migration.run(null);
+
+        assertNull(repoRows.get("personal-alice").getRemoteUrl());
+        assertNull(legacyRemoteUrl("alice"));
+    }
+
+    @Test
+    void freshUserGetsLegacyRemoteBindingOnce() {
+        jdbc.update("INSERT INTO worklog_user_settings (user_id, remote_url, remote_branch)"
+                + " VALUES (?,?,?)", "alice", "file:///tmp/backup.git", "backup");
+
+        migration.run(null);
+
+        WorklogRepoEntity repo = repoRows.get("personal-alice");
+        assertEquals("file:///tmp/backup.git", repo.getRemoteUrl());
+        assertEquals("backup", repo.getRemoteBranch());
+        assertNull(legacyRemoteUrl("alice"));
+    }
+
     // ---------------- 工装 ----------------
+
+    private String legacyRemoteUrl(String user) {
+        return jdbc.queryForObject("SELECT remote_url FROM worklog_user_settings WHERE user_id = ?",
+                String.class, user);
+    }
 
     private long commitCount(String repoKey) throws Exception {
         Process p = new ProcessBuilder("git", "rev-list", "--count", "HEAD")

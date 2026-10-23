@@ -7,7 +7,6 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -19,9 +18,11 @@ import java.util.Map;
  * CAP-74 C5 存量迁移：daily_reports/weekly_reports（CAP-41 DB 镜像表，实体已删）→ 服务端 git 仓；
  * 顺带把 worklog_user_settings.remote_url/remote_branch 搬到 worklog_repos 个人仓行（D5 路由）。
  *
- * <p>幂等：目标文件字节级一致即跳过（零新 commit）；commit 时间回填 updated_at（git 历史即审计）。
- * 逐行 try/catch 失败 warn 续跑，任何异常不阻断启动；旧表不删（ddl-auto 不管删表，手工 DROP 口径
- * 见 CAP-74 文档）。</p>
+ * <p>一次性补缺：目标文件不存在才写入；已存在一律跳过——git 已是事实源，重启时若拿旧 DB 镜像
+ * 覆盖，会把 AI 成稿/平台内手改回滚，并触发自动推送把旧版推到远端。远端绑定同理只回填到尚不存在
+ * 的个人仓行（仓行已存在=CAP-74 已接管，含用户主动解绑，不得复活），遗留列迁移后清空。
+ * 写文件 commit 时间回填 updated_at（git 历史即审计）；逐行 try/catch 失败 warn 续跑，任何异常
+ * 不阻断启动；旧表不删（ddl-auto 不管删表，手工 DROP 口径见 CAP-74 文档）。</p>
  */
 @Component
 public class WorklogReportMigration implements ApplicationRunner {
@@ -118,7 +119,7 @@ public class WorklogReportMigration implements ApplicationRunner {
     }
 
     /**
-     * 迁移单行到个人仓：目标文件字节级一致 → null（跳过）；否则写入并 commit
+     * 迁移单行到个人仓：目标文件已存在 → null（跳过，git 为准）；否则写入并 commit
      * （source=migration、sessionId 追溯、commitDate 回填）→ true。
      */
     private Boolean migrateOne(String user, WorklogRepoService.ReportKind kind, LocalDate date,
@@ -126,12 +127,9 @@ public class WorklogReportMigration implements ApplicationRunner {
         var repo = repoService.ensurePersonalRepo(user);
         Path file = repoService.repoDir(repo.getRepoKey())
                 .resolve(WorklogRepoService.reportRelPath(user, kind, date));
-        try {
-            if (Files.exists(file) && Files.readString(file, StandardCharsets.UTF_8).equals(content)) {
-                return null;
-            }
-        } catch (Exception e) {
-            throw new IllegalStateException("目标文件读取失败: " + file, e);
+        if (Files.exists(file)) {
+            // 只补缺：已有文件（AI 成稿/平台内编辑/平台外编辑）绝不被旧 DB 镜像覆盖
+            return null;
         }
         repoService.writeReportTo(repo, user, kind, date, content,
                 WorklogRepoService.CommitSource.MIGRATION,
@@ -139,7 +137,10 @@ public class WorklogReportMigration implements ApplicationRunner {
         return true;
     }
 
-    /** settings.remote_url/remote_branch → 个人仓行（仓行已绑定才跳过；settings 表恒在无需判存）。 */
+    /**
+     * settings.remote_url/remote_branch → 个人仓行：仅当个人仓行尚不存在时回填（仓行已存在 =
+     * CAP-74 已接管，绑定以仓行为准，含主动解绑）；处理完清空遗留列，防重启复活已解绑远端。
+     */
     private void migrateRemoteBindings() {
         List<Map<String, Object>> rows = jdbc.queryForList(
                 "SELECT user_id, remote_url, remote_branch FROM worklog_user_settings"
@@ -154,18 +155,21 @@ public class WorklogReportMigration implements ApplicationRunner {
                     skipped++;
                     continue;
                 }
-                var repo = repoService.ensurePersonalRepo(user);
-                if (repo.getRemoteUrl() != null && !repo.getRemoteUrl().isBlank()) {
+                if (repoService.findPersonalRepo(user).isPresent()) {
                     skipped++;
-                    continue;
+                } else {
+                    var repo = repoService.ensurePersonalRepo(user);
+                    repo.setRemoteUrl(url);
+                    String branch = (String) row.get("remote_branch");
+                    if (branch != null && !branch.isBlank()) {
+                        repo.setRemoteBranch(branch);
+                    }
+                    repoService.saveRepo(repo);
+                    migrated++;
                 }
-                repo.setRemoteUrl(url);
-                String branch = (String) row.get("remote_branch");
-                if (branch != null && !branch.isBlank()) {
-                    repo.setRemoteBranch(branch);
-                }
-                repoService.saveRepo(repo);
-                migrated++;
+                // 一次性迁移：清掉遗留列，用户之后解绑不会被下次重启重新绑定
+                jdbc.update("UPDATE worklog_user_settings SET remote_url = NULL,"
+                        + " remote_branch = NULL WHERE user_id = ?", user);
             } catch (Exception e) {
                 skipped++;
                 log.warn("CAP-74 远端绑定迁移单行失败（跳过续跑）: user={} err={}",
