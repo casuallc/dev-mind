@@ -58,7 +58,8 @@ class ReportPromptsTest {
     void 周报优先以日报为素材并含周区间() {
         var d = new ReportPrompts.DailyMaterial(LocalDate.of(2026, 9, 8), "- 完成登录改造");
         String prompt = ReportPrompts.weekly(LocalDate.of(2026, 9, 7),
-                List.of(d), List.of(entry("不该出现", 1)), List.of(), WorklogTemplates.DEFAULT_WEEKLY, null);
+                List.of(d), List.of(entry("不该出现", 1)), List.of(), "",
+                WorklogTemplates.DEFAULT_WEEKLY, null);
         assertTrue(prompt.contains("2026-09-07 ~ 2026-09-13"), "缺周区间");
         assertTrue(prompt.contains("### 2026-09-08"), "缺日报小节");
         assertTrue(prompt.contains("- 完成登录改造"), "缺日报正文");
@@ -68,8 +69,28 @@ class ReportPromptsTest {
     @Test
     void 周报无日报时回退原始条目() {
         String prompt = ReportPrompts.weekly(LocalDate.of(2026, 9, 7), List.of(),
-                List.of(entry("手工条目", 30)), List.of(), "{{entries}}", null);
+                List.of(entry("手工条目", 30)), List.of(), "", "{{entries}}", null);
         assertTrue(prompt.contains("手工条目"));
+    }
+
+    @Test
+    void 周报携带上周计划并要求逐条呼应() {
+        var d = new ReportPrompts.DailyMaterial(LocalDate.of(2026, 9, 8), "- 完成登录改造");
+        String prompt = ReportPrompts.weekly(LocalDate.of(2026, 9, 7), List.of(d), List.of(),
+                List.of(), "1. 完成登录改造\n2. 补齐回归测试", WorklogTemplates.DEFAULT_WEEKLY, null);
+        assertTrue(prompt.contains("上周计划跟进"), "缺上周计划跟进块");
+        assertTrue(prompt.contains("完成 / 部分完成 / 未完成"), "缺完成状态约定");
+        assertTrue(prompt.contains("1. 完成登录改造"), "缺上周计划原文");
+        assertTrue(prompt.contains("2. 补齐回归测试"), "缺上周计划原文");
+        assertFalse(prompt.contains("{{lastWeekPlan}}"), "占位符未渲染");
+    }
+
+    @Test
+    void 周报无上周计划时提示省略而非编造() {
+        String prompt = ReportPrompts.weekly(LocalDate.of(2026, 9, 7), List.of(), List.of(),
+                List.of(), null, "{{lastWeekPlan}}", null);
+        assertTrue(prompt.contains("无上周计划"));
+        assertFalse(prompt.contains("{{"));
     }
 
     @Test

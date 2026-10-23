@@ -225,7 +225,16 @@ public class ReportService {
         String template = WorklogTemplates.orDefault(
                 settingsService.templateOf(username, false), WorklogTemplates.DEFAULT_WEEKLY);
         return launch(username, WorklogScenarios.WEEKLY,
-                ReportPrompts.weekly(weekStart, dailies, entries, commits, template, hint));
+                ReportPrompts.weekly(weekStart, dailies, entries, commits,
+                        lastWeekPlan(username, weekStart), template, hint));
+    }
+
+    /** 上一周周报的「下周计划」；无上周周报/计划为空 → 空串（模板据此省略跟进块）。 */
+    String lastWeekPlan(String username, LocalDate weekStart) {
+        return repoService.readReport(username, WorklogRepoService.ReportKind.WEEKLY,
+                        weekStart.minusWeeks(1))
+                .map(c -> splitWeekly(c.contentMd())[1])
+                .orElse("");
     }
 
     /** 手动创建空白周报：同 {@link #createDaily}，幂等。 */

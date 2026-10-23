@@ -2,7 +2,12 @@ package com.devmind.worklog.service;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDate;
+import java.util.Optional;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class ReportServiceTest {
 
@@ -42,5 +47,26 @@ class ReportServiceTest {
         String[] p2 = ReportService.splitWeekly(noPlan);
         assertEquals("- 完成 A", p2[0]);
         assertEquals("", p2[1]);
+    }
+
+    @Test
+    void 上一周计划从上周周报拆出() {
+        WorklogRepoService repo = mock(WorklogRepoService.class);
+        when(repo.readReport("alice", WorklogRepoService.ReportKind.WEEKLY, LocalDate.of(2026, 10, 12)))
+                .thenReturn(Optional.of(new WorklogRepoService.ReportContent(
+                        "personal-alice", "alice/weekly/2026-W42.md",
+                        ReportService.assembleWeekly("- 完成 A", "- 完成 B\n- 推进 C"),
+                        null, null, "ai", null)));
+        when(repo.readReport("alice", WorklogRepoService.ReportKind.WEEKLY, LocalDate.of(2026, 10, 5)))
+                .thenReturn(Optional.of(new WorklogRepoService.ReportContent(
+                        "personal-alice", "alice/weekly/2026-W41.md",
+                        ReportService.assembleWeekly("只有总结", ""),
+                        null, null, "ai", null)));
+
+        ReportService service = new ReportService(null, null, null, null, null, repo);
+
+        assertEquals("- 完成 B\n- 推进 C", service.lastWeekPlan("alice", LocalDate.of(2026, 10, 19)));
+        // 上周周报没有计划时返回空串，模板据此省略跟进块
+        assertEquals("", service.lastWeekPlan("alice", LocalDate.of(2026, 10, 12)));
     }
 }

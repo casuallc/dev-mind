@@ -18,7 +18,8 @@ import java.util.Map;
  * CAP-74 M3：条目素材从 DB 表切到仓内 day 文件（{@link WorklogEntryService.DatedEntry}）。</p>
  *
  * <p>生成质量：git 素材按仓库分组，带提交正文与改动规模（同一需求的多次提交才可归并）；
- * 条目补需求/Jira/来源；本人补充说明追加在末尾（高优先级事实，与素材冲突时以它为准）。</p>
+ * 条目补需求/Jira/来源；周报额外携带上一周周报的「下周计划」，要求本周总结逐条呼应；
+ * 本人补充说明追加在末尾（高优先级事实，与素材冲突时以它为准）。</p>
  */
 final class ReportPrompts {
 
@@ -46,13 +47,23 @@ final class ReportPrompts {
 
     static String weekly(LocalDate weekStart, List<DailyMaterial> dailies,
                          List<WorklogEntryService.DatedEntry> entries,
-                         List<GitCommitView> commits, String template, String hint) {
+                         List<GitCommitView> commits, String lastWeekPlan,
+                         String template, String hint) {
         String material = !dailies.isEmpty() ? formatDailies(dailies) : formatEntries(entries);
         return appendHint(WorklogTemplates.render(template, Map.of(
                 "date", weekStart.toString(),
                 "weekRange", weekStart + " ~ " + weekStart.plusDays(6),
                 "entries", material,
-                "commits", formatCommits(commits))), hint);
+                "commits", formatCommits(commits),
+                "lastWeekPlan", formatLastWeekPlan(lastWeekPlan))), hint);
+    }
+
+    /** 上一周周报的「下周计划」：缺省时明确提示省略跟进块，避免模型编造上周计划。 */
+    static String formatLastWeekPlan(String plan) {
+        if (plan == null || plan.isBlank()) {
+            return "（无上周计划：省略「上周计划跟进」块，不得编造上周计划）";
+        }
+        return plan.strip();
     }
 
     /** 按仓库分组；每条带日期、改动规模与提交正文（正文压成一行，避免挤占 prompt）。 */
