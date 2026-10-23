@@ -4,7 +4,9 @@ import com.devmind.chat.dto.ChatAuthorizeRequest;
 import com.devmind.chat.dto.ChatInputRequest;
 import com.devmind.chat.dto.ChatView;
 import com.devmind.chat.dto.CreateChatRequest;
+import com.devmind.chat.dto.KnowledgeFeedbackView;
 import com.devmind.chat.service.ChatManagerService;
+import com.devmind.chat.service.KnowledgeFeedbackService;
 import com.devmind.common.agent.SessionEvent;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -27,9 +29,11 @@ import java.util.Map;
 public class ChatController {
 
     private final ChatManagerService service;
+    private final KnowledgeFeedbackService feedbackService;
 
-    public ChatController(ChatManagerService service) {
+    public ChatController(ChatManagerService service, KnowledgeFeedbackService feedbackService) {
         this.service = service;
+        this.feedbackService = feedbackService;
     }
 
     @PostMapping
@@ -93,6 +97,30 @@ public class ChatController {
     @GetMapping(value = "/{id}/context", produces = "application/json")
     public String context(@PathVariable String id) {
         return service.contextManifest(id); // 落库的即合法 JSON 快照，原样透传
+    }
+
+    /** CAP-84 FR-19：每轮检索引用快照（turnSeq 为空 = 全部轮次）。 */
+    @GetMapping("/{id}/references")
+    public List<com.devmind.chat.dto.KnowledgeReferenceView> references(
+            @PathVariable String id, @RequestParam(required = false) Long turnSeq) {
+        return service.references(id, turnSeq);
+    }
+
+    /** CAP-84 FR-25：对指定轮次回答提交「有用/无用 + 原因」，重复提交覆盖。 */
+    @PostMapping("/{id}/feedback")
+    public KnowledgeFeedbackView feedback(@PathVariable String id,
+                                          @RequestBody FeedbackRequest req) {
+        return feedbackService.submit(id, req.turnSeq(), req.useful(), req.reason());
+    }
+
+    /** 当前用户对指定轮次的已有反馈；未反馈返回空 body。 */
+    @GetMapping("/{id}/feedback")
+    public KnowledgeFeedbackView feedbackOf(@PathVariable String id,
+                                            @RequestParam(required = false) Long turnSeq) {
+        return feedbackService.find(id, turnSeq);
+    }
+
+    public record FeedbackRequest(Long turnSeq, Boolean useful, String reason) {
     }
 
     // ---------------- CAP-54 工作区视图（沙箱非 git：无 diff；推送走 /ws/chats/{id} 的 workspace 帧） ----------------

@@ -34,15 +34,18 @@ public class FeishuImportService {
 
     private final KnowledgeBaseRepository kbRepo;
     private final KnowledgeEntryRepository entryRepo;
+    private final KnowledgeVersionService versionService;
     private final ApplicationEventPublisher eventPublisher;
     private final ObjectProvider<FeishuDocFetcher> fetcherProvider;
 
     public FeishuImportService(KnowledgeBaseRepository kbRepo,
                                KnowledgeEntryRepository entryRepo,
+                               KnowledgeVersionService versionService,
                                ApplicationEventPublisher eventPublisher,
                                ObjectProvider<FeishuDocFetcher> fetcherProvider) {
         this.kbRepo = kbRepo;
         this.entryRepo = entryRepo;
+        this.versionService = versionService;
         this.eventPublisher = eventPublisher;
         this.fetcherProvider = fetcherProvider;
     }
@@ -118,8 +121,15 @@ public class FeishuImportService {
             e.setContentMd(doc.contentMd());
             e.setContentHash(newHash);
             e.setPath(doc.sourceUrl());
+            e.setSourceUri(doc.sourceUrl());
+            e.setSummary(summarize(doc.contentMd()));
+            if (e.getDocType() == null || e.getDocType().isBlank()) {
+                e.setDocType(KnowledgeEntryEntity.DOC_TECH);
+            }
+            e.setContentVersion(Math.max(1, e.getContentVersion()) + 1);
             e.setUpdatedAt(now);
-            entryRepo.save(e);
+            e = entryRepo.save(e);
+            versionService.record(e, "feishu", "飞书重新同步");
             publishContentChanged(e);
             return FeishuImportResult.of(doc.sourceUrl(), "updated", e.getId());
         }
@@ -134,13 +144,26 @@ public class FeishuImportService {
         e.setPath(doc.sourceUrl());
         e.setSource(KnowledgeEntryEntity.SOURCE_FEISHU);
         e.setExternalId(externalId);
+        e.setDocType(KnowledgeEntryEntity.DOC_TECH);
+        e.setSourceUri(doc.sourceUrl());
+        e.setSummary(summarize(doc.contentMd()));
+        e.setContentVersion(1);
         e.setStatus("active");
         e.setHitCount(0);
         e.setCreatedAt(now);
         e.setUpdatedAt(now);
-        entryRepo.save(e);
+        e = entryRepo.save(e);
+        versionService.record(e, "feishu", "飞书导入");
         publishContentChanged(e);
         return FeishuImportResult.of(doc.sourceUrl(), "created", e.getId());
+    }
+
+    private static String summarize(String content) {
+        if (content == null) {
+            return null;
+        }
+        String oneLine = content.replaceAll("\\s+", " ").strip();
+        return oneLine.length() <= 300 ? oneLine : oneLine.substring(0, 300);
     }
 
     /** externalId 形为 "{integrationId}:{docToken}"，取前缀 */

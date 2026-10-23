@@ -59,9 +59,27 @@ public class ChatSessionEntity {
     @Column(name = "scenario_code", length = 64)
     private String scenarioCode;
 
-    /** CAP-46 FR-01：绑定的知识库 id（可空 = 普通问答） */
+    /** CAP-46 FR-01：绑定的知识库 id（可空 = 普通问答）；CAP-84 起为多库列表的第一个（兼容字段） */
     @Column(name = "knowledge_base_id")
     private Long knowledgeBaseId;
+
+    /** CAP-84 FR-16：多库绑定 CSV（如 "3,7"）；历史单库会话为空，读取时回落 knowledgeBaseId */
+    @Column(name = "knowledge_base_ids", length = 500)
+    private String knowledgeBaseIds;
+
+    /** CAP-84 FR-17：ANSWER | SOLUTION；null = 历史 CAP-46 单库会话（沿用旧注入行为） */
+    @Column(name = "knowledge_mode", length = 16)
+    private String knowledgeMode;
+
+    /** CAP-84 FR-16：检索选项 JSON（topK/docTypes/tags/requireCitation） */
+    @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @Column(name = "knowledge_options", length = 16_777_216)
+    private String knowledgeOptions;
+
+    /** CAP-84 FR-20：最近一轮向量通道降级原因（NONE/NO_EMBEDDING/DIMENSION_MISMATCH），供会话顶部提示 */
+    @Column(name = "knowledge_degraded_reason", length = 32)
+    private String knowledgeDegradedReason;
 
     /**
      * CAP-49：执行体（AGENT / MODEL）。<b>可空 = AGENT</b>——沿用本表加列即可空的先例，
@@ -145,6 +163,16 @@ public class ChatSessionEntity {
     public void setScenarioCode(String scenarioCode) { this.scenarioCode = scenarioCode; }
     public Long getKnowledgeBaseId() { return knowledgeBaseId; }
     public void setKnowledgeBaseId(Long knowledgeBaseId) { this.knowledgeBaseId = knowledgeBaseId; }
+    public String getKnowledgeBaseIds() { return knowledgeBaseIds; }
+    public void setKnowledgeBaseIds(String knowledgeBaseIds) { this.knowledgeBaseIds = knowledgeBaseIds; }
+    public String getKnowledgeMode() { return knowledgeMode; }
+    public void setKnowledgeMode(String knowledgeMode) { this.knowledgeMode = knowledgeMode; }
+    public String getKnowledgeOptions() { return knowledgeOptions; }
+    public void setKnowledgeOptions(String knowledgeOptions) { this.knowledgeOptions = knowledgeOptions; }
+    public String getKnowledgeDegradedReason() { return knowledgeDegradedReason; }
+    public void setKnowledgeDegradedReason(String knowledgeDegradedReason) {
+        this.knowledgeDegradedReason = knowledgeDegradedReason;
+    }
     public String getContextManifestJson() { return contextManifestJson; }
     public void setContextManifestJson(String contextManifestJson) { this.contextManifestJson = contextManifestJson; }
     public String getInitialPrompt() { return initialPrompt; }

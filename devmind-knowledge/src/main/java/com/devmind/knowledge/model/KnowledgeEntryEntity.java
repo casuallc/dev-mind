@@ -21,10 +21,17 @@ public class KnowledgeEntryEntity {
 
     public static final String SOURCE_MANUAL = "manual";
     public static final String SOURCE_FEISHU = "feishu";
+    public static final String SOURCE_FILE = "file";
+    public static final String SOURCE_GIT = "git";
+    public static final String SOURCE_API = "api";
+    public static final String DOC_TECH = "TECH";
+    public static final String DOC_MAINT = "MAINT";
+    public static final String DOC_FAQ = "FAQ";
+    public static final String DOC_ARTIFACT = "ARTIFACT";
     public static final String INDEX_PENDING = "pending";
     public static final String INDEX_READY = "ready";
     public static final String INDEX_FAILED = "failed";
-    /** embedding 未配置：不走向量索引，检索退化 LIKE */
+    /** 向量通道未配置；CAP-84 起文本仍进 Lucene BM25，检索可用 */
     public static final String INDEX_DISABLED = "disabled";
 
     @Id
@@ -70,9 +77,48 @@ public class KnowledgeEntryEntity {
     @Column(length = 16)
     private String status;
 
-    /** 来源：manual | feishu（CAP-45 写值） */
+    /** 来源：manual | feishu | file | git | api */
     @Column(length = 16)
     private String source = SOURCE_MANUAL;
+
+    /** CAP-84 FR-01：文档类型 TECH/MAINT/FAQ/ARTIFACT（标签做主题，不再建目录树） */
+    @Column(length = 16)
+    private String docType = DOC_TECH;
+
+    /** 原始相对路径/外部地址（本地导入用于判重与溯源） */
+    @Column(length = 1024)
+    private String sourceUri;
+
+    /** 外部版本（commit/文档版本号等） */
+    @Column(length = 128)
+    private String sourceVersion;
+
+    @Column(length = 128)
+    private String mimeType;
+
+    /** 文档摘要（默认取正文前 300 字，后续可被模型摘要覆盖） */
+    @Column(length = 2000)
+    private String summary;
+
+    @Column(length = 16)
+    private String language = "zh";
+
+    /** 负责人（导入批次发起人/手工录入人） */
+    @Column(length = 64)
+    private String owner;
+
+    /** 内容版本（每次正文变化 +1；历史见 knowledge_entry_versions） */
+    private int contentVersion = 1;
+
+    private Instant validFrom;
+    private Instant validTo;
+    private Instant lastReviewedAt;
+
+    /** 扩展元数据（JSON，暂不参与检索） */
+    @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @Column(length = 16_777_216)
+    private String metadataJson;
 
     /** 外部系统主键（飞书 node token 等，CAP-45 判重） */
     @Column(length = 256)
@@ -89,6 +135,23 @@ public class KnowledgeEntryEntity {
     /** 最近一次索引失败原因 */
     @Column(length = 1000)
     private String indexError;
+
+    /** CAP-85 FR-27：外部同步源归属（手工/本地上传为空） */
+    private Long syncSourceId;
+
+    /** CAP-85 FR-29：正文 SimHash（十六进制 16 位），检索索引时维护，重复检测用 */
+    @Column(length = 16)
+    private String simHash;
+
+    /** CAP-85 FR-28：是否允许模型自动补充分类/摘要/标签；人工修正后置 false */
+    private Boolean autoEnrich = Boolean.TRUE;
+
+    /** 最近一次模型补全成功时间；正文变化时清空 */
+    private Instant enrichedAt;
+
+    /** 最近一次模型补全失败原因（不阻断摄入） */
+    @Column(length = 1000)
+    private String enrichError;
 
     /**
      * CAP-48 FR-06 索引血缘：本条目的向量是用哪个端点、哪个模型、多少维建的。
@@ -131,6 +194,30 @@ public class KnowledgeEntryEntity {
     public void setStatus(String status) { this.status = status; }
     public String getSource() { return source; }
     public void setSource(String source) { this.source = source; }
+    public String getDocType() { return docType; }
+    public void setDocType(String docType) { this.docType = docType; }
+    public String getSourceUri() { return sourceUri; }
+    public void setSourceUri(String sourceUri) { this.sourceUri = sourceUri; }
+    public String getSourceVersion() { return sourceVersion; }
+    public void setSourceVersion(String sourceVersion) { this.sourceVersion = sourceVersion; }
+    public String getMimeType() { return mimeType; }
+    public void setMimeType(String mimeType) { this.mimeType = mimeType; }
+    public String getSummary() { return summary; }
+    public void setSummary(String summary) { this.summary = summary; }
+    public String getLanguage() { return language; }
+    public void setLanguage(String language) { this.language = language; }
+    public String getOwner() { return owner; }
+    public void setOwner(String owner) { this.owner = owner; }
+    public int getContentVersion() { return contentVersion; }
+    public void setContentVersion(int contentVersion) { this.contentVersion = contentVersion; }
+    public Instant getValidFrom() { return validFrom; }
+    public void setValidFrom(Instant validFrom) { this.validFrom = validFrom; }
+    public Instant getValidTo() { return validTo; }
+    public void setValidTo(Instant validTo) { this.validTo = validTo; }
+    public Instant getLastReviewedAt() { return lastReviewedAt; }
+    public void setLastReviewedAt(Instant lastReviewedAt) { this.lastReviewedAt = lastReviewedAt; }
+    public String getMetadataJson() { return metadataJson; }
+    public void setMetadataJson(String metadataJson) { this.metadataJson = metadataJson; }
     public String getExternalId() { return externalId; }
     public void setExternalId(String externalId) { this.externalId = externalId; }
     public String getContentHash() { return contentHash; }
@@ -139,6 +226,16 @@ public class KnowledgeEntryEntity {
     public void setIndexStatus(String indexStatus) { this.indexStatus = indexStatus; }
     public String getIndexError() { return indexError; }
     public void setIndexError(String indexError) { this.indexError = indexError; }
+    public Long getSyncSourceId() { return syncSourceId; }
+    public void setSyncSourceId(Long syncSourceId) { this.syncSourceId = syncSourceId; }
+    public String getSimHash() { return simHash; }
+    public void setSimHash(String simHash) { this.simHash = simHash; }
+    public Boolean getAutoEnrich() { return autoEnrich; }
+    public void setAutoEnrich(Boolean autoEnrich) { this.autoEnrich = autoEnrich; }
+    public Instant getEnrichedAt() { return enrichedAt; }
+    public void setEnrichedAt(Instant enrichedAt) { this.enrichedAt = enrichedAt; }
+    public String getEnrichError() { return enrichError; }
+    public void setEnrichError(String enrichError) { this.enrichError = enrichError; }
     public Long getIndexedEndpointId() { return indexedEndpointId; }
     public void setIndexedEndpointId(Long indexedEndpointId) { this.indexedEndpointId = indexedEndpointId; }
     public String getIndexedModel() { return indexedModel; }

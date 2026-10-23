@@ -24,6 +24,7 @@ import {
 import {
   ArrowLeftOutlined,
   CloudDownloadOutlined,
+  MessageOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -47,6 +48,7 @@ import {
 import { listModelEndpoints } from '../../model/api'
 import type { ModelEndpoint } from '../../model/types'
 import type {
+  DocType,
   FeishuImportResult,
   FeishuIntegration,
   IndexStatus,
@@ -56,6 +58,7 @@ import type {
   KnowledgeEntryInput,
   KnowledgeSearchResult,
 } from '../types'
+import { DOC_TYPE_LABEL, DOC_TYPE_OPTIONS } from '../types'
 import MarkdownEditor from '../../../shared/components/MarkdownEditor'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
@@ -64,8 +67,13 @@ import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
-const sourceTag = (s: string) =>
-  s === 'feishu' ? <Tag color="cyan">飞书</Tag> : <Tag>手动</Tag>
+const sourceTag = (s: string) => {
+  if (s === 'feishu') return <Tag color="cyan">飞书</Tag>
+  if (s === 'file') return <Tag color="blue">文件</Tag>
+  if (s === 'git') return <Tag color="geekblue">Git 同步</Tag>
+  if (s === 'api') return <Tag color="purple">API</Tag>
+  return <Tag>手动</Tag>
+}
 
 const indexStatusTag = (e: KnowledgeEntry, onRetry: (e: KnowledgeEntry) => void) => {
   const s: IndexStatus = e.indexStatus
@@ -192,6 +200,9 @@ export default function KnowledgeBaseDetail() {
       contentMd: e.contentMd,
       tags: e.tags,
       status: e.status,
+      docType: e.docType ?? undefined,
+      summary: e.summary ?? undefined,
+      owner: e.owner ?? undefined,
     })
     setEntryDrawerOpen(true)
   }
@@ -347,6 +358,13 @@ export default function KnowledgeBaseDetail() {
   const entryColumns: ColumnsType<KnowledgeEntry> = [
     { title: '名称', dataIndex: 'name', ellipsis: true },
     {
+      title: '类型',
+      dataIndex: 'docType',
+      width: 100,
+      render: (t: DocType | null | undefined) =>
+        t ? <Tag color="blue">{DOC_TYPE_LABEL[t] ?? t}</Tag> : '-',
+    },
+    {
       title: '标签',
       dataIndex: 'tags',
       width: 180,
@@ -424,6 +442,9 @@ export default function KnowledgeBaseDetail() {
       }
       extra={
         <Space wrap>
+          <Link to={`/chats?kbId=${baseId}`}>
+            <Button icon={<MessageOutlined />}>用此库问答</Button>
+          </Link>
           {view === 'entries' && (
             <>
               <Button icon={<ReloadOutlined />} onClick={load}>
@@ -805,6 +826,19 @@ export default function KnowledgeBaseDetail() {
         <Form form={entryForm} layout="vertical">
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请填写名称' }]}>
             <Input placeholder="如：AntD 表格固定列写法" />
+          </Form.Item>
+          <Form.Item
+            name="docType"
+            label="文档类型"
+            extra="手工改动分类/摘要/标签会关闭该条目的自动增强，避免模型覆盖人工修正"
+          >
+            <Select allowClear placeholder="未指定" options={DOC_TYPE_OPTIONS} />
+          </Form.Item>
+          <Form.Item name="summary" label="摘要">
+            <Input.TextArea rows={2} placeholder="留空则按正文自动截取摘要" />
+          </Form.Item>
+          <Form.Item name="owner" label="负责人">
+            <Input placeholder="文档维护责任人" />
           </Form.Item>
           <Form.Item name="tags" label="标签">
             <Select

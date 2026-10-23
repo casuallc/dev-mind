@@ -1,22 +1,32 @@
 // 新问答草稿态：输入框直接开问——首条消息即开场提问，发送即创建问答。
-// 高级选项：知识库（CAP-46）/场景（CAP-33）/执行节点/模型/权限模式（无项目/仓库，与项目会话完全分开），收进 Popover。
+// 高级选项：知识库（CAP-46 单库 / CAP-84 模型执行体多库 + 知识模式与过滤）/场景（CAP-33）/
+// 执行节点/模型/权限模式（无项目/仓库，与项目会话完全分开），收进 Popover。
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Badge, Button, Empty, Form, Input, Popover, Select, Space, message } from 'antd'
+import { Alert, Badge, Button, Empty, Form, Input, InputNumber, Popover, Select, Space, Switch, message } from 'antd'
 import { SendOutlined, SettingOutlined } from '@ant-design/icons'
 import { createChat } from '../api'
-import type { ChatSummary } from '../types'
+import type { ChatKnowledgeOptions, ChatSummary } from '../types'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
 import { listScenarios } from '../../scenarios/api'
 import type { Scenario } from '../../scenarios/types'
 import { listBases } from '../../knowledge/api'
 import type { KnowledgeBase } from '../../knowledge/types'
+import { DOC_TYPE_OPTIONS } from '../../knowledge/types'
 import { listModelEndpoints } from '../../model/api'
 import type { ModelEndpoint } from '../../model/types'
 import ModelEndpointSelect from './ModelEndpointSelect'
 import { showError } from '../../../shared/utils/showError'
 
-const DEFAULTS = { permissionMode: 'acceptEdits', executor: 'AGENT' }
+const DEFAULTS = { permissionMode: 'acceptEdits', executor: 'AGENT', knowledgeMode: 'ANSWER' }
+const MAX_KB = 5
+
+const TEMPLATE_OPTIONS = [
+  { value: 'FAULT', label: '故障排查' },
+  { value: 'DEPLOY', label: '部署变更' },
+  { value: 'DEV', label: '开发实现' },
+  { value: 'FAQ', label: 'FAQ 答复' },
+]
 
 export default function NewChatDraft({
   onCreated,
@@ -41,6 +51,9 @@ export default function NewChatDraft({
   // 默认口径（只取已注册字段）会看着像"什么都没选"——徽标点会灭、条件字段会闪回默认视图
   const values = Form.useWatch([], { form, preserve: true }) ?? {}
   const isModel = values.executor === 'MODEL'
+  const selectedKbIds: number[] = values.knowledgeBaseIds ?? []
+  const hasKnowledge = isModel ? selectedKbIds.length > 0 : Boolean(values.knowledgeBaseId)
+  const isSolution = hasKnowledge && values.knowledgeMode === 'SOLUTION'
 
   // 只有 active 的 CHAT 端点能用于问答；一个都没有就不让选模型执行体（选了指望着 409 更糟）
   const chatEndpoints = useMemo(
@@ -71,13 +84,33 @@ export default function NewChatDraft({
     if (def) form.setFieldValue('modelEndpointId', def.id)
   }, [chatEndpoints, form])
 
-  // 预选知识库（库详情「发起会话」跳入）：active 库直接选中，失效（归档/删除）则忽略
+  // 预选知识库（库详情「用此库问答」跳入）：有可用对话端点时直接进入知识会话（MODEL + 多库）；
+  // 没有端点则退回 CAP-46 的 Agent 单库注入，至少让人能先问起来。
   useEffect(() => {
     if (presetKbId == null || knowledgeBases.length === 0) return
-    if (knowledgeBases.some((b) => b.id === presetKbId && b.status === 'active')) {
+    if (!knowledgeBases.some((b) => b.id === presetKbId && b.status === 'active')) return
+    if (chatEndpoints.length > 0) {
+      form.setFieldValue('executor', 'MODEL')
+      form.setFieldValue('knowledgeBaseIds', [presetKbId])
+      form.setFieldValue('knowledgeMode', 'ANSWER')
+    } else {
       form.setFieldValue('knowledgeBaseId', presetKbId)
     }
-  }, [presetKbId, knowledgeBases, form])
+  }, [presetKbId, knowledgeBases, chatEndpoints.length, form])
+
+  // 切执行体时把单库/多库互相带上（目标字段为空才带，避免覆盖用户已经改过的选择）
+  useEffect(() => {
+    if (isModel) {
+      const single = form.getFieldValue('knowledgeBaseId') as number | undefined
+      const multi = form.getFieldValue('knowledgeBaseIds') as number[] | undefined
+      if (single && (!multi || multi.length === 0)) form.setFieldValue('knowledgeBaseIds', [single])
+    } else {
+      const multi = form.getFieldValue('knowledgeBaseIds') as number[] | undefined
+      if (!form.getFieldValue('knowledgeBaseId') && multi?.length === 1) {
+        form.setFieldValue('knowledgeBaseId', multi[0])
+      }
+    }
+  }, [isModel, form])
 
   // 有任意非默认选项时给入口加徽标点
   const hasCustomOptions = useMemo(
@@ -87,6 +120,13 @@ export default function NewChatDraft({
           values.scenarioCode ||
           values.agentNodeId ||
           values.knowledgeBaseId ||
+          values.knowledgeBaseIds?.length ||
+          values.knowledgeMode === 'SOLUTION' ||
+          values.knowledgeTemplate ||
+          values.knowledgeTopK ||
+          values.knowledgeDocTypes?.length ||
+          values.knowledgeTags?.length ||
+          values.knowledgeRequireCitation ||
           values.executor === 'MODEL' ||
           (values.permissionMode && values.permissionMode !== DEFAULTS.permissionMode),
       ),
@@ -110,6 +150,19 @@ export default function NewChatDraft({
       // 表现就是"选了模型执行体，建的还是 runner 问答"（无值即回落后端默认）。
       const v = form.getFieldsValue(true)
       const model = v.executor === 'MODEL'
+      // CAP-84：知识会话 = MODEL + 多库；知识模式/过滤只在绑了库时下发（无库的普通模型问答保持纯聊）
+      const kbIds: number[] = model && Array.isArray(v.knowledgeBaseIds)
+        ? (v.knowledgeBaseIds as number[]).slice(0, MAX_KB)
+        : []
+      const knowledgeMode = kbIds.length > 0
+        ? (v.knowledgeMode === 'SOLUTION' ? 'SOLUTION' : 'ANSWER')
+        : undefined
+      const options: ChatKnowledgeOptions = {}
+      if (v.knowledgeTopK) options.topK = v.knowledgeTopK as number
+      if (v.knowledgeDocTypes?.length) options.docTypes = v.knowledgeDocTypes as string[]
+      if (v.knowledgeTags?.length) options.tags = v.knowledgeTags as string[]
+      if (v.knowledgeRequireCitation) options.requireCitation = true
+      if (knowledgeMode === 'SOLUTION' && v.knowledgeTemplate) options.template = v.knowledgeTemplate as string
       const c = await createChat({
         message: t,
         executor: model ? 'MODEL' : undefined,
@@ -118,7 +171,10 @@ export default function NewChatDraft({
         permissionMode: model ? undefined : v.permissionMode || undefined,
         agentNodeId: model ? undefined : v.agentNodeId || undefined,
         scenarioCode: model ? undefined : v.scenarioCode || undefined,
-        knowledgeBaseId: v.knowledgeBaseId || undefined,
+        knowledgeBaseId: model ? undefined : v.knowledgeBaseId || undefined,
+        knowledgeBaseIds: kbIds.length > 0 ? kbIds : undefined,
+        knowledgeMode,
+        knowledgeOptions: Object.keys(options).length > 0 ? options : undefined,
       })
       message.success(`问答已创建：${c.id}`)
       setText('')
@@ -132,7 +188,7 @@ export default function NewChatDraft({
   }
 
   const optionsForm = (
-    <div style={{ width: 340 }}>
+    <div style={{ width: 380, maxHeight: '70vh', overflowY: 'auto', paddingRight: 4 }}>
       <Form form={form} layout="vertical" size="small" initialValues={DEFAULTS}>
         <Form.Item
           label="执行体"
@@ -180,24 +236,120 @@ export default function NewChatDraft({
             </Form.Item>
           </>
         )}
-        <Form.Item
-          label="知识库"
-          name="knowledgeBaseId"
-          extra="绑定后：启动注入库概览，每轮提问自动检索库内相关内容注入（CAP-46）"
-          style={{ marginBottom: 12 }}
-        >
-          <Select
-            allowClear
-            placeholder="（可选）绑定知识库"
-            options={knowledgeBases
-              .filter((b) => b.status === 'active')
-              .map((b) => ({
-                value: b.id,
-                label: `${b.name}（${b.injectMode} · ${b.entryCount} 条）`,
-              }))}
-            notFoundContent="暂无可用知识库（知识库 → 新建）"
-          />
-        </Form.Item>
+        {isModel ? (
+          <>
+            <Form.Item
+              label={`知识库（最多 ${MAX_KB} 个）`}
+              name="knowledgeBaseIds"
+              extra="绑定后进入知识会话：每轮检索这些库并注入证据；不选 = 普通模型问答。知识会话仅支持模型执行体。"
+              style={{ marginBottom: 12 }}
+            >
+              <Select
+                mode="multiple"
+                allowClear
+                maxCount={MAX_KB}
+                placeholder="（可选）选择一个或多个知识库"
+                options={knowledgeBases
+                  .filter((b) => b.status === 'active')
+                  .map((b) => ({
+                    value: b.id,
+                    label: `${b.name}（${b.injectMode} · ${b.entryCount} 条）`,
+                  }))}
+                notFoundContent="暂无可用知识库（知识库 → 新建）"
+                maxTagCount="responsive"
+              />
+            </Form.Item>
+            {hasKnowledge && (
+              <>
+                <Form.Item
+                  label="知识模式"
+                  name="knowledgeMode"
+                  extra={
+                    isSolution
+                      ? '生成固定九章结构方案：问题理解 → 结论 → 前提 → 操作步骤 → 参数 → 风险 → 回滚 → 待确认 → 参考来源'
+                      : '逐轮检索证据回答；资料不足时明确说明，不编造'
+                  }
+                  style={{ marginBottom: 12 }}
+                >
+                  <Select
+                    options={[
+                      { value: 'ANSWER', label: 'ANSWER（检索问答）' },
+                      { value: 'SOLUTION', label: 'SOLUTION（结构化方案）' },
+                    ]}
+                  />
+                </Form.Item>
+                {isSolution && (
+                  <Form.Item
+                    label="方案模板"
+                    name="knowledgeTemplate"
+                    extra="留空按问题关键词自动判别（默认故障排查）；模板只约束章节侧重"
+                    style={{ marginBottom: 12 }}
+                  >
+                    <Select allowClear placeholder="自动判别" options={TEMPLATE_OPTIONS} />
+                  </Form.Item>
+                )}
+                <Form.Item
+                  label="每轮检索条数"
+                  name="knowledgeTopK"
+                  extra="注入的证据块上限；留空用平台默认"
+                  style={{ marginBottom: 12 }}
+                >
+                  <InputNumber min={1} max={30} style={{ width: '100%' }} placeholder="默认 8" />
+                </Form.Item>
+                <Form.Item
+                  label="文档类型过滤"
+                  name="knowledgeDocTypes"
+                  extra="只在这些类型里检索；留空不限"
+                  style={{ marginBottom: 12 }}
+                >
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    placeholder="不限"
+                    options={DOC_TYPE_OPTIONS}
+                    maxTagCount="responsive"
+                  />
+                </Form.Item>
+                <Form.Item
+                  label="标签过滤"
+                  name="knowledgeTags"
+                  extra="多标签为 OR（命中任一即可）"
+                  style={{ marginBottom: 12 }}
+                >
+                  <Select mode="tags" open={false} placeholder="回车添加标签" />
+                </Form.Item>
+                <Form.Item
+                  label="强制引用"
+                  name="knowledgeRequireCitation"
+                  valuePropName="checked"
+                  extra="要求回答标注 [S#] 并在末尾列出参考来源"
+                  style={{ marginBottom: 12 }}
+                >
+                  <Switch />
+                </Form.Item>
+              </>
+            )}
+          </>
+        ) : (
+          <Form.Item
+            label="知识库"
+            name="knowledgeBaseId"
+            extra="绑定后：启动注入库概览，每轮提问自动检索库内相关内容注入（CAP-46 单库）；检索过滤/方案模式请改用模型执行体"
+            style={{ marginBottom: 12 }}
+          >
+            <Select
+              allowClear
+              placeholder="（可选）绑定知识库"
+              options={knowledgeBases
+                .filter((b) => b.status === 'active')
+                .map((b) => ({
+                  value: b.id,
+                  label: `${b.name}（${b.injectMode} · ${b.entryCount} 条）`,
+                }))}
+              notFoundContent="暂无可用知识库（知识库 → 新建）"
+            />
+          </Form.Item>
+        )}
         {!isModel && (
           <>
             <Form.Item

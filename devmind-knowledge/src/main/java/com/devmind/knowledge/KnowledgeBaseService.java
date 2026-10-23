@@ -10,22 +10,34 @@ import com.devmind.knowledge.dto.EntryView;
 import com.devmind.knowledge.dto.EntryViews;
 import com.devmind.knowledge.dto.KnowledgeBaseRequest;
 import com.devmind.knowledge.dto.KnowledgeBaseView;
+import com.devmind.knowledge.dto.KnowledgeChunkView;
+import com.devmind.knowledge.dto.KnowledgeVersionView;
 import com.devmind.knowledge.dto.PreviewResult;
 import com.devmind.knowledge.dto.ProposalRequest;
 import com.devmind.knowledge.dto.ProposalView;
 import com.devmind.knowledge.dto.ReindexResult;
 import com.devmind.knowledge.embedding.EmbeddingResolver;
+import com.devmind.knowledge.index.KnowledgeIndexService;
+import com.devmind.knowledge.index.KnowledgeRebuildTaskHandler;
 import com.devmind.knowledge.model.KnowledgeBaseEntity;
 import com.devmind.knowledge.model.KnowledgeEntryEntity;
+import com.devmind.knowledge.model.KnowledgeImportFileEntity;
 import com.devmind.knowledge.model.KnowledgeProposalEntity;
 import com.devmind.knowledge.repo.KnowledgeBaseRepository;
 import com.devmind.knowledge.repo.KnowledgeChunkRepository;
 import com.devmind.knowledge.repo.KnowledgeEntryRepository;
+import com.devmind.knowledge.repo.KnowledgeImportFileRepository;
 import com.devmind.knowledge.repo.KnowledgeProposalRepository;
 import com.devmind.notification.NotificationPublisher;
 import com.devmind.project.ProjectService;
 import com.devmind.project.model.Project;
+import com.devmind.task.api.TaskOptions;
+import com.devmind.task.service.AsyncTaskService;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
@@ -33,11 +45,15 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -57,30 +73,45 @@ public class KnowledgeBaseService {
     private final KnowledgeEntryRepository entryRepo;
     private final KnowledgeChunkRepository chunkRepo;
     private final KnowledgeProposalRepository proposalRepo;
+    private final KnowledgeImportFileRepository importFileRepo;
     private final ProjectService projectService;
     private final NotificationPublisher notificationPublisher;
     private final ApplicationEventPublisher eventPublisher;
     private final EmbeddingResolver resolver;
     private final ObjectProvider<ModelEndpointProvider> endpointProviders;
+    private final KnowledgeVersionService versionService;
+    private final KnowledgeIndexService indexService;
+    private final com.devmind.knowledge.retrieve.KnowledgeSearchService searchService;
+    private final AsyncTaskService taskService;
 
     public KnowledgeBaseService(KnowledgeBaseRepository kbRepo,
                                 KnowledgeEntryRepository entryRepo,
                                 KnowledgeChunkRepository chunkRepo,
                                 KnowledgeProposalRepository proposalRepo,
+                                KnowledgeImportFileRepository importFileRepo,
                                 ProjectService projectService,
                                 NotificationPublisher notificationPublisher,
                                 ApplicationEventPublisher eventPublisher,
                                 EmbeddingResolver resolver,
-                                ObjectProvider<ModelEndpointProvider> endpointProviders) {
+                                ObjectProvider<ModelEndpointProvider> endpointProviders,
+                                KnowledgeVersionService versionService,
+                                KnowledgeIndexService indexService,
+                                com.devmind.knowledge.retrieve.KnowledgeSearchService searchService,
+                                @Lazy AsyncTaskService taskService) {
         this.kbRepo = kbRepo;
         this.entryRepo = entryRepo;
         this.chunkRepo = chunkRepo;
         this.proposalRepo = proposalRepo;
+        this.importFileRepo = importFileRepo;
         this.projectService = projectService;
         this.notificationPublisher = notificationPublisher;
         this.eventPublisher = eventPublisher;
         this.resolver = resolver;
         this.endpointProviders = endpointProviders;
+        this.versionService = versionService;
+        this.indexService = indexService;
+        this.searchService = searchService;
+        this.taskService = taskService;
     }
 
     // ---------------- 知识库（CAP-44 FR-01/FR-07） ----------------
@@ -126,6 +157,9 @@ public class KnowledgeBaseService {
         }
         for (KnowledgeEntryEntity e : entries) {
             chunkRepo.deleteByEntryId(e.getId());
+            versionService.deleteAll(e.getId());
+            indexService.removeFromIndex(e.getId());
+            releaseStoredFiles(e.getId());
             entryRepo.delete(e);
         }
         kbRepo.delete(kb);
@@ -265,17 +299,24 @@ public class KnowledgeBaseService {
     @Transactional
     public ReindexResult reindexBase(Long id, boolean onlyMismatched) {
         KnowledgeBaseEntity kb = requireBase(id);
-        List<KnowledgeEntryEntity> targets;
-        if (onlyMismatched) {
-            EmbeddingResolver.Resolution r = resolver.resolve(kb.getModelEndpointId());
-            if (!r.available() || r.endpointId() == null || r.dimensions() == null) {
-                log.info("全库失配重建跳过：知识库 {} 无可用端点或端点未探测过维度", id);
-                return new ReindexResult(0);
-            }
-            targets = entryRepo.findMismatched(id, r.endpointId(), r.dimensions());
-        } else {
-            targets = entryRepo.findByKbIdOrderByCreatedAtDesc(id);
+        if (!onlyMismatched) {
+            long total = entryRepo.countByKbId(id);
+            String taskId = taskService.submit(KnowledgeRebuildTaskHandler.TASK_TYPE,
+                    "{\"kbId\":" + id + "}",
+                    TaskOptions.builder()
+                            .name("重建知识库索引 " + kb.getName())
+                            .retryMaxAttempts(1)
+                            .timeoutMs(6 * 60 * 60_000L)
+                            .build());
+            log.info("知识库 {} 全量重建已提交任务: task={} entries={}", id, taskId, total);
+            return new ReindexResult(total);
         }
+        EmbeddingResolver.Resolution r = resolver.resolve(kb.getModelEndpointId());
+        if (!r.available() || r.endpointId() == null || r.dimensions() == null) {
+            log.info("全库失配重建跳过：知识库 {} 无可用端点或端点未探测过维度", id);
+            return new ReindexResult(0);
+        }
+        List<KnowledgeEntryEntity> targets = entryRepo.findMismatched(id, r.endpointId(), r.dimensions());
         Instant now = Instant.now();
         for (KnowledgeEntryEntity e : targets) {
             e.setIndexStatus(KnowledgeEntryEntity.INDEX_PENDING);
@@ -285,8 +326,24 @@ public class KnowledgeBaseService {
         }
         // 事件在事务提交后投递（KnowledgeIndexListener 是 AFTER_COMMIT），异步线程才读得到上面这些写
         targets.forEach(this::publishContentChanged);
-        log.info("知识库 {} 重建索引已入队: {} 条（onlyMismatched={}）", id, targets.size(), onlyMismatched);
+        log.info("知识库 {} 失配重建已入队: {} 条", id, targets.size());
         return new ReindexResult(targets.size());
+    }
+
+    /** CAP-84 M2：管理端全量重建所有知识库索引（异步任务，万级条目可取消）。 */
+    public RebuildSubmit submitRebuildAll() {
+        long total = entryRepo.count();
+        String taskId = taskService.submit(KnowledgeRebuildTaskHandler.TASK_TYPE, "{}",
+                TaskOptions.builder()
+                        .name("重建全部知识库索引")
+                        .retryMaxAttempts(1)
+                        .timeoutMs(12 * 60 * 60_000L)
+                        .build());
+        log.info("全部知识库重建已提交任务: task={} entries={}", taskId, total);
+        return new RebuildSubmit(taskId, total);
+    }
+
+    public record RebuildSubmit(String taskId, long entries) {
     }
 
     private KnowledgeBaseEntity requireBase(Long id) {
@@ -366,9 +423,12 @@ public class KnowledgeBaseService {
         applyEntry(e, req, kb);
         if (e.getStatus() == null || e.getStatus().isBlank()) e.setStatus("active"); // 未显式传状态默认 active，否则永不注入
         e.setHitCount(0);
+        e.setContentVersion(1);
         e.setCreatedAt(Instant.now());
         e.setUpdatedAt(e.getCreatedAt());
-        EntryView view = EntryViews.entry(entryRepo.save(e), kb);
+        e = entryRepo.save(e);
+        versionService.record(e, actorOrDefault(req.owner()), "手工创建");
+        EntryView view = EntryViews.entry(e, kb);
         publishContentChanged(e);
         return view;
     }
@@ -378,20 +438,83 @@ public class KnowledgeBaseService {
         KnowledgeEntryEntity e = requireEntry(id);
         KnowledgeBaseEntity kb = e.getKbId() == null ? resolveTargetKb(req) : requireBase(e.getKbId());
         boolean contentChanged = req.contentMd() != null && !req.contentMd().equals(e.getContentMd());
+        boolean metadataChanged = metadataChanged(req, e);
         applyEntry(e, req, kb);
-        e.setUpdatedAt(Instant.now());
-        EntryView view = EntryViews.entry(entryRepo.save(e), kb);
         if (contentChanged) {
-            publishContentChanged(e);
+            e.setContentVersion(e.getContentVersion() + 1);
+            // CAP-85 FR-28：正文变了，上一次模型增强结果不再对应当前内容，下次批量增强重跑
+            e.setEnrichedAt(null);
+            e.setEnrichError(null);
+            e.setSimHash(null);
         }
-        return view;
+        if (metadataChanged) {
+            // 人工改动分类/摘要/标签才锁定自动增强；表单回传未变化的值不算修正
+            e.setAutoEnrich(false);
+        }
+        e.setUpdatedAt(Instant.now());
+        e = entryRepo.save(e);
+        if (contentChanged) {
+            versionService.record(e, actorOrDefault(req.owner()), "手工更新");
+        }
+        // 名称/标签/状态/有效期都会进 Lucene 过滤与排序字段，因此不只在正文变化时重建
+        publishContentChanged(e);
+        return EntryViews.entry(e, kb);
     }
 
     @Transactional
     public void deleteEntry(Long id) {
         KnowledgeEntryEntity e = requireEntry(id);
         chunkRepo.deleteByEntryId(id);
+        versionService.deleteAll(id);
+        indexService.removeFromIndex(id);
+        releaseStoredFiles(id);
         entryRepo.delete(e);
+    }
+
+    /**
+     * 删除本地上传的原始文件（FR-06）。同一份文件可能被多个条目引用（内容寻址去重），
+     * 仍有其它条目引用时保留；文件缺失不影响条目删除。
+     */
+    private void releaseStoredFiles(Long entryId) {
+        for (KnowledgeImportFileEntity f : importFileRepo.findByEntryId(entryId)) {
+            String stored = f.getStoredPath();
+            if (stored == null || stored.isBlank() || importFileRepo.countByStoredPath(stored) > 1) {
+                continue;
+            }
+            try {
+                Files.deleteIfExists(Paths.get(stored));
+            } catch (IOException ex) {
+                log.warn("原始文件删除失败: entry={} path={} err={}", entryId, stored, ex.getMessage());
+            }
+        }
+    }
+
+    public List<KnowledgeVersionView> listVersions(Long entryId) {
+        requireEntry(entryId);
+        return versionService.listViews(entryId);
+    }
+
+    public KnowledgeVersionView.Detail getVersion(Long entryId, int contentVersion) {
+        requireEntry(entryId);
+        return versionService.get(entryId, contentVersion);
+    }
+
+    /** FR-15：文档当前索引分块（按 chunkIndex 升序），供详情「分块」页签与引用定位。 */
+    public List<KnowledgeChunkView> listChunks(Long entryId) {
+        requireEntry(entryId);
+        return chunkRepo.findByEntryIdOrderByChunkIndexAsc(entryId).stream()
+                .map(c -> new KnowledgeChunkView(c.getId(), c.getChunkIndex(), c.getHeadingPath(),
+                        c.getStartOffset(), c.getEndOffset(), c.getTokenCount(), c.getContent()))
+                .toList();
+    }
+
+    /** CAP-85 FR-29：人工复核。只写复核时间，不动 updatedAt（避免把老化计时重置成"刚更新"）。 */
+    @Transactional
+    public EntryView review(Long id) {
+        KnowledgeEntryEntity e = requireEntry(id);
+        e.setLastReviewedAt(Instant.now());
+        e = entryRepo.save(e);
+        return EntryViews.entry(e, e.getKbId() == null ? null : kbRepo.findById(e.getKbId()).orElse(null));
     }
 
     /** 索引重试（CAP-44 FR-04）：重置 pending 并触发异步重索引。 */
@@ -428,10 +551,27 @@ public class KnowledgeBaseService {
         if (req.contentMd() != null) {
             e.setContentMd(req.contentMd());
             e.setContentHash(sha256(req.contentMd()));
+            if (req.summary() == null) {
+                e.setSummary(summarize(req.contentMd()));
+            }
         }
         if (req.tags() != null) e.setTags(EntryViews.joinTags(req.tags()));
         if (req.sourceProject() != null) e.setSourceProject(req.sourceProject().isBlank() ? null : req.sourceProject());
         if (req.status() != null && !req.status().isBlank()) e.setStatus(req.status());
+        if (req.docType() != null && !req.docType().isBlank()) {
+            e.setDocType(normalizeDocType(req.docType()));
+        }
+        if (req.sourceUri() != null) {
+            e.setSourceUri(req.sourceUri().isBlank() ? null : req.sourceUri());
+        }
+        if (req.summary() != null) {
+            e.setSummary(req.summary().isBlank() ? null : req.summary());
+        }
+        if (req.owner() != null) {
+            e.setOwner(req.owner().isBlank() ? null : req.owner());
+        }
+        if (req.validFrom() != null) e.setValidFrom(req.validFrom());
+        if (req.validTo() != null) e.setValidTo(req.validTo());
         // 历史列双写（值派生自 KB，单一事实源仍是库；旧 SQL/回滚期代码可读）
         e.setScope(kb.getScope());
         e.setProjectId(kb.getProjectId());
@@ -439,6 +579,44 @@ public class KnowledgeBaseService {
             String name = e.getName() == null ? "entry" : e.getName().replaceAll("[\\\\/:*?\"<>|\\s]+", "-");
             e.setPath(kb.getScope() + "/" + name + ".md");
         }
+    }
+
+    private static final Set<String> DOC_TYPES = Set.of(
+            KnowledgeEntryEntity.DOC_TECH, KnowledgeEntryEntity.DOC_MAINT,
+            KnowledgeEntryEntity.DOC_FAQ, KnowledgeEntryEntity.DOC_ARTIFACT);
+
+    /** CAP-85 FR-28：显式传入且值确有变化 = 人工修正（空串/空列表也算显式清除）。 */
+    private static boolean metadataChanged(EntryRequest req, KnowledgeEntryEntity e) {
+        if (req.docType() != null && !req.docType().isBlank()
+                && !normalizeDocType(req.docType()).equals(e.getDocType())) {
+            return true;
+        }
+        if (req.summary() != null
+                && !Objects.equals(req.summary().isBlank() ? null : req.summary(), e.getSummary())) {
+            return true;
+        }
+        return req.tags() != null && !Objects.equals(EntryViews.joinTags(req.tags()), e.getTags());
+    }
+
+    private static String normalizeDocType(String docType) {
+        String upper = docType.strip().toUpperCase(Locale.ROOT);
+        if (!DOC_TYPES.contains(upper)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "docType 必须是 TECH/MAINT/FAQ/ARTIFACT");
+        }
+        return upper;
+    }
+
+    private static String summarize(String content) {
+        if (content == null) {
+            return null;
+        }
+        String oneLine = content.replaceAll("\\s+", " ").strip();
+        return oneLine.length() <= 300 ? oneLine : oneLine.substring(0, 300);
+    }
+
+    private static String actorOrDefault(String actor) {
+        return actor == null || actor.isBlank() ? "manual" : actor;
     }
 
     private void validateEntry(EntryRequest req, KnowledgeBaseEntity kb) {
@@ -467,7 +645,7 @@ public class KnowledgeBaseService {
         }
     }
 
-    /** 全文检索（FR-08）：跨 global + 本项目库，含名称/内容/标签。 */
+    /** 全文检索（FR-08/FR-14）：跨 global + 本项目库，统一走 Lucene 混合检索（不再 LIKE 全表）。 */
     public List<EntryView> search(String q, String projectId) {
         if (q == null || q.isBlank()) {
             return List.of();
@@ -476,10 +654,23 @@ public class KnowledgeBaseService {
         if (kbIds.isEmpty()) {
             return List.of();
         }
+        List<Long> orderedIds = searchService.searchEntryIds(q, kbIds, 50);
+        if (orderedIds.isEmpty()) {
+            return List.of();
+        }
         Map<Long, KnowledgeBaseEntity> kbMap = kbMap();
-        return entryRepo.searchInBases(kbIds, q).stream()
-                .map(e -> EntryViews.entry(e, kbMap.get(e.getKbId())))
-                .toList();
+        Map<Long, EntryView> views = new HashMap<>();
+        for (KnowledgeEntryEntity e : entryRepo.findAllById(orderedIds)) {
+            views.put(e.getId(), EntryViews.entry(e, kbMap.get(e.getKbId())));
+        }
+        List<EntryView> out = new ArrayList<>(orderedIds.size());
+        for (Long id : orderedIds) {
+            EntryView v = views.get(id);
+            if (v != null) {
+                out.add(v);
+            }
+        }
+        return out;
     }
 
     /** 检索范围：全部 global 库 + 指定项目的 project 库（不限 injectMode，UI 检索语义）。 */

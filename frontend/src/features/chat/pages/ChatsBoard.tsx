@@ -3,16 +3,17 @@
 // CAP-46：?kbId=<id> 跳入（知识库详情「发起会话」）→ 新问答草稿预选该库；绑库问答标题区显示库名标签。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Badge, Button, Card, Input, Modal, Segmented, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Alert, Badge, Button, Card, Input, Modal, Segmented, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   CaretRightOutlined,
   DeleteOutlined,
+  FileAddOutlined,
   PauseOutlined,
   ReloadOutlined,
   StopOutlined,
 } from '@ant-design/icons'
-import { deleteChat, finishChat, killChat, listChats, resumeChat, suspendChat } from '../api'
+import { deleteChat, finishChat, killChat, listChatEvents, listChats, resumeChat, suspendChat } from '../api'
 import type { ChatSummary } from '../types'
 import { stateColor, ACTIVE_STATES, STATE_OPTIONS } from '../../../shared/chat/stateMeta'
 import ChatPanel from '../../../shared/chat/ChatPanel'
@@ -22,8 +23,11 @@ import ChatListPane from '../components/ChatListPane'
 import NewChatDraft from '../components/NewChatDraft'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
-import { listBases } from '../../knowledge/api'
+import { listBases, saveSolution } from '../../knowledge/api'
 import type { KnowledgeBase } from '../../knowledge/types'
+import { listProjects } from '../../projects/api'
+import type { Project } from '../../projects/types'
+import { isAdmin } from '../../auth/authStore'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
@@ -42,6 +46,7 @@ export default function ChatsBoard() {
   const [chats, setChats] = useState<ChatSummary[]>([])
   const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(false)
   const [view, setView] = useState<string>('chat') // chat | list
   const [status, setStatus] = useState('ALL')
@@ -52,6 +57,15 @@ export default function ChatsBoard() {
   const [streamMeta, setStreamMeta] = useState<StreamMeta>({ connected: false, fatal: false })
   // CAP-54：WS 旁路工作区快照（ChatPanel 上抛），右侧窄条入口的徽标/抽屉数据源
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot | undefined>(undefined)
+  // CAP-84 FR-24：按轮次沉淀方案——选择轮次 + 同一轮前端禁用重复保存
+  const [solutionOpen, setSolutionOpen] = useState(false)
+  const [solutionLoading, setSolutionLoading] = useState(false)
+  const [solutionTurns, setSolutionTurns] = useState<{ turnSeq: number; text: string }[]>([])
+  const [solutionTurnSeq, setSolutionTurnSeq] = useState<number | undefined>(undefined)
+  const [solutionTitle, setSolutionTitle] = useState('')
+  const [solutionProjectId, setSolutionProjectId] = useState<string | undefined>(undefined)
+  const [savedTurns, setSavedTurns] = useState<Record<string, number[]>>({})
+  const [savingSolution, setSavingSolution] = useState(false)
   const autoPickedRef = useRef(false)
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -79,6 +93,9 @@ export default function ChatsBoard() {
       .catch(() => undefined)
     listBases()
       .then(setKnowledgeBases)
+      .catch(() => undefined)
+    listProjects()
+      .then(setProjects)
       .catch(() => undefined)
   }, [])
 
@@ -132,6 +149,7 @@ export default function ChatsBoard() {
   // 切换问答：清工作区快照，避免旧问答变更数徽标带到新问答
   useEffect(() => {
     setWorkspace(undefined)
+    setSolutionOpen(false)
   }, [selectedId])
 
   // ---- 生命周期操作（动作后靠轮询刷新状态标签）----
@@ -196,6 +214,89 @@ export default function ChatsBoard() {
   // SUSPENDED=恢复（同进程语义）；DONE/FAILED/TERMINATED=继续对话（claude --resume 带历史重拉起，
   // 模型执行体重建运行时即可——历史在事件表里）
   const canResume = !!current && ['SUSPENDED', 'DONE', 'FAILED', 'TERMINATED'].includes(current.state)
+
+  // CAP-84：多库标签（历史 CAP-46 单库回填）；降级原因展示；SOLUTION 一键沉淀
+  const currentKbIds = current
+    ? current.knowledgeBaseIds?.length
+      ? current.knowledgeBaseIds
+      : current.knowledgeBaseId != null
+        ? [current.knowledgeBaseId]
+        : []
+    : []
+  const degradedReason =
+    current?.knowledgeDegradedReason && current.knowledgeDegradedReason !== 'NONE'
+      ? current.knowledgeDegradedReason
+      : null
+  const savedTurnSeqs = current ? (savedTurns[current.id] ?? []) : []
+
+  // 轮次选择来自事件流：assistant 事件的 payload.turnSeq 即该轮用户 seq
+  const openSolutionModal = async () => {
+    if (!current) return
+    setSolutionOpen(true)
+    setSolutionLoading(true)
+    setSolutionTitle('')
+    setSolutionProjectId(undefined)
+    setSolutionTurnSeq(undefined)
+    try {
+      const events = await listChatEvents(current.id)
+      const byTurn = new Map<number, string>()
+      for (const ev of events) {
+        if (ev.type !== 'assistant' || !ev.content?.trim()) continue
+        const t = typeof ev.payload?.turnSeq === 'number' ? (ev.payload.turnSeq as number) : undefined
+        if (t) byTurn.set(t, ev.content)
+      }
+      const turns = [...byTurn.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([turnSeq, text]) => ({ turnSeq, text }))
+      setSolutionTurns(turns)
+      const available = turns.filter((t) => !savedTurnSeqs.includes(t.turnSeq))
+      setSolutionTurnSeq(available.length > 0 ? available[available.length - 1].turnSeq : undefined)
+      if (turns.length === 0) message.info('还没有可沉淀的方案回答')
+    } catch (e) {
+      showError(e, '加载回答轮次失败')
+    } finally {
+      setSolutionLoading(false)
+    }
+  }
+
+  const onSubmitSolution = async () => {
+    if (!current) return
+    if (!solutionTurnSeq) {
+      message.warning('请选择要沉淀的回答轮次')
+      return
+    }
+    setSavingSolution(true)
+    try {
+      const r = await saveSolution(current.id, {
+        turnSeq: solutionTurnSeq,
+        title: solutionTitle.trim() || undefined,
+        kind: 'design',
+        projectId: solutionProjectId,
+      })
+      setSavedTurns((prev) => ({
+        ...prev,
+        [current.id]: [...(prev[current.id] ?? []), solutionTurnSeq],
+      }))
+      setSolutionOpen(false)
+      Modal.success({
+        centered: true,
+        title: '已沉淀为文档',
+        content: (
+          <Space direction="vertical" size={4}>
+            <span>
+              《{r.title}》已创建（v{r.versionNo}，含证据附录）
+            </span>
+            {/* 静态 Modal 在独立 React root 里渲染，没有 Router 上下文，只能放普通锚点 */}
+            {isAdmin() && <a href={`/admin/docs/${r.documentId}`}>打开文档继续编辑</a>}
+          </Space>
+        ),
+      })
+    } catch (e) {
+      showError(e, '沉淀失败')
+    } finally {
+      setSavingSolution(false)
+    }
+  }
 
   const columns: ColumnsType<ChatSummary> = [
     {
@@ -369,10 +470,14 @@ export default function ChatsBoard() {
                         : '本机（历史）'}
                     </Tag>
                   )}
-                  {current.knowledgeBaseId != null && (
-                    <Tag color="purple">
-                      知识库：{knowledgeBases.find((b) => b.id === current.knowledgeBaseId)?.name ??
-                        `#${current.knowledgeBaseId}`}
+                  {currentKbIds.map((id) => (
+                    <Tag key={id} color="purple">
+                      知识库：{knowledgeBases.find((b) => b.id === id)?.name ?? `#${id}`}
+                    </Tag>
+                  ))}
+                  {current.knowledgeMode && (
+                    <Tag color={current.knowledgeMode === 'SOLUTION' ? 'magenta' : 'blue'}>
+                      {current.knowledgeMode === 'SOLUTION' ? '方案模式' : '知识问答'}
                     </Tag>
                   )}
                   <Badge
@@ -396,6 +501,17 @@ export default function ChatsBoard() {
                       {current.state === 'SUSPENDED' ? '恢复' : '继续对话'}
                     </Button>
                   )}
+                  {current.knowledgeMode === 'SOLUTION' && (
+                    <Button
+                      size="small"
+                      icon={<FileAddOutlined />}
+                      loading={savingSolution}
+                      disabled={current.state === 'RUNNING'}
+                      onClick={openSolutionModal}
+                    >
+                      沉淀为文档
+                    </Button>
+                  )}
                   {canSuspend && (
                     <Button size="small" danger icon={<StopOutlined />} onClick={onKill}>
                       终止
@@ -406,6 +522,19 @@ export default function ChatsBoard() {
                   </Button>
                 </Space>
               </div>
+              {degradedReason && (
+                <Alert
+                  style={{ marginBottom: 8 }}
+                  type="warning"
+                  showIcon
+                  message={`知识检索通道降级：${degradedReason}`}
+                  description={
+                    degradedReason === 'DIMENSION_MISMATCH'
+                      ? '向量维度与当前端点不一致，本轮及后续检索走 BM25 关键词召回；到「后台 → 知识库」重建索引后可恢复向量召回。'
+                      : '当前没有可用的向量端点，检索走 BM25 关键词召回；语义相近但字面不同的文档可能漏召。'
+                  }
+                />
+              )}
               <ChatPanel
                 key={current.id}
                 summary={current}
@@ -455,6 +584,62 @@ export default function ChatsBoard() {
           />
         </div>
       )}
+      <Modal
+        open={solutionOpen}
+        title="沉淀方案为文档"
+        okText="沉淀"
+        cancelText="取消"
+        confirmLoading={savingSolution}
+        onOk={onSubmitSolution}
+        onCancel={() => setSolutionOpen(false)}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <div>
+            <Typography.Text strong>回答轮次</Typography.Text>
+            <Select
+              style={{ width: '100%', marginTop: 6 }}
+              loading={solutionLoading}
+              value={solutionTurnSeq}
+              placeholder={solutionLoading ? '加载回答…' : '选择要沉淀的方案回答'}
+              onChange={setSolutionTurnSeq}
+              options={solutionTurns.map((t, i) => ({
+                value: t.turnSeq,
+                label: `第 ${i + 1} 轮 · ${t.text.replace(/\s+/g, ' ').slice(0, 60)}`,
+                disabled: savedTurnSeqs.includes(t.turnSeq),
+              }))}
+            />
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              已沉淀的轮次不可重复选择（服务端允许人工多版本，前端按轮次禁用）。
+            </Typography.Text>
+          </div>
+          <div>
+            <Typography.Text strong>文档标题（可选）</Typography.Text>
+            <Input
+              style={{ marginTop: 6 }}
+              value={solutionTitle}
+              maxLength={120}
+              placeholder="默认「{问题摘要} 方案」"
+              onChange={(e) => setSolutionTitle(e.target.value)}
+            />
+          </div>
+          <div>
+            <Typography.Text strong>关联项目（可选）</Typography.Text>
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              style={{ width: '100%', marginTop: 6 }}
+              value={solutionProjectId}
+              placeholder="选择项目"
+              onChange={setSolutionProjectId}
+              options={projects.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))}
+            />
+          </div>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            正文前会附生成时间、模型、知识库与引用数，末尾附完整证据附录。
+          </Typography.Text>
+        </Space>
+      </Modal>
     </Card>
   )
 }

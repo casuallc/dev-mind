@@ -5,10 +5,15 @@ import com.devmind.chat.config.ChatProperties;
 import com.devmind.chat.dto.ChatView;
 import com.devmind.chat.dto.CreateChatRequest;
 import com.devmind.chat.dto.ImageRef;
+import com.devmind.chat.dto.KnowledgeOptions;
+import com.devmind.chat.dto.KnowledgeReferenceView;
 import com.devmind.chat.model.ChatEventEntity;
+import com.devmind.chat.model.ChatKnowledgeRefEntity;
 import com.devmind.chat.model.ChatSessionEntity;
 import com.devmind.chat.repo.ChatEventRepository;
+import com.devmind.chat.repo.ChatKnowledgeRefRepository;
 import com.devmind.chat.repo.ChatSessionRepository;
+import com.devmind.chat.repo.KnowledgeFeedbackRepository;
 import com.devmind.chat.runtime.ChatEventSaver;
 import com.devmind.common.agent.AgentEventFrame;
 import com.devmind.common.agent.AgentLaunchCommand;
@@ -26,6 +31,8 @@ import com.devmind.common.agent.runtime.SessionExecutor;
 import com.devmind.common.agent.runtime.SessionState;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.knowledge.KnowledgeRetriever;
+import com.devmind.common.knowledge.KnowledgeRetriever.DegradedReason;
+import com.devmind.common.knowledge.KnowledgeRetriever.Detailed;
 import com.devmind.common.knowledge.KnowledgeRetriever.KbOverview;
 import com.devmind.common.knowledge.KnowledgeRetriever.RetrievedChunk;
 import com.devmind.common.model.ModelEndpointProvider;
@@ -81,6 +88,9 @@ class ChatManagerServiceTest {
 
     private FakeChatRepo chats;
     private FakeEventRepo events;
+    private FakeKnowledgeRefRepo refs;
+    private ChatKnowledgeRefService refService;
+    private KnowledgeFeedbackService feedbackService;
     private ChatEventSaver saver;
     private ChatManagerService service;
     private FakeRunnerConnector runner;
@@ -130,6 +140,15 @@ class ChatManagerServiceTest {
                     e.setFinishedAt(null); // 与真实 JPQL 同语义：能写活动状态就说明"还没结束"
                     yield 1;
                 }
+                case "updateKnowledgeDegraded" -> {
+                    ChatSessionEntity e = store.get((String) args[0]);
+                    if (e == null) {
+                        yield 0;
+                    }
+                    e.setKnowledgeDegradedReason((String) args[1]);
+                    e.setUpdatedAt((java.time.Instant) args[2]);
+                    yield 1;
+                }
                 case "delete" -> {
                     store.remove(((ChatSessionEntity) args[0]).getId());
                     yield null;
@@ -163,6 +182,49 @@ class ChatManagerServiceTest {
                 }
                 case "deleteByChatId" -> {
                     store.removeIf(e -> e.getChatId().equals(args[0]));
+                    yield null;
+                }
+                // CAP-84：检索 query 取最近 N 轮用户提问（按 seq 倒序）
+                case "findByChatIdAndTypeOrderBySeqDesc" -> {
+                    int limit = ((org.springframework.data.domain.Pageable) args[2]).getPageSize();
+                    yield store.stream()
+                            .filter(e -> e.getChatId().equals(args[0]) && e.getType().equals(args[1]))
+                            .sorted(Comparator.comparingLong(ChatEventEntity::getSeq).reversed())
+                            .limit(limit)
+                            .toList();
+                }
+                default -> throw new UnsupportedOperationException(m.getName());
+            });
+        }
+    }
+
+    /** CAP-84 引用快照内存表（id 自增模拟 identity）。 */
+    static class FakeKnowledgeRefRepo {
+        final List<ChatKnowledgeRefEntity> store = new java.util.concurrent.CopyOnWriteArrayList<>();
+        private final AtomicLong ids = new AtomicLong();
+
+        ChatKnowledgeRefRepository jpa() {
+            return proxy(ChatKnowledgeRefRepository.class, (p, m, args) -> switch (m.getName()) {
+                case "saveAll" -> {
+                    List<ChatKnowledgeRefEntity> rows = (List<ChatKnowledgeRefEntity>) args[0];
+                    rows.forEach(r -> {
+                        r.setId(ids.incrementAndGet());
+                        store.add(r);
+                    });
+                    yield rows;
+                }
+                case "findByChatIdOrderByTurnSeqAscCitationNoAsc" -> store.stream()
+                        .filter(r -> r.getChatId().equals(args[0]))
+                        .sorted(Comparator.comparingLong(ChatKnowledgeRefEntity::getTurnSeq)
+                                .thenComparingInt(ChatKnowledgeRefEntity::getCitationNo))
+                        .toList();
+                case "findByChatIdAndTurnSeqOrderByCitationNoAsc" -> store.stream()
+                        .filter(r -> r.getChatId().equals(args[0])
+                                && r.getTurnSeq() == ((Number) args[1]).longValue())
+                        .sorted(Comparator.comparingInt(ChatKnowledgeRefEntity::getCitationNo))
+                        .toList();
+                case "deleteByChatId" -> {
+                    store.removeIf(r -> r.getChatId().equals(args[0]));
                     yield null;
                 }
                 default -> throw new UnsupportedOperationException(m.getName());
@@ -364,6 +426,16 @@ class ChatManagerServiceTest {
     void setUp() {
         chats = new FakeChatRepo();
         events = new FakeEventRepo();
+        refs = new FakeKnowledgeRefRepo();
+        refService = new ChatKnowledgeRefService(refs.jpa());
+        // 反馈仓储在本测试不参与业务，只满足 deleteChat 的级联清理
+        feedbackService = new KnowledgeFeedbackService(
+                proxy(KnowledgeFeedbackRepository.class, (p, m, args) -> switch (m.getName()) {
+                    case "findByChatId" -> List.of();
+                    case "deleteByChatId" -> null;
+                    default -> throw new UnsupportedOperationException(m.getName());
+                }),
+                null, null, refService, fakeIdentity());
         endpoints = new FakeModelEndpointProvider();
         props = new ChatProperties();
         props.setEventFlushMs(50);
@@ -384,7 +456,8 @@ class ChatManagerServiceTest {
                 emptyObjectProvider(),
                 objectProviderOf(endpoints),
                 // 无 usage 模块：逐回合账本跳过，只记累计列
-                emptyObjectProvider());
+                emptyObjectProvider(),
+                refService, feedbackService);
     }
 
     /** 换上带指定检索器的服务实例（CAP-46 用例重建 service 专用）。 */
@@ -395,7 +468,8 @@ class ChatManagerServiceTest {
         service = new ChatManagerService(fakeIdentity(), (NotificationEvent e) -> { },
                 chats.jpa(), events.jpa(), saver, props, JsonMapper.builder().build(),
                 objectProviderOf(runner), emptyObjectProvider(), emptyObjectProvider(),
-                objectProviderOf(retriever), objectProviderOf(endpoints), emptyObjectProvider());
+                objectProviderOf(retriever), objectProviderOf(endpoints), emptyObjectProvider(),
+                refService, feedbackService);
     }
 
     @SuppressWarnings("unchecked")
@@ -546,7 +620,7 @@ class ChatManagerServiceTest {
         service = new ChatManagerService(fakeIdentity(), (NotificationEvent e) -> { },
                 chats.jpa(), events.jpa(), saver, props, JsonMapper.builder().build(),
                 objectProviderOf(runner), emptyObjectProvider(), objectProviderOf(preparer),
-                emptyObjectProvider(), emptyObjectProvider(), emptyObjectProvider());
+                emptyObjectProvider(), emptyObjectProvider(), emptyObjectProvider(), refService, feedbackService);
 
         // 显式全空 → 场景预设的 model/pm/node 生效
         ChatView v = service.create(new CreateChatRequest("你好", null, null, null, "qa"));
@@ -726,11 +800,14 @@ class ChatManagerServiceTest {
 
     // ---------------- CAP-46 知识库问答 ----------------
 
-    /** 可变 fake 检索器：hits 可切换、fail=true 模拟检索异常、记录调用次数。 */
+    /** 可变 fake 检索器：hits 可切换、fail=true 模拟检索异常、记录调用次数与过滤参数。 */
     static class FakeRetriever implements KnowledgeRetriever {
         volatile List<RetrievedChunk> hits = List.of();
         volatile boolean fail = false;
+        volatile DegradedReason reason = DegradedReason.NONE;
         final AtomicInteger retrieveCalls = new AtomicInteger();
+        volatile List<String> lastDocTypes;
+        volatile List<String> lastTags;
 
         @Override
         public boolean vectorAvailable() {
@@ -747,12 +824,190 @@ class ChatManagerServiceTest {
         }
 
         @Override
-        public Optional<KbOverview> overview(long kbId) {
-            return kbId == 7L
-                    ? Optional.of(new KbOverview("研发规范库", "团队研发规范", "RAG",
-                            List.of("构建规范", "部署规范")))
-                    : Optional.empty();
+        public Detailed retrieveDetailed(List<Long> kbIds, String query, int topK,
+                                         List<String> docTypes, List<String> tags) {
+            retrieveCalls.incrementAndGet();
+            lastDocTypes = docTypes;
+            lastTags = tags;
+            if (fail) {
+                throw new RuntimeException("检索炸了");
+            }
+            return new Detailed(hits, reason == DegradedReason.NONE, reason);
         }
+
+        @Override
+        public java.util.Map<Long, String> baseNames(List<Long> kbIds) {
+            java.util.Map<Long, String> names = new java.util.LinkedHashMap<>();
+            if (kbIds.contains(7L)) {
+                names.put(7L, "研发规范库");
+            }
+            if (kbIds.contains(8L)) {
+                names.put(8L, "运维手册库");
+            }
+            return names;
+        }
+
+        @Override
+        public Optional<KbOverview> overview(long kbId) {
+            if (kbId == 7L) {
+                return Optional.of(new KbOverview("研发规范库", "团队研发规范", "RAG",
+                        List.of("构建规范", "部署规范")));
+            }
+            if (kbId == 8L) {
+                return Optional.of(new KbOverview("运维手册库", "线上运维", "RAG", List.of("回滚手册")));
+            }
+            return Optional.empty();
+        }
+    }
+
+    @Test
+    void 知识会话_多库编号证据_引用快照_降级原因落库() throws Exception {
+        FakeRetriever retriever = new FakeRetriever();
+        retriever.hits = List.of(
+                new RetrievedChunk(11L, "发布手册", 7L, 101L, "maint/runbook.md", "部署 > 回滚",
+                        "回滚步骤：先摘流量。", "回滚步骤：先摘流量。", 0.9),
+                new RetrievedChunk(12L, "构建规范", 8L, 102L, "tech/build.md", "构建 > 单测",
+                        "构建前必须先跑单测。", "构建前必须先跑单测。", 0.8));
+        retriever.reason = DegradedReason.NO_EMBEDDING;
+        rebuildWith(retriever);
+        endpoints.defaultChat = endpoints.add(21L, "CHAT", "本地 vLLM", "qwen2.5", serveSse("答", 0));
+
+        ChatView v = service.create(new CreateChatRequest("回滚怎么做", null, null, null, null, null,
+                ChatSessionEntity.EXECUTOR_MODEL, null, List.of(7L, 8L), "ANSWER",
+                new KnowledgeOptions(5, List.of("MAINT"), List.of("部署"), true, null)));
+
+        assertEquals(List.of(7L, 8L), v.knowledgeBaseIds());
+        assertEquals("ANSWER", v.knowledgeMode());
+        assertEquals(5, v.knowledgeOptions().topK());
+        ChatSessionEntity ent = chats.store.get(v.id());
+        assertEquals("7,8", ent.getKnowledgeBaseIds(), "多库 CSV 落库");
+        assertEquals(7L, ent.getKnowledgeBaseId(), "兼容字段取第一个库");
+        assertEquals(List.of("MAINT"), retriever.lastDocTypes, "docTypes 过滤透传检索");
+        assertEquals(List.of("部署"), retriever.lastTags, "tags 过滤透传检索");
+        assertEquals("NO_EMBEDDING", ent.getKnowledgeDegradedReason());
+
+        await("首轮完成", () -> hasEvent("assistant", "答"));
+        String body = sseRequests.get(0);
+        assertTrue(body.contains("[S1]") && body.contains("[S2]"), "命中按编号注入: " + body);
+        assertTrue(body.contains("maint/runbook.md") && body.contains("运维手册库"), "来源路径/库名进证据块");
+
+        List<KnowledgeReferenceView> refs = service.references(v.id(), null);
+        assertEquals(2, refs.size());
+        assertEquals("发布手册", refs.get(0).entryName());
+        assertEquals(101L, refs.get(0).chunkId(), "引用可定位到分块");
+        assertEquals(1, refs.get(0).citationNo());
+        assertTrue(refs.get(0).turnSeq() > 0, "引用按本轮 user 事件 seq 归组");
+    }
+
+    @Test
+    void 知识会话_SOLUTION_自动模板_九章结构_显式模板校验() throws Exception {
+        FakeRetriever retriever = new FakeRetriever();
+        retriever.hits = List.of(new RetrievedChunk(11L, "排障手册", 7L, 101L, "maint/faq.md", "故障 > 连接池",
+                "先看连接池使用率。", "先看连接池使用率。", 0.9));
+        rebuildWith(retriever);
+        endpoints.defaultChat = endpoints.add(21L, "CHAT", "本地 vLLM", "qwen2.5",
+                serveSse("## 1. 问题理解\\n答", 0));
+
+        ChatView v = service.create(new CreateChatRequest("数据库连接池耗尽怎么排查", null, null, null, null, null,
+                ChatSessionEntity.EXECUTOR_MODEL, null, List.of(7L), "SOLUTION", null));
+
+        assertEquals("SOLUTION", v.knowledgeMode());
+        assertEquals("FAULT", v.knowledgeOptions().template(), "故障关键词自动判别为故障排查模板");
+        await("首轮完成", () -> hasEvent("assistant", "问题理解"));
+        String body = sseRequests.get(0);
+        assertTrue(body.contains("## 1. 问题理解") && body.contains("## 9. 参考来源"), "固定九章结构: " + body);
+        assertTrue(body.contains("模板要求（故障排查）"), "模板侧重进 system prompt");
+        assertTrue(body.contains("不得执行"), "声明文档内指令无效");
+
+        // 显式模板优先；非法模板直接 400
+        ChatView deploy = service.create(new CreateChatRequest("发布新版本", null, null, null, null, null,
+                ChatSessionEntity.EXECUTOR_MODEL, null, List.of(7L), "SOLUTION",
+                new KnowledgeOptions(null, null, null, null, "deploy")));
+        assertEquals("DEPLOY", deploy.knowledgeOptions().template());
+        assertThrows(DevMindException.class, () -> service.create(new CreateChatRequest(
+                "部署", null, null, null, null, null, ChatSessionEntity.EXECUTOR_MODEL, null,
+                List.of(7L), "SOLUTION", new KnowledgeOptions(null, null, null, null, "UNKNOWN"))));
+    }
+
+    @Test
+    void 知识会话_引用校验_剔除越界编号并提示异常() throws Exception {
+        FakeRetriever retriever = new FakeRetriever();
+        retriever.hits = List.of(
+                new RetrievedChunk(11L, "发布手册", 7L, 101L, "maint/runbook.md", "部署 > 回滚",
+                        "回滚步骤：先摘流量。", "回滚步骤：先摘流量。", 0.9),
+                new RetrievedChunk(12L, "构建规范", 7L, 102L, "tech/build.md", "构建 > 单测",
+                        "构建前必须先跑单测。", "构建前必须先跑单测。", 0.8));
+        rebuildWith(retriever);
+        endpoints.defaultChat = endpoints.add(21L, "CHAT", "本地 vLLM", "qwen2.5",
+                serveSse("先摘流量[S1]，再回滚[S9]。", 0));
+
+        ChatView v = service.create(new CreateChatRequest("回滚怎么做", null, null, null, null, null,
+                ChatSessionEntity.EXECUTOR_MODEL, null, List.of(7L), "ANSWER", null));
+
+        await("引用校验事件落库", () -> hasEvent("citation_check", "无效 1 条"));
+        ChatEventEntity check = events.store.stream()
+                .filter(e -> "citation_check".equals(e.getType())).findFirst().orElseThrow();
+        assertTrue(check.getPayload().contains("\"warning\":true"), "非法引用率 50% 触发异常提示");
+        assertTrue(check.getPayload().contains("发布手册"), "来源按有效引用重排");
+        assertFalse(check.getPayload().contains("S9"), "越界编号不进入来源列表");
+    }
+
+    @Test
+    void 方案沉淀数据源_取指定轮次正文与引用快照() throws Exception {
+        FakeRetriever retriever = new FakeRetriever();
+        retriever.hits = List.of(new RetrievedChunk(11L, "发布手册", 7L, 101L, "maint/runbook.md", "部署 > 回滚",
+                "回滚步骤：先摘流量。", "回滚步骤：先摘流量。", 0.9));
+        rebuildWith(retriever);
+        endpoints.defaultChat = endpoints.add(21L, "CHAT", "本地 vLLM", "qwen2.5",
+                serveSse("回滚方案正文[S1]", 0));
+
+        ChatView v = service.create(new CreateChatRequest("回滚怎么做", null, null, null, null, null,
+                ChatSessionEntity.EXECUTOR_MODEL, null, List.of(7L, 8L), "SOLUTION",
+                new KnowledgeOptions(null, null, null, null, "DEPLOY")));
+        await("首轮完成", () -> hasEvent("assistant", "回滚方案正文"));
+
+        var source = service.solutionSource(v.id(), null).orElseThrow();
+        assertEquals("回滚怎么做", source.title());
+        assertEquals("回滚怎么做", source.question());
+        assertEquals("回滚方案正文[S1]", source.answer());
+        assertEquals("SOLUTION", source.mode());
+        assertEquals(1, source.evidence().size());
+        assertEquals("发布手册", source.evidence().get(0).entryName());
+        assertEquals(101L, source.evidence().get(0).chunkId());
+        assertEquals(List.of("研发规范库", "运维手册库"), source.knowledgeBaseNames());
+        assertTrue(source.generatedAt() != null);
+    }
+
+    @Test
+    void 知识会话_无命中时注入证据不足指令_不记引用() throws Exception {
+        FakeRetriever retriever = new FakeRetriever();
+        rebuildWith(retriever);
+        endpoints.defaultChat = endpoints.add(21L, "CHAT", "本地 vLLM", "qwen2.5", serveSse("答", 0));
+
+        ChatView v = service.create(new CreateChatRequest("回滚怎么做", null, null, null, null, null,
+                ChatSessionEntity.EXECUTOR_MODEL, null, List.of(7L), "ANSWER", null));
+
+        await("首轮完成", () -> hasEvent("assistant", "答"));
+        assertTrue(sseRequests.get(0).contains("未在知识库中找到足够依据"),
+                "无命中不得放任模型编造: " + sseRequests.get(0));
+        assertTrue(service.references(v.id(), null).isEmpty(), "无命中没有引用快照");
+    }
+
+    @Test
+    void 知识会话_校验_最多5库_模式取值_Agent不支持() {
+        rebuildWith(new FakeRetriever());
+        assertThrows(DevMindException.class, () -> service.create(new CreateChatRequest(
+                "x", null, null, null, null, null, ChatSessionEntity.EXECUTOR_MODEL, null,
+                List.of(7L, 8L, 9L, 10L, 11L, 12L), "ANSWER", null)), "超过 5 个库");
+        assertThrows(DevMindException.class, () -> service.create(new CreateChatRequest(
+                "x", null, null, null, null, null, ChatSessionEntity.EXECUTOR_MODEL, null,
+                List.of(7L), "PLAN", null)), "非法知识模式");
+        assertThrows(DevMindException.class, () -> service.create(new CreateChatRequest(
+                "x", null, null, NODE, null, null, ChatSessionEntity.EXECUTOR_AGENT, null,
+                List.of(7L), "ANSWER", null)), "Agent 执行体不支持多库知识会话");
+        assertThrows(DevMindException.class, () -> service.create(new CreateChatRequest(
+                "x", null, null, null, null, null, ChatSessionEntity.EXECUTOR_MODEL, null,
+                List.of(99L), "ANSWER", null)), "库不存在");
     }
 
     @Test
@@ -767,6 +1022,8 @@ class ChatManagerServiceTest {
 
         ChatView v = service.create(new CreateChatRequest("构建规范有哪些", null, null, NODE, null, 7L));
         assertEquals(7L, v.knowledgeBaseId());
+        assertEquals(List.of(7L), v.knowledgeBaseIds());
+        assertNull(v.knowledgeMode(), "旧单库字段 = 历史 CAP-46 会话，保持旧注入行为");
         assertEquals(7L, chats.store.get(v.id()).getKnowledgeBaseId(), "knowledge_base_id 落库");
 
         // 启动注入：库概览节拼进初始 prompt 前缀
@@ -961,7 +1218,7 @@ class ChatManagerServiceTest {
         service = new ChatManagerService(fakeIdentity(), (NotificationEvent e) -> { },
                 chats.jpa(), events.jpa(), saver, p, JsonMapper.builder().build(),
                 objectProviderOf(runner), emptyObjectProvider(), emptyObjectProvider(),
-                emptyObjectProvider(), emptyObjectProvider(), emptyObjectProvider());
+                emptyObjectProvider(), emptyObjectProvider(), emptyObjectProvider(), refService, feedbackService);
         assertThrows(DevMindException.class, () -> service.create(modelRequest("x", null)));
     }
 

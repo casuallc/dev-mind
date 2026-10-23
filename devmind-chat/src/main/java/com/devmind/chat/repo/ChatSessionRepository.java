@@ -62,4 +62,15 @@ public interface ChatSessionRepository extends JpaRepository<ChatSessionEntity, 
                  @Param("cacheReadTokens") long cacheReadTokens,
                  @Param("cacheCreationTokens") long cacheCreationTokens,
                  @Param("now") Instant now);
+
+    /**
+     * CAP-84 FR-20：只写最近一轮知识检索的降级原因（会话顶部提示用）。
+     * 批量 UPDATE 的理由同 {@link #updateLiveStatus}——检索发生在提问线程，不能整实体 save 互踩。
+     */
+    @Transactional
+    @Modifying
+    @Query("update ChatSessionEntity e set e.knowledgeDegradedReason = :reason, e.updatedAt = :now "
+            + "where e.id = :id")
+    int updateKnowledgeDegraded(@Param("id") String id, @Param("reason") String reason,
+                                @Param("now") Instant now);
 }

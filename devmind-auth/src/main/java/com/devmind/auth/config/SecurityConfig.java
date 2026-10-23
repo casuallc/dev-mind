@@ -117,6 +117,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/async-tasks/**").hasRole("ADMIN")
                         // CAP-70：出口规则表即内网出口白名单，全方法（含 GET）仅 ADMIN，须先于通用规则
                         .requestMatchers("/api/egress-rules", "/api/egress-rules/**").hasRole("ADMIN")
+                        // CAP-84：索引健康度/全量重建/索引统计属运维面（可触发全库重跑），仅 ADMIN
+                        .requestMatchers("/api/knowledge/admin", "/api/knowledge/admin/**",
+                                "/api/knowledge/index/health").hasRole("ADMIN")
+                        // CAP-84 FR-25：负面反馈统计含跨用户会话数据，仅 ADMIN
+                        .requestMatchers("/api/chats/admin", "/api/chats/admin/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/**").authenticated()
                         // CAP-29：全局仓库登记写操作仅 ADMIN（含 fetch/clone 触发）；GET 走上方全认证
                         .requestMatchers(HttpMethod.POST, "/api/repos", "/api/repos/**").hasRole("ADMIN")

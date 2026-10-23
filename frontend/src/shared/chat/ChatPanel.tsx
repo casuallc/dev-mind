@@ -276,6 +276,7 @@ export default function ChatPanel({
         speaker={isModel ? (summary.modelEndpointName || '模型') : 'Claude'}
         maxHeight={maxHeight}
         emptyText={`等待事件…（${fatal ? '会话已结束' : connected ? '连接正常' : '重连中'}）`}
+        feedback={summary.knowledgeMode ? { apiBase, chatId: summary.id } : undefined}
       />
       <div
         style={{ borderTop: '1px solid #f0f0f0', marginTop: 8, paddingTop: 12, flexShrink: 0 }}

@@ -48,6 +48,22 @@ public class KnowledgeBaseMigration implements ApplicationRunner {
         // 新列默认值兜底（存量行 JPA 字段初始值不生效）
         jdbc.update("UPDATE knowledge_entries SET source = 'manual' WHERE source IS NULL");
         jdbc.update("UPDATE knowledge_entries SET index_status = 'pending' WHERE index_status IS NULL");
+        // CAP-84 治理列兜底：老行没有文档类型/版本号/来源地址。列可能尚未由 JPA 补齐
+        // （滚动升级窗口/精简 schema），单个回填失败不能拖垮整段容器迁移
+        if (columnExists("knowledge_entries", "doc_type")) {
+            jdbc.update("UPDATE knowledge_entries SET doc_type = 'TECH' WHERE doc_type IS NULL OR doc_type = ''");
+        }
+        if (columnExists("knowledge_entries", "content_version")) {
+            jdbc.update("UPDATE knowledge_entries SET content_version = 1 WHERE content_version IS NULL OR content_version < 1");
+        }
+        if (columnExists("knowledge_entries", "source_uri") && columnExists("knowledge_entries", "path")) {
+            jdbc.update("UPDATE knowledge_entries SET source_uri = path"
+                    + " WHERE source = 'feishu' AND (source_uri IS NULL OR source_uri = '') AND path IS NOT NULL");
+        }
+        // CAP-85 FR-28：存量条目默认允许自动增强（NULL 不能参与 `auto_enrich = true` 查询）
+        if (columnExists("knowledge_entries", "auto_enrich")) {
+            jdbc.update("UPDATE knowledge_entries SET auto_enrich = TRUE WHERE auto_enrich IS NULL");
+        }
 
         Integer unmigrated = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM knowledge_entries WHERE kb_id IS NULL", Integer.class);
@@ -138,6 +154,16 @@ public class KnowledgeBaseMigration implements ApplicationRunner {
         try {
             // COUNT 恒返一行（queryForObject + SELECT 1 WHERE 1=0 空结果会抛 EmptyResultDataAccessException 误判不存在）
             jdbc.queryForObject("SELECT COUNT(*) FROM " + table + " WHERE 1 = 0", Integer.class);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean columnExists(String table, String column) {
+        try {
+            // COUNT(column) 恒返一行：SELECT column WHERE 1=0 的空结果会被误判为缺列
+            jdbc.queryForObject("SELECT COUNT(" + column + ") FROM " + table, Integer.class);
             return true;
         } catch (Exception e) {
             return false;

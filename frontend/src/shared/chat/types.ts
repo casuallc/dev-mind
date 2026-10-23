@@ -42,6 +42,8 @@ export interface ChatEvent {
     | 'error'
     | 'state'
     | 'log'
+    /** CAP-84 FR-23：知识会话回合结束后的引用校验（payload.sources/turnSeq/warning） */
+    | 'citation_check'
   content?: string
   source?: string
   timestamp: number
@@ -106,6 +108,8 @@ export interface ChatSummaryBase {
   executor?: ChatExecutor
   /** 模型执行体的端点名（端点被停用/删除后为 null，此时继续提问会 409） */
   modelEndpointName?: string | null
+  /** CAP-84：知识模式 ANSWER | SOLUTION；有值才展示答案反馈入口 */
+  knowledgeMode?: string | null
 }
 
 /** 两类对话资源的 REST/WS 前缀（路径段同名：/api<X> 与 /ws<X>） */

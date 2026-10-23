@@ -11,6 +11,7 @@ import com.devmind.knowledge.dto.ProposalView;
 import com.devmind.knowledge.dto.ReindexResult;
 import com.devmind.knowledge.embedding.EmbeddingClient;
 import com.devmind.knowledge.embedding.EmbeddingResolver;
+import com.devmind.knowledge.index.KnowledgeIndexService;
 import com.devmind.knowledge.model.KnowledgeBaseEntity;
 import com.devmind.knowledge.model.KnowledgeEntryEntity;
 import com.devmind.knowledge.model.KnowledgeProposalEntity;
@@ -21,6 +22,7 @@ import com.devmind.knowledge.repo.KnowledgeProposalRepository;
 import com.devmind.notification.NotificationPublisher;
 import com.devmind.project.ProjectService;
 import com.devmind.project.model.Project;
+import com.devmind.task.service.AsyncTaskService;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -60,6 +62,9 @@ class KnowledgeBaseServiceTest {
     private EmbeddingResolver resolver;
     private ObjectProvider<ModelEndpointProvider> endpointProviders;
     private ApplicationEventPublisher eventPublisher;
+    private KnowledgeVersionService versionService;
+    private KnowledgeIndexService indexService;
+    private AsyncTaskService taskService;
     private long kbSeq = 0;
     private long entrySeq = 0;
 
@@ -80,6 +85,10 @@ class KnowledgeBaseServiceTest {
         lenient().when(resolver.resolve(any())).thenReturn(EmbeddingResolver.Resolution.unavailable());
         endpointProviders = mock(ObjectProvider.class);
         lenient().when(endpointProviders.getIfAvailable()).thenReturn(null);
+        versionService = mock(KnowledgeVersionService.class);
+        indexService = mock(KnowledgeIndexService.class);
+        taskService = mock(AsyncTaskService.class);
+        lenient().when(taskService.submit(anyString(), anyString(), any())).thenReturn("task-1");
 
         when(kbRepo.findByScopeAndInjectModeAndStatus(anyString(), anyString(), anyString())).thenAnswer(inv ->
                 kbs.stream().filter(k -> inv.getArgument(0).equals(k.getScope())
@@ -114,7 +123,10 @@ class KnowledgeBaseServiceTest {
                         null, null, null));
 
         service = new KnowledgeBaseService(kbRepo, entryRepo, chunkRepo, proposalRepo,
-                projectService, notificationPublisher, eventPublisher, resolver, endpointProviders);
+                mock(com.devmind.knowledge.repo.KnowledgeImportFileRepository.class),
+                projectService, notificationPublisher, eventPublisher, resolver, endpointProviders,
+                versionService, indexService, mock(com.devmind.knowledge.retrieve.KnowledgeSearchService.class),
+                taskService);
     }
 
     private KnowledgeBaseEntity addKb(String scope, String projectId, String injectMode) {
@@ -181,7 +193,8 @@ class KnowledgeBaseServiceTest {
     @Test
     void legacyScopeCreateResolvesExperienceKb() {
         EntryView created = service.createEntry(new EntryRequest(
-                null, "project", "p9", "条目A", "# 内容", List.of("t"), null, null));
+                null, "project", "p9", "条目A", "# 内容", List.of("t"), null, null,
+                null, null, null, null, null, null));
 
         assertEquals(1, kbs.size(), "无经验库时按 legacy scope 兜底建库");
         KnowledgeBaseEntity kb = kbs.get(0);
@@ -192,7 +205,8 @@ class KnowledgeBaseServiceTest {
         assertEquals("project", created.scope(), "视图 scope 派生自库");
         assertEquals("p9", created.projectId());
 
-        service.createEntry(new EntryRequest(null, "project", "p9", "条目B", "x", null, null, null));
+        service.createEntry(new EntryRequest(null, "project", "p9", "条目B", "x", null, null, null,
+                null, null, null, null, null, null));
         assertEquals(1, kbs.size(), "同项目经验库复用不重复建");
         assertEquals(2, entries.size());
     }
@@ -239,24 +253,22 @@ class KnowledgeBaseServiceTest {
     }
 
     @Test
-    void reindexBaseQueuesAllEntries() {
+    void reindexBaseQueuesFullRebuildTask() {
         KnowledgeBaseEntity kb = addKb("global", null, "RAG");
         when(kbRepo.findById(kb.getId())).thenReturn(java.util.Optional.of(kb));
+        when(entryRepo.countByKbId(kb.getId())).thenReturn(2L);
         KnowledgeEntryEntity ready = addEntry(kb, "已索引", null, "active");
         ready.setIndexStatus(KnowledgeEntryEntity.INDEX_READY);
         KnowledgeEntryEntity failed = addEntry(kb, "失败条目", null, "active");
         failed.setIndexStatus(KnowledgeEntryEntity.INDEX_FAILED);
-        failed.setIndexError("boom");
-        when(entryRepo.findByKbIdOrderByCreatedAtDesc(kb.getId())).thenReturn(List.of(ready, failed));
 
         ReindexResult result = service.reindexBase(kb.getId(), false);
 
-        assertEquals(2, result.queued(), "全量重建把库里所有条目重新入队");
-        for (KnowledgeEntryEntity e : List.of(ready, failed)) {
-            assertEquals(KnowledgeEntryEntity.INDEX_PENDING, e.getIndexStatus());
-            assertNull(e.getIndexError(), "重建要清掉上一次的错误信息");
-        }
-        verify(eventPublisher, org.mockito.Mockito.times(2)).publishEvent(any(Object.class));
+        assertEquals(2, result.queued(), "全量重建返回库内条目数");
+        verify(taskService).submit(org.mockito.ArgumentMatchers.eq("knowledge.rebuild"),
+                org.mockito.ArgumentMatchers.contains(String.valueOf(kb.getId())),
+                any());
+        assertEquals(KnowledgeEntryEntity.INDEX_READY, ready.getIndexStatus(), "任务模式不预先改状态");
     }
 
     @Test

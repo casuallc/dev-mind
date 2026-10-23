@@ -28,6 +28,7 @@ import NotificationCenter from '../features/notifications/pages/NotificationCent
 import AdminNotificationsPage from '../features/notifications/pages/AdminNotificationsPage'
 import KnowledgeBaseList from '../features/knowledge/pages/KnowledgeBaseList'
 import KnowledgeBaseDetail from '../features/knowledge/pages/KnowledgeBaseDetail'
+import KnowledgeCenter from '../features/knowledge/pages/KnowledgeCenter'
 import SkillsPage from '../features/skills/pages/SkillsPage'
 import SkillDetailPage from '../features/skills/pages/SkillDetailPage'
 import DocsPage from '../features/docs/pages/DocsPage'
@@ -149,7 +150,8 @@ export default function App() {
           <Route path="/settings/notifications" element={<Navigate to="/admin/notifications" replace />} />
           {/* 旧路径兼容：指挥中心/知识库/文档已迁入 /admin 后台 */}
           <Route path="/dashboard" element={<Navigate to="/admin/dashboard" replace />} />
-          <Route path="/knowledge" element={<Navigate to="/admin/knowledge" replace />} />
+          {/* CAP-84 知识中心（一级入口，个人级只读检索；库管理仍在 /admin/knowledge） */}
+          <Route path="/knowledge" element={<KnowledgeCenter />} />
           <Route path="/docs" element={<Navigate to="/admin/docs" replace />} />
           <Route path="/docs/:id" element={<LegacyDocRedirect />} />
           <Route path="/servers" element={<Navigate to="/admin/execution" replace />} />

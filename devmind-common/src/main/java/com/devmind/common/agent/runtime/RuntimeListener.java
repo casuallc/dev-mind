@@ -19,4 +19,11 @@ public interface RuntimeListener {
      */
     default void onTurnResult(String sessionId, TurnUsage usage) {
     }
+
+    /**
+     * 一回合结束（result 事件）时回调，<b>无论是否带用量</b>。
+     * 供能力层做回合级后处理（CAP-84 FR-23 引用校验）；实现方务必快返回（在事件读取线程上）。
+     */
+    default void onResult(String sessionId, SessionEvent resultEvent) {
+    }
 }

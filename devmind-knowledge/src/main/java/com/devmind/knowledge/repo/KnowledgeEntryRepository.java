@@ -1,8 +1,10 @@
 package com.devmind.knowledge.repo;
 
 import com.devmind.knowledge.model.KnowledgeEntryEntity;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -20,6 +22,14 @@ public interface KnowledgeEntryRepository extends JpaRepository<KnowledgeEntryEn
     /** CAP-45 飞书导入判重：同库同外部主键 */
     Optional<KnowledgeEntryEntity> findByKbIdAndExternalId(Long kbId, String externalId);
 
+    /** CAP-84 本地上传判重：同库同来源路径 */
+    Optional<KnowledgeEntryEntity> findByKbIdAndSourceUri(Long kbId, String sourceUri);
+
+    /** CAP-84 重建索引：按 id 键集分页，避免一次加载万级条目正文 */
+    List<KnowledgeEntryEntity> findTop100ByIdGreaterThanOrderByIdAsc(Long id);
+
+    List<KnowledgeEntryEntity> findTop100ByKbIdAndIdGreaterThanOrderByIdAsc(Long kbId, Long id);
+
     List<KnowledgeEntryEntity> findByKbIdOrderByCreatedAtDesc(Long kbId);
 
     List<KnowledgeEntryEntity> findByKbIdAndStatusOrderByCreatedAtDesc(Long kbId, String status);
@@ -31,6 +41,111 @@ public interface KnowledgeEntryRepository extends JpaRepository<KnowledgeEntryEn
     List<KnowledgeEntryEntity> findByIndexStatus(String indexStatus);
 
     List<KnowledgeEntryEntity> findByIndexStatusIn(List<String> indexStatuses);
+
+    /** CAP-85 FR-27：同步源归属条目（删除检测用，只取 id/externalId，不加载正文） */
+    @Query("select e.id as id, e.externalId as externalId from KnowledgeEntryEntity e "
+            + "where e.syncSourceId = :sourceId")
+    List<SyncEntryRef> findRefsBySyncSourceId(@Param("sourceId") Long sourceId);
+
+    interface SyncEntryRef {
+        Long getId();
+
+        String getExternalId();
+    }
+
+    /** CAP-85 FR-28：待自动增强条目（只取 id，正文逐条加载，避免整批 LOB 进内存） */
+    @Query("select e.id from KnowledgeEntryEntity e where e.status = 'active' "
+            + "and (e.autoEnrich is null or e.autoEnrich = true) "
+            + "and (e.enrichedAt is null or e.updatedAt > e.enrichedAt) order by e.id")
+    List<Long> findEnrichCandidateIds(Pageable page);
+
+    @Query("select e.id from KnowledgeEntryEntity e where e.status = 'active' and e.kbId = :kbId "
+            + "and (e.autoEnrich is null or e.autoEnrich = true) "
+            + "and (e.enrichedAt is null or e.updatedAt > e.enrichedAt) order by e.id")
+    List<Long> findEnrichCandidateIdsByKbId(@Param("kbId") Long kbId, Pageable page);
+
+    /** CAP-85 FR-31：治理页增强状态清单（轻量投影，按最近增强/更新时间倒序） */
+    @Query("select e.id as id, e.kbId as kbId, e.name as name, e.docType as docType, "
+            + "e.autoEnrich as autoEnrich, e.enrichedAt as enrichedAt, e.enrichError as enrichError, "
+            + "e.updatedAt as updatedAt from KnowledgeEntryEntity e where e.status = 'active' "
+            + "order by coalesce(e.enrichedAt, e.updatedAt) desc")
+    List<EnrichEntryRef> findEnrichEntries(Pageable page);
+
+    @Query("select e.id as id, e.kbId as kbId, e.name as name, e.docType as docType, "
+            + "e.autoEnrich as autoEnrich, e.enrichedAt as enrichedAt, e.enrichError as enrichError, "
+            + "e.updatedAt as updatedAt from KnowledgeEntryEntity e where e.status = 'active' "
+            + "and e.kbId = :kbId order by coalesce(e.enrichedAt, e.updatedAt) desc")
+    List<EnrichEntryRef> findEnrichEntriesByKbId(@Param("kbId") Long kbId, Pageable page);
+
+    interface EnrichEntryRef {
+        Long getId();
+
+        Long getKbId();
+
+        String getName();
+
+        String getDocType();
+
+        Boolean getAutoEnrich();
+
+        Instant getEnrichedAt();
+
+        String getEnrichError();
+
+        Instant getUpdatedAt();
+    }
+
+    /** CAP-85 FR-29：生命周期清单（轻量投影，不加载正文 LOB） */
+    @Query("select e.id as id, e.kbId as kbId, e.name as name, e.docType as docType, e.owner as owner, "
+            + "e.validTo as validTo, e.lastReviewedAt as lastReviewedAt, e.updatedAt as updatedAt, "
+            + "e.status as status from KnowledgeEntryEntity e where e.status = 'active'")
+    List<LifecycleRef> findLifecycleRefs();
+
+    interface LifecycleRef {
+        Long getId();
+
+        Long getKbId();
+
+        String getName();
+
+        String getDocType();
+
+        String getOwner();
+
+        Instant getValidTo();
+
+        Instant getLastReviewedAt();
+
+        Instant getUpdatedAt();
+
+        String getStatus();
+    }
+
+    /** CAP-85 FR-29：重复检测清单（只取指纹与展示字段） */
+    @Query("select e.id as id, e.kbId as kbId, e.name as name, e.docType as docType, "
+            + "e.updatedAt as updatedAt, e.simHash as simHash "
+            + "from KnowledgeEntryEntity e where e.status = 'active'")
+    List<DuplicateRef> findDuplicateRefs();
+
+    interface DuplicateRef {
+        Long getId();
+
+        Long getKbId();
+
+        String getName();
+
+        String getDocType();
+
+        Instant getUpdatedAt();
+
+        String getSimHash();
+    }
+
+    @Query("select count(e) from KnowledgeEntryEntity e where e.simHash is null or e.simHash = ''")
+    long countMissingSimHash();
+
+    @Query("select e.id from KnowledgeEntryEntity e where e.simHash is null or e.simHash = '' order by e.id")
+    List<Long> findMissingSimHashIds(Pageable page);
 
     long countByKbId(Long kbId);
 

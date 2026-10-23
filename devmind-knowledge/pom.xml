@@ -30,6 +30,49 @@
             <groupId>com.devmind</groupId>
             <artifactId>devmind-auth</artifactId>
         </dependency>
+        <!-- CAP-84 FR-05：批量摄入/重建走通用异步任务框架 -->
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-task</artifactId>
+        </dependency>
+        <!-- CAP-84 FR-24：方案一键沉淀为 CAP-03 文档 -->
+        <dependency>
+            <groupId>com.devmind</groupId>
+            <artifactId>devmind-docs</artifactId>
+        </dependency>
+        <!-- CAP-84 FR-09：嵌入式 Lucene（BM25 + HNSW 向量） -->
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-core</artifactId>
+            <version>10.3.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-analysis-common</artifactId>
+            <version>10.3.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-queryparser</artifactId>
+            <version>10.3.1</version>
+        </dependency>
+        <!-- CAP-84 FR-03：PDF/Word/PPT/Excel/HTML 解析 -->
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-core</artifactId>
+            <version>3.2.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-parsers-standard-package</artifactId>
+            <version>3.2.3</version>
+        </dependency>
+        <!-- FR-03：Tika XHTML → Markdown 结构转换 -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.21.2</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>

@@ -25,6 +25,15 @@ public interface SessionHandle extends AutoCloseable {
     void injectInput(String text, List<InputImage> images);
 
     /**
+     * CAP-84 FR-19：注入用户消息并返回本轮 user 事件 seq（知识引用快照按轮次关联）。
+     * 默认实现退回 {@link #injectInput} 并以当前 seq 兜底；输入被忽略时返回 0。
+     */
+    default long injectInputForTurn(String text, List<InputImage> images) {
+        injectInput(text, images);
+        return currentSeq();
+    }
+
+    /**
      * CAP-68：注入用户消息（图片 + 文件附件）。默认丢弃 files 降级到两参版本——
      * 实现方应覆盖本方法；远程链路（runner）才有工作区落盘能力。
      */

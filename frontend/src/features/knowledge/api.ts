@@ -1,17 +1,41 @@
 // CAP-04 知识库 API（CAP-44 增库容器管理与检索）
 import { api } from '../../shared/api/client'
 import type {
+  AdminIndexStats,
+  AdminRebuildSubmit,
+  ClassifyPreviewItem,
+  DocType,
+  DuplicateReport,
+  EnrichConfig,
+  EnrichEntry,
+  EnrichSubmitResult,
+  EvalReport,
   FeishuImportResult,
   FeishuIntegration,
+  ImportBatch,
+  ImportSubmitResult,
+  IndexHealth,
   KnowledgeBase,
   KnowledgeBaseInput,
+  KnowledgeChunk,
   KnowledgeEntry,
   KnowledgeEntryInput,
   KnowledgeProposal,
   KnowledgeProposalInput,
   KnowledgeSearchResult,
+  KnowledgeSearchV2Request,
+  KnowledgeSearchV2Result,
+  KnowledgeSyncSource,
+  KnowledgeSyncSourceInput,
+  KnowledgeVersion,
+  KnowledgeVersionDetail,
+  LifecycleReport,
+  NegativeFeedbackReport,
   PreviewResult,
   ReindexResult,
+  SolutionSaveInput,
+  SolutionSaveResult,
+  SyncSubmitResult,
 } from './types'
 
 // ---------------- 知识库（CAP-44） ----------------
@@ -35,6 +59,58 @@ export const reindexBase = (id: number, onlyMismatched = false) =>
 
 export const searchChunks = (kbIds: number[], query: string, topK?: number) =>
   api.post<KnowledgeSearchResult>('/knowledge/search', { kbIds, query, topK })
+
+// ---------------- CAP-84 全局检索 / 本地上传 / 索引治理 ----------------
+
+/** 全局混合检索（BM25 + 向量 RRF，文档级聚合 + 高亮片段） */
+export const searchV2 = (input: KnowledgeSearchV2Request) =>
+  api.post<KnowledgeSearchV2Result>('/knowledge/search/v2', input)
+
+/**
+ * 文件/文件夹/ZIP 上传。relativePaths 必须与 files 顺序一致（文件夹选择携带
+ * webkitRelativePath，ZIP 由服务端解压），受理后轮询批次看进度。
+ */
+export const uploadImport = (
+  kbId: number,
+  files: File[],
+  relativePaths: string[],
+  defaultDocType: DocType,
+  tags: string[],
+  onProgress?: (percent: number) => void,
+) => {
+  const form = new FormData()
+  files.forEach((f) => form.append('files', f, f.name))
+  relativePaths.forEach((p) => form.append('relativePaths', p))
+  form.append('defaultDocType', defaultDocType)
+  tags.forEach((t) => form.append('tags', t))
+  return api.uploadWithProgress<ImportSubmitResult>(
+    `/knowledge/bases/${kbId}/import/upload`,
+    form,
+    onProgress,
+  )
+}
+
+export const listImports = (kbId?: number) =>
+  api.get<ImportBatch[]>(`/knowledge/imports${kbId ? `?kbId=${kbId}` : ''}`)
+export const getImport = (batchId: string) => api.get<ImportBatch>(`/knowledge/imports/${batchId}`)
+export const retryImport = (batchId: string) =>
+  api.post<ImportBatch>(`/knowledge/imports/${batchId}/retry`)
+export const retryImportFile = (batchId: string, fileId: number) =>
+  api.post<ImportBatch>(`/knowledge/imports/${batchId}/files/${fileId}/retry`)
+/** 上传前分类预览：与入库共用目录规则，避免前端规则漂移 */
+export const previewClassification = (relativePaths: string[], defaultDocType: DocType) =>
+  api.post<ClassifyPreviewItem[]>('/knowledge/imports/classify-preview', {
+    relativePaths,
+    defaultDocType,
+  })
+
+export const indexHealth = () => api.get<IndexHealth>('/knowledge/index/health')
+export const adminIndexStats = () => api.get<AdminIndexStats>('/knowledge/admin/index/stats')
+export const adminRebuild = () => api.post<AdminRebuildSubmit>('/knowledge/admin/rebuild')
+
+/** CAP-84 FR-24：把指定轮次的方案回答沉淀为 CAP-03 文档（含证据附录） */
+export const saveSolution = (chatId: string, input: SolutionSaveInput = {}) =>
+  api.post<SolutionSaveResult>(`/knowledge/solutions/${chatId}/save`, input)
 
 // ---------------- 飞书导入（CAP-45） ----------------
 
@@ -68,6 +144,19 @@ export const updateEntry = (id: number, input: Partial<KnowledgeEntryInput>) =>
 export const deleteEntry = (id: number) => api.del(`/knowledge/entries/${id}`)
 export const reindexEntry = (id: number) =>
   api.post<KnowledgeEntry>(`/knowledge/entries/${id}/reindex`)
+/** CAP-85 FR-29：登记一次人工复核（刷新 lastReviewedAt） */
+export const reviewEntry = (id: number) =>
+  api.post<KnowledgeEntry>(`/knowledge/entries/${id}/review`)
+export const listEntryChunks = (id: number) =>
+  api.get<KnowledgeChunk[]>(`/knowledge/entries/${id}/chunks`)
+export const listEntryVersions = (id: number) =>
+  api.get<KnowledgeVersion[]>(`/knowledge/entries/${id}/versions`)
+export const getEntryVersion = (id: number, version: number) =>
+  api.get<KnowledgeVersionDetail>(`/knowledge/entries/${id}/versions/${version}`)
+
+/** CAP-84 FR-25 负面反馈 Top 文档（ADMIN） */
+export const negativeFeedbackTop = (days = 30, limit = 20) =>
+  api.get<NegativeFeedbackReport>(`/chats/admin/knowledge-feedback/top?days=${days}&limit=${limit}`)
 
 // ---------------- 注入预览 ----------------
 
@@ -95,3 +184,40 @@ export const adoptProposal = (id: number, target: 'project' | 'global', projectI
 }
 export const rejectProposal = (id: number) => api.post<KnowledgeProposal>(`/knowledge/proposals/${id}/reject`)
 export const deleteProposal = (id: number) => api.del(`/knowledge/proposals/${id}`)
+
+// ---------------- CAP-85 知识治理（ADMIN） ----------------
+
+export const listSyncSources = (kbId?: number) =>
+  api.get<KnowledgeSyncSource[]>(`/knowledge/admin/sync-sources${kbId ? `?kbId=${kbId}` : ''}`)
+export const createSyncSource = (input: KnowledgeSyncSourceInput) =>
+  api.post<KnowledgeSyncSource>('/knowledge/admin/sync-sources', input)
+export const updateSyncSource = (id: number, input: KnowledgeSyncSourceInput) =>
+  api.put<KnowledgeSyncSource>(`/knowledge/admin/sync-sources/${id}`, input)
+export const deleteSyncSource = (id: number) => api.del(`/knowledge/admin/sync-sources/${id}`)
+export const runSyncSource = (id: number) =>
+  api.post<SyncSubmitResult>(`/knowledge/admin/sync-sources/${id}/run`)
+
+export const getEnrichConfig = () => api.get<EnrichConfig>('/knowledge/admin/enrich/config')
+export const runEnrich = (kbId?: number, limit?: number) =>
+  api.post<EnrichSubmitResult>('/knowledge/admin/enrich', { kbId, limit })
+export const runEntryEnrich = (id: number) =>
+  api.post<EnrichSubmitResult>(`/knowledge/admin/entries/${id}/enrich`)
+export const listEnrichEntries = (kbId?: number, limit = 100) => {
+  const q = new URLSearchParams()
+  if (kbId) q.set('kbId', String(kbId))
+  q.set('limit', String(limit))
+  return api.get<EnrichEntry[]>(`/knowledge/admin/enrich/entries?${q.toString()}`)
+}
+
+export const lifecycleReport = (expiringDays = 14, staleDays = 180, limit = 100) =>
+  api.get<LifecycleReport>(
+    `/knowledge/admin/governance/lifecycle?expiringDays=${expiringDays}&staleDays=${staleDays}&limit=${limit}`,
+  )
+export const duplicateReport = (threshold = 3, maxEntries = 2000) =>
+  api.get<DuplicateReport>(
+    `/knowledge/admin/governance/duplicates?threshold=${threshold}&maxEntries=${maxEntries}`,
+  )
+export const evalReport = (topK = 10, kbId?: number) =>
+  api.get<EvalReport>(
+    `/knowledge/admin/eval/report?topK=${topK}${kbId ? `&kbId=${kbId}` : ''}`,
+  )

@@ -1,6 +1,7 @@
 // 通用问答（CAP-30）REST 封装，对应后端 /api/chats
 import { api } from '../../shared/api/client'
-import type { ChatExecutor, ChatSummary } from './types'
+import type { ChatEvent } from '../../shared/chat/types'
+import type { ChatExecutor, ChatKnowledgeOptions, ChatSummary } from './types'
 
 export interface CreateChatPayload {
   /** 首条提问（即开场消息，发送即创建问答） */
@@ -13,6 +14,12 @@ export interface CreateChatPayload {
   scenarioCode?: string
   /** CAP-46：绑定的知识库 id；启动注入库概览、每轮检索注入 <knowledge-context> */
   knowledgeBaseId?: number
+  /** CAP-84：多库绑定（最多 5 个，仅 MODEL 执行体）；与 knowledgeBaseId 二选一 */
+  knowledgeBaseIds?: number[]
+  /** CAP-84：知识模式 ANSWER（默认，逐轮检索回答）| SOLUTION（九章结构化方案） */
+  knowledgeMode?: 'ANSWER' | 'SOLUTION'
+  /** CAP-84：检索过滤与方案模板（仅知识会话有效） */
+  knowledgeOptions?: ChatKnowledgeOptions
   /** CAP-49：执行体；缺省 = AGENT（runner 上的 claude CLI） */
   executor?: ChatExecutor
   /** CAP-49：MODEL 时钉住的对话端点 id；缺省走平台默认 CHAT 端点，都没有则创建失败 */
@@ -25,6 +32,10 @@ export const listChats = (status?: string) =>
   api.get<ChatSummary[]>(`/chats${status && status !== 'ALL' ? `?status=${encodeURIComponent(status)}` : ''}`)
 
 export const getChat = (id: string) => api.get<ChatSummary>(`/chats/${id}`)
+
+/** CAP-84 FR-24：沉淀方案时选择轮次——从事件流里取带 turnSeq 的回答 */
+export const listChatEvents = (id: string) =>
+  api.get<ChatEvent[]>(`/chats/${id}/events?afterSeq=-1`)
 
 export const suspendChat = (id: string) => api.post<ChatSummary>(`/chats/${id}/suspend`)
 

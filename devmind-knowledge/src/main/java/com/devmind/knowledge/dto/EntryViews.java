@@ -25,6 +25,9 @@ public final class EntryViews {
                 e.getContentMd(), splitTags(e.getTags()), e.getSourceProject(),
                 e.getHitCount(), e.getStatus(), e.getSource(), e.getExternalId(),
                 e.getIndexStatus(), e.getIndexError(),
+                e.getDocType(), e.getSourceUri(), e.getMimeType(), e.getSummary(), e.getOwner(),
+                e.getContentVersion(), e.getValidFrom(), e.getValidTo(), e.getLastReviewedAt(),
+                !Boolean.FALSE.equals(e.getAutoEnrich()), e.getEnrichedAt(), e.getEnrichError(),
                 e.getCreatedAt(), e.getUpdatedAt());
     }
 

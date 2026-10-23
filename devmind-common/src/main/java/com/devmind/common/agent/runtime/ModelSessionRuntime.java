@@ -134,24 +134,34 @@ public class ModelSessionRuntime extends AbstractSessionRuntime {
      * <p>图片直接拒：模型执行体没有图片能力，静默丢弃是更坏的失败（用户以为模型看到了图）。</p>
      */
     @Override
+    public long injectInputForTurn(String text, List<InputImage> images) {
+        return startUserTurn(text, images);
+    }
+
+    @Override
     public void injectInput(String text, List<InputImage> images) {
+        startUserTurn(text, images);
+    }
+
+    private long startUserTurn(String text, List<InputImage> images) {
         if (images != null && !images.isEmpty()) {
             rejectWithError("模型执行体不支持图片输入：请去掉图片，或改用智能体（Agent）执行体");
-            return;
+            return 0;
         }
         boolean hasText = text != null && !text.isBlank();
         if (!hasText || !alive()) {
-            return;
+            return 0;
         }
         if (generating()) {
             rejectWithError("上一轮回答还在生成中：请先点「停止生成」再提问");
-            return;
+            return 0;
         }
         touchActivity();
         long userSeq = nextSeq();
         publish(SessionEvent.of(userSeq, "user", text, "system"));
         transition(SessionState.RUNNING, "收到用户输入，开始生成");
         startTurn(text, userSeq);
+        return userSeq;
     }
 
     /**
@@ -225,7 +235,7 @@ public class ModelSessionRuntime extends AbstractSessionRuntime {
             failure = new ModelCallException("模型问答回合异常: " + e, e);
             log.warn("模型问答回合异常: chat={}", id, e);
         }
-        finishTurn(reply, failure, startedAt);
+        finishTurn(userSeq, reply, failure, startedAt);
     }
 
     /** 增量回调（在读取线程上，必须快速返回）：攒够字数或窗口就发一条合并后的 text_delta。 */
@@ -262,7 +272,8 @@ public class ModelSessionRuntime extends AbstractSessionRuntime {
     }
 
     /** 回合收尾：先清积压增量，再落全量 assistant 与 result；finish 请求的收口也在这里完成。 */
-    private void finishTurn(OpenAiCompatChatStream.Reply reply, ModelCallException failure, long startedAt) {
+    private void finishTurn(long userSeq, OpenAiCompatChatStream.Reply reply,
+                            ModelCallException failure, long startedAt) {
         // 中断后中断位可能是置着的（JDK 在读被中断时会重新置位）——先清掉，别污染落库/广播
         Thread.interrupted();
         boolean killed = exitHandled.get();
@@ -300,6 +311,7 @@ public class ModelSessionRuntime extends AbstractSessionRuntime {
             }
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("model", target.model());
+            payload.put("turnSeq", userSeq);
             if (truncated) {
                 payload.put("truncated", true);
             }
@@ -310,6 +322,7 @@ public class ModelSessionRuntime extends AbstractSessionRuntime {
         payload.put("isError", failure != null);
         payload.put("durationMs", durationMs);
         payload.put("model", target.model());
+        payload.put("turnSeq", userSeq);
         payload.put("subtype", failure != null ? "error" : (interrupted ? "interrupted" : "success"));
         if (truncated) {
             payload.put("truncated", true);

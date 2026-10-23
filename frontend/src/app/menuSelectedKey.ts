@@ -12,6 +12,7 @@ const SELECT_PREFIXES: Array<[string, string]> = [
   ['/projects/', '/requirements'], // /projects/:id/requirements/:rid → 需求
   ['/context', '/context'],
   ['/chats', '/chats'],
+  ['/knowledge', '/knowledge'], // CAP-84 知识中心（库管理在 /admin/knowledge，不走这里）
   ['/bookmarks', '/bookmarks'],
   ['/worklog', '/worklog'],
   ['/settings', '/settings'], // 一级导航「设置」（旧 /me/settings 已重定向）
@@ -35,6 +36,7 @@ export function menuSelectedKey(pathname: string): string {
 const TOPNAV_PREFIXES: Array<[string, string]> = [
   ['/home', '/home'],
   ['/chats', '/chats'],
+  ['/knowledge', '/knowledge'],
   ['/bookmarks', '/bookmarks'],
   ['/worklog', '/worklog'],
   ['/settings', '/settings'], // 一级导航「设置」

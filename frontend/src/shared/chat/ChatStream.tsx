@@ -1,11 +1,14 @@
 // 对话式事件流渲染（由 ChatPanel 承载；CAP-30 由 sessions 上移共享）：把 ChatEvent 流转成问答气泡 + 工具调用卡片 + 回合分隔。
 // system/log 等底层事件收进底部折叠「过程日志」。
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
-import { Collapse, Image, Tag, Typography } from 'antd'
+import { Link } from 'react-router-dom'
+import { Alert, Button, Collapse, Image, Input, Modal, Tag, Typography, message } from 'antd'
 import {
   CheckCircleFilled,
   CloseCircleFilled,
+  DislikeOutlined,
   DownOutlined,
+  LikeOutlined,
   Loading3QuartersOutlined,
   LockOutlined,
   RobotOutlined,
@@ -13,21 +16,56 @@ import {
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import type { ChatEvent, ChatImageAttachment } from './types'
+import { api } from '../api/client'
 import { isImageAttachment } from '../attachments/api'
 import { attachmentRawUrl } from '../attachments/url'
 import { fmtTime } from '../utils/format'
+import { showError } from '../utils/showError'
 
 // ---------------- 事件 → 渲染项 ----------------
 
 type ChatItem =
   | { kind: 'user'; key: string; text: string; isTask?: boolean; attachments?: ChatImageAttachment[]; ts?: number }
   // streaming=true：模型执行体正在逐段吐正文（CAP-49），气泡带光标、不定稿
-  | { kind: 'assistant'; key: string; text: string; model?: string; ts: number; streaming?: boolean }
+  | {
+      kind: 'assistant'
+      key: string
+      text: string
+      model?: string
+      ts: number
+      streaming?: boolean
+      /** CAP-84：本轮用户事件 seq（引用校验按它归位） */
+      turnSeq?: number
+      /** CAP-84 FR-19/23：该轮引用快照与校验结果 */
+      citations?: CitationCheck
+    }
   | ToolItem
   | { kind: 'result'; key: string; isError: boolean; cost?: string; durationMs?: number }
   | { kind: 'divider'; key: string; text: string }
   | { kind: 'notice'; key: string; text: string; ts: number }
   | { kind: 'error'; key: string; text: string; ts: number }
+
+/** CAP-84 FR-19：本轮引用快照（后端 chat_knowledge_refs 的展示形状） */
+interface CitationSource {
+  citationNo: number
+  entryId: number
+  kbId?: number
+  chunkId?: number
+  entryName: string
+  sourceUri?: string
+  snippet?: string
+  score?: number
+}
+
+/** CAP-84 FR-23：citation_check 事件 payload */
+interface CitationCheck {
+  turnSeq: number
+  citedCount: number
+  invalidCount: number
+  invalidRate: number
+  warning: boolean
+  sources: CitationSource[]
+}
 
 interface ToolItem {
   kind: 'tool'
@@ -46,6 +84,15 @@ const LEGACY_TOOL_RE =
 
 function cleanAssistantText(text: string): string {
   return (text || '').replace(LEGACY_TOOL_RE, '').trim()
+}
+
+// CAP-84：用户事件里可能带检索注入块（首轮库概览 + 每轮证据），原文给模型看，气泡只显示真实提问
+const INJECTED_BLOCK_RE = /^\s*<knowledge-(?:base|context)>[\s\S]*?<\/knowledge-(?:base|context)>\s*/
+
+function cleanUserText(text: string): string {
+  let s = text || ''
+  while (INJECTED_BLOCK_RE.test(s)) s = s.replace(INJECTED_BLOCK_RE, '')
+  return s.trim()
 }
 
 function toolSummary(inputRaw?: string): string {
@@ -115,9 +162,10 @@ function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[];
         endStream() // 新提问：上一轮气泡定稿（结果事件可能没来，气泡不能一直转）
         // CAP-32：附件引用在 payload.attachments（只放 id/name/contentType）
         const attachments = (ev.payload?.attachments as ChatImageAttachment[] | undefined) ?? []
-        if (ev.content?.trim() || attachments.length > 0) {
+        const text = cleanUserText(ev.content ?? '')
+        if (text || attachments.length > 0) {
           items.push({
-            kind: 'user', key: `e${ev.seq}`, text: ev.content ?? '',
+            kind: 'user', key: `e${ev.seq}`, text,
             attachments: attachments.length > 0 ? attachments : undefined, ts: ev.timestamp,
           })
         }
@@ -127,12 +175,14 @@ function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[];
         const text = cleanAssistantText(ev.content ?? '')
         if (!text) break
         const model = (ev.payload?.model as string) || undefined
+        const turnSeq = typeof ev.payload?.turnSeq === 'number' ? (ev.payload.turnSeq as number) : undefined
         if (streamItem) {
           // 全量为准：直接覆盖流式气泡的正文（增量与全量相等 / 前缀 / 网关重发不一致，三种情况
           // 都收敛到这一条路径——否则会留下两个气泡或重复尾巴）
           streamItem.text = text
           streamItem.model = model ?? streamItem.model
           streamItem.ts = ev.timestamp
+          streamItem.turnSeq = turnSeq ?? streamItem.turnSeq
           endStream()
           break
         }
@@ -141,8 +191,9 @@ function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[];
           last.text += '\n\n' + text
           last.model = last.model ?? model
           last.ts = ev.timestamp
+          last.turnSeq = last.turnSeq ?? turnSeq
         } else {
-          items.push({ kind: 'assistant', key: `e${ev.seq}`, text, model, ts: ev.timestamp })
+          items.push({ kind: 'assistant', key: `e${ev.seq}`, text, model, ts: ev.timestamp, turnSeq })
         }
         break
       }
@@ -210,6 +261,45 @@ function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[];
         endStream() // 报错即这一轮完了（随后一般有 result{isError}，但不指望它）
         items.push({ kind: 'error', key: `e${ev.seq}`, text: ev.content ?? 'unknown', ts: ev.timestamp })
         break
+      case 'citation_check': {
+        // CAP-84 FR-23：回合收口后的引用校验；正文不动，只把来源与异常提示挂到对应回答上
+        const p = ev.payload ?? {}
+        const rawSources = Array.isArray(p.sources) ? (p.sources as Record<string, unknown>[]) : []
+        const sources: CitationSource[] = rawSources
+          .filter((s) => typeof s.entryId === 'number' && typeof s.citationNo === 'number')
+          .map((s) => ({
+            citationNo: Number(s.citationNo),
+            entryId: Number(s.entryId),
+            kbId: typeof s.kbId === 'number' ? s.kbId : undefined,
+            chunkId: typeof s.chunkId === 'number' ? s.chunkId : undefined,
+            entryName: typeof s.entryName === 'string' ? s.entryName : `文档 #${s.entryId}`,
+            sourceUri: typeof s.sourceUri === 'string' ? s.sourceUri : undefined,
+            snippet: typeof s.snippet === 'string' ? s.snippet : undefined,
+            score: typeof s.score === 'number' ? s.score : undefined,
+          }))
+        const check: CitationCheck = {
+          turnSeq: typeof p.turnSeq === 'number' ? p.turnSeq : 0,
+          citedCount: typeof p.citedCount === 'number' ? p.citedCount : 0,
+          invalidCount: typeof p.invalidCount === 'number' ? p.invalidCount : 0,
+          invalidRate: typeof p.invalidRate === 'number' ? p.invalidRate : 0,
+          warning: Boolean(p.warning),
+          sources,
+        }
+        let target: Extract<ChatItem, { kind: 'assistant' }> | undefined
+        if (check.turnSeq > 0) {
+          target = [...items]
+            .reverse()
+            .find((it): it is Extract<ChatItem, { kind: 'assistant' }> =>
+              it.kind === 'assistant' && it.turnSeq === check.turnSeq)
+        }
+        if (!target) {
+          target = [...items]
+            .reverse()
+            .find((it): it is Extract<ChatItem, { kind: 'assistant' }> => it.kind === 'assistant')
+        }
+        if (target) target.citations = check
+        break
+      }
       case 'system':
       case 'log':
         logs.push(ev)
@@ -230,6 +320,7 @@ export default function ChatStream({
   speaker = 'Claude',
   maxHeight = 560,
   emptyText = '等待事件…',
+  feedback,
 }: {
   events: ChatEvent[]
   taskSpec?: string
@@ -238,6 +329,8 @@ export default function ChatStream({
   speaker?: string
   maxHeight?: number | string | null
   emptyText?: string
+  /** CAP-84 FR-25：知识会话的答案反馈入口 */
+  feedback?: { apiBase: string; chatId: string }
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
@@ -263,7 +356,7 @@ export default function ChatStream({
         <Typography.Text type="secondary">{emptyText}</Typography.Text>
       )}
       {items.map((item) => (
-        <ChatItemView key={item.key} item={item} sessionModel={model} speaker={speaker} />
+        <ChatItemView key={item.key} item={item} sessionModel={model} speaker={speaker} feedback={feedback} />
       ))}
       {logs.length > 0 && (
         <Collapse
@@ -290,7 +383,12 @@ export default function ChatStream({
   )
 }
 
-function ChatItemView({ item, sessionModel, speaker }: { item: ChatItem; sessionModel?: string; speaker: string }) {
+function ChatItemView({ item, sessionModel, speaker, feedback }: {
+  item: ChatItem
+  sessionModel?: string
+  speaker: string
+  feedback?: { apiBase: string; chatId: string }
+}) {
   switch (item.kind) {
     case 'user':
       return (
@@ -332,6 +430,10 @@ function ChatItemView({ item, sessionModel, speaker }: { item: ChatItem; session
             <span className="chat-time">{fmtTime(new Date(item.ts).toISOString())}</span>
           </div>
           <AssistantBody text={item.text} streaming={item.streaming} />
+          {item.citations && <CitationBlock check={item.citations} />}
+          {feedback && item.turnSeq && !item.streaming && (
+            <FeedbackBar apiBase={feedback.apiBase} chatId={feedback.chatId} turnSeq={item.turnSeq} />
+          )}
         </div>
       )
     }
@@ -378,6 +480,132 @@ function AssistantBody({ text, streaming }: { text: string; streaming?: boolean 
     <div className="doc-md chat-md">
       <ReactMarkdown>{deferred}</ReactMarkdown>
       {streaming && <span className="chat-cursor" />}
+    </div>
+  )
+}
+
+/**
+ * CAP-84 FR-25：知识会话答案反馈。同一轮重复提交覆盖评价（后端按 chat+turn+user 去重），
+ * 「无用」必须填原因，管理页据此聚合负面反馈 Top 文档。
+ */
+function FeedbackBar({ apiBase, chatId, turnSeq }: { apiBase: string; chatId: string; turnSeq: number }) {
+  const [value, setValue] = useState<boolean | null>(null)
+  const [open, setOpen] = useState(false)
+  const [useful, setUseful] = useState(true)
+  const [reason, setReason] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const openWith = (u: boolean) => {
+    setUseful(u)
+    setReason('')
+    setOpen(true)
+  }
+
+  const submit = async () => {
+    if (!useful && !reason.trim()) {
+      message.warning('请填写「无用」的原因')
+      return
+    }
+    setSubmitting(true)
+    try {
+      await api.post(`${apiBase}/${chatId}/feedback`, {
+        turnSeq,
+        useful,
+        reason: reason.trim() || undefined,
+      })
+      setValue(useful)
+      setOpen(false)
+      message.success('感谢反馈，已记录用于改进知识库')
+    } catch (e) {
+      showError(e, '反馈提交失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        这条回答有帮助吗？
+      </Typography.Text>
+      <Button
+        size="small"
+        type={value === true ? 'primary' : 'default'}
+        icon={<LikeOutlined />}
+        onClick={() => openWith(true)}
+      >
+        有用
+      </Button>
+      <Button
+        size="small"
+        danger={value === false}
+        icon={<DislikeOutlined />}
+        onClick={() => openWith(false)}
+      >
+        无用
+      </Button>
+      <Modal
+        open={open}
+        title={useful ? '这条回答有帮助' : '这条回答没帮助'}
+        okText="提交"
+        cancelText="取消"
+        confirmLoading={submitting}
+        onOk={submit}
+        onCancel={() => setOpen(false)}
+      >
+        <Input.TextArea
+          rows={3}
+          value={reason}
+          maxLength={1000}
+          showCount
+          placeholder={
+            useful
+              ? '可选：具体哪里有帮助？（如：步骤清晰、命令可直接执行）'
+              : '请说明原因（如：文档过时、缺少命令、答非所问），便于补充文档或调整分块'
+          }
+          onChange={(e) => setReason(e.target.value)}
+        />
+      </Modal>
+    </div>
+  )
+}
+
+/**
+ * CAP-84 FR-19/23：回答底部「参考来源」与引用校验异常提示。
+ * 引用来源点击跳知识中心文档详情（/knowledge?entryId=#&chunkId=#），由知识中心按深链打开抽屉并定位分块。
+ */
+function CitationBlock({ check }: { check: CitationCheck }) {
+  return (
+    <div style={{ marginTop: 8 }}>
+      {check.warning && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 6 }}
+          message={`引用校验异常：${check.invalidCount}/${check.citedCount} 条引用不在本轮检索结果中`}
+          description="回答已完整保留；引用编号不可靠时请按下方来源核对原文后再采用。"
+        />
+      )}
+      {check.sources.length > 0 && (
+        <div>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            参考来源（{check.sources.length}）
+          </Typography.Text>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+            {check.sources.map((s) => (
+              <Link
+                key={`${s.citationNo}-${s.entryId}-${s.chunkId ?? ''}`}
+                to={`/knowledge?entryId=${s.entryId}${s.chunkId ? `&chunkId=${s.chunkId}` : ''}`}
+                title={[s.sourceUri, s.snippet].filter(Boolean).join('\n')}
+              >
+                <Tag color="purple" style={{ marginInlineEnd: 0, maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  [S{s.citationNo}] {s.entryName}
+                </Tag>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

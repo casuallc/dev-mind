@@ -154,6 +154,12 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
                 summary = ev.content() == null ? "" : ev.content();
                 transition(SessionState.WAITING_INPUT, "回合完成，可继续输入或结束会话");
                 scheduleIdleEnd();
+                // CAP-84 FR-23：回合级后处理（引用校验）不依赖用量字段，必须无条件回调
+                try {
+                    listener.onResult(id, ev);
+                } catch (Exception e) {
+                    log.warn("回合结束回调失败: session={}", id, e);
+                }
                 // 用量账本：入账失败绝不能打断事件流，故这里兜底 catch（transition 的监听器调用
                 // 不兜底是刻意的——状态通知失败本身就是 bug，要炸出来）
                 TurnUsage usage = TurnUsage.from(ev.payload());
@@ -230,22 +236,33 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
      */
     @Override
     public void injectInput(String text, List<InputImage> images, List<InputFile> files) {
+        injectInputInternal(text, images, files);
+    }
+
+    @Override
+    public long injectInputForTurn(String text, List<InputImage> images) {
+        return injectInputInternal(text, images, List.of());
+    }
+
+    private long injectInputInternal(String text, List<InputImage> images, List<InputFile> files) {
         boolean hasText = text != null && !text.isBlank();
         boolean hasImages = images != null && !images.isEmpty();
         boolean hasFiles = files != null && !files.isEmpty();
         if ((!hasText && !hasImages && !hasFiles) || !alive()) {
-            return;
+            return 0;
         }
         touchActivity();
         List<InputImage> imgs = hasImages ? images : List.of();
         List<InputFile> fs = hasFiles ? files : List.of();
         sendUserMessage(hasText ? text : "", imgs, fs);
-        publish(SessionEvent.of(nextSeq(), "user",
+        long userSeq = nextSeq();
+        publish(SessionEvent.of(userSeq, "user",
                 hasText ? text : (!fs.isEmpty() ? "[文件]" : "[图片]"), "system",
                 attachmentPayload(imgs, fs)));
         if (state == SessionState.WAITING_INPUT) {
             transition(SessionState.RUNNING, "收到用户输入，继续执行");
         }
+        return userSeq;
     }
 
     /** user 事件 payload：附件引用（只放 id/name/contentType，不放 base64）。 */
@@ -286,6 +303,14 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
             return;
         }
         publish(SessionEvent.of(nextSeq(), "user", text, "system"));
+    }
+
+    /**
+     * 能力层补充一条系统事件（CAP-84 FR-23 引用校验结果等）。
+     * 只入事件流，不改变会话状态；可在 result 分派回调里安全调用。
+     */
+    public void noteSystemEvent(String type, String content, Map<String, Object> payload) {
+        publish(SessionEvent.of(nextSeq(), type, content, "system", payload));
     }
 
     /** 优雅结束：关 stdin（EOF）/发 finish 指令，agent 读完后自然退出 → DONE/FAILED；20s 不退兜底强杀。 */

@@ -4,18 +4,12 @@ import com.devmind.common.knowledge.KnowledgeRetriever.DegradedReason;
 import com.devmind.common.knowledge.KnowledgeRetriever.Detailed;
 import com.devmind.common.knowledge.KnowledgeRetriever.KbOverview;
 import com.devmind.common.knowledge.KnowledgeRetriever.RetrievedChunk;
-import com.devmind.knowledge.config.KnowledgeProperties;
-import com.devmind.knowledge.embedding.EmbeddingClient;
-import com.devmind.knowledge.embedding.EmbeddingException;
 import com.devmind.knowledge.embedding.EmbeddingResolver;
-import com.devmind.knowledge.embedding.MockEmbeddingClient;
-import com.devmind.knowledge.embedding.VectorJson;
 import com.devmind.knowledge.model.KnowledgeBaseEntity;
-import com.devmind.knowledge.model.KnowledgeChunkEntity;
 import com.devmind.knowledge.model.KnowledgeEntryEntity;
 import com.devmind.knowledge.repo.KnowledgeBaseRepository;
-import com.devmind.knowledge.repo.KnowledgeChunkRepository;
 import com.devmind.knowledge.repo.KnowledgeEntryRepository;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,9 +18,11 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -34,199 +30,110 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * KnowledgeRetrieverImpl（CAP-44 FR-06 + CAP-48 按端点分组/降级诊断）：向量路径排序/阈值/topK/
- * active 过滤，无端点 LIKE 降级，异常按无命中降级，维度失配显式报 DIMENSION_MISMATCH。
+ * CAP-84 检索 SPI：委托混合检索服务，保留块级返回形状；overview 行为不变。
  */
 class KnowledgeRetrieverImplTest {
 
-    // 64 维降低哈希碰撞（16 维下无关文本碰撞余弦会误过 0.15 阈值）
-    private static final MockEmbeddingClient MOCK = new MockEmbeddingClient(64);
-
-    private KnowledgeChunkRepository chunkRepo;
+    private KnowledgeSearchService searchService;
     private KnowledgeEntryRepository entryRepo;
     private KnowledgeBaseRepository kbRepo;
-    private EmbeddingClient embeddingClient;
     private EmbeddingResolver resolver;
-    private KnowledgeProperties props;
     private KnowledgeRetrieverImpl retriever;
 
     @BeforeEach
     void setUp() {
-        chunkRepo = mock(KnowledgeChunkRepository.class);
+        searchService = mock(KnowledgeSearchService.class);
         entryRepo = mock(KnowledgeEntryRepository.class);
         kbRepo = mock(KnowledgeBaseRepository.class);
-        embeddingClient = mock(EmbeddingClient.class);
         resolver = mock(EmbeddingResolver.class);
-        props = new KnowledgeProperties();
-        lenient().when(embeddingClient.available()).thenReturn(true);
-        lenient().when(embeddingClient.model()).thenReturn("mock-embedding");
-        lenient().when(embeddingClient.embed(anyList()))
-                .thenAnswer(inv -> MOCK.embed(inv.getArgument(0)));
         lenient().when(resolver.anyConfigured()).thenReturn(true);
-        lenient().when(resolver.resolve(any())).thenReturn(resolution(11L, 64, 0.15));
-        retriever = new KnowledgeRetrieverImpl(chunkRepo, entryRepo, kbRepo, resolver, props);
+        retriever = new KnowledgeRetrieverImpl(searchService, entryRepo, kbRepo, resolver);
     }
 
-    private EmbeddingResolver.Resolution resolution(Long endpointId, Integer dimensions, double threshold) {
-        return new EmbeddingResolver.Resolution(endpointId, "mock-embedding", dimensions, threshold,
-                props.getEmbedding().getTopK(), embeddingClient);
-    }
-
-    private void unavailable() {
-        lenient().when(resolver.anyConfigured()).thenReturn(false);
-        lenient().when(resolver.resolve(any())).thenReturn(EmbeddingResolver.Resolution.unavailable());
-    }
-
-    private KnowledgeEntryEntity entry(long id, long kbId, String name, String status) {
-        KnowledgeEntryEntity e = new KnowledgeEntryEntity();
-        e.setId(id);
-        e.setKbId(kbId);
-        e.setName(name);
-        e.setStatus(status);
-        e.setContentMd("content-" + name);
-        return e;
-    }
-
-    private KnowledgeChunkEntity chunk(long entryId, long kbId, int idx, String content) {
-        return chunk(entryId, kbId, idx, content, 64);
-    }
-
-    private KnowledgeChunkEntity chunk(long entryId, long kbId, int idx, String content, int dims) {
-        KnowledgeChunkEntity c = new KnowledgeChunkEntity();
-        c.setEntryId(entryId);
-        c.setKbId(kbId);
-        c.setChunkIndex(idx);
-        c.setContent(content);
-        c.setEmbedding(VectorJson.toJson(new MockEmbeddingClient(dims).embed(List.of(content)).get(0)));
-        return c;
+    private KnowledgeSearchService.ChunkHit hit(long entryId, long kbId, String name,
+                                                 String content, double score) {
+        return new KnowledgeSearchService.ChunkHit(100 + entryId, entryId, kbId, score, name,
+                content, "部署 > 回滚", 0, 10, 200, "摘要", "MAINT", "maint/runbook.md",
+                "maint/runbook.md", "运维,部署", Instant.now());
     }
 
     @Test
-    void vectorRetrieveRanksAndFilters() {
-        // 测试侧阈值提到 0.5：mock 哈希向量无关文本碰撞分可达 ~0.15（真实 embedding 不存在此问题），
-        // 本用例验证排序/过滤逻辑而非 mock 向量质量
-        lenient().when(resolver.resolve(any())).thenReturn(resolution(11L, 64, 0.5));
+    void mapsFusedChunksToSpiShape() {
+        when(searchService.fusedChunks("回滚", List.of(10L), null, null, null, 8))
+                .thenReturn(new KnowledgeSearchService.Fused(
+                        List.of(hit(1, 10, "发布手册", "回滚步骤：先摘流量", 0.03)),
+                        true, DegradedReason.NONE));
 
-        List<KnowledgeChunkEntity> chunks = List.of(
-                chunk(1, 10, 0, "前端构建规范与产物说明"),
-                chunk(1, 10, 1, "数据库备份策略恢复演练流程"),
-                chunk(2, 10, 0, "前端构建规范"),       // deprecated 条目
-                chunk(3, 20, 0, "前端构建规范细则"));   // 其他库
-        when(chunkRepo.findByKbIdIn(List.of(10L))).thenReturn(
-                chunks.stream().filter(c -> c.getKbId() == 10L).toList());
-        when(entryRepo.findAllById(anyList())).thenReturn(List.of(
-                entry(1, 10, "构建规范", "active"),
-                entry(2, 10, "废弃规范", "deprecated")));
+        List<RetrievedChunk> hits = retriever.retrieve(List.of(10L), "回滚", 8);
 
-        List<RetrievedChunk> hits = retriever.retrieve(List.of(10L), "前端构建规范", 8);
-
-        assertEquals(1, hits.size(), "只命中相关块：无关块过阈值、deprecated 条目剔除");
-        assertEquals("构建规范", hits.get(0).entryName());
-        assertEquals("前端构建规范与产物说明", hits.get(0).content());
-        assertTrue(hits.get(0).score() >= 0.5, "命中分应过阈值");
+        assertEquals(1, hits.size());
+        assertEquals("发布手册", hits.get(0).entryName());
+        assertEquals("回滚步骤：先摘流量", hits.get(0).content());
+        assertEquals(0.03, hits.get(0).score());
+        assertEquals(101L, hits.get(0).chunkId(), "引用可定位到具体分块");
+        assertEquals("maint/runbook.md", hits.get(0).sourceUri());
+        assertEquals("部署 > 回滚", hits.get(0).headingPath());
+        assertTrue(hits.get(0).snippet().contains("回滚步骤"), "引用片段用于列表展示");
     }
 
     @Test
-    void vectorRetrieveRespectsTopK() {
-        when(chunkRepo.findByKbIdIn(List.of(10L))).thenReturn(List.of(
-                chunk(1, 10, 0, "前端构建规范与产物"),
-                chunk(1, 10, 1, "前端构建规范")));
-        when(entryRepo.findAllById(anyList())).thenReturn(List.of(entry(1, 10, "规范", "active")));
+    void baseNamesMapsIdsForEvidenceHint() {
+        KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
+        kb.setId(10L);
+        kb.setName("研发规范库");
+        when(kbRepo.findAllById(List.of(10L))).thenReturn(List.of(kb));
 
-        List<RetrievedChunk> hits = retriever.retrieve(List.of(10L), "前端构建规范", 1);
-
-        assertEquals(1, hits.size(), "topK=1 只留最高分");
-        assertEquals("前端构建规范", hits.get(0).content(), "与查询完全相同的块分最高");
+        assertEquals(java.util.Map.of(10L, "研发规范库"), retriever.baseNames(List.of(10L)));
+        assertTrue(retriever.baseNames(List.of()).isEmpty());
     }
 
     @Test
-    void reportsDimensionMismatchInsteadOfSilentEmptyResult() {
-        // 库内向量是 64 维（旧端点建的），当前端点返回 16 维：余弦恒 0、命中被阈值全过滤，
-        // 旧行为只表现为"搜不到"；现在必须显式告诉用户去重建索引
-        when(chunkRepo.findByKbIdIn(List.of(10L))).thenReturn(List.of(chunk(1, 10, 0, "前端构建规范", 64)));
-        when(entryRepo.findAllById(anyList())).thenReturn(List.of(entry(1, 10, "规范", "active")));
-        lenient().when(resolver.resolve(any())).thenReturn(resolution(11L, 16, 0.15));
-        lenient().when(embeddingClient.embed(anyList()))
-                .thenAnswer(inv -> new MockEmbeddingClient(16).embed(inv.getArgument(0)));
+    void bm25OnlySearchStillReturnsHitsWithoutEmbedding() {
+        when(searchService.fusedChunks(any(), anyList(), any(), any(), any(), eq(8)))
+                .thenReturn(new KnowledgeSearchService.Fused(
+                        List.of(hit(1, 10, "发布手册", "回滚步骤", 0.016)),
+                        false, DegradedReason.NO_EMBEDDING));
+        when(resolver.anyConfigured()).thenReturn(false);
 
-        Detailed result = retriever.retrieveDetailed(List.of(10L), "前端构建规范", 8);
+        Detailed result = retriever.retrieveDetailed(List.of(10L), "回滚", 8);
 
-        assertTrue(result.chunks().isEmpty(), "维度不等时不应有命中");
-        assertEquals(DegradedReason.DIMENSION_MISMATCH, result.degradedReason());
-        assertTrue(result.vector(), "仍然是走了向量通道的");
-    }
-
-    @Test
-    void healthyVectorRetrieveReportsNoDegradation() {
-        when(chunkRepo.findByKbIdIn(List.of(10L))).thenReturn(List.of(chunk(1, 10, 0, "前端构建规范")));
-        when(entryRepo.findAllById(anyList())).thenReturn(List.of(entry(1, 10, "规范", "active")));
-
-        Detailed result = retriever.retrieveDetailed(List.of(10L), "前端构建规范", 8);
-
-        assertEquals(DegradedReason.NONE, result.degradedReason());
-        assertTrue(result.vector());
-    }
-
-    @Test
-    void eachKbUsesItsOwnEndpointThenMergesHits() {
-        KnowledgeBaseEntity kb10 = new KnowledgeBaseEntity();
-        kb10.setId(10L);
-        kb10.setModelEndpointId(11L);
-        KnowledgeBaseEntity kb20 = new KnowledgeBaseEntity();
-        kb20.setId(20L);
-        kb20.setModelEndpointId(22L);
-        when(kbRepo.findAllById(List.of(10L, 20L))).thenReturn(List.of(kb10, kb20));
-        // 22 号端点用另一个客户端（另一个模型）：查询要向两个端点各投一次
-        EmbeddingClient other = mock(EmbeddingClient.class);
-        lenient().when(other.available()).thenReturn(true);
-        lenient().when(other.model()).thenReturn("other-model");
-        lenient().when(other.embed(anyList())).thenAnswer(inv -> MOCK.embed(inv.getArgument(0)));
-        when(resolver.resolve(11L)).thenReturn(resolution(11L, 64, 0.15));
-        when(resolver.resolve(22L)).thenReturn(new EmbeddingResolver.Resolution(
-                22L, "other-model", 64, 0.15, 8, other));
-        when(chunkRepo.findByKbIdIn(List.of(10L))).thenReturn(List.of(chunk(1, 10, 0, "前端构建规范")));
-        when(chunkRepo.findByKbIdIn(List.of(20L))).thenReturn(List.of(chunk(2, 20, 0, "前端构建规范")));
-        when(entryRepo.findAllById(anyList())).thenReturn(List.of(
-                entry(1, 10, "A 库条目", "active"), entry(2, 20, "B 库条目", "active")));
-
-        List<RetrievedChunk> hits = retriever.retrieve(List.of(10L, 20L), "前端构建规范", 8);
-
-        verify(other).embed(anyList());
-        assertEquals(2, hits.size(), "两个库各自的命中合并返回");
-    }
-
-    @Test
-    void fallsBackToLikeWhenNoEndpoint() {
-        unavailable();
-        KnowledgeEntryEntity e = entry(1, 10, "构建规范", "active");
-        e.setContentMd("长".repeat(600));
-        when(entryRepo.searchInBases(List.of(10L), "构建")).thenReturn(List.of(e));
-
-        Detailed result = retriever.retrieveDetailed(List.of(10L), "构建", 8);
-
-        assertEquals(1, result.chunks().size());
-        assertEquals(0.0, result.chunks().get(0).score(), "LIKE 降级命中 score=0");
-        assertEquals(KnowledgeRetrieverImpl.FALLBACK_CONTENT_LEN + 1,
-                result.chunks().get(0).content().length(), "降级命中内容截断 500+省略号");
-        assertTrue(result.chunks().get(0).content().endsWith("…"));
+        assertEquals(1, result.chunks().size(), "BM25 不依赖向量端点");
         assertEquals(DegradedReason.NO_EMBEDDING, result.degradedReason());
         assertTrue(!result.vector());
-        verify(embeddingClient, never()).embed(anyList());
+    }
+
+    @Test
+    void dimensionMismatchIsExposedForRebuildGuidance() {
+        when(searchService.fusedChunks(any(), anyList(), any(), any(), any(), anyInt()))
+                .thenReturn(new KnowledgeSearchService.Fused(List.of(), true,
+                        DegradedReason.DIMENSION_MISMATCH));
+
+        Detailed result = retriever.retrieveDetailed(List.of(10L), "回滚", 8);
+
+        assertEquals(DegradedReason.DIMENSION_MISMATCH, result.degradedReason());
+        assertTrue(result.vector(), "仍然走了向量通道");
+    }
+
+    @Test
+    void filteredRetrievalPassesDocTypesAndTags() {
+        when(searchService.fusedChunks(eq("回滚"), eq(List.of(10L)), eq(List.of("MAINT")),
+                isNull(), eq(List.of("部署", "运维")), eq(5)))
+                .thenReturn(new KnowledgeSearchService.Fused(
+                        List.of(hit(1, 10, "发布手册", "回滚步骤", 0.03)), false, DegradedReason.NONE));
+
+        Detailed result = retriever.retrieveDetailed(List.of(10L), "回滚", 5,
+                List.of("MAINT"), List.of("部署", "运维"));
+
+        assertEquals(1, result.chunks().size());
+        verify(searchService).fusedChunks("回滚", List.of(10L), List.of("MAINT"),
+                null, List.of("部署", "运维"), 5);
     }
 
     @Test
     void emptyInputShortCircuits() {
         assertEquals(List.of(), retriever.retrieve(List.of(), "q", 8));
         assertEquals(List.of(), retriever.retrieve(List.of(10L), " ", 8));
-        verify(chunkRepo, never()).findByKbIdIn(anyList());
-        verify(entryRepo, never()).searchInBases(anyList(), any());
-    }
-
-    @Test
-    void embeddingFailureDegradesToEmpty() {
-        when(embeddingClient.embed(anyList())).thenThrow(new EmbeddingException("boom"));
-
-        assertEquals(List.of(), retriever.retrieve(List.of(10L), "q", 8), "检索异常按无命中降级");
+        verify(searchService, never()).fusedChunks(any(), anyList(), any(), any(), any(), anyInt());
     }
 
     @Test
@@ -237,10 +144,12 @@ class KnowledgeRetrieverImplTest {
         kb.setInjectMode("RAG");
         kb.setStatus(KnowledgeBaseEntity.STATUS_ACTIVE);
         when(kbRepo.findById(10L)).thenReturn(Optional.of(kb));
-        when(entryRepo.findByKbIdAndStatusOrderByCreatedAtDesc(10L, "active")).thenReturn(List.of(
-                entry(1, 10, "新条目", "active"),
-                entry(2, 10, "旧条目", "active"),
-                entry(3, 10, "废弃条目", "deprecated")));
+        KnowledgeEntryEntity e1 = new KnowledgeEntryEntity();
+        e1.setName("新条目");
+        KnowledgeEntryEntity e2 = new KnowledgeEntryEntity();
+        e2.setName("旧条目");
+        when(entryRepo.findByKbIdAndStatusOrderByCreatedAtDesc(10L, "active"))
+                .thenReturn(List.of(e1, e2));
 
         Optional<KbOverview> overview = retriever.overview(10L);
 
@@ -248,8 +157,7 @@ class KnowledgeRetrieverImplTest {
         assertEquals("研发规范库", overview.get().name());
         assertEquals("团队研发规范", overview.get().description());
         assertEquals("RAG", overview.get().injectMode());
-        assertEquals(List.of("新条目", "旧条目", "废弃条目"), overview.get().entryNames(),
-                "按创建时间倒序取回（截断由 SQL/实现侧 limit 处理，测试桩少于上限即全量）");
+        assertEquals(List.of("新条目", "旧条目"), overview.get().entryNames());
     }
 
     @Test

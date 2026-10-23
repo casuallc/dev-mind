@@ -99,7 +99,8 @@ class FeishuImportServiceTest {
 
         ObjectProvider<FeishuDocFetcher> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(fetcher);
-        service = new FeishuImportService(kbRepo, entryRepo, eventPublisher, provider);
+        service = new FeishuImportService(kbRepo, entryRepo, mock(KnowledgeVersionService.class),
+                eventPublisher, provider);
     }
 
     private static FeishuDoc doc(String token, String title, String content) {
@@ -216,6 +217,7 @@ class FeishuImportServiceTest {
         when(empty.getIfAvailable()).thenReturn(null);
         FeishuImportService noFetcher = new FeishuImportService(
                 mock(KnowledgeBaseRepository.class), mock(KnowledgeEntryRepository.class),
+                mock(KnowledgeVersionService.class),
                 mock(ApplicationEventPublisher.class), empty);
 
         assertTrue(noFetcher.listIntegrations().isEmpty());
