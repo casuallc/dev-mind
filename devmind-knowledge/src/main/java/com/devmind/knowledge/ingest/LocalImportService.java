@@ -7,6 +7,7 @@ import com.devmind.knowledge.config.KnowledgeProperties;
 import com.devmind.knowledge.dto.ClassifyPreviewItem;
 import com.devmind.knowledge.dto.ImportBatchView;
 import com.devmind.knowledge.dto.ImportSubmitResult;
+import com.devmind.knowledge.enrich.KnowledgeEnrichService;
 import com.devmind.knowledge.index.KnowledgeIndexService;
 import com.devmind.knowledge.model.KnowledgeBaseEntity;
 import com.devmind.knowledge.model.KnowledgeEntryEntity;
@@ -70,6 +71,7 @@ public class LocalImportService {
     private final KnowledgeIndexService indexService;
     private final KnowledgeVersionService versionService;
     private final AsyncTaskService taskService;
+    private final KnowledgeEnrichService enrichService;
     private final KnowledgeProperties props;
     private final Set<String> running = ConcurrentHashMap.newKeySet();
 
@@ -81,6 +83,7 @@ public class LocalImportService {
                               KnowledgeIndexService indexService,
                               KnowledgeVersionService versionService,
                               @Lazy AsyncTaskService taskService,
+                              KnowledgeEnrichService enrichService,
                               KnowledgeProperties props) {
         this.kbRepo = kbRepo;
         this.entryRepo = entryRepo;
@@ -90,6 +93,7 @@ public class LocalImportService {
         this.indexService = indexService;
         this.versionService = versionService;
         this.taskService = taskService;
+        this.enrichService = enrichService;
         this.props = props;
     }
 
@@ -307,8 +311,22 @@ public class LocalImportService {
             indexService.flush();
             ctx.log("知识导入完成: " + batch.getStatus() + " 成功 " + batch.getSuccessCount()
                     + " 跳过 " + batch.getSkippedCount() + " 失败 " + batch.getFailedCount());
+            queueEnrich(batch, ctx);
         } finally {
             running.remove(batchId);
+        }
+    }
+
+    /** CAP-85 FR-28：开启自动增强时，导入结束后排队一批（失败不影响导入结果）。 */
+    private void queueEnrich(KnowledgeImportBatchEntity batch, TaskContext ctx) {
+        if (!enrichService.autoEnabled() || batch.getSuccessCount() <= 0) {
+            return;
+        }
+        try {
+            String taskId = enrichService.submit(batch.getKbId(), null).taskId();
+            ctx.log("已排队自动增强任务: " + taskId);
+        } catch (Exception e) {
+            log.warn("自动增强排队失败（不阻断导入）: batch={} err={}", batch.getId(), e.toString());
         }
     }
 

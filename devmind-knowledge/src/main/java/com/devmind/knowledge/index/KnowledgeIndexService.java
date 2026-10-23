@@ -3,6 +3,7 @@ package com.devmind.knowledge.index;
 import com.devmind.knowledge.chunk.TextChunker;
 import com.devmind.knowledge.config.KnowledgeProperties;
 import com.devmind.knowledge.embedding.EmbeddingResolver;
+import com.devmind.knowledge.governance.SimHash;
 import com.devmind.knowledge.model.KnowledgeBaseEntity;
 import com.devmind.knowledge.model.KnowledgeChunkEntity;
 import com.devmind.knowledge.model.KnowledgeEntryEntity;
@@ -70,6 +71,12 @@ public class KnowledgeIndexService {
             return;
         }
         KnowledgeBaseEntity kb = entry.getKbId() == null ? null : kbRepo.findById(entry.getKbId()).orElse(null);
+        // CAP-85 FR-29：索引时维护 SimHash（重复检测用；纯元数据，不改变 updatedAt）
+        String simHash = SimHash.of(entry.getContentMd());
+        if (simHash != null && !simHash.equals(entry.getSimHash())) {
+            entry.setSimHash(simHash);
+            entry = entryRepo.save(entry);
+        }
         EmbeddingResolver.Resolution resolution = resolver.resolve(kb == null ? null : kb.getModelEndpointId());
 
         KnowledgeProperties.Embedding cfg = props.getEmbedding();

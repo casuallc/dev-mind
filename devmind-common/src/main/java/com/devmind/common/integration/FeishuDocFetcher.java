@@ -31,4 +31,33 @@ public interface FeishuDocFetcher {
 
     record FeishuIntegration(Long id, String name) {
     }
+
+    /**
+     * CAP-85 FR-27：目录同步用的轻量引用（不含正文）。objType 为 docx/doc，
+     * externalId 即内容 token；updatedAt 为 epoch millis（0 = 源端未给，调用方按需全拉）。
+     */
+    record SpaceDoc(String externalId, String title, String objType, long updatedAt) {
+    }
+
+    /**
+     * CAP-85 FR-27：列出飞书空间/目录下的可同步文档（递归子目录，只收 docx/doc）。
+     * target 支持 wiki 空间链接/ID、云盘文件夹链接/token。
+     * 未实现目录枚举的集成保持默认抛错，知识模块按「当前集成不支持目录同步」提示。
+     */
+    default List<SpaceDoc> listSpaceDocs(long integrationId, String target) {
+        throw new UnsupportedOperationException("当前飞书集成不支持目录枚举");
+    }
+
+    /**
+     * CAP-85 FR-27：按内容 token 直接拉取（目录同步已拿到 objType/token，避免再绕 URL）。
+     * 默认回落到 {@link #fetch(long, String)} 的 URL 形态。
+     */
+    default FeishuDoc fetchNode(long integrationId, String objType, String token) {
+        String path = switch (objType == null ? "" : objType) {
+            case "wiki" -> "/wiki/";
+            case "docx" -> "/docx/";
+            default -> "/docs/";
+        };
+        return fetch(integrationId, "https://open.feishu.cn" + path + token);
+    }
 }

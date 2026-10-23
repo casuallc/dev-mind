@@ -97,6 +97,7 @@
 | [CAP-82](CAP-82-llm-computer-use.md) | LLM Computer-Use 循环 | Agent 域 | 复用 CAP-81 computer 原语，服务端编排视觉模型循环操作 GUI：computer_use_tasks/steps、动作 JSON 协议、dryRun、人工接管；前置=视觉模型接入（扩 common 多模态 + 模型端点视觉位）+ 明确驱动场景 |
 | [CAP-83](CAP-83-binary-session-outputs.md) | 会话产出二进制文件回传 | Agent 域 | CAP-37 产出链路补二进制（xlsx 等曾 UTF-8 解码失败被静默跳过）：严格 UTF-8 解码判定文本/二进制，二进制走独立裸字节 POST 通道进附件管理（CAP-32：归属会话创建者+PRIVATE+tags=session-output，下载/图片预览复用 attachments raw），session_outputs 加 attachment_id 引用列（文本通道与消费零改动），同名覆盖删旧附件，上限沿用附件 20MB；前端弹窗附件项下载/禁推送，publish 兜底 400；部署先服务端后 runner |
 | [CAP-84](CAP-84-knowledge-management-v2.md) | 知识管理 v2（万级文档摄入 + 混合检索 + 方案输出） | 管理/底座 | 本地上传（文件/文件夹/ZIP + Tika 解析 + 目录分类 + 哈希去重/版本）走 devmind-task 异步摄入；嵌入式 Lucene 10 BM25+HNSW 混合检索（RRF）+ 文档级聚合/高亮 + 全局知识中心（H2/PG 同构，否决 2GB 场景的 pgvector）；chat 扩展多库/多轮改写/引用快照；SOLUTION 结构化方案 + 引用校验 + 一键沉淀 CAP-03 文档 |
+| [CAP-85](CAP-85-knowledge-governance-sync.md) | 知识治理与增量同步（M5） | 管理/底座 | Git 本地副本 + 飞书空间目录增量同步（水位 + 删除标记，外部删只 deprecated 不物理删）；CHAT 端点可选自动分类/摘要/标签（人工修正锁定、失败不阻断摄入）；复核/到期/久未复核提醒 + SimHash 近重复报告；固定评测集输出 Recall@K/MRR/引用准确率/拒答率；知识中心 ADMIN 治理控制台 |
 
 ## 文档模板说明
 

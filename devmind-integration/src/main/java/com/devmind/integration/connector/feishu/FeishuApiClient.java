@@ -110,6 +110,75 @@ public class FeishuApiClient {
         return data.path("content").asText("");
     }
 
+    // ---------------- CAP-85 FR-27：目录枚举 ----------------
+
+    /** wiki 空间某父节点下的直接子节点（parentNodeToken 为空 = 根），自动翻页。 */
+    public List<WikiSpaceNode> listWikiSpaceNodes(String spaceId, String parentNodeToken) {
+        List<WikiSpaceNode> nodes = new ArrayList<>();
+        String pageToken = null;
+        do {
+            String path = "/open-apis/wiki/v2/spaces/" + encode(spaceId) + "/nodes?page_size=50"
+                    + (parentNodeToken == null || parentNodeToken.isBlank()
+                            ? "" : "&parent_node_token=" + encode(parentNodeToken))
+                    + (pageToken == null ? "" : "&page_token=" + encode(pageToken));
+            JsonNode data = get(path);
+            data.path("items").forEach(n -> nodes.add(new WikiSpaceNode(
+                    n.path("node_token").asText(""),
+                    n.path("obj_token").asText(""),
+                    n.path("obj_type").asText(""),
+                    n.path("title").asText(""),
+                    epochMillis(n.path("obj_edit_time")))));
+            pageToken = data.path("has_more").asBoolean(false)
+                    ? data.path("page_token").asText("") : null;
+        } while (pageToken != null && !pageToken.isBlank());
+        return nodes;
+    }
+
+    /** 云盘文件夹下的直接文件/子目录（folderToken 为空 = 我的空间根）。 */
+    public List<DriveFile> listDriveFiles(String folderToken) {
+        List<DriveFile> files = new ArrayList<>();
+        String pageToken = null;
+        do {
+            String path = "/open-apis/drive/v1/files?page_size=200"
+                    + (folderToken == null || folderToken.isBlank()
+                            ? "" : "&folder_token=" + encode(folderToken))
+                    + (pageToken == null ? "" : "&page_token=" + encode(pageToken));
+            JsonNode data = get(path);
+            data.path("files").forEach(f -> files.add(new DriveFile(
+                    f.path("token").asText(""),
+                    f.path("name").asText(""),
+                    f.path("type").asText(""),
+                    epochMillis(f.path("modified_time")))));
+            pageToken = data.path("has_more").asBoolean(false)
+                    ? data.path("next_page_token").asText("") : null;
+        } while (pageToken != null && !pageToken.isBlank());
+        return files;
+    }
+
+    public record WikiSpaceNode(String nodeToken, String objToken, String objType,
+                                String title, long updatedAt) {
+    }
+
+    public record DriveFile(String token, String name, String type, long updatedAt) {
+    }
+
+    /** 飞书时间字段有秒级字符串/毫秒数字两种形态，统一为 epoch millis。 */
+    private static long epochMillis(JsonNode node) {
+        long v = node.isNumber() ? node.asLong() : parseLong(node.asText(""));
+        if (v <= 0) {
+            return 0L;
+        }
+        return v < 1_000_000_000_000L ? v * 1000L : v;
+    }
+
+    private static long parseLong(String s) {
+        try {
+            return Long.parseLong(s);
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
+    }
+
     public record WikiNode(String objType, String objToken, String title) {
     }
 

@@ -35,6 +35,19 @@ public final class OpenAiCompatChat {
      * 网络/非 2xx/响应结构异常一律抛 {@link ModelCallException}，消息已脱敏。
      */
     public static String chat(Options opt, String prompt) {
+        return call(opt, prompt, true);
+    }
+
+    /**
+     * 发一条 user 消息，返回<b>完整</b>回复文本（不折叠、不截断）。
+     * 结构化输出（如 CAP-85 的 JSON 分类/摘要）必须用本方法——探针语义的
+     * {@link #chat} 会把 200 字之后的 JSON 截掉，解析必然失败。
+     */
+    public static String complete(Options opt, String prompt) {
+        return call(opt, prompt, false);
+    }
+
+    private static String call(Options opt, String prompt, boolean probe) {
         try {
             var root = MAPPER.createObjectNode();
             root.put("model", opt.model());
@@ -57,7 +70,7 @@ public final class OpenAiCompatChat {
                 throw new ModelCallException(OpenAiCompatHttp.failure(
                         "chat 端点", request.uri(), resp.statusCode(), resp.body()));
             }
-            return replyOf(resp.body());
+            return probe ? replyOf(resp.body()) : fullReplyOf(resp.body());
         } catch (ModelCallException e) {
             throw e;
         } catch (InterruptedException e) {
@@ -89,5 +102,26 @@ public final class OpenAiCompatChat {
             throw new ModelCallException("chat 响应 choices[0].message.content 为空（网关拦截或限流？）");
         }
         return OpenAiCompatHttp.collapse(text);
+    }
+
+    /** 完整回复（结构化输出用）：数组形态拼接全部 part，不截断、不压空白 */
+    private static String fullReplyOf(String body) {
+        JsonNode choices;
+        try {
+            choices = MAPPER.readTree(body).path("choices");
+        } catch (Exception e) {
+            throw new ModelCallException("chat 响应不是合法 JSON: "
+                    + OpenAiCompatHttp.sanitize(OpenAiCompatHttp.abbreviate(body)));
+        }
+        if (!choices.isArray() || choices.isEmpty()) {
+            throw new ModelCallException("chat 响应缺少 choices: "
+                    + OpenAiCompatHttp.sanitize(OpenAiCompatHttp.abbreviate(body)));
+        }
+        String text = OpenAiCompatHttp.contentText(
+                choices.get(0).path("message").path("content"));
+        if (text.isBlank()) {
+            throw new ModelCallException("chat 响应 choices[0].message.content 为空（网关拦截或限流？）");
+        }
+        return text;
     }
 }

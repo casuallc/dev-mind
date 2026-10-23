@@ -49,6 +49,7 @@ import FitTable from '../../../shared/components/FitTable'
 import HighlightedSnippet from '../components/HighlightedSnippet'
 import KnowledgeEntryDrawer from '../components/KnowledgeEntryDrawer'
 import KnowledgeUploadDrawer from '../components/KnowledgeUploadDrawer'
+import GovernanceConsole from '../components/GovernanceConsole'
 import { fmtTime } from '../../../shared/utils/format'
 import { isAdmin } from '../../auth/authStore'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
@@ -382,6 +383,7 @@ export default function KnowledgeCenter() {
             options={[
               { value: 'search', label: '全局检索' },
               { value: 'imports', label: '上传批次' },
+              ...(admin ? [{ value: 'governance', label: '知识治理' }] : []),
             ]}
           />
         </Space>
@@ -632,6 +634,10 @@ export default function KnowledgeCenter() {
             locale={{ emptyText: '暂无上传批次。点右上角「上传文档」导入文件/文件夹/ZIP。' }}
           />
         </div>
+      )}
+
+      {view === 'governance' && admin && (
+        <GovernanceConsole bases={bases} onOpenEntry={(entryId) => setDetail({ entryId })} />
       )}
 
       <KnowledgeUploadDrawer open={uploadOpen} onClose={() => setUploadOpen(false)} onSubmitted={(r) => onUploaded(r.batchId)} />
