@@ -1,0 +1,420 @@
+// 共享 Markdown 阅读/编辑组件（shared/components/Markdown、MarkdownEditor）真浏览器验证。
+// 覆盖：
+//   阅读：代码块语言标签 + 高亮 token + 一键复制、表格横向滚动容器、图片点击预览、任务列表；
+//   编辑：字符统计、Ctrl+B 加粗、Tab 缩进、编辑/分栏/预览三态、分栏预览高亮、全屏与 Esc 退出（不连带关抽屉）。
+// 前置：app 隔离实例 + 指向它的前端 dev 同时起（数据自造，落隔离 H2，无需 runner）：
+//   mvn -pl devmind-app spring-boot:run -Dspring-boot.run.profiles=e2e \
+//     "-Dspring-boot.run.arguments=--server.port=18103 --spring.datasource.url=jdbc:h2:file:<tmp>/markdown-components/db/devmind;AUTO_SERVER=TRUE"
+//   VITE_BACKEND_URL=http://localhost:18103 npm run dev -- --port 5199 --strictPort   # frontend/ 下
+//   node tests/e2e-markdown-components.mjs [--shots]   （API/BASE/CHROME_PATH 可覆盖）
+import { spawn } from 'node:child_process'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+const BASE = process.env.BASE ?? 'http://localhost:5199'
+const API = process.env.API ?? 'http://localhost:18103'
+const USER = process.env.USER ?? 'admin'
+const PASS = process.env.PASS ?? 'admin123'
+const CHROME = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+const PORT = 9473
+const TMP = join(ROOT, 'tmp', 'markdown-components', 'e2e')
+const PROFILE = join(TMP, 'chrome')
+const MARK = `e2e-md-${Date.now()}`
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+let passed = 0
+function ok(cond, what) {
+  if (!cond) throw new Error(`断言失败：${what}`)
+  passed++
+  console.log(`  ✔ ${what}`)
+}
+
+async function api(path, { method = 'POST', body, token } = {}) {
+  const res = await fetch(`${API}/api${path}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })
+  const text = await res.text()
+  if (!res.ok) throw new Error(`${method} ${path} → ${res.status} ${text.slice(0, 300)}`)
+  return text ? JSON.parse(text) : null
+}
+
+async function uploadAttachment(token) {
+  // 1x1 透明 PNG：只验证「点击图片开预览」链路，不求画质
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64')
+  const form = new FormData()
+  form.append('file', new Blob([png], { type: 'image/png' }), `dot-${MARK}.png`)
+  form.append('scope', 'SHARED')
+  const res = await fetch(`${API}/api/attachments`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  })
+  const text = await res.text()
+  if (!res.ok) throw new Error(`上传附件 → ${res.status} ${text.slice(0, 300)}`)
+  return JSON.parse(text)
+}
+
+/** 最小 CDP 客户端（Node 内置 WebSocket，与 e2e-injection-preview-drawer.mjs 同套路） */
+function cdp(wsUrl) {
+  const ws = new WebSocket(wsUrl)
+  const pending = new Map()
+  const logs = []
+  let seq = 0
+  ws.addEventListener('message', (ev) => {
+    const msg = JSON.parse(ev.data)
+    if (msg.id && pending.has(msg.id)) {
+      const { resolve, reject } = pending.get(msg.id)
+      pending.delete(msg.id)
+      msg.error ? reject(new Error(JSON.stringify(msg.error))) : resolve(msg.result)
+      return
+    }
+    if (msg.method === 'Runtime.consoleAPICalled' && ['error', 'warning'].includes(msg.params.type)) {
+      logs.push(`${msg.params.type}: ${msg.params.args.map((a) => a.value ?? a.description ?? '').join(' ')}`)
+    }
+  })
+  return {
+    logs,
+    ready: new Promise((resolve, reject) => {
+      ws.addEventListener('open', resolve)
+      ws.addEventListener('error', () => reject(new Error(`CDP 连接失败: ${wsUrl}`)))
+    }),
+    send(method, params = {}) {
+      const id = ++seq
+      return new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject })
+        ws.send(JSON.stringify({ id, method, params }))
+      })
+    },
+    close: () => ws.close(),
+  }
+}
+
+async function waitFor(pred, what, timeout = 15000, interval = 250) {
+  const deadline = Date.now() + timeout
+  for (;;) {
+    const v = await pred().catch(() => null)
+    if (v) return v
+    if (Date.now() > deadline) throw new Error(`等待「${what}」超时`)
+    await sleep(interval)
+  }
+}
+
+async function evaluate(ws, expression) {
+  const { result, exceptionDetails } = await ws.send('Runtime.evaluate', {
+    expression, returnByValue: true, awaitPromise: true,
+  })
+  if (exceptionDetails) throw new Error(`页面脚本异常：${JSON.stringify(exceptionDetails).slice(0, 300)}`)
+  return result.value
+}
+
+const drawerOpenJs = `(() => {
+  const w = document.querySelector('.ant-drawer-open');
+  return !!w && getComputedStyle(w).display !== 'none';
+})()`
+const clickButtonJs = (text) => `(() => {
+  const btn = [...document.querySelectorAll('button')]
+    .find((b) => b.innerText.replace(/\\s/g, '') === ${JSON.stringify(text)});
+  if (!btn) return false;
+  btn.click();
+  return true;
+})()`
+const clickSegJs = (text) => `(() => {
+  const el = [...document.querySelectorAll('.ant-drawer .ant-segmented-item')]
+    .find((e) => e.textContent.replace(/\\s/g, '') === ${JSON.stringify(text)});
+  if (!el) return false;
+  el.click();
+  return true;
+})()`
+const javaCodeBlockJs = `(() => {
+  return [...document.querySelectorAll('.ant-drawer .md-code, .md-code')]
+    .find((b) => b.querySelector('.md-code-lang')?.textContent.trim() === 'Java') ?? null;
+})()`
+// 预览层关闭后节点可能仍留在 DOM（rc-dialog 默认不销毁），可见性要看 root 的面积与 display
+const imagePreviewOpenJs = `(() => {
+  const el = document.querySelector('.ant-image-preview-root');
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  return getComputedStyle(el).display !== 'none' && r.width > 0 && r.height > 0;
+})()`
+
+async function pressEscape(ws) {
+  for (const type of ['keyDown', 'keyUp']) {
+    await ws.send('Input.dispatchKeyEvent', {
+      type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27,
+    })
+  }
+}
+
+let chrome
+async function main() {
+  rmSync(TMP, { recursive: true, force: true })
+  mkdirSync(TMP, { recursive: true })
+
+  const login = await api('/auth/login', { body: { username: USER, password: PASS } })
+  const { accessToken, refreshToken, user } = login
+  const attachment = await uploadAttachment(accessToken)
+
+  const title = `Markdown 组件验证-${MARK}`
+  const codeMarker = `hello-${MARK}`
+  const contentMd = `# ${title}
+
+这是段落文字，用于快捷键验证。
+
+## Java 代码块
+
+\`\`\`java
+public class Demo {
+  public static void main(String[] args) {
+    System.out.println("${codeMarker}");
+  }
+}
+\`\`\`
+
+## 无语言代码块
+
+\`\`\`
+plain text ${MARK}
+\`\`\`
+
+## 表格
+
+| 名称 | 说明 | 值 |
+| --- | --- | --- |
+| alpha | 一段足够长的说明文本用来撑开表格宽度 | 1 |
+| beta | 另一段说明 | 2 |
+
+## 任务
+
+- [x] 已完成
+- [ ] 待办
+
+![预览图](/api/attachments/${attachment.attachmentId}/raw)
+
+尾部标记 ${MARK}
+`
+  const doc = await api('/documents', {
+    token: accessToken,
+    body: { kind: 'design', title, tags: ['e2e'], contentMd },
+  })
+  ok(!!doc.id && !!attachment.attachmentId, '造数完成（文档 + 图片附件）')
+
+  if (!existsSync(CHROME)) throw new Error(`找不到浏览器：${CHROME}（用 CHROME_PATH 指定）`)
+  chrome = spawn(CHROME, [
+    '--headless=new', `--remote-debugging-port=${PORT}`, `--user-data-dir=${PROFILE}`,
+    '--no-first-run', '--no-default-browser-check', '--disable-extensions',
+    '--window-size=1600,900', 'about:blank',
+  ], { stdio: 'ignore' })
+  const ws = cdp(await waitFor(async () => {
+    const l = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json()
+    return l.find((t) => t.type === 'page')?.webSocketDebuggerUrl
+  }, 'Chrome 调试端口'))
+  await ws.ready
+  await ws.send('Page.enable')
+  await ws.send('Runtime.enable')
+
+  try {
+    await ws.send('Page.navigate', { url: `${BASE}/` })
+    await waitFor(() => evaluate(ws, `document.readyState === 'complete'`), '首页加载完', 30000)
+    await evaluate(ws, `(() => {
+      localStorage.setItem('devmind.accessToken', ${JSON.stringify(accessToken)});
+      localStorage.setItem('devmind.refreshToken', ${JSON.stringify(refreshToken)});
+      localStorage.setItem('devmind.user', ${JSON.stringify(JSON.stringify(user))});
+      return 'ok';
+    })()`)
+    await ws.send('Page.navigate', { url: `${BASE}/admin/docs/${doc.id}` })
+    await waitFor(() => evaluate(ws, `!!${javaCodeBlockJs}`), '文档只读页 Java 代码块', 30000)
+
+    // ── 1. 阅读：高亮 + 语言标签 ────────────────────────────
+    const readInfo = await evaluate(ws, `(() => {
+      const blocks = [...document.querySelectorAll('.md-code')];
+      const javaBlock = ${javaCodeBlockJs};
+      const keywords = [...(javaBlock?.querySelectorAll('.hljs-keyword') ?? [])].map((e) => e.textContent);
+      return {
+        blocks: blocks.length,
+        labels: blocks.map((b) => b.querySelector('.md-code-lang')?.textContent.trim() ?? ''),
+        keywords,
+        hasString: !!javaBlock?.querySelector('.hljs-string')?.textContent.includes(${JSON.stringify(codeMarker)}),
+        taskItems: document.querySelectorAll('.doc-md .task-list-item').length,
+      };
+    })()`)
+    ok(readInfo.blocks >= 2, `代码块渲染出工具栏（${readInfo.blocks} 个）`)
+    ok(readInfo.labels.includes('Java') && readInfo.labels.includes('代码'), `语言标签（${readInfo.labels.join(' / ')}）`)
+    ok(readInfo.keywords.length > 0 && readInfo.hasString, `highlight.js 着色生效（keyword: ${readInfo.keywords.slice(0, 3).join(', ')}）`)
+    ok(readInfo.taskItems === 2, 'GFM 任务列表渲染')
+    await sleep(300)
+    ok(!ws.logs.some((l) => l.includes('cannot be a descendant')), '无非法 DOM 嵌套告警（图片段落）')
+
+    // ── 2. 复制按钮：点击后拿到纯代码文本 ────────────────────
+    await evaluate(ws, `(() => {
+      window.__copied = null;
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: async (t) => { window.__copied = t; } },
+      });
+      return true;
+    })()`)
+    await evaluate(ws, `(() => { ${javaCodeBlockJs}.querySelector('.md-code-copy').click(); return true })()`)
+    const copied = await waitFor(() => evaluate(ws, `window.__copied`), '复制回调')
+    ok(copied.includes(codeMarker) && copied.includes('class Demo') && !copied.includes('\`\`\`'),
+      '复制内容为纯代码（含正文、不含围栏）')
+    await waitFor(
+      () => evaluate(ws, `[...document.querySelectorAll('.ant-message-notice-content')].some((e) => e.textContent.includes('代码已复制'))`),
+      '复制成功提示', 5000,
+    )
+    ok(true, '复制成功提示')
+
+    // ── 3. 表格横向滚动容器 + 图片预览 ───────────────────────
+    const tableInfo = await evaluate(ws, `(() => {
+      const wrap = document.querySelector('.doc-md .md-table-wrap');
+      return {
+        hasWrap: !!wrap,
+        overflowX: wrap ? getComputedStyle(wrap).overflowX : '',
+        rows: wrap?.querySelectorAll('tbody tr').length ?? 0,
+      };
+    })()`)
+    ok(tableInfo.hasWrap && tableInfo.overflowX === 'auto' && tableInfo.rows === 2,
+      `表格包横向滚动容器（overflow-x=${tableInfo.overflowX}，${tableInfo.rows} 行）`)
+
+    await evaluate(ws, `document.querySelector('.doc-md .ant-image-img').click()`)
+    await waitFor(() => evaluate(ws, `!!document.querySelector('.ant-image-preview-img')`), '图片预览层')
+    const previewSrc = await evaluate(ws, `document.querySelector('.ant-image-preview-img')?.getAttribute('src') ?? ''`)
+    ok(previewSrc.includes(attachment.attachmentId), '点图片打开 antd 预览（src 指向附件）')
+    await evaluate(ws, `document.querySelector('.ant-image-preview-close')?.click()`)
+    await waitFor(async () => !(await evaluate(ws, imagePreviewOpenJs)), '图片预览关闭')
+
+    // ── 4. 打开编辑抽屉：字符数 / 快捷键 / Tab 缩进 ─────────
+    ok(await evaluate(ws, clickButtonJs('编辑')), '点「编辑」打开抽屉')
+    await waitFor(() => evaluate(ws, drawerOpenJs), '编辑抽屉打开')
+    await waitFor(() => evaluate(ws, `!!document.querySelector('.ant-drawer textarea')`), '编辑器 textarea')
+    await waitFor(() => evaluate(ws, `(() => {
+      const ta = document.querySelector('.ant-drawer textarea');
+      return !!ta && ta.value.length > 0;
+    })()`), '编辑器载入正文')
+
+    const countText = await evaluate(ws, `(() => {
+      const el = [...document.querySelectorAll('.ant-drawer .md-editor .ant-typography')]
+        .find((e) => e.textContent.includes('字符'));
+      return el?.textContent ?? '';
+    })()`)
+    const countDigits = countText.split('字符')[0].replace(/[^0-9]/g, '')
+    ok(countDigits === String(contentMd.length), `字符统计（${countText.trim()} / 实际 ${contentMd.length}）`)
+
+    const boldValue = await evaluate(ws, `(async () => {
+      const ta = document.querySelector('.ant-drawer textarea');
+      ta.focus();
+      const start = ta.value.indexOf('这是段落');
+      ta.setSelectionRange(start, start + 4);
+      ta.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'b', code: 'KeyB', ctrlKey: true, bubbles: true, cancelable: true,
+      }));
+      await new Promise((r) => setTimeout(r, 200));
+      return ta.value;
+    })()`)
+    ok(boldValue.includes('**这是段落**'), 'Ctrl+B 包裹选区加粗')
+
+    const tabValue = await evaluate(ws, `(async () => {
+      const ta = document.querySelector('.ant-drawer textarea');
+      ta.focus();
+      const start = ta.value.indexOf('## 无语言代码块');
+      ta.setSelectionRange(start, start);
+      ta.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Tab', code: 'Tab', bubbles: true, cancelable: true,
+      }));
+      await new Promise((r) => setTimeout(r, 200));
+      return ta.value;
+    })()`)
+    ok(tabValue.includes('\n  ## 无语言代码块'), 'Tab 在行首缩进两空格')
+
+    // ── 5. 分栏 / 预览 / 全屏 ───────────────────────────────
+    ok(await evaluate(ws, clickSegJs('分栏')), '切到分栏模式')
+    await waitFor(() => evaluate(ws, `!!document.querySelector('.ant-drawer .doc-md .md-code')`), '分栏预览代码块')
+    const split = await evaluate(ws, `(() => {
+      const ta = document.querySelector('.ant-drawer textarea')?.getBoundingClientRect();
+      const paneEl = document.querySelector('.ant-drawer .md-editor-preview');
+      const pane = paneEl?.getBoundingClientRect();
+      return {
+        sideBySide: !!ta && !!pane && pane.left >= ta.right - 2,
+        highlight: !!document.querySelector('.ant-drawer .doc-md .hljs-keyword'),
+        taHeight: ta?.height ?? 0,
+        paneHeight: pane?.height ?? 0,
+        paneScroll: paneEl ? getComputedStyle(paneEl).overflowY : '',
+      };
+    })()`)
+    ok(split.sideBySide, '分栏为左右两栏（预览在编辑区右侧）')
+    ok(split.highlight, '分栏预览同样有代码高亮')
+    ok(Math.abs(split.taHeight - split.paneHeight) < 4 && split.paneScroll === 'auto',
+      `分栏两栏等高、预览独立滚动（${Math.round(split.taHeight)} / ${Math.round(split.paneHeight)}，overflow=${split.paneScroll}）`)
+
+    await evaluate(ws, `(() => {
+      const btn = document.querySelector('.ant-drawer .md-editor button[aria-label="全屏编辑"]');
+      btn?.click();
+      return !!btn;
+    })()`)
+    await waitFor(() => evaluate(ws, `!!document.querySelector('.md-editor-fullscreen')`), '全屏编辑器')
+    const full = await evaluate(ws, `(() => {
+      const el = document.querySelector('.md-editor-fullscreen');
+      const r = el.getBoundingClientRect();
+      return {
+        covers: Math.abs(r.width - innerWidth) < 2 && Math.abs(r.height - innerHeight) < 2,
+        portaled: !el.closest('.ant-drawer'),
+        hasEditor: !!el.querySelector('textarea'),
+        hasPreview: !!el.querySelector('.doc-md .md-code'),
+      };
+    })()`)
+    ok(full.covers && full.portaled, '全屏层铺满视口且脱离抽屉 DOM（portal）')
+    ok(full.hasEditor && full.hasPreview, '全屏下编辑与分栏预览都在')
+
+    if (process.argv.includes('--shots')) {
+      const shot = await ws.send('Page.captureScreenshot', { format: 'png' })
+      writeFileSync(join(TMP, 'fullscreen.png'), Buffer.from(shot.data, 'base64'))
+      console.log(`  截图 → ${join(TMP, 'fullscreen.png')}`)
+    }
+
+    await pressEscape(ws)
+    await waitFor(async () => !(await evaluate(ws, `!!document.querySelector('.md-editor-fullscreen')`)), 'Esc 退出全屏')
+    ok(await evaluate(ws, drawerOpenJs), 'Esc 退出全屏后编辑抽屉仍在（未连带关闭）')
+
+    ok(await evaluate(ws, clickSegJs('预览')), '切到纯预览模式')
+    await waitFor(() => evaluate(ws, `!document.querySelector('.ant-drawer .md-editor textarea') && !!document.querySelector('.ant-drawer .md-editor .doc-md .md-code')`), '纯预览模式（无编辑框）')
+    ok(true, '纯预览模式隐藏编辑框，仅保留渲染结果')
+
+    // ── 6. 取消关闭：改动不落库 ─────────────────────────────
+    await evaluate(ws, clickButtonJs('取消'))
+    await waitFor(async () => !(await evaluate(ws, drawerOpenJs)), '编辑抽屉关闭')
+    const reloaded = await api(`/documents/${doc.id}`, { method: 'GET', token: accessToken })
+    ok(reloaded.contentMd === contentMd, '取消编辑后正文未落库')
+  } catch (e) {
+    try {
+      const diag = await evaluate(ws, `location.href + ' | ' + document.body.innerText.slice(0, 300)`)
+      console.error(`[诊断] ${diag}`)
+      if (ws.logs.length) console.error(`[诊断] 控制台告警：\n${ws.logs.slice(-5).join('\n')}`)
+      const shot = await ws.send('Page.captureScreenshot', { format: 'png' })
+      writeFileSync(join(TMP, 'failure.png'), Buffer.from(shot.data, 'base64'))
+      console.error(`[诊断] 截图 → ${join(TMP, 'failure.png')}`)
+    } catch { /* 诊断本身失败就算了 */ }
+    throw e
+  } finally {
+    ws.close()
+  }
+
+  console.log(`\n全部 ${passed} 项断言通过`)
+}
+
+main().catch((e) => { console.error(`\n✖ ${e.message}`); process.exitCode = 1 })
+  .finally(async () => {
+    // 只杀自己 spawn 的那棵 Chrome 进程树（按 PID，别按窗口标题——会误杀用户真实浏览器）
+    if (chrome?.pid) {
+      spawn('cmd', ['/c', 'taskkill', '/F', '/T', '/PID', String(chrome.pid)], { stdio: 'ignore' })
+      await sleep(1200)
+    }
+    try {
+      rmSync(PROFILE, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 })
+    } catch { /* profile 留在 tmp/ 无碍，下次跑开头还会清 */ }
+  })
