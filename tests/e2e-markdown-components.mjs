@@ -1,10 +1,11 @@
 // 共享 Markdown 阅读/编辑组件（shared/components/Markdown、MarkdownEditor）真浏览器验证。
 // 覆盖：
 //   阅读：代码块语言标签 + 高亮 token + 一键复制、表格横向滚动容器、图片点击预览、任务列表；
-//   编辑：字符统计、Ctrl+B 加粗、Tab 缩进、编辑/分栏/预览三态、分栏预览高亮、全屏与 Esc 退出（不连带关抽屉）；
-//   极简编辑器：工作日志日报默认预览、顶栏只有源码/分栏/预览三个图标（无格式工具栏）、撑满页面底部，
-//               源码态 CodeMirror 行号/当前行/Markdown 语法高亮、可编辑；分栏左源码右实时预览，
-//               输入后右侧即时更新，两栏滚动条按比例双向联动。
+//   编辑：CodeMirror 源码、字符统计、Ctrl+B 加粗、Tab 缩进、编辑/分栏/预览三态、分栏预览高亮、
+//         全屏与 Esc 退出（不连带关抽屉）；
+//   极简模式（showToolbar=false）：工作日志日报默认预览、顶栏只有源码/分栏/预览三个图标、
+//         撑满页面底部，源码态行号/当前行/Markdown 语法高亮、可编辑；分栏左源码右实时预览，
+//         输入后右侧即时更新，两栏滚动条按比例双向联动。
 // 前置：app 隔离实例 + 指向它的前端 dev 同时起（数据自造，落隔离 H2，无需 runner）：
 //   mvn -pl devmind-app spring-boot:run -Dspring-boot.run.profiles=e2e \
 //     "-Dspring-boot.run.arguments=--server.port=18103 --spring.datasource.url=jdbc:h2:file:<tmp>/markdown-components/db/devmind;AUTO_SERVER=TRUE"
@@ -162,6 +163,44 @@ async function pressEscape(ws) {
   }
 }
 
+/** 真实鼠标点中 CodeMirror 某一行（按行内文本定位），让编辑器自己接管选区 */
+async function clickCmLine(ws, scope, text) {
+  let pos = null
+  // 抽屉滑入动画期间 rect 还在视口外，等行真正落到可点击位置再点
+  for (let i = 0; i < 20; i++) {
+    pos = await evaluate(ws, `(() => {
+      const line = [...document.querySelectorAll(${JSON.stringify(scope)})]
+        .find((l) => l.textContent.includes(${JSON.stringify(text)}));
+      if (!line) return null;
+      const r = line.getBoundingClientRect();
+      const x = r.left + 8;
+      const y = r.top + r.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      return { x, y, inside: !!hit && line.contains(hit) };
+    })()`)
+    if (pos?.inside) break
+    await sleep(100)
+  }
+  if (!pos?.inside) throw new Error(`CodeMirror 行不可点击：${text}`)
+  await ws.send('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x: pos.x, y: pos.y, button: 'left', buttons: 1, clickCount: 1,
+  })
+  await ws.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x: pos.x, y: pos.y, button: 'left', buttons: 0, clickCount: 1,
+  })
+  await sleep(100)
+}
+
+/** 真实按键（modifiers：Alt=1 Ctrl=2 Meta=4 Shift=8） */
+async function pressKey(ws, key, code, vk, modifiers = 0) {
+  for (const type of ['keyDown', 'keyUp']) {
+    await ws.send('Input.dispatchKeyEvent', {
+      type, key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers,
+    })
+  }
+  await sleep(100)
+}
+
 let chrome
 async function main() {
   rmSync(TMP, { recursive: true, force: true })
@@ -215,7 +254,7 @@ plain text ${MARK}
   })
   ok(!!doc.id && !!attachment.attachmentId, '造数完成（文档 + 图片附件）')
 
-  // 工作日志日报：初始化日志空间 + 造当天日报，供极简编辑器断言
+  // 工作日志日报：初始化日志空间 + 造当天日报，供编辑器极简模式断言
   const today = new Date().toLocaleDateString('sv-SE')
   const dailyBody = Array.from({ length: 30 }, (_, i) => `第 ${i + 1} 段：用于验证分栏滚动联动与实时预览。`).join('\n\n')
   await api('/worklog/workspace/ensure', { token: accessToken, body: {} })
@@ -318,10 +357,10 @@ plain text ${MARK}
     // ── 4. 打开编辑抽屉：字符数 / 快捷键 / Tab 缩进 ─────────
     ok(await evaluate(ws, clickButtonJs('编辑')), '点「编辑」打开抽屉')
     await waitFor(() => evaluate(ws, drawerOpenJs), '编辑抽屉打开')
-    await waitFor(() => evaluate(ws, `!!document.querySelector('.ant-drawer textarea')`), '编辑器 textarea')
+    await waitFor(() => evaluate(ws, `!!document.querySelector('.ant-drawer .md-editor .cm-content')`), '编辑器 CodeMirror')
     await waitFor(() => evaluate(ws, `(() => {
-      const ta = document.querySelector('.ant-drawer textarea');
-      return !!ta && ta.value.length > 0;
+      const lines = [...document.querySelectorAll('.ant-drawer .md-editor .cm-line')];
+      return lines.map((l) => l.textContent).join('').length > 0;
     })()`), '编辑器载入正文')
 
     const countText = await evaluate(ws, `(() => {
@@ -332,51 +371,42 @@ plain text ${MARK}
     const countDigits = countText.split('字符')[0].replace(/[^0-9]/g, '')
     ok(countDigits === String(contentMd.length), `字符统计（${countText.trim()} / 实际 ${contentMd.length}）`)
 
-    const boldValue = await evaluate(ws, `(async () => {
-      const ta = document.querySelector('.ant-drawer textarea');
-      ta.focus();
-      const start = ta.value.indexOf('这是段落');
-      ta.setSelectionRange(start, start + 4);
-      ta.dispatchEvent(new KeyboardEvent('keydown', {
-        key: 'b', code: 'KeyB', ctrlKey: true, bubbles: true, cancelable: true,
-      }));
-      await new Promise((r) => setTimeout(r, 200));
-      return ta.value;
-    })()`)
-    ok(boldValue.includes('**这是段落**'), 'Ctrl+B 包裹选区加粗')
+    const cmDocJs = `[...document.querySelectorAll('.ant-drawer .md-editor .cm-line')]
+      .map((l) => l.textContent).join('\\n')`
+    await clickCmLine(ws, '.ant-drawer .md-editor .cm-line', '这是段落')
+    await pressKey(ws, 'Home', 'Home', 36)
+    await pressKey(ws, 'End', 'End', 35, 8)
+    await pressKey(ws, 'b', 'KeyB', 66, 2)
+    await sleep(200)
+    const boldValue = await evaluate(ws, cmDocJs)
+    ok(boldValue.includes('**这是段落文字，用于快捷键验证。**'), 'Ctrl+B 包裹选区加粗')
 
-    const tabValue = await evaluate(ws, `(async () => {
-      const ta = document.querySelector('.ant-drawer textarea');
-      ta.focus();
-      const start = ta.value.indexOf('## 无语言代码块');
-      ta.setSelectionRange(start, start);
-      ta.dispatchEvent(new KeyboardEvent('keydown', {
-        key: 'Tab', code: 'Tab', bubbles: true, cancelable: true,
-      }));
-      await new Promise((r) => setTimeout(r, 200));
-      return ta.value;
-    })()`)
+    await clickCmLine(ws, '.ant-drawer .md-editor .cm-line', '## 无语言代码块')
+    await pressKey(ws, 'Home', 'Home', 36)
+    await pressKey(ws, 'Tab', 'Tab', 9)
+    await sleep(200)
+    const tabValue = await evaluate(ws, cmDocJs)
     ok(tabValue.includes('\n  ## 无语言代码块'), 'Tab 在行首缩进两空格')
 
     // ── 5. 分栏 / 预览 / 全屏 ───────────────────────────────
     ok(await evaluate(ws, clickSegJs('分栏')), '切到分栏模式')
     await waitFor(() => evaluate(ws, `!!document.querySelector('.ant-drawer .doc-md .md-code')`), '分栏预览代码块')
     const split = await evaluate(ws, `(() => {
-      const ta = document.querySelector('.ant-drawer textarea')?.getBoundingClientRect();
+      const src = document.querySelector('.ant-drawer .md-editor-source')?.getBoundingClientRect();
       const paneEl = document.querySelector('.ant-drawer .md-editor-preview');
       const pane = paneEl?.getBoundingClientRect();
       return {
-        sideBySide: !!ta && !!pane && pane.left >= ta.right - 2,
+        sideBySide: !!src && !!pane && pane.left >= src.right - 2,
         highlight: !!document.querySelector('.ant-drawer .doc-md .hljs-keyword'),
-        taHeight: ta?.height ?? 0,
+        srcHeight: src?.height ?? 0,
         paneHeight: pane?.height ?? 0,
         paneScroll: paneEl ? getComputedStyle(paneEl).overflowY : '',
       };
     })()`)
     ok(split.sideBySide, '分栏为左右两栏（预览在编辑区右侧）')
     ok(split.highlight, '分栏预览同样有代码高亮')
-    ok(Math.abs(split.taHeight - split.paneHeight) < 4 && split.paneScroll === 'auto',
-      `分栏两栏等高、预览独立滚动（${Math.round(split.taHeight)} / ${Math.round(split.paneHeight)}，overflow=${split.paneScroll}）`)
+    ok(Math.abs(split.srcHeight - split.paneHeight) < 4 && split.paneScroll === 'auto',
+      `分栏两栏等高、预览独立滚动（${Math.round(split.srcHeight)} / ${Math.round(split.paneHeight)}，overflow=${split.paneScroll}）`)
 
     await evaluate(ws, `(() => {
       const btn = document.querySelector('.ant-drawer .md-editor button[aria-label="全屏编辑"]');
@@ -390,7 +420,7 @@ plain text ${MARK}
       return {
         covers: Math.abs(r.width - innerWidth) < 2 && Math.abs(r.height - innerHeight) < 2,
         portaled: !el.closest('.ant-drawer'),
-        hasEditor: !!el.querySelector('textarea'),
+        hasEditor: !!el.querySelector('.cm-editor'),
         hasPreview: !!el.querySelector('.doc-md .md-code'),
       };
     })()`)
@@ -408,7 +438,7 @@ plain text ${MARK}
     ok(await evaluate(ws, drawerOpenJs), 'Esc 退出全屏后编辑抽屉仍在（未连带关闭）')
 
     ok(await evaluate(ws, clickSegJs('预览')), '切到纯预览模式')
-    await waitFor(() => evaluate(ws, `!document.querySelector('.ant-drawer .md-editor textarea') && !!document.querySelector('.ant-drawer .md-editor .doc-md .md-code')`), '纯预览模式（无编辑框）')
+    await waitFor(() => evaluate(ws, `!document.querySelector('.ant-drawer .md-editor .cm-editor') && !!document.querySelector('.ant-drawer .md-editor .doc-md .md-code')`), '纯预览模式（无编辑框）')
     ok(true, '纯预览模式隐藏编辑框，仅保留渲染结果')
 
     // ── 6. 取消关闭：改动不落库 ─────────────────────────────
@@ -417,16 +447,16 @@ plain text ${MARK}
     const reloaded = await api(`/documents/${doc.id}`, { method: 'GET', token: accessToken })
     ok(reloaded.contentMd === contentMd, '取消编辑后正文未落库')
 
-    // ── 7. 工作日志日报：极简编辑器（只有编辑/预览，无格式工具栏） ──
+    // ── 7. 工作日志日报：极简模式（showToolbar=false，只有源码/分栏/预览，无格式工具栏） ──
     await ws.send('Page.navigate', { url: `${BASE}/worklog` })
     await waitFor(() => evaluate(ws, `!![...document.querySelectorAll('.ant-segmented-item')].find((e) => e.textContent.replace(/\\s/g, '') === '日报')`), '工作日志页', 30000)
     ok(await evaluate(ws, clickPageSegJs('日报')), '切到日报视图')
-    await waitFor(() => evaluate(ws, `!!document.querySelector('.md-simple')`), '日报极简编辑器')
+    await waitFor(() => evaluate(ws, `!!document.querySelector('.md-editor-minimal')`), '日报极简模式编辑器')
 
     const simplePreview = await evaluate(ws, `(() => {
-      const el = document.querySelector('.md-simple');
+      const el = document.querySelector('.md-editor-minimal');
       return {
-        modes: [...el.querySelectorAll('.md-simple-modes button')].map((b) => b.getAttribute('aria-label')),
+        modes: [...el.querySelectorAll('.md-editor-modes button')].map((b) => b.getAttribute('aria-label')),
         hasEditor: !!el.querySelector('.cm-editor'),
         previewOn: el.querySelector('button[aria-label="预览"]')?.getAttribute('aria-pressed') === 'true',
         title: el.querySelector('.doc-md h1')?.textContent ?? '',
@@ -441,7 +471,7 @@ plain text ${MARK}
 
     // 高度铺满：编辑器底部 = 卡片内容区底部（只差卡片 padding）
     const layout = await evaluate(ws, `(() => {
-      const el = document.querySelector('.md-simple');
+      const el = document.querySelector('.md-editor-minimal');
       const body = el.closest('.ant-card-body');
       const er = el.getBoundingClientRect();
       const br = body.getBoundingClientRect();
@@ -460,20 +490,20 @@ plain text ${MARK}
       console.log(`  截图 → ${join(TMP, 'daily-report.png')}`)
     }
 
-    await evaluate(ws, `document.querySelector('.md-simple button[aria-label="编辑源码"]').click()`)
+    await evaluate(ws, `document.querySelector('.md-editor-minimal button[aria-label="编辑源码"]').click()`)
     await waitFor(() => evaluate(ws, `(() => {
-      const content = document.querySelector('.md-simple .cm-content');
+      const content = document.querySelector('.md-editor-minimal .cm-content');
       return !!content && content.textContent.includes(${JSON.stringify(MARK)});
     })()`), '日报源码态')
     const simpleEdit = await evaluate(ws, `(() => {
-      const el = document.querySelector('.md-simple');
+      const el = document.querySelector('.md-editor-minimal');
       const content = el.querySelector('.cm-content');
       const heading = [...el.querySelectorAll('.cm-line')].find((l) => l.textContent.includes('# 日报'));
       const headingColors = heading
         ? [...heading.querySelectorAll('span')].map((s) => getComputedStyle(s).color)
         : [];
       return {
-        modes: el.querySelectorAll('.md-simple-modes button').length,
+        modes: el.querySelectorAll('.md-editor-modes button').length,
         noToolbar: ![...el.querySelectorAll('button')].some((b) => /^H[1-3]$/.test(b.textContent)),
         noStats: !el.innerText.includes('字符'),
         editable: content?.getAttribute('contenteditable') === 'true',
@@ -498,16 +528,16 @@ plain text ${MARK}
     }
 
     // ── 8. 分栏：左源码实时驱动右侧预览，两栏滚动条按比例双向联动 ──
-    await evaluate(ws, `document.querySelector('.md-simple button[aria-label="分栏"]').click()`)
+    await evaluate(ws, `document.querySelector('.md-editor-minimal button[aria-label="分栏"]').click()`)
     await waitFor(() => evaluate(ws, `(() => {
-      const el = document.querySelector('.md-simple');
-      return !!el?.querySelector('.cm-scroller') && !!el?.querySelector('.md-simple-preview');
+      const el = document.querySelector('.md-editor-minimal');
+      return !!el?.querySelector('.cm-scroller') && !!el?.querySelector('.md-editor-preview');
     })()`), '分栏两栏渲染')
 
     const splitLayout = await evaluate(ws, `(() => {
-      const el = document.querySelector('.md-simple');
+      const el = document.querySelector('.md-editor-minimal');
       const src = el.querySelector('.cm-scroller');
-      const prev = el.querySelector('.md-simple-preview');
+      const prev = el.querySelector('.md-editor-preview');
       const sr = src.getBoundingClientRect();
       const pr = prev.getBoundingClientRect();
       return {
@@ -525,15 +555,15 @@ plain text ${MARK}
 
     // 左侧改字，右侧预览实时更新（分栏的核心目的）
     const realtimeMark = `实时预览-${MARK}`
-    await evaluate(ws, `document.querySelector('.md-simple .cm-content').focus()`)
+    await evaluate(ws, `document.querySelector('.md-editor-minimal .cm-content').focus()`)
     await ws.send('Input.insertText', { text: realtimeMark })
-    await waitFor(() => evaluate(ws, `document.querySelector('.md-simple .md-simple-preview')?.innerText.includes(${JSON.stringify(realtimeMark)})`), '分栏实时预览')
+    await waitFor(() => evaluate(ws, `document.querySelector('.md-editor-minimal .md-editor-preview')?.innerText.includes(${JSON.stringify(realtimeMark)})`), '分栏实时预览')
     ok(true, '源码输入后右侧预览实时更新')
 
     const syncDown = await evaluate(ws, `(async () => {
-      const el = document.querySelector('.md-simple');
+      const el = document.querySelector('.md-editor-minimal');
       const src = el.querySelector('.cm-scroller');
-      const prev = el.querySelector('.md-simple-preview');
+      const prev = el.querySelector('.md-editor-preview');
       const maxSrc = src.scrollHeight - src.clientHeight;
       const maxPrev = prev.scrollHeight - prev.clientHeight;
       src.scrollTop = maxSrc * 0.6;
@@ -545,9 +575,9 @@ plain text ${MARK}
       `源码滚动带动右侧按比例联动（${Math.round(syncDown.srcTop / syncDown.maxSrc * 100)}% → ${Math.round(syncDown.prevTop / syncDown.maxPrev * 100)}%）`)
 
     const syncUp = await evaluate(ws, `(async () => {
-      const el = document.querySelector('.md-simple');
+      const el = document.querySelector('.md-editor-minimal');
       const src = el.querySelector('.cm-scroller');
-      const prev = el.querySelector('.md-simple-preview');
+      const prev = el.querySelector('.md-editor-preview');
       prev.scrollTop = 0;
       await new Promise((r) => setTimeout(r, 300));
       return { srcTop: src.scrollTop, prevTop: prev.scrollTop };
