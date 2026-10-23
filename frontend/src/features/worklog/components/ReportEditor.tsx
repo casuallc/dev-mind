@@ -2,7 +2,7 @@ import { Button, Empty, Modal, Space, Typography, message } from 'antd'
 import { RobotOutlined, EditOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { fmtTime } from '../../../shared/utils/format'
-import SimpleMarkdownEditor, { type SimpleMarkdownEditorMode } from '../../../shared/components/SimpleMarkdownEditor'
+import MarkdownEditor, { type MarkdownEditorMode } from '../../../shared/components/MarkdownEditor'
 import { showError } from '../../../shared/utils/showError'
 
 interface Props {
@@ -25,8 +25,8 @@ interface Props {
 /**
  * CAP-28 报告编辑卡：空白手填 / AI 草稿 → 人工修订 → 保存。
  * CAP-74：去 DRAFT/CONFIRMED 状态机——事实源是服务端仓，保存即 commit，历史走 git log，
- * 不再有「确认定稿/只读」概念。编辑态复用极简 Markdown 编辑器（Qoder 文档式：只有编辑/预览切换，
- * 默认预览；日报以读为主，不摆格式工具栏）。
+ * 不再有「确认定稿/只读」概念。编辑态复用共享 MarkdownEditor 的极简模式（showToolbar=false：
+ * Qoder 文档式顶栏，只有源码/分栏/预览切换，默认预览；日报以读为主，不摆格式工具栏）。
  * 全部字段处于预览时不显示「保存修改」；保存需二次确认。
  */
 export default function ReportEditor({
@@ -40,7 +40,7 @@ export default function ReportEditor({
   fill,
 }: Props) {
   const [values, setValues] = useState<Record<string, string>>({})
-  const [modes, setModes] = useState<Record<string, SimpleMarkdownEditorMode>>({})
+  const [modes, setModes] = useState<Record<string, MarkdownEditorMode>>({})
   const [saving, setSaving] = useState(false)
   const [creating, setCreating] = useState(false)
 
@@ -148,8 +148,9 @@ export default function ReportEditor({
                   ? { marginTop: 8, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }
                   : { marginTop: 8 }}
               >
-                <SimpleMarkdownEditor
+                <MarkdownEditor
                   fill={fill}
+                  showToolbar={false}
                   height={boxHeight}
                   value={content}
                   onChange={(v) => setValues({ ...values, [f.key]: v })}

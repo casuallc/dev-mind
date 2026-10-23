@@ -42,13 +42,13 @@
   （条目｜检索测试｜设置；飞书导入页签 CAP-45 加）。
 - **FR-09 Markdown 阅读/编辑组件升级**（2026-10-23）：阅读侧 `shared/components/Markdown.tsx`
   接入 rehype-highlight（只认显式围栏语言，避免自动识别误标），代码块带语言标签与一键复制、
-  表格横向滚动、图片 antd 预览、空内容占位；编辑侧 `MarkdownEditor` 增加分栏（`useDeferredValue`
-  抑制输入卡顿）、全屏（portal + Esc，不连带关外层抽屉）、Ctrl/⌘+B/I/K 与 Tab 缩进、
-  字符/行统计，`value/onChange` 受控口径与附件上传保持不变。阅读优先场景另提供
-  `SimpleMarkdownEditor`（Qoder 文档式顶栏，只有源码/分栏/预览三个图标、默认预览，不摆格式
-  工具栏；源码态用 CodeMirror 行号 + Markdown 语法高亮 + 当前行高亮，分栏左侧源码右侧实时
-  预览且两栏滚动条按比例双向联动，预览态复用共享渲染，支持撑满父容器），
-  工作日志日报/周报已切换，日报编辑器铺满到页面底部。全站既有 `<Markdown>` /
+  表格横向滚动、图片 antd 预览、空内容占位；编辑侧 `MarkdownEditor` 源码统一为 CodeMirror
+  （行号 + Markdown 语法高亮 + 当前行高亮），保留分栏（`useDeferredValue` 抑制输入卡顿，
+  左右两栏滚动条按比例双向联动）、全屏（portal + Esc，不连带关外层抽屉）、Ctrl/⌘+B/I/K 与
+  Tab 缩进、字符/行统计，`value/onChange` 受控口径与附件上传（工具栏 + 粘贴/拖拽）保持不变。
+  阅读优先场景传 `showToolbar={false}` 切 Qoder 文档式极简顶栏（只有源码/分栏/预览三个图标、
+  默认预览，不摆格式工具栏/字符统计），`fill` 撑满父容器剩余高度；原 `SimpleMarkdownEditor`
+  已合并进同一组件，工作日志日报使用极简模式并铺满到页面底部。全站既有 `<Markdown>` /
   `MarkdownEditor` 消费方无需改调用即继承。E2E：`tests/e2e-markdown-components.mjs`。
 
 ## 3. 关键设计
