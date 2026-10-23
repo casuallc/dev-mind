@@ -44,7 +44,9 @@
   接入 rehype-highlight（只认显式围栏语言，避免自动识别误标），代码块带语言标签与一键复制、
   表格横向滚动、图片 antd 预览、空内容占位；编辑侧 `MarkdownEditor` 增加分栏（`useDeferredValue`
   抑制输入卡顿）、全屏（portal + Esc，不连带关外层抽屉）、Ctrl/⌘+B/I/K 与 Tab 缩进、
-  字符/行统计，`value/onChange` 受控口径与附件上传保持不变。全站既有 `<Markdown>` /
+  字符/行统计，`value/onChange` 受控口径与附件上传保持不变。阅读优先场景另提供
+  `SimpleMarkdownEditor`（Qoder 文档式顶栏，只有编辑源码/预览两个图标、默认预览，不摆格式
+  工具栏），工作日志日报/周报已切换。全站既有 `<Markdown>` /
   `MarkdownEditor` 消费方无需改调用即继承。E2E：`tests/e2e-markdown-components.mjs`。
 
 ## 3. 关键设计
