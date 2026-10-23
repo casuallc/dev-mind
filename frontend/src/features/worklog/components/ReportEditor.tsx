@@ -26,7 +26,8 @@ interface Props {
  * CAP-28 报告编辑卡：空白手填 / AI 草稿 → 人工修订 → 保存。
  * CAP-74：去 DRAFT/CONFIRMED 状态机——事实源是服务端仓，保存即 commit，历史走 git log，
  * 不再有「确认定稿/只读」概念。编辑态复用共享 MarkdownEditor 的极简模式（showToolbar=false：
- * Qoder 文档式顶栏，只有源码/分栏/预览切换，默认预览；日报以读为主，不摆格式工具栏）。
+ * Qoder 文档式顶栏，字段标题通过 title 进入顶栏，只有源码/分栏/预览切换，默认预览；日报以读为主，
+ * 不摆格式工具栏）。
  * 全部字段处于预览时不显示「保存修改」；保存需二次确认。
  */
 export default function ReportEditor({
@@ -142,22 +143,16 @@ export default function ReportEditor({
                 ? { flex: 1, minHeight: 220, display: 'flex', flexDirection: 'column' }
                 : { marginBottom: 16 }}
             >
-              <Typography.Text strong style={{ flex: 'none' }}>{f.label}</Typography.Text>
-              <div
-                style={fill
-                  ? { marginTop: 8, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }
-                  : { marginTop: 8 }}
-              >
-                <MarkdownEditor
-                  fill={fill}
-                  showToolbar={false}
-                  height={boxHeight}
-                  value={content}
-                  onChange={(v) => setValues({ ...values, [f.key]: v })}
-                  mode={modeOf(f.key)}
-                  onModeChange={(m) => setModes({ ...modes, [f.key]: m })}
-                />
-              </div>
+              <MarkdownEditor
+                title={f.label}
+                fill={fill}
+                showToolbar={false}
+                height={boxHeight}
+                value={content}
+                onChange={(v) => setValues({ ...values, [f.key]: v })}
+                mode={modeOf(f.key)}
+                onModeChange={(m) => setModes({ ...modes, [f.key]: m })}
+              />
             </div>
           )
         })}

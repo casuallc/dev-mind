@@ -55,6 +55,8 @@ export interface MarkdownEditorProps {
   fill?: boolean
   /** 显示格式/附件快捷按钮、字符统计与全屏（默认 true）；false 为极简顶栏，只留源码/分栏/预览切换 */
   showToolbar?: boolean
+  /** 顶栏标题；极简模式替代默认「Markdown」品牌文字，让调用方的字段标题进入编辑器 */
+  title?: React.ReactNode
   placeholder?: string
   disabled?: boolean
   /** 开启图片/附件上传内联；scope 默认 PRIVATE（需求描述等成员共享场景传 SHARED） */
@@ -123,6 +125,7 @@ export default function MarkdownEditor({
   height = 360,
   fill = false,
   showToolbar = true,
+  title,
   placeholder,
   disabled,
   attachmentUpload,
@@ -451,44 +454,47 @@ export default function MarkdownEditor({
             background: '#fafafa',
           }}
         >
-          <Space size={2} wrap>
-            {actions.map((a) => (
-              <Tooltip key={a.key} title={a.title}>
-                <Button
-                  size="small"
-                  type="text"
-                  disabled={disabled || mode === 'preview'}
-                  // mousedown 抢焦点会让选区丢失，拦掉（click 仍会触发）
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={a.run}
-                >
-                  {a.label}
-                </Button>
-              </Tooltip>
-            ))}
-            {attachmentUpload && (
-              <>
-                <Tooltip title="插入图片（也可直接粘贴/拖拽）">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: '1 1 auto' }}>
+            {title && <span className="md-editor-title">{title}</span>}
+            <Space size={2} wrap>
+              {actions.map((a) => (
+                <Tooltip key={a.key} title={a.title}>
                   <Button
                     size="small"
                     type="text"
                     disabled={disabled || mode === 'preview'}
-                    icon={<PictureOutlined />}
-                    onClick={() => imageInputRef.current?.click()}
-                  />
+                    // mousedown 抢焦点会让选区丢失，拦掉（click 仍会触发）
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={a.run}
+                  >
+                    {a.label}
+                  </Button>
                 </Tooltip>
-                <Tooltip title="插入附件">
-                  <Button
-                    size="small"
-                    type="text"
-                    disabled={disabled || mode === 'preview'}
-                    icon={<PaperClipOutlined />}
-                    onClick={() => fileInputRef.current?.click()}
-                  />
-                </Tooltip>
-              </>
-            )}
-          </Space>
+              ))}
+              {attachmentUpload && (
+                <>
+                  <Tooltip title="插入图片（也可直接粘贴/拖拽）">
+                    <Button
+                      size="small"
+                      type="text"
+                      disabled={disabled || mode === 'preview'}
+                      icon={<PictureOutlined />}
+                      onClick={() => imageInputRef.current?.click()}
+                    />
+                  </Tooltip>
+                  <Tooltip title="插入附件">
+                    <Button
+                      size="small"
+                      type="text"
+                      disabled={disabled || mode === 'preview'}
+                      icon={<PaperClipOutlined />}
+                      onClick={() => fileInputRef.current?.click()}
+                    />
+                  </Tooltip>
+                </>
+              )}
+            </Space>
+          </div>
           <Space size={8} align="center" wrap>
             <Typography.Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
               {value.length.toLocaleString()} 字符 · {value ? value.split('\n').length : 0} 行
@@ -512,9 +518,9 @@ export default function MarkdownEditor({
         </div>
       ) : (
         <div className="md-editor-head-minimal">
-          <span className="md-editor-brand">
+          <span className="md-editor-brand" title={typeof title === 'string' ? title : undefined}>
             <FileMarkdownOutlined />
-            Markdown
+            {title ? <span className="md-editor-title">{title}</span> : 'Markdown'}
           </span>
           <span className="md-editor-modes">
             <Tooltip title="编辑源码（Markdown）">

@@ -47,9 +47,10 @@
   左右两栏滚动条按比例双向联动）、全屏（portal + Esc，不连带关外层抽屉）、Ctrl/⌘+B/I/K 与
   Tab 缩进、字符/行统计，`value/onChange` 受控口径与附件上传（工具栏 + 粘贴/拖拽）保持不变。
   阅读优先场景传 `showToolbar={false}` 切 Qoder 文档式极简顶栏（只有源码/分栏/预览三个图标、
-  默认预览，不摆格式工具栏/字符统计），`fill` 撑满父容器剩余高度；原 `SimpleMarkdownEditor`
-  已合并进同一组件，工作日志日报使用极简模式并铺满到页面底部。全站既有 `<Markdown>` /
-  `MarkdownEditor` 消费方无需改调用即继承。E2E：`tests/e2e-markdown-components.mjs`。
+  默认预览，不摆格式工具栏/字符统计），字段标题可用 `title` 进入顶栏，`fill` 撑满父容器剩余高度；
+  原 `SimpleMarkdownEditor` 已合并进同一组件，工作日志日报使用极简模式（标题即顶栏标题）并
+  铺满到页面底部。全站既有 `<Markdown>` / `MarkdownEditor` 消费方无需改调用即继承。
+  E2E：`tests/e2e-markdown-components.mjs`。
 
 ## 3. 关键设计
 

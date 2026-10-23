@@ -269,10 +269,21 @@ html, body, #root {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   color: #8c8c8c;
   font-size: 12px;
 }
-.md-editor-modes { display: inline-flex; align-items: center; gap: 2px; }
+.md-editor-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: #1f1f1f;
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.md-editor-modes { flex: none; display: inline-flex; align-items: center; gap: 2px; }
 .md-editor-modes .ant-btn { color: #8c8c8c; }
 .md-editor-modes .ant-btn:hover:not(:disabled) { color: #1677ff; background: rgba(0, 0, 0, 0.04); }
 .md-editor-modes .ant-btn.is-active { color: #1677ff; background: #e6f4ff; }
