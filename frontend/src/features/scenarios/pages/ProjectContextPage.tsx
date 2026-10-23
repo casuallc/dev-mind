@@ -1,11 +1,13 @@
 // 项目「知识」页（CAP-33 FR-06）：当前项目实际会注入/可用的上下文资产只读清单
 // （知识条目 / 文档 / Skills 三视图，GET /api/projects/{id}/context-assets 聚合）。
-// 多视图切换走 Card title 里的 Segmented（布局约定：禁 Card 内套 Tabs）；维护请去 /admin 对应管理页。
+// 多视图切换走 Card title 里的 Segmented（布局约定：禁 Card 内套 Tabs）；文档/知识条目点名称开抽屉看全文，维护请去 /admin 对应管理页。
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Button, Card, Segmented, Space, Tag, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { listContextAssets } from '../api'
 import type { AssetGroup, ProjectAssetItem } from '../types'
+import ContextAssetViewer from '../components/ContextAssetViewer'
+import type { ContextAssetRef } from '../components/ContextAssetViewer'
 import { useCurrentProject } from '../../../app/useCurrentProject'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
@@ -62,6 +64,8 @@ export default function ProjectContextPage({
   const { projectId, project } = useCurrentProject(fixedProjectId)
   const [groups, setGroups] = useState<AssetGroup[]>([])
   const [loading, setLoading] = useState(false)
+  // 点名称查看全文：只对文档/知识条目开放（Skills 无内容查看接口）
+  const [viewing, setViewing] = useState<ContextAssetRef | null>(null)
   const [innerView, setInnerView] = useState<string>('knowledge')
   const view = controlledView ?? innerView
   const setView = onViewChange ?? setInnerView
@@ -106,7 +110,20 @@ export default function ProjectContextPage({
   const activeGroup = groups.find((g) => g.kind === activeKind)
 
   const columns = [
-    { title: '名称', dataIndex: 'name', width: 260, ellipsis: true },
+    {
+      title: '名称',
+      dataIndex: 'name',
+      width: 260,
+      ellipsis: true,
+      render: (name: string, r: ProjectAssetItem) =>
+        activeKind === 'doc' || activeKind === 'knowledge' ? (
+          <Typography.Link onClick={() => setViewing({ kind: activeKind, ref: r.ref, name })}>
+            {name}
+          </Typography.Link>
+        ) : (
+          name
+        ),
+    },
     {
       title: '摘要',
       dataIndex: 'summary',
@@ -145,7 +162,8 @@ export default function ProjectContextPage({
     >
       <Typography.Paragraph type="secondary">
         当前项目（{project?.name ?? projectId}）的会话上下文资产：创建会话/场景问答时经装配管线注入沙箱
-        （CLAUDE.local.md + .claude/skills/ + .devmind/docs/）。此页只读，维护请去后台管理对应页面。
+        （CLAUDE.local.md + .claude/skills/ + .devmind/docs/）。此页只读，点文档/知识条目名称可查看全文，
+        维护请去后台管理对应页面。
         {activeMeta.hint && (
           <>
             <br />
@@ -161,6 +179,8 @@ export default function ProjectContextPage({
         pagination={LIST_PAGINATION}
         locale={{ emptyText: `暂无${activeMeta.title}，可到后台管理维护。` }}
       />
+
+      <ContextAssetViewer asset={viewing} onClose={() => setViewing(null)} />
     </Card>
   )
 }

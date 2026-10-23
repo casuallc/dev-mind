@@ -53,6 +53,8 @@ docs（CAP-03）/ knowledge（CAP-04）/ skills 三类资产目前挂在 /admin 
 - **FR-06 前端集成**：
   - 项目工作区新增「上下文」页签：按 projectId 过滤展示 docs/skills/knowledge
     三资产（只读视图 + 跳转 /admin 对应管理页），消除资产与项目的割裂感；
+    文档/知识条目点名称开只读抽屉看全文（列表只出摘要，正文走 GET /documents/{id}、
+    /knowledge/entries/{id}，非 ADMIN 用户也能读）；
   - 会话/问答创建表单加「场景」下拉（按当前项目过滤 scope）；
   - 场景管理页 `/admin/scenarios`（遵循内容区布局约定：Card + extra 按钮 + 表格，
     编辑器含资产多选与 prompt 骨架预览）。
