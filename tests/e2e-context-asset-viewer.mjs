@@ -8,8 +8,8 @@
 //   mvn -pl devmind-app spring-boot:run -Dspring-boot.run.profiles=e2e \
 //     "-Dspring-boot.run.arguments=--server.port=18103 --spring.datasource.url=jdbc:h2:file:<tmp>/db/devmind;AUTO_SERVER=TRUE"
 //   VITE_BACKEND_URL=http://localhost:18103 npm run dev -- --port 5199 --strictPort   # frontend/ 下
-//   node tests/e2e-context-asset-viewer.mjs   （API/BASE/CHROME_PATH 可覆盖）
-import { spawn } from 'node:child_process'
+//   node tests/e2e-context-asset-viewer.mjs [--shots]   （API/BASE/CHROME_PATH 可覆盖）
+import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -117,6 +117,10 @@ let chrome
 async function main() {
   rmSync(TMP, { recursive: true, force: true })
   mkdirSync(TMP, { recursive: true })
+  // 每轮新路径 + 真 git 仓库：项目 path 全局唯一，同库重跑不会撞 409
+  const repoPath = join(TMP, `repo-${MARK}`)
+  mkdirSync(repoPath, { recursive: true })
+  execFileSync('git', ['init', '-q'], { cwd: repoPath })
 
   const login = await api('/auth/login', { body: { username: USER, password: PASS } })
   const { accessToken, refreshToken, user } = login
@@ -126,7 +130,7 @@ async function main() {
     token: accessToken,
     body: {
       name: `查看验证-${MARK}`,
-      path: ROOT,
+      path: repoPath,
       defaultBranch: 'master',
       tags: [],
       status: 'ACTIVE',
@@ -225,6 +229,24 @@ async function main() {
     await evaluate(ws, `document.querySelector('.ant-drawer-close').click()`)
     await waitFor(async () => !(await evaluate(ws, drawerVisibleJs)), '文档抽屉关闭')
     ok(await evaluate(ws, `!!document.querySelector('.ant-table')`), '关抽屉后文档表格仍在')
+
+    // 列宽：名称是主列（自适应），必须比固定宽的摘要更宽
+    const colWidths = await evaluate(ws, `(() => {
+      const w = {};
+      for (const th of document.querySelectorAll('.ant-table-thead th')) {
+        w[th.textContent.trim()] = th.getBoundingClientRect().width;
+      }
+      return w;
+    })()`)
+    ok(colWidths['名称'] >= 320 && colWidths['名称'] > colWidths['摘要'],
+      `列宽合理：名称 ${Math.round(colWidths['名称'])}px > 摘要 ${Math.round(colWidths['摘要'])}px`)
+
+    // --shots：留一张文档列表终态图，便于人工核对列宽（产物落 tmp/，不入库）
+    if (process.argv.includes('--shots')) {
+      const shot = await ws.send('Page.captureScreenshot', { format: 'png' })
+      writeFileSync(join(TMP, 'final.png'), Buffer.from(shot.data, 'base64'))
+      console.log(`  截图 → ${join(TMP, 'final.png')}`)
+    }
   } catch (e) {
     try {
       const diag = await evaluate(ws, `location.href + ' | ' + document.body.innerText.slice(0, 300)`)
