@@ -81,7 +81,14 @@ export default function DocEditDrawer({ open, doc, onClose, onSaved }: {
         </Space>
       }
     >
-      <Form form={form} layout="vertical" onFinish={onSave} preserve={false}>
+      {/* destroyOnHidden 下抽屉内容晚于父级 effect 挂载，initialValues 兜住首开赋值；effect 负责抽屉开着时 doc 切换 */}
+      <Form
+        form={form}
+        layout="vertical"
+        onFinish={onSave}
+        preserve={false}
+        initialValues={{ kind: doc.kind, title: doc.title, tags: doc.tags, contentMd: doc.contentMd }}
+      >
         <Form.Item label="类型" name="kind" rules={[{ required: true }]}>
           <Select options={Object.entries(KIND_LABEL).map(([value, label]) => ({ value, label }))} />
         </Form.Item>
