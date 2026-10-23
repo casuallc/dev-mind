@@ -2,7 +2,8 @@
 // 覆盖：
 //   阅读：代码块语言标签 + 高亮 token + 一键复制、表格横向滚动容器、图片点击预览、任务列表；
 //   编辑：字符统计、Ctrl+B 加粗、Tab 缩进、编辑/分栏/预览三态、分栏预览高亮、全屏与 Esc 退出（不连带关抽屉）；
-//   极简编辑器：工作日志日报默认预览、顶栏只有编辑/预览两个图标（无格式工具栏），源码态可编辑。
+//   极简编辑器：工作日志日报默认预览、顶栏只有源码/预览两个图标（无格式工具栏）、撑满页面底部，
+//               源码态 CodeMirror 行号/当前行/Markdown 语法高亮、可编辑，预览态走共享高亮渲染。
 // 前置：app 隔离实例 + 指向它的前端 dev 同时起（数据自造，落隔离 H2，无需 runner）：
 //   mvn -pl devmind-app spring-boot:run -Dspring-boot.run.profiles=e2e \
 //     "-Dspring-boot.run.arguments=--server.port=18103 --spring.datasource.url=jdbc:h2:file:<tmp>/markdown-components/db/devmind;AUTO_SERVER=TRUE"
@@ -424,17 +425,32 @@ plain text ${MARK}
       const el = document.querySelector('.md-simple');
       return {
         modes: [...el.querySelectorAll('.md-simple-modes button')].map((b) => b.getAttribute('aria-label')),
-        hasEditor: !!el.querySelector('textarea'),
+        hasEditor: !!el.querySelector('.cm-editor'),
         previewOn: el.querySelector('button[aria-label="预览"]')?.getAttribute('aria-pressed') === 'true',
         title: el.querySelector('.doc-md h1')?.textContent ?? '',
         items: el.querySelectorAll('.doc-md li').length,
         highlight: !!el.querySelector('.doc-md .hljs-keyword'),
       };
     })()`)
-    ok(simplePreview.modes.join() === '编辑源码,预览', '日报顶栏只有编辑/预览两个图标（无格式工具栏）')
-    ok(!simplePreview.hasEditor && simplePreview.previewOn, '日报默认预览态（无编辑框）')
+    ok(simplePreview.modes.join() === '编辑源码,预览', '日报顶栏只有源码/预览两个图标（无格式工具栏）')
+    ok(!simplePreview.hasEditor && simplePreview.previewOn, '日报默认预览态（无编辑器）')
     ok(simplePreview.title.includes(MARK) && simplePreview.items === 2 && simplePreview.highlight,
       '日报预览走共享 Markdown 渲染（标题/列表/代码高亮）')
+
+    // 高度铺满：编辑器底部 = 卡片内容区底部（只差卡片 padding）
+    const layout = await evaluate(ws, `(() => {
+      const el = document.querySelector('.md-simple');
+      const body = el.closest('.ant-card-body');
+      const er = el.getBoundingClientRect();
+      const br = body.getBoundingClientRect();
+      return {
+        editorHeight: er.height,
+        gap: br.bottom - er.bottom,
+        paddingBottom: parseFloat(getComputedStyle(body).paddingBottom),
+      };
+    })()`)
+    ok(layout.editorHeight > 280 && Math.abs(layout.gap - layout.paddingBottom) < 2,
+      `日报编辑器撑满到页面底部（高 ${Math.round(layout.editorHeight)}px，底部留白 ${Math.round(layout.gap)}px = padding ${layout.paddingBottom}px）`)
 
     if (process.argv.includes('--shots')) {
       const shot = await ws.send('Page.captureScreenshot', { format: 'png' })
@@ -444,18 +460,40 @@ plain text ${MARK}
 
     await evaluate(ws, `document.querySelector('.md-simple button[aria-label="编辑源码"]').click()`)
     await waitFor(() => evaluate(ws, `(() => {
-      const ta = document.querySelector('.md-simple textarea');
-      return !!ta && ta.value.includes(${JSON.stringify(MARK)});
+      const content = document.querySelector('.md-simple .cm-content');
+      return !!content && content.textContent.includes(${JSON.stringify(MARK)});
     })()`), '日报源码态')
     const simpleEdit = await evaluate(ws, `(() => {
       const el = document.querySelector('.md-simple');
+      const content = el.querySelector('.cm-content');
+      const heading = [...el.querySelectorAll('.cm-line')].find((l) => l.textContent.includes('# 日报'));
+      const headingColors = heading
+        ? [...heading.querySelectorAll('span')].map((s) => getComputedStyle(s).color)
+        : [];
       return {
         modes: el.querySelectorAll('.md-simple-modes button').length,
         noToolbar: ![...el.querySelectorAll('button')].some((b) => /^H[1-3]$/.test(b.textContent)),
         noStats: !el.innerText.includes('字符'),
+        editable: content?.getAttribute('contenteditable') === 'true',
+        lineNumbers: el.querySelectorAll('.cm-lineNumbers .cm-gutterElement').length,
+        headingColors,
+        headingHighlighted: headingColors.includes('rgb(9, 88, 217)')
+          || (!!heading && getComputedStyle(heading).color === 'rgb(9, 88, 217)'),
+        activeLine: !!el.querySelector('.cm-activeLine'),
+        editorHeight: el.querySelector('.cm-editor')?.getBoundingClientRect().height ?? 0,
       };
     })()`)
     ok(simpleEdit.modes === 2 && simpleEdit.noToolbar && simpleEdit.noStats, '源码态同样无格式工具栏/字符统计')
+    ok(simpleEdit.editable && simpleEdit.lineNumbers >= 3 && simpleEdit.activeLine,
+      `源码态为带行号/当前行的可编辑编辑器（${simpleEdit.lineNumbers} 行号）`)
+    ok(simpleEdit.headingHighlighted, `Markdown 标题语法高亮（${simpleEdit.headingColors.join(' / ')}）`)
+    ok(Math.abs(simpleEdit.editorHeight - layout.editorHeight) < 40, '源码态与预览态高度一致（都铺满）')
+
+    if (process.argv.includes('--shots')) {
+      const shot = await ws.send('Page.captureScreenshot', { format: 'png' })
+      writeFileSync(join(TMP, 'daily-report-source.png'), Buffer.from(shot.data, 'base64'))
+      console.log(`  截图 → ${join(TMP, 'daily-report-source.png')}`)
+    }
   } catch (e) {
     try {
       const diag = await evaluate(ws, `location.href + ' | ' + document.body.innerText.slice(0, 300)`)
