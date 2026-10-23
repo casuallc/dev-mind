@@ -257,12 +257,13 @@ html, body, #root {
 .md-simple-modes .ant-btn { color: #8c8c8c; }
 .md-simple-modes .ant-btn:hover:not(:disabled) { color: #1677ff; background: rgba(0, 0, 0, 0.04); }
 .md-simple-modes .ant-btn.is-active { color: #1677ff; background: #e6f4ff; }
-.md-simple-source { min-height: 0; overflow: hidden; }
-.md-simple-preview { min-height: 0; overflow: auto; padding: 12px 16px; }
+.md-simple-source { flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; }
+.md-simple-preview { flex: 1 1 0; min-width: 0; min-height: 0; overflow: auto; padding: 12px 16px; }
+.md-simple-body { display: flex; min-height: 0; }
+.md-simple-split .md-simple-preview { border-left: 1px solid #f0f0f0; }
 /* 撑满父容器：报告页阅读区一直落到页面底部，源码/预览各自内部滚动 */
 .md-simple-fill { flex: 1; min-height: 220px; }
-.md-simple-fill .md-simple-source,
-.md-simple-fill .md-simple-preview { flex: 1; }
+.md-simple-fill .md-simple-body { flex: 1; }
 
 /* highlight.js 常见 token 配色（GitHub Light 口径，只落 .doc-md 作用域） */
 .doc-md .hljs { color: #24292e; }

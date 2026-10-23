@@ -1,10 +1,11 @@
-// 极简 Markdown 编辑器：Qoder 文档式顶栏，只保留「源码/预览」两个图标，不摆格式工具栏。
-// 源码态基于 CodeMirror：行号、Markdown 语法高亮、当前行高亮；预览态复用共享 Markdown。
+// 极简 Markdown 编辑器：Qoder 文档式顶栏，只保留「源码/分栏/预览」三个图标，不摆格式工具栏。
+// 源码态基于 CodeMirror：行号、Markdown 语法高亮、当前行高亮；分栏左侧源码、右侧实时预览，
+// 两边滚动条按比例双向联动；预览态复用共享 Markdown。
 // 阅读优先的报告类场景用这个；需要插表格/代码块/附件的富编辑用 MarkdownEditor。
 // 受控组件：value/onChange；mode/onModeChange 可受控，也可内部自管；fill 时撑满父容器剩余高度。
-import { useDeferredValue, useEffect, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useRef, useState } from 'react'
 import { Button, Tooltip } from 'antd'
-import { CodeOutlined, EyeOutlined, FileMarkdownOutlined } from '@ant-design/icons'
+import { CodeOutlined, EyeOutlined, FileMarkdownOutlined, SplitCellsOutlined } from '@ant-design/icons'
 import { EditorState } from '@codemirror/state'
 import {
   EditorView,
@@ -20,7 +21,7 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
 import Markdown from './Markdown'
 
-export type SimpleMarkdownEditorMode = 'edit' | 'preview'
+export type SimpleMarkdownEditorMode = 'edit' | 'split' | 'preview'
 
 export interface SimpleMarkdownEditorProps {
   value?: string
@@ -94,15 +95,38 @@ export default function SimpleMarkdownEditor({
   }
   const previewValue = useDeferredValue(value)
   const hostRef = useRef<HTMLDivElement>(null)
+  const previewRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   // 异步/延迟回调拿旧闭包时也能把最新文本交回父级
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
   const valueRef = useRef(value)
   valueRef.current = value
+  const modeRef = useRef(mode)
+  modeRef.current = mode
+  // 程序化滚动会再触发对侧 scroll 事件，短时间内忽略对侧，避免两栏互相拉扯
+  const scrollLockRef = useRef<{ ignore: 'source' | 'preview'; until: number } | null>(null)
+
+  const syncScroll = useCallback((from: 'source' | 'preview') => {
+    if (modeRef.current !== 'split') return
+    const source = viewRef.current?.scrollDOM
+    const preview = previewRef.current
+    if (!source || !preview) return
+    const lock = scrollLockRef.current
+    const now = Date.now()
+    if (lock && lock.ignore === from && now < lock.until) return
+    const [fromEl, toEl] = from === 'source' ? [source, preview] : [preview, source]
+    const fromRange = fromEl.scrollHeight - fromEl.clientHeight
+    const toRange = toEl.scrollHeight - toEl.clientHeight
+    if (fromRange <= 0 || toRange <= 0) return
+    scrollLockRef.current = { ignore: from === 'source' ? 'preview' : 'source', until: now + 100 }
+    toEl.scrollTop = (fromEl.scrollTop / fromRange) * toRange
+  }, [])
+
+  const showSource = mode !== 'preview'
 
   useEffect(() => {
-    if (mode !== 'edit' || !hostRef.current) return
+    if (!showSource || !hostRef.current) return
     const view = new EditorView({
       parent: hostRef.current,
       state: EditorState.create({
@@ -128,12 +152,22 @@ export default function SimpleMarkdownEditor({
       }),
     })
     viewRef.current = view
+    const onSourceScroll = () => syncScroll('source')
+    view.scrollDOM.addEventListener('scroll', onSourceScroll, { passive: true })
     view.focus()
     return () => {
+      view.scrollDOM.removeEventListener('scroll', onSourceScroll)
       view.destroy()
       viewRef.current = null
     }
-  }, [mode, disabled, placeholder])
+  }, [showSource, disabled, placeholder, syncScroll])
+
+  // 切到分栏时对齐一次：源码可能已在某处滚动，右侧预览刚从 0 挂载
+  useEffect(() => {
+    if (mode !== 'split') return
+    const id = window.setTimeout(() => syncScroll('source'), 50)
+    return () => window.clearTimeout(id)
+  }, [mode, syncScroll])
 
   // 外部改值（如 AI 重写）同步进编辑器；编辑器自己触发的 onChange 不回灌，避免打断输入
   useEffect(() => {
@@ -143,9 +177,7 @@ export default function SimpleMarkdownEditor({
     if (value !== current) {
       view.dispatch({ changes: { from: 0, to: current.length, insert: value } })
     }
-  }, [value, mode])
-
-  const sourceHeight = fill ? undefined : height
+  }, [value, showSource])
 
   return (
     <div className={fill ? 'md-simple md-simple-fill' : 'md-simple'} style={fill ? { height: '100%' } : undefined}>
@@ -167,6 +199,17 @@ export default function SimpleMarkdownEditor({
               onClick={() => setMode('edit')}
             />
           </Tooltip>
+          <Tooltip title="分栏（源码 + 实时预览）">
+            <Button
+              size="small"
+              type="text"
+              aria-label="分栏"
+              aria-pressed={mode === 'split'}
+              className={mode === 'split' ? 'is-active' : undefined}
+              icon={<SplitCellsOutlined />}
+              onClick={() => setMode('split')}
+            />
+          </Tooltip>
           <Tooltip title="预览">
             <Button
               size="small"
@@ -180,20 +223,22 @@ export default function SimpleMarkdownEditor({
           </Tooltip>
         </span>
       </div>
-      {mode === 'edit' ? (
-        <div
-          ref={hostRef}
-          className="md-simple-source"
-          style={sourceHeight === undefined ? undefined : { height: sourceHeight }}
-        />
-      ) : (
-        <div
-          className="md-simple-preview"
-          style={sourceHeight === undefined ? undefined : { height: sourceHeight }}
-        >
-          <Markdown content={previewValue} />
-        </div>
-      )}
+      <div
+        className={mode === 'split' ? 'md-simple-body md-simple-split' : 'md-simple-body'}
+        style={fill ? undefined : { height }}
+      >
+        {showSource && <div key="source" ref={hostRef} className="md-simple-source" />}
+        {mode !== 'edit' && (
+          <div
+            key="preview"
+            ref={previewRef}
+            className="md-simple-preview"
+            onScroll={() => syncScroll('preview')}
+          >
+            <Markdown content={previewValue} />
+          </div>
+        )}
+      </div>
     </div>
   )
 }
