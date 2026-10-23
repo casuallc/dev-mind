@@ -20,6 +20,8 @@ interface Props {
   onSave: (values: Record<string, string>) => Promise<void>
   /** 撑满父容器剩余高度（日报页要求编辑器底部与页面底部对齐） */
   fill?: boolean
+  /** 多字段布局：vertical 上下（默认）；horizontal 左右等宽（周报「周总结 / 下周计划」） */
+  layout?: 'vertical' | 'horizontal'
 }
 
 /**
@@ -27,7 +29,7 @@ interface Props {
  * CAP-74：去 DRAFT/CONFIRMED 状态机——事实源是服务端仓，保存即 commit，历史走 git log，
  * 不再有「确认定稿/只读」概念。编辑态复用共享 MarkdownEditor 的极简模式（showToolbar=false：
  * Qoder 文档式顶栏，字段标题通过 title 进入顶栏，只有源码/分栏/预览切换，默认预览；日报以读为主，
- * 不摆格式工具栏）。
+ * 不摆格式工具栏）。周报两字段用 layout=horizontal 左右等宽并排。
  * 全部字段处于预览时不显示「保存修改」；保存需二次确认。
  */
 export default function ReportEditor({
@@ -39,6 +41,7 @@ export default function ReportEditor({
   onGenerate,
   onSave,
   fill,
+  layout = 'vertical',
 }: Props) {
   const [values, setValues] = useState<Record<string, string>>({})
   const [modes, setModes] = useState<Record<string, MarkdownEditorMode>>({})
@@ -56,6 +59,13 @@ export default function ReportEditor({
   const modeOf = (key: string) => modes[key] ?? 'preview'
   // 任一字段在编辑/分栏态才显示保存按钮（全预览=纯阅读，隐藏保存防误触）
   const anyEditing = fields.some((f) => modeOf(f.key) !== 'preview')
+  const horizontal = layout === 'horizontal' && fields.length > 1
+  const heightOf = (key: string) => {
+    const rows = Math.max(6, (values[key] || '').split('\n').length + 1)
+    return Math.max(220, rows * 22 + 12)
+  }
+  // 左右并排时两边同高，避免卡片底边参差
+  const rowHeight = horizontal && fields.length ? Math.max(...fields.map((f) => heightOf(f.key))) : 220
 
   const doSave = async () => {
     setSaving(true)
@@ -127,21 +137,24 @@ export default function ReportEditor({
         )}
       </Space>
       <div
-        style={fill
-          ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 16 }
-          : undefined}
+        style={horizontal
+          ? { display: 'flex', gap: 16, alignItems: 'flex-start' }
+          : fill
+            ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 16 }
+            : undefined}
       >
         {fields.map((f) => {
           const content = values[f.key] || ''
-          const rows = Math.max(6, content.split('\n').length + 1)
           // 普通模式高度随内容行数伸缩（下限 220）；fill 模式由 flex 撑满页面剩余高度
-          const boxHeight = Math.max(220, rows * 22 + 12)
+          const boxHeight = horizontal ? rowHeight : heightOf(f.key)
           return (
             <div
               key={f.key}
-              style={fill
-                ? { flex: 1, minHeight: 220, display: 'flex', flexDirection: 'column' }
-                : { marginBottom: 16 }}
+              style={horizontal
+                ? { flex: '1 1 0', minWidth: 0 }
+                : fill
+                  ? { flex: 1, minHeight: 220, display: 'flex', flexDirection: 'column' }
+                  : { marginBottom: 16 }}
             >
               <MarkdownEditor
                 title={f.label}

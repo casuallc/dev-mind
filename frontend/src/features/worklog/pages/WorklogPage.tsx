@@ -733,6 +733,7 @@ export default function WorklogPage() {
               exists={weekly?.exists}
               updatedAt={weekly?.updatedAt}
               generating={generating}
+              layout="horizontal"
               fields={[
                 { key: 'summaryMd', label: `周总结（${weekStartStr} 周，Markdown）`, value: weekly?.summaryMd ?? '' },
                 { key: 'nextPlanMd', label: '下周计划（Markdown）', value: weekly?.nextPlanMd ?? '' },
