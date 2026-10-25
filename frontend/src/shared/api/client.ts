@@ -98,10 +98,43 @@ async function requestText(path: string): Promise<string> {
   return res.text()
 }
 
+export interface ConditionalResult<T> {
+  /** true = 服务端 304，data/etag 无意义，调用方沿用本地缓存 */
+  notModified: boolean
+  data?: T
+  /** 200 时响应携带的 ETag，下次请求作 If-None-Match 回传 */
+  etag?: string
+}
+
+/**
+ * 条件 GET（ETag/304）：轮询列表专用——数据没变时服务端回 304 空体，
+ * 省掉每轮几百 KB 的传输与 JSON 解析。401 刷新后带原 If-None-Match 重放。
+ */
+async function requestConditional<T>(path: string, etag?: string): Promise<ConditionalResult<T>> {
+  const init: RequestInit | undefined = etag ? { headers: { 'If-None-Match': etag } } : undefined
+  let res = await rawRequest(path, init)
+  if (res.status === 401 && !isAuthEndpoint(path)) {
+    if (await tryRefresh()) {
+      res = await rawRequest(path, init)
+    } else {
+      forceReLogin()
+    }
+  }
+  if (res.status === 304) return { notModified: true }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw parseApiError(res.status, text)
+  }
+  const text = await res.text()
+  return { notModified: false, data: (text ? JSON.parse(text) : undefined) as T, etag: res.headers.get('ETag') ?? undefined }
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   /** 纯文本 GET（日志/报告等非 JSON 响应） */
   getText: (path: string) => requestText(path),
+  /** 条件 GET（ETag/304）：轮询列表省传输 */
+  getConditional: <T>(path: string, etag?: string) => requestConditional<T>(path, etag),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) }),
   put: <T>(path: string, body?: unknown) =>

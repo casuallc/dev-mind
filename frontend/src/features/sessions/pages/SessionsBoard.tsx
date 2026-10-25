@@ -13,7 +13,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
-import { collectSessionOutputs, deleteSession, listSessions } from '../api'
+import { collectSessionOutputs, deleteSession, getSession, listSessionsConditional } from '../api'
 import type { SessionSummary } from '../types'
 import { stateColor, ACTIVE_STATES, STATE_OPTIONS } from '../stateMeta'
 import { useSessionActions } from '../hooks/useSessionActions'
@@ -79,23 +79,41 @@ export default function SessionsBoard({
   const setView = onViewChange ?? setInnerView
   const [status, setStatus] = useState('ALL')
   const [keyword, setKeyword] = useState('')
+  // 防抖后的搜索词：实际下发服务端（列表 taskSpec/summary 已是截断预览，客户端过滤会漏全文命中）
+  const [kw, setKw] = useState('')
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
+  // 列表行的 taskSpec 是 200 字预览；对话气泡的任务说明要全文，选中后按 id 补拉单条
+  const [selectedFull, setSelectedFull] = useState<SessionSummary | undefined>(undefined)
   const [draft, setDraft] = useState(false)
   const [outputsOpen, setOutputsOpen] = useState(false)
   const [streamMeta, setStreamMeta] = useState<StreamMeta>({ connected: false, fatal: false })
   // CAP-54：WS 旁路工作区快照（ChatPanel 上抛），操作条「工作区」入口按钮的徽标/抽屉数据源
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot | undefined>(undefined)
   const autoPickedRef = useRef(false)
+  // 条件拉取的 ETag：数据没变服务端回 304，省掉每轮几百 KB 的传输与 JSON 解析
+  const etagRef = useRef<string | undefined>(undefined)
+
+  // 输入停 300ms 才发服务端搜索，逐键打请求会把轮询通道挤满
+  useEffect(() => {
+    const t = window.setTimeout(() => setKw(keyword.trim()), 300)
+    return () => window.clearTimeout(t)
+  }, [keyword])
+
+  // projectId/搜索词变了，旧 ETag 对应另一份数据，必须作废重新全量拉
+  useEffect(() => {
+    etagRef.current = undefined
+  }, [projectId, kw])
 
   const load = useCallback(async () => {
     try {
-      setSessions(await listSessions(projectId ?? undefined))
+      const fresh = await listSessionsConditional(projectId ?? undefined, kw || undefined, etagRef)
+      if (fresh) setSessions(fresh) // null = 304 未变化，沿用现有列表
     } catch (e) {
       showError(e, '加载会话失败')
     } finally {
       setLoading(false)
     }
-  }, [projectId])
+  }, [projectId, kw])
 
   // 切换当前项目：清选中态与自动选中标记，避免选中到上一个项目的会话
   useEffect(() => {
@@ -104,12 +122,30 @@ export default function SessionsBoard({
     setDraft(false)
   }, [projectId])
 
-  // 轮询刷新状态；对话内容由 ChatPanel 的 WS 实时流负责，这里只刷状态标签/摘要
+  // 智能轮询刷新状态；对话内容由 ChatPanel 的 WS 实时流负责，这里只刷状态标签/摘要。
+  // 有活跃会话 3s、全终态 15s；标签页隐藏时暂停（后台标签页每秒打列表是纯浪费），回到前台立即补一次
+  const sessionsRef = useRef<SessionSummary[]>([])
+  sessionsRef.current = sessions
   useEffect(() => {
     setLoading(true)
-    load()
-    const timer = window.setInterval(() => load(), 3000)
-    return () => window.clearInterval(timer)
+    let timer: number | undefined
+    let stopped = false
+    const tick = async () => {
+      if (!document.hidden) await load()
+      if (stopped) return
+      const hasActive = sessionsRef.current.some((s) => ACTIVE_STATES.includes(s.state))
+      timer = window.setTimeout(tick, hasActive ? 3000 : 15000)
+    }
+    tick()
+    const onVisible = () => {
+      if (!document.hidden) load()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      stopped = true
+      window.clearTimeout(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [load])
 
   useEffect(() => {
@@ -152,6 +188,21 @@ export default function SessionsBoard({
   useEffect(() => {
     if (selectedId && !loading && !current) setSelectedId(undefined)
   }, [selectedId, current, loading])
+
+  // 列表行 taskSpec/summary 是 200 字预览（列表瘦身），对话气泡的任务说明要全文
+  useEffect(() => {
+    setSelectedFull(undefined)
+    if (!selectedId) return
+    let cancelled = false
+    getSession(selectedId)
+      .then((s) => {
+        if (!cancelled) setSelectedFull(s)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [selectedId])
 
   const onUpdated = useCallback(() => load(), [load])
   const { onFinish, onSuspend, onResume, onKill, diff } = useSessionActions(selectedId, onUpdated)
@@ -326,17 +377,10 @@ export default function SessionsBoard({
     },
   ]
 
+  // 关键词过滤在服务端（预览截断后客户端再滤会漏全文命中）；状态筛选仍客户端做
   const listFiltered = useMemo(() => {
-    const kw = keyword.trim().toLowerCase()
-    const list = status === 'ALL' ? sessions : sessions.filter((s) => s.state === status)
-    if (!kw) return list
-    return list.filter(
-      (s) =>
-        s.id.toLowerCase().includes(kw) ||
-        s.taskSpec.toLowerCase().includes(kw) ||
-        (s.summary ?? '').toLowerCase().includes(kw),
-    )
-  }, [sessions, status, keyword])
+    return status === 'ALL' ? sessions : sessions.filter((s) => s.state === status)
+  }, [sessions, status])
 
   return (
     <Card
@@ -484,7 +528,10 @@ export default function SessionsBoard({
                 </div>
                 <ChatPanel
                   key={current.id}
-                  summary={{ ...current, topic: current.taskSpec }}
+                  summary={{
+                    ...current,
+                    topic: selectedFull?.id === current.id ? selectedFull.taskSpec : current.taskSpec,
+                  }}
                   apiBase="/sessions"
                   maxHeight={null}
                   allowImages

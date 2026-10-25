@@ -35,23 +35,16 @@ export default function SessionListPane({
 }) {
   const { token } = theme.useToken()
 
+  // 关键词过滤已下沉服务端（列表 taskSpec/summary 是截断预览，客户端再滤一遍会误杀
+  // 服务端命中但预览里没有的行）；这里只剩状态筛选 + 排序
   const filtered = useMemo(() => {
-    const kw = keyword.trim().toLowerCase()
     const list = status === 'ALL' ? sessions : sessions.filter((s) => s.state === status)
-    const hit = kw
-      ? list.filter(
-          (s) =>
-            s.id.toLowerCase().includes(kw) ||
-            s.taskSpec.toLowerCase().includes(kw) ||
-            (s.summary ?? '').toLowerCase().includes(kw),
-        )
-      : list
-    return [...hit].sort((a, b) => {
+    return [...list].sort((a, b) => {
       const aa = ACTIVE_STATES.includes(a.state) ? 0 : 1
       const bb = ACTIVE_STATES.includes(b.state) ? 0 : 1
       return aa - bb || +new Date(b.createdAt) - +new Date(a.createdAt)
     })
-  }, [sessions, status, keyword])
+  }, [sessions, status])
 
   return (
     <div

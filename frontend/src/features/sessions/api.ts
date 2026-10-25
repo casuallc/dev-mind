@@ -15,14 +15,35 @@ export function listSessions(
   status?: string,
   workItemId?: string,
   requirementId?: string,
+  keyword?: string,
 ): Promise<SessionSummary[]> {
   const params = new URLSearchParams()
   if (projectId) params.set('projectId', projectId)
   if (status && status !== 'ALL') params.set('status', status)
   if (workItemId) params.set('workItemId', workItemId)
   if (requirementId) params.set('requirementId', requirementId)
+  if (keyword) params.set('keyword', keyword)
   const q = params.toString()
   return api.get<SessionSummary[]>(`/sessions${q ? `?${q}` : ''}`)
+}
+
+/**
+ * 轮询专用条件拉取：服务端对列表算 ETag，未变回 304（省每轮传输与解析）。
+ * 返回 null = 未变化；否则为新列表，并把新 ETag 写入 etagRef。
+ */
+export async function listSessionsConditional(
+  projectId: string | undefined,
+  keyword: string | undefined,
+  etagRef: { current: string | undefined },
+): Promise<SessionSummary[] | null> {
+  const params = new URLSearchParams()
+  if (projectId) params.set('projectId', projectId)
+  if (keyword) params.set('keyword', keyword)
+  const q = params.toString()
+  const res = await api.getConditional<SessionSummary[]>(`/sessions${q ? `?${q}` : ''}`, etagRef.current)
+  if (res.notModified) return null
+  etagRef.current = res.etag
+  return res.data ?? []
 }
 
 export function getSession(id: string): Promise<SessionSummary> {
