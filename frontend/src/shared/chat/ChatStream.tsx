@@ -77,6 +77,13 @@ interface ToolItem {
   isError?: boolean
   done: boolean
   ts: number
+  /** tool_use 事件 seq（inputTrunc 时按它补全文） */
+  seq?: number
+  /** 配对 tool_result 事件 seq（outputTrunc 时按它补全文；独立结果块用 seq） */
+  resultSeq?: number
+  /** 历史页 payloadMax 预览截断标记：展开卡片时按 seq 补拉全文 */
+  inputTrunc?: boolean
+  outputTrunc?: boolean
 }
 
 // 旧格式 assistant 文本里拍平的工具标记（如 "[Bash] "），渲染前剔除
@@ -256,6 +263,8 @@ class ChatBuilder {
           input: (ev.payload?.toolInput as string) || undefined,
           done: false,
           ts: ev.timestamp,
+          seq: ev.seq,
+          inputTrunc: Boolean(ev.payload?.previewTruncated),
         })
         const id = ev.payload?.toolUseId as string | undefined
         if (id) this.toolsById.set(id, idx)
@@ -268,12 +277,16 @@ class ChatBuilder {
         if (idx === undefined && this.pendingTools.length > 0) idx = this.pendingTools.shift()
         const target = idx !== undefined ? items[idx] : undefined
         if (target?.kind === 'tool' && !target.done) {
-          items[idx!] = { ...target, output: ev.content ?? '', isError: Boolean(ev.payload?.isError), done: true }
+          items[idx!] = {
+            ...target, output: ev.content ?? '', isError: Boolean(ev.payload?.isError), done: true,
+            resultSeq: ev.seq, outputTrunc: Boolean(ev.payload?.previewTruncated),
+          }
         } else {
           // 找不到配对的调用（历史截断等），退化为独立结果块
           items.push({
             kind: 'tool', key: `e${ev.seq}`, name: '结果', output: ev.content ?? '',
             isError: Boolean(ev.payload?.isError), done: true, ts: ev.timestamp,
+            seq: ev.seq, outputTrunc: Boolean(ev.payload?.previewTruncated),
           })
         }
         break
@@ -372,6 +385,7 @@ export default function ChatStream({
   hasOlder = false,
   loadingOlder = false,
   onLoadOlder,
+  onLoadFullEvent,
 }: {
   events: ChatEvent[]
   taskSpec?: string
@@ -386,6 +400,8 @@ export default function ChatStream({
   hasOlder?: boolean
   loadingOlder?: boolean
   onLoadOlder?: () => void
+  /** 历史页事件被 payloadMax 截断时，展开工具卡片按 seq 补拉全文 */
+  onLoadFullEvent?: (seq: number) => Promise<ChatEvent>
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
@@ -435,7 +451,7 @@ export default function ChatStream({
         </div>
       )}
       {items.map((item) => (
-        <ChatItemView key={item.key} item={item} sessionModel={model} speaker={speaker} feedback={feedback} />
+        <ChatItemView key={item.key} item={item} sessionModel={model} speaker={speaker} feedback={feedback} onLoadFullEvent={onLoadFullEvent} />
       ))}
       {logs.length > 0 && (
         <Collapse
@@ -465,11 +481,12 @@ export default function ChatStream({
 // memo 生效的前提：ChatBuilder 对未修改的渲染项保持对象身份（copy-on-write），
 // feedback 由 ChatPanel useMemo 钉住——流式增量帧只重渲染正文在变的那一条气泡，
 // 其余几百条（含各自的 Markdown）整批跳过
-const ChatItemView = memo(function ChatItemView({ item, sessionModel, speaker, feedback }: {
+const ChatItemView = memo(function ChatItemView({ item, sessionModel, speaker, feedback, onLoadFullEvent }: {
   item: ChatItem
   sessionModel?: string
   speaker: string
   feedback?: { apiBase: string; chatId: string }
+  onLoadFullEvent?: (seq: number) => Promise<ChatEvent>
 }) {
   switch (item.kind) {
     case 'user':
@@ -520,7 +537,7 @@ const ChatItemView = memo(function ChatItemView({ item, sessionModel, speaker, f
       )
     }
     case 'tool':
-      return <ToolCard item={item} />
+      return <ToolCard item={item} onLoadFullEvent={onLoadFullEvent} />
     case 'result':
       return (
         <div className="chat-result" style={{ color: item.isError ? '#cf1322' : '#389e0d' }}>
@@ -711,10 +728,40 @@ function CitationBlock({ check }: { check: CitationCheck }) {
   )
 }
 
-function ToolCard({ item }: { item: ToolItem }) {
+function ToolCard({ item, onLoadFullEvent }: {
+  item: ToolItem
+  onLoadFullEvent?: (seq: number) => Promise<ChatEvent>
+}) {
   const [open, setOpen] = useState(false)
-  const summary = toolSummary(item.input)
-  let prettyInput = item.input ?? ''
+  // 历史页 payloadMax 截断的输入/输出，首次展开时按 seq 补拉全文（本地覆盖，不回写 builder）
+  const [full, setFull] = useState<{ input?: string; output?: string } | null>(null)
+  const [loadingFull, setLoadingFull] = useState(false)
+
+  const toggle = () => {
+    const next = !open
+    setOpen(next)
+    if (!next || full || (!item.inputTrunc && !item.outputTrunc) || !onLoadFullEvent) return
+    setLoadingFull(true)
+    const loadInput =
+      item.inputTrunc && item.seq != null ? onLoadFullEvent(item.seq) : Promise.resolve(null)
+    const resultSeq = item.resultSeq ?? item.seq
+    const loadOutput =
+      item.outputTrunc && resultSeq != null ? onLoadFullEvent(resultSeq) : Promise.resolve(null)
+    Promise.all([loadInput, loadOutput])
+      .then(([useEv, resultEv]) => {
+        setFull({
+          input: useEv ? ((useEv.payload?.toolInput as string) || undefined) : undefined,
+          output: resultEv ? (resultEv.content ?? undefined) : undefined,
+        })
+      })
+      .catch((e) => showError(e, '加载完整内容失败'))
+      .finally(() => setLoadingFull(false))
+  }
+
+  const input = full?.input ?? item.input
+  const output = full?.output ?? item.output
+  const summary = toolSummary(input)
+  let prettyInput = input ?? ''
   try {
     prettyInput = JSON.stringify(JSON.parse(prettyInput), null, 2)
   } catch {
@@ -722,7 +769,7 @@ function ToolCard({ item }: { item: ToolItem }) {
   }
   return (
     <div className={`chat-tool${item.isError ? ' chat-tool-err' : ''}`}>
-      <div className="chat-tool-head" onClick={() => setOpen((v) => !v)}>
+      <div className="chat-tool-head" onClick={toggle}>
         <ToolOutlined style={{ color: '#722ed1' }} />
         <span style={{ fontWeight: 500 }}>{item.name}</span>
         {summary && (
@@ -745,16 +792,22 @@ function ToolCard({ item }: { item: ToolItem }) {
       </div>
       {open && (
         <div className="chat-tool-body">
+          {loadingFull && (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              <Loading3QuartersOutlined spin style={{ marginRight: 6 }} />
+              加载完整内容…
+            </Typography.Text>
+          )}
           {prettyInput && (
             <>
               <div className="chat-tool-label">输入</div>
               <pre>{prettyInput}</pre>
             </>
           )}
-          {item.output != null && item.output !== '' && (
+          {output != null && output !== '' && (
             <>
               <div className="chat-tool-label">输出</div>
-              <pre>{item.output}</pre>
+              <pre>{output}</pre>
             </>
           )}
         </div>

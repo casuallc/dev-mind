@@ -37,6 +37,10 @@ export const getChat = (id: string) => api.get<ChatSummary>(`/chats/${id}`)
 export const listChatEvents = (id: string) =>
   api.get<ChatEvent[]>(`/chats/${id}/events?afterSeq=-1`)
 
+/** 单条事件全文：payloadMax 预览截断后的补取通道（展开工具卡片时按 seq 拉） */
+export const chatEvent = (id: string, seq: number) =>
+  api.get<ChatEvent>(`/chats/${id}/events/${seq}`)
+
 export const suspendChat = (id: string) => api.post<ChatSummary>(`/chats/${id}/suspend`)
 
 export const resumeChat = (id: string) => api.post<ChatSummary>(`/chats/${id}/resume`)

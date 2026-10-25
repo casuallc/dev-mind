@@ -26,6 +26,9 @@ const MAX_INPUT_FILES = 5
 /** 终态会话历史首屏/翻页条数：长会话一次拉全量（几千条、几十 MB）会把首屏拖垮 */
 const HISTORY_PAGE = 200
 
+/** 历史页工具载荷预览上限（字符）：tool_use/tool_result 大字段截断，展开卡片时按 seq 补全文 */
+const PAYLOAD_PREVIEW = 4096
+
 export default function ChatPanel({
   summary,
   apiBase,
@@ -98,7 +101,7 @@ export default function ChatPanel({
     let cancelled = false
     setLoadingOlder(false)
     api
-      .get<ChatEvent[]>(`${apiBase}/${summary.id}/events?afterSeq=-1&limit=${HISTORY_PAGE}`)
+      .get<ChatEvent[]>(`${apiBase}/${summary.id}/events?afterSeq=-1&limit=${HISTORY_PAGE}&payloadMax=${PAYLOAD_PREVIEW}`)
       .then((evs) => {
         if (cancelled) return
         setBaseEvents(evs)
@@ -118,7 +121,7 @@ export default function ChatPanel({
     setLoadingOlder(true)
     api
       .get<ChatEvent[]>(
-        `${apiBase}/${summary.id}/events?afterSeq=-1&limit=${HISTORY_PAGE}&beforeSeq=${first.seq}`,
+        `${apiBase}/${summary.id}/events?afterSeq=-1&limit=${HISTORY_PAGE}&beforeSeq=${first.seq}&payloadMax=${PAYLOAD_PREVIEW}`,
       )
       .then((evs) => {
         setBaseEvents((prev) => {
@@ -255,6 +258,12 @@ export default function ChatPanel({
     [summary.knowledgeMode, apiBase, summary.id],
   )
 
+  // 历史页被 payloadMax 截断的工具载荷，展开卡片时按 seq 补全文（稳定引用保 memo）
+  const loadFullEvent = useCallback(
+    (seq: number) => api.get<ChatEvent>(`${apiBase}/${summary.id}/events/${seq}`),
+    [apiBase, summary.id],
+  )
+
   // 模型执行体生成中不接受注入（后端会拒）：输入区此时换成「停止生成」
   const canInput = ACTIVE_STATES.includes(summary.state) && !generating
   const allowImg = allowImages && !isModel
@@ -318,6 +327,7 @@ export default function ChatPanel({
         hasOlder={!isLive && hasOlder}
         loadingOlder={loadingOlder}
         onLoadOlder={loadOlder}
+        onLoadFullEvent={loadFullEvent}
       />
       <div
         style={{ borderTop: '1px solid #f0f0f0', marginTop: 8, paddingTop: 12, flexShrink: 0 }}

@@ -71,12 +71,25 @@ export function createSession(body: {
   return api.post<SessionSummary>('/sessions', body)
 }
 
-/** 事件补拉：seq > afterSeq 且 < beforeSeq 的最近 limit 条（limit 缺省走后端默认上限） */
-export function sessionEvents(id: string, afterSeq = -1, limit?: number, beforeSeq?: number): Promise<SessionEvent[]> {
+/** 事件补拉：seq > afterSeq 且 < beforeSeq 的最近 limit 条（limit 缺省走后端默认上限）；
+ *  payloadMax>0 时 tool_use/tool_result 大字段截断为预览（payload.previewTruncated 标记） */
+export function sessionEvents(
+  id: string,
+  afterSeq = -1,
+  limit?: number,
+  beforeSeq?: number,
+  payloadMax?: number,
+): Promise<SessionEvent[]> {
   const params = new URLSearchParams({ afterSeq: String(afterSeq) })
   if (limit != null) params.set('limit', String(limit))
   if (beforeSeq != null) params.set('beforeSeq', String(beforeSeq))
+  if (payloadMax != null) params.set('payloadMax', String(payloadMax))
   return api.get<SessionEvent[]>(`/sessions/${id}/events?${params.toString()}`)
+}
+
+/** 单条事件全文：预览截断后的补取通道（展开工具卡片时按 seq 拉） */
+export function sessionEvent(id: string, seq: number): Promise<SessionEvent> {
+  return api.get<SessionEvent>(`/sessions/${id}/events/${seq}`)
 }
 
 export function sendInput(id: string, text: string): Promise<void> {
