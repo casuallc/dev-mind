@@ -162,7 +162,7 @@ export default function KnowledgeSearchView({
   ]
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '16px 20px' }}>
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <Space direction="vertical" size={10} style={{ flexShrink: 0, marginBottom: 12 }}>
         <Input.Search
           allowClear

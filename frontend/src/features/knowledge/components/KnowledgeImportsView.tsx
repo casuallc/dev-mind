@@ -30,32 +30,39 @@ export default function KnowledgeImportsView({
   bases,
   kbId,
   refreshKey = 0,
+  filterKbId,
+  hideToolbar = false,
   onOpenEntry,
 }: {
   bases: KnowledgeBase[]
   /** 传了 = 只看本库批次（库内导入页签） */
   kbId?: number
   refreshKey?: number
+  /** 受控「按库过滤」（hideToolbar 时生效：父组件把过滤/刷新收进 Card extra） */
+  filterKbId?: number
+  /** 隐藏内置工具行（刷新/过滤），由父页面 extra 托管 */
+  hideToolbar?: boolean
   onOpenEntry: (entryId: number) => void
 }) {
-  const [filterKbId, setFilterKbId] = useState<number | undefined>(undefined)
+  const [innerFilterKbId, setInnerFilterKbId] = useState<number | undefined>(undefined)
   const [imports, setImports] = useState<ImportBatch[]>([])
   const [loading, setLoading] = useState(false)
   const [retrying, setRetrying] = useState<string | null>(null)
   const [retryingFile, setRetryingFile] = useState<string | null>(null)
 
   const kbName = new Map<number, string>(bases.map((b) => [b.id, b.name]))
+  const effFilterKbId = hideToolbar ? filterKbId : innerFilterKbId
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setImports(await listImports(kbId ?? filterKbId))
+      setImports(await listImports(kbId ?? effFilterKbId))
     } catch (e) {
       showError(e, '加载上传批次失败')
     } finally {
       setLoading(false)
     }
-  }, [kbId, filterKbId])
+  }, [kbId, effFilterKbId])
 
   // 有运行中的批次才轮询；否则依赖上传后的 refreshKey 与手动刷新，避免历史批次下的常驻请求
   useEffect(() => {
@@ -157,26 +164,28 @@ export default function KnowledgeImportsView({
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <Space size={8} wrap style={{ marginBottom: 10, flexShrink: 0 }}>
-        <Button icon={<ReloadOutlined />} onClick={load}>
-          刷新
-        </Button>
-        {!kbId && (
-          <Select
-            allowClear
-            placeholder="按知识库过滤"
-            style={{ minWidth: 220 }}
-            value={filterKbId}
-            onChange={setFilterKbId}
-            options={bases.map((b) => ({ value: b.id, label: b.name }))}
-            showSearch
-            optionFilterProp="label"
-          />
-        )}
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          每次上传生成一个批次，逐文件展示解析/入库结果；运行中会自动轮询。失败文件可单条或整批重试（按内容哈希幂等，不会重复入库）。
-        </Typography.Text>
-      </Space>
+      {!hideToolbar && (
+        <Space size={8} wrap style={{ marginBottom: 10, flexShrink: 0 }}>
+          <Button icon={<ReloadOutlined />} onClick={load}>
+            刷新
+          </Button>
+          {!kbId && (
+            <Select
+              allowClear
+              placeholder="按知识库过滤"
+              style={{ minWidth: 220 }}
+              value={innerFilterKbId}
+              onChange={setInnerFilterKbId}
+              options={bases.map((b) => ({ value: b.id, label: b.name }))}
+              showSearch
+              optionFilterProp="label"
+            />
+          )}
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            每次上传生成一个批次，逐文件展示解析/入库结果；运行中会自动轮询。失败文件可单条或整批重试（按内容哈希幂等，不会重复入库）。
+          </Typography.Text>
+        </Space>
+      )}
       <FitTable<ImportBatch>
         rowKey="id"
         loading={loading}
@@ -230,7 +239,6 @@ export default function KnowledgeImportsView({
                     r.status === 'failed' ? (
                       <Button
                         size="small"
-                        type="link"
                         loading={retryingFile === `${batch.id}:${r.id}`}
                         onClick={() => onRetryFile(batch, r)}
                       >

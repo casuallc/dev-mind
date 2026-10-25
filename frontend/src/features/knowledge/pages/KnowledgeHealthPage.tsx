@@ -1,5 +1,6 @@
-// CAP-86 FR-06 治理报告：跨库聚合页。生命周期 / 近重复 / 反馈 / 检索评测 / 自动增强
-// 五个区块平铺、各自懒加载（重报表手动触发，轻报表挂载加载）。同步源已按库下沉到库详情「同步」页签。
+// CAP-86 FR-06 治理报告：跨库聚合页。页内视图 = 生命周期 / 近重复 / 反馈 / 检索评测 / 自动增强
+//（Card 头部 Segmented 切换，遵循内容区布局约定禁 Card 内套 Tabs；重报表手动触发，轻报表进视图即加载）。
+// 同步源已按库下沉到库详情「同步」页签。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
@@ -54,7 +55,10 @@ import KnowledgeEntryDrawer from '../components/KnowledgeEntryDrawer'
 import { fmtTime } from '../../../shared/utils/format'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { showError } from '../../../shared/utils/showError'
-import { pageRootScrollStyle } from '../../../shared/utils/pageLayout'
+import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
+
+/** 表格类视图（生命周期/反馈/增强）的区块容器：工具行固定、FitTable 撑满剩余高度 */
+const sectionFlexStyle = { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } as const
 
 type LifecycleGroupKey = 'expired' | 'expiring' | 'stale' | 'missingOwner'
 
@@ -172,7 +176,7 @@ function LifecycleSection({
       key: 'review',
       width: 90,
       render: (_, r) => (
-        <Button size="small" type="link" loading={reviewingId === r.id} onClick={() => onReview(r)}>
+        <Button size="small" loading={reviewingId === r.id} onClick={() => onReview(r)}>
           去复核
         </Button>
       ),
@@ -180,8 +184,8 @@ function LifecycleSection({
   ]
 
   return (
-    <Card size="small" title="生命周期">
-      <Space style={{ marginBottom: 12 }} wrap>
+    <div style={sectionFlexStyle}>
+      <Space style={{ marginBottom: 12, flexShrink: 0 }} wrap>
         <Typography.Text type="secondary">即将过期阈值（天）</Typography.Text>
         <InputNumber
           min={1}
@@ -214,23 +218,22 @@ function LifecycleSection({
           value: k,
           label: `${LIFECYCLE_LABEL[k]}（${counts[k]}）`,
         }))}
-        style={{ marginBottom: 12 }}
+        style={{ marginBottom: 12, flexShrink: 0 }}
       />
       {lifecycle && (
-        <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 0 }}>
+        <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 0, flexShrink: 0 }}>
           四组互相独立：同一篇文档可能同时出现在「已过期」与「缺失负责人」。复核后记录复核时间，长期未复核以复核时间（未复核则取更新时间）计算。
         </Typography.Paragraph>
       )}
-      <Table<LifecycleItem>
+      <FitTable<LifecycleItem>
         rowKey="id"
-        size="small"
         loading={loading}
         columns={columns}
         dataSource={items}
         pagination={LIST_PAGINATION}
         locale={{ emptyText: '该分组没有需要处理的文档。' }}
       />
-    </Card>
+    </div>
   )
 }
 
@@ -290,7 +293,7 @@ function DuplicatesSection({
   ]
 
   return (
-    <Card size="small" title="近重复文档">
+    <div style={pagePaneScrollStyle}>
       <Space style={{ marginBottom: 12 }} wrap>
         <Typography.Text type="secondary">汉明距离阈值</Typography.Text>
         <InputNumber
@@ -345,7 +348,6 @@ function DuplicatesSection({
             >
               <Table<DuplicateItem>
                 rowKey="id"
-                size="small"
                 columns={columns}
                 dataSource={g.entries}
                 pagination={false}
@@ -356,7 +358,7 @@ function DuplicatesSection({
       ) : (
         <Empty description={duplicates ? '未发现近重复文档（阈值为汉明距离，越小越严格）。' : '点击「扫描近重复」生成报告。'} />
       )}
-    </Card>
+    </div>
   )
 }
 
@@ -447,8 +449,8 @@ function FeedbackSection({
   ]
 
   return (
-    <Card size="small" title="答案反馈">
-      <Space style={{ marginBottom: 12 }} wrap>
+    <div style={sectionFlexStyle}>
+      <Space style={{ marginBottom: 12, flexShrink: 0 }} wrap>
         <Select
           value={days}
           onChange={setDays}
@@ -472,7 +474,7 @@ function FeedbackSection({
           </>
         )}
       </Space>
-      <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+      <Typography.Paragraph type="secondary" style={{ marginTop: 0, flexShrink: 0 }}>
         聚合知识会话里「无用」反馈命中的文档，按负面数排序；到文档详情查看分块并补充/重写内容后重建索引。
       </Typography.Paragraph>
       <FitTable<NegativeFeedbackDoc>
@@ -483,7 +485,7 @@ function FeedbackSection({
         pagination={LIST_PAGINATION}
         locale={{ emptyText: '区间内没有负面反馈。' }}
       />
-    </Card>
+    </div>
   )
 }
 
@@ -559,7 +561,7 @@ function EvalSection({ bases }: { bases: KnowledgeBase[] }) {
   ]
 
   return (
-    <Card size="small" title="检索评测">
+    <div style={pagePaneScrollStyle}>
       <Space style={{ marginBottom: 12 }} wrap>
         <Typography.Text type="secondary">Top-K</Typography.Text>
         <Select
@@ -629,7 +631,6 @@ function EvalSection({ bases }: { bases: KnowledgeBase[] }) {
           </Space>
           <Table<EvalCaseResult>
             rowKey="id"
-            size="small"
             loading={loading}
             columns={columns}
             dataSource={evalResult.cases}
@@ -657,7 +658,7 @@ function EvalSection({ bases }: { bases: KnowledgeBase[] }) {
           />
         </Space>
       )}
-    </Card>
+    </div>
   )
 }
 
@@ -790,7 +791,7 @@ function EnrichSection({
       key: 'action',
       width: 90,
       render: (_, r) => (
-        <Button size="small" type="link" loading={enrichingId === r.id} onClick={() => onEnrichEntry(r)}>
+        <Button size="small" loading={enrichingId === r.id} onClick={() => onEnrichEntry(r)}>
           补全
         </Button>
       ),
@@ -798,11 +799,11 @@ function EnrichSection({
   ]
 
   return (
-    <Card size="small" title="自动增强">
+    <div style={sectionFlexStyle}>
       <Descriptions
         size="small"
         column={4}
-        style={{ marginBottom: 12 }}
+        style={{ marginBottom: 12, flexShrink: 0 }}
         items={[
           {
             key: 'enabled',
@@ -834,7 +835,7 @@ function EnrichSection({
           },
         ]}
       />
-      <Space style={{ marginBottom: 12 }} wrap>
+      <Space style={{ marginBottom: 12, flexShrink: 0 }} wrap>
         <Select
           allowClear
           placeholder="全部知识库"
@@ -861,23 +862,25 @@ function EnrichSection({
           增强为异步任务；人工修正过的条目默认不覆盖，点「补全」可恢复自动模式。
         </Typography.Text>
       </Space>
-      <Table<EnrichEntry>
+      <FitTable<EnrichEntry>
         rowKey="id"
-        size="small"
         loading={loading}
         columns={columns}
         dataSource={entries}
         pagination={LIST_PAGINATION}
         locale={{ emptyText: '暂无条目。' }}
       />
-    </Card>
+    </div>
   )
 }
 
 // ---------------- 页面 ----------------
 
+type HealthView = 'lifecycle' | 'duplicates' | 'feedback' | 'eval' | 'enrich'
+
 export default function KnowledgeHealthPage() {
   const [bases, setBases] = useState<KnowledgeBase[]>([])
+  const [view, setView] = useState<HealthView>('lifecycle')
   const [entryDetail, setEntryDetail] = useState<{ entryId: number } | null>(null)
 
   useEffect(() => {
@@ -892,23 +895,42 @@ export default function KnowledgeHealthPage() {
     return map
   }, [bases])
 
+  const openEntry = (entryId: number) => setEntryDetail({ entryId })
+
   return (
-    <div style={pageRootScrollStyle}>
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          跨库治理报告：生命周期、近重复、答案反馈、检索评测与自动增强。同步源已按库下沉到各库详情的「同步」页签。
-        </Typography.Paragraph>
-        <LifecycleSection kbName={kbName} onOpenEntry={(entryId) => setEntryDetail({ entryId })} />
-        <DuplicatesSection kbName={kbName} onOpenEntry={(entryId) => setEntryDetail({ entryId })} />
-        <FeedbackSection kbName={kbName} onOpenEntry={(entryId) => setEntryDetail({ entryId })} />
-        <EvalSection bases={bases} />
-        <EnrichSection bases={bases} onOpenEntry={(entryId) => setEntryDetail({ entryId })} />
-      </Space>
+    <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyFlexStyle }}
+      title={
+        <Space size={12}>
+          <span>治理报告</span>
+          <Segmented
+            value={view}
+            onChange={(v) => setView(v as HealthView)}
+            options={[
+              { value: 'lifecycle', label: '生命周期' },
+              { value: 'duplicates', label: '近重复' },
+              { value: 'feedback', label: '答案反馈' },
+              { value: 'eval', label: '检索评测' },
+              { value: 'enrich', label: '自动增强' },
+            ]}
+          />
+        </Space>
+      }
+    >
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
+        跨库治理报告：生命周期、近重复、答案反馈、检索评测与自动增强。同步源已按库下沉到各库详情的「同步」页签。
+      </Typography.Paragraph>
+      {view === 'lifecycle' && <LifecycleSection kbName={kbName} onOpenEntry={openEntry} />}
+      {view === 'duplicates' && <DuplicatesSection kbName={kbName} onOpenEntry={openEntry} />}
+      {view === 'feedback' && <FeedbackSection kbName={kbName} onOpenEntry={openEntry} />}
+      {view === 'eval' && <EvalSection bases={bases} />}
+      {view === 'enrich' && <EnrichSection bases={bases} onOpenEntry={openEntry} />}
       <KnowledgeEntryDrawer
         entryId={entryDetail?.entryId}
         kbNames={kbName}
         onClose={() => setEntryDetail(null)}
       />
-    </div>
+    </Card>
   )
 }

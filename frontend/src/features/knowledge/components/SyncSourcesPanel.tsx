@@ -19,13 +19,7 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import {
-  DeleteOutlined,
-  EditOutlined,
-  PlusOutlined,
-  ReloadOutlined,
-  SyncOutlined,
-} from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import {
   createSyncSource,
   deleteSyncSource,
@@ -311,8 +305,6 @@ export default function SyncSourcesPanel({
           <Tooltip title={r.enabled ? '立即同步一次' : '同步源已停用'}>
             <Button
               size="small"
-              type="link"
-              icon={<SyncOutlined />}
               disabled={!r.enabled || r.lastStatus === 'RUNNING'}
               loading={runningSync === r.id}
               onClick={() => onRunSync(r)}
@@ -320,7 +312,7 @@ export default function SyncSourcesPanel({
               运行
             </Button>
           </Tooltip>
-          <Button size="small" type="link" icon={<EditOutlined />} onClick={() => openEditSync(r)}>
+          <Button size="small" onClick={() => openEditSync(r)}>
             编辑
           </Button>
           <Popconfirm
@@ -331,7 +323,9 @@ export default function SyncSourcesPanel({
             cancelText="取消"
             onConfirm={() => onDeleteSync(r)}
           >
-            <Button size="small" type="link" danger icon={<DeleteOutlined />} />
+            <Button size="small" danger>
+              删除
+            </Button>
           </Popconfirm>
         </Space>
       ),
@@ -353,7 +347,6 @@ export default function SyncSourcesPanel({
       </Space>
       <Table<KnowledgeSyncSource>
         rowKey="id"
-        size="small"
         loading={sourcesLoading}
         columns={syncColumns}
         dataSource={sources}

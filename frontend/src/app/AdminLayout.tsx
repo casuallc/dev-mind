@@ -8,6 +8,7 @@ import {
   ExperimentOutlined,
   FileTextOutlined,
   ForkOutlined,
+  HeartOutlined,
   InteractionOutlined,
   FolderOutlined,
   KeyOutlined,
@@ -17,11 +18,13 @@ import {
   RobotOutlined,
   SafetyCertificateOutlined,
   ScheduleOutlined,
+  SearchOutlined,
   ThunderboltOutlined,
   ToolOutlined,
+  UploadOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import AppHeader from './AppHeader'
 import { menuSelectedKey } from './menuSelectedKey'
 import { startNotificationStream, stopNotificationStream } from '../features/notifications/store'
@@ -39,22 +42,21 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
     children: [
       // 项目管理为六视图聚合页：项目/经验提案/命令模板/代码库/场景/执行审计
       { key: '/admin/projects', icon: <FolderOutlined />, label: '项目管理' },
-      // CAP-86 知识库菜单组：消费在 AI 问答，这里只做管理（看状态/喂内容/验效果/做治理）
-      {
-        key: 'knowledge-group',
-        icon: <ReadOutlined />,
-        label: '知识库',
-        children: [
-          { key: '/admin/knowledge', label: '库总览' },
-          { key: '/admin/knowledge/imports', label: '文档导入' },
-          { key: '/admin/knowledge/search', label: '召回验证' },
-          { key: '/admin/knowledge/health', label: '治理报告' },
-        ],
-      },
       { key: '/admin/docs', icon: <FileTextOutlined />, label: '文档管理' },
       { key: '/admin/attachments', icon: <PaperClipOutlined />, label: '附件管理' },
       { key: '/admin/skills', icon: <ToolOutlined />, label: '技能管理' },
       { key: '/admin/agent/nodes', icon: <RobotOutlined />, label: 'Agent 节点' },
+    ],
+  },
+  {
+    type: 'group' as const,
+    label: '知识库',
+    children: [
+      // CAP-86 知识库菜单组（与「项目与资源」平级）：消费在 AI 问答，这里只做管理（看状态/喂内容/验效果/做治理）
+      { key: '/admin/knowledge', icon: <ReadOutlined />, label: '库总览' },
+      { key: '/admin/knowledge/imports', icon: <UploadOutlined />, label: '文档导入' },
+      { key: '/admin/knowledge/search', icon: <SearchOutlined />, label: '召回验证' },
+      { key: '/admin/knowledge/health', icon: <HeartOutlined />, label: '治理报告' },
     ],
   },
   {
@@ -119,16 +121,6 @@ export default function AdminLayout() {
     ? '知识库详情'
     : (menuLabel(ADMIN_MENU_ITEMS, selectedKey) ?? '后台管理')
 
-  // 知识库菜单组：进入任一子路径自动展开；用户可手动折叠
-  const [openKeys, setOpenKeys] = useState<string[]>(() =>
-    location.pathname.startsWith('/admin/knowledge') ? ['knowledge-group'] : [],
-  )
-  useEffect(() => {
-    if (location.pathname.startsWith('/admin/knowledge')) {
-      setOpenKeys((keys) => (keys.includes('knowledge-group') ? keys : [...keys, 'knowledge-group']))
-    }
-  }, [location.pathname])
-
   return (
     <Layout style={{ height: '100vh' }}>
       {/* 菜单组增多后总高可能超视口：Sider 内部滚动，不溢出整页（layout 回归断言文档不溢出） */}
@@ -141,8 +133,6 @@ export default function AdminLayout() {
           theme="light"
           mode="inline"
           selectedKeys={[selectedKey]}
-          openKeys={openKeys}
-          onOpenChange={(keys) => setOpenKeys(keys as string[])}
           onClick={({ key }) => navigate(key)}
           items={ADMIN_MENU_ITEMS}
         />

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Button, Card, Segmented, Space, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { MessageOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
 import { listBases } from '../api'
 import { listProjects } from '../../projects/api'
 import type { Project } from '../../projects/types'
@@ -165,20 +165,16 @@ export default function KnowledgeBaseListPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 210,
+      width: 180,
       render: (_, r) => (
         <Space size={2}>
           <Link to={`/admin/knowledge/bases/${r.id}`}>
-            <Button size="small" type="link">
-              详情
-            </Button>
+            <Button size="small">详情</Button>
           </Link>
           <Link to={`/chats?kbId=${r.id}`}>
-            <Button size="small" type="link" icon={<MessageOutlined />}>
-              问答
-            </Button>
+            <Button size="small">问答</Button>
           </Link>
-          <Button size="small" type="link" icon={<UploadOutlined />} onClick={() => openUpload(r.id)}>
+          <Button size="small" onClick={() => openUpload(r.id)}>
             上传
           </Button>
         </Space>
@@ -187,50 +183,50 @@ export default function KnowledgeBaseListPage() {
   ]
 
   return (
-    <Card style={pageCardStyle} styles={{ body: pageCardBodyFlexStyle }}>
-      <div style={{ padding: '16px 20px 12px', borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
-        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <Typography.Title level={4} style={{ margin: 0 }}>
-              库总览
-            </Typography.Title>
-            <Typography.Text type="secondary">
-              共 {bases.length} 个库 · {totals.entries} 篇文档 · 已索引 {totals.ready}
-              。知识的消费在 AI 问答里完成，这里只管库与内容。
-            </Typography.Text>
-          </div>
-          <Space wrap>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setBaseModalOpen(true)}>
-              新建知识库
-            </Button>
-            <Button icon={<UploadOutlined />} onClick={() => openUpload()}>
-              上传文档
-            </Button>
-          </Space>
-        </div>
-      </div>
-
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '14px 20px' }}>
-        {archivedCount > 0 && (
-          <Segmented
-            value={scopeFilter}
-            onChange={(v) => setScopeFilter(v as 'active' | 'archived')}
-            options={[
-              { value: 'active', label: `启用中（${bases.length - archivedCount}）` },
-              { value: 'archived', label: `已归档（${archivedCount}）` },
-            ]}
-            style={{ marginBottom: 12, flexShrink: 0 }}
-          />
-        )}
-        <FitTable<KnowledgeBase>
-          rowKey="id"
-          loading={loading}
-          columns={columns}
-          dataSource={shown}
-          pagination={LIST_PAGINATION}
-          locale={{ emptyText: '还没有知识库。点右上角「新建知识库」创建第一个。' }}
-        />
-      </div>
+    <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyFlexStyle }}
+      title={
+        <Space size={12}>
+          <span>库总览</span>
+          {archivedCount > 0 && (
+            <Segmented
+              value={scopeFilter}
+              onChange={(v) => setScopeFilter(v as 'active' | 'archived')}
+              options={[
+                { value: 'active', label: `启用中（${bases.length - archivedCount}）` },
+                { value: 'archived', label: `已归档（${archivedCount}）` },
+              ]}
+            />
+          )}
+        </Space>
+      }
+      extra={
+        <Space wrap>
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={loadBases}>
+            刷新
+          </Button>
+          <Button icon={<UploadOutlined />} onClick={() => openUpload()}>
+            上传文档
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setBaseModalOpen(true)}>
+            新建知识库
+          </Button>
+        </Space>
+      }
+    >
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
+        共 {bases.length} 个库 · {totals.entries} 篇文档 · 已索引 {totals.ready}
+        。知识的消费在 AI 问答里完成，这里只管库与内容。
+      </Typography.Paragraph>
+      <FitTable<KnowledgeBase>
+        rowKey="id"
+        loading={loading}
+        columns={columns}
+        dataSource={shown}
+        pagination={LIST_PAGINATION}
+        locale={{ emptyText: '还没有知识库。点右上角「新建知识库」创建第一个。' }}
+      />
 
       <KnowledgeBaseFormModal
         open={baseModalOpen}

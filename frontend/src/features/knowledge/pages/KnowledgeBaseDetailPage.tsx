@@ -13,10 +13,10 @@ import {
   message,
   Modal,
   Popconfirm,
+  Segmented,
   Select,
   Space,
   Table,
-  Tabs,
   Tag,
   Tooltip,
   Typography,
@@ -27,7 +27,6 @@ import {
   EditOutlined,
   EyeOutlined,
   MessageOutlined,
-  MoreOutlined,
   PlusOutlined,
   ReloadOutlined,
   SyncOutlined,
@@ -117,13 +116,13 @@ function indexStatusTag(entry: KnowledgeEntrySummary, onRetry: (entry: Knowledge
       </Tooltip>
       <Button
         size="small"
-        type="link"
-        icon={<SyncOutlined />}
         onClick={(e) => {
           e.stopPropagation()
           onRetry(entry)
         }}
-      />
+      >
+        重试
+      </Button>
     </Space>
   )
 }
@@ -530,12 +529,9 @@ export default function KnowledgeBaseDetailPage() {
                 },
               }}
             >
-              <Button
-                size="small"
-                icon={<MoreOutlined />}
-                loading={resyncingId === r.id}
-                onClick={(e) => e.stopPropagation()}
-              />
+              <Button size="small" loading={resyncingId === r.id} onClick={(e) => e.stopPropagation()}>
+                更多
+              </Button>
             </Dropdown>
           </Space>
         )
@@ -554,78 +550,92 @@ export default function KnowledgeBaseDetailPage() {
   )
 
   return (
-    <Card style={pageCardStyle} styles={{ body: { ...pageCardBodyFlexStyle, padding: 0 } }}>
-      <div style={{ padding: '14px 20px 0', borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
-        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <Space size={8} wrap>
-              <Link to="/admin/knowledge" style={{ fontSize: 12 }}>
-                ← 库总览
-              </Link>
-              <Typography.Title level={4} style={{ margin: 0 }}>
-                {base?.name ?? `知识库 #${id}`}
-              </Typography.Title>
-              {baseLoading && !base && <Typography.Text type="secondary">加载中…</Typography.Text>}
-              {headerTags}
-            </Space>
-            {base?.description && (
-              <div style={{ marginTop: 4 }}>
-                <Typography.Text type="secondary">{base.description}</Typography.Text>
-              </div>
-            )}
-            {base && (
-              <Space size={12} wrap style={{ marginTop: 6, fontSize: 12 }}>
-                <Space size={4}>
-                  <Typography.Text type="secondary">向量端点</Typography.Text>
-                  {base.modelEndpointName ? (
-                    <Tag color="blue">
-                      {base.modelEndpointName}
-                      {resolvedEndpoint?.dimensions ? ` · ${resolvedEndpoint.dimensions} 维` : ''}
-                    </Tag>
-                  ) : (
-                    <Tooltip title="未配置向量端点：索引停用、检索走关键词降级。到「模型接入」新建端点并设为平台默认，或在「设置」为本库指定。">
-                      <Tag color="orange">未配置向量端点</Tag>
-                    </Tooltip>
-                  )}
-                </Space>
-                <Typography.Text type="secondary">
-                  索引 {base.indexStats.ready}/{base.entryCount}
-                  {base.indexStats.pending > 0 && ` · 待索引 ${base.indexStats.pending}`}
-                  {base.indexStats.failed > 0 && ` · 失败 ${base.indexStats.failed}`}
-                  {base.indexStats.disabled > 0 && ` · 未配置端点 ${base.indexStats.disabled}`}
-                  {base.indexStats.mismatched > 0 && ` · 需重建 ${base.indexStats.mismatched}`}
-                </Typography.Text>
-                <Link to={`/admin/knowledge/search?kbId=${baseId}`}>召回验证</Link>
-              </Space>
-            )}
-          </div>
-          <Space wrap>
-            <Link to={`/chats?kbId=${baseId}`}>
-              <Button icon={<MessageOutlined />}>用此库问答</Button>
-            </Link>
-            <Button icon={<ReloadOutlined />} onClick={refreshAll}>
-              刷新
-            </Button>
+    <Card
+      style={pageCardStyle}
+      styles={{ body: pageCardBodyFlexStyle }}
+      title={
+        <Space size={12}>
+          <span>{base?.name ?? `知识库 #${id}`}</span>
+          {baseLoading && !base && <Typography.Text type="secondary">加载中…</Typography.Text>}
+          <Segmented
+            value={tab}
+            onChange={(key) => setTab(key as BaseTab)}
+            options={[
+              { value: 'entries', label: `文档${base ? ` (${base.entryCount})` : ''}` },
+              { value: 'import', label: '摄入' },
+              { value: 'sync', label: '同步' },
+              { value: 'settings', label: '设置' },
+            ]}
+          />
+        </Space>
+      }
+      extra={
+        <Space wrap>
+          <Link to={`/chats?kbId=${baseId}`}>
+            <Button icon={<MessageOutlined />}>用此库问答</Button>
+          </Link>
+          <Button icon={<ReloadOutlined />} onClick={refreshAll}>
+            刷新
+          </Button>
+          {tab === 'entries' && (
+            <>
+              <Popconfirm
+                title="重建全库索引？"
+                description={`库内 ${base?.entryCount ?? 0} 条文档会全部重新向量化（异步排队），换端点/换分块参数后需要执行。`}
+                okText="重建"
+                onConfirm={() => onReindexBase(false)}
+                disabled={!base || base.entryCount === 0}
+              >
+                <Button icon={<SyncOutlined />} loading={reindexing} disabled={!base || base.entryCount === 0}>
+                  重建全库索引
+                </Button>
+              </Popconfirm>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditEntry(null)}>
+                新增条目
+              </Button>
+            </>
+          )}
+          {tab === 'import' && (
             <Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadOpen(true)}>
               上传文档
             </Button>
+          )}
+        </Space>
+      }
+    >
+      {base && (
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
+          <Space size={8} wrap>
+            <Link to="/admin/knowledge">← 库总览</Link>
+            {headerTags}
+            <Space size={4}>
+              <span>向量端点</span>
+              {base.modelEndpointName ? (
+                <Tag color="blue">
+                  {base.modelEndpointName}
+                  {resolvedEndpoint?.dimensions ? ` · ${resolvedEndpoint.dimensions} 维` : ''}
+                </Tag>
+              ) : (
+                <Tooltip title="未配置向量端点：索引停用、检索走关键词降级。到「模型接入」新建端点并设为平台默认，或在「设置」为本库指定。">
+                  <Tag color="orange">未配置向量端点</Tag>
+                </Tooltip>
+              )}
+            </Space>
+            <span>
+              索引 {base.indexStats.ready}/{base.entryCount}
+              {base.indexStats.pending > 0 && ` · 待索引 ${base.indexStats.pending}`}
+              {base.indexStats.failed > 0 && ` · 失败 ${base.indexStats.failed}`}
+              {base.indexStats.disabled > 0 && ` · 未配置端点 ${base.indexStats.disabled}`}
+              {base.indexStats.mismatched > 0 && ` · 需重建 ${base.indexStats.mismatched}`}
+            </span>
+            <Link to={`/admin/knowledge/search?kbId=${baseId}`}>召回验证</Link>
+            {base.description && <span>{base.description}</span>}
           </Space>
-        </div>
-        <Tabs
-          activeKey={tab}
-          onChange={(key) => setTab(key as BaseTab)}
-          items={[
-            { key: 'entries', label: `文档${base ? ` (${base.entryCount})` : ''}` },
-            { key: 'import', label: '摄入' },
-            { key: 'sync', label: '同步' },
-            { key: 'settings', label: '设置' },
-          ]}
-          style={{ marginTop: 8, marginBottom: 0 }}
-        />
-      </div>
+        </Typography.Paragraph>
+      )}
 
       {tab === 'entries' && (
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '14px 20px' }}>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <Space size={8} wrap style={{ marginBottom: 10, flexShrink: 0 }}>
             <Input.Search
               allowClear
@@ -680,21 +690,6 @@ export default function KnowledgeBaseDetailPage() {
               disabled={!keyword && !docType && !source && !indexStatus}
             >
               重置
-            </Button>
-            <span style={{ flex: 1 }} />
-            <Popconfirm
-              title="重建全库索引？"
-              description={`库内 ${base?.entryCount ?? 0} 条文档会全部重新向量化（异步排队），换端点/换分块参数后需要执行。`}
-              okText="重建"
-              onConfirm={() => onReindexBase(false)}
-              disabled={!base || base.entryCount === 0}
-            >
-              <Button icon={<SyncOutlined />} loading={reindexing} disabled={!base || base.entryCount === 0}>
-                重建全库索引
-              </Button>
-            </Popconfirm>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditEntry(null)}>
-              新增条目
             </Button>
           </Space>
 
@@ -752,24 +747,11 @@ export default function KnowledgeBaseDetailPage() {
       )}
 
       {tab === 'import' && (
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '14px 20px', gap: 12 }}>
-          <Card size="small" style={{ flexShrink: 0 }}>
-            <Space size={12} wrap>
-              <UploadOutlined style={{ fontSize: 20, color: '#1677ff' }} />
-              <div style={{ flex: 1, minWidth: 260 }}>
-                <Typography.Text strong>上传到「{base?.name ?? `#${baseId}`}」</Typography.Text>
-                <div>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    支持 Markdown / 文本 / PDF / Word / PPT / Excel / HTML 与 ZIP；文件夹按目录结构入库，
-                    分类/标签自动识别。解析与索引在后台异步执行。飞书文档到「同步」页签导入。
-                  </Typography.Text>
-                </div>
-              </div>
-              <Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadOpen(true)}>
-                上传文档
-              </Button>
-            </Space>
-          </Card>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
+            上传到「{base?.name ?? `#${baseId}`}」：支持 Markdown / 文本 / PDF / Word / PPT / Excel / HTML 与 ZIP；
+            文件夹按目录结构入库，分类/标签自动识别。解析与索引在后台异步执行。飞书文档到「同步」页签导入。
+          </Typography.Paragraph>
           <KnowledgeImportsView
             bases={base ? [base] : []}
             kbId={baseId}
@@ -780,7 +762,7 @@ export default function KnowledgeBaseDetailPage() {
       )}
 
       {tab === 'sync' && (
-        <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '14px 20px' }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Card size="small" title="同步源">
               <SyncSourcesPanel bases={bases.length > 0 ? bases : base ? [base] : []} kbId={baseId} />
@@ -890,7 +872,7 @@ export default function KnowledgeBaseDetailPage() {
       )}
 
       {tab === 'settings' && base && (
-        <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '14px 20px' }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
           <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
             库的基本设置；归档后不再参与注入与检索。范围与所属项目创建后不可改。
           </Typography.Paragraph>

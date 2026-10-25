@@ -35,15 +35,10 @@ export default function KnowledgeSearchPage() {
   const presetKbId = Number.isFinite(rawKbId) && rawKbId > 0 ? rawKbId : undefined
 
   return (
-    <Card style={pageCardStyle} styles={{ body: pageCardBodyFlexStyle }}>
-      <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          召回验证
-        </Typography.Title>
-        <Typography.Text type="secondary">
-          验证「这个问题能不能问出来」：跨库/单库检索调试，看命中文档与高亮片段。日常问知识请用 AI 问答（绑定知识库）。
-        </Typography.Text>
-      </div>
+    <Card style={pageCardStyle} styles={{ body: pageCardBodyFlexStyle }} title="召回验证">
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
+        验证「这个问题能不能问出来」：跨库/单库检索调试，看命中文档与高亮片段。日常问知识请用 AI 问答（绑定知识库）。
+      </Typography.Paragraph>
       <KnowledgeSearchView
         bases={bases}
         projects={projects}
