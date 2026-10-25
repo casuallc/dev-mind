@@ -53,7 +53,7 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
     label: '知识库',
     children: [
       // CAP-86 知识库菜单组（与「项目与资源」平级）：消费在 AI 问答，这里只做管理（看状态/喂内容/验效果/做治理）
-      { key: '/admin/knowledge', icon: <ReadOutlined />, label: '库总览' },
+      { key: '/admin/knowledge', icon: <ReadOutlined />, label: '知识库总览' },
       { key: '/admin/knowledge/imports', icon: <UploadOutlined />, label: '文档导入' },
       { key: '/admin/knowledge/search', icon: <SearchOutlined />, label: '召回验证' },
       { key: '/admin/knowledge/health', icon: <HeartOutlined />, label: '治理报告' },

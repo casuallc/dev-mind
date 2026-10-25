@@ -600,13 +600,15 @@ export default function KnowledgeBaseDetailPage() {
               上传文档
             </Button>
           )}
+          <Link to="/admin/knowledge">
+            <Button>返回列表</Button>
+          </Link>
         </Space>
       }
     >
       {base && (
         <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
           <Space size={8} wrap>
-            <Link to="/admin/knowledge">← 库总览</Link>
             {headerTags}
             <Space size={4}>
               <span>向量端点</span>

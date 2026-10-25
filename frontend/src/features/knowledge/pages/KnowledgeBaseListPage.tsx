@@ -188,7 +188,7 @@ export default function KnowledgeBaseListPage() {
       styles={{ body: pageCardBodyFlexStyle }}
       title={
         <Space size={12}>
-          <span>库总览</span>
+          <span>知识库总览</span>
           {archivedCount > 0 && (
             <Segmented
               value={scopeFilter}
