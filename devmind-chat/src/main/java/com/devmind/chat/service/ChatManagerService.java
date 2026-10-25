@@ -100,6 +100,11 @@ public class ChatManagerService {
 
     private static final Logger log = LoggerFactory.getLogger(ChatManagerService.class);
 
+    /** 事件补拉默认上限（与 session 侧 CAP-50 口径一致）：limit<=0 时按此截断。 */
+    static final int DEFAULT_EVENT_LIMIT = 2000;
+    /** 事件补拉硬上限：调用方传超大 limit 也不能变成整表拉取。 */
+    static final int MAX_EVENT_LIMIT = 20_000;
+
     private final IdentityService identityService;
     private final NotificationPublisher notificationPublisher;
     private final ChatSessionRepository chatRepo;
@@ -433,10 +438,24 @@ public class ChatManagerService {
     }
 
     public List<SessionEvent> events(String id, long afterSeq) {
+        return events(id, afterSeq, 0, Long.MAX_VALUE);
+    }
+
+    /**
+     * 事件补拉：seq &gt; afterSeq 且 &lt; beforeSeq 的<b>最近</b> limit 条（升序返回）。
+     * 与 session 侧 {@code SessionManagerService#events} 同一手法（CAP-50）——原先这里
+     * 无上限全量取，长问答一次性拉几千条把首屏拖垮；{@code limit<=0} 落默认上限。
+     */
+    public List<SessionEvent> events(String id, long afterSeq, int limit, long beforeSeq) {
         requireOwned(id);
-        return eventRepo.findByChatIdAndSeqGreaterThanOrderBySeqAsc(id, afterSeq).stream()
-                .map(this::toEvent)
-                .toList();
+        int size = limit <= 0 ? DEFAULT_EVENT_LIMIT : Math.min(limit, MAX_EVENT_LIMIT);
+        List<ChatEventEntity> rows = eventRepo.findByChatIdAndSeqLessThanAndSeqGreaterThanOrderBySeqDesc(
+                id, beforeSeq, afterSeq, PageRequest.of(0, size));
+        List<SessionEvent> out = new ArrayList<>(rows.size());
+        for (int i = rows.size() - 1; i >= 0; i--) {
+            out.add(toEvent(rows.get(i)));
+        }
+        return out;
     }
 
     @SuppressWarnings("unchecked")

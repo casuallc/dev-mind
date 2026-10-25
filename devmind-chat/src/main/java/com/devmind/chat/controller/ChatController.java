@@ -51,10 +51,16 @@ public class ChatController {
         return service.get(id);
     }
 
+    /**
+     * 事件补拉：seq &gt; afterSeq 且 &lt; beforeSeq 的<b>最近</b>一段（升序），
+     * {@code limit<=0} 取默认上限。长问答首屏只取一页，「加载更早」用 beforeSeq 向前翻页。
+     */
     @GetMapping("/{id}/events")
     public List<SessionEvent> events(@PathVariable String id,
-                                     @RequestParam(defaultValue = "-1") long afterSeq) {
-        return service.events(id, afterSeq);
+                                     @RequestParam(defaultValue = "-1") long afterSeq,
+                                     @RequestParam(defaultValue = "0") int limit,
+                                     @RequestParam(defaultValue = "9223372036854775807") long beforeSeq) {
+        return service.events(id, afterSeq, limit, beforeSeq);
     }
 
     @PostMapping("/{id}/input")

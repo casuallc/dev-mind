@@ -180,6 +180,16 @@ class ChatManagerServiceTest {
                             .limit(limit)
                             .toList();
                 }
+                // 事件补拉（带双边界）：seq < beforeSeq 且 > afterSeq 的最近一页，倒序（调用方反转）
+                case "findByChatIdAndSeqLessThanAndSeqGreaterThanOrderBySeqDesc" -> {
+                    int limit = ((org.springframework.data.domain.Pageable) args[3]).getPageSize();
+                    yield store.stream()
+                            .filter(e -> e.getChatId().equals(args[0])
+                                    && e.getSeq() < (Long) args[1] && e.getSeq() > (Long) args[2])
+                            .sorted(Comparator.comparingLong(ChatEventEntity::getSeq).reversed())
+                            .limit(limit)
+                            .toList();
+                }
                 case "deleteByChatId" -> {
                     store.removeIf(e -> e.getChatId().equals(args[0]));
                     yield null;

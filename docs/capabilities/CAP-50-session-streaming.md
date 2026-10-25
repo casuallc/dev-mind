@@ -84,6 +84,13 @@
 - 接口增 `limit`（默认 `0` = 走默认上限 **2000**，超硬上限 **20000** 按硬上限截断）；不传 limit 的既有调用方
   行为不变；**返回仍是 seq 升序**，前端按 seq 追加的逻辑不受影响。
 
+> **2026-10-25 补订（beforeSeq 翻页 + chats 对齐）**：2000 条上限对内容多的会话仍然太大
+> （tool_result 单条可到 100KB，整页几十 MB）。两端点再增 `beforeSeq`（默认不限）——返回
+> `seq > afterSeq 且 < beforeSeq` 的最近一页；**chats 侧同步从无上限全量取改为同款语义**
+> （`limit<=0` 落默认上限 2000）。前端终态历史首屏只取最近 200 条，顶部「加载更早消息」
+> 按 beforeSeq 向前翻页（`hasOlder` 为推断值：拿满一页且最早 seq>1，边界多打一次空请求，
+> 不动 API 形状）。回归网：`SessionEventsLimitTest` 增 beforeSeq 用例 + `tests/e2e-events-pagination.py`。
+
 ### FR-06 逃生开关
 
 `agent.properties` 增 `partialMessages`（默认 `true`）。万一某节点上的 claude 版本不认这个 flag

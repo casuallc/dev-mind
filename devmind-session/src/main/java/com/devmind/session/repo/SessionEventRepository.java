@@ -18,6 +18,13 @@ public interface SessionEventRepository extends JpaRepository<SessionEventEntity
     List<SessionEventEntity> findBySessionIdAndSeqGreaterThanOrderBySeqDesc(
             String sessionId, long afterSeq, Pageable limit);
 
+    /**
+     * 带下界的补拉（seq &lt; beforeSeq 且 &gt; afterSeq 的<b>最近</b>一段）：前端「加载更早消息」
+     * 向前翻页用——长会话首屏只取最近一页，避免一次性拉全量把延迟拖垮。
+     */
+    List<SessionEventEntity> findBySessionIdAndSeqLessThanAndSeqGreaterThanOrderBySeqDesc(
+            String sessionId, long beforeSeq, long afterSeq, Pageable limit);
+
     long countBySessionId(String sessionId);
 
     void deleteBySessionId(String sessionId);

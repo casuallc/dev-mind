@@ -506,10 +506,18 @@ public class SessionManagerService {
      * 从头取会把内存与延迟都拖垮。</p>
      */
     public List<SessionEvent> events(String id, long afterSeq, int limit) {
+        return events(id, afterSeq, limit, Long.MAX_VALUE);
+    }
+
+    /**
+     * 带下界的翻页变体：seq &lt; beforeSeq 的最近一页。前端长会话首屏只取最近一页、
+     * 「加载更早」再向前翻，避免内容多的会话一次性拉全量。
+     */
+    public List<SessionEvent> events(String id, long afterSeq, int limit, long beforeSeq) {
         requireEntity(id);
         int size = limit <= 0 ? DEFAULT_EVENT_LIMIT : Math.min(limit, MAX_EVENT_LIMIT);
-        List<SessionEventEntity> rows = eventRepo.findBySessionIdAndSeqGreaterThanOrderBySeqDesc(
-                id, afterSeq, PageRequest.of(0, size));
+        List<SessionEventEntity> rows = eventRepo.findBySessionIdAndSeqLessThanAndSeqGreaterThanOrderBySeqDesc(
+                id, beforeSeq, afterSeq, PageRequest.of(0, size));
         List<SessionEvent> out = new ArrayList<>(rows.size());
         for (int i = rows.size() - 1; i >= 0; i--) {
             out.add(toEvent(rows.get(i)));

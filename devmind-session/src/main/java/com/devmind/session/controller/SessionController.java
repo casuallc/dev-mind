@@ -58,13 +58,15 @@ public class SessionController {
     /**
      * 事件补拉。CAP-50 起返回的是 seq &gt; afterSeq 的<b>最近</b>一段（升序），
      * {@code limit<=0} 取默认上限、超过硬上限按硬上限截断（见
-     * {@link SessionManagerService#DEFAULT_EVENT_LIMIT}）。
+     * {@link SessionManagerService#DEFAULT_EVENT_LIMIT}）；
+     * {@code beforeSeq} 为向前翻页下界（只取 seq 小于它的一页），默认不限。
      */
     @GetMapping("/{id}/events")
     public List<SessionEvent> events(@PathVariable String id,
                                      @RequestParam(defaultValue = "-1") long afterSeq,
-                                     @RequestParam(defaultValue = "0") int limit) {
-        return service.events(id, afterSeq, limit);
+                                     @RequestParam(defaultValue = "0") int limit,
+                                     @RequestParam(defaultValue = "9223372036854775807") long beforeSeq) {
+        return service.events(id, afterSeq, limit, beforeSeq);
     }
 
     @PostMapping("/{id}/input")

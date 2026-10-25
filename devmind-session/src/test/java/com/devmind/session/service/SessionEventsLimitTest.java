@@ -77,6 +77,17 @@ class SessionEventsLimitTest {
                         .limit(page.getPageSize())
                         .toList();
             }
+            case "findBySessionIdAndSeqLessThanAndSeqGreaterThanOrderBySeqDesc" -> {
+                long before = (Long) args[1];
+                long after = (Long) args[2];
+                Pageable page = (Pageable) args[3];
+                pageSizeSeen.set(page.getPageSize());
+                yield rows.stream()
+                        .filter(e -> e.getSeq() < before && e.getSeq() > after)
+                        .sorted(Comparator.comparingLong(SessionEventEntity::getSeq).reversed())
+                        .limit(page.getPageSize())
+                        .toList();
+            }
             default -> throw new UnsupportedOperationException(m.getName());
         });
         SessionProperties props = new SessionProperties();
@@ -121,5 +132,21 @@ class SessionEventsLimitTest {
         List<Long> seqs = service().events("s1", 8, 0).stream().map(e -> e.seq()).toList();
 
         assertEquals(List.of(9L, 10L), seqs);
+    }
+
+    @Test
+    void beforeSeq向前翻页取更早一段() {
+        seed(10);
+        List<Long> seqs = service().events("s1", -1, 3, 8).stream().map(e -> e.seq()).toList();
+
+        assertEquals(List.of(5L, 6L, 7L), seqs, "beforeSeq=8 应取 seq<8 的最近一页，且仍升序");
+    }
+
+    @Test
+    void beforeSeq与afterSeq同时限定取区间最近一页() {
+        seed(10);
+        List<Long> seqs = service().events("s1", 2, 3, 9).stream().map(e -> e.seq()).toList();
+
+        assertEquals(List.of(6L, 7L, 8L), seqs, "区间 (2,9) 内被截断时保留最近几条");
     }
 }

@@ -16,6 +16,13 @@ public interface ChatEventRepository extends JpaRepository<ChatEventEntity, Long
      */
     List<ChatEventEntity> findByChatIdAndSeqLessThanOrderBySeqDesc(String chatId, long beforeSeq, Pageable limit);
 
+    /**
+     * 事件补拉：seq &lt; beforeSeq 且 &gt; afterSeq 的<b>最近</b>一段（倒序取、调用方反转）。
+     * 前端长会话首屏只取最近一页，「加载更早」以 beforeSeq 向前翻页；取代原先的无上限全量取。
+     */
+    List<ChatEventEntity> findByChatIdAndSeqLessThanAndSeqGreaterThanOrderBySeqDesc(
+            String chatId, long beforeSeq, long afterSeq, Pageable limit);
+
     /** CAP-84 FR-18：多轮检索改写——最近几条用户提问（倒序取，调用方按 seq 反转）。 */
     List<ChatEventEntity> findByChatIdAndTypeOrderBySeqDesc(String chatId, String type, Pageable limit);
 
