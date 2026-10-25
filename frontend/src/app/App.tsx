@@ -26,9 +26,11 @@ import TestsPage from '../features/test/pages/TestsPage'
 import SuiteDetailPage from '../features/test/pages/SuiteDetailPage'
 import NotificationCenter from '../features/notifications/pages/NotificationCenter'
 import AdminNotificationsPage from '../features/notifications/pages/AdminNotificationsPage'
-import KnowledgeBaseList from '../features/knowledge/pages/KnowledgeBaseList'
-import KnowledgeBaseDetail from '../features/knowledge/pages/KnowledgeBaseDetail'
-import KnowledgeCenter from '../features/knowledge/pages/KnowledgeCenter'
+import KnowledgeBaseListPage from '../features/knowledge/pages/KnowledgeBaseListPage'
+import KnowledgeBaseDetailPage from '../features/knowledge/pages/KnowledgeBaseDetailPage'
+import KnowledgeImportsPage from '../features/knowledge/pages/KnowledgeImportsPage'
+import KnowledgeSearchPage from '../features/knowledge/pages/KnowledgeSearchPage'
+import KnowledgeHealthPage from '../features/knowledge/pages/KnowledgeHealthPage'
 import SkillsPage from '../features/skills/pages/SkillsPage'
 import SkillDetailPage from '../features/skills/pages/SkillDetailPage'
 import DocsPage from '../features/docs/pages/DocsPage'
@@ -94,6 +96,31 @@ function LegacyNodeFilesRedirect() {
   return <Navigate to={{ pathname: '/admin/agent/nodes', search: `?${search}` }} replace />
 }
 
+/** v1 工作台 URL 兼容（CAP-86 FR-07）：/admin/knowledge?view=|baseId=|tab= → 菜单组新路由；
+ *  无旧参数（含聊天引用 ?entryId=&chunkId= 深链）时渲染库总览。 */
+function LegacyKnowledgeQueryRedirect() {
+  const location = useLocation()
+  const search = new URLSearchParams(location.search)
+  const view = search.get('view')
+  const baseId = search.get('baseId')
+  const tab = search.get('tab')
+  if (view === 'imports') return <Navigate to="/admin/knowledge/imports" replace />
+  if (view === 'governance') return <Navigate to="/admin/knowledge/health" replace />
+  if (baseId) {
+    if (tab === 'test') return <Navigate to={`/admin/knowledge/search?kbId=${baseId}`} replace />
+    const next = new URLSearchParams()
+    if (tab === 'import' || tab === 'sync' || tab === 'settings') next.set('tab', tab)
+    return <Navigate to={{ pathname: `/admin/knowledge/bases/${baseId}`, search: next.size ? `?${next}` : '' }} replace />
+  }
+  return <KnowledgeBaseListPage />
+}
+
+/** 旧链接兼容：/knowledge 知识中心已并入后台知识库（聊天引用 ?entryId=&chunkId= 原样带到新入口） */
+function LegacyKnowledgeRedirect() {
+  const location = useLocation()
+  return <Navigate to={{ pathname: '/admin/knowledge', search: location.search }} replace />
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -150,8 +177,8 @@ export default function App() {
           <Route path="/settings/notifications" element={<Navigate to="/admin/notifications" replace />} />
           {/* 旧路径兼容：指挥中心/知识库/文档已迁入 /admin 后台 */}
           <Route path="/dashboard" element={<Navigate to="/admin/dashboard" replace />} />
-          {/* CAP-84 知识中心（一级入口，个人级只读检索；库管理仍在 /admin/knowledge） */}
-          <Route path="/knowledge" element={<KnowledgeCenter />} />
+          {/* CAP-86 知识库统一入口（后台知识库）：/knowledge 旧入口整组兼容到后台并保留深链 */}
+          <Route path="/knowledge" element={<LegacyKnowledgeRedirect />} />
           <Route path="/docs" element={<Navigate to="/admin/docs" replace />} />
           <Route path="/docs/:id" element={<LegacyDocRedirect />} />
           <Route path="/servers" element={<Navigate to="/admin/execution" replace />} />
@@ -233,9 +260,12 @@ export default function App() {
           {/* CAP-33 场景已并入项目管理「场景」tab（会话模板的升级形态；/admin/templates 旧路径重定向） */}
           <Route path="/admin/scenarios" element={<Navigate to="/admin/projects?tab=scenarios" replace />} />
           <Route path="/admin/templates" element={<Navigate to="/admin/projects?tab=scenarios" replace />} />
-          {/* CAP-04 知识库（CAP-44 库容器化：列表 + 详情） */}
-          <Route path="/admin/knowledge" element={<KnowledgeBaseList />} />
-          <Route path="/admin/knowledge/bases/:id" element={<KnowledgeBaseDetail />} />
+          {/* CAP-86 知识库菜单组：库总览（兼 v1 工作台 URL 重定向）/ 文档导入 / 召回验证 / 治理报告 + 库详情 */}
+          <Route path="/admin/knowledge" element={<LegacyKnowledgeQueryRedirect />} />
+          <Route path="/admin/knowledge/imports" element={<KnowledgeImportsPage />} />
+          <Route path="/admin/knowledge/search" element={<KnowledgeSearchPage />} />
+          <Route path="/admin/knowledge/health" element={<KnowledgeHealthPage />} />
+          <Route path="/admin/knowledge/bases/:id" element={<KnowledgeBaseDetailPage />} />
           {/* Skill 管理（基础模块，供其他业务引用；详情页交互对齐文档管理） */}
           <Route path="/admin/skills" element={<SkillsPage />} />
           <Route path="/admin/skills/:id" element={<SkillDetailPage />} />

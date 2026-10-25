@@ -1,9 +1,11 @@
 package com.devmind.knowledge;
 
+import com.devmind.common.dto.PageView;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.model.ModelEndpointProvider;
 import com.devmind.common.model.ModelEndpointView;
 import com.devmind.knowledge.dto.EntryRequest;
+import com.devmind.knowledge.dto.EntrySummaryView;
 import com.devmind.knowledge.dto.EntryView;
 import com.devmind.knowledge.dto.KnowledgeBaseRequest;
 import com.devmind.knowledge.dto.ProposalRequest;
@@ -31,6 +33,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -355,5 +359,43 @@ class KnowledgeBaseServiceTest {
         assertEquals(1, result.queued(), "只重建当前端点+维度对不上的条目");
         assertEquals(KnowledgeEntryEntity.INDEX_PENDING, stale.getIndexStatus());
         assertEquals(KnowledgeEntryEntity.INDEX_READY, current.getIndexStatus(), "未失配的条目不动");
+    }
+
+    @Test
+    void pageByBaseReturnsLightweightSummariesAndClampsSize() {
+        KnowledgeBaseEntity kb = addKb("global", null, "RAG");
+        when(kbRepo.findById(kb.getId())).thenReturn(java.util.Optional.of(kb));
+        KnowledgeEntryRepository.EntrySummaryRef ref = new KnowledgeEntryRepository.EntrySummaryRef() {
+            @Override public Long getId() { return 7L; }
+            @Override public Long getKbId() { return kb.getId(); }
+            @Override public String getName() { return "RabbitMQ 集群部署"; }
+            @Override public String getDocType() { return "TECH"; }
+            @Override public String getTags() { return "ops, mq"; }
+            @Override public String getSource() { return "file"; }
+            @Override public String getExternalId() { return null; }
+            @Override public String getIndexStatus() { return "ready"; }
+            @Override public String getIndexError() { return null; }
+            @Override public String getSummary() { return null; }
+            @Override public String getOwner() { return null; }
+            @Override public int getHitCount() { return 3; }
+            @Override public String getStatus() { return "active"; }
+            @Override public String getSourceUri() { return "ops/rabbitmq.md"; }
+            @Override public int getContentVersion() { return 2; }
+            @Override public Instant getUpdatedAt() { return Instant.parse("2026-10-24T00:00:00Z"); }
+        };
+        when(entryRepo.pageSummariesByBase(anyLong(), anyString(), anyString(), any(), any(), any(),
+                any(Pageable.class))).thenReturn(new PageImpl<>(List.of(ref)));
+
+        PageView<EntrySummaryView> page = service.pageByBase(
+                kb.getId(), "Rabbit", "TECH", null, null, null, -1, 500);
+
+        assertEquals(0, page.page(), "负页码回落 0");
+        assertEquals(100, page.size(), "页大小上限 100");
+        assertEquals(1, page.total());
+        EntrySummaryView item = page.items().get(0);
+        assertEquals("RabbitMQ 集群部署", item.name());
+        assertEquals(List.of("ops", "mq"), item.tags(), "逗号标签拆成列表");
+        assertEquals("file", item.source());
+        assertEquals(2, item.contentVersion());
     }
 }

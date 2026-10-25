@@ -75,6 +75,18 @@ class LuceneKnowledgeSearchIndexTest {
     }
 
     @Test
+    void pendingWritesAreVisibleWithoutExplicitFlush() {
+        index.upsert(meta(1, 1, null, "TECH", null, "集群部署"),
+                List.of(chunk(101, "节点", "RabbitMQ 集群建议至少三个节点。")), null);
+
+        assertEquals(1, index.numDocs(), "少量写入未达 commit 阈值时，读前刷新也应看到新文档");
+        assertEquals(1L, only(index.searchText(null, "集群", 10)).entryId());
+
+        index.deleteEntry(1);
+        assertEquals(0, index.numDocs(), "删除同样无需显式 flush 即可见");
+    }
+
+    @Test
     void excludesDeprecatedAndExpiredEntries() {
         index.upsert(meta(1, 1, null, "TECH", null, "回滚方案"),
                 List.of(chunk(101, "回滚", "回滚时先摘流量，再切到上一个稳定版本。")), null);

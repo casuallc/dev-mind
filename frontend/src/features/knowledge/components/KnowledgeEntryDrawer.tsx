@@ -1,5 +1,5 @@
 // CAP-84 FR-15 文档详情抽屉：概览（元数据 + 命中片段）/ 全文 / 分块 / 版本，共用检索与深链入口。
-// 深链 /knowledge?entryId=123&chunkId=456（聊天引用）打开后直接定位到分块页签并滚动到对应块。
+// 深链 /admin/knowledge?entryId=123&chunkId=456（聊天引用）打开后直接定位到分块页签并滚动到对应块。
 import { useEffect, useState } from 'react'
 import {
   Alert,

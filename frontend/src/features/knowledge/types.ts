@@ -484,6 +484,34 @@ export interface KnowledgeEntry {
   updatedAt: string
 }
 
+/** CAP-86 库内条目摘要（GET /knowledge/bases/{id}/entries/page）：不含正文，列表页轻量投影 */
+export interface KnowledgeEntrySummary {
+  id: number
+  kbId: number
+  name: string
+  docType: DocType | null
+  tags: string[]
+  source: KnowledgeEntry['source']
+  externalId: string | null
+  indexStatus: IndexStatus
+  indexError: string | null
+  summary: string | null
+  owner: string | null
+  hitCount: number
+  status: 'active' | 'deprecated'
+  sourceUri: string | null
+  contentVersion: number
+  updatedAt: string
+}
+
+/** CAP-86 服务端分页响应（page 从 0 起） */
+export interface KnowledgePage<T> {
+  items: T[]
+  total: number
+  page: number
+  size: number
+}
+
 export interface KnowledgeEntryInput {
   kbId?: number
   scope?: EntryScope

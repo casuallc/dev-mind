@@ -1,11 +1,13 @@
 package com.devmind.knowledge;
 
+import com.devmind.common.dto.PageView;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.model.ModelEndpointProvider;
 import com.devmind.common.model.ModelEndpointView;
 import com.devmind.common.notification.NotificationEvent;
 import com.devmind.knowledge.dto.EntryRequest;
+import com.devmind.knowledge.dto.EntrySummaryView;
 import com.devmind.knowledge.dto.EntryView;
 import com.devmind.knowledge.dto.EntryViews;
 import com.devmind.knowledge.dto.KnowledgeBaseRequest;
@@ -54,6 +56,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -402,11 +406,33 @@ public class KnowledgeBaseService {
                 .toList();
     }
 
-    /** 库内条目列表（CAP-44 FR-07）。 */
+    /** 库内条目列表（CAP-44 FR-07）。保留给全量导出/脚本，新界面用 {@link #pageByBase}。 */
     public List<EntryView> listByBase(Long kbId) {
         KnowledgeBaseEntity kb = requireBase(kbId);
         return entryRepo.findByKbIdOrderByCreatedAtDesc(kbId).stream()
                 .map(e -> EntryViews.entry(e, kb)).toList();
+    }
+
+    /** CAP-86 FR-38 库内条目分页摘要：只查列表字段，过滤与排序下推数据库。 */
+    public PageView<EntrySummaryView> pageByBase(Long kbId, String keyword, String docType,
+                                                 String source, String indexStatus, String status,
+                                                 int page, int size) {
+        requireBase(kbId);
+        int safePage = Math.max(0, page);
+        int safeSize = Math.min(Math.max(1, size), 100);
+        Page<KnowledgeEntryRepository.EntrySummaryRef> result = entryRepo.pageSummariesByBase(
+                kbId, blankToNull(keyword), blankToNull(docType), blankToNull(source),
+                blankToNull(indexStatus), blankToNull(status),
+                PageRequest.of(safePage, safeSize));
+        List<EntrySummaryView> items = result.getContent().stream()
+                .map(r -> new EntrySummaryView(
+                        r.getId(), r.getKbId(), r.getName(), r.getDocType(),
+                        EntryViews.splitTags(r.getTags()), r.getSource(), r.getExternalId(),
+                        r.getIndexStatus(), r.getIndexError(), r.getSummary(), r.getOwner(),
+                        r.getHitCount(), r.getStatus(), r.getSourceUri(),
+                        r.getContentVersion(), r.getUpdatedAt()))
+                .toList();
+        return new PageView<>(items, result.getTotalElements(), safePage, safeSize);
     }
 
     public EntryView getEntry(Long id) {
@@ -872,6 +898,10 @@ public class KnowledgeBaseService {
     @Transactional
     public void deleteProposal(Long id) {
         proposalRepo.delete(requireProposal(id));
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s;
     }
 
     private String defaultPath(KnowledgeEntryEntity e) {

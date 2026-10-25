@@ -21,6 +21,7 @@ import { isImageAttachment } from '../attachments/api'
 import { attachmentRawUrl } from '../attachments/url'
 import { fmtTime } from '../utils/format'
 import { showError } from '../utils/showError'
+import { isAdmin } from '../../features/auth/authStore'
 
 // ---------------- 事件 → 渲染项 ----------------
 
@@ -572,9 +573,11 @@ function FeedbackBar({ apiBase, chatId, turnSeq }: { apiBase: string; chatId: st
 
 /**
  * CAP-84 FR-19/23：回答底部「参考来源」与引用校验异常提示。
- * 引用来源点击跳知识中心文档详情（/knowledge?entryId=#&chunkId=#），由知识中心按深链打开抽屉并定位分块。
+ * 知识库只有后台一个入口（CAP-86），ADMIN 点击引用跳 /admin/knowledge?entryId=#&chunkId=# 由工作区打开抽屉并定位分块；
+ * 非 ADMIN 无可达的详情页，只展示来源标记与原文路径提示，避免点进 403。
  */
 function CitationBlock({ check }: { check: CitationCheck }) {
+  const canOpenEntry = isAdmin()
   return (
     <div style={{ marginTop: 8 }}>
       {check.warning && (
@@ -592,17 +595,34 @@ function CitationBlock({ check }: { check: CitationCheck }) {
             参考来源（{check.sources.length}）
           </Typography.Text>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
-            {check.sources.map((s) => (
-              <Link
-                key={`${s.citationNo}-${s.entryId}-${s.chunkId ?? ''}`}
-                to={`/knowledge?entryId=${s.entryId}${s.chunkId ? `&chunkId=${s.chunkId}` : ''}`}
-                title={[s.sourceUri, s.snippet].filter(Boolean).join('\n')}
-              >
-                <Tag color="purple" style={{ marginInlineEnd: 0, maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {check.sources.map((s) => {
+              const key = `${s.citationNo}-${s.entryId}-${s.chunkId ?? ''}`
+              const tag = (
+                <Tag
+                  color="purple"
+                  style={{ marginInlineEnd: 0, maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                >
                   [S{s.citationNo}] {s.entryName}
                 </Tag>
-              </Link>
-            ))}
+              )
+              return canOpenEntry ? (
+                <Link
+                  key={key}
+                  to={`/admin/knowledge?entryId=${s.entryId}${s.chunkId ? `&chunkId=${s.chunkId}` : ''}`}
+                  title={[s.sourceUri, s.snippet].filter(Boolean).join('\n')}
+                >
+                  {tag}
+                </Link>
+              ) : (
+                <span
+                  key={key}
+                  title={[s.sourceUri, s.snippet].filter(Boolean).join('\n')}
+                  style={{ maxWidth: 320 }}
+                >
+                  {tag}
+                </span>
+              )
+            })}
           </div>
         </div>
       )}

@@ -8,6 +8,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -108,6 +109,7 @@ public class KnowledgeEntryEntity {
     private String owner;
 
     /** 内容版本（每次正文变化 +1；历史见 knowledge_entry_versions） */
+    @ColumnDefault("1")
     private int contentVersion = 1;
 
     private Instant validFrom;

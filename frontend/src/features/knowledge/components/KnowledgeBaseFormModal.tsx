@@ -1,0 +1,121 @@
+// CAP-86 知识库新建/编辑弹窗：工作台左栏「新建」与库设置页共用。
+import { useEffect } from 'react'
+import { Form, Input, message, Modal, Select } from 'antd'
+import type { Project } from '../../projects/types'
+import { createBase, updateBase } from '../api'
+import type { KnowledgeBase, KnowledgeBaseInput } from '../types'
+import { showError } from '../../../shared/utils/showError'
+
+export default function KnowledgeBaseFormModal({
+  open,
+  base,
+  projects,
+  onClose,
+  onSaved,
+}: {
+  open: boolean
+  /** 传入 = 编辑；不传 = 新建 */
+  base?: KnowledgeBase | null
+  projects: Project[]
+  onClose: () => void
+  onSaved: (base: KnowledgeBase) => void
+}) {
+  const [form] = Form.useForm<KnowledgeBaseInput>()
+  const scope = Form.useWatch('scope', form)
+
+  useEffect(() => {
+    if (!open) return
+    form.resetFields()
+    if (base) {
+      form.setFieldsValue({
+        name: base.name,
+        description: base.description ?? undefined,
+        scope: base.scope,
+        projectId: base.projectId ?? undefined,
+        injectMode: base.injectMode,
+        status: base.status,
+      })
+    } else {
+      form.setFieldsValue({ scope: 'global', injectMode: 'RAG', status: 'active' })
+    }
+  }, [open, base, form])
+
+  const onSave = async () => {
+    const values = await form.validateFields()
+    try {
+      const saved = base
+        ? await updateBase(base.id, values)
+        : await createBase(values)
+      message.success(base ? '知识库已更新' : '知识库已创建')
+      onSaved(saved)
+      onClose()
+    } catch (e) {
+      showError(e, '保存失败')
+    }
+  }
+
+  const projectOptions = projects.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))
+
+  return (
+    <Modal
+      title={base ? '编辑知识库' : '新建知识库'}
+      open={open}
+      onCancel={onClose}
+      onOk={onSave}
+      okText="保存"
+      cancelText="取消"
+    >
+      <Form form={form} labelCol={{ span: 5 }} wrapperCol={{ span: 18 }}>
+        <Form.Item name="name" label="名称" rules={[{ required: true, message: '请填写名称' }]}>
+          <Input placeholder="如：运维手册库" />
+        </Form.Item>
+        <Form.Item name="description" label="描述">
+          <Input placeholder="这个库装什么？（可选）" />
+        </Form.Item>
+        <Form.Item name="scope" label="范围" rules={[{ required: true }]}>
+          <Select
+            disabled={!!base}
+            options={[
+              { value: 'global', label: 'global（全局可用）' },
+              { value: 'project', label: 'project（指定项目）' },
+            ]}
+          />
+        </Form.Item>
+        {scope === 'project' && (
+          <Form.Item name="projectId" label="项目" rules={[{ required: true, message: '请选择项目' }]}>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="选择项目"
+              disabled={!!base}
+              options={projectOptions}
+            />
+          </Form.Item>
+        )}
+        <Form.Item
+          name="injectMode"
+          label="注入模式"
+          rules={[{ required: true }]}
+          extra="FULL：会话启动全量注入（经验库）；RAG：仅检索，按提问召回内容"
+        >
+          <Select
+            options={[
+              { value: 'RAG', label: 'RAG 检索（推荐）' },
+              { value: 'FULL', label: 'FULL 全量注入' },
+            ]}
+          />
+        </Form.Item>
+        {base && (
+          <Form.Item name="status" label="状态">
+            <Select
+              options={[
+                { value: 'active', label: 'active（启用）' },
+                { value: 'archived', label: 'archived（归档停用）' },
+              ]}
+            />
+          </Form.Item>
+        )}
+      </Form>
+    </Modal>
+  )
+}

@@ -4,6 +4,7 @@ import com.devmind.knowledge.model.KnowledgeEntryEntity;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -33,6 +34,76 @@ public interface KnowledgeEntryRepository extends JpaRepository<KnowledgeEntryEn
     List<KnowledgeEntryEntity> findByKbIdOrderByCreatedAtDesc(Long kbId);
 
     List<KnowledgeEntryEntity> findByKbIdAndStatusOrderByCreatedAtDesc(Long kbId, String status);
+
+    /** CAP-86 FR-38 库内条目分页：只取列表字段，不加载正文/元数据 LOB；过滤条件为 null 时不限。 */
+    @Query(value = """
+            select e.id as id, e.kbId as kbId, e.name as name, e.docType as docType,
+                   e.tags as tags, e.source as source, e.externalId as externalId,
+                   e.indexStatus as indexStatus, e.indexError as indexError,
+                   e.summary as summary, e.owner as owner, e.hitCount as hitCount,
+                   e.status as status, e.sourceUri as sourceUri,
+                   e.contentVersion as contentVersion, e.updatedAt as updatedAt
+            from KnowledgeEntryEntity e
+            where e.kbId = :kbId
+              and (:status is null or e.status = :status)
+              and (:docType is null or e.docType = :docType)
+              and (:source is null or e.source = :source)
+              and (:indexStatus is null or e.indexStatus = :indexStatus)
+              and (cast(:keyword as string) is null
+                   or lower(e.name) like lower(concat('%', cast(:keyword as string), '%')))
+            order by e.updatedAt desc, e.id desc
+            """,
+            countQuery = """
+            select count(e) from KnowledgeEntryEntity e
+            where e.kbId = :kbId
+              and (:status is null or e.status = :status)
+              and (:docType is null or e.docType = :docType)
+              and (:source is null or e.source = :source)
+              and (:indexStatus is null or e.indexStatus = :indexStatus)
+              and (cast(:keyword as string) is null
+                   or lower(e.name) like lower(concat('%', cast(:keyword as string), '%')))
+            """)
+    Page<EntrySummaryRef> pageSummariesByBase(@Param("kbId") Long kbId,
+                                              @Param("keyword") String keyword,
+                                              @Param("docType") String docType,
+                                              @Param("source") String source,
+                                              @Param("indexStatus") String indexStatus,
+                                              @Param("status") String status,
+                                              Pageable pageable);
+
+    interface EntrySummaryRef {
+        Long getId();
+
+        Long getKbId();
+
+        String getName();
+
+        String getDocType();
+
+        String getTags();
+
+        String getSource();
+
+        String getExternalId();
+
+        String getIndexStatus();
+
+        String getIndexError();
+
+        String getSummary();
+
+        String getOwner();
+
+        int getHitCount();
+
+        String getStatus();
+
+        String getSourceUri();
+
+        int getContentVersion();
+
+        Instant getUpdatedAt();
+    }
 
     List<KnowledgeEntryEntity> findByKbIdInOrderByCreatedAtDesc(List<Long> kbIds);
 

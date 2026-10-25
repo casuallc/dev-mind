@@ -89,7 +89,6 @@ public class LuceneKnowledgeSearchIndex implements KnowledgeSearchIndex {
     private IndexWriter writer;
     private SearcherManager searcherManager;
     private int pendingDocs;
-    private int sinceRefresh;
 
     public LuceneKnowledgeSearchIndex(KnowledgeProperties props) {
         this.props = props;
@@ -277,7 +276,6 @@ public class LuceneKnowledgeSearchIndex implements KnowledgeSearchIndex {
                 writer.commit();
                 searcherManager.maybeRefresh();
                 pendingDocs = 0;
-                sinceRefresh = 0;
             } catch (IOException e) {
                 throw new IllegalStateException("提交知识库索引失败", e);
             }
@@ -290,10 +288,24 @@ public class LuceneKnowledgeSearchIndex implements KnowledgeSearchIndex {
             writer.commit();
             searcherManager.maybeRefresh();
             pendingDocs = 0;
-            sinceRefresh = 0;
-        } else if (++sinceRefresh >= 5) {
-            searcherManager.maybeRefresh();
-            sinceRefresh = 0;
+        }
+    }
+
+    /**
+     * 读前刷新：写入只按阈值 commit，若等 commit 才刷新 searcher，少量文档重建后
+     * 检索会一直看到启动时的空快照（numDocs=0 → INDEX_EMPTY）。读时补一次 NRT
+     * refresh 既不拖慢批量导入，又能保证「写完即可检索」。
+     */
+    private void refreshIfPending() {
+        synchronized (mutex) {
+            if (pendingDocs <= 0) {
+                return;
+            }
+            try {
+                searcherManager.maybeRefresh();
+            } catch (IOException e) {
+                log.warn("知识库索引刷新失败（按已有快照检索）: {}", e.toString());
+            }
         }
     }
 
@@ -302,6 +314,7 @@ public class LuceneKnowledgeSearchIndex implements KnowledgeSearchIndex {
         if (query == null || query.isBlank()) {
             return List.of();
         }
+        refreshIfPending();
         Query textQuery = parseTextQuery(query);
         if (textQuery == null) {
             return List.of();
@@ -318,6 +331,7 @@ public class LuceneKnowledgeSearchIndex implements KnowledgeSearchIndex {
         if (queryVector == null || queryVector.length == 0) {
             return List.of();
         }
+        refreshIfPending();
         String field = vectorField(queryVector.length);
         if (!vectorDims.contains(queryVector.length)) {
             return List.of();
@@ -463,6 +477,7 @@ public class LuceneKnowledgeSearchIndex implements KnowledgeSearchIndex {
 
     @Override
     public long numDocs() {
+        refreshIfPending();
         IndexSearcher searcher = null;
         try {
             searcher = searcherManager.acquire();
@@ -482,6 +497,7 @@ public class LuceneKnowledgeSearchIndex implements KnowledgeSearchIndex {
 
     @Override
     public IndexStats stats() {
+        refreshIfPending();
         long size = 0L;
         if (indexPath != null && Files.exists(indexPath)) {
             try (var files = Files.walk(indexPath)) {

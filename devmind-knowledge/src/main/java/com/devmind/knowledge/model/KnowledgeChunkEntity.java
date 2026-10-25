@@ -9,6 +9,7 @@ import jakarta.persistence.Index;
 import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -53,7 +54,9 @@ public class KnowledgeChunkEntity {
     private String headingPath;
 
     /** 原文字符偏移 [start, end)，前端可跳原文 */
+    @ColumnDefault("0")
     private int startOffset;
+    @ColumnDefault("0")
     private int endOffset;
 
     @Column(length = 64)

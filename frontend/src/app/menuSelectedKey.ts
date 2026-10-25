@@ -8,11 +8,13 @@ const SELECT_PREFIXES: Array<[string, string]> = [
   ['/admin/notifications', '/admin/notifications'], // 通知管理（页内视图 ?view=channels/prefs）
   ['/admin/projects', '/admin/projects'], // 列表 + 设置子路由
   ['/admin/docs', '/admin/docs'], // 列表 + 编辑器
-  ['/admin/knowledge', '/admin/knowledge'], // 列表 + 库详情（/admin/knowledge/bases/:id）
+  ['/admin/knowledge/imports', '/admin/knowledge/imports'], // CAP-86 菜单组：文档导入
+  ['/admin/knowledge/search', '/admin/knowledge/search'], // 召回验证
+  ['/admin/knowledge/health', '/admin/knowledge/health'], // 治理报告
+  ['/admin/knowledge', '/admin/knowledge'], // 库总览 + 库详情（/admin/knowledge/bases/:id 高亮库总览）
   ['/projects/', '/requirements'], // /projects/:id/requirements/:rid → 需求
   ['/context', '/context'],
   ['/chats', '/chats'],
-  ['/knowledge', '/knowledge'], // CAP-84 知识中心（库管理在 /admin/knowledge，不走这里）
   ['/bookmarks', '/bookmarks'],
   ['/worklog', '/worklog'],
   ['/settings', '/settings'], // 一级导航「设置」（旧 /me/settings 已重定向）
@@ -36,7 +38,6 @@ export function menuSelectedKey(pathname: string): string {
 const TOPNAV_PREFIXES: Array<[string, string]> = [
   ['/home', '/home'],
   ['/chats', '/chats'],
-  ['/knowledge', '/knowledge'],
   ['/bookmarks', '/bookmarks'],
   ['/worklog', '/worklog'],
   ['/settings', '/settings'], // 一级导航「设置」

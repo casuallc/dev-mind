@@ -1,5 +1,6 @@
 package com.devmind.knowledge.controller;
 
+import com.devmind.common.dto.PageView;
 import com.devmind.common.integration.FeishuDocFetcher.FeishuIntegration;
 import com.devmind.common.knowledge.KnowledgeRetriever;
 import com.devmind.knowledge.FeishuImportService;
@@ -8,6 +9,7 @@ import com.devmind.knowledge.SolutionService;
 import com.devmind.knowledge.dto.ClassifyPreviewItem;
 import com.devmind.knowledge.dto.ClassifyPreviewRequest;
 import com.devmind.knowledge.dto.EntryRequest;
+import com.devmind.knowledge.dto.EntrySummaryView;
 import com.devmind.knowledge.dto.EntryView;
 import com.devmind.knowledge.dto.FeishuImportRequest;
 import com.devmind.knowledge.dto.FeishuImportResult;
@@ -101,6 +103,19 @@ public class KnowledgeController {
     @GetMapping("/bases/{id}/entries")
     public List<EntryView> listBaseEntries(@PathVariable Long id) {
         return service.listByBase(id);
+    }
+
+    /** CAP-86 FR-38 库内条目分页（轻量摘要，不含正文 LOB）。 */
+    @GetMapping("/bases/{id}/entries/page")
+    public PageView<EntrySummaryView> pageBaseEntries(@PathVariable Long id,
+                                                      @RequestParam(required = false) String keyword,
+                                                      @RequestParam(required = false) String docType,
+                                                      @RequestParam(required = false) String source,
+                                                      @RequestParam(required = false) String indexStatus,
+                                                      @RequestParam(required = false) String status,
+                                                      @RequestParam(defaultValue = "0") int page,
+                                                      @RequestParam(defaultValue = "20") int size) {
+        return service.pageByBase(id, keyword, docType, source, indexStatus, status, page, size);
     }
 
     /**

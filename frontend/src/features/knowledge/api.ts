@@ -20,6 +20,8 @@ import type {
   KnowledgeChunk,
   KnowledgeEntry,
   KnowledgeEntryInput,
+  KnowledgeEntrySummary,
+  KnowledgePage,
   KnowledgeProposal,
   KnowledgeProposalInput,
   KnowledgeSearchResult,
@@ -50,6 +52,32 @@ export const deleteBase = (id: number, force = false) =>
   api.del(`/knowledge/bases/${id}${force ? '?force=true' : ''}`)
 export const listBaseEntries = (id: number) =>
   api.get<KnowledgeEntry[]>(`/knowledge/bases/${id}/entries`)
+
+/** CAP-86 库内文档页：轻量摘要 + 服务端分页/过滤（万级文档不拉正文） */
+export const pageBaseEntries = (
+  id: number,
+  params: {
+    page?: number
+    size?: number
+    keyword?: string
+    docType?: string
+    source?: string
+    indexStatus?: string
+    status?: string
+  } = {},
+) => {
+  const q = new URLSearchParams()
+  q.set('page', String(params.page ?? 0))
+  q.set('size', String(params.size ?? 20))
+  if (params.keyword?.trim()) q.set('keyword', params.keyword.trim())
+  if (params.docType) q.set('docType', params.docType)
+  if (params.source) q.set('source', params.source)
+  if (params.indexStatus) q.set('indexStatus', params.indexStatus)
+  if (params.status) q.set('status', params.status)
+  return api.get<KnowledgePage<KnowledgeEntrySummary>>(
+    `/knowledge/bases/${id}/entries/page?${q.toString()}`,
+  )
+}
 
 /** CAP-48 FR-08 全库重建索引；onlyMismatched=true 只重建血缘失配的条目（换端点后的定向修复） */
 export const reindexBase = (id: number, onlyMismatched = false) =>
