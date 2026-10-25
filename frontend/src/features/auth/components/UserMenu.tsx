@@ -1,5 +1,5 @@
-import { Descriptions, Dropdown, Modal, Space, Tag, Typography } from 'antd'
-import { InfoCircleOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons'
+import { Button, Descriptions, Dropdown, Modal, Space, Tag, Typography } from 'antd'
+import { FileTextOutlined, InfoCircleOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons'
 import { useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../shared/api/client'
@@ -22,8 +22,9 @@ interface AboutInfo {
   commitTime: string | null
 }
 
-/** CAP-01 Header 用户区：当前用户 + 角色 + 下拉（关于 / 退出登录）。
- * 个人信息 / 第三方账号 / Jira 推送模板 / 工作日志统一收进一级导航「设置」页（/settings），不走下拉开入口。 */
+/** CAP-01 Header 用户区：当前用户 + 角色 + 下拉（关于 / 更新日志 / 退出登录）。
+ * 个人信息 / 第三方账号 / Jira 推送模板 / 工作日志统一收进一级导航「设置」页（/settings），不走下拉开入口。
+ * CAP-87 更新日志：下拉直达 /changelog；「关于」弹框可带当前部署版本跳到对应条目。 */
 export default function UserMenu() {
   const user = useSyncExternalStore(subscribeAuth, getUserSnapshot)
   const navigate = useNavigate()
@@ -54,6 +55,12 @@ export default function UserMenu() {
         menu={{
           items: [
             { key: 'about', icon: <InfoCircleOutlined />, label: '关于', onClick: openAbout },
+            {
+              key: 'changelog',
+              icon: <FileTextOutlined />,
+              label: '更新日志',
+              onClick: () => navigate('/changelog'),
+            },
             { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', onClick: onLogout },
           ],
         }}
@@ -67,7 +74,22 @@ export default function UserMenu() {
       <Modal
         title={about ? `${about.name} · ${about.description}` : '关于'}
         open={aboutOpen}
-        footer={null}
+        footer={
+          about ? (
+            <Space>
+              <Button onClick={() => setAboutOpen(false)}>关闭</Button>
+              <Button
+                type="primary"
+                onClick={() => {
+                  setAboutOpen(false)
+                  navigate(`/changelog?version=${encodeURIComponent(about.version)}`)
+                }}
+              >
+                查看更新日志
+              </Button>
+            </Space>
+          ) : null
+        }
         onCancel={() => setAboutOpen(false)}
       >
         {about ? (

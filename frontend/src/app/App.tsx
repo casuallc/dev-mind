@@ -25,6 +25,7 @@ import ReleasesPage from '../features/deploy/pages/ReleasesPage'
 import TestsPage from '../features/test/pages/TestsPage'
 import SuiteDetailPage from '../features/test/pages/SuiteDetailPage'
 import NotificationCenter from '../features/notifications/pages/NotificationCenter'
+import ChangelogPage from '../features/changelog/pages/ChangelogPage'
 import AdminNotificationsPage from '../features/notifications/pages/AdminNotificationsPage'
 import KnowledgeBaseListPage from '../features/knowledge/pages/KnowledgeBaseListPage'
 import KnowledgeBaseDetailPage from '../features/knowledge/pages/KnowledgeBaseDetailPage'
@@ -173,6 +174,8 @@ export default function App() {
           <Route path="/projects/:id/requirements/:rid" element={<RequirementDetailPage />} />
           {/* CAP-06 通知 */}
           <Route path="/notifications" element={<NotificationCenter />} />
+          {/* CAP-87 更新日志（个人级只读页，非项目上下文） */}
+          <Route path="/changelog" element={<ChangelogPage />} />
           {/* 通知设置已迁入后台「系统」组（通道为全局配置），旧路径兼容 */}
           <Route path="/settings/notifications" element={<Navigate to="/admin/notifications" replace />} />
           {/* 旧路径兼容：指挥中心/知识库/文档已迁入 /admin 后台 */}
