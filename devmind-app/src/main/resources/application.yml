@@ -4,6 +4,11 @@ server:
     encoding:
       charset: UTF-8
       force: true   # multipart 表单字段（如附件 description）按 UTF-8 解码——客户端未带 charset 时 Tomcat 默认 ISO-8859-1 会乱码
+  compression:
+    # 事件补拉/会话列表这类大 JSON（单页可到 MB 级）gzip 后约剩 1/10；小响应不值得压，2KB 起
+    enabled: true
+    mime-types: application/json,application/javascript,text/css,text/html,text/plain,image/svg+xml
+    min-response-size: 2KB
 
 spring:
   application:
