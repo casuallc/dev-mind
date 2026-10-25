@@ -1,144 +1,156 @@
-# CAP-86 知识库管理台（菜单组化信息架构）
+# CAP-86 知识库管理台（内容 / 运营两区模型）
 
-> 能力 ID：CAP-86 ｜ 分类：管理/前端体验 ｜ 状态：**v2 已交付**（v1 单工作台方案已否决，未进 git 历史） ｜ 日期：2026-10-24（v2 重构定稿 2026-10-25，实施完成 2026-10-25）
+> 能力 ID：CAP-86 ｜ 分类：管理/前端体验 ｜ 状态：**v3 已交付**（v1 单工作台、v2 四子菜单菜单组均已否决/取代） ｜ 日期：2026-10-24（v3 重构定稿与实施 2026-10-25）
 > 上游能力：CAP-84（知识管理 v2）、CAP-85（知识治理与增量同步）、CAP-44（库容器化）、CAP-46（知识库 AI 会话）
-> 决策记录（v2，替代 v1 全部决策）：
+> 决策记录（v3，替代 v1/v2 全部导航决策）：
 > 1. **消费归 AI 问答**：知识的消费（搜索答案、多轮追问、方案沉淀）已由 CAP-46/84 M3 在
->    `/chats` 闭环。知识库页面是**纯管理员工具**，不再承担消费职责；页内检索只保留为
->    管理员的**召回验证**调试手段，不是第二套消费入口。
-> 2. **菜单组化，撤销单工作台**：后台「知识库」升级为与「项目与资源」平级的菜单组
->    （antd `type:'group'`，非 SubMenu 三级嵌套），四个子菜单——知识库总览 /
->    文档导入 / 召回验证 / 治理报告。撤销 v1 的「左栏全局动作 + 库列表」主从工作台
->    （左栏混排异质元素是 v1 最主要的心智负担来源）。
-> 3. **治理按对象下沉**：同步源、飞书手动导入本质是 per-base 的，下沉到库详情「同步」
->    视图；生命周期 / 近重复 / 反馈 / 检索评测是跨库聚合的，合并为「治理报告」（Card 头部
->    Segmented 五视图切换，不平铺堆叠）。撤销 v1 的 6 页签全局治理控制台。
-> 4. **库详情恢复独立路由** `/admin/knowledge/bases/:id`，视图收敛为：文档 / 摄入 /
->    同步 / 设置；「检索测试」删除，由「召回验证」预选本库替代。
-> 5. **深链与权限边界不变**：仍仅 ADMIN 可达；`/knowledge?entryId=&chunkId=` 聊天引用
->    深链重定向到库总览并打开详情抽屉，普通用户引用标签维持不可点退化展示。
+>    `/chats` 闭环。知识库页面是**纯管理员工具**，页内检索只保留为**召回验证**调试手段。
+> 2. **两区模型 + 报表独立**：后台新增独立菜单组「知识库」，组内三项「知识库」「知识运营」「报表」——知识库回答「这个库喂什么」，
+>    知识运营回答「现在该处理什么」，报表集中看跨库质量。撤销 v2 按系统拆分的四个子菜单
+>    （知识库总览 / 文档导入 / 召回验证 / 治理报告）。
+> 3. **待办是运营默认页，且只收能闭环的动作**：跨库聚合待复核、增强失败与负面反馈，页面只保留
+>    类型筛选与队列；已过期 / 临期 / 缺负责人没有补录入口，不进入队列，到生命周期报表查看。
+> 4. **库详情三页签，库设置上移到列表**：库详情按内容来源拆为文档 / 手动上传 / 飞书同步——
+>    手动上传只看本库上传批次，飞书同步放同步源（Git / 飞书增量）与飞书文档手动导入。
+>    库设置（含归档、注入预览、删除库）改为库列表操作列「设置」抽屉，撤销 v2 的「摄入 / 同步」
+>    双页签、详情设置页签、内容来源内层 Segmented 与多处重复上传入口。
+> 5. **动作按任务折叠**：库详情顶部状态条异常时给出直达动作（失败 → 筛选失败条目、需重建 →
+>    一键重建）；正常态只留「添加内容」下拉（上传 / 新建 Markdown / 飞书导入）。所有更新类
+>    操作统一居中 `Modal.confirm` 二次确认。
+> 6. **深链与权限边界不变**：仍仅 ADMIN 可达；v1/v2 旧链接全量重定向；聊天引用
+>    `/knowledge?entryId=&chunkId=` 继续由库列表页打开详情抽屉。
 
 ## 1. 目的
 
-v1 把检索 / 摄入 / 治理 / 库管理四套系统塞进一个页面（一个 URL + 五个 query 参数），
-试行后暴露五个结构性问题：
+v2 把工作台拆成四个子菜单后，试行中仍暴露结构性问题：
 
-- **定位矛盾**：页面在后台（管理员专属），默认落地页却是「跨库检索」——检索是消费
-  行为，与 AI 问答形成两个定位含糊的"搜知识"入口；
-- **左栏概念混乱**：「跨库检索/上传批次/知识治理」是视图切换，下面的库是对象，两类
-  异质元素在同一列表里并列；
-- **治理层级错位**：同步源、检索评测绑定具体库，却放在全局视图，用户要理解"全局入口、
-  按库治理"这层拐弯；同一个"飞书进库"被拆到全局治理与库内导入两处；
-- **功能重复**：库内「检索测试」与全局「跨库检索」几乎同功能；「上传文档」按钮出现在
-  四个位置；全局批次与库内「导入」渲染同一组件；
-- **术语工程化**：「索引失配」「维度未探测」「未启用」直接暴露给用户，且不给下一步动作。
+- **按系统分组，而非按任务**：管理员每次先判断「这属于哪个页面」（总览 / 导入 / 检索 / 治理），
+  而真实任务是「看库状态 / 喂内容 / 处理质量问题 / 验证召回」；
+- **入口重复**：上传入口同时出现在总览行、库详情、导入页；飞书导入又在库详情与治理页各有一份；
+- **治理只解决「看」**：待复核、增强失败、负反馈、失败批次分散在报表和库详情，缺少一个
+  「现在该做什么」的收件箱，管理员要自己巡检；
+- **库详情页签按数据源拆**：上传批次与同步源同属「内容从哪来」，却被拆成「摄入 / 同步」两个
+  页签，还要和顶部「添加内容」重复对照；
+- **术语仍有工程腔**：摄入、治理、索引失配、未启用等词直接暴露。
 
-根因：v1 按**实现分层**（检索/摄入/治理/库并列）组织页面，而管理员的任务是
-**看状态 / 喂内容 / 验效果 / 做治理** 四件相互独立的事。v2 按任务组织信息架构，
-一件任务一个子菜单。
+v3 的根因修正：把管理员心智从「系统分层」改为两问——**这个库喂什么（知识库）**、
+**现在有哪些质量问题要处理（知识运营）**。
 
 ## 2. 功能需求
 
-### M1 菜单组与子页面骨架
+### M1 两区菜单与路由
 
-- **FR-01 菜单组与路由**：后台侧边栏「知识库」升级为与「项目与资源」**平级的菜单组**
-  （antd `type: 'group'`，组名常驻展示、四项直挂组下，**非 SubMenu 三级嵌套**，仅 ADMIN 可见）：
+- **FR-01 菜单与路由**：后台侧边栏新增独立菜单组「知识库」（antd `type: 'group'`，
+  组名常驻展示、三项直挂组下，仅 ADMIN 可见）：
 
-  | 子菜单 | 路由 | 内容 |
-  |---|---|---|
-  | 知识库总览 | `/admin/knowledge` | 库列表 + 新建库 + 全局索引统计（默认页） |
-  | 文档导入 | `/admin/knowledge/imports` | 上传入口 + 全部批次 |
-  | 召回验证 | `/admin/knowledge/search` | 跨库/单库检索召回调试 |
-  | 治理报告 | `/admin/knowledge/health` | 生命周期 / 近重复 / 反馈 / 评测 |
+  | 菜单组 | 子菜单 | 路由 | 内容 |
+  |---|---|---|---|
+  | 知识库 | 知识库 | `/admin/knowledge` | 库列表（默认页）+ 库详情 `/admin/knowledge/bases/:id` |
+  | 知识库 | 知识运营 | `/admin/knowledge/ops` | 待办（`?tab=tasks`，默认）/ 召回验证（`?tab=search`） |
+  | 知识库 | 报表 | `/admin/knowledge/reports` | 跨库质量报表（`?view=lifecycle|duplicates|feedback|eval|enrich`） |
 
-  四个子路由均 `RequireAdmin`；`menuSelectedKey` 使任一子路径下对应菜单保持高亮
-  （库详情 `/admin/knowledge/bases/:id` 高亮「知识库总览」）。
-- **FR-01a 页面骨架统一**：五个页面一律遵循《前端内容区布局约定》骨架——Card 默认密度、
-  `title` = 页名（多视图在 title 内放 Segmented）、动作按钮与过滤控件收进 `extra`、
-  body 顶部一行 `type="secondary"` 说明、表格默认密度 + FitTable、行操作为纯文字按钮。
-- **FR-02 知识库总览（默认页）**：库表格——名称、范围/注入模式、文档数、索引健康
-  （已索引/总数 + 失败与待重建数）、最近摄入时间、更新时间；行操作：进入详情、
-  用此库问答（`/chats?kbId=`）、上传文档（预选本库）。页头：新建知识库 +
-  一行全局统计（库数/文档数/已索引）。归档库默认折叠到表格末尾分组。
-- **FR-03 文档导入**：统一上传抽屉入口（文件/文件夹/ZIP）+ 全部批次列表
-  （`KnowledgeImportsView` 整页化，按库过滤）；仅存在 RUNNING 批次时轮询（3s），
-  失败单条/整批重试。
-- **FR-04 召回验证**：现有跨库检索视图整页化，文案定位为「验证召回效果」：
-  搜索框 + 库/类型/项目/标签过滤 + 文档级聚合结果（高亮片段、score、降级原因告警）；
-  `?kbId=` 预选单库即替代原库内「检索测试」。命中打开文档详情抽屉。
+  所有路由沿用 `RequireAdmin`；`menuSelectedKey` 将 `/admin/knowledge/ops` 及其子态映射到
+  「知识运营」，其余 `/admin/knowledge*`（含库详情）映射到「知识库」。
+- **FR-01a 页面骨架统一**：所有页面遵循《前端内容区布局约定》骨架——Card 默认密度、`title` =
+  页名（多视图在 title 内放 Segmented）、动作与过滤收进 `extra`、body 顶部一行 `type="secondary"`
+  说明、表格默认密度 + `FitTable`、行操作为纯文字按钮。
 
-### M2 库详情与治理下沉
+### M2 知识运营中心
 
-- **FR-05 库详情页** `/admin/knowledge/bases/:id`：Card `title` = 库名 + Segmented 视图切换
-  （文档 / 摄入 / 同步 / 设置，URL `?tab=` 同步）；`extra` = 用此库问答 / 刷新 +
-  随视图切换的动作（文档：重建全库索引 + 新增条目；摄入：上传文档）；body 顶部信息行
-  （范围/注入/状态、当前向量端点、索引健康一行、召回验证入口；extra 末尾「返回列表」回总览）：
-  - **文档**：服务端分页条目表（复用 v1 已交付的 `/entries/page` 摘要投影与过滤）；
-    行点击开详情抽屉，编辑拉完整正文进 Markdown 编辑抽屉；更多菜单：重建索引、
-    飞书重同步、删除。
-  - **摄入**：本库上传入口（预选当前库）+ 本库批次列表。
-  - **同步**：本库同步源列表与 CRUD（飞书空间 / Git 本地副本，从治理控制台下沉，
-    按 `kbId` 过滤）+ 飞书文档手动导入（原库内「导入」页签的飞书半边）。
-  - **设置**：基本信息、注入模式、向量端点覆盖、状态；注入预览（从 v1 左栏底部归入，
-    预选本库）；危险区删除库。
-- **FR-06 治理报告**：跨库聚合页，Card `title` 内 Segmented 切换五个视图（布局约定禁 Card 内套
-  Tabs，多视图统一 Segmented；不平铺堆叠，一次只渲染当前视图）：
-  - 生命周期（到期/待复核/久未复核清单）；
-  - 近重复文档报告（SimHash，只报告不自动删）；
-  - 答案反馈聚合（负面反馈 Top 文档）；
-  - 检索评测（评测集运行与 Recall@K/MRR/引用准确率/拒答率）；
-  - 自动增强配置（CHAT 端点、批量上限等全局开关）作为配置区块。
-  条目链接统一打开文档详情抽屉。**同步源页签从此页移除**（已下沉库详情「同步」）。
+- **FR-02 待办队列**（`/admin/knowledge/ops?tab=tasks`，默认视图）：
+  - 三路并行聚合（`Promise.allSettled`，部分失败只提示不阻塞）：生命周期报告、
+    增强状态、负面反馈 Top；页内不设统计卡/入口卡，队列即全部内容；
+  - 类型筛选 Segmented：全部 / 待复核 / 增强失败 / 负面反馈（带计数）；
+  - 待办表格：类型 / 对象（开文档详情抽屉）/ 知识库 / 待办说明 / 时间 / 操作；
+    操作分别是「登记复核」「重试增强」「查看文档」，前两者居中 `Modal.confirm`；
+  - 支持 `?kbId=` 按库过滤，页头展示可关闭的「仅看：库名」标签；无待办时显示健康态空态；
+  - 队列**只收能闭环的动作**：已过期 / 临期 / 缺失负责人不进入队列（无补录入口），
+    到生命周期报表查看。
+- **FR-03 召回验证**（`?tab=search`）：复用跨库检索视图（库/类型/项目/标签过滤、文档级聚合、
+  高亮片段、降级原因告警、命中开详情抽屉）；`?kbId=` 预选单库，替代原库内「检索测试」。
+  文案明示：日常问知识走 AI 问答，本页只做召回调试。
+- **FR-04 报表独立页**（`/admin/knowledge/reports`）：从知识运营页签中拆出的独立菜单入口，
+  跨库质量报表，Card title 内 Segmented 五视图（生命周期 / 近重复 / 答案反馈 / 检索评测 /
+  自动增强），URL `?view=` 可深链；一次只渲染当前视图。同步源与上传批次在库详情「手动上传 / 飞书同步」维护。
+  运营页的到期 / 近重复 / 评测入口直接跳本页对应视图；旧 `?tab=reports` 自动重定向到本页。
 
-### M3 收口
+### M3 库详情与库设置抽屉
 
-- **FR-07 路由兼容与深链**：
-  - `/knowledge?entryId=&chunkId=` → `/admin/knowledge?entryId=&chunkId=`，
-    库总览作为深链宿主打开详情抽屉并定位分块；
-  - v1 旧链接 `/admin/knowledge?view=imports|governance` → `/admin/knowledge/imports` |
-    `/admin/knowledge/health`；`?baseId=:id&tab=entries|import|settings` →
-    `/admin/knowledge/bases/:id?tab=…`（`tab=test` → `/admin/knowledge/search?kbId=:id`）；
-  - 聊天引用链接维持指向 `/admin/knowledge?entryId=&chunkId=`（FR-41 口径不变：
-    非 ADMIN 退化为不可点展示）。
-- **FR-08 术语人话化**：「索引失配」→「需要重建索引」（附一键重建操作）；「未启用」→
-  「未配置向量端点」（附跳转模型接入）；健康点 tooltip 一律给"状态 + 下一步动作"。
-- **FR-09 菜单溢出回归**：菜单组新增 4 项后，全量 admin 页面过一遍 Sider 溢出巡检
-  （Sider 已 `overflowY: auto`，此处验证不复发）。
+- **FR-05 库详情页** `/admin/knowledge/bases/:id`：Card `title` = 库名 + Segmented
+  （文档 / 手动上传 / 飞书同步，`?tab=upload|feishu`）；`extra` = 用此库问答 / 刷新 /「添加内容」下拉
+  （上传文件·文件夹·ZIP / 新建 Markdown 文档 / 从飞书导入）/ 返回列表。
+  body 顶部状态条：注入方式（全量注入 / RAG 检索）、范围（全局 / 所属项目）、向量端点与维度、
+  `已索引 x/y`、待索引数、异常入口（`失败 N · 去处理`、`需重建 N · 一键重建`、
+  `未配置端点 N`）、`召回验证` 与 `库待办` 深链、库描述。
+  - **文档**：服务端分页条目表 + 关键字/类型/来源/索引状态过滤；行点击开详情抽屉；
+    行操作编辑、更多（重建索引 / 重同步飞书内容 / 删除）；索引失败行内提供「重试」。
+  - **手动上传**：沿用 `KnowledgeImportsView` 展示本库上传批次（固定库过滤，失败单条/整批重试）；
+    上传入口在顶部「添加内容」下拉（文件 / 文件夹 / ZIP、新建 Markdown）。
+  - **飞书同步**：同步源含 Git / 飞书增量同步 CRUD 与运行，以及飞书文档手动导入（选集成 → 粘贴
+    URL → 按内容哈希判重入库）。
+- **FR-05a 库设置抽屉**：库列表操作列「设置」打开抽屉（深链 `?settings=<id>`），含名称、
+  描述、注入方式（全量注入 / RAG 按需检索）、向量端点覆盖、状态（启用 / 归档停用）、
+  注入预览与危险区删除库；范围与所属项目创建后不可改。保存与删除均为居中 `Modal.confirm`，
+  保存后列表行即时更新。
+- **FR-06 状态条即操作入口**：只有异常存在时才出现动作链接；正常库不堆按钮。
+  归档库在文档页顶部给出 Alert，指引到库列表「设置」把状态改回启用。
+
+### M4 术语、确认与兼容收口
+
+- **FR-07 路由兼容**：
+  - `/knowledge` → `/admin/knowledge`（保留 `entryId/chunkId` 深链）；
+  - `/admin/knowledge?view=imports` → `/admin/knowledge/ops?tab=tasks`；
+    `?view=governance` → `/admin/knowledge/reports?view=lifecycle`；
+  - `?baseId=:id&tab=test` → `/admin/knowledge/ops?tab=search&kbId=:id`；
+    `?baseId=:id&tab=import` → `/admin/knowledge/bases/:id?tab=upload`；
+    `?baseId=:id&tab=sync` → `/admin/knowledge/bases/:id?tab=feishu`；
+    `?baseId=:id&tab=settings` 与库详情 `?tab=settings` → `/admin/knowledge?settings=:id`（列表抽屉）；
+  - `/admin/knowledge/imports` → `/ops?tab=tasks`；`/admin/knowledge/search` → `/ops?tab=search`；
+    `/admin/knowledge/health` → `/admin/knowledge/reports?view=lifecycle`；
+    `/admin/knowledge/ops?tab=reports&view=` → `/admin/knowledge/reports?view=`。
+- **FR-08 术语人话化**：摄入 → 手动上传 / 飞书同步；治理报告 → 报表；未启用 → 启用 / 归档停用；
+  索引失配 / 维度未探测 → 「需重建」+ 一键重建；`FULL/RAG` → 全量注入 / RAG 检索；
+  健康点与失败标签统一「状态 + 下一步动作」。
+- **FR-09 更新操作二次确认**：知识库与知识运营范围内所有更新动作（导入、重试、重建、
+  重同步、登记复核、补全增强、保存设置、归档、删除、同步源增删改/启停）统一居中
+  `Modal.confirm`，文案说明影响范围与可逆性。
 
 ## 3. 否决方案
 
 | 方案 | 否决理由 |
 |---|---|
-| v1 单工作台（左栏全局动作+库列表，右栏上下文） | 已完整试行一版：左栏混排视图与对象、默认消费视图与管理定位矛盾、URL 五参数——实践证明概念模型不成立，详见第 1 节 |
-| 恢复 `/knowledge` 前台只读检索入口 | 消费归 AI 问答（决策 1）；两入口的过滤/权限会再次漂移 |
-| 召回验证不占子菜单、只留库内检索测试 | 排查"这个问题为什么问不出来"需要跨库验证，是高频调试动作；藏进库内逼管理员先猜库 |
-| 治理保留全局 6 页签控制台 | 同步源/评测是 per-base 的，全局入口造成层级错位；按对象拆分后每处职责单一 |
-| 库详情留在工作台右栏不恢复路由 | 换库必须先回总览恰是清晰的对象层级；菜单组内切换是一步点击，成本不高于左栏 |
-| 后端配合改接口 | 纯前端信息架构重排，v1 已交付的 `/entries/page` 等接口全部复用 |
+| v2 四子菜单（总览 / 导入 / 检索 / 治理） | 仍按系统分层：管理员先找页面而非做任务；上传与飞书入口重复；治理只解决「看」，缺待办收件箱 |
+| 只保留报表、不设待办 | 管理员需要自己巡检生命周期/增强/反馈/批次四处，质量问题无人认领 |
+| 待办包含已过期 / 临期 / 缺负责人 | 这些项没有补录入口，点「登记复核」也不会离队，违背「处理完即消失」；改为只在生命周期报表查看 |
+| 库详情保留「摄入 / 同步」双页签 | 工程术语、与顶部添加内容重复；改为按管理员动作命名的「手动上传 / 飞书同步」双页签 |
+| 新增后端待办聚合接口 | 三路数据已有现成接口，前端 `allSettled` 聚合足够；纯前端改造，后端零改动 |
+| 恢复 `/knowledge` 前台只读检索 | 消费归 AI 问答；两入口的过滤/权限会再次漂移 |
 
 ## 4. 架构与模块归属
 
-纯前端重排 + 组件拆分复用，不新增表、不改后端接口：
+纯前端重排 + 组件下沉复用，不新增表、不改后端接口：
 
 - 前端 `frontend/src/features/knowledge`：
-  - `pages/KnowledgeBaseListPage.tsx`：库总览（深链宿主）；
-  - `pages/KnowledgeImportsPage.tsx` / `KnowledgeSearchPage.tsx` /
-    `KnowledgeHealthPage.tsx`：三个子菜单页（由 v1 对应视图整页化）；
-  - `pages/KnowledgeBaseDetailPage.tsx`：库详情（由 v1 `KnowledgeBasePanel` 拆分重组：
-    文档/摄入/同步/设置）；
-  - 删除 v1 的 `KnowledgeWorkspace.tsx`、`KnowledgeBaseRail.tsx`；
-  - 复用：`KnowledgeImportsView`、`KnowledgeSearchView`、`GovernanceConsole`（拆区块）、
-    `KnowledgeUploadDrawer`、`KnowledgeEntryDrawer`、`KnowledgeEntryEditorDrawer`、
-    `KnowledgeBaseFormModal`、`InjectionPreview`。
-- 路由与菜单：`app/App.tsx`（子路由 + 重定向）、`app/AdminLayout.tsx`（菜单组）、
-  `app/menuSelectedKey.ts`。
-- 后端 `devmind-knowledge`：零改动；同步源列表接口需支持按 `kbId` 过滤（若治理接口
-  已带该参数则复用，否则补一个查询参数，不改变返回结构）。
+  - `pages/KnowledgeOpsPage.tsx`（新增）：知识运营中心，含待办队列、类型筛选、召回验证与
+    文档详情抽屉；
+  - `pages/KnowledgeReportsPage.tsx`（新增）：报表独立页，Card title 内五视图 Segmented + `?view=`；
+  - `components/KnowledgeReportsPanel.tsx`（由 `pages/KnowledgeHealthPage.tsx` 下沉）：
+    五视图受控面板（仅接收 `view`），不再自带 Card 与视图切换；
+  - `pages/KnowledgeBaseListPage.tsx`：库列表 + 深链宿主 + 操作列「设置」抽屉（`?settings=`）；
+    索引健康列「失败」链到库详情 `?tab=entries&indexStatus=failed`，「需重建」链到库详情状态条一键重建；
+  - `pages/KnowledgeBaseDetailPage.tsx`：库详情三页签（文档 / 手动上传 / 飞书同步）+ 状态条 + 添加内容下拉；
+  - `components/KnowledgeBaseSettingsDrawer.tsx`（新增）：库设置 + 注入预览 + 危险区删除；
+  - 删除 `pages/KnowledgeImportsPage.tsx`、`pages/KnowledgeSearchPage.tsx`（整页化不再需要）；
+  - 复用：`KnowledgeImportsView`、`KnowledgeSearchView`、`KnowledgeUploadDrawer`、
+    `KnowledgeEntryDrawer`、`KnowledgeEntryEditorDrawer`、`SyncSourcesPanel`、`InjectionPreview`
+    （注入预览由设置抽屉内嵌二级抽屉承载）。
+- 路由与菜单：`app/App.tsx`（两区路由 + 旧链重定向）、`app/AdminLayout.tsx`（知识库菜单组）、
+  `app/menuSelectedKey.ts`（前缀映射）。
+- 后端 `devmind-knowledge`：零改动。
 
 ## 5. 数据模型
 
-无表结构变更。v1 交付的 `EntrySummaryView` 摘要投影（不含 `contentMd`/`metadata_json`
-两个 LOB）继续作为库内文档分页的数据源。
+无表结构变更。库内文档分页继续复用 `EntrySummaryView` 摘要投影（不含正文 LOB）。
 
 ## 6. API 概要
 
@@ -146,63 +158,63 @@ v1 把检索 / 摄入 / 治理 / 库管理四套系统塞进一个页面（一�
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| GET | `/api/knowledge/bases` | 库总览列表与统计 |
-| GET | `/api/knowledge/bases/{id}` | 库详情头部/索引统计 |
-| GET | `/api/knowledge/bases/{id}/entries/page` | 库内文档摘要分页（v1 交付） |
-| GET | `/api/knowledge/entries/{id}` | 编辑前加载完整正文 |
+| GET | `/api/knowledge/bases` | 库列表与统计 |
+| GET | `/api/knowledge/bases/{id}` | 库详情头部 / 索引统计 |
+| GET | `/api/knowledge/bases/{id}/entries/page` | 库内文档摘要分页 |
+| GET | `/api/knowledge/entries/{id}` | 文档详情 / 编辑前加载正文 |
 | POST | `/api/knowledge/search/v2` | 召回验证 |
-| GET | `/api/knowledge/imports?kbId=` | 全局/本库批次 |
-| GET/POST | `/api/knowledge/admin/sync-sources...` | 同步源（库详情「同步」页签按 kbId 过滤） |
-| GET | `/api/knowledge/admin/...` | 治理报告各区块 |
+| GET | `/api/knowledge/imports?kbId=` | 库内上传批次（手动上传页签） |
+| GET | `/api/knowledge/admin/lifecycle?expiringDays=&staleDays=` | 待办复核队列 + 到期/负责人计数 |
+| GET | `/api/knowledge/admin/enrich/entries?kbId=&limit=` | 增强失败队列 |
+| GET | `/api/knowledge/admin/feedback/negative?days=&limit=` | 负面反馈队列 |
+| POST | `/api/knowledge/entries/{id}/review` | 登记复核 |
+| POST | `/api/knowledge/admin/enrich/entries/{id}` | 单条补全增强 |
+| GET/POST | `/api/knowledge/admin/sync-sources...` | 同步源（库详情「飞书同步」按 kbId 过滤） |
+| GET | `/api/knowledge/admin/...` | 报表其余区块 |
 
 ## 7. 安全
 
-- 全部子路由沿用 `RequireAdmin`；菜单组仅 ADMIN 渲染。
+- 全部路由沿用 `RequireAdmin`；菜单组仅 ADMIN 渲染。
 - 摘要投影不含正文 LOB 的暴露面控制保持不变。
-- 同步源/端点凭证仍在既有密文与权限体系内，下沉展示不新增暴露。
+- 同步源 / 端点凭证仍在既有密文与权限体系内，入口收敛不新增暴露面。
 
 ## 8. 里程碑
 
-- **M1 菜单组与骨架**：FR-01~FR-04（菜单组、库总览、文档导入/召回验证整页化、
-  旧 `?view=` 重定向）。
-- **M2 库详情与治理下沉**：FR-05、FR-06（库详情独立路由四页签、同步源下沉、
-  治理报告页）。
-- **M3 收口**：FR-07~FR-09（深链与 v1 链接全量重定向、术语人话化、菜单溢出巡检）；
-  `mvn -pl devmind-knowledge test` 与 `tsc -b` 全绿，E2E 过一遍主流程。
+- **M1 两区骨架**：FR-01、FR-01a（菜单与路由收敛、页面骨架、旧链重定向）。
+- **M2 运营中心与报表**：FR-02~FR-04（待办收件箱、召回验证、报表独立页五视图）。
+- **M3 库详情与设置抽屉**：FR-05、FR-05a、FR-06（三页签、手动上传与飞书同步分离、状态条动作、设置上移列表）。
+- **M4 收口**：FR-07~FR-09（术语、确认弹窗、`tsc -b` 与浏览器主流程验证）。
 
 ## 9. 验收标准
 
-> 验收记录（2026-10-25 实施交付）：`tsc -b` 与 `vite build` 通过；`mvn -pl devmind-knowledge test`
-> 全绿（后端零改动回归）。M1/M2/M3 全部落地：菜单组四子菜单、库详情四视图（文档/摄入/同步/设置，
-> 检索测试视图删除、由召回验证 `?kbId=` 替代）、治理报告五视图、v1 `?view=`/`?baseId=&tab=`
-> 全量重定向、术语人话化（「需重建」「未配置向量端点」）。FR-09 菜单溢出巡检为手工项（Sider 已
-> `overflowY: auto`）。
->
-> 评审修正（2026-10-25 同日复审）：①菜单组改为与「项目与资源」平级的 antd `type:'group'` 分组
-> （撤掉 SubMenu 三级嵌套，四项直挂组下带图标）；②五页骨架全部对齐《前端内容区布局约定》
-> （Card title/extra/说明行/FitTable 默认密度/行操作纯文字）；③治理报告五区块平铺改为 Card 头部
-> Segmented 视图切换（约定禁 Card 内套 Tabs）。`tsc -b` 复验通过。
+> 验收记录（2026-10-25 v3 实施交付）：`tsc -b` 通过；后端零改动。
+> 浏览器实测：侧边栏「知识库」菜单组下含知识库 / 知识运营 / 报表三项且高亮正确；库列表索引异常可直达库详情处理；
+> 运营两视图（待办/召回验证）与报表独立页五子视图可切换、`?tab=&view=&kbId=` 深链生效；
+> 待办三路数据聚合、类型筛选、库过滤「仅看」标签、文档详情抽屉正常；
+> 「登记复核」居中二次确认并成功提交；库详情三页签、库列表「设置」抽屉、手动上传批次与飞书同步、
+> 状态条「去处理 / 一键重建」入口正常；`?view=`、`?baseId=&tab=`、`/imports|/search|/health`
+> 旧链均落到新位置。
 
-- `mvn -pl devmind-knowledge test` 通过（后端零改动，回归不破）；`tsc -b` / `vite build` 通过。
+- `tsc -b` 通过；后端 `devmind-knowledge` 零改动（回归不破）。
 - 手工验收：
-  1. 后台「知识库」为与「项目与资源」平级的菜单组，四个子菜单名称与路由符合 FR-01 表；
-     任一子页刷新/直达对应菜单保持高亮（库详情高亮「知识库总览」）；
-  2. 默认落知识库总览，表格信息与健康状态正确，行操作可达；
-  3. 库详情 Segmented 四视图齐备；「同步」视图可对本库同步源增删改查并手动触发，飞书手动导入
-     在原位；不再有「检索测试」；
-  4. 召回验证页 `?kbId=` 预选生效，降级告警与详情抽屉正常；
-  5. 治理报告 Segmented 五视图可用，同步源区块不存在；
-  6. 深链：`/knowledge?entryId=&chunkId=`、`/admin/knowledge?view=governance`、
-     `/admin/knowledge?baseId=1&tab=test` 均落到正确新位置；
-  7. 菜单组加入后各 admin 页无 Sider 溢出回归。
+  1. 后台「知识库」菜单组下含「知识库」「知识运营」「报表」三项，任一子路径刷新/直达保持正确高亮；
+  2. 知识运营默认落待办，页面只有类型筛选与待办表格（无统计卡/入口卡）；处理完
+     待复核/增强/反馈后刷新队列即消失；
+  3. 待办按 `?kbId=` 过滤时队列同步收窄，报表页明示跨库；
+  4. 召回验证 `?kbId=` 预选生效，降级告警与高亮片段正常；
+  5. 报表独立页五视图可用，`?view=` 深链可刷新保持；同步源/批次不在报表页出现；
+  6. 库详情三页签齐备，手动上传可看批次与重试，飞书同步可维护同步源并手动导入；列表「设置」抽屉可改注入方式 /
+     向量端点 / 状态、预览注入并删除库，保存与删除均二次确认；`?settings=` 与旧 `?tab=settings` 直达抽屉；
+  7. v1/v2 旧链（`?view=`、`?baseId=&tab=`、`/imports|/search|/health|ops?tab=reports`）全部重定向正确。
 
 ## 10. 风险与开放问题
 
 | ID | 风险/问题 | 口径 |
 |---|---|---|
-| R1 | 菜单组增多触发 Sider 溢出回归 | Sider 已 `overflowY: auto`；FR-09 全量巡检兜底 |
-| R2 | v1 外链/书签（`?view=`、`?baseId=&tab=`）失效 | FR-07 全量重定向覆盖；tab 名映射到最近语义 |
-| R3 | 治理报告五视图同页信息密度高 | Segmented 一次只渲染一个视图、各自懒加载；不恢复多层页签（布局约定） |
-| R4 | 同步源接口缺少 kbId 过滤参数 | 补查询参数（向后兼容）；库外治理不再展示同步源 |
-| O1 | v1 工作台已写代码的处置 | 视图组件尽量整页化复用；壳层（Workspace/Rail）删除，不留死代码 |
+| R1 | 待办首屏并发三个聚合接口 | `Promise.allSettled`；单路失败仅提示不阻塞，其余队列照常展示 |
+| R2 | 队列只收可闭环项，可能让人忽略过期/缺负责人 | 运营页不设入口卡，页头说明指向生命周期报表；报表入口在「报表」菜单 |
+| R3 | 待办可按库过滤，而报表是跨库的 | 报表页不展示「仅看」标签，页头文案明示跨库，避免误读 |
+| R4 | 菜单从四个减到三个，召回验证发现性下降 | 库详情状态条、运营页内 Segmented 双入口；`?kbId=` 深链保留 |
+| R5 | v1/v2 外链与书签失效 | FR-07 全量重定向覆盖；`tab=import|sync` 映射到手动上传 / 飞书同步，`tab=reports` 映射到报表页 |
+| O1 | 待办刷新实时性 | 首屏与手动刷新拉取；不做常驻轮询，避免三路聚合请求常开 |
 | O2 | 普通用户检索诉求 | 维持 CAP-84/86 口径：AI 问答绑库满足；引用标签非 ADMIN 不可点 |

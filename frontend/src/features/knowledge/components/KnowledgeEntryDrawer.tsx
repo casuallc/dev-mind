@@ -133,44 +133,73 @@ export default function KnowledgeEntryDrawer({
   const kbLabel = baseName ?? (entry?.kbId ? `#${entry.kbId}` : null)
   const focusMissing = !!focusChunkId && chunks.length > 0 && !chunks.some((c) => c.id === focusChunkId)
 
-  const onReindex = async () => {
+  const onReindex = () => {
     if (!entryId) return
-    setReindexing(true)
-    try {
-      const updated = await reindexEntry(entryId)
-      setEntry(updated)
-      message.success('已提交重建索引，稍后刷新查看结果')
-    } catch (e) {
-      showError(e, '重建索引失败')
-    } finally {
-      setReindexing(false)
-    }
+    Modal.confirm({
+      centered: true,
+      title: `重建「${entry?.name ?? '该文档'}」的索引？`,
+      content: '将重新分块并向量化（异步排队）；重建期间该文档可能暂时检索不到。',
+      okText: '重建',
+      cancelText: '取消',
+      onOk: async () => {
+        setReindexing(true)
+        try {
+          const updated = await reindexEntry(entryId)
+          setEntry(updated)
+          message.success('已提交重建索引，稍后刷新查看结果')
+        } catch (e) {
+          showError(e, '重建索引失败')
+        } finally {
+          setReindexing(false)
+        }
+      },
+    })
   }
 
-  const onReview = async () => {
+  const onReview = () => {
     if (!entryId) return
-    setReviewing(true)
-    try {
-      setEntry(await reviewEntry(entryId))
-      message.success('已登记复核')
-    } catch (e) {
-      showError(e, '登记复核失败')
-    } finally {
-      setReviewing(false)
-    }
+    Modal.confirm({
+      centered: true,
+      title: `登记「${entry?.name ?? '该文档'}」的复核？`,
+      content: '将把最近复核时间更新为当前时间，并移出长期未复核分组。',
+      okText: '登记复核',
+      cancelText: '取消',
+      onOk: async () => {
+        setReviewing(true)
+        try {
+          setEntry(await reviewEntry(entryId))
+          message.success('已登记复核')
+        } catch (e) {
+          showError(e, '登记复核失败')
+        } finally {
+          setReviewing(false)
+        }
+      },
+    })
   }
 
-  const onEnrich = async () => {
+  const onEnrich = () => {
     if (!entryId) return
-    setEnriching(true)
-    try {
-      await runEntryEnrich(entryId)
-      message.success('已提交自动补全任务，稍后重新打开可查看结果')
-    } catch (e) {
-      showError(e, '提交补全任务失败')
-    } finally {
-      setEnriching(false)
-    }
+    Modal.confirm({
+      centered: true,
+      title: `补全「${entry?.name ?? '该文档'}」的元数据？`,
+      content: entry?.autoEnrich
+        ? '会重新生成分类、摘要与标签，并重建索引。'
+        : '该条目为人工锁定；补全会恢复自动增强并覆盖现有分类、摘要与标签。',
+      okText: '补全',
+      cancelText: '取消',
+      onOk: async () => {
+        setEnriching(true)
+        try {
+          await runEntryEnrich(entryId)
+          message.success('已提交自动补全任务，稍后重新打开可查看结果')
+        } catch (e) {
+          showError(e, '提交补全任务失败')
+        } finally {
+          setEnriching(false)
+        }
+      },
+    })
   }
 
   const openVersion = async (v: number) => {

@@ -1,6 +1,6 @@
 // CAP-86 条目编辑抽屉：新建/编辑 Markdown 条目；编辑时按 id 拉完整正文（列表摘要不含 contentMd）。
 import { useEffect, useState } from 'react'
-import { Button, Drawer, Form, Input, message, Select, Space, Spin } from 'antd'
+import { Button, Drawer, Form, Input, message, Modal, Select, Space, Spin } from 'antd'
 import { createEntry, getEntry, updateEntry } from '../api'
 import type { DocType } from '../types'
 import { DOC_TYPE_OPTIONS } from '../types'
@@ -74,22 +74,37 @@ export default function KnowledgeEntryEditorDrawer({
 
   const onSave = async () => {
     const values = await form.validateFields()
-    setSaving(true)
-    try {
-      if (entryId && loadedEntryId === entryId) {
-        await updateEntry(entryId, values)
-        message.success('条目已更新（自动重建索引）')
-      } else {
-        await createEntry({ ...values, kbId: baseId })
-        message.success('条目已创建（自动建立索引）')
+    const isUpdate = !!entryId && loadedEntryId === entryId
+    const commit = async () => {
+      setSaving(true)
+      try {
+        if (isUpdate) {
+          await updateEntry(entryId as number, values)
+          message.success('条目已更新（自动重建索引）')
+        } else {
+          await createEntry({ ...values, kbId: baseId })
+          message.success('条目已创建（自动建立索引）')
+        }
+        onSaved()
+        onClose()
+      } catch (e) {
+        showError(e, '保存失败')
+      } finally {
+        setSaving(false)
       }
-      onSaved()
-      onClose()
-    } catch (e) {
-      showError(e, '保存失败')
-    } finally {
-      setSaving(false)
     }
+    if (!isUpdate) {
+      await commit()
+      return
+    }
+    Modal.confirm({
+      centered: true,
+      title: `保存「${values.name}」的修改？`,
+      content: '保存后会更新正文并自动重建索引，旧内容保留为历史版本。',
+      okText: '保存',
+      cancelText: '取消',
+      onOk: commit,
+    })
   }
 
   return (

@@ -1,4 +1,4 @@
-// CAP-86 FR-05 同步源面板：从原治理控制台「同步源」页签抽出，按库下沉到库详情「同步」页签。
+// CAP-86 FR-05 同步源面板：从原治理控制台「同步源」页签抽出，按库下沉到库详情「飞书同步」页签。
 // kbId 固定 = 只看/只建本库同步源；不传 = 全库（预留，当前仅库详情使用）。
 import { useCallback, useEffect, useState } from 'react'
 import {
@@ -7,7 +7,6 @@ import {
   Input,
   InputNumber,
   Modal,
-  Popconfirm,
   Segmented,
   Select,
   Space,
@@ -147,6 +146,25 @@ export default function SyncSourcesPanel({
     setSyncModalOpen(true)
   }
 
+  const commitSync = async (input: KnowledgeSyncSourceInput) => {
+    setSyncSaving(true)
+    try {
+      if (editingSync) {
+        await updateSyncSource(editingSync.id, input)
+        message.success('同步源已更新')
+      } else {
+        await createSyncSource(input)
+        message.success('同步源已创建')
+      }
+      setSyncModalOpen(false)
+      loadSync()
+    } catch (e) {
+      showError(e, '保存同步源失败')
+    } finally {
+      setSyncSaving(false)
+    }
+  }
+
   const onSaveSync = async () => {
     const v = await syncForm.validateFields()
     const config: Record<string, unknown> = { tags: v.tags ?? [] }
@@ -166,45 +184,60 @@ export default function SyncSourcesPanel({
       config,
       enabled: v.enabled,
     }
-    setSyncSaving(true)
-    try {
-      if (editingSync) {
-        await updateSyncSource(editingSync.id, input)
-        message.success('同步源已更新')
-      } else {
-        await createSyncSource(input)
-        message.success('同步源已创建')
-      }
-      setSyncModalOpen(false)
-      loadSync()
-    } catch (e) {
-      showError(e, '保存同步源失败')
-    } finally {
-      setSyncSaving(false)
+    if (!editingSync) {
+      await commitSync(input)
+      return
     }
+    Modal.confirm({
+      centered: true,
+      title: `保存同步源「${editingSync.name}」的修改？`,
+      content: '保存后配置立即生效；下次运行将按新配置同步。',
+      okText: '保存',
+      cancelText: '取消',
+      onOk: () => commitSync(input),
+    })
   }
 
-  const onRunSync = async (s: KnowledgeSyncSource) => {
-    setRunningSync(s.id)
-    try {
-      await runSyncSource(s.id)
-      message.success(`已提交同步任务：${s.name}`)
-      window.setTimeout(() => loadSync(true), 1200)
-    } catch (e) {
-      showError(e, '提交同步任务失败')
-    } finally {
-      setRunningSync(null)
-    }
+  const onRunSync = (s: KnowledgeSyncSource) => {
+    Modal.confirm({
+      centered: true,
+      title: `立即运行同步源「${s.name}」？`,
+      content: '将拉取源端最新内容：新增/更新文档会立即入库并重建索引，源端已删除的文档会停用。',
+      okText: '运行',
+      cancelText: '取消',
+      onOk: async () => {
+        setRunningSync(s.id)
+        try {
+          await runSyncSource(s.id)
+          message.success(`已提交同步任务：${s.name}`)
+          window.setTimeout(() => loadSync(true), 1200)
+        } catch (e) {
+          showError(e, '提交同步任务失败')
+        } finally {
+          setRunningSync(null)
+        }
+      },
+    })
   }
 
-  const onDeleteSync = async (s: KnowledgeSyncSource) => {
-    try {
-      await deleteSyncSource(s.id)
-      message.success('同步源已删除（已入库文档保留）')
-      loadSync()
-    } catch (e) {
-      showError(e, '删除同步源失败')
-    }
+  const onDeleteSync = (s: KnowledgeSyncSource) => {
+    Modal.confirm({
+      centered: true,
+      title: `删除同步源「${s.name}」？`,
+      content: '已入库文档会保留，只是不再继续同步。',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await deleteSyncSource(s.id)
+          message.success('同步源已删除（已入库文档保留）')
+          loadSync()
+        } catch (e) {
+          showError(e, '删除同步源失败')
+        }
+      },
+    })
   }
 
   const syncConfigText = (s: KnowledgeSyncSource) =>
@@ -315,18 +348,9 @@ export default function SyncSourcesPanel({
           <Button size="small" onClick={() => openEditSync(r)}>
             编辑
           </Button>
-          <Popconfirm
-            title="删除该同步源？"
-            description="已入库文档会保留，只是不再继续同步。"
-            okText="删除"
-            okButtonProps={{ danger: true }}
-            cancelText="取消"
-            onConfirm={() => onDeleteSync(r)}
-          >
-            <Button size="small" danger>
-              删除
-            </Button>
-          </Popconfirm>
+          <Button size="small" danger onClick={() => onDeleteSync(r)}>
+            删除
+          </Button>
         </Space>
       ),
     },

@@ -1,6 +1,5 @@
-// CAP-86 FR-06 治理报告：跨库聚合页。页内视图 = 生命周期 / 近重复 / 反馈 / 检索评测 / 自动增强
-//（Card 头部 Segmented 切换，遵循内容区布局约定禁 Card 内套 Tabs；重报表手动触发，轻报表进视图即加载）。
-// 同步源已按库下沉到库详情「同步」页签。
+// CAP-86 v3 报表页：跨库质量报表 = 生命周期 / 近重复 / 反馈 / 检索评测 / 自动增强。
+// 视图切换由页面 Card title 内的 Segmented 承载；重报表手动触发，轻报表进视图即加载。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
@@ -10,6 +9,7 @@ import {
   Descriptions,
   Empty,
   InputNumber,
+  Modal,
   Row,
   Segmented,
   Select,
@@ -51,11 +51,11 @@ import type {
 } from '../types'
 import { DOC_TYPE_LABEL } from '../types'
 import FitTable from '../../../shared/components/FitTable'
-import KnowledgeEntryDrawer from '../components/KnowledgeEntryDrawer'
+import KnowledgeEntryDrawer from './KnowledgeEntryDrawer'
 import { fmtTime } from '../../../shared/utils/format'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { showError } from '../../../shared/utils/showError'
-import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
+import { pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 
 /** 表格类视图（生命周期/反馈/增强）的区块容器：工具行固定、FitTable 撑满剩余高度 */
 const sectionFlexStyle = { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } as const
@@ -102,17 +102,26 @@ function LifecycleSection({
     load()
   }, [load])
 
-  const onReview = async (item: LifecycleItem) => {
-    setReviewingId(item.id)
-    try {
-      await reviewEntry(item.id)
-      message.success(`已登记复核：${item.name}`)
-      load()
-    } catch (e) {
-      showError(e, '登记复核失败')
-    } finally {
-      setReviewingId(null)
-    }
+  const onReview = (item: LifecycleItem) => {
+    Modal.confirm({
+      centered: true,
+      title: `登记「${item.name}」的复核？`,
+      content: '将把最近复核时间更新为当前时间，并移出长期未复核分组。',
+      okText: '登记复核',
+      cancelText: '取消',
+      onOk: async () => {
+        setReviewingId(item.id)
+        try {
+          await reviewEntry(item.id)
+          message.success(`已登记复核：${item.name}`)
+          load()
+        } catch (e) {
+          showError(e, '登记复核失败')
+        } finally {
+          setReviewingId(null)
+        }
+      },
+    })
   }
 
   const items: LifecycleItem[] = lifecycle ? lifecycle[group] : []
@@ -699,30 +708,51 @@ function EnrichSection({
     load()
   }, [load])
 
-  const onBatchEnrich = async () => {
-    setBatchEnriching(true)
-    try {
-      const r = await runEnrich(kbId, limit)
-      message.success(`已提交自动增强任务（最多 ${r.limit} 条），稍后刷新查看结果`)
-      window.setTimeout(() => load(), 1500)
-    } catch (e) {
-      showError(e, '提交自动增强失败')
-    } finally {
-      setBatchEnriching(false)
-    }
+  const onBatchEnrich = () => {
+    const scope = kbId ? `知识库「${kbName.get(kbId) ?? kbId}」` : '全部知识库'
+    Modal.confirm({
+      centered: true,
+      title: `立即增强${scope}（最多 ${limit} 条）？`,
+      content: '增强会改写文档的分类、摘要与标签（人工锁定条目不受影响），并重建索引。',
+      okText: '增强',
+      cancelText: '取消',
+      onOk: async () => {
+        setBatchEnriching(true)
+        try {
+          const r = await runEnrich(kbId, limit)
+          message.success(`已提交自动增强任务（最多 ${r.limit} 条），稍后刷新查看结果`)
+          window.setTimeout(() => load(), 1500)
+        } catch (e) {
+          showError(e, '提交自动增强失败')
+        } finally {
+          setBatchEnriching(false)
+        }
+      },
+    })
   }
 
-  const onEnrichEntry = async (e: EnrichEntry) => {
-    setEnrichingId(e.id)
-    try {
-      await runEntryEnrich(e.id)
-      message.success(`已提交补全任务：${e.name}`)
-      window.setTimeout(() => load(), 1500)
-    } catch (err) {
-      showError(err, '提交补全任务失败')
-    } finally {
-      setEnrichingId(null)
-    }
+  const onEnrichEntry = (e: EnrichEntry) => {
+    Modal.confirm({
+      centered: true,
+      title: `补全「${e.name}」的元数据？`,
+      content: e.autoEnrich
+        ? '会重新生成分类、摘要与标签，并重建索引。'
+        : '该条目为人工锁定；补全会恢复自动增强并覆盖现有分类、摘要与标签。',
+      okText: '补全',
+      cancelText: '取消',
+      onOk: async () => {
+        setEnrichingId(e.id)
+        try {
+          await runEntryEnrich(e.id)
+          message.success(`已提交补全任务：${e.name}`)
+          window.setTimeout(() => load(), 1500)
+        } catch (err) {
+          showError(err, '提交补全任务失败')
+        } finally {
+          setEnrichingId(null)
+        }
+      },
+    })
   }
 
   const statusTag = (e: EnrichEntry) => {
@@ -874,13 +904,20 @@ function EnrichSection({
   )
 }
 
-// ---------------- 页面 ----------------
+// ---------------- 面板 ----------------
 
-type HealthView = 'lifecycle' | 'duplicates' | 'feedback' | 'eval' | 'enrich'
+export type ReportsView = 'lifecycle' | 'duplicates' | 'feedback' | 'eval' | 'enrich'
 
-export default function KnowledgeHealthPage() {
+export const REPORT_VIEW_OPTIONS: { value: ReportsView; label: string }[] = [
+  { value: 'lifecycle', label: '生命周期' },
+  { value: 'duplicates', label: '近重复' },
+  { value: 'feedback', label: '答案反馈' },
+  { value: 'eval', label: '检索评测' },
+  { value: 'enrich', label: '自动增强' },
+]
+
+export default function KnowledgeReportsPanel({ view }: { view: ReportsView }) {
   const [bases, setBases] = useState<KnowledgeBase[]>([])
-  const [view, setView] = useState<HealthView>('lifecycle')
   const [entryDetail, setEntryDetail] = useState<{ entryId: number } | null>(null)
 
   useEffect(() => {
@@ -898,29 +935,7 @@ export default function KnowledgeHealthPage() {
   const openEntry = (entryId: number) => setEntryDetail({ entryId })
 
   return (
-    <Card
-      style={pageCardStyle}
-      styles={{ body: pageCardBodyFlexStyle }}
-      title={
-        <Space size={12}>
-          <span>治理报告</span>
-          <Segmented
-            value={view}
-            onChange={(v) => setView(v as HealthView)}
-            options={[
-              { value: 'lifecycle', label: '生命周期' },
-              { value: 'duplicates', label: '近重复' },
-              { value: 'feedback', label: '答案反馈' },
-              { value: 'eval', label: '检索评测' },
-              { value: 'enrich', label: '自动增强' },
-            ]}
-          />
-        </Space>
-      }
-    >
-      <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
-        跨库治理报告：生命周期、近重复、答案反馈、检索评测与自动增强。同步源已按库下沉到各库详情的「同步」页签。
-      </Typography.Paragraph>
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       {view === 'lifecycle' && <LifecycleSection kbName={kbName} onOpenEntry={openEntry} />}
       {view === 'duplicates' && <DuplicatesSection kbName={kbName} onOpenEntry={openEntry} />}
       {view === 'feedback' && <FeedbackSection kbName={kbName} onOpenEntry={openEntry} />}
@@ -931,6 +946,6 @@ export default function KnowledgeHealthPage() {
         kbNames={kbName}
         onClose={() => setEntryDetail(null)}
       />
-    </Card>
+    </div>
   )
 }

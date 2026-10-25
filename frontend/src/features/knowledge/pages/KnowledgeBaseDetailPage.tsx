@@ -1,18 +1,16 @@
-// CAP-86 FR-05 库详情页 /admin/knowledge/bases/:id：文档 / 摄入 / 同步 / 设置 四页签。
-// 同步页签 = 本库同步源（SyncSourcesPanel 按 kbId 过滤）+ 飞书手动导入；设置页签含注入预览与危险区。
+// CAP-86 v3 库详情页 /admin/knowledge/bases/:id：文档 / 手动上传 / 飞书同步 三页签（库设置在列表页「设置」抽屉）。
+// 手动上传 = 本库上传批次；飞书同步 = 同步源（Git / 飞书增量）与飞书文档手动导入。
+// 顶部状态条异常时给出下一步动作，正常态只留「添加内容」。
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Button,
   Card,
-  Drawer,
   Dropdown,
-  Form,
   Input,
   message,
   Modal,
-  Popconfirm,
   Segmented,
   Select,
   Space,
@@ -23,19 +21,14 @@ import {
 } from 'antd'
 import {
   CloudDownloadOutlined,
-  DeleteOutlined,
   EditOutlined,
-  EyeOutlined,
   MessageOutlined,
   PlusOutlined,
   ReloadOutlined,
-  SyncOutlined,
-  UploadOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import type { MenuProps } from 'antd'
 import {
-  deleteBase,
   deleteEntry,
   getBase,
   importFeishuDocs,
@@ -45,7 +38,6 @@ import {
   reindexBase,
   reindexEntry,
   resyncEntry,
-  updateBase,
 } from '../api'
 import { listModelEndpoints } from '../../model/api'
 import type { ModelEndpoint } from '../../model/types'
@@ -54,7 +46,6 @@ import type {
   FeishuImportResult,
   FeishuIntegration,
   KnowledgeBase,
-  KnowledgeBaseInput,
   KnowledgeEntrySummary,
   KnowledgePage,
 } from '../types'
@@ -64,14 +55,12 @@ import KnowledgeEntryEditorDrawer from './KnowledgeEntryEditorDrawer'
 import KnowledgeEntryDrawer from '../components/KnowledgeEntryDrawer'
 import KnowledgeUploadDrawer from '../components/KnowledgeUploadDrawer'
 import SyncSourcesPanel from '../components/SyncSourcesPanel'
-import InjectionPreview from '../components/InjectionPreview'
 import FitTable from '../../../shared/components/FitTable'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
-import { DRAWER_SCREEN } from '../../../shared/utils/overlay'
 
-type BaseTab = 'entries' | 'import' | 'sync' | 'settings'
+type BaseTab = 'entries' | 'upload' | 'feishu'
 
 const ENTRY_PAGE_SIZE = 20
 
@@ -104,7 +93,7 @@ function indexStatusTag(entry: KnowledgeEntrySummary, onRetry: (entry: Knowledge
   if (status === 'pending') return <Tag color="gold">待索引</Tag>
   if (status === 'disabled') {
     return (
-      <Tooltip title="未配置向量端点：索引停用、检索走关键词降级。到「模型接入」配置端点，或在「设置」为本库指定">
+      <Tooltip title="未配置向量端点：索引停用、检索走关键词降级。到「模型接入」配置端点，或回到库列表点「设置」为本库指定">
         <Tag>未配置向量端点</Tag>
       </Tooltip>
     )
@@ -130,7 +119,6 @@ function indexStatusTag(entry: KnowledgeEntrySummary, onRetry: (entry: Knowledge
 export default function KnowledgeBaseDetailPage() {
   const { id } = useParams<{ id: string }>()
   const baseId = Number(id)
-  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const [base, setBase] = useState<KnowledgeBase | null>(null)
@@ -145,7 +133,11 @@ export default function KnowledgeBaseDetailPage() {
   const [keyword, setKeyword] = useState('')
   const [docType, setDocType] = useState<string | undefined>(undefined)
   const [source, setSource] = useState<string | undefined>(undefined)
-  const [indexStatus, setIndexStatus] = useState<string | undefined>(undefined)
+  // 外部深链（库列表「失败 N」）可直接带索引状态过滤
+  const [indexStatus, setIndexStatus] = useState<string | undefined>(() => {
+    const raw = searchParams.get('indexStatus')
+    return INDEX_OPTIONS.some((o) => o.value === raw) ? (raw as string) : undefined
+  })
 
   // 条目编辑 / 详情 / 重同步
   const [editorOpen, setEditorOpen] = useState(false)
@@ -168,15 +160,14 @@ export default function KnowledgeBaseDetailPage() {
   const [feishuImporting, setFeishuImporting] = useState(false)
   const [feishuResults, setFeishuResults] = useState<FeishuImportResult[] | null>(null)
 
-  // 设置
-  const [settingsForm] = Form.useForm<KnowledgeBaseInput>()
-  const [settingsSaving, setSettingsSaving] = useState(false)
-  const [deletingBase, setDeletingBase] = useState(false)
-  const [previewOpen, setPreviewOpen] = useState(false)
-
   const tabParam = searchParams.get('tab')
+  // 旧深链兼容：?tab=sync → 飞书同步；?tab=sources|import → 手动上传
   const tab: BaseTab =
-    tabParam === 'import' || tabParam === 'sync' || tabParam === 'settings' ? tabParam : 'entries'
+    tabParam === 'feishu' || tabParam === 'sync'
+      ? 'feishu'
+      : tabParam === 'upload' || tabParam === 'sources' || tabParam === 'import'
+        ? 'upload'
+        : 'entries'
 
   const setTab = (next: BaseTab) => {
     const params = new URLSearchParams(searchParams)
@@ -225,7 +216,7 @@ export default function KnowledgeBaseDetailPage() {
 
   // 同步源表单需要全库列表（SyncSourcesPanel 的库名映射）
   useEffect(() => {
-    if (tab !== 'sync') return
+    if (tab !== 'feishu') return
     listBases()
       .then(setBases)
       .catch(() => undefined)
@@ -238,18 +229,6 @@ export default function KnowledgeBaseDetailPage() {
         .catch((e) => showError(e, '加载飞书集成失败'))
     }
   }, [tab, feishuIntegrations])
-
-  useEffect(() => {
-    if (base && tab === 'settings') {
-      settingsForm.setFieldsValue({
-        name: base.name,
-        description: base.description ?? undefined,
-        injectMode: base.injectMode,
-        modelEndpointId: base.modelEndpointId ?? undefined,
-        status: base.status,
-      })
-    }
-  }, [base, tab, settingsForm])
 
   const embeddingEndpoints = useMemo(
     () => endpoints.filter((e) => e.kind === 'EMBEDDING'),
@@ -297,66 +276,97 @@ export default function KnowledgeBaseDetailPage() {
     })
   }
 
-  const onReindexEntry = async (entry: KnowledgeEntrySummary) => {
-    try {
-      await reindexEntry(entry.id)
-      message.success('已触发重建索引')
-      window.setTimeout(() => {
-        loadEntries()
-        loadBase()
-      }, 1500)
-    } catch (err) {
-      showError(err, '重建索引失败')
-    }
+  const onReindexEntry = (entry: KnowledgeEntrySummary) => {
+    Modal.confirm({
+      centered: true,
+      title: `重建「${entry.name}」的索引？`,
+      content: '将重新分块并向量化（异步排队）；重建期间该文档可能暂时检索不到。',
+      okText: '重建',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await reindexEntry(entry.id)
+          message.success('已触发重建索引')
+          window.setTimeout(() => {
+            loadEntries()
+            loadBase()
+          }, 1500)
+        } catch (err) {
+          showError(err, '重建索引失败')
+        }
+      },
+    })
   }
 
-  const onResync = async (entry: KnowledgeEntrySummary) => {
-    setResyncingId(entry.id)
-    try {
-      const result = await resyncEntry(entry.id)
-      if (result.status === 'updated') {
-        message.success(`「${entry.name}」已同步最新内容（自动重建索引）`)
-        window.setTimeout(() => {
-          loadEntries()
-          loadBase()
-        }, 1500)
-      } else if (result.status === 'unchanged') {
-        message.info(`「${entry.name}」内容无变更`)
-      } else {
-        message.warning(`重同步失败：${result.error ?? '未知原因'}（保留旧内容）`)
-      }
-    } catch (err) {
-      showError(err, '重同步失败')
-    } finally {
-      setResyncingId(null)
-    }
+  const onResync = (entry: KnowledgeEntrySummary) => {
+    Modal.confirm({
+      centered: true,
+      title: `重同步「${entry.name}」的飞书内容？`,
+      content: '将从飞书拉取最新内容；有变更时更新正文并自动重建索引，无变更不处理。',
+      okText: '重同步',
+      cancelText: '取消',
+      onOk: async () => {
+        setResyncingId(entry.id)
+        try {
+          const result = await resyncEntry(entry.id)
+          if (result.status === 'updated') {
+            message.success(`「${entry.name}」已同步最新内容（自动重建索引）`)
+            window.setTimeout(() => {
+              loadEntries()
+              loadBase()
+            }, 1500)
+          } else if (result.status === 'unchanged') {
+            message.info(`「${entry.name}」内容无变更`)
+          } else {
+            message.warning(`重同步失败：${result.error ?? '未知原因'}（保留旧内容）`)
+          }
+        } catch (err) {
+          showError(err, '重同步失败')
+        } finally {
+          setResyncingId(null)
+        }
+      },
+    })
   }
 
-  const onReindexBase = async (onlyMismatched: boolean) => {
-    setReindexing(true)
-    try {
-      const result = await reindexBase(baseId, onlyMismatched)
-      if (result.queued === 0) {
-        message.info(
-          onlyMismatched
-            ? '没有需要重建的条目（端点未探测过维度时无法判定）'
-            : '库里没有可重建的条目',
-        )
-      } else {
-        message.success(`已入队重建 ${result.queued} 条，稍后自动刷新`)
-      }
-      window.setTimeout(() => {
-        loadBase()
-        loadEntries()
-      }, 2000)
-    } catch (e) {
-      showError(e, '重建索引失败')
-    } finally {
-      setReindexing(false)
-    }
+  const onReindexBase = (onlyMismatched: boolean) => {
+    Modal.confirm({
+      centered: true,
+      title: onlyMismatched
+        ? `重建 ${base?.indexStats.mismatched ?? 0} 条端点不一致的索引？`
+        : '重建全库索引？',
+      content: onlyMismatched
+        ? '只重建与当前向量端点不一致的条目（异步排队），其余文档不受影响。'
+        : `库内 ${base?.entryCount ?? 0} 条文档会全部重新分块并向量化（异步排队），换端点/换分块参数后需要执行。`,
+      okText: '重建',
+      cancelText: '取消',
+      onOk: async () => {
+        setReindexing(true)
+        try {
+          const result = await reindexBase(baseId, onlyMismatched)
+          if (result.queued === 0) {
+            message.info(
+              onlyMismatched
+                ? '没有需要重建的条目（端点未探测过维度时无法判定）'
+                : '库里没有可重建的条目',
+            )
+          } else {
+            message.success(`已入队重建 ${result.queued} 条，稍后自动刷新`)
+          }
+          window.setTimeout(() => {
+            loadBase()
+            loadEntries()
+          }, 2000)
+        } catch (e) {
+          showError(e, '重建索引失败')
+        } finally {
+          setReindexing(false)
+        }
+      },
+    })
   }
 
-  const onImportFeishu = async () => {
+  const onImportFeishu = () => {
     const urls = feishuUrls
       .split('\n')
       .map((u) => u.trim())
@@ -369,64 +379,33 @@ export default function KnowledgeBaseDetailPage() {
       message.warning('请粘贴至少一条飞书文档 URL（每行一条）')
       return
     }
-    setFeishuImporting(true)
-    setFeishuResults(null)
-    try {
-      const results = await importFeishuDocs(baseId, feishuIntegrationId, urls)
-      setFeishuResults(results)
-      const created = results.filter((r) => r.status === 'created').length
-      const updated = results.filter((r) => r.status === 'updated').length
-      const failed = results.filter((r) => r.status === 'failed').length
-      if (failed === 0) {
-        message.success(`导入完成：新建 ${created}、更新 ${updated}、未变更 ${results.length - created - updated}`)
-      } else {
-        message.warning(`导入完成：新建 ${created}、更新 ${updated}、失败 ${failed}（详见列表）`)
-      }
-      loadEntries()
-      loadBase()
-    } catch (e) {
-      showError(e, '飞书导入失败')
-    } finally {
-      setFeishuImporting(false)
-    }
-  }
-
-  const onSaveSettings = async () => {
-    const values = await settingsForm.validateFields()
-    setSettingsSaving(true)
-    try {
-      const updated = await updateBase(baseId, values)
-      setBase(updated)
-      message.success('设置已保存')
-    } catch (e) {
-      showError(e, '保存失败')
-    } finally {
-      setSettingsSaving(false)
-    }
-  }
-
-  const onDeleteBase = () => {
-    if (!base) return
+    const integrationId = feishuIntegrationId
     Modal.confirm({
       centered: true,
-      title: `删除知识库「${base.name}」？`,
-      content:
-        base.entryCount > 0
-          ? `库内还有 ${base.entryCount} 个文档，确认后将连同条目与索引一并删除，无法恢复。`
-          : '删除后无法恢复。',
-      okText: '删除',
-      okButtonProps: { danger: true },
+      title: `导入 ${urls.length} 条飞书文档？`,
+      content: '同一文档重复导入按内容哈希判重：内容有变更时会更新已有条目并自动重建索引。',
+      okText: '导入',
       cancelText: '取消',
       onOk: async () => {
-        setDeletingBase(true)
+        setFeishuImporting(true)
+        setFeishuResults(null)
         try {
-          await deleteBase(base.id, base.entryCount > 0)
-          message.success('已删除')
-          navigate('/admin/knowledge', { replace: true })
-        } catch (err) {
-          showError(err, '删除失败')
+          const results = await importFeishuDocs(baseId, integrationId, urls)
+          setFeishuResults(results)
+          const created = results.filter((r) => r.status === 'created').length
+          const updated = results.filter((r) => r.status === 'updated').length
+          const failed = results.filter((r) => r.status === 'failed').length
+          if (failed === 0) {
+            message.success(`导入完成：新建 ${created}、更新 ${updated}、未变更 ${results.length - created - updated}`)
+          } else {
+            message.warning(`导入完成：新建 ${created}、更新 ${updated}、失败 ${failed}（详见列表）`)
+          }
+          loadEntries()
+          loadBase()
+        } catch (e) {
+          showError(e, '飞书导入失败')
         } finally {
-          setDeletingBase(false)
+          setFeishuImporting(false)
         }
       },
     })
@@ -493,7 +472,7 @@ export default function KnowledgeBaseDetailPage() {
       title: '状态',
       dataIndex: 'status',
       width: 96,
-      render: (s: string) => (s === 'active' ? <Tag color="green">active</Tag> : <Tag>deprecated</Tag>),
+      render: (s: string) => (s === 'active' ? <Tag color="green">启用</Tag> : <Tag>已下线</Tag>),
     },
     { title: '更新时间', dataIndex: 'updatedAt', width: 165, render: (v: string) => fmtTime(v) },
     {
@@ -541,13 +520,43 @@ export default function KnowledgeBaseDetailPage() {
 
   const headerTags = base && (
     <Space size={4} wrap>
-      <Tag color={base.injectMode === 'FULL' ? 'geekblue' : 'purple'}>{base.injectMode}</Tag>
+      <Tag color={base.injectMode === 'FULL' ? 'geekblue' : 'purple'}>
+        {base.injectMode === 'FULL' ? '全量注入' : 'RAG 检索'}
+      </Tag>
       <Tag color={base.scope === 'global' ? 'blue' : undefined}>
-        {base.scope === 'global' ? 'global' : (base.projectName ?? base.projectId ?? 'project')}
+        {base.scope === 'global'
+          ? '范围：全局'
+          : `范围：${base.projectName ?? base.projectId ?? '项目'}`}
       </Tag>
       {base.status === 'archived' && <Tag>已归档</Tag>}
     </Space>
   )
+
+  const addContentItems: MenuProps['items'] = [
+    { key: 'upload', label: '上传文件 / 文件夹 / ZIP' },
+    { key: 'markdown', label: '新建 Markdown 文档' },
+    { key: 'feishu', label: '从飞书导入' },
+  ]
+
+  const onAddContent: MenuProps['onClick'] = ({ key }) => {
+    if (key === 'upload') setUploadOpen(true)
+    else if (key === 'markdown') openEditEntry(null)
+    else if (key === 'feishu') setTab('feishu')
+  }
+
+  const showFailedEntries = () => {
+    const params = new URLSearchParams(searchParams)
+    params.delete('tab')
+    params.set('indexStatus', 'failed')
+    setSearchParams(params, { replace: true })
+    setIndexStatus('failed')
+    setPage(0)
+  }
+
+  // 旧 ?tab=settings：设置已移到库列表抽屉，直接带库 ID 打开
+  if (tabParam === 'settings') {
+    return <Navigate to={`/admin/knowledge?settings=${baseId}`} replace />
+  }
 
   return (
     <Card
@@ -562,9 +571,8 @@ export default function KnowledgeBaseDetailPage() {
             onChange={(key) => setTab(key as BaseTab)}
             options={[
               { value: 'entries', label: `文档${base ? ` (${base.entryCount})` : ''}` },
-              { value: 'import', label: '摄入' },
-              { value: 'sync', label: '同步' },
-              { value: 'settings', label: '设置' },
+              { value: 'upload', label: '手动上传' },
+              { value: 'feishu', label: '飞书同步' },
             ]}
           />
         </Space>
@@ -577,29 +585,11 @@ export default function KnowledgeBaseDetailPage() {
           <Button icon={<ReloadOutlined />} onClick={refreshAll}>
             刷新
           </Button>
-          {tab === 'entries' && (
-            <>
-              <Popconfirm
-                title="重建全库索引？"
-                description={`库内 ${base?.entryCount ?? 0} 条文档会全部重新向量化（异步排队），换端点/换分块参数后需要执行。`}
-                okText="重建"
-                onConfirm={() => onReindexBase(false)}
-                disabled={!base || base.entryCount === 0}
-              >
-                <Button icon={<SyncOutlined />} loading={reindexing} disabled={!base || base.entryCount === 0}>
-                  重建全库索引
-                </Button>
-              </Popconfirm>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditEntry(null)}>
-                新增条目
-              </Button>
-            </>
-          )}
-          {tab === 'import' && (
-            <Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadOpen(true)}>
-              上传文档
+          <Dropdown menu={{ items: addContentItems, onClick: onAddContent }} placement="bottomRight">
+            <Button type="primary" icon={<PlusOutlined />}>
+              添加内容
             </Button>
-          )}
+          </Dropdown>
           <Link to="/admin/knowledge">
             <Button>返回列表</Button>
           </Link>
@@ -607,7 +597,7 @@ export default function KnowledgeBaseDetailPage() {
       }
     >
       {base && (
-        <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
+        <Space direction="vertical" size={4} style={{ marginBottom: 12, flexShrink: 0, width: '100%' }}>
           <Space size={8} wrap>
             {headerTags}
             <Space size={4}>
@@ -618,22 +608,39 @@ export default function KnowledgeBaseDetailPage() {
                   {resolvedEndpoint?.dimensions ? ` · ${resolvedEndpoint.dimensions} 维` : ''}
                 </Tag>
               ) : (
-                <Tooltip title="未配置向量端点：索引停用、检索走关键词降级。到「模型接入」新建端点并设为平台默认，或在「设置」为本库指定。">
+                <Tooltip title="未配置向量端点：索引停用、检索走关键词降级。到「模型接入」新建端点并设为平台默认，或回到库列表点「设置」为本库指定。">
                   <Tag color="orange">未配置向量端点</Tag>
                 </Tooltip>
               )}
             </Space>
-            <span>
-              索引 {base.indexStats.ready}/{base.entryCount}
-              {base.indexStats.pending > 0 && ` · 待索引 ${base.indexStats.pending}`}
-              {base.indexStats.failed > 0 && ` · 失败 ${base.indexStats.failed}`}
-              {base.indexStats.disabled > 0 && ` · 未配置端点 ${base.indexStats.disabled}`}
-              {base.indexStats.mismatched > 0 && ` · 需重建 ${base.indexStats.mismatched}`}
-            </span>
-            <Link to={`/admin/knowledge/search?kbId=${baseId}`}>召回验证</Link>
-            {base.description && <span>{base.description}</span>}
+            <Typography.Text type="secondary">
+              已索引 {base.indexStats.ready}/{base.entryCount}
+            </Typography.Text>
+            {base.indexStats.pending > 0 && (
+              <Typography.Text type="secondary">待索引 {base.indexStats.pending}</Typography.Text>
+            )}
+            {base.indexStats.failed > 0 && (
+              <Typography.Link onClick={showFailedEntries}>
+                失败 {base.indexStats.failed} · 去处理
+              </Typography.Link>
+            )}
+            {base.indexStats.mismatched > 0 && (
+              <Typography.Link onClick={() => onReindexBase(true)}>
+                需重建 {base.indexStats.mismatched} · 一键重建
+              </Typography.Link>
+            )}
+            {base.indexStats.disabled > 0 && (
+              <Tag>未配置端点 {base.indexStats.disabled}</Tag>
+            )}
+            <Link to={`/admin/knowledge/ops?tab=search&kbId=${baseId}`}>召回验证</Link>
+            <Link to={`/admin/knowledge/ops?tab=tasks&kbId=${baseId}`}>库待办</Link>
           </Space>
-        </Typography.Paragraph>
+          {base.description && (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {base.description}
+            </Typography.Text>
+          )}
+        </Space>
       )}
 
       {tab === 'entries' && (
@@ -701,7 +708,7 @@ export default function KnowledgeBaseDetailPage() {
               type="info"
               showIcon
               message="该库已归档"
-              description="归档库不参与检索与会话注入；需要恢复时到「设置」把状态改回 active。"
+              description="归档库不参与检索与会话注入；需要恢复时到知识库列表点「设置」把状态改回「启用」。"
             />
           )}
           {base && base.indexStats.mismatched > 0 && (
@@ -743,16 +750,16 @@ export default function KnowledgeBaseDetailPage() {
                 setSize(nextSize)
               },
             }}
-            locale={{ emptyText: '没有匹配的文档。可调整过滤条件，或点「新增条目 / 上传文档」补充内容。' }}
+            locale={{ emptyText: '没有匹配的文档。可调整过滤条件，或点右上角「添加内容」补充。' }}
           />
         </div>
       )}
 
-      {tab === 'import' && (
+      {tab === 'upload' && (
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
-            上传到「{base?.name ?? `#${baseId}`}」：支持 Markdown / 文本 / PDF / Word / PPT / Excel / HTML 与 ZIP；
-            文件夹按目录结构入库，分类/标签自动识别。解析与索引在后台异步执行。飞书文档到「同步」页签导入。
+            支持 Markdown / 文本 / PDF / Word / PPT / Excel / HTML 与 ZIP；文件夹按目录结构入库，解析与索引在后台异步执行。
+            点右上角「添加内容」上传文件 / 文件夹 / ZIP，或新建 Markdown 文档。
           </Typography.Paragraph>
           <KnowledgeImportsView
             bases={base ? [base] : []}
@@ -763,10 +770,13 @@ export default function KnowledgeBaseDetailPage() {
         </div>
       )}
 
-      {tab === 'sync' && (
+      {tab === 'feishu' && (
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Card size="small" title="同步源">
+              <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+                飞书空间 / 目录按水位增量同步，Git 本地副本也在本页维护；同一文档按内容哈希判重，删除只停同步、已入库文档保留。
+              </Typography.Paragraph>
               <SyncSourcesPanel bases={bases.length > 0 ? bases : base ? [base] : []} kbId={baseId} />
             </Card>
             <Card size="small" title="飞书文档手动导入">
@@ -873,107 +883,6 @@ export default function KnowledgeBaseDetailPage() {
         </div>
       )}
 
-      {tab === 'settings' && base && (
-        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-          <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-            库的基本设置；归档后不再参与注入与检索。范围与所属项目创建后不可改。
-          </Typography.Paragraph>
-          <Form form={settingsForm} labelCol={{ span: 4 }} wrapperCol={{ span: 12 }} style={{ maxWidth: 760 }}>
-            <Form.Item name="name" label="名称" rules={[{ required: true, message: '请填写名称' }]}>
-              <Input />
-            </Form.Item>
-            <Form.Item name="description" label="描述">
-              <Input />
-            </Form.Item>
-            <Form.Item label="范围">
-              <Space>
-                <Tag color={base.scope === 'global' ? 'blue' : undefined}>{base.scope}</Tag>
-                {base.scope === 'project' && (
-                  <Typography.Text type="secondary">{base.projectName ?? base.projectId}</Typography.Text>
-                )}
-              </Space>
-            </Form.Item>
-            <Form.Item
-              name="injectMode"
-              label="注入模式"
-              extra="FULL：会话启动全量注入（经验库）；RAG：仅检索，按提问召回内容"
-            >
-              <Select
-                options={[
-                  { value: 'RAG', label: 'RAG 检索' },
-                  { value: 'FULL', label: 'FULL 全量注入' },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item
-              name="modelEndpointId"
-              label="向量端点"
-              extra="留空 = 跟随平台默认端点；指定后本库索引与检索按该端点走（不同模型/维度不能混用同一份索引）"
-            >
-              <Select
-                allowClear
-                placeholder="跟随平台默认端点"
-                options={embeddingEndpoints.map((e) => ({
-                  value: e.id,
-                  label: `${e.name}（${e.model ?? e.provider}${e.dimensions ? ` · ${e.dimensions} 维` : ' · 未探测维度'}${e.status === 'disabled' ? ' · 已停用' : ''}）`,
-                }))}
-              />
-            </Form.Item>
-            <Form.Item label="当前生效">
-              <Space>
-                {base.modelEndpointName ? (
-                  <Tag color="blue">{base.modelEndpointName}</Tag>
-                ) : (
-                  <Tooltip title="无可用向量端点：索引停用、检索走关键词降级">
-                    <Tag color="orange">未配置向量端点</Tag>
-                  </Tooltip>
-                )}
-                <Typography.Text type="secondary">
-                  {resolvedEndpoint?.dimensions
-                    ? `维度 ${resolvedEndpoint.dimensions}`
-                    : '维度未探测（可在「模型接入」对该端点做一次连接测试）'}
-                </Typography.Text>
-                <Link to="/admin/models">模型接入</Link>
-              </Space>
-            </Form.Item>
-            <Form.Item name="status" label="状态">
-              <Select
-                options={[
-                  { value: 'active', label: 'active（启用）' },
-                  { value: 'archived', label: 'archived（归档停用）' },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item wrapperCol={{ offset: 4 }}>
-              <Space>
-                <Button type="primary" loading={settingsSaving} onClick={onSaveSettings}>
-                  保存设置
-                </Button>
-                <Button icon={<EyeOutlined />} onClick={() => setPreviewOpen(true)}>
-                  注入预览
-                </Button>
-              </Space>
-            </Form.Item>
-          </Form>
-
-          <div style={{ borderTop: '1px solid #f0f0f0', marginTop: 8, paddingTop: 16, maxWidth: 760 }}>
-            <Typography.Text type="danger" strong>
-              危险区
-            </Typography.Text>
-            <div style={{ marginTop: 8 }}>
-              <Space wrap>
-                <Typography.Text type="secondary">
-                  删除知识库会连同 {base.entryCount} 个文档与索引一并移除，无法恢复。
-                </Typography.Text>
-                <Button danger icon={<DeleteOutlined />} loading={deletingBase} onClick={onDeleteBase}>
-                  删除知识库
-                </Button>
-              </Space>
-            </div>
-          </div>
-        </div>
-      )}
-
       <KnowledgeEntryEditorDrawer
         open={editorOpen}
         baseId={baseId}
@@ -991,12 +900,9 @@ export default function KnowledgeBaseDetailPage() {
           setImportsRefresh((n) => n + 1)
           refreshAll()
           window.setTimeout(refreshAll, 3000)
-          if (tab !== 'import') setTab('import')
+          setTab('upload')
         }}
       />
-      <Drawer title="注入预览" open={previewOpen} onClose={() => setPreviewOpen(false)} width={DRAWER_SCREEN}>
-        <InjectionPreview />
-      </Drawer>
     </Card>
   )
 }

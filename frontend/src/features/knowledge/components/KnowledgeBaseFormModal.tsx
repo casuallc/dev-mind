@@ -40,8 +40,7 @@ export default function KnowledgeBaseFormModal({
     }
   }, [open, base, form])
 
-  const onSave = async () => {
-    const values = await form.validateFields()
+  const commit = async (values: KnowledgeBaseInput) => {
     try {
       const saved = base
         ? await updateBase(base.id, values)
@@ -52,6 +51,22 @@ export default function KnowledgeBaseFormModal({
     } catch (e) {
       showError(e, '保存失败')
     }
+  }
+
+  const onSave = async () => {
+    const values = await form.validateFields()
+    if (!base) {
+      await commit(values)
+      return
+    }
+    Modal.confirm({
+      centered: true,
+      title: `保存知识库「${base.name}」的修改？`,
+      content: '保存后立即生效；归档的库会退出检索与会话注入。',
+      okText: '保存',
+      cancelText: '取消',
+      onOk: () => commit(values),
+    })
   }
 
   const projectOptions = projects.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))
@@ -76,8 +91,8 @@ export default function KnowledgeBaseFormModal({
           <Select
             disabled={!!base}
             options={[
-              { value: 'global', label: 'global（全局可用）' },
-              { value: 'project', label: 'project（指定项目）' },
+              { value: 'global', label: '全局（所有会话可用）' },
+              { value: 'project', label: '项目（仅指定项目）' },
             ]}
           />
         </Form.Item>
@@ -94,14 +109,14 @@ export default function KnowledgeBaseFormModal({
         )}
         <Form.Item
           name="injectMode"
-          label="注入模式"
+          label="注入方式"
           rules={[{ required: true }]}
-          extra="FULL：会话启动全量注入（经验库）；RAG：仅检索，按提问召回内容"
+          extra="全量注入：会话启动时注入整库（适合经验/规范库）；RAG：按提问检索并召回相关片段（适合文档量大）"
         >
           <Select
             options={[
-              { value: 'RAG', label: 'RAG 检索（推荐）' },
-              { value: 'FULL', label: 'FULL 全量注入' },
+              { value: 'RAG', label: 'RAG 按需检索（推荐）' },
+              { value: 'FULL', label: '全量注入（适合经验库）' },
             ]}
           />
         </Form.Item>
@@ -109,8 +124,8 @@ export default function KnowledgeBaseFormModal({
           <Form.Item name="status" label="状态">
             <Select
               options={[
-                { value: 'active', label: 'active（启用）' },
-                { value: 'archived', label: 'archived（归档停用）' },
+                { value: 'active', label: '启用' },
+                { value: 'archived', label: '归档停用（退出检索与注入）' },
               ]}
             />
           </Form.Item>

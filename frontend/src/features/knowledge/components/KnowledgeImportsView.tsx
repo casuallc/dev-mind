@@ -1,6 +1,6 @@
-// CAP-86 上传批次表：全局视图（可按库过滤）与库内「导入」页签（固定库）共用。
+// CAP-86 上传批次表：全局视图（可按库过滤）与库内「手动上传」页签（固定库）共用。
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Select, Space, Table, Tag, Tooltip, Typography } from 'antd'
+import { Button, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd'
 import { ReloadOutlined, SyncOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { listImports, retryImport, retryImportFile } from '../api'
@@ -80,29 +80,47 @@ export default function KnowledgeImportsView({
     return () => window.clearInterval(timer)
   }, [imports, load])
 
-  const onRetry = async (batch: ImportBatch) => {
-    setRetrying(batch.id)
-    try {
-      await retryImport(batch.id)
-      await load()
-    } catch (e) {
-      showError(e, '重试失败')
-    } finally {
-      setRetrying(null)
-    }
+  const onRetry = (batch: ImportBatch) => {
+    Modal.confirm({
+      centered: true,
+      title: `重试批次「${batch.name}」的失败文件？`,
+      content: `将重新解析并入库 ${batch.failedCount} 个失败文件；已成功的文件按内容哈希跳过，不会重复入库。`,
+      okText: '重试',
+      cancelText: '取消',
+      onOk: async () => {
+        setRetrying(batch.id)
+        try {
+          await retryImport(batch.id)
+          await load()
+        } catch (e) {
+          showError(e, '重试失败')
+        } finally {
+          setRetrying(null)
+        }
+      },
+    })
   }
 
-  const onRetryFile = async (batch: ImportBatch, file: ImportBatchFile) => {
-    const key = `${batch.id}:${file.id}`
-    setRetryingFile(key)
-    try {
-      await retryImportFile(batch.id, file.id)
-      await load()
-    } catch (e) {
-      showError(e, '单文件重试失败')
-    } finally {
-      setRetryingFile(null)
-    }
+  const onRetryFile = (batch: ImportBatch, file: ImportBatchFile) => {
+    Modal.confirm({
+      centered: true,
+      title: `重试文件「${file.relativePath}」？`,
+      content: '将重新解析并入库该文件；同路径内容未变会跳过，有变更则升版本并重建索引。',
+      okText: '重试',
+      cancelText: '取消',
+      onOk: async () => {
+        const key = `${batch.id}:${file.id}`
+        setRetryingFile(key)
+        try {
+          await retryImportFile(batch.id, file.id)
+          await load()
+        } catch (e) {
+          showError(e, '单文件重试失败')
+        } finally {
+          setRetryingFile(null)
+        }
+      },
+    })
   }
 
   const columns: ColumnsType<ImportBatch> = [

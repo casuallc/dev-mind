@@ -1,4 +1,4 @@
-// CAP-86 FR-02 库总览（菜单组默认页）：库表格 + 全局统计 + 新建/上传入口。
+// CAP-86 v3 知识库（内容工作台）：库表格 + 全局统计 + 新建/上传入口；索引异常跳知识运营待办。
 // 同时是聊天引用深链宿主（/admin/knowledge?entryId=&chunkId= → 打开文档详情抽屉）。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -10,6 +10,7 @@ import { listProjects } from '../../projects/api'
 import type { Project } from '../../projects/types'
 import type { KnowledgeBase } from '../types'
 import KnowledgeBaseFormModal from '../components/KnowledgeBaseFormModal'
+import KnowledgeBaseSettingsDrawer from '../components/KnowledgeBaseSettingsDrawer'
 import KnowledgeUploadDrawer from '../components/KnowledgeUploadDrawer'
 import KnowledgeEntryDrawer from '../components/KnowledgeEntryDrawer'
 import FitTable from '../../../shared/components/FitTable'
@@ -18,9 +19,10 @@ import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { showError } from '../../../shared/utils/showError'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 
-/** FR-08 索引健康一行：状态 + 数量，异常给下一步动作 */
+/** FR-08 索引健康一行：状态 + 数量，异常直达库详情处理（失败逐条重试 / 需重建一键重建） */
 function IndexHealth({ base, onUpload }: { base: KnowledgeBase; onUpload: () => void }) {
   const s = base.indexStats
+  const detailLink = `/admin/knowledge/bases/${base.id}?tab=entries`
   return (
     <Space size={4} wrap>
       <Tag color={s.ready === base.entryCount ? 'green' : 'blue'}>
@@ -28,14 +30,18 @@ function IndexHealth({ base, onUpload }: { base: KnowledgeBase; onUpload: () => 
       </Tag>
       {s.pending > 0 && <Tag color="gold">待索引 {s.pending}</Tag>}
       {s.failed > 0 && (
-        <Tooltip title="解析或向量化失败，到库详情「文档」页签逐条重试">
-          <Tag color="red">失败 {s.failed}</Tag>
-        </Tooltip>
+        <Link to={`${detailLink}&indexStatus=failed`}>
+          <Tooltip title="解析或向量化失败，进库详情筛选失败条目逐条重试">
+            <Tag color="red">失败 {s.failed}</Tag>
+          </Tooltip>
+        </Link>
       )}
       {s.mismatched > 0 && (
-        <Tooltip title="这些文档的索引与当前向量端点不一致，检索命中不到；到库详情一键重建">
-          <Tag color="orange">需重建 {s.mismatched}</Tag>
-        </Tooltip>
+        <Link to={detailLink}>
+          <Tooltip title="这些文档的索引与当前向量端点不一致，检索命中不到；进库详情一键重建">
+            <Tag color="orange">需重建 {s.mismatched}</Tag>
+          </Tooltip>
+        </Link>
       )}
       {s.disabled > 0 && (
         <Tooltip title="未配置向量端点：索引停用、检索走关键词降级。到「模型接入」配置端点">
@@ -120,6 +126,22 @@ export default function KnowledgeBaseListPage() {
     setUploadOpen(true)
   }
 
+  // 设置抽屉用 URL 承载（?settings=<id>），便于从库详情旧链接直达
+  const settingsRaw = Number(searchParams.get('settings'))
+  const settingsBase = bases.find((b) => b.id === settingsRaw) ?? null
+
+  const openSettings = (b: KnowledgeBase) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('settings', String(b.id))
+    setSearchParams(next, { replace: true })
+  }
+
+  const closeSettings = () => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('settings')
+    setSearchParams(next, { replace: true })
+  }
+
   const columns: ColumnsType<KnowledgeBase> = [
     {
       title: '知识库',
@@ -143,9 +165,11 @@ export default function KnowledgeBaseListPage() {
       render: (_, r) => (
         <Space size={4} wrap>
           <Tag color={r.scope === 'global' ? 'blue' : undefined}>
-            {r.scope === 'global' ? 'global' : (r.projectName ?? r.projectId ?? 'project')}
+            {r.scope === 'global' ? '全局' : (r.projectName ?? r.projectId ?? '项目')}
           </Tag>
-          <Tag color={r.injectMode === 'FULL' ? 'geekblue' : 'purple'}>{r.injectMode}</Tag>
+          <Tag color={r.injectMode === 'FULL' ? 'geekblue' : 'purple'}>
+            {r.injectMode === 'FULL' ? '全量注入' : 'RAG 检索'}
+          </Tag>
         </Space>
       ),
     },
@@ -165,12 +189,15 @@ export default function KnowledgeBaseListPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 180,
+      width: 240,
       render: (_, r) => (
         <Space size={2}>
           <Link to={`/admin/knowledge/bases/${r.id}`}>
             <Button size="small">详情</Button>
           </Link>
+          <Button size="small" onClick={() => openSettings(r)}>
+            设置
+          </Button>
           <Link to={`/chats?kbId=${r.id}`}>
             <Button size="small">问答</Button>
           </Link>
@@ -188,7 +215,7 @@ export default function KnowledgeBaseListPage() {
       styles={{ body: pageCardBodyFlexStyle }}
       title={
         <Space size={12}>
-          <span>知识库总览</span>
+          <span>知识库</span>
           {archivedCount > 0 && (
             <Segmented
               value={scopeFilter}
@@ -217,7 +244,7 @@ export default function KnowledgeBaseListPage() {
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
         共 {bases.length} 个库 · {totals.entries} 篇文档 · 已索引 {totals.ready}
-        。知识的消费在 AI 问答里完成，这里只管库与内容。
+        。这里管理库与内容（含索引异常处理）；待复核、负面反馈与质量报表到「知识运营」。
       </Typography.Paragraph>
       <FitTable<KnowledgeBase>
         rowKey="id"
@@ -242,6 +269,16 @@ export default function KnowledgeBaseListPage() {
           setUploadOpen(false)
           loadBases()
           window.setTimeout(loadBases, 3000)
+        }}
+      />
+      <KnowledgeBaseSettingsDrawer
+        open={!!settingsBase}
+        base={settingsBase}
+        onClose={closeSettings}
+        onSaved={(updated) => setBases((prev) => prev.map((b) => (b.id === updated.id ? updated : b)))}
+        onDeleted={() => {
+          closeSettings()
+          loadBases()
         }}
       />
       {/* 聊天引用深链宿主：/admin/knowledge?entryId=&chunkId= */}
