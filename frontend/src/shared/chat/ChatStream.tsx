@@ -1,6 +1,6 @@
 // 对话式事件流渲染（由 ChatPanel 承载；CAP-30 由 sessions 上移共享）：把 ChatEvent 流转成问答气泡 + 工具调用卡片 + 回合分隔。
 // system/log 等底层事件收进底部折叠「过程日志」。
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useDeferredValue, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Alert, Button, Collapse, Image, Input, Modal, Tag, Typography, message } from 'antd'
 import {
@@ -125,42 +125,89 @@ function fmtDur(ms?: number): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
-function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[]; logs: ChatEvent[] } {
-  const sorted = [...events].sort((a, b) => a.seq - b.seq)
-  const items: ChatItem[] = []
-  const logs: ChatEvent[] = []
-  const toolsById = new Map<string, ToolItem>()
-  const pendingTools: ToolItem[] = [] // 未配对的工具调用，旧数据无 toolUseId 时按序兜底
-  // CAP-49 流式正文气泡：本轮 text_delta 原地累积的那一条（非流式执行体恒为 null）
-  let streamItem: Extract<ChatItem, { kind: 'assistant' }> | null = null
-  const endStream = () => {
-    if (streamItem) {
-      streamItem.streaming = false
-      streamItem = null
+/**
+ * 增量「事件 → 渲染项」构建器。长会话几千条事件，旧实现每次流式增量都全量重扫全数组、
+ * 且渲染项对象全部重建（下游无从 memo，每条回答的 Markdown 每个增量帧都重解析）——
+ * 首屏与流式卡顿的主因。这里尾部追加时只处理新增事件；被修改的渲染项 copy-on-write，
+ * 未动的项保持对象身份，下游 memo(ChatItemView) 才能跳过重渲染。
+ * 前缀变化（加载更早）或长度回退（WS 重连快照替换）时全量重建。
+ * 输入约定：events 已按 seq 升序（ChatPanel 合并排序保证）。
+ */
+class ChatBuilder {
+  private items: ChatItem[] = []
+  private logs: ChatEvent[] = []
+  private toolsById = new Map<string, number>() // toolUseId → items 下标
+  private pendingTools: number[] = [] // 未配对的工具调用下标，旧数据无 toolUseId 时按序兜底
+  // CAP-49 流式正文气泡下标：本轮 text_delta 原地累积的那一条（非流式执行体恒为 null）
+  private streamIdx: number | null = null
+  private seenLen = 0
+  private seenLastSeq = -1
+  private snapshot: { items: ChatItem[]; logs: ChatEvent[] } | null = null
+
+  constructor(readonly taskSpec?: string) {
+    if (taskSpec && taskSpec.trim()) {
+      this.items.push({ kind: 'user', key: 'task', text: taskSpec, isTask: true })
     }
   }
 
-  if (taskSpec && taskSpec.trim()) {
-    items.push({ kind: 'user', key: 'task', text: taskSpec, isTask: true })
+  apply(events: ChatEvent[]): { items: ChatItem[]; logs: ChatEvent[] } {
+    const appendOnly =
+      this.seenLen === 0 ||
+      (events.length >= this.seenLen && events[this.seenLen - 1]?.seq === this.seenLastSeq)
+    if (!appendOnly) {
+      this.items =
+        this.taskSpec && this.taskSpec.trim()
+          ? [{ kind: 'user', key: 'task', text: this.taskSpec, isTask: true }]
+          : []
+      this.logs = []
+      this.toolsById.clear()
+      this.pendingTools = []
+      this.streamIdx = null
+      this.seenLen = 0
+      this.seenLastSeq = -1
+      this.snapshot = null
+    }
+    if (events.length === this.seenLen && this.snapshot) return this.snapshot
+    if (events.length > this.seenLen) {
+      // 本批次有改动先拷壳：push/replace 都落在新数组上，不污染已下发的 snapshot 引用
+      this.items = [...this.items]
+      this.logs = [...this.logs]
+      for (let i = this.seenLen; i < events.length; i++) this.process(events[i])
+      this.seenLen = events.length
+      this.seenLastSeq = events[events.length - 1].seq
+    }
+    this.snapshot = { items: this.items, logs: this.logs }
+    return this.snapshot
   }
 
-  for (const ev of sorted) {
+  /** 流式气泡定稿（新提问/回合收口/报错/非 RUNNING 状态转移都会触发，气泡不能一直转） */
+  private endStream() {
+    if (this.streamIdx === null) return
+    const cur = this.items[this.streamIdx]
+    if (cur?.kind === 'assistant' && cur.streaming) {
+      this.items[this.streamIdx] = { ...cur, streaming: false }
+    }
+    this.streamIdx = null
+  }
+
+  private process(ev: ChatEvent) {
+    const items = this.items
     switch (ev.type) {
       case 'text_delta': {
         // 模型执行体逐段吐正文；CLI 未开 partial messages ⇒ 恒无此事件（AGENT 零影响）
         const delta = ev.content ?? ''
         if (!delta) break // 空增量不动：CLI 的 stream_event 会产空 content，别拿它开一个空气泡
-        if (streamItem) {
-          streamItem.text += delta
-          streamItem.ts = ev.timestamp
+        const cur = this.streamIdx !== null ? items[this.streamIdx] : undefined
+        if (cur?.kind === 'assistant') {
+          items[this.streamIdx!] = { ...cur, text: cur.text + delta, ts: ev.timestamp }
         } else {
-          streamItem = { kind: 'assistant', key: `e${ev.seq}`, text: delta, streaming: true, ts: ev.timestamp }
-          items.push(streamItem)
+          this.streamIdx = items.length
+          items.push({ kind: 'assistant', key: `e${ev.seq}`, text: delta, streaming: true, ts: ev.timestamp })
         }
         break
       }
       case 'user': {
-        endStream() // 新提问：上一轮气泡定稿（结果事件可能没来，气泡不能一直转）
+        this.endStream()
         // CAP-32：附件引用在 payload.attachments（只放 id/name/contentType）
         const attachments = (ev.payload?.attachments as ChatImageAttachment[] | undefined) ?? []
         const text = cleanUserText(ev.content ?? '')
@@ -176,51 +223,52 @@ function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[];
         const text = cleanAssistantText(ev.content ?? '')
         if (!text) break
         const model = (ev.payload?.model as string) || undefined
-        const turnSeq = typeof ev.payload?.turnSeq === 'number' ? (ev.payload.turnSeq as number) : undefined
-        if (streamItem) {
+        const turnSeq = typeof ev.payload?.turnSeq === 'number' ? ev.payload.turnSeq : undefined
+        const cur = this.streamIdx !== null ? items[this.streamIdx] : undefined
+        if (cur?.kind === 'assistant') {
           // 全量为准：直接覆盖流式气泡的正文（增量与全量相等 / 前缀 / 网关重发不一致，三种情况
           // 都收敛到这一条路径——否则会留下两个气泡或重复尾巴）
-          streamItem.text = text
-          streamItem.model = model ?? streamItem.model
-          streamItem.ts = ev.timestamp
-          streamItem.turnSeq = turnSeq ?? streamItem.turnSeq
-          endStream()
+          items[this.streamIdx!] = {
+            ...cur, text, streaming: false,
+            model: model ?? cur.model, ts: ev.timestamp, turnSeq: turnSeq ?? cur.turnSeq,
+          }
+          this.streamIdx = null
           break
         }
-        const last = items[items.length - 1]
+        const lastIdx = items.length - 1
+        const last = items[lastIdx]
         if (last?.kind === 'assistant') {
-          last.text += '\n\n' + text
-          last.model = last.model ?? model
-          last.ts = ev.timestamp
-          last.turnSeq = last.turnSeq ?? turnSeq
+          items[lastIdx] = {
+            ...last, text: `${last.text}\n\n${text}`,
+            model: last.model ?? model, ts: ev.timestamp, turnSeq: last.turnSeq ?? turnSeq,
+          }
         } else {
           items.push({ kind: 'assistant', key: `e${ev.seq}`, text, model, ts: ev.timestamp, turnSeq })
         }
         break
       }
       case 'tool_use': {
-        const item: ToolItem = {
+        const idx = items.length
+        items.push({
           kind: 'tool',
           key: `e${ev.seq}`,
           name: (ev.payload?.name as string) || ev.content || 'tool',
           input: (ev.payload?.toolInput as string) || undefined,
           done: false,
           ts: ev.timestamp,
-        }
-        items.push(item)
+        })
         const id = ev.payload?.toolUseId as string | undefined
-        if (id) toolsById.set(id, item)
-        else pendingTools.push(item)
+        if (id) this.toolsById.set(id, idx)
+        else this.pendingTools.push(idx)
         break
       }
       case 'tool_result': {
         const id = ev.payload?.toolUseId as string | undefined
-        let target = id ? toolsById.get(id) : undefined
-        if (!target && pendingTools.length > 0) target = pendingTools.shift()
-        if (target && !target.done) {
-          target.output = ev.content ?? ''
-          target.isError = Boolean(ev.payload?.isError)
-          target.done = true
+        let idx = id !== undefined ? this.toolsById.get(id) : undefined
+        if (idx === undefined && this.pendingTools.length > 0) idx = this.pendingTools.shift()
+        const target = idx !== undefined ? items[idx] : undefined
+        if (target?.kind === 'tool' && !target.done) {
+          items[idx!] = { ...target, output: ev.content ?? '', isError: Boolean(ev.payload?.isError), done: true }
         } else {
           // 找不到配对的调用（历史截断等），退化为独立结果块
           items.push({
@@ -231,7 +279,7 @@ function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[];
         break
       }
       case 'result':
-        endStream() // 回合收口：气泡定稿
+        this.endStream() // 回合收口：气泡定稿
         items.push({
           kind: 'result',
           key: `e${ev.seq}`,
@@ -243,7 +291,7 @@ function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[];
       case 'state':
         // 非 RUNNING 的状态转移（终止/结束/回合完成）意味着这一轮不再产增量：
         // 被 kill 的会话只有 state、没有 result，不收口气泡会一直转圈
-        if ((ev.payload?.state as string) !== 'RUNNING') endStream()
+        if ((ev.payload?.state as string) !== 'RUNNING') this.endStream()
         if (ev.content) items.push({ kind: 'divider', key: `e${ev.seq}`, text: ev.content })
         break
       case 'permission_request':
@@ -259,7 +307,7 @@ function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[];
         break
       }
       case 'error':
-        endStream() // 报错即这一轮完了（随后一般有 result{isError}，但不指望它）
+        this.endStream() // 报错即这一轮完了（随后一般有 result{isError}，但不指望它）
         items.push({ kind: 'error', key: `e${ev.seq}`, text: ev.content ?? 'unknown', ts: ev.timestamp })
         break
       case 'citation_check': {
@@ -286,30 +334,29 @@ function buildChat(events: ChatEvent[], taskSpec?: string): { items: ChatItem[];
           warning: Boolean(p.warning),
           sources,
         }
-        let target: Extract<ChatItem, { kind: 'assistant' }> | undefined
-        if (check.turnSeq > 0) {
-          target = [...items]
-            .reverse()
-            .find((it): it is Extract<ChatItem, { kind: 'assistant' }> =>
-              it.kind === 'assistant' && it.turnSeq === check.turnSeq)
+        const findAssistant = (pred: (it: Extract<ChatItem, { kind: 'assistant' }>) => boolean) => {
+          for (let i = items.length - 1; i >= 0; i--) {
+            const it = items[i]
+            if (it.kind === 'assistant' && pred(it)) return i
+          }
+          return -1
         }
-        if (!target) {
-          target = [...items]
-            .reverse()
-            .find((it): it is Extract<ChatItem, { kind: 'assistant' }> => it.kind === 'assistant')
+        let targetIdx = check.turnSeq > 0 ? findAssistant((it) => it.turnSeq === check.turnSeq) : -1
+        if (targetIdx < 0) targetIdx = findAssistant(() => true)
+        if (targetIdx >= 0) {
+          const t = items[targetIdx]
+          if (t.kind === 'assistant') items[targetIdx] = { ...t, citations: check }
         }
-        if (target) target.citations = check
         break
       }
       case 'system':
       case 'log':
-        logs.push(ev)
+        this.logs.push(ev)
         break
       default:
         break
     }
   }
-  return { items, logs }
 }
 
 // ---------------- 组件 ----------------
@@ -322,6 +369,9 @@ export default function ChatStream({
   maxHeight = 560,
   emptyText = '等待事件…',
   feedback,
+  hasOlder = false,
+  loadingOlder = false,
+  onLoadOlder,
 }: {
   events: ChatEvent[]
   taskSpec?: string
@@ -332,16 +382,37 @@ export default function ChatStream({
   emptyText?: string
   /** CAP-84 FR-25：知识会话的答案反馈入口 */
   feedback?: { apiBase: string; chatId: string }
+  /** 顶部「加载更早消息」：还有更早历史（终态会话 REST 分页翻页） */
+  hasOlder?: boolean
+  loadingOlder?: boolean
+  onLoadOlder?: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
-  const { items, logs } = useMemo(() => buildChat(events, taskSpec), [events, taskSpec])
+  // 增量构建器驻留 ref：taskSpec 变了（换了会话）才重建；apply 幂等，重复渲染不重复消费
+  const builderRef = useRef<ChatBuilder | null>(null)
+  if (!builderRef.current || builderRef.current.taskSpec !== taskSpec) {
+    builderRef.current = new ChatBuilder(taskSpec)
+  }
+  const { items, logs } = builderRef.current.apply(events)
+
+  // 「加载更早」发出时的 scrollHeight——prepend 后按高度差守住视口，不把用户拽动
+  const anchorRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (loadingOlder && ref.current) anchorRef.current = ref.current.scrollHeight
+  }, [loadingOlder])
 
   // 用户贴近底部时跟随滚动；上翻阅读时不强拉
   useEffect(() => {
     const el = ref.current
-    if (el && stickRef.current) el.scrollTop = el.scrollHeight
-  }, [items, logs.length])
+    if (!el) return
+    if (stickRef.current) {
+      el.scrollTop = el.scrollHeight
+    } else if (!loadingOlder && anchorRef.current != null) {
+      el.scrollTop += el.scrollHeight - anchorRef.current
+    }
+    if (!loadingOlder) anchorRef.current = null
+  }, [items, logs.length, loadingOlder])
 
   return (
     <div
@@ -355,6 +426,13 @@ export default function ChatStream({
     >
       {items.length === 0 && logs.length === 0 && (
         <Typography.Text type="secondary">{emptyText}</Typography.Text>
+      )}
+      {hasOlder && onLoadOlder && (
+        <div style={{ textAlign: 'center', padding: '2px 0 8px' }}>
+          <Button size="small" loading={loadingOlder} onClick={onLoadOlder}>
+            加载更早消息
+          </Button>
+        </div>
       )}
       {items.map((item) => (
         <ChatItemView key={item.key} item={item} sessionModel={model} speaker={speaker} feedback={feedback} />
@@ -384,7 +462,10 @@ export default function ChatStream({
   )
 }
 
-function ChatItemView({ item, sessionModel, speaker, feedback }: {
+// memo 生效的前提：ChatBuilder 对未修改的渲染项保持对象身份（copy-on-write），
+// feedback 由 ChatPanel useMemo 钉住——流式增量帧只重渲染正文在变的那一条气泡，
+// 其余几百条（含各自的 Markdown）整批跳过
+const ChatItemView = memo(function ChatItemView({ item, sessionModel, speaker, feedback }: {
   item: ChatItem
   sessionModel?: string
   speaker: string
@@ -468,7 +549,7 @@ function ChatItemView({ item, sessionModel, speaker, feedback }: {
     default:
       return null
   }
-}
+})
 
 /**
  * 回答正文。独立组件是为了能放 hook：ChatItemView 是个大 switch，在 case 里调 hook 会违反

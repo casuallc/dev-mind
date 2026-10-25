@@ -23,6 +23,9 @@ import { showError } from '../utils/showError'
 /** CAP-68：单条消息文件附件上限（与后端 SessionManagerService.MAX_INPUT_FILES 一致） */
 const MAX_INPUT_FILES = 5
 
+/** 终态会话历史首屏/翻页条数：长会话一次拉全量（几千条、几十 MB）会把首屏拖垮 */
+const HISTORY_PAGE = 200
+
 export default function ChatPanel({
   summary,
   apiBase,
@@ -59,6 +62,8 @@ export default function ChatPanel({
   const [uploading, setUploading] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [baseEvents, setBaseEvents] = useState<ChatEvent[]>([])
+  const [hasOlder, setHasOlder] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
 
   const isLive = ACTIVE_STATES.includes(summary.state)
   const { events, connected, fatal, notice, workspace, input, interrupt, authorize: wsAuthorize } = useChatStream(
@@ -86,20 +91,47 @@ export default function ChatPanel({
     if (notice) message.warning(notice.text)
   }, [notice])
 
-  // 终态会话（进程已结束/重启恢复）无 WS 运行时，退化为 REST 拉取事件历史
+  // 终态会话（进程已结束/重启恢复）无 WS 运行时，退化为 REST 拉取事件历史。
+  // 只取最近一页：长会话全量几千条会把首屏拖垮；更早的由「加载更早消息」按 beforeSeq 翻页
   useEffect(() => {
     if (isLive) return
     let cancelled = false
+    setLoadingOlder(false)
     api
-      .get<ChatEvent[]>(`${apiBase}/${summary.id}/events?afterSeq=-1`)
+      .get<ChatEvent[]>(`${apiBase}/${summary.id}/events?afterSeq=-1&limit=${HISTORY_PAGE}`)
       .then((evs) => {
-        if (!cancelled) setBaseEvents(evs)
+        if (cancelled) return
+        setBaseEvents(evs)
+        setHasOlder(evs.length === HISTORY_PAGE && (evs[0]?.seq ?? 1) > 1)
       })
       .catch(() => undefined)
     return () => {
       cancelled = true
     }
   }, [summary.id, apiBase, isLive])
+
+  // 向前翻一页更早历史（seq < 当前最早一条），合并去重后前插；hasOlder 是推断值——
+  // 拿满一页且最早 seq>1 才可能还有更早，边界上会多打一次空请求，换来不动 API 形状
+  const loadOlder = useCallback(() => {
+    const first = baseEvents[0]
+    if (!first || loadingOlder) return
+    setLoadingOlder(true)
+    api
+      .get<ChatEvent[]>(
+        `${apiBase}/${summary.id}/events?afterSeq=-1&limit=${HISTORY_PAGE}&beforeSeq=${first.seq}`,
+      )
+      .then((evs) => {
+        setBaseEvents((prev) => {
+          const merged = new Map<number, ChatEvent>()
+          for (const e of evs) merged.set(e.seq, e)
+          for (const e of prev) merged.set(e.seq, e)
+          return Array.from(merged.values()).sort((a, b) => a.seq - b.seq)
+        })
+        setHasOlder(evs.length === HISTORY_PAGE && (evs[0]?.seq ?? 1) > 1)
+      })
+      .catch((e) => showError(e, '加载更早消息失败'))
+      .finally(() => setLoadingOlder(false))
+  }, [apiBase, summary.id, baseEvents, loadingOlder])
 
   // 捕获最近的授权请求
   useEffect(() => {
@@ -217,6 +249,12 @@ export default function ChatPanel({
     return Array.from(merged.values()).sort((a, b) => a.seq - b.seq)
   }, [baseEvents, events])
 
+  // 反馈配置钉成稳定引用：ChatStream 的渲染项已 memo，内联对象每次新引用会让 memo 全失效
+  const feedback = useMemo(
+    () => (summary.knowledgeMode ? { apiBase: apiBase as string, chatId: summary.id } : undefined),
+    [summary.knowledgeMode, apiBase, summary.id],
+  )
+
   // 模型执行体生成中不接受注入（后端会拒）：输入区此时换成「停止生成」
   const canInput = ACTIVE_STATES.includes(summary.state) && !generating
   const allowImg = allowImages && !isModel
@@ -276,7 +314,10 @@ export default function ChatPanel({
         speaker={isModel ? (summary.modelEndpointName || '模型') : 'Claude'}
         maxHeight={maxHeight}
         emptyText={`等待事件…（${fatal ? '会话已结束' : connected ? '连接正常' : '重连中'}）`}
-        feedback={summary.knowledgeMode ? { apiBase, chatId: summary.id } : undefined}
+        feedback={feedback}
+        hasOlder={!isLive && hasOlder}
+        loadingOlder={loadingOlder}
+        onLoadOlder={loadOlder}
       />
       <div
         style={{ borderTop: '1px solid #f0f0f0', marginTop: 8, paddingTop: 12, flexShrink: 0 }}

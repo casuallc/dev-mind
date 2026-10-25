@@ -50,8 +50,12 @@ export function createSession(body: {
   return api.post<SessionSummary>('/sessions', body)
 }
 
-export function sessionEvents(id: string, afterSeq = -1): Promise<SessionEvent[]> {
-  return api.get<SessionEvent[]>(`/sessions/${id}/events?afterSeq=${afterSeq}`)
+/** 事件补拉：seq > afterSeq 且 < beforeSeq 的最近 limit 条（limit 缺省走后端默认上限） */
+export function sessionEvents(id: string, afterSeq = -1, limit?: number, beforeSeq?: number): Promise<SessionEvent[]> {
+  const params = new URLSearchParams({ afterSeq: String(afterSeq) })
+  if (limit != null) params.set('limit', String(limit))
+  if (beforeSeq != null) params.set('beforeSeq', String(beforeSeq))
+  return api.get<SessionEvent[]>(`/sessions/${id}/events?${params.toString()}`)
 }
 
 export function sendInput(id: string, text: string): Promise<void> {
