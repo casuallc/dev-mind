@@ -32,6 +32,11 @@
             <source>../devmind-agent-runner/target/devmind-agent-runner.jar</source>
             <outputDirectory>runner</outputDirectory>
         </file>
+        <!-- CAP-87：更新日志随安装包分发，放 config/ 便于不重打包 UI 就替换 -->
+        <file>
+            <source>../CHANGELOG.md</source>
+            <outputDirectory>config</outputDirectory>
+        </file>
     </files>
 
     <fileSets>

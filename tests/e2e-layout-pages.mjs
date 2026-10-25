@@ -64,6 +64,7 @@ const ROUTES = [
   { path: '/worklog', name: '工作日志' },
   { path: '/settings/profile', name: '个人设置' },
   { path: '/notifications', name: '通知中心' },
+  { path: '/changelog', name: '更新日志' },
   { path: '/admin/dashboard', name: '后台-仪表盘' },
   { path: '/admin/projects', name: '后台-项目' },
   { path: '/admin/users', name: '后台-用户' },
