@@ -80,6 +80,9 @@ devmind:
   attachment:                      # CAP-32 公共附件管理
     root-dir: ""                   # 空=${user.dir}/data/attachments
     max-size-mb: 20                # 单附件上限（同时受 spring.servlet.multipart 64MB 约束）
+  changelog:                       # CAP-87 控制台更新日志（只读本地文件，随安装包分发）
+    path: ""                       # 空=user.dir/CHANGELOG.md → user.dir/config/CHANGELOG.md → classpath
+    max-size-kb: 2048              # 单文件上限；超出 400 提示拆分
   worklog:                         # CAP-28 个人工时（CAP-41 起生成走 worklog 会话，one-shot 已摘除）
     schedule-cron: "0 * * * * *"   # 主 tick（每分钟）：逐用户判到期——个人执行时间（设置页）优先，未设跟随下列全局 cron
     daily-enabled: true

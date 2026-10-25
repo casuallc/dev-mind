@@ -117,6 +117,10 @@
         </dependency>
         <dependency>
             <groupId>com.devmind</groupId>
+            <artifactId>devmind-changelog</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
             <artifactId>devmind-flow</artifactId>
         </dependency>
         <dependency>
@@ -195,6 +199,19 @@
     </dependencies>
 
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <!-- CAP-87：更新日志随包分发；打进 classpath 作为 IDE/测试兜底，
+                 分发包优先读外置 config/CHANGELOG.md -->
+            <resource>
+                <directory>${project.basedir}/..</directory>
+                <includes>
+                    <include>CHANGELOG.md</include>
+                </includes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <!-- application-local.yml 是本机专属（已 gitignore，可能含共享库凭证），只进 target/classes
