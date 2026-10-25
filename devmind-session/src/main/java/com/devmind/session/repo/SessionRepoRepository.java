@@ -9,5 +9,8 @@ public interface SessionRepoRepository extends JpaRepository<SessionRepoEntity, 
 
     List<SessionRepoEntity> findBySessionIdOrderBySortOrderAscIdAsc(String sessionId);
 
+    /** 列表批量取（修 N+1：toView 逐会话单查，几百个会话就是几百次往返） */
+    List<SessionRepoEntity> findBySessionIdInOrderBySortOrderAscIdAsc(java.util.Collection<String> sessionIds);
+
     void deleteBySessionId(String sessionId);
 }

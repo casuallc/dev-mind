@@ -298,6 +298,9 @@ class SessionRequirementWorkspaceTest {
                         : null);
         var repoRowRepo = proxy(SessionRepoRepository.class, (p, m, args) -> switch (m.getName()) {
             case "findBySessionIdOrderBySortOrderAscIdAsc" -> repoRows;
+            case "findBySessionIdInOrderBySortOrderAscIdAsc" -> repoRows.stream()
+                    .filter(r -> ((java.util.Collection<?>) args[0]).contains(r.getSessionId()))
+                    .toList();
             case "saveAll" -> args[0];
             case "deleteBySessionId" -> null;
             default -> throw new UnsupportedOperationException(m.getName());

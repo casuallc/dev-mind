@@ -75,6 +75,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -476,8 +477,23 @@ public class SessionManagerService {
     }
 
     public List<SessionView> list(String status, String projectId, String workItemId, String requirementId) {
+        return list(status, projectId, workItemId, requirementId, null);
+    }
+
+    public List<SessionView> list(String status, String projectId, String workItemId, String requirementId,
+                                  String keyword) {
         List<SessionEntity> entities;
-        if (workItemId != null && !workItemId.isBlank()) {
+        String kw = keyword == null || keyword.isBlank() ? null : keyword.trim();
+        if (kw != null) {
+            // 关键字优先走服务端 LIKE（列表字段已截断，前端本地搜会漏）；工作单元/需求分支集合小，内存过滤
+            if (workItemId != null && !workItemId.isBlank()) {
+                entities = filterKeyword(sessionRepo.findByWorkItemIdOrderByCreatedAtDesc(workItemId), kw);
+            } else if (requirementId != null && !requirementId.isBlank()) {
+                entities = filterKeyword(sessionRepo.findByRequirementIdOrderByCreatedAtDesc(requirementId), kw);
+            } else {
+                entities = sessionRepo.search(projectId == null || projectId.isBlank() ? null : projectId, kw);
+            }
+        } else if (workItemId != null && !workItemId.isBlank()) {
             entities = sessionRepo.findByWorkItemIdOrderByCreatedAtDesc(workItemId);
         } else if (requirementId != null && !requirementId.isBlank()) {
             entities = sessionRepo.findByRequirementIdOrderByCreatedAtDesc(requirementId);
@@ -489,7 +505,26 @@ public class SessionManagerService {
             entities = new ArrayList<>(sessionRepo.findAll());
             entities.sort(Comparator.comparing(SessionEntity::getCreatedAt).reversed());
         }
-        return entities.stream().map(e -> toView(e, liveState(e))).toList();
+        // repo 名一次批量取（逐会话单查在几百个会话时是 N+1 次往返，列表轮询 3s 一次放大明显）
+        Map<String, List<String>> namesBySession = new HashMap<>();
+        if (!entities.isEmpty()) {
+            List<String> ids = entities.stream().map(SessionEntity::getId).toList();
+            for (SessionRepoEntity r : sessionRepoRepo.findBySessionIdInOrderBySortOrderAscIdAsc(ids)) {
+                namesBySession.computeIfAbsent(r.getSessionId(), k -> new ArrayList<>()).add(r.getName());
+            }
+        }
+        return entities.stream()
+                .map(e -> toView(e, liveState(e), namesBySession.getOrDefault(e.getId(), List.of())))
+                .toList();
+    }
+
+    private List<SessionEntity> filterKeyword(List<SessionEntity> entities, String kw) {
+        String k = kw.toLowerCase();
+        return entities.stream()
+                .filter(e -> e.getId().toLowerCase().contains(k)
+                        || (e.getTaskSpec() != null && e.getTaskSpec().toLowerCase().contains(k))
+                        || (e.getSummary() != null && e.getSummary().toLowerCase().contains(k)))
+                .toList();
     }
 
     public SessionView get(String id) {
@@ -2047,6 +2082,10 @@ public class SessionManagerService {
     private SessionView toView(SessionEntity ent, SessionState state) {
         List<String> repoNames = sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(ent.getId())
                 .stream().map(SessionRepoEntity::getName).toList();
+        return toView(ent, state, repoNames);
+    }
+
+    private SessionView toView(SessionEntity ent, SessionState state, List<String> repoNames) {
         return new SessionView(
                 ent.getId(), ent.getProjectId(), ent.getWorkItemId(), ent.getRequirementId(), ent.getTaskSpec(),
                 state.name(), state, ent.getWorktreePath(), ent.getPid(),

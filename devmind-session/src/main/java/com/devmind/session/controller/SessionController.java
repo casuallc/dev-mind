@@ -12,17 +12,22 @@ import com.devmind.session.dto.SessionView;
 import com.devmind.common.agent.SessionEvent;
 import com.devmind.session.service.SessionManagerService;
 import jakarta.validation.Valid;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 会话 REST API。
@@ -33,6 +38,9 @@ public class SessionController {
 
     private final SessionManagerService service;
 
+    /** 列表 taskSpec/summary 预览长度（列表 UI 只展示前 40 字；留 200 余量给 tooltip） */
+    private static final int LIST_PREVIEW_CHARS = 200;
+
     public SessionController(SessionManagerService service) {
         this.service = service;
     }
@@ -42,12 +50,37 @@ public class SessionController {
         return service.create(req);
     }
 
+    /**
+     * 会话列表。taskSpec/summary 只回预览（全文走 /{id}——看板轮询不需要全文）；
+     * keyword 服务端 LIKE 搜索（字段截断后前端本地搜会漏）。
+     * 带 ETag 条件请求：看板 3s 轮询无变化时回 304 空体，带宽≈0
+     * （Cache-Control: no-cache 强制每次回源校验；显式设置也避免安全头默认 no-store 吃掉浏览器缓存）。
+     */
     @GetMapping
-    public List<SessionView> list(@RequestParam(required = false) String status,
-                                  @RequestParam(required = false) String projectId,
-                                  @RequestParam(required = false) String workItemId,
-                                  @RequestParam(required = false) String requirementId) {
-        return service.list(status, projectId, workItemId, requirementId);
+    public ResponseEntity<List<SessionView>> list(@RequestParam(required = false) String status,
+                                                  @RequestParam(required = false) String projectId,
+                                                  @RequestParam(required = false) String workItemId,
+                                                  @RequestParam(required = false) String requirementId,
+                                                  @RequestParam(required = false) String keyword,
+                                                  @RequestHeader(value = "If-None-Match", required = false)
+                                                  String ifNoneMatch) {
+        List<SessionView> views = service.list(status, projectId, workItemId, requirementId, keyword)
+                .stream().map(v -> v.withPreview(LIST_PREVIEW_CHARS)).toList();
+        String etag = "\"" + Integer.toHexString(fingerprint(views)) + "\"";
+        if (etag.equals(ifNoneMatch)) {
+            return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(etag).build();
+        }
+        return ResponseEntity.ok().cacheControl(CacheControl.noCache()).eTag(etag).body(views);
+    }
+
+    /** 轮询变更指纹：只看 UI 展示的字段，任一变化即换 ETag（列表内容本身已是最新快照，无需另查库） */
+    private static int fingerprint(List<SessionView> views) {
+        int h = 1;
+        for (SessionView v : views) {
+            h = 31 * h + Objects.hash(v.id(), v.status(), v.workspaceState(), v.updatedAt(),
+                    v.taskSpec(), v.summary(), v.turnCount(), v.costUsd(), v.repoNames());
+        }
+        return h;
     }
 
     @GetMapping("/{id}")

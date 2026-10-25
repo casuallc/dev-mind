@@ -16,6 +16,19 @@ public interface SessionRepository extends JpaRepository<SessionEntity, String> 
 
     List<SessionEntity> findByProjectIdOrderByCreatedAtDesc(String projectId);
 
+    /**
+     * 看板关键字搜索（服务端化：列表 taskSpec/summary 已截断为预览，前端本地搜会漏）。
+     * 两个 cast 都是既有红线踩坑的规避：:kw 只在 concat 里出现时不强转 PG 会落成 bytea；
+     * taskSpec/summary 是 @Lob CLOB，lower 前必须 cast 成 string（Hibernate 启动期校验）。
+     */
+    @Query("select s from SessionEntity s where "
+            + "(:projectId is null or s.projectId = :projectId) "
+            + "and (s.id like concat('%', cast(:kw as string), '%') "
+            + "or lower(cast(s.taskSpec as string)) like lower(concat('%', cast(:kw as string), '%')) "
+            + "or lower(cast(s.summary as string)) like lower(concat('%', cast(:kw as string), '%'))) "
+            + "order by s.createdAt desc")
+    List<SessionEntity> search(@Param("projectId") String projectId, @Param("kw") String kw);
+
     /** CAP-13：按工作单元聚合会话（需求主线视图） */
     List<SessionEntity> findByWorkItemIdOrderByCreatedAtDesc(String workItemId);
 

@@ -38,4 +38,22 @@ public record SessionView(
         Long cacheReadTokens,
         Long cacheCreationTokens,
         Integer turnCount) {
+
+    /**
+     * 列表预览版：taskSpec/summary 全文是 @Lob 大字段，看板 3s 轮询全量回传会把带宽打满。
+     * 列表 UI 只展示前 40 字，超出 max 截断补「…」；全文走 GET /sessions/{id}。
+     */
+    public SessionView withPreview(int max) {
+        return new SessionView(id, projectId, workItemId, requirementId, previewOf(taskSpec, max),
+                status, state, worktreePath, pid, model, previewOf(summary, max), agentNodeId,
+                repoNames, createdBy, workspaceState, createdAt, updatedAt, finishedAt,
+                costUsd, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, turnCount);
+    }
+
+    private static String previewOf(String s, int max) {
+        if (s == null || s.length() <= max) {
+            return s;
+        }
+        return s.substring(0, max) + "…";
+    }
 }
