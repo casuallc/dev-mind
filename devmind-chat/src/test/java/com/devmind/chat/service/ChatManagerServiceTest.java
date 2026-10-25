@@ -190,6 +190,10 @@ class ChatManagerServiceTest {
                             .limit(limit)
                             .toList();
                 }
+                // 单条全文（payloadMax 预览截断后的补取通道）
+                case "findByChatIdAndSeq" -> store.stream()
+                        .filter(e -> e.getChatId().equals(args[0]) && e.getSeq() == (Long) args[1])
+                        .findFirst();
                 case "deleteByChatId" -> {
                     store.removeIf(e -> e.getChatId().equals(args[0]));
                     yield null;
@@ -1332,6 +1336,39 @@ class ChatManagerServiceTest {
                 "要说清是端点没了（而不是难懂的连接错误）：" + gone.getMessage());
         // 读历史不受影响：端点没了也要能打开看
         assertFalse(service.events("model-idle", 0).isEmpty());
+    }
+
+    @Test
+    void 事件payloadMax截断工具载荷_单条端点取全文() {
+        // 与 session 侧同一手法（SessionEventPreview）：列表页只取预览，展开时按 seq 补全文
+        ChatSessionEntity ent = new ChatSessionEntity();
+        ent.setId("c1");
+        ent.setStatus(SessionState.WAITING_INPUT.name());
+        ent.setCreatedBy("tester");
+        ent.setCreatedAt(java.time.Instant.now());
+        ent.setUpdatedAt(java.time.Instant.now());
+        chats.store.put(ent.getId(), ent);
+        ChatEventEntity tu = new ChatEventEntity();
+        tu.setChatId("c1");
+        tu.setSeq(1L);
+        tu.setType("tool_use");
+        tu.setPayload("{\"name\":\"Bash\",\"toolInput\":\"" + "i".repeat(60) + "\"}");
+        tu.setCreatedAt(java.time.Instant.now());
+        ChatEventEntity tr = new ChatEventEntity();
+        tr.setChatId("c1");
+        tr.setSeq(2L);
+        tr.setType("tool_result");
+        tr.setContent("o".repeat(60));
+        tr.setCreatedAt(java.time.Instant.now());
+        events.store.addAll(List.of(tu, tr));
+
+        var page = service.events("c1", -1, 0, Long.MAX_VALUE, 8);
+        assertEquals("iiiiiiii…", page.get(0).payload().get("toolInput"));
+        assertEquals(Boolean.TRUE, page.get(0).payload().get("previewTruncated"));
+        assertEquals("oooooooo…", page.get(1).content());
+
+        assertEquals("o".repeat(60), service.event("c1", 2).content(), "单条端点必须给全文");
+        assertEquals("i".repeat(60), service.event("c1", 1).payload().get("toolInput"));
     }
 
     @Test

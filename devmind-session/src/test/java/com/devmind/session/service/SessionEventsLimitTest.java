@@ -88,6 +88,9 @@ class SessionEventsLimitTest {
                         .limit(page.getPageSize())
                         .toList();
             }
+            case "findBySessionIdAndSeq" -> rows.stream()
+                    .filter(e -> e.getSeq() == (Long) args[1])
+                    .findFirst();
             default -> throw new UnsupportedOperationException(m.getName());
         });
         SessionProperties props = new SessionProperties();
@@ -148,5 +151,50 @@ class SessionEventsLimitTest {
         List<Long> seqs = service().events("s1", 2, 3, 9).stream().map(e -> e.seq()).toList();
 
         assertEquals(List.of(6L, 7L, 8L), seqs, "区间 (2,9) 内被截断时保留最近几条");
+    }
+
+    @Test
+    void payloadMax截断工具载荷并打标记_单条端点取全文() {
+        SessionEventEntity tu = new SessionEventEntity();
+        tu.setSessionId("s1");
+        tu.setSeq(1L);
+        tu.setType("tool_use");
+        tu.setPayload("{\"name\":\"Bash\",\"toolInput\":\"" + "i".repeat(60) + "\"}");
+        tu.setCreatedAt(Instant.now());
+        SessionEventEntity tr = new SessionEventEntity();
+        tr.setSessionId("s1");
+        tr.setSeq(2L);
+        tr.setType("tool_result");
+        tr.setContent("o".repeat(60));
+        tr.setCreatedAt(Instant.now());
+        rows.add(tu);
+        rows.add(tr);
+
+        SessionManagerService svc = service();
+        List<com.devmind.common.agent.SessionEvent> page = svc.events("s1", -1, 0, Long.MAX_VALUE, 8);
+
+        assertEquals("iiiiiiii…", page.get(0).payload().get("toolInput"));
+        assertEquals(Boolean.TRUE, page.get(0).payload().get("previewTruncated"));
+        assertEquals("oooooooo…", page.get(1).content());
+        assertEquals(Boolean.TRUE, page.get(1).payload().get("previewTruncated"));
+
+        // 单条全文端点不受 payloadMax 影响
+        assertEquals("o".repeat(60), svc.event("s1", 2).content());
+        assertEquals("i".repeat(60), svc.event("s1", 1).payload().get("toolInput"));
+    }
+
+    @Test
+    void 不带payloadMax时事件原样返回() {
+        SessionEventEntity tr = new SessionEventEntity();
+        tr.setSessionId("s1");
+        tr.setSeq(1L);
+        tr.setType("tool_result");
+        tr.setContent("o".repeat(60));
+        tr.setCreatedAt(Instant.now());
+        rows.add(tr);
+
+        List<com.devmind.common.agent.SessionEvent> page = service().events("s1", -1, 0, Long.MAX_VALUE);
+
+        assertEquals("o".repeat(60), page.get(0).content(), "旧调用形态（无 payloadMax）行为不变");
     }
 }

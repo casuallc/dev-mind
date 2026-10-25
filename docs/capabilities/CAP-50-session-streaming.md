@@ -139,6 +139,26 @@ WS  /ws/sessions/{id}                               协议零变更（不新增�
 runner 协议                                         零变更（text_delta 是既有事件类型）
 ```
 
+**2026-10-25 增补（事件载荷瘦身，性能优化配套）**：
+
+```
+GET /api/sessions/{id}/events?...&payloadMax=0      新增 payloadMax（0=关闭）；>0 时 tool_use.payload.toolInput
+                                                    与 tool_result.content 截断为预览（max 字 + "…"），
+                                                    payload 打 previewTruncated=true 标记；其余事件类型与
+                                                    assistant/user 正文永不截断。chats 侧对称
+GET /api/sessions/{id}/events/{seq}                 新增单条事件全文端点：预览截断的补取通道，
+                                                    前端展开工具卡片时按 seq 补拉（chats 侧对称）
+GET /api/sessions?keyword=&...                      列表新增 keyword 服务端搜索（id/taskSpec/summary 模糊），
+                                                    taskSpec/summary 截为 200 字预览；ETag 条件拉取，
+                                                    If-None-Match 命中回 304 空体
+```
+
+- 截断助手 `SessionEventPreview`（devmind-common，sessions/chats 共用）；
+- 前端首屏/翻页带 `payloadMax=4096`，`ChatStream` 工具卡片凭 `previewTruncated` 标记在展开时
+  调单条端点补全文；会话列表轮询走 `If-None-Match`，未变化省掉整页传输；
+- 回归网：`SessionEventPreviewTest`、`SessionEventsLimitTest`（截断 + 单条全文 + 兼容形态）、
+  `ChatManagerServiceTest`（问答侧对称用例）、E2E `tests/e2e-events-pagination.py`。
+
 ## 7. 验收标准
 
 - **增量先到、全量收口**：WS 与落库都能看到「多条 `text_delta` → 一条完整 `assistant`」，

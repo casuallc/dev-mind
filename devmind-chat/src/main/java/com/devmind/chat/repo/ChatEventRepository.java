@@ -26,5 +26,8 @@ public interface ChatEventRepository extends JpaRepository<ChatEventEntity, Long
     /** CAP-84 FR-18：多轮检索改写——最近几条用户提问（倒序取，调用方按 seq 反转）。 */
     List<ChatEventEntity> findByChatIdAndTypeOrderBySeqDesc(String chatId, String type, Pageable limit);
 
+    /** 单条全文（payload 预览截断后，前端展开工具卡片时按 seq 补取） */
+    java.util.Optional<ChatEventEntity> findByChatIdAndSeq(String chatId, long seq);
+
     void deleteByChatId(String chatId);
 }

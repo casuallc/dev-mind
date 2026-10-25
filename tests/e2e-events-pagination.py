@@ -13,6 +13,9 @@ runner jar 已构建（mvn -q install -DskipTests）。脚本自建 fake runner 
  1. sessions：四轮对话攒事件 → 默认拉取=全量（<2000 时）→ limit=4 首页=全量末尾 4 条
     → beforeSeq 链式翻页拼接 == 全量（seq 逐一相等、无重叠无缺口）→ 越界 beforeSeq 空页
  2. chats：同款断言 + 旧调用形态（只传 afterSeq、不带 limit/beforeSeq）兼容
+ 3. payloadMax=8 预览截断（tool_use.toolInput / tool_result.content 截断 + previewTruncated
+    标记）→ 单条端点 /{kind}/{id}/events/{seq} 取全文 → 不带 payloadMax 原样返回
+ 4. 会话列表：keyword 服务端搜索（命中/不命中）+ ETag 条件拉取（二刷 304 空体）
 """
 import json, os, shutil, subprocess, sys, time, urllib.request, urllib.error
 from pathlib import Path
@@ -42,6 +45,19 @@ def req(method, path, body=None, token=None, expect=200):
         if e.code == expect:
             return json.loads(e.read().decode() or "null")
         raise AssertionError(f"{method} {path} -> {e.code}: {e.read().decode()[:300]}")
+
+
+def req_raw(method, path, token, headers=None):
+    """带响应头/状态码的原始 GET（ETag/304 断言要拿 ETag 头与空体）。"""
+    r = urllib.request.Request(BASE + path, method=method)
+    r.add_header("Authorization", "Bearer " + token)
+    for k, v in (headers or {}).items():
+        r.add_header(k, v)
+    try:
+        with urllib.request.urlopen(r) as resp:
+            return resp.status, dict(resp.headers), resp.read()
+    except urllib.error.HTTPError as e:
+        return e.code, dict(e.headers), e.read()
 
 
 def wait(cond, what, timeout=60):
@@ -104,6 +120,31 @@ def assert_pagination(tok, kind, cid):
     return n
 
 
+def assert_payload_preview(tok, kind, cid):
+    """payloadMax 预览截断 + 单条全文端点。fake runner 的 tool_result 正文 'step 1 output'
+    （13 字符）、toolInput 是 JSON 串，payloadMax=8 两者都必截断。"""
+    trunc = events(tok, kind, cid, afterSeq=-1, payloadMax=8)
+    tr = next((e for e in trunc if e["type"] == "tool_result"), None)
+    tu = next((e for e in trunc if e["type"] == "tool_use"), None)
+    assert tr and tu, f"{kind}/{cid} 缺 tool 事件，无法验证截断"
+    assert tr["content"] == "step 1 o…", f"tool_result 应截为 8 字+省略号: {tr['content']!r}"
+    assert tr["payload"].get("previewTruncated") is True, "截断必须打 previewTruncated 标记"
+    assert tu["payload"]["toolInput"].endswith("…") and len(tu["payload"]["toolInput"]) == 9, \
+        f"toolInput 应截为 8 字+省略号: {tu['payload']['toolInput']!r}"
+    assert tu["payload"].get("previewTruncated") is True
+
+    full_tr = req("GET", f"/{kind}/{cid}/events/{tr['seq']}", token=tok)
+    assert full_tr["content"] == "step 1 output", f"单条端点必须给全文: {full_tr['content']!r}"
+    full_tu = req("GET", f"/{kind}/{cid}/events/{tu['seq']}", token=tok)
+    assert "step 1" in full_tu["payload"]["toolInput"] and not full_tu["payload"].get("previewTruncated"), \
+        "单条端点不受 payloadMax 影响"
+
+    plain = events(tok, kind, cid, afterSeq=-1)
+    assert next(e for e in plain if e["type"] == "tool_result")["content"] == "step 1 output", \
+        "不带 payloadMax 应原样返回"
+    print(f"  [{kind}] {cid} payloadMax 截断/标记 + 单条全文 + 兼容形态 OK")
+
+
 def main():
     login = req("POST", "/auth/login", {"username": "admin", "password": "admin123"})
     tok = login.get("token") or login.get("accessToken")
@@ -164,6 +205,22 @@ def main():
                 req("POST", f"/sessions/{sid}/input", {"text": f"第 {i + 2} 轮"}, tok)
         print(f"[3] 会话 {sid} 四轮落定")
         assert_pagination(tok, "sessions", sid)
+        assert_payload_preview(tok, "sessions", sid)
+
+        # 会话列表：keyword 服务端搜索（列表已瘦身截断，客户端过滤会漏全文命中，故下沉）
+        hits = req("GET", f"/sessions?projectId={pid}&keyword={MARK}", token=tok)
+        assert any(s["id"] == sid for s in hits), f"keyword={MARK} 应命中会话: {hits}"
+        miss = req("GET", f"/sessions?projectId={pid}&keyword=zzz-no-such-kw", token=tok)
+        assert miss == [], f"不命中应空列表: {miss}"
+        print("[3b] 会话列表 keyword 搜索 OK")
+
+        # ETag 条件拉取：首拉拿 ETag，带 If-None-Match 二刷数据没变 → 304 空体
+        st, hdrs, body = req_raw("GET", f"/sessions?projectId={pid}", tok)
+        etag = hdrs.get("ETag") or hdrs.get("etag")
+        assert st == 200 and etag, f"列表应带 ETag: status={st} headers={list(hdrs)}"
+        st2, _, body2 = req_raw("GET", f"/sessions?projectId={pid}", tok, {"If-None-Match": etag})
+        assert st2 == 304 and body2 == b"", f"未变化应 304 空体: status={st2} len={len(body2)}"
+        print(f"[3c] 会话列表 ETag/304 OK（etag={etag}）")
 
         # ---------- chats ----------
         chat = req("POST", "/chats", {
@@ -178,6 +235,7 @@ def main():
                 req("POST", f"/chats/{cid}/input", {"text": f"第 {i + 2} 轮"}, tok)
         print(f"[4] 问答 {cid} 三轮落定")
         assert_pagination(tok, "chats", cid)
+        assert_payload_preview(tok, "chats", cid)
 
         # 旧调用形态兼容：只传 afterSeq（不带 limit/beforeSeq）→ <2000 时返回全量
         legacy = events(tok, "chats", cid, afterSeq=-1)

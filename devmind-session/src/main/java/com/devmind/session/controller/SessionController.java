@@ -93,13 +93,22 @@ public class SessionController {
      * {@code limit<=0} 取默认上限、超过硬上限按硬上限截断（见
      * {@link SessionManagerService#DEFAULT_EVENT_LIMIT}）；
      * {@code beforeSeq} 为向前翻页下界（只取 seq 小于它的一页），默认不限。
+     * {@code payloadMax>0} 时 tool_use/tool_result 大字段截断为预览（payload 带 previewTruncated 标记），
+     * 全文走 {@code GET /{id}/events/{seq}}。
      */
     @GetMapping("/{id}/events")
     public List<SessionEvent> events(@PathVariable String id,
                                      @RequestParam(defaultValue = "-1") long afterSeq,
                                      @RequestParam(defaultValue = "0") int limit,
-                                     @RequestParam(defaultValue = "9223372036854775807") long beforeSeq) {
-        return service.events(id, afterSeq, limit, beforeSeq);
+                                     @RequestParam(defaultValue = "9223372036854775807") long beforeSeq,
+                                     @RequestParam(defaultValue = "0") int payloadMax) {
+        return service.events(id, afterSeq, limit, beforeSeq, payloadMax);
+    }
+
+    /** 单条事件全文：预览截断（payloadMax）后的补取通道，前端展开工具卡片时按 seq 拉取 */
+    @GetMapping("/{id}/events/{seq}")
+    public SessionEvent event(@PathVariable String id, @PathVariable long seq) {
+        return service.event(id, seq);
     }
 
     @PostMapping("/{id}/input")

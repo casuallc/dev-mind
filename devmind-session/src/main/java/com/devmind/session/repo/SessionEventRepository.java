@@ -27,5 +27,8 @@ public interface SessionEventRepository extends JpaRepository<SessionEventEntity
 
     long countBySessionId(String sessionId);
 
+    /** 单条全文（payload 预览截断后，前端展开工具卡片时按 seq 补取） */
+    java.util.Optional<SessionEventEntity> findBySessionIdAndSeq(String sessionId, long seq);
+
     void deleteBySessionId(String sessionId);
 }

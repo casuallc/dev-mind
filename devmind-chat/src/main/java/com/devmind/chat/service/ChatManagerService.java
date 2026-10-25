@@ -19,6 +19,7 @@ import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.ChatContextPreparer;
 import com.devmind.common.agent.InputImage;
 import com.devmind.common.agent.SessionEvent;
+import com.devmind.common.agent.SessionEventPreview;
 import com.devmind.common.agent.WorkspaceQueryResult;
 import com.devmind.common.agent.exec.ContextManifest;
 import com.devmind.common.agent.runtime.AbstractSessionRuntime;
@@ -447,6 +448,14 @@ public class ChatManagerService {
      * 无上限全量取，长问答一次性拉几千条把首屏拖垮；{@code limit<=0} 落默认上限。
      */
     public List<SessionEvent> events(String id, long afterSeq, int limit, long beforeSeq) {
+        return events(id, afterSeq, limit, beforeSeq, 0);
+    }
+
+    /**
+     * payloadMax&gt;0 时截断 tool_use/tool_result 的大字段为预览（{@code previewTruncated} 标记），
+     * 全文走 {@link #event(String, long)}——与 session 侧同一手法（{@code SessionEventPreview}）。
+     */
+    public List<SessionEvent> events(String id, long afterSeq, int limit, long beforeSeq, int payloadMax) {
         requireOwned(id);
         int size = limit <= 0 ? DEFAULT_EVENT_LIMIT : Math.min(limit, MAX_EVENT_LIMIT);
         List<ChatEventEntity> rows = eventRepo.findByChatIdAndSeqLessThanAndSeqGreaterThanOrderBySeqDesc(
@@ -455,7 +464,15 @@ public class ChatManagerService {
         for (int i = rows.size() - 1; i >= 0; i--) {
             out.add(toEvent(rows.get(i)));
         }
-        return out;
+        return SessionEventPreview.truncate(out, payloadMax);
+    }
+
+    /** 单条事件全文（预览截断的补取通道） */
+    public SessionEvent event(String id, long seq) {
+        requireOwned(id);
+        return eventRepo.findByChatIdAndSeq(id, seq)
+                .map(this::toEvent)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "事件不存在: " + id + "#" + seq));
     }
 
     @SuppressWarnings("unchecked")

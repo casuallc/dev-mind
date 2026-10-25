@@ -45,6 +45,7 @@ import com.devmind.session.dto.RepoDiffView;
 import com.devmind.session.dto.SessionView;
 import com.devmind.session.model.SessionEntity;
 import com.devmind.common.agent.SessionEvent;
+import com.devmind.common.agent.SessionEventPreview;
 import com.devmind.session.model.SessionEventEntity;
 import com.devmind.common.agent.runtime.SessionState;
 import com.devmind.session.model.SessionRepoEntity;
@@ -549,6 +550,14 @@ public class SessionManagerService {
      * 「加载更早」再向前翻，避免内容多的会话一次性拉全量。
      */
     public List<SessionEvent> events(String id, long afterSeq, int limit, long beforeSeq) {
+        return events(id, afterSeq, limit, beforeSeq, 0);
+    }
+
+    /**
+     * payloadMax&gt;0 时截断 tool_use/tool_result 的大字段为预览（{@code previewTruncated} 标记），
+     * 全文走 {@link #event(String, long)}——历史首屏一页的大头就是这两类 payload。
+     */
+    public List<SessionEvent> events(String id, long afterSeq, int limit, long beforeSeq, int payloadMax) {
         requireEntity(id);
         int size = limit <= 0 ? DEFAULT_EVENT_LIMIT : Math.min(limit, MAX_EVENT_LIMIT);
         List<SessionEventEntity> rows = eventRepo.findBySessionIdAndSeqLessThanAndSeqGreaterThanOrderBySeqDesc(
@@ -557,7 +566,15 @@ public class SessionManagerService {
         for (int i = rows.size() - 1; i >= 0; i--) {
             out.add(toEvent(rows.get(i)));
         }
-        return out;
+        return SessionEventPreview.truncate(out, payloadMax);
+    }
+
+    /** 单条事件全文（预览截断的补取通道） */
+    public SessionEvent event(String id, long seq) {
+        requireEntity(id);
+        return eventRepo.findBySessionIdAndSeq(id, seq)
+                .map(this::toEvent)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "事件不存在: " + id + "#" + seq));
     }
 
     @SuppressWarnings("unchecked")

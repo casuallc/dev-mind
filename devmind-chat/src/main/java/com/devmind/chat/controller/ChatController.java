@@ -54,13 +54,21 @@ public class ChatController {
     /**
      * 事件补拉：seq &gt; afterSeq 且 &lt; beforeSeq 的<b>最近</b>一段（升序），
      * {@code limit<=0} 取默认上限。长问答首屏只取一页，「加载更早」用 beforeSeq 向前翻页。
+     * {@code payloadMax>0} 时 tool_use/tool_result 大字段截断为预览，全文走 {@code /{id}/events/{seq}}。
      */
     @GetMapping("/{id}/events")
     public List<SessionEvent> events(@PathVariable String id,
                                      @RequestParam(defaultValue = "-1") long afterSeq,
                                      @RequestParam(defaultValue = "0") int limit,
-                                     @RequestParam(defaultValue = "9223372036854775807") long beforeSeq) {
-        return service.events(id, afterSeq, limit, beforeSeq);
+                                     @RequestParam(defaultValue = "9223372036854775807") long beforeSeq,
+                                     @RequestParam(defaultValue = "0") int payloadMax) {
+        return service.events(id, afterSeq, limit, beforeSeq, payloadMax);
+    }
+
+    /** 单条事件全文：预览截断（payloadMax）后的补取通道，前端展开工具卡片时按 seq 拉取 */
+    @GetMapping("/{id}/events/{seq}")
+    public SessionEvent event(@PathVariable String id, @PathVariable long seq) {
+        return service.event(id, seq);
     }
 
     @PostMapping("/{id}/input")
