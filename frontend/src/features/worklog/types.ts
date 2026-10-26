@@ -31,6 +31,12 @@ export interface WorklogEntry {
   jiraIssueKey?: string
   /** CAP-88 FR-04：关联计划项 id（worklog_plan_items；删计划项后端置空） */
   planItemId?: number
+  /** CAP-90 FR-01：DONE=事实（默认）；TODO/DOING=计划态（日计划并入条目）；CARRIED/DROPPED 终态 */
+  status: string
+  /** CAP-90 FR-01：计划态预估工时（小时），「完成」交互预填用 */
+  estimateHours?: number
+  /** CAP-90 FR-05：日粒度滚转来源条目 id */
+  carriedFromId?: string
   createdAt?: string
   updatedAt?: string
 }
@@ -53,12 +59,16 @@ export interface EntryPayload {
   jiraIssueKey?: string
   /** CAP-88 FR-04：关联计划项；undefined/无字段 = 不关联（更新即解除） */
   planId?: number
+  /** CAP-90 FR-02：不传 = 默认 DONE（补录事实）；TODO/DOING = 计划态；CARRIED 不可人工设 */
+  status?: string
+  /** CAP-90 FR-01：计划态预估工时（小时，可空） */
+  estimateHours?: number
 }
 
-/** CAP-88 计划项（scope=DAY 时 planDate=当天；WEEK=周一） */
+/** CAP-90：计划项收窄为 WEEK 唯一粒度（日计划并入条目，DAY 后端 400；planDate=周一） */
 export interface PlanItem {
   id: number
-  scope: 'DAY' | 'WEEK'
+  scope: 'WEEK'
   planDate: string
   title: string
   content?: string
@@ -83,9 +93,9 @@ export interface PlanListView {
   carryoverItems: PlanItem[]
 }
 
-/** 计划项新建/更新请求（WEEK 时 date 传周内任意日，后端归一到周一） */
+/** 计划项新建/更新请求（date 传周内任意日，后端归一到周一） */
 export interface PlanItemPayload {
-  scope: 'DAY' | 'WEEK'
+  scope: 'WEEK'
   date: string
   title: string
   content?: string
@@ -105,11 +115,24 @@ export const PLAN_STATUSES: Record<string, { label: string; color: string }> = {
   CARRIED: { label: '已滚转', color: 'purple' },
 }
 
-/** 滚转结果：carried=成功滚转数；skipped=幂等跳过数；items=新建副本 */
+/** 计划项滚转结果：carried=成功滚转数；skipped=幂等跳过数；items=新建副本 */
 export interface CarryResult {
   carried: number
   skipped: number
   items: PlanItem[]
+}
+
+/** CAP-90 FR-05：条目日粒度滚转结果（同 CarryResult 口径，items 为新条目副本） */
+export interface EntryCarryResult {
+  carried: number
+  skipped: number
+  items: WorklogEntry[]
+}
+
+/** CAP-90 FR-10「从计划项重建」预览：下周计划项确定性渲染的 markdown（不经 LLM） */
+export interface NextPlanPreview {
+  markdown: string
+  itemCount: number
 }
 
 /** CAP-89：日报视图 DB 口径——无 status（状态机已删），exists 恒 true（GET 不存在返回 undefined） */

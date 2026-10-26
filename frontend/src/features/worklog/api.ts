@@ -3,11 +3,13 @@ import { api } from '../../shared/api/client'
 import type {
   CarryResult,
   DailyReport,
+  EntryCarryResult,
   EntryPage,
   EntryPayload,
   GenerateAck,
   GitPreview,
   GitPreviewFilter,
+  NextPlanPreview,
   PlanItem,
   PlanItemPayload,
   PlanListView,
@@ -39,19 +41,26 @@ export const updateEntry = (id: string, body: EntryPayload) =>
 /** CAP-89：删除按 uuid 直删（DB 主键，不再需要日期寻址） */
 export const deleteEntry = (id: string) => api.del(`/worklog/entries/${id}`)
 
-// ---- CAP-88 计划项（日/周双层，状态机 TODO→DOING 自动、DONE/DROPPED 人工、CARRIED 滚转写入） ----
-export const listPlans = (scope: 'DAY' | 'WEEK', date: string) =>
-  api.get<PlanListView>(`/worklog/plans?scope=${scope}&date=${date}`)
-/** 条目抽屉可关联项：当日日计划 + 当周周计划 */
+/** CAP-90 FR-05：上一日未完成（TODO/DOING）条目提示（日粒度滚转的提示数据） */
+export const entryCarryover = (date: string) =>
+  api.get<WorklogEntry[]>(`/worklog/entries/carryover?date=${date}`)
+/** CAP-90 FR-05：条目日粒度一键滚转（幂等：已 CARRIED/已完结跳过）；to=目标日期 */
+export const carryEntries = (to: string, ids: string[]) =>
+  api.post<EntryCarryResult>('/worklog/entries/carry', { to, ids })
+
+// ---- CAP-88/90 计划项（WEEK 唯一粒度：日计划已并入条目；状态机 TODO→DOING 自动、DONE/DROPPED 人工、CARRIED 滚转写入） ----
+export const listPlans = (date: string) =>
+  api.get<PlanListView>(`/worklog/plans?scope=WEEK&date=${date}`)
+/** 条目抽屉可关联项：当周周计划（CAP-90：日计划并入条目后只列周方向） */
 export const listLinkablePlans = (date: string) =>
   api.get<PlanItem[]>(`/worklog/plans/linkable?date=${date}`)
 export const createPlanItem = (body: PlanItemPayload) => api.post<PlanItem>('/worklog/plans/items', body)
 export const updatePlanItem = (id: number, body: PlanItemPayload) =>
   api.put<PlanItem>(`/worklog/plans/items/${id}`, body)
 export const deletePlanItem = (id: number) => api.del(`/worklog/plans/items/${id}`)
-/** 一键滚转（幂等：已 CARRIED/已完结跳过）；to：DAY=目标日期，WEEK=目标周内任意日 */
-export const carryPlans = (scope: 'DAY' | 'WEEK', to: string, ids: number[]) =>
-  api.post<CarryResult>('/worklog/plans/carry', { scope, to, ids })
+/** 周计划一键滚转（幂等：已 CARRIED/已完结跳过）；to=目标周内任意日 */
+export const carryPlans = (to: string, ids: number[]) =>
+  api.post<CarryResult>('/worklog/plans/carry', { scope: 'WEEK', to, ids })
 /** CAP-88 M3「AI 建议计划」：异步起生成会话；目标周已有项非 force → reused=true 跳过，force 只追加不覆盖 */
 export const suggestPlans = (date: string, force = false, hint?: string) =>
   api.post<GenerateAck>('/worklog/plans/suggest', { date, force, hint })
@@ -89,6 +98,9 @@ export const generateWeekly = (weekStart: string, force = false, hint?: string) 
 /** CAP-89：按周一寻址保存（分节字段落库两列）；status 传了 400 */
 export const updateWeekly = (weekStart: string, body: { summaryMd?: string; nextPlanMd?: string }) =>
   api.put<WeeklyReport>(`/worklog/weekly/${weekStart}`, body)
+/** CAP-90 FR-10「从计划项重建」：下周计划项确定性渲染预览（不经 LLM；人工确认后填入编辑框） */
+export const nextPlanPreview = (weekStart: string) =>
+  api.get<NextPlanPreview>(`/worklog/weekly/next-plan-preview?weekStart=${weekStart}`)
 
 // ---- CAP-41/89 工作日志空间（事实源=数据库；WORKLOG 项目仅服务 AI 生成/对话） ----
 export const getWorkspace = () => api.get<WorkspaceView>('/worklog/workspace')

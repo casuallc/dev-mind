@@ -1,12 +1,11 @@
-import { Alert, Button, Checkbox, Input, Modal, Segmented, Select, Space, Tag, Typography, message } from 'antd'
+import { Alert, Button, Checkbox, Input, Modal, Select, Space, Tag, Typography, message } from 'antd'
 import { LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, RobotOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useMemo, useState, useEffect } from 'react'
-import { carryPlans, createPlanItem, deletePlanItem, listPlans, suggestPlans, updatePlanItem } from '../api'
+import { carryPlans, createPlanItem, deletePlanItem, getWeekly, listPlans, suggestPlans, updatePlanItem } from '../api'
 import type { PlanItem, PlanItemPayload } from '../types'
 import { ENTRY_TYPES, PLAN_STATUSES } from '../types'
 import FitTable from '../../../shared/components/FitTable'
-import WeekDayStrip from './WeekDayStrip'
 import PlanItemFormDrawer from './PlanItemFormDrawer'
 import { showError } from '../../../shared/utils/showError'
 
@@ -16,14 +15,11 @@ const mondayOf = (d: Dayjs) => d.startOf('week').add(1, 'day') // dayjs 周日�
 const EDITABLE_STATUSES = ['TODO', 'DOING', 'DONE', 'DROPPED']
 
 /**
- * CAP-88 FR-06 「计划」视图：日/周双层计划项（内层 Segmented 切换 + 日期/周导航）。
- * 状态徽标 + 下拉改状态 + 预估工时 + 关联需求/Jira；上一周期未完成提示条一键滚转。
+ * CAP-88 FR-06 + CAP-90 FR-06「计划」视图：WEEK 唯一粒度（日计划已并入条目——条目状态即计划态，
+ * 今日清单在「条目」页签维护）。状态徽标 + 下拉改状态 + 预估工时 + 关联需求/Jira；
+ * 上周未完成提示条一键滚转；下周计划项是周报「下周计划」节的唯一事实源（单向投影）。
  */
 export default function PlanView() {
-  const [scope, setScope] = useState<'DAY' | 'WEEK'>('DAY')
-  // DAY：按周浏览（周日条同条目视图）；WEEK：周翻页
-  const [weekStart, setWeekStart] = useState<Dayjs>(() => mondayOf(dayjs()))
-  const [day, setDay] = useState<Dayjs>(dayjs())
   const [week, setWeek] = useState<Dayjs>(() => mondayOf(dayjs()))
   const [items, setItems] = useState<PlanItem[]>([])
   const [carryover, setCarryover] = useState<PlanItem[]>([])
@@ -33,19 +29,20 @@ export default function PlanView() {
   const [editTarget, setEditTarget] = useState<PlanItem | null>(null)
   const [editOpen, setEditOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  // 上一周周报的「下周计划」文本：命中的本周计划项打「已写入周报」徽标（单向投影闭环的可视化）
+  const [reportPlanMd, setReportPlanMd] = useState('')
   // CAP-88 M3「AI 建议」弹层（受控取值，不用 Form——弹层关闭即卸载会丢值）
   const [suggestOpen, setSuggestOpen] = useState(false)
   const [suggestHint, setSuggestHint] = useState('')
   const [suggestForce, setSuggestForce] = useState(false)
   const [suggesting, setSuggesting] = useState(false)
 
-  const currentDateStr = scope === 'DAY' ? day.format('YYYY-MM-DD') : week.format('YYYY-MM-DD')
-  const isCurrentWeek = weekStart.format('YYYY-MM-DD') === mondayOf(dayjs()).format('YYYY-MM-DD')
+  const currentDateStr = week.format('YYYY-MM-DD')
   const isThisWeek = week.format('YYYY-MM-DD') === mondayOf(dayjs()).format('YYYY-MM-DD')
 
   const load = useCallback(() => {
     setLoading(true)
-    listPlans(scope, currentDateStr)
+    listPlans(currentDateStr)
       .then((r) => {
         setItems(r.items)
         setCarryover(r.carryoverItems)
@@ -53,17 +50,15 @@ export default function PlanView() {
       })
       .catch((e) => showError(e, '加载计划失败'))
       .finally(() => setLoading(false))
-  }, [scope, currentDateStr])
+    // 本周计划是否已被上周周报叙述（标题命中即视为已投影——文本可人工润色，宽松匹配）
+    getWeekly(mondayOf(dayjs(currentDateStr)).subtract(1, 'week').format('YYYY-MM-DD'))
+      .then((r) => setReportPlanMd(r?.nextPlanMd ?? ''))
+      .catch(() => setReportPlanMd(''))
+  }, [currentDateStr])
 
   useEffect(load, [load])
 
-  // 日计划周导航：同条目视图规则（当前周禁止切未来周）
-  const shiftDayWeek = (n: number) => {
-    if (n > 0 && isCurrentWeek) return
-    setWeekStart((w) => w.add(n * 7, 'day'))
-    setDay((d) => d.add(n * 7, 'day'))
-  }
-  // 周计划翻页：±1 周，不越过本周
+  // 周翻页：±1 周，不越过本周
   const shiftWeek = (n: number) => {
     if (n > 0 && isThisWeek) return
     setWeek((w) => w.add(n * 7, 'day'))
@@ -119,7 +114,7 @@ export default function PlanView() {
 
   const onCarryAll = () => {
     setCarrying(true)
-    carryPlans(scope, currentDateStr, carryover.map((c) => c.id))
+    carryPlans(currentDateStr, carryover.map((c) => c.id))
       .then((r) => {
         message.success(`已滚转 ${r.carried} 项${r.skipped > 0 ? `，跳过 ${r.skipped} 项` : ''}`)
         load()
@@ -156,31 +151,17 @@ export default function PlanView() {
   return (
     <>
       <Space style={{ marginBottom: 12 }} wrap>
-        <Segmented
-          value={scope}
-          onChange={(v) => setScope(v as 'DAY' | 'WEEK')}
-          options={[
-            { value: 'DAY', label: '日计划' },
-            { value: 'WEEK', label: '周计划' },
-          ]}
-        />
-        {scope === 'WEEK' && (
-          <>
-            <Button size="small" icon={<LeftOutlined />} onClick={() => shiftWeek(-1)} />
-            <Typography.Text>
-              {week.format('YYYY-MM-DD')} 周{isThisWeek && '（本周）'}
-            </Typography.Text>
-            <Button size="small" icon={<RightOutlined />} disabled={isThisWeek} onClick={() => shiftWeek(1)} />
-            <Button size="small" disabled={isThisWeek} onClick={() => setWeek(mondayOf(dayjs()))}>
-              本周
-            </Button>
-          </>
-        )}
-        {scope === 'WEEK' && (
-          <Button icon={<RobotOutlined />} onClick={() => setSuggestOpen(true)}>
-            AI 建议
-          </Button>
-        )}
+        <Button size="small" icon={<LeftOutlined />} onClick={() => shiftWeek(-1)} />
+        <Typography.Text>
+          {week.format('YYYY-MM-DD')} 周{isThisWeek && '（本周）'}
+        </Typography.Text>
+        <Button size="small" icon={<RightOutlined />} disabled={isThisWeek} onClick={() => shiftWeek(1)} />
+        <Button size="small" disabled={isThisWeek} onClick={() => setWeek(mondayOf(dayjs()))}>
+          本周
+        </Button>
+        <Button icon={<RobotOutlined />} onClick={() => setSuggestOpen(true)}>
+          AI 建议
+        </Button>
         <Button icon={<ReloadOutlined />} onClick={load}>
           刷新
         </Button>
@@ -205,7 +186,7 @@ export default function PlanView() {
           type="warning"
           showIcon
           style={{ marginBottom: 12 }}
-          message={`上一${scope === 'DAY' ? '天' : '周'}（${carryoverFrom}）有 ${carryover.length} 项计划未完成`}
+          message={`上一周（${carryoverFrom}）有 ${carryover.length} 项计划未完成`}
           description={
             <Space direction="vertical" size={4}>
               {carryover.map((c) => (
@@ -217,33 +198,17 @@ export default function PlanView() {
           }
           action={
             <Button size="small" type="primary" loading={carrying} onClick={onCarryAll}>
-              一键滚转到本{scope === 'DAY' ? '日' : '周'}
+              一键滚转到本周
             </Button>
           }
         />
-      )}
-      {scope === 'DAY' && (
-        <>
-          <WeekDayStrip
-            weekStart={weekStart}
-            selected={day.format('YYYY-MM-DD')}
-            onSelect={setDay}
-            onShiftWeek={shiftDayWeek}
-          />
-          <div style={{ textAlign: 'center', marginTop: -8, marginBottom: 12 }}>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {weekStart.format('YYYY-MM-DD')} ~ {weekStart.add(6, 'day').format('MM-DD')}
-              {isCurrentWeek && '（本周）'}
-            </Typography.Text>
-          </div>
-        </>
       )}
       <FitTable
         rowKey="id"
         loading={loading}
         dataSource={items}
         pagination={false}
-        locale={{ emptyText: '本周期暂无计划项：点「新建计划项」开始规划' }}
+        locale={{ emptyText: '本周暂无计划项：点「新建计划项」开始规划（日计划已并入条目——在「条目」页签建计划态条目）' }}
         columns={[
           {
             title: '标题',
@@ -253,6 +218,11 @@ export default function PlanView() {
               <Space size={4}>
                 {i.source === 'AI_SUGGEST' && <Tag color="geekblue">AI</Tag>}
                 {i.carriedFromId != null && <Tag color="purple">滚转</Tag>}
+                {reportPlanMd.includes(t) && (
+                  <Tag color="cyan" title="上一周周报的「下周计划」已叙述该项（单向投影，文本可再润色）">
+                    已写入周报
+                  </Tag>
+                )}
                 <span>{t}</span>
               </Space>
             ),
@@ -332,7 +302,6 @@ export default function PlanView() {
       <PlanItemFormDrawer
         open={editOpen}
         target={editTarget}
-        scope={scope}
         defaultDate={currentDateStr}
         saving={saving}
         onCancel={() => setEditOpen(false)}

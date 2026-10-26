@@ -3,21 +3,24 @@ import {
   Button,
   Card,
   Input,
+  InputNumber,
   Modal,
   Space,
   Tag,
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined, GithubOutlined, CodeOutlined, RobotOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, GithubOutlined, CodeOutlined, RobotOutlined, CheckOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  carryEntries,
   createDaily,
   createEntry,
   createWeekly,
   deleteEntry,
   ensureWorkspace,
+  entryCarryover,
   generateDaily,
   generateWeekly,
   getDaily,
@@ -25,8 +28,8 @@ import {
   getWorkspace,
   listDailyWeek,
   listEntries,
-  listPlans,
   listWeeklyRecent,
+  nextPlanPreview,
   updateDaily,
   updateEntry,
   updateWeekly,
@@ -38,7 +41,7 @@ import type {
   WorklogEntry,
   WorkspaceView,
 } from '../types'
-import { ENTRY_SOURCES, ENTRY_TYPES } from '../types'
+import { ENTRY_SOURCES, ENTRY_TYPES, PLAN_STATUSES } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import EntryFormDrawer from '../components/EntryFormDrawer'
 import GitImportDrawer from '../components/GitImportDrawer'
@@ -156,17 +159,70 @@ export default function WorklogPage() {
     return m
   }, [weekEntries])
 
-  // ---- CAP-88 FR-06：条目视图当日分组顶部显示当日计划完成度（如 3/5） ----
-  const [dayPlanRatio, setDayPlanRatio] = useState<{ done: number; total: number } | null>(null)
+  // ---- CAP-90 FR-07：当日完成度由条目状态派生（日计划已并入条目，不再查 DAY 计划项） ----
+  const dayPlanRatio = useMemo(() => {
+    const active = dayEntries.filter((e) => e.status !== 'DROPPED' && e.status !== 'CARRIED')
+    return active.length > 0
+      ? { done: active.filter((e) => e.status === 'DONE').length, total: active.length }
+      : null
+  }, [dayEntries])
+
+  // ---- CAP-90 FR-05：昨日未完成条目提示 + 一键滚转到今日（仅选中今天时出现） ----
+  const [carryoverEntries, setCarryoverEntries] = useState<WorklogEntry[]>([])
+  const [carryingEntries, setCarryingEntries] = useState(false)
+  const isEntryDayToday = entryDayStr === dayjs().format('YYYY-MM-DD')
   useEffect(() => {
-    if (view !== 'entries') return
-    listPlans('DAY', entryDayStr)
+    if (view !== 'entries' || !isEntryDayToday) {
+      setCarryoverEntries([])
+      return
+    }
+    entryCarryover(entryDayStr)
+      .then(setCarryoverEntries)
+      .catch(() => setCarryoverEntries([]))
+  }, [view, entryDayStr, isEntryDayToday, weekEntries])
+
+  const onCarryEntries = () => {
+    setCarryingEntries(true)
+    carryEntries(entryDayStr, carryoverEntries.map((e) => e.id))
       .then((r) => {
-        const active = r.items.filter((i) => i.status !== 'DROPPED' && i.status !== 'CARRIED')
-        setDayPlanRatio(active.length > 0 ? { done: active.filter((i) => i.status === 'DONE').length, total: active.length } : null)
+        message.success(`已滚转 ${r.carried} 条${r.skipped > 0 ? `，跳过 ${r.skipped} 条` : ''}`)
+        setCarryoverEntries([])
+        loadEntries()
       })
-      .catch(() => setDayPlanRatio(null))
-  }, [view, entryDayStr])
+      .catch((e) => showError(e, '滚转失败'))
+      .finally(() => setCarryingEntries(false))
+  }
+
+  // ---- CAP-90 FR-03「完成」一步到位：点完成 → 弹实际工时（预估预填）→ 状态置 DONE ----
+  const [completeTarget, setCompleteTarget] = useState<WorklogEntry | null>(null)
+  const [completeHours, setCompleteHours] = useState(1)
+  const [completing, setCompleting] = useState(false)
+  const onComplete = async () => {
+    if (!completeTarget) return
+    setCompleting(true)
+    const e = completeTarget
+    try {
+      await updateEntry(e.id, {
+        workDate: e.workDate,
+        title: e.title,
+        content: e.content,
+        entryType: e.entryType,
+        hours: completeHours,
+        requirementId: e.requirementId,
+        jiraIssueKey: e.jiraIssueKey,
+        planId: e.planItemId,
+        status: 'DONE',
+        estimateHours: e.estimateHours,
+      })
+      message.success('已完成')
+      setCompleteTarget(null)
+      loadEntries()
+    } catch (err) {
+      showError(err, '完成失败')
+    } finally {
+      setCompleting(false)
+    }
+  }
 
   const loadDailyWeek = useCallback(() => {
     setLoading(true)
@@ -517,8 +573,28 @@ export default function WorklogPage() {
           </div>
           {dayPlanRatio && (
             <Typography.Paragraph type="secondary" style={{ marginBottom: 8, fontSize: 12 }}>
-              当日计划完成度：{dayPlanRatio.done}/{dayPlanRatio.total}（「计划」页签维护）
+              当日完成度：{dayPlanRatio.done}/{dayPlanRatio.total}
             </Typography.Paragraph>
+          )}
+          {isEntryDayToday && carryoverEntries.length > 0 && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 8 }}
+              message={`昨日有 ${carryoverEntries.length} 条未完成条目（计划态）`}
+              description={
+                <Space size={4} wrap>
+                  {carryoverEntries.map((e) => (
+                    <Tag key={e.id}>{e.title}</Tag>
+                  ))}
+                </Space>
+              }
+              action={
+                <Button size="small" type="primary" loading={carryingEntries} onClick={onCarryEntries}>
+                  一键滚转到今天
+                </Button>
+              }
+            />
           )}
           <FitTable
             rowKey="id"
@@ -543,6 +619,15 @@ export default function WorklogPage() {
               { title: '日期', dataIndex: 'workDate', width: 110 },
               { title: '标题', dataIndex: 'title', ellipsis: true },
               {
+                title: '状态',
+                dataIndex: 'status',
+                width: 90,
+                render: (s: string) => {
+                  const meta = PLAN_STATUSES[s]
+                  return meta ? <Tag color={meta.color}>{meta.label}</Tag> : s
+                },
+              },
+              {
                 title: '类型',
                 dataIndex: 'entryType',
                 width: 90,
@@ -551,8 +636,12 @@ export default function WorklogPage() {
               {
                 title: '工时',
                 dataIndex: 'hours',
-                width: 90,
-                render: (h: number) => `${h}h`,
+                width: 110,
+                render: (h: number, e) =>
+                  // 计划态展示 预估/已用，DONE 只记实际工时
+                  e.status === 'TODO' || e.status === 'DOING'
+                    ? `${e.estimateHours ?? '-'} / ${h}h`
+                    : `${h}h`,
               },
               {
                 title: '来源',
@@ -590,9 +679,24 @@ export default function WorklogPage() {
               },
               {
                 title: '操作',
-                width: 150,
+                width: 190,
                 render: (_, e) => (
                   <Space>
+                    {/* 计划态人工条目可一键完成（GIT/AGENT 恒 DONE 无此按钮） */}
+                    {(e.status === 'TODO' || e.status === 'DOING') && e.source === 'MANUAL' && (
+                      <Button
+                        size="small"
+                        type="primary"
+                        ghost
+                        icon={<CheckOutlined />}
+                        onClick={() => {
+                          setCompleteTarget(e)
+                          setCompleteHours(e.estimateHours && e.estimateHours > 0 ? e.estimateHours : 1)
+                        }}
+                      >
+                        完成
+                      </Button>
+                    )}
                     <Button
                       size="small"
                       onClick={() => {
@@ -616,7 +720,7 @@ export default function WorklogPage() {
       {view === 'plan' && (
         <>
           <Typography.Paragraph type="secondary">
-            日计划管当天执行对照，周计划管方向与周间滚转；条目编辑抽屉可关联计划项（关联自动置「进行中」）；上一周期未完成项可一键滚转。
+            周计划管方向与周间滚转；日计划已并入条目（条目选「待办/进行中」即为当日计划，「条目」页签一键滚转昨日未完成）；条目编辑抽屉可关联周计划项（关联自动置「进行中」）。
           </Typography.Paragraph>
           <PlanView />
         </>
@@ -692,6 +796,7 @@ export default function WorklogPage() {
               ]}
               onCreateManual={onCreateWeekly}
               onGenerate={(force, hint) => onGenerate('weekly', force, hint)}
+              onRebuildNextPlan={() => nextPlanPreview(weekStartStr)}
               onSave={async (values) => {
                 if (weekly?.exists) {
                   const updated = await updateWeekly(weekStartStr, { summaryMd: values.summaryMd, nextPlanMd: values.nextPlanMd })
@@ -720,6 +825,31 @@ export default function WorklogPage() {
         onImported={loadEntries}
       />
       <RepoSubscriptionDrawer open={reposOpen} onCancel={() => setReposOpen(false)} />
+      {/* CAP-90 FR-03：完成一步到位——弹实际工时确认（预估预填），确认即置 DONE */}
+      <Modal
+        centered
+        open={completeTarget != null}
+        title={`完成「${completeTarget?.title ?? ''}」`}
+        okText="确认完成"
+        cancelText="取消"
+        confirmLoading={completing}
+        onOk={onComplete}
+        onCancel={() => setCompleteTarget(null)}
+      >
+        <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+          确认实际工时后条目置「已完成」；预填的是预估工时，按实际情况修正。
+        </Typography.Paragraph>
+        <Space>
+          <span>实际工时（小时）：</span>
+          <InputNumber
+            min={0.25}
+            max={24}
+            step={0.25}
+            value={completeHours}
+            onChange={(v) => setCompleteHours(v ?? 0.25)}
+          />
+        </Space>
+      </Modal>
     </Card>
   )
 }

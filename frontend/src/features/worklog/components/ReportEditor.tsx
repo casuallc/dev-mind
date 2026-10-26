@@ -1,5 +1,5 @@
 import { Button, Empty, Input, Modal, Space, Typography, message } from 'antd'
-import { RobotOutlined, EditOutlined } from '@ant-design/icons'
+import { RobotOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { fmtTime } from '../../../shared/utils/format'
 import MarkdownEditor, { type MarkdownEditorMode } from '../../../shared/components/MarkdownEditor'
@@ -22,6 +22,11 @@ interface Props {
   fill?: boolean
   /** 多字段布局：vertical 上下（默认）；horizontal 左右等宽（周报「周总结 / 下周计划」） */
   layout?: 'vertical' | 'horizontal'
+  /**
+   * CAP-90 FR-10「从计划项重建」：仅周报传——拉取下周期计划项的确定性 markdown 预览，
+   * 人工确认后替换 nextPlanMd 编辑值（保存才落库）；返回 null 表示下周无计划项。
+   */
+  onRebuildNextPlan?: () => Promise<{ markdown: string; itemCount: number } | null>
 }
 
 /**
@@ -42,6 +47,7 @@ export default function ReportEditor({
   onSave,
   fill,
   layout = 'vertical',
+  onRebuildNextPlan,
 }: Props) {
   const [values, setValues] = useState<Record<string, string>>({})
   const [modes, setModes] = useState<Record<string, MarkdownEditorMode>>({})
@@ -50,6 +56,45 @@ export default function ReportEditor({
   const [genOpen, setGenOpen] = useState(false)
   const [genForce, setGenForce] = useState(false)
   const [hint, setHint] = useState('')
+  const [rebuilding, setRebuilding] = useState(false)
+
+  // CAP-90 FR-10：下周计划项 → markdown 确定性投影，人工确认后填入「下周计划」（保存才落库）
+  const rebuildNextPlan = async () => {
+    if (!onRebuildNextPlan) return
+    setRebuilding(true)
+    try {
+      const preview = await onRebuildNextPlan()
+      if (!preview || preview.itemCount === 0) {
+        message.info('下周暂无计划项：可先在「计划」页签排下周计划')
+        return
+      }
+      Modal.confirm({
+        centered: true,
+        title: `用 ${preview.itemCount} 项下周计划重建「下周计划」？`,
+        content: (
+          <div>
+            <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+              将替换当前编辑值（未保存的旧文本不受影响；保存后才落库）：
+            </Typography.Paragraph>
+            <Typography.Paragraph>
+              <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{preview.markdown}</pre>
+            </Typography.Paragraph>
+          </div>
+        ),
+        okText: '填入编辑框',
+        cancelText: '取消',
+        onOk: () => {
+          setValues((v) => ({ ...v, nextPlanMd: preview.markdown }))
+          // 切到编辑态让「保存修改」出现（全预览时保存按钮隐藏）
+          setModes((m) => ({ ...m, nextPlanMd: 'split' }))
+        },
+      })
+    } catch (e) {
+      showError(e, '获取下周计划预览失败')
+    } finally {
+      setRebuilding(false)
+    }
+  }
 
   useEffect(() => {
     const next: Record<string, string> = {}
@@ -172,6 +217,17 @@ export default function ReportEditor({
         <Button size="small" icon={<RobotOutlined />} loading={generating} onClick={() => openGenerate(true)}>
           重新生成
         </Button>
+        {onRebuildNextPlan && (
+          <Button
+            size="small"
+            icon={<ReloadOutlined />}
+            loading={rebuilding}
+            onClick={rebuildNextPlan}
+            title="以下周期计划项为准重建「下周计划」文本（计划项是唯一事实源，文本只是其叙述投影）"
+          >
+            从计划项重建
+          </Button>
+        )}
         {anyEditing && (
           <Button size="small" type="primary" loading={saving} onClick={save}>
             保存修改

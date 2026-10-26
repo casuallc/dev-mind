@@ -9,17 +9,18 @@ interface Props {
   open: boolean
   /** null = 新建 */
   target: PlanItem | null
-  /** 视图当前 scope：新建时锁定（日/周计划分开排） */
-  scope: 'DAY' | 'WEEK'
-  /** 新建时默认日期（DAY=当天；WEEK=周内任意日，后端归一到周一） */
+  /** 新建时默认周（周内任意日，后端归一到周一） */
   defaultDate: string
   saving: boolean
   onCancel: () => void
   onSave: (payload: PlanItemPayload) => void
 }
 
-/** CAP-88 FR-06 计划项编辑抽屉：新建/编辑共用（scope 不可改——改层即改语义，重建代替）。 */
-export default function PlanItemFormDrawer({ open, target, scope, defaultDate, saving, onCancel, onSave }: Props) {
+/**
+ * CAP-88 FR-06 计划项编辑抽屉：新建/编辑共用。
+ * CAP-90 FR-06：收窄为 WEEK 唯一粒度（日计划已并入条目——建计划态条目代替）。
+ */
+export default function PlanItemFormDrawer({ open, target, defaultDate, saving, onCancel, onSave }: Props) {
   const [form] = Form.useForm()
 
   useEffect(() => {
@@ -46,7 +47,7 @@ export default function PlanItemFormDrawer({ open, target, scope, defaultDate, s
   const submit = async () => {
     const v = await form.validateFields()
     onSave({
-      scope: target ? target.scope : scope,
+      scope: 'WEEK',
       date: (v.date as Dayjs).format('YYYY-MM-DD'),
       title: v.title,
       content: v.content || undefined,
@@ -59,7 +60,7 @@ export default function PlanItemFormDrawer({ open, target, scope, defaultDate, s
 
   return (
     <Drawer
-      title={target ? '编辑计划项' : `新建${scope === 'DAY' ? '日' : '周'}计划项`}
+      title={target ? '编辑计划项' : '新建周计划项'}
       open={open}
       onClose={onCancel}
       width={DRAWER_DEFAULT}
@@ -74,16 +75,8 @@ export default function PlanItemFormDrawer({ open, target, scope, defaultDate, s
       }
     >
       <Form form={form} layout="vertical">
-        <Form.Item
-          name="date"
-          label={scope === 'DAY' || target?.scope === 'DAY' ? '日期' : '周（任选周内一天）'}
-          rules={[{ required: true, message: '请选择日期' }]}
-        >
-          <DatePicker
-            style={{ width: '100%' }}
-            allowClear={false}
-            picker={(target ? target.scope : scope) === 'WEEK' ? 'week' : 'date'}
-          />
+        <Form.Item name="date" label="周（任选周内一天）" rules={[{ required: true, message: '请选择周' }]}>
+          <DatePicker style={{ width: '100%' }} allowClear={false} picker="week" />
         </Form.Item>
         <Form.Item name="title" label="标题" rules={[{ required: true, message: '请输入标题' }]}>
           <Input placeholder="计划做什么，一句话" maxLength={256} />
