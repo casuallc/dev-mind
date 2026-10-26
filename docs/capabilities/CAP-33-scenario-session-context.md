@@ -11,6 +11,8 @@
 >   行为修复：resume 由重装配未渲染原文改为按落库 scenarioCode 重渲染。
 > - dryRun 预览（`GET /api/scenarios/{code}/preview`）零副作用不 bumpHits；
 >   真实装配（create/resume/包重建）沿用 CAP-04 hitCount 累计。
+> - 后续修订（CAP-92）：场景资产的知识部分由 `knowledgeTags` 改为 `knowledgeBaseIds`，
+>   装配时以渲染后的任务说明为查询检索、只注入命中片段；dryRun 同样检索但不 bumpHits。
 > - 路由/预设优先级——会话：显式 > 场景预设 > 项目默认 > 平台默认 > 标签兜底（皆无 409）；
 >   chat：显式 > 场景 > 平台默认；model/permissionMode：显式 > 场景 > props 默认。
 >   PROJECT 场景挂会话 projectId 必须相符（400）；chat 挂 PROJECT 场景 = 以该项目身份装配。

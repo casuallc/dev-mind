@@ -21,7 +21,7 @@
 | [CAP-01](CAP-01-auth.md) | 用户认证与权限 | 管理 | 已实现 | 登录鉴权与角色，所有操作的 actor 基础 |
 | [CAP-02](CAP-02-project-management.md) | 项目管理 | 管理 | 已实现 | 注册项目与服务器，其余能力的挂载点 |
 | [CAP-03](CAP-03-document-management.md) | 文档管理 | 管理 | 已实现 | 版本化文档库（DB），需求/方案/报告跟需求走 |
-| [CAP-04](CAP-04-knowledge-base.md) | 知识库管理 | 管理 | 已实现（经 CAP-44 容器化/RAG 化、CAP-84 升级混合检索） | 经验分层（global/projects/inbox）+ 注入 + 捕获 |
+| [CAP-04](CAP-04-knowledge-base.md) | 知识库管理 | 管理 | 已实现（经 CAP-44 容器化/RAG 化、CAP-84 升级混合检索、CAP-92 收敛为检索注入） | 经验分层（global/projects/inbox）+ 捕获；消费统一为检索命中注入 |
 | [CAP-05](CAP-05-agent-session.md) | Agent 会话管理 | 底座 | 已实现（经 CAP-31/34/42/50/51/53/54 多轮演进） | 起/管/收 headless agent 会话，worktree 隔离，看板 |
 | [CAP-06](CAP-06-notification.md) | 通知中心 | 底座 | 已实现 | 事件分级路由，多通道推送，远程快捷动作 |
 | [CAP-07](CAP-07-server-adapter.md) | 服务器适配器 | 底座 | 已废弃 → CAP-36（模块已删除） | 原 SSH/HTTP 插件化服务器控制，远程执行统一切 runner exec 帧 |
@@ -50,7 +50,7 @@
 | [CAP-30](CAP-30-agent-chat.md) | 通用问答 | 底座 | 已实现（CAP-49 增 MODEL 执行体、CAP-46 增知识库绑定） | 无项目纯问答（个人组 /chats），共享内核上移 common |
 | [CAP-31](CAP-31-session-multirepo.md) | 项目会话多仓库与归属拆分 | 底座 | 已实现（经 CAP-42/51 重构布局） | 会话收敛纯项目开发会话 + 显式关联多 git 仓库 |
 | [CAP-32](CAP-32-attachment.md) | 公共附件管理 | 底座 | 已实现（CAP-68 补标签/到期/生命周期） | 统一附件模型：上传即附件、字符串 id 引用、图片内联渲染 |
-| [CAP-33](CAP-33-scenario-session-context.md) | 场景化会话与上下文装配 | 底座 | 已实现 | 场景=命名模板+预装配上下文包，session/chat 统一装配管线 |
+| [CAP-33](CAP-33-scenario-session-context.md) | 场景化会话与上下文装配 | 底座 | 已实现（CAP-92 场景改绑知识库并检索） | 场景=命名模板+预装配上下文包，session/chat 统一装配管线 |
 | [CAP-34](CAP-34-agent-runner-executor.md) | Agent Runner 执行代理化 | 底座 | 已实现（FR-06 exec 帧随 CAP-36 落地） | 服务端零执行纯调度，一切执行收敛 runner 层 |
 | [CAP-35](CAP-35-unified-platform-accounts.md) | 统一第三方账号体系 | 底座 | 已实现 | UserPlatformAccount 绑定实例，MR/PR、Jira、worklog 全走个人优先身份链 |
 | [CAP-36](CAP-36-build-on-runner.md) | 构建执行 Runner 化 | 底座 | 已实现 | 构建/测试/部署/发版统一切 agent 节点 exec 帧执行 |
@@ -61,9 +61,9 @@
 | [CAP-41](CAP-41-worklog-workspace.md) | 工作日志空间 | 组装层 | 已实现（存储随 CAP-89 回 DB；远程备份退役） | WORKLOG 特殊项目 + 按用户持久工作区，报告走真实会话写文件 |
 | [CAP-42](CAP-42-per-user-workspace.md) | 每用户固定工作区与手动收口 | 底座 | 已实现（粒度经 CAP-51 重构） | runner 工作区固定 {项目}/{用户}，页面手动收口合并+push+删 worktree |
 | [CAP-43](CAP-43-agent-node-proxy.md) | Agent 节点外网代理 | 底座 | 已实现 | 节点级 HTTP 代理按功能勾选 scope，随帧下发 runner 进程级注入 |
-| [CAP-44](CAP-44-knowledge-base-rag.md) | 知识库容器化与向量检索 | 管理 | 已实现（检索链路经 CAP-84 升级为 Lucene 混合检索） | 知识库一等容器（scope+inject_mode），条目分块向量化，检索 SPI |
+| [CAP-44](CAP-44-knowledge-base-rag.md) | 知识库容器化与向量检索 | 管理 | 已实现（检索链路经 CAP-84 升级为 Lucene 混合检索；CAP-92 下线 FULL 注入） | 知识库一等容器（scope 分层），条目分块向量化，检索 SPI |
 | [CAP-45](CAP-45-feishu-knowledge-import.md) | 飞书文档对接 | 管理 | 已实现（CAP-85 补增量同步） | wiki/docx 拉取转 markdown 导入知识库，变更检测+手动重同步 |
-| [CAP-46](CAP-46-kb-chat.md) | 知识库 AI 会话 | 会话 | 已实现（CAP-84 扩多库/引用快照） | 通用问答绑定知识库，每轮检索包注入，无命中降级 |
+| [CAP-46](CAP-46-kb-chat.md) | 知识库 AI 会话 | 会话 | 已实现（CAP-84 扩多库/引用快照；检索口径经 CAP-92 统一） | 通用问答绑定知识库，每轮检索包注入，无命中降级 |
 | [CAP-47](CAP-47-requirement-push-to-jira.md) | 自建需求手动推送到 Jira | 底座 | 已实现 | LOCAL 需求手动推送建 Jira issue，createmeta 动态渲染必填字段 |
 | [CAP-48](CAP-48-model-endpoint-management.md) | 模型接入管理 | 底座 | 已实现 | 模型端点一等资源（密文凭据+连接测试+平台默认+库级覆盖+索引血缘） |
 | [CAP-49](CAP-49-chat-model-executor.md) | 问答模型执行体 | 底座 | 已实现 | 问答 MODEL 执行体：服务端直连 CHAT 端点流式 SSE，零节点依赖 |
@@ -101,14 +101,15 @@
 | [CAP-81](CAP-81-computer-use.md) | 远程桌面（节点 GUI 观测与控制） | Agent 域 | 定稿未实施 | runner 补 GUI 原语（截屏/键鼠），三里程碑：观看/交互/审计运维 |
 | [CAP-82](CAP-82-llm-computer-use.md) | LLM Computer-Use 循环 | Agent 域 | 定稿未实施 | 视觉模型循环操作 GUI：computer_use_tasks/steps、dryRun、人工接管 |
 | [CAP-83](CAP-83-binary-session-outputs.md) | 会话产出二进制文件回传 | Agent 域 | 已实现 | 二进制产出走裸字节 POST 进附件管理，session_outputs 加 attachment_id |
-| [CAP-84](CAP-84-knowledge-management-v2.md) | 知识管理 v2 | 管理/底座 | 已实现（M1~M4） | 万级文档摄入（devmind-task 异步）+ Lucene 混合检索 + SOLUTION 方案输出 |
+| [CAP-84](CAP-84-knowledge-management-v2.md) | 知识管理 v2 | 管理/底座 | 已实现（M1~M4；CAP-92 下线全量注入） | 万级文档摄入（devmind-task 异步）+ Lucene 混合检索 + SOLUTION 方案输出 |
 | [CAP-85](CAP-85-knowledge-governance-sync.md) | 知识治理与增量同步 | 管理/底座 | 已实现 | Git/飞书增量同步 + 自动分类摘要 + 复核提醒 + 近重复报告 + 评测 |
-| [CAP-86](CAP-86-knowledge-workspace.md) | 知识库管理台（菜单组化信息架构） | 管理/前端体验 | 已实现（v3） | 后台「知识库」菜单组：库总览/文档导入/召回验证/治理报告 |
+| [CAP-86](CAP-86-knowledge-workspace.md) | 知识库管理台（菜单组化信息架构） | 管理/前端体验 | 已实现（v3；CAP-92 移除注入方式/注入预览） | 后台「知识库」菜单组：库总览/文档导入/召回验证/治理报告 |
 | [CAP-87](CAP-87-changelog.md) | 控制台更新日志 | 管理/前端体验 | 已实现 | CHANGELOG.md 随包分发，控制台只读解析渲染 |
 | [CAP-88](CAP-88-worklog-plan-loop.md) | 工作日志计划闭环 | 组装层 | 已实现（M1+M2+M3；FR-11 提醒开放后置；日计划口径 2026-10-26 被 CAP-90 修订并入条目） | 日/周计划项一等数据 + 条目关联 + 数据驱动复盘，M3 AI 建议计划 |
 | [CAP-89](CAP-89-worklog-storage-back-to-db.md) | 工作日志存储回 DB | 组装层 | 已实现（取代 CAP-74） | 去 git 仓化与远程推送：事实源回 DB，团队仓退役，幂等迁移 |
 | [CAP-90](CAP-90-worklog-plan-entry-merge.md) | 工作日志计划-条目合并与周报投影 | 组装层 | 已实现（2026-10-26；WEEK 联动保留为实现修订） | 日计划并入条目（status=DONE 即事实），周计划唯一计划实体，周报下周计划单向投影 |
 | [CAP-91](CAP-91-worklog-goals-okr.md) | 工作目标与 OKR 对齐 | 组装层 | 已实现（M1+M2+M3，2026-10-26） | 年度目标 + 季度 OKR 一等数据，周计划挂 KR 对齐，季度复盘数据驱动投影 |
+| [CAP-92](CAP-92-knowledge-injection-retrieval.md) | 知识注入收敛为检索 | 管理/底座 | 已实现（M1+M2+M3，2026-10-26） | 下线 FULL 全量注入与注入预览；场景改绑知识库，装配时按任务检索命中片段 |
 
 ## 文档模板说明
 
