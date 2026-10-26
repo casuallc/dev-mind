@@ -1,8 +1,9 @@
-import { Button, Drawer, Form, Input, InputNumber, Select, Space, DatePicker } from 'antd'
+import { Button, Drawer, Form, Input, InputNumber, Select, Space, DatePicker, Tag } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
-import { useEffect } from 'react'
-import type { EntryPayload, WorklogEntry } from '../types'
-import { ENTRY_TYPES } from '../types'
+import { useEffect, useState } from 'react'
+import type { EntryPayload, PlanItem, WorklogEntry } from '../types'
+import { ENTRY_TYPES, PLAN_STATUSES } from '../types'
+import { listLinkablePlans } from '../api'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 interface Props {
@@ -16,9 +17,16 @@ interface Props {
   onSave: (payload: EntryPayload) => void
 }
 
-/** CAP-28 工作条目编辑抽屉：新建/编辑共用（按布局约定成套表单收进 Drawer）。 */
+/**
+ * CAP-28 工作条目编辑抽屉：新建/编辑共用（按布局约定成套表单收进 Drawer）。
+ * CAP-88 FR-04/06：增「关联计划项」下拉（当日日计划 + 当周周计划；DOING/DONE 也可选——补录忘挂的执行），
+ * 关联后服务端自动把 TODO 项置「进行中」。
+ */
 export default function EntryFormDrawer({ open, target, defaultDate, saving, onCancel, onSave }: Props) {
   const [form] = Form.useForm()
+  const [linkable, setLinkable] = useState<PlanItem[]>([])
+  // 日期变化 → 可关联计划项跟着变（当日日计划 + 当周周计划）
+  const workDate: Dayjs | undefined = Form.useWatch('workDate', form)
 
   useEffect(() => {
     if (!open) return
@@ -26,6 +34,7 @@ export default function EntryFormDrawer({ open, target, defaultDate, saving, onC
       form.setFieldsValue({
         ...target,
         workDate: dayjs(target.workDate),
+        planId: target.planItemId,
       })
     } else {
       form.setFieldsValue({
@@ -36,9 +45,17 @@ export default function EntryFormDrawer({ open, target, defaultDate, saving, onC
         content: '',
         requirementId: '',
         jiraIssueKey: '',
+        planId: undefined,
       })
     }
   }, [open, target, defaultDate, form])
+
+  useEffect(() => {
+    if (!open || !workDate) return
+    listLinkablePlans(workDate.format('YYYY-MM-DD'))
+      .then(setLinkable)
+      .catch(() => setLinkable([]))
+  }, [open, workDate])
 
   const submit = async () => {
     const v = await form.validateFields()
@@ -50,8 +67,15 @@ export default function EntryFormDrawer({ open, target, defaultDate, saving, onC
       hours: v.hours,
       requirementId: v.requirementId || undefined,
       jiraIssueKey: v.jiraIssueKey || undefined,
+      planId: v.planId ?? undefined,
     })
   }
+
+  // 已关联项不在可关联范围（如关联后又被放弃/滚转）时兜底显示，避免下拉只露裸 id
+  const linkedMissing =
+    target?.planItemId != null && !linkable.some((p) => p.id === target.planItemId)
+      ? target.planItemId
+      : null
 
   return (
     <Drawer
@@ -87,6 +111,36 @@ export default function EntryFormDrawer({ open, target, defaultDate, saving, onC
         >
           <InputNumber min={0.25} max={24} step={0.25} style={{ width: '100%' }} />
         </Form.Item>
+        <Form.Item
+          name="planId"
+          label="关联计划项"
+          extra="当日日计划 + 当周周计划；关联后计划项自动置「进行中」（完成仍需人工）"
+        >
+          <Select
+            allowClear
+            placeholder="可选"
+            options={[
+              ...linkable.map((p) => ({
+                value: p.id,
+                label: p.title,
+                scope: p.scope,
+                status: p.status,
+              })),
+              ...(linkedMissing != null
+                ? [{ value: linkedMissing, label: `关联计划 #${linkedMissing}（已放弃/已滚转）`, scope: '', status: '' }]
+                : []),
+            ]}
+            optionRender={(opt) => (
+              <Space size={4}>
+                {(opt.data as { scope?: string }).scope === 'WEEK' && <Tag>周</Tag>}
+                <span>{opt.label}</span>
+                {(opt.data as { status?: string }).status && (
+                  <TypographyTextStatus status={(opt.data as { status?: string }).status!} />
+                )}
+              </Space>
+            )}
+          />
+        </Form.Item>
         <Form.Item name="content" label="详情">
           <Input.TextArea rows={4} placeholder="可选：背景、结论、链接等" />
         </Form.Item>
@@ -98,5 +152,16 @@ export default function EntryFormDrawer({ open, target, defaultDate, saving, onC
         </Form.Item>
       </Form>
     </Drawer>
+  )
+}
+
+/** 计划状态下拉选项里的小徽标（避免选项里塞整包 Tag 样式过重） */
+function TypographyTextStatus({ status }: { status: string }) {
+  const s = PLAN_STATUSES[status]
+  if (!s) return null
+  return (
+    <Tag color={s.color} style={{ marginInlineEnd: 0 }}>
+      {s.label}
+    </Tag>
   )
 }

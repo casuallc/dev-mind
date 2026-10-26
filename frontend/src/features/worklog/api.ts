@@ -1,12 +1,16 @@
 // CAP-28 个人工作日志与工时管理 API
 import { api } from '../../shared/api/client'
 import type {
+  CarryResult,
   DailyReport,
   EntryPage,
   EntryPayload,
   GenerateAck,
   GitPreview,
   GitPreviewFilter,
+  PlanItem,
+  PlanItemPayload,
+  PlanListView,
   TemplateDefaults,
   WeeklyReport,
   WorklogEntry,
@@ -34,6 +38,20 @@ export const updateEntry = (id: string, body: EntryPayload) =>
   api.put<WorklogEntry>(`/worklog/entries/${id}`, body)
 /** CAP-89：删除按 uuid 直删（DB 主键，不再需要日期寻址） */
 export const deleteEntry = (id: string) => api.del(`/worklog/entries/${id}`)
+
+// ---- CAP-88 计划项（日/周双层，状态机 TODO→DOING 自动、DONE/DROPPED 人工、CARRIED 滚转写入） ----
+export const listPlans = (scope: 'DAY' | 'WEEK', date: string) =>
+  api.get<PlanListView>(`/worklog/plans?scope=${scope}&date=${date}`)
+/** 条目抽屉可关联项：当日日计划 + 当周周计划 */
+export const listLinkablePlans = (date: string) =>
+  api.get<PlanItem[]>(`/worklog/plans/linkable?date=${date}`)
+export const createPlanItem = (body: PlanItemPayload) => api.post<PlanItem>('/worklog/plans/items', body)
+export const updatePlanItem = (id: number, body: PlanItemPayload) =>
+  api.put<PlanItem>(`/worklog/plans/items/${id}`, body)
+export const deletePlanItem = (id: number) => api.del(`/worklog/plans/items/${id}`)
+/** 一键滚转（幂等：已 CARRIED/已完结跳过）；to：DAY=目标日期，WEEK=目标周内任意日 */
+export const carryPlans = (scope: 'DAY' | 'WEEK', to: string, ids: number[]) =>
+  api.post<CarryResult>('/worklog/plans/carry', { scope, to, ids })
 
 // ---- git 扫描导入 ----
 /** filter：NEW（仅未导入，弹窗默认）/ IMPORTED（仅已导入）/ ALL（后端缺省值）；诊断不受 filter 影响 */

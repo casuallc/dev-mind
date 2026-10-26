@@ -29,6 +29,8 @@ export interface WorklogEntry {
   commitSha?: string
   requirementId?: string
   jiraIssueKey?: string
+  /** CAP-88 FR-04：关联计划项 id（worklog_plan_items；删计划项后端置空） */
+  planItemId?: number
   createdAt?: string
   updatedAt?: string
 }
@@ -49,6 +51,65 @@ export interface EntryPayload {
   hours: number
   requirementId?: string
   jiraIssueKey?: string
+  /** CAP-88 FR-04：关联计划项；undefined/无字段 = 不关联（更新即解除） */
+  planId?: number
+}
+
+/** CAP-88 计划项（scope=DAY 时 planDate=当天；WEEK=周一） */
+export interface PlanItem {
+  id: number
+  scope: 'DAY' | 'WEEK'
+  planDate: string
+  title: string
+  content?: string
+  planType: string
+  /** 预估工时（小时）；undefined=未预估 */
+  estimateHours?: number
+  status: string
+  /** MANUAL / AI_SUGGEST（M3） */
+  source: string
+  requirementId?: string
+  jiraIssueKey?: string
+  carriedFromId?: number
+  sortOrder: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** 计划项列表响应：本周期计划 + 上一周期未完成提示 */
+export interface PlanListView {
+  items: PlanItem[]
+  carryoverFrom: string
+  carryoverItems: PlanItem[]
+}
+
+/** 计划项新建/更新请求（WEEK 时 date 传周内任意日，后端归一到周一） */
+export interface PlanItemPayload {
+  scope: 'DAY' | 'WEEK'
+  date: string
+  title: string
+  content?: string
+  planType?: string
+  hours?: number
+  requirementId?: string
+  jiraIssueKey?: string
+  /** 仅更新有效：TODO/DOING/DONE/DROPPED（CARRIED 由滚转写入） */
+  status?: string
+}
+
+export const PLAN_STATUSES: Record<string, { label: string; color: string }> = {
+  TODO: { label: '待办', color: 'default' },
+  DOING: { label: '进行中', color: 'processing' },
+  DONE: { label: '已完成', color: 'success' },
+  DROPPED: { label: '已放弃', color: 'warning' },
+  CARRIED: { label: '已滚转', color: 'purple' },
+}
+
+/** 滚转结果：carried=成功滚转数；skipped=幂等跳过数；items=新建副本 */
+export interface CarryResult {
+  carried: number
+  skipped: number
+  items: PlanItem[]
 }
 
 /** CAP-89：日报视图 DB 口径——无 status（状态机已删），exists 恒 true（GET 不存在返回 undefined） */

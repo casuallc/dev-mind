@@ -25,6 +25,7 @@ import {
   getWorkspace,
   listDailyWeek,
   listEntries,
+  listPlans,
   listWeeklyRecent,
   updateDaily,
   updateEntry,
@@ -41,6 +42,7 @@ import { ENTRY_SOURCES, ENTRY_TYPES } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import EntryFormDrawer from '../components/EntryFormDrawer'
 import GitImportDrawer from '../components/GitImportDrawer'
+import PlanView from '../components/PlanView'
 import RepoSubscriptionDrawer from '../components/RepoSubscriptionDrawer'
 import ReportEditor from '../components/ReportEditor'
 import WeekDayStrip from '../components/WeekDayStrip'
@@ -155,6 +157,18 @@ export default function WorklogPage() {
     return m
   }, [weekEntries])
 
+  // ---- CAP-88 FR-06：条目视图当日分组顶部显示当日计划完成度（如 3/5） ----
+  const [dayPlanRatio, setDayPlanRatio] = useState<{ done: number; total: number } | null>(null)
+  useEffect(() => {
+    if (view !== 'entries') return
+    listPlans('DAY', entryDayStr)
+      .then((r) => {
+        const active = r.items.filter((i) => i.status !== 'DROPPED' && i.status !== 'CARRIED')
+        setDayPlanRatio(active.length > 0 ? { done: active.filter((i) => i.status === 'DONE').length, total: active.length } : null)
+      })
+      .catch(() => setDayPlanRatio(null))
+  }, [view, entryDayStr])
+
   const loadDailyWeek = useCallback(() => {
     setLoading(true)
     listDailyWeek(dailyWeekStartStr)
@@ -193,10 +207,11 @@ export default function WorklogPage() {
   const reload = useCallback(() => {
     if (view === 'entries') loadEntries()
     else if (view === 'daily') loadDailyWeek()
-    else {
+    else if (view === 'weekly') {
       loadWeekly()
       loadRecentWeeks()
     }
+    // plan 视图自包含（PlanView 内部自载）
   }, [view, loadEntries, loadDailyWeek, loadWeekly, loadRecentWeeks])
 
   useEffect(reload, [reload])
@@ -508,6 +523,11 @@ export default function WorklogPage() {
               {isEntriesCurrentWeek && '（本周）'}
             </Typography.Text>
           </div>
+          {dayPlanRatio && (
+            <Typography.Paragraph type="secondary" style={{ marginBottom: 8, fontSize: 12 }}>
+              当日计划完成度：{dayPlanRatio.done}/{dayPlanRatio.total}（「计划」页签维护）
+            </Typography.Paragraph>
+          )}
           <FitTable
             rowKey="id"
             loading={loading}
@@ -598,6 +618,15 @@ export default function WorklogPage() {
               },
             ]}
           />
+        </>
+      )}
+
+      {view === 'plan' && (
+        <>
+          <Typography.Paragraph type="secondary">
+            日计划管当天执行对照，周计划管方向与周间滚转；条目编辑抽屉可关联计划项（关联自动置「进行中」）；上一周期未完成项可一键滚转。
+          </Typography.Paragraph>
+          <PlanView />
         </>
       )}
 

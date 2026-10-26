@@ -6,6 +6,7 @@ import ScrollRow from '../../../shared/components/ScrollRow'
 
 export type WorklogView =
   | 'entries'
+  | 'plan'
   | 'daily'
   | 'weekly'
   | 'chat'
@@ -37,6 +38,7 @@ export default function WorklogViewSwitch({
           onChange={(v) => onChange(v as WorklogView)}
           options={[
             { value: 'entries', label: '工作条目' },
+            { value: 'plan', label: '计划' },
             { value: 'daily', label: '日报' },
             { value: 'weekly', label: '周报' },
             { value: 'chat', label: '对话' },
