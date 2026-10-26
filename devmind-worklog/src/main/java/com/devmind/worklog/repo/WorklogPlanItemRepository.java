@@ -38,4 +38,10 @@ public interface WorklogPlanItemRepository extends JpaRepository<WorklogPlanItem
 
     /** CAP-90 FR-06 存量迁移：全部 DAY 计划项（迁移为条目后删除；无行=跳过，幂等键） */
     List<WorklogPlanItemEntity> findByScopeOrderByUserIdAscPlanDateAscIdAsc(String scope);
+
+    /** CAP-91：引用某 KR 的全部计划项（删 KR 清引用用） */
+    List<WorklogPlanItemEntity> findByKrId(Long krId);
+
+    /** CAP-91 FR-07 派生进度：一批 KR 的关联计划项（tree 视图批量取，禁逐 KR 查库） */
+    List<WorklogPlanItemEntity> findByKrIdIn(Collection<Long> krIds);
 }

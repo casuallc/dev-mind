@@ -22,4 +22,6 @@ public record PlanItemRequest(
         @DecimalMin("0") @DecimalMax("24") Double hours,
         @Size(max = 64) String requirementId,
         @Size(max = 64) String jiraIssueKey,
+        /** CAP-91 FR-05：关联季度 KR（worklog_goals 的 KEY_RESULT id；null=不对齐） */
+        Long krId,
         @Size(max = 16) String status) {}

@@ -9,8 +9,10 @@ import com.devmind.worklog.dto.PlanItemView;
 import com.devmind.worklog.dto.PlanListView;
 import com.devmind.worklog.dto.SuggestedPlanItem;
 import com.devmind.worklog.model.WorklogEntryEntity;
+import com.devmind.worklog.model.WorklogGoalEntity;
 import com.devmind.worklog.model.WorklogPlanItemEntity;
 import com.devmind.worklog.repo.WorklogEntryRepository;
+import com.devmind.worklog.repo.WorklogGoalRepository;
 import com.devmind.worklog.repo.WorklogPlanItemRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,8 +21,10 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static com.devmind.worklog.model.WorklogPlanItemEntity.SCOPE_WEEK;
@@ -53,16 +57,19 @@ public class WorklogPlanService {
 
     private final WorklogPlanItemRepository planRepo;
     private final WorklogEntryRepository entryRepo;
+    private final WorklogGoalRepository goalRepo;
     private final IdentityService identity;
 
     public WorklogPlanService(WorklogPlanItemRepository planRepo, WorklogEntryRepository entryRepo,
-                              IdentityService identity) {
+                              WorklogGoalRepository goalRepo, IdentityService identity) {
         this.planRepo = planRepo;
         this.entryRepo = entryRepo;
+        this.goalRepo = goalRepo;
         this.identity = identity;
     }
 
-    /** 某周期计划项列表 + 上一周期未完成提示（FR-05 前半：提示数据随列表返回；CAP-90：仅 WEEK）。 */
+    /** 某周期计划项列表 + 上一周期未完成提示（FR-05 前半：提示数据随列表返回；CAP-90：仅 WEEK）。
+     *  CAP-91 FR-05：附 krTitles 映射（本响应涉及 KR 的 id→标题，避免前端逐行解析）。 */
     public PlanListView list(String scope, LocalDate date) {
         String me = identity.currentActor();
         String sc = validatedScope(scope);
@@ -74,7 +81,22 @@ public class WorklogPlanService {
         List<PlanItemView> carryover = planRepo
                 .findByUserIdAndScopeAndPlanDateAndStatusInOrderBySortOrderAscIdAsc(me, sc, prev, UNFINISHED)
                 .stream().map(PlanItemView::of).toList();
-        return new PlanListView(items, prev, carryover);
+        return new PlanListView(items, prev, carryover, krTitles(items, carryover));
+    }
+
+    /** 本响应涉及 KR 的 id→标题映射（空关联 → 空表；KR 已删/越权不出现的 id 自然缺席）。 */
+    private Map<Long, String> krTitles(List<PlanItemView> items, List<PlanItemView> carryover) {
+        Set<Long> krIds = new HashSet<>();
+        items.forEach(i -> { if (i.krId() != null) { krIds.add(i.krId()); } });
+        carryover.forEach(i -> { if (i.krId() != null) { krIds.add(i.krId()); } });
+        if (krIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, String> map = new HashMap<>();
+        for (WorklogGoalEntity g : goalRepo.findAllById(krIds)) {
+            map.put(g.getId(), g.getTitle());
+        }
+        return map;
     }
 
     /** 条目抽屉可关联项（CAP-90 FR-06：只列当周周计划——日计划已并入条目，日执行直接对齐周方向；
@@ -169,6 +191,7 @@ public class WorklogPlanService {
             copy.setSource(src.getSource());
             copy.setRequirementId(src.getRequirementId());
             copy.setJiraIssueKey(src.getJiraIssueKey());
+            copy.setKrId(src.getKrId());
             copy.setCarriedFromId(src.getId());
             copy.setSortOrder(0);
             copy.setCreatedAt(now);
@@ -230,14 +253,28 @@ public class WorklogPlanService {
     // ---------------- 内部 ----------------
 
     /** 就地更新可变字段；id/userId/scope/planDate/status/source/carriedFromId/createdAt 保留。 */
-    private static void applyTo(WorklogPlanItemEntity e, PlanItemRequest req) {
+    private void applyTo(WorklogPlanItemEntity e, PlanItemRequest req) {
         e.setTitle(req.title().strip());
         e.setContent(req.content());
         e.setPlanType(validatedType(req.planType()));
         e.setEstimateMinutes(req.hours() == null ? null : WorklogEntryFile.toMinutes(req.hours()));
         e.setRequirementId(req.requirementId());
         e.setJiraIssueKey(req.jiraIssueKey());
+        e.setKrId(validatedKr(req.krId()));
         e.setUpdatedAt(Instant.now().truncatedTo(ChronoUnit.SECONDS));
+    }
+
+    /** CAP-91 FR-05：krId 必须指向本人 KEY_RESULT（null=不对齐放行；他人/非 KR 400）。 */
+    private Long validatedKr(Long krId) {
+        if (krId == null) {
+            return null;
+        }
+        WorklogGoalEntity kr = goalRepo.findByIdAndUserId(krId, identity.currentActor())
+                .orElseThrow(() -> new DevMindException(ErrorCode.BAD_REQUEST, "关联的 KR 不存在: " + krId));
+        if (!WorklogGoalEntity.KIND_KEY_RESULT.equals(kr.getKind())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "krId 必须指向 KEY_RESULT 目标: " + krId);
+        }
+        return krId;
     }
 
     /** CAP-90 FR-06：计划项收窄为 WEEK 唯一粒度——日计划已并入条目（计划=未完成条目），

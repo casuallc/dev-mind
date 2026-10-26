@@ -93,6 +93,10 @@ public class WorklogPlanItemEntity {
     @Column(name = "jira_issue_key", length = 64)
     private String jiraIssueKey;
 
+    /** 可选关联：季度 KR（CAP-91 FR-05，worklog_goals 的 KEY_RESULT；删 KR 时置空） */
+    @Column(name = "kr_id")
+    private Long krId;
+
     /** 滚转来源项 id（自引用，拖延链可追溯；首版无折叠展示） */
     @Column(name = "carried_from_id")
     private Long carriedFromId;
@@ -131,6 +135,8 @@ public class WorklogPlanItemEntity {
     public void setRequirementId(String requirementId) { this.requirementId = requirementId; }
     public String getJiraIssueKey() { return jiraIssueKey; }
     public void setJiraIssueKey(String jiraIssueKey) { this.jiraIssueKey = jiraIssueKey; }
+    public Long getKrId() { return krId; }
+    public void setKrId(Long krId) { this.krId = krId; }
     public Long getCarriedFromId() { return carriedFromId; }
     public void setCarriedFromId(Long carriedFromId) { this.carriedFromId = carriedFromId; }
     public Integer getSortOrder() { return sortOrder; }

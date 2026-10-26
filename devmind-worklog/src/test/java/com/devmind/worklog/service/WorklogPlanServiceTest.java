@@ -8,8 +8,10 @@ import com.devmind.worklog.dto.PlanItemView;
 import com.devmind.worklog.dto.PlanListView;
 import com.devmind.worklog.dto.SuggestedPlanItem;
 import com.devmind.worklog.model.WorklogEntryEntity;
+import com.devmind.worklog.model.WorklogGoalEntity;
 import com.devmind.worklog.model.WorklogPlanItemEntity;
 import com.devmind.worklog.repo.WorklogEntryRepository;
+import com.devmind.worklog.repo.WorklogGoalRepository;
 import com.devmind.worklog.repo.WorklogPlanItemRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,6 +44,7 @@ class WorklogPlanServiceTest {
 
     private WorklogPlanItemRepository planRepo;
     private WorklogEntryRepository entryRepo;
+    private WorklogGoalRepository goalRepo;
     private WorklogPlanService service;
     private WorklogEntryService entryService;
 
@@ -49,11 +52,12 @@ class WorklogPlanServiceTest {
     void setUp() {
         planRepo = mock(WorklogPlanItemRepository.class);
         entryRepo = mock(WorklogEntryRepository.class);
+        goalRepo = mock(WorklogGoalRepository.class);
         IdentityService identity = mock(IdentityService.class);
         when(identity.currentActor()).thenReturn(ME);
         when(planRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(entryRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        service = new WorklogPlanService(planRepo, entryRepo, identity);
+        service = new WorklogPlanService(planRepo, entryRepo, goalRepo, identity);
         entryService = new WorklogEntryService(entryRepo, planItemRepoArg(), identity, null);
     }
 
@@ -78,7 +82,7 @@ class WorklogPlanServiceTest {
 
     @Test
     void 周计划日期归一到周一() {
-        PlanItemView v = service.create(new PlanItemRequest("WEEK", WED, "本周目标", null, null, 4.0, null, null, null));
+        PlanItemView v = service.create(new PlanItemRequest("WEEK", WED, "本周目标", null, null, 4.0, null, null, null, null));
         assertEquals(MON, v.planDate());
         assertEquals("TODO", v.status());
         assertEquals("MANUAL", v.source());
@@ -89,13 +93,13 @@ class WorklogPlanServiceTest {
     void CAP90日计划退役_DAY与非法scope全400() {
         // DAY 已并入条目：create/update/carry 全拒绝
         assertThrows(DevMindException.class,
-                () -> service.create(new PlanItemRequest("DAY", WED, "x", null, null, null, null, null, null)));
+                () -> service.create(new PlanItemRequest("DAY", WED, "x", null, null, null, null, null, null, null)));
         assertThrows(DevMindException.class,
-                () -> service.create(new PlanItemRequest("MONTH", MON, "x", null, null, null, null, null, null)));
+                () -> service.create(new PlanItemRequest("MONTH", MON, "x", null, null, null, null, null, null, null)));
         assertThrows(DevMindException.class,
-                () -> service.create(new PlanItemRequest("WEEK", WED, "x", null, "BOGUS", null, null, null, null)));
+                () -> service.create(new PlanItemRequest("WEEK", WED, "x", null, "BOGUS", null, null, null, null, null)));
         assertThrows(DevMindException.class,
-                () -> service.update(1L, new PlanItemRequest("DAY", WED, "x", null, null, null, null, null, null)));
+                () -> service.update(1L, new PlanItemRequest("DAY", WED, "x", null, null, null, null, null, null, null)));
         assertThrows(DevMindException.class,
                 () -> service.carry("DAY", WED, List.of(1L)));
         assertThrows(DevMindException.class, () -> service.list("DAY", WED));
@@ -123,11 +127,11 @@ class WorklogPlanServiceTest {
         WorklogPlanItemEntity e = item(1, "WEEK", MON, "DOING");
         when(planRepo.findByIdAndUserId(1L, ME)).thenReturn(Optional.of(e));
 
-        PlanItemView done = service.update(1L, new PlanItemRequest("WEEK", MON, "计划1", null, null, null, null, null, "DONE"));
+        PlanItemView done = service.update(1L, new PlanItemRequest("WEEK", MON, "计划1", null, null, null, null, null, null, "DONE"));
         assertEquals("DONE", done.status());
 
         assertThrows(DevMindException.class,
-                () -> service.update(1L, new PlanItemRequest("WEEK", MON, "计划1", null, null, null, null, null, "CARRIED")));
+                () -> service.update(1L, new PlanItemRequest("WEEK", MON, "计划1", null, null, null, null, null, null, "CARRIED")));
     }
 
     @Test
@@ -135,7 +139,7 @@ class WorklogPlanServiceTest {
         WorklogPlanItemEntity e = item(1, "WEEK", MON, "CARRIED");
         when(planRepo.findByIdAndUserId(1L, ME)).thenReturn(Optional.of(e));
         assertThrows(DevMindException.class,
-                () -> service.update(1L, new PlanItemRequest("WEEK", MON, "改名", null, null, null, null, null, null)));
+                () -> service.update(1L, new PlanItemRequest("WEEK", MON, "改名", null, null, null, null, null, null, null)));
     }
 
     @Test
@@ -316,6 +320,62 @@ class WorklogPlanServiceTest {
         List<com.devmind.worklog.dto.EntryView> hint = entryService.dayCarryover(WED);
         assertEquals(1, hint.size());
         assertEquals("e3", hint.get(0).id());
+    }
+
+    // ---------------- CAP-91 M1：计划项 KR 对齐 ----------------
+
+    @Test
+    void 计划项挂KR_非KR或他人目标400_null放行() {
+        // null krId = 不对齐，放行
+        PlanItemView v = service.create(new PlanItemRequest("WEEK", WED, "无对齐", null, null, null, null, null, null, null));
+        assertNull(v.krId());
+
+        // 指向 OBJECTIVE → 400
+        WorklogGoalEntity objective = new WorklogGoalEntity();
+        objective.setId(50L);
+        objective.setUserId(ME);
+        objective.setKind(WorklogGoalEntity.KIND_OBJECTIVE);
+        when(goalRepo.findByIdAndUserId(50L, ME)).thenReturn(Optional.of(objective));
+        assertThrows(DevMindException.class,
+                () -> service.create(new PlanItemRequest("WEEK", WED, "x", null, null, null, null, null, 50L, null)));
+
+        // 他人/不存在 → 400
+        assertThrows(DevMindException.class,
+                () -> service.create(new PlanItemRequest("WEEK", WED, "x", null, null, null, null, null, 999L, null)));
+
+        // 合法 KR → 落库
+        WorklogGoalEntity kr = new WorklogGoalEntity();
+        kr.setId(51L);
+        kr.setUserId(ME);
+        kr.setKind(WorklogGoalEntity.KIND_KEY_RESULT);
+        when(goalRepo.findByIdAndUserId(51L, ME)).thenReturn(Optional.of(kr));
+        PlanItemView ok = service.create(new PlanItemRequest("WEEK", WED, "对齐KR", null, null, null, null, null, 51L, null));
+        assertEquals(51L, ok.krId());
+    }
+
+    @Test
+    void 列表响应附krTitles映射() {
+        WorklogPlanItemEntity withKr = item(1, "WEEK", MON, "TODO");
+        withKr.setKrId(51L);
+        when(planRepo.findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(ME, "WEEK", MON))
+                .thenReturn(List.of(withKr));
+        WorklogGoalEntity kr = new WorklogGoalEntity();
+        kr.setId(51L);
+        kr.setTitle("KR1 覆盖率 80%");
+        when(goalRepo.findAllById(java.util.Set.of(51L))).thenReturn(List.of(kr));
+
+        PlanListView view = service.list("WEEK", MON);
+        assertEquals("KR1 覆盖率 80%", view.krTitles().get(51L));
+    }
+
+    @Test
+    void 滚转副本沿用krId() {
+        WorklogPlanItemEntity src = item(1, "WEEK", MON.minusWeeks(1), "DOING");
+        src.setKrId(51L);
+        when(planRepo.findByIdAndUserId(1L, ME)).thenReturn(Optional.of(src));
+
+        var r = service.carry("WEEK", MON, List.of(1L));
+        assertEquals(51L, r.items().get(0).krId());
     }
 
     // ---------------- CAP-88 M3：AI 建议项落库 ----------------
