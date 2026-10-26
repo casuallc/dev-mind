@@ -15,6 +15,8 @@ r"""CAP-88 M1 计划闭环 E2E（自起隔离 app，纯 DB REST 链路，无需 
   [6] 周滚转：上周 TODO → 本周一，同口径
   [7] M2 内置模板占位符：日报含 {{plans}}、周报含 {{lastWeekPlan}}/{{thisWeekPlan}}
       （prompt 组装与计划对照格式由单测覆盖；生成链路需 runner，不在本脚本范围）
+  [8] M3 AI 建议计划：目标周已有项非 force → reused 跳过不起会话；force/空目标周 →
+      409（E2E 无默认节点，fail-visible 口径同日报生成）
 """
 import json
 import os
@@ -41,6 +43,7 @@ TODAY_S = TODAY.isoformat()
 YESTERDAY_S = (TODAY - timedelta(days=1)).isoformat()
 MONDAY_S = (TODAY - timedelta(days=TODAY.weekday())).isoformat()
 LAST_MONDAY_S = (TODAY - timedelta(days=TODAY.weekday() + 7)).isoformat()
+NEXT_MONDAY_S = (TODAY - timedelta(days=TODAY.weekday()) + timedelta(days=7)).isoformat()
 # 周内非周一的一天（验证 WEEK 归一；今天就周一则取明天）
 WEEK_MID_S = (TODAY if TODAY.weekday() != 0 else TODAY + timedelta(days=1)).isoformat()
 
@@ -269,6 +272,17 @@ def main():
               "{{lastWeekPlan}}" in tpl.get("weeklyTemplateMd", "")
               and "{{thisWeekPlan}}" in tpl.get("weeklyTemplateMd", ""),
               tpl.get("weeklyTemplateMd", "")[:80])
+
+        # ---------- [8] M3 AI 建议计划（幂等跳过 + fail-visible；产物解析由单测覆盖） ----------
+        s1 = req("POST", "/worklog/plans/suggest", {"date": NEXT_MONDAY_S}, token, expect=409)
+        check("空目标周非 force 起会话（无默认节点 409）", True, str(s1)[:200])
+        req("POST", "/worklog/plans/items",
+            {"scope": "WEEK", "date": NEXT_MONDAY_S, "title": "下周已有人工计划"}, token)
+        s2 = req("POST", "/worklog/plans/suggest", {"date": NEXT_MONDAY_S}, token)
+        check("目标周已有项非 force 幂等跳过", s2.get("reused") is True and not s2.get("sessionId"),
+              json.dumps(s2)[:200])
+        req("POST", "/worklog/plans/suggest", {"date": NEXT_MONDAY_S, "force": True}, token, expect=409)
+        check("force 重生成仍走会话链路（无默认节点 409）", True)
 
         print(f"\n== CAP-88 M1 E2E: {len(passed)} passed, {len(failed)} failed ==")
         if failed:
