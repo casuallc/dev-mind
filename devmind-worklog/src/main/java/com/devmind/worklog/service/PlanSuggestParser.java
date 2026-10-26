@@ -11,8 +11,8 @@ import java.util.regex.Pattern;
 
 /**
  * CAP-88 M3 FR-10「AI 建议计划」产物解析：把 plan-suggest-yyyy-Www.md 的逐行建议
- * （契约 `- [类型] 标题（预估 Xh）`，见 {@link WorklogAssetSeeder#PLAN_SUGGEST_SKELETON}）
- * 解析为建议项。容错口径：不合规行静默丢弃（模型偶尔带标题/解释行），标题截 256，
+ * （契约 `- [类型] 标题（预估 Xh）（KR#id）`——KR 标注可选，CAP-91 M3 FR-11；
+ * 见 {@link WorklogAssetSeeder#PLAN_SUGGEST_SKELETON}）解析为建议项。容错口径：不合规行静默丢弃（模型偶尔带标题/解释行），标题截 256，
  * 类型不识别回退 DEV，预估只认 `数字+h`（0.25 步进），总量封顶 {@value #MAX_ITEMS} 条。
  */
 final class PlanSuggestParser {
@@ -26,11 +26,14 @@ final class PlanSuggestParser {
             WorklogEntryEntity.TYPE_RESEARCH, WorklogEntryEntity.TYPE_OTHER);
 
     /**
-     * 建议行：`- [类型] 标题（预估 2h）`——类型段与预估段各自可缺；
-     * 预估括号兼容全/半角，单位只认 h（小时），数字允许小数。
+     * 建议行：`- [类型] 标题（预估 2h）（KR#12）`——类型段、预估段、KR 标注（CAP-91 M3 FR-11）
+     * 各自可缺；预估/KR 括号兼容全/半角，预估单位只认 h（小时），数字允许小数；
+     * KR 标注固定收尾（先预估后 KR 或只写其一均可）。
      */
     private static final Pattern LINE = Pattern.compile(
-            "^\\s*[-*]\\s*(?:\\[([A-Za-z]+)]\\s*)?(.+?)\\s*(?:[（(]\\s*预估\\s*([0-9]+(?:\\.[0-9]+)?)\\s*[hH]\\s*[）)])?\\s*$");
+            "^\\s*[-*]\\s*(?:\\[([A-Za-z]+)]\\s*)?(.+?)\\s*"
+                    + "(?:[（(]\\s*预估\\s*([0-9]+(?:\\.[0-9]+)?)\\s*[hH]\\s*[）)])?\\s*"
+                    + "(?:[（(]\\s*[Kk][Rr]#\\s*(\\d+)\\s*[）)])?\\s*$");
 
     private PlanSuggestParser() {
     }
@@ -78,7 +81,15 @@ final class PlanSuggestParser {
                     // 预估解析失败按未填处理（建议项预估可有可无）
                 }
             }
-            items.add(new SuggestedPlanItem(title, type, minutes));
+            Long krId = null;
+            if (m.group(4) != null) {
+                try {
+                    krId = Long.parseLong(m.group(4));
+                } catch (RuntimeException ignored) {
+                    // KR id 超范围按未标注处理（归属校验在 insertSuggestions）
+                }
+            }
+            items.add(new SuggestedPlanItem(title, type, minutes, krId));
         }
         return items;
     }

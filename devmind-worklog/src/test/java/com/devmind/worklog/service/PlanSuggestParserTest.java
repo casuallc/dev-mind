@@ -11,7 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * CAP-88 M3 PlanSuggestParser：契约行解析（类型/预估/容错丢弃/截断/封顶）。
- * 行格式是场景骨架 ↔ prompt ↔ 解析器三方契约（`- [类型] 标题（预估 Xh）`）。
+ * 行格式是场景骨架 ↔ prompt ↔ 解析器三方契约（`- [类型] 标题（预估 Xh）（KR#id）`，
+ * KR 标注可选，CAP-91 M3 FR-11）。
  */
 class PlanSuggestParserTest {
 
@@ -22,10 +23,38 @@ class PlanSuggestParserTest {
                         + "- [RESEARCH] 调研分诊模型替换（预估 1.5h）\n"
                         + "- [MEETING] 对齐评审口径\n");
         assertEquals(3, items.size());
-        assertEquals(new SuggestedPlanItem("承接登录改造收尾", "DEV", 240), items.get(0));
-        assertEquals(new SuggestedPlanItem("调研分诊模型替换", "RESEARCH", 90), items.get(1));
+        assertEquals(new SuggestedPlanItem("承接登录改造收尾", "DEV", 240, null), items.get(0));
+        assertEquals(new SuggestedPlanItem("调研分诊模型替换", "RESEARCH", 90, null), items.get(1));
         // 预估可省略 → null；类型小写也认（归大写）
-        assertEquals(new SuggestedPlanItem("对齐评审口径", "MEETING", null), items.get(2));
+        assertEquals(new SuggestedPlanItem("对齐评审口径", "MEETING", null, null), items.get(2));
+    }
+
+    @Test
+    void KR标注解析_可缺省() {
+        List<SuggestedPlanItem> items = PlanSuggestParser.parse(
+                "- [DEV] 承接登录改造收尾（预估 4h）（KR#12）\n"
+                        + "- [DEV] 只标KR不标预估（KR#7）\n"
+                        + "- [RESEARCH] 小写半角也认 (kr# 9)\n"
+                        + "- [MEETING] 不标注的行\n");
+        assertEquals(4, items.size());
+        assertEquals(Long.valueOf(12), items.get(0).krId());
+        assertEquals(Integer.valueOf(240), items.get(0).estimateMinutes());
+        assertEquals("承接登录改造收尾", items.get(0).title());
+        assertEquals(Long.valueOf(7), items.get(1).krId());
+        assertNull(items.get(1).estimateMinutes());
+        assertEquals("只标KR不标预估", items.get(1).title());
+        assertEquals(Long.valueOf(9), items.get(2).krId());
+        assertNull(items.get(3).krId(), "未标注为 null");
+        assertEquals("不标注的行", items.get(3).title());
+    }
+
+    @Test
+    void 非数字KR标注不进id字段() {
+        // KR#abc 不命中标注组 → 残留进标题（容错不丢行），krId 为 null
+        List<SuggestedPlanItem> items = PlanSuggestParser.parse("- [DEV] 某建议（KR#abc）\n");
+        assertEquals(1, items.size());
+        assertNull(items.get(0).krId());
+        assertTrue(items.get(0).title().contains("某建议"));
     }
 
     @Test

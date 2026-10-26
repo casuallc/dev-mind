@@ -390,10 +390,10 @@ class WorklogPlanServiceTest {
                 ME, "WEEK", MON)).thenReturn(List.of(existing));
 
         int inserted = service.insertSuggestions(ME, MON, List.of(
-                new SuggestedPlanItem("承接登录改造收尾", "DEV", 120),
-                new SuggestedPlanItem("收尾登录改造", "DEV", null),   // 与已有项撞题 → 跳过
-                new SuggestedPlanItem("  承接登录改造收尾  ", "DEV", 60), // 同批重复（忽略首尾空白）→ 跳过
-                new SuggestedPlanItem("对齐下周评审口径", "MEETING", null)));
+                new SuggestedPlanItem("承接登录改造收尾", "DEV", 120, null),
+                new SuggestedPlanItem("收尾登录改造", "DEV", null, null),   // 与已有项撞题 → 跳过
+                new SuggestedPlanItem("  承接登录改造收尾  ", "DEV", 60, null), // 同批重复（忽略首尾空白）→ 跳过
+                new SuggestedPlanItem("对齐下周评审口径", "MEETING", null, null)));
         assertEquals(2, inserted);
 
         ArgumentCaptor<WorklogPlanItemEntity> cap = ArgumentCaptor.forClass(WorklogPlanItemEntity.class);
@@ -414,5 +414,39 @@ class WorklogPlanServiceTest {
         assertEquals(0, service.insertSuggestions(ME, MON, List.of()));
         assertEquals(0, service.insertSuggestions(ME, MON, null));
         verify(planRepo, times(0)).save(any());
+    }
+
+    @Test
+    void 建议项KR标注校验归属_非法置空不炸批() {
+        // MON=2026-10-26 → 当季 2026-Q4；合法 = 本人 + KEY_RESULT + 当季，其余一律置空
+        when(goalRepo.findAllById(any())).thenReturn(List.of(
+                goal(51L, ME, "KEY_RESULT", "2026-Q4"),
+                goal(52L, "bob", "KEY_RESULT", "2026-Q4"),   // 他人 KR
+                goal(53L, ME, "OBJECTIVE", "2026-Q4"),      // O 不是 KR
+                goal(54L, ME, "KEY_RESULT", "2026-Q3")));   // 他季 KR
+        int inserted = service.insertSuggestions(ME, MON, List.of(
+                new SuggestedPlanItem("对齐合法KR", "DEV", null, 51L),
+                new SuggestedPlanItem("标注他人KR", "DEV", null, 52L),
+                new SuggestedPlanItem("标注O", "DEV", null, 53L),
+                new SuggestedPlanItem("标注他季KR", "DEV", null, 54L),
+                new SuggestedPlanItem("标注不存在KR", "DEV", null, 99L),
+                new SuggestedPlanItem("不标注", "DEV", null, null)));
+        assertEquals(6, inserted, "非法标注不炸整批");
+        ArgumentCaptor<WorklogPlanItemEntity> cap = ArgumentCaptor.forClass(WorklogPlanItemEntity.class);
+        verify(planRepo, times(6)).save(cap.capture());
+        List<WorklogPlanItemEntity> saved = cap.getAllValues();
+        assertEquals(51L, saved.get(0).getKrId(), "合法标注落 krId");
+        for (int i = 1; i < saved.size(); i++) {
+            assertNull(saved.get(i).getKrId(), "非法/未标注置空: " + saved.get(i).getTitle());
+        }
+    }
+
+    private static WorklogGoalEntity goal(long id, String userId, String kind, String period) {
+        WorklogGoalEntity g = new WorklogGoalEntity();
+        g.setId(id);
+        g.setUserId(userId);
+        g.setKind(kind);
+        g.setPeriod(period);
+        return g;
     }
 }

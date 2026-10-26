@@ -10,6 +10,7 @@ import com.devmind.worklog.dto.GoalView;
 import com.devmind.worklog.dto.UpdateQuarterlyRequest;
 import com.devmind.worklog.model.WeeklyReportEntity;
 import com.devmind.worklog.model.WorklogEntryEntity;
+import com.devmind.worklog.model.WorklogGoalEntity;
 import com.devmind.worklog.model.WorklogPlanItemEntity;
 import com.devmind.worklog.model.WorklogQuarterlyReportEntity;
 import com.devmind.worklog.repo.WeeklyReportRepository;
@@ -173,6 +174,25 @@ class ReportServiceTest {
         @SuppressWarnings("unchecked")
         ObjectProvider<WipRequirementProvider> wipProvider = mock(ObjectProvider.class);
         when(wipProvider.getIfAvailable()).thenReturn(null);
+        // CAP-91 M3：目标周所在季（2026-Q4）一条进行中 KR → 进素材清单；DONE 的不进
+        WorklogGoalRepository goalRepo = mock(WorklogGoalRepository.class);
+        WorklogGoalEntity kr = new WorklogGoalEntity();
+        kr.setId(12L);
+        kr.setUserId("alice");
+        kr.setKind("KEY_RESULT");
+        kr.setPeriod("2026-Q4");
+        kr.setTitle("完成 CAP-91 上线");
+        kr.setStatus("ACTIVE");
+        kr.setProgress(60);
+        WorklogGoalEntity doneKr = new WorklogGoalEntity();
+        doneKr.setId(13L);
+        doneKr.setUserId("alice");
+        doneKr.setKind("KEY_RESULT");
+        doneKr.setPeriod("2026-Q4");
+        doneKr.setTitle("已盖棺KR");
+        doneKr.setStatus("DONE");
+        when(goalRepo.findByUserIdAndPeriodInOrderBySortOrderAscIdAsc("alice", List.of("2026-Q4")))
+                .thenReturn(List.of(kr, doneKr));
 
         WorklogWorkspaceService workspaceService = mock(WorklogWorkspaceService.class);
         when(workspaceService.ensureFor("alice"))
@@ -184,7 +204,7 @@ class ReportServiceTest {
         when(sessionManager.create(reqCap.capture())).thenReturn(created);
 
         ReportService service = new ReportService(null, null, null, workspaceService, sessionManager,
-                null, null, planRepo, entryRepo, wipProvider, null, null, null);
+                null, null, planRepo, entryRepo, wipProvider, null, goalRepo, null);
         var launch = service.suggestPlan("alice", LocalDate.of(2026, 11, 3), false, "多排评审");
         assertEquals("s-1", launch.sessionId());
         assertFalse(launch.reused());
@@ -196,6 +216,9 @@ class ReportServiceTest {
         assertTrue(prompt.contains("计划1") && prompt.contains("计划2"), "TODO/CARRIED 须进素材");
         assertFalse(prompt.contains("计划3") || prompt.contains("计划4"), "DONE/DROPPED 不得进素材");
         assertTrue(prompt.contains("（无在办需求数据）"), "SPI 缺席降级提示");
+        assertTrue(prompt.contains("KR#12") && prompt.contains("完成 CAP-91 上线"),
+                "当季进行中 KR 须进素材: " + prompt);
+        assertFalse(prompt.contains("已盖棺KR"), "DONE 的 KR 不进清单: " + prompt);
         assertTrue(prompt.contains("多排评审"), "hint 未注入");
     }
 

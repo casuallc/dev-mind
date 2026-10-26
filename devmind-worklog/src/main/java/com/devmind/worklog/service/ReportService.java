@@ -21,6 +21,7 @@ import com.devmind.worklog.dto.WeeklyReportView;
 import com.devmind.worklog.model.DailyReportEntity;
 import com.devmind.worklog.model.WeeklyReportEntity;
 import com.devmind.worklog.model.WorklogEntryEntity;
+import com.devmind.worklog.model.WorklogGoalEntity;
 import com.devmind.worklog.model.WorklogPlanItemEntity;
 import com.devmind.worklog.model.WorklogQuarterlyReportEntity;
 import com.devmind.worklog.repo.DailyReportRepository;
@@ -436,9 +437,29 @@ public class ReportService {
         WipRequirementProvider provider = wipProvider.getIfAvailable();
         String wipBlock = ReportPrompts.formatWipRequirements(
                 provider == null ? List.of() : provider.findWip(username, 20));
+        // 素材 3（CAP-91 M3 FR-11）：目标周所在季度的进行中 KR 清单（建议项可选标注对齐）
+        String krBlock = ReportPrompts.formatCurrentKrs(currentKrs(username, target));
 
         return launch(username, WorklogScenarios.PLAN_SUGGEST,
-                ReportPrompts.planSuggest(target, lastWeekBlock, wipBlock, hint));
+                ReportPrompts.planSuggest(target, lastWeekBlock, wipBlock, krBlock, hint));
+    }
+
+    /** 目标周所在季度的进行中 KR（O 标题回填 parentTitle，供 `- KR#id [O标题] 标题` 渲染）。 */
+    private List<GoalView> currentKrs(String username, LocalDate targetWeekStart) {
+        String quarter = WorklogQuarters.quarterOf(targetWeekStart);
+        List<WorklogGoalEntity> goals = goalRepo
+                .findByUserIdAndPeriodInOrderBySortOrderAscIdAsc(username, List.of(quarter));
+        Map<Long, String> oTitles = new HashMap<>();
+        for (WorklogGoalEntity g : goals) {
+            if (WorklogGoalEntity.KIND_OBJECTIVE.equals(g.getKind())) {
+                oTitles.put(g.getId(), g.getTitle());
+            }
+        }
+        return goals.stream()
+                .filter(g -> WorklogGoalEntity.KIND_KEY_RESULT.equals(g.getKind())
+                        && WorklogGoalEntity.STATUS_ACTIVE.equals(g.getStatus()))
+                .map(g -> GoalView.of(g, g.getParentId() == null ? null : oTitles.get(g.getParentId())))
+                .toList();
     }
 
     // ---------------- CAP-91 M2：季度复盘 ----------------

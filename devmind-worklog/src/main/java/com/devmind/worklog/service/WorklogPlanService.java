@@ -26,6 +26,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static com.devmind.worklog.model.WorklogPlanItemEntity.SCOPE_WEEK;
 import static com.devmind.worklog.model.WorklogPlanItemEntity.SOURCE_AI_SUGGEST;
@@ -226,6 +227,9 @@ public class WorklogPlanService {
             sort = Math.max(sort, e.getSortOrder() == null ? 0 : e.getSortOrder());
         }
         Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        // CAP-91 M3 FR-11：建议行可选 KR 标注——批量校验归属（本人 + KEY_RESULT + 目标周当季），
+        // 非法置空不落（不炸整批）；模型编造的/他人的/他季的 KR id 一律丢弃
+        Set<Long> validKrIds = validSuggestionKrIds(owner, weekStart, items);
         int inserted = 0;
         for (SuggestedPlanItem item : items) {
             String title = item.title() == null ? "" : item.title().strip();
@@ -239,6 +243,9 @@ public class WorklogPlanService {
             e.setTitle(title);
             e.setPlanType(item.planType() == null ? WorklogEntryEntity.TYPE_DEV : item.planType());
             e.setEstimateMinutes(item.estimateMinutes());
+            if (item.krId() != null && validKrIds.contains(item.krId())) {
+                e.setKrId(item.krId());
+            }
             e.setStatus(STATUS_TODO);
             e.setSource(SOURCE_AI_SUGGEST);
             e.setSortOrder(++sort);
@@ -251,6 +258,25 @@ public class WorklogPlanService {
     }
 
     // ---------------- 内部 ----------------
+
+    /** 建议项 KR 标注批量校验：返回「本人 + KEY_RESULT + period=目标周当季」的合法 id 集。 */
+    private Set<Long> validSuggestionKrIds(String owner, LocalDate weekStart, List<SuggestedPlanItem> items) {
+        Set<Long> requested = items.stream().map(SuggestedPlanItem::krId)
+                .filter(k -> k != null).collect(Collectors.toSet());
+        if (requested.isEmpty()) {
+            return Set.of();
+        }
+        String quarter = WorklogQuarters.quarterOf(weekStart);
+        Set<Long> valid = new HashSet<>();
+        for (WorklogGoalEntity g : goalRepo.findAllById(requested)) {
+            if (owner.equals(g.getUserId())
+                    && WorklogGoalEntity.KIND_KEY_RESULT.equals(g.getKind())
+                    && quarter.equals(g.getPeriod())) {
+                valid.add(g.getId());
+            }
+        }
+        return valid;
+    }
 
     /** 就地更新可变字段；id/userId/scope/planDate/status/source/carriedFromId/createdAt 保留。 */
     private void applyTo(WorklogPlanItemEntity e, PlanItemRequest req) {

@@ -2,6 +2,7 @@ package com.devmind.worklog.service;
 
 import com.devmind.common.requirement.WipRequirementProvider;
 import com.devmind.worklog.dto.GitCommitView;
+import com.devmind.worklog.dto.GoalView;
 import com.devmind.worklog.model.WorklogEntryEntity;
 import com.devmind.worklog.model.WorklogPlanItemEntity;
 import org.junit.jupiter.api.Test;
@@ -246,20 +247,39 @@ class ReportPromptsTest {
                 plan(1L, "WEEK", LocalDate.of(2026, 10, 19), "收尾登录改造", "TODO", null)), Map.of());
         String wip = ReportPrompts.formatWipRequirements(List.of(
                 new WipRequirementProvider.WipRequirement("REQ-88", "工作日志计划闭环", "IN_PROGRESS", "dev-mind")));
-        String prompt = ReportPrompts.planSuggest(LocalDate.of(2026, 10, 26), lastWeek, wip, "下周请优先评审");
+        String prompt = ReportPrompts.planSuggest(LocalDate.of(2026, 10, 26), lastWeek, wip,
+                "- KR#12 [平台能力跃迁] 完成 CAP-91 上线（进行中 · 人工进度 60%）", "下周请优先评审");
         assertTrue(prompt.contains("2026-10-26 周（2026-10-26 ~ 2026-11-01）"), "缺目标周区间: " + prompt);
         assertTrue(prompt.contains("[状态=待办] 收尾登录改造"), "缺上周未完成素材");
         assertTrue(prompt.contains("REQ-88") && prompt.contains("工作日志计划闭环"), "缺在办需求素材");
-        assertTrue(prompt.contains("3~6 条") && prompt.contains("- [类型] 标题（预估 Xh）"), "缺输出契约");
+        assertTrue(prompt.contains("当季 KR 清单") && prompt.contains("KR#12"), "缺当季 KR 素材: " + prompt);
+        assertTrue(prompt.contains("3~6 条") && prompt.contains("（KR#id）"), "缺输出契约: " + prompt);
         assertTrue(prompt.contains("本人补充说明") && prompt.contains("下周请优先评审"), "hint 未注入");
     }
 
     @Test
     void 建议计划素材缺席降级为空提示() {
-        String prompt = ReportPrompts.planSuggest(LocalDate.of(2026, 10, 26), "", "", null);
+        String prompt = ReportPrompts.planSuggest(LocalDate.of(2026, 10, 26), "", "", "", null);
         assertTrue(prompt.contains("（上周无未完成计划项）"));
         assertTrue(prompt.contains("（无在办需求数据）"));
+        assertTrue(prompt.contains("（当季无进行中 KR，无需标注对齐）"), "KR 清单缺席降级提示: " + prompt);
         assertFalse(prompt.contains("本人补充说明"), "空 hint 不注入补充块");
+    }
+
+    @Test
+    void 当季KR清单渲染与缺席降级() {
+        GoalView kr = new GoalView(12L, "QUARTER", "2026-Q4", "KEY_RESULT", 10L, "平台能力跃迁",
+                "完成 CAP-91 上线", null, null, 60, "ACTIVE", null, 0, null, null,
+                null, null, null, null);
+        GoalView orphan = new GoalView(13L, "QUARTER", "2026-Q4", "KEY_RESULT", null, null,
+                "无父O的KR", null, null, null, "ACTIVE", null, 0, null, null,
+                null, null, null, null);
+        String block = ReportPrompts.formatCurrentKrs(List.of(kr, orphan));
+        assertTrue(block.contains("- KR#12 [平台能力跃迁] 完成 CAP-91 上线（进行中 · 人工进度 60%）"), block);
+        assertTrue(block.contains("- KR#13 无父O的KR（进行中 · 人工进度 0%）"),
+                "父 O 缺失省略 [] 段、人工进度 null 按 0: " + block);
+        assertEquals("（当季无进行中 KR，无需标注对齐）", ReportPrompts.formatCurrentKrs(List.of()));
+        assertEquals("（当季无进行中 KR，无需标注对齐）", ReportPrompts.formatCurrentKrs(null));
     }
 
     @Test

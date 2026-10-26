@@ -295,10 +295,12 @@ final class ReportPrompts {
 
     /**
      * CAP-88 M3 FR-10「AI 建议下周计划」prompt：目标周 + 素材（上周未完成/滚转项 +
-     * 在办需求，缺席降级为空提示）+ 产物格式契约（与场景骨架、{@code PlanSuggestParser}
-     * 三方共用行格式 `- [类型] 标题（预估 Xh）`，改动必须三处同步）。
+     * 在办需求 + 当季 KR 清单（CAP-91 M3 FR-11），缺席降级为空提示）+ 产物格式契约
+     * （与场景骨架、{@code PlanSuggestParser} 三方共用行格式
+     * `- [类型] 标题（预估 Xh）（KR#id）`，KR 标注可选，改动必须三处同步）。
      */
-    static String planSuggest(LocalDate targetWeekStart, String lastWeekItems, String wipRequirements, String hint) {
+    static String planSuggest(LocalDate targetWeekStart, String lastWeekItems, String wipRequirements,
+                              String currentKrs, String hint) {
         String prompt = "请为我建议 " + targetWeekStart + " 周（" + targetWeekStart + " ~ "
                 + targetWeekStart.plusDays(6) + "）的工作计划。\n\n"
                 + "## 素材：上周未完成/已滚转的计划项（优先承接，已完成的不要重复建议）\n\n"
@@ -307,12 +309,37 @@ final class ReportPrompts {
                 + "## 素材：当前在办需求（可作为计划方向来源）\n\n"
                 + (wipRequirements == null || wipRequirements.isBlank()
                         ? "（无在办需求数据）" : wipRequirements) + "\n\n"
+                + "## 素材：当季 KR 清单（建议项若有明确归属，请在行尾标注 `（KR#id）` 对齐；无归属不标）\n\n"
+                + (currentKrs == null || currentKrs.isBlank()
+                        ? "（当季无进行中 KR，无需标注对齐）" : currentKrs) + "\n\n"
                 + "## 输出契约（严格遵守，平台按行解析）\n\n"
-                + "- 3~6 条建议，每条一行：`- [类型] 标题（预估 Xh）`\n"
-                + "- 类型 ∈ DEV/SUPPORT/MEETING/RESEARCH/OTHER；预估工时可省略\n"
-                + "- 每条建议必须能从上方素材追溯（承接未完成项或推进在办需求），不要编造与素材无关的空话\n"
+                + "- 3~6 条建议，每条一行：`- [类型] 标题（预估 Xh）（KR#id）`\n"
+                + "- 类型 ∈ DEV/SUPPORT/MEETING/RESEARCH/OTHER；预估工时与 KR 标注均可省略\n"
+                + "- KR 标注只能引用上方「当季 KR 清单」里的 id，清单外 id 平台落库时丢弃\n"
+                + "- 每条建议必须能从上方素材追溯（承接未完成项或推进在办需求/KR），不要编造与素材无关的空话\n"
                 + "- 除建议行外不写任何其他内容";
         return appendHint(prompt, hint);
+    }
+
+    /**
+     * CAP-91 M3 FR-11 当季 KR 清单素材：`- KR#<id> [O标题] KR标题（状态 · 人工进度）`。
+     * 只列进行中（ACTIVE）KR——已盖棺（DONE/DROPPED/CARRIED）的不该再承接新计划。
+     */
+    static String formatCurrentKrs(List<GoalView> krs) {
+        if (krs == null || krs.isEmpty()) {
+            return "（当季无进行中 KR，无需标注对齐）";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (GoalView kr : krs) {
+            sb.append("- KR#").append(kr.id()).append(' ');
+            if (kr.parentTitle() != null && !kr.parentTitle().isBlank()) {
+                sb.append('[').append(kr.parentTitle()).append("] ");
+            }
+            sb.append(kr.title())
+                    .append("（").append(GOAL_STATUS_LABELS.getOrDefault(kr.status(), kr.status()))
+                    .append(" · 人工进度 ").append(kr.progress() == null ? 0 : kr.progress()).append("%）\n");
+        }
+        return sb.toString().strip();
     }
 
     /** 在办需求素材（CAP-88 M3：SPI 探测命中时注入；空列表渲染「无数据」提示）。 */

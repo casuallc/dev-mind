@@ -51,7 +51,7 @@ public class WorklogAssetSeeder {
             ## 成稿回传（平台契约，必须执行）
             - 日报成稿写到 `.devmind/output/daily-yyyy-MM-dd.md`
             - 周报成稿写到 `.devmind/output/weekly-yyyy-Www.md`
-            - 建议计划成稿写到 `.devmind/output/plan-suggest-yyyy-Www.md`（逐行 `- [类型] 标题（预估 Xh）`）
+            - 建议计划成稿写到 `.devmind/output/plan-suggest-yyyy-Www.md`（逐行 `- [类型] 标题（预估 Xh）（KR#id）`，KR 标注可选）
             - 季度复盘成稿写到 `.devmind/output/quarterly-review-<period>.md`（period 如 2026-Q4）
             - 平台在会话结束时自动采集该目录写入服务端工作日志仓（git 历史留痕）；缺文件则本次生成判失败
 
@@ -95,16 +95,18 @@ public class WorklogAssetSeeder {
 
     /**
      * CAP-88 M3「AI 建议计划」场景骨架。产物行格式是服务端解析契约
-     * （{@code PlanSuggestParser}）：`- [类型] 标题（预估 Xh）`，改格式必须同步解析器。
+     * （{@code PlanSuggestParser}）：`- [类型] 标题（预估 Xh）（KR#id）`（KR 标注可选，
+     * CAP-91 M3 FR-11），改格式必须同步解析器。
      */
     static final String PLAN_SUGGEST_SKELETON = """
             {{task}}
 
             ## 执行要求（遵循 worklog skill 约定）
-            1. 素材以上方任务说明为准（上周未完成/滚转项与在办需求已附上），建议项必须能从素材追溯，不写空话；
+            1. 素材以上方任务说明为准（上周未完成/滚转项、在办需求与当季 KR 清单已附上），建议项必须能从素材追溯，不写空话；
             2. 给出 3~6 条建议，每条一行，严格按此格式（平台按行解析，格式错整条丢弃）：
-               `- [DEV] 标题（预估 2h）`
+               `- [DEV] 标题（预估 2h）（KR#12）`
                - 类型 ∈ DEV/SUPPORT/MEETING/RESEARCH/OTHER；预估工时可省略（不写括号段）；
+               - KR 标注可选：建议项明确归属某条当季 KR 时在行尾标注（只能引用素材清单里的 id），无归属不标；
                - 除建议行外不写别的内容（不要标题、不要解释、不要代码块）；
             3. 成稿写入 .devmind/output/plan-suggest-<yyyy-Www>.md（ISO 周，见上方任务说明；平台回传契约，缺文件判失败）；
             4. 最后一句话确认已完成。
