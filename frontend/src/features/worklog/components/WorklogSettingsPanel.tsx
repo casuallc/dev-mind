@@ -173,7 +173,7 @@ export default function WorklogSettingsPanel({ ref }: { ref?: Ref<WorklogSetting
             label="日报格式模板"
             extra={
               <>
-                占位符：{'{{date}}'} / {'{{entries}}'} / {'{{commits}}'}；留空 = 内置默认。
+                占位符：{'{{date}}'} / {'{{entries}}'} / {'{{commits}}'} / {'{{plans}}'}（今日计划对照）；留空 = 内置默认。
                 <Button type="link" size="small" onClick={() => fillDefaultTemplate('dailyTemplateMd')}>
                   填入内置默认
                 </Button>
@@ -187,7 +187,7 @@ export default function WorklogSettingsPanel({ ref }: { ref?: Ref<WorklogSetting
             label="周报格式模板"
             extra={
               <>
-                占位符：{'{{weekRange}}'} / {'{{entries}}'} / {'{{commits}}'}；留空 = 内置默认。
+                占位符：{'{{weekRange}}'} / {'{{entries}}'} / {'{{commits}}'} / {'{{lastWeekPlan}}'}（上周计划）/ {'{{thisWeekPlan}}'}（本周已排计划项）；留空 = 内置默认。
                 <Button type="link" size="small" onClick={() => fillDefaultTemplate('weeklyTemplateMd')}>
                   填入内置默认
                 </Button>
