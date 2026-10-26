@@ -190,7 +190,7 @@ try:
     check("人工验证通过 → 闸门打开", st == 200 and (ck or {}).get("verified") is True, f"{st} {ck}")
 
     st, kb = call("POST", "/knowledge/bases",
-                  {"name": "CAP55-RECORDS-E2E 经验库", "scope": "global", "injectMode": "FULL"})
+                  {"name": "CAP55-RECORDS-E2E 经验库", "scope": "global"})
     KB_ID = (kb or {}).get("id")
     st, entry = call("POST", "/knowledge/entries",
                      {"kbId": KB_ID, "name": "构建排错心得", "contentMd": ENTRY_CONTENT,

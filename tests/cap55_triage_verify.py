@@ -191,7 +191,7 @@ try:
     check("验证通过后放行：状态端点报可用", st == 200 and (s or {}).get("available") is True, f"{st} {s}")
 
     st, kb = call("POST", "/knowledge/bases",
-                  {"name": "CAP55-TRIAGE-E2E 经验库", "scope": "global", "injectMode": "FULL"})
+                  {"name": "CAP55-TRIAGE-E2E 经验库", "scope": "global"})
     KB_ID = (kb or {}).get("id")
     check("建全局经验库", st == 200 and bool(KB_ID), f"{st} {kb}")
     st, entry = call("POST", "/knowledge/entries",

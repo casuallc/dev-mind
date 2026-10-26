@@ -320,7 +320,7 @@ try:
     print("\n[D] 绑库模型问答：system 概览 + 本轮注入 + 历轮注入块剥离")
     st, kb = call("POST", "/knowledge/bases", {
         "name": "E2E CAP49 发布规范库", "description": "CAP49 注入验证",
-        "scope": "global", "injectMode": "RAG"})
+        "scope": "global"})
     KB = (kb or {}).get("id")
     check("创建 RAG 知识库", st == 200 and bool(KB), f"{st} {kb}")
     st, entry = call("POST", "/knowledge/entries", {

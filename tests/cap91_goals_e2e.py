@@ -3,7 +3,7 @@ r"""CAP-91 工作目标与 OKR 对齐 E2E（自起隔离 app，纯 DB REST 链�
 
 运行前提：`mvn -q install -DskipTests`；JDK 21（JAVA_HOME 未设时回落本机 Adoptium 路径）。
 脚本自起隔离 app（:18106，--spring.profiles.active=e2e 独立 H2，定时开关全关），跑完杀掉。
-（命名 cap91_goals_e2e.py 而非 cap91_e2e.py：后者被知识库能力的同名脚本占用。）
+（知识注入检索能力的同名脚本为 cap92_e2e.py，本脚本用 goals 后缀区分。）
 
 验收覆盖（CAP-91 §9）：
   [1] 目标 CRUD 与层级校验：年 O/季 O/KR 新增落库；KR 无父 400、父跨周期 400、YEAR O 带父 400、

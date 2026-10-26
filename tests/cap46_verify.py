@@ -130,7 +130,7 @@ try:
     # ---------- 2. 建 RAG 库 + 条目，等索引 ready ----------
     st, kb = call("POST", "/knowledge/bases", {
         "name": "E2E CAP46 研发规范库", "description": "E2E 规范集合",
-        "scope": "global", "injectMode": "RAG"})
+        "scope": "global"})
     kb_id = (kb or {}).get("id")
     check("创建 RAG 知识库", st == 200 and bool(kb_id), f"{st} {kb}")
 

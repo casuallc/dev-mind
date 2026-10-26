@@ -6,10 +6,9 @@
 脚本自建 runner 节点（executor=fake）。
 
 覆盖：
- 1. 造资产：知识条目 A(global 无标签)/B(tag=e2e33)/C(tag=e2e33x)、GLOBAL skill、项目文档
- 2. 场景 CRUD + dryRun 预览（渲染骨架、三层 items、不 bumpHits）
- 3. POST /sessions + scenarioCode + extraKnowledgeTags → /sessions/{id}/context 三层来源
-    （scenario / project-auto / request）+ scenarioCode 落库
+ 1. 造资产：知识库 + 登录页规范条目（等索引）、GLOBAL skill、项目文档
+ 2. 场景 CRUD + dryRun 预览（渲染骨架、来源清单、不 bumpHits；CAP-92 知识库按任务检索）
+ 3. POST /sessions + scenarioCode → /sessions/{id}/context 来源（scenario）+ scenarioCode 落库
  4. 节点 token 拉 /agent/context/{sid}：SKILL.md base64、文档全文、claudeMd 场景背景与索引
  5. POST /chats + scenarioCode → /chats/{id}/context + runner 沙箱实际物化
     （_chat/<cid>/CLAUDE.local.md、.claude/skills/<name>/SKILL.md、.devmind/docs/<id>.md）
@@ -90,7 +89,7 @@ def main():
                               stdout=open(TMP / "cap33-runner.log", "w", encoding="utf-8"),
                               stderr=subprocess.STDOUT)
 
-    created = {"entries": [], "skills": [], "docs": [], "scenarios": [], "sessions": [], "chats": []}
+    created = {"bases": [], "entries": [], "skills": [], "docs": [], "scenarios": [], "sessions": [], "chats": []}
     backend_restarted = False
     try:
         wait(lambda: next((n for n in req("GET", "/agent-nodes", token=tok)
@@ -98,13 +97,15 @@ def main():
         print(f"[0] runner 节点上线 id={node_id}")
 
         # ---------- [1] 造资产 ----------
-        ea = req("POST", "/knowledge/entries",
-                 {"scope": "global", "name": f"{MARK}-A", "contentMd": "全局通用经验正文A"}, tok)
-        eb = req("POST", "/knowledge/entries",
-                 {"scope": "global", "name": f"{MARK}-B", "contentMd": "场景绑定经验正文B", "tags": ["e2e33"]}, tok)
-        ec = req("POST", "/knowledge/entries",
-                 {"scope": "global", "name": f"{MARK}-C", "contentMd": "请求追加经验正文C", "tags": ["e2e33x"]}, tok)
-        created["entries"] = [ea["id"], eb["id"], ec["id"]]
+        kb = req("POST", "/knowledge/bases",
+                 {"name": f"{MARK}-规范库", "scope": "global", "description": "cap33 e2e"}, tok)
+        created["bases"] = [kb["id"]]
+        ed = req("POST", "/knowledge/entries",
+                 {"kbId": kb["id"], "name": f"{MARK}-登录页规范",
+                  "contentMd": "登录页表单校验规范：提交前逐字段校验并提示错误。"}, tok)
+        created["entries"] = [ed["id"]]
+        wait(lambda: req("GET", f"/knowledge/entries/{ed['id']}", token=tok)["indexStatus"] != "pending",
+             "知识条目索引完成")
         skill_md = f"# {MARK} 技能\n\n步骤一：先看清上下文。\n"
         sk = req("POST", "/skills",
                  {"scope": "GLOBAL", "name": f"{MARK}-skill", "description": "e2e",
@@ -114,50 +115,50 @@ def main():
         doc = req("POST", "/documents",
                   {"kind": "design", "projectId": PID, "title": f"{MARK} 设计稿", "contentMd": doc_body}, tok)
         created["docs"] = [doc["id"]]
-        print(f"[1] 资产就绪 entry={created['entries']} skill={sk['id']} doc={doc['id']}")
+        print(f"[1] 资产就绪 kb={kb['id']} entry={ed['id']} skill={sk['id']} doc={doc['id']}")
 
         # ---------- [2] 场景 CRUD + dryRun 预览（不 bumpHits） ----------
-        hits_before = {i: req("GET", f"/knowledge/entries/{i}", token=tok)["hitCount"]
-                       for i in created["entries"]}
+        hits_before = req("GET", f"/knowledge/entries/{ed['id']}", token=tok)["hitCount"]
         sc = req("POST", "/scenarios", {
             "code": SC, "name": f"{MARK} 场景", "scope": "GLOBAL",
             "promptSkeleton": "任务：{{task}}\n项目：{{project}}\n分支：{{branch}}",
             "extraContextMd": "口径：一律中文回答。",
-            "skillIds": [sk["id"]], "docIds": [doc["id"]], "knowledgeTags": ["e2e33"],
+            "skillIds": [sk["id"]], "docIds": [doc["id"]], "knowledgeBaseIds": [kb["id"]],
         }, tok)
         created["scenarios"] = [sc["id"]]
         assert sc["skillIds"] == [sk["id"]] and sc["docIds"] == [doc["id"]]
+        assert sc["knowledgeBaseIds"] == [kb["id"]], sc
         pv = req("GET", f"/scenarios/{SC}/preview?projectId={PID}&taskSpec={urllib.parse.quote('修登录页')}", token=tok)
         assert "修登录页" in pv["renderedTaskSpec"], pv["renderedTaskSpec"]
         assert pv["hasContext"], "预览应装配出上下文"
         sources = {(i["kind"], i["ref"]): i["source"] for i in pv["items"]}
-        assert sources.get(("knowledge", str(ea["id"]))) == "project-auto", sources
-        assert sources.get(("knowledge", str(eb["id"]))) == "scenario", sources
+        assert sources.get(("knowledge", str(ed["id"]))) == "scenario", sources
         assert sources.get(("skill", sk["id"])) == "scenario", sources
         assert sources.get(("doc", str(doc["id"]))) == "scenario", sources
         assert "场景背景" in pv["claudeMd"] and "口径：一律中文回答。" in pv["claudeMd"]
+        assert "相关知识（检索命中）" in pv["claudeMd"], "CAP-92 知识应按任务检索命中"
+        assert f"{MARK}-登录页规范" in pv["claudeMd"], pv["claudeMd"][:500]
         assert ".devmind/docs/" in pv["claudeMd"], "文档索引路径应进 CLAUDE.md"
-        hits_after = {i: req("GET", f"/knowledge/entries/{i}", token=tok)["hitCount"]
-                      for i in created["entries"]}
+        hits_after = req("GET", f"/knowledge/entries/{ed['id']}", token=tok)["hitCount"]
         assert hits_before == hits_after, f"dryRun 预览不得 bumpHits: {hits_before} -> {hits_after}"
-        print(f"[2] 场景预览 OK：items={len(pv['items'])} 三层来源正确，hitCount 未涨")
+        print(f"[2] 场景预览 OK：items={len(pv['items'])} 来源正确、检索节存在、hitCount 未涨")
 
-        # ---------- [3] 会话挂场景 + 请求级追加 ----------
+        # ---------- [3] 会话挂场景 ----------
         s = req("POST", "/sessions", {
-            "projectId": PID, "taskSpec": f"{MARK} 会话任务", "scenarioCode": SC,
-            "agentNodeId": str(node_id), "extraKnowledgeTags": ["e2e33x"],
+            "projectId": PID, "taskSpec": f"{MARK} 修登录页会话任务", "scenarioCode": SC,
+            "agentNodeId": str(node_id),
         }, tok)
         sid = s["id"]
         created["sessions"] = [sid]
         snap = req("GET", f"/sessions/{sid}/context", token=tok)
         assert snap["scenarioCode"] == SC, snap
         src = {(i["kind"], i["ref"]): i["source"] for i in snap["items"]}
-        assert src.get(("knowledge", str(ea["id"]))) == "project-auto", src
-        assert src.get(("knowledge", str(eb["id"]))) == "scenario", src
-        assert src.get(("knowledge", str(ec["id"]))) == "request", src
+        assert src.get(("knowledge", str(ed["id"]))) == "scenario", src
         assert src.get(("skill", sk["id"])) == "scenario", src
         assert src.get(("doc", str(doc["id"]))) == "scenario", src
-        print(f"[3] 会话快照 OK：{len(snap['items'])} 条目三层来源齐（scenario/project-auto/request）")
+        hits_session = wait(lambda: (lambda h: h if h > hits_after else None)(
+            req("GET", f"/knowledge/entries/{ed['id']}", token=tok)["hitCount"]), "会话装配命中计数上涨")
+        print(f"[3] 会话快照 OK：{len(snap['items'])} 条目来源齐，hitCount {hits_after}->{hits_session}")
 
         # ---------- [4] 节点 token 拉包：SKILL.md base64 / 文档全文 / claudeMd ----------
         pkg = json.loads(req("GET", f"/agent/context/{sid}?token={node_token}", raw=True).decode())
@@ -174,7 +175,7 @@ def main():
 
         # ---------- [5] 问答挂场景 + runner 沙箱物化 ----------
         c = req("POST", "/chats", {
-            "message": "这个项目的发布流程怎么走？", "scenarioCode": SC,
+            "message": "登录页表单校验怎么做？", "scenarioCode": SC,
             "agentNodeId": str(node_id),
         }, tok)
         cid = c["id"]
@@ -184,7 +185,8 @@ def main():
         sandbox = WS / "_chat" / cid
         claude_md = wait(lambda: (sandbox / "CLAUDE.local.md").read_text(encoding="utf-8")
                          if (sandbox / "CLAUDE.local.md").exists() else None, "chat 沙箱 CLAUDE.local.md 物化", 30)
-        assert "场景背景" in claude_md and "这个项目的发布流程怎么走？" in claude_md
+        assert "场景背景" in claude_md and "登录页表单校验怎么做？" in claude_md
+        assert "相关知识（检索命中）" in claude_md, "CAP-92 场景绑库应在问答装配时检索注入"
         sk_file = sandbox / ".claude" / "skills" / f"{MARK}-skill" / "SKILL.md"
         assert sk_file.is_file() and skill_md.strip() in sk_file.read_text(encoding="utf-8")
         doc_file = sandbox / ".devmind" / "docs" / f"{doc['id']}.md"
@@ -239,6 +241,9 @@ def main():
                 except Exception: pass
             for i in created["entries"]:
                 try: req("DELETE", f"/knowledge/entries/{i}", token=tok)
+                except Exception: pass
+            for i in created["bases"]:
+                try: req("DELETE", f"/knowledge/bases/{i}?force=true", token=tok)
                 except Exception: pass
             for i in created["skills"]:
                 try: req("DELETE", f"/skills/{i}", token=tok)

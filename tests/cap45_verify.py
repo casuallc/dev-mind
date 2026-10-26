@@ -107,7 +107,7 @@ try:
 
     # ---------- 2. 建 RAG 库 ----------
     st, kb = call("POST", "/knowledge/bases", {
-        "name": "E2E 飞书库", "scope": "global", "injectMode": "RAG"})
+        "name": "E2E 飞书库", "scope": "global"})
     check("创建 RAG 知识库", st == 200, f"{st} {kb}")
     kb_id = (kb or {}).get("id")
 

@@ -43,7 +43,7 @@ const runCleanups = () => {
 }
 
 const EP = { id: 42, kind: 'CHAT', name: '探针对话端点', provider: 'mock', model: 'probe-chat-model' }
-const KB = { id: 7, name: '探针知识库', status: 'active', injectMode: 'auto', entryCount: 3 }
+const KB = { id: 7, name: '探针知识库', status: 'active', entryCount: 3 }
 
 const MAIN_TSX = `
 import '@ant-design/v5-patch-for-react-19'
@@ -59,7 +59,7 @@ const endpoints = [{
 }]
 const nodes = [{ id: 1, name: 'probe-node', status: 'ONLINE', os: 'linux', isDefault: true }]
 const bases = [{
-  id: ${KB.id}, name: '${KB.name}', description: '', status: 'active', injectMode: 'auto',
+  id: ${KB.id}, name: '${KB.name}', description: '', status: 'active',
   entryCount: 3, createdAt: '2026-09-21 10:00:00', updatedAt: '2026-09-21 10:00:00',
 }]
 const project = { id: 'p1', name: '探针项目', key: 'PROBE', kind: 'DEV', status: 'ACTIVE',

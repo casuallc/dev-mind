@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""CAP-04 知识库端到端验证：FR-01~FR-08 + 真实会话注入。
+"""CAP-04 知识库端到端验证：条目 CRUD/检索 + 提案流转。
 运行前提：后端已起（:8080），DB 干净。"""
 import json
 import sys
@@ -63,19 +63,6 @@ check("创建 4 条条目成功", st and g1[0] == 200 and g2[0] == 200 and g3[0]
       f"g1={g1[0]} g2={g2[0]} g3={g3[0]} p1={p1[0]}")
 g1_id, g2_id, g3_id, p1_id = g1[1]["id"], g2[1]["id"], g3[1]["id"], p1[1]["id"]
 
-# ---------- 2. 预览（FR-04）+ 标签过滤（FR-03） ----------
-st, prev = call("GET", "/knowledge/preview?projectId=default&taskSpec=给项目加个功能")
-used = names(prev["entriesUsed"]) if prev else []
-check("项目预览命中 G1/G2/P1", "通用-无标签经验" in used and "Java 命名规范" in used and "playground 特有经验" in used, str(used))
-check("项目预览排除不匹配标签 G3", "前端样式规范" not in used, str(used))
-content = prev["content"] if prev else ""
-check("预览内容含任务段", "## 当前任务" in content and "给项目加个功能" in content, "无任务段")
-check("预览内容含全局/项目标题", "通用经验（global）" in content and "项目经验（project）" in content, "无标题")
-
-st, prev0 = call("GET", "/knowledge/preview?taskSpec=t")
-used0 = names(prev0["entriesUsed"]) if prev0 else []
-check("空项目预览仅含无标签全局条目", used0 == ["通用-无标签经验"], str(used0))
-
 # ---------- 3. 条目 CRUD + 检索（FR-02/FR-08） ----------
 st, lst = call("GET", "/knowledge/entries?scope=global")
 check("scope=global 列表 3 条", st == 200 and len(lst) == 3, str(len(lst) if lst else 0))
@@ -130,6 +117,7 @@ check("重复采纳 → 409", st == 409, f"{st}")
 # hitCount（FR-07）同样依赖真实注入，一并移出。现行覆盖：
 #   - 会话上下文快照 / 拉包内容 / 预览不 bumpHits → tests/cap33_verify.py [2][3][4]
 #   - 工作区物化文件（CLAUDE.local.md、settings.local.json、平台路径不进 git）→ tests/e2e-cap42.py [2b]
+# CAP-92 起全量注入与 /knowledge/preview 已下线：知识库统一由场景绑定、装配时检索（cap33_verify.py）。
 
 print(f"\n== CAP-04 验证结果: {passed} passed, {failed} failed ==")
 sys.exit(1 if failed else 0)

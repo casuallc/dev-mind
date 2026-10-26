@@ -1,9 +1,8 @@
-// 项目「知识」页资产查看：知识条目/文档列表点名称开只读抽屉看全文（此前只有列表）。
+// 项目「上下文」页资产查看：文档列表点名称开只读抽屉看全文（列表不展示正文）。
 // 覆盖：
-//   1) /context 默认知识条目视图，条目名称是可点链接；
-//   2) 点开抽屉 → 标题=条目名、正文含知识内容、宽度 70%；
-//   3) 切到「文档」视图 → 文档名称可点，抽屉正文含文档内容与类型标签；
-//   4) 关闭抽屉后列表仍在。
+//   1) /context 默认文档视图，文档名称是可点链接；
+//   2) 点开抽屉 → 标题=文档名、正文含文档内容、类型标签可见、宽度 70%；
+//   3) 关闭抽屉后列表仍在，名称主列宽于摘要列。
 // 前置：app 隔离实例 + 指向它的前端 dev 同时起（数据自造，落隔离 H2，无需 runner）：
 //   mvn -pl devmind-app spring-boot:run -Dspring-boot.run.profiles=e2e \
 //     "-Dspring-boot.run.arguments=--server.port=18103 --spring.datasource.url=jdbc:h2:file:<tmp>/db/devmind;AUTO_SERVER=TRUE"
@@ -106,11 +105,6 @@ const nameLinkJs = (text) => `(() => {
   return [...document.querySelectorAll('.ant-table-tbody a')]
     .find((a) => a.textContent.trim() === ${JSON.stringify(text)}) ?? null;
 })()`
-// 按文字找 Segmented 选项卡（antd 会给两字标签插空格）
-const segJs = (text) => `(() => {
-  return [...document.querySelectorAll('.ant-segmented-item')]
-    .find((el) => el.textContent.replace(/\\s/g, '') === ${JSON.stringify(text)}) ?? null;
-})()`
 const drawerBodyTextJs = `(() => document.querySelector('.ant-drawer-body')?.innerText ?? '')()`
 
 let chrome
@@ -125,7 +119,7 @@ async function main() {
   const login = await api('/auth/login', { body: { username: USER, password: PASS } })
   const { accessToken, refreshToken, user } = login
 
-  // ── 造数：项目 + 文档 + 全局知识条目 ──────────────────────
+  // ── 造数：项目 + 文档 ──────────────────────────────────
   const project = await api('/projects', {
     token: accessToken,
     body: {
@@ -148,19 +142,7 @@ async function main() {
       contentMd: `# ${docTitle}\n\n这是文档正文，marker：${docMarker}\n\n- 要点一\n- 要点二`,
     },
   })
-  const entryName = `查看验证知识-${MARK}`
-  const entryMarker = `知识正文-${MARK}`
-  const entry = await api('/knowledge/entries', {
-    token: accessToken,
-    body: {
-      scope: 'global',
-      name: entryName,
-      contentMd: `## ${entryName}\n\n这是知识条目正文，marker：${entryMarker}`,
-      tags: [],
-      status: 'active',
-    },
-  })
-  ok(!!project.id && !!doc.id && !!entry.id, '造数完成（项目/文档/知识条目）')
+  ok(!!project.id && !!doc.id, '造数完成（项目/文档）')
 
   if (!existsSync(CHROME)) throw new Error(`找不到浏览器：${CHROME}（用 CHROME_PATH 指定）`)
   chrome = spawn(CHROME, [
@@ -188,47 +170,34 @@ async function main() {
       return 'ok';
     })()`)
     await ws.send('Page.navigate', { url: `${BASE}/context` })
-    await waitFor(() => evaluate(ws, `!!document.querySelector('.ant-table')`), '项目知识页表格渲染', 30000)
+    await waitFor(() => evaluate(ws, `!!document.querySelector('.ant-table')`), '项目上下文页表格渲染', 30000)
 
-    // ── 1. 知识条目：名称是链接 ─────────────────────────────
-    await waitFor(() => evaluate(ws, `!!${nameLinkJs(entryName)}`), '知识条目名称链接', 30000)
-    ok(true, '知识条目视图的名称是可点链接（列表不再只读）')
+    // ── 1. 文档：名称是链接 ─────────────────────────────────
+    await waitFor(() => evaluate(ws, `!!${nameLinkJs(docTitle)}`), '文档名称链接', 30000)
+    ok(true, '文档视图的名称是可点链接')
 
     // ── 2. 点开抽屉，正文可见 ───────────────────────────────
-    await evaluate(ws, `${nameLinkJs(entryName)}.click()`)
-    await waitFor(() => evaluate(ws, drawerVisibleJs), '知识条目查看抽屉打开')
-    await waitFor(() => evaluate(ws, `${drawerBodyTextJs}.includes(${JSON.stringify(entryMarker)})`), '知识正文渲染')
-    const entryDrawer = await evaluate(ws, `(() => {
+    await evaluate(ws, `${nameLinkJs(docTitle)}.click()`)
+    await waitFor(() => evaluate(ws, drawerVisibleJs), '文档查看抽屉打开')
+    await waitFor(() => evaluate(ws, `${drawerBodyTextJs}.includes(${JSON.stringify(docMarker)})`), '文档正文渲染')
+    const docDrawer = await evaluate(ws, `(() => {
       const d = document.querySelector('.ant-drawer-content');
       const r = d.getBoundingClientRect();
       return {
         title: document.querySelector('.ant-drawer-title')?.textContent ?? '',
+        body: document.querySelector('.ant-drawer-body')?.innerText ?? '',
         winW: window.innerWidth,
         width: r.width,
       };
     })()`)
-    ok(entryDrawer.title === entryName, `抽屉标题=条目名（${entryDrawer.title}）`)
-    ok(entryDrawer.width / entryDrawer.winW > 0.6, `查看抽屉宽度（${entryDrawer.width}/${entryDrawer.winW} ≈ 70%）`)
-
-    // ── 3. 切到文档视图，点文档名看全文 ─────────────────────
-    await evaluate(ws, `document.querySelector('.ant-drawer-close').click()`)
-    await waitFor(async () => !(await evaluate(ws, drawerVisibleJs)), '知识条目抽屉关闭')
-    await evaluate(ws, `${segJs('文档')}.click()`)
-    await waitFor(() => evaluate(ws, `!!${nameLinkJs(docTitle)}`), '文档视图名称链接', 30000)
-    await evaluate(ws, `${nameLinkJs(docTitle)}.click()`)
-    await waitFor(() => evaluate(ws, drawerVisibleJs), '文档查看抽屉打开')
-    await waitFor(() => evaluate(ws, `${drawerBodyTextJs}.includes(${JSON.stringify(docMarker)})`), '文档正文渲染')
-    const docDrawer = await evaluate(ws, `(() => ({
-      title: document.querySelector('.ant-drawer-title')?.textContent ?? '',
-      body: document.querySelector('.ant-drawer-body')?.innerText ?? '',
-    }))()`)
     ok(docDrawer.title === docTitle, `抽屉标题=文档名（${docDrawer.title}）`)
     ok(docDrawer.body.includes('技术方案'), '抽屉内展示文档类型标签（技术方案）')
+    ok(docDrawer.width / docDrawer.winW > 0.6, `查看抽屉宽度（${docDrawer.width}/${docDrawer.winW} ≈ 70%）`)
 
-    // ── 4. 关抽屉后文档表格仍在 ─────────────────────────────
+    // ── 3. 关抽屉后文档表格仍在 ─────────────────────────────
     await evaluate(ws, `document.querySelector('.ant-drawer-close').click()`)
     await waitFor(async () => !(await evaluate(ws, drawerVisibleJs)), '文档抽屉关闭')
-    ok(await evaluate(ws, `!!document.querySelector('.ant-table')`), '关抽屉后文档表格仍在')
+    ok(await evaluate(ws, `!!document.querySelector('.ant-table')`), '关抽屉后上下文表格仍在')
 
     // 列宽：名称是主列（自适应），必须比固定宽的摘要更宽
     const colWidths = await evaluate(ws, `(() => {

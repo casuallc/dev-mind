@@ -69,10 +69,11 @@ check("登录 admin", st == 200 and bool(TOKEN), f"{st} {login}")
 if not TOKEN:
     sys.exit(1)
 
-# ---------- 1. 建 RAG 库 ----------
+# ---------- 1. 建知识库 ----------
 st, kb = call("POST", "/knowledge/bases", {
-    "name": "E2E 规范库", "description": "cap44 verify", "scope": "global", "injectMode": "RAG"})
-check("创建 RAG 知识库", st == 200 and kb.get("injectMode") == "RAG", f"{st} {kb}")
+    "name": "E2E 规范库", "description": "cap44 verify", "scope": "global"})
+check("创建知识库（CAP-92 无注入方式字段）",
+      st == 200 and kb.get("name") == "E2E 规范库" and "injectMode" not in kb, f"{st} {kb}")
 kb_id = kb.get("id") if kb else None
 
 st, bases = call("GET", "/knowledge/bases")
@@ -86,7 +87,8 @@ check("legacy scope=global 建条目", st == 200 and legacy.get("kbId"), f"{st} 
 check("legacy 条目 scope 派生自库", (legacy or {}).get("scope") == "global", f"{legacy}")
 if legacy and legacy.get("kbId"):
     st, exp_kb = call("GET", f"/knowledge/bases/{legacy['kbId']}")
-    check("经验库为 FULL 注入模式", st == 200 and exp_kb.get("injectMode") == "FULL", f"{st} {exp_kb}")
+    check("经验库为自动创建的统一检索库",
+          st == 200 and exp_kb.get("name") == "全局经验库" and "injectMode" not in exp_kb, f"{st} {exp_kb}")
 
 # ---------- 3. 建条目 → 异步索引 ready ----------
 st, e1 = call("POST", "/knowledge/entries", {

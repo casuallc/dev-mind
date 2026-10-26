@@ -175,7 +175,7 @@ try:
     E1_NAME = (seeded or {}).get("name")
 
     st, kb_a = call("POST", "/knowledge/bases",
-                    {"name": "CAP48-E2E-平台默认", "scope": "global", "injectMode": "RAG"})
+                    {"name": "CAP48-E2E-平台默认", "scope": "global"})
     check("建库 A（不传覆盖）", st == 200, f"{st} {kb_a}")
     A = (kb_a or {}).get("id")
     check("库 A 无库级覆盖且生效端点=平台默认",
@@ -258,7 +258,7 @@ try:
     # ---------- D. FR-04 库级覆盖优先于平台默认 ----------
     print("\n[D] 库级覆盖优先 + 跨端点库合并检索")
     st, kb_b = call("POST", "/knowledge/bases",
-                    {"name": "CAP48-E2E-库级覆盖", "scope": "global", "injectMode": "RAG",
+                    {"name": "CAP48-E2E-库级覆盖", "scope": "global",
                      "modelEndpointId": E1})
     check("建库 B 并指定库级覆盖端点", st == 200 and (kb_b or {}).get("modelEndpointId") == E1,
           f"{st} {kb_b}")
@@ -394,7 +394,7 @@ try:
     check("对话端点非法 provider 仍 400", st == 400, f"{st}")
 
     st, err = call("POST", "/knowledge/bases",
-                   {"name": "CAP48-E2E-错绑对话端点", "scope": "global", "injectMode": "RAG",
+                   {"name": "CAP48-E2E-错绑对话端点", "scope": "global",
                     "modelEndpointId": EC})
     check("知识库不能绑对话端点（绑定时就 400，别等索引才炸）",
           st == 400 and "EMBEDDING" in json.dumps(err, ensure_ascii=False), f"{st} {err}")

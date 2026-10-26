@@ -350,7 +350,7 @@ try {
   check('验证通过后闸门打开（按钮才有理由亮）', gate1?.open === true, JSON.stringify(gate1))
 
   kbId = (await api('POST', '/knowledge/bases',
-    { name: 'CAP55-UI-E2E 经验库', scope: 'global', injectMode: 'FULL' }, token)).id
+    { name: 'CAP55-UI-E2E 经验库', scope: 'global' }, token)).id
   await api('POST', '/knowledge/entries',
     { kbId, name: ENTRY_NAME, contentMd: ENTRY_CONTENT, status: 'active' }, token)
   check('建经验库与比对条目（条目内容含标题原文，LIKE 召回才命中）', !!kbId)
