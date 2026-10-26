@@ -17,6 +17,11 @@ import java.time.Instant;
  * （scope=YEAR/QUARTER × kind=OBJECTIVE/KEY_RESULT；年/季同为低频实体，字段同构不拆表）。
  * period：YEAR='2026'；QUARTER='2026-Q1'（格式服务端校验，见 WorklogQuarters）。
  *
+ * <p>目标体系（CAP-91 M4）：framework 标识目标采用的管理形式，当前仅 OKR（O→KR 层级
+ * 规则/复盘投影/计划对齐均按 OKR 语义）；列与字段先行落地、非 OKR 一律 400，为后续
+ * 其他形式（如纯目标清单、KPI）预留扩展点——层级校验以 framework 为分发缝，新体系
+ * 在 WorklogGoalService 挂自己的规则集即可，不动表结构。</p>
+ *
  * <p>层级（parent_id 自引用）：KR 必挂同 scope+period 的 O；QUARTER O 可选挂同年 YEAR O；
  * YEAR O 必空。</p>
  *
@@ -33,6 +38,9 @@ public class WorklogGoalEntity {
 
     public static final String KIND_OBJECTIVE = "OBJECTIVE";
     public static final String KIND_KEY_RESULT = "KEY_RESULT";
+
+    /** 目标体系：当前唯一实现（O→KR 语义）；新形式在此登记常量并挂自己的校验规则集 */
+    public static final String FRAMEWORK_OKR = "OKR";
 
     public static final String STATUS_ACTIVE = "ACTIVE";
     public static final String STATUS_DONE = "DONE";
@@ -59,6 +67,11 @@ public class WorklogGoalEntity {
     /** OBJECTIVE / KEY_RESULT */
     @Column(nullable = false, length = 16)
     private String kind;
+
+    /** 目标体系（CAP-91 M4）：OKR=目标+关键结果；身份属性不可改。后续非 OKR 形式的扩展点 */
+    @Column(nullable = false, length = 16)
+    @ColumnDefault("'OKR'")
+    private String framework = FRAMEWORK_OKR;
 
     /** 父目标 id：KR→同周期 O（必填）；QUARTER O→同年 YEAR O（可选）；YEAR O 必空 */
     @Column(name = "parent_id")
@@ -108,6 +121,8 @@ public class WorklogGoalEntity {
     public void setPeriod(String period) { this.period = period; }
     public String getKind() { return kind; }
     public void setKind(String kind) { this.kind = kind; }
+    public String getFramework() { return framework; }
+    public void setFramework(String framework) { this.framework = framework; }
     public Long getParentId() { return parentId; }
     public void setParentId(Long parentId) { this.parentId = parentId; }
     public String getTitle() { return title; }

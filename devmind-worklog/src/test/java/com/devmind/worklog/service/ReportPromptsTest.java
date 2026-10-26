@@ -268,10 +268,10 @@ class ReportPromptsTest {
 
     @Test
     void 当季KR清单渲染与缺席降级() {
-        GoalView kr = new GoalView(12L, "QUARTER", "2026-Q4", "KEY_RESULT", 10L, "平台能力跃迁",
+        GoalView kr = new GoalView(12L, "QUARTER", "2026-Q4", "KEY_RESULT", "OKR", 10L, "平台能力跃迁",
                 "完成 CAP-91 上线", null, null, 60, "ACTIVE", null, 0, null, null,
                 null, null, null, null);
-        GoalView orphan = new GoalView(13L, "QUARTER", "2026-Q4", "KEY_RESULT", null, null,
+        GoalView orphan = new GoalView(13L, "QUARTER", "2026-Q4", "KEY_RESULT", "OKR", null, null,
                 "无父O的KR", null, null, null, "ACTIVE", null, 0, null, null,
                 null, null, null, null);
         String block = ReportPrompts.formatCurrentKrs(List.of(kr, orphan));

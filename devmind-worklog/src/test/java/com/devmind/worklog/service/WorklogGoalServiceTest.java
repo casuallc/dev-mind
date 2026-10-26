@@ -79,26 +79,26 @@ class WorklogGoalServiceTest {
 
         // YEAR O 带父 → 400
         assertThrows(DevMindException.class, () -> service.create(
-                new GoalRequest("YEAR", "2026", "OBJECTIVE", 1L, "x", null, null, null, null)));
+                new GoalRequest("YEAR", "2026", "OBJECTIVE", 1L, "x", null, null, null, null, null)));
         // KR 无父 → 400
         assertThrows(DevMindException.class, () -> service.create(
-                new GoalRequest("QUARTER", "2026-Q4", "KEY_RESULT", null, "x", null, null, null, null)));
+                new GoalRequest("QUARTER", "2026-Q4", "KEY_RESULT", null, "x", null, null, null, null, null)));
         // KR 父跨周期（年 O 不是 2026-Q4 的 O）→ 400
         assertThrows(DevMindException.class, () -> service.create(
-                new GoalRequest("QUARTER", "2026-Q4", "KEY_RESULT", 1L, "x", null, null, null, null)));
+                new GoalRequest("QUARTER", "2026-Q4", "KEY_RESULT", 1L, "x", null, null, null, null, null)));
         // QUARTER O 挂同年 YEAR O → 放行
         GoalView qo = service.create(
-                new GoalRequest("QUARTER", "2026-Q4", "OBJECTIVE", 1L, "Q4 目标", null, null, null, null));
+                new GoalRequest("QUARTER", "2026-Q4", "OBJECTIVE", 1L, "Q4 目标", null, null, null, null, null));
         assertEquals(1L, qo.parentId());
         assertEquals("目标1", qo.parentTitle());
         // QUARTER O 挂错年 YEAR O → 400
         WorklogGoalEntity yearO2025 = goal(9, "YEAR", "2025", "OBJECTIVE", null);
         when(goalRepo.findByIdAndUserId(9L, ME)).thenReturn(Optional.of(yearO2025));
         assertThrows(DevMindException.class, () -> service.create(
-                new GoalRequest("QUARTER", "2026-Q4", "OBJECTIVE", 9L, "x", null, null, null, null)));
+                new GoalRequest("QUARTER", "2026-Q4", "OBJECTIVE", 9L, "x", null, null, null, null, null)));
         // KR 挂同周期 O → 放行，默认 ACTIVE/0
         GoalView kr = service.create(
-                new GoalRequest("QUARTER", "2026-Q4", "KEY_RESULT", 2L, "KR1", null, 50, 80, null));
+                new GoalRequest("QUARTER", "2026-Q4", "KEY_RESULT", 2L, "KR1", null, 50, 80, null, null));
         assertEquals(2L, kr.parentId());
         assertEquals("ACTIVE", kr.status());
         assertEquals(0, kr.progress(), "创建恒 progress=0（人工域，请求值不生效）");
@@ -107,13 +107,38 @@ class WorklogGoalServiceTest {
     @Test
     void scope_kind_period_非法全400() {
         assertThrows(DevMindException.class, () -> service.create(
-                new GoalRequest("MONTH", "2026-10", "OBJECTIVE", null, "x", null, null, null, null)));
+                new GoalRequest("MONTH", "2026-10", "OBJECTIVE", null, "x", null, null, null, null, null)));
         assertThrows(DevMindException.class, () -> service.create(
-                new GoalRequest("YEAR", "2026", "EPIC", null, "x", null, null, null, null)));
+                new GoalRequest("YEAR", "2026", "EPIC", null, "x", null, null, null, null, null)));
         assertThrows(DevMindException.class, () -> service.create(
-                new GoalRequest("YEAR", "26", "OBJECTIVE", null, "x", null, null, null, null)));
+                new GoalRequest("YEAR", "26", "OBJECTIVE", null, "x", null, null, null, null, null)));
         assertThrows(DevMindException.class, () -> service.create(
-                new GoalRequest("QUARTER", "2026-Q5", "OBJECTIVE", null, "x", null, null, null, null)));
+                new GoalRequest("QUARTER", "2026-Q5", "OBJECTIVE", null, "x", null, null, null, null, null)));
+    }
+
+    @Test
+    void framework默认OKR_非OKR400_更新不可改() {
+        // 空 = 默认 OKR；显式 OKR 放行
+        GoalView v = service.create(
+                new GoalRequest("YEAR", "2026", "OBJECTIVE", null, "年度方向", null, null, null, null, null));
+        assertEquals("OKR", v.framework());
+        GoalView v2 = service.create(
+                new GoalRequest("YEAR", "2026", "OBJECTIVE", null, "年度方向2", null, null, null, null, "OKR"));
+        assertEquals("OKR", v2.framework());
+        // 非 OKR → 400（后续体系的扩展点，当前一律拒）
+        assertThrows(DevMindException.class, () -> service.create(
+                new GoalRequest("YEAR", "2026", "OBJECTIVE", null, "x", null, null, null, null, "KPI")));
+        // 更新：framework 传不同值 400（身份属性）；传 null/同值放行
+        WorklogGoalEntity e = goal(1, "YEAR", "2026", "OBJECTIVE", null);
+        when(goalRepo.findByIdAndUserId(1L, ME)).thenReturn(Optional.of(e));
+        assertThrows(DevMindException.class, () -> service.update(1L,
+                new GoalRequest("YEAR", "2026", "OBJECTIVE", null, "x", null, null, null, null, "KPI")));
+        GoalView updated = service.update(1L,
+                new GoalRequest("YEAR", "2026", "OBJECTIVE", null, "改名", null, null, null, null, null));
+        assertEquals("OKR", updated.framework());
+        GoalView updated2 = service.update(1L,
+                new GoalRequest("YEAR", "2026", "OBJECTIVE", null, "改名2", null, null, null, null, "OKR"));
+        assertEquals("OKR", updated2.framework());
     }
 
     @Test
@@ -123,27 +148,27 @@ class WorklogGoalServiceTest {
 
         // scope/period/kind 不可改
         assertThrows(DevMindException.class, () -> service.update(1L,
-                new GoalRequest("YEAR", "2026", "OBJECTIVE", null, "x", null, null, null, null)));
+                new GoalRequest("YEAR", "2026", "OBJECTIVE", null, "x", null, null, null, null, null)));
 
         // progress/status 人工可改
         GoalView v = service.update(1L,
-                new GoalRequest("QUARTER", "2026-Q4", "OBJECTIVE", null, "改名", null, null, 60, "DONE"));
+                new GoalRequest("QUARTER", "2026-Q4", "OBJECTIVE", null, "改名", null, null, 60, "DONE", null));
         assertEquals(60, v.progress());
         assertEquals("DONE", v.status());
         // CARRIED 人工不可设
         assertThrows(DevMindException.class, () -> service.update(1L,
-                new GoalRequest("QUARTER", "2026-Q4", "OBJECTIVE", null, "x", null, null, null, "CARRIED")));
+                new GoalRequest("QUARTER", "2026-Q4", "OBJECTIVE", null, "x", null, null, null, "CARRIED", null)));
 
         // CARRIED 只读
         WorklogGoalEntity carried = goal(2, "QUARTER", "2026-Q3", "OBJECTIVE", null);
         carried.setStatus(WorklogGoalEntity.STATUS_CARRIED);
         when(goalRepo.findByIdAndUserId(2L, ME)).thenReturn(Optional.of(carried));
         assertThrows(DevMindException.class, () -> service.update(2L,
-                new GoalRequest("QUARTER", "2026-Q3", "OBJECTIVE", null, "x", null, null, null, null)));
+                new GoalRequest("QUARTER", "2026-Q3", "OBJECTIVE", null, "x", null, null, null, null, null)));
 
         // 他人目标 404
         assertThrows(DevMindException.class, () -> service.update(999L,
-                new GoalRequest("QUARTER", "2026-Q4", "OBJECTIVE", null, "x", null, null, null, null)));
+                new GoalRequest("QUARTER", "2026-Q4", "OBJECTIVE", null, "x", null, null, null, null, null)));
     }
 
     @Test
@@ -188,6 +213,7 @@ class WorklogGoalServiceTest {
         assertEquals(WorklogGoalEntity.STATUS_CARRIED, kr.getStatus());
         GoalView krCopy = r.items().stream().filter(v -> "KEY_RESULT".equals(v.kind())).findFirst().orElseThrow();
         assertEquals("2026-Q4", krCopy.period());
+        assertEquals("OKR", krCopy.framework(), "滚转复制 framework");
         assertEquals(WorklogGoalEntity.STATUS_ACTIVE, krCopy.status());
         assertEquals(2L, krCopy.carriedFromId());
         // KR 副本的新父 = 同批 O 副本的 id（不是原父 1L）

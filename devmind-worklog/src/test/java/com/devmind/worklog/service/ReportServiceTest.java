@@ -358,10 +358,10 @@ class ReportServiceTest {
         WorklogPlanItemRepository planRepo = mock(WorklogPlanItemRepository.class);
         WorklogEntryRepository entryRepo = mock(WorklogEntryRepository.class);
         // 树：2026-Q4 区一个 O + 一个 KR（KR#11，带派生数据）
-        GoalView kr = new GoalView(11L, "QUARTER", "2026-Q4", "KEY_RESULT", 10L, null,
+        GoalView kr = new GoalView(11L, "QUARTER", "2026-Q4", "KEY_RESULT", "OKR", 10L, null,
                 "完成 CAP-91 上线", null, null, 60, "ACTIVE", null, 0, null, null,
                 3, 2, 5.0, 67);
-        GoalView o = new GoalView(10L, "QUARTER", "2026-Q4", "OBJECTIVE", null, null,
+        GoalView o = new GoalView(10L, "QUARTER", "2026-Q4", "OBJECTIVE", "OKR", null, null,
                 "平台能力跃迁", null, null, 50, "ACTIVE", null, 0, null, null,
                 null, null, null, null);
         when(goalService.tree(2026)).thenReturn(new GoalTreeView(List.of(), List.of(

@@ -8,7 +8,8 @@ r"""CAP-91 工作目标与 OKR 对齐 E2E（自起隔离 app，纯 DB REST 链�
 验收覆盖（CAP-91 §9）：
   [1] 目标 CRUD 与层级校验：年 O/季 O/KR 新增落库；KR 无父 400、父跨周期 400、YEAR O 带父 400、
       period 格式非法 400、progress 越界 400；编辑/改进度生效；他人目标 404（改/删）、
-      他人 O 作父 400；删有子项的 O 400；删 KR 后关联计划项 kr_id 置空
+      他人 O 作父 400；删有子项的 O 400；删 KR 后关联计划项 kr_id 置空；
+      framework（M4）：缺省回传 OKR、非 OKR 400、更新改 framework 400
   [2] 滚转：KR 单独滚转无 krParentMap 400；O+KR 同批滚转副本挂副本、原项 CARRIED、
       副本 ACTIVE+carriedFromId；重复滚转幂等（skipped）
   [3] 计划对齐：计划项挂 krId 落库；krId 指 O 400；他人 KR 400；计划列表附 krTitles；
@@ -183,6 +184,16 @@ def main():
                   {"scope": "YEAR", "period": str(Y), "kind": "OBJECTIVE", "title": "年度目标：平台跃迁"}, token)
         check("年度 O 落库（ACTIVE/0）", y_o.get("status") == "ACTIVE" and y_o.get("progress") == 0,
               json.dumps(y_o, ensure_ascii=False)[:200])
+        # framework（CAP-91 M4）：缺省回传 OKR；非 OKR 400；更新改 framework 400（身份属性）
+        check("framework 缺省回传 OKR", y_o.get("framework") == "OKR", json.dumps(y_o)[:200])
+        req("POST", "/worklog/goals",
+            {"scope": "YEAR", "period": str(Y), "kind": "OBJECTIVE", "title": "x", "framework": "KPI"},
+            token, expect=400)
+        check("非 OKR framework 400", True)
+        req("PUT", f"/worklog/goals/{y_o['id']}",
+            {"scope": "YEAR", "period": str(Y), "kind": "OBJECTIVE", "title": "年度目标：平台跃迁",
+             "framework": "KPI"}, token, expect=400)
+        check("更新改 framework 400", True)
         req("POST", "/worklog/goals",
             {"scope": "YEAR", "period": str(Y), "kind": "OBJECTIVE", "title": "x", "parentId": y_o["id"]},
             token, expect=400)
@@ -263,6 +274,7 @@ def main():
               o_copy and kr_copy and o_copy["status"] == "ACTIVE" and kr_copy["status"] == "ACTIVE")
         check("KR 副本挂 O 副本", kr_copy and kr_copy.get("parentId") == o_copy["id"],
               json.dumps(kr_copy)[:200])
+        check("滚转复制 framework", kr_copy and kr_copy.get("framework") == "OKR")
         src_o = req("GET", f"/worklog/goals/tree?year={Y}", token=token)
         src_qs = quarter_section(src_o, QP)
         src_o_node = next((n for n in src_qs["objectives"] if n["goal"]["id"] == q_o["id"]), None)

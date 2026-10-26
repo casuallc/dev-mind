@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static com.devmind.worklog.model.WorklogGoalEntity.FRAMEWORK_OKR;
 import static com.devmind.worklog.model.WorklogGoalEntity.KIND_KEY_RESULT;
 import static com.devmind.worklog.model.WorklogGoalEntity.KIND_OBJECTIVE;
 import static com.devmind.worklog.model.WorklogGoalEntity.SCOPE_QUARTER;
@@ -169,12 +170,13 @@ public class WorklogGoalService {
         return new LocalDate[]{LocalDate.of(year, 1, 1), LocalDate.of(year, 12, 31)};
     }
 
-    /** 新增（状态恒 ACTIVE、进度恒 0）。 */
+    /** 新增（状态恒 ACTIVE、进度恒 0；framework 空 = OKR）。 */
     public GoalView create(GoalRequest req) {
         String me = identity.currentActor();
         WorklogGoalEntity e = new WorklogGoalEntity();
         e.setUserId(me);
         e.setScope(validatedScope(req.scope()));
+        e.setFramework(validatedFramework(req.framework()));
         e.setKind(validatedKind(req.kind()));
         e.setPeriod(WorklogQuarters.validatedPeriod(e.getScope(), req.period()));
         e.setParentId(validatedParent(me, e.getScope(), e.getPeriod(), e.getKind(), req.parentId()));
@@ -199,6 +201,12 @@ public class WorklogGoalService {
                 || !e.getKind().equals(req.kind())) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "scope/period/kind 不可改（目标的身份属性），请新建目标");
+        }
+        // framework 同为身份属性：传 null/空白 = 不变；传不同值 400
+        if (req.framework() != null && !req.framework().isBlank()
+                && !e.getFramework().equals(req.framework().strip())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "framework 不可改（目标的身份属性），请新建目标");
         }
         e.setParentId(validatedParent(me, e.getScope(), e.getPeriod(), e.getKind(), req.parentId()));
         applyTo(e, req);
@@ -318,6 +326,7 @@ public class WorklogGoalService {
         copy.setScope(src.getScope());
         copy.setPeriod(toPeriod);
         copy.setKind(src.getKind());
+        copy.setFramework(src.getFramework());
         copy.setParentId(newParent);
         copy.setTitle(src.getTitle());
         copy.setContent(src.getContent());
@@ -371,6 +380,22 @@ public class WorklogGoalService {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "scope 仅支持 YEAR/QUARTER");
         }
         return scope;
+    }
+
+    /**
+     * 目标体系校验（CAP-91 M4）：null/空白 = OKR（默认）；其余一律 400。
+     * 后续接入新形式时在此登记，并为 validatedKind/validatedParent 挂该体系的规则集
+     * （OKR 规则 = O/KR 两层、KR 必挂同周期 O、QUARTER O 可选挂同年 YEAR O）。
+     */
+    private static String validatedFramework(String framework) {
+        if (framework == null || framework.isBlank()) {
+            return FRAMEWORK_OKR;
+        }
+        String f = framework.strip();
+        if (!FRAMEWORK_OKR.equals(f)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "目前仅支持 OKR 目标体系: " + f);
+        }
+        return f;
     }
 
     private static String validatedKind(String kind) {
