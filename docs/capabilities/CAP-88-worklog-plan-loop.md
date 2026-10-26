@@ -1,6 +1,10 @@
 # CAP-88 工作日志计划闭环（日/周计划项 + 执行关联 + 数据驱动复盘）
 
-> 能力 ID：CAP-88 ｜ 分类：组装层 ｜ 状态：部分交付（M1 已实现：计划项实体/CRUD/状态机/条目关联/滚转 + 前端计划视图；M2 已实现：日报计划对照注入 + 周报 {{lastWeekPlan}} 数据驱动 + {{thisWeekPlan}}；E2E tests/cap88_e2e.py 23 项全绿；M3 AI 建议待实施）｜ 日期：2026-10-26
+> 能力 ID：CAP-88 ｜ 分类：组装层 ｜ 状态：已实现（M1 计划项/关联/滚转 + 前端计划视图；
+> M2 日报计划对照 + 周报数据驱动 {{lastWeekPlan}}/{{thisWeekPlan}}；M3 AI 建议计划：
+> worklog-plan-suggest 场景 + suggest 链路（WipRequirementProvider SPI 探测降级）+
+> 建议项 AI_SUGGEST 落库 + 前端「AI 建议」入口；FR-11 周期末提醒开放后置；
+> E2E tests/cap88_e2e.py 26 项全绿）｜ 日期：2026-10-26
 > （2026-10-26 修订：存储口径随 CAP-89 定稿**改为 DB 表**——CAP-74 的仓内文件
 > 方案同日被推翻（远程推送判定无意义、git 链路整体退役），原计划文件契约作废；
 > 功能闭环设计不变，仅载体从 `plans/*.md` 文件改为 `worklog_plan_items` 表 +
@@ -113,8 +117,9 @@
 ## 4. 架构与模块归属
 
 - 后端：`devmind-worklog` 模块内——`PlanItemEntity/Repository/PlanService/
-  PlanController`；ReportService 素材构建增计划对照注入。无新 SPI、无 runner/
-  协议变更。
+  PlanController`；ReportService 素材构建增计划对照注入。M3 新增 SPI
+  `common.requirement.WipRequirementProvider`（实现方 devmind-project，在办需求素材）；
+  无 runner/协议变更。
 - 前端：`features/worklog` 增 `PlanView`（自包含）；`WorklogViewSwitch` 增
   「计划」页签；条目抽屉（EntryFormDrawer）增关联下拉。
 - 依赖：**CAP-89（硬前置——条目表与 `plan_item_id` 列随其 FR-02 复活落地）**、
@@ -149,7 +154,8 @@ PUT    /api/worklog/plans/items/{id}         编辑/改状态
 DELETE /api/worklog/plans/items/{id}         删除（关联条目 plan_item_id 置空）
 POST   /api/worklog/plans/carry {scope, to, ids[]}          滚转到目标日期/周（幂等）
 GET    /api/worklog/plans/linkable?date=                    条目抽屉可关联项（当日日计划+当周周计划）
-POST   /api/worklog/plans/suggest {weekStart, hint?}        M3 AI 建议（异步 202 + sessionId，幂等跳过）
+POST   /api/worklog/plans/suggest {date, hint?, force?}       M3 AI 建议（异步受理，返回 ReportLaunch{sessionId, reused}；
+                                                              date=目标周内任意日归一到周一；已有项非 force 幂等跳过，force 只追加不覆盖）
 
 条目 POST/PUT 增可选 planId（落 plan_item_id + 触发 TODO→DOING 联动）
 ```
@@ -174,7 +180,7 @@ POST   /api/worklog/plans/suggest {weekStart, hint?}        M3 AI 建议（异�
 - **M2 复盘确定性**：日报计划对照注入 + 周报「上周计划跟进」改数据驱动 + 内置
   模板更新（存量自定义模板兼容）。
 - **M3 智能建议**：`worklog-plan-suggest` 场景种子 + suggest 链路（CAP-13 探测
-  降级）+ 前端建议项交互；（FR-11 周期末提醒视打扰度评估后定）。
+  降级）+ 前端建议项交互；（FR-11 周期末提醒视打扰度评估后定，本里程碑未实施）。
 
 ## 9. 验收标准
 

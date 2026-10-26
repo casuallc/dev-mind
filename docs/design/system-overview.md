@@ -72,7 +72,7 @@ agent-runner 节点（瘦 jar 无 Spring，可 Windows 服务托管）
 
 ### 3.5 工作日志
 
-条目管理 + git 扫描导入（CAP-28），WORKLOG 项目 + 真实会话生成日/周报（CAP-41），事实源为数据库（CAP-89，取代 CAP-74 的服务端 git 仓——远程推送与团队仓已退役），计划闭环 M1+M2 已落地（CAP-88：日/周计划项一等数据 + 条目关联联动 + 滚转 + 日/周报计划对照数据驱动注入；M3 AI 建议计划待实施）。
+条目管理 + git 扫描导入（CAP-28），WORKLOG 项目 + 真实会话生成日/周报（CAP-41），事实源为数据库（CAP-89，取代 CAP-74 的服务端 git 仓——远程推送与团队仓已退役），计划闭环已落地（CAP-88：日/周计划项一等数据 + 条目关联联动 + 滚转 + 日/周报计划对照数据驱动注入 + AI 建议计划（worklog-plan-suggest 场景，建议项 AI_SUGGEST 落库，在办需求素材经 WipRequirementProvider SPI 探测降级）；FR-11 周期末提醒开放后置）。
 
 ### 3.6 集成与开放
 
@@ -91,7 +91,7 @@ agent-runner 节点（瘦 jar 无 Spring，可 Windows 服务托管）
 
 ### 3.8 已定稿未实施清单
 
-CAP-63 多租户 ｜ CAP-66 安全扫描 ｜ CAP-79 记忆闭环 ｜ CAP-81 远程桌面 ｜ CAP-82 LLM Computer-Use。（CAP-88 计划闭环 M1+M2 已实现、M3 待实施；CAP-89 工作日志回 DB 已实现，移出清单。）
+CAP-63 多租户 ｜ CAP-66 安全扫描 ｜ CAP-79 记忆闭环 ｜ CAP-81 远程桌面 ｜ CAP-82 LLM Computer-Use。（CAP-88 计划闭环已实现——M1+M2+M3，FR-11 提醒开放后置；CAP-89 工作日志回 DB 已实现，移出清单。）
 
 ## 4. 后端模块清单（以 pom 依赖图为准）
 
