@@ -13,6 +13,8 @@ r"""CAP-88 M1 计划闭环 E2E（自起隔离 app，纯 DB REST 链路，无需 
   [5] 日滚转：昨日未完成提示随列表返回；一键滚转副本 TODO+carriedFromId、原项 CARRIED；
       DONE 项跳过；重复滚转幂等
   [6] 周滚转：上周 TODO → 本周一，同口径
+  [7] M2 内置模板占位符：日报含 {{plans}}、周报含 {{lastWeekPlan}}/{{thisWeekPlan}}
+      （prompt 组装与计划对照格式由单测覆盖；生成链路需 runner，不在本脚本范围）
 """
 import json
 import os
@@ -258,6 +260,15 @@ def main():
               and wc["items"][0].get("planDate") == MONDAY_S
               and wc["items"][0].get("carriedFromId") == w1,
               json.dumps(wc, ensure_ascii=False)[:200])
+
+        # ---------- [7] M2 内置模板占位符（prompt 组装细节由单测覆盖，E2E 只钉 REST 可见口径） ----------
+        tpl = req("GET", "/worklog/settings/templates/default", token=token)
+        check("日报内置模板含 {{plans}} 计划对照占位", "{{plans}}" in tpl.get("dailyTemplateMd", ""),
+              tpl.get("dailyTemplateMd", "")[:80])
+        check("周报内置模板含 {{lastWeekPlan}}/{{thisWeekPlan}}",
+              "{{lastWeekPlan}}" in tpl.get("weeklyTemplateMd", "")
+              and "{{thisWeekPlan}}" in tpl.get("weeklyTemplateMd", ""),
+              tpl.get("weeklyTemplateMd", "")[:80])
 
         print(f"\n== CAP-88 M1 E2E: {len(passed)} passed, {len(failed)} failed ==")
         if failed:
