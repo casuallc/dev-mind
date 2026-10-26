@@ -83,7 +83,7 @@ class VerifyContextProviderTest {
         // dryRun 预览不签发 token
         assertTrue(newProvider().contribute(
                 new ContextAssemblyRequest("p1", List.of(), List.of(), List.of(), List.of(),
-                        List.of(), List.of(), List.of(), true, true, "r1", List.of(), "s1", false))
+                        List.of(), List.of(), null, true, true, "r1", List.of(), "s1", false))
                 .inputs().isEmpty());
         // 无 sessionId（chat/兼容路径）
         assertTrue(newProvider().contribute(req(null, "r1", false)).inputs().isEmpty());
@@ -106,7 +106,7 @@ class VerifyContextProviderTest {
 
     private static ContextAssemblyRequest req(String sessionId, String requirementId, boolean lean) {
         return new ContextAssemblyRequest("p1", List.of(), List.of(), List.of(), List.of(),
-                List.of(), List.of(), List.of(), true, false, requirementId, List.of(),
+                List.of(), List.of(), null, true, false, requirementId, List.of(),
                 sessionId, lean);
     }
 

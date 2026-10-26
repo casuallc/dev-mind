@@ -52,9 +52,14 @@ public class SessionScenarioEntity {
     @Column(name = "doc_ids_json", length = 16_777_216)
     private String docIdsJson;
 
-    /** ①层显式绑定的知识 tags（CSV，与 knowledge_entries.tags 同格式） */
-    @Column(name = "knowledge_tags", length = 500)
-    private String knowledgeTags;
+    /**
+     * ①层显式绑定的知识库 id 列表（JSON 数组串）。CAP-92 起场景绑定知识库并在装配时检索，
+     * 旧 knowledge_tags 列（全量注入 tags）保留在库中但不再读写。
+     */
+    @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @Column(name = "knowledge_base_ids_json", length = 16_777_216)
+    private String knowledgeBaseIdsJson;
 
     /** 业务背景/口径约定等自由文本 → CLAUDE.md「场景背景」节 */
     @Lob
@@ -114,8 +119,8 @@ public class SessionScenarioEntity {
     public void setSkillIdsJson(String skillIdsJson) { this.skillIdsJson = skillIdsJson; }
     public String getDocIdsJson() { return docIdsJson; }
     public void setDocIdsJson(String docIdsJson) { this.docIdsJson = docIdsJson; }
-    public String getKnowledgeTags() { return knowledgeTags; }
-    public void setKnowledgeTags(String knowledgeTags) { this.knowledgeTags = knowledgeTags; }
+    public String getKnowledgeBaseIdsJson() { return knowledgeBaseIdsJson; }
+    public void setKnowledgeBaseIdsJson(String knowledgeBaseIdsJson) { this.knowledgeBaseIdsJson = knowledgeBaseIdsJson; }
     public String getExtraContextMd() { return extraContextMd; }
     public void setExtraContextMd(String extraContextMd) { this.extraContextMd = extraContextMd; }
     public String getModel() { return model; }

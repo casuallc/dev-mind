@@ -69,8 +69,11 @@ class KnowledgeBaseMigrationTest {
         new KnowledgeBaseMigration(jdbc).run(null);
 
         Integer globalKb = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM knowledge_bases WHERE scope='global' AND inject_mode='FULL'", Integer.class);
+                "SELECT COUNT(*) FROM knowledge_bases WHERE scope='global'", Integer.class);
         assertEquals(1, globalKb, "应建唯一全局经验库");
+        Integer legacyFull = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM knowledge_bases WHERE inject_mode<>'RAG'", Integer.class);
+        assertEquals(0, legacyFull, "CAP-92：注入方式归一为 RAG");
         Integer projectKbs = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM knowledge_bases WHERE scope='project'", Integer.class);
         assertEquals(2, projectKbs, "两个 project_id 各建一个项目库");

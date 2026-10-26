@@ -624,7 +624,7 @@ public class ReportService {
         }
         SessionView s = sessionManager.create(new CreateSessionRequest(
                 null, scenarioCode, projectId, null, null, prompt,
-                null, null, null, null, null, null, null, null, null));
+                null, null, null, null, null, null, null, null));
         log.info("报告生成会话已创建: user={} scenario={} session={}", username, scenarioCode, s.id());
         return new ReportLaunch(s.id(), false);
     }

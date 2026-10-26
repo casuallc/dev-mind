@@ -115,7 +115,7 @@ class SessionAttachmentProviderTest {
 
     private ContextAssemblyRequest req(List<String> attachmentIds) {
         return new ContextAssemblyRequest("p1", List.of(), List.of(), List.of(), List.of(),
-                List.of(), List.of(), List.of(), true, false, null, attachmentIds);
+                List.of(), List.of(), null, true, false, null, attachmentIds, null, false);
     }
 
     /** id → 字节表；put 过的 id 才解析得到（模拟附件不存在/已硬删）。 */

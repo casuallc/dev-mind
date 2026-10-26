@@ -13,7 +13,7 @@ import java.util.List;
 
 /**
  * CAP-33 FR-06 场景预览：dryRun 装配（无副作用，不 bumpHits）出「将会注入什么」。
- * 供场景管理页骨架预览与创建表单联调。
+ * 知识为检索命中（场景绑定库 + 渲染后任务作 query），供场景管理页骨架预览与创建表单联调。
  */
 @Service
 public class ScenarioPreviewService {
@@ -51,7 +51,7 @@ public class ScenarioPreviewService {
                 project != null && project.tags() != null ? project.tags() : List.of(),
                 scenarioService.skillIdsOf(s), List.of(),
                 scenarioService.docIdsOf(s), List.of(),
-                scenarioService.knowledgeTagsOf(s), List.of(),
+                scenarioService.knowledgeBaseIdsOf(s), rendered,
                 project != null, true);
         ContextAssembler.AssembledContext a = assembler.assemble(req, s.getCode(), s.getName(),
                 s.getExtraContextMd(), rendered);

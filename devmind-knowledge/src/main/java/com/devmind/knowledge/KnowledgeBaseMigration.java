@@ -13,8 +13,9 @@ import org.springframework.stereotype.Component;
 
 /**
  * CAP-44 FR-02 存量迁移：扁平经验条目（scope/project_id）→ 知识库容器归属。
- * 建「全局经验库」（global+FULL）；按存量条目 project_id 各建「XX 项目经验库」（project+FULL）；
+ * 建「全局经验库」；按存量条目 project_id 各建「XX 项目经验库」；
  * 回填 entries.kb_id 及新列默认值（source/index_status）。
+ * CAP-92：FULL 全量注入下线，存量 FULL 库统一归一到 RAG（列保留兼容回滚）。
  * 幂等：kb_id 已回填的条目跳过、库按 (scope, project_id, name) 查重；任何异常只记日志不阻断启动。
  * 旧 scope/project_id 列保留不删（防 rollback 丢数据）。
  */
@@ -48,6 +49,12 @@ public class KnowledgeBaseMigration implements ApplicationRunner {
         // 新列默认值兜底（存量行 JPA 字段初始值不生效）
         jdbc.update("UPDATE knowledge_entries SET source = 'manual' WHERE source IS NULL");
         jdbc.update("UPDATE knowledge_entries SET index_status = 'pending' WHERE index_status IS NULL");
+        // CAP-92：FULL 全量注入下线，统一检索口径；列保留只为兼容旧库结构与回滚
+        int normalized = jdbc.update(
+                "UPDATE knowledge_bases SET inject_mode = 'RAG' WHERE inject_mode IS NULL OR inject_mode <> 'RAG'");
+        if (normalized > 0) {
+            log.info("知识库注入方式归一: {} 个库 FULL → RAG（CAP-92 下线全量注入）", normalized);
+        }
         // CAP-84 治理列兜底：老行没有文档类型/版本号/来源地址。列可能尚未由 JPA 补齐
         // （滚动升级窗口/精简 schema），单个回填失败不能拖垮整段容器迁移
         if (columnExists("knowledge_entries", "doc_type")) {
@@ -128,7 +135,7 @@ public class KnowledgeBaseMigration implements ApplicationRunner {
         }
         Timestamp now = Timestamp.from(Instant.now());
         jdbc.update("INSERT INTO knowledge_bases(name, description, scope, project_id, inject_mode, status,"
-                        + " created_at, updated_at) VALUES (?,?,?,?, 'FULL', 'active', ?, ?)",
+                        + " created_at, updated_at) VALUES (?,?,?,?, 'RAG', 'active', ?, ?)",
                 name, description, scope, projectId, now, now);
         // 不回查 created_at（H2 TIMESTAMP 精度截断纳秒会判等失败），按去重同口径回查
         Long id = findKbId(name, scope, projectId);

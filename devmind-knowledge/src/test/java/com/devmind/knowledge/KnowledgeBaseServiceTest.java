@@ -51,9 +51,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * KnowledgeBaseService 库模型重构（CAP-44 FR-03 注入口径零回归，mock repo 不拉起 Spring）：
- * selectEntries = global FULL 库按项目 tags 过滤 + 本项目 FULL 库全量；
- * legacy scope 创建条目 → 解析/兜底建经验库；CAP-48 库级端点绑定 / 失配重建。
+ * KnowledgeBaseService 库模型（CAP-44 库容器；CAP-92 下线全量注入后仅保留检索辅助，
+ * mock repo 不拉起 Spring）：legacy scope 创建条目 → 解析/兜底建经验库；
+ * CAP-48 库级端点绑定 / 失配重建；检索命中计数。
  */
 class KnowledgeBaseServiceTest {
 
@@ -94,15 +94,19 @@ class KnowledgeBaseServiceTest {
         taskService = mock(AsyncTaskService.class);
         lenient().when(taskService.submit(anyString(), anyString(), any())).thenReturn("task-1");
 
-        when(kbRepo.findByScopeAndInjectModeAndStatus(anyString(), anyString(), anyString())).thenAnswer(inv ->
+        when(kbRepo.findByScopeAndStatus(anyString(), anyString())).thenAnswer(inv ->
                 kbs.stream().filter(k -> inv.getArgument(0).equals(k.getScope())
-                        && inv.getArgument(1).equals(k.getInjectMode())
-                        && inv.getArgument(2).equals(k.getStatus())).toList());
-        when(kbRepo.findByScopeAndProjectIdAndInjectModeAndStatus(anyString(), anyString(), anyString(), anyString()))
+                        && inv.getArgument(1).equals(k.getStatus())).toList());
+        when(kbRepo.findByScopeAndProjectIdAndStatus(anyString(), anyString(), anyString()))
                 .thenAnswer(inv -> kbs.stream().filter(k -> inv.getArgument(0).equals(k.getScope())
                         && inv.getArgument(1).equals(k.getProjectId())
-                        && inv.getArgument(2).equals(k.getInjectMode())
-                        && inv.getArgument(3).equals(k.getStatus())).toList());
+                        && inv.getArgument(2).equals(k.getStatus())).toList());
+        when(kbRepo.findAllById(any())).thenAnswer(inv -> {
+            Iterable<Long> ids = inv.getArgument(0);
+            List<Long> wanted = new ArrayList<>();
+            ids.forEach(wanted::add);
+            return kbs.stream().filter(k -> wanted.contains(k.getId())).toList();
+        });
         when(kbRepo.save(any())).thenAnswer(inv -> {
             KnowledgeBaseEntity kb = inv.getArgument(0);
             if (kb.getId() == null) {
@@ -122,6 +126,12 @@ class KnowledgeBaseServiceTest {
             }
             return e;
         });
+        when(entryRepo.findAllById(any())).thenAnswer(inv -> {
+            Iterable<Long> ids = inv.getArgument(0);
+            List<Long> wanted = new ArrayList<>();
+            ids.forEach(wanted::add);
+            return entries.stream().filter(e -> wanted.contains(e.getId())).toList();
+        });
         when(projectService.requireProject(anyString())).thenAnswer(inv ->
                 new Project(inv.getArgument(0), "项目" + inv.getArgument(0), null, null, List.of(),
                         null, null, null));
@@ -133,12 +143,11 @@ class KnowledgeBaseServiceTest {
                 taskService);
     }
 
-    private KnowledgeBaseEntity addKb(String scope, String projectId, String injectMode) {
+    private KnowledgeBaseEntity addKb(String scope, String projectId) {
         KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
         kb.setId(++kbSeq);
         kb.setScope(scope);
         kb.setProjectId(projectId);
-        kb.setInjectMode(injectMode);
         kb.setName(scope + "-kb-" + kb.getId());
         kb.setCreatedAt(Instant.now());
         kbs.add(kb);
@@ -159,39 +168,25 @@ class KnowledgeBaseServiceTest {
     }
 
     @Test
-    void selectEntriesKeepsCap04Semantics() {
-        KnowledgeBaseEntity globalFull = addKb("global", null, "FULL");
-        KnowledgeBaseEntity globalRag = addKb("global", null, "RAG");
-        KnowledgeBaseEntity projectFull = addKb("project", "p1", "FULL");
-        KnowledgeBaseEntity otherProjectFull = addKb("project", "p2", "FULL");
-        addEntry(globalFull, "无标签全局", null, "active");
-        addEntry(globalFull, "前端规范", "frontend,spring", "active");
-        addEntry(globalFull, "废弃条目", null, "deprecated");
-        addEntry(globalRag, "RAG 库条目", null, "active");
-        addEntry(projectFull, "项目条目", null, "active");
-        addEntry(otherProjectFull, "他项目条目", null, "active");
+    void baseScopesMapsIdsForManifest() {
+        KnowledgeBaseEntity global = addKb("global", null);
+        KnowledgeBaseEntity project = addKb("project", "p1");
 
-        List<EntryView> noTags = service.selectEntries("p1", List.of());
-        assertEquals(List.of("无标签全局", "项目条目"), noTags.stream().map(EntryView::name).toList(),
-                "无项目 tags：仅无标签全局 + 本项目 FULL；RAG 库/deprecated/他项目排除");
-
-        List<EntryView> withTags = service.selectEntries("p1", List.of("frontend"));
-        assertEquals(List.of("无标签全局", "前端规范", "项目条目"),
-                withTags.stream().map(EntryView::name).toList(), "项目 tags 命中带标签全局条目");
-        assertEquals("global", withTags.get(0).scope(), "视图 scope 由 KB 派生");
-        assertEquals("p1", withTags.get(2).projectId(), "视图 projectId 由 KB 派生");
+        assertEquals(java.util.Map.of(global.getId(), "global", project.getId(), "project"),
+                service.baseScopes(List.of(global.getId(), project.getId(), 999L)), "不存在的 id 跳过");
+        assertTrue(service.baseScopes(List.of()).isEmpty());
     }
 
     @Test
-    void selectByTagsPoolsFullBasesOnly() {
-        KnowledgeBaseEntity globalFull = addKb("global", null, "FULL");
-        KnowledgeBaseEntity globalRag = addKb("global", null, "RAG");
-        addEntry(globalFull, "spring 经验", "spring", "active");
-        addEntry(globalRag, "rag 条目", "spring", "active");
+    void bumpHitsCountsRetrievedEntries() {
+        KnowledgeBaseEntity kb = addKb("global", null);
+        KnowledgeEntryEntity hit = addEntry(kb, "命中", null, "active");
+        KnowledgeEntryEntity miss = addEntry(kb, "未命中", null, "active");
 
-        List<EntryView> hits = service.selectByTags(List.of("spring"), null);
-        assertEquals(List.of("spring 经验"), hits.stream().map(EntryView::name).toList(),
-                "selectByTags 只从 FULL 库取");
+        service.bumpHitsByEntryIds(List.of(hit.getId()));
+
+        assertEquals(1, hit.getHitCount());
+        assertEquals(0, miss.getHitCount());
     }
 
     @Test
@@ -204,7 +199,6 @@ class KnowledgeBaseServiceTest {
         KnowledgeBaseEntity kb = kbs.get(0);
         assertEquals("project", kb.getScope());
         assertEquals("p9", kb.getProjectId());
-        assertEquals("FULL", kb.getInjectMode(), "兜底建的是 FULL 经验库");
         assertEquals(kb.getId(), created.kbId());
         assertEquals("project", created.scope(), "视图 scope 派生自库");
         assertEquals("p9", created.projectId());
@@ -219,22 +213,22 @@ class KnowledgeBaseServiceTest {
 
     @Test
     void createBaseBindsKbLevelEndpointOverride() {
-        service.createBase(new KnowledgeBaseRequest("研发库", "d", "global", null, "RAG", 11L, null));
+        service.createBase(new KnowledgeBaseRequest("研发库", "d", "global", null, 11L, null));
         assertEquals(11L, kbs.get(0).getModelEndpointId(), "显式传端点 → 库级覆盖");
 
-        service.createBase(new KnowledgeBaseRequest("归档库", "d", "global", null, "RAG", 0L, null));
+        service.createBase(new KnowledgeBaseRequest("归档库", "d", "global", null, 0L, null));
         assertNull(kbs.get(1).getModelEndpointId(), "0 = 清除覆盖，回落平台默认端点");
     }
 
     @Test
     void updateBaseWithoutEndpointKeepsExistingOverride() {
-        service.createBase(new KnowledgeBaseRequest("研发库", "d", "global", null, "RAG", 11L, null));
+        service.createBase(new KnowledgeBaseRequest("研发库", "d", "global", null, 11L, null));
         Long id = kbs.get(0).getId();
         when(kbRepo.findById(id)).thenAnswer(inv -> kbs.stream()
                 .filter(k -> k.getId().equals(inv.getArgument(0))).findFirst());
 
         // 只改描述（modelEndpointId 缺省 null）：其他表单字段的"未传=不改"语义要一致
-        service.updateBase(id, new KnowledgeBaseRequest(null, "新描述", null, null, null, null, null));
+        service.updateBase(id, new KnowledgeBaseRequest(null, "新描述", null, null, null, null));
 
         assertEquals(11L, kbs.get(0).getModelEndpointId(), "缺省不传端点不得清掉已有覆盖");
         assertEquals("新描述", kbs.get(0).getDescription());
@@ -250,7 +244,7 @@ class KnowledgeBaseServiceTest {
                 null, "gpt-4o-mini", null, 30, 32, null, null)));
 
         DevMindException ex = assertThrows(DevMindException.class, () -> service.createBase(
-                new KnowledgeBaseRequest("研发库", "d", "global", null, "RAG", 7L, null)));
+                new KnowledgeBaseRequest("研发库", "d", "global", null, 7L, null)));
 
         assertTrue(ex.getMessage().contains("EMBEDDING"), ex.getMessage());
         assertTrue(ex.getMessage().contains("公司通用模型"), "错误消息要点名是哪个端点: " + ex.getMessage());
@@ -258,7 +252,7 @@ class KnowledgeBaseServiceTest {
 
     @Test
     void reindexBaseQueuesFullRebuildTask() {
-        KnowledgeBaseEntity kb = addKb("global", null, "RAG");
+        KnowledgeBaseEntity kb = addKb("global", null);
         when(kbRepo.findById(kb.getId())).thenReturn(java.util.Optional.of(kb));
         when(entryRepo.countByKbId(kb.getId())).thenReturn(2L);
         KnowledgeEntryEntity ready = addEntry(kb, "已索引", null, "active");
@@ -333,7 +327,7 @@ class KnowledgeBaseServiceTest {
 
     @Test
     void reindexBaseOnlyMismatchedSkipsWithoutProbedDimensions() {
-        KnowledgeBaseEntity kb = addKb("global", null, "RAG");
+        KnowledgeBaseEntity kb = addKb("global", null);
         when(kbRepo.findById(kb.getId())).thenReturn(java.util.Optional.of(kb));
 
         ReindexResult result = service.reindexBase(kb.getId(), true);
@@ -344,7 +338,7 @@ class KnowledgeBaseServiceTest {
 
     @Test
     void reindexBaseOnlyMismatchedUsesResolvedEndpointLineage() {
-        KnowledgeBaseEntity kb = addKb("global", null, "RAG");
+        KnowledgeBaseEntity kb = addKb("global", null);
         when(kbRepo.findById(kb.getId())).thenReturn(java.util.Optional.of(kb));
         when(resolver.resolve(any())).thenReturn(new EmbeddingResolver.Resolution(
                 11L, "bge-m3", 1024, 0.15, 8, mock(EmbeddingClient.class)));
@@ -363,7 +357,7 @@ class KnowledgeBaseServiceTest {
 
     @Test
     void pageByBaseReturnsLightweightSummariesAndClampsSize() {
-        KnowledgeBaseEntity kb = addKb("global", null, "RAG");
+        KnowledgeBaseEntity kb = addKb("global", null);
         when(kbRepo.findById(kb.getId())).thenReturn(java.util.Optional.of(kb));
         KnowledgeEntryRepository.EntrySummaryRef ref = new KnowledgeEntryRepository.EntrySummaryRef() {
             @Override public Long getId() { return 7L; }

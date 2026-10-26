@@ -354,11 +354,11 @@ public class SessionManagerService {
         // 否则 createdBy=local 会让身份解析落空、agent 提交署名退化成 runner 机系统 git 配置
         String effectiveActor = resolveSessionActor(workItem, requirement);
         Map<String, String> gitEnv = resolveGitEnv(effectiveActor, project);
-        // CAP-33 FR-02：三层合并装配上下文包（场景绑定 + 项目自动命中 + 请求追加）。
+        // CAP-33 FR-02：装配上下文包（场景绑定 + 项目自动命中 + 请求追加；知识为场景绑库检索）。
         // 场景绑定的资产失效（DevMindException 404）fail-visible 向上传播；其它装配异常降级
-        // 为无上下文启动（沿用知识注入不阻塞会话的语义）
+        // 为无上下文启动（沿用知识检索不阻塞会话的语义）
         SessionContextService.Prepared prepared = prepareContext(id, project, scenario, taskSpec,
-                req.extraSkillIds(), req.extraDocIds(), req.extraKnowledgeTags(),
+                req.extraSkillIds(), req.extraDocIds(),
                 requirement != null ? requirement.getId() : null,
                 SessionContextService.isExecutionSession(taskSpec, req.workItemId()),
                 req.attachmentIds());
@@ -744,11 +744,11 @@ public class SessionManagerService {
                 }
                 // CAP-33：resume 按落库 scenarioCode 重渲染重装配（修复此前用未渲染原文重装配的
                 // 偏差；场景已删降级按原文；③层请求追加为创建时一次性，resume 不重放）；
-                // resume = 重新注入（hitCount 再累计一次，与创建同语义）
+                // resume = 重新检索（命中条目的 hitCount 再累计一次，与创建同语义）
                 String renderedTask = scenario != null
                         ? scenarioService.render(scenario, ent.getTaskSpec(), proj, requirementTitleOf(ent))
                         : ent.getTaskSpec();
-                prepared = prepareContext(id, proj, scenario, renderedTask, null, null, null,
+                prepared = prepareContext(id, proj, scenario, renderedTask, null, null,
                         ent.getRequirementId(),
                         SessionContextService.isExecutionSession(ent.getTaskSpec(), ent.getWorkItemId()),
                         parseCsv(ent.getAttachmentIds()));
@@ -1825,8 +1825,8 @@ public class SessionManagerService {
     }
 
     /**
-     * CAP-33 FR-02：装配上下文包（三层合并）。场景绑定的资产失效（DevMindException 404）
-     * 向上传播 fail-visible；其它装配异常降级为 null = 无上下文启动（沿用注入不阻塞语义）。
+     * CAP-33 FR-02：装配上下文包。场景绑定的资产失效（DevMindException 404）
+     * 向上传播 fail-visible；其它装配异常降级为 null = 无上下文启动（沿用检索不阻塞语义）。
      *
      * @param lean CAP-52 FR-05 瘦上下文开关，取 {@link SessionContextService#isExecutionSession}
      * @param attachmentIds CAP-68 创建附带附件（create 取请求值，resume 取落库列；可空）
@@ -1836,14 +1836,12 @@ public class SessionManagerService {
                                                           String renderedTaskSpec,
                                                           List<String> extraSkillIds,
                                                           List<Long> extraDocIds,
-                                                          List<String> extraKnowledgeTags,
                                                           String requirementId,
                                                           boolean lean,
                                                           List<String> attachmentIds) {
         try {
             return sessionContextService.prepare(sessionId, project, scenario, renderedTaskSpec,
-                    extraSkillIds, extraDocIds, extraKnowledgeTags, requirementId, lean,
-                    attachmentIds);
+                    extraSkillIds, extraDocIds, requirementId, lean, attachmentIds);
         } catch (DevMindException de) {
             throw de;
         } catch (Exception e) {

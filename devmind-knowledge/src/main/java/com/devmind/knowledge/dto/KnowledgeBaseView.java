@@ -11,7 +11,6 @@ import java.time.Instant;
  * @param scope             global | project
  * @param projectId         scope=project 时所属项目
  * @param projectName       scope=project 时项目名（展示用，解析失败为空）
- * @param injectMode        FULL=全量注入 CLAUDE.md | RAG=仅检索
  * @param modelEndpointId   库级覆盖的 embedding 端点 ID（null = 平台默认端点）
  * @param modelEndpointName 实际生效的端点名（含回落平台默认后的结果；无可用端点时 null）
  * @param status            active | archived
@@ -28,7 +27,6 @@ public record KnowledgeBaseView(
         String scope,
         String projectId,
         String projectName,
-        String injectMode,
         Long modelEndpointId,
         String modelEndpointName,
         String status,

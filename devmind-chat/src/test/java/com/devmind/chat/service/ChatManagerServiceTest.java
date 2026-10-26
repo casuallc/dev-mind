@@ -864,11 +864,11 @@ class ChatManagerServiceTest {
         @Override
         public Optional<KbOverview> overview(long kbId) {
             if (kbId == 7L) {
-                return Optional.of(new KbOverview("研发规范库", "团队研发规范", "RAG",
+                return Optional.of(new KbOverview("研发规范库", "团队研发规范",
                         List.of("构建规范", "部署规范")));
             }
             if (kbId == 8L) {
-                return Optional.of(new KbOverview("运维手册库", "线上运维", "RAG", List.of("回滚手册")));
+                return Optional.of(new KbOverview("运维手册库", "线上运维", List.of("回滚手册")));
             }
             return Optional.empty();
         }
@@ -1043,7 +1043,7 @@ class ChatManagerServiceTest {
         // 启动注入：库概览节拼进初始 prompt 前缀
         String prompt = runner.lastLaunch.taskSpec();
         assertTrue(prompt.startsWith("<knowledge-base>"), "库概览节在初始 prompt 最前");
-        assertTrue(prompt.contains("研发规范库") && prompt.contains("注入模式：RAG"));
+        assertTrue(prompt.contains("研发规范库"));
         assertTrue(prompt.contains("- 构建规范") && prompt.contains("- 部署规范"));
         assertTrue(prompt.endsWith("构建规范有哪些"), "概览节后接原始首条消息");
 

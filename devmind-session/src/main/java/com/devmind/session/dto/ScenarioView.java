@@ -9,14 +9,14 @@ import java.util.List;
  * @param promptSkeleton prompt 骨架（占位符 {{task}}/{{project}}/{{branch}}/{{requirement}}）
  * @param skillIds       ①层绑定 skill ids
  * @param docIds         ①层绑定 doc ids
- * @param knowledgeTags  ①层绑定知识 tags
+ * @param knowledgeBaseIds ①层绑定知识库 ids（装配时检索命中注入）
  * @param extraContextMd 场景背景（业务背景/口径约定 → CLAUDE.md「场景背景」节）
  * @param scope          GLOBAL | PROJECT
  * @param autoFinishSec  自动结束（秒）：回合完成后空闲 N 秒自动结束会话；null=跟随全局，0=永不
  */
 public record ScenarioView(
         Long id, String code, String name, String description, String promptSkeleton,
-        List<String> skillIds, List<Long> docIds, List<String> knowledgeTags,
+        List<String> skillIds, List<Long> docIds, List<Long> knowledgeBaseIds,
         String extraContextMd, String model, String permissionMode, String agentNodeId,
         String scope, String projectId, boolean enabled, int sortOrder,
         Instant createdAt, Instant updatedAt, Integer autoFinishSec) {

@@ -21,7 +21,6 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -123,7 +122,7 @@ public class ScenarioService {
         if (req.promptSkeleton() != null) s.setPromptSkeleton(req.promptSkeleton());
         if (req.skillIds() != null) s.setSkillIdsJson(writeJson(req.skillIds()));
         if (req.docIds() != null) s.setDocIdsJson(writeJson(req.docIds()));
-        if (req.knowledgeTags() != null) s.setKnowledgeTags(joinCsv(req.knowledgeTags()));
+        if (req.knowledgeBaseIds() != null) s.setKnowledgeBaseIdsJson(writeJson(req.knowledgeBaseIds()));
         if (req.extraContextMd() != null) s.setExtraContextMd(req.extraContextMd());
         if (req.model() != null) s.setModel(req.model().isBlank() ? null : req.model().strip());
         if (req.permissionMode() != null) {
@@ -173,15 +172,16 @@ public class ScenarioService {
         });
     }
 
-    public List<String> knowledgeTagsOf(SessionScenarioEntity s) {
-        return splitCsv(s.getKnowledgeTags());
+    public List<Long> knowledgeBaseIdsOf(SessionScenarioEntity s) {
+        return readJson(s.getKnowledgeBaseIdsJson(), new TypeReference<>() {
+        });
     }
 
     // ---------------- 视图 ----------------
 
     public ScenarioView toView(SessionScenarioEntity s) {
         return new ScenarioView(s.getId(), s.getCode(), s.getName(), s.getDescription(),
-                s.getPromptSkeleton(), skillIdsOf(s), docIdsOf(s), knowledgeTagsOf(s),
+                s.getPromptSkeleton(), skillIdsOf(s), docIdsOf(s), knowledgeBaseIdsOf(s),
                 s.getExtraContextMd(), s.getModel(), s.getPermissionMode(), s.getAgentNodeId(),
                 s.getScope(), s.getProjectId(), s.isEnabled(), s.getSortOrder(),
                 s.getCreatedAt(), s.getUpdatedAt(), s.getAutoFinishSec());
@@ -238,14 +238,4 @@ public class ScenarioService {
         return mapper.readValue(json, type);
     }
 
-    static String joinCsv(List<String> items) {
-        return items == null || items.isEmpty() ? "" : String.join(",", items);
-    }
-
-    static List<String> splitCsv(String csv) {
-        if (csv == null || csv.isBlank()) {
-            return List.of();
-        }
-        return Arrays.stream(csv.split(",")).map(String::strip).filter(s -> !s.isEmpty()).toList();
-    }
 }

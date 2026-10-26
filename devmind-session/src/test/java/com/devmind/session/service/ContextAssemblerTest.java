@@ -29,7 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ContextAssemblerTest {
 
     private static final ContextAssemblyRequest REQ = new ContextAssemblyRequest(
-            "p1", List.of("java"), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+            "p1", List.of("java"), List.of(), List.of(), List.of(), List.of(), List.of(), "任务",
             true, false);
 
     private static ContextProvider provider(ContextContribution c) {

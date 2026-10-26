@@ -36,7 +36,7 @@ public final class EntryViews {
                                          String modelEndpointName, KnowledgeBaseView.IndexStats indexStats) {
         return new KnowledgeBaseView(
                 kb.getId(), kb.getName(), kb.getDescription(), kb.getScope(), kb.getProjectId(),
-                projectName, kb.getInjectMode(), kb.getModelEndpointId(), modelEndpointName, kb.getStatus(),
+                projectName, kb.getModelEndpointId(), modelEndpointName, kb.getStatus(),
                 entryCount, chunkCount, indexStats, kb.getCreatedAt(), kb.getUpdatedAt());
     }
 

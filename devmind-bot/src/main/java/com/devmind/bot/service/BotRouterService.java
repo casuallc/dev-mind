@@ -1044,7 +1044,7 @@ public class BotRouterService implements BotMessageHandler {
         List<String> attachmentIds = pendingImages.drain(pendingKey(msg));
         SessionView s = sessionManager.create(new CreateSessionRequest(
                 null, null, projectId, null, null, desc, null, null, null, null,
-                null, null, null, null, null,
+                null, null, null, null,
                 attachmentIds.isEmpty() ? null : attachmentIds));
         // FR-20：订阅终态推送——会话结束（含失败）时把进展推回这个聊天
         watchService.register(s.id(), msg.channel(), msg.externalChatId(), desc);
@@ -1175,7 +1175,7 @@ public class BotRouterService implements BotMessageHandler {
         List<String> attachmentIds = pendingImages.drain(pendingKey(msg));
         SessionView s = sessionManager.create(new CreateSessionRequest(
                 null, null, projectId, null, r.id(), spec.toString(), null, null, null, null,
-                null, null, null, null, null,
+                null, null, null, null,
                 attachmentIds.isEmpty() ? null : attachmentIds));
         // FR-20：订阅终态推送（taskSpec 用需求标题+描述的首段，推送文案够读）
         watchService.register(s.id(), msg.channel(), msg.externalChatId(), spec.toString());

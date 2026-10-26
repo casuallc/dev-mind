@@ -10,8 +10,7 @@ import java.time.Instant;
 
 /**
  * 知识库容器（CAP-44 FR-01）：条目的一等归属。scope 语义自条目上移（global=平台共享 /
- * project=项目特有，projectId 必填）；injectMode 区分消费方式——FULL=全量注入 CLAUDE.md
- * （原 CAP-04 经验库语义），RAG=仅检索（文档库语义，向量检索命中才进上下文）。
+ * project=项目特有，projectId 必填）；消费方式统一为检索命中注入（CAP-92 下线 FULL 全量注入）。
  */
 @Entity
 @Table(name = "knowledge_bases")
@@ -19,8 +18,6 @@ public class KnowledgeBaseEntity {
 
     public static final String SCOPE_GLOBAL = "global";
     public static final String SCOPE_PROJECT = "project";
-    public static final String INJECT_FULL = "FULL";
-    public static final String INJECT_RAG = "RAG";
     public static final String STATUS_ACTIVE = "active";
     public static final String STATUS_ARCHIVED = "archived";
 
@@ -42,9 +39,12 @@ public class KnowledgeBaseEntity {
     @Column(length = 64)
     private String projectId;
 
-    /** FULL=全量注入 CLAUDE.md | RAG=仅向量检索（CAP-46 会话消费） */
+    /**
+     * CAP-92：FULL 全量注入已下线，该列仅为兼容存量表结构与回滚保留，取值恒为 RAG。
+     * 保留映射是为了不破坏 nullable=false 的旧库插入（ddl-auto 不删列）。
+     */
     @Column(nullable = false, length = 8)
-    private String injectMode = INJECT_RAG;
+    private String injectMode = "RAG";
 
     /**
      * CAP-48 FR-04：库级覆盖的 embedding 端点（空 = 平台默认端点）。
@@ -53,7 +53,7 @@ public class KnowledgeBaseEntity {
     @Column(name = "model_endpoint_id")
     private Long modelEndpointId;
 
-    /** active | archived（archived 不参与注入与检索） */
+    /** active | archived（archived 不参与检索） */
     @Column(nullable = false, length = 16)
     private String status = STATUS_ACTIVE;
 

@@ -14,7 +14,6 @@ import com.devmind.knowledge.dto.KnowledgeBaseRequest;
 import com.devmind.knowledge.dto.KnowledgeBaseView;
 import com.devmind.knowledge.dto.KnowledgeChunkView;
 import com.devmind.knowledge.dto.KnowledgeVersionView;
-import com.devmind.knowledge.dto.PreviewResult;
 import com.devmind.knowledge.dto.ProposalRequest;
 import com.devmind.knowledge.dto.ProposalView;
 import com.devmind.knowledge.dto.ReindexResult;
@@ -32,7 +31,6 @@ import com.devmind.knowledge.repo.KnowledgeImportFileRepository;
 import com.devmind.knowledge.repo.KnowledgeProposalRepository;
 import com.devmind.notification.NotificationPublisher;
 import com.devmind.project.ProjectService;
-import com.devmind.project.model.Project;
 import com.devmind.task.api.TaskOptions;
 import com.devmind.task.service.AsyncTaskService;
 import java.io.IOException;
@@ -44,6 +42,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
@@ -62,9 +61,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 知识库核心（CAP-04 条目/提案/注入选择 + CAP-44 库容器）。
- * 库为一等归属：条目的 scope/projectId 语义由所属库派生；FULL 库参与 CLAUDE.md 注入
- * （口径同 CAP-04：global FULL 库按项目 tags 过滤 + 本项目 FULL 库全量），RAG 库仅检索。
+ * 知识库核心（CAP-04 条目/提案 + CAP-44 库容器）。
+ * 库为一等归属：条目的 scope/projectId 语义由所属库派生；消费方式统一为检索
+ * （CAP-92 下线 FULL 全量注入，条目命中相关 query 才进上下文）。
  * 会话层不直接依赖本服务——CAP-33 起经 {@link KnowledgeContextProvider}（common ContextProvider SPI）
  * 被装配管线收集。
  */
@@ -182,11 +181,6 @@ public class KnowledgeBaseService {
                 && (req.projectId() == null || req.projectId().isBlank()) && create) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "project 范围必须指定项目");
         }
-        if (req.injectMode() != null && !req.injectMode().isBlank()
-                && !KnowledgeBaseEntity.INJECT_FULL.equals(req.injectMode())
-                && !KnowledgeBaseEntity.INJECT_RAG.equals(req.injectMode())) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "injectMode 必须是 FULL 或 RAG");
-        }
         if (req.modelEndpointId() != null && req.modelEndpointId() > 0) {
             requireEmbeddingEndpoint(req.modelEndpointId());
         }
@@ -224,9 +218,6 @@ public class KnowledgeBaseService {
         }
         if (KnowledgeBaseEntity.SCOPE_GLOBAL.equals(kb.getScope())) {
             kb.setProjectId(null);
-        }
-        if (req.injectMode() != null && !req.injectMode().isBlank()) {
-            kb.setInjectMode(req.injectMode());
         }
         // CAP-48 FR-04 库级端点覆盖：显式传 null 或缺省 = 平台默认端点
         if (req.modelEndpointId() != null) {
@@ -355,14 +346,12 @@ public class KnowledgeBaseService {
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "知识库不存在: " + id));
     }
 
-    /** 按 legacy scope/projectId 解析目标经验库（FULL）；不存在则创建（兼容旧调用与提案采纳）。 */
+    /** 按 legacy scope/projectId 解析目标经验库；不存在则创建（兼容旧调用与提案采纳）。 */
     private KnowledgeBaseEntity resolveExperienceKb(String scope, String projectId) {
         String s = scope == null || scope.isBlank() ? KnowledgeBaseEntity.SCOPE_GLOBAL : scope;
         List<KnowledgeBaseEntity> candidates = KnowledgeBaseEntity.SCOPE_PROJECT.equals(s)
-                ? kbRepo.findByScopeAndProjectIdAndInjectModeAndStatus(
-                        s, projectId, KnowledgeBaseEntity.INJECT_FULL, KnowledgeBaseEntity.STATUS_ACTIVE)
-                : kbRepo.findByScopeAndInjectModeAndStatus(
-                        s, KnowledgeBaseEntity.INJECT_FULL, KnowledgeBaseEntity.STATUS_ACTIVE);
+                ? kbRepo.findByScopeAndProjectIdAndStatus(s, projectId, KnowledgeBaseEntity.STATUS_ACTIVE)
+                : kbRepo.findByScopeAndStatus(s, KnowledgeBaseEntity.STATUS_ACTIVE);
         if (!candidates.isEmpty()) {
             return candidates.get(0);
         }
@@ -374,7 +363,6 @@ public class KnowledgeBaseService {
         } else {
             kb.setName(KnowledgeBaseMigration.GLOBAL_KB_NAME);
         }
-        kb.setInjectMode(KnowledgeBaseEntity.INJECT_FULL);
         kb.setDescription("经验库（自动创建）");
         Instant now = Instant.now();
         kb.setCreatedAt(now);
@@ -447,7 +435,7 @@ public class KnowledgeBaseService {
         KnowledgeEntryEntity e = new KnowledgeEntryEntity();
         e.setKbId(kb.getId());
         applyEntry(e, req, kb);
-        if (e.getStatus() == null || e.getStatus().isBlank()) e.setStatus("active"); // 未显式传状态默认 active，否则永不注入
+        if (e.getStatus() == null || e.getStatus().isBlank()) e.setStatus("active"); // 未显式传状态默认 active，否则永不参与检索
         e.setHitCount(0);
         e.setContentVersion(1);
         e.setCreatedAt(Instant.now());
@@ -556,9 +544,7 @@ public class KnowledgeBaseService {
         return view;
     }
 
-    /**
-     * 解析目标库：kbId 优先；否则按 legacy scope/projectId 找/建经验库（FULL）。
-     */
+    /** 解析目标库：kbId 优先；否则按 legacy scope/projectId 找/建经验库。 */
     private KnowledgeBaseEntity resolveTargetKb(EntryRequest req) {
         if (req.kbId() != null) {
             return requireBase(req.kbId());
@@ -699,7 +685,7 @@ public class KnowledgeBaseService {
         return out;
     }
 
-    /** 检索范围：全部 global 库 + 指定项目的 project 库（不限 injectMode，UI 检索语义）。 */
+    /** 检索范围：全部 global 库 + 指定项目的 project 库。 */
     private List<Long> searchScopeKbIds(String projectId) {
         List<Long> kbIds = new ArrayList<>();
         for (KnowledgeBaseEntity kb : kbRepo.findAll()) {
@@ -711,92 +697,31 @@ public class KnowledgeBaseService {
         return kbIds;
     }
 
-    // ---------------- 注入选择（FR-03 标签过滤，CAP-44 经 FULL 库） ----------------
+    // ---------------- 检索辅助（CAP-92 场景绑库检索） ----------------
 
-    /** 按项目选出将被注入的条目：全局 FULL 库按项目 tags 匹配 + 本项目 FULL 库全量。 */
-    public List<EntryView> selectEntries(Project project) {
-        return selectEntries(project == null ? null : project.id(),
-                project == null ? null : project.tags());
+    /** 库 id → scope（装配清单展示用；不存在的 id 跳过）。 */
+    public Map<Long, String> baseScopes(List<Long> kbIds) {
+        Map<Long, String> scopes = new HashMap<>();
+        if (kbIds == null || kbIds.isEmpty()) {
+            return scopes;
+        }
+        for (KnowledgeBaseEntity kb : kbRepo.findAllById(kbIds)) {
+            scopes.put(kb.getId(), kb.getScope());
+        }
+        return scopes;
     }
 
-    /**
-     * {@link #selectEntries(Project)} 的无 Project 对象变体（CAP-33 装配管线按
-     * projectId+tags 入参调用，免回查项目表）。
-     */
-    public List<EntryView> selectEntries(String projectId, List<String> projectTags) {
-        List<EntryView> used = new ArrayList<>();
-        List<KnowledgeBaseEntity> globalKbs = kbRepo.findByScopeAndInjectModeAndStatus(
-                KnowledgeBaseEntity.SCOPE_GLOBAL, KnowledgeBaseEntity.INJECT_FULL,
-                KnowledgeBaseEntity.STATUS_ACTIVE);
-        for (KnowledgeBaseEntity kb : globalKbs) {
-            for (KnowledgeEntryEntity e : entryRepo.findByKbIdAndStatusOrderByCreatedAtDesc(kb.getId(), "active")) {
-                List<String> tags = EntryViews.splitTags(e.getTags());
-                if (!tags.isEmpty()) {
-                    if (projectTags == null || projectTags.isEmpty()
-                            || projectTags.stream().noneMatch(tags::contains)) {
-                        continue; // 带标签但项目无匹配 → 不注入（防上下文膨胀）
-                    }
-                }
-                used.add(EntryViews.entry(e, kb));
-            }
-        }
-        if (projectId != null && !projectId.isBlank()) {
-            List<KnowledgeBaseEntity> projectKbs = kbRepo.findByScopeAndProjectIdAndInjectModeAndStatus(
-                    KnowledgeBaseEntity.SCOPE_PROJECT, projectId, KnowledgeBaseEntity.INJECT_FULL,
-                    KnowledgeBaseEntity.STATUS_ACTIVE);
-            for (KnowledgeBaseEntity kb : projectKbs) {
-                for (KnowledgeEntryEntity e : entryRepo.findByKbIdAndStatusOrderByCreatedAtDesc(kb.getId(), "active")) {
-                    used.add(EntryViews.entry(e, kb));
-                }
-            }
-        }
-        return used;
-    }
-
-    /**
-     * 按 tags 显式选条目（CAP-33 FR-02 ①③层：场景绑定/请求追加的 knowledgeTags 命中）：
-     * active 且条目 tags 与给定 tags 有交集；范围 = global FULL 库 + 指定项目的 project FULL 库。
-     */
-    public List<EntryView> selectByTags(List<String> tags, String projectId) {
-        if (tags == null || tags.isEmpty()) {
-            return List.of();
-        }
-        List<KnowledgeBaseEntity> pool = new ArrayList<>(kbRepo.findByScopeAndInjectModeAndStatus(
-                KnowledgeBaseEntity.SCOPE_GLOBAL, KnowledgeBaseEntity.INJECT_FULL,
-                KnowledgeBaseEntity.STATUS_ACTIVE));
-        if (projectId != null && !projectId.isBlank()) {
-            pool.addAll(kbRepo.findByScopeAndProjectIdAndInjectModeAndStatus(
-                    KnowledgeBaseEntity.SCOPE_PROJECT, projectId, KnowledgeBaseEntity.INJECT_FULL,
-                    KnowledgeBaseEntity.STATUS_ACTIVE));
-        }
-        List<EntryView> used = new ArrayList<>();
-        for (KnowledgeBaseEntity kb : pool) {
-            for (KnowledgeEntryEntity e : entryRepo.findByKbIdAndStatusOrderByCreatedAtDesc(kb.getId(), "active")) {
-                if (EntryViews.splitTags(e.getTags()).stream().anyMatch(tags::contains)) {
-                    used.add(EntryViews.entry(e, kb));
-                }
-            }
-        }
-        return used;
-    }
-
-    /** 注入预览（FR-04）：同真实注入的组装结果，但不写盘、不加 hitCount。 */
-    public PreviewResult preview(String projectId, String taskSpec) {
-        Project project = projectId == null || projectId.isBlank()
-                ? null : projectService.requireProject(projectId);
-        List<EntryView> used = selectEntries(project);
-        return new PreviewResult(ClaudeMd.assemble(used, taskSpec, null), used);
-    }
-
-    /** 对本次注入用到的条目计数（FR-07 清理依据）。 */
+    /** 对本次检索命中的条目计数（FR-07 清理依据；dryRun 不调用）。 */
     @Transactional
-    public void bumpHits(List<EntryView> used) {
-        for (EntryView v : used) {
-            entryRepo.findById(v.id()).ifPresent(e -> {
-                e.setHitCount(e.getHitCount() + 1);
-                e.setUpdatedAt(Instant.now());
-                entryRepo.save(e);
-            });
+    public void bumpHitsByEntryIds(Collection<Long> entryIds) {
+        if (entryIds == null || entryIds.isEmpty()) {
+            return;
+        }
+        Instant now = Instant.now();
+        for (KnowledgeEntryEntity e : entryRepo.findAllById(entryIds)) {
+            e.setHitCount(e.getHitCount() + 1);
+            e.setUpdatedAt(now);
+            entryRepo.save(e);
         }
     }
 

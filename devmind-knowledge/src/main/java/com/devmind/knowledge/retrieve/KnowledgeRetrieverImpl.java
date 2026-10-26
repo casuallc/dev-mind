@@ -89,7 +89,7 @@ public class KnowledgeRetrieverImpl implements KnowledgeRetriever {
     public Optional<KbOverview> overview(long kbId) {
         return kbRepo.findById(kbId)
                 .filter(kb -> KnowledgeBaseEntity.STATUS_ACTIVE.equals(kb.getStatus()))
-                .map(kb -> new KbOverview(kb.getName(), kb.getDescription(), kb.getInjectMode(),
+                .map(kb -> new KbOverview(kb.getName(), kb.getDescription(),
                         entryRepo.findByKbIdAndStatusOrderByCreatedAtDesc(kbId, "active").stream()
                                 .limit(OVERVIEW_ENTRY_LIMIT)
                                 .map(KnowledgeEntryEntity::getName)

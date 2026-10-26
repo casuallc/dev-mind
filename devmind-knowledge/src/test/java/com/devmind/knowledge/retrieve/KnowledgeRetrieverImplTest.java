@@ -141,7 +141,6 @@ class KnowledgeRetrieverImplTest {
         KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
         kb.setName("研发规范库");
         kb.setDescription("团队研发规范");
-        kb.setInjectMode("RAG");
         kb.setStatus(KnowledgeBaseEntity.STATUS_ACTIVE);
         when(kbRepo.findById(10L)).thenReturn(Optional.of(kb));
         KnowledgeEntryEntity e1 = new KnowledgeEntryEntity();
@@ -156,7 +155,6 @@ class KnowledgeRetrieverImplTest {
         assertTrue(overview.isPresent());
         assertEquals("研发规范库", overview.get().name());
         assertEquals("团队研发规范", overview.get().description());
-        assertEquals("RAG", overview.get().injectMode());
         assertEquals(List.of("新条目", "旧条目"), overview.get().entryNames());
     }
 

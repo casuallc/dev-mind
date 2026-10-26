@@ -26,11 +26,12 @@ import java.util.Map;
  *
  * <p>CLAUDE.md 节序（保持 CAP-04 结构）：头部注释 → ## 场景背景（场景 extraContextMd）
  * → 各 provider 节（@Order：知识 10 / 文档 20 / skill 30）→ ## 当前任务（渲染后 taskSpec）。
- * settings.local.json 契约上仅 knowledge provider 产出，取第一个非空。</p>
+ * 知识节为检索命中块（CAP-92），非全量注入。settings.local.json 契约上仅 knowledge provider
+ * 产出，取第一个非空。</p>
  *
- * <p>空产出（无场景背景/无条目节/无 skills/无 docs/无附件 **且无 settings**）= null：不带上下文
- * 启动，沿用 CAP-34 之前「知识无命中 = 无注入」的语义。CAP-52 起例外：**只有权限白名单**时
- * 必须出包（瘦上下文的执行会话靠它拿到 settings.local.json）。</p>
+ * <p>空产出（无场景背景/无内容节/无 skills/无 docs/无附件 **且无 settings**）= null：不带上下文
+ * 启动。CAP-52 起例外：**只有权限白名单**时必须出包（瘦上下文的执行会话靠它拿到
+ * settings.local.json）。</p>
  */
 @Service
 public class ContextAssembler {
@@ -81,7 +82,7 @@ public class ContextAssembler {
         }
 
         boolean hasScenarioBg = extraContextMd != null && !extraContextMd.isBlank();
-        // CAP-40：附件投送也算产出——挂需求会话即使无场景无知识命中，有附件就必须出包
+        // CAP-40：附件投送也算产出——挂需求会话即使无场景无知识命中，有附件也必须出包
         // CAP-52：权限白名单（settings）**必须**独立成包——瘦上下文（执行会话）没有任何内容节，
         // 若仍按「空产出 = null」返回，runner 拉不到包就不会物化 settings.local.json，
         // headless claude 会在权限提示上卡死。白名单是沙箱策略，不是「上下文注入」。

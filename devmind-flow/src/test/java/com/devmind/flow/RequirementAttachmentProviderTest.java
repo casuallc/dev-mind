@@ -141,7 +141,8 @@ class RequirementAttachmentProviderTest {
 
     private ContextAssemblyRequest req(String requirementId) {
         return new ContextAssemblyRequest("p1", List.of(), List.of(), List.of(), List.of(),
-                List.of(), List.of(), List.of(), true, false, requirementId);
+                List.of(), List.of(), null, true, false, requirementId, List.of(),
+                null, false);
     }
 
     private static RequirementEntity entity(String description, boolean jira) {

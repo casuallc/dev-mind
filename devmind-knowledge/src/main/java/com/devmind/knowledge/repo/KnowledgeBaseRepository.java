@@ -8,10 +8,10 @@ public interface KnowledgeBaseRepository extends JpaRepository<KnowledgeBaseEnti
 
     List<KnowledgeBaseEntity> findByStatusOrderByCreatedAtDesc(String status);
 
-    List<KnowledgeBaseEntity> findByScopeAndInjectModeAndStatus(String scope, String injectMode, String status);
+    List<KnowledgeBaseEntity> findByScopeAndStatus(String scope, String status);
 
-    List<KnowledgeBaseEntity> findByScopeAndProjectIdAndInjectModeAndStatus(
-            String scope, String projectId, String injectMode, String status);
+    List<KnowledgeBaseEntity> findByScopeAndProjectIdAndStatus(
+            String scope, String projectId, String status);
 
     List<KnowledgeBaseEntity> findByScopeAndProjectId(String scope, String projectId);
 

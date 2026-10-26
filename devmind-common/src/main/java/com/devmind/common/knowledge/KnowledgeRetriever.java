@@ -95,6 +95,6 @@ public interface KnowledgeRetriever {
         }
     }
 
-    record KbOverview(String name, String description, String injectMode, List<String> entryNames) {
+    record KbOverview(String name, String description, List<String> entryNames) {
     }
 }

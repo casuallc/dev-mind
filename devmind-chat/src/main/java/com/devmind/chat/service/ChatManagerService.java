@@ -2093,9 +2093,6 @@ public class ChatManagerService {
         sb.append("<knowledge-base>\n本会话已绑定 ").append(overviews.size()).append(" 个知识库：\n");
         for (KnowledgeRetriever.KbOverview kb : overviews) {
             sb.append("- 「").append(kb.name()).append("」");
-            if (kb.injectMode() != null && !kb.injectMode().isBlank()) {
-                sb.append("（注入模式：").append(kb.injectMode()).append("）");
-            }
             if (kb.description() != null && !kb.description().isBlank()) {
                 String desc = kb.description().replace('\n', ' ').strip();
                 sb.append("：").append(desc.length() <= 120 ? desc : desc.substring(0, 120) + "…");
@@ -2113,9 +2110,6 @@ public class ChatManagerService {
     private static String overviewSection(KnowledgeRetriever.KbOverview kb) {
         StringBuilder sb = new StringBuilder();
         sb.append("<knowledge-base>\n本会话已绑定知识库「").append(kb.name()).append("」");
-        if (kb.injectMode() != null && !kb.injectMode().isBlank()) {
-            sb.append("（注入模式：").append(kb.injectMode()).append("）");
-        }
         sb.append('\n');
         if (kb.description() != null && !kb.description().isBlank()) {
             String desc = kb.description().replace('\n', ' ').strip();

@@ -22,7 +22,6 @@ import com.devmind.knowledge.dto.KnowledgeSearchResponse;
 import com.devmind.knowledge.dto.KnowledgeSearchV2Request;
 import com.devmind.knowledge.dto.KnowledgeSearchV2Response;
 import com.devmind.knowledge.dto.KnowledgeVersionView;
-import com.devmind.knowledge.dto.PreviewResult;
 import com.devmind.knowledge.dto.ProposalRequest;
 import com.devmind.knowledge.dto.ProposalView;
 import com.devmind.knowledge.dto.ReindexResult;
@@ -293,14 +292,6 @@ public class KnowledgeController {
     public SolutionSaveResult saveSolution(@PathVariable String chatId,
                                            @RequestBody(required = false) SolutionSaveRequest req) {
         return solutionService.save(chatId, req);
-    }
-
-    // ---------------- 注入预览（FR-04） ----------------
-
-    @GetMapping("/preview")
-    public PreviewResult preview(@RequestParam(required = false) String projectId,
-                                 @RequestParam(required = false) String taskSpec) {
-        return service.preview(projectId, taskSpec);
     }
 
     // ---------------- 提案（FR-05/FR-06） ----------------

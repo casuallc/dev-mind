@@ -7,7 +7,6 @@ package com.devmind.knowledge.dto;
  * @param description     描述
  * @param scope           global | project（创建必填，缺省 global）
  * @param projectId       scope=project 必填
- * @param injectMode      FULL | RAG（缺省 RAG）
  * @param modelEndpointId CAP-48 FR-04 库级覆盖的 embedding 端点（空 = 平台默认端点）
  * @param status          active | archived
  */
@@ -16,7 +15,6 @@ public record KnowledgeBaseRequest(
         String description,
         String scope,
         String projectId,
-        String injectMode,
         Long modelEndpointId,
         String status) {
 }

@@ -94,24 +94,22 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
     }
 
     /**
-     * 会话 launch 前装配（create/resume 调用）。projectAuto 恒 true：无项目会话仅全局无标签
-     * 条目命中（沿用 CAP-04 现状口径）。renderedTaskSpec 须为场景骨架渲染后的任务说明。
-     * requirementId 透传给 CAP-40 附件投送 provider（无关联需求传 null）。
-     * 空产出返回 null（不带上下文启动）；场景绑定资产失效等 DevMindException 向上传播。
+     * 会话 launch 前装配（create/resume 调用）。renderedTaskSpec 须为场景骨架渲染后的任务说明，
+     * 同时作为场景绑定知识库的检索 query。requirementId 透传给 CAP-40 附件投送 provider
+     * （无关联需求传 null）。空产出返回 null（不带上下文启动）；场景绑定资产失效等
+     * DevMindException 向上传播。
      */
     public Prepared prepare(String sessionId, Project project, SessionScenarioEntity scenario,
                             String renderedTaskSpec, List<String> extraSkillIds,
-                            List<Long> extraDocIds, List<String> extraKnowledgeTags,
-                            String requirementId) {
+                            List<Long> extraDocIds, String requirementId) {
         return prepare(sessionId, project, scenario, renderedTaskSpec, extraSkillIds, extraDocIds,
-                extraKnowledgeTags, requirementId, false, null);
+                requirementId, false, null);
     }
 
     /**
-     * CAP-52 FR-05 分层注入：{@code lean=true} 的执行会话（挂工作单元）**不注入**知识条目、
-     * 项目 skills、需求附件——规划会话已经把结论写进工作单元的 spec，执行会话再读一遍同一批
-     * 知识是纯浪费（每个执行会话都要重新装配一次全量知识）。权限白名单不受影响（见
-     * {@link ContextAssembler}：只有 settings 也出包）。
+     * CAP-52 FR-05 分层注入：{@code lean=true} 的执行会话（挂工作单元）**不注入**知识、
+     * 项目 skills、需求附件——规划会话已经把结论写进工作单元的 spec，执行会话再检索一遍同一批
+     * 知识是纯浪费。权限白名单不受影响（见 {@link ContextAssembler}：只有 settings 也出包）。
      *
      * <p>CAP-68：{@code attachmentIds}（创建时显式附带）<b>不受 lean 影响</b>——用户显式递的
      * 材料不是「自动命中注入」，瘦身只砍自动层。create/resume/rebuild 三处都必须带上
@@ -121,17 +119,8 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
      */
     public Prepared prepare(String sessionId, Project project, SessionScenarioEntity scenario,
                             String renderedTaskSpec, List<String> extraSkillIds,
-                            List<Long> extraDocIds, List<String> extraKnowledgeTags,
-                            String requirementId, boolean lean) {
-        return prepare(sessionId, project, scenario, renderedTaskSpec, extraSkillIds, extraDocIds,
-                extraKnowledgeTags, requirementId, lean, null);
-    }
-
-    /** 全参版：attachmentIds = CAP-68 创建会话即带附件（可空）。 */
-    public Prepared prepare(String sessionId, Project project, SessionScenarioEntity scenario,
-                            String renderedTaskSpec, List<String> extraSkillIds,
-                            List<Long> extraDocIds, List<String> extraKnowledgeTags,
-                            String requirementId, boolean lean, List<String> attachmentIds) {
+                            List<Long> extraDocIds, String requirementId, boolean lean,
+                            List<String> attachmentIds) {
         ContextAssemblyRequest req = new ContextAssemblyRequest(
                 project != null ? project.id() : null,
                 project != null && project.tags() != null ? project.tags() : List.of(),
@@ -139,8 +128,9 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
                 lean || extraSkillIds == null ? List.of() : extraSkillIds,
                 lean || scenario == null ? List.of() : scenarioService.docIdsOf(scenario),
                 lean || extraDocIds == null ? List.of() : extraDocIds,
-                lean || scenario == null ? List.of() : scenarioService.knowledgeTagsOf(scenario),
-                lean || extraKnowledgeTags == null ? List.of() : extraKnowledgeTags,
+                // CAP-92：场景绑定的知识库 = 检索范围，渲染后任务说明 = 检索 query
+                lean || scenario == null ? List.of() : scenarioService.knowledgeBaseIdsOf(scenario),
+                renderedTaskSpec == null ? "" : renderedTaskSpec,
                 // CAP-73：requirementId 不再随 lean 置空（验证链触发助手要为执行会话签发 token），
                 // 需求级投送的豁免改由 provider 读 lean 标志自行判定（CAP-40 附件已加守卫）
                 !lean, false, requirementId,
@@ -163,8 +153,9 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
     }
 
     /**
-     * chat 装配：PROJECT 场景「以某项目身份问答」（projectAuto=true，自动命中该项目知识/私有
+     * chat 装配：PROJECT 场景「以某项目身份问答」（projectAuto=true，自动命中该项目私有
      * skill）；GLOBAL 场景只带场景绑定资产（projectAuto=false，无项目语义）。
+     * 场景绑定知识库时以首条消息为 query 检索命中块。
      */
     @Override
     public PreparedContext prepare(String chatId, String scenarioCode, String message) {
@@ -180,7 +171,7 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
                 contextProjectId, project != null && project.tags() != null ? project.tags() : List.of(),
                 scenarioService.skillIdsOf(s), List.of(),
                 scenarioService.docIdsOf(s), List.of(),
-                scenarioService.knowledgeTagsOf(s), List.of(),
+                scenarioService.knowledgeBaseIdsOf(s), rendered,
                 contextProjectId != null, false);
         ContextAssembler.AssembledContext a = assembleAndCache(chatId, req, s.getCode(), s.getName(),
                 s.getExtraContextMd(), rendered);
@@ -241,7 +232,7 @@ public class SessionContextService implements ContextPackageProvider, ChatContex
             // 的执行会话重新灌满知识（同一个会话两次拉包内容不一致，最难受的一种 bug）
             boolean lean = isExecutionSession(ent.getTaskSpec(), ent.getWorkItemId());
             // CAP-68：创建时附带的附件按落库列重装配（附件可能已被生命周期硬删，provider 跳过标注）
-            prepare(ent.getId(), project, scenario, rendered, null, null, null,
+            prepare(ent.getId(), project, scenario, rendered, null, null,
                     ent.getRequirementId(), lean, parseCsv(ent.getAttachmentIds())); // 命中即入缓存
             Cached cached = cache.get(ent.getId());
             return cached != null ? Optional.of(cached.pkg()) : Optional.empty();

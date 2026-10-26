@@ -47,7 +47,7 @@ class SessionContextServiceTest {
     @Test
     void 装配缓存与manifest摘要一致() {
         SessionContextService svc = newSvc(repoWith(null), null, null, stub(ONE_ENTRY));
-        SessionContextService.Prepared p = svc.prepare("s1", null, null, "任务", null, null, null, null);
+        SessionContextService.Prepared p = svc.prepare("s1", null, null, "任务", null, null, null);
         assertEquals(1, p.manifest().entries());
         assertTrue(p.snapshotJson().contains("\"scenarioCode\":null") || p.snapshotJson().contains("scenarioCode"));
 
@@ -63,7 +63,7 @@ class SessionContextServiceTest {
     @Test
     void 无命中装配为null() {
         SessionContextService svc = newSvc(repoWith(null), null, null, stub(ContextContribution.empty()));
-        assertNull(svc.prepare("s1", null, null, "任务", null, null, null, null));
+        assertNull(svc.prepare("s1", null, null, "任务", null, null, null));
         assertTrue(svc.find("unknown").isEmpty());
     }
 
@@ -150,8 +150,8 @@ class SessionContextServiceTest {
         assertTrue(svc.find("s4").isEmpty());
         assertEquals(1, seen.size());
         assertFalse(seen.get(0).projectAuto());
-        assertTrue(seen.get(0).scenarioKnowledgeTags().isEmpty());
-        assertTrue(seen.get(0).extraKnowledgeTags().isEmpty());
+        assertTrue(seen.get(0).scenarioKnowledgeBaseIds().isEmpty(), "执行会话不检索场景知识库");
+        assertEquals("[flow:dev]\n开发任务", seen.get(0).knowledgeQuery());
         assertTrue(seen.get(0).scenarioSkillIds().isEmpty());
         // CAP-73：requirementId 对 lean 会话也透传（验证链 provider 要用），
         // 附件投送的豁免改由 provider 读 lean 标志——这里钉死 lean 标志本身

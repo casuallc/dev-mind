@@ -238,7 +238,7 @@ public class SessionTools {
             CreateSessionRequest req = new CreateSessionRequest(
                     null, null, projectId, workItemId,
                     requirementId, taskSpec, null, null, null,
-                    ToolText.str(args, "agentNodeId"), null, null, null, null, null, null);
+                    ToolText.str(args, "agentNodeId"), null, null, null, null, null);
             SessionView view = sessions.create(req);
             String text = "已启动会话 " + shortId(view.id()) + "（状态 " + view.status() + "）";
             return ToolResult.ok(text, text, ToolResult.data(
