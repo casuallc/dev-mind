@@ -10,7 +10,8 @@ Guidance for Claude Code when working in this repository.
 
 | 领域 | 文档 |
 |------|------|
-| 能力需求（CAP-01~20）；新能力先在此立 CAP 文档 | [docs/capabilities/](docs/capabilities/README.md) |
+| 能力需求（CAP-01~89）；新能力先在此立 CAP 文档 | [docs/capabilities/](docs/capabilities/README.md) |
+| 系统全景（架构/能力地图/部署现状，现状视角活文档） | [docs/design/system-overview.md](docs/design/system-overview.md) |
 | 实现方案（定稿） | [docs/design/](docs/design/) |
 | 使用/排错指南 | [docs/guides/](docs/guides/) |
 | 开发注意事项（Windows 环境 / H2 / Jackson / SSH 单点坑） | [docs/core/开发注意事项.md](docs/core/开发注意事项.md) |
