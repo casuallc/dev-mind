@@ -8,19 +8,27 @@ import com.devmind.session.dto.SessionView;
 import com.devmind.session.service.SessionManagerService;
 import com.devmind.worklog.dto.DailyReportView;
 import com.devmind.worklog.dto.GitCommitView;
+import com.devmind.worklog.dto.GoalTreeView;
+import com.devmind.worklog.dto.GoalView;
 import com.devmind.worklog.dto.NextPlanPreview;
+import com.devmind.worklog.dto.QuarterlyReportView;
 import com.devmind.worklog.dto.ReportLaunch;
+import com.devmind.worklog.dto.ReviewPreview;
 import com.devmind.worklog.dto.UpdateDailyRequest;
+import com.devmind.worklog.dto.UpdateQuarterlyRequest;
 import com.devmind.worklog.dto.UpdateWeeklyRequest;
 import com.devmind.worklog.dto.WeeklyReportView;
 import com.devmind.worklog.model.DailyReportEntity;
 import com.devmind.worklog.model.WeeklyReportEntity;
 import com.devmind.worklog.model.WorklogEntryEntity;
 import com.devmind.worklog.model.WorklogPlanItemEntity;
+import com.devmind.worklog.model.WorklogQuarterlyReportEntity;
 import com.devmind.worklog.repo.DailyReportRepository;
 import com.devmind.worklog.repo.WeeklyReportRepository;
 import com.devmind.worklog.repo.WorklogEntryRepository;
+import com.devmind.worklog.repo.WorklogGoalRepository;
 import com.devmind.worklog.repo.WorklogPlanItemRepository;
+import com.devmind.worklog.repo.WorklogQuarterlyReportRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -31,8 +39,12 @@ import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * CAP-28 FR-05/06：日报/周报查询、手动空白稿、编辑保存；CAP-41 FR-03：AI 生成改真实会话；
@@ -66,6 +78,9 @@ public class ReportService {
     private final WorklogPlanItemRepository planRepo;
     private final WorklogEntryRepository entryRepo;
     private final ObjectProvider<WipRequirementProvider> wipProvider;
+    private final WorklogQuarterlyReportRepository quarterlyRepo;
+    private final WorklogGoalRepository goalRepo;
+    private final WorklogGoalService goalService;
 
     public ReportService(WorklogEntryService entryService,
                          GitLogScanner gitScanner,
@@ -76,7 +91,10 @@ public class ReportService {
                          WeeklyReportRepository weeklyRepo,
                          WorklogPlanItemRepository planRepo,
                          WorklogEntryRepository entryRepo,
-                         ObjectProvider<WipRequirementProvider> wipProvider) {
+                         ObjectProvider<WipRequirementProvider> wipProvider,
+                         WorklogQuarterlyReportRepository quarterlyRepo,
+                         WorklogGoalRepository goalRepo,
+                         WorklogGoalService goalService) {
         this.entryService = entryService;
         this.gitScanner = gitScanner;
         this.settingsService = settingsService;
@@ -87,6 +105,9 @@ public class ReportService {
         this.planRepo = planRepo;
         this.entryRepo = entryRepo;
         this.wipProvider = wipProvider;
+        this.quarterlyRepo = quarterlyRepo;
+        this.goalRepo = goalRepo;
+        this.goalService = goalService;
     }
 
     // ---------------- 日报 ----------------
@@ -418,6 +439,154 @@ public class ReportService {
 
         return launch(username, WorklogScenarios.PLAN_SUGGEST,
                 ReportPrompts.planSuggest(target, lastWeekBlock, wipBlock, hint));
+    }
+
+    // ---------------- CAP-91 M2：季度复盘 ----------------
+
+    public QuarterlyReportView getQuarterly(String username, String period) {
+        String p = validatedQuarter(period);
+        return quarterlyRepo.findByUserIdAndQuarter(username, p)
+                .map(e -> new QuarterlyReportView(true, p, e.getContentMd(), e.getSessionId(),
+                        e.getCreatedAt(), e.getUpdatedAt()))
+                .orElse(null);
+    }
+
+    /** 季度复盘手动生成预检（同 {@link #precheckDaily}）：素材 = 当季目标 或 季内 DONE 条目。 */
+    public void precheckQuarterly(String username, String period, boolean force) {
+        String p = validatedQuarter(period);
+        if (quarterlyRepo.existsByUserIdAndQuarter(username, p) && !force) {
+            return;
+        }
+        LocalDate[] range = WorklogQuarters.rangeOf(p);
+        boolean noGoals = goalRepo
+                .findByUserIdAndPeriodInOrderBySortOrderAscIdAsc(username, List.of(p)).isEmpty();
+        boolean noEntries = entryRepo.findRange(username, range[0], range[1]).stream()
+                .noneMatch(e -> WorklogEntryEntity.STATUS_DONE.equals(e.getStatus()));
+        if (noGoals && noEntries) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    p + " 无复盘素材（当季无目标且无已完成条目），季度复盘未生成");
+        }
+    }
+
+    /**
+     * 生成季度复盘（FR-09）：场景 worklog-quarterly-review，素材 = OKR 对照块（确定性渲染，
+     * 与 {@link #reviewPreview} 同源）+ 计划外工作聚合 + hint；prompt 固定结构不走用户模板。
+     * 防覆盖语义同日报：非 force 已有行复用，force 显式覆盖。
+     */
+    public ReportLaunch generateQuarterly(String username, String period, boolean force, String hint) {
+        String p = validatedQuarter(period);
+        boolean exists = quarterlyRepo.existsByUserIdAndQuarter(username, p);
+        if (exists && !force) {
+            return new ReportLaunch(null, true);
+        }
+        LocalDate[] range = WorklogQuarters.rangeOf(p);
+        return launch(username, WorklogScenarios.QUARTERLY_REVIEW,
+                ReportPrompts.quarterlyReview(p, range[0], range[1],
+                        okrBlock(username, p), unalignedBlock(username, p), hint));
+    }
+
+    /**
+     * 「从数据重建」预览（FR-10）：OKR 对照块 + 计划外聚合确定性渲染为 markdown（不经 LLM）；
+     * 前端确认后填入编辑框，人工保存才落库（同 CAP-90 FR-10 哲学）。
+     */
+    public ReviewPreview reviewPreview(String username, String period) {
+        String p = validatedQuarter(period);
+        return new ReviewPreview("## OKR 对照\n\n" + okrBlock(username, p)
+                + "\n\n## 计划外工作\n\n" + unalignedBlock(username, p));
+    }
+
+    /** 手动创建空白季度复盘：同 {@link #createDaily}，幂等。 */
+    public QuarterlyReportView createQuarterly(String username, String period) {
+        String p = validatedQuarter(period);
+        if (!quarterlyRepo.existsByUserIdAndQuarter(username, p)) {
+            WorklogQuarterlyReportEntity e = new WorklogQuarterlyReportEntity();
+            e.setUserId(username);
+            e.setQuarter(p);
+            e.setContentMd("");
+            Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+            e.setCreatedAt(now);
+            e.setUpdatedAt(now);
+            quarterlyRepo.save(e);
+        }
+        return getQuarterly(username, p);
+    }
+
+    /** 编辑保存季度复盘（按 period 寻址，保存即生效，同日报口径）。 */
+    public QuarterlyReportView updateQuarterly(String username, String period, UpdateQuarterlyRequest req) {
+        String p = validatedQuarter(period);
+        WorklogQuarterlyReportEntity e = quarterlyRepo.findByUserIdAndQuarter(username, p)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "季度复盘不存在: " + p));
+        if (req.contentMd() != null) {
+            e.setContentMd(req.contentMd());
+            e.setUpdatedAt(Instant.now().truncatedTo(ChronoUnit.SECONDS));
+            quarterlyRepo.save(e);
+        }
+        return getQuarterly(username, p);
+    }
+
+    /**
+     * OKR 对照素材（FR-09）：复用 {@link WorklogGoalService#tree} 的派生口径取当季区，
+     * 再补 KR 关联计划项逐项明细（期外项不计，同派生过滤口径）。
+     */
+    String okrBlock(String username, String period) {
+        GoalTreeView tree = goalService.tree(Integer.parseInt(WorklogQuarters.yearOf(period)));
+        GoalTreeView.QuarterSection section = tree.quarters().stream()
+                .filter(s -> period.equals(s.period())).findFirst().orElse(null);
+        if (section == null || section.objectives().isEmpty()) {
+            return ReportPrompts.formatOkrTree(List.of(), null, null);
+        }
+        List<Long> krIds = section.objectives().stream()
+                .flatMap(n -> n.krs().stream()).map(GoalView::id).toList();
+        Map<Long, List<WorklogPlanItemEntity>> plansByKr = new HashMap<>();
+        if (!krIds.isEmpty()) {
+            LocalDate[] range = WorklogQuarters.rangeOf(period);
+            for (WorklogPlanItemEntity p : planRepo.findByKrIdIn(krIds)) {
+                if (p.getPlanDate().isBefore(range[0]) || p.getPlanDate().isAfter(range[1])) {
+                    continue; // 周期外（周跨季挂错季等）不计，同派生口径
+                }
+                plansByKr.computeIfAbsent(p.getKrId(), k -> new ArrayList<>()).add(p);
+            }
+        }
+        List<WorklogPlanItemEntity> all = plansByKr.values().stream()
+                .flatMap(List::stream).toList();
+        return ReportPrompts.formatOkrTree(section.objectives(), plansByKr, linkedEntries(all));
+    }
+
+    /** 计划外工作聚合素材（FR-09）：季内 DONE 且未对齐任何 KR 的条目，按类型聚合 + 标题抽样。 */
+    String unalignedBlock(String username, String period) {
+        LocalDate[] range = WorklogQuarters.rangeOf(period);
+        List<WorklogEntryEntity> done = entryRepo.findRange(username, range[0], range[1]).stream()
+                .filter(e -> WorklogEntryEntity.STATUS_DONE.equals(e.getStatus()))
+                .toList();
+        if (done.isEmpty()) {
+            return ReportPrompts.formatUnaligned(List.of());
+        }
+        Set<Long> planIds = done.stream().map(WorklogEntryEntity::getPlanItemId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, WorklogPlanItemEntity> planById = new HashMap<>();
+        if (!planIds.isEmpty()) {
+            planRepo.findAllById(planIds).forEach(p -> planById.put(p.getId(), p));
+        }
+        Map<String, List<WorklogEntryEntity>> byType = new LinkedHashMap<>();
+        for (WorklogEntryEntity e : done) {
+            WorklogPlanItemEntity p = e.getPlanItemId() == null ? null : planById.get(e.getPlanItemId());
+            if (p != null && p.getKrId() != null) {
+                continue; // 已对齐 KR 的不算计划外
+            }
+            byType.computeIfAbsent(e.getEntryType(), k -> new ArrayList<>()).add(e);
+        }
+        List<ReportPrompts.UnalignedGroup> groups = byType.entrySet().stream()
+                .map(en -> new ReportPrompts.UnalignedGroup(en.getKey(), en.getValue().size(),
+                        en.getValue().stream().mapToInt(
+                                e -> e.getMinutes() == null ? 0 : e.getMinutes()).sum(),
+                        en.getValue().stream().map(WorklogEntryEntity::getTitle).limit(5).toList()))
+                .toList();
+        return ReportPrompts.formatUnaligned(groups);
+    }
+
+    /** 季度 period 校验（'2026-Q1'，非法 400）。 */
+    private static String validatedQuarter(String period) {
+        return WorklogQuarters.validatedPeriod("QUARTER", period);
     }
 
     // ---------------- 内部 ----------------

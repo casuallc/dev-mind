@@ -52,6 +52,7 @@ public class WorklogAssetSeeder {
             - 日报成稿写到 `.devmind/output/daily-yyyy-MM-dd.md`
             - 周报成稿写到 `.devmind/output/weekly-yyyy-Www.md`
             - 建议计划成稿写到 `.devmind/output/plan-suggest-yyyy-Www.md`（逐行 `- [类型] 标题（预估 Xh）`）
+            - 季度复盘成稿写到 `.devmind/output/quarterly-review-<period>.md`（period 如 2026-Q4）
             - 平台在会话结束时自动采集该目录写入服务端工作日志仓（git 历史留痕）；缺文件则本次生成判失败
 
             ## 追加工作条目（如需）
@@ -109,6 +110,19 @@ public class WorklogAssetSeeder {
             4. 最后一句话确认已完成。
             """;
 
+    /**
+     * CAP-91 M2「季度复盘」场景骨架。产物文件名契约 quarterly-review-<period>.md 与
+     * {@code WorklogOutputMirror.QUARTERLY_REVIEW_FILE} 解析共用，改动必须两处同步。
+     */
+    static final String QUARTERLY_REVIEW_SKELETON = """
+            {{task}}
+
+            ## 执行要求（遵循 worklog skill 约定）
+            1. 素材以上方任务说明为准（当季 OKR 对照与计划外工作聚合已附上），数字与状态以素材为准，不得编造；
+            2. 成稿写入 .devmind/output/quarterly-review-<period>.md（period 如 2026-Q4，见上方任务说明；平台回传契约，缺文件判失败）；
+            3. 最后一句话确认已完成。
+            """;
+
     private final SkillRepository skillRepo;
     private final SkillService skillService;
     private final SessionScenarioRepository scenarioRepo;
@@ -133,6 +147,9 @@ public class WorklogAssetSeeder {
             ensureScenario(WorklogScenarios.PLAN_SUGGEST, "工作日志·建议计划",
                     "AI 建议下周计划（素材随 prompt 携带，产物解析为建议计划项）",
                     PLAN_SUGGEST_SKELETON, skillId, 92);
+            ensureScenario(WorklogScenarios.QUARTERLY_REVIEW, "工作日志·季度复盘",
+                    "生成季度复盘（OKR 对照 + 计划外聚合素材随 prompt 携带，成稿回传落库）",
+                    QUARTERLY_REVIEW_SKELETON, skillId, 93);
         } catch (Exception e) {
             log.warn("worklog skill/场景种子失败（不阻断启动）: {}", e.getMessage());
         }

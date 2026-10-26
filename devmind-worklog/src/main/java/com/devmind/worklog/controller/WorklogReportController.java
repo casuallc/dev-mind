@@ -2,18 +2,24 @@ package com.devmind.worklog.controller;
 
 import com.devmind.auth.IdentityService;
 import com.devmind.worklog.dto.CreateDailyRequest;
+import com.devmind.worklog.dto.CreateQuarterlyRequest;
 import com.devmind.worklog.dto.CreateWeeklyRequest;
 import com.devmind.worklog.dto.DailyReportView;
 import com.devmind.worklog.dto.GenerateDailyRequest;
+import com.devmind.worklog.dto.GenerateQuarterlyRequest;
 import com.devmind.worklog.dto.GenerateWeeklyRequest;
 import com.devmind.worklog.dto.NextPlanPreview;
+import com.devmind.worklog.dto.QuarterlyReportView;
 import com.devmind.worklog.dto.ReportLaunch;
+import com.devmind.worklog.dto.ReviewPreview;
 import com.devmind.worklog.dto.SyncReportsRequest;
 import com.devmind.worklog.dto.UpdateDailyRequest;
+import com.devmind.worklog.dto.UpdateQuarterlyRequest;
 import com.devmind.worklog.dto.UpdateWeeklyRequest;
 import com.devmind.worklog.dto.WeeklyReportView;
 import com.devmind.worklog.service.ReportService;
 import com.devmind.worklog.service.WorklogOutputMirror;
+import com.devmind.worklog.service.WorklogQuarters;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -138,6 +144,47 @@ public class WorklogReportController {
     public NextPlanPreview nextPlanPreview(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart) {
         return reportService.nextPlanPreview(identity.currentActor(), weekStart);
+    }
+
+    // ---------------- CAP-91 M2：季度复盘 ----------------
+
+    /** 季度复盘查询（period 缺省=当前季度；无则 200 null 同日报口径）。 */
+    @GetMapping("/quarterly")
+    public QuarterlyReportView getQuarterly(@RequestParam(required = false) String period) {
+        return reportService.getQuarterly(identity.currentActor(),
+                period != null ? period : WorklogQuarters.quarterOf(LocalDate.now()));
+    }
+
+    /** 手动创建空白季度复盘（不经 AI、不要求素材）：已存在幂等返回。 */
+    @PostMapping("/quarterly")
+    public QuarterlyReportView createQuarterly(@Valid @RequestBody CreateQuarterlyRequest req) {
+        return reportService.createQuarterly(identity.currentActor(), req.period());
+    }
+
+    /** 手动触发生成（创建 worklog 会话，立即返回 sessionId；成稿随会话结束回传落库）。 */
+    @PostMapping("/quarterly/generate")
+    public ReportLaunch generateQuarterly(@Valid @RequestBody GenerateQuarterlyRequest req) {
+        String actor = identity.currentActor();
+        boolean force = Boolean.TRUE.equals(req.force());
+        reportService.precheckQuarterly(actor, req.period(), force);
+        return reportService.generateQuarterly(actor, req.period(), force, req.hint());
+    }
+
+    /** 编辑保存（按 period 寻址，保存即生效）。 */
+    @PutMapping("/quarterly/{period}")
+    public QuarterlyReportView updateQuarterly(@PathVariable String period,
+                                               @Valid @RequestBody UpdateQuarterlyRequest req) {
+        return reportService.updateQuarterly(identity.currentActor(), period, req);
+    }
+
+    /**
+     * CAP-91 FR-10「从数据重建」：OKR 对照块 + 计划外聚合确定性渲染为 markdown 预览
+     * （不经 LLM）；前端确认后填入编辑框，人工保存才落库。
+     */
+    @GetMapping("/quarterly/review-preview")
+    public ReviewPreview reviewPreview(@RequestParam(required = false) String period) {
+        return reportService.reviewPreview(identity.currentActor(),
+                period != null ? period : WorklogQuarters.quarterOf(LocalDate.now()));
     }
 
     // ---------------- 会话成稿同步 ----------------

@@ -7,8 +7,10 @@ import com.devmind.session.model.SessionEntity;
 import com.devmind.session.model.SessionOutputEntity;
 import com.devmind.worklog.model.DailyReportEntity;
 import com.devmind.worklog.model.WeeklyReportEntity;
+import com.devmind.worklog.model.WorklogQuarterlyReportEntity;
 import com.devmind.worklog.repo.DailyReportRepository;
 import com.devmind.worklog.repo.WeeklyReportRepository;
+import com.devmind.worklog.repo.WorklogQuarterlyReportRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -39,14 +41,17 @@ class WorklogOutputMirrorTest {
     private DailyReportRepository dailyRepo;
     private WeeklyReportRepository weeklyRepo;
     private WorklogPlanService planService;
+    private WorklogQuarterlyReportRepository quarterlyRepo;
     private WorklogOutputMirror mirror;
 
     @BeforeEach
     void setUp() {
         dailyRepo = mock(DailyReportRepository.class);
         weeklyRepo = mock(WeeklyReportRepository.class);
+        quarterlyRepo = mock(WorklogQuarterlyReportRepository.class);
         planService = mock(WorklogPlanService.class);
-        mirror = new WorklogOutputMirror(null, null, null, dailyRepo, weeklyRepo, publisher, planService);
+        mirror = new WorklogOutputMirror(null, null, null, dailyRepo, weeklyRepo, publisher,
+                planService, quarterlyRepo);
     }
 
     static class FakePublisher extends DomainEventPublisher {
@@ -274,5 +279,68 @@ class WorklogOutputMirrorTest {
                 "# 抱歉我无法给出建议\n没有任何合规建议行")));
         verifyNoInteractions(planService, dailyRepo, weeklyRepo);
         assertEquals("worklog.report.failed", publisher.events.get(0).type());
+    }
+
+    // ---------------- CAP-91 M2：季度复盘镜像 ----------------
+
+    @Test
+    void 季度复盘成稿落库并发事件() {
+        mirror.mirrorQuarterly(session("s1"), "u1",
+                List.of(output("quarterly-review-2026-Q3.md", "# 复盘正文")));
+        ArgumentCaptor<WorklogQuarterlyReportEntity> cap =
+                ArgumentCaptor.forClass(WorklogQuarterlyReportEntity.class);
+        verify(quarterlyRepo).save(cap.capture());
+        WorklogQuarterlyReportEntity saved = cap.getValue();
+        assertEquals("u1", saved.getUserId());
+        assertEquals("2026-Q3", saved.getQuarter());
+        assertEquals("# 复盘正文", saved.getContentMd());
+        assertEquals("s1", saved.getSessionId());
+        assertEquals(1, publisher.events.size());
+        DomainEvent ev = publisher.events.get(0);
+        assertEquals("worklog.quarterly.generated", ev.type());
+        assertEquals("2026-Q3", ((SimpleDomainEvent) ev).entityId(), "entityId 为季度 period");
+    }
+
+    @Test
+    void 季度复盘缺回传发降级通知() {
+        mirror.mirrorQuarterly(session("s1"), "u1", List.of(output("other.md", "x")));
+        verifyNoInteractions(quarterlyRepo);
+        assertEquals(1, publisher.events.size());
+        DomainEvent ev = publisher.events.get(0);
+        assertEquals("worklog.report.failed", ev.type());
+        assertTrue(((SimpleDomainEvent) ev).summary().contains("季度复盘"));
+    }
+
+    @Test
+    void mirrorAll季度复盘已有不同内容跳过不覆盖() {
+        // 同日报闸：库中已有不同内容（无论来源）→ 跳过，要覆盖走 force 重新生成
+        WorklogQuarterlyReportEntity existing = new WorklogQuarterlyReportEntity();
+        existing.setUserId("u1");
+        existing.setQuarter("2026-Q3");
+        existing.setContentMd("人工改过的复盘");
+        when(quarterlyRepo.findByUserIdAndQuarter("u1", "2026-Q3"))
+                .thenReturn(Optional.of(existing));
+        var r = mirror.mirrorAll(session("s1"), "u1",
+                List.of(output("quarterly-review-2026-Q3.md", "旧成稿")));
+        assertTrue(r.mirrored().isEmpty());
+        assertEquals(1, r.skipped().size());
+        assertTrue(r.skipped().get(0).contains("2026-Q3") && r.skipped().get(0).contains("未覆盖"),
+                "skipped 带原因: " + r.skipped());
+        verify(quarterlyRepo, times(0)).save(any());
+    }
+
+    @Test
+    void mirrorAll季度复盘同内容静默跳过() {
+        WorklogQuarterlyReportEntity existing = new WorklogQuarterlyReportEntity();
+        existing.setUserId("u1");
+        existing.setQuarter("2026-Q3");
+        existing.setContentMd("复盘v1");
+        when(quarterlyRepo.findByUserIdAndQuarter("u1", "2026-Q3"))
+                .thenReturn(Optional.of(existing));
+        var r = mirror.mirrorAll(session("s1"), "u1",
+                List.of(output("quarterly-review-2026-Q3.md", "复盘v1")));
+        assertTrue(r.mirrored().isEmpty(), "内容一致零写库");
+        assertTrue(r.skipped().isEmpty());
+        verify(quarterlyRepo, times(0)).save(any());
     }
 }

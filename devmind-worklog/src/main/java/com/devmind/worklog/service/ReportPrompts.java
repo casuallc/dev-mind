@@ -2,7 +2,10 @@ package com.devmind.worklog.service;
 
 import com.devmind.common.requirement.WipRequirementProvider;
 import com.devmind.worklog.dto.GitCommitView;
+import com.devmind.worklog.dto.GoalTreeView;
+import com.devmind.worklog.dto.GoalView;
 import com.devmind.worklog.model.WorklogEntryEntity;
+import com.devmind.worklog.model.WorklogGoalEntity;
 import com.devmind.worklog.model.WorklogPlanItemEntity;
 
 import java.time.LocalDate;
@@ -330,9 +333,127 @@ final class ReportPrompts {
         return sb.toString().strip();
     }
 
+    // ---------------- CAP-91 M2：季度复盘 ----------------
+
+    /** 目标状态码 → 中文标签（同 PLAN_STATUS_LABELS 口径，prompt 直给中文） */
+    private static final Map<String, String> GOAL_STATUS_LABELS = Map.of(
+            WorklogGoalEntity.STATUS_ACTIVE, "进行中",
+            WorklogGoalEntity.STATUS_DONE, "已完成",
+            WorklogGoalEntity.STATUS_DROPPED, "已放弃",
+            WorklogGoalEntity.STATUS_CARRIED, "已滚转");
+
+    /** 计划外工作聚合组（按条目类型；sampleTitles 为代表性标题抽样） */
+    record UnalignedGroup(String type, int count, int minutes, List<String> sampleTitles) {}
+
+    /**
+     * CAP-91 FR-09 OKR 对照块（确定性渲染，复盘生成素材与「从数据重建」预览共用）：
+     * 当季 O→KR 树 + 每项状态/人工进度/派生进度 + 关联周计划项逐项真实状态与工时。
+     * 空树渲染「省略」指令（不编造目标）。
+     */
+    static String formatOkrTree(List<GoalTreeView.GoalNode> objectives,
+                                Map<Long, List<WorklogPlanItemEntity>> plansByKr,
+                                Map<Long, List<WorklogEntryEntity>> linkedByPlanId) {
+        if (objectives == null || objectives.isEmpty()) {
+            return "（当季无 OKR 目标：省略 OKR 对照块，不得编造目标）";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (GoalTreeView.GoalNode node : objectives) {
+            GoalView o = node.goal();
+            sb.append("### O：").append(o.title())
+                    .append("（状态=").append(GOAL_STATUS_LABELS.getOrDefault(o.status(), o.status()))
+                    .append(" · 人工进度 ").append(o.progress() == null ? 0 : o.progress()).append("%）\n");
+            if (node.krs().isEmpty()) {
+                sb.append("- （该 O 下无 KR）\n");
+                continue;
+            }
+            for (GoalView kr : node.krs()) {
+                sb.append("- KR#").append(kr.id()).append(' ').append(kr.title())
+                        .append("（状态=").append(GOAL_STATUS_LABELS.getOrDefault(kr.status(), kr.status()))
+                        .append(" · 人工进度 ").append(kr.progress() == null ? 0 : kr.progress()).append('%');
+                if (kr.suggestedProgress() != null) {
+                    sb.append(" · 建议进度 ").append(kr.suggestedProgress()).append('%');
+                }
+                if (kr.linkedPlanTotal() != null && kr.linkedPlanTotal() > 0) {
+                    sb.append(" · 关联计划 ").append(kr.linkedPlanDone()).append('/')
+                            .append(kr.linkedPlanTotal()).append(" 完成");
+                }
+                if (kr.linkedHours() != null && kr.linkedHours() > 0) {
+                    sb.append(" · 关联工时 ").append(kr.linkedHours()).append('h');
+                }
+                sb.append("）\n");
+                List<WorklogPlanItemEntity> plans = plansByKr == null ? null : plansByKr.get(kr.id());
+                if (plans != null) {
+                    for (WorklogPlanItemEntity p : plans) {
+                        sb.append("  - [状态=")
+                                .append(PLAN_STATUS_LABELS.getOrDefault(p.getStatus(), p.getStatus()))
+                                .append("] ").append(p.getTitle())
+                                .append("（类型=").append(p.getPlanType());
+                        if (p.getEstimateMinutes() != null) {
+                            sb.append(" · 预估=").append(hoursText(p.getEstimateMinutes()));
+                        }
+                        sb.append("）\n");
+                        List<WorklogEntryEntity> linked =
+                                linkedByPlanId == null ? null : linkedByPlanId.get(p.getId());
+                        if (linked != null && !linked.isEmpty()) {
+                            sb.append("    关联条目：");
+                            for (int i = 0; i < linked.size(); i++) {
+                                WorklogEntryEntity e = linked.get(i);
+                                if (i > 0) {
+                                    sb.append("；");
+                                }
+                                sb.append(e.getTitle()).append('（').append(e.getWorkDate()).append(' ')
+                                        .append(e.getMinutes()).append(" 分钟）");
+                            }
+                            sb.append('\n');
+                        }
+                    }
+                }
+            }
+        }
+        return sb.toString().strip();
+    }
+
+    /** CAP-91 FR-09 计划外工作聚合（季内 DONE 且未对齐任何 KR 的条目，按类型聚合）。 */
+    static String formatUnaligned(List<UnalignedGroup> groups) {
+        if (groups == null || groups.isEmpty()) {
+            return "（季内无计划外已完成条目）";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (UnalignedGroup g : groups) {
+            sb.append("- ").append(g.type()).append(" ×").append(g.count())
+                    .append(" · ").append(hoursText(g.minutes()));
+            if (!g.sampleTitles().isEmpty()) {
+                sb.append("：").append(String.join("；", g.sampleTitles()));
+            }
+            sb.append('\n');
+        }
+        return sb.toString().strip();
+    }
+
+    /**
+     * CAP-91 FR-09「季度复盘」prompt：固定结构（不走用户模板——首版无模板定制诉求）。
+     * 产物契约 `.devmind/output/quarterly-review-<period>.md` 由场景骨架钉死
+     * （{@code WorklogAssetSeeder}），与 {@code WorklogOutputMirror} 解析三方同步。
+     */
+    static String quarterlyReview(String period, LocalDate from, LocalDate to,
+                                  String okrBlock, String unalignedBlock, String hint) {
+        String prompt = "请为我写 " + period + "（" + from + " ~ " + to + "）的季度工作复盘。\n\n"
+                + "## 素材：当季 OKR 对照（确定性数据，目标达成情况以此为准）\n\n"
+                + (okrBlock == null || okrBlock.isBlank() ? "（当季无 OKR 目标）" : okrBlock) + "\n\n"
+                + "## 素材：计划外工作聚合（季内已完成但未对齐任何 KR 的条目，按类型聚合）\n\n"
+                + (unalignedBlock == null || unalignedBlock.isBlank()
+                        ? "（季内无计划外已完成条目）" : unalignedBlock) + "\n\n"
+                + "## 输出契约（严格遵守）\n\n"
+                + "- 复盘结构：## 目标达成回顾（逐 O/KR 对照素材陈述事实，点明达成/未达成）"
+                + "→ ## 计划外工作（价值判断：哪些反映了下季该纳入目标的方向）"
+                + "→ ## 下季建议（承接未完成 KR，结合计划外工作的启示）\n"
+                + "- 中文、事实导向；数字与状态一律以上方素材为准，不得编造\n"
+                + "- 除复盘正文外不写任何其他内容";
+        return appendHint(prompt, hint);
+    }
+
     /** 本人补充说明：只有用户填了才追加；放在末尾让模型最后读到，冲突时以它为准。 */
-    static String appendHint(String prompt, String hint) {        String h = hint == null ? "" : hint.strip();
-        if (h.isEmpty()) {
+    static String appendHint(String prompt, String hint) {        String h = hint == null ? "" : hint.strip();        if (h.isEmpty()) {
             return prompt;
         }
         if (h.length() > HINT_CHARS) {

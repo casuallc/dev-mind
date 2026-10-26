@@ -19,6 +19,9 @@ public final class WorklogScenarios {
     /** CAP-88 M3「AI 建议计划」生成场景 code（产 plan-suggest-<yyyy-Www>.md，解析为建议计划项） */
     public static final String PLAN_SUGGEST = "worklog-plan-suggest";
 
+    /** CAP-91 M2「季度复盘」生成场景 code（产 quarterly-review-<period>.md，落 worklog_quarterly_reports） */
+    public static final String QUARTERLY_REVIEW = "worklog-quarterly-review";
+
     private WorklogScenarios() {
     }
 }

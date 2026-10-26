@@ -13,8 +13,10 @@ import com.devmind.session.service.SessionOutputService;
 import com.devmind.worklog.dto.WorklogSyncResult;
 import com.devmind.worklog.model.DailyReportEntity;
 import com.devmind.worklog.model.WeeklyReportEntity;
+import com.devmind.worklog.model.WorklogQuarterlyReportEntity;
 import com.devmind.worklog.repo.DailyReportRepository;
 import com.devmind.worklog.repo.WeeklyReportRepository;
+import com.devmind.worklog.repo.WorklogQuarterlyReportRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
@@ -55,6 +57,8 @@ public class WorklogOutputMirror {
     static final Pattern WEEKLY_FILE = Pattern.compile("^weekly-(\\d{4})-W(\\d{2})\\.md$");
     /** CAP-88 M3：建议计划产物（plan-suggest-<yyyy>-W<ww>.md → 解析插 worklog_plan_items） */
     static final Pattern PLAN_SUGGEST_FILE = Pattern.compile("^plan-suggest-(\\d{4})-W(\\d{2})\\.md$");
+    /** CAP-91 M2：季度复盘产物（quarterly-review-<period>.md → upsert worklog_quarterly_reports） */
+    static final Pattern QUARTERLY_REVIEW_FILE = Pattern.compile("^quarterly-review-(\\d{4}-Q[1-4])\\.md$");
 
     private final SessionRepository sessionRepo;
     private final SessionOutputService outputService;
@@ -63,11 +67,13 @@ public class WorklogOutputMirror {
     private final WeeklyReportRepository weeklyRepo;
     private final DomainEventPublisher eventPublisher;
     private final WorklogPlanService planService;
+    private final WorklogQuarterlyReportRepository quarterlyRepo;
 
     public WorklogOutputMirror(SessionRepository sessionRepo, SessionOutputService outputService,
                                ProjectService projectService,
                                DailyReportRepository dailyRepo, WeeklyReportRepository weeklyRepo,
-                               DomainEventPublisher eventPublisher, WorklogPlanService planService) {
+                               DomainEventPublisher eventPublisher, WorklogPlanService planService,
+                               WorklogQuarterlyReportRepository quarterlyRepo) {
         this.sessionRepo = sessionRepo;
         this.outputService = outputService;
         this.projectService = projectService;
@@ -75,6 +81,7 @@ public class WorklogOutputMirror {
         this.weeklyRepo = weeklyRepo;
         this.eventPublisher = eventPublisher;
         this.planService = planService;
+        this.quarterlyRepo = quarterlyRepo;
     }
 
     @EventListener
@@ -98,8 +105,9 @@ public class WorklogOutputMirror {
         boolean daily = WorklogScenarios.DAILY.equals(s.getScenarioCode());
         boolean weekly = WorklogScenarios.WEEKLY.equals(s.getScenarioCode());
         boolean suggest = WorklogScenarios.PLAN_SUGGEST.equals(s.getScenarioCode());
-        if (daily || weekly || suggest) {
-            String label = daily ? "日报" : weekly ? "周报" : "建议计划";
+        boolean quarterly = WorklogScenarios.QUARTERLY_REVIEW.equals(s.getScenarioCode());
+        if (daily || weekly || suggest || quarterly) {
+            String label = daily ? "日报" : weekly ? "周报" : suggest ? "建议计划" : "季度复盘";
             if (!Boolean.TRUE.equals(event.success())) {
                 notifyFailed(label, owner, label + "生成会话执行失败，请到会话详情查看事件流（session " + s.getId() + "）");
                 return;
@@ -109,6 +117,8 @@ public class WorklogOutputMirror {
                 mirrorDaily(s, owner, outputs);
             } else if (weekly) {
                 mirrorWeekly(s, owner, outputs);
+            } else if (quarterly) {
+                mirrorQuarterly(s, owner, outputs);
             } else {
                 mirrorSuggest(s, owner, outputs);
             }
@@ -155,6 +165,7 @@ public class WorklogOutputMirror {
             }
             Matcher dm = DAILY_FILE.matcher(fileName);
             Matcher wm = WEEKLY_FILE.matcher(fileName);
+            Matcher qm = QUARTERLY_REVIEW_FILE.matcher(fileName);
             if (dm.matches()) {
                 LocalDate date = LocalDate.parse(dm.group(1));
                 switch (dailyGuard(owner, date, o.getContent())) {
@@ -169,6 +180,13 @@ public class WorklogOutputMirror {
                     case UNCHANGED -> { }
                     case EXISTING -> skipped.add("周报 " + weekStart + " 周（库中已有报告，未覆盖）");
                     case WRITE -> mirrored.add(writeWeekly(s, owner, weekStart, o.getContent()));
+                }
+            } else if (qm.matches()) {
+                String period = qm.group(1);
+                switch (quarterlyGuard(owner, period, o.getContent())) {
+                    case UNCHANGED -> { }
+                    case EXISTING -> skipped.add("季度复盘 " + period + "（库中已有报告，未覆盖）");
+                    case WRITE -> mirrored.add(writeQuarterly(s, owner, period, o.getContent()));
                 }
             }
         }
@@ -192,6 +210,14 @@ public class WorklogOutputMirror {
                             && Objects.equals(e.getNextPlanMd(), parts[1])
                             ? MirrorGuard.UNCHANGED : MirrorGuard.EXISTING;
                 })
+                .orElse(MirrorGuard.WRITE);
+    }
+
+    /** 季度复盘前置闸：同日报（按 content_md 比对）。 */
+    private MirrorGuard quarterlyGuard(String owner, String period, String content) {
+        return quarterlyRepo.findByUserIdAndQuarter(owner, period)
+                .map(e -> Objects.equals(e.getContentMd(), content)
+                        ? MirrorGuard.UNCHANGED : MirrorGuard.EXISTING)
                 .orElse(MirrorGuard.WRITE);
     }
 
@@ -291,6 +317,42 @@ public class WorklogOutputMirror {
         eventPublisher.publish(SimpleDomainEvent.of("worklog.plan.suggested", null, null, owner,
                 owner + " 的 " + weekStart + " 周建议计划已生成（新增 " + inserted + " 条建议项）",
                 "WORKLOG_PLAN", weekStart.toString(), null));
+    }
+
+    /**
+     * 季度复盘落库（CAP-91 M2 生成场景 exit 路径）：缺回传发降级通知，命中走
+     * {@link #writeQuarterly}（upsert，同日报口径——非 force 已在生成侧跳过）。
+     */
+    void mirrorQuarterly(SessionEntity s, String owner, List<SessionOutputEntity> outputs) {
+        SessionOutputEntity out = find(outputs, QUARTERLY_REVIEW_FILE);
+        if (out == null) {
+            notifyFailed("季度复盘", owner,
+                    "季度复盘生成会话已完成，但未回传成稿（.devmind/output 缺 quarterly-review-<period>.md），请到会话详情排查");
+            return;
+        }
+        Matcher m = QUARTERLY_REVIEW_FILE.matcher(out.getFileName());
+        m.matches();
+        writeQuarterly(s, owner, m.group(1), out.getContent());
+    }
+
+    /** 季度复盘落库（upsert + 会话追溯 sessionId），返回 "季度复盘 <period>"。 */
+    private String writeQuarterly(SessionEntity s, String owner, String period, String content) {
+        WorklogQuarterlyReportEntity e = quarterlyRepo.findByUserIdAndQuarter(owner, period)
+                .orElseGet(() -> {
+                    WorklogQuarterlyReportEntity n = new WorklogQuarterlyReportEntity();
+                    n.setUserId(owner);
+                    n.setQuarter(period);
+                    n.setCreatedAt(now());
+                    return n;
+                });
+        e.setContentMd(content == null ? "" : content);
+        e.setSessionId(s.getId());
+        e.setUpdatedAt(now());
+        quarterlyRepo.save(e);
+        log.info("季度复盘已落库: user={} quarter={} session={}", owner, period, s.getId());
+        eventPublisher.publish(SimpleDomainEvent.of("worklog.quarterly.generated", null, null, owner,
+                owner + " 的 " + period + " 季度复盘已生成", "QUARTERLY_REPORT", period, null));
+        return "季度复盘 " + period;
     }
 
     private static Instant now() {

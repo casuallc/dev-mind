@@ -1,15 +1,22 @@
 package com.devmind.worklog.service;
 
+import com.devmind.common.exception.DevMindException;
 import com.devmind.common.requirement.WipRequirementProvider;
 import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.SessionView;
 import com.devmind.session.service.SessionManagerService;
+import com.devmind.worklog.dto.GoalTreeView;
+import com.devmind.worklog.dto.GoalView;
+import com.devmind.worklog.dto.UpdateQuarterlyRequest;
 import com.devmind.worklog.model.WeeklyReportEntity;
 import com.devmind.worklog.model.WorklogEntryEntity;
 import com.devmind.worklog.model.WorklogPlanItemEntity;
+import com.devmind.worklog.model.WorklogQuarterlyReportEntity;
 import com.devmind.worklog.repo.WeeklyReportRepository;
 import com.devmind.worklog.repo.WorklogEntryRepository;
+import com.devmind.worklog.repo.WorklogGoalRepository;
 import com.devmind.worklog.repo.WorklogPlanItemRepository;
+import com.devmind.worklog.repo.WorklogQuarterlyReportRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
@@ -21,10 +28,13 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ReportServiceTest {
@@ -87,7 +97,7 @@ class ReportServiceTest {
                 .thenReturn(Optional.empty());
 
         ReportService service = new ReportService(null, null, null, null, null, null, weeklyRepo,
-                planRepo, null, null);
+                planRepo, null, null, null, null, null);
 
         assertEquals("- 完成 B\n- 推进 C", service.lastWeekPlan("alice", LocalDate.of(2026, 10, 19)));
         // 上周周报没有计划时返回空串，模板据此省略跟进块
@@ -120,7 +130,7 @@ class ReportServiceTest {
         when(entryRepo.findByPlanItemIdIn(List.of(7L))).thenReturn(List.of(linked));
 
         ReportService service = new ReportService(null, null, null, null, null, null, weeklyRepo,
-                planRepo, entryRepo, null);
+                planRepo, entryRepo, null, null, null, null);
 
         String block = service.lastWeekPlan("alice", LocalDate.of(2026, 10, 19));
         assertTrue(block.contains("[周计划] [状态=已完成] 收尾登录改造"), "缺结构化计划项: " + block);
@@ -136,7 +146,7 @@ class ReportServiceTest {
         when(planRepo.findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(
                 "alice", "WEEK", mon)).thenReturn(List.of(new WorklogPlanItemEntity()));
         ReportService service = new ReportService(null, null, null, null, null, null, null,
-                planRepo, null, null);
+                planRepo, null, null, null, null, null);
         var launch = service.suggestPlan("alice", LocalDate.of(2026, 11, 4), false, null);
         assertTrue(launch.reused(), "已有项非 force 须幂等跳过");
         assertNull(launch.sessionId());
@@ -174,7 +184,7 @@ class ReportServiceTest {
         when(sessionManager.create(reqCap.capture())).thenReturn(created);
 
         ReportService service = new ReportService(null, null, null, workspaceService, sessionManager,
-                null, null, planRepo, entryRepo, wipProvider);
+                null, null, planRepo, entryRepo, wipProvider, null, null, null);
         var launch = service.suggestPlan("alice", LocalDate.of(2026, 11, 3), false, "多排评审");
         assertEquals("s-1", launch.sessionId());
         assertFalse(launch.reused());
@@ -213,7 +223,7 @@ class ReportServiceTest {
         when(entryRepo.findByPlanItemIdIn(List.of(5L))).thenReturn(List.of());
 
         ReportService service = new ReportService(null, null, null, null, null, null, null,
-                planRepo, entryRepo, null);
+                planRepo, entryRepo, null, null, null, null);
         String block = service.dayPlanBlock("alice", wed);
         assertTrue(block.contains("当日未完成条目"), "缺未完成条目小节: " + block);
         assertTrue(block.contains("修登录页"), "缺条目行: " + block);
@@ -233,7 +243,7 @@ class ReportServiceTest {
                 "alice", "WEEK", mon.plusWeeks(1))).thenReturn(List.of(next));
 
         ReportService service = new ReportService(null, null, null, null, null, null, null,
-                planRepo, null, null);
+                planRepo, null, null, null, null, null);
         var preview = service.nextPlanPreview("alice", mon);
         assertEquals(1, preview.itemCount());
         assertTrue(preview.markdown().contains("1. [DEV] 收尾周报链路（预估 3h）"), preview.markdown());
@@ -253,6 +263,164 @@ class ReportServiceTest {
         e.setTitle("计划" + id);
         e.setPlanType("DEV");
         e.setStatus(status);
+        return e;
+    }
+
+    // ---------------- CAP-91 M2：季度复盘 ----------------
+
+    @Test
+    void 季度复盘非force已有行幂等跳过() {
+        WorklogQuarterlyReportRepository quarterlyRepo = mock(WorklogQuarterlyReportRepository.class);
+        when(quarterlyRepo.existsByUserIdAndQuarter("alice", "2026-Q4")).thenReturn(true);
+        ReportService service = new ReportService(null, null, null, null, null, null, null,
+                null, null, null, quarterlyRepo, null, null);
+        var launch = service.generateQuarterly("alice", "2026-Q4", false, null);
+        assertTrue(launch.reused(), "已有行非 force 须幂等跳过");
+        assertNull(launch.sessionId());
+    }
+
+    @Test
+    void 季度复盘预检无目标且无完成条目时400() {
+        WorklogQuarterlyReportRepository quarterlyRepo = mock(WorklogQuarterlyReportRepository.class);
+        WorklogGoalRepository goalRepo = mock(WorklogGoalRepository.class);
+        WorklogEntryRepository entryRepo = mock(WorklogEntryRepository.class);
+        when(goalRepo.findByUserIdAndPeriodInOrderBySortOrderAscIdAsc("alice", List.of("2026-Q4")))
+                .thenReturn(List.of());
+        WorklogEntryEntity todo = new WorklogEntryEntity();
+        todo.setStatus("TODO");
+        when(entryRepo.findRange("alice", LocalDate.of(2026, 10, 1), LocalDate.of(2026, 12, 31)))
+                .thenReturn(List.of(todo));
+        ReportService service = new ReportService(null, null, null, null, null, null, null,
+                null, entryRepo, null, quarterlyRepo, goalRepo, null);
+        DevMindException ex = assertThrows(DevMindException.class,
+                () -> service.precheckQuarterly("alice", "2026-Q4", false));
+        assertTrue(ex.getMessage().contains("无复盘素材"), ex.getMessage());
+    }
+
+    @Test
+    void 季度复盘generate起会话场景与prompt契约() {
+        WorklogQuarterlyReportRepository quarterlyRepo = mock(WorklogQuarterlyReportRepository.class);
+        WorklogGoalService goalService = mock(WorklogGoalService.class);
+        WorklogEntryRepository entryRepo = mock(WorklogEntryRepository.class);
+        when(goalService.tree(2026)).thenReturn(new GoalTreeView(List.of(), List.of()));
+        when(entryRepo.findRange("alice", LocalDate.of(2026, 10, 1), LocalDate.of(2026, 12, 31)))
+                .thenReturn(List.of());
+        WorklogWorkspaceService workspaceService = mock(WorklogWorkspaceService.class);
+        when(workspaceService.ensureFor("alice"))
+                .thenReturn(new com.devmind.worklog.dto.WorkspaceView(true, "p-wl", null, null));
+        SessionManagerService sessionManager = mock(SessionManagerService.class);
+        ArgumentCaptor<CreateSessionRequest> reqCap = ArgumentCaptor.forClass(CreateSessionRequest.class);
+        SessionView created = mock(SessionView.class);
+        when(created.id()).thenReturn("s-q1");
+        when(sessionManager.create(reqCap.capture())).thenReturn(created);
+
+        ReportService service = new ReportService(null, null, null, workspaceService, sessionManager,
+                null, null, null, entryRepo, null, quarterlyRepo, null, goalService);
+        var launch = service.generateQuarterly("alice", "2026-Q4", false, "重点写 KR 风险");
+        assertEquals("s-q1", launch.sessionId());
+        assertFalse(launch.reused());
+
+        CreateSessionRequest req = reqCap.getValue();
+        assertEquals(WorklogScenarios.QUARTERLY_REVIEW, req.scenarioCode());
+        String prompt = req.taskSpec();
+        assertTrue(prompt.contains("2026-Q4（2026-10-01 ~ 2026-12-31）"), "季度区间缺失: " + prompt);
+        assertTrue(prompt.contains("（当季无 OKR 目标"), "空树省略指令缺失: " + prompt);
+        assertTrue(prompt.contains("（季内无计划外已完成条目）"), "空聚合占位缺失: " + prompt);
+        assertTrue(prompt.contains("重点写 KR 风险"), "hint 未注入: " + prompt);
+    }
+
+    @Test
+    void 复盘预览确定性渲染OKR对照与计划外聚合() {
+        WorklogGoalService goalService = mock(WorklogGoalService.class);
+        WorklogPlanItemRepository planRepo = mock(WorklogPlanItemRepository.class);
+        WorklogEntryRepository entryRepo = mock(WorklogEntryRepository.class);
+        // 树：2026-Q4 区一个 O + 一个 KR（KR#11，带派生数据）
+        GoalView kr = new GoalView(11L, "QUARTER", "2026-Q4", "KEY_RESULT", 10L, null,
+                "完成 CAP-91 上线", null, null, 60, "ACTIVE", null, 0, null, null,
+                3, 2, 5.0, 67);
+        GoalView o = new GoalView(10L, "QUARTER", "2026-Q4", "OBJECTIVE", null, null,
+                "平台能力跃迁", null, null, 50, "ACTIVE", null, 0, null, null,
+                null, null, null, null);
+        when(goalService.tree(2026)).thenReturn(new GoalTreeView(List.of(), List.of(
+                new GoalTreeView.QuarterSection("2026-Q4",
+                        List.of(new GoalTreeView.GoalNode(o, List.of(kr)))))));
+        // KR#11 关联计划：季内一条 DONE + 季外一条（周跨季挂错季，不计）
+        WorklogPlanItemEntity inQ = wipItem(21L, "DONE");
+        inQ.setKrId(11L);
+        inQ.setTitle("季度内计划");
+        inQ.setPlanDate(LocalDate.of(2026, 11, 2));
+        WorklogPlanItemEntity outQ = wipItem(22L, "DONE");
+        outQ.setKrId(11L);
+        outQ.setTitle("季度外计划");
+        outQ.setPlanDate(LocalDate.of(2026, 9, 28));
+        when(planRepo.findByKrIdIn(List.of(11L))).thenReturn(List.of(inQ, outQ));
+        when(entryRepo.findByPlanItemIdIn(any())).thenReturn(List.of());
+        // 计划外聚合：季内 DONE 三条——一条挂 KR 计划（对齐不计）、两条未对齐
+        WorklogEntryEntity aligned = doneEntry("对齐条目", "DEV", 60);
+        aligned.setPlanItemId(21L);
+        WorklogEntryEntity un1 = doneEntry("临时支持工单", "SUPPORT", 90);
+        WorklogEntryEntity un2 = doneEntry("月度例会", "MEETING", 60);
+        when(entryRepo.findRange("alice", LocalDate.of(2026, 10, 1), LocalDate.of(2026, 12, 31)))
+                .thenReturn(List.of(aligned, un1, un2));
+        when(planRepo.findAllById(any())).thenReturn(List.of(inQ));
+
+        ReportService service = new ReportService(null, null, null, null, null, null, null,
+                planRepo, entryRepo, null, null, null, goalService);
+        String md = service.reviewPreview("alice", "2026-Q4").markdown();
+        assertTrue(md.contains("### O：平台能力跃迁"), "缺 O 行: " + md);
+        assertTrue(md.contains("KR#11 完成 CAP-91 上线"), "缺 KR 行: " + md);
+        assertTrue(md.contains("建议进度 67%"), "缺派生进度: " + md);
+        assertTrue(md.contains("季度内计划"), "季内计划项须进对照块: " + md);
+        assertFalse(md.contains("季度外计划"), "季外计划项不计: " + md);
+        assertTrue(md.contains("SUPPORT ×1") && md.contains("临时支持工单"), "缺计划外聚合: " + md);
+        assertTrue(md.contains("MEETING ×1"), "缺 MEETING 聚合: " + md);
+        assertFalse(md.contains("对齐条目"), "已对齐 KR 的条目不算计划外: " + md);
+    }
+
+    @Test
+    void 季度复盘手动创建幂等与编辑保存() {
+        WorklogQuarterlyReportRepository quarterlyRepo = mock(WorklogQuarterlyReportRepository.class);
+        ReportService service = new ReportService(null, null, null, null, null, null, null,
+                null, null, null, quarterlyRepo, null, null);
+        service.createQuarterly("alice", "2026-Q4");
+        ArgumentCaptor<WorklogQuarterlyReportEntity> cap =
+                ArgumentCaptor.forClass(WorklogQuarterlyReportEntity.class);
+        verify(quarterlyRepo).save(cap.capture());
+        assertEquals("alice", cap.getValue().getUserId());
+        assertEquals("2026-Q4", cap.getValue().getQuarter());
+
+        // 已存在 → 幂等不再插
+        when(quarterlyRepo.existsByUserIdAndQuarter("alice", "2026-Q4")).thenReturn(true);
+        service.createQuarterly("alice", "2026-Q4");
+        verify(quarterlyRepo, times(1)).save(any());
+
+        // 编辑保存（按 period 寻址直写）
+        WorklogQuarterlyReportEntity row = new WorklogQuarterlyReportEntity();
+        row.setUserId("alice");
+        row.setQuarter("2026-Q4");
+        row.setContentMd("旧稿");
+        when(quarterlyRepo.findByUserIdAndQuarter("alice", "2026-Q4"))
+                .thenReturn(Optional.of(row));
+        service.updateQuarterly("alice", "2026-Q4", new UpdateQuarterlyRequest("新稿"));
+        assertEquals("新稿", row.getContentMd());
+        verify(quarterlyRepo, times(2)).save(any());
+    }
+
+    @Test
+    void 季度period非法400() {
+        ReportService service = new ReportService(null, null, null, null, null, null, null,
+                null, null, null, null, null, null);
+        assertThrows(DevMindException.class, () -> service.getQuarterly("alice", "2026-Q5"));
+        assertThrows(DevMindException.class, () -> service.reviewPreview("alice", "2026"));
+    }
+
+    private static WorklogEntryEntity doneEntry(String title, String type, int minutes) {
+        WorklogEntryEntity e = new WorklogEntryEntity();
+        e.setTitle(title);
+        e.setEntryType(type);
+        e.setMinutes(minutes);
+        e.setStatus(WorklogEntryEntity.STATUS_DONE);
+        e.setWorkDate(LocalDate.of(2026, 11, 5));
         return e;
     }
 }
