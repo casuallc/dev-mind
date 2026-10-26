@@ -1,7 +1,7 @@
-// CAP-86 v3 知识运营中心：跨库待办队列 + 召回验证。
+// CAP-86 v3 知识运营中心：跨库待办队列 + 召回验证 + 自动增强。
 // 与「知识库」（内容管理）分工：这里回答「现在该处理什么」，所有动作行级发起并二次确认。
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, Navigate, useSearchParams } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import {
   Button,
   Card,
@@ -33,6 +33,7 @@ import type {
   NegativeFeedbackReport,
 } from '../types'
 import KnowledgeSearchView from '../components/KnowledgeSearchView'
+import KnowledgeEnrichView from '../components/KnowledgeEnrichView'
 import KnowledgeEntryDrawer from '../components/KnowledgeEntryDrawer'
 import type { Project } from '../../projects/types'
 import FitTable from '../../../shared/components/FitTable'
@@ -41,7 +42,7 @@ import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { showError } from '../../../shared/utils/showError'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 
-type OpsTab = 'tasks' | 'search'
+type OpsTab = 'tasks' | 'search' | 'enrich'
 type TodoKind = 'review' | 'enrich' | 'feedback'
 type TodoFilter = 'all' | TodoKind
 
@@ -72,13 +73,11 @@ export default function KnowledgeOpsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
 
   const tabParam = searchParams.get('tab')
-  const tab: OpsTab = tabParam === 'search' ? 'search' : 'tasks'
+  const tab: OpsTab =
+    tabParam === 'search' ? 'search' : tabParam === 'enrich' ? 'enrich' : 'tasks'
   const kbIdRaw = Number(searchParams.get('kbId'))
   const kbId = Number.isFinite(kbIdRaw) && kbIdRaw > 0 ? kbIdRaw : undefined
   const viewParam = searchParams.get('view')
-  const reportsView = ['lifecycle', 'duplicates', 'feedback', 'eval', 'enrich'].includes(viewParam ?? '')
-    ? viewParam
-    : null
 
   const update = (patch: Record<string, string | undefined>) => {
     const next = new URLSearchParams(searchParams)
@@ -136,7 +135,7 @@ export default function KnowledgeOpsPage() {
     loadTodos()
   }, [loadTodos])
 
-  // 待办队列只收「动作能闭环」的项：已过期/临期/缺负责人无补录入口，留在报表里提示
+  // 待办队列只收「动作能闭环」的项：已过期/临期/缺负责人无补录入口，留在质量报告里提示
   const reviewRows = useMemo<TodoRow[]>(() => {
     if (!lifecycle) return []
     const map = new Map<number, TodoRow>()
@@ -292,12 +291,19 @@ export default function KnowledgeOpsPage() {
   const tabHint =
     tab === 'tasks'
       ? '跨库待办收件箱：待复核、增强失败与负反馈集中处理；数据实时聚合，处理后刷新即可看到最新队列。'
-      : '验证「这个问题能不能问出来」：跨库/单库检索调试，看命中文档与高亮片段。日常问知识请用 AI 问答。'
+      : tab === 'search'
+        ? '验证「这个问题能不能问出来」：跨库/单库检索调试，看命中文档与高亮片段。日常问知识请用 AI 问答。'
+        : '自动补全文档元数据：按知识库分批生成分类、摘要与标签并重建索引，可对失败条目单独重试。'
 
-  // 旧入口兼容：/admin/knowledge/ops?tab=reports&view=xxx → 报表独立页
+  // 旧入口兼容：/admin/knowledge/ops?tab=reports&view=xxx → 质量报告页；自动增强已并入本页
   if (tabParam === 'reports') {
+    if (viewParam === 'enrich') {
+      return <Navigate to="/admin/knowledge/ops?tab=enrich" replace />
+    }
     const next = new URLSearchParams()
-    if (reportsView) next.set('view', reportsView)
+    if (viewParam && ['lifecycle', 'duplicates', 'feedback', 'eval'].includes(viewParam)) {
+      next.set('view', viewParam)
+    }
     return (
       <Navigate
         to={{ pathname: '/admin/knowledge/reports', search: next.size ? `?${next}` : '' }}
@@ -319,26 +325,24 @@ export default function KnowledgeOpsPage() {
             options={[
               { value: 'tasks', label: '待办' },
               { value: 'search', label: '召回验证' },
+              { value: 'enrich', label: '自动增强' },
             ]}
           />
         </Space>
       }
       extra={
-        <Space wrap>
-          {tab === 'tasks' && kbId && (
-            <Tag closable onClose={() => update({ kbId: undefined })} color="blue">
-              仅看：{kbName.get(kbId) ?? `#${kbId}`}
-            </Tag>
-          )}
-          {tab === 'tasks' && (
+        tab === 'tasks' ? (
+          <Space wrap>
+            {kbId && (
+              <Tag closable onClose={() => update({ kbId: undefined })} color="blue">
+                仅看：{kbName.get(kbId) ?? `#${kbId}`}
+              </Tag>
+            )}
             <Button icon={<ReloadOutlined />} loading={loading} onClick={loadTodos}>
               刷新
             </Button>
-          )}
-          <Link to="/admin/knowledge">
-            <Button>知识库</Button>
-          </Link>
-        </Space>
+          </Space>
+        ) : undefined
       }
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
@@ -391,6 +395,13 @@ export default function KnowledgeOpsPage() {
             onOpenEntry={(entryId, hit, focusChunkId) => setEntryDetail({ entryId, hit, focusChunkId })}
           />
         </div>
+      )}
+
+      {tab === 'enrich' && (
+        <KnowledgeEnrichView
+          bases={bases}
+          onOpenEntry={(entryId) => setEntryDetail({ entryId })}
+        />
       )}
 
       <KnowledgeEntryDrawer

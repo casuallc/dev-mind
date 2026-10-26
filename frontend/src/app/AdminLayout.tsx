@@ -51,10 +51,10 @@ const ADMIN_MENU_ITEMS: AdminMenuItem[] = [
     type: 'group' as const,
     label: '知识库',
     children: [
-      // CAP-86 v3 两区模型：知识库管内容（喂什么），知识运营管质量（现在该做什么），报表独立入口
+      // CAP-86 v3 两区模型：知识库管内容（喂什么），知识运营管动作（现在该做什么），质量报告集中看跨库质量
       { key: '/admin/knowledge', icon: <ReadOutlined />, label: '知识库' },
       { key: '/admin/knowledge/ops', icon: <HeartOutlined />, label: '知识运营' },
-      { key: '/admin/knowledge/reports', icon: <BarChartOutlined />, label: '报表' },
+      { key: '/admin/knowledge/reports', icon: <BarChartOutlined />, label: '质量报告' },
     ],
   },
   {

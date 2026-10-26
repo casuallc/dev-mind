@@ -244,7 +244,7 @@ export default function KnowledgeBaseListPage() {
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
         共 {bases.length} 个库 · {totals.entries} 篇文档 · 已索引 {totals.ready}
-        。这里管理库与内容（含索引异常处理）；待复核、负面反馈与质量报表到「知识运营」。
+        。这里管理库与内容（含索引异常处理）；待复核、负面反馈与自动增强到「知识运营」，跨库质量看「质量报告」。
       </Typography.Paragraph>
       <FitTable<KnowledgeBase>
         rowKey="id"

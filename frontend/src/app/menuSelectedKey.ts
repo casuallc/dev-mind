@@ -8,8 +8,8 @@ const SELECT_PREFIXES: Array<[string, string]> = [
   ['/admin/notifications', '/admin/notifications'], // 通知管理（页内视图 ?view=channels/prefs）
   ['/admin/projects', '/admin/projects'], // 列表 + 设置子路由
   ['/admin/docs', '/admin/docs'], // 列表 + 编辑器
-  ['/admin/knowledge/reports', '/admin/knowledge/reports'], // 报表（跨库质量报表五视图）
-  ['/admin/knowledge/ops', '/admin/knowledge/ops'], // 知识运营（待办/召回验证）
+  ['/admin/knowledge/reports', '/admin/knowledge/reports'], // 质量报告（跨库质量报告四视图）
+  ['/admin/knowledge/ops', '/admin/knowledge/ops'], // 知识运营（待办/召回验证/自动增强）
   ['/admin/knowledge', '/admin/knowledge'], // 库列表 + 库详情（/admin/knowledge/bases/:id 高亮知识库）
   ['/projects/', '/requirements'], // /projects/:id/requirements/:rid → 需求
   ['/context', '/context'],

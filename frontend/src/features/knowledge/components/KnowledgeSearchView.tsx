@@ -21,7 +21,7 @@ import { LIST_PAGINATION } from '../../../shared/utils/table'
 const DEGRADED_TEXT: Record<string, string> = {
   NO_EMBEDDING: '无可用向量端点，本次为 BM25 关键词检索（结果仍可用，语义相近的文档可能漏召）；到「模型接入」配置 Embedding 端点后重建索引即可走向量检索',
   DIMENSION_MISMATCH: '向量维度与当前端点不一致，本次已降级为 BM25 关键词检索（到库详情「文档」页签一键重建需要重建的索引即可恢复）',
-  INDEX_EMPTY: '索引为空：尚未建立知识索引，请先到「知识库」给对应库上传内容，或到「知识运营·报表」检查索引健康度',
+  INDEX_EMPTY: '索引为空：尚未建立知识索引，请先到「知识库」给对应库上传内容，或到「质量报告」检查索引健康度',
 }
 
 export default function KnowledgeSearchView({

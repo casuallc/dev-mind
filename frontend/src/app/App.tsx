@@ -274,7 +274,7 @@ export default function App() {
           {/* CAP-33 场景已并入项目管理「场景」tab（会话模板的升级形态；/admin/templates 旧路径重定向） */}
           <Route path="/admin/scenarios" element={<Navigate to="/admin/projects?tab=scenarios" replace />} />
           <Route path="/admin/templates" element={<Navigate to="/admin/projects?tab=scenarios" replace />} />
-          {/* CAP-86 知识库菜单组：知识库（列表/库详情）/ 知识运营（待办/召回验证）/ 报表 + 旧链重定向 */}
+          {/* CAP-86 知识库菜单组：知识库（列表/库详情）/ 知识运营（待办/召回验证/自动增强）/ 质量报告 + 旧链重定向 */}
           <Route path="/admin/knowledge" element={<LegacyKnowledgeQueryRedirect />} />
           <Route path="/admin/knowledge/ops" element={<KnowledgeOpsPage />} />
           <Route path="/admin/knowledge/reports" element={<KnowledgeReportsPage />} />
