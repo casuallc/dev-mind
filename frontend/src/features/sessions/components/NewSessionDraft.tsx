@@ -191,7 +191,7 @@ export default function NewSessionDraft({
         <Form.Item
           label="场景"
           name="scenarioCode"
-          extra="场景 = prompt 骨架 + 预装配上下文包（skills/文档/知识/背景），骨架包裹首条消息、资产注入沙箱"
+          extra="场景 = prompt 骨架 + 预装配上下文包（skills/文档/知识库检索/背景），骨架包裹首条消息、资产注入沙箱"
           style={{ marginBottom: 12 }}
         >
           <Select

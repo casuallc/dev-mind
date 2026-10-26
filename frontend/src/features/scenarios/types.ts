@@ -1,5 +1,5 @@
 // 场景（CAP-33）的类型定义，与后端 devmind-session 模块对齐。
-// 场景 = 命名模板 + 预装配上下文包（skills/docs/知识 tags/场景背景），会话与问答可挂。
+// 场景 = 命名模板 + 预装配上下文包（skills/docs/知识库检索/场景背景），会话与问答可挂。
 
 export interface Scenario {
   id: number
@@ -12,8 +12,8 @@ export interface Scenario {
   skillIds: string[]
   /** ①层绑定 doc ids */
   docIds: number[]
-  /** ①层绑定知识 tags */
-  knowledgeTags: string[]
+  /** ①层绑定知识库 ids（CAP-92：装配时按任务检索，仅取命中片段） */
+  knowledgeBaseIds: number[]
   /** 场景背景（→ CLAUDE.local.md「场景背景」节） */
   extraContextMd?: string
   model?: string

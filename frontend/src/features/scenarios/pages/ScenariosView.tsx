@@ -28,6 +28,7 @@ import {
 import type { Scenario, ScenarioInput, ScenarioPreview } from '../types'
 import { listSkills } from '../../skills/api'
 import { listDocs } from '../../docs/api'
+import { listBases } from '../../knowledge/api'
 import { listProjects } from '../../projects/api'
 import { listAgentNodes } from '../../agent/api'
 import { fmtTime } from '../../../shared/utils/format'
@@ -60,6 +61,7 @@ export default function ScenariosView({
   // 编辑器的资产备选项
   const [skillOptions, setSkillOptions] = useState<{ value: string; label: string }[]>([])
   const [docOptions, setDocOptions] = useState<{ value: number; label: string }[]>([])
+  const [knowledgeOptions, setKnowledgeOptions] = useState<{ value: number; label: string }[]>([])
   const [projectOptions, setProjectOptions] = useState<{ value: string; label: string }[]>([])
   const [nodeOptions, setNodeOptions] = useState<{ value: string; label: string }[]>([])
   const [form] = Form.useForm()
@@ -98,7 +100,7 @@ export default function ScenariosView({
         scope: 'GLOBAL',
         skillIds: [],
         docIds: [],
-        knowledgeTags: [],
+        knowledgeBaseIds: [],
         sortOrder: rows.length + 1,
         enabled: true,
       },
@@ -115,6 +117,14 @@ export default function ScenariosView({
       .catch(() => undefined)
     listDocs({})
       .then((docs) => setDocOptions(docs.map((d) => ({ value: d.id, label: `#${d.id} ${d.title}` }))))
+      .catch(() => undefined)
+    listBases()
+      .then((bases) =>
+        setKnowledgeOptions(bases.map((b) => ({
+          value: b.id,
+          label: `${b.name}（${b.scope === 'global' ? '全局' : (b.projectName ?? b.projectId ?? '项目')}${b.status === 'archived' ? ' · 已归档' : ''}）`,
+        }))),
+      )
       .catch(() => undefined)
     listProjects()
       .then((ps) => setProjectOptions(ps.map((p) => ({ value: p.id, label: p.name }))))
@@ -219,8 +229,8 @@ export default function ScenariosView({
         <Space size={4} wrap>
           {r.skillIds.length > 0 && <Tag>{r.skillIds.length} skill</Tag>}
           {r.docIds.length > 0 && <Tag>{r.docIds.length} 文档</Tag>}
-          {r.knowledgeTags.length > 0 && <Tag>{r.knowledgeTags.length} 知识标签</Tag>}
-          {r.skillIds.length + r.docIds.length + r.knowledgeTags.length === 0 && '-'}
+          {r.knowledgeBaseIds.length > 0 && <Tag>{r.knowledgeBaseIds.length} 知识库</Tag>}
+          {r.skillIds.length + r.docIds.length + r.knowledgeBaseIds.length === 0 && '-'}
         </Space>
       ),
     },
@@ -248,8 +258,8 @@ export default function ScenariosView({
   return (
     <>
       <Typography.Paragraph type="secondary" style={{ marginTop: 0, marginBottom: 12 }}>
-        场景 = prompt 骨架 + 预装配上下文包（skills / 文档 / 知识标签 / 场景背景）。新建会话或问答时选择场景，
-        骨架渲染为首条 prompt，绑定资产随上下文包注入沙箱。占位符：
+        场景 = prompt 骨架 + 预装配上下文包（skills / 文档 / 知识库检索 / 场景背景）。新建会话或问答时选择场景，
+        骨架渲染为首条 prompt，绑定资产随上下文包注入沙箱；绑定知识库按任务检索，命中片段随上下文注入。占位符：
         <Typography.Text code>{'{{task}}'}</Typography.Text>、
         <Typography.Text code>{'{{project}}'}</Typography.Text>、
         <Typography.Text code>{'{{branch}}'}</Typography.Text>、
@@ -346,8 +356,19 @@ export default function ScenariosView({
           >
             <Select mode="multiple" options={docOptions} placeholder="（可选）" showSearch optionFilterProp="label" />
           </Form.Item>
-          <Form.Item label="绑定知识标签" name="knowledgeTags" extra="命中的知识条目进 CLAUDE.local.md（可输入新标签回车添加）">
-            <Select mode="tags" placeholder="（可选）如 gitlab,review" open={false} />
+          <Form.Item
+            label="绑定知识库"
+            name="knowledgeBaseIds"
+            extra="装配时以渲染后的任务说明为查询检索这些库，只注入命中的片段；执行会话（瘦上下文）不检索"
+          >
+            <Select
+              mode="multiple"
+              options={knowledgeOptions}
+              placeholder="（可选）选择要检索的知识库"
+              showSearch
+              optionFilterProp="label"
+              maxTagCount="responsive"
+            />
           </Form.Item>
           <Space size="middle" style={{ display: 'flex' }} wrap>
             <Form.Item label="模型" name="model" style={{ width: 180 }}>

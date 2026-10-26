@@ -1,6 +1,6 @@
-// 项目「知识」页（CAP-33 FR-06）：当前项目实际会注入/可用的上下文资产只读清单
-// （知识条目 / 文档 / Skills 三视图，GET /api/projects/{id}/context-assets 聚合）。
-// 多视图切换走 Card title 里的 Segmented（布局约定：禁 Card 内套 Tabs）；文档/知识条目点名称开抽屉看全文，维护请去 /admin 对应管理页。
+// 项目「上下文」页（CAP-33 FR-06）：当前项目实际会注入/可用的上下文资产只读清单
+// （文档 / Skills 两视图，GET /api/projects/{id}/context-assets 聚合；知识库改为场景检索，不再按项目自动命中）。
+// 多视图切换走 Card title 里的 Segmented（布局约定：禁 Card 内套 Tabs）；文档点名称开抽屉看全文，维护请去 /admin 对应管理页。
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Button, Card, Segmented, Space, Tag, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
@@ -16,11 +16,6 @@ import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 /** kind → 展示名 + 说明；数组顺序即 Segmented 视图顺序；未知 kind 用兜底配置排在最后 */
 const GROUP_META: Array<{ kind: string; title: string; hint: string }> = [
-  {
-    kind: 'knowledge',
-    title: '知识条目',
-    hint: '创建会话时按项目标签自动命中（global 无标签条目恒命中）',
-  },
   {
     kind: 'doc',
     title: '文档',
@@ -53,20 +48,20 @@ export default function ProjectContextPage({
   view: controlledView,
   onViewChange,
 }: {
-  /** 锁定项目（如工作日志页「知识条目/文档/Skills」视图锁定 WORKLOG 空间）；不传则跟随当前项目切换器 */
+  /** 锁定项目（如工作日志页文档/Skills 视图锁定 WORKLOG 空间）；不传则跟随当前项目切换器 */
   projectId?: string
   /** 自定义 Card 标题（内嵌场景传入外层视图切换器，此时须配合受控 view 使用——内层 Segmented 不再渲染） */
   title?: ReactNode
-  /** 受控视图（knowledge/doc/skill 资产 kind）：传入后内层 Segmented 隐藏，由外层切换器驱动 */
+  /** 受控视图（doc/skill 资产 kind）：传入后内层 Segmented 隐藏，由外层切换器驱动 */
   view?: string
   onViewChange?: (v: string) => void
 } = {}) {
   const { projectId, project } = useCurrentProject(fixedProjectId)
   const [groups, setGroups] = useState<AssetGroup[]>([])
   const [loading, setLoading] = useState(false)
-  // 点名称查看全文：只对文档/知识条目开放（Skills 无内容查看接口）
+  // 点名称查看全文：只对文档开放（Skills 无内容查看接口）
   const [viewing, setViewing] = useState<ContextAssetRef | null>(null)
-  const [innerView, setInnerView] = useState<string>('knowledge')
+  const [innerView, setInnerView] = useState<string>('doc')
   const view = controlledView ?? innerView
   const setView = onViewChange ?? setInnerView
 
@@ -117,7 +112,7 @@ export default function ProjectContextPage({
       minWidth: 320,
       ellipsis: true,
       render: (name: string, r: ProjectAssetItem) =>
-        activeKind === 'doc' || activeKind === 'knowledge' ? (
+        activeKind === 'doc' ? (
           <Typography.Link onClick={() => setViewing({ kind: activeKind, ref: r.ref, name })}>
             {name}
           </Typography.Link>
@@ -147,7 +142,7 @@ export default function ProjectContextPage({
       title={
         title ?? (
           <Space size={12}>
-            <span>知识</span>
+            <span>上下文</span>
             <Segmented
               value={activeKind}
               onChange={(v) => setView(v as string)}
@@ -164,7 +159,7 @@ export default function ProjectContextPage({
     >
       <Typography.Paragraph type="secondary">
         当前项目（{project?.name ?? projectId}）的会话上下文资产：创建会话/场景问答时经装配管线注入沙箱
-        （CLAUDE.local.md + .claude/skills/ + .devmind/docs/）。此页只读，点文档/知识条目名称可查看全文，
+        （CLAUDE.local.md + .claude/skills/ + .devmind/docs/）。此页只读，点文档名称可查看全文，
         维护请去后台管理对应页面。
         {activeMeta.hint && (
           <>

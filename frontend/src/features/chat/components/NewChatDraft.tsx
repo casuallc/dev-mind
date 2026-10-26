@@ -253,7 +253,7 @@ export default function NewChatDraft({
                   .filter((b) => b.status === 'active')
                   .map((b) => ({
                     value: b.id,
-                    label: `${b.name}（${b.injectMode} · ${b.entryCount} 条）`,
+                    label: `${b.name}（${b.entryCount} 条）`,
                   }))}
                 notFoundContent="暂无可用知识库（知识库 → 新建）"
                 maxTagCount="responsive"
@@ -344,7 +344,7 @@ export default function NewChatDraft({
                 .filter((b) => b.status === 'active')
                 .map((b) => ({
                   value: b.id,
-                  label: `${b.name}（${b.injectMode} · ${b.entryCount} 条）`,
+                  label: `${b.name}（${b.entryCount} 条）`,
                 }))}
               notFoundContent="暂无可用知识库（知识库 → 新建）"
             />
@@ -355,7 +355,7 @@ export default function NewChatDraft({
             <Form.Item
               label="场景"
               name="scenarioCode"
-              extra="场景骨架包裹首条提问，并注入其绑定的知识/skills/文档；PROJECT 场景按该项目身份装配"
+              extra="场景骨架包裹首条提问，并注入其绑定的 skills/文档、检索其绑定的知识库；PROJECT 场景按该项目身份装配"
               style={{ marginBottom: 12 }}
             >
               <Select

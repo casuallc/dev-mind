@@ -62,8 +62,8 @@ export default function SedimentExperienceModal({ open, onClose, sessionId, proj
         <Form.Item name="targetScope" label="去向" rules={[{ required: true }]}>
           <Select
             options={[
-              { value: 'project', label: '项目经验（仅本项目注入）' },
-              { value: 'global', label: '全局经验（所有项目可注入）' },
+              { value: 'project', label: '项目经验（仅本项目知识库）' },
+              { value: 'global', label: '全局经验（所有项目可检索）' },
             ]}
           />
         </Form.Item>
@@ -82,7 +82,7 @@ export default function SedimentExperienceModal({ open, onClose, sessionId, proj
           }
         </Form.Item>
         <Form.Item name="contentMd" label="内容" rules={[{ required: true, message: '请填写经验内容' }]}>
-          <Input.TextArea rows={7} placeholder="本次学到的经验（Markdown），审核采纳后进入知识库自动注入" />
+          <Input.TextArea rows={7} placeholder="本次学到的经验（Markdown），审核采纳后进入知识库，供检索命中" />
         </Form.Item>
       </Form>
     </Modal>

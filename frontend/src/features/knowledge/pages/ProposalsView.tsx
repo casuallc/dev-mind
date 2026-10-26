@@ -1,5 +1,5 @@
 // 经验提案视图（项目管理聚合页的「经验提案」tab）：会话「沉淀经验」/手动提交 → inbox → 采纳/拒绝/删除。
-// 注入预览在知识库列表页（/admin/knowledge）extra——预览的是 FULL 库条目，与提案 inbox 无关。
+// 提案 inbox 与注入预览无关；CAP-92 起知识库统一走检索，不再有全量注入预览。
 // 外壳 Card / extra 按钮在 AdminProjectsHub（refreshTick/createTick 驱动）。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -114,7 +114,7 @@ export default function ProposalsView({
       title: `采纳「${p.title}」${target === 'global' ? '到全局' : '到项目'}`,
       content:
         target === 'global'
-          ? '将作为全局经验条目进入经验库，后续所有项目会话都可能注入。'
+          ? '将作为全局经验条目进入经验库，后续所有项目的检索问答都可能命中。'
           : `将进入项目经验库（项目 ${p.targetProjectId ?? '待定'}）。`,
       okText: '采纳',
       cancelText: '取消',

@@ -520,9 +520,6 @@ export default function KnowledgeBaseDetailPage() {
 
   const headerTags = base && (
     <Space size={4} wrap>
-      <Tag color={base.injectMode === 'FULL' ? 'geekblue' : 'purple'}>
-        {base.injectMode === 'FULL' ? '全量注入' : 'RAG 检索'}
-      </Tag>
       <Tag color={base.scope === 'global' ? 'blue' : undefined}>
         {base.scope === 'global'
           ? '范围：全局'
@@ -708,7 +705,7 @@ export default function KnowledgeBaseDetailPage() {
               type="info"
               showIcon
               message="该库已归档"
-              description="归档库不参与检索与会话注入；需要恢复时到知识库列表点「设置」把状态改回「启用」。"
+              description="归档库不参与检索（含场景绑定）；需要恢复时到知识库列表点「设置」把状态改回「启用」。"
             />
           )}
           {base && base.indexStats.mismatched > 0 && (

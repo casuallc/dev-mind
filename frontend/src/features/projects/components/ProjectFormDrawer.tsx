@@ -182,7 +182,7 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
         </Form.Item>
         </>
         )}
-        <Form.Item label="标签" name="tags" extra="如 java/spring/frontend，供知识库注入筛选">
+        <Form.Item label="标签" name="tags" extra="如 java/spring/frontend，供项目私有 Skill 自动命中">
           <Select mode="tags" placeholder="输入后回车添加" open={false} suffixIcon={null} />
         </Form.Item>
         <Form.Item label="描述" name="description">

@@ -33,7 +33,6 @@ import type {
   KnowledgeVersionDetail,
   LifecycleReport,
   NegativeFeedbackReport,
-  PreviewResult,
   ReindexResult,
   SolutionSaveInput,
   SolutionSaveResult,
@@ -185,16 +184,6 @@ export const getEntryVersion = (id: number, version: number) =>
 /** CAP-84 FR-25 负面反馈 Top 文档（ADMIN） */
 export const negativeFeedbackTop = (days = 30, limit = 20) =>
   api.get<NegativeFeedbackReport>(`/chats/admin/knowledge-feedback/top?days=${days}&limit=${limit}`)
-
-// ---------------- 注入预览 ----------------
-
-export const previewInjection = (projectId?: string, taskSpec?: string) => {
-  const q = new URLSearchParams()
-  if (projectId) q.set('projectId', projectId)
-  if (taskSpec) q.set('taskSpec', taskSpec)
-  const s = q.toString()
-  return api.get<PreviewResult>(`/knowledge/preview${s ? '?' + s : ''}`)
-}
 
 // ---------------- 提案（inbox） ----------------
 

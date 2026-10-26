@@ -1,16 +1,15 @@
-// CAP-86 v3 库设置抽屉：名称 / 描述 / 注入方式 / 向量端点 / 状态 + 注入预览 + 危险区删除。
+// CAP-86 v3 库设置抽屉：名称 / 描述 / 向量端点 / 状态 + 危险区删除。
 // 设置已从库详情页移出，统一从库列表「设置」打开；保存与删除均居中 Modal.confirm。
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Button, Divider, Drawer, Form, Input, message, Modal, Select, Space, Tag, Tooltip, Typography } from 'antd'
-import { DeleteOutlined, EyeOutlined } from '@ant-design/icons'
+import { DeleteOutlined } from '@ant-design/icons'
 import { deleteBase, updateBase } from '../api'
 import { listModelEndpoints } from '../../model/api'
 import type { ModelEndpoint } from '../../model/types'
 import type { KnowledgeBase, KnowledgeBaseInput } from '../types'
-import InjectionPreview from './InjectionPreview'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_DEFAULT, DRAWER_NESTED } from '../../../shared/utils/overlay'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 export default function KnowledgeBaseSettingsDrawer({
   open,
@@ -30,18 +29,15 @@ export default function KnowledgeBaseSettingsDrawer({
   const [endpoints, setEndpoints] = useState<ModelEndpoint[]>([])
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [previewOpen, setPreviewOpen] = useState(false)
 
   useEffect(() => {
     if (!open) return
     setCurrent(base)
-    setPreviewOpen(false)
     form.resetFields()
     if (base) {
       form.setFieldsValue({
         name: base.name,
         description: base.description ?? undefined,
-        injectMode: base.injectMode,
         modelEndpointId: base.modelEndpointId ?? undefined,
         status: base.status,
       })
@@ -72,7 +68,7 @@ export default function KnowledgeBaseSettingsDrawer({
       centered: true,
       title: `保存知识库「${current.name}」的设置？`,
       content: archiving
-        ? '状态将改为「归档停用」：该库会退出检索与会话注入，已入库文档保留。'
+        ? '状态将改为「归档停用」：该库会退出检索，已入库文档保留。'
         : '保存后立即生效；向量端点变更后可能需要重建索引。',
       okText: '保存',
       cancelText: '取消',
@@ -160,27 +156,6 @@ export default function KnowledgeBaseSettingsDrawer({
                 </Space>
               </Form.Item>
               <Form.Item
-                name="injectMode"
-                label="注入方式"
-                extra={
-                  <Space size={4} wrap>
-                    <span>
-                      全量注入：会话启动时注入整库（适合经验/规范库）；RAG：按提问检索并召回相关片段（适合文档量大）
-                    </span>
-                    <Typography.Link onClick={() => setPreviewOpen(true)}>
-                      <EyeOutlined /> 预览注入效果
-                    </Typography.Link>
-                  </Space>
-                }
-              >
-                <Select
-                  options={[
-                    { value: 'RAG', label: 'RAG 按需检索' },
-                    { value: 'FULL', label: '全量注入' },
-                  ]}
-                />
-              </Form.Item>
-              <Form.Item
                 name="modelEndpointId"
                 label="向量端点"
                 extra="留空 = 跟随平台默认端点；指定后本库索引与检索按该端点走（不同模型/维度不能混用同一份索引）"
@@ -215,7 +190,7 @@ export default function KnowledgeBaseSettingsDrawer({
                 <Select
                   options={[
                     { value: 'active', label: '启用' },
-                    { value: 'archived', label: '归档停用（退出检索与注入）' },
+                    { value: 'archived', label: '归档停用（退出检索）' },
                   ]}
                 />
               </Form.Item>
@@ -237,14 +212,6 @@ export default function KnowledgeBaseSettingsDrawer({
             </div>
           </>
         )}
-      </Drawer>
-      <Drawer
-        title="注入预览"
-        open={previewOpen}
-        onClose={() => setPreviewOpen(false)}
-        width={DRAWER_NESTED}
-      >
-        <InjectionPreview />
       </Drawer>
     </>
   )

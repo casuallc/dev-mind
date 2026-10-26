@@ -255,7 +255,7 @@ export default function KnowledgeUploadDrawer({
             onChange={setKbId}
             options={bases.map((b) => ({
               value: b.id,
-              label: `${b.name}（${b.entryCount} 条 · ${b.injectMode}）`,
+              label: `${b.name}（${b.entryCount} 条）`,
             }))}
             notFoundContent="暂无启用中的知识库，请先到「后台 → 知识库」创建"
           />

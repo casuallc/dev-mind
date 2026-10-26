@@ -2,9 +2,6 @@
 
 export type EntryScope = 'global' | 'project'
 
-/** 注入模式：FULL=全量注入 CLAUDE.local.md（经验库）；RAG=仅向量检索 */
-export type InjectMode = 'FULL' | 'RAG'
-
 export type BaseStatus = 'active' | 'archived'
 
 export interface KnowledgeBase {
@@ -14,7 +11,6 @@ export interface KnowledgeBase {
   scope: EntryScope
   projectId: string | null
   projectName: string | null
-  injectMode: InjectMode
   /** CAP-48 库级向量端点覆盖；null = 跟随平台默认端点 */
   modelEndpointId: number | null
   /** 实际生效的端点名（含回落平台默认的结果）；null = 无可用端点（索引停用、检索降级） */
@@ -46,7 +42,6 @@ export interface KnowledgeBaseInput {
   description?: string
   scope?: EntryScope
   projectId?: string
-  injectMode?: InjectMode
   /** 库级端点覆盖；传 0 或 null = 清除覆盖、跟随平台默认 */
   modelEndpointId?: number | null
   status?: BaseStatus
@@ -627,11 +622,6 @@ export interface KnowledgeProposalInput {
   targetScope: EntryScope
   targetProjectId?: string
   sourceSessionId?: string
-}
-
-export interface PreviewResult {
-  content: string
-  entriesUsed: KnowledgeEntry[]
 }
 
 // ---------------- CAP-45 飞书导入 ----------------

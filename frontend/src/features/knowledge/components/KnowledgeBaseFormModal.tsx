@@ -32,11 +32,10 @@ export default function KnowledgeBaseFormModal({
         description: base.description ?? undefined,
         scope: base.scope,
         projectId: base.projectId ?? undefined,
-        injectMode: base.injectMode,
         status: base.status,
       })
     } else {
-      form.setFieldsValue({ scope: 'global', injectMode: 'RAG', status: 'active' })
+      form.setFieldsValue({ scope: 'global', status: 'active' })
     }
   }, [open, base, form])
 
@@ -62,7 +61,7 @@ export default function KnowledgeBaseFormModal({
     Modal.confirm({
       centered: true,
       title: `保存知识库「${base.name}」的修改？`,
-      content: '保存后立即生效；归档的库会退出检索与会话注入。',
+      content: '保存后立即生效；归档的库不再参与检索。',
       okText: '保存',
       cancelText: '取消',
       onOk: () => commit(values),
@@ -107,25 +106,12 @@ export default function KnowledgeBaseFormModal({
             />
           </Form.Item>
         )}
-        <Form.Item
-          name="injectMode"
-          label="注入方式"
-          rules={[{ required: true }]}
-          extra="全量注入：会话启动时注入整库（适合经验/规范库）；RAG：按提问检索并召回相关片段（适合文档量大）"
-        >
-          <Select
-            options={[
-              { value: 'RAG', label: 'RAG 按需检索（推荐）' },
-              { value: 'FULL', label: '全量注入（适合经验库）' },
-            ]}
-          />
-        </Form.Item>
         {base && (
           <Form.Item name="status" label="状态">
             <Select
               options={[
                 { value: 'active', label: '启用' },
-                { value: 'archived', label: '归档停用（退出检索与注入）' },
+                { value: 'archived', label: '归档停用（退出检索）' },
               ]}
             />
           </Form.Item>

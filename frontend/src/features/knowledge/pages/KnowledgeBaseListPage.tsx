@@ -159,18 +159,13 @@ export default function KnowledgeBaseListPage() {
       ),
     },
     {
-      title: '范围 / 注入',
+      title: '范围',
       key: 'scope',
       width: 180,
       render: (_, r) => (
-        <Space size={4} wrap>
-          <Tag color={r.scope === 'global' ? 'blue' : undefined}>
-            {r.scope === 'global' ? '全局' : (r.projectName ?? r.projectId ?? '项目')}
-          </Tag>
-          <Tag color={r.injectMode === 'FULL' ? 'geekblue' : 'purple'}>
-            {r.injectMode === 'FULL' ? '全量注入' : 'RAG 检索'}
-          </Tag>
-        </Space>
+        <Tag color={r.scope === 'global' ? 'blue' : undefined}>
+          {r.scope === 'global' ? '全局' : (r.projectName ?? r.projectId ?? '项目')}
+        </Tag>
       ),
     },
     { title: '文档数', dataIndex: 'entryCount', width: 90 },
