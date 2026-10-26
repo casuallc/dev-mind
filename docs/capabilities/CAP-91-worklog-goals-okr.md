@@ -1,12 +1,15 @@
 # CAP-91 工作目标与 OKR 对齐（年度目标 + 季度 OKR + 周计划对齐 + 季度复盘）
 
-> 能力 ID：CAP-91 ｜ 分类：组装层 ｜ 状态：已实现（M1+M2+M3，2026-10-26） ｜ 日期：2026-10-26
+> 能力 ID：CAP-91 ｜ 分类：组装层 ｜ 状态：已实现（M1+M2+M3，2026-10-26；M4，2026-10-26） ｜ 日期：2026-10-26
 > 决策记录：**年/季一张表**（`worklog_goals`：scope=YEAR/QUARTER × kind=OBJECTIVE/KEY_RESULT，
 > 低频实体不拆表；季度 O 可选挂年度 O，KR 必挂同周期 O）；**计划对齐只加一层关联**
 > （周计划项挂 `kr_id`，条目经 plan_item_id 间接对齐，不给条目再加列）；**季度复盘 =
 > 数据驱动投影**（KR 达成度由关联周计划项真实状态 + DONE 条目工时聚合驱动，沿用 CAP-88
 > 「上周计划跟进不靠 LLM 猜」的同一思路往上搬）；**KR 进度人工落库 + 派生建议值展示**
-> （沿用「DONE 必须人工」哲学，派生值只展示不回写）；**KR 跨季滚转复用 carried_from_id 链**。
+> （沿用「DONE 必须人工」哲学，派生值只展示不回写）；**KR 跨季滚转复用 carried_from_id 链**；
+> **目标体系 framework 字段先行**（M4：当前仅 OKR，列/请求字段/校验分发缝先落地，非 OKR
+> 一律 400——为后续非 OKR 目标形式预留扩展点，不做猜测性实现）；**目标视图页面内切换**
+> （M4：Segmented 切年度/Q1~Q4 单区展示，替掉 M1 的五区长页，禁 Tabs 同布局约定）。
 
 ## 1. 目的
 
@@ -93,6 +96,22 @@ CAP-88/90 把计划闭环收敛为「日条目（计划态/事实）→ 周计�
   校验 krId 属于本人当季 KR（不属于则置空不落，不炸整批）。场景骨架/prompt/解析器
   三方同步（存量库骨架不覆盖——KR 标注是可选项，旧骨架照常工作，见 §10 R3）。
 
+### M4 目标体系扩展基础与视图切换
+
+- **FR-12 目标体系 framework 字段**：`worklog_goals` 增 `framework`（默认 `'OKR'`）。
+  目标当前固定 OKR 形式，但后续可能换用其他目标管理形式（纯目标清单、KPI 等）——
+  本 FR 只铺基础不做猜测性实现：创建请求可带 `framework`（空=OKR；其余一律 400
+  「目前仅支持 OKR 目标体系」）；framework 是身份属性（同 scope/period/kind，更新传
+  不同值 400、传空=不变）；滚转复制 framework；GoalView 全链路回传。后续接入新体系
+  的挂点：服务端 `WorklogGoalService.validatedFramework` 登记 + kind/层级规则按体系
+  分发；前端 `GOAL_FRAMEWORKS` 注册表（types.ts）登记体系文案，GoalBoard 树渲染按
+  framework 分支出自己的渲染路径。
+- **FR-13 目标视图页面内切换**：「目标」页签改为 Segmented 页面内切换——
+  `年度目标 / Q1 / Q2 / Q3 / Q4`，一次只展示一个区段（替掉 M1 的年度区+四季度区
+  长页平铺；布局约定禁 Card 内套 Tabs）。默认定位当季；切年时区段选择保持
+  （便于跨年同季对比）；年选择条（YearStrip）不变，各区段操作（新建/滚转/季度复盘）
+  仍在区段 Card 的 extra。
+
 ## 3. 否决方案
 
 - **OKR 用标签/自由文本挂在计划项上**：否决——重蹈 `next_plan_md` 覆辙（CAP-88 §1）：
@@ -132,6 +151,7 @@ worklog_goals(
   scope varchar(8) not null,      -- YEAR / QUARTER
   period varchar(8) not null,     -- '2026' / '2026-Q1'（格式服务端校验）
   kind varchar(16) not null,      -- OBJECTIVE / KEY_RESULT
+  framework varchar(16) not null default 'OKR',  -- 目标体系（M4；身份属性，当前仅 OKR）
   parent_id bigint?,              -- KR→同周期 O（必填）；QUARTER O→同年 YEAR O（可选）；YEAR O 必空
   title varchar(256) not null,
   content clob?,
@@ -159,8 +179,8 @@ worklog_quarterly_reports(
 
 ```
 GET    /api/worklog/goals/tree?year=2026        整年目标树（年度 O + Q1~Q4 O→KR 嵌套，KR 附派生数据）
-POST   /api/worklog/goals                       新增 {scope, period, kind, parentId?, title, content?, weight?}
-PUT    /api/worklog/goals/{id}                  编辑/改状态/改进度 {..., status?, progress?}
+POST   /api/worklog/goals                       新增 {scope, period, kind, framework?, parentId?, title, content?, weight?}
+PUT    /api/worklog/goals/{id}                  编辑/改状态/改进度 {..., status?, progress?}（framework 不可改，传空=不变）
 DELETE /api/worklog/goals/{id}                  删除（O 有子项 400；删 KR 清计划项 kr_id）
 POST   /api/worklog/goals/carry {toPeriod, ids[], krParentMap?}   KR/O 跨周期滚转（幂等）
 GET    /api/worklog/goals/linkable-krs?date=    该日所在季的可关联 KR（计划项抽屉下拉）
@@ -192,6 +212,8 @@ GET    /api/worklog/quarterly/review-preview?period=  OKR 对照确定性渲染 
 - **M2 季度复盘投影**：FR-08~FR-10（quarterly_reports 表 + 生成场景与回传落库 +
   OKR 对照素材 + review-preview 重建按钮 + 前端复盘编辑入口）。
 - **M3 智能对齐**：FR-11（suggest 注入当季 KR + 产物 KR 标注解析落库）。
+- **M4 目标体系扩展基础与视图切换**：FR-12~FR-13（framework 列+校验分发缝+全链路
+  回传；目标视图 Segmented 页面内切换年度/季度）。
 
 ## 9. 验收标准
 
@@ -209,7 +231,10 @@ GET    /api/worklog/quarterly/review-preview?period=  OKR 对照确定性渲染 
 6. M3：suggest 素材含当季 KR 清单；产物带 `（KR#id）` 标注的建议项落库带 kr_id，非法
    id 置空不炸批；无 KR 时素材块降级提示、生成行为同现状；
 7. 全量 `mvn test` 绿；E2E（tests/ 沉淀）覆盖目标 CRUD/层级校验/滚转/计划对齐/派生进度/
-   复盘 CRUD 与预览/素材口径。
+   复盘 CRUD 与预览/素材口径；
+8. M4：创建不带 framework 落库回传 OKR、显式 OKR 放行、非 OKR 400；更新改 framework 400、
+   传空不变；滚转副本带 framework；前端「目标」页签 Segmented 切年度/Q1~Q4 单区展示、
+   默认当季、切年区段保持。
 
 ## 10. 风险与开放问题
 
