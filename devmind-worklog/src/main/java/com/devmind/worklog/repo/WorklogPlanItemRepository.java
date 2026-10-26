@@ -23,6 +23,10 @@ public interface WorklogPlanItemRepository extends JpaRepository<WorklogPlanItem
     List<WorklogPlanItemEntity> findByUserIdAndScopeAndPlanDateAndStatusInOrderBySortOrderAscIdAsc(
             String userId, String scope, LocalDate planDate, Collection<String> statuses);
 
+    /** 一段日期内的全部计划项（CAP-88 M2 复盘素材：DAY 项按日散落、WEEK 项落在周一，一段区间两者通吃） */
+    List<WorklogPlanItemEntity> findByUserIdAndPlanDateBetweenOrderByPlanDateAscSortOrderAscIdAsc(
+            String userId, LocalDate from, LocalDate to);
+
     /** 条目抽屉可关联项：当日日计划 + 当周周计划，排除 DROPPED/CARRIED（DOING/DONE 可选——补录忘挂的执行） */
     @Query("SELECT p FROM WorklogPlanItemEntity p WHERE p.userId = :userId"
             + " AND ((p.scope = 'DAY' AND p.planDate = :date) OR (p.scope = 'WEEK' AND p.planDate = :weekStart))"

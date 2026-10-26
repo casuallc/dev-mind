@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -43,6 +44,9 @@ public interface WorklogEntryRepository extends JpaRepository<WorklogEntryEntity
 
     /** CAP-88 FR-04：某计划项的关联条目（删计划项时清引用用） */
     List<WorklogEntryEntity> findByPlanItemId(Long planItemId);
+
+    /** CAP-88 M2 复盘素材：批量取一组计划项的关联条目（避免逐条 N+1） */
+    List<WorklogEntryEntity> findByPlanItemIdIn(Collection<Long> planItemIds);
 
     /** git 导入幂等判定 */
     boolean existsByUserIdAndRepoIdAndCommitSha(String userId, Long repoId, String commitSha);

@@ -1,13 +1,21 @@
 package com.devmind.worklog.service;
 
 import com.devmind.worklog.model.WeeklyReportEntity;
+import com.devmind.worklog.model.WorklogEntryEntity;
+import com.devmind.worklog.model.WorklogPlanItemEntity;
 import com.devmind.worklog.repo.WeeklyReportRepository;
+import com.devmind.worklog.repo.WorklogEntryRepository;
+import com.devmind.worklog.repo.WorklogPlanItemRepository;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -52,8 +60,11 @@ class ReportServiceTest {
     }
 
     @Test
-    void 上一周计划直读上周周报nextPlan列() {
+    void 上周无计划项时计划文本回退上周周报nextPlan列() {
         WeeklyReportRepository weeklyRepo = mock(WeeklyReportRepository.class);
+        WorklogPlanItemRepository planRepo = mock(WorklogPlanItemRepository.class);
+        when(planRepo.findByUserIdAndPlanDateBetweenOrderByPlanDateAscSortOrderAscIdAsc(
+                anyString(), any(), any())).thenReturn(List.of());
         WeeklyReportEntity withPlan = new WeeklyReportEntity();
         withPlan.setSummaryMd("- 完成 A");
         withPlan.setNextPlanMd("- 完成 B\n- 推进 C");
@@ -67,12 +78,43 @@ class ReportServiceTest {
         when(weeklyRepo.findByUserIdAndWeekStart("alice", LocalDate.of(2026, 9, 28)))
                 .thenReturn(Optional.empty());
 
-        ReportService service = new ReportService(null, null, null, null, null, null, weeklyRepo);
+        ReportService service = new ReportService(null, null, null, null, null, null, weeklyRepo,
+                planRepo, null);
 
         assertEquals("- 完成 B\n- 推进 C", service.lastWeekPlan("alice", LocalDate.of(2026, 10, 19)));
         // 上周周报没有计划时返回空串，模板据此省略跟进块
         assertEquals("", service.lastWeekPlan("alice", LocalDate.of(2026, 10, 12)));
         // 上周无周报同样空串
         assertEquals("", service.lastWeekPlan("alice", LocalDate.of(2026, 10, 5)));
+    }
+
+    @Test
+    void 上周有计划项时lastWeekPlan升级为结构化清单() {
+        WeeklyReportRepository weeklyRepo = mock(WeeklyReportRepository.class);
+        WorklogPlanItemRepository planRepo = mock(WorklogPlanItemRepository.class);
+        WorklogEntryRepository entryRepo = mock(WorklogEntryRepository.class);
+        LocalDate prevMonday = LocalDate.of(2026, 10, 12);
+        WorklogPlanItemEntity item = new WorklogPlanItemEntity();
+        item.setId(7L);
+        item.setScope(WorklogPlanItemEntity.SCOPE_WEEK);
+        item.setPlanDate(prevMonday);
+        item.setTitle("收尾登录改造");
+        item.setPlanType("DEV");
+        item.setStatus(WorklogPlanItemEntity.STATUS_DONE);
+        when(planRepo.findByUserIdAndPlanDateBetweenOrderByPlanDateAscSortOrderAscIdAsc(
+                "alice", prevMonday, prevMonday.plusDays(6))).thenReturn(List.of(item));
+        WorklogEntryEntity linked = new WorklogEntryEntity();
+        linked.setWorkDate(LocalDate.of(2026, 10, 13));
+        linked.setTitle("执行条目");
+        linked.setMinutes(60);
+        linked.setPlanItemId(7L);
+        when(entryRepo.findByPlanItemIdIn(List.of(7L))).thenReturn(List.of(linked));
+
+        ReportService service = new ReportService(null, null, null, null, null, null, weeklyRepo,
+                planRepo, entryRepo);
+
+        String block = service.lastWeekPlan("alice", LocalDate.of(2026, 10, 19));
+        assertTrue(block.contains("[周计划] [状态=已完成] 收尾登录改造"), "缺结构化计划项: " + block);
+        assertTrue(block.contains("关联条目：执行条目"), "缺关联条目: " + block);
     }
 }

@@ -14,8 +14,11 @@ import com.devmind.worklog.dto.WeeklyReportView;
 import com.devmind.worklog.model.DailyReportEntity;
 import com.devmind.worklog.model.WeeklyReportEntity;
 import com.devmind.worklog.model.WorklogEntryEntity;
+import com.devmind.worklog.model.WorklogPlanItemEntity;
 import com.devmind.worklog.repo.DailyReportRepository;
 import com.devmind.worklog.repo.WeeklyReportRepository;
+import com.devmind.worklog.repo.WorklogEntryRepository;
+import com.devmind.worklog.repo.WorklogPlanItemRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -23,7 +26,10 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * CAP-28 FR-05/06：日报/周报查询、手动空白稿、编辑保存；CAP-41 FR-03：AI 生成改真实会话；
@@ -54,6 +60,8 @@ public class ReportService {
     private final SessionManagerService sessionManager;
     private final DailyReportRepository dailyRepo;
     private final WeeklyReportRepository weeklyRepo;
+    private final WorklogPlanItemRepository planRepo;
+    private final WorklogEntryRepository entryRepo;
 
     public ReportService(WorklogEntryService entryService,
                          GitLogScanner gitScanner,
@@ -61,7 +69,9 @@ public class ReportService {
                          WorklogWorkspaceService workspaceService,
                          SessionManagerService sessionManager,
                          DailyReportRepository dailyRepo,
-                         WeeklyReportRepository weeklyRepo) {
+                         WeeklyReportRepository weeklyRepo,
+                         WorklogPlanItemRepository planRepo,
+                         WorklogEntryRepository entryRepo) {
         this.entryService = entryService;
         this.gitScanner = gitScanner;
         this.settingsService = settingsService;
@@ -69,6 +79,8 @@ public class ReportService {
         this.sessionManager = sessionManager;
         this.dailyRepo = dailyRepo;
         this.weeklyRepo = weeklyRepo;
+        this.planRepo = planRepo;
+        this.entryRepo = entryRepo;
     }
 
     // ---------------- 日报 ----------------
@@ -139,7 +151,20 @@ public class ReportService {
         String template = WorklogTemplates.orDefault(
                 settingsService.templateOf(username, true), WorklogTemplates.DEFAULT_DAILY);
         return launch(username, WorklogScenarios.DAILY,
-                ReportPrompts.daily(date, commits, entries, template, hint));
+                ReportPrompts.daily(date, commits, entries, dayPlanBlock(username, date), template, hint));
+    }
+
+    /**
+     * CAP-88 M2 FR-07 日报计划对照素材：当日日计划 + 当周周计划（linkable 同口径）+ 真实状态 +
+     * 关联条目；无计划项渲染「省略」指令，存量日期生成行为不变。
+     */
+    String dayPlanBlock(String username, LocalDate date) {
+        List<WorklogPlanItemEntity> plans = new ArrayList<>(
+                planRepo.findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(
+                        username, WorklogPlanItemEntity.SCOPE_DAY, date));
+        plans.addAll(planRepo.findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(
+                username, WorklogPlanItemEntity.SCOPE_WEEK, WorklogWeeks.mondayOf(date)));
+        return ReportPrompts.formatPlanItems(plans, linkedEntries(plans));
     }
 
     /** 手动创建空白日报（不经 AI、不要求素材）。幂等：已存在直接返回，不覆盖已有内容。 */
@@ -240,14 +265,47 @@ public class ReportService {
                 settingsService.templateOf(username, false), WorklogTemplates.DEFAULT_WEEKLY);
         return launch(username, WorklogScenarios.WEEKLY,
                 ReportPrompts.weekly(weekStart, dailies, entries, commits,
-                        lastWeekPlan(username, weekStart), template, hint));
+                        lastWeekPlan(username, weekStart), thisWeekPlanBlock(username, weekStart),
+                        template, hint));
     }
 
-    /** 上一周周报的「下周计划」（DB next_plan_md 直读）；无上周周报/计划为空 → 空串（模板据此省略跟进块）。 */
+    /**
+     * 上周计划素材（CAP-88 M2 FR-08）：上周有计划项 → 结构化清单（计划项 + 真实状态 + 关联条目）；
+     * 无计划项 → 回退上周周报 next_plan_md 文本（FR-09 存量兼容，{{lastWeekPlan}} 语义不变只升级来源）；
+     * 两者皆无 → 空串（模板据此省略跟进块）。
+     */
     String lastWeekPlan(String username, LocalDate weekStart) {
-        return weeklyRepo.findByUserIdAndWeekStart(username, weekStart.minusWeeks(1))
+        LocalDate prevMonday = weekStart.minusWeeks(1);
+        List<WorklogPlanItemEntity> items = planRepo
+                .findByUserIdAndPlanDateBetweenOrderByPlanDateAscSortOrderAscIdAsc(
+                        username, prevMonday, prevMonday.plusDays(6));
+        if (!items.isEmpty()) {
+            return ReportPrompts.formatPlanItems(items, linkedEntries(items));
+        }
+        return weeklyRepo.findByUserIdAndWeekStart(username, prevMonday)
                 .map(WeeklyReportEntity::getNextPlanMd)
                 .orElse("");
+    }
+
+    /** CAP-88 M2 FR-08：本周已排计划项一并注入，供「下周计划」节呼应；未排渲染「省略」指令。 */
+    String thisWeekPlanBlock(String username, LocalDate weekStart) {
+        List<WorklogPlanItemEntity> items = planRepo
+                .findByUserIdAndPlanDateBetweenOrderByPlanDateAscSortOrderAscIdAsc(
+                        username, weekStart, weekStart.plusDays(6));
+        return ReportPrompts.formatPlanItems(items, linkedEntries(items));
+    }
+
+    /** 批量取计划项的关联条目并按 planItemId 分组（禁 Map.of 空兜底——见平台坑录）。 */
+    private Map<Long, List<WorklogEntryEntity>> linkedEntries(List<WorklogPlanItemEntity> items) {
+        if (items == null || items.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, List<WorklogEntryEntity>> byPlanId = new HashMap<>();
+        for (WorklogEntryEntity e : entryRepo.findByPlanItemIdIn(
+                items.stream().map(WorklogPlanItemEntity::getId).toList())) {
+            byPlanId.computeIfAbsent(e.getPlanItemId(), k -> new ArrayList<>()).add(e);
+        }
+        return byPlanId;
     }
 
     /** 手动创建空白周报：同 {@link #createDaily}，幂等。 */

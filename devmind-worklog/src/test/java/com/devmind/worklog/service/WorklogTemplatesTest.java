@@ -34,10 +34,11 @@ class WorklogTemplatesTest {
 
     @Test
     void 内置默认模板含全部约定占位符() {
-        for (String ph : new String[]{"{{date}}", "{{entries}}", "{{commits}}"}) {
+        for (String ph : new String[]{"{{date}}", "{{entries}}", "{{commits}}", "{{plans}}"}) {
             assertTrue(WorklogTemplates.DEFAULT_DAILY.contains(ph), "日报默认模板缺 " + ph);
         }
-        for (String ph : new String[]{"{{weekRange}}", "{{entries}}", "{{commits}}", "{{lastWeekPlan}}"}) {
+        for (String ph : new String[]{"{{weekRange}}", "{{entries}}", "{{commits}}", "{{lastWeekPlan}}",
+                "{{thisWeekPlan}}"}) {
             assertTrue(WorklogTemplates.DEFAULT_WEEKLY.contains(ph), "周报默认模板缺 " + ph);
         }
         // 周报分节标题与 ReportService.splitWeekly 的镜像解析约定联动，不能漂移
@@ -49,10 +50,11 @@ class WorklogTemplatesTest {
     @Test
     void 内置模板锁定写作口径() {
         // 口径=成稿口吻的唯一来源（模板即 prompt）：改坏会静默换风格，故钉死关键约定
-        for (String rule : new String[]{"有序列表", "commit sha", "项目支持：", "工时合计"}) {
+        for (String rule : new String[]{"有序列表", "commit sha", "项目支持：", "工时合计", "今日计划对照"}) {
             assertTrue(WorklogTemplates.DEFAULT_DAILY.contains(rule), "日报模板缺写作约定: " + rule);
         }
-        for (String rule : new String[]{"有序列表", "计划外工作", "下周计划", "上周计划跟进", "呼应上周计划"}) {
+        for (String rule : new String[]{"有序列表", "计划外工作", "下周计划", "上周计划跟进", "呼应上周计划",
+                "状态（待办/进行中/已完成/已放弃/已滚转）为准", "本周已排计划项"}) {
             assertTrue(WorklogTemplates.DEFAULT_WEEKLY.contains(rule), "周报模板缺写作约定: " + rule);
         }
     }
