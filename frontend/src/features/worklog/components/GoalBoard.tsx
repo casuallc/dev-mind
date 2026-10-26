@@ -1,19 +1,17 @@
 import { Button, Card, Checkbox, Empty, Modal, Progress, Space, Tag, Tooltip, Typography, message } from 'antd'
 import {
   FileTextOutlined,
-  LeftOutlined,
   PlusOutlined,
-  ReloadOutlined,
-  RightOutlined,
   SwapRightOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useState, type Ref } from 'react'
 import { carryGoals, createGoal, deleteGoal, getGoalTree, updateGoal } from '../api'
 import type { GoalNode, GoalPayload, GoalTreeView, WorklogGoal } from '../types'
 import { GOAL_STATUSES } from '../types'
 import GoalFormDrawer, { type GoalPreset } from './GoalFormDrawer'
 import QuarterlyReviewDrawer from './QuarterlyReviewDrawer'
+import YearStrip from './YearStrip'
 import { showError } from '../../../shared/utils/showError'
 
 /** 季度 period → 日期范围展示（'2026-Q1' → '01-01 ~ 03-31'） */
@@ -46,13 +44,22 @@ interface CarryState {
   selected: Set<number>
 }
 
+/** 页面壳（WorklogPage）工具栏在 Card extra，靠该句柄触发 今年/刷新 */
+export interface GoalBoardHandle {
+  backToThisYear: () => void
+  reload: () => void
+}
+
 /**
  * CAP-91「目标」视图：年度目标区 + Q1~Q4 季度 OKR 区（O→KR 树）。
  * KR 行展示人工进度 + 派生建议进度（关联计划完成度/工时，只展示不回写）；
  * 每个季度区头部有「季度复盘」入口（M2）与跨周期滚转（FR-04：KR 需与父 O 同批滚转）。
+ * 年切换用 5 年选择条（交互对齐周报 7 周条）；操作按钮在页面壳 Card extra（布局约定），经 ref 句柄触发。
  */
-export default function GoalBoard() {
+export default function GoalBoard({ ref }: { ref?: Ref<GoalBoardHandle> }) {
   const [year, setYear] = useState(() => dayjs().year())
+  // 年条窗口相对今年的偏移（0=今年居中；目标允许规划未来年，偏移双向不设限）
+  const [yearsOffset, setYearsOffset] = useState(0)
   const [tree, setTree] = useState<GoalTreeView | null>(null)
   const [loading, setLoading] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -63,8 +70,6 @@ export default function GoalBoard() {
   const [carrying, setCarrying] = useState(false)
   const [reviewPeriod, setReviewPeriod] = useState<string | null>(null)
 
-  const isThisYear = year === dayjs().year()
-
   const load = useCallback(() => {
     setLoading(true)
     getGoalTree(year)
@@ -73,6 +78,14 @@ export default function GoalBoard() {
       .finally(() => setLoading(false))
   }, [year])
   useEffect(load, [load])
+
+  useImperativeHandle(ref, () => ({
+    backToThisYear: () => {
+      setYearsOffset(0)
+      setYear(dayjs().year())
+    },
+    reload: load,
+  }))
 
   const openCreate = (p: GoalPreset) => {
     setEditTarget(null)
@@ -267,21 +280,17 @@ export default function GoalBoard() {
 
   return (
     <>
-      <Space style={{ marginBottom: 12 }} wrap>
-        <Button size="small" icon={<LeftOutlined />} onClick={() => setYear((y) => y - 1)} />
-        <Typography.Text strong>{year} 年{isThisYear && '（今年）'}</Typography.Text>
-        <Button size="small" icon={<RightOutlined />} onClick={() => setYear((y) => y + 1)} />
-        <Button size="small" disabled={isThisYear} onClick={() => setYear(dayjs().year())}>
-          今年
-        </Button>
-        <Button icon={<ReloadOutlined />} loading={loading} onClick={load}>
-          刷新
-        </Button>
-      </Space>
+      <YearStrip
+        selected={year}
+        onSelect={setYear}
+        yearsOffset={yearsOffset}
+        onShift={(n) => setYearsOffset((o) => o + n)}
+      />
 
       <Card
         size="small"
         title={`${year} 年度目标`}
+        loading={loading}
         style={{ marginBottom: 16 }}
         extra={
           <Space size={4}>

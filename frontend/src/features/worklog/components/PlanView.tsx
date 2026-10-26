@@ -1,12 +1,12 @@
 import { Alert, Button, Checkbox, Input, Modal, Select, Space, Tag, Typography, message } from 'antd'
-import { LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, RobotOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
-import { useCallback, useMemo, useState, useEffect } from 'react'
+import { useCallback, useImperativeHandle, useMemo, useState, useEffect, type Ref } from 'react'
 import { carryPlans, createPlanItem, deletePlanItem, getWeekly, listPlans, suggestPlans, updatePlanItem } from '../api'
 import type { PlanItem, PlanItemPayload } from '../types'
 import { ENTRY_TYPES, PLAN_STATUSES } from '../types'
 import FitTable from '../../../shared/components/FitTable'
 import PlanItemFormDrawer from './PlanItemFormDrawer'
+import RecentWeekStrip from './RecentWeekStrip'
 import { showError } from '../../../shared/utils/showError'
 
 const mondayOf = (d: Dayjs) => d.startOf('week').add(1, 'day') // dayjs 周日开头，+1 = 周一
@@ -14,13 +14,24 @@ const mondayOf = (d: Dayjs) => d.startOf('week').add(1, 'day') // dayjs 周日�
 /** 人工可设状态（CARRIED 由滚转写入，不在下拉里） */
 const EDITABLE_STATUSES = ['TODO', 'DOING', 'DONE', 'DROPPED']
 
+/** 页面壳（WorklogPage）工具栏在 Card extra，靠该句柄触发 本周/刷新/AI 建议/新建计划项 */
+export interface PlanViewHandle {
+  backToThisWeek: () => void
+  reload: () => void
+  openSuggest: () => void
+  openCreate: () => void
+}
+
 /**
  * CAP-88 FR-06 + CAP-90 FR-06「计划」视图：WEEK 唯一粒度（日计划已并入条目——条目状态即计划态，
  * 今日清单在「条目」页签维护）。状态徽标 + 下拉改状态 + 预估工时 + 关联需求/Jira；
  * 上周未完成提示条一键滚转；下周计划项是周报「下周计划」节的唯一事实源（单向投影）。
+ * 周切换复用周报的 7 周选择条（不可选未来周）；操作按钮在页面壳 Card extra（布局约定），经 ref 句柄触发。
  */
-export default function PlanView() {
+export default function PlanView({ ref }: { ref?: Ref<PlanViewHandle> }) {
   const [week, setWeek] = useState<Dayjs>(() => mondayOf(dayjs()))
+  // 周条窗口回退周数（0=最右为本周），与周报视图同口径
+  const [weeksBack, setWeeksBack] = useState(0)
   const [items, setItems] = useState<PlanItem[]>([])
   const [carryover, setCarryover] = useState<PlanItem[]>([])
   const [carryoverFrom, setCarryoverFrom] = useState('')
@@ -40,7 +51,6 @@ export default function PlanView() {
   const [suggesting, setSuggesting] = useState(false)
 
   const currentDateStr = week.format('YYYY-MM-DD')
-  const isThisWeek = week.format('YYYY-MM-DD') === mondayOf(dayjs()).format('YYYY-MM-DD')
 
   const load = useCallback(() => {
     setLoading(true)
@@ -61,11 +71,18 @@ export default function PlanView() {
 
   useEffect(load, [load])
 
-  // 周翻页：±1 周，不越过本周
-  const shiftWeek = (n: number) => {
-    if (n > 0 && isThisWeek) return
-    setWeek((w) => w.add(n * 7, 'day'))
-  }
+  useImperativeHandle(ref, () => ({
+    backToThisWeek: () => {
+      setWeeksBack(0)
+      setWeek(mondayOf(dayjs()))
+    },
+    reload: load,
+    openSuggest: () => setSuggestOpen(true),
+    openCreate: () => {
+      setEditTarget(null)
+      setEditOpen(true)
+    },
+  }))
 
   const onSave = async (payload: PlanItemPayload) => {
     setSaving(true)
@@ -155,37 +172,12 @@ export default function PlanView() {
 
   return (
     <>
-      <Space style={{ marginBottom: 12 }} wrap>
-        <Button size="small" icon={<LeftOutlined />} onClick={() => shiftWeek(-1)} />
-        <Typography.Text>
-          {week.format('YYYY-MM-DD')} 周{isThisWeek && '（本周）'}
-        </Typography.Text>
-        <Button size="small" icon={<RightOutlined />} disabled={isThisWeek} onClick={() => shiftWeek(1)} />
-        <Button size="small" disabled={isThisWeek} onClick={() => setWeek(mondayOf(dayjs()))}>
-          本周
-        </Button>
-        <Button icon={<RobotOutlined />} onClick={() => setSuggestOpen(true)}>
-          AI 建议
-        </Button>
-        <Button icon={<ReloadOutlined />} onClick={load}>
-          刷新
-        </Button>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            setEditTarget(null)
-            setEditOpen(true)
-          }}
-        >
-          新建计划项
-        </Button>
-        {ratio.total > 0 && (
-          <Typography.Text type="secondary">
-            完成度 {ratio.done}/{ratio.total}
-          </Typography.Text>
-        )}
-      </Space>
+      <RecentWeekStrip
+        selected={currentDateStr}
+        onSelect={setWeek}
+        weeksBack={weeksBack}
+        onShiftWindow={(p) => setWeeksBack((b) => Math.max(0, b + p))}
+      />
       {carryover.length > 0 && (
         <Alert
           type="warning"
@@ -207,6 +199,11 @@ export default function PlanView() {
             </Button>
           }
         />
+      )}
+      {ratio.total > 0 && (
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 8, fontSize: 12 }}>
+          本周完成度：{ratio.done}/{ratio.total}
+        </Typography.Paragraph>
       )}
       <FitTable
         rowKey="id"

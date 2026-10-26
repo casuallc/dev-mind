@@ -12,7 +12,7 @@ import {
 } from 'antd'
 import { PlusOutlined, ReloadOutlined, GithubOutlined, CodeOutlined, RobotOutlined, CheckOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   carryEntries,
   createDaily,
@@ -45,8 +45,8 @@ import { ENTRY_SOURCES, ENTRY_TYPES, PLAN_STATUSES } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import EntryFormDrawer from '../components/EntryFormDrawer'
 import GitImportDrawer from '../components/GitImportDrawer'
-import GoalBoard from '../components/GoalBoard'
-import PlanView from '../components/PlanView'
+import GoalBoard, { type GoalBoardHandle } from '../components/GoalBoard'
+import PlanView, { type PlanViewHandle } from '../components/PlanView'
 import RepoSubscriptionDrawer from '../components/RepoSubscriptionDrawer'
 import ReportEditor from '../components/ReportEditor'
 import WeekDayStrip from '../components/WeekDayStrip'
@@ -135,6 +135,9 @@ export default function WorklogPage() {
   const [saving, setSaving] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [reposOpen, setReposOpen] = useState(false)
+  // 计划/目标视图自包含（组件内部自载）：extra 工具栏按钮经 ref 句柄触发其动作
+  const planRef = useRef<PlanViewHandle>(null)
+  const goalsRef = useRef<GoalBoardHandle>(null)
 
   // 一次取整周条目（后端 size 上限 200，足够覆盖单人一周量），当日列表与各天条数均在前端派生
   const loadEntries = useCallback(() => {
@@ -267,7 +270,7 @@ export default function WorklogPage() {
       loadWeekly()
       loadRecentWeeks()
     }
-    // plan 视图自包含（PlanView 内部自载）
+    // plan/goals 视图自包含（组件内部自载）；其 extra 按钮经 planRef/goalsRef 句柄触发
   }, [view, loadEntries, loadDailyWeek, loadWeekly, loadRecentWeeks])
 
   useEffect(reload, [reload])
@@ -439,6 +442,28 @@ export default function WorklogPage() {
           今天
         </Button>
         <Button icon={<ReloadOutlined />} onClick={reload}>
+          刷新
+        </Button>
+      </>
+    ),
+    plan: (
+      <>
+        <Button onClick={() => planRef.current?.backToThisWeek()}>本周</Button>
+        <Button icon={<ReloadOutlined />} onClick={() => planRef.current?.reload()}>
+          刷新
+        </Button>
+        <Button icon={<RobotOutlined />} onClick={() => planRef.current?.openSuggest()}>
+          AI 建议
+        </Button>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => planRef.current?.openCreate()}>
+          新建计划项
+        </Button>
+      </>
+    ),
+    goals: (
+      <>
+        <Button onClick={() => goalsRef.current?.backToThisYear()}>今年</Button>
+        <Button icon={<ReloadOutlined />} onClick={() => goalsRef.current?.reload()}>
           刷新
         </Button>
       </>
@@ -723,7 +748,7 @@ export default function WorklogPage() {
           <Typography.Paragraph type="secondary">
             周计划管方向与周间滚转；日计划已并入条目（条目选「待办/进行中」即为当日计划，「条目」页签一键滚转昨日未完成）；条目编辑抽屉可关联周计划项（关联自动置「进行中」）。
           </Typography.Paragraph>
-          <PlanView />
+          <PlanView ref={planRef} />
         </>
       )}
 
@@ -734,7 +759,7 @@ export default function WorklogPage() {
             的「建议进度」由关联计划完成度派生只展示不回写；每季末在季度区头部打开「季度复盘」（OKR 对照 +
             计划外聚合 AI 成稿，人工修订后保存）。
           </Typography.Paragraph>
-          <GoalBoard />
+          <GoalBoard ref={goalsRef} />
         </>
       )}
 

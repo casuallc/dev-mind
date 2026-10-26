@@ -5,8 +5,8 @@ import { useRef, useState } from 'react'
 import type { WeeklyReport } from '../types'
 
 interface Props {
-  /** weekStart(YYYY-MM-DD 周一) → 周报；无报告的周不在 map 里 */
-  reports: Record<string, WeeklyReport>
+  /** weekStart(YYYY-MM-DD 周一) → 周报；无报告的周不在 map 里。不传则不渲染状态行（计划视图只借本条切周） */
+  reports?: Record<string, WeeklyReport>
   /** 选中周周一 YYYY-MM-DD */
   selected: string
   onSelect: (monday: Dayjs) => void
@@ -14,6 +14,8 @@ interface Props {
   weeksBack: number
   /** 滑动 / 点两侧箭头整页翻窗：+1 更早 7 周，-1 更近 7 周 */
   onShiftWindow: (pages: number) => void
+  /** 自定义每格状态行；不传且给了 reports 时按 ● 有 / ○ 无 渲染 */
+  renderStatus?: (key: string) => React.ReactNode
 }
 
 /** 滑动超过该距离（px）才触发翻页 */
@@ -22,12 +24,12 @@ const SWIPE_THRESHOLD = 60
 const DRAG_MIN = 8
 
 /**
- * 周报视图的 7 周选择条：左旧右新，每格显当周是否有报告（● 有 / ○ 无），
- * 点击切换到该周。支持在整条上水平滑动（触摸/鼠标拖拽）或点两侧箭头整页翻窗看更早/更近的 7 周；
+ * 周报/计划视图的 7 周选择条：左旧右新，每格可显当周状态（周报 ● 有 / ○ 无；计划视图不传 reports 只作纯周切换），
+ * 点击切换到该周。支持在整条上水平滑动（触摸/鼠标拖拽）或点两侧箭头翻窗看更早/更近的周；
  * 窗口最右不越过本周（weeksBack=0 时隐藏右箭头、左滑不生效），即不可查看未来周。
  * 滑动手势用 Pointer Events 统一触摸与鼠标；touchAction: pan-y 保留纵向滚动。
  */
-export default function RecentWeekStrip({ reports, selected, onSelect, weeksBack, onShiftWindow }: Props) {
+export default function RecentWeekStrip({ reports, selected, onSelect, weeksBack, onShiftWindow, renderStatus }: Props) {
   const thisMonday = dayjs().startOf('week').add(1, 'day') // dayjs 周日开头，+1 = 周一
   const thisMondayKey = thisMonday.format('YYYY-MM-DD')
   /** 窗口最新（最右）一周的周一 */
@@ -135,8 +137,14 @@ export default function RecentWeekStrip({ reports, selected, onSelect, weeksBack
         {Array.from({ length: 7 }, (_, i) => {
           const monday = anchor.subtract(6 - i, 'week')
           const key = monday.format('YYYY-MM-DD')
-          const report = reports[key]
           const active = key === selected
+          const status = renderStatus
+            ? renderStatus(key)
+            : reports
+              ? reports[key]
+                ? <Typography.Text style={{ color: '#52c41a' }}>● 有</Typography.Text>
+                : <Typography.Text type="secondary">○ 无</Typography.Text>
+              : null
           return (
             <div
               key={key}
@@ -160,13 +168,7 @@ export default function RecentWeekStrip({ reports, selected, onSelect, weeksBack
                   </Typography.Text>
                 )}
               </div>
-              <div style={{ fontSize: 12, marginTop: 2 }}>
-                {!report ? (
-                  <Typography.Text type="secondary">○ 无</Typography.Text>
-                ) : (
-                  <Typography.Text style={{ color: '#52c41a' }}>● 有</Typography.Text>
-                )}
-              </div>
+              {status && <div style={{ fontSize: 12, marginTop: 2 }}>{status}</div>}
             </div>
           )
         })}
