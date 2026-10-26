@@ -153,6 +153,23 @@ daily_reports.status / weekly_reports.status
 `ALTER TABLE worklog_user_settings DROP COLUMN active_repo_key;`
 `ALTER TABLE daily_reports DROP COLUMN status;`（weekly 同）。
 
+**存量库必做（2026-10-26 194 事故补记）**：ddl-auto=update 不改存量列**类型**——
+CAP-28 时代 `worklog_entries.id` 是 bigint IDENTITY，实体改 String uuid 后老库列型
+不随动，PG 上读写即炸 `operator does not exist: bigint = character varying`（新库 E2E
+全绿盖不到）。凡从 CAP-74 之前一路升级来的库须手工执行：
+
+```sql
+-- PG：先 DROP IDENTITY（IDENTITY 列不收 DROP DEFAULT）；MySQL：MODIFY id varchar(32)
+ALTER TABLE worklog_entries ALTER COLUMN id DROP IDENTITY;
+ALTER TABLE worklog_entries ALTER COLUMN id TYPE varchar(32) USING id::text;
+-- 老数字 id 行（CAP-74 已全量迁 git 仓）建议删除，让启动回迁以 uuid 干净重导，
+-- 否则 MANUAL 条目新旧双份、GIT 条目永留数字 id：
+DELETE FROM worklog_entries WHERE id ~ '^[0-9]+$';   -- 删前先 CREATE TABLE z_bak_... AS SELECT 备份
+```
+
+194 已于 2026-10-26 执行（备份表 `z_bak_worklog_entries_pre_varchar_20261026`，
+删 1310 行数字 id 老数据，重启后回迁 +1931 条 uuid 条目，API 建/删实测通过）。
+
 ## 6. API 概要
 
 ```

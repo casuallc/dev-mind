@@ -21,6 +21,10 @@ import java.time.LocalDate;
  * 主键 Long，此处为保前端契约的有意例外：CAP-74 文件时代已做过一次 Long→String 破坏性变更，
  * 回 DB 不再二次翻转（CAP-89 §10 载明；勿"顺手"改回 Long）。</p>
  *
+ * <p><strong>存量库注意</strong>：CAP-28 时代 id 为 bigint IDENTITY，ddl-auto=update 不改
+ * 存量列类型——老库必须手工 ALTER id → varchar(32)（口径见 CAP-89 §5，194 于 2026-10-26
+ * 已执行），否则 PG 读写炸 "operator does not exist: bigint = character varying"。</p>
+ *
  * <p>unique(user_id, repo_id, commit_sha)：GIT 来源导入判重（CAP-28 原口径恢复；
  * 手动条目 repo_id/commit_sha 为 NULL，唯一约束天然不拦）。</p>
  */
