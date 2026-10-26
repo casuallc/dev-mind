@@ -97,7 +97,7 @@ devmind:
     git-import-enabled: true       # FR-09 定时 Git 导入总开关（用户级仍需在设置页打开）
     git-import-cron: "0 0 18 * * *" # 全局兜底：每日 18:00 导入当日提交为条目（早于日报生成）
     git-scan-max-commits: 200      # 单库单日扫描上限
-    repo-root: "./data/worklog/repos"  # CAP-74 服务端工作日志仓根目录（本机路径只走配置；仓路径=repo-root+repo_key）
+    repo-root: "./data/worklog/repos"  # CAP-89：仅作存量仓→DB 启动回迁的数据源（本机路径只走配置）；回迁完成后仓目录成死数据，可手工清理
   worktree:
     root: ""                       # 空=项目内 .devmind/worktrees
     base-branch: master

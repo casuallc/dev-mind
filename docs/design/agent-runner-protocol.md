@@ -120,8 +120,9 @@ force=true 先 killAll 排空（上限 30s）再下载。ack 落线后 spawn Sel
 `{sessionId}`。运行中会话即时扫描 `.devmind/output/` 上传（先上传后 ack，服务端 ack 后回读无竞态）。
 
 ### 4.5 `worklog_push` ⏳ v6+（ack: `worklog_push_ack`，等 330s）——⚠️ CAP-74 M3 起已下线
-> **废弃注（2026-10-12）**：工作日志推送改服务端仓直推（fetch+merge+push，见 `WorklogRemoteBackupService`），
-> 服务端不再下发本帧，runner 侧帧处理为 no-op ack 仅兼容 CAP-74 前的旧服务端。本节保留供考古。
+> **废弃注（2026-10-12）**：工作日志推送改服务端仓直推（fetch+merge+push），服务端不再下发本帧。
+> **废弃注②（2026-10-26，CAP-89）**：远程推送链路整体退役（`WorklogRemoteBackupService` 已删）；
+> runner 侧帧处理保留为 no-op ack，仅兼容旧服务端。本节保留供考古。
 
 `{requestId:"wp-<ms>-<owner>", worklogOwner, remoteUrl, branch, token?, gitAuthorName?(v23), gitAuthorEmail?(v23), proxy?}`。
 push 前先 fetch 对齐：远端领先/分叉自动 `merge --no-edit --allow-unrelated-histories -X ours`

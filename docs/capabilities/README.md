@@ -45,7 +45,7 @@
 | [CAP-25](CAP-25-runner-workspace.md) | 远程会话工作区编排 | 底座 | 已实现（布局/生命周期经 CAP-42、粒度经 CAP-51 重构） | launch 帧下发 repo+短期凭据，runner 自动 clone/worktree/push |
 | [CAP-26](CAP-26-exec-fetch.md) | 执行前代码同步 | 底座 | 已实现 | 构建/发版/worktree 基准一律取 origin/ 远端引用（执行前 fetch） |
 | [CAP-27](CAP-27-requirement-effort.md) | 需求工时 | 组装层 | 已实现 | AI 实际耗时会话时长汇总 + Jira 工时同步 + worklog 一键回写 |
-| [CAP-28](CAP-28-personal-worklog.md) | 个人工作日志与工时管理 | 组装层 | 已实现（报告链路经 CAP-41/74 重构；存储将随 CAP-89 回 DB） | git log + 手动补录成条目记工时，AI 日报/周报草稿人工确认 |
+| [CAP-28](CAP-28-personal-worklog.md) | 个人工作日志与工时管理 | 组装层 | 已实现（报告链路经 CAP-41 重构；存储经 CAP-74→CAP-89 回 DB） | git log + 手动补录成条目记工时，AI 日报/周报草稿人工确认 |
 | [CAP-29](CAP-29-global-git-repo-registry.md) | 全局代码仓库登记 | 平台层 | 已实现 | 仓库平台级登记（ADMIN）+ 服务端克隆 + 定时 fetch，项目仓库改关联 |
 | [CAP-30](CAP-30-agent-chat.md) | 通用问答 | 底座 | 已实现（CAP-49 增 MODEL 执行体、CAP-46 增知识库绑定） | 无项目纯问答（个人组 /chats），共享内核上移 common |
 | [CAP-31](CAP-31-session-multirepo.md) | 项目会话多仓库与归属拆分 | 底座 | 已实现（经 CAP-42/51 重构布局） | 会话收敛纯项目开发会话 + 显式关联多 git 仓库 |
@@ -58,7 +58,7 @@
 | [CAP-38](CAP-38-requirement-flow-simplify.md) | 需求流程简化 | 流程层 | 已实现 | 分析/方案独立 Tab 可跳过，方案产出后自动拆分+固化 WI |
 | [CAP-39](CAP-39-session-output-publish.md) | 会话产出手动推送与按需回传 | 流程层 | 已实现 | collect_output 帧即时回传，手动推送为关联需求文档 |
 | [CAP-40](CAP-40-requirement-attachment-context.md) | 需求附件上下文投送 | 流程层 | 已实现 | 需求附件+Jira 内嵌图打进 ContextPackage，runner 物化 .devmind/input/ |
-| [CAP-41](CAP-41-worklog-workspace.md) | 工作日志空间 | 组装层 | 已实现（存储将随 CAP-89 调整） | WORKLOG 特殊项目 + 按用户持久工作区，报告走真实会话写文件 |
+| [CAP-41](CAP-41-worklog-workspace.md) | 工作日志空间 | 组装层 | 已实现（存储随 CAP-89 回 DB；远程备份退役） | WORKLOG 特殊项目 + 按用户持久工作区，报告走真实会话写文件 |
 | [CAP-42](CAP-42-per-user-workspace.md) | 每用户固定工作区与手动收口 | 底座 | 已实现（粒度经 CAP-51 重构） | runner 工作区固定 {项目}/{用户}，页面手动收口合并+push+删 worktree |
 | [CAP-43](CAP-43-agent-node-proxy.md) | Agent 节点外网代理 | 底座 | 已实现 | 节点级 HTTP 代理按功能勾选 scope，随帧下发 runner 进程级注入 |
 | [CAP-44](CAP-44-knowledge-base-rag.md) | 知识库容器化与向量检索 | 管理 | 已实现（检索链路经 CAP-84 升级为 Lucene 混合检索） | 知识库一等容器（scope+inject_mode），条目分块向量化，检索 SPI |
@@ -91,7 +91,7 @@
 | [CAP-71](CAP-71-agent-audit-log.md) | Agent 节点审计日志 | 底座 | 已实现 | agent_audit_logs 九分类全量审计，旁路落库，保留期可配 |
 | [CAP-72](CAP-72-pipeline-project-switches.md) | 执行链自动化项目级开关 | 底座 | 已实现 | auto_build_on_wi_done / auto_deploy_test_on_build 默认关，两处入口闸门 |
 | [CAP-73](CAP-73-requirement-indev-verification.md) | 需求开发中验证 | 流程层 | 部分交付（MVP 后端+runner 全链落地，v4 差异口径收尾中） | 验证前移开发中：推送 HEAD→增量构建→补丁部署→冒烟，PROD 禁绑 |
-| [CAP-74](CAP-74-worklog-server-git-repo.md) | 工作日志事实源服务端化 | 组装层 | 已实现（将被 CAP-89 取代） | 事实源收敛服务端本地 git 仓（JGit 单写者），DB 状态机退役 |
+| [CAP-74](CAP-74-worklog-server-git-repo.md) | 工作日志事实源服务端化 | 组装层 | 已废弃（2026-10-26 被 CAP-89 取代） | 事实源收敛服务端本地 git 仓（JGit 单写者），DB 状态机退役 |
 | [CAP-75](CAP-75-feishu-integration.md) | 飞书集成（通知通道+机器人网关） | 组装层 | 已实现 | feishu 机器人通知通道 + BotAdapter SPI 网关（devmind-bot/feishu-bot），群内问答与项目操作 |
 | [CAP-76](CAP-76-agent-gateway.md) | 平台智能体网关 | 组装层 | 已实现 | 飞书裸文本→LLM 工具选择→受控执行→卡片回复；工具契约先行，写必确认 |
 | [CAP-77](CAP-77-self-feedback-loop.md) | 平台自举反馈闭环（/issue） | 组装层 | 已实现 | Dev-Mind 自注册为项目，/issue 快捷登记投自项目，回执 REQ 编号 |
@@ -106,7 +106,7 @@
 | [CAP-86](CAP-86-knowledge-workspace.md) | 知识库管理台（菜单组化信息架构） | 管理/前端体验 | 已实现（v3） | 后台「知识库」菜单组：库总览/文档导入/召回验证/治理报告 |
 | [CAP-87](CAP-87-changelog.md) | 控制台更新日志 | 管理/前端体验 | 已实现 | CHANGELOG.md 随包分发，控制台只读解析渲染 |
 | [CAP-88](CAP-88-worklog-plan-loop.md) | 工作日志计划闭环 | 组装层 | 定稿未实施（存储随 CAP-89 定 DB） | 日/周计划项一等数据 + 条目关联 + 数据驱动复盘，M3 AI 建议计划 |
-| [CAP-89](CAP-89-worklog-storage-back-to-db.md) | 工作日志存储回 DB | 组装层 | 定稿未实施（取代 CAP-74） | 去 git 仓化与远程推送：事实源回 DB，团队仓退役，幂等迁移 |
+| [CAP-89](CAP-89-worklog-storage-back-to-db.md) | 工作日志存储回 DB | 组装层 | 已实现（取代 CAP-74） | 去 git 仓化与远程推送：事实源回 DB，团队仓退役，幂等迁移 |
 
 ## 文档模板说明
 
