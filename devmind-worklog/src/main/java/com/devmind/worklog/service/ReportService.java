@@ -8,6 +8,7 @@ import com.devmind.session.dto.SessionView;
 import com.devmind.session.service.SessionManagerService;
 import com.devmind.worklog.dto.DailyReportView;
 import com.devmind.worklog.dto.GitCommitView;
+import com.devmind.worklog.dto.NextPlanPreview;
 import com.devmind.worklog.dto.ReportLaunch;
 import com.devmind.worklog.dto.UpdateDailyRequest;
 import com.devmind.worklog.dto.UpdateWeeklyRequest;
@@ -160,16 +161,18 @@ public class ReportService {
     }
 
     /**
-     * CAP-88 M2 FR-07 日报计划对照素材：当日日计划 + 当周周计划（linkable 同口径）+ 真实状态 +
-     * 关联条目；无计划项渲染「省略」指令，存量日期生成行为不变。
+     * CAP-90 FR-04 日报计划对照素材（数据源切换：日计划已并入条目）：当日未完成条目
+     * （TODO/DOING，计划态即日计划）+ 当周周计划项 + 真实状态 + 关联条目；两者皆无渲染
+     * 「省略」指令，存量日期生成行为不变。
      */
     String dayPlanBlock(String username, LocalDate date) {
-        List<WorklogPlanItemEntity> plans = new ArrayList<>(
-                planRepo.findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(
-                        username, WorklogPlanItemEntity.SCOPE_DAY, date));
-        plans.addAll(planRepo.findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(
-                username, WorklogPlanItemEntity.SCOPE_WEEK, WorklogWeeks.mondayOf(date)));
-        return ReportPrompts.formatPlanItems(plans, linkedEntries(plans));
+        List<WorklogEntryEntity> unfinished = entryRepo
+                .findByUserIdAndWorkDateAndStatusInOrderByCreatedAtAsc(
+                        username, date, WorklogEntryService.UNFINISHED);
+        List<WorklogPlanItemEntity> weekPlans = planRepo
+                .findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(
+                        username, WorklogPlanItemEntity.SCOPE_WEEK, WorklogWeeks.mondayOf(date));
+        return ReportPrompts.formatDayPlanBlock(unfinished, weekPlans, linkedEntries(weekPlans));
     }
 
     /** 手动创建空白日报（不经 AI、不要求素材）。幂等：已存在直接返回，不覆盖已有内容。 */
@@ -271,7 +274,33 @@ public class ReportService {
         return launch(username, WorklogScenarios.WEEKLY,
                 ReportPrompts.weekly(weekStart, dailies, entries, commits,
                         lastWeekPlan(username, weekStart), thisWeekPlanBlock(username, weekStart),
-                        template, hint));
+                        nextWeekPlanBlock(username, weekStart), template, hint));
+    }
+
+    /**
+     * CAP-90 FR-09「下周计划」素材：下周（weekStart+7d）WEEK 计划项的结构化清单
+     * （{{nextWeekPlan}} 占位；下周计划项是唯一事实源，周报文本是其单向叙述投影）；
+     * 未排 → 空串（weekly() 渲染为「按本周总结合理推断」指令，维持存量行为）。
+     */
+    String nextWeekPlanBlock(String username, LocalDate weekStart) {
+        List<WorklogPlanItemEntity> items = planRepo
+                .findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(
+                        username, WorklogPlanItemEntity.SCOPE_WEEK, weekStart.plusWeeks(1));
+        if (items.isEmpty()) {
+            return "";
+        }
+        return ReportPrompts.formatPlanItems(items, linkedEntries(items));
+    }
+
+    /**
+     * CAP-90 FR-10「从计划项重建」预览：下周计划项确定性渲染为 markdown（不经 LLM），
+     * 前端确认后填入周报编辑框（人工保存才落库——「自动草稿 + 人工确认」哲学）。
+     */
+    public NextPlanPreview nextPlanPreview(String username, LocalDate weekStart) {
+        List<WorklogPlanItemEntity> items = planRepo
+                .findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(
+                        username, WorklogPlanItemEntity.SCOPE_WEEK, weekStart.plusWeeks(1));
+        return new NextPlanPreview(ReportPrompts.renderNextPlanMarkdown(items), items.size());
     }
 
     /**
@@ -300,7 +329,8 @@ public class ReportService {
         return ReportPrompts.formatPlanItems(items, linkedEntries(items));
     }
 
-    /** 批量取计划项的关联条目并按 planItemId 分组（禁 Map.of 空兜底——见平台坑录）。 */
+    /** 批量取计划项的关联条目并按 planItemId 分组（禁 Map.of 空兜底——见平台坑录）。
+     *  CAP-90 FR-04：素材口径只取 DONE 事实条目（计划态关联不算执行证据）。 */
     private Map<Long, List<WorklogEntryEntity>> linkedEntries(List<WorklogPlanItemEntity> items) {
         if (items == null || items.isEmpty()) {
             return Map.of();
@@ -308,6 +338,9 @@ public class ReportService {
         Map<Long, List<WorklogEntryEntity>> byPlanId = new HashMap<>();
         for (WorklogEntryEntity e : entryRepo.findByPlanItemIdIn(
                 items.stream().map(WorklogPlanItemEntity::getId).toList())) {
+            if (!WorklogEntryEntity.STATUS_DONE.equals(e.getStatus())) {
+                continue;
+            }
             byPlanId.computeIfAbsent(e.getPlanItemId(), k -> new ArrayList<>()).add(e);
         }
         return byPlanId;

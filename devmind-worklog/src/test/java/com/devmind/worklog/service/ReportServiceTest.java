@@ -115,6 +115,7 @@ class ReportServiceTest {
         linked.setWorkDate(LocalDate.of(2026, 10, 13));
         linked.setTitle("执行条目");
         linked.setMinutes(60);
+        linked.setStatus(WorklogEntryEntity.STATUS_DONE);
         linked.setPlanItemId(7L);
         when(entryRepo.findByPlanItemIdIn(List.of(7L))).thenReturn(List.of(linked));
 
@@ -186,6 +187,62 @@ class ReportServiceTest {
         assertFalse(prompt.contains("计划3") || prompt.contains("计划4"), "DONE/DROPPED 不得进素材");
         assertTrue(prompt.contains("（无在办需求数据）"), "SPI 缺席降级提示");
         assertTrue(prompt.contains("多排评审"), "hint 未注入");
+    }
+
+    // ---------------- CAP-90 M2：素材口径切换 + 下周计划投影 ----------------
+
+    @Test
+    void 日报计划对照块改由当日未完成条目与周计划驱动() {
+        WorklogEntryRepository entryRepo = mock(WorklogEntryRepository.class);
+        WorklogPlanItemRepository planRepo = mock(WorklogPlanItemRepository.class);
+        LocalDate wed = LocalDate.of(2026, 10, 28);
+        LocalDate mon = LocalDate.of(2026, 10, 26);
+        WorklogEntryEntity unfinished = new WorklogEntryEntity();
+        unfinished.setId("e1");
+        unfinished.setWorkDate(wed);
+        unfinished.setTitle("修登录页");
+        unfinished.setEntryType("DEV");
+        unfinished.setStatus("TODO");
+        unfinished.setEstimateMinutes(120);
+        when(entryRepo.findByUserIdAndWorkDateAndStatusInOrderByCreatedAtAsc(
+                "alice", wed, WorklogEntryService.UNFINISHED)).thenReturn(List.of(unfinished));
+        WorklogPlanItemEntity week = wipItem(5L, "TODO");
+        week.setPlanDate(mon);
+        when(planRepo.findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(
+                "alice", "WEEK", mon)).thenReturn(List.of(week));
+        when(entryRepo.findByPlanItemIdIn(List.of(5L))).thenReturn(List.of());
+
+        ReportService service = new ReportService(null, null, null, null, null, null, null,
+                planRepo, entryRepo, null);
+        String block = service.dayPlanBlock("alice", wed);
+        assertTrue(block.contains("当日未完成条目"), "缺未完成条目小节: " + block);
+        assertTrue(block.contains("修登录页"), "缺条目行: " + block);
+        assertTrue(block.contains("当周周计划项"), "缺周计划小节: " + block);
+        assertTrue(block.contains("计划5"), "缺周计划行: " + block);
+    }
+
+    @Test
+    void 下周计划预览确定性渲染_无计划项返回空() {
+        WorklogPlanItemRepository planRepo = mock(WorklogPlanItemRepository.class);
+        LocalDate mon = LocalDate.of(2026, 10, 26);
+        WorklogPlanItemEntity next = wipItem(9L, "TODO");
+        next.setPlanDate(mon.plusWeeks(1));
+        next.setTitle("收尾周报链路");
+        next.setEstimateMinutes(180);
+        when(planRepo.findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(
+                "alice", "WEEK", mon.plusWeeks(1))).thenReturn(List.of(next));
+
+        ReportService service = new ReportService(null, null, null, null, null, null, null,
+                planRepo, null, null);
+        var preview = service.nextPlanPreview("alice", mon);
+        assertEquals(1, preview.itemCount());
+        assertTrue(preview.markdown().contains("1. [DEV] 收尾周报链路（预估 3h）"), preview.markdown());
+
+        when(planRepo.findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(
+                "alice", "WEEK", mon.plusWeeks(1))).thenReturn(List.of());
+        var empty = service.nextPlanPreview("alice", mon);
+        assertEquals(0, empty.itemCount());
+        assertEquals("", empty.markdown());
     }
 
     private static WorklogPlanItemEntity wipItem(long id, String status) {

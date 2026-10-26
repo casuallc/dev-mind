@@ -40,6 +40,14 @@ public class WorklogEntryEntity {
     /** 预留：agent 会话自动转条目 */
     public static final String SOURCE_AGENT = "AGENT";
 
+    /** CAP-90 FR-01/02：条目状态——TODO/DOING=计划态（日计划并入条目），DONE=事实；
+     *  DONE/DROPPED 人工，CARRIED 仅滚转写入；GIT/AGENT 来源恒 DONE。素材/工时一律 DONE-only。 */
+    public static final String STATUS_TODO = "TODO";
+    public static final String STATUS_DOING = "DOING";
+    public static final String STATUS_DONE = "DONE";
+    public static final String STATUS_DROPPED = "DROPPED";
+    public static final String STATUS_CARRIED = "CARRIED";
+
     /** uuid 32hex（WorklogEntryService 应用侧生成） */
     @Id
     @Column(length = 32)
@@ -67,6 +75,20 @@ public class WorklogEntryEntity {
     /** 工时（分钟） */
     @Column(nullable = false)
     private Integer minutes = 0;
+
+    /** CAP-90 FR-01：TODO/DOING/DONE/DROPPED/CARRIED（@ColumnDefault 字符串必带引号；
+     *  存量事实行由 DDL 默认值回填 DONE） */
+    @Column(nullable = false, length = 16)
+    @ColumnDefault("'DONE'")
+    private String status = STATUS_DONE;
+
+    /** CAP-90 FR-01：计划态预估工时（分钟；可空=未预估），「完成」时预填确认 */
+    @Column(name = "estimate_minutes")
+    private Integer estimateMinutes;
+
+    /** CAP-90 FR-05：日粒度滚转来源条目 uuid（自引用，拖延链可追溯） */
+    @Column(name = "carried_from_id", length = 32)
+    private String carriedFromId;
 
     /** 来源：GIT/MANUAL/AGENT */
     @Column(nullable = false, length = 16)
@@ -112,6 +134,12 @@ public class WorklogEntryEntity {
     public void setEntryType(String entryType) { this.entryType = entryType; }
     public Integer getMinutes() { return minutes; }
     public void setMinutes(Integer minutes) { this.minutes = minutes; }
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+    public Integer getEstimateMinutes() { return estimateMinutes; }
+    public void setEstimateMinutes(Integer estimateMinutes) { this.estimateMinutes = estimateMinutes; }
+    public String getCarriedFromId() { return carriedFromId; }
+    public void setCarriedFromId(String carriedFromId) { this.carriedFromId = carriedFromId; }
     public String getSource() { return source; }
     public void setSource(String source) { this.source = source; }
     public Long getRepoId() { return repoId; }

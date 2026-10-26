@@ -23,7 +23,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import static com.devmind.worklog.model.WorklogPlanItemEntity.SCOPE_DAY;
 import static com.devmind.worklog.model.WorklogPlanItemEntity.SCOPE_WEEK;
 import static com.devmind.worklog.model.WorklogPlanItemEntity.SOURCE_AI_SUGGEST;
 import static com.devmind.worklog.model.WorklogPlanItemEntity.SOURCE_MANUAL;
@@ -34,7 +33,8 @@ import static com.devmind.worklog.model.WorklogPlanItemEntity.STATUS_DROPPED;
 import static com.devmind.worklog.model.WorklogPlanItemEntity.STATUS_TODO;
 
 /**
- * 计划项 CRUD/状态/滚转（CAP-88 M1：FR-01/02/03/05 + FR-04 的删项清引用）。
+ * 计划项 CRUD/状态/滚转（CAP-88 M1：FR-01/02/03/05 + FR-04 的删项清引用；
+ * CAP-90 FR-06：收窄为 WEEK 唯一计划实体——日计划并入条目，DAY scope 全部 400）。
  * 按人隔离（仅能改自己的，他人 404，同条目口径）；周计划 plan_date 服务端归一到周一。
  *
  * <p>状态机（FR-03）：自动只到 DOING（条目关联在 {@link WorklogEntryService} 触发）；
@@ -62,7 +62,7 @@ public class WorklogPlanService {
         this.identity = identity;
     }
 
-    /** 某周期计划项列表 + 上一周期未完成提示（FR-05 前半：提示数据随列表返回）。 */
+    /** 某周期计划项列表 + 上一周期未完成提示（FR-05 前半：提示数据随列表返回；CAP-90：仅 WEEK）。 */
     public PlanListView list(String scope, LocalDate date) {
         String me = identity.currentActor();
         String sc = validatedScope(scope);
@@ -70,17 +70,18 @@ public class WorklogPlanService {
         List<PlanItemView> items = planRepo
                 .findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(me, sc, planDate)
                 .stream().map(PlanItemView::of).toList();
-        LocalDate prev = SCOPE_DAY.equals(sc) ? planDate.minusDays(1) : planDate.minusWeeks(1);
+        LocalDate prev = planDate.minusWeeks(1);
         List<PlanItemView> carryover = planRepo
                 .findByUserIdAndScopeAndPlanDateAndStatusInOrderBySortOrderAscIdAsc(me, sc, prev, UNFINISHED)
                 .stream().map(PlanItemView::of).toList();
         return new PlanListView(items, prev, carryover);
     }
 
-    /** 条目抽屉可关联项（FR-06）：当日日计划 + 当周周计划（DOING/DONE 可选——补录忘挂的执行）。 */
+    /** 条目抽屉可关联项（CAP-90 FR-06：只列当周周计划——日计划已并入条目，日执行直接对齐周方向；
+     *  DOING/DONE 可选——补录忘挂的执行）。 */
     public List<PlanItemView> linkable(LocalDate date) {
         String me = identity.currentActor();
-        return planRepo.findLinkable(me, date, WorklogWeeks.mondayOf(date))
+        return planRepo.findLinkable(me, WorklogWeeks.mondayOf(date))
                 .stream().map(PlanItemView::of).toList();
     }
 
@@ -100,9 +101,10 @@ public class WorklogPlanService {
         return PlanItemView.of(planRepo.save(e));
     }
 
-    /** 编辑/改状态（他人项 404；CARRIED 项只读——不可改内容也不可改状态）。 */
+    /** 编辑/改状态（他人项 404；CARRIED 项只读——不可改内容也不可改状态；CAP-90：scope≠WEEK 400）。 */
     public PlanItemView update(Long id, PlanItemRequest req) {
         String me = identity.currentActor();
+        validatedScope(req.scope());
         WorklogPlanItemEntity e = planRepo.findByIdAndUserId(id, me)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "计划项不存在: " + id));
         if (STATUS_CARRIED.equals(e.getStatus())) {
@@ -238,9 +240,12 @@ public class WorklogPlanService {
         e.setUpdatedAt(Instant.now().truncatedTo(ChronoUnit.SECONDS));
     }
 
+    /** CAP-90 FR-06：计划项收窄为 WEEK 唯一粒度——日计划已并入条目（计划=未完成条目），
+     *  DAY scope 全部 400（存量 DAY 行由 DayPlanToEntryMigration 迁移为条目）。 */
     private static String validatedScope(String scope) {
-        if (!SCOPE_DAY.equals(scope) && !SCOPE_WEEK.equals(scope)) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "scope 仅支持 DAY/WEEK");
+        if (!SCOPE_WEEK.equals(scope)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "日计划已并入条目（CAP-90）：计划项仅支持 WEEK 粒度，日计划请直接建计划态条目");
         }
         return scope;
     }

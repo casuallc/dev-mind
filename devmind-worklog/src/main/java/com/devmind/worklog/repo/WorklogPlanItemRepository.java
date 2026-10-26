@@ -27,12 +27,15 @@ public interface WorklogPlanItemRepository extends JpaRepository<WorklogPlanItem
     List<WorklogPlanItemEntity> findByUserIdAndPlanDateBetweenOrderByPlanDateAscSortOrderAscIdAsc(
             String userId, LocalDate from, LocalDate to);
 
-    /** 条目抽屉可关联项：当日日计划 + 当周周计划，排除 DROPPED/CARRIED（DOING/DONE 可选——补录忘挂的执行） */
+    /** 条目抽屉可关联项（CAP-90 FR-06：收窄为当周周计划——日计划已并入条目）；
+     *  排除 DROPPED/CARRIED（DOING/DONE 可选——补录忘挂的执行） */
     @Query("SELECT p FROM WorklogPlanItemEntity p WHERE p.userId = :userId"
-            + " AND ((p.scope = 'DAY' AND p.planDate = :date) OR (p.scope = 'WEEK' AND p.planDate = :weekStart))"
+            + " AND p.scope = 'WEEK' AND p.planDate = :weekStart"
             + " AND p.status IN ('TODO', 'DOING', 'DONE')"
-            + " ORDER BY p.scope ASC, p.sortOrder ASC, p.id ASC")
+            + " ORDER BY p.sortOrder ASC, p.id ASC")
     List<WorklogPlanItemEntity> findLinkable(@Param("userId") String userId,
-                                             @Param("date") LocalDate date,
                                              @Param("weekStart") LocalDate weekStart);
+
+    /** CAP-90 FR-06 存量迁移：全部 DAY 计划项（迁移为条目后删除；无行=跳过，幂等键） */
+    List<WorklogPlanItemEntity> findByScopeOrderByUserIdAscPlanDateAscIdAsc(String scope);
 }

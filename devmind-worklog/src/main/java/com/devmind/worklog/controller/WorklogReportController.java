@@ -6,6 +6,7 @@ import com.devmind.worklog.dto.CreateWeeklyRequest;
 import com.devmind.worklog.dto.DailyReportView;
 import com.devmind.worklog.dto.GenerateDailyRequest;
 import com.devmind.worklog.dto.GenerateWeeklyRequest;
+import com.devmind.worklog.dto.NextPlanPreview;
 import com.devmind.worklog.dto.ReportLaunch;
 import com.devmind.worklog.dto.SyncReportsRequest;
 import com.devmind.worklog.dto.UpdateDailyRequest;
@@ -127,6 +128,16 @@ public class WorklogReportController {
             @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart,
             @Valid @RequestBody UpdateWeeklyRequest req) {
         return reportService.updateWeekly(identity.currentActor(), weekStart, req);
+    }
+
+    /**
+     * CAP-90 FR-10「从计划项重建」：下周计划项确定性渲染为 markdown 预览（不经 LLM）；
+     * 前端确认后填入「下周计划」编辑框，人工保存才落库。
+     */
+    @GetMapping("/weekly/next-plan-preview")
+    public NextPlanPreview nextPlanPreview(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart) {
+        return reportService.nextPlanPreview(identity.currentActor(), weekStart);
     }
 
     // ---------------- 会话成稿同步 ----------------

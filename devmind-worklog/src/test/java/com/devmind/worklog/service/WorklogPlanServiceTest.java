@@ -31,8 +31,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * CAP-88 M1 计划项：CRUD/状态机/滚转幂等/条目关联联动。
- * Mockito 直桩仓储与身份（同模块既有测试风格，不起 Spring 上下文）。
+ * CAP-88 M1 计划项：CRUD/状态机/滚转幂等/条目关联联动；CAP-90 M1：DAY scope 退役（全 400）、
+ * 条目状态语义与日粒度滚转。Mockito 直桩仓储与身份（同模块既有测试风格，不起 Spring 上下文）。
  */
 class WorklogPlanServiceTest {
 
@@ -86,53 +86,61 @@ class WorklogPlanServiceTest {
     }
 
     @Test
-    void 非法scope与非法类型被拒() {
+    void CAP90日计划退役_DAY与非法scope全400() {
+        // DAY 已并入条目：create/update/carry 全拒绝
+        assertThrows(DevMindException.class,
+                () -> service.create(new PlanItemRequest("DAY", WED, "x", null, null, null, null, null, null)));
         assertThrows(DevMindException.class,
                 () -> service.create(new PlanItemRequest("MONTH", MON, "x", null, null, null, null, null, null)));
         assertThrows(DevMindException.class,
-                () -> service.create(new PlanItemRequest("DAY", WED, "x", null, "BOGUS", null, null, null, null)));
+                () -> service.create(new PlanItemRequest("WEEK", WED, "x", null, "BOGUS", null, null, null, null)));
+        assertThrows(DevMindException.class,
+                () -> service.update(1L, new PlanItemRequest("DAY", WED, "x", null, null, null, null, null, null)));
+        assertThrows(DevMindException.class,
+                () -> service.carry("DAY", WED, List.of(1L)));
+        assertThrows(DevMindException.class, () -> service.list("DAY", WED));
     }
 
     @Test
     void 列表附上一周期未完成提示() {
-        WorklogPlanItemEntity today = item(1, "DAY", WED, "TODO");
-        WorklogPlanItemEntity yTodo = item(2, "DAY", WED.minusDays(1), "DOING");
-        when(planRepo.findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(ME, "DAY", WED))
-                .thenReturn(List.of(today));
+        WorklogPlanItemEntity thisWeek = item(1, "WEEK", MON, "TODO");
+        WorklogPlanItemEntity prevTodo = item(2, "WEEK", MON.minusWeeks(1), "DOING");
+        when(planRepo.findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(ME, "WEEK", MON))
+                .thenReturn(List.of(thisWeek));
         when(planRepo.findByUserIdAndScopeAndPlanDateAndStatusInOrderBySortOrderAscIdAsc(
-                ME, "DAY", WED.minusDays(1), WorklogPlanService.UNFINISHED))
-                .thenReturn(List.of(yTodo));
+                ME, "WEEK", MON.minusWeeks(1), WorklogPlanService.UNFINISHED))
+                .thenReturn(List.of(prevTodo));
 
-        PlanListView view = service.list("DAY", WED);
+        PlanListView view = service.list("WEEK", MON);
         assertEquals(1, view.items().size());
-        assertEquals(WED.minusDays(1), view.carryoverFrom());
+        assertEquals(MON.minusWeeks(1), view.carryoverFrom());
         assertEquals(1, view.carryoverItems().size());
         assertEquals(2L, view.carryoverItems().get(0).id());
     }
 
     @Test
     void 人工改状态合法值生效_CARRIED不可人工设() {
-        WorklogPlanItemEntity e = item(1, "DAY", WED, "DOING");
+        WorklogPlanItemEntity e = item(1, "WEEK", MON, "DOING");
         when(planRepo.findByIdAndUserId(1L, ME)).thenReturn(Optional.of(e));
 
-        PlanItemView done = service.update(1L, new PlanItemRequest("DAY", WED, "计划1", null, null, null, null, null, "DONE"));
+        PlanItemView done = service.update(1L, new PlanItemRequest("WEEK", MON, "计划1", null, null, null, null, null, "DONE"));
         assertEquals("DONE", done.status());
 
         assertThrows(DevMindException.class,
-                () -> service.update(1L, new PlanItemRequest("DAY", WED, "计划1", null, null, null, null, null, "CARRIED")));
+                () -> service.update(1L, new PlanItemRequest("WEEK", MON, "计划1", null, null, null, null, null, "CARRIED")));
     }
 
     @Test
     void 已滚转项只读() {
-        WorklogPlanItemEntity e = item(1, "DAY", WED, "CARRIED");
+        WorklogPlanItemEntity e = item(1, "WEEK", MON, "CARRIED");
         when(planRepo.findByIdAndUserId(1L, ME)).thenReturn(Optional.of(e));
         assertThrows(DevMindException.class,
-                () -> service.update(1L, new PlanItemRequest("DAY", WED, "改名", null, null, null, null, null, null)));
+                () -> service.update(1L, new PlanItemRequest("WEEK", MON, "改名", null, null, null, null, null, null)));
     }
 
     @Test
     void 删计划项清条目引用() {
-        WorklogPlanItemEntity e = item(1, "DAY", WED, "TODO");
+        WorklogPlanItemEntity e = item(1, "WEEK", MON, "TODO");
         WorklogEntryEntity linked = new WorklogEntryEntity();
         linked.setId("abc");
         linked.setPlanItemId(1L);
@@ -172,48 +180,142 @@ class WorklogPlanServiceTest {
     }
 
     @Test
-    void 已完结项不滚转_scope不匹配报400() {
+    void 已完结项不滚转_不存在报404() {
         WorklogPlanItemEntity done = item(1, "WEEK", MON.minusWeeks(1), "DONE");
-        WorklogPlanItemEntity dayItem = item(2, "DAY", WED, "TODO");
         when(planRepo.findByIdAndUserId(1L, ME)).thenReturn(Optional.of(done));
-        when(planRepo.findByIdAndUserId(2L, ME)).thenReturn(Optional.of(dayItem));
 
         var r = service.carry("WEEK", MON, List.of(1L));
         assertEquals(0, r.carried());
         assertEquals(1, r.skipped());
 
-        assertThrows(DevMindException.class, () -> service.carry("WEEK", MON, List.of(2L)));
         assertThrows(DevMindException.class, () -> service.carry("WEEK", MON, List.of(999L)));
     }
 
     @Test
-    void 条目关联触发TODO变DOING_他人计划项404() {
-        WorklogPlanItemEntity todo = item(7, "DAY", WED, "TODO");
-        WorklogPlanItemEntity doing = item(8, "DAY", WED, "DOING");
+    void 条目关联触发TODO变DOING_他人计划项404_DAY项拒挂() {
+        WorklogPlanItemEntity todo = item(7, "WEEK", MON, "TODO");
+        WorklogPlanItemEntity doing = item(8, "WEEK", MON, "DOING");
+        WorklogPlanItemEntity dayItem = item(9, "DAY", WED, "TODO");
         when(planRepo.findByIdAndUserId(7L, ME)).thenReturn(Optional.of(todo));
         when(planRepo.findByIdAndUserId(8L, ME)).thenReturn(Optional.of(doing));
+        when(planRepo.findByIdAndUserId(9L, ME)).thenReturn(Optional.of(dayItem));
 
-        var v1 = entryService.create(new EntryRequest(WED, "干活", null, "DEV", 1.0, null, null, 7L));
+        var v1 = entryService.create(new EntryRequest(WED, "干活", null, "DEV", 1.0, null, null, 7L, null, null));
         assertEquals(7L, v1.planItemId());
         assertEquals("DOING", todo.getStatus());
 
         // 已是 DOING 的项不重复回写（状态保持）
-        doing.setStatus("DOING");
-        var v2 = entryService.create(new EntryRequest(WED, "继续干", null, "DEV", 0.5, null, null, 8L));
+        var v2 = entryService.create(new EntryRequest(WED, "继续干", null, "DEV", 0.5, null, null, 8L, null, null));
         assertEquals(8L, v2.planItemId());
         assertEquals("DOING", doing.getStatus());
 
         // 他人/不存在的计划项 → 404
         assertThrows(DevMindException.class,
-                () -> entryService.create(new EntryRequest(WED, "x", null, "DEV", 1.0, null, null, 999L)));
+                () -> entryService.create(new EntryRequest(WED, "x", null, "DEV", 1.0, null, null, 999L, null, null)));
+        // CAP-90：DAY 项不可关联（日计划已并入条目）
+        assertThrows(DevMindException.class,
+                () -> entryService.create(new EntryRequest(WED, "x", null, "DEV", 1.0, null, null, 9L, null, null)));
     }
 
     @Test
-    void linkable排除DROPPED与CARRIED由仓储查询保证_服务层只做周归一() {
-        when(planRepo.findLinkable(ME, WED, MON)).thenReturn(List.of(item(1, "DAY", WED, "TODO")));
+    void linkable只列当周周计划由仓储查询保证_服务层只做周归一() {
+        when(planRepo.findLinkable(ME, MON)).thenReturn(List.of(item(1, "WEEK", MON, "TODO")));
         List<PlanItemView> v = service.linkable(WED);
         assertEquals(1, v.size());
-        assertTrue(v.get(0).planDate().equals(WED));
+        assertTrue(v.get(0).planDate().equals(MON));
+    }
+
+    // ---------------- CAP-90 M1：条目状态语义 ----------------
+
+    @Test
+    void 新建条目默认DONE_显式TODO落计划态_CARRIED人工不可设() {
+        var done = entryService.create(new EntryRequest(WED, "补录昨天", null, "DEV", 1.0, null, null, null, null, null));
+        assertEquals("DONE", done.status(), "手动新建默认 DONE（补录已发生的）");
+        assertNull(done.estimateHours());
+
+        var todo = entryService.create(new EntryRequest(WED, "明天要修", null, "DEV", 0.0, null, null, null, "TODO", 2.0));
+        assertEquals("TODO", todo.status());
+        assertEquals(2.0, todo.estimateHours());
+
+        assertThrows(DevMindException.class,
+                () -> entryService.create(new EntryRequest(WED, "x", null, "DEV", 0.0, null, null, null, "CARRIED", null)));
+    }
+
+    @Test
+    void GIT与AGENT来源条目恒DONE_转非DONE报400() {
+        WorklogEntryEntity git = new WorklogEntryEntity();
+        git.setId("g1");
+        git.setUserId(ME);
+        git.setSource(WorklogEntryEntity.SOURCE_GIT);
+        git.setStatus(WorklogEntryEntity.STATUS_DONE);
+        when(entryRepo.findByIdAndUserId("g1", ME)).thenReturn(Optional.of(git));
+
+        assertThrows(DevMindException.class,
+                () -> entryService.update("g1", new EntryRequest(WED, "x", null, "DEV", 1.0, null, null, null, "TODO", null)));
+        // 显式传 DONE / 不传 status 均放行
+        entryService.update("g1", new EntryRequest(WED, "x", null, "DEV", 1.0, null, null, null, "DONE", null));
+        entryService.update("g1", new EntryRequest(WED, "x", null, "DEV", 1.0, null, null, null, null, null));
+    }
+
+    // ---------------- CAP-90 M1：日粒度滚转 ----------------
+
+    private WorklogEntryEntity entry(String id, LocalDate date, String status) {
+        WorklogEntryEntity e = new WorklogEntryEntity();
+        e.setId(id);
+        e.setUserId(ME);
+        e.setWorkDate(date);
+        e.setTitle("条目" + id);
+        e.setEntryType("DEV");
+        e.setMinutes(0);
+        e.setEstimateMinutes(120);
+        e.setStatus(status);
+        e.setSource(WorklogEntryEntity.SOURCE_MANUAL);
+        return e;
+    }
+
+    @Test
+    void 条目滚转生成TODO副本带链_原行置CARRIED_幂等() {
+        WorklogEntryEntity src = entry("e1", WED.minusDays(1), "DOING");
+        when(entryRepo.findByIdAndUserId("e1", ME)).thenReturn(Optional.of(src));
+
+        var r1 = entryService.carry(WED, List.of("e1"));
+        assertEquals(1, r1.carried());
+        assertEquals(0, r1.skipped());
+        assertEquals("CARRIED", src.getStatus());
+        var copy = r1.items().get(0);
+        assertEquals("TODO", copy.status());
+        assertEquals(WED, copy.workDate());
+        assertEquals("e1", copy.carriedFromId());
+        assertEquals(2.0, copy.estimateHours(), "estimate 沿用");
+        assertEquals(0.0, copy.hours(), "副本工时归零");
+        assertTrue(!"e1".equals(copy.id()), "副本须新 uuid");
+
+        // 重复滚转：已 CARRIED → 跳过（幂等）
+        var r2 = entryService.carry(WED, List.of("e1"));
+        assertEquals(0, r2.carried());
+        assertEquals(1, r2.skipped());
+    }
+
+    @Test
+    void 已完结条目不滚转_他人条目404() {
+        WorklogEntryEntity done = entry("e2", WED.minusDays(1), "DONE");
+        when(entryRepo.findByIdAndUserId("e2", ME)).thenReturn(Optional.of(done));
+
+        var r = entryService.carry(WED, List.of("e2"));
+        assertEquals(0, r.carried());
+        assertEquals(1, r.skipped());
+
+        assertThrows(DevMindException.class, () -> entryService.carry(WED, List.of("ghost")));
+    }
+
+    @Test
+    void 日滚转提示取昨日未完成() {
+        WorklogEntryEntity yTodo = entry("e3", WED.minusDays(1), "TODO");
+        when(entryRepo.findByUserIdAndWorkDateAndStatusInOrderByCreatedAtAsc(
+                ME, WED.minusDays(1), WorklogEntryService.UNFINISHED)).thenReturn(List.of(yTodo));
+        List<com.devmind.worklog.dto.EntryView> hint = entryService.dayCarryover(WED);
+        assertEquals(1, hint.size());
+        assertEquals("e3", hint.get(0).id());
     }
 
     // ---------------- CAP-88 M3：AI 建议项落库 ----------------

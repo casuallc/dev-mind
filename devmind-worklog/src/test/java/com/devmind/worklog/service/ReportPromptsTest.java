@@ -65,7 +65,7 @@ class ReportPromptsTest {
     void 周报优先以日报为素材并含周区间() {
         var d = new ReportPrompts.DailyMaterial(LocalDate.of(2026, 9, 8), "- 完成登录改造");
         String prompt = ReportPrompts.weekly(LocalDate.of(2026, 9, 7),
-                List.of(d), List.of(entry("不该出现", 1)), List.of(), "", "",
+                List.of(d), List.of(entry("不该出现", 1)), List.of(), "", "", "",
                 WorklogTemplates.DEFAULT_WEEKLY, null);
         assertTrue(prompt.contains("2026-09-07 ~ 2026-09-13"), "缺周区间");
         assertTrue(prompt.contains("### 2026-09-08"), "缺日报小节");
@@ -76,7 +76,7 @@ class ReportPromptsTest {
     @Test
     void 周报无日报时回退原始条目() {
         String prompt = ReportPrompts.weekly(LocalDate.of(2026, 9, 7), List.of(),
-                List.of(entry("手工条目", 30)), List.of(), "", "", "{{entries}}", null);
+                List.of(entry("手工条目", 30)), List.of(), "", "", "", "{{entries}}", null);
         assertTrue(prompt.contains("手工条目"));
     }
 
@@ -84,7 +84,7 @@ class ReportPromptsTest {
     void 周报携带上周计划并要求逐条呼应() {
         var d = new ReportPrompts.DailyMaterial(LocalDate.of(2026, 9, 8), "- 完成登录改造");
         String prompt = ReportPrompts.weekly(LocalDate.of(2026, 9, 7), List.of(d), List.of(),
-                List.of(), "1. 完成登录改造\n2. 补齐回归测试", "", WorklogTemplates.DEFAULT_WEEKLY, null);
+                List.of(), "1. 完成登录改造\n2. 补齐回归测试", "", "", WorklogTemplates.DEFAULT_WEEKLY, null);
         assertTrue(prompt.contains("上周计划跟进"), "缺上周计划跟进块");
         assertTrue(prompt.contains("完成 / 部分完成 / 未完成"), "缺完成状态约定");
         assertTrue(prompt.contains("1. 完成登录改造"), "缺上周计划原文");
@@ -95,7 +95,7 @@ class ReportPromptsTest {
     @Test
     void 周报无上周计划时提示省略而非编造() {
         String prompt = ReportPrompts.weekly(LocalDate.of(2026, 9, 7), List.of(), List.of(),
-                List.of(), null, "", "{{lastWeekPlan}}", null);
+                List.of(), null, "", "", "{{lastWeekPlan}}", null);
         assertTrue(prompt.contains("无上周计划"));
         assertFalse(prompt.contains("{{"));
     }
@@ -172,10 +172,70 @@ class ReportPromptsTest {
         WorklogPlanItemEntity thisWeek = plan(3L, "WEEK", LocalDate.of(2026, 9, 7), "收尾登录改造", "TODO", null);
         String prompt = ReportPrompts.weekly(LocalDate.of(2026, 9, 7), List.of(d), List.of(), List.of(),
                 "1. 完成登录改造", ReportPrompts.formatPlanItems(List.of(thisWeek), Map.of()),
-                WorklogTemplates.DEFAULT_WEEKLY, null);
+                "1. [DEV] 评审收尾", WorklogTemplates.DEFAULT_WEEKLY, null);
         assertTrue(prompt.contains("本周已排计划项"), "缺本周计划项块");
         assertTrue(prompt.contains("[状态=待办] 收尾登录改造"), "缺本周计划项行");
         assertTrue(prompt.indexOf("{{") < 0, "存在未渲染占位符");
+    }
+
+    // ---------------- CAP-90 FR-04/09/10：日计划并入条目后的素材口径 ----------------
+
+    @Test
+    void 日计划对照块由未完成条目与周计划组成() {
+        WorklogEntryEntity todo = entry("修首页样式", 0).entry();
+        todo.setStatus("TODO");
+        todo.setEstimateMinutes(120);
+        WorklogEntryEntity doing = entry("联调日报生成", 0).entry();
+        doing.setStatus("DOING");
+        WorklogPlanItemEntity week = plan(2L, "WEEK", LocalDate.of(2026, 9, 14), "本周方向", "TODO", null);
+
+        String block = ReportPrompts.formatDayPlanBlock(List.of(todo, doing), List.of(week), Map.of());
+        assertTrue(block.contains("当日未完成条目（计划态，即今日计划）："), "缺未完成条目小节: " + block);
+        assertTrue(block.contains("- [状态=待办] 修首页样式（类型=DEV · 预估=2h）"), "缺条目行: " + block);
+        assertTrue(block.contains("- [状态=进行中] 联调日报生成"), "缺条目行: " + block);
+        assertTrue(block.contains("当周周计划项："), "缺周计划小节: " + block);
+        assertTrue(block.contains("[状态=待办] 本周方向"), "缺周计划行: " + block);
+    }
+
+    @Test
+    void 日计划对照块两者皆空渲染省略指令() {
+        assertEquals("（无计划项：省略计划对照/跟进块，不得编造计划）",
+                ReportPrompts.formatDayPlanBlock(List.of(), List.of(), Map.of()));
+        assertEquals("（无计划项：省略计划对照/跟进块，不得编造计划）",
+                ReportPrompts.formatDayPlanBlock(null, null, null));
+        // 只有未完成条目时也能成块（无周计划不阻断）
+        WorklogEntryEntity todo = entry("修首页样式", 0).entry();
+        todo.setStatus("TODO");
+        String block = ReportPrompts.formatDayPlanBlock(List.of(todo), List.of(), Map.of());
+        assertTrue(block.contains("当日未完成条目"), "仅未完成条目须成块: " + block);
+        assertFalse(block.contains("当周周计划项"), "无周计划项不出小节: " + block);
+    }
+
+    @Test
+    void 下周计划项确定性渲染为markdown() {
+        WorklogPlanItemEntity p1 = plan(1L, "WEEK", LocalDate.of(2026, 9, 21), "完成周报链路联调", "TODO", 120);
+        p1.setRequirementId("REQ-9");
+        WorklogPlanItemEntity p2 = plan(2L, "WEEK", LocalDate.of(2026, 9, 21), "评审对齐", "TODO", null);
+        p2.setPlanType("MEETING");
+        p2.setJiraIssueKey("ADM-12");
+
+        String md = ReportPrompts.renderNextPlanMarkdown(List.of(p1, p2));
+        assertEquals("1. [DEV] 完成周报链路联调（预估 2h · 需求=REQ-9）\n"
+                + "2. [MEETING] 评审对齐（Jira=ADM-12）", md);
+        assertEquals("", ReportPrompts.renderNextPlanMarkdown(List.of()));
+        assertEquals("", ReportPrompts.renderNextPlanMarkdown(null));
+    }
+
+    @Test
+    void 周报下周计划素材注入与缺席降级() {
+        String withItems = ReportPrompts.weekly(LocalDate.of(2026, 9, 7), List.of(), List.of(),
+                List.of(), "", "", "1. [DEV] 评审收尾", "{{nextWeekPlan}}", null);
+        assertEquals("1. [DEV] 评审收尾", withItems);
+
+        String blank = ReportPrompts.weekly(LocalDate.of(2026, 9, 7), List.of(), List.of(),
+                List.of(), "", "", "", "{{nextWeekPlan}}", null);
+        assertTrue(blank.contains("无下周计划项"), blank);
+        assertFalse(blank.contains("{{"));
     }
 
     // ---------------- CAP-88 M3：AI 建议计划 prompt ----------------

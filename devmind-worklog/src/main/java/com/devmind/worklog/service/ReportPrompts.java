@@ -55,7 +55,7 @@ final class ReportPrompts {
     static String weekly(LocalDate weekStart, List<DailyMaterial> dailies,
                          List<WorklogEntryService.DatedEntry> entries,
                          List<GitCommitView> commits, String lastWeekPlan, String thisWeekPlan,
-                         String template, String hint) {
+                         String nextWeekPlan, String template, String hint) {
         String material = !dailies.isEmpty() ? formatDailies(dailies) : formatEntries(entries);
         return appendHint(WorklogTemplates.render(template, Map.of(
                 "date", weekStart.toString(),
@@ -65,7 +65,40 @@ final class ReportPrompts {
                 "lastWeekPlan", formatLastWeekPlan(lastWeekPlan),
                 "thisWeekPlan", thisWeekPlan == null || thisWeekPlan.isBlank()
                         ? "（本周未排计划项：「下周计划」节依据本周未完成/进行中线索自由发挥）"
-                        : thisWeekPlan)), hint);
+                        : thisWeekPlan,
+                "nextWeekPlan", nextWeekPlan == null || nextWeekPlan.isBlank()
+                        ? "（无下周计划项：「下周计划」节按本周总结合理推断）"
+                        : nextWeekPlan)), hint);
+    }
+
+    /**
+     * CAP-90 FR-10：下周计划项 → 确定性 markdown 投影（不经 LLM，固定格式有序列表；
+     * 「从计划项重建」按钮与预览端点共用）。空列表返回空串（调用方按 itemCount 判断）。
+     */
+    static String renderNextPlanMarkdown(List<WorklogPlanItemEntity> items) {
+        if (items == null || items.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        int i = 1;
+        for (WorklogPlanItemEntity p : items) {
+            sb.append(i++).append(". [").append(p.getPlanType()).append("] ").append(p.getTitle());
+            List<String> meta = new ArrayList<>();
+            if (p.getEstimateMinutes() != null) {
+                meta.add("预估 " + hoursText(p.getEstimateMinutes()));
+            }
+            if (p.getRequirementId() != null && !p.getRequirementId().isBlank()) {
+                meta.add("需求=" + p.getRequirementId());
+            }
+            if (p.getJiraIssueKey() != null && !p.getJiraIssueKey().isBlank()) {
+                meta.add("Jira=" + p.getJiraIssueKey());
+            }
+            if (!meta.isEmpty()) {
+                sb.append("（").append(String.join(" · ", meta)).append("）");
+            }
+            sb.append('\n');
+        }
+        return sb.toString().strip();
     }
 
     /** 上一周周报的「下周计划」：缺省时明确提示省略跟进块，避免模型编造上周计划。 */
@@ -102,10 +135,7 @@ final class ReportPrompts {
             List<String> meta = new ArrayList<>();
             meta.add("类型=" + p.getPlanType());
             if (p.getEstimateMinutes() != null) {
-                double h = p.getEstimateMinutes() / 60.0;
-                meta.add("预估=" + (h == Math.floor(h) && !Double.isInfinite(h)
-                        ? Long.toString((long) h)
-                        : String.format(java.util.Locale.ROOT, "%.2f", h)) + "h");
+                meta.add("预估=" + hoursText(p.getEstimateMinutes()));
             }
             if (p.getRequirementId() != null && !p.getRequirementId().isBlank()) {
                 meta.add("需求=" + p.getRequirementId());
@@ -131,6 +161,53 @@ final class ReportPrompts {
             }
         }
         return sb.toString().strip();
+    }
+
+    /**
+     * CAP-90 FR-04 日报「今日计划对照」块（数据源切换：日计划并入条目）：当日未完成条目
+     * （TODO/DOING 计划态 = 今日计划）+ 当周周计划项。两者皆空渲染「省略」指令
+     * （存量兼容：对照块整块省略，不编造）。
+     */
+    static String formatDayPlanBlock(List<WorklogEntryEntity> unfinished,
+                                     List<WorklogPlanItemEntity> weekPlans,
+                                     Map<Long, List<WorklogEntryEntity>> linkedByPlanId) {
+        boolean noEntries = unfinished == null || unfinished.isEmpty();
+        boolean noPlans = weekPlans == null || weekPlans.isEmpty();
+        if (noEntries && noPlans) {
+            return "（无计划项：省略计划对照/跟进块，不得编造计划）";
+        }
+        StringBuilder sb = new StringBuilder();
+        if (!noEntries) {
+            sb.append("当日未完成条目（计划态，即今日计划）：\n");
+            for (WorklogEntryEntity e : unfinished) {
+                sb.append("- [状态=").append(PLAN_STATUS_LABELS.getOrDefault(e.getStatus(), e.getStatus()))
+                        .append("] ").append(e.getTitle());
+                List<String> meta = new ArrayList<>();
+                meta.add("类型=" + e.getEntryType());
+                if (e.getEstimateMinutes() != null) {
+                    meta.add("预估=" + hoursText(e.getEstimateMinutes()));
+                }
+                if (e.getRequirementId() != null && !e.getRequirementId().isBlank()) {
+                    meta.add("需求=" + e.getRequirementId());
+                }
+                sb.append("（").append(String.join(" · ", meta)).append("）\n");
+            }
+        }
+        if (!noPlans) {
+            if (sb.length() > 0) {
+                sb.append('\n');
+            }
+            sb.append("当周周计划项：\n").append(formatPlanItems(weekPlans, linkedByPlanId));
+        }
+        return sb.toString().strip();
+    }
+
+    /** 预估工时渲染（分钟 → "2h"/"1.25h"）。 */
+    private static String hoursText(int minutes) {
+        double h = minutes / 60.0;
+        return (h == Math.floor(h) && !Double.isInfinite(h)
+                ? Long.toString((long) h)
+                : String.format(java.util.Locale.ROOT, "%.2f", h)) + "h";
     }
 
     /** 按仓库分组；每条带日期、改动规模与提交正文（正文压成一行，避免挤占 prompt）。 */

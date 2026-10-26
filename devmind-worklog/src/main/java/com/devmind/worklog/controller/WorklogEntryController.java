@@ -2,6 +2,8 @@ package com.devmind.worklog.controller;
 
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.worklog.dto.EntryCarryRequest;
+import com.devmind.worklog.dto.EntryCarryResult;
 import com.devmind.worklog.dto.EntryPage;
 import com.devmind.worklog.dto.EntryRequest;
 import com.devmind.worklog.dto.EntryView;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.List;
 
 /** CAP-28 FR-03：工作条目 CRUD（仅本人）。 */
 @RestController
@@ -59,5 +62,21 @@ public class WorklogEntryController {
     @DeleteMapping("/{id}")
     public void delete(@PathVariable String id) {
         service.delete(id);
+    }
+
+    /** CAP-90 FR-05：上一日未完成（TODO/DOING）条目提示（当日清单顶部的滚转提示数据源）。 */
+    @GetMapping("/carryover")
+    public List<EntryView> carryover(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return service.dayCarryover(date);
+    }
+
+    /** CAP-90 FR-05：日粒度一键滚转（幂等：已 CARRIED/已完结跳过；原行置 CARRIED）。 */
+    @PostMapping("/carry")
+    public EntryCarryResult carry(@Valid @RequestBody EntryCarryRequest req) {
+        if (req.ids().size() > 200) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "单次滚转上限 200 项");
+        }
+        return service.carry(req.to(), req.ids());
     }
 }

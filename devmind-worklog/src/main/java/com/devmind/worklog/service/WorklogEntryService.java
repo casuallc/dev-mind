@@ -7,6 +7,7 @@ import com.devmind.common.integration.GitRepoCatalog;
 import com.devmind.worklog.dto.EntryPage;
 import com.devmind.worklog.dto.EntryRequest;
 import com.devmind.worklog.dto.EntryView;
+import com.devmind.worklog.dto.EntryCarryResult;
 import com.devmind.worklog.dto.GitImportRequest;
 import com.devmind.worklog.model.WorklogEntryEntity;
 import com.devmind.worklog.model.WorklogPlanItemEntity;
@@ -17,10 +18,12 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -52,6 +55,14 @@ public class WorklogEntryService {
 
     private static final Set<String> ENTRY_TYPES = Set.of(
             TYPE_DEV, TYPE_SUPPORT, TYPE_MEETING, TYPE_RESEARCH, TYPE_OTHER);
+
+    /** CAP-90 FR-02：人工可设状态（CARRIED 仅滚转写入） */
+    private static final Set<String> MANUAL_STATUSES = Set.of(
+            WorklogEntryEntity.STATUS_TODO, WorklogEntryEntity.STATUS_DOING,
+            WorklogEntryEntity.STATUS_DONE, WorklogEntryEntity.STATUS_DROPPED);
+    /** 未完成（可滚转）状态集 */
+    static final Set<String> UNFINISHED = Set.of(
+            WorklogEntryEntity.STATUS_TODO, WorklogEntryEntity.STATUS_DOING);
 
     private final WorklogEntryRepository entryRepo;
     private final WorklogPlanItemRepository planItemRepo;
@@ -99,11 +110,17 @@ public class WorklogEntryService {
         return EntryView.of(entryRepo.save(e), null);
     }
 
-    /** 更新（DB 主键直接定位；改期只是改 work_date 列）。他人条目 404（不暴露存在性）。 */
+    /** 更新（DB 主键直接定位；改期只是改 work_date 列）。他人条目 404（不暴露存在性）。
+     *  CAP-90 FR-02：GIT/AGENT 来源条目恒 DONE（事实），不可转非 DONE。 */
     public EntryView update(String id, EntryRequest req) {
         String me = identity.currentActor();
         WorklogEntryEntity e = entryRepo.findByIdAndUserId(id, me)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "条目不存在: " + id));
+        if ((SOURCE_GIT.equals(e.getSource()) || SOURCE_AGENT.equals(e.getSource()))
+                && req.status() != null && !WorklogEntryEntity.STATUS_DONE.equals(req.status().strip())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    e.getSource() + " 来源条目是已发生事实，状态恒为 DONE");
+        }
         applyTo(e, req);
         applyPlanLink(e, req.planId(), me);
         return EntryView.of(entryRepo.save(e), null);
@@ -158,16 +175,71 @@ public class WorklogEntryService {
                 .collect(Collectors.toSet());
     }
 
-    /** 当日条目（生成素材用；无 → 空表）。 */
+    /** 当日条目（生成素材用，CAP-90 FR-04：只取 DONE 事实条目；无 → 空表）。 */
     public List<WorklogEntryEntity> listDayEntries(String username, LocalDate date) {
-        return entryRepo.findByUserIdAndWorkDateOrderByCreatedAtAsc(username, date);
+        return entryRepo.findByUserIdAndWorkDateAndStatusInOrderByCreatedAtAsc(
+                username, date, Set.of(WorklogEntryEntity.STATUS_DONE));
     }
 
-    /** 范围条目（含归属日；按日期升序、日内创建时间序）。from/to 可空（null=不限）。 */
+    /** 范围条目（含归属日；按日期升序、日内创建时间序）。from/to 可空（null=不限）。
+     *  CAP-90 FR-04：素材口径只取 DONE 事实条目。 */
     public List<DatedEntry> listRangeEntries(String username, LocalDate from, LocalDate to) {
         return entryRepo.findRange(username, from, to).stream()
+                .filter(e -> WorklogEntryEntity.STATUS_DONE.equals(e.getStatus()))
                 .map(e -> new DatedEntry(e.getWorkDate(), e))
                 .toList();
+    }
+
+    /** 上一日未完成（TODO/DOING）条目提示（CAP-90 FR-05：日粒度滚转的提示数据，沿用 plans carryover 形态）。 */
+    public List<EntryView> dayCarryover(LocalDate date) {
+        String me = identity.currentActor();
+        return entryRepo.findByUserIdAndWorkDateAndStatusInOrderByCreatedAtAsc(
+                        me, date.minusDays(1), UNFINISHED).stream()
+                .map(e -> EntryView.of(e, null))
+                .toList();
+    }
+
+    /**
+     * 条目日粒度一键滚转（CAP-90 FR-05）：目标日插入各条目副本（新 uuid、status=TODO、estimate 沿用、
+     * carried_from_id=原 uuid、minutes 归零），原行置 CARRIED——单事务完成。
+     * 幂等：原行已 CARRIED 或已完结（DONE/DROPPED）即跳过；GIT/AGENT 来源恒 DONE 天然不可滚转。
+     */
+    @Transactional
+    public EntryCarryResult carry(LocalDate to, List<String> ids) {
+        String me = identity.currentActor();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        List<EntryView> created = new ArrayList<>();
+        int skipped = 0;
+        for (String id : ids) {
+            WorklogEntryEntity src = entryRepo.findByIdAndUserId(id, me)
+                    .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "条目不存在: " + id));
+            if (!UNFINISHED.contains(src.getStatus())) {
+                skipped++;
+                continue;
+            }
+            WorklogEntryEntity copy = new WorklogEntryEntity();
+            copy.setId(newId());
+            copy.setUserId(me);
+            copy.setWorkDate(to);
+            copy.setTitle(src.getTitle());
+            copy.setContent(src.getContent());
+            copy.setEntryType(src.getEntryType());
+            copy.setMinutes(0);
+            copy.setEstimateMinutes(src.getEstimateMinutes());
+            copy.setStatus(WorklogEntryEntity.STATUS_TODO);
+            copy.setSource(src.getSource());
+            copy.setRequirementId(src.getRequirementId());
+            copy.setJiraIssueKey(src.getJiraIssueKey());
+            copy.setPlanItemId(src.getPlanItemId());
+            copy.setCarriedFromId(src.getId());
+            copy.setCreatedAt(now);
+            copy.setUpdatedAt(now);
+            src.setStatus(WorklogEntryEntity.STATUS_CARRIED);
+            src.setUpdatedAt(now);
+            entryRepo.save(src);
+            created.add(EntryView.of(entryRepo.save(copy), null));
+        }
+        return new EntryCarryResult(created.size(), skipped, created);
     }
 
     // ---------------- 内部 ----------------
@@ -177,13 +249,23 @@ public class WorklogEntryService {
         return UUID.randomUUID().toString().replace("-", "");
     }
 
-    /** 就地更新可变字段；id/userId/source/repo/sha/createdAt 保留。 */
+    /** 就地更新可变字段；id/userId/source/repo/sha/carriedFromId/createdAt 保留。
+     *  status 空 = 不动（新建走实体默认 DONE）；CARRIED 人工不可设（仅滚转写入）。 */
     private static void applyTo(WorklogEntryEntity e, EntryRequest req) {
         e.setWorkDate(req.workDate());
         e.setTitle(req.title().strip());
         e.setContent(req.content());
         e.setEntryType(validatedType(req.entryType()));
         e.setMinutes(WorklogEntryFile.toMinutes(req.hours()));
+        if (req.status() != null && !req.status().isBlank()) {
+            String st = req.status().strip();
+            if (!MANUAL_STATUSES.contains(st)) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "status 仅支持 " + MANUAL_STATUSES + "（CARRIED 由滚转写入）");
+            }
+            e.setStatus(st);
+        }
+        e.setEstimateMinutes(req.estimateHours() == null ? null : WorklogEntryFile.toMinutes(req.estimateHours()));
         e.setRequirementId(req.requirementId());
         e.setJiraIssueKey(req.jiraIssueKey());
         e.setUpdatedAt(Instant.now().truncatedTo(ChronoUnit.SECONDS));
@@ -198,8 +280,9 @@ public class WorklogEntryService {
     }
 
     /**
-     * CAP-88 FR-04 条目关联计划：planId 必须是本人项（他人/不存在 404）；关联时该项为 TODO
-     * 则服务端置 DOING（关联只证明动过，不证明做完——DONE 必须人工）。null=解除关联。
+     * 条目关联计划（CAP-88 FR-04；CAP-90 FR-06：仅 WEEK 项可关联——日计划已并入条目，日执行
+     * 直接对齐周方向）：planId 必须是本人 WEEK 项（他人/不存在 404，DAY 项 400）；关联时该项为
+     * TODO 则服务端置 DOING（关联只证明动过，不证明做完——DONE 必须人工）。null=解除关联。
      */
     private void applyPlanLink(WorklogEntryEntity e, Long planId, String me) {
         if (planId == null) {
@@ -208,6 +291,10 @@ public class WorklogEntryService {
         }
         WorklogPlanItemEntity item = planItemRepo.findByIdAndUserId(planId, me)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "计划项不存在: " + planId));
+        if (!WorklogPlanItemEntity.SCOPE_WEEK.equals(item.getScope())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "日计划已并入条目（CAP-90），条目只能关联周计划项");
+        }
         e.setPlanItemId(planId);
         if (WorklogPlanItemEntity.STATUS_TODO.equals(item.getStatus())) {
             item.setStatus(WorklogPlanItemEntity.STATUS_DOING);

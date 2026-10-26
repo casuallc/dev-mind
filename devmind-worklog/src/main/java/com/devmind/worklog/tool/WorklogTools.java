@@ -142,7 +142,8 @@ public class WorklogTools {
             LocalDate workDate = dateOr(ToolText.str(args, "workDate"), LocalDate.now());
             EntryView view = entries.create(new EntryRequest(
                     workDate, title, ToolText.str(args, "content"), type, hours,
-                    ToolText.str(args, "requirementId"), ToolText.str(args, "jiraIssueKey"), null));
+                    ToolText.str(args, "requirementId"), ToolText.str(args, "jiraIssueKey"), null,
+                    null, null));
             String text = "已登记 " + view.workDate() + " 的工作日志：" + view.title()
                     + "（" + hours(view.hours()) + " 小时）";
             return ToolResult.ok(text, text, ToolResult.data(

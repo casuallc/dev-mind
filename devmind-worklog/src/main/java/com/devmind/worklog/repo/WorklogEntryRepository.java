@@ -30,15 +30,21 @@ public interface WorklogEntryRepository extends JpaRepository<WorklogEntryEntity
             String userId, LocalDate from, LocalDate to, String keyword, Pageable pageable);
 
     /** 范围内工时合计（分钟）；keyword 为空串时不过滤标题。
-     *  cast 红线：keyword 只在 concat 内无列可推断，PG 会落成 bytea——必须 cast 为 string。 */
+     *  cast 红线：keyword 只在 concat 内无列可推断，PG 会落成 bytea——必须 cast 为 string。
+     *  CAP-90 FR-04：工时统计一律只取 status=DONE 事实条目。 */
     @Query("SELECT COALESCE(SUM(e.minutes), 0) FROM WorklogEntryEntity e"
             + " WHERE e.userId = :userId AND e.workDate BETWEEN :from AND :to"
+            + " AND e.status = 'DONE'"
             + " AND (:keyword = '' OR LOWER(e.title) LIKE LOWER(CONCAT('%', cast(:keyword as string), '%')))")
     long sumMinutes(@Param("userId") String userId,
                     @Param("from") LocalDate from, @Param("to") LocalDate to,
                     @Param("keyword") String keyword);
 
     List<WorklogEntryEntity> findByUserIdAndWorkDateOrderByCreatedAtAsc(String userId, LocalDate workDate);
+
+    /** CAP-90：当日指定状态集条目（DONE=日报素材；TODO/DOING=日滚转提示与计划对照） */
+    List<WorklogEntryEntity> findByUserIdAndWorkDateAndStatusInOrderByCreatedAtAsc(
+            String userId, LocalDate workDate, Collection<String> statuses);
 
     Optional<WorklogEntryEntity> findByIdAndUserId(String id, String userId);
 
