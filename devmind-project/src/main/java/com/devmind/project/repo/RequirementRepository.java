@@ -42,5 +42,13 @@ public interface RequirementRepository extends JpaRepository<RequirementEntity, 
     @Query("select max(r.seq) from RequirementEntity r where r.projectId = :projectId")
     Long findMaxSeqByProjectId(@Param("projectId") String projectId);
 
+    /**
+     * 某用户在办的需求（owner 或 assignee 命中；进行中/待验收），新近更新优先。
+     * CAP-88 FR-10 WipRequirementProvider 素材查询。
+     */
+    @Query("select r from RequirementEntity r where (r.ownerId = :userId or r.assignee = :userId)"
+            + " and r.status in ('IN_PROGRESS', 'ACCEPTANCE') order by r.updatedAt desc")
+    List<RequirementEntity> findWipByUser(@Param("userId") String userId, Pageable pageable);
+
     void deleteByProjectId(String projectId);
 }
