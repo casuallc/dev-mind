@@ -80,7 +80,7 @@ export default function KnowledgeBaseSettingsDrawer({
         setSaving(true)
         try {
           const updated = await updateBase(current.id, values)
-          message.success('设置已保存')
+          message.success('已更新')
           onSaved(updated)
           onClose()
         } catch (e) {
@@ -122,18 +122,16 @@ export default function KnowledgeBaseSettingsDrawer({
   return (
     <>
       <Drawer
-        title={current ? `设置 · ${current.name}` : '知识库设置'}
+        title={current ? '编辑知识库' : '知识库设置'}
         open={open}
         onClose={onClose}
         width={DRAWER_DEFAULT}
+        destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button onClick={onClose}>取消</Button>
-            <Button icon={<EyeOutlined />} onClick={() => setPreviewOpen(true)} disabled={!current}>
-              注入预览
-            </Button>
             <Button type="primary" loading={saving} onClick={onSave} disabled={!current}>
-              保存设置
+              保存
             </Button>
           </Space>
         }
@@ -142,17 +140,14 @@ export default function KnowledgeBaseSettingsDrawer({
           <Typography.Text type="secondary">加载中…</Typography.Text>
         ) : (
           <>
-            <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-              库的基本设置；归档后退出检索与会话注入。范围与所属项目创建后不可改。
-            </Typography.Paragraph>
-            <Form form={form} labelCol={{ span: 5 }} wrapperCol={{ span: 16 }} style={{ maxWidth: 760 }}>
+            <Form form={form} layout="vertical">
               <Form.Item name="name" label="名称" rules={[{ required: true, message: '请填写名称' }]}>
-                <Input />
+                <Input placeholder="如 在线商城后端经验库" />
               </Form.Item>
               <Form.Item name="description" label="描述">
-                <Input />
+                <Input.TextArea rows={2} placeholder="库的用途、覆盖范围（可选）" />
               </Form.Item>
-              <Form.Item label="范围">
+              <Form.Item label="范围" extra="范围与所属项目创建后不可修改">
                 <Space>
                   <Tag color={current.scope === 'global' ? 'blue' : undefined}>
                     {current.scope === 'global' ? '全局' : '项目'}
@@ -167,7 +162,16 @@ export default function KnowledgeBaseSettingsDrawer({
               <Form.Item
                 name="injectMode"
                 label="注入方式"
-                extra="全量注入：会话启动时注入整库（适合经验/规范库）；RAG：按提问检索并召回相关片段（适合文档量大）"
+                extra={
+                  <Space size={4} wrap>
+                    <span>
+                      全量注入：会话启动时注入整库（适合经验/规范库）；RAG：按提问检索并召回相关片段（适合文档量大）
+                    </span>
+                    <Typography.Link onClick={() => setPreviewOpen(true)}>
+                      <EyeOutlined /> 预览注入效果
+                    </Typography.Link>
+                  </Space>
+                }
               >
                 <Select
                   options={[
