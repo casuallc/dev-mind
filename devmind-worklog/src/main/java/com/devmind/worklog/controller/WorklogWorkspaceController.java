@@ -7,18 +7,18 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** CAP-41：工作日志空间查询与懒初始化；CAP-74：事实源改服务端仓，push 改服务端直推（不再下发 runner）。 */
+/**
+ * CAP-41：工作日志空间查询与懒初始化。
+ * CAP-89：push/resolve 端点随 git 仓链路退役删除（远端推送整体下线，见 CAP-89 §4）。
+ */
 @RestController
 @RequestMapping("/api/worklog/workspace")
 public class WorklogWorkspaceController {
 
     private final WorklogWorkspaceService service;
-    private final com.devmind.worklog.service.WorklogRemoteBackupService backupService;
 
-    public WorklogWorkspaceController(WorklogWorkspaceService service,
-                                      com.devmind.worklog.service.WorklogRemoteBackupService backupService) {
+    public WorklogWorkspaceController(WorklogWorkspaceService service) {
         this.service = service;
-        this.backupService = backupService;
     }
 
     @GetMapping
@@ -29,24 +29,5 @@ public class WorklogWorkspaceController {
     @PostMapping("/ensure")
     public WorkspaceView ensure() {
         return service.ensure();
-    }
-
-    /**
-     * CAP-74：服务端直推个人仓到已绑定远端（fetch+merge+push；分叉冲突 409，
-     * 走 POST /api/worklog/repos/{key}/resolve 显式解决）。未绑定远端 400、缺凭证 409。
-     */
-    @PostMapping("/push")
-    public com.devmind.common.agent.WorklogPushResult push() {
-        return backupService.pushToRemote();
-    }
-
-    /**
-     * push 409 冲突后的显式解决（个人仓快捷入口，strategy=ours 以平台为准 / theirs 以远端为准）：
-     * 与 POST /api/worklog/repos/{key}/resolve 同逻辑，key 由当前用户推导，免前端拼 personal-<username>。
-     */
-    @PostMapping("/resolve")
-    public com.devmind.common.agent.WorklogPushResult resolve(
-            @org.springframework.web.bind.annotation.RequestParam("strategy") String strategy) {
-        return backupService.resolvePersonalConflict(strategy);
     }
 }

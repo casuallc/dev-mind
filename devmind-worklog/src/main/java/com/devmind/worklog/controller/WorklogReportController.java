@@ -30,7 +30,7 @@ import java.util.List;
 /**
  * CAP-28 FR-05/06：日报/周报查询、手动创建空白稿、编辑保存；
  * CAP-41 FR-03：AI 触发生成 = 创建 worklog 会话（同步受理返回 sessionId，前端轮询报告）；
- * CAP-74：编辑保存按日期/周一寻址（PUT /daily/{date}、/weekly/{weekStart}），状态机删除。
+ * CAP-89：存储回 DB——编辑保存按日期/周一寻址直写 DB（保存即生效），状态机与写仓链路删除。
  */
 @RestController
 @RequestMapping("/api/worklog")
@@ -70,7 +70,7 @@ public class WorklogReportController {
         return reportService.weekDaily(identity.currentActor(), weekStart);
     }
 
-    /** 手动触发生成（CAP-41：创建 worklog 会话，立即返回 sessionId；成稿随会话结束回传写仓）。 */
+    /** 手动触发生成（CAP-41：创建 worklog 会话，立即返回 sessionId；成稿随会话结束回传落库）。 */
     @PostMapping("/daily/generate")
     public ReportLaunch generateDaily(@Valid @RequestBody GenerateDailyRequest req) {
         String actor = identity.currentActor();
@@ -85,7 +85,7 @@ public class WorklogReportController {
         return reportService.createDaily(identity.currentActor(), req.date());
     }
 
-    /** CAP-74：按日期寻址保存（保存即生效写仓 + commit）；status 字段已废弃，传了 400。 */
+    /** CAP-89：按日期寻址保存（保存即生效落库）；status 字段已废弃，传了 400。 */
     @PutMapping("/daily/{date}")
     public DailyReportView updateDaily(
             @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
@@ -121,7 +121,7 @@ public class WorklogReportController {
         return reportService.createWeekly(identity.currentActor(), req.weekStart());
     }
 
-    /** CAP-74：按周一寻址保存（分节字段重组正文写仓）；status 传了 400。 */
+    /** CAP-89：按周一寻址保存（分节字段直写两列）；status 传了 400。 */
     @PutMapping("/weekly/{weekStart}")
     public WeeklyReportView updateWeekly(
             @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart,
@@ -133,7 +133,7 @@ public class WorklogReportController {
 
     /**
      * 把工作日志空间某会话的成稿产出（.devmind/output 的 daily-/weekly- 文件）
-     * 写进服务端仓（幂等；同内容零 commit）。前端对话页「推送工作日志」用，
+     * 落库（幂等；同内容静默跳过，已有不同内容不覆盖）。前端对话页「推送工作日志」用，
      * 调用前通常先 POST /sessions/{id}/outputs/collect 让 runner 即时回传。
      */
     @PostMapping("/reports/sync")

@@ -76,17 +76,8 @@ public class WorklogUserSettingsEntity {
     @Column(name = "weekly_template_md", length = 16_777_216)
     private String weeklyTemplateMd;
 
-    /** CAP-41 M3：远端备份仓库 URL（http/https/file，不含凭证；null = 未绑定） */
-    @Column(name = "remote_url", length = 512)
-    private String remoteUrl;
-
-    /** CAP-41 M3：远端备份目标分支（null/空白 = main） */
-    @Column(name = "remote_branch", length = 128)
-    private String remoteBranch;
-
-    /** CAP-74 FR-01：写入路由——活动仓 repo_key（null = 个人仓；团队仓绑定后设置页切换） */
-    @Column(name = "active_repo_key", length = 64)
-    private String activeRepoKey;
+    // CAP-89：remote_url / remote_branch / active_repo_key 三列随 git 仓链路退役停读写，
+    // 实体不再映射（存量列保留不删，同 daily_reports.status 先例）。
 
     @Column(name = "updated_at")
     private Instant updatedAt;
@@ -116,12 +107,6 @@ public class WorklogUserSettingsEntity {
     public void setDailyTemplateMd(String dailyTemplateMd) { this.dailyTemplateMd = dailyTemplateMd; }
     public String getWeeklyTemplateMd() { return weeklyTemplateMd; }
     public void setWeeklyTemplateMd(String weeklyTemplateMd) { this.weeklyTemplateMd = weeklyTemplateMd; }
-    public String getRemoteUrl() { return remoteUrl; }
-    public void setRemoteUrl(String remoteUrl) { this.remoteUrl = remoteUrl; }
-    public String getRemoteBranch() { return remoteBranch; }
-    public void setRemoteBranch(String remoteBranch) { this.remoteBranch = remoteBranch; }
-    public String getActiveRepoKey() { return activeRepoKey; }
-    public void setActiveRepoKey(String activeRepoKey) { this.activeRepoKey = activeRepoKey; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
 }

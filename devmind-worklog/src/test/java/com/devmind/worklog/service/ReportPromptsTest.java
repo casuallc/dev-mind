@@ -1,12 +1,12 @@
 package com.devmind.worklog.service;
 
 import com.devmind.worklog.dto.GitCommitView;
+import com.devmind.worklog.model.WorklogEntryEntity;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -27,9 +27,13 @@ class ReportPromptsTest {
     }
 
     private static WorklogEntryService.DatedEntry entry(String title, int minutes) {
-        WorklogEntryFile.ParsedEntry e = new WorklogEntryFile.ParsedEntry(
-                "id1", "DEV", minutes, "MANUAL", null, null, null, null,
-                Instant.now(), title, null, Map.of());
+        WorklogEntryEntity e = new WorklogEntryEntity();
+        e.setId("id1");
+        e.setWorkDate(LocalDate.of(2026, 9, 14));
+        e.setTitle(title);
+        e.setEntryType("DEV");
+        e.setMinutes(minutes);
+        e.setSource("MANUAL");
         return new WorklogEntryService.DatedEntry(LocalDate.of(2026, 9, 14), e);
     }
 

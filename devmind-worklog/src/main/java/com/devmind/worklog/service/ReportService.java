@@ -11,24 +11,29 @@ import com.devmind.worklog.dto.ReportLaunch;
 import com.devmind.worklog.dto.UpdateDailyRequest;
 import com.devmind.worklog.dto.UpdateWeeklyRequest;
 import com.devmind.worklog.dto.WeeklyReportView;
+import com.devmind.worklog.model.DailyReportEntity;
+import com.devmind.worklog.model.WeeklyReportEntity;
+import com.devmind.worklog.model.WorklogEntryEntity;
+import com.devmind.worklog.repo.DailyReportRepository;
+import com.devmind.worklog.repo.WeeklyReportRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.LocalDate;
-import java.util.Comparator;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 /**
  * CAP-28 FR-05/06：日报/周报查询、手动空白稿、编辑保存；CAP-41 FR-03：AI 生成改真实会话；
- * CAP-74：读改写全部收口到服务端 git 仓（{@link WorklogRepoService} 单写者），
- * DRAFT/CONFIRMED 状态机删除——保存即生效，防自动覆盖靠「非 force 已存在跳过 + git 历史可回溯」。
+ * CAP-89：存储回 DB（CAP-74 的服务端 git 仓链路整体退役）——daily_reports/weekly_reports
+ * 重新成为事实源。防覆盖语义不变：自动路径（定时/手动非 force）在目标行已存在时跳过；
+ * force 显式覆盖（旧版不留历史——已定稿接受的代价，见 CAP-89 §10）。
  *
  * <p>生成 = 在本人 WORKLOG 项目下创建 kind=worklog 会话（场景 worklog-daily / worklog-weekly，
  * prompt = 渲染后的格式模板 + 素材快照），claude 在 runner 草稿区把成稿写到
- * .devmind/output/ 回传；写仓由 {@link WorklogOutputMirror} 在会话结束时消费回传完成。</p>
- *
- * <p>幂等：目标文件已存在且非 force 直接复用不起会话；force 显式覆盖（旧版本 git log 可找回）。</p>
+ * .devmind/output/ 回传；落库由 {@link WorklogOutputMirror} 在会话结束时消费回传完成。</p>
  */
 @Service
 public class ReportService {
@@ -39,7 +44,7 @@ public class ReportService {
     static final String SUMMARY_HEADING = "## 上周总结";
     static final String PLAN_HEADING = "## 下周计划";
 
-    /** 周报视图/周报素材读全文的上限（一人一周一文件，量级小；截断只是兜底防爆） */
+    /** 周报视图/周报素材读全文的上限（截断只是兜底防爆） */
     private static final int FULL_READ_CHARS = 500_000;
 
     private final WorklogEntryService entryService;
@@ -47,50 +52,52 @@ public class ReportService {
     private final WorklogSettingsService settingsService;
     private final WorklogWorkspaceService workspaceService;
     private final SessionManagerService sessionManager;
-    private final WorklogRepoService repoService;
+    private final DailyReportRepository dailyRepo;
+    private final WeeklyReportRepository weeklyRepo;
 
     public ReportService(WorklogEntryService entryService,
                          GitLogScanner gitScanner,
                          WorklogSettingsService settingsService,
                          WorklogWorkspaceService workspaceService,
                          SessionManagerService sessionManager,
-                         WorklogRepoService repoService) {
+                         DailyReportRepository dailyRepo,
+                         WeeklyReportRepository weeklyRepo) {
         this.entryService = entryService;
         this.gitScanner = gitScanner;
         this.settingsService = settingsService;
         this.workspaceService = workspaceService;
         this.sessionManager = sessionManager;
-        this.repoService = repoService;
+        this.dailyRepo = dailyRepo;
+        this.weeklyRepo = weeklyRepo;
     }
 
     // ---------------- 日报 ----------------
 
     public DailyReportView getDaily(String username, LocalDate date) {
-        return repoService.readReport(username, WorklogRepoService.ReportKind.DAILY, date)
-                .map(c -> new DailyReportView(true, date, c.contentMd(), c.sessionId(),
-                        c.createdAt(), c.updatedAt()))
+        return dailyRepo.findByUserIdAndWorkDate(username, date)
+                .map(e -> new DailyReportView(true, date, e.getContentMd(), e.getSessionId(),
+                        e.getCreatedAt(), e.getUpdatedAt()))
                 .orElse(null);
     }
 
     /** 最近 days 天内有报告的日报（新日期在前，contentMd 为前 1000 字预览），前端「最近两周」列表用。 */
     public List<DailyReportView> recentDaily(String username, int days) {
         LocalDate to = LocalDate.now();
-        return repoService.listReports(username, WorklogRepoService.ReportKind.DAILY,
-                        to.minusDays(days - 1L), to, 1000)
+        return dailyRepo.findByUserIdAndWorkDateBetweenOrderByWorkDateDesc(
+                        username, to.minusDays(days - 1L), to)
                 .stream()
-                .map(s -> new DailyReportView(true, s.date(), s.preview(), s.sessionId(),
-                        s.createdAt(), s.updatedAt()))
+                .map(e -> new DailyReportView(true, e.getWorkDate(), preview(e.getContentMd(), 1000),
+                        e.getSessionId(), e.getCreatedAt(), e.getUpdatedAt()))
                 .toList();
     }
 
     /** 某周（weekStart=周一）7 天内有报告的日报（日期升序，contentMd 为预览），日报周视图的周日选择条用。 */
     public List<DailyReportView> weekDaily(String username, LocalDate weekStart) {
-        return repoService.listReports(username, WorklogRepoService.ReportKind.DAILY,
-                        weekStart, weekStart.plusDays(6), 1000)
+        return dailyRepo.findByUserIdAndWorkDateBetweenOrderByWorkDateAsc(
+                        username, weekStart, weekStart.plusDays(6))
                 .stream()
-                .sorted(Comparator.comparing(WorklogRepoService.ReportSummary::date))
-                .map(s -> new DailyReportView(true, s.date(), s.preview(), s.sessionId(),
-                        s.createdAt(), s.updatedAt()))
+                .map(e -> new DailyReportView(true, e.getWorkDate(), preview(e.getContentMd(), 1000),
+                        e.getSessionId(), e.getCreatedAt(), e.getUpdatedAt()))
                 .toList();
     }
 
@@ -99,7 +106,7 @@ public class ReportService {
      * 无素材 → 400。让「点生成却永远没有结果」的场景立即报错，而不是起会话后空跑。
      */
     public void precheckDaily(String username, LocalDate date, boolean force) {
-        boolean exists = repoService.reportExists(username, WorklogRepoService.ReportKind.DAILY, date);
+        boolean exists = dailyRepo.existsByUserIdAndWorkDate(username, date);
         if (exists && !force) {
             return; // 已有报告且非 force：generate 直接复用，无需素材
         }
@@ -112,11 +119,11 @@ public class ReportService {
 
     /**
      * 生成日报：创建 worklog 会话（场景 worklog-daily），立即返回会话 id；
-     * 成稿随会话结束回传写仓（{@link WorklogOutputMirror}）。
-     * 已存在：非 force 复用（reused=true，不起会话）；force 显式覆盖（旧稿 git log 可找回）。
+     * 成稿随会话结束回传落库（{@link WorklogOutputMirror}）。
+     * 已存在：非 force 复用（reused=true，不起会话）；force 显式覆盖（旧版不留，见类注释）。
      */
     public ReportLaunch generateDaily(String username, LocalDate date, boolean force, String hint) {
-        boolean exists = repoService.reportExists(username, WorklogRepoService.ReportKind.DAILY, date);
+        boolean exists = dailyRepo.existsByUserIdAndWorkDate(username, date);
         if (exists && !force) {
             return new ReportLaunch(null, true);
         }
@@ -137,25 +144,31 @@ public class ReportService {
 
     /** 手动创建空白日报（不经 AI、不要求素材）。幂等：已存在直接返回，不覆盖已有内容。 */
     public DailyReportView createDaily(String username, LocalDate date) {
-        if (!repoService.reportExists(username, WorklogRepoService.ReportKind.DAILY, date)) {
-            repoService.writeReport(username, WorklogRepoService.ReportKind.DAILY, date, "",
-                    WorklogRepoService.CommitSource.MANUAL, null, null);
+        if (!dailyRepo.existsByUserIdAndWorkDate(username, date)) {
+            DailyReportEntity e = new DailyReportEntity();
+            e.setUserId(username);
+            e.setWorkDate(date);
+            e.setContentMd("");
+            Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+            e.setCreatedAt(now);
+            e.setUpdatedAt(now);
+            dailyRepo.save(e);
         }
         return getDaily(username, date);
     }
 
     /**
-     * 编辑保存日报（CAP-74：PUT 按日期寻址，保存即生效写仓 + commit）。
+     * 编辑保存日报（按日期寻址，保存即生效）。
      * status 字段已随状态机删除——传了即 400（防旧前端静默误以为确认生效）。
      */
     public DailyReportView updateDaily(String username, LocalDate date, UpdateDailyRequest req) {
         rejectStatus(req.status());
-        if (!repoService.reportExists(username, WorklogRepoService.ReportKind.DAILY, date)) {
-            throw new DevMindException(ErrorCode.NOT_FOUND, "日报不存在: " + date);
-        }
+        DailyReportEntity e = dailyRepo.findByUserIdAndWorkDate(username, date)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "日报不存在: " + date));
         if (req.contentMd() != null) {
-            repoService.writeReport(username, WorklogRepoService.ReportKind.DAILY, date,
-                    req.contentMd(), WorklogRepoService.CommitSource.MANUAL, null, null);
+            e.setContentMd(req.contentMd());
+            e.setUpdatedAt(Instant.now().truncatedTo(ChronoUnit.SECONDS));
+            dailyRepo.save(e);
         }
         return getDaily(username, date);
     }
@@ -163,30 +176,32 @@ public class ReportService {
     // ---------------- 周报 ----------------
 
     public WeeklyReportView getWeekly(String username, LocalDate weekStart) {
-        return repoService.readReport(username, WorklogRepoService.ReportKind.WEEKLY, weekStart)
-                .map(c -> toWeeklyView(weekStart, c.contentMd(), c.sessionId(), c.createdAt(), c.updatedAt()))
+        return weeklyRepo.findByUserIdAndWeekStart(username, weekStart)
+                .map(e -> new WeeklyReportView(true, weekStart, e.getSummaryMd(), e.getNextPlanMd(),
+                        e.getSessionId(), e.getCreatedAt(), e.getUpdatedAt()))
                 .orElse(null);
     }
 
     /** 最近 weeks 个周（含本周，周一为界）有报告的周报（新周在前），前端「最近一个月」列表用。 */
     public List<WeeklyReportView> recentWeekly(String username, int weeks) {
         LocalDate thisMonday = LocalDate.now().with(java.time.DayOfWeek.MONDAY);
-        return repoService.listReports(username, WorklogRepoService.ReportKind.WEEKLY,
-                        thisMonday.minusWeeks(weeks - 1L), thisMonday, FULL_READ_CHARS)
+        return weeklyRepo.findByUserIdAndWeekStartBetweenOrderByWeekStartDesc(
+                        username, thisMonday.minusWeeks(weeks - 1L), thisMonday)
                 .stream()
-                .map(s -> toWeeklyView(s.date(), s.preview(), s.sessionId(), s.createdAt(), s.updatedAt()))
+                .map(e -> new WeeklyReportView(true, e.getWeekStart(), e.getSummaryMd(), e.getNextPlanMd(),
+                        e.getSessionId(), e.getCreatedAt(), e.getUpdatedAt()))
                 .toList();
     }
 
     /** 周报手动生成预检：同 {@link #precheckDaily}，素材 = 该周日报或原始条目。 */
     public void precheckWeekly(String username, LocalDate weekStart, boolean force) {
-        boolean exists = repoService.reportExists(username, WorklogRepoService.ReportKind.WEEKLY, weekStart);
+        boolean exists = weeklyRepo.existsByUserIdAndWeekStart(username, weekStart);
         if (exists && !force) {
             return;
         }
         LocalDate weekEnd = weekStart.plusDays(6);
-        boolean noDaily = repoService.listReports(username, WorklogRepoService.ReportKind.DAILY,
-                weekStart, weekEnd, 1).isEmpty();
+        boolean noDaily = dailyRepo.findByUserIdAndWorkDateBetweenOrderByWorkDateAsc(
+                username, weekStart, weekEnd).isEmpty();
         boolean noEntry = entryService.listRangeEntries(username, weekStart, weekEnd).isEmpty();
         if (noDaily && noEntry) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
@@ -195,22 +210,21 @@ public class ReportService {
     }
 
     /**
-     * 生成周报：创建 worklog 会话（场景 worklog-weekly）。素材 = 该周日报全文（CAP-74：
-     * 草稿区无历史文件可回读，prompt 携带的日报全文是唯一素材口径；无日报回退该周原始条目）
-     * + 该周 git 提交。
+     * 生成周报：创建 worklog 会话（场景 worklog-weekly）。素材 = 该周日报全文（草稿区无历史文件
+     * 可回读，prompt 携带的日报全文是唯一素材口径；无日报回退该周原始条目）+ 该周 git 提交。
      */
     public ReportLaunch generateWeekly(String username, LocalDate weekStart, boolean force, String hint) {
-        boolean exists = repoService.reportExists(username, WorklogRepoService.ReportKind.WEEKLY, weekStart);
+        boolean exists = weeklyRepo.existsByUserIdAndWeekStart(username, weekStart);
         if (exists && !force) {
             return new ReportLaunch(null, true);
         }
 
         LocalDate weekEnd = weekStart.plusDays(6);
-        List<ReportPrompts.DailyMaterial> dailies = repoService.listReports(username,
-                        WorklogRepoService.ReportKind.DAILY, weekStart, weekEnd, FULL_READ_CHARS)
+        List<ReportPrompts.DailyMaterial> dailies = dailyRepo
+                .findByUserIdAndWorkDateBetweenOrderByWorkDateAsc(username, weekStart, weekEnd)
                 .stream()
-                .sorted(Comparator.comparing(WorklogRepoService.ReportSummary::date))
-                .map(s -> new ReportPrompts.DailyMaterial(s.date(), s.preview()))
+                .map(e -> new ReportPrompts.DailyMaterial(e.getWorkDate(),
+                        preview(e.getContentMd(), FULL_READ_CHARS)))
                 .toList();
         List<WorklogEntryService.DatedEntry> entries = List.of();
         if (dailies.isEmpty()) {
@@ -229,37 +243,46 @@ public class ReportService {
                         lastWeekPlan(username, weekStart), template, hint));
     }
 
-    /** 上一周周报的「下周计划」；无上周周报/计划为空 → 空串（模板据此省略跟进块）。 */
+    /** 上一周周报的「下周计划」（DB next_plan_md 直读）；无上周周报/计划为空 → 空串（模板据此省略跟进块）。 */
     String lastWeekPlan(String username, LocalDate weekStart) {
-        return repoService.readReport(username, WorklogRepoService.ReportKind.WEEKLY,
-                        weekStart.minusWeeks(1))
-                .map(c -> splitWeekly(c.contentMd())[1])
+        return weeklyRepo.findByUserIdAndWeekStart(username, weekStart.minusWeeks(1))
+                .map(WeeklyReportEntity::getNextPlanMd)
                 .orElse("");
     }
 
     /** 手动创建空白周报：同 {@link #createDaily}，幂等。 */
     public WeeklyReportView createWeekly(String username, LocalDate weekStart) {
-        if (!repoService.reportExists(username, WorklogRepoService.ReportKind.WEEKLY, weekStart)) {
-            repoService.writeReport(username, WorklogRepoService.ReportKind.WEEKLY, weekStart,
-                    assembleWeekly("", ""), WorklogRepoService.CommitSource.MANUAL, null, null);
+        if (!weeklyRepo.existsByUserIdAndWeekStart(username, weekStart)) {
+            WeeklyReportEntity e = new WeeklyReportEntity();
+            e.setUserId(username);
+            e.setWeekStart(weekStart);
+            e.setSummaryMd("");
+            e.setNextPlanMd("");
+            Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+            e.setCreatedAt(now);
+            e.setUpdatedAt(now);
+            weeklyRepo.save(e);
         }
         return getWeekly(username, weekStart);
     }
 
     /**
-     * 编辑保存周报（按 weekStart 寻址）：分节字段重组正文写仓（未提供的节保留现状）。
+     * 编辑保存周报（按 weekStart 寻址）：分节字段直写两列（未提供的节保留现状）。
      * status 传了即 400（同 {@link #updateDaily}）。
      */
     public WeeklyReportView updateWeekly(String username, LocalDate weekStart, UpdateWeeklyRequest req) {
         rejectStatus(req.status());
-        var current = repoService.readReport(username, WorklogRepoService.ReportKind.WEEKLY, weekStart)
+        WeeklyReportEntity e = weeklyRepo.findByUserIdAndWeekStart(username, weekStart)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "周报不存在: " + weekStart));
         if (req.summaryMd() != null || req.nextPlanMd() != null) {
-            String[] parts = splitWeekly(current.contentMd());
-            String summary = req.summaryMd() != null ? req.summaryMd() : parts[0];
-            String plan = req.nextPlanMd() != null ? req.nextPlanMd() : parts[1];
-            repoService.writeReport(username, WorklogRepoService.ReportKind.WEEKLY, weekStart,
-                    assembleWeekly(summary, plan), WorklogRepoService.CommitSource.MANUAL, null, null);
+            if (req.summaryMd() != null) {
+                e.setSummaryMd(req.summaryMd());
+            }
+            if (req.nextPlanMd() != null) {
+                e.setNextPlanMd(req.nextPlanMd());
+            }
+            e.setUpdatedAt(Instant.now().truncatedTo(ChronoUnit.SECONDS));
+            weeklyRepo.save(e);
         }
         return getWeekly(username, weekStart);
     }
@@ -273,9 +296,8 @@ public class ReportService {
     private ReportLaunch launch(String username, String scenarioCode, String prompt) {
         String projectId = workspaceService.ensureFor(username).projectId();
         if (projectId == null || projectId.isBlank()) {
-            // CAP-74：仓初始化不再被节点阻断，409 推迟到这里 fail-visible
             throw new DevMindException(ErrorCode.CONFLICT,
-                    "无平台默认执行节点，无法创建工作日志生成会话（请先注册 runner 节点并设为默认；读/编辑/推送不受影响）");
+                    "无平台默认执行节点，无法创建工作日志生成会话（请先注册 runner 节点并设为默认；读/编辑不受影响）");
         }
         SessionView s = sessionManager.create(new CreateSessionRequest(
                 null, scenarioCode, projectId, null, null, prompt,
@@ -284,14 +306,16 @@ public class ReportService {
         return new ReportLaunch(s.id(), false);
     }
 
-    /** 周报分节视图组装（contentMd 全文 → summary/nextPlan）。 */
-    private static WeeklyReportView toWeeklyView(LocalDate weekStart, String contentMd, String sessionId,
-                                                 java.time.Instant createdAt, java.time.Instant updatedAt) {
-        String[] parts = splitWeekly(contentMd);
-        return new WeeklyReportView(true, weekStart, parts[0], parts[1], sessionId, createdAt, updatedAt);
+    /** 列表 preview / 全文上限截断（null 安全）。 */
+    static String preview(String content, int chars) {
+        if (content == null) {
+            return "";
+        }
+        return content.length() <= chars ? content : content.substring(0, chars);
     }
 
-    /** 分节重组周报正文（plan 空省略尾部，往返幂等：splitWeekly(assembleWeekly(s,p)) == [s,p]）。 */
+    /** 周报分节重组正文（plan 空省略尾部，往返幂等：splitWeekly(assembleWeekly(s,p)) == [s,p]）。
+     *  存量仓文件迁移与成稿回传落库（全文 → 两列）共用。 */
     static String assembleWeekly(String summary, String plan) {
         String s = summary == null ? "" : summary.strip();
         String p = plan == null ? "" : plan.strip();
@@ -318,7 +342,7 @@ public class ReportService {
     private static void rejectStatus(String status) {
         if (status != null) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
-                    "status 字段已废弃（CAP-74 去状态机，保存即生效），请不要再传");
+                    "status 字段已废弃（去状态机，保存即生效），请不要再传");
         }
     }
 }

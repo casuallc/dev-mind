@@ -1,6 +1,7 @@
 package com.devmind.worklog.service;
 
 import com.devmind.worklog.dto.GitCommitView;
+import com.devmind.worklog.model.WorklogEntryEntity;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -14,8 +15,8 @@ import java.util.Map;
  * CAP-41 FR-03/05 生成 prompt 组装：渲染后的格式模板 + 当日/当周素材。
  *
  * <p>CAP-74：草稿区无历史文件可回读，prompt 携带的素材快照是唯一素材口径——
- * 周报素材改由服务端仓读出的日报全文（{@link DailyMaterial}）组成。
- * CAP-74 M3：条目素材从 DB 表切到仓内 day 文件（{@link WorklogEntryService.DatedEntry}）。</p>
+ * 周报素材由日报全文（{@link DailyMaterial}）组成。CAP-89：存储回 DB，素材口径不变
+ * （条目/日报均从 DB 表读，{@link WorklogEntryService.DatedEntry}）。</p>
  *
  * <p>生成质量：git 素材按仓库分组，带提交正文与改动规模（同一需求的多次提交才可归并）；
  * 条目补需求/Jira/来源；周报额外携带上一周周报的「下周计划」，要求本周总结逐条呼应；
@@ -110,22 +111,22 @@ final class ReportPrompts {
         }
         StringBuilder sb = new StringBuilder();
         for (WorklogEntryService.DatedEntry d : entries) {
-            WorklogEntryFile.ParsedEntry e = d.entry();
+            WorklogEntryEntity e = d.entry();
             List<String> meta = new ArrayList<>();
-            meta.add(e.minutes() + " 分钟");
-            if (e.requirementId() != null && !e.requirementId().isBlank()) {
-                meta.add("需求=" + e.requirementId());
+            meta.add(e.getMinutes() + " 分钟");
+            if (e.getRequirementId() != null && !e.getRequirementId().isBlank()) {
+                meta.add("需求=" + e.getRequirementId());
             }
-            if (e.jiraIssueKey() != null && !e.jiraIssueKey().isBlank()) {
-                meta.add("Jira=" + e.jiraIssueKey());
+            if (e.getJiraIssueKey() != null && !e.getJiraIssueKey().isBlank()) {
+                meta.add("Jira=" + e.getJiraIssueKey());
             }
-            if (e.source() != null && !e.source().isBlank()) {
-                meta.add("来源=" + e.source());
+            if (e.getSource() != null && !e.getSource().isBlank()) {
+                meta.add("来源=" + e.getSource());
             }
-            sb.append("- ").append(d.date()).append(" [").append(e.entryType()).append("] ")
-                    .append(e.title())
+            sb.append("- ").append(d.date()).append(" [").append(e.getEntryType()).append("] ")
+                    .append(e.getTitle())
                     .append("（").append(String.join(" · ", meta)).append("）");
-            String body = oneLine(e.body(), ENTRY_BODY_CHARS);
+            String body = oneLine(e.getContent(), ENTRY_BODY_CHARS);
             if (!body.isEmpty()) {
                 sb.append("：").append(body);
             }

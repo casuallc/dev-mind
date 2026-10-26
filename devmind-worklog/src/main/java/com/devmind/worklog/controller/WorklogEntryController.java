@@ -55,10 +55,9 @@ public class WorklogEntryController {
         return service.update(id, req);
     }
 
-    /** CAP-74 M3：删除按日期寻址（date 定位 day 文件，避免全目录扫描）。 */
-    @DeleteMapping("/{date}/{id}")
-    public void delete(@PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
-                       @PathVariable String id) {
-        service.delete(date, id);
+    /** CAP-89 FR-06：删除按 DB 主键寻址（CAP-74 的 /{date}/{id} 日期寻址是文件时代限制，已回收）。 */
+    @DeleteMapping("/{id}")
+    public void delete(@PathVariable String id) {
+        service.delete(id);
     }
 }

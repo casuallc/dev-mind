@@ -11,32 +11,27 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 
 /** CAP-28：个人工时开关设置（无设置行 = 默认全开）；CAP-41 FR-05：日报/周报格式模板；
- *  三个定时项的个人执行时间（null/清除 = 跟随全局 devmind.worklog.*-cron）。 */
+ *  三个定时项的个人执行时间（null/清除 = 跟随全局 devmind.worklog.*-cron）。
+ *  CAP-89：远端绑定/活动仓切换随 git 仓链路退役移除（实体三列停读写留存）。 */
 @Service
 public class WorklogSettingsService {
 
     private final WorklogUserSettingsRepository settingsRepo;
     private final IdentityService identity;
     private final com.devmind.worklog.config.WorklogProperties props;
-    private final WorklogRepoService repoService;
 
     public WorklogSettingsService(WorklogUserSettingsRepository settingsRepo, IdentityService identity,
-                                  com.devmind.worklog.config.WorklogProperties props,
-                                  WorklogRepoService repoService) {
+                                  com.devmind.worklog.config.WorklogProperties props) {
         this.settingsRepo = settingsRepo;
         this.identity = identity;
         this.props = props;
-        this.repoService = repoService;
     }
 
     public SettingsView get() {
         String me = identity.currentActor();
         SettingsView v = settingsRepo.findByUserId(me)
                 .map(SettingsView::of).orElseGet(SettingsView::defaults);
-        // CAP-74 D5：remoteUrl/remoteBranch 路由 worklog_repos 个人仓行（读不建仓，未建=未绑定）
-        return withGlobalLabels(repoService.findPersonalRepo(me)
-                .map(r -> v.withRemote(r.getRemoteUrl(), r.getRemoteBranch()))
-                .orElseGet(() -> v.withRemote(null, null)));
+        return withGlobalLabels(v);
     }
 
     @Transactional
@@ -80,49 +75,8 @@ public class WorklogSettingsService {
         if (req.weeklyTemplateMd() != null) {
             e.setWeeklyTemplateMd(normalizeTemplate(req.weeklyTemplateMd()));
         }
-        // CAP-74 D5：远端备份绑定改写 worklog_repos 个人仓行（null = 不变；空白串 = 解绑）；
-        // worklog_user_settings.remote_url/remote_branch 列废弃停读写（存量由 CAP-74 C5 迁移搬走）
-        boolean remoteTouched = false;
-        com.devmind.worklog.model.WorklogRepoEntity repo = null;
-        if (req.remoteUrl() != null || req.remoteBranch() != null) {
-            repo = repoService.ensurePersonalRepo(me);
-            remoteTouched = true;
-        }
-        if (req.remoteUrl() != null) {
-            repo.setRemoteUrl(normalizeRemoteUrl(req.remoteUrl()));
-        }
-        if (req.remoteBranch() != null) {
-            String branch = normalizeTemplate(req.remoteBranch());
-            repo.setRemoteBranch(branch == null ? "main" : branch);
-        }
-        if (remoteTouched) {
-            repoService.saveRepo(repo);
-        }
-        // CAP-74 M2：活动仓切换（null = 不变；空白串 = 回个人仓；否则必须仓存在且本人是成员）
-        if (req.activeRepoKey() != null) {
-            String key = req.activeRepoKey().trim();
-            if (key.isEmpty()) {
-                e.setActiveRepoKey(null);
-            } else {
-                var target = repoService.findRepo(key)
-                        .orElseThrow(() -> new com.devmind.common.exception.DevMindException(
-                                com.devmind.common.exception.ErrorCode.BAD_REQUEST,
-                                "工作日志仓不存在: " + key));
-                if (!repoService.isMember(target, me)) {
-                    throw new com.devmind.common.exception.DevMindException(
-                            com.devmind.common.exception.ErrorCode.BAD_REQUEST,
-                            "你不是仓 " + key + " 的成员，不能设为活动仓");
-                }
-                e.setActiveRepoKey(key);
-            }
-        }
         e.setUpdatedAt(Instant.now());
-        SettingsView saved = SettingsView.of(settingsRepo.save(e));
-        return withGlobalLabels(repo != null
-                ? saved.withRemote(repo.getRemoteUrl(), repo.getRemoteBranch())
-                : repoService.findPersonalRepo(me)
-                        .map(r -> saved.withRemote(r.getRemoteUrl(), r.getRemoteBranch()))
-                        .orElseGet(() -> saved.withRemote(null, null)));
+        return withGlobalLabels(SettingsView.of(settingsRepo.save(e)));
     }
 
     /** 全局兜底规则的中文展示标签（前端 placeholder/extra 提示用）。 */
@@ -148,26 +102,5 @@ public class WorklogSettingsService {
     /** 空白 → null（= 回退内置默认），避免空串与 null 两种语义并存。 */
     private static String normalizeTemplate(String t) {
         return t == null || t.isBlank() ? null : t;
-    }
-
-    /** CAP-41 M3：远端 URL 校验（空白=解绑置 null；仅 http/https/file，ssh 口径同 runner 侧）。 */
-    private static String normalizeRemoteUrl(String url) {
-        if (url.isBlank()) {
-            return null;
-        }
-        String u = url.trim();
-        String scheme;
-        try {
-            scheme = java.net.URI.create(u).getScheme();
-        } catch (IllegalArgumentException e) {
-            scheme = null;
-        }
-        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)
-                && !"file".equalsIgnoreCase(scheme)) {
-            throw new com.devmind.common.exception.DevMindException(
-                    com.devmind.common.exception.ErrorCode.BAD_REQUEST,
-                    "远端仓库仅支持 http/https URL（ssh 不支持）: " + u);
-        }
-        return u;
     }
 }
