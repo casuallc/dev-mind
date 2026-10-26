@@ -72,7 +72,7 @@ agent-runner 节点（瘦 jar 无 Spring，可 Windows 服务托管）
 
 ### 3.5 工作日志
 
-条目管理 + git 扫描导入（CAP-28），WORKLOG 项目 + 真实会话生成日/周报（CAP-41），事实源为数据库（CAP-89，取代 CAP-74 的服务端 git 仓——远程推送与团队仓已退役），计划闭环已落地（CAP-88：日/周计划项一等数据 + 条目关联联动 + 滚转 + 日/周报计划对照数据驱动注入 + AI 建议计划（worklog-plan-suggest 场景，建议项 AI_SUGGEST 落库，在办需求素材经 WipRequirementProvider SPI 探测降级）；FR-11 周期末提醒开放后置）。
+条目管理 + git 扫描导入（CAP-28），WORKLOG 项目 + 真实会话生成日/周报（CAP-41），事实源为数据库（CAP-89，取代 CAP-74 的服务端 git 仓——远程推送与团队仓已退役），计划闭环已落地并收敛（CAP-88→CAP-90：日计划并入条目——条目加 status（DONE 即事实，TODO/DOING 即当日计划）+ 「完成」一步到位 + 日滚转；计划项收窄为 WEEK 唯一计划实体（方向/周间滚转/上周跟进/下周投影结构载体），条目关联 WEEK 项 TODO→DOING 联动保留；周报「下周计划」为下周计划项的单向投影（{{nextWeekPlan}} 注入 + next-plan-preview 确定性重建，人工润色不回写）；AI 建议计划沿用（worklog-plan-suggest 场景，WipRequirementProvider SPI 探测降级）；FR-11 周期末提醒开放后置）。
 
 ### 3.6 集成与开放
 

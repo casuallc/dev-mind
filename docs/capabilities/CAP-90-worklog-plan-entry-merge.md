@@ -1,6 +1,6 @@
 # CAP-90 工作日志计划-条目合并与周报投影（日计划并入条目，周计划↔周报单向打通）
 
-> 能力 ID：CAP-90 ｜ 分类：组装层 ｜ 状态：定稿未实施 ｜ 日期：2026-10-26
+> 能力 ID：CAP-90 ｜ 分类：组装层 ｜ 状态：已实现（2026-10-26，M1+M2 同批交付） ｜ 日期：2026-10-26
 > 决策记录：**日计划并入条目**（推翻 CAP-88 §3「计划并入条目」否决——CAP-88 交付
 > 当日实测反馈：同一件事要录两遍（计划一条 + 条目一条 + 手动关联），双重记录代价
 > 大于「条目=纯事实」的语义纯度收益；语义分裂担忧用 `status=DONE 即事实」单一判别
@@ -45,9 +45,12 @@ CAP-88 把计划升格为一等数据（`worklog_plan_items`，日/周双层）�
   `carried_from_id`（varchar(32) 可空，自引用条目 uuid，滚转链）。
 - **FR-02 状态语义**：git 导入 / AGENT 来源恒 DONE（事实）；手动新建默认 DONE
   （补录已发生的），显式传 `status=TODO` 即计划。TODO↔DOING 人工互转，DONE/DROPPED
-  人工；CARRIED 仅滚转写入。原「条目关联计划项 → TODO 自动 DOING」联动随 DAY
-  计划项退役（计划即条目，无关联可挂）；条目 `plan_item_id` 保留，只指向 WEEK 项。
-  EntryRequest 新增字段用 `Boolean`/包装类型（Jackson 3 红线）。
+  人工；CARRIED 仅滚转写入。条目 `plan_item_id` 保留，只指向 WEEK 项（挂非 WEEK
+  项 400）。
+  **实现修订（2026-10-26）**：条目关联 WEEK 计划项 → 该项 TODO 自动置 DOING 的联动
+  **保留**（原文"联动随 DAY 计划项退役"作废——WEEK 项仍是可关联实体，联动是
+  「日执行对齐周方向」的反馈信号，CAP-88 语义在 WEEK 侧不受 DAY 退役影响）。
+  EntryRequest 新增字段用包装类型（Jackson 3 红线）。
 - **FR-03 「完成」一步到位**：条目视图当日列表中 TODO/DOING 行显示「完成」按钮 →
   弹工时确认（预填 estimate_minutes 换算值，可改）→ 一次 PUT 置 DONE + minutes。
   不再需要「先建计划、再录条目、再挂关联」三步。
@@ -130,7 +133,8 @@ worklog_plan_items ── scope 收窄 WEEK（DAY 存量迁移为条目后删除
 ```
 POST   /api/worklog/entries                  增可选 status（默认 DONE）/estimateHours
 PUT    /api/worklog/entries/{id}             同上 + 改状态（CARRIED 人工不可设 400）
-POST   /api/worklog/entries/carry {to, ids[]}   日粒度滚转（幂等；原行置 CARRIED）
+POST   /api/worklog/entries/carry {to, ids[]}   日粒度滚转（幂等；原行置 CARRIED；单次上限 200）
+GET    /api/worklog/entries/carryover?date=     上一日未完成（TODO/DOING）条目提示
 GET    /api/worklog/entries?from=&to=        响应 EntryView 增 status/estimateHours/carriedFromId
 
 GET    /api/worklog/plans?scope=DAY          → 400（退役）
