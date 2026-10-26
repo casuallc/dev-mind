@@ -47,9 +47,8 @@ import RepoSubscriptionDrawer from '../components/RepoSubscriptionDrawer'
 import ReportEditor from '../components/ReportEditor'
 import WeekDayStrip from '../components/WeekDayStrip'
 import RecentWeekStrip from '../components/RecentWeekStrip'
-import WorklogViewSwitch, { isContextView, isSessionsView, type WorklogView } from '../components/WorklogViewSwitch'
+import WorklogViewSwitch, { isSessionsView, type WorklogView } from '../components/WorklogViewSwitch'
 import SessionsBoard from '../../sessions/pages/SessionsBoard'
-import ProjectContextPage from '../../scenarios/pages/ProjectContextPage'
 import { pageCardBodyFlexStyle, pageCardBodyScrollStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
@@ -61,7 +60,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /**
  * CAP-28 个人工作日志与工时：条目（按周浏览+标题搜索+git 导入）/ AI 日报（按周浏览）/ AI 周报。
- * CAP-41：日志空间的「对话/列表」「知识」收为页内视图（锁定 WORKLOG 项目），不再跳项目上下文。
+ * CAP-41：日志空间的「对话/列表」收为页内视图（锁定 WORKLOG 项目），不再跳项目上下文。
  * 个人级页面，不进项目上下文（路由不进 ProjectContextGate）。
  */
 export default function WorklogPage() {
@@ -399,10 +398,10 @@ export default function WorklogPage() {
     ),
   }
 
-  // ---- 对话/对话列表/知识视图：整页渲染内嵌工作台（锁定 WORKLOG 项目），title 放共享视图切换器保证可切回 ----
+  // ---- 对话/对话列表视图：整页渲染内嵌工作台（锁定 WORKLOG 项目），title 放共享视图切换器保证可切回 ----
   const viewSwitch = <WorklogViewSwitch value={view} onChange={setView} />
   const readyProjectId = workspace?.exists && workspace.projectId ? workspace.projectId : null
-  if (isSessionsView(view) || isContextView(view)) {
+  if (isSessionsView(view)) {
     if (!readyProjectId) {
       return (
         <Card style={pageCardStyle} styles={{ body: pageCardBodyScrollStyle }} title={viewSwitch}>
@@ -410,7 +409,7 @@ export default function WorklogPage() {
             type="info"
             showIcon
             message="工作日志空间尚未初始化"
-            description="对话与知识视图依赖日志空间的 runner 执行链路（按用户隔离的持久工作区）；初始化空间且默认节点在线后可用。"
+            description="对话视图依赖日志空间的 runner 执行链路（按用户隔离的持久工作区）；初始化空间且默认节点在线后可用。"
             action={
               <Button type="primary" loading={ensuring} onClick={onEnsure}>
                 初始化空间
@@ -420,20 +419,13 @@ export default function WorklogPage() {
         </Card>
       )
     }
-    return isSessionsView(view) ? (
+    return (
       <SessionsBoard
         projectId={readyProjectId}
         title={viewSwitch}
         view={view}
         onViewChange={(v) => setView(v as WorklogView)}
         worklog
-      />
-    ) : (
-      <ProjectContextPage
-        projectId={readyProjectId}
-        title={viewSwitch}
-        view={view}
-        onViewChange={(v) => setView(v as WorklogView)}
       />
     )
   }
