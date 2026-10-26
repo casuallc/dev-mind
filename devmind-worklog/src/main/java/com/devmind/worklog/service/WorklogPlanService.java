@@ -7,6 +7,7 @@ import com.devmind.worklog.dto.CarryResult;
 import com.devmind.worklog.dto.PlanItemRequest;
 import com.devmind.worklog.dto.PlanItemView;
 import com.devmind.worklog.dto.PlanListView;
+import com.devmind.worklog.dto.SuggestedPlanItem;
 import com.devmind.worklog.model.WorklogEntryEntity;
 import com.devmind.worklog.model.WorklogPlanItemEntity;
 import com.devmind.worklog.repo.WorklogEntryRepository;
@@ -18,11 +19,13 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 import static com.devmind.worklog.model.WorklogPlanItemEntity.SCOPE_DAY;
 import static com.devmind.worklog.model.WorklogPlanItemEntity.SCOPE_WEEK;
+import static com.devmind.worklog.model.WorklogPlanItemEntity.SOURCE_AI_SUGGEST;
 import static com.devmind.worklog.model.WorklogPlanItemEntity.SOURCE_MANUAL;
 import static com.devmind.worklog.model.WorklogPlanItemEntity.STATUS_CARRIED;
 import static com.devmind.worklog.model.WorklogPlanItemEntity.STATUS_DOING;
@@ -174,6 +177,52 @@ public class WorklogPlanService {
             created.add(PlanItemView.of(planRepo.save(copy)));
         }
         return new CarryResult(created.size(), skipped, created);
+    }
+
+    // ---------------- CAP-88 M3：AI 建议项落库 ----------------
+
+    /**
+     * 建议计划项落库（FR-10：force 重生成「只追加不覆盖」的落点）——目标周 WEEK 维度追加，
+     * source=AI_SUGGEST、status=TODO；与已有项按标题（忽略首尾空白）去重，重复行跳过。
+     *
+     * @return 实际插入条数（0 = 全部重复/产物为空）
+     */
+    @Transactional
+    public int insertSuggestions(String owner, LocalDate weekStart, List<SuggestedPlanItem> items) {
+        if (items == null || items.isEmpty()) {
+            return 0;
+        }
+        List<WorklogPlanItemEntity> existing = planRepo
+                .findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(owner, SCOPE_WEEK, weekStart);
+        Set<String> titles = new HashSet<>();
+        int sort = 0;
+        for (WorklogPlanItemEntity e : existing) {
+            titles.add(e.getTitle() == null ? "" : e.getTitle().strip());
+            sort = Math.max(sort, e.getSortOrder() == null ? 0 : e.getSortOrder());
+        }
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        int inserted = 0;
+        for (SuggestedPlanItem item : items) {
+            String title = item.title() == null ? "" : item.title().strip();
+            if (title.isEmpty() || !titles.add(title)) {
+                continue; // 与已有项/同批建议标题重复 → 跳过（只追加不覆盖）
+            }
+            WorklogPlanItemEntity e = new WorklogPlanItemEntity();
+            e.setUserId(owner);
+            e.setScope(SCOPE_WEEK);
+            e.setPlanDate(weekStart);
+            e.setTitle(title);
+            e.setPlanType(item.planType() == null ? WorklogEntryEntity.TYPE_DEV : item.planType());
+            e.setEstimateMinutes(item.estimateMinutes());
+            e.setStatus(STATUS_TODO);
+            e.setSource(SOURCE_AI_SUGGEST);
+            e.setSortOrder(++sort);
+            e.setCreatedAt(now);
+            e.setUpdatedAt(now);
+            planRepo.save(e);
+            inserted++;
+        }
+        return inserted;
     }
 
     // ---------------- 内部 ----------------

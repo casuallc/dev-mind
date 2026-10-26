@@ -2,6 +2,7 @@ package com.devmind.worklog.service;
 
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.common.requirement.WipRequirementProvider;
 import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.SessionView;
 import com.devmind.session.service.SessionManagerService;
@@ -21,6 +22,7 @@ import com.devmind.worklog.repo.WorklogEntryRepository;
 import com.devmind.worklog.repo.WorklogPlanItemRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -62,6 +64,7 @@ public class ReportService {
     private final WeeklyReportRepository weeklyRepo;
     private final WorklogPlanItemRepository planRepo;
     private final WorklogEntryRepository entryRepo;
+    private final ObjectProvider<WipRequirementProvider> wipProvider;
 
     public ReportService(WorklogEntryService entryService,
                          GitLogScanner gitScanner,
@@ -71,7 +74,8 @@ public class ReportService {
                          DailyReportRepository dailyRepo,
                          WeeklyReportRepository weeklyRepo,
                          WorklogPlanItemRepository planRepo,
-                         WorklogEntryRepository entryRepo) {
+                         WorklogEntryRepository entryRepo,
+                         ObjectProvider<WipRequirementProvider> wipProvider) {
         this.entryService = entryService;
         this.gitScanner = gitScanner;
         this.settingsService = settingsService;
@@ -81,6 +85,7 @@ public class ReportService {
         this.weeklyRepo = weeklyRepo;
         this.planRepo = planRepo;
         this.entryRepo = entryRepo;
+        this.wipProvider = wipProvider;
     }
 
     // ---------------- 日报 ----------------
@@ -343,6 +348,43 @@ public class ReportService {
             weeklyRepo.save(e);
         }
         return getWeekly(username, weekStart);
+    }
+
+    // ---------------- CAP-88 M3：AI 建议计划 ----------------
+
+    /**
+     * 「AI 建议下周计划」（FR-10）：目标周已有 WEEK 计划项且非 force → 幂等跳过
+     * （reused=true，不起会话）；否则走既有 worklog 会话生成链路（场景 worklog-plan-suggest，
+     * 素材 = 上周未完成/滚转项 + 在办需求 SPI 探测 + hint），产物解析落库由
+     * {@link WorklogOutputMirror} 在会话结束时完成（只追加不覆盖）。
+     */
+    public ReportLaunch suggestPlan(String username, LocalDate weekStart, boolean force, String hint) {
+        LocalDate target = WorklogWeeks.mondayOf(weekStart);
+        boolean hasItems = !planRepo.findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(
+                username, WorklogPlanItemEntity.SCOPE_WEEK, target).isEmpty();
+        if (hasItems && !force) {
+            log.info("建议计划幂等跳过（目标周已有计划项）: user={} weekStart={}", username, target);
+            return new ReportLaunch(null, true);
+        }
+
+        // 素材 1：上周未完成/滚转项（TODO/DOING/CARRIED——DONE/DROPPED 已盖棺不承接）
+        LocalDate prevMonday = target.minusWeeks(1);
+        List<WorklogPlanItemEntity> lastWeek = planRepo
+                .findByUserIdAndPlanDateBetweenOrderByPlanDateAscSortOrderAscIdAsc(
+                        username, prevMonday, prevMonday.plusDays(6))
+                .stream()
+                .filter(p -> WorklogPlanItemEntity.STATUS_TODO.equals(p.getStatus())
+                        || WorklogPlanItemEntity.STATUS_DOING.equals(p.getStatus())
+                        || WorklogPlanItemEntity.STATUS_CARRIED.equals(p.getStatus()))
+                .toList();
+        String lastWeekBlock = ReportPrompts.formatPlanItems(lastWeek, linkedEntries(lastWeek));
+        // 素材 2：在办需求（CAP-13 SPI 探测，缺席降级为「无数据」提示）
+        WipRequirementProvider provider = wipProvider.getIfAvailable();
+        String wipBlock = ReportPrompts.formatWipRequirements(
+                provider == null ? List.of() : provider.findWip(username, 20));
+
+        return launch(username, WorklogScenarios.PLAN_SUGGEST,
+                ReportPrompts.planSuggest(target, lastWeekBlock, wipBlock, hint));
     }
 
     // ---------------- 内部 ----------------

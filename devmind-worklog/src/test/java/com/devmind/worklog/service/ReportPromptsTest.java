@@ -1,5 +1,6 @@
 package com.devmind.worklog.service;
 
+import com.devmind.common.requirement.WipRequirementProvider;
 import com.devmind.worklog.dto.GitCommitView;
 import com.devmind.worklog.model.WorklogEntryEntity;
 import com.devmind.worklog.model.WorklogPlanItemEntity;
@@ -175,5 +176,37 @@ class ReportPromptsTest {
         assertTrue(prompt.contains("本周已排计划项"), "缺本周计划项块");
         assertTrue(prompt.contains("[状态=待办] 收尾登录改造"), "缺本周计划项行");
         assertTrue(prompt.indexOf("{{") < 0, "存在未渲染占位符");
+    }
+
+    // ---------------- CAP-88 M3：AI 建议计划 prompt ----------------
+
+    @Test
+    void 建议计划prompt携带目标周素材与输出契约() {
+        String lastWeek = ReportPrompts.formatPlanItems(List.of(
+                plan(1L, "WEEK", LocalDate.of(2026, 10, 19), "收尾登录改造", "TODO", null)), Map.of());
+        String wip = ReportPrompts.formatWipRequirements(List.of(
+                new WipRequirementProvider.WipRequirement("REQ-88", "工作日志计划闭环", "IN_PROGRESS", "dev-mind")));
+        String prompt = ReportPrompts.planSuggest(LocalDate.of(2026, 10, 26), lastWeek, wip, "下周请优先评审");
+        assertTrue(prompt.contains("2026-10-26 周（2026-10-26 ~ 2026-11-01）"), "缺目标周区间: " + prompt);
+        assertTrue(prompt.contains("[状态=待办] 收尾登录改造"), "缺上周未完成素材");
+        assertTrue(prompt.contains("REQ-88") && prompt.contains("工作日志计划闭环"), "缺在办需求素材");
+        assertTrue(prompt.contains("3~6 条") && prompt.contains("- [类型] 标题（预估 Xh）"), "缺输出契约");
+        assertTrue(prompt.contains("本人补充说明") && prompt.contains("下周请优先评审"), "hint 未注入");
+    }
+
+    @Test
+    void 建议计划素材缺席降级为空提示() {
+        String prompt = ReportPrompts.planSuggest(LocalDate.of(2026, 10, 26), "", "", null);
+        assertTrue(prompt.contains("（上周无未完成计划项）"));
+        assertTrue(prompt.contains("（无在办需求数据）"));
+        assertFalse(prompt.contains("本人补充说明"), "空 hint 不注入补充块");
+    }
+
+    @Test
+    void 在办需求项目名缺失不阻断渲染() {
+        String block = ReportPrompts.formatWipRequirements(List.of(
+                new WipRequirementProvider.WipRequirement("REQ-1", "标题", "ACCEPTANCE", null)));
+        assertTrue(block.contains("- 标题（REQ-1 · 状态=ACCEPTANCE）"), "项目名缺失时省略项目段: " + block);
+        assertEquals("（无在办需求数据）", ReportPrompts.formatWipRequirements(List.of()));
     }
 }

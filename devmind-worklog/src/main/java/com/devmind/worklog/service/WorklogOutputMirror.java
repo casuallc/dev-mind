@@ -53,6 +53,8 @@ public class WorklogOutputMirror {
 
     static final Pattern DAILY_FILE = Pattern.compile("^daily-(\\d{4}-\\d{2}-\\d{2})\\.md$");
     static final Pattern WEEKLY_FILE = Pattern.compile("^weekly-(\\d{4})-W(\\d{2})\\.md$");
+    /** CAP-88 M3：建议计划产物（plan-suggest-<yyyy>-W<ww>.md → 解析插 worklog_plan_items） */
+    static final Pattern PLAN_SUGGEST_FILE = Pattern.compile("^plan-suggest-(\\d{4})-W(\\d{2})\\.md$");
 
     private final SessionRepository sessionRepo;
     private final SessionOutputService outputService;
@@ -60,17 +62,19 @@ public class WorklogOutputMirror {
     private final DailyReportRepository dailyRepo;
     private final WeeklyReportRepository weeklyRepo;
     private final DomainEventPublisher eventPublisher;
+    private final WorklogPlanService planService;
 
     public WorklogOutputMirror(SessionRepository sessionRepo, SessionOutputService outputService,
                                ProjectService projectService,
                                DailyReportRepository dailyRepo, WeeklyReportRepository weeklyRepo,
-                               DomainEventPublisher eventPublisher) {
+                               DomainEventPublisher eventPublisher, WorklogPlanService planService) {
         this.sessionRepo = sessionRepo;
         this.outputService = outputService;
         this.projectService = projectService;
         this.dailyRepo = dailyRepo;
         this.weeklyRepo = weeklyRepo;
         this.eventPublisher = eventPublisher;
+        this.planService = planService;
     }
 
     @EventListener
@@ -93,8 +97,9 @@ public class WorklogOutputMirror {
         }
         boolean daily = WorklogScenarios.DAILY.equals(s.getScenarioCode());
         boolean weekly = WorklogScenarios.WEEKLY.equals(s.getScenarioCode());
-        if (daily || weekly) {
-            String label = daily ? "日报" : "周报";
+        boolean suggest = WorklogScenarios.PLAN_SUGGEST.equals(s.getScenarioCode());
+        if (daily || weekly || suggest) {
+            String label = daily ? "日报" : weekly ? "周报" : "建议计划";
             if (!Boolean.TRUE.equals(event.success())) {
                 notifyFailed(label, owner, label + "生成会话执行失败，请到会话详情查看事件流（session " + s.getId() + "）");
                 return;
@@ -102,8 +107,10 @@ public class WorklogOutputMirror {
             List<SessionOutputEntity> outputs = outputService.list(s.getId());
             if (daily) {
                 mirrorDaily(s, owner, outputs);
-            } else {
+            } else if (weekly) {
                 mirrorWeekly(s, owner, outputs);
+            } else {
+                mirrorSuggest(s, owner, outputs);
             }
             return;
         }
@@ -255,6 +262,35 @@ public class WorklogOutputMirror {
         eventPublisher.publish(SimpleDomainEvent.of("worklog.weekly.generated", null, null, owner,
                 owner + " 的 " + weekStart + " 周周报已生成", "WEEKLY_REPORT", weekStart.toString(), null));
         return "周报 " + weekStart + " 周";
+    }
+
+    /**
+     * 建议计划落库（CAP-88 M3）：解析 plan-suggest 产物为建议项追加进目标周（只追加不覆盖，
+     * 标题去重由 {@link WorklogPlanService#insertSuggestions} 兜底）；缺回传/解析为空发降级通知。
+     */
+    void mirrorSuggest(SessionEntity s, String owner, List<SessionOutputEntity> outputs) {
+        SessionOutputEntity out = find(outputs, PLAN_SUGGEST_FILE);
+        if (out == null) {
+            notifyFailed("建议计划", owner,
+                    "建议计划会话已完成，但未回传产物（.devmind/output 缺 plan-suggest-<yyyy>-W<ww>.md），请到会话详情排查");
+            return;
+        }
+        Matcher m = PLAN_SUGGEST_FILE.matcher(out.getFileName());
+        m.matches();
+        LocalDate weekStart = WorklogWeeks.weekStartOf(
+                Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)));
+        var items = PlanSuggestParser.parse(out.getContent());
+        if (items.isEmpty()) {
+            notifyFailed("建议计划", owner,
+                    "建议计划产物未解析出有效建议行（格式应为 `- [类型] 标题（预估 Xh）`），请到会话详情查看产物原文");
+            return;
+        }
+        int inserted = planService.insertSuggestions(owner, weekStart, items);
+        log.info("建议计划已落库: user={} weekStart={} parsed={} inserted={} session={}",
+                owner, weekStart, items.size(), inserted, s.getId());
+        eventPublisher.publish(SimpleDomainEvent.of("worklog.plan.suggested", null, null, owner,
+                owner + " 的 " + weekStart + " 周建议计划已生成（新增 " + inserted + " 条建议项）",
+                "WORKLOG_PLAN", weekStart.toString(), null));
     }
 
     private static Instant now() {

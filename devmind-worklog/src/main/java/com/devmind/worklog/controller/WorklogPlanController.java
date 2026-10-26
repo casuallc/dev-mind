@@ -2,11 +2,15 @@ package com.devmind.worklog.controller;
 
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.auth.IdentityService;
 import com.devmind.worklog.dto.CarryRequest;
 import com.devmind.worklog.dto.CarryResult;
 import com.devmind.worklog.dto.PlanItemRequest;
 import com.devmind.worklog.dto.PlanItemView;
 import com.devmind.worklog.dto.PlanListView;
+import com.devmind.worklog.dto.ReportLaunch;
+import com.devmind.worklog.dto.SuggestPlanRequest;
+import com.devmind.worklog.service.ReportService;
 import com.devmind.worklog.service.WorklogPlanService;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -32,9 +36,14 @@ import java.util.List;
 public class WorklogPlanController {
 
     private final WorklogPlanService service;
+    private final ReportService reportService;
+    private final IdentityService identity;
 
-    public WorklogPlanController(WorklogPlanService service) {
+    public WorklogPlanController(WorklogPlanService service, ReportService reportService,
+                                 IdentityService identity) {
         this.service = service;
+        this.reportService = reportService;
+        this.identity = identity;
     }
 
     /** 计划项列表（附上一周期未完成提示数据）。 */
@@ -74,5 +83,15 @@ public class WorklogPlanController {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "单次滚转上限 200 项");
         }
         return service.carry(req.scope(), req.to(), req.ids());
+    }
+
+    /**
+     * CAP-88 M3「AI 建议计划」（FR-10）：异步起生成会话，建议项随会话结束落库（AI_SUGGEST）。
+     * 目标周已有计划项且非 force → reused=true 幂等跳过；force 只追加不覆盖。
+     */
+    @PostMapping("/suggest")
+    public ReportLaunch suggest(@Valid @RequestBody SuggestPlanRequest req) {
+        return reportService.suggestPlan(identity.currentActor(), req.date(),
+                Boolean.TRUE.equals(req.force()), req.hint());
     }
 }

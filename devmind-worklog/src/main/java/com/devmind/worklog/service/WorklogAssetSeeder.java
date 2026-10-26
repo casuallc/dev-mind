@@ -51,6 +51,7 @@ public class WorklogAssetSeeder {
             ## 成稿回传（平台契约，必须执行）
             - 日报成稿写到 `.devmind/output/daily-yyyy-MM-dd.md`
             - 周报成稿写到 `.devmind/output/weekly-yyyy-Www.md`
+            - 建议计划成稿写到 `.devmind/output/plan-suggest-yyyy-Www.md`（逐行 `- [类型] 标题（预估 Xh）`）
             - 平台在会话结束时自动采集该目录写入服务端工作日志仓（git 历史留痕）；缺文件则本次生成判失败
 
             ## 追加工作条目（如需）
@@ -91,6 +92,23 @@ public class WorklogAssetSeeder {
             3. 最后一句话确认已完成。
             """;
 
+    /**
+     * CAP-88 M3「AI 建议计划」场景骨架。产物行格式是服务端解析契约
+     * （{@code PlanSuggestParser}）：`- [类型] 标题（预估 Xh）`，改格式必须同步解析器。
+     */
+    static final String PLAN_SUGGEST_SKELETON = """
+            {{task}}
+
+            ## 执行要求（遵循 worklog skill 约定）
+            1. 素材以上方任务说明为准（上周未完成/滚转项与在办需求已附上），建议项必须能从素材追溯，不写空话；
+            2. 给出 3~6 条建议，每条一行，严格按此格式（平台按行解析，格式错整条丢弃）：
+               `- [DEV] 标题（预估 2h）`
+               - 类型 ∈ DEV/SUPPORT/MEETING/RESEARCH/OTHER；预估工时可省略（不写括号段）；
+               - 除建议行外不写别的内容（不要标题、不要解释、不要代码块）；
+            3. 成稿写入 .devmind/output/plan-suggest-<yyyy-Www>.md（ISO 周，见上方任务说明；平台回传契约，缺文件判失败）；
+            4. 最后一句话确认已完成。
+            """;
+
     private final SkillRepository skillRepo;
     private final SkillService skillService;
     private final SessionScenarioRepository scenarioRepo;
@@ -112,6 +130,9 @@ public class WorklogAssetSeeder {
                     "生成当日工作日志（草稿区成稿回传服务端仓）", DAILY_SKELETON, skillId, 90);
             ensureScenario(WorklogScenarios.WEEKLY, "工作日志·周报",
                     "生成一周工作周报（素材随 prompt 携带，成稿回传服务端仓）", WEEKLY_SKELETON, skillId, 91);
+            ensureScenario(WorklogScenarios.PLAN_SUGGEST, "工作日志·建议计划",
+                    "AI 建议下周计划（素材随 prompt 携带，产物解析为建议计划项）",
+                    PLAN_SUGGEST_SKELETON, skillId, 92);
         } catch (Exception e) {
             log.warn("worklog skill/场景种子失败（不阻断启动）: {}", e.getMessage());
         }

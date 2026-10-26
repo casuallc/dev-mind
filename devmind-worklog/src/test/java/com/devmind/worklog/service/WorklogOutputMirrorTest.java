@@ -38,13 +38,15 @@ class WorklogOutputMirrorTest {
     private final FakePublisher publisher = new FakePublisher();
     private DailyReportRepository dailyRepo;
     private WeeklyReportRepository weeklyRepo;
+    private WorklogPlanService planService;
     private WorklogOutputMirror mirror;
 
     @BeforeEach
     void setUp() {
         dailyRepo = mock(DailyReportRepository.class);
         weeklyRepo = mock(WeeklyReportRepository.class);
-        mirror = new WorklogOutputMirror(null, null, null, dailyRepo, weeklyRepo, publisher);
+        planService = mock(WorklogPlanService.class);
+        mirror = new WorklogOutputMirror(null, null, null, dailyRepo, weeklyRepo, publisher, planService);
     }
 
     static class FakePublisher extends DomainEventPublisher {
@@ -238,5 +240,39 @@ class WorklogOutputMirrorTest {
             }
         }
         return null;
+    }
+
+    // ---------------- CAP-88 M3：建议计划镜像 ----------------
+
+    @Test
+    void 建议计划产物解析落库并发事件() {
+        when(planService.insertSuggestions(any(), any(), any())).thenReturn(2);
+        mirror.mirrorSuggest(session("s9"), "u1", List.of(output("plan-suggest-2026-W43.md",
+                "- [DEV] 承接上周未完成的登录改造（预估 4h）\n- [RESEARCH] 调研分诊模型替换\n")));
+        // W43 周一 = 2026-10-19；解析出 2 条，插库委托 planService（去重/追加语义有其单测覆盖）
+        ArgumentCaptor<LocalDate> weekCap = ArgumentCaptor.forClass(LocalDate.class);
+        verify(planService).insertSuggestions(org.mockito.ArgumentMatchers.eq("u1"), weekCap.capture(), any());
+        assertEquals(LocalDate.of(2026, 10, 19), weekCap.getValue());
+        assertEquals(1, publisher.events.size());
+        DomainEvent ev = publisher.events.get(0);
+        assertEquals("worklog.plan.suggested", ev.type());
+        assertEquals("2026-10-19", ((SimpleDomainEvent) ev).entityId());
+        verifyNoInteractions(dailyRepo, weeklyRepo);
+    }
+
+    @Test
+    void 建议计划缺回传发降级通知() {
+        mirror.mirrorSuggest(session("s9"), "u1", List.of(output("other.md", "x")));
+        verifyNoInteractions(planService, dailyRepo, weeklyRepo);
+        assertEquals("worklog.report.failed", publisher.events.get(0).type());
+        assertTrue(((SimpleDomainEvent) publisher.events.get(0)).summary().contains("建议计划"));
+    }
+
+    @Test
+    void 建议计划产物无可解析行发降级通知() {
+        mirror.mirrorSuggest(session("s9"), "u1", List.of(output("plan-suggest-2026-W43.md",
+                "# 抱歉我无法给出建议\n没有任何合规建议行")));
+        verifyNoInteractions(planService, dailyRepo, weeklyRepo);
+        assertEquals("worklog.report.failed", publisher.events.get(0).type());
     }
 }

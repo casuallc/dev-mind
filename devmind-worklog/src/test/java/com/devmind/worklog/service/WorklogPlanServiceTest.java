@@ -6,12 +6,14 @@ import com.devmind.worklog.dto.EntryRequest;
 import com.devmind.worklog.dto.PlanItemRequest;
 import com.devmind.worklog.dto.PlanItemView;
 import com.devmind.worklog.dto.PlanListView;
+import com.devmind.worklog.dto.SuggestedPlanItem;
 import com.devmind.worklog.model.WorklogEntryEntity;
 import com.devmind.worklog.model.WorklogPlanItemEntity;
 import com.devmind.worklog.repo.WorklogEntryRepository;
 import com.devmind.worklog.repo.WorklogPlanItemRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -24,6 +26,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -210,5 +214,43 @@ class WorklogPlanServiceTest {
         List<PlanItemView> v = service.linkable(WED);
         assertEquals(1, v.size());
         assertTrue(v.get(0).planDate().equals(WED));
+    }
+
+    // ---------------- CAP-88 M3：AI 建议项落库 ----------------
+
+    @Test
+    void 建议项追加落库_标题去重_来源与状态固定() {
+        // 目标周已有「收尾登录改造」；同批建议自带重复标题
+        WorklogPlanItemEntity existing = item(1, "WEEK", MON, "TODO");
+        existing.setTitle("收尾登录改造");
+        existing.setSortOrder(3);
+        when(planRepo.findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(
+                ME, "WEEK", MON)).thenReturn(List.of(existing));
+
+        int inserted = service.insertSuggestions(ME, MON, List.of(
+                new SuggestedPlanItem("承接登录改造收尾", "DEV", 120),
+                new SuggestedPlanItem("收尾登录改造", "DEV", null),   // 与已有项撞题 → 跳过
+                new SuggestedPlanItem("  承接登录改造收尾  ", "DEV", 60), // 同批重复（忽略首尾空白）→ 跳过
+                new SuggestedPlanItem("对齐下周评审口径", "MEETING", null)));
+        assertEquals(2, inserted);
+
+        ArgumentCaptor<WorklogPlanItemEntity> cap = ArgumentCaptor.forClass(WorklogPlanItemEntity.class);
+        verify(planRepo, times(2)).save(cap.capture());
+        WorklogPlanItemEntity first = cap.getAllValues().get(0);
+        assertEquals("承接登录改造收尾", first.getTitle());
+        assertEquals("WEEK", first.getScope());
+        assertEquals(MON, first.getPlanDate());
+        assertEquals("TODO", first.getStatus());
+        assertEquals("AI_SUGGEST", first.getSource());
+        assertEquals(Integer.valueOf(120), first.getEstimateMinutes());
+        assertEquals(Integer.valueOf(4), first.getSortOrder(), "sortOrder 从已有最大值续排");
+        assertEquals(Integer.valueOf(5), cap.getAllValues().get(1).getSortOrder());
+    }
+
+    @Test
+    void 建议项空产物零写库() {
+        assertEquals(0, service.insertSuggestions(ME, MON, List.of()));
+        assertEquals(0, service.insertSuggestions(ME, MON, null));
+        verify(planRepo, times(0)).save(any());
     }
 }

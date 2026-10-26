@@ -1,5 +1,6 @@
 package com.devmind.worklog.service;
 
+import com.devmind.common.requirement.WipRequirementProvider;
 import com.devmind.worklog.dto.GitCommitView;
 import com.devmind.worklog.model.WorklogEntryEntity;
 import com.devmind.worklog.model.WorklogPlanItemEntity;
@@ -212,9 +213,48 @@ final class ReportPrompts {
         return sb.toString().strip();
     }
 
+    /**
+     * CAP-88 M3 FR-10「AI 建议下周计划」prompt：目标周 + 素材（上周未完成/滚转项 +
+     * 在办需求，缺席降级为空提示）+ 产物格式契约（与场景骨架、{@code PlanSuggestParser}
+     * 三方共用行格式 `- [类型] 标题（预估 Xh）`，改动必须三处同步）。
+     */
+    static String planSuggest(LocalDate targetWeekStart, String lastWeekItems, String wipRequirements, String hint) {
+        String prompt = "请为我建议 " + targetWeekStart + " 周（" + targetWeekStart + " ~ "
+                + targetWeekStart.plusDays(6) + "）的工作计划。\n\n"
+                + "## 素材：上周未完成/已滚转的计划项（优先承接，已完成的不要重复建议）\n\n"
+                + (lastWeekItems == null || lastWeekItems.isBlank()
+                        ? "（上周无未完成计划项）" : lastWeekItems) + "\n\n"
+                + "## 素材：当前在办需求（可作为计划方向来源）\n\n"
+                + (wipRequirements == null || wipRequirements.isBlank()
+                        ? "（无在办需求数据）" : wipRequirements) + "\n\n"
+                + "## 输出契约（严格遵守，平台按行解析）\n\n"
+                + "- 3~6 条建议，每条一行：`- [类型] 标题（预估 Xh）`\n"
+                + "- 类型 ∈ DEV/SUPPORT/MEETING/RESEARCH/OTHER；预估工时可省略\n"
+                + "- 每条建议必须能从上方素材追溯（承接未完成项或推进在办需求），不要编造与素材无关的空话\n"
+                + "- 除建议行外不写任何其他内容";
+        return appendHint(prompt, hint);
+    }
+
+    /** 在办需求素材（CAP-88 M3：SPI 探测命中时注入；空列表渲染「无数据」提示）。 */
+    static String formatWipRequirements(List<WipRequirementProvider.WipRequirement> requirements) {
+        if (requirements == null || requirements.isEmpty()) {
+            return "（无在办需求数据）";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (WipRequirementProvider.WipRequirement r : requirements) {
+            sb.append("- ").append(r.title())
+                    .append("（").append(r.requirementId())
+                    .append(" · 状态=").append(r.status());
+            if (r.projectName() != null && !r.projectName().isBlank()) {
+                sb.append(" · 项目=").append(r.projectName());
+            }
+            sb.append("）\n");
+        }
+        return sb.toString().strip();
+    }
+
     /** 本人补充说明：只有用户填了才追加；放在末尾让模型最后读到，冲突时以它为准。 */
-    static String appendHint(String prompt, String hint) {
-        String h = hint == null ? "" : hint.strip();
+    static String appendHint(String prompt, String hint) {        String h = hint == null ? "" : hint.strip();
         if (h.isEmpty()) {
             return prompt;
         }

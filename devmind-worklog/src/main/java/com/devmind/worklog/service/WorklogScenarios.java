@@ -16,6 +16,9 @@ public final class WorklogScenarios {
     /** 周报生成场景 code */
     public static final String WEEKLY = "worklog-weekly";
 
+    /** CAP-88 M3「AI 建议计划」生成场景 code（产 plan-suggest-<yyyy-Www>.md，解析为建议计划项） */
+    public static final String PLAN_SUGGEST = "worklog-plan-suggest";
+
     private WorklogScenarios() {
     }
 }
