@@ -7,13 +7,10 @@ import type {
   GenerateAck,
   GitPreview,
   GitPreviewFilter,
-  PushAck,
   TemplateDefaults,
   WeeklyReport,
   WorklogEntry,
   WorklogRepo,
-  WorklogRepoInfo,
-  WorklogRepoMember,
   WorklogSettings,
   WorklogSyncResult,
   WorkspaceView,
@@ -35,8 +32,8 @@ export const createEntry = (body: EntryPayload) => api.post<WorklogEntry>('/work
 /** CAP-74 M3：id 为 uuid 字符串；寻址靠请求体 workDate（改期由后端跨文件搬移） */
 export const updateEntry = (id: string, body: EntryPayload) =>
   api.put<WorklogEntry>(`/worklog/entries/${id}`, body)
-/** CAP-74 M3：删除按日期寻址（date 定位 day 文件） */
-export const deleteEntry = (date: string, id: string) => api.del(`/worklog/entries/${date}/${id}`)
+/** CAP-89：删除按 uuid 直删（DB 主键，不再需要日期寻址） */
+export const deleteEntry = (id: string) => api.del(`/worklog/entries/${id}`)
 
 // ---- git 扫描导入 ----
 /** filter：NEW（仅未导入，弹窗默认）/ IMPORTED（仅已导入）/ ALL（后端缺省值）；诊断不受 filter 影响 */
@@ -55,7 +52,7 @@ export const createDaily = (date: string) => api.post<DailyReport>('/worklog/dai
 /** hint：本人补充说明（重点/影响/数字），作为高优先级事实进入生成 prompt；空则不传 */
 export const generateDaily = (date: string, force = false, hint?: string) =>
   api.post<GenerateAck>('/worklog/daily/generate', { date, force, hint })
-/** CAP-74：按日期寻址保存（保存即写仓 commit）；status 字段已废弃，传了后端 400 */
+/** CAP-89：按日期寻址保存（落库 upsert）；status 字段已废弃，传了后端 400 */
 export const updateDaily = (date: string, body: { contentMd?: string }) =>
   api.put<DailyReport>(`/worklog/daily/${date}`, body)
 
@@ -68,36 +65,16 @@ export const createWeekly = (weekStart: string) => api.post<WeeklyReport>('/work
 /** hint：本人补充说明（重点/影响/数字），作为高优先级事实进入生成 prompt；空则不传 */
 export const generateWeekly = (weekStart: string, force = false, hint?: string) =>
   api.post<GenerateAck>('/worklog/weekly/generate', { weekStart, force, hint })
-/** CAP-74：按周一寻址保存（分节字段重组正文写仓）；status 传了 400 */
+/** CAP-89：按周一寻址保存（分节字段落库两列）；status 传了 400 */
 export const updateWeekly = (weekStart: string, body: { summaryMd?: string; nextPlanMd?: string }) =>
   api.put<WeeklyReport>(`/worklog/weekly/${weekStart}`, body)
 
-// ---- CAP-41/74 工作日志空间（事实源=服务端仓；WORKLOG 项目仅服务 AI 生成/对话） ----
+// ---- CAP-41/89 工作日志空间（事实源=数据库；WORKLOG 项目仅服务 AI 生成/对话） ----
 export const getWorkspace = () => api.get<WorkspaceView>('/worklog/workspace')
 export const ensureWorkspace = () => api.post<WorkspaceView>('/worklog/workspace/ensure', {})
-/** CAP-74：服务端直推个人仓到已绑定远端（fetch+merge+push；分叉冲突 409 → resolvePushConflict 显式解决） */
-export const pushWorkspace = () => api.post<PushAck>('/worklog/workspace/push', {})
-/** push 409 冲突后的显式解决（个人仓快捷入口）：ours=以平台仓为准 / theirs=以远端为准 */
-export const resolvePushConflict = (strategy: 'ours' | 'theirs') =>
-  api.post<PushAck>(`/worklog/workspace/resolve?strategy=${strategy}`, {})
-/** CAP-41/74：把空间某会话的成稿产出（daily-/weekly-）写进服务端仓（幂等，同内容零 commit） */
+/** CAP-41/89：把空间某会话的成稿产出（daily-/weekly-）落库（幂等；已有不同内容跳过不覆盖） */
 export const syncSessionReports = (sessionId: string) =>
   api.post<WorklogSyncResult>('/worklog/reports/sync', { sessionId })
-
-// ---- CAP-74：服务端仓（团队仓成员管理 + 冲突解决 + 活动仓切换数据源） ----
-/** push 409 冲突后的显式解决：ours=以平台仓为准 / theirs=以远端为准 */
-export const resolveRepoConflict = (repoKey: string, strategy: 'ours' | 'theirs') =>
-  api.post<PushAck>(`/worklog/repos/${repoKey}/resolve?strategy=${strategy}`, {})
-/** 我所属的仓列表（个人仓 + 团队仓） */
-export const listMyRepos = () => api.get<WorklogRepoInfo[]>('/worklog/repos/mine')
-export const listRepoMembers = (repoKey: string) =>
-  api.get<WorklogRepoMember[]>(`/worklog/repos/${repoKey}/members`)
-/** 仓主加成员（按 username；返回更新后的成员列表） */
-export const addRepoMember = (repoKey: string, username: string) =>
-  api.post<WorklogRepoMember[]>(`/worklog/repos/${repoKey}/members?username=${encodeURIComponent(username)}`, {})
-/** 仓主移除成员（仅删成员关系，仓内历史文件保留） */
-export const removeRepoMember = (repoKey: string, username: string) =>
-  api.del<WorklogRepoMember[]>(`/worklog/repos/${repoKey}/members/${encodeURIComponent(username)}`)
 
 // ---- 个人设置 ----
 export const getSettings = () => api.get<WorklogSettings>('/worklog/settings')

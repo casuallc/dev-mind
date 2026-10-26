@@ -14,9 +14,9 @@ interface Props {
   generating: boolean
   /** 手动创建空白稿（不经 AI），创建后进入编辑态 */
   onCreateManual: () => Promise<void>
-  /** 触发 AI 生成（非 force 已存在由后端跳过；force=显式覆盖旧稿，git log 可找回）；hint 为可选补充说明 */
+  /** 触发 AI 生成（非 force 已存在由后端跳过；force=显式覆盖旧稿）；hint 为可选补充说明 */
   onGenerate: (force: boolean, hint?: string) => void
-  /** 保存即生效写仓（CAP-74：无确认态，保存后仍可随时再改） */
+  /** 保存即生效落库（无确认态，保存后仍可随时再改） */
   onSave: (values: Record<string, string>) => Promise<void>
   /** 撑满父容器剩余高度（日报页要求编辑器底部与页面底部对齐） */
   fill?: boolean
@@ -26,7 +26,7 @@ interface Props {
 
 /**
  * CAP-28 报告编辑卡：空白手填 / AI 草稿 → 人工修订 → 保存。
- * CAP-74：去 DRAFT/CONFIRMED 状态机——事实源是服务端仓，保存即 commit，历史走 git log，
+ * CAP-74 去 DRAFT/CONFIRMED 状态机，CAP-89 起事实源回落数据库（保存即落库），
  * 不再有「确认定稿/只读」概念。编辑态复用共享 MarkdownEditor 的极简模式（showToolbar=false：
  * Qoder 文档式顶栏，字段标题通过 title 进入顶栏，只有源码/分栏/预览切换，默认预览；日报以读为主，
  * 不摆格式工具栏）。周报两字段用 layout=horizontal 左右等宽并排，与日报一样 fill 撑满并底部对齐。
@@ -85,7 +85,7 @@ export default function ReportEditor({
   const save = () => {
     Modal.confirm({
       title: '保存修改',
-      content: '保存即写入仓库并提交（历史可走 git log 找回），确定保存吗？',
+      content: '保存即落库生效（之后仍可随时再改），确定保存吗？',
       okText: '保存',
       cancelText: '取消',
       onOk: doSave,
