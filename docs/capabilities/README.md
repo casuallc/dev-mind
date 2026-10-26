@@ -100,7 +100,8 @@
 | [CAP-85](CAP-85-knowledge-governance-sync.md) | 知识治理与增量同步（M5） | 管理/底座 | Git 本地副本 + 飞书空间目录增量同步（水位 + 删除标记，外部删只 deprecated 不物理删）；CHAT 端点可选自动分类/摘要/标签（人工修正锁定、失败不阻断摄入）；复核/到期/久未复核提醒 + SimHash 近重复报告；固定评测集输出 Recall@K/MRR/引用准确率/拒答率；知识中心 ADMIN 治理控制台 |
 | [CAP-86](CAP-86-knowledge-workspace.md) | 知识库管理台（菜单组化信息架构） | 管理/前端体验 | 消费归 AI 问答、知识页面纯管理员工具；后台「知识库」升级为菜单组：库总览/文档导入/召回验证/治理报告四子菜单；库详情恢复独立路由四页签（文档/摄入/同步/设置），同步源与飞书手动导入按库下沉，生命周期/近重复/反馈/评测聚合为治理报告；库内条目轻量摘要服务端分页，旧 `/knowledge` 与 v1 链接全量重定向并保留聊天引用深链 |
 | [CAP-87](CAP-87-changelog.md) | 控制台更新日志（本地文件只读渲染） | 管理/前端体验 | 对象为 Dev-Mind 自身版本变更：`CHANGELOG.md` 随安装包分发，控制台只读解析渲染（无编辑/草稿/发布/修订）；`[Unreleased]` 不可见；版本/日期/关键词筛选 + 服务端分页 + Markdown 详情抽屉；「关于」弹框按当前部署版本一键跳转；按文件 mtime 缓存，替换文件即生效 |
-| [CAP-88](CAP-88-worklog-plan-loop.md) | 工作日志计划闭环（日/周计划项） | 组装层 | 计划升格一等数据补「计划→执行→复盘→滚转」闭环：仓内 plans/ 文件 + marker 计划项（沿用 CAP-74 事实源口径，零新表），TODO/DOING/DONE/DROPPED/CARRIED 状态机（自动只到 DOING），条目 marker 增 plan 关联；日报/周报生成注入计划对照，「上周计划跟进」改数据驱动；M3 AI 建议周计划（AI_SUGGEST 草稿人工确认） |
+| [CAP-88](CAP-88-worklog-plan-loop.md) | 工作日志计划闭环（日/周计划项） | 组装层 | 计划升格一等数据补「计划→执行→复盘→滚转」闭环：worklog_plan_items 表（存储随 CAP-89 定 DB），TODO/DOING/DONE/DROPPED/CARRIED 状态机（自动只到 DOING），条目 plan_item_id 关联；日报/周报生成注入计划对照，「上周计划跟进」改数据驱动；M3 AI 建议周计划（AI_SUGGEST 草稿人工确认） |
+| [CAP-89](CAP-89-worklog-storage-back-to-db.md) | 工作日志存储回 DB（去 git 仓化，取代 CAP-74） | 组装层 | 远程推送判定无意义：事实源回 DB（复活 daily/weekly_reports、重建 worklog_entries 保持 String uuid + plan_item_id 列），git 仓单写者/自动推送/冲突 resolve/仓管理全链路删除，团队仓退役回纯个人域；防覆盖=自动不覆盖+force 显式（无状态机无历史表）；仓→DB 幂等迁移；CAP-74「读写不依赖 runner/自动不覆盖」两收益以 DB 等价物保留 |
 
 ## 文档模板说明
 

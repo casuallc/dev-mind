@@ -1,10 +1,13 @@
 # CAP-88 工作日志计划闭环（日/周计划项 + 执行关联 + 数据驱动复盘）
 
 > 能力 ID：CAP-88 ｜ 分类：组装层 ｜ 状态：设计定稿 ｜ 日期：2026-10-26
-> 决策记录：计划粒度定稿**日计划 + 周计划双层**（日计划管当天执行对照，周计划管方向与
-> 周间滚转，两层经条目关联打通）；计划项**存仓内文件不回建 DB 表**——CAP-74 已把
-> 条目/报告事实源收敛为服务端 git 仓，计划沿用同一契约（marker 注释定界），平台外编辑、
-> 写后自动推送、git 历史审计全部白嫖；「AI 建议计划」纳入 M3，不阻塞 M1/M2 闭环先行。
+> （2026-10-26 修订：存储口径随 CAP-89 定稿**改为 DB 表**——CAP-74 的仓内文件
+> 方案同日被推翻（远程推送判定无意义、git 链路整体退役），原计划文件契约作废；
+> 功能闭环设计不变，仅载体从 `plans/*.md` 文件改为 `worklog_plan_items` 表 +
+> `worklog_entries.plan_item_id` 列。）
+> 决策记录：计划粒度定稿**日计划 + 周计划双层**（日计划管当天执行对照，周计划管
+> 方向与周间滚转，两层经条目关联打通）；计划项为 DB 一等实体（随 CAP-89 存储
+> 口径）；「AI 建议计划」纳入 M3，不阻塞 M1/M2 闭环先行。
 
 ## 1. 目的
 
@@ -17,164 +20,157 @@
 - 计划没有生命周期：做完没做完、拖了几周，文本里都看不出来；
 - 每天的执行（条目）与每周的方向（计划文本）之间没有连接点。
 
-本能力把**计划升格为一等数据**（仓内计划文件 + 结构化计划项），补齐闭环：
+本能力把**计划升格为一等数据**（`worklog_plan_items` 表，计划项有状态、可关联、
+可滚转），补齐闭环：
 
 ```
-计划（plans/daily/yyyy-MM-dd.md、plans/weekly/yyyy-Www.md，计划项有状态）
-   │ 执行时关联（条目 marker 增 plan=<id> 属性）
+计划（worklog_plan_items：scope=DAY/WEEK，有状态）
+   │ 执行时关联（worklog_entries.plan_item_id）
    ▼
-条目（CAP-74 §10 既有契约，事实源在仓）
+条目（已发生事实）
    │ 生成时注入「计划 vs 实际」结构化对照
    ▼
 日报：今日计划逐条有着落 + 计划外工作；周报：「上周计划跟进」由真实状态驱动
    │ 周期切换
    ▼
-未完成项一键滚转次日/下周（CARRIED + carried 链，反复拖延可追溯）
+未完成项一键滚转次日/下周（CARRIED + carried_from_id 链，反复拖延可追溯）
 ```
 
 ## 2. 功能需求
 
 ### M1 计划项与执行关联
 
-- **FR-01 计划文件契约**：仓内 `<subdir>/plans/daily/yyyy-MM-dd.md`（日计划）与
-  `<subdir>/plans/weekly/yyyy-Www.md`（周计划，周文件名口径同周报）。计划项格式
-  沿用 CAP-74 §10 条目同款 marker 注释定界：
-  `<!-- devmind:plan id=<32hex> type=DEV status=TODO est=120 source=MANUAL req=.. jira=.. carried=.. -->`
-  + `## 标题` + 正文；preamble（首个注释前内容）与未知 `k=v` 属性逐字节/原序无损
-  往返，平台外手改不丢。属性口径：`type` 与条目同枚举（DEV/SUPPORT/MEETING/
-  RESEARCH/OTHER）；`est`=预估分钟（0.25h 步进口径）；`req`/`jira` 关联沿用条目
-  口径；`carried`=滚转来源项 id。
-- **FR-02 计划 CRUD**：按 (scope, date/weekStart) 读计划文件解析视图；新增/编辑/
-  删除/改状态一律经 `WorklogRepoService` 单写者收口写文件 + commit
-  （trailer `DevMind-Source: manual`）；**写后自动推送白嫖 CAP-74 FR-06**——仓写
-  收口不变，绑定远端的仓计划变更随写即推，零新增同步链路。
-- **FR-03 状态机**：`TODO / DOING / DONE / DROPPED / CARRIED`。状态变更 = 重写
-  marker 属性 + commit。自动只到 DOING：条目关联计划项（FR-04）且该项为 TODO 时
-  服务端置 DOING（关联只证明动过，不证明做完）；DONE/DROPPED 必须人工。状态
-  历史走 git log，平台不自建。
-- **FR-04 条目关联计划**：条目新增/编辑 API 增可选 `planId`；条目 marker 增
-  `plan=<id>` 属性（单关联；一项执行对应一个计划项）。git 扫描导入链路不动，
-  导入后人工关联。删计划项时关联条目保留 marker 原值（悬空 id 渲染为「已删计划」，
-  不级联改条目文件）。
-- **FR-05 滚转**：打开某日/周计划视图时检测上一周期未完成项（TODO/DOING），提示
-  「上周期 N 项未完成」一键滚转：目标文件追加各项（新 id、`status=TODO`、
-  `carried=<原id>`），原项状态改 `CARRIED`——同一仓一次 commit。`carried` 链使
-  「一项拖了三周」可回溯；重复滚转幂等（原项已 CARRIED 即跳过）。
+- **FR-01 计划项实体**：`worklog_plan_items` 表（见 §5）——user_id + scope
+  （DAY/WEEK）+ plan_date（DAY=当天日期；WEEK=week_start 周一）+ title/content +
+  plan_type（与条目同枚举 DEV/SUPPORT/MEETING/RESEARCH/OTHER）+ estimate_minutes
+  （0.25h 步进口径）+ status + source + requirement_id/jira_issue_key 关联（沿用
+  条目口径）+ carried_from_id + sort_order。按人隔离（仅能改自己的，他人 404，
+  同条目口径）。
+- **FR-02 计划 CRUD**：按 (scope, date/weekStart) 查列表；新增/编辑/删除/改状态
+  常规 REST；工时内部分钟存储、API 暴露 hours（同条目）。
+- **FR-03 状态机**：`TODO / DOING / DONE / DROPPED / CARRIED`。自动只到 DOING：
+  条目关联计划项（FR-04）且该项为 TODO 时服务端置 DOING（关联只证明动过，不
+  证明做完）；DONE/DROPPED 必须人工。状态历史 = updated_at + 演进预留（首版不
+  自建审计表）。
+- **FR-04 条目关联计划**：条目新增/编辑 API 增可选 `planId`（列
+  `worklog_entries.plan_item_id`，随 CAP-89 FR-02 一并落；单关联——一项执行
+  对应一个计划项）。git 扫描导入链路不动，导入后人工关联。删计划项时条目
+  plan_item_id 置空（DB 世界直接清引用，无悬空 id 问题）。
+- **FR-05 滚转**：打开某日/周计划视图时返回上一周期未完成项（TODO/DOING）提示；
+  一键滚转 `POST /plans/carry`：目标周期插入各项副本（status=TODO、
+  carried_from_id=原 id），原项置 CARRIED——单事务完成。`carried_from_id` 链使
+  「一项拖了三周」可回溯；幂等（原项已 CARRIED 即跳过）。
 - **FR-06 前端「计划」视图**：/worklog 页 Segmented 增「计划」（内层日/周切换 +
   日期/周导航，布局沿用内容区约定）：计划项列表（状态徽标 + 下拉改状态 + 预估
   工时 + 关联需求/Jira 展示）、新增/编辑抽屉、滚转提示条；条目编辑抽屉增「关联
-  计划项」下拉（当日日计划 + 当周周计划，DOING/DONE 项也可选——补录昨天忘挂的
-  执行）；条目视图当日分组顶部显示计划完成度（如 3/5）。
+  计划项」下拉（当日日计划 + 当周周计划，DOING/DONE 项也可选——补录忘挂的执行）；
+  条目视图当日分组顶部显示计划完成度（如 3/5）。
 
 ### M2 数据驱动复盘
 
-- **FR-07 日报生成注入计划对照**：`ReportService` 素材构建读当日计划文件 +
-  条目 marker `plan` 关联，prompt 增「今日计划对照」块（每项：标题/状态/关联条目
+- **FR-07 日报生成注入计划对照**：`ReportService` 素材构建查当日计划项 + 条目
+  plan_item_id 关联，prompt 增「今日计划对照」块（每项：标题/状态/关联条目
   摘要）；内置日报模板要求「今日重点」逐条呼应计划、无关联条目的工作归「其他
   进展/项目支持」。`{{entries}}`/`{{commits}}` 占位不变。
 - **FR-08 周报「上周计划跟进」改数据驱动**：`{{lastWeekPlan}}` 内容由「上周周报
-  文本解析的下周计划」升级为「上周计划文件的计划项 + 真实状态 + 关联条目」结构
-  化清单（占位符名不变，自定义模板兼容）；模板要求逐条标注「完成/部分完成/未完成」
-  直接以 marker 状态为准叙述，不再让模型从文本猜对应。上周无计划文件时仍渲染
-  「无上周计划：省略该块，不得编造」。本周计划项（若已排）一并注入，供「下周计划」
-  节呼应——下周计划文本仍是汇报形态（自由文本），计划项才是结构载体，两者不互写。
-- **FR-09 存量兼容**：无计划文件的历史日期/周，生成行为与现状完全一致（对照块
-  省略）；`splitWeekly` 分节解析、`{{lastWeekPlan}}` 语义不变只升级内容来源。
+  next_plan_md 文本」升级为「上周计划项 + 真实状态 + 关联条目」结构化清单
+  （占位符名不变，自定义模板兼容）；模板要求逐条标注「完成/部分完成/未完成」
+  直接以 status 为准叙述，不再让模型从文本猜对应。上周无计划项时仍渲染「无
+  上周计划：省略该块，不得编造」。本周计划项（若已排）一并注入，供「下周计划」
+  节呼应——下周计划文本仍是汇报形态（自由文本），计划项才是结构载体，两者
+  不互写（漂移风险见 §10）。
+- **FR-09 存量兼容**：无计划项的历史日期/周，生成行为与现状完全一致（对照块
+  省略）；`{{lastWeekPlan}}` 语义不变只升级内容来源。
 
 ### M3 AI 建议计划
 
 - **FR-10 「建议下周计划」**：计划视图手动触发 → 走既有 worklog 会话生成链路
-  （场景新增 `worklog-plan-suggest` 种子），素材 = 上周未完成/滚转项 + 本周在办
-  需求（ObjectProvider 探测 CAP-13 SPI，缺席降级只用未完成项）+ 可选 hint；
-  claude 产 `.devmind/output/plan-suggest-yyyy-Www.md` → 服务端解析为建议项写
-  下周计划文件，`source=AI_SUGGEST`、`status=TODO`。前端建议项带「AI」徽标，
-  逐条编辑/删除即人工确认（同日报「自动草稿 + 人工确认」哲学，无独立接受态）。
-  幂等：目标周已存在计划项时跳过生成（force 显式重生成只追加不覆盖已有项——
-  已有项是人排过的事实）。
+  （场景新增 `worklog-plan-suggest` 种子），素材 = 上周未完成/滚转项 + 在办需求
+  （ObjectProvider 探测 CAP-13 SPI，缺席降级只用未完成项）+ 可选 hint；claude
+  产 `.devmind/output/plan-suggest-yyyy-Www.md` → 服务端解析为建议项插
+  `worklog_plan_items`，`source=AI_SUGGEST`、`status=TODO`。前端建议项带「AI」
+  徽标，逐条编辑/删除即人工确认（同日报「自动草稿 + 人工确认」哲学，无独立
+  接受态）。幂等：目标周已存在计划项时跳过生成；force 显式重生成只追加不覆盖
+  已有项（已有项是人排过的事实）。
 - **FR-11 周期末提醒（开放，可后置）**：周计划仍有未完成项时周五发站内提醒
   （CAP-06 既有广播制），引导滚转或标 DROPPED。
 
 ## 3. 否决方案
 
-- **回建 DB 表（worklog_plan_items）**：否决。CAP-74 刚把条目/报告从 DB 迁仓
-  （「仓 = 事实源、禁回建 DB 镜像/落盘索引」），计划回建 DB 表是开倒车；计划项
-  量级与条目相同（一人一年数百小数据），marker 解析器现成可抽共用；文件形态还
-  直接继承平台外编辑、自动推送、git 历史审计三项红利。DB 唯一诱惑是状态字段的
-  结构化查询，而该量级下「读文件 + 解析」毫无压力。
-- **计划并入条目文件（PLANNED 标志位）**：否决。条目 = 已发生事实（日期 = 发生
-  日），计划 = 面向未来且跨周期滚转，生命周期根本不同；混进 `entries/` 会让
-  「当日清单」语义分裂（今天记的事 vs 今天打算做的事），生成素材口径也要跟着
-  分叉。
+- **仓内计划文件（plans/*.md + marker 注释）**：初稿定稿、同日作废——该方案
+  押注 CAP-74「仓 = 事实源」方向，CAP-89 判定远程无意义、git 链路整体退役后，
+  文件载体只剩成本（解析器/无损往返机器），DB 表的状态/关联字段原生可查，
+  计划项恰好是本能力最需要的结构化形态。
+- **计划并入条目（PLANNED 标志位）**：否决。条目 = 已发生事实（日期 = 发生日），
+  计划 = 面向未来且跨周期滚转，生命周期根本不同；混在一张表里会让「当日清单」
+  语义分裂（今天记的事 vs 今天打算做的事），生成素材口径也要跟着分叉。
 - **状态全自动（关联条目即 DONE）**：否决。关联只证明动过；自动只到 DOING，
   DONE 必须人工（M3 可让 AI 给建议值，但落库仍人工）。
 - **周计划项取代周报 `next_plan_md` 文本**：否决。周报是给上级/团队看的汇报
   形态（叙述性文本），计划项是给自己跟踪的结构载体；强行合一要么汇报变干巴巴
-  清单，要么跟踪失去结构。两者各司其职、不互写（漂移风险见 §10）。
+  清单，要么跟踪失去结构。两者各司其职、不互写。
 
 ## 4. 架构与模块归属
 
-- 后端：`devmind-worklog` 模块内——`PlanService`（CRUD/状态/滚转/关联联动）+
-  marker 解析器从 CAP-74 §10 条目解析抽共用（条目/计划同构：注释定界 + 标题 +
-  正文 + 无损往返）。写路径全走 `WorklogRepoService` 单写者收口，仓锁/commit/
-  自动推送零新增。
-- 前端：`features/worklog` 增 `PlanView`（自包含）；`WorklogViewSwitch` 增「计划」
-  页签；条目抽屉（EntryFormDrawer）增关联下拉。
-- 无新 SPI、无 runner/协议变更、无新表。M3 在办需求素材经 ObjectProvider 探测
-  CAP-13 SPI（缺席降级，同 one-shot 探测先例）。
-- 依赖：CAP-74（仓设施/单写者/自动推送/条目契约）、CAP-41（生成链路/模板）、
-  CAP-28（设置与调度骨架）；M3 另依赖 CAP-13（在办需求）、CAP-06（提醒，FR-11）。
+- 后端：`devmind-worklog` 模块内——`PlanItemEntity/Repository/PlanService/
+  PlanController`；ReportService 素材构建增计划对照注入。无新 SPI、无 runner/
+  协议变更。
+- 前端：`features/worklog` 增 `PlanView`（自包含）；`WorklogViewSwitch` 增
+  「计划」页签；条目抽屉（EntryFormDrawer）增关联下拉。
+- 依赖：**CAP-89（硬前置——条目表与 `plan_item_id` 列随其 FR-02 复活落地）**、
+  CAP-41（生成链路/模板）、CAP-28（设置与调度骨架）；M3 另依赖 CAP-13（在办
+  需求，ObjectProvider 探测缺席降级）、CAP-06（提醒，FR-11）。
 
 ## 5. 数据模型
 
-无新表、无存量表变更（ddl-auto 不动）。全部为仓内文件契约：
+```sql
+worklog_plan_items(
+  id PK,                      -- Long 自增（平台惯例；条目 String uuid 是 CAP-89 载明的有意例外，不扩散）
+  user_id, scope,             -- DAY / WEEK
+  plan_date,                  -- DAY=当天日期；WEEK=week_start（周一）
+  title, content clob?,
+  plan_type default 'DEV',    -- DEV/SUPPORT/MEETING/RESEARCH/OTHER
+  estimate_minutes int?,      -- 分钟存储，API 暴露 hours（0.25h 步进）
+  status default 'TODO',      -- TODO/DOING/DONE/DROPPED/CARRIED（@ColumnDefault 带引号）
+  source default 'MANUAL',    -- MANUAL / AI_SUGGEST（M3）
+  requirement_id?, jira_issue_key?,
+  carried_from_id?,           -- 滚转来源项 id（自引用，拖延链可追溯）
+  sort_order int, created_at, updated_at)
 
+worklog_entries ── + plan_item_id?   -- 随 CAP-89 FR-02 一并落；删计划项时置空
 ```
-<subdir>/plans/daily/yyyy-MM-dd.md      -- 日计划（文件名编码日期，同 daily/ 口径）
-<subdir>/plans/weekly/yyyy-Www.md       -- 周计划（周文件名口径同 weekly/）
-
-文件内计划项：
-<!-- devmind:plan id=<32hex> type=DEV status=TODO est=120 source=MANUAL
-     req=<requirementId> jira=<key> carried=<来源项id> -->
-## 计划项标题
-正文（可选，目标/验收口径）
-
-条目 marker 增可选属性：plan=<计划项id>（单关联，悬空 id 容忍）
-```
-
-`status` ∈ TODO/DOING/DONE/DROPPED/CARRIED；`source` ∈ MANUAL/AI_SUGGEST（M3）；
-`est` 分钟 int（0.25h=15）；id 生成与条目同款 uuid 32hex。
 
 ## 6. API 概要
 
 ```
-GET    /api/worklog/plans?scope=DAY|WEEK&date=|weekStart=   计划文件解析视图（含各项状态）
-POST   /api/worklog/plans/items              新增 {scope, date|weekStart, title, content?, type, est?, req?, jira?}
-PUT    /api/worklog/plans/items/{date}/{id}  编辑/改状态（date 定位文件免全目录扫，寻址同条目删除先例；
-                                             周项用 weekStart 同位）
-DELETE /api/worklog/plans/items/{date}/{id}
+GET    /api/worklog/plans?scope=DAY|WEEK&date=|weekStart=   计划项列表（附上一周期未完成提示数据）
+POST   /api/worklog/plans/items              新增 {scope, date|weekStart, title, content?, type, hours?, req?, jira?}
+PUT    /api/worklog/plans/items/{id}         编辑/改状态
+DELETE /api/worklog/plans/items/{id}         删除（关联条目 plan_item_id 置空）
 POST   /api/worklog/plans/carry {scope, to, ids[]}          滚转到目标日期/周（幂等）
 GET    /api/worklog/plans/linkable?date=                    条目抽屉可关联项（当日日计划+当周周计划）
 POST   /api/worklog/plans/suggest {weekStart, hint?}        M3 AI 建议（异步 202 + sessionId，幂等跳过）
 
-条目 POST/PUT 增可选 planId（写 marker plan 属性 + 触发 TODO→DOING 联动）
+条目 POST/PUT 增可选 planId（落 plan_item_id + 触发 TODO→DOING 联动）
 ```
 
-写端点全部经仓锁单写者；commit message `worklog: plan daily 2026-10-26` /
-`worklog: plan weekly 2026-W44` + `DevMind-Source: manual|ai` trailer。
+全部端点仅本人数据（owner 强制）；suggest 走既有 worklog 会话生成链路（异步、
+亲和节点离线 409 口径同日报生成）。
 
 ## 7. 安全
 
-- 个人域数据 owner 强制沿用 CAP-62 既有口径：计划读写只落操作人活动仓的本人
-  subdir，越权访问 404（同条目/报告）。
-- 计划文件路径由服务端按 (仓, 用户名, scope, date) 派生，客户端不可控路径；
-  日期/周格式服务端强校验（防 `../` 注入，同条目删除寻址先例）。
-- AI_SUGGEST 项只是文件里的草稿行，不触发任何自动执行；FR-10 生成会话沿用
-  worklog 场景只读权限口径。
+- 个人域数据 owner 强制（CAP-62 口径）：计划项读写仅本人，越权 404（同条目）。
+- 关联字段（requirement_id/jira_issue_key/plan_item_id/carried_from_id）服务端
+  校验归属合法性：plan_item_id 必须是本人项，requirement 沿用条目的关联校验
+  先例。
+- AI_SUGGEST 项只是草稿行，不触发任何自动执行；FR-10 生成会话沿用 worklog
+  场景只读权限口径。
 
 ## 8. 里程碑
 
-- **M1 闭环骨架**：计划文件契约 + marker 解析抽共用 + CRUD/状态/滚转 API + 条目
-  关联（planId + TODO→DOING 联动）+ 前端「计划」视图与条目抽屉关联下拉。
+- **M1 闭环骨架**：`worklog_plan_items` 表 + CRUD/状态/滚转 API + 条目关联
+  （planId + TODO→DOING 联动）+ 前端「计划」视图与条目抽屉关联下拉。
+  （依赖 CAP-89 M1 先落——条目表与 plan_item_id 列在其 FR-02。）
 - **M2 复盘确定性**：日报计划对照注入 + 周报「上周计划跟进」改数据驱动 + 内置
   模板更新（存量自定义模板兼容）。
 - **M3 智能建议**：`worklog-plan-suggest` 场景种子 + suggest 链路（CAP-13 探测
@@ -182,22 +178,21 @@ POST   /api/worklog/plans/suggest {weekStart, hint?}        M3 AI 建议（异�
 
 ## 9. 验收标准
 
-1. 新增日计划项后：仓内出现 `plans/daily/yyyy-MM-dd.md` 且 commit 带
-   `DevMind-Source: manual`；绑定远端的仓无需手动推送即远端可见（白嫖 CAP-74
-   FR-06）；平台外手改计划文件后平台读路径正常解析、未知属性无损往返；
-2. 条目关联计划项：条目 marker 出现 `plan=<id>`，关联项 TODO 自动变 DOING；
-   删计划项后关联条目正常渲染「已删计划」不报错；
-3. 状态流转：DOING→DONE/DROPPED 人工改成功，git log 可见每次变更；TODO 不可
-   被任何自动路径直接置 DONE；
+1. 计划项 CRUD：新增日/周计划项落库，编辑/删除/改状态生效；他人项 404；
+2. 条目关联计划项：条目 plan_item_id 落库，关联项 TODO 自动变 DOING；删计划项
+   后关联条目 plan_item_id 置空、正常渲染不报错；
+3. 状态流转：DOING→DONE/DROPPED 人工改成功；TODO 不可被任何自动路径直接置
+   DONE；
 4. 滚转：昨日 2 项未完成 → 今日计划视图提示并可一键滚转，原项 CARRIED、新项
-   带 `carried` 链；重复滚转幂等；跨周滚转同样成立；
+   带 carried_from_id 链；重复滚转幂等；跨周滚转同样成立；
 5. 日报生成：prompt 素材含当日计划对照块，成稿「今日重点」呼应计划项、计划外
-   工作归「其他进展/项目支持」；无计划文件的历史日期生成行为与现状一致；
-6. 周报生成：上周有计划文件时「上周计划跟进」逐条对应且状态与 marker 一致
-   （数据驱动，非模型猜）；上周无计划文件时该块省略不编造；
-7. M3：触发「建议下周计划」→ 建议项以 AI_SUGGEST 落下周计划文件、前端带徽标，
-   可逐条删改；目标周已有项时跳过生成；CAP-13 缺席时仅用未完成项素材正常生成；
-8. 越权：改他人计划项 404；路径注入（`date=../../x`）400。
+   工作归「其他进展/项目支持」；无计划项的历史日期生成行为与现状一致；
+6. 周报生成：上周有计划项时「上周计划跟进」逐条对应且状态与库中一致（数据
+   驱动，非模型猜）；上周无计划项时该块省略不编造；
+7. M3：触发「建议下周计划」→ 建议项以 AI_SUGGEST 落库、前端带徽标，可逐条
+   删改；目标周已有项时跳过生成；CAP-13 缺席时仅用未完成项素材正常生成；
+8. 全量 `mvn test` 绿；E2E（tests/ 沉淀）覆盖 CRUD/关联联动/滚转幂等/生成
+   对照注入。
 
 ## 10. 风险与开放问题
 
@@ -205,11 +200,11 @@ POST   /api/worklog/plans/suggest {weekStart, hint?}        M3 AI 建议（异�
   可能困惑「周报里写的下周计划怎么没进计划视图」。开放问题：周报生成后是否提供
   「把下周计划文本转为计划项」入口（解析自由文本不可靠，倾向 AI_SUGGEST 链路
   顺带覆盖该场景——下周计划以建议项先行、周报文本引用之）。M3 实施时再定。
-- **团队仓下计划对他人可见**：仓共享语义下同仓成员可读彼此 subdir（同日报/周报），
-  符合「工作日志可共享」定位，不做计划专属权限；有私密诉求用个人仓。
-- **滚转链噪音**：一项反复滚转会产生长 `carried` 链与多个 CARRIED 行。M1 先不
-  做折叠，视实际使用加「链式合并展示」。
+- **滚转链噪音**：一项反复滚转会产生长 carried_from_id 链与多个 CARRIED 行。
+  M1 先不做折叠，视实际使用加「链式合并展示」。
 - **FR-11 提醒打扰度**：广播制通知下多人部署会互相看到提醒，评估后再定或等
   通知按人投递演进。
-- **est 预估与实际工时对照**：条目有 minutes、计划有 est，M2 后可加「预估 vs
-  实际」偏差展示；首版只存不比。
+- **est 预估与实际工时对照**：条目有 minutes、计划有 estimate_minutes，M2 后可
+  加「预估 vs 实际」偏差展示；首版只存不比。
+- **状态历史**：首版只有 updated_at；出现「什么时候标 DONE 的」审计诉求再立
+  演进（状态变更流水表），不阻塞。
