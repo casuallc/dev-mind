@@ -24,6 +24,8 @@ export default function PlanView() {
   const [items, setItems] = useState<PlanItem[]>([])
   const [carryover, setCarryover] = useState<PlanItem[]>([])
   const [carryoverFrom, setCarryoverFrom] = useState('')
+  // CAP-91 FR-05：krId→标题映射（KR 列展示；后端随列表响应带全）
+  const [krTitles, setKrTitles] = useState<Record<number, string>>({})
   const [loading, setLoading] = useState(false)
   const [carrying, setCarrying] = useState(false)
   const [editTarget, setEditTarget] = useState<PlanItem | null>(null)
@@ -47,6 +49,7 @@ export default function PlanView() {
         setItems(r.items)
         setCarryover(r.carryoverItems)
         setCarryoverFrom(r.carryoverFrom)
+        setKrTitles(r.krTitles ?? {})
       })
       .catch((e) => showError(e, '加载计划失败'))
       .finally(() => setLoading(false))
@@ -89,6 +92,8 @@ export default function PlanView() {
       hours: item.estimateHours,
       requirementId: item.requirementId,
       jiraIssueKey: item.jiraIssueKey,
+      // CAP-91：krId 必须回传——缺省会被后端当作解除对齐
+      krId: item.krId,
       status,
     })
       .then(() => load())
@@ -240,6 +245,20 @@ export default function PlanView() {
             render: (h?: number) => (h == null ? '-' : `${h}h`),
           },
           {
+            // CAP-91 FR-05：KR 对齐列（krTitles 由列表响应带全；已删/失效 KR 兜底显示 id）
+            title: 'KR 对齐',
+            dataIndex: 'krId',
+            width: 150,
+            render: (krId?: number) =>
+              krId == null ? (
+                '-'
+              ) : (
+                <Tag color="geekblue" title={krTitles[krId] ?? undefined}>
+                  {krTitles[krId] ?? `KR#${krId}`}
+                </Tag>
+              ),
+          },
+          {
             title: '状态',
             dataIndex: 'status',
             width: 150,
@@ -303,6 +322,7 @@ export default function PlanView() {
         open={editOpen}
         target={editTarget}
         defaultDate={currentDateStr}
+        krTitles={krTitles}
         saving={saving}
         onCancel={() => setEditOpen(false)}
         onSave={onSave}

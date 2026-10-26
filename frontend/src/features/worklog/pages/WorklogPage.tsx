@@ -45,6 +45,7 @@ import { ENTRY_SOURCES, ENTRY_TYPES, PLAN_STATUSES } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import EntryFormDrawer from '../components/EntryFormDrawer'
 import GitImportDrawer from '../components/GitImportDrawer'
+import GoalBoard from '../components/GoalBoard'
 import PlanView from '../components/PlanView'
 import RepoSubscriptionDrawer from '../components/RepoSubscriptionDrawer'
 import ReportEditor from '../components/ReportEditor'
@@ -726,6 +727,17 @@ export default function WorklogPage() {
         </>
       )}
 
+      {view === 'goals' && (
+        <>
+          <Typography.Paragraph type="secondary">
+            年度目标定全年方向，季度 OKR（O→KR）逐级拆解；周计划项可关联当季 KR（计划页签编辑），KR
+            的「建议进度」由关联计划完成度派生只展示不回写；每季末在季度区头部打开「季度复盘」（OKR 对照 +
+            计划外聚合 AI 成稿，人工修订后保存）。
+          </Typography.Paragraph>
+          <GoalBoard />
+        </>
+      )}
+
       {view === 'daily' && (
         <>
           <Typography.Paragraph type="secondary">
@@ -796,7 +808,7 @@ export default function WorklogPage() {
               ]}
               onCreateManual={onCreateWeekly}
               onGenerate={(force, hint) => onGenerate('weekly', force, hint)}
-              onRebuildNextPlan={() => nextPlanPreview(weekStartStr)}
+              rebuild={{ fetch: () => nextPlanPreview(weekStartStr) }}
               onSave={async (values) => {
                 if (weekly?.exists) {
                   const updated = await updateWeekly(weekStartStr, { summaryMd: values.summaryMd, nextPlanMd: values.nextPlanMd })

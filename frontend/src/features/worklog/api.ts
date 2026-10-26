@@ -9,13 +9,20 @@ import type {
   GenerateAck,
   GitPreview,
   GitPreviewFilter,
+  GoalCarryResult,
+  GoalPayload,
+  GoalTreeView,
+  LinkableKr,
   NextPlanPreview,
   PlanItem,
   PlanItemPayload,
   PlanListView,
+  QuarterlyReport,
+  ReviewPreview,
   TemplateDefaults,
   WeeklyReport,
   WorklogEntry,
+  WorklogGoal,
   WorklogRepo,
   WorklogSettings,
   WorklogSyncResult,
@@ -101,6 +108,35 @@ export const updateWeekly = (weekStart: string, body: { summaryMd?: string; next
 /** CAP-90 FR-10「从计划项重建」：下周计划项确定性渲染预览（不经 LLM；人工确认后填入编辑框） */
 export const nextPlanPreview = (weekStart: string) =>
   api.get<NextPlanPreview>(`/worklog/weekly/next-plan-preview?weekStart=${weekStart}`)
+
+// ---- CAP-91 工作目标与 OKR 对齐 ----
+/** 整年目标树：年度 O（嵌套年度 KR）+ Q1~Q4 四季区（KR 附派生进度数据） */
+export const getGoalTree = (year: number) => api.get<GoalTreeView>(`/worklog/goals/tree?year=${year}`)
+/** 计划项抽屉可关联 KR：该日所在季的 ACTIVE KEY_RESULT */
+export const listLinkableKrs = (date: string) =>
+  api.get<LinkableKr[]>(`/worklog/goals/linkable-krs?date=${date}`)
+export const createGoal = (body: GoalPayload) => api.post<WorklogGoal>('/worklog/goals', body)
+export const updateGoal = (id: number, body: GoalPayload) =>
+  api.put<WorklogGoal>(`/worklog/goals/${id}`, body)
+/** 删除（O 有子项 400；删 KR 后端清引用它的周计划项 kr_id） */
+export const deleteGoal = (id: number) => api.del(`/worklog/goals/${id}`)
+/** 跨周期滚转（幂等：非 ACTIVE 跳过；KR 需与父 O 同批或显式指定新父） */
+export const carryGoals = (toPeriod: string, ids: number[], krParentMap?: Record<number, number>) =>
+  api.post<GoalCarryResult>('/worklog/goals/carry', { toPeriod, ids, krParentMap })
+
+// ---- CAP-91 M2 季度复盘（period='2026-Q1'；GET 不存在返回 undefined 同日报口径） ----
+export const getQuarterly = (period: string) =>
+  api.get<QuarterlyReport | undefined>(`/worklog/quarterly?period=${period}`)
+export const createQuarterly = (period: string) =>
+  api.post<QuarterlyReport>('/worklog/quarterly', { period })
+/** hint：本人补充说明（高优先级事实注入 prompt）；空则不传。force=显式覆盖已有成稿 */
+export const generateQuarterly = (period: string, force = false, hint?: string) =>
+  api.post<GenerateAck>('/worklog/quarterly/generate', { period, force, hint })
+export const updateQuarterly = (period: string, body: { contentMd?: string }) =>
+  api.put<QuarterlyReport>(`/worklog/quarterly/${period}`, body)
+/** CAP-91 FR-10「从数据重建」：OKR 对照 + 计划外聚合确定性预览（不经 LLM；人工确认后填入编辑框） */
+export const reviewPreview = (period: string) =>
+  api.get<ReviewPreview>(`/worklog/quarterly/review-preview?period=${period}`)
 
 // ---- CAP-41/89 工作日志空间（事实源=数据库；WORKLOG 项目仅服务 AI 生成/对话） ----
 export const getWorkspace = () => api.get<WorkspaceView>('/worklog/workspace')

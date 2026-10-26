@@ -80,17 +80,20 @@ export interface PlanItem {
   source: string
   requirementId?: string
   jiraIssueKey?: string
+  /** CAP-91 FR-05：关联季度 KR（worklog_goals 的 KEY_RESULT id；undefined=不对齐） */
+  krId?: number
   carriedFromId?: number
   sortOrder: number
   createdAt?: string
   updatedAt?: string
 }
 
-/** 计划项列表响应：本周期计划 + 上一周期未完成提示 */
+/** 计划项列表响应：本周期计划 + 上一周期未完成提示；krTitles（CAP-91 FR-05）= 涉及 KR 的 id→标题映射 */
 export interface PlanListView {
   items: PlanItem[]
   carryoverFrom: string
   carryoverItems: PlanItem[]
+  krTitles?: Record<number, string>
 }
 
 /** 计划项新建/更新请求（date 传周内任意日，后端归一到周一） */
@@ -103,6 +106,8 @@ export interface PlanItemPayload {
   hours?: number
   requirementId?: string
   jiraIssueKey?: string
+  /** CAP-91 FR-05：关联季度 KR；undefined/无字段 = 不对齐（更新即解除） */
+  krId?: number
   /** 仅更新有效：TODO/DOING/DONE/DROPPED（CARRIED 由滚转写入） */
   status?: string
 }
@@ -259,4 +264,100 @@ export const ENTRY_SOURCES: Record<string, string> = {
   GIT: 'Git 导入',
   MANUAL: '手动',
   AGENT: 'Agent',
+}
+
+// ---------------- CAP-91 工作目标与 OKR 对齐 ----------------
+
+/**
+ * 目标（CAP-91 FR-02）：scope=YEAR/QUARTER；period：YEAR='2026'、QUARTER='2026-Q1'；
+ * kind=OBJECTIVE/KEY_RESULT（KR 必有同周期父 O；QUARTER O 可选挂同年 YEAR O）。
+ * 派生字段仅 tree 视图的 KR 有意义（只展示不回写）：linkedPlanTotal/Done=关联周计划项 总/完成数，
+ * linkedHours=关联 DONE 条目工时（小时），suggestedProgress=done/total×100（无关联项为 undefined）。
+ */
+export interface WorklogGoal {
+  id: number
+  scope: 'YEAR' | 'QUARTER'
+  period: string
+  kind: 'OBJECTIVE' | 'KEY_RESULT'
+  parentId?: number
+  parentTitle?: string
+  title: string
+  content?: string
+  weight?: number
+  /** 人工进度（0-100，手动维护） */
+  progress?: number
+  /** ACTIVE/DONE/DROPPED 人工可设；CARRIED 由滚转写入 */
+  status: string
+  carriedFromId?: number
+  sortOrder: number
+  createdAt?: string
+  updatedAt?: string
+  linkedPlanTotal?: number
+  linkedPlanDone?: number
+  linkedHours?: number
+  suggestedProgress?: number
+}
+
+/** 整年目标树：年度 O（嵌套年度 KR）+ Q1~Q4 四季度区（无目标的季度也返回空区） */
+export interface GoalTreeView {
+  yearObjectives: GoalNode[]
+  quarters: QuarterSection[]
+}
+export interface GoalNode {
+  goal: WorklogGoal
+  krs: WorklogGoal[]
+}
+export interface QuarterSection {
+  period: string
+  objectives: GoalNode[]
+}
+
+/** 目标新建/更新请求（scope/period/kind/parentId 由入口预设；status/progress 仅更新有效） */
+export interface GoalPayload {
+  scope: string
+  period: string
+  kind: string
+  parentId?: number
+  title: string
+  content?: string
+  weight?: number
+  progress?: number
+  status?: string
+}
+
+/** 目标跨周期滚转结果（CAP-91 FR-04）：carried=成功滚转数；skipped=幂等跳过数；items=新建副本 */
+export interface GoalCarryResult {
+  carried: number
+  skipped: number
+  items: WorklogGoal[]
+}
+
+/** 计划项抽屉可关联 KR（CAP-91 FR-06）：该日所在季的 ACTIVE KEY_RESULT + 所属 O 标题 */
+export interface LinkableKr {
+  id: number
+  title: string
+  objectiveTitle?: string
+  period: string
+}
+
+export const GOAL_STATUSES: Record<string, { label: string; color: string }> = {
+  ACTIVE: { label: '进行中', color: 'processing' },
+  DONE: { label: '已完成', color: 'success' },
+  DROPPED: { label: '已放弃', color: 'warning' },
+  CARRIED: { label: '已滚转', color: 'purple' },
+}
+
+/** 季度复盘（CAP-91 FR-08）：DB 口径同日报——GET 不存在返回 undefined；exists 恒 true */
+export interface QuarterlyReport {
+  exists: boolean
+  quarter: string
+  contentMd: string
+  sessionId?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** 季度复盘「从数据重建」预览（CAP-91 FR-10）：OKR 对照 + 计划外聚合的确定性 markdown（不经 LLM） */
+export interface ReviewPreview {
+  markdown: string
 }
