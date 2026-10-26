@@ -5,6 +5,11 @@
 > worklog-plan-suggest 场景 + suggest 链路（WipRequirementProvider SPI 探测降级）+
 > 建议项 AI_SUGGEST 落库 + 前端「AI 建议」入口；FR-11 周期末提醒开放后置；
 > E2E tests/cap88_e2e.py 26 项全绿）｜ 日期：2026-10-26
+> **（2026-10-26 被 CAP-90 修订：交付当日实测反馈「日计划与条目双重记录、周计划与
+> 周报下周计划隔离」——DAY scope 计划项整体退役并入条目（条目加 status，计划即
+> 未完成条目），plan_items 收窄为 WEEK 唯一计划实体，周报「下周计划」改为计划项
+> 单向投影；本节 FR-01 scope=DAY / FR-03 TODO→DOING 联动 / FR-05 日粒度 carry /
+> FR-06 日计划视图口径作废，WEEK scope 与 M2/M3 主干沿用。）**
 > （2026-10-26 修订：存储口径随 CAP-89 定稿**改为 DB 表**——CAP-74 的仓内文件
 > 方案同日被推翻（远程推送判定无意义、git 链路整体退役），原计划文件契约作废；
 > 功能闭环设计不变，仅载体从 `plans/*.md` 文件改为 `worklog_plan_items` 表 +
