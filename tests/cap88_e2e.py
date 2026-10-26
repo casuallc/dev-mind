@@ -1,21 +1,22 @@
 # -*- coding: utf-8 -*-
-r"""CAP-88 M1 计划闭环 E2E（自起隔离 app，纯 DB REST 链路，无需 runner/外部服务）。
+r"""CAP-88 计划闭环 E2E（自起隔离 app，纯 DB REST 链路，无需 runner/外部服务）。
+
+⚠ CAP-90 已修订 CAP-88 日计划口径：DAY scope 退役（日计划并入条目），计划项仅 WEEK。
+本脚本保留 CAP-88 仍生效的部分（周计划闭环 / M2 素材占位 / M3 建议计划），
+条目状态机 / 日滚转 / DAY 迁移的验收挪到 tests/cap90_e2e.py。
 
 运行前提：`mvn -q install -DskipTests`；JDK 21（JAVA_HOME 未设时回落本机 Adoptium 路径）。
 脚本自起隔离 app（:18098，--spring.profiles.active=e2e 独立 H2，定时开关全关），跑完杀掉。
 
-验收覆盖（CAP-88 §9 的 M1 部分）：
-  [1] 日计划 CRUD：新增落库 TODO / 编辑标题 / 人工 DONE / CARRIED 不可人工设（400）
-  [2] 周计划日期归一：传周三 → planDate 落周一
-  [3] 条目关联联动：planId 落库、TODO 自动变 DOING、linkable 当日日计划+当周周计划、
-      他人/不存在计划项 404
+验收覆盖：
+  [1] DAY scope 退役钉：新建/编辑/列表/滚传传 DAY 一律 400（回归防复活）
+  [2] 周计划日期归一：传周三 → planDate 落周一；CRUD 状态机（CARRIED 不可人工设）
+  [3] 条目关联联动：planId 落库、TODO 自动变 DOING（CAP-90 保留 WEEK 联动）、
+      linkable 仅当周周计划、他人/不存在计划项 404
   [4] 删计划项：关联条目 plan_item_id 置空
-  [5] 日滚转：昨日未完成提示随列表返回；一键滚转副本 TODO+carriedFromId、原项 CARRIED；
-      DONE 项跳过；重复滚转幂等
-  [6] 周滚转：上周 TODO → 本周一，同口径
-  [7] M2 内置模板占位符：日报含 {{plans}}、周报含 {{lastWeekPlan}}/{{thisWeekPlan}}
-      （prompt 组装与计划对照格式由单测覆盖；生成链路需 runner，不在本脚本范围）
-  [8] M3 AI 建议计划：目标周已有项非 force → reused 跳过不起会话；force/空目标周 →
+  [5] 周滚转：上周 TODO → 本周一，副本 TODO+carriedFromId、原项 CARRIED、重复幂等
+  [6] M2 内置模板占位符：日报含 {{plans}}、周报含 {{lastWeekPlan}}/{{thisWeekPlan}}/{{nextWeekPlan}}
+  [7] M3 AI 建议计划：目标周已有项非 force → reused 跳过不起会话；force/空目标周 →
       409（E2E 无默认节点，fail-visible 口径同日报生成）
 """
 import json
@@ -40,7 +41,6 @@ JAVA_HOME = os.environ.get("JAVA_HOME") or r"C:\Program Files\Eclipse Adoptium\j
 
 TODAY = date.today()
 TODAY_S = TODAY.isoformat()
-YESTERDAY_S = (TODAY - timedelta(days=1)).isoformat()
 MONDAY_S = (TODAY - timedelta(days=TODAY.weekday())).isoformat()
 LAST_MONDAY_S = (TODAY - timedelta(days=TODAY.weekday() + 7)).isoformat()
 NEXT_MONDAY_S = (TODAY - timedelta(days=TODAY.weekday()) + timedelta(days=7)).isoformat()
@@ -163,47 +163,50 @@ def main():
         token = req("POST", "/auth/login", {"username": "admin", "password": "admin123"})["accessToken"]
         print(f"[0] app 已起（:{PORT}），admin 登录成功")
 
-        # ---------- [1] 日计划 CRUD + 状态机 ----------
-        p1 = req("POST", "/worklog/plans/items",
-                 {"scope": "DAY", "date": TODAY_S, "title": "写 CAP-88 设计", "planType": "DEV",
-                  "hours": 2.0, "requirementId": "REQ-88"}, token)
-        check("新建日计划落库 TODO", p1.get("status") == "TODO" and p1.get("source") == "MANUAL"
-              and p1.get("estimateHours") == 2.0, json.dumps(p1, ensure_ascii=False)[:200])
-        pid1 = p1["id"]
-        lst = req("GET", f"/worklog/plans?scope=DAY&date={TODAY_S}", token=token)
-        check("日计划列表可读", any(i["id"] == pid1 for i in lst.get("items", [])), str(lst)[:200])
-        upd = req("PUT", f"/worklog/plans/items/{pid1}",
-                  {"scope": "DAY", "date": TODAY_S, "title": "写 CAP-88 设计（改）", "status": "DONE"}, token)
-        check("编辑+人工 DONE 生效", upd.get("title").endswith("（改）") and upd.get("status") == "DONE",
-              json.dumps(upd, ensure_ascii=False)[:200])
-        req("PUT", f"/worklog/plans/items/{pid1}",
-            {"scope": "DAY", "date": TODAY_S, "title": "x", "status": "CARRIED"}, token, expect=400)
-        check("CARRIED 不可人工设（400）", True)
+        # ---------- [1] DAY scope 退役钉（CAP-90 FR-06） ----------
+        req("POST", "/worklog/plans/items",
+            {"scope": "DAY", "date": TODAY_S, "title": "日计划已退役"}, token, expect=400)
+        check("新建 DAY 计划项 400", True)
+        req("GET", f"/worklog/plans?scope=DAY&date={TODAY_S}", token=token, expect=400)
+        check("DAY 列表 400", True)
+        req("POST", "/worklog/plans/carry", {"scope": "DAY", "to": TODAY_S, "ids": [1]},
+            token, expect=400)
+        check("DAY 滚转 400", True)
         req("GET", "/worklog/plans?scope=MONTH&date=" + TODAY_S, token=token, expect=400)
         check("非法 scope 400", True)
 
-        # ---------- [2] 周计划日期归一 ----------
+        # ---------- [2] 周计划日期归一 + 状态机 ----------
         pw = req("POST", "/worklog/plans/items",
-                 {"scope": "WEEK", "date": WEEK_MID_S, "title": "本周方向", "planType": "RESEARCH"}, token)
-        check("周计划传周内日归一到周一", pw.get("planDate") == MONDAY_S, json.dumps(pw)[:200])
+                 {"scope": "WEEK", "date": WEEK_MID_S, "title": "本周方向", "planType": "RESEARCH",
+                  "hours": 2.0}, token)
+        check("周计划传周内日归一到周一", pw.get("planDate") == MONDAY_S
+              and pw.get("status") == "TODO", json.dumps(pw)[:200])
+        upd = req("PUT", f"/worklog/plans/items/{pw['id']}",
+                  {"scope": "WEEK", "date": MONDAY_S, "title": "本周方向（改）", "status": "DONE"}, token)
+        check("编辑+人工 DONE 生效", upd.get("title").endswith("（改）") and upd.get("status") == "DONE",
+              json.dumps(upd, ensure_ascii=False)[:200])
+        req("PUT", f"/worklog/plans/items/{pw['id']}",
+            {"scope": "WEEK", "date": MONDAY_S, "title": "x", "status": "CARRIED"}, token, expect=400)
+        check("CARRIED 不可人工设（400）", True)
 
-        # ---------- [3] 条目关联联动 ----------
+        # ---------- [3] 条目关联联动（CAP-90 保留 WEEK 联动） ----------
         p2 = req("POST", "/worklog/plans/items",
-                 {"scope": "DAY", "date": TODAY_S, "title": "联动的计划"}, token)
+                 {"scope": "WEEK", "date": MONDAY_S, "title": "联动的计划"}, token)
         pid2 = p2["id"]
         en = req("POST", "/worklog/entries",
                  {"workDate": TODAY_S, "title": "执行条目", "hours": 1.0, "entryType": "DEV",
                   "planId": pid2}, token)
         check("条目关联 planId 落库", en.get("planItemId") == pid2, json.dumps(en)[:200])
-        after = req("GET", f"/worklog/plans?scope=DAY&date={TODAY_S}", token=token)
+        after = req("GET", f"/worklog/plans?scope=WEEK&date={MONDAY_S}", token=token)
         linked = {i["id"]: i for i in after.get("items", [])}
         check("关联后 TODO 自动变 DOING", linked.get(pid2, {}).get("status") == "DOING",
               json.dumps(linked.get(pid2), ensure_ascii=False)[:200])
-        check("DONE 项不被联动回退", linked.get(pid1, {}).get("status") == "DONE",
-              json.dumps(linked.get(pid1))[:160])
+        check("DONE 项不被联动回退", linked.get(pw["id"], {}).get("status") == "DONE",
+              json.dumps(linked.get(pw["id"]))[:160])
         lk = req("GET", f"/worklog/plans/linkable?date={TODAY_S}", token=token)
         lk_ids = {i["id"] for i in (lk or [])}
-        check("linkable 含当日日计划+当周周计划", pid2 in lk_ids and pw["id"] in lk_ids,
+        check("linkable 仅当周周计划", pid2 in lk_ids
+              and all(i.get("scope") == "WEEK" for i in (lk or [])),
               json.dumps(lk, ensure_ascii=False)[:300])
         req("POST", "/worklog/entries",
             {"workDate": TODAY_S, "title": "x", "hours": 1.0, "planId": 999999}, token, expect=404)
@@ -216,64 +219,41 @@ def main():
         e0 = (ent.get("items") or [{}])[0]
         check("删计划项后条目 plan_item_id 置空", e0.get("planItemId") is None, json.dumps(e0)[:200])
 
-        # ---------- [5] 日滚转：提示 + 一键滚转 + 幂等 ----------
-        y1 = req("POST", "/worklog/plans/items",
-                 {"scope": "DAY", "date": YESTERDAY_S, "title": "昨天没做完"}, token)["id"]
-        y2 = req("POST", "/worklog/plans/items",
-                 {"scope": "DAY", "date": YESTERDAY_S, "title": "昨天已完成"}, token)["id"]
-        req("PUT", f"/worklog/plans/items/{y2}",
-            {"scope": "DAY", "date": YESTERDAY_S, "title": "昨天已完成", "status": "DONE"}, token)
-        today_list = req("GET", f"/worklog/plans?scope=DAY&date={TODAY_S}", token=token)
-        check("昨日未完成提示随列表返回", today_list.get("carryoverFrom") == YESTERDAY_S
-              and any(i["id"] == y1 for i in today_list.get("carryoverItems", []))
-              and all(i["id"] != y2 for i in today_list.get("carryoverItems", [])),
-              json.dumps(today_list, ensure_ascii=False)[:300])
-        c1 = req("POST", "/worklog/plans/carry",
-                 {"scope": "DAY", "to": TODAY_S, "ids": [y1, y2]}, token)
-        check("滚转：TODO 转入/DONE 跳过", c1.get("carried") == 1 and c1.get("skipped") == 1,
-              json.dumps(c1, ensure_ascii=False)[:200])
-        copy = c1["items"][0]
-        check("副本 TODO+carriedFromId+目标日", copy.get("status") == "TODO"
-              and copy.get("carriedFromId") == y1 and copy.get("planDate") == TODAY_S,
-              json.dumps(copy, ensure_ascii=False)[:200])
-        ylst = req("GET", f"/worklog/plans?scope=DAY&date={YESTERDAY_S}", token=token)
-        orig = {i["id"]: i for i in ylst.get("items", [])}
-        check("原项置 CARRIED", orig.get(y1, {}).get("status") == "CARRIED", json.dumps(orig.get(y1))[:160])
-        c2 = req("POST", "/worklog/plans/carry",
-                 {"scope": "DAY", "to": TODAY_S, "ids": [y1]}, token)
-        check("重复滚转幂等（carried=0）", c2.get("carried") == 0 and c2.get("skipped") == 1,
-              json.dumps(c2)[:160])
-        # CARRIED 项不进 linkable
-        lk2 = req("GET", f"/worklog/plans/linkable?date={YESTERDAY_S}", token=token)
-        check("linkable 排除 CARRIED", all(i["id"] != y1 for i in (lk2 or [])), str(lk2)[:200])
-        # 已滚转项只读
-        req("PUT", f"/worklog/plans/items/{y1}",
-            {"scope": "DAY", "date": YESTERDAY_S, "title": "改名"}, token, expect=400)
-        check("已滚转项编辑 400", True)
-        # scope 不匹配 400
-        req("POST", "/worklog/plans/carry", {"scope": "WEEK", "to": MONDAY_S, "ids": [y2]},
-            token, expect=400)
-        check("滚转 scope 不匹配 400", True)
-
-        # ---------- [6] 周滚转 ----------
+        # ---------- [5] 周滚转：提示 + 一键滚转 + 幂等 ----------
         w1 = req("POST", "/worklog/plans/items",
                  {"scope": "WEEK", "date": LAST_MONDAY_S, "title": "上周没收尾"}, token)["id"]
-        wc = req("POST", "/worklog/plans/carry", {"scope": "WEEK", "to": MONDAY_S, "ids": [w1]}, token)
-        check("周滚转副本落本周一", wc.get("carried") == 1
-              and wc["items"][0].get("planDate") == MONDAY_S
-              and wc["items"][0].get("carriedFromId") == w1,
-              json.dumps(wc, ensure_ascii=False)[:200])
+        wlist = req("GET", f"/worklog/plans?scope=WEEK&date={MONDAY_S}", token=token)
+        check("上周未完成提示随列表返回", wlist.get("carryoverFrom") == LAST_MONDAY_S
+              and any(i["id"] == w1 for i in wlist.get("carryoverItems", [])),
+              json.dumps(wlist, ensure_ascii=False)[:300])
+        c1 = req("POST", "/worklog/plans/carry", {"scope": "WEEK", "to": MONDAY_S, "ids": [w1]}, token)
+        check("周滚转副本落本周一", c1.get("carried") == 1
+              and c1["items"][0].get("planDate") == MONDAY_S
+              and c1["items"][0].get("carriedFromId") == w1
+              and c1["items"][0].get("status") == "TODO",
+              json.dumps(c1, ensure_ascii=False)[:200])
+        lwl = req("GET", f"/worklog/plans?scope=WEEK&date={LAST_MONDAY_S}", token=token)
+        orig = {i["id"]: i for i in lwl.get("items", [])}
+        check("原项置 CARRIED", orig.get(w1, {}).get("status") == "CARRIED", json.dumps(orig.get(w1))[:160])
+        c2 = req("POST", "/worklog/plans/carry", {"scope": "WEEK", "to": MONDAY_S, "ids": [w1]}, token)
+        check("重复滚转幂等（carried=0）", c2.get("carried") == 0 and c2.get("skipped") == 1,
+              json.dumps(c2)[:160])
+        # 已滚转项只读
+        req("PUT", f"/worklog/plans/items/{w1}",
+            {"scope": "WEEK", "date": LAST_MONDAY_S, "title": "改名"}, token, expect=400)
+        check("已滚转项编辑 400", True)
 
-        # ---------- [7] M2 内置模板占位符（prompt 组装细节由单测覆盖，E2E 只钉 REST 可见口径） ----------
+        # ---------- [6] M2 内置模板占位符（prompt 组装细节由单测覆盖，E2E 只钉 REST 可见口径） ----------
         tpl = req("GET", "/worklog/settings/templates/default", token=token)
         check("日报内置模板含 {{plans}} 计划对照占位", "{{plans}}" in tpl.get("dailyTemplateMd", ""),
               tpl.get("dailyTemplateMd", "")[:80])
-        check("周报内置模板含 {{lastWeekPlan}}/{{thisWeekPlan}}",
+        check("周报内置模板含 {{lastWeekPlan}}/{{thisWeekPlan}}/{{nextWeekPlan}}",
               "{{lastWeekPlan}}" in tpl.get("weeklyTemplateMd", "")
-              and "{{thisWeekPlan}}" in tpl.get("weeklyTemplateMd", ""),
+              and "{{thisWeekPlan}}" in tpl.get("weeklyTemplateMd", "")
+              and "{{nextWeekPlan}}" in tpl.get("weeklyTemplateMd", ""),
               tpl.get("weeklyTemplateMd", "")[:80])
 
-        # ---------- [8] M3 AI 建议计划（幂等跳过 + fail-visible；产物解析由单测覆盖） ----------
+        # ---------- [7] M3 AI 建议计划（幂等跳过 + fail-visible；产物解析由单测覆盖） ----------
         s1 = req("POST", "/worklog/plans/suggest", {"date": NEXT_MONDAY_S}, token, expect=409)
         check("空目标周非 force 起会话（无默认节点 409）", True, str(s1)[:200])
         req("POST", "/worklog/plans/items",
@@ -284,7 +264,7 @@ def main():
         req("POST", "/worklog/plans/suggest", {"date": NEXT_MONDAY_S, "force": True}, token, expect=409)
         check("force 重生成仍走会话链路（无默认节点 409）", True)
 
-        print(f"\n== CAP-88 M1 E2E: {len(passed)} passed, {len(failed)} failed ==")
+        print(f"\n== CAP-88 E2E（CAP-90 修订后）: {len(passed)} passed, {len(failed)} failed ==")
         if failed:
             print("FAILED: " + " | ".join(failed))
     finally:
