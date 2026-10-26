@@ -52,6 +52,9 @@ export const deletePlanItem = (id: number) => api.del(`/worklog/plans/items/${id
 /** 一键滚转（幂等：已 CARRIED/已完结跳过）；to：DAY=目标日期，WEEK=目标周内任意日 */
 export const carryPlans = (scope: 'DAY' | 'WEEK', to: string, ids: number[]) =>
   api.post<CarryResult>('/worklog/plans/carry', { scope, to, ids })
+/** CAP-88 M3「AI 建议计划」：异步起生成会话；目标周已有项非 force → reused=true 跳过，force 只追加不覆盖 */
+export const suggestPlans = (date: string, force = false, hint?: string) =>
+  api.post<GenerateAck>('/worklog/plans/suggest', { date, force, hint })
 
 // ---- git 扫描导入 ----
 /** filter：NEW（仅未导入，弹窗默认）/ IMPORTED（仅已导入）/ ALL（后端缺省值）；诊断不受 filter 影响 */

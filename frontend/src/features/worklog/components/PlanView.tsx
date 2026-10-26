@@ -1,8 +1,8 @@
-import { Alert, Button, Modal, Segmented, Select, Space, Tag, Typography, message } from 'antd'
-import { LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined } from '@ant-design/icons'
+import { Alert, Button, Checkbox, Input, Modal, Segmented, Select, Space, Tag, Typography, message } from 'antd'
+import { LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, RobotOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useMemo, useState, useEffect } from 'react'
-import { carryPlans, createPlanItem, deletePlanItem, listPlans, updatePlanItem } from '../api'
+import { carryPlans, createPlanItem, deletePlanItem, listPlans, suggestPlans, updatePlanItem } from '../api'
 import type { PlanItem, PlanItemPayload } from '../types'
 import { ENTRY_TYPES, PLAN_STATUSES } from '../types'
 import FitTable from '../../../shared/components/FitTable'
@@ -33,6 +33,11 @@ export default function PlanView() {
   const [editTarget, setEditTarget] = useState<PlanItem | null>(null)
   const [editOpen, setEditOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  // CAP-88 M3「AI 建议」弹层（受控取值，不用 Form——弹层关闭即卸载会丢值）
+  const [suggestOpen, setSuggestOpen] = useState(false)
+  const [suggestHint, setSuggestHint] = useState('')
+  const [suggestForce, setSuggestForce] = useState(false)
+  const [suggesting, setSuggesting] = useState(false)
 
   const currentDateStr = scope === 'DAY' ? day.format('YYYY-MM-DD') : week.format('YYYY-MM-DD')
   const isCurrentWeek = weekStart.format('YYYY-MM-DD') === mondayOf(dayjs()).format('YYYY-MM-DD')
@@ -123,6 +128,24 @@ export default function PlanView() {
       .finally(() => setCarrying(false))
   }
 
+  /** CAP-88 M3：AI 建议当前浏览周（目标周已有项且未勾 force → 后端幂等跳过） */
+  const onSuggest = () => {
+    setSuggesting(true)
+    suggestPlans(week.format('YYYY-MM-DD'), suggestForce, suggestHint || undefined)
+      .then((r) => {
+        if (r.reused) {
+          message.info('该周已有计划项，已跳过生成（勾选「强制重新生成」可追加建议）')
+        } else {
+          message.success('建议生成会话已启动：完成后建议项自动落入该周（带 AI 徽标，可逐条删改）')
+        }
+        setSuggestOpen(false)
+        setSuggestHint('')
+        setSuggestForce(false)
+      })
+      .catch((e) => showError(e, '建议计划启动失败'))
+      .finally(() => setSuggesting(false))
+  }
+
   /** 完成度：DONE / 非 DROPPED 总数（已放弃不计入分母） */
   const ratio = useMemo(() => {
     const active = items.filter((i) => i.status !== 'DROPPED' && i.status !== 'CARRIED')
@@ -152,6 +175,11 @@ export default function PlanView() {
               本周
             </Button>
           </>
+        )}
+        {scope === 'WEEK' && (
+          <Button icon={<RobotOutlined />} onClick={() => setSuggestOpen(true)}>
+            AI 建议
+          </Button>
         )}
         <Button icon={<ReloadOutlined />} onClick={load}>
           刷新
@@ -310,6 +338,34 @@ export default function PlanView() {
         onCancel={() => setEditOpen(false)}
         onSave={onSave}
       />
+      <Modal
+        centered
+        title={`AI 建议 ${week.format('YYYY-MM-DD')} 周计划`}
+        open={suggestOpen}
+        confirmLoading={suggesting}
+        okText="生成建议"
+        onOk={onSuggest}
+        onCancel={() => setSuggestOpen(false)}
+      >
+        <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+          以「上周未完成/滚转项 + 当前在办需求」为素材，经 worklog 会话生成 3~6 条建议，
+          逐条以 AI 徽标落入该周计划（可编辑/删除即确认）。目标周已有计划项时默认跳过。
+        </Typography.Paragraph>
+        <Input.TextArea
+          rows={3}
+          placeholder="补充说明（可选）：如「下周优先收尾评审」"
+          value={suggestHint}
+          onChange={(e) => setSuggestHint(e.target.value)}
+          maxLength={500}
+        />
+        <Checkbox
+          style={{ marginTop: 8 }}
+          checked={suggestForce}
+          onChange={(e) => setSuggestForce(e.target.checked)}
+        >
+          强制重新生成（已有计划项仍追加建议，不覆盖）
+        </Checkbox>
+      </Modal>
     </>
   )
 }
