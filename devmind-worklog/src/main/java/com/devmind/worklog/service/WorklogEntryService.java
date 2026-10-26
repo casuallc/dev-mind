@@ -9,7 +9,9 @@ import com.devmind.worklog.dto.EntryRequest;
 import com.devmind.worklog.dto.EntryView;
 import com.devmind.worklog.dto.GitImportRequest;
 import com.devmind.worklog.model.WorklogEntryEntity;
+import com.devmind.worklog.model.WorklogPlanItemEntity;
 import com.devmind.worklog.repo.WorklogEntryRepository;
+import com.devmind.worklog.repo.WorklogPlanItemRepository;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -52,12 +54,14 @@ public class WorklogEntryService {
             TYPE_DEV, TYPE_SUPPORT, TYPE_MEETING, TYPE_RESEARCH, TYPE_OTHER);
 
     private final WorklogEntryRepository entryRepo;
+    private final WorklogPlanItemRepository planItemRepo;
     private final IdentityService identity;
     private final ObjectProvider<GitRepoCatalog> catalog;
 
-    public WorklogEntryService(WorklogEntryRepository entryRepo, IdentityService identity,
-                               ObjectProvider<GitRepoCatalog> catalog) {
+    public WorklogEntryService(WorklogEntryRepository entryRepo, WorklogPlanItemRepository planItemRepo,
+                               IdentityService identity, ObjectProvider<GitRepoCatalog> catalog) {
         this.entryRepo = entryRepo;
+        this.planItemRepo = planItemRepo;
         this.identity = identity;
         this.catalog = catalog;
     }
@@ -91,6 +95,7 @@ public class WorklogEntryService {
         e.setSource(SOURCE_MANUAL);
         e.setCreatedAt(Instant.now().truncatedTo(ChronoUnit.SECONDS));
         applyTo(e, req);
+        applyPlanLink(e, req.planId(), me);
         return EntryView.of(entryRepo.save(e), null);
     }
 
@@ -100,6 +105,7 @@ public class WorklogEntryService {
         WorklogEntryEntity e = entryRepo.findByIdAndUserId(id, me)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "条目不存在: " + id));
         applyTo(e, req);
+        applyPlanLink(e, req.planId(), me);
         return EntryView.of(entryRepo.save(e), null);
     }
 
@@ -189,6 +195,25 @@ public class WorklogEntryService {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "entryType 仅支持 " + ENTRY_TYPES);
         }
         return t;
+    }
+
+    /**
+     * CAP-88 FR-04 条目关联计划：planId 必须是本人项（他人/不存在 404）；关联时该项为 TODO
+     * 则服务端置 DOING（关联只证明动过，不证明做完——DONE 必须人工）。null=解除关联。
+     */
+    private void applyPlanLink(WorklogEntryEntity e, Long planId, String me) {
+        if (planId == null) {
+            e.setPlanItemId(null);
+            return;
+        }
+        WorklogPlanItemEntity item = planItemRepo.findByIdAndUserId(planId, me)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "计划项不存在: " + planId));
+        e.setPlanItemId(planId);
+        if (WorklogPlanItemEntity.STATUS_TODO.equals(item.getStatus())) {
+            item.setStatus(WorklogPlanItemEntity.STATUS_DOING);
+            item.setUpdatedAt(Instant.now().truncatedTo(ChronoUnit.SECONDS));
+            planItemRepo.save(item);
+        }
     }
 
     /** repoId → 仓库名（CAP-29 全局登记表经 SPI 读，缺席时返回空表）。 */

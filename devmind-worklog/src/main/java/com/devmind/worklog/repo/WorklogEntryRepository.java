@@ -41,6 +41,9 @@ public interface WorklogEntryRepository extends JpaRepository<WorklogEntryEntity
 
     Optional<WorklogEntryEntity> findByIdAndUserId(String id, String userId);
 
+    /** CAP-88 FR-04：某计划项的关联条目（删计划项时清引用用） */
+    List<WorklogEntryEntity> findByPlanItemId(Long planItemId);
+
     /** git 导入幂等判定 */
     boolean existsByUserIdAndRepoIdAndCommitSha(String userId, Long repoId, String commitSha);
 

@@ -37,7 +37,7 @@ class GitAutoImportServiceTest {
                 return scan;
             }
         };
-        WorklogEntryService entryService = new WorklogEntryService(null, null, null) {
+        WorklogEntryService entryService = new WorklogEntryService(null, null, null, null) {
             @Override
             public int[] importGit(String username, GitImportRequest req) {
                 captured.set(req);

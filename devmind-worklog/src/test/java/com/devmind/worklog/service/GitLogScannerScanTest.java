@@ -43,7 +43,7 @@ class GitLogScannerScanTest {
                 return subs;
             }
         };
-        WorklogEntryService entryService = new WorklogEntryService(null, null, null) {
+        WorklogEntryService entryService = new WorklogEntryService(null, null, null, null) {
             @Override
             public Set<String> importedShas(String username) {
                 return Set.of();

@@ -21,6 +21,11 @@ final class WorklogWeeks {
                 .with(DayOfWeek.MONDAY);
     }
 
+    /** 任意日期 → 所在周周一（CAP-88 周计划 plan_date 归一用）。 */
+    static LocalDate mondayOf(LocalDate d) {
+        return d.with(DayOfWeek.MONDAY);
+    }
+
     /** 周一开始日期 → "yyyy-Www"（ISO 周年/周，文件名口径）。 */
     static String weekFileName(LocalDate weekStart) {
         return String.format("%04d-W%02d",
