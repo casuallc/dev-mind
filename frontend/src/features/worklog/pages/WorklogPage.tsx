@@ -755,11 +755,14 @@ export default function WorklogPage() {
       {view === 'goals' && (
         <>
           <Typography.Paragraph type="secondary">
-            年度目标定全年方向，季度 OKR（O→KR）逐级拆解；周计划项可关联当季 KR（计划页签编辑），KR
-            的「建议进度」由关联计划完成度派生只展示不回写；每季末在季度区头部打开「季度复盘」（OKR 对照 +
+            年度目标定全年方向，季度 OKR（O→KR）逐级拆解；页内切换条查看年度或某个季度。周计划项可关联当季
+            KR（计划页签编辑），KR
+            的「建议进度」由关联计划完成度派生只展示不回写；季末在季度区头部打开「季度复盘」（OKR 对照 +
             计划外聚合 AI 成稿，人工修订后保存）。
           </Typography.Paragraph>
-          <GoalBoard ref={goalsRef} />
+          <div style={pagePaneScrollStyle}>
+            <GoalBoard ref={goalsRef} />
+          </div>
         </>
       )}
 

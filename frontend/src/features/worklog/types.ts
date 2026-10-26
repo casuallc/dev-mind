@@ -271,6 +271,8 @@ export const ENTRY_SOURCES: Record<string, string> = {
 /**
  * 目标（CAP-91 FR-02）：scope=YEAR/QUARTER；period：YEAR='2026'、QUARTER='2026-Q1'；
  * kind=OBJECTIVE/KEY_RESULT（KR 必有同周期父 O；QUARTER O 可选挂同年 YEAR O）。
+ * framework（CAP-91 M4）= 目标体系，当前恒 OKR（O/KR 层级、文案均按 OKR 语义）；
+ * 字段与 GOAL_FRAMEWORKS 注册表是后续非 OKR 形式（如纯目标清单/KPI）的扩展点。
  * 派生字段仅 tree 视图的 KR 有意义（只展示不回写）：linkedPlanTotal/Done=关联周计划项 总/完成数，
  * linkedHours=关联 DONE 条目工时（小时），suggestedProgress=done/total×100（无关联项为 undefined）。
  */
@@ -279,6 +281,7 @@ export interface WorklogGoal {
   scope: 'YEAR' | 'QUARTER'
   period: string
   kind: 'OBJECTIVE' | 'KEY_RESULT'
+  framework: string
   parentId?: number
   parentTitle?: string
   title: string
@@ -312,11 +315,12 @@ export interface QuarterSection {
   objectives: GoalNode[]
 }
 
-/** 目标新建/更新请求（scope/period/kind/parentId 由入口预设；status/progress 仅更新有效） */
+/** 目标新建/更新请求（scope/period/kind/parentId 由入口预设；status/progress 仅更新有效；framework 仅创建有效，空=OKR） */
 export interface GoalPayload {
   scope: string
   period: string
   kind: string
+  framework?: string
   parentId?: number
   title: string
   content?: string
@@ -346,6 +350,19 @@ export const GOAL_STATUSES: Record<string, { label: string; color: string }> = {
   DROPPED: { label: '已放弃', color: 'warning' },
   CARRIED: { label: '已滚转', color: 'purple' },
 }
+
+/**
+ * 目标体系注册表（CAP-91 M4）：当前仅 OKR。后续接入非 OKR 形式时在此登记体系名与
+ * kind 文案（抽屉/表单的字样全走 goalKindLabel），树渲染（GoalBoard 的 O/KR 嵌套卡）
+ * 是 OKR 语义渲染路径，新体系需配自己的渲染分支。
+ */
+export const GOAL_FRAMEWORKS: Record<string, { label: string; kindLabels: Record<string, string> }> = {
+  OKR: { label: 'OKR', kindLabels: { OBJECTIVE: '目标（O）', KEY_RESULT: '关键结果（KR）' } },
+}
+
+/** kind 展示文案（未知体系/类型回退原值） */
+export const goalKindLabel = (framework: string | undefined, kind: string): string =>
+  GOAL_FRAMEWORKS[framework ?? 'OKR']?.kindLabels[kind] ?? kind
 
 /** 季度复盘（CAP-91 FR-08）：DB 口径同日报——GET 不存在返回 undefined；exists 恒 true */
 export interface QuarterlyReport {

@@ -1,7 +1,7 @@
 import { Button, Drawer, Form, Input, InputNumber, Select, Space, Typography } from 'antd'
 import { useEffect } from 'react'
 import type { GoalPayload, WorklogGoal } from '../types'
-import { GOAL_STATUSES } from '../types'
+import { GOAL_STATUSES, goalKindLabel } from '../types'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 /** 新建入口预设：scope/period/kind/parent 由触发按钮决定，抽屉内只读展示 */
@@ -9,6 +9,8 @@ export interface GoalPreset {
   scope: 'YEAR' | 'QUARTER'
   period: string
   kind: 'OBJECTIVE' | 'KEY_RESULT'
+  /** 目标体系（CAP-91 M4）：新建入口暂恒 OKR，缺省走注册表 OKR 文案 */
+  framework?: string
   parentId?: number
   parentTitle?: string
 }
@@ -56,6 +58,7 @@ export default function GoalFormDrawer({ open, target, preset, yearObjectives, s
         scope: target.scope,
         period: target.period,
         kind: target.kind,
+        framework: target.framework,
         parentId: target.parentId,
         parentTitle: target.parentTitle,
       }
@@ -68,6 +71,8 @@ export default function GoalFormDrawer({ open, target, preset, yearObjectives, s
       scope: ctx.scope,
       period: ctx.period,
       kind: ctx.kind,
+      // framework 仅创建有效（后端空=OKR；更新传了同值也可，不传=不变）
+      framework: editing ? undefined : 'OKR',
       parentId: v.parentId ?? ctx.parentId,
       title: v.title,
       content: v.content || undefined,
@@ -99,7 +104,7 @@ export default function GoalFormDrawer({ open, target, preset, yearObjectives, s
       }
     >
       <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
-        {ctx.period} · {ctx.kind === 'OBJECTIVE' ? '目标（O）' : '关键结果（KR）'}
+        {ctx.period} · {goalKindLabel(ctx.framework, ctx.kind)}
         {ctx.parentTitle ? ` · 父 O：${ctx.parentTitle}` : ''}
       </Typography.Paragraph>
       <Form form={form} layout="vertical">

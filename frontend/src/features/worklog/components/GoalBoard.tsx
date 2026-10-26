@@ -1,4 +1,4 @@
-import { Button, Card, Checkbox, Empty, Modal, Progress, Space, Tag, Tooltip, Typography, message } from 'antd'
+import { Button, Card, Checkbox, Empty, Modal, Progress, Segmented, Space, Tag, Tooltip, Typography, message } from 'antd'
 import {
   FileTextOutlined,
   PlusOutlined,
@@ -13,6 +13,17 @@ import GoalFormDrawer, { type GoalPreset } from './GoalFormDrawer'
 import QuarterlyReviewDrawer from './QuarterlyReviewDrawer'
 import YearStrip from './YearStrip'
 import { showError } from '../../../shared/utils/showError'
+
+/** 页面内切换的区段：年度目标 / 各季度（CAP-91 M4） */
+type GoalSection = 'YEAR' | 'Q1' | 'Q2' | 'Q3' | 'Q4'
+
+const SECTION_OPTIONS: { label: string; value: GoalSection }[] = [
+  { label: '年度目标', value: 'YEAR' },
+  { label: 'Q1', value: 'Q1' },
+  { label: 'Q2', value: 'Q2' },
+  { label: 'Q3', value: 'Q3' },
+  { label: 'Q4', value: 'Q4' },
+]
 
 /** 季度 period → 日期范围展示（'2026-Q1' → '01-01 ~ 03-31'） */
 const quarterRange = (period: string) => {
@@ -51,7 +62,8 @@ export interface GoalBoardHandle {
 }
 
 /**
- * CAP-91「目标」视图：年度目标区 + Q1~Q4 季度 OKR 区（O→KR 树）。
+ * CAP-91「目标」视图：年度目标 + Q1~Q4 季度 OKR（O→KR 树），页面内 Segmented 切换区段
+ * （M4：默认定位当季，跨年查看时区段选择保持，便于同比）。
  * KR 行展示人工进度 + 派生建议进度（关联计划完成度/工时，只展示不回写）；
  * 每个季度区头部有「季度复盘」入口（M2）与跨周期滚转（FR-04：KR 需与父 O 同批滚转）。
  * 年切换用 5 年选择条（交互对齐周报 7 周条）；操作按钮在页面壳 Card extra（布局约定），经 ref 句柄触发。
@@ -60,6 +72,10 @@ export default function GoalBoard({ ref }: { ref?: Ref<GoalBoardHandle> }) {
   const [year, setYear] = useState(() => dayjs().year())
   // 年条窗口相对今年的偏移（0=今年居中；目标允许规划未来年，偏移双向不设限）
   const [yearsOffset, setYearsOffset] = useState(0)
+  // 页面内区段（年度/季度），默认当季
+  const [section, setSection] = useState<GoalSection>(
+    () => `Q${Math.floor(dayjs().month() / 3) + 1}` as GoalSection
+  )
   const [tree, setTree] = useState<GoalTreeView | null>(null)
   const [loading, setLoading] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -277,6 +293,92 @@ export default function GoalBoard({ ref }: { ref?: Ref<GoalBoardHandle> }) {
   )
 
   const yearOs = tree?.yearObjectives ?? []
+  // 当前选中季度区（切换年/加载中可能暂无数据，按 period 兜底空区）
+  const quarterPeriod = `${year}-${section}`
+  const selQuarter =
+    section === 'YEAR' ? null : (tree?.quarters ?? []).find((q) => q.period === quarterPeriod)
+
+  const yearCard = (
+    <Card
+      size="small"
+      title={`${year} 年度目标`}
+      loading={loading}
+      extra={
+        <Space size={4}>
+          <Button
+            size="small"
+            icon={<SwapRightOutlined />}
+            onClick={() => openCarry(`${year} 年度`, String(year + 1), yearOs)}
+          >
+            滚转到明年
+          </Button>
+          <Button
+            size="small"
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => openCreate({ scope: 'YEAR', period: String(year), kind: 'OBJECTIVE' })}
+          >
+            新建年度目标
+          </Button>
+        </Space>
+      }
+    >
+      {yearOs.length === 0 ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description="本年度暂无目标：点右上「新建年度目标」定全年方向"
+        />
+      ) : (
+        yearOs.map((n) => renderNode(n, 'YEAR', String(year)))
+      )}
+    </Card>
+  )
+
+  const quarterCard = (
+    <Card
+      size="small"
+      title={
+        <Space size={8}>
+          <span>{quarterPeriod} 季度目标</span>
+          <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
+            {quarterRange(quarterPeriod)}
+          </Typography.Text>
+        </Space>
+      }
+      loading={loading}
+      extra={
+        <Space size={4}>
+          <Button size="small" icon={<FileTextOutlined />} onClick={() => setReviewPeriod(quarterPeriod)}>
+            季度复盘
+          </Button>
+          <Button
+            size="small"
+            icon={<SwapRightOutlined />}
+            onClick={() => openCarry(quarterPeriod, nextPeriodOf(quarterPeriod, year), selQuarter?.objectives ?? [])}
+          >
+            滚转
+          </Button>
+          <Button
+            size="small"
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => openCreate({ scope: 'QUARTER', period: quarterPeriod, kind: 'OBJECTIVE' })}
+          >
+            新建目标
+          </Button>
+        </Space>
+      }
+    >
+      {(selQuarter?.objectives ?? []).length === 0 ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description="本季度暂无 OKR：点右上「新建目标」制定季度 O，再逐个拆 KR"
+        />
+      ) : (
+        (selQuarter?.objectives ?? []).map((n) => renderNode(n, 'QUARTER', quarterPeriod))
+      )}
+    </Card>
+  )
 
   return (
     <>
@@ -286,88 +388,13 @@ export default function GoalBoard({ ref }: { ref?: Ref<GoalBoardHandle> }) {
         yearsOffset={yearsOffset}
         onShift={(n) => setYearsOffset((o) => o + n)}
       />
-
-      <Card
-        size="small"
-        title={`${year} 年度目标`}
-        loading={loading}
-        style={{ marginBottom: 16 }}
-        extra={
-          <Space size={4}>
-            <Button
-              size="small"
-              icon={<SwapRightOutlined />}
-              onClick={() => openCarry(`${year} 年度`, String(year + 1), yearOs)}
-            >
-              滚转到明年
-            </Button>
-            <Button
-              size="small"
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => openCreate({ scope: 'YEAR', period: String(year), kind: 'OBJECTIVE' })}
-            >
-              新建年度目标
-            </Button>
-          </Space>
-        }
-      >
-        {yearOs.length === 0 ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="本年度暂无目标：点右上「新建年度目标」定全年方向"
-          />
-        ) : (
-          yearOs.map((n) => renderNode(n, 'YEAR', String(year)))
-        )}
-      </Card>
-
-      {(tree?.quarters ?? []).map((q) => (
-        <Card
-          key={q.period}
-          size="small"
-          title={
-            <Space size={8}>
-              <span>{q.period} 季度 OKR</span>
-              <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
-                {quarterRange(q.period)}
-              </Typography.Text>
-            </Space>
-          }
-          style={{ marginBottom: 16 }}
-          extra={
-            <Space size={4}>
-              <Button size="small" icon={<FileTextOutlined />} onClick={() => setReviewPeriod(q.period)}>
-                季度复盘
-              </Button>
-              <Button
-                size="small"
-                icon={<SwapRightOutlined />}
-                onClick={() => openCarry(q.period, nextPeriodOf(q.period, year), q.objectives)}
-              >
-                滚转
-              </Button>
-              <Button
-                size="small"
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => openCreate({ scope: 'QUARTER', period: q.period, kind: 'OBJECTIVE' })}
-              >
-                新建目标
-              </Button>
-            </Space>
-          }
-        >
-          {q.objectives.length === 0 ? (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="本季度暂无 OKR：点右上「新建目标」制定季度 O，再逐个拆 KR"
-            />
-          ) : (
-            q.objectives.map((n) => renderNode(n, 'QUARTER', q.period))
-          )}
-        </Card>
-      ))}
+      <Segmented
+        style={{ marginBottom: 12 }}
+        value={section}
+        onChange={(v) => setSection(v as GoalSection)}
+        options={SECTION_OPTIONS}
+      />
+      {section === 'YEAR' ? yearCard : quarterCard}
 
       <GoalFormDrawer
         open={drawerOpen}
