@@ -14,9 +14,11 @@ import java.util.Optional;
 
 public interface WorklogEntryRepository extends JpaRepository<WorklogEntryEntity, String> {
 
-    /** 范围条目（日期升序、日内按创建时间）；from/to 可空（null=不限），生成素材/判重扫描用 */
+    /** 范围条目（日期升序、日内按创建时间）；from/to 可空（null=不限），生成素材/判重扫描用。
+     *  PG 红线：禁写 (:from IS NULL OR e.workDate >= :from)——孤立出现的 `? IS NULL` 无列可推断
+     *  参数类型，PG 报 42P18（H2 测不出）；改 COALESCE(:from, e.workDate) 借列类型兜底。 */
     @Query("SELECT e FROM WorklogEntryEntity e WHERE e.userId = :userId"
-            + " AND (:from IS NULL OR e.workDate >= :from) AND (:to IS NULL OR e.workDate <= :to)"
+            + " AND e.workDate >= COALESCE(:from, e.workDate) AND e.workDate <= COALESCE(:to, e.workDate)"
             + " ORDER BY e.workDate ASC, e.createdAt ASC")
     List<WorklogEntryEntity> findRange(@Param("userId") String userId,
                                        @Param("from") LocalDate from, @Param("to") LocalDate to);
