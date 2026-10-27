@@ -108,6 +108,13 @@ public class WorklogPlanService {
                 .stream().map(PlanItemView::of).toList();
     }
 
+    /** 单条查询（CAP-76 M9 更新工具读-合并-写用；他人 404，同 update 口径）。 */
+    public PlanItemView get(Long id) {
+        String me = identity.currentActor();
+        return PlanItemView.of(planRepo.findByIdAndUserId(id, me)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "计划项不存在: " + id)));
+    }
+
     /** 新增（状态恒 TODO、来源 MANUAL；AI_SUGGEST 由 M3 suggest 链路写入）。 */
     public PlanItemView create(PlanItemRequest req) {
         String me = identity.currentActor();

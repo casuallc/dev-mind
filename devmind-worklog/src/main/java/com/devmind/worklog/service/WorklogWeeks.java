@@ -7,9 +7,9 @@ import java.time.temporal.IsoFields;
 /**
  * ISO-8601 周工具（周一开始、含 1 月 4 日的周为第 1 周）。
  * CAP-89：原属 WorklogRepoService 的静态方法随仓服务删除独立出来——成稿回传解析
- * weekly-yyyy-Www 文件名、存量仓迁移定位周报行共用。
+ * weekly-yyyy-Www 文件名、存量仓迁移定位周报行共用。CAP-76 M9：public 化供 tool 包归一周起点。
  */
-final class WorklogWeeks {
+public final class WorklogWeeks {
 
     private WorklogWeeks() {
     }
@@ -22,7 +22,7 @@ final class WorklogWeeks {
     }
 
     /** 任意日期 → 所在周周一（CAP-88 周计划 plan_date 归一用）。 */
-    static LocalDate mondayOf(LocalDate d) {
+    public static LocalDate mondayOf(LocalDate d) {
         return d.with(DayOfWeek.MONDAY);
     }
 

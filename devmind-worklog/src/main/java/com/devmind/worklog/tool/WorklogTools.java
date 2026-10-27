@@ -54,8 +54,8 @@ public class WorklogTools {
                 ToolRisk.READ, "VIEWER", false, "devmind-worklog", M);
         return PlatformTool.of(spec, (call, ctx) -> {
             Map<String, Object> args = call.args();
-            LocalDate to = dateOr(ToolText.str(args, "to"), LocalDate.now());
-            LocalDate from = dateOr(ToolText.str(args, "from"), to.minusDays(6));
+            LocalDate to = WorklogToolsHelper.dateOr(ToolText.str(args, "to"), LocalDate.now());
+            LocalDate from = WorklogToolsHelper.dateOr(ToolText.str(args, "from"), to.minusDays(6));
             if (from.isAfter(to)) {
                 return ToolResult.fail(ToolResult.INVALID_ARGUMENTS, "from 不能晚于 to");
             }
@@ -65,11 +65,11 @@ public class WorklogTools {
                 return ToolResult.ok("该时间范围内没有匹配的工作日志。");
             }
             StringBuilder sb = new StringBuilder("共 " + page.total() + " 条，合计 "
-                    + hours(page.totalMinutes() / 60.0) + " 小时（显示 " + page.items().size() + " 条）：");
+                    + WorklogToolsHelper.hours(page.totalMinutes() / 60.0) + " 小时（显示 " + page.items().size() + " 条）：");
             List<Map<String, Object>> rows = new ArrayList<>();
             for (EntryView e : page.items()) {
                 sb.append("\n- ").append(e.workDate()).append(" ").append(e.title())
-                        .append(" · ").append(hours(e.hours())).append("h");
+                        .append(" · ").append(WorklogToolsHelper.hours(e.hours())).append("h");
                 if (e.entryType() != null) {
                     sb.append(" · ").append(e.entryType());
                 }
@@ -139,28 +139,17 @@ public class WorklogTools {
                 return ToolResult.fail(ToolResult.INVALID_ARGUMENTS, "工时必须大于 0 且不超过 24 小时");
             }
             String type = normalizeType(ToolText.str(args, "entryType"));
-            LocalDate workDate = dateOr(ToolText.str(args, "workDate"), LocalDate.now());
+            LocalDate workDate = WorklogToolsHelper.dateOr(ToolText.str(args, "workDate"), LocalDate.now());
             EntryView view = entries.create(new EntryRequest(
                     workDate, title, ToolText.str(args, "content"), type, hours,
                     ToolText.str(args, "requirementId"), ToolText.str(args, "jiraIssueKey"), null,
                     null, null));
             String text = "已登记 " + view.workDate() + " 的工作日志：" + view.title()
-                    + "（" + hours(view.hours()) + " 小时）";
+                    + "（" + WorklogToolsHelper.hours(view.hours()) + " 小时）";
             return ToolResult.ok(text, text, ToolResult.data(
                     "id", view.id(), "workDate", String.valueOf(view.workDate()),
                     "hours", view.hours()));
         });
-    }
-
-    private static LocalDate dateOr(String raw, LocalDate def) {
-        if (raw == null) {
-            return def;
-        }
-        try {
-            return LocalDate.parse(raw);
-        } catch (RuntimeException e) {
-            throw new IllegalArgumentException("日期格式应为 yyyy-MM-dd: " + raw);
-        }
     }
 
     private static String normalizeType(String type) {
@@ -174,12 +163,4 @@ public class WorklogTools {
         return s;
     }
 
-    private static String hours(Double h) {
-        return h == null ? "0" : hours(h.doubleValue());
-    }
-
-    private static String hours(double h) {
-        String s = String.format(Locale.ROOT, "%.2f", h);
-        return s.replaceAll("0+$", "").replaceAll("\\.$", "");
-    }
 }

@@ -170,6 +170,14 @@ public class WorklogGoalService {
         return new LocalDate[]{LocalDate.of(year, 1, 1), LocalDate.of(year, 12, 31)};
     }
 
+    /** 单条查询（CAP-76 M9 更新工具读-合并-写用；他人 404，同 update 口径）。 */
+    public GoalView get(Long id) {
+        String me = identity.currentActor();
+        WorklogGoalEntity e = goalRepo.findByIdAndUserId(id, me)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "目标不存在: " + id));
+        return GoalView.of(e, parentTitle(me, e.getParentId()));
+    }
+
     /** 新增（状态恒 ACTIVE、进度恒 0；framework 空 = OKR）。 */
     public GoalView create(GoalRequest req) {
         String me = identity.currentActor();
