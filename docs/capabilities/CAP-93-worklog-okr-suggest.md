@@ -1,6 +1,6 @@
 # CAP-93 工作日志 OKR AI 生成（草稿确认落库）
 
-> 能力 ID：CAP-93 ｜ 分类：组装层 ｜ 状态：实施中 ｜ 日期：2026-10-27
+> 能力 ID：CAP-93 ｜ 分类：组装层 ｜ 状态：已实现（M1+M2，2026-10-27） ｜ 日期：2026-10-27
 > 决策记录：**草稿确认落库**（AI 产物解析进 `worklog_okr_drafts` 草稿表，人工在抽屉里勾选/
 > 编辑后「采纳」才批量建目标——OKR 是方向性数据，复用「建议计划」的直接落库会把模型幻觉
 > 直接写进目标域，风险等级不同）；**周期可选**（YEAR 或任一 QUARTER，前端生成弹层默认
@@ -50,7 +50,8 @@ CAP-91 把年度目标 + 季度 OKR 升格为一等数据并接入计划闭环�
     逐条走 `WorklogGoalService.create` 校验链；任一条失败整体回滚 400；成功置草稿
     ADOPTED，返回创建数与目标视图；
   - `POST /api/worklog/goals/suggest/discard {draftId}` → 置 DISCARDED（采纳前可重来：
-    force 重生成覆盖回 DRAFT）。
+    force 重生成覆盖回 DRAFT）。ADOPTED 不可丢弃（400：目标已建，去目标页删目标）；
+    DISCARDED 重复丢弃幂等（200）。
   - 归属：仅能操作本人草稿（他人 404）。
 
 ### M2 前端：生成入口 + 草稿确认抽屉
@@ -125,16 +126,17 @@ worklog_okr_drafts (
 
 ## 8. 里程碑
 
-- **M1 后端**（FR-01~FR-04）：生成链路 + 解析 + 草稿 + 采纳/丢弃 + 单测。
-- **M2 前端**（FR-05/FR-06）：生成入口 + 草稿确认抽屉 + E2E。
+- **M1 后端**（FR-01~FR-04）：生成链路 + 解析 + 草稿 + 采纳/丢弃 + 单测。✅ 2026-10-27
+- **M2 前端**（FR-05/FR-06）：生成入口 + 草稿确认抽屉 + E2E。✅ 2026-10-27
 
 ## 9. 验收标准
 
-- M1：`OkrSuggestParserTest`（行契约/容错/封顶/围栏）、`OkrSuggestServiceTest`
-  （采纳两阶段/事务回滚/归属 404/幂等覆盖）、`WorklogOutputMirror` 草稿落库单测；
-  `mvn -q test` 全绿。
-- M2：`tests/cap93_okr_suggest_e2e.py`（隔离 app + fake executor：触发 suggest → 产物
-  回传 → 草稿出现 → 采纳后 goals 树含新目标；discard 路径）通过；`npx tsc -b` 通过。
+- M1：`OkrSuggestParserTest`（行契约/容错/封顶/围栏，8 例）、`OkrSuggestServiceTest`
+  （采纳两阶段/归属 404/幂等覆盖/丢弃口径，7 例）、`WorklogOutputMirror` 草稿落库单测
+  （3 例）；`mvn -q test` 全绿。✅
+- M2：`tests/cap93_e2e.py`（隔离 app :18107 + fake executor：触发 suggest → 预写产物
+  回传 → 草稿出现 → 编辑后采纳进 goals 树；force 重生成覆盖；discard 幂等；护栏 400）
+  20/20 通过；`npx tsc -b` 通过。✅
 
 ## 10. 风险与开放问题
 

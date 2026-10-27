@@ -110,7 +110,7 @@
 | [CAP-90](CAP-90-worklog-plan-entry-merge.md) | 工作日志计划-条目合并与周报投影 | 组装层 | 已实现（2026-10-26；WEEK 联动保留为实现修订） | 日计划并入条目（status=DONE 即事实），周计划唯一计划实体，周报下周计划单向投影 |
 | [CAP-91](CAP-91-worklog-goals-okr.md) | 工作目标与 OKR 对齐 | 组装层 | 已实现（M1+M2+M3，2026-10-26） | 年度目标 + 季度 OKR 一等数据，周计划挂 KR 对齐，季度复盘数据驱动投影 |
 | [CAP-92](CAP-92-knowledge-injection-retrieval.md) | 知识注入收敛为检索 | 管理/底座 | 已实现（M1+M2+M3，2026-10-26） | 下线 FULL 全量注入与注入预览；场景改绑知识库，装配时按任务检索命中片段 |
-| [CAP-93](CAP-93-worklog-okr-suggest.md) | 工作日志 OKR AI 生成 | 组装层 | 实施中 | 会话链路生成年度/季度 OKR 草稿（worklog_okr_drafts），人工勾选编辑后采纳批量建目标 |
+| [CAP-93](CAP-93-worklog-okr-suggest.md) | 工作日志 OKR AI 生成 | 组装层 | 已实现 | 会话链路生成年度/季度 OKR 草稿（worklog_okr_drafts），人工勾选编辑后采纳批量建目标 |
 
 ## 文档模板说明
 
