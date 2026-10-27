@@ -2,7 +2,6 @@ import { Button, Card, Checkbox, Empty, Modal, Progress, Segmented, Space, Tag, 
 import {
   FileTextOutlined,
   PlusOutlined,
-  RobotOutlined,
   SwapRightOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
@@ -58,10 +57,11 @@ interface CarryState {
   selected: Set<number>
 }
 
-/** 页面壳（WorklogPage）工具栏在 Card extra，靠该句柄触发 今年/刷新 */
+/** 页面壳（WorklogPage）工具栏在 Card extra，靠该句柄触发 今年/刷新/AI 生成 */
 export interface GoalBoardHandle {
   backToThisYear: () => void
   reload: () => void
+  openGenerate: () => void
 }
 
 /**
@@ -107,6 +107,7 @@ export default function GoalBoard({ ref }: { ref?: Ref<GoalBoardHandle> }) {
       setYear(dayjs().year())
     },
     reload: load,
+    openGenerate: () => setGenOpen(true),
   }))
 
   const openCreate = (p: GoalPreset) => {
@@ -311,9 +312,6 @@ export default function GoalBoard({ ref }: { ref?: Ref<GoalBoardHandle> }) {
       loading={loading}
       extra={
         <Space size={4}>
-          <Button size="small" icon={<RobotOutlined />} onClick={() => setGenOpen(true)}>
-            AI 生成
-          </Button>
           <Button
             size="small"
             icon={<SwapRightOutlined />}
@@ -357,9 +355,6 @@ export default function GoalBoard({ ref }: { ref?: Ref<GoalBoardHandle> }) {
       loading={loading}
       extra={
         <Space size={4}>
-          <Button size="small" icon={<RobotOutlined />} onClick={() => setGenOpen(true)}>
-            AI 生成
-          </Button>
           <Button size="small" icon={<FileTextOutlined />} onClick={() => setReviewPeriod(quarterPeriod)}>
             季度复盘
           </Button>

@@ -466,6 +466,9 @@ export default function WorklogPage() {
         <Button icon={<ReloadOutlined />} onClick={() => goalsRef.current?.reload()}>
           刷新
         </Button>
+        <Button icon={<RobotOutlined />} onClick={() => goalsRef.current?.openGenerate()}>
+          AI 生成
+        </Button>
       </>
     ),
     weekly: (
