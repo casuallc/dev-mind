@@ -151,18 +151,18 @@ function TasksTab({ refreshTick, onEdit }: { refreshTick: number; onEdit: (t: As
     {
       title: '形态',
       dataIndex: 'scheduleKind',
-      width: 130,
+      width: 170,
       render: (k, r) => (
-        <Space size={4}>
+        <Space size={4} style={{ whiteSpace: 'nowrap' }}>
           <Tag>{KIND_LABEL[k] ?? k}</Tag>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>{scheduleDesc(r)}</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{scheduleDesc(r)}</Typography.Text>
         </Space>
       ),
     },
     {
       title: '状态',
       dataIndex: 'status',
-      width: 90,
+      width: 100,
       render: (s) => <Tag color={TASK_STATUS_COLOR[s] ?? 'default'}>{s}</Tag>,
     },
     {
@@ -191,7 +191,7 @@ function TasksTab({ refreshTick, onEdit }: { refreshTick: number; onEdit: (t: As
       render: (_, r) => `${r.runCount}${r.maxRuns != null ? ` / ${r.maxRuns}` : ''}`,
     },
     { title: '下次执行', dataIndex: 'nextRunAt', width: 170, render: (t) => (t ? fmtTime(t) : '—') },
-    { title: '属主', dataIndex: 'actor', width: 110, render: (a) => a || '—' },
+    { title: '属主', dataIndex: 'actor', width: 140, ellipsis: true, render: (a) => a || '—' },
     { title: '创建时间', dataIndex: 'createdAt', width: 170, render: (t) => fmtTime(t) },
     {
       title: '操作',
