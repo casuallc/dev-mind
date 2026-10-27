@@ -12,11 +12,12 @@ import org.springframework.data.repository.query.Param;
 public interface BotInteractionRepository extends JpaRepository<BotInteractionEntity, Long> {
 
     /** 运维页组合查询（条件可空=不限），按 id 倒序。keyword 命中入站/出站/发送者。
-     *  cast(:keyword as string)：参数只在 concat 内无列可推断，PG 会落成 bytea（前车之鉴）。 */
+     *  可空筛选参数的 null 判断一律 cast：孤立 `? is null` 无列可推断，PG 报 42P18；
+     *  keyword 另因只在 concat 内出现会落 bytea（双重红线，JpqlNullableParamCastTest 钉死）。 */
     @Query("""
             select a from BotInteractionEntity a
-            where (:channel is null or a.channel = :channel)
-              and (:status is null or a.status = :status)
+            where (cast(:channel as string) is null or a.channel = :channel)
+              and (cast(:status as string) is null or a.status = :status)
               and (cast(:keyword as string) is null
                    or lower(a.inputText) like lower(concat('%', cast(:keyword as string), '%'))
                    or lower(a.replyText) like lower(concat('%', cast(:keyword as string), '%'))

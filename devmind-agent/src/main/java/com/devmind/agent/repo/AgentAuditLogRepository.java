@@ -14,13 +14,14 @@ public interface AgentAuditLogRepository extends JpaRepository<AgentAuditLogEnti
     /**
      * 审计组合查询：category/event/nodeId/result 精确匹配（空=不限）；
      * keyword 对 detail/nodeName/remoteAddr/target 四列做大小写不敏感包含（均普通 varchar）。
+     * 可空筛选参数的 null 判断一律 cast：孤立 `? is null` 无列可推断参数类型，PG 报 42P18。
      */
     @Query("""
             select a from AgentAuditLogEntity a
-            where (:category is null or a.category = :category)
-              and (:event is null or a.event = :event)
-              and (:nodeId is null or a.nodeId = :nodeId)
-              and (:result is null or a.result = :result)
+            where (cast(:category as string) is null or a.category = :category)
+              and (cast(:event as string) is null or a.event = :event)
+              and (cast(:nodeId as long) is null or a.nodeId = :nodeId)
+              and (cast(:result as string) is null or a.result = :result)
               and (cast(:keyword as string) is null
                    or lower(a.detail) like lower(concat('%', cast(:keyword as string), '%'))
                    or lower(a.nodeName) like lower(concat('%', cast(:keyword as string), '%'))

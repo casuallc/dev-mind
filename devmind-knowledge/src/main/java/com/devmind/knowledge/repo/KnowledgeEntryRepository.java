@@ -41,10 +41,10 @@ public interface KnowledgeEntryRepository extends JpaRepository<KnowledgeEntryEn
                    e.contentVersion as contentVersion, e.updatedAt as updatedAt
             from KnowledgeEntryEntity e
             where e.kbId = :kbId
-              and (:status is null or e.status = :status)
-              and (:docType is null or e.docType = :docType)
-              and (:source is null or e.source = :source)
-              and (:indexStatus is null or e.indexStatus = :indexStatus)
+              and (cast(:status as string) is null or e.status = :status)
+              and (cast(:docType as string) is null or e.docType = :docType)
+              and (cast(:source as string) is null or e.source = :source)
+              and (cast(:indexStatus as string) is null or e.indexStatus = :indexStatus)
               and (cast(:keyword as string) is null
                    or lower(e.name) like lower(concat('%', cast(:keyword as string), '%')))
             order by e.updatedAt desc, e.id desc
@@ -52,10 +52,10 @@ public interface KnowledgeEntryRepository extends JpaRepository<KnowledgeEntryEn
             countQuery = """
             select count(e) from KnowledgeEntryEntity e
             where e.kbId = :kbId
-              and (:status is null or e.status = :status)
-              and (:docType is null or e.docType = :docType)
-              and (:source is null or e.source = :source)
-              and (:indexStatus is null or e.indexStatus = :indexStatus)
+              and (cast(:status as string) is null or e.status = :status)
+              and (cast(:docType as string) is null or e.docType = :docType)
+              and (cast(:source as string) is null or e.source = :source)
+              and (cast(:indexStatus as string) is null or e.indexStatus = :indexStatus)
               and (cast(:keyword as string) is null
                    or lower(e.name) like lower(concat('%', cast(:keyword as string), '%')))
             """)

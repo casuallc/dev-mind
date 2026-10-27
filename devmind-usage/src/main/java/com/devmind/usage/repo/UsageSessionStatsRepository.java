@@ -15,12 +15,12 @@ import java.util.List;
  */
 public interface UsageSessionStatsRepository extends JpaRepository<SessionEntity, String> {
 
-    /** PG 无法推断裸 'Instant 参数 is null' 的类型，时间可空筛选必须 cast（JpqlNullableParamCastTest 钉死）；
-     * :user/:model 裸 is null 安全的前提是与字符串列成对比较（PG 推断 text），保持成对写法。 */
+    /** PG 无法推断孤立 `? is null` 参数位的类型（42P18，prepare 期即炸），
+     * 可空筛选参数的 null 判断一律 cast（JpqlNullableParamCastTest 钉死全仓）。 */
     String FILTER = " where (cast(:start as timestamp) is null or e.createdAt >= :start)"
             + " and (cast(:end as timestamp) is null or e.createdAt < :end)"
-            + " and (:user is null or e.createdBy = :user)"
-            + " and (:model is null or e.model = :model)";
+            + " and (cast(:user as string) is null or e.createdBy = :user)"
+            + " and (cast(:model as string) is null or e.model = :model)";
 
     String TOTALS_SELECT = "select new com.devmind.usage.repo.UsageTotals(count(e),"
             + " coalesce(sum(e.turnCount), 0), coalesce(sum(e.costUsd), 0),"

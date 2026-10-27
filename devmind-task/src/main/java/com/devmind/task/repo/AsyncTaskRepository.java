@@ -34,14 +34,14 @@ public interface AsyncTaskRepository extends JpaRepository<AsyncTaskEntity, Stri
 
     /**
      * 管理端组合查询：type/status/actor 精确匹配（空=不限，actor 由非 admin 强制传入），
-     * keyword 对 name/taskType 大小写不敏感包含。keyword 只在 concat 内无列可推断，
-     * 须 cast(:keyword as string) 防 PG 落成 bytea。
+     * keyword 对 name/taskType 大小写不敏感包含。可空筛选参数的 null 判断一律 cast
+     * （孤立 `? is null` 无列可推断，PG 报 42P18）；keyword 另因只在 concat 内会落 bytea。
      */
     @Query("""
             select t from AsyncTaskEntity t
-            where (:type is null or t.taskType = :type)
-              and (:status is null or t.status = :status)
-              and (:actor is null or t.actor = :actor)
+            where (cast(:type as string) is null or t.taskType = :type)
+              and (cast(:status as string) is null or t.status = :status)
+              and (cast(:actor as string) is null or t.actor = :actor)
               and (cast(:keyword as string) is null
                    or lower(t.name) like lower(concat('%', cast(:keyword as string), '%'))
                    or lower(t.taskType) like lower(concat('%', cast(:keyword as string), '%')))

@@ -27,8 +27,9 @@ public interface AsyncTaskRunRepository extends JpaRepository<AsyncTaskRunEntity
 
     Page<AsyncTaskRunEntity> findByTaskIdOrderByRunSeqDescAttemptDesc(String taskId, Pageable pageable);
 
-    /** 执行记录横查（管理页「执行记录」视图）：按状态过滤，scheduled_at 倒序 */
-    @Query("select r from AsyncTaskRunEntity r where (:status is null or r.status = :status) "
+    /** 执行记录横查（管理页「执行记录」视图）：按状态过滤，scheduled_at 倒序。
+     *  cast(:status as string)：孤立 `? is null` 无列可推断参数类型，PG 报 42P18。 */
+    @Query("select r from AsyncTaskRunEntity r where (cast(:status as string) is null or r.status = :status) "
             + "order by r.scheduledAt desc")
     Page<AsyncTaskRunEntity> queryRuns(@Param("status") String status, Pageable pageable);
 

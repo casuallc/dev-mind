@@ -49,8 +49,9 @@ class JpqlNullableParamCastTest {
             "java.time.OffsetDateTime",
             "java.time.ZonedDateTime");
 
-    /** `:foo is null` 形式的空值判断 */
-    private static final Pattern NULL_CHECK = Pattern.compile(":(\\w+)\\s+is\\s+null");
+    /** `:foo is null` 形式的空值判断（必须 CASE_INSENSITIVE——大写 `IS NULL` 曾让
+     *  WorklogEntryRepository.findRange 的 LocalDate 裸判断漏网，2026-10-27 在 194(PG) 实炸 42P18） */
+    private static final Pattern NULL_CHECK = Pattern.compile(":(\\w+)\\s+is\\s+null", Pattern.CASE_INSENSITIVE);
 
     /** 空值判断左侧必须是 cast(（允许 `cast (` 这样的空白写法） */
     private static final Pattern CAST_AHEAD = Pattern.compile("cast\\s*\\(\\s*$", Pattern.CASE_INSENSITIVE);

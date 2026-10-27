@@ -12,9 +12,9 @@ import java.util.List;
 public interface SkillRepository extends JpaRepository<SkillEntity, String> {
 
     /** 组合过滤（null=不限）。GLOBAL 行 projectId=""，故 projectId 精确匹配天然不混入 GLOBAL 行 */
-    @Query("select s from SkillEntity s where (:scope is null or s.scope = :scope)"
-            + " and (:projectId is null or s.projectId = :projectId)"
-            + " and (:status is null or s.status = :status)"
+    @Query("select s from SkillEntity s where (cast(:scope as string) is null or s.scope = :scope)"
+            + " and (cast(:projectId as string) is null or s.projectId = :projectId)"
+            + " and (cast(:status as string) is null or s.status = :status)"
             + " and (cast(:kw as string) is null or lower(s.name) like lower(concat('%', cast(:kw as string), '%'))"
             + "     or lower(s.description) like lower(concat('%', cast(:kw as string), '%')))")
     Page<SkillEntity> search(@Param("scope") String scope,

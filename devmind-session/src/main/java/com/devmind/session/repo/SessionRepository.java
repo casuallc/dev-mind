@@ -22,7 +22,7 @@ public interface SessionRepository extends JpaRepository<SessionEntity, String> 
      * taskSpec/summary 是 @Lob CLOB，lower 前必须 cast 成 string（Hibernate 启动期校验）。
      */
     @Query("select s from SessionEntity s where "
-            + "(:projectId is null or s.projectId = :projectId) "
+            + "(cast(:projectId as string) is null or s.projectId = :projectId) "
             + "and (s.id like concat('%', cast(:kw as string), '%') "
             + "or lower(cast(s.taskSpec as string)) like lower(concat('%', cast(:kw as string), '%')) "
             + "or lower(cast(s.summary as string)) like lower(concat('%', cast(:kw as string), '%'))) "

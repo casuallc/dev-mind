@@ -24,10 +24,10 @@ public interface RequirementRepository extends JpaRepository<RequirementEntity, 
      * openOnly=true 时排除终态（DONE/CANCELLED），对应列表默认「未完结」视图。
      */
     @Query("select r from RequirementEntity r where r.projectId = :projectId"
-            + " and (:status is null or r.status = :status)"
+            + " and (cast(:status as string) is null or r.status = :status)"
             + " and (:openOnly = false or r.status not in ('DONE', 'CANCELLED'))"
-            + " and (:type is null or r.type = :type)"
-            + " and (:source is null or r.source = :source)"
+            + " and (cast(:type as string) is null or r.type = :type)"
+            + " and (cast(:source as string) is null or r.source = :source)"
             + " and (cast(:kw as string) is null or lower(r.title) like lower(concat('%', cast(:kw as string), '%'))"
             + "      or lower(r.externalKey) like lower(concat('%', cast(:kw as string), '%')))")
     Page<RequirementEntity> search(@Param("projectId") String projectId,
