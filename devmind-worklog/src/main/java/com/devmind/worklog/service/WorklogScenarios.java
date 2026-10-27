@@ -22,6 +22,9 @@ public final class WorklogScenarios {
     /** CAP-91 M2「季度复盘」生成场景 code（产 quarterly-review-<period>.md，落 worklog_quarterly_reports） */
     public static final String QUARTERLY_REVIEW = "worklog-quarterly-review";
 
+    /** CAP-93「AI 生成 OKR」场景 code（产 okr-suggest-<period>.md，解析进 worklog_okr_drafts 草稿） */
+    public static final String OKR_SUGGEST = "worklog-okr-suggest";
+
     private WorklogScenarios() {
     }
 }

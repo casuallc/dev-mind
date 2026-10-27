@@ -125,6 +125,25 @@ public class WorklogAssetSeeder {
             3. 最后一句话确认已完成。
             """;
 
+    /**
+     * CAP-93「AI 生成 OKR」场景骨架。产物行契约与 {@code OkrSuggestParser}、
+     * {@code WorklogOutputMirror#OKR_SUGGEST_FILE} 三方共用，改动必须三处同步：
+     * `- [O] 标题（权重 40%）（父O#id）` / 缩进 `- [KR] 标题（权重 30%）`。
+     */
+    static final String OKR_SUGGEST_SKELETON = """
+            {{task}}
+
+            ## 执行要求（遵循 worklog skill 约定）
+            1. 素材以上方任务说明为准（既有目标进展、近期周报摘要与工作聚合已附上），建议必须能从素材追溯，不写空话；
+            2. 给出 2~4 个 O，每个 O 下 2~4 条 KR，严格按此两级列表格式（平台按行解析，格式错整行丢弃）：
+               `- [O] 目标标题（权重 40%）`
+               `  - [KR] 关键结果标题（权重 30%）`（KR 行必须缩进）
+               - 权重段可省略；季度目标可在 O 行尾追加 `（父O#id）` 挂到年度目标（只能引用素材清单里的 id，无归属不标）；
+               - 除两级列表外不写别的内容（不要标题、不要解释、不要代码块）；
+            3. 成稿写入 .devmind/output/okr-suggest-<period>.md（period 见上方任务说明，如 2026-Q4 或 2027；平台回传契约，缺文件判失败）；
+            4. 最后一句话确认已完成。
+            """;
+
     private final SkillRepository skillRepo;
     private final SkillService skillService;
     private final SessionScenarioRepository scenarioRepo;
@@ -152,6 +171,9 @@ public class WorklogAssetSeeder {
             ensureScenario(WorklogScenarios.QUARTERLY_REVIEW, "工作日志·季度复盘",
                     "生成季度复盘（OKR 对照 + 计划外聚合素材随 prompt 携带，成稿回传落库）",
                     QUARTERLY_REVIEW_SKELETON, skillId, 93);
+            ensureScenario(WorklogScenarios.OKR_SUGGEST, "工作日志·OKR 生成",
+                    "AI 分析近期工作生成年度/季度 OKR 草稿（素材随 prompt 携带，产物解析进草稿待人工采纳）",
+                    OKR_SUGGEST_SKELETON, skillId, 94);
         } catch (Exception e) {
             log.warn("worklog skill/场景种子失败（不阻断启动）: {}", e.getMessage());
         }

@@ -42,6 +42,7 @@ class WorklogOutputMirrorTest {
     private WeeklyReportRepository weeklyRepo;
     private WorklogPlanService planService;
     private WorklogQuarterlyReportRepository quarterlyRepo;
+    private OkrSuggestService okrSuggestService;
     private WorklogOutputMirror mirror;
 
     @BeforeEach
@@ -50,8 +51,9 @@ class WorklogOutputMirrorTest {
         weeklyRepo = mock(WeeklyReportRepository.class);
         quarterlyRepo = mock(WorklogQuarterlyReportRepository.class);
         planService = mock(WorklogPlanService.class);
+        okrSuggestService = mock(OkrSuggestService.class);
         mirror = new WorklogOutputMirror(null, null, null, dailyRepo, weeklyRepo, publisher,
-                planService, quarterlyRepo);
+                planService, quarterlyRepo, okrSuggestService);
     }
 
     static class FakePublisher extends DomainEventPublisher {
@@ -342,5 +344,39 @@ class WorklogOutputMirrorTest {
         assertTrue(r.mirrored().isEmpty(), "内容一致零写库");
         assertTrue(r.skipped().isEmpty());
         verify(quarterlyRepo, times(0)).save(any());
+    }
+
+    // ---------------- CAP-93：OKR 草稿镜像 ----------------
+
+    @Test
+    void okr产物解析落草稿并发事件() {
+        mirror.mirrorOkrSuggest(session("s10"), "u1", List.of(output("okr-suggest-2026-Q4.md",
+                "- [O] 提升交付质量（权重 60%）\n  - [KR] 缺陷率降至 1%（权重 30%）\n- [O] 第二个目标\n")));
+        ArgumentCaptor<List> itemsCap = ArgumentCaptor.forClass(List.class);
+        verify(okrSuggestService).saveDraft(org.mockito.ArgumentMatchers.eq("u1"),
+                org.mockito.ArgumentMatchers.eq("2026-Q4"), any(), itemsCap.capture(),
+                org.mockito.ArgumentMatchers.eq("s10"));
+        assertEquals(2, itemsCap.getValue().size());
+        assertEquals(1, publisher.events.size());
+        DomainEvent ev = publisher.events.get(0);
+        assertEquals("worklog.okr.suggested", ev.type());
+        assertEquals("2026-Q4", ((SimpleDomainEvent) ev).entityId());
+        verifyNoInteractions(dailyRepo, weeklyRepo, quarterlyRepo, planService);
+    }
+
+    @Test
+    void okr缺回传发降级通知() {
+        mirror.mirrorOkrSuggest(session("s10"), "u1", List.of(output("other.md", "x")));
+        verifyNoInteractions(okrSuggestService);
+        assertEquals("worklog.report.failed", publisher.events.get(0).type());
+        assertTrue(((SimpleDomainEvent) publisher.events.get(0)).summary().contains("OKR"));
+    }
+
+    @Test
+    void okr产物无可解析行发降级通知() {
+        mirror.mirrorOkrSuggest(session("s10"), "u1", List.of(output("okr-suggest-2027.md",
+                "# 无法给出建议\n没有任何合规目标行")));
+        verifyNoInteractions(okrSuggestService);
+        assertEquals("worklog.report.failed", publisher.events.get(0).type());
     }
 }

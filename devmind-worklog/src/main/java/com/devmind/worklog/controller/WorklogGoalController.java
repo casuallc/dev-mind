@@ -1,5 +1,6 @@
 package com.devmind.worklog.controller;
 
+import com.devmind.auth.IdentityService;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.worklog.dto.GoalCarryRequest;
@@ -8,6 +9,14 @@ import com.devmind.worklog.dto.GoalRequest;
 import com.devmind.worklog.dto.GoalTreeView;
 import com.devmind.worklog.dto.GoalView;
 import com.devmind.worklog.dto.LinkableKrView;
+import com.devmind.worklog.dto.OkrAdoptRequest;
+import com.devmind.worklog.dto.OkrAdoptResult;
+import com.devmind.worklog.dto.OkrDraftIdRequest;
+import com.devmind.worklog.dto.OkrDraftView;
+import com.devmind.worklog.dto.OkrSuggestRequest;
+import com.devmind.worklog.dto.ReportLaunch;
+import com.devmind.worklog.service.OkrSuggestService;
+import com.devmind.worklog.service.ReportService;
 import com.devmind.worklog.service.WorklogGoalService;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -24,15 +33,22 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.util.List;
 
-/** CAP-91 目标 REST（仅本人数据，owner 强制，越权 404 同条目/计划项口径）。 */
+/** CAP-91 目标 REST + CAP-93 OKR AI 生成（草稿确认）REST（仅本人数据，owner 强制，越权 404）。 */
 @RestController
 @RequestMapping("/api/worklog/goals")
 public class WorklogGoalController {
 
     private final WorklogGoalService service;
+    private final ReportService reportService;
+    private final OkrSuggestService okrSuggestService;
+    private final IdentityService identity;
 
-    public WorklogGoalController(WorklogGoalService service) {
+    public WorklogGoalController(WorklogGoalService service, ReportService reportService,
+                                 OkrSuggestService okrSuggestService, IdentityService identity) {
         this.service = service;
+        this.reportService = reportService;
+        this.okrSuggestService = okrSuggestService;
+        this.identity = identity;
     }
 
     /** 整年目标树：年度 O（嵌套年度 KR）+ Q1~Q4 四季区（O 嵌套 KR，KR 附派生进度数据）。 */
@@ -46,6 +62,31 @@ public class WorklogGoalController {
     public List<LinkableKrView> linkableKrs(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         return service.linkableKrs(date);
+    }
+
+    /** CAP-93 FR-01 AI 生成 OKR 草稿（幂等：目标周期已有目标且非 force → reused=true）。 */
+    @PostMapping("/suggest")
+    public ReportLaunch suggestOkr(@Valid @RequestBody OkrSuggestRequest req) {
+        return reportService.suggestOkr(identity.currentActor(), req.scope(), req.period(),
+                Boolean.TRUE.equals(req.force()), req.hint());
+    }
+
+    /** CAP-93 FR-04 最新草稿（无 → exists=false，同报告口径）。 */
+    @GetMapping("/suggest/draft")
+    public OkrDraftView okrDraft(@RequestParam String period) {
+        return okrSuggestService.latestDraft(identity.currentActor(), period);
+    }
+
+    /** CAP-93 FR-04 采纳草稿：两阶段建 O→KR（单事务，复用目标校验链）。 */
+    @PostMapping("/suggest/adopt")
+    public OkrAdoptResult adoptOkr(@Valid @RequestBody OkrAdoptRequest req) {
+        return okrSuggestService.adopt(identity.currentActor(), req);
+    }
+
+    /** CAP-93 FR-04 丢弃草稿（ADOPTED 不可丢弃）。 */
+    @PostMapping("/suggest/discard")
+    public void discardOkr(@Valid @RequestBody OkrDraftIdRequest req) {
+        okrSuggestService.discard(identity.currentActor(), req.draftId());
     }
 
     @PostMapping

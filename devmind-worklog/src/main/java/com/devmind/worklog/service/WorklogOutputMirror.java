@@ -59,6 +59,8 @@ public class WorklogOutputMirror {
     static final Pattern PLAN_SUGGEST_FILE = Pattern.compile("^plan-suggest-(\\d{4})-W(\\d{2})\\.md$");
     /** CAP-91 M2：季度复盘产物（quarterly-review-<period>.md → upsert worklog_quarterly_reports） */
     static final Pattern QUARTERLY_REVIEW_FILE = Pattern.compile("^quarterly-review-(\\d{4}-Q[1-4])\\.md$");
+    /** CAP-93：OKR 草稿产物（okr-suggest-<period>.md → 解析 upsert worklog_okr_drafts） */
+    static final Pattern OKR_SUGGEST_FILE = Pattern.compile("^okr-suggest-(\\d{4}(?:-Q[1-4])?)\\.md$");
 
     private final SessionRepository sessionRepo;
     private final SessionOutputService outputService;
@@ -68,12 +70,14 @@ public class WorklogOutputMirror {
     private final DomainEventPublisher eventPublisher;
     private final WorklogPlanService planService;
     private final WorklogQuarterlyReportRepository quarterlyRepo;
+    private final OkrSuggestService okrSuggestService;
 
     public WorklogOutputMirror(SessionRepository sessionRepo, SessionOutputService outputService,
                                ProjectService projectService,
                                DailyReportRepository dailyRepo, WeeklyReportRepository weeklyRepo,
                                DomainEventPublisher eventPublisher, WorklogPlanService planService,
-                               WorklogQuarterlyReportRepository quarterlyRepo) {
+                               WorklogQuarterlyReportRepository quarterlyRepo,
+                               OkrSuggestService okrSuggestService) {
         this.sessionRepo = sessionRepo;
         this.outputService = outputService;
         this.projectService = projectService;
@@ -82,6 +86,7 @@ public class WorklogOutputMirror {
         this.eventPublisher = eventPublisher;
         this.planService = planService;
         this.quarterlyRepo = quarterlyRepo;
+        this.okrSuggestService = okrSuggestService;
     }
 
     @EventListener
@@ -106,8 +111,10 @@ public class WorklogOutputMirror {
         boolean weekly = WorklogScenarios.WEEKLY.equals(s.getScenarioCode());
         boolean suggest = WorklogScenarios.PLAN_SUGGEST.equals(s.getScenarioCode());
         boolean quarterly = WorklogScenarios.QUARTERLY_REVIEW.equals(s.getScenarioCode());
-        if (daily || weekly || suggest || quarterly) {
-            String label = daily ? "日报" : weekly ? "周报" : suggest ? "建议计划" : "季度复盘";
+        boolean okrSuggest = WorklogScenarios.OKR_SUGGEST.equals(s.getScenarioCode());
+        if (daily || weekly || suggest || quarterly || okrSuggest) {
+            String label = daily ? "日报" : weekly ? "周报" : suggest ? "建议计划"
+                    : quarterly ? "季度复盘" : "OKR 生成";
             if (!Boolean.TRUE.equals(event.success())) {
                 notifyFailed(label, owner, label + "生成会话执行失败，请到会话详情查看事件流（session " + s.getId() + "）");
                 return;
@@ -119,6 +126,8 @@ public class WorklogOutputMirror {
                 mirrorWeekly(s, owner, outputs);
             } else if (quarterly) {
                 mirrorQuarterly(s, owner, outputs);
+            } else if (okrSuggest) {
+                mirrorOkrSuggest(s, owner, outputs);
             } else {
                 mirrorSuggest(s, owner, outputs);
             }
@@ -317,6 +326,35 @@ public class WorklogOutputMirror {
         eventPublisher.publish(SimpleDomainEvent.of("worklog.plan.suggested", null, null, owner,
                 owner + " 的 " + weekStart + " 周建议计划已生成（新增 " + inserted + " 条建议项）",
                 "WORKLOG_PLAN", weekStart.toString(), null));
+    }
+
+    /**
+     * OKR 草稿落库（CAP-93 生成场景 exit 路径）：解析 okr-suggest 产物为 O/KR 树 upsert
+     * 草稿（user+period 唯一，重生成覆盖回 DRAFT——人工采纳才建目标）；缺回传/解析为空
+     * 发降级通知（同建议计划口径）。
+     */
+    void mirrorOkrSuggest(SessionEntity s, String owner, List<SessionOutputEntity> outputs) {
+        SessionOutputEntity out = find(outputs, OKR_SUGGEST_FILE);
+        if (out == null) {
+            notifyFailed("OKR 生成", owner,
+                    "OKR 生成会话已完成，但未回传产物（.devmind/output 缺 okr-suggest-<period>.md），请到会话详情排查");
+            return;
+        }
+        Matcher m = OKR_SUGGEST_FILE.matcher(out.getFileName());
+        m.matches();
+        String period = m.group(1);
+        var items = OkrSuggestParser.parse(out.getContent());
+        if (items.isEmpty()) {
+            notifyFailed("OKR 生成", owner,
+                    "OKR 产物未解析出有效目标行（格式应为 `- [O] 标题` 加缩进 `- [KR] 标题`），请到会话详情查看产物原文");
+            return;
+        }
+        int objectives = okrSuggestService.saveDraft(owner, period, out.getContent(), items, s.getId());
+        log.info("OKR 草稿已落库: user={} period={} objectives={} session={}",
+                owner, period, objectives, s.getId());
+        eventPublisher.publish(SimpleDomainEvent.of("worklog.okr.suggested", null, null, owner,
+                owner + " 的 " + period + " OKR 草稿已生成（" + objectives + " 个目标），请到目标页确认采纳",
+                "WORKLOG_GOAL", period, null));
     }
 
     /**

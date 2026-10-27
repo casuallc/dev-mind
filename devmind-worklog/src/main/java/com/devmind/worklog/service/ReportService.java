@@ -462,6 +462,121 @@ public class ReportService {
                 .toList();
     }
 
+    // ---------------- CAP-93：AI 生成 OKR（草稿确认落库） ----------------
+
+    /**
+     * 生成 OKR 草稿（FR-01）：场景 worklog-okr-suggest，素材 = 既有目标进展 + 上一周期周报
+     * 摘要 + 上一周期条目类型聚合（YEAR 目标另加各季复盘摘要），产物解析进
+     * worklog_okr_drafts（{@link WorklogOutputMirror}），人工采纳才建目标。
+     * 幂等同 suggestPlan：目标周期已有目标且非 force 跳过（reused=true）；无任何素材 400。
+     */
+    public ReportLaunch suggestOkr(String username, String scope, String period, boolean force, String hint) {
+        if (!WorklogGoalEntity.SCOPE_YEAR.equals(scope) && !WorklogGoalEntity.SCOPE_QUARTER.equals(scope)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "scope 仅支持 YEAR/QUARTER");
+        }
+        String p = WorklogQuarters.validatedPeriod(scope, period);
+        boolean exists = !goalRepo
+                .findByUserIdAndPeriodInOrderBySortOrderAscIdAsc(username, List.of(p)).isEmpty();
+        if (exists && !force) {
+            log.info("OKR 生成幂等跳过（目标周期已有目标）: user={} period={}", username, p);
+            return new ReportLaunch(null, true);
+        }
+        boolean quarter = WorklogGoalEntity.SCOPE_QUARTER.equals(scope);
+        String materials = quarter
+                ? okrQuarterMaterials(username, p) : okrYearMaterials(username, p);
+        if (materials == null) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    p + " 无生成素材（参考周期无目标、无周报且无已完成条目），OKR 草稿未生成");
+        }
+        String linkableYearOs = quarter
+                ? ReportPrompts.formatYearOsForLinking(
+                        goalService.tree(Integer.parseInt(WorklogQuarters.yearOf(p))).yearObjectives())
+                : null;
+        return launch(username, WorklogScenarios.OKR_SUGGEST,
+                ReportPrompts.okrSuggest(scope, p, materials, linkableYearOs, hint));
+    }
+
+    /**
+     * QUARTER 素材：上一季度 OKR 进展（紧凑树）+ 上一季度周报摘要 + 上一季度条目类型聚合。
+     * 全空返回 null（调用方 400）。
+     */
+    private String okrQuarterMaterials(String username, String period) {
+        LocalDate prevEnd = WorklogQuarters.rangeOf(period)[0].minusDays(1);
+        String prevQuarter = WorklogQuarters.quarterOf(prevEnd);
+        GoalTreeView refTree = goalService.tree(Integer.parseInt(WorklogQuarters.yearOf(prevQuarter)));
+        GoalTreeView.QuarterSection prevSection = refTree.quarters().stream()
+                .filter(s -> prevQuarter.equals(s.period())).findFirst().orElse(null);
+        String prevOkr = ReportPrompts.formatGoalTreeCompact(
+                prevSection == null ? List.of() : prevSection.objectives());
+        LocalDate[] prevRange = WorklogQuarters.rangeOf(prevQuarter);
+        String weeklies = ReportPrompts.formatWeeklySummaries(
+                weeklyRepo.findByUserIdAndWeekStartBetweenOrderByWeekStartAsc(
+                        username, prevRange[0], prevRange[1]));
+        String entries = entryTypeAggBlock(username, prevRange[0], prevRange[1]);
+        boolean noOkr = prevSection == null || prevSection.objectives().isEmpty();
+        if (noOkr && weeklies.startsWith("（无") && entries.startsWith("（无")) {
+            return null;
+        }
+        return "## 素材：上一季度（" + prevQuarter + "）OKR 进展（未完成的可承接滚转）\n\n" + prevOkr
+                + "\n\n## 素材：上一季度周报摘要\n\n" + weeklies
+                + "\n\n## 素材：上一季度工作聚合（已完成条目按类型）\n\n" + entries;
+    }
+
+    /**
+     * YEAR 素材：上一年度目标进展 + 上一年各季度 OKR 进展 + 上一年各季度复盘摘要 +
+     * 上一年条目类型聚合。全空返回 null（调用方 400）。
+     */
+    private String okrYearMaterials(String username, String period) {
+        int refYear = Integer.parseInt(period) - 1;
+        GoalTreeView refTree = goalService.tree(refYear);
+        StringBuilder quarters = new StringBuilder();
+        boolean anyQuarter = false;
+        for (GoalTreeView.QuarterSection s : refTree.quarters()) {
+            if (s.objectives().isEmpty()) {
+                continue;
+            }
+            anyQuarter = true;
+            quarters.append("### ").append(s.period()).append('\n')
+                    .append(ReportPrompts.formatGoalTreeCompact(s.objectives())).append("\n\n");
+        }
+        StringBuilder reviews = new StringBuilder();
+        for (int q = 1; q <= 4; q++) {
+            quarterlyRepo.findByUserIdAndQuarter(username, refYear + "-Q" + q)
+                    .filter(r -> r.getContentMd() != null && !r.getContentMd().isBlank())
+                    .ifPresent(r -> reviews.append("### ").append(r.getQuarter()).append('\n')
+                            .append(preview(r.getContentMd(), 800)).append("\n\n"));
+        }
+        String entries = entryTypeAggBlock(username,
+                LocalDate.of(refYear, 1, 1), LocalDate.of(refYear, 12, 31));
+        if (refTree.yearObjectives().isEmpty() && !anyQuarter
+                && reviews.length() == 0 && entries.startsWith("（无")) {
+            return null;
+        }
+        return "## 素材：" + refYear + " 年度目标进展\n\n"
+                + ReportPrompts.formatGoalTreeCompact(refTree.yearObjectives())
+                + "\n\n## 素材：" + refYear + " 各季度 OKR 进展\n\n"
+                + (anyQuarter ? quarters.toString().strip() : "（无季度目标）")
+                + "\n\n## 素材：" + refYear + " 各季度复盘摘要\n\n"
+                + (reviews.length() == 0 ? "（无复盘数据）" : reviews.toString().strip())
+                + "\n\n## 素材：" + refYear + " 全年工作聚合（已完成条目按类型）\n\n" + entries;
+    }
+
+    /** 条目按类型聚合素材（OKR 生成：范围内 DONE 条目全量按类型聚，含标题抽样）。 */
+    private String entryTypeAggBlock(String username, LocalDate from, LocalDate to) {
+        Map<String, List<WorklogEntryEntity>> byType = new LinkedHashMap<>();
+        for (WorklogEntryEntity e : entryRepo.findRange(username, from, to)) {
+            if (WorklogEntryEntity.STATUS_DONE.equals(e.getStatus())) {
+                byType.computeIfAbsent(e.getEntryType(), k -> new ArrayList<>()).add(e);
+            }
+        }
+        return ReportPrompts.formatEntryTypeAgg(byType.entrySet().stream()
+                .map(en -> new ReportPrompts.UnalignedGroup(en.getKey(), en.getValue().size(),
+                        en.getValue().stream().mapToInt(
+                                e -> e.getMinutes() == null ? 0 : e.getMinutes()).sum(),
+                        en.getValue().stream().map(WorklogEntryEntity::getTitle).limit(5).toList()))
+                .toList());
+    }
+
     // ---------------- CAP-91 M2：季度复盘 ----------------
 
     public QuarterlyReportView getQuarterly(String username, String period) {

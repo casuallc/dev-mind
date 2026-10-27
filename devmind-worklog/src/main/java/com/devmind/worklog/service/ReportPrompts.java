@@ -4,6 +4,7 @@ import com.devmind.common.requirement.WipRequirementProvider;
 import com.devmind.worklog.dto.GitCommitView;
 import com.devmind.worklog.dto.GoalTreeView;
 import com.devmind.worklog.dto.GoalView;
+import com.devmind.worklog.model.WeeklyReportEntity;
 import com.devmind.worklog.model.WorklogEntryEntity;
 import com.devmind.worklog.model.WorklogGoalEntity;
 import com.devmind.worklog.model.WorklogPlanItemEntity;
@@ -487,6 +488,96 @@ final class ReportPrompts {
             h = h.substring(0, HINT_CHARS);
         }
         return prompt + "\n\n### 本人补充说明（高优先级事实，必须体现；与素材冲突时以此为准）\n\n" + h;
+    }
+
+    // ---------------- CAP-93：AI 生成 OKR ----------------
+
+    /**
+     * CAP-93 FR-01「AI 生成 OKR」prompt：目标周期 + 素材块（调用方组装，缺席块降级为空
+     * 提示）+ 产物两级列表契约（与 {@code OkrSuggestParser}、
+     * {@code WorklogAssetSeeder#OKR_SUGGEST_SKELETON} 三方同步，改动必须三处同步）。
+     * linkableYearOs 仅 QUARTER scope 传（年度 O 清单带 id，O 行可标注父O#id）；YEAR 传 null。
+     */
+    static String okrSuggest(String scope, String period, String materialsMd,
+                             String linkableYearOs, String hint) {
+        String label = WorklogGoalEntity.SCOPE_YEAR.equals(scope) ? "年度目标" : "季度 OKR";
+        StringBuilder sb = new StringBuilder("请为我生成 ")
+                .append(period).append(" 的").append(label).append("草稿。\n\n")
+                .append(materialsMd).append("\n\n");
+        if (linkableYearOs != null) {
+            sb.append("## 素材：").append(WorklogQuarters.yearOf(period))
+                    .append(" 年度目标清单（季度 O 若有明确归属，请在 O 行尾标注 `（父O#id）`；无归属不标）\n\n")
+                    .append(linkableYearOs).append("\n\n");
+        }
+        sb.append("## 输出契约（严格遵守，平台按行解析）\n\n")
+                .append("- 2~4 个 O，每个 O 下 2~4 条 KR，两级列表：\n")
+                .append("  `- [O] 目标标题（权重 40%）`\n")
+                .append("  `  - [KR] 关键结果标题（权重 30%）`（KR 行必须缩进，归属其上方最近的 O）\n")
+                .append("- 权重段可省略（0~100 整数）；O 要有方向性，KR 要可衡量（带数字/交付物口径）\n")
+                .append("- 建议必须能从上方素材追溯（承接未完成目标、延续近期工作主线），不要编造与素材无关的空话\n")
+                .append("- 除两级列表外不写任何其他内容（不要标题、不要解释、不要代码块）");
+        return appendHint(sb.toString(), hint);
+    }
+
+    /** 年度 O 清单（季度 O 挂年度父的标注素材）：`- O#<id> 标题`；空清单返回 null（省略该块）。 */
+    static String formatYearOsForLinking(List<GoalTreeView.GoalNode> yearObjectives) {
+        if (yearObjectives == null || yearObjectives.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (GoalTreeView.GoalNode n : yearObjectives) {
+            sb.append("- O#").append(n.goal().id()).append(' ').append(n.goal().title()).append('\n');
+        }
+        return sb.toString().strip();
+    }
+
+    /** 目标树紧凑渲染（OKR 生成素材：O/KR + 状态/进度，不含计划项明细——明细见 formatOkrTree）。 */
+    static String formatGoalTreeCompact(List<GoalTreeView.GoalNode> objectives) {
+        if (objectives == null || objectives.isEmpty()) {
+            return "（无目标）";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (GoalTreeView.GoalNode node : objectives) {
+            GoalView o = node.goal();
+            sb.append("- O：").append(o.title())
+                    .append("（状态=").append(GOAL_STATUS_LABELS.getOrDefault(o.status(), o.status()))
+                    .append(" · 进度 ").append(o.progress() == null ? 0 : o.progress()).append("%）\n");
+            for (GoalView kr : node.krs()) {
+                sb.append("  - KR：").append(kr.title())
+                        .append("（状态=").append(GOAL_STATUS_LABELS.getOrDefault(kr.status(), kr.status()))
+                        .append(" · 进度 ").append(kr.progress() == null ? 0 : kr.progress()).append('%');
+                if (kr.suggestedProgress() != null) {
+                    sb.append(" · 派生建议 ").append(kr.suggestedProgress()).append('%');
+                }
+                sb.append("）\n");
+            }
+        }
+        return sb.toString().strip();
+    }
+
+    /** 周报摘要素材（OKR 生成）：`- <weekStart> 周：<summary 一行截断>`。 */
+    static String formatWeeklySummaries(List<WeeklyReportEntity> weeklies) {
+        if (weeklies == null || weeklies.isEmpty()) {
+            return "（无周报数据）";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (WeeklyReportEntity w : weeklies) {
+            String oneLine = oneLine(w.getSummaryMd(), 160);
+            if (oneLine.isEmpty()) {
+                continue;
+            }
+            sb.append("- ").append(w.getWeekStart()).append(" 周：").append(oneLine).append('\n');
+        }
+        String out = sb.toString().strip();
+        return out.isEmpty() ? "（无周报数据）" : out;
+    }
+
+    /** 条目按类型聚合素材（OKR 生成：范围内 DONE 条目全量按类型聚，含标题抽样）。 */
+    static String formatEntryTypeAgg(List<UnalignedGroup> groups) {
+        if (groups == null || groups.isEmpty()) {
+            return "（无已完成条目）";
+        }
+        return formatUnaligned(groups);
     }
 
     private static String oneLine(String raw, int maxChars) {
