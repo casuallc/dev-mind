@@ -96,7 +96,9 @@ export default function OkrGenerateModal({ open, defaultScope, viewedYear, viewe
       confirmLoading={running}
       okButtonProps={{ disabled: !period }}
       onOk={onOk}
-      onCancel={() => !running && onCancel()}
+      // 取消不设 running 守卫：生成已在后台进行，关弹窗只关 UI，轮询继续，
+      // 完成后照常 onReady 打开草稿抽屉（否则生成期间 5 分钟内弹窗锁死无法关闭）
+      onCancel={onCancel}
     >
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <div>
