@@ -469,8 +469,11 @@ public class ReportService {
      * 摘要 + 上一周期条目类型聚合（YEAR 目标另加各季复盘摘要），产物解析进
      * worklog_okr_drafts（{@link WorklogOutputMirror}），人工采纳才建目标。
      * 幂等同 suggestPlan：目标周期已有目标且非 force 跳过（reused=true）；无任何素材 400。
+     * FR-07 textOnly=true（纯文本模式）：不聚合任何平台素材，hint 必填且为唯一
+     * 生成依据（不再作为「补充说明」二次注入 prompt）。
      */
-    public ReportLaunch suggestOkr(String username, String scope, String period, boolean force, String hint) {
+    public ReportLaunch suggestOkr(String username, String scope, String period, boolean force,
+                                   String hint, boolean textOnly) {
         if (!WorklogGoalEntity.SCOPE_YEAR.equals(scope) && !WorklogGoalEntity.SCOPE_QUARTER.equals(scope)) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "scope 仅支持 YEAR/QUARTER");
         }
@@ -482,18 +485,30 @@ public class ReportService {
             return new ReportLaunch(null, true);
         }
         boolean quarter = WorklogGoalEntity.SCOPE_QUARTER.equals(scope);
-        String materials = quarter
-                ? okrQuarterMaterials(username, p) : okrYearMaterials(username, p);
-        if (materials == null) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST,
-                    p + " 无生成素材（参考周期无目标、无周报且无已完成条目），OKR 草稿未生成");
+        String materials;
+        String promptHint = hint;
+        if (textOnly) {
+            String text = hint == null ? "" : hint.strip();
+            if (text.isEmpty()) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        "纯文本模式下依据文本必填（未提供生成依据，OKR 草稿未生成）");
+            }
+            materials = "## 素材：本人提供的说明文本（本次生成的唯一依据）\n\n" + text;
+            promptHint = null;   // 文本已在素材块内，避免 appendHint 二次注入
+        } else {
+            materials = quarter
+                    ? okrQuarterMaterials(username, p) : okrYearMaterials(username, p);
+            if (materials == null) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST,
+                        p + " 无生成素材（参考周期无目标、无周报且无已完成条目），OKR 草稿未生成");
+            }
         }
         String linkableYearOs = quarter
                 ? ReportPrompts.formatYearOsForLinking(
                         goalService.tree(Integer.parseInt(WorklogQuarters.yearOf(p))).yearObjectives())
                 : null;
         return launch(username, WorklogScenarios.OKR_SUGGEST,
-                ReportPrompts.okrSuggest(scope, p, materials, linkableYearOs, hint));
+                ReportPrompts.okrSuggest(scope, p, materials, linkableYearOs, promptHint, textOnly));
     }
 
     /**

@@ -68,7 +68,7 @@ public class WorklogGoalController {
     @PostMapping("/suggest")
     public ReportLaunch suggestOkr(@Valid @RequestBody OkrSuggestRequest req) {
         return reportService.suggestOkr(identity.currentActor(), req.scope(), req.period(),
-                Boolean.TRUE.equals(req.force()), req.hint());
+                Boolean.TRUE.equals(req.force()), req.hint(), Boolean.TRUE.equals(req.textOnly()));
     }
 
     /** CAP-93 FR-04 最新草稿（无 → exists=false，同报告口径）。 */

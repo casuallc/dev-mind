@@ -437,6 +437,48 @@ class ReportServiceTest {
         assertThrows(DevMindException.class, () -> service.reviewPreview("alice", "2026"));
     }
 
+    @Test
+    void okr纯文本模式空依据400() {
+        WorklogGoalRepository goalRepo = mock(WorklogGoalRepository.class);
+        ReportService service = new ReportService(null, null, null, null, null, null, null,
+                null, null, null, null, goalRepo, null);
+        DevMindException ex = assertThrows(DevMindException.class,
+                () -> service.suggestOkr("alice", "QUARTER", "2027-Q1", false, "  ", true));
+        assertTrue(ex.getMessage().contains("依据文本必填"), ex.getMessage());
+        assertThrows(DevMindException.class,
+                () -> service.suggestOkr("alice", "QUARTER", "2027-Q1", false, null, true));
+    }
+
+    @Test
+    void okr纯文本模式起会话prompt以用户文本为唯一依据() {
+        WorklogGoalRepository goalRepo = mock(WorklogGoalRepository.class);
+        WorklogGoalService goalService = mock(WorklogGoalService.class);
+        when(goalService.tree(2027)).thenReturn(new GoalTreeView(List.of(), List.of()));
+        WorklogWorkspaceService workspaceService = mock(WorklogWorkspaceService.class);
+        when(workspaceService.ensureFor("alice"))
+                .thenReturn(new com.devmind.worklog.dto.WorkspaceView(true, "p-wl", null, null));
+        SessionManagerService sessionManager = mock(SessionManagerService.class);
+        ArgumentCaptor<CreateSessionRequest> reqCap = ArgumentCaptor.forClass(CreateSessionRequest.class);
+        SessionView created = mock(SessionView.class);
+        when(created.id()).thenReturn("s-txt");
+        when(sessionManager.create(reqCap.capture())).thenReturn(created);
+
+        // entryRepo/weeklyRepo/quarterlyRepo 全部传 null：textOnly 若误查平台素材会当场 NPE
+        ReportService service = new ReportService(null, null, null, workspaceService, sessionManager,
+                null, null, null, null, null, null, goalRepo, goalService);
+        var launch = service.suggestOkr("alice", "QUARTER", "2027-Q1", false,
+                "下季度主打私有化部署，交付三家头部客户标杆", true);
+        assertEquals("s-txt", launch.sessionId());
+
+        CreateSessionRequest req = reqCap.getValue();
+        assertEquals(WorklogScenarios.OKR_SUGGEST, req.scenarioCode());
+        String prompt = req.taskSpec();
+        assertTrue(prompt.contains("本次生成的唯一依据"), "素材块唯一依据标注缺失: " + prompt);
+        assertTrue(prompt.contains("下季度主打私有化部署"), "用户文本未进 prompt: " + prompt);
+        assertTrue(prompt.contains("唯一依据提炼目标"), "textOnly 契约句缺失: " + prompt);
+        assertFalse(prompt.contains("本人补充说明（高优先级事实"), "用户文本不应二次注入: " + prompt);
+    }
+
     private static WorklogEntryEntity doneEntry(String title, String type, int minutes) {
         WorklogEntryEntity e = new WorklogEntryEntity();
         e.setTitle(title);

@@ -128,9 +128,11 @@ export const carryGoals = (toPeriod: string, ids: number[], krParentMap?: Record
   api.post<GoalCarryResult>('/worklog/goals/carry', { toPeriod, ids, krParentMap })
 
 // ---- CAP-93 AI 生成 OKR（草稿确认：生成 → 草稿抽屉人工编辑 → 采纳批量落库） ----
-/** FR-01 触发生成（幂等：目标周期已有目标且非 force → reused=true 不起会话） */
-export const suggestOkr = (scope: 'YEAR' | 'QUARTER', period: string, force = false, hint?: string) =>
-  api.post<GenerateAck>('/worklog/goals/suggest', { scope, period, force, hint })
+/** FR-01 触发生成（幂等：目标周期已有目标且非 force → reused=true 不起会话）；
+ *  FR-07 textOnly=true 为纯文本模式：仅以 hint 文本为依据生成（hint 必填） */
+export const suggestOkr = (scope: 'YEAR' | 'QUARTER', period: string, force = false,
+                           hint?: string, textOnly = false) =>
+  api.post<GenerateAck>('/worklog/goals/suggest', { scope, period, force, hint, textOnly })
 /** FR-04 最新草稿（无 → exists=false，同报告口径） */
 export const getOkrDraft = (period: string) =>
   api.get<OkrDraftView>(`/worklog/goals/suggest/draft?period=${period}`)

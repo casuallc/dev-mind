@@ -497,9 +497,10 @@ final class ReportPrompts {
      * 提示）+ 产物两级列表契约（与 {@code OkrSuggestParser}、
      * {@code WorklogAssetSeeder#OKR_SUGGEST_SKELETON} 三方同步，改动必须三处同步）。
      * linkableYearOs 仅 QUARTER scope 传（年度 O 清单带 id，O 行可标注父O#id）；YEAR 传 null。
+     * FR-07 textOnly=true 时素材块即用户文本本身，追溯契约改为「以说明文本为唯一依据」。
      */
     static String okrSuggest(String scope, String period, String materialsMd,
-                             String linkableYearOs, String hint) {
+                             String linkableYearOs, String hint, boolean textOnly) {
         String label = WorklogGoalEntity.SCOPE_YEAR.equals(scope) ? "年度目标" : "季度 OKR";
         StringBuilder sb = new StringBuilder("请为我生成 ")
                 .append(period).append(" 的").append(label).append("草稿。\n\n")
@@ -514,7 +515,9 @@ final class ReportPrompts {
                 .append("  `- [O] 目标标题（权重 40%）`\n")
                 .append("  `  - [KR] 关键结果标题（权重 30%）`（KR 行必须缩进，归属其上方最近的 O）\n")
                 .append("- 权重段可省略（0~100 整数）；O 要有方向性，KR 要可衡量（带数字/交付物口径）\n")
-                .append("- 建议必须能从上方素材追溯（承接未完成目标、延续近期工作主线），不要编造与素材无关的空话\n")
+                .append(textOnly
+                        ? "- 以上方说明文本为唯一依据提炼目标（可合理细化展开，但不得捏造文中未提及的既有进展数据）\n"
+                        : "- 建议必须能从上方素材追溯（承接未完成目标、延续近期工作主线），不要编造与素材无关的空话\n")
                 .append("- 除两级列表外不写任何其他内容（不要标题、不要解释、不要代码块）");
         return appendHint(sb.toString(), hint);
     }

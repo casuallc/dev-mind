@@ -27,15 +27,19 @@ const nextPeriod = (scope: 'YEAR' | 'QUARTER', year: number, quarter?: number) =
       : `${year}-Q${(quarter ?? 4) + 1}`
 
 /**
- * CAP-93 FR-05「AI 生成 OKR」弹窗：选周期（年度/某一季度）+ 补充说明 + 强制重生成，
- * 受理后轮询草稿（updatedAt 变化判定，同季度复盘模式），生成完成交父组件开草稿抽屉。
+ * CAP-93 FR-05「AI 生成 OKR」弹窗：选周期（年度/某一季度）+ 生成依据（FR-07：平台素材 /
+ * 纯文本二选一）+ 补充说明/依据文本 + 强制重生成，受理后轮询草稿（updatedAt 变化判定，
+ * 同季度复盘模式），生成完成交父组件开草稿抽屉。
  */
 export default function OkrGenerateModal({ open, defaultScope, viewedYear, viewedQuarter, onReady, onCancel }: Props) {
   const [scope, setScope] = useState<'YEAR' | 'QUARTER'>(defaultScope)
   const [period, setPeriod] = useState('')
   const [hint, setHint] = useState('')
   const [force, setForce] = useState(false)
+  /** FR-07 生成依据：MATERIALS=平台素材（目标/周报聚合）+ 补充说明；TEXT=仅以用户文本为依据 */
+  const [basis, setBasis] = useState<'MATERIALS' | 'TEXT'>('MATERIALS')
   const [running, setRunning] = useState(false)
+  const textOnly = basis === 'TEXT'
 
   // 每次打开重置：默认生成「当前查看周期的下一周期」（如正在看 Q4 → 默认下一年 Q1）
   useEffect(() => {
@@ -44,6 +48,7 @@ export default function OkrGenerateModal({ open, defaultScope, viewedYear, viewe
     setPeriod(nextPeriod(defaultScope, viewedYear, viewedQuarter))
     setHint('')
     setForce(false)
+    setBasis('MATERIALS')
   }, [open, defaultScope, viewedYear, viewedQuarter])
 
   const yearOptions = [viewedYear - 1, viewedYear, viewedYear + 1, viewedYear + 2].map((y) => ({
@@ -61,10 +66,11 @@ export default function OkrGenerateModal({ open, defaultScope, viewedYear, viewe
 
   const onOk = async () => {
     if (!period) return
+    if (textOnly && !hint.trim()) return
     setRunning(true)
     const prev = await getOkrDraft(period).catch(() => undefined)
     try {
-      const ack = await suggestOkr(scope, period, force, hint.trim() || undefined)
+      const ack = await suggestOkr(scope, period, force, hint.trim() || undefined, textOnly)
       if (ack.reused) {
         message.info(`${period} 已有目标，未重复生成（如需重生成请勾选「强制重新生成」）`)
         return
@@ -94,7 +100,7 @@ export default function OkrGenerateModal({ open, defaultScope, viewedYear, viewe
       open={open}
       okText={running ? '生成中…' : '开始生成'}
       confirmLoading={running}
-      okButtonProps={{ disabled: !period }}
+      okButtonProps={{ disabled: !period || (textOnly && !hint.trim()) }}
       onOk={onOk}
       // 取消不设 running 守卫：生成已在后台进行，关弹窗只关 UI，轮询继续，
       // 完成后照常 onReady 打开草稿抽屉（否则生成期间 5 分钟内弹窗锁死无法关闭）
@@ -124,12 +130,30 @@ export default function OkrGenerateModal({ open, defaultScope, viewedYear, viewe
         </div>
         <div>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            补充说明（可选，作为高优先级事实进入分析；如「明年重点是平台化」）
+            生成依据
+          </Typography.Text>
+          <div style={{ marginTop: 4 }}>
+            <Segmented
+              value={basis}
+              onChange={(v) => setBasis(v as 'MATERIALS' | 'TEXT')}
+              options={[
+                { label: '参考近期工作（目标/周报素材）', value: 'MATERIALS' },
+                { label: '仅依据下方文本', value: 'TEXT' },
+              ]}
+            />
+          </div>
+        </div>
+        <div>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {textOnly
+              ? 'OKR 依据文本（必填，AI 仅依据此文本生成，不参考平台素材）'
+              : '补充说明（可选，作为高优先级事实进入分析；如「明年重点是平台化」）'}
           </Typography.Text>
           <Input.TextArea
             style={{ marginTop: 4 }}
-            rows={3}
-            maxLength={500}
+            rows={textOnly ? 8 : 3}
+            maxLength={4000}
+            showCount
             value={hint}
             onChange={(e) => setHint(e.target.value)}
           />
@@ -138,7 +162,9 @@ export default function OkrGenerateModal({ open, defaultScope, viewedYear, viewe
           强制重新生成（目标周期已有目标时仍会生成草稿；采纳草稿不影响已有目标）
         </Checkbox>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          生成依据：{scope === 'QUARTER' ? '上一季度的 OKR 进展、周报摘要与条目类型聚合' : '上一年度目标树、各季进展与季度复盘摘要'}。
+          {textOnly
+            ? '生成依据：仅上方文本（适合粘贴会议纪要、规划稿等外部素材），不读取平台内的目标与周报。'
+            : `生成依据：${scope === 'QUARTER' ? '上一季度的 OKR 进展、周报摘要与条目类型聚合' : '上一年度目标树、各季进展与季度复盘摘要'}。`}
           结果进草稿抽屉，人工确认采纳后才落库。
         </Typography.Text>
       </Space>
