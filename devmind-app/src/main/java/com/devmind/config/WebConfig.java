@@ -3,8 +3,14 @@ package com.devmind.config;
 import java.io.IOException;
 
 import com.devmind.common.security.CorsProperties;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.Resource;
+import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
@@ -41,6 +47,30 @@ public class WebConfig implements WebMvcConfigurer {
         // SPA 回退解析器管不到 "/"，故由视图控制器显式 forward 到 index.html
         // （URL 保持 "/"，React Router 接管后再跳 /overview）
         registry.addViewController("/").setViewName("forward:/index.html");
+    }
+
+    /**
+     * index.html / SPA 路由强制回源校验（Cache-Control: no-cache）。
+     * 资源处理器只发 Last-Modified、无 Cache-Control → 浏览器按 10% 启发式缓存
+     * index.html，部署新前端后仍引用旧 hash 包——「改了线上不生效」（2026-10-27
+     * OKR 弹窗修复后用户端仍复现旧行为，根因即此）。no-cache 不禁缓存只强制校验，
+     * 未变仍 304 省流量；带内容 hash 的 /assets/ 与 /api/、/ws/ 前缀不动。
+     */
+    @Bean
+    OncePerRequestFilter spaIndexNoCacheFilter() {
+        return new OncePerRequestFilter() {
+            @Override
+            protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res,
+                                            FilterChain chain) throws ServletException, IOException {
+                String p = req.getRequestURI();
+                if ("GET".equals(req.getMethod())
+                        && !p.startsWith("/api/") && !p.startsWith("/ws/")
+                        && !p.startsWith("/assets/") && !p.startsWith("/h2-console")) {
+                    res.setHeader("Cache-Control", "no-cache");
+                }
+                chain.doFilter(req, res);
+            }
+        };
     }
 
     @Override
