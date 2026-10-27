@@ -26,6 +26,7 @@ import type { RequirementOverview, WorkItem, WorkItemInput, WorkItemStatus, Work
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import MarkdownEditor from '../../../shared/components/MarkdownEditor'
+import { noWrapColumns } from '../../../shared/components/FitTable'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 const WI_STATUS_FLOW: WorkItemStatus[] = ['TODO', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED']
@@ -263,7 +264,7 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
           }
         />
       ) : (
-        <Table rowKey="id" size="small" columns={columns} dataSource={workItems} pagination={LIST_PAGINATION} />
+        <Table rowKey="id" size="small" columns={noWrapColumns(columns)} dataSource={workItems} pagination={LIST_PAGINATION} />
       )}
 
       <Drawer

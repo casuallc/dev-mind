@@ -5,6 +5,24 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Table } from 'antd'
 import type { TableProps } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
+
+type AnyColumns = ColumnsType<never>
+
+/**
+ * 全站默认：单元格不换行、超长省略（ellipsis）。
+ * 某列确需多行展示时显式 `ellipsis: false` 关闭；列分组递归处理。
+ * 配合 FitTable 恒有的 scroll.y，antd 走 tableLayout: fixed，省略截断才真正生效。
+ */
+export function noWrapColumns<T extends object>(columns: TableProps<T>['columns']): TableProps<T>['columns'] {
+  return columns?.map((c) => ({
+    ...c,
+    ellipsis: c.ellipsis ?? true,
+    ...('children' in c && c.children
+      ? { children: noWrapColumns(c.children as AnyColumns) }
+      : {}),
+  }))
+}
 
 interface FitTableProps<T> extends TableProps<T> {
   /** 表体最小高度（px）：容器被压得很矮时兜底，避免表头/分页重叠，默认 120 */
@@ -14,6 +32,7 @@ interface FitTableProps<T> extends TableProps<T> {
 export default function FitTable<T extends object>({
   minBodyHeight = 120,
   scroll,
+  columns,
   ...tableProps
 }: FitTableProps<T>) {
   const boxRef = useRef<HTMLDivElement>(null)
@@ -49,7 +68,7 @@ export default function FitTable<T extends object>({
   return (
     // overflow:hidden 保证表格撑不破容器（容器高度由 flex 决定，不受内容影响，测高不会自激）
     <div ref={boxRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-      <Table<T> {...tableProps} scroll={{ ...scroll, y: bodyHeight }} />
+      <Table<T> {...tableProps} columns={noWrapColumns(columns)} scroll={{ ...scroll, y: bodyHeight }} />
     </div>
   )
 }

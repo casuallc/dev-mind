@@ -2,6 +2,7 @@
 // 与 AI 流程无关的记录管理保留：「确认」为纯标记（人工挑一份作准绳），废弃/恢复/删除是本地记录整理。
 import { useCallback, useEffect, useState } from 'react'
 import { Button, Popconfirm, Space, Table, Tag, Typography } from 'antd'
+import { noWrapColumns } from '../../../../shared/components/FitTable'
 import { ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { listDesigns } from '../../api'
@@ -93,7 +94,7 @@ export default function DesignsTab({ projectId, requirement, onChanged }: {
         </Typography.Text>
         <Button size="small" icon={<ReloadOutlined />} onClick={load} loading={loading} />
       </Space>
-      <Table rowKey="id" size="small" columns={columns} dataSource={designs} loading={loading} pagination={LIST_PAGINATION} />
+      <Table rowKey="id" size="small" columns={noWrapColumns(columns)} dataSource={designs} loading={loading} pagination={LIST_PAGINATION} />
       <DocPreviewDrawer preview={preview} onClose={closePreview} />
     </Space>
   )
