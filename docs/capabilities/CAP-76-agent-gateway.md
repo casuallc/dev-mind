@@ -23,6 +23,11 @@
 >    common 的 `JobTerminalProbe` 轮询探针（幂等、进程重启后状态可查、copilot 不感知各模块
 >    事件类型），不订阅 DomainEvent（一次性、重启丢等待态、反向依赖）。进度视图仍不新增表：
 >    步骤快照在 `copilot_actions.args_json`，实时进度在 `copilot_tool_calls`（+`step_seq`）。
+> 8. **个人域工具一律无项目上下文、更新走读-合并-写**（M9）——工作日志域（条目/周计划/
+>    目标/报告）数据归属当前登录人，`requiresProject=false`、不落 projectId；更新类工具先
+>    取现状再合并参数（未传字段保持不变，因此不能清空字段），避免模型为改一个字段复述全部
+>    内容。报告 AI 生成（generate）是异步 runner 会话链路，不进同步工具；报告不存在时的
+>    手工写入由工具内自动「建空白 + 写入」一步完成（幂等），不拆两次确认。
 
 ## 1. 目的
 
@@ -859,7 +864,7 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 `ToolAccessPolicy` 是否接入；`devmind.copilot.enabled=false` 时 bot 不调用 AgentGateway，
 裸文本回落 CAP-75 问答；已在执行的轮次自然结束，不做强制中断。
 
-## 6. 工具目录（M1/M2/M6）
+## 6. 工具目录（M1/M2/M6/M9）
 
 命名约定：`<domain>_<action>`；参数中的 id 一律字符串；所有列表工具必须支持 `limit`（默认 20，上限 50）。
 
@@ -907,6 +912,11 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 | `list_notifications` | `level?`（P0/P1/P2）, `unreadOnly?`, `limit` | 通知中心列表（分级/标题/摘要/已读/关联对象）与未读总数（M6） |
 | `count_unread_notifications` | — | 当前未读通知数（M6） |
 | `list_worklog_entries` | `from?`, `to?`（yyyy-MM-dd，缺省最近 7 天）, `keyword?`, `limit` | 本人工作日志条目、合计工时（M6） |
+| `list_worklog_plans` | `weekStart?`（周内任意日，缺省本周） | 本人周计划项 + 上周未完成提示（M9；日计划已并入条目，见 CAP-90） |
+| `list_worklog_goals` | `year?`（缺省今年） | 本人 OKR 目标树（年度 O + Q1~Q4 季区，KR 附进度与计划完成度/工时派生）（M9） |
+| `get_daily_report` | `date?`（缺省今天） | 本人日报全文；无日报返回提示不算失败（M9） |
+| `get_weekly_report` | `weekStart?`（周内任意日，缺省本周） | 本人周报（本周总结/下周计划两节）；无周报返回提示不算失败（M9） |
+| `get_quarterly_report` | `period?`（形如 2026-Q1，缺省当前季） | 本人季度复盘全文；无复盘返回提示不算失败（M9） |
 | `list_jira_transitions` | `projectId?`, `requirementId` 或 `seq` | 需求关联 Jira issue 当前可用的工作流转换（M6） |
 | `list_jira_sync_configs` | `projectId` | 项目 Jira 同步配置、上次同步时间/计数/错误（M6） |
 
@@ -928,6 +938,12 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 | `trigger_build` | `projectId`, `branch?` | WRITE（工具超时 90s，覆盖同步 fetch） |
 | `mark_notifications_read` | `id` 或 `all=true` | WRITE（批量已读需 `all` 显式声明；M6） |
 | `create_worklog_entry` | `workDate?`, `title`, `hours`, `content?`, `entryType?`, `requirementId?`, `jiraIssueKey?` | WRITE（本人日志；工时 0~24 小时；M6） |
+| `create_worklog_plan_item` | `title`, `weekStart?`, `planType?`, `hours?`, `content?`, `requirementId?`, `jiraIssueKey?`, `krId?` | WRITE（本人周计划项，初始 TODO；M9） |
+| `update_worklog_plan_item` | `id`, `title?/content?/planType?/hours?/requirementId?/jiraIssueKey?/krId?/status?` | WRITE（读-合并-写，未传字段不变；CARRIED 只读；M9） |
+| `create_worklog_goal` | `scope`(YEAR/QUARTER), `period`, `kind`(OBJECTIVE/KEY_RESULT), `title`, `parentId?`, `content?`, `weight?` | WRITE（KR 必挂同周期 O；M9） |
+| `update_worklog_goal` | `id`, `title?/content?/weight?/progress?/status?/parentId?` | WRITE（读-合并-写；scope/period/kind 身份属性不可改；M9） |
+| `update_daily_report` | `date?`, `contentMd` | WRITE（整篇覆盖；无日报自动建空白再写；M9） |
+| `update_weekly_report` | `weekStart?`, `summaryMd?`, `nextPlanMd?`（至少一节） | WRITE（未传的节保留现状；无周报自动建空白再写；M9） |
 | `transit_jira_issue` | `projectId?`, `requirementId` 或 `seq`, `transitionId` | WRITE（只回写远端与托管字段，本地需求 status 不动；M6） |
 | `log_jira_worklog` | `projectId?`, `requirementId` 或 `seq`, `hours`, `comment?` | WRITE（写远端 Jira worklog，个人账号优先；M6） |
 | `run_jira_sync` | `projectId`, `configId` | WRITE（同步执行，工具超时 180s；全局同一时间只允许一个同步；M6） |
@@ -956,6 +972,7 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 | `devmind-usage` | 无 project 维度；工具参数去掉 projectId，非 ADMIN 强制本人 | `get_usage_summary` |
 | `devmind-project` | `RequirementService.resolveRef(projectId, ref, seq)` / `WorkItemService.resolveRef(projectId, ref)`：接受内部 id、`REQ-<seq>`/`WI-<seq>`、纯数字 | 所有需求/工作项工具的统一寻址（M6） |
 | `devmind-integration` | 工具直接复用 `JiraIssueActionService.listTransitions/transit/logWork` 与 `JiraSyncService.list/syncNow`（同步执行是既有 Service，不下探 Repository） | Jira 工具（M6） |
+| `devmind-worklog` | `WorklogPlanService.get(id)` / `WorklogGoalService.get(id)`（本人口径单条查询，他人 404）；`WorklogWeeks.mondayOf` public 化 | M9 更新工具读-合并-写、周报周一归一 |
 
 > 工具实现的统一结构：① 参数校验（`ToolArgs`）→ ② 反查对象所属 projectId →
 > ③ `ToolAccessPolicy` → ④ 合成 `SecurityContext` 调 Service → ⑤ 映射 `ToolResult`。
@@ -1145,6 +1162,16 @@ devmind:
 - [x] `copilot_tool_calls.step_seq` + RUNNING/WAITING 中间态；plans 管理 API
 - [x] 前端「计划」视图（进度表 + 步骤展开 + EXECUTING 轮询）
 - [x] 验收：异步分发/await 成败与超时/进度页数据口径（单测 + E2E 场景 12）
+
+### M9 工作日志域工具补齐（计划/目标/报告）
+
+- [x] 只读：`list_worklog_plans`（周计划 + 上周未完成提示）/ `list_worklog_goals`（OKR 树 +
+      KR 派生统计）/ `get_daily_report` / `get_weekly_report` / `get_quarterly_report`
+      （无报告返回提示，不算失败）
+- [x] 写：`create/update_worklog_plan_item`、`create/update_worklog_goal`（读-合并-写）、
+      `update_daily_report` / `update_weekly_report`（无报告自动建空白再写入，幂等）
+- [x] 刻意不做：报告 generate（异步 runner 会话链路，不进同步工具）、delete_*（§6 刻意不做口径）
+- [x] 契约快照（`docs/capabilities/tools/cap76-tools.yaml`）随工具更新
 
 ## 11. 验收标准
 
