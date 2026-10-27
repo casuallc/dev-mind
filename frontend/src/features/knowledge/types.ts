@@ -1,6 +1,4 @@
-// CAP-04 知识库类型定义，与后端 devmind-knowledge 模块对齐（CAP-44 库容器化重构）
-
-export type EntryScope = 'global' | 'project'
+// CAP-04 知识库类型定义，与后端 devmind-knowledge 模块对齐（CAP-44 库容器化重构；CAP-94 去项目化：库为独立一等资产，无 scope/project 归属）
 
 export type BaseStatus = 'active' | 'archived'
 
@@ -8,9 +6,6 @@ export interface KnowledgeBase {
   id: number
   name: string
   description: string | null
-  scope: EntryScope
-  projectId: string | null
-  projectName: string | null
   /** CAP-48 库级向量端点覆盖；null = 跟随平台默认端点 */
   modelEndpointId: number | null
   /** 实际生效的端点名（含回落平台默认的结果）；null = 无可用端点（索引停用、检索降级） */
@@ -40,8 +35,6 @@ export interface ReindexResult {
 export interface KnowledgeBaseInput {
   name: string
   description?: string
-  scope?: EntryScope
-  projectId?: string
   /** 库级端点覆盖；传 0 或 null = 清除覆盖、跟随平台默认 */
   modelEndpointId?: number | null
   status?: BaseStatus
@@ -72,7 +65,6 @@ export interface KnowledgeSearchV2Request {
   query: string
   kbIds?: number[]
   docTypes?: DocType[]
-  projectId?: string
   tags?: string[]
   topK?: number
 }
@@ -447,8 +439,6 @@ export interface EvalReport {
 export interface KnowledgeEntry {
   id: number
   kbId: number | null
-  scope: EntryScope
-  projectId: string | null
   name: string
   path: string
   contentMd: string
@@ -508,9 +498,8 @@ export interface KnowledgePage<T> {
 }
 
 export interface KnowledgeEntryInput {
+  /** CAP-94 起必填：知识库为唯一归属 */
   kbId?: number
-  scope?: EntryScope
-  projectId?: string
   name: string
   contentMd: string
   tags?: string[]
@@ -550,12 +539,13 @@ export interface KnowledgeProposal {
   id: number
   title: string
   contentMd: string
-  targetScope: EntryScope
-  targetProjectId: string | null
   sourceSessionId: string | null
+  /** CAP-94：来源项目仅作溯源标注 */
+  sourceProject: string | null
   status: ProposalStatus
-  adoptedTo: string | null
-  adoptedProjectId: string | null
+  /** CAP-94：采纳时显式选择的目标库 */
+  adoptedKbId: number | null
+  adoptedKbName: string | null
   createdAt: string
   adoptedAt: string | null
   /** CAP-55 FR-04 AI 分诊建议（null = 从未分诊，不渲染徽标区块） */
@@ -586,7 +576,7 @@ export interface TriageView {
 }
 
 export interface TriageChoice {
-  /** 机器值 global|project|discard（与采纳 API 的 target 同域） */
+  /** 机器值 global|project|discard（CAP-55 边车输出域；CAP-94 起仅作展示，采纳一律显式选库） */
   value: string
   label: string
   confidence: number | null
@@ -619,9 +609,9 @@ export interface TriageScore {
 export interface KnowledgeProposalInput {
   title: string
   contentMd: string
-  targetScope: EntryScope
-  targetProjectId?: string
   sourceSessionId?: string
+  /** 来源项目（纯溯源标注，可空） */
+  sourceProject?: string
 }
 
 // ---------------- CAP-45 飞书导入 ----------------

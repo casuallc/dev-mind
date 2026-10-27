@@ -1,4 +1,4 @@
-// CAP-04 知识库 API（CAP-44 增库容器管理与检索）
+// CAP-04 知识库 API（CAP-44 增库容器管理与检索；CAP-94 去项目化：条目/检索/采纳一律显式 kbId）
 import { api } from '../../shared/api/client'
 import type {
   AdminIndexStats,
@@ -149,19 +149,15 @@ export const resyncEntry = (entryId: number) =>
 
 // ---------------- 条目 ----------------
 
-export const listEntries = (params: { scope?: string; projectId?: string; status?: string } = {}) => {
+export const listEntries = (params: { status?: string } = {}) => {
   const q = new URLSearchParams()
-  if (params.scope) q.set('scope', params.scope)
-  if (params.projectId) q.set('projectId', params.projectId)
   if (params.status) q.set('status', params.status)
   const s = q.toString()
   return api.get<KnowledgeEntry[]>(`/knowledge/entries${s ? '?' + s : ''}`)
 }
 
-export const searchEntries = (q: string, projectId?: string) => {
-  const p = projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''
-  return api.get<KnowledgeEntry[]>(`/knowledge/entries/search?q=${encodeURIComponent(q)}${p}`)
-}
+export const searchEntries = (q: string) =>
+  api.get<KnowledgeEntry[]>(`/knowledge/entries/search?q=${encodeURIComponent(q)}`)
 
 export const getEntry = (id: number) => api.get<KnowledgeEntry>(`/knowledge/entries/${id}`)
 export const createEntry = (input: KnowledgeEntryInput) =>
@@ -194,11 +190,9 @@ export const listProposals = (status?: string) => {
 
 export const createProposal = (input: KnowledgeProposalInput) =>
   api.post<KnowledgeProposal>('/knowledge/proposals', input)
-export const adoptProposal = (id: number, target: 'project' | 'global', projectId?: string) => {
-  const q = new URLSearchParams({ target })
-  if (projectId) q.set('projectId', projectId)
-  return api.post<KnowledgeProposal>(`/knowledge/proposals/${id}/adopt?${q.toString()}`)
-}
+/** CAP-94：采纳 = 显式选目标库（必选；库不存在 404 / 已归档 409） */
+export const adoptProposal = (id: number, targetKbId: number) =>
+  api.post<KnowledgeProposal>(`/knowledge/proposals/${id}/adopt?targetKbId=${targetKbId}`)
 export const rejectProposal = (id: number) => api.post<KnowledgeProposal>(`/knowledge/proposals/${id}/reject`)
 export const deleteProposal = (id: number) => api.del(`/knowledge/proposals/${id}`)
 

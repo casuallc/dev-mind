@@ -1,7 +1,7 @@
 // CAP-86 知识库新建/编辑弹窗：工作台左栏「新建」与库设置页共用。
+// CAP-94 起库为独立一等资产：不再有范围/所属项目维度。
 import { useEffect } from 'react'
 import { Form, Input, message, Modal, Select } from 'antd'
-import type { Project } from '../../projects/types'
 import { createBase, updateBase } from '../api'
 import type { KnowledgeBase, KnowledgeBaseInput } from '../types'
 import { showError } from '../../../shared/utils/showError'
@@ -9,19 +9,16 @@ import { showError } from '../../../shared/utils/showError'
 export default function KnowledgeBaseFormModal({
   open,
   base,
-  projects,
   onClose,
   onSaved,
 }: {
   open: boolean
   /** 传入 = 编辑；不传 = 新建 */
   base?: KnowledgeBase | null
-  projects: Project[]
   onClose: () => void
   onSaved: (base: KnowledgeBase) => void
 }) {
   const [form] = Form.useForm<KnowledgeBaseInput>()
-  const scope = Form.useWatch('scope', form)
 
   useEffect(() => {
     if (!open) return
@@ -30,12 +27,10 @@ export default function KnowledgeBaseFormModal({
       form.setFieldsValue({
         name: base.name,
         description: base.description ?? undefined,
-        scope: base.scope,
-        projectId: base.projectId ?? undefined,
         status: base.status,
       })
     } else {
-      form.setFieldsValue({ scope: 'global', status: 'active' })
+      form.setFieldsValue({ status: 'active' })
     }
   }, [open, base, form])
 
@@ -68,8 +63,6 @@ export default function KnowledgeBaseFormModal({
     })
   }
 
-  const projectOptions = projects.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))
-
   return (
     <Modal
       title={base ? '编辑知识库' : '新建知识库'}
@@ -86,26 +79,6 @@ export default function KnowledgeBaseFormModal({
         <Form.Item name="description" label="描述">
           <Input placeholder="这个库装什么？（可选）" />
         </Form.Item>
-        <Form.Item name="scope" label="范围" rules={[{ required: true }]}>
-          <Select
-            disabled={!!base}
-            options={[
-              { value: 'global', label: '全局（所有会话可用）' },
-              { value: 'project', label: '项目（仅指定项目）' },
-            ]}
-          />
-        </Form.Item>
-        {scope === 'project' && (
-          <Form.Item name="projectId" label="项目" rules={[{ required: true, message: '请选择项目' }]}>
-            <Select
-              showSearch
-              optionFilterProp="label"
-              placeholder="选择项目"
-              disabled={!!base}
-              options={projectOptions}
-            />
-          </Form.Item>
-        )}
         {base && (
           <Form.Item name="status" label="状态">
             <Select

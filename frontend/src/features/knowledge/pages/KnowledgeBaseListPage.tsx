@@ -6,8 +6,6 @@ import { Button, Card, Segmented, Space, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
 import { listBases } from '../api'
-import { listProjects } from '../../projects/api'
-import type { Project } from '../../projects/types'
 import type { KnowledgeBase } from '../types'
 import KnowledgeBaseFormModal from '../components/KnowledgeBaseFormModal'
 import KnowledgeBaseSettingsDrawer from '../components/KnowledgeBaseSettingsDrawer'
@@ -61,8 +59,7 @@ export default function KnowledgeBaseListPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [bases, setBases] = useState<KnowledgeBase[]>([])
   const [loading, setLoading] = useState(false)
-  const [projects, setProjects] = useState<Project[]>([])
-  const [scopeFilter, setScopeFilter] = useState<'active' | 'archived'>('active')
+  const [statusFilter, setStatusFilter] = useState<'active' | 'archived'>('active')
 
   const [baseModalOpen, setBaseModalOpen] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -81,9 +78,6 @@ export default function KnowledgeBaseListPage() {
 
   useEffect(() => {
     loadBases()
-    listProjects()
-      .then(setProjects)
-      .catch(() => undefined)
   }, [loadBases])
 
   // 深链 ?entryId=&chunkId=（聊天引用）：打开/关闭详情抽屉
@@ -103,9 +97,9 @@ export default function KnowledgeBaseListPage() {
   const shown = useMemo(
     () =>
       bases.filter((b) =>
-        archivedCount === 0 ? true : scopeFilter === 'archived' ? b.status === 'archived' : b.status !== 'archived',
+        archivedCount === 0 ? true : statusFilter === 'archived' ? b.status === 'archived' : b.status !== 'archived',
       ),
-    [bases, scopeFilter, archivedCount],
+    [bases, statusFilter, archivedCount],
   )
   const totals = useMemo(
     () => ({
@@ -158,16 +152,6 @@ export default function KnowledgeBaseListPage() {
         </Space>
       ),
     },
-    {
-      title: '范围',
-      key: 'scope',
-      width: 180,
-      render: (_, r) => (
-        <Tag color={r.scope === 'global' ? 'blue' : undefined}>
-          {r.scope === 'global' ? '全局' : (r.projectName ?? r.projectId ?? '项目')}
-        </Tag>
-      ),
-    },
     { title: '文档数', dataIndex: 'entryCount', width: 90 },
     {
       title: '索引健康',
@@ -213,8 +197,8 @@ export default function KnowledgeBaseListPage() {
           <span>知识库</span>
           {archivedCount > 0 && (
             <Segmented
-              value={scopeFilter}
-              onChange={(v) => setScopeFilter(v as 'active' | 'archived')}
+              value={statusFilter}
+              onChange={(v) => setStatusFilter(v as 'active' | 'archived')}
               options={[
                 { value: 'active', label: `启用中（${bases.length - archivedCount}）` },
                 { value: 'archived', label: `已归档（${archivedCount}）` },
@@ -252,7 +236,6 @@ export default function KnowledgeBaseListPage() {
 
       <KnowledgeBaseFormModal
         open={baseModalOpen}
-        projects={projects}
         onClose={() => setBaseModalOpen(false)}
         onSaved={() => loadBases()}
       />

@@ -122,7 +122,8 @@ export default function ScenariosView({
       .then((bases) =>
         setKnowledgeOptions(bases.map((b) => ({
           value: b.id,
-          label: `${b.name}（${b.scope === 'global' ? '全局' : (b.projectName ?? b.projectId ?? '项目')}${b.status === 'archived' ? ' · 已归档' : ''}）`,
+          // CAP-94：库已无 scope/project 归属，标签只标归档态
+          label: `${b.name}${b.status === 'archived' ? '（已归档）' : ''}`,
         }))),
       )
       .catch(() => undefined)

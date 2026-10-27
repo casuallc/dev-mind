@@ -143,18 +143,6 @@ export default function KnowledgeBaseSettingsDrawer({
               <Form.Item name="description" label="描述">
                 <Input.TextArea rows={2} placeholder="库的用途、覆盖范围（可选）" />
               </Form.Item>
-              <Form.Item label="范围" extra="范围与所属项目创建后不可修改">
-                <Space>
-                  <Tag color={current.scope === 'global' ? 'blue' : undefined}>
-                    {current.scope === 'global' ? '全局' : '项目'}
-                  </Tag>
-                  {current.scope === 'project' && (
-                    <Typography.Text type="secondary">
-                      {current.projectName ?? current.projectId}
-                    </Typography.Text>
-                  )}
-                </Space>
-              </Form.Item>
               <Form.Item
                 name="modelEndpointId"
                 label="向量端点"

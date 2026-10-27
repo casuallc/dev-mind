@@ -520,11 +520,6 @@ export default function KnowledgeBaseDetailPage() {
 
   const headerTags = base && (
     <Space size={4} wrap>
-      <Tag color={base.scope === 'global' ? 'blue' : undefined}>
-        {base.scope === 'global'
-          ? '范围：全局'
-          : `范围：${base.projectName ?? base.projectId ?? '项目'}`}
-      </Tag>
       {base.status === 'archived' && <Tag>已归档</Tag>}
     </Space>
   )

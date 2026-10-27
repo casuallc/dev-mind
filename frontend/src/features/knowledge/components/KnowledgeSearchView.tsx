@@ -1,4 +1,5 @@
 // CAP-86 v3 跨库检索：知识运营·召回验证视图。BM25 + 向量 RRF，文档级聚合 + 高亮片段 + 证据分块。
+// CAP-94：检索维度只有知识库/类型/标签，不再有项目过滤。
 import { useCallback, useEffect, useState } from 'react'
 import { Alert, Button, Empty, Input, Select, Space, Tag, Typography, message } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
@@ -11,7 +12,6 @@ import type {
   KnowledgeSearchV2Result,
 } from '../types'
 import { DOC_TYPE_LABEL, DOC_TYPE_OPTIONS } from '../types'
-import type { Project } from '../../projects/types'
 import FitTable from '../../../shared/components/FitTable'
 import HighlightedSnippet from './HighlightedSnippet'
 import { fmtTime } from '../../../shared/utils/format'
@@ -26,12 +26,10 @@ const DEGRADED_TEXT: Record<string, string> = {
 
 export default function KnowledgeSearchView({
   bases,
-  projects,
   presetKbId,
   onOpenEntry,
 }: {
   bases: KnowledgeBase[]
-  projects: Project[]
   /** FR-04：?kbId= 预选单库（替代原库内「检索测试」页签） */
   presetKbId?: number
   onOpenEntry: (entryId: number, hit?: KnowledgeSearchV2Hit, focusChunkId?: number) => void
@@ -44,7 +42,6 @@ export default function KnowledgeSearchView({
     if (presetKbId) setKbIds([presetKbId])
   }, [presetKbId])
   const [docTypes, setDocTypes] = useState<DocType[]>([])
-  const [projectId, setProjectId] = useState<string | undefined>(undefined)
   const [tags, setTags] = useState<string[]>([])
   const [result, setResult] = useState<KnowledgeSearchV2Result | null>(null)
   const [searching, setSearching] = useState(false)
@@ -62,7 +59,6 @@ export default function KnowledgeSearchView({
           query: q,
           kbIds: kbIds.length > 0 ? kbIds : undefined,
           docTypes: docTypes.length > 0 ? docTypes : undefined,
-          projectId,
           tags: tags.length > 0 ? tags : undefined,
           topK: 30,
         }),
@@ -72,12 +68,11 @@ export default function KnowledgeSearchView({
     } finally {
       setSearching(false)
     }
-  }, [query, kbIds, docTypes, projectId, tags])
+  }, [query, kbIds, docTypes, tags])
 
   const resetFilters = () => {
     setKbIds([])
     setDocTypes([])
-    setProjectId(undefined)
     setTags([])
   }
 
@@ -197,16 +192,6 @@ export default function KnowledgeSearchView({
             maxTagCount="responsive"
           />
           <Select
-            allowClear
-            placeholder="所属项目"
-            style={{ minWidth: 180 }}
-            value={projectId}
-            onChange={setProjectId}
-            showSearch
-            optionFilterProp="label"
-            options={projects.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))}
-          />
-          <Select
             mode="tags"
             placeholder="标签过滤（回车添加）"
             style={{ minWidth: 200 }}
@@ -216,7 +201,7 @@ export default function KnowledgeSearchView({
           />
           <Button
             onClick={resetFilters}
-            disabled={kbIds.length + docTypes.length + tags.length === 0 && !projectId}
+            disabled={kbIds.length + docTypes.length + tags.length === 0}
           >
             重置过滤
           </Button>

@@ -24,7 +24,6 @@ import {
   reviewEntry,
   runEntryEnrich,
 } from '../api'
-import { listProjects } from '../../projects/api'
 import type {
   EnrichEntry,
   KnowledgeBase,
@@ -35,7 +34,6 @@ import type {
 import KnowledgeSearchView from '../components/KnowledgeSearchView'
 import KnowledgeEnrichView from '../components/KnowledgeEnrichView'
 import KnowledgeEntryDrawer from '../components/KnowledgeEntryDrawer'
-import type { Project } from '../../projects/types'
 import FitTable from '../../../shared/components/FitTable'
 import { fmtTime } from '../../../shared/utils/format'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
@@ -89,7 +87,6 @@ export default function KnowledgeOpsPage() {
   }
 
   const [bases, setBases] = useState<KnowledgeBase[]>([])
-  const [projects, setProjects] = useState<Project[]>([])
   const [lifecycle, setLifecycle] = useState<LifecycleReport | null>(null)
   const [enrichEntries, setEnrichEntries] = useState<EnrichEntry[]>([])
   const [feedback, setFeedback] = useState<NegativeFeedbackReport | null>(null)
@@ -105,9 +102,6 @@ export default function KnowledgeOpsPage() {
     listBases()
       .then(setBases)
       .catch((e) => showError(e, '加载知识库失败'))
-    listProjects()
-      .then(setProjects)
-      .catch(() => undefined)
   }, [])
 
   const kbName = useMemo(() => {
@@ -390,7 +384,6 @@ export default function KnowledgeOpsPage() {
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <KnowledgeSearchView
             bases={bases}
-            projects={projects}
             presetKbId={kbId}
             onOpenEntry={(entryId, hit, focusChunkId) => setEntryDetail({ entryId, hit, focusChunkId })}
           />

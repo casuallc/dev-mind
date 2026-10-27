@@ -1,5 +1,6 @@
 // 经验提案视图（项目管理聚合页的「经验提案」tab）：会话「沉淀经验」/手动提交 → inbox → 采纳/拒绝/删除。
 // 提案 inbox 与注入预览无关；CAP-92 起知识库统一走检索，不再有全量注入预览。
+// CAP-94：提案只记录内容与溯源（sourceProject），采纳时由审核人显式选择目标知识库。
 // 外壳 Card / extra 按钮在 AdminProjectsHub（refreshTick/createTick 驱动）。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -17,10 +18,15 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { listProjects } from '../../projects/api'
-import type { Project } from '../../projects/types'
-import { adoptProposal, createProposal, deleteProposal, listProposals, rejectProposal } from '../api'
-import type { KnowledgeProposal, TriageView } from '../types'
+import {
+  adoptProposal,
+  createProposal,
+  deleteProposal,
+  listBases,
+  listProposals,
+  rejectProposal,
+} from '../api'
+import type { KnowledgeBase, KnowledgeProposal, TriageView } from '../types'
 import TriageEvidenceDrawer from '../components/TriageEvidenceDrawer'
 import { fmtTime } from '../../../shared/utils/format'
 import FitTable from '../../../shared/components/FitTable'
@@ -28,7 +34,6 @@ import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
-const scopeTag = (s: string) => (s === 'global' ? <Tag color="blue">global</Tag> : <Tag>project</Tag>)
 const statusTag = (s: string) =>
   s === 'active' ? <Tag color="green">active</Tag> : s === 'open' ? <Tag color="gold">open</Tag>
     : s === 'adopted' ? <Tag color="green">adopted</Tag> : s === 'rejected' ? <Tag>rejected</Tag>
@@ -66,13 +71,18 @@ export default function ProposalsView({
   refreshTick?: number
   createTick?: number
 }) {
-  const [projects, setProjects] = useState<Project[]>([])
+  const [bases, setBases] = useState<KnowledgeBase[]>([])
   const [proposals, setProposals] = useState<KnowledgeProposal[]>([])
   const [proposalsLoading, setProposalsLoading] = useState(false)
 
   // 提案管理抽屉：引用实时列表数据，状态变化自动反映
   const [manageId, setManageId] = useState<number | null>(null)
   const manageProposal = manageId != null ? proposals.find((p) => p.id === manageId) ?? null : null
+
+  // CAP-94：采纳弹窗——显式选择目标知识库
+  const [adoptId, setAdoptId] = useState<number | null>(null)
+  const [adoptKbId, setAdoptKbId] = useState<number | undefined>(undefined)
+  const adoptProposal0 = adoptId != null ? proposals.find((p) => p.id === adoptId) ?? null : null
 
   // CAP-57：分诊已与决策引擎解耦，徽标只读展示历史 triage 数据（不再发起新分诊）
   const [evidenceId, setEvidenceId] = useState<number | null>(null)
@@ -94,8 +104,8 @@ export default function ProposalsView({
   }, [])
 
   useEffect(() => {
-    listProjects()
-      .then(setProjects)
+    listBases()
+      .then(setBases)
       .catch(() => undefined)
     loadProposals()
   }, [loadProposals, refreshTick])
@@ -108,27 +118,26 @@ export default function ProposalsView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [createTick])
 
-  const onAdopt = (p: KnowledgeProposal, target: 'project' | 'global') => {
-    Modal.confirm({
-      centered: true,
-      title: `采纳「${p.title}」${target === 'global' ? '到全局' : '到项目'}`,
-      content:
-        target === 'global'
-          ? '将作为全局经验条目进入经验库，后续所有项目的检索问答都可能命中。'
-          : `将进入项目经验库（项目 ${p.targetProjectId ?? '待定'}）。`,
-      okText: '采纳',
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          await adoptProposal(p.id, target, p.targetProjectId ?? undefined)
-          message.success('已采纳为知识条目')
-          setManageId(null)
-          loadProposals()
-        } catch (err) {
-          showError(err, '采纳失败')
-        }
-      },
-    })
+  const openAdopt = (p: KnowledgeProposal) => {
+    setAdoptId(p.id)
+    setAdoptKbId(undefined)
+  }
+
+  const onAdoptConfirm = async () => {
+    if (!adoptProposal0) return
+    if (adoptKbId == null) {
+      message.warning('请选择目标知识库')
+      return
+    }
+    try {
+      await adoptProposal(adoptProposal0.id, adoptKbId)
+      message.success('已采纳为知识条目')
+      setAdoptId(null)
+      setManageId(null)
+      loadProposals()
+    } catch (err) {
+      showError(err, '采纳失败')
+    }
   }
 
   const onReject = (p: KnowledgeProposal) => {
@@ -179,8 +188,7 @@ export default function ProposalsView({
       await createProposal({
         title: v.title,
         contentMd: v.contentMd,
-        targetScope: v.targetScope ?? 'project',
-        targetProjectId: v.targetProjectId,
+        sourceProject: v.sourceProject,
       })
       message.success('提案已提交，等待审核')
       setProposalModalOpen(false)
@@ -193,7 +201,12 @@ export default function ProposalsView({
 
   const proposalColumns: ColumnsType<KnowledgeProposal> = [
     { title: '标题', dataIndex: 'title', ellipsis: true },
-    { title: '去向', dataIndex: 'targetScope', width: 90, render: scopeTag },
+    {
+      title: '来源项目',
+      dataIndex: 'sourceProject',
+      width: 130,
+      render: (v) => v ?? '-',
+    },
     { title: '来源会话', dataIndex: 'sourceSessionId', width: 130, render: (v) => v ?? '-' },
     {
       title: 'AI 建议',
@@ -226,7 +239,9 @@ export default function ProposalsView({
     },
   ]
 
-  const projectOptions = projects.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))
+  const activeBaseOptions = bases
+    .filter((b) => b.status === 'active')
+    .map((b) => ({ value: b.id, label: b.name }))
 
   return (
     <>
@@ -254,10 +269,16 @@ export default function ProposalsView({
         >
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Descriptions size="small" column={2}>
-              <Descriptions.Item label="去向">{scopeTag(manageProposal.targetScope)}</Descriptions.Item>
               <Descriptions.Item label="状态">{statusTag(manageProposal.status)}</Descriptions.Item>
+              <Descriptions.Item label="来源项目">{manageProposal.sourceProject ?? '-'}</Descriptions.Item>
               <Descriptions.Item label="来源会话">{manageProposal.sourceSessionId ?? '-'}</Descriptions.Item>
               <Descriptions.Item label="创建时间">{fmtTime(manageProposal.createdAt)}</Descriptions.Item>
+              {manageProposal.status === 'adopted' && (
+                <Descriptions.Item label="采纳到">
+                  {manageProposal.adoptedKbName ??
+                    (manageProposal.adoptedKbId != null ? `知识库 #${manageProposal.adoptedKbId}` : '-')}
+                </Descriptions.Item>
+              )}
             </Descriptions>
             <pre
               style={{
@@ -303,10 +324,9 @@ export default function ProposalsView({
 
             {manageProposal.status === 'open' ? (
               <Space>
-                <Button type="primary" onClick={() => onAdopt(manageProposal, 'project')}>
-                  采纳到项目
+                <Button type="primary" onClick={() => openAdopt(manageProposal)}>
+                  采纳到知识库…
                 </Button>
-                <Button onClick={() => onAdopt(manageProposal, 'global')}>晋升全局</Button>
                 <Button danger onClick={() => onReject(manageProposal)}>
                   拒绝
                 </Button>
@@ -337,27 +357,40 @@ export default function ProposalsView({
           <Form.Item name="title" label="标题" rules={[{ required: true, message: '请填写标题' }]}>
             <Input placeholder="如：Maven 多模块增量编译实践" />
           </Form.Item>
-          <Form.Item name="targetScope" label="去向" initialValue="project">
-            <Select
-              options={[
-                { value: 'project', label: '项目经验' },
-                { value: 'global', label: '全局经验' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item noStyle shouldUpdate>
-            {({ getFieldValue }) =>
-              getFieldValue('targetScope') === 'project' && (
-                <Form.Item name="targetProjectId" label="目标项目">
-                  <Select allowClear showSearch optionFilterProp="label" placeholder="选择项目" options={projectOptions} />
-                </Form.Item>
-              )
-            }
+          <Form.Item name="sourceProject" label="来源项目">
+            <Input placeholder="可选，仅作溯源标注" />
           </Form.Item>
           <Form.Item name="contentMd" label="内容" rules={[{ required: true, message: '请填写内容' }]}>
-            <Input.TextArea rows={6} placeholder="经验内容（Markdown），审核采纳后成为知识条目" />
+            <Input.TextArea rows={6} placeholder="经验内容（Markdown），审核采纳时选择目标知识库" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* CAP-94：采纳 = 显式选目标知识库（审核人决定去向，提案本身不带目标） */}
+      <Modal
+        title={adoptProposal0 ? `采纳「${adoptProposal0.title}」` : '采纳提案'}
+        open={adoptId != null}
+        onCancel={() => setAdoptId(null)}
+        onOk={onAdoptConfirm}
+        okText="采纳"
+        cancelText="取消"
+      >
+        <Form labelCol={{ span: 6 }} wrapperCol={{ span: 16 }}>
+          <Form.Item label="目标知识库" required>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="选择要写入的知识库"
+              value={adoptKbId}
+              onChange={setAdoptKbId}
+              options={activeBaseOptions}
+              notFoundContent="还没有启用中的知识库，请先到「知识库」创建"
+            />
+          </Form.Item>
+        </Form>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          采纳后提案内容将作为知识条目进入所选库，参与该库的检索与装配。
+        </Typography.Text>
       </Modal>
     </>
   )
