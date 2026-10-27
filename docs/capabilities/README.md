@@ -111,6 +111,7 @@
 | [CAP-91](CAP-91-worklog-goals-okr.md) | 工作目标与 OKR 对齐 | 组装层 | 已实现（M1+M2+M3，2026-10-26） | 年度目标 + 季度 OKR 一等数据，周计划挂 KR 对齐，季度复盘数据驱动投影 |
 | [CAP-92](CAP-92-knowledge-injection-retrieval.md) | 知识注入收敛为检索 | 管理/底座 | 已实现（M1+M2+M3，2026-10-26） | 下线 FULL 全量注入与注入预览；场景改绑知识库，装配时按任务检索命中片段 |
 | [CAP-93](CAP-93-worklog-okr-suggest.md) | 工作日志 OKR AI 生成 | 组装层 | 已实现 | 会话链路生成年度/季度 OKR 草稿（worklog_okr_drafts），人工勾选编辑后采纳批量建目标 |
+| [CAP-94](CAP-94-knowledge-project-decoupling.md) | 知识库去项目化 | 管理/底座 | 设计中 | 废除 scope/project 归属，库完全独立；检索/注入/工具/沉淀一律显式绑定 kbIds |
 
 ## 文档模板说明
 
