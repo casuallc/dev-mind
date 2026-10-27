@@ -22,7 +22,6 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -59,7 +58,7 @@ class KnowledgeRetrieverImplTest {
 
     @Test
     void mapsFusedChunksToSpiShape() {
-        when(searchService.fusedChunks("回滚", List.of(10L), null, null, null, 8))
+        when(searchService.fusedChunks("回滚", List.of(10L), null, null, 8))
                 .thenReturn(new KnowledgeSearchService.Fused(
                         List.of(hit(1, 10, "发布手册", "回滚步骤：先摘流量", 0.03)),
                         true, DegradedReason.NONE));
@@ -89,7 +88,7 @@ class KnowledgeRetrieverImplTest {
 
     @Test
     void bm25OnlySearchStillReturnsHitsWithoutEmbedding() {
-        when(searchService.fusedChunks(any(), anyList(), any(), any(), any(), eq(8)))
+        when(searchService.fusedChunks(any(), anyList(), any(), any(), eq(8)))
                 .thenReturn(new KnowledgeSearchService.Fused(
                         List.of(hit(1, 10, "发布手册", "回滚步骤", 0.016)),
                         false, DegradedReason.NO_EMBEDDING));
@@ -104,7 +103,7 @@ class KnowledgeRetrieverImplTest {
 
     @Test
     void dimensionMismatchIsExposedForRebuildGuidance() {
-        when(searchService.fusedChunks(any(), anyList(), any(), any(), any(), anyInt()))
+        when(searchService.fusedChunks(any(), anyList(), any(), any(), anyInt()))
                 .thenReturn(new KnowledgeSearchService.Fused(List.of(), true,
                         DegradedReason.DIMENSION_MISMATCH));
 
@@ -117,7 +116,7 @@ class KnowledgeRetrieverImplTest {
     @Test
     void filteredRetrievalPassesDocTypesAndTags() {
         when(searchService.fusedChunks(eq("回滚"), eq(List.of(10L)), eq(List.of("MAINT")),
-                isNull(), eq(List.of("部署", "运维")), eq(5)))
+                eq(List.of("部署", "运维")), eq(5)))
                 .thenReturn(new KnowledgeSearchService.Fused(
                         List.of(hit(1, 10, "发布手册", "回滚步骤", 0.03)), false, DegradedReason.NONE));
 
@@ -126,14 +125,14 @@ class KnowledgeRetrieverImplTest {
 
         assertEquals(1, result.chunks().size());
         verify(searchService).fusedChunks("回滚", List.of(10L), List.of("MAINT"),
-                null, List.of("部署", "运维"), 5);
+                List.of("部署", "运维"), 5);
     }
 
     @Test
     void emptyInputShortCircuits() {
         assertEquals(List.of(), retriever.retrieve(List.of(), "q", 8));
         assertEquals(List.of(), retriever.retrieve(List.of(10L), " ", 8));
-        verify(searchService, never()).fusedChunks(any(), anyList(), any(), any(), any(), anyInt());
+        verify(searchService, never()).fusedChunks(any(), anyList(), any(), any(), anyInt());
     }
 
     @Test

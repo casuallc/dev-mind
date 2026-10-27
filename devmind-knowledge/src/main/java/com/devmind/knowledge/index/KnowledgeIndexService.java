@@ -103,7 +103,7 @@ public class KnowledgeIndexService {
         try {
             List<KnowledgeChunkEntity> saved = writer.writeChunks(
                     entryId, pieces, vectors, resolution, degradedReason);
-            searchIndex.upsert(meta(entry, kb), toChunks(saved), vectors);
+            searchIndex.upsert(meta(entry), toChunks(saved), vectors);
             log.info("知识条目索引完成: entry={} chunks={} vectors={} endpoint={}",
                     entryId, saved.size(), vectors.isEmpty() ? 0 : vectors.size(),
                     vectors.isEmpty() ? "-" : resolution.endpointId());
@@ -207,14 +207,13 @@ public class KnowledgeIndexService {
                                   String schemaVersion, java.util.Set<Integer> vectorDimensions) {
     }
 
-    private KnowledgeSearchIndex.EntryMeta meta(KnowledgeEntryEntity entry, KnowledgeBaseEntity kb) {
-        String projectId = kb == null ? entry.getProjectId() : kb.getProjectId();
+    private KnowledgeSearchIndex.EntryMeta meta(KnowledgeEntryEntity entry) {
         String docType = entry.getDocType() == null || entry.getDocType().isBlank()
                 ? KnowledgeEntryEntity.DOC_TECH : entry.getDocType();
         String status = entry.getStatus() == null || entry.getStatus().isBlank() ? "active" : entry.getStatus();
         return new KnowledgeSearchIndex.EntryMeta(entry.getId(),
                 entry.getKbId() == null ? 0L : entry.getKbId(),
-                projectId, docType, status, splitTags(entry.getTags()), entry.getName(),
+                docType, status, splitTags(entry.getTags()), entry.getName(),
                 entry.getSourceUri(), entry.getValidFrom(), entry.getValidTo(),
                 entry.getUpdatedAt() == null ? Instant.now() : entry.getUpdatedAt());
     }

@@ -30,7 +30,6 @@ import com.devmind.knowledge.repo.KnowledgeEntryRepository;
 import com.devmind.knowledge.repo.KnowledgeImportFileRepository;
 import com.devmind.knowledge.repo.KnowledgeProposalRepository;
 import com.devmind.notification.NotificationPublisher;
-import com.devmind.project.ProjectService;
 import com.devmind.task.api.TaskOptions;
 import com.devmind.task.service.AsyncTaskService;
 import java.io.IOException;
@@ -61,9 +60,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 知识库核心（CAP-04 条目/提案 + CAP-44 库容器）。
- * 库为一等归属：条目的 scope/projectId 语义由所属库派生；消费方式统一为检索
- * （CAP-92 下线 FULL 全量注入，条目命中相关 query 才进上下文）。
+ * 知识库核心（CAP-04 条目/提案 + CAP-44 库容器）。CAP-94 起知识库去项目化：库是完全
+ * 独立的平台资产（无 scope/project 归属），条目归属只看 kbId；消费统一为显式绑库检索
+ * （CAP-92 下线 FULL 全量注入，CAP-94 删除一切按项目自动圈范围逻辑）。
  * 会话层不直接依赖本服务——CAP-33 起经 {@link KnowledgeContextProvider}（common ContextProvider SPI）
  * 被装配管线收集。
  */
@@ -77,7 +76,6 @@ public class KnowledgeBaseService {
     private final KnowledgeChunkRepository chunkRepo;
     private final KnowledgeProposalRepository proposalRepo;
     private final KnowledgeImportFileRepository importFileRepo;
-    private final ProjectService projectService;
     private final NotificationPublisher notificationPublisher;
     private final ApplicationEventPublisher eventPublisher;
     private final EmbeddingResolver resolver;
@@ -92,7 +90,6 @@ public class KnowledgeBaseService {
                                 KnowledgeChunkRepository chunkRepo,
                                 KnowledgeProposalRepository proposalRepo,
                                 KnowledgeImportFileRepository importFileRepo,
-                                ProjectService projectService,
                                 NotificationPublisher notificationPublisher,
                                 ApplicationEventPublisher eventPublisher,
                                 EmbeddingResolver resolver,
@@ -106,7 +103,6 @@ public class KnowledgeBaseService {
         this.chunkRepo = chunkRepo;
         this.proposalRepo = proposalRepo;
         this.importFileRepo = importFileRepo;
-        this.projectService = projectService;
         this.notificationPublisher = notificationPublisher;
         this.eventPublisher = eventPublisher;
         this.resolver = resolver;
@@ -172,15 +168,6 @@ public class KnowledgeBaseService {
         if (create && (req.name() == null || req.name().isBlank())) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "知识库名称必填");
         }
-        String scope = req.scope() == null || req.scope().isBlank()
-                ? KnowledgeBaseEntity.SCOPE_GLOBAL : req.scope();
-        if (!KnowledgeBaseEntity.SCOPE_GLOBAL.equals(scope) && !KnowledgeBaseEntity.SCOPE_PROJECT.equals(scope)) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "scope 必须是 global 或 project");
-        }
-        if (KnowledgeBaseEntity.SCOPE_PROJECT.equals(scope)
-                && (req.projectId() == null || req.projectId().isBlank()) && create) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "project 范围必须指定项目");
-        }
         if (req.modelEndpointId() != null && req.modelEndpointId() > 0) {
             requireEmbeddingEndpoint(req.modelEndpointId());
         }
@@ -210,15 +197,6 @@ public class KnowledgeBaseService {
         if (req.description() != null) {
             kb.setDescription(req.description());
         }
-        if (req.scope() != null && !req.scope().isBlank()) {
-            kb.setScope(req.scope());
-        }
-        if (req.projectId() != null) {
-            kb.setProjectId(req.projectId().isBlank() ? null : req.projectId());
-        }
-        if (KnowledgeBaseEntity.SCOPE_GLOBAL.equals(kb.getScope())) {
-            kb.setProjectId(null);
-        }
         // CAP-48 FR-04 库级端点覆盖：显式传 null 或缺省 = 平台默认端点
         if (req.modelEndpointId() != null) {
             kb.setModelEndpointId(req.modelEndpointId() > 0 ? req.modelEndpointId() : null);
@@ -229,15 +207,7 @@ public class KnowledgeBaseService {
     }
 
     private KnowledgeBaseView baseView(KnowledgeBaseEntity kb) {
-        String projectName = null;
-        if (kb.getProjectId() != null && !kb.getProjectId().isBlank()) {
-            try {
-                projectName = projectService.requireProject(kb.getProjectId()).name();
-            } catch (Exception e) {
-                log.debug("知识库项目名解析失败: {}", e.getMessage());
-            }
-        }
-        return EntryViews.base(kb, projectName, entryRepo.countByKbId(kb.getId()),
+        return EntryViews.base(kb, entryRepo.countByKbId(kb.getId()),
                 chunkRepo.countByKbId(kb.getId()), endpointNameOf(kb), indexStatsOf(kb));
     }
 
@@ -346,49 +316,14 @@ public class KnowledgeBaseService {
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "知识库不存在: " + id));
     }
 
-    /** 按 legacy scope/projectId 解析目标经验库；不存在则创建（兼容旧调用与提案采纳）。 */
-    private KnowledgeBaseEntity resolveExperienceKb(String scope, String projectId) {
-        String s = scope == null || scope.isBlank() ? KnowledgeBaseEntity.SCOPE_GLOBAL : scope;
-        List<KnowledgeBaseEntity> candidates = KnowledgeBaseEntity.SCOPE_PROJECT.equals(s)
-                ? kbRepo.findByScopeAndProjectIdAndStatus(s, projectId, KnowledgeBaseEntity.STATUS_ACTIVE)
-                : kbRepo.findByScopeAndStatus(s, KnowledgeBaseEntity.STATUS_ACTIVE);
-        if (!candidates.isEmpty()) {
-            return candidates.get(0);
-        }
-        KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
-        kb.setScope(s);
-        if (KnowledgeBaseEntity.SCOPE_PROJECT.equals(s)) {
-            kb.setProjectId(projectId);
-            kb.setName(projectKbName(projectId));
-        } else {
-            kb.setName(KnowledgeBaseMigration.GLOBAL_KB_NAME);
-        }
-        kb.setDescription("经验库（自动创建）");
-        Instant now = Instant.now();
-        kb.setCreatedAt(now);
-        kb.setUpdatedAt(now);
-        return kbRepo.save(kb);
-    }
-
-    private String projectKbName(String projectId) {
-        try {
-            return projectService.requireProject(projectId).name() + "经验库";
-        } catch (Exception e) {
-            return "项目经验库(" + projectId + ")";
-        }
-    }
-
     // ---------------- 条目（FR-02/FR-03，CAP-44 按库归属） ----------------
 
-    public List<EntryView> list(String scope, String projectId, String status) {
+    public List<EntryView> list(String status) {
         List<KnowledgeEntryEntity> list = (status != null && !status.isBlank())
                 ? entryRepo.findByStatusOrderByCreatedAtDesc(status)
                 : entryRepo.findAll();
         Map<Long, KnowledgeBaseEntity> kbMap = kbMap();
         return list.stream()
-                .filter(e -> scope == null || scope.isBlank() || scope.equals(derivedScope(e, kbMap)))
-                .filter(e -> projectId == null || projectId.isBlank()
-                        || projectId.equals(derivedProjectId(e, kbMap)))
                 .sorted((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()))
                 .map(e -> EntryViews.entry(e, kbMap.get(e.getKbId())))
                 .toList();
@@ -544,18 +479,12 @@ public class KnowledgeBaseService {
         return view;
     }
 
-    /** 解析目标库：kbId 优先；否则按 legacy scope/projectId 找/建经验库。 */
+    /** 解析目标库（CAP-94：kbId 必填，不再按 scope/projectId 兜底找/建经验库）。 */
     private KnowledgeBaseEntity resolveTargetKb(EntryRequest req) {
-        if (req.kbId() != null) {
-            return requireBase(req.kbId());
+        if (req.kbId() == null) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "必须指定所属知识库 kbId");
         }
-        String scope = req.scope() == null || req.scope().isBlank()
-                ? KnowledgeBaseEntity.SCOPE_GLOBAL : req.scope();
-        if (KnowledgeBaseEntity.SCOPE_PROJECT.equals(scope)
-                && (req.projectId() == null || req.projectId().isBlank())) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "project 范围必须指定项目");
-        }
-        return resolveExperienceKb(scope, req.projectId());
+        return requireBase(req.kbId());
     }
 
     private void applyEntry(KnowledgeEntryEntity e, EntryRequest req, KnowledgeBaseEntity kb) {
@@ -584,12 +513,9 @@ public class KnowledgeBaseService {
         }
         if (req.validFrom() != null) e.setValidFrom(req.validFrom());
         if (req.validTo() != null) e.setValidTo(req.validTo());
-        // 历史列双写（值派生自 KB，单一事实源仍是库；旧 SQL/回滚期代码可读）
-        e.setScope(kb.getScope());
-        e.setProjectId(kb.getProjectId());
         if (e.getPath() == null || e.getPath().isBlank()) {
             String name = e.getName() == null ? "entry" : e.getName().replaceAll("[\\\\/:*?\"<>|\\s]+", "-");
-            e.setPath(kb.getScope() + "/" + name + ".md");
+            e.setPath("kb-" + kb.getId() + "/" + name + ".md");
         }
     }
 
@@ -635,10 +561,6 @@ public class KnowledgeBaseService {
         if (req.name() == null || req.name().isBlank()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "条目名称必填");
         }
-        if (KnowledgeBaseEntity.SCOPE_PROJECT.equals(kb.getScope())
-                && (kb.getProjectId() == null || kb.getProjectId().isBlank())) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "project 范围知识库必须绑定项目");
-        }
     }
 
     private void publishContentChanged(KnowledgeEntryEntity e) {
@@ -657,12 +579,13 @@ public class KnowledgeBaseService {
         }
     }
 
-    /** 全文检索（FR-08/FR-14）：跨 global + 本项目库，统一走 Lucene 混合检索（不再 LIKE 全表）。 */
-    public List<EntryView> search(String q, String projectId) {
+    /** 全文检索（FR-08/FR-14）：范围 = 全部 active 库，统一走 Lucene 混合检索（不再 LIKE 全表）。 */
+    public List<EntryView> search(String q) {
         if (q == null || q.isBlank()) {
             return List.of();
         }
-        List<Long> kbIds = searchScopeKbIds(projectId);
+        List<Long> kbIds = kbRepo.findByStatusOrderByCreatedAtDesc(KnowledgeBaseEntity.STATUS_ACTIVE)
+                .stream().map(KnowledgeBaseEntity::getId).toList();
         if (kbIds.isEmpty()) {
             return List.of();
         }
@@ -685,30 +608,18 @@ public class KnowledgeBaseService {
         return out;
     }
 
-    /** 检索范围：全部 global 库 + 指定项目的 project 库。 */
-    private List<Long> searchScopeKbIds(String projectId) {
-        List<Long> kbIds = new ArrayList<>();
-        for (KnowledgeBaseEntity kb : kbRepo.findAll()) {
-            if (KnowledgeBaseEntity.SCOPE_GLOBAL.equals(kb.getScope())
-                    || (projectId != null && !projectId.isBlank() && projectId.equals(kb.getProjectId()))) {
-                kbIds.add(kb.getId());
-            }
-        }
-        return kbIds;
-    }
-
     // ---------------- 检索辅助（CAP-92 场景绑库检索） ----------------
 
-    /** 库 id → scope（装配清单展示用；不存在的 id 跳过）。 */
-    public Map<Long, String> baseScopes(List<Long> kbIds) {
-        Map<Long, String> scopes = new HashMap<>();
+    /** 库 id → 库名（装配清单/提案视图展示用；不存在的 id 跳过）。 */
+    public Map<Long, String> baseNames(List<Long> kbIds) {
+        Map<Long, String> names = new HashMap<>();
         if (kbIds == null || kbIds.isEmpty()) {
-            return scopes;
+            return names;
         }
         for (KnowledgeBaseEntity kb : kbRepo.findAllById(kbIds)) {
-            scopes.put(kb.getId(), kb.getScope());
+            names.put(kb.getId(), kb.getName());
         }
-        return scopes;
+        return names;
     }
 
     /** 对本次检索命中的条目计数（FR-07 清理依据；dryRun 不调用）。 */
@@ -731,7 +642,9 @@ public class KnowledgeBaseService {
         List<KnowledgeProposalEntity> list = (status == null || status.isBlank())
                 ? proposalRepo.findByOrderByCreatedAtDesc()
                 : proposalRepo.findByStatusOrderByCreatedAtDesc(status);
-        return list.stream().map(EntryViews::proposal).toList();
+        Map<Long, String> kbNames = baseNames(list.stream()
+                .map(KnowledgeProposalEntity::getAdoptedKbId).filter(Objects::nonNull).toList());
+        return list.stream().map(p -> EntryViews.proposal(p, kbNames)).toList();
     }
 
     @Transactional
@@ -745,9 +658,8 @@ public class KnowledgeBaseService {
         KnowledgeProposalEntity p = new KnowledgeProposalEntity();
         p.setTitle(req.title());
         p.setContentMd(req.contentMd());
-        p.setTargetScope(req.targetScope() == null || req.targetScope().isBlank() ? "project" : req.targetScope());
-        p.setTargetProjectId(req.targetProjectId());
         p.setSourceSessionId(req.sourceSessionId());
+        p.setSourceProject(blankToNull(req.sourceProject()));
         p.setStatus("open");
         p.setCreatedAt(Instant.now());
         p = proposalRepo.save(p);
@@ -760,51 +672,43 @@ public class KnowledgeBaseService {
         } catch (Exception e) {
             log.warn("提案通知发送失败: {}", e.getMessage());
         }
-        return EntryViews.proposal(p);
+        return EntryViews.proposal(p, null);
     }
 
-    /** 采纳：target=project → 项目经验库；target=global → 全局经验库（FR-06）。 */
+    /** 采纳（CAP-94）：显式指定目标库 targetKbId（必选；不存在 404 / 已归档 409）。 */
     @Transactional
-    public ProposalView adopt(Long id, String target, String projectId) {
+    public ProposalView adopt(Long id, Long targetKbId) {
         KnowledgeProposalEntity p = requireProposal(id);
         if (!"open".equals(p.getStatus())) {
             throw new DevMindException(ErrorCode.CONFLICT, "提案已处理（" + p.getStatus() + "）");
         }
-        if (target == null || (!"project".equals(target) && !"global".equals(target))) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "target 必须是 project 或 global");
+        if (targetKbId == null) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "采纳必须指定目标知识库 targetKbId");
         }
-        String pid = "project".equals(target)
-                ? (projectId != null && !projectId.isBlank() ? projectId : p.getTargetProjectId()) : null;
-        if ("project".equals(target) && (pid == null || pid.isBlank())) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "采纳到项目必须指定项目");
+        KnowledgeBaseEntity kb = requireBase(targetKbId);
+        if (!KnowledgeBaseEntity.STATUS_ACTIVE.equals(kb.getStatus())) {
+            throw new DevMindException(ErrorCode.CONFLICT, "目标知识库已归档，不能采纳: " + kb.getName());
         }
-        KnowledgeBaseEntity kb = resolveExperienceKb(target, pid);
 
         KnowledgeEntryEntity e = new KnowledgeEntryEntity();
         e.setKbId(kb.getId());
-        e.setScope(kb.getScope());
-        e.setProjectId(kb.getProjectId());
         e.setName(p.getTitle());
         e.setContentMd(p.getContentMd());
         e.setContentHash(sha256(p.getContentMd()));
-        if ("global".equals(target)) {
-            e.setSourceProject(p.getTargetProjectId());
-        }
+        e.setSourceProject(p.getSourceProject());
         e.setStatus("active");
         e.setHitCount(0);
         Instant now = Instant.now();
         e.setCreatedAt(now);
         e.setUpdatedAt(now);
-        e.setPath(defaultPath(e));
+        e.setPath(defaultPath(e, kb));
         entryRepo.save(e);
         publishContentChanged(e);
 
         p.setStatus("adopted");
-        p.setAdoptedTo(target);
-        p.setAdoptedProjectId("project".equals(target) ? kb.getProjectId() : null);
+        p.setAdoptedKbId(kb.getId());
         p.setAdoptedAt(now);
-        ProposalView view = EntryViews.proposal(proposalRepo.save(p));
-        return view;
+        return EntryViews.proposal(proposalRepo.save(p), Map.of(kb.getId(), kb.getName()));
     }
 
     @Transactional
@@ -815,8 +719,7 @@ public class KnowledgeBaseService {
         }
         p.setStatus("rejected");
         p.setAdoptedAt(Instant.now());
-        ProposalView view = EntryViews.proposal(proposalRepo.save(p));
-        return view;
+        return EntryViews.proposal(proposalRepo.save(p), null);
     }
 
     /** 删除提案（硬删除，不限状态；已采纳生成的知识条目不受影响）。 */
@@ -829,9 +732,9 @@ public class KnowledgeBaseService {
         return s == null || s.isBlank() ? null : s;
     }
 
-    private String defaultPath(KnowledgeEntryEntity e) {
+    private String defaultPath(KnowledgeEntryEntity e, KnowledgeBaseEntity kb) {
         String name = e.getName() == null ? "entry" : e.getName().replaceAll("[\\\\/:*?\"<>|\\s]+", "-");
-        return e.getScope() + "/" + name + ".md";
+        return "kb-" + kb.getId() + "/" + name + ".md";
     }
 
     private Map<Long, KnowledgeBaseEntity> kbMap() {
@@ -840,16 +743,6 @@ public class KnowledgeBaseService {
             map.put(kb.getId(), kb);
         }
         return map;
-    }
-
-    private String derivedScope(KnowledgeEntryEntity e, Map<Long, KnowledgeBaseEntity> kbMap) {
-        KnowledgeBaseEntity kb = e.getKbId() == null ? null : kbMap.get(e.getKbId());
-        return kb != null ? kb.getScope() : e.getScope();
-    }
-
-    private String derivedProjectId(KnowledgeEntryEntity e, Map<Long, KnowledgeBaseEntity> kbMap) {
-        KnowledgeBaseEntity kb = e.getKbId() == null ? null : kbMap.get(e.getKbId());
-        return kb != null ? kb.getProjectId() : e.getProjectId();
     }
 
     private KnowledgeEntryEntity requireEntry(Long id) {

@@ -9,13 +9,15 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 
 /**
- * 知识库容器（CAP-44 FR-01）：条目的一等归属。scope 语义自条目上移（global=平台共享 /
- * project=项目特有，projectId 必填）；消费方式统一为检索命中注入（CAP-92 下线 FULL 全量注入）。
+ * 知识库容器（CAP-44 FR-01）：条目的一等归属。CAP-94 起知识库去项目化：库是完全独立
+ * 的平台资产，scope/projectId 停写（列保留不删防 rollback，存量行原样）；消费方式统一为
+ * 显式绑库后的检索命中注入（CAP-92 下线 FULL 全量注入）。
  */
 @Entity
 @Table(name = "knowledge_bases")
 public class KnowledgeBaseEntity {
 
+    /** 历史常量（CAP-94 停写）：仅存量行与 KnowledgeBaseMigration 迁移 SQL 可读 */
     public static final String SCOPE_GLOBAL = "global";
     public static final String SCOPE_PROJECT = "project";
     public static final String STATUS_ACTIVE = "active";
@@ -31,11 +33,11 @@ public class KnowledgeBaseEntity {
     @Column(length = 512)
     private String description;
 
-    /** global | project（全局共享 / 项目特有） */
+    /** 历史列：global | project（CAP-94 起停写，库不再分层） */
     @Column(nullable = false, length = 16)
     private String scope = SCOPE_GLOBAL;
 
-    /** scope=project 时必填 */
+    /** 历史列：scope=project 时所属项目（CAP-94 起停写） */
     @Column(length = 64)
     private String projectId;
 

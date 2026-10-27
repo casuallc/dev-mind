@@ -76,7 +76,7 @@ public class KnowledgeEvalService {
         for (Case testCase : dataset.cases()) {
             KnowledgeSearchV2Response response = searchService.searchDocuments(
                     new KnowledgeSearchV2Request(kbId == null ? List.of() : List.of(kbId),
-                            testCase.question(), null, null, null, k));
+                            testCase.question(), null, null, k));
             if (response.degradedReason() != null && !"NONE".equals(response.degradedReason())) {
                 degraded.add(response.degradedReason());
             }

@@ -13,8 +13,8 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 /**
- * 知识条目（CAP-04 FR-02/FR-03，CAP-44 重构）：归属知识库（kbId），库的 scope 决定
- * 全局/项目语义。历史 scope/projectId 列保留停写（防 rollback 丢数据），读取一律经 KB 派生。
+ * 知识条目（CAP-04 FR-02/FR-03，CAP-44 重构）：归属知识库（kbId）。CAP-94 起库不再分
+ * 全局/项目层，scope/projectId 历史列保留停写（防 rollback 丢数据）。
  */
 @Entity
 @Table(name = "knowledge_entries")

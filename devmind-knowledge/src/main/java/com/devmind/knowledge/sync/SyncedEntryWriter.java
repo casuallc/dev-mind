@@ -100,8 +100,7 @@ public class SyncedEntryWriter {
         }
         KnowledgeEntryEntity e = new KnowledgeEntryEntity();
         e.setKbId(kb.getId());
-        e.setScope(kb.getScope());
-        e.setProjectId(kb.getProjectId());
+        // CAP-94：历史 scope/projectId 列停写
         e.setName(title == null || title.isBlank() ? externalId : title);
         e.setContentMd(content);
         e.setContentHash(hash);

@@ -4,13 +4,11 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * 知识条目视图。CAP-44 起 scope/projectId 由所属知识库派生（kbId 为一等归属），
- * 历史列仅作迁移期兜底；CAP-84 增加文档类型/来源/版本/治理字段。
+ * 知识条目视图。CAP-44 起 kbId 为一等归属；CAP-94 起知识库去项目化，不再输出
+ * scope/projectId（历史列停写），来源项目仅保留 sourceProject 作溯源。
  *
  * @param id             条目 ID
  * @param kbId           所属知识库 ID
- * @param scope          global | project（由 KB 派生）
- * @param projectId      项目范围所属项目（global 为 null，由 KB 派生）
  * @param name           名称
  * @param path           逻辑路径
  * @param contentMd      Markdown 内容
@@ -40,8 +38,6 @@ import java.util.List;
 public record EntryView(
         Long id,
         Long kbId,
-        String scope,
-        String projectId,
         String name,
         String path,
         String contentMd,

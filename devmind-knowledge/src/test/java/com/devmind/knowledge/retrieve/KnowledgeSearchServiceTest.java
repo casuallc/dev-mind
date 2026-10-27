@@ -122,7 +122,7 @@ class KnowledgeSearchServiceTest {
                 new RankedHit(201, 2, 10L, 1.0)));
 
         KnowledgeSearchV2Response result = service.searchDocuments(
-                new KnowledgeSearchV2Request(List.of(10L), "回滚", null, null, null, 10));
+                new KnowledgeSearchV2Request(List.of(10L), "回滚", null, null, 10));
 
         assertEquals(2, result.hits().size(), "同一文档的多个块聚合为一条");
         KnowledgeSearchV2Response.Hit top = result.hits().get(0);
@@ -149,7 +149,7 @@ class KnowledgeSearchServiceTest {
                 new RankedHit(301, 3, 10L, 1.0)));
 
         KnowledgeSearchV2Response result = service.searchDocuments(
-                new KnowledgeSearchV2Request(List.of(10L), "回滚", null, null, null, 10));
+                new KnowledgeSearchV2Request(List.of(10L), "回滚", null, null, 10));
 
         assertEquals(1, result.hits().size());
         assertEquals("有效文档", result.hits().get(0).title());
@@ -173,7 +173,7 @@ class KnowledgeSearchServiceTest {
                 .thenReturn(List.of(new RankedHit(201, 2, 10L, 0.82)));
 
         KnowledgeSearchService.Fused fused = service.fusedChunks(
-                "回滚", List.of(10L), null, null, null, 10);
+                "回滚", List.of(10L), null, null, 10);
 
         assertEquals(2, fused.chunks().size(), "两路召回都保留");
         assertTrue(fused.vector());
@@ -194,7 +194,7 @@ class KnowledgeSearchServiceTest {
         when(searchIndex.vectorDimensions()).thenReturn(Set.of(8));
 
         KnowledgeSearchService.Fused fused = service.fusedChunks(
-                "回滚", List.of(10L), null, null, null, 10);
+                "回滚", List.of(10L), null, null, 10);
 
         assertEquals(1, fused.chunks().size(), "BM25 命中不受向量维度影响");
         assertEquals(DegradedReason.DIMENSION_MISMATCH, fused.reason());
@@ -214,7 +214,7 @@ class KnowledgeSearchServiceTest {
         when(searchIndex.vectorDimensions()).thenReturn(Set.of());
 
         KnowledgeSearchService.Fused fused = service.fusedChunks(
-                "回滚", List.of(10L), null, null, null, 10);
+                "回滚", List.of(10L), null, null, 10);
 
         assertEquals(DegradedReason.NO_EMBEDDING, fused.reason());
         assertFalse(fused.vector());
@@ -228,7 +228,7 @@ class KnowledgeSearchServiceTest {
                 .thenReturn(List.of(new RankedHit(101, 1, 10L, 1.0)));
 
         KnowledgeSearchV2Response result = service.searchDocuments(
-                new KnowledgeSearchV2Request(List.of(10L), "回滚", null, null, null, 5));
+                new KnowledgeSearchV2Request(List.of(10L), "回滚", null, null, 5));
 
         String snippet = result.hits().get(0).snippet();
         assertTrue(snippet.contains("&lt;script&gt;"), snippet);
@@ -243,12 +243,11 @@ class KnowledgeSearchServiceTest {
         when(searchIndex.searchText(any(), eq("回滚"), anyInt()))
                 .thenReturn(List.of(new RankedHit(101, 1, 10L, 1.0)));
 
-        service.fusedChunks("回滚", List.of(10L), List.of("FAQ"), "p1", List.of("运维", "部署"), 5);
+        service.fusedChunks("回滚", List.of(10L), List.of("FAQ"), List.of("运维", "部署"), 5);
 
         org.mockito.ArgumentCaptor<Filter> captor = org.mockito.ArgumentCaptor.forClass(Filter.class);
         verify(searchIndex).searchText(captor.capture(), eq("回滚"), anyInt());
         assertEquals(List.of("FAQ"), captor.getValue().docTypes());
-        assertEquals("p1", captor.getValue().projectId());
         assertEquals(List.of("运维", "部署"), captor.getValue().tags());
     }
 
@@ -257,7 +256,7 @@ class KnowledgeSearchServiceTest {
         when(kbRepo.findAllById(anyList())).thenReturn(List.of());
 
         KnowledgeSearchService.Fused fused = service.fusedChunks(
-                "回滚", List.of(99L), null, null, null, 5);
+                "回滚", List.of(99L), null, null, 5);
 
         assertTrue(fused.chunks().isEmpty());
         verify(searchIndex, org.mockito.Mockito.never()).searchText(any(), any(), anyInt());

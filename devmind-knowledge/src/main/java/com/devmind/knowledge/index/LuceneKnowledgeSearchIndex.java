@@ -63,12 +63,11 @@ import org.springframework.stereotype.Component;
 public class LuceneKnowledgeSearchIndex implements KnowledgeSearchIndex {
 
     private static final Logger log = LoggerFactory.getLogger(LuceneKnowledgeSearchIndex.class);
-    static final String SCHEMA_VERSION = "2";
+    static final String SCHEMA_VERSION = "3"; // CAP-94：去掉 projectId 字段（知识库去项目化）
     private static final String F_ENTRY_KEY = "entryKey";
     private static final String F_ENTRY_ID = "entryId";
     private static final String F_CHUNK_ID = "chunkId";
     private static final String F_KB_ID = "kbId";
-    private static final String F_PROJECT_ID = "projectId";
     private static final String F_DOC_TYPE = "docType";
     private static final String F_STATUS = "status";
     private static final String F_TAG = "tag";
@@ -207,9 +206,6 @@ public class LuceneKnowledgeSearchIndex implements KnowledgeSearchIndex {
                     doc.add(new LongPoint(F_CHUNK_ID, chunk.chunkId()));
                     doc.add(new StoredField(F_CHUNK_ID, chunk.chunkId()));
                     doc.add(new StringField(F_KB_ID, Long.toString(entry.kbId()), Field.Store.NO));
-                    if (entry.projectId() != null && !entry.projectId().isBlank()) {
-                        doc.add(new StringField(F_PROJECT_ID, entry.projectId(), Field.Store.NO));
-                    }
                     doc.add(new StringField(F_DOC_TYPE, entry.docType(), Field.Store.NO));
                     doc.add(new StringField(F_STATUS, entry.status(), Field.Store.NO));
                     if (entry.tags() != null) {
@@ -408,10 +404,6 @@ public class LuceneKnowledgeSearchIndex implements KnowledgeSearchIndex {
                 if (!refs.isEmpty()) {
                     builder.add(new TermInSetQuery(F_DOC_TYPE, refs), BooleanClause.Occur.FILTER);
                 }
-            }
-            if (filter.projectId() != null && !filter.projectId().isBlank()) {
-                builder.add(new TermQuery(new Term(F_PROJECT_ID, filter.projectId())),
-                        BooleanClause.Occur.FILTER);
             }
             if (filter.tags() != null && !filter.tags().isEmpty()) {
                 List<BytesRef> tags = filter.tags().stream()

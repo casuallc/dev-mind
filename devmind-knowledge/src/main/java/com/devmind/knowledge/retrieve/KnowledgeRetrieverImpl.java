@@ -64,7 +64,7 @@ public class KnowledgeRetrieverImpl implements KnowledgeRetriever {
         }
         int limit = topK > 0 ? topK : 8;
         KnowledgeSearchService.Fused fused =
-                searchService.fusedChunks(query, kbIds, docTypes, null, tags, limit);
+                searchService.fusedChunks(query, kbIds, docTypes, tags, limit);
         List<RetrievedChunk> chunks = fused.chunks().stream()
                 .map(h -> new RetrievedChunk(h.entryId(), h.entryName(), h.kbId(), h.chunkId(),
                         h.sourceUri(), h.headingPath(), h.content(),

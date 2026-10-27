@@ -13,15 +13,10 @@ public final class EntryViews {
     private EntryViews() {
     }
 
-    /**
-     * 条目视图：scope/projectId 由 KB 派生（CAP-44）；kb 为 null（迁移未跑的存量行）
-     * 时兜底用历史列。
-     */
+    /** 条目视图（CAP-94：不再派生 scope/projectId，归属只看 kbId）。 */
     public static EntryView entry(KnowledgeEntryEntity e, KnowledgeBaseEntity kb) {
-        String scope = kb != null ? kb.getScope() : e.getScope();
-        String projectId = kb != null ? kb.getProjectId() : e.getProjectId();
         return new EntryView(
-                e.getId(), e.getKbId(), scope, projectId, e.getName(), e.getPath(),
+                e.getId(), e.getKbId(), e.getName(), e.getPath(),
                 e.getContentMd(), splitTags(e.getTags()), e.getSourceProject(),
                 e.getHitCount(), e.getStatus(), e.getSource(), e.getExternalId(),
                 e.getIndexStatus(), e.getIndexError(),
@@ -31,20 +26,24 @@ public final class EntryViews {
                 e.getCreatedAt(), e.getUpdatedAt());
     }
 
-    public static KnowledgeBaseView base(KnowledgeBaseEntity kb, String projectName,
+    public static KnowledgeBaseView base(KnowledgeBaseEntity kb,
                                          long entryCount, long chunkCount,
                                          String modelEndpointName, KnowledgeBaseView.IndexStats indexStats) {
         return new KnowledgeBaseView(
-                kb.getId(), kb.getName(), kb.getDescription(), kb.getScope(), kb.getProjectId(),
-                projectName, kb.getModelEndpointId(), modelEndpointName, kb.getStatus(),
+                kb.getId(), kb.getName(), kb.getDescription(),
+                kb.getModelEndpointId(), modelEndpointName, kb.getStatus(),
                 entryCount, chunkCount, indexStats, kb.getCreatedAt(), kb.getUpdatedAt());
     }
 
-    public static ProposalView proposal(KnowledgeProposalEntity p) {
+    /** 提案视图；kbNames 用于解析采纳目标库名（可为 null → adoptedKbName=null）。 */
+    public static ProposalView proposal(KnowledgeProposalEntity p,
+                                        java.util.Map<Long, String> kbNames) {
+        String adoptedKbName = p.getAdoptedKbId() == null || kbNames == null
+                ? null : kbNames.get(p.getAdoptedKbId());
         return new ProposalView(
-                p.getId(), p.getTitle(), p.getContentMd(), p.getTargetScope(),
-                p.getTargetProjectId(), p.getSourceSessionId(), p.getStatus(),
-                p.getAdoptedTo(), p.getAdoptedProjectId(), p.getCreatedAt(), p.getAdoptedAt(),
+                p.getId(), p.getTitle(), p.getContentMd(),
+                p.getSourceSessionId(), p.getSourceProject(), p.getStatus(),
+                p.getAdoptedKbId(), adoptedKbName, p.getCreatedAt(), p.getAdoptedAt(),
                 TriageViews.of(p.getTriageJson(), p.getTriageAt(), p.isTriageDegraded()));
     }
 

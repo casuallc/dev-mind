@@ -37,7 +37,7 @@ public interface KnowledgeSearchIndex {
     record IndexStats(long docs, long sizeBytes, String schemaVersion, Set<Integer> vectorDimensions) {
     }
 
-    record EntryMeta(long entryId, long kbId, String projectId, String docType, String status,
+    record EntryMeta(long entryId, long kbId, String docType, String status,
                      List<String> tags, String title, String sourceUri, Instant validFrom, Instant validTo,
                      Instant updatedAt) {
     }
@@ -45,8 +45,8 @@ public interface KnowledgeSearchIndex {
     record Chunk(long chunkId, String headingPath, String content) {
     }
 
-    /** tags 多选为 OR（命中任一标签即可）；空/null = 不按标签过滤。 */
-    record Filter(List<Long> kbIds, List<String> docTypes, String projectId, List<String> tags) {
+    /** tags 多选为 OR（命中任一标签即可）；空/null = 不按标签过滤。CAP-94 起无 projectId 维度。 */
+    record Filter(List<Long> kbIds, List<String> docTypes, List<String> tags) {
     }
 
     record RankedHit(long chunkId, long entryId, long kbId, double score) {

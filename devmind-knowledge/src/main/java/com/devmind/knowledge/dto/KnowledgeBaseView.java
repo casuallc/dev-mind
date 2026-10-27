@@ -4,13 +4,11 @@ import java.time.Instant;
 
 /**
  * 知识库视图（CAP-44 FR-01，CAP-48 FR-06 增补端点与索引健康度）。
+ * CAP-94 起知识库去项目化：不再输出 scope/projectId/projectName。
  *
  * @param id                库 ID
  * @param name              名称
  * @param description       描述
- * @param scope             global | project
- * @param projectId         scope=project 时所属项目
- * @param projectName       scope=project 时项目名（展示用，解析失败为空）
  * @param modelEndpointId   库级覆盖的 embedding 端点 ID（null = 平台默认端点）
  * @param modelEndpointName 实际生效的端点名（含回落平台默认后的结果；无可用端点时 null）
  * @param status            active | archived
@@ -24,9 +22,6 @@ public record KnowledgeBaseView(
         Long id,
         String name,
         String description,
-        String scope,
-        String projectId,
-        String projectName,
         Long modelEndpointId,
         String modelEndpointName,
         String status,

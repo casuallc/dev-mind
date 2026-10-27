@@ -48,11 +48,11 @@ class LuceneKnowledgeSearchIndexTest {
 
     @Test
     void textSearchMatchesChineseContentAndRespectsFilters() {
-        index.upsert(meta(1, 1, "p1", "MAINT", List.of("ops", "deploy"), "部署手册"),
+        index.upsert(meta(1, 1, "MAINT", List.of("ops", "deploy"), "部署手册"),
                 List.of(chunk(101, "部署", "发布前检查环境变量与磁盘余量，然后执行发布脚本。")), null);
-        index.upsert(meta(2, 1, "p2", "TECH", List.of("db"), "数据库备份"),
+        index.upsert(meta(2, 1, "TECH", List.of("db"), "数据库备份"),
                 List.of(chunk(102, "备份", "每日凌晨执行 pg_dump 备份，保留七天。")), null);
-        index.upsert(meta(3, 2, "p1", "FAQ", List.of("deploy"), "FAQ 回滚"),
+        index.upsert(meta(3, 2, "FAQ", List.of("deploy"), "FAQ 回滚"),
                 List.of(chunk(103, "回滚", "回滚失败怎么办？先摘流量再切换版本。")), null);
         index.flush();
 
@@ -60,15 +60,15 @@ class LuceneKnowledgeSearchIndexTest {
         assertEquals(2L, only(index.searchText(null, "数据库", 10)).entryId());
 
         assertEquals(1L, only(index.searchText(new KnowledgeSearchIndex.Filter(
-                List.of(1L), null, null, null), "发布", 10)).entryId(), "kbIds 过滤");
+                List.of(1L), null, null), "发布", 10)).entryId(), "kbIds 过滤");
         assertEquals(2L, only(index.searchText(new KnowledgeSearchIndex.Filter(
-                null, List.of("tech"), null, null), "备份", 10)).entryId(), "docType 大小写不敏感");
+                null, List.of("tech"), null), "备份", 10)).entryId(), "docType 大小写不敏感");
         assertEquals(3L, only(index.searchText(new KnowledgeSearchIndex.Filter(
-                null, null, "p1", null), "回滚", 10)).entryId(), "projectId 过滤");
+                List.of(2L), null, null), "回滚", 10)).entryId(), "CAP-94：项目维度改由显式 kbIds 表达");
         assertEquals(1L, only(index.searchText(new KnowledgeSearchIndex.Filter(
-                null, null, null, List.of("Deploy")), "发布", 10)).entryId(), "tag 大小写不敏感");
+                null, null, List.of("Deploy")), "发布", 10)).entryId(), "tag 大小写不敏感");
         Set<Long> multiTag = index.searchText(new KnowledgeSearchIndex.Filter(
-                        null, null, null, List.of("ops", "db")), "备份 发布", 10).stream()
+                        null, null, List.of("ops", "db")), "备份 发布", 10).stream()
                 .map(KnowledgeSearchIndex.RankedHit::entryId)
                 .collect(java.util.stream.Collectors.toSet());
         assertEquals(Set.of(1L, 2L), multiTag, "多标签取并集");
@@ -76,7 +76,7 @@ class LuceneKnowledgeSearchIndexTest {
 
     @Test
     void pendingWritesAreVisibleWithoutExplicitFlush() {
-        index.upsert(meta(1, 1, null, "TECH", null, "集群部署"),
+        index.upsert(meta(1, 1, "TECH", null, "集群部署"),
                 List.of(chunk(101, "节点", "RabbitMQ 集群建议至少三个节点。")), null);
 
         assertEquals(1, index.numDocs(), "少量写入未达 commit 阈值时，读前刷新也应看到新文档");
@@ -88,17 +88,17 @@ class LuceneKnowledgeSearchIndexTest {
 
     @Test
     void excludesDeprecatedAndExpiredEntries() {
-        index.upsert(meta(1, 1, null, "TECH", null, "回滚方案"),
+        index.upsert(meta(1, 1, "TECH", null, "回滚方案"),
                 List.of(chunk(101, "回滚", "回滚时先摘流量，再切到上一个稳定版本。")), null);
         KnowledgeSearchIndex.EntryMeta deprecated = new KnowledgeSearchIndex.EntryMeta(
-                2, 1, null, "TECH", "deprecated", null, "旧回滚方案", null, null, null, Instant.now());
+                2, 1, "TECH", "deprecated", null, "旧回滚方案", null, null, null, Instant.now());
         index.upsert(deprecated, List.of(chunk(102, "回滚", "回滚时直接重启。")), null);
         KnowledgeSearchIndex.EntryMeta expired = new KnowledgeSearchIndex.EntryMeta(
-                3, 1, null, "TECH", "active", null, "过期回滚方案", null, null,
+                3, 1, "TECH", "active", null, "过期回滚方案", null, null,
                 Instant.now().minusSeconds(3600), Instant.now());
         index.upsert(expired, List.of(chunk(103, "回滚", "回滚时删库重建。")), null);
         KnowledgeSearchIndex.EntryMeta notYetValid = new KnowledgeSearchIndex.EntryMeta(
-                4, 1, null, "TECH", "active", null, "未生效回滚方案", null,
+                4, 1, "TECH", "active", null, "未生效回滚方案", null,
                 Instant.now().plusSeconds(3600), null, Instant.now());
         index.upsert(notYetValid, List.of(chunk(104, "回滚", "回滚时先演练。")), null);
         index.flush();
@@ -110,10 +110,10 @@ class LuceneKnowledgeSearchIndexTest {
 
     @Test
     void vectorSearchRanksByCosineSimilarityAndTracksDimensions() {
-        index.upsert(meta(1, 1, null, "TECH", null, "缓存设计"),
+        index.upsert(meta(1, 1, "TECH", null, "缓存设计"),
                 List.of(chunk(101, "缓存", "使用本地缓存减少数据库压力。")),
                 List.of(new float[]{1f, 0f, 0f, 0f}));
-        index.upsert(meta(2, 1, null, "TECH", null, "消息队列"),
+        index.upsert(meta(2, 1, "TECH", null, "消息队列"),
                 List.of(chunk(102, "队列", "异步任务通过消息队列削峰。")),
                 List.of(new float[]{0f, 1f, 0f, 0f}));
         index.flush();
@@ -125,7 +125,7 @@ class LuceneKnowledgeSearchIndexTest {
         assertEquals(101L, hits.get(0).chunkId());
 
         List<KnowledgeSearchIndex.RankedHit> filtered = index.searchVector(
-                new KnowledgeSearchIndex.Filter(List.of(1L), List.of("TECH"), null, null),
+                new KnowledgeSearchIndex.Filter(List.of(1L), List.of("TECH"), null),
                 new float[]{0.9f, 0.1f, 0f, 0f}, 5);
         assertEquals(1L, filtered.get(0).entryId());
 
@@ -135,12 +135,12 @@ class LuceneKnowledgeSearchIndexTest {
 
     @Test
     void upsertReplacesAllPreviousChunksAndDeleteRemovesEntry() {
-        index.upsert(meta(1, 1, null, "TECH", null, "构建规范"),
+        index.upsert(meta(1, 1, "TECH", null, "构建规范"),
                 List.of(chunk(101, "旧一", "旧版本缓存预热说明"), chunk(102, "旧二", "旧版本日志轮转说明")), null);
         index.flush();
         assertEquals(2, index.numDocs());
 
-        index.upsert(meta(1, 1, null, "TECH", null, "构建规范"),
+        index.upsert(meta(1, 1, "TECH", null, "构建规范"),
                 List.of(chunk(103, "新一", "新版本队列削峰说明")), null);
         index.flush();
 
@@ -155,7 +155,7 @@ class LuceneKnowledgeSearchIndexTest {
 
     @Test
     void reopenKeepsCommittedDocsAndVectorDimensions() {
-        index.upsert(meta(1, 1, null, "TECH", null, "部署手册"),
+        index.upsert(meta(1, 1, "TECH", null, "部署手册"),
                 List.of(chunk(101, "部署", "发布前检查环境变量。")),
                 List.of(new float[]{1f, 0f, 0f, 0f}));
         index.flush();
@@ -171,7 +171,7 @@ class LuceneKnowledgeSearchIndexTest {
 
     @Test
     void reopenClearsIndexWhenSchemaVersionMismatches() throws Exception {
-        index.upsert(meta(1, 1, null, "TECH", null, "部署手册"),
+        index.upsert(meta(1, 1, "TECH", null, "部署手册"),
                 List.of(chunk(101, "部署", "发布前检查环境变量。")), null);
         index.flush();
         index.close();
@@ -190,9 +190,9 @@ class LuceneKnowledgeSearchIndexTest {
         assertFalse(index.vectorDimensions().contains(4));
     }
 
-    private static KnowledgeSearchIndex.EntryMeta meta(long entryId, long kbId, String projectId,
+    private static KnowledgeSearchIndex.EntryMeta meta(long entryId, long kbId,
             String docType, List<String> tags, String title) {
-        return new KnowledgeSearchIndex.EntryMeta(entryId, kbId, projectId, docType, "active",
+        return new KnowledgeSearchIndex.EntryMeta(entryId, kbId, docType, "active",
                 tags, title, null, null, null, Instant.now());
     }
 

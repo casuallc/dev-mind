@@ -76,7 +76,6 @@ class KnowledgeContextProviderTest {
                 chunk(1L, "发布手册", 10L, "灰度步骤：每批 10%", "maint/runbook.md", "部署 > 灰度", 0.02),
                 chunk(2L, "编码规范", 10L, "异常必须带上下文", "dev/style.md", "Java > 异常", 0.01)));
         when(retriever.baseNames(List.of(10L))).thenReturn(Map.of(10L, "研发规范库"));
-        when(service.baseScopes(List.of(10L))).thenReturn(Map.of(10L, "global"));
 
         ContextContribution c = provider.contribute(req(List.of(10L), "修构建", false));
 
@@ -92,7 +91,7 @@ class KnowledgeContextProviderTest {
         assertEquals(ManifestItem.KIND_KNOWLEDGE, first.kind());
         assertEquals("1", first.ref());
         assertEquals("发布手册", first.name());
-        assertEquals("global", first.scope());
+        assertEquals("研发规范库", first.scope(), "CAP-94：manifest scope 字段输出库名");
         assertEquals(ManifestItem.SOURCE_SCENARIO, first.source());
         assertEquals(2, first.extra().get("chunks"));
         assertNotNull(c.settingsLocalJson(), "settings 白名单始终产出");
@@ -103,7 +102,6 @@ class KnowledgeContextProviderTest {
     void dryRunDoesNotCountHits() {
         stubHits(List.of(chunk(1L, "发布手册", 10L, "回滚", "maint/runbook.md", null, 0.03)));
         when(retriever.baseNames(any())).thenReturn(Map.of());
-        when(service.baseScopes(any())).thenReturn(Map.of());
 
         ContextContribution c = provider.contribute(req(List.of(10L), "修构建", true));
 

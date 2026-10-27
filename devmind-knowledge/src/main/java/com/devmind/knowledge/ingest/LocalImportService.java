@@ -385,8 +385,7 @@ public class LocalImportService {
                             KnowledgeImportFileEntity file, String content, String hash, boolean isNew) {
         KnowledgeBaseEntity kb = requireBase(batch.getKbId());
         entry.setKbId(kb.getId());
-        entry.setScope(kb.getScope());
-        entry.setProjectId(kb.getProjectId());
+        // CAP-94：历史 scope/projectId 列停写
         entry.setName(stripExtension(file.getFileName()));
         entry.setPath(truncate(file.getRelativePath(), 255));
         entry.setContentMd(content);

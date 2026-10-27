@@ -22,8 +22,6 @@ import com.devmind.knowledge.repo.KnowledgeChunkRepository;
 import com.devmind.knowledge.repo.KnowledgeEntryRepository;
 import com.devmind.knowledge.repo.KnowledgeProposalRepository;
 import com.devmind.notification.NotificationPublisher;
-import com.devmind.project.ProjectService;
-import com.devmind.project.model.Project;
 import com.devmind.task.service.AsyncTaskService;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -51,9 +49,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * KnowledgeBaseService 库模型（CAP-44 库容器；CAP-92 下线全量注入后仅保留检索辅助，
- * mock repo 不拉起 Spring）：legacy scope 创建条目 → 解析/兜底建经验库；
- * CAP-48 库级端点绑定 / 失配重建；检索命中计数。
+ * KnowledgeBaseService 库模型（CAP-44 库容器；CAP-94 去项目化：kbId 必填、采纳显式选库，
+ * mock repo 不拉起 Spring）：CAP-48 库级端点绑定 / 失配重建；检索命中计数；提案采纳。
  */
 class KnowledgeBaseServiceTest {
 
@@ -81,7 +78,6 @@ class KnowledgeBaseServiceTest {
         entryRepo = mock(KnowledgeEntryRepository.class);
         KnowledgeChunkRepository chunkRepo = mock(KnowledgeChunkRepository.class);
         proposalRepo = mock(KnowledgeProposalRepository.class);
-        ProjectService projectService = mock(ProjectService.class);
         NotificationPublisher notificationPublisher = mock(NotificationPublisher.class);
         eventPublisher = mock(ApplicationEventPublisher.class);
         resolver = mock(EmbeddingResolver.class);
@@ -94,13 +90,8 @@ class KnowledgeBaseServiceTest {
         taskService = mock(AsyncTaskService.class);
         lenient().when(taskService.submit(anyString(), anyString(), any())).thenReturn("task-1");
 
-        when(kbRepo.findByScopeAndStatus(anyString(), anyString())).thenAnswer(inv ->
-                kbs.stream().filter(k -> inv.getArgument(0).equals(k.getScope())
-                        && inv.getArgument(1).equals(k.getStatus())).toList());
-        when(kbRepo.findByScopeAndProjectIdAndStatus(anyString(), anyString(), anyString()))
-                .thenAnswer(inv -> kbs.stream().filter(k -> inv.getArgument(0).equals(k.getScope())
-                        && inv.getArgument(1).equals(k.getProjectId())
-                        && inv.getArgument(2).equals(k.getStatus())).toList());
+        lenient().when(kbRepo.findByStatusOrderByCreatedAtDesc(anyString())).thenAnswer(inv ->
+                kbs.stream().filter(k -> inv.getArgument(0).equals(k.getStatus())).toList());
         when(kbRepo.findAllById(any())).thenAnswer(inv -> {
             Iterable<Long> ids = inv.getArgument(0);
             List<Long> wanted = new ArrayList<>();
@@ -132,23 +123,18 @@ class KnowledgeBaseServiceTest {
             ids.forEach(wanted::add);
             return entries.stream().filter(e -> wanted.contains(e.getId())).toList();
         });
-        when(projectService.requireProject(anyString())).thenAnswer(inv ->
-                new Project(inv.getArgument(0), "项目" + inv.getArgument(0), null, null, List.of(),
-                        null, null, null));
-
         service = new KnowledgeBaseService(kbRepo, entryRepo, chunkRepo, proposalRepo,
                 mock(com.devmind.knowledge.repo.KnowledgeImportFileRepository.class),
-                projectService, notificationPublisher, eventPublisher, resolver, endpointProviders,
+                notificationPublisher, eventPublisher, resolver, endpointProviders,
                 versionService, indexService, mock(com.devmind.knowledge.retrieve.KnowledgeSearchService.class),
                 taskService);
     }
 
-    private KnowledgeBaseEntity addKb(String scope, String projectId) {
+    private KnowledgeBaseEntity addKb(String name) {
         KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
         kb.setId(++kbSeq);
-        kb.setScope(scope);
-        kb.setProjectId(projectId);
-        kb.setName(scope + "-kb-" + kb.getId());
+        kb.setStatus(KnowledgeBaseEntity.STATUS_ACTIVE);
+        kb.setName(name + "-" + kb.getId());
         kb.setCreatedAt(Instant.now());
         kbs.add(kb);
         return kb;
@@ -168,18 +154,18 @@ class KnowledgeBaseServiceTest {
     }
 
     @Test
-    void baseScopesMapsIdsForManifest() {
-        KnowledgeBaseEntity global = addKb("global", null);
-        KnowledgeBaseEntity project = addKb("project", "p1");
+    void baseNamesMapsIdsForManifest() {
+        KnowledgeBaseEntity a = addKb("研发规范");
+        KnowledgeBaseEntity b = addKb("运维经验");
 
-        assertEquals(java.util.Map.of(global.getId(), "global", project.getId(), "project"),
-                service.baseScopes(List.of(global.getId(), project.getId(), 999L)), "不存在的 id 跳过");
-        assertTrue(service.baseScopes(List.of()).isEmpty());
+        assertEquals(java.util.Map.of(a.getId(), a.getName(), b.getId(), b.getName()),
+                service.baseNames(List.of(a.getId(), b.getId(), 999L)), "不存在的 id 跳过");
+        assertTrue(service.baseNames(List.of()).isEmpty());
     }
 
     @Test
     void bumpHitsCountsRetrievedEntries() {
-        KnowledgeBaseEntity kb = addKb("global", null);
+        KnowledgeBaseEntity kb = addKb("kb");
         KnowledgeEntryEntity hit = addEntry(kb, "命中", null, "active");
         KnowledgeEntryEntity miss = addEntry(kb, "未命中", null, "active");
 
@@ -190,45 +176,43 @@ class KnowledgeBaseServiceTest {
     }
 
     @Test
-    void legacyScopeCreateResolvesExperienceKb() {
+    void createEntryRequiresExplicitKbId() {
+        DevMindException ex = assertThrows(DevMindException.class, () -> service.createEntry(
+                new EntryRequest(null, "条目A", "# 内容", List.of("t"), null, null,
+                        null, null, null, null, null, null)));
+        assertTrue(ex.getMessage().contains("kbId"), ex.getMessage());
+
+        KnowledgeBaseEntity kb = addKb("经验库");
+        when(kbRepo.findById(kb.getId())).thenReturn(Optional.of(kb));
         EntryView created = service.createEntry(new EntryRequest(
-                null, "project", "p9", "条目A", "# 内容", List.of("t"), null, null,
+                kb.getId(), "条目A", "# 内容", List.of("t"), "p9", null,
                 null, null, null, null, null, null));
 
-        assertEquals(1, kbs.size(), "无经验库时按 legacy scope 兜底建库");
-        KnowledgeBaseEntity kb = kbs.get(0);
-        assertEquals("project", kb.getScope());
-        assertEquals("p9", kb.getProjectId());
         assertEquals(kb.getId(), created.kbId());
-        assertEquals("project", created.scope(), "视图 scope 派生自库");
-        assertEquals("p9", created.projectId());
-
-        service.createEntry(new EntryRequest(null, "project", "p9", "条目B", "x", null, null, null,
-                null, null, null, null, null, null));
-        assertEquals(1, kbs.size(), "同项目经验库复用不重复建");
-        assertEquals(2, entries.size());
+        assertEquals("p9", created.sourceProject(), "项目只剩溯源标注");
+        assertEquals(1, entries.size());
     }
 
     // ---------------- CAP-48 库级端点绑定 / 失配重建 ----------------
 
     @Test
     void createBaseBindsKbLevelEndpointOverride() {
-        service.createBase(new KnowledgeBaseRequest("研发库", "d", "global", null, 11L, null));
+        service.createBase(new KnowledgeBaseRequest("研发库", "d", 11L, null));
         assertEquals(11L, kbs.get(0).getModelEndpointId(), "显式传端点 → 库级覆盖");
 
-        service.createBase(new KnowledgeBaseRequest("归档库", "d", "global", null, 0L, null));
+        service.createBase(new KnowledgeBaseRequest("归档库", "d", 0L, null));
         assertNull(kbs.get(1).getModelEndpointId(), "0 = 清除覆盖，回落平台默认端点");
     }
 
     @Test
     void updateBaseWithoutEndpointKeepsExistingOverride() {
-        service.createBase(new KnowledgeBaseRequest("研发库", "d", "global", null, 11L, null));
+        service.createBase(new KnowledgeBaseRequest("研发库", "d", 11L, null));
         Long id = kbs.get(0).getId();
         when(kbRepo.findById(id)).thenAnswer(inv -> kbs.stream()
                 .filter(k -> k.getId().equals(inv.getArgument(0))).findFirst());
 
         // 只改描述（modelEndpointId 缺省 null）：其他表单字段的"未传=不改"语义要一致
-        service.updateBase(id, new KnowledgeBaseRequest(null, "新描述", null, null, null, null));
+        service.updateBase(id, new KnowledgeBaseRequest(null, "新描述", null, null));
 
         assertEquals(11L, kbs.get(0).getModelEndpointId(), "缺省不传端点不得清掉已有覆盖");
         assertEquals("新描述", kbs.get(0).getDescription());
@@ -244,7 +228,7 @@ class KnowledgeBaseServiceTest {
                 null, "gpt-4o-mini", null, 30, 32, null, null)));
 
         DevMindException ex = assertThrows(DevMindException.class, () -> service.createBase(
-                new KnowledgeBaseRequest("研发库", "d", "global", null, 7L, null)));
+                new KnowledgeBaseRequest("研发库", "d", 7L, null)));
 
         assertTrue(ex.getMessage().contains("EMBEDDING"), ex.getMessage());
         assertTrue(ex.getMessage().contains("公司通用模型"), "错误消息要点名是哪个端点: " + ex.getMessage());
@@ -252,7 +236,7 @@ class KnowledgeBaseServiceTest {
 
     @Test
     void reindexBaseQueuesFullRebuildTask() {
-        KnowledgeBaseEntity kb = addKb("global", null);
+        KnowledgeBaseEntity kb = addKb("kb");
         when(kbRepo.findById(kb.getId())).thenReturn(java.util.Optional.of(kb));
         when(entryRepo.countByKbId(kb.getId())).thenReturn(2L);
         KnowledgeEntryEntity ready = addEntry(kb, "已索引", null, "active");
@@ -280,7 +264,7 @@ class KnowledgeBaseServiceTest {
         });
 
         ProposalView view = service.createProposal(new ProposalRequest(
-                "构建失败先看日志末尾", "九成环境类报错在日志最后 200 行", "project", "p1", "s1"));
+                "构建失败先看日志末尾", "九成环境类报错在日志最后 200 行", "s1", "p1"));
 
         assertEquals("open", view.status());
         assertNull(view.triage(), "CAP-57 解耦后不再有自动分诊：徽标只读历史数据");
@@ -293,8 +277,7 @@ class KnowledgeBaseServiceTest {
         p.setId(4711L);
         p.setTitle("构建失败先看日志末尾");
         p.setContentMd("九成环境类报错在日志最后 200 行");
-        p.setTargetScope("project");
-        p.setTargetProjectId("p1");
+        p.setSourceProject("p1");
         p.setStatus("open");
         p.setCreatedAt(Instant.now());
         when(proposalRepo.findById(4711L)).thenReturn(Optional.of(p));
@@ -303,10 +286,39 @@ class KnowledgeBaseServiceTest {
     }
 
     @Test
-    void adoptMarksProposalAdopted() {
+    void adoptRequiresExplicitTargetKb() {
         KnowledgeProposalEntity p = addOpenProposal();
 
-        assertEquals("adopted", service.adopt(p.getId(), "global", null).status());
+        DevMindException ex = assertThrows(DevMindException.class, () -> service.adopt(p.getId(), null));
+        assertTrue(ex.getMessage().contains("targetKbId"), ex.getMessage());
+    }
+
+    @Test
+    void adoptIntoSelectedKbCreatesEntryThere() {
+        KnowledgeProposalEntity p = addOpenProposal();
+        KnowledgeBaseEntity kb = addKb("经验库");
+        when(kbRepo.findById(kb.getId())).thenReturn(Optional.of(kb));
+
+        ProposalView view = service.adopt(p.getId(), kb.getId());
+
+        assertEquals("adopted", view.status());
+        assertEquals(kb.getId(), view.adoptedKbId());
+        assertEquals(kb.getName(), view.adoptedKbName());
+        assertEquals(1, entries.size(), "采纳在目标库落一条知识条目");
+        assertEquals(kb.getId(), entries.get(0).getKbId());
+        assertEquals("p1", entries.get(0).getSourceProject(), "条目带来源项目溯源");
+    }
+
+    @Test
+    void adoptIntoArchivedKbRejected() {
+        KnowledgeProposalEntity p = addOpenProposal();
+        KnowledgeBaseEntity kb = addKb("旧库");
+        kb.setStatus(KnowledgeBaseEntity.STATUS_ARCHIVED);
+        when(kbRepo.findById(kb.getId())).thenReturn(Optional.of(kb));
+
+        DevMindException ex = assertThrows(DevMindException.class, () -> service.adopt(p.getId(), kb.getId()));
+        assertTrue(ex.getMessage().contains("归档"), ex.getMessage());
+        assertTrue(entries.isEmpty(), "归档库采纳不落条目");
     }
 
     @Test
@@ -327,7 +339,7 @@ class KnowledgeBaseServiceTest {
 
     @Test
     void reindexBaseOnlyMismatchedSkipsWithoutProbedDimensions() {
-        KnowledgeBaseEntity kb = addKb("global", null);
+        KnowledgeBaseEntity kb = addKb("kb");
         when(kbRepo.findById(kb.getId())).thenReturn(java.util.Optional.of(kb));
 
         ReindexResult result = service.reindexBase(kb.getId(), true);
@@ -338,7 +350,7 @@ class KnowledgeBaseServiceTest {
 
     @Test
     void reindexBaseOnlyMismatchedUsesResolvedEndpointLineage() {
-        KnowledgeBaseEntity kb = addKb("global", null);
+        KnowledgeBaseEntity kb = addKb("kb");
         when(kbRepo.findById(kb.getId())).thenReturn(java.util.Optional.of(kb));
         when(resolver.resolve(any())).thenReturn(new EmbeddingResolver.Resolution(
                 11L, "bge-m3", 1024, 0.15, 8, mock(EmbeddingClient.class)));
@@ -357,7 +369,7 @@ class KnowledgeBaseServiceTest {
 
     @Test
     void pageByBaseReturnsLightweightSummariesAndClampsSize() {
-        KnowledgeBaseEntity kb = addKb("global", null);
+        KnowledgeBaseEntity kb = addKb("kb");
         when(kbRepo.findById(kb.getId())).thenReturn(java.util.Optional.of(kb));
         KnowledgeEntryRepository.EntrySummaryRef ref = new KnowledgeEntryRepository.EntrySummaryRef() {
             @Override public Long getId() { return 7L; }

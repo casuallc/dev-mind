@@ -135,9 +135,7 @@ public class FeishuImportService {
         }
         KnowledgeEntryEntity e = new KnowledgeEntryEntity();
         e.setKbId(kb.getId());
-        // 历史列双写（派生自库，与手工保存同口径）
-        e.setScope(kb.getScope());
-        e.setProjectId(kb.getProjectId());
+        // CAP-94：历史 scope/projectId 列停写（库不再分层，列保留存量）
         e.setName(doc.title());
         e.setContentMd(doc.contentMd());
         e.setContentHash(newHash);

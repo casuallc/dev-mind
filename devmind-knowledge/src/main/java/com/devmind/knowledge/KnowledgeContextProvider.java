@@ -98,8 +98,8 @@ public class KnowledgeContextProvider implements ContextProvider {
             service.bumpHitsByEntryIds(byEntry.keySet()); // FR-07 清理依据；dryRun 预览零副作用
         }
         Map<Long, String> kbNames = retriever.baseNames(kbIds);
-        Map<Long, String> scopes = service.baseScopes(kbIds);
-        List<ManifestItem> items = manifestItems(byEntry, kbNames, scopes);
+        // CAP-94：库不再分层，manifest scope 字段改输出库名
+        List<ManifestItem> items = manifestItems(byEntry, kbNames);
         log.info("知识上下文装配: project={} kbs={} 条目={} 分块={} dryRun={}",
                 req.projectId(), kbIds, items.size(), hits.size(), req.dryRun());
         return new ContextContribution(List.of(renderSection(byEntry, kbNames)), List.of(), List.of(),
@@ -107,18 +107,18 @@ public class KnowledgeContextProvider implements ContextProvider {
     }
 
     private static List<ManifestItem> manifestItems(Map<Long, List<RetrievedChunk>> byEntry,
-                                                    Map<Long, String> kbNames,
-                                                    Map<Long, String> scopes) {
+                                                    Map<Long, String> kbNames) {
         List<ManifestItem> items = new ArrayList<>(byEntry.size());
         for (Map.Entry<Long, List<RetrievedChunk>> e : byEntry.entrySet()) {
             RetrievedChunk first = e.getValue().get(0);
+            String kbName = first.kbId() == null ? null : kbNames.get(first.kbId());
             Map<String, Object> extra = new LinkedHashMap<>();
             extra.put("kbId", first.kbId());
-            extra.put("kbName", first.kbId() == null ? null : kbNames.get(first.kbId()));
+            extra.put("kbName", kbName);
             extra.put("chunks", e.getValue().size());
             extra.put("sourceUri", first.sourceUri());
             items.add(new ManifestItem(ManifestItem.KIND_KNOWLEDGE, String.valueOf(e.getKey()),
-                    entryName(first), scopes.get(first.kbId()), ManifestItem.SOURCE_SCENARIO, extra));
+                    entryName(first), kbName, ManifestItem.SOURCE_SCENARIO, extra));
         }
         return items;
     }

@@ -66,9 +66,9 @@ public class KnowledgeSearchService {
         this.props = props;
     }
 
-    /** 块级混合检索（chat 注入走这里）。tags 多选为 OR。 */
+    /** 块级混合检索（chat 注入走这里）。tags 多选为 OR。范围一律显式 kbIds（CAP-94）。 */
     public Fused fusedChunks(String query, List<Long> kbIds, List<String> docTypes,
-                             String projectId, List<String> tags, int limit) {
+                             List<String> tags, int limit) {
         if (query == null || query.isBlank()) {
             return new Fused(List.of(), false, DegradedReason.NONE);
         }
@@ -81,7 +81,7 @@ public class KnowledgeSearchService {
         Map<Long, Double> scores = new LinkedHashMap<>();
 
         List<RankedHit> textHits = searchIndex.searchText(
-                new Filter(effectiveKbIds, docTypes, projectId, tags), query, candidate);
+                new Filter(effectiveKbIds, docTypes, tags), query, candidate);
         addRrf(scores, textHits);
 
         boolean vector = false;
@@ -101,7 +101,7 @@ public class KnowledgeSearchService {
                     continue;
                 }
                 List<RankedHit> vectorHits = searchIndex.searchVector(
-                        new Filter(group.getValue(), docTypes, projectId, tags), qv, candidate);
+                        new Filter(group.getValue(), docTypes, tags), qv, candidate);
                 vector = true;
                 addRrf(scores, vectorHits);
             } catch (Exception e) {
@@ -142,7 +142,7 @@ public class KnowledgeSearchService {
         }
         int candidateChunks = Math.min(200, Math.max(topK * 4, 40));
         Fused fused = fusedChunks(req.query(), req.kbIds(), req.docTypes(),
-                req.projectId(), req.tags(), candidateChunks);
+                req.tags(), candidateChunks);
 
         Map<Long, KnowledgeBaseEntity> kbMap = kbs.stream()
                 .collect(Collectors.toMap(KnowledgeBaseEntity::getId, Function.identity()));
@@ -174,7 +174,7 @@ public class KnowledgeSearchService {
         if (query == null || query.isBlank() || limit <= 0) {
             return List.of();
         }
-        Fused fused = fusedChunks(query, kbIds, null, null, null, Math.max(limit * 3, 60));
+        Fused fused = fusedChunks(query, kbIds, null, null, Math.max(limit * 3, 60));
         LinkedHashSet<Long> ordered = new LinkedHashSet<>();
         for (ChunkHit hit : fused.chunks()) {
             ordered.add(hit.entryId());
@@ -252,19 +252,6 @@ public class KnowledgeSearchService {
                     entry.getTags(), entry.getUpdatedAt()));
         }
         return hits;
-    }
-
-    /**
-     * 智能体工具检索范围：全部 global active 库 + 当前项目 active 库；
-     * 未给项目时只查 global 库，避免把别的项目库喂给模型。
-     */
-    public List<Long> scopedKbIds(String projectId) {
-        return kbRepo.findByStatusOrderByCreatedAtDesc(KnowledgeBaseEntity.STATUS_ACTIVE).stream()
-                .filter(kb -> KnowledgeBaseEntity.SCOPE_GLOBAL.equals(kb.getScope())
-                        || (projectId != null && !projectId.isBlank()
-                        && projectId.equals(kb.getProjectId())))
-                .map(KnowledgeBaseEntity::getId)
-                .toList();
     }
 
     private List<KnowledgeBaseEntity> resolveBases(List<Long> kbIds) {

@@ -131,16 +131,13 @@ public class KnowledgeController {
     // ---------------- 条目 ----------------
 
     @GetMapping("/entries")
-    public List<EntryView> list(@RequestParam(required = false) String scope,
-                                @RequestParam(required = false) String projectId,
-                                @RequestParam(required = false) String status) {
-        return service.list(scope, projectId, status);
+    public List<EntryView> list(@RequestParam(required = false) String status) {
+        return service.list(status);
     }
 
     @GetMapping("/entries/search")
-    public List<EntryView> search(@RequestParam String q,
-                                  @RequestParam(required = false) String projectId) {
-        return service.search(q, projectId);
+    public List<EntryView> search(@RequestParam String q) {
+        return service.search(q);
     }
 
     @GetMapping("/entries/{id}")
@@ -306,11 +303,11 @@ public class KnowledgeController {
         return service.createProposal(req);
     }
 
+    /** CAP-94：采纳 = 显式选目标库（必选；库不存在 404 / 已归档 409）。 */
     @PostMapping("/proposals/{id}/adopt")
     public ProposalView adopt(@PathVariable Long id,
-                              @RequestParam String target,
-                              @RequestParam(required = false) String projectId) {
-        return service.adopt(id, target, projectId);
+                              @RequestParam Long targetKbId) {
+        return service.adopt(id, targetKbId);
     }
 
     @PostMapping("/proposals/{id}/reject")

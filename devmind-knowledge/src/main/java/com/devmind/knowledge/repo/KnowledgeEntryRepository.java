@@ -12,10 +12,6 @@ import org.springframework.data.repository.query.Param;
 
 public interface KnowledgeEntryRepository extends JpaRepository<KnowledgeEntryEntity, Long> {
 
-    List<KnowledgeEntryEntity> findByScopeOrderByCreatedAtDesc(String scope);
-
-    List<KnowledgeEntryEntity> findByScopeAndProjectIdOrderByCreatedAtDesc(String scope, String projectId);
-
     List<KnowledgeEntryEntity> findByStatusOrderByCreatedAtDesc(String status);
 
     Optional<KnowledgeEntryEntity> findByIdAndStatus(Long id, String status);
@@ -240,11 +236,6 @@ public interface KnowledgeEntryRepository extends JpaRepository<KnowledgeEntryEn
             + "or e.indexedDimensions is null or e.indexedDimensions <> :dimensions)")
     List<KnowledgeEntryEntity> findMismatched(@Param("kbId") Long kbId, @Param("endpointId") Long endpointId,
                                               @Param("dimensions") int dimensions);
-
-    @Query("select e from KnowledgeEntryEntity e where e.status = 'active' and (e.scope = 'global' or e.projectId = :projectId) " +
-            "and (lower(e.name) like lower(concat('%', cast(:q as string), '%')) or lower(cast(e.contentMd as string)) like lower(concat('%', cast(:q as string), '%')) " +
-            "or lower(e.tags) like lower(concat('%', cast(:q as string), '%'))) order by e.createdAt desc")
-    List<KnowledgeEntryEntity> searchActive(@Param("q") String q, @Param("projectId") String projectId);
 
     /** CAP-44 库模型检索：指定库集合内 LIKE 命中（embedding 未配置时的降级检索）。 */
     @Query("select e from KnowledgeEntryEntity e where e.kbId in :kbIds and e.status = 'active' " +
