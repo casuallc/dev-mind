@@ -17,6 +17,8 @@
 > **builtin.shell 复用 CAP-36 `exec` 帧族**（评审定稿：协议 v3 起全量存量 runner 已支持，
 > 零协议改动零 runner 发版；不另起 task_exec 帧族），runner 侧 execAllowlist 防线不变。
 
+> 后续消费方（2026-10-27，定稿未实施）：[CAP-96](CAP-96-assistant-task-runtime.md) 和 [CAP-98](CAP-98-standing-missions-upstream-watch.md) 复用本框架的主 tick/内部 handler 调度，助手目标、授权、作业等待与长期委托由各自业务表管理，不由 async run 状态代替。保留本 CAP 的 ADMIN 人工创建接口；普通用户经受限助手业务 API 提交白名单内部 handler，身份必须显式传播。后台 run 重试不得直接重放助手副作用，须先按 CAP-97 的动作回执对账。
+
 ## 1. 目的
 
 现状是「同步执行底座（CAP-12）+ 各模块私有虚拟线程池 + 自有记录表 + 自有僵尸收割

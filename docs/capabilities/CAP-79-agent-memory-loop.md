@@ -14,6 +14,8 @@
 > replan.json 补 type 与 dependsOn 引用空间定义；WI 状态名对齐 TODO/BLOCKED；
 > 提案表补 requirementId/tags 列；挂起与 rollup 口径写清分支。
 
+> 后续衔接（2026-10-27，均未实施）：[CAP-96](CAP-96-assistant-task-runtime.md) 负责助手目标的动态计划和任务事实记忆；本 CAP 保留经验提案、Runner 知识通道和领域 WI diff，首版 WI 重规划仍由人触发。助手调整行动计划不等于自动改 WI。本文旧稿中的 targetScope/targetProjectId 与“项目自动命中”属于历史设计，实施前必须按 CAP-94 显式选库及 CAP-95 资源授权修订，禁止恢复旧 scope/项目授权语义；自动提案不得自动公开或采纳。
+
 ## 1. 目的
 
 - **经验不再靠自觉**：开发会话收尾协议里让 agent 顺手产出经验候选，平台自动登记进
