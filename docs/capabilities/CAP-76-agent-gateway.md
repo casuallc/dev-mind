@@ -904,7 +904,7 @@ externalChatId, senderId, eventId, actor, personalActor)`，调 `AgentGateway.on
 | `list_releases` | `projectId`, `status?`, `limit` | 发版记录 |
 | `get_release` | `releaseId` | 发版详情/制品/tag |
 | `list_environments` | `projectId` | 可部署环境（id/名称/是否 PROD；归属 devmind-project） |
-| `search_knowledge` | `query`, `projectId?`, `limit` | 知识片段（带来源） |
+| `search_knowledge` | `query`, `kbIds?`（≤5，CAP-94 起替代 projectId；不传返回可用库清单不检索）, `limit` | 知识片段（带来源） |
 | `list_documents` | `projectId?`, `keyword?`, `limit` | 文档列表（keyword 走 `search`，两者同时给时先搜后按项目过滤） |
 | `get_document` | `docId` | 文档元数据 + 最新版本摘要 |
 | `list_agent_nodes` | `limit` | 节点 id/名称/在线/默认（不泄露 token） |

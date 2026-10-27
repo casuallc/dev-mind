@@ -478,7 +478,7 @@
       "post": {
         "operationId": "search_knowledge",
         "summary": "检索知识库",
-        "description": "按关键词检索知识库（全局库 + 当前项目库），返回文档摘要、命中片段与出处。回答规范/流程/历史经验类问题前先检索；query 必填，可用 docType/tag 缩小范围。",
+        "description": "按关键词检索指定知识库，返回文档摘要、命中片段与出处。回答规范/流程/历史经验类问题前先检索；query 必填，kbIds 指定要检索的知识库（≤5 个），不知道有哪些库时不传 kbIds 调用一次即可获取库清单；可用 docType/tag 缩小范围。（CAP-94：删 projectId，检索范围一律显式 kbIds）",
         "x-tool-risk": "READ",
         "x-min-role": "VIEWER",
         "x-owner-module": "devmind-knowledge",
@@ -494,9 +494,13 @@
                     "type": "string",
                     "maxLength": 200
                   },
-                  "projectId": {
-                    "type": "string",
-                    "maxLength": 64
+                  "kbIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "maxItems": 5,
+                    "description": "要检索的知识库 id 列表（≤5）；不传则不检索，返回可用库清单"
                   },
                   "docType": {
                     "type": "string",
