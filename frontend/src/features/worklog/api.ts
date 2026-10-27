@@ -14,11 +14,14 @@ import type {
   GoalTreeView,
   LinkableKr,
   NextPlanPreview,
+  OkrAdoptResult,
+  OkrDraftView,
   PlanItem,
   PlanItemPayload,
   PlanListView,
   QuarterlyReport,
   ReviewPreview,
+  SuggestedObjective,
   TemplateDefaults,
   WeeklyReport,
   WorklogEntry,
@@ -123,6 +126,20 @@ export const deleteGoal = (id: number) => api.del(`/worklog/goals/${id}`)
 /** 跨周期滚转（幂等：非 ACTIVE 跳过；KR 需与父 O 同批或显式指定新父） */
 export const carryGoals = (toPeriod: string, ids: number[], krParentMap?: Record<number, number>) =>
   api.post<GoalCarryResult>('/worklog/goals/carry', { toPeriod, ids, krParentMap })
+
+// ---- CAP-93 AI 生成 OKR（草稿确认：生成 → 草稿抽屉人工编辑 → 采纳批量落库） ----
+/** FR-01 触发生成（幂等：目标周期已有目标且非 force → reused=true 不起会话） */
+export const suggestOkr = (scope: 'YEAR' | 'QUARTER', period: string, force = false, hint?: string) =>
+  api.post<GenerateAck>('/worklog/goals/suggest', { scope, period, force, hint })
+/** FR-04 最新草稿（无 → exists=false，同报告口径） */
+export const getOkrDraft = (period: string) =>
+  api.get<OkrDraftView>(`/worklog/goals/suggest/draft?period=${period}`)
+/** FR-04 采纳草稿：objectives 为人工编辑后的树，两阶段建 O→KR（复用目标校验链，单事务） */
+export const adoptOkrDraft = (draftId: number, objectives: SuggestedObjective[]) =>
+  api.post<OkrAdoptResult>('/worklog/goals/suggest/adopt', { draftId, objectives })
+/** FR-04 丢弃草稿（已采纳不可丢弃） */
+export const discardOkrDraft = (draftId: number) =>
+  api.post('/worklog/goals/suggest/discard', { draftId })
 
 // ---- CAP-91 M2 季度复盘（period='2026-Q1'；GET 不存在返回 undefined 同日报口径） ----
 export const getQuarterly = (period: string) =>

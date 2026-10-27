@@ -2,6 +2,7 @@ import { Button, Card, Checkbox, Empty, Modal, Progress, Segmented, Space, Tag, 
 import {
   FileTextOutlined,
   PlusOutlined,
+  RobotOutlined,
   SwapRightOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
@@ -10,6 +11,8 @@ import { carryGoals, createGoal, deleteGoal, getGoalTree, updateGoal } from '../
 import type { GoalNode, GoalPayload, GoalTreeView, WorklogGoal } from '../types'
 import { GOAL_STATUSES } from '../types'
 import GoalFormDrawer, { type GoalPreset } from './GoalFormDrawer'
+import OkrGenerateModal from './OkrGenerateModal'
+import OkrSuggestDrawer from './OkrSuggestDrawer'
 import QuarterlyReviewDrawer from './QuarterlyReviewDrawer'
 import YearStrip from './YearStrip'
 import { showError } from '../../../shared/utils/showError'
@@ -85,6 +88,9 @@ export default function GoalBoard({ ref }: { ref?: Ref<GoalBoardHandle> }) {
   const [carry, setCarry] = useState<CarryState | null>(null)
   const [carrying, setCarrying] = useState(false)
   const [reviewPeriod, setReviewPeriod] = useState<string | null>(null)
+  // CAP-93：AI 生成 OKR（弹窗配置 + 草稿抽屉）
+  const [genOpen, setGenOpen] = useState(false)
+  const [draftPeriod, setDraftPeriod] = useState<string | null>(null)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -305,6 +311,9 @@ export default function GoalBoard({ ref }: { ref?: Ref<GoalBoardHandle> }) {
       loading={loading}
       extra={
         <Space size={4}>
+          <Button size="small" icon={<RobotOutlined />} onClick={() => setGenOpen(true)}>
+            AI 生成
+          </Button>
           <Button
             size="small"
             icon={<SwapRightOutlined />}
@@ -348,6 +357,9 @@ export default function GoalBoard({ ref }: { ref?: Ref<GoalBoardHandle> }) {
       loading={loading}
       extra={
         <Space size={4}>
+          <Button size="small" icon={<RobotOutlined />} onClick={() => setGenOpen(true)}>
+            AI 生成
+          </Button>
           <Button size="small" icon={<FileTextOutlined />} onClick={() => setReviewPeriod(quarterPeriod)}>
             季度复盘
           </Button>
@@ -406,6 +418,22 @@ export default function GoalBoard({ ref }: { ref?: Ref<GoalBoardHandle> }) {
         onSave={onSave}
       />
       <QuarterlyReviewDrawer period={reviewPeriod} onCancel={() => setReviewPeriod(null)} />
+      <OkrGenerateModal
+        open={genOpen}
+        defaultScope={section === 'YEAR' ? 'YEAR' : 'QUARTER'}
+        viewedYear={year}
+        viewedQuarter={section === 'YEAR' ? undefined : Number(section.slice(1))}
+        onReady={(p) => {
+          setGenOpen(false)
+          setDraftPeriod(p)
+        }}
+        onCancel={() => setGenOpen(false)}
+      />
+      <OkrSuggestDrawer
+        period={draftPeriod}
+        onCancel={() => setDraftPeriod(null)}
+        onAdopted={load}
+      />
       <Modal
         centered
         title={`滚转目标：${carry?.sourceLabel ?? ''} → ${carry?.toPeriod ?? ''}`}

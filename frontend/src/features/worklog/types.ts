@@ -351,6 +351,40 @@ export const GOAL_STATUSES: Record<string, { label: string; color: string }> = {
   CARRIED: { label: '已滚转', color: 'purple' },
 }
 
+// ---------------- CAP-93 AI 生成 OKR（草稿确认） ----------------
+
+/** 草稿里的一条建议 KR */
+export interface SuggestedKr {
+  title: string
+  content?: string
+  weight?: number
+}
+/** 草稿里的一条建议 O（parentYearGoalId 仅季度 O：挂同年年度 O 的 id） */
+export interface SuggestedObjective {
+  title: string
+  content?: string
+  weight?: number
+  parentYearGoalId?: number
+  krs: SuggestedKr[]
+}
+/** OKR 草稿视图（GET /worklog/goals/suggest/draft）；exists=false 表示无草稿（同报告口径） */
+export interface OkrDraftView {
+  exists: boolean
+  id?: number
+  scope?: 'YEAR' | 'QUARTER'
+  period?: string
+  contentMd?: string
+  objectives: SuggestedObjective[]
+  sessionId?: string
+  status?: string
+  updatedAt?: string
+}
+/** 采纳结果：created=实际建条目数（O+KR），goals=新建目标 */
+export interface OkrAdoptResult {
+  created: number
+  goals: WorklogGoal[]
+}
+
 /**
  * 目标体系注册表（CAP-91 M4）：当前仅 OKR。后续接入非 OKR 形式时在此登记体系名与
  * kind 文案（抽屉/表单的字样全走 goalKindLabel），树渲染（GoalBoard 的 O/KR 嵌套卡）
