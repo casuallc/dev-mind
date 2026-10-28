@@ -126,7 +126,7 @@
 2. 非 admin 用户调任意端点只见自己的数据（含传 `userId=他人` 被忽略）；
    非 admin 请求 `dim=user` 报 403；
 3. `mvn -q test` 全绿（含新增 `UsageStatsServiceTest`）；`npx tsc -b` 通过；
-   `node tests/e2e-layout-pages.mjs` 覆盖 /usage 无溢出。
+   `node tests/legacy/ui/e2e-layout-pages.mjs` 覆盖 /usage 无溢出。
 
 ## 8. MVP 范围
 

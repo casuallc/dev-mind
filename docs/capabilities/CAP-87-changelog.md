@@ -144,13 +144,13 @@
 - **M1**：FR-01~FR-04（文件定位、解析、可见性、缓存与容错）+ 解析单测。
 - **M2**：FR-05~FR-07（列表/详情 API、筛选分页、当前版本对照）+ 接口测试。
 - **M3**：FR-08~FR-11（页面、详情抽屉、用户菜单与关于弹框入口、空态与性能）+
-  `tsc -b` / `vite build`、`tests/cap87_changelog_e2e.py`。
+  `tsc -b` / `vite build`、`tests/legacy/api/cap87_changelog_e2e.py`。
 
 ## 9. 验收标准
 
 - `mvn -pl devmind-changelog test` 通过；全量 `mvn -q test` 不回归。
 - `cd frontend && npx tsc -b && npm run build` 通过。
-- `tests/cap87_changelog_e2e.py` 覆盖：
+- `tests/legacy/api/cap87_changelog_e2e.py` 覆盖：
   1. 默认列表只含已发布版本且按版本倒序，`[Unreleased]` 不出现；
   2. 版本号、日期区间、关键词三类筛选各自命中/落空；
   3. 详情返回完整 Markdown，未知版本 404；

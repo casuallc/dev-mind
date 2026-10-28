@@ -4,7 +4,7 @@
 > M2 日报计划对照 + 周报数据驱动 {{lastWeekPlan}}/{{thisWeekPlan}}；M3 AI 建议计划：
 > worklog-plan-suggest 场景 + suggest 链路（WipRequirementProvider SPI 探测降级）+
 > 建议项 AI_SUGGEST 落库 + 前端「AI 建议」入口；FR-11 周期末提醒开放后置；
-> E2E tests/cap88_e2e.py 26 项全绿）｜ 日期：2026-10-26
+> E2E tests/legacy/api/cap88_e2e.py 26 项全绿）｜ 日期：2026-10-26
 > **（2026-10-26 被 CAP-90 修订：交付当日实测反馈「日计划与条目双重记录、周计划与
 > 周报下周计划隔离」——DAY scope 计划项整体退役并入条目（条目加 status，计划即
 > 未完成条目），plan_items 收窄为 WEEK 唯一计划实体，周报「下周计划」改为计划项

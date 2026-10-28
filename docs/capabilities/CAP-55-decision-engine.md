@@ -136,7 +136,7 @@ GET    /api/decision/records/export              导出训练 JSONL（capability
 - E2E：mock 边车（固定 answers）跑通「提案入库→自动分诊→徽标→人工裁决→记录导出」全链。
 
 **E2E 落地**（脚本随 git，运行产物进 tmp/）：
-`tests/cap55_triage_verify.py`（FR-01~04，46 断言）｜ `tests/cap55_records_verify.py`
+`tests/legacy/api/cap55_triage_verify.py`（FR-01~04，46 断言）｜ `tests/legacy/api/cap55_records_verify.py`
 （FR-05，58 断言：分诊留痕→裁决配对→JSONL 导出三字段/分布→重诊不抹裁决→查询与 size 边界→
 拒绝不产 gold 不进导出集→降级样本也留痕）。
 

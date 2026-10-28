@@ -153,6 +153,6 @@ CAP-58 的终端是「每条命令一个独立进程」：`cd` 靠前端持有 c
   补全）/ Ctrl+C 取消 / Ctrl+L 清屏 / 已取消标记。与文档一处口径偏差：shell 重启
   的初始目录实现取「runner 侧 lastCwd 优先、空回落帧 cwd」（FR-01 写的是「以帧 cwd
   重启」），页面刷新后 ack 会重新对齐，语义等价。`mvn test` 全绿；
-  `tests/cap59_e2e.py` 在 :8090 独立实例 + fake runner（协议 v17）实跑通过：
+  `tests/legacy/api/cap59_e2e.py` 在 :8090 独立实例 + fake runner（协议 v17）实跑通过：
   env/cd 跨命令保持、runner cwd 权威、cd 越界 409+拉回、补全三模式、
   取消 exit 130+shell 重启、问答沙箱对称端点。

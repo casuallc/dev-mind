@@ -229,7 +229,7 @@ POST   /api/bookmarks/shared-with-me/copy   {bookmarkId, groupId|null}（复制�
 - **M1 —— 需求定稿**：本文档。
 - **M2 —— 实现 + E2E 通过（2026-09-24）**：新模块 `devmind-bookmark`（仅依赖 common + auth）
   + `frontend/src/features/bookmarks`（顶部一级导航「收藏夹」）。单测 47 项（含真实网络探测、
-  DNS/CONNECT 分类回归）`mvn test` 全绿；`npx tsc -b` 通过；`tests/cap64_e2e.py` 51 项断言
+  DNS/CONNECT 分类回归）`mvn test` 全绿；`npx tsc -b` 通过；`tests/legacy/api/cap64_e2e.py` 51 项断言
   闭环通过；全站布局巡检 `--only bookmarks` 四视图（1366×768）全过。
 - **规格未明确处的实现口径**（后续若要改口径，改这里 + 同步代码）：
   1. 分组过滤含子树——选中父分组即含全部后代条目；
@@ -262,5 +262,5 @@ POST   /api/bookmarks/shared-with-me/copy   {bookmarkId, groupId|null}（复制�
 
 - **M5 —— FR-10 浏览器书签导出（2026-10-09）**：工具条「导出」按钮前端拼 Netscape HTML
   下载（`buildBookmarkFile`，与 FR-09 解析器同文件对称维护）；分组层级/备注/标签往返无损，
-  账号密码不导出。E2E：`tests/cap64_export_ui.mjs`（真浏览器落盘 + 喂回 parseBookmarkFile
+  账号密码不导出。E2E：`tests/legacy/ui/cap64_export_ui.mjs`（真浏览器落盘 + 喂回 parseBookmarkFile
   往返断言）。

@@ -34,14 +34,14 @@
 
 ## 历史迁移
 
-`tests/e2e/legacy.json` 登记 tests 顶层所有历史脚本，`legacy`=待审核，`helper`=辅助探针，`manual-only`=不可自动化的运维操作。保留原位置，避免破坏已有调用。
+`tests/e2e/legacy.json` 登记 `tests/legacy/` 下所有历史脚本（`api/`、`ui/`、`ws/`、`ops/` 四类），`legacy`=待审核，`helper`=辅助探针，`manual-only`=不可自动化的运维操作。归档位置固定，不再在 `tests/` 顶层新增脚本，避免调用方路径继续分散。
 
-迁移时逐一核对端点与认证、独立前置、数据清理、失败退出码、硬编码路径/凭据；提炼断言到正式 TestCase，并更新清单 reason 为替代用例 id。优先迁移项目/需求/会话/测试套件关键链路，再迁移 UI 与外部依赖。未经审核不得直接批量执行 124 个历史脚本。
+迁移时逐一核对端点与认证、独立前置、数据清理、失败退出码、硬编码路径/凭据；提炼断言到正式 TestCase，并更新清单 reason 为替代用例 id。优先迁移项目/需求/会话/测试套件关键链路，再迁移 UI 与外部依赖。未经审核不得直接批量执行 110 个历史脚本。
 
 ### Python 文件接入规则
 
-- [逐文件迁移索引](../../tests/e2e/python-inventory.md) 覆盖 tests 顶层所有 `.py`，`python tests/e2e/python_inventory.py --write` 更新，统一入口 `--check` 检查清单是否过期。
-- 状态 `legacy` → 核对原断言与前置 → 提取独立 TestCase → 登记 catalog（含 source 原脚本路径）→ 真服务验证 → `migrated`。部分迁移不得标成全部迁移。
-- 原文件可保留兼容包装，委托统一入口，不再重复实现登录/起停/报告。不得 import 会在模块顶层发请求的历史脚本作自动发现。
+- [逐文件迁移索引](../../tests/e2e/python-inventory.md) 覆盖 `tests/legacy/` 下所有 `.py`，`python tests/e2e/python_inventory.py --write` 更新，统一入口 `--check` 检查清单是否过期。
+- 状态 `legacy` → 核对原断言与前置 → 提取独立 TestCase → 登记 catalog（含 source 原脚本路径，如 `tests/legacy/api/cap76_tools_contract.py`）→ 真服务验证 → `migrated`。部分迁移不得标成全部迁移。
+- 原文件可保留兼容包装（放在 `tests/legacy/` 对应分类目录），委托统一入口，不再重复实现登录/起停/报告。不得 import 会在模块顶层发请求的历史脚本作自动发现。
 - 项目按业务套件接入，不为每个历史文件机械建一个不可维护的套件。迁移后的每个测试方法在项目报告中单独显示；命令、JUnit 路径、超时、节点与密钥注入沿用统一契约。
-- 首批完整迁移 `cap76_tools_contract.py` → `contract.copilot.*` 三条测试，保留原契约断言。快照落本次 tmp/ 目录，正式测试不自动改写已跟踪的 docs 契约快照。
+- 首批完整迁移 `tests/legacy/api/cap76_tools_contract.py` → `contract.copilot.*` 三条测试，保留原契约断言。快照落本次 tmp/ 目录，正式测试不自动改写已跟踪的 docs 契约快照。

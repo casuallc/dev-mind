@@ -173,7 +173,7 @@ GET    /api/worklog/weekly/next-plan-preview?weekStart=   → {markdown, itemCou
 5. 日报素材只含 DONE 条目，「今日计划对照」含当日未完成条目 + 当周周计划项；
 6. 周报生成：下周已排计划项时「下周计划」逐条呼应清单；无计划项时维持推断行为；
    next-plan-preview 渲染与下周计划项一致，重建按钮填入后人工保存落库；
-7. 全量 `mvn test` 绿；E2E tests/cap90_e2e.py 覆盖状态流转/完成交互/日滚转幂等/
+7. 全量 `mvn test` 绿；E2E tests/legacy/api/cap90_e2e.py 覆盖状态流转/完成交互/日滚转幂等/
    DAY 迁移/素材口径/投影渲染。
 
 ## 10. 风险与开放问题

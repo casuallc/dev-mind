@@ -49,7 +49,7 @@
       "suite": "contract",
       "owner": "copilot",
       "cap": "CAP-76",
-      "source": "tests/cap76_tools_contract.py"
+      "source": "tests/legacy/api/cap76_tools_contract.py"
     },
     {
       "id": "contract.copilot.operation-inventory",
@@ -57,7 +57,7 @@
       "suite": "contract",
       "owner": "copilot",
       "cap": "CAP-76",
-      "source": "tests/cap76_tools_contract.py"
+      "source": "tests/legacy/api/cap76_tools_contract.py"
     },
     {
       "id": "contract.copilot.operation-contracts",
@@ -65,7 +65,7 @@
       "suite": "contract",
       "owner": "copilot",
       "cap": "CAP-76",
-      "source": "tests/cap76_tools_contract.py"
+      "source": "tests/legacy/api/cap76_tools_contract.py"
     }
   ]
 }

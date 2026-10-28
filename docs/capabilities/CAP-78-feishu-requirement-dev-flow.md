@@ -187,7 +187,7 @@ FR-10 不依赖通知中心）。
   `stop_session` 既有实现所在类内补充），均 `@Component` 注册进 `ToolRegistry`。
 - 工具实现统一结构（CAP-76 §6.3）：参数校验 → 反查对象 projectId →
   `ToolAccessPolicy`（缺席=仅 RBAC）→ 合成 SecurityContext 调 Service → 映射 ToolResult。
-- 契约快照 `docs/capabilities/tools/cap76-tools.yaml` 用 `tests/cap76_tools_contract.py`
+- 契约快照 `docs/capabilities/tools/cap76-tools.yaml` 用 `tests/legacy/api/cap76_tools_contract.py`
   重新生成，8 个新 operation 在 diff 中可见。
 
 ## 5. 依赖关系
@@ -217,7 +217,7 @@ FR-10 不依赖通知中心）。
 5. bot 指令：`/plan` 首规划直执行、再规划二次确认；`/finalize` 必二次确认且
    discard 进入确认文案；`/dev WI-2` 路由到 WI 起会话。
 
-### E2E（`tests/cap78_feishu_flow_verify.py`，产物写 tmp/）
+### E2E（`tests/legacy/api/cap78_feishu_flow_verify.py`，产物写 tmp/）
 
 - 隔离 app（e2e profile）+ fake bot 注入消息 + fake 模型（工具调用）+ fake runner
   （executor=fake 或 mock WS 节点）。

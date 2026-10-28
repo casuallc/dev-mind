@@ -58,6 +58,6 @@ FULL 库的全量 CLAUDE.md 注入（经验库语义），缺少「挂一个 RAG
 ## 验证
 
 - 单测：注入包装（有命中拼前缀/无命中原样/检索异常降级原样/未绑库不调用检索）。
-- E2E（tests/cap46_verify.py）：独立实例（18090+独立 H2+mock embedding）+ fake runner
+- E2E（tests/legacy/api/cap46_verify.py）：独立实例（18090+独立 H2+mock embedding）+ fake runner
   节点 → 建库建条目等索引 ready → 绑库起问答 → 断言事件流出现 `<knowledge-context>`
   与库概览 → 再发一轮输入断言二次注入；不绑库问答断言无注入。

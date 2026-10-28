@@ -325,14 +325,14 @@ M3 新增：
 
 - M1：新库种子出 5 通道含 feishu；存量库（预置部分通道）启动后补插缺失 code 且不覆盖
   既有配置；feishu 启用但 webhookUrl 空时 emit P0 后 channelStatus.feishu 以 FAILED 开头；
-  前端可界面配置 webhookUrl/secret 并保存（合并语义不丢其他 key）；`tests/cap06_verify.py` 全绿。
+  前端可界面配置 webhookUrl/secret 并保存（合并语义不丢其他 key）；`tests/legacy/api/cap06_verify.py` 全绿。
 - M2：单测覆盖指令解析矩阵、路由（绑定懒创建/失败文案）、去重 TTL、飞书事件标准化；
-  `tests/cap75_bot_verify.py`（FakeBotAdapter 驱动全路由 + 飞书出站打 mock server）全绿；
+  `tests/legacy/api/cap75_bot_verify.py`（FakeBotAdapter 驱动全路由 + 飞书出站打 mock server）全绿；
   部署机真实联调：飞书后台选长连接保存通过 → 群内 /help → /bind → 问答 → /build。
 - M3：`/bindme` 回身份码指引；未绑定发敏感指令被拒并落 REJECTED、问答放行；
   设置页绑定身份码后 `/whoami` 命中个人身份、敏感操作放行；`/api/bot/admin/interactions`
   可见 OK/DEDUPED/REJECTED 行、非 ADMIN 403；运维页三视图可查可解绑；
-  `tests/cap75_bot_verify.py` G/H 段全绿。
+  `tests/legacy/api/cap75_bot_verify.py` G/H 段全绿。
 - M4：`/reqs` 列出未完结需求；`/req REQ-1`（兼容 `1`/`req-1` 形态）回详情含工作单元；
   `/dev REQ-1 补充` 起会话且挂 requirementId、taskSpec 含需求标题与补充说明；
   未绑定个人身份发三个指令均落 REJECTED。
@@ -340,7 +340,7 @@ M3 新增：
   收到与描述一致的张数）；发图片消息回执「已收到截图」且附件表出现 SHARED 记录，
   随后 `/dev` 起会话挂 attachmentIds；`/status` 列会话、`/stop` 停 RUNNING；
   `/wi` / `/design` 回工作单元与方案正文截断；四个指令 + 图片消息未绑定身份均落 REJECTED；
-  `tests/cap75_bot_verify.py` M5 段全绿。
+  `tests/legacy/api/cap75_bot_verify.py` M5 段全绿。
 - M6：`/flow REQ-x 验收` 状态推进成功；`/flow REQ-x 完结` 先回确认提示、回「确认」才落 DONE、
   回「取消」不动；`/stop` 有运行中会话时先确认再停（E2E 无 runner 仅覆盖空态与文案，
   确认流由单测覆盖）；`/release` 无参回空态、带参无成功构建回明确文案（发版全链路

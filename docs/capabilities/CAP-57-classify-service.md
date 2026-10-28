@@ -12,7 +12,7 @@ laya 决策模型在知识库分诊场景经 CAP-56 真机基准证伪（37 题�
    决策链路降级为平台级独立「分类服务」，不向任何业务链路承诺 SLA；
 2. **平台化**：Python 边车（tools/laya-sidecar，FastAPI uvicorn）的**生命周期（起停/健康）**与
    **安装包（程序包/模型权重包/语料包）**纳入管控台，经 agent 节点 WS 通道下发执行，
-   替代 `tests/cap56_gpu_e2e.py` 里 SSH `pkill uvicorn` + `nohup` 的手工运维。
+   替代 `tests/legacy/api/cap56_gpu_e2e.py` 里 SSH `pkill uvicorn` + `nohup` 的手工运维。
 
 ### 非目标（v1 不做）
 

@@ -7,7 +7,7 @@
 > FR-07 准入闸门 9263697、FR-08 前端四视图 0bf4737 已落地；FR-09 口径更正见 c6ab1a0。
 > 承载机制：题面上提 95ec1c2、exec 帧 bundle 端点 + runner 协议 v14 e128cc1。
 >
-> **真机结论**（`tests/cap56_gpu_e2e.py`，41 条断言全绿）：
+> **真机结论**（`tests/legacy/api/cap56_gpu_e2e.py`，41 条断言全绿）：
 > ① **退化复现**——基座在 37 题基准集上 accuracy **0.216** < 随机基线 0.389 < 多数类基线 0.676；
 > 分组 空召回 0.25 / 逐字重复 0.583 / 不相关 0.25 / 普通 0.4（noulRate 0.80）——即"恒答重复"，
 > 与本 CAP 缘起里那次实测（0.988/0.931/0.972）同源。
@@ -50,10 +50,10 @@
 > **两个必须钉住的环境项**（写进 guides/decision-lab-guide.md §6/§7）：与 vLLM 共卡时边车
 > `LAYA_DEVICE=cpu`（cuda 在显存吃满时随机 500 / 退 CPU → 平台侧整片分诊降级；CPU ~2.0s/条零降级）、
 > DECISION 端点 `model` 钉到槽位（留空 = 边车按语言路由，会撞上 laya 0.3.6 内置 english 槽位指向
-> 非 checkpoint 的坑）。平台侧链路另有 `tests/cap56_e2e.py` 全绿（78 条断言：真 runner + mock 边车 +
+> 非 checkpoint 的坑）。平台侧链路另有 `tests/legacy/api/cap56_e2e.py` 全绿（78 条断言：真 runner + mock 边车 +
 > stdlib stub 脚本，边界见脚本头注释）。
 >
-> **⑥ 224 生产环境落地实证**（2026-09-23，`tests/cap56_224_verify.py`，22 项断言全绿）：在
+> **⑥ 224 生产环境落地实证**（2026-09-23，`tests/legacy/api/cap56_224_verify.py`，22 项断言全绿）：在
 > 172.20.140.224 上跑通最小可用段——登记基座 → serve 自检六项全 OK → 放行（**闸门 False→True，
 > 知识库分诊从「闸门拦死」恢复可用**）→ 37 条基准集冻结 → 节点 3（140.88 真 venv、真 laya 0.3.6）
 > 真评测 **13 秒**跑完 111 题：accuracy **0.216** < 随机 0.389 < 多数类 0.676，`choice` 37/37 恒答
@@ -216,10 +216,10 @@ tools/laya-sidecar  GET /healthz          增报槽位实际来源（FR-01）
   `decide()` 运行时降级；验证通过后全链放行——两侧行为都覆盖到测试；
 - 校准前后 ECE 有对比数字；`adopt_layer` 恒 `project` 这类退化能被报告显式暴露（不是靠人偶然发现）；
 - E2E：脚本沉淀 `tests/`（运行产物写 `tmp/`），mock 边车 + mock 节点跑通「建集→冻结→评测→微调→回评→
-  验证→serve→分诊」全链。→ **已达成**：`tests/cap56_e2e.py`（78 条断言全绿，真 runner + mock 边车）。
+  验证→serve→分诊」全链。→ **已达成**：`tests/legacy/api/cap56_e2e.py`（78 条断言全绿，真 runner + mock 边车）。
   节点上执行的是 stdlib stub（复刻退化形态），所以这一遍证的是**平台把数字算清并摆到一起**，
   不是「RLCD 收敛了」——收敛性只能在真机验。→ **真机那一遍也已沉淀**：
-  `tests/cap56_gpu_e2e.py`（真 laya 模型 + 真 torch 训练 + 真边车，41 条断言全绿，结论见文首状态块）。
+  `tests/legacy/api/cap56_gpu_e2e.py`（真 laya 模型 + 真 torch 训练 + 真边车，41 条断言全绿，结论见文首状态块）。
 
 ## 8. 非目标
 

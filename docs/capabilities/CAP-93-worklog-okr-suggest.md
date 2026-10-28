@@ -147,7 +147,7 @@ worklog_okr_drafts (
 - M1：`OkrSuggestParserTest`（行契约/容错/封顶/围栏，8 例）、`OkrSuggestServiceTest`
   （采纳两阶段/归属 404/幂等覆盖/丢弃口径，7 例）、`WorklogOutputMirror` 草稿落库单测
   （3 例）；`mvn -q test` 全绿。✅
-- M2：`tests/cap93_e2e.py`（隔离 app :18107 + fake executor：触发 suggest → 预写产物
+- M2：`tests/legacy/api/cap93_e2e.py`（隔离 app :18107 + fake executor：触发 suggest → 预写产物
   回传 → 草稿出现 → 编辑后采纳进 goals 树；force 重生成覆盖；discard 幂等；护栏 400）
   20/20 通过；`npx tsc -b` 通过。✅
 - M3：`ReportServiceTest` 纯文本模式单测（空依据 400；textOnly 起会话 prompt 含用户文本、

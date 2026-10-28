@@ -1,27 +1,51 @@
-# tests/ — 可复用 E2E 验证脚本
+# tests/ — E2E 验证套件与历史脚本归档
 
-> **2026-10-28 起统一标准**：[E2E 测试规范 v1](../docs/core/e2e-testing-standard.md)。下面的清单保留作历史脚本说明；新用例遵循统一入口和登记表。
+> **统一标准**：[E2E 测试规范 v1](../docs/core/e2e-testing-standard.md)。正式用例只维护 `tests/e2e/`；历史脚本统一归档在 `tests/legacy/`，仅作参考，不再新增。
 >
 > - 校验登记：`python tests/e2e/run.py --check`；查看正式用例：`python tests/e2e/run.py --list`
 > - 当前代码隔离回归：先 `mvn -q install -DskipTests`，再 `python tests/e2e/run.py --suite regression --isolated`
 > - 共享实例只读冒烟：提供 `E2E_TOKEN` 或 `E2E_USER` + `E2E_PASSWORD`，运行 `python tests/e2e/run.py --suite smoke --base <含/api的地址>`
-> - JUnit 报告统一为 `tmp/e2e/junit.xml`；当前 9 个正式用例（smoke 5、隔离回归 1、contract 3），124 个历史脚本见 `e2e/legacy.json`，未全部迁移。
+> - JUnit 报告统一为 `tmp/e2e/junit.xml`；当前 11 个正式用例（smoke 5、隔离回归 3、contract 3）。
+> - 历史脚本共 110 个，登记在 `e2e/legacy.json`；Python 静态索引见 [e2e/python-inventory.md](e2e/python-inventory.md)。
 > - [194 项目接入步骤](../docs/guides/platform-self-deploy-194.md#统一-e2e-套件接入)
-> - [所有 Python 文件迁移索引](e2e/python-inventory.md)；首批完整迁移 `cap76_tools_contract.py`，运行 `python tests/e2e/run.py --suite contract --base <API地址>`，统一认证环境变量同上。
 
 对真实启动的服务跑端到端验证的脚本集，随 git 提交。与 `mvn test` 单测互补：单测管逻辑回归，这里管「不起服务跑一遍不算完成」的那遍。
 
+## 目录结构
+
+```text
+tests/
+├── e2e/            # 统一入口、正式用例、catalog/legacy 登记表
+├── fixtures/       # 测试双端与基准样本（正式用例与历史脚本共用）
+├── legacy/
+│   ├── api/        # 66 个 Python 能力验证脚本
+│   ├── ui/         # 14 个前端 CDP 回归脚本（.mjs）
+│   ├── ws/         # 9 个 WS 帧探针（.mjs）
+│   └── ops/        # 20 个 Shell 运维脚本 + 1 个 PowerShell 脚本
+└── README.md
+```
+
+`tests/` 顶层不再放脚本；新增用例一律写入 `tests/e2e/` 并登记 `tests/e2e/catalog.json`。
+
 ## 通用约定
 
-- **运行产物一律落 `tmp/`**（gitignored）：日志、runner 工作区、临时 json/zip。本目录只放脚本与 fixtures，别把生成物写进来。
-- **前置看脚本头注释**：多数要 app 已起（:8080，个别 :8081/:18090）；涉及 runner 的先 `mvn -q install -DskipTests` 出 `devmind-agent-runner.jar`。
+- **运行产物一律落 `tmp/`**（gitignored）：日志、runner 工作区、临时 json/zip。脚本与 fixtures 目录不放生成物。
+- **前置看脚本头注释**：多数要 app 已起（:8080，个别 :8081/:18090 等）；涉及 runner 的先 `mvn -q install -DskipTests` 出 `devmind-agent-runner.jar`。
 - Python 脚本只用标准库（Windows 控制台已处理 UTF-8）；`.mjs` 需 Node 18+（原生 WebSocket/fetch）；`.sh` 用 Git Bash；从仓库根目录跑。
-- 新正式用例按规范写入 `tests/e2e/` 并登记 `catalog.json`；以下旧命名仅用于存量维护。禁硬编码密钥/本机密码。
+- 历史脚本只做存档参考：禁止直接加入共享环境套件；需要复用时先按规范审核、改写并登记 `catalog.json`。
 - **E2E 跑完必须清理环境（MUST）**：脚本自起的隔离 app 实例、runner、mock/fixture 进程全部杀掉，不留后台残留。尤其 runner 若从 `devmind-agent-runner/target/` 起，运行中会**锁住 jar**——后续 `mvn package/clean`（含 deploy 构建）直接报 "Failed to delete ... devmind-agent-runner.jar"（2026-10-11 更新 194 环境时实踩）。杀 runner 按命令行特征（无监听端口可查）：
   ```bash
   powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name like 'java%'\" | ? { \$_.CommandLine -match 'devmind-agent-runner/target' } | % { Stop-Process -Id \$_.ProcessId -Force }"
   ```
   注意只匹配 `devmind-agent-runner/target` 路径——别误杀 WinSW 服务化的 runner（`C:\Users\kingdee\devmind-runner*` 独立目录）。隔离 app 实例按端口查 PID 再 taskkill（姿势见 docs/core/开发注意事项.md「停后端」）。
+
+## 正式套件（tests/e2e/）
+
+| 套件 | 用例 | 说明 |
+|------|------|------|
+| smoke | health / anonymous / identity / projects / changelog | 只读冒烟，可打共享实例；不写业务数据 |
+| regression | project-lifecycle / knowledge-permissions / knowledge-published-versions | 写操作回归，必须 `--isolated` 起私有实例 |
+| contract | copilot document-metadata / operation-inventory / operation-contracts | 契约快照；`tests/legacy/api/cap76_tools_contract.py` 为兼容入口，内部转调统一入口 |
 
 ## 起独立实例跑 E2E（不碰本机 dev 实例与库）
 
@@ -37,7 +61,7 @@ mvn -pl devmind-app spring-boot:run -Dspring-boot.run.profiles=e2e \
    --devmind.project.workspace-root=$PWD/tmp/e2e-data/repositories \
    --devmind.worktree.root=$PWD/tmp/e2e-data/worktrees \
    --devmind.attachment.root-dir=$PWD/tmp/e2e-data/attachments"
-E2E_BASE=http://localhost:8090/api python tests/cap52_e2e.py
+E2E_BASE=http://localhost:8090/api python tests/legacy/api/cap52_e2e.py
 ```
 
 `--spring-boot.run.profiles=e2e` 是**必需的**：仓库无 `application-e2e.yml`，该 profile 的作用是
@@ -48,13 +72,14 @@ E2E_BASE=http://localhost:8090/api python tests/cap52_e2e.py
 
 | 文件 | 用途 | 启动方式 |
 |------|------|----------|
-| `TestSshServer.java` | 内存 SSH 服务器（sshd），cap07~10 的上传/远程执行目标 | 先编译（见下），verify 脚本会自动拉起；手工：`java -cp <cp> TestSshServer 2222 test testpw` |
-| `agent-mock.js` | 假 Agent HTTP 端（cap07 健康检查） | `node agent-mock.js 9100 tok123` |
-| `api-mock.js` | 假 OpenAPI 端（cap10 apiDocSource） | `node api-mock.js 9300` |
+| `TestSshServer.java` | 内存 SSH 服务器（sshd）。原 cap07~10 的上传/远程执行目标；对应脚本已删除，当前无自动调用 | 先编译（见下），手工：`java -cp <cp> TestSshServer 2222 test testpw` |
+| `agent-mock.js` | 假 Agent HTTP 端（原 cap07 健康检查）；当前无自动调用 | `node agent-mock.js 9100 tok123` |
+| `api-mock.js` | 假 OpenAPI 端（原 cap10 apiDocSource）；当前无自动调用 | `node api-mock.js 9300` |
 | `embedding-mock.py` | 假 OpenAI 兼容 embedding 端（`POST /v1/embeddings`，每行常量单位向量 → 余弦恒 1.0，与 LIKE 降级的 score=0 可区分），控制面 `/__dims` 改维度、`/__status` 注入故障（body 回显 Authorization 验凭据脱敏）、`/__state` 回看请求 | `python embedding-mock.py [port]`（默认 18193，cap48 脚本自动拉起） |
 | `jira-mock.py` | 假 Jira Server（`/rest/api/2`，创建 issue/任务类型/创建字段元数据（新旧两种端点）/优先级/可指派用户/单条读取/搜索/转换清单与执行/工时登记——转换默认按 issue 状态推导，终态只给「重新打开」），控制面 `/__state` 暴露收到的 payload 与 worklogs、`/__createmeta` 注入字段目录并可按目录校验必填、`/__transitions` 注入转换清单、`/__fail-transition`·`/__fail-worklog` 注入故障 | `python jira-mock.py [port]`（默认 18192，cap47/cap101 脚本自动拉起） |
 | `chat-mock.py` | 假 OpenAI 兼容对话端（`POST /v1/chat/completions` → `choices[0].message.content` 为当前回复文本），控制面 `/__reply` 改回复、`/__status` 注入故障（body 回显 Authorization 验凭据脱敏）、`/__state` 回看请求（model/prompt/role/auth/path/hasMaxTokens）。**刻意不实现 `/v1/embeddings`**：探针没按 kind 分派时会拿到 404 当场报错 | `python chat-mock.py [port]`（默认 18194，cap48 脚本自动拉起） |
 | `laya-sidecar-mock.py` | 假 laya 决策边车（CAP-55，`GET /healthz` + `POST /v1/predict`），**不实现 `/v1/embeddings` 与 `/chat/completions`**；答案按 questions 原语派生（choice→第一个选项 0.9、score→最高等级 0.8、noul→0.2，形状照 0.3.5 真机），控制面 `/__answers` 固定答案、`/__checkpoint` 改 routing、`/__health` 把 status 改成 loading（验「边车未就绪」）、`/__status` 注入故障码与 detail、**`/__sources` 注入槽位→实际来源**（CAP-56 FR-01 的 `/healthz` 上报形态：`sources`/`source_origin`/`overridden_slots`/`unready_slots`；传 null 恢复「不上报」= FR-01 之前的老边车，serve 自检该报 WARN）、`/__state` 回看请求（state/questions/model/hasModelKey/auth） | `python laya-sidecar-mock.py [port]`（默认 18195，cap55 脚本自动拉起；cap56_e2e.py 用 18196） |
+| `feishu-mock.js` | 假飞书开放平台（tenant_access_token / wiki get_node / docx 文档+blocks / 旧版 doc raw_content），控制面 `/__set_docx`、`/__set_doc`、`/__fail` | `node feishu-mock.js [port]`（默认 18191，cap45 脚本自动拉起） |
 
 ### 数据 fixtures（基准样本，不是测试双端）
 
@@ -70,120 +95,142 @@ javac -cp "$M2/org/apache/sshd/sshd-core/2.16.0/sshd-core-2.16.0.jar;$M2/org/apa
   -d tests/fixtures tests/fixtures/TestSshServer.java
 ```
 
-## 脚本清单
+## 历史脚本归档
 
-### 能力验证（Python，app :8080 除非另注）
+以下脚本仅为存档，**不保证可重复运行**；运行前先读脚本头注释，产物落 `tmp/`，跑完自行清理。路径均相对仓库根。
 
-| 脚本 | 覆盖 |
-|------|------|
-| cap02_verify.py | 项目 CRUD/查重 409/标签筛选 |
-| cap03_verify.py | 文档库：建档/模板/多版本/diff/回退/git 同步 |
-| cap04_verify.py | 知识库 FR-01~08 + 真实会话注入 |
-| cap44_verify.py | CAP-44 知识库容器化+向量检索：库 CRUD/级联删、legacy 兜底经验库、索引状态机、向量检索排序（需 app 配 `devmind.knowledge.embedding.provider=mock`，默认 :18090 独立实例） |
-| cap45_verify.py | CAP-45 飞书文档对接：FEISHU 集成+连接测试、docx/wiki/doc 三形态导入（externalId 判重+contentHash 变更检测）、URL 归一化、重同步 updated/unchanged/失败保留旧内容（需 node 起 fixtures/feishu-mock.js 由脚本自起、app 配 mock embedding，默认 :18090 独立实例） |
-| cap46_verify.py | CAP-46 知识库 AI 会话：绑库问答（ChatView 回传 knowledgeBaseId、库不存在 400）、事件流断言库概览节 <knowledge-base> 与两轮 <knowledge-context> 注入（来源标注）、不绑库问答无注入（脚本自起 fake runner 节点连 :18090，需 runner jar 已构建 + app 配 mock embedding 独立实例） |
-| cap48_verify.py | CAP-48 模型接入管理：迁移种子端点、端点 CRUD/校验、连接测试（实测维度回写/维度变化告警/失败诊断且凭据脱敏）、解析链（库级覆盖→平台默认→无，停用/删除后回落不回写）、索引血缘与维度失配诊断（DIMENSION_MISMATCH / NO_EMBEDDING 均不静默空结果）、重建索引（全库/只失配）、删除引用保护、通用模型（CHAT）端点段：按 kind 分派打 /chat/completions（含草稿预检与 RERANK 400）、不吃向量语义（topK/threshold 落 null 且越界不报错）、mock 对话零网络、测试消息回显模型真实回复、平台默认按类型各自唯一、知识库不能绑对话端点、对话默认不劫持向量解析链（脚本自起 fixtures/embedding-mock.py + fixtures/chat-mock.py，默认 :18090 独立实例；**会删掉迁移种子端点，放在 cap44/45/46 之后跑**） |
-| knowledge_eval/run-eval.mjs | CAP-85 FR-30 检索评测：登录 → `GET /knowledge/admin/eval/report?topK=&kbId=` → 打印 Recall@K/MRR/引用准确率/拒答率与逐题明细，`--out` 落 JSON 供改动索引/模型前后对比。数据集 `knowledge_eval/dataset.json`（含不可回答题），需 app 已起且期望文档已导入对应库；只读，不改数据 |
-| cap47_verify.py | CAP-47 自建需求推送 Jira：push-targets/options/可指派用户（GDPR 退 username）、建 issue payload（含回链、空参数不写）、转托管不动托管字段、重复推送 409、无凭证 400 引导绑定、手动 refresh、同步 run 不重复建需求、FR-08 动态必填字段（create-fields 分区与控件映射/候选值与预填、缺字段被 Jira 逐字段拒、动态字段 payload 形态、护栏拦越权与超深取值、旧端点兜底、读端点抖动降级、FR-10 个人推送模板（四元组 upsert/多用户隔离/未登录 401/targets 带回模板/项目无关选项端点））（脚本自起 fixtures/jira-mock.py，默认 :18090 独立实例） |
-| cap101_verify.py | CAP-101 验收通过联动 Jira 解决与工时登记：推送转托管→DONE→resolve 主路径（词表命中 toStatus/中文 comment 透传/timespent 累加/remoteStatus 单条刷新）、终态重入跳过空转、转换成功+工时失败部分成功不回滚、转换失败抛错不登记、name 兜底匹配、非法入参与非 Jira 来源 400（脚本自起 fixtures/jira-mock.py，默认 :18090 独立实例） |
-| cap06_verify.py / cap06_integration.py | 通知中心 REST / 集成链路 |
-| cap07_verify.py | 服务器适配：SSH/HTTP 连通、模板白名单、上传下载、凭证加密（自动拉起 fixtures） |
-| cap08_verify.py | 构建执行器：多步骤/上下文 env/并发 409/远程构建/WS 日志流 |
-| cap09_verify.py | 部署执行器：幂等 409/备份/失败自动回滚/确认门 |
-| cap10_verify.py | 测试执行器：OpenAPI 套件/API 执行/报告/失败转缺陷（自动拉起 fixtures） |
-| cap10_acceptance_e2e.py | 验收联动：WI 挂测试绿跑 → 需求 rollup ACCEPTANCE + 待验收通知（免 fixture，用例打应用自身 /api/health） |
-| cap11_verify.py | 发版执行器：tag/版本递增/回滚删 tag/强制 buildId/tag 区间归集需求与 WI/验收中需求自动完结（带登录，argv 传 base/user/pwd） |
-| cap21-project-default-node.py | 项目默认执行节点继承与覆盖 |
-| cap23_verify.py | 项目仓库 git 克隆：状态机/重试/WS 帧（配 cap23-ws-test.mjs） |
-| cap28_e2e.py / cap28_e2e2.py | 工时：仓库订阅/条目 CRUD/git 导入/日报周报（:8081） |
-| cap29_e2e.py | 全局仓库登记 + 项目关联 + 工时订阅扫描（:8081） |
-| cap32_e2e.py | 附件：上传/鉴权/Content-Disposition/chat 引用 |
-| cap33_verify.py | 场景化会话与上下文装配（自建 fake runner） |
-| cap34_fr04_08_verify.py / cap34_reattach_verify.py | runner 调度：断连对账/服务端重启 reattach/exit 路由 |
-| cap37_e2e.py ~ cap40_e2e.py | 产出回传、流程串联、需求附件上下文投送（协议 v3/v4；cap37 链路已被 CAP-38/52 取代，cap40 已改用 flow/plan） |
-| cap52_e2e.py | 需求流程精简：三合一规划会话（一会话三产出）→ 自动开发会话（**复用同一棵需求工作树**，CAP-51 验收 5）→ 待验收；粒度护栏/入口互斥/无清单与终态 409（协议 v10）；终态自动清理（CAP-51 FR-06 修订：DONE 后需求工作树回收 + 本地/远端需求分支删除，协议 v13）。支持 `E2E_BASE` 指向非 8080 实例（如 `E2E_BASE=http://localhost:8090/api`），起隔离实例的姿势见下方「起独立实例跑 E2E」 |
-| cap54_e2e.py | 会话工作区实时视图（协议 v11）：status/tree/file/diff 四端点（含已跟踪 diff 与未跟踪 untracked）、路径逃逸 409/缺参 400、问答沙箱 gitAvailable=false 且无 diff 端点、终态经 runner recentDirs 仍可读（脚本自起 fake runner 节点） |
-| cap58_e2e.py | 会话工作区远程终端（协议 v16）：pwd/ls/cat/git status 回显与非零退出、cd 状态跟进（ack 带回新 cwd）、安全边界全拒（cwd 越界/`cd ../..` 逃逸/白名单外 rm/git 写子命令/> 重定向不落盘）、问答沙箱终端、终态会话经 recentDirs 仍可执行；runner 协议 <v16 拒跑（脚本自起 fake runner 节点，支持 `E2E_BASE` 指独立实例） |
-| cap59_e2e.py | CAP-59 远程终端增强（协议 v17）：持久 shell（export/cd 跨命令保持、runner 侧 cwd 权威——故意传空 cwd 验证）、cd 越界 409+shell 强制拉回、Tab 补全三模式（文件/目录带斜杠/首词命令）、Ctrl+C 取消（tail -f 执行中 POST cancel → cancelled=true exit 130 + shell 自动重启 env 丢失佐证）、问答沙箱对称 complete 端点（脚本自起 fake runner 节点，断言协议 ≥v17，支持 `E2E_BASE` 指独立实例） |
-| cap64_e2e.py | CAP-64 收藏夹：CRUD/探测（HEAD 405 回落 GET + Range）/账号密文按次取/分享闭环（接收方只读+复制+撤销 404）/归属 404/分组删除二档；FR-09 书签导入（结构化树 → 层级/备注/标签落库、非法地址跳过、重复导入幂等、他人同 URL 不阻塞、空树与超 8 层 400）。支持 `E2E_BASE` 指独立实例 |
-| cap64_group_tree_ui.mjs | CAP-64 M4 分组树交互（CDP 真浏览器）：antd Tree 渲染默认全展开、折叠集写 localStorage 且刷新后仍折叠、合成 DragEvent 拖拽子分组落到目标分组内（服务端 parentId 真变更）、拖父进自己子树被 allowDrop 拒绝。前置：后端（`API` 可指独立实例 :8090）+ 前端 dev（`BASE`）已起；坑都钉在 drag() 注释里（HTML5 DnD 必须合成 DragEvent、落点横移量与下半格余量、展开动画落定再量坐标） |
-| cap65_e2e.py | CAP-65 节点文件浏览器（协议 v18）：真 runner 节点全链——list 目录优先/跳 .git、中文 write→read 回读、rename 冲突与非法名 409、二进制 read 409、>512KB write 400、逃逸（../绝对路径/白名单外 root）409、delete recursive 门控、5MB upload→download sha256 对账 + RFC5987 中文文件名、64MB 中转期间 list 不阻塞、>100MB 上传 409、白名单清空 409、裸 WS 模拟 v17 runner → 409 指引升级、离线 409、非 ADMIN GET/POST 一律 403（前置：runner jar 已构建 + 隔离实例，`E2E_BASE=http://localhost:8090/api`） |
-| cap68_e2e.py | CAP-68 会话附件注入与附件生命周期：上传带标签+保留天数/PUT meta 改清（空白=清除）/tag 过滤/批量删除权限矩阵（owner/ADMIN 逐项部分失败）/过期硬删（expiresAt 拨过去 + 短 cron，行 404+盘无残留）/上传超限 400；创建会话即带附件 → .devmind/input/attachments/&lt;id&gt;-&lt;净化名&gt; 字节对账 + 注入块「## 会话附件」（ASCII/中文名/路径穿越三形态）；会话中发文件 → runner 落盘 .devmind/incoming + fake 回复带 Read 提示；发图片 → user 事件 payload.attachments 引用；单条 6 文件 400（前置：隔离实例加 `--devmind.attachment.max-size-mb=1` + 环境变量 `DEVMIND_ATTACHMENT_CLEANUPCRON=*/10 * * * * *`，runner jar 已构建，`E2E_BASE=http://localhost:8090/api`） |
-| cap69_e2e.py | CAP-69 脚本测试套件**全链**（真 runner + file:// fixture git 仓库；套件强制绑定 LOCAL 项目）：CRUD + secret env 掩码/掩码回传=不变 + junitPath 穿越/非法 env 键/projectId 缺失 400 + 幽灵项目 404 → 显式节点触发 → SUCCESS（3 条结果 pass×2/skip×1 中文名 + 耗时；run.projectId 归属 + CAP-03 报告文档沉淀）→ env 覆盖 SUITE_MODE=fail → FAILED + 缺陷线索 → junit 缺失不炸 → 离线节点 409 → 共享 workspaceKey 跨套件工作区复用 → 路由链（套件默认 → 项目默认节点回落）→ 项目运行历史 5 条全归属 → /tests/runs 收 script 套件 400（前置：隔离实例 :18099 + 全新 H2 + `--spring.profiles.active=e2e`，runner jar 已构建，脚本自起 runner（execAllowlist=bash），姿势见脚本头） |
-| cap69_ui_unify.mjs | CAP-69 交互统一回归（CDP 真浏览器）：三种套件类型新建走统一抽屉（类型在表单内，openapi 类型免名称/确认键变「生成」，切 script 才展开 git/命令字段，extra 不再单挂「从 OpenAPI 生成」）、smoke/script 行操作均为 运行/编辑/删除、行内运行弹窗按类型渲染字段（smoke=目标环境/baseUrl、script=env/命令覆盖）、script 行编辑跳内层页脚本属性表单（改命令保存 API 回读对账、无用例表格）、内层页 extra「运行」按钮两种类型字段族各断言。前置：后端 :8080 + 前端 :5173 已起（scripts/dev.sh） |
-| cap70_e2e.py | CAP-70 服务端出口反向隧道（协议 v21）**全链**：真 runner jar（executor=fake）自动起 /ws/agent-tunnel → 规则 CRUD + host 规范化（空白/端口剥离入库）+ 非法节点 400 → /egress-rules/status 隧道徽标 → 手写 SOCKS5 客户端打 127.0.0.1:18089 经隧道到本机 echo 双向 relay（含二进制）→ 未命中规则 rep=2 → 命中离线节点 rep=4 快速失败 → 删规则路由快照即失效 → 裸 WS 握手 v17 老 runner（supportsTunnel=false，引用即 rep=4）→ DEVELOPER 全方法（含 GET）403（前置：runner jar 已构建 + 隔离实例，`E2E_BASE=http://localhost:8090/api`，SOCKS 端口 `E2E_SOCKS_PORT` 可覆盖） |
-| cap71_e2e.py | CAP-71 节点审计日志：NODE 生命周期 6 事件（actor=admin）/RULE 建改删/CONTEXT 坏 token REJECTED/PROXY SOCKS 未命中 REJECTED_NO_RULE（target=host:port、detail 含协议形态）→ 关键词大小写不敏感与乱串 0 条 → 真分页 size=2 两页不重叠+total 一致+时间倒序+result 过滤（无需 runner，egress 默认开；隔离实例 `E2E_BASE=http://localhost:8090/api`，SOCKS 端口 `E2E_SOCKS_PORT` 可覆盖；保留期清理由 AgentAuditLogServiceTest 覆盖） |
-| cap72_e2e.py | CAP-72 执行链项目级开关：新项目两开关默认关（GET 回读 false）→ 开关关 WI DONE 不触发构建 → 开 autoBuildOnWiDone 后新 WI DONE 自动建构建单（带 workItemId）→ 更新不传开关字段保持原值 → 再关不再触发（无需 runner，自建 file:// bare 库 fixture 供 CAP-26 触发前 fetch；隔离实例 `E2E_BASE` 可覆盖；部署链闸门由 PipelineOrchestratorSwitchTest 覆盖） |
-| cap75_bot_verify.py | CAP-75 M2+M3+M5+M6 双向机器人：fake 适配器驱动全路由（/help/未知指令/event_id 重发去重/群聊免打扰//bind+/build+/deploy 空态//session 无节点失败文案）+ 裸文本问答走 chat-mock MODEL 执行体回推 + 飞书出站（ENABLED 集成 baseUrl 指向脚本内联 mock，断言 tenant_token 与 im/v1 reply 到达）+ M3 个人身份（/bindme 取码 → 门禁拒绝 → 绑定后 /whoami 放行）与运维端点（interactions/bindings/用户映射，非 ADMIN 403）+ M5 出站/入站图片与 /status /stop /wi /design 空态 + M6 运行闭环（/flow 当前状态与直接推进、完结/取消走二次确认且「取消」不留痕、DONE 撞未完结 WI 提前给 force 提示；/release 无参空态与无带产物构建文案）。FR-20 终态推送与 /stop 非空态确认流 E2E 不可观测（无 runner → 起会话恒 409 → 无 session.completed），由单测覆盖。脚本自起 chat-mock/feishu-mock 并自清理；需隔离实例（e2e profile + **全新 H2**，注意 H2 相对路径落在 devmind-app/tmp/ 下；项目路径唯一约束使同库不能重跑，重跑须清库重启）；eventId/项目名带时间戳后缀 |
-| cap67_usage_stats_e2e.py | CAP-67 用量统计：summary/breakdown/daily/top 四端点对账（fake runner 常量）、权限口径、from 过滤（脚本自起 fake runner 节点，`E2E_BASE` 可指隔离实例） |
-| cap76_copilot_verify.py | CAP-76 平台智能体网关：只读工具调用与审计、写操作确认单（未确认不落库→文本确认落库）、VIEWER 越权拒绝无确认单、他人确认被拒且原单仍 PENDING、`/cancel` 与 TTL 过期（短码失效、再确认不执行）、卡片回调执行 + `updateCard` 原地更新、DANGEROUS 终态裸「确认」被拒而完整短码才执行、kill switch 回落 CAP-75 问答、管理 API 非 ADMIN 403/ADMIN 200。脚本自起隔离 app（`:18096` + 全新 H2 + 三阶段重启：admin→viewer→disabled）与内嵌假 OpenAI 服务（`:18198`，同一进程支持原生 tools/tool_calls 与流式 SSE），全部自清理；依赖 `mvn -q install -DskipTests` |
-| cap76_tools_contract.py | CAP-76 FR-03 工具契约快照：起隔离 app 拉取 `/copilot/admin/openapi.json` 与 `/admin/tools`，校验 OpenAPI 3.0.3、operation 数与 `operationId` 集合、requestBody schema 与 `parametersSchema` 逐字段一致、`x-tool-risk/x-min-role/x-owner-module/x-tool-since` 齐全，并把快照写到 `docs/capabilities/tools/cap76-tools.yaml`（JSON 即合法 YAML）；`E2E_BASE` 可指已起的实例（此时不自起 app） |
-| usage_records_e2e.py | usage_records 逐回合账本 + 模型筛选/tokens 排序：records 两行倒序+归属快照+标题带出+tokensPerSec=170、source/model 过滤与未知 source 400、分页翻页、owner 强制（非 admin 传 userId 被忽略）、hourly 24 桶当前小时对账、四老端点 model 过滤收窄、top 同 tokens 按 createdAt 倒序（脚本自起 fake runner 节点，`E2E_BASE` 可指隔离实例；无双计对账由 cap67 复跑守住） |
-| requirement_attachments_e2e.py | 需求附件（描述内联引用口径，零后端改动）：建项目+需求 → 上传 PNG/TXT（scope=SHARED 回读断言）→ PUT 需求把 `![图](…/raw)`/`[文件](…/raw)` 引用行写进 description → GET 回读命中 CAP-40 锚点 `/api/attachments/{id}/raw`（即会话投送同口径）→ 元数据 + /raw 字节对账 → 移除其一（PUT 剔引用行 + 删文件 404，另一引用保留）→ 删需求（附件不随删，收尾清理）。无需 runner，隔离实例 `E2E_BASE` 可覆盖 |
-| e2e-agent-node.py | CAP-21 节点全链路：注册→会话→授权→优雅退出→离线 409 |
-| cap56_sidecar_source.py | CAP-56 FR-01 边车槽位来源覆盖：真起边车（需 `tools/laya-sidecar/.venv` + `--artifact` 一份真实 checkpoint 目录），文件分支（`models.json` 的 `slots` 包裹/`_comment` 剔除）+ `/healthz.sources` 上报（kind/overridden/ready/missing/device/source_origin）+ **覆盖真被 serve**（真发一次 `/v1/predict`，断言响应 `routing.repo` 指向该产物）；五类坏配置（槽位名不认识/本地路径不存在/环境变量坏 JSON/来源文件坏 JSON/`LAYA_MODELS_FILE` 指了不存在的文件）一律启动即失败，与「没配覆盖」的正常降级划清界线。不起 app，纯边车侧，`python tests/cap56_sidecar_source.py --artifact <产物目录>` |
-| cap57_classify_e2e.py | CAP-57 分类服务**全链**（真 runner v15 + 真 python + 脚本自写的 stub 边车包）：multipart 上传程序包/语料包（sha256 落库）→ pkg 帧下发 → 节点拉取物化 INSTALLED + installDir 回收 → 建实例（commandOverride 拆词、env 带 `${PKG_DIR:<id>}` 占位符）→ start 组 proc 帧 → 健康轮询翻 RUNNING（快照带槽位/版本）→ env 真传到进程且占位符展开成 installDir（stub 落 env-probe.txt 对账）→ playground instanceId 直打 /v1/predict + decision_records 落 classify-playground 行 → stop 进程真死。前置：`mvn -q install -DskipTests`（runner jar 必须 v15）+ app 隔离实例（`:18098` + 全新 H2 + `--devmind.classify.health-interval-ms=2000`），脚本自起 runner jar（不碰本机 WinSW 服务） |
-| cap56_e2e.py | CAP-56 决策实验室**全链**（真 runner + 真 python + mock 边车）：建含对照组的基准集（四类 caseGroup 冻结红线/题面不一致 400/gold 值域 400）→ 冻结与修订（历史指标不被新版本改写）→ 经 runner 下发执行包跑评测（bundle 拉取/物化解包/白名单/env 注入/marker 抓取与日志剔除全走真的）→ 头部指标与**两条基线**显式暴露（退化的基座准确率**低于**多数类基线）→ 对照组分解与逐题明细 → 温度校准（held-out 拟合、前后 ECE 对比）→ 微调（指纹登记 + 结束自动回评 + 指标优于基座）→ 人工验证 → 闸门放行 → serve 自检四形态（来源一致/未上报 WARN/本地目录不存在 FAIL/槽位未常驻 FAIL）→ 同槽位互斥与撤销。**不验模型质量**（节点上跑的是本脚本自写的 stdlib stub，复刻「恒答 project/全档 2/判重复」的退化形态），也**不验 WS 帧**；真机收敛性只能在 172.20.140.88 验。前置：`mvn -q install -DskipTests` + app 隔离实例（`:18096` + **全新 H2**（启动时自查，非空拒跑）+ `--devmind.decision-lab.scripts-dir` 指向 stub 目录），脚本自起 mock 边车（:18196）与 runner jar |
-| cap56_gpu_e2e.py | CAP-56 **真机**全链（172.20.140.88 GPU 节点，**真 laya 模型 / 真 torch 训练 / 真边车**）：9 阶段 = 前置检查 → 节点 runner（上传 jar 到 `~/cap56-runner/`，**不动生产用的 `~/devmind-runner`**）→ DECISION 端点（**`model` 钉到槽位**）→ 基准集（37 题，含三类对照组）→ 基座评测（**复现恒答退化**：accuracy 0.216 < 随机 0.389 < 多数类 0.676，EMPTY_RECALL 0.25 vs VERBATIM_DUP 0.583）+ 放行基座 → 数据飞轮（28 提案 → 真模型分诊 → 人工裁决 → 决策记录）→ 收编回流集（含**删草稿集**这条 CRUD 回归网，它抓出了 `DatasetService.delete` 缺事务）→ RLCD 微调（真 torch，指纹登记 + 自动回评）→ 放行微调产物 + serve 自检 + 槽位来源覆盖 + 分诊徽标前后对比。前置：本机隔离实例（`:18097` + **全新 H2** + `--spring.profiles.active=e2e` + `--devmind.decision-lab.scripts-dir=tools/laya-sidecar/lab` + `--devmind.decision-lab.python-path=<节点 venv python>`）、`ssh <节点> true` 免密、节点 `~/laya-venv`（laya 0.3.6 + torch）与 `~/laya/multilingual-base`。**与 vLLM 共卡时必须 `DEVMIND_GPU_SIDECAR_DEVICE=cpu`**（见脚本头：cuda 在显存被占满时随机 500 / 退 CPU → 平台整片超时降级；CPU 实测 ~2.0s/条零降级）。状态存 `tmp/cap56-gpu/state.json`，`--from/--to` 按**阶段序号**（1..9，注意顺序是 3 端点→4 基准集→5 基座评测→6 飞轮→7 回流集→8 微调→9 serve）续跑 |
-| cap55_verify.py | CAP-55 FR-02 决策端点：DECISION 端点登记（provider 默认 laya、model=checkpoint 别名可空、不吃向量语义）、连接测试两段实调（/healthz→固定样例 /v1/predict，message 带常驻清单+样例答案+routing.reason）、边车未就绪不白跑样例题、样例失败透出边车 detail、mock provider 零网络自报、kind-provider 配对 400、同类型唯一的平台默认、无引用可删（脚本自起 fixtures/laya-sidecar-mock.py，默认 :18095 独立实例；真边车连通性由 FR-01 smoke 覆盖，这里只钉 Java 侧协议） |
-| cap55_triage_verify.py | CAP-55 FR-04 提案分诊：自动分诊出徽标（层级/置信度/重复/质量分+routing.reason）、发出去的题面与 state（三题类型/回引 state 键/不放提案人自称去向/1500 字截断/召回 query 用标题）、重复判定两段式（无 embedding 走关键词召回）、手动重分诊换答案徽标跟着变、降级链（端点删掉→按钮置灰+落 degraded 记录+其余接口零影响）、边界 404；**外加 CAP-56 FR-07 闸门联动**：端点配好但库里没有验证过的产物时仍不可用（原因指向决策实验室）→ 登记+人工验证后放行（只登记不放行）→ 删端点后原因才轮到「模型接入」（脚本自起 fixtures/laya-sidecar-mock.py，默认 :18095 独立实例，需干净 H2：产物名固定，重跑前清库） |
-| cap55_records_verify.py | CAP-55 FR-05 决策记录与训练集导出：自动分诊落 state/questions/model_answer/routing/延迟、人工裁决配对（gold/agreement 逐题算）、导出 JSONL 三字段与 gold one-hot、reject 行不进导出集、重分诊不抹裁决、查询过滤与 size 边界、降级样本也留痕（脚本自起 fixtures/laya-sidecar-mock.py，默认 :18095 独立实例，需干净 H2；同样先过 CAP-56 FR-07 闸门：§0 登记+验证一份产物，收尾撤销+删除） |
-| e2e-cap41.py / b / c | CAP-41 工作日志空间：懒创建/守卫/种子模板/日报周报生成 |
-| e2e-cap74.py | CAP-74 工作日志事实源服务端化（自起隔离 app :18097 + fake runner，全自起自清）：懒建仓骨架 commit/会话产出直写仓+trailer/PUT 手改 manual commit/file:// 远端 push 一致/非 force 跳过+force 旧稿可找回/节点离线读改推正常 generate 409/平台外改动 TTL 合并/双侧冲突 409+resolve ours-theirs 不留 MERGING/重启 rev-list 不变/PUT 带 status 400。前置 `mvn -q install -DskipTests`（app 走 .m2 jar） |
-| e2e-cap74-m3.py | CAP-74 M3 条目文件化（自起隔离 app :18098 + fake runner，全自起自清）：H2 URL INIT 预植 legacy 表真迁移（legacy= 幂等键/migration trailer/rev-list==2）/无素材 generate 400/建条目 day 文件字节+manual trailer+id 32hex/平台外手改 preamble 与自由文本在平台重写后存活/删除按日期寻址+重复删 404/git 导入判重走文件二次全 skipped+git-import trailer+alreadyImported 翻转/有素材 generate 起会话/重启迁移二跑零新 commit+列表 API 读回迁移条目。前置 `mvn -q install -DskipTests`；INIT 含空格走 SPRING_DATASOURCE_URL 环境变量宽松绑定 |
-| cap80_verify.py | CAP-80 通用异步任务框架（自起隔离 app :18098 + 全新 H2 + e2e profile 种子五任务，无需 runner——任务在服务端虚拟线程执行，全自起自清）：种子可见/即时任务 DONE+日志/WS 实时 attach（30s RUNNING 窗口）与终态快照回放（`cap80-ws-test.mjs`）/重试 attempt 1→2 同 runSeq 后 DONE/不可重试一次即终/pause→trigger 409→resume→trigger 200→cancel 级联清未终态 run/非 admin 列表按 actor 过滤空、他人任务与 run 详情 404、控制操作与执行记录横查 403。前置 `mvn -q install -DskipTests` + node |
-| cap80_runner_verify.py | CAP-80 M4 任务管理 + runner 执行（自起隔离 app :18099 + 真实 runner executor=fake，全自起自清；**必须先 `mvn -q install -DskipTests`**——spring-boot:run 从本地仓库解析 devmind-task，忘装新包会 404 测到老代码）：types 端点 executor 标记/REST 创建四形态（IMMEDIATE 跑完 DONE、DELAY/间隔/CRON ACTIVE）+ 非法 type/payload/interval/cron 全 400/RUNNER 类指定不存在节点 400/builtin.shell 指定在线节点 exit 0 → SUCCESS 且 runner 行流落库/非零退出 attempt 1→2 重试后 DONE（error 含 exit=3）/无可用节点 FAILED 且 error 可读/终态编辑 409、ACTIVE 编辑 200 重排/LOCAL 类 agentNodeId 忽略不落库/非 admin 创建/编辑/types 全 403。runner 侧需 `gitProxyEnabled=false`（本机常驻 runner 已占 18377） |
-| cap83_verify.py | CAP-83 二进制会话产出（自起隔离 app :18101 + 真实 runner executor=fake，全自起自清；**必须先 `mvn -q install -DskipTests`**——附件通道在 runner 侧，旧 jar 没有）：文本产出走 JSON 通道无回归/二进制产出（非法 UTF-8 字节）走附件通道列表带 attachmentId+contentType/附件 raw 下载字节级一致+attachment disposition/归属会话创建者+PRIVATE+session-output 标签/二进制行文本内容端点 400/推送为文档兜底闸 400/同名覆盖引用换新+旧附件 404。runner 侧需 `gitProxyEnabled=false` |
-| cap87_changelog_e2e.py | CAP-87 控制台更新日志（自起隔离 app :18104 + 独立 H2 + `devmind.changelog.path` 指向 tmp 文件，只读、全自起自清）：已发布版本数值倒序且 Unreleased 隐藏、摘要/类型/关联编号解析、服务端分页两页不重叠、版本/日期/关键词筛选命中与落空、详情完整 Markdown + `v` 前缀兼容 + 未知版本/Unreleased 404、文件缺失 `available=false` 不 500、替换文件后 mtime/size 缓存失效热加载。前置 `mvn -q install -DskipTests` |
-| cap88_e2e.py | CAP-88 计划闭环（**CAP-90 修订后口径**：日计划并入条目，计划项仅 WEEK——DAY 传新建/列表/滚转一律 400 的退役钉 + 周计划归一/CRUD 状态机/条目关联 TODO→DOING/linkable 仅周计划/删项清引用/周滚转幂等 + M2 模板占位符（含 CAP-90 的 {{nextWeekPlan}}）+ M3 建议计划幂等与 fail-visible 409）。自起隔离 app :18098 + 全新 H2，全自起自清 |
-| cap89_e2e.py | CAP-89 工作日志存储回 DB：存量仓日报/周报/条目启动回迁读回（判存跳过不覆盖）、uuid 主键保真、条目 CRUD 纯 DB、日报手填落库往返、无素材 generate 400、有素材起会话（fake runner）、重启迁移二跑幂等。自起隔离 app :18099 + fake runner，全自起自清 |
-| cap90_e2e.py | CAP-90 日计划并入条目 + 周报「下周计划」单向投影：条目状态机（默认 DONE/计划态 TODO+预估/CARRIED·非法值 400/GIT 恒 DONE）、完成交互、日滚转（carryover 提示只含未完成/副本带链/幂等/>200 ids 400）、DAY scope 退役 400、WEEK 保留（归一/联动/linkable/删引用/周滚转）、next-plan-preview 确定性渲染与空下周降级、模板占位符、**FR-06 DAY 迁移**（停库用 H2 Shell 播种存量 DAY 行 → 重启迁移 → 状态映射/滚转链接 uuid/挂 DAY 项条目置空/WEEK 不动）。自起隔离 app :18105 + 全新 H2（两趟启动），全自起自清 |
-| cap92_e2e.py | CAP-92 场景绑定知识库 + 装配检索：知识库 API 无 injectMode 字段、场景绑定库后 dryRun 预览按任务命中（清单 source=scenario + CLAUDE.local.md「相关知识（检索命中）」带来源/库名）、dryRun 不 bumpHits、解绑后不检索、归档库退出检索。需 app :18090 + 独立 H2 + `--devmind.knowledge.embedding.provider=mock` |
-| cap93_e2e.py | CAP-93 AI 生成 OKR（草稿确认）：场景种子、suggest 起会话（prompt 携带素材+年度O清单+hint）、预写产物 → 草稿落库（O/KR 两级+权重+父O#id 解析）、编辑后采纳两阶段建 O→KR（季度 O 挂年度 O）、重复采纳 400、已有目标非 force reused、force 重生成覆盖草稿回 DRAFT、丢弃 DISCARDED 幂等、无素材 400/非法 scope 400。自起隔离 app :18107 + fake runner（预写 .devmind/output 产物），全自起自清 |
-| e2e-events-pagination.py | 会话/问答事件 REST 分页 + 载荷瘦身（性能优化配套）：fake runner 四轮会话 + 三轮问答攒事件 → 默认拉取=全量 → limit 首页=末尾一页 → beforeSeq 链式翻页拼接==全量（无重叠无缺口）→ 越界空页 → chats 旧调用形态（仅 afterSeq）兼容 → payloadMax=8 截断 tool_use.toolInput/tool_result.content 且打 previewTruncated 标记 → 单条端点 /{kind}/{id}/events/{seq} 取全文 → 不带 payloadMax 原样 → 会话列表 keyword 服务端搜索（命中/落空）→ ETag 条件拉取二刷 304 空体。自建 CLONE 项目 fixture，全自起自清（先 kill 会话再删资源、最后杀 runner）；`E2E_BASE` 可指隔离实例，需 runner jar 已构建 |
-| e2e-cap42.py | CAP-42 固定工作区 + 手动收口（CAP-51 keyed 布局 worktrees/sid-*）：布局落盘/finish 不 push 不删/收口闭环（merge --ff 快进不留合并点+push+FINALIZED+保留工作树 ff 前进+重复 409）/勾选 deleteRemoteBranch 收口后远端会话分支删除（协议 v19）/脏与合并冲突两负例重试/删除释放与离线 fail-visible（协议 v7+，file:// bare 库） |
-| e2e-git-import-range.py / e2e-worklog-keyword.py | git 导入范围扫描 / 工时条目关键字筛选（:8081） |
-| skill-import-e2e.py | skill zip 导入：root/包裹结构/409/overwrite（:8081） |
-
-### Shell（Git Bash）
+### Python 能力验证（tests/legacy/api/）
 
 | 脚本 | 覆盖 |
 |------|------|
-| e2e-cap25.sh | 服务端+runner 全链路：CLONE 项目→远程会话→worktree→push 回远端 |
-| e2e-cap32-attachments.sh | 附件 description 与关键字搜索（multipart 中文坑见头注释） |
-| e2e-cap34.sh | dist 包起服务端:18090+runner：无节点 409/"local" 400/问答全链路 |
-| e2e-cap34-{list,cleanup,del-node}-mysql.sh | CAP-34 E2E 误写共享 MySQL 的查看/清理（**操作 156 共享库，慎用**） |
-| e2e-chat-stream.sh | fake 会话结构化事件解析（:8081，executor=fake） |
-| e2e-resume-chat.sh | 问答「继续对话」claude --resume 续接（真实 runner） |
-| e2e-install-script.sh | 一键安装脚本端点下发与执行（install-script 端点三形态 + sh --no-service 实跑 + 服务路径静态断言 + ps1 语法解析 + 坏 token/匿名/坏 os 负例） |
-| e2e-integration-test.sh | 集成连通性测试端点（未保存试连） |
-| e2e-req-open-filter.sh | 需求列表 status=OPEN 伪状态筛选 |
-| e2e-worklog-auto-import.sh | CAP-28 FR-09/FR-10 定时从 Git 导入工作条目：开关打开→当日提交定时导入（GIT/hours=0）、下一 tick 幂等不重复、关闭后不导入、重开补导入、个人执行时间覆盖全局 cron（设个人时间后全局对本人失效、到点才导入）。FR-10 起调度是每分钟主 tick，全局 cron 用环境变量 `DEVMIND_WORKLOG_GITIMPORTCRON` 覆盖成 */15s（收敛为每分钟一跳；cron 含空格塞不进 run.arguments），JDBC 路径要 cygpath 转 Windows 形态，姿势见脚本头 |
-| e2e-runner-upgrade{,-main,-force}.sh | CAP-21 FR-09 runner 自升级：BUSY 推迟/换包重启/强制升级 |
-| e2e-stacktrace.sh | 错误响应堆栈透传（local profile） |
-| verify-skill-import.sh | /api/skills/import 报错文案 + BOM 兼容 |
+| `tests/legacy/api/cap03_verify.py` | 文档库：建档/模板/多版本/diff/回退/git 同步 |
+| `tests/legacy/api/cap06_verify.py` | 通知中心 REST / 集成链路 |
+| `tests/legacy/api/cap101_verify.py` | CAP-101 验收通过联动 Jira 解决与工时登记：推送转托管→DONE→resolve 主路径（词表命中 toStatus/中文 comment 透传/timespent 累加/remoteStatus 单条刷新）、终态重入跳过空转、转换成功+工时失败部分成功不回滚、转换失败抛错不登记、name 兜底匹配、非法入参与非 Jira 来源 400（脚本自起 fixtures/jira-mock.py，默认 :18090 独立实例） |
+| `tests/legacy/api/cap10_acceptance_e2e.py` | 验收联动：WI 挂测试绿跑 → 需求 rollup ACCEPTANCE + 待验收通知（免 fixture，用例打应用自身 /api/health） |
+| `tests/legacy/api/cap11_verify.py` | 发版执行器：tag/版本递增/回滚删 tag/强制 buildId/tag 区间归集需求与 WI/验收中需求自动完结（带登录，argv 传 base/user/pwd） |
+| `tests/legacy/api/cap21-project-default-node.py` | 项目默认执行节点继承与覆盖 |
+| `tests/legacy/api/cap23_verify.py` | 项目仓库 git 克隆：状态机/重试/WS 帧（配 cap23-ws-test.mjs） |
+| `tests/legacy/api/cap28_e2e.py` | 工时：仓库订阅/条目 CRUD/git 导入/日报周报（:8081） |
+| `tests/legacy/api/cap29_e2e.py` | 全局仓库登记 + 项目关联 + 工时订阅扫描（:8081） |
+| `tests/legacy/api/cap32_e2e.py` | 附件：上传/鉴权/Content-Disposition/chat 引用 |
+| `tests/legacy/api/cap33_verify.py` | 场景化会话与上下文装配（自建 fake runner） |
+| `tests/legacy/api/cap34_fr04_08_verify.py` | runner 调度：断连对账/服务端重启 reattach/exit 路由 |
+| `tests/legacy/api/cap34_reattach_verify.py` | runner 调度：断连对账/服务端重启 reattach/exit 路由 |
+| `tests/legacy/api/cap40_e2e.py` | 产出回传、流程串联、需求附件上下文投送（协议 v3/v4；cap37 链路已被 CAP-38/52 取代，cap40 已改用 flow/plan） |
+| `tests/legacy/api/cap44_verify.py` | CAP-44 知识库容器化+向量检索：库 CRUD/级联删、legacy 兜底经验库、索引状态机、向量检索排序（需 app 配 `devmind.knowledge.embedding.provider=mock`，默认 :18090 独立实例） |
+| `tests/legacy/api/cap45_verify.py` | CAP-45 飞书文档对接：FEISHU 集成+连接测试、docx/wiki/doc 三形态导入（externalId 判重+contentHash 变更检测）、URL 归一化、重同步 updated/unchanged/失败保留旧内容（需 node 起 fixtures/feishu-mock.js 由脚本自起、app 配 mock embedding，默认 :18090 独立实例） |
+| `tests/legacy/api/cap46_verify.py` | CAP-46 知识库 AI 会话：绑库问答（ChatView 回传 knowledgeBaseId、库不存在 400）、事件流断言库概览节 <knowledge-base> 与两轮 <knowledge-context> 注入（来源标注）、不绑库问答无注入（脚本自起 fake runner 节点连 :18090，需 runner jar 已构建 + app 配 mock embedding 独立实例） |
+| `tests/legacy/api/cap47_verify.py` | CAP-47 自建需求推送 Jira：push-targets/options/可指派用户（GDPR 退 username）、建 issue payload（含回链、空参数不写）、转托管不动托管字段、重复推送 409、无凭证 400 引导绑定、手动 refresh、同步 run 不重复建需求、FR-08 动态必填字段（create-fields 分区与控件映射/候选值与预填、缺字段被 Jira 逐字段拒、动态字段 payload 形态、护栏拦越权与超深取值、旧端点兜底、读端点抖动降级、FR-10 个人推送模板（四元组 upsert/多用户隔离/未登录 401/targets 带回模板/项目无关选项端点））（脚本自起 fixtures/jira-mock.py，默认 :18090 独立实例） |
+| `tests/legacy/api/cap48_verify.py` | CAP-48 模型接入管理：迁移种子端点、端点 CRUD/校验、连接测试（实测维度回写/维度变化告警/失败诊断且凭据脱敏）、解析链（库级覆盖→平台默认→无，停用/删除后回落不回写）、索引血缘与维度失配诊断（DIMENSION_MISMATCH / NO_EMBEDDING 均不静默空结果）、重建索引（全库/只失配）、删除引用保护、通用模型（CHAT）端点段：按 kind 分派打 /chat/completions（含草稿预检与 RERANK 400）、不吃向量语义（topK/threshold 落 null 且越界不报错）、mock 对话零网络、测试消息回显模型真实回复、平台默认按类型各自唯一、知识库不能绑对话端点、对话默认不劫持向量解析链（脚本自起 fixtures/embedding-mock.py + fixtures/chat-mock.py，默认 :18090 独立实例；**会删掉迁移种子端点，放在 cap44/45/46 之后跑**） |
+| `tests/legacy/api/cap49_verify.py` | CAP-49 问答模型执行体（无 runner）：CHAT 端点 + MODEL 问答全链、WS 流式与落库逐条一致、多轮装配、绑库注入与前缀剥离、中断保留部分正文（chat-mock + mock embedding） |
+| `tests/legacy/api/cap52_e2e.py` | 需求流程精简：三合一规划会话（一会话三产出）→ 自动开发会话（**复用同一棵需求工作树**，CAP-51 验收 5）→ 待验收；粒度护栏/入口互斥/无清单与终态 409（协议 v10）；终态自动清理（CAP-51 FR-06 修订：DONE 后需求工作树回收 + 本地/远端需求分支删除，协议 v13）。支持 `E2E_BASE` 指向非 8080 实例（如 `E2E_BASE=http://localhost:8090/api`），起隔离实例的姿势见下方「起独立实例跑 E2E」 |
+| `tests/legacy/api/cap54_e2e.py` | 会话工作区实时视图（协议 v11）：status/tree/file/diff 四端点（含已跟踪 diff 与未跟踪 untracked）、路径逃逸 409/缺参 400、问答沙箱 gitAvailable=false 且无 diff 端点、终态经 runner recentDirs 仍可读（脚本自起 fake runner 节点） |
+| `tests/legacy/api/cap55_records_verify.py` | CAP-55 FR-05 决策记录与训练集导出：自动分诊落 state/questions/model_answer/routing/延迟、人工裁决配对（gold/agreement 逐题算）、导出 JSONL 三字段与 gold one-hot、reject 行不进导出集、重分诊不抹裁决、查询过滤与 size 边界、降级样本也留痕（脚本自起 fixtures/laya-sidecar-mock.py，默认 :18095 独立实例，需干净 H2；同样先过 CAP-56 FR-07 闸门：§0 登记+验证一份产物，收尾撤销+删除） |
+| `tests/legacy/api/cap55_triage_verify.py` | CAP-55 FR-04 提案分诊：自动分诊出徽标（层级/置信度/重复/质量分+routing.reason）、发出去的题面与 state（三题类型/回引 state 键/不放提案人自称去向/1500 字截断/召回 query 用标题）、重复判定两段式（无 embedding 走关键词召回）、手动重分诊换答案徽标跟着变、降级链（端点删掉→按钮置灰+落 degraded 记录+其余接口零影响）、边界 404；**外加 CAP-56 FR-07 闸门联动**：端点配好但库里没有验证过的产物时仍不可用（原因指向决策实验室）→ 登记+人工验证后放行（只登记不放行）→ 删端点后原因才轮到「模型接入」（脚本自起 fixtures/laya-sidecar-mock.py，默认 :18095 独立实例，需干净 H2：产物名固定，重跑前清库） |
+| `tests/legacy/api/cap55_verify.py` | CAP-55 FR-02 决策端点：DECISION 端点登记（provider 默认 laya、model=checkpoint 别名可空、不吃向量语义）、连接测试两段实调（/healthz→固定样例 /v1/predict，message 带常驻清单+样例答案+routing.reason）、边车未就绪不白跑样例题、样例失败透出边车 detail、mock provider 零网络自报、kind-provider 配对 400、同类型唯一的平台默认、无引用可删（脚本自起 fixtures/laya-sidecar-mock.py，默认 :18095 独立实例；真边车连通性由 FR-01 smoke 覆盖，这里只钉 Java 侧协议） |
+| `tests/legacy/api/cap56_224_verify.py` | CAP-56 在 172.20.140.224 生产环境的真实模型最小闭环：登记基座 → serve 自检 → 放行 → 基准集冻结 → 真评测与报告口径核对（刻意不跑微调） |
+| `tests/legacy/api/cap56_e2e.py` | CAP-56 决策实验室**全链**（真 runner + 真 python + mock 边车）：建含对照组的基准集（四类 caseGroup 冻结红线/题面不一致 400/gold 值域 400）→ 冻结与修订（历史指标不被新版本改写）→ 经 runner 下发执行包跑评测（bundle 拉取/物化解包/白名单/env 注入/marker 抓取与日志剔除全走真的）→ 头部指标与**两条基线**显式暴露（退化的基座准确率**低于**多数类基线）→ 对照组分解与逐题明细 → 温度校准（held-out 拟合、前后 ECE 对比）→ 微调（指纹登记 + 结束自动回评 + 指标优于基座）→ 人工验证 → 闸门放行 → serve 自检四形态（来源一致/未上报 WARN/本地目录不存在 FAIL/槽位未常驻 FAIL）→ 同槽位互斥与撤销。**不验模型质量**（节点上跑的是本脚本自写的 stdlib stub，复刻「恒答 project/全档 2/判重复」的退化形态），也**不验 WS 帧**；真机收敛性只能在 172.20.140.88 验。前置：`mvn -q install -DskipTests` + app 隔离实例（`:18096` + **全新 H2**（启动时自查，非空拒跑）+ `--devmind.decision-lab.scripts-dir` 指向 stub 目录），脚本自起 mock 边车（:18196）与 runner jar |
+| `tests/legacy/api/cap56_gpu_e2e.py` | CAP-56 **真机**全链（172.20.140.88 GPU 节点，**真 laya 模型 / 真 torch 训练 / 真边车**）：9 阶段 = 前置检查 → 节点 runner（上传 jar 到 `~/cap56-runner/`，**不动生产用的 `~/devmind-runner`**）→ DECISION 端点（**`model` 钉到槽位**）→ 基准集（37 题，含三类对照组）→ 基座评测（**复现恒答退化**：accuracy 0.216 < 随机 0.389 < 多数类 0.676，EMPTY_RECALL 0.25 vs VERBATIM_DUP 0.583）+ 放行基座 → 数据飞轮（28 提案 → 真模型分诊 → 人工裁决 → 决策记录）→ 收编回流集（含**删草稿集**这条 CRUD 回归网，它抓出了 `DatasetService.delete` 缺事务）→ RLCD 微调（真 torch，指纹登记 + 自动回评）→ 放行微调产物 + serve 自检 + 槽位来源覆盖 + 分诊徽标前后对比。前置：本机隔离实例（`:18097` + **全新 H2** + `--spring.profiles.active=e2e` + `--devmind.decision-lab.scripts-dir=tools/laya-sidecar/lab` + `--devmind.decision-lab.python-path=<节点 venv python>`）、`ssh <节点> true` 免密、节点 `~/laya-venv`（laya 0.3.6 + torch）与 `~/laya/multilingual-base`。**与 vLLM 共卡时必须 `DEVMIND_GPU_SIDECAR_DEVICE=cpu`**（见脚本头：cuda 在显存被占满时随机 500 / 退 CPU → 平台整片超时降级；CPU 实测 ~2.0s/条零降级）。状态存 `tmp/cap56-gpu/state.json`，`--from/--to` 按**阶段序号**（1..9，注意顺序是 3 端点→4 基准集→5 基座评测→6 飞轮→7 回流集→8 微调→9 serve）续跑 |
+| `tests/legacy/api/cap56_sidecar_source.py` | CAP-56 FR-01 边车槽位来源覆盖：真起边车（需 `tools/laya-sidecar/.venv` + `--artifact` 一份真实 checkpoint 目录），文件分支（`models.json` 的 `slots` 包裹/`_comment` 剔除）+ `/healthz.sources` 上报（kind/overridden/ready/missing/device/source_origin）+ **覆盖真被 serve**（真发一次 `/v1/predict`，断言响应 `routing.repo` 指向该产物）；五类坏配置（槽位名不认识/本地路径不存在/环境变量坏 JSON/来源文件坏 JSON/`LAYA_MODELS_FILE` 指了不存在的文件）一律启动即失败，与「没配覆盖」的正常降级划清界线。不起 app，纯边车侧，`python tests/legacy/api/cap56_sidecar_source.py --artifact <产物目录>` |
+| `tests/legacy/api/cap57_classify_e2e.py` | CAP-57 分类服务**全链**（真 runner v15 + 真 python + 脚本自写的 stub 边车包）：multipart 上传程序包/语料包（sha256 落库）→ pkg 帧下发 → 节点拉取物化 INSTALLED + installDir 回收 → 建实例（commandOverride 拆词、env 带 `${PKG_DIR:<id>}` 占位符）→ start 组 proc 帧 → 健康轮询翻 RUNNING（快照带槽位/版本）→ env 真传到进程且占位符展开成 installDir（stub 落 env-probe.txt 对账）→ playground instanceId 直打 /v1/predict + decision_records 落 classify-playground 行 → stop 进程真死。前置：`mvn -q install -DskipTests`（runner jar 必须 v15）+ app 隔离实例（`:18098` + 全新 H2 + `--devmind.classify.health-interval-ms=2000`），脚本自起 runner jar（不碰本机 WinSW 服务） |
+| `tests/legacy/api/cap58_e2e.py` | 会话工作区远程终端（协议 v16）：pwd/ls/cat/git status 回显与非零退出、cd 状态跟进（ack 带回新 cwd）、安全边界全拒（cwd 越界/`cd ../..` 逃逸/白名单外 rm/git 写子命令/> 重定向不落盘）、问答沙箱终端、终态会话经 recentDirs 仍可执行；runner 协议 <v16 拒跑（脚本自起 fake runner 节点，支持 `E2E_BASE` 指独立实例） |
+| `tests/legacy/api/cap59_e2e.py` | CAP-59 远程终端增强（协议 v17）：持久 shell（export/cd 跨命令保持、runner 侧 cwd 权威——故意传空 cwd 验证）、cd 越界 409+shell 强制拉回、Tab 补全三模式（文件/目录带斜杠/首词命令）、Ctrl+C 取消（tail -f 执行中 POST cancel → cancelled=true exit 130 + shell 自动重启 env 丢失佐证）、问答沙箱对称 complete 端点（脚本自起 fake runner 节点，断言协议 ≥v17，支持 `E2E_BASE` 指独立实例） |
+| `tests/legacy/api/cap64_e2e.py` | CAP-64 收藏夹：CRUD/探测（HEAD 405 回落 GET + Range）/账号密文按次取/分享闭环（接收方只读+复制+撤销 404）/归属 404/分组删除二档；FR-09 书签导入（结构化树 → 层级/备注/标签落库、非法地址跳过、重复导入幂等、他人同 URL 不阻塞、空树与超 8 层 400）。支持 `E2E_BASE` 指独立实例 |
+| `tests/legacy/api/cap65_e2e.py` | CAP-65 节点文件浏览器（协议 v18）：真 runner 节点全链——list 目录优先/跳 .git、中文 write→read 回读、rename 冲突与非法名 409、二进制 read 409、>512KB write 400、逃逸（../绝对路径/白名单外 root）409、delete recursive 门控、5MB upload→download sha256 对账 + RFC5987 中文文件名、64MB 中转期间 list 不阻塞、>100MB 上传 409、白名单清空 409、裸 WS 模拟 v17 runner → 409 指引升级、离线 409、非 ADMIN GET/POST 一律 403（前置：runner jar 已构建 + 隔离实例，`E2E_BASE=http://localhost:8090/api`） |
+| `tests/legacy/api/cap67_usage_stats_e2e.py` | CAP-67 用量统计：summary/breakdown/daily/top 四端点对账（fake runner 常量）、权限口径、from 过滤（脚本自起 fake runner 节点，`E2E_BASE` 可指隔离实例） |
+| `tests/legacy/api/cap68_e2e.py` | CAP-68 会话附件注入与附件生命周期：上传带标签+保留天数/PUT meta 改清（空白=清除）/tag 过滤/批量删除权限矩阵（owner/ADMIN 逐项部分失败）/过期硬删（expiresAt 拨过去 + 短 cron，行 404+盘无残留）/上传超限 400；创建会话即带附件 → .devmind/input/attachments/&lt;id&gt;-&lt;净化名&gt; 字节对账 + 注入块「## 会话附件」（ASCII/中文名/路径穿越三形态）；会话中发文件 → runner 落盘 .devmind/incoming + fake 回复带 Read 提示；发图片 → user 事件 payload.attachments 引用；单条 6 文件 400（前置：隔离实例加 `--devmind.attachment.max-size-mb=1` + 环境变量 `DEVMIND_ATTACHMENT_CLEANUPCRON=*/10 * * * * *`，runner jar 已构建，`E2E_BASE=http://localhost:8090/api`） |
+| `tests/legacy/api/cap69_e2e.py` | CAP-69 脚本测试套件**全链**（真 runner + file:// fixture git 仓库；套件强制绑定 LOCAL 项目）：CRUD + secret env 掩码/掩码回传=不变 + junitPath 穿越/非法 env 键/projectId 缺失 400 + 幽灵项目 404 → 显式节点触发 → SUCCESS（3 条结果 pass×2/skip×1 中文名 + 耗时；run.projectId 归属 + CAP-03 报告文档沉淀）→ env 覆盖 SUITE_MODE=fail → FAILED + 缺陷线索 → junit 缺失不炸 → 离线节点 409 → 共享 workspaceKey 跨套件工作区复用 → 路由链（套件默认 → 项目默认节点回落）→ 项目运行历史 5 条全归属 → /tests/runs 收 script 套件 400（前置：隔离实例 :18099 + 全新 H2 + `--spring.profiles.active=e2e`，runner jar 已构建，脚本自起 runner（execAllowlist=bash），姿势见脚本头） |
+| `tests/legacy/api/cap70_e2e.py` | CAP-70 服务端出口反向隧道（协议 v21）**全链**：真 runner jar（executor=fake）自动起 /ws/agent-tunnel → 规则 CRUD + host 规范化（空白/端口剥离入库）+ 非法节点 400 → /egress-rules/status 隧道徽标 → 手写 SOCKS5 客户端打 127.0.0.1:18089 经隧道到本机 echo 双向 relay（含二进制）→ 未命中规则 rep=2 → 命中离线节点 rep=4 快速失败 → 删规则路由快照即失效 → 裸 WS 握手 v17 老 runner（supportsTunnel=false，引用即 rep=4）→ DEVELOPER 全方法（含 GET）403（前置：runner jar 已构建 + 隔离实例，`E2E_BASE=http://localhost:8090/api`，SOCKS 端口 `E2E_SOCKS_PORT` 可覆盖） |
+| `tests/legacy/api/cap71_e2e.py` | CAP-71 节点审计日志：NODE 生命周期 6 事件（actor=admin）/RULE 建改删/CONTEXT 坏 token REJECTED/PROXY SOCKS 未命中 REJECTED_NO_RULE（target=host:port、detail 含协议形态）→ 关键词大小写不敏感与乱串 0 条 → 真分页 size=2 两页不重叠+total 一致+时间倒序+result 过滤（无需 runner，egress 默认开；隔离实例 `E2E_BASE=http://localhost:8090/api`，SOCKS 端口 `E2E_SOCKS_PORT` 可覆盖；保留期清理由 AgentAuditLogServiceTest 覆盖） |
+| `tests/legacy/api/cap72_e2e.py` | CAP-72 执行链项目级开关：新项目两开关默认关（GET 回读 false）→ 开关关 WI DONE 不触发构建 → 开 autoBuildOnWiDone 后新 WI DONE 自动建构建单（带 workItemId）→ 更新不传开关字段保持原值 → 再关不再触发（无需 runner，自建 file:// bare 库 fixture 供 CAP-26 触发前 fetch；隔离实例 `E2E_BASE` 可覆盖；部署链闸门由 PipelineOrchestratorSwitchTest 覆盖） |
+| `tests/legacy/api/cap75_bot_verify.py` | CAP-75 M2+M3+M5+M6 双向机器人：fake 适配器驱动全路由（/help/未知指令/event_id 重发去重/群聊免打扰//bind+/build+/deploy 空态//session 无节点失败文案）+ 裸文本问答走 chat-mock MODEL 执行体回推 + 飞书出站（ENABLED 集成 baseUrl 指向脚本内联 mock，断言 tenant_token 与 im/v1 reply 到达）+ M3 个人身份（/bindme 取码 → 门禁拒绝 → 绑定后 /whoami 放行）与运维端点（interactions/bindings/用户映射，非 ADMIN 403）+ M5 出站/入站图片与 /status /stop /wi /design 空态 + M6 运行闭环（/flow 当前状态与直接推进、完结/取消走二次确认且「取消」不留痕、DONE 撞未完结 WI 提前给 force 提示；/release 无参空态与无带产物构建文案）。FR-20 终态推送与 /stop 非空态确认流 E2E 不可观测（无 runner → 起会话恒 409 → 无 session.completed），由单测覆盖。脚本自起 chat-mock/feishu-mock 并自清理；需隔离实例（e2e profile + **全新 H2**，注意 H2 相对路径落在 devmind-app/tmp/ 下；项目路径唯一约束使同库不能重跑，重跑须清库重启）；eventId/项目名带时间戳后缀 |
+| `tests/legacy/api/cap76_copilot_verify.py` | CAP-76 平台智能体网关：只读工具调用与审计、写操作确认单（未确认不落库→文本确认落库）、VIEWER 越权拒绝无确认单、他人确认被拒且原单仍 PENDING、`/cancel` 与 TTL 过期（短码失效、再确认不执行）、卡片回调执行 + `updateCard` 原地更新、DANGEROUS 终态裸「确认」被拒而完整短码才执行、kill switch 回落 CAP-75 问答、管理 API 非 ADMIN 403/ADMIN 200。脚本自起隔离 app（`:18096` + 全新 H2 + 三阶段重启：admin→viewer→disabled）与内嵌假 OpenAI 服务（`:18198`，同一进程支持原生 tools/tool_calls 与流式 SSE），全部自清理；依赖 `mvn -q install -DskipTests` |
+| `tests/legacy/api/cap76_tools_contract.py` | CAP-76 FR-03 工具契约快照：起隔离 app 拉取 `/copilot/admin/openapi.json` 与 `/admin/tools`，校验 OpenAPI 3.0.3、operation 数与 `operationId` 集合、requestBody schema 与 `parametersSchema` 逐字段一致、`x-tool-risk/x-min-role/x-owner-module/x-tool-since` 齐全，并把快照写到 `docs/capabilities/tools/cap76-tools.yaml`（JSON 即合法 YAML）；`E2E_BASE` 可指已起的实例（此时不自起 app） |
+| `tests/legacy/api/cap78_feishu_flow_verify.py` | CAP-78 飞书对话式需求开发全流程：copilot 工具主路径（确认单/会话拉起/收口）+ `/plan`、`/finish` 斜杠快速路径（自起隔离 app + 内嵌假 OpenAI + fake runner + file:// 仓） |
+| `tests/legacy/api/cap80_runner_verify.py` | CAP-80 M4 任务管理 + runner 执行（自起隔离 app :18099 + 真实 runner executor=fake，全自起自清；**必须先 `mvn -q install -DskipTests`**——spring-boot:run 从本地仓库解析 devmind-task，忘装新包会 404 测到老代码）：types 端点 executor 标记/REST 创建四形态（IMMEDIATE 跑完 DONE、DELAY/间隔/CRON ACTIVE）+ 非法 type/payload/interval/cron 全 400/RUNNER 类指定不存在节点 400/builtin.shell 指定在线节点 exit 0 → SUCCESS 且 runner 行流落库/非零退出 attempt 1→2 重试后 DONE（error 含 exit=3）/无可用节点 FAILED 且 error 可读/终态编辑 409、ACTIVE 编辑 200 重排/LOCAL 类 agentNodeId 忽略不落库/非 admin 创建/编辑/types 全 403。runner 侧需 `gitProxyEnabled=false`（本机常驻 runner 已占 18377） |
+| `tests/legacy/api/cap80_verify.py` | CAP-80 通用异步任务框架（自起隔离 app :18098 + 全新 H2 + e2e profile 种子五任务，无需 runner——任务在服务端虚拟线程执行，全自起自清）：种子可见/即时任务 DONE+日志/WS 实时 attach（30s RUNNING 窗口）与终态快照回放（`cap80-ws-test.mjs`）/重试 attempt 1→2 同 runSeq 后 DONE/不可重试一次即终/pause→trigger 409→resume→trigger 200→cancel 级联清未终态 run/非 admin 列表按 actor 过滤空、他人任务与 run 详情 404、控制操作与执行记录横查 403。前置 `mvn -q install -DskipTests` + node |
+| `tests/legacy/api/cap83_verify.py` | CAP-83 二进制会话产出（自起隔离 app :18101 + 真实 runner executor=fake，全自起自清；**必须先 `mvn -q install -DskipTests`**——附件通道在 runner 侧，旧 jar 没有）：文本产出走 JSON 通道无回归/二进制产出（非法 UTF-8 字节）走附件通道列表带 attachmentId+contentType/附件 raw 下载字节级一致+attachment disposition/归属会话创建者+PRIVATE+session-output 标签/二进制行文本内容端点 400/推送为文档兜底闸 400/同名覆盖引用换新+旧附件 404。runner 侧需 `gitProxyEnabled=false` |
+| `tests/legacy/api/cap87_changelog_e2e.py` | CAP-87 控制台更新日志（自起隔离 app :18104 + 独立 H2 + `devmind.changelog.path` 指向 tmp 文件，只读、全自起自清）：已发布版本数值倒序且 Unreleased 隐藏、摘要/类型/关联编号解析、服务端分页两页不重叠、版本/日期/关键词筛选命中与落空、详情完整 Markdown + `v` 前缀兼容 + 未知版本/Unreleased 404、文件缺失 `available=false` 不 500、替换文件后 mtime/size 缓存失效热加载。前置 `mvn -q install -DskipTests` |
+| `tests/legacy/api/cap88_e2e.py` | CAP-88 计划闭环（**CAP-90 修订后口径**：日计划并入条目，计划项仅 WEEK——DAY 传新建/列表/滚转一律 400 的退役钉 + 周计划归一/CRUD 状态机/条目关联 TODO→DOING/linkable 仅周计划/删项清引用/周滚转幂等 + M2 模板占位符（含 CAP-90 的 {{nextWeekPlan}}）+ M3 建议计划幂等与 fail-visible 409）。自起隔离 app :18098 + 全新 H2，全自起自清 |
+| `tests/legacy/api/cap89_e2e.py` | CAP-89 工作日志存储回 DB：存量仓日报/周报/条目启动回迁读回（判存跳过不覆盖）、uuid 主键保真、条目 CRUD 纯 DB、日报手填落库往返、无素材 generate 400、有素材起会话（fake runner）、重启迁移二跑幂等。自起隔离 app :18099 + fake runner，全自起自清 |
+| `tests/legacy/api/cap90_e2e.py` | CAP-90 日计划并入条目 + 周报「下周计划」单向投影：条目状态机（默认 DONE/计划态 TODO+预估/CARRIED·非法值 400/GIT 恒 DONE）、完成交互、日滚转（carryover 提示只含未完成/副本带链/幂等/>200 ids 400）、DAY scope 退役 400、WEEK 保留（归一/联动/linkable/删引用/周滚转）、next-plan-preview 确定性渲染与空下周降级、模板占位符、**FR-06 DAY 迁移**（停库用 H2 Shell 播种存量 DAY 行 → 重启迁移 → 状态映射/滚转链接 uuid/挂 DAY 项条目置空/WEEK 不动）。自起隔离 app :18105 + 全新 H2（两趟启动），全自起自清 |
+| `tests/legacy/api/cap91_goals_e2e.py` | CAP-91 工作目标与 OKR 对齐：目标 CRUD/层级校验、KR 滚转、计划对齐、派生进度、季度复盘（纯 DB REST，无需 runner） |
+| `tests/legacy/api/cap92_e2e.py` | CAP-92 场景绑定知识库 + 装配检索：知识库 API 无 injectMode 字段、场景绑定库后 dryRun 预览按任务命中（清单 source=scenario + CLAUDE.local.md「相关知识（检索命中）」带来源/库名）、dryRun 不 bumpHits、解绑后不检索、归档库退出检索。需 app :18090 + 独立 H2 + `--devmind.knowledge.embedding.provider=mock` |
+| `tests/legacy/api/cap93_e2e.py` | CAP-93 AI 生成 OKR（草稿确认）：场景种子、suggest 起会话（prompt 携带素材+年度O清单+hint）、预写产物 → 草稿落库（O/KR 两级+权重+父O#id 解析）、编辑后采纳两阶段建 O→KR（季度 O 挂年度 O）、重复采纳 400、已有目标非 force reused、force 重生成覆盖草稿回 DRAFT、丢弃 DISCARDED 幂等、无素材 400/非法 scope 400。自起隔离 app :18107 + fake runner（预写 .devmind/output 产物），全自起自清 |
+| `tests/legacy/api/e2e-agent-node.py` | CAP-21 节点全链路：注册→会话→授权→优雅退出→离线 409 |
+| `tests/legacy/api/e2e-cap41.py` | CAP-41 工作日志空间：懒创建/守卫/种子模板/日报周报生成 |
+| `tests/legacy/api/e2e-cap41d-autofinish.py` | CAP-33 FR-08 / CAP-41 FR-04：日报生成会话按场景 autoFinishSec 自动结束 + 成稿自动回传落镜像（全程不调 finish/collect 的无人值守链路） |
+| `tests/legacy/api/e2e-cap42.py` | CAP-42 固定工作区 + 手动收口（CAP-51 keyed 布局 worktrees/sid-*）：布局落盘/finish 不 push 不删/收口闭环（merge --ff 快进不留合并点+push+FINALIZED+保留工作树 ff 前进+重复 409）/勾选 deleteRemoteBranch 收口后远端会话分支删除（协议 v19）/脏与合并冲突两负例重试/删除释放与离线 fail-visible（协议 v7+，file:// bare 库） |
+| `tests/legacy/api/e2e-cap74-m3.py` | CAP-74 M3 条目文件化（自起隔离 app :18098 + fake runner，全自起自清）：H2 URL INIT 预植 legacy 表真迁移（legacy= 幂等键/migration trailer/rev-list==2）/无素材 generate 400/建条目 day 文件字节+manual trailer+id 32hex/平台外手改 preamble 与自由文本在平台重写后存活/删除按日期寻址+重复删 404/git 导入判重走文件二次全 skipped+git-import trailer+alreadyImported 翻转/有素材 generate 起会话/重启迁移二跑零新 commit+列表 API 读回迁移条目。前置 `mvn -q install -DskipTests`；INIT 含空格走 SPRING_DATASOURCE_URL 环境变量宽松绑定 |
+| `tests/legacy/api/e2e-cap74.py` | CAP-74 工作日志事实源服务端化（自起隔离 app :18097 + fake runner，全自起自清）：懒建仓骨架 commit/会话产出直写仓+trailer/PUT 手改 manual commit/file:// 远端 push 一致/非 force 跳过+force 旧稿可找回/节点离线读改推正常 generate 409/平台外改动 TTL 合并/双侧冲突 409+resolve ours-theirs 不留 MERGING/重启 rev-list 不变/PUT 带 status 400。前置 `mvn -q install -DskipTests`（app 走 .m2 jar） |
+| `tests/legacy/api/e2e-events-pagination.py` | 会话/问答事件 REST 分页 + 载荷瘦身（性能优化配套）：fake runner 四轮会话 + 三轮问答攒事件 → 默认拉取=全量 → limit 首页=末尾一页 → beforeSeq 链式翻页拼接==全量（无重叠无缺口）→ 越界空页 → chats 旧调用形态（仅 afterSeq）兼容 → payloadMax=8 截断 tool_use.toolInput/tool_result.content 且打 previewTruncated 标记 → 单条端点 /{kind}/{id}/events/{seq} 取全文 → 不带 payloadMax 原样 → 会话列表 keyword 服务端搜索（命中/落空）→ ETag 条件拉取二刷 304 空体。自建 CLONE 项目 fixture，全自起自清（先 kill 会话再删资源、最后杀 runner）；`E2E_BASE` 可指隔离实例，需 runner jar 已构建 |
+| `tests/legacy/api/e2e-git-import-range.py` | Git 导入范围扫描（:8081）：preview from/to + 按提交日落条目 + 幂等 |
+| `tests/legacy/api/e2e-worklog-keyword.py` | 工作日志筛选（:8081）：entries keyword 标题模糊查询 |
+| `tests/legacy/api/requirement_attachments_e2e.py` | 需求附件（描述内联引用口径，零后端改动）：建项目+需求 → 上传 PNG/TXT（scope=SHARED 回读断言）→ PUT 需求把 `![图](…/raw)`/`[文件](…/raw)` 引用行写进 description → GET 回读命中 CAP-40 锚点 `/api/attachments/{id}/raw`（即会话投送同口径）→ 元数据 + /raw 字节对账 → 移除其一（PUT 剔引用行 + 删文件 404，另一引用保留）→ 删需求（附件不随删，收尾清理）。无需 runner，隔离实例 `E2E_BASE` 可覆盖 |
+| `tests/legacy/api/skill-import-e2e.py` | skill zip 导入：root/包裹结构/409/overwrite（:8081） |
+| `tests/legacy/api/usage_records_e2e.py` | usage_records 逐回合账本 + 模型筛选/tokens 排序：records 两行倒序+归属快照+标题带出+tokensPerSec=170、source/model 过滤与未知 source 400、分页翻页、owner 强制（非 admin 传 userId 被忽略）、hourly 24 桶当前小时对账、四老端点 model 过滤收窄、top 同 tokens 按 createdAt 倒序（脚本自起 fake runner 节点，`E2E_BASE` 可指隔离实例；无双计对账由 cap67 复跑守住） |
 
-### 前端布局回归（Node + 无头 Chrome，需 app :8080 与前端 dev :5173 同时起）
+### Shell / PowerShell（tests/legacy/ops/）
 
 | 脚本 | 覆盖 |
 |------|------|
-| e2e-requirements-layout.mjs | 需求列表：整页不出纵向滚动条、表体内部滚动（`scroll.y` 为实测值）、表头吸顶、分页条常驻；自带数据（临时项目「布局校验-临时」造 30 条需求，跑完连项目一起删，`--keep` 保留）。浏览器路径用 `CHROME_PATH` 覆盖，截图落 `tmp/layout-check-requirements.png` |
-| e2e-layout-pages.mjs | 全站布局巡检：35 个路由（项目页/个人页/后台页/项目设置，含知识库详情页取库里第一个库、没有则跳过该路由）逐个打开，并依次点开页内第一组 `Segmented` 的每个视图，逐个断言 `.ant-layout-content` 与 document 都不溢出、且没有「越界又无滚动祖先」的元素（漏了滚动容器 → 内容被裁或顶破卡片）。只读，不改数据（当前项目取库中第一个）。`--only knowledge,worklog` 只跑匹配路由（**别写前导斜杠**，Git Bash 会做路径转换；片段是 `includes` 匹配，`admin/knowledge` 会同时命中知识库列表页与详情页）、`KB_ID=<库ID>` 指定知识库详情页巡检哪个库（默认取库里第一个）、`--window 1366,768` 换视口（矮视口更易暴露问题，建议两轮都跑）、`--shots` 每页存图、`--dump` 失败时打印内容区组件树（含高度/滚动量）定位元凶。截图与 report.json 落 `tmp/layout-sweep/` |
-| e2e-model-form-probe.mjs | 「模型接入」抽屉内「测试连接」：**填进表单的凭据与超时必须真的进探针请求**（浏览器里那条「表单取值 → 草稿请求」的路径，cap48_verify.py 走接口测不到）。自起一个强制鉴权的假端点（Bearer 不匹配一律 401，与 vLLM 行为一致），无头 Chrome 开抽屉、选类型、填表、点「测试连接」，逐项断言：探针打对路径、**带上 apiKey**、提示条成功、表单填的超时生效（拖 5 秒的假端点按 2 秒超时失败）。只读，不点「保存」。前置同上一行（app + 前端 dev），另需前端 origin 在后端 CORS 白名单内（默认只放 5173/8080，Vite 因端口占用换到 5174 时脚本会直接报错并给处置办法）。报告与失败截图落 `tmp/e2e-model-form-probe/` |
-| e2e-table-tag-ellipsis.mjs | 表格内 Tag 溢出（执行节点列）：备超长名节点（脚本自起 fake runner 上线）+ LOCAL 项目指它当默认节点，无头 Chrome 开 /admin/projects 断言 Tag 计算样式 ellipsis/hidden/nowrap（index.css 全局兜底）、Tag 右缘不越出单元格、td 无横向溢出、内容真被截断（scrollWidth>clientWidth）、悬停出完整名 Tooltip。前置：app 隔离实例（默认 :18102，**CORS 白名单带前端 origin**）+ `VITE_BACKEND_URL` 指向它的前端 dev（默认 :5199）+ runner jar 已构建；跑完删项目/节点、杀 runner，全自清 |
-| e2e-context-asset-viewer.mjs | 项目「上下文」页资产查看：脚本自造项目（每轮自建 tmp git 仓库，同库可重跑）+文档，/context 默认文档视图断言文档名可点、70% 抽屉标题=文档名且正文与类型标签可见，关抽屉列表仍在，且名称主列宽于摘要列；`--shots` 留终态截图供人工核对列宽。数据落隔离 H2。前置：app 隔离实例（默认 :18103）+ `VITE_BACKEND_URL` 指向它的前端 dev（默认 :5199） |
-| e2e-markdown-components.mjs | 共享 Markdown 阅读/编辑组件：脚本自造文档+图片附件，只读页断言代码块语言标签与 highlight.js token、复制按钮（钩住 clipboard 校验拷贝的是纯代码）、表格横滚容器、图片点开 antd 预览、任务列表、无非法 DOM 嵌套告警；编辑抽屉断言 CodeMirror 源码、字符/行统计、Ctrl+B、Tab 缩进、编辑/分栏/预览三态、分栏预览等高独立滚动、全屏铺满视口且 portal 到 body、Esc 退出全屏不连带关抽屉、取消后正文未落库。另造当天日报断言统一编辑器的极简模式（`showToolbar=false`）：默认预览、字段标题通过 `title` 进入顶栏（上方无独立标签）、顶栏只有源码/分栏/预览三个图标（无格式工具栏/字符统计）、预览走共享 Markdown 高亮、源码态 CodeMirror 行号/当前行/标题语法高亮、编辑器撑满到页面底部；分栏左源码右预览，输入即时更新、两栏滚动条按比例双向联动。再造周报断言「周总结 / 下周计划」两个编辑器左右等宽、等高并排，各自顶栏带字段标题，且撑满到页面底部。`--shots` 留全屏分栏、日报预览/源码/分栏、周报并排截图。前置：app 隔离实例（默认 :18103）+ `VITE_BACKEND_URL` 指向它的前端 dev（默认 :5199） |
+| `tests/legacy/ops/e2e-cap25.sh` | 服务端+runner 全链路：CLONE 项目→远程会话→worktree→push 回远端 |
+| `tests/legacy/ops/e2e-cap32-attachments.sh` | 附件 description 与关键字搜索（multipart 中文坑见头注释） |
+| `tests/legacy/ops/e2e-cap34-cleanup-mysql.sh` | 清理 CAP-34 E2E 误写共享 MySQL 的测试数据（e2e-node 节点 / e2e 会话与问答，**操作 156 共享库，慎用**） |
+| `tests/legacy/ops/e2e-cap34-del-node.sh` | 删除共享 MySQL 里 E2E 后建节点 e2e-node（需人工确认；先 unset-default 再删） |
+| `tests/legacy/ops/e2e-cap34-list-mysql.sh` | 只读列出共享 MySQL 中 e2e 遗留（节点/会话/问答），不删 |
+| `tests/legacy/ops/e2e-cap34.sh` | dist 包起服务端:18090+runner：无节点 409/"local" 400/问答全链路 |
+| `tests/legacy/ops/e2e-chat-stream.sh` | fake 会话结构化事件解析（:8081，executor=fake） |
+| `tests/legacy/ops/e2e-error-semantics.sh` | 客户端错误的状态码语义（后端 :8080 运行或传 baseUrl） |
+| `tests/legacy/ops/e2e-install-script.sh` | 一键安装脚本端点下发与执行（install-script 端点三形态 + sh --no-service 实跑 + 服务路径静态断言 + ps1 语法解析 + 坏 token/匿名/坏 os 负例） |
+| `tests/legacy/ops/e2e-integration-test.sh` | 集成连通性测试端点（未保存试连） |
+| `tests/legacy/ops/e2e-req-open-filter.sh` | 需求列表 status=OPEN 伪状态筛选 |
+| `tests/legacy/ops/e2e-req-sort.sh` | 需求列表按更新时间排序（sortBy=updatedAt + sortDir asc/desc），默认 seq 倒序不变 |
+| `tests/legacy/ops/e2e-resume-chat.sh` | 问答「继续对话」claude --resume 续接（真实 runner） |
+| `tests/legacy/ops/e2e-rotate-key.sh` | bin/dev-mind rotate-key：非 yes 中止、服务运行中拒绝、交互/--force 重生成 auth.key 与 *-crypto.key、旧密钥进 data/key-backup-*、auth.key 缺失时新建 32 字节随机密钥 |
+| `tests/legacy/ops/e2e-runner-upgrade-force.sh` | CAP-21 FR-09 强制升级：非 force 升级 BUSY → force 升级 ACCEPTED、会话离开活动态、runner 换包重启版本翻新 |
+| `tests/legacy/ops/e2e-runner-upgrade-main.sh` | FR-09 升级主流程 v2：先传包 → BUSY 验证 → 杀会话 → 升级 → 断言换包重启 |
+| `tests/legacy/ops/e2e-runner-upgrade.sh` | CAP-21 FR-09 升级链路：建节点 → fake runner → 挂会话验证 BUSY 推迟 → 上传改版本 jar → 自替换重启 |
+| `tests/legacy/ops/e2e-stacktrace.sh` | 错误响应堆栈透传（local profile） |
+| `tests/legacy/ops/e2e-worklog-auto-import.sh` | CAP-28 FR-09/FR-10 定时从 Git 导入工作条目：开关打开→当日提交定时导入（GIT/hours=0）、下一 tick 幂等不重复、关闭后不导入、重开补导入、个人执行时间覆盖全局 cron（设个人时间后全局对本人失效、到点才导入）。FR-10 起调度是每分钟主 tick，全局 cron 用环境变量 `DEVMIND_WORKLOG_GITIMPORTCRON` 覆盖成 */15s（收敛为每分钟一跳；cron 含空格塞不进 run.arguments），JDBC 路径要 cygpath 转 Windows 形态，姿势见脚本头 |
+| `tests/legacy/ops/service-e2e.ps1` | runner Windows 服务 install → start → restart → stop → uninstall（需管理员） |
+| `tests/legacy/ops/verify-skill-import.sh` | /api/skills/import 报错文案 + BOM 兼容 |
 
-### 前端 UI E2E（Node + 无头 Chrome，需 app 隔离实例 + 前端 dev server 同时起）
+### 前端回归（tests/legacy/ui/，Node + 无头 Chrome）
+
+需 app 与前端 dev（`scripts/dev.sh`）同时起；各脚本 `BASE`/`API`/`CHROME_PATH` 可覆盖，截图与报告落 `tmp/`。
 
 | 脚本 | 覆盖 |
 |------|------|
-| e2e-cap55-frontend.mjs | CAP-55 FR-07 前端：inbox 分诊徽标三块、查看依据抽屉（routing.reason 原文/概率分布/召回比对物/laya 应答回放）、管理抽屉里「分诊」按钮的可用性、晋升全局 → 决策记录页（模型建议 vs 人工裁决、agreement、可训练标记、state 与题面逐字回放）、导出训练集（点按钮 → 浏览器真下载 → 校验 JSONL 三字段与 gold one-hot）、降级链（删端点 → 按钮置灰、悬停给出指向模型接入的原因）。**含 CAP-56 FR-07 闸门**：§1 先断言闸门关着（登记 ≠ 放行），登记+验证一份产物把闸门打开，按钮才不灰；收尾撤销放行再删（验证中的产物删不掉）。前置：app 隔离实例（`--server.port=18095 --spring.profiles.active=e2e` + 干净 H2 + **CORS 白名单带上前端 origin**）与 `VITE_BACKEND_URL=http://localhost:18095 npm run dev -- --port 5199 --strictPort`；脚本自起 fixtures/laya-sidecar-mock.py。`BASE` 指向前端 dev（默认 5173——端口被占时 Vite 会换端口，这时必须用 `BASE=` 指过去，否则代理检查会打到别人那份 dev server 上） |
+| `tests/legacy/ui/cap64_export_ui.mjs` | CAP-64 收藏导出 UI：导出 Chrome（Netscape）书签文件并往返喂回自家解析器，断言层级/条目/转义/TAGS/备注无损；产物落 `tmp/` |
+| `tests/legacy/ui/cap64_group_tree_ui.mjs` | CAP-64 M4 分组树交互（CDP 真浏览器）：antd Tree 渲染默认全展开、折叠集写 localStorage 且刷新后仍折叠、合成 DragEvent 拖拽子分组落到目标分组内（服务端 parentId 真变更）、拖父进自己子树被 allowDrop 拒绝。前置：后端（`API` 可指独立实例 :8090）+ 前端 dev（`BASE`）已起；坑都钉在 drag() 注释里（HTML5 DnD 必须合成 DragEvent、落点横移量与下半格余量、展开动画落定再量坐标） |
+| `tests/legacy/ui/cap67_usage_tab_switch_ui.mjs` | CAP-67 用量页维度 tab 切换：未归属桶重复 rowKey 导致残留行（断言各维度首访/回访行数一致、单元格数 == 表头列数） |
+| `tests/legacy/ui/cap69_ui_unify.mjs` | CAP-69 交互统一回归（CDP 真浏览器）：三种套件类型新建走统一抽屉（类型在表单内，openapi 类型免名称/确认键变「生成」，切 script 才展开 git/命令字段，extra 不再单挂「从 OpenAPI 生成」）、smoke/script 行操作均为 运行/编辑/删除、行内运行弹窗按类型渲染字段（smoke=目标环境/baseUrl、script=env/命令覆盖）、script 行编辑跳内层页脚本属性表单（改命令保存 API 回读对账、无用例表格）、内层页 extra「运行」按钮两种类型字段族各断言。前置：后端 :8080 + 前端 :5173 已起（scripts/dev.sh） |
+| `tests/legacy/ui/e2e-cap55-frontend.mjs` | CAP-55 FR-07 前端：inbox 分诊徽标三块、查看依据抽屉（routing.reason 原文/概率分布/召回比对物/laya 应答回放）、管理抽屉里「分诊」按钮的可用性、晋升全局 → 决策记录页（模型建议 vs 人工裁决、agreement、可训练标记、state 与题面逐字回放）、导出训练集（点按钮 → 浏览器真下载 → 校验 JSONL 三字段与 gold one-hot）、降级链（删端点 → 按钮置灰、悬停给出指向模型接入的原因）。**含 CAP-56 FR-07 闸门**：§1 先断言闸门关着（登记 ≠ 放行），登记+验证一份产物把闸门打开，按钮才不灰；收尾撤销放行再删（验证中的产物删不掉）。前置：app 隔离实例（`--server.port=18095 --spring.profiles.active=e2e` + 干净 H2 + **CORS 白名单带上前端 origin**）与 `VITE_BACKEND_URL=http://localhost:18095 npm run dev -- --port 5199 --strictPort`；脚本自起 fixtures/laya-sidecar-mock.py。`BASE` 指向前端 dev（默认 5173——端口被占时 Vite 会换端口，这时必须用 `BASE=` 指过去，否则代理检查会打到别人那份 dev server 上） |
+| `tests/legacy/ui/e2e-context-asset-viewer.mjs` | 项目「上下文」页资产查看：脚本自造项目（每轮自建 tmp git 仓库，同库可重跑）+文档，/context 默认文档视图断言文档名可点、70% 抽屉标题=文档名且正文与类型标签可见，关抽屉列表仍在，且名称主列宽于摘要列；`--shots` 留终态截图供人工核对列宽。数据落隔离 H2。前置：app 隔离实例（默认 :18103）+ `VITE_BACKEND_URL` 指向它的前端 dev（默认 :5199） |
+| `tests/legacy/ui/e2e-draft-options-probe.mjs` | 新问答/新会话草稿「高级选项」真实链路探针：真鼠标开选项 → 输入 → 发送，断言 POST `/api/chats`、`/api/sessions` 请求体保留所选字段 |
+| `tests/legacy/ui/e2e-layout-pages.mjs` | 全站布局巡检：35 个路由（项目页/个人页/后台页/项目设置，含知识库详情页取库里第一个库、没有则跳过该路由）逐个打开，并依次点开页内第一组 `Segmented` 的每个视图，逐个断言 `.ant-layout-content` 与 document 都不溢出、且没有「越界又无滚动祖先」的元素（漏了滚动容器 → 内容被裁或顶破卡片）。只读，不改数据（当前项目取库中第一个）。`--only knowledge,worklog` 只跑匹配路由（**别写前导斜杠**，Git Bash 会做路径转换；片段是 `includes` 匹配，`admin/knowledge` 会同时命中知识库列表页与详情页）、`KB_ID=<库ID>` 指定知识库详情页巡检哪个库（默认取库里第一个）、`--window 1366,768` 换视口（矮视口更易暴露问题，建议两轮都跑）、`--shots` 每页存图、`--dump` 失败时打印内容区组件树（含高度/滚动量）定位元凶。截图与 report.json 落 `tmp/layout-sweep/` |
+| `tests/legacy/ui/e2e-markdown-components.mjs` | 共享 Markdown 阅读/编辑组件：脚本自造文档+图片附件，只读页断言代码块语言标签与 highlight.js token、复制按钮（钩住 clipboard 校验拷贝的是纯代码）、表格横滚容器、图片点开 antd 预览、任务列表、无非法 DOM 嵌套告警；编辑抽屉断言 CodeMirror 源码、字符/行统计、Ctrl+B、Tab 缩进、编辑/分栏/预览三态、分栏预览等高独立滚动、全屏铺满视口且 portal 到 body、Esc 退出全屏不连带关抽屉、取消后正文未落库。另造当天日报断言统一编辑器的极简模式（`showToolbar=false`）：默认预览、字段标题通过 `title` 进入顶栏（上方无独立标签）、顶栏只有源码/分栏/预览三个图标（无格式工具栏/字符统计）、预览走共享 Markdown 高亮、源码态 CodeMirror 行号/当前行/标题语法高亮、编辑器撑满到页面底部；分栏左源码右预览，输入即时更新、两栏滚动条按比例双向联动。再造周报断言「周总结 / 下周计划」两个编辑器左右等宽、等高并排，各自顶栏带字段标题，且撑满到页面底部。`--shots` 留全屏分栏、日报预览/源码/分栏、周报并排截图。前置：app 隔离实例（默认 :18103）+ `VITE_BACKEND_URL` 指向它的前端 dev（默认 :5199） |
+| `tests/legacy/ui/e2e-model-form-probe.mjs` | 「模型接入」抽屉内「测试连接」：**填进表单的凭据与超时必须真的进探针请求**（浏览器里那条「表单取值 → 草稿请求」的路径，cap48_verify.py 走接口测不到）。自起一个强制鉴权的假端点（Bearer 不匹配一律 401，与 vLLM 行为一致），无头 Chrome 开抽屉、选类型、填表、点「测试连接」，逐项断言：探针打对路径、**带上 apiKey**、提示条成功、表单填的超时生效（拖 5 秒的假端点按 2 秒超时失败）。只读，不点「保存」。前置同上一行（app + 前端 dev），另需前端 origin 在后端 CORS 白名单内（默认只放 5173/8080，Vite 因端口占用换到 5174 时脚本会直接报错并给处置办法）。报告与失败截图落 `tmp/e2e-model-form-probe/` |
+| `tests/legacy/ui/e2e-requirements-layout.mjs` | 需求列表：整页不出纵向滚动条、表体内部滚动（`scroll.y` 为实测值）、表头吸顶、分页条常驻；自带数据（临时项目「布局校验-临时」造 30 条需求，跑完连项目一起删，`--keep` 保留）。浏览器路径用 `CHROME_PATH` 覆盖，截图落 `tmp/layout-check-requirements.png` |
+| `tests/legacy/ui/e2e-session-refs-layout.mjs` | 会话列表「关联」列溢出回归：长需求标题必须在列内省略截断，不得视觉上压到「摘要」列 |
+| `tests/legacy/ui/e2e-session-refs.mjs` | 会话关联需求展示与跳转：对话左栏/头部/列表「关联」列的链接与工作单元标签（fake runner 起会话造数） |
+| `tests/legacy/ui/e2e-table-tag-ellipsis.mjs` | 表格内 Tag 溢出（执行节点列）：备超长名节点（脚本自起 fake runner 上线）+ LOCAL 项目指它当默认节点，无头 Chrome 开 /admin/projects 断言 Tag 计算样式 ellipsis/hidden/nowrap（index.css 全局兜底）、Tag 右缘不越出单元格、td 无横向溢出、内容真被截断（scrollWidth>clientWidth）、悬停出完整名 Tooltip。前置：app 隔离实例（默认 :18102，**CORS 白名单带前端 origin**）+ `VITE_BACKEND_URL` 指向它的前端 dev（默认 :5199）+ runner jar 已构建；跑完删项目/节点、杀 runner，全自清 |
 
-### WS 帧探针（Node，被 verify 脚本调用或手工）
+### WS 帧探针（tests/legacy/ws/，Node）
 
-`ws_check.mjs`（通知流）、`cap08-ws-test.mjs <buildId>`、`cap09-ws-test.mjs <depId>`、`cap10-ws-test.mjs <runId>`、`cap23-ws-test.mjs <repoId>`、`cap80-ws-test.mjs <port> <runId> <live|replay>`
+| 脚本 | 覆盖 |
+|------|------|
+| `tests/legacy/ws/cap08-ws-test.mjs` | CAP-08 构建 WS 实时日志（`/ws/builds/{id}/logs`）：log 帧与 done 帧 |
+| `tests/legacy/ws/cap09-ws-test.mjs` | CAP-09 部署 WS 实时流（`/ws/deployments/{id}/stream`）：step/log 帧与 done 帧 |
+| `tests/legacy/ws/cap10-ws-test.mjs` | CAP-10 测试运行 WS 实时流（`/ws/test-runs/{id}/stream`）：result 帧与 done 帧 |
+| `tests/legacy/ws/cap23-ws-test.mjs` | CAP-23 仓库克隆 WS（`/ws/repo-clones/clone-<repoId>`）：snapshot 帧与 done 帧 |
+| `tests/legacy/ws/cap34-snapshot-probe.mjs` | CAP-34 会话 WS snapshot 探针（`/ws/sessions/{id}`）：打印 SNAP_JSON，供 reattach 断言重启后仍含历史 |
+| `tests/legacy/ws/cap49-ws-test.mjs` | CAP-49 模型执行体 WS（`/ws/chats/{id}`）：text_delta → 全量 assistant → result，及 interrupt/notice 语义 |
+| `tests/legacy/ws/cap50-sessions-ws.mjs` | CAP-50 CLI 会话 WS（`/ws/sessions/{id}`）：增量与全量拼接一致，进行中 snapshot 不混入 text_delta |
+| `tests/legacy/ws/cap80-ws-test.mjs` | CAP-80 异步任务 WS（`/ws/async-tasks/{runId}`）：live 实时 attach 与终态 replay |
+| `tests/legacy/ws/ws_check.mjs` | 通知流 WS 探针（手工使用） |
 
-### PowerShell
+## 其他工具
 
-`service-e2e.ps1 <home>` — runner Windows 服务 install→start→restart→stop→uninstall，**需管理员**。
+`knowledge_eval/run-eval.mjs` — CAP-85 FR-30 检索评测：登录 → `GET /knowledge/admin/eval/report?topK=&kbId=` → 打印 Recall@K/MRR/引用准确率/拒答率与逐题明细，`--out` 落 JSON 供改动索引/模型前后对比。数据集 `knowledge_eval/dataset.json`（含不可回答题），需 app 已起且期望文档已导入对应库；只读，不改数据。

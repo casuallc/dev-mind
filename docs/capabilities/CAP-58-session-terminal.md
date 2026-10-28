@@ -181,7 +181,7 @@ runner 自己发起的 git 进程参数，worktree 的 origin 是裸 URL → age
   runner `TerminalHandler`（可配置白名单缺省只读档 + cwd 限定 + marker 取新 cwd）+
   服务端 registry/SPI/REST（session/chat 对称）+ 前端工作区面板终端 tab。
   单测：runner 白名单纯函数面、agent 帧链路面（组帧/ack 路由/v16 门控/断连清理）。
-  E2E：`tests/cap58_e2e.py`（fake runner + 独立实例）已实跑通过。
+  E2E：`tests/legacy/api/cap58_e2e.py`（fake runner + 独立实例）已实跑通过。
 - **M3 —— FR-06/FR-07 实现（2026-10-13）**：FR-06 会话内本地 git 凭据注入——common
   `GitProxyBroker`（key→(upstreamOrigin, token) 纯内存登记簿）+ `RunnerWorkspace`
   prepare/prepareMulti 链路 `ensureProxyOrigin`（缓存库开 extensions.worktreeConfig +

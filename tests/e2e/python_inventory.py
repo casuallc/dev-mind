@@ -11,9 +11,9 @@ OUT = Path(__file__).with_name("python-inventory.md")
 
 def render():
     legacy = json.loads(Path(__file__).with_name("legacy.json").read_text(encoding="utf-8"))
-    files = sorted((ROOT / "tests").glob("*.py"))
+    files = sorted((ROOT / "tests/legacy").rglob("*.py"))
     lines = ["# Python 测试迁移清单", "",
-             f"共 {len(files)} 个顶层 Python 脚本。由 python_inventory.py 生成；只静态读取，不执行脚本。",
+             f"共 {len(files)} 个归档 Python 脚本（tests/legacy/**）。由 python_inventory.py 生成；只静态读取，不执行脚本。",
              "信号仅帮助审核，不代表已验证的前置或安全结论。legacy 不能直接批量导入可执行套件。", "",
              "| 脚本 | 状态 | 静态信号 | 替代/审核说明 |", "|---|---|---|---|"]
     for file in files:
@@ -29,9 +29,10 @@ def render():
             signals.append("runner")
         if re.search(r"https?://(?:localhost|127\.0\.0\.1):\d+", text):
             signals.append("含本机默认地址")
-        info = legacy[file.name]
+        key = file.relative_to(ROOT / "tests").as_posix()
+        info = legacy[key]
         reason = info["reason"].replace("|", "\\|")
-        lines.append(f'| [{file.name}](../{file.name}) | {info["status"]} | {"、".join(signals) or "需人工审核"} | {reason} |')
+        lines.append(f'| [{file.name}](../{key}) | {info["status"]} | {"、".join(signals) or "需人工审核"} | {reason} |')
     return "\n".join(lines) + "\n"
 
 

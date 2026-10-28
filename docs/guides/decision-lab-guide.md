@@ -126,7 +126,7 @@ CAP-55 把 laya 决策模型接进了产品路径（知识库提案分诊），�
 
 > ⚠ **上线副作用（必读）**：闸门生效后，**没有任何已验证 checkpoint 时知识库分诊整体不可用**、
 > 按钮置灰（悬停给原因）。这正是要的机械保证，但 224 环境上线后必须**先登记 + 验证一个 checkpoint**
-> 才恢复可用。`tests/cap55_triage_verify.py` / `cap55_records_verify.py` / `e2e-cap55-frontend.mjs`
+> 才恢复可用。`tests/legacy/api/cap55_triage_verify.py` / `cap55_records_verify.py` / `e2e-cap55-frontend.mjs`
 > 已补上这道前置（各自 §0/§1 自己登记+验证一份产物，收尾撤销+删除），实跑全绿（58 / 63 / 54 条）。
 
 ## 4. 节点侧（runner）准备 —— 缺一项就下发即被拒
@@ -220,7 +220,7 @@ python -m uvicorn app:app --port 8377
 ## 8. 生产环境（224）落地清单与实证
 
 在 172.20.140.224 上跑这套东西要过四道门，缺哪道就卡在哪一步（2026-09-23 实测，
-`tests/cap56_224_verify.py` 22 项断言全绿）：
+`tests/legacy/api/cap56_224_verify.py` 22 项断言全绿）：
 
 | 门 | 缺了会怎样 | 怎么补 |
 |---|---|---|
@@ -249,10 +249,10 @@ python -m uvicorn app:app --port 8377
 - 上游决策引擎与分诊：[docs/capabilities/CAP-55-decision-engine.md](../capabilities/CAP-55-decision-engine.md)
 - runner 部署：[runner-service-deploy.md](runner-service-deploy.md)、[admq-manager-cicd-guide.md](admq-manager-cicd-guide.md)（execAllowlist 实务）
 - 开发坑位（H2/Jackson/WS 等）：[docs/core/开发注意事项.md](../core/开发注意事项.md)
-- 回归脚本：[tests/cap56_e2e.py](../../tests/cap56_e2e.py)（平台全链，真 runner + mock 边车；起隔离实例与
-  stub 脚本的姿势在文件头注释）、[tests/cap56_224_verify.py](../../tests/cap56_224_verify.py)
+- 回归脚本：[tests/legacy/api/cap56_e2e.py](../../tests/legacy/api/cap56_e2e.py)（平台全链，真 runner + mock 边车；起隔离实例与
+  stub 脚本的姿势在文件头注释）、[tests/legacy/api/cap56_224_verify.py](../../tests/legacy/api/cap56_224_verify.py)
   （**生产环境**最小可用段：登记→自检→放行→基准集→真评测，不跑微调，见 §8）、
-  [tests/cap56_sidecar_source.py](../../tests/cap56_sidecar_source.py)
-  （边车槽位来源覆盖，不起 app）、[tests/cap56_gpu_e2e.py](../../tests/cap56_gpu_e2e.py)
+  [tests/legacy/api/cap56_sidecar_source.py](../../tests/legacy/api/cap56_sidecar_source.py)
+  （边车槽位来源覆盖，不起 app）、[tests/legacy/api/cap56_gpu_e2e.py](../../tests/legacy/api/cap56_gpu_e2e.py)
   （**真机**全链：真 laya 模型 + 真 torch 训练 + 真边车，跑在 172.20.140.88；前置与两个必须钉住的
   东西（`LAYA_DEVICE`、端点 `model`）见脚本头注释与 §6）；闸门对既有脚本的影响见 §3

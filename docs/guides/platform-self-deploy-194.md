@@ -88,6 +88,6 @@ stop/解包/换 bin·libs·ui·runner·lab·config（**跳过 application-local.
 
 ### Python 历史脚本迁移接入
 
-80 个 Python 脚本的 [逐文件清单](../../tests/e2e/python-inventory.md) 区分已迁移与待审核。首个完整迁移 `cap76_tools_contract.py`，旧入口委托统一 runner；项目按业务登记 contract 套件，不把所有历史文件直接作为可执行套件批量导入。
+66 个归档 Python 脚本的 [逐文件清单](../../tests/e2e/python-inventory.md) 区分已迁移与待审核。首个完整迁移 `tests/legacy/api/cap76_tools_contract.py`，旧入口委托统一 runner；项目按业务登记 contract 套件，不把所有历史文件直接作为可执行套件批量导入。
 
 注册方式与 smoke 相同，增加 `--suite contract`，并指定新 `--workspace-key`。首次验证使用分支 `codex/e2e-standard-20261028` 的 `326ad71c`：套件 **#6**，节点 **4**，运行单 **#7 SUCCESS，3/3 通过**，报告文档 **#52**。套件执行只读 CAP-76 工具契约检查，需管理员权限；不触发真实模型调用。原 smoke 套件 #5 保留。

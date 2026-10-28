@@ -276,7 +276,7 @@ MVP 明确不做：index.json 或任何落盘索引（否决，见 §3）、团�
    被覆盖会新旧类混装。
 9. **验收 6（egress 隧道）** 由 `GitRemoteOpsEgressTest` 单测覆盖（CAP-70 既有回归网），
    E2E 不起真实隧道；验收 7 的带行迁移幂等由 `WorklogReportMigrationTest` 覆盖，
-   E2E（tests/e2e-cap74.py）钉「重启零新 commit」。
+   E2E（tests/legacy/api/e2e-cap74.py）钉「重启零新 commit」。
 
 ## 10. M3 条目文件化与 runner 清理（2026-10-12 落地）
 
@@ -302,6 +302,6 @@ MVP 明确不做：index.json 或任何落盘索引（否决，见 §3）、团�
    runner 侧 `worklog_push` no-op ack 分支按 §5 保留兼容旧服务端。**运维**：runner jar
    重建后重启所有节点（WinSW devmind-agent/devmind-agent-194、140.88），新旧两侧任意
    组合均安全。
-7. **E2E**：`tests/e2e-cap74-m3.py`（32 断言）——H2 URL INIT 预植 legacy 表真迁移、
+7. **E2E**：`tests/legacy/api/e2e-cap74-m3.py`（32 断言）——H2 URL INIT 预植 legacy 表真迁移、
    条目文件字节/trailer、平台外手改存活、删除寻址、git 导入判重走文件、生成预检
    文件化通路、重启迁移幂等。

@@ -302,7 +302,7 @@ public record ToolSpec(
   `x-tool-risk` / `x-min-role` / `x-owner-module`；
 - **导出的文档是契约描述，不是可调用端点**：它不注册路由、不提供认证；未来若对外开放调用，
   须按 CAP-20 单独立项鉴权/限流/版本治理，不能默认这份文档可以直接打；
-- 契约快照由 `tests/cap76_tools_contract.py`（起隔离 app 后拉取该端点）生成到
+- 契约快照由 `tests/legacy/api/cap76_tools_contract.py`（起隔离 app 后拉取该端点）生成到
   `docs/capabilities/tools/cap76-tools.yaml` 并随代码评审，契约变更在 diff 里可见；
   脚本内自检可被标准 OpenAPI 解析、operation 集合与注册表一致，**不接入 CI**（本期无 CI
   流水线，靠脚本 + 评审把关）。**不要在建包过程写源码树**（构建有副作用，且需要完整
@@ -1191,7 +1191,7 @@ devmind:
 9. 卡片：按钮 value 只含 action id；回调 3s 内返回；重复 event_id 去重。
 10. OpenAPI：导出 operation 数与注册工具数一致、可被标准 OpenAPI 解析；重名/非法名启动失败。
 
-### E2E（`tests/cap76_copilot_verify.py`，产物写 `tmp/`）
+### E2E（`tests/legacy/api/cap76_copilot_verify.py`，产物写 `tmp/`）
 
 - 起隔离 app（`--spring.profiles.active=e2e`）+ 假 OpenAI 服务（支持 tools/tool_calls）
   + 假 bot 适配器（`POST /api/e2e/bot/message` 注入入站消息）。
@@ -1212,7 +1212,7 @@ devmind:
       `/api/copilot/admin/plans` 至 SUCCEEDED、步骤行带 `step_seq` 与 RUNNING→OK 轨迹；
       `await` 用 e2e profile 的假 BUILD 探针（fake 控制器翻转作业状态）验证 等待→继续
       与 作业失败→中断 两条路径；终态推送落入 fake adapter 的 pushes。
-  11. 契约：`tests/cap76_tools_contract.py` 生成的 `cap76-tools.yaml` 与注册表一致
+  11. 契约：`tests/legacy/api/cap76_tools_contract.py` 生成的 `cap76-tools.yaml` 与注册表一致
       （operation 数、schema 可被标准 OpenAPI 解析）。
 - 跑完清理 app/mock 进程（见 `docs/core/开发注意事项.md` 与 `tests/README.md`）。
 

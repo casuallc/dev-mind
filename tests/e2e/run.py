@@ -39,7 +39,9 @@ def catalog():
                   for method in unittest.defaultTestLoader.getTestCaseNames(cls)}
     assert discovered == tests, "every official test must be registered"
     legacy = json.loads((HERE / "legacy.json").read_text(encoding="utf-8"))
-    actual = {p.name for p in (ROOT / "tests").iterdir() if p.suffix in (".py", ".mjs", ".sh", ".ps1")}
+    actual = {p.relative_to(ROOT / "tests").as_posix()
+              for p in (ROOT / "tests/legacy").rglob("*")
+              if p.is_file() and p.suffix in (".py", ".mjs", ".sh", ".ps1")}
     assert actual == set(legacy), "legacy inventory changed: update tests/e2e/legacy.json"
     assert python_inventory.OUT.read_text(encoding="utf-8") == python_inventory.render(), "Python inventory stale; regenerate with python_inventory.py --write"
     return entries

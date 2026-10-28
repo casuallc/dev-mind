@@ -3,7 +3,7 @@
 > 能力 ID：CAP-101 ｜ 分类：集成 ｜ 状态：已实现 ｜ 日期：2026-10-28
 > 实现：M1 后端 FR-01~05（端点 + 词表匹配 + 部分失败语义 + 审计/事件，
 > `JiraIssueActionServiceTest` 18 例过）+ M2 前端 FR-06~08（验收弹窗联动区默认勾选、
-> force 路径沿用勾选态、直接完成不联动）+ E2E `tests/cap101_verify.py`
+> force 路径沿用勾选态、直接完成不联动）+ E2E `tests/legacy/api/cap101_verify.py`
 > （jira-mock 补 transitions/worklog 端点，主路径/终态跳过/部分失败/转换失败/兜底匹配/
 > 非法入参全覆盖）。全量 `mvn test` 与 `npx tsc -b` 通过。
 > 决策记录：**弹窗内用户选择（默认勾选）而非全自动**——验收是人工动作，Jira 写操作
@@ -100,7 +100,7 @@ AI 实际耗时），确认后本地 DONE + Jira 解决转换 + worklog 登记�
 - M1：`JiraIssueActionServiceTest` 新增用例——词表命中（toStatus 优先于 name）、
   无匹配跳过不报错、仅登记工时（seconds 无转换也登记）、转换成功工时失败返回
   worklogError、转换失败抛错不登记工时；`mvn -q test` 通过；
-  `tests/cap101_verify.py`（mock Jira 服务 E2E）通过。
+  `tests/legacy/api/cap101_verify.py`（mock Jira 服务 E2E）通过。
 - M2：`npx tsc -b` 通过；验收弹窗在 Jira 需求下渲染联动区且默认勾选，取消勾选则
   不调 resolve；force 路径沿用勾选态；Jira 步失败有 warning 且需求已 DONE。
 

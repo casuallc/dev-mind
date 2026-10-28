@@ -231,7 +231,7 @@ POST   /api/chats/{id}/resume     MODEL 走"重建 runtime"分支（无需 cliSe
 - **失败不炸链路**：已钉端点被停用/删除后**提问即 409**（读历史/收口不受影响，恢复端点后照常提问）；
   生成期故障（401/网络/2xx 零正文）⇒ `error` 事件 + `result{isError:true}` + 会话仍在 WAITING_INPUT
   （修好端点可直接重问）；401 ⇒ 消息脱敏（`***`）不泄密；服务端忽略 `stream:true` 时回落非流式仍可用；
-- **零回归**：AGENT 问答链路不变；`tests/cap46_verify.py`（知识库问答）与 `cap48_verify.py` 不改一行仍全绿；
+- **零回归**：AGENT 问答链路不变；`tests/legacy/api/cap46_verify.py`（知识库问答）与 `cap48_verify.py` 不改一行仍全绿；
 - **红线**：列表/详情视图无密文；日志与事件文本无 apiKey；`git status --short` 无本机路径与密钥。
 
 ## 8. 非目标
@@ -260,9 +260,9 @@ POST   /api/chats/{id}/resume     MODEL 走"重建 runtime"分支（无需 cliSe
 - 后端 `mvn -q test` 全绿（含本能力新增单测：`OpenAiCompatChatStreamTest`、`ModelSessionRuntimeTest`、
   `ChatModelTurnSupplierTest`、`ChatManagerServiceTest` 的 MODEL 分流/409/引用保护）；
 - 前端 `cd frontend && npx tsc -b` 通过；
-- `tests/cap49_verify.py` **72/72**（连跑三次稳定）：独立实例 `:18090` + 独立 H2 + mock embedding +
+- `tests/legacy/api/cap49_verify.py` **72/72**（连跑三次稳定）：独立实例 `:18090` + 独立 H2 + mock embedding +
   扩了 SSE 的 `tests/fixtures/chat-mock.py`，**全程无 runner 节点**——覆盖无节点建模型问答与流式、
   WS 与落库逐条一致、多轮装配与历轮前缀剥离、绑库注入、中断保留部分正文、挂起/授权/空闲中断 409、
   被拒动作只回 `notice`、冲突字段与图片 400、端点停用 409、401 脱敏、引用保护、无 CHAT 端点 409、
   以及"Agent 仍必须有节点（无本机回落）"；
-- 回归：`tests/cap46_verify.py` **18/18**、`tests/cap48_verify.py` **79/79**，两个脚本一行未改仍全绿。
+- 回归：`tests/legacy/api/cap46_verify.py` **18/18**、`tests/legacy/api/cap48_verify.py` **79/79**，两个脚本一行未改仍全绿。

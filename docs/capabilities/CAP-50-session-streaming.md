@@ -89,7 +89,7 @@
 > `seq > afterSeq 且 < beforeSeq` 的最近一页；**chats 侧同步从无上限全量取改为同款语义**
 > （`limit<=0` 落默认上限 2000）。前端终态历史首屏只取最近 200 条，顶部「加载更早消息」
 > 按 beforeSeq 向前翻页（`hasOlder` 为推断值：拿满一页且最早 seq>1，边界多打一次空请求，
-> 不动 API 形状）。回归网：`SessionEventsLimitTest` 增 beforeSeq 用例 + `tests/e2e-events-pagination.py`。
+> 不动 API 形状）。回归网：`SessionEventsLimitTest` 增 beforeSeq 用例 + `tests/legacy/api/e2e-events-pagination.py`。
 
 ### FR-06 逃生开关
 
@@ -157,7 +157,7 @@ GET /api/sessions?keyword=&...                      列表新增 keyword 服务�
 - 前端首屏/翻页带 `payloadMax=4096`，`ChatStream` 工具卡片凭 `previewTruncated` 标记在展开时
   调单条端点补全文；会话列表轮询走 `If-None-Match`，未变化省掉整页传输；
 - 回归网：`SessionEventPreviewTest`、`SessionEventsLimitTest`（截断 + 单条全文 + 兼容形态）、
-  `ChatManagerServiceTest`（问答侧对称用例）、E2E `tests/e2e-events-pagination.py`。
+  `ChatManagerServiceTest`（问答侧对称用例）、E2E `tests/legacy/api/e2e-events-pagination.py`。
 
 ## 7. 验收标准
 
@@ -176,8 +176,8 @@ GET /api/sessions?keyword=&...                      列表新增 keyword 服务�
 - 后端 `mvn -q test` 全绿：**674 项**（本能力新增 `CliEventParserStreamEventTest`、
   `RunnerDeltaAggregatorTest`、`ServerConnectionEgressTest`、`SessionReplayRingTest`、`SessionEventsLimitTest`
   与 `CliProcessLauncherBuildCommandTest` 的 flag 注入用例）；
-- E2E `tests/e2e-agent-node.py`（runner 用 `executor=fake` 真跑）：
-  `[7.5]` 新增 `tests/cap50-sessions-ws.mjs` 断言 3 条增量 → 67 字全量收口、流式进行中重连 snapshot 19 条不含增量；
+- E2E `tests/legacy/api/e2e-agent-node.py`（runner 用 `executor=fake` 真跑）：
+  `[7.5]` 新增 `tests/legacy/ws/cap50-sessions-ws.mjs` 断言 3 条增量 → 67 字全量收口、流式进行中重连 snapshot 19 条不含增量；
   `[8.5]` 落库 **21 条增量 / 7 次全量收口**、无空增量、无噪音泄漏；
 - 前端零改动（`npx tsc -b` 仅作回归确认）。
 

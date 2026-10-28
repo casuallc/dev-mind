@@ -92,8 +92,8 @@
 - **FR-10 存量场景**：旧场景 `knowledge_tags` 不自动转换为库绑定；升级后这些场景
   不再注入知识，管理员按需在场景里重新绑定知识库（首版不做启发式迁移）。
 - **FR-11 文档/索引**：新增本 CAP，回写 CAP-04/33/44/46/84/86 状态口径与能力索引；
-  `tests/cap33_verify.py` 改为场景绑库检索断言，新增 `tests/cap92_e2e.py`；
-  删除 `tests/e2e-injection-preview-drawer.mjs`，`tests/e2e-context-asset-viewer.mjs`
+  `tests/legacy/api/cap33_verify.py` 改为场景绑库检索断言，新增 `tests/legacy/api/cap92_e2e.py`；
+  删除 `tests/e2e-injection-preview-drawer.mjs`，`tests/legacy/ui/e2e-context-asset-viewer.mjs`
   收为文档视图。
 
 ## 3. 否决方案
@@ -172,8 +172,8 @@
    装配（只落权限设置，不报错）；
 5. 场景解绑后不再检索；绑定归档库不命中（归档退出检索）；
 6. 存量 `inject_mode=FULL` 启动后归一为 `RAG`；旧场景不因缺少新字段报错，仅不再注入知识；
-7. 全量 `mvn test` 绿、前端 `npx tsc -b` 绿；`tests/cap92_e2e.py` 与更新的
-   `tests/cap33_verify.py` 覆盖预览/真实装配/不计数/解绑/归档。
+7. 全量 `mvn test` 绿、前端 `npx tsc -b` 绿；`tests/legacy/api/cap92_e2e.py` 与更新的
+   `tests/legacy/api/cap33_verify.py` 覆盖预览/真实装配/不计数/解绑/归档。
 
 ## 10. 风险与开放问题
 
