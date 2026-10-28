@@ -13,10 +13,15 @@
   GET  /rest/api/2/issue/<KEY>                         单条读取（回读/手动刷新用）
   GET  /rest/api/2/user/assignable/search              可指派用户（__gdpr 打开时拒 query 参数）
   GET  /rest/api/2/search                              同步分页拉取（返回全部已建 issue）
+  GET  /rest/api/2/issue/<KEY>/transitions             可用转换（默认按 issue 状态推导，/__transitions 可注入）
+  POST /rest/api/2/issue/<KEY>/transitions             执行转换（把 issue 状态置为 to.name；__fail-transition 注入 400）
+  POST /rest/api/2/issue/<KEY>/worklog                 登记工时（累加 timespent；__fail-worklog 注入 403）
 控制面：
-  GET  /__state    {"issues":[…回读形态…], "requests":[{method,path,auth,body}]}
+  GET  /__state    {"issues":[…回读形态…], "requests":[{method,path,auth,body}], "worklogs":[{key,seconds,comment}]}
   POST /__mutate   {"key":"PROJ-101","patch":{"status":"In Progress",…}} 改远端字段
   POST /__gdpr     {"on":true} 让 user/assignable/search 对 query 参数报 400 GDPR
+  POST /__transitions {"transitions":[{"id","name","toStatus"}]|null} 注入转换清单（null 恢复按状态推导）
+  POST /__fail-transition {"on":true} 让 POST transitions 回 400；POST /__fail-worklog {"on":true} 让 worklog 回 403
   POST /__create-error {"error":{…}} 让 POST /issue 回该 400 体（字段级错误透出用；{"error":null} 关闭）
   POST /__createmeta {"fields":[…],"enforce":true,"notFound":true,"fail":true} 注入创建字段目录（FR-08）；
                     enforce 打开后 POST /issue 按目录逐字段校验必填并回 Jira 同形 400；
@@ -56,7 +61,18 @@ USERS = [
 # FR-08 创建字段目录：默认空（既有用例不受影响），由控制面 /__createmeta 注入。
 # 形态与真实 createmeta 一致：fieldId/name/required/hasDefaultValue/schema/allowedValues。
 STATE = {"issues": {}, "seq": 100, "gdpr": False, "requests": [], "create_error": None,
-         "create_fields": [], "createmeta_404": False, "createmeta_500": False, "enforce_fields": False}
+         "create_fields": [], "createmeta_404": False, "createmeta_500": False, "enforce_fields": False,
+         "transitions": None, "fail_transition": False, "fail_worklog": False, "worklogs": []}
+
+
+def default_transitions(issue):
+    """按 issue 当前状态推导可用转换（真实 Jira 语义：终态只给「重新打开」，不提供解决类转换——
+    CAP-101 的「已是终态则跳过」路径靠这个覆盖）。/__transitions 注入后完全覆盖本推导。"""
+    status = ((issue or {}).get("fields") or {}).get("status") or {}
+    if status.get("name") == "Done":
+        return [{"id": "31", "name": "重新打开", "toStatus": "To Do"}]
+    return [{"id": "11", "name": "开始处理", "toStatus": "In Progress"},
+            {"id": "21", "name": "完成", "toStatus": "Done"}]
 
 
 def legacy_field(ref):
@@ -132,6 +148,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def send_empty(self, code):
+        """204 等无体响应：禁带 Content-Length（JDK HttpClient 见 204+Content-Length 直接抛
+        "unexpected content length header with 204 response"）。"""
+        self.send_response(code)
+        self.end_headers()
+
     def read_body(self):
         """请求体：兼容 Content-Length 与 chunked（Spring RestClient 走的是后者，
         只认 Content-Length 会把创建 issue 的 payload 读成空 dict → 必填字段全缺）。"""
@@ -192,9 +214,61 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith(prefix) and path.endswith("/issuetypes"):
             return lambda self_, p, q, b: self_.issue_types_page(q)
         prefix = "/rest/api/2/issue/"
-        if method == "GET" and path.startswith(prefix):
-            return lambda self_, p, q, b: self_.get_issue(p[len(prefix):])
+        if path.startswith(prefix):
+            rest = path[len(prefix):]
+            # 子资源（transitions/worklog）必须先于单条读取分流，否则 key 被吞进 <KEY>/transitions
+            if rest.endswith("/transitions"):
+                key = rest[:-len("/transitions")]
+                if method == "GET":
+                    return lambda self_, p, q, b: self_.list_transitions(key)
+                if method == "POST":
+                    return lambda self_, p, q, b: self_.do_transition(key, b)
+            if rest.endswith("/worklog") and method == "POST":
+                return lambda self_, p, q, b: self_.add_worklog(rest[:-len("/worklog")], b)
+            if method == "GET":
+                return lambda self_, p, q, b: self_.get_issue(rest)
         return None
+
+    # ---------------- 转换 / 工时（CAP-19/27/101 回写通道） ----------------
+    def list_transitions(self, key):
+        issue = STATE["issues"].get(key)
+        if issue is None:
+            return self.send_json(404, {"errorMessages": ["Issue does not exist: " + key]})
+        offered = STATE["transitions"] if STATE["transitions"] is not None else default_transitions(issue)
+        return self.send_json(200, {"transitions": [
+            {"id": t["id"], "name": t.get("name"), "to": {"name": t.get("toStatus")}} for t in offered]})
+
+    def do_transition(self, key, body):
+        if STATE["fail_transition"]:
+            return self.send_json(400, {"errorMessages": ["工作流校验失败（注入）"]})
+        issue = STATE["issues"].get(key)
+        if issue is None:
+            return self.send_json(404, {"errorMessages": ["Issue does not exist: " + key]})
+        offered = STATE["transitions"] if STATE["transitions"] is not None else default_transitions(issue)
+        tid = ((body or {}).get("transition") or {}).get("id")
+        hit = next((t for t in offered if t["id"] == tid), None)
+        if hit is None:
+            return self.send_json(400, {"errorMessages": ["转换不可用: %s" % tid]})
+        issue["fields"]["status"] = {"name": hit.get("toStatus") or "Done"}
+        issue["fields"]["updated"] = "2026-09-18T13:00:00.000+0800"
+        return self.send_empty(204)
+
+    def add_worklog(self, key, body):
+        if STATE["fail_worklog"]:
+            return self.send_json(403, {"errorMessages": ["无权限登记工时（注入）"]})
+        issue = STATE["issues"].get(key)
+        if issue is None:
+            return self.send_json(404, {"errorMessages": ["Issue does not exist: " + key]})
+        body = body or {}
+        seconds = int(body.get("timeSpentSeconds") or 0)
+        if seconds <= 0:
+            return self.send_json(400, {"errorMessages": ["timeSpentSeconds 必填"]})
+        fields = issue["fields"]
+        fields["timespent"] = (fields.get("timespent") or 0) + seconds
+        fields["updated"] = "2026-09-18T14:00:00.000+0800"
+        STATE["worklogs"].append({"key": key, "seconds": seconds, "comment": body.get("comment")})
+        return self.send_json(201, {"id": str(90000 + len(STATE["worklogs"])),
+                                    "timeSpentSeconds": seconds})
 
     # ---------------- 只读端点 ----------------
     def issue_types_page(self, query):
@@ -275,7 +349,8 @@ class Handler(BaseHTTPRequestHandler):
     # ---------------- 控制面 ----------------
     def control_state(self, path, query, body):
         return self.send_json(200, {"issues": list(STATE["issues"].values()),
-                                    "requests": STATE["requests"]})
+                                    "requests": STATE["requests"],
+                                    "worklogs": STATE["worklogs"]})
 
     def control_mutate(self, path, query, body):
         key = (body or {}).get("key")
@@ -288,6 +363,19 @@ class Handler(BaseHTTPRequestHandler):
     def control_gdpr(self, path, query, body):
         STATE["gdpr"] = bool((body or {}).get("on"))
         return self.send_json(200, {"gdpr": STATE["gdpr"]})
+
+    def control_transitions(self, path, query, body):
+        """body {"transitions":[{"id","name","toStatus"}]|null}：null = 恢复按 issue 状态推导"""
+        STATE["transitions"] = (body or {}).get("transitions")
+        return self.send_json(200, {"transitions": STATE["transitions"]})
+
+    def control_fail_transition(self, path, query, body):
+        STATE["fail_transition"] = bool((body or {}).get("on"))
+        return self.send_json(200, {"failTransition": STATE["fail_transition"]})
+
+    def control_fail_worklog(self, path, query, body):
+        STATE["fail_worklog"] = bool((body or {}).get("on"))
+        return self.send_json(200, {"failWorklog": STATE["fail_worklog"]})
 
     def control_create_error(self, path, query, body):
         """body {"error": {"errorMessages":[…], "errors":{字段: 原因}}} 注入；{"error": null} 关闭"""
@@ -314,6 +402,7 @@ class Handler(BaseHTTPRequestHandler):
     def control_reset(self, path, query, body):
         STATE["issues"].clear()
         STATE["requests"].clear()
+        STATE["worklogs"].clear()
         STATE["seq"] = 100
         STATE["gdpr"] = False
         STATE["create_error"] = None
@@ -321,6 +410,9 @@ class Handler(BaseHTTPRequestHandler):
         STATE["createmeta_404"] = False
         STATE["createmeta_500"] = False
         STATE["enforce_fields"] = False
+        STATE["transitions"] = None
+        STATE["fail_transition"] = False
+        STATE["fail_worklog"] = False
         return self.send_json(200, {"ok": True})
 
 
@@ -338,6 +430,9 @@ ROUTES = {
     ("GET", "/__state"): Handler.control_state,
     ("POST", "/__mutate"): Handler.control_mutate,
     ("POST", "/__gdpr"): Handler.control_gdpr,
+    ("POST", "/__transitions"): Handler.control_transitions,
+    ("POST", "/__fail-transition"): Handler.control_fail_transition,
+    ("POST", "/__fail-worklog"): Handler.control_fail_worklog,
     ("POST", "/__create-error"): Handler.control_create_error,
     ("POST", "/__createmeta"): Handler.control_createmeta,
     ("POST", "/__reset"): Handler.control_reset,
