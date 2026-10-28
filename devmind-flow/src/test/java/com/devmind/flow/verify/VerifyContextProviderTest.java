@@ -146,7 +146,7 @@ class VerifyContextProviderTest {
         public ProjectView get(String id) {
             return new ProjectView(id, "项目", null, null, List.of(), null, "ACTIVE", null, null,
                     null, null, false, false, null, null, null, null, "NORMAL",
-                    projectEnabled, 20, null, null);
+                    projectEnabled, 20, false, null, null);
         }
     }
 }

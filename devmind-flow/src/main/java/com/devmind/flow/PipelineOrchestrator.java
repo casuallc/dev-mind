@@ -33,8 +33,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -100,7 +102,7 @@ public class PipelineOrchestrator {
         try {
             WorkItemEntity wi = workItemService.requireById(event.workItemId());
             if (PipelineEligibility.buildable(wi.getType(), wi.getStatus())) {
-                tryTriggerBuild(event.projectId(), wi.getId(), wi.getSeq());
+                tryTriggerBuild(event.projectId(), wi.getId(), wi.getSeq(), wi.getRequirementId());
             }
         } catch (Exception e) {
             log.warn("执行链处理状态变更事件失败(不阻塞): wi={} err={}", event.workItemId(), e.getMessage());
@@ -161,8 +163,10 @@ public class PipelineOrchestrator {
         return projectRepo.findById(projectId).map(ProjectEntity::isAutoDeployTestOnBuild).orElse(false);
     }
 
-    /** 触发自动构建：项目开关关/未配构建步骤/已有构建记录则跳过；并发满跳过等补扫。 */
-    private void tryTriggerBuild(String projectId, String workItemId, Long seq) {
+    /** 触发自动构建：项目开关关/未配构建步骤则跳过；并发满跳过等补扫。
+     *  CAP-100 FR-04：幂等粒度 WI 级 → 需求级（同需求已有构建记录即跳过）——CAP-52 后一个需求
+     *  一条分支一次开发，构建走主库 HEAD 与 WI 无关；批量自动 DONE 才不会掀起 N 次构建。 */
+    private void tryTriggerBuild(String projectId, String workItemId, Long seq, String requirementId) {
         // CAP-72 闸门：WI DONE 事件与补扫共用此入口，一处管住两路；关=静默跳过不降级通知
         if (!autoBuildEnabled(projectId)) {
             log.info("项目未开启 WI 完成自动构建，跳过: project={} wi={}", projectId, workItemId);
@@ -172,8 +176,9 @@ public class PipelineOrchestrator {
             log.info("项目未配置构建步骤，跳过自动构建: project={} wi={}", projectId, workItemId);
             return;
         }
-        if (!buildRepo.findByWorkItemIdOrderByCreatedAtDesc(workItemId).isEmpty()) {
-            return; // 幂等：已有构建记录（含进行中），不重复触发
+        if (requirementHasBuild(projectId, requirementId)) {
+            log.info("同需求已有构建记录，跳过自动构建(需求级幂等): req={} wi={}", requirementId, workItemId);
+            return;
         }
         try {
             BuildView build = buildService.trigger(projectId,
@@ -186,6 +191,23 @@ public class PipelineOrchestrator {
             }
             log.warn("自动构建触发失败(跳过): WI-{} err={}", seq, e.getMessage());
         }
+    }
+
+    /** 需求级幂等：该需求下任一 WI 已有构建记录（任意状态）即视为已构建。 */
+    private boolean requirementHasBuild(String projectId, String requirementId) {
+        if (requirementId == null) {
+            return false;
+        }
+        Set<String> wiIds = new HashSet<>();
+        for (WorkItemEntity w : workItemRepo.findByRequirementIdOrderBySeqAsc(requirementId)) {
+            wiIds.add(w.getId());
+        }
+        for (BuildEntity b : buildRepo.findByProjectIdOrderByCreatedAtDesc(projectId)) {
+            if (b.getWorkItemId() != null && wiIds.contains(b.getWorkItemId())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 构建成功 → 自动部署 TEST 环境；前置不齐降级为人工。 */
@@ -227,15 +249,31 @@ public class PipelineOrchestrator {
         }
     }
 
-    /** FR-03：补扫项目内 DONE 且无构建记录的代码类 WI（构建并发释放后的重试）。 */
+    /** FR-03：补扫项目内 DONE 且无构建记录的代码类 WI（构建并发释放后的重试）。
+     *  CAP-100 FR-04：需求级幂等——同需求已有构建记录的 WI 不再视为待构建。 */
     private void retryPendingBuilds(String projectId) {
         List<WorkItemView> items = workItemRepo.findByProjectIdOrderBySeqDesc(projectId).stream()
                 .map(this::toView).toList();
         Set<String> built = new HashSet<>();
-        buildRepo.findByProjectIdOrderByCreatedAtDesc(projectId)
-                .forEach(b -> { if (b.getWorkItemId() != null) built.add(b.getWorkItemId()); });
+        Set<String> builtReqs = new HashSet<>();
+        Map<String, String> reqOf = new HashMap<>();
+        for (WorkItemView w : items) {
+            reqOf.put(w.id(), w.requirementId());
+        }
+        buildRepo.findByProjectIdOrderByCreatedAtDesc(projectId).forEach(b -> {
+            if (b.getWorkItemId() != null) {
+                built.add(b.getWorkItemId());
+                String reqId = reqOf.get(b.getWorkItemId());
+                if (reqId != null) {
+                    builtReqs.add(reqId);
+                }
+            }
+        });
         for (WorkItemView w : PipelineEligibility.pendingBuilds(items, built)) {
-            tryTriggerBuild(projectId, w.id(), w.seq());
+            if (builtReqs.contains(w.requirementId())) {
+                continue; // 需求级幂等：同需求已构建过，不逐 WI 补
+            }
+            tryTriggerBuild(projectId, w.id(), w.seq(), w.requirementId());
         }
     }
 

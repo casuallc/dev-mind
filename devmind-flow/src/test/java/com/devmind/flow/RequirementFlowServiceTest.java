@@ -24,8 +24,10 @@ import com.devmind.project.dto.RequirementView;
 import com.devmind.project.dto.WorkItemRequest;
 import com.devmind.project.dto.WorkItemView;
 import com.devmind.project.model.DesignEntity;
+import com.devmind.project.model.ProjectEntity;
 import com.devmind.project.model.RequirementEntity;
 import com.devmind.project.model.WorkItemEntity;
+import com.devmind.project.repo.ProjectRepository;
 import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.SessionView;
 import com.devmind.session.model.SessionEntity;
@@ -69,6 +71,7 @@ class RequirementFlowServiceTest {
     private FakeArtifactService artifactService;
     private FakeEventPublisher eventPublisher;
     private Map<String, SessionEntity> sessionStore;
+    private Map<String, ProjectEntity> projectStore;
     private RequirementFlowService service;
 
     // ---------------- fakes ----------------
@@ -186,10 +189,19 @@ class RequirementFlowServiceTest {
             return e;
         }
 
+        /** CAP-100 FR-02：内存 fake 直接落实体（真实实现走 workItemRepo，fake 无 repo）。 */
+        @Override
+        public void bindSession(String projectId, String requirementId,
+                                java.util.Collection<String> workItemIds, String sessionId) {
+            for (String id : workItemIds) {
+                requireById(id).setSessionId(sessionId);
+            }
+        }
+
         private WorkItemView toView(WorkItemEntity e) {
             return new WorkItemView(e.getId(), e.getProjectId(), e.getRequirementId(), e.getDesignId(),
                     1L, "WI-1", e.getType(), e.getTitle(), e.getSpec(), e.getStatus(),
-                    null, null, "test", Instant.now(), Instant.now());
+                    null, null, e.getSessionId(), "test", Instant.now(), Instant.now());
         }
     }
 
@@ -212,6 +224,21 @@ class RequirementFlowServiceTest {
                     seq, DesignEntity.STATUS_DRAFT, "test", Instant.now(), Instant.now());
             designs.add(v);
             return v;
+        }
+
+        /** CAP-100 FR-01：内存 fake 直接换视图状态（真实实现走 designRepo）。 */
+        @Override
+        public DesignView updateStatus(String projectId, String requirementId, String designId, String status) {
+            for (int i = 0; i < designs.size(); i++) {
+                DesignView d = designs.get(i);
+                if (d.id().equals(designId)) {
+                    DesignView v = new DesignView(d.id(), d.projectId(), d.requirementId(), d.docId(),
+                            d.version(), status, d.createdBy(), d.createdAt(), Instant.now());
+                    designs.set(i, v);
+                    return v;
+                }
+            }
+            throw new DevMindException(ErrorCode.NOT_FOUND, "方案不存在: " + designId);
         }
     }
 
@@ -431,6 +458,7 @@ class RequirementFlowServiceTest {
         artifactService = new FakeArtifactService();
         eventPublisher = new FakeEventPublisher();
         sessionStore = new HashMap<>();
+        projectStore = new HashMap<>();
         SessionRepository sessionRepo = proxy(SessionRepository.class, (p, m, args) ->
                 switch (m.getName()) {
                     case "findById" -> Optional.ofNullable(sessionStore.get((String) args[0]));
@@ -440,10 +468,24 @@ class RequirementFlowServiceTest {
                             .toList();
                     default -> throw new UnsupportedOperationException(m.getName());
                 });
+        // CAP-100 FR-03：项目开关存根（默认空 = 关）
+        ProjectRepository projectRepo = proxy(ProjectRepository.class, (p, m, args) ->
+                switch (m.getName()) {
+                    case "findById" -> Optional.ofNullable(projectStore.get((String) args[0]));
+                    default -> throw new UnsupportedOperationException(m.getName());
+                });
         service = new RequirementFlowService(requirementService, workItemService, designService,
                 relationService, sessionManager, sessionRepo, sessionOutputService, documentService,
-                artifactService, notificationService, eventPublisher, new ObjectMapper(),
+                artifactService, notificationService, eventPublisher, projectRepo, new ObjectMapper(),
                 new FakeIdentityService());
+    }
+
+    /** CAP-100 FR-03：造一个开了 autoDoneWiOnDev 的项目行。 */
+    private void enableAutoDoneWiOnDev() {
+        ProjectEntity p = new ProjectEntity();
+        p.setId("p1");
+        p.setAutoDoneWiOnDev(true);
+        projectStore.put("p1", p);
     }
 
     private SessionEntity addSession(String id, String workItemId, String requirementId, String taskSpec) {
@@ -605,6 +647,25 @@ class RequirementFlowServiceTest {
         assertEquals(0, notificationService.ofType("flow.plan.partial").size());
         assertEquals(1, sessionManager.requests.size());
         assertTrue(sessionManager.requests.get(0).taskSpec().startsWith(FlowOutputContract.MARKER_DEV));
+        // CAP-100 FR-01：规划链路方案登记即 CONFIRMED，固化的 WI 挂上 designId 追溯边
+        assertEquals(DesignEntity.STATUS_CONFIRMED, designService.designs.get(0).status());
+        String designId = designService.designs.get(0).id();
+        assertTrue(workItemService.list("p1", "r1").stream().allMatch(w -> designId.equals(w.designId())));
+        // CAP-100 FR-02：自动起的开发会话回填 WI 归属会话（FakeSessionManager 首个会话 sess-new-1）
+        assertTrue(workItemService.list("p1", "r1").stream()
+                .allMatch(w -> "sess-new-1".equals(w.sessionId())));
+    }
+
+    @Test
+    void 工作单元行内起会话回填归属会话() {
+        requirementService.add("r1", RequirementEntity.STATUS_IN_PROGRESS);
+        workItemService.add("wi-1", WorkItemEntity.TYPE_DEVELOPMENT, WorkItemEntity.STATUS_TODO);
+
+        SessionView session = service.startWorkItemSession("p1", "wi-1");
+
+        // CAP-100 FR-02：行内会话与需求级 [flow:dev] 同口径回填
+        assertEquals(session.id(), workItemService.requireById("wi-1").getSessionId());
+        assertEquals(WorkItemEntity.STATUS_IN_PROGRESS, workItemService.requireById("wi-1").getStatus());
     }
 
     @Test
@@ -676,9 +737,27 @@ class RequirementFlowServiceTest {
         fireCompleted("s4");
 
         assertEquals(RequirementEntity.STATUS_ACCEPTANCE, requirementService.requireById("r1").getStatus());
-        // 人验收才置 DONE：N 条一起自动 DONE 会掀起 N 次构建
+        // CAP-100 FR-03：开关默认关——WI 完成仍由人在工作单元 Tab 批量确认
         assertEquals(WorkItemEntity.STATUS_IN_PROGRESS, workItemService.requireById("wi-1").getStatus());
         assertEquals(1, notificationService.ofType("flow.dev.done").size());
+    }
+
+    @Test
+    void 开发产出_开关开自动完成进行中工作单元() {
+        enableAutoDoneWiOnDev();
+        requirementService.add("r1", RequirementEntity.STATUS_IN_PROGRESS);
+        workItemService.add("wi-1", WorkItemEntity.TYPE_DEVELOPMENT, WorkItemEntity.STATUS_IN_PROGRESS);
+        workItemService.add("wi-2", WorkItemEntity.TYPE_DEVELOPMENT, WorkItemEntity.STATUS_TODO);
+        addSession("s4", null, "r1", FlowOutputContract.MARKER_DEV + "\n开发任务");
+        sessionOutputService.put("s4", FlowOutputContract.DEV_SUMMARY_FILE, "## 完成情况");
+
+        fireCompleted("s4");
+
+        // CAP-100 FR-03：只翻 IN_PROGRESS（TODO 说明开发会话未覆盖，不替人宣布完成）
+        assertEquals(WorkItemEntity.STATUS_DONE, workItemService.requireById("wi-1").getStatus());
+        assertEquals(WorkItemEntity.STATUS_TODO, workItemService.requireById("wi-2").getStatus());
+        assertEquals(RequirementEntity.STATUS_ACCEPTANCE, requirementService.requireById("r1").getStatus());
+        assertTrue(notificationService.ofType("flow.dev.done").get(0).body().contains("1 个工作单元"));
     }
 
     @Test

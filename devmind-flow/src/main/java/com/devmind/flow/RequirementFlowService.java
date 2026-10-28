@@ -29,9 +29,11 @@ import com.devmind.project.dto.RelationView;
 import com.devmind.project.dto.WorkItemRequest;
 import com.devmind.project.dto.WorkItemView;
 import com.devmind.project.model.DesignEntity;
+import com.devmind.project.model.ProjectEntity;
 import com.devmind.project.model.RelationEntity;
 import com.devmind.project.model.RequirementEntity;
 import com.devmind.project.model.WorkItemEntity;
+import com.devmind.project.repo.ProjectRepository;
 import com.devmind.session.dto.CreateSessionRequest;
 import com.devmind.session.dto.SessionView;
 import com.devmind.session.model.SessionEntity;
@@ -84,6 +86,7 @@ public class RequirementFlowService {
     private final ArtifactService artifactService;
     private final NotificationService notificationService;
     private final DomainEventPublisher eventPublisher;
+    private final ProjectRepository projectRepo;
     private final ObjectMapper mapper;
 
     public RequirementFlowService(RequirementService requirementService,
@@ -97,6 +100,7 @@ public class RequirementFlowService {
                                   ArtifactService artifactService,
                                   NotificationService notificationService,
                                   DomainEventPublisher eventPublisher,
+                                  ProjectRepository projectRepo,
                                   ObjectMapper mapper,
                            IdentityService identityService) {
         this.identityService = identityService;
@@ -111,6 +115,7 @@ public class RequirementFlowService {
         this.artifactService = artifactService;
         this.notificationService = notificationService;
         this.eventPublisher = eventPublisher;
+        this.projectRepo = projectRepo;
         this.mapper = mapper;
     }
 
@@ -164,6 +169,7 @@ public class RequirementFlowService {
         SessionView session = sessionManager.create(new CreateSessionRequest(
                 null, req.getProjectId(), null, req.getId(),
                 FlowOutputContract.devSpec(req, toDevItems(req, items)), null, null, null, null));
+        List<String> activated = new ArrayList<>();
         for (WorkItemView w : items) {
             if (!WorkItemEntity.STATUS_TODO.equals(w.status())) {
                 continue;
@@ -171,10 +177,13 @@ public class RequirementFlowService {
             try {
                 workItemService.updateStatus(req.getProjectId(), req.getId(), w.id(),
                         WorkItemEntity.STATUS_IN_PROGRESS);
+                activated.add(w.id());
             } catch (Exception e) {
                 log.warn("工作单元置 IN_PROGRESS 失败(不阻塞开发会话): wi={} err={}", w.id(), e.getMessage());
             }
         }
+        // CAP-100 FR-02：回填归属会话，WI 行「会话」列可直接跳转（覆盖式，重新开发取最新）
+        workItemService.bindSession(req.getProjectId(), req.getId(), activated, session.id());
         log.info("需求开发会话已启动: req={} session={} workItems={}",
                 req.getId(), session.id(), items.size());
         return session;
@@ -299,6 +308,8 @@ public class RequirementFlowService {
             workItemService.updateStatus(projectId, wi.getRequirementId(), wi.getId(),
                     WorkItemEntity.STATUS_IN_PROGRESS);
         }
+        // CAP-100 FR-02：回填归属会话（与需求级 [flow:dev] 同口径）
+        workItemService.bindSession(projectId, wi.getRequirementId(), List.of(wi.getId()), session.id());
         log.info("工作单元会话已启动: wi={} session={}", workItemId, session.id());
         return session;
     }
@@ -504,7 +515,16 @@ public class RequirementFlowService {
             }
         } else {
             try {
-                registerDesignDocument(req, session, design, null);
+                // CAP-100 FR-01：规划链路的方案 = 已采纳（开发会话即以它为据执行），登记即 CONFIRMED，
+                // 且必须先于 applySplitPlan 确认，其 CONFIRMED 过滤才能挂上 WI.designId 追溯边
+                DesignView registered = registerDesignDocument(req, session, design, null);
+                try {
+                    designService.updateStatus(session.getProjectId(), req.getId(), registered.id(),
+                            DesignEntity.STATUS_CONFIRMED);
+                } catch (Exception ce) {
+                    log.warn("规划方案自动确认失败(不阻塞固化): req={} design={} err={}",
+                            req.getId(), registered.id(), ce.getMessage());
+                }
             } catch (Exception e) {
                 log.warn("方案文档登记失败: req={} err={}", req.getId(), e.getMessage());
                 missing.add(FlowOutputContract.DESIGN_FILE + "（登记失败）");
@@ -542,8 +562,11 @@ public class RequirementFlowService {
     /**
      * CAP-52 FR-06 开发会话 DONE → 需求进 ACCEPTANCE 待验收。
      *
-     * <p>**不自动把工作单元置 DONE**：CAP-17 执行链按 WI DONE 触发构建，N 条一起自动 DONE 会掀起
-     * N 次构建；且「AI 产出、人验收」是既有原则。人可在工作单元 Tab 批量确认。</p>
+     * <p>CAP-100 FR-03：项目开关 autoDoneWiOnDev 开时，把 IN_PROGRESS 的工作单元批量置 DONE
+     * （TODO/BLOCKED 不动——开发会话未覆盖的不替人宣布完成；逐条走 updateStatus，rollup/事件/
+     * CAP-17 触发语义不变，构建幂等已由需求级去重压住，见 PipelineOrchestrator）。
+     * 开关关（默认）保持原口径：不自动置 DONE，人在工作单元 Tab 批量确认——人工验收闸门
+     * 仍在需求级（ACCEPTANCE→DONE）与收口。</p>
      */
     private void handleDevOutput(SessionEntity session) {
         RequirementEntity req = requirementService.requireById(session.getRequirementId());
@@ -551,6 +574,7 @@ public class RequirementFlowService {
         if (summary != null) {
             registerDevSummary(req, session);
         }
+        int autoDone = autoCompleteWorkItems(req);
         if (!RequirementEntity.STATUS_DONE.equals(req.getStatus())
                 && !RequirementEntity.STATUS_CANCELLED.equals(req.getStatus())
                 && !RequirementEntity.STATUS_ACCEPTANCE.equals(req.getStatus())) {
@@ -565,9 +589,42 @@ public class RequirementFlowService {
                 ? "开发会话已完成并提交改动，但未找到产出 " + FlowOutputContract.OUTPUT_DIR + "/"
                         + FlowOutputContract.DEV_SUMMARY_FILE + "；请到会话详情核对改动后再验收。"
                 : "开发会话已完成并提交改动。摘要：" + preview(summary, 400) + "（完整内容见「开发产出」Tab）";
+        if (autoDone > 0) {
+            body += "（项目已开自动完成：" + autoDone + " 个工作单元置为 DONE）";
+        }
         notify(NotificationLevel.P1, "flow.dev.done",
                 "REQ-" + req.getSeq() + " 开发完成待验收",
                 body, req.getProjectId(), req.getId());
+    }
+
+    /** CAP-100 FR-03：开关开时批量完成 IN_PROGRESS 工作单元，返回完成条数；开关关/异常返回 0。 */
+    private int autoCompleteWorkItems(RequirementEntity req) {
+        if (RequirementEntity.STATUS_DONE.equals(req.getStatus())
+                || RequirementEntity.STATUS_CANCELLED.equals(req.getStatus())) {
+            return 0;
+        }
+        boolean enabled = projectRepo.findById(req.getProjectId())
+                .map(ProjectEntity::isAutoDoneWiOnDev).orElse(false);
+        if (!enabled) {
+            return 0;
+        }
+        int done = 0;
+        for (WorkItemView w : workItemService.list(req.getProjectId(), req.getId())) {
+            if (!WorkItemEntity.STATUS_IN_PROGRESS.equals(w.status())) {
+                continue;
+            }
+            try {
+                workItemService.updateStatus(req.getProjectId(), req.getId(), w.id(),
+                        WorkItemEntity.STATUS_DONE);
+                done++;
+            } catch (Exception e) {
+                log.warn("工作单元自动完成失败(跳过该条): wi={} err={}", w.id(), e.getMessage());
+            }
+        }
+        if (done > 0) {
+            log.info("开发会话成功，工作单元已自动完成: req={} count={}", req.getId(), done);
+        }
+        return done;
     }
 
     /**

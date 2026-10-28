@@ -151,6 +151,9 @@ class PipelineOrchestratorSwitchTest {
             if (m.getName().equals("findByWorkItemIdOrderByCreatedAtDesc")) {
                 return builds.values().stream().filter(b -> args[0].equals(b.getWorkItemId())).toList();
             }
+            if (m.getName().equals("findByProjectIdOrderByCreatedAtDesc")) {
+                return builds.values().stream().filter(b -> args[0].equals(b.getProjectId())).toList();
+            }
             if (m.getName().equals("findById")) return Optional.ofNullable(builds.get(args[0]));
             return defaultValue(m.getReturnType());
         });
@@ -164,6 +167,10 @@ class PipelineOrchestratorSwitchTest {
         });
         WorkItemRepository workItemRepo = proxy(WorkItemRepository.class, (p, m, args) -> {
             if (m.getName().equals("findByProjectIdOrderBySeqDesc")) return List.copyOf(workItems.values());
+            if (m.getName().equals("findByRequirementIdOrderBySeqAsc")) {
+                return workItems.values().stream()
+                        .filter(w -> args[0].equals(w.getRequirementId())).toList();
+            }
             return defaultValue(m.getReturnType());
         });
         DeploymentRepository deploymentRepo = proxy(DeploymentRepository.class,
@@ -258,6 +265,60 @@ class PipelineOrchestratorSwitchTest {
         projects.put(PID, project(true, false));
         orchestrator.onBuildCompleted(buildCompletedEvent(null, false));
         assertEquals(1, buildService.triggers.size(), "打开后补扫应补触发");
+    }
+
+    // ---------------- CAP-100 FR-04 需求级构建幂等 ----------------
+
+    private static BuildEntity buildOf(long id, String workItemId) {
+        BuildEntity b = new BuildEntity();
+        b.setId(id);
+        b.setProjectId(PID);
+        b.setWorkItemId(workItemId);
+        return b;
+    }
+
+    private static SimpleDomainEvent wiDoneEvent(String workItemId) {
+        return SimpleDomainEvent.of("workitem.status.changed", PID, workItemId, "tester", "done",
+                null, null, null);
+    }
+
+    @Test
+    void sameRequirementSecondWiDoneDoesNotBuildAgain() {
+        // 批量自动 DONE 场景：同需求已有构建记录 → 第二个 WI DONE 不再触发（N 次压成 1 次）
+        projects.put(PID, project(true, false));
+        builds.put(1L, buildOf(1L, WI_ID));
+        workItems.put("wi-2", workItem("wi-2", WorkItemEntity.STATUS_DONE));
+
+        orchestrator.onWorkItemStatusChanged(wiDoneEvent("wi-2"));
+
+        assertTrue(buildService.triggers.isEmpty(), "同需求已有构建记录，第二个 WI 不自动构建");
+    }
+
+    @Test
+    void retrySweepSkipsWiWhoseRequirementAlreadyBuilt() {
+        // 补扫同口径：同需求已构建过的 DONE WI 不再补触发
+        projects.put(PID, project(true, false));
+        builds.put(1L, buildOf(1L, WI_ID));
+        workItems.put("wi-2", workItem("wi-2", WorkItemEntity.STATUS_DONE));
+
+        orchestrator.onBuildCompleted(buildCompletedEvent(1L, false));
+
+        assertTrue(buildService.triggers.isEmpty(), "同需求已构建，补扫不得给其余 WI 补触发");
+    }
+
+    @Test
+    void differentRequirementWiStillBuilds() {
+        // 需求级幂等不误伤：其它需求的 WI DONE 照常触发
+        projects.put(PID, project(true, false));
+        builds.put(1L, buildOf(1L, WI_ID));
+        WorkItemEntity other = workItem("wi-3", WorkItemEntity.STATUS_DONE);
+        other.setRequirementId("r2");
+        workItems.put("wi-3", other);
+
+        orchestrator.onWorkItemStatusChanged(wiDoneEvent("wi-3"));
+
+        assertEquals(1, buildService.triggers.size());
+        assertEquals("wi-3", buildService.triggers.get(0).workItemId());
     }
 
     // ---------------- FR-02 部署闸门 ----------------
