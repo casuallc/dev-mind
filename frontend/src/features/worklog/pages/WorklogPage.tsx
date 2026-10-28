@@ -98,8 +98,9 @@ export default function WorklogPage() {
     if (!workspace?.projectId) return
     setView('chat')
   }
-  // 周报选中周（周条点击切换）+ 周条窗口回退周数（0=最右为本周，滑动/箭头翻页）
-  const [date, setDate] = useState<Dayjs>(dayjs())
+  // 周报选中周（周条点击切换）+ 周条窗口回退周数（0=最右为本周，滑动/箭头翻页）；
+  // 默认选中上周：本周周报是下周才总结的，进来先看/补上周
+  const [date, setDate] = useState<Dayjs>(() => dayjs().subtract(7, 'day'))
   const [weeksBack, setWeeksBack] = useState(0)
   const weekStartStr = mondayOf(date).format('YYYY-MM-DD')
   const isCurrentWeekSelected = weekStartStr === mondayOf(dayjs()).format('YYYY-MM-DD')
@@ -816,7 +817,7 @@ export default function WorklogPage() {
       {view === 'weekly' && (
         <>
           <Typography.Paragraph type="secondary">
-            点下方周条切换周，左右滑动或点两侧箭头整页翻看更早的 7 周；可「手动填写」直接写，或由 AI 汇总该周（周一 {weekStartStr} 起）条目与日报产出「上周总结 + 下周计划」草稿；人工修订后保存即生效。
+            默认展示上周（本周周报下周再总结）；点下方周条切换周，左右滑动或点两侧箭头整页翻看更早的 7 周；可「手动填写」直接写，或由 AI 汇总该周（周一 {weekStartStr} 起）条目与日报产出「上周总结 + 下周计划」草稿；人工修订后保存即生效。
           </Typography.Paragraph>
           <RecentWeekStrip
             reports={recentWeeks}
