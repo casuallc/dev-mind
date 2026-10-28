@@ -7,6 +7,8 @@ import com.devmind.integration.dto.JiraPushOptionsView;
 import com.devmind.integration.dto.JiraPushRequest;
 import com.devmind.integration.dto.JiraPushResultView;
 import com.devmind.integration.dto.JiraPushTargetsView;
+import com.devmind.integration.dto.JiraResolveRequest;
+import com.devmind.integration.dto.JiraResolveResultView;
 import com.devmind.integration.dto.JiraTransitionRequest;
 import com.devmind.integration.dto.JiraTransitionResultView;
 import com.devmind.integration.dto.JiraTransitionView;
@@ -33,7 +35,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * 项目作用域 Jira issue 端点（全部挂在需求上）：
  * CAP-19 FR-08 工作流转换（平台侧状态回写）、CAP-27 工时登记、CAP-19 FR-09 附件内容代理（描述图片按需拉取）、
- * CAP-47 自建需求推送（候选/选项/可指派用户/推送/手动刷新）。
+ * CAP-47 自建需求推送（候选/选项/可指派用户/推送/手动刷新）、CAP-101 验收联动解决。
  */
 @RestController
 @RequestMapping("/api/projects/{pid}/requirements/{rid}/jira")
@@ -65,6 +67,13 @@ public class ProjectJiraIssueController {
     public JiraWorklogResultView logWork(@PathVariable String pid, @PathVariable String rid,
                                          @RequestBody JiraWorklogRequest req) {
         return service.logWork(pid, rid, req.seconds(), req.comment());
+    }
+
+    /** CAP-101：验收联动——解决转换（词表匹配，无匹配跳过）+ 登记工时一步编排 */
+    @PostMapping("/resolve")
+    public JiraResolveResultView resolve(@PathVariable String pid, @PathVariable String rid,
+                                         @RequestBody JiraResolveRequest req) {
+        return service.resolveOnAcceptance(pid, rid, req.seconds(), req.comment());
     }
 
     /**

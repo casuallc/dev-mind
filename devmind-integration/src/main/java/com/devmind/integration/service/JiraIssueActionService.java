@@ -11,6 +11,7 @@ import com.devmind.integration.connector.IntegrationConnector.IssuePage;
 import com.devmind.integration.connector.IntegrationConnector.IssueQuery;
 import com.devmind.integration.connector.IntegrationConnector.IssueTransition;
 import com.devmind.integration.connector.IntegrationConnector.JiraIssue;
+import com.devmind.integration.dto.JiraResolveResultView;
 import com.devmind.integration.dto.JiraTransitionResultView;
 import com.devmind.integration.dto.JiraTransitionView;
 import com.devmind.integration.dto.JiraWorklogResultView;
@@ -159,6 +160,112 @@ public class JiraIssueActionService {
                 "REQUIREMENT", requirementId, true));
         log.info("Jira issue {} 工时已登记: {}s", ref.link().getExternalKey(), seconds);
         return new JiraWorklogResultView(seconds, remoteStatus);
+    }
+
+    /**
+     * CAP-101 验收联动：置为解决 + 登记工时（一步编排，验收弹窗默认勾选触发）。
+     * 解决转换从动态清单按词表匹配（toStatus 优先、name 兜底），匹配不到 → 跳过转换不报错
+     * （issue 可能已在终态或工作流无此转换）；seconds 为空只解决不登记。
+     * 部分失败语义：转换失败抛错（远端无变更）；转换成功但工时失败 → transitioned=true +
+     * worklogError 返回（不抛）。收尾每步各做一次单条刷新；本地需求 status 绝不动。
+     */
+    public JiraResolveResultView resolveOnAcceptance(String projectId, String requirementId,
+                                                     Long seconds, String comment) {
+        if (seconds != null && (seconds <= 0 || seconds > 360_000)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "工时秒数非法（1~360000）: " + seconds);
+        }
+        Ref ref = resolve(projectId, requirementId);
+        IntegrationConnector connector = jiraConnector();
+        String actor = identityService.currentActor();
+        // CAP-35 FR-03：人触发写操作个人账号优先
+        IntegrationService.WriteIdentity identity =
+                integrationService.resolveWriteIdentity(actor, ref.integration());
+        String token = identity.secret();
+        String issueKey = ref.link().getExternalKey();
+
+        IssueTransition target = pickResolveTransition(
+                connector.listTransitions(ref.integration(), token, issueKey));
+        String remoteStatus = ref.link().getStatus();
+        Long loggedSeconds = null;
+        String worklogError = null;
+
+        if (target != null) {
+            try {
+                connector.transitionIssue(ref.integration(), token, issueKey, target.id());
+            } catch (Exception e) {
+                integrationService.recordCall(ref.integration().getId(), "jira_transition",
+                        ExternalLinkEntity.INTERNAL_REQUIREMENT, requirementId, false, e.getMessage());
+                throw e;
+            }
+            integrationService.recordCall(ref.integration().getId(), "jira_transition",
+                    ExternalLinkEntity.INTERNAL_REQUIREMENT, requirementId, true, null);
+            remoteStatus = refreshAfterTransit(projectId, requirementId, ref, connector, token);
+            log.info("Jira issue {} 验收联动解决: 转换「{}」-> {}", issueKey, target.name(), target.toStatus());
+        }
+        if (seconds != null) {
+            try {
+                connector.logWork(ref.integration(), token, issueKey, seconds, comment);
+                integrationService.recordCall(ref.integration().getId(), "jira_worklog",
+                        ExternalLinkEntity.INTERNAL_REQUIREMENT, requirementId, true, null);
+                loggedSeconds = seconds;
+                remoteStatus = refreshAfterTransit(projectId, requirementId, ref, connector, token);
+                log.info("Jira issue {} 验收联动工时: {}s", issueKey, seconds);
+            } catch (Exception e) {
+                // 转换可能已成功——工时不抛，带回错误由前端提示手动补
+                integrationService.recordCall(ref.integration().getId(), "jira_worklog",
+                        ExternalLinkEntity.INTERNAL_REQUIREMENT, requirementId, false, e.getMessage());
+                worklogError = e.getMessage();
+                log.warn("Jira issue {} 验收联动工时登记失败（转换不回滚）: {}", issueKey, e.getMessage());
+            }
+        }
+        if (target == null && loggedSeconds == null && worklogError == null) {
+            // 无可解决转换且不登记工时：纯空转，不审计不广播
+            return new JiraResolveResultView(false, null, remoteStatus, null, null);
+        }
+        String summary = "[" + issueKey + "] "
+                + (target != null ? "解决转换「" + target.name() + "」" : "无可用解决转换（跳过）")
+                + (loggedSeconds != null ? " + 登记工时 " + formatSeconds(loggedSeconds) : "")
+                + (worklogError != null ? "（工时登记失败: " + worklogError + "）" : "");
+        auditService.record("integration", "jira_resolve", actor, projectId, worklogError == null,
+                summary + "（需求 " + requirementId + "，身份 " + identity.source() + "）");
+        eventPublisher.publish(SimpleDomainEvent.of("integration.jira.resolved", projectId,
+                null, actor, "Jira " + summary,
+                "REQUIREMENT", requirementId, worklogError == null));
+        return new JiraResolveResultView(target != null,
+                target == null ? null : target.name(), remoteStatus, loggedSeconds, worklogError);
+    }
+
+    /**
+     * CAP-101 FR-02：从动态转换清单匹配「解决」转换——toStatus 优先、name 兜底，
+     * 词表大小写不敏感包含匹配，按 Jira 返回顺序取首个（顺序即工作流推荐序）。
+     */
+    static IssueTransition pickResolveTransition(List<IssueTransition> available) {
+        IssueTransition byName = null;
+        for (IssueTransition t : available) {
+            if (matchesResolveWord(t.toStatus())) {
+                return t;
+            }
+            if (byName == null && matchesResolveWord(t.name())) {
+                byName = t;
+            }
+        }
+        return byName;
+    }
+
+    private static final List<String> RESOLVE_WORDS = List.of(
+            "解决", "resolved", "resolve", "已完成", "完成", "done", "已关闭", "关闭", "closed", "close");
+
+    static boolean matchesResolveWord(String text) {
+        if (text == null) {
+            return false;
+        }
+        String lower = text.toLowerCase(java.util.Locale.ROOT);
+        for (String w : RESOLVE_WORDS) {
+            if (lower.contains(w)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 秒数 → 简报文案（1.5h / 45m） */

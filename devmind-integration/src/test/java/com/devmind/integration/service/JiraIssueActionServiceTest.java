@@ -61,6 +61,8 @@ class JiraIssueActionServiceTest {
         IssuePage refreshPage = new IssuePage(0, 0, 0, List.of());
         final List<String> executed = new ArrayList<>();
         final List<String> worklogs = new ArrayList<>();
+        boolean failTransition;
+        boolean failWorklog;
 
         @Override public String type() { return IntegrationEntity.TYPE_JIRA; }
         @Override public TestResult testConnection(IntegrationEntity c, String t) { throw new UnsupportedOperationException(); }
@@ -75,11 +77,17 @@ class JiraIssueActionServiceTest {
 
         @Override
         public void transitionIssue(IntegrationEntity c, String token, String issueKey, String transitionId) {
+            if (failTransition) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "Jira 状态转换失败：HTTP 400 工作流校验失败");
+            }
             executed.add(issueKey + ":" + transitionId);
         }
 
         @Override
         public void logWork(IntegrationEntity c, String token, String issueKey, long seconds, String comment) {
+            if (failWorklog) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "Jira 工时登记失败：HTTP 403 无权限");
+            }
             worklogs.add(issueKey + ":" + seconds + ":" + comment);
         }
 
@@ -299,5 +307,115 @@ class JiraIssueActionServiceTest {
         assertEquals("Open", result.remoteStatus()); // 回退链接旧值
         assertEquals(1, eventPublisher.events.size()); // 事件仍发
         assertEquals(List.of(true), integrationService.callOk);
+    }
+
+    // ---- CAP-101 验收联动解决 ----
+
+    @Test
+    void 验收联动_词表命中toStatus优先_解决并登记工时() {
+        // 默认 transitions：[11 开始处理→In Progress] 不命中，[21 完成→Done] toStatus 命中
+        connector.refreshPage = new IssuePage(0, 1, 1, List.of(
+                new JiraIssue("PROJ-1", "标题", "描述", "Bug", "High", List.of(), "Done",
+                        T1, T1, "张三", "李四", null, List.of(), 7200L, 3600L)));
+
+        var result = service.resolveOnAcceptance("p1", "req-jira", 3600L, "验收通过");
+
+        assertEquals(List.of("PROJ-1:21"), connector.executed);
+        assertEquals(List.of("PROJ-1:3600:验收通过"), connector.worklogs);
+        assertTrue(result.transitioned());
+        assertEquals("完成", result.transitionName());
+        assertEquals(3600L, result.loggedSeconds());
+        assertEquals("Done", result.remoteStatus());
+        assertEquals(null, result.worklogError());
+        assertEquals(List.of(true, true), integrationService.callOk); // transition + worklog 各一记
+        assertEquals("integration.jira.resolved", eventPublisher.events.get(0).type());
+    }
+
+    @Test
+    void 验收联动_toStatus无命中时name兜底() {
+        connector.transitions = List.of(
+                new IssueTransition("11", "开始处理", "处理中"),
+                new IssueTransition("31", "Resolve issue", "待关闭"));
+
+        var result = service.resolveOnAcceptance("p1", "req-jira", null, null);
+
+        assertEquals(List.of("PROJ-1:31"), connector.executed);
+        assertTrue(result.transitioned());
+        assertEquals("Resolve issue", result.transitionName());
+        assertTrue(connector.worklogs.isEmpty()); // seconds 空 = 只解决不登记
+    }
+
+    @Test
+    void 验收联动_无解决转换跳过不报错_仍登记工时() {
+        connector.transitions = List.of(new IssueTransition("11", "开始处理", "In Progress"));
+
+        var result = service.resolveOnAcceptance("p1", "req-jira", 1800L, null);
+
+        assertTrue(connector.executed.isEmpty());
+        assertEquals(List.of("PROJ-1:1800:null"), connector.worklogs);
+        assertEquals(false, result.transitioned());
+        assertEquals(null, result.transitionName());
+        assertEquals(1800L, result.loggedSeconds());
+        assertEquals("integration.jira.resolved", eventPublisher.events.get(0).type());
+    }
+
+    @Test
+    void 验收联动_空转不审计不广播() {
+        connector.transitions = List.of(new IssueTransition("11", "开始处理", "In Progress"));
+
+        var result = service.resolveOnAcceptance("p1", "req-jira", null, null);
+
+        assertEquals(false, result.transitioned());
+        assertTrue(connector.executed.isEmpty());
+        assertTrue(connector.worklogs.isEmpty());
+        assertTrue(integrationService.callOk.isEmpty());
+        assertTrue(eventPublisher.events.isEmpty());
+    }
+
+    @Test
+    void 验收联动_转换失败抛错且不登记工时() {
+        connector.failTransition = true;
+
+        assertThrows(DevMindException.class,
+                () -> service.resolveOnAcceptance("p1", "req-jira", 3600L, null));
+
+        assertTrue(connector.executed.isEmpty());
+        assertTrue(connector.worklogs.isEmpty());
+        assertEquals(List.of(false), integrationService.callOk); // 转换失败已记
+    }
+
+    @Test
+    void 验收联动_转换成功工时失败_部分成功不抛() {
+        connector.failWorklog = true;
+
+        var result = service.resolveOnAcceptance("p1", "req-jira", 3600L, null);
+
+        assertEquals(List.of("PROJ-1:21"), connector.executed); // 转换不回滚
+        assertTrue(connector.worklogs.isEmpty());
+        assertTrue(result.transitioned());
+        assertEquals(null, result.loggedSeconds());
+        assertTrue(result.worklogError() != null && result.worklogError().contains("无权限"));
+        assertEquals(List.of(true, false), integrationService.callOk);
+    }
+
+    @Test
+    void 验收联动_非法工时秒数拒绝() {
+        assertThrows(DevMindException.class,
+                () -> service.resolveOnAcceptance("p1", "req-jira", 0L, null));
+        assertThrows(DevMindException.class,
+                () -> service.resolveOnAcceptance("p1", "req-jira", 400_000L, null));
+        assertTrue(connector.executed.isEmpty());
+        assertTrue(connector.worklogs.isEmpty());
+    }
+
+    @Test
+    void 词表匹配_覆盖中英文解决与关闭() {
+        assertTrue(JiraIssueActionService.matchesResolveWord("解决"));
+        assertTrue(JiraIssueActionService.matchesResolveWord("Resolved"));
+        assertTrue(JiraIssueActionService.matchesResolveWord("已关闭"));
+        assertTrue(JiraIssueActionService.matchesResolveWord("DONE"));
+        assertTrue(!JiraIssueActionService.matchesResolveWord("In Progress"));
+        assertTrue(!JiraIssueActionService.matchesResolveWord("处理中"));
+        assertTrue(!JiraIssueActionService.matchesResolveWord(null));
     }
 }
