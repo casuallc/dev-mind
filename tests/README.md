@@ -1,5 +1,13 @@
 # tests/ — 可复用 E2E 验证脚本
 
+> **2026-10-28 起统一标准**：[E2E 测试规范 v1](../docs/core/e2e-testing-standard.md)。下面的清单保留作历史脚本说明；新用例遵循统一入口和登记表。
+>
+> - 校验登记：`python tests/e2e/run.py --check`；查看正式用例：`python tests/e2e/run.py --list`
+> - 当前代码隔离回归：先 `mvn -q install -DskipTests`，再 `python tests/e2e/run.py --suite regression --isolated`
+> - 共享实例只读冒烟：提供 `E2E_TOKEN` 或 `E2E_USER` + `E2E_PASSWORD`，运行 `python tests/e2e/run.py --suite smoke --base <含/api的地址>`
+> - JUnit 报告统一为 `tmp/e2e/junit.xml`；首批 6 个正式用例，124 个历史脚本见 `e2e/legacy.json`，未全部迁移。
+> - [194 项目接入步骤](../docs/guides/platform-self-deploy-194.md#统一-e2e-套件接入)
+
 对真实启动的服务跑端到端验证的脚本集，随 git 提交。与 `mvn test` 单测互补：单测管逻辑回归，这里管「不起服务跑一遍不算完成」的那遍。
 
 ## 通用约定
@@ -7,7 +15,7 @@
 - **运行产物一律落 `tmp/`**（gitignored）：日志、runner 工作区、临时 json/zip。本目录只放脚本与 fixtures，别把生成物写进来。
 - **前置看脚本头注释**：多数要 app 已起（:8080，个别 :8081/:18090）；涉及 runner 的先 `mvn -q install -DskipTests` 出 `devmind-agent-runner.jar`。
 - Python 脚本只用标准库（Windows 控制台已处理 UTF-8）；`.mjs` 需 Node 18+（原生 WebSocket/fetch）；`.sh` 用 Git Bash；从仓库根目录跑。
-- 新脚本命名 `capXX_*.py` / `e2e-<主题>.sh`，头部注明前置与覆盖点，禁硬编码密钥/本机密码。
+- 新正式用例按规范写入 `tests/e2e/` 并登记 `catalog.json`；以下旧命名仅用于存量维护。禁硬编码密钥/本机密码。
 - **E2E 跑完必须清理环境（MUST）**：脚本自起的隔离 app 实例、runner、mock/fixture 进程全部杀掉，不留后台残留。尤其 runner 若从 `devmind-agent-runner/target/` 起，运行中会**锁住 jar**——后续 `mvn package/clean`（含 deploy 构建）直接报 "Failed to delete ... devmind-agent-runner.jar"（2026-10-11 更新 194 环境时实踩）。杀 runner 按命令行特征（无监听端口可查）：
   ```bash
   powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name like 'java%'\" | ? { \$_.CommandLine -match 'devmind-agent-runner/target' } | % { Stop-Process -Id \$_.ProcessId -Force }"

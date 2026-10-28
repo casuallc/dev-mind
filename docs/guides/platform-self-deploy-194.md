@@ -57,3 +57,22 @@ stop/解包/换 bin·libs·ui·runner·lab·config（**跳过 application-local.
 | 部署步骤 allowlist 报错 | runner-194 `agent.properties` execAllowlist；改后须重启服务（平台强制升级） |
 | 部署单 SUCCESS 但版本没换 | `.deploy-incoming/result`、`journalctl -u 'devmind-selfdeploy*'` |
 | 平台起不来 | `journalctl -u dev-mind`、`logs/dev-mind.log`；手工回滚=`/api/deployments` 建单用 dm_rollback_stage + backup 路径 |
+
+## 统一 E2E 套件接入
+
+复用 CAP-69 脚本套件，无需修改平台后端。标准见 [E2E 规范](../core/e2e-testing-standard.md)。194 共享实例只登记 smoke，写入回归在开发/构建隔离实例运行。
+
+1. 将统一入口代码提交并推送到套件配置的分支（默认 master）；节点 4 的独立套件工作区会从 Git 拉代码，本地未推送代码不可见。
+2. 节点需可用 Python 3.10+、Git Bash 和仓库拉取权限。LocalSystem 找不到 Python 时，注册前提供 `E2E_PYTHON` 为节点上 Python 可执行文件路径；wrapper 支持带空格路径。
+3. 预览接入配置（不写平台、不含凭据）：
+
+   ```bash
+   python tests/e2e/register.py --base https://8.135.37.194:38880/api --project lj606ymb --node 4 --insecure
+   ```
+
+4. 通过进程环境注入 `E2E_USER` / `E2E_PASSWORD`（建议专用测试账号，仅需读取权限）。登记套件需要管理员，若该账号无管理权限，另用 `E2E_TOKEN` 提供管理员令牌。凭据不要写命令行或提交到文件。加 `--apply` 重跑注册命令，按固定套件名查重，已有则更新，不重复建单。密码作为 `secret=true` 的套件变量保存，响应脱敏；每次冒烟登录取短期 token，避免保存一个很快过期的 token 当长期配置。
+5. 在 dev-mind 项目 → 测试中运行 `dev-mind / E2E smoke (standard v1)`。命令为 `bash scripts/e2e.sh --suite smoke --insecure`，JUnit 路径 `tmp/e2e/junit.xml`，超时 300 秒，工作区 key `devmind-e2e-smoke-v1`。平台自动回收报告并呈现逐用例结果；失败查看日志。
+
+194 自部署步骤异步触发后先等健康与 `.deploy-incoming/result=OK`，再人工触发该冒烟套件。此接入不修改现有部署计划，也不启用所有测试套件的自动回归开关，以免把未审核的历史套件一并触发。
+
+验收：首次手动运行必须出现 5 条用例、无 failure/error，且报告不含密码/token；不可仅凭脚本命令退出 0 判断接入成功。当前 5 条覆盖健康、匿名访问拒绝、身份、项目列表、更新日志；业务全链路/UI 仍按规范继续迁移。

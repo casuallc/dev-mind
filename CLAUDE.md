@@ -15,6 +15,7 @@ Guidance for Claude Code when working in this repository.
 | 实现方案（定稿） | [docs/design/](docs/design/) |
 | 使用/排错指南 | [docs/guides/](docs/guides/) |
 | 开发注意事项（Windows 环境 / H2 / Jackson / SSH 单点坑） | [docs/core/开发注意事项.md](docs/core/开发注意事项.md) |
+| E2E 统一入口 / 用例登记 / 环境隔离 / JUnit / 平台接入 | [docs/core/e2e-testing-standard.md](docs/core/e2e-testing-standard.md)（涉及 E2E 必读） |
 | 前端内容区布局约定（列表/管理页） | [docs/core/前端内容区布局约定.md](docs/core/前端内容区布局约定.md) |
 
 文档治理：capabilities 只放能力需求、design 放定稿方案、guides 放使用说明、core 放开发规范与踩坑记录；可复用 E2E 脚本沉淀 `tests/`（见 tests/README.md，随 git 提交），方案草稿与 E2E 运行产物放 `tmp/`（已 gitignore，禁 commit）。

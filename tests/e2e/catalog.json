@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "cases": [
+    {"id": "smoke.health", "test": "Smoke.test_health", "suite": "smoke", "owner": "app", "cap": "CAP-01"},
+    {"id": "smoke.anonymous", "test": "Smoke.test_anonymous_rejected", "suite": "smoke", "owner": "auth", "cap": "CAP-01"},
+    {"id": "smoke.identity", "test": "Smoke.test_identity", "suite": "smoke", "owner": "auth", "cap": "CAP-01"},
+    {"id": "smoke.projects", "test": "Smoke.test_projects", "suite": "smoke", "owner": "project", "cap": "CAP-02"},
+    {"id": "smoke.changelog", "test": "Smoke.test_changelog", "suite": "smoke", "owner": "changelog", "cap": "CAP-87"},
+    {"id": "regression.project-lifecycle", "test": "Regression.test_project_lifecycle", "suite": "regression", "owner": "project", "cap": "CAP-02"}
+  ]
+}
