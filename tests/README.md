@@ -5,7 +5,7 @@
 > - 校验登记：`python tests/e2e/run.py --check`；查看正式用例：`python tests/e2e/run.py --list`
 > - 当前代码隔离回归：先 `mvn -q install -DskipTests`，再 `python tests/e2e/run.py --suite regression --isolated`
 > - 共享实例只读冒烟：提供 `E2E_TOKEN` 或 `E2E_USER` + `E2E_PASSWORD`，运行 `python tests/e2e/run.py --suite smoke --base <含/api的地址>`
-> - JUnit 报告统一为 `tmp/e2e/junit.xml`；首批 6 个正式用例，124 个历史脚本见 `e2e/legacy.json`，未全部迁移。
+> - JUnit 报告统一为 `tmp/e2e/junit.xml`；当前 9 个正式用例（smoke 5、隔离回归 1、contract 3），124 个历史脚本见 `e2e/legacy.json`，未全部迁移。
 > - [194 项目接入步骤](../docs/guides/platform-self-deploy-194.md#统一-e2e-套件接入)
 > - [所有 Python 文件迁移索引](e2e/python-inventory.md)；首批完整迁移 `cap76_tools_contract.py`，运行 `python tests/e2e/run.py --suite contract --base <API地址>`，统一认证环境变量同上。
 
