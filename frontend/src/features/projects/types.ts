@@ -19,6 +19,8 @@ export interface Project {
   autoBuildOnWiDone?: boolean
   /** CAP-72：构建成功后自动部署 TEST 环境 */
   autoDeployTestOnBuild?: boolean
+  /** CAP-100 FR-03：需求开发会话成功后自动把进行中 WI 置 DONE */
+  autoDoneWiOnDev?: boolean
   /** CAP-73：需求开发中验证开关（默认关） */
   verifyInDevEnabled?: boolean
   /** CAP-73：验证日配额（默认 20，0 = 不限） */
@@ -54,6 +56,8 @@ export interface ProjectInput {
   autoBuildOnWiDone?: boolean
   /** CAP-72：构建成功后自动部署 TEST 环境（不传 = 创建默认关/更新保持） */
   autoDeployTestOnBuild?: boolean
+  /** CAP-100 FR-03：需求开发会话成功后自动把进行中 WI 置 DONE（不传 = 创建默认关/更新保持） */
+  autoDoneWiOnDev?: boolean
   /** CAP-73：需求开发中验证开关（不传 = 创建默认关/更新保持） */
   verifyInDevEnabled?: boolean
   /** CAP-73：验证日配额（默认 20，0 = 不限；不传 = 保持） */

@@ -238,6 +238,8 @@ export interface WorkItem {
   status: WorkItemStatus
   ownerId?: string
   branchSlug?: string
+  /** CAP-100 FR-02：归属会话（最新一次；需求级 [flow:dev] 或行内 WI 会话均回填，仅展示/跳转用途） */
+  sessionId?: string
   createdBy?: string
   createdAt: string
   updatedAt: string

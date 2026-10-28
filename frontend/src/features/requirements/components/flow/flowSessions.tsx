@@ -15,11 +15,18 @@ export function latestFlowSession(sessions: OverviewSession[], marker: string): 
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0]
 }
 
-/** 取工作单元最近一次会话（createdAt 最新在前） */
+/** 取工作单元最近一次会话（createdAt 最新在前）。
+ *  CAP-100 FR-02：优先按服务端回填的归属会话 boundSessionId 反查（需求级 [flow:dev] 会话
+ *  不挂 workItemId，只有这条通道能在 WI 行可见）；未命中回落 workItemId 匹配。 */
 export function latestSessionOfWorkItem(
   sessions: OverviewSession[],
   workItemId: string,
+  boundSessionId?: string,
 ): OverviewSession | undefined {
+  if (boundSessionId) {
+    const bound = sessions.find((s) => s.id === boundSessionId)
+    if (bound) return bound
+  }
   return sessions
     .filter((s) => s.workItemId === workItemId)
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0]

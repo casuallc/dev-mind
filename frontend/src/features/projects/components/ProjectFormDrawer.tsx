@@ -63,6 +63,7 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
             autoRegressionOnDeploy: false,
             autoBuildOnWiDone: false,
             autoDeployTestOnBuild: false,
+            autoDoneWiOnDev: false,
             verifyInDevEnabled: false,
           },
     )
@@ -217,6 +218,14 @@ export default function ProjectFormDrawer({ open, project, onCancel, onSaved }: 
           name="autoRegressionOnDeploy"
           valuePropName="checked"
           extra="CAP-10 FR-05：部署单成功后自动对该项目全部套件跑一次回归"
+        >
+          <Switch />
+        </Form.Item>
+        <Form.Item
+          label="开发成功后自动完成工作单元"
+          name="autoDoneWiOnDev"
+          valuePropName="checked"
+          extra="CAP-100：需求开发会话成功退出后，自动把该需求「进行中」的工作单元置为 DONE（配合「WI 完成后自动构建」时同需求只构建一次）；验收仍归人"
         >
           <Switch />
         </Form.Item>

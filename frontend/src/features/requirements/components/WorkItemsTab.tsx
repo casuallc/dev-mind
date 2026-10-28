@@ -182,7 +182,7 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
     {
       title: '会话', key: 'session', width: 110,
       render: (_, w) => {
-        const s = latestSessionOfWorkItem(sessions, w.id)
+        const s = latestSessionOfWorkItem(sessions, w.id, w.sessionId)
         return s ? <SessionTag s={s} /> : <Typography.Text type="secondary">-</Typography.Text>
       },
     },
