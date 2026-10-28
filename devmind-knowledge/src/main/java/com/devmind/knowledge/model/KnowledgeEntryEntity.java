@@ -17,6 +17,7 @@ import org.hibernate.type.SqlTypes;
  * 全局/项目层，scope/projectId 历史列保留停写（防 rollback 丢数据）。
  */
 @Entity
+@org.hibernate.annotations.DynamicUpdate
 @Table(name = "knowledge_entries")
 public class KnowledgeEntryEntity {
 
@@ -38,9 +39,23 @@ public class KnowledgeEntryEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+    @jakarta.persistence.Version @ColumnDefault("0") private long rowRevision;
 
     /** 归属知识库（CAP-44；存量行由 KnowledgeBaseMigration 回填） */
     private Long kbId;
+
+    /** CAP-95: optional restriction, evaluated in addition to the base policy. */
+    private Long policyId;
+    @org.hibernate.annotations.ColumnDefault("0")
+    private long releaseSetRevision;
+    private Instant indexedAt;
+    @Lob @JdbcTypeCode(SqlTypes.LONGVARCHAR) private String parseReportJson;
+    public String getParseReportJson(){return parseReportJson;}public void setParseReportJson(String v){parseReportJson=v;}
+    public Instant getIndexedAt(){return indexedAt;} public void setIndexedAt(Instant v){indexedAt=v;}
+    public long getReleaseSetRevision() { return releaseSetRevision; }
+    public void advanceReleaseSet() { releaseSetRevision++; }
+    public Long getPolicyId() { return policyId; }
+    public void setPolicyId(Long policyId) { this.policyId = policyId; }
 
     /** 历史列：global | project（CAP-44 起停写，语义上移到 knowledge_bases.scope） */
     @Column(length = 16)

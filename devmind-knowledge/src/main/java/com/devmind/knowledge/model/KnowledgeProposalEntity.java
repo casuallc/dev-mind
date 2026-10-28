@@ -19,6 +19,9 @@ import org.hibernate.type.SqlTypes;
 @Entity
 @Table(name = "knowledge_proposals")
 public class KnowledgeProposalEntity {
+    private String createdBy;
+    public String getCreatedBy() { return createdBy; }
+    public void setCreatedBy(String actor) { createdBy = actor; }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

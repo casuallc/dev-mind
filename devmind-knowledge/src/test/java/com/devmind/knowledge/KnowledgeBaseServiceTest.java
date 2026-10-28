@@ -57,6 +57,7 @@ class KnowledgeBaseServiceTest {
     private final List<KnowledgeBaseEntity> kbs = new ArrayList<>();
     private final List<KnowledgeEntryEntity> entries = new ArrayList<>();
     private KnowledgeBaseService service;
+    private com.devmind.knowledge.access.KnowledgeAccessService access;
     private KnowledgeBaseRepository kbRepo;
     private KnowledgeEntryRepository entryRepo;
     private KnowledgeProposalRepository proposalRepo;
@@ -123,11 +124,15 @@ class KnowledgeBaseServiceTest {
             ids.forEach(wanted::add);
             return entries.stream().filter(e -> wanted.contains(e.getId())).toList();
         });
+        access = mock(com.devmind.knowledge.access.KnowledgeAccessService.class);
+        lenient().when(access.actor()).thenReturn("tester");
+        lenient().when(access.readableBaseIds(any())).thenAnswer(inv -> kbs.stream().map(KnowledgeBaseEntity::getId).toList());
+        lenient().when(access.readableEntryIds(any())).thenAnswer(inv -> entries.stream().map(KnowledgeEntryEntity::getId).toList());
         service = new KnowledgeBaseService(kbRepo, entryRepo, chunkRepo, proposalRepo,
                 mock(com.devmind.knowledge.repo.KnowledgeImportFileRepository.class),
                 notificationPublisher, eventPublisher, resolver, endpointProviders,
                 versionService, indexService, mock(com.devmind.knowledge.retrieve.KnowledgeSearchService.class),
-                taskService);
+                taskService, access);
     }
 
     private KnowledgeBaseEntity addKb(String name) {
@@ -259,6 +264,7 @@ class KnowledgeBaseServiceTest {
             KnowledgeProposalEntity p = inv.getArgument(0);
             if (p.getId() == null) {
                 p.setId(4711L);
+        p.setCreatedBy("tester");
             }
             return p;
         });
@@ -275,6 +281,7 @@ class KnowledgeBaseServiceTest {
     private KnowledgeProposalEntity addOpenProposal() {
         KnowledgeProposalEntity p = new KnowledgeProposalEntity();
         p.setId(4711L);
+        p.setCreatedBy("tester");
         p.setTitle("构建失败先看日志末尾");
         p.setContentMd("九成环境类报错在日志最后 200 行");
         p.setSourceProject("p1");
@@ -390,8 +397,9 @@ class KnowledgeBaseServiceTest {
             @Override public Instant getUpdatedAt() { return Instant.parse("2026-10-24T00:00:00Z"); }
         };
         when(entryRepo.pageSummariesByBase(anyLong(), anyString(), anyString(), any(), any(), any(),
-                any(Pageable.class))).thenReturn(new PageImpl<>(List.of(ref)));
+                any(), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(ref)));
 
+        when(access.readableEntryIds(any())).thenReturn(List.of(ref.getId()));
         PageView<EntrySummaryView> page = service.pageByBase(
                 kb.getId(), "Rabbit", "TECH", null, null, null, -1, 500);
 

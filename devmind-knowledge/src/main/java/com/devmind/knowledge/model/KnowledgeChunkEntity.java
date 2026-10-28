@@ -26,6 +26,14 @@ public class KnowledgeChunkEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+    private Long releaseId;
+    private int releaseChunkIndex;
+    @Lob @JdbcTypeCode(SqlTypes.LONGVARCHAR) private String applicabilityJson;
+    public String getApplicabilityJson(){return applicabilityJson;}public void setApplicabilityJson(String value){applicabilityJson=value;}
+    public Long getReleaseId() { return releaseId; }
+    public void setReleaseId(Long v) { releaseId=v; }
+    public int getReleaseChunkIndex() { return releaseChunkIndex; }
+    public void setReleaseChunkIndex(int v) { releaseChunkIndex=v; }
 
     @Column(name = "kb_id", nullable = false)
     private Long kbId;

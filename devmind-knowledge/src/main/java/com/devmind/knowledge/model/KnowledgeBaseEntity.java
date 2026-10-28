@@ -27,6 +27,11 @@ public class KnowledgeBaseEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /** CAP-95: null means legacy/unassigned, never public. */
+    private Long policyId;
+    public Long getPolicyId() { return policyId; }
+    public void setPolicyId(Long policyId) { this.policyId = policyId; }
+
     @Column(nullable = false, length = 128)
     private String name;
 

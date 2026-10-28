@@ -23,16 +23,17 @@ public final class EntryViews {
                 e.getDocType(), e.getSourceUri(), e.getMimeType(), e.getSummary(), e.getOwner(),
                 e.getContentVersion(), e.getValidFrom(), e.getValidTo(), e.getLastReviewedAt(),
                 !Boolean.FALSE.equals(e.getAutoEnrich()), e.getEnrichedAt(), e.getEnrichError(),
-                e.getCreatedAt(), e.getUpdatedAt());
+                e.getCreatedAt(), e.getUpdatedAt(), e.getReleaseSetRevision(),e.getParseReportJson());
     }
 
     public static KnowledgeBaseView base(KnowledgeBaseEntity kb,
                                          long entryCount, long chunkCount,
-                                         String modelEndpointName, KnowledgeBaseView.IndexStats indexStats) {
+                                         String modelEndpointName, KnowledgeBaseView.IndexStats indexStats,
+                                         List<com.devmind.common.knowledge.KnowledgeAccessPolicy.Action> effectiveActions) {
         return new KnowledgeBaseView(
                 kb.getId(), kb.getName(), kb.getDescription(),
                 kb.getModelEndpointId(), modelEndpointName, kb.getStatus(),
-                entryCount, chunkCount, indexStats, kb.getCreatedAt(), kb.getUpdatedAt());
+                entryCount, chunkCount, indexStats, kb.getCreatedAt(), kb.getUpdatedAt(), effectiveActions);
     }
 
     /** 提案视图；kbNames 用于解析采纳目标库名（可为 null → adoptedKbName=null）。 */

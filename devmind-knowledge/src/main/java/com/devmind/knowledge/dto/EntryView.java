@@ -62,5 +62,6 @@ public record EntryView(
         Instant enrichedAt,
         String enrichError,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        long releaseSetRevision,String parseReportJson) {
 }

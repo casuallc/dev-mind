@@ -11,6 +11,23 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface KnowledgeEntryRepository extends JpaRepository<KnowledgeEntryEntity, Long> {
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select e from KnowledgeEntryEntity e where e.id = :id")
+    Optional<KnowledgeEntryEntity> findForAccessUpdate(@Param("id") Long id);
+
+    long countByIdInAndIndexStatus(java.util.Collection<Long> ids, String indexStatus);
+
+    interface AccessRef {
+        Long getId();
+        Long getKbId();
+        Long getPolicyId();
+        String getSource();
+    }
+    @Query("select e.id as id, e.kbId as kbId, e.policyId as policyId, e.source as source from KnowledgeEntryEntity e where e.kbId in :ids")
+    List<AccessRef> findAccessRefsByKbIdIn(@Param("ids") java.util.Collection<Long> ids);
+
+    @Query("select e.id as id, e.kbId as kbId, e.policyId as policyId, e.source as source from KnowledgeEntryEntity e where e.id in :ids")
+    List<AccessRef> findAccessRefsByIdIn(@Param("ids") java.util.Collection<Long> ids);
 
     List<KnowledgeEntryEntity> findByStatusOrderByCreatedAtDesc(String status);
 
@@ -41,6 +58,7 @@ public interface KnowledgeEntryRepository extends JpaRepository<KnowledgeEntryEn
                    e.contentVersion as contentVersion, e.updatedAt as updatedAt
             from KnowledgeEntryEntity e
             where e.kbId = :kbId
+              and e.id in :readableIds
               and (cast(:status as string) is null or e.status = :status)
               and (cast(:docType as string) is null or e.docType = :docType)
               and (cast(:source as string) is null or e.source = :source)
@@ -52,6 +70,7 @@ public interface KnowledgeEntryRepository extends JpaRepository<KnowledgeEntryEn
             countQuery = """
             select count(e) from KnowledgeEntryEntity e
             where e.kbId = :kbId
+              and e.id in :readableIds
               and (cast(:status as string) is null or e.status = :status)
               and (cast(:docType as string) is null or e.docType = :docType)
               and (cast(:source as string) is null or e.source = :source)
@@ -65,6 +84,7 @@ public interface KnowledgeEntryRepository extends JpaRepository<KnowledgeEntryEn
                                               @Param("source") String source,
                                               @Param("indexStatus") String indexStatus,
                                               @Param("status") String status,
+                                              @Param("readableIds") java.util.Collection<Long> readableIds,
                                               Pageable pageable);
 
     interface EntrySummaryRef {

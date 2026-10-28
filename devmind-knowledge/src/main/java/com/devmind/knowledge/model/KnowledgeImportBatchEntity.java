@@ -13,6 +13,10 @@ import java.time.Instant;
 @Entity
 @Table(name = "knowledge_import_batches")
 public class KnowledgeImportBatchEntity {
+    /** Trusted submitting/retrying identity; legacy caller-supplied createdBy is not authorization. */
+    private String executionActor;
+    public String getExecutionActor() { return executionActor; }
+    public void setExecutionActor(String actor) { executionActor = actor; }
 
     public static final String STATUS_RUNNING = "RUNNING";
     public static final String STATUS_DONE = "DONE";

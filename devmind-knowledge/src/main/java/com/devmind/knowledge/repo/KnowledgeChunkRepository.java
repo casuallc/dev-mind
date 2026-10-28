@@ -10,6 +10,15 @@ import org.springframework.data.repository.query.Param;
 public interface KnowledgeChunkRepository extends JpaRepository<KnowledgeChunkEntity, Long> {
 
     List<KnowledgeChunkEntity> findByEntryIdOrderByChunkIndexAsc(Long entryId);
+    List<KnowledgeChunkEntity> findByReleaseIdOrderByReleaseChunkIndexAsc(Long releaseId);
+    interface ScopeRef {Long getId();Long getReleaseId();String getApplicabilityJson();}
+    @Query("select c.id as id,c.releaseId as releaseId,c.applicabilityJson as applicabilityJson from KnowledgeChunkEntity c where c.releaseId in :ids")
+    List<ScopeRef> findScopeRefs(@Param("ids") java.util.Collection<Long> releaseIds);
+    @Query("select coalesce(max(c.chunkIndex), -1) from KnowledgeChunkEntity c where c.entryId = :entryId")
+    int maxChunkOrdinal(@Param("entryId") Long entryId);
+    @Modifying
+    @Query("delete from KnowledgeChunkEntity c where c.entryId = :entryId and c.releaseId is null")
+    void deleteUnpublishedByEntryId(@Param("entryId") Long entryId);
 
     List<KnowledgeChunkEntity> findByKbId(Long kbId);
 
@@ -20,4 +29,5 @@ public interface KnowledgeChunkRepository extends JpaRepository<KnowledgeChunkEn
     void deleteByEntryId(@Param("entryId") Long entryId);
 
     long countByKbId(Long kbId);
+    long countByEntryIdIn(java.util.Collection<Long> entryIds);
 }
