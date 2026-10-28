@@ -1,5 +1,5 @@
 import { api } from '../../shared/api/client'
-import type { AuthUser, LoginResponse } from './types'
+import type { AuthUser, LoginResponse, MenuGrants, MenuItem, VisibleMenus } from './types'
 import type { PlatformAccount } from './types'
 
 export function login(username: string, password: string) {
@@ -47,6 +47,24 @@ export function resetPassword(id: string, password: string) {
 
 export function deleteUser(id: string) {
   return api.del<void>(`/auth/users/${id}`)
+}
+
+// ---- CAP-61 菜单目录与角色授权 ----
+
+export function fetchMenus() {
+  return api.get<VisibleMenus>('/auth/menus')
+}
+
+export function fetchMenuCatalog() {
+  return api.get<MenuItem[]>('/auth/menus/catalog')
+}
+
+export function fetchMenuGrants() {
+  return api.get<MenuGrants>('/auth/menus/grants')
+}
+
+export function saveMenuGrants(role: string, menuKeys: string[]) {
+  return api.put<MenuGrants>('/auth/menus/grants', { role, menuKeys })
 }
 
 // ---- 我的第三方账号（CAP-35） ----

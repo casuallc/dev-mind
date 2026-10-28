@@ -66,6 +66,13 @@
       "owner": "copilot",
       "cap": "CAP-76",
       "source": "tests/legacy/api/cap76_tools_contract.py"
+    },
+    {
+      "id": "regression.menu-grants",
+      "test": "Regression.test_menu_grants_drive_visible_menu",
+      "suite": "regression",
+      "owner": "auth",
+      "cap": "CAP-61"
     }
   ]
 }

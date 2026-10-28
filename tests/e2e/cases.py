@@ -29,6 +29,47 @@ class Regression(unittest.TestCase):
     api = None
     workspace = None
 
+    def test_menu_grants_drive_visible_menu(self):
+        from support import Api
+        catalog = self.api.request("GET", "/auth/menus/catalog")
+        keys = {item["menuKey"] for item in catalog}
+        self.assertIn("admin.menus", keys)
+        self.assertIn("project.tests", keys)
+        original = self.api.request("GET", "/auth/menus/grants")["grants"]["DEVELOPER"]
+        self.addCleanup(self.api.request, "PUT", "/auth/menus/grants",
+                        {"role": "DEVELOPER", "menuKeys": original})
+        username = "e2e-menu-" + uuid.uuid4().hex[:10]
+        password = "e2e-" + uuid.uuid4().hex
+        user = self.api.request("POST", "/auth/users", {"username": username, "password": password,
+                                                        "role": "DEVELOPER"})
+        self.addCleanup(self.api.request, "DELETE", "/auth/users/" + user["id"])
+        client = Api(self.api.base)
+        client.login(username, password)
+
+        visible = client.request("GET", "/auth/menus")
+        initial = {m["menuKey"] for m in visible["items"]}
+        self.assertIn("top.home", initial)
+        self.assertNotIn("admin.dashboard", initial)
+        self.assertIn("/home", visible["knownPaths"])
+        client.request("GET", "/auth/menus/catalog", expected=403)
+        client.request("PUT", "/auth/menus/grants", {"role": "VIEWER", "menuKeys": []}, expected=403)
+
+        updated = [k for k in original if k not in ("top.home", "project.tests")]
+        updated.append("admin.dashboard")
+        self.api.request("PUT", "/auth/menus/grants", {"role": "DEVELOPER", "menuKeys": updated})
+        after = {m["menuKey"] for m in client.request("GET", "/auth/menus")["items"]}
+        self.assertNotIn("top.home", after)
+        self.assertNotIn("project.tests", after)
+        self.assertIn("admin.dashboard", after)
+        self.assertIn("admin.dashboard",
+                      self.api.request("GET", "/auth/menus/grants")["grants"]["DEVELOPER"])
+        admin_keys = {m["menuKey"] for m in self.api.request("GET", "/auth/menus")["items"]}
+        self.assertIn("admin.menus", admin_keys)
+
+        self.api.request("PUT", "/auth/menus/grants", {"role": "ADMIN", "menuKeys": []}, expected=400)
+        self.api.request("PUT", "/auth/menus/grants", {"role": "DEVELOPER", "menuKeys": ["not.exists"]},
+                         expected=400)
+
     def test_project_lifecycle(self):
         path = self.workspace / ("project-" + uuid.uuid4().hex)
         path.mkdir()

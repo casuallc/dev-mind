@@ -14,6 +14,30 @@ export interface LoginResponse {
   user: AuthUser
 }
 
+/** CAP-61 菜单项（目录由后端代码登记，前端只按下发清单渲染） */
+export interface MenuItem {
+  menuKey: string
+  title: string
+  path: string
+  zone: 'TOP' | 'PROJECT' | 'ADMIN' | string
+  groupName?: string | null
+  icon?: string | null
+  sortNo: number
+  retired: boolean
+}
+
+/** 当前用户可见菜单；knownPaths = 全量在架菜单路径（弱守卫区分非菜单页面） */
+export interface VisibleMenus {
+  items: MenuItem[]
+  knownPaths: string[]
+}
+
+/** 角色 → 可见 menuKey 集合（ADMIN 恒全量、不可编辑） */
+export interface MenuGrants {
+  roles: string[]
+  grants: Record<string, string[]>
+}
+
 /** CAP-35 我的第三方账号视图：一行 = 一个 ENABLED 平台实例 + 我的绑定状态（不含 secret 明文） */
 export interface PlatformAccount {
   integrationId: number

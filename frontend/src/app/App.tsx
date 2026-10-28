@@ -56,9 +56,12 @@ import ChatsBoard from '../features/chat/pages/ChatsBoard'
 import AttachmentsPage from '../features/attachments/pages/AttachmentsPage'
 import LoginPage from '../features/auth/pages/LoginPage'
 import UserManagementPage from '../features/auth/pages/UserManagementPage'
+import MenuPermissionsPage from '../features/auth/pages/MenuPermissionsPage'
 import SettingsPage from '../features/auth/pages/SettingsPage'
 import RequireAuth from '../features/auth/RequireAuth'
 import RequireAdmin from '../features/auth/RequireAdmin'
+import { isAdmin } from '../features/auth/authStore'
+import { useMenus } from '../features/auth/useMenus'
 import { setCurrentProject } from './currentProjectStore'
 
 /** 旧链接兼容：/projects/:id → 同步当前项目后回概览（原 ProjectDetail 已拆成项目上下文菜单页） */
@@ -131,6 +134,15 @@ function LegacyKnowledgeSearchRedirect() {
 function LegacyKnowledgeRedirect() {
   const location = useLocation()
   return <Navigate to={{ pathname: '/admin/knowledge', search: location.search }} replace />
+}
+
+/** CAP-61 后台入口：ADMIN 保持原跳转（项目管理）；被授予后台菜单的其他角色落到第一个可见菜单 */
+function AdminIndexRedirect() {
+  const { items, loaded } = useMenus()
+  if (isAdmin()) return <Navigate to="/admin/projects" replace />
+  if (!loaded) return null
+  const first = items.find((m) => m.zone === 'ADMIN')
+  return <Navigate to={first?.path ?? '/home'} replace />
 }
 
 export default function App() {
@@ -209,8 +221,8 @@ export default function App() {
             </RequireAdmin>
           }
         >
-          <Route path="/admin" element={<Navigate to="/admin/projects" replace />} />
-          {/* CAP-16 指挥中心（全局视角，仅 ADMIN） */}
+          <Route path="/admin" element={<AdminIndexRedirect />} />
+          {/* CAP-16 指挥中心（全局视角） */}
           <Route path="/admin/dashboard" element={<DashboardPage />} />
           {/* CAP-02 项目管理（六视图聚合页：项目/经验提案/命令模板/代码库/场景/执行审计；项目配置为嵌套子路由） */}
           <Route path="/admin/projects" element={<AdminProjectsHub />} />
@@ -228,6 +240,8 @@ export default function App() {
           <Route path="/admin/repos" element={<Navigate to="/admin/projects?tab=repos" replace />} />
           {/* CAP-01 用户管理 */}
           <Route path="/admin/users" element={<UserManagementPage />} />
+          {/* CAP-61 菜单管理与角色菜单权限矩阵 */}
+          <Route path="/admin/menus" element={<MenuPermissionsPage />} />
           {/* CAP-36 执行底座（命令模板 + 执行审计）已并入项目管理 tab，旧路径兼容 */}
           <Route path="/admin/execution" element={<Navigate to="/admin/projects?tab=templates" replace />} />
           {/* CAP-80 任务管理（M4 正名；旧路径兼容跳转） */}

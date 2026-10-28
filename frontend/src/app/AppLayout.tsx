@@ -2,25 +2,20 @@
 // 项目切换器放在 ProjectSubNav 二级页签条右端（仅项目上下文页），不进顶部导航——
 // 否则切 tab 时一级导航位置随切换器显隐左右移动。
 import { Button, Layout, Menu, Tooltip } from 'antd'
-import {
-  CommentOutlined,
-  FieldTimeOutlined,
-  FolderOutlined,
-  HomeOutlined,
-  SafetyCertificateOutlined,
-  SettingOutlined,
-  StarOutlined,
-} from '@ant-design/icons'
+import { SafetyCertificateOutlined } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useSyncExternalStore } from 'react'
 import ProjectSubNav, { isProjectPage } from './ProjectSubNav'
 import { useProjectBootstrap } from './useProjectBootstrap'
 import { topNavKey } from './menuSelectedKey'
+import { menuIcon } from './menuIcons'
+import MenuAccessGuard from './MenuAccessGuard'
 import NotificationBell from '../features/notifications/components/NotificationBell'
 import UserMenu from '../features/auth/components/UserMenu'
 import { startNotificationStream, stopNotificationStream } from '../features/notifications/store'
 import { getUserSnapshot, isAdmin, setUser, subscribeAuth } from '../features/auth/authStore'
 import { fetchMe } from '../features/auth/api'
+import { useMenus } from '../features/auth/useMenus'
 
 const { Header, Content } = Layout
 
@@ -32,6 +27,12 @@ export default function AppLayout() {
   // 项目列表常驻引导（加载 + currentId 兜底），与切换器 UI 解耦
   const projectBootstrap = useProjectBootstrap()
   const projectPage = isProjectPage(location.pathname)
+  // CAP-61：顶部导航按角色可见菜单渲染（菜单权限只控入口，接口鉴权仍由后端负责）
+  const { items: menus } = useMenus()
+  const topItems = menus
+    .filter((m) => m.zone === 'TOP')
+    .map((m) => ({ key: m.path, icon: menuIcon(m.icon), label: m.title }))
+  const adminEntrance = isAdmin() || menus.some((m) => m.zone === 'ADMIN')
 
   // 启动全局通知实时流（铃铛角标/浏览器通知依赖它）
   useEffect(() => {
@@ -78,18 +79,10 @@ export default function AppLayout() {
           selectedKeys={[topNavKey(location.pathname)]}
           onClick={({ key }) => navigate(key)}
           style={{ flex: 1, minWidth: 0, borderBottom: 'none' }}
-          items={[
-            { key: '/home', icon: <HomeOutlined />, label: '工作台' },
-            { key: '/overview', icon: <FolderOutlined />, label: '项目' },
-            { key: '/chats', icon: <CommentOutlined />, label: 'AI 问答' },
-            { key: '/bookmarks', icon: <StarOutlined />, label: '收藏夹' },
-            { key: '/worklog', icon: <FieldTimeOutlined />, label: '工作日志' },
-            // 个人设置已从用户下拉上提为一级导航（页内视图切换在页面 Card 头部）
-            { key: '/settings', icon: <SettingOutlined />, label: '设置' },
-          ]}
+          items={topItems}
         />
-        {/* 管理功能集中在 /admin 后台，仅 ADMIN 可见入口 */}
-        {isAdmin() && (
+        {/* 管理功能集中在 /admin 后台：ADMIN 恒可见；其他角色有任一后台菜单授权时也显示入口 */}
+        {adminEntrance && (
           <Tooltip title="后台管理">
             <Button
               type="text"
@@ -127,7 +120,9 @@ export default function AppLayout() {
               onRetry={projectBootstrap.reload}
             />
           )}
-          <Outlet />
+          <MenuAccessGuard>
+            <Outlet />
+          </MenuAccessGuard>
         </div>
       </Content>
     </Layout>

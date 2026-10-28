@@ -1,6 +1,6 @@
 # CAP-61 菜单管理与角色菜单权限
 
-> 能力 ID：CAP-61 ｜ 分类：管理 ｜ 状态：需求定稿（2026-09-23），待实施。
+> 能力 ID：CAP-61 ｜ 分类：管理 ｜ 状态：已实现（2026-10-28） ｜ 日期：2026-09-23 需求定稿，2026-10-28 实施。
 
 ## 1. 目的
 
@@ -126,3 +126,24 @@ PUT  /api/auth/menus/grants          {role, menuKeys[]} 全量覆盖某角色授
 - v1：FR-01~05 全做；菜单目录集中常量登记（不强制 SPI 化）；
 - 留后续：能力模块自登记菜单（SPI）、菜单变更 WS 推送、按钮级权限、自定义角色、
   指挥中心卡片按菜单裁剪。
+
+## 9. 实施记录（2026-10-28）
+
+- **目录**：`MenuCatalog` 集中常量共 35 项（TOP 6 / PROJECT 8 / ADMIN 21）。较 FR-01 初始清单
+  多出：`top.bookmarks`（CAP-64 收藏夹）、`admin.knowledge-ops` / `admin.knowledge-reports`
+  （CAP-86 知识库组拆分）、`admin.menus`（本能力管理页，系统组）。
+- **装配**：`MenuBootstrap`（ApplicationRunner）调 `MenuPermissionService.syncCatalog()` 幂等落库：
+  新增项插入并按 zone 补默认授权（ADMIN 35、DEVELOPER 14、VIEWER 14），标题/路径/排序变更同步，
+  目录缺失项标记 retired 不物理删除。
+- **下发**：`GET /api/auth/menus` 返回 `{items, knownPaths}`。`knownPaths` 为在架菜单去重路径
+  （34 条，`/overview` 被 `top.projects` 与 `project.overview` 共用），供前端弱守卫区分
+  「非菜单页放行」与「无权限菜单页 403」，避免前端另维护一份路由清单。
+- **前端**：`menuStore`/`useMenus` 登录后拉取并缓存（失败放行）；三个菜单位全部改为清单渲染，
+  本地常量删除；`MenuAccessGuard` 弱守卫 + `/admin/menus` 矩阵页（zone 三段展示、ADMIN 列
+  锁定全选、勾选即保存）。
+- **非 ADMIN 进后台**：`RequireAdmin` 放宽为「持有任一 ADMIN 区菜单」，`/admin` 索引重定向到
+  首个可见后台菜单；具体页面权限由 `MenuAccessGuard` 逐路径判定，后端接口鉴权口径不变。
+- **验证**：`MenuPermissionServiceTest` 8 例；E2E 新增 `regression.menu-grants`（目录 12 例全绿，
+  隔离回归 9/9）；`npx tsc -b && vite build` 通过；浏览器手工验证动态菜单、矩阵保存即时生效、
+  直敲无权限菜单 URL 显示无权限页。
+- **未落地**（按 §8 留后续）：`MenuCatalogProvider` SPI、菜单变更 WS 推送。

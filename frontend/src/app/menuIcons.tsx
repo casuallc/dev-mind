@@ -1,0 +1,61 @@
+// CAP-61 菜单图标注册表：后端目录只存 icon key，前端在此映射到组件。
+import type { ReactNode } from 'react'
+import {
+  ApiOutlined,
+  BarChartOutlined,
+  BellOutlined,
+  CommentOutlined,
+  DashboardOutlined,
+  ExperimentOutlined,
+  FieldTimeOutlined,
+  FileTextOutlined,
+  FolderOutlined,
+  ForkOutlined,
+  HeartOutlined,
+  HomeOutlined,
+  InteractionOutlined,
+  KeyOutlined,
+  MenuOutlined,
+  PaperClipOutlined,
+  PartitionOutlined,
+  ReadOutlined,
+  RobotOutlined,
+  SafetyCertificateOutlined,
+  ScheduleOutlined,
+  SettingOutlined,
+  StarOutlined,
+  ThunderboltOutlined,
+  ToolOutlined,
+} from '@ant-design/icons'
+
+const ICONS: Record<string, ReactNode> = {
+  home: <HomeOutlined />,
+  folder: <FolderOutlined />,
+  comment: <CommentOutlined />,
+  star: <StarOutlined />,
+  'field-time': <FieldTimeOutlined />,
+  setting: <SettingOutlined />,
+  dashboard: <DashboardOutlined />,
+  'file-text': <FileTextOutlined />,
+  'paper-clip': <PaperClipOutlined />,
+  tool: <ToolOutlined />,
+  robot: <RobotOutlined />,
+  read: <ReadOutlined />,
+  heart: <HeartOutlined />,
+  'bar-chart': <BarChartOutlined />,
+  interaction: <InteractionOutlined />,
+  partition: <PartitionOutlined />,
+  fork: <ForkOutlined />,
+  experiment: <ExperimentOutlined />,
+  schedule: <ScheduleOutlined />,
+  api: <ApiOutlined />,
+  thunderbolt: <ThunderboltOutlined />,
+  key: <KeyOutlined />,
+  'safety-certificate': <SafetyCertificateOutlined />,
+  bell: <BellOutlined />,
+  menu: <MenuOutlined />,
+}
+
+export function menuIcon(key?: string | null): ReactNode {
+  return key ? ICONS[key] : undefined
+}
