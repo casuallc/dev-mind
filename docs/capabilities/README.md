@@ -111,10 +111,13 @@
 | [CAP-91](CAP-91-worklog-goals-okr.md) | 工作目标与 OKR 对齐 | 组装层 | 已实现（M1+M2+M3，2026-10-26） | 年度目标 + 季度 OKR 一等数据，周计划挂 KR 对齐，季度复盘数据驱动投影 |
 | [CAP-92](CAP-92-knowledge-injection-retrieval.md) | 知识注入收敛为检索 | 管理/底座 | 已实现（M1+M2+M3，2026-10-26） | 下线 FULL 全量注入与注入预览；场景改绑知识库，装配时按任务检索命中片段 |
 | [CAP-93](CAP-93-worklog-okr-suggest.md) | 工作日志 OKR AI 生成 | 组装层 | 已实现 | 会话链路生成年度/季度 OKR 草稿（worklog_okr_drafts），人工勾选编辑后采纳批量建目标 |
-| [CAP-94](CAP-94-knowledge-project-decoupling.md) | 知识库去项目化 | 管理/底座 | 设计中 | 废除 scope/project 归属，库完全独立；检索/注入/工具/沉淀一律显式绑定 kbIds |
+| [CAP-94](CAP-94-knowledge-project-decoupling.md) | 知识库去项目化 | 管理/底座 | 已实现（2026-10-27；权限边界后续由 CAP-95 演进） | 废除 scope/project 归属，库完全独立；检索/注入/工具/沉淀一律显式绑定 kbIds |
+| [CAP-95](CAP-95-trusted-knowledge-solutions.md) | 可信知识问答与完整解决方案 | 管理/底座/会话 | 部分交付（M1-A 用户/库/文档授权基础；M1 未完整验收） | 默认私有与检索授权基础已落地；来源/出口/流式撤权、版本适用性和完整方案闭环继续实施 |
 | [CAP-96](CAP-96-assistant-task-runtime.md) | 目标驱动的持续助手任务内核 | 底座/会话 | 定稿未实施 | 持久目标、动态推进、作业唤醒与重启对账，首个场景为受控构建失败修复 |
 | [CAP-97](CAP-97-assistant-controlled-execution.md) | 助手任务授权、可靠动作与证据验收 | 底座/治理 | 定稿未实施 | 有限可撤销授权、工具适配与受理幂等、证据绑定和目标验收；CAP-96 首批前置 |
 | [CAP-98](CAP-98-standing-missions-upstream-watch.md) | 长期委托与主动跟踪 | 组装层/流程层 | 定稿未实施 | 周期委托、观察台账和安静提醒，上游只读跟踪试点，漏洞闭环消费 CAP-66 |
+| [CAP-99](CAP-99-multi-agent-requirement-workflow.md) | 多 Agent 需求协作与人工阶段接管 | 流程层/Agent 底座 | 定稿未实施 | 阶段执行器/模型配置、人工分析设计、版本化交接与工作单元草稿评审 |
+| [CAP-100](CAP-100-requirement-dev-full-auto.md) | 需求开发全自动链 | 流程层 | 定稿 | 规划方案即 CONFIRMED、WI 回填归属会话、项目级开关控开发成功自动完成 WI；自动构建幂等提升需求级 |
 
 ## 持续助手实施主线（规划，均未实施）
 
