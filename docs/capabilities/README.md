@@ -118,6 +118,7 @@
 | [CAP-98](CAP-98-standing-missions-upstream-watch.md) | 长期委托与主动跟踪 | 组装层/流程层 | 定稿未实施 | 周期委托、观察台账和安静提醒，上游只读跟踪试点，漏洞闭环消费 CAP-66 |
 | [CAP-99](CAP-99-multi-agent-requirement-workflow.md) | 多 Agent 需求协作与人工阶段接管 | 流程层/Agent 底座 | 定稿未实施 | 阶段执行器/模型配置、人工分析设计、版本化交接与工作单元草稿评审 |
 | [CAP-100](CAP-100-requirement-dev-full-auto.md) | 需求开发全自动链 | 流程层 | 定稿 | 规划方案即 CONFIRMED、WI 回填归属会话、项目级开关控开发成功自动完成 WI；自动构建幂等提升需求级 |
+| [CAP-101](CAP-101-acceptance-jira-resolve.md) | 验收通过联动 Jira 解决与工时登记 | 集成 | 定稿未实施 | 验收弹窗默认勾选联动：Jira issue 置为解决 + worklog 登记（词表匹配动态转换），失败不阻断验收 |
 
 ## 持续助手实施主线（规划，均未实施）
 
