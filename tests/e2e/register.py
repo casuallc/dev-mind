@@ -15,7 +15,8 @@ def main():
     parser.add_argument("--node", required=True)
     parser.add_argument("--repo", default="https://github.com/casuallc/dev-mind.git")
     parser.add_argument("--branch", default="master")
-    parser.add_argument("--workspace-key", default="devmind-e2e-smoke-v1",
+    parser.add_argument("--suite", choices=["smoke", "contract"], default="smoke")
+    parser.add_argument("--workspace-key",
                         help="bump when updating test code; the platform reuses suite worktrees")
     parser.add_argument("--insecure", action="store_true")
     parser.add_argument("--apply", action="store_true", help="default prints a reviewable template")
@@ -24,11 +25,11 @@ def main():
            {"key": "E2E_USER", "value": os.environ.get("E2E_USER", "admin"), "secret": False}]
     password = os.environ.get("E2E_PASSWORD")
     env.append({"key": "E2E_PASSWORD", "value": password if args.apply else "<set E2E_PASSWORD>", "secret": True})
-    payload = {"projectId": args.project, "name": "dev-mind / E2E smoke (standard v1)",
+    payload = {"projectId": args.project, "name": f"dev-mind / E2E {args.suite} (standard v1)",
                "repoUrl": args.repo, "branch": args.branch, "workSubdir": None,
-               "command": "bash scripts/e2e.sh --suite smoke" + (" --insecure" if args.insecure else ""),
+               "command": f"bash scripts/e2e.sh --suite {args.suite}" + (" --insecure" if args.insecure else ""),
                "junitPath": "tmp/e2e/junit.xml", "env": env, "agentNodeId": args.node,
-               "timeoutSec": 300, "workspaceKey": args.workspace_key}
+               "timeoutSec": 300, "workspaceKey": args.workspace_key or f"devmind-e2e-{args.suite}-v1"}
     if os.environ.get("E2E_PYTHON"):
         payload["env"].append({"key": "E2E_PYTHON", "value": os.environ["E2E_PYTHON"], "secret": False})
     if not args.apply:

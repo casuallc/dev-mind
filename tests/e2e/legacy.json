@@ -63,7 +63,7 @@
   "cap72_e2e.py": {"status": "legacy", "reason": "待核对环境、鉴权、清理和断言后迁入正式套件；禁止批量执行"},
   "cap75_bot_verify.py": {"status": "legacy", "reason": "待核对环境、鉴权、清理和断言后迁入正式套件；禁止批量执行"},
   "cap76_copilot_verify.py": {"status": "legacy", "reason": "待核对环境、鉴权、清理和断言后迁入正式套件；禁止批量执行"},
-  "cap76_tools_contract.py": {"status": "legacy", "reason": "待核对环境、鉴权、清理和断言后迁入正式套件；禁止批量执行"},
+  "cap76_tools_contract.py": {"status": "migrated", "reason": "contract.copilot.*; original entry delegates to standard runner"},
   "cap78_feishu_flow_verify.py": {"status": "legacy", "reason": "待核对环境、鉴权、清理和断言后迁入正式套件；禁止批量执行"},
   "cap80-ws-test.mjs": {"status": "helper", "reason": "其他脚本调用的协议探针，非独立套件"},
   "cap80_runner_verify.py": {"status": "legacy", "reason": "待核对环境、鉴权、清理和断言后迁入正式套件；禁止批量执行"},

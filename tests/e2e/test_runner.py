@@ -6,12 +6,25 @@ import unittest
 import uuid
 import xml.etree.ElementTree as ET
 
-from run import ROOT, catalog, write_report
+from run import ROOT, catalog, write_report, select_entries
 
 
 class RunnerContract(unittest.TestCase):
     def test_catalog_complete(self):
         self.assertGreaterEqual(len(catalog()), 6)
+
+    def test_readonly_contract_does_not_include_write_cases(self):
+        selected = select_entries(catalog(), "contract")
+        self.assertEqual(3, len(selected))
+        self.assertEqual({"contract"}, {e["suite"] for e in selected})
+
+    def test_regression_keeps_smoke_without_other_domains(self):
+        self.assertEqual({"smoke", "regression"},
+                         {e["suite"] for e in select_entries(catalog(), "regression")})
+
+    def test_empty_suite_is_an_error(self):
+        with self.assertRaises(ValueError):
+            select_entries([], "contract")
 
     def test_report_preserves_xml_and_outcomes(self):
         path = ROOT / "tmp/e2e" / ("contract-" + uuid.uuid4().hex + ".xml")

@@ -9,6 +9,7 @@
 | 单元/模块测试 | 业务逻辑、边界、模拟依赖 | `mvn test`，留在各模块 |
 | smoke | 共享实例只读健康与关键 API；认证之外不得写业务数据 | `python tests/e2e/run.py --suite smoke --base <API地址>` |
 | regression | 独立 H2、唯一工作目录、可清理的数据写入 | `python tests/e2e/run.py --suite regression --isolated` |
+| contract | 从历史 Python 脚本迁移的只读契约；当前 CAP-76，需管理员 | `python tests/e2e/run.py --suite contract --base <API地址>` |
 | UI / 外部集成 / 运维 | 浏览器、GPU、真实 Jira、升级、服务安装等专属前置 | 仍按历史清单手动运行，审核后另建套件，不能混入 smoke |
 
 先执行 `mvn -q install -DskipTests` 构建当前代码，隔离入口通过 Maven 启动应用，JDK 21 / Python 3.10+ / Git / Maven 必备。无 Python 第三方依赖。入口可从任意目录执行；平台用 `bash scripts/e2e.sh` 调用同一入口。
@@ -36,3 +37,11 @@
 `tests/e2e/legacy.json` 登记 tests 顶层所有历史脚本，`legacy`=待审核，`helper`=辅助探针，`manual-only`=不可自动化的运维操作。保留原位置，避免破坏已有调用。
 
 迁移时逐一核对端点与认证、独立前置、数据清理、失败退出码、硬编码路径/凭据；提炼断言到正式 TestCase，并更新清单 reason 为替代用例 id。优先迁移项目/需求/会话/测试套件关键链路，再迁移 UI 与外部依赖。未经审核不得直接批量执行 124 个历史脚本。
+
+### Python 文件接入规则
+
+- [逐文件迁移索引](../../tests/e2e/python-inventory.md) 覆盖 tests 顶层所有 `.py`，`python tests/e2e/python_inventory.py --write` 更新，统一入口 `--check` 检查清单是否过期。
+- 状态 `legacy` → 核对原断言与前置 → 提取独立 TestCase → 登记 catalog（含 source 原脚本路径）→ 真服务验证 → `migrated`。部分迁移不得标成全部迁移。
+- 原文件可保留兼容包装，委托统一入口，不再重复实现登录/起停/报告。不得 import 会在模块顶层发请求的历史脚本作自动发现。
+- 项目按业务套件接入，不为每个历史文件机械建一个不可维护的套件。迁移后的每个测试方法在项目报告中单独显示；命令、JUnit 路径、超时、节点与密钥注入沿用统一契约。
+- 首批完整迁移 `cap76_tools_contract.py` → `contract.copilot.*` 三条测试，保留原契约断言。快照落本次 tmp/ 目录，正式测试不自动改写已跟踪的 docs 契约快照。

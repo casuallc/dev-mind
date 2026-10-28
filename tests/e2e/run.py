@@ -17,6 +17,7 @@ import uuid
 import xml.etree.ElementTree as ET
 
 import cases
+import python_inventory
 from support import Api
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,19 +29,28 @@ def catalog():
     ids, tests = set(), set()
     for entry in entries:
         assert entry["id"] not in ids and entry["test"] not in tests, "duplicate case"
-        assert entry["suite"] in ("smoke", "regression")
+        assert entry["suite"] in ("smoke", "regression", "contract")
         assert entry["owner"] and entry["cap"]
         cls, method = entry["test"].split(".")
         assert callable(getattr(getattr(cases, cls), method))
         ids.add(entry["id"])
         tests.add(entry["test"])
-    discovered = {f"{cls.__name__}.{method}" for cls in (cases.Smoke, cases.Regression)
+    discovered = {f"{cls.__name__}.{method}" for cls in (cases.Smoke, cases.Regression, cases.CopilotContract)
                   for method in unittest.defaultTestLoader.getTestCaseNames(cls)}
     assert discovered == tests, "every official test must be registered"
     legacy = json.loads((HERE / "legacy.json").read_text(encoding="utf-8"))
     actual = {p.name for p in (ROOT / "tests").iterdir() if p.suffix in (".py", ".mjs", ".sh", ".ps1")}
     assert actual == set(legacy), "legacy inventory changed: update tests/e2e/legacy.json"
+    assert python_inventory.OUT.read_text(encoding="utf-8") == python_inventory.render(), "Python inventory stale; regenerate with python_inventory.py --write"
     return entries
+
+
+def select_entries(entries, suite):
+    selected = [e for e in entries if e["suite"] == suite
+                or (suite == "regression" and e["suite"] == "smoke")]
+    if not selected:
+        raise ValueError("selected suite contains no cases")
+    return selected
 
 
 def stop_tree(proc):
@@ -149,8 +159,8 @@ def write_report(path, records):
 
 
 def execute(api, entries, folder):
-    cases.Smoke.api = cases.Regression.api = api
-    cases.Regression.workspace = folder
+    cases.Smoke.api = cases.Regression.api = cases.CopilotContract.api = api
+    cases.Regression.workspace = cases.CopilotContract.workspace = folder
     suite = unittest.TestSuite()
     for entry in entries:
         cls, method = entry["test"].split(".")
@@ -161,7 +171,7 @@ def execute(api, entries, folder):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--suite", choices=["smoke", "regression"], default="smoke")
+    parser.add_argument("--suite", choices=["smoke", "regression", "contract"], default="smoke")
     parser.add_argument("--isolated", action="store_true", help="start a private H2 app (requires built modules)")
     parser.add_argument("--base", default=os.environ.get("E2E_BASE"))
     parser.add_argument("--insecure", action="store_true", help="explicitly allow a self-signed HTTPS certificate")
@@ -178,7 +188,7 @@ def main():
         return 0
     records = []
     try:
-        entries = [e for e in catalog() if e["suite"] == "smoke" or args.suite == "regression"]
+        entries = select_entries(catalog(), args.suite)
         if args.suite == "regression" and not args.isolated:
             raise ValueError("regression requires --isolated; shared targets are smoke-only")
         if args.isolated and args.base:
