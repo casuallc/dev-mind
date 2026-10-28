@@ -75,4 +75,13 @@ stop/解包/换 bin·libs·ui·runner·lab·config（**跳过 application-local.
 
 194 自部署步骤异步触发后先等健康与 `.deploy-incoming/result=OK`，再人工触发该冒烟套件。此接入不修改现有部署计划，也不启用所有测试套件的自动回归开关，以免把未审核的历史套件一并触发。
 
+平台会复用 `workspaceKey` 对应工作树；测试代码更新后，重新登记时用 `--workspace-key devmind-e2e-<新提交短SHA>` 创建新工作树，避免沿用旧脚本。不要只推送代码就假定原工作树已更新。
+
 验收：首次手动运行必须出现 5 条用例、无 failure/error，且报告不含密码/token；不可仅凭脚本命令退出 0 判断接入成功。当前 5 条覆盖健康、匿名访问拒绝、身份、项目列表、更新日志；业务全链路/UI 仍按规范继续迁移。
+
+### 2026-10-28 接入记录
+
+- 项目 `lj606ymb`，套件 **#5**（`dev-mind / E2E smoke (standard v1)`），执行节点 **4**。
+- Git 源 `https://github.com/casuallc/dev-mind.git`，分支 `codex/e2e-standard-20261028`，首次验证代码 `777542c6`。合入 master 后再将套件 branch 更新为 master。
+- 服务账号通过 SSH 拉取时报 `Host key verification failed`；改用同一仓库的 HTTPS 地址后，平台运行单 **#5 SUCCESS，5/5 通过**，JUnit 已回收，报告文档 **#50**。
+- `E2E_PYTHON` 由套件环境指定节点上已有的 Python 3.12；密码作为 secret 变量保存，已核验读取时掩码。凭据与本机路径不入 Git。
