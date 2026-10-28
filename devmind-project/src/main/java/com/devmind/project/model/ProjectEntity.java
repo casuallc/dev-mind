@@ -73,6 +73,10 @@ public class ProjectEntity {
     @Column(name = "auto_deploy_test_on_build")
     private Boolean autoDeployTestOnBuild;
 
+    /** CAP-100 FR-03：开发会话成功后自动把 IN_PROGRESS 工作单元置 DONE（null/false = 关，默认关） */
+    @Column(name = "auto_done_wi_on_dev")
+    private Boolean autoDoneWiOnDev;
+
     /** CAP-73：需求开发中验证总开关（null/false = 关，默认关） */
     @Column(name = "verify_in_dev_enabled")
     private Boolean verifyInDevEnabled;
@@ -137,6 +141,9 @@ public class ProjectEntity {
     public void setAutoBuildOnWiDone(Boolean autoBuildOnWiDone) { this.autoBuildOnWiDone = autoBuildOnWiDone; }
     public boolean isAutoDeployTestOnBuild() { return Boolean.TRUE.equals(autoDeployTestOnBuild); }
     public void setAutoDeployTestOnBuild(Boolean autoDeployTestOnBuild) { this.autoDeployTestOnBuild = autoDeployTestOnBuild; }
+    /** CAP-100：Boolean 列不加 @ColumnDefault（同 CAP-72 红线），存量行 null 兜底关 */
+    public boolean isAutoDoneWiOnDev() { return Boolean.TRUE.equals(autoDoneWiOnDev); }
+    public void setAutoDoneWiOnDev(Boolean autoDoneWiOnDev) { this.autoDoneWiOnDev = autoDoneWiOnDev; }
     /** CAP-73：Boolean 列不加 @ColumnDefault（同 CAP-72 红线），存量行 null 兜底关 */
     public boolean isVerifyInDevEnabled() { return Boolean.TRUE.equals(verifyInDevEnabled); }
     public void setVerifyInDevEnabled(Boolean verifyInDevEnabled) { this.verifyInDevEnabled = verifyInDevEnabled; }

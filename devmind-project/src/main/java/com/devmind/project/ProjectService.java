@@ -247,6 +247,8 @@ public class ProjectService {
         e.setAutoRegressionOnDeploy(req.autoRegressionOnDeploy() != null && req.autoRegressionOnDeploy());
         e.setAutoBuildOnWiDone(req.autoBuildOnWiDone() != null && req.autoBuildOnWiDone());
         e.setAutoDeployTestOnBuild(req.autoDeployTestOnBuild() != null && req.autoDeployTestOnBuild());
+        // CAP-100：创建默认关
+        e.setAutoDoneWiOnDev(req.autoDoneWiOnDev() != null && req.autoDoneWiOnDev());
         // CAP-73：创建默认关；配额 null 落库 = 默认 20（getter 兜底）
         e.setVerifyInDevEnabled(req.verifyInDevEnabled() != null && req.verifyInDevEnabled());
         e.setVerifyDailyQuota(req.verifyDailyQuota());
@@ -347,6 +349,8 @@ public class ProjectService {
         if (req.autoRegressionOnDeploy() != null) e.setAutoRegressionOnDeploy(req.autoRegressionOnDeploy());
         if (req.autoBuildOnWiDone() != null) e.setAutoBuildOnWiDone(req.autoBuildOnWiDone());
         if (req.autoDeployTestOnBuild() != null) e.setAutoDeployTestOnBuild(req.autoDeployTestOnBuild());
+        // CAP-100：不传 = 保持
+        if (req.autoDoneWiOnDev() != null) e.setAutoDoneWiOnDev(req.autoDoneWiOnDev());
         // CAP-73：不传 = 保持
         if (req.verifyInDevEnabled() != null) e.setVerifyInDevEnabled(req.verifyInDevEnabled());
         if (req.verifyDailyQuota() != null) {
@@ -948,6 +952,7 @@ public class ProjectService {
                 e.getAutoRegressionOnDeploy(), e.isAutoBuildOnWiDone(), e.isAutoDeployTestOnBuild(),
                 e.getAgentNodeId(), e.getContextSummary(), e.getSummaryGeneratedAt(),
                 e.getOwnerId(), e.getKind(), e.isVerifyInDevEnabled(), e.getVerifyDailyQuota(),
+                e.isAutoDoneWiOnDev(),
                 e.getCreatedAt(), e.getUpdatedAt());
     }
 

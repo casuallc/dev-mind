@@ -30,5 +30,7 @@ public record ProjectRequest(
         /** CAP-73：需求开发中验证总开关（不传=创建默认关/更新保持） */
         Boolean verifyInDevEnabled,
         /** CAP-73：验证日配额（不传=保持；0=不限；null 落库=默认 20） */
-        Integer verifyDailyQuota) {
+        Integer verifyDailyQuota,
+        /** CAP-100：开发会话成功后自动完成 IN_PROGRESS 工作单元（不传=创建默认关/更新保持） */
+        Boolean autoDoneWiOnDev) {
 }

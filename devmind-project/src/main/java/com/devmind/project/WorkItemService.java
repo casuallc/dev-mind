@@ -145,6 +145,27 @@ public class WorkItemService {
         return view;
     }
 
+    /**
+     * CAP-100 FR-02：回填归属会话（最新一次覆盖）。需求级 [flow:dev] 起会话后批量调用，
+     * WI 行内起会话单条调用；失败不阻塞主流程（仅展示/跳转用途）。
+     */
+    public void bindSession(String projectId, String requirementId, Collection<String> workItemIds,
+                            String sessionId) {
+        if (workItemIds == null || workItemIds.isEmpty() || sessionId == null || sessionId.isBlank()) {
+            return;
+        }
+        for (String wiId : workItemIds) {
+            try {
+                WorkItemEntity e = requireUnder(projectId, requirementId, wiId);
+                e.setSessionId(sessionId);
+                e.setUpdatedAt(Instant.now());
+                workItemRepo.save(e);
+            } catch (Exception ex) {
+                log.warn("工作单元回填归属会话失败(不阻塞): wi={} session={} err={}", wiId, sessionId, ex.getMessage());
+            }
+        }
+    }
+
     /** 删除工作单元：清理双向 Relation 边后删除。派生 deleteBy 查询需事务上下文。 */
     @org.springframework.transaction.annotation.Transactional
     public void delete(String projectId, String requirementId, String workItemId) {
@@ -297,6 +318,7 @@ public class WorkItemService {
     private WorkItemView toView(WorkItemEntity e) {
         return new WorkItemView(e.getId(), e.getProjectId(), e.getRequirementId(), e.getDesignId(),
                 e.getSeq(), code(e.getSeq()), e.getType(), e.getTitle(), e.getSpec(), e.getStatus(),
-                e.getOwnerId(), e.getBranchSlug(), e.getCreatedBy(), e.getCreatedAt(), e.getUpdatedAt());
+                e.getOwnerId(), e.getBranchSlug(), e.getSessionId(), e.getCreatedBy(),
+                e.getCreatedAt(), e.getUpdatedAt());
     }
 }

@@ -33,6 +33,8 @@ public record ProjectView(
         boolean verifyInDevEnabled,
         /** CAP-73：验证日配额（0=不限） */
         int verifyDailyQuota,
+        /** CAP-100：开发会话成功后自动完成 IN_PROGRESS 工作单元 */
+        boolean autoDoneWiOnDev,
         Instant createdAt,
         Instant updatedAt) {
 }

@@ -74,6 +74,10 @@ public class WorkItemEntity {
     @Column(name = "branch_slug", length = 64)
     private String branchSlug;
 
+    /** CAP-100 FR-02：归属会话（最新一次，需求级 [flow:dev] 或行内 WI 会话均可回填；仅展示/跳转用途，不做门禁） */
+    @Column(name = "session_id", length = 32)
+    private String sessionId;
+
     @Column(name = "created_by", length = 64)
     private String createdBy;
 
@@ -105,6 +109,8 @@ public class WorkItemEntity {
     public void setOwnerId(String ownerId) { this.ownerId = ownerId; }
     public String getBranchSlug() { return branchSlug; }
     public void setBranchSlug(String branchSlug) { this.branchSlug = branchSlug; }
+    public String getSessionId() { return sessionId; }
+    public void setSessionId(String sessionId) { this.sessionId = sessionId; }
     public String getCreatedBy() { return createdBy; }
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public Instant getCreatedAt() { return createdAt; }
