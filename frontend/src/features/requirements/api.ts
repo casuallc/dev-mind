@@ -11,6 +11,7 @@ import type {
   JiraPushTargets,
   JiraTransition,
   JiraTransitionResult,
+  JiraResolveResult,
   Requirement,
   RequirementInput,
   RequirementOverview,
@@ -118,6 +119,25 @@ export function logJiraWork(
     seconds: Math.round(hours * 3600),
     comment: comment || undefined,
   })
+}
+
+// ---- CAP-101 验收联动 Jira 解决 ----
+
+/** 验收联动：Jira issue 置为解决（词表匹配动态转换，无匹配跳过）+ 登记工时，一步编排。
+ *  hours 为空 = 只解决不登记；调用时机固定为需求翻 DONE 成功之后（失败不阻断 DONE）。 */
+export function resolveJiraOnAcceptance(
+  projectId: string,
+  requirementId: string,
+  hours?: number,
+  comment?: string,
+): Promise<JiraResolveResult> {
+  return api.post<JiraResolveResult>(
+    `/projects/${projectId}/requirements/${requirementId}/jira/resolve`,
+    {
+      seconds: hours != null ? Math.round(hours * 3600) : undefined,
+      comment: comment || undefined,
+    },
+  )
 }
 
 // ---- CAP-47 自建需求手动推送到 Jira ----

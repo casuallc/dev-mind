@@ -71,6 +71,16 @@ export interface JiraTransitionResult {
   remoteStatus?: string
 }
 
+/** CAP-101：验收联动解决结果（transitioned=false = 无解决类转换被跳过，不算失败；
+ *  worklogError 非空 = 转换已成功但工时登记失败，部分成功） */
+export interface JiraResolveResult {
+  transitioned: boolean
+  transitionName?: string
+  remoteStatus?: string
+  loggedSeconds?: number
+  worklogError?: string
+}
+
 // ---- CAP-47 自建需求推送到 Jira ----
 
 // Jira 选项 / 创建字段元数据这几组类型同时被「个人 Jira 推送模板」面板（integrations 能力）使用，

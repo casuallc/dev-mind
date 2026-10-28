@@ -11,10 +11,13 @@ import type { ReactNode } from 'react'
 import {
   Button,
   Card,
+  Checkbox,
   Descriptions,
   Drawer,
   Dropdown,
   Empty,
+  Input,
+  InputNumber,
   Modal,
   Space,
   Spin,
@@ -47,6 +50,7 @@ import {
   listVerifyRuns,
   refreshRequirementFromJira,
   isUnfinishedWorkItemsConflict,
+  resolveJiraOnAcceptance,
   updateRequirementStatus,
 } from '../api'
 import JiraActions from '../components/JiraActions'
@@ -270,6 +274,9 @@ export default function RequirementDetailPage() {
 
   // 需求翻 DONE（终态）：验收通过（ACCEPTANCE 主按钮）与直接完成（伪需求/无需工作单元，不经 rollup）共用，仅文案不同
   // CAP-73 FR-07：验收弹窗展示最近一次 verify run 状态（仅提示不门禁）
+  // CAP-101：验收通过弹窗对 Jira 来源需求追加联动区（默认勾选「置为解决 + 登记工时」，
+  // 工时默认 = AI 实际耗时，与 JiraActions.openWorklog 同公式）；直接完成不联动。
+  // 勾选态先捕获进闭包对象，DONE 成功（含 force 二次确认路径）后再调 resolve——Jira 步失败不阻断验收。
   const confirmMarkDone = async (mode: 'accept' | 'direct') => {
     const direct = mode === 'direct'
     let verifyHint: ReactNode = null
@@ -287,6 +294,32 @@ export default function RequirementDetailPage() {
         </div>
       )
     }
+    const jiraSync = {
+      enabled: !direct && isJira,
+      hours: r.agentSeconds && r.agentSeconds > 0 ? Math.max(0.25, Math.round(r.agentSeconds / 900) / 4) : 1,
+      comment: '',
+    }
+    /** DONE 落定后的 Jira 联动（验收通过且勾选时）：失败仅 warning，提示「Jira 操作」手动补 */
+    const syncJiraAfterAccept = async () => {
+      if (!projectId || !jiraSync.enabled) return
+      try {
+        const res = await resolveJiraOnAcceptance(projectId, r.id, jiraSync.hours, jiraSync.comment)
+        const step = res.transitioned
+          ? `已执行解决转换「${res.transitionName}」`
+          : '无可用解决转换（issue 可能已是终态，跳过）'
+        const logged = res.loggedSeconds ? `，已登记工时 ${jiraSync.hours}h` : ''
+        if (res.worklogError) {
+          message.warning(`${r.externalKey} ${step}，但工时登记失败：${res.worklogError}（可经「Jira 操作」手动补登）`)
+        } else {
+          message.success(`${r.externalKey} ${step}${logged}`)
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        message.warning(`需求已 DONE，但 Jira 联动失败：${msg}（可经「Jira 操作」手动处理）`)
+      } finally {
+        reloadOverview() // 托管字段（remoteStatus/spentSeconds）可能已刷新
+      }
+    }
     Modal.confirm({
       centered: true,
       title: direct ? '直接完成需求？' : '验收通过？',
@@ -296,6 +329,35 @@ export default function RequirementDetailPage() {
             ? `「${r.code} ${r.title}」将不经过工作单元直接标记为 DONE，适用于伪需求/无需开发处理的条目。`
             : `「${r.code} ${r.title}」将标记为 DONE，工作单元与关联记录保留。`}
           {verifyHint}
+          {!direct && isJira && (
+            <div style={{ marginTop: 12, borderTop: '1px solid #f0f0f0', paddingTop: 10 }}>
+              <Checkbox
+                defaultChecked
+                onChange={(e) => { jiraSync.enabled = e.target.checked }}
+              >
+                同步 Jira <Typography.Text code>{r.externalKey}</Typography.Text>：置为解决并登记工时
+              </Checkbox>
+              <div style={{ marginTop: 8, paddingLeft: 24 }}>
+                工时（小时）{' '}
+                <InputNumber
+                  min={0.25}
+                  step={0.25}
+                  defaultValue={jiraSync.hours}
+                  onChange={(v) => { jiraSync.hours = v ?? 0.25 }}
+                  style={{ width: 110 }}
+                />
+                {r.agentSeconds ? (
+                  <span style={{ color: '#888', marginLeft: 8 }}>默认 = AI 实际耗时</span>
+                ) : null}
+              </div>
+              <Input
+                placeholder="工时备注（可选，写入 Jira worklog comment）"
+                maxLength={200}
+                onChange={(e) => { jiraSync.comment = e.target.value }}
+                style={{ marginTop: 8, marginLeft: 24, width: 'calc(100% - 24px)' }}
+              />
+            </div>
+          )}
         </div>
       ),
       okText: direct ? '直接完成' : '验收通过',
@@ -306,6 +368,7 @@ export default function RequirementDetailPage() {
           await updateRequirementStatus(projectId, r.id, 'DONE')
           message.success(`${r.code} → DONE`)
           reloadAll()
+          await syncJiraAfterAccept()
         } catch (e) {
           // 存在未完结工作单元被后端拦下（409）→ 二次确认强制完成
           if (isUnfinishedWorkItemsConflict(e)) {
@@ -321,6 +384,7 @@ export default function RequirementDetailPage() {
                   await updateRequirementStatus(projectId, r.id, 'DONE', true)
                   message.success(`${r.code} → DONE（强制）`)
                   reloadAll()
+                  await syncJiraAfterAccept()
                 } catch (e2) {
                   showError(e2)
                 }
