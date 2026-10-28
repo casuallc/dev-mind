@@ -11,6 +11,25 @@ import java.util.Optional;
  * 可用 {@link #vectorAvailable()} 探测以便 UI 明示降级。</p>
  */
 public interface KnowledgeRetriever {
+    default void validateQuestionContext(KnowledgeScope.Environment environment,String question) {
+        if(environment!=null)throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.CONFLICT,"检索适配器尚未支持问题环境校验");
+    }
+
+    default void requireModelProcessing(String actor, List<Long> kbIds, List<Long> entryIds, Long endpointId,
+                                        KnowledgeProcessingPolicy.Purpose purpose) {
+        throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.FORBIDDEN,"知识模型处理边界尚未适配");
+    }
+
+    /** Mandatory reauthorization for persisted chat evidence. Older adapters fail closed. */
+    default void requireRead(String actor, List<Long> kbIds, List<Long> entryIds) {
+        throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.FORBIDDEN, "知识访问校验尚未适配");
+    }
+
+    /** False until an adapter explicitly supports isolated delivery and revocable receiver leases. */
+    default boolean canMaterialize(String actor, List<Long> kbIds) { return false; }
 
     /** 是否走向量检索（embedding 已配置）；false = 实现内部降级 LIKE */
     boolean vectorAvailable();
@@ -30,6 +49,10 @@ public interface KnowledgeRetriever {
      * @param entryNames 库内 active 条目名（创建时间倒序，实现侧截断上限）
      */
     Optional<KbOverview> overview(long kbId);
+    /** Model system prompts retain only base-policy metadata, not untracked mutable document titles. */
+    default Optional<KbOverview> overviewForModel(long kbId) {
+        return overview(kbId).map(b->new KbOverview(b.name(),b.description(),List.of()));
+    }
 
     /**
      * CAP-48 FR-06：带降级原因的检索。默认实现按 {@link #vectorAvailable()} 推断，
@@ -61,14 +84,21 @@ public interface KnowledgeRetriever {
         /** 端点维度与库内已建索引维度不一致：余弦恒 0，命中被阈值全部过滤 */
         DIMENSION_MISMATCH,
         /** 索引为空（DB 有文档但检索索引尚未建立/正在重建）：应提示重建而非「没有答案」 */
-        INDEX_EMPTY
+        INDEX_EMPTY,
+        NEEDS_CONTEXT,
+        NO_APPLICABLE_EVIDENCE,
+        EMBEDDING_MISMATCH,
+        PROCESSING_NOT_APPROVED
     }
 
     /**
      * @param vector         本次是否走了向量通道（false = LIKE 降级）
      * @param degradedReason 降级原因，供 UI 明示与「重建索引」入口判定
      */
-    record Detailed(List<RetrievedChunk> chunks, boolean vector, DegradedReason degradedReason) {
+    record Detailed(List<RetrievedChunk> chunks, boolean vector, DegradedReason degradedReason,int candidateCount) {
+        public Detailed(List<RetrievedChunk> chunks,boolean vector,DegradedReason reason) {
+            this(chunks,vector,reason,chunks==null?0:chunks.size());
+        }
     }
 
     /**
@@ -87,7 +117,13 @@ public interface KnowledgeRetriever {
      * @param snippet 纯文本摘要片段（不含高亮标签；由实现侧按 query 截取）
      */
     record RetrievedChunk(Long entryId, String entryName, Long kbId, Long chunkId, String sourceUri,
-                          String headingPath, String content, String snippet, double score) {
+                          String headingPath, String content, String snippet, double score,
+                          Long releaseId, String releaseLabel, String contentHash, String sourceClass) {
+
+        public RetrievedChunk(Long entryId, String entryName, Long kbId, Long chunkId, String sourceUri,
+                              String headingPath, String content, String snippet, double score) {
+            this(entryId,entryName,kbId,chunkId,sourceUri,headingPath,content,snippet,score,null,null,null,null);
+        }
 
         /** 兼容构造器：CAP-44 调用点（无分块定位信息）。 */
         public RetrievedChunk(Long entryId, String entryName, Long kbId, String content, double score) {
@@ -96,5 +132,12 @@ public interface KnowledgeRetriever {
     }
 
     record KbOverview(String name, String description, List<String> entryNames) {
+    }
+
+    default Detailed retrieveDetailed(List<Long> kbIds, String query, int topK, List<String> docTypes,
+                                      List<String> tags, KnowledgeScope.Environment environment, java.time.Instant asOf) {
+        if (environment != null || asOf != null) throw new com.devmind.common.exception.DevMindException(
+                com.devmind.common.exception.ErrorCode.CONFLICT, "检索适配器尚未支持适用环境");
+        return retrieveDetailed(kbIds,query,topK,docTypes,tags);
     }
 }
