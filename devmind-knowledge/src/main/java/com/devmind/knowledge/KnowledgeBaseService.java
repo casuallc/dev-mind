@@ -68,7 +68,6 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class KnowledgeBaseService {
-    private final com.devmind.knowledge.access.KnowledgeAccessService access;
 
     private static final Logger log = LoggerFactory.getLogger(KnowledgeBaseService.class);
 
@@ -98,9 +97,7 @@ public class KnowledgeBaseService {
                                 KnowledgeVersionService versionService,
                                 KnowledgeIndexService indexService,
                                 com.devmind.knowledge.retrieve.KnowledgeSearchService searchService,
-                                @Lazy AsyncTaskService taskService,
-                                com.devmind.knowledge.access.KnowledgeAccessService access) {
-        this.access = access;
+                                @Lazy AsyncTaskService taskService) {
         this.kbRepo = kbRepo;
         this.entryRepo = entryRepo;
         this.chunkRepo = chunkRepo;
@@ -119,9 +116,7 @@ public class KnowledgeBaseService {
     // ---------------- 知识库（CAP-44 FR-01/FR-07） ----------------
 
     public List<KnowledgeBaseView> listBases() {
-        var readable = new java.util.HashSet<>(access.readableBaseIds(null));
         return kbRepo.findAll().stream()
-                .filter(k -> readable.contains(k.getId()))
                 .sorted((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()))
                 .map(this::baseView).toList();
     }
@@ -134,7 +129,6 @@ public class KnowledgeBaseService {
     public KnowledgeBaseView createBase(KnowledgeBaseRequest req) {
         validateBase(req, true);
         KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
-        access.initializeBase(kb);
         applyBase(kb, req, true);
         Instant now = Instant.now();
         kb.setCreatedAt(now);
@@ -144,7 +138,6 @@ public class KnowledgeBaseService {
 
     @Transactional
     public KnowledgeBaseView updateBase(Long id, KnowledgeBaseRequest req) {
-        access.requireBase(id, com.devmind.common.knowledge.KnowledgeAccessPolicy.Action.EDIT);
         KnowledgeBaseEntity kb = requireBase(id);
         validateBase(req, false);
         applyBase(kb, req, false);
@@ -155,10 +148,7 @@ public class KnowledgeBaseService {
     /** 删除库：非空库需 force=true（级联删条目与分块）。 */
     @Transactional
     public void deleteBase(Long id, boolean force) {
-        access.requireBase(id, com.devmind.common.knowledge.KnowledgeAccessPolicy.Action.MANAGE_ACL);
         KnowledgeBaseEntity kb = requireBase(id);
-        access.requireEntries(access.actor(), entryRepo.findAccessRefsByKbIdIn(List.of(id)).stream()
-                .map(KnowledgeEntryRepository.AccessRef::getId).toList());
         List<KnowledgeEntryEntity> entries = entryRepo.findByKbIdOrderByCreatedAtDesc(id);
         if (!entries.isEmpty() && !force) {
             throw new DevMindException(ErrorCode.CONFLICT,
@@ -217,16 +207,8 @@ public class KnowledgeBaseService {
     }
 
     private KnowledgeBaseView baseView(KnowledgeBaseEntity kb) {
-        List<Long> ids = access.readableEntryIds(List.of(kb.getId()));
-        return EntryViews.base(kb, ids.size(),
-                ids.isEmpty() ? 0 : chunkRepo.countByEntryIdIn(ids), endpointNameOf(kb),
-                ids.size() == entryRepo.countByKbId(kb.getId()) ? indexStatsOf(kb)
-                        : new KnowledgeBaseView.IndexStats(
-                            ids.isEmpty() ? 0 : entryRepo.countByIdInAndIndexStatus(ids, "ready"),
-                            ids.isEmpty() ? 0 : entryRepo.countByIdInAndIndexStatus(ids, "pending"),
-                            ids.isEmpty() ? 0 : entryRepo.countByIdInAndIndexStatus(ids, "failed"),
-                            ids.isEmpty() ? 0 : entryRepo.countByIdInAndIndexStatus(ids, "disabled"), 0),
-                access.effectiveActions(kb.getId()));
+        return EntryViews.base(kb, entryRepo.countByKbId(kb.getId()),
+                chunkRepo.countByKbId(kb.getId()), endpointNameOf(kb), indexStatsOf(kb));
     }
 
     /** 实际生效的端点名（含回落平台默认的结果）；无可用端点 → null，UI 据此显示"未配置向量端点" */
@@ -281,9 +263,6 @@ public class KnowledgeBaseService {
      */
     @Transactional
     public ReindexResult reindexBase(Long id, boolean onlyMismatched) {
-        access.requireBase(id, com.devmind.common.knowledge.KnowledgeAccessPolicy.Action.EDIT);
-        access.requireEntries(access.actor(), entryRepo.findAccessRefsByKbIdIn(List.of(id)).stream()
-                .map(KnowledgeEntryRepository.AccessRef::getId).toList());
         KnowledgeBaseEntity kb = requireBase(id);
         if (!onlyMismatched) {
             long total = entryRepo.countByKbId(id);
@@ -333,7 +312,6 @@ public class KnowledgeBaseService {
     }
 
     private KnowledgeBaseEntity requireBase(Long id) {
-        access.requireBase(id, com.devmind.common.knowledge.KnowledgeAccessPolicy.Action.READ);
         return kbRepo.findById(id)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "知识库不存在: " + id));
     }
@@ -341,11 +319,11 @@ public class KnowledgeBaseService {
     // ---------------- 条目（FR-02/FR-03，CAP-44 按库归属） ----------------
 
     public List<EntryView> list(String status) {
-        List<Long> readable = access.readableEntryIds(null);
-        List<KnowledgeEntryEntity> list = readable.isEmpty() ? List.of() : entryRepo.findAllById(readable);
+        List<KnowledgeEntryEntity> list = (status != null && !status.isBlank())
+                ? entryRepo.findByStatusOrderByCreatedAtDesc(status)
+                : entryRepo.findAll();
         Map<Long, KnowledgeBaseEntity> kbMap = kbMap();
         return list.stream()
-                .filter(e -> status == null || status.isBlank() || status.equals(e.getStatus()))
                 .sorted((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()))
                 .map(e -> EntryViews.entry(e, kbMap.get(e.getKbId())))
                 .toList();
@@ -354,8 +332,7 @@ public class KnowledgeBaseService {
     /** 库内条目列表（CAP-44 FR-07）。保留给全量导出/脚本，新界面用 {@link #pageByBase}。 */
     public List<EntryView> listByBase(Long kbId) {
         KnowledgeBaseEntity kb = requireBase(kbId);
-        List<Long> readable = access.readableEntryIds(List.of(kbId));
-        return (readable.isEmpty() ? List.<KnowledgeEntryEntity>of() : entryRepo.findAllById(readable)).stream()
+        return entryRepo.findByKbIdOrderByCreatedAtDesc(kbId).stream()
                 .map(e -> EntryViews.entry(e, kb)).toList();
     }
 
@@ -366,12 +343,10 @@ public class KnowledgeBaseService {
         requireBase(kbId);
         int safePage = Math.max(0, page);
         int safeSize = Math.min(Math.max(1, size), 100);
-        List<Long> readable = access.readableEntryIds(List.of(kbId));
-        if (readable.isEmpty()) return new PageView<>(List.of(), 0, safePage, safeSize);
         Page<KnowledgeEntryRepository.EntrySummaryRef> result = entryRepo.pageSummariesByBase(
                 kbId, blankToNull(keyword), blankToNull(docType), blankToNull(source),
                 blankToNull(indexStatus), blankToNull(status),
-                readable, PageRequest.of(safePage, safeSize));
+                PageRequest.of(safePage, safeSize));
         List<EntrySummaryView> items = result.getContent().stream()
                 .map(r -> new EntrySummaryView(
                         r.getId(), r.getKbId(), r.getName(), r.getDocType(),
@@ -391,7 +366,6 @@ public class KnowledgeBaseService {
     @Transactional
     public EntryView createEntry(EntryRequest req) {
         KnowledgeBaseEntity kb = resolveTargetKb(req);
-        access.requireBase(kb.getId(), com.devmind.common.knowledge.KnowledgeAccessPolicy.Action.EDIT);
         validateEntry(req, kb);
         KnowledgeEntryEntity e = new KnowledgeEntryEntity();
         e.setKbId(kb.getId());
@@ -410,7 +384,6 @@ public class KnowledgeBaseService {
 
     @Transactional
     public EntryView updateEntry(Long id, EntryRequest req) {
-        access.requireEntry(id, com.devmind.common.knowledge.KnowledgeAccessPolicy.Action.EDIT);
         KnowledgeEntryEntity e = requireEntry(id);
         KnowledgeBaseEntity kb = e.getKbId() == null ? resolveTargetKb(req) : requireBase(e.getKbId());
         boolean contentChanged = req.contentMd() != null && !req.contentMd().equals(e.getContentMd());
@@ -439,7 +412,6 @@ public class KnowledgeBaseService {
 
     @Transactional
     public void deleteEntry(Long id) {
-        access.requireEntry(id, com.devmind.common.knowledge.KnowledgeAccessPolicy.Action.EDIT);
         KnowledgeEntryEntity e = requireEntry(id);
         chunkRepo.deleteByEntryId(id);
         versionService.deleteAll(id);
@@ -488,7 +460,6 @@ public class KnowledgeBaseService {
     /** CAP-85 FR-29：人工复核。只写复核时间，不动 updatedAt（避免把老化计时重置成"刚更新"）。 */
     @Transactional
     public EntryView review(Long id) {
-        access.requireEntry(id, com.devmind.common.knowledge.KnowledgeAccessPolicy.Action.EDIT);
         KnowledgeEntryEntity e = requireEntry(id);
         e.setLastReviewedAt(Instant.now());
         e = entryRepo.save(e);
@@ -498,7 +469,6 @@ public class KnowledgeBaseService {
     /** 索引重试（CAP-44 FR-04）：重置 pending 并触发异步重索引。 */
     @Transactional
     public EntryView reindex(Long id) {
-        access.requireEntry(id, com.devmind.common.knowledge.KnowledgeAccessPolicy.Action.EDIT);
         KnowledgeEntryEntity e = requireEntry(id);
         e.setIndexStatus(KnowledgeEntryEntity.INDEX_PENDING);
         e.setIndexError(null);
@@ -551,7 +521,7 @@ public class KnowledgeBaseService {
 
     private static final Set<String> DOC_TYPES = Set.of(
             KnowledgeEntryEntity.DOC_TECH, KnowledgeEntryEntity.DOC_MAINT,
-            KnowledgeEntryEntity.DOC_FAQ, KnowledgeEntryEntity.DOC_ARTIFACT, "ARCHITECTURE", "TEST", "BID");
+            KnowledgeEntryEntity.DOC_FAQ, KnowledgeEntryEntity.DOC_ARTIFACT);
 
     /** CAP-85 FR-28：显式传入且值确有变化 = 人工修正（空串/空列表也算显式清除）。 */
     private static boolean metadataChanged(EntryRequest req, KnowledgeEntryEntity e) {
@@ -614,7 +584,8 @@ public class KnowledgeBaseService {
         if (q == null || q.isBlank()) {
             return List.of();
         }
-        List<Long> kbIds = access.readableBaseIds(null);
+        List<Long> kbIds = kbRepo.findByStatusOrderByCreatedAtDesc(KnowledgeBaseEntity.STATUS_ACTIVE)
+                .stream().map(KnowledgeBaseEntity::getId).toList();
         if (kbIds.isEmpty()) {
             return List.of();
         }
@@ -625,7 +596,6 @@ public class KnowledgeBaseService {
         Map<Long, KnowledgeBaseEntity> kbMap = kbMap();
         Map<Long, EntryView> views = new HashMap<>();
         for (KnowledgeEntryEntity e : entryRepo.findAllById(orderedIds)) {
-            if (!access.readableEntryIds(List.of(e.getKbId())).contains(e.getId())) continue;
             views.put(e.getId(), EntryViews.entry(e, kbMap.get(e.getKbId())));
         }
         List<EntryView> out = new ArrayList<>(orderedIds.size());
@@ -646,7 +616,7 @@ public class KnowledgeBaseService {
         if (kbIds == null || kbIds.isEmpty()) {
             return names;
         }
-        for (KnowledgeBaseEntity kb : kbRepo.findAllById(access.readableBaseIds(kbIds))) {
+        for (KnowledgeBaseEntity kb : kbRepo.findAllById(kbIds)) {
             names.put(kb.getId(), kb.getName());
         }
         return names;
@@ -666,10 +636,6 @@ public class KnowledgeBaseService {
         }
     }
 
-    public boolean canMaterializeKnowledge(Collection<Long> entryIds) {
-        return access.canMaterializeForRunner(entryIds);
-    }
-
     // ---------------- 提案（FR-05/FR-06） ----------------
 
     public List<ProposalView> listProposals(String status) {
@@ -678,9 +644,7 @@ public class KnowledgeBaseService {
                 : proposalRepo.findByStatusOrderByCreatedAtDesc(status);
         Map<Long, String> kbNames = baseNames(list.stream()
                 .map(KnowledgeProposalEntity::getAdoptedKbId).filter(Objects::nonNull).toList());
-        String actor = access.actor();
-        return list.stream().filter(p -> actor.equals(p.getCreatedBy()))
-                .map(p -> EntryViews.proposal(p, kbNames)).toList();
+        return list.stream().map(p -> EntryViews.proposal(p, kbNames)).toList();
     }
 
     @Transactional
@@ -692,7 +656,6 @@ public class KnowledgeBaseService {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "提案内容必填");
         }
         KnowledgeProposalEntity p = new KnowledgeProposalEntity();
-        p.setCreatedBy(access.actor());
         p.setTitle(req.title());
         p.setContentMd(req.contentMd());
         p.setSourceSessionId(req.sourceSessionId());
@@ -700,17 +663,22 @@ public class KnowledgeBaseService {
         p.setStatus("open");
         p.setCreatedAt(Instant.now());
         p = proposalRepo.save(p);
-        // CAP-95: no broadcast of a private proposal title to unspecified recipients.
+        // P2 通知：静默进中心（FR-05 不打扰）
+        try {
+            notificationPublisher.publish(NotificationEvent.of(
+                    "KNOWLEDGE_PROPOSAL",
+                    req.sourceSessionId() == null ? "-" : req.sourceSessionId(),
+                    "有新的经验提案", req.title()));
+        } catch (Exception e) {
+            log.warn("提案通知发送失败: {}", e.getMessage());
+        }
         return EntryViews.proposal(p, null);
     }
 
     /** 采纳（CAP-94）：显式指定目标库 targetKbId（必选；不存在 404 / 已归档 409）。 */
     @Transactional
     public ProposalView adopt(Long id, Long targetKbId) {
-        access.requireBase(targetKbId, com.devmind.common.knowledge.KnowledgeAccessPolicy.Action.EDIT);
         KnowledgeProposalEntity p = requireProposal(id);
-        if(p.getSourceSessionId()!=null && !p.getSourceSessionId().isBlank())
-            throw new DevMindException(ErrorCode.CONFLICT,"此生成提案的会话来源尚未完成核验，不能作为独立本地资料采纳");
         if (!"open".equals(p.getStatus())) {
             throw new DevMindException(ErrorCode.CONFLICT, "提案已处理（" + p.getStatus() + "）");
         }
@@ -778,14 +746,12 @@ public class KnowledgeBaseService {
     }
 
     private KnowledgeEntryEntity requireEntry(Long id) {
-        access.requireEntry(id, com.devmind.common.knowledge.KnowledgeAccessPolicy.Action.READ);
         return entryRepo.findById(id)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "条目不存在: " + id));
     }
 
     private KnowledgeProposalEntity requireProposal(Long id) {
-        String actor = access.actor();
-        return proposalRepo.findById(id).filter(p -> actor.equals(p.getCreatedBy()))
+        return proposalRepo.findById(id)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "提案不存在: " + id));
     }
 }

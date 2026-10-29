@@ -29,8 +29,7 @@ public record KnowledgeBaseView(
         long chunkCount,
         IndexStats indexStats,
         Instant createdAt,
-        Instant updatedAt,
-        java.util.List<com.devmind.common.knowledge.KnowledgeAccessPolicy.Action> effectiveActions) {
+        Instant updatedAt) {
 
     /**
      * 索引健康度：条目的索引状态分布 + 失配数。
