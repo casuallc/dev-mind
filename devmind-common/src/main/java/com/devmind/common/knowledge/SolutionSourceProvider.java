@@ -31,19 +31,10 @@ public interface SolutionSourceProvider {
      */
     record SolutionSource(String chatId, String title, String question, String answer,
                           String model, String mode, Instant generatedAt,
-                          List<String> knowledgeBaseNames, List<Evidence> evidence,
-                          String completeness,List<Evidence> dependencies) {
-        public SolutionSource(String chatId,String title,String question,String answer,String model,String mode,
-                              Instant generatedAt,List<String> knowledgeBaseNames,List<Evidence> evidence) {
-            this(chatId,title,question,answer,model,mode,generatedAt,knowledgeBaseNames,evidence,"UNKNOWN",List.of());
-        }
+                          List<String> knowledgeBaseNames, List<Evidence> evidence) {
 
         public record Evidence(int citationNo, Long entryId, Long kbId, String entryName,
-                               String sourceUri, Long chunkId, String snippet, Double score,
-                               Long releaseId,String contentHash) {
-            public Evidence(int citationNo,Long entryId,Long kbId,String entryName,String sourceUri,Long chunkId,String snippet,Double score) {
-                this(citationNo,entryId,kbId,entryName,sourceUri,chunkId,snippet,score,null,null);
-            }
+                               String sourceUri, Long chunkId, String snippet, Double score) {
         }
     }
 }
