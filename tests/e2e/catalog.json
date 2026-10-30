@@ -80,6 +80,13 @@
       "suite": "regression",
       "owner": "auth",
       "cap": "CAP-102"
+    },
+    {
+      "id": "regression.fine-grained-permissions",
+      "test": "Regression.test_fine_grained_menu_tab_action_permissions",
+      "suite": "regression",
+      "owner": "auth",
+      "cap": "CAP-103"
     }
   ]
 }

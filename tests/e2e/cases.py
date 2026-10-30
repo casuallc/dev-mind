@@ -54,12 +54,17 @@ class Regression(unittest.TestCase):
         client.request("GET", "/auth/menus/catalog", expected=403)
         client.request("PUT", "/auth/menus/grants", {"role": "VIEWER", "menuKeys": []}, expected=403)
 
-        updated = [k for k in original if k not in ("top.home", "project.tests")]
+        # 子节点授权隐含祖先（CAP-103），撤下父节点必须先撤掉其全部后代
+        updated = [k for k in original
+                   if k != "top.home" and not k.startswith("top.home.")
+                   and k != "project.tests" and not k.startswith("project.tests.")]
         updated.append("admin.dashboard")
         self.api.request("PUT", "/auth/menus/grants", {"role": "DEVELOPER", "menuKeys": updated})
         after = {m["menuKey"] for m in client.request("GET", "/auth/menus")["items"]}
         self.assertNotIn("top.home", after)
+        self.assertNotIn("top.home.tab.overview", after)
         self.assertNotIn("project.tests", after)
+        self.assertNotIn("project.tests.tab.suites", after)
         self.assertIn("admin.dashboard", after)
         self.assertIn("admin.dashboard",
                       self.api.request("GET", "/auth/menus/grants")["grants"]["DEVELOPER"])
@@ -144,6 +149,50 @@ class Regression(unittest.TestCase):
 
         self.api.request("PUT", "/auth/roles/ADMIN", {"name": "x"}, expected=400)
         self.api.request("DELETE", "/auth/roles/ADMIN", expected=400)
+
+    def test_fine_grained_menu_tab_action_permissions(self):
+        from support import Api
+        catalog = {item["menuKey"]: item for item in self.api.request("GET", "/auth/menus/catalog")}
+        self.assertEqual("MENU", catalog["top.bookmarks"]["nodeType"])
+        self.assertEqual("TAB", catalog["top.bookmarks.tab.tags"]["nodeType"])
+        self.assertEqual("top.bookmarks", catalog["top.bookmarks.tab.tags"]["parentKey"])
+        self.assertEqual("ACTION", catalog["top.bookmarks.action.manage-bookmark"]["nodeType"])
+        self.assertTrue(catalog["top.bookmarks.action.manage-bookmark"]["writeAction"])
+
+        code = "E2E_" + uuid.uuid4().hex[:8].upper()
+        role = self.api.request("POST", "/auth/roles", {"code": code.lower(), "name": "E2E 细粒度权限",
+                                                       "baseRole": "DEVELOPER"})
+        self.addCleanup(self._ensure_role_absent, code)
+        self.assertEqual("DEVELOPER", role["baseRole"])
+        username = "e2e-perm-" + uuid.uuid4().hex[:10]
+        password = "e2e-" + uuid.uuid4().hex
+        self.api.request("POST", "/auth/users", {"username": username, "password": password, "role": code})
+        self.addCleanup(self._ensure_user_absent, username)
+        client = Api(self.api.base)
+        client.login(username, password)
+
+        # 只授予一个页签：祖先菜单自动补齐，兄弟页签与按钮均不可见
+        self.api.request("PUT", "/auth/menus/grants",
+                         {"role": code, "menuKeys": ["top.bookmarks.tab.tags"]})
+        visible = {m["menuKey"]: m for m in client.request("GET", "/auth/menus")["items"]}
+        self.assertEqual({"top.bookmarks", "top.bookmarks.tab.tags"}, set(visible))
+        self.assertEqual("TAB", visible["top.bookmarks.tab.tags"]["nodeType"])
+        self.assertNotIn("top.bookmarks.tab.shares", visible)
+        self.assertNotIn("top.bookmarks.action.manage-bookmark", visible)
+
+        # 未授予按钮权限：写接口被后端拦截
+        client.request("POST", "/bookmark-groups", {"name": "e2e-denied"}, expected=403)
+        client.request("POST", "/bookmark-tags", {"name": "e2e-denied"}, expected=403)
+
+        # 授予 manage-group 后通过权限层（空体落到参数校验 400），兄弟按钮仍被拦截
+        self.api.request("PUT", "/auth/menus/grants",
+                         {"role": code, "menuKeys": ["top.bookmarks.tab.tags",
+                                                     "top.bookmarks.action.manage-group"]})
+        visible = {m["menuKey"] for m in client.request("GET", "/auth/menus")["items"]}
+        self.assertEqual({"top.bookmarks", "top.bookmarks.tab.tags",
+                          "top.bookmarks.action.manage-group"}, visible)
+        client.request("POST", "/bookmark-groups", {}, expected=400)
+        client.request("POST", "/bookmark-tags", {"name": "e2e-denied"}, expected=403)
 
     def test_project_lifecycle(self):
         path = self.workspace / ("project-" + uuid.uuid4().hex)
