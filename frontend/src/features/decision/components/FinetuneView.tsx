@@ -36,6 +36,7 @@ import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import FitTable from '../../../shared/components/FitTable'
+import { usePermissions } from '../../auth/usePermissions'
 import LabLogDrawer from './LabLogDrawer'
 import { ReportStatusTag, RunStatusTag, runActive } from './labCommon'
 import {
@@ -85,6 +86,8 @@ function Headline({ h }: { h: Record<string, number | null> }) {
 }
 
 export default function FinetuneView({ refreshTick = 0, createTick = 0 }: { refreshTick?: number; createTick?: number }) {
+  const { canAction } = usePermissions()
+  const canManageFinetune = canAction('admin.laya-lab.action.manage-finetune')
   const [rows, setRows] = useState<FinetuneView[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
@@ -217,16 +220,18 @@ export default function FinetuneView({ refreshTick = 0, createTick = 0 }: { refr
           <Button type="link" onClick={() => setLogRow(r)}>
             日志
           </Button>
-          <Popconfirm
-            title="删除这次微调任务？"
-            description="删除的是任务记录与报告；节点上的权重目录不会被删。运行中的不可删。"
-            onConfirm={() => onDelete(r.id)}
-            disabled={r.status === 'RUNNING'}
-          >
-            <TipButton type="link" danger tip={r.status === 'RUNNING' ? '运行中不可删除' : undefined} disabled={r.status === 'RUNNING'}>
-              删除
-            </TipButton>
-          </Popconfirm>
+          {canManageFinetune && (
+            <Popconfirm
+              title="删除这次微调任务？"
+              description="删除的是任务记录与报告；节点上的权重目录不会被删。运行中的不可删。"
+              onConfirm={() => onDelete(r.id)}
+              disabled={r.status === 'RUNNING'}
+            >
+              <TipButton type="link" danger tip={r.status === 'RUNNING' ? '运行中不可删除' : undefined} disabled={r.status === 'RUNNING'}>
+                删除
+              </TipButton>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },

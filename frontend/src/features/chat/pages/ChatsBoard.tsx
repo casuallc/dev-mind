@@ -3,7 +3,7 @@
 // CAP-46：?kbId=<id> 跳入（知识库详情「发起会话」）→ 新问答草稿预选该库；绑库问答标题区显示库名标签。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Alert, Badge, Button, Card, Input, Modal, Segmented, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Alert, Badge, Button, Card, Empty, Input, Modal, Segmented, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   CaretRightOutlined,
@@ -28,6 +28,7 @@ import type { KnowledgeBase } from '../../knowledge/types'
 import { listProjects } from '../../projects/api'
 import type { Project } from '../../projects/types'
 import { isAdmin } from '../../auth/authStore'
+import { usePermissions, usePermittedView } from '../../auth/usePermissions'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
@@ -42,6 +43,14 @@ function sortForBoard(list: ChatSummary[]): ChatSummary[] {
   })
 }
 
+const CHAT_VIEWS = ['chat', 'list'] as const
+type ChatView = (typeof CHAT_VIEWS)[number]
+const CHAT_VIEW_PERMISSIONS: Record<ChatView, string> = {
+  chat: 'top.chats.tab.chat',
+  list: 'top.chats.tab.list',
+}
+const CHAT_VIEW_LABELS: Record<ChatView, string> = { chat: '对话', list: '列表' }
+
 export default function ChatsBoard() {
   const [chats, setChats] = useState<ChatSummary[]>([])
   const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
@@ -49,6 +58,12 @@ export default function ChatsBoard() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(false)
   const [view, setView] = useState<string>('chat') // chat | list
+  const views = usePermittedView(
+    CHAT_VIEWS,
+    (v) => CHAT_VIEW_PERMISSIONS[v],
+    (CHAT_VIEWS as readonly string[]).includes(view) ? (view as ChatView) : 'chat',
+    setView,
+  )
   const [status, setStatus] = useState('ALL')
   const [keyword, setKeyword] = useState('')
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
@@ -68,6 +83,10 @@ export default function ChatsBoard() {
   const [savingSolution, setSavingSolution] = useState(false)
   const autoPickedRef = useRef(false)
   const [searchParams, setSearchParams] = useSearchParams()
+  const { canAction } = usePermissions()
+  const canCreate = canAction('top.chats.action.create')
+  const canManage = canAction('top.chats.action.manage')
+  const canSaveSolution = canAction('top.chats.action.save-solution')
 
   const load = useCallback(async () => {
     try {
@@ -104,10 +123,12 @@ export default function ChatsBoard() {
     const kb = Number(searchParams.get('kbId'))
     if (!Number.isFinite(kb) || kb <= 0) return
     setView('chat')
-    setDraftKbId(kb)
-    setDraft(true)
+    if (canCreate) {
+      setDraftKbId(kb)
+      setDraft(true)
+    }
     setSearchParams({}, { replace: true })
-  }, [searchParams, setSearchParams])
+  }, [searchParams, setSearchParams, canCreate])
 
   // 深链 ?cid=<id>（用量请求日志等入口，对齐 /sessions?sid= 先例）：
   // 列表加载后选中目标问答并清参数（防粘性选中；目标不在列表时由消失兜底清选中态）
@@ -126,8 +147,8 @@ export default function ChatsBoard() {
     if (autoPickedRef.current || loading || searchParams.get('cid')) return
     autoPickedRef.current = true
     if (chats.length > 0) setSelectedId(sortForBoard(chats)[0].id)
-    else setDraft(true)
-  }, [chats, loading, searchParams])
+    else if (canCreate) setDraft(true)
+  }, [chats, loading, searchParams, canCreate])
 
   // 草稿创建成功后：先等列表刷新拿到新问答行，再选中——否则「消失兜底」effect 会误清新 id
   const onDraftCreated = useCallback(
@@ -360,9 +381,11 @@ export default function ChatsBoard() {
           >
             对话
           </Button>
-          <Button size="small" danger onClick={() => confirmDelete(r)}>
-            删除
-          </Button>
+          {canManage && (
+            <Button size="small" danger onClick={() => confirmDelete(r)}>
+              删除
+            </Button>
+          )}
         </Space>
       ),
     },
@@ -388,10 +411,7 @@ export default function ChatsBoard() {
           <Segmented
             value={view}
             onChange={setView}
-            options={[
-              { value: 'chat', label: '对话' },
-              { value: 'list', label: '列表' },
-            ]}
+            options={views.map((v) => ({ value: v, label: CHAT_VIEW_LABELS[v] }))}
           />
         </Space>
       }
@@ -486,22 +506,22 @@ export default function ChatsBoard() {
                   />
                 </Space>
                 <Space size={4} wrap>
-                  {canSuspend && (
+                  {canManage && canSuspend && (
                     <Button size="small" icon={<StopOutlined />} onClick={onFinish}>
                       结束
                     </Button>
                   )}
-                  {canSuspend && (
+                  {canManage && canSuspend && (
                     <Button size="small" icon={<PauseOutlined />} onClick={onSuspend}>
                       挂起
                     </Button>
                   )}
-                  {canResume && (
+                  {canManage && canResume && (
                     <Button size="small" icon={<CaretRightOutlined />} onClick={onResume}>
                       {current.state === 'SUSPENDED' ? '恢复' : '继续对话'}
                     </Button>
                   )}
-                  {current.knowledgeMode === 'SOLUTION' && (
+                  {canSaveSolution && current.knowledgeMode === 'SOLUTION' && (
                     <Button
                       size="small"
                       icon={<FileAddOutlined />}
@@ -512,14 +532,16 @@ export default function ChatsBoard() {
                       沉淀为文档
                     </Button>
                   )}
-                  {canSuspend && (
+                  {canManage && canSuspend && (
                     <Button size="small" danger icon={<StopOutlined />} onClick={onKill}>
                       终止
                     </Button>
                   )}
-                  <Button size="small" danger icon={<DeleteOutlined />} onClick={() => confirmDelete(current)}>
-                    删除
-                  </Button>
+                  {canManage && (
+                    <Button size="small" danger icon={<DeleteOutlined />} onClick={() => confirmDelete(current)}>
+                      删除
+                    </Button>
+                  )}
                 </Space>
               </div>
               {degradedReason && (
@@ -552,8 +574,10 @@ export default function ChatsBoard() {
                 }
               />
             </>
-          ) : (
+          ) : canCreate ? (
             <NewChatDraft onCreated={onDraftCreated} />
+          ) : (
+            <Empty description="当前账号无新建问答权限" style={{ marginTop: 80 }} />
           )}
         </div>
       </div>

@@ -26,6 +26,7 @@ import FitTable from '../../../shared/components/FitTable'
 import { fmtTime } from '../../../shared/utils/format'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { showError } from '../../../shared/utils/showError'
+import { usePermissions } from '../../auth/usePermissions'
 
 /** 表格类视图：工具行固定、FitTable 撑满剩余高度 */
 const sectionFlexStyle = { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } as const
@@ -44,6 +45,8 @@ export default function KnowledgeEnrichView({
   const [limit, setLimit] = useState(100)
   const [enrichingId, setEnrichingId] = useState<number | null>(null)
   const [batchEnriching, setBatchEnriching] = useState(false)
+  const { canAction } = usePermissions()
+  const canEnrich = canAction('admin.knowledge-ops.action.enrich')
 
   const kbName = new Map<number, string>(bases.map((b) => [b.id, b.name]))
 
@@ -173,16 +176,20 @@ export default function KnowledgeEnrichView({
           '-'
         ),
     },
-    {
-      title: '操作',
-      key: 'action',
-      width: 90,
-      render: (_, r) => (
-        <Button size="small" loading={enrichingId === r.id} onClick={() => onEnrichEntry(r)}>
-          补全
-        </Button>
-      ),
-    },
+    ...(canEnrich
+      ? [
+          {
+            title: '操作',
+            key: 'action',
+            width: 90,
+            render: (_: unknown, r: EnrichEntry) => (
+              <Button size="small" loading={enrichingId === r.id} onClick={() => onEnrichEntry(r)}>
+                补全
+              </Button>
+            ),
+          } satisfies ColumnsType<EnrichEntry>[number],
+        ]
+      : []),
   ]
 
   return (
@@ -239,9 +246,11 @@ export default function KnowledgeEnrichView({
           addonAfter="条"
           style={{ width: 130 }}
         />
-        <Button type="primary" icon={<ThunderboltOutlined />} loading={batchEnriching} onClick={onBatchEnrich}>
-          立即增强
-        </Button>
+        {canEnrich && (
+          <Button type="primary" icon={<ThunderboltOutlined />} loading={batchEnriching} onClick={onBatchEnrich}>
+            立即增强
+          </Button>
+        )}
         <Button icon={<ReloadOutlined />} loading={loading} onClick={load}>
           刷新
         </Button>

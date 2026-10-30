@@ -9,6 +9,7 @@ import ProjectFormDrawer from '../../components/ProjectFormDrawer'
 import { useProject } from '../../hooks/useProject'
 import { fmtTime } from '../../../../shared/utils/format'
 import { pageCardBodyScrollStyle } from '../../../../shared/utils/pageLayout'
+import { usePermissions, usePermittedView } from '../../../auth/usePermissions'
 
 const SUB_TABS = [
   { key: 'repos', label: '仓库' },
@@ -19,6 +20,17 @@ const SUB_TABS = [
   { key: 'jira', label: 'Jira 同步' },
   { key: 'lock', label: '锁定' },
 ]
+const SUB_TAB_KEYS = SUB_TABS.map((t) => t.key)
+/** CAP-103 项目设置页签的权限节点（与后端权限目录一致） */
+const SUB_TAB_PERMISSIONS: Record<string, string> = {
+  repos: 'admin.projects.tab.settings-repos',
+  summary: 'admin.projects.tab.settings-summary',
+  environments: 'admin.projects.tab.settings-environments',
+  build: 'admin.projects.tab.settings-build',
+  release: 'admin.projects.tab.settings-release',
+  jira: 'admin.projects.tab.settings-jira',
+  lock: 'admin.projects.tab.settings-lock',
+}
 
 export default function ProjectSettingsLayout() {
   const { id } = useParams<{ id: string }>()
@@ -26,6 +38,14 @@ export default function ProjectSettingsLayout() {
   const location = useLocation()
   const { project, loading, reload } = useProject(id)
   const [editOpen, setEditOpen] = useState(false)
+  const { canAction } = usePermissions()
+
+  // /admin/projects/:id 会被 index 路由重定向到 repos，这里兜底保证高亮合法
+  const seg = location.pathname.split('/').pop() ?? ''
+  const activeKey = SUB_TABS.some((t) => t.key === seg) ? seg : 'repos'
+  const permittedTabs = usePermittedView(SUB_TAB_KEYS, (k) => SUB_TAB_PERMISSIONS[k], activeKey, (k) => {
+    if (id) navigate(`/admin/projects/${id}/${k}`, { replace: true })
+  })
 
   if (loading) {
     return <Card><Spin /></Card>
@@ -33,10 +53,6 @@ export default function ProjectSettingsLayout() {
   if (!project) {
     return <Card><Empty description="项目不存在" /></Card>
   }
-
-  // /admin/projects/:id 会被 index 路由重定向到 repos，这里兜底保证高亮合法
-  const seg = location.pathname.split('/').pop() ?? ''
-  const activeKey = SUB_TABS.some((t) => t.key === seg) ? seg : 'repos'
 
   return (
     // 根容器用 div flex 列而不是 antd Space：Space 会给每个子项套一层 .ant-space-item（不是 flex 项），
@@ -53,9 +69,11 @@ export default function ProjectSettingsLayout() {
         }
         extra={
           <Space>
-            <Button icon={<EditOutlined />} onClick={() => setEditOpen(true)}>
-              编辑基本信息
-            </Button>
+            {canAction('admin.projects.action.edit-project') && (
+              <Button icon={<EditOutlined />} onClick={() => setEditOpen(true)}>
+                编辑基本信息
+              </Button>
+            )}
             <Button icon={<ReloadOutlined />} onClick={reload}>
               刷新
             </Button>
@@ -95,7 +113,7 @@ export default function ProjectSettingsLayout() {
         <Tabs
           activeKey={activeKey}
           onChange={(k) => navigate(`/admin/projects/${project.id}/${k}`)}
-          items={SUB_TABS}
+          items={SUB_TABS.filter((t) => permittedTabs.includes(t.key))}
         />
         <Outlet context={{ reloadProject: reload }} />
       </Card>

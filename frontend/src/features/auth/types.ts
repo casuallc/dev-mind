@@ -18,7 +18,7 @@ export interface LoginResponse {
   user: AuthUser
 }
 
-/** CAP-61 菜单项（目录由后端代码登记，前端只按下发清单渲染） */
+/** CAP-61 菜单项（目录由后端代码登记，前端只按下发清单渲染）；CAP-103 扩展为 MENU/TAB/ACTION 三级 */
 export interface MenuItem {
   menuKey: string
   title: string
@@ -28,6 +28,12 @@ export interface MenuItem {
   icon?: string | null
   sortNo: number
   retired: boolean
+  /** 节点类型：MENU 导航菜单 / TAB 页面页签 / ACTION 操作按钮 */
+  nodeType: 'MENU' | 'TAB' | 'ACTION' | string
+  /** 页签/按钮所属菜单或页签的权限编码；菜单为 null */
+  parentKey?: string | null
+  /** ACTION 是否为写操作（VIEWER 基础角色不可用） */
+  writeAction: boolean
 }
 
 /** 可管理角色：baseRole 决定接口读写级别，menuKeys 决定可见菜单 */

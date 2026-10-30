@@ -14,6 +14,7 @@ import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import LayaViewSwitch from '../../laya/components/LayaViewSwitch'
+import { usePermissions } from '../../auth/usePermissions'
 
 /** 人工动作 → 中文（后端给的是机器值 adopt:global / adopt:project / reject） */
 const ACTION_LABEL: Record<string, string> = {
@@ -46,6 +47,8 @@ function confidenceTag(a: DecisionAnswer | undefined) {
 }
 
 export default function DecisionRecordsPage() {
+  const { canAction } = usePermissions()
+  const canExportTrainingSet = canAction('admin.laya-records.action.export-training-set')
   // 支持 ?capability=xxx 直达（试分类结果面板的「到决策记录页查证」链接，CAP-57）
   const [searchParams] = useSearchParams()
   const [rows, setRows] = useState<DecisionRecord[]>([])
@@ -184,9 +187,11 @@ export default function DecisionRecordsPage() {
           <Button icon={<ReloadOutlined />} onClick={load}>
             刷新
           </Button>
-          <Button type="primary" icon={<DownloadOutlined />} loading={exporting} onClick={onExport}>
-            导出训练集
-          </Button>
+          {canExportTrainingSet && (
+            <Button type="primary" icon={<DownloadOutlined />} loading={exporting} onClick={onExport}>
+              导出训练集
+            </Button>
+          )}
         </Space>
       }
     >

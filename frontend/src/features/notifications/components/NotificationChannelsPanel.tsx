@@ -6,6 +6,7 @@ import { Button, Form, Input, Select, Spin, Switch, Typography, message } from '
 import { useCallback, useEffect, useImperativeHandle, useState, type Ref } from 'react'
 import { emitTest, listChannels, updateChannel } from '../api'
 import { type NotificationChannel, type NotificationLevel } from '../types'
+import { usePermissions } from '../../auth/usePermissions'
 import { showError } from '../../../shared/utils/showError'
 
 /** 页面壳（AdminNotificationsPage）工具栏在 Card extra，靠该句柄触发刷新 / 保存 */
@@ -52,6 +53,8 @@ export default function NotificationChannelsPanel({ ref }: { ref?: Ref<Notificat
   const [testing, setTesting] = useState(false)
   // 通道元数据（id/code/name）与表单无关，渲染数据源
   const [channels, setChannels] = useState<NotificationChannel[]>([])
+  const { canAction } = usePermissions()
+  const canTest = canAction('admin.notifications.action.test-channel')
 
   const reload = useCallback(() => {
     setLoading(true)
@@ -163,9 +166,11 @@ export default function NotificationChannelsPanel({ ref }: { ref?: Ref<Notificat
             )
           })}
         </Form>
-        <Button loading={testing} onClick={onSendTest}>
-          发送测试通知（P0）
-        </Button>
+        {canTest && (
+          <Button loading={testing} onClick={onSendTest}>
+            发送测试通知（P0）
+          </Button>
+        )}
       </Spin>
     </div>
   )

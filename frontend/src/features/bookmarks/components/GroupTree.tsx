@@ -14,6 +14,7 @@ import {
 import { useMemo, useRef, useState } from 'react'
 import type { CSSProperties, Key, ReactNode } from 'react'
 import type { BookmarkGroup } from '../types'
+import { usePermissions } from '../../auth/usePermissions'
 
 /** 侧栏选中项：全部 / 默认分组（group_id 为空的虚拟分组）/ 某个分组（点分组 = 看到该子树内的收藏） */
 export type GroupSelection = { kind: 'all' } | { kind: 'ungrouped' } | { kind: 'group'; id: number }
@@ -132,6 +133,8 @@ export default function GroupTree({
 }: Props) {
   const [collapsed, setCollapsed] = useState<number[]>(loadCollapsed)
   const dragIdRef = useRef<number | null>(null)
+  const { canAction } = usePermissions()
+  const canManage = canAction('top.bookmarks.action.manage-group')
 
   const { allIds, parentOf } = useMemo(() => {
     const allIds: number[] = []
@@ -207,7 +210,7 @@ export default function GroupTree({
         </Tooltip>
         {g.bookmarkCount > 0 && <span style={countStyle}>（{g.bookmarkCount}）</span>}
         <span style={{ flex: 1 }} />
-        {actionsFor(g)}
+        {canManage && actionsFor(g)}
       </div>
     )
   }
@@ -280,9 +283,11 @@ export default function GroupTree({
             description="用分组归类常用入口"
             style={{ marginTop: 8 }}
           >
-            <Button size="small" onClick={() => onCreate(null)}>
-              新建分组
-            </Button>
+            {canManage && (
+              <Button size="small" onClick={() => onCreate(null)}>
+                新建分组
+              </Button>
+            )}
           </Empty>
         ) : (
           <>
@@ -303,7 +308,7 @@ export default function GroupTree({
                 const k = keys[0]
                 if (k != null) onSelect({ kind: 'group', id: Number(k) })
               }}
-              draggable={{ icon: false }}
+              draggable={canManage ? { icon: false } : false}
               allowDrop={allowDrop}
               onDragStart={({ node }) => {
                 dragIdRef.current = Number(node.key)
@@ -326,7 +331,7 @@ export default function GroupTree({
                 cursor: 'pointer',
                 color: '#8c8c8c',
               }}
-              onClick={() => onCreate(null)}
+              onClick={canManage ? () => onCreate(null) : undefined}
             >
               新建分组
             </div>

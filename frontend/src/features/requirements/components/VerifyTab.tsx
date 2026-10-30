@@ -27,6 +27,7 @@ import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { usePermissions } from '../../auth/usePermissions'
 
 const STATUS_COLOR: Record<VerifyRunStatus, string> = {
   RUNNING: 'processing',
@@ -70,6 +71,8 @@ function fmtStageTimings(json?: string): string {
 
 export default function VerifyTab({ requirement }: { requirement: Requirement }) {
   const projectId = requirement.projectId
+  const { canAction } = usePermissions()
+  const canVerify = canAction('project.requirements.action.verify')
   const [runs, setRuns] = useState<VerifyRun[]>([])
   const [loading, setLoading] = useState(false)
   const [environments, setEnvironments] = useState<ProjectEnvironment[]>([])
@@ -193,18 +196,20 @@ export default function VerifyTab({ requirement }: { requirement: Requirement })
         </Typography.Text>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={reload}>刷新</Button>
-          <Tooltip title={unbound ? '先在「编辑」里绑定验证环境（PROD 除外）' : undefined}>
-            <span>
-              <Button
-                type="primary"
-                icon={<PlayCircleOutlined />}
-                disabled={unbound}
-                onClick={() => setTriggerOpen(true)}
-              >
-                立即验证
-              </Button>
-            </span>
-          </Tooltip>
+          {canVerify && (
+            <Tooltip title={unbound ? '先在「编辑」里绑定验证环境（PROD 除外）' : undefined}>
+              <span>
+                <Button
+                  type="primary"
+                  icon={<PlayCircleOutlined />}
+                  disabled={unbound}
+                  onClick={() => setTriggerOpen(true)}
+                >
+                  立即验证
+                </Button>
+              </span>
+            </Tooltip>
+          )}
         </Space>
       </Space>
       {unbound && (

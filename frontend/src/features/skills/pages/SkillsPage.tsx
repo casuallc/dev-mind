@@ -10,7 +10,7 @@ import {
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate } from 'react-router-dom'
-import { canWrite } from '../../auth/authStore'
+import { usePermissions } from '../../auth/usePermissions'
 import { listProjects } from '../../projects/api'
 import type { Project } from '../../projects/types'
 import { listSkills } from '../api'
@@ -29,6 +29,9 @@ const statusTag = (s: string) =>
 
 export default function SkillsPage() {
   const navigate = useNavigate()
+  const { canAction } = usePermissions()
+  const canImport = canAction('admin.skills.action.import')
+  const canCreate = canAction('admin.skills.action.create')
   const [projects, setProjects] = useState<Project[]>([])
   const [items, setItems] = useState<Skill[]>([])
   const [total, setTotal] = useState(0)
@@ -120,15 +123,15 @@ export default function SkillsPage() {
           <Button icon={<ReloadOutlined />} onClick={load}>
             刷新
           </Button>
-          {canWrite() && (
-            <>
-              <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
-                导入
-              </Button>
-              <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-                新建 Skill
-              </Button>
-            </>
+          {canImport && (
+            <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
+              导入
+            </Button>
+          )}
+          {canCreate && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建 Skill
+            </Button>
           )}
         </Space>
       }
@@ -211,9 +214,11 @@ export default function SkillsPage() {
           emptyText: (
             <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
               <Typography.Text type="secondary">
-                还没有 skill——「新建 Skill」手工创建，或「导入」从 zip 包批量导入。
+                {canCreate || canImport
+                  ? '还没有 skill——「新建 Skill」手工创建，或「导入」从 zip 包批量导入。'
+                  : '还没有 skill'}
               </Typography.Text>
-              {canWrite() && (
+              {canCreate && (
                 <div>
                   <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
                     新建 Skill

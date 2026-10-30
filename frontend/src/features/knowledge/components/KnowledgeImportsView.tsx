@@ -9,6 +9,7 @@ import FitTable from '../../../shared/components/FitTable'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { usePermissions } from '../../auth/usePermissions'
 
 const IMPORT_STATUS: Record<string, { color: string; text: string }> = {
   RUNNING: { color: 'processing', text: '运行中' },
@@ -49,6 +50,8 @@ export default function KnowledgeImportsView({
   const [loading, setLoading] = useState(false)
   const [retrying, setRetrying] = useState<string | null>(null)
   const [retryingFile, setRetryingFile] = useState<string | null>(null)
+  const { canAction } = usePermissions()
+  const canUpload = canAction('admin.knowledge.action.upload')
 
   const kbName = new Map<number, string>(bases.map((b) => [b.id, b.name]))
   const effFilterKbId = hideToolbar ? filterKbId : innerFilterKbId
@@ -161,23 +164,27 @@ export default function KnowledgeImportsView({
     { title: '文件数', dataIndex: 'totalFiles', width: 80 },
     { title: '提交人', dataIndex: 'createdBy', width: 110, ellipsis: true },
     { title: '时间', dataIndex: 'createdAt', width: 165, render: (v: string) => fmtTime(v) },
-    {
-      title: '操作',
-      width: 100,
-      render: (_, r) => (
-        <Tooltip title={r.status === 'RUNNING' ? '批次运行中，结束后可重试失败项' : '失败/跳过的文件重新解析'}>
-          <Button
-            size="small"
-            icon={<SyncOutlined />}
-            loading={retrying === r.id}
-            disabled={r.status === 'RUNNING' || r.failedCount === 0}
-            onClick={() => onRetry(r)}
-          >
-            重试
-          </Button>
-        </Tooltip>
-      ),
-    },
+    ...(canUpload
+      ? [
+          {
+            title: '操作',
+            width: 100,
+            render: (_: unknown, r: ImportBatch) => (
+              <Tooltip title={r.status === 'RUNNING' ? '批次运行中，结束后可重试失败项' : '失败/跳过的文件重新解析'}>
+                <Button
+                  size="small"
+                  icon={<SyncOutlined />}
+                  loading={retrying === r.id}
+                  disabled={r.status === 'RUNNING' || r.failedCount === 0}
+                  onClick={() => onRetry(r)}
+                >
+                  重试
+                </Button>
+              </Tooltip>
+            ),
+          } satisfies ColumnsType<ImportBatch>[number],
+        ]
+      : []),
   ]
 
   return (
@@ -250,26 +257,34 @@ export default function KnowledgeImportsView({
                       '-'
                     ),
                 },
-                {
-                  title: '操作',
-                  width: 86,
-                  render: (_, r) =>
-                    r.status === 'failed' ? (
-                      <Button
-                        size="small"
-                        loading={retryingFile === `${batch.id}:${r.id}`}
-                        onClick={() => onRetryFile(batch, r)}
-                      >
-                        重试
-                      </Button>
-                    ) : null,
-                },
+                ...(canUpload
+                  ? [
+                      {
+                        title: '操作',
+                        width: 86,
+                        render: (_: unknown, r: ImportBatchFile) =>
+                          r.status === 'failed' ? (
+                            <Button
+                              size="small"
+                              loading={retryingFile === `${batch.id}:${r.id}`}
+                              onClick={() => onRetryFile(batch, r)}
+                            >
+                              重试
+                            </Button>
+                          ) : null,
+                      } satisfies ColumnsType<ImportBatchFile>[number],
+                    ]
+                  : []),
               ]}
             />
           ),
           rowExpandable: (b) => b.files.length > 0,
         }}
-        locale={{ emptyText: '暂无上传批次。点右上角「上传文档」导入文件/文件夹/ZIP。' }}
+        locale={{
+          emptyText: canUpload
+            ? '暂无上传批次。点右上角「上传文档」导入文件/文件夹/ZIP。'
+            : '暂无上传批次。',
+        }}
       />
     </div>
   )

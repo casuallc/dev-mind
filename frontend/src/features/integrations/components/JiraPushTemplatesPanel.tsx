@@ -45,6 +45,7 @@ import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
+import { usePermissions } from '../../auth/usePermissions'
 
 const EMPTY_OPTIONS: JiraPushOptions = { jiraProjects: [], issueTypes: [], priorities: [] }
 
@@ -71,6 +72,8 @@ export default function JiraPushTemplatesPanel({ ref }: { ref?: Ref<JiraPushTemp
   const [loading, setLoading] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  const { canAction } = usePermissions()
+  const canManage = canAction('top.settings.action.manage-jira-template')
 
   const reload = useCallback(() => {
     setLoading(true)
@@ -118,7 +121,11 @@ export default function JiraPushTemplatesPanel({ ref }: { ref?: Ref<JiraPushTemp
         loading={loading}
         dataSource={templates}
         pagination={LIST_PAGINATION}
-        locale={{ emptyText: '还没有推送模板——点右上「新建模板」，为你常推的 Jira 项目 + 任务类型配一套默认值' }}
+        locale={{
+          emptyText: canManage
+            ? '还没有推送模板——点右上「新建模板」，为你常推的 Jira 项目 + 任务类型配一套默认值'
+            : '还没有推送模板',
+        }}
         columns={[
           { title: 'Jira 实例', dataIndex: 'integrationName', render: (n: string) => n ?? '—' },
           { title: 'Jira 项目', dataIndex: 'jiraProjectKey', width: 120 },
@@ -156,12 +163,14 @@ export default function JiraPushTemplatesPanel({ ref }: { ref?: Ref<JiraPushTemp
             title: '操作',
             width: 120,
             render: (_, row) => (
-              <Space size={4}>
-                <TemplateEditButton template={row} onSaved={reload} />
-                <Button size="small" danger loading={deletingId === row.id} onClick={() => onDelete(row)}>
-                  删除
-                </Button>
-              </Space>
+              canManage && (
+                <Space size={4}>
+                  <TemplateEditButton template={row} onSaved={reload} />
+                  <Button size="small" danger loading={deletingId === row.id} onClick={() => onDelete(row)}>
+                    删除
+                  </Button>
+                </Space>
+              )
             ),
           },
         ]}

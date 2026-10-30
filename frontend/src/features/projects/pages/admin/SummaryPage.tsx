@@ -7,9 +7,12 @@ import { getSummary, refreshSummary, saveSummary } from '../../api'
 import type { ContextSummary } from '../../types'
 import { fmtTime } from '../../../../shared/utils/format'
 import { showError } from '../../../../shared/utils/showError'
+import { usePermissions } from '../../../auth/usePermissions'
 
 export default function SummaryPage() {
   const { id = '' } = useParams<{ id: string }>()
+  const { canAction } = usePermissions()
+  const canEdit = canAction('admin.projects.action.edit-project')
   const [summary, setSummary] = useState<ContextSummary>({ projectId: id, summary: '' })
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -58,14 +61,16 @@ export default function SummaryPage() {
     <Card
       title="上下文摘要"
       extra={
-        <Space>
-          <Button icon={<ReloadOutlined />} loading={busy} onClick={doRefresh}>
-            重新扫描生成
-          </Button>
-          <Button type="primary" icon={<DiffOutlined />} loading={busy} onClick={doSave}>
-            保存修改
-          </Button>
-        </Space>
+        canEdit && (
+          <Space>
+            <Button icon={<ReloadOutlined />} loading={busy} onClick={doRefresh}>
+              重新扫描生成
+            </Button>
+            <Button type="primary" icon={<DiffOutlined />} loading={busy} onClick={doSave}>
+              保存修改
+            </Button>
+          </Space>
+        )
       }
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
@@ -74,6 +79,7 @@ export default function SummaryPage() {
       </Typography.Paragraph>
       <Input.TextArea
         rows={18}
+        readOnly={!canEdit}
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder="点击「重新扫描生成」自动扫描仓库结构；也可直接编辑此摘要作为项目上下文（供需求对话/方案/会话注入）。"

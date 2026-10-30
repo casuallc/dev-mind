@@ -4,12 +4,15 @@ import { changePassword } from '../api'
 import { getUserSnapshot, subscribeAuth } from '../authStore'
 import { baseRoleMeta, displayRole } from '../roleMeta'
 import { showError } from '../../../shared/utils/showError'
+import { usePermissions } from '../usePermissions'
 
 /** 设置页「个人信息」视图：账号信息只读展示 + 修改密码（原 UserMenu 弹窗搬入）。 */
 export default function ProfilePanel() {
   const user = useSyncExternalStore(subscribeAuth, getUserSnapshot)
   const [form] = Form.useForm<{ oldPassword: string; newPassword: string }>()
   const [saving, setSaving] = useState(false)
+  const { canAction } = usePermissions()
+  const canChangePassword = canAction('top.settings.action.change-password')
 
   const onChangePassword = async (v: { oldPassword: string; newPassword: string }) => {
     setSaving(true)
@@ -49,22 +52,26 @@ export default function ProfilePanel() {
           },
         ]}
       />
-      <Divider orientation="left" orientationMargin={0}>修改密码</Divider>
-      <Form form={form} layout="vertical" onFinish={onChangePassword}>
-        <Form.Item name="oldPassword" label="原密码" rules={[{ required: true, message: '请输入原密码' }]}>
-          <Input.Password autoComplete="current-password" />
-        </Form.Item>
-        <Form.Item
-          name="newPassword"
-          label="新密码"
-          rules={[{ required: true, min: 6, message: '至少 6 位' }]}
-        >
-          <Input.Password autoComplete="new-password" />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" loading={saving}>
-          保存
-        </Button>
-      </Form>
+      {canChangePassword && (
+        <>
+          <Divider orientation="left" orientationMargin={0}>修改密码</Divider>
+          <Form form={form} layout="vertical" onFinish={onChangePassword}>
+            <Form.Item name="oldPassword" label="原密码" rules={[{ required: true, message: '请输入原密码' }]}>
+              <Input.Password autoComplete="current-password" />
+            </Form.Item>
+            <Form.Item
+              name="newPassword"
+              label="新密码"
+              rules={[{ required: true, min: 6, message: '至少 6 位' }]}
+            >
+              <Input.Password autoComplete="new-password" />
+            </Form.Item>
+            <Button type="primary" htmlType="submit" loading={saving}>
+              保存
+            </Button>
+          </Form>
+        </>
+      )}
     </div>
   )
 }

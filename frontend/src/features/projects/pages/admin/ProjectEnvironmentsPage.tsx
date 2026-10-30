@@ -27,6 +27,7 @@ import { envColor } from '../../components/utils'
 import { showError } from '../../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../../shared/utils/table'
 import { DRAWER_DEFAULT } from '../../../../shared/utils/overlay'
+import { usePermissions } from '../../../auth/usePermissions'
 
 const ENV_NAME_OPTIONS = ['DEV', 'TEST', 'STAGING', 'PROD']
 
@@ -49,6 +50,8 @@ function textToVars(text: string): Record<string, string> {
 
 export default function ProjectEnvironmentsPage() {
   const { id = '' } = useParams<{ id: string }>()
+  const { canAction } = usePermissions()
+  const canEdit = canAction('admin.projects.action.edit-project')
   const [environments, setEnvironments] = useState<ProjectEnvironment[]>([])
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [loading, setLoading] = useState(false)
@@ -184,17 +187,19 @@ export default function ProjectEnvironmentsPage() {
         : <Tooltip title="未配补丁目录 = 该环境不可用于开发中验证（CAP-73）"><Tag>-</Tag></Tooltip>,
     },
     { title: '描述', dataIndex: 'description', ellipsis: true, render: (d?: string) => d || '-' },
-    {
-      title: '操作',
-      key: 'action',
-      width: 120,
-      render: (_: unknown, r: ProjectEnvironment) => (
-        <Space size={4}>
-          <Button size="small" onClick={() => openEdit(r)}>编辑</Button>
-          <Button size="small" danger onClick={() => confirmDelete(r)}>删除</Button>
-        </Space>
-      ),
-    },
+    ...(canEdit
+      ? [{
+          title: '操作',
+          key: 'action',
+          width: 120,
+          render: (_: unknown, r: ProjectEnvironment) => (
+            <Space size={4}>
+              <Button size="small" onClick={() => openEdit(r)}>编辑</Button>
+              <Button size="small" danger onClick={() => confirmDelete(r)}>删除</Button>
+            </Space>
+          ),
+        } satisfies ColumnsType<ProjectEnvironment>[number]]
+      : []),
   ]
 
   return (
@@ -205,9 +210,11 @@ export default function ProjectEnvironmentsPage() {
           <Button icon={<ReloadOutlined />} onClick={reload}>
             刷新
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-            添加环境
-          </Button>
+          {canEdit && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
+              添加环境
+            </Button>
+          )}
         </Space>
       }
     >

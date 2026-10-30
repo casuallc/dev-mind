@@ -8,7 +8,7 @@ import { menuSelectedKey } from './menuSelectedKey'
 import { getCurrentProjectId, subscribeCurrentProject } from './currentProjectStore'
 import ProjectSwitcher from './ProjectSwitcher'
 import type { Project } from '../features/projects/types'
-import { useMenus } from '../features/auth/useMenus'
+import { usePermissions } from '../features/auth/usePermissions'
 
 /** 项目上下文页面前缀（命中这些路径时 AppLayout 渲染本页签条） */
 const PROJECT_PAGE_PREFIXES = [
@@ -43,11 +43,9 @@ export default function ProjectSubNav({ projects, loadError, onRetry }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
   const currentProjectId = useSyncExternalStore(subscribeCurrentProject, getCurrentProjectId)
-  // CAP-61：页签按角色可见菜单过滤；全部取消时页签条为空条，项目切换器仍在
-  const { items: menus } = useMenus()
-  const items = menus
-    .filter((m) => m.zone === 'PROJECT')
-    .map((m) => ({ key: m.path, label: m.title }))
+  // CAP-61/103：页签按角色可见菜单过滤（仅一级菜单，页签/按钮节点不参与）；全部取消时页签条为空条，项目切换器仍在
+  const { menusOf } = usePermissions()
+  const items = menusOf('PROJECT').map((m) => ({ key: m.path, label: m.title }))
 
   if (!currentProjectId) return null
 

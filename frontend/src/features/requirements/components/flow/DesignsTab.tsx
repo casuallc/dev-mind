@@ -13,6 +13,7 @@ import { showError } from '../../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../../shared/utils/table'
 import DocPreviewDrawer from './DocPreviewDrawer'
 import { designStatusColor, useDesignActions } from './useDesignActions'
+import { usePermissions } from '../../../auth/usePermissions'
 
 export default function DesignsTab({ projectId, requirement, onChanged }: {
   projectId: string
@@ -21,6 +22,8 @@ export default function DesignsTab({ projectId, requirement, onChanged }: {
   onChanged: () => void
 }) {
   const requirementId = requirement.id
+  const { canAction } = usePermissions()
+  const canManage = canAction('project.requirements.action.manage-design')
   const [designs, setDesigns] = useState<Design[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -64,7 +67,7 @@ export default function DesignsTab({ projectId, requirement, onChanged }: {
       render: (_, d) => (
         <Space size={4}>
           <Button size="small" type="link" disabled={!d.docId} onClick={() => previewDesign(d)}>查看</Button>
-          {d.status === 'DRAFT' && (
+          {canManage && d.status === 'DRAFT' && (
             <>
               <Popconfirm title={`确认方案 v${d.version}？`} description="纯标记：AI 拆分时优先采用已确认方案的内容"
                 onConfirm={() => setStatus(d, 'CONFIRMED')}>
@@ -73,13 +76,15 @@ export default function DesignsTab({ projectId, requirement, onChanged }: {
               <Button size="small" type="link" onClick={() => setStatus(d, 'DISCARDED')}>废弃</Button>
             </>
           )}
-          {d.status === 'CONFIRMED' && (
+          {canManage && d.status === 'CONFIRMED' && (
             <Button size="small" type="link" onClick={() => setStatus(d, 'DISCARDED')}>废弃</Button>
           )}
-          {d.status === 'DISCARDED' && (
+          {canManage && d.status === 'DISCARDED' && (
             <Button size="small" type="link" onClick={() => setStatus(d, 'DRAFT')}>恢复</Button>
           )}
-          <Button size="small" type="link" danger onClick={() => remove(d)}>删除</Button>
+          {canManage && (
+            <Button size="small" type="link" danger onClick={() => remove(d)}>删除</Button>
+          )}
         </Space>
       ),
     },

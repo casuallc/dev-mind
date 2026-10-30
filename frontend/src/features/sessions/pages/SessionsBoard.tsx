@@ -1,7 +1,7 @@
 // 会话工作台：默认对话视图（左侧会话列表 + 右侧对话交互，类聊天应用），可切换表格列表视图。
 // CAP-39：会话详情页已裁撤——产出推送/更多操作（上下文/沉淀/清理 worktree）均在操作条，深链 /sessions?sid=<id>。
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Badge, Button, Card, Input, Modal, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
+import { Badge, Button, Card, Empty, Input, Modal, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   CaretRightOutlined,
@@ -35,6 +35,15 @@ import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/page
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { usePermissions, usePermittedView } from '../../auth/usePermissions'
+
+const SESSION_BOARD_VIEWS = ['chat', 'list'] as const
+type SessionBoardView = (typeof SESSION_BOARD_VIEWS)[number]
+const SESSION_BOARD_VIEW_PERMISSIONS: Record<SessionBoardView, string> = {
+  chat: 'project.sessions.tab.chat',
+  list: 'project.sessions.tab.list',
+}
+const SESSION_BOARD_VIEW_LABELS: Record<SessionBoardView, string> = { chat: '对话', list: '列表' }
 
 // 活跃在前 + 创建时间倒序（与 SessionListPane 一致，用于自动选中第一个）
 function sortForBoard(list: SessionSummary[]): SessionSummary[] {
@@ -77,6 +86,18 @@ export default function SessionsBoard({
   const [innerView, setInnerView] = useState<string>('chat') // chat | list（受控时以 controlledView 为准）
   const view = controlledView ?? innerView
   const setView = onViewChange ?? setInnerView
+  const { canAction } = usePermissions()
+  const canCreate = canAction(worklog ? 'top.worklog.action.create-session' : 'project.sessions.action.create')
+  const canManageSession = canAction(worklog ? 'top.worklog.action.manage-session' : 'project.sessions.action.manage')
+  const canOutputs = canAction('project.sessions.action.outputs')
+  const canSyncWorklog = canAction('top.worklog.action.manage-entry')
+  const permittedViews = usePermittedView(
+    SESSION_BOARD_VIEWS,
+    (v) => SESSION_BOARD_VIEW_PERMISSIONS[v],
+    (SESSION_BOARD_VIEWS as readonly string[]).includes(view) ? (view as SessionBoardView) : 'chat',
+    setInnerView,
+    !controlledView,
+  )
   const [status, setStatus] = useState('ALL')
   const [keyword, setKeyword] = useState('')
   // 防抖后的搜索词：实际下发服务端（列表 taskSpec/summary 已是截断预览，客户端过滤会漏全文命中）
@@ -170,8 +191,8 @@ export default function SessionsBoard({
     if (autoPickedRef.current || loading || searchParams.get('sid')) return
     autoPickedRef.current = true
     if (sessions.length > 0) setSelectedId(sortForBoard(sessions)[0].id)
-    else setDraft(true)
-  }, [sessions, loading, searchParams])
+    else if (canCreate) setDraft(true)
+  }, [sessions, loading, searchParams, canCreate])
 
   // 草稿创建成功后：先等列表刷新拿到新会话行，再选中——否则「消失兜底」effect 会误清新 id
   const onDraftCreated = useCallback(
@@ -369,9 +390,11 @@ export default function SessionsBoard({
           >
             对话
           </Button>
-          <Button size="small" danger onClick={() => confirmDelete(r)}>
-            删除
-          </Button>
+          {canManageSession && (
+            <Button size="small" danger onClick={() => confirmDelete(r)}>
+              删除
+            </Button>
+          )}
         </Space>
       ),
     },
@@ -391,10 +414,10 @@ export default function SessionsBoard({
             <Segmented
               value={view}
               onChange={(v) => setView(v as string)}
-              options={[
-                { value: 'chat', label: '对话' },
-                { value: 'list', label: '列表' },
-              ]}
+              options={permittedViews.map((v) => ({
+                value: v,
+                label: SESSION_BOARD_VIEW_LABELS[v],
+              }))}
             />
           </Space>
         )
@@ -424,6 +447,7 @@ export default function SessionsBoard({
             keyword={keyword}
             onKeywordChange={setKeyword}
             refs={refs}
+            canCreate={canCreate}
           />
           {/* overflow:auto 是兜底：右侧「操作条 + 摘要卡 + 输入区」的固定高度在矮视口（≤1366x768）会超过卡片高度，
               不兜底就顶破内容区（实测 1280x720 溢 50px）；空间够时不会出现滚动条，行为与原先一致 */}
@@ -464,32 +488,34 @@ export default function SessionsBoard({
                     />
                   </Space>
                   <Space size={4} wrap>
-                    {canSuspend && (
+                    {canManageSession && canSuspend && (
                       <Button size="small" icon={<StopOutlined />} onClick={onFinish}>
                         结束
                       </Button>
                     )}
-                    {canSuspend && (
+                    {canManageSession && canSuspend && (
                       <Button size="small" icon={<PauseOutlined />} onClick={onSuspend}>
                         挂起
                       </Button>
                     )}
-                    {canResume && (
+                    {canManageSession && canResume && (
                       <Button size="small" icon={<CaretRightOutlined />} onClick={onResume}>
                         {current.state === 'SUSPENDED' ? '恢复' : '继续对话'}
                       </Button>
                     )}
                     {worklog && (
                       <>
-                        <Button
-                          size="small"
-                          type="primary"
-                          icon={<CloudSyncOutlined />}
-                          loading={syncingWorklog}
-                          onClick={onSyncWorklog}
-                        >
-                          推送工作日志
-                        </Button>
+                        {canSyncWorklog && (
+                          <Button
+                            size="small"
+                            type="primary"
+                            icon={<CloudSyncOutlined />}
+                            loading={syncingWorklog}
+                            onClick={onSyncWorklog}
+                          >
+                            推送工作日志
+                          </Button>
+                        )}
                         {/* CAP-54：worklog 会话也有 runner 持久工作区，入口按钮同样放操作条 */}
                         <WorkspacePanel
                           entry="button"
@@ -505,9 +531,11 @@ export default function SessionsBoard({
                         <Button size="small" icon={<DiffOutlined />} loading={diff.loading} onClick={diff.show}>
                           Diff
                         </Button>
-                        <Button size="small" icon={<UploadOutlined />} onClick={() => setOutputsOpen(true)}>
-                          推送产出
-                        </Button>
+                        {canOutputs && (
+                          <Button size="small" icon={<UploadOutlined />} onClick={() => setOutputsOpen(true)}>
+                            推送产出
+                          </Button>
+                        )}
                         {/* CAP-54：工作区入口提到操作条，置于「更多」前 */}
                         <WorkspacePanel
                           entry="button"
@@ -519,7 +547,7 @@ export default function SessionsBoard({
                         <SessionMoreActions session={current} canSuspend={canSuspend} onChanged={load} />
                       </>
                     )}
-                    {canSuspend && (
+                    {canManageSession && canSuspend && (
                       <Button size="small" danger icon={<StopOutlined />} onClick={onKill}>
                         终止
                       </Button>
@@ -541,8 +569,10 @@ export default function SessionsBoard({
                   onWorkspaceSnapshot={setWorkspace}
                 />
               </>
-            ) : (
+            ) : canCreate ? (
               <NewSessionDraft projectId={projectId ?? undefined} onCreated={onDraftCreated} />
+            ) : (
+              <Empty description="当前账号无新建会话权限" style={{ marginTop: 80 }} />
             )}
           </div>
         </div>

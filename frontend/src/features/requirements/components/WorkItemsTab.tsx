@@ -28,6 +28,7 @@ import { LIST_PAGINATION } from '../../../shared/utils/table'
 import MarkdownEditor from '../../../shared/components/MarkdownEditor'
 import { noWrapColumns } from '../../../shared/components/FitTable'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
+import { usePermissions } from '../../auth/usePermissions'
 
 const WI_STATUS_FLOW: WorkItemStatus[] = ['TODO', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED']
 const WI_TYPES: WorkItemType[] = ['DESIGN', 'DEVELOPMENT', 'TEST', 'DOCUMENT', 'REVIEW']
@@ -43,6 +44,8 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
   onChanged: () => Promise<void> | void
 }) {
   const navigate = useNavigate()
+  const { canAction } = usePermissions()
+  const canManage = canAction('project.requirements.action.manage-workitem')
   const [editOpen, setEditOpen] = useState(false)
   const [editing, setEditing] = useState<WorkItem | null>(null)
   const [finishing, setFinishing] = useState(false)
@@ -160,24 +163,27 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
     { title: '标题', dataIndex: 'title', ellipsis: true },
     {
       title: '状态', dataIndex: 'status', width: 120,
-      render: (s: WorkItemStatus, w) => (
-        <Dropdown
-          menu={{
-            items: WI_STATUS_FLOW.map((x) => ({ key: x, label: WI_STATUS_LABEL[x] })),
-            selectedKeys: [s],
-            onClick: ({ key }) => advance(w, key as WorkItemStatus),
-          }}
-          trigger={['click']}
-          disabled={locked}
-        >
-          <Tag
-            color={workItemStatusColor(s)}
-            style={{ marginInlineEnd: 0, cursor: locked ? 'default' : 'pointer' }}
+      render: (s: WorkItemStatus, w) => {
+        const lockedStatus = locked || !canManage
+        return (
+          <Dropdown
+            menu={{
+              items: WI_STATUS_FLOW.map((x) => ({ key: x, label: WI_STATUS_LABEL[x] })),
+              selectedKeys: [s],
+              onClick: ({ key }) => advance(w, key as WorkItemStatus),
+            }}
+            trigger={['click']}
+            disabled={lockedStatus}
           >
-            {WI_STATUS_LABEL[s] ?? s} {!locked && <DownOutlined style={{ fontSize: 10 }} />}
-          </Tag>
-        </Dropdown>
-      ),
+            <Tag
+              color={workItemStatusColor(s)}
+              style={{ marginInlineEnd: 0, cursor: lockedStatus ? 'default' : 'pointer' }}
+            >
+              {WI_STATUS_LABEL[s] ?? s} {!lockedStatus && <DownOutlined style={{ fontSize: 10 }} />}
+            </Tag>
+          </Dropdown>
+        )
+      },
     },
     {
       title: '会话', key: 'session', width: 110,
@@ -190,7 +196,7 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
       title: '操作', key: 'ops', width: 130,
       render: (_, w) => (
         <Space size={4}>
-          {!locked && (w.status === 'TODO' || w.status === 'IN_PROGRESS') && (
+          {!locked && canManage && (w.status === 'TODO' || w.status === 'IN_PROGRESS') && (
             <Button size="small" type="link" onClick={() => startSession(w)}>
               起会话
             </Button>
@@ -200,8 +206,12 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
               items: [
                 { key: 'build', label: '触发构建' },
                 { key: 'test', label: '触发测试' },
-                { key: 'edit', label: '编辑' },
-                { key: 'delete', label: '删除', danger: true, disabled: locked },
+                ...(canManage
+                  ? [
+                      { key: 'edit', label: '编辑' },
+                      { key: 'delete', label: '删除', danger: true, disabled: locked },
+                    ]
+                  : []),
               ],
               onClick: ({ key }) => {
                 // 触发构建/测试：深链到执行器页并预填 WI（构建顺带预填工作分支 wi/<seq>-<slug>）
@@ -233,7 +243,7 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
 
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      {!locked && (
+      {!locked && canManage && (
         <Space size={8}>
           <Button size="small" type="primary" ghost icon={<PlusOutlined />} onClick={() => openEdit(null)}>
             新建工作单元
@@ -258,8 +268,8 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description={
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              工作单元由「开启 AI 规划」一次性产出（分析 + 方案 + 清单，并自动接开发会话）；
-              也可以直接手工新建。
+              工作单元由「开启 AI 规划」一次性产出（分析 + 方案 + 清单，并自动接开发会话）
+              {canManage ? '；也可以直接手工新建。' : '。'}
             </Typography.Text>
           }
         />

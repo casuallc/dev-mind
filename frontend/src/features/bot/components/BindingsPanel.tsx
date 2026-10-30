@@ -7,6 +7,7 @@ import { listBotBindings, unbindBotBinding } from '../api'
 import type { BotBinding } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import FitTable from '../../../shared/components/FitTable'
+import { usePermissions } from '../../auth/usePermissions'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
@@ -15,6 +16,8 @@ const CHANNEL_LABEL: Record<string, string> = { feishu: '飞书' }
 export default function BindingsPanel({ refreshTick = 0 }: { refreshTick?: number }) {
   const [rows, setRows] = useState<BotBinding[]>([])
   const [loading, setLoading] = useState(false)
+  const { canAction } = usePermissions()
+  const canUnbind = canAction('admin.bot.action.unbind')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -96,15 +99,19 @@ export default function BindingsPanel({ refreshTick = 0 }: { refreshTick?: numbe
       render: (s?: string) => s || '-',
     },
     { title: '更新时间', dataIndex: 'updatedAt', width: 160, render: (t) => fmtTime(t) },
-    {
-      title: '操作',
-      width: 80,
-      render: (_, r) => (
-        <Typography.Link type="danger" onClick={() => onUnbind(r)}>
-          解绑
-        </Typography.Link>
-      ),
-    },
+    ...(canUnbind
+      ? [
+          {
+            title: '操作',
+            width: 80,
+            render: (_: unknown, r: BotBinding) => (
+              <Typography.Link type="danger" onClick={() => onUnbind(r)}>
+                解绑
+              </Typography.Link>
+            ),
+          } satisfies ColumnsType<BotBinding>[number],
+        ]
+      : []),
   ]
 
   return (

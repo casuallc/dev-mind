@@ -1,6 +1,6 @@
 // CAP-03 文档列表：筛选/检索 + 新建文档（模板一键预填）。
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { canWrite } from '../../auth/authStore'
+import { usePermissions } from '../../auth/usePermissions'
 import {
   Button,
   Card,
@@ -40,6 +40,8 @@ const statusTag = (s: DocStatus) => (
 
 export default function DocsPage() {
   const navigate = useNavigate()
+  const { canAction } = usePermissions()
+  const canCreate = canAction('admin.docs.action.create')
   const [docs, setDocs] = useState<DocMeta[]>([])
   const [loading, setLoading] = useState(false)
   const [kindFilter, setKindFilter] = useState<string>('')
@@ -179,7 +181,7 @@ export default function DocsPage() {
           <Button icon={<ReloadOutlined />} onClick={() => load()}>
             刷新
           </Button>
-          {canWrite() && (
+          {canCreate && (
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
               新建文档
             </Button>
@@ -200,9 +202,9 @@ export default function DocsPage() {
           emptyText: (
             <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
               <Typography.Text type="secondary">
-                暂无文档。点击「新建文档」从模板开始写第一篇。
+                {canCreate ? '暂无文档。点击「新建文档」从模板开始写第一篇。' : '暂无文档'}
               </Typography.Text>
-              {canWrite() && (
+              {canCreate && (
                 <div>
                   <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
                     新建文档

@@ -16,9 +16,26 @@ import { fmtTime } from '../../../shared/utils/format'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { showError } from '../../../shared/utils/showError'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import { usePermissions, usePermittedView } from '../../auth/usePermissions'
+
+const KNOWLEDGE_LIST_VIEWS = ['active', 'archived'] as const
+type KnowledgeListView = (typeof KNOWLEDGE_LIST_VIEWS)[number]
+/** CAP-103 知识库列表页签权限节点（与后端权限目录一致） */
+const KNOWLEDGE_LIST_VIEW_PERMISSIONS: Record<KnowledgeListView, string> = {
+  active: 'admin.knowledge.tab.active',
+  archived: 'admin.knowledge.tab.archived',
+}
 
 /** FR-08 索引健康一行：状态 + 数量，异常直达库详情处理（失败逐条重试 / 需重建一键重建） */
-function IndexHealth({ base, onUpload }: { base: KnowledgeBase; onUpload: () => void }) {
+function IndexHealth({
+  base,
+  onUpload,
+  canUpload,
+}: {
+  base: KnowledgeBase
+  onUpload: () => void
+  canUpload: boolean
+}) {
   const s = base.indexStats
   const detailLink = `/admin/knowledge/bases/${base.id}?tab=entries`
   return (
@@ -46,7 +63,7 @@ function IndexHealth({ base, onUpload }: { base: KnowledgeBase; onUpload: () => 
           <Tag>未配置向量端点 {s.disabled}</Tag>
         </Tooltip>
       )}
-      {base.entryCount === 0 && (
+      {base.entryCount === 0 && canUpload && (
         <Typography.Link style={{ fontSize: 12 }} onClick={onUpload}>
           空库，去上传文档
         </Typography.Link>
@@ -60,6 +77,16 @@ export default function KnowledgeBaseListPage() {
   const [bases, setBases] = useState<KnowledgeBase[]>([])
   const [loading, setLoading] = useState(false)
   const [statusFilter, setStatusFilter] = useState<'active' | 'archived'>('active')
+  const { canAction } = usePermissions()
+  const canCreateBase = canAction('admin.knowledge.action.create-base')
+  const canEditBase = canAction('admin.knowledge.action.edit-base')
+  const canUpload = canAction('admin.knowledge.action.upload')
+  const permittedStatus = usePermittedView(
+    KNOWLEDGE_LIST_VIEWS,
+    (v) => KNOWLEDGE_LIST_VIEW_PERMISSIONS[v],
+    statusFilter,
+    setStatusFilter,
+  )
 
   const [baseModalOpen, setBaseModalOpen] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -157,7 +184,7 @@ export default function KnowledgeBaseListPage() {
       title: '索引健康',
       key: 'index',
       width: 320,
-      render: (_, r) => <IndexHealth base={r} onUpload={() => openUpload(r.id)} />,
+      render: (_, r) => <IndexHealth base={r} onUpload={() => openUpload(r.id)} canUpload={canUpload} />,
     },
     {
       title: '更新时间',
@@ -174,15 +201,19 @@ export default function KnowledgeBaseListPage() {
           <Link to={`/admin/knowledge/bases/${r.id}`}>
             <Button size="small">详情</Button>
           </Link>
-          <Button size="small" onClick={() => openSettings(r)}>
-            设置
-          </Button>
+          {canEditBase && (
+            <Button size="small" onClick={() => openSettings(r)}>
+              设置
+            </Button>
+          )}
           <Link to={`/chats?kbId=${r.id}`}>
             <Button size="small">问答</Button>
           </Link>
-          <Button size="small" onClick={() => openUpload(r.id)}>
-            上传
-          </Button>
+          {canUpload && (
+            <Button size="small" onClick={() => openUpload(r.id)}>
+              上传
+            </Button>
+          )}
         </Space>
       ),
     },
@@ -200,8 +231,12 @@ export default function KnowledgeBaseListPage() {
               value={statusFilter}
               onChange={(v) => setStatusFilter(v as 'active' | 'archived')}
               options={[
-                { value: 'active', label: `启用中（${bases.length - archivedCount}）` },
-                { value: 'archived', label: `已归档（${archivedCount}）` },
+                ...(permittedStatus.includes('active')
+                  ? [{ value: 'active', label: `启用中（${bases.length - archivedCount}）` }]
+                  : []),
+                ...(permittedStatus.includes('archived')
+                  ? [{ value: 'archived', label: `已归档（${archivedCount}）` }]
+                  : []),
               ]}
             />
           )}
@@ -212,12 +247,16 @@ export default function KnowledgeBaseListPage() {
           <Button icon={<ReloadOutlined />} loading={loading} onClick={loadBases}>
             刷新
           </Button>
-          <Button icon={<UploadOutlined />} onClick={() => openUpload()}>
-            上传文档
-          </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setBaseModalOpen(true)}>
-            新建知识库
-          </Button>
+          {canUpload && (
+            <Button icon={<UploadOutlined />} onClick={() => openUpload()}>
+              上传文档
+            </Button>
+          )}
+          {canCreateBase && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setBaseModalOpen(true)}>
+              新建知识库
+            </Button>
+          )}
         </Space>
       }
     >
@@ -231,7 +270,7 @@ export default function KnowledgeBaseListPage() {
         columns={columns}
         dataSource={shown}
         pagination={LIST_PAGINATION}
-        locale={{ emptyText: '还没有知识库。点右上角「新建知识库」创建第一个。' }}
+        locale={{ emptyText: canCreateBase ? '还没有知识库。点右上角「新建知识库」创建第一个。' : '还没有知识库。' }}
       />
 
       <KnowledgeBaseFormModal

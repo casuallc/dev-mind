@@ -32,6 +32,7 @@ import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/page
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { usePermittedView, usePermissions } from '../../auth/usePermissions'
 
 const statusColor: Record<string, string> = {
   ONLINE: 'green',
@@ -47,15 +48,39 @@ const statusColor: Record<string, string> = {
  */
 type NodesView = 'nodes' | 'package' | 'audit' | 'egress' | 'files'
 const VIEWS: NodesView[] = ['nodes', 'package', 'audit', 'egress', 'files']
+/** CAP-103 页签权限节点（与后端权限目录一致） */
+const VIEW_PERMISSIONS: Record<NodesView, string> = {
+  nodes: 'admin.agent-nodes.tab.nodes',
+  package: 'admin.agent-nodes.tab.package',
+  audit: 'admin.agent-nodes.tab.audit',
+  egress: 'admin.agent-nodes.tab.egress',
+  files: 'admin.agent-nodes.tab.files',
+}
+const VIEW_LABELS: Record<NodesView, string> = {
+  nodes: '节点列表',
+  package: 'Runner 包',
+  audit: '审计日志',
+  egress: '出口规则',
+  files: '文件浏览',
+}
 
 export default function AgentNodesPage() {
   const navigate = useNavigate()
+  const { canAction } = usePermissions()
+  const canManageNode = canAction('admin.agent-nodes.action.manage-node')
+  const canUpgradeNode = canAction('admin.agent-nodes.action.upgrade-node')
   // 视图随 URL（?view=…）走：旧链接重定向/刷新后仍停在原页签
   const [searchParams, setSearchParams] = useSearchParams()
   const rawView = searchParams.get('view') as NodesView | null
   const view: NodesView = rawView && VIEWS.includes(rawView) ? rawView : 'nodes'
   const switchView = (v: string | number) =>
     setSearchParams(v === 'nodes' ? {} : { view: String(v) }, { replace: true })
+  const permittedViews = usePermittedView(
+    VIEWS,
+    (v) => VIEW_PERMISSIONS[v],
+    view,
+    switchView,
+  )
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [pkg, setPkg] = useState<RunnerPackage | null>(null)
   const [loading, setLoading] = useState(false)
@@ -236,13 +261,7 @@ export default function AgentNodesPage() {
           <Segmented
             value={view}
             onChange={switchView}
-            options={[
-              { label: '节点列表', value: 'nodes' },
-              { label: 'Runner 包', value: 'package' },
-              { label: '出口规则', value: 'egress' },
-              { label: '审计日志', value: 'audit' },
-              { label: '文件浏览', value: 'files' },
-            ]}
+            options={permittedViews.map((v) => ({ label: VIEW_LABELS[v], value: v }))}
           />
         </Space>
       }
@@ -255,7 +274,7 @@ export default function AgentNodesPage() {
         ) : (
           view === 'nodes' && (
           <Space>
-            {outdatedNodes.length > 0 && (
+            {canUpgradeNode && outdatedNodes.length > 0 && (
               <>
                 <Tag color="orange">{outdatedNodes.length} 个节点可升级 → {pkg!.version}</Tag>
                 <Button
@@ -271,9 +290,11 @@ export default function AgentNodesPage() {
             <Button icon={<ReloadOutlined />} onClick={reload}>
               刷新
             </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-              新建节点
-            </Button>
+            {canManageNode && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+                新建节点
+              </Button>
+            )}
           </Space>
           )
         )
@@ -308,13 +329,17 @@ export default function AgentNodesPage() {
               emptyText: (
                 <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
                   <Typography.Text type="secondary">
-                    还没有 Agent 节点——先「新建节点」拿到 token，再在目标机执行一键安装脚本即可上线。
+                    {canManageNode
+                      ? '还没有 Agent 节点——先「新建节点」拿到 token，再在目标机执行一键安装脚本即可上线。'
+                      : '还没有 Agent 节点'}
                   </Typography.Text>
-                  <div>
-                    <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-                      新建节点
-                    </Button>
-                  </div>
+                  {canManageNode && (
+                    <div>
+                      <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+                        新建节点
+                      </Button>
+                    </div>
+                  )}
                 </Space>
               ),
             }}

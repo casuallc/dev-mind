@@ -13,18 +13,30 @@ import JiraPushTemplatesPanel, {
 import WorklogSettingsPanel, {
   type WorklogSettingsPanelHandle,
 } from '../../worklog/components/WorklogSettingsPanel'
-import SettingsViewSwitch, { asSettingsTab, type SettingsTab } from '../components/SettingsViewSwitch'
+import SettingsViewSwitch, {
+  SETTINGS_TAB_KEYS,
+  SETTINGS_TAB_PERMISSIONS,
+  asSettingsTab,
+  type SettingsTab,
+} from '../components/SettingsViewSwitch'
+import { usePermissions, usePermittedView } from '../usePermissions'
 import { pageCardBodyScrollStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 
 export default function SettingsPage() {
   const { tab } = useParams<{ tab: string }>()
   const navigate = useNavigate()
   const view = asSettingsTab(tab)
+  usePermittedView(SETTINGS_TAB_KEYS, (v) => SETTINGS_TAB_PERMISSIONS[v], view, (v) =>
+    navigate(`/settings/${v}`, { replace: true }),
+  )
   // 工具栏在 extra 里，刷新/新建/保存要触发面板内部动作 → 面板以 ref 暴露最小句柄
   const accountsRef = useRef<PlatformAccountsPanelHandle>(null)
   const templatesRef = useRef<JiraPushTemplatesPanelHandle>(null)
   const worklogRef = useRef<WorklogSettingsPanelHandle>(null)
   const [savingWorklog, setSavingWorklog] = useState(false)
+  const { canAction } = usePermissions()
+  const canManageTemplate = canAction('top.settings.action.manage-jira-template')
+  const canSaveWorklog = canAction('top.settings.action.save-worklog-settings')
 
   const onSaveWorklog = async () => {
     setSavingWorklog(true)
@@ -46,9 +58,11 @@ export default function SettingsPage() {
         <Button icon={<ReloadOutlined />} onClick={() => templatesRef.current?.reload()}>
           刷新
         </Button>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => templatesRef.current?.openCreate()}>
-          新建模板
-        </Button>
+        {canManageTemplate && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => templatesRef.current?.openCreate()}>
+            新建模板
+          </Button>
+        )}
       </>
     ),
     worklog: (
@@ -56,9 +70,11 @@ export default function SettingsPage() {
         <Button icon={<ReloadOutlined />} onClick={() => worklogRef.current?.reload()}>
           刷新
         </Button>
-        <Button type="primary" icon={<SaveOutlined />} loading={savingWorklog} onClick={onSaveWorklog}>
-          保存
-        </Button>
+        {canSaveWorklog && (
+          <Button type="primary" icon={<SaveOutlined />} loading={savingWorklog} onClick={onSaveWorklog}>
+            保存
+          </Button>
+        )}
       </>
     ),
   }

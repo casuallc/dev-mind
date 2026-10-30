@@ -21,6 +21,7 @@ import { fmtTime } from '../../../shared/utils/format'
 import { pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
 import { isApiRequestError } from '../../../shared/api/error'
+import { usePermissions } from '../../auth/usePermissions'
 
 /**
  * FR-09「Runner 包」页签：服务端托管的 devmind-agent-runner.jar（全局单份，上传即替换）。
@@ -29,6 +30,8 @@ import { isApiRequestError } from '../../../shared/api/error'
  * 节点升级走节点列表的「升级」按钮。
  */
 export default function RunnerPackagePanel() {
+  const { canAction } = usePermissions()
+  const canUpload = canAction('admin.agent-nodes.action.upload-package')
   const [pkg, setPkg] = useState<RunnerPackage | null>(null)
   const [loading, setLoading] = useState(false)
   const [file, setFile] = useState<File | null>(null)
@@ -107,29 +110,33 @@ export default function RunnerPackagePanel() {
         />
       )}
       <Space direction="vertical" style={{ width: 480 }}>
-        <Upload.Dragger
-          accept=".jar"
-          maxCount={1}
-          beforeUpload={(f) => {
-            setFile(f)
-            return false // 本地暂存，点「上传替换」才真正提交
-          }}
-          onRemove={() => setFile(null)}
-          fileList={file ? [{ uid: '-1', name: file.name }] : []}
-        >
-          <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-          <p className="ant-upload-text">点击或拖拽 devmind-agent-runner.jar 到此</p>
-        </Upload.Dragger>
-        <Space>
-          <Button
-            type="primary"
-            icon={<UploadOutlined />}
-            disabled={!file}
-            loading={uploading}
-            onClick={() => doUpload(false)}
+        {canUpload && (
+          <Upload.Dragger
+            accept=".jar"
+            maxCount={1}
+            beforeUpload={(f) => {
+              setFile(f)
+              return false // 本地暂存，点「上传替换」才真正提交
+            }}
+            onRemove={() => setFile(null)}
+            fileList={file ? [{ uid: '-1', name: file.name }] : []}
           >
-            上传替换
-          </Button>
+            <p className="ant-upload-drag-icon"><InboxOutlined /></p>
+            <p className="ant-upload-text">点击或拖拽 devmind-agent-runner.jar 到此</p>
+          </Upload.Dragger>
+        )}
+        <Space>
+          {canUpload && (
+            <Button
+              type="primary"
+              icon={<UploadOutlined />}
+              disabled={!file}
+              loading={uploading}
+              onClick={() => doUpload(false)}
+            >
+              上传替换
+            </Button>
+          )}
           <Button
             icon={<DownloadOutlined />}
             disabled={!pkg}

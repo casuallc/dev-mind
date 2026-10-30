@@ -1,4 +1,5 @@
 import { Badge, Button, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
 import { ApiOutlined } from '@ant-design/icons'
 import { useEffect, useImperativeHandle, useState, type Ref } from 'react'
 import {
@@ -12,6 +13,7 @@ import type { PlatformAccount } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { usePermissions } from '../usePermissions'
 
 const TYPE_COLOR: Record<string, string> = { GITLAB: 'orange', GITHUB: 'default', JIRA: 'blue', FEISHU: 'cyan' }
 const TYPE_LABEL: Record<string, string> = { GITLAB: 'GitLab', GITHUB: 'GitHub', JIRA: 'Jira', FEISHU: '飞书' }
@@ -38,6 +40,8 @@ export default function PlatformAccountsPanel({ ref }: { ref?: Ref<PlatformAccou
   const isGit = editTarget?.integrationType === 'GITLAB' || editTarget?.integrationType === 'GITHUB'
   const isJira = editTarget?.integrationType === 'JIRA'
   const isFeishu = editTarget?.integrationType === 'FEISHU'
+  const { canAction } = usePermissions()
+  const canManage = canAction('top.settings.action.manage-account')
 
   const reload = () => {
     setLoading(true)
@@ -201,32 +205,40 @@ export default function PlatformAccountsPanel({ ref }: { ref?: Ref<PlatformAccou
             width: 160,
             render: (t: string | null) => (t ? fmtTime(t) : '—'),
           },
-          {
-            title: '操作',
-            width: 200,
-            render: (_, row) => (
-              <Space size={4}>
-                <Button size="small" type={row.bound ? 'default' : 'primary'} onClick={() => openEdit(row)}>
-                  {row.bound ? '编辑' : '绑定'}
-                </Button>
-                {row.bound && (
-                  <>
-                    <Button
-                      size="small"
-                      icon={<ApiOutlined />}
-                      loading={testingId === row.integrationId}
-                      onClick={() => onTest(row)}
-                    >
-                      自检
-                    </Button>
-                    <Button size="small" danger onClick={() => onUnbind(row)}>
-                      解绑
-                    </Button>
-                  </>
-                )}
-              </Space>
-            ),
-          },
+          ...(canManage
+            ? [
+                {
+                  title: '操作',
+                  width: 200,
+                  render: (_: unknown, row: PlatformAccount) => (
+                    <Space size={4}>
+                      <Button
+                        size="small"
+                        type={row.bound ? 'default' : 'primary'}
+                        onClick={() => openEdit(row)}
+                      >
+                        {row.bound ? '编辑' : '绑定'}
+                      </Button>
+                      {row.bound && (
+                        <>
+                          <Button
+                            size="small"
+                            icon={<ApiOutlined />}
+                            loading={testingId === row.integrationId}
+                            onClick={() => onTest(row)}
+                          >
+                            自检
+                          </Button>
+                          <Button size="small" danger onClick={() => onUnbind(row)}>
+                            解绑
+                          </Button>
+                        </>
+                      )}
+                    </Space>
+                  ),
+                } satisfies ColumnsType<PlatformAccount>[number],
+              ]
+            : []),
         ]}
       />
 

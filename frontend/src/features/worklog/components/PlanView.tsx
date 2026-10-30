@@ -8,6 +8,7 @@ import FitTable from '../../../shared/components/FitTable'
 import PlanItemFormDrawer from './PlanItemFormDrawer'
 import RecentWeekStrip from './RecentWeekStrip'
 import { showError } from '../../../shared/utils/showError'
+import { usePermissions } from '../../auth/usePermissions'
 
 const mondayOf = (d: Dayjs) => d.startOf('week').add(1, 'day') // dayjs 周日开头，+1 = 周一
 
@@ -29,6 +30,8 @@ export interface PlanViewHandle {
  * 周切换复用周报的 7 周选择条（不可选未来周）；操作按钮在页面壳 Card extra（布局约定），经 ref 句柄触发。
  */
 export default function PlanView({ ref }: { ref?: Ref<PlanViewHandle> }) {
+  const { canAction } = usePermissions()
+  const canManage = canAction('top.worklog.action.manage-plan')
   const [week, setWeek] = useState<Dayjs>(() => mondayOf(dayjs()))
   // 周条窗口回退周数（0=最右为本周），与周报视图同口径
   const [weeksBack, setWeeksBack] = useState(0)
@@ -194,9 +197,11 @@ export default function PlanView({ ref }: { ref?: Ref<PlanViewHandle> }) {
             </Space>
           }
           action={
-            <Button size="small" type="primary" loading={carrying} onClick={onCarryAll}>
-              一键滚转到本周
-            </Button>
+            canManage && (
+              <Button size="small" type="primary" loading={carrying} onClick={onCarryAll}>
+                一键滚转到本周
+              </Button>
+            )
           }
         />
       )}
@@ -267,6 +272,7 @@ export default function PlanView({ ref }: { ref?: Ref<PlanViewHandle> }) {
                   size="small"
                   value={s}
                   style={{ width: 110 }}
+                  disabled={!canManage}
                   onChange={(v) => onStatusChange(i, v)}
                   options={EDITABLE_STATUSES.map((v) => ({
                     value: v,
@@ -296,21 +302,23 @@ export default function PlanView({ ref }: { ref?: Ref<PlanViewHandle> }) {
             title: '操作',
             width: 150,
             render: (_, i) => (
-              <Space>
-                <Button
-                  size="small"
-                  disabled={i.status === 'CARRIED'}
-                  onClick={() => {
-                    setEditTarget(i)
-                    setEditOpen(true)
-                  }}
-                >
-                  编辑
-                </Button>
-                <Button size="small" danger onClick={() => onDelete(i)}>
-                  删除
-                </Button>
-              </Space>
+              canManage && (
+                <Space>
+                  <Button
+                    size="small"
+                    disabled={i.status === 'CARRIED'}
+                    onClick={() => {
+                      setEditTarget(i)
+                      setEditOpen(true)
+                    }}
+                  >
+                    编辑
+                  </Button>
+                  <Button size="small" danger onClick={() => onDelete(i)}>
+                    删除
+                  </Button>
+                </Space>
+              )
             ),
           },
         ]}

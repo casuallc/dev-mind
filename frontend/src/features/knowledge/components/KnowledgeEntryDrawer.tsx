@@ -44,6 +44,7 @@ import Markdown from '../../../shared/components/Markdown'
 import HighlightedSnippet from './HighlightedSnippet'
 import { fmtTime } from '../../../shared/utils/format'
 import { isAdmin } from '../../auth/authStore'
+import { usePermissions } from '../../auth/usePermissions'
 import { showError } from '../../../shared/utils/showError'
 import { DRAWER_SCREEN } from '../../../shared/utils/overlay'
 
@@ -78,6 +79,10 @@ export default function KnowledgeEntryDrawer({
   const [enriching, setEnriching] = useState(false)
   const [versionDetail, setVersionDetail] = useState<KnowledgeVersionDetail | null>(null)
   const [versionLoading, setVersionLoading] = useState(false)
+  const { canAction } = usePermissions()
+  const canEnrich = canAction('admin.knowledge-ops.action.enrich')
+  const canManageEntry = canAction('admin.knowledge.action.manage-entry')
+  const canReview = canAction('admin.knowledge-ops.action.review')
 
   useEffect(() => {
     if (entryId == null) {
@@ -390,7 +395,13 @@ export default function KnowledgeEntryDrawer({
         />
       )}
       {chunks.length === 0 ? (
-        <Empty description="暂无分块。文档可能尚未完成索引，可在右上角重建索引。" />
+        <Empty
+          description={
+            canManageEntry
+              ? '暂无分块。文档可能尚未完成索引，可在右上角重建索引。'
+              : '暂无分块。'
+          }
+        />
       ) : (
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Typography.Text type="secondary">
@@ -475,17 +486,19 @@ export default function KnowledgeEntryDrawer({
         </Space>
       }
       extra={
-        entry ? (
+        entry && (canReview || canEnrich || canManageEntry) ? (
           <Space>
-            <Button icon={<CheckCircleOutlined />} loading={reviewing} onClick={onReview}>
-              登记复核
-            </Button>
-            {isAdmin() && (
+            {canReview && (
+              <Button icon={<CheckCircleOutlined />} loading={reviewing} onClick={onReview}>
+                登记复核
+              </Button>
+            )}
+            {canEnrich && (
               <Button icon={<ThunderboltOutlined />} loading={enriching} onClick={onEnrich}>
                 补全元数据
               </Button>
             )}
-            {isAdmin() && (
+            {canManageEntry && (
               <Button icon={<ReloadOutlined />} loading={reindexing} onClick={onReindex}>
                 重建索引
               </Button>

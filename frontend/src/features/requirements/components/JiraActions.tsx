@@ -9,12 +9,15 @@ import type { MenuProps } from 'antd'
 import { listJiraTransitions, logJiraWork, transitionJiraIssue } from '../api'
 import type { JiraTransition, Requirement } from '../types'
 import { showError } from '../../../shared/utils/showError'
+import { usePermissions } from '../../auth/usePermissions'
 
 export default function JiraActions({ requirement, onChanged }: {
   requirement: Requirement
   onChanged: () => void
 }) {
   const [transitions, setTransitions] = useState<JiraTransition[] | null>(null)
+  const { canAction } = usePermissions()
+  const canPush = canAction('project.requirements.action.push-jira')
   const [busy, setBusy] = useState(false)
   const [worklogOpen, setWorklogOpen] = useState(false)
   const [hours, setHours] = useState(1)
@@ -29,7 +32,7 @@ export default function JiraActions({ requirement, onChanged }: {
       .catch(() => setTransitions(null)) // 静默降级：无关联/权限不足时不显示入口
   }, [pid, rid, requirement.source, requirement.remoteStatus])
 
-  if (!transitions) return null
+  if (!transitions || !canPush) return null
 
   const confirmTransit = (t: JiraTransition) => {
     Modal.confirm({

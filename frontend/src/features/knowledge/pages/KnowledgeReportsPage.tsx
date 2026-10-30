@@ -1,8 +1,14 @@
 // CAP-86 v3 质量报告独立页：跨库质量报告（生命周期/近重复/答案反馈/检索评测）。
 import { Navigate, useSearchParams } from 'react-router-dom'
 import { Card, Segmented, Space, Typography } from 'antd'
-import KnowledgeReportsPanel, { REPORT_VIEW_OPTIONS, type ReportsView } from '../components/KnowledgeReportsPanel'
+import KnowledgeReportsPanel, {
+  REPORT_VIEW_OPTIONS,
+  REPORT_VIEWS,
+  REPORT_VIEW_PERMISSIONS,
+  type ReportsView,
+} from '../components/KnowledgeReportsPanel'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import { usePermittedView } from '../../auth/usePermissions'
 
 export default function KnowledgeReportsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -15,6 +21,13 @@ export default function KnowledgeReportsPage() {
     params.set('view', next)
     setSearchParams(params, { replace: true })
   }
+
+  const views = usePermittedView(
+    REPORT_VIEWS,
+    (v) => REPORT_VIEW_PERMISSIONS[v],
+    view,
+    onViewChange,
+  )
 
   // 自动增强已并入知识运营，旧链接跳转过去
   if (viewParam === 'enrich') {
@@ -31,7 +44,7 @@ export default function KnowledgeReportsPage() {
           <Segmented
             value={view}
             onChange={(v) => onViewChange(v as ReportsView)}
-            options={REPORT_VIEW_OPTIONS}
+            options={REPORT_VIEW_OPTIONS.filter((o) => views.includes(o.value))}
           />
         </Space>
       }

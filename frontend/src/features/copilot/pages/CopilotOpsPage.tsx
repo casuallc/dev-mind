@@ -12,16 +12,30 @@ import ActionsPanel from '../components/ActionsPanel'
 import PlansPanel from '../components/PlansPanel'
 import { showError } from '../../../shared/utils/showError'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
+import { usePermittedView } from '../../auth/usePermissions'
 
 type CopilotView = 'tools' | 'turns' | 'actions' | 'plans'
 const VIEWS: CopilotView[] = ['tools', 'turns', 'actions', 'plans']
+const VIEW_LABELS: Record<CopilotView, string> = {
+  tools: '工具目录',
+  turns: '对话审计',
+  actions: '确认单',
+  plans: '计划',
+}
+const VIEW_PERMISSIONS: Record<CopilotView, string> = {
+  tools: 'admin.copilot.tab.tools',
+  turns: 'admin.copilot.tab.turns',
+  actions: 'admin.copilot.tab.actions',
+  plans: 'admin.copilot.tab.plans',
+}
 
 export default function CopilotOpsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const rawView = searchParams.get('view') as CopilotView | null
   const view: CopilotView = rawView && VIEWS.includes(rawView) ? rawView : 'tools'
-  const switchView = (v: string | number) =>
-    setSearchParams(v === 'tools' ? {} : { view: String(v) }, { replace: true })
+  const switchView = (v: CopilotView) =>
+    setSearchParams(v === 'tools' ? {} : { view: v }, { replace: true })
+  const views = usePermittedView(VIEWS, (v) => VIEW_PERMISSIONS[v], view, switchView)
 
   const [refreshTick, setRefreshTick] = useState(0)
   const [health, setHealth] = useState<CopilotHealth | null>(null)
@@ -45,13 +59,8 @@ export default function CopilotOpsPage() {
           <span>智能体运维</span>
           <Segmented
             value={view}
-            onChange={switchView}
-            options={[
-              { value: 'tools', label: '工具目录' },
-              { value: 'turns', label: '对话审计' },
-              { value: 'actions', label: '确认单' },
-              { value: 'plans', label: '计划' },
-            ]}
+            onChange={(v) => switchView(v as CopilotView)}
+            options={views.map((v) => ({ value: v, label: VIEW_LABELS[v] }))}
           />
         </Space>
       }

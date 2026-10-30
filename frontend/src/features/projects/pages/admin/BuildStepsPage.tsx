@@ -31,11 +31,14 @@ import { showError } from '../../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../../shared/utils/table'
 import { DRAWER_DEFAULT } from '../../../../shared/utils/overlay'
 import CopyableLongText from '../../../../shared/components/CopyableLongText'
+import { usePermissions } from '../../../auth/usePermissions'
 
 const LOCATION_OPTIONS = ['LOCAL', 'AGENT']
 
 export default function BuildStepsPage() {
   const { id = '' } = useParams<{ id: string }>()
+  const { canAction } = usePermissions()
+  const canEdit = canAction('admin.projects.action.edit-project')
   const [steps, setSteps] = useState<BuildStep[]>([])
   const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
@@ -112,23 +115,25 @@ export default function BuildStepsPage() {
     { title: '命令', dataIndex: 'command', render: (c: string) => <CopyableLongText text={c} maxWidth={360} modalTitle="构建命令" /> },
     { title: '目录', dataIndex: 'workingDir', width: 120, render: (d?: string) => d || '-' },
     { title: '位置', dataIndex: 'location', width: 90, render: (l: string) => <Tag color={l === 'AGENT' ? 'purple' : 'default'}>{l}</Tag> },
-    {
-      title: '操作',
-      key: 'action',
-      width: 200,
-      render: (_: unknown, r: BuildStep, idx: number) => (
-        <Space size={4}>
-          <Button size="small" disabled={idx === 0} onClick={() => move(idx, -1)}>
-            上移
-          </Button>
-          <Button size="small" disabled={idx === steps.length - 1} onClick={() => move(idx, 1)}>
-            下移
-          </Button>
-          <Button size="small" onClick={() => openEdit(r)}>编辑</Button>
-          <Button size="small" danger onClick={() => confirmDelete(r)}>删除</Button>
-        </Space>
-      ),
-    },
+    ...(canEdit
+      ? [{
+          title: '操作',
+          key: 'action',
+          width: 200,
+          render: (_: unknown, r: BuildStep, idx: number) => (
+            <Space size={4}>
+              <Button size="small" disabled={idx === 0} onClick={() => move(idx, -1)}>
+                上移
+              </Button>
+              <Button size="small" disabled={idx === steps.length - 1} onClick={() => move(idx, 1)}>
+                下移
+              </Button>
+              <Button size="small" onClick={() => openEdit(r)}>编辑</Button>
+              <Button size="small" danger onClick={() => confirmDelete(r)}>删除</Button>
+            </Space>
+          ),
+        } satisfies ColumnsType<BuildStep>[number]]
+      : []),
   ]
 
   return (
@@ -139,9 +144,11 @@ export default function BuildStepsPage() {
           <Button icon={<ReloadOutlined />} onClick={reload}>
             刷新
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-            添加步骤
-          </Button>
+          {canEdit && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
+              添加步骤
+            </Button>
+          )}
         </Space>
       }
     >
@@ -154,7 +161,7 @@ export default function BuildStepsPage() {
         dataSource={steps}
         loading={loading}
         pagination={LIST_PAGINATION}
-        locale={{ emptyText: '暂无构建步骤。点击「添加步骤」创建第一个。' }}
+        locale={{ emptyText: canEdit ? '暂无构建步骤。点击「添加步骤」创建第一个。' : '暂无构建步骤' }}
       />
       <Drawer
         title={editing ? '编辑构建步骤' : '添加构建步骤'}

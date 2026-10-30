@@ -10,6 +10,7 @@ import type { ModelEndpoint } from '../../model/types'
 import type { KnowledgeBase, KnowledgeBaseInput } from '../types'
 import { showError } from '../../../shared/utils/showError'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
+import { usePermissions } from '../../auth/usePermissions'
 
 export default function KnowledgeBaseSettingsDrawer({
   open,
@@ -29,6 +30,9 @@ export default function KnowledgeBaseSettingsDrawer({
   const [endpoints, setEndpoints] = useState<ModelEndpoint[]>([])
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const { canAction } = usePermissions()
+  const canEditBase = canAction('admin.knowledge.action.edit-base')
+  const canDeleteBase = canAction('admin.knowledge.action.delete-base')
 
   useEffect(() => {
     if (!open) return
@@ -126,9 +130,11 @@ export default function KnowledgeBaseSettingsDrawer({
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button onClick={onClose}>取消</Button>
-            <Button type="primary" loading={saving} onClick={onSave} disabled={!current}>
-              保存
-            </Button>
+            {canEditBase && (
+              <Button type="primary" loading={saving} onClick={onSave} disabled={!current}>
+                保存
+              </Button>
+            )}
           </Space>
         }
       >
@@ -184,20 +190,24 @@ export default function KnowledgeBaseSettingsDrawer({
               </Form.Item>
             </Form>
 
-            <Divider style={{ margin: '8px 0 16px' }} />
-            <Typography.Text type="danger" strong>
-              危险区
-            </Typography.Text>
-            <div style={{ marginTop: 8 }}>
-              <Space wrap>
-                <Typography.Text type="secondary">
-                  删除知识库会连同 {current.entryCount} 个文档与索引一并移除，无法恢复。
+            {canDeleteBase && (
+              <>
+                <Divider style={{ margin: '8px 0 16px' }} />
+                <Typography.Text type="danger" strong>
+                  危险区
                 </Typography.Text>
-                <Button danger icon={<DeleteOutlined />} loading={deleting} onClick={onDelete}>
-                  删除知识库
-                </Button>
-              </Space>
-            </div>
+                <div style={{ marginTop: 8 }}>
+                  <Space wrap>
+                    <Typography.Text type="secondary">
+                      删除知识库会连同 {current.entryCount} 个文档与索引一并移除，无法恢复。
+                    </Typography.Text>
+                    <Button danger icon={<DeleteOutlined />} loading={deleting} onClick={onDelete}>
+                      删除知识库
+                    </Button>
+                  </Space>
+                </div>
+              </>
+            )}
           </>
         )}
       </Drawer>

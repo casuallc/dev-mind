@@ -11,8 +11,29 @@ import DatasetView from '../components/DatasetView'
 import EvaluationView from '../components/EvaluationView'
 import FinetuneView from '../components/FinetuneView'
 import CheckpointView from '../components/CheckpointView'
+import { usePermissions, usePermittedView } from '../../auth/usePermissions'
 
 type LabView = 'datasets' | 'evaluations' | 'finetunes' | 'checkpoints'
+
+const LAB_VIEWS: LabView[] = ['datasets', 'evaluations', 'finetunes', 'checkpoints']
+const LAB_VIEW_LABELS: Record<LabView, string> = {
+  datasets: '评测集',
+  evaluations: '评测运行',
+  finetunes: '微调任务',
+  checkpoints: 'Checkpoint 登记',
+}
+const LAB_VIEW_PERMISSIONS: Record<LabView, string> = {
+  datasets: 'admin.laya-lab.tab.datasets',
+  evaluations: 'admin.laya-lab.tab.evaluations',
+  finetunes: 'admin.laya-lab.tab.finetunes',
+  checkpoints: 'admin.laya-lab.tab.checkpoints',
+}
+const LAB_VIEW_ACTIONS: Record<LabView, string> = {
+  datasets: 'admin.laya-lab.action.manage-dataset',
+  evaluations: 'admin.laya-lab.action.manage-evaluation',
+  finetunes: 'admin.laya-lab.action.manage-finetune',
+  checkpoints: 'admin.laya-lab.action.manage-checkpoint',
+}
 
 const VIEW_DESC: Record<LabView, string> = {
   datasets:
@@ -33,7 +54,10 @@ const VIEW_ACTION: Record<LabView, string> = {
 }
 
 export default function DecisionLabPage() {
+  const { canAction } = usePermissions()
   const [view, setView] = useState<LabView>('datasets')
+  const views = usePermittedView(LAB_VIEWS, (v) => LAB_VIEW_PERMISSIONS[v], view, setView)
+  const canCreate = canAction(LAB_VIEW_ACTIONS[view])
   // extra 按钮通过 tick 触发当前视图内组件的动作（刷新 / 新建）
   const [refreshTick, setRefreshTick] = useState(0)
   const [createTick, setCreateTick] = useState(0)
@@ -51,12 +75,7 @@ export default function DecisionLabPage() {
             <Segmented
               value={view}
               onChange={(v) => setView(v as LabView)}
-              options={[
-                { value: 'datasets', label: '评测集' },
-                { value: 'evaluations', label: '评测运行' },
-                { value: 'finetunes', label: '微调任务' },
-                { value: 'checkpoints', label: 'Checkpoint 登记' },
-              ]}
+              options={views.map((v) => ({ value: v, label: LAB_VIEW_LABELS[v] }))}
             />
           </ScrollRow>
         </div>
@@ -66,9 +85,11 @@ export default function DecisionLabPage() {
           <Button icon={<ReloadOutlined />} onClick={() => setRefreshTick((t) => t + 1)}>
             刷新
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateTick((t) => t + 1)}>
-            {VIEW_ACTION[view]}
-          </Button>
+          {canCreate && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateTick((t) => t + 1)}>
+              {VIEW_ACTION[view]}
+            </Button>
+          )}
         </Space>
       }
     >

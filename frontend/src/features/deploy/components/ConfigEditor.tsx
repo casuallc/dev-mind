@@ -18,12 +18,15 @@ import type { DeployConfig, DeployStepInput } from '../types'
 import type { TemplateView } from '../../execution/types'
 import { listTemplates } from '../../execution/api'
 import { paramsToText, textToParams } from '../../../shared/utils/format'
+import { usePermissions } from '../../auth/usePermissions'
 
 const STEP_TYPES = ['artifact', 'backup', 'deploy', 'start', 'health']
 
 export default function ConfigEditor({ cfg, onChanged }: { cfg: DeployConfig; onChanged: (c: DeployConfig) => void }) {
   // CAP-36 命令模板白名单：步骤的 templateCode 只能从这里选，不允许手填
   const [templates, setTemplates] = useState<TemplateView[]>([])
+  const { canAction } = usePermissions()
+  const canSave = canAction('project.deployments.action.save-config')
   useEffect(() => {
     listTemplates(cfg.projectId).then(setTemplates).catch(() => setTemplates([]))
   }, [cfg.projectId])
@@ -34,22 +37,25 @@ export default function ConfigEditor({ cfg, onChanged }: { cfg: DeployConfig; on
         title="部署步骤（拉取产物 → 备份 → 部署 → 启动 → 健康检查）"
         steps={cfg.steps}
         templates={templates}
+        readOnly={!canSave}
         onChange={(steps) => onChanged({ ...cfg, steps })}
       />
       <StepListEditor
         title="回滚步骤（失败后按此恢复，${backup} 为备份引用）"
         steps={cfg.rollbackSteps}
         templates={templates}
+        readOnly={!canSave}
         onChange={(rollbackSteps) => onChanged({ ...cfg, rollbackSteps })}
       />
     </Space>
   )
 }
 
-function StepListEditor({ title, steps, templates, onChange }: {
+function StepListEditor({ title, steps, templates, readOnly, onChange }: {
   title: string
   steps: DeployStepInput[]
   templates: TemplateView[]
+  readOnly?: boolean
   onChange: (s: DeployStepInput[]) => void
 }) {
   const [editing, setEditing] = useState<DeployStepInput | null>(null)
@@ -108,7 +114,7 @@ function StepListEditor({ title, steps, templates, onChange }: {
       title: '',
       key: 'act',
       width: 130,
-      render: (_, r) => (
+      render: (_, r) => readOnly ? null : (
         <Space size={4}>
           <Button size="small" onClick={() => openEdit(r)}>编辑</Button>
           <Popconfirm
@@ -129,7 +135,9 @@ function StepListEditor({ title, steps, templates, onChange }: {
     <div>
       <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
         <Typography.Text type="secondary" style={{ fontSize: 13 }}>{title}</Typography.Text>
-        <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>添加步骤</Button>
+        {!readOnly && (
+          <Button size="small" icon={<PlusOutlined />} onClick={() => openEdit(null)}>添加步骤</Button>
+        )}
       </Space>
       <Table<DeployStepInput> rowKey={(r) => r.name + r.type + r.templateCode} size="small" columns={columns} dataSource={steps} pagination={false} />
       <Modal title={isNew ? '添加步骤' : '编辑步骤'} open={modalOpen} onCancel={closeModal}

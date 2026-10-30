@@ -14,9 +14,11 @@ import {
   message,
 } from 'antd'
 import { CopyOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { deleteApiKey, issueApiKey, listApiKeys, setApiKeyEnabled } from '../api'
 import type { ApiKey, IssuedKey } from '../types'
+import { usePermissions } from '../../auth/usePermissions'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
@@ -33,6 +35,8 @@ export default function ApiKeysPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [issued, setIssued] = useState<IssuedKey | null>(null)
   const [form] = Form.useForm<{ name: string; expiresAt?: dayjs.Dayjs }>()
+  const { canAction } = usePermissions()
+  const canManage = canAction('admin.keys.action.manage')
 
   const reload = () => {
     setLoading(true)
@@ -66,7 +70,7 @@ export default function ApiKeysPage() {
     message.success(`${label}已复制`)
   }
 
-  const columns = [
+  const columns: ColumnsType<ApiKey> = [
     { title: '名称', dataIndex: 'name', width: 180 },
     {
       title: 'Access Key',
@@ -100,35 +104,39 @@ export default function ApiKeysPage() {
       render: (t: string | null) => fmtTime(t),
     },
     { title: '创建人', dataIndex: 'createdBy', width: 100, render: (s: string | null) => s || '-' },
-    {
-      title: '操作',
-      key: 'act',
-      width: 190,
-      render: (_: unknown, r: ApiKey) => (
-        <Space size={8}>
-          <Switch
-            size="small"
-            checked={r.enabled}
-            onChange={async (checked) => {
-              await setApiKeyEnabled(r.id, checked)
-              message.success(`已${checked ? '启用' : '禁用'} ${r.name}`)
-              reload()
-            }}
-          />
-          <Button size="small" danger onClick={() => Modal.confirm({
-            centered: true,
-            title: `删除密钥「${r.name}」？`,
-            okText: '删除',
-            okButtonProps: { danger: true },
-            onOk: async () => {
-              await deleteApiKey(r.id)
-              message.success('已删除')
-              reload()
-            },
-          })}>删除</Button>
-        </Space>
-      ),
-    },
+    ...(canManage
+      ? [
+          {
+            title: '操作',
+            key: 'act',
+            width: 190,
+            render: (_: unknown, r: ApiKey) => (
+              <Space size={8}>
+                <Switch
+                  size="small"
+                  checked={r.enabled}
+                  onChange={async (checked) => {
+                    await setApiKeyEnabled(r.id, checked)
+                    message.success(`已${checked ? '启用' : '禁用'} ${r.name}`)
+                    reload()
+                  }}
+                />
+                <Button size="small" danger onClick={() => Modal.confirm({
+                  centered: true,
+                  title: `删除密钥「${r.name}」？`,
+                  okText: '删除',
+                  okButtonProps: { danger: true },
+                  onOk: async () => {
+                    await deleteApiKey(r.id)
+                    message.success('已删除')
+                    reload()
+                  },
+                })}>删除</Button>
+              </Space>
+            ),
+          } satisfies ColumnsType<ApiKey>[number],
+        ]
+      : []),
   ]
 
   return (
@@ -141,9 +149,11 @@ export default function ApiKeysPage() {
           <Button icon={<ReloadOutlined />} onClick={reload}>
             刷新
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            新建密钥
-          </Button>
+          {canManage && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              新建密钥
+            </Button>
+          )}
         </Space>
       }
     >
@@ -160,13 +170,17 @@ export default function ApiKeysPage() {
           emptyText: (
             <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
               <Typography.Text type="secondary">
-                还没有 API 密钥——「新建密钥」签发一对 Access Key / Secret 即可接入。
+                {canManage
+                  ? '还没有 API 密钥——「新建密钥」签发一对 Access Key / Secret 即可接入。'
+                  : '还没有 API 密钥。'}
               </Typography.Text>
-              <div>
-                <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-                  新建密钥
-                </Button>
-              </div>
+              {canManage && (
+                <div>
+                  <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+                    新建密钥
+                  </Button>
+                </div>
+              )}
             </Space>
           ),
         }}

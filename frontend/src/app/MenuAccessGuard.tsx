@@ -22,12 +22,14 @@ export default function MenuAccessGuard({ children }: { children: ReactNode }) {
   if (!loaded) return <>{children}</>
 
   const selected = menuSelectedKey(location.pathname)
-  if (!knownPaths.includes(selected) || items.some((m) => m.path === selected)) {
+  if (!knownPaths.includes(selected)
+    || items.some((m) => m.nodeType === 'MENU' && m.path === selected)) {
     return <>{children}</>
   }
 
-  const home = items.find((m) => m.path === '/home')
-  const fallback = home?.path ?? items[0]?.path ?? '/login'
+  const navItems = items.filter((m) => m.nodeType === 'MENU')
+  const home = navItems.find((m) => m.path === '/home')
+  const fallback = home?.path ?? navItems[0]?.path ?? '/login'
   return (
     <Result
       status="403"

@@ -15,7 +15,7 @@ import UserMenu from '../features/auth/components/UserMenu'
 import { startNotificationStream, stopNotificationStream } from '../features/notifications/store'
 import { getUserSnapshot, isAdmin, setUser, subscribeAuth } from '../features/auth/authStore'
 import { fetchMe } from '../features/auth/api'
-import { useMenus } from '../features/auth/useMenus'
+import { usePermissions } from '../features/auth/usePermissions'
 
 const { Header, Content } = Layout
 
@@ -27,12 +27,11 @@ export default function AppLayout() {
   // 项目列表常驻引导（加载 + currentId 兜底），与切换器 UI 解耦
   const projectBootstrap = useProjectBootstrap()
   const projectPage = isProjectPage(location.pathname)
-  // CAP-61：顶部导航按角色可见菜单渲染（菜单权限只控入口，接口鉴权仍由后端负责）
-  const { items: menus } = useMenus()
-  const topItems = menus
-    .filter((m) => m.zone === 'TOP')
+  // CAP-61/103：顶部导航按角色可见的一级菜单渲染（页签/按钮节点不参与导航）
+  const { menusOf } = usePermissions()
+  const topItems = menusOf('TOP')
     .map((m) => ({ key: m.path, icon: menuIcon(m.icon), label: m.title }))
-  const adminEntrance = isAdmin() || menus.some((m) => m.zone === 'ADMIN')
+  const adminEntrance = isAdmin() || menusOf('ADMIN').length > 0
 
   // 启动全局通知实时流（铃铛角标/浏览器通知依赖它）
   useEffect(() => {

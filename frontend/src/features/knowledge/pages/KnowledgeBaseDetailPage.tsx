@@ -59,8 +59,16 @@ import FitTable from '../../../shared/components/FitTable'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import { usePermissions, usePermittedView } from '../../auth/usePermissions'
 
 type BaseTab = 'entries' | 'upload' | 'feishu'
+const BASE_TABS = ['entries', 'upload', 'feishu'] as const
+/** CAP-103 知识库详情页签权限节点（与后端权限目录一致） */
+const BASE_TAB_PERMISSIONS: Record<BaseTab, string> = {
+  entries: 'admin.knowledge.tab.entries',
+  upload: 'admin.knowledge.tab.upload',
+  feishu: 'admin.knowledge.tab.feishu',
+}
 
 const ENTRY_PAGE_SIZE = 20
 
@@ -87,7 +95,11 @@ function sourceTag(source: string) {
   return <Tag>手动</Tag>
 }
 
-function indexStatusTag(entry: KnowledgeEntrySummary, onRetry: (entry: KnowledgeEntrySummary) => void) {
+function indexStatusTag(
+  entry: KnowledgeEntrySummary,
+  onRetry: (entry: KnowledgeEntrySummary) => void,
+  canRetry: boolean,
+) {
   const status = entry.indexStatus
   if (status === 'ready') return <Tag color="green">已索引</Tag>
   if (status === 'pending') return <Tag color="gold">待索引</Tag>
@@ -103,15 +115,17 @@ function indexStatusTag(entry: KnowledgeEntrySummary, onRetry: (entry: Knowledge
       <Tooltip title={entry.indexError ?? '索引失败'}>
         <Tag color="red">索引失败</Tag>
       </Tooltip>
-      <Button
-        size="small"
-        onClick={(e) => {
-          e.stopPropagation()
-          onRetry(entry)
-        }}
-      >
-        重试
-      </Button>
+      {canRetry && (
+        <Button
+          size="small"
+          onClick={(e) => {
+            e.stopPropagation()
+            onRetry(entry)
+          }}
+        >
+          重试
+        </Button>
+      )}
     </Space>
   )
 }
@@ -175,6 +189,13 @@ export default function KnowledgeBaseDetailPage() {
     else params.set('tab', next)
     setSearchParams(params, { replace: true })
   }
+  const permittedTabs = usePermittedView(BASE_TABS, (v) => BASE_TAB_PERMISSIONS[v], tab, setTab)
+  const { canAction } = usePermissions()
+  const canEditBase = canAction('admin.knowledge.action.edit-base')
+  const canManageEntry = canAction('admin.knowledge.action.manage-entry')
+  const canReindex = canAction('admin.knowledge.action.reindex')
+  const canUpload = canAction('admin.knowledge.action.upload')
+  const canAddContent = canUpload || canManageEntry
 
   const loadBase = useCallback(async () => {
     if (!Number.isFinite(baseId) || baseId <= 0) return
@@ -456,7 +477,7 @@ export default function KnowledgeBaseDetailPage() {
       title: '索引',
       dataIndex: 'indexStatus',
       width: 132,
-      render: (_, r) => indexStatusTag(r, onReindexEntry),
+      render: (_, r) => indexStatusTag(r, onReindexEntry, canManageEntry),
     },
     {
       title: '版本/命中',
@@ -475,47 +496,51 @@ export default function KnowledgeBaseDetailPage() {
       render: (s: string) => (s === 'active' ? <Tag color="green">启用</Tag> : <Tag>已下线</Tag>),
     },
     { title: '更新时间', dataIndex: 'updatedAt', width: 165, render: (v: string) => fmtTime(v) },
-    {
-      title: '操作',
-      width: 150,
-      render: (_, r) => {
-        const items: MenuProps['items'] = [
-          { key: 'reindex', label: '重建索引' },
-          ...(r.source === 'feishu' ? [{ key: 'resync', label: '重同步飞书内容' }] : []),
-          { type: 'divider' as const },
-          { key: 'delete', label: '删除', danger: true },
+    ...(canManageEntry
+      ? [
+          {
+            title: '操作',
+            width: 150,
+            render: (_: unknown, r: KnowledgeEntrySummary) => {
+              const items: MenuProps['items'] = [
+                { key: 'reindex', label: '重建索引' },
+                ...(r.source === 'feishu' ? [{ key: 'resync', label: '重同步飞书内容' }] : []),
+                { type: 'divider' as const },
+                { key: 'delete', label: '删除', danger: true },
+              ]
+              return (
+                <Space size={4}>
+                  <Button
+                    size="small"
+                    icon={<EditOutlined />}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      openEditEntry(r.id)
+                    }}
+                  >
+                    编辑
+                  </Button>
+                  <Dropdown
+                    menu={{
+                      items,
+                      onClick: ({ key, domEvent }) => {
+                        domEvent.stopPropagation()
+                        if (key === 'reindex') onReindexEntry(r)
+                        else if (key === 'resync') onResync(r)
+                        else if (key === 'delete') onDeleteEntry(r)
+                      },
+                    }}
+                  >
+                    <Button size="small" loading={resyncingId === r.id} onClick={(e) => e.stopPropagation()}>
+                      更多
+                    </Button>
+                  </Dropdown>
+                </Space>
+              )
+            },
+          } satisfies ColumnsType<KnowledgeEntrySummary>[number],
         ]
-        return (
-          <Space size={4}>
-            <Button
-              size="small"
-              icon={<EditOutlined />}
-              onClick={(e) => {
-                e.stopPropagation()
-                openEditEntry(r.id)
-              }}
-            >
-              编辑
-            </Button>
-            <Dropdown
-              menu={{
-                items,
-                onClick: ({ key, domEvent }) => {
-                  domEvent.stopPropagation()
-                  if (key === 'reindex') onReindexEntry(r)
-                  else if (key === 'resync') onResync(r)
-                  else if (key === 'delete') onDeleteEntry(r)
-                },
-              }}
-            >
-              <Button size="small" loading={resyncingId === r.id} onClick={(e) => e.stopPropagation()}>
-                更多
-              </Button>
-            </Dropdown>
-          </Space>
-        )
-      },
-    },
+      : []),
   ]
 
   const headerTags = base && (
@@ -525,9 +550,9 @@ export default function KnowledgeBaseDetailPage() {
   )
 
   const addContentItems: MenuProps['items'] = [
-    { key: 'upload', label: '上传文件 / 文件夹 / ZIP' },
-    { key: 'markdown', label: '新建 Markdown 文档' },
-    { key: 'feishu', label: '从飞书导入' },
+    ...(canUpload ? [{ key: 'upload', label: '上传文件 / 文件夹 / ZIP' }] : []),
+    ...(canManageEntry ? [{ key: 'markdown', label: '新建 Markdown 文档' }] : []),
+    ...(canUpload ? [{ key: 'feishu', label: '从飞书导入' }] : []),
   ]
 
   const onAddContent: MenuProps['onClick'] = ({ key }) => {
@@ -562,9 +587,11 @@ export default function KnowledgeBaseDetailPage() {
             value={tab}
             onChange={(key) => setTab(key as BaseTab)}
             options={[
-              { value: 'entries', label: `文档${base ? ` (${base.entryCount})` : ''}` },
-              { value: 'upload', label: '手动上传' },
-              { value: 'feishu', label: '飞书同步' },
+              ...(permittedTabs.includes('entries')
+                ? [{ value: 'entries', label: `文档${base ? ` (${base.entryCount})` : ''}` }]
+                : []),
+              ...(permittedTabs.includes('upload') ? [{ value: 'upload', label: '手动上传' }] : []),
+              ...(permittedTabs.includes('feishu') ? [{ value: 'feishu', label: '飞书同步' }] : []),
             ]}
           />
         </Space>
@@ -577,11 +604,13 @@ export default function KnowledgeBaseDetailPage() {
           <Button icon={<ReloadOutlined />} onClick={refreshAll}>
             刷新
           </Button>
-          <Dropdown menu={{ items: addContentItems, onClick: onAddContent }} placement="bottomRight">
-            <Button type="primary" icon={<PlusOutlined />}>
-              添加内容
-            </Button>
-          </Dropdown>
+          {canAddContent && (
+            <Dropdown menu={{ items: addContentItems, onClick: onAddContent }} placement="bottomRight">
+              <Button type="primary" icon={<PlusOutlined />}>
+                添加内容
+              </Button>
+            </Dropdown>
+          )}
           <Link to="/admin/knowledge">
             <Button>返回列表</Button>
           </Link>
@@ -616,7 +645,7 @@ export default function KnowledgeBaseDetailPage() {
                 失败 {base.indexStats.failed} · 去处理
               </Typography.Link>
             )}
-            {base.indexStats.mismatched > 0 && (
+            {base.indexStats.mismatched > 0 && canReindex && (
               <Typography.Link onClick={() => onReindexBase(true)}>
                 需重建 {base.indexStats.mismatched} · 一键重建
               </Typography.Link>
@@ -700,7 +729,11 @@ export default function KnowledgeBaseDetailPage() {
               type="info"
               showIcon
               message="该库已归档"
-              description="归档库不参与检索（含场景绑定）；需要恢复时到知识库列表点「设置」把状态改回「启用」。"
+              description={
+                canEditBase
+                  ? '归档库不参与检索（含场景绑定）；需要恢复时到知识库列表点「设置」把状态改回「启用」。'
+                  : '归档库不参与检索（含场景绑定）。'
+              }
             />
           )}
           {base && base.indexStats.mismatched > 0 && (
@@ -717,9 +750,11 @@ export default function KnowledgeBaseDetailPage() {
                   : '当前库没有可用向量端点，历史索引无法用于检索。'
               }
               action={
-                <Button size="small" loading={reindexing} onClick={() => onReindexBase(true)}>
-                  一键重建
-                </Button>
+                canReindex ? (
+                  <Button size="small" loading={reindexing} onClick={() => onReindexBase(true)}>
+                    一键重建
+                  </Button>
+                ) : undefined
               }
             />
           )}
@@ -742,7 +777,11 @@ export default function KnowledgeBaseDetailPage() {
                 setSize(nextSize)
               },
             }}
-            locale={{ emptyText: '没有匹配的文档。可调整过滤条件，或点右上角「添加内容」补充。' }}
+            locale={{
+              emptyText: canAddContent
+                ? '没有匹配的文档。可调整过滤条件，或点右上角「添加内容」补充。'
+                : '没有匹配的文档。可调整过滤条件。',
+            }}
           />
         </div>
       )}
@@ -751,7 +790,7 @@ export default function KnowledgeBaseDetailPage() {
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
             支持 Markdown / 文本 / PDF / Word / PPT / Excel / HTML 与 ZIP；文件夹按目录结构入库，解析与索引在后台异步执行。
-            点右上角「添加内容」上传文件 / 文件夹 / ZIP，或新建 Markdown 文档。
+            {canAddContent && '点右上角「添加内容」上传文件 / 文件夹 / ZIP，或新建 Markdown 文档。'}
           </Typography.Paragraph>
           <KnowledgeImportsView
             bases={base ? [base] : []}
@@ -807,16 +846,18 @@ export default function KnowledgeBaseDetailPage() {
                     value={feishuUrls}
                     onChange={(e) => setFeishuUrls(e.target.value)}
                   />
-                  <div>
-                    <Button
-                      type="primary"
-                      icon={<CloudDownloadOutlined />}
-                      loading={feishuImporting}
-                      onClick={onImportFeishu}
-                    >
-                      导入
-                    </Button>
-                  </div>
+                  {canUpload && (
+                    <div>
+                      <Button
+                        type="primary"
+                        icon={<CloudDownloadOutlined />}
+                        loading={feishuImporting}
+                        onClick={onImportFeishu}
+                      >
+                        导入
+                      </Button>
+                    </div>
+                  )}
                   {feishuResults && (
                     <Table<FeishuImportResult>
                       rowKey={(r) => r.url}

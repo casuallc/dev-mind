@@ -8,7 +8,7 @@ import {
   FolderOpenOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
-import { canWrite } from '../../auth/authStore'
+import { usePermissions } from '../../auth/usePermissions'
 import { listProjects } from '../../projects/api'
 import type { Project } from '../../projects/types'
 import { deleteSkill, getSkill, updateSkillStatus } from '../api'
@@ -28,6 +28,9 @@ const statusTag = (s: string) =>
 export default function SkillDetailPage() {
   const { id = '' } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { canAction } = usePermissions()
+  const canEdit = canAction('admin.skills.action.edit')
+  const canDeleteSkill = canAction('admin.skills.action.delete')
 
   const [detail, setDetail] = useState<SkillDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -116,7 +119,7 @@ export default function SkillDetailPage() {
           }
           extra={
             <Space wrap>
-              {canWrite() && (
+              {canEdit && (
                 <Button icon={<EditOutlined />} onClick={() => setFormOpen(true)}>
                   编辑
                 </Button>
@@ -124,15 +127,15 @@ export default function SkillDetailPage() {
               <Button icon={<FolderOpenOutlined />} onClick={() => setFilesOpen(true)}>
                 附件
               </Button>
-              {canWrite() && (
-                <>
-                  <Button onClick={onToggleStatus}>
-                    {skill.status === 'ACTIVE' ? '停用' : '启用'}
-                  </Button>
-                  <Button danger icon={<DeleteOutlined />} onClick={onDelete}>
-                    删除
-                  </Button>
-                </>
+              {canEdit && (
+                <Button onClick={onToggleStatus}>
+                  {skill.status === 'ACTIVE' ? '停用' : '启用'}
+                </Button>
+              )}
+              {canDeleteSkill && (
+                <Button danger icon={<DeleteOutlined />} onClick={onDelete}>
+                  删除
+                </Button>
               )}
               <Button onClick={() => navigate('/admin/skills')}>返回列表</Button>
             </Space>

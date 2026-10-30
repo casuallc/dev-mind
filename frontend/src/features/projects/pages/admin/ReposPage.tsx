@@ -30,11 +30,14 @@ import { useGitIntegrations } from '../../hooks/useGitIntegrations'
 import { showError } from '../../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../../shared/utils/table'
 import { DRAWER_DEFAULT } from '../../../../shared/utils/overlay'
+import { usePermissions } from '../../../auth/usePermissions'
 
 const ROLE_OPTIONS = ['CODE', 'DOCS', 'CONFIG']
 
 export default function ReposPage() {
   const { id = '' } = useParams<{ id: string }>()
+  const { canAction } = usePermissions()
+  const canManage = canAction('admin.projects.action.manage-repo')
   // 主库切换会同步 projects.path 镜像，通知布局刷新头部展示
   const { reloadProject } = useOutletContext<{ reloadProject: () => void }>()
   const [repos, setRepos] = useState<ProjectRepo[]>([])
@@ -241,8 +244,8 @@ export default function ReposPage() {
       width: 260,
       render: (_: unknown, r: ProjectRepo) => (
         <Space size={4}>
-          {!r.primary && <Button size="small" onClick={() => makePrimary(r)}>设为主库</Button>}
-          {r.sourceType === 'CLONE' && r.cloneStatus !== 'CLONING' && (
+          {canManage && !r.primary && <Button size="small" onClick={() => makePrimary(r)}>设为主库</Button>}
+          {canManage && r.sourceType === 'CLONE' && r.cloneStatus !== 'CLONING' && (
             <Button size="small" onClick={() => triggerClone(r)}>
               {r.cloneStatus === 'READY' ? '重新克隆' : r.cloneStatus === 'FAILED' ? '重试' : '克隆'}
             </Button>
@@ -250,8 +253,12 @@ export default function ReposPage() {
           {r.sourceType === 'CLONE' && (
             <Button size="small" onClick={() => setLogRepo(r)}>日志</Button>
           )}
-          <Button size="small" onClick={() => openEdit(r)}>编辑</Button>
-          {!r.primary && <Button size="small" danger onClick={() => confirmDelete(r)}>移除</Button>}
+          {canManage && (
+            <>
+              <Button size="small" onClick={() => openEdit(r)}>编辑</Button>
+              {!r.primary && <Button size="small" danger onClick={() => confirmDelete(r)}>移除</Button>}
+            </>
+          )}
         </Space>
       ),
     },
@@ -265,9 +272,11 @@ export default function ReposPage() {
           <Button icon={<ReloadOutlined />} onClick={reload}>
             刷新
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
-            添加仓库
-          </Button>
+          {canManage && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit(null)}>
+              添加仓库
+            </Button>
+          )}
         </Space>
       }
     >
@@ -280,7 +289,7 @@ export default function ReposPage() {
         dataSource={repos}
         loading={loading}
         pagination={LIST_PAGINATION}
-        locale={{ emptyText: '暂无仓库。点击「添加仓库」登记本地路径或从 Git 克隆。' }}
+        locale={{ emptyText: canManage ? '暂无仓库。点击「添加仓库」登记本地路径或从 Git 克隆。' : '暂无仓库' }}
       />
       <Drawer title={editing ? '编辑仓库' : '添加仓库'} open={open} onClose={() => setOpen(false)}
         width={DRAWER_DEFAULT} destroyOnHidden

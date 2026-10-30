@@ -33,6 +33,7 @@ import { workItemColumn } from '../../../shared/components/WorkItemCell'
 import WorkItemSelect from '../../../shared/components/WorkItemSelect'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { usePermissions } from '../../auth/usePermissions'
 
 interface CreateValues {
   buildId?: number
@@ -51,6 +52,8 @@ export default function ReleasesPage() {
 
 function ReleaseCenter({ id }: { id: string }) {
   const [searchParams, setSearchParams] = useSearchParams()
+  const { canAction } = usePermissions()
+  const canCreate = canAction('project.releases.action.create')
   const [rows, setRows] = useState<ReleaseRecord[]>([])
   const [detail, setDetail] = useState<ReleaseRecord | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
@@ -140,9 +143,11 @@ function ReleaseCenter({ id }: { id: string }) {
           <Button icon={<ReloadOutlined />} onClick={load}>
             刷新
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            新建发版
-          </Button>
+          {canCreate && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              新建发版
+            </Button>
+          )}
         </Space>
       }
     >
@@ -151,7 +156,9 @@ function ReleaseCenter({ id }: { id: string }) {
       </Typography.Paragraph>
       <FitTable rowKey="id" columns={columns} dataSource={rows} pagination={LIST_PAGINATION}
         locale={{
-          emptyText: '暂无发版记录。先在项目设置保存发版配置，再点「新建发版」创建并执行第一个发版。',
+          emptyText: canCreate
+            ? '暂无发版记录。先在项目设置保存发版配置，再点「新建发版」创建并执行第一个发版。'
+            : '暂无发版记录',
         }}
         scroll={{ x: 1000 }} />
 

@@ -36,6 +36,7 @@ import {
   updateModelEndpoint,
 } from '../api'
 import type { EndpointTestResult, ModelEndpoint, ModelEndpointInput } from '../types'
+import { usePermissions } from '../../auth/usePermissions'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
@@ -147,6 +148,9 @@ export default function ModelEndpointsPage() {
   const isChat = isChatKind(formKind)
   const isDecision = isDecisionKind(formKind)
   const isVector = isVectorKind(formKind)
+  const { canAction } = usePermissions()
+  const canManage = canAction('admin.models.action.manage')
+  const canTest = canAction('admin.models.action.test')
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -347,16 +351,18 @@ export default function ModelEndpointsPage() {
       extra={
         <Space>
           <Button icon={<ReloadOutlined />} onClick={reload}>刷新</Button>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => {
-              setEditing(null)
-              setEditOpen(true)
-            }}
-          >
-            新建端点
-          </Button>
+          {canManage && (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => {
+                setEditing(null)
+                setEditOpen(true)
+              }}
+            >
+              新建端点
+            </Button>
+          )}
         </Space>
       }
     >
@@ -373,7 +379,11 @@ export default function ModelEndpointsPage() {
         loading={loading}
         dataSource={items}
         pagination={LIST_PAGINATION}
-        locale={{ emptyText: '还没有端点，点右上角「新建端点」接入 Embedding / 对话 / 决策模型服务' }}
+        locale={{
+          emptyText: canManage
+            ? '还没有端点，点右上角「新建端点」接入 Embedding / 对话 / 决策模型服务'
+            : '还没有端点',
+        }}
         columns={[
           {
             title: '名称',
@@ -414,7 +424,7 @@ export default function ModelEndpointsPage() {
                 )
               }
               return d == null ? (
-                <Tooltip title="尚未探测：点「管理 → 测试连接」实测一次">
+                <Tooltip title={canTest ? '尚未探测：点「管理 → 测试连接」实测一次' : '尚未探测'}>
                   <Tag>未探测</Tag>
                 </Tooltip>
               ) : (
@@ -460,13 +470,15 @@ export default function ModelEndpointsPage() {
             width: 140,
             render: (_, row) => (
               <Space>
-                <Button
-                  size="small"
-                  loading={testingId === row.id}
-                  onClick={() => onTest(row)}
-                >
-                  测试
-                </Button>
+                {canTest && (
+                  <Button
+                    size="small"
+                    loading={testingId === row.id}
+                    onClick={() => onTest(row)}
+                  >
+                    测试
+                  </Button>
+                )}
                 <Button
                   size="small"
                   onClick={() => {
@@ -491,22 +503,26 @@ export default function ModelEndpointsPage() {
         destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-            <Tooltip
-              title={
-                editing && !form.getFieldValue('apiKey')
-                  ? '凭据未修改，将测试已保存的端点'
-                  : '按当前表单内容试连一次，凭据不会保存'
-              }
-            >
-              <Button icon={<ApiOutlined />} loading={testingForm} onClick={onTestForm}>
-                测试连接
-              </Button>
-            </Tooltip>
+            {canTest && (
+              <Tooltip
+                title={
+                  editing && !form.getFieldValue('apiKey')
+                    ? '凭据未修改，将测试已保存的端点'
+                    : '按当前表单内容试连一次，凭据不会保存'
+                }
+              >
+                <Button icon={<ApiOutlined />} loading={testingForm} onClick={onTestForm}>
+                  测试连接
+                </Button>
+              </Tooltip>
+            )}
             <Space>
               <Button onClick={() => setEditOpen(false)}>取消</Button>
-              <Button type="primary" loading={saving} onClick={() => form.submit()}>
-                保存
-              </Button>
+              {canManage && (
+                <Button type="primary" loading={saving} onClick={() => form.submit()}>
+                  保存
+                </Button>
+              )}
             </Space>
           </Space>
         }
@@ -673,7 +689,9 @@ export default function ModelEndpointsPage() {
               {isVectorKind(managing.kind) && (
                 <>
                   <Descriptions.Item label="向量维度">
-                    {managing.dimensions == null ? '未探测（点下方「测试连接」实测）' : managing.dimensions}
+                    {managing.dimensions == null
+                      ? (canTest ? '未探测（点下方「测试连接」实测）' : '未探测')
+                      : managing.dimensions}
                   </Descriptions.Item>
                   <Descriptions.Item label="检索参数覆盖">
                     topK {managing.topK ?? '平台默认'} · threshold {managing.threshold ?? '平台默认'}
@@ -722,54 +740,60 @@ export default function ModelEndpointsPage() {
 
             <Divider />
             <Space wrap>
-              <Button
-                icon={<ApiOutlined />}
-                loading={testingId === managing.id}
-                onClick={() => onTest(managing)}
-              >
-                测试连接
-              </Button>
-              <Button
-                icon={<EditOutlined />}
-                onClick={() => {
-                  setEditing(managing)
-                  setManageResult(null)
-                  setEditOpen(true)
-                }}
-              >
-                编辑
-              </Button>
-              <Tooltip
-                title={
-                  isDecisionKind(managing.kind)
-                    ? '设为默认后，未指定端点的决策类能力（如提案分诊）回落到它；不设则相关能力整体降级为人工路径'
-                    : isChatKind(managing.kind)
-                      ? '设为默认后，未指定端点的模型问答回落到它'
-                      : '调用解析链在「未指定端点」的知识库上回落到它'
-                }
-              >
-                <Button disabled={managing.isDefault} onClick={() => onSetDefault(managing)}>
-                  设为平台默认
+              {canTest && (
+                <Button
+                  icon={<ApiOutlined />}
+                  loading={testingId === managing.id}
+                  onClick={() => onTest(managing)}
+                >
+                  测试连接
                 </Button>
-              </Tooltip>
-              <Button onClick={() => onToggle(managing)}>
-                {managing.status === 'active' ? '停用' : '启用'}
-              </Button>
-              <Popconfirm
-                title="删除该端点？"
-                description={
-                  isVectorKind(managing.kind)
-                    ? '被知识库引用时会被拒绝并列出引用方；索引维度不会被回写，引用它的库需重建索引。'
-                    : isDecisionKind(managing.kind)
-                      ? '被决策类能力引用时会被拒绝并列出引用方；删掉后相关能力降级为人工路径。'
-                      : '被模型问答等资源引用时会被拒绝并列出引用方。'
-                }
-                okText="删除"
-                okButtonProps={{ danger: true }}
-                onConfirm={() => onDelete(managing)}
-              >
-                <Button danger>删除</Button>
-              </Popconfirm>
+              )}
+              {canManage && (
+                <>
+                  <Button
+                    icon={<EditOutlined />}
+                    onClick={() => {
+                      setEditing(managing)
+                      setManageResult(null)
+                      setEditOpen(true)
+                    }}
+                  >
+                    编辑
+                  </Button>
+                  <Tooltip
+                    title={
+                      isDecisionKind(managing.kind)
+                        ? '设为默认后，未指定端点的决策类能力（如提案分诊）回落到它；不设则相关能力整体降级为人工路径'
+                        : isChatKind(managing.kind)
+                          ? '设为默认后，未指定端点的模型问答回落到它'
+                          : '调用解析链在「未指定端点」的知识库上回落到它'
+                    }
+                  >
+                    <Button disabled={managing.isDefault} onClick={() => onSetDefault(managing)}>
+                      设为平台默认
+                    </Button>
+                  </Tooltip>
+                  <Button onClick={() => onToggle(managing)}>
+                    {managing.status === 'active' ? '停用' : '启用'}
+                  </Button>
+                  <Popconfirm
+                    title="删除该端点？"
+                    description={
+                      isVectorKind(managing.kind)
+                        ? '被知识库引用时会被拒绝并列出引用方；索引维度不会被回写，引用它的库需重建索引。'
+                        : isDecisionKind(managing.kind)
+                          ? '被决策类能力引用时会被拒绝并列出引用方；删掉后相关能力降级为人工路径。'
+                          : '被模型问答等资源引用时会被拒绝并列出引用方。'
+                    }
+                    okText="删除"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={() => onDelete(managing)}
+                  >
+                    <Button danger>删除</Button>
+                  </Popconfirm>
+                </>
+              )}
             </Space>
           </>
         )}

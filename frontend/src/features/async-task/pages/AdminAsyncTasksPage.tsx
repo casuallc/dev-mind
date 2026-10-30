@@ -23,6 +23,15 @@ import FitTable from '../../../shared/components/FitTable'
 import { fmtTime } from '../../../shared/utils/format'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import { usePermissions, usePermittedView } from '../../auth/usePermissions'
+
+type TaskView = 'tasks' | 'runs'
+const TASK_VIEWS: TaskView[] = ['tasks', 'runs']
+const TASK_VIEW_LABELS: Record<TaskView, string> = { tasks: '任务', runs: '执行记录' }
+const TASK_VIEW_PERMISSIONS: Record<TaskView, string> = {
+  tasks: 'admin.tasks.tab.tasks',
+  runs: 'admin.tasks.tab.runs',
+}
 
 const TASK_STATUS_COLOR: Record<string, string> = {
   ACTIVE: 'green',
@@ -46,8 +55,10 @@ function scheduleDesc(t: AsyncTaskView): string {
 
 export default function AdminAsyncTasksPage() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const view = searchParams.get('view') === 'runs' ? 'runs' : 'tasks'
-  const setView = (v: string) => setSearchParams(v === 'runs' ? { view: 'runs' } : {}, { replace: true })
+  const view: TaskView = searchParams.get('view') === 'runs' ? 'runs' : 'tasks'
+  const setView = (v: TaskView) => setSearchParams(v === 'runs' ? { view: 'runs' } : {}, { replace: true })
+  const views = usePermittedView(TASK_VIEWS, (v) => TASK_VIEW_PERMISSIONS[v], view, setView)
+  const { canAction } = usePermissions()
   const [refreshTick, setRefreshTick] = useState(0)
   /** undefined=关闭；null=新建；否则编辑 */
   const [editing, setEditing] = useState<AsyncTaskView | null | undefined>(undefined)
@@ -61,17 +72,14 @@ export default function AdminAsyncTasksPage() {
           <span>任务管理</span>
           <Segmented
             value={view}
-            onChange={setView}
-            options={[
-              { value: 'tasks', label: '任务' },
-              { value: 'runs', label: '执行记录' },
-            ]}
+            onChange={(v) => setView(v as TaskView)}
+            options={views.map((v) => ({ value: v, label: TASK_VIEW_LABELS[v] }))}
           />
         </Space>
       }
       extra={
         <Space>
-          {view === 'tasks' && (
+          {view === 'tasks' && canAction('admin.tasks.action.manage-task') && (
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditing(null)}>
               新建任务
             </Button>
@@ -94,6 +102,9 @@ export default function AdminAsyncTasksPage() {
 }
 
 function TasksTab({ refreshTick, onEdit }: { refreshTick: number; onEdit: (t: AsyncTaskView) => void }) {
+  const { canAction } = usePermissions()
+  const canManage = canAction('admin.tasks.action.manage-task')
+  const canControl = canAction('admin.tasks.action.control-task')
   const [rows, setRows] = useState<AsyncTaskView[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
@@ -199,12 +210,12 @@ function TasksTab({ refreshTick, onEdit }: { refreshTick: number; onEdit: (t: As
       width: 240,
       render: (_, r) => (
         <Space>
-          {r.status === 'ACTIVE' && <a onClick={() => act(() => triggerTask(r.id), '已触发（重叠策略照常生效）')}>触发</a>}
-          {(r.status === 'ACTIVE' || r.status === 'PAUSED') && <a onClick={() => onEdit(r)}>编辑</a>}
-          {r.status === 'ACTIVE' && <a onClick={() => act(() => pauseTask(r.id), '已暂停')}>暂停</a>}
-          {r.status === 'PAUSED' && <a onClick={() => act(() => resumeTask(r.id), '已恢复')}>恢复</a>}
+          {canControl && r.status === 'ACTIVE' && <a onClick={() => act(() => triggerTask(r.id), '已触发（重叠策略照常生效）')}>触发</a>}
+          {canManage && (r.status === 'ACTIVE' || r.status === 'PAUSED') && <a onClick={() => onEdit(r)}>编辑</a>}
+          {canControl && r.status === 'ACTIVE' && <a onClick={() => act(() => pauseTask(r.id), '已暂停')}>暂停</a>}
+          {canControl && r.status === 'PAUSED' && <a onClick={() => act(() => resumeTask(r.id), '已恢复')}>恢复</a>}
           <a onClick={() => setRunsTask(r)}>记录</a>
-          {(r.status === 'ACTIVE' || r.status === 'PAUSED') && (
+          {canControl && (r.status === 'ACTIVE' || r.status === 'PAUSED') && (
             <a
               style={{ color: '#f5222d' }}
               onClick={() =>

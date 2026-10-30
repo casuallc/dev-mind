@@ -15,6 +15,7 @@ import { fmtTime } from '../../../shared/utils/format'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { usePermissions } from '../../auth/usePermissions'
 
 const STATUS_OPTIONS = [
   { value: 'ACTIVE', label: 'ACTIVE', color: 'green' },
@@ -31,6 +32,9 @@ export default function ProjectsView({
   onboardTick?: number
 }) {
   const navigate = useNavigate()
+  const { canAction } = usePermissions()
+  const canEditProject = canAction('admin.projects.action.edit-project')
+  const canDeleteProject = canAction('admin.projects.action.delete-project')
   const [projects, setProjects] = useState<Project[]>([])
   const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
   const [loading, setLoading] = useState(false)
@@ -198,11 +202,13 @@ export default function ProjectsView({
           <Button size="small" onClick={() => navigate(`/admin/projects/${r.id}`)}>
             设置
           </Button>
-          <Button size="small" onClick={() => openEdit(r)}>
-            编辑
-          </Button>
+          {canEditProject && (
+            <Button size="small" onClick={() => openEdit(r)}>
+              编辑
+            </Button>
+          )}
           {/* CAP-41：WORKLOG 项目禁止删除（防孤儿化 runner 侧日志数据），后端同样 409 */}
-          {r.kind !== 'WORKLOG' && (
+          {canDeleteProject && r.kind !== 'WORKLOG' && (
             <Button size="small" danger onClick={() => confirmDelete(r)}>
               删除
             </Button>
@@ -236,7 +242,11 @@ export default function ProjectsView({
           columns={columns}
           dataSource={projects}
           pagination={LIST_PAGINATION}
-          locale={{ emptyText: '暂无项目。点击「新建项目」注册一个本地 git 仓库。' }}
+          locale={{
+            emptyText: canAction('admin.projects.action.create-project')
+              ? '暂无项目。点击「新建项目」注册一个本地 git 仓库。'
+              : '暂无项目',
+          }}
         />
       </div>
 

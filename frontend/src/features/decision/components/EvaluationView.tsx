@@ -36,6 +36,7 @@ import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import FitTable from '../../../shared/components/FitTable'
+import { usePermissions } from '../../auth/usePermissions'
 import LabLogDrawer from './LabLogDrawer'
 import { ReportStatusTag, RunStatusTag, runActive } from './labCommon'
 import {
@@ -89,6 +90,8 @@ function Headline({ h }: { h: Record<string, number | null> }) {
 }
 
 export default function EvaluationView({ refreshTick = 0, createTick = 0 }: { refreshTick?: number; createTick?: number }) {
+  const { canAction } = usePermissions()
+  const canManageEvaluation = canAction('admin.laya-lab.action.manage-evaluation')
   const [rows, setRows] = useState<EvalView[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
@@ -203,16 +206,18 @@ export default function EvaluationView({ refreshTick = 0, createTick = 0 }: { re
           <Button type="link" onClick={() => setLogRow(r)}>
             日志
           </Button>
-          <Popconfirm
-            title="删除这次评测运行？"
-            description="删除的是运行记录与报告；运行中的不可删。"
-            onConfirm={() => onDelete(r.id)}
-            disabled={r.status === 'RUNNING'}
-          >
-            <TipButton type="link" danger tip={r.status === 'RUNNING' ? '运行中不可删除' : undefined} disabled={r.status === 'RUNNING'}>
-              删除
-            </TipButton>
-          </Popconfirm>
+          {canManageEvaluation && (
+            <Popconfirm
+              title="删除这次评测运行？"
+              description="删除的是运行记录与报告；运行中的不可删。"
+              onConfirm={() => onDelete(r.id)}
+              disabled={r.status === 'RUNNING'}
+            >
+              <TipButton type="link" danger tip={r.status === 'RUNNING' ? '运行中不可删除' : undefined} disabled={r.status === 'RUNNING'}>
+                删除
+              </TipButton>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -250,8 +255,9 @@ export default function EvaluationView({ refreshTick = 0, createTick = 0 }: { re
           },
         }}
         locale={{
-          emptyText:
-            '还没有评测运行——先建一个含对照组的评测集并冻结，再「发起评测」在节点上跑一遍 base 模型看它到底有多好（报告中永远带随机与多数类两条基线）。',
+          emptyText: canManageEvaluation
+            ? '还没有评测运行——先建一个含对照组的评测集并冻结，再「发起评测」在节点上跑一遍 base 模型看它到底有多好（报告中永远带随机与多数类两条基线）。'
+            : '还没有评测运行。',
         }}
       />
 

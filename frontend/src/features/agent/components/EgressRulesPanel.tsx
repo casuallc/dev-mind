@@ -26,6 +26,7 @@ import {
   updateEgressRule,
 } from '../api'
 import type { AgentNode, EgressRule, EgressRuleBody } from '../types'
+import { usePermissions } from '../../auth/usePermissions'
 
 /** 隧道能力协议版本（AgentProtocol.EGRESS_TUNNEL）；低于此版本 runner 无隧道连接 */
 const TUNNEL_PROTOCOL = 21
@@ -37,6 +38,8 @@ const TUNNEL_PROTOCOL = 21
  * 操作按钮（刷新/新建）收在面板工具行，与 Runner 包页签同例（页面 extra 只放节点视图操作）。
  */
 export default function EgressRulesPanel() {
+  const { canAction } = usePermissions()
+  const canManage = canAction('admin.agent-nodes.action.manage-egress')
   const [rows, setRows] = useState<EgressRule[]>([])
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [loading, setLoading] = useState(false)
@@ -176,12 +179,13 @@ export default function EgressRulesPanel() {
       title: '操作',
       key: 'ops',
       width: 130,
-      render: (_: unknown, r: EgressRule) => (
-        <Space>
-          <Button onClick={() => openEdit(r)}>编辑</Button>
-          <Button danger onClick={() => confirmRemove(r)}>删除</Button>
-        </Space>
-      ),
+      render: (_: unknown, r: EgressRule) =>
+        canManage ? (
+          <Space>
+            <Button onClick={() => openEdit(r)}>编辑</Button>
+            <Button danger onClick={() => confirmRemove(r)}>删除</Button>
+          </Space>
+        ) : null,
     },
   ]
 
@@ -194,7 +198,9 @@ export default function EgressRulesPanel() {
       <Flex justify="end" style={{ marginBottom: 12 }}>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => void load()}>刷新</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新建规则</Button>
+          {canManage && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新建规则</Button>
+          )}
         </Space>
       </Flex>
       <FitTable
@@ -203,7 +209,11 @@ export default function EgressRulesPanel() {
         columns={columns}
         dataSource={rows}
         pagination={LIST_PAGINATION}
-        locale={{ emptyText: '暂无出口规则（全部直连），点右上角「新建规则」开始配置' }}
+        locale={{
+          emptyText: canManage
+            ? '暂无出口规则（全部直连），点右上角「新建规则」开始配置'
+            : '暂无出口规则（全部直连）',
+        }}
       />
       <Modal
         open={editing !== null}

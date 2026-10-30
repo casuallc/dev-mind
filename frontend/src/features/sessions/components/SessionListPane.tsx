@@ -20,6 +20,7 @@ export default function SessionListPane({
   keyword,
   onKeywordChange,
   refs,
+  canCreate = true,
 }: {
   sessions: SessionSummary[]
   loading: boolean
@@ -32,6 +33,8 @@ export default function SessionListPane({
   onKeywordChange: (k: string) => void
   /** 需求/工作单元 id→对象映射（有关联的会话显示可跳需求页的链接） */
   refs: SessionRefs
+  /** 是否显示「新对话」入口（CAP-103 按钮权限） */
+  canCreate?: boolean
 }) {
   const { token } = theme.useToken()
 
@@ -59,9 +62,11 @@ export default function SessionListPane({
         gap: 8,
       }}
     >
-      <Button type="primary" icon={<PlusOutlined />} block onClick={onNew}>
-        新对话
-      </Button>
+      {canCreate && (
+        <Button type="primary" icon={<PlusOutlined />} block onClick={onNew}>
+          新对话
+        </Button>
+      )}
       <Input.Search
         placeholder="搜索 ID / 任务 / 摘要"
         allowClear

@@ -7,7 +7,7 @@ import { menuSelectedKey } from './menuSelectedKey'
 import { menuIcon } from './menuIcons'
 import MenuAccessGuard from './MenuAccessGuard'
 import { startNotificationStream, stopNotificationStream } from '../features/notifications/store'
-import { useMenus } from '../features/auth/useMenus'
+import { usePermissions } from '../features/auth/usePermissions'
 import type { MenuItem } from '../features/auth/types'
 
 const { Sider, Content } = Layout
@@ -53,8 +53,8 @@ function menuLabel(items: AdminMenuItem[], key: string): string | undefined {
 export default function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { items: menus } = useMenus()
-  const adminItems = buildAdminMenu(menus.filter((m) => m.zone === 'ADMIN'))
+  const { menusOf } = usePermissions()
+  const adminItems = buildAdminMenu(menusOf('ADMIN'))
 
   // 管理员同样接收全局通知实时流
   useEffect(() => {

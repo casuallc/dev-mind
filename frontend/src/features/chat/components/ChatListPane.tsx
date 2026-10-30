@@ -6,6 +6,7 @@ import { PlusOutlined } from '@ant-design/icons'
 import type { ChatSummary } from '../types'
 import { stateColor, ACTIVE_STATES, STATE_OPTIONS } from '../../../shared/chat/stateMeta'
 import { fmtTime, usageText } from '../../../shared/utils/format'
+import { usePermissions } from '../../auth/usePermissions'
 
 export default function ChatListPane({
   chats,
@@ -29,6 +30,7 @@ export default function ChatListPane({
   onKeywordChange: (k: string) => void
 }) {
   const { token } = theme.useToken()
+  const { canAction } = usePermissions()
 
   const filtered = useMemo(() => {
     const kw = keyword.trim().toLowerCase()
@@ -61,9 +63,11 @@ export default function ChatListPane({
         gap: 8,
       }}
     >
-      <Button type="primary" icon={<PlusOutlined />} block onClick={onNew}>
-        新问答
-      </Button>
+      {canAction('top.chats.action.create') && (
+        <Button type="primary" icon={<PlusOutlined />} block onClick={onNew}>
+          新问答
+        </Button>
+      )}
       <Input.Search
         placeholder="搜索标题 / 摘要"
         allowClear

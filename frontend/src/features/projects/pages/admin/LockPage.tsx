@@ -6,9 +6,12 @@ import { useParams } from 'react-router-dom'
 import { claimWrite, getLock, releaseWrite, updateLock } from '../../api'
 import type { ProjectLock } from '../../types'
 import { showError } from '../../../../shared/utils/showError'
+import { usePermissions } from '../../../auth/usePermissions'
 
 export default function LockPage() {
   const { id = '' } = useParams<{ id: string }>()
+  const { canAction } = usePermissions()
+  const canEdit = canAction('admin.projects.action.edit-project')
   const [lock, setLock] = useState<ProjectLock | null>(null)
   const [max, setMax] = useState(1)
 
@@ -60,14 +63,18 @@ export default function LockPage() {
           </Descriptions.Item>
         </Descriptions>
         <Space wrap>
-          <InputNumber min={1} value={max} onChange={(v) => setMax(v ?? 1)} addonBefore="并发上限" />
-          <Button type="primary" onClick={saveMax}>保存上限</Button>
-          <Button icon={<DiffOutlined />} onClick={() => act(() => claimWrite(id), '已占用一个写配额')}>
-            占用写配额
-          </Button>
-          <Button icon={<StopOutlined />} onClick={() => act(() => releaseWrite(id), '已释放一个写配额')}>
-            释放写配额
-          </Button>
+          <InputNumber min={1} value={max} disabled={!canEdit} onChange={(v) => setMax(v ?? 1)} addonBefore="并发上限" />
+          {canEdit && (
+            <>
+              <Button type="primary" onClick={saveMax}>保存上限</Button>
+              <Button icon={<DiffOutlined />} onClick={() => act(() => claimWrite(id), '已占用一个写配额')}>
+                占用写配额
+              </Button>
+              <Button icon={<StopOutlined />} onClick={() => act(() => releaseWrite(id), '已释放一个写配额')}>
+                释放写配额
+              </Button>
+            </>
+          )}
         </Space>
       </Space>
     </Card>

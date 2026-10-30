@@ -49,6 +49,7 @@ import { fmtTime } from '../../../shared/utils/format'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { showError } from '../../../shared/utils/showError'
 import { pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
+import { usePermissions } from '../../auth/usePermissions'
 
 /** 表格类视图（生命周期/反馈）的区块容器：工具行固定、FitTable 撑满剩余高度 */
 const sectionFlexStyle = { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } as const
@@ -79,6 +80,8 @@ function LifecycleSection({
   const [expiringDays, setExpiringDays] = useState(14)
   const [staleDays, setStaleDays] = useState(180)
   const [reviewingId, setReviewingId] = useState<number | null>(null)
+  const { canAction } = usePermissions()
+  const canReview = canAction('admin.knowledge-reports.action.review')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -173,16 +176,20 @@ function LifecycleSection({
       width: 165,
       render: (v: string) => fmtTime(v),
     },
-    {
-      title: '操作',
-      key: 'review',
-      width: 90,
-      render: (_, r) => (
-        <Button size="small" loading={reviewingId === r.id} onClick={() => onReview(r)}>
-          去复核
-        </Button>
-      ),
-    },
+    ...(canReview
+      ? [
+          {
+            title: '操作',
+            key: 'review',
+            width: 90,
+            render: (_: unknown, r: LifecycleItem) => (
+              <Button size="small" loading={reviewingId === r.id} onClick={() => onReview(r)}>
+                去复核
+              </Button>
+            ),
+          } satisfies ColumnsType<LifecycleItem>[number],
+        ]
+      : []),
   ]
 
   return (
@@ -674,6 +681,16 @@ export const REPORT_VIEW_OPTIONS: { value: ReportsView; label: string }[] = [
   { value: 'feedback', label: '答案反馈' },
   { value: 'eval', label: '检索评测' },
 ]
+
+/** CAP-103 质量报告页签权限节点（与后端权限目录一致） */
+export const REPORT_VIEW_PERMISSIONS: Record<ReportsView, string> = {
+  lifecycle: 'admin.knowledge-reports.tab.lifecycle',
+  duplicates: 'admin.knowledge-reports.tab.duplicates',
+  feedback: 'admin.knowledge-reports.tab.feedback',
+  eval: 'admin.knowledge-reports.tab.eval',
+}
+
+export const REPORT_VIEWS = REPORT_VIEW_OPTIONS.map((o) => o.value)
 
 export default function KnowledgeReportsPanel({ view }: { view: ReportsView }) {
   const [bases, setBases] = useState<KnowledgeBase[]>([])

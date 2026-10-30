@@ -7,12 +7,15 @@ import { adminUnbindPlatformAccount, listUserPlatformAccounts } from '../api'
 import type { AdminPlatformAccount } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import FitTable from '../../../shared/components/FitTable'
+import { usePermissions } from '../../auth/usePermissions'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 
 export default function UserMappingsPanel({ refreshTick = 0 }: { refreshTick?: number }) {
   const [rows, setRows] = useState<AdminPlatformAccount[]>([])
   const [loading, setLoading] = useState(false)
+  const { canAction } = usePermissions()
+  const canUnbind = canAction('admin.bot.action.unbind')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -74,15 +77,19 @@ export default function UserMappingsPanel({ refreshTick = 0 }: { refreshTick?: n
       render: (t?: string) => (t === 'IDENTITY' ? <Tag color="cyan">身份映射</Tag> : t || '-'),
     },
     { title: '绑定时间', dataIndex: 'createdAt', width: 160, render: (t) => fmtTime(t) },
-    {
-      title: '操作',
-      width: 80,
-      render: (_, r) => (
-        <Typography.Link type="danger" onClick={() => onUnbind(r)}>
-          解绑
-        </Typography.Link>
-      ),
-    },
+    ...(canUnbind
+      ? [
+          {
+            title: '操作',
+            width: 80,
+            render: (_: unknown, r: AdminPlatformAccount) => (
+              <Typography.Link type="danger" onClick={() => onUnbind(r)}>
+                解绑
+              </Typography.Link>
+            ),
+          } satisfies ColumnsType<AdminPlatformAccount>[number],
+        ]
+      : []),
   ]
 
   return (

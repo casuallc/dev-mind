@@ -39,8 +39,16 @@ import { fmtTime } from '../../../shared/utils/format'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { showError } from '../../../shared/utils/showError'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import { usePermissions, usePermittedView } from '../../auth/usePermissions'
 
 type OpsTab = 'tasks' | 'search' | 'enrich'
+const OPS_TABS = ['tasks', 'search', 'enrich'] as const
+/** CAP-103 知识运营页签权限节点（与后端权限目录一致） */
+const OPS_TAB_PERMISSIONS: Record<OpsTab, string> = {
+  tasks: 'admin.knowledge-ops.tab.tasks',
+  search: 'admin.knowledge-ops.tab.search',
+  enrich: 'admin.knowledge-ops.tab.enrich',
+}
 type TodoKind = 'review' | 'enrich' | 'feedback'
 type TodoFilter = 'all' | TodoKind
 
@@ -85,6 +93,15 @@ export default function KnowledgeOpsPage() {
     }
     setSearchParams(next, { replace: true })
   }
+  const permittedTabs = usePermittedView(
+    OPS_TABS,
+    (v) => OPS_TAB_PERMISSIONS[v],
+    tab,
+    (v) => update({ tab: v === 'tasks' ? undefined : v }),
+  )
+  const { canAction } = usePermissions()
+  const canEnrich = canAction('admin.knowledge-ops.action.enrich')
+  const canReview = canAction('admin.knowledge-ops.action.review')
 
   const [bases, setBases] = useState<KnowledgeBase[]>([])
   const [lifecycle, setLifecycle] = useState<LifecycleReport | null>(null)
@@ -269,16 +286,19 @@ export default function KnowledgeOpsPage() {
       title: '操作',
       key: 'action',
       width: 110,
-      render: (_, r) => (
-        <Button
-          size="small"
-          onClick={() =>
-            r.kind === 'review' ? onReview(r) : r.kind === 'enrich' ? onEnrich(r) : setEntryDetail({ entryId: r.entryId })
-          }
-        >
-          {KIND_META[r.kind].action}
-        </Button>
-      ),
+      render: (_, r) => {
+        const allowed = r.kind === 'review' ? canReview : r.kind === 'enrich' ? canEnrich : true
+        return allowed ? (
+          <Button
+            size="small"
+            onClick={() =>
+              r.kind === 'review' ? onReview(r) : r.kind === 'enrich' ? onEnrich(r) : setEntryDetail({ entryId: r.entryId })
+            }
+          >
+            {KIND_META[r.kind].action}
+          </Button>
+        ) : null
+      },
     },
   ]
 
@@ -317,9 +337,9 @@ export default function KnowledgeOpsPage() {
             value={tab}
             onChange={(v) => update({ tab: v as string })}
             options={[
-              { value: 'tasks', label: '待办' },
-              { value: 'search', label: '召回验证' },
-              { value: 'enrich', label: '自动增强' },
+              ...(permittedTabs.includes('tasks') ? [{ value: 'tasks', label: '待办' }] : []),
+              ...(permittedTabs.includes('search') ? [{ value: 'search', label: '召回验证' }] : []),
+              ...(permittedTabs.includes('enrich') ? [{ value: 'enrich', label: '自动增强' }] : []),
             ]}
           />
         </Space>

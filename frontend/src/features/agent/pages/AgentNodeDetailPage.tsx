@@ -45,6 +45,7 @@ import { installOneLiner } from '../utils/installScript'
 import { fmtTime, fmtBytes } from '../../../shared/utils/format'
 import { pageCardStyle, pageCardBodyFlexStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import { showError } from '../../../shared/utils/showError'
+import { usePermittedView, usePermissions } from '../../auth/usePermissions'
 
 const statusColor: Record<string, string> = {
   ONLINE: 'green',
@@ -56,12 +57,30 @@ const statusColor: Record<string, string> = {
  * CAP-21 节点详情页（替代原管理抽屉）：头部 extra 放运维操作（默认/升级/启停/删除），
  * body 内 Segmented 切「概览（观测）/ 配置（低频编辑）」。5s 轮询保持状态新鲜；节点被删自动返回列表。
  */
+const DETAIL_VIEWS = ['overview', 'config'] as const
+type DetailView = (typeof DETAIL_VIEWS)[number]
+/** CAP-103 详情页签权限节点（与后端权限目录一致） */
+const DETAIL_VIEW_PERMISSIONS: Record<DetailView, string> = {
+  overview: 'admin.agent-nodes.tab.detail-overview',
+  config: 'admin.agent-nodes.tab.detail-config',
+}
+
 export default function AgentNodeDetailPage() {
   const navigate = useNavigate()
   const nodeId = Number(useParams<{ id: string }>().id)
+  const { canAction } = usePermissions()
+  const canManageNode = canAction('admin.agent-nodes.action.manage-node')
+  const canUpgradeNode = canAction('admin.agent-nodes.action.upgrade-node')
+  const canInstallNode = canAction('admin.agent-nodes.action.install-node')
   const [nodes, setNodes] = useState<AgentNode[] | null>(null) // null=尚未加载成功过
   const [pkg, setPkg] = useState<RunnerPackage | null>(null)
   const [view, setView] = useState<string>('overview') // overview | config
+  const permittedViews = usePermittedView(
+    DETAIL_VIEWS,
+    (v) => DETAIL_VIEW_PERMISSIONS[v],
+    (DETAIL_VIEWS as readonly string[]).includes(view) ? (view as DetailView) : 'overview',
+    setView,
+  )
   const [busy, setBusy] = useState(false)
 
   // 强制升级弹窗：BUSY 时打开，异步拉活跃会话清单（null=加载中）
@@ -275,10 +294,10 @@ export default function AgentNodeDetailPage() {
             <Segmented
               value={view}
               onChange={setView}
-              options={[
-                { value: 'overview', label: '概览' },
-                { value: 'config', label: '配置' },
-              ]}
+              options={permittedViews.map((v) => ({
+                value: v,
+                label: v === 'config' ? '配置' : '概览',
+              }))}
             />
           )}
         </Space>
@@ -286,22 +305,26 @@ export default function AgentNodeDetailPage() {
       extra={
         node && (
           <Space>
-            {node.isDefault ? (
-              <Button icon={<StarOutlined />} onClick={() => onSetDefault(false)}>
-                取消平台默认
-              </Button>
-            ) : (
-              <Tooltip title={node.status === 'DISABLED' ? '已禁用节点不能设为默认' : undefined}>
-                <Button
-                  icon={<StarOutlined />}
-                  disabled={node.status === 'DISABLED'}
-                  onClick={() => onSetDefault(true)}
-                >
-                  设为平台默认
-                </Button>
-              </Tooltip>
+            {canManageNode && (
+              <>
+                {node.isDefault ? (
+                  <Button icon={<StarOutlined />} onClick={() => onSetDefault(false)}>
+                    取消平台默认
+                  </Button>
+                ) : (
+                  <Tooltip title={node.status === 'DISABLED' ? '已禁用节点不能设为默认' : undefined}>
+                    <Button
+                      icon={<StarOutlined />}
+                      disabled={node.status === 'DISABLED'}
+                      onClick={() => onSetDefault(true)}
+                    >
+                      设为平台默认
+                    </Button>
+                  </Tooltip>
+                )}
+              </>
             )}
-            {node.status === 'ONLINE' && (
+            {canUpgradeNode && node.status === 'ONLINE' && (
               <Tooltip
                 title={
                   pkg
@@ -316,10 +339,14 @@ export default function AgentNodeDetailPage() {
                 </Button>
               </Tooltip>
             )}
-            <Button onClick={onToggleEnable}>{node.status === 'DISABLED' ? '启用' : '禁用'}</Button>
-            <Button danger onClick={onDelete}>
-              删除节点
-            </Button>
+            {canManageNode && (
+              <>
+                <Button onClick={onToggleEnable}>{node.status === 'DISABLED' ? '启用' : '禁用'}</Button>
+                <Button danger onClick={onDelete}>
+                  删除节点
+                </Button>
+              </>
+            )}
           </Space>
         )
       }
@@ -382,9 +409,11 @@ export default function AgentNodeDetailPage() {
                         value={labelsDraft}
                         onChange={(e) => setLabelsDraft(e.target.value)}
                       />
-                      <Button type="primary" loading={busy} onClick={onSaveLabels}>
-                        保存
-                      </Button>
+                      {canManageNode && (
+                        <Button type="primary" loading={busy} onClick={onSaveLabels}>
+                          保存
+                        </Button>
+                      )}
                     </Space.Compact>
                   </Space>
                 </Card>
@@ -410,11 +439,13 @@ export default function AgentNodeDetailPage() {
                       value={proxyScopesDraft}
                       onChange={(v) => setProxyScopesDraft(v as string[])}
                     />
-                    <div>
-                      <Button type="primary" loading={busy} onClick={onSaveProxy}>
-                        保存
-                      </Button>
-                    </div>
+                    {canManageNode && (
+                      <div>
+                        <Button type="primary" loading={busy} onClick={onSaveProxy}>
+                          保存
+                        </Button>
+                      </div>
+                    )}
                   </Space>
                 </Card>
 
@@ -432,9 +463,11 @@ export default function AgentNodeDetailPage() {
                       onChange={(e) => setFileRootsDraft(e.target.value)}
                     />
                     <Space>
-                      <Button type="primary" loading={busy} onClick={onSaveFileRoots}>
-                        保存
-                      </Button>
+                      {canManageNode && (
+                        <Button type="primary" loading={busy} onClick={onSaveFileRoots}>
+                          保存
+                        </Button>
+                      )}
                       <Tooltip
                         title={
                           !(node.fileRoots?.length)
@@ -483,12 +516,16 @@ export default function AgentNodeDetailPage() {
                       {installOneLiner(node.id, 'linux', null)}
                     </Typography.Paragraph>
                     <Space>
-                      <Button icon={<WindowsOutlined />} onClick={() => downloadInstallScript(node.id, 'windows')}>
-                        下载参数化 .ps1
-                      </Button>
-                      <Button icon={<CodeOutlined />} onClick={() => downloadInstallScript(node.id, 'linux')}>
-                        下载参数化 .sh
-                      </Button>
+                      {canInstallNode && (
+                        <>
+                          <Button icon={<WindowsOutlined />} onClick={() => downloadInstallScript(node.id, 'windows')}>
+                            下载参数化 .ps1
+                          </Button>
+                          <Button icon={<CodeOutlined />} onClick={() => downloadInstallScript(node.id, 'linux')}>
+                            下载参数化 .sh
+                          </Button>
+                        </>
+                      )}
                     </Space>
                   </Space>
                 </Card>

@@ -13,6 +13,7 @@ import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/page
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { usePermissions } from '../../auth/usePermissions'
 
 /** kind → 展示名 + 说明；数组顺序即 Segmented 视图顺序；未知 kind 用兜底配置排在最后 */
 const GROUP_META: Array<{ kind: string; title: string; hint: string }> = [
@@ -28,6 +29,12 @@ const GROUP_META: Array<{ kind: string; title: string; hint: string }> = [
   },
 ]
 const FALLBACK_TITLE = '资产'
+
+/** CAP-103 上下文页签与权限节点（按资产 kind 映射） */
+const CONTEXT_KIND_PERMISSIONS: Record<string, string> = {
+  doc: 'project.context.tab.doc',
+  skill: 'project.context.tab.skill',
+}
 
 /** extra 附加信息白名单渲染（scope/status/tags/hitCount/version），其余忽略 */
 function ExtraTags({ extra }: { extra?: Record<string, unknown> }) {
@@ -81,14 +88,19 @@ export default function ProjectContextPage({
     load()
   }, [load])
 
-  // 视图选项：按 GROUP_META 顺序排已知 kind，未知 kind 追加在最后
+  // 视图选项：按 GROUP_META 顺序排已知 kind，未知 kind 追加在最后；已知 kind 按角色权限过滤
+  const { can } = usePermissions()
   const viewOptions = useMemo(() => {
-    const known = GROUP_META.filter((m) => groups.some((g) => g.kind === m.kind))
+    const known = GROUP_META.filter(
+      (m) =>
+        groups.some((g) => g.kind === m.kind) &&
+        (!CONTEXT_KIND_PERMISSIONS[m.kind] || can(CONTEXT_KIND_PERMISSIONS[m.kind])),
+    )
     const unknown = groups
       .filter((g) => !GROUP_META.some((m) => m.kind === g.kind))
       .map((g) => ({ kind: g.kind, title: FALLBACK_TITLE, hint: '' }))
     return [...known, ...unknown]
-  }, [groups])
+  }, [groups, can])
 
   // 当前视图的数据与元信息；受控时直接用受控值（该 kind 无数据显示空表，外层页签与内容保持一致），
   // 非受控且视图无效（如重载后该组消失）时回落到首个可用视图

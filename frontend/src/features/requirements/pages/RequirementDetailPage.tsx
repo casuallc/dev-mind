@@ -82,9 +82,24 @@ import {
 import type { Design, RequirementOverview } from '../types'
 import { showError } from '../../../shared/utils/showError'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
+import { usePermittedView, usePermissions } from '../../auth/usePermissions'
 
 /** 描述收起高度（超出才显示展开/收起；留 24px 余量避免刚好贴线也出按钮） */
 const DESC_COLLAPSED_HEIGHT = 168
+
+/** CAP-103 需求详情页签与权限节点（与后端权限目录一致） */
+const REQUIREMENT_TABS = ['analysis', 'design', 'outputs', 'workItems', 'verify', 'timeline', 'records', 'attachments'] as const
+type RequirementTab = (typeof REQUIREMENT_TABS)[number]
+const REQUIREMENT_TAB_PERMISSIONS: Record<RequirementTab, string> = {
+  analysis: 'project.requirements.tab.analysis',
+  design: 'project.requirements.tab.design',
+  outputs: 'project.requirements.tab.outputs',
+  workItems: 'project.requirements.tab.work-items',
+  verify: 'project.requirements.tab.verify',
+  timeline: 'project.requirements.tab.timeline',
+  records: 'project.requirements.tab.records',
+  attachments: 'project.requirements.tab.attachments',
+}
 
 /** 超长描述收起容器：默认限高 + 底部渐变遮罩 + 展开/收起；内容不超高则原样渲染无按钮。
  *  用 ResizeObserver 重测（Jira 截图异步加载完成后高度才稳定）。 */
@@ -146,6 +161,10 @@ function CollapsibleDescription({ children }: { children: ReactNode }) {
 export default function RequirementDetailPage() {
   const { id: projectId, rid } = useParams<{ id: string; rid: string }>()
   const navigate = useNavigate()
+  const { canAction } = usePermissions()
+  const canManage = canAction('project.requirements.action.manage')
+  const canFlow = canAction('project.requirements.action.flow')
+  const canPushJira = canAction('project.requirements.action.push-jira')
   const [overview, setOverview] = useState<RequirementOverview | null>(null)
   const [loading, setLoading] = useState(true)
   const [editOpen, setEditOpen] = useState(false)
@@ -163,6 +182,12 @@ export default function RequirementDetailPage() {
   const setActiveTab = (key: string) => {
     setSearchParams(key === 'analysis' ? {} : { tab: key }, { replace: true })
   }
+  const permittedTabs = usePermittedView(
+    REQUIREMENT_TABS,
+    (tab) => REQUIREMENT_TAB_PERMISSIONS[tab],
+    (REQUIREMENT_TABS as readonly string[]).includes(activeTab) ? (activeTab as RequirementTab) : 'analysis',
+    setActiveTab,
+  )
 
   // URL 自含项目身份：从分享链接进入时把当前项目切到该需求所属项目
   useEffect(() => {
@@ -224,6 +249,15 @@ export default function RequirementDetailPage() {
   const planned = overview.docs.some((d) => d.kind === 'analysis')
     || designs.some((d) => d.status !== 'DISCARDED')
   const hasWorkItems = overview.workItems.length > 0
+  const moreItems = canManage
+    ? [
+        ...(r.status !== 'ACCEPTANCE'
+          ? [{ key: 'done', label: '直接完成', icon: <CheckOutlined />, disabled: terminal }]
+          : []),
+        { key: 'cancel', label: '取消需求', danger: true, disabled: !cancellable },
+        { key: 'delete', label: '删除', danger: true },
+      ]
+    : []
 
   /** 起流程会话：规划/开发共用（成功后刷新 overview + 方案列表，会话状态进「会话」列与 Tab 标签） */
   const startFlow = async (kind: 'plan' | 'dev') => {
@@ -479,7 +513,7 @@ export default function RequirementDetailPage() {
         }
         extra={
           <Space size={8} wrap>
-            {!terminal && (
+            {!terminal && canFlow && (
               <Tooltip title={flowActive ? '该需求已有进行中的流程会话，等它结束后再起' : undefined}>
                 <span>
                   <Button
@@ -494,7 +528,7 @@ export default function RequirementDetailPage() {
                 </span>
               </Tooltip>
             )}
-            {!terminal && hasWorkItems && (
+            {!terminal && hasWorkItems && canFlow && (
               <Tooltip title={flowActive ? '该需求已有进行中的流程会话，等它结束后再起' : undefined}>
                 <span>
                   <Button
@@ -508,14 +542,16 @@ export default function RequirementDetailPage() {
                 </span>
               </Tooltip>
             )}
-            {r.status === 'ACCEPTANCE' && (
+            {r.status === 'ACCEPTANCE' && canManage && (
               <Button type="primary" icon={<CheckOutlined />} onClick={() => confirmMarkDone('accept')}>
                 验收通过
               </Button>
             )}
-            <Button icon={<EditOutlined />} onClick={() => setEditOpen(true)}>编辑</Button>
+            {canManage && (
+              <Button icon={<EditOutlined />} onClick={() => setEditOpen(true)}>编辑</Button>
+            )}
             <Button icon={<ProfileOutlined />} onClick={() => setPropsOpen(true)}>属性</Button>
-            {!isJira && (
+            {!isJira && canPushJira && (
               <Tooltip title={terminal ? '需求已完结（DONE/CANCELLED），不可推送' : undefined}>
                 <span>
                   <Button
@@ -530,25 +566,21 @@ export default function RequirementDetailPage() {
             )}
             {isJira && <JiraActions requirement={r} onChanged={reloadOverview} />}
             <Button icon={<ReloadOutlined />} onClick={reloadOverview}>刷新</Button>
-            <Dropdown
-              menu={{
-                items: [
-                  ...(r.status !== 'ACCEPTANCE' ? [
-                    { key: 'done', label: '直接完成', icon: <CheckOutlined />, disabled: terminal },
-                  ] : []),
-                  { key: 'cancel', label: '取消需求', danger: true, disabled: !cancellable },
-                  { key: 'delete', label: '删除', danger: true },
-                ],
-                onClick: ({ key }) => {
-                  if (!projectId) return
-                  if (key === 'cancel') confirmCancel()
-                  else if (key === 'delete') confirmDelete()
-                  else if (key === 'done') confirmMarkDone('direct')
-                },
-              }}
-            >
-              <Button>更多 <DownOutlined /></Button>
-            </Dropdown>
+            {moreItems.length > 0 && (
+              <Dropdown
+                menu={{
+                  items: moreItems,
+                  onClick: ({ key }) => {
+                    if (!projectId) return
+                    if (key === 'cancel') confirmCancel()
+                    else if (key === 'delete') confirmDelete()
+                    else if (key === 'done') confirmMarkDone('direct')
+                  },
+                }}
+              >
+                <Button>更多 <DownOutlined /></Button>
+              </Dropdown>
+            )}
             <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/requirements')}>返回列表</Button>
           </Space>
         }
@@ -637,7 +669,7 @@ export default function RequirementDetailPage() {
                 />
               ),
             },
-          ]}
+          ].filter((item) => permittedTabs.includes(item.key as RequirementTab))}
         />
       </Card>
 
@@ -662,16 +694,18 @@ export default function RequirementDetailPage() {
             <Descriptions.Item label="Jira 状态">
               <Space size={8}>
                 <span>{r.remoteStatus ?? '-'}</span>
-                <Tooltip title="按关联 issue 拉回托管字段（JQL 同步未覆盖该 issue 时的兜底通道）">
-                  <Button
-                    size="small"
-                    icon={<ReloadOutlined />}
-                    loading={refreshingJira}
-                    onClick={refreshFromJira}
-                  >
-                    从 Jira 刷新
-                  </Button>
-                </Tooltip>
+                {canPushJira && (
+                  <Tooltip title="按关联 issue 拉回托管字段（JQL 同步未覆盖该 issue 时的兜底通道）">
+                    <Button
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      loading={refreshingJira}
+                      onClick={refreshFromJira}
+                    >
+                      从 Jira 刷新
+                    </Button>
+                  </Tooltip>
+                )}
               </Space>
             </Descriptions.Item>
           )}

@@ -20,6 +20,7 @@ import type { AttachmentView } from '../../../shared/attachments/api'
 import { attachmentRawUrl, withAccessToken } from '../../../shared/attachments/url'
 import { fmtBytes, fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
+import { usePermissions } from '../../auth/usePermissions'
 
 /** 列表行：本地附件引用（带元数据，文件已删则 meta=null 灰显）/ Jira wiki 图（只读） */
 type Row =
@@ -54,7 +55,9 @@ export default function RequirementAttachmentPanel({ requirement, onCountChange,
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const editable = requirement.source !== 'JIRA'
+  const { canAction } = usePermissions()
+  const canManage = canAction('project.requirements.action.manage-attachment')
+  const editable = requirement.source !== 'JIRA' && canManage
 
   const reload = useCallback(async () => {
     const description = requirement.description ?? ''
@@ -151,9 +154,11 @@ export default function RequirementAttachmentPanel({ requirement, onCountChange,
           </Button>
         )}
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          {editable
-            ? '附件以引用形式写进需求描述，AI 会话可读取；也可在编辑描述时直接粘贴图片'
-            : 'Jira 来源需求的描述由同步托管，附件只读'}
+          {requirement.source === 'JIRA'
+            ? 'Jira 来源需求的描述由同步托管，附件只读'
+            : canManage
+              ? '附件以引用形式写进需求描述，AI 会话可读取；也可在编辑描述时直接粘贴图片'
+              : '当前角色无需求附件管理权限，仅可查看'}
         </Typography.Text>
       </Space>
       {editable && (

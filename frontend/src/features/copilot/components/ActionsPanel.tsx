@@ -8,6 +8,7 @@ import { cancelCopilotAction, listCopilotActions } from '../api'
 import type { CopilotAction } from '../types'
 import { ACTION_STATUS_OPTIONS, ActionStatusBadge, RISK_OPTIONS, RiskTag } from './tags'
 import FitTable from '../../../shared/components/FitTable'
+import { usePermissions } from '../../auth/usePermissions'
 import { showError } from '../../../shared/utils/showError'
 import { fmtTime } from '../../../shared/utils/format'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
@@ -27,6 +28,8 @@ export default function ActionsPanel({ refreshTick = 0 }: { refreshTick?: number
   const [size, setSize] = useState(20)
   const [loading, setLoading] = useState(false)
   const [detail, setDetail] = useState<CopilotAction | null>(null)
+  const { canAction } = usePermissions()
+  const canCancel = canAction('admin.copilot.action.cancel-confirmation')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -103,19 +106,23 @@ export default function ActionsPanel({ refreshTick = 0 }: { refreshTick?: number
       render: (c: string) => <Tag>{CHANNEL_LABEL[c] ?? c}</Tag>,
     },
     { title: '过期时间', dataIndex: 'expiresAt', width: 160, render: (t?: string) => fmtTime(t) },
-    {
-      title: '操作',
-      key: 'op',
-      width: 90,
-      render: (_, r) =>
-        r.status === 'PENDING' ? (
-          <Button danger type="link" onClick={(e) => { e.stopPropagation(); cancel(r) }}>
-            取消
-          </Button>
-        ) : (
-          '-'
-        ),
-    },
+    ...(canCancel
+      ? [
+          {
+            title: '操作',
+            key: 'op',
+            width: 90,
+            render: (_: unknown, r: CopilotAction) =>
+              r.status === 'PENDING' ? (
+                <Button danger type="link" onClick={(e) => { e.stopPropagation(); cancel(r) }}>
+                  取消
+                </Button>
+              ) : (
+                '-'
+              ),
+          } satisfies ColumnsType<CopilotAction>[number],
+        ]
+      : []),
   ]
 
   return (

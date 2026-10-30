@@ -28,10 +28,12 @@ import {
   ReloadOutlined,
   SendOutlined,
 } from '@ant-design/icons'
+import type { ColumnsType } from 'antd/es/table'
 import FitTable from '../../../shared/components/FitTable'
 import { fmtBytes, fmtTime } from '../../../shared/utils/format'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import LayaViewSwitch from '../../laya/components/LayaViewSwitch'
+import { usePermissions } from '../../auth/usePermissions'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import { listAgentNodes } from '../../agent/api'
@@ -59,6 +61,8 @@ const INSTALL_STATUS: Record<string, { color: string; label: string }> = {
 }
 
 export default function ClassifyPackagesPage() {
+  const { canAction } = usePermissions()
+  const canManagePackage = canAction('admin.laya-instances.action.manage-package')
   const [searchParams] = useSearchParams()
   // 包类型由 URL ?kind= 驱动（LayaViewSwitch 的三个包视图直接跳对应 kind），非法值回落边车程序包
   const kindParam = searchParams.get('kind') ?? ''
@@ -208,14 +212,16 @@ export default function ClassifyPackagesPage() {
       width: 200,
       render: (_: unknown, row: ClassifyPackage) => (
         <Space>
-          <a
-            onClick={() => {
-              setDistributeNodeId(null)
-              setDistributeFor(row)
-            }}
-          >
-            分发
-          </a>
+          {canManagePackage && (
+            <a
+              onClick={() => {
+                setDistributeNodeId(null)
+                setDistributeFor(row)
+              }}
+            >
+              分发
+            </a>
+          )}
           <a
             onClick={() => {
               setInstallsFor(row)
@@ -224,15 +230,17 @@ export default function ClassifyPackagesPage() {
           >
             安装记录
           </a>
-          <Popconfirm title="删除该包？" description="已绑定为实例程序包时不可删；节点的安装目录不受影响。" onConfirm={() => remove(row)}>
-            <a style={{ color: '#ff4d4f' }}>删除</a>
-          </Popconfirm>
+          {canManagePackage && (
+            <Popconfirm title="删除该包？" description="已绑定为实例程序包时不可删；节点的安装目录不受影响。" onConfirm={() => remove(row)}>
+              <a style={{ color: '#ff4d4f' }}>删除</a>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
   ]
 
-  const installColumns = [
+  const installColumns: ColumnsType<ClassifyPackageInstall> = [
     {
       title: '节点',
       dataIndex: 'nodeId',
@@ -270,13 +278,13 @@ export default function ClassifyPackagesPage() {
         ),
     },
     { title: '更新时间', dataIndex: 'updatedAt', width: 150, render: (t: string) => fmtTime(t) },
-    {
+    ...(canManagePackage ? [{
       title: '操作',
       key: 'actions',
       width: 80,
       render: (_: unknown, inst: ClassifyPackageInstall) =>
         inst.status === 'FAILED' ? <a onClick={() => retry(inst)}>重试</a> : null,
-    },
+    } satisfies ColumnsType<ClassifyPackageInstall>[number]] : []),
   ]
 
   return (
@@ -289,16 +297,18 @@ export default function ClassifyPackagesPage() {
           <Button icon={<ReloadOutlined />} onClick={load}>
             刷新
           </Button>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => {
-              uploadForm.resetFields()
-              setUploadOpen(true)
-            }}
-          >
-            上传包
-          </Button>
+          {canManagePackage && (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => {
+                uploadForm.resetFields()
+                setUploadOpen(true)
+              }}
+            >
+              上传包
+            </Button>
+          )}
         </Space>
       }
     >
@@ -315,9 +325,11 @@ export default function ClassifyPackagesPage() {
         locale={{
           emptyText: (
             <Empty description={`还没有${KIND_META[kind]}`}>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setUploadOpen(true)}>
-                上传包
-              </Button>
+              {canManagePackage && (
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => setUploadOpen(true)}>
+                  上传包
+                </Button>
+              )}
             </Empty>
           ),
         }}

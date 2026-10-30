@@ -24,6 +24,7 @@ import { STATUS_COLOR } from '../constants'
 import { showError } from '../../../shared/utils/showError'
 import LogView from '../../../shared/components/LogView'
 import { DRAWER_SCREEN } from '../../../shared/utils/overlay'
+import { usePermissions } from '../../auth/usePermissions'
 
 const STEP_STATUS_COLOR: Record<string, string> = {
   PENDING: 'default',
@@ -39,6 +40,9 @@ export default function DeployDetailDrawer({ record, onClose, onChanged }: {
   onChanged: (d: DeploymentRecord) => void
 }) {
   const [d, setD] = useState<DeploymentRecord | null>(record)
+  const { canAction } = usePermissions()
+  const canExecuteAction = canAction('project.deployments.action.execute')
+  const canRollbackAction = canAction('project.deployments.action.rollback')
   const [text, setText] = useState('')
   const [connected, setConnected] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
@@ -169,18 +173,24 @@ export default function DeployDetailDrawer({ record, onClose, onChanged }: {
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           {d.errorSummary && <Alert type="error" showIcon message={d.errorSummary} />}
           <Space wrap>
-            <Button type="primary" size="small" disabled={!canExecute} loading={busy}
-              onClick={() => act(() => executeDeployment(d.id), '已开始执行')}>
-              执行
-            </Button>
-            <Button size="small" disabled={!canConfirm} loading={busy}
-              onClick={() => act(() => confirmDeployment(d.id), '已确认')}>
-              确认
-            </Button>
-            <Button size="small" danger disabled={!canRollback} loading={busy}
-              onClick={() => act(() => rollbackDeployment(d.id), '已开始回滚')}>
-              回滚
-            </Button>
+            {canExecuteAction && (
+              <>
+                <Button type="primary" size="small" disabled={!canExecute} loading={busy}
+                  onClick={() => act(() => executeDeployment(d.id), '已开始执行')}>
+                  执行
+                </Button>
+                <Button size="small" disabled={!canConfirm} loading={busy}
+                  onClick={() => act(() => confirmDeployment(d.id), '已确认')}>
+                  确认
+                </Button>
+              </>
+            )}
+            {canRollbackAction && (
+              <Button size="small" danger disabled={!canRollback} loading={busy}
+                onClick={() => act(() => rollbackDeployment(d.id), '已开始回滚')}>
+                回滚
+              </Button>
+            )}
           </Space>
           <Space wrap size={8}>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>

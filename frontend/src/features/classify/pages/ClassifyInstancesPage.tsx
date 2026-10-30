@@ -33,6 +33,7 @@ import { fmtBytes, fmtTime } from '../../../shared/utils/format'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import LayaViewSwitch from '../../laya/components/LayaViewSwitch'
+import { usePermissions } from '../../auth/usePermissions'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
@@ -75,6 +76,8 @@ interface InstanceFormValues {
 }
 
 export default function ClassifyInstancesPage() {
+  const { canAction } = usePermissions()
+  const canManageInstance = canAction('admin.laya-instances.action.manage-instance')
   const [rows, setRows] = useState<ClassifyInstance[]>([])
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [appPackages, setAppPackages] = useState<ClassifyPackage[]>([])
@@ -278,9 +281,11 @@ export default function ClassifyInstancesPage() {
           <Button icon={<ReloadOutlined />} onClick={load}>
             刷新
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建实例
-          </Button>
+          {canManageInstance && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建实例
+            </Button>
+          )}
         </Space>
       }
     >
@@ -296,9 +301,11 @@ export default function ClassifyInstancesPage() {
         locale={{
           emptyText: (
             <Empty description="还没有分类服务实例">
-              <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-                新建实例
-              </Button>
+              {canManageInstance && (
+                <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+                  新建实例
+                </Button>
+              )}
             </Empty>
           ),
         }}
@@ -411,40 +418,43 @@ export default function ClassifyInstancesPage() {
         {managing ? (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Space wrap>
-              {managing.status !== 'RUNNING' && managing.status !== 'STARTING' ? (
-                <Button
-                  type="primary"
-                  icon={<CaretRightOutlined />}
-                  loading={operating === 'start'}
-                  onClick={() => operate(managing, 'start')}
-                >
-                  启动
-                </Button>
-              ) : (
-                <>
-                  <Popconfirm title="确认停止该实例？" onConfirm={() => operate(managing, 'stop')}>
-                    <Button icon={<StopOutlined />} loading={operating === 'stop'}>
-                      停止
-                    </Button>
-                  </Popconfirm>
-                  <Popconfirm title="确认重启该实例？" onConfirm={() => operate(managing, 'restart')}>
-                    <Button icon={<PoweroffOutlined />} loading={operating === 'restart'}>
-                      重启
-                    </Button>
-                  </Popconfirm>
-                </>
-              )}
+              {canManageInstance &&
+                (managing.status !== 'RUNNING' && managing.status !== 'STARTING' ? (
+                  <Button
+                    type="primary"
+                    icon={<CaretRightOutlined />}
+                    loading={operating === 'start'}
+                    onClick={() => operate(managing, 'start')}
+                  >
+                    启动
+                  </Button>
+                ) : (
+                  <>
+                    <Popconfirm title="确认停止该实例？" onConfirm={() => operate(managing, 'stop')}>
+                      <Button icon={<StopOutlined />} loading={operating === 'stop'}>
+                        停止
+                      </Button>
+                    </Popconfirm>
+                    <Popconfirm title="确认重启该实例？" onConfirm={() => operate(managing, 'restart')}>
+                      <Button icon={<PoweroffOutlined />} loading={operating === 'restart'}>
+                        重启
+                      </Button>
+                    </Popconfirm>
+                  </>
+                ))}
               <Button icon={<ReloadOutlined />} loading={operating === 'status'} onClick={() => refreshStatus(managing)}>
                 状态对账
               </Button>
-              <Button onClick={() => openEdit(managing)}>编辑</Button>
-              <Popconfirm
-                title="删除实例？"
-                description="仅停止状态可删除；删除不影响节点上已安装的包。"
-                onConfirm={() => remove(managing)}
-              >
-                <Button danger>删除</Button>
-              </Popconfirm>
+              {canManageInstance && <Button onClick={() => openEdit(managing)}>编辑</Button>}
+              {canManageInstance && (
+                <Popconfirm
+                  title="删除实例？"
+                  description="仅停止状态可删除；删除不影响节点上已安装的包。"
+                  onConfirm={() => remove(managing)}
+                >
+                  <Button danger>删除</Button>
+                </Popconfirm>
+              )}
             </Space>
             {managing.lastError ? <Alert type="error" showIcon message={managing.lastError} /> : null}
             <Descriptions column={1} size="small" bordered>

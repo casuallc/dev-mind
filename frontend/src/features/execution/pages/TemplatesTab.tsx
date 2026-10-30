@@ -12,10 +12,13 @@ import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import FitTable from '../../../shared/components/FitTable'
 import CopyableLongText from '../../../shared/components/CopyableLongText'
+import { usePermissions } from '../../auth/usePermissions'
 
 const CAPABILITIES = ['build', 'deploy', 'release', 'test', 'logs', 'exec']
 
 export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refreshTick?: number; createTick?: number }) {
+  const { canAction } = usePermissions()
+  const canManage = canAction('admin.projects.action.manage-template')
   const [projects, setProjects] = useState<Project[]>([])
   const [projectId, setProjectId] = useState<string>('')
   const [templates, setTemplates] = useState<TemplateView[]>([])
@@ -137,16 +140,18 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
       render: (p: TemplateView['params']) =>
         p && p.length > 0 ? p.map((x) => <Tag key={x.name}>{x.name}{x.required ? '*' : ''}</Tag>) : '-',
     },
-    {
-      title: '操作',
-      width: 140,
-      render: (_, r) => (
-        <Space>
-          <Button onClick={() => openEdit(r)}>编辑</Button>
-          <Button danger onClick={() => onDelete(r.id)}>删除</Button>
-        </Space>
-      ),
-    },
+    ...(canManage
+      ? [{
+          title: '操作',
+          width: 140,
+          render: (_: unknown, r: TemplateView) => (
+            <Space>
+              <Button onClick={() => openEdit(r)}>编辑</Button>
+              <Button danger onClick={() => onDelete(r.id)}>删除</Button>
+            </Space>
+          ),
+        } satisfies ColumnsType<TemplateView>[number]]
+      : []),
   ]
 
   return (
@@ -167,10 +172,12 @@ export default function TemplatesTab({ refreshTick = 0, createTick = 0 }: { refr
         dataSource={templates}
         pagination={LIST_PAGINATION}
         locale={{
-          emptyText: (
+          emptyText: canManage ? (
             <Empty description="暂无模板。构建/部署/发版等执行器只允许使用白名单内的模板。">
               <Button type="primary" onClick={openCreate}>新建模板</Button>
             </Empty>
+          ) : (
+            <Empty description="暂无模板。构建/部署/发版等执行器只允许使用白名单内的模板。" />
           ),
         }}
       />

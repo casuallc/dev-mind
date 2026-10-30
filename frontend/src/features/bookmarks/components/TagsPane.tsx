@@ -2,6 +2,7 @@ import { Button, Space } from 'antd'
 import FitTable from '../../../shared/components/FitTable'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import type { BookmarkTagSummary } from '../types'
+import { usePermissions } from '../../auth/usePermissions'
 
 interface Props {
   rows: BookmarkTagSummary[]
@@ -12,6 +13,8 @@ interface Props {
 
 /** FR-03 标签管理：删除只解除关联（不动收藏），改名受 (owner, name) 唯一约束。 */
 export default function TagsPane({ rows, loading, onRename, onDelete }: Props) {
+  const { canAction } = usePermissions()
+  const canManage = canAction('top.bookmarks.action.manage-tag')
   return (
     <FitTable<BookmarkTagSummary>
       rowKey="id"
@@ -26,18 +29,22 @@ export default function TagsPane({ rows, loading, onRename, onDelete }: Props) {
           dataIndex: 'bookmarkCount',
           width: 120,
         },
-        {
-          title: '操作',
-          width: 160,
-          render: (_, t) => (
-            <Space>
-              <Button onClick={() => onRename(t)}>重命名</Button>
-              <Button danger onClick={() => onDelete(t)}>
-                删除
-              </Button>
-            </Space>
-          ),
-        },
+        ...(canManage
+          ? [
+              {
+                title: '操作',
+                width: 160,
+                render: (_: unknown, t: BookmarkTagSummary) => (
+                  <Space>
+                    <Button onClick={() => onRename(t)}>重命名</Button>
+                    <Button danger onClick={() => onDelete(t)}>
+                      删除
+                    </Button>
+                  </Space>
+                ),
+              },
+            ]
+          : []),
       ]}
     />
   )

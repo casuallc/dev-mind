@@ -33,6 +33,7 @@ import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
+import { usePermissions } from '../../auth/usePermissions'
 
 const statusTag = (s: string) =>
   s === 'active' ? <Tag color="green">active</Tag> : s === 'open' ? <Tag color="gold">open</Tag>
@@ -74,6 +75,9 @@ export default function ProposalsView({
   const [bases, setBases] = useState<KnowledgeBase[]>([])
   const [proposals, setProposals] = useState<KnowledgeProposal[]>([])
   const [proposalsLoading, setProposalsLoading] = useState(false)
+  const { canAction } = usePermissions()
+  const canManageProposal = canAction('admin.projects.action.manage-proposal')
+  const canSedimentProposal = canAction('admin.projects.action.sediment-proposal')
 
   // 提案管理抽屉：引用实时列表数据，状态变化自动反映
   const [manageId, setManageId] = useState<number | null>(null)
@@ -223,20 +227,24 @@ export default function ProposalsView({
     },
     { title: '状态', dataIndex: 'status', width: 100, render: statusTag },
     { title: '创建时间', dataIndex: 'createdAt', width: 170, render: (v) => fmtTime(v) },
-    {
-      title: '操作',
-      width: 90,
-      render: (_, r) =>
-        r.status === 'open' ? (
-          <Button size="small" onClick={() => setManageId(r.id)}>
-            管理
-          </Button>
-        ) : (
-          <Button size="small" danger onClick={() => onDelete(r)}>
-            删除
-          </Button>
-        ),
-    },
+    ...(canManageProposal
+      ? [
+          {
+            title: '操作',
+            width: 90,
+            render: (_: unknown, r: KnowledgeProposal) =>
+              r.status === 'open' ? (
+                <Button size="small" onClick={() => setManageId(r.id)}>
+                  管理
+                </Button>
+              ) : (
+                <Button size="small" danger onClick={() => onDelete(r)}>
+                  删除
+                </Button>
+              ),
+          } satisfies ColumnsType<KnowledgeProposal>[number],
+        ]
+      : []),
   ]
 
   const activeBaseOptions = bases
@@ -255,7 +263,9 @@ export default function ProposalsView({
         dataSource={proposals}
         pagination={LIST_PAGINATION}
         locale={{
-          emptyText: '暂无待审核经验——在会话中点「沉淀经验」，或点击右上角「手动沉淀经验」提交一条。',
+          emptyText: canSedimentProposal
+            ? '暂无待审核经验——在会话中点「沉淀经验」，或点击右上角「手动沉淀经验」提交一条。'
+            : '暂无待审核经验。',
         }}
       />
 
@@ -323,22 +333,26 @@ export default function ProposalsView({
             </div>
 
             {manageProposal.status === 'open' ? (
-              <Space>
-                <Button type="primary" onClick={() => openAdopt(manageProposal)}>
-                  采纳到知识库…
-                </Button>
-                <Button danger onClick={() => onReject(manageProposal)}>
-                  拒绝
-                </Button>
-              </Space>
+              canManageProposal && (
+                <Space>
+                  <Button type="primary" onClick={() => openAdopt(manageProposal)}>
+                    采纳到知识库…
+                  </Button>
+                  <Button danger onClick={() => onReject(manageProposal)}>
+                    拒绝
+                  </Button>
+                </Space>
+              )
             ) : (
               <Typography.Text type="secondary">该提案已处理。</Typography.Text>
             )}
-            <div>
-              <Button size="small" danger onClick={() => onDelete(manageProposal)}>
-                删除提案
-              </Button>
-            </div>
+            {canManageProposal && (
+              <div>
+                <Button size="small" danger onClick={() => onDelete(manageProposal)}>
+                  删除提案
+                </Button>
+              </div>
+            )}
           </Space>
         </Drawer>
       )}

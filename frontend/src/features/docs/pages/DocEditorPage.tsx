@@ -22,7 +22,7 @@ import {
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { canWrite } from '../../auth/authStore'
+import { usePermissions } from '../../auth/usePermissions'
 import { deleteDoc, docDiff, getDoc, listDocVersions, revertDoc, transitionDoc } from '../api'
 import { KIND_LABEL, STATUS_LABEL } from '../types'
 import type { DiffResult, DocDetail, DocVersion } from '../types'
@@ -151,6 +151,9 @@ export default function DocEditorPage() {
   const { id } = useParams<{ id: string }>()
   const docId = Number(id)
   const navigate = useNavigate()
+  const { canAction } = usePermissions()
+  const canEdit = canAction('admin.docs.action.edit')
+  const canDelete = canAction('admin.docs.action.delete')
 
   const [doc, setDoc] = useState<DocDetail | null>(null)
   const [versions, setVersions] = useState<DocVersion[]>([])
@@ -285,12 +288,14 @@ export default function DocEditorPage() {
           <Button onClick={() => onDiff(r.versionNo)}>
             与当前 diff
           </Button>
-          <Button
-            disabled={r.versionNo === doc?.currentVersion}
-            onClick={() => onRevert(r.versionNo)}
-          >
-            回退
-          </Button>
+          {canEdit && (
+            <Button
+              disabled={r.versionNo === doc?.currentVersion}
+              onClick={() => onRevert(r.versionNo)}
+            >
+              回退
+            </Button>
+          )}
         </Space>
       ),
     },
@@ -306,27 +311,27 @@ export default function DocEditorPage() {
     </Button>
   ) : (
     <>
-      {canWrite() && (
+      {canEdit && (
         <Button type="primary" icon={<EditOutlined />} onClick={() => setEditOpen(true)}>
           编辑
         </Button>
       )}
-      {doc?.status === 'draft' && (
+      {canEdit && doc?.status === 'draft' && (
         <Button onClick={() => onTransition('submit', '提交确认', '进入待确认状态，可进一步冻结为基线。')}>
           提交确认
         </Button>
       )}
-      {doc?.status === 'pending_confirm' && (
+      {canEdit && doc?.status === 'pending_confirm' && (
         <Button onClick={() => onTransition('freeze', '冻结', '冻结后为基线，后续变更必须生成新版本并填写变更说明。')}>
           冻结
         </Button>
       )}
-      {doc?.status === 'frozen' && (
+      {canEdit && doc?.status === 'frozen' && (
         <Button onClick={() => onTransition('unfreeze', '解除冻结', '回到草稿态，可随意编辑。')}>
           解除冻结
         </Button>
       )}
-      {canWrite() && (
+      {canDelete && (
         <Button danger icon={<DeleteOutlined />} onClick={onDelete}>
           删除
         </Button>

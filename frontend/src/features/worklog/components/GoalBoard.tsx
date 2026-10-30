@@ -15,6 +15,7 @@ import OkrSuggestDrawer from './OkrSuggestDrawer'
 import QuarterlyReviewDrawer from './QuarterlyReviewDrawer'
 import YearStrip from './YearStrip'
 import { showError } from '../../../shared/utils/showError'
+import { usePermissions } from '../../auth/usePermissions'
 
 /** 页面内切换的区段：年度目标 / 各季度（CAP-91 M4） */
 type GoalSection = 'YEAR' | 'Q1' | 'Q2' | 'Q3' | 'Q4'
@@ -72,6 +73,8 @@ export interface GoalBoardHandle {
  * 年切换用 5 年选择条（交互对齐周报 7 周条）；操作按钮在页面壳 Card extra（布局约定），经 ref 句柄触发。
  */
 export default function GoalBoard({ ref }: { ref?: Ref<GoalBoardHandle> }) {
+  const { canAction } = usePermissions()
+  const canManage = canAction('top.worklog.action.manage-goal')
   const [year, setYear] = useState(() => dayjs().year())
   // 年条窗口相对今年的偏移（0=今年居中；目标允许规划未来年，偏移双向不设限）
   const [yearsOffset, setYearsOffset] = useState(0)
@@ -232,12 +235,16 @@ export default function GoalBoard({ ref }: { ref?: Ref<GoalBoardHandle> }) {
         </Typography.Text>
       )}
       <Space size={4}>
-        <Button size="small" onClick={() => openEdit(kr)}>
-          编辑
-        </Button>
-        <Button size="small" danger onClick={() => onDelete(kr)}>
-          删除
-        </Button>
+        {canManage && (
+          <>
+            <Button size="small" onClick={() => openEdit(kr)}>
+              编辑
+            </Button>
+            <Button size="small" danger onClick={() => onDelete(kr)}>
+              删除
+            </Button>
+          </>
+        )}
       </Space>
     </div>
   )
@@ -264,24 +271,26 @@ export default function GoalBoard({ ref }: { ref?: Ref<GoalBoardHandle> }) {
         </Space>
       }
       extra={
-        <Space size={4}>
-          <Button
-            size="small"
-            icon={<PlusOutlined />}
-            disabled={node.goal.status !== 'ACTIVE'}
-            onClick={() =>
-              openCreate({ scope, period, kind: 'KEY_RESULT', parentId: node.goal.id, parentTitle: node.goal.title })
-            }
-          >
-            新建 KR
-          </Button>
-          <Button size="small" onClick={() => openEdit(node.goal)}>
-            编辑
-          </Button>
-          <Button size="small" danger onClick={() => onDelete(node.goal)}>
-            删除
-          </Button>
-        </Space>
+        canManage && (
+          <Space size={4}>
+            <Button
+              size="small"
+              icon={<PlusOutlined />}
+              disabled={node.goal.status !== 'ACTIVE'}
+              onClick={() =>
+                openCreate({ scope, period, kind: 'KEY_RESULT', parentId: node.goal.id, parentTitle: node.goal.title })
+              }
+            >
+              新建 KR
+            </Button>
+            <Button size="small" onClick={() => openEdit(node.goal)}>
+              编辑
+            </Button>
+            <Button size="small" danger onClick={() => onDelete(node.goal)}>
+              删除
+            </Button>
+          </Space>
+        )
       }
     >
       {node.goal.content && (
@@ -311,23 +320,25 @@ export default function GoalBoard({ ref }: { ref?: Ref<GoalBoardHandle> }) {
       title={`${year} 年度目标`}
       loading={loading}
       extra={
-        <Space size={4}>
-          <Button
-            size="small"
-            icon={<SwapRightOutlined />}
-            onClick={() => openCarry(`${year} 年度`, String(year + 1), yearOs)}
-          >
-            滚转到明年
-          </Button>
-          <Button
-            size="small"
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => openCreate({ scope: 'YEAR', period: String(year), kind: 'OBJECTIVE' })}
-          >
-            新建年度目标
-          </Button>
-        </Space>
+        canManage && (
+          <Space size={4}>
+            <Button
+              size="small"
+              icon={<SwapRightOutlined />}
+              onClick={() => openCarry(`${year} 年度`, String(year + 1), yearOs)}
+            >
+              滚转到明年
+            </Button>
+            <Button
+              size="small"
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => openCreate({ scope: 'YEAR', period: String(year), kind: 'OBJECTIVE' })}
+            >
+              新建年度目标
+            </Button>
+          </Space>
+        )
       }
     >
       {yearOs.length === 0 ? (
@@ -358,21 +369,25 @@ export default function GoalBoard({ ref }: { ref?: Ref<GoalBoardHandle> }) {
           <Button size="small" icon={<FileTextOutlined />} onClick={() => setReviewPeriod(quarterPeriod)}>
             季度复盘
           </Button>
-          <Button
-            size="small"
-            icon={<SwapRightOutlined />}
-            onClick={() => openCarry(quarterPeriod, nextPeriodOf(quarterPeriod, year), selQuarter?.objectives ?? [])}
-          >
-            滚转
-          </Button>
-          <Button
-            size="small"
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => openCreate({ scope: 'QUARTER', period: quarterPeriod, kind: 'OBJECTIVE' })}
-          >
-            新建目标
-          </Button>
+          {canManage && (
+            <>
+              <Button
+                size="small"
+                icon={<SwapRightOutlined />}
+                onClick={() => openCarry(quarterPeriod, nextPeriodOf(quarterPeriod, year), selQuarter?.objectives ?? [])}
+              >
+                滚转
+              </Button>
+              <Button
+                size="small"
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => openCreate({ scope: 'QUARTER', period: quarterPeriod, kind: 'OBJECTIVE' })}
+              >
+                新建目标
+              </Button>
+            </>
+          )}
         </Space>
       }
     >

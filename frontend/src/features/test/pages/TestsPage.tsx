@@ -58,6 +58,15 @@ import { workItemColumn } from '../../../shared/components/WorkItemCell'
 import WorkItemSelect from '../../../shared/components/WorkItemSelect'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { usePermittedView, usePermissions } from '../../auth/usePermissions'
+
+const TEST_VIEWS = ['suites', 'runs'] as const
+type TestView = (typeof TEST_VIEWS)[number]
+const TEST_VIEW_PERMISSIONS: Record<TestView, string> = {
+  suites: 'project.tests.tab.suites',
+  runs: 'project.tests.tab.runs',
+}
+const TEST_VIEW_LABELS: Record<TestView, string> = { suites: '测试套件', runs: '运行历史' }
 
 export default function TestsPage() {
   const projectId = useCurrentProjectId()
@@ -68,7 +77,17 @@ export default function TestsPage() {
 function TestCenter({ id }: { id: string }) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+  const { canAction } = usePermissions()
+  const canManageSuite = canAction('project.tests.action.manage-suite')
+  const canRun = canAction('project.tests.action.run')
+  const canManageRun = canAction('project.tests.action.manage-run')
   const [view, setView] = useState<string>('suites') // suites | runs
+  const permittedViews = usePermittedView(
+    TEST_VIEWS,
+    (v) => TEST_VIEW_PERMISSIONS[v],
+    (TEST_VIEWS as readonly string[]).includes(view) ? (view as TestView) : 'suites',
+    setView,
+  )
   const [suites, setSuites] = useState<TestSuite[]>([])
   const [scriptSuites, setScriptSuites] = useState<ScriptSuite[]>([])
   const [runs, setRuns] = useState<TestRun[]>([])
@@ -132,7 +151,7 @@ function TestCenter({ id }: { id: string }) {
     if (searchParams.get('run') !== '1') return
     const wi = searchParams.get('workItemId')
     if (wi) setRunWorkItemId(wi)
-    setRunOpen(true)
+    if (canRun) setRunOpen(true)
     setSearchParams({}, { replace: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
@@ -215,10 +234,16 @@ function TestCenter({ id }: { id: string }) {
       // 三种类型行操作统一：运行（RunSuiteModal 按类型渲染字段）/ 编辑（统一跳内层页）/ 删除
       render: (_, s) => (
         <Space size={4}>
-          <Button size="small" type="primary" ghost icon={<PlayCircleOutlined />}
-            onClick={() => setRunFor(s)}>运行</Button>
-          <Button size="small" onClick={() => navigate(`/tests/suites/${s.id}`)}>编辑</Button>
-          <Button size="small" danger onClick={() => onDeleteSuite(s)}>删除</Button>
+          {canRun && (
+            <Button size="small" type="primary" ghost icon={<PlayCircleOutlined />}
+              onClick={() => setRunFor(s)}>运行</Button>
+          )}
+          {canManageSuite && (
+            <>
+              <Button size="small" onClick={() => navigate(`/tests/suites/${s.id}`)}>编辑</Button>
+              <Button size="small" danger onClick={() => onDeleteSuite(s)}>删除</Button>
+            </>
+          )}
         </Space>
       ),
     },
@@ -257,7 +282,7 @@ function TestCenter({ id }: { id: string }) {
       render: (_, r) => (
         <Space size={4}>
           <Button size="small" onClick={() => setDetail(r)}>详情</Button>
-          <Button size="small" danger onClick={() => onDeleteRun(r)}>删除</Button>
+          {canManageRun && <Button size="small" danger onClick={() => onDeleteRun(r)}>删除</Button>}
         </Space>
       ),
     },
@@ -305,10 +330,7 @@ function TestCenter({ id }: { id: string }) {
           <Segmented
             value={view}
             onChange={setView}
-            options={[
-              { value: 'suites', label: '测试套件' },
-              { value: 'runs', label: '运行历史' },
-            ]}
+            options={permittedViews.map((v) => ({ value: v, label: TEST_VIEW_LABELS[v] }))}
           />
         </Space>
       }
@@ -316,12 +338,16 @@ function TestCenter({ id }: { id: string }) {
         view === 'suites' ? (
           <Space>
             <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建套件</Button>
+            {canManageSuite && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建套件</Button>
+            )}
           </Space>
         ) : (
           <Space>
             <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setRunOpen(true)}>新建运行</Button>
+            {canRun && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setRunOpen(true)}>新建运行</Button>
+            )}
           </Space>
         )
       }
@@ -333,7 +359,9 @@ function TestCenter({ id }: { id: string }) {
             script 脚本套件自带 git 源与命令、下发执行节点跑（JUnit 自动解析进用例结果）。
           </Typography.Paragraph>
           <FitTable<TestSuite> rowKey="id" loading={loading} dataSource={suites} columns={suiteColumns}
-            pagination={LIST_PAGINATION} locale={{ emptyText: '暂无套件：点右上角「新建套件」——冒烟（health 用例走执行节点健康检查）/ api（手工编排或选 openapi 由项目文档生成）/ 脚本（git 源 + 命令）' }} />
+            pagination={LIST_PAGINATION} locale={{ emptyText: canManageSuite
+              ? '暂无套件：点右上角「新建套件」——冒烟（health 用例走执行节点健康检查）/ api（手工编排或选 openapi 由项目文档生成）/ 脚本（git 源 + 命令）'
+              : '暂无套件' }} />
         </>
       ) : (
         <>
@@ -341,7 +369,9 @@ function TestCenter({ id }: { id: string }) {
             运行的历史记录：「详情」里看实时结果流与报告/日志；失败运行可在详情中一键生成缺陷线索。
           </Typography.Paragraph>
           <FitTable<TestRun> rowKey="id" loading={loading} dataSource={runs} columns={runColumns}
-            pagination={LIST_PAGINATION} locale={{ emptyText: '暂无运行记录：切到「测试套件」视图准备套件后，点右上角「新建运行」执行测试' }} />
+            pagination={LIST_PAGINATION} locale={{ emptyText: canRun
+              ? '暂无运行记录：切到「测试套件」视图准备套件后，点右上角「新建运行」执行测试'
+              : '暂无运行记录' }} />
         </>
       )}
 

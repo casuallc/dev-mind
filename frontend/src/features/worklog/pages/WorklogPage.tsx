@@ -51,11 +51,17 @@ import RepoSubscriptionDrawer from '../components/RepoSubscriptionDrawer'
 import ReportEditor from '../components/ReportEditor'
 import WeekDayStrip from '../components/WeekDayStrip'
 import RecentWeekStrip from '../components/RecentWeekStrip'
-import WorklogViewSwitch, { isSessionsView, type WorklogView } from '../components/WorklogViewSwitch'
+import WorklogViewSwitch, {
+  WORKLOG_VIEWS,
+  WORKLOG_VIEW_PERMISSIONS,
+  isSessionsView,
+  type WorklogView,
+} from '../components/WorklogViewSwitch'
 import SessionsBoard from '../../sessions/pages/SessionsBoard'
 import { pageCardBodyFlexStyle, pageCardBodyScrollStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
+import { usePermissions, usePermittedView } from '../../auth/usePermissions'
 
 type View = WorklogView
 
@@ -69,6 +75,13 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
  */
 export default function WorklogPage() {
   const [view, setView] = useState<View>('entries')
+  usePermittedView(WORKLOG_VIEWS, (v) => WORKLOG_VIEW_PERMISSIONS[v], view, setView)
+  const { canAction } = usePermissions()
+  const canManageEntry = canAction('top.worklog.action.manage-entry')
+  const canManagePlan = canAction('top.worklog.action.manage-plan')
+  const canSuggestOkr = canAction('top.worklog.action.suggest-okr')
+  const canManageSubscription = canAction('top.worklog.action.manage-subscription')
+  const canManageReport = canAction('top.worklog.action.manage-report')
 
   // ---- CAP-41/89 工作日志空间：事实源=数据库；WORKLOG 项目与亲和节点只用于「AI 生成/对话」链路 ----
   const [workspace, setWorkspace] = useState<WorkspaceView | null>(null)
@@ -419,19 +432,23 @@ export default function WorklogPage() {
             if (!e.target.value) applyKeyword('')
           }}
         />
-        <Button icon={<GithubOutlined />} onClick={() => setImportOpen(true)}>
-          从 Git 导入
-        </Button>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            setEditTarget(null)
-            setEditOpen(true)
-          }}
-        >
-          新建条目
-        </Button>
+        {canManageEntry && (
+          <>
+            <Button icon={<GithubOutlined />} onClick={() => setImportOpen(true)}>
+              从 Git 导入
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => {
+                setEditTarget(null)
+                setEditOpen(true)
+              }}
+            >
+              新建条目
+            </Button>
+          </>
+        )}
       </>
     ),
     daily: (
@@ -453,12 +470,16 @@ export default function WorklogPage() {
         <Button icon={<ReloadOutlined />} onClick={() => planRef.current?.reload()}>
           刷新
         </Button>
-        <Button icon={<RobotOutlined />} onClick={() => planRef.current?.openSuggest()}>
-          AI 建议
-        </Button>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => planRef.current?.openCreate()}>
-          新建计划项
-        </Button>
+        {canManagePlan && (
+          <>
+            <Button icon={<RobotOutlined />} onClick={() => planRef.current?.openSuggest()}>
+              AI 建议
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => planRef.current?.openCreate()}>
+              新建计划项
+            </Button>
+          </>
+        )}
       </>
     ),
     goals: (
@@ -467,9 +488,11 @@ export default function WorklogPage() {
         <Button icon={<ReloadOutlined />} onClick={() => goalsRef.current?.reload()}>
           刷新
         </Button>
-        <Button icon={<RobotOutlined />} onClick={() => goalsRef.current?.openGenerate()}>
-          AI 生成
-        </Button>
+        {canSuggestOkr && (
+          <Button icon={<RobotOutlined />} onClick={() => goalsRef.current?.openGenerate()}>
+            AI 生成
+          </Button>
+        )}
       </>
     ),
     weekly: (
@@ -524,9 +547,11 @@ export default function WorklogPage() {
       extra={
         <Space>
           {extraByView[view]}
-          <Button icon={<CodeOutlined />} onClick={() => setReposOpen(true)}>
-            仓库订阅
-          </Button>
+          {canManageSubscription && (
+            <Button icon={<CodeOutlined />} onClick={() => setReposOpen(true)}>
+              仓库订阅
+            </Button>
+          )}
           {/* 工时/报表偏好已收口到一级导航「设置」页的工作日志视图（原「工时设置」Modal），
               此处不再留重复入口 */}
         </Space>
@@ -620,9 +645,11 @@ export default function WorklogPage() {
                 </Space>
               }
               action={
-                <Button size="small" type="primary" loading={carryingEntries} onClick={onCarryEntries}>
-                  一键滚转到今天
-                </Button>
+                canManageEntry && (
+                  <Button size="small" type="primary" loading={carryingEntries} onClick={onCarryEntries}>
+                    一键滚转到今天
+                  </Button>
+                )
               }
             />
           )}
@@ -713,7 +740,7 @@ export default function WorklogPage() {
                 render: (_, e) => (
                   <Space>
                     {/* 计划态人工条目可一键完成（GIT/AGENT 恒 DONE 无此按钮） */}
-                    {(e.status === 'TODO' || e.status === 'DOING') && e.source === 'MANUAL' && (
+                    {canManageEntry && (e.status === 'TODO' || e.status === 'DOING') && e.source === 'MANUAL' && (
                       <Button
                         size="small"
                         type="primary"
@@ -727,18 +754,22 @@ export default function WorklogPage() {
                         完成
                       </Button>
                     )}
-                    <Button
-                      size="small"
-                      onClick={() => {
-                        setEditTarget(e)
-                        setEditOpen(true)
-                      }}
-                    >
-                      编辑
-                    </Button>
-                    <Button size="small" danger onClick={() => onDeleteEntry(e)}>
-                      删除
-                    </Button>
+                    {canManageEntry && (
+                      <>
+                        <Button
+                          size="small"
+                          onClick={() => {
+                            setEditTarget(e)
+                            setEditOpen(true)
+                          }}
+                        >
+                          编辑
+                        </Button>
+                        <Button size="small" danger onClick={() => onDeleteEntry(e)}>
+                          删除
+                        </Button>
+                      </>
+                    )}
                   </Space>
                 ),
               },
@@ -797,6 +828,7 @@ export default function WorklogPage() {
             <ReportEditor
               key={dayStr}
               fill
+              canEdit={canManageReport}
               exists={daily?.exists}
               updatedAt={daily?.updatedAt}
               generating={generating}
@@ -830,6 +862,7 @@ export default function WorklogPage() {
             <ReportEditor
               key={weekStartStr}
               fill
+              canEdit={canManageReport}
               exists={weekly?.exists}
               updatedAt={weekly?.updatedAt}
               generating={generating}

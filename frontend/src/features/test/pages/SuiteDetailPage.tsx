@@ -47,6 +47,7 @@ import RunSuiteModal from '../components/RunSuiteModal'
 import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
+import { usePermissions } from '../../auth/usePermissions'
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
@@ -143,6 +144,10 @@ function fromView(c: TestCase): TestCaseInput {
 export default function SuiteDetailPage() {
   const { suiteId } = useParams<{ suiteId: string }>()
   const navigate = useNavigate()
+  const { canAction } = usePermissions()
+  const canRun = canAction('project.tests.action.run')
+  const canManageSuite = canAction('project.tests.action.manage-suite')
+  const canPublish = canAction('project.tests.action.publish')
   const [suite, setSuite] = useState<TestSuite | null>(null)
   const [loading, setLoading] = useState(true)
   const [cases, setCases] = useState<TestCaseInput[]>([])
@@ -304,12 +309,12 @@ export default function SuiteDetailPage() {
       title: '操作',
       key: 'act',
       width: 110,
-      render: (_, c) => (
+      render: (_, c) => canManageSuite ? (
         <Space size={4}>
           <Button size="small" onClick={() => openEdit(c)}>编辑</Button>
           <Button size="small" danger onClick={() => setCases(cases.filter((x) => x !== c))}>删除</Button>
         </Space>
-      ),
+      ) : null,
     },
   ]
 
@@ -320,20 +325,36 @@ export default function SuiteDetailPage() {
       title={suite ? `套件 · ${suite.name}` : '套件'}
       extra={isScript ? (
         <Space>
-          <Button type="primary" ghost icon={<PlayCircleOutlined />} disabled={!suite} onClick={() => setRunOpen(true)}>运行</Button>
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSaveScript} disabled={!script}>保存</Button>
-          <Button danger icon={<DeleteOutlined />} disabled={!suite} onClick={onDelete}>删除</Button>
+          {canRun && (
+            <Button type="primary" ghost icon={<PlayCircleOutlined />} disabled={!suite} onClick={() => setRunOpen(true)}>运行</Button>
+          )}
+          {canManageSuite && (
+            <>
+              <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSaveScript} disabled={!script}>保存</Button>
+              <Button danger icon={<DeleteOutlined />} disabled={!suite} onClick={onDelete}>删除</Button>
+            </>
+          )}
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/tests')}>返回列表</Button>
         </Space>
       ) : (
         <Space>
-          <Button type="primary" ghost icon={<PlayCircleOutlined />} disabled={!suite} onClick={() => setRunOpen(true)}>运行</Button>
-          <Button icon={<PlusOutlined />} onClick={() => openEdit(null)} disabled={!suite}>添加用例</Button>
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSaveAll} disabled={!suite}>保存全部</Button>
-          <Button icon={<ExportOutlined />} loading={publishing} disabled={!suite || !suite.caseCount} onClick={onPublish}>
-            沉淀为文档
-          </Button>
-          <Button danger icon={<DeleteOutlined />} disabled={!suite} onClick={onDelete}>删除</Button>
+          {canRun && (
+            <Button type="primary" ghost icon={<PlayCircleOutlined />} disabled={!suite} onClick={() => setRunOpen(true)}>运行</Button>
+          )}
+          {canManageSuite && (
+            <>
+              <Button icon={<PlusOutlined />} onClick={() => openEdit(null)} disabled={!suite}>添加用例</Button>
+              <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSaveAll} disabled={!suite}>保存全部</Button>
+            </>
+          )}
+          {canPublish && (
+            <Button icon={<ExportOutlined />} loading={publishing} disabled={!suite || !suite.caseCount} onClick={onPublish}>
+              沉淀为文档
+            </Button>
+          )}
+          {canManageSuite && (
+            <Button danger icon={<DeleteOutlined />} disabled={!suite} onClick={onDelete}>删除</Button>
+          )}
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/tests')}>返回列表</Button>
         </Space>
       )}
@@ -383,7 +404,7 @@ export default function SuiteDetailPage() {
             http 用例由服务端直请求 baseUrl，health 用例的 command 型经 exec 帧下发执行节点。
           </Typography.Paragraph>
           <FitTable<TestCaseInput> rowKey={(c) => c.id ?? c.name + c.path} columns={columns}
-            dataSource={cases} pagination={false} locale={{ emptyText: '暂无用例：点右上角「添加用例」' }} />
+            dataSource={cases} pagination={false} locale={{ emptyText: canManageSuite ? '暂无用例：点右上角「添加用例」' : '暂无用例' }} />
         </>
       )}
 

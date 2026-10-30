@@ -21,6 +21,7 @@ import {
 import { ClearOutlined, ExperimentOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import LayaViewSwitch from '../../laya/components/LayaViewSwitch'
+import { usePermissions } from '../../auth/usePermissions'
 import type { DecisionAnswer } from '../../decision/types'
 import { listModelEndpoints } from '../../model/api'
 import {
@@ -72,6 +73,8 @@ function AnswerBlock({ qid, answer }: { qid: string; answer: DecisionAnswer }) {
 }
 
 export default function ClassifyPlaygroundPage() {
+  const { canAction } = usePermissions()
+  const canRunPlayground = canAction('admin.laya-records.action.run-playground')
   const [channel, setChannel] = useState<Channel>('default')
   const [instanceId, setInstanceId] = useState<number | null>(null)
   const [endpointId, setEndpointId] = useState<number | null>(null)
@@ -195,9 +198,11 @@ export default function ClassifyPlaygroundPage() {
           >
             清空
           </Button>
-          <Button type="primary" icon={<PlayCircleOutlined />} loading={running} disabled={!canRun} onClick={run}>
-            运行
-          </Button>
+          {canRunPlayground && (
+            <Button type="primary" icon={<PlayCircleOutlined />} loading={running} disabled={!canRun} onClick={run}>
+              运行
+            </Button>
+          )}
         </Space>
       }
     >
@@ -242,7 +247,16 @@ export default function ClassifyPlaygroundPage() {
               ))}
             </Space>
           ) : (
-            <Empty style={{ marginTop: 80 }} description={running ? '推理中……' : '左侧填好 questions 后点「运行」'} />
+            <Empty
+              style={{ marginTop: 80 }}
+              description={
+                running
+                  ? '推理中……'
+                  : canRunPlayground
+                    ? '左侧填好 questions 后点「运行」'
+                    : '当前角色没有运行在线试分类的权限'
+              }
+            />
           )}
           {result && Object.keys(result.answers).length === 0 ? (
             <Alert type="warning" showIcon message="边车返回了空 answers——检查 questions 结构是否符合三原语协议。" />

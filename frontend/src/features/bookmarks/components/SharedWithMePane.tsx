@@ -4,6 +4,7 @@ import { fmtTime } from '../../../shared/utils/format'
 import { pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import type { Bookmark, SharedWithMe } from '../types'
 import StatusDot from './StatusDot'
+import { usePermissions } from '../../auth/usePermissions'
 
 interface Props {
   rows: SharedWithMe[]
@@ -16,6 +17,8 @@ interface Props {
  * 这里连掩码都不显示（账号只列用途/用户名）；不可编辑、不可再分享，只能「复制为我的」。
  */
 export default function SharedWithMePane({ rows, onOpen, onCopy }: Props) {
+  const { canAction } = usePermissions()
+  const canCopy = canAction('top.bookmarks.action.copy-shared')
   if (rows.length === 0) {
     return (
       <div style={pagePaneScrollStyle}>
@@ -87,7 +90,7 @@ export default function SharedWithMePane({ rows, onOpen, onCopy }: Props) {
                 render: (_, b) => (
                   <Space>
                     <Button onClick={() => onOpen(b)}>打开</Button>
-                    <Button onClick={() => onCopy(b, r.owner)}>复制为我的</Button>
+                    {canCopy && <Button onClick={() => onCopy(b, r.owner)}>复制为我的</Button>}
                   </Space>
                 ),
               },

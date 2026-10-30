@@ -36,6 +36,7 @@ import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
+import { usePermissions } from '../../auth/usePermissions'
 
 const SOURCE_LABEL: Record<string, string> = {
   scenario: '场景绑定',
@@ -51,6 +52,8 @@ export default function ScenariosView({
   refreshTick?: number
   createTick?: number
 }) {
+  const { canAction } = usePermissions()
+  const canManage = canAction('admin.projects.action.manage-scenario')
   const [rows, setRows] = useState<Scenario[]>([])
   const [loading, setLoading] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -244,16 +247,18 @@ export default function ScenariosView({
     },
     { title: '排序', dataIndex: 'sortOrder', width: 60 },
     { title: '更新时间', dataIndex: 'updatedAt', width: 150, render: (t: string) => fmtTime(t) },
-    {
-      title: '操作',
-      key: 'action',
-      width: 90,
-      render: (_, r) => (
-        <Button size="small" onClick={() => openEditor(r)}>
-          管理
-        </Button>
-      ),
-    },
+    ...(canManage
+      ? [{
+          title: '操作',
+          key: 'action',
+          width: 90,
+          render: (_: unknown, r: Scenario) => (
+            <Button size="small" onClick={() => openEditor(r)}>
+              管理
+            </Button>
+          ),
+        } satisfies ColumnsType<Scenario>[number]]
+      : []),
   ]
 
   return (
@@ -272,7 +277,7 @@ export default function ScenariosView({
         columns={columns}
         dataSource={rows}
         pagination={LIST_PAGINATION}
-        locale={{ emptyText: '暂无场景。点击右上角「新建场景」创建第一个。' }}
+        locale={{ emptyText: canManage ? '暂无场景。点击右上角「新建场景」创建第一个。' : '暂无场景' }}
       />
 
       <Drawer

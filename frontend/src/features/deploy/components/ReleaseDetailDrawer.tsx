@@ -15,6 +15,7 @@ import { STATUS_COLOR } from '../constants'
 import { showError } from '../../../shared/utils/showError'
 import LogView from '../../../shared/components/LogView'
 import { DRAWER_SCREEN } from '../../../shared/utils/overlay'
+import { usePermissions } from '../../auth/usePermissions'
 
 export default function ReleaseDetailDrawer({ record, onClose, onChanged }: {
   record: ReleaseRecord | null
@@ -22,6 +23,10 @@ export default function ReleaseDetailDrawer({ record, onClose, onChanged }: {
   onChanged: () => void
 }) {
   const [d, setD] = useState<ReleaseRecord | null>(record)
+  const { canAction } = usePermissions()
+  const canExecute = canAction('project.releases.action.execute')
+  const canRollback = canAction('project.releases.action.rollback')
+  const canDelete = canAction('project.releases.action.delete')
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -128,10 +133,10 @@ export default function ReleaseDetailDrawer({ record, onClose, onChanged }: {
             </Typography.Text>
           )}
           <Space>
-            {d.status === 'PLANNED' && (
+            {canExecute && d.status === 'PLANNED' && (
               <Button type="primary" loading={busy} onClick={() => act(() => executeRelease(d.id), '已开始执行')}>执行发版</Button>
             )}
-            {d.status !== 'RUNNING' && d.status !== 'ROLLED_BACK' && (
+            {canRollback && d.status !== 'RUNNING' && d.status !== 'ROLLED_BACK' && (
               <Button
                 loading={busy}
                 onClick={() =>
@@ -148,25 +153,27 @@ export default function ReleaseDetailDrawer({ record, onClose, onChanged }: {
                 回滚
               </Button>
             )}
-            <Button
-              danger
-              onClick={() =>
-                Modal.confirm({
-                  centered: true,
-                  title: '删除该发版记录？',
-                  okText: '删除',
-                  okButtonProps: { danger: true },
-                  onOk: async () => {
-                    await deleteRelease(d.id)
-                    message.success('已删除')
-                    onChanged()
-                    onClose()
-                  },
-                })
-              }
-            >
-              删除
-            </Button>
+            {canDelete && (
+              <Button
+                danger
+                onClick={() =>
+                  Modal.confirm({
+                    centered: true,
+                    title: '删除该发版记录？',
+                    okText: '删除',
+                    okButtonProps: { danger: true },
+                    onOk: async () => {
+                      await deleteRelease(d.id)
+                      message.success('已删除')
+                      onChanged()
+                      onClose()
+                    },
+                  })
+                }
+              >
+                删除
+              </Button>
+            )}
           </Space>
           <LogView
             key={d.id}

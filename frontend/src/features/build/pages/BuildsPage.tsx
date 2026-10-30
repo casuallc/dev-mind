@@ -21,6 +21,7 @@ import { workItemColumn } from '../../../shared/components/WorkItemCell'
 import WorkItemSelect from '../../../shared/components/WorkItemSelect'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { DRAWER_SCREEN } from '../../../shared/utils/overlay'
+import { usePermissions } from '../../auth/usePermissions'
 
 const STATUS_COLOR: Record<BuildStatus, string> = {
   QUEUED: 'blue',
@@ -38,6 +39,9 @@ export default function BuildsPage() {
 
 function BuildCenter({ id }: { id: string }) {
   const [searchParams, setSearchParams] = useSearchParams()
+  const { canAction } = usePermissions()
+  const canTrigger = canAction('project.builds.action.trigger')
+  const canManage = canAction('project.builds.action.manage')
   const [cfg, setCfg] = useState<BuildConfig | null>(null)
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [builds, setBuilds] = useState<BuildRecord[]>([])
@@ -74,7 +78,7 @@ function BuildCenter({ id }: { id: string }) {
     const br = searchParams.get('branch')
     if (wi) setTriggerWorkItemId(wi)
     if (br) setBranch(br)
-    setTriggerOpen(true)
+    if (canTrigger) setTriggerOpen(true)
     setSearchParams({}, { replace: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
@@ -184,8 +188,12 @@ function BuildCenter({ id }: { id: string }) {
       extra={
         <Space>
           <Button icon={<ReloadOutlined />} onClick={refresh}>刷新</Button>
-          <Button icon={<SettingOutlined />} onClick={() => setConfigOpen(true)}>构建配置</Button>
-          <Button type="primary" icon={<RocketOutlined />} onClick={() => setTriggerOpen(true)}>触发构建</Button>
+          {canManage && (
+            <Button icon={<SettingOutlined />} onClick={() => setConfigOpen(true)}>构建配置</Button>
+          )}
+          {canTrigger && (
+            <Button type="primary" icon={<RocketOutlined />} onClick={() => setTriggerOpen(true)}>触发构建</Button>
+          )}
         </Space>
       }
     >
@@ -202,13 +210,17 @@ function BuildCenter({ id }: { id: string }) {
           emptyText: (
             <Space direction="vertical" size={8} style={{ padding: '24px 0' }}>
               <Typography.Text type="secondary">
-                还没有构建记录——点「触发构建」发起第一次构建，执行位置先到「构建配置」里确认。
+                {canTrigger
+                  ? '还没有构建记录——点「触发构建」发起第一次构建，执行位置先到「构建配置」里确认。'
+                  : '还没有构建记录。'}
               </Typography.Text>
-              <div>
-                <Button type="primary" icon={<RocketOutlined />} onClick={() => setTriggerOpen(true)}>
-                  触发构建
-                </Button>
-              </div>
+              {canTrigger && (
+                <div>
+                  <Button type="primary" icon={<RocketOutlined />} onClick={() => setTriggerOpen(true)}>
+                    触发构建
+                  </Button>
+                </div>
+              )}
             </Space>
           ),
         }}

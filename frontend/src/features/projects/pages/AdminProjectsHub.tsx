@@ -8,6 +8,7 @@ import { BulbOutlined, PlusOutlined, ReloadOutlined, RobotOutlined } from '@ant-
 import { useSearchParams } from 'react-router-dom'
 import ScrollRow from '../../../shared/components/ScrollRow'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
+import { usePermissions, usePermittedView } from '../../auth/usePermissions'
 import ProjectsView from './ProjectsView'
 import ProposalsView from '../../knowledge/pages/ProposalsView'
 import TemplatesTab from '../../execution/pages/TemplatesTab'
@@ -23,20 +24,37 @@ const TABS = [
   { key: 'scenarios', label: '场景' },
   { key: 'audit', label: '执行审计' },
 ]
+const TAB_KEYS = TABS.map((t) => t.key)
+
+/** CAP-103 页签与操作按钮的权限节点（与后端权限目录一致） */
+const TAB_PERMISSIONS: Record<string, string> = {
+  projects: 'admin.projects.tab.projects',
+  proposals: 'admin.projects.tab.proposals',
+  templates: 'admin.projects.tab.templates',
+  repos: 'admin.projects.tab.repos',
+  scenarios: 'admin.projects.tab.scenarios',
+  audit: 'admin.projects.tab.audit',
+}
 
 export default function AdminProjectsHub() {
   const [searchParams, setSearchParams] = useSearchParams()
   const rawTab = searchParams.get('tab') ?? 'projects'
   const view = TABS.some((t) => t.key === rawTab) ? rawTab : 'projects'
+  const setView = (v: string) => {
+    setSearchParams(v === 'projects' ? {} : { tab: v }, { replace: true })
+  }
+  const permittedTabs = usePermittedView(
+    TAB_KEYS,
+    (key) => TAB_PERMISSIONS[key],
+    view,
+    setView,
+  )
+  const { canAction } = usePermissions()
 
   // 统一 tick 驱动各视图的 extra 操作（同一时刻仅挂载一个视图，无跨视图串扰）
   const [refreshTick, setRefreshTick] = useState(0)
   const [createTick, setCreateTick] = useState(0)
   const [onboardTick, setOnboardTick] = useState(0)
-
-  const setView = (v: string) => {
-    setSearchParams(v === 'projects' ? {} : { tab: v }, { replace: true })
-  }
 
   const refreshBtn = <Button icon={<ReloadOutlined />} onClick={() => setRefreshTick((t) => t + 1)}>刷新</Button>
 
@@ -45,48 +63,60 @@ export default function AdminProjectsHub() {
     extra = (
       <Space>
         {refreshBtn}
-        <Button icon={<RobotOutlined />} onClick={() => setOnboardTick((t) => t + 1)}>
-          AI 智能接入
-        </Button>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateTick((t) => t + 1)}>
-          新建项目
-        </Button>
+        {canAction('admin.projects.action.onboard-project') && (
+          <Button icon={<RobotOutlined />} onClick={() => setOnboardTick((t) => t + 1)}>
+            AI 智能接入
+          </Button>
+        )}
+        {canAction('admin.projects.action.create-project') && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateTick((t) => t + 1)}>
+            新建项目
+          </Button>
+        )}
       </Space>
     )
   } else if (view === 'proposals') {
     extra = (
       <Space>
         {refreshBtn}
-        <Button type="primary" icon={<BulbOutlined />} onClick={() => setCreateTick((t) => t + 1)}>
-          手动沉淀经验
-        </Button>
+        {canAction('admin.projects.action.sediment-proposal') && (
+          <Button type="primary" icon={<BulbOutlined />} onClick={() => setCreateTick((t) => t + 1)}>
+            手动沉淀经验
+          </Button>
+        )}
       </Space>
     )
   } else if (view === 'templates') {
     extra = (
       <Space>
         {refreshBtn}
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateTick((t) => t + 1)}>
-          新建模板
-        </Button>
+        {canAction('admin.projects.action.manage-template') && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateTick((t) => t + 1)}>
+            新建模板
+          </Button>
+        )}
       </Space>
     )
   } else if (view === 'repos') {
     extra = (
       <Space>
         {refreshBtn}
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateTick((t) => t + 1)}>
-          登记仓库
-        </Button>
+        {canAction('admin.projects.action.manage-repo') && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateTick((t) => t + 1)}>
+            登记仓库
+          </Button>
+        )}
       </Space>
     )
   } else if (view === 'scenarios') {
     extra = (
       <Space>
         {refreshBtn}
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateTick((t) => t + 1)}>
-          新建场景
-        </Button>
+        {canAction('admin.projects.action.manage-scenario') && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateTick((t) => t + 1)}>
+            新建场景
+          </Button>
+        )}
       </Space>
     )
   } else if (view === 'audit') {
@@ -106,7 +136,10 @@ export default function AdminProjectsHub() {
             <Segmented
               value={view}
               onChange={(v) => setView(v as string)}
-              options={TABS.map((t) => ({ value: t.key, label: t.label }))}
+              options={TABS.filter((t) => permittedTabs.includes(t.key)).map((t) => ({
+                value: t.key,
+                label: t.label,
+              }))}
             />
           </ScrollRow>
         </div>

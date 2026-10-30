@@ -34,6 +34,7 @@ import {
   updateJiraSyncConfig,
 } from '../api'
 import type { ExternalProject, Integration, JiraSyncConfig, JiraSyncConfigInput, JiraSyncPreview } from '../types'
+import { usePermissions } from '../../auth/usePermissions'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
@@ -61,6 +62,9 @@ export default function JiraSyncTab({ projectId }: Props) {
   const watchIntegrationId = Form.useWatch('integrationId', form)
   const watchProjectKey = Form.useWatch('jiraProjectKey', form)
   const watchJql = Form.useWatch('jql', form)
+  const { canAction } = usePermissions()
+  // 同步配置与立即同步都走 /api/projects/*/jira-sync，权限归项目设置编辑
+  const canManage = canAction('admin.projects.action.edit-project')
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -221,17 +225,19 @@ export default function JiraSyncTab({ projectId }: Props) {
         把 Jira issue 单向拉取为本项目的 DRAFT 需求，支持按间隔自动轮询。
       </Typography.Paragraph>
       <Space wrap>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          disabled={jiraIntegrations.length === 0}
-          onClick={() => {
-            setEditing(null)
-            setEditOpen(true)
-          }}
-        >
-          新建同步配置
-        </Button>
+        {canManage && (
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            disabled={jiraIntegrations.length === 0}
+            onClick={() => {
+              setEditing(null)
+              setEditOpen(true)
+            }}
+          >
+            新建同步配置
+          </Button>
+        )}
         <Button icon={<ReloadOutlined />} onClick={reload}>刷新</Button>
         {jiraIntegrations.length === 0 && (
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -249,7 +255,9 @@ export default function JiraSyncTab({ projectId }: Props) {
           emptyText:
             jiraIntegrations.length === 0
               ? '请先在「平台集成」中新建 JIRA 类型集成'
-              : '暂无同步配置，点「新建同步配置」开始拉取 Jira issue',
+              : canManage
+                ? '暂无同步配置，点「新建同步配置」开始拉取 Jira issue'
+                : '暂无同步配置',
         }}
         columns={[
           {
@@ -301,25 +309,31 @@ export default function JiraSyncTab({ projectId }: Props) {
             width: 200,
             render: (_, row) => (
               <Space size={4}>
-                <Button
-                  size="small"
-                  loading={runningId === row.id}
-                  onClick={() => onRun(row)}
-                >
-                  立即同步
-                </Button>
-                <Button
-                  size="small"
-                  onClick={() => {
-                    setEditing(row)
-                    setEditOpen(true)
-                  }}
-                >
-                  编辑
-                </Button>
-                <Button size="small" danger onClick={() => onDelete(row)}>
-                  删除
-                </Button>
+                {canManage && (
+                  <Button
+                    size="small"
+                    loading={runningId === row.id}
+                    onClick={() => onRun(row)}
+                  >
+                    立即同步
+                  </Button>
+                )}
+                {canManage && (
+                  <>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        setEditing(row)
+                        setEditOpen(true)
+                      }}
+                    >
+                      编辑
+                    </Button>
+                    <Button size="small" danger onClick={() => onDelete(row)}>
+                      删除
+                    </Button>
+                  </>
+                )}
               </Space>
             ),
           },
@@ -335,9 +349,11 @@ export default function JiraSyncTab({ projectId }: Props) {
         footer={
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button onClick={() => setEditOpen(false)}>取消</Button>
-            <Button type="primary" loading={saving} onClick={() => form.submit()}>
-              保存
-            </Button>
+            {canManage && (
+              <Button type="primary" loading={saving} onClick={() => form.submit()}>
+                保存
+              </Button>
+            )}
           </Space>
         }
       >

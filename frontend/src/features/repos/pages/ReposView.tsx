@@ -25,6 +25,7 @@ import { fmtTime } from '../../../shared/utils/format'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { usePermissions } from '../../auth/usePermissions'
 
 export default function ReposView({
   refreshTick = 0,
@@ -33,6 +34,8 @@ export default function ReposView({
   refreshTick?: number
   createTick?: number
 }) {
+  const { canAction } = usePermissions()
+  const canManage = canAction('admin.projects.action.manage-repo')
   const [rows, setRows] = useState<GitRepo[]>([])
   const [loading, setLoading] = useState(false)
   const [editTarget, setEditTarget] = useState<GitRepo | null>(null)
@@ -145,7 +148,9 @@ export default function ReposView({
         loading={loading}
         dataSource={rows}
         pagination={LIST_PAGINATION}
-        locale={{ emptyText: '暂无登记仓库，点击右上角「登记仓库」添加' }}
+        locale={{
+          emptyText: canManage ? '暂无登记仓库，点击右上角「登记仓库」添加' : '暂无登记仓库',
+        }}
         columns={[
           { title: '名称', dataIndex: 'name', width: 160 },
           {
@@ -231,41 +236,45 @@ export default function ReposView({
             width: 230,
             render: (_, r) => (
               <Space>
-                {r.sourceType === 'CLONE' && r.cloneStatus === 'READY' && (
+                {canManage && r.sourceType === 'CLONE' && r.cloneStatus === 'READY' && (
                   <Button size="small" onClick={() => onFetch(r)}>
                     立即抓取
                   </Button>
                 )}
-                {r.sourceType === 'CLONE' && r.cloneStatus === 'FAILED' && (
+                {canManage && r.sourceType === 'CLONE' && r.cloneStatus === 'FAILED' && (
                   <Button size="small" onClick={() => onReclone(r)}>
                     重试克隆
                   </Button>
                 )}
-                <Button size="small" onClick={() => openEdit(r)}>
-                  编辑
-                </Button>
-                <Button
-                  size="small"
-                  danger
-                  onClick={() =>
-                    Modal.confirm({
-                      centered: true,
-                      title: `删除仓库「${r.name}」？`,
-                      content: '被项目引用时将被拒绝。',
-                      okText: '删除',
-                      okButtonProps: { danger: true },
-                      onOk: () =>
-                        deleteRepo(r.id)
-                          .then(() => {
-                            message.success('已删除')
-                            reload()
-                          })
-                          .catch((e) => showError(e, '删除失败')),
-                    })
-                  }
-                >
-                  删除
-                </Button>
+                {canManage && (
+                  <>
+                    <Button size="small" onClick={() => openEdit(r)}>
+                      编辑
+                    </Button>
+                    <Button
+                      size="small"
+                      danger
+                      onClick={() =>
+                        Modal.confirm({
+                          centered: true,
+                          title: `删除仓库「${r.name}」？`,
+                          content: '被项目引用时将被拒绝。',
+                          okText: '删除',
+                          okButtonProps: { danger: true },
+                          onOk: () =>
+                            deleteRepo(r.id)
+                              .then(() => {
+                                message.success('已删除')
+                                reload()
+                              })
+                              .catch((e) => showError(e, '删除失败')),
+                        })
+                      }
+                    >
+                      删除
+                    </Button>
+                  </>
+                )}
               </Space>
             ),
           },

@@ -59,6 +59,7 @@ import ShareModal, { type ShareTarget } from '../components/ShareModal'
 import SharedWithMePane from '../components/SharedWithMePane'
 import StatusDot from '../components/StatusDot'
 import TagsPane from '../components/TagsPane'
+import { usePermissions, usePermittedView } from '../../auth/usePermissions'
 import FitTable from '../../../shared/components/FitTable'
 import { fmtTime } from '../../../shared/utils/format'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
@@ -71,7 +72,15 @@ type ViewMode = 'table' | 'card'
 
 const VIEW_MODE_KEY = 'bookmark.viewMode'
 
-const VIEWS = [
+const BOOKMARK_VIEWS = ['mine', 'shared', 'shares', 'tags'] as const
+const BOOKMARK_VIEW_PERMISSIONS: Record<View, string> = {
+  mine: 'top.bookmarks.tab.mine',
+  shared: 'top.bookmarks.tab.shared',
+  shares: 'top.bookmarks.tab.shares',
+  tags: 'top.bookmarks.tab.tags',
+}
+
+const VIEWS: { value: View; label: string }[] = [
   { value: 'mine', label: '我的收藏' },
   { value: 'shared', label: '与我分享' },
   { value: 'shares', label: '分享管理' },
@@ -103,6 +112,17 @@ function flatten(groups: BookmarkGroup[]): BookmarkGroup[] {
  */
 export default function BookmarksPage() {
   const [view, setView] = useState<View>('mine')
+  const views = usePermittedView(
+    BOOKMARK_VIEWS,
+    (v) => BOOKMARK_VIEW_PERMISSIONS[v],
+    view,
+    setView,
+  )
+  const viewOptions = VIEWS.filter((v) => views.includes(v.value))
+  const { canAction } = usePermissions()
+  const canManageBookmark = canAction('top.bookmarks.action.manage-bookmark')
+  const canManageGroup = canAction('top.bookmarks.action.manage-group')
+  const canManageTag = canAction('top.bookmarks.action.manage-tag')
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
     localStorage.getItem(VIEW_MODE_KEY) === 'card' ? 'card' : 'table',
   )
@@ -559,18 +579,22 @@ export default function BookmarksPage() {
       </Button>
       {view === 'mine' && (
         <>
-          <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
-            导入
-          </Button>
+          {canManageBookmark && (
+            <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
+              导入
+            </Button>
+          )}
           <Button icon={<ExportOutlined />} onClick={exportBookmarks}>
             导出
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={startCreate}>
-            新建收藏
-          </Button>
+          {canManageBookmark && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={startCreate}>
+              新建收藏
+            </Button>
+          )}
         </>
       )}
-      {view === 'tags' && (
+      {view === 'tags' && canManageTag && (
         <Button
           type="primary"
           icon={<PlusOutlined />}
@@ -592,7 +616,7 @@ export default function BookmarksPage() {
       title={
         <Space size={12}>
           <span>收藏夹</span>
-          <Segmented value={view} onChange={(v) => setView(v as View)} options={VIEWS} />
+          <Segmented value={view} onChange={(v) => setView(v as View)} options={viewOptions} />
         </Space>
       }
       extra={extra}
@@ -640,7 +664,7 @@ export default function BookmarksPage() {
                 onChange={(v) => setStatus(v as BookmarkStatus | 'ALL')}
                 options={STATUS_OPTIONS}
               />
-              {canBatch && (
+              {canBatch && canManageBookmark && (
                 <>
                   <Button onClick={probeSelected}>批量探测（{selectedKeys.length}）</Button>
                   <Button
@@ -702,9 +726,11 @@ export default function BookmarksPage() {
                   emptyText: (
                     <Space direction="vertical">
                       <span>这里还没有收藏</span>
-                      <Button type="primary" onClick={startCreate}>
-                        新建收藏
-                      </Button>
+                      {canManageBookmark && (
+                        <Button type="primary" onClick={startCreate}>
+                          新建收藏
+                        </Button>
+                      )}
                     </Space>
                   ),
                 }}
@@ -763,45 +789,49 @@ export default function BookmarksPage() {
                     render: (_, b) => (
                       <Space>
                         <Button onClick={() => openBookmark(b)}>打开</Button>
-                        <Button
-                          onClick={() => {
-                            setEditing(b)
-                            setDrawerOpen(true)
-                          }}
-                        >
-                          编辑
-                        </Button>
-                        <Dropdown
-                          trigger={['click']}
-                          menu={{
-                            items: [
-                              { key: 'probe', label: '探测' },
-                              { key: 'accounts', label: `账号（${b.accounts.length}）` },
-                              { key: 'share', label: '分享给同事' },
-                              { key: 'move', label: '转移分组' },
-                              { type: 'divider' },
-                              { key: 'delete', label: '删除', danger: true },
-                            ],
-                            onClick: ({ key }) => {
-                              if (key === 'probe') {
-                                void probeOne(b)
-                              } else if (key === 'accounts') {
-                                setSecrets({})
-                                setAccountsOf(b)
-                              } else if (key === 'share') {
-                                setShareTarget({ kind: 'bookmark', id: Number(b.id), name: b.title })
-                              } else if (key === 'move') {
-                                setSelectedKeys([b.id])
-                                setMoveTarget(null)
-                                setMoveOpen(true)
-                              } else if (key === 'delete') {
-                                confirmDeleteBookmark(b)
-                              }
-                            },
-                          }}
-                        >
-                          <Button>管理</Button>
-                        </Dropdown>
+                        {canManageBookmark && (
+                          <>
+                            <Button
+                              onClick={() => {
+                                setEditing(b)
+                                setDrawerOpen(true)
+                              }}
+                            >
+                              编辑
+                            </Button>
+                            <Dropdown
+                              trigger={['click']}
+                              menu={{
+                                items: [
+                                  { key: 'probe', label: '探测' },
+                                  { key: 'accounts', label: `账号（${b.accounts.length}）` },
+                                  { key: 'share', label: '分享给同事' },
+                                  { key: 'move', label: '转移分组' },
+                                  { type: 'divider' },
+                                  { key: 'delete', label: '删除', danger: true },
+                                ],
+                                onClick: ({ key }) => {
+                                  if (key === 'probe') {
+                                    void probeOne(b)
+                                  } else if (key === 'accounts') {
+                                    setSecrets({})
+                                    setAccountsOf(b)
+                                  } else if (key === 'share') {
+                                    setShareTarget({ kind: 'bookmark', id: Number(b.id), name: b.title })
+                                  } else if (key === 'move') {
+                                    setSelectedKeys([b.id])
+                                    setMoveTarget(null)
+                                    setMoveOpen(true)
+                                  } else if (key === 'delete') {
+                                    confirmDeleteBookmark(b)
+                                  }
+                                },
+                              }}
+                            >
+                              <Button>管理</Button>
+                            </Dropdown>
+                          </>
+                        )}
                       </Space>
                     ),
                   },
@@ -847,9 +877,11 @@ export default function BookmarksPage() {
               title: '操作',
               width: 100,
               render: (_, s) => (
-                <Button danger onClick={() => revokeShare(s)}>
-                  撤销
-                </Button>
+                (canManageBookmark || canManageGroup) && (
+                  <Button danger onClick={() => revokeShare(s)}>
+                    撤销
+                  </Button>
+                )
               ),
             },
           ]}

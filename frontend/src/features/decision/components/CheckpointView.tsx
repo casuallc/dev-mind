@@ -46,6 +46,7 @@ import { fmtBytes, fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import FitTable from '../../../shared/components/FitTable'
+import { usePermissions } from '../../auth/usePermissions'
 import { CHECK_STATUS_COLOR, CP_KIND_LABEL } from './labCommon'
 import { CalibrationBlock, JsonBlock, MetricsTable } from './ReportBlocks'
 
@@ -96,6 +97,8 @@ export function ServeCheckBlock({ result }: { result: ServeCheckResult }) {
 }
 
 export default function CheckpointView({ refreshTick = 0, createTick = 0 }: { refreshTick?: number; createTick?: number }) {
+  const { canAction } = usePermissions()
+  const canManageCheckpoint = canAction('admin.laya-lab.action.manage-checkpoint')
   const [rows, setRows] = useState<CheckpointRow[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
@@ -251,28 +254,33 @@ export default function CheckpointView({ refreshTick = 0, createTick = 0 }: { re
           <Button type="link" onClick={() => setDetailId(r.id)}>
             详情
           </Button>
-          <Button type="link" loading={checking === r.id} onClick={() => onServeCheck(r)}>
-            自检
-          </Button>
-          {r.verified ? (
-            <Button type="link" onClick={() => setVerifyRow({ row: r, unverify: true })}>
-              撤销放行
-            </Button>
-          ) : (
-            <Button type="link" onClick={() => setVerifyRow({ row: r, unverify: false })}>
-              放行
+          {canManageCheckpoint && (
+            <Button type="link" loading={checking === r.id} onClick={() => onServeCheck(r)}>
+              自检
             </Button>
           )}
-          <Popconfirm
-            title="删除这份产物登记？"
-            description="节点上的权重目录不会被删。已放行的要先撤销放行。"
-            onConfirm={() => onDelete(r.id)}
-            disabled={r.verified}
-          >
-            <TipButton type="link" danger tip={r.verified ? '已放行的产物要先撤销放行才能删' : undefined} disabled={r.verified}>
-              删除
-            </TipButton>
-          </Popconfirm>
+          {canManageCheckpoint &&
+            (r.verified ? (
+              <Button type="link" onClick={() => setVerifyRow({ row: r, unverify: true })}>
+                撤销放行
+              </Button>
+            ) : (
+              <Button type="link" onClick={() => setVerifyRow({ row: r, unverify: false })}>
+                放行
+              </Button>
+            ))}
+          {canManageCheckpoint && (
+            <Popconfirm
+              title="删除这份产物登记？"
+              description="节点上的权重目录不会被删。已放行的要先撤销放行。"
+              onConfirm={() => onDelete(r.id)}
+              disabled={r.verified}
+            >
+              <TipButton type="link" danger tip={r.verified ? '已放行的产物要先撤销放行才能删' : undefined} disabled={r.verified}>
+                删除
+              </TipButton>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -334,8 +342,9 @@ export default function CheckpointView({ refreshTick = 0, createTick = 0 }: { re
           },
         }}
         locale={{
-          emptyText:
-            '还没有登记的产物——「登记产物」把官方基础模型或微调产物登记进来（来源路径必填），跑一次 serve 自检确认边车在服务它，再人工放行。',
+          emptyText: canManageCheckpoint
+            ? '还没有登记的产物——「登记产物」把官方基础模型或微调产物登记进来（来源路径必填），跑一次 serve 自检确认边车在服务它，再人工放行。'
+            : '还没有登记的产物。',
         }}
       />
 

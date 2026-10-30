@@ -37,6 +37,7 @@ import type {
 import { DOC_TYPE_OPTIONS } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
+import { usePermissions } from '../../auth/usePermissions'
 
 const SYNC_STATUS: Record<string, { color: string; text: string }> = {
   RUNNING: { color: 'processing', text: '运行中' },
@@ -94,6 +95,8 @@ export default function SyncSourcesPanel({
   const [editingSync, setEditingSync] = useState<KnowledgeSyncSource | null>(null)
   const [syncSaving, setSyncSaving] = useState(false)
   const [runningSync, setRunningSync] = useState<number | null>(null)
+  const { canAction } = usePermissions()
+  const canManageSyncSource = canAction('admin.knowledge.action.manage-sync-source')
   const [syncForm] = Form.useForm<SyncFormValues>()
   const syncKind = Form.useWatch('kind', syncForm) ?? 'GIT'
 
@@ -329,31 +332,35 @@ export default function SyncSourcesPanel({
         </Space>
       ),
     },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 190,
-      render: (_, r) => (
-        <Space size={2}>
-          <Tooltip title={r.enabled ? '立即同步一次' : '同步源已停用'}>
-            <Button
-              size="small"
-              disabled={!r.enabled || r.lastStatus === 'RUNNING'}
-              loading={runningSync === r.id}
-              onClick={() => onRunSync(r)}
-            >
-              运行
-            </Button>
-          </Tooltip>
-          <Button size="small" onClick={() => openEditSync(r)}>
-            编辑
-          </Button>
-          <Button size="small" danger onClick={() => onDeleteSync(r)}>
-            删除
-          </Button>
-        </Space>
-      ),
-    },
+    ...(canManageSyncSource
+      ? [
+          {
+            title: '操作',
+            key: 'actions',
+            width: 190,
+            render: (_: unknown, r: KnowledgeSyncSource) => (
+              <Space size={2}>
+                <Tooltip title={r.enabled ? '立即同步一次' : '同步源已停用'}>
+                  <Button
+                    size="small"
+                    disabled={!r.enabled || r.lastStatus === 'RUNNING'}
+                    loading={runningSync === r.id}
+                    onClick={() => onRunSync(r)}
+                  >
+                    运行
+                  </Button>
+                </Tooltip>
+                <Button size="small" onClick={() => openEditSync(r)}>
+                  编辑
+                </Button>
+                <Button size="small" danger onClick={() => onDeleteSync(r)}>
+                  删除
+                </Button>
+              </Space>
+            ),
+          } satisfies ColumnsType<KnowledgeSyncSource>[number],
+        ]
+      : []),
   ]
 
   return (
@@ -362,9 +369,11 @@ export default function SyncSourcesPanel({
         <Button icon={<ReloadOutlined />} onClick={() => loadSync()}>
           刷新
         </Button>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreateSync}>
-          新建同步源
-        </Button>
+        {canManageSyncSource && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateSync}>
+            新建同步源
+          </Button>
+        )}
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           Git 只读服务器本地副本，飞书同步沿用集成凭证；删除只停同步，已入库文档保留。
         </Typography.Text>
@@ -375,7 +384,11 @@ export default function SyncSourcesPanel({
         columns={syncColumns}
         dataSource={sources}
         pagination={false}
-        locale={{ emptyText: '暂无同步源。新建后手动运行，或等待后续接入定时同步。' }}
+        locale={{
+          emptyText: canManageSyncSource
+            ? '暂无同步源。新建后手动运行，或等待后续接入定时同步。'
+            : '暂无同步源。',
+        }}
       />
 
       <Modal

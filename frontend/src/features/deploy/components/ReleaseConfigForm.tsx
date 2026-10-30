@@ -9,8 +9,11 @@ import type { ReleaseConfigInput } from '../types'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
 import { showError } from '../../../shared/utils/showError'
+import { usePermissions } from '../../auth/usePermissions'
 
 export default function ReleaseConfigForm({ id }: { id: string }) {
+  const { canAction } = usePermissions()
+  const canEdit = canAction('admin.projects.action.edit-project')
   const [form] = Form.useForm<ReleaseConfigInput>()
   const [busy, setBusy] = useState(false)
   const [nodes, setNodes] = useState<AgentNode[]>([])
@@ -46,15 +49,17 @@ export default function ReleaseConfigForm({ id }: { id: string }) {
     <Card
       title="发版配置"
       extra={
-        <Button type="primary" icon={<SaveOutlined />} loading={busy} onClick={() => form.submit()}>
-          保存配置
-        </Button>
+        canEdit && (
+          <Button type="primary" icon={<SaveOutlined />} loading={busy} onClick={() => form.submit()}>
+            保存配置
+          </Button>
+        )
       }
     >
       <Typography.Paragraph type="secondary">
         发版执行器（CAP-11）：配置制品推送 Nexus 的模板与版本规则；配置好后到工作台「发版」创建并跟踪发版。
       </Typography.Paragraph>
-      <Form form={form} layout="vertical" onFinish={onSave} style={{ maxWidth: 480 }}>
+      <Form form={form} layout="vertical" disabled={!canEdit} onFinish={onSave} style={{ maxWidth: 480 }}>
         <Form.Item label="Nexus 仓库" name="nexusRepo" extra="目标仓库，如 snapshots / releases">
           <Input placeholder="snapshots / releases" />
         </Form.Item>

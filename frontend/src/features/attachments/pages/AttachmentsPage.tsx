@@ -46,6 +46,7 @@ import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/page
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { usePermissions } from '../../auth/usePermissions'
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`
@@ -54,6 +55,10 @@ function fmtSize(n: number): string {
 }
 
 export default function AttachmentsPage() {
+  const { canAction } = usePermissions()
+  const canUpload = canAction('admin.attachments.action.upload')
+  const canEditAttach = canAction('admin.attachments.action.edit')
+  const canDeleteAttach = canAction('admin.attachments.action.delete')
   const [rows, setRows] = useState<AttachmentView[]>([])
   const [loading, setLoading] = useState(false)
   const [scopeFilter, setScopeFilter] = useState<string>('ALL')
@@ -363,9 +368,13 @@ export default function AttachmentsPage() {
             <Dropdown
               menu={{
                 items: [
-                  { key: 'edit-meta', label: '编辑描述/标签/过期' },
+                  ...(canEditAttach
+                    ? [
+                        { key: 'edit-meta', label: '编辑描述/标签/过期' },
+                        { key: 'scope', label: r.scope === 'PRIVATE' ? '设为共享' : '设为私有' },
+                      ]
+                    : []),
                   { key: 'copy-url', label: '复制访问 URL' },
-                  { key: 'scope', label: r.scope === 'PRIVATE' ? '设为共享' : '设为私有' },
                 ],
                 onClick: ({ key }) => {
                   if (key === 'edit-meta') openMetaEdit(r)
@@ -379,15 +388,17 @@ export default function AttachmentsPage() {
                 更多
               </Button>
             </Dropdown>
-            <Button size="small" type="text" danger onClick={() => onDelete(r)}>
-              删除
-            </Button>
+            {canDeleteAttach && (
+              <Button size="small" type="text" danger onClick={() => onDelete(r)}>
+                删除
+              </Button>
+            )}
           </Space>
         ),
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [canEditAttach, canDeleteAttach],
   )
 
   return (
@@ -440,12 +451,16 @@ export default function AttachmentsPage() {
           <Button icon={<ReloadOutlined />} onClick={load}>
             刷新
           </Button>
-          <Button danger disabled={selectedKeys.length === 0} onClick={onBatchDelete}>
-            批量删除{selectedKeys.length > 0 ? `（${selectedKeys.length}）` : ''}
-          </Button>
-          <Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadOpen(true)}>
-            上传附件
-          </Button>
+          {canDeleteAttach && (
+            <Button danger disabled={selectedKeys.length === 0} onClick={onBatchDelete}>
+              批量删除{selectedKeys.length > 0 ? `（${selectedKeys.length}）` : ''}
+            </Button>
+          )}
+          {canUpload && (
+            <Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadOpen(true)}>
+              上传附件
+            </Button>
+          )}
         </Space>
       }
     >
@@ -459,14 +474,16 @@ export default function AttachmentsPage() {
         columns={columns}
         dataSource={rows}
         pagination={LIST_PAGINATION}
-        rowSelection={{
+        rowSelection={canDeleteAttach ? {
           selectedRowKeys: selectedKeys,
           onChange: (keys) => setSelectedKeys(keys as string[]),
-        }}
+        } : undefined}
         locale={{
           emptyText: (
             <span>
-              暂无附件，点击右上角「上传附件」或在 AI 问答/文档编辑器中粘贴图片试试。
+              {canUpload
+                ? '暂无附件，点击右上角「上传附件」或在 AI 问答/文档编辑器中粘贴图片试试。'
+                : '暂无附件'}
             </span>
           ),
         }}

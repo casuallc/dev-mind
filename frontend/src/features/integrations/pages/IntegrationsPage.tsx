@@ -18,6 +18,7 @@ import {
   message,
 } from 'antd'
 import { ApiOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import type { ColumnsType } from 'antd/es/table'
 import {
   changeIntegrationStatus,
   createIntegration,
@@ -27,6 +28,7 @@ import {
   updateIntegration,
 } from '../api'
 import type { Integration, IntegrationInput, IntegrationTestResult } from '../types'
+import { usePermissions } from '../../auth/usePermissions'
 import { pageCardStyle, pageCardBodyFlexStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
@@ -128,6 +130,9 @@ export default function IntegrationsPage() {
   const isGitHub = formType === 'GITHUB'
   const isFeishu = formType === 'FEISHU'
   const isBasic = (isJira && formAuthType === 'BASIC') || isFeishu
+  const { canAction } = usePermissions()
+  const canManage = canAction('admin.integrations.action.manage')
+  const canTest = canAction('admin.integrations.action.test')
 
   /** 列表加载后逐行实时探测连通性（结果回填「连通性」列） */
   const probeAll = useCallback((list: Integration[]) => {
@@ -300,16 +305,18 @@ export default function IntegrationsPage() {
       extra={
         <Space>
           <Button icon={<ReloadOutlined />} onClick={reload}>刷新</Button>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => {
-              setEditing(null)
-              setEditOpen(true)
-            }}
-          >
-            新建集成
-          </Button>
+          {canManage && (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => {
+                setEditing(null)
+                setEditOpen(true)
+              }}
+            >
+              新建集成
+            </Button>
+          )}
         </Space>
       }
     >
@@ -323,7 +330,11 @@ export default function IntegrationsPage() {
         loading={loading}
         dataSource={items}
         pagination={LIST_PAGINATION}
-        locale={{ emptyText: '还没有集成实例，点右上角「新建集成」接入 GitLab / GitHub / Jira' }}
+        locale={{
+          emptyText: canManage
+            ? '还没有集成实例，点右上角「新建集成」接入 GitLab / GitHub / Jira'
+            : '还没有集成实例',
+        }}
         columns={[
           {
             title: '类型',
@@ -378,35 +389,45 @@ export default function IntegrationsPage() {
               <Tag color={s === 'ENABLED' ? 'green' : 'default'}>{s === 'ENABLED' ? '启用' : '停用'}</Tag>
             ),
           },
-          {
-            title: '操作',
-            width: 220,
-            render: (_, row) => (
-              <Space size={4}>
-                <Tooltip title="验证地址可达 + 凭据有效">
-                  <Button
-                    size="small"
-                    loading={testingId === row.id}
-                    onClick={() => onTest(row)}
-                  >
-                    测试
-                  </Button>
-                </Tooltip>
-                <Button
-                  size="small"
-                  onClick={() => {
-                    setEditing(row)
-                    setEditOpen(true)
-                  }}
-                >
-                  编辑
-                </Button>
-                <Button size="small" onClick={() => onToggle(row)}>
-                  {row.status === 'ENABLED' ? '停用' : '启用'}
-                </Button>
-              </Space>
-            ),
-          },
+          ...(canManage || canTest
+            ? [
+                {
+                  title: '操作',
+                  width: 220,
+                  render: (_: unknown, row: Integration) => (
+                    <Space size={4}>
+                      {canTest && (
+                        <Tooltip title="验证地址可达 + 凭据有效">
+                          <Button
+                            size="small"
+                            loading={testingId === row.id}
+                            onClick={() => onTest(row)}
+                          >
+                            测试
+                          </Button>
+                        </Tooltip>
+                      )}
+                      {canManage && (
+                        <>
+                          <Button
+                            size="small"
+                            onClick={() => {
+                              setEditing(row)
+                              setEditOpen(true)
+                            }}
+                          >
+                            编辑
+                          </Button>
+                          <Button size="small" onClick={() => onToggle(row)}>
+                            {row.status === 'ENABLED' ? '停用' : '启用'}
+                          </Button>
+                        </>
+                      )}
+                    </Space>
+                  ),
+                } satisfies ColumnsType<Integration>[number],
+              ]
+            : []),
         ]}
       />
 
@@ -418,22 +439,26 @@ export default function IntegrationsPage() {
         destroyOnHidden
         footer={
           <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-            <Tooltip
-              title={
-                editing && !form.getFieldValue('token')
-                  ? '凭据未修改，将测试已保存的配置'
-                  : '按当前表单内容试连，凭据不会保存'
-              }
-            >
-              <Button icon={<ApiOutlined />} loading={testingForm} onClick={onTestForm}>
-                测试连接
-              </Button>
-            </Tooltip>
+            {canTest && (
+              <Tooltip
+                title={
+                  editing && !form.getFieldValue('token')
+                    ? '凭据未修改，将测试已保存的配置'
+                    : '按当前表单内容试连，凭据不会保存'
+                }
+              >
+                <Button icon={<ApiOutlined />} loading={testingForm} onClick={onTestForm}>
+                  测试连接
+                </Button>
+              </Tooltip>
+            )}
             <Space>
               <Button onClick={() => setEditOpen(false)}>取消</Button>
-              <Button type="primary" loading={saving} onClick={() => form.submit()}>
-                保存
-              </Button>
+              {canManage && (
+                <Button type="primary" loading={saving} onClick={() => form.submit()}>
+                  保存
+                </Button>
+              )}
             </Space>
           </Space>
         }

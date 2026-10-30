@@ -13,6 +13,7 @@ import {
 import dayjs from 'dayjs'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getUserSnapshot, subscribeAuth } from '../../auth/authStore'
+import { usePermittedView } from '../../auth/usePermissions'
 import { listSessions } from '../../sessions/api'
 import type { SessionSummary } from '../../sessions/types'
 import { ACTIVE_STATES, stateColor } from '../../../shared/chat/stateMeta'
@@ -33,11 +34,24 @@ function greeting(): string {
   return '晚上好'
 }
 
+const HOME_VIEWS = ['overview', 'usage'] as const
+type HomeView = (typeof HOME_VIEWS)[number]
+const HOME_VIEW_PERMISSIONS: Record<HomeView, string> = {
+  overview: 'top.home.tab.overview',
+  usage: 'top.home.tab.usage',
+}
+
 export default function HomePage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const user = useSyncExternalStore(subscribeAuth, getUserSnapshot)
   const view = searchParams.get('view') === 'usage' ? 'usage' : 'overview'
+  const views = usePermittedView(
+    HOME_VIEWS,
+    (v) => HOME_VIEW_PERMISSIONS[v],
+    view,
+    (v) => setSearchParams(v === 'usage' ? { view: 'usage' } : {}, { replace: true }),
+  )
 
   const [activeSessions, setActiveSessions] = useState<SessionSummary[]>([])
   const [unread, setUnread] = useState(0)
@@ -83,10 +97,10 @@ export default function HomePage() {
         <Space size={12}>
           <span>工作台</span>
           <Segmented
-            options={[
-              { label: '概览', value: 'overview' },
-              { label: '用量', value: 'usage' },
-            ]}
+            options={views.map((v) => ({
+              label: v === 'usage' ? '用量' : '概览',
+              value: v,
+            }))}
             value={view}
             onChange={(v) => setSearchParams(v === 'usage' ? { view: 'usage' } : {}, { replace: true })}
           />

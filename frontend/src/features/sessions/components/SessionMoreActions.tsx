@@ -15,6 +15,7 @@ import { getSessionContext } from '../../scenarios/api'
 import type { ContextSnapshot } from '../../scenarios/types'
 import SedimentExperienceModal from '../../knowledge/components/SedimentExperienceModal'
 import { getUserSnapshot, isAdmin } from '../../auth/authStore'
+import { usePermissions } from '../../auth/usePermissions'
 import { fmtTime } from '../../../shared/utils/format'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import { showError } from '../../../shared/utils/showError'
@@ -41,7 +42,12 @@ export default function SessionMoreActions({
   // CAP-42：固定工作区会话（workspaceState 非空）才显示收口入口；
   // 已收口 / 会话运行中 / 非创建者且非管理员 → 禁用
   const me = getUserSnapshot()
+  const { canAction } = usePermissions()
+  const canFinalizeAction = canAction('project.sessions.action.finalize')
+  const canSediment = canAction('project.sessions.action.sediment')
+  const canManageSession = canAction('project.sessions.action.manage')
   const canFinalize =
+    canFinalizeAction &&
     !!session.workspaceState &&
     session.workspaceState !== 'FINALIZED' &&
     !canSuspend &&
@@ -103,7 +109,7 @@ export default function SessionMoreActions({
         trigger={['click']}
         menu={{
           items: [
-            ...(session.workspaceState
+            ...(session.workspaceState && canFinalizeAction
               ? [
                   {
                     key: 'finalize',
@@ -114,14 +120,20 @@ export default function SessionMoreActions({
                 ]
               : []),
             { key: 'context', icon: <FileSearchOutlined />, label: '已注入上下文' },
-            { key: 'sediment', icon: <BulbOutlined />, label: '沉淀经验' },
-            {
-              key: 'worktree',
-              icon: <DeleteOutlined />,
-              label: '清理 worktree',
-              disabled: !session.worktreePath || canSuspend,
-              danger: true,
-            },
+            ...(canSediment
+              ? [{ key: 'sediment', icon: <BulbOutlined />, label: '沉淀经验' }]
+              : []),
+            ...(canManageSession
+              ? [
+                  {
+                    key: 'worktree',
+                    icon: <DeleteOutlined />,
+                    label: '清理 worktree',
+                    disabled: !session.worktreePath || canSuspend,
+                    danger: true,
+                  },
+                ]
+              : []),
           ],
           onClick: ({ key }) => {
             if (key === 'finalize') setFinalizeOpen(true)

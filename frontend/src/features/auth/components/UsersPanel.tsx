@@ -1,9 +1,11 @@
 import { Button, Form, Input, Modal, Select, Space, Tag, Tooltip, Typography, message } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useState } from 'react'
 import { createUser, deleteUser, listRoles, listUsers, resetPassword, updateUser } from '../api'
 import { getUserSnapshot } from '../authStore'
 import type { AuthUser, RoleView } from '../types'
 import { baseRoleMeta, displayRole, roleSelectOptions } from '../roleMeta'
+import { usePermissions } from '../usePermissions'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
@@ -28,6 +30,8 @@ export default function UsersPanel({ createOpen, onCreateOpenChange, refreshTick
   const [editForm] = Form.useForm()
   const [resetForm] = Form.useForm()
   const me = getUserSnapshot()
+  const { canAction } = usePermissions()
+  const canManage = canAction('admin.users.action.manage-user')
 
   const reload = useCallback(() => {
     setLoading(true)
@@ -148,7 +152,7 @@ export default function UsersPanel({ createOpen, onCreateOpenChange, refreshTick
         loading={loading}
         dataSource={users}
         pagination={LIST_PAGINATION}
-        locale={{ emptyText: '暂无用户，点击右上角「新建用户」创建第一个账号' }}
+        locale={{ emptyText: canManage ? '暂无用户，点击右上角「新建用户」创建第一个账号' : '暂无用户' }}
         columns={[
           { title: '用户名', dataIndex: 'username' },
           { title: '显示名', dataIndex: 'displayName' },
@@ -191,33 +195,37 @@ export default function UsersPanel({ createOpen, onCreateOpenChange, refreshTick
               ),
           },
           { title: '创建时间', dataIndex: 'createdAt', width: 160, render: (v?: string) => fmtTime(v) },
-          {
-            title: '操作',
-            width: 340,
-            render: (_, u) => {
-              const isLocal = u.username === 'local'
-              const isSelf = u.username === me?.username
-              return (
-                <Space size={4}>
-                  <Button size="small" disabled={isLocal} onClick={() => openEdit(u)}>
-                    编辑
-                  </Button>
-                  <Button size="small" disabled={isLocal} onClick={() => openRole(u)}>
-                    角色
-                  </Button>
-                  <Button size="small" disabled={isLocal} onClick={() => setResetTarget(u)}>
-                    重置密码
-                  </Button>
-                  <Button size="small" disabled={isLocal || isSelf} onClick={() => toggleStatus(u)}>
-                    {u.status === 'DISABLED' ? '启用' : '禁用'}
-                  </Button>
-                  <Button size="small" danger disabled={isLocal || isSelf} onClick={() => confirmDelete(u)}>
-                    删除
-                  </Button>
-                </Space>
-              )
-            },
-          },
+          ...(canManage
+            ? [
+                {
+                  title: '操作',
+                  width: 340,
+                  render: (_: unknown, u: AuthUser) => {
+                    const isLocal = u.username === 'local'
+                    const isSelf = u.username === me?.username
+                    return (
+                      <Space size={4}>
+                        <Button size="small" disabled={isLocal} onClick={() => openEdit(u)}>
+                          编辑
+                        </Button>
+                        <Button size="small" disabled={isLocal} onClick={() => openRole(u)}>
+                          角色
+                        </Button>
+                        <Button size="small" disabled={isLocal} onClick={() => setResetTarget(u)}>
+                          重置密码
+                        </Button>
+                        <Button size="small" disabled={isLocal || isSelf} onClick={() => toggleStatus(u)}>
+                          {u.status === 'DISABLED' ? '启用' : '禁用'}
+                        </Button>
+                        <Button size="small" danger disabled={isLocal || isSelf} onClick={() => confirmDelete(u)}>
+                          删除
+                        </Button>
+                      </Space>
+                    )
+                  },
+                } satisfies ColumnsType<AuthUser>[number],
+              ]
+            : []),
         ]}
       />
 

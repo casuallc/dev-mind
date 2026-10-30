@@ -39,6 +39,8 @@ interface Props {
     /** 确认弹窗标题（默认「重建「下周计划」？」） */
     confirmTitle?: string
   }
+  /** 编辑入口是否可见（CAP-103 按钮权限：日报/周报 = manage-report，季度复盘 = manage-goal） */
+  canEdit?: boolean
 }
 
 /**
@@ -60,6 +62,7 @@ export default function ReportEditor({
   fill,
   layout = 'vertical',
   rebuild,
+  canEdit = true,
 }: Props) {
   const [values, setValues] = useState<Record<string, string>>({})
   const [modes, setModes] = useState<Record<string, MarkdownEditorMode>>({})
@@ -72,7 +75,7 @@ export default function ReportEditor({
 
   // 确定性重建（不经 LLM）：拉取预览 → 人工确认 → 填入编辑框（保存才落库）
   const doRebuild = async () => {
-    if (!rebuild) return
+    if (!rebuild || !canEdit) return
     const fieldKey = rebuild.fieldKey ?? 'nextPlanMd'
     setRebuilding(true)
     try {
@@ -194,26 +197,30 @@ export default function ReportEditor({
           style={{ padding: '48px 0' }}
         >
           <Space>
-            <Button
-              type="primary"
-              icon={<EditOutlined />}
-              loading={creating}
-              onClick={async () => {
-                setCreating(true)
-                try {
-                  await onCreateManual()
-                } catch (e) {
-                  showError(e, '创建失败')
-                } finally {
-                  setCreating(false)
-                }
-              }}
-            >
-              手动填写
-            </Button>
-            <Button icon={<RobotOutlined />} loading={generating} onClick={() => openGenerate(false)}>
-              AI 生成
-            </Button>
+            {canEdit && (
+              <>
+                <Button
+                  type="primary"
+                  icon={<EditOutlined />}
+                  loading={creating}
+                  onClick={async () => {
+                    setCreating(true)
+                    try {
+                      await onCreateManual()
+                    } catch (e) {
+                      showError(e, '创建失败')
+                    } finally {
+                      setCreating(false)
+                    }
+                  }}
+                >
+                  手动填写
+                </Button>
+                <Button icon={<RobotOutlined />} loading={generating} onClick={() => openGenerate(false)}>
+                  AI 生成
+                </Button>
+              </>
+            )}
           </Space>
         </Empty>
         {generateDialog}
@@ -227,24 +234,28 @@ export default function ReportEditor({
     >
       <Space style={{ marginBottom: 12, flex: 'none' }} wrap>
         <Typography.Text type="secondary">更新于 {fmtTime(updatedAt)}</Typography.Text>
-        <Button size="small" icon={<RobotOutlined />} loading={generating} onClick={() => openGenerate(true)}>
-          重新生成
-        </Button>
-        {rebuild && (
-          <Button
-            size="small"
-            icon={<ReloadOutlined />}
-            loading={rebuilding}
-            onClick={doRebuild}
-            title="以确定性数据为准重建文本（不经 LLM；数据是唯一事实源，文本只是其叙述投影）"
-          >
-            {rebuild.label ?? '从计划项重建'}
-          </Button>
-        )}
-        {anyEditing && (
-          <Button size="small" type="primary" loading={saving} onClick={save}>
-            保存修改
-          </Button>
+        {canEdit && (
+          <>
+            <Button size="small" icon={<RobotOutlined />} loading={generating} onClick={() => openGenerate(true)}>
+              重新生成
+            </Button>
+            {rebuild && (
+              <Button
+                size="small"
+                icon={<ReloadOutlined />}
+                loading={rebuilding}
+                onClick={doRebuild}
+                title="以确定性数据为准重建文本（不经 LLM；数据是唯一事实源，文本只是其叙述投影）"
+              >
+                {rebuild.label ?? '从计划项重建'}
+              </Button>
+            )}
+            {anyEditing && (
+              <Button size="small" type="primary" loading={saving} onClick={save}>
+                保存修改
+              </Button>
+            )}
+          </>
         )}
       </Space>
       <div

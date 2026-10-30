@@ -11,6 +11,7 @@ import type { QuarterlyReport } from '../types'
 import ReportEditor from './ReportEditor'
 import { DRAWER_SCREEN } from '../../../shared/utils/overlay'
 import { showError } from '../../../shared/utils/showError'
+import { usePermissions } from '../../auth/usePermissions'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -28,6 +29,8 @@ interface Props {
 export default function QuarterlyReviewDrawer({ period, onCancel }: Props) {
   const [report, setReport] = useState<QuarterlyReport | undefined>()
   const [generating, setGenerating] = useState(false)
+  const { canAction } = usePermissions()
+  const canEdit = canAction('top.worklog.action.manage-goal')
 
   const load = useCallback(() => {
     if (!period) return
@@ -80,6 +83,7 @@ export default function QuarterlyReviewDrawer({ period, onCancel }: Props) {
           exists={report?.exists}
           updatedAt={report?.updatedAt}
           generating={generating}
+          canEdit={canEdit}
           fields={[{ key: 'contentMd', label: `复盘内容（${period}，Markdown）`, value: report?.contentMd ?? '' }]}
           onCreateManual={async () => {
             setReport(await createQuarterly(period))

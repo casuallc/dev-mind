@@ -4,6 +4,7 @@ import type { CSSProperties } from 'react'
 import { pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import type { Bookmark } from '../types'
 import StatusDot from './StatusDot'
+import { usePermissions } from '../../auth/usePermissions'
 
 interface Props {
   rows: Bookmark[]
@@ -66,13 +67,17 @@ export default function BookmarkCardGrid({
   onDelete,
   onCreate,
 }: Props) {
+  const { canAction } = usePermissions()
+  const canManage = canAction('top.bookmarks.action.manage-bookmark')
   if (!loading && rows.length === 0) {
     return (
       <div style={pagePaneScrollStyle}>
         <Empty description="这里还没有收藏" style={{ marginTop: 48 }}>
-          <Button type="primary" onClick={onCreate}>
-            新建收藏
-          </Button>
+          {canManage && (
+            <Button type="primary" onClick={onCreate}>
+              新建收藏
+            </Button>
+          )}
         </Empty>
       </div>
     )
@@ -98,7 +103,8 @@ export default function BookmarkCardGrid({
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <StatusDot bookmark={b} />
                 <span style={titleStyle}>{b.title}</span>
-                <Dropdown
+                {canManage && (
+                  <Dropdown
                   trigger={['click']}
                   menu={{
                     items: [
@@ -128,6 +134,7 @@ export default function BookmarkCardGrid({
                     onClick={(e) => e.stopPropagation()}
                   />
                 </Dropdown>
+                )}
               </div>
               <div style={urlStyle}>{b.url}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, minHeight: 22 }}>
@@ -147,19 +154,21 @@ export default function BookmarkCardGrid({
               </div>
             </div>
           ))}
-          <div
-            style={{
-              ...cardStyle,
-              border: '1px dashed #d9d9d9',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#8c8c8c',
-              minHeight: 84,
-            }}
-            onClick={onCreate}
-          >
-            <PlusOutlined /> 新建收藏
-          </div>
+          {canManage && (
+            <div
+              style={{
+                ...cardStyle,
+                border: '1px dashed #d9d9d9',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#8c8c8c',
+                minHeight: 84,
+              }}
+              onClick={onCreate}
+            >
+              <PlusOutlined /> 新建收藏
+            </div>
+          )}
         </div>
       </Spin>
     </div>

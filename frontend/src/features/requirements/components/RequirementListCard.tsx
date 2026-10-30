@@ -13,6 +13,7 @@ import { fmtDuration, fmtTime } from '../../../shared/utils/format'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
+import { usePermissions } from '../../auth/usePermissions'
 import {
   ALL_STATUSES,
   ALL_TYPES,
@@ -27,6 +28,9 @@ type SourceView = 'ALL' | RequirementSource
 
 export default function RequirementListCard({ projectId }: { projectId: string }) {
   const navigate = useNavigate()
+  const { canAction } = usePermissions()
+  const canCreate = canAction('project.requirements.action.create')
+  const canManage = canAction('project.requirements.action.manage')
   const [items, setItems] = useState<Requirement[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -217,11 +221,11 @@ export default function RequirementListCard({ projectId }: { projectId: string }
         </Typography.Text>
       ),
     },
-    {
+    ...(canManage ? [{
       title: '操作',
       key: 'actions',
       width: 60,
-      render: (_, r) =>
+      render: (_: unknown, r: Requirement) =>
         r.status === 'DONE' || r.status === 'CANCELLED' ? null : (
           <Button
             type="link"
@@ -235,7 +239,7 @@ export default function RequirementListCard({ projectId }: { projectId: string }
             完成
           </Button>
         ),
-    },
+    } satisfies ColumnsType<Requirement>[number]] : []),
   ]
 
   return (
@@ -286,9 +290,11 @@ export default function RequirementListCard({ projectId }: { projectId: string }
             <Button icon={<ReloadOutlined />} onClick={reload}>
               刷新
             </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-              新建需求
-            </Button>
+            {canCreate && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+                新建需求
+              </Button>
+            )}
           </Space>
         }
       >
@@ -323,7 +329,7 @@ export default function RequirementListCard({ projectId }: { projectId: string }
               setSize(s)
             },
           }}
-          locale={{ emptyText: '暂无需求，点击「新建需求」开始一条研发主线' }}
+          locale={{ emptyText: canCreate ? '暂无需求，点击「新建需求」开始一条研发主线' : '暂无需求' }}
         />
       </Card>
 

@@ -103,6 +103,7 @@ export default function NodeFilePreviewModal({
   entry,
   kind,
   initialContent,
+  readOnly = false,
   onClose,
 }: {
   node: AgentNode
@@ -112,6 +113,8 @@ export default function NodeFilePreviewModal({
   kind: NodeFileKind
   /** 文本类已读出的内容；图片传 null（弹窗自行拉 blob） */
   initialContent: string | null
+  /** 无「写入文件」权限时只读：隐藏编辑/保存，仅预览与查找 */
+  readOnly?: boolean
   onClose: (saved: boolean) => void
 }) {
   const rel = dir ? `${dir}/${entry.name}` : entry.name
@@ -197,6 +200,7 @@ export default function NodeFilePreviewModal({
     if (!matches.length) return
     const next = (cur + d + matches.length) % matches.length
     setCurIdx(next)
+    if (readOnly) return
     if (mode === 'edit' || kind === 'markdown') {
       if (mode !== 'edit') setMode('edit')
       pendingJump.current = next
@@ -257,7 +261,7 @@ export default function NodeFilePreviewModal({
         </div>
       }
       footer={
-        kind === 'image' ? (
+        kind === 'image' || readOnly ? (
           <Button onClick={close}>关闭</Button>
         ) : (
           <Space>
@@ -273,10 +277,14 @@ export default function NodeFilePreviewModal({
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
           <Segmented
             value={mode}
-            options={[
-              { label: '预览', value: 'preview' },
-              { label: '编辑', value: 'edit' },
-            ]}
+            options={
+              readOnly
+                ? [{ label: '预览', value: 'preview' }]
+                : [
+                    { label: '预览', value: 'preview' },
+                    { label: '编辑', value: 'edit' },
+                  ]
+            }
             onChange={(v) => setMode(v as 'preview' | 'edit')}
           />
           <span style={{ flex: 1 }} />

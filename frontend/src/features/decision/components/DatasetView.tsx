@@ -60,6 +60,7 @@ import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import FitTable from '../../../shared/components/FitTable'
+import { usePermissions } from '../../auth/usePermissions'
 import { CASE_GROUP_LABEL, CaseGroupTag, CONTROL_GROUPS, SKIP_REASON_LABEL, SOURCE_LABEL } from './labCommon'
 import { JsonBlock } from './ReportBlocks'
 
@@ -86,6 +87,8 @@ function TipButton({ tip, ...rest }: { tip?: string } & ButtonProps) {
 }
 
 export default function DatasetView({ refreshTick = 0, createTick = 0 }: { refreshTick?: number; createTick?: number }) {
+  const { canAction } = usePermissions()
+  const canManageDataset = canAction('admin.laya-lab.action.manage-dataset')
   const [rows, setRows] = useState<DatasetRow[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
@@ -209,8 +212,9 @@ export default function DatasetView({ refreshTick = 0, createTick = 0 }: { refre
           },
         }}
         locale={{
-          emptyText:
-            '还没有评测集——「新建评测集」建一个基准集并手工标注样本，或建回流集把已裁决的决策记录收编进来。',
+          emptyText: canManageDataset
+            ? '还没有评测集——「新建评测集」建一个基准集并手工标注样本，或建回流集把已裁决的决策记录收编进来。'
+            : '还没有评测集。',
         }}
       />
 
@@ -248,6 +252,8 @@ export default function DatasetView({ refreshTick = 0, createTick = 0 }: { refre
 // ---------------- 评测集详情抽屉 ----------------
 
 function DatasetDrawer({ id, onClose, onChanged }: { id: number; onClose: () => void; onChanged: () => void }) {
+  const { canAction } = usePermissions()
+  const canManageDataset = canAction('admin.laya-lab.action.manage-dataset')
   const [detail, setDetail] = useState<DatasetDetail | null>(null)
   const [templates, setTemplates] = useState<CaseGroupTemplate[]>([])
   const [items, setItems] = useState<DatasetItemView[]>([])
@@ -379,7 +385,7 @@ function DatasetDrawer({ id, onClose, onChanged }: { id: number; onClose: () => 
       render: (q: string[]) => (q?.length ? q.join('、') : <Typography.Text type="secondary">未标注</Typography.Text>),
     },
     { title: '添加', dataIndex: 'createdAt', width: 170, render: (v) => fmtTime(v) },
-    {
+    ...(canManageDataset ? [{
       title: '操作',
       width: 120,
       render: (_, r) => (
@@ -399,7 +405,7 @@ function DatasetDrawer({ id, onClose, onChanged }: { id: number; onClose: () => 
           </Popconfirm>
         </Space>
       ),
-    },
+    } satisfies ColumnsType<DatasetItemView>[number]] : []),
   ]
 
   return (
@@ -411,22 +417,26 @@ function DatasetDrawer({ id, onClose, onChanged }: { id: number; onClose: () => 
         onClose={onClose}
         extra={
           <Space>
-            <TipButton
-              icon={<EditOutlined />}
-              tip={frozen ? frozenTip : undefined}
-              disabled={frozen}
-              onClick={() => setEditing({ itemId: null, caseGroup: 'NORMAL' })}
-            >
-              添加样本
-            </TipButton>
-            <TipButton
-              tip={frozen ? frozenTip : ds?.kind !== 'REPLAY' ? '只有回流集（kind=REPLAY）能收编决策记录' : undefined}
-              disabled={frozen || ds?.kind !== 'REPLAY'}
-              onClick={() => setIntakeOpen(true)}
-            >
-              收编决策记录
-            </TipButton>
-            {ds && !frozen && (
+            {canManageDataset && (
+              <TipButton
+                icon={<EditOutlined />}
+                tip={frozen ? frozenTip : undefined}
+                disabled={frozen}
+                onClick={() => setEditing({ itemId: null, caseGroup: 'NORMAL' })}
+              >
+                添加样本
+              </TipButton>
+            )}
+            {canManageDataset && (
+              <TipButton
+                tip={frozen ? frozenTip : ds?.kind !== 'REPLAY' ? '只有回流集（kind=REPLAY）能收编决策记录' : undefined}
+                disabled={frozen || ds?.kind !== 'REPLAY'}
+                onClick={() => setIntakeOpen(true)}
+              >
+                收编决策记录
+              </TipButton>
+            )}
+            {canManageDataset && ds && !frozen && (
               <Popconfirm
                 title="冻结这个评测集？"
                 description="冻结后不可修改，评测才能引用它。缺对照组、标签与内容不符、题面版本不一致都会被拒（并逐条给原因）。"
@@ -435,20 +445,22 @@ function DatasetDrawer({ id, onClose, onChanged }: { id: number; onClose: () => 
                 <Button type="primary">冻结</Button>
               </Popconfirm>
             )}
-            {ds?.frozen && (
+            {canManageDataset && ds?.frozen && (
               <Popconfirm title="修订为新版本？" description="从当前冻结版本派生下一个草稿，冻结版本本身不动。" onConfirm={onRevise}>
                 <Button type="primary">修订为新版本</Button>
               </Popconfirm>
             )}
-            <Popconfirm
-              title="删除这个评测集？"
-              description="样本与冻结版本一并删除，已引用它的评测运行会失去数据集主体。"
-              onConfirm={onDelete}
-            >
-              <TipButton danger tip={frozen ? frozenTip : undefined} disabled={frozen}>
-                删除
-              </TipButton>
-            </Popconfirm>
+            {canManageDataset && (
+              <Popconfirm
+                title="删除这个评测集？"
+                description="样本与冻结版本一并删除，已引用它的评测运行会失去数据集主体。"
+                onConfirm={onDelete}
+              >
+                <TipButton danger tip={frozen ? frozenTip : undefined} disabled={frozen}>
+                  删除
+                </TipButton>
+              </Popconfirm>
+            )}
           </Space>
         }
       >
@@ -547,8 +559,9 @@ function DatasetDrawer({ id, onClose, onChanged }: { id: number; onClose: () => 
                 size: 'small',
               }}
               locale={{
-                emptyText:
-                  ds.kind === 'REPLAY'
+                emptyText: !canManageDataset
+                  ? '还没有样本。'
+                  : ds.kind === 'REPLAY'
                     ? '还没有样本——用「收编决策记录」把已裁决的记录转成样本（只收 gold 落得上题面的）。'
                     : '还没有样本——用「添加样本」按对照组模板逐条标注（三个对照组缺一不可）。',
               }}

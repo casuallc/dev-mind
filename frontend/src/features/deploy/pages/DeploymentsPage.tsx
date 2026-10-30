@@ -42,6 +42,15 @@ import FitTable from '../../../shared/components/FitTable'
 import { workItemColumn } from '../../../shared/components/WorkItemCell'
 import WorkItemSelect from '../../../shared/components/WorkItemSelect'
 import { showError } from '../../../shared/utils/showError'
+import { usePermittedView, usePermissions } from '../../auth/usePermissions'
+
+const DEPLOY_VIEWS = ['history', 'config'] as const
+type DeployView = (typeof DEPLOY_VIEWS)[number]
+const DEPLOY_VIEW_PERMISSIONS: Record<DeployView, string> = {
+  history: 'project.deployments.tab.history',
+  config: 'project.deployments.tab.config',
+}
+const DEPLOY_VIEW_LABELS: Record<DeployView, string> = { history: '部署历史', config: '部署配置' }
 
 export default function DeploymentsPage() {
   const projectId = useCurrentProjectId()
@@ -51,7 +60,15 @@ export default function DeploymentsPage() {
 
 function DeployCenter({ id }: { id: string }) {
   const [searchParams, setSearchParams] = useSearchParams()
+  const { canAction } = usePermissions()
+  const canCreate = canAction('project.deployments.action.create')
   const [view, setView] = useState<'history' | 'config'>('history')
+  const permittedViews = usePermittedView(
+    DEPLOY_VIEWS,
+    (v) => DEPLOY_VIEW_PERMISSIONS[v],
+    view,
+    setView,
+  )
   const [cfg, setCfg] = useState<DeployConfig | null>(null)
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [environments, setEnvironments] = useState<ProjectEnvironment[]>([])
@@ -200,11 +217,8 @@ function DeployCenter({ id }: { id: string }) {
           <span>部署记录</span>
           <Segmented
             value={view}
-            onChange={(v) => setView(v as 'history' | 'config')}
-            options={[
-              { value: 'history', label: '部署历史' },
-              { value: 'config', label: '部署配置' },
-            ]}
+            onChange={(v) => setView(v as DeployView)}
+            options={permittedViews.map((v) => ({ value: v, label: DEPLOY_VIEW_LABELS[v] }))}
           />
         </Space>
       }
@@ -220,8 +234,9 @@ function DeployCenter({ id }: { id: string }) {
 
       {view === 'history' ? (
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <Card size="small" title="创建部署">
-            <Space wrap>
+          {canCreate && (
+            <Card size="small" title="创建部署">
+              <Space wrap>
               <Select<number>
                 style={{ width: 180 }}
                 placeholder="选择环境（可选）"
@@ -275,7 +290,8 @@ function DeployCenter({ id }: { id: string }) {
             <div style={{ marginTop: 8, fontSize: 12, color: 'rgba(0,0,0,0.45)' }}>
               创建后进入待执行（PLANNED），计划在执行前可见；同构建重复部署会被识别（需 force 才可重建）。
             </div>
-          </Card>
+            </Card>
+          )}
 
           <FitTable<DeploymentRecord>
             rowKey="id"
@@ -293,7 +309,9 @@ function DeployCenter({ id }: { id: string }) {
                 setSize(s)
               },
             }}
-            locale={{ emptyText: '暂无部署记录。在上方「创建部署」选择环境/节点与构建，发起第一个部署。' }}
+            locale={{ emptyText: canCreate
+              ? '暂无部署记录。在上方「创建部署」选择环境/节点与构建，发起第一个部署。'
+              : '暂无部署记录' }}
           />
         </div>
       ) : (

@@ -38,6 +38,7 @@ import { fmtBytes, fmtTime } from '../../../shared/utils/format'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
+import { usePermissions } from '../../auth/usePermissions'
 
 const TRANSFER_CAP = 100 * 1024 * 1024
 /** 图片预览走下载端点拉 blob，超 20MB 不内联，引导下载 */
@@ -49,6 +50,8 @@ const joinRel = (dir: string, name: string) => (dir ? `${dir}/${name}` : name)
 const badName = (n: string) => !n.trim() || /[/\\:]/.test(n) || n === '.' || n === '..'
 
 export default function NodeFilesBrowser({ node }: { node: AgentNode }) {
+  const { canAction } = usePermissions()
+  const canWriteFiles = canAction('admin.agent-nodes.action.write-files')
   const roots = node.fileRoots ?? []
   const [root, setRoot] = useState(roots[0] ?? '')
   const [dir, setDir] = useState('')
@@ -240,12 +243,16 @@ export default function NodeFilesBrowser({ node }: { node: AgentNode }) {
           <Button icon={<ReloadOutlined />} onClick={() => void reload()}>
             刷新
           </Button>
-          <Button icon={<FileAddOutlined />} onClick={() => setNewFileOpen(true)}>
-            新建文本文件
-          </Button>
-          <Upload showUploadList={false} beforeUpload={(f) => (doUpload(f), false)}>
-            <Button icon={<UploadOutlined />}>上传</Button>
-          </Upload>
+          {canWriteFiles && (
+            <>
+              <Button icon={<FileAddOutlined />} onClick={() => setNewFileOpen(true)}>
+                新建文本文件
+              </Button>
+              <Upload showUploadList={false} beforeUpload={(f) => (doUpload(f), false)}>
+                <Button icon={<UploadOutlined />}>上传</Button>
+              </Upload>
+            </>
+          )}
         </Space>
       </Space>
 
@@ -290,23 +297,27 @@ export default function NodeFilesBrowser({ node }: { node: AgentNode }) {
               <Space>
                 {!e.dir && (
                   <>
-                    <Button onClick={() => openFile(e)}>预览/编辑</Button>
+                    <Button onClick={() => openFile(e)}>{canWriteFiles ? '预览/编辑' : '预览'}</Button>
                     <Button onClick={() => run(() => downloadNodeFile(node.id, root, joinRel(dir, e.name), e.name))}>
                       下载
                     </Button>
                   </>
                 )}
-                <Button
-                  onClick={() => {
-                    setRenaming(e)
-                    setRenameDraft(e.name)
-                  }}
-                >
-                  重命名
-                </Button>
-                <Button danger onClick={() => onDelete(e)}>
-                  删除
-                </Button>
+                {canWriteFiles && (
+                  <>
+                    <Button
+                      onClick={() => {
+                        setRenaming(e)
+                        setRenameDraft(e.name)
+                      }}
+                    >
+                      重命名
+                    </Button>
+                    <Button danger onClick={() => onDelete(e)}>
+                      删除
+                    </Button>
+                  </>
+                )}
               </Space>
             ),
           },
@@ -322,6 +333,7 @@ export default function NodeFilesBrowser({ node }: { node: AgentNode }) {
           entry={preview.entry}
           kind={preview.kind}
           initialContent={preview.content}
+          readOnly={!canWriteFiles}
           onClose={(saved) => {
             setPreview(null)
             if (saved) void reload()

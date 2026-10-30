@@ -1,9 +1,11 @@
 import { Button, Form, Input, Modal, Select, Space, Tag, Typography, message } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useState } from 'react'
 import { createRole, deleteRole, listRoles, updateRole } from '../api'
 import type { RoleView } from '../types'
 import { baseRoleMeta, CUSTOM_BASE_ROLE_OPTIONS } from '../roleMeta'
 import RoleMenuDrawer from './RoleMenuDrawer'
+import { usePermissions } from '../usePermissions'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
@@ -30,6 +32,9 @@ export default function RolesPanel({ createOpen, onCreateOpenChange, refreshTick
   const [permTarget, setPermTarget] = useState<RoleView | null>(null)
   const [saving, setSaving] = useState(false)
   const [form] = Form.useForm<RoleFormValues>()
+  const { canAction } = usePermissions()
+  const canManage = canAction('admin.users.action.manage-role')
+  const canGrantMenu = canAction('admin.users.action.grant-menu')
 
   const reload = useCallback(() => {
     setLoading(true)
@@ -117,7 +122,7 @@ export default function RolesPanel({ createOpen, onCreateOpenChange, refreshTick
   return (
     <>
       <Typography.Paragraph type="secondary">
-        角色 = 基础接口权限 + 菜单可见范围。ADMIN 为内置管理员角色，恒见全部菜单且不可改；自定义角色可选「读写」或「只读」基础权限，并在「菜单权限」里勾选可见入口。仍有用户使用的角色不可删除。
+        角色 = 基础接口权限 + 菜单/页签/按钮权限。ADMIN 为内置管理员角色，恒见全部权限且不可改；自定义角色可选「读写」或「只读」基础权限，并在「权限配置」里勾选可见菜单、页签与操作按钮。仍有用户使用的角色不可删除。
       </Typography.Paragraph>
       <FitTable
         rowKey="code"
@@ -156,38 +161,48 @@ export default function RolesPanel({ createOpen, onCreateOpenChange, refreshTick
           },
           { title: '用户数', dataIndex: 'userCount', width: 90, align: 'center' },
           {
-            title: '菜单权限',
+            title: '权限范围',
             dataIndex: 'menuKeys',
             width: 140,
             render: (keys: string[], role) =>
               role.code === 'ADMIN' ? (
-                <Tag color="green">全部菜单</Tag>
+                <Tag color="green">全部权限</Tag>
               ) : (
-                <Typography.Text>{keys.length} 个菜单</Typography.Text>
+                <Typography.Text>{keys.length} 项</Typography.Text>
               ),
           },
           { title: '更新时间', dataIndex: 'updatedAt', width: 160, render: (v?: string) => fmtTime(v) },
-          {
-            title: '操作',
-            width: 260,
-            render: (_, role) => (
-              <Space size={4}>
-                <Button
-                  size="small"
-                  disabled={role.code === 'ADMIN'}
-                  onClick={() => setPermTarget(role)}
-                >
-                  菜单权限
-                </Button>
-                <Button size="small" disabled={role.builtin} onClick={() => openEdit(role)}>
-                  编辑
-                </Button>
-                <Button size="small" danger disabled={role.builtin} onClick={() => confirmDelete(role)}>
-                  删除
-                </Button>
-              </Space>
-            ),
-          },
+          ...(canManage || canGrantMenu
+            ? [
+                {
+                  title: '操作',
+                  width: 260,
+                  render: (_: unknown, role: RoleView) => (
+                    <Space size={4}>
+                      {canGrantMenu && (
+                        <Button
+                          size="small"
+                          disabled={role.code === 'ADMIN'}
+                          onClick={() => setPermTarget(role)}
+                        >
+                          权限配置
+                        </Button>
+                      )}
+                      {canManage && (
+                        <Button size="small" disabled={role.builtin} onClick={() => openEdit(role)}>
+                          编辑
+                        </Button>
+                      )}
+                      {canManage && (
+                        <Button size="small" danger disabled={role.builtin} onClick={() => confirmDelete(role)}>
+                          删除
+                        </Button>
+                      )}
+                    </Space>
+                  ),
+                } satisfies ColumnsType<RoleView>[number],
+              ]
+            : []),
         ]}
       />
 
