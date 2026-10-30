@@ -80,7 +80,18 @@ export const suggestPlans = (date: string, force = false, hint?: string) =>
 export const previewGit = (from: string, to: string, filter: GitPreviewFilter = 'NEW') =>
   api.get<GitPreview>(`/worklog/git/preview?from=${from}&to=${to}&filter=${filter}`)
 export const importGit = (
-  items: { repoId: number; commitSha: string; subject: string; date: string; hours?: number }[],
+  items: {
+    repoId: number
+    commitSha: string
+    subject: string
+    date: string
+    hours?: number
+    /** 提交正文与改动规模：服务端合成条目详情 */
+    body?: string
+    filesChanged?: number
+    insertions?: number
+    deletions?: number
+  }[],
 ) => api.post<{ created: number; skipped: number }>('/worklog/git/import', { items })
 
 // ---- 日报 / 周报 ----

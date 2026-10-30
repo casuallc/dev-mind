@@ -72,6 +72,11 @@ export default function GitImportDrawer({ open, onCancel, onImported }: Props) {
         subject: c.subject,
         // 条目归属日 = 提交实际日期（本机时区），范围导入时跨天各归各日
         date: dayjs(c.committedAt).format('YYYY-MM-DD'),
+        // 提交正文与改动规模一并上送，落成条目详情
+        body: c.body,
+        filesChanged: c.filesChanged,
+        insertions: c.insertions,
+        deletions: c.deletions,
       }))
     if (items.length === 0) {
       message.info('请先勾选要导入的提交')

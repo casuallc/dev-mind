@@ -63,9 +63,11 @@ public class GitAutoImportService {
         return r;
     }
 
-    /** 条目归属日 = 提交实际日期（本机时区，与手动导入一致）；hours=null → 0 工时事后补。 */
+    /** 条目归属日 = 提交实际日期（本机时区，与手动导入一致）；hours=null → 0 工时事后补；
+     *  body/改动规模一并带入，由 importGit 合成条目详情。 */
     private static GitImportRequest.Item toItem(GitCommitView c) {
         return new GitImportRequest.Item(c.repoId(), c.sha(), c.subject(),
-                LocalDate.ofInstant(c.committedAt(), ZoneId.systemDefault()), null);
+                LocalDate.ofInstant(c.committedAt(), ZoneId.systemDefault()), null,
+                c.body(), c.filesChanged(), c.insertions(), c.deletions());
     }
 }

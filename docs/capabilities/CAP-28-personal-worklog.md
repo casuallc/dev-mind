@@ -51,7 +51,8 @@ CAP-06 通知中心（站内提醒）
   解析为空则不过滤并 warn（预览人工勾选兜底）；
   `GET /git/preview` 预览不落库（支持 `filter=NEW/IMPORTED/ALL(默认)` 按是否已导入过滤，
   诊断不受 filter 影响；前端弹窗默认传 NEW 且页内分页展示）→ `POST /git/import` 导入为 GIT 条目，
-  按 (user_id, repo_id, commit_sha) 幂等去重。
+  按 (user_id, repo_id, commit_sha) 幂等去重；提交正文（%b）与 numstat 改动规模随导入
+  合成条目详情 content（2026-10-30 补，此前只存题目致报表无正文素材）。
 - **FR-05 AI 日报**：cron（默认每日 18:30）或手动触发
   `POST /api/worklog/daily/generate`；汇总当日 git 扫描 + 条目 → one-shot 会话
   生成 `daily_reports` DRAFT（unique(user_id, work_date)，已存在则跳过）→

@@ -154,6 +154,7 @@ public class WorklogEntryService {
             e.setUserId(username);
             e.setWorkDate(item.date());
             e.setTitle(item.subject().length() > 256 ? item.subject().substring(0, 256) : item.subject());
+            e.setContent(composeGitContent(item));
             e.setEntryType(TYPE_DEV);
             e.setMinutes(WorklogEntryFile.toMinutes(item.hours() == null ? 0d : item.hours()));
             e.setSource(SOURCE_GIT);
@@ -168,8 +169,29 @@ public class WorklogEntryService {
         return new int[]{created, skipped};
     }
 
-    /** 已导入的 {@code repoId:commitSha} 集合（DB 直查；GitLogScanner 预览判重同用）。 */
-    public Set<String> importedShas(String username) {
+    /**
+     * GIT 条目详情 = 提交正文 + 改动规模行（原实现只存题目 subject，正文丢失致日报/周报无素材，
+     * 而扫描侧 CAP-41 起已带出 body 与 numstat）。正文超长按 4000 字符截断；正文与规模皆空 → null。
+     */
+    static String composeGitContent(GitImportRequest.Item item) {
+        StringBuilder sb = new StringBuilder();
+        if (item.body() != null && !item.body().isBlank()) {
+            String body = item.body().strip();
+            sb.append(body.length() > 4000 ? body.substring(0, 4000) : body);
+        }
+        if (item.filesChanged() != null && item.filesChanged() > 0) {
+            if (sb.length() > 0) {
+                sb.append("\n\n");
+            }
+            sb.append("改动规模：").append(item.filesChanged()).append(" 个文件，+")
+                    .append(item.insertions() == null ? 0 : item.insertions())
+                    .append(" -")
+                    .append(item.deletions() == null ? 0 : item.deletions());
+        }
+        return sb.length() == 0 ? null : sb.toString();
+    }
+
+    /** 已导入的 {@code repoId:commitSha} 集合（DB 直查；GitLogScanner 预览判重同用）。 */    public Set<String> importedShas(String username) {
         return entryRepo.findGitKeys(username).stream()
                 .map(row -> row[0] + ":" + row[1])
                 .collect(Collectors.toSet());

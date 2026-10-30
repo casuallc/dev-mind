@@ -26,7 +26,7 @@ class GitAutoImportServiceTest {
 
     private static GitCommitView commit(long repoId, String sha, boolean imported, Instant at) {
         return new GitCommitView(repoId, "repo" + repoId, sha, "n", "n@e", at,
-                "subject-" + sha, "", 1, 1, 0, imported);
+                "subject-" + sha, "body-" + sha, 2, 10, 3, imported);
     }
 
     private static GitAutoImportService service(GitPreviewResponse scan, AtomicReference<GitImportRequest> captured,
@@ -70,6 +70,10 @@ class GitAutoImportServiceTest {
         assertEquals("subject-aaa", it.subject());
         assertEquals(DAY, it.date());          // 归属日 = 提交时间本机日期
         assertNull(it.hours());                // hours=null → 0 工时事后补
+        assertEquals("body-aaa", it.body());   // 正文/改动规模随导入带入详情
+        assertEquals(2, it.filesChanged());
+        assertEquals(10, it.insertions());
+        assertEquals(3, it.deletions());
     }
 
     @Test
