@@ -3,7 +3,11 @@ export interface AuthUser {
   username: string
   displayName: string
   description?: string | null
+  /** 基础接口权限级别：ADMIN / DEVELOPER / VIEWER */
   role: string
+  /** 可管理角色编码（roles.code），菜单权限按它判定；旧数据缺省时同 role */
+  roleCode?: string | null
+  roleName?: string | null
   status: string
   createdAt?: string
 }
@@ -26,16 +30,23 @@ export interface MenuItem {
   retired: boolean
 }
 
+/** 可管理角色：baseRole 决定接口读写级别，menuKeys 决定可见菜单 */
+export interface RoleView {
+  code: string
+  name: string
+  description?: string | null
+  builtin: boolean
+  baseRole: string
+  userCount: number
+  menuKeys: string[]
+  createdAt?: string
+  updatedAt?: string
+}
+
 /** 当前用户可见菜单；knownPaths = 全量在架菜单路径（弱守卫区分非菜单页面） */
 export interface VisibleMenus {
   items: MenuItem[]
   knownPaths: string[]
-}
-
-/** 角色 → 可见 menuKey 集合（ADMIN 恒全量、不可编辑） */
-export interface MenuGrants {
-  roles: string[]
-  grants: Record<string, string[]>
 }
 
 /** CAP-35 我的第三方账号视图：一行 = 一个 ENABLED 平台实例 + 我的绑定状态（不含 secret 明文） */

@@ -51,6 +51,9 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/login", "/api/auth/refresh", "/api/auth/logout",
                                 "/api/health", "/h2-console/**", "/ws/**").permitAll()
                         .requestMatchers("/api/auth/users", "/api/auth/users/**").hasRole("ADMIN")
+                        .requestMatchers("/api/auth/roles", "/api/auth/roles/**").hasRole("ADMIN")
+                        // 角色菜单目录与授权矩阵仅 ADMIN；当前用户可见菜单 /api/auth/menus 仍登录即可
+                        .requestMatchers("/api/auth/menus/catalog", "/api/auth/menus/grants").hasRole("ADMIN")
                         .requestMatchers("/api/auth/change-password").authenticated()
                         // CAP-20：API Key 管理仅 ADMIN（开放面 /open-api/** 由 OpenApiAuthFilter 独立认证，不走 JWT）
                         .requestMatchers("/api/open-keys", "/api/open-keys/**").hasRole("ADMIN")

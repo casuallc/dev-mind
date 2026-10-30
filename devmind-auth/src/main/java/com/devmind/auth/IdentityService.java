@@ -49,6 +49,7 @@ public class IdentityService {
             u.setUsername(LOCAL_USER);
             u.setDisplayName("本机用户");
             u.setRole(UserEntity.ROLE_ADMIN);
+            u.setRoleCode(UserEntity.ROLE_ADMIN);
             u.setStatus(UserEntity.STATUS_ACTIVE);
             u.setCreatedAt(Instant.now());
             userRepo.save(u);
@@ -63,6 +64,7 @@ public class IdentityService {
             admin.setUsername("admin");
             admin.setDisplayName("管理员");
             admin.setRole(UserEntity.ROLE_ADMIN);
+            admin.setRoleCode(UserEntity.ROLE_ADMIN);
             admin.setStatus(UserEntity.STATUS_ACTIVE);
             admin.setPasswordHash(passwordEncoder.encode(props.getAdminPassword()));
             admin.setCreatedAt(Instant.now());
@@ -71,7 +73,7 @@ public class IdentityService {
         }
     }
 
-    /** 旧枚举值迁移：OWNER→ADMIN、MEMBER→DEVELOPER（角色为 String 列，直接改值） */
+    /** 旧枚举值迁移：OWNER→ADMIN、MEMBER→DEVELOPER；role_code 为空时按基础权限回填。 */
     private void migrateLegacyRoles() {
         for (UserEntity u : userRepo.findAll()) {
             String mapped = switch (u.getRole() == null ? "" : u.getRole()) {
@@ -82,11 +84,15 @@ public class IdentityService {
             };
             if (mapped != null) {
                 u.setRole(mapped);
+                u.setRoleCode(mapped);
                 if (u.getStatus() == null) {
                     u.setStatus(UserEntity.STATUS_ACTIVE);
                 }
                 userRepo.save(u);
                 log.info("用户角色已迁移: {} -> {}", u.getUsername(), mapped);
+            } else if (u.getRoleCode() == null || u.getRoleCode().isBlank()) {
+                u.setRoleCode(u.getRole());
+                userRepo.save(u);
             }
         }
     }

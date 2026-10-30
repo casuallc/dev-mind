@@ -73,6 +73,13 @@
       "suite": "regression",
       "owner": "auth",
       "cap": "CAP-61"
+    },
+    {
+      "id": "regression.role-management",
+      "test": "Regression.test_role_management_drives_user_permissions",
+      "suite": "regression",
+      "owner": "auth",
+      "cap": "CAP-102"
     }
   ]
 }

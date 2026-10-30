@@ -3,6 +3,7 @@ package com.devmind.auth;
 import com.devmind.auth.dto.CreateUserRequest;
 import com.devmind.auth.dto.UpdateUserRequest;
 import com.devmind.auth.dto.UserView;
+import com.devmind.auth.model.RoleEntity;
 import com.devmind.auth.model.UserEntity;
 import com.devmind.auth.repo.RefreshTokenRepository;
 import com.devmind.auth.repo.UserRepository;
@@ -26,8 +27,6 @@ import java.util.Set;
 @Service
 public class UserAdminService {
 
-    private static final Set<String> ROLES = Set.of(UserEntity.ROLE_ADMIN, UserEntity.ROLE_DEVELOPER,
-            UserEntity.ROLE_VIEWER);
     private static final Set<String> STATUSES = Set.of(UserEntity.STATUS_ACTIVE, UserEntity.STATUS_DISABLED);
     /** CAP-42 FR-07：username 作 runner 工作区目录名（与 RunnerWorkspace.SAFE_ID 同口径） */
     private static final java.util.regex.Pattern USERNAME_PATTERN =
@@ -41,13 +40,16 @@ public class UserAdminService {
     private final RefreshTokenRepository refreshTokenRepo;
     private final PasswordEncoder passwordEncoder;
     private final AuthService authService;
+    private final RoleService roleService;
 
     public UserAdminService(UserRepository userRepo, RefreshTokenRepository refreshTokenRepo,
-                            PasswordEncoder passwordEncoder, AuthService authService) {
+                            PasswordEncoder passwordEncoder, AuthService authService,
+                            RoleService roleService) {
         this.userRepo = userRepo;
         this.refreshTokenRepo = refreshTokenRepo;
         this.passwordEncoder = passwordEncoder;
         this.authService = authService;
+        this.roleService = roleService;
     }
 
     public List<UserView> list() {
@@ -74,7 +76,9 @@ public class UserAdminService {
         u.setDisplayName(req.displayName() == null || req.displayName().isBlank()
                 ? username : req.displayName().trim());
         u.setDescription(trimToNull(req.description()));
-        u.setRole(requireRole(req.role()));
+        RoleEntity role = roleService.require(req.role());
+        u.setRole(role.getBaseRole());
+        u.setRoleCode(role.getCode());
         u.setStatus(UserEntity.STATUS_ACTIVE);
         u.setPasswordHash(passwordEncoder.encode(req.password()));
         u.setCreatedAt(Instant.now());
@@ -91,9 +95,10 @@ public class UserAdminService {
             u.setDescription(trimToNull(req.description()));
         }
         if (req.role() != null && !req.role().isBlank()) {
-            String role = requireRole(req.role());
-            guardLastAdmin(u, role, u.getStatus());
-            u.setRole(role);
+            RoleEntity role = roleService.require(req.role());
+            guardLastAdmin(u, role.getBaseRole(), u.getStatus());
+            u.setRole(role.getBaseRole());
+            u.setRoleCode(role.getCode());
         }
         if (req.status() != null && !req.status().isBlank()) {
             String status = req.status().trim().toUpperCase();
@@ -156,14 +161,6 @@ public class UserAdminService {
         }
         String t = s.trim();
         return t.isEmpty() ? null : t;
-    }
-
-    private String requireRole(String role) {
-        String r = role.trim().toUpperCase();
-        if (!ROLES.contains(r)) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "非法角色: " + role + "（可选 ADMIN/DEVELOPER/VIEWER）");
-        }
-        return r;
     }
 
     /** 目标用户若正从「可登录 ADMIN」变成不是，要求系统里还剩另一个可登录 ADMIN */

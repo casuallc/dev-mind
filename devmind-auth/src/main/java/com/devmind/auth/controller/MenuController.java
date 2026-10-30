@@ -37,7 +37,7 @@ public class MenuController {
         if (principal == null) {
             throw new DevMindException(ErrorCode.UNAUTHORIZED, "未登录");
         }
-        return new VisibleMenusView(menuService.visibleMenus(principal.role()), menuService.knownPaths());
+        return new VisibleMenusView(menuService.visibleMenus(principal.roleCode()), menuService.knownPaths());
     }
 
     @GetMapping("/catalog")

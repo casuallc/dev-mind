@@ -5,12 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../../shared/api/client'
 import { logout } from '../api'
 import { clearAuth, getRefreshToken, getUserSnapshot, subscribeAuth } from '../authStore'
-
-const ROLE_LABELS: Record<string, { color: string; text: string }> = {
-  ADMIN: { color: 'red', text: 'ADMIN' },
-  DEVELOPER: { color: 'blue', text: 'DEVELOPER' },
-  VIEWER: { color: 'default', text: 'VIEWER' },
-}
+import { baseRoleMeta, displayRole } from '../roleMeta'
 
 interface AboutInfo {
   name: string
@@ -32,7 +27,7 @@ export default function UserMenu() {
   const [about, setAbout] = useState<AboutInfo | null>(null)
 
   if (!user) return null
-  const role = ROLE_LABELS[user.role] ?? { color: 'default', text: user.role }
+  const role = baseRoleMeta(user.role)
   const onLogout = async () => {
     try {
       await logout(getRefreshToken())
@@ -68,7 +63,7 @@ export default function UserMenu() {
         <Space style={{ cursor: 'pointer' }}>
           <UserOutlined />
           <Typography.Text>{user.displayName || user.username}</Typography.Text>
-          <Tag color={role.color}>{role.text}</Tag>
+          <Tag color={role.color}>{displayRole(user)}</Tag>
         </Space>
       </Dropdown>
       <Modal

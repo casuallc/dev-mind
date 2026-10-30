@@ -52,8 +52,7 @@ public final class MenuCatalog {
             new Item("admin.models", "模型接入", "/admin/models", MenuItemEntity.ZONE_ADMIN, "系统", "thunderbolt", 170),
             new Item("admin.keys", "API 密钥", "/admin/keys", MenuItemEntity.ZONE_ADMIN, "系统", "key", 180),
             new Item("admin.users", "用户管理", "/admin/users", MenuItemEntity.ZONE_ADMIN, "系统", "safety-certificate", 190),
-            new Item("admin.notifications", "通知管理", "/admin/notifications", MenuItemEntity.ZONE_ADMIN, "系统", "bell", 200),
-            new Item("admin.menus", "菜单权限", "/admin/menus", MenuItemEntity.ZONE_ADMIN, "系统", "menu", 210)
+            new Item("admin.notifications", "通知管理", "/admin/notifications", MenuItemEntity.ZONE_ADMIN, "系统", "bell", 200)
     );
 
     private MenuCatalog() {

@@ -8,8 +8,9 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 
 /**
- * users 表（CAP-01）：登录账户 + 三角色粗粒度 RBAC（单角色列）。
- * role：ADMIN（全权限+用户管理）/ DEVELOPER（业务读写）/ VIEWER（只读）。
+ * users 表（CAP-01）：登录账户 + 基础权限级别（单角色列）。
+ * role：ADMIN（全权限+用户管理）/ DEVELOPER（业务读写）/ VIEWER（只读），由所分配角色的 base_role 决定；
+ * roleCode：所分配的可管理角色编码（roles.code），菜单权限按它判定。
  * 无密码的用户（如系统身份 local）不可登录。
  */
 @Entity
@@ -41,9 +42,13 @@ public class UserEntity {
     @Column(name = "password_hash", length = 128)
     private String passwordHash;
 
-    /** ADMIN / DEVELOPER / VIEWER */
+    /** ADMIN / DEVELOPER / VIEWER（角色对应的基础接口权限级别） */
     @Column(length = 32)
     private String role;
+
+    /** 所分配角色的编码（roles.code）；老数据启动时回填为 role */
+    @Column(name = "role_code", length = 32)
+    private String roleCode;
 
     /** ACTIVE / DISABLED */
     @Column(length = 16)
@@ -68,6 +73,8 @@ public class UserEntity {
     public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
     public String getRole() { return role; }
     public void setRole(String role) { this.role = role; }
+    public String getRoleCode() { return roleCode; }
+    public void setRoleCode(String roleCode) { this.roleCode = roleCode; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public Instant getCreatedAt() { return createdAt; }

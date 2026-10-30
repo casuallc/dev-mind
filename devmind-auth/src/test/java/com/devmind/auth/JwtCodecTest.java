@@ -28,6 +28,17 @@ class JwtCodecTest {
         assertTrue(claims.isPresent());
         assertEquals("alice", claims.get().subject());
         assertEquals("ADMIN", claims.get().role());
+        // 旧调用不带角色编码时退化为 role
+        assertEquals("ADMIN", claims.get().roleCode());
+    }
+
+    @Test
+    void 签发可携带独立角色编码() {
+        JwtCodec c = codec();
+        String token = c.issue("alice", "DEVELOPER", "QA_LEAD", Instant.now().plusSeconds(3600));
+        JwtCodec.JwtClaims claims = c.verify(token).orElseThrow();
+        assertEquals("DEVELOPER", claims.role());
+        assertEquals("QA_LEAD", claims.roleCode());
     }
 
     @Test

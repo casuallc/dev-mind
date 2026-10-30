@@ -33,7 +33,7 @@ class Regression(unittest.TestCase):
         from support import Api
         catalog = self.api.request("GET", "/auth/menus/catalog")
         keys = {item["menuKey"] for item in catalog}
-        self.assertIn("admin.menus", keys)
+        self.assertIn("admin.users", keys)
         self.assertIn("project.tests", keys)
         original = self.api.request("GET", "/auth/menus/grants")["grants"]["DEVELOPER"]
         self.addCleanup(self.api.request, "PUT", "/auth/menus/grants",
@@ -64,11 +64,86 @@ class Regression(unittest.TestCase):
         self.assertIn("admin.dashboard",
                       self.api.request("GET", "/auth/menus/grants")["grants"]["DEVELOPER"])
         admin_keys = {m["menuKey"] for m in self.api.request("GET", "/auth/menus")["items"]}
-        self.assertIn("admin.menus", admin_keys)
+        self.assertIn("admin.users", admin_keys)
+        self.assertNotIn("admin.menus", admin_keys)
 
         self.api.request("PUT", "/auth/menus/grants", {"role": "ADMIN", "menuKeys": []}, expected=400)
         self.api.request("PUT", "/auth/menus/grants", {"role": "DEVELOPER", "menuKeys": ["not.exists"]},
                          expected=400)
+
+    def _ensure_user_absent(self, username):
+        for user in self.api.request("GET", "/auth/users"):
+            if user["username"] == username:
+                self.api.request("DELETE", "/auth/users/" + user["id"])
+
+    def _ensure_role_absent(self, code):
+        if code in {role["code"] for role in self.api.request("GET", "/auth/roles")}:
+            self.api.request("DELETE", "/auth/roles/" + code)
+
+    def test_role_management_drives_user_permissions(self):
+        from support import Api
+        code = "E2E_" + uuid.uuid4().hex[:8].upper()
+        name = "E2E 只读角色"
+        role = self.api.request("POST", "/auth/roles", {"code": code.lower(), "name": name,
+                                                       "description": "临时角色", "baseRole": "VIEWER"})
+        self.addCleanup(self._ensure_role_absent, code)
+        self.assertEqual(code, role["code"])
+        self.assertFalse(role["builtin"])
+        self.assertEqual("VIEWER", role["baseRole"])
+        self.assertEqual(0, role["userCount"])
+        self.assertIn("top.home", role["menuKeys"])
+        self.assertIn("project.tests", role["menuKeys"])
+        self.assertFalse([key for key in role["menuKeys"] if key.startswith("admin.")])
+
+        self.api.request("POST", "/auth/roles", {"code": code, "name": name, "baseRole": "VIEWER"},
+                         expected=409)
+        self.api.request("POST", "/auth/roles", {"code": "E2E_BAD_" + uuid.uuid4().hex[:6].upper(),
+                                                 "name": "x", "baseRole": "ADMIN"}, expected=400)
+
+        username = "e2e-role-" + uuid.uuid4().hex[:10]
+        password = "e2e-" + uuid.uuid4().hex
+        user = self.api.request("POST", "/auth/users", {"username": username, "password": password,
+                                                        "role": code})
+        self.addCleanup(self._ensure_user_absent, username)
+        self.assertEqual(code, user["roleCode"])
+        self.assertEqual(name, user["roleName"])
+        self.assertEqual("VIEWER", user["role"])
+
+        client = Api(self.api.base)
+        client.login(username, password)
+        client.request("GET", "/auth/roles", expected=403)
+        client.request("GET", "/auth/users", expected=403)
+        client.request("GET", "/auth/menus/catalog", expected=403)
+        client.request("PUT", "/auth/menus/grants", {"role": code, "menuKeys": []}, expected=403)
+
+        initial = {m["menuKey"] for m in client.request("GET", "/auth/menus")["items"]}
+        self.assertIn("top.home", initial)
+        self.assertNotIn("admin.dashboard", initial)
+
+        self.api.request("PUT", "/auth/menus/grants",
+                         {"role": code, "menuKeys": ["top.home", "admin.dashboard"]})
+        after = {m["menuKey"] for m in client.request("GET", "/auth/menus")["items"]}
+        self.assertEqual({"top.home", "admin.dashboard"}, after)
+
+        updated = self.api.request("PUT", "/auth/roles/" + code,
+                                   {"name": name, "baseRole": "DEVELOPER"})
+        self.assertEqual("DEVELOPER", updated["baseRole"])
+        self.assertEqual(1, updated["userCount"])
+
+        client.login(username, password)
+        me = client.request("GET", "/auth/me")
+        self.assertEqual("DEVELOPER", me["role"])
+        self.assertEqual(code, me["roleCode"])
+        self.assertEqual(name, me["roleName"])
+
+        self.api.request("DELETE", "/auth/roles/" + code, expected=400)
+        self.api.request("DELETE", "/auth/users/" + user["id"])
+        self.api.request("DELETE", "/auth/roles/" + code)
+        self.assertNotIn(code, {role["code"] for role in self.api.request("GET", "/auth/roles")})
+        self.assertNotIn(code, self.api.request("GET", "/auth/menus/grants")["roles"])
+
+        self.api.request("PUT", "/auth/roles/ADMIN", {"name": "x"}, expected=400)
+        self.api.request("DELETE", "/auth/roles/ADMIN", expected=400)
 
     def test_project_lifecycle(self):
         path = self.workspace / ("project-" + uuid.uuid4().hex)

@@ -30,7 +30,7 @@ export default function RequireAdmin({ children }: { children: ReactNode }) {
       <Result
         status="403"
         title="无权限"
-        subTitle="当前账号没有后台菜单权限，请联系管理员在「菜单权限」中授权"
+        subTitle="当前账号没有后台菜单权限，请联系管理员在「用户管理 → 角色」中授权"
         extra={
           <Button type="primary" onClick={() => navigate('/home')}>
             返回工作台

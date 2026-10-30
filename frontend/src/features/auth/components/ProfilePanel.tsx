@@ -1,14 +1,9 @@
-import { Button, Descriptions, Divider, Form, Input, Tag, Typography, message } from 'antd'
+import { Button, Descriptions, Divider, Form, Input, Space, Tag, Typography, message } from 'antd'
 import { useState, useSyncExternalStore } from 'react'
 import { changePassword } from '../api'
 import { getUserSnapshot, subscribeAuth } from '../authStore'
+import { baseRoleMeta, displayRole } from '../roleMeta'
 import { showError } from '../../../shared/utils/showError'
-
-const ROLE_LABELS: Record<string, { color: string; text: string }> = {
-  ADMIN: { color: 'red', text: 'ADMIN' },
-  DEVELOPER: { color: 'blue', text: 'DEVELOPER' },
-  VIEWER: { color: 'default', text: 'VIEWER' },
-}
 
 /** 设置页「个人信息」视图：账号信息只读展示 + 修改密码（原 UserMenu 弹窗搬入）。 */
 export default function ProfilePanel() {
@@ -30,11 +25,11 @@ export default function ProfilePanel() {
   }
 
   if (!user) return null
-  const role = ROLE_LABELS[user.role] ?? { color: 'default', text: user.role }
+  const role = baseRoleMeta(user.role)
   return (
     <div style={{ maxWidth: 480 }}>
       <Typography.Paragraph type="secondary">
-        你的账号信息（用户名 / 显示名 / 描述 / 角色）与登录密码修改入口；显示名与描述由管理员在用户管理中维护。
+        你的账号信息（用户名 / 显示名 / 描述 / 角色）与登录密码修改入口；显示名、描述与角色由管理员在用户管理中维护。
       </Typography.Paragraph>
       <Descriptions
         column={1}
@@ -42,7 +37,16 @@ export default function ProfilePanel() {
           { key: 'username', label: '用户名', children: user.username },
           { key: 'displayName', label: '显示名', children: user.displayName || '—' },
           { key: 'description', label: '描述', children: user.description || '—' },
-          { key: 'role', label: '角色', children: <Tag color={role.color}>{role.text}</Tag> },
+          {
+            key: 'role',
+            label: '角色',
+            children: (
+              <Space size={8}>
+                <Tag color={role.color}>{displayRole(user)}</Tag>
+                <Typography.Text type="secondary">{role.text}</Typography.Text>
+              </Space>
+            ),
+          },
         ]}
       />
       <Divider orientation="left" orientationMargin={0}>修改密码</Divider>

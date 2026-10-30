@@ -38,7 +38,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String token = resolveToken(request);
         if (token != null) {
             jwtCodec.verify(token).ifPresent(claims -> {
-                DevMindPrincipal principal = new DevMindPrincipal(claims.subject(), claims.role());
+                DevMindPrincipal principal = new DevMindPrincipal(claims.subject(), claims.role(),
+                        claims.roleCode());
                 var auth = new UsernamePasswordAuthenticationToken(principal, null,
                         List.of(new SimpleGrantedAuthority("ROLE_" + claims.role())));
                 SecurityContextHolder.getContext().setAuthentication(auth);

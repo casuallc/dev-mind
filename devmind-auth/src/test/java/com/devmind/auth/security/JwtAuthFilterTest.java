@@ -46,6 +46,11 @@ class JwtAuthFilterTest {
         return auth == null ? null : ((DevMindPrincipal) auth.getPrincipal()).username();
     }
 
+    private String currentRoleCode() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth == null ? null : ((DevMindPrincipal) auth.getPrincipal()).roleCode();
+    }
+
     @Test
     void headerBearer仍然优先() throws Exception {
         JwtCodec c = codec();
@@ -59,11 +64,12 @@ class JwtAuthFilterTest {
     @Test
     void get请求支持accessToken参数回退() throws Exception {
         JwtCodec c = codec();
-        String token = c.issue("bob", "DEVELOPER", Instant.now().plusSeconds(3600));
+        String token = c.issue("bob", "DEVELOPER", "QA_LEAD", Instant.now().plusSeconds(3600));
         MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/attachments/x/raw");
         req.setParameter("access_token", token);
         run(new JwtAuthFilter(c), req);
         assertEquals("bob", currentUser());
+        assertEquals("QA_LEAD", currentRoleCode());
     }
 
     @Test

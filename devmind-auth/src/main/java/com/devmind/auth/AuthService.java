@@ -4,8 +4,10 @@ import com.devmind.auth.config.AuthProperties;
 import com.devmind.auth.dto.LoginResponse;
 import com.devmind.auth.dto.UserView;
 import com.devmind.auth.model.RefreshTokenEntity;
+import com.devmind.auth.model.RoleEntity;
 import com.devmind.auth.model.UserEntity;
 import com.devmind.auth.repo.RefreshTokenRepository;
+import com.devmind.auth.repo.RoleRepository;
 import com.devmind.auth.repo.UserRepository;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
@@ -32,14 +34,17 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtCodec jwtCodec;
     private final AuthProperties props;
+    private final RoleRepository roleRepo;
 
     public AuthService(UserRepository userRepo, RefreshTokenRepository refreshRepo,
-                       PasswordEncoder passwordEncoder, JwtCodec jwtCodec, AuthProperties props) {
+                       PasswordEncoder passwordEncoder, JwtCodec jwtCodec, AuthProperties props,
+                       RoleRepository roleRepo) {
         this.userRepo = userRepo;
         this.refreshRepo = refreshRepo;
         this.passwordEncoder = passwordEncoder;
         this.jwtCodec = jwtCodec;
         this.props = props;
+        this.roleRepo = roleRepo;
     }
 
     @Transactional
@@ -78,12 +83,19 @@ public class AuthService {
     }
 
     public UserView toView(UserEntity u) {
+        String roleCode = u.getRoleCode() == null || u.getRoleCode().isBlank()
+                ? u.getRole() : u.getRoleCode();
+        String roleName = roleRepo.findById(roleCode)
+                .map(RoleEntity::getName)
+                .orElse(roleCode);
         return new UserView(u.getId(), u.getUsername(), u.getDisplayName(), u.getDescription(), u.getRole(),
-                u.getStatus(), u.getCreatedAt());
+                roleCode, roleName, u.getStatus(), u.getCreatedAt());
     }
 
     private LoginResponse issueTokens(UserEntity u) {
-        String access = jwtCodec.issue(u.getUsername(), u.getRole(),
+        String roleCode = u.getRoleCode() == null || u.getRoleCode().isBlank()
+                ? u.getRole() : u.getRoleCode();
+        String access = jwtCodec.issue(u.getUsername(), u.getRole(), roleCode,
                 Instant.now().plus(props.getAccessTtl()));
         byte[] raw = new byte[24];
         RANDOM.nextBytes(raw);

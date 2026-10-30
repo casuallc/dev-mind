@@ -3,10 +3,11 @@ package com.devmind.auth.menu;
 import com.devmind.auth.dto.MenuGrantsView;
 import com.devmind.auth.dto.MenuItemView;
 import com.devmind.auth.model.MenuItemEntity;
+import com.devmind.auth.model.RoleEntity;
 import com.devmind.auth.model.RoleMenuGrantEntity;
-import com.devmind.auth.model.UserEntity;
 import com.devmind.auth.repo.MenuItemRepository;
 import com.devmind.auth.repo.RoleMenuGrantRepository;
+import com.devmind.auth.repo.RoleRepository;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import org.slf4j.Logger;
@@ -20,21 +21,20 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * CAP-61 菜单目录同步与角色可见性判定。
+ * CAP-61 菜单目录同步与角色可见性判定；CAP-102 起角色清单来自 roles 表（支持自定义角色）。
  * 菜单权限是展示层管控，不是安全边界：后端接口鉴权仍由 CAP-01 过滤器链独立成立。
  */
 @Service
 public class MenuPermissionService {
 
     private static final Logger log = LoggerFactory.getLogger(MenuPermissionService.class);
-    private static final List<String> ROLES = List.of(UserEntity.ROLE_ADMIN,
-            UserEntity.ROLE_DEVELOPER, UserEntity.ROLE_VIEWER);
     private static final Comparator<MenuItemEntity> CATALOG_ORDER =
             Comparator.comparingInt((MenuItemEntity e) -> zoneRank(e.getZone()))
                     .thenComparingInt(MenuItemEntity::getSortNo)
@@ -42,10 +42,13 @@ public class MenuPermissionService {
 
     private final MenuItemRepository menuRepo;
     private final RoleMenuGrantRepository grantRepo;
+    private final RoleRepository roleRepo;
 
-    public MenuPermissionService(MenuItemRepository menuRepo, RoleMenuGrantRepository grantRepo) {
+    public MenuPermissionService(MenuItemRepository menuRepo, RoleMenuGrantRepository grantRepo,
+                                 RoleRepository roleRepo) {
         this.menuRepo = menuRepo;
         this.grantRepo = grantRepo;
+        this.roleRepo = roleRepo;
     }
 
     /**
@@ -106,13 +109,17 @@ public class MenuPermissionService {
         return menuRepo.findAll().stream().sorted(CATALOG_ORDER).map(this::toView).toList();
     }
 
-    /** FR-03 判定链：ADMIN 短路全量在架目录；其他角色取目录 ∩ 授权。 */
-    public List<MenuItemView> visibleMenus(String role) {
+    /** FR-03 判定链：内置 ADMIN 短路全量在架目录；其他角色取目录 ∩ 授权。 */
+    public List<MenuItemView> visibleMenus(String roleCode) {
         List<MenuItemView> active = catalog().stream().filter(m -> !m.retired()).toList();
-        if (UserEntity.ROLE_ADMIN.equals(role)) {
+        if (RoleEntity.CODE_ADMIN.equals(normalize(roleCode))) {
             return active;
         }
-        Set<String> granted = grantRepo.findByRole(role).stream()
+        String code = normalize(roleCode);
+        if (code.isEmpty()) {
+            return List.of();
+        }
+        Set<String> granted = grantRepo.findByRole(code).stream()
                 .map(RoleMenuGrantEntity::getMenuKey)
                 .collect(Collectors.toSet());
         return active.stream().filter(m -> granted.contains(m.menuKey())).toList();
@@ -124,28 +131,34 @@ public class MenuPermissionService {
     }
 
     public MenuGrantsView grants() {
+        List<String> roles = roles();
         Map<String, Set<String>> byRole = new LinkedHashMap<>();
-        for (String role : ROLES) {
+        for (String role : roles) {
             byRole.put(role, new LinkedHashSet<>());
         }
         for (RoleMenuGrantEntity grant : grantRepo.findAll()) {
-            byRole.computeIfAbsent(grant.getRole(), k -> new LinkedHashSet<>()).add(grant.getMenuKey());
+            Set<String> keys = byRole.get(grant.getRole());
+            if (keys != null) {
+                keys.add(grant.getMenuKey());
+            }
         }
         // ADMIN 恒全量（短路矩阵），显式回全量使管理页有权威对照
-        byRole.put(UserEntity.ROLE_ADMIN, catalog().stream().filter(m -> !m.retired())
+        byRole.put(RoleEntity.CODE_ADMIN, catalog().stream().filter(m -> !m.retired())
                 .map(MenuItemView::menuKey).collect(Collectors.toCollection(LinkedHashSet::new)));
         Map<String, List<String>> grants = new LinkedHashMap<>();
         byRole.forEach((role, keys) -> grants.put(role, new ArrayList<>(keys)));
-        return new MenuGrantsView(ROLES, grants);
+        return new MenuGrantsView(roles, grants);
     }
 
-    /** FR-04 全量覆盖某角色授权：先删后插，幂等；ADMIN 恒全见不允许修改。 */
+    /** FR-04 全量覆盖某角色授权：先删后插，幂等；内置 ADMIN 恒全见不允许修改。 */
     @Transactional
     public MenuGrantsView saveGrants(String role, List<String> menuKeys) {
-        String normalized = role == null ? "" : role.trim().toUpperCase();
-        if (!UserEntity.ROLE_DEVELOPER.equals(normalized) && !UserEntity.ROLE_VIEWER.equals(normalized)) {
+        String normalized = normalize(role);
+        RoleEntity roleEntity = roleRepo.findById(normalized)
+                .orElseThrow(() -> new DevMindException(ErrorCode.BAD_REQUEST, "角色不存在或已删除: " + role));
+        if (RoleEntity.CODE_ADMIN.equals(roleEntity.getCode())) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
-                    "仅支持调整 DEVELOPER / VIEWER 的菜单授权（ADMIN 恒见全部菜单）");
+                    "内置 ADMIN 角色恒见全部菜单，不支持调整授权");
         }
         Set<String> activeKeys = catalog().stream().filter(m -> !m.retired())
                 .map(MenuItemView::menuKey).collect(Collectors.toSet());
@@ -169,11 +182,12 @@ public class MenuPermissionService {
     }
 
     private List<RoleMenuGrantEntity> defaultGrants(MenuCatalog.Item item) {
-        List<String> roles = MenuItemEntity.ZONE_ADMIN.equals(item.zone())
-                ? List.of(UserEntity.ROLE_ADMIN)
-                : ROLES;
+        List<String> roles = roles();
+        List<String> targetRoles = MenuItemEntity.ZONE_ADMIN.equals(item.zone())
+                ? List.of(RoleEntity.CODE_ADMIN)
+                : roles;
         Instant now = Instant.now();
-        return roles.stream().map(role -> {
+        return targetRoles.stream().map(role -> {
             RoleMenuGrantEntity grant = new RoleMenuGrantEntity();
             grant.setRole(role);
             grant.setMenuKey(item.menuKey());
@@ -182,9 +196,18 @@ public class MenuPermissionService {
         }).toList();
     }
 
+    private List<String> roles() {
+        return roleRepo.findAllByOrderByBuiltinDescCodeAsc().stream()
+                .map(RoleEntity::getCode).toList();
+    }
+
     private MenuItemView toView(MenuItemEntity e) {
         return new MenuItemView(e.getMenuKey(), e.getTitle(), e.getPath(), e.getZone(),
                 e.getGroupName(), e.getIcon(), e.getSortNo(), e.isRetired());
+    }
+
+    private static String normalize(String role) {
+        return role == null ? "" : role.trim().toUpperCase(Locale.ROOT);
     }
 
     private static int zoneRank(String zone) {

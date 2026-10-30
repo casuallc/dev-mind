@@ -32,7 +32,7 @@ export default function MenuAccessGuard({ children }: { children: ReactNode }) {
     <Result
       status="403"
       title="无权限访问"
-      subTitle="当前账号没有该菜单权限，请联系管理员在「菜单权限」中调整"
+      subTitle="当前账号没有该菜单权限，请联系管理员在「用户管理 → 角色」中调整"
       extra={
         <Button type="primary" onClick={() => navigate(fallback, { replace: true })}>
           {home ? '返回工作台' : '返回可用页面'}

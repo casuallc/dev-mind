@@ -5,7 +5,7 @@
 > - 校验登记：`python tests/e2e/run.py --check`；查看正式用例：`python tests/e2e/run.py --list`
 > - 当前代码隔离回归：先 `mvn -q install -DskipTests`，再 `python tests/e2e/run.py --suite regression --isolated`
 > - 共享实例只读冒烟：提供 `E2E_TOKEN` 或 `E2E_USER` + `E2E_PASSWORD`，运行 `python tests/e2e/run.py --suite smoke --base <含/api的地址>`
-> - JUnit 报告统一为 `tmp/e2e/junit.xml`；当前 12 个正式用例（smoke 5、隔离回归 4、contract 3）。
+> - JUnit 报告统一为 `tmp/e2e/junit.xml`；当前 11 个正式用例（smoke 5、隔离回归 3、contract 3）。
 > - 历史脚本共 110 个，登记在 `e2e/legacy.json`；Python 静态索引见 [e2e/python-inventory.md](e2e/python-inventory.md)。
 > - [194 项目接入步骤](../docs/guides/platform-self-deploy-194.md#统一-e2e-套件接入)
 
@@ -44,7 +44,7 @@ tests/
 | 套件 | 用例 | 说明 |
 |------|------|------|
 | smoke | health / anonymous / identity / projects / changelog | 只读冒烟，可打共享实例；不写业务数据 |
-| regression | project-lifecycle / menu-grants / knowledge-permissions / knowledge-published-versions | 写操作回归，必须 `--isolated` 起私有实例 |
+| regression | project-lifecycle / menu-grants / role-management | 写操作回归，必须 `--isolated` 起私有实例 |
 | contract | copilot document-metadata / operation-inventory / operation-contracts | 契约快照；`tests/legacy/api/cap76_tools_contract.py` 为兼容入口，内部转调统一入口 |
 
 ## 起独立实例跑 E2E（不碰本机 dev 实例与库）

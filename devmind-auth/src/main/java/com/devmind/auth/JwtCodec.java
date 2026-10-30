@@ -29,7 +29,7 @@ import java.util.Optional;
 @Component
 public class JwtCodec {
 
-    public record JwtClaims(String subject, String role, long expiresAt) {}
+    public record JwtClaims(String subject, String role, String roleCode, long expiresAt) {}
 
     private static final Logger log = LoggerFactory.getLogger(JwtCodec.class);
     private static final Base64.Encoder B64 = Base64.getUrlEncoder().withoutPadding();
@@ -50,13 +50,19 @@ public class JwtCodec {
         this.key = loadKey();
     }
 
-    /** 签发：sub + role + jti（随机，保证同秒多次签发不撞车）+ 绝对过期时刻。 */
+    /** 兼容旧调用：未提供角色编码时退化为基础权限码。 */
     public String issue(String subject, String role, Instant expiresAt) {
+        return issue(subject, role, role, expiresAt);
+    }
+
+    /** 签发：sub + role（基础权限）+ roleCode（可管理角色）+ jti + 绝对过期时刻。 */
+    public String issue(String subject, String role, String roleCode, Instant expiresAt) {
         byte[] jti = new byte[8];
         new SecureRandom().nextBytes(jti);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("sub", subject);
         payload.put("role", role);
+        payload.put("roleCode", roleCode == null || roleCode.isBlank() ? role : roleCode);
         payload.put("jti", HexFormat.of().formatHex(jti));
         payload.put("iat", Instant.now().getEpochSecond());
         payload.put("exp", expiresAt.getEpochSecond());
@@ -83,6 +89,7 @@ public class JwtCodec {
             Map<String, Object> payload = mapper.readValue(B64D.decode(parts[1]), Map.class);
             Object sub = payload.get("sub");
             Object role = payload.get("role");
+            Object roleCode = payload.get("roleCode");
             Object exp = payload.get("exp");
             if (sub == null || exp == null) {
                 return Optional.empty();
@@ -91,7 +98,9 @@ public class JwtCodec {
             if (Instant.ofEpochSecond(expSec).isBefore(Instant.now())) {
                 return Optional.empty();
             }
-            return Optional.of(new JwtClaims(sub.toString(), role == null ? null : role.toString(), expSec));
+            String roleValue = role == null ? null : role.toString();
+            String roleCodeValue = roleCode == null ? roleValue : roleCode.toString();
+            return Optional.of(new JwtClaims(sub.toString(), roleValue, roleCodeValue, expSec));
         } catch (Exception e) {
             return Optional.empty();
         }

@@ -56,7 +56,6 @@ import ChatsBoard from '../features/chat/pages/ChatsBoard'
 import AttachmentsPage from '../features/attachments/pages/AttachmentsPage'
 import LoginPage from '../features/auth/pages/LoginPage'
 import UserManagementPage from '../features/auth/pages/UserManagementPage'
-import MenuPermissionsPage from '../features/auth/pages/MenuPermissionsPage'
 import SettingsPage from '../features/auth/pages/SettingsPage'
 import RequireAuth from '../features/auth/RequireAuth'
 import RequireAdmin from '../features/auth/RequireAdmin'
@@ -238,10 +237,10 @@ export default function App() {
           </Route>
           {/* CAP-29 全局代码仓库登记已并入项目管理「代码库」tab，旧路径兼容 */}
           <Route path="/admin/repos" element={<Navigate to="/admin/projects?tab=repos" replace />} />
-          {/* CAP-01 用户管理 */}
+          {/* CAP-01 用户管理（页内视图：用户 / 角色） */}
           <Route path="/admin/users" element={<UserManagementPage />} />
-          {/* CAP-61 菜单管理与角色菜单权限矩阵 */}
-          <Route path="/admin/menus" element={<MenuPermissionsPage />} />
+          {/* 原独立菜单权限矩阵已并入用户管理 → 角色（CAP-102） */}
+          <Route path="/admin/menus" element={<Navigate to="/admin/users?tab=roles" replace />} />
           {/* CAP-36 执行底座（命令模板 + 执行审计）已并入项目管理 tab，旧路径兼容 */}
           <Route path="/admin/execution" element={<Navigate to="/admin/projects?tab=templates" replace />} />
           {/* CAP-80 任务管理（M4 正名；旧路径兼容跳转） */}

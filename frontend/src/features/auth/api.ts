@@ -1,5 +1,5 @@
 import { api } from '../../shared/api/client'
-import type { AuthUser, LoginResponse, MenuGrants, MenuItem, VisibleMenus } from './types'
+import type { AuthUser, LoginResponse, MenuItem, RoleView, VisibleMenus } from './types'
 import type { PlatformAccount } from './types'
 
 export function login(username: string, password: string) {
@@ -49,6 +49,27 @@ export function deleteUser(id: string) {
   return api.del<void>(`/auth/users/${id}`)
 }
 
+// ---- 角色管理（ADMIN）：角色 = 基础接口权限 + 菜单授权 ----
+
+export function listRoles() {
+  return api.get<RoleView[]>('/auth/roles')
+}
+
+export function createRole(req: { code: string; name: string; description?: string; baseRole: string }) {
+  return api.post<RoleView>('/auth/roles', req)
+}
+
+export function updateRole(
+  code: string,
+  req: { name?: string; description?: string; baseRole?: string },
+) {
+  return api.put<RoleView>(`/auth/roles/${encodeURIComponent(code)}`, req)
+}
+
+export function deleteRole(code: string) {
+  return api.del<void>(`/auth/roles/${encodeURIComponent(code)}`)
+}
+
 // ---- CAP-61 菜单目录与角色授权 ----
 
 export function fetchMenus() {
@@ -59,12 +80,11 @@ export function fetchMenuCatalog() {
   return api.get<MenuItem[]>('/auth/menus/catalog')
 }
 
-export function fetchMenuGrants() {
-  return api.get<MenuGrants>('/auth/menus/grants')
-}
-
 export function saveMenuGrants(role: string, menuKeys: string[]) {
-  return api.put<MenuGrants>('/auth/menus/grants', { role, menuKeys })
+  return api.put<{ roles: string[]; grants: Record<string, string[]> }>('/auth/menus/grants', {
+    role,
+    menuKeys,
+  })
 }
 
 // ---- 我的第三方账号（CAP-35） ----
