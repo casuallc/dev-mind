@@ -1,5 +1,6 @@
 package com.devmind.auth.config;
 
+import com.devmind.auth.menu.ApiPermissionFilter;
 import com.devmind.auth.security.JwtAuthFilter;
 import com.devmind.auth.security.PreJwtAuthFilter;
 import com.devmind.common.exception.ApiError;
@@ -41,6 +42,7 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthFilter jwtAuthFilter,
+                                                   ApiPermissionFilter apiPermissionFilter,
                                                    ObjectProvider<PreJwtAuthFilter> preJwtFilters) throws Exception {
         http
                 .csrf(csrf -> csrf.disable())
@@ -138,6 +140,8 @@ public class SecurityConfig {
                         .accessDeniedHandler((req, res, ex) ->
                                 writeError(res, 403, ErrorCode.FORBIDDEN, "当前角色无权限执行该操作", req.getRequestURI())))
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+        // CAP-103：JWT 认证后按按钮权限校验登记过的写接口（ADMIN 短路，未登记接口不受影响）
+        http.addFilterAfter(apiPermissionFilter, JwtAuthFilter.class);
         // CAP-20 等模块提供的 PreJwtAuthFilter（如 HMAC 签名认证）插在 JWT 过滤器之前
         preJwtFilters.orderedStream().forEach(f -> http.addFilterBefore(f, JwtAuthFilter.class));
         return http.build();

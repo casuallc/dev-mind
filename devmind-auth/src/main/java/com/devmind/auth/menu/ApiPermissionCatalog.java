@@ -1,0 +1,383 @@
+package com.devmind.auth.menu;
+
+import org.springframework.util.AntPathMatcher;
+
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+
+/**
+ * CAP-103 后端操作权限规则：HTTP 方法 + Ant 路径 + 可放行权限编码（OR）。
+ * 仅登记需要按按钮权限收紧的写接口；未命中规则的请求完全沿用 CAP-01 粗粒度规则。
+ * 启动时校验所有权限编码都存在于 {@link MenuCatalog}，防止规则静默失效。
+ */
+public final class ApiPermissionCatalog {
+
+    public record Rule(String method, String pattern, Set<String> permissions) {
+    }
+
+    private static final AntPathMatcher MATCHER = new AntPathMatcher();
+
+    private static final List<Rule> RULES = List.of(
+            // ---------- 项目与资源 ----------
+            rule("POST", "/api/projects/onboard", "admin.projects.action.onboard-project"),
+            rule("POST", "/api/projects", "admin.projects.action.create-project"),
+            rule("PUT", "/api/projects/*", "admin.projects.action.edit-project"),
+            rule("DELETE", "/api/projects/*", "admin.projects.action.delete-project"),
+            rule("POST", "/api/projects/*/summary/refresh", "admin.projects.action.edit-project"),
+            rule("PUT", "/api/projects/*/summary", "admin.projects.action.edit-project"),
+            rule("POST", "/api/projects/*/repos", "admin.projects.action.manage-repo"),
+            rule("PUT", "/api/projects/*/repos/*", "admin.projects.action.manage-repo"),
+            rule("DELETE", "/api/projects/*/repos/*", "admin.projects.action.manage-repo"),
+            rule("POST", "/api/projects/*/repos/*/primary", "admin.projects.action.manage-repo"),
+            rule("POST", "/api/projects/*/repos/*/clone", "admin.projects.action.manage-repo"),
+            rule("POST", "/api/projects/*/clone/retry", "admin.projects.action.manage-repo"),
+            rule("POST", "/api/repos", "admin.projects.action.manage-repo"),
+            rule("PUT", "/api/repos/*", "admin.projects.action.manage-repo"),
+            rule("DELETE", "/api/repos/*", "admin.projects.action.manage-repo"),
+            rule("POST", "/api/repos/*/fetch", "admin.projects.action.manage-repo"),
+            rule("POST", "/api/repos/*/clone", "admin.projects.action.manage-repo"),
+            rule("POST", "/api/script-templates", "admin.projects.action.manage-template"),
+            rule("PUT", "/api/script-templates/*", "admin.projects.action.manage-template"),
+            rule("DELETE", "/api/script-templates/*", "admin.projects.action.manage-template"),
+            rule("POST", "/api/scenarios", "admin.projects.action.manage-scenario"),
+            rule("PUT", "/api/scenarios/*", "admin.projects.action.manage-scenario"),
+            rule("DELETE", "/api/scenarios/*", "admin.projects.action.manage-scenario"),
+            rule("POST", "/api/projects/*/environments", "admin.projects.action.edit-project"),
+            rule("PUT", "/api/projects/*/environments/*", "admin.projects.action.edit-project"),
+            rule("DELETE", "/api/projects/*/environments/*", "admin.projects.action.edit-project"),
+            rule("POST", "/api/projects/*/build-steps", "admin.projects.action.edit-project"),
+            rule("PUT", "/api/projects/*/build-steps", "admin.projects.action.edit-project"),
+            rule("PUT", "/api/projects/*/build-steps/*", "admin.projects.action.edit-project"),
+            rule("DELETE", "/api/projects/*/build-steps/*", "admin.projects.action.edit-project"),
+            rule("POST", "/api/projects/*/release-config", "admin.projects.action.edit-project"),
+            rule("PUT", "/api/projects/*/lock", "admin.projects.action.edit-project"),
+            rule("POST", "/api/projects/*/lock/claim", "admin.projects.action.edit-project"),
+            rule("POST", "/api/projects/*/lock/release", "admin.projects.action.edit-project"),
+            rule("POST", "/api/projects/*/jira-sync", "admin.projects.action.edit-project"),
+            rule("PUT", "/api/projects/*/jira-sync/*", "admin.projects.action.edit-project"),
+            rule("DELETE", "/api/projects/*/jira-sync/*", "admin.projects.action.edit-project"),
+            rule("POST", "/api/projects/*/jira-sync/preview", "admin.projects.action.edit-project"),
+            rule("POST", "/api/projects/*/jira-sync/*/run", "admin.projects.action.edit-project"),
+            rule("POST", "/api/projects/*/integrations", "admin.projects.action.edit-project"),
+            rule("DELETE", "/api/projects/*/integrations/*", "admin.projects.action.edit-project"),
+            rule("POST", "/api/projects/*/work-items/*/push",
+                    "project.requirements.action.push-jira", "admin.projects.action.edit-project"),
+            rule("POST", "/api/projects/*/work-items/*/merge-request",
+                    "project.requirements.action.push-jira", "admin.projects.action.edit-project"),
+            rule("POST", "/api/knowledge/proposals",
+                    "admin.projects.action.sediment-proposal", "project.sessions.action.sediment"),
+            rule("POST", "/api/knowledge/proposals/*/adopt", "admin.projects.action.manage-proposal"),
+            rule("POST", "/api/knowledge/proposals/*/reject", "admin.projects.action.manage-proposal"),
+            rule("DELETE", "/api/knowledge/proposals/*", "admin.projects.action.manage-proposal"),
+
+            // ---------- 文档 / 技能 / 附件 ----------
+            rule("POST", "/api/documents", "admin.docs.action.create"),
+            rule("PUT", "/api/documents/*", "admin.docs.action.edit"),
+            rule("POST", "/api/documents/*/versions", "admin.docs.action.edit"),
+            rule("POST", "/api/documents/*/versions/*/revert", "admin.docs.action.edit"),
+            rule("POST", "/api/documents/*/status", "admin.docs.action.edit"),
+            rule("DELETE", "/api/documents/*", "admin.docs.action.delete"),
+            rule("POST", "/api/skills/import", "admin.skills.action.import"),
+            rule("POST", "/api/skills", "admin.skills.action.create"),
+            rule("PUT", "/api/skills/*", "admin.skills.action.edit"),
+            rule("PUT", "/api/skills/*/status", "admin.skills.action.edit"),
+            rule("DELETE", "/api/skills/*", "admin.skills.action.delete"),
+            rule("POST", "/api/skills/*/files", "admin.skills.action.manage-files"),
+            rule("PUT", "/api/skills/*/files/*", "admin.skills.action.manage-files"),
+            rule("DELETE", "/api/skills/*/files/*", "admin.skills.action.manage-files"),
+
+            // ---------- Agent 节点 ----------
+            rule("POST", "/api/agent-nodes", "admin.agent-nodes.action.manage-node"),
+            rule("POST", "/api/agent-nodes/*/enable", "admin.agent-nodes.action.manage-node"),
+            rule("POST", "/api/agent-nodes/*/disable", "admin.agent-nodes.action.manage-node"),
+            rule("POST", "/api/agent-nodes/*/default", "admin.agent-nodes.action.manage-node"),
+            rule("POST", "/api/agent-nodes/*/unset-default", "admin.agent-nodes.action.manage-node"),
+            rule("DELETE", "/api/agent-nodes/*", "admin.agent-nodes.action.manage-node"),
+            rule("POST", "/api/agent-nodes/*/upgrade", "admin.agent-nodes.action.upgrade-node"),
+            rule("POST", "/api/agent-nodes/runner-package", "admin.agent-nodes.action.upload-package"),
+            rule("POST", "/api/egress-rules", "admin.agent-nodes.action.manage-egress"),
+            rule("PUT", "/api/egress-rules/*", "admin.agent-nodes.action.manage-egress"),
+            rule("DELETE", "/api/egress-rules/*", "admin.agent-nodes.action.manage-egress"),
+            rule("PUT", "/api/agent-nodes/*/files/content", "admin.agent-nodes.action.write-files"),
+            rule("POST", "/api/agent-nodes/*/files/rename", "admin.agent-nodes.action.write-files"),
+            rule("POST", "/api/agent-nodes/*/files/delete", "admin.agent-nodes.action.write-files"),
+            rule("POST", "/api/agent-nodes/*/files/upload", "admin.agent-nodes.action.write-files"),
+
+            // ---------- 知识库 ----------
+            rule("POST", "/api/knowledge/bases", "admin.knowledge.action.create-base"),
+            rule("PUT", "/api/knowledge/bases/*", "admin.knowledge.action.edit-base"),
+            rule("PUT", "/api/knowledge/bases/*/access", "admin.knowledge.action.edit-base"),
+            rule("DELETE", "/api/knowledge/bases/*", "admin.knowledge.action.delete-base"),
+            rule("POST", "/api/knowledge/bases/*/import/upload", "admin.knowledge.action.upload"),
+            rule("POST", "/api/knowledge/bases/*/import/feishu", "admin.knowledge.action.upload"),
+            rule("POST", "/api/knowledge/imports/*/retry", "admin.knowledge.action.upload"),
+            rule("POST", "/api/knowledge/imports/*/files/*/retry", "admin.knowledge.action.upload"),
+            rule("POST", "/api/knowledge/imports/classify-preview", "admin.knowledge.action.upload"),
+            rule("POST", "/api/knowledge/entries", "admin.knowledge.action.manage-entry"),
+            rule("PUT", "/api/knowledge/entries/*", "admin.knowledge.action.manage-entry"),
+            rule("DELETE", "/api/knowledge/entries/*", "admin.knowledge.action.manage-entry"),
+            rule("PUT", "/api/knowledge/entries/*/access", "admin.knowledge.action.manage-entry"),
+            rule("PUT", "/api/knowledge/entries/*/source-policy", "admin.knowledge.action.manage-entry"),
+            rule("POST", "/api/knowledge/entries/*/resync", "admin.knowledge.action.manage-entry"),
+            rule("POST", "/api/knowledge/entries/*/review", "admin.knowledge-ops.action.review"),
+            rule("POST", "/api/knowledge/entries/*/enrich", "admin.knowledge-ops.action.enrich"),
+            rule("POST", "/api/knowledge/admin/enrich", "admin.knowledge-ops.action.enrich"),
+            rule("POST", "/api/knowledge/admin/sync-sources", "admin.knowledge.action.manage-sync-source"),
+            rule("PUT", "/api/knowledge/admin/sync-sources/*", "admin.knowledge.action.manage-sync-source"),
+            rule("DELETE", "/api/knowledge/admin/sync-sources/*", "admin.knowledge.action.manage-sync-source"),
+            rule("POST", "/api/knowledge/admin/sync-sources/*/run", "admin.knowledge.action.manage-sync-source"),
+            rule("POST", "/api/knowledge/bases/*/reindex", "admin.knowledge.action.reindex"),
+            rule("POST", "/api/knowledge/entries/*/reindex", "admin.knowledge.action.reindex"),
+            rule("POST", "/api/knowledge/admin/rebuild", "admin.knowledge.action.reindex"),
+
+            // ---------- 审批 / 报告 / 机器人 / 智能体运维 ----------
+            rule("DELETE", "/api/bot/admin/bindings/*", "admin.bot.action.unbind"),
+            rule("POST", "/api/copilot/admin/actions/*/cancel", "admin.copilot.action.cancel-confirmation"),
+
+            // ---------- 智能决策 ----------
+            rule("POST", "/api/classify/instances", "admin.laya-instances.action.manage-instance"),
+            rule("PUT", "/api/classify/instances/*", "admin.laya-instances.action.manage-instance"),
+            rule("DELETE", "/api/classify/instances/*", "admin.laya-instances.action.manage-instance"),
+            rule("POST", "/api/classify/instances/*/start", "admin.laya-instances.action.manage-instance"),
+            rule("POST", "/api/classify/instances/*/stop", "admin.laya-instances.action.manage-instance"),
+            rule("POST", "/api/classify/instances/*/restart", "admin.laya-instances.action.manage-instance"),
+            rule("POST", "/api/classify/packages/upload", "admin.laya-instances.action.manage-package"),
+            rule("DELETE", "/api/classify/packages/*", "admin.laya-instances.action.manage-package"),
+            rule("POST", "/api/classify/packages/*/install", "admin.laya-instances.action.manage-package"),
+            rule("POST", "/api/classify/installs/*/retry", "admin.laya-instances.action.manage-package"),
+            rule("POST", "/api/classify/playground/run", "admin.laya-records.action.run-playground"),
+            rule("POST", "/api/decision/datasets", "admin.laya-lab.action.manage-dataset"),
+            rule("PUT", "/api/decision/datasets/*", "admin.laya-lab.action.manage-dataset"),
+            rule("DELETE", "/api/decision/datasets/*", "admin.laya-lab.action.manage-dataset"),
+            rule("POST", "/api/decision/datasets/*/freeze", "admin.laya-lab.action.manage-dataset"),
+            rule("POST", "/api/decision/datasets/*/revise", "admin.laya-lab.action.manage-dataset"),
+            rule("POST", "/api/decision/datasets/*/from-records", "admin.laya-lab.action.manage-dataset"),
+            rule("POST", "/api/decision/datasets/*/items", "admin.laya-lab.action.manage-dataset"),
+            rule("PUT", "/api/decision/datasets/*/items/*", "admin.laya-lab.action.manage-dataset"),
+            rule("DELETE", "/api/decision/datasets/*/items/*", "admin.laya-lab.action.manage-dataset"),
+            rule("POST", "/api/decision/evaluations", "admin.laya-lab.action.manage-evaluation"),
+            rule("DELETE", "/api/decision/evaluations/*", "admin.laya-lab.action.manage-evaluation"),
+            rule("POST", "/api/decision/finetunes", "admin.laya-lab.action.manage-finetune"),
+            rule("DELETE", "/api/decision/finetunes/*", "admin.laya-lab.action.manage-finetune"),
+            rule("POST", "/api/decision/checkpoints", "admin.laya-lab.action.manage-checkpoint"),
+            rule("POST", "/api/decision/checkpoints/*/verify", "admin.laya-lab.action.manage-checkpoint"),
+            rule("POST", "/api/decision/checkpoints/*/unverify", "admin.laya-lab.action.manage-checkpoint"),
+            rule("POST", "/api/decision/checkpoints/*/serve-check", "admin.laya-lab.action.manage-checkpoint"),
+            rule("DELETE", "/api/decision/checkpoints/*", "admin.laya-lab.action.manage-checkpoint"),
+
+            // ---------- 系统 ----------
+            rule("POST", "/api/async-tasks", "admin.tasks.action.manage-task"),
+            rule("PUT", "/api/async-tasks/*", "admin.tasks.action.manage-task"),
+            rule("POST", "/api/async-tasks/*/pause", "admin.tasks.action.control-task"),
+            rule("POST", "/api/async-tasks/*/resume", "admin.tasks.action.control-task"),
+            rule("POST", "/api/async-tasks/*/cancel", "admin.tasks.action.control-task"),
+            rule("POST", "/api/async-tasks/*/trigger", "admin.tasks.action.control-task"),
+            rule("POST", "/api/integrations/test", "admin.integrations.action.test"),
+            rule("POST", "/api/integrations/*/test", "admin.integrations.action.test"),
+            rule("POST", "/api/integrations", "admin.integrations.action.manage"),
+            rule("PUT", "/api/integrations/*", "admin.integrations.action.manage"),
+            rule("PUT", "/api/integrations/*/status", "admin.integrations.action.manage"),
+            rule("DELETE", "/api/integrations/*", "admin.integrations.action.manage"),
+            rule("POST", "/api/model-endpoints/test", "admin.models.action.test"),
+            rule("POST", "/api/model-endpoints/*/test", "admin.models.action.test"),
+            rule("POST", "/api/model-endpoints", "admin.models.action.manage"),
+            rule("PUT", "/api/model-endpoints/*", "admin.models.action.manage"),
+            rule("PUT", "/api/model-endpoints/*/status", "admin.models.action.manage"),
+            rule("PUT", "/api/model-endpoints/*/default", "admin.models.action.manage"),
+            rule("DELETE", "/api/model-endpoints/*", "admin.models.action.manage"),
+            rule("POST", "/api/open-keys", "admin.keys.action.manage"),
+            rule("PUT", "/api/open-keys/*", "admin.keys.action.manage"),
+            rule("DELETE", "/api/open-keys/*", "admin.keys.action.manage"),
+            rule("POST", "/api/auth/users", "admin.users.action.manage-user"),
+            rule("PUT", "/api/auth/users/*", "admin.users.action.manage-user"),
+            rule("POST", "/api/auth/users/*/reset-password", "admin.users.action.manage-user"),
+            rule("DELETE", "/api/auth/users/*", "admin.users.action.manage-user"),
+            rule("POST", "/api/auth/roles", "admin.users.action.manage-role"),
+            rule("PUT", "/api/auth/roles/*", "admin.users.action.manage-role"),
+            rule("DELETE", "/api/auth/roles/*", "admin.users.action.manage-role"),
+            rule("PUT", "/api/auth/menus/grants", "admin.users.action.grant-menu"),
+            rule("PUT", "/api/notification-channels/*", "admin.notifications.action.manage-channel"),
+            rule("PUT", "/api/notification-prefs", "admin.notifications.action.save-prefs"),
+
+            // ---------- 项目执行链 ----------
+            rule("PUT", "/api/projects/*/build-config", "project.builds.action.manage"),
+            rule("POST", "/api/projects/*/builds", "project.builds.action.trigger"),
+            rule("DELETE", "/api/builds/*", "project.builds.action.manage"),
+            rule("PUT", "/api/projects/*/deploy-config", "project.deployments.action.save-config"),
+            rule("DELETE", "/api/projects/*/deploy-config", "project.deployments.action.save-config"),
+            rule("POST", "/api/deployments", "project.deployments.action.create"),
+            rule("POST", "/api/deployments/*/execute", "project.deployments.action.execute"),
+            rule("POST", "/api/deployments/*/confirm", "project.deployments.action.execute"),
+            rule("POST", "/api/deployments/*/rollback", "project.deployments.action.rollback"),
+            rule("DELETE", "/api/deployments/*", "project.deployments.action.delete"),
+            rule("POST", "/api/projects/*/test-suites", "project.tests.action.manage-suite"),
+            rule("POST", "/api/projects/*/test-suites/generate", "project.tests.action.manage-suite"),
+            rule("PUT", "/api/test-suites/*/cases", "project.tests.action.manage-suite"),
+            rule("DELETE", "/api/test-suites/*", "project.tests.action.manage-suite"),
+            rule("POST", "/api/test-suites/*/publish", "project.tests.action.publish"),
+            rule("POST", "/api/tests/runs", "project.tests.action.run"),
+            rule("POST", "/api/test-runs/*/issues", "project.tests.action.manage-run"),
+            rule("DELETE", "/api/test-runs/*", "project.tests.action.manage-run"),
+            rule("POST", "/api/releases", "project.releases.action.create"),
+            rule("POST", "/api/releases/*/execute", "project.releases.action.execute"),
+            rule("POST", "/api/releases/*/rollback", "project.releases.action.rollback"),
+            rule("DELETE", "/api/releases/*", "project.releases.action.delete"),
+
+            // ---------- 需求流程 ----------
+            rule("POST", "/api/projects/*/requirements", "project.requirements.action.create"),
+            rule("PUT", "/api/projects/*/requirements/*", "project.requirements.action.manage"),
+            rule("PUT", "/api/projects/*/requirements/*/status", "project.requirements.action.manage"),
+            rule("DELETE", "/api/projects/*/requirements/*", "project.requirements.action.manage"),
+            rule("POST", "/api/projects/*/requirements/*/flow/plan", "project.requirements.action.flow"),
+            rule("POST", "/api/projects/*/requirements/*/flow/dev", "project.requirements.action.flow"),
+            rule("POST", "/api/projects/*/work-items/*/start-session", "project.requirements.action.manage-workitem"),
+            rule("POST", "/api/projects/*/requirements/*/workspace/finalize", "project.requirements.action.manage"),
+            rule("POST", "/api/projects/*/requirements/*/designs", "project.requirements.action.manage-design"),
+            rule("PUT", "/api/projects/*/requirements/*/designs/*", "project.requirements.action.manage-design"),
+            rule("PUT", "/api/projects/*/requirements/*/designs/*/status", "project.requirements.action.manage-design"),
+            rule("DELETE", "/api/projects/*/requirements/*/designs/*", "project.requirements.action.manage-design"),
+            rule("POST", "/api/projects/*/requirements/*/work-items", "project.requirements.action.manage-workitem"),
+            rule("PUT", "/api/projects/*/requirements/*/work-items/*", "project.requirements.action.manage-workitem"),
+            rule("PUT", "/api/projects/*/requirements/*/work-items/*/status", "project.requirements.action.manage-workitem"),
+            rule("DELETE", "/api/projects/*/requirements/*/work-items/*", "project.requirements.action.manage-workitem"),
+            rule("POST", "/api/projects/*/requirements/*/jira/transitions", "project.requirements.action.push-jira"),
+            rule("POST", "/api/projects/*/requirements/*/jira/worklog", "project.requirements.action.push-jira"),
+            rule("POST", "/api/projects/*/requirements/*/jira/resolve", "project.requirements.action.push-jira"),
+            rule("POST", "/api/projects/*/requirements/*/jira/push", "project.requirements.action.push-jira"),
+            rule("POST", "/api/projects/*/requirements/*/jira/refresh", "project.requirements.action.push-jira"),
+            rule("POST", "/api/projects/*/requirements/*/verify", "project.requirements.action.verify"),
+            rule("POST", "/api/projects/*/relations", "project.requirements.action.manage"),
+            rule("DELETE", "/api/projects/*/relations/*", "project.requirements.action.manage"),
+
+            // ---------- 会话 / 问答 / 工作日志 / 收藏夹 / 设置 ----------
+            rule("POST", "/api/sessions",
+                    "project.sessions.action.create", "top.worklog.action.create-session"),
+            rule("POST", "/api/sessions/*/finish",
+                    "project.sessions.action.manage", "top.worklog.action.manage-session"),
+            rule("POST", "/api/sessions/*/suspend",
+                    "project.sessions.action.manage", "top.worklog.action.manage-session"),
+            rule("POST", "/api/sessions/*/resume",
+                    "project.sessions.action.manage", "top.worklog.action.manage-session"),
+            rule("POST", "/api/sessions/*/kill",
+                    "project.sessions.action.manage", "top.worklog.action.manage-session"),
+            rule("POST", "/api/sessions/*/input",
+                    "project.sessions.action.manage", "top.worklog.action.manage-session"),
+            rule("POST", "/api/sessions/*/authorize",
+                    "project.sessions.action.manage", "top.worklog.action.manage-session"),
+            rule("POST", "/api/sessions/*/terminal/exec",
+                    "project.sessions.action.manage", "top.worklog.action.manage-session"),
+            rule("POST", "/api/sessions/*/terminal/complete",
+                    "project.sessions.action.manage", "top.worklog.action.manage-session"),
+            rule("POST", "/api/sessions/*/terminal/cancel",
+                    "project.sessions.action.manage", "top.worklog.action.manage-session"),
+            rule("DELETE", "/api/sessions/*",
+                    "project.sessions.action.manage", "top.worklog.action.manage-session"),
+            rule("POST", "/api/sessions/*/outputs/collect",
+                    "project.sessions.action.outputs", "top.worklog.action.manage-session"),
+            rule("POST", "/api/sessions/*/outputs/publish", "project.sessions.action.outputs"),
+            rule("POST", "/api/sessions/*/finalize",
+                    "project.sessions.action.finalize", "top.worklog.action.manage-session"),
+            rule("DELETE", "/api/sessions/*/worktree",
+                    "project.sessions.action.finalize", "top.worklog.action.manage-session"),
+            rule("POST", "/api/chats", "top.chats.action.create"),
+            rule("POST", "/api/chats/*/finish", "top.chats.action.manage"),
+            rule("POST", "/api/chats/*/suspend", "top.chats.action.manage"),
+            rule("POST", "/api/chats/*/resume", "top.chats.action.manage"),
+            rule("POST", "/api/chats/*/kill", "top.chats.action.manage"),
+            rule("POST", "/api/chats/*/input", "top.chats.action.manage"),
+            rule("POST", "/api/chats/*/authorize", "top.chats.action.manage"),
+            rule("POST", "/api/chats/*/interrupt", "top.chats.action.manage"),
+            rule("POST", "/api/chats/*/terminal/exec", "top.chats.action.manage"),
+            rule("POST", "/api/chats/*/terminal/complete", "top.chats.action.manage"),
+            rule("POST", "/api/chats/*/terminal/cancel", "top.chats.action.manage"),
+            rule("DELETE", "/api/chats/*", "top.chats.action.manage"),
+            rule("POST", "/api/knowledge/solutions/*/save", "top.chats.action.save-solution"),
+            rule("POST", "/api/bookmarks", "top.bookmarks.action.manage-bookmark"),
+            rule("PUT", "/api/bookmarks/move", "top.bookmarks.action.manage-bookmark"),
+            rule("POST", "/api/bookmarks/probe-batch", "top.bookmarks.action.manage-bookmark"),
+            rule("POST", "/api/bookmarks/import", "top.bookmarks.action.manage-bookmark"),
+            rule("PUT", "/api/bookmarks/*", "top.bookmarks.action.manage-bookmark"),
+            rule("DELETE", "/api/bookmarks/*", "top.bookmarks.action.manage-bookmark"),
+            rule("POST", "/api/bookmarks/*/probe", "top.bookmarks.action.manage-bookmark"),
+            rule("POST", "/api/bookmarks/shared-with-me/copy", "top.bookmarks.action.copy-shared"),
+            rule("POST", "/api/bookmark-groups", "top.bookmarks.action.manage-group"),
+            rule("PUT", "/api/bookmark-groups/*", "top.bookmarks.action.manage-group"),
+            rule("DELETE", "/api/bookmark-groups/*", "top.bookmarks.action.manage-group"),
+            rule("POST", "/api/bookmark-shares", "top.bookmarks.action.manage-bookmark"),
+            rule("DELETE", "/api/bookmark-shares/*", "top.bookmarks.action.manage-bookmark"),
+            rule("POST", "/api/bookmark-tags", "top.bookmarks.action.manage-tag"),
+            rule("PUT", "/api/bookmark-tags/*", "top.bookmarks.action.manage-tag"),
+            rule("DELETE", "/api/bookmark-tags/*", "top.bookmarks.action.manage-tag"),
+            rule("POST", "/api/worklog/entries", "top.worklog.action.manage-entry"),
+            rule("PUT", "/api/worklog/entries/*", "top.worklog.action.manage-entry"),
+            rule("DELETE", "/api/worklog/entries/*", "top.worklog.action.manage-entry"),
+            rule("POST", "/api/worklog/entries/carry", "top.worklog.action.manage-entry"),
+            rule("POST", "/api/worklog/git/import", "top.worklog.action.manage-entry"),
+            rule("POST", "/api/worklog/plans/items", "top.worklog.action.manage-plan"),
+            rule("PUT", "/api/worklog/plans/items/*", "top.worklog.action.manage-plan"),
+            rule("DELETE", "/api/worklog/plans/items/*", "top.worklog.action.manage-plan"),
+            rule("POST", "/api/worklog/plans/carry", "top.worklog.action.manage-plan"),
+            rule("POST", "/api/worklog/plans/suggest", "top.worklog.action.manage-plan"),
+            rule("POST", "/api/worklog/goals/suggest", "top.worklog.action.suggest-okr"),
+            rule("POST", "/api/worklog/goals/suggest/adopt", "top.worklog.action.suggest-okr"),
+            rule("POST", "/api/worklog/goals/suggest/discard", "top.worklog.action.suggest-okr"),
+            rule("POST", "/api/worklog/goals", "top.worklog.action.manage-goal"),
+            rule("PUT", "/api/worklog/goals/*", "top.worklog.action.manage-goal"),
+            rule("DELETE", "/api/worklog/goals/*", "top.worklog.action.manage-goal"),
+            rule("POST", "/api/worklog/goals/carry", "top.worklog.action.manage-goal"),
+            rule("POST", "/api/worklog/daily/generate", "top.worklog.action.manage-report"),
+            rule("POST", "/api/worklog/daily", "top.worklog.action.manage-report"),
+            rule("PUT", "/api/worklog/daily/*", "top.worklog.action.manage-report"),
+            rule("POST", "/api/worklog/weekly/generate", "top.worklog.action.manage-report"),
+            rule("POST", "/api/worklog/weekly", "top.worklog.action.manage-report"),
+            rule("PUT", "/api/worklog/weekly/*", "top.worklog.action.manage-report"),
+            rule("POST", "/api/worklog/quarterly/generate", "top.worklog.action.manage-report"),
+            rule("POST", "/api/worklog/quarterly", "top.worklog.action.manage-report"),
+            rule("PUT", "/api/worklog/quarterly/*", "top.worklog.action.manage-report"),
+            rule("POST", "/api/worklog/reports/sync", "top.worklog.action.manage-report"),
+            rule("PUT", "/api/worklog/repos/*/subscription", "top.worklog.action.manage-subscription"),
+            rule("PUT", "/api/worklog/settings", "top.settings.action.save-worklog-settings"),
+            rule("POST", "/api/auth/change-password", "top.settings.action.change-password"),
+            rule("PUT", "/api/me/platform-accounts/*", "top.settings.action.manage-account"),
+            rule("DELETE", "/api/me/platform-accounts/*", "top.settings.action.manage-account"),
+            rule("POST", "/api/me/platform-accounts/*/test", "top.settings.action.manage-account"),
+            rule("PUT", "/api/me/jira-push-templates", "top.settings.action.manage-jira-template"),
+            rule("DELETE", "/api/me/jira-push-templates/*", "top.settings.action.manage-jira-template")
+    );
+
+    static {
+        Set<String> known = MenuCatalog.items().stream()
+                .map(MenuCatalog.Item::menuKey)
+                .collect(java.util.stream.Collectors.toSet());
+        for (Rule rule : RULES) {
+            for (String permission : rule.permissions()) {
+                if (!known.contains(permission)) {
+                    throw new IllegalStateException("API 权限规则引用未知权限编码: " + permission);
+                }
+            }
+        }
+    }
+
+    private ApiPermissionCatalog() {
+    }
+
+    public static Optional<Rule> match(String method, String path) {
+        if (method == null || path == null) {
+            return Optional.empty();
+        }
+        return RULES.stream()
+                .filter(rule -> rule.method().equalsIgnoreCase(method))
+                .filter(rule -> MATCHER.match(rule.pattern(), path))
+                .findFirst();
+    }
+
+    public static List<Rule> rules() {
+        return RULES;
+    }
+
+    private static Rule rule(String method, String pattern, String... permissions) {
+        return new Rule(method, pattern, new LinkedHashSet<>(List.of(permissions)));
+    }
+}
