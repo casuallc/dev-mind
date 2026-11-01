@@ -427,7 +427,7 @@ function TestCenter({ id }: { id: string }) {
       ) : view === 'assets' ? (
         <AssetLibraryPanel projectId={id} />
       ) : view === 'stats' ? (
-        <StatsPanel projectId={id} />
+        <StatsPanel projectId={id} onOpenRun={openRunDetail} />
       ) : (
         <>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
