@@ -89,6 +89,14 @@ public class EnvironmentService {
         envRepo.delete(requireEnvironment(projectId, envId));
     }
 
+    /** CAP-104：保存环境最近一次预检结果（配置与结果合并在 precheckJson）。 */
+    public EnvironmentView savePrecheck(String projectId, Long envId, String precheckJson) {
+        EnvironmentEntity e = requireEnvironment(projectId, envId);
+        e.setPrecheckJson(precheckJson);
+        e.setUpdatedAt(Instant.now());
+        return toView(envRepo.save(e));
+    }
+
     // ---------------- 内部 ----------------
 
     private void apply(EnvironmentEntity e, EnvironmentRequest req, String name) {
@@ -101,6 +109,16 @@ public class EnvironmentService {
         e.setPatchDir(blankToNull(req.patchDir()));
         e.setPatchPreHook(blankToNull(req.patchPreHook()));
         e.setPatchPostHook(blankToNull(req.patchPostHook()));
+        // CAP-104：productVersion/precheck/cleanup 可空，旧请求不传保持原值
+        if (req.productVersion() != null) {
+            e.setProductVersion(blankToNull(req.productVersion()));
+        }
+        if (req.precheckJson() != null) {
+            e.setPrecheckJson(blankToNull(req.precheckJson()));
+        }
+        if (req.cleanupJson() != null) {
+            e.setCleanupJson(blankToNull(req.cleanupJson()));
+        }
     }
 
     /** 节点 id 轻量校验（非空、去空白、去重）；节点存在性/在线状态由执行期路由校验。 */
@@ -167,6 +185,7 @@ public class EnvironmentService {
         return new EnvironmentView(e.getId(), e.getProjectId(), e.getName(), e.getDescription(),
                 nodeIdsOf(e), vars, secrets,
                 e.getPatchDir(), e.getPatchPreHook(), e.getPatchPostHook(),
+                e.getProductVersion(), e.getPrecheckJson(), e.getCleanupJson(),
                 e.getCreatedAt(), e.getUpdatedAt());
     }
 

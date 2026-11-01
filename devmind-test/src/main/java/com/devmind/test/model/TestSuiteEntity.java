@@ -21,6 +21,10 @@ import org.hibernate.type.SqlTypes;
 @Table(name = "test_suites")
 public class TestSuiteEntity {
 
+    public static final String DRAFT = "DRAFT";
+    public static final String APPROVED = "APPROVED";
+    public static final String DEPRECATED = "DEPRECATED";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -88,6 +92,30 @@ public class TestSuiteEntity {
     @Column(name = "created_at")
     private Instant createdAt;
 
+    // ---------------- CAP-104 资产字段 ----------------
+
+    /** 功能模块 id（空 = 未分类，存量套件不阻塞） */
+    @Column(name = "module_id")
+    private Long moduleId;
+
+    @Column(length = 64)
+    private String owner;
+
+    @Column(length = 256)
+    private String tags;
+
+    /** DRAFT / APPROVED / DEPRECATED；存量套件启动时回填 APPROVED */
+    @Column(name = "review_status", length = 16)
+    private String reviewStatus;
+
+    /** 固定 commit（脚本套件运行 repo 块使用；空 = 分支 HEAD，并把实际 HEAD 记入证据） */
+    @Column(name = "commit_hash", length = 64)
+    private String commitHash;
+
+    /** 来源资产 id（非空时须评审通过才可运行） */
+    @Column(name = "source_asset_id")
+    private Long sourceAssetId;
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public String getProjectId() { return projectId; }
@@ -120,4 +148,16 @@ public class TestSuiteEntity {
     public void setWorkspaceKey(String workspaceKey) { this.workspaceKey = workspaceKey; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+    public Long getModuleId() { return moduleId; }
+    public void setModuleId(Long moduleId) { this.moduleId = moduleId; }
+    public String getOwner() { return owner; }
+    public void setOwner(String owner) { this.owner = owner; }
+    public String getTags() { return tags; }
+    public void setTags(String tags) { this.tags = tags; }
+    public String getReviewStatus() { return reviewStatus; }
+    public void setReviewStatus(String reviewStatus) { this.reviewStatus = reviewStatus; }
+    public String getCommitHash() { return commitHash; }
+    public void setCommitHash(String commitHash) { this.commitHash = commitHash; }
+    public Long getSourceAssetId() { return sourceAssetId; }
+    public void setSourceAssetId(Long sourceAssetId) { this.sourceAssetId = sourceAssetId; }
 }

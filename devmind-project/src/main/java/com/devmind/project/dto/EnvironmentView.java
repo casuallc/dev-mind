@@ -17,6 +17,10 @@ public record EnvironmentView(
         String patchDir,
         String patchPreHook,
         String patchPostHook,
+        /** CAP-104：产品版本 / 预检配置 / 清理命令 */
+        String productVersion,
+        String precheckJson,
+        String cleanupJson,
         Instant createdAt,
         Instant updatedAt) {
 }

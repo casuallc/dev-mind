@@ -12,5 +12,12 @@ public record TestSuiteView(
         Long docId,
         Integer caseCount,
         List<TestCaseView> cases,
-        Instant createdAt) {
+        Instant createdAt,
+        // CAP-104 资产字段
+        Long moduleId,
+        String owner,
+        String tags,
+        String reviewStatus,
+        String commitHash,
+        Long sourceAssetId) {
 }

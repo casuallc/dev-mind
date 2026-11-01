@@ -70,6 +70,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/agent/decision-lab/**").permitAll()
                         // CAP-57：分类安装包拉取 permitAll 放行，节点 token 由控制器内判定
                         .requestMatchers(HttpMethod.GET, "/api/agent/classify/**").permitAll()
+                        // CAP-104 M1.5：测试程序包拉取 permitAll 放行，节点 token 由控制器内判定
+                        .requestMatchers(HttpMethod.GET, "/api/agent/test-program/**").permitAll()
+                        // CAP-104 FR-24：一次性 token 大文件证据上传 permitAll 放行，服务内验 token/归属/大小/MIME
+                        .requestMatchers(HttpMethod.POST, "/api/test-runs/*/evidence").permitAll()
                         // CAP-65：文件中转端点 permitAll 放行，节点 token 由控制器内判定（归属校验在控制器）
                         .requestMatchers(HttpMethod.GET, "/api/agent/files-transfer/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/agent/files-transfer/**").permitAll()

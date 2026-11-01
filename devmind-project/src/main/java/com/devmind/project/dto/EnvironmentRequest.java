@@ -17,5 +17,11 @@ public record EnvironmentRequest(
         /** CAP-73：覆盖文件前命令（停服/备份） */
         String patchPreHook,
         /** CAP-73：覆盖文件后命令（启服/热加载） */
-        String patchPostHook) {
+        String patchPostHook,
+        /** CAP-104：产品版本字符串（预检 VERSION_MATCH 对比） */
+        String productVersion,
+        /** CAP-104：预检配置 JSON（command / expectedVersion） */
+        String precheckJson,
+        /** CAP-104：执行后清理命令（方案/单次运行 teardown） */
+        String cleanupJson) {
 }

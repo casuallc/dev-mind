@@ -13,8 +13,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.devmind.test.dto.CaseResultView;
 import com.devmind.test.dto.CreateTestRunRequest;
 import com.devmind.test.dto.IssueDraftView;
+import com.devmind.test.dto.ManualReviewRequest;
+import com.devmind.test.dto.SuiteMetaRequest;
+import com.devmind.test.dto.SuiteReviewRequest;
 import com.devmind.test.dto.TestCaseInput;
 import com.devmind.test.dto.TestRunView;
 import com.devmind.test.dto.TestSuiteCreateRequest;
@@ -60,6 +64,17 @@ public class TestController {
         return suiteService.getSuite(id);
     }
 
+    /** CAP-104 FR-05：套件模块/负责人/标签/固定 commit/来源资产。 */
+    @PutMapping("/test-suites/{id}")
+    public TestSuiteView updateSuiteMeta(@PathVariable Long id, @RequestBody SuiteMetaRequest req) {
+        return suiteService.updateMeta(id, req);
+    }
+
+    @PostMapping("/test-suites/{id}/review")
+    public TestSuiteView reviewSuite(@PathVariable Long id, @RequestBody SuiteReviewRequest req) {
+        return suiteService.review(id, req);
+    }
+
     @DeleteMapping("/test-suites/{id}")
     public void deleteSuite(@PathVariable Long id) {
         suiteService.delete(id);
@@ -98,6 +113,19 @@ public class TestController {
     @GetMapping(value = "/test-runs/{id}/report", produces = MediaType.TEXT_PLAIN_VALUE)
     public String report(@PathVariable Long id) {
         return runService.report(id);
+    }
+
+    /** CAP-104 FR-10 结构化报告（稳定契约，Markdown 仍是默认 report 端点）。 */
+    @GetMapping("/test-runs/{id}/report.json")
+    public java.util.Map<String, Object> reportJson(@PathVariable Long id) {
+        return runService.reportJson(id);
+    }
+
+    /** CAP-104 FR-09 人工复核/人工判定（CONFIRMED / REJECTED / PASS / FAIL）。 */
+    @PutMapping("/test-runs/{id}/results/{resultId}/review")
+    public CaseResultView reviewResult(@PathVariable Long id, @PathVariable Long resultId,
+                                       @RequestBody ManualReviewRequest req) {
+        return runService.manualReview(id, resultId, req);
     }
 
     @GetMapping(value = "/test-runs/{id}/logs", produces = MediaType.TEXT_PLAIN_VALUE)

@@ -278,6 +278,31 @@ public class AgentNodeService {
                 .toList();
     }
 
+    /** CAP-104 M3：在线且同时满足标签/能力要求的节点（空条件不限制；按 id 升序）。 */
+    public List<AgentNodeEntity> onlineNodesMatching(List<String> requiredLabels,
+                                                    List<String> requiredCapabilities) {
+        return repo.findAll().stream()
+                .filter(e -> STATUS_ONLINE.equals(e.getStatus()))
+                .filter(e -> labelsCover(e.getLabels(), requiredLabels))
+                .filter(e -> csvCovers(e.getCapabilities(), requiredCapabilities))
+                .sorted(java.util.Comparator.comparing(AgentNodeEntity::getId))
+                .toList();
+    }
+
+    /** CSV 能力覆盖判定（语义同 labels：required 每项都必须在节点 CSV 中）。 */
+    static boolean csvCovers(String nodeCsv, List<String> required) {
+        if (required == null || required.isEmpty()) {
+            return true;
+        }
+        if (nodeCsv == null || nodeCsv.isBlank()) {
+            return false;
+        }
+        java.util.Set<String> have = java.util.Arrays.stream(nodeCsv.split(","))
+                .map(String::strip).filter(s -> !s.isEmpty())
+                .collect(java.util.stream.Collectors.toSet());
+        return required.stream().map(String::strip).filter(s -> !s.isEmpty()).allMatch(have::contains);
+    }
+
     /** CSV 标签覆盖判定：required 中每个标签都在节点 CSV 标签集合内（大小写敏感，去空白）。 */
     static boolean labelsCover(String nodeLabelsCsv, List<String> requiredLabels) {
         if (requiredLabels == null || requiredLabels.isEmpty()) {

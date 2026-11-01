@@ -33,17 +33,18 @@ import {
   PlusOutlined,
   SaveOutlined,
 } from '@ant-design/icons'
-import { deleteScriptSuite, deleteSuite, getScriptSuite, getSuite, publishSuite, saveCases, updateScriptSuite } from '../api'
-import type { ScriptSuite, TestCase, TestCaseInput, TestSuite } from '../types'
+import { deleteScriptSuite, deleteSuite, getScriptSuite, getSuite, listModules, publishSuite, saveCases, updateScriptSuite } from '../api'
+import type { ScriptSuite, TestCase, TestCaseInput, TestModule, TestSuite } from '../types'
 import type { AgentNode } from '../../agent/types'
 import type { ProjectEnvironment } from '../../projects/types'
 import { listAgentNodes } from '../../agent/api'
 import { listEnvironments } from '../../projects/api'
 import { fmtTime, paramsToText, textToParams } from '../../../shared/utils/format'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
-import { SUITE_KIND_COLOR } from '../constants'
+import { SUITE_KIND_COLOR, REVIEW_COLOR, REVIEW_LABEL } from '../constants'
 import ScriptSuiteFields, { toScriptSuiteInput } from '../components/ScriptSuiteFields'
 import RunSuiteModal from '../components/RunSuiteModal'
+import SuiteAssetDrawer from '../components/SuiteAssetDrawer'
 import { pageCardBodyFlexStyle, pageCardStyle, pagePaneScrollStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { showError } from '../../../shared/utils/showError'
@@ -148,8 +149,12 @@ export default function SuiteDetailPage() {
   const canRun = canAction('project.tests.action.run')
   const canManageSuite = canAction('project.tests.action.manage-suite')
   const canPublish = canAction('project.tests.action.publish')
+  const canReviewCase = canAction('project.tests.action.review-case')
+  const canEditAssetMeta = canAction('project.tests.action.manage-case')
   const [suite, setSuite] = useState<TestSuite | null>(null)
   const [loading, setLoading] = useState(true)
+  const [modules, setModules] = useState<TestModule[]>([])
+  const [assetOpen, setAssetOpen] = useState(false)
   const [cases, setCases] = useState<TestCaseInput[]>([])
   const [saving, setSaving] = useState(false)
   const [publishing, setPublishing] = useState(false)
@@ -181,6 +186,7 @@ export default function SuiteDetailPage() {
       ])
       setNodes(nd)
       setEnvironments(ev)
+      listModules(s.projectId).then(setModules).catch(() => {})
       if (s.kind === 'script') {
         const ss = await getScriptSuite(s.id)
         setScript(ss)
@@ -352,6 +358,9 @@ export default function SuiteDetailPage() {
               沉淀为文档
             </Button>
           )}
+          {(canEditAssetMeta || canReviewCase) && (
+            <Button disabled={!suite} onClick={() => setAssetOpen(true)}>资产属性</Button>
+          )}
           {canManageSuite && (
             <Button danger icon={<DeleteOutlined />} disabled={!suite} onClick={onDelete}>删除</Button>
           )}
@@ -398,10 +407,22 @@ export default function SuiteDetailPage() {
               {suite.docId ? `#${suite.docId}` : '-'}
             </Descriptions.Item>
             <Descriptions.Item label="创建时间">{fmtTime(suite.createdAt)}</Descriptions.Item>
+            <Descriptions.Item label="功能模块">
+              {suite.moduleId != null
+                ? (modules.find((m) => m.id === suite.moduleId)?.name ?? `#${suite.moduleId}`)
+                : '未分类'}
+            </Descriptions.Item>
+            <Descriptions.Item label="负责人">{suite.owner || '-'}</Descriptions.Item>
+            <Descriptions.Item label="评审">
+              {suite.reviewStatus
+                ? <Tag color={REVIEW_COLOR[suite.reviewStatus]}>{REVIEW_LABEL[suite.reviewStatus]}</Tag>
+                : '-'}
+            </Descriptions.Item>
           </Descriptions>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
             用例编辑为整体替换保存：改动先落在下方列表，点「保存全部」生效；不在列表中的现有用例将被删除。
             http 用例由服务端直请求 baseUrl，health 用例的 command 型经 exec 帧下发执行节点。
+            CAP-104 规范用例（含断言/版本）请到「用例库」页签编辑，此处对规范用例仅保留启停。
           </Typography.Paragraph>
           <FitTable<TestCaseInput> rowKey={(c) => c.id ?? c.name + c.path} columns={columns}
             dataSource={cases} pagination={false} locale={{ emptyText: canManageSuite ? '暂无用例：点右上角「添加用例」' : '暂无用例' }} />
@@ -421,6 +442,15 @@ export default function SuiteDetailPage() {
       </Drawer>
 
       {/* 运行：与列表行内运行同一组件，按 kind 渲染字段；成功后回列表页看运行历史/详情 */}
+      <SuiteAssetDrawer
+        open={assetOpen}
+        suite={suite}
+        projectId={suite?.projectId ?? ''}
+        canEdit={canEditAssetMeta}
+        canReview={canReviewCase}
+        onClose={() => setAssetOpen(false)}
+        onSaved={(s) => setSuite(s)}
+      />
       <RunSuiteModal
         suite={runOpen ? suite : null}
         scriptSuite={script ?? undefined}

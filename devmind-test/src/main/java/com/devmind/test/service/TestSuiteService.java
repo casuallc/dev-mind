@@ -8,14 +8,22 @@ import com.devmind.docs.dto.DocRequest;
 import com.devmind.docs.dto.SaveVersionRequest;
 import com.devmind.project.ProjectService;
 import com.devmind.project.dto.ProjectView;
+import com.devmind.test.dto.SuiteMetaRequest;
+import com.devmind.test.dto.SuiteReviewRequest;
 import com.devmind.test.dto.TestCaseInput;
 import com.devmind.test.dto.TestCaseView;
 import com.devmind.test.dto.TestSuiteCreateRequest;
 import com.devmind.test.dto.TestSuiteView;
+import com.devmind.test.model.TestAssetEntity;
 import com.devmind.test.model.TestCaseEntity;
+import com.devmind.test.model.TestCaseVersionEntity;
 import com.devmind.test.model.TestSuiteEntity;
+import com.devmind.test.repo.TestAssetRepository;
 import com.devmind.test.repo.TestCaseRepository;
+import com.devmind.test.repo.TestCaseVersionRepository;
+import com.devmind.test.repo.TestModuleRepository;
 import com.devmind.test.repo.TestSuiteRepository;
+import com.devmind.test.spec.CaseSignatures;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -35,6 +43,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -53,17 +62,26 @@ public class TestSuiteService {
 
     private final TestSuiteRepository suiteRepo;
     private final TestCaseRepository caseRepo;
+    private final TestCaseVersionRepository versionRepo;
+    private final TestModuleRepository moduleRepo;
+    private final TestAssetRepository assetRepo;
     private final ProjectService projectService;
     private final DocumentService documentService;
     private final ObjectMapper mapper;
 
     public TestSuiteService(TestSuiteRepository suiteRepo,
                             TestCaseRepository caseRepo,
+                            TestCaseVersionRepository versionRepo,
+                            TestModuleRepository moduleRepo,
+                            TestAssetRepository assetRepo,
                             ProjectService projectService,
                             DocumentService documentService,
                             ObjectMapper mapper) {
         this.suiteRepo = suiteRepo;
         this.caseRepo = caseRepo;
+        this.versionRepo = versionRepo;
+        this.moduleRepo = moduleRepo;
+        this.assetRepo = assetRepo;
         this.projectService = projectService;
         this.documentService = documentService;
         this.mapper = mapper;
@@ -74,7 +92,9 @@ public class TestSuiteService {
     public List<TestSuiteView> list(String projectId) {
         return suiteRepo.findByProjectIdOrderByCreatedAtDesc(projectId).stream()
                 .map(s -> new TestSuiteView(s.getId(), s.getProjectId(), s.getName(), s.getKind(), s.getSource(),
-                        s.getDocId(), caseRepo.findBySuiteIdOrderBySortAsc(s.getId()).size(), List.of(), s.getCreatedAt()))
+                        s.getDocId(), (int) caseRepo.countBySuiteId(s.getId()), List.of(), s.getCreatedAt(),
+                        s.getModuleId(), s.getOwner(), s.getTags(), s.getReviewStatus(), s.getCommitHash(),
+                        s.getSourceAssetId()))
                 .toList();
     }
 
@@ -82,10 +102,13 @@ public class TestSuiteService {
         TestSuiteEntity s = require(id);
         List<TestCaseView> cases = caseRepo.findBySuiteIdOrderBySortAsc(id).stream().map(this::toCaseView).toList();
         return new TestSuiteView(s.getId(), s.getProjectId(), s.getName(), s.getKind(), s.getSource(),
-                s.getDocId(), cases.size(), cases, s.getCreatedAt());
+                s.getDocId(), cases.size(), cases, s.getCreatedAt(),
+                s.getModuleId(), s.getOwner(), s.getTags(), s.getReviewStatus(), s.getCommitHash(),
+                s.getSourceAssetId());
     }
 
     public TestSuiteView create(String projectId, TestSuiteCreateRequest req) {
+        projectService.requireProject(projectId);
         if (req.name() == null || req.name().isBlank()) {
             throw new DevMindException(ErrorCode.BAD_REQUEST, "套件名称必填");
         }
@@ -98,14 +121,60 @@ public class TestSuiteService {
         e.setName(req.name().strip());
         e.setKind(kind);
         e.setSource("manual");
+        e.setReviewStatus(TestSuiteEntity.DRAFT);
+        e.setModuleId(checkModule(projectId, req.moduleId()));
+        e.setOwner(blankToNull(req.owner()));
+        e.setTags(blankToNull(req.tags()));
         e.setCreatedAt(Instant.now());
         suiteRepo.save(e);
         return getSuite(e.getId());
     }
 
+    /** CAP-104 套件资产属性：模块/负责人/标签/固定 commit/来源资产（来源资产须已评审通过）。 */
+    public TestSuiteView updateMeta(Long id, SuiteMetaRequest req) {
+        TestSuiteEntity s = require(id);
+        s.setModuleId(checkModule(s.getProjectId(), req.moduleId()));
+        s.setOwner(blankToNull(req.owner()));
+        s.setTags(blankToNull(req.tags()));
+        if (req.commitHash() != null && !req.commitHash().isBlank()
+                && !req.commitHash().strip().matches("[0-9a-fA-F]{7,64}")) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "commitHash 只能是 7~64 位十六进制");
+        }
+        s.setCommitHash(blankToNull(req.commitHash()));
+        if (req.sourceAssetId() != null) {
+            TestAssetEntity asset = assetRepo.findById(req.sourceAssetId())
+                    .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "来源资产不存在: " + req.sourceAssetId()));
+            if (!asset.getProjectId().equals(s.getProjectId())) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "来源资产不属于项目 " + s.getProjectId());
+            }
+            if (!TestAssetEntity.APPROVED.equals(asset.getReviewStatus())) {
+                throw new DevMindException(ErrorCode.CONFLICT, "来源资产未评审通过，不可引用");
+            }
+        }
+        s.setSourceAssetId(req.sourceAssetId());
+        suiteRepo.save(s);
+        return getSuite(id);
+    }
+
+    public TestSuiteView review(Long id, SuiteReviewRequest req) {
+        TestSuiteEntity s = require(id);
+        String status = req == null || req.reviewStatus() == null ? null
+                : req.reviewStatus().strip().toUpperCase(Locale.ROOT);
+        if (!TestSuiteEntity.APPROVED.equals(status) && !TestSuiteEntity.DEPRECATED.equals(status)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "评审状态只能是 APPROVED / DEPRECATED");
+        }
+        s.setReviewStatus(status);
+        suiteRepo.save(s);
+        return getSuite(id);
+    }
+
     @Transactional
     public void delete(Long id) {
         TestSuiteEntity s = require(id);
+        List<TestCaseEntity> cases = caseRepo.findBySuiteIdOrderBySortAsc(id);
+        for (TestCaseEntity c : cases) {
+            versionRepo.deleteByCaseId(c.getId());
+        }
         caseRepo.deleteBySuiteId(id);
         suiteRepo.delete(s);
     }
@@ -125,6 +194,16 @@ public class TestSuiteService {
             TestCaseEntity e = in.id() != null
                     ? existing.stream().filter(x -> x.getId().equals(in.id())).findFirst().orElse(null)
                     : null;
+            if (e != null && e.getSpecJson() != null) {
+                // CAP-104 规范用例有 spec/版本/断言，旧整体保存会破坏一致性：只允许在这里启停
+                e.setEnabled(in.enabled() == null || in.enabled());
+                e.setUpdatedAt(Instant.now());
+                caseRepo.save(e);
+                keep.add(e.getId());
+                sort++;
+                continue;
+            }
+            boolean isNew = e == null;
             if (e == null) {
                 e = new TestCaseEntity();
             }
@@ -140,10 +219,19 @@ public class TestSuiteService {
             e.setExpectedJson(writeMap(in.expected()));
             e.setEnabled(in.enabled() == null || in.enabled());
             e.setUpdatedAt(Instant.now());
+            e.setType(legacyType(e.getKind()));
+            e.setCaseVersion(e.getCaseVersion() == null ? 1 : e.getCaseVersion());
+            e.setReviewStatus(e.getReviewStatus() == null ? TestCaseVersionEntity.APPROVED : e.getReviewStatus());
+            e.setSignature(CaseSignatures.ofLegacy(e.getKind(), e.getMethod(), e.getPath(), e.getExpectedJson()));
             if (in.id() != null) {
                 keep.add(in.id());
             }
             caseRepo.save(e);
+            if (isNew) {
+                // caseKey 依赖自增 id（LEGACY-<id>），保存后再补
+                e.setCaseKey("LEGACY-" + e.getId());
+                caseRepo.save(e);
+            }
         }
         List<Long> remove = existing.stream().map(TestCaseEntity::getId).filter(id -> !keep.contains(id)).toList();
         if (!remove.isEmpty()) {
@@ -210,6 +298,12 @@ public class TestSuiteService {
             c.setSort(sort++);
             c.setEnabled(true);
             c.setUpdatedAt(Instant.now());
+            c.setType(legacyType(c.getKind()));
+            c.setCaseVersion(1);
+            c.setReviewStatus(TestCaseVersionEntity.APPROVED);
+            c.setSignature(CaseSignatures.ofLegacy(c.getKind(), c.getMethod(), c.getPath(), c.getExpectedJson()));
+            caseRepo.save(c);
+            c.setCaseKey("LEGACY-" + c.getId());
             caseRepo.save(c);
         }
         log.info("CAP-10 从 OpenAPI 生成套件: id={} project={} 用例数={}", suite.getId(), projectId, generated.size());
@@ -478,7 +572,49 @@ public class TestSuiteService {
     private TestCaseView toCaseView(TestCaseEntity c) {
         return new TestCaseView(c.getId(), c.getSuiteId(), c.getSort(), c.getName(), c.getKind(), c.getMethod(),
                 c.getPath(), readMap(c.getParamsJson()), readMap(c.getHeadersJson()), c.getBodyJson(),
-                readObjectMap(c.getExpectedJson()), c.getEnabled(), c.getUpdatedAt());
+                readObjectMap(c.getExpectedJson()), c.getEnabled(), c.getUpdatedAt(),
+                c.getCaseKey(), c.getType(), c.getPriority(), c.getTags(), c.getCaseVersion(),
+                c.getReviewStatus(), c.getSignature(), c.getSourceAssetId(), parseSpec(c.getSpecJson()));
+    }
+
+    private com.devmind.test.spec.CaseSpec parseSpec(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return mapper.readValue(json, com.devmind.test.spec.CaseSpec.class);
+        } catch (Exception e) {
+            log.warn("用例 spec 解析失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private String legacyType(String kind) {
+        if (kind == null) {
+            return "HTTP";
+        }
+        return switch (kind.toLowerCase(Locale.ROOT)) {
+            case "health" -> "COMMAND";
+            case "manual" -> "MANUAL";
+            default -> "HTTP";
+        };
+    }
+
+    /** 模块必须属于该项目；null/0 表示未分类。 */
+    private Long checkModule(String projectId, Long moduleId) {
+        if (moduleId == null || moduleId == 0) {
+            return null;
+        }
+        var module = moduleRepo.findById(moduleId)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "测试模块不存在: " + moduleId));
+        if (!module.getProjectId().equals(projectId)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "模块 " + moduleId + " 不属于项目 " + projectId);
+        }
+        return moduleId;
+    }
+
+    private String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.strip();
     }
 
     @SuppressWarnings("unchecked")

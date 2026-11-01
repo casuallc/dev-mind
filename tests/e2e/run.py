@@ -89,6 +89,8 @@ def isolated_app(folder):
               "devmind.worktree.root": str(data / "worktrees"),
               "devmind.attachment.root-dir": str(data / "attachments"),
               "devmind.worklog.repo-root": str(data / "repos"),
+              "devmind.test.evidence.root-dir": str(data / "test-evidence"),
+              "devmind.test.assets.root-dir": str(data / "test-assets"),
               "devmind.worklog.daily-enabled": False, "devmind.worklog.weekly-enabled": False,
               "devmind.worklog.git-import-enabled": False}
     env["SPRING_APPLICATION_JSON"] = json.dumps(config)

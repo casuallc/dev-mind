@@ -68,12 +68,17 @@ package com.devmind.common.agent;
      * 老服务端没有该端点 = 隧道连接连不上自动退避重试，控制通道不受影响，双向优雅降级）。
      * v22 = CAP-73 需求开发中验证（verify_push/verify_pack/verify_patch 下行帧 +
      * verify_ack/verify_log 上行帧——构建产物包走 HTTP 上下行不入帧；老 runner 不认识
-     * verify_* 帧会静默忽略，编排端会空等超时，故属「必须认识」需门控，409 话术引导升级）。</p>
+     * verify_* 帧会静默忽略，编排端会空等超时，故属「必须认识」需门控，409 话术引导升级）。
+     * v23 = CAP-74 worklog_push 署名（已随 worklog 下发链路下线，版本号保持单调）。
+     * v24 = CAP-104 M1.5 程序型用例（exec 帧 {@code bundle.kind="test-program"}：runner
+     * 从 {@code /api/agent/test-program/assets/{id}/bundle} 拉预构建程序 ZIP，树形解包、
+     * 注入 DEVMIND_INPUT/RESULT/ARTIFACTS 并回收 result.json/artifacts；老 runner 会按
+     * CAP-56 平铺解包并找 bundle.json，必然失败，故属「必须认识」需门控）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 23;
+    public static final int CURRENT = 24;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;
@@ -155,6 +160,9 @@ public final class AgentProtocol {
      */
     @Deprecated
     public static final int WORKLOG_PUSH_IDENTITY = 23;
+
+    /** CAP-104 M1.5 程序型用例（exec bundle.kind=test-program，树形解包 + 程序契约注入）所需最低版本 */
+    public static final int TEST_PROGRAM_BUNDLE = 24;
 
     /** hello 未携带 protocolVersion 的老 runner 按此版本对待 */
     public static final int DEFAULT_WHEN_ABSENT = 1;

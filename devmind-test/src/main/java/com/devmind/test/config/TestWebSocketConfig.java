@@ -4,10 +4,13 @@ import com.devmind.common.security.CorsProperties;
 import com.devmind.execution.ws.ExecutionLogHub;
 import com.devmind.execution.ws.ExecutionSnapshotProvider.ExecutionSnapshot;
 import com.devmind.execution.ws.ExecutionWsHandler;
-import com.devmind.test.dto.CaseResultView;
+import com.devmind.test.dto.TestPlanRunView;
+import com.devmind.test.dto.TestRunView;
+import com.devmind.test.model.TestPlanRunEntity;
 import com.devmind.test.model.TestRunEntity;
-import com.devmind.test.repo.TestCaseResultRepository;
 import com.devmind.test.repo.TestRunRepository;
+import com.devmind.test.service.TestPlanRunService;
+import com.devmind.test.service.TestRunService;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
@@ -28,16 +31,18 @@ public class TestWebSocketConfig implements WebSocketConfigurer {
 
     private final ExecutionLogHub hub;
     private final TestRunRepository runRepo;
-    private final TestCaseResultRepository resultRepo;
+    private final TestRunService runService;
+    private final TestPlanRunService planRunService;
     private final ObjectMapper mapper;
     private final CorsProperties corsProperties;
 
-    public TestWebSocketConfig(ExecutionLogHub hub, TestRunRepository runRepo,
-                               TestCaseResultRepository resultRepo, ObjectMapper mapper,
-                               CorsProperties corsProperties) {
+    public TestWebSocketConfig(ExecutionLogHub hub, TestRunRepository runRepo, TestRunService runService,
+                               TestPlanRunService planRunService,
+                               ObjectMapper mapper, CorsProperties corsProperties) {
         this.hub = hub;
         this.runRepo = runRepo;
-        this.resultRepo = resultRepo;
+        this.runService = runService;
+        this.planRunService = planRunService;
         this.mapper = mapper;
         this.corsProperties = corsProperties;
     }
@@ -46,6 +51,9 @@ public class TestWebSocketConfig implements WebSocketConfigurer {
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(new ExecutionWsHandler(hub, this::snapshot, mapper, "/test-runs/"),
                         "/ws/test-runs/**")
+                .setAllowedOrigins(corsProperties.originsArray());
+        registry.addHandler(new ExecutionWsHandler(hub, this::planSnapshot, mapper, "/test-plan-runs/"),
+                        "/ws/test-plan-runs/**")
                 .setAllowedOrigins(corsProperties.originsArray());
     }
 
@@ -59,19 +67,50 @@ public class TestWebSocketConfig implements WebSocketConfigurer {
         if (r == null) {
             return null;
         }
+        TestRunView view;
+        try {
+            view = runService.get(id);
+        } catch (Exception e) {
+            return null;
+        }
         Map<String, Object> extra = new LinkedHashMap<>();
         extra.put("runId", id);
         extra.put("status", r.getStatus());
         extra.put("baseUrl", r.getBaseUrl() == null ? "" : r.getBaseUrl());
-        extra.put("results", resultRepo.findByRunIdOrderBySortAsc(id).stream()
-                .map(e -> new CaseResultView(e.getId(), e.getCaseId(), e.getSuiteId(), e.getSort(), e.getName(),
-                        e.getStatus(), e.getRequestSummary(), e.getResponseSummary(), e.getError(), e.getDuration()))
-                .toList());
+        extra.put("results", view.results());
         return new ExecutionSnapshot(null, r.getStatus(), isTerminal(r.getStatus()), extra);
     }
 
+    /** 方案运行快照：汇总 + 方案项结果 + 子运行（topic 形如 plan-{id}）。 */
+    private ExecutionSnapshot planSnapshot(String topic) {
+        Long id = parseLong(topic == null ? null : topic.replaceFirst("^plan-", ""));
+        if (id == null) {
+            return null;
+        }
+        TestPlanRunView view;
+        try {
+            view = planRunService.get(id);
+        } catch (Exception e) {
+            return null;
+        }
+        Map<String, Object> extra = new LinkedHashMap<>();
+        extra.put("planRunId", id);
+        extra.put("status", view.status());
+        extra.put("conclusion", view.conclusion());
+        extra.put("summary", view.summary());
+        extra.put("items", view.items());
+        extra.put("children", view.children());
+        return new ExecutionSnapshot(null, view.status(), isPlanTerminal(view.status()), extra);
+    }
+
+    private boolean isPlanTerminal(String status) {
+        return TestPlanRunEntity.SUCCESS.equals(status) || TestPlanRunEntity.FAILED.equals(status)
+                || TestPlanRunEntity.BLOCKED.equals(status) || TestPlanRunEntity.CANCELLED.equals(status);
+    }
+
     private boolean isTerminal(String status) {
-        return TestRunEntity.SUCCESS.equals(status) || TestRunEntity.FAILED.equals(status);
+        return TestRunEntity.SUCCESS.equals(status) || TestRunEntity.FAILED.equals(status)
+                || TestRunEntity.BLOCKED.equals(status);
     }
 
     private Long parseLong(String topic) {

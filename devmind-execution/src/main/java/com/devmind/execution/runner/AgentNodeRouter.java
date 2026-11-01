@@ -5,6 +5,7 @@ import com.devmind.common.agent.AgentExecResult;
 import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.AgentProtocol;
 import com.devmind.common.exception.DevMindException;
+import com.devmind.common.program.ProgramManifest;
 import com.devmind.common.exception.ErrorCode;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
@@ -77,6 +78,45 @@ public class AgentNodeRouter {
      */
     public void requireBundleCapable(String nodeId) {
         requireProtocol(nodeId, AgentProtocol.EXEC_BUNDLE, "决策实验室评测/微调（执行包由 runner 拉取物化）");
+    }
+
+    /**
+     * CAP-104 M1.5：节点在线且支持程序包树形解包（v24+）；随后按清单预检
+     * OS/架构/运行时版本——不匹配在执行前 BLOCKED，而不是让程序跑到一半报「命令不存在」。
+     */
+    public void requireProgramCompatible(String nodeId, ProgramManifest manifest) {
+        requireProtocol(nodeId, AgentProtocol.TEST_PROGRAM_BUNDLE, "程序型用例（程序包由 runner 树形解包）");
+        AgentNodeConnector connector = connectorProvider.getIfAvailable();
+        if (connector == null) {
+            throw new DevMindException(ErrorCode.CONFLICT, "agent 模块未装配，无可用执行节点");
+        }
+        String os = connector.nodeOs(nodeId);
+        if (!manifest.matchesOs(os)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 的 OS（" + (os == null ? "未上报" : os)
+                            + "）与程序包 targetOs=" + manifest.targetOs() + " 不匹配");
+        }
+        String arch = ProgramManifest.archOfNodeOs(os);
+        if (!manifest.matchesArch(arch)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 的架构（" + (arch == null ? "未上报" : arch)
+                            + "）与程序包 targetArch=" + manifest.targetArch() + " 不匹配");
+        }
+        String key = manifest.requiredToolchainKey();
+        if (key == null) {
+            return;
+        }
+        String actual = connector.nodeToolchain(nodeId).get(key);
+        if (actual == null || actual.isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 未探测到 " + key + " 运行时，无法满足程序包 runtime="
+                            + manifest.runtime());
+        }
+        if (!manifest.satisfiesRuntimeVersion(actual)) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "节点 " + nodeId + " 的 " + key + " 版本 " + actual
+                            + " 不满足程序包 runtimeVersion=" + manifest.runtimeVersion());
+        }
     }
 
     /**

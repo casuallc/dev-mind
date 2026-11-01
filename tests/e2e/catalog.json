@@ -87,6 +87,41 @@
       "suite": "regression",
       "owner": "auth",
       "cap": "CAP-103"
+    },
+    {
+      "id": "regression.test-case-version-run-evidence",
+      "test": "Regression.test_case_version_review_run_and_evidence",
+      "suite": "regression",
+      "owner": "test",
+      "cap": "CAP-104"
+    },
+    {
+      "id": "regression.test-asset-review-gate",
+      "test": "Regression.test_test_asset_review_gate_and_deletion",
+      "suite": "regression",
+      "owner": "test",
+      "cap": "CAP-104"
+    },
+    {
+      "id": "regression.plan-orchestration-baseline-stats-evidence",
+      "test": "Regression.test_plan_orchestration_baseline_stats_and_evidence",
+      "suite": "regression",
+      "owner": "test",
+      "cap": "CAP-104"
+    },
+    {
+      "id": "regression.distributed-matrix-shard",
+      "test": "Regression.test_distributed_matrix_and_shard",
+      "suite": "regression",
+      "owner": "test",
+      "cap": "CAP-104"
+    },
+    {
+      "id": "regression.runner-partial-failure-program-case",
+      "test": "Regression.test_runner_partial_failure_and_program_case",
+      "suite": "regression",
+      "owner": "test",
+      "cap": "CAP-104"
     }
   ]
 }

@@ -98,6 +98,23 @@ async function requestText(path: string): Promise<string> {
   return res.text()
 }
 
+/** 鉴权下载：证据/附件等二进制响应，401 刷新后重放一次 */
+async function requestBlob(path: string): Promise<Blob> {
+  let res = await rawRequest(path)
+  if (res.status === 401 && !isAuthEndpoint(path)) {
+    if (await tryRefresh()) {
+      res = await rawRequest(path)
+    } else {
+      forceReLogin()
+    }
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw parseApiError(res.status, text)
+  }
+  return res.blob()
+}
+
 export interface ConditionalResult<T> {
   /** true = 服务端 304，data/etag 无意义，调用方沿用本地缓存 */
   notModified: boolean
@@ -133,6 +150,8 @@ export const api = {
   get: <T>(path: string) => request<T>(path),
   /** 纯文本 GET（日志/报告等非 JSON 响应） */
   getText: (path: string) => requestText(path),
+  /** 鉴权二进制 GET（下载证据/附件） */
+  getBlob: (path: string) => requestBlob(path),
   /** 条件 GET（ETag/304）：轮询列表省传输 */
   getConditional: <T>(path: string, etag?: string) => requestConditional<T>(path, etag),
   post: <T>(path: string, body?: unknown) =>

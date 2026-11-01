@@ -35,11 +35,12 @@ import {
   getRun,
   getRunLogs,
   getRunReport,
+  listModules,
   listRuns,
   listScriptSuites,
   listSuites,
 } from '../api'
-import type { IssueDraft, ScriptSuite, TestRun, TestRunStatus, TestSuite } from '../types'
+import type { IssueDraft, ScriptSuite, TestModule, TestRun, TestRunStatus, TestSuite } from '../types'
 import type { ProjectEnvironment } from '../../projects/types'
 import type { AgentNode } from '../../agent/types'
 import { listEnvironments } from '../../projects/api'
@@ -47,11 +48,16 @@ import { listAgentNodes } from '../../agent/api'
 import { useCurrentProjectId } from '../../../app/useCurrentProject'
 import { durationMs, fmtTime } from '../../../shared/utils/format'
 import { DRAWER_DEFAULT, DRAWER_SCREEN } from '../../../shared/utils/overlay'
-import { STATUS_COLOR, SUITE_KIND_COLOR } from '../constants'
+import { CONCLUSION_COLOR, REVIEW_COLOR, REVIEW_LABEL, STATUS_COLOR, SUITE_KIND_COLOR } from '../constants'
 import RunDetailDrawer from '../components/RunDetailDrawer'
 import IssuesTable from '../components/IssuesTable'
 import SuiteFormDrawer from '../components/SuiteFormDrawer'
 import RunSuiteModal from '../components/RunSuiteModal'
+import CaseLibraryPanel from '../components/CaseLibraryPanel'
+import AssetLibraryPanel from '../components/AssetLibraryPanel'
+import PlansPanel from '../components/PlansPanel'
+import StatsPanel from '../components/StatsPanel'
+import ScrollRow from '../../../shared/components/ScrollRow'
 import { pageCardBodyFlexStyle, pageCardStyle } from '../../../shared/utils/pageLayout'
 import FitTable from '../../../shared/components/FitTable'
 import { workItemColumn } from '../../../shared/components/WorkItemCell'
@@ -60,13 +66,24 @@ import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { usePermittedView, usePermissions } from '../../auth/usePermissions'
 
-const TEST_VIEWS = ['suites', 'runs'] as const
+const TEST_VIEWS = ['suites', 'plans', 'cases', 'assets', 'runs', 'stats'] as const
 type TestView = (typeof TEST_VIEWS)[number]
 const TEST_VIEW_PERMISSIONS: Record<TestView, string> = {
   suites: 'project.tests.tab.suites',
+  plans: 'project.tests.tab.plans',
+  cases: 'project.tests.tab.cases',
+  assets: 'project.tests.tab.assets',
   runs: 'project.tests.tab.runs',
+  stats: 'project.tests.tab.stats',
 }
-const TEST_VIEW_LABELS: Record<TestView, string> = { suites: '测试套件', runs: '运行历史' }
+const TEST_VIEW_LABELS: Record<TestView, string> = {
+  suites: '测试套件',
+  plans: '测试方案',
+  cases: '用例库',
+  assets: '测试资产',
+  runs: '运行历史',
+  stats: '测试统计',
+}
 
 export default function TestsPage() {
   const projectId = useCurrentProjectId()
@@ -81,7 +98,11 @@ function TestCenter({ id }: { id: string }) {
   const canManageSuite = canAction('project.tests.action.manage-suite')
   const canRun = canAction('project.tests.action.run')
   const canManageRun = canAction('project.tests.action.manage-run')
-  const [view, setView] = useState<string>('suites') // suites | runs
+  const canManagePlan = canAction('project.tests.action.manage-plan')
+  const canRunPlan = canAction('project.tests.action.run-plan')
+  const canManageBaseline = canAction('project.tests.action.manage-baseline')
+  const canExportEvidence = canAction('project.tests.action.export-evidence')
+  const [view, setView] = useState<string>('suites')
   const permittedViews = usePermittedView(
     TEST_VIEWS,
     (v) => TEST_VIEW_PERMISSIONS[v],
@@ -90,6 +111,7 @@ function TestCenter({ id }: { id: string }) {
   )
   const [suites, setSuites] = useState<TestSuite[]>([])
   const [scriptSuites, setScriptSuites] = useState<ScriptSuite[]>([])
+  const [modules, setModules] = useState<TestModule[]>([])
   const [runs, setRuns] = useState<TestRun[]>([])
   const [nodes, setNodes] = useState<AgentNode[]>([])
   const [environments, setEnvironments] = useState<ProjectEnvironment[]>([])
@@ -119,21 +141,29 @@ function TestCenter({ id }: { id: string }) {
     listRuns(id).then(setRuns).catch(() => {})
   }
 
+  const openRunDetail = (runId: number) => {
+    getRun(runId)
+      .then(setDetail)
+      .catch(() => message.warning(`测试运行 #${runId} 不存在或已删除`))
+  }
+
   const loadAll = async () => {
     setLoading(true)
     try {
-      const [s, r, nd, ev, ss] = await Promise.all([
+      const [s, r, nd, ev, ss, md] = await Promise.all([
         listSuites(id),
         listRuns(id),
         listAgentNodes().catch(() => []),
         listEnvironments(id).catch(() => []),
         listScriptSuites(id).catch(() => []),
+        listModules(id).catch(() => []),
       ])
       setSuites(s)
       setRuns(r)
       setNodes(nd)
       setEnvironments(ev)
       setScriptSuites(ss)
+      setModules(md)
     } catch (e) {
       showError(e, '加载失败')
     } finally {
@@ -217,12 +247,21 @@ function TestCenter({ id }: { id: string }) {
   }
 
   const scriptOf = (suiteId: number) => scriptSuites.find((x) => x.id === suiteId)
+  const moduleNameOf = (s: TestSuite) => {
+    if (s.moduleId == null) return '未分类'
+    return modules.find((m) => m.id === s.moduleId)?.name ?? `#${s.moduleId}`
+  }
 
   // 列宽全部固定：名称不再吃掉剩余宽度，创建时间给足 170 不折行
   const suiteColumns: ColumnsType<TestSuite> = [
     { title: 'ID', dataIndex: 'id', width: 64, render: (v: number) => `#${v}` },
-    { title: '名称', dataIndex: 'name', width: 240, ellipsis: true, render: (n: string) => n || '-' },
+    { title: '名称', dataIndex: 'name', width: 220, ellipsis: true, render: (n: string) => n || '-' },
     { title: '类型', dataIndex: 'kind', width: 80, render: (v: string) => <Tag color={SUITE_KIND_COLOR[v]}>{v}</Tag> },
+    { title: '模块', key: 'module', width: 110, ellipsis: true, render: (_, s) => moduleNameOf(s) },
+    {
+      title: '评审', dataIndex: 'reviewStatus', width: 90,
+      render: (v: keyof typeof REVIEW_COLOR | null) => (v ? <Tag color={REVIEW_COLOR[v]}>{REVIEW_LABEL[v]}</Tag> : '-'),
+    },
     { title: '来源', dataIndex: 'source', width: 100, render: (v: string) => (v === 'openapi' ? <Tag color="geekblue">OpenAPI</Tag> : <Tag>手动</Tag>) },
     { title: '用例数', dataIndex: 'caseCount', width: 80, render: (v: number, s) => (s.kind === 'script' ? '-' : v) },
     { title: '沉淀文档', dataIndex: 'docId', width: 90, render: (v: number | null) => (v ? `#${v}` : <span>-</span>) },
@@ -256,16 +295,22 @@ function TestCenter({ id }: { id: string }) {
       render: (v: TestRunStatus) => <Tag color={STATUS_COLOR[v]}>{v}</Tag>,
     },
     {
-      title: '结果', dataIndex: 'summary', width: 130,
+      title: '结果', dataIndex: 'summary', width: 170,
       render: (s: TestRun['summary']) => (
         s ? (
           <span style={{ fontSize: 12 }}>
             {s.total} 项 · <span style={{ color: '#52c41a' }}>{s.passed} 过</span>{' '}
             <span style={{ color: s.failed ? '#ff4d4f' : undefined }}>{s.failed} 败</span>{' '}
             <span style={{ color: '#fa8c16' }}>{s.skipped} 跳</span>
+            {s.blocked > 0 && <span style={{ color: '#d48806' }}> {s.blocked} 阻</span>}
+            {s.error > 0 && <span style={{ color: '#c41d7f' }}> {s.error} 错</span>}
           </span>
         ) : <span>-</span>
       ),
+    },
+    {
+      title: '结论', dataIndex: 'conclusion', width: 90,
+      render: (v: keyof typeof CONCLUSION_COLOR | null) => (v ? <Tag color={CONCLUSION_COLOR[v]}>{v}</Tag> : '-'),
     },
     { title: '目标', dataIndex: 'baseUrl', width: 160, ellipsis: true, render: (v: string | null) => (v ? <Typography.Text code style={{ fontSize: 12 }}>{v}</Typography.Text> : <span>-</span>) },
     workItemColumn<TestRun>(id),
@@ -327,11 +372,13 @@ function TestCenter({ id }: { id: string }) {
       title={
         <Space size={12}>
           <span>测试记录</span>
-          <Segmented
-            value={view}
-            onChange={setView}
-            options={permittedViews.map((v) => ({ value: v, label: TEST_VIEW_LABELS[v] }))}
-          />
+          <ScrollRow activeSelector=".ant-segmented-item-selected">
+            <Segmented
+              value={view}
+              onChange={setView}
+              options={permittedViews.map((v) => ({ value: v, label: TEST_VIEW_LABELS[v] }))}
+            />
+          </ScrollRow>
         </Space>
       }
       extra={
@@ -342,14 +389,14 @@ function TestCenter({ id }: { id: string }) {
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建套件</Button>
             )}
           </Space>
-        ) : (
+        ) : view === 'runs' ? (
           <Space>
             <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
             {canRun && (
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setRunOpen(true)}>新建运行</Button>
             )}
           </Space>
-        )
+        ) : null // 用例库/资产库的筛选与操作由面板自带（与 AgentNodesPage 子面板同构）
       }
     >
       {view === 'suites' ? (
@@ -363,10 +410,28 @@ function TestCenter({ id }: { id: string }) {
               ? '暂无套件：点右上角「新建套件」——冒烟（health 用例走执行节点健康检查）/ api（手工编排或选 openapi 由项目文档生成）/ 脚本（git 源 + 命令）'
               : '暂无套件' }} />
         </>
+      ) : view === 'plans' ? (
+        <PlansPanel
+          projectId={id}
+          suites={suites}
+          nodes={nodes}
+          environments={environments}
+          canManagePlan={canManagePlan}
+          canRunPlan={canRunPlan}
+          canManageBaseline={canManageBaseline}
+          canExportEvidence={canExportEvidence}
+          onOpenRun={openRunDetail}
+        />
+      ) : view === 'cases' ? (
+        <CaseLibraryPanel projectId={id} onOpenRun={(r) => { setDetail(r); refresh() }} />
+      ) : view === 'assets' ? (
+        <AssetLibraryPanel projectId={id} />
+      ) : view === 'stats' ? (
+        <StatsPanel projectId={id} />
       ) : (
         <>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-            运行的历史记录：「详情」里看实时结果流与报告/日志；失败运行可在详情中一键生成缺陷线索。
+            运行的历史记录：「详情」里看实时结果流、断言差异、证据链与报告/日志；失败运行可在详情中一键生成缺陷线索。
           </Typography.Paragraph>
           <FitTable<TestRun> rowKey="id" loading={loading} dataSource={runs} columns={runColumns}
             pagination={LIST_PAGINATION} locale={{ emptyText: canRun

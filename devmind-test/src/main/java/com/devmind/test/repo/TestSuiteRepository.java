@@ -18,5 +18,11 @@ public interface TestSuiteRepository extends JpaRepository<TestSuiteEntity, Long
     /** CAP-69：项目绑定的脚本套件（项目「测试」页套件列表用） */
     List<TestSuiteEntity> findByProjectIdAndKindOrderByCreatedAtDesc(String projectId, String kind);
 
+    List<TestSuiteEntity> findByModuleId(Long moduleId);
+
+    long countByModuleId(Long moduleId);
+
+    long countBySourceAssetId(Long sourceAssetId);
+
     void deleteByProjectId(String projectId);
 }

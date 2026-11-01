@@ -64,7 +64,7 @@ agent-runner 节点（瘦 jar 无 Spring，可 Windows 服务托管）
 
 ### 3.3 执行器（构建/部署/测试/发版）
 
-统一执行底座（步骤链 + 日志 Hub，CAP-12），四大执行器各自实体与状态机，**全部 runner 化**（exec 帧下发节点执行，CAP-36）；脚本测试套件（kind=script，JUnit XML 回收，CAP-69）；制品登记存储（devmind-artifact）。安全扫描（CAP-66）定稿未实施。
+统一执行底座（步骤链 + 日志 Hub，CAP-12），四大执行器各自实体与状态机，**全部 runner 化**（exec 帧下发节点执行，CAP-36）；脚本测试套件（kind=script，JUnit XML 回收，CAP-69）；测试资产与执行平台 v2（CAP-104：模块分层、CaseSpec 版本/评审、资产导入闸门、环境预检、证据哈希链、人工判定与 JSON 报告；M1.5 预构建 ZIP 程序包与输入/输出契约，平台不构建；M2 方案编排/快照/基线/证据包；M3 SHARD/MATRIX、统计与大文件证据上行）；制品登记存储（devmind-artifact）。安全扫描（CAP-66）定稿未实施。
 
 ### 3.4 知识
 

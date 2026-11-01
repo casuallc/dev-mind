@@ -2,6 +2,7 @@ package com.devmind.agent.runner;
 
 import com.devmind.common.agent.exec.RunnerWorkspace;
 import com.devmind.common.agent.runtime.ProcessHelper;
+import com.devmind.common.program.ProgramContract;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
@@ -14,6 +15,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,6 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 
 /**
  * CAP-36 exec 帧 handler（runner 侧本地执行代理）：收 exec{execId, command, ...} →
@@ -103,6 +107,7 @@ public class ExecHandler {
         }
         String token = null;
         Path bundleDir = null;
+        TestProgramPuller.Materialized program = null;
         try {
             String command = frame.path("command").asText("");
             String projectId = frame.path("projectId").asText(null);
@@ -126,18 +131,30 @@ public class ExecHandler {
                 if (kind.isBlank() || bundleId.isBlank()) {
                     throw new IllegalStateException("bundle 块缺 kind/id");
                 }
-                LabBundlePuller.Materialized bundle = LabBundlePuller.pull(config, kind, bundleId);
-                bundleDir = bundle.dir();
-                env.put(SCRIPT_ENV, bundle.script().toAbsolutePath().toString());
-                env.put(PAYLOAD_ENV, bundle.payload().toAbsolutePath().toString());
-                emit(execId, "stdout", "[runner] 执行包已物化: " + bundle.fileName()
-                        + " → " + bundle.dir(), token);
+                if (ProgramContract.KIND.equals(kind)) {
+                    // CAP-104 M1.5：程序包树形解包 + 契约 v1 输入/输出路径注入
+                    program = TestProgramPuller.pull(config, bundleId);
+                    bundleDir = program.dir();
+                    prepareProgramInput(program, env);
+                    emit(execId, "stdout", "[runner] 程序包已解包: " + program.fileName()
+                            + " (" + program.manifest().name() + " " + program.manifest().version() + ")"
+                            + " → " + program.dir(), token);
+                } else {
+                    LabBundlePuller.Materialized bundle = LabBundlePuller.pull(config, kind, bundleId);
+                    bundleDir = bundle.dir();
+                    env.put(SCRIPT_ENV, bundle.script().toAbsolutePath().toString());
+                    env.put(PAYLOAD_ENV, bundle.payload().toAbsolutePath().toString());
+                    emit(execId, "stdout", "[runner] 执行包已物化: " + bundle.fileName()
+                            + " → " + bundle.dir(), token);
+                }
             }
 
-            // 工作区：带 repo 块 = 构建（clone 缓存 + detach checkout）；否则 runner 本地目录（部署/发版）
+            // 工作区：程序包以解包根为工作区；带 repo 块 = 构建；否则 runner 本地目录（部署/发版）
             Path cwd;
             JsonNode repoNode = frame.path("repo");
-            if (repoNode.isObject() && !repoNode.path("remoteUrl").asText("").isBlank()) {
+            if (program != null) {
+                cwd = program.root();
+            } else if (repoNode.isObject() && !repoNode.path("remoteUrl").asText("").isBlank()) {
                 if (projectId == null || projectId.isBlank() || workspaceId == null || workspaceId.isBlank()) {
                     throw new IllegalStateException("带 repo 块的 exec 必须携带 projectId 与 workspaceId");
                 }
@@ -191,6 +208,13 @@ public class ExecHandler {
                 outT.join(5000);
                 errT.join(5000);
                 code = proc.exitValue();
+                if (program != null) {
+                    try {
+                        collectProgram(execId, program, token);
+                    } catch (Exception e) {
+                        emit(execId, "stderr", "[runner] 程序产物回收失败: " + e.getMessage(), token);
+                    }
+                }
             } finally {
                 active.remove(execId);
                 if (proc != null && proc.isAlive()) {
@@ -283,6 +307,119 @@ public class ExecHandler {
             throw new IllegalStateException("工作目录不存在: " + cwd);
         }
         return cwd;
+    }
+
+    /**
+     * 程序契约 v1 输入落盘：服务端把 input.json 以 base64 放在 {@code DEVMIND_PROGRAM_INPUT_B64}
+     * （避免把 JSON 拼进 shell 命令/临时脚本），这里落盘后移除该变量，只给程序暴露三个绝对路径。
+     */
+    private void prepareProgramInput(TestProgramPuller.Materialized program, Map<String, String> env)
+            throws IOException {
+        String b64 = env.remove(ProgramContract.INPUT_B64_ENV);
+        byte[] input;
+        try {
+            input = b64 == null ? null : Base64.getDecoder().decode(b64);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("程序输入 base64 非法", e);
+        }
+        if (input == null || input.length == 0) {
+            throw new IllegalStateException("程序型用例缺少输入 JSON（" + ProgramContract.INPUT_B64_ENV + "）");
+        }
+        if (input.length > ProgramContract.MAX_INPUT_BYTES) {
+            throw new IllegalStateException("程序输入超限（" + input.length + " > "
+                    + ProgramContract.MAX_INPUT_BYTES + " 字节）");
+        }
+        Path root = program.root();
+        Path inputPath = root.resolve(ProgramContract.INPUT_PATH).normalize();
+        Path resultPath = root.resolve(ProgramContract.RESULT_PATH).normalize();
+        Path artifacts = root.resolve(ProgramContract.ARTIFACTS_PATH).normalize();
+        if (!inputPath.startsWith(root) || !resultPath.startsWith(root) || !artifacts.startsWith(root)) {
+            throw new IllegalStateException("程序契约路径逃逸包根");
+        }
+        Files.createDirectories(inputPath.getParent());
+        Files.createDirectories(artifacts);
+        Files.write(inputPath, input);
+        try {
+            Files.setPosixFilePermissions(inputPath,
+                    java.nio.file.attribute.PosixFilePermissions.fromString("r--r--r--"));
+        } catch (Exception ignored) {
+            // Windows/非 POSIX 文件系统不支持只读权限位；输入不落敏感信息，尽力而为
+        }
+        env.put(ProgramContract.INPUT_ENV, inputPath.toAbsolutePath().toString());
+        env.put(ProgramContract.RESULT_ENV, resultPath.toAbsolutePath().toString());
+        env.put(ProgramContract.ARTIFACTS_ENV, artifacts.toAbsolutePath().toString());
+    }
+
+    /** 进程结束后回收 result.json 与 artifacts（按 512KB WS 上限分片上行），随后调用方删临时目录。 */
+    private void collectProgram(String execId, TestProgramPuller.Materialized program, String token)
+            throws IOException {
+        Path root = program.root();
+        Path result = root.resolve(ProgramContract.RESULT_PATH).normalize();
+        if (Files.isRegularFile(result)) {
+            long size = Files.size(result);
+            if (size > ProgramContract.MAX_RESULT_BYTES) {
+                emit(execId, "stderr", "[runner] result.json 超限（" + size + " > "
+                        + ProgramContract.MAX_RESULT_BYTES + " 字节），按畸形结果处理", token);
+            } else {
+                byte[] bytes = Files.readAllBytes(result);
+                emit(execId, "stdout", ProgramContract.RESULT_MARKER + bytes.length + " "
+                        + TestProgramPuller.sha256(bytes), token);
+                for (int off = 0, seq = 0; off < bytes.length; off += ProgramContract.CHUNK_BYTES, seq++) {
+                    int end = Math.min(bytes.length, off + ProgramContract.CHUNK_BYTES);
+                    emit(execId, "stdout", ProgramContract.RESULT_CHUNK_MARKER + seq + " "
+                            + Base64.getEncoder().encodeToString(
+                                    java.util.Arrays.copyOfRange(bytes, off, end)), token);
+                }
+            }
+        }
+
+        Path artifacts = root.resolve(ProgramContract.ARTIFACTS_PATH).normalize();
+        if (!Files.isDirectory(artifacts)) {
+            return;
+        }
+        List<Path> files;
+        try (Stream<Path> walk = Files.walk(artifacts)) {
+            files = walk.filter(p -> !Files.isSymbolicLink(p) && Files.isRegularFile(p))
+                    .sorted(Comparator.comparing(p -> relative(artifacts, p)))
+                    .toList();
+        }
+        int count = 0;
+        long total = 0;
+        for (Path file : files) {
+            String rel = relative(artifacts, file);
+            if (count >= ProgramContract.MAX_ARTIFACTS) {
+                emit(execId, "stderr", "[runner] artifacts 数量超限（>" + ProgramContract.MAX_ARTIFACTS
+                        + "），其余未采集", token);
+                break;
+            }
+            long size = Files.size(file);
+            if (size > ProgramContract.MAX_ARTIFACT_BYTES) {
+                emit(execId, "stderr", "[runner] artifact 超限跳过: " + rel + "（" + size + " > "
+                        + ProgramContract.MAX_ARTIFACT_BYTES + " 字节）", token);
+                continue;
+            }
+            if (total + size > ProgramContract.MAX_ARTIFACTS_TOTAL_BYTES) {
+                emit(execId, "stderr", "[runner] artifacts 总量超限（>"
+                        + ProgramContract.MAX_ARTIFACTS_TOTAL_BYTES + " 字节），其余未采集", token);
+                break;
+            }
+            byte[] bytes = Files.readAllBytes(file);
+            String name = Base64.getEncoder().encodeToString(rel.getBytes(StandardCharsets.UTF_8));
+            emit(execId, "stdout", ProgramContract.ARTIFACT_MARKER + name + " " + bytes.length + " "
+                    + TestProgramPuller.sha256(bytes), token);
+            for (int off = 0, seq = 0; off < bytes.length; off += ProgramContract.CHUNK_BYTES, seq++) {
+                int end = Math.min(bytes.length, off + ProgramContract.CHUNK_BYTES);
+                emit(execId, "stdout", ProgramContract.ARTIFACT_CHUNK_MARKER + name + " " + seq + " "
+                        + Base64.getEncoder().encodeToString(
+                                java.util.Arrays.copyOfRange(bytes, off, end)), token);
+            }
+            count++;
+            total += bytes.length;
+        }
+    }
+
+    private String relative(Path base, Path file) {
+        return base.relativize(file).toString().replace('\\', '/');
     }
 
     private void pump(InputStream in, String stream, String execId, String token) {

@@ -32,7 +32,10 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import com.devmind.common.agent.AgentExecCommand;
+import com.devmind.common.audit.AuditService;
 import com.devmind.common.event.DomainEventPublisher;
+import com.devmind.common.program.ProgramContract;
+import com.devmind.common.program.ProgramManifest;
 import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
@@ -56,21 +59,37 @@ import com.devmind.project.dto.ProjectView;
 import com.devmind.project.dto.WorkItemBrief;
 import com.devmind.project.model.EnvironmentEntity;
 import com.devmind.test.dto.CaseResultView;
+import com.devmind.test.dto.CaseRunRequest;
 import com.devmind.test.dto.CreateTestRunRequest;
 import com.devmind.test.dto.IssueDraftView;
+import com.devmind.test.dto.ManualReviewRequest;
+import com.devmind.test.dto.PlanChildRunSpec;
+import com.devmind.test.dto.PrecheckReport;
+import com.devmind.test.dto.ProgramRunView;
+import com.devmind.test.dto.RunExecutionSnapshot;
 import com.devmind.test.dto.RunSummary;
 import com.devmind.test.dto.ScriptSuiteEnv;
 import com.devmind.test.dto.ScriptSuiteRunRequest;
+import com.devmind.test.dto.TestEvidenceView;
 import com.devmind.test.dto.TestRunView;
+import com.devmind.test.executor.CaseExecInput;
+import com.devmind.test.executor.CaseExecOutcome;
+import com.devmind.test.executor.CaseExecutionService;
+import com.devmind.test.executor.ProgramOutcome;
 import com.devmind.test.model.TestCaseEntity;
 import com.devmind.test.model.TestCaseResultEntity;
+import com.devmind.test.model.TestCaseVersionEntity;
 import com.devmind.test.model.TestRunEntity;
 import com.devmind.test.model.TestSuiteEntity;
 import com.devmind.test.repo.TestCaseRepository;
 import com.devmind.test.repo.TestCaseResultRepository;
 import com.devmind.test.repo.TestRunRepository;
 import com.devmind.test.repo.TestSuiteRepository;
+import com.devmind.test.spec.AssertionResult;
+import com.devmind.test.spec.CaseSpec;
 import com.devmind.execution.ws.ExecutionLogHub;
+
+import java.util.stream.Collectors;
 
 /**
  * CAP-10 测试执行：创建并异步执行 test_run（http 用例直请求 baseUrl 匹配 expected；health 用例——http 型
@@ -102,6 +121,10 @@ public class TestRunService {
     private final ObjectMapper mapper;
     private final EnvironmentService environmentService;
     private final DomainEventPublisher eventPublisher;
+    private final CaseExecutionService caseExecutionService;
+    private final EvidenceService evidenceService;
+    private final EnvironmentPrecheckService precheckService;
+    private final AuditService auditService;
     /** 僵尸运行阈值（devmind.test.stale-timeout）：QUEUED/RUNNING 超此时长无终态 → 收割置 FAILED */
     private final Duration staleTimeout;
 
@@ -121,6 +144,10 @@ public class TestRunService {
                           EnvironmentService environmentService,
                            IdentityService identityService,
                            DomainEventPublisher eventPublisher,
+                           CaseExecutionService caseExecutionService,
+                           EvidenceService evidenceService,
+                           EnvironmentPrecheckService precheckService,
+                           AuditService auditService,
                            @Value("${devmind.test.stale-timeout:PT2H}") Duration staleTimeout) {
         this.identityService = identityService;
         this.repo = repo;
@@ -138,6 +165,10 @@ public class TestRunService {
         this.mapper = mapper;
         this.environmentService = environmentService;
         this.eventPublisher = eventPublisher;
+        this.caseExecutionService = caseExecutionService;
+        this.evidenceService = evidenceService;
+        this.precheckService = precheckService;
+        this.auditService = auditService;
         this.staleTimeout = staleTimeout;
     }
 
@@ -184,6 +215,7 @@ public class TestRunService {
                 throw new DevMindException(ErrorCode.BAD_REQUEST,
                         "套件 " + sid + " 是脚本套件，请经 /api/script-suites/{id}/run 触发");
             }
+            ensureRunnable(s);
         }
         // 环境补全（CAP-36）：缺省 agentNodeId 取环境首个节点，缺省 baseUrl 取环境变量 baseUrl/BASE_URL
         String envBaseUrl = null;
@@ -211,16 +243,140 @@ public class TestRunService {
         r.setBaseUrl(resolvedBaseUrl);
         r.setStatus(TestRunEntity.RUNNING);
         r.setTriggeredBy(triggeredBy);
+        r.setRunScope(TestRunEntity.SCOPE_SUITE);
         Instant now = Instant.now();
         r.setStartedAt(now);
         r.setCreatedAt(now);
         TestRunEntity saved = repo.save(r);
         testExecutor.submit(() -> run(saved.getId()));
+        auditService.record("test", "run.create", triggeredBy, projectId, true,
+                "运行 #" + saved.getId() + " suites=" + suiteIds);
         return toView(saved);
     }
 
-    // ---------------- CAP-69 脚本套件运行 ----------------
+    // ---------------- CAP-104 单用例运行 ----------------
 
+    /**
+     * 单用例运行（runScope=CASE）：仍生成完整 test_run（结果/证据/报告/通知一致），
+     * 只是执行集合收敛为一个用例；环境预检与清理语义同套件运行。
+     */
+    public TestRunView createCaseRun(Long caseId, CaseRunRequest req) {
+        CaseRunRequest request = req == null ? new CaseRunRequest(null, null, null, null, null, null) : req;
+        TestCaseEntity c = caseRepo.findById(caseId)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "用例不存在: " + caseId));
+        TestSuiteEntity s = suiteRepo.findById(c.getSuiteId())
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "测试套件不存在: " + c.getSuiteId()));
+        String projectId = s.getProjectId();
+        if (projectId == null || projectId.isBlank()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "脚本套件不支持单用例运行");
+        }
+        if (request.projectId() != null && !request.projectId().isBlank()
+                && !request.projectId().strip().equals(projectId)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "用例不属于项目 " + request.projectId());
+        }
+        projectService.requireProject(projectId);
+        if (request.workItemId() != null && !request.workItemId().isBlank()) {
+            workItemService.requireEntity(projectId, request.workItemId());
+        }
+        ensureRunnable(s);
+        ensureCaseRunnable(c);
+
+        String agentNodeId = request.agentNodeId();
+        String envBaseUrl = null;
+        if (request.environmentId() != null) {
+            EnvironmentEntity environment = environmentService.requireEnvironment(projectId, request.environmentId());
+            List<String> envNodes = environmentService.nodeIdsOf(environment);
+            if ((agentNodeId == null || agentNodeId.isBlank()) && !envNodes.isEmpty()) {
+                agentNodeId = envNodes.get(0);
+            }
+            Map<String, String> vars = environmentService.variablesOf(environment);
+            envBaseUrl = vars.getOrDefault("baseUrl", vars.get("BASE_URL"));
+        }
+        String baseUrl = request.baseUrl() != null && !request.baseUrl().isBlank()
+                ? request.baseUrl().strip() : envBaseUrl;
+
+        TestRunEntity r = new TestRunEntity();
+        r.setProjectId(projectId);
+        r.setWorkItemId(request.workItemId() == null || request.workItemId().isBlank()
+                ? null : request.workItemId());
+        r.setSuiteIdsJson(writeIds(List.of(s.getId())));
+        r.setCaseId(caseId);
+        r.setRunScope(TestRunEntity.SCOPE_CASE);
+        r.setAgentNodeId(agentNodeId == null || agentNodeId.isBlank() ? null : agentNodeId.strip());
+        r.setEnvironmentId(request.environmentId());
+        r.setBaseUrl(baseUrl == null || baseUrl.isBlank() ? null : baseUrl.strip());
+        r.setParametersJson(request.parameters() == null ? null : writeMap(request.parameters()));
+        r.setStatus(TestRunEntity.RUNNING);
+        r.setTriggeredBy(identityService.currentActor());
+        Instant now = Instant.now();
+        r.setStartedAt(now);
+        r.setCreatedAt(now);
+        TestRunEntity saved = repo.save(r);
+        testExecutor.submit(() -> run(saved.getId()));
+        auditService.record("test", "run.create.case", saved.getTriggeredBy(), projectId, true,
+                "运行 #" + saved.getId() + " case=" + caseId);
+        return toView(saved);
+    }
+
+    /**
+     * CAP-104 M2 方案子运行：同步执行到终态后返回（并发/重试/失败策略由方案编排器控制）。
+     * 用例来自方案快照，运行期不再读实时用例；报告/通知/完成事件由父方案运行统一发。
+     */
+    public TestRunView createPlanChildRun(PlanChildRunSpec spec, String triggeredBy) {
+        projectService.requireProject(spec.projectId());
+        if (spec.environmentId() != null) {
+            environmentService.requireEnvironment(spec.projectId(), spec.environmentId());
+        }
+        if (spec.workItemId() != null && !spec.workItemId().isBlank()) {
+            workItemService.requireEntity(spec.projectId(), spec.workItemId());
+        }
+        if (spec.cases() == null || spec.cases().isEmpty()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "方案项无可执行用例");
+        }
+        TestRunEntity r = new TestRunEntity();
+        r.setProjectId(spec.projectId());
+        r.setRequirementId(blankToNull(spec.requirementId()));
+        r.setWorkItemId(blankToNull(spec.workItemId()));
+        r.setSuiteIdsJson(writeIds(spec.suiteIds() == null ? List.of() : spec.suiteIds()));
+        r.setCaseId(spec.caseId());
+        r.setRunScope(spec.runScope() == null ? TestRunEntity.SCOPE_SUITE : spec.runScope());
+        r.setAgentNodeId(blankToNull(spec.agentNodeId()));
+        r.setEnvironmentId(spec.environmentId());
+        r.setBaseUrl(blankToNull(spec.baseUrl()));
+        r.setParametersJson(spec.parameters() == null || spec.parameters().isEmpty()
+                ? null : writeMap(spec.parameters()));
+        r.setPlanRunId(spec.planRunId());
+        r.setPlanItemId(spec.planItemId());
+        r.setAttempt(spec.attempt() == null ? 1 : spec.attempt());
+        r.setShardKey(blankToNull(spec.shardKey()));
+        r.setExecutionSnapshotJson(toJson(new RunExecutionSnapshot(Instant.now(), spec.cases())));
+        r.setStatus(TestRunEntity.RUNNING);
+        r.setTriggeredBy(triggeredBy);
+        Instant now = Instant.now();
+        r.setStartedAt(now);
+        r.setCreatedAt(now);
+        TestRunEntity saved = repo.save(r);
+        try {
+            run(saved.getId());
+        } catch (Exception e) {
+            TestRunEntity failed = repo.findById(saved.getId()).orElse(saved);
+            if (TestRunEntity.RUNNING.equals(failed.getStatus()) || TestRunEntity.QUEUED.equals(failed.getStatus())) {
+                failed.setStatus(TestRunEntity.FAILED);
+                failed.setConclusion("FAIL");
+                failed.setErrorSummary(truncate(rootMessage(e), 2000));
+                failed.setFinishedAt(Instant.now());
+                repo.save(failed);
+                hub.done(topic(saved.getId()), failed.getStatus());
+            }
+        }
+        return toView(repo.findById(saved.getId()).orElse(saved));
+    }
+
+    private String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.strip();
+    }
+
+    // ---------------- CAP-69 脚本套件运行 ----------------
     /** RunnerWorkspace.prepareBuild 要求非空 SAFE_ID 项目归属：脚本套件无项目，用固定伪 id */
     static final String SCRIPT_PSEUDO_PROJECT = "script-tests";
 
@@ -235,6 +391,7 @@ public class TestRunService {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "套件 " + suiteId + " 不是脚本套件（kind=" + s.getKind() + "）");
         }
+        ensureRunnable(s);
         String explicit = req != null && req.agentNodeId() != null && !req.agentNodeId().isBlank()
                 ? req.agentNodeId().strip() : null;
         // route() 只有两档回退：套件默认优先；套件未配默认且绑了项目时，回退档让给项目默认节点
@@ -269,6 +426,7 @@ public class TestRunService {
         r.setAgentNodeId(nodeId);
         r.setStatus(TestRunEntity.RUNNING);
         r.setTriggeredBy(identityService.currentActor());
+        r.setRunScope(TestRunEntity.SCOPE_SCRIPT);
         Instant now = Instant.now();
         r.setStartedAt(now);
         r.setCreatedAt(now);
@@ -276,6 +434,8 @@ public class TestRunService {
         Map<String, String> finalEnv = Map.copyOf(env);
         String finalCommand = command;
         testExecutor.submit(() -> runScript(saved.getId(), finalEnv, finalCommand));
+        auditService.record("test", "run.create.script", saved.getTriggeredBy(), s.getProjectId(), true,
+                "脚本运行 #" + saved.getId() + " suite=" + suiteId);
         return toView(saved);
     }
 
@@ -304,6 +464,7 @@ public class TestRunService {
         ScriptMarkers.Tap tap = new ScriptMarkers.Tap(line -> hub.publishLog(topic, line));
         int total = 0, passed = 0, failed = 0, skipped = 0;
         boolean execFailed = false;
+        String junitXml = null;
         try {
             String wsKey = s.getWorkspaceKey() != null && !s.getWorkspaceKey().isBlank()
                     ? s.getWorkspaceKey() : String.valueOf(s.getId());
@@ -311,10 +472,11 @@ public class TestRunService {
                     "stsuite-" + wsKey, 1,
                     new StepSpec("script:" + s.getName(), wrapScriptCommand(command, s.getJunitPath()),
                             s.getWorkSubdir(), "test"),
-                    env, new AgentExecCommand.Repo(s.getRepoUrl(), s.getBranch(), null, null),
+                    env, new AgentExecCommand.Repo(s.getRepoUrl(), s.getBranch(), s.getCommitHash(), null),
                     null, s.getTimeoutSec() == null ? 7200L : s.getTimeoutSec().longValue(), tap);
 
             var xml = tap.junitXml();
+            junitXml = xml.orElse(null);
             if (xml.isPresent()) {
                 try {
                     int sort = 1;
@@ -328,6 +490,9 @@ public class TestRunService {
                         re.setStatus(c.status());
                         re.setError(truncate(c.error(), 1000));
                         re.setDuration(c.durationMs());
+                        re.setNodeId(r.getAgentNodeId());
+                        re.setAttempt(1);
+                        re.setEnvSnapshotJson(toJson(scriptSnapshot(s, r.getAgentNodeId())));
                         re.setCreatedAt(Instant.now());
                         resultRepo.save(re);
                         hub.publishEvent(topic, "result", toResultView(re));
@@ -363,10 +528,19 @@ public class TestRunService {
 
         boolean bad = failed > 0 || execFailed;
         r.setStatus(bad ? TestRunEntity.FAILED : TestRunEntity.SUCCESS);
+        r.setConclusion(conclusion(total, passed, failed, skipped, 0, 0));
         r.setSummaryJson(writeSummary(total, passed, failed, skipped));
         r.setLogsText(tap.logText());
         r.setFinishedAt(Instant.now());
         repo.save(r);
+
+        // CAP-104 证据链：控制台日志 / JUnit XML / 运行摘要（证据失败不影响运行收口）
+        appendEvidenceQuiet(runId, null, r.getAgentNodeId(), "CONSOLE_LOG", "console.log", tap.logText());
+        if (junitXml != null) {
+            appendEvidenceQuiet(runId, null, r.getAgentNodeId(), "JUNIT_XML", "junit.xml", junitXml);
+        }
+        appendEvidenceQuiet(runId, null, r.getAgentNodeId(), "RESULT_JSON", "script-result.json",
+                toJson(scriptRunSummary(r, s, total, passed, failed, skipped)));
 
         // 无项目的脚本 run 跳过 CAP-03 报告文档沉淀（report 端点仍可按 results 重渲染）
         if (r.getProjectId() != null) {
@@ -416,69 +590,479 @@ public class TestRunService {
         if (r == null) {
             return;
         }
-        List<Long> suiteIds = parseIds(r.getSuiteIdsJson());
+        EnvironmentEntity environment = environmentOf(r);
         StringBuilder logs = new StringBuilder();
-        int total = 0, passed = 0, failed = 0, skipped = 0;
+
+        // CAP-104 FR-06 环境预检：失败即 BLOCKED，不产生假失败。
+        // 方案子运行跳过：方案触发时已预检，重复探测既慢又会把父运行已放行的事项再判一遍。
+        if (environment != null && r.getPlanRunId() == null) {
+            PrecheckReport precheck = precheckService.run(r.getProjectId(), environment.getId(), r.getAgentNodeId());
+            appendEvidenceQuiet(runId, null, r.getAgentNodeId(), "QUEUE_LOG", "precheck.json", toJson(precheck));
+            if (!precheck.passed()) {
+                String reason = precheck.items().stream().filter(i -> !i.pass())
+                        .map(i -> i.name() + ": " + i.message())
+                        .collect(Collectors.joining("；"));
+                blockRun(r, logs, "环境预检未通过: " + reason);
+                return;
+            }
+        }
+
+        Counters c = new Counters();
         int sort = 1;
         try {
-            for (Long sid : suiteIds) {
-                List<TestCaseEntity> cases = caseRepo.findBySuiteIdOrderBySortAsc(sid);
-                for (TestCaseEntity c : cases) {
-                    if (!Boolean.TRUE.equals(c.getEnabled())) {
-                        continue;
+            for (CaseExecTarget target : caseTargetsOf(r)) {
+                TestCaseEntity caseEntity = target.entity();
+                if (caseEntity.getSpecJson() != null && !caseEntity.getSpecJson().isBlank()) {
+                    try {
+                        c.add(runSpecCase(r, caseEntity, target.suiteCommit(), environment, sort++, logs));
+                    } catch (Exception e) {
+                        c.add(saveErrorResult(r, caseEntity, sort++, rootMessage(e), logs));
+                        logs.append("[ERROR] ").append(caseEntity.getName()).append(" — ")
+                                .append(rootMessage(e)).append('\n');
                     }
-                    total++;
-                    CaseOutcome out = "health".equalsIgnoreCase(c.getKind())
-                            ? runHealth(c, r)
-                            : runHttp(c, r.getBaseUrl());
-                    long dur = out.duration();
-
-                    TestCaseResultEntity re = new TestCaseResultEntity();
-                    re.setRunId(runId);
-                    re.setCaseId(c.getId());
-                    re.setSuiteId(sid);
-                    re.setSort(sort++);
-                    re.setName(c.getName() == null ? (c.getMethod() + " " + c.getPath()) : c.getName());
-                    re.setStatus(out.status());
-                    re.setRequestSummary(truncate(out.requestSummary(), 1000));
-                    re.setResponseSummary(truncate(out.responseSummary(), 1000));
-                    re.setError(truncate(out.error(), 1000));
-                    re.setDuration(dur);
-                    re.setCreatedAt(Instant.now());
-                    resultRepo.save(re);
-                    hub.publishEvent(topic(runId), "result", toResultView(re));
-                    logs.append("[").append(out.status().toUpperCase()).append("] ")
-                            .append(re.getName()).append(" (").append(dur).append("ms)");
-                    if (out.error() != null && !out.error().isBlank()) {
-                        logs.append(" — ").append(out.error());
-                    }
-                    logs.append('\n');
-
-                    if ("pass".equals(out.status())) {
-                        passed++;
-                    } else if ("fail".equals(out.status())) {
-                        failed++;
-                    } else {
-                        skipped++;
-                    }
+                } else {
+                    CaseOutcome out = "health".equalsIgnoreCase(caseEntity.getKind())
+                            ? runHealth(caseEntity, r)
+                            : runHttp(caseEntity, r.getBaseUrl());
+                    c.add(saveLegacyResult(r, caseEntity, out, sort++, logs));
                 }
             }
-            if (total == 0) {
+            if (c.total == 0) {
                 logs.append("[运行结束] 选中的套件无可执行用例（全部禁用或套件为空）\n");
             }
         } catch (Exception e) {
-            failed++;
+            c.error();
             logs.append("[运行异常] ").append(rootMessage(e)).append('\n');
             r.setErrorSummary(truncate(rootMessage(e), 2000));
         }
 
-        r.setStatus(failed > 0 ? TestRunEntity.FAILED : TestRunEntity.SUCCESS);
-        r.setSummaryJson(writeSummary(total, passed, failed, skipped));
+        // CAP-104 FR-06 环境清理：cleanup_json 配置了才执行，日志进证据链
+        if (environment != null) {
+            String cleanupNode = cleanupNode(r, environment);
+            if (cleanupNode != null) {
+                try {
+                    EnvironmentPrecheckService.CleanupOutcome cleanup = precheckService.cleanup(
+                            r.getProjectId(), environment, cleanupNode,
+                            line -> logs.append("[cleanup] ").append(line).append('\n'));
+                    if (cleanup != null) {
+                        logs.append(cleanup.message()).append('\n');
+                        appendEvidenceQuiet(runId, null, cleanupNode, "CLEANUP_LOG", "cleanup-env.log",
+                                "command: " + cleanup.command() + "\n" + cleanup.output());
+                    }
+                } catch (Exception e) {
+                    logs.append("[cleanup failed] ").append(rootMessage(e)).append('\n');
+                }
+            }
+        }
+
+        finishRun(r, logs, c);
+    }
+
+    /** CASE 作用域只跑指定用例；SUITE 作用域跑所有启用用例。 */
+    private List<TestCaseEntity> casesOf(TestRunEntity r) {
+        if (TestRunEntity.SCOPE_CASE.equals(r.getRunScope()) && r.getCaseId() != null) {
+            TestCaseEntity c = caseRepo.findById(r.getCaseId()).orElse(null);
+            return c == null ? List.of() : List.of(c);
+        }
+        List<TestCaseEntity> out = new ArrayList<>();
+        for (Long sid : parseIds(r.getSuiteIdsJson())) {
+            for (TestCaseEntity c : caseRepo.findBySuiteIdOrderBySortAsc(sid)) {
+                if (Boolean.TRUE.equals(c.getEnabled())) {
+                    out.add(c);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** 执行目标：快照运行用快照里的用例与套件 commit；普通运行用实时数据。 */
+    private record CaseExecTarget(TestCaseEntity entity, String suiteCommit) {
+    }
+
+    private List<CaseExecTarget> caseTargetsOf(TestRunEntity r) {
+        if (r.getExecutionSnapshotJson() != null && !r.getExecutionSnapshotJson().isBlank()) {
+            try {
+                RunExecutionSnapshot snap = mapper.readValue(r.getExecutionSnapshotJson(),
+                        RunExecutionSnapshot.class);
+                if (snap.cases() != null) {
+                    return snap.cases().stream()
+                            .map(c -> new CaseExecTarget(c.toEntity(), c.suiteCommit()))
+                            .toList();
+                }
+            } catch (Exception e) {
+                throw new DevMindException(ErrorCode.CONFLICT,
+                        "运行用例快照损坏，无法按快照执行: run=" + r.getId() + " " + rootMessage(e));
+            }
+        }
+        return casesOf(r).stream().map(c -> {
+            TestSuiteEntity suite = suiteRepo.findById(c.getSuiteId()).orElse(null);
+            return new CaseExecTarget(c, suite == null ? null : suite.getCommitHash());
+        }).toList();
+    }
+
+    /** CAP-104 规范用例执行 + 结果落库 + 证据链。返回 pass/fail/blocked/skip/error。 */
+    private String runSpecCase(TestRunEntity r, TestCaseEntity c, String suiteCommit,
+                               EnvironmentEntity environment, int sort, StringBuilder logs) {
+        CaseSpec spec = caseExecutionService.parseSpec(c.getSpecJson());
+        CaseExecInput in = new CaseExecInput(r.getProjectId(), r.getId(), environment, r.getAgentNodeId(),
+                r.getBaseUrl(), suiteCommit,
+                readStringMap(r.getParametersJson()), c.getId(), c.getCaseKey());
+        String title = spec.title() == null || spec.title().isBlank()
+                ? (c.getName() == null ? c.getCaseKey() : c.getName()) : spec.title();
+        CaseExecOutcome out = caseExecutionService.execute(title, spec, in);
+
+        TestCaseResultEntity re = new TestCaseResultEntity();
+        re.setRunId(r.getId());
+        re.setCaseId(c.getId());
+        re.setSuiteId(c.getSuiteId());
+        re.setSort(sort);
+        re.setName(truncate(title, 128));
+        re.setStatus(out.status());
+        re.setRequestSummary(truncate(out.requestSummary(), 1000));
+        re.setResponseSummary(truncate(out.responseSummary(), 1000));
+        re.setError(truncate(out.error(), 1000));
+        re.setDuration(out.durationMs());
+        re.setNodeId(out.nodeId());
+        re.setAttempt(1);
+        re.setFailureCategory(out.failureCategory());
+        re.setAssertionJson(toJson(out.assertions()));
+        re.setCommand(truncate(out.command(), 4000));
+        re.setExitCode(out.exitCode());
+        re.setEnvSnapshotJson(toJson(out.envSnapshot()));
+        re.setWorkingDir(truncate(out.workingDir(), 512));
+        re.setStartedAt(out.startedAt());
+        re.setFinishedAt(out.finishedAt());
+        re.setCreatedAt(Instant.now());
+        applyProgramColumns(re, out.program());
+        resultRepo.save(re);
+        Long evidenceId = appendCaseEvidence(r.getId(), re, out);
+        if (evidenceId != null) {
+            re.setEvidenceId(evidenceId);
+            resultRepo.save(re);
+        }
+        hub.publishEvent(topic(r.getId()), "result", toResultView(re));
+
+        logLine(logs, out.status(), title, out.durationMs(), out.error());
+        return out.status();
+    }
+
+    /** 程序用例结果列（M1.5）：清单/输入/输出摘要随结果落库，原始 JSON 与产物进证据链。 */
+    private void applyProgramColumns(TestCaseResultEntity re, ProgramOutcome p) {
+        if (p == null) {
+            return;
+        }
+        re.setProgramAssetId(p.assetId());
+        re.setProgramContractVersion(p.contractVersion());
+        re.setProgramManifestJson(p.manifestJson());
+        re.setProgramStatus(p.resultStatus());
+        re.setProgramMessage(truncate(p.resultMessage(), 4000));
+        if (p.metrics() != null && !p.metrics().isEmpty()) {
+            re.setProgramMetricsJson(toJson(p.metrics()));
+        }
+        if (p.artifacts() != null && !p.artifacts().isEmpty()) {
+            re.setProgramArtifactsJson(toJson(p.artifacts().stream()
+                    .map(a -> Map.of("path", a.path(),
+                            "sizeBytes", a.content() == null ? 0 : a.content().length,
+                            "sha256", a.sha256() == null ? "" : a.sha256()))
+                    .toList()));
+        }
+    }
+
+    /** 旧 CAP-10 用例（无 spec）：沿用原执行器，结果同样进证据链。 */
+    private String saveLegacyResult(TestRunEntity r, TestCaseEntity c, CaseOutcome out, int sort,
+                                    StringBuilder logs) {
+        Instant finished = Instant.now();
+        TestCaseResultEntity re = new TestCaseResultEntity();
+        re.setRunId(r.getId());
+        re.setCaseId(c.getId());
+        re.setSuiteId(c.getSuiteId());
+        re.setSort(sort);
+        re.setName(c.getName() == null ? (c.getMethod() + " " + c.getPath()) : c.getName());
+        re.setStatus(out.status());
+        re.setRequestSummary(truncate(out.requestSummary(), 1000));
+        re.setResponseSummary(truncate(out.responseSummary(), 1000));
+        re.setError(truncate(out.error(), 1000));
+        re.setDuration(out.duration());
+        re.setAttempt(1);
+        re.setFailureCategory("fail".equals(out.status()) ? "ASSERTION" : null);
+        re.setStartedAt(finished.minusMillis(Math.max(0, out.duration())));
+        re.setFinishedAt(finished);
+        re.setCreatedAt(finished);
+        resultRepo.save(re);
+        CaseExecOutcome synthetic = new CaseExecOutcome(out.status(),
+                "fail".equals(out.status()) ? "ASSERTION" : null, List.of(),
+                out.requestSummary(), out.responseSummary(), out.error(), out.duration(),
+                null, null, null, "", "", null, re.getStartedAt(), re.getFinishedAt(), null, null);
+        Long evidenceId = appendCaseEvidence(r.getId(), re, synthetic);
+        if (evidenceId != null) {
+            re.setEvidenceId(evidenceId);
+            resultRepo.save(re);
+        }
+        hub.publishEvent(topic(r.getId()), "result", toResultView(re));
+        logLine(logs, out.status(), re.getName(), out.duration(), out.error());
+        return out.status();
+    }
+
+    private String saveErrorResult(TestRunEntity r, TestCaseEntity c, int sort, String message,
+                                   StringBuilder logs) {
+        Instant now = Instant.now();
+        TestCaseResultEntity re = new TestCaseResultEntity();
+        re.setRunId(r.getId());
+        re.setCaseId(c.getId());
+        re.setSuiteId(c.getSuiteId());
+        re.setSort(sort);
+        re.setName(truncate(c.getName() == null ? c.getCaseKey() : c.getName(), 128));
+        re.setStatus("error");
+        re.setError(truncate(message, 1000));
+        re.setDuration(0L);
+        re.setAttempt(1);
+        re.setFailureCategory("UNKNOWN");
+        re.setStartedAt(now);
+        re.setFinishedAt(now);
+        re.setCreatedAt(now);
+        resultRepo.save(re);
+        appendEvidenceQuiet(r.getId(), re.getId(), null, "RESULT_JSON", "case-" + re.getId() + ".json",
+                toJson(Map.of("caseId", c.getId(), "status", "error", "error", message == null ? "" : message)));
+        hub.publishEvent(topic(r.getId()), "result", toResultView(re));
+        logLine(logs, "error", re.getName(), 0L, message);
+        return "error";
+    }
+
+    private void logLine(StringBuilder logs, String status, String name, long duration, String error) {
+        if (logs == null) {
+            return;
+        }
+        logs.append('[').append(status == null ? "?" : status.toUpperCase()).append("] ")
+                .append(name == null ? "-" : name).append(" · ").append(duration).append("ms");
+        if (error != null && !error.isBlank()) {
+            logs.append(" — ").append(error);
+        }
+        logs.append('\n');
+    }
+
+    private void blockRun(TestRunEntity r, StringBuilder logs, String reason) {
+        logs.append("[BLOCKED] ").append(reason).append('\n');
+        r.setStatus(TestRunEntity.BLOCKED);
+        r.setConclusion("BLOCKED");
+        r.setSummaryJson(writeSummary(0, 0, 0, 0, 0, 0));
+        r.setErrorSummary(truncate(reason, 2000));
         r.setLogsText(logs.toString());
         r.setFinishedAt(Instant.now());
         repo.save(r);
+        appendEvidenceQuiet(r.getId(), null, r.getAgentNodeId(), "RESULT_JSON", "run-summary.json",
+                toJson(runSummary(r)));
+        createReportDocQuiet(r);
+        hub.done(topic(r.getId()), r.getStatus());
+        notify(r, NotificationLevel.P1, "测试阻塞 #" + r.getId(), reason);
+        publishCompleted(r);
+    }
 
-        // FR-04 报告沉淀为 CAP-03 的 report 文档
+    private void finishRun(TestRunEntity r, StringBuilder logs, Counters c) {
+        boolean bad = c.failed > 0 || c.errors > 0;
+        r.setStatus(bad ? TestRunEntity.FAILED : c.blocked > 0 ? TestRunEntity.BLOCKED : TestRunEntity.SUCCESS);
+        r.setConclusion(conclusion(c));
+        r.setSummaryJson(writeSummary(c.total, c.passed, c.failed, c.skipped, c.blocked, c.errors));
+        r.setLogsText(logs.toString());
+        r.setFinishedAt(Instant.now());
+        repo.save(r);
+        appendEvidenceQuiet(r.getId(), null, r.getAgentNodeId(), "RESULT_JSON", "run-summary.json",
+                toJson(runSummary(r)));
+        createReportDocQuiet(r);
+        hub.done(topic(r.getId()), r.getStatus());
+        notify(r, bad ? NotificationLevel.P1 : NotificationLevel.P2,
+                "测试" + (bad ? "失败" : TestRunEntity.BLOCKED.equals(r.getStatus()) ? "阻塞" : "通过")
+                        + " #" + r.getId(),
+                c.passed + " 通过 / " + c.failed + " 失败 / " + c.blocked + " 阻塞 / "
+                        + c.errors + " 异常 / " + c.skipped + " 跳过"
+                        + (r.getBaseUrl() == null ? "" : " · " + r.getBaseUrl()));
+        publishCompleted(r);
+    }
+
+    private String conclusion(Counters c) {
+        return conclusion(c.total, c.passed, c.failed, c.skipped, c.blocked, c.errors);
+    }
+
+    private String conclusion(int total, int passed, int failed, int skipped, int blocked, int errors) {
+        if (total == 0) {
+            return "BLOCKED";
+        }
+        if (failed == 0 && blocked == 0 && errors == 0) {
+            return "PASS";
+        }
+        if (passed == 0 && failed == 0) {
+            return "BLOCKED";
+        }
+        if (passed > 0) {
+            return "PARTIAL";
+        }
+        return "FAIL";
+    }
+
+    private Map<String, Object> runSummary(TestRunEntity r) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("runId", r.getId());
+        m.put("projectId", r.getProjectId());
+        m.put("status", r.getStatus());
+        m.put("conclusion", r.getConclusion());
+        m.put("summary", parseSummary(r.getSummaryJson()));
+        m.put("baseUrl", r.getBaseUrl());
+        m.put("environmentId", r.getEnvironmentId());
+        m.put("nodeId", r.getAgentNodeId());
+        m.put("errorSummary", r.getErrorSummary());
+        m.put("finishedAt", r.getFinishedAt());
+        return m;
+    }
+
+    private Map<String, Object> scriptRunSummary(TestRunEntity r, TestSuiteEntity s,
+                                                 int total, int passed, int failed, int skipped) {
+        Map<String, Object> m = runSummary(r);
+        m.put("suite", s.getName());
+        m.put("repoUrl", s.getRepoUrl());
+        m.put("branch", s.getBranch());
+        m.put("commit", s.getCommitHash() == null ? "HEAD" : s.getCommitHash());
+        m.put("summary", Map.of("total", total, "passed", passed, "failed", failed, "skipped", skipped));
+        return m;
+    }
+
+    private Map<String, Object> scriptSnapshot(TestSuiteEntity s, String nodeId) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("nodeId", nodeId);
+        m.put("suite", s.getName());
+        m.put("repoUrl", s.getRepoUrl());
+        m.put("branch", s.getBranch());
+        m.put("commit", s.getCommitHash() == null ? "HEAD" : s.getCommitHash());
+        m.put("workspaceKey", s.getWorkspaceKey());
+        m.put("junitPath", s.getJunitPath());
+        m.put("project", SCRIPT_PSEUDO_PROJECT);
+        m.put("executedAt", Instant.now().toString());
+        return m;
+    }
+
+    /** 单用例证据：结果 JSON（断言差异/环境快照）+ stdout/stderr/清理日志，返回结果证据 id。 */
+    private Long appendCaseEvidence(Long runId, TestCaseResultEntity re, CaseExecOutcome out) {
+        if (out.program() != null) {
+            return appendProgramEvidence(runId, re, out);
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("caseId", re.getCaseId());
+        payload.put("caseKey", null);
+        payload.put("name", re.getName());
+        payload.put("status", re.getStatus());
+        payload.put("failureCategory", re.getFailureCategory());
+        payload.put("requestSummary", re.getRequestSummary());
+        payload.put("responseSummary", re.getResponseSummary());
+        payload.put("error", re.getError());
+        payload.put("command", out.command());
+        payload.put("exitCode", out.exitCode());
+        payload.put("assertions", out.assertions());
+        payload.put("envSnapshot", out.envSnapshot());
+        payload.put("stdout", cap(out.stdout(), 16 * 1024));
+        payload.put("stderr", cap(out.stderr(), 16 * 1024));
+        payload.put("cleanup", cap(out.cleanupLog(), 16 * 1024));
+        payload.put("finishedAt", re.getFinishedAt());
+        Long first = appendEvidenceQuiet(runId, re.getId(), out.nodeId(), "RESULT_JSON",
+                "case-" + re.getId() + "-result.json", toJson(payload));
+        if (out.stdout() != null && !out.stdout().isBlank()) {
+            appendEvidenceQuiet(runId, re.getId(), out.nodeId(), "STDOUT",
+                    "case-" + re.getId() + "-stdout.txt", cap(out.stdout(), 512 * 1024));
+        }
+        if (out.stderr() != null && !out.stderr().isBlank()) {
+            appendEvidenceQuiet(runId, re.getId(), out.nodeId(), "STDERR",
+                    "case-" + re.getId() + "-stderr.txt", cap(out.stderr(), 512 * 1024));
+        }
+        if (out.cleanupLog() != null && !out.cleanupLog().isBlank()) {
+            appendEvidenceQuiet(runId, re.getId(), out.nodeId(), "CLEANUP_LOG",
+                    "case-" + re.getId() + "-cleanup.log", cap(out.cleanupLog(), 256 * 1024));
+        }
+        return first;
+    }
+
+    /**
+     * 程序型用例证据链：清单/输入/原始输出/stdout/stderr/每个产物/汇总。
+     * 产物内容超出证据配置时逐条跳过并留日志，不影响其它证据入链。
+     */
+    private Long appendProgramEvidence(Long runId, TestCaseResultEntity re, CaseExecOutcome out) {
+        ProgramOutcome p = out.program();
+        Long first = appendEvidenceQuiet(runId, re.getId(), out.nodeId(),
+                ProgramContract.EVIDENCE_MANIFEST, "case-" + re.getId() + "-program-manifest.json",
+                cap(p.manifestJson(), 1_800_000));
+        appendEvidenceQuiet(runId, re.getId(), out.nodeId(), ProgramContract.EVIDENCE_INPUT,
+                "case-" + re.getId() + "-input.json", cap(p.inputJson(), 1_800_000));
+        if (p.resultJson() != null && !p.resultJson().isBlank()) {
+            appendEvidenceQuiet(runId, re.getId(), out.nodeId(), ProgramContract.EVIDENCE_RESULT,
+                    "case-" + re.getId() + "-result.json", cap(p.resultJson(), 1_800_000));
+        }
+        if (out.stdout() != null && !out.stdout().isBlank()) {
+            appendEvidenceQuiet(runId, re.getId(), out.nodeId(), ProgramContract.EVIDENCE_STDOUT,
+                    "case-" + re.getId() + "-stdout.txt", cap(out.stdout(), 512 * 1024));
+        }
+        if (out.stderr() != null && !out.stderr().isBlank()) {
+            appendEvidenceQuiet(runId, re.getId(), out.nodeId(), ProgramContract.EVIDENCE_STDERR,
+                    "case-" + re.getId() + "-stderr.txt", cap(out.stderr(), 512 * 1024));
+        }
+        int index = 0;
+        for (ProgramOutcome.ProgramArtifact a : p.artifacts()) {
+            index++;
+            appendEvidenceBytesQuiet(runId, re.getId(), out.nodeId(), ProgramContract.EVIDENCE_ARTIFACT,
+                    "case-" + re.getId() + "-artifact-" + index + "-" + fileNameOf(a.path()),
+                    a.content());
+        }
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("caseId", re.getCaseId());
+        summary.put("status", re.getStatus());
+        summary.put("failureCategory", re.getFailureCategory());
+        summary.put("assetId", p.assetId());
+        summary.put("assetSha256", p.assetSha256());
+        summary.put("contractVersion", p.contractVersion());
+        summary.put("programStatus", p.resultStatus());
+        summary.put("programMessage", p.resultMessage());
+        summary.put("metrics", p.metrics());
+        summary.put("assertions", out.assertions());
+        summary.put("exitCode", out.exitCode());
+        summary.put("artifacts", p.artifacts().stream()
+                .map(a -> Map.of("path", a.path(), "sizeBytes", a.content() == null ? 0 : a.content().length,
+                        "sha256", a.sha256())).toList());
+        summary.put("envSnapshot", out.envSnapshot());
+        summary.put("cleanup", cap(out.cleanupLog(), 16 * 1024));
+        summary.put("finishedAt", re.getFinishedAt());
+        appendEvidenceQuiet(runId, re.getId(), out.nodeId(), ProgramContract.EVIDENCE_SUMMARY,
+                "case-" + re.getId() + "-program-summary.json", toJson(summary));
+        return first;
+    }
+
+    private String fileNameOf(String path) {
+        String p = path == null ? "artifact" : path.replace('\\', '/');
+        int slash = p.lastIndexOf('/');
+        return slash < 0 ? p : p.substring(slash + 1);
+    }
+
+    private Long appendEvidenceQuiet(Long runId, Long resultId, String nodeId, String kind,
+                                     String filename, String content) {
+        try {
+            return evidenceService.appendText(runId, resultId, nodeId, kind, filename,
+                    cap(content, 1_800_000)).getId();
+        } catch (Exception e) {
+            log.warn("测试证据写入跳过: run={} kind={} err={}", runId, kind, e.getMessage());
+            return null;
+        }
+    }
+
+    private Long appendEvidenceBytesQuiet(Long runId, Long resultId, String nodeId, String kind,
+                                          String filename, byte[] content) {
+        try {
+            return evidenceService.append(runId, resultId, nodeId, kind, filename, content).getId();
+        } catch (Exception e) {
+            log.warn("测试证据写入跳过: run={} kind={} file={} err={}",
+                    runId, kind, filename, e.getMessage());
+            return null;
+        }
+    }
+
+    private void createReportDocQuiet(TestRunEntity r) {
+        if (r.getProjectId() == null || r.getPlanRunId() != null) {
+            // 方案子运行的报告由父方案运行汇总，避免一次方案生成 N 份文档
+            return;
+        }
         try {
             Long docId = createReportDoc(r);
             r.setReportDocId(docId);
@@ -486,13 +1070,46 @@ public class TestRunService {
         } catch (Exception e) {
             log.warn("测试报告文档创建失败: {}", e.getMessage());
         }
+    }
 
-        hub.done(topic(runId), r.getStatus());
-        notify(r, failed > 0 ? NotificationLevel.P1 : NotificationLevel.P2,
-                "测试" + (failed > 0 ? "失败" : "通过") + " #" + runId,
-                passed + " 通过 / " + failed + " 失败 / " + skipped + " 跳过"
-                        + (r.getBaseUrl() == null ? "" : " · " + r.getBaseUrl()));
-        publishCompleted(r);
+    private EnvironmentEntity environmentOf(TestRunEntity r) {
+        if (r.getEnvironmentId() == null || r.getProjectId() == null) {
+            return null;
+        }
+        try {
+            return environmentService.requireEnvironment(r.getProjectId(), r.getEnvironmentId());
+        } catch (Exception e) {
+            log.warn("测试运行目标环境不可用: run={} env={} err={}", r.getId(), r.getEnvironmentId(), e.getMessage());
+            return null;
+        }
+    }
+
+    private String cleanupNode(TestRunEntity r, EnvironmentEntity environment) {
+        if (r.getAgentNodeId() != null && !r.getAgentNodeId().isBlank()) {
+            return r.getAgentNodeId();
+        }
+        List<String> nodes = environmentService.nodeIdsOf(environment);
+        return nodes.isEmpty() ? null : nodes.get(0);
+    }
+
+    private void ensureRunnable(TestSuiteEntity s) {
+        if (TestSuiteEntity.DEPRECATED.equals(s.getReviewStatus())) {
+            throw new DevMindException(ErrorCode.CONFLICT, "套件已废弃，不可运行: " + s.getId());
+        }
+        if (s.getSourceAssetId() != null && !TestSuiteEntity.APPROVED.equals(s.getReviewStatus())) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "套件 " + s.getId() + " 来源于资产 " + s.getSourceAssetId() + "，资产套件须评审通过后才可运行");
+        }
+    }
+
+    private void ensureCaseRunnable(TestCaseEntity c) {
+        if (TestCaseVersionEntity.DEPRECATED.equals(c.getReviewStatus())) {
+            throw new DevMindException(ErrorCode.CONFLICT, "用例已废弃，不可运行: " + c.getId());
+        }
+        if (c.getSourceAssetId() != null && !TestCaseVersionEntity.APPROVED.equals(c.getReviewStatus())) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "用例 " + c.getId() + " 引用的资产未评审通过，不可运行");
+        }
     }
 
     /** http 用例：直请求 baseUrl+path，校验 expected.status（支持 "2XX"）与 contains。 */
@@ -683,15 +1300,95 @@ public class TestRunService {
 
     public List<TestRunView> history(String projectId, String status) {
         List<TestRunEntity> list = (status == null || status.isBlank())
-                ? repo.findByProjectIdOrderByCreatedAtDesc(projectId)
-                : repo.findByProjectIdAndStatusOrderByCreatedAtDesc(projectId, status.trim().toUpperCase());
+                ? repo.findByProjectIdAndPlanRunIdIsNullOrderByCreatedAtDesc(projectId)
+                : repo.findByProjectIdAndStatusAndPlanRunIdIsNullOrderByCreatedAtDesc(
+                        projectId, status.trim().toUpperCase());
         Map<String, WorkItemBrief> briefs = briefsOf(list.stream().map(TestRunEntity::getWorkItemId).toList());
         return list.stream().map(r -> toView(r, briefs.get(r.getWorkItemId()))).toList();
+    }
+
+    /** CAP-104 M2 父方案运行下的子运行（下钻用，按 id 升序 = 创建顺序）。 */
+    public List<TestRunView> childrenOfPlanRun(Long planRunId) {
+        return repo.findByPlanRunIdOrderByIdAsc(planRunId).stream().map(this::toView).toList();
     }
 
     public String report(Long id) {
         TestRunEntity r = require(id);
         return renderReport(r, resultRepo.findByRunIdOrderBySortAsc(id));
+    }
+
+    /** CAP-104 结构化报告（稳定契约，供基线与统计复用）。 */
+    public Map<String, Object> reportJson(Long id) {
+        TestRunEntity r = require(id);
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("run", runSummary(r));
+        m.put("runScope", r.getRunScope());
+        m.put("suiteIds", parseIds(r.getSuiteIdsJson()));
+        m.put("caseId", r.getCaseId());
+        m.put("workItemId", r.getWorkItemId());
+        m.put("results", resultRepo.findByRunIdOrderBySortAsc(id).stream()
+                .map(this::toResultView).toList());
+        m.put("evidence", evidenceService.list(id));
+        return m;
+    }
+
+    /**
+     * CAP-104 FR-09 人工复核/人工判定：CONFIRMED/REJECTED 只记录复核意见、原始判定不变；
+     * PASS/FAIL 用于 MANUAL 用例给出人工结论（改结果状态并重算运行汇总）。
+     */
+    @Transactional
+    public CaseResultView manualReview(Long runId, Long resultId, ManualReviewRequest req) {
+        TestRunEntity r = require(runId);
+        TestCaseResultEntity re = resultRepo.findById(resultId)
+                .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "用例结果不存在: " + resultId));
+        if (!runId.equals(re.getRunId())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "结果不属于该运行: " + resultId);
+        }
+        if (TestRunEntity.RUNNING.equals(r.getStatus()) || TestRunEntity.QUEUED.equals(r.getStatus())) {
+            throw new DevMindException(ErrorCode.CONFLICT, "运行尚未结束，不能复核结果");
+        }
+        String review = req == null || req.review() == null ? "" : req.review().strip().toUpperCase();
+        if (!List.of("CONFIRMED", "REJECTED", "PASS", "FAIL").contains(review)) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "review 仅支持 CONFIRMED / REJECTED / PASS / FAIL");
+        }
+        String note = req.note() == null ? null : truncate(req.note().strip(), 1000);
+        if ("PASS".equals(review) || "FAIL".equals(review)) {
+            re.setStatus("PASS".equals(review) ? "pass" : "fail");
+            if ("FAIL".equals(review)) {
+                re.setFailureCategory("ASSERTION");
+                if (note != null && !note.isBlank()) {
+                    re.setError(note);
+                }
+            } else {
+                re.setFailureCategory(null);
+                re.setError(null);
+            }
+            re.setManualReview("CONFIRMED");
+        } else {
+            re.setManualReview(review);
+        }
+        re.setManualNote(note);
+        resultRepo.save(re);
+        appendEvidenceQuiet(r.getId(), re.getId(), re.getNodeId(), "MANUAL_REVIEW",
+                "case-" + re.getId() + "-review.json",
+                toJson(Map.of("resultId", re.getId(), "review", review,
+                        "note", note == null ? "" : note, "status", re.getStatus(),
+                        "reviewedBy", identityService.currentActor(),
+                        "reviewedAt", Instant.now().toString())));
+        recomputeRun(r);
+        return toResultView(re);
+    }
+
+    /** 人工判定改变结果后重算运行汇总/结论（运行已终态，不重跑）。 */
+    private void recomputeRun(TestRunEntity r) {
+        Counters c = new Counters();
+        resultRepo.findByRunIdOrderBySortAsc(r.getId()).forEach(x -> c.add(x.getStatus()));
+        r.setStatus(c.failed > 0 || c.errors > 0 ? TestRunEntity.FAILED
+                : c.blocked > 0 ? TestRunEntity.BLOCKED : TestRunEntity.SUCCESS);
+        r.setConclusion(conclusion(c));
+        r.setSummaryJson(writeSummary(c.total, c.passed, c.failed, c.skipped, c.blocked, c.errors));
+        repo.save(r);
     }
 
     public String logs(Long id) {
@@ -725,9 +1422,11 @@ public class TestRunService {
     @Transactional
     public void delete(Long id) {
         TestRunEntity r = require(id);
-        if (TestRunEntity.RUNNING.equals(r.getStatus())) {
+        if (TestRunEntity.RUNNING.equals(r.getStatus()) || TestRunEntity.QUEUED.equals(r.getStatus())) {
             throw new DevMindException(ErrorCode.CONFLICT, "测试运行中不可删除");
         }
+        // 证据随运行删除（无单条删除 API；此处是唯一清理入口）
+        evidenceService.deleteRun(id);
         resultRepo.deleteByRunId(id);
         repo.delete(r);
     }
@@ -746,7 +1445,9 @@ public class TestRunService {
         return new TestRunView(r.getId(), r.getProjectId(), r.getWorkItemId(), suiteIds, r.getDeploymentId(),
                 r.getAgentNodeId(), r.getEnvironmentId(), r.getBaseUrl(), r.getStatus(), summary, r.getReportDocId(),
                 r.getErrorSummary(),
-                r.getTriggeredBy(), r.getStartedAt(), r.getFinishedAt(), r.getCreatedAt(), results, workItem);
+                r.getTriggeredBy(), r.getStartedAt(), r.getFinishedAt(), r.getCreatedAt(), results, workItem,
+                r.getRunScope() == null ? TestRunEntity.SCOPE_SUITE : r.getRunScope(), r.getConclusion(),
+                r.getPlanRunId(), r.getPlanItemId(), r.getAttempt(), r.getRequirementId(), r.getShardKey());
     }
 
     /** 单条摘要（详情出参用）；workItemId 为空或已删除返回 null。 */
@@ -857,29 +1558,90 @@ public class TestRunService {
         }
         md.append("- 触发: ").append(r.getTriggeredBy() == null ? "user" : r.getTriggeredBy()).append("\n");
         md.append("- 状态: **").append(r.getStatus()).append("**\n");
+        if (r.getConclusion() != null) {
+            md.append("- 结论: **").append(r.getConclusion()).append("**\n");
+        }
+        int denominator = s.passed() + s.failed() + s.error();
+        String passRate = denominator == 0 ? "—"
+                : String.format(java.util.Locale.ROOT, "%.1f%%", s.passed() * 100.0 / denominator);
         md.append("- 结果: ").append(s.total()).append(" 用例 / ").append(s.passed()).append(" 通过 / ")
-                .append(s.failed()).append(" 失败 / ").append(s.skipped()).append(" 跳过\n");
+                .append(s.failed()).append(" 失败 / ").append(s.blocked()).append(" 阻塞 / ")
+                .append(s.error()).append(" 异常 / ").append(s.skipped()).append(" 跳过 / 通过率 ")
+                .append(passRate).append("\n");
         md.append("- 目标: ").append(r.getBaseUrl() == null || r.getBaseUrl().isBlank() ? "(节点)" : "`" + r.getBaseUrl() + "`").append("\n");
         if (r.getDeploymentId() != null) {
             md.append("- 关联部署: #").append(r.getDeploymentId()).append("\n");
         }
+        if (r.getErrorSummary() != null && !r.getErrorSummary().isBlank()) {
+            md.append("- 阻塞/异常说明: ").append(r.getErrorSummary()).append("\n");
+        }
+        List<TestCaseResultEntity> failed = results.stream()
+                .filter(x -> "fail".equals(x.getStatus()) || "error".equals(x.getStatus())
+                        || "blocked".equals(x.getStatus())).toList();
+        if (!failed.isEmpty()) {
+            md.append("\n## 失败清单\n\n");
+            for (TestCaseResultEntity re : failed) {
+                md.append("- [").append(re.getStatus() == null ? "fail" : re.getStatus()).append("] ")
+                        .append(re.getName());
+                if (re.getFailureCategory() != null) {
+                    md.append(" · ").append(re.getFailureCategory());
+                }
+                if (re.getError() != null && !re.getError().isBlank()) {
+                    md.append(" — ").append(cap(re.getError(), 200));
+                }
+                if (re.getEvidenceId() != null) {
+                    md.append(" · 证据 /api/test-evidence/").append(re.getEvidenceId()).append("/download");
+                }
+                md.append("\n");
+            }
+        }
         md.append("\n## 用例结果\n\n");
         for (TestCaseResultEntity re : results) {
-            String icon = switch (re.getStatus()) {
+            String icon = switch (re.getStatus() == null ? "" : re.getStatus()) {
                 case "pass" -> "✅";
                 case "skip" -> "⏭";
+                case "blocked" -> "⛔";
+                case "error" -> "⚠️";
                 default -> "❌";
             };
             md.append("### ").append(icon).append(" ").append(re.getName()).append(" (")
                     .append(re.getDuration() == null ? "?" : re.getDuration()).append("ms)\n\n");
+            if (re.getNodeId() != null && !re.getNodeId().isBlank()) {
+                md.append("- 节点: `").append(re.getNodeId()).append("`\n");
+            }
+            if (re.getFailureCategory() != null && !re.getFailureCategory().isBlank()) {
+                md.append("- 失败分类: ").append(re.getFailureCategory()).append("\n");
+            }
             if (re.getRequestSummary() != null && !re.getRequestSummary().isBlank()) {
                 md.append("- 请求: `").append(re.getRequestSummary()).append("`\n");
             }
             if (re.getResponseSummary() != null && !re.getResponseSummary().isBlank()) {
                 md.append("- 响应: `").append(re.getResponseSummary()).append("`\n");
             }
+            for (AssertionResult a : parseAssertions(re.getAssertionJson())) {
+                md.append("- 断言 ").append(a.pass() ? "✅" : "❌").append(' ')
+                        .append(a.source() == null ? "" : a.source()).append(' ')
+                        .append(a.selector() == null ? "" : a.selector()).append(' ')
+                        .append(a.op() == null ? "" : a.op()).append(" 期望 `")
+                        .append(a.expected() == null ? "" : a.expected()).append("` 实际 `")
+                        .append(a.actual() == null ? "" : a.actual()).append('`');
+                if (a.message() != null && !a.message().isBlank()) {
+                    md.append(" — ").append(a.message());
+                }
+                md.append("\n");
+            }
             if (re.getError() != null && !re.getError().isBlank()) {
                 md.append("- 错误: ").append(re.getError()).append("\n");
+            }
+            if (re.getEvidenceId() != null) {
+                md.append("- 证据: `/api/test-evidence/").append(re.getEvidenceId()).append("/download`\n");
+            }
+            if (re.getManualReview() != null) {
+                md.append("- 人工复核: ").append(re.getManualReview());
+                if (re.getManualNote() != null && !re.getManualNote().isBlank()) {
+                    md.append(" — ").append(re.getManualNote());
+                }
+                md.append("\n");
             }
             md.append("\n");
         }
@@ -887,6 +1649,10 @@ public class TestRunService {
     }
 
     private void notify(TestRunEntity r, NotificationLevel level, String title, String body) {
+        if (r.getPlanRunId() != null) {
+            // 方案子运行不单独通知：一次方案几十条通知会淹没真正的方案级结果
+            return;
+        }
         try {
             notificationService.emit(new NotificationDraft(level, "test", title, body,
                     "test_run", String.valueOf(r.getId()), r.getProjectId(), List.of()));
@@ -900,6 +1666,10 @@ public class TestRunService {
      * 通知侧已直发 notify()，该事件在通知监听 IGNORED；订阅方是验收联动（回归全绿 → 需求进 ACCEPTANCE）。
      */
     private void publishCompleted(TestRunEntity r) {
+        if (r.getPlanRunId() != null) {
+            // 方案子运行不向外发布 test.completed：方案父运行完成后统一发布一次
+            return;
+        }
         try {
             String workItemId = r.getWorkItemId();
             if ((workItemId == null || workItemId.isBlank()) && r.getDeploymentId() != null) {
@@ -920,9 +1690,66 @@ public class TestRunService {
         return String.valueOf(runId);
     }
 
-    private CaseResultView toResultView(TestCaseResultEntity e) {
+    public CaseResultView toResultView(TestCaseResultEntity e) {
         return new CaseResultView(e.getId(), e.getCaseId(), e.getSuiteId(), e.getSort(), e.getName(),
-                e.getStatus(), e.getRequestSummary(), e.getResponseSummary(), e.getError(), e.getDuration());
+                e.getStatus(), e.getRequestSummary(), e.getResponseSummary(), e.getError(), e.getDuration(),
+                e.getNodeId(), e.getAttempt(), e.getFailureCategory(), parseAssertions(e.getAssertionJson()),
+                e.getCommand(), e.getExitCode(), readObjectMap(e.getEnvSnapshotJson()), e.getEvidenceId(),
+                e.getStartedAt(), e.getFinishedAt(), e.getManualReview(), e.getManualNote(),
+                parseProgram(e));
+    }
+
+    /** 程序列 → 详情视图；非程序用例返回 null（前端据此区分展示）。 */
+    private ProgramRunView parseProgram(TestCaseResultEntity e) {
+        if (e.getProgramAssetId() == null && (e.getProgramManifestJson() == null || e.getProgramManifestJson().isBlank())) {
+            return null;
+        }
+        ProgramManifest manifest = null;
+        if (e.getProgramManifestJson() != null && !e.getProgramManifestJson().isBlank()) {
+            try {
+                manifest = ProgramManifest.parse(e.getProgramManifestJson());
+            } catch (Exception ex) {
+                log.debug("程序清单快照解析失败（按空字段展示）: result={} err={}", e.getId(), ex.getMessage());
+            }
+        }
+        return new ProgramRunView(e.getProgramAssetId(), e.getProgramContractVersion(),
+                manifest == null ? null : manifest.name(),
+                manifest == null ? null : manifest.version(),
+                manifest == null ? null : manifest.runtime(),
+                manifest == null ? null : manifest.runtimeVersion(),
+                manifest == null ? null : manifest.entrypoint(),
+                manifest == null ? null : manifest.targetOs(),
+                manifest == null ? null : manifest.targetArch(),
+                e.getProgramStatus(), e.getProgramMessage(),
+                readObjectMap(e.getProgramMetricsJson()), parseArtifacts(e.getProgramArtifactsJson()));
+    }
+
+    private List<ProgramRunView.Artifact> parseArtifacts(String json) {
+        List<ProgramRunView.Artifact> out = new ArrayList<>();
+        if (json == null || json.isBlank()) {
+            return out;
+        }
+        try {
+            for (JsonNode n : mapper.readTree(json)) {
+                out.add(new ProgramRunView.Artifact(n.path("path").asText(null),
+                        n.path("sizeBytes").asLong(0), n.path("sha256").asText(null)));
+            }
+        } catch (Exception e) {
+            // 元数据损坏不影响结果展示
+        }
+        return out;
+    }
+
+    private List<AssertionResult> parseAssertions(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            return mapper.readValue(json,
+                    mapper.getTypeFactory().constructCollectionType(List.class, AssertionResult.class));
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     // ---------- JSON 序列化/解析 ----------
@@ -951,9 +1778,19 @@ public class TestRunService {
     }
 
     private String writeSummary(int total, int passed, int failed, int skipped) {
+        return writeSummary(total, passed, failed, skipped, 0, 0);
+    }
+
+    private String writeSummary(int total, int passed, int failed, int skipped, int blocked, int errors) {
         try {
-            return mapper.writeValueAsString(Map.of("total", total, "passed", passed,
-                    "failed", failed, "skipped", skipped));
+            Map<String, Integer> m = new LinkedHashMap<>();
+            m.put("total", total);
+            m.put("passed", passed);
+            m.put("failed", failed);
+            m.put("skipped", skipped);
+            m.put("blocked", blocked);
+            m.put("error", errors);
+            return mapper.writeValueAsString(m);
         } catch (Exception e) {
             return "{}";
         }
@@ -966,10 +1803,30 @@ public class TestRunService {
         try {
             JsonNode n = mapper.readTree(json);
             return new RunSummary(n.path("total").asInt(0), n.path("passed").asInt(0),
-                    n.path("failed").asInt(0), n.path("skipped").asInt(0));
+                    n.path("failed").asInt(0), n.path("skipped").asInt(0),
+                    n.path("blocked").asInt(0), n.path("error").asInt(0));
         } catch (Exception e) {
             return new RunSummary(0, 0, 0, 0);
         }
+    }
+
+    private String toJson(Object value) {
+        try {
+            return mapper.writeValueAsString(value);
+        } catch (Exception e) {
+            return "null";
+        }
+    }
+
+    private String writeMap(Map<String, String> map) {
+        return toJson(map == null ? Map.of() : map);
+    }
+
+    private String cap(String s, int max) {
+        if (s == null || s.length() <= max) {
+            return s;
+        }
+        return s.substring(0, max) + "…[截断]";
     }
 
     @SuppressWarnings("unchecked")
@@ -1012,7 +1869,12 @@ public class TestRunService {
         if (s == null) {
             return null;
         }
-        return s.length() <= max ? s : s.substring(0, max) + "…[截断]";
+        if (s.length() <= max) {
+            return s;
+        }
+        // 截断后缀计入 max：否则 128/512 这类定长列会写到 max+5 导致入库失败
+        String suffix = "…[截断]";
+        return s.substring(0, Math.max(0, max - suffix.length())) + suffix;
     }
 
     private String rootMessage(Throwable t) {
@@ -1026,5 +1888,31 @@ public class TestRunService {
     /** 用例执行结果（内部）。 */
     private record CaseOutcome(String status, String requestSummary, String responseSummary,
                                String error, long duration) {
+    }
+
+    /** 运行级计数：total 含全部结果，error 单列以便报告区分“断言失败”与“执行异常”。 */
+    private static final class Counters {
+        int total;
+        int passed;
+        int failed;
+        int skipped;
+        int blocked;
+        int errors;
+
+        void add(String status) {
+            total++;
+            switch (status == null ? "" : status.toLowerCase(java.util.Locale.ROOT)) {
+                case "pass" -> passed++;
+                case "fail" -> failed++;
+                case "blocked" -> blocked++;
+                case "error" -> errors++;
+                default -> skipped++;
+            }
+        }
+
+        void error() {
+            total++;
+            errors++;
+        }
     }
 }

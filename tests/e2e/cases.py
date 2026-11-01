@@ -1,8 +1,18 @@
 """Official cases: independent fixtures, explicit assertions, cleanup registered first."""
+import io
+import os
+import shutil
+import signal
 import unittest
+import urllib.parse
 import uuid
 import subprocess
 import json
+import time
+import zipfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class Smoke(unittest.TestCase):
@@ -207,6 +217,769 @@ class Regression(unittest.TestCase):
         self.api.request("POST", "/projects", body, expected=409)
         body["name"] = "e2e-project-updated"
         self.assertEqual(body["name"], self.api.request("PUT", route, body)["name"])
+
+    # ---------------- CAP-104 测试平台 MVP ----------------
+
+    def _cap104_project(self):
+        path = self.workspace / ("project-" + uuid.uuid4().hex)
+        path.mkdir()
+        subprocess.run(["git", "init", "--initial-branch=master", str(path)],
+                       check=True, capture_output=True)
+        project = self.api.request("POST", "/projects", {
+            "name": "e2e-test-" + uuid.uuid4().hex[:8], "path": path.as_posix(),
+            "defaultBranch": "master", "tags": ["e2e"], "status": "ACTIVE"})
+        self.addCleanup(self.api.request, "DELETE", "/projects/" + project["id"])
+        return project["id"]
+
+    def _cap104_suite(self, project_id):
+        module = self.api.request("POST", f"/projects/{project_id}/test-modules", {
+            "name": "e2e-module-" + uuid.uuid4().hex[:8], "description": "e2e",
+            "tags": "e2e", "owner": "e2e", "sortNo": 1})
+        self.addCleanup(self.api.request, "DELETE", "/test-modules/" + str(module["id"]))
+        suite = self.api.request("POST", f"/projects/{project_id}/test-suites", {
+            "name": "e2e-suite-" + uuid.uuid4().hex[:8], "kind": "api",
+            "moduleId": module["id"], "owner": "e2e", "tags": "api"})
+        self.addCleanup(self.api.request, "DELETE", "/test-suites/" + str(suite["id"]))
+        return module, suite
+
+    def _cap104_http_spec(self, case_key, expected_status="200"):
+        return {"caseKey": case_key, "title": "健康检查", "type": "HTTP", "priority": "P1",
+                "tags": ["e2e"],
+                "assertions": [
+                    {"source": "HTTP_STATUS", "op": "EQUALS", "expected": expected_status},
+                    {"source": "JSON_PATH", "selector": "$.status", "op": "EQUALS", "expected": "UP"}],
+                "executor": {"location": "SERVER", "timeoutSec": 20},
+                "http": {"method": "GET", "path": "/health"},
+                "source": {"kind": "MANUAL", "note": "e2e"}}
+
+    def _cap104_wait_run(self, run_id):
+        deadline = time.monotonic() + 60
+        while True:
+            run = self.api.request("GET", f"/test-runs/{run_id}")
+            if run["status"] not in ("QUEUED", "RUNNING"):
+                return run
+            self.assertLess(time.monotonic(), deadline, "CAP-104 run did not finish in 60s")
+            time.sleep(1)
+
+    def _cap104_approved_case(self, suite_path, spec):
+        saved = self.api.request("POST", suite_path + "/test-cases",
+                                 {"changeNote": "e2e", "spec": spec})
+        case = saved["testCase"]
+        self.addCleanup(self.api.request, "DELETE", "/test-cases/" + str(case["id"]))
+        self.api.request("POST", f"/test-cases/{case['id']}/review",
+                         {"reviewStatus": "APPROVED", "note": "e2e approve"})
+        return case
+
+    def _cap104_environment(self, project_id, node_ids=None, name="TEST"):
+        environment = self.api.request("POST", f"/projects/{project_id}/environments", {
+            "name": name, "nodeIds": node_ids or [],
+            "variables": {"baseUrl": self.api.base}, "productVersion": "1.0.0",
+            "precheckJson": json.dumps({"config": {"expectedVersion": "1.0.0"}})})
+        self.addCleanup(self.api.request, "DELETE",
+                        f"/projects/{project_id}/environments/{environment['id']}")
+        return environment
+
+    def _cap104_register_plan(self, plan):
+        state = {"deleted": False}
+
+        def cleanup():
+            if not state["deleted"]:
+                self.api.request("DELETE", f"/test-plans/{plan['id']}")
+                state["deleted"] = True
+
+        self.addCleanup(cleanup)
+        return plan, state
+
+    def _cap104_plan(self, project_id, body):
+        return self._cap104_register_plan(
+            self.api.request("POST", f"/projects/{project_id}/test-plans", body))
+
+    def _cap104_copy_plan(self, plan_id):
+        return self._cap104_register_plan(
+            self.api.request("POST", f"/test-plans/{plan_id}/copy", {}))
+
+    def _cap104_delete_plan(self, plan_id, state):
+        if state["deleted"]:
+            return
+        self.api.request("DELETE", f"/test-plans/{plan_id}")
+        state["deleted"] = True
+
+    def _cap104_baseline(self, plan_run_id, name):
+        baseline = self.api.request("POST", f"/test-plan-runs/{plan_run_id}/baselines",
+                                    {"name": name, "productVersion": "1.0.0"})
+        state = {"deleted": False}
+
+        def cleanup():
+            if not state["deleted"]:
+                self.api.request("DELETE", f"/test-baselines/{baseline['id']}")
+                state["deleted"] = True
+
+        self.addCleanup(cleanup)
+        return baseline, state
+
+    def _cap104_wait_plan_run(self, plan_run_id, timeout=240):
+        deadline = time.monotonic() + timeout
+        while True:
+            run = self.api.request("GET", f"/test-plan-runs/{plan_run_id}")
+            if run["status"] not in ("QUEUED", "RUNNING"):
+                return run
+            self.assertLess(time.monotonic(), deadline, "CAP-104 plan run did not finish in 240s")
+            time.sleep(1)
+
+    @staticmethod
+    def _cap104_java_hash(value):
+        h = 0
+        for ch in value:
+            h = (31 * h + ord(ch)) & 0xFFFFFFFF
+        return h - 0x100000000 if h >= 0x80000000 else h
+
+    @staticmethod
+    def _cap104_zip_entries(blob):
+        with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+            if archive.testzip() is not None:
+                raise AssertionError("evidence zip contains a corrupt entry")
+            return {name: archive.read(name) for name in archive.namelist()}
+
+    def _cap104_issue_node(self, name):
+        issued = self.api.request("POST", "/agent-nodes", {"name": name, "labels": "e2e"})
+        node_id = str(issued["node"]["id"])
+        state = {"deleted": False}
+
+        def cleanup():
+            if not state["deleted"]:
+                self.api.request("DELETE", "/agent-nodes/" + node_id)
+                state["deleted"] = True
+
+        self.addCleanup(cleanup)
+        return node_id, issued["token"]
+
+    def _cap104_create_node(self, name):
+        node_id, _ = self._cap104_issue_node(name)
+        return node_id
+
+    def _cap104_start_runner(self, name):
+        node_id, token = self._cap104_issue_node(name)
+        folder = self.workspace / ("runner-" + uuid.uuid4().hex[:8])
+        folder.mkdir()
+        jar_source = ROOT / "devmind-agent-runner" / "target" / "devmind-agent-runner.jar"
+        self.assertTrue(jar_source.is_file(),
+                        "runner jar missing; build with mvn -q install -DskipTests")
+        jar = folder / "devmind-agent-runner.jar"
+        shutil.copy2(jar_source, jar)
+        java = shutil.which("java")
+        bash = shutil.which("bash")
+        self.assertTrue(java, "java not found on PATH")
+        self.assertTrue(bash, "bash not found on PATH")
+        parsed = urllib.parse.urlsplit(self.api.base)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        ws_scheme = "wss" if parsed.scheme == "https" else "ws"
+        config = folder / "agent.properties"
+        config.write_text("\n".join([
+            f"serverUrl={ws_scheme}://{parsed.hostname}:{port}/ws/agent",
+            f"token={token}",
+            "executor=fake",
+            "execAllowlist=bash",
+            f"execShell={Path(bash).as_posix()}",
+            f"workDir={(folder / 'work').as_posix()}",
+            f"workspaceRoot={(folder / 'workspaces').as_posix()}",
+            f"worklogRoot={(folder / 'worklog').as_posix()}",
+            "gitProxyEnabled=false",
+            "maxConcurrent=4",
+            "gcInitialDelayMinutes=600",
+            "gcIntervalMinutes=600",
+            "partialMessages=false",
+        ]) + "\n", encoding="utf-8")
+        env = os.environ.copy()
+        env["PATH"] = str(Path(bash).parent) + os.pathsep + env.get("PATH", "")
+        log = (folder / "runner.log").open("w", encoding="utf-8")
+        proc = subprocess.Popen([java, "-jar", str(jar), str(config)], cwd=folder, env=env,
+                                stdout=log, stderr=subprocess.STDOUT,
+                                start_new_session=os.name != "nt")
+        stopped = {"value": False}
+
+        def stop():
+            if stopped["value"]:
+                return
+            stopped["value"] = True
+            try:
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                                   capture_output=True)
+                    proc.wait(timeout=15)
+                else:
+                    try:
+                        os.killpg(proc.pid, signal.SIGTERM)
+                        proc.wait(timeout=10)
+                    except ProcessLookupError:
+                        pass
+                    except subprocess.TimeoutExpired:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                        proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            finally:
+                log.close()
+
+        self.addCleanup(stop)
+        deadline = time.monotonic() + 90
+        while True:
+            nodes = self.api.request("GET", "/agent-nodes")
+            node = next((n for n in nodes if str(n["id"]) == node_id), None)
+            if node and node.get("status") == "ONLINE" and (node.get("protocolVersion") or 0) >= 24:
+                return node_id
+            self.assertIsNone(proc.poll(), "runner exited before ONLINE; see tmp runner.log")
+            self.assertLess(time.monotonic(), deadline, "runner did not reach ONLINE within 90s")
+            time.sleep(1)
+
+    @staticmethod
+    def _cap104_program_zip():
+        manifest = {"contractVersion": "1", "name": "e2e-program", "version": "1.0.0",
+                    "runtime": "SHELL", "entrypoint": "run.sh",
+                    "targetOs": "ANY", "targetArch": "ANY", "description": "e2e program"}
+        script = """#!/usr/bin/env bash
+set -uo pipefail
+test -n "${DEVMIND_INPUT:-}" || exit 3
+test -n "${DEVMIND_RESULT:-}" || exit 4
+test -n "${DEVMIND_ARTIFACTS:-}" || exit 5
+if grep -q '"apiToken"' "$DEVMIND_INPUT"; then exit 9; fi
+if ! grep -q '"visibleParam":"e2e"' "$DEVMIND_INPUT"; then exit 7; fi
+if [ -z "${apiToken:-}" ]; then exit 8; fi
+echo "e2e program ran"
+mkdir -p "$DEVMIND_ARTIFACTS"
+printf 'artifact-ok' > "$DEVMIND_ARTIFACTS/report.txt"
+printf '%s' '{"contractVersion":"1","status":"pass","message":"e2e program pass","metrics":{"checked":2},"assertions":[{"name":"input-filtered","pass":true,"expected":"no apiToken","actual":"no apiToken"}]}' > "$DEVMIND_RESULT"
+"""
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr(".devmind-program.json", json.dumps(manifest))
+            archive.writestr("run.sh", script)
+        return buffer.getvalue()
+
+    @staticmethod
+    def _cap104_program_spec(case_key, asset_id):
+        return {"caseKey": case_key, "title": "程序型用例 " + case_key, "type": "COMMAND",
+                "priority": "P1", "tags": ["e2e", "program"],
+                "assertions": [{"source": "EXIT_CODE", "op": "EQUALS", "expected": "0"}],
+                "executor": {"location": "NODE", "timeoutSec": 120},
+                "command": {"command": "bash run.sh", "contractVersion": "1"},
+                "source": {"kind": "ASSET", "assetId": asset_id, "note": "e2e program"}}
+
+    def test_case_version_review_run_and_evidence(self):
+        from support import Api
+        project_id = self._cap104_project()
+        module, suite = self._cap104_suite(project_id)
+        suite_path = "/test-suites/" + str(suite["id"])
+
+        updated = self.api.request("PUT", "/test-modules/" + str(module["id"]), {
+            "name": module["name"] + "-upd", "description": "updated", "tags": "e2e2",
+            "owner": "qa", "sortNo": 2})
+        self.assertEqual(module["name"] + "-upd", updated["name"])
+        self.assertIn(module["id"], [m["id"] for m in
+                                     self.api.request("GET", f"/projects/{project_id}/test-modules")])
+
+        meta = self.api.request("PUT", suite_path, {
+            "moduleId": module["id"], "owner": "qa", "tags": "api,smoke"})
+        self.assertEqual("qa", meta["owner"])
+        self.assertEqual(module["id"], meta["moduleId"])
+        self.assertEqual("APPROVED", self.api.request(
+            "POST", suite_path + "/review", {"reviewStatus": "APPROVED", "note": "e2e"})["reviewStatus"])
+
+        case_key = "health-" + uuid.uuid4().hex[:8]
+        saved = self.api.request("POST", suite_path + "/test-cases", {
+            "changeNote": "initial", "spec": self._cap104_http_spec(case_key)})
+        case = saved["testCase"]
+        self.addCleanup(self.api.request, "DELETE", "/test-cases/" + str(case["id"]))
+        self.assertEqual(case_key, case["caseKey"])
+        self.assertEqual(1, case["caseVersion"])
+        self.assertEqual("DRAFT", case["reviewStatus"])
+        self.assertEqual("HTTP", case["type"])
+        self.assertEqual([], saved["duplicates"])
+
+        duplicate = self.api.request("POST", suite_path + "/test-cases", {
+            "changeNote": "same shape", "spec": self._cap104_http_spec(case_key + "-dup")})
+        self.addCleanup(self.api.request, "DELETE", "/test-cases/" + str(duplicate["testCase"]["id"]))
+        self.assertIn(case["id"], [c["id"] for c in duplicate["duplicates"]])
+
+        self.api.request("POST", suite_path + "/test-cases",
+                         {"changeNote": "bad", "spec": {"title": "", "type": "HTTP"}}, expected=400)
+        listed = self.api.request("GET", f"/test-cases?projectId={project_id}"
+                                         f"&moduleId={module['id']}&type=HTTP&reviewStatus=DRAFT")
+        self.assertIn(case["id"], [c["id"] for c in listed])
+
+        reviewed = self.api.request("POST", f"/test-cases/{case['id']}/review",
+                                    {"reviewStatus": "APPROVED", "note": "e2e approve"})
+        self.assertEqual("APPROVED", reviewed["reviewStatus"])
+        versions = self.api.request("GET", f"/test-cases/{case['id']}/versions")
+        self.assertEqual("APPROVED", versions[0]["reviewStatus"])
+        self.assertEqual("e2e approve", versions[0]["changeNote"])
+
+        environment = self.api.request("POST", f"/projects/{project_id}/environments", {
+            "name": "TEST", "nodeIds": [], "variables": {"baseUrl": self.api.base},
+            "productVersion": "1.0.0",
+            "precheckJson": json.dumps({"config": {"expectedVersion": "1.0.0"}})})
+        self.addCleanup(self.api.request, "DELETE",
+                        f"/projects/{project_id}/environments/{environment['id']}")
+
+        username = "e2e-cap104-" + uuid.uuid4().hex[:10]
+        password = "e2e-" + uuid.uuid4().hex
+        self.api.request("POST", "/auth/users",
+                         {"username": username, "password": password, "role": "VIEWER"})
+        self.addCleanup(self._ensure_user_absent, username)
+        viewer = Api(self.api.base)
+        viewer.login(username, password)
+        viewer.request("GET", f"/test-cases?projectId={project_id}")
+        viewer.request("POST", suite_path + "/test-cases",
+                       {"changeNote": "x", "spec": self._cap104_http_spec("denied-key")}, expected=403)
+        viewer.request("PUT", suite_path, {"owner": "denied"}, expected=403)
+        viewer.request("POST", f"/test-cases/{case['id']}/review",
+                       {"reviewStatus": "APPROVED"}, expected=403)
+        viewer.request("POST", f"/test-cases/{case['id']}/run", {}, expected=403)
+        viewer.request("POST", f"/projects/{project_id}/environments/{environment['id']}/precheck",
+                       expected=403)
+
+        precheck = self.api.request(
+            "POST", f"/projects/{project_id}/environments/{environment['id']}/precheck")
+        self.assertTrue(precheck["passed"])
+        names = {item["name"] for item in precheck["items"]}
+        self.assertIn("HTTP", names)
+        self.assertIn("VERSION_MATCH", names)
+
+        created = self.api.request("POST", f"/test-cases/{case['id']}/run",
+                                   {"environmentId": environment["id"]})
+        self.addCleanup(self.api.request, "DELETE", "/test-runs/" + str(created["id"]))
+        run = self._cap104_wait_run(created["id"])
+        self.assertEqual("SUCCESS", run["status"])
+        self.assertEqual("CASE", run["runScope"])
+        self.assertEqual("PASS", run["conclusion"])
+        self.assertEqual(1, len(run["results"]))
+        result = run["results"][0]
+        self.assertEqual("pass", result["status"])
+        self.assertTrue(result["assertions"])
+        self.assertTrue(all(a["pass"] for a in result["assertions"]))
+
+        evidence = self.api.request("GET", f"/test-runs/{run['id']}/evidence")
+        self.assertTrue({"QUEUE_LOG", "STDOUT", "RESULT_JSON"} <= {e["kind"] for e in evidence})
+        self.assertEqual(list(range(1, len(evidence) + 1)), [e["seqNo"] for e in evidence])
+        verified = self.api.request("GET", f"/test-runs/{run['id']}/evidence/verify")
+        self.assertTrue(verified["valid"])
+        self.assertEqual(len(evidence), verified["count"])
+        self.assertTrue(self.api.download(f"/test-evidence/{evidence[0]['id']}/download"))
+
+        reviewed_result = self.api.request(
+            "PUT", f"/test-runs/{run['id']}/results/{result['id']}/review",
+            {"review": "CONFIRMED", "note": "e2e confirm"})
+        self.assertEqual("CONFIRMED", reviewed_result["manualReview"])
+        report = self.api.request("GET", f"/test-runs/{run['id']}/report.json")
+        self.assertEqual(run["id"], report["run"]["runId"])
+        self.assertEqual("PASS", report["run"]["conclusion"])
+        self.assertEqual(1, len(report["results"]))
+
+        # CAP-10 旧链路不被 CAP-104 改动破坏：无 spec 的 legacy 套件仍可整体保存并运行
+        legacy_suite = self.api.request("POST", f"/projects/{project_id}/test-suites", {
+            "name": "e2e-legacy-" + uuid.uuid4().hex[:8], "kind": "api"})
+        legacy_path = "/test-suites/" + str(legacy_suite["id"])
+        self.addCleanup(self.api.request, "DELETE", legacy_path)
+        self.api.request("PUT", legacy_path + "/cases", [{
+            "name": "legacy health", "kind": "http", "method": "GET", "path": "/health",
+            "expected": {"status": 200, "contains": "UP"}, "enabled": True}])
+        legacy_created = self.api.request("POST", "/tests/runs", {
+            "projectId": project_id, "suiteIds": [legacy_suite["id"]], "baseUrl": self.api.base})
+        self.addCleanup(self.api.request, "DELETE", "/test-runs/" + str(legacy_created["id"]))
+        legacy_run = self._cap104_wait_run(legacy_created["id"])
+        self.assertEqual("SUCCESS", legacy_run["status"])
+        self.assertEqual("pass", legacy_run["results"][0]["status"])
+        self.assertEqual("legacy health", legacy_run["results"][0]["name"])
+
+    def test_test_asset_review_gate_and_deletion(self):
+        project_id = self._cap104_project()
+        module, suite = self._cap104_suite(project_id)
+
+        self.api.request("POST", f"/projects/{project_id}/test-assets/git", {
+            "name": "e2e-git-asset", "repoUrl": "https://example.com/e2e.git",
+            "branch": "main", "commitHash": "not-a-hash"}, expected=400)
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("spec/health.json", "{}")
+            archive.writestr("cases/health.md", "# health")
+        asset = self.api.upload(f"/projects/{project_id}/test-assets/upload", "asset.zip",
+                                buffer.getvalue(),
+                                {"name": "e2e-asset-" + uuid.uuid4().hex[:8], "note": "e2e"})
+        asset_path = "/test-assets/" + str(asset["id"])
+        state = {"deleted": False}
+
+        def detach_and_delete():
+            if state["deleted"]:
+                return
+            self.api.request("PUT", "/test-suites/" + str(suite["id"]), {
+                "moduleId": module["id"], "owner": "e2e", "tags": "api", "sourceAssetId": None})
+            self.api.request("DELETE", asset_path)
+
+        self.addCleanup(detach_and_delete)
+        self.assertEqual("ZIP", asset["kind"])
+        self.assertEqual(2, asset["fileCount"])
+        self.assertEqual("DRAFT", asset["reviewStatus"])
+
+        suite_body = {"moduleId": module["id"], "owner": "e2e", "tags": "api",
+                      "sourceAssetId": asset["id"]}
+        self.api.request("PUT", "/test-suites/" + str(suite["id"]), suite_body, expected=409)
+        self.api.request("POST", asset_path + "/review", {"reviewStatus": "APPROVED", "note": "e2e"})
+        approved = self.api.request("GET", f"/projects/{project_id}/test-assets?reviewStatus=APPROVED")
+        self.assertIn(asset["id"], [a["id"] for a in approved])
+        self.assertEqual(asset["id"], self.api.request(
+            "PUT", "/test-suites/" + str(suite["id"]), suite_body)["sourceAssetId"])
+        self.api.request("DELETE", asset_path, expected=409)
+
+        self.api.request("PUT", "/test-suites/" + str(suite["id"]), {
+            "moduleId": module["id"], "owner": "e2e", "tags": "api", "sourceAssetId": None})
+        self.api.request("DELETE", asset_path)
+        state["deleted"] = True
+        self.assertNotIn(asset["id"], [a["id"] for a in
+                                       self.api.request("GET", f"/projects/{project_id}/test-assets")])
+
+    def test_plan_orchestration_baseline_stats_and_evidence(self):
+        from support import Api
+        project_id = self._cap104_project()
+        module, suite = self._cap104_suite(project_id)
+        suite_path = "/test-suites/" + str(suite["id"])
+        pass_case = self._cap104_approved_case(
+            suite_path, self._cap104_http_spec("e2e-pass-" + uuid.uuid4().hex[:8]))
+        fail_case = self._cap104_approved_case(
+            suite_path, self._cap104_http_spec("e2e-fail-" + uuid.uuid4().hex[:8],
+                                               expected_status="500"))
+        environment = self._cap104_environment(project_id)
+        secret = "e2e-secret-" + uuid.uuid4().hex
+        plan, plan_state = self._cap104_plan(project_id, {
+            "name": "e2e-plan-" + uuid.uuid4().hex[:8], "description": "e2e orchestration",
+            "failStrategy": "CONTINUE", "concurrency": 1,
+            "parameters": {"apiToken": secret, "visibleParam": "alpha"},
+            "items": [{"refType": "SUITE", "refId": suite["id"], "seq": 1, "enabled": True}]})
+        self.assertEqual(1, plan["planVersion"])
+        self.assertEqual("******", plan["parameters"]["apiToken"])
+        self.assertEqual("alpha", plan["parameters"]["visibleParam"])
+
+        first = self._cap104_wait_plan_run(self.api.request(
+            "POST", f"/test-plans/{plan['id']}/run", {"environmentId": environment["id"]})["id"])
+        self.assertEqual("FAILED", first["status"])
+        self.assertEqual("PARTIAL", first["conclusion"])
+        self.assertEqual(1, first["summary"]["items"])
+        self.assertEqual(2, first["summary"]["total"])
+        self.assertEqual(1, first["summary"]["casePassed"])
+        self.assertEqual(1, first["summary"]["caseFailed"])
+        self.assertEqual(50.0, first["summary"]["passRate"])
+        self.assertEqual(1, len(first["children"]))
+        first_cases = self.api.request("GET", f"/test-plan-runs/{first['id']}/cases")
+        self.assertEqual(2, len(first_cases))
+        self.assertEqual({"pass", "fail"}, {c["status"] for c in first_cases})
+        report = self.api.request("GET", f"/test-plan-runs/{first['id']}/report.json")
+        self.assertEqual(first["id"], report["planRun"]["id"])
+        self.assertEqual(2, len(report["cases"]))
+        self.assertNotIn(secret, json.dumps(report, ensure_ascii=False))
+
+        # 方案更新：视图回传掩码，服务端按旧值还原；直接提交掩码（无旧值）必须拒绝
+        current = self.api.request("GET", f"/test-plans/{plan['id']}")
+        updated = self.api.request("PUT", f"/test-plans/{plan['id']}", {
+            "name": current["name"] + "-v2", "description": "updated",
+            "environmentId": current["environmentId"],
+            "failStrategy": current["failStrategy"], "concurrency": current["concurrency"],
+            "parameters": current["parameters"], "requirementId": current["requirementId"],
+            "isTemplate": current["isTemplate"],
+            "items": [{"refType": "SUITE", "refId": suite["id"], "seq": 1, "enabled": True}]})
+        self.assertEqual(2, updated["planVersion"])
+        self.assertEqual("******", updated["parameters"]["apiToken"])
+        self.assertEqual("alpha", updated["parameters"]["visibleParam"])
+        self.api.request("POST", f"/projects/{project_id}/test-plans", {
+            "name": "e2e-masked-" + uuid.uuid4().hex[:8],
+            "parameters": {"apiToken": "******"},
+            "items": [{"refType": "CASE", "refId": pass_case["id"], "seq": 1}]}, expected=400)
+
+        copied, copied_state = self._cap104_copy_plan(plan["id"])
+        self.assertEqual(updated["name"] + " 副本", copied["name"])
+        self.assertEqual(1, copied["planVersion"])
+        self.assertEqual("******", copied["parameters"]["apiToken"])
+        copied_current = self.api.request("GET", f"/test-plans/{copied['id']}")
+        copied_updated = self.api.request("PUT", f"/test-plans/{copied['id']}", {
+            "name": copied_current["name"], "parameters": copied_current["parameters"],
+            "failStrategy": copied_current["failStrategy"],
+            "concurrency": copied_current["concurrency"],
+            "items": [{"refType": "SUITE", "refId": suite["id"], "seq": 1}]})
+        self.assertEqual("******", copied_updated["parameters"]["apiToken"])
+        self._cap104_delete_plan(copied["id"], copied_state)
+
+        template, template_state = self._cap104_plan(project_id, {
+            "name": "e2e-template-" + uuid.uuid4().hex[:8], "isTemplate": True,
+            "items": [{"refType": "SUITE", "refId": suite["id"], "seq": 1, "enabled": True}]})
+        self.api.request("POST", f"/test-plans/{template['id']}/run", {}, expected=409)
+        templates = self.api.request(
+            "GET", f"/projects/{project_id}/test-plans?templateOnly=true")
+        self.assertIn(template["id"], [p["id"] for p in templates])
+        template_copy, template_copy_state = self._cap104_copy_plan(template["id"])
+        self.assertFalse(template_copy["isTemplate"])
+        self._cap104_delete_plan(template_copy["id"], template_copy_state)
+        self._cap104_delete_plan(template["id"], template_state)
+
+        rerun = self._cap104_wait_plan_run(self.api.request(
+            "POST", f"/test-plan-runs/{first['id']}/rerun", {})["id"])
+        self.assertEqual(first["planName"], rerun["planName"])
+        self.assertEqual(1, rerun["planVersion"])
+        self.assertEqual("PARTIAL", rerun["conclusion"])
+        history = self.api.request(
+            "GET", f"/test-plan-runs?projectId={project_id}&planId={plan['id']}")
+        self.assertEqual({first["id"], rerun["id"]}, {r["id"] for r in history})
+
+        baseline, baseline_state = self._cap104_baseline(
+            rerun["id"], "e2e-baseline-" + uuid.uuid4().hex[:8])
+        self.assertEqual(2, baseline["caseCount"])
+        comparison = self.api.request(
+            "GET", f"/test-baselines/{baseline['id']}/compare?planRunId={rerun['id']}")
+        self.assertEqual(1, len(comparison["persistentFailures"]))
+        self.assertEqual(0, len(comparison["newFailures"]))
+        self.assertEqual(0, len(comparison["fixed"]))
+        self.assertEqual(0.0, comparison["passRateDelta"])
+        baselines = self.api.request(
+            "GET", f"/projects/{project_id}/test-baselines?planId={plan['id']}")
+        self.assertIn(baseline["id"], [b["id"] for b in baselines])
+        self.api.request("DELETE", f"/test-baselines/{baseline['id']}")
+        baseline_state["deleted"] = True
+        self.api.request("GET", f"/test-baselines/{baseline['id']}", expected=404)
+
+        stats = self.api.request(
+            "GET", f"/projects/{project_id}/test-stats?days=7&granularity=DAY&planId={plan['id']}")
+        overview = stats["overview"]
+        self.assertEqual(2, overview["runs"])
+        self.assertEqual(4, overview["cases"])
+        self.assertEqual(2, overview["passed"])
+        self.assertEqual(2, overview["failed"])
+        self.assertEqual(50.0, overview["passRate"])
+        self.assertEqual(1, len(stats["topFailures"]))
+        self.assertEqual(fail_case["id"], stats["topFailures"][0]["caseId"])
+        self.assertEqual(2, stats["topFailures"][0]["failures"])
+
+        entries = self._cap104_zip_entries(
+            self.api.download(f"/test-plan-runs/{first['id']}/evidence.zip"))
+        manifest = json.loads(entries["manifest.json"])
+        self.assertEqual("PLAN_RUN", manifest["scope"])
+        self.assertEqual(1, len(manifest["children"]))
+        self.assertTrue(all(chain["valid"] for chain in manifest["chains"]))
+        self.assertEqual("******", manifest["planSnapshot"]["parameters"]["apiToken"])
+        self.assertIn("redaction", manifest)
+        self.assertIn("report.md", entries)
+        self.assertIn("report.json", entries)
+        self.assertTrue(any(name.startswith("children/") and name.endswith("/report.md")
+                            for name in entries))
+        self.assertTrue(any(name.startswith("evidence/run-") for name in entries))
+        for name, content in entries.items():
+            self.assertNotIn(secret.encode(), content, f"secret leaked in evidence zip entry {name}")
+        exported = json.loads(entries["report.json"])
+        self.assertNotIn(secret, json.dumps(exported, ensure_ascii=False))
+
+        with self.subTest("evidence export permission"):
+            code = "E2E_" + uuid.uuid4().hex[:8].upper()
+            username = "e2e-zip-" + uuid.uuid4().hex[:10]
+            password = "e2e-" + uuid.uuid4().hex
+            self.api.request("POST", "/auth/roles",
+                             {"code": code.lower(), "name": "E2E 证据导出", "baseRole": "DEVELOPER"})
+            self.addCleanup(self._ensure_role_absent, code)
+            self.api.request("POST", "/auth/users",
+                             {"username": username, "password": password, "role": code})
+            self.addCleanup(self._ensure_user_absent, username)
+            self.api.request("PUT", "/auth/menus/grants",
+                             {"role": code, "menuKeys": ["project.tests"]})
+            restricted = Api(self.api.base)
+            restricted.login(username, password)
+            restricted.download(f"/test-plan-runs/{first['id']}/evidence.zip", expected=403)
+            self.assertTrue(self.api.download(f"/test-plan-runs/{first['id']}/evidence.zip"))
+
+        self._cap104_delete_plan(plan["id"], plan_state)
+        self.api.request("GET", f"/test-plans/{plan['id']}", expected=404)
+
+    def test_distributed_matrix_and_shard(self):
+        project_id = self._cap104_project()
+        module, suite = self._cap104_suite(project_id)
+        suite_path = "/test-suites/" + str(suite["id"])
+        even_keys, odd_keys = [], []
+        index = 0
+        while len(even_keys) < 2 or len(odd_keys) < 2:
+            key = "e2e-shard-" + str(index)
+            bucket = even_keys if self._cap104_java_hash(key) & 1 == 0 else odd_keys
+            if len(bucket) < 2:
+                bucket.append(key)
+            index += 1
+            self.assertLess(index, 1000, "unable to pick shard keys")
+        keys = even_keys + odd_keys
+        for key in keys:
+            self._cap104_approved_case(suite_path, self._cap104_http_spec(key))
+
+        node_a = self._cap104_start_runner("e2e-runner-a-" + uuid.uuid4().hex[:8])
+        node_b = self._cap104_start_runner("e2e-runner-b-" + uuid.uuid4().hex[:8])
+        plan, _ = self._cap104_plan(project_id, {
+            "name": "e2e-distributed-" + uuid.uuid4().hex[:8],
+            "failStrategy": "CONTINUE", "concurrency": 2,
+            "items": [{"refType": "SUITE", "refId": suite["id"], "seq": 1, "enabled": True}]})
+
+        matrix = self._cap104_wait_plan_run(self.api.request("POST", f"/test-plans/{plan['id']}/run", {
+            "mode": "MATRIX", "nodeIds": [node_a, node_b], "baseUrl": self.api.base})["id"])
+        self.assertEqual("SUCCESS", matrix["status"])
+        self.assertEqual("PASS", matrix["conclusion"])
+        self.assertEqual(2, matrix["summary"]["items"])
+        self.assertEqual(8, matrix["summary"]["total"])
+        self.assertEqual(8, matrix["summary"]["casePassed"])
+        self.assertEqual(100.0, matrix["summary"]["passRate"])
+        self.assertEqual(2, len(matrix["children"]))
+        self.assertEqual({node_a, node_b},
+                         {str(child["agentNodeId"]) for child in matrix["children"]})
+        matrix_cases = self.api.request("GET", f"/test-plan-runs/{matrix['id']}/cases")
+        self.assertEqual(8, len(matrix_cases))
+        for node_id in (node_a, node_b):
+            mine = [c for c in matrix_cases if c["nodeId"] == node_id]
+            self.assertEqual(4, len(mine))
+            self.assertEqual(set(keys), {c["caseKey"] for c in mine})
+            self.assertTrue(all(c["status"] == "pass" for c in mine))
+            self.assertEqual({node_id}, {c["shardKey"] for c in mine})
+
+        shard = self._cap104_wait_plan_run(self.api.request("POST", f"/test-plans/{plan['id']}/run", {
+            "mode": "SHARD", "nodeIds": [node_a, node_b], "baseUrl": self.api.base})["id"])
+        self.assertEqual("SUCCESS", shard["status"])
+        self.assertEqual("PASS", shard["conclusion"])
+        self.assertEqual(2, shard["summary"]["items"])
+        self.assertEqual(4, shard["summary"]["total"])
+        self.assertEqual(4, shard["summary"]["casePassed"])
+        self.assertEqual(2, len(shard["children"]))
+        self.assertEqual([2, 2], sorted(child["summary"]["total"] for child in shard["children"]))
+        shard_cases = self.api.request("GET", f"/test-plan-runs/{shard['id']}/cases")
+        self.assertEqual(4, len(shard_cases))
+        for node_id, expected in ((node_a, set(even_keys)), (node_b, set(odd_keys))):
+            mine = [c for c in shard_cases if c["nodeId"] == node_id]
+            self.assertEqual(2, len(mine))
+            self.assertEqual(expected, {c["caseKey"] for c in mine})
+            self.assertEqual({node_id}, {c["shardKey"] for c in mine})
+            self.assertTrue(all(c["status"] == "pass" for c in mine))
+
+        self.api.request("POST", f"/test-plans/{plan['id']}/run",
+                         {"mode": "SEQUENTIAL", "nodeIds": [node_a]}, expected=400)
+        self.api.request("POST", f"/test-plans/{plan['id']}/run", {
+            "mode": "MATRIX", "nodeIds": ["e2e-missing-" + uuid.uuid4().hex]}, expected=400)
+        self.api.request("POST", f"/test-plans/{plan['id']}/run", {
+            "mode": "MATRIX", "labels": ["e2e-missing-" + uuid.uuid4().hex]}, expected=400)
+
+    def test_runner_partial_failure_and_program_case(self):
+        project_id = self._cap104_project()
+        module, suite = self._cap104_suite(project_id)
+        suite_path = "/test-suites/" + str(suite["id"])
+        keys = ["e2e-blocked-" + uuid.uuid4().hex[:8] for _ in range(4)]
+        for key in keys:
+            self._cap104_approved_case(suite_path, self._cap104_http_spec(key))
+
+        online = self._cap104_start_runner("e2e-runner-online-" + uuid.uuid4().hex[:8])
+        offline = self._cap104_create_node("e2e-runner-offline-" + uuid.uuid4().hex[:8])
+        environment = self._cap104_environment(project_id, [online, offline])
+        plan, _ = self._cap104_plan(project_id, {
+            "name": "e2e-partial-" + uuid.uuid4().hex[:8],
+            "failStrategy": "CONTINUE", "concurrency": 2,
+            "items": [{"refType": "SUITE", "refId": suite["id"], "seq": 1, "enabled": True}]})
+        partial = self._cap104_wait_plan_run(self.api.request("POST", f"/test-plans/{plan['id']}/run", {
+            "mode": "MATRIX", "nodeIds": [online, offline],
+            "environmentId": environment["id"]})["id"])
+        self.assertEqual("FAILED", partial["status"])
+        self.assertEqual("PARTIAL", partial["conclusion"])
+        self.assertEqual(2, partial["summary"]["items"])
+        self.assertEqual(1, partial["summary"]["passed"])
+        self.assertEqual(1, partial["summary"]["blocked"])
+        self.assertEqual(8, partial["summary"]["total"])
+        self.assertEqual(4, partial["summary"]["casePassed"])
+        self.assertEqual(4, partial["summary"]["caseBlocked"])
+        self.assertEqual(0, partial["summary"]["caseFailed"])
+        self.assertEqual(100.0, partial["summary"]["passRate"])
+        self.assertEqual(1, len(partial["children"]))
+        self.assertEqual(online, str(partial["children"][0]["agentNodeId"]))
+        items = {str(item["shardKey"]): item for item in partial["items"]}
+        self.assertEqual("PASS", items[online]["status"])
+        self.assertEqual("BLOCKED", items[offline]["status"])
+        self.assertEqual(4, items[offline]["blocked"])
+
+        secret = "e2e-secret-" + uuid.uuid4().hex
+        asset = self.api.upload(
+            f"/projects/{project_id}/test-assets/upload", "e2e-program.zip",
+            self._cap104_program_zip(),
+            {"name": "e2e-program-" + uuid.uuid4().hex[:8], "note": "e2e", "assetRole": "PROGRAM"})
+        asset_id = asset["id"]
+        asset_state = {"deleted": False}
+
+        def delete_asset():
+            if not asset_state["deleted"]:
+                self.api.request("DELETE", f"/test-assets/{asset_id}")
+                asset_state["deleted"] = True
+
+        self.addCleanup(delete_asset)
+        self.assertEqual("PROGRAM", asset["assetRole"])
+        self.assertEqual("DRAFT", asset["reviewStatus"])
+        self.assertEqual("ZIP", asset["kind"])
+        manifest_text = self.api.download(f"/test-assets/{asset_id}/manifest")
+        self.assertIn(b"e2e-program", manifest_text)
+        program_key = "e2e-program-" + uuid.uuid4().hex[:8]
+        program_spec = self._cap104_program_spec(program_key, asset_id)
+        self.api.request("POST", suite_path + "/test-cases",
+                         {"changeNote": "e2e", "spec": program_spec}, expected=409)
+        self.api.request("POST", f"/test-assets/{asset_id}/review",
+                         {"reviewStatus": "APPROVED", "note": "e2e approve"})
+        program_case = self._cap104_approved_case(suite_path, program_spec)
+
+        program_plan, _ = self._cap104_plan(project_id, {
+            "name": "e2e-program-plan-" + uuid.uuid4().hex[:8],
+            "failStrategy": "CONTINUE", "concurrency": 1,
+            "parameters": {"apiToken": secret, "visibleParam": "e2e"},
+            "items": [{"refType": "CASE", "refId": program_case["id"], "seq": 1, "enabled": True}]})
+        program_run = self._cap104_wait_plan_run(self.api.request(
+            "POST", f"/test-plans/{program_plan['id']}/run",
+            {"mode": "MATRIX", "nodeIds": [online]})["id"])
+        self.assertEqual("SUCCESS", program_run["status"])
+        self.assertEqual("PASS", program_run["conclusion"])
+        self.assertEqual(1, program_run["summary"]["total"])
+        self.assertEqual(1, program_run["summary"]["casePassed"])
+        self.assertEqual(100.0, program_run["summary"]["passRate"])
+        self.assertEqual(1, len(program_run["children"]))
+        child_id = program_run["children"][0]["id"]
+        child = self.api.request("GET", f"/test-runs/{child_id}")
+        result = child["results"][0]
+        self.assertEqual("pass", result["status"])
+        program = result["program"]
+        self.assertEqual("pass", program["status"])
+        self.assertEqual({"checked": 2}, program["metrics"])
+        self.assertEqual(1, len(program["artifacts"]))
+        self.assertEqual("report.txt", program["artifacts"][0]["path"])
+        self.assertEqual(11, program["artifacts"][0]["sizeBytes"])
+        self.assertTrue(all(a["pass"] for a in result["assertions"]))
+        self.assertTrue(any(a["source"] == "CUSTOM" and a["selector"] == "input-filtered"
+                            for a in result["assertions"]))
+
+        evidence = self.api.request("GET", f"/test-runs/{child_id}/evidence")
+        kinds = {e["kind"] for e in evidence}
+        self.assertLessEqual({"PROGRAM_MANIFEST", "INPUT_JSON", "RESULT_JSON", "STDOUT",
+                              "ARTIFACT", "PROGRAM_SUMMARY"}, kinds)
+        self.assertEqual(list(range(1, len(evidence) + 1)), [e["seqNo"] for e in evidence])
+        verified = self.api.request("GET", f"/test-runs/{child_id}/evidence/verify")
+        self.assertTrue(verified["valid"])
+        self.assertEqual(len(evidence), verified["count"])
+        input_evidence = next(e for e in evidence if e["kind"] == "INPUT_JSON")
+        input_text = self.api.download(
+            f"/test-evidence/{input_evidence['id']}/download").decode("utf-8")
+        self.assertNotIn("apiToken", input_text)
+        self.assertIn('"visibleParam":"e2e"', input_text)
+        artifact_evidence = next(e for e in evidence if e["kind"] == "ARTIFACT")
+        self.assertEqual(b"artifact-ok",
+                         self.api.download(f"/test-evidence/{artifact_evidence['id']}/download"))
+        for entry in evidence:
+            self.assertNotIn(secret.encode(),
+                             self.api.download(f"/test-evidence/{entry['id']}/download"),
+                             f"secret leaked in evidence {entry['kind']}")
+
+        entries = self._cap104_zip_entries(
+            self.api.download(f"/test-plan-runs/{program_run['id']}/evidence.zip"))
+        self.assertEqual("PLAN_RUN", json.loads(entries["manifest.json"])["scope"])
+        for name, content in entries.items():
+            self.assertNotIn(secret.encode(), content, f"secret leaked in evidence zip entry {name}")
+
+        self.api.request("DELETE", f"/test-assets/{asset_id}", expected=409)
 
 
 class CopilotContract(unittest.TestCase):

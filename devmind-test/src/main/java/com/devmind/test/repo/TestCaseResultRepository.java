@@ -9,5 +9,8 @@ public interface TestCaseResultRepository extends JpaRepository<TestCaseResultEn
 
     List<TestCaseResultEntity> findByRunIdOrderBySortAsc(Long runId);
 
+    /** CAP-104 M3 统计：批量取时间窗内结果，避免逐运行查询 */
+    List<TestCaseResultEntity> findByRunIdInOrderByCreatedAtAsc(java.util.Collection<Long> runIds);
+
     void deleteByRunId(Long runId);
 }

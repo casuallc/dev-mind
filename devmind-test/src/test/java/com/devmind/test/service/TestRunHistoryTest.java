@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
 import com.devmind.auth.IdentityService;
+import com.devmind.common.audit.AuditService;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.deploy.repo.DeploymentRepository;
 import com.devmind.docs.DocumentService;
@@ -53,7 +54,10 @@ class TestRunHistoryTest {
                 mock(AgentNodeStepRunner.class), mock(DocumentService.class),
                 mock(NotificationService.class), mock(ExecutionLogHub.class),
                 new ObjectMapper(), mock(EnvironmentService.class),
-                mock(IdentityService.class), mock(DomainEventPublisher.class), Duration.ofHours(2));
+                mock(IdentityService.class), mock(DomainEventPublisher.class),
+                mock(com.devmind.test.executor.CaseExecutionService.class),
+                mock(EvidenceService.class), mock(EnvironmentPrecheckService.class),
+                mock(AuditService.class), Duration.ofHours(2));
     }
 
     private TestRunEntity run(Long id, String workItemId) {
@@ -68,7 +72,7 @@ class TestRunHistoryTest {
 
     @Test
     void historyWithUnlinkedRunsDoesNotThrow() {
-        when(repo.findByProjectIdOrderByCreatedAtDesc("p1"))
+        when(repo.findByProjectIdAndPlanRunIdIsNullOrderByCreatedAtDesc("p1"))
                 .thenReturn(List.of(run(1L, null), run(2L, null)));
         List<TestRunView> views = service.history("p1", null);
         assertEquals(2, views.size());

@@ -1,6 +1,7 @@
 package com.devmind.common.agent;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * CAP-21 节点连接 SPI（会话模块 → agent 模块：经节点 WS 长连接下发指令）。
@@ -81,6 +82,31 @@ public interface AgentNodeConnector {
      */
     default boolean nodeMatches(String nodeId, List<String> requiredLabels) {
         return true;
+    }
+
+    /**
+     * CAP-104 M3 FR-19：在线且同时满足标签/能力要求的节点（按 id 升序）。
+     * labels 与 capabilities 为空表示不限制；用于方案运行的“标签匹配 → 能力匹配 → 平台默认”选节点链。
+     * 默认空列表（未装配 agent 模块 = 无节点可选）。
+     */
+    default List<String> onlineNodesMatching(List<String> requiredLabels, List<String> requiredCapabilities) {
+        return List.of();
+    }
+
+    /**
+     * CAP-104 M1.5：节点 hello 上报的 OS 串（如 {@code "Linux / amd64"}；老 runner/缺省 null）。
+     * 程序型用例执行前按清单 targetOs/targetArch 匹配。
+     */
+    default String nodeOs(String nodeId) {
+        return null;
+    }
+
+    /**
+     * CAP-104 M1.5：节点工具链探测结果（如 {@code {java:"21.0.2",node:"22.11.0"}}；
+     * 未上报 = 空表）。程序型用例按 runtime/runtimeVersion 做执行前匹配。
+     */
+    default Map<String, String> nodeToolchain(String nodeId) {
+        return Map.of();
     }
 
     /**

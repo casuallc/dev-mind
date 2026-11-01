@@ -79,6 +79,24 @@ public class EnvironmentEntity {
     @Column(name = "updated_at")
     private Instant updatedAt;
 
+    // ---------------- CAP-104 环境预检与清理 ----------------
+
+    /** 产品版本字符串（人工维护；预检 VERSION_MATCH 对比） */
+    @Column(name = "product_version", length = 128)
+    private String productVersion;
+
+    /** 预检配置与最近一次结果 JSON：{"command":"…","expectedVersion":"…","last":{"passed":true,"checkedAt":"…","items":[…]}} */
+    @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @Column(name = "precheck_json", length = 16_777_216)
+    private String precheckJson;
+
+    /** 执行后清理命令（方案级 teardown；M1 单次运行也执行） */
+    @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @Column(name = "cleanup_json", length = 16_777_216)
+    private String cleanupJson;
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public String getProjectId() { return projectId; }
@@ -103,4 +121,10 @@ public class EnvironmentEntity {
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+    public String getProductVersion() { return productVersion; }
+    public void setProductVersion(String productVersion) { this.productVersion = productVersion; }
+    public String getPrecheckJson() { return precheckJson; }
+    public void setPrecheckJson(String precheckJson) { this.precheckJson = precheckJson; }
+    public String getCleanupJson() { return cleanupJson; }
+    public void setCleanupJson(String cleanupJson) { this.cleanupJson = cleanupJson; }
 }

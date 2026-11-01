@@ -32,6 +32,7 @@ import com.devmind.common.agent.WorkspaceStatusListener;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.integration.GitIdentityProvider.GitAuthor;
+import com.devmind.common.program.ProgramContract;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -40,6 +41,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
@@ -504,6 +506,46 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         return nodeService.nodeMatchesLabels(nodeId, requiredLabels);
     }
 
+    /** CAP-104 M3：方案分布式选节点（标签 + 能力同时满足，在线，按 id 升序）。 */
+    @Override
+    public List<String> onlineNodesMatching(List<String> requiredLabels, List<String> requiredCapabilities) {
+        return nodeService.onlineNodesMatching(requiredLabels, requiredCapabilities).stream()
+                .map(e -> String.valueOf(e.getId()))
+                .toList();
+    }
+
+    /** CAP-104 M1.5：hello 上报的 OS 串，供程序包 targetOs/targetArch 预检。 */
+    @Override
+    public String nodeOs(String nodeId) {
+        try {
+            return nodeService.require(Long.parseLong(nodeId)).getOs();
+        } catch (NumberFormatException | DevMindException e) {
+            return null;
+        }
+    }
+
+    /** CAP-104 M1.5：hello 上报的工具链 JSON → key/version；解析失败按空表（宁可漏检不误杀）。 */
+    @Override
+    public Map<String, String> nodeToolchain(String nodeId) {
+        try {
+            String json = nodeService.require(Long.parseLong(nodeId)).getToolchain();
+            if (json == null || json.isBlank()) {
+                return Map.of();
+            }
+            JsonNode node = mapper.readTree(json);
+            Map<String, String> out = new LinkedHashMap<>();
+            if (node.isObject()) {
+                node.properties().forEach(e -> out.put(e.getKey(), e.getValue().asText("")));
+            }
+            return out;
+        } catch (NumberFormatException | DevMindException e) {
+            return Map.of();
+        } catch (Exception e) {
+            log.debug("节点工具链解析失败: {}", e.getMessage());
+            return Map.of();
+        }
+    }
+
     /**
      * CAP-43：节点配了外网代理时随帧携带 {@code proxy:{url,scopes}}（runner 进程级 holder 生效）。
      * 协议 v8 门控：runner 过旧抛 CONFLICT 明示升级——不静默发送（老 runner 忽略该字段会让
@@ -934,6 +976,15 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
      */
     private void requireBundleProtocol(String nodeId, AgentExecCommand.LabBundleRef bundle) {
         if (bundle == null) {
+            return;
+        }
+        if (ProgramContract.KIND.equals(bundle.kind())) {
+            if (!supports(nodeId, AgentProtocol.TEST_PROGRAM_BUNDLE)) {
+                throw new DevMindException(ErrorCode.CONFLICT,
+                        "节点 " + nodeId + " 的 runner 协议版本过低（程序型用例需 v"
+                                + AgentProtocol.TEST_PROGRAM_BUNDLE + "+，程序包要由 runner 树形解包），"
+                                + "请到节点页升级 runner");
+            }
             return;
         }
         if (!supports(nodeId, AgentProtocol.EXEC_BUNDLE)) {

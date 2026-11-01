@@ -24,5 +24,15 @@ public record TestRunView(
         Instant createdAt,
         List<CaseResultView> results,
         /** 关联工作单元摘要（列表回链需求展示；未关联或已删除时为 null） */
-        WorkItemBrief workItem) {
+        WorkItemBrief workItem,
+        /** CAP-104：SUITE / CASE / SCRIPT */
+        String runScope,
+        /** CAP-104：PASS / FAIL / PARTIAL / BLOCKED */
+        String conclusion,
+        /** CAP-104 M2/M3：所属方案运行 / 方案项 / 重试次数 / 关联需求 / 分片键 */
+        Long planRunId,
+        Long planItemId,
+        Integer attempt,
+        String requirementId,
+        String shardKey) {
 }
