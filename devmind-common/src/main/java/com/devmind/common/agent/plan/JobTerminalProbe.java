@@ -27,4 +27,13 @@ public interface JobTerminalProbe {
     default String failureSummary(String entityId) {
         return null;
     }
+
+    /**
+     * 终态后的详情报告（CAP-76 FR-37 计划推送用）：耗时、产出摘要、关键指标
+     * （构建 id / 会话 token 用量等）。default 返回 null 保证既有实现兼容；
+     * null = 无额外信息，推送降级为只报 kind/jobId/终态。
+     */
+    default JobReport terminalReport(String entityId) {
+        return null;
+    }
 }
