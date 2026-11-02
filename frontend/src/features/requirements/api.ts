@@ -48,6 +48,15 @@ export function createRequirement(projectId: string, input: RequirementInput): P
   return api.post<Requirement>(`/projects/${projectId}/requirements`, input)
 }
 
+/** CAP-105 需求 AI 扩展：关键点 → one-shot 同步会话 → 标题/类型/描述草稿（不落地，仅回填表单；
+ *  type 为 null 表示 AI 给的类型不在词表，前端保留表单原值；sessionId 为执行痕迹） */
+export function aiExpandRequirement(
+  projectId: string,
+  input: { points: string; title?: string; description?: string },
+): Promise<{ title: string; type: string | null; description: string; sessionId: string }> {
+  return api.post(`/projects/${projectId}/requirements/ai-expand`, input)
+}
+
 export function updateRequirement(
   projectId: string,
   requirementId: string,

@@ -4,9 +4,10 @@
 // 描述为 Markdown 富文本（CAP-44 MarkdownEditor）：粘贴/拖拽/工具栏上传图片附件内联进描述
 // （scope=SHARED 项目成员可见），与 CAP-40 需求附件装配同一口径——描述里的引用会被投送到 AI 会话。
 import { useEffect, useState } from 'react'
-import { Button, DatePicker, Drawer, Form, Input, Select, Space, message } from 'antd'
+import { Button, DatePicker, Drawer, Form, Input, Modal, Select, Space, message } from 'antd'
+import { RobotOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { createRequirement, updateRequirement } from '../api'
+import { aiExpandRequirement, createRequirement, updateRequirement } from '../api'
 import type { Requirement, RequirementInput } from '../types'
 import { ALL_PRIORITIES, ALL_TYPES, TYPE_LABEL } from './requirementMeta'
 import { listEnvironments } from '../../projects/api'
@@ -31,6 +32,38 @@ export default function RequirementFormDrawer({ projectId, editing, open, onClos
   const jiraManaged = editing?.source === 'JIRA'
   // CAP-73：验证环境选项（PROD 永远不可绑，服务端同样校验同项目归属）
   const [envOptions, setEnvOptions] = useState<{ value: number; label: string }[]>([])
+  // CAP-105：AI 扩展弹窗（关键点 → one-shot 同步扩展 → 回填标题/类型/描述供修改）
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiPoints, setAiPoints] = useState('')
+  const [aiExpanding, setAiExpanding] = useState(false)
+
+  const onAiExpand = async () => {
+    const points = aiPoints.trim()
+    if (!points) {
+      message.warning('请先输入关键点')
+      return
+    }
+    setAiExpanding(true)
+    try {
+      const resp = await aiExpandRequirement(projectId, {
+        points,
+        title: form.getFieldValue('title') || undefined,
+        description: form.getFieldValue('description') || undefined,
+      })
+      form.setFieldsValue({
+        title: resp.title,
+        description: resp.description,
+        ...(resp.type ? { type: resp.type as FormValues['type'] } : {}),
+      })
+      message.success('已回填表单，请检查后保存')
+      setAiOpen(false)
+      setAiPoints('')
+    } catch (e) {
+      showError(e, 'AI 扩展失败')
+    } finally {
+      setAiExpanding(false)
+    }
+  }
 
   useEffect(() => {
     if (!open) return
@@ -90,6 +123,11 @@ export default function RequirementFormDrawer({ projectId, editing, open, onClos
       onClose={onClose}
       width={DRAWER_DEFAULT}
       destroyOnHidden
+      extra={!jiraManaged && (
+        <Button size="small" icon={<RobotOutlined />} onClick={() => setAiOpen(true)}>
+          AI 扩展
+        </Button>
+      )}
       footer={
         <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button onClick={onClose}>取消</Button>
@@ -145,6 +183,33 @@ export default function RequirementFormDrawer({ projectId, editing, open, onClos
           <Select allowClear placeholder="不绑定 = 开发中验证不可用" options={envOptions} />
         </Form.Item>
       </Form>
+      {/* CAP-105：AI 扩展弹窗。输入框用受控 state 而非 Form.Item——弹窗关闭即卸载，
+          放 Form 里会踩字段卸载丢值的坑 */}
+      <Modal
+        title="AI 扩展需求"
+        open={aiOpen}
+        onCancel={() => !aiExpanding && setAiOpen(false)}
+        onOk={onAiExpand}
+        okText="生成并回填"
+        cancelText="取消"
+        confirmLoading={aiExpanding}
+        maskClosable={!aiExpanding}
+        keyboard={!aiExpanding}
+      >
+        <p style={{ color: 'rgba(0,0,0,0.45)', marginBottom: 8 }}>
+          粘贴需求关键点（口语化即可），AI 会扩展成标题、类型与结构化描述回填到表单，保存前可继续修改。
+          生成期间请勿关闭抽屉（同步等待，通常 1 分钟内）。
+        </p>
+        <Input.TextArea
+          value={aiPoints}
+          onChange={(e) => setAiPoints(e.target.value)}
+          placeholder={'如：\n用户登录支持扫码\npc 端和手机端都要\n要考虑扫码超时'}
+          autoSize={{ minRows: 4, maxRows: 10 }}
+          maxLength={2000}
+          showCount
+          disabled={aiExpanding}
+        />
+      </Modal>
     </Drawer>
   )
 }
