@@ -76,6 +76,9 @@ public class CopilotProperties {
     /** await timeoutMinutes 上限（FR-35） */
     private int planAwaitMaxTimeoutMinutes = 120;
 
+    /** 计划推送（确认回执概览/终态逐步骤结果）最大字符数（FR-37）：超出先压缩字段行再截断 */
+    private int planPushMaxChars = 2800;
+
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public String getEndpointId() { return endpointId; }
@@ -136,4 +139,6 @@ public class CopilotProperties {
     public void setPlanAwaitPollSeconds(int v) { this.planAwaitPollSeconds = v; }
     public int getPlanAwaitMaxTimeoutMinutes() { return planAwaitMaxTimeoutMinutes; }
     public void setPlanAwaitMaxTimeoutMinutes(int v) { this.planAwaitMaxTimeoutMinutes = v; }
+    public int getPlanPushMaxChars() { return planPushMaxChars; }
+    public void setPlanPushMaxChars(int v) { this.planPushMaxChars = v; }
 }

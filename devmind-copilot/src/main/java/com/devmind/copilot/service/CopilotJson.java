@@ -76,6 +76,11 @@ public final class CopilotJson {
         return value;
     }
 
+    /** 敏感键判定（FR-37 计划推送字段过滤与参数摘要掩码用）。 */
+    public static boolean isSensitiveKey(String key) {
+        return key != null && SECRET_KEY.matcher(key).matches();
+    }
+
     /** 自由文本脱敏（FR-28）：`sk-…` / `Bearer …` 一律替换。 */
     public static String maskText(String text) {
         if (text == null || text.isBlank()) {

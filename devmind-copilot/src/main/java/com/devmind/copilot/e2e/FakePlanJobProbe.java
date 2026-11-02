@@ -1,5 +1,6 @@
 package com.devmind.copilot.e2e;
 
+import com.devmind.common.agent.plan.JobReport;
 import com.devmind.common.agent.plan.JobState;
 import com.devmind.common.agent.plan.JobTerminalProbe;
 import java.util.Map;
@@ -31,6 +32,16 @@ public class FakePlanJobProbe implements JobTerminalProbe {
     @Override
     public String failureSummary(String entityId) {
         return states.get(entityId) == JobState.FAILED ? "e2e 假作业被置为失败" : null;
+    }
+
+    /** FR-37：假终态报告（E2E 断言推送里的作业终态块用）。 */
+    @Override
+    public JobReport terminalReport(String entityId) {
+        JobState state = states.get(entityId);
+        if (state == null) {
+            return null;
+        }
+        return new JobReport(state, 1000L, "e2e 假作业终态报告", Map.of("fakeJobId", entityId));
     }
 
     public void setState(String entityId, JobState state) {

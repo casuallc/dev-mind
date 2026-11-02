@@ -47,19 +47,23 @@ public class CopilotActionService {
     private final CopilotToolRunner runner;
     private final CopilotProperties props;
     private final ObjectProvider<ToolAccessPolicy> policies;
+    // FR-37：计划确认回执概览。PlanService 对 ToolRegistry 用 ObjectProvider 延迟取，直接注入不成环。
+    private final PlanService plans;
 
     public CopilotActionService(CopilotActionRepository actions,
                                 CopilotToolCallRepository toolCalls,
                                 ToolRegistry registry,
                                 CopilotToolRunner runner,
                                 CopilotProperties props,
-                                ObjectProvider<ToolAccessPolicy> policies) {
+                                ObjectProvider<ToolAccessPolicy> policies,
+                                PlanService plans) {
         this.actions = actions;
         this.toolCalls = toolCalls;
         this.registry = registry;
         this.runner = runner;
         this.props = props;
         this.policies = policies;
+        this.plans = plans;
     }
 
     /** 默认预览（工具未覆写 preview 时使用）：展示工具名与规范化参数；敏感键掩码。 */
@@ -210,9 +214,8 @@ public class CopilotActionService {
         // 终态由 PlanService 收口（SUCCEEDED/FAILED + 汇总审计 + 聊天推送）。
         if (PlanService.TOOL_NAME.equals(tool.spec().name())) {
             toolCalls.closePendingByActionId(action.getId(), CopilotToolCallEntity.CONFIRMED);
-            int total = args.get("steps") instanceof List<?> steps ? steps.size() : 0;
-            return new Outcome(true, "计划已开始执行（共 " + total + " 步），完成后会推送结果；"
-                    + "进度见平台「智能体运维 → 计划」", action, null);
+            // FR-37：确认回执升级为计划概览（目标 + 步骤清单 + await 标注）；渲染异常内部回退简短文案
+            return new Outcome(true, plans.overviewText(args, ctx, action.getShortCode()), action, null);
         }
 
         // 8) 执行（服务端参数快照；SecurityContext 在 runner 内合成）

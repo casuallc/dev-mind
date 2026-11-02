@@ -1,5 +1,6 @@
 package com.devmind.copilot.service;
 
+import com.devmind.common.agent.plan.JobReport;
 import com.devmind.common.agent.plan.JobState;
 import com.devmind.common.agent.plan.JobTerminalProbe;
 import com.devmind.common.agent.tool.PlatformTool;
@@ -444,7 +445,83 @@ public class PlanService {
         }
     }
 
-    /** FR-34：终态推送（SPI 缺席/来源非聊天入口静默跳过；推送失败不阻断收口）。 */
+    // ------------------------------------------------------------------
+    // FR-37：执行前概览（确认回执文案）与执行后逐步骤结果推送
+    // ------------------------------------------------------------------
+
+    /**
+     * 确认回执用的计划概览（FR-37）：目标 + 有序步骤清单（序号/标题/工具名/参数摘要）
+     * + await 标注 + 短码入口。任何渲染异常回退到简短文案——<b>不阻断确认</b>。
+     */
+    public String overviewText(Map<String, Object> planArgs, ToolContext ctx, String shortCode) {
+        try {
+            ValidatedPlan plan = validate(planArgs, ctx.role(), ctx.projectId(), ctx);
+            StringBuilder sb = new StringBuilder();
+            sb.append("📋 计划已开始执行（共 ").append(plan.steps().size()).append(" 步）\n");
+            sb.append("目标：").append(plan.goal().isBlank() ? "（未填写目标）"
+                    : CopilotJson.truncate(CopilotJson.maskText(plan.goal()), 200)).append('\n');
+            boolean anyAwait = false;
+            for (PlanStep step : plan.steps()) {
+                sb.append(step.seq()).append(". ").append(step.tool().spec().title())
+                        .append("（").append(step.tool().spec().name()).append("）");
+                if (step.await() != null) {
+                    anyAwait = true;
+                    sb.append(" ⏳ 将等待 ").append(step.await().kind()).append(" 终态（超时 ")
+                            .append(step.await().timeoutMinutes()).append(" 分钟）");
+                }
+                sb.append('\n');
+                String params = paramsSummary(step.args());
+                if (!params.isBlank()) {
+                    sb.append("   ").append(params).append('\n');
+                }
+            }
+            sb.append("────────────\n");
+            if (!anyAwait) {
+                sb.append("本计划无需等待异步作业\n");
+            }
+            if (!isBlank(shortCode)) {
+                sb.append("计划短码 ").append(shortCode).append(" · ");
+            }
+            sb.append("进度：智能体运维 → 计划");
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("计划概览渲染失败，回退简短文案: err={}", e.toString());
+            return fallbackOverview(planArgs);
+        }
+    }
+
+    private String fallbackOverview(Map<String, Object> planArgs) {
+        int total = planArgs != null && planArgs.get("steps") instanceof List<?> l ? l.size() : 0;
+        return "计划已开始执行（共 " + total + " 步），完成后会推送结果；"
+                + "进度见平台「智能体运维 → 计划」";
+    }
+
+    /** 参数摘要：前 4 个参数，值截断 60 字符；敏感键 → ***；${stepN.field} 占位符原样展示。 */
+    private String paramsSummary(Map<String, Object> args) {
+        List<String> parts = new ArrayList<>();
+        for (Map.Entry<String, Object> e : args.entrySet()) {
+            if (parts.size() >= 4) {
+                break;
+            }
+            parts.add(e.getKey() + ": " + displayArg(e.getKey(), e.getValue()));
+        }
+        return String.join(" · ", parts);
+    }
+
+    private String displayArg(String key, Object value) {
+        if (CopilotJson.isSensitiveKey(key)) {
+            return "***";
+        }
+        if (value == null) {
+            return "（空）";
+        }
+        String text = value instanceof String s ? s
+                : (value instanceof Number || value instanceof Boolean
+                        ? String.valueOf(value) : CopilotJson.write(value));
+        return CopilotJson.truncate(CopilotJson.maskText(text), 60);
+    }
+
+    /** FR-37：终态推送（SPI 缺席/来源非聊天入口静默跳过；推送失败不阻断收口）。 */
     private void pushPlanResult(Map<String, Object> args, ToolContext ctx, ToolResult result) {
         if (isBlank(ctx.channel()) || isBlank(ctx.externalChatId())) {
             return;
@@ -453,24 +530,222 @@ public class PlanService {
         if (push == null) {
             return;
         }
-        String goal = args.get("goal") instanceof String g && !g.isBlank() ? g : "（未命名计划）";
-        Object completed = result.data() == null ? null : result.data().get("completed");
-        Object total = result.data() == null ? null : result.data().get("total");
-        StringBuilder text = new StringBuilder(result.success() ? "✅" : "❌")
-                .append(" 计划《").append(CopilotJson.truncate(goal, 60)).append("》")
-                .append(result.success() ? "已完成" : "执行中断");
-        if (completed != null && total != null) {
-            text.append("（").append(completed).append('/').append(total).append(" 步）");
-        }
-        if (!result.success() && result.errorMessage() != null) {
-            text.append('\n').append(CopilotJson.truncate(result.errorMessage(), 300));
-        }
-        text.append("\n进度详见平台「智能体运维 → 计划」");
+        String shortCode = null;
         try {
-            push.pushText(ctx.channel(), ctx.externalChatId(), text.toString());
+            shortCode = actions.findById(ctx.actionId())
+                    .map(CopilotActionEntity::getShortCode).orElse(null);
+        } catch (Exception e) {
+            log.debug("计划短码读取失败: actionId={} err={}", ctx.actionId(), e.toString());
+        }
+        int max = Math.max(500, props.getPlanPushMaxChars());
+        String text = renderResultText(args, result, shortCode, true);
+        if (text.length() > max) {
+            // 先压缩：去掉步骤字段行，只留状态/标题/失败一行
+            text = renderResultText(args, result, shortCode, false);
+        }
+        if (text.length() > max) {
+            String note = "\n…已截断，详情见「智能体运维 → 计划」"
+                    + (isBlank(shortCode) ? "" : "（搜索短码 " + shortCode + "）");
+            text = text.substring(0, Math.max(0, max - note.length())) + note;
+        }
+        try {
+            push.pushText(ctx.channel(), ctx.externalChatId(), text);
         } catch (Exception e) {
             log.warn("计划终态推送失败: actionId={} err={}", ctx.actionId(), e.toString());
         }
+    }
+
+    /**
+     * 逐步骤结果渲染（FR-37）：结论行 + 每步一行（状态/标题/工具/耗时 + 成功字段行 /
+     * 失败归类行）+ 中断说明段 + 短码入口。{@code withFields=false} 为超长压缩档。
+     */
+    private String renderResultText(Map<String, Object> args, ToolResult result,
+                                    String shortCode, boolean withFields) {
+        String goal = args.get("goal") instanceof String g && !g.isBlank()
+                ? CopilotJson.truncate(CopilotJson.maskText(g), 60) : "（未命名计划）";
+        Map<String, Object> data = result.data();
+        int completed = data.get("completed") instanceof Number n ? n.intValue() : -1;
+        int total = data.get("total") instanceof Number n ? n.intValue() : -1;
+        int failedStep = data.get("failedStep") instanceof Number n ? n.intValue() : -1;
+        List<?> steps = data.get("steps") instanceof List<?> l ? l : List.of();
+
+        StringBuilder sb = new StringBuilder();
+        if (result.success()) {
+            sb.append("✅ 计划《").append(goal).append("》执行成功");
+            if (total >= 0) {
+                sb.append("（").append(completed).append('/').append(total).append(" 步）");
+            }
+        } else if (completed > 0) {
+            sb.append("⚠️ 计划《").append(goal).append("》部分成功：完成 ")
+                    .append(completed).append('/').append(total).append(" 步后中断");
+        } else {
+            sb.append("❌ 计划《").append(goal).append("》执行失败");
+            if (total >= 0) {
+                sb.append("（0/").append(total).append(" 步）");
+            }
+        }
+        sb.append('\n');
+        if (!steps.isEmpty()) {
+            sb.append("────────────\n");
+            int seq = 0;
+            for (Object item : steps) {
+                if (item instanceof Map<?, ?> row) {
+                    seq++;
+                    renderStepLine(sb, seq, row, failedStep, withFields);
+                }
+            }
+        }
+        if (!result.success()) {
+            sb.append("────────────\n");
+            if (failedStep > 0) {
+                sb.append("中断说明：已完成 ").append(Math.max(completed, 0))
+                        .append(" 步且已生效、不回滚。\n");
+                List<String> outputs = collectOutputs(steps, withFields);
+                if (!outputs.isEmpty()) {
+                    sb.append("已落库产出：").append(String.join(" · ", outputs)).append('\n');
+                }
+                if (total > failedStep) {
+                    sb.append("剩余 ").append(total - failedStep)
+                            .append(" 步未执行。善后：请到平台核实失败原因，处理后重新发起剩余操作。\n");
+                }
+            } else if (result.errorMessage() != null) {
+                sb.append(CopilotJson.truncate(CopilotJson.maskText(result.errorMessage()), 300))
+                        .append('\n');
+            }
+        }
+        if (!isBlank(shortCode)) {
+            sb.append("计划短码 ").append(shortCode).append(" · 详情：智能体运维 → 计划（搜索短码）");
+        } else {
+            sb.append("详情：智能体运维 → 计划");
+        }
+        return sb.toString();
+    }
+
+    private void renderStepLine(StringBuilder sb, int seq, Map<?, ?> row, int failedStep,
+                                boolean withFields) {
+        String status = row.get("status") instanceof String s ? s : "";
+        String title = row.get("title") instanceof String s ? s : "";
+        String tool = row.get("tool") instanceof String s ? s : "";
+        boolean failedHere = seq == failedStep || "FAILED".equals(status);
+        String emoji = switch (status) {
+            case "OK" -> "✅";
+            case "REJECTED" -> failedHere ? "❌" : "⏭️";
+            default -> "❌";
+        };
+        sb.append(seq).append(". ").append(emoji).append(' ').append(title);
+        if (!tool.isBlank()) {
+            sb.append(" · ").append(tool);
+        }
+        if (row.get("durationMs") instanceof Number n) {
+            sb.append(" · ").append(fmtDuration(n.longValue()));
+        }
+        Map<?, ?> await = row.get("await") instanceof Map<?, ?> a ? a : null;
+        if (await != null && "OK".equals(status)) {
+            sb.append("（等待 ").append(await.get("kind")).append(" 终态）");
+        }
+        sb.append('\n');
+        if ("OK".equals(status)) {
+            if (withFields && row.get("fields") instanceof Map<?, ?> fields && !fields.isEmpty()) {
+                fields.forEach((k, v) -> sb.append("   ").append(k).append(": ")
+                        .append(v).append('\n'));
+            } else if (Boolean.TRUE.equals(row.get("fieldsMasked"))) {
+                sb.append("   敏感结果已脱敏\n");
+            }
+            renderAwaitLine(sb, await, withFields);
+        } else if (failedHere) {
+            String errorCode = row.get("errorCode") instanceof String s ? s : null;
+            String error = row.get("error") instanceof String s ? s : "";
+            sb.append("   失败（").append(failureKind(errorCode)).append("）：")
+                    .append(CopilotJson.truncate(CopilotJson.maskText(error), 200)).append('\n');
+            renderAwaitLine(sb, await, withFields);
+        } else {
+            sb.append("   跳过（前序步骤失败，未执行）\n");
+        }
+    }
+
+    /** await 作业终态行：kind/jobId/状态/耗时/摘要；metrics 逐行（压缩档省略）。 */
+    private void renderAwaitLine(StringBuilder sb, Map<?, ?> await, boolean withFields) {
+        if (await == null) {
+            return;
+        }
+        String kind = await.get("kind") instanceof String s ? s : "";
+        String jobId = await.get("jobId") instanceof String s ? s : "";
+        String state = await.get("state") instanceof String s ? s : "";
+        String stateText = switch (state) {
+            case "SUCCEEDED" -> "成功";
+            case "FAILED" -> "失败";
+            case "TIMEOUT" -> "等待超时";
+            default -> "已受理";
+        };
+        sb.append("   作业 ").append(kind).append(' ').append(jobId).append('：').append(stateText);
+        if (await.get("durationMs") instanceof Number n) {
+            sb.append(" · 耗时 ").append(fmtDuration(n.longValue()));
+        }
+        if (await.get("summary") instanceof String s && !s.isBlank()) {
+            sb.append(" · ").append(CopilotJson.truncate(CopilotJson.maskText(s), 200));
+        }
+        sb.append('\n');
+        if (withFields && await.get("metrics") instanceof Map<?, ?> metrics && !metrics.isEmpty()) {
+            metrics.forEach((k, v) -> sb.append("   ").append(k).append(": ")
+                    .append(v).append('\n'));
+        }
+    }
+
+    /** 中断说明段的「已落库产出」：已完成步骤 fields 与 await metrics 的扁平清单（最多 10 条）。 */
+    private List<String> collectOutputs(List<?> steps, boolean withFields) {
+        List<String> out = new ArrayList<>();
+        if (!withFields) {
+            return out;
+        }
+        for (Object item : steps) {
+            if (!(item instanceof Map<?, ?> row) || !"OK".equals(row.get("status"))) {
+                continue;
+            }
+            if (row.get("fields") instanceof Map<?, ?> fields) {
+                for (Map.Entry<?, ?> e : fields.entrySet()) {
+                    out.add(e.getKey() + ": " + e.getValue());
+                    if (out.size() >= 10) {
+                        return out;
+                    }
+                }
+            }
+            if (row.get("await") instanceof Map<?, ?> await
+                    && await.get("metrics") instanceof Map<?, ?> metrics) {
+                for (Map.Entry<?, ?> e : metrics.entrySet()) {
+                    out.add(e.getKey() + ": " + e.getValue());
+                    if (out.size() >= 10) {
+                        return out;
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    /** FR-37：失败归类（errorCode → 用户可读文案）。 */
+    static String failureKind(String errorCode) {
+        if (errorCode == null) {
+            return "执行失败";
+        }
+        return switch (errorCode) {
+            case ToolResult.INVALID_ARGUMENTS -> "参数非法";
+            case ToolResult.PERMISSION_DENIED, ToolResult.IDENTITY_REQUIRED -> "权限不足";
+            case ToolResult.PROJECT_REQUIRED, ToolResult.NOT_FOUND, ToolResult.CONFLICT -> "前置条件未满足";
+            case ToolResult.UPSTREAM_ERROR, ToolResult.TOOL_UNAVAILABLE -> "远端返回错误";
+            case ToolResult.TIMEOUT -> "等待超时";
+            default -> "执行失败";
+        };
+    }
+
+    private static String fmtDuration(long ms) {
+        if (ms < 1000) {
+            return ms + "ms";
+        }
+        long seconds = ms / 1000;
+        if (seconds < 60) {
+            return seconds + "s";
+        }
+        return (seconds / 60) + " 分 " + (seconds % 60) + " 秒";
     }
 
     // ------------------------------------------------------------------
@@ -497,6 +772,8 @@ public class PlanService {
                         substitute(step.args(), dataByStep, step.seq()));
             } catch (ToolArgs.InvalidArgumentException e) {
                 auditEnd(row, CopilotToolCallEntity.FAILED, null, "参数失效：" + e.getMessage(), t0);
+                report.add(stepReport(step, "FAILED", null, "参数失效：" + e.getMessage(),
+                        ToolResult.INVALID_ARGUMENTS, elapsed(t0), null, null));
                 return halt(plan, step, ToolResult.INVALID_ARGUMENTS,
                         "参数失效：" + e.getMessage(), report, ctx);
             }
@@ -506,7 +783,8 @@ public class PlanService {
                     step.projectId(), step.risk(), step.tool().spec().name());
             if (denied != null) {
                 auditEnd(row, CopilotToolCallEntity.REJECTED, null, denied.errorMessage(), t0);
-                report.add(stepReport(step, "REJECTED", null, denied.errorMessage()));
+                report.add(stepReport(step, "REJECTED", null, denied.errorMessage(),
+                        ToolResult.PERMISSION_DENIED, elapsed(t0), null, null));
                 return halt(plan, step, ToolResult.PERMISSION_DENIED, denied.errorMessage(), report, ctx);
             }
             // 3) 执行（SecurityContext 在 runner 内合成）
@@ -518,32 +796,39 @@ public class PlanService {
                     stepCtx);
             if (!result.success()) {
                 auditEnd(row, CopilotToolCallEntity.FAILED, result.summary(), result.errorMessage(), t0);
-                report.add(stepReport(step, "FAILED", null, result.errorMessage()));
-                return halt(plan, step, result.errorCode() == null ? ToolResult.UPSTREAM_ERROR : result.errorCode(),
+                String code = result.errorCode() == null ? ToolResult.UPSTREAM_ERROR : result.errorCode();
+                report.add(stepReport(step, "FAILED", result.summary(), result.errorMessage(),
+                        code, elapsed(t0), null, null));
+                return halt(plan, step, code,
                         result.errorMessage() == null ? "未知原因" : result.errorMessage(), report, ctx);
             }
             // 4) FR-35：声明了 await 的步骤等作业终态（步骤行转 WAITING，轮询探针）
+            Map<String, Object> awaitReport = null;
             if (step.await() != null) {
                 String jobId = jobIdOf(result, step.await());
                 if (jobId == null) {
                     String error = "步骤未产出 " + step.await().idField()
                             + " 字段，无法等待作业终态（请检查工具返回结构）";
                     auditEnd(row, CopilotToolCallEntity.FAILED, result.summary(), error, t0);
-                    report.add(stepReport(step, "FAILED", null, error));
+                    report.add(stepReport(step, "FAILED", result.summary(), error,
+                            ToolResult.INVALID_ARGUMENTS, elapsed(t0), null, null));
                     return halt(plan, step, ToolResult.INVALID_ARGUMENTS, error, report, ctx);
                 }
                 auditWaiting(row, step.await(), jobId);
-                ToolResult awaitFailure = awaitTerminal(step.await(), jobId, ctx);
-                if (awaitFailure != null) {
+                AwaitOutcome outcome = awaitTerminal(step.await(), jobId, ctx);
+                awaitReport = outcome.report();
+                if (outcome.failure() != null) {
                     auditEnd(row, CopilotToolCallEntity.FAILED, result.summary(),
-                            awaitFailure.errorMessage(), t0);
-                    report.add(stepReport(step, "FAILED", result.summary(), awaitFailure.errorMessage()));
-                    return halt(plan, step, awaitFailure.errorCode(), awaitFailure.errorMessage(), report, ctx);
+                            outcome.failure().errorMessage(), t0);
+                    report.add(stepReport(step, "FAILED", result.summary(), outcome.failure().errorMessage(),
+                            outcome.failure().errorCode(), elapsed(t0), null, awaitReport));
+                    return halt(plan, step, outcome.failure().errorCode(),
+                            outcome.failure().errorMessage(), report, ctx);
                 }
             }
             auditEnd(row, CopilotToolCallEntity.OK, result.summary(), null, t0);
             dataByStep.put(step.seq(), result.data());
-            report.add(stepReport(step, "OK", result.summary(), null));
+            report.add(stepReport(step, "OK", result.summary(), null, null, elapsed(t0), result, awaitReport));
         }
 
         StringBuilder text = new StringBuilder("计划已完成（").append(total).append(" 步）");
@@ -559,11 +844,20 @@ public class PlanService {
                 ToolResult.data("completed", total, "total", total, "steps", report));
     }
 
-    /** FR-35：轮询探针等终态；返回 null = 作业成功，否则为失败/超时回执。 */
-    private ToolResult awaitTerminal(AwaitSpec spec, String jobId, ToolContext ctx) {
+    /** FR-35 轮询结果：failure = null 表示作业成功；report = 推送用的 await 块（FR-37）。 */
+    private record AwaitOutcome(ToolResult failure, Map<String, Object> report) {
+    }
+
+    /** FR-35：轮询探针等终态；{@code failure=null} = 作业成功，否则为失败/超时回执。 */
+    private AwaitOutcome awaitTerminal(AwaitSpec spec, String jobId, ToolContext ctx) {
+        Map<String, Object> report = new LinkedHashMap<>();
+        report.put("kind", spec.kind());
+        report.put("jobId", jobId);
         JobTerminalProbe probe = probes.find(spec.kind()).orElse(null);
         if (probe == null) {
-            return ToolResult.fail(ToolResult.TOOL_UNAVAILABLE, "作业探针已下线：" + spec.kind());
+            report.put("state", "UNKNOWN");
+            return new AwaitOutcome(
+                    ToolResult.fail(ToolResult.TOOL_UNAVAILABLE, "作业探针已下线：" + spec.kind()), report);
         }
         long deadline = nowMillis() + spec.timeoutMinutes() * 60_000L;
         long pollMs = Math.max(5, props.getPlanAwaitPollSeconds()) * 1000L;
@@ -576,28 +870,68 @@ public class PlanService {
                 state = JobState.UNKNOWN;
             }
             if (state == JobState.SUCCEEDED) {
-                return null;
+                report.put("state", "SUCCEEDED");
+                fillTerminalReport(probe, jobId, report);
+                return new AwaitOutcome(null, report);
             }
             if (state == JobState.FAILED) {
+                report.put("state", "FAILED");
+                fillTerminalReport(probe, jobId, report);
                 String summary = null;
                 try {
                     summary = probe.failureSummary(jobId);
                 } catch (Exception e) {
                     log.warn("作业失败摘要读取失败: kind={} id={} err={}", spec.kind(), jobId, e.toString());
                 }
-                return ToolResult.fail(ToolResult.UPSTREAM_ERROR, spec.kind() + " 作业 " + jobId + " 失败"
-                        + (summary == null || summary.isBlank() ? "" : "：" + CopilotJson.truncate(summary, 300)));
+                return new AwaitOutcome(ToolResult.fail(ToolResult.UPSTREAM_ERROR,
+                        spec.kind() + " 作业 " + jobId + " 失败"
+                                + (summary == null || summary.isBlank()
+                                        ? "" : "：" + CopilotJson.truncate(summary, 300))), report);
             }
             if (nowMillis() >= deadline) {
-                return ToolResult.fail(ToolResult.TIMEOUT, "等待 " + spec.kind() + " 作业 " + jobId
-                        + " 终态超时（" + spec.timeoutMinutes() + " 分钟），请到平台核实作业状态，勿直接重试");
+                report.put("state", "TIMEOUT");
+                return new AwaitOutcome(ToolResult.fail(ToolResult.TIMEOUT, "等待 " + spec.kind() + " 作业 "
+                        + jobId + " 终态超时（" + spec.timeoutMinutes()
+                        + " 分钟），请到平台核实作业状态，勿直接重试"), report);
             }
             try {
                 sleepAwait(pollMs);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return ToolResult.fail(ToolResult.TIMEOUT, "等待 " + spec.kind() + " " + jobId
-                        + " 终态被中断，请到平台核实作业状态，勿直接重试");
+                report.put("state", "TIMEOUT");
+                return new AwaitOutcome(ToolResult.fail(ToolResult.TIMEOUT, "等待 " + spec.kind() + " " + jobId
+                        + " 终态被中断，请到平台核实作业状态，勿直接重试"), report);
+            }
+        }
+    }
+
+    /** FR-37：终态详情并入 await 块；probe 返回 null/异常时降级只留 kind/jobId/终态。 */
+    private void fillTerminalReport(JobTerminalProbe probe, String jobId, Map<String, Object> report) {
+        JobReport detail;
+        try {
+            detail = probe.terminalReport(jobId);
+        } catch (Exception e) {
+            log.warn("作业终态报告读取失败: kind={} id={} err={}", probe.kind(), jobId, e.toString());
+            return;
+        }
+        if (detail == null) {
+            return;
+        }
+        if (detail.durationMs() != null) {
+            report.put("durationMs", detail.durationMs());
+        }
+        if (detail.summary() != null && !detail.summary().isBlank()) {
+            report.put("summary", CopilotJson.truncate(CopilotJson.maskText(detail.summary()), 300));
+        }
+        if (!detail.metrics().isEmpty()) {
+            Map<String, Object> metrics = new LinkedHashMap<>();
+            detail.metrics().forEach((k, v) -> {
+                if (k != null && v != null && !CopilotJson.isSensitiveKey(String.valueOf(k))) {
+                    metrics.put(String.valueOf(k), v);
+                }
+            });
+            if (!metrics.isEmpty()) {
+                report.put("metrics", metrics);
             }
         }
     }
@@ -629,7 +963,8 @@ public class PlanService {
             if (step.seq() > failed.seq()) {
                 auditStep(ctx, step, step.args(), CopilotToolCallEntity.REJECTED, null,
                         "前序步骤失败，未执行", 0);
-                report.add(stepReport(step, "REJECTED", null, "前序步骤失败，未执行"));
+                report.add(stepReport(step, "REJECTED", null, "前序步骤失败，未执行",
+                        null, 0L, null, null));
             }
         }
         int done = failed.seq() - 1;
@@ -644,7 +979,14 @@ public class PlanService {
         return new ToolResult(false, errorCode, message, message, message, data, false);
     }
 
-    private Map<String, Object> stepReport(PlanStep step, String status, String summary, String error) {
+    /**
+     * 步骤报告行（FR-36 审计 + FR-37 推送）：seq/tool/title/status/summary/error 之外，
+     * 增补 errorCode（失败归类素材）、durationMs、fields（成功步骤关键业务字段）、
+     * await 块（kind/jobId/state/durationMs/summary/metrics）。
+     */
+    private Map<String, Object> stepReport(PlanStep step, String status, String summary, String error,
+                                           String errorCode, Long durationMs, ToolResult okResult,
+                                           Map<String, Object> awaitReport) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("seq", step.seq());
         row.put("tool", step.tool().spec().name());
@@ -652,7 +994,62 @@ public class PlanService {
         row.put("status", status);
         row.put("summary", summary == null ? "" : CopilotJson.truncate(summary, 500));
         row.put("error", error == null ? "" : CopilotJson.truncate(error, 500));
+        if (errorCode != null) {
+            row.put("errorCode", errorCode);
+        }
+        if (durationMs != null) {
+            row.put("durationMs", durationMs);
+        }
+        if (okResult != null) {
+            Map<String, Object> fields = successFields(okResult);
+            if (fields == null) {
+                // 结果含敏感信息：不输出字段，推送改注「敏感结果已脱敏」
+                row.put("fieldsMasked", true);
+            } else if (!fields.isEmpty()) {
+                row.put("fields", fields);
+            }
+        }
+        if (awaitReport != null) {
+            row.put("await", awaitReport);
+        }
         return row;
+    }
+
+    /**
+     * 成功步骤的关键业务字段（FR-37）：data 顶层标量（String/Number/Boolean），最多 6 个、
+     * 单值截断 80 字符并过 {@link CopilotJson#maskText}；任一 key 命中敏感模式或
+     * {@code result.sensitive()=true} 时返回 null（调用方改注脱敏，不输出 fields）。
+     */
+    private Map<String, Object> successFields(ToolResult result) {
+        if (result.sensitive()) {
+            return null;
+        }
+        Map<String, Object> data = result.data();
+        if (data.isEmpty()) {
+            return Map.of();
+        }
+        for (String key : data.keySet()) {
+            if (CopilotJson.isSensitiveKey(key)) {
+                return null;
+            }
+        }
+        Map<String, Object> fields = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> e : data.entrySet()) {
+            Object v = e.getValue();
+            if (!(v instanceof String || v instanceof Number || v instanceof Boolean)) {
+                continue;
+            }
+            String text = v instanceof String s ? s : String.valueOf(v);
+            fields.put(e.getKey(), CopilotJson.truncate(CopilotJson.maskText(text), 80));
+            if (fields.size() >= 6) {
+                break;
+            }
+        }
+        return fields;
+    }
+
+    private static long elapsed(long t0) {
+        return Math.max(0, System.currentTimeMillis() - t0);
     }
 
     // ------------------------------------------------------------------
