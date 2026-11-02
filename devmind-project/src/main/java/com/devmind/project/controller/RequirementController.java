@@ -1,7 +1,10 @@
 package com.devmind.project.controller;
 
 import com.devmind.project.RequirementService;
+import com.devmind.project.service.RequirementAiExpandService;
 import com.devmind.common.dto.PageView;
+import com.devmind.project.dto.AiExpandRequest;
+import com.devmind.project.dto.AiExpandResponse;
 import com.devmind.project.dto.RequirementRequest;
 import com.devmind.project.dto.RequirementView;
 import com.devmind.project.dto.StatusRequest;
@@ -24,9 +27,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class RequirementController {
 
     private final RequirementService service;
+    private final RequirementAiExpandService aiExpandService;
 
-    public RequirementController(RequirementService service) {
+    public RequirementController(RequirementService service, RequirementAiExpandService aiExpandService) {
         this.service = service;
+        this.aiExpandService = aiExpandService;
     }
 
     /** 分页列表：status/type/source 过滤（空=不限；status=OPEN 为伪值=未完结，排除 DONE/CANCELLED），keyword 匹配标题/Jira key，
@@ -47,6 +52,12 @@ public class RequirementController {
     @PostMapping
     public RequirementView create(@PathVariable String projectId, @Valid @RequestBody RequirementRequest req) {
         return service.create(projectId, req);
+    }
+
+    /** CAP-105 需求 AI 扩展：关键点 → one-shot 同步会话 → 标题/类型/描述草稿（只回填表单，不落库） */
+    @PostMapping("/ai-expand")
+    public AiExpandResponse aiExpand(@PathVariable String projectId, @Valid @RequestBody AiExpandRequest req) {
+        return aiExpandService.expand(projectId, req);
     }
 
     @GetMapping("/{requirementId}")
