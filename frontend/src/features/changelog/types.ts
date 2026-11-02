@@ -4,6 +4,8 @@ export type ChangelogType = 'ADDED' | 'IMPROVED' | 'FIXED' | 'BREAKING'
 export interface ChangelogEntryBrief {
   version: string
   releasedAt: string | null
+  /** 打包时 HEAD 短哈希（M4「当前部署」对照锚点）；旧条目为 null */
+  commit: string | null
   types: ChangelogType[]
   refs: string[]
   summary: string
@@ -27,6 +29,8 @@ export interface ChangelogPageView {
 export interface ChangelogQuery {
   keyword?: string
   version?: string
+  /** 提交哈希前缀过滤（M4，「当前部署」定位用） */
+  commit?: string
   from?: string
   to?: string
   page?: number

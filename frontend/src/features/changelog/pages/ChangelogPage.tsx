@@ -78,6 +78,23 @@ function RefTags({ refs }: { refs: string[] }) {
   )
 }
 
+interface AboutInfo {
+  version: string
+  commit: string | null
+  commitTime: string | null
+}
+
+/** M4 当前部署对照：条目 commit 与 about.commit 前缀互含即命中（长度不同的缩写也能对上）；
+ * 条目无 commit（M4 前旧条目）时回退版本号精确匹配。 */
+function matchesDeployment(entry: ChangelogEntryBrief, about: AboutInfo): boolean {
+  if (entry.commit && about.commit) {
+    const a = entry.commit.toLowerCase()
+    const b = about.commit.toLowerCase()
+    return a.startsWith(b) || b.startsWith(a)
+  }
+  return entry.version === about.version.replace(/^v/i, '')
+}
+
 export default function ChangelogPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [rows, setRows] = useState<ChangelogEntryBrief[]>([])
@@ -94,7 +111,7 @@ export default function ChangelogPage() {
   const [versionInput, setVersionInput] = useState('')
   const [range, setRange] = useState<[Dayjs, Dayjs] | null>(null)
 
-  const [currentVersion, setCurrentVersion] = useState<string | null>(null)
+  const [about, setAbout] = useState<AboutInfo | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [detail, setDetail] = useState<ChangelogEntryView | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -123,8 +140,8 @@ export default function ChangelogPage() {
 
   useEffect(() => {
     api
-      .get<{ version: string }>('/about')
-      .then((a) => setCurrentVersion(a.version))
+      .get<AboutInfo>('/about')
+      .then(setAbout)
       .catch(() => {})
   }, [])
 
@@ -142,8 +159,41 @@ export default function ChangelogPage() {
       .finally(() => setDetailLoading(false))
   }
 
-  // 「关于」弹框带 ?version=<当前部署版本> 落地：套用版本筛选并尝试直开该版本详情，读后清参数
+  // 「查看该版本变更」：优先按 commit 定位当前部署条目（走服务端，不受当前筛选影响），
+  // 落空再按版本号兜底
+  const openCurrentDeployment = () => {
+    if (!about) return
+    if (about.commit) {
+      listChangelog({ commit: about.commit, size: 1 })
+        .then((r) => {
+          if (r.items.length > 0) openDetail(r.items[0].version)
+          else openDetail(about.version.replace(/^v/i, ''), '当前部署暂无更新日志条目')
+        })
+        .catch((e) => showError(e, '定位当前部署条目失败'))
+      return
+    }
+    openDetail(about.version.replace(/^v/i, ''), '当前部署暂无更新日志条目')
+  }
+
+  // 「关于」弹框落地：?commit=<sha>（M4 优先）套用提交筛选并直开命中条目；
+  // 旧链接 ?version= 保留——套用版本筛选并尝试直开该版本详情，读后清参数
   useEffect(() => {
+    const c = searchParams.get('commit')?.trim()
+    if (c) {
+      setSearchParams({}, { replace: true })
+      setKeyword('')
+      setVersionInput('')
+      setRange(null)
+      setPage(0)
+      setFilters({ commit: c })
+      listChangelog({ commit: c, size: 1 })
+        .then((r) => {
+          if (r.items.length > 0) openDetail(r.items[0].version)
+          else message.warning('当前部署暂无更新日志条目')
+        })
+        .catch(() => {})
+      return
+    }
     const v = searchParams.get('version')?.trim()
     if (!v) return
     setSearchParams({}, { replace: true })
@@ -159,6 +209,8 @@ export default function ChangelogPage() {
   const applyFilters = () => {
     setPage(0)
     setFilters({
+      // commit 落地筛选（?commit= 或标签）不随普通查询清空，由标签关闭/重置清除
+      commit: filters.commit,
       keyword: keyword.trim() || undefined,
       version: versionInput.trim() || undefined,
       from: range?.[0].format('YYYY-MM-DD'),
@@ -174,17 +226,19 @@ export default function ChangelogPage() {
     setFilters({})
   }
 
-  const hasFilters = Boolean(filters.keyword || filters.version || filters.from || filters.to)
+  const hasFilters = Boolean(
+    filters.keyword || filters.version || filters.commit || filters.from || filters.to,
+  )
 
   const columns: ColumnsType<ChangelogEntryBrief> = [
     {
       title: '版本',
       dataIndex: 'version',
       width: 170,
-      render: (v: string) => (
+      render: (v: string, r) => (
         <Space size={6} wrap>
           <Typography.Text strong>v{v}</Typography.Text>
-          {currentVersion && v === currentVersion.replace(/^v/i, '') && <Tag color="gold">当前部署</Tag>}
+          {about && matchesDeployment(r, about) && <Tag color="gold">当前部署</Tag>}
         </Space>
       ),
     },
@@ -239,7 +293,7 @@ export default function ChangelogPage() {
       <Button onClick={resetFilters}>清空筛选</Button>
     </Empty>
   ) : (
-    <Empty description="暂无已发布版本的更新日志。发布前在仓库根 CHANGELOG.md 登记新版本条目即可在此展示。" />
+    <Empty description="暂无已发布版本的更新日志。打包分发（scripts/build-dist.sh）时会按提交记录自动生成新条目。" />
   )
 
   return (
@@ -254,11 +308,11 @@ export default function ChangelogPage() {
       }
     >
       <Typography.Paragraph type="secondary">
-        更新日志（CAP-87）：只读展示随安装包分发的 CHANGELOG.md，按版本倒序查看已发布版本的变更类型、说明与关联编号；
-        Unreleased（未发布）内容不会出现。
+        更新日志（CAP-87）：只读展示随安装包分发的 CHANGELOG.md，条目在打包（build-dist）时按提交记录自动生成，
+        按版本倒序查看变更类型、说明与关联编号；Unreleased（未发布）内容不会出现。
       </Typography.Paragraph>
 
-      {currentVersion && (
+      {about && (
         <Alert
           type="info"
           showIcon
@@ -266,9 +320,16 @@ export default function ChangelogPage() {
           message={
             <Space wrap size={8}>
               <span>
-                当前部署版本 <Typography.Text code>v{currentVersion}</Typography.Text>
+                当前部署 <Typography.Text code>v{about.version}</Typography.Text>
+                {about.commit && (
+                  <>
+                    {' @ '}
+                    <Typography.Text code>{about.commit}</Typography.Text>
+                  </>
+                )}
+                {about.commitTime && <Typography.Text type="secondary">（{about.commitTime}）</Typography.Text>}
               </span>
-              <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openDetail(currentVersion)}>
+              <Button type="link" size="small" style={{ padding: 0 }} onClick={openCurrentDeployment}>
                 查看该版本变更
               </Button>
             </Space>
@@ -304,6 +365,18 @@ export default function ChangelogPage() {
         <Button onClick={resetFilters} disabled={!hasFilters}>
           重置
         </Button>
+        {filters.commit && (
+          <Tag
+            closable
+            color="gold"
+            onClose={() => {
+              setPage(0)
+              setFilters((f) => ({ ...f, commit: undefined }))
+            }}
+          >
+            提交：{filters.commit}
+          </Tag>
+        )}
       </Space>
 
       <FitTable<ChangelogEntryBrief>
@@ -333,6 +406,7 @@ export default function ChangelogPage() {
             <Space wrap size={8}>
               <span>v{detail.version}</span>
               {detail.releasedAt && <Typography.Text type="secondary">{detail.releasedAt}</Typography.Text>}
+              {detail.commit && <Typography.Text code>{detail.commit}</Typography.Text>}
             </Space>
           ) : (
             '版本详情'

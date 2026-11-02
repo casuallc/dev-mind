@@ -77,7 +77,12 @@ export default function UserMenu() {
                 type="primary"
                 onClick={() => {
                   setAboutOpen(false)
-                  navigate(`/changelog?version=${encodeURIComponent(about.version)}`)
+                  // M4：优先按 commit 定位当前部署条目（pom 版本恒 SNAPSHOT，版本号匹配必然落空）
+                  navigate(
+                    about.commit
+                      ? `/changelog?commit=${encodeURIComponent(about.commit)}`
+                      : `/changelog?version=${encodeURIComponent(about.version)}`,
+                  )
                 }}
               >
                 查看更新日志
