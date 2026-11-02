@@ -29,7 +29,7 @@ import {
   REVIEW_COLOR,
   STATUS_COLOR,
 } from '../constants'
-import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
+import { DRAWER_SCREEN } from '../../../shared/utils/overlay'
 import { fmtBytes, fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { usePermissions } from '../../auth/usePermissions'
@@ -391,7 +391,7 @@ export default function RunDetailDrawer({ record, onClose, onChanged, onOpenText
           {connected && <Tag color="cyan">实时</Tag>}
         </Space>
       ) : '测试详情'}
-      width={DRAWER_DEFAULT}
+      width={DRAWER_SCREEN}
       open={!!record}
       onClose={onClose}
     >
