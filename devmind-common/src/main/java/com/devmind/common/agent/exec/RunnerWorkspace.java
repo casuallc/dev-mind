@@ -749,7 +749,9 @@ public class RunnerWorkspace {
                     ? operator.name() : "devmind";
             String mergeEmail = operator != null && operator.email() != null && !operator.email().isBlank()
                     ? operator.email() : "devmind@runner.local";
-            Result merge = run(tmp, OP_TIMEOUT_SEC, spec.token(),
+            Result merge = run(tmp, OP_TIMEOUT_SEC, spec.token(), java.util.Map.of(
+                            "GIT_AUTHOR_NAME", mergeName, "GIT_AUTHOR_EMAIL", mergeEmail,
+                            "GIT_COMMITTER_NAME", mergeName, "GIT_COMMITTER_EMAIL", mergeEmail),
                     "-c", "user.name=" + mergeName, "-c", "user.email=" + mergeEmail,
                     "merge", "--ff", "-m", "merge: 会话分支 " + spec.branch() + " 收口", spec.branch());
             if (merge.exit() != 0) {
@@ -1373,9 +1375,23 @@ public class RunnerWorkspace {
 
     /** 跑 git 进程，输出合并捕获并脱敏（token 明文 + URL 编码形态 → ***）后才允许外溢 */
     private Result run(Path cwd, long timeoutSec, String token, String... args) {
+        return run(cwd, timeoutSec, token, null, args);
+    }
+
+    /**
+     * 带显式环境变量的 git 调用。署名场景必须走这里：git 身份解析中 GIT_AUTHOR_*&#47;GIT_COMMITTER_*
+     * 环境变量优先级高于 {@code -c user.name}，宿主（如 devmind runner 给会话进程注入的操作者身份）
+     * 若已导出这些变量，仅靠 -c 会被静默覆盖，显式身份（如收口合并提交的操作者署名）落空。
+     */
+    private Result run(Path cwd, long timeoutSec, String token, java.util.Map<String, String> extraEnv,
+                       String... args) {
         List<String> cmd = buildCmd(cwd, args);
         try {
-            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            ProcessBuilder pb = new ProcessBuilder(cmd).redirectErrorStream(true);
+            if (extraEnv != null) {
+                pb.environment().putAll(extraEnv);
+            }
+            Process p = pb.start();
             // 读输出与等待分离，防缓冲满死锁
             var outFuture = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
                 try {
