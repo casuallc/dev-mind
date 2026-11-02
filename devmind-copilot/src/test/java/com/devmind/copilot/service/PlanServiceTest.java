@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.devmind.common.agent.plan.JobReport;
 import com.devmind.common.agent.plan.JobState;
 import com.devmind.common.agent.plan.JobTerminalProbe;
 import com.devmind.common.agent.tool.PlatformTool;
@@ -509,9 +510,314 @@ class PlanServiceTest {
         }
     }
 
+    // ------------------------------------------------------------------
+    // FR-37：确认回执概览
+    // ------------------------------------------------------------------
+
+    @Test
+    void overviewRendersStepsParamsAwaitMarkerAndFooter() {
+        PlanService plans = serviceWith(List.of(probe(JobState.SUCCEEDED, null)), startBuild);
+        Map<String, Object> planArgs = plan(
+                awaitStep("start_build", Map.of(),
+                        Map.of("kind", "BUILD", "idField", "buildId", "timeoutMinutes", 15)),
+                step("create_beta", Map.of(
+                        "alphaId", "${step1.buildId}",
+                        "note", "sk-abcdef123456789")));
+        String text = plans.overviewText(planArgs, ctx(), "ABCD-1");
+        assertTrue(text.startsWith("📋 计划已开始执行（共 2 步）"), text);
+        assertTrue(text.contains("目标：测试计划"), text);
+        assertTrue(text.contains("1. start_build（start_build）"), text);
+        assertTrue(text.contains("⏳ 将等待 BUILD 终态（超时 15 分钟）"), text);
+        assertTrue(text.contains("2. create_beta（create_beta）"), text);
+        // ${stepN.field} 占位符原样展示；sk- 文本被 maskText 脱敏
+        assertTrue(text.contains("alphaId: ${step1.buildId}"), text);
+        assertTrue(text.contains("note: ***"), text);
+        assertFalse(text.contains("sk-abcdef"), text);
+        assertTrue(text.contains("计划短码 ABCD-1 · 进度：智能体运维 → 计划"), text);
+        assertFalse(text.contains("本计划无需等待异步作业"), text);
+    }
+
+    @Test
+    void overviewWithoutAwaitNotesNoAsyncJob() {
+        PlanService plans = service();
+        String text = plans.overviewText(plan(
+                step("create_alpha", Map.of()),
+                step("create_beta", Map.of("alphaId", "A-1"))), ctx(), "ABCD-1");
+        assertTrue(text.contains("本计划无需等待异步作业"), text);
+        assertTrue(text.contains("计划短码 ABCD-1"), text);
+    }
+
+    @Test
+    void overviewMasksSensitiveParamKeys() {
+        PlatformTool withToken = PlatformTool.of(
+                spec("with_token", ToolRisk.WRITE,
+                        "{\"type\":\"object\",\"properties\":{\"apiToken\":{\"type\":\"string\"},"
+                                + "\"name\":{\"type\":\"string\"}}}"),
+                (call, ctx) -> ToolResult.ok("ok"),
+                args -> "p1");
+        PlanService plans = service(withToken);
+        String text = plans.overviewText(plan(
+                step("create_alpha", Map.of()),
+                step("with_token", Map.of("apiToken", "supersecret-value", "name", "n1"))), ctx(), "ABCD-1");
+        assertTrue(text.contains("apiToken: ***"), text);
+        assertTrue(text.contains("name: n1"), text);
+        assertFalse(text.contains("supersecret-value"), text);
+    }
+
+    @Test
+    void overviewFallsBackWhenValidateThrows() {
+        // 单步计划校验不过：概览回退简短文案，不阻断确认回执
+        PlanService plans = service();
+        String text = plans.overviewText(plan(step("create_alpha", Map.of())), ctx(), "ABCD-1");
+        assertTrue(text.contains("计划已开始执行（共 1 步）"), text);
+        assertTrue(text.contains("智能体运维 → 计划"), text);
+    }
+
+    // ------------------------------------------------------------------
+    // FR-37：终态逐步骤结果推送
+    // ------------------------------------------------------------------
+
+    @Test
+    void pushSuccessIncludesFieldsAndFooter() throws Exception {
+        PlanService plans = service();
+        CopilotActionEntity action = newAction(CopilotActionEntity.EXECUTING, plan(
+                step("create_alpha", Map.of()),
+                step("create_beta", Map.of("alphaId", "${step1.alphaId}"))));
+        action.setShortCode("ABCD-1");
+        plans.dispatchAsync(action.getId(), ctx());
+        awaitActionSettled(action);
+        assertEquals(1, pushed.size());
+        String push = pushed.get(0);
+        assertTrue(push.contains("✅ 计划《测试计划》执行成功（2/2 步）"), push);
+        assertTrue(push.contains("1. ✅ create_alpha · create_alpha"), push);
+        assertTrue(push.contains("alphaId: A-1"), push);
+        assertTrue(push.contains("code: AL-1"), push);
+        assertTrue(push.contains("betaId: B-1"), push);
+        assertTrue(push.contains("计划短码 ABCD-1 · 详情：智能体运维 → 计划（搜索短码）"), push);
+    }
+
+    @Test
+    void pushInterruptedShowsPartialSuccessAndRemediation() throws Exception {
+        PlanService plans = service();
+        CopilotActionEntity action = newAction(CopilotActionEntity.EXECUTING, plan(
+                step("create_alpha", Map.of()),
+                step("explode", Map.of()),
+                step("create_beta", Map.of("alphaId", "A-1"))));
+        action.setShortCode("ABCD-1");
+        plans.dispatchAsync(action.getId(), ctx());
+        awaitActionSettled(action);
+        assertEquals(1, pushed.size());
+        String push = pushed.get(0);
+        assertTrue(push.contains("⚠️ 计划《测试计划》部分成功：完成 1/3 步后中断"), push);
+        assertTrue(push.contains("1. ✅ create_alpha"), push);
+        assertTrue(push.contains("2. ❌ explode · explode"), push);
+        assertTrue(push.contains("失败（远端返回错误）：炸了"), push);
+        assertTrue(push.contains("3. ⏭️"), push);
+        assertTrue(push.contains("跳过（前序步骤失败，未执行）"), push);
+        assertTrue(push.contains("中断说明：已完成 1 步且已生效、不回滚。"), push);
+        // Map.of 语义的 data 不保证字段顺序：产出清单逐项断言
+        assertTrue(push.contains("已落库产出："), push);
+        assertTrue(push.contains("alphaId: A-1"), push);
+        assertTrue(push.contains("code: AL-1"), push);
+        assertTrue(push.contains("剩余 1 步未执行。善后："), push);
+    }
+
+    @Test
+    void pushZeroDoneShowsFailureConclusion() throws Exception {
+        PlanService plans = service();
+        CopilotActionEntity action = newAction(CopilotActionEntity.EXECUTING, plan(
+                step("explode", Map.of()),
+                step("create_alpha", Map.of())));
+        plans.dispatchAsync(action.getId(), ctx());
+        awaitActionSettled(action);
+        assertEquals(1, pushed.size());
+        String push = pushed.get(0);
+        assertTrue(push.contains("❌ 计划《测试计划》执行失败（0/2 步）"), push);
+        assertTrue(push.contains("中断说明：已完成 0 步且已生效、不回滚。"), push);
+        assertTrue(push.contains("剩余 1 步未执行"), push);
+        assertFalse(push.contains("已落库产出"), push);
+    }
+
+    @Test
+    void failureKindClassifiesAllKnownCodes() {
+        assertEquals("参数非法", PlanService.failureKind(ToolResult.INVALID_ARGUMENTS));
+        assertEquals("权限不足", PlanService.failureKind(ToolResult.PERMISSION_DENIED));
+        assertEquals("权限不足", PlanService.failureKind(ToolResult.IDENTITY_REQUIRED));
+        assertEquals("前置条件未满足", PlanService.failureKind(ToolResult.PROJECT_REQUIRED));
+        assertEquals("前置条件未满足", PlanService.failureKind(ToolResult.NOT_FOUND));
+        assertEquals("前置条件未满足", PlanService.failureKind(ToolResult.CONFLICT));
+        assertEquals("远端返回错误", PlanService.failureKind(ToolResult.UPSTREAM_ERROR));
+        assertEquals("远端返回错误", PlanService.failureKind(ToolResult.TOOL_UNAVAILABLE));
+        assertEquals("等待超时", PlanService.failureKind(ToolResult.TIMEOUT));
+        assertEquals("执行失败", PlanService.failureKind(null));
+        assertEquals("执行失败", PlanService.failureKind("SOMETHING_ELSE"));
+    }
+
+    @Test
+    void pushShowsPermissionClassification() throws Exception {
+        PlatformTool denied = PlatformTool.of(
+                spec("denied_thing", ToolRisk.WRITE, "{\"type\":\"object\",\"properties\":{}}"),
+                (call, ctx) -> ToolResult.fail(ToolResult.PERMISSION_DENIED, "无项目 p1 写权限"),
+                args -> "p1");
+        PlanService plans = service(denied);
+        CopilotActionEntity action = newAction(CopilotActionEntity.EXECUTING, plan(
+                step("create_alpha", Map.of()),
+                step("denied_thing", Map.of())));
+        plans.dispatchAsync(action.getId(), ctx());
+        awaitActionSettled(action);
+        String push = pushed.get(0);
+        assertTrue(push.contains("失败（权限不足）：无项目 p1 写权限"), push);
+    }
+
+    @Test
+    void pushAwaitStepIncludesTerminalReport() throws Exception {
+        PlanService plans = serviceWith(List.of(probeWithReport(JobState.SUCCEEDED,
+                new JobReport(JobState.SUCCEEDED, 42_000L, "构建成功", Map.of("buildId", 7L)))), startBuild);
+        CopilotActionEntity action = newAction(CopilotActionEntity.EXECUTING, plan(
+                awaitStep("start_build", Map.of(), Map.of("kind", "BUILD", "idField", "buildId")),
+                step("create_alpha", Map.of())));
+        plans.dispatchAsync(action.getId(), ctx());
+        awaitActionSettled(action);
+        assertEquals(CopilotActionEntity.SUCCEEDED, action.getStatus());
+        String push = pushed.get(0);
+        assertTrue(push.contains("（等待 BUILD 终态）"), push);
+        assertTrue(push.contains("作业 BUILD 7：成功 · 耗时 42s · 构建成功"), push);
+        assertTrue(push.contains("buildId: 7"), push);
+    }
+
+    @Test
+    void pushAwaitStepDegradesWhenTerminalReportNull() throws Exception {
+        // 探针未实现 terminalReport（接口默认 null）：await 块只留 kind/jobId/终态
+        PlanService plans = serviceWith(List.of(probe(JobState.SUCCEEDED, null)), startBuild);
+        CopilotActionEntity action = newAction(CopilotActionEntity.EXECUTING, plan(
+                awaitStep("start_build", Map.of(), Map.of("kind", "BUILD", "idField", "buildId")),
+                step("create_alpha", Map.of())));
+        plans.dispatchAsync(action.getId(), ctx());
+        awaitActionSettled(action);
+        assertEquals(CopilotActionEntity.SUCCEEDED, action.getStatus());
+        String push = pushed.get(0);
+        assertTrue(push.contains("作业 BUILD 7：成功"), push);
+        assertFalse(push.contains("耗时"), push);
+    }
+
+    @Test
+    void pushCompressesFieldLinesWhenOverLimit() throws Exception {
+        PlatformTool fat = PlatformTool.of(
+                spec("fat_alpha", ToolRisk.WRITE, "{\"type\":\"object\",\"properties\":{}}"),
+                (call, ctx) -> {
+                    Map<String, Object> data = new LinkedHashMap<>();
+                    for (int i = 1; i <= 6; i++) {
+                        data.put("field" + i, "v".repeat(100));
+                    }
+                    return ToolResult.ok("建成", null, data);
+                },
+                args -> "p1");
+        props.setPlanPushMaxChars(600);
+        PlanService plans = service(fat);
+        CopilotActionEntity action = newAction(CopilotActionEntity.EXECUTING, plan(
+                step("fat_alpha", Map.of()),
+                step("create_alpha", Map.of())));
+        plans.dispatchAsync(action.getId(), ctx());
+        awaitActionSettled(action);
+        String push = pushed.get(0);
+        // 超长先压缩字段行：字段消失但结论保留，且无需截断说明
+        assertFalse(push.contains("field1"), push);
+        assertTrue(push.contains("执行成功"), push);
+        assertFalse(push.contains("已截断"), push);
+    }
+
+    @Test
+    void pushTruncatesWithNoteWhenStillOverLimit() throws Exception {
+        String padding = "x".repeat(100);
+        PlatformTool[] longNamed = new PlatformTool[5];
+        for (int i = 0; i < 5; i++) {
+            longNamed[i] = PlatformTool.of(
+                    spec("tool_" + i + "_" + padding, ToolRisk.WRITE,
+                            "{\"type\":\"object\",\"properties\":{}}"),
+                    (call, ctx) -> ToolResult.ok("ok"),
+                    args -> "p1");
+        }
+        props.setPlanPushMaxChars(500);
+        PlanService plans = service(longNamed);
+        CopilotActionEntity action = newAction(CopilotActionEntity.EXECUTING, plan(
+                step(longNamed[0].spec().name(), Map.of()), step(longNamed[1].spec().name(), Map.of()),
+                step(longNamed[2].spec().name(), Map.of()), step(longNamed[3].spec().name(), Map.of()),
+                step(longNamed[4].spec().name(), Map.of())));
+        action.setShortCode("ABCD-1");
+        plans.dispatchAsync(action.getId(), ctx());
+        awaitActionSettled(action);
+        String push = pushed.get(0);
+        String text = push.substring("feishu|chat-1|".length());
+        assertTrue(text.length() <= 500, "截断后不应超过 planPushMaxChars: " + text.length());
+        assertTrue(text.contains("…已截断，详情见「智能体运维 → 计划」（搜索短码 ABCD-1）"), text);
+    }
+
+    @Test
+    void pushMasksSensitiveResultFields() throws Exception {
+        PlatformTool sensitiveKeyOut = PlatformTool.of(
+                spec("sensitive_key_out", ToolRisk.WRITE, "{\"type\":\"object\",\"properties\":{}}"),
+                (call, ctx) -> ToolResult.ok("建成", null,
+                        ToolResult.data("alphaId", "A-1", "apiToken", "sk-topsecret123456")),
+                args -> "p1");
+        PlanService plans = service(sensitiveKeyOut);
+        CopilotActionEntity action = newAction(CopilotActionEntity.EXECUTING, plan(
+                step("sensitive_key_out", Map.of()),
+                step("create_alpha", Map.of())));
+        plans.dispatchAsync(action.getId(), ctx());
+        awaitActionSettled(action);
+        String push = pushed.get(0);
+        // 任一 key 命中敏感模式 → 整步字段改注脱敏，且明文绝不入推送
+        assertTrue(push.contains("敏感结果已脱敏"), push);
+        assertFalse(push.contains("sk-topsecret"), push);
+        assertFalse(push.contains("apiToken"), push);
+    }
+
+    @Test
+    void pushMasksSecretPatternsInsideFieldValues() throws Exception {
+        PlatformTool leaky = PlatformTool.of(
+                spec("leaky_out", ToolRisk.WRITE, "{\"type\":\"object\",\"properties\":{}}"),
+                (call, ctx) -> ToolResult.ok("建成", null,
+                        ToolResult.data("code", "token=sk-topsecret123456 done")),
+                args -> "p1");
+        PlanService plans = service(leaky);
+        CopilotActionEntity action = newAction(CopilotActionEntity.EXECUTING, plan(
+                step("leaky_out", Map.of()),
+                step("create_alpha", Map.of())));
+        plans.dispatchAsync(action.getId(), ctx());
+        awaitActionSettled(action);
+        String push = pushed.get(0);
+        assertTrue(push.contains("code: token=*** done"), push);
+        assertFalse(push.contains("sk-topsecret"), push);
+    }
+
+    private static JobTerminalProbe probeWithReport(JobState state, JobReport report) {
+        return new JobTerminalProbe() {
+            @Override
+            public String kind() {
+                return "BUILD";
+            }
+
+            @Override
+            public JobState probe(String entityId, String actor) {
+                return state;
+            }
+
+            @Override
+            public String failureSummary(String entityId) {
+                return null;
+            }
+
+            @Override
+            public JobReport terminalReport(String entityId) {
+                return report;
+            }
+        };
+    }
+
     private CopilotActionEntity newAction(String status, Map<String, Object> planArgs) {
         CopilotActionEntity action = new CopilotActionEntity();
-        action.setId("act-" + actionStore.size());
+        // id 与 ctx().actionId() 对齐：FR-37 推送按 ctx.actionId() 回查短码
+        action.setId("action-1");
         action.setTurnId("turn-1");
         action.setToolName(PlanService.TOOL_NAME);
         action.setArgsJson(CopilotJson.write(planArgs));

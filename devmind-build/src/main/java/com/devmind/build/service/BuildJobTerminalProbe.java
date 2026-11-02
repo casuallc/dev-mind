@@ -3,9 +3,11 @@ package com.devmind.build.service;
 import com.devmind.auth.security.DevMindPrincipal;
 import com.devmind.build.dto.BuildView;
 import com.devmind.build.model.BuildEntity;
+import com.devmind.common.agent.plan.JobReport;
 import com.devmind.common.agent.plan.JobState;
 import com.devmind.common.agent.plan.JobTerminalProbe;
 import java.util.List;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
@@ -50,6 +52,31 @@ public class BuildJobTerminalProbe implements JobTerminalProbe {
             log.debug("BUILD 探针读取失败: id={} err={}", entityId, e.toString());
             return JobState.UNKNOWN;
         }
+        return stateOf(view);
+    }
+
+    @Override
+    public JobReport terminalReport(String entityId) {
+        Long id = parseId(entityId);
+        if (id == null) {
+            return null;
+        }
+        BuildView view;
+        try {
+            view = builds.get(id);
+        } catch (RuntimeException e) {
+            log.debug("BUILD 终态报告读取失败: id={} err={}", entityId, e.toString());
+            return null;
+        }
+        Long durationMs = null;
+        if (view.startedAt() != null && view.finishedAt() != null) {
+            durationMs = Math.max(0, view.finishedAt().toEpochMilli() - view.startedAt().toEpochMilli());
+        }
+        String summary = BuildEntity.SUCCESS.equals(view.status()) ? "构建成功" : view.errorSummary();
+        return new JobReport(stateOf(view), durationMs, summary, Map.of("buildId", id));
+    }
+
+    private static JobState stateOf(BuildView view) {
         return switch (view.status()) {
             case BuildEntity.SUCCESS -> JobState.SUCCEEDED;
             case BuildEntity.FAILED -> JobState.FAILED;

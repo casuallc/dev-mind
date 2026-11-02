@@ -20,11 +20,13 @@ tmp/cap76-e2e/，三个 worklog 定时开关关掉），假 OpenAI 服务内嵌�
   [7] DANGEROUS（需求置 DONE）：裸「确认」被拒，完整短码才执行；
   [8] kill switch → 裸文本回落 CAP-75 问答（流式）；
   [9] 管理 API：非 ADMIN 403，ADMIN 200；
-  [10] 多步计划（M7/M8）：submit_plan 一张确认单 → 确认回执秒回「已开始执行」→
-       异步按序执行 + ${stepN.field} 替换 + 步骤级审计 + 终态推送；第二步失败即停、
-       已完成步骤不回滚。
-  [12] 异步计划 await（M8）：假 BUILD 探针（/e2e/plan-jobs 翻转）验证 等待→继续 与
-       作业失败→中断；/copilot/admin/plans 进度口径、步骤行 step_seq 轨迹、终态推送落 pushes。
+  [10] 多步计划（M7/M8/M10）：submit_plan 一张确认单 → 确认回执=计划概览（FR-37：目标 +
+       步骤清单 + 短码入口）→ 异步按序执行 + ${stepN.field} 替换 + 步骤级审计 +
+       终态逐步骤结果推送（含产出标识）；第二步失败即停、已完成步骤不回滚，
+       推送含失败归类与中断说明。
+  [12] 异步计划 await（M8/M10）：假 BUILD 探针（/e2e/plan-jobs 翻转）验证 等待→继续 与
+       作业失败→中断；/copilot/admin/plans 进度口径、步骤行 step_seq 轨迹、
+       终态推送落 pushes（含 await 作业终态报告，FR-37）。
 
 阶段划分（同一套 H2 顺序重启）：
   A. enabled=true / default-actor=admin / allow-default-actor-writes=true → 场景 1~7、9、10、12
@@ -718,13 +720,31 @@ def scenario_10_plan():
           len(requirement_by_keyword("计划联调需求")) == 0)
 
     reply = send_and_wait_reply(f"确认 {code}", "计划已开始执行")
+    overview = reply.get("text") or ""
     check("确认回执秒回（FR-34 异步分发，不阻塞等执行完）",
-          "计划已开始执行" in (reply.get("text") or ""), str(reply))
-    wait_push("计划《建需求并挂一个工作项》已完成")
-    check("计划终态推送（✅ 已完成）", True)
+          "计划已开始执行" in overview, str(reply))
+    # FR-37：确认回执升级为执行前概览（📋 头部 + 目标 + 有序步骤清单 + 占位符原样 + 短码入口）
+    check("确认回执=计划概览（FR-37）",
+          overview.startswith("📋 计划已开始执行（共 2 步）")
+          and "目标：建需求并挂一个工作项" in overview
+          and "1. 创建需求（create_requirement）" in overview
+          and "2. 创建工作项（create_work_item）" in overview
+          and "requirementId: ${step1.requirementId}" in overview
+          and "本计划无需等待异步作业" in overview
+          and f"计划短码 {code}" in overview
+          and "进度：智能体运维 → 计划" in overview, overview)
+    push = wait_push("计划《建需求并挂一个工作项》执行成功")
+    ptext = push.get("text") or ""
+    check("计划终态推送（✅ 执行成功 2/2 + 逐步骤状态行 + 详情入口，FR-37）",
+          "✅ 计划《建需求并挂一个工作项》执行成功（2/2 步）" in ptext
+          and "1. ✅ 创建需求" in ptext and "2. ✅ 创建工作项" in ptext
+          and "计划短码" in ptext and "智能体运维 → 计划" in ptext, ptext)
     check("计划确认单 SUCCEEDED", wait_action_status(code, "SUCCEEDED").get("status") == "SUCCEEDED")
     reqs = requirement_by_keyword("计划联调需求")
     check("步骤1需求已落库", len(reqs) == 1, str(reqs))
+    if reqs:
+        check("推送含步骤产出标识（需求编号，FR-37 成功字段行）",
+              f"code: {reqs[0].get('code')}" in ptext, ptext)
     if reqs:
         _, items = api("GET", f"/projects/{PID}/requirements/{reqs[0]['id']}/work-items",
                        token=TOKEN)
@@ -747,10 +767,17 @@ def scenario_10_plan():
     code2, _ = write_confirmation("计划失败用例", expect_title="提交多步计划")
     reply = send_and_wait_reply(f"确认 {code2}", "计划已开始执行")
     check("失败用例确认回执同样秒回", "计划已开始执行" in (reply.get("text") or ""), str(reply))
-    push = wait_push("计划《第二步必失败》执行中断")
-    check("失败终态推送（❌ 执行中断，含 1/2 步进度）",
-          "执行中断" in (push.get("text") or "") and "1/2" in (push.get("text") or ""),
-          str(push))
+    push = wait_push("计划《第二步必失败》部分成功")
+    ptext2 = push.get("text") or ""
+    # FR-37：⚠️ 部分成功 + 失败归类（需求不存在 → NOT_FOUND → 前置条件未满足）+ 中断说明段
+    check("失败终态推送（⚠️ 部分成功 1/2 + 失败归类 + 中断说明，FR-37）",
+          "部分成功：完成 1/2 步后中断" in ptext2
+          and "失败（前置条件未满足）" in ptext2
+          and "2. ❌" in ptext2
+          and "中断说明：已完成 1 步且已生效、不回滚。" in ptext2
+          and "已落库产出：" in ptext2
+          and "剩余 1 步未执行" in ptext2
+          and "智能体运维 → 计划" in ptext2, ptext2)
     check("失败计划确认单 FAILED", wait_action_status(code2, "FAILED").get("status") == "FAILED")
     check("已完成的步骤不回滚（需求仍在）",
           len(requirement_by_keyword("计划失败需求")) == 1)
@@ -763,6 +790,9 @@ def scenario_12_async_plan_await():
     code, _ = write_confirmation("异步计划等待成功", expect_title="提交多步计划")
     reply = send_and_wait_reply(f"确认 {code}", "计划已开始执行")
     check("确认回执秒回", "计划已开始执行" in (reply.get("text") or ""), str(reply))
+    # FR-37：概览标注 await 步骤
+    check("概览标注 await（⏳ 将等待 BUILD 终态，FR-37）",
+          "⏳ 将等待 BUILD 终态（超时 3 分钟）" in (reply.get("text") or ""), str(reply))
     # 假探针：未知 id 恒 RUNNING → 步骤1 停在 WAITING 直到翻转
     step = wait_plan_step(code, 1, "WAITING", timeout=60)
     check("步骤1 进入 WAITING（等 BUILD 作业终态）", step.get("status") == "WAITING", str(step))
@@ -784,8 +814,14 @@ def scenario_12_async_plan_await():
     check("步骤1 详情带 await 声明（BUILD/requirementId）",
           (await_marks.get(1) or {}).get("kind") == "BUILD"
           and (await_marks.get(1) or {}).get("idField") == "requirementId", str(await_marks))
-    wait_push("计划《异步计划等待成功》已完成")
-    check("终态推送落入 fake pushes", True)
+    push = wait_push("计划《异步计划等待成功》执行成功")
+    ptext = push.get("text") or ""
+    # FR-37：成功推送带 await 作业终态报告（假探针 terminalReport：耗时 1s + fakeJobId）
+    check("终态推送落入 fake pushes（✅ + 作业终态报告，FR-37）",
+          "✅ 计划《异步计划等待成功》执行成功（2/2 步）" in ptext
+          and "（等待 BUILD 终态）" in ptext
+          and f"作业 BUILD {rid}：成功 · 耗时 1s · e2e 假作业终态报告" in ptext
+          and f"fakeJobId: {rid}" in ptext, ptext)
     # 步骤审计 step_seq 落库（确认执行轮次的 toolCalls：步骤行带 1/2，汇总行 null）
     _, turns = api("GET", "/copilot/admin/turns?channel=fake&actor=admin&keyword="
                    + urllib.parse.quote(f"确认 {code}"), token=TOKEN)
@@ -819,8 +855,16 @@ def scenario_12_async_plan_await():
           statuses2.get(1) == "FAILED" and statuses2.get(2) == "REJECTED", str(statuses2))
     step1 = next((s for s in (detail2 or {}).get("steps") or [] if s.get("seq") == 1), {})
     check("步骤1 错误含作业失败摘要", "失败" in (step1.get("error") or ""), str(step1))
-    push = wait_push("计划《异步计划作业失败》执行中断")
-    check("失败终态推送（❌）", "❌" in (push.get("text") or ""), str(push))
+    push = wait_push("计划《异步计划作业失败》执行失败")
+    ptext2 = push.get("text") or ""
+    # FR-37：步骤1 等终态失败 → done=0 → ❌ 执行失败；归类=远端返回错误（UPSTREAM_ERROR）；
+    # await 块带假探针终态报告
+    check("失败终态推送（❌ 执行失败 0/2 + 归类 + 作业终态块，FR-37）",
+          "❌ 计划《异步计划作业失败》执行失败（0/2 步）" in ptext2
+          and "失败（远端返回错误）" in ptext2
+          and f"作业 BUILD {reqs2[0]['id']}：失败 · 耗时 1s · e2e 假作业终态报告" in ptext2
+          and "已完成 0 步且已生效、不回滚。" in ptext2
+          and "剩余 1 步未执行" in ptext2, ptext2)
     check("12b 步骤2 工作项未落库",
           "异步计划乙工作项" not in [w.get("title")
                                      for w in (api("GET", f"/projects/{PID}/requirements/"

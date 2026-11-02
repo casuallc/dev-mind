@@ -1,11 +1,15 @@
 package com.devmind.session.service;
 
 import com.devmind.auth.security.DevMindPrincipal;
+import com.devmind.common.agent.plan.JobReport;
 import com.devmind.common.agent.plan.JobState;
 import com.devmind.common.agent.plan.JobTerminalProbe;
 import com.devmind.common.agent.runtime.SessionState;
 import com.devmind.session.dto.SessionView;
+import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -45,17 +49,7 @@ public class SessionJobTerminalProbe implements JobTerminalProbe {
             log.debug("SESSION 探针读取失败: id={} err={}", entityId, e.toString());
             return JobState.UNKNOWN;
         }
-        SessionState state = view.state();
-        if (state == SessionState.DONE) {
-            return JobState.SUCCEEDED;
-        }
-        if (state == SessionState.FAILED || state == SessionState.TERMINATED) {
-            return JobState.FAILED;
-        }
-        if (state == null) {
-            return JobState.UNKNOWN;
-        }
-        return JobState.RUNNING;
+        return stateOf(view.state());
     }
 
     @Override
@@ -66,6 +60,58 @@ public class SessionJobTerminalProbe implements JobTerminalProbe {
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    /**
+     * 终态报告（FR-37）：会话类作业附 token 用量与产出摘要；sessionId 只放前 8 位
+     * （与页面口径一致）。
+     */
+    @Override
+    public JobReport terminalReport(String entityId) {
+        if (entityId == null || entityId.isBlank()) {
+            return null;
+        }
+        SessionView view;
+        try {
+            view = sessions.get(entityId.trim());
+        } catch (RuntimeException e) {
+            log.debug("SESSION 终态报告读取失败: id={} err={}", entityId, e.toString());
+            return null;
+        }
+        Long durationMs = null;
+        Instant end = view.finishedAt() != null ? view.finishedAt() : view.updatedAt();
+        if (view.createdAt() != null && end != null) {
+            durationMs = Math.max(0, end.toEpochMilli() - view.createdAt().toEpochMilli());
+        }
+        Map<String, Object> metrics = new LinkedHashMap<>();
+        String id = view.id() == null ? entityId.trim() : view.id();
+        metrics.put("sessionId", id.length() > 8 ? id.substring(0, 8) : id);
+        if (view.inputTokens() != null) {
+            metrics.put("inputTokens", view.inputTokens());
+        }
+        if (view.outputTokens() != null) {
+            metrics.put("outputTokens", view.outputTokens());
+        }
+        if (view.cacheReadTokens() != null) {
+            metrics.put("cacheReadTokens", view.cacheReadTokens());
+        }
+        if (view.cacheCreationTokens() != null) {
+            metrics.put("cacheCreationTokens", view.cacheCreationTokens());
+        }
+        return new JobReport(stateOf(view.state()), durationMs, view.summary(), metrics);
+    }
+
+    private static JobState stateOf(SessionState state) {
+        if (state == SessionState.DONE) {
+            return JobState.SUCCEEDED;
+        }
+        if (state == SessionState.FAILED || state == SessionState.TERMINATED) {
+            return JobState.FAILED;
+        }
+        if (state == null) {
+            return JobState.UNKNOWN;
+        }
+        return JobState.RUNNING;
     }
 
     private static <T> T withActor(String actor, java.util.function.Supplier<T> body) {

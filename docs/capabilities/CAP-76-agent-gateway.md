@@ -28,6 +28,9 @@
 >    取现状再合并参数（未传字段保持不变，因此不能清空字段），避免模型为改一个字段复述全部
 >    内容。报告 AI 生成（generate）是异步 runner 会话链路，不进同步工具；报告不存在时的
 >    手工写入由工具内自动「建空白 + 写入」一步完成（幂等），不拆两次确认。
+> 9. **计划推送内容在服务端组装、脱敏前置**（M10，FR-37）——确认回执概览与终态逐步骤结果
+>    都在 copilot 侧渲染成纯文本，经 `AgentChatPush` 推出来源聊天，bot/前端零改动；进入聊天
+>    的字段值与摘要统一过 `maskText`、敏感键整步弃字段改注脱敏，推送失败只记日志不阻断收口。
 
 > 后续演进（2026-10-27，定稿未实施）：[CAP-96](CAP-96-assistant-task-runtime.md) 将显式目标委托建为持久助手任务；[CAP-97](CAP-97-assistant-controlled-execution.md) 仅为该任务提供有限授权、可靠动作与验收。本文短对话“写必确认”、不可变确认参数、固定 submit_plan 失败即停等既有语义保持，不因新方案全局放开。新的任务状态和动态计划不塞入历史 copilot_actions；具体危险动作仍复用确认链。
 
@@ -555,6 +558,46 @@ public enum JobState { RUNNING, SUCCEEDED, FAILED, UNKNOWN }
   （状态/摘要/错误/耗时）；列表存在 EXECUTING 行时 5s 轮询；遵循
   `docs/core/前端内容区布局约定.md`。
 
+**FR-37 计划推送内容（M10）**：用户只看聊天消息就能完整理解一份计划的执行——
+确认回执升级为**执行前概览**，终态推送升级为**逐步骤结果**：
+
+- **执行前概览**（确认回执，`CopilotActionService` 计划分流分支渲染）：
+  「📋 计划已开始执行（共 N 步）」+ 目标 + 有序步骤清单（序号/工具标题/工具名 +
+  前 4 个参数摘要，值截断 60 字符、敏感键显示 `***`、文本过 `maskText`，
+  `${stepN.field}` 占位符原样展示）；声明 `await` 的步骤标注
+  「⏳ 将等待 KIND 终态（超时 X 分钟）」，全计划无 await 时尾部注明
+  「本计划无需等待异步作业」；收尾「计划短码 X · 进度：智能体运维 → 计划」。
+  渲染整体 try-catch：任何异常（含重校验失败）回退原简短文案，**不阻断确认**。
+- **逐步骤结果推送**（终态收口，沿用 FR-34 的 `AgentChatPush` 通道）：
+  - 结论行三态：✅ 执行成功（c/t 步）/ ⚠️ 部分成功（中断且 done>0）/ ❌ 执行失败（done=0）；
+  - 每步一行：序号 + 状态 emoji（✅/❌/⏭️ 跳过）+ 标题 + 工具名 + 耗时；成功步骤缩进列出
+    **关键业务字段**（`ToolResult.data` 顶层 String/Number/Boolean 标量，最多 6 个、单值
+    截断 80 字符并过 `maskText`；任一 key 命中敏感键模式或 `result.sensitive()=true` 时
+    整步不输出字段，改注「敏感结果已脱敏」）；失败步骤给出**失败归类** + 脱敏错误摘要
+    （截断 200）；被跳过的步骤注明「前序步骤失败，未执行」；
+  - **失败归类**（`errorCode` → 用户可读）：`INVALID_ARGUMENTS`→参数非法；
+    `PERMISSION_DENIED`/`IDENTITY_REQUIRED`→权限不足；
+    `PROJECT_REQUIRED`/`NOT_FOUND`/`CONFLICT`→前置条件未满足；
+    `UPSTREAM_ERROR`/`TOOL_UNAVAILABLE`→远端返回错误；`TIMEOUT`→等待超时；其余→执行失败；
+  - **中断说明段**（仅失败时）：「已完成 N 步且已生效、不回滚」+ 已落库产出清单
+    （已完成步骤字段与 await metrics 扁平展示，最多 10 条）+ 剩余步数与善后指引
+    （到平台核实失败原因、处理后重新发起剩余操作）；
+  - 固定收尾「计划短码 XXXX · 详情：智能体运维 → 计划（搜索短码）」。
+- **await 终态报告**：`JobTerminalProbe` 增 `default JobReport terminalReport(String entityId)`
+  （返回 null = 未实现，兼容旧实现）；`JobReport(state, durationMs, summary, metrics)` 记录在
+  `common.agent.plan`。BUILD 探针由 BuildView 组装（耗时 = start→finish，摘要 = 构建成功/
+  errorSummary，metrics 带 buildId）；SESSION 探针附 token 用量
+  （input/output/cacheRead/cacheCreation，null 不放）与 sessionId 前 8 位。await 成功/失败
+  路径把报告并入步骤 `await` 块（kind/jobId/state/durationMs/summary/metrics），推送渲染为
+  「作业 KIND id：成功/失败/等待超时 · 耗时 · 摘要」+ metrics 行；probe 返回 null/异常时
+  降级为只有 kind/jobId/终态。metrics 键命中敏感模式的不入块。
+- **长度控制**：推送文本上限 `plan-push-max-chars`（默认 2800，下限 500）；超限时先压缩
+  （去掉步骤字段与 metrics 行），仍超限则截断并补
+  「…已截断，详情见「智能体运维 → 计划」（搜索短码 X）」。
+- 推送失败只记日志不阻断收口；`AgentChatPush` 未装配或来源非聊天入口（channel/chatId 为空）
+  静默跳过。推送文本不含堆栈/明文密钥/内部 URL（所有字段值与摘要统一过
+  `CopilotJson.maskText`）。
+
 ### 5.3 确认与执行
 
 **FR-13 确认单模型**：`copilot_actions` 字段与状态机：
@@ -1041,6 +1084,8 @@ M4 候选：文档新版本、知识提案采纳、需求流程阶段动作、�
 
 > M7 多步计划（FR-33）**不新增表**：整份计划是一张 `copilot_actions` 行（`tool_name=submit_plan`，
 > `args_json` 存全部步骤快照），步骤级执行审计是确认执行 turn 下的多条 `copilot_tool_calls`。
+> M10（FR-37）同样**无 schema 变更**：推送素材（步骤 fields/await 终态报告）挂在
+> `result_json` 的步骤报告行内（`fields`/`fieldsMasked`/`await`/`errorCode`/`durationMs` 键）。
 
 **存储量**：`args_json`/`assistant_text` 用 LONGVARCHAR，不裸 `@Lob`（PG 会落 oid，踩过事故）。
 
@@ -1080,6 +1125,7 @@ devmind:
     plan-execution-timeout-minutes: 120  # submit_plan 异步执行整体上限（M8，FR-34 sweep 分流阈值）
     plan-await-poll-seconds: 10          # await 终态轮询间隔（M8，FR-35；下限 5）
     plan-await-max-timeout-minutes: 120  # await timeoutMinutes 上限（M8，FR-35）
+    plan-push-max-chars: 2800  # 计划推送（确认回执概览/终态逐步骤结果）最大字符数（M10，FR-37；下限 500）
     reply-progress-card: true
     allow-default-actor-writes: false
     audit-retention-days: 180
@@ -1166,7 +1212,6 @@ devmind:
 - [x] 验收：异步分发/await 成败与超时/进度页数据口径（单测 + E2E 场景 12）
 
 ### M9 工作日志域工具补齐（计划/目标/报告）
-
 - [x] 只读：`list_worklog_plans`（周计划 + 上周未完成提示）/ `list_worklog_goals`（OKR 树 +
       KR 派生统计）/ `get_daily_report` / `get_weekly_report` / `get_quarterly_report`
       （无报告返回提示，不算失败）
@@ -1174,6 +1219,17 @@ devmind:
       `update_daily_report` / `update_weekly_report`（无报告自动建空白再写入，幂等）
 - [x] 刻意不做：报告 generate（异步 runner 会话链路，不进同步工具）、delete_*（§6 刻意不做口径）
 - [x] 契约快照（`docs/capabilities/tools/cap76-tools.yaml`）随工具更新
+
+### M10 计划推送内容增强（FR-37）
+
+- [x] 确认回执升级为执行前概览：目标 + 有序步骤清单（参数摘要/敏感键掩码）+ await 标注 +
+      短码入口；渲染异常回退简短文案不阻断确认
+- [x] 终态推送升级为逐步骤结果：三态结论行 + 每步状态/耗时/关键字段 + 失败归类 +
+      中断说明（已生效不回滚/已落库产出/善后指引）+ 固定短码入口
+- [x] `JobTerminalProbe.terminalReport`（default null 兼容）+ BUILD/SESSION 探针实现；
+      await 终态报告并入推送，未实现时降级 kind/jobId/终态
+- [x] 长度控制 `plan-push-max-chars`（先压缩字段行再截断补说明）；推送文本全程脱敏
+- [x] 验收：PlanServiceTest 概览/推送/归类/脱敏/截断单测 + 探针单测 + E2E 场景 10/12 断言更新
 
 ## 11. 验收标准
 
