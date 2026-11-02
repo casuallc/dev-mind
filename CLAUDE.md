@@ -31,7 +31,7 @@ Guidance for Claude Code when working in this repository.
 | 起前端 :5173 | `cd frontend && npm run dev`（/api、/ws 已代理 8080） |
 | 前端类型检查 | `cd frontend && npx tsc -b` |
 | 前端构建 | `cd frontend && npm run build`（产物输出到 `frontend/dist/`，不进 jar） |
-| 构建分发包 | `scripts/build-dist.sh`（→ `devmind-dist/target/devmind-<version>.tar.gz`） |
+| 构建分发包 | `scripts/build-dist.sh`（→ `devmind-dist/target/devmind-<version>.tar.gz`；打包前自动生成更新日志条目、成功后自动提交 CHANGELOG.md（不 push），`--skip-changelog` 跳过，见 CAP-87 M4） |
 | 一键更新 224 环境 | `scripts/deploy-224.sh`（构建→上传→换包（保留 application-local.yml/data)→可选 --config/--sql→重启+失败回滚）；194 用 `scripts/deploy-194.sh`（SSH 30022、systemd 托管停起）；两者均为 `scripts/deploy-common.sh` 包装，新环境照抄包装脚本 |
 | 一键起停 | `scripts\dev.ps1`（PowerShell）/ `scripts/dev.sh`（Git Bash）（后端+前端+runner 三进程；runner 配置 tmp/runner/agent.properties 缺失自动生成模板） |
 
