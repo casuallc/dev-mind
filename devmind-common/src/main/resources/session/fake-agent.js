@@ -95,12 +95,18 @@ function assistantMsg(blocks) {
   });
 }
 
+// CAP-105 E2E 钩子：stdin 文本里出现独立行 `__FAKE_EOF_RESULT__=<单行文本>` 时，
+// EOF 的 result 正文改用该值（one-shot 会话的唯一产出通道是 EOF result，无此钩子
+// 假进程只能产固定文案，「AI 产物契约解析」类链路无法端到端）。仅 fake 识别。
+let eofResultOverride = null;
+const EOF_RESULT_MARK = '__FAKE_EOF_RESULT__=';
+
 // stdin EOF = 优雅结束（与真实 claude -p 一致）：发 result 后退出；
 // 管道写是异步的，必须等 flush 回调再 exit，否则 Windows 下末行可能被截断
 rl.on('close', () => {
   // 也走闸门：真实 CLI 是「把手头这一回合吐完再读 EOF 退出」，不会把 result 塞进正文中间
   serial(() => process.stdout.write(
-    JSON.stringify(resultFrame('任务完成（fake，stdin EOF）。')) + '\n',
+    JSON.stringify(resultFrame(eofResultOverride ?? '任务完成（fake，stdin EOF）。')) + '\n',
     () => process.exit(0)));
 });
 
@@ -114,6 +120,9 @@ rl.on('line', async line => {
     text = Array.isArray(c) ? c.map(b => (b && b.text) || '').join('') : (msg.message.content || '');
   } else if (msg.type === 'input') {
     text = msg.text || '';
+  }
+  for (const ln of text.split('\n')) {
+    if (ln.startsWith(EOF_RESULT_MARK)) eofResultOverride = ln.slice(EOF_RESULT_MARK.length);
   }
   if (msg.type === 'input' || msg.type === 'user') {
     if (text === '__exit__') {
