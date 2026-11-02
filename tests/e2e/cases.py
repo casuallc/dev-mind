@@ -981,6 +981,42 @@ printf '%s' '{"contractVersion":"1","status":"pass","message":"e2e program pass"
 
         self.api.request("DELETE", f"/test-assets/{asset_id}", expected=409)
 
+    def test_requirement_ai_expand(self):
+        # CAP-105：关键点 → one-shot 同步扩展。fake runner 作平台默认节点；one-shot 的唯一产出
+        # 通道是 EOF 时的 result 帧，fake 用 __FAKE_EOF_RESULT__ 指令行产出契约 JSON。
+        path = self.workspace / ("project-" + uuid.uuid4().hex)
+        path.mkdir()
+        subprocess.run(["git", "init", "--initial-branch=master", str(path)],
+                       check=True, capture_output=True)
+        project = self.api.request("POST", "/projects", {
+            "name": "e2e-ai-expand", "path": path.as_posix(), "defaultBranch": "master",
+            "tags": ["e2e"], "description": "temporary fixture", "status": "ACTIVE"})
+        project_id = project["id"]
+        self.addCleanup(self.api.request, "DELETE", "/projects/" + project_id)
+
+        node_id = self._cap104_start_runner("e2e-expand-" + uuid.uuid4().hex[:8])
+        self.api.request("POST", f"/agent-nodes/{node_id}/default")
+        self.addCleanup(self.api.request, "POST", f"/agent-nodes/{node_id}/unset-default")
+
+        canned = {"title": "用户登录支持扫码", "type": "FEATURE",
+                  "description": "## 背景与目标\n扫码登录。\n\n## 需求描述\n- pc 端\n\n## 验收标准\n- 可扫码"}
+        directive = "__FAKE_EOF_RESULT__=" + json.dumps(canned, ensure_ascii=False)
+        resp = self.api.request("POST", f"/projects/{project_id}/requirements/ai-expand",
+                                {"points": "做一个扫码登录\n" + directive,
+                                 "title": "旧标题", "description": "旧描述"})
+        self.assertEqual(canned["title"], resp["title"])
+        self.assertEqual(canned["type"], resp["type"])
+        self.assertEqual(canned["description"], resp["description"])
+        self.assertTrue(resp["sessionId"])
+        # 执行痕迹可回溯：one-shot 会话在会话域里查得到
+        session = self.api.request("GET", "/sessions/" + resp["sessionId"])
+        self.assertEqual(resp["sessionId"], session["id"])
+
+        self.api.request("POST", f"/projects/{project_id}/requirements/ai-expand",
+                         {"points": "   "}, expected=400)
+        self.api.request("POST", "/projects/ghost-nope/requirements/ai-expand",
+                         {"points": "x"}, expected=404)
+
 
 class CopilotContract(unittest.TestCase):
     """Migrated from cap76_tools_contract.py; GET-only, requires admin."""

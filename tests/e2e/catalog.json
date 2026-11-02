@@ -122,6 +122,13 @@
       "suite": "regression",
       "owner": "test",
       "cap": "CAP-104"
+    },
+    {
+      "id": "regression.requirement-ai-expand",
+      "test": "Regression.test_requirement_ai_expand",
+      "suite": "regression",
+      "owner": "project",
+      "cap": "CAP-105"
     }
   ]
 }
