@@ -13,6 +13,8 @@ import type {
   JiraTransitionResult,
   JiraResolveResult,
   Requirement,
+  RequirementAiExpandInput,
+  RequirementAiExpandResult,
   RequirementInput,
   RequirementOverview,
   RequirementPage,
@@ -46,6 +48,14 @@ export function listRequirements(
 
 export function createRequirement(projectId: string, input: RequirementInput): Promise<Requirement> {
   return api.post<Requirement>(`/projects/${projectId}/requirements`, input)
+}
+
+/** CAP-105 AI 扩充：关键信息 → 结构化需求正文（纯生成不落库，结果由表单回填） */
+export function aiExpandRequirement(
+  projectId: string,
+  input: RequirementAiExpandInput,
+): Promise<RequirementAiExpandResult> {
+  return api.post<RequirementAiExpandResult>(`/projects/${projectId}/requirements/ai-expand`, input)
 }
 
 export function updateRequirement(

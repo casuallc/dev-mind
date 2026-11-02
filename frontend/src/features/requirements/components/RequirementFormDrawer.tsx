@@ -4,9 +4,9 @@
 // 描述为 Markdown 富文本（CAP-44 MarkdownEditor）：粘贴/拖拽/工具栏上传图片附件内联进描述
 // （scope=SHARED 项目成员可见），与 CAP-40 需求附件装配同一口径——描述里的引用会被投送到 AI 会话。
 import { useEffect, useState } from 'react'
-import { Button, DatePicker, Drawer, Form, Input, Select, Space, message } from 'antd'
+import { Button, DatePicker, Drawer, Form, Input, Modal, Select, Space, Typography, message } from 'antd'
 import dayjs from 'dayjs'
-import { createRequirement, updateRequirement } from '../api'
+import { aiExpandRequirement, createRequirement, updateRequirement } from '../api'
 import type { Requirement, RequirementInput } from '../types'
 import { ALL_PRIORITIES, ALL_TYPES, TYPE_LABEL } from './requirementMeta'
 import { listEnvironments } from '../../projects/api'
@@ -31,6 +31,11 @@ export default function RequirementFormDrawer({ projectId, editing, open, onClos
   const jiraManaged = editing?.source === 'JIRA'
   // CAP-73：验证环境选项（PROD 永远不可绑，服务端同样校验同项目归属）
   const [envOptions, setEnvOptions] = useState<{ value: number; label: string }[]>([])
+  // CAP-105 AI 扩充：要点弹层 + 生成态 + 覆盖前描述备份（可恢复）
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiNotes, setAiNotes] = useState('')
+  const [aiGenerating, setAiGenerating] = useState(false)
+  const [descBackup, setDescBackup] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -59,8 +64,67 @@ export default function RequirementFormDrawer({ projectId, editing, open, onClos
           verifyEnvironmentId: undefined,
         })
       }
+      // CAP-105：每次打开抽屉重置 AI 扩充弹层与描述备份
+      setAiOpen(false)
+      setAiNotes('')
+      setDescBackup(null)
     }
   }, [open, editing, form])
+
+  /** CAP-105：AI 扩充——成功回填（描述非空先确认覆盖，覆盖前备份可恢复）；失败不动表单、不关弹层 */
+  const onAiGenerate = async () => {
+    const notes = aiNotes.trim()
+    if (!notes) {
+      message.warning('请先输入关键信息/要点')
+      return
+    }
+    setAiGenerating(true)
+    try {
+      const title = form.getFieldValue('title') as string | undefined
+      const type = form.getFieldValue('type') as FormValues['type']
+      const priority = form.getFieldValue('priority') as string | undefined
+      const result = await aiExpandRequirement(projectId, {
+        notes,
+        title: title?.trim() || undefined,
+        type,
+        priority: priority || undefined,
+      })
+      const apply = () => {
+        const current = (form.getFieldValue('description') as string | undefined) ?? ''
+        if (current.trim()) setDescBackup(current) // 重新生成时刷新备份为本次生成前内容
+        form.setFieldsValue({ description: result.description })
+        if (result.truncated) {
+          message.warning('生成内容超出长度上限，已截断至 20000 字，请人工补全')
+        }
+        setAiOpen(false)
+        setAiNotes('')
+      }
+      const current = (form.getFieldValue('description') as string | undefined) ?? ''
+      if (current.trim()) {
+        Modal.confirm({
+          centered: true,
+          title: '覆盖当前描述？',
+          content: '生成内容将覆盖当前描述；覆盖前的原文会保留，可通过描述下方的「恢复原文」还原。',
+          okText: '覆盖',
+          cancelText: '取消',
+          onOk: apply,
+        })
+      } else {
+        apply()
+      }
+    } catch (e) {
+      showError(e, 'AI 生成失败')
+    } finally {
+      setAiGenerating(false)
+    }
+  }
+
+  /** CAP-105：恢复覆盖前的手填描述并清空备份 */
+  const onRestoreBackup = () => {
+    if (descBackup == null) return
+    form.setFieldsValue({ description: descBackup })
+    setDescBackup(null)
+  }
 
   const onSave = async (v: FormValues) => {
     const input: RequirementInput = {
@@ -108,8 +172,25 @@ export default function RequirementFormDrawer({ projectId, editing, open, onClos
           tooltip={jiraManaged ? JIRA_MANAGED_TIP : undefined}>
           <Select options={ALL_TYPES.map((t) => ({ value: t, label: TYPE_LABEL[t] }))} disabled={jiraManaged} />
         </Form.Item>
-        <Form.Item label="描述（业务目标）" name="description"
-          tooltip={jiraManaged ? JIRA_MANAGED_TIP : undefined}>
+        <Form.Item
+          label={
+            <Space size={8}>
+              <span>描述（业务目标）</span>
+              <Button size="small" disabled={jiraManaged} onClick={() => setAiOpen(true)}>
+                AI 扩充
+              </Button>
+            </Space>
+          }
+          name="description"
+          tooltip={jiraManaged ? JIRA_MANAGED_TIP : undefined}
+          extra={
+            descBackup != null && (
+              <Typography.Link style={{ fontSize: 12 }} onClick={onRestoreBackup}>
+                恢复原文（AI 扩充前的手填描述）
+              </Typography.Link>
+            )
+          }
+        >
           <MarkdownEditor
             height={220}
             placeholder="支持 Markdown；粘贴/拖拽图片或点工具栏按钮上传附件，内联进描述（AI 会话可读）"
@@ -145,6 +226,30 @@ export default function RequirementFormDrawer({ projectId, editing, open, onClos
           <Select allowClear placeholder="不绑定 = 开发中验证不可用" options={envOptions} />
         </Form.Item>
       </Form>
+      {/* CAP-105 AI 扩充要点弹层：失败不关弹层、不动表单；成功后关闭并清空 notes */}
+      <Modal
+        title="AI 扩充描述"
+        open={aiOpen}
+        okText="生成"
+        cancelText="取消"
+        confirmLoading={aiGenerating}
+        okButtonProps={{ disabled: !aiNotes.trim() }}
+        onOk={onAiGenerate}
+        onCancel={() => setAiOpen(false)}
+        destroyOnHidden
+      >
+        <Input.TextArea
+          rows={6}
+          maxLength={4000}
+          showCount
+          value={aiNotes}
+          onChange={(e) => setAiNotes(e.target.value)}
+          placeholder="输入关键信息/零散要点，如：用户反馈导出报表慢，希望支持异步导出并通知"
+        />
+        <Typography.Paragraph type="secondary" style={{ fontSize: 12, margin: '8px 0 0' }}>
+          {aiGenerating ? '生成中…' : '将携带当前已填的标题/类型/优先级作为生成上下文；生成结果只回填到描述，保存时才提交。'}
+        </Typography.Paragraph>
+      </Modal>
     </Drawer>
   )
 }

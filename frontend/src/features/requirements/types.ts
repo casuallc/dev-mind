@@ -192,6 +192,22 @@ export interface RequirementInput {
   verifyEnvironmentId?: number | null
 }
 
+// ---- CAP-105 需求 AI 扩充 ----
+
+/** AI 扩充入参：notes 必填（关键信息/零散要点），title/type/priority 为表单已填上下文（可空） */
+export interface RequirementAiExpandInput {
+  notes: string
+  title?: string
+  type?: RequirementType
+  priority?: string
+}
+
+/** AI 扩充结果：description 为生成的 Markdown 正文；truncated=true = 超 20000 字被截断，需人工补全 */
+export interface RequirementAiExpandResult {
+  description: string
+  truncated?: boolean
+}
+
 // ---- CAP-73 需求开发中验证 ----
 
 export type VerifyRunStatus = 'RUNNING' | 'SUCCESS' | 'FAILED'
