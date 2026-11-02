@@ -18,6 +18,7 @@ import {
   Spin,
   Switch,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd'
@@ -125,6 +126,16 @@ function statusValue(s: string): number | string | undefined {
   if (!t) return undefined
   if (/^[1-5][0-9][0-9]$/.test(t)) return Number(t)
   return t.toUpperCase()
+}
+
+/** 期望列可读摘要：command 型显示命令，http 型拼 状态/包含/url；空对象返回空串由列渲染 '-' */
+function expectedSummary(e: Record<string, unknown>): string {
+  if (e.type === 'command') return e.command ? `命令: ${e.command}` : '命令检查'
+  const parts: string[] = []
+  if (e.url) parts.push(String(e.url))
+  if (e.status !== undefined && e.status !== '') parts.push(`状态 ${e.status}`)
+  if (e.contains) parts.push(`包含 ${e.contains}`)
+  return parts.join(' · ')
 }
 
 function fromView(c: TestCase): TestCaseInput {
@@ -306,10 +317,21 @@ export default function SuiteDetailPage() {
   const columns: ColumnsType<TestCaseInput> = [
     { title: '#', dataIndex: 'sort', width: 48, render: (_, __, i) => i + 1 },
     { title: '名称', dataIndex: 'name', ellipsis: true, render: (n: string) => n || '-' },
-    { title: '类型', dataIndex: 'kind', width: 80, render: (k: string) => <Tag color={k === 'health' ? 'purple' : 'blue'}>{k}</Tag> },
-    { title: '方法', dataIndex: 'method', width: 80, render: (m: string) => <Tag>{m}</Tag> },
-    { title: '路径', dataIndex: 'path', ellipsis: true, render: (p: string) => <code style={{ fontSize: 12 }}>{p}</code> },
-    { title: '期望', dataIndex: 'expected', width: 180, ellipsis: true, render: (e: Record<string, unknown>) => <span style={{ fontSize: 12 }}>{JSON.stringify(e ?? {})}</span> },
+    { title: '类型', dataIndex: 'kind', width: 96, render: (k: string) => <Tag color={k === 'health' ? 'purple' : 'blue'}>{k}</Tag> },
+    { title: '方法', dataIndex: 'method', width: 90, render: (m: string) => (m ? <Tag>{m}</Tag> : <span style={{ color: '#bbb' }}>-</span>) },
+    { title: '路径', dataIndex: 'path', ellipsis: true, render: (p: string) => (p ? <code style={{ fontSize: 12 }}>{p}</code> : <span style={{ color: '#bbb' }}>-</span>) },
+    {
+      title: '期望', dataIndex: 'expected', ellipsis: true,
+      render: (e: Record<string, unknown>) => {
+        const s = expectedSummary(e ?? {})
+        if (!s) return <span style={{ color: '#bbb' }}>-</span>
+        return (
+          <Tooltip title={JSON.stringify(e)}>
+            <span style={{ fontSize: 12 }}>{s}</span>
+          </Tooltip>
+        )
+      },
+    },
     { title: '启用', dataIndex: 'enabled', width: 70, render: (v: boolean) => (v ? <Tag color="green">是</Tag> : <Tag>否</Tag>) },
     {
       title: '操作',
