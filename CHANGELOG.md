@@ -11,6 +11,25 @@
 
 <!-- 可选：在此人工起草下一版公告，打包时优先转正并清空；留空则按提交记录自动生成。 -->
 
+## [0.1.0-20261102+1272989] - 2026-11-02
+
+- 提交：1272989
+- 关联：CAP-105
+
+### 新增
+
+- **copilot**：submit_plan 执行前概览与终态逐步骤推送增强（FR-37）（4188eaf）
+- **session**：SessionJobTerminalProbe 实现终态报告（摘要/token 指标/短会话号，FR-37）（5880097）
+- **build**：BuildJobTerminalProbe 实现终态报告（耗时/错误摘要/buildId，FR-37）（0f4c8d3）
+- **common**：JobTerminalProbe 增加终态报告扩展（JobReport，FR-37）（5f05180）
+- **frontend**：需求抽屉加 AI 扩充入口（要点弹层、覆盖确认、原文可恢复、截断提示，CAP-105）（3269129）
+- **project**：需求 AI 扩充同步生成端点（CAP-105，默认 CHAT 端点直连、纯生成不落库、409 配置引导、20000 字截断）（e2179ff）
+
+### 修复
+
+- **worklog**：扫描测试 git helper 剥离宿主 GIT_AUTHOR/COMMITTER env，避免测试提交署名被覆盖致 author 过滤全空（3791940）
+- **common**：收口 merge 提交显式传 GIT_AUTHOR/COMMITTER env，防宿主注入身份静默覆盖操作者署名（a29672a）
+
 ## [0.1.0-20261102+770fc0a] - 2026-11-02
 
 - 提交：770fc0a
