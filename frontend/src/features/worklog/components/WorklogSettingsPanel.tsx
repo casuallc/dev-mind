@@ -125,7 +125,7 @@ export default function WorklogSettingsPanel({ ref }: { ref?: Ref<WorklogSetting
         <Form form={form} layout="vertical">
           <Form.Item
             label="每天自动生成日报草稿"
-            extra={`执行时间留空 = 跟随全局（${globalLabels.daily}）`}
+            extra={`执行时间留空 = 跟随全局（${globalLabels.daily}）。执行时间早于中午 12 点生成前一天的日报，否则生成当天的`}
           >
             <Space wrap>
               <Form.Item name="autoDaily" valuePropName="checked" noStyle>
@@ -154,7 +154,7 @@ export default function WorklogSettingsPanel({ ref }: { ref?: Ref<WorklogSetting
           </Form.Item>
           <Form.Item
             label="每天定时从 Git 导入工作条目"
-            extra={`执行时间留空 = 跟随全局（${globalLabels.gitImport}，全局默认早于日报生成，当日条目先落库再进日报素材）。扫描本人勾选仓库的当日提交，自动导入为新条目（工时 0，事后再补）；未能解析提交署名的仓库会跳过，防混入他人提交；已导入过的提交自动去重，与手动「从 Git 导入」不冲突。`}
+            extra={`执行时间留空 = 跟随全局（${globalLabels.gitImport}，全局默认早于日报生成，当日条目先落库再进日报素材）。执行时间早于中午 12 点导入前一天的提交，否则导入当天的；扫描本人勾选仓库的对应日期提交，自动导入为新条目（工时 0，事后再补）；未能解析提交署名的仓库会跳过，防混入他人提交；已导入过的提交自动去重，与手动「从 Git 导入」不冲突。`}
           >
             <Space wrap>
               <Form.Item name="autoGitImport" valuePropName="checked" noStyle>

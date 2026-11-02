@@ -91,11 +91,11 @@ devmind:
   worklog:                         # CAP-28 个人工时（CAP-41 起生成走 worklog 会话，one-shot 已摘除）
     schedule-cron: "0 * * * * *"   # 主 tick（每分钟）：逐用户判到期——个人执行时间（设置页）优先，未设跟随下列全局 cron
     daily-enabled: true
-    daily-cron: "0 30 18 * * *"    # 全局兜底：每日 18:30 生成日报草稿
+    daily-cron: "0 30 18 * * *"    # 全局兜底：每日 18:30 生成日报草稿（执行时刻早于 12 点则生成前一天，Git 导入同口径）
     weekly-enabled: true
     weekly-cron: "0 0 9 * * MON"   # 全局兜底：周一 09:00 生成上周周报草稿
     git-import-enabled: true       # FR-09 定时 Git 导入总开关（用户级仍需在设置页打开）
-    git-import-cron: "0 0 18 * * *" # 全局兜底：每日 18:00 导入当日提交为条目（早于日报生成）
+    git-import-cron: "0 0 18 * * *" # 全局兜底：每日 18:00 导入当日提交为条目（早于日报生成；早于 12 点执行则导入前一天）
     git-scan-max-commits: 200      # 单库单日扫描上限
     repo-root: "./data/worklog/repos"  # CAP-89：仅作存量仓→DB 启动回迁的数据源（本机路径只走配置）；回迁完成后仓目录成死数据，可手工清理
   worktree:

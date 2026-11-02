@@ -4,6 +4,7 @@ import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import org.springframework.scheduling.support.CronExpression;
 
+import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.regex.Matcher;
@@ -28,6 +29,14 @@ public final class WorklogSchedule {
             Pattern.compile("^0 (\\d{1,2}) (\\d{1,2}) \\* \\* (MON|TUE|WED|THU|FRI|SAT|SUN|[0-7])$");
     private static final String[] DOW_NAMES = {"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"};
     private static final String[] DOW_CN = {"周一", "周二", "周三", "周四", "周五", "周六", "周日"};
+
+    /**
+     * 每日类任务（日报/Git 导入）目标日期的切换点：执行时刻早于该小时 → 目标为前一天，
+     * 否则为当天。早上跑（如 09:30）时当天还没有素材，生成前一天的内容才有意义；
+     * 傍晚跑（默认 18:00/18:30）保持「当日条目先落库再进日报素材」的既有口径。
+     * 只按自然日回退一天，不跳过周末/节假日。
+     */
+    static final int PREVIOUS_DAY_CUTOFF_HOUR = 12;
 
     private WorklogSchedule() {}
 
@@ -77,6 +86,15 @@ public final class WorklogSchedule {
         }
         return CronExpression.parse(
                 "0 " + m.group(2) + " " + Integer.parseInt(m.group(1)) + " * * " + DOW_NAMES[userDay - 1]);
+    }
+
+    /**
+     * 每日类任务的目标日期：tick 时刻早于 {@link #PREVIOUS_DAY_CUTOFF_HOUR} 点取前一天，
+     * 否则取当天（详见常量注释）。
+     */
+    public static LocalDate targetDate(ZonedDateTime tick) {
+        LocalDate day = tick.toLocalDate();
+        return tick.getHour() < PREVIOUS_DAY_CUTOFF_HOUR ? day.minusDays(1) : day;
     }
 
     /**

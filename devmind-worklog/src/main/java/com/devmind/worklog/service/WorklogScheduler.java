@@ -82,7 +82,7 @@ public class WorklogScheduler {
         gitImportBatch(tick, byUser);
     }
 
-    /** 每日生成日报草稿（个人 dailyTime 优先，全局默认 18:30）。 */
+    /** 每日生成日报草稿（个人 dailyTime 优先，全局默认 18:30）。目标日期见 {@link WorklogSchedule#targetDate}。 */
     void dailyBatch(ZonedDateTime tick, Map<String, WorklogUserSettingsEntity> byUser) {
         if (!props.isDailyEnabled()) {
             return;
@@ -99,8 +99,8 @@ public class WorklogScheduler {
                 due.add(u);
             }
         }
-        LocalDate today = LocalDate.now();
-        runBatch("日报", due, u -> reportService.generateDaily(u, today, false, null));
+        LocalDate target = WorklogSchedule.targetDate(tick);
+        runBatch("日报", due, u -> reportService.generateDaily(u, target, false, null));
     }
 
     /** 每周生成上周周报草稿（个人 weeklyDay+weeklyTime 同时设置才覆盖，全局默认周一 09:00）。 */
@@ -127,7 +127,8 @@ public class WorklogScheduler {
 
     /**
      * CAP-28 FR-09：每日定时从 Git 导入工作条目（全局默认 18:00，早于日报生成的 18:30，
-     * 当日条目先落库再进日报素材；个人 gitImportTime 可覆盖）。严格 opt-in：仅设置行显式
+     * 当日条目先落库再进日报素材；个人 gitImportTime 可覆盖；目标日期同日报口径，
+     * 见 {@link WorklogSchedule#targetDate}）。严格 opt-in：仅设置行显式
      * 打开 autoGitImport 的用户参与（不看订阅——它直接产生数据行，且署名未解析的仓库
      * 没有人工预览兜底，由 GitAutoImportService 整仓跳过）。
      */
@@ -145,8 +146,8 @@ public class WorklogScheduler {
                         WorklogSchedule.resolveDaily(s.getGitImportTime(), global), tick))
                 .map(WorklogUserSettingsEntity::getUserId)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        LocalDate today = LocalDate.now();
-        runBatch("Git 导入", due, u -> gitAutoImport.importForDate(u, today));
+        LocalDate target = WorklogSchedule.targetDate(tick);
+        runBatch("Git 导入", due, u -> gitAutoImport.importForDate(u, target));
     }
 
     // ---------------- 内部 ----------------

@@ -4,6 +4,7 @@ import com.devmind.common.exception.DevMindException;
 import org.junit.jupiter.api.Test;
 import org.springframework.scheduling.support.CronExpression;
 
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 
@@ -91,6 +92,28 @@ class WorklogScheduleTest {
         // 2026-10-12 周一、2026-10-13 周二
         assertTrue(WorklogSchedule.dueThisMinute(mon9, at(2026, 10, 12, 9, 0)));
         assertFalse(WorklogSchedule.dueThisMinute(mon9, at(2026, 10, 13, 9, 0)));
+    }
+
+    // ---- targetDate（每日类任务的目标日期：中午前 → 前一天） ----
+
+    @Test
+    void targetDateBeforeCutoffIsPreviousDay() {
+        assertEquals(LocalDate.of(2026, 10, 8), WorklogSchedule.targetDate(at(2026, 10, 9, 9, 30)));
+        assertEquals(LocalDate.of(2026, 10, 8), WorklogSchedule.targetDate(at(2026, 10, 9, 0, 0)));
+        assertEquals(LocalDate.of(2026, 10, 8), WorklogSchedule.targetDate(at(2026, 10, 9, 11, 59)));
+    }
+
+    @Test
+    void targetDateFromCutoffOnIsSameDay() {
+        assertEquals(LocalDate.of(2026, 10, 9), WorklogSchedule.targetDate(at(2026, 10, 9, 12, 0)));
+        assertEquals(LocalDate.of(2026, 10, 9), WorklogSchedule.targetDate(at(2026, 10, 9, 18, 30)));
+    }
+
+    @Test
+    void targetDateRollsBackAcrossMonthBoundary() {
+        // 只按自然日回退一天：月初早上 → 上月末；周一早上 → 周日（不跳周末）
+        assertEquals(LocalDate.of(2026, 9, 30), WorklogSchedule.targetDate(at(2026, 10, 1, 8, 0)));
+        assertEquals(LocalDate.of(2026, 10, 11), WorklogSchedule.targetDate(at(2026, 10, 12, 8, 0)));
     }
 
     // ---- friendlyLabel ----

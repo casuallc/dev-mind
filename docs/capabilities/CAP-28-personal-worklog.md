@@ -57,6 +57,9 @@ CAP-06 通知中心（站内提醒）
   `POST /api/worklog/daily/generate`；汇总当日 git 扫描 + 条目 → one-shot 会话
   生成 `daily_reports` DRAFT（unique(user_id, work_date)，已存在则跳过）→
   发 `worklog.daily.generated` 事件；用户可编辑正文并置 CONFIRMED。
+  定时链路的目标日期（2026-11-02 起）：**执行时刻早于中午 12 点生成前一天，
+  否则生成当天**（早上跑时当天还没有素材；只按自然日回退一天，不跳周末；
+  Git 导入同口径，见 `WorklogSchedule.targetDate`）。手动触发不受影响（日期由前端传）。
 - **FR-06 AI 周报**：cron（默认周一 09:00）或手动触发；输入 = 上周日报集合，
   生成 `weekly_reports`（summary_md + next_plan_md，unique(user_id, week_start)）；
   发 `worklog.weekly.generated` 事件 → 通知中心站内提醒。
@@ -69,6 +72,8 @@ CAP-06 通知中心（站内提醒）
   数据行，且署名解析失败的仓库在手动链路靠「预览人工勾选」兜底，自动链路没有
   这个人工环节）。cron `devmind.worklog.git-import-cron`（默认每日 18:00，早于
   日报生成的 18:30，当日条目先落库再进日报素材），总开关 `git-import-enabled`。
+  目标日期与日报同口径：执行时刻早于中午 12 点导入前一天的提交，否则导入当天
+  （2026-11-02 起，见 FR-05 与 `WorklogSchedule.targetDate`）。
   安全口径：**只导入署名过滤已生效的仓库**（扫描诊断 `SCANNED 且 authorFilter
   非空`），未解析署名的仓库整仓跳过防混入他人提交；hours=0 事后编辑补工时；
   幂等键与手动导入一致（user_id, repo_id, commit_sha），手动/自动混用不重复。
