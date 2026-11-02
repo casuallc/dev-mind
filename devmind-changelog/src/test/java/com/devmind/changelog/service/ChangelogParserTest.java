@@ -116,4 +116,30 @@ class ChangelogParserTest {
         assertThat(parser.parse("")).isEmpty();
         assertThat(parser.parse("# 只有标题\n")).isEmpty();
     }
+
+    @Test
+    void stripsCommitMetaLineFromBody() {
+        String md = """
+                ## [0.1.0-20261102+a1b2c3d] - 2026-11-02
+                - 提交：A1B2C3D
+                - 关联：CAP-87
+
+                ### 新增
+                - 打包自动生成条目
+
+                ## [0.1.0] - 2026-10-25
+                ### 新增
+                - 无提交锚点的旧条目
+                """;
+
+        List<ChangelogEntry> entries = parser.parse(md);
+
+        assertThat(entries).hasSize(2);
+        ChangelogEntry first = entries.get(0);
+        assertThat(first.version()).isEqualTo("0.1.0-20261102+a1b2c3d");
+        assertThat(first.commit()).isEqualTo("a1b2c3d");
+        assertThat(first.contentMd()).contains("打包自动生成条目")
+                .doesNotContain("提交：", "关联：");
+        assertThat(entries.get(1).commit()).isNull();
+    }
 }

@@ -48,13 +48,13 @@ class ChangelogServiceTest {
     void listsOnlyPublishedEntriesWithPagination() throws IOException {
         ChangelogService service = service(file(MD));
 
-        ChangelogPageView page = service.list(null, null, null, null, 0, 2);
+        ChangelogPageView page = service.list(null, null, null, null, null, 0, 2);
 
         assertThat(page.available()).isTrue();
         assertThat(page.total()).isEqualTo(3);
         assertThat(page.items()).extracting(i -> i.version())
                 .containsExactly("1.2.0", "1.1.0");
-        assertThat(service.list(null, null, null, null, 1, 2).items())
+        assertThat(service.list(null, null, null, null, null, 1, 2).items())
                 .extracting(i -> i.version()).containsExactly("1.0.0");
     }
 
@@ -62,19 +62,19 @@ class ChangelogServiceTest {
     void filtersByVersionDateAndKeyword() throws IOException {
         ChangelogService service = service(file(MD));
 
-        assertThat(service.list(null, "1.1", null, null, 0, 20).items())
+        assertThat(service.list(null, "1.1", null, null, null, 0, 20).items())
                 .extracting(i -> i.version()).containsExactly("1.1.0");
-        assertThat(service.list(null, "v1.2.0", null, null, 0, 20).items())
+        assertThat(service.list(null, "v1.2.0", null, null, null, 0, 20).items())
                 .extracting(i -> i.version()).containsExactly("1.2.0");
 
-        assertThat(service.list(null, null, LocalDate.of(2026, 9, 1), LocalDate.of(2026, 10, 1), 0, 20).items())
+        assertThat(service.list(null, null, null, LocalDate.of(2026, 9, 1), LocalDate.of(2026, 10, 1), 0, 20).items())
                 .extracting(i -> i.version()).containsExactly("1.1.0");
 
-        assertThat(service.list("CAP-87", null, null, null, 0, 20).items())
+        assertThat(service.list("CAP-87", null, null, null, null, 0, 20).items())
                 .extracting(i -> i.version()).containsExactly("1.2.0");
-        assertThat(service.list("分页", null, null, null, 0, 20).items())
+        assertThat(service.list("分页", null, null, null, null, 0, 20).items())
                 .extracting(i -> i.version()).containsExactly("1.1.0");
-        assertThat(service.list("不存在", null, null, null, 0, 20).items()).isEmpty();
+        assertThat(service.list("不存在", null, null, null, null, 0, 20).items()).isEmpty();
     }
 
     @Test
@@ -97,7 +97,7 @@ class ChangelogServiceTest {
         props.setPath(tempDir.resolve("missing.md").toString());
         ChangelogService service = new ChangelogService(props, new ChangelogParser());
 
-        ChangelogPageView page = service.list(null, null, null, null, 0, 20);
+        ChangelogPageView page = service.list(null, null, null, null, null, 0, 20);
 
         assertThat(page.available()).isFalse();
         assertThat(page.items()).isEmpty();
@@ -108,7 +108,7 @@ class ChangelogServiceTest {
     void reloadsWhenFileChangesWithoutRestart() throws IOException {
         Path path = file(MD);
         ChangelogService service = service(path);
-        assertThat(service.list(null, null, null, null, 0, 20).total()).isEqualTo(3);
+        assertThat(service.list(null, null, null, null, null, 0, 20).total()).isEqualTo(3);
 
         Files.writeString(path, MD + """
 
@@ -118,7 +118,7 @@ class ChangelogServiceTest {
                 """, StandardCharsets.UTF_8);
         Files.setLastModifiedTime(path, FileTime.fromMillis(System.currentTimeMillis() + 5_000));
 
-        assertThat(service.list(null, null, null, null, 0, 20).total()).isEqualTo(4);
+        assertThat(service.list(null, null, null, null, null, 0, 20).total()).isEqualTo(4);
         assertThat(service.get("1.3.0").summary()).contains("新版本");
     }
 
@@ -132,10 +132,32 @@ class ChangelogServiceTest {
         props.setMaxSizeKb(1);
         ChangelogService service = new ChangelogService(props, new ChangelogParser());
 
-        assertThatThrownBy(() -> service.list(null, null, null, null, 0, 20))
+        assertThatThrownBy(() -> service.list(null, null, null, null, null, 0, 20))
                 .isInstanceOf(DevMindException.class)
                 .extracting(e -> ((DevMindException) e).getErrorCode())
                 .isEqualTo(ErrorCode.BAD_REQUEST);
+    }
+
+    @Test
+    void filtersByCommitWithPrefixMatch() throws IOException {
+        ChangelogService service = service(file("""
+                ## [0.1.0-20261102+a1b2c3d] - 2026-11-02
+                - 提交：a1b2c3d
+                ### 新增
+                - 自动生成条目
+
+                ## [0.1.0] - 2026-10-25
+                - 提交：f1852db
+                ### 新增
+                - 旧条目
+                """));
+
+        // 条目记 7 位短哈希，调用方给更长缩写时仍能前缀互含命中
+        assertThat(service.list(null, null, "a1b2c3d9e8f7", null, null, 0, 20).items())
+                .extracting(i -> i.version()).containsExactly("0.1.0-20261102+a1b2c3d");
+        assertThat(service.list(null, null, "f1852db", null, null, 0, 20).items())
+                .extracting(i -> i.version()).containsExactly("0.1.0");
+        assertThat(service.list(null, null, "0000000", null, null, 0, 20).items()).isEmpty();
     }
 
     private Path file(String content) throws IOException {

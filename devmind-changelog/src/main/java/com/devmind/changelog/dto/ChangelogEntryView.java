@@ -9,6 +9,7 @@ import java.util.List;
 public record ChangelogEntryView(
         String version,
         LocalDate releasedAt,
+        String commit,
         List<ChangelogType> types,
         List<String> refs,
         String summary,

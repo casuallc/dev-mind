@@ -46,16 +46,19 @@ public class ChangelogService {
         this.parser = parser;
     }
 
-    public ChangelogPageView list(String keyword, String version, LocalDate from, LocalDate to,
+    public ChangelogPageView list(String keyword, String version, String commit,
+                                  LocalDate from, LocalDate to,
                                   int page, int size) {
         int p = Math.max(0, page);
         int s = size <= 0 ? DEFAULT_PAGE_SIZE : Math.min(size, MAX_PAGE_SIZE);
         String kw = blankToNull(keyword);
         String ver = normalizeVersion(blankToNull(version));
+        String cmt = blankToNull(commit);
 
         Snapshot snap = current();
         List<ChangelogEntry> filtered = snap.entries().stream()
                 .filter(e -> matchesVersion(e, ver))
+                .filter(e -> matchesCommit(e, cmt))
                 .filter(e -> matchesDate(e, from, to))
                 .filter(e -> matchesKeyword(e, kw))
                 .toList();
@@ -200,6 +203,18 @@ public class ChangelogService {
                 .contains(version.toLowerCase(Locale.ROOT));
     }
 
+    /** commit 前缀互含匹配：条目记 7 位短哈希，about 可能给更长缩写，任一方向前缀一致即命中。 */
+    private boolean matchesCommit(ChangelogEntry e, String commit) {
+        if (commit == null) {
+            return true;
+        }
+        if (e.commit() == null) {
+            return false;
+        }
+        String c = commit.toLowerCase(Locale.ROOT);
+        return e.commit().startsWith(c) || c.startsWith(e.commit());
+    }
+
     private boolean matchesDate(ChangelogEntry e, LocalDate from, LocalDate to) {
         if (from == null && to == null) {
             return true;
@@ -218,18 +233,19 @@ public class ChangelogService {
             return true;
         }
         String kw = keyword.toLowerCase(Locale.ROOT);
-        String haystack = String.join(" ", e.version(), nullToEmpty(e.summary()),
+        String haystack = String.join(" ", e.version(), nullToEmpty(e.commit()), nullToEmpty(e.summary()),
                 nullToEmpty(e.contentMd()), String.join(" ", e.refs()), e.types().toString())
                 .toLowerCase(Locale.ROOT);
         return haystack.contains(kw);
     }
 
     private ChangelogEntryBrief brief(ChangelogEntry e) {
-        return new ChangelogEntryBrief(e.version(), e.releasedAt(), e.types(), e.refs(), e.summary());
+        return new ChangelogEntryBrief(e.version(), e.releasedAt(), e.commit(), e.types(), e.refs(),
+                e.summary());
     }
 
     private ChangelogEntryView view(ChangelogEntry e) {
-        return new ChangelogEntryView(e.version(), e.releasedAt(), e.types(), e.refs(),
+        return new ChangelogEntryView(e.version(), e.releasedAt(), e.commit(), e.types(), e.refs(),
                 e.summary(), e.contentMd());
     }
 

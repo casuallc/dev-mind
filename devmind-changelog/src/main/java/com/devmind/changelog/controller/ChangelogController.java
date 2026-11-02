@@ -29,11 +29,12 @@ public class ChangelogController {
     public ChangelogPageView list(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String version,
+            @RequestParam(required = false) String commit,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return service.list(keyword, version, from, to, page, size);
+        return service.list(keyword, version, commit, from, to, page, size);
     }
 
     @GetMapping("/{version:.+}")

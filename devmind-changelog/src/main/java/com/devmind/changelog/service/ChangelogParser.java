@@ -17,7 +17,8 @@ import java.util.regex.Pattern;
  * CAP-87 CHANGELOG.md 解析器（Keep a Changelog 风格）。
  *
  * <p>只认二级标题段落：`## [1.0.0] - 2026-10-25`。段内三级标题映射变更类型，
- * `- 关联：CAP-87, WI-12` 行剥离为 refs，其余 Markdown 原样保留。Unreleased/未发布
+ * `- 关联：CAP-87, WI-12` 行剥离为 refs，`- 提交：a1b2c3d` 行剥离为 commit（M4
+ * 「当前部署」对照锚点），其余 Markdown 原样保留。Unreleased/未发布
  * 段落直接跳过——对应「未发布版本不对外可见」。</p>
  *
  * <p>坏段落不抛异常：单个版本解析失败只跳过该段，避免一份格式瑕疵让整个页面不可用。</p>
@@ -33,6 +34,9 @@ public class ChangelogParser {
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern REF_TOKEN = Pattern.compile(
             "(?i)\\b(?:CAP|REQ|WI)-\\d+\\b");
+    private static final Pattern COMMIT_LINE = Pattern.compile(
+            "^\\s{0,3}(?:[-*+]\\s+)?(?:提交|commit)\\s*[:：]\\s*([0-9a-f]{7,40})\\s*$",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern MD_IMAGE = Pattern.compile("!\\[[^]]*]\\([^)]*\\)");
     private static final Pattern MD_LINK = Pattern.compile("\\[([^]]*)]\\([^)]*\\)");
     private static final Pattern HTML_TAG = Pattern.compile("<[^>]+>");
@@ -97,6 +101,7 @@ public class ChangelogParser {
         Set<ChangelogType> types = new LinkedHashSet<>();
         Set<String> refs = new LinkedHashSet<>();
         List<String> content = new ArrayList<>();
+        String commit = null;
         for (String line : body) {
             Matcher ref = REF_LINE.matcher(line);
             if (ref.matches()) {
@@ -104,6 +109,11 @@ public class ChangelogParser {
                 while (token.find()) {
                     refs.add(token.group().toUpperCase(Locale.ROOT));
                 }
+                continue;
+            }
+            Matcher commitLine = COMMIT_LINE.matcher(line);
+            if (commitLine.matches()) {
+                commit = commitLine.group(1).toLowerCase(Locale.ROOT);
                 continue;
             }
             Matcher type = TYPE_HEADING.matcher(line);
@@ -117,7 +127,7 @@ public class ChangelogParser {
         }
         String contentMd = trimBlank(content);
         try {
-            out.add(new ChangelogEntry(version, releasedAt, List.copyOf(types), List.copyOf(refs),
+            out.add(new ChangelogEntry(version, releasedAt, commit, List.copyOf(types), List.copyOf(refs),
                     summarize(contentMd), contentMd));
         } catch (RuntimeException e) {
             // 单段异常不影响其余版本（防御未来解析逻辑扩展）
