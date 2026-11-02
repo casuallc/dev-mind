@@ -64,9 +64,16 @@ class GitLogScannerScanTest {
         return new GitLogScanner(codeRepoService, entryService, new WorklogProperties(), noProvider);
     }
 
-    private void git(String... args) {
-        GitCli.Result r = GitCli.run(repoDir, 15, args);
-        assertEquals(0, r.exitCode(), () -> String.join(" ", args) + " -> " + r.err());
+    private void git(String... args) throws Exception {
+        // 宿主（CI/平台 runner）可能导出 GIT_AUTHOR_*/GIT_COMMITTER_*，其优先级高于仓库
+        // user.name/user.email 配置，会把测试提交署名静默覆盖成操作者身份 → author 过滤全空。
+        // 这里剥掉这组环境变量，让仓库本地 config 生效。
+        ProcessBuilder pb = new ProcessBuilder(args).directory(repoDir.toFile());
+        pb.environment().keySet().removeIf(k -> k.startsWith("GIT_AUTHOR_") || k.startsWith("GIT_COMMITTER_"));
+        Process p = pb.start();
+        String err = new String(p.getErrorStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
+        assertEquals(0, p.exitValue(), () -> String.join(" ", args) + " -> " + err);
     }
 
     private Path initRepoWithCommit() throws Exception {
