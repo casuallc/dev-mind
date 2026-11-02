@@ -1,8 +1,10 @@
 package com.devmind.flow;
 
+import com.devmind.flow.dto.FlowPlanRequest;
 import com.devmind.session.dto.SessionView;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -21,10 +23,12 @@ public class RequirementFlowController {
         this.service = service;
     }
 
-    /** CAP-52 FR-01「开启 AI 规划」：一个会话产出分析 + 方案 + 工作单元，产出后自动起开发会话。 */
+    /** CAP-52 FR-01「开启 AI 规划」：一个会话产出分析 + 方案 + 工作单元，产出后自动起开发会话。
+     *  body 可空：带 userSuggestion 时清洗后拼入规划 taskSpec 末尾（REQ-16 补充建议）。 */
     @PostMapping("/requirements/{requirementId}/flow/plan")
-    public SessionView plan(@PathVariable String projectId, @PathVariable String requirementId) {
-        return service.startPlan(projectId, requirementId);
+    public SessionView plan(@PathVariable String projectId, @PathVariable String requirementId,
+                            @RequestBody(required = false) FlowPlanRequest body) {
+        return service.startPlan(projectId, requirementId, body == null ? null : body.userSuggestion());
     }
 
     /** CAP-52 FR-04「重新开发」：按已固化清单重起需求级开发会话。 */

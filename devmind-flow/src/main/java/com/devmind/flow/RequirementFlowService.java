@@ -129,12 +129,22 @@ public class RequirementFlowService {
      * 但不再是门禁——只剩一个动作，没有下游要解锁。</p>
      */
     public SessionView startPlan(String projectId, String requirementId) {
+        // 两参旧签名保留：飞书 BotRouterService、FlowTools 及存量调用方走这里（等价于不带建议）
+        return startPlan(projectId, requirementId, null);
+    }
+
+    /**
+     * 带用户补充建议的规划入口（REQ-16）：建议经 {@link FlowOutputContract} 清洗后拼到
+     * taskSpec 末尾并明确标注；null/空白时与两参版本输出完全一致（无回归）。
+     */
+    public SessionView startPlan(String projectId, String requirementId, String userSuggestion) {
         RequirementEntity req = requirementService.requireEntity(projectId, requirementId);
         requireNotTerminal(req, "发起规划");
         requireNoActiveSession(requirementId, "发起规划");
         SessionView session = sessionManager.create(new CreateSessionRequest(
                 null, projectId, null, requirementId,
-                FlowOutputContract.planSpec(req, req.getAnalysisSkipped(), req.getDesignSkipped()),
+                FlowOutputContract.planSpec(req, req.getAnalysisSkipped(), req.getDesignSkipped(),
+                        userSuggestion),
                 null, null, null, null));
         if (RequirementEntity.STATUS_DRAFT.equals(req.getStatus())) {
             requirementService.updateStatus(projectId, requirementId, RequirementEntity.STATUS_ANALYZING);
