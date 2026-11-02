@@ -21,8 +21,10 @@ done
 # 与 jar 内 git.properties 一致）；python 按 python3 → python → py -3 探测
 PY=""
 if [ "$SKIP_CHANGELOG" = "0" ]; then
+  # 必须实跑一次验证：Windows 应用商店的 python3.exe 占位 stub 能被 command -v 查到，
+  # 但一执行就以 49 退出（2026-11-02 部署即退事故），会把真 python 挤掉
   for c in python3 python "py -3"; do
-    if command -v ${c%% *} >/dev/null 2>&1; then PY=$c; break; fi
+    if $c -c "pass" >/dev/null 2>&1; then PY=$c; break; fi
   done
   if [ -z "$PY" ]; then
     echo "[dist] ERROR: 找不到 python3/python/py，无法生成更新日志条目（可用 --skip-changelog 跳过）" >&2
