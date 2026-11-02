@@ -12,7 +12,6 @@ import {
   Space,
   Spin,
   Tag,
-  Tooltip,
   Typography,
   message,
 } from 'antd'
@@ -22,6 +21,7 @@ import type { ColumnsType } from 'antd/es/table'
 import type { Dayjs } from 'dayjs'
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import { getChangelog, listChangelog } from '../api'
+import CopyableLongText from '../../../shared/components/CopyableLongText'
 import type {
   ChangelogEntryBrief,
   ChangelogEntryView,
@@ -44,35 +44,49 @@ const TYPE_META: Record<ChangelogType, { color: string; label: string }> = {
 
 const DEFAULT_SIZE = 20
 
-function TypeTags({ types }: { types: ChangelogType[] }) {
+/** 变更类型：单行不换行，最多平铺 head 个，其余收进 +N（点击弹窗看全部，可复制）。 */
+function TypeTags({ types, head = 2 }: { types: ChangelogType[]; head?: number }) {
   if (!types.length) return <span>-</span>
+  const shown = types.slice(0, head)
+  const restCount = types.length - shown.length
   return (
-    <Space size={4} wrap>
-      {types.map((t) => {
+    <Space size={4} style={{ whiteSpace: 'nowrap' }}>
+      {shown.map((t) => {
         const meta = TYPE_META[t] ?? { color: 'default', label: t }
         return (
-          <Tag key={t} color={meta.color}>
+          <Tag key={t} color={meta.color} style={{ marginInlineEnd: 0 }}>
             {meta.label}
           </Tag>
         )
       })}
+      {restCount > 0 && (
+        <CopyableLongText
+          text={types.map((t) => (TYPE_META[t] ?? { color: 'default', label: t }).label).join('\n')}
+          modalTitle="变更类型"
+        >
+          <Tag style={{ cursor: 'pointer', marginInlineEnd: 0 }}>+{restCount}</Tag>
+        </CopyableLongText>
+      )}
     </Space>
   )
 }
 
-/** 关联编号最多平铺 3 个，其余收进 +N（Tooltip 展开全文），避免固定宽列被长列表撑高。 */
-function RefTags({ refs }: { refs: string[] }) {
+/** 关联编号：单行不换行，最多平铺 head 个，其余收进 +N（点击弹窗看全部，可复制）。 */
+function RefTags({ refs, head = 3 }: { refs: string[]; head?: number }) {
   if (!refs.length) return <span>-</span>
-  const head = refs.slice(0, 3)
+  const shown = refs.slice(0, head)
+  const restCount = refs.length - shown.length
   return (
-    <Space size={4} wrap>
-      {head.map((r) => (
-        <Tag key={r}>{r}</Tag>
+    <Space size={4} style={{ whiteSpace: 'nowrap' }}>
+      {shown.map((r) => (
+        <Tag key={r} style={{ marginInlineEnd: 0 }}>
+          {r}
+        </Tag>
       ))}
-      {refs.length > head.length && (
-        <Tooltip title={refs.slice(head.length).join('、')}>
-          <Tag>+{refs.length - head.length}</Tag>
-        </Tooltip>
+      {restCount > 0 && (
+        <CopyableLongText text={refs.join('\n')} modalTitle="关联编号">
+          <Tag style={{ cursor: 'pointer', marginInlineEnd: 0 }}>+{restCount}</Tag>
+        </CopyableLongText>
       )}
     </Space>
   )
@@ -251,19 +265,21 @@ export default function ChangelogPage() {
     {
       title: '变更类型',
       dataIndex: 'types',
-      width: 220,
+      width: 190,
       render: (v: ChangelogType[]) => <TypeTags types={v} />,
     },
     {
       title: '变更摘要',
       dataIndex: 'summary',
-      ellipsis: true,
-      render: (v: string) => v || '-',
+      width: 300,
+      render: (v: string, r) => (
+        <CopyableLongText text={v} maxWidth={260} modalTitle={`v${r.version} · 变更摘要`} />
+      ),
     },
     {
       title: '关联编号',
       dataIndex: 'refs',
-      width: 220,
+      width: 230,
       render: (v: string[]) => <RefTags refs={v} />,
     },
     {
@@ -397,7 +413,7 @@ export default function ChangelogPage() {
           },
         }}
         locale={{ emptyText }}
-        scroll={{ x: 960 }}
+        scroll={{ x: 1090 }}
       />
 
       <Drawer
@@ -421,8 +437,8 @@ export default function ChangelogPage() {
           {detail ? (
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
               <Space wrap size={8}>
-                <TypeTags types={detail.types} />
-                <RefTags refs={detail.refs} />
+                <TypeTags types={detail.types} head={detail.types.length} />
+                <RefTags refs={detail.refs} head={detail.refs.length} />
               </Space>
               <Divider style={{ margin: 0 }} />
               <Markdown content={detail.contentMd} />
