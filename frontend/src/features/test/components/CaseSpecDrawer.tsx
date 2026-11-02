@@ -405,7 +405,7 @@ export default function CaseSpecDrawer({ open, suites, nodes, assets, editing, d
               <Input placeholder="如 tests/e2e" />
             </Form.Item>
             <Form.Item label="环境变量（每行 k=v，可选）" name="envText">
-              <Input.TextArea rows={2} placeholder="TARGET_URL=http://…" />
+              <Input.TextArea autoSize={{ minRows: 2 }} placeholder="TARGET_URL=http://…" />
             </Form.Item>
           </>
         )}
