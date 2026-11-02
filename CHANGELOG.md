@@ -11,6 +11,19 @@
 
 <!-- 可选：在此人工起草下一版公告，打包时优先转正并清空；留空则按提交记录自动生成。 -->
 
+## [0.1.0-20261102+93f3e52] - 2026-11-02
+
+- 提交：93f3e52
+- 关联：CAP-52, REQ-16
+
+### 新增
+
+- **flow**：开启 AI 规划支持填入用户补充建议（0c93421）
+
+### 修复
+
+- **test**：用例库可空参数与 concat 拼接参数全量补 cast——excludeId/suiteId/moduleId 等 :x is null 裸判断在 PG prepare 期炸 could not determine data type，keyword/tags 在 concat('%',:x,'%') 内被推断成 bytea 炸 lower(bytea)（2026-11-01 于 194 实炸，打开用例库不传关键字必现）；JpqlNullableParamCastTest 巡检网从仅时间类型升级为全覆盖（所有裸 is null + concat 首参），开发注意事项补第二空洞记录（c5636cf）
+
 ## [0.1.0-20261102+1272989] - 2026-11-02
 
 - 提交：1272989
