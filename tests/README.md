@@ -17,6 +17,7 @@
 tests/
 ├── e2e/            # 统一入口、正式用例、catalog/legacy 登记表
 ├── fixtures/       # 测试双端与基准样本（正式用例与历史脚本共用）
+├── unit/           # 不起服务的脚本纯函数单测（python -m unittest discover tests/unit）
 ├── legacy/
 │   ├── api/        # 66 个 Python 能力验证脚本
 │   ├── ui/         # 14 个前端 CDP 回归脚本（.mjs）
