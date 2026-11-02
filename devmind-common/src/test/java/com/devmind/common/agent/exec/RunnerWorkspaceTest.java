@@ -912,7 +912,11 @@ class RunnerWorkspaceTest {
     private static String git(Path cwd, String... args) throws Exception {
         List<String> cmd = new ArrayList<>(List.of("git", "-C", cwd.toString()));
         cmd.addAll(List.of(args));
-        Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+        ProcessBuilder pb = new ProcessBuilder(cmd).redirectErrorStream(true);
+        // 环境身份隔离：宿主导出的 GIT_AUTHOR_*/GIT_COMMITTER_* 优先级高于 -c user.name，
+        // 不剥掉会让测试里 -c 指定的署名（t/o 等）被静默覆盖，用例结果随机器环境漂移
+        pb.environment().keySet().removeIf(k -> k.startsWith("GIT_AUTHOR_") || k.startsWith("GIT_COMMITTER_"));
+        Process p = pb.start();
         String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
         if (p.waitFor() != 0) {
             throw new IllegalStateException("git " + String.join(" ", args) + " 失败: " + out);
