@@ -14,7 +14,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -22,32 +21,24 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * JPQL 空值判断参数的类型可推断性巡检（PG 回归网）。
+ * JPQL 可空参数的类型可推断性巡检（PG 回归网）。
  *
- * <p><b>规则</b>：@Query 里 {@code :x is null} 形式的"可空筛选"，若 x 是 {@code java.time.*}
- * 类型，必须写成 {@code cast(:x as …) is null}。</p>
+ * <p><b>规则</b>：@Query 里 {@code :x is null} 形式的"可空筛选"，必须写成
+ * {@code cast(:x as …) is null}；字符串参数出现在 {@code concat('%', :x, '%')} 里时，
+ * 也必须写成 {@code concat('%', cast(:x as string), '%')}。</p>
  *
  * <p><b>为什么</b>：PG 的类型推断只认上下文——裸的 {@code ? is null} 是"没有上下文"的参数位，
- * PG 推断不出类型就在 prepare 阶段整条拒绝：{@code ERROR: could not determine data type of
- * parameter $N}（与参数取值无关，null 和非 null 一样炸）。String/Integer 参数侥幸没事，只是
- * 因为 JDBC 驱动恰好知道这些 Java 类型的 OID 会随 Parse 一起送；{@code Instant} 没有，
- * 于是"按时间筛选"一个条件就能把整页打成 500（2026-09-22 172.20.140.224 实录，
- * CAP-55 决策记录页 —— 见 docs/core/开发注意事项.md「PostgreSQL」）。</p>
+ * PG 推断不出类型就在 prepare 阶段整条拒绝：{@code could not determine data type of
+ * parameter $N}（与参数取值无关，null 和非 null 一样炸）。{@code '%' || ? || '%'} 同样
+ * 没有上下文：2026-11-01 用例库在 194(PG) 上把 String 参数推断成 bytea，报
+ * {@code function lower(bytea) does not exist}，打开用例库（不传关键字）必现。
+ * String/Long 并不因 Java 类型而天然安全。</p>
  *
  * <p><b>为什么必须是静态巡检</b>：H2/MySQL 不做这层校验，本地 dev 库（MySQL）与单测（H2）
  * 全绿，只有 PG 实例会炸；@Query 的 HQL 本身也是合法 HQL，Hibernate 启动期同样不报错。
  * 能提前拦住的只有"看一眼 SQL 长什么样"。</p>
  */
 class JpqlNullableParamCastTest {
-
-    /** 驱动送不出类型 OID、只能靠 SQL 上下文自证的类型（实测 Instant；java.time 一律按这条走） */
-    private static final Set<String> CONTEXT_ONLY_TYPES = Set.of(
-            "java.time.Instant",
-            "java.time.LocalDateTime",
-            "java.time.LocalDate",
-            "java.time.LocalTime",
-            "java.time.OffsetDateTime",
-            "java.time.ZonedDateTime");
 
     /** `:foo is null` 形式的空值判断（必须 CASE_INSENSITIVE——大写 `IS NULL` 曾让
      *  WorklogEntryRepository.findRange 的 LocalDate 裸判断漏网，2026-10-27 在 194(PG) 实炸 42P18） */
@@ -56,11 +47,15 @@ class JpqlNullableParamCastTest {
     /** 空值判断左侧必须是 cast(（允许 `cast (` 这样的空白写法） */
     private static final Pattern CAST_AHEAD = Pattern.compile("cast\\s*\\(\\s*$", Pattern.CASE_INSENSITIVE);
 
+    /** concat 首参拼接里的裸参数：`concat('%', :kw, '%')` 在 PG 上会被推断成 bytea */
+    private static final Pattern BARE_CONCAT_PARAM =
+            Pattern.compile("concat\\s*\\(\\s*'%'\\s*,\\s*:(\\w+)", Pattern.CASE_INSENSITIVE);
+
     /** 只看紧邻空值判断的那一小段，避免"同名的另一半条件里有 cast"误判 */
     private static final int LOOKBACK = 24;
 
     @Test
-    void 可空时间参数的空值判断必须带_cast() throws Exception {
+    void 可空参数的空值判断与字符串拼接必须带_cast() throws Exception {
         List<Class<?>> repositories = findRepositories();
         assertFalse(repositories.isEmpty(),
                 "一个 repository 都没扫到 = 巡检空跑（类路径/过滤条件失效），先修巡检本身");
@@ -77,24 +72,32 @@ class JpqlNullableParamCastTest {
         }
 
         assertTrue(violations.isEmpty(),
-                "PG 无法推断 '? is null' 裸参数的类型（could not determine data type of parameter $N），"
-                        + "时间类型的可空筛选必须写成 cast(:x as timestamp) is null：\n  - "
+                "PG 无法推断裸参数的类型（could not determine data type / lower(bytea) does not exist），"
+                        + "可空筛选必须写成 cast(:x as …) is null，concat 内的字符串参数必须写成 cast(:x as string)：\n  - "
                         + String.join("\n  - ", violations));
     }
 
     private static void inspect(Class<?> repo, Method method, String jpql, List<String> violations) {
         Map<String, Class<?>> paramTypes = paramTypes(method);
-        Matcher m = NULL_CHECK.matcher(jpql);
-        while (m.find()) {
-            String name = m.group(1);
+        Matcher nullCheck = NULL_CHECK.matcher(jpql);
+        while (nullCheck.find()) {
+            String name = nullCheck.group(1);
             Class<?> type = paramTypes.get(name);
-            if (type == null || !CONTEXT_ONLY_TYPES.contains(type.getName())) {
-                continue;   // 驱动送得出类型，或无从判断类型（不是本规则的对象）
+            if (type == null) {
+                continue;   // 不是本 repository 声明的参数（如 SpEL），无从判断
             }
-            String prefix = jpql.substring(Math.max(0, m.start() - LOOKBACK), m.start());
+            String prefix = jpql.substring(Math.max(0, nullCheck.start() - LOOKBACK), nullCheck.start());
             if (!CAST_AHEAD.matcher(prefix).find()) {
                 violations.add(repo.getSimpleName() + "." + method.getName()
                         + "() 的 :" + name + "（" + type.getSimpleName() + "）");
+            }
+        }
+        Matcher concatParam = BARE_CONCAT_PARAM.matcher(jpql);
+        while (concatParam.find()) {
+            String name = concatParam.group(1);
+            if (paramTypes.get(name) == String.class) {
+                violations.add(repo.getSimpleName() + "." + method.getName()
+                        + "() 的 concat('%', :" + name + ", '%')");
             }
         }
     }

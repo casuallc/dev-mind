@@ -31,7 +31,7 @@ public interface TestCaseRepository extends JpaRepository<TestCaseEntity, Long> 
     @Query("""
             select count(c) from TestCaseEntity c join TestSuiteEntity s on s.id = c.suiteId
             where s.projectId = :projectId and c.caseKey = :caseKey
-              and (:excludeId is null or c.id <> :excludeId)
+              and (cast(:excludeId as long) is null or c.id <> :excludeId)
             """)
     long countCaseKeyInProject(@Param("projectId") String projectId,
                                @Param("caseKey") String caseKey,
@@ -41,7 +41,7 @@ public interface TestCaseRepository extends JpaRepository<TestCaseEntity, Long> 
     @Query("""
             select c from TestCaseEntity c join TestSuiteEntity s on s.id = c.suiteId
             where s.projectId = :projectId and c.signature = :signature
-              and (:excludeId is null or c.id <> :excludeId)
+              and (cast(:excludeId as long) is null or c.id <> :excludeId)
             """)
     List<TestCaseEntity> findDuplicates(@Param("projectId") String projectId,
                                         @Param("signature") String signature,
@@ -51,14 +51,16 @@ public interface TestCaseRepository extends JpaRepository<TestCaseEntity, Long> 
     @Query("""
             select c from TestCaseEntity c join TestSuiteEntity s on s.id = c.suiteId
             where s.projectId = :projectId
-              and (:suiteId is null or c.suiteId = :suiteId)
-              and (:moduleId is null or s.moduleId = :moduleId)
-              and (:type is null or c.type = :type)
-              and (:reviewStatus is null or c.reviewStatus = :reviewStatus)
-              and (:keyword is null or lower(c.name) like lower(concat('%', :keyword, '%'))
-                   or lower(c.caseKey) like lower(concat('%', :keyword, '%'))
-                   or lower(c.path) like lower(concat('%', :keyword, '%')))
-              and (:tags is null or lower(c.tags) like lower(concat('%', :tags, '%')))
+              and (cast(:suiteId as long) is null or c.suiteId = :suiteId)
+              and (cast(:moduleId as long) is null or s.moduleId = :moduleId)
+              and (cast(:type as string) is null or c.type = :type)
+              and (cast(:reviewStatus as string) is null or c.reviewStatus = :reviewStatus)
+              and (cast(:keyword as string) is null
+                   or lower(c.name) like lower(concat('%', cast(:keyword as string), '%'))
+                   or lower(c.caseKey) like lower(concat('%', cast(:keyword as string), '%'))
+                   or lower(c.path) like lower(concat('%', cast(:keyword as string), '%')))
+              and (cast(:tags as string) is null
+                   or lower(c.tags) like lower(concat('%', cast(:tags as string), '%')))
             order by c.suiteId asc, c.sort asc
             """)
     List<TestCaseEntity> search(@Param("projectId") String projectId,
