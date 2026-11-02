@@ -1,5 +1,5 @@
-// CAP-104 M3 方案运行弹窗：SEQUENTIAL 单节点编排 / SHARD 用例哈希分片 / MATRIX 每节点全量。
-import { Form, Input, InputNumber, Modal, Select, Typography, message } from 'antd'
+// CAP-104 M3 方案运行抽屉：SEQUENTIAL 单节点编排 / SHARD 用例哈希分片 / MATRIX 每节点全量。
+import { Button, Drawer, Form, Input, InputNumber, Select, Space, Typography, message } from 'antd'
 import { useEffect, useState } from 'react'
 import { runPlan } from '../api'
 import type { CreatePlanRunInput, PlanMode, TestPlan, TestPlanRun } from '../types'
@@ -7,6 +7,7 @@ import type { AgentNode } from '../../agent/types'
 import type { ProjectEnvironment } from '../../projects/types'
 import WorkItemSelect from '../../../shared/components/WorkItemSelect'
 import { showError } from '../../../shared/utils/showError'
+import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 
 interface Props {
   plan: TestPlan | null
@@ -22,7 +23,7 @@ const MODE_OPTIONS: { value: PlanMode; label: string; desc: string }[] = [
   { value: 'MATRIX', label: 'MATRIX 矩阵', desc: '每个节点对每个方案项各跑全量用例（多环境/多版本对比）' },
 ]
 
-export default function RunPlanModal({ plan, nodes, environments, onClose, onRan }: Props) {
+export default function RunPlanDrawer({ plan, nodes, environments, onClose, onRan }: Props) {
   const [form] = Form.useForm()
   const [running, setRunning] = useState(false)
   const mode = Form.useWatch('mode', form) as PlanMode | undefined
@@ -94,15 +95,20 @@ export default function RunPlanModal({ plan, nodes, environments, onClose, onRan
   }
 
   return (
-    <Modal
+    <Drawer
       title={plan ? `运行方案「${plan.name}」` : '运行方案'}
       open={!!plan}
-      onCancel={onClose}
-      onOk={onRun}
-      okText="执行方案"
-      confirmLoading={running}
-      width={600}
+      onClose={onClose}
+      width={DRAWER_DEFAULT}
       destroyOnHidden
+      footer={
+        <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" loading={running} onClick={onRun}>
+            执行方案
+          </Button>
+        </Space>
+      }
     >
       <Form form={form} layout="vertical">
         <Form.Item label="执行模式" name="mode" rules={[{ required: true }]}>
@@ -169,6 +175,6 @@ export default function RunPlanModal({ plan, nodes, environments, onClose, onRan
           <Input.TextArea rows={3} style={{ fontFamily: 'monospace' }} placeholder="{}" />
         </Form.Item>
       </Form>
-    </Modal>
+    </Drawer>
   )
 }

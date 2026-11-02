@@ -18,7 +18,7 @@ import type { AgentNode } from '../../agent/types'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import PlanEditorDrawer from './PlanEditorDrawer'
-import RunPlanModal from './RunPlanModal'
+import RunPlanDrawer from './RunPlanDrawer'
 import PlanRunHistoryDrawer from './PlanRunHistoryDrawer'
 import PlanRunDetailDrawer from './PlanRunDetailDrawer'
 
@@ -186,7 +186,7 @@ export default function PlansPanel({
         }}
       />
 
-      <RunPlanModal
+      <RunPlanDrawer
         plan={runFor}
         nodes={nodes}
         environments={environments}
