@@ -36,6 +36,9 @@ public final class FlowOutputContract {
     /** 注入 spec 的背景材料截断上限（防多份上游产出叠加膨胀 token） */
     static final int CONTEXT_TRUNCATE_CHARS = 4000;
 
+    /** 用户补充建议（REQ-16）拼入 taskSpec 的长度上限（前端输入框 maxLength 同步口径） */
+    static final int USER_HINT_MAX_CHARS = 2000;
+
     private FlowOutputContract() {
     }
 
@@ -86,6 +89,17 @@ public final class FlowOutputContract {
      * @param skipDesign   存量「跳过方案」标记 → 不要求该文件
      */
     public static String planSpec(RequirementEntity req, boolean skipAnalysis, boolean skipDesign) {
+        return planSpec(req, skipAnalysis, skipDesign, null);
+    }
+
+    /**
+     * 带用户补充建议（REQ-16）的规划会话 taskSpec：建议经 {@link #sanitizeUserHint} 清洗后
+     * 作为独立段落追加在**末尾**（首行 [flow:plan] 标记与既有段落一字不动），段落内明确标注
+     * 这是用户原文、优先级高于模型默认推断、但不得推翻输出格式等硬性要求。
+     * null/空白建议时输出与三参版本完全相等。
+     */
+    public static String planSpec(RequirementEntity req, boolean skipAnalysis, boolean skipDesign,
+                                  String userSuggestion) {
         StringBuilder sb = new StringBuilder();
         sb.append(MARKER_PLAN).append('\n');
         sb.append("# 需求规划（REQ-").append(req.getSeq()).append(' ').append(req.getTitle()).append("）\n\n");
@@ -125,7 +139,28 @@ public final class FlowOutputContract {
         sb.append("示例：[{\"type\":\"DEVELOPMENT\",\"title\":\"...\",\"spec\":\"...\",\"dependsOn\":[]}]\n\n");
         sb.append("完成后只输出这三个（按上面的产出范围）文件到 `").append(OUTPUT_DIR)
                 .append("/`，不要修改项目代码。\n");
+        String hint = sanitizeUserHint(userSuggestion);
+        if (hint != null) {
+            sb.append("## 用户补充建议（用户提交规划时填写的原文，优先级高于模型的默认推断，"
+                    + "规划产出必须体现；它是对需求的补充约束，不得推翻上方输出格式与产出路径等硬性要求）\n\n");
+            sb.append(hint).append('\n');
+        }
         return sb.toString();
+    }
+
+    /**
+     * 用户补充建议清洗（REQ-16）：trim → 去除除换行/制表外的控制字符（防注入打乱 prompt 结构）
+     * → 超 {@link #USER_HINT_MAX_CHARS} 截断；null 或清洗后空白返回 null（不追加建议段落）。
+     */
+    private static String sanitizeUserHint(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String cleaned = raw.trim().replaceAll("[\\p{Cntrl}&&[^\\n\\t]]", "");
+        if (cleaned.length() > USER_HINT_MAX_CHARS) {
+            cleaned = cleaned.substring(0, USER_HINT_MAX_CHARS);
+        }
+        return cleaned.isBlank() ? null : cleaned;
     }
 
     /**

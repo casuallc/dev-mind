@@ -3,6 +3,7 @@ package com.devmind.flow;
 import com.devmind.project.model.RequirementEntity;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -56,6 +57,41 @@ class FlowOutputContractTest {
         assertTrue(spec.contains(FlowOutputContract.ANALYSIS_FILE));
         assertTrue(spec.contains("### 2. `" + FlowOutputContract.OUTPUT_DIR + "/"
                 + FlowOutputContract.WI_PLAN_FILE + "`"));
+    }
+
+    // ---------------- REQ-16：规划 spec 末尾追加用户补充建议 ----------------
+
+    @Test
+    void 规划spec带建议时末尾追加且首行标记不动() {
+        String spec = FlowOutputContract.planSpec(req(), false, false, "优先考虑复用现有接口");
+        assertTrue(spec.startsWith(FlowOutputContract.MARKER_PLAN), "首行 [flow:plan] 标记一字不动");
+        assertTrue(spec.contains("## 用户补充建议"));
+        assertTrue(spec.contains("优先级高于模型的默认推断"));
+        assertTrue(spec.stripTrailing().endsWith("优先考虑复用现有接口"), "建议段落只能加在末尾");
+    }
+
+    @Test
+    void 规划spec空建议与三参输出完全相等() {
+        // 回归钉死：null 与纯空白建议都不改变既有输出（字节级一致）
+        assertEquals(FlowOutputContract.planSpec(req(), false, false),
+                FlowOutputContract.planSpec(req(), false, false, null));
+        assertEquals(FlowOutputContract.planSpec(req(), true, false),
+                FlowOutputContract.planSpec(req(), true, false, "  \n\t  "));
+    }
+
+    @Test
+    void 规划spec建议超长被截断() {
+        String longHint = "议".repeat(FlowOutputContract.USER_HINT_MAX_CHARS + 500);
+        String spec = FlowOutputContract.planSpec(req(), false, false, longHint);
+        assertFalse(spec.contains(longHint), "超过上限的建议不应全文进入 taskSpec");
+        assertTrue(spec.contains("议".repeat(FlowOutputContract.USER_HINT_MAX_CHARS)));
+    }
+
+    @Test
+    void 规划spec建议清洗控制字符但保留换行() {
+        String spec = FlowOutputContract.planSpec(req(), false, false, "第一行第二行\n第三行");
+        assertFalse(spec.contains(""), "控制字符必须被清除（防注入打乱 prompt 结构）");
+        assertTrue(spec.contains("第一行第二行\n第三行"), "换行保留");
     }
 
     // ---------------- CAP-52：需求级开发 spec ----------------

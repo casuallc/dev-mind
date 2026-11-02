@@ -8,6 +8,9 @@
 > 演进：CAP-100 接通全自动链——规划产出方案登记即 CONFIRMED（FR-02 的 DRAFT 口径修订）、
 > 开发会话回填 WI 归属会话、FR-06「不自动置 WI DONE」修订为项目级开关可选自动完成，
 > CAP-17 自动构建幂等粒度随之提升为需求级。
+> 决策记录（REQ-16，FR-08）：`RequirementFlowService.startPlan` 新增三参重载承载用户补充建议，
+> **保留两参旧签名**（委托三参传 null）——飞书 BotRouterService、FlowTools 及存量调用方零改动；
+> 建议清洗后只追加在 taskSpec **末尾**，null/空白建议时输出与旧版字节级一致（回归由单测钉死）。
 
 ## 1. 目的
 
@@ -142,6 +145,19 @@ DRAFT ──开启 AI 规划──> ANALYZING ──规划产出固化 WI──>
 - 存量端点 `flow/analyze`、`flow/design`、`flow/split`、`flow/skip` 在**前端切换完成后删除**
   （同一发行版内切换，`devmind-open-api` 未暴露这些路径，无外部调用方；`tests/` 下 E2E 脚本同步改）。
 - 新增：`POST .../flow/plan`（起规划）、`POST .../flow/dev`（弃用后重起开发会话）。
+
+### FR-08 规划前用户补充建议（REQ-16）
+
+- 点「开启 AI 规划 / 重新规划」先弹提交对话框，提供「补充建议」多行输入框（**可空**，
+  前端 `maxLength=2000` + showCount）；确定后才起规划会话，重新规划路径共用同一对话框
+  （保留原「整段重跑」警告文案）。
+- `POST .../flow/plan` 接受可选请求体 `{ "userSuggestion": "..." }`；不带 body / 空 body /
+  建议为空白时行为与现状**完全一致**（无回归）。
+- 服务端清洗（`FlowOutputContract.sanitizeUserHint`）：trim → 去除除换行/制表外的控制字符
+  （防注入打乱 prompt 结构）→ 超 2000 字符截断；清洗后空白等同未填。
+- 清洗后的建议以「## 用户补充建议」段落追加在 taskSpec **末尾**，段落内明确标注：用户原文、
+  优先级高于模型默认推断、规划产出必须体现、但不得推翻输出格式与产出路径等硬性要求；
+  taskSpec 首行 `[flow:plan]` 标记与既有段落一字不动。建议在会话任务说明中留痕，可回溯。
 
 ## 3. 门禁矩阵
 

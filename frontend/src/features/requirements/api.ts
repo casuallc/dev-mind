@@ -330,9 +330,15 @@ export function deleteDesign(projectId: string, requirementId: string, designId:
 
 // ---- CAP-14/52 需求流程 ----
 
-/** CAP-52 开启 AI 规划：一个会话产出 分析 + 方案 + 工作单元，三份齐备后自动起开发会话 */
-export function flowPlan(projectId: string, requirementId: string): Promise<FlowSession> {
-  return api.post<FlowSession>(`/projects/${projectId}/requirements/${requirementId}/flow/plan`)
+/** CAP-52 开启 AI 规划：一个会话产出 分析 + 方案 + 工作单元，三份齐备后自动起开发会话。
+ *  REQ-16：userSuggestion 可空——trim 后非空才带 body（服务端清洗后拼入规划 taskSpec 末尾），
+ *  否则保持原无 body POST（行为与现状一致）。 */
+export function flowPlan(projectId: string, requirementId: string, userSuggestion?: string): Promise<FlowSession> {
+  const suggestion = userSuggestion?.trim()
+  return api.post<FlowSession>(
+    `/projects/${projectId}/requirements/${requirementId}/flow/plan`,
+    suggestion ? { userSuggestion: suggestion } : undefined,
+  )
 }
 
 /** CAP-52 开发（重新开发）：按已固化清单起需求级开发会话，整份清单一次做完 */

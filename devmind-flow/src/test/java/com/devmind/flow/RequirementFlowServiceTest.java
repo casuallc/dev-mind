@@ -836,6 +836,17 @@ class RequirementFlowServiceTest {
     }
 
     @Test
+    void 规划入口_带用户建议拼入taskSpec() {
+        requirementService.add("r1", RequirementEntity.STATUS_DRAFT);
+
+        SessionView view = service.startPlan("p1", "r1", "优先复用现有组件实现");
+
+        assertTrue(view.taskSpec().startsWith(FlowOutputContract.MARKER_PLAN));
+        assertTrue(view.taskSpec().contains("用户补充建议"));
+        assertTrue(view.taskSpec().contains("优先复用现有组件实现"));
+    }
+
+    @Test
     void 规划入口_已有进行中会话报409() {
         requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
         SessionEntity active = addSession("s9", null, "r1", "在跑");

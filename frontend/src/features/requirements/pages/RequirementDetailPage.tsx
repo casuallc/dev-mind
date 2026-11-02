@@ -176,6 +176,9 @@ export default function RequirementDetailPage() {
   const [attachCount, setAttachCount] = useState<number | null>(null)
   // CAP-52 流程动作互斥：同一时刻只允许一个在飞（规划 / 开发）
   const [flowBusy, setFlowBusy] = useState<null | 'plan' | 'dev'>(null)
+  // REQ-16 规划提交对话框：受控 Modal + 补充建议输入框（可空）
+  const [planOpen, setPlanOpen] = useState(false)
+  const [planSuggestion, setPlanSuggestion] = useState('')
   // Tab 与 URL 同步（?tab=analysis/design/workItems）：流程通知深链直达对应 Tab，刷新/分享不丢位置
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab = searchParams.get('tab') || 'analysis'
@@ -259,13 +262,14 @@ export default function RequirementDetailPage() {
       ]
     : []
 
-  /** 起流程会话：规划/开发共用（成功后刷新 overview + 方案列表，会话状态进「会话」列与 Tab 标签） */
-  const startFlow = async (kind: 'plan' | 'dev') => {
+  /** 起流程会话：规划/开发共用（成功后刷新 overview + 方案列表，会话状态进「会话」列与 Tab 标签）。
+   *  REQ-16：规划分支把用户补充建议透传给 flowPlan（可空，空时与现状一致）。 */
+  const startFlow = async (kind: 'plan' | 'dev', userSuggestion?: string) => {
     if (!projectId) return
     setFlowBusy(kind)
     try {
       const s = kind === 'plan'
-        ? await flowPlan(projectId, r.id)
+        ? await flowPlan(projectId, r.id, userSuggestion)
         : await flowDev(projectId, r.id)
       message.success(kind === 'plan'
         ? '规划会话已启动：一个会话产出分析+方案+工作单元，完成后自动接开发会话'
@@ -278,20 +282,15 @@ export default function RequirementDetailPage() {
     }
   }
 
+  /** REQ-16：开启/重新规划统一走受控 Modal（可填补充建议）；确认后关闭并起会话 */
   const confirmPlan = () => {
-    if (!planned) {
-      startFlow('plan')
-      return
-    }
-    Modal.confirm({
-      centered: true,
-      title: '重新规划？',
-      content: '将重跑整个规划链路（分析 + 方案 + 工作单元），新产出会落成分析/方案文档的新版本；'
-        + '已有工作单元不会被删除。',
-      okText: '重新规划',
-      cancelText: '返回',
-      onOk: () => startFlow('plan'),
-    })
+    setPlanSuggestion('')
+    setPlanOpen(true)
+  }
+
+  const submitPlan = () => {
+    setPlanOpen(false)
+    startFlow('plan', planSuggestion)
   }
 
   const confirmDev = () => {
@@ -771,6 +770,33 @@ export default function RequirementDetailPage() {
           onPushed={reloadAll}
         />
       )}
+
+      {/* REQ-16：开启/重新规划提交对话框——可填补充建议（选填，随 taskSpec 末尾拼入规划会话） */}
+      <Modal
+        centered
+        open={planOpen}
+        title={planned ? '重新规划' : '开启 AI 规划'}
+        okText={planned ? '重新规划' : '开启规划'}
+        cancelText="返回"
+        confirmLoading={flowBusy === 'plan'}
+        onOk={submitPlan}
+        onCancel={() => setPlanOpen(false)}
+      >
+        {planned && (
+          <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+            将重跑整个规划链路（分析 + 方案 + 工作单元），新产出会落成分析/方案文档的新版本；
+            已有工作单元不会被删除。
+          </Typography.Text>
+        )}
+        <Input.TextArea
+          rows={4}
+          maxLength={2000}
+          showCount
+          value={planSuggestion}
+          onChange={(e) => setPlanSuggestion(e.target.value)}
+          placeholder="可填写补充建议：技术选型、约束、重点关注点等（选填）"
+        />
+      </Modal>
     </Space>
   )
 }
