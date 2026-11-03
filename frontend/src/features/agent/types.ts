@@ -26,6 +26,8 @@ export interface AgentNode {
   proxyScopes?: string
   /** 文件访问根目录白名单（CAP-65；空/缺席 = 文件浏览不可用） */
   fileRoots?: string[]
+  /** 节点级环境变量（CAP-106；明文，禁存密钥；执行下发时作 env 合并最低优先基底） */
+  env?: Record<string, string>
   /** 活跃会话数（列表接口聚合各会话模块 SPI 填充；RUNNING/WAITING_INPUT/WAITING_AUTH 三态） */
   activeSessionCount?: number
   lastHeartbeatAt?: string

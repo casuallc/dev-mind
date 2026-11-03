@@ -117,11 +117,13 @@ export default function AgentNodeDetailPage() {
   const [proxyUrlDraft, setProxyUrlDraft] = useState('')
   const [proxyScopesDraft, setProxyScopesDraft] = useState<string[]>(['git'])
   const [fileRootsDraft, setFileRootsDraft] = useState('')
+  const [envDraft, setEnvDraft] = useState('')
   useEffect(() => {
     setLabelsDraft(node?.labels ?? '')
     setProxyUrlDraft(node?.proxyUrl ?? '')
     setProxyScopesDraft(node?.proxyScopes ? node.proxyScopes.split(',').filter(Boolean) : ['git'])
     setFileRootsDraft((node?.fileRoots ?? []).join('\n'))
+    setEnvDraft(Object.entries(node?.env ?? {}).map(([k, v]) => `${k}=${v}`).join('\n'))
   }, [node?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const outdated = !!(pkg && node?.runnerVersion && node.runnerVersion !== pkg.version)
@@ -274,6 +276,25 @@ export default function AgentNodeDetailPage() {
       reload()
     })
 
+  // CAP-106：每行 KEY=VALUE，空行忽略；VALUE 留空 = 删该 key；全留空 = 清空
+  const onSaveEnv = () =>
+    run(async () => {
+      const env: Record<string, string> = {}
+      for (const line of envDraft.split('\n')) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        const eq = trimmed.indexOf('=')
+        if (eq <= 0) {
+          message.error(`环境变量行缺少 KEY=：${trimmed}`)
+          return
+        }
+        env[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim()
+      }
+      await updateAgentNode(nodeId, { env })
+      message.success(Object.keys(env).length ? `环境变量已保存（${Object.keys(env).length} 条，随下一次执行下发生效）` : '环境变量已清空')
+      reload()
+    })
+
   return (
     <Card
       style={pageCardStyle}
@@ -385,7 +406,14 @@ export default function AgentNodeDetailPage() {
                   </Descriptions.Item>
                   <Descriptions.Item label="最近心跳">{fmtTime(node.lastHeartbeatAt)}</Descriptions.Item>
                   <Descriptions.Item label="工具链" span={2}>
-                    <ToolchainTags json={node.toolchain} />
+                    <Space size={8} wrap>
+                      <ToolchainTags json={node.toolchain} />
+                      <Tooltip title="runner 启动探测 + 周期重探测（默认 10 分钟）随心跳上报；刚在节点上装运行时，等一个探测周期或重启 runner 自动刷新。也可在 agent.properties 配 toolchain.<key> 显式路径（CAP-106）">
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          快照时间 = 最近心跳
+                        </Typography.Text>
+                      </Tooltip>
+                    </Space>
                   </Descriptions.Item>
                   <Descriptions.Item label="标签" span={2}>
                     {node.labels || '-'}
@@ -488,6 +516,32 @@ export default function AgentNodeDetailPage() {
                         </span>
                       </Tooltip>
                     </Space>
+                  </Space>
+                </Card>
+
+                <Card size="small" title="环境变量（CAP-106）">
+                  <Space direction="vertical" style={{ width: '100%' }} size={8}>
+                    <Typography.Text type="secondary">
+                      每行一条 KEY=VALUE（VALUE 留空 = 删除该 key，全留空 = 清空；最多 64 条、单值 ≤4KB）。
+                      作为该节点 exec/proc/程序型用例执行的环境变量基底下发，
+                      优先级最低：节点 env &lt; 测试环境 variables &lt; 用例 env。
+                      典型用途：PATH / JAVA_HOME 这类机器差异——配上后 toolchain 快照缺失的程序型用例不再被预检误杀。
+                      <Typography.Text strong type="danger">明文存储与展示，禁存密钥</Typography.Text>
+                      （密钥请走测试环境 secrets）。
+                    </Typography.Text>
+                    <Input.TextArea
+                      autoSize={{ minRows: 3, maxRows: 10 }}
+                      placeholder={'PATH=/home/jdk-21/bin:/usr/local/bin:/usr/bin\nJAVA_HOME=/home/jdk-21'}
+                      value={envDraft}
+                      onChange={(e) => setEnvDraft(e.target.value)}
+                    />
+                    {canManageNode && (
+                      <div>
+                        <Button type="primary" loading={busy} onClick={onSaveEnv}>
+                          保存
+                        </Button>
+                      </div>
+                    )}
                   </Space>
                 </Card>
 

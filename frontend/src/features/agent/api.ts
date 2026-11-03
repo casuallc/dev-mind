@@ -55,12 +55,13 @@ export function createAgentNode(body: { name: string; labels?: string }): Promis
 }
 
 /**
- * 编辑节点（CAP-34 FR-07 标签 / CAP-43 外网代理 / CAP-65 文件访问根目录）。字段缺席 = 不动该配置；
- * labels "" 清空标签；proxyUrl "" 清空代理（连同 scopes）；fileRoots [] 清空白名单。
+ * 编辑节点（CAP-34 FR-07 标签 / CAP-43 外网代理 / CAP-65 文件访问根目录 / CAP-106 环境变量）。
+ * 字段缺席 = 不动该配置；labels "" 清空标签；proxyUrl "" 清空代理（连同 scopes）；
+ * fileRoots [] 清空白名单；env {} 清空环境变量、空值 = 删该 key。
  */
 export function updateAgentNode(
   id: number,
-  body: { labels?: string; proxyUrl?: string; proxyScopes?: string; fileRoots?: string[] },
+  body: { labels?: string; proxyUrl?: string; proxyScopes?: string; fileRoots?: string[]; env?: Record<string, string> },
 ): Promise<AgentNode> {
   return api.put<AgentNode>(`/agent-nodes/${id}`, body)
 }
