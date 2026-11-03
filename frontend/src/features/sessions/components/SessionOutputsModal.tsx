@@ -28,7 +28,7 @@ import Markdown from '../../../shared/components/Markdown'
 import { attachmentRawUrl } from '../../../shared/attachments/url'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
-import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
+import { DRAWER_SCREEN } from '../../../shared/utils/overlay'
 
 const KIND_OPTIONS: { value: PublishDocKind; label: string }[] = [
   { value: 'analysis', label: '需求分析' },
@@ -273,7 +273,7 @@ export default function SessionOutputsModal({
       title={`会话产出（.devmind/output）${session ? ` - ${session.id}` : ''}`}
       open={open}
       onClose={onClose}
-      width={DRAWER_DEFAULT}
+      width={DRAWER_SCREEN}
       destroyOnHidden
     >
       {syncMessage && (
