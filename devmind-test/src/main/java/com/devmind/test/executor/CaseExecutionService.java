@@ -241,15 +241,16 @@ public class CaseExecutionService {
             return blocked("程序资产缺少 sha256，无法保证不可变性", "PRECHECK", in, started, startMs);
         }
 
+        // CAP-106 FR-06：env 先算出来喂预检——toolchain 快照缺失但注入 env 含 PATH/JAVA_HOME
+        // 覆盖时不误杀（判定下沉 runner 执行期探测）
+        Map<String, String> env = commandEnv(spec, in);
         String nodeId;
         try {
             nodeId = routeNode(spec, in);
-            router.requireProgramCompatible(nodeId, manifest);
+            router.requireProgramCompatible(nodeId, manifest, env);
         } catch (DevMindException e) {
             return blocked(e.getMessage(), "PRECHECK", in, started, startMs);
         }
-
-        Map<String, String> env = commandEnv(spec, in);
         Map<String, Object> input = programInput(spec, in);
         String inputJson;
         try {
@@ -289,6 +290,12 @@ public class CaseExecutionService {
                     }
                 });
         long dur = System.currentTimeMillis() - startMs;
+
+        // CAP-106 FR-07：预检放行后 runner 执行期探测仍不满足（env 覆盖是假的/路径里没 java）
+        // → BLOCKED 语义，入口脚本未执行，不算程序 INFRA 错误
+        if (res.error() != null && res.error().startsWith("[toolchain]")) {
+            return blocked(res.error(), "PRECHECK", in, started, startMs);
+        }
 
         ProgramResultParser.Collected collected;
         ProgramResultParser.Decoded decoded = null;
