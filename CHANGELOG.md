@@ -11,6 +11,20 @@
 
 <!-- 可选：在此人工起草下一版公告，打包时优先转正并清空；留空则按提交记录自动生成。 -->
 
+## [0.1.0-20261103+c3e4832] - 2026-11-03
+
+- 提交：c3e4832
+- 关联：CAP-106
+
+### 新增
+
+- **frontend**：CAP-106 节点页环境变量卡片（KEY=VALUE 文本域、禁存密钥警示、合并优先级说明）+ 工具链快照时间提示（FR-08 O2：快照时间=最近心跳）（1a8d9e6）
+- **runner**：CAP-106 FR-03/05/07——agent.properties 支持 toolchain.<key> 显式路径（未知 key 启动 fail-fast）与 toolchainRefreshMinutes（默认 10，0=关）周期重探测；探测结果有变化才随下一次 heartbeat 携带 toolchain（断线期间丢失由重连 hello 恒带兜底）；程序包解包后跑入口前按合并 env 执行期探测，不满足抛 [toolchain] 前缀错误（入口不执行）（a7fbae2）
+- **test**：CAP-106 程序型用例预检 env 联动 + 执行期探测 BLOCKED 映射——env 提前到预检前计算喂 requireProgramCompatible（FR-06）；runner 回报的 [toolchain] 前缀错误映射 blocked/PRECHECK 而非 INFRA（FR-07：入口脚本未执行不算程序错误）（b54b85c）
+- **execution**：CAP-106 FR-02/FR-06——AgentNodeStepRunner 下发前合并节点 env 基底（节点 env < 调用方 env，帧内 env 即终态 runner 零改动）；requireProgramCompatible 增 env 联动重载：快照缺 key 时合并 env 含 PATH/JAVA_HOME 覆盖则放行下沉 runner 判定，无覆盖维持 BLOCKED 且文案附探测周期/节点页配 env 指引（三分支单测）（7d05013）
+- **agent**：CAP-106 节点级环境变量界面化 + 心跳 toolchain 落库——agent_nodes 增 env_json 列（明文 KV 禁存密钥，key 白名单正则/≤64 条/单值 ≤4KB，空值=删 key，null=不动/{}=清空，AgentNodeEnv 编解码校验）；PUT 端点增 env 字段（记录带兼容构造）+ 视图/审计透出；FR-04 heartbeat 帧 toolchain 非空即覆盖落库（不 bump 协议版本）（3009a05）
+- **common**：CAP-106 工具链显式路径/env-overlay 探测 + 节点 env SPI——ToolchainDetector 支持 detect(explicitPaths)/detectOne(key, explicit, envOverlay)（显式路径→PATH 覆盖扫目录→JAVA_HOME→PATH 回落链，不依赖 ProcessBuilder 平台相关查找语义）；AgentNodeConnector 增 nodeEnv 默认方法（FR-01/05/07 底座）（573c683）
+
 ## [0.1.0-20261103+09e851a] - 2026-11-03
 
 - 提交：09e851a
