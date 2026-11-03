@@ -15,6 +15,7 @@ import type { ProjectEnvironment } from '../../projects/types'
 import MarkdownEditor from '../../../shared/components/MarkdownEditor'
 import { showError } from '../../../shared/utils/showError'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
+import { usePermissions } from '../../auth/usePermissions'
 
 /** 表单值形态：dueDate 在表单里是 dayjs，提交时转 'YYYY-MM-DD' */
 type FormValues = Omit<RequirementInput, 'dueDate'> & { dueDate?: dayjs.Dayjs | null }
@@ -33,6 +34,9 @@ export default function RequirementFormDrawer({ projectId, editing, open, onClos
   // CAP-73：验证环境选项（PROD 永远不可绑，服务端同样校验同项目归属）
   const [envOptions, setEnvOptions] = useState<{ value: number; label: string }[]>([])
   // CAP-105：AI 扩展弹窗（关键点 → one-shot 同步扩展 → 回填标题/类型/描述供修改）
+  // CAP-108 M1：按钮按 ACTION 门控（后端 requirement.draft.generate 同 key 强校验）
+  const { canAction } = usePermissions()
+  const canAiExpand = canAction('project.requirements.action.generate-draft')
   const [aiOpen, setAiOpen] = useState(false)
   const [aiPoints, setAiPoints] = useState('')
   const [aiExpanding, setAiExpanding] = useState(false)
@@ -123,7 +127,7 @@ export default function RequirementFormDrawer({ projectId, editing, open, onClos
       onClose={onClose}
       width={DRAWER_DEFAULT}
       destroyOnHidden
-      extra={!jiraManaged && (
+      extra={!jiraManaged && canAiExpand && (
         <Button size="small" icon={<RobotOutlined />} onClick={() => setAiOpen(true)}>
           AI 扩展
         </Button>
