@@ -85,7 +85,7 @@ class RequirementFlowServiceTest {
         final Map<String, RequirementEntity> store = new LinkedHashMap<>();
 
         FakeRequirementService() {
-            super(null, null, null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null, null, null);
         }
 
         RequirementEntity add(String id, String status) {
@@ -130,7 +130,7 @@ class RequirementFlowServiceTest {
         private int seq = 0;
 
         FakeWorkItemService() {
-            super(null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null);
         }
 
         WorkItemEntity add(String id, String type, String status) {

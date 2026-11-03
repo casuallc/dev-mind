@@ -91,9 +91,9 @@ class RequirementAcceptanceListenerTest {
                 proxy(org.springframework.beans.factory.ObjectProvider.class,
                         (p, m, args) -> "getIfAvailable".equals(m.getName()) ? null : null),
                 events,
-                proxy(EnvironmentRepository.class, untouchable));
+                proxy(EnvironmentRepository.class, untouchable), null);
         WorkItemService workItemService = new WorkItemService(requirementService, workItemRepo,
-                null, null, null, events, new FakeIdentityService());
+                null, null, null, events, new FakeIdentityService(), null);
         listener = new RequirementAcceptanceListener(requirementService, workItemService, events);
     }
 

@@ -1,6 +1,8 @@
 package com.devmind.project.service;
 
 import com.devmind.common.agent.OneShotAgentRunner;
+import com.devmind.common.authz.AuthorizationService;
+import com.devmind.common.authz.ResourceTarget;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.project.dto.AiExpandRequest;
@@ -41,17 +43,22 @@ public class RequirementAiExpandService {
     private final ProjectRepository projectRepo;
     private final ObjectProvider<OneShotAgentRunner> oneShot;
     private final int timeoutSeconds;
+    /** CAP-108 M1：核心授权（expand 硬校验，GENERATE 消耗模型预算） */
+    private final AuthorizationService authz;
     private final ObjectMapper mapper = JsonMapper.builder().build();
 
     public RequirementAiExpandService(ProjectRepository projectRepo,
                                       ObjectProvider<OneShotAgentRunner> oneShot,
-                                      @Value("${devmind.project.ai-expand.timeout-seconds:120}") int timeoutSeconds) {
+                                      @Value("${devmind.project.ai-expand.timeout-seconds:120}") int timeoutSeconds,
+                                      AuthorizationService authz) {
         this.projectRepo = projectRepo;
         this.oneShot = oneShot;
         this.timeoutSeconds = timeoutSeconds;
+        this.authz = authz;
     }
 
     public AiExpandResponse expand(String projectId, AiExpandRequest req) {
+        authz.require("requirement.draft.generate", ResourceTarget.project(projectId));
         ProjectEntity project = projectRepo.findById(projectId)
                 .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "项目不存在: " + projectId));
         OneShotAgentRunner runner = oneShot.getIfAvailable();

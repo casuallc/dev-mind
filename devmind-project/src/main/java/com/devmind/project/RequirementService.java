@@ -1,6 +1,9 @@
 package com.devmind.project;
 
 import com.devmind.auth.IdentityService;
+import com.devmind.common.authz.AuthorizationService;
+import com.devmind.common.authz.ExecutionContextHolder;
+import com.devmind.common.authz.ResourceTarget;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
@@ -80,6 +83,8 @@ public class RequirementService {
     private final DomainEventPublisher eventPublisher;
     /** CAP-73：验证环境绑定校验（同库 repo 直读，避免 service 间依赖） */
     private final EnvironmentRepository environmentRepo;
+    /** CAP-108 M1：核心授权（create 硬校验；list/get 有上下文时软校验） */
+    private final AuthorizationService authz;
 
     public RequirementService(ProjectRepository projectRepo,
                               RequirementRepository requirementRepo,
@@ -90,7 +95,8 @@ public class RequirementService {
                               ObjectProvider<RequirementExternalRefLookup> externalRefLookup,
                               ObjectProvider<RequirementAgentTimeLookup> agentTimeLookup,
                               DomainEventPublisher eventPublisher,
-                              EnvironmentRepository environmentRepo) {
+                              EnvironmentRepository environmentRepo,
+                              AuthorizationService authz) {
         this.identityService = identityService;
         this.projectRepo = projectRepo;
         this.requirementRepo = requirementRepo;
@@ -101,6 +107,14 @@ public class RequirementService {
         this.agentTimeLookup = agentTimeLookup;
         this.eventPublisher = eventPublisher;
         this.environmentRepo = environmentRepo;
+        this.authz = authz;
+    }
+
+    /** CAP-108 M1 软读边界：有可信上下文 → require(requirement.read)；无上下文（内部异步/机器人）保持原样。 */
+    private void requireReadIfContext(String projectId) {
+        if (authz != null && ExecutionContextHolder.current().isPresent()) {
+            authz.require("requirement.read", ResourceTarget.project(projectId));
+        }
     }
 
     /**
@@ -112,6 +126,7 @@ public class RequirementService {
      */
     public PageView<RequirementView> list(String projectId, String status, String type, String source,
                                           String keyword, String sortBy, String sortDir, int page, int size) {
+        requireReadIfContext(projectId);
         requireProject(projectId);
         boolean openOnly = "OPEN".equalsIgnoreCase(status == null ? "" : status.trim());
         String st = (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status) || openOnly)
@@ -138,13 +153,16 @@ public class RequirementService {
     }
 
     public RequirementView get(String projectId, String requirementId) {
+        requireReadIfContext(projectId);
         RequirementEntity e = requireEntity(projectId, requirementId);
         return toView(e, refsFor(List.of(e.getId())).get(e.getId()),
                 agentSecondsFor(List.of(e.getId())).get(e.getId()));
     }
 
-    /** 创建需求（API 通道，source=LOCAL）：DRAFT 起步，seq 项目内自增（(project_id, seq) 唯一约束兜底）。 */
+    /** 创建需求（API 通道，source=LOCAL）：DRAFT 起步，seq 项目内自增（(project_id, seq) 唯一约束兜底）。
+     *  CAP-108 M1 硬边界：无认证上下文 → 401，内部自动链路调用方须以系统任务身份建立上下文。 */
     public synchronized RequirementView create(String projectId, RequirementRequest req) {
+        authz.require("requirement.create", ResourceTarget.project(projectId));
         requireProject(projectId);
         RequirementEntity e = newRequirement(projectId);
         e.setTitle(req.title().trim());

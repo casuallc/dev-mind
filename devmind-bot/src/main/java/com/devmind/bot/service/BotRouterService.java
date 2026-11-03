@@ -5,6 +5,7 @@ import com.devmind.attachment.dto.AttachmentView;
 import com.devmind.attachment.model.AttachmentEntity;
 import com.devmind.attachment.service.AttachmentService;
 import com.devmind.bot.config.BotProperties;
+import com.devmind.common.authz.ExecutionContextHolder;
 import com.devmind.bot.model.BotBindingEntity;
 import com.devmind.bot.model.BotInteractionEntity;
 import com.devmind.bot.repo.BotBindingRepository;
@@ -518,9 +519,12 @@ public class BotRouterService implements BotMessageHandler {
                 + "\n发送者：" + (msg.senderId() == null ? "-" : msg.senderId())
                 + "\n登记人：" + currentActor()
                 + "\n时间：" + TIME_FMT.format(Instant.now());
-        RequirementView created = requirementService.create(projectId, new RequirementRequest(
-                title, description, null, null, input.type(), "Medium", null, null,
-                List.of("bot-feedback"), null, null, null));
+        // CAP-108 M1：机器人线程无用户上下文（default-actor "local" 非真实用户），
+        // 以系统任务身份建需求（requirement.create 硬边界；M2 换绑定用户的委托身份）
+        RequirementView created = ExecutionContextHolder.withSystemIfAbsent("bot-issue",
+                () -> requirementService.create(projectId, new RequirementRequest(
+                        title, description, null, null, input.type(), "Medium", null, null,
+                        List.of("bot-feedback"), null, null, null)));
         ProjectView project = projectService.get(projectId);
         String code = created.code() != null ? created.code() : "REQ-" + created.seq();
         return "已登记 " + issueTypeLabel(created.type()) + " " + code + "：" + created.title()

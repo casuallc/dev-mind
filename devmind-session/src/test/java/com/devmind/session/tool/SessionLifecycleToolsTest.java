@@ -233,7 +233,7 @@ class SessionLifecycleToolsTest {
         final Map<String, RequirementEntity> store = new LinkedHashMap<>();
 
         FakeRequirementService() {
-            super(null, null, null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null, null, null);
         }
 
         RequirementEntity add(String id, String projectId, long seq, String title, String status) {

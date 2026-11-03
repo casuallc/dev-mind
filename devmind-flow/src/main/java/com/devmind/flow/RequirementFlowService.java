@@ -3,6 +3,7 @@ package com.devmind.flow;
 import com.devmind.auth.IdentityService;
 import com.devmind.artifact.ArtifactService;
 import com.devmind.common.agent.runtime.SessionState;
+import com.devmind.common.authz.ExecutionContextHolder;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
@@ -361,8 +362,14 @@ public class RequirementFlowService {
         }
     }
 
-    /** 固化拆分清单：批量建 Work Item（触发既有 rollup）+ 按 dependsOn 下标建 depends_on 边，返回创建数。 */
+    /** 固化拆分清单：批量建 Work Item（触发既有 rollup）+ 按 dependsOn 下标建 depends_on 边，返回创建数。
+     *  CAP-108 M1：flow 线程无用户上下文时以系统任务身份执行（work_item.create 硬边界，M2 换操作者委托身份）。 */
     private int applySplitPlan(RequirementEntity req, List<SplitDraftItem> items) {
+        return ExecutionContextHolder.withSystemIfAbsent("requirement-flow-split",
+                () -> applySplitPlan0(req, items));
+    }
+
+    private int applySplitPlan0(RequirementEntity req, List<SplitDraftItem> items) {
         String projectId = req.getProjectId();
         String requirementId = req.getId();
         String designId = designService.list(projectId, requirementId).stream()

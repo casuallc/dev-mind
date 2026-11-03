@@ -124,7 +124,7 @@ class VerifyContextProviderTest {
 
     private class FakeRequirementService extends RequirementService {
         FakeRequirementService() {
-            super(null, null, null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null, null, null);
         }
 
         @Override
@@ -139,7 +139,7 @@ class VerifyContextProviderTest {
     private class FakeProjectService extends ProjectService {
         FakeProjectService() {
             super(null, null, null, null, null, null, null, null, null, null,
-                    null, null, null, null, null);
+                    null, null, null, null, null, null, null, null);
         }
 
         @Override

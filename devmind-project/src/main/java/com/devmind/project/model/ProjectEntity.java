@@ -7,6 +7,7 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -21,6 +22,10 @@ public class ProjectEntity {
     /** CAP-41：项目种类——NORMAL（缺省，代码项目）/ WORKLOG（工作日志空间：runner 持久工作区，无仓库语义） */
     public static final String KIND_NORMAL = "NORMAL";
     public static final String KIND_WORKLOG = "WORKLOG";
+
+    /** CAP-62/CAP-108：可见性——PUBLIC（全员可读，成员+ADMIN 可写）/ PRIVATE（仅成员+ADMIN） */
+    public static final String VISIBILITY_PUBLIC = "PUBLIC";
+    public static final String VISIBILITY_PRIVATE = "PRIVATE";
 
     @Id
     @Column(length = 32)
@@ -105,6 +110,11 @@ public class ProjectEntity {
     @Column(length = 16)
     private String kind;
 
+    /** CAP-62/CAP-108：可见性（PUBLIC/PRIVATE）；存量行 null 由 getter 兜底 PUBLIC；WORKLOG 恒 PRIVATE */
+    @Column(length = 16)
+    @ColumnDefault("'PUBLIC'")
+    private String visibility;
+
     @Column(name = "created_by", length = 64)
     private String createdBy;
 
@@ -163,6 +173,9 @@ public class ProjectEntity {
     /** 旧行可能为 null（ddl-auto 历史数据），统一兜底 NORMAL */
     public String getKind() { return kind == null ? KIND_NORMAL : kind; }
     public void setKind(String kind) { this.kind = kind; }
+    /** CAP-62：旧行可能为 null，统一兜底 PUBLIC（与 @ColumnDefault 新行口径一致） */
+    public String getVisibility() { return visibility == null ? VISIBILITY_PUBLIC : visibility; }
+    public void setVisibility(String visibility) { this.visibility = visibility; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

@@ -164,7 +164,8 @@ class ProjectServiceCloneTest {
         gitRepoService = new GitRepoService(gitRepos.jpa(), repos.jpa(), props, identity, events);
         service = new ProjectService(identity, props, new WorktreeProperties(),
                 projects.jpa(), repos.jpa(), null, null, null,
-                null, null, null, null, null, null, gitRepoService);
+                null, null, null, null, null, null, gitRepoService,
+                null, null, null);
     }
 
     private ProjectRequest cloneRequest(String remoteUrl, Long integrationId) {

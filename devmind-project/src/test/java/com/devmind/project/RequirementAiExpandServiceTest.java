@@ -1,6 +1,9 @@
 package com.devmind.project;
 
 import com.devmind.common.agent.OneShotAgentRunner;
+import com.devmind.common.authz.AuthorizationDecision;
+import com.devmind.common.authz.AuthorizationService;
+import com.devmind.common.authz.ResourceTarget;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.project.dto.AiExpandRequest;
@@ -57,7 +60,21 @@ class RequirementAiExpandServiceTest {
     }
 
     private RequirementAiExpandService service(OneShotAgentRunner runner) {
-        return new RequirementAiExpandService(repoReturning(project()), providerOf(runner), 120);
+        return new RequirementAiExpandService(repoReturning(project()), providerOf(runner), 120, allowAll());
+    }
+
+    /** CAP-108 授权桩：本类钉 prompt/解析契约，授权判定放行 */
+    private static AuthorizationService allowAll() {
+        return new AuthorizationService() {
+            @Override
+            public void require(String operationId, ResourceTarget target) {
+            }
+
+            @Override
+            public AuthorizationDecision check(String operationId, ResourceTarget target) {
+                return AuthorizationDecision.allow();
+            }
+        };
     }
 
     @Test
@@ -158,7 +175,7 @@ class RequirementAiExpandServiceTest {
     @Test
     void unavailableRunnerIsConflict() {
         RequirementAiExpandService svc = new RequirementAiExpandService(
-                repoReturning(project()), providerOf(null), 120);
+                repoReturning(project()), providerOf(null), 120, allowAll());
         DevMindException e = assertThrows(DevMindException.class,
                 () -> svc.expand(PROJECT_ID, new AiExpandRequest("x", null, null)));
         assertEquals(ErrorCode.CONFLICT, e.getErrorCode());
@@ -167,7 +184,7 @@ class RequirementAiExpandServiceTest {
     @Test
     void missingProjectIsNotFound() {
         RequirementAiExpandService svc = new RequirementAiExpandService(
-                repoReturning(null), providerOf((p, t) -> null), 120);
+                repoReturning(null), providerOf((p, t) -> null), 120, allowAll());
         DevMindException e = assertThrows(DevMindException.class,
                 () -> svc.expand("ghost", new AiExpandRequest("x", null, null)));
         assertEquals(ErrorCode.NOT_FOUND, e.getErrorCode());

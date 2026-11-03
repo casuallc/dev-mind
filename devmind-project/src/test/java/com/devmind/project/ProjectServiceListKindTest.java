@@ -49,7 +49,8 @@ class ProjectServiceListKindTest {
         });
         service = new ProjectService(null, new ProjectProperties(), new WorktreeProperties(),
                 repo, null, null, null, null,
-                null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null,
+                null, null, null);
     }
 
     private static ProjectEntity entity(String id, String kind, Instant createdAt) {

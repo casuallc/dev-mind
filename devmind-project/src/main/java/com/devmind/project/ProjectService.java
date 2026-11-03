@@ -1,8 +1,12 @@
 package com.devmind.project;
 
 import com.devmind.auth.IdentityService;
+import com.devmind.common.authz.AuthorizationService;
+import com.devmind.common.authz.ExecutionContextHolder;
+import com.devmind.common.authz.ResourceTarget;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
+import com.devmind.project.authz.ProjectQueryScope;
 import com.devmind.project.config.ProjectProperties;
 import com.devmind.project.config.WorktreeProperties;
 import com.devmind.project.dto.BuildStepRequest;
@@ -22,12 +26,14 @@ import com.devmind.project.model.GitRepositoryEntity;
 import com.devmind.project.model.ProjectEntity;
 import com.devmind.project.model.Project;
 import com.devmind.project.model.ProjectLockEntity;
+import com.devmind.project.model.ProjectMemberEntity;
 import com.devmind.project.model.ProjectRepoEntity;
 import com.devmind.project.model.ReleaseConfigEntity;
 import com.devmind.project.repo.BuildStepRepository;
 import com.devmind.project.repo.DesignRepository;
 import com.devmind.project.repo.EnvironmentRepository;
 import com.devmind.project.repo.ProjectLockRepository;
+import com.devmind.project.repo.ProjectMemberRepository;
 import com.devmind.project.repo.ProjectRepoRepository;
 import com.devmind.project.repo.ProjectRepository;
 import com.devmind.project.repo.RelationRepository;
@@ -50,6 +56,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
@@ -83,6 +90,12 @@ public class ProjectService {
     private final RepoScanner repoScanner;
     /** CAP-29：全局仓库登记（唯一数据源）；项目仓库只关联不复制 */
     private final GitRepoService gitRepoService;
+    /** CAP-62/CAP-108：项目成员（可见性判定） */
+    private final ProjectMemberRepository memberRepo;
+    /** CAP-108 M1：核心授权（有可信上下文时在 Service 边界硬校验） */
+    private final AuthorizationService authz;
+    /** CAP-108 M1：列表查询范围（按可见性过滤） */
+    private final ProjectQueryScope queryScope;
 
     public ProjectService(IdentityService identityService,
                             ProjectProperties props,
@@ -98,7 +111,10 @@ public class ProjectService {
                           RelationRepository relationRepo,
                           EnvironmentRepository environmentRepo,
                           RepoScanner repoScanner,
-                          GitRepoService gitRepoService) {
+                          GitRepoService gitRepoService,
+                          ProjectMemberRepository memberRepo,
+                          AuthorizationService authz,
+                          ProjectQueryScope queryScope) {
         this.identityService = identityService;
         this.props = props;
         this.worktreeProps = worktreeProps;
@@ -114,6 +130,9 @@ public class ProjectService {
         this.environmentRepo = environmentRepo;
         this.repoScanner = repoScanner;
         this.gitRepoService = gitRepoService;
+        this.memberRepo = memberRepo;
+        this.authz = authz;
+        this.queryScope = queryScope;
     }
 
     /** 启动种子：projects 表为空且配置了 default-path 时，把 yml 预置仓库注册为 id=default 的项目（MVP 平滑迁移）。 */
@@ -139,6 +158,52 @@ public class ProjectService {
             }
         }
         migrateProjectRepos();
+        migrateVisibilityAndMembers();
+    }
+
+    /**
+     * CAP-62 FR-06 存量迁移：WORKLOG 项目置 PRIVATE + 归属用户为唯一 OWNER 成员；
+     * 其余项目可见性兜底 PUBLIC（getter 兜底，无需回写）、ownerId 空补 createdBy（再空落 local）、
+     * 创建者补 OWNER 成员行（created_by 为空即 owner=local 的项目成员行留空，不登记 local）。
+     */
+    private void migrateVisibilityAndMembers() {
+        for (ProjectEntity p : projectRepo.findAll()) {
+            boolean dirty = false;
+            boolean worklog = ProjectEntity.KIND_WORKLOG.equals(p.getKind());
+            if (worklog && !ProjectEntity.VISIBILITY_PRIVATE.equals(p.getVisibility())) {
+                p.setVisibility(ProjectEntity.VISIBILITY_PRIVATE);
+                dirty = true;
+            }
+            if (p.getOwnerId() == null || p.getOwnerId().isBlank()) {
+                p.setOwnerId(p.getCreatedBy() != null && !p.getCreatedBy().isBlank()
+                        ? p.getCreatedBy() : "local");
+                dirty = true;
+            }
+            String ownerCandidate = worklog ? p.getOwnerId() : p.getCreatedBy();
+            ensureMember(p.getId(), ownerCandidate, ProjectMemberEntity.ROLE_OWNER, "system-migration");
+            if (dirty) {
+                p.setUpdatedAt(Instant.now());
+                projectRepo.save(p);
+                log.info("CAP-62 项目可见性迁移: id={} visibility={} owner={}", p.getId(), p.getVisibility(), p.getOwnerId());
+            }
+        }
+    }
+
+    /** 幂等补成员行；"local" 等非真实用户主体不登记（CAP-62 FR-06：无创建者项目成员行留空）。 */
+    private void ensureMember(String projectId, String username, String role, String createdBy) {
+        if (memberRepo == null || username == null || username.isBlank() || "local".equals(username)) {
+            return;
+        }
+        if (memberRepo.existsByProjectIdAndUserId(projectId, username)) {
+            return;
+        }
+        ProjectMemberEntity m = new ProjectMemberEntity();
+        m.setProjectId(projectId);
+        m.setUserId(username);
+        m.setProjectRole(role);
+        m.setCreatedAt(Instant.now());
+        m.setCreatedBy(createdBy);
+        memberRepo.save(m);
     }
 
     /**
@@ -175,12 +240,25 @@ public class ProjectService {
     /**
      * 项目列表。kind 过滤：null/空白 = 排除 WORKLOG 空间（工作日志是会话调度载体，不进项目列表/切换语义）；
      * "ALL" = 不过滤（后台管理、currentId 校验用）；其余值按种类精确匹配。
+     * CAP-108 M1：存在可信执行上下文时按可见性过滤（软边界——无上下文的内部异步调用保持原样，M2 迁移）。
      */
     public List<ProjectView> list(String status, String kind) {
         List<ProjectEntity> entities = (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status))
                 ? projectRepo.findAllByOrderByCreatedAtDesc()
                 : projectRepo.findByStatusOrderByCreatedAtDesc(status.toUpperCase());
-        return entities.stream().filter(e -> kindMatches(e, kind)).map(this::toView).toList();
+        Set<String> readable = readableScopeForCurrent();
+        return entities.stream().filter(e -> kindMatches(e, kind))
+                .filter(e -> readable == null || readable.contains(e.getId()))
+                .map(this::toView).toList();
+    }
+
+    /** CAP-108 M1 软读边界：有上下文 → require + 可见范围；无上下文（内部异步/机器人）→ null 不过滤。 */
+    private Set<String> readableScopeForCurrent() {
+        if (ExecutionContextHolder.current().isEmpty() || authz == null) {
+            return null;
+        }
+        authz.require("project.list", ResourceTarget.none());
+        return queryScope.readableProjectIdsForCurrent();
     }
 
     /**
@@ -210,6 +288,10 @@ public class ProjectService {
     }
 
     public ProjectView get(String id) {
+        // CAP-108 M1 软读边界：PRIVATE 非成员详情 404；无上下文内部调用保持原样
+        if (ExecutionContextHolder.current().isPresent() && authz != null) {
+            authz.require("project.read", ResourceTarget.project(id));
+        }
         return toView(requireEntity(id));
     }
 
@@ -259,6 +341,8 @@ public class ProjectService {
         e.setCreatedAt(now);
         e.setUpdatedAt(now);
         projectRepo.save(e);
+        // CAP-62 FR-01：创建者自动落 OWNER 成员行（"local" 等非真实主体跳过）
+        ensureMember(e.getId(), e.getCreatedBy(), ProjectMemberEntity.ROLE_OWNER, e.getCreatedBy());
         // P0-4：注册主库记录（projects.path 为主库镜像）；CAP-29：回填 gitRepoId 关联全局行
         String primaryName = clone ? repoNameFromUrl(req.remoteUrl()) : repoDirName(e.getPath());
         ProjectRepoEntity primary = newRepoRow(e.getId(), primaryName, e.getPath(),
@@ -384,6 +468,9 @@ public class ProjectService {
         stepRepo.deleteByProjectId(id);
         releaseRepo.deleteByProjectId(id);
         lockRepo.deleteById(id);
+        if (memberRepo != null) {
+            memberRepo.deleteByProjectId(id);
+        }
         projectRepo.delete(e);
         // CAP-23：克隆项目不删磁盘目录，与 deleteRepo"不删除磁盘上的仓库"语义一致
         if (ProjectRepoEntity.SOURCE_CLONE.equals(e.getSourceType())) {
@@ -414,6 +501,8 @@ public class ProjectService {
         e.setName("工作日志");
         e.setPath("worklog://" + ownerId);
         e.setKind(ProjectEntity.KIND_WORKLOG);
+        // CAP-62：WORKLOG 恒 PRIVATE 且唯一成员 = 归属用户
+        e.setVisibility(ProjectEntity.VISIBILITY_PRIVATE);
         e.setStatus(STATUS_ACTIVE);
         e.setAgentNodeId(agentNodeId);
         e.setOwnerId(ownerId);
@@ -422,6 +511,7 @@ public class ProjectService {
         e.setCreatedAt(now);
         e.setUpdatedAt(now);
         projectRepo.save(e);
+        ensureMember(e.getId(), ownerId, ProjectMemberEntity.ROLE_OWNER, ownerId);
         log.info("CAP-41 WORKLOG 项目已创建: id={} owner={} affinityNode={}", e.getId(), ownerId, agentNodeId);
         return toView(e);
     }

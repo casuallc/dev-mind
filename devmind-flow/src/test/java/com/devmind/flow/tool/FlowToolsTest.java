@@ -184,7 +184,7 @@ class FlowToolsTest {
         final Map<String, RequirementEntity> store = new LinkedHashMap<>();
 
         FakeRequirementService() {
-            super(null, null, null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null, null, null);
         }
 
         RequirementEntity add(String id, String projectId, long seq, String title, String status) {
@@ -222,7 +222,7 @@ class FlowToolsTest {
         final Map<String, WorkItemEntity> store = new LinkedHashMap<>();
 
         FakeWorkItemService() {
-            super(null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null);
         }
 
         WorkItemEntity add(String id, String requirementId, String status) {

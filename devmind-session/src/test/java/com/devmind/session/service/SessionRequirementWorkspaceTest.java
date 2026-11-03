@@ -108,7 +108,7 @@ class SessionRequirementWorkspaceTest {
     /** 只覆盖工作区路径用得到的依赖，其余传 null（构造全链路成本过高）。 */
     static class FakeProjectService extends ProjectService {
         FakeProjectService() {
-            super(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         @Override
@@ -123,7 +123,7 @@ class SessionRequirementWorkspaceTest {
         final List<String> finalized = new ArrayList<>();
 
         FakeRequirementService() {
-            super(null, null, null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null, null, null);
         }
 
         void add(RequirementEntity e) {

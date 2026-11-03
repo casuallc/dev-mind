@@ -5,6 +5,7 @@ import com.devmind.common.agent.AgentLaunchCommand;
 import com.devmind.common.agent.AgentNodeConnector;
 import com.devmind.common.agent.AgentCollectResult;
 import com.devmind.common.agent.AgentProtocol;
+import com.devmind.common.authz.ExecutionContextHolder;
 import com.devmind.common.agent.FinalizeResult;
 import com.devmind.common.agent.InputFile;
 import com.devmind.common.agent.InputImage;
@@ -471,8 +472,10 @@ public class SessionManagerService {
                 .findFirst().orElse("");
         String title = firstLine.isEmpty() ? "执行 - " + requirement.getTitle()
                 : (firstLine.length() > 60 ? firstLine.substring(0, 60) : firstLine);
-        WorkItemView view = workItemService.create(requirement.getProjectId(), requirement.getId(),
-                new WorkItemRequest(WorkItemEntity.TYPE_DEVELOPMENT, title, spec, null, null, null));
+        // CAP-108 M1：非 HTTP 线程起会话时以系统任务身份建 WI（work_item.create 硬边界）
+        WorkItemView view = ExecutionContextHolder.withSystemIfAbsent("session-autocreate-wi",
+                () -> workItemService.create(requirement.getProjectId(), requirement.getId(),
+                        new WorkItemRequest(WorkItemEntity.TYPE_DEVELOPMENT, title, spec, null, null, null)));
         log.info("会话关联需求自动建工作单元: req={} wi={} title={}", requirement.getId(), view.id(), title);
         return workItemService.requireById(view.id());
     }

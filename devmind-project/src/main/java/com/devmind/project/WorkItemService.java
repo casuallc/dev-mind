@@ -1,6 +1,8 @@
 package com.devmind.project;
 
 import com.devmind.auth.IdentityService;
+import com.devmind.common.authz.AuthorizationService;
+import com.devmind.common.authz.ResourceTarget;
 import com.devmind.common.event.DomainEventPublisher;
 import com.devmind.common.event.SimpleDomainEvent;
 import com.devmind.common.exception.DevMindException;
@@ -60,6 +62,8 @@ public class WorkItemService {
     private final DesignRepository designRepo;
     private final RelationRepository relationRepo;
     private final DomainEventPublisher eventPublisher;
+    /** CAP-108 M1：核心授权（create 硬校验） */
+    private final AuthorizationService authz;
 
     public WorkItemService(@Lazy RequirementService requirementService,
                            WorkItemRepository workItemRepo,
@@ -67,7 +71,8 @@ public class WorkItemService {
                            DesignRepository designRepo,
                            RelationRepository relationRepo,
                            DomainEventPublisher eventPublisher,
-                           IdentityService identityService) {
+                           IdentityService identityService,
+                           AuthorizationService authz) {
         this.identityService = identityService;
         this.requirementService = requirementService;
         this.workItemRepo = workItemRepo;
@@ -75,6 +80,7 @@ public class WorkItemService {
         this.designRepo = designRepo;
         this.relationRepo = relationRepo;
         this.eventPublisher = eventPublisher;
+        this.authz = authz;
     }
 
     public List<WorkItemView> list(String projectId, String requirementId) {
@@ -86,9 +92,13 @@ public class WorkItemService {
         return toView(requireUnder(projectId, requirementId, workItemId));
     }
 
-    /** 创建工作单元：TODO 起步，seq 项目内自增；创建后触发需求 rollup。 */
+    /** 创建工作单元：TODO 起步，seq 项目内自增；创建后触发需求 rollup。
+     *  CAP-108 M1 硬边界：授权目标的项目归属取服务端反查的真实值（requireEntity 校验路径关系后），
+     *  不采用客户端路径原值；无认证上下文 → 401。 */
     public synchronized WorkItemView create(String projectId, String requirementId, WorkItemRequest req) {
         RequirementEntity requirement = requirementService.requireEntity(projectId, requirementId);
+        authz.require("work_item.create",
+                ResourceTarget.inProject("WORK_ITEM", null, requirement.getProjectId()));
         WorkItemEntity e = new WorkItemEntity();
         e.setId(MainlineSupport.shortId());
         e.setProjectId(projectId);

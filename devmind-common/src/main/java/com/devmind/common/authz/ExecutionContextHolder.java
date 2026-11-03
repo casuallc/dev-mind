@@ -1,6 +1,7 @@
 package com.devmind.common.authz;
 
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * CAP-108 执行上下文持有器：请求/工具/异步线程级 ThreadLocal。
@@ -27,6 +28,26 @@ public final class ExecutionContextHolder {
 
     public static void clear() {
         CURRENT.remove();
+    }
+
+    /**
+     * 无上下文时以登记的系统任务身份执行（内部自动链路：流程落地/会话自动建 WI/机器人建需求）；
+     * 已有上下文（HTTP/工具线程）保持用户身份不覆盖。
+     */
+    public static <T> T withSystemIfAbsent(String taskName, Supplier<T> body) {
+        if (current().isPresent()) {
+            return body.get();
+        }
+        try (Scope ignored = set(ExecutionContext.system(taskName))) {
+            return body.get();
+        }
+    }
+
+    public static void runWithSystemIfAbsent(String taskName, Runnable body) {
+        withSystemIfAbsent(taskName, () -> {
+            body.run();
+            return null;
+        });
     }
 
     public static final class Scope implements AutoCloseable {

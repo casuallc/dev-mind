@@ -117,7 +117,7 @@ class PipelineOrchestratorSwitchTest {
         private final Map<String, WorkItemEntity> store;
 
         FakeWorkItemService(Map<String, WorkItemEntity> store) {
-            super(null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null);
             this.store = store;
         }
 

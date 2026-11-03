@@ -174,7 +174,7 @@ class GitRepoSyncServiceFetchTest {
         mirroredProjectIds = new ArrayList<>();
         gitOps = new StubGitRemoteOps();
         ProjectService projectService = new ProjectService(null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null) {
+                null, null, null, null, null, null, null, null, null, null, null) {
             @Override
             public void syncPrimaryMirror(String projectId) {
                 mirroredProjectIds.add(projectId);
