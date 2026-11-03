@@ -168,12 +168,38 @@ public class AgentRunnerMain {
         Thread.ofVirtual().name("workspace-usage-init").start(() -> workspaceBytes.set(gc.usageBytes()));
 
         // CAP-34 FR-07：工具链探测（各 5s 超时，异步避免拖慢首次接入；未完成前 hello 不带 toolchain）
+        // CAP-106 FR-05：显式路径（toolchain.<key>）优先于 PATH 探测
         var toolchain = new java.util.concurrent.atomic.AtomicReference<Map<String, String>>(Map.of());
+        var toolchainDirty = new java.util.concurrent.atomic.AtomicBoolean(false);
         Thread.ofVirtual().name("toolchain-detect").start(() -> {
-            Map<String, String> detected = new com.devmind.common.agent.exec.ToolchainDetector().detect();
+            Map<String, String> detected =
+                    new com.devmind.common.agent.exec.ToolchainDetector().detect(config.toolchainPaths());
             toolchain.set(detected);
             log.info("工具链探测完成: {}", detected);
         });
+
+        // CAP-106 FR-03：周期重探测——机器后装运行时分钟级自愈，不再必须重启 runner；
+        // 结果有变化才置脏（下一次 heartbeat 携带 toolchain），0=关闭
+        ScheduledExecutorService toolchainTimer = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "toolchain-refresh");
+            t.setDaemon(true);
+            return t;
+        });
+        if (config.toolchainRefreshMinutes() > 0) {
+            toolchainTimer.scheduleWithFixedDelay(() -> {
+                try {
+                    Map<String, String> detected =
+                            new com.devmind.common.agent.exec.ToolchainDetector().detect(config.toolchainPaths());
+                    if (!detected.equals(toolchain.get())) {
+                        toolchain.set(detected);
+                        toolchainDirty.set(true);
+                        log.info("工具链变化（下一次心跳上报）: {}", detected);
+                    }
+                } catch (Exception e) {
+                    log.debug("工具链周期重探测异常（下轮重试）: {}", e.getMessage());
+                }
+            }, config.toolchainRefreshMinutes(), config.toolchainRefreshMinutes(), TimeUnit.MINUTES);
+        }
 
         ServerConnection conn = new ServerConnection(config, mapper,
                 frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, workspace,
@@ -192,7 +218,8 @@ public class AgentRunnerMain {
             return t;
         });
         heartbeat.scheduleWithFixedDelay(
-                () -> conn.send(heartbeatFrame(workspaceBytes.get())), HEARTBEAT_MS, HEARTBEAT_MS, TimeUnit.MILLISECONDS);
+                () -> conn.send(heartbeatFrame(workspaceBytes.get(), toolchain, toolchainDirty)),
+                HEARTBEAT_MS, HEARTBEAT_MS, TimeUnit.MILLISECONDS);
 
         // FR-05 GC：首跑延迟 gcInitialDelayMinutes（默认 10），其后按 gcIntervalMinutes 巡检；跑完刷新磁盘占用缓存
         ScheduledExecutorService gcTimer = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -223,6 +250,7 @@ public class AgentRunnerMain {
                 gitProxyFinal.stop();
             }
             heartbeat.shutdownNow();
+            toolchainTimer.shutdownNow();
             gcTimer.shutdownNow();
             watcher.shutdown();
             sessions.killAll();
@@ -268,12 +296,19 @@ public class AgentRunnerMain {
         return hello;
     }
 
-    /** FR-05：心跳带 workspaceBytes 让节点页数据保鲜（重连才发 hello 更新太慢）。 */
-    private static Map<String, Object> heartbeatFrame(long workspaceBytes) {
+    /** FR-05：心跳带 workspaceBytes 让节点页数据保鲜（重连才发 hello 更新太慢）。
+     *  CAP-106 FR-03：周期重探测有变化（dirty）时随本次心跳携带 toolchain 并清脏——
+     *  无变化不带（心跳不膨胀）；携带后发送失败丢帧的兜底 = 断线重连的 hello 恒带最新快照。 */
+    private static Map<String, Object> heartbeatFrame(long workspaceBytes,
+                                                      java.util.concurrent.atomic.AtomicReference<Map<String, String>> toolchain,
+                                                      java.util.concurrent.atomic.AtomicBoolean toolchainDirty) {
         Map<String, Object> hb = new LinkedHashMap<>();
         hb.put("type", "heartbeat");
         if (workspaceBytes >= 0) {
             hb.put("workspaceBytes", workspaceBytes);
+        }
+        if (toolchainDirty.compareAndSet(true, false) && !toolchain.get().isEmpty()) {
+            hb.put("toolchain", toolchain.get());
         }
         return hb;
     }

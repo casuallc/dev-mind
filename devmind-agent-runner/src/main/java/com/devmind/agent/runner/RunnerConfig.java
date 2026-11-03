@@ -71,6 +71,10 @@ import java.util.Properties;
  * insecure=false             # CAP-21：https 自签证书部署时置 true——runner 对服务端的一切
  *                            # wss/https 调用（长连接/隧道/升级与上下文下载/文件上传）信任一切证书
  *                            # 并关主机名校验；一键安装脚本探测到证书校验失败会自动写入 true
+ * toolchain.&lt;key&gt;=/path/to/bin   # CAP-106 FR-05：显式工具链路径（key ∈ java/mvn/node/npm/docker/git），
+ *                            # 可指可执行文件或其所在 bin 目录；探测优先于 PATH（版本解析正则不变），
+ *                            # 失败回落 PATH；探测成功覆盖 PATH 结果
+ * toolchainRefreshMinutes=10 # CAP-106 FR-03：周期重探测间隔（分钟），有变化才随下次心跳上报；0=关闭
  * </pre>
  */
 public record RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -82,7 +86,26 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                            int worktreeGcDays, java.util.List<String> terminalAllowlist,
                            int terminalTimeoutSec, boolean terminalAllowRedirect,
                            int terminalShellIdleMin, boolean insecure,
-                           boolean gitProxyEnabled, int gitProxyPort) {
+                           boolean gitProxyEnabled, int gitProxyPort,
+                           Map<String, String> toolchainPaths, int toolchainRefreshMinutes) {
+
+    /** 兼容构造（CAP-106 前的 27 参签名）：无显式工具链路径、周期重探测 10 分钟。 */
+    public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
+                        Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
+                        String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes,
+                        int gcInitialDelayMinutes, java.util.List<String> labels,
+                        java.util.List<String> execAllowlist, String execShell, int buildGcHours,
+                        String claudeConfigDir, String worklogRoot, boolean partialMessages,
+                        int worktreeGcDays, java.util.List<String> terminalAllowlist,
+                        int terminalTimeoutSec, boolean terminalAllowRedirect,
+                        int terminalShellIdleMin, boolean insecure,
+                        boolean gitProxyEnabled, int gitProxyPort) {
+        this(serverUrl, token, claudePath, permissionMode, workDir, projectPaths, maxConcurrent,
+                executor, workspaceRoot, gcDays, gcIntervalMinutes, gcInitialDelayMinutes, labels,
+                execAllowlist, execShell, buildGcHours, claudeConfigDir, worklogRoot, partialMessages,
+                worktreeGcDays, terminalAllowlist, terminalTimeoutSec, terminalAllowRedirect,
+                terminalShellIdleMin, insecure, gitProxyEnabled, gitProxyPort, Map.of(), 10);
+    }
 
     /** 兼容构造（CAP-58 FR-06 前的 26 参签名）：git 代理默认开启、端口 18377。 */
     public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -204,9 +227,19 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
         String serverUrl = required(p, "serverUrl", file);
         String token = required(p, "token", file);
         Map<String, Path> projects = new LinkedHashMap<>();
+        Map<String, String> toolchainPaths = new LinkedHashMap<>();
         for (String name : p.stringPropertyNames()) {
             if (name.startsWith("project.")) {
                 projects.put(name.substring("project.".length()), Path.of(p.getProperty(name).strip()));
+            } else if (name.startsWith("toolchain.")) {
+                // CAP-106 FR-05：显式工具链路径；key 限既有探测目标集，未知 key fail-fast
+                String key = name.substring("toolchain.".length()).strip();
+                if (!com.devmind.common.agent.exec.ToolchainDetector.targetKeys().contains(key)) {
+                    throw new IllegalArgumentException("toolchain." + key + " 不是合法探测目标（可选 "
+                            + String.join("/", com.devmind.common.agent.exec.ToolchainDetector.targetKeys())
+                            + "）: " + file);
+                }
+                toolchainPaths.put(key, p.getProperty(name).strip());
             }
         }
         return new RunnerConfig(
@@ -237,7 +270,9 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                 Integer.parseInt(p.getProperty("terminalShellIdleMin", "30").strip()),
                 "true".equalsIgnoreCase(p.getProperty("insecure", "false").strip()),
                 !"false".equalsIgnoreCase(p.getProperty("gitProxyEnabled", "true").strip()),
-                Integer.parseInt(p.getProperty("gitProxyPort", "18377").strip()));
+                Integer.parseInt(p.getProperty("gitProxyPort", "18377").strip()),
+                toolchainPaths,
+                Integer.parseInt(p.getProperty("toolchainRefreshMinutes", "10").strip()));
     }
 
     /** CAP-41：worklog 持久工作区根目录——配置优先，空 = {user.home}/worklog。 */

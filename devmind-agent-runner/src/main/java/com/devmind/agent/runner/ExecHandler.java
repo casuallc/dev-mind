@@ -139,6 +139,25 @@ public class ExecHandler {
                     emit(execId, "stdout", "[runner] 程序包已解包: " + program.fileName()
                             + " (" + program.manifest().name() + " " + program.manifest().version() + ")"
                             + " → " + program.dir(), token);
+                    // CAP-106 FR-07：执行期探测——预检（CAP-104 M1.5）可能因 env 覆盖放行，
+                    // 这里按合并后 env 做最终判定，不满足则不跑入口（[toolchain] 前缀由服务端
+                    // 映射 BLOCKED 语义，而不是 INFRA 错误）
+                    String tcKey = program.manifest().requiredToolchainKey();
+                    if (tcKey != null) {
+                        String found = new com.devmind.common.agent.exec.ToolchainDetector()
+                                .detectOne(tcKey, config.toolchainPaths(), env);
+                        if (found == null) {
+                            throw new IllegalStateException("[toolchain] 执行期探测 " + tcKey
+                                    + " 失败：合并 env 后仍未找到该运行时（程序包 runtime="
+                                    + program.manifest().runtime() + "，env PATH=" + env.getOrDefault("PATH", "<未覆盖>")
+                                    + "）。请检查节点页环境变量或 agent.properties 的 toolchain." + tcKey);
+                        }
+                        if (!program.manifest().satisfiesRuntimeVersion(found)) {
+                            throw new IllegalStateException("[toolchain] 执行期探测 " + tcKey + " 版本 " + found
+                                    + " 不满足程序包 runtimeVersion=" + program.manifest().runtimeVersion());
+                        }
+                        emit(execId, "stdout", "[runner] 执行期探测通过: " + tcKey + " " + found, token);
+                    }
                 } else {
                     LabBundlePuller.Materialized bundle = LabBundlePuller.pull(config, kind, bundleId);
                     bundleDir = bundle.dir();

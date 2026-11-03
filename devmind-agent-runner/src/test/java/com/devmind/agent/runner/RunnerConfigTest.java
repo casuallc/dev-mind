@@ -40,6 +40,30 @@ class RunnerConfigTest {
         org.junit.jupiter.api.Assertions.assertEquals(19377, c.gitProxyPort());
     }
 
+    // ---- CAP-106 FR-03/FR-05 工具链显式路径与周期重探测 ----
+
+    @Test
+    void toolchainDefaults() throws Exception {
+        RunnerConfig c = load("");
+        assertTrue(c.toolchainPaths().isEmpty());
+        org.junit.jupiter.api.Assertions.assertEquals(10, c.toolchainRefreshMinutes());
+    }
+
+    @Test
+    void toolchainPathsParsedAndRefreshConfigurable() throws Exception {
+        RunnerConfig c = load("toolchain.java=/home/jdk-21/bin/java\ntoolchain.git=/usr/bin\ntoolchainRefreshMinutes=0\n");
+        org.junit.jupiter.api.Assertions.assertEquals("/home/jdk-21/bin/java", c.toolchainPaths().get("java"));
+        org.junit.jupiter.api.Assertions.assertEquals("/usr/bin", c.toolchainPaths().get("git"));
+        org.junit.jupiter.api.Assertions.assertEquals(0, c.toolchainRefreshMinutes(), "0 = 关闭周期重探测");
+    }
+
+    @Test
+    void toolchainUnknownKeyFailsFast() throws Exception {
+        var e = org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> load("toolchain.python=/usr/bin/python3\n"));
+        assertTrue(e.getMessage().contains("toolchain.python"), e.getMessage());
+    }
+
     private RunnerConfig load(String extra) throws Exception {
         Path f = dir.resolve("agent.properties");
         Files.writeString(f, "serverUrl=ws://127.0.0.1:8080/ws/agent\ntoken=dmag_t\n" + extra,
