@@ -79,7 +79,7 @@
 | [CAP-59](CAP-59-terminal-persistent-shell.md) | 远程终端增强 | 底座 | 已实现 | 每会话长驻 shell + Tab 补全 + Ctrl+C 取消（协议 v17） |
 | [CAP-60](CAP-60-terminal-frontend-polish.md) | 远程终端前端打磨 | 前端体验 | 已实现 | ANSI SGR 颜色渲染、等宽字体栈、字号调节持久化 |
 | [CAP-61](CAP-61-menu-management.md) | 菜单管理与角色菜单权限 | 管理 | 已实现 | 菜单目录注册表 + 角色×菜单可见性矩阵，/api/auth/menus 驱动渲染 |
-| [CAP-62](CAP-62-data-permission.md) | 数据权限：项目成员与个人归属 | 管理 | 已实现 | 项目可见性+project_members+ProjectAccessChecker 收口，个人数据 owner 强制 |
+| [CAP-62](CAP-62-data-permission.md) | 数据权限：项目成员与个人归属 | 管理 | 定稿未实施 | 项目可见性+project_members+ProjectAccessChecker 收口，个人数据 owner 强制 |
 | [CAP-63](CAP-63-multi-tenant.md) | 多租户隔离 | 平台层 | 定稿未实施 | 共享库共享表 + tenant_id 判别列，M1 租户登记/M2 业务表铺 tenant_code |
 | [CAP-64](CAP-64-bookmark-favorites.md) | 收藏夹 | 组装层 | 已实现 | 绑定到人的网址收藏：分组树/标签/可用性探测/关联账号速查/只读分享 |
 | [CAP-65](CAP-65-agent-node-file-browser.md) | Agent 节点文件浏览器 | 底座 | 已实现 | 节点根目录白名单下文件浏览/编辑/上传下载，大文件走 HTTP 中转 |
