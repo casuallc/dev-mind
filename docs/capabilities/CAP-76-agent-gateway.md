@@ -34,6 +34,8 @@
 
 > 后续演进（2026-10-27，定稿未实施）：[CAP-96](CAP-96-assistant-task-runtime.md) 将显式目标委托建为持久助手任务；[CAP-97](CAP-97-assistant-controlled-execution.md) 仅为该任务提供有限授权、可靠动作与验收。本文短对话“写必确认”、不可变确认参数、固定 submit_plan 失败即停等既有语义保持，不因新方案全局放开。新的任务状态和动态计划不塞入历史 copilot_actions；具体危险动作仍复用确认链。
 
+> Web 入口与授权演进（定稿未实施）：[CAP-107](CAP-107-unified-ai-assistant.md)复用本能力交付全局会话入口，内置工具继续调用应用 Service；[CAP-108 核心授权收敛](CAP-108-core-authorization.md)独立补齐 roleCode、操作与资源权限的 Service 最终检查，并规定外部助手的用户委托边界。不另建确认链，也不改变短对话写必确认的规则。
+
 ## 1. 目的
 
 CAP-75 的飞书机器人已经能问答、绑定项目、起会话、查构建状态，但能力边界是**确定性斜杠指令**：
