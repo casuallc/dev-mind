@@ -1,6 +1,6 @@
 # CAP-108 核心授权收敛
 
-> 能力 ID：CAP-108 ｜ 分类：底座/管理 ｜ 状态：定稿未实施 ｜ 日期：2026-11-03
+> 能力 ID：CAP-108 ｜ 分类：底座/管理 ｜ 状态：M1 已交付（2026-11-04），M2/M3 定稿未实施 ｜ 日期：2026-11-03
 > 依赖：CAP-01/102/103（身份、角色与 ACTION 授权）、CAP-62（资源权限模型）、CAP-20（开放接口）；首批消费方为 [CAP-107 统一 AI 助手](CAP-107-unified-ai-assistant.md)，确认链复用 CAP-76。CAP-62 尚未实施，其项目可见性与成员模型作为本能力 M1 的交付项落地（见第 5 节与 R1），不等待 CAP-62 独立排期。
 > 决策记录：
 > 1. **核心授权独立立项**：服务人工 `/api`、内置工具、Open API 与受委托异步操作，拥有独立需求、迁移里程碑和验收；CAP-107 消费本能力，不承担全平台授权底座建设。
@@ -271,6 +271,18 @@ CAP-107 不等待全站 M2/M3 完成，但它的每个开放工具必须先满�
 4. 迁移完成的操作仅维护 OperationSpec，HTTP/Tool 旧规则生成/委托到该目录；证明该域所有应用入口受保护后才删除重复条件。未迁移域保留旧行为和缺口标识，不对助手开放。
 5. 回滚关闭新助手/新操作映射并恢复上一版本入口，不通过关闭授权或缺策略自动放行来恢复可用性。授权表不另建副本，新增列/受理记录按向后兼容迁移保留。
 
+### M1 实施口径（2026-11-04 交付）
+
+FR-01～08 已落地，范围与定稿一致（引擎、首批六操作 + `project.list` 共七项、CAP-62 项目可见性/成员模型、确认绑定、审计决策码）。实施中与文档表述存在偏差的口径在此固化：
+
+- **读操作软边界、写/生成硬边界**：`requirement.read`、`project.list` 等读操作仅在 `ExecutionContextHolder` 存在上下文时 require 并按项目范围过滤查询（`ProjectAccessChecker.queryScope`：ADMIN 全量，普通用户 = PUBLIC 非 WORKLOG ∪ 成员项目，不可解析主体 = 空集）；`requirement.create`、`work_item.create`、`worklog.entry.create`、`requirement.draft.generate` 等写/生成操作硬 require，无上下文 401。这样既有内部调用方（无上下文的装配查询）不被误伤。
+- **bot 线程默认不携带 ExecutionContext**：M1 兼容既有 bot 链路，bot 适配层暂不建立主体上下文；AI 来源的强制确认约束由工具线程上下文（`ExecutionContext` 带 `source=BOT/COPILOT_WEB` + `actionId` 确认凭据）承载，随工具提交在 `CopilotToolRunner` 建立。
+- **内部自动建单走 system 上下文**：流程拆需求（`requirement-flow-split`）、会话自动建工作单元（`session-autocreate-wi`）、bot 建单（`bot-issue`）等无用户主体的内部路径以 `ExecutionContextHolder.withSystemIfAbsent` 包裹，经由 SYSTEM 主体放行，不回退 local。
+- **OWNER_ONLY 不向 ADMIN 扩展**：工作日志策略恒校验归属本人（`subject.system()` 放行、`ownerId` 缺失判 RESOURCE_HIDDEN），管理员调用也受同一归属边界约束。
+- **确认凭据要求 EXECUTING 在途状态**：`CoreAuthorizationService` 对 AI 来源（`aiSourced()`）的 WRITE/DANGEROUS 操作调用 `ConfirmationVerifier`；`CopilotConfirmationVerifier` 校验凭据存在、属主匹配、状态为 EXECUTING（CAP-76 `actions.claim()` CAS 单次消费链路）、未过期，拒绝 PENDING/SUCCEEDED 等已离链状态，防伪造与重放。
+- **前端预检不替代后端**：AI 扩展按钮按 `project.requirements.action.generate-draft` 门控渲染，后端同 key 强校验，隐藏不构成授权结论。
+- **回归**：单测覆盖引擎/主体解析/策略/确认绑定（`ProjectAccessTest`、`ProjectQueryScopeTest`、`OwnerOnlyPolicyTest`、`WorklogEntryCreateAuthzTest`、`CopilotConfirmationVerifierTest`、`CopilotToolRunnerContextTest` 等）；E2E 登记 `regression.core-authorization-boundaries`（ACTION 门控 403→授权→200、CAP-62 PUBLIC 非成员写 403/读 200、OWNER_ONLY 本人日志创建、VIEWER 底线全拒）。
+
 ## 9. 验收标准
 
 用同一主体、操作与资源构造共用用例矩阵，验证人工 HTTP、直接应用 Service、工具以及外部接入后的 Open API；比较业务权限结论，再分别验证 AI 确认和凭证 scope 附加约束。相同业务参数在各入口的创建结果/created_by 一致，但测试分别创建独立资源，禁止为比较重复产生同一副作用。
@@ -293,7 +305,7 @@ CAP-107 不等待全站 M2/M3 完成，但它的每个开放工具必须先满�
 - 拟增单测：`CoreAuthorizationServiceTest`、`SubjectResolverTest`、`OperationRegistryTest`、`ResourcePolicyTest`、`ApplicationAuthorizationBoundaryTest`、`CopilotConfirmationBindingTest`、`OpenApiDelegatedAuthorizationTest`。
 - 模块集成测试直接调用真实 Spring 应用用例，证明绕开 Controller/Tool 仍受保护；同时覆盖内部调用、跨模块和异步恢复，不能只模拟授权接口返回 false。
 - 正式 E2E 按 [统一规范](../core/e2e-testing-standard.md)与 [tests/README](../../tests/README.md)登记 `tests/e2e/catalog.json`，拟增 `regression.authorization-parity` 和 `regression.assistant-confirmation`。写入使用入口自起隔离实例；共享实例只跑 smoke；全部证据落 `tmp/`，不直接纳入未审核历史脚本。
-- 本次只交付需求与设计文档；上述检查均为实施验收要求，未运行、未宣称通过。
+- M1 对应检查（引擎/策略/确认绑定单测与 `regression.core-authorization-boundaries` E2E）已随交付运行通过；M2/M3 场景仍为实施验收要求，未运行、未宣称通过。
 
 ## 10. 风险与开放问题
 

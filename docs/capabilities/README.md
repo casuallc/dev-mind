@@ -79,7 +79,7 @@
 | [CAP-59](CAP-59-terminal-persistent-shell.md) | 远程终端增强 | 底座 | 已实现 | 每会话长驻 shell + Tab 补全 + Ctrl+C 取消（协议 v17） |
 | [CAP-60](CAP-60-terminal-frontend-polish.md) | 远程终端前端打磨 | 前端体验 | 已实现 | ANSI SGR 颜色渲染、等宽字体栈、字号调节持久化 |
 | [CAP-61](CAP-61-menu-management.md) | 菜单管理与角色菜单权限 | 管理 | 已实现 | 菜单目录注册表 + 角色×菜单可见性矩阵，/api/auth/menus 驱动渲染 |
-| [CAP-62](CAP-62-data-permission.md) | 数据权限：项目成员与个人归属 | 管理 | 已实现 | 项目可见性+project_members+ProjectAccessChecker 收口，个人数据 owner 强制 |
+| [CAP-62](CAP-62-data-permission.md) | 数据权限：项目成员与个人归属 | 管理 | 已实现 | 项目可见性+project_members+ProjectAccessChecker 收口，个人数据 owner 强制；随 CAP-108 M1 实际落地（2026-11-04） |
 | [CAP-63](CAP-63-multi-tenant.md) | 多租户隔离 | 平台层 | 定稿未实施 | 共享库共享表 + tenant_id 判别列，M1 租户登记/M2 业务表铺 tenant_code |
 | [CAP-64](CAP-64-bookmark-favorites.md) | 收藏夹 | 组装层 | 已实现 | 绑定到人的网址收藏：分组树/标签/可用性探测/关联账号速查/只读分享 |
 | [CAP-65](CAP-65-agent-node-file-browser.md) | Agent 节点文件浏览器 | 底座 | 已实现 | 节点根目录白名单下文件浏览/编辑/上传下载，大文件走 HTTP 中转 |
@@ -125,7 +125,7 @@
 | [CAP-105](CAP-105-requirement-ai-expand.md) | 需求 AI 扩展（关键点 → 表单草稿） | 流程层 | 已实现（2026-11-02） | 新建/编辑需求抽屉内粘贴关键点，one-shot 同步会话扩展成 标题+类型+Markdown 描述 回填表单，人工修改后保存 |
 | [CAP-106](CAP-106-node-env-toolchain-refresh.md) | 节点环境变量与工具链探测刷新 | 底座 | 定稿未实施 | 节点 env 界面化随帧合并 + runner 周期重探测随心跳刷新 + 显式工具链路径回落 + 预检 env 联动（2026-11-03 节点 6 java 误杀事故立项） |
 | [CAP-107](CAP-107-unified-ai-assistant.md) | 统一 AI 助手与受控能力接入 | 组装层 | 定稿未实施 | 全局会话复用 CAP-76，消费 CAP-108 授权底座；内置工具调用应用 Service，外部助手走 Open API，写必确认 |
-| [CAP-108](CAP-108-core-authorization.md) | 核心授权收敛 | 底座/管理 | 定稿未实施 | 业务操作目录与 Service 最终授权统一身份、ACTION、资源范围和凭证约束；覆盖人工、工具、Open API 及异步入口，独立推进全站迁移 |
+| [CAP-108](CAP-108-core-authorization.md) | 核心授权收敛 | 底座/管理 | M1 已交付（2026-11-04），M2/M3 定稿未实施 | 业务操作目录与 Service 最终授权统一身份、ACTION、资源范围和凭证约束；M1 落地授权引擎+首批六操作（项目/需求/工作单元/工作日志/AI 草稿）+CAP-62 项目可见性与成员模型+确认绑定；M2 执行域迁移、M3 外部主体 |
 
 ## 持续助手实施主线（规划，均未实施）
 
