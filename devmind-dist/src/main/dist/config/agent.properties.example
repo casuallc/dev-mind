@@ -1,34 +1,102 @@
 # agent runner 配置模板（CAP-34：服务端零执行，会话/问答一律由 runner 执行）。
 # 使用：cp agent.properties.example agent.properties，填 token 后 bin/dev-mind-agent start。
-# 注意：必须 UTF-8 无 BOM（properties 首行 key 会被 BOM 污染）。
+#      本地开发 scripts/dev.sh / scripts/dev.ps1 首次运行也会把本文件复制为 tmp/runner/agent.properties。
+# 注意：必须 UTF-8 无 BOM（properties 首行 key 会被 BOM 污染）；改任何项都要重启 runner 生效。
+# properties 不支持行内注释，注释必须独立成行。全量键以 devmind-agent-runner 的 RunnerConfig javadoc 为准。
+
+# ========== 必填 ==========
 
 # 服务端 WS 接入地址（wss 也行，路径固定 /ws/agent）
 serverUrl=ws://127.0.0.1:8080/ws/agent
-# 平台为自签证书 https/wss 部署时置 true：信任一切证书并关闭主机名校验
-# （一键安装脚本探测到证书校验失败会自动写入；CA 签名站点保持 false）
-insecure=false
 # 节点 token：服务端 后台 → Agent 节点 新建节点后复制（dmag_ 开头）；建议将该节点设为平台默认
 token=dmag_待填
 
+# ========== claude 执行体 ==========
+
 # 执行器：claude=真实 Claude Code CLI / fake=内置假进程（自测/无 claude 环境）
 executor=claude
-# claude 可执行文件路径；空 = 自动探测（which/where claude）
+# claude 可执行文件路径；空 = 自动探测（Windows=where / Linux·macOS=which claude）
 claudePath=
-# claude 配置目录（含登录态：settings.json / .credentials.json）；空 = claude 默认（~/.claude）
-# 服务化部署必配：WinSW LocalSystem / systemd root 的 HOME 不是安装用户的，claude 读不到登录态
-# 会报 "Not logged in · Please run /login"。指向已登录用户的 .claude 目录即可，如：
+# claude 配置目录（含登录态：settings.json / .credentials.json）。
+# 空 = 平台专属目录 {workspaceRoot}/../claude-config（CAP-51，与个人 ~/.claude 隔离，需在内补一次登录态）。
+# 服务化部署（WinSW LocalSystem / systemd root）必显式指向已登录用户的 .claude 目录：
 #   Windows: claudeConfigDir=C:/Users/<用户名>/.claude    Linux: claudeConfigDir=/home/<用户名>/.claude
 claudeConfigDir=
-# runner 默认权限模式（服务端指令未指定时用）
+# runner 默认权限模式（服务端指令未指定时用）：acceptEdits / default / bypassPermissions
 permissionMode=acceptEdits
+# 逐 token 打字机输出（--include-partial-messages，需 claude 2.1.250+）；
+# 节点 claude 版本过旧会因未知选项非零退出、会话直接 FAILED，此时改 false 重启 runner 退回整块输出
+partialMessages=true
 
-# CAP-25 托管工作区根目录：克隆缓存 <root>/<projectId>/main + 会话 worktree <root>/<projectId>/sessions/<sid>
-# （相对路径跟随 bin/dev-mind-agent 的工作目录 = 分发包根目录）
+# ========== 工作区与并发 ==========
+
+# 托管工作区根目录：克隆缓存 <root>/<projectId>/<owner>/main + 会话/需求工作树（CAP-25/42/51）。
+# 相对路径跟随 runner 进程工作目录（分发包 = 包根目录；dev 脚本 = tmp/runner）
 workspaceRoot=./workspaces
-# 项目无 repo 块时的兜底工作目录
+# 项目无 repo 块也无 project.<id> 映射时的兜底工作目录
 workDir=./workspaces/_default
 # 最大并发会话数
 maxConcurrent=4
+# 项目 → 节点本地路径映射（仅降级回退；会话带 repo 块时走托管工作区，不用此项）
+#project.<projectId>=/path/to/repo
 
-# 项目 → 节点本地路径映射（仅作降级回退；会话带 repo 块时走托管工作区，不用此项）
-# project.<projectId>=/path/to/repo
+# ========== 命令执行白名单（runner 本机最后一道防线，不在服务端下发，空=拒绝一切） ==========
+
+# exec 帧（构建/部署/发版/测试/异步任务的命令）白名单：CSV 前缀，按 |/&&/;/换行 切段逐段校验首词，
+# shell 内置命令不受限。不配/空 = 拒绝一切 exec（CAP-36）
+#execAllowlist=git,mvn,./mvnw,java,node,npm,python
+# exec 脚本解释器（命令写临时 .sh 后以其执行；Windows 需 Git Bash 在 PATH）
+execShell=bash
+# 会话内终端帧（terminal_exec）白名单（CAP-58）：CSV 前缀，切段规则同上；
+# git 默认只放行只读子命令，条目 git:* 全放行、git:<sub>（如 git:fetch）追加放行该子命令。
+# 缺省（整行不配）= 内置只读档（ls/cat/head/tail/grep/find/git 只读等）；
+# 显式配置（含空串）= 全覆盖，空串 = 拒绝一切终端命令
+#terminalAllowlist=ls,cat,git:status,git:log
+# 单条终端命令超时（秒），超时整树杀
+terminalTimeoutSec=60
+# 是否放开 >/>> 重定向写入（默认拒绝）
+terminalAllowRedirect=false
+# 持久 shell 空闲回收阈值（分钟，CAP-59），无命令超过即整树杀，下条命令自动重启新 shell
+terminalShellIdleMin=30
+
+# ========== 节点标签（调度匹配；非空时 hello 上报并覆盖服务端编辑值） ==========
+#labels=windows,office
+
+# ========== 工作日志（kind=worklog 会话的持久仓库，CAP-41） ==========
+
+# 持久工作区根目录（<root>/<console-username>/ 本地 git 仓库，永不删除、不参与 GC）；空 = {user.home}/worklog
+#worklogRoot=
+
+# ========== GC ==========
+
+# 会话目录超龄清理阈值（天）
+gcDays=14
+# GC 巡检间隔（分钟）
+gcIntervalMinutes=360
+# GC 启动后首跑延迟（分钟）
+gcInitialDelayMinutes=10
+# 构建工作区（builds/<id>）保留时长（小时）
+buildGcHours=24
+# 需求粒度工作树（worktrees/<key>）超龄回收阈值（天）；未提交改动/分支未推远端永不删。
+# 应与 claude transcript 保留期（cleanupPeriodDays，runner 落 180 天）对齐
+worktreeGcDays=30
+
+# ========== 会话内 git 凭据代理（CAP-58 FR-06：token 零落盘） ==========
+
+# 内置 localhost git 代理（worktree origin 重写为 http://127.0.0.1:<port>/git/<key>/...）
+gitProxyEnabled=true
+# git 代理监听端口（仅回环）；端口被占 runner 启动报错；改端口后存量 worktree 代理 URL 下次 launch 重写
+gitProxyPort=18377
+
+# ========== TLS ==========
+
+# 平台为自签证书 https/wss 部署时置 true：runner 对服务端一切 wss/https 调用信任一切证书并关主机名校验
+# （一键安装脚本探测到证书校验失败会自动写入；CA 签名站点保持 false）
+insecure=false
+
+# ========== 工具链探测（CAP-106：随心跳上报 java/mvn/node/npm/docker/git 版本） ==========
+
+# 显式工具链路径（可指可执行文件或其所在 bin 目录；优先于 PATH，失败回落 PATH）。未知 key 启动 fail-fast
+#toolchain.mvn=C:/tools/apache-maven-3.9/bin
+# 周期重探测间隔（分钟），有变化才随下次心跳上报；0=关闭
+toolchainRefreshMinutes=10

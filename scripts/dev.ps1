@@ -29,22 +29,8 @@ $runnerJar = "devmind-agent-runner/target/devmind-agent-runner.jar"
 $runnerProc = $null
 if (-not (Test-Path $runnerConf)) {
     New-Item -ItemType Directory -Force $runnerDir | Out-Null
-    # 模板必须 UTF-8 无 BOM（runner 按 UTF-8 读 properties，BOM 会污染首行 key）
-    $tpl = @"
-# agent runner 本地开发配置（CAP-34：服务端零执行，会话/问答必须由 runner 执行）
-serverUrl=ws://localhost:8080/ws/agent
-# 节点 token：先起后端，到 后台 -> Agent 节点 新建节点（如 local-dev，建议设平台默认）复制 token 填入
-token=dmag_待填
-executor=claude          # claude=真实 CLI / fake=内置假进程（自测/E2E）
-claudePath=              # 空 = where claude 自动探测
-workspaceRoot=./workspaces
-maxConcurrent=4
-# CAP-36 exec 帧（构建/部署/发版/健康检查命令）：白名单逐行首词前缀匹配，空=全部拒绝
-#execAllowlist=git,mvn,java,echo
-#execShell=bash           # exec 脚本解释器（Windows 需 Git Bash 在 PATH）
-#buildGcHours=24          # 构建工作区（builds/<id>）保留时长
-"@
-    [System.IO.File]::WriteAllText("$PWD/$runnerConf", $tpl, (New-Object System.Text.UTF8Encoding($false)))
+    # 模板与分发包同源（含全部可配项与说明），改模板只改 devmind-dist/.../agent.properties.example
+    Copy-Item "devmind-dist/src/main/dist/config/agent.properties.example" $runnerConf
     Write-Host "[dev] 已生成 runner 配置模板 $runnerConf ——填入 token 后重跑本脚本才会启动 runner"
 } elseif ((Get-Content $runnerConf -Raw) -match "(?m)^token=dmag_待填") {
     Write-Host "[dev] runner 配置 token 未填（$runnerConf），跳过 runner（创建会话将 409）"

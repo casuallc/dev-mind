@@ -64,6 +64,33 @@ class RunnerConfigTest {
         assertTrue(e.getMessage().contains("toolchain.python"), e.getMessage());
     }
 
+    // ---- 分发包模板防漂移：agent.properties.example 必须能被完整解析，且默认值与代码一致 ----
+
+    @Test
+    void distExampleTemplateParsesWithExpectedDefaults() throws Exception {
+        Path example = Path.of(System.getProperty("user.dir"))
+                .resolve("../devmind-dist/src/main/dist/config/agent.properties.example").normalize();
+        assertTrue(Files.exists(example), "分发包模板缺失: " + example);
+        RunnerConfig c = RunnerConfig.load(example);
+        // 必填项（token 占位符也算已填，dev 脚本靠它识别未配置）
+        assertTrue(c.token().startsWith("dmag_"), "token 占位符应为 dmag_ 开头: " + c.token());
+        // 模板中显式给出的关键默认值与代码缺省一致
+        org.junit.jupiter.api.Assertions.assertEquals("claude", c.executor());
+        org.junit.jupiter.api.Assertions.assertEquals("acceptEdits", c.permissionMode());
+        org.junit.jupiter.api.Assertions.assertEquals(4, c.maxConcurrent());
+        org.junit.jupiter.api.Assertions.assertEquals("bash", c.execShell());
+        assertTrue(c.execAllowlist().isEmpty(), "execAllowlist 默认空 = 拒绝一切 exec");
+        assertTrue(c.terminalAllowlist() == null, "terminalAllowlist 缺省 = 内置只读档");
+        org.junit.jupiter.api.Assertions.assertEquals(60, c.terminalTimeoutSec());
+        org.junit.jupiter.api.Assertions.assertEquals(14, c.gcDays());
+        org.junit.jupiter.api.Assertions.assertEquals(24, c.buildGcHours());
+        org.junit.jupiter.api.Assertions.assertEquals(30, c.worktreeGcDays());
+        assertTrue(c.gitProxyEnabled());
+        org.junit.jupiter.api.Assertions.assertEquals(18377, c.gitProxyPort());
+        assertFalse(c.insecure());
+        org.junit.jupiter.api.Assertions.assertEquals(10, c.toolchainRefreshMinutes());
+    }
+
     private RunnerConfig load(String extra) throws Exception {
         Path f = dir.resolve("agent.properties");
         Files.writeString(f, "serverUrl=ws://127.0.0.1:8080/ws/agent\ntoken=dmag_t\n" + extra,
