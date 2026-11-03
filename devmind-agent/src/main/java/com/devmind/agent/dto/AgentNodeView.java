@@ -2,9 +2,11 @@ package com.devmind.agent.dto;
 
 import com.devmind.agent.model.AgentNodeEntity;
 import com.devmind.agent.service.AgentFileRoots;
+import com.devmind.agent.service.AgentNodeEnv;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 /** 节点视图（不含 token 哈希）。isDefault = 平台默认执行节点（FR-03）；remoteAddr = 最近接入的 IP:端口；
  * workspaceBytes = 工作区磁盘占用（CAP-34 FR-05，旧 runner 未上报为 null）；
@@ -12,28 +14,30 @@ import java.util.List;
  * toolchain = 探测到的工具链 JSON 对象串（FR-07，未上报为 null）；
  * proxyUrl/proxyScopes = CAP-43 节点外网代理与生效范围 CSV；
  * fileRoots = CAP-65 文件访问根目录白名单（解析后列表，未配置为 null）；
+ * env = CAP-106 节点级环境变量（明文，未配置为 null）；
  * activeSessionCount = 活跃会话数（由控制器聚合 AgentNodeSessionsProvider 填充，from 恒 null）。 */
 public record AgentNodeView(Long id, String name, String status, String os, String labels,
                             String capabilities, String runnerVersion, boolean isDefault,
                             String remoteAddr, Instant lastHeartbeatAt, Instant createdAt,
                             Long workspaceBytes, Integer protocolVersion, String toolchain,
                             String proxyUrl, String proxyScopes,
-                            List<String> fileRoots,
+                            List<String> fileRoots, Map<String, String> env,
                             Integer activeSessionCount) {
 
     public static AgentNodeView from(AgentNodeEntity e) {
         List<String> roots = AgentFileRoots.parse(e.getFileRoots());
+        Map<String, String> env = AgentNodeEnv.parse(e.getEnvJson());
         return new AgentNodeView(e.getId(), e.getName(), e.getStatus(), e.getOs(), e.getLabels(),
                 e.getCapabilities(), e.getRunnerVersion(), e.isDefault(), e.getRemoteAddr(),
                 e.getLastHeartbeatAt(), e.getCreatedAt(), e.getWorkspaceBytes(), e.getProtocolVersion(),
                 e.getToolchain(), e.getProxyUrl(), e.getProxyScopes(),
-                roots.isEmpty() ? null : roots, null);
+                roots.isEmpty() ? null : roots, env.isEmpty() ? null : env, null);
     }
 
     /** 填充活跃会话数（列表接口在控制器层聚合会话 SPI 后调用）。 */
     public AgentNodeView withActiveSessionCount(Integer count) {
         return new AgentNodeView(id, name, status, os, labels, capabilities, runnerVersion, isDefault,
                 remoteAddr, lastHeartbeatAt, createdAt, workspaceBytes, protocolVersion, toolchain,
-                proxyUrl, proxyScopes, fileRoots, count);
+                proxyUrl, proxyScopes, fileRoots, env, count);
     }
 }

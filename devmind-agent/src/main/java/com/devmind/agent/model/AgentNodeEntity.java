@@ -70,6 +70,11 @@ public class AgentNodeEntity {
     @Column(length = 2048)
     private String toolchain;
 
+    /** CAP-106 FR-01：节点级环境变量（JSON 对象串 {"KEY":"VALUE"}；null = 未配置。
+     *  明文落库明文展示，禁存密钥；执行下发时作 env 合并最低优先基底） */
+    @Column(name = "env_json", length = 8192)
+    private String envJson;
+
     @Column(name = "last_heartbeat_at")
     private Instant lastHeartbeatAt;
 
@@ -113,6 +118,8 @@ public class AgentNodeEntity {
     public void setProtocolVersion(Integer protocolVersion) { this.protocolVersion = protocolVersion; }
     public String getToolchain() { return toolchain; }
     public void setToolchain(String toolchain) { this.toolchain = toolchain; }
+    public String getEnvJson() { return envJson; }
+    public void setEnvJson(String envJson) { this.envJson = envJson; }
     public Instant getLastHeartbeatAt() { return lastHeartbeatAt; }
     public void setLastHeartbeatAt(Instant lastHeartbeatAt) { this.lastHeartbeatAt = lastHeartbeatAt; }
     public String getRemoteAddr() { return remoteAddr; }

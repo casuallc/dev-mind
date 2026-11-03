@@ -134,7 +134,12 @@ public class AgentNodeWsHandler extends TextWebSocketHandler {
                 if (frame.has("workspaceBytes") && frame.path("workspaceBytes").isNumber()) {
                     nodeService.updateWorkspaceBytes(node.getId(), frame.path("workspaceBytes").asLong());
                 }
-            }
+                // CAP-106 FR-04：周期重探测有变化时心跳才带 toolchain，非空即覆盖落库
+                // （与 hello 同一写入路径；旧 runner 不带 = 不动，协议向后兼容不 bump 版本）
+                JsonNode hbToolchain = frame.path("toolchain");
+                if (hbToolchain.isObject() && !hbToolchain.isEmpty()) {
+                    nodeService.updateToolchain(node.getId(), hbToolchain.toString());
+                }            }
             case "event" -> {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> payload = frame.has("payload")

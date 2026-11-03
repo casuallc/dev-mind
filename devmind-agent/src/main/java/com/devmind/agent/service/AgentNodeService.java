@@ -214,7 +214,28 @@ public class AgentNodeService {
         if (req.fileRoots() != null) {
             e.setFileRoots(AgentFileRoots.toJson(AgentFileRoots.validate(req.fileRoots())));
         }
+        // CAP-106 FR-01：env 全量语义——null = 不动，空对象 = 清空；明文落库禁存密钥
+        if (req.env() != null) {
+            e.setEnvJson(AgentNodeEnv.toJson(AgentNodeEnv.validate(req.env())));
+        }
         return AgentNodeView.from(repo.save(e));
+    }
+
+    /** CAP-106 FR-01：节点级环境变量（解析后 Map；未配置/坏数据 = 空表）。下发合并基底用。 */
+    public java.util.Map<String, String> nodeEnv(Long id) {
+        return repo.findById(id).map(e -> AgentNodeEnv.parse(e.getEnvJson())).orElse(java.util.Map.of());
+    }
+
+    /** CAP-106 FR-04：heartbeat 帧携带的 toolchain 覆盖落库（与 hello 同一写入路径；
+     * 非空才覆盖，老 runner 心跳不带 = 不动）。 */
+    public void updateToolchain(Long id, String toolchainJson) {
+        if (toolchainJson == null || toolchainJson.isBlank()) {
+            return;
+        }
+        repo.findById(id).ifPresent(e -> {
+            e.setToolchain(toolchainJson);
+            repo.save(e);
+        });
     }
 
     /** 代理 URL 校验：仅 http/https、host 非空、禁 userinfo（密钥不入库）。合法返回原串。 */

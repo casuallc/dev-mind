@@ -135,7 +135,8 @@ public class AgentNodeController {
         auditNode("UPDATE", view.id(), view.name(),
                 "labels=" + (req.labels() != null ? "改" : "不动")
                         + " proxy=" + (req.proxyUrl() != null ? "改" : "不动")
-                        + " fileRoots=" + (req.fileRoots() != null ? "改" : "不动"));
+                        + " fileRoots=" + (req.fileRoots() != null ? "改" : "不动")
+                        + " env=" + (req.env() != null ? "改" : "不动"));
         return view;
     }
 

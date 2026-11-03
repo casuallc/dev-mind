@@ -161,4 +161,53 @@ class AgentNodeServiceTest {
                 new com.devmind.agent.dto.UpdateAgentNodeRequest(
                         null, null, null, List.of("relative/path"))));
     }
+
+    // ---- CAP-106 节点级环境变量 ----
+
+    @Test
+    void envFullReplaceNullUntouchedEmptyClears() {
+        AgentNodeEntity a = addNode(1L, AgentNodeService.STATUS_ONLINE);
+        var view = service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest(
+                null, null, null, null,
+                java.util.Map.of("PATH", "/home/jdk/bin:/usr/bin", "KAFKA_BOOTSTRAP", "x:9092")));
+        assertEquals("/home/jdk/bin:/usr/bin", view.env().get("PATH"));
+        assertTrue(a.getEnvJson().contains("KAFKA_BOOTSTRAP"));
+        // null = 不动
+        service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest("gpu", null, null, null));
+        assertEquals("x:9092", service.nodeEnv(1L).get("KAFKA_BOOTSTRAP"), "env 字段缺席不应动已有值");
+        // 空值 = 删 key；空对象 = 清空（落 null）
+        var cleared = service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest(
+                null, null, null, null, java.util.Map.of()));
+        assertNull(cleared.env());
+        assertNull(a.getEnvJson());
+    }
+
+    @Test
+    void envValidationRejectsBadKeyAndOversize() {
+        addNode(1L, AgentNodeService.STATUS_ONLINE);
+        // 空值 = 删 key 语义（不报错，不落库）
+        assertNull(service.update(1L, new com.devmind.agent.dto.UpdateAgentNodeRequest(
+                null, null, null, null, java.util.Map.of("GONE", ""))).env());
+        assertThrows(DevMindException.class, () -> service.update(1L,
+                new com.devmind.agent.dto.UpdateAgentNodeRequest(null, null, null, null,
+                        java.util.Map.of("BAD KEY", "x"))));
+        assertThrows(DevMindException.class, () -> service.update(1L,
+                new com.devmind.agent.dto.UpdateAgentNodeRequest(null, null, null, null,
+                        java.util.Map.of("1LEADING", "x"))));
+        assertThrows(DevMindException.class, () -> service.update(1L,
+                new com.devmind.agent.dto.UpdateAgentNodeRequest(null, null, null, null,
+                        java.util.Map.of("BIG", "x".repeat(4097)))));
+    }
+
+    @Test
+    void updateToolchainOverwriteAndBlankNoop() {
+        AgentNodeEntity a = addNode(1L, AgentNodeService.STATUS_ONLINE);
+        a.setToolchain("{\"java\":\"21.0.2\"}");
+        service.updateToolchain(1L, "{\"java\":\"21.0.7\",\"git\":\"2.47.0\"}");
+        assertEquals("{\"java\":\"21.0.7\",\"git\":\"2.47.0\"}", a.getToolchain());
+        // 空/缺失不动（心跳不带 toolchain 的口径在 WS handler 层，这里防空调用）
+        service.updateToolchain(1L, null);
+        service.updateToolchain(1L, " ");
+        assertEquals("{\"java\":\"21.0.7\",\"git\":\"2.47.0\"}", a.getToolchain());
+    }
 }

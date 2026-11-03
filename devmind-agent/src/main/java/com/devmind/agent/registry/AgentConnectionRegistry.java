@@ -546,6 +546,16 @@ public class AgentConnectionRegistry implements AgentNodeConnector {
         }
     }
 
+    /** CAP-106 FR-01：节点级环境变量（env_json 解析），exec/proc/program 帧 env 合并基底。 */
+    @Override
+    public Map<String, String> nodeEnv(String nodeId) {
+        try {
+            return nodeService.nodeEnv(Long.parseLong(nodeId));
+        } catch (NumberFormatException e) {
+            return Map.of();
+        }
+    }
+
     /**
      * CAP-43：节点配了外网代理时随帧携带 {@code proxy:{url,scopes}}（runner 进程级 holder 生效）。
      * 协议 v8 门控：runner 过旧抛 CONFLICT 明示升级——不静默发送（老 runner 忽略该字段会让
