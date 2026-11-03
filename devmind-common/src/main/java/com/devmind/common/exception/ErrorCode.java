@@ -12,7 +12,8 @@ public enum ErrorCode {
     METHOD_NOT_ALLOWED(405, "DEV-405", "请求方法不支持"),
     CONFLICT(409, "DEV-409", "状态冲突"),
     TOO_MANY_SESSIONS(429, "DEV-429", "并发会话数已达上限，请稍后再试"),
-    INTERNAL(500, "DEV-500", "内部错误");
+    INTERNAL(500, "DEV-500", "内部错误"),
+    SERVICE_UNAVAILABLE(503, "DEV-503", "服务暂不可用");
 
     private final int status;
     private final String code;

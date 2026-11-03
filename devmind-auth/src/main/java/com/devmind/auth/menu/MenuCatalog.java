@@ -14,7 +14,9 @@ public final class MenuCatalog {
 
     public record Item(String menuKey, String title, String path, String zone,
                        String groupName, String icon, int sortNo,
-                       String nodeType, String parentKey, boolean writeAction) {
+                       String nodeType, String parentKey, boolean writeAction,
+                       /** CAP-108：新节点默认授权改从这些兄弟节点取并集（为空则继承父节点） */
+                       List<String> seedFromKeys) {
     }
 
     private static final List<Item> ITEMS = List.of(
@@ -89,6 +91,9 @@ public final class MenuCatalog {
             tab("project.requirements", "records", "关联记录", 70),
             tab("project.requirements", "attachments", "附件", 80),
             action("project.requirements", "create", "新建需求", 10, true),
+            // CAP-108 requirement.draft.generate：默认授权从需求创建/编辑派生（迁移证据见 CAP-108 §4.2.2）
+            action("project.requirements", "generate-draft", "AI 扩充需求草稿", 15, true,
+                    List.of("project.requirements.action.create", "project.requirements.action.manage")),
             action("project.requirements", "manage", "编辑/变更状态/删除需求", 20, true),
             action("project.requirements", "flow", "发起分析/开发会话", 30, true),
             action("project.requirements", "push-jira", "推送/同步 Jira", 40, true),
@@ -278,16 +283,23 @@ public final class MenuCatalog {
     private static Item menu(String key, String title, String path, String zone,
                              String groupName, String icon, int sortNo) {
         return new Item(key, title, path, zone, groupName, icon, sortNo,
-                MenuItemEntity.TYPE_MENU, null, false);
+                MenuItemEntity.TYPE_MENU, null, false, List.of());
     }
 
     private static Item tab(String parent, String name, String title, int sortNo) {
         return new Item(parent + ".tab." + name, title, "", "",
-                null, null, sortNo, MenuItemEntity.TYPE_TAB, parent, false);
+                null, null, sortNo, MenuItemEntity.TYPE_TAB, parent, false, List.of());
     }
 
     private static Item action(String parent, String name, String title, int sortNo, boolean writeAction) {
         return new Item(parent + ".action." + name, title, "", "",
-                null, null, sortNo, MenuItemEntity.TYPE_ACTION, parent, writeAction);
+                null, null, sortNo, MenuItemEntity.TYPE_ACTION, parent, writeAction, List.of());
+    }
+
+    /** CAP-108：默认授权从指定兄弟节点并集派生的 ACTION（如生成类能力沿用创建/编辑授权）。 */
+    private static Item action(String parent, String name, String title, int sortNo, boolean writeAction,
+                               List<String> seedFromKeys) {
+        return new Item(parent + ".action." + name, title, "", "",
+                null, null, sortNo, MenuItemEntity.TYPE_ACTION, parent, writeAction, seedFromKeys);
     }
 }

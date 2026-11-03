@@ -90,9 +90,7 @@ public class MenuPermissionService {
                 entity.setMenuKey(item.menuKey());
                 entity.setCreatedAt(Instant.now());
                 created++;
-                Set<String> targetRoles = parent == null
-                        ? defaultRoles(zone)
-                        : inheritedRoles(grantsByKey, item.parentKey(), zone);
+                Set<String> targetRoles = seedRoles(item, parent, grantsByKey, zone);
                 grantSeeds.addAll(buildGrants(item.menuKey(), targetRoles));
                 grantsByKey.put(item.menuKey(), targetRoles);
             }
@@ -244,6 +242,39 @@ public class MenuPermissionService {
             return false;
         }
         return grantRepo.existsByRoleAndMenuKeyIn(code, permissionKeys);
+    }
+
+    /** CAP-108 操作目录 ALL_OF 判定：ADMIN 短路；全部权限编码被授予才放行。 */
+    public boolean hasAllGrants(String roleCode, Collection<String> permissionKeys) {
+        String code = normalize(roleCode);
+        if (RoleEntity.CODE_ADMIN.equals(code)) {
+            return true;
+        }
+        if (code.isEmpty() || permissionKeys == null || permissionKeys.isEmpty()) {
+            return false;
+        }
+        Set<String> granted = grantRepo.findByRole(code).stream()
+                .map(RoleMenuGrantEntity::getMenuKey)
+                .collect(Collectors.toSet());
+        return granted.containsAll(permissionKeys);
+    }
+
+    /** 新节点默认授权：seedFromKeys 非空时取这些兄弟节点授权的并集（全缺则回落父节点继承）。 */
+    private Set<String> seedRoles(MenuCatalog.Item item, MenuCatalog.Item parent,
+                                  Map<String, Set<String>> grantsByKey, String zone) {
+        if (item.seedFromKeys() != null && !item.seedFromKeys().isEmpty()) {
+            Set<String> union = new LinkedHashSet<>();
+            for (String key : item.seedFromKeys()) {
+                Set<String> roles = grantsByKey.get(key);
+                if (roles != null) {
+                    union.addAll(roles);
+                }
+            }
+            if (!union.isEmpty()) {
+                return union;
+            }
+        }
+        return parent == null ? defaultRoles(zone) : inheritedRoles(grantsByKey, item.parentKey(), zone);
     }
 
     private Set<String> inheritedRoles(Map<String, Set<String>> grantsByKey, String parentKey, String zone) {
