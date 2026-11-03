@@ -2,6 +2,10 @@ package com.devmind.copilot.service;
 
 import com.devmind.auth.security.DevMindPrincipal;
 import com.devmind.common.agent.tool.PlatformTool;
+import com.devmind.common.authz.ExecutionContext;
+import com.devmind.common.authz.ExecutionContextHolder;
+import com.devmind.common.authz.ExecutionSource;
+import com.devmind.common.authz.SubjectType;
 import com.devmind.common.agent.tool.ToolCall;
 import com.devmind.common.agent.tool.ToolContext;
 import com.devmind.common.agent.tool.ToolResult;
@@ -46,11 +50,19 @@ public class CopilotToolRunner {
         // 只在调用线程设置会让 identity.currentActor() 在工具体里回退 local（按 actor 取数的工具读空）。
         Authentication auth = new UsernamePasswordAuthenticationToken(
                 new DevMindPrincipal(ctx.actor(), ctx.role()), null, List.of());
+        // CAP-108 FR-05：与 SecurityContext 同步建立授权执行上下文（同线程可见），
+        // AI 来源（BOT/COPILOT_WEB）让引擎对写命令强制确认凭据校验；actor 缺失/匿名则不建立（写边界 401）
+        ExecutionContext authzCtx = executionContext(ctx);
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             Future<ToolResult> future = executor.submit(() -> {
                 SecurityContextHolder.getContext().setAuthentication(auth);
                 try {
-                    return tool.execute(call, ctx);
+                    if (authzCtx == null) {
+                        return tool.execute(call, ctx);
+                    }
+                    try (var ignored = ExecutionContextHolder.set(authzCtx)) {
+                        return tool.execute(call, ctx);
+                    }
                 } finally {
                     SecurityContextHolder.clearContext();
                 }
@@ -70,6 +82,20 @@ public class CopilotToolRunner {
         } catch (Exception e) {
             return mapException(e);
         }
+    }
+
+    /** 由 ToolContext 装配授权执行上下文：来源按渠道判定（bot 渠道非空 → BOT，否则 Web 内置助手）。 */
+    private ExecutionContext executionContext(ToolContext ctx) {
+        if (ctx.actor() == null || ctx.actor().isBlank() || "local".equals(ctx.actor())) {
+            return null;
+        }
+        ExecutionSource source = ctx.channel() == null || ctx.channel().isBlank()
+                ? ExecutionSource.COPILOT_WEB : ExecutionSource.BOT;
+        return ExecutionContext.builder(SubjectType.USER, ctx.actor(), source)
+                .subjectId(ctx.actor())
+                .turnId(ctx.turnId())
+                .actionId(ctx.actionId())
+                .build();
     }
 
     private ToolResult mapException(Throwable error) {
