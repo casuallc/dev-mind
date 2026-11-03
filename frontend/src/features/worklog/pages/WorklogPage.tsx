@@ -118,9 +118,9 @@ export default function WorklogPage() {
   const weekStartStr = mondayOf(date).format('YYYY-MM-DD')
   const isCurrentWeekSelected = weekStartStr === mondayOf(dayjs()).format('YYYY-MM-DD')
 
-  // ---- 日报：按周浏览（周导航 + 周日选择条），默认当前周、选中今天 ----
-  const [dailyWeekStart, setDailyWeekStart] = useState<Dayjs>(() => mondayOf(dayjs()))
-  const [day, setDay] = useState<Dayjs>(dayjs())
+  // ---- 日报：按周浏览（周导航 + 周日选择条），默认选中昨天（同周报默认上周：进来先看/补昨天） ----
+  const [dailyWeekStart, setDailyWeekStart] = useState<Dayjs>(() => mondayOf(dayjs().subtract(1, 'day')))
+  const [day, setDay] = useState<Dayjs>(() => dayjs().subtract(1, 'day'))
   const dailyWeekStartStr = dailyWeekStart.format('YYYY-MM-DD')
   const dayStr = day.format('YYYY-MM-DD')
   const isCurrentWeek = dailyWeekStartStr === mondayOf(dayjs()).format('YYYY-MM-DD')
