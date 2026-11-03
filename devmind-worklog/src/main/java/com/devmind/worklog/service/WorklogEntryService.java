@@ -1,6 +1,8 @@
 package com.devmind.worklog.service;
 
 import com.devmind.auth.IdentityService;
+import com.devmind.common.authz.AuthorizationService;
+import com.devmind.common.authz.ResourceTarget;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.integration.GitRepoCatalog;
@@ -68,13 +70,16 @@ public class WorklogEntryService {
     private final WorklogPlanItemRepository planItemRepo;
     private final IdentityService identity;
     private final ObjectProvider<GitRepoCatalog> catalog;
+    private final AuthorizationService authz;
 
     public WorklogEntryService(WorklogEntryRepository entryRepo, WorklogPlanItemRepository planItemRepo,
-                               IdentityService identity, ObjectProvider<GitRepoCatalog> catalog) {
+                               IdentityService identity, ObjectProvider<GitRepoCatalog> catalog,
+                               AuthorizationService authz) {
         this.entryRepo = entryRepo;
         this.planItemRepo = planItemRepo;
         this.identity = identity;
         this.catalog = catalog;
+        this.authz = authz;
     }
 
     /** 条目 + 归属日（范围读取/生成素材用；date 与 entry.workDate 恒一致，留存为调用方便利）。 */
@@ -100,6 +105,10 @@ public class WorklogEntryService {
 
     public EntryView create(EntryRequest req) {
         String me = identity.currentActor();
+        // CAP-108 M1：写边界硬授权——归属主体取服务端身份（禁客户端传入），OWNER_ONLY 不因 ADMIN 扩展
+        if (authz != null) {
+            authz.require("worklog.entry.create", ResourceTarget.owned("WORKLOG_ENTRY", null, me));
+        }
         WorklogEntryEntity e = new WorklogEntryEntity();
         e.setId(newId());
         e.setUserId(me);

@@ -58,7 +58,7 @@ class WorklogPlanServiceTest {
         when(planRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(entryRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         service = new WorklogPlanService(planRepo, entryRepo, goalRepo, identity);
-        entryService = new WorklogEntryService(entryRepo, planItemRepoArg(), identity, null);
+        entryService = new WorklogEntryService(entryRepo, planItemRepoArg(), identity, null, null);
     }
 
     /** entryService 用同一个 planRepo mock（独立变量名防 setUp 顺序歧义）。 */
