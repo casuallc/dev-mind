@@ -85,6 +85,17 @@ public class AgentNodeRouter {
      * OS/架构/运行时版本——不匹配在执行前 BLOCKED，而不是让程序跑到一半报「命令不存在」。
      */
     public void requireProgramCompatible(String nodeId, ProgramManifest manifest) {
+        requireProgramCompatible(nodeId, manifest, null);
+    }
+
+    /**
+     * CAP-106 FR-06：带本次执行合并 env 的预检——toolchain 快照缺所需 key 时，检查
+     * {@code execEnv}（调用方合并链：环境 variables &lt; 用例 env）叠上节点 env 后是否含
+     * {@code PATH}（或该 key 对应的 {@code *_HOME}，java→JAVA_HOME）覆盖：无覆盖 → 维持
+     * BLOCKED；有覆盖 → 放行，最终判定下沉 runner 执行期探测（仍不满足也跑不了入口脚本）。
+     */
+    public void requireProgramCompatible(String nodeId, ProgramManifest manifest,
+                                         java.util.Map<String, String> execEnv) {
         requireProtocol(nodeId, AgentProtocol.TEST_PROGRAM_BUNDLE, "程序型用例（程序包由 runner 树形解包）");
         AgentNodeConnector connector = connectorProvider.getIfAvailable();
         if (connector == null) {
@@ -108,15 +119,43 @@ public class AgentNodeRouter {
         }
         String actual = connector.nodeToolchain(nodeId).get(key);
         if (actual == null || actual.isBlank()) {
+            if (hasRuntimeEnvOverride(connector.nodeEnv(nodeId), execEnv, key)) {
+                return; // FR-06：注入 env 显式覆盖 PATH/JAVA_HOME → 判定下沉 runner 执行期探测
+            }
             throw new DevMindException(ErrorCode.CONFLICT,
                     "节点 " + nodeId + " 未探测到 " + key + " 运行时，无法满足程序包 runtime="
-                            + manifest.runtime());
+                            + manifest.runtime() + "（若刚在节点上安装运行时，等一个探测周期（默认 10 分钟）"
+                            + "或重启 runner 后重试；也可在节点页配 PATH/JAVA_HOME 环境变量）");
         }
         if (!manifest.satisfiesRuntimeVersion(actual)) {
             throw new DevMindException(ErrorCode.CONFLICT,
                     "节点 " + nodeId + " 的 " + key + " 版本 " + actual
                             + " 不满足程序包 runtimeVersion=" + manifest.runtimeVersion());
         }
+    }
+
+    /** FR-06：合并 env（节点 env < execEnv）是否含 PATH / key 对应 *_HOME 的运行时覆盖。 */
+    private static boolean hasRuntimeEnvOverride(java.util.Map<String, String> nodeEnv,
+                                                 java.util.Map<String, String> execEnv, String key) {
+        java.util.Map<String, String> merged = new java.util.LinkedHashMap<>();
+        if (nodeEnv != null) {
+            merged.putAll(nodeEnv);
+        }
+        if (execEnv != null) {
+            merged.putAll(execEnv);
+        }
+        for (java.util.Map.Entry<String, String> e : merged.entrySet()) {
+            if (e.getValue() == null || e.getValue().isBlank()) {
+                continue;
+            }
+            if ("PATH".equalsIgnoreCase(e.getKey())) {
+                return true;
+            }
+            if ("java".equals(key) && "JAVA_HOME".equals(e.getKey())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

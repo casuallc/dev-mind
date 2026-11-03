@@ -83,11 +83,24 @@ public class AgentNodeStepRunner {
         if (connector == null) {
             return StepResult.failed(-1, "agent 模块未装配，无可用执行节点");
         }
+        // CAP-106 FR-02：节点级环境变量作合并基底（低→高：节点 env < 调用方 env
+        // ——测试环境 variables 与用例/步骤 env 已在调用方合好）。runner 侧零改动：
+        // 帧内 env 已是终态
+        Map<String, String> nodeEnv = connector.nodeEnv(nodeId);
+        Map<String, String> mergedEnv;
+        if (nodeEnv.isEmpty()) {
+            mergedEnv = env;
+        } else {
+            mergedEnv = new java.util.LinkedHashMap<>(nodeEnv);
+            if (env != null) {
+                mergedEnv.putAll(env);
+            }
+        }
         String execId = (workspaceId == null || workspaceId.isBlank() ? "exec-" + nodeId : workspaceId)
                 + "-s" + stepIndex + "-" + Long.toString(System.nanoTime(), 36);
         long timeout = timeoutSec != null && timeoutSec > 0 ? timeoutSec : props.getStepTimeoutMs() / 1000;
         AgentExecCommand cmd = new AgentExecCommand(execId, projectId, workspaceId, step.command(),
-                step.workingDir(), env, timeout, repo, bundle);
+                step.workingDir(), mergedEnv, timeout, repo, bundle);
         long start = System.currentTimeMillis();
         AgentExecResult r;
         try {

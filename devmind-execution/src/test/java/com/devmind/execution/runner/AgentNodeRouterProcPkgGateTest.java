@@ -79,4 +79,53 @@ class AgentNodeRouterProcPkgGateTest {
                 () -> new AgentNodeRouter(empty).requirePkgCapable("1"));
         assertTrue(e.getMessage().contains("agent 模块未装配"), e.getMessage());
     }
+
+    // ---- CAP-106 FR-06 程序包预检 env 联动（三分支） ----
+
+    private com.devmind.common.program.ProgramManifest javaManifest() {
+        return new com.devmind.common.program.ProgramManifest(
+                "1", "kafka-poc", "1.0", "JAVA", null, "run.sh", "ANY", "ANY", null);
+    }
+
+    private void stubOnlineProgramNode() {
+        when(connector.isOnline("1")).thenReturn(true);
+        when(connector.supports("1", AgentProtocol.TEST_PROGRAM_BUNDLE)).thenReturn(true);
+        when(connector.nodeOs("1")).thenReturn("Linux / aarch64");
+    }
+
+    @Test
+    void 快照有运行时常量直接放行() {
+        stubOnlineProgramNode();
+        when(connector.nodeToolchain("1")).thenReturn(java.util.Map.of("java", "21.0.7"));
+        assertDoesNotThrow(() -> router.requireProgramCompatible("1", javaManifest(), null));
+    }
+
+    @Test
+    void 快照缺失且无env覆盖维持BLOCKED并带指引() {
+        stubOnlineProgramNode();
+        when(connector.nodeToolchain("1")).thenReturn(java.util.Map.of());
+        when(connector.nodeEnv("1")).thenReturn(java.util.Map.of());
+        var e = assertThrows(DevMindException.class,
+                () -> router.requireProgramCompatible("1", javaManifest(), null));
+        assertTrue(e.getMessage().contains("未探测到 java"), e.getMessage());
+        assertTrue(e.getMessage().contains("探测周期"), e.getMessage());
+    }
+
+    @Test
+    void 快照缺失但env含PATH或JAVAHOME覆盖放行() {
+        stubOnlineProgramNode();
+        when(connector.nodeToolchain("1")).thenReturn(java.util.Map.of());
+        // 节点 env 里配了 PATH（CAP-106 FR-01）
+        when(connector.nodeEnv("1")).thenReturn(java.util.Map.of("PATH", "/home/jdk/bin:/usr/bin"));
+        assertDoesNotThrow(() -> router.requireProgramCompatible("1", javaManifest(), null));
+        // 用例/环境 env 里带 JAVA_HOME
+        when(connector.nodeEnv("1")).thenReturn(java.util.Map.of());
+        assertDoesNotThrow(() -> router.requireProgramCompatible("1", javaManifest(),
+                java.util.Map.of("JAVA_HOME", "/home/jdk")));
+        // 空值 PATH 不算覆盖
+        var blocked = assertThrows(DevMindException.class,
+                () -> router.requireProgramCompatible("1", javaManifest(),
+                        java.util.Map.of("PATH", " ")));
+        assertTrue(blocked.getMessage().contains("未探测到 java"), blocked.getMessage());
+    }
 }
