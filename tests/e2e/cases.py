@@ -1017,6 +1017,78 @@ printf '%s' '{"contractVersion":"1","status":"pass","message":"e2e program pass"
         self.api.request("POST", "/projects/ghost-nope/requirements/ai-expand",
                          {"points": "x"}, expected=404)
 
+    def test_core_authorization_boundaries(self):
+        # CAP-108 M1：应用 Service 边界统一授权——ACTION 表达式 / VIEWER 只读底线 /
+        # 项目成员写范围（CAP-62）/ OWNER_ONLY 在引擎一处判定，不再各自为政
+        from support import Api
+        code = "E2E_" + uuid.uuid4().hex[:8].upper()
+        role = self.api.request("POST", "/auth/roles", {"code": code.lower(), "name": "E2E 核心授权",
+                                                       "description": "临时角色", "baseRole": "DEVELOPER"})
+        self.assertEqual(code, role["code"])
+        self.addCleanup(self._ensure_role_absent, code)
+        username = "e2e-authz-" + uuid.uuid4().hex[:10]
+        password = "e2e-" + uuid.uuid4().hex
+        self.api.request("POST", "/auth/users", {"username": username, "password": password,
+                                                 "role": code})
+        self.addCleanup(self._ensure_user_absent, username)
+        client = Api(self.api.base)
+        client.login(username, password)
+
+        # 建项目走 CAP-103 既有过滤器（M1 未纳入操作目录）：预授 create-project
+        self.api.request("PUT", "/auth/menus/grants",
+                         {"role": code, "menuKeys": ["admin.projects.action.create-project"]})
+
+        # 自建项目：创建者自动落 OWNER 成员行（CAP-62 FR-01）
+        path = self.workspace / ("project-" + uuid.uuid4().hex)
+        path.mkdir()
+        subprocess.run(["git", "init", "--initial-branch=master", str(path)],
+                       check=True, capture_output=True)
+        own = client.request("POST", "/projects", {
+            "name": "e2e-authz-own", "path": path.as_posix(), "defaultBranch": "master",
+            "tags": ["e2e"], "status": "ACTIVE"})
+        self.addCleanup(self.api.request, "DELETE", "/projects/" + own["id"])
+        own_reqs = f"/projects/{own['id']}/requirements"
+
+        # ACTION 未授予：即使项目 OWNER / 本人归属也被核心授权拒绝（403）
+        client.request("POST", own_reqs, {"title": "未授权创建"}, expected=403)
+        client.request("POST", "/worklog/entries", {
+            "workDate": "2026-11-04", "title": "未授权条目", "entryType": "DEV",
+            "hours": 1.0}, expected=403)
+        # 授予 requirement.create / worklog manage-entry 的 ACTION 后放行（create-project 保留）
+        self.api.request("PUT", "/auth/menus/grants",
+                         {"role": code, "menuKeys": ["admin.projects.action.create-project",
+                                                     "project.requirements.action.create",
+                                                     "top.worklog.action.manage-entry"]})
+        req = client.request("POST", own_reqs, {"title": "授权后创建"})
+        self.assertEqual("REQ-1", req["code"])
+
+        # CAP-62 资源范围：PUBLIC 项目非成员可读不可写（SCOPE_DENIED 403）
+        admin_path = self.workspace / ("project-" + uuid.uuid4().hex)
+        admin_path.mkdir()
+        subprocess.run(["git", "init", "--initial-branch=master", str(admin_path)],
+                       check=True, capture_output=True)
+        other = self.api.request("POST", "/projects", {
+            "name": "e2e-authz-other", "path": admin_path.as_posix(), "defaultBranch": "master",
+            "tags": ["e2e"], "status": "ACTIVE"})
+        self.addCleanup(self.api.request, "DELETE", "/projects/" + other["id"])
+        client.request("POST", f"/projects/{other['id']}/requirements",
+                       {"title": "非成员写"}, expected=403)
+        self.assertIn("items", client.request("GET", f"/projects/{other['id']}/requirements"))
+
+        # OWNER_ONLY：本人工作日志可建（归属=服务端身份）
+        entry = client.request("POST", "/worklog/entries", {
+            "workDate": "2026-11-04", "title": "e2e 条目", "entryType": "DEV", "hours": 1.0})
+        self.assertTrue(entry["id"])
+
+        # VIEWER 只读底线：baseRole 降级后，即使有 ACTION + 项目 OWNER 也写不动
+        self.api.request("PUT", "/auth/roles/" + code, {"name": "E2E 核心授权", "baseRole": "VIEWER"})
+        client.login(username, password)
+        client.request("POST", own_reqs, {"title": "viewer 写"}, expected=403)
+        client.request("POST", "/worklog/entries", {
+            "workDate": "2026-11-04", "title": "viewer 条目", "entryType": "DEV",
+            "hours": 1.0}, expected=403)
+        self.assertIn("items", client.request("GET", own_reqs))
+
 
 class CopilotContract(unittest.TestCase):
     """Migrated from cap76_tools_contract.py; GET-only, requires admin."""

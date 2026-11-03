@@ -129,6 +129,13 @@
       "suite": "regression",
       "owner": "project",
       "cap": "CAP-105"
+    },
+    {
+      "id": "regression.core-authorization-boundaries",
+      "test": "Regression.test_core_authorization_boundaries",
+      "suite": "regression",
+      "owner": "auth",
+      "cap": "CAP-108"
     }
   ]
 }
