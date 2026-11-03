@@ -79,5 +79,70 @@ class ToolchainDetectorTest {
             return null;
         }).detect();
         assertEquals(List.of("java", "mvn", "node", "npm", "docker", "git"), probed);
+        assertEquals(probed, ToolchainDetector.targetKeys());
+    }
+
+    // ---- CAP-106 FR-05/FR-07 ----
+
+    @Test
+    void 显式路径优先且版本覆盖PATH结果() {
+        Map<String, String> out = new ToolchainDetector(cmd -> switch (cmd.get(0)) {
+            case "/opt/jdk21/bin/java" -> "openjdk version \"21.0.7\" 2025-04-15";
+            case "java" -> "openjdk version \"17.0.9\" 2023-10-17";
+            default -> null;
+        }).detect(Map.of("java", "/opt/jdk21/bin/java"));
+
+        assertEquals("21.0.7", out.get("java"), "显式路径探测成功的版本须覆盖 PATH 探测结果");
+    }
+
+    @Test
+    void 显式路径探测失败回落PATH() {
+        Map<String, String> out = new ToolchainDetector(cmd ->
+                "java".equals(cmd.get(0)) ? "openjdk version \"17.0.9\" 2023-10-17" : null)
+                .detect(Map.of("java", "/nonexistent/bin/java"));
+
+        assertEquals("17.0.9", out.get("java"), "显式路径失败须回落 PATH 探测");
+    }
+
+    @Test
+    void detectOne未知key返回null() {
+        assertNull(new ToolchainDetector(cmd -> "anything").detectOne("python", Map.of(), Map.of()));
+    }
+
+    @Test
+    void detectOne显式路径优先于PATH覆盖(@org.junit.jupiter.api.io.TempDir java.nio.file.Path tmp)
+            throws Exception {
+        java.nio.file.Path bin = java.nio.file.Files.createDirectory(tmp.resolve("bin"));
+        java.nio.file.Path javaExe = bin.resolve("java");
+        java.nio.file.Files.writeString(javaExe, "#!/bin/sh\n");
+        javaExe.toFile().setExecutable(true);
+
+        String version = new ToolchainDetector(cmd ->
+                cmd.get(0).equals(javaExe.toFile().getAbsolutePath())
+                        ? "openjdk version \"21.0.7\" 2025-04-15" : null)
+                .detectOne("java", Map.of(), Map.of("PATH", bin.toString()));
+        assertEquals("21.0.7", version, "envOverlay PATH 扫到可执行文件后须以绝对路径探测");
+    }
+
+    @Test
+    void detectOneJava回落JAVA_HOME(@org.junit.jupiter.api.io.TempDir java.nio.file.Path tmp)
+            throws Exception {
+        java.nio.file.Path bin = java.nio.file.Files.createDirectories(tmp.resolve("jdk/bin"));
+        java.nio.file.Path javaExe = bin.resolve("java");
+        java.nio.file.Files.writeString(javaExe, "#!/bin/sh\n");
+        javaExe.toFile().setExecutable(true);
+
+        String version = new ToolchainDetector(cmd ->
+                cmd.get(0).equals(javaExe.toFile().getAbsolutePath())
+                        ? "openjdk version \"21.0.7\" 2025-04-15" : null)
+                .detectOne("java", Map.of(), Map.of("JAVA_HOME", tmp.resolve("jdk").toString()));
+        assertEquals("21.0.7", version, "PATH 无覆盖时须尝试 JAVA_HOME/bin/java");
+    }
+
+    @Test
+    void detectOne全程未命中返回null() {
+        assertNull(new ToolchainDetector(cmd -> null)
+                .detectOne("java", Map.of("java", "/nonexistent/bin/java"),
+                        Map.of("PATH", "/nonexistent", "JAVA_HOME", "/nonexistent")));
     }
 }

@@ -110,6 +110,15 @@ public interface AgentNodeConnector {
     }
 
     /**
+     * CAP-106 FR-01：节点级环境变量（agent_nodes.env_json，明文 KV；未配置 = 空表）。
+     * 作为 exec/proc/program 帧 env 合并的最低优先基底（节点 env &lt; 测试环境 variables
+     * &lt; 用例/步骤 env），由服务端在下发前合并，runner 侧无感知。
+     */
+    default Map<String, String> nodeEnv(String nodeId) {
+        return Map.of();
+    }
+
+    /**
      * CAP-34 FR-07 标签调度：在在线节点中挑一个标签覆盖全部 required 的（无命中返回 null）。
      * 默认 null（未装配 agent 模块 = 无节点可挑）。
      */
