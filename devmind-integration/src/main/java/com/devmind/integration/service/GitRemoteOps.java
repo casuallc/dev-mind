@@ -338,10 +338,21 @@ public class GitRemoteOps {
 
     /**
      * CAP-29：fetch 后把已检出的默认分支快进到 origin/&lt;branch&gt;（纯本地操作，无网络/凭据）。
-     * 服务端克隆是只读用途的非裸库，本地分支不随 fetch 移动；失败（分叉等）由调用方忽略。
+     * 服务端克隆是只读用途的非裸库，本地分支不随 fetch 移动；失败（分叉等）由调用方决定
+     * 是否回落 {@link #checkoutReset}（远端 force push 后 ff 永不恢复，必须重置）。
      */
     public GitResult ffOnly(String repoPath, String upstreamRef) {
         return exec(repoPath, null, List.of("merge", "--ff-only", upstreamRef));
+    }
+
+    /**
+     * CAP-29：非快进兜底——远端 force push（或默认分支漂移）后本地与 origin 历史分叉，
+     * ff-only 永久失败、工作区停在旧提交。服务端克隆是只读镜像（本地无有价值提交），
+     * 直接 {@code git checkout -f -B <branch> <upstreamRef>} 重置对齐远端；-f 同时丢弃
+     * 可能的脏工作区，且顺带处理本地检出还停在旧默认分支的情况。
+     */
+    public GitResult checkoutReset(String repoPath, String branch, String upstreamRef) {
+        return exec(repoPath, null, List.of("checkout", "-f", "-B", branch.trim(), upstreamRef));
     }
 
     /**

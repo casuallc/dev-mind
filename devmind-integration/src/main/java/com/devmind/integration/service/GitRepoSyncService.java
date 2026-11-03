@@ -241,17 +241,28 @@ public class GitRepoSyncService {
                     mirrorDefaultBranchToProjectRepos(repo);
                 }
             }
-            // 本地检出分支不随 fetch 移动：快进到 origin/<默认分支>，供扫描/构建读到最新代码
+            // 本地检出分支不随 fetch 移动：快进到 origin/<默认分支>，供扫描/构建读到最新代码。
+            // 非快进（远端 force push / 默认分支漂移致历史分叉）时 ff 永不恢复，只读镜像
+            // 直接重置对齐远端；重置也失败则记 lastFetchError 让 UI 可见（工作区仍是旧代码）
+            String fetchError = null;
             if (repo.getDefaultBranch() != null && !repo.getDefaultBranch().isBlank()) {
-                GitRemoteOps.GitResult ff = gitOps.ffOnly(repo.getLocalPath(),
-                        "origin/" + repo.getDefaultBranch().trim());
+                String branch = repo.getDefaultBranch().trim();
+                GitRemoteOps.GitResult ff = gitOps.ffOnly(repo.getLocalPath(), "origin/" + branch);
                 if (!ff.ok()) {
-                    log.info("默认分支快进跳过（非 ff，不影响抓取结果）: gitRepoId={} branch={}",
-                            repo.getId(), repo.getDefaultBranch());
+                    GitRemoteOps.GitResult reset = gitOps.checkoutReset(repo.getLocalPath(),
+                            branch, "origin/" + branch);
+                    if (reset.ok()) {
+                        log.warn("默认分支非快进（疑似远端 force push），已重置对齐远端: gitRepoId={} branch={}",
+                                repo.getId(), branch);
+                    } else {
+                        fetchError = truncate("本地检出对齐 origin/" + branch + " 失败: " + reset.output(), 1000);
+                        log.warn("默认分支非快进且重置失败: gitRepoId={} branch={} err={}",
+                                repo.getId(), branch, reset.output());
+                    }
                 }
             }
             repo.setLastFetchAt(Instant.now());
-            repo.setLastFetchError(null);
+            repo.setLastFetchError(fetchError);
         } else {
             repo.setLastFetchAt(Instant.now());
             repo.setLastFetchError(truncate(result.output(), 1000));

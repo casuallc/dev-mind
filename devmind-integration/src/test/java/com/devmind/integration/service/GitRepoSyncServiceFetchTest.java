@@ -96,6 +96,10 @@ class GitRepoSyncServiceFetchTest {
     static class StubGitRemoteOps extends GitRemoteOps {
         int fetchCalls = 0;
         int cloneCalls = 0;
+        int resetCalls = 0;
+        /** 置 true 模拟远端 force push：ff 失败，走 checkoutReset 兜底 */
+        boolean ffFails = false;
+        boolean resetFails = false;
 
         StubGitRemoteOps() {
             // 全部网络方法已覆盖，出口路由器永不触达——传空 ObjectProvider 即可
@@ -137,7 +141,14 @@ class GitRepoSyncServiceFetchTest {
 
         @Override
         public GitResult ffOnly(String repoPath, String upstreamRef) {
-            return new GitResult(true, "");
+            return ffFails ? new GitResult(false, "Not possible to fast-forward")
+                    : new GitResult(true, "");
+        }
+
+        @Override
+        public GitResult checkoutReset(String repoPath, String branch, String upstreamRef) {
+            resetCalls++;
+            return resetFails ? new GitResult(false, "checkout failed") : new GitResult(true, "");
         }
     }
 
@@ -222,6 +233,44 @@ class GitRepoSyncServiceFetchTest {
 
         assertEquals("main", gitRepos.store.get(repo.getId()).getDefaultBranch());
         assertEquals(List.of(), mirroredProjectIds);
+    }
+
+    @Test
+    void fetchWithForcePushedRemoteResetsToOrigin() throws IOException {
+        // 远端 force push 后本地与 origin 分叉：ff 永久失败，须 checkoutReset 重置对齐，
+        // 否则工作区永远停在旧提交（gitRepoId=2 develop 实炸：抓取成功但代码不更新）
+        GitRepositoryEntity repo = newReadyRepo("develop", true);
+        gitOps.ffFails = true;
+
+        service.fetchOne(repo.getId());
+
+        assertEquals(1, gitOps.resetCalls);
+        assertEquals(1, gitOps.fetchCalls);
+        assertNull(gitRepos.store.get(repo.getId()).getLastFetchError());
+    }
+
+    @Test
+    void fetchWithForcePushAndResetFailureSurfacesError() throws IOException {
+        // 重置也失败（如工作区锁文件）时 lastFetchError 必须可见，不能静默留旧代码
+        GitRepositoryEntity repo = newReadyRepo("develop", true);
+        gitOps.ffFails = true;
+        gitOps.resetFails = true;
+
+        service.fetchOne(repo.getId());
+
+        assertEquals(1, gitOps.resetCalls);
+        String err = gitRepos.store.get(repo.getId()).getLastFetchError();
+        org.junit.jupiter.api.Assertions.assertNotNull(err);
+        org.junit.jupiter.api.Assertions.assertTrue(err.contains("origin/develop"));
+    }
+
+    @Test
+    void fetchFastForwardSkipsReset() throws IOException {
+        GitRepositoryEntity repo = newReadyRepo("main", false);
+
+        service.fetchOne(repo.getId());
+
+        assertEquals(0, gitOps.resetCalls);
     }
 
     @Test
