@@ -129,6 +129,13 @@
       "suite": "regression",
       "owner": "project",
       "cap": "CAP-105"
+    },
+    {
+      "id": "regression.security-scan-pipeline",
+      "test": "Regression.test_security_scan_pipeline",
+      "suite": "regression",
+      "owner": "security",
+      "cap": "CAP-66"
     }
   ]
 }

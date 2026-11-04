@@ -5,7 +5,7 @@
 > - 校验登记：`python tests/e2e/run.py --check`；查看正式用例：`python tests/e2e/run.py --list`
 > - 当前代码隔离回归：先 `mvn -q install -DskipTests`，再 `python tests/e2e/run.py --suite regression --isolated`
 > - 共享实例只读冒烟：提供 `E2E_TOKEN` 或 `E2E_USER` + `E2E_PASSWORD`，运行 `python tests/e2e/run.py --suite smoke --base <含/api的地址>`
-> - JUnit 报告统一为 `tmp/e2e/junit.xml`；当前 17 个正式用例（smoke 5、隔离回归 9、contract 3）。
+> - JUnit 报告统一为 `tmp/e2e/junit.xml`；当前 19 个正式用例（smoke 5、隔离回归 11、contract 3）。
 > - 历史脚本共 110 个，登记在 `e2e/legacy.json`；Python 静态索引见 [e2e/python-inventory.md](e2e/python-inventory.md)。
 > - [194 项目接入步骤](../docs/guides/platform-self-deploy-194.md#统一-e2e-套件接入)
 
@@ -45,7 +45,7 @@ tests/
 | 套件 | 用例 | 说明 |
 |------|------|------|
 | smoke | health / anonymous / identity / projects / changelog | 只读冒烟，可打共享实例；不写业务数据 |
-| regression | project-lifecycle / menu-grants / role-management / fine-grained-permissions / test-case-version-run-evidence / test-asset-review-gate / plan-orchestration-baseline-stats-evidence / distributed-matrix-shard / runner-partial-failure-program-case | 写操作回归，必须 `--isolated` 起私有实例；CAP-104 六条：前两条覆盖 M1 用例库与资产/证据链，第三条覆盖 M2 编排/基线/统计/证据包与导出权限，后两条自起真 runner，覆盖 M3 矩阵/分片、节点部分失败与 M1.5 程序型用例（含密钥只走环境变量） |
+| regression | project-lifecycle / menu-grants / role-management / fine-grained-permissions / test-case-version-run-evidence / test-asset-review-gate / plan-orchestration-baseline-stats-evidence / distributed-matrix-shard / runner-partial-failure-program-case / requirement-ai-expand / security-scan-pipeline | 写操作回归，必须 `--isolated` 起私有实例；CAP-104 六条：前两条覆盖 M1 用例库与资产/证据链，第三条覆盖 M2 编排/基线/统计/证据包与导出权限，后两条自起真 runner，覆盖 M3 矩阵/分片、节点部分失败与 M1.5 程序型用例（含密钥只走环境变量）；CAP-66 自起真 runner + mock 引擎（罐装报告换版驱动 diff），覆盖三引擎真上传/归一化/白名单过滤计数/引入链回填/test scope 默认过滤/密钥脱敏/修复建议/二扫 diff 四态/CSV 导出/toolcheck |
 | contract | copilot document-metadata / operation-inventory / operation-contracts | 契约快照；`tests/legacy/api/cap76_tools_contract.py` 为兼容入口，内部转调统一入口 |
 
 ## 起独立实例跑 E2E（不碰本机 dev 实例与库）

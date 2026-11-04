@@ -1017,6 +1017,350 @@ printf '%s' '{"contractVersion":"1","status":"pass","message":"e2e program pass"
         self.api.request("POST", "/projects/ghost-nope/requirements/ai-expand",
                          {"points": "x"}, expected=404)
 
+    # ---------------- CAP-66 安全扫描（mock 引擎 + 真 runner + 真上传链路） ----------------
+
+    def _sec_start_runner(self, name, project_id, work_dir, bin_dirs):
+        """起真 runner：项目工作区映射 + scan.<engine>.path 注入 mock 工具目录 + exec 白名单。"""
+        node_id, token = self._cap104_issue_node(name)
+        folder = self.workspace / ("runner-" + uuid.uuid4().hex[:8])
+        folder.mkdir()
+        jar_source = ROOT / "devmind-agent-runner" / "target" / "devmind-agent-runner.jar"
+        self.assertTrue(jar_source.is_file(),
+                        "runner jar missing; build with mvn -q install -DskipTests")
+        jar = folder / "devmind-agent-runner.jar"
+        shutil.copy2(jar_source, jar)
+        java = shutil.which("java")
+        bash = shutil.which("bash")
+        curl = shutil.which("curl")
+        self.assertTrue(java and bash and curl, "java/bash/curl must be on PATH")
+        parsed = urllib.parse.urlsplit(self.api.base)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        ws_scheme = "wss" if parsed.scheme == "https" else "ws"
+        config = folder / "agent.properties"
+        config.write_text("\n".join([
+            f"serverUrl={ws_scheme}://{parsed.hostname}:{port}/ws/agent",
+            f"token={token}",
+            "executor=fake",
+            "execAllowlist=dependency-check,curl,mvn,gradle,semgrep,mkdir,gitleaks",
+            f"execShell={Path(bash).as_posix()}",
+            f"workDir={(folder / 'work').as_posix()}",
+            f"project.{project_id}={work_dir.as_posix()}",
+            f"scan.sca.path={bin_dirs['sca'].as_posix()}",
+            f"scan.sast.path={bin_dirs['sast'].as_posix()}",
+            f"scan.secrets.path={bin_dirs['secrets'].as_posix()}",
+            f"workspaceRoot={(folder / 'workspaces').as_posix()}",
+            f"worklogRoot={(folder / 'worklog').as_posix()}",
+            "gitProxyEnabled=false",
+            "maxConcurrent=4",
+            "gcInitialDelayMinutes=600",
+            "gcIntervalMinutes=600",
+            "partialMessages=false",
+        ]) + "\n", encoding="utf-8")
+        env = os.environ.copy()
+        env["PATH"] = str(Path(bash).parent) + os.pathsep + env.get("PATH", "")
+        log = (folder / "runner.log").open("w", encoding="utf-8")
+        proc = subprocess.Popen([java, "-jar", str(jar), str(config)], cwd=folder, env=env,
+                                stdout=log, stderr=subprocess.STDOUT,
+                                start_new_session=os.name != "nt")
+        stopped = {"value": False}
+
+        def stop():
+            if stopped["value"]:
+                return
+            stopped["value"] = True
+            try:
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                                   capture_output=True)
+                    proc.wait(timeout=15)
+                else:
+                    try:
+                        os.killpg(proc.pid, signal.SIGTERM)
+                        proc.wait(timeout=10)
+                    except ProcessLookupError:
+                        pass
+                    except subprocess.TimeoutExpired:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                        proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            finally:
+                log.close()
+
+        self.addCleanup(stop)
+        deadline = time.monotonic() + 90
+        while True:
+            nodes = self.api.request("GET", "/agent-nodes")
+            node = next((n for n in nodes if str(n["id"]) == node_id), None)
+            if node and node.get("status") == "ONLINE" and (node.get("protocolVersion") or 0) >= 24:
+                return node_id
+            self.assertIsNone(proc.poll(), "runner exited before ONLINE; see tmp runner.log")
+            self.assertLess(time.monotonic(), deadline, "runner did not reach ONLINE within 90s")
+            time.sleep(1)
+
+    @staticmethod
+    def _sec_write_tool(directory, name, body):
+        path = directory / name
+        path.write_text(body, encoding="utf-8", newline="\n")
+        os.chmod(path, 0o755)
+
+    def _sec_wait_scan(self, scan_id, timeout=240):
+        deadline = time.monotonic() + timeout
+        while True:
+            detail = self.api.request("GET", f"/security/scans/{scan_id}")
+            if detail["scan"]["status"] in ("SUCCESS", "FAILED", "CANCELED"):
+                return detail
+            self.assertLess(time.monotonic(), deadline,
+                            f"scan {scan_id} not finished in {timeout}s: {detail['scan']}")
+            time.sleep(2)
+
+    @staticmethod
+    def _sec_sca_report(with_junit, with_log4j):
+        deps = [
+            {"fileName": "internal-lib-1.0.0.jar",
+             "packages": [{"id": "pkg:maven/com.apusic/internal-lib@1.0.0"}],
+             "vulnerabilities": [{"name": "CVE-2023-00001", "source": "NVD",
+                                  "cvssv3": {"baseScore": 7.5, "attackVector": "NETWORK"},
+                                  "description": "internal noise", "cwes": ["CWE-89"]}]},
+            {"fileName": "commons-text-1.9.jar", "scope": "compile",
+             "packages": [{"id": "pkg:maven/org.apache.commons/commons-text@1.9"}],
+             "vulnerabilities": [{"name": "CVE-2022-42889", "source": "NVD",
+                                  "cvssv3": {"baseScore": 9.8, "attackVector": "NETWORK"},
+                                  "description": "Text4Shell", "cwes": ["CWE-94"],
+                                  "vulnerableSoftware": [{"software": {
+                                      "id": "cpe:2.3:a:apache:commons-text:*:*:*:*:*:*:*:*",
+                                      "versionEndExcluding": "1.10.0"}}]}]},
+            {"fileName": "okio-2.8.0.jar",
+             "packages": [{"id": "pkg:maven/com.squareup.okio/okio@2.8.0"}],
+             "vulnerabilities": [{"name": "CVE-2023-3635", "source": "NVD",
+                                  "cvssv3": {"baseScore": 5.9},
+                                  "description": "GzipSource DoS", "cwes": []}]},
+        ]
+        if with_junit:
+            deps.append({"fileName": "junit-4.12.jar", "scope": "test",
+                         "packages": [{"id": "pkg:maven/junit/junit@4.12"}],
+                         "vulnerabilities": [{"name": "CVE-2020-15250", "source": "NVD",
+                                              "cvssv3": {"baseScore": 4.4},
+                                              "description": "TemporaryFolder 信息泄露", "cwes": []}]})
+        if with_log4j:
+            deps.append({"fileName": "log4j-core-2.14.1.jar",
+                         "packages": [{"id": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"}],
+                         "vulnerabilities": [{"name": "CVE-2021-44228", "source": "NVD",
+                                              "cvssv3": {"baseScore": 10.0, "attackVector": "NETWORK"},
+                                              "description": "Log4Shell", "cwes": ["CWE-502"],
+                                              "vulnerableSoftware": [{"software": {
+                                                  "id": "cpe:2.3:a:apache:log4j:*:*:*:*:*:*:*:*",
+                                                  "versionStartIncluding": "2.0",
+                                                  "versionEndExcluding": "2.15.0"}}]}]})
+        return json.dumps({"dependencies": deps})
+
+    def test_security_scan_pipeline(self):
+        # CAP-66 §9：mock 引擎（读工作区 .devmind-mock/ 的罐装报告）+ 真 runner + 真上传/归一化链路。
+        # 覆盖：白名单过滤计数、引入链回填（direct/transitive/depPath）、test scope 默认不进列表、
+        # 密钥脱敏、修复建议（UPGRADE_DIRECT）、二次扫描 diff（SUPPRESSED/EXISTING/FIXED/NEW）、
+        # 报告附件与导出、引擎子状态、toolcheck。
+        secret = "AKIAIOSFODNN7EXAMPLE"
+        sast_report = json.dumps({"version": "2.1.0", "runs": [
+            {"tool": {"driver": {"name": "semgrep", "rules": [
+                {"id": "java.lang.security.audit.sqli"},
+                {"id": "java.lang.security.weak-crypto"}]}},
+             "results": [
+                 {"ruleId": "java.lang.security.audit.sqli", "level": "error",
+                  "message": {"text": "SQL 注入风险"},
+                  "locations": [{"physicalLocation": {
+                      "artifactLocation": {"uri": "src/main/java/com/example/App.java"},
+                      "region": {"startLine": 42, "snippet": {"text": "stmt.executeQuery(sql)"}}}}]},
+                 {"ruleId": "java.lang.security.weak-crypto", "level": "warning",
+                  "message": {"text": "弱哈希 MD5"},
+                  "locations": [{"physicalLocation": {
+                      "artifactLocation": {"uri": "src/main/java/com/example/Crypto.java"},
+                      "region": {"startLine": 10, "snippet": {"text": "md5.digest()"}}}}]}]}]})
+        secrets_report = json.dumps({"version": "2.1.0", "runs": [
+            {"tool": {"driver": {"name": "gitleaks", "rules": [{"id": "aws-access-token"}]}},
+             "results": [
+                 {"ruleId": "aws-access-token", "level": "error",
+                  "message": {"text": "AWS Access Key detected"},
+                  "locations": [{"physicalLocation": {
+                      "artifactLocation": {"uri": "config/keys.txt"},
+                      "region": {"startLine": 3, "snippet": {"text": secret}}}}]}]}]})
+        dep_tree = "\n".join([
+            "com.example:app:jar:1.0.0",
+            "+- org.apache.commons:commons-text:jar:1.9:compile",
+            "|  +- com.squareup.okio:okio:jar:2.8.0:compile",
+            "+- junit:junit:jar:4.12:test",
+            "\\- org.apache.logging.log4j:log4j-core:jar:2.14.1:compile",
+        ])
+
+        # 项目（本地 git 库，CAP-02 建项目自动注册主库）
+        proj_path = self.workspace / ("sec-proj-" + uuid.uuid4().hex[:8])
+        proj_path.mkdir()
+        subprocess.run(["git", "init", "--initial-branch=master", str(proj_path)],
+                       check=True, capture_output=True)
+        project = self.api.request("POST", "/projects", {
+            "name": "e2e-security-" + uuid.uuid4().hex[:8], "path": proj_path.as_posix(),
+            "defaultBranch": "master", "tags": ["e2e"], "status": "ACTIVE"})
+        project_id = project["id"]
+        self.addCleanup(self.api.request, "DELETE", "/projects/" + project_id)
+
+        # runner 项目工作区：pom.xml 触发 SCA 依赖树采集分支；.devmind-mock/ 为罐装报告源
+        work = self.workspace / ("sec-work-" + uuid.uuid4().hex[:8])
+        mock_src = work / ".devmind-mock"
+        mock_src.mkdir(parents=True)
+        (work / "pom.xml").write_text("<project/>", encoding="utf-8")
+        (mock_src / "sca-report.json").write_text(
+            self._sec_sca_report(with_junit=True, with_log4j=False), encoding="utf-8")
+        (mock_src / "sast-report.sarif").write_text(sast_report, encoding="utf-8")
+        (mock_src / "secrets-report.sarif").write_text(secrets_report, encoding="utf-8")
+        (mock_src / "dep-tree.txt").write_text(dep_tree, encoding="utf-8")
+
+        # mock 引擎（SCA 目录附带 mock mvn 产出依赖树）
+        bin_sca = self.workspace / ("bin-sca-" + uuid.uuid4().hex[:8])
+        bin_sast = self.workspace / ("bin-sast-" + uuid.uuid4().hex[:8])
+        bin_secrets = self.workspace / ("bin-secrets-" + uuid.uuid4().hex[:8])
+        for d in (bin_sca, bin_sast, bin_secrets):
+            d.mkdir()
+        self._sec_write_tool(bin_sca, "dependency-check", """#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then echo "Dependency-Check version 0.0.0-e2e"; exit 0; fi
+out=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--out" ]; then out="$a"; fi
+  prev="$a"
+done
+mkdir -p "$out"
+cp .devmind-mock/sca-report.json "$out/dependency-check-report.json"
+echo "<html>e2e</html>" > "$out/dependency-check-report.html"
+""")
+        self._sec_write_tool(bin_sca, "mvn", """#!/usr/bin/env bash
+for a in "$@"; do
+  case "$a" in
+    -DoutputFile=*) cp .devmind-mock/dep-tree.txt "${a#-DoutputFile=}" ;;
+  esac
+done
+exit 0
+""")
+        self._sec_write_tool(bin_sast, "semgrep", """#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then echo "0.0.0-e2e"; exit 0; fi
+out=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--output" ]; then out="$a"; fi
+  prev="$a"
+done
+cp .devmind-mock/sast-report.sarif "$out"
+exit 1
+""")
+        self._sec_write_tool(bin_secrets, "gitleaks", """#!/usr/bin/env bash
+if [ "$1" = "version" ]; then echo "0.0.0-e2e"; exit 0; fi
+out=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--report-path" ]; then out="$a"; fi
+  prev="$a"
+done
+cp .devmind-mock/secrets-report.sarif "$out"
+exit 1
+""")
+        node_id = self._sec_start_runner("e2e-security-" + uuid.uuid4().hex[:8],
+                                         project_id, work,
+                                         {"sca": bin_sca, "sast": bin_sast, "secrets": bin_secrets})
+
+        # 工具自检（ADMIN）：三引擎 --version 真跑
+        checks = self.api.request("POST", f"/security/nodes/{node_id}/toolcheck")
+        self.assertEqual(3, len(checks))
+        for item in checks:
+            self.assertTrue(item["ok"], f"toolcheck {item['engine']}: {item['output']}")
+
+        # 项目白名单：内部 groupId 前缀
+        self.api.request("PUT", f"/security/projects/{project_id}/config",
+                         {"internalGroupPrefixes": "com.apusic"})
+        cfg = self.api.request("GET", f"/security/projects/{project_id}/config")
+        self.assertIn("com.apusic", cfg["effectivePrefixes"])
+
+        # ---- 扫描 1：全引擎
+        scan1 = self.api.request("POST", f"/security/scans?projectId={project_id}",
+                                 {"engines": ["sca", "sast", "secrets"], "agentNodeId": node_id})
+        d1 = self._sec_wait_scan(scan1["id"])
+        self.assertEqual("SUCCESS", d1["scan"]["status"], d1["scan"].get("errorMessage"))
+        self.assertEqual("SUCCESS", d1["engineStatus"]["sca"]["status"])
+        self.assertEqual("SUCCESS", d1["engineStatus"]["sast"]["status"])
+        self.assertEqual("SUCCESS", d1["engineStatus"]["secrets"]["status"])
+        formats = {(r["engine"], r["format"]) for r in d1["reports"]}
+        self.assertIn(("sca", "json"), formats)
+        self.assertIn(("sca", "html"), formats)
+        self.assertIn(("sca", "deptree"), formats)
+        self.assertIn(("sast", "sarif"), formats)
+        self.assertIn(("secrets", "sarif"), formats)
+        # 白名单过滤计数：com.apusic 内部构件被滤
+        self.assertEqual(1, d1["scan"]["filteredCount"])
+
+        all1 = self.api.request("GET", f"/security/scans/{scan1['id']}/findings"
+                                       "?status=ALL&includeTestScope=true")
+        self.assertNotIn(secret, json.dumps(all1, ensure_ascii=False), "密钥原文泄漏进发现响应")
+        by_cve = {json.loads(f["detailJson"]).get("cve"): f for f in all1 if f["engine"] == "sca"}
+        self.assertNotIn("CVE-2023-00001", by_cve, "白名单构件未过滤")
+        ct = by_cve["CVE-2022-42889"]
+        ct_detail = json.loads(ct["detailJson"])
+        self.assertEqual("NEW", ct["status"])
+        self.assertEqual("CRITICAL", ct["severity"])
+        self.assertTrue(ct["directDep"])
+        self.assertEqual("org.apache.commons:commons-text", ct_detail["depPath"])
+        self.assertEqual("UPGRADE_DIRECT", ct_detail["remediation"]["action"])
+        self.assertEqual("1.10.0", ct_detail["remediation"]["recommendedVersion"])
+        okio = by_cve["CVE-2023-3635"]
+        self.assertEqual("MEDIUM", okio["severity"])
+        self.assertFalse(okio["directDep"])
+        self.assertEqual("org.apache.commons:commons-text > com.squareup.okio:okio",
+                         json.loads(okio["detailJson"])["depPath"])
+        junit = by_cve["CVE-2020-15250"]
+        self.assertEqual("test", junit["depScope"])
+        # 默认查询滤 test scope
+        default1 = self.api.request("GET", f"/security/scans/{scan1['id']}/findings")
+        self.assertNotIn("CVE-2020-15250",
+                         {json.loads(f["detailJson"]).get("cve") for f in default1})
+        # SAST 两条 + 脱敏密钥一条
+        sast_rules = {f["ruleId"]: f for f in all1 if f["engine"] == "sast"}
+        self.assertEqual("HIGH", sast_rules["java.lang.security.audit.sqli"]["severity"])
+        self.assertEqual("MEDIUM", sast_rules["java.lang.security.weak-crypto"]["severity"])
+        secrets_rows = [f for f in all1 if f["engine"] == "secrets"]
+        self.assertEqual(1, len(secrets_rows))
+        # 脱敏红线：脱敏后内容只进 codeHash 哈希，响应任何字段都不得带原文（上方已全量断言），
+        # detailJson 也不得回流 snippet 原文
+        self.assertNotIn("snippet", json.loads(secrets_rows[0]["detailJson"]))
+
+        # 抑制 commons-text（误报），供二扫 diff 断言 SUPPRESSED
+        self.api.request("POST", "/security/suppressions",
+                         {"findingId": ct["id"], "type": "FALSE_POSITIVE",
+                          "reason": "e2e 误报：不使用 StringSubstitutor"})
+
+        # ---- 扫描 2：换 v2 报告（去 junit、加 log4j）
+        (mock_src / "sca-report.json").write_text(
+            self._sec_sca_report(with_junit=False, with_log4j=True), encoding="utf-8")
+        scan2 = self.api.request("POST", f"/security/scans?projectId={project_id}",
+                                 {"engines": ["sca", "sast", "secrets"], "agentNodeId": node_id})
+        d2 = self._sec_wait_scan(scan2["id"])
+        self.assertEqual("SUCCESS", d2["scan"]["status"], d2["scan"].get("errorMessage"))
+        all2 = self.api.request("GET", f"/security/scans/{scan2['id']}/findings"
+                                       "?status=ALL&includeTestScope=true")
+        self.assertNotIn(secret, json.dumps(all2, ensure_ascii=False))
+        by_cve2 = {json.loads(f["detailJson"]).get("cve"): f for f in all2 if f["engine"] == "sca"}
+        self.assertEqual("SUPPRESSED", by_cve2["CVE-2022-42889"]["status"], "抑制未在 diff 生效")
+        self.assertEqual("EXISTING", by_cve2["CVE-2023-3635"]["status"])
+        self.assertEqual("FIXED", by_cve2["CVE-2020-15250"]["status"])
+        log4j = by_cve2["CVE-2021-44228"]
+        self.assertEqual("NEW", log4j["status"])
+        self.assertEqual("CRITICAL", log4j["severity"])
+        self.assertEqual("org.apache.logging.log4j:log4j-core",
+                         json.loads(log4j["detailJson"])["depPath"])
+        # EXISTING 的 firstSeen 延续首扫
+        self.assertEqual(scan1["id"], by_cve2["CVE-2023-3635"]["firstSeenScanId"])
+        # 导出 CSV：行数与内容
+        exported = self.api.request("GET", f"/security/scans/{scan2['id']}/export?format=csv")
+        self.assertGreater(exported["count"], 0)
+        csv_text = self.api.download(f"/attachments/{exported['attachmentId']}/raw").decode("utf-8")
+        self.assertIn("CVE-2021-44228", csv_text)
+        self.assertNotIn(secret, csv_text)
+
 
 class CopilotContract(unittest.TestCase):
     """Migrated from cap76_tools_contract.py; GET-only, requires admin."""

@@ -92,7 +92,10 @@ def isolated_app(folder):
               "devmind.test.evidence.root-dir": str(data / "test-evidence"),
               "devmind.test.assets.root-dir": str(data / "test-assets"),
               "devmind.worklog.daily-enabled": False, "devmind.worklog.weekly-enabled": False,
-              "devmind.worklog.git-import-enabled": False}
+              "devmind.worklog.git-import-enabled": False,
+              # CAP-66：报告上行端点拼给 runner；情报同步走外网，隔离环境关闭（富化由单测覆盖）
+              "devmind.security.server-url": f"http://127.0.0.1:{port}",
+              "devmind.security.intel-enabled": False}
     env["SPRING_APPLICATION_JSON"] = json.dumps(config)
     env["SPRING_CONFIG_LOCATION"] = "classpath:/application.yml"
     mvn = shutil.which("mvn")
