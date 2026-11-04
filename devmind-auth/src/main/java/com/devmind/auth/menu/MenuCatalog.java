@@ -75,6 +75,7 @@ public final class MenuCatalog {
             menu("project.deployments", "部署", "/deployments", MenuItemEntity.ZONE_PROJECT, null, null, 60),
             menu("project.tests", "测试", "/tests", MenuItemEntity.ZONE_PROJECT, null, null, 70),
             menu("project.releases", "发版", "/releases", MenuItemEntity.ZONE_PROJECT, null, null, 80),
+            menu("project.security", "安全", "/security", MenuItemEntity.ZONE_PROJECT, null, null, 90),
             tab("project.sessions", "chat", "对话", 10),
             tab("project.sessions", "list", "会话列表", 20),
             action("project.sessions", "create", "新建会话", 10, true),
@@ -133,6 +134,15 @@ public final class MenuCatalog {
             action("project.releases", "execute", "执行发版", 20, true),
             action("project.releases", "rollback", "回滚发版", 30, true),
             action("project.releases", "delete", "删除发版记录", 40, true),
+            tab("project.security", "scans", "扫描任务", 10),
+            tab("project.security", "findings", "发现列表", 20),
+            tab("project.security", "suppressions", "抑制管理", 30),
+            tab("project.security", "config", "扫描配置", 40),
+            action("project.security", "scan", "发起/取消扫描", 10, true),
+            action("project.security", "suppress", "管理抑制规则", 20, true),
+            action("project.security", "ai", "AI 复核/修复", 30, true),
+            action("project.security", "export", "导出报告", 40, true),
+            action("project.security", "config", "保存扫描配置", 50, true),
 
             // ---------- 后台侧边 ----------
             menu("admin.dashboard", "指挥中心", "/admin/dashboard", MenuItemEntity.ZONE_ADMIN, null, "dashboard", 10),

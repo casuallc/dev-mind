@@ -44,6 +44,7 @@
         <module>devmind-build</module>
         <module>devmind-deploy</module>
         <module>devmind-test</module>
+        <module>devmind-security</module>
         <module>devmind-release</module>
         <module>devmind-changelog</module>
         <module>devmind-flow</module>
@@ -187,6 +188,11 @@
             <dependency>
                 <groupId>com.devmind</groupId>
                 <artifactId>devmind-test</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.devmind</groupId>
+                <artifactId>devmind-security</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

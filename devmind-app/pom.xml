@@ -113,6 +113,10 @@
         </dependency>
         <dependency>
             <groupId>com.devmind</groupId>
+            <artifactId>devmind-security</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.devmind</groupId>
             <artifactId>devmind-release</artifactId>
         </dependency>
         <dependency>

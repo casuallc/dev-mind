@@ -20,6 +20,7 @@ const PROJECT_PAGE_PREFIXES = [
   '/deployments',
   '/tests',
   '/releases',
+  '/security',
 ]
 
 /** 需求详情页（/projects/:id/requirements/:rid）也属项目上下文 */

@@ -82,6 +82,11 @@ public class SecurityConfig {
                         // CAP-73：验证产物包上下行 permitAll 放行，节点 token + run↔节点绑定由控制器/SPI 判定
                         .requestMatchers(HttpMethod.POST, "/api/agent/verify/runs/*/bundle").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/agent/verify/runs/*/bundle").permitAll()
+                        // CAP-66 FR-03：扫描报告上行 permitAll 放行，一次性 X-Scan-Token
+                        // （SHA-256 落库、绑 scanId+engine+TTL）由控制器/服务内校验
+                        .requestMatchers(HttpMethod.POST, "/api/security/scans/*/reports").permitAll()
+                        // CAP-66 FR-12：节点工具自检（远程执行面）仅 ADMIN
+                        .requestMatchers(HttpMethod.POST, "/api/security/nodes/*/toolcheck").hasRole("ADMIN")
                         // CAP-73：agent 触发通道 permitAll 放行，verify 作用域 token 由服务内验签（绑会话+需求）
                         .requestMatchers(HttpMethod.POST, "/api/verify/trigger").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/agent-nodes", "/api/agent-nodes/**").hasRole("ADMIN")

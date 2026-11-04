@@ -20,6 +20,7 @@ import ReleaseConfigPage from '../features/projects/pages/admin/ReleaseConfigPag
 import JiraSyncPage from '../features/projects/pages/admin/JiraSyncPage'
 import LockPage from '../features/projects/pages/admin/LockPage'
 import BuildsPage from '../features/build/pages/BuildsPage'
+import SecurityPage from '../features/security/pages/SecurityPage'
 import DeploymentsPage from '../features/deploy/pages/DeploymentsPage'
 import ReleasesPage from '../features/deploy/pages/ReleasesPage'
 import TestsPage from '../features/test/pages/TestsPage'
@@ -189,6 +190,8 @@ export default function App() {
             <Route path="/releases" element={<ReleasesPage />} />
             <Route path="/tests" element={<TestsPage />} />
             <Route path="/tests/suites/:suiteId" element={<SuiteDetailPage />} />
+            {/* CAP-66 安全扫描中心 */}
+            <Route path="/security" element={<SecurityPage />} />
           </Route>
           {/* CAP-02 项目：列表仅切换器底部入口；详情页保留双参数 URL（可分享，进入时同步当前项目） */}
           <Route path="/projects" element={<ProjectsPage />} />
