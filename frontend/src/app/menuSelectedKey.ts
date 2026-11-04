@@ -22,6 +22,7 @@ const SELECT_PREFIXES: Array<[string, string]> = [
   ['/deployments', '/deployments'],
   ['/releases', '/releases'],
   ['/tests', '/tests'],
+  ['/security', '/security'],
   ['/overview', '/overview'],
   ['/notifications', '/notifications'],
 ]
@@ -48,6 +49,7 @@ const TOPNAV_PREFIXES: Array<[string, string]> = [
   ['/deployments', '/overview'],
   ['/releases', '/overview'],
   ['/tests', '/overview'],
+  ['/security', '/overview'],
   ['/projects', '/overview'],
 ]
 
