@@ -63,6 +63,8 @@ public class ExecHandler {
     private final RunnerConfig config;
     private final RunnerWorkspace workspace;
     private final Consumer<Map<String, Object>> sender;
+    /** CAP-66：scan.<engine>.path 配置（引擎 → 路径），env 带 DEVMIND_SCAN_ENGINE 时 prepend PATH */
+    private final Map<String, String> scanToolPaths;
     /** execId → 运行中的进程（shutdown killAll 用） */
     private final Map<String, Process> active = new ConcurrentHashMap<>();
     /** 进行中的构建工作区 id（GC 跳过用） */
@@ -70,9 +72,15 @@ public class ExecHandler {
     private final Semaphore permits;
 
     public ExecHandler(RunnerConfig config, RunnerWorkspace workspace, Consumer<Map<String, Object>> sender) {
+        this(config, workspace, sender, Map.of());
+    }
+
+    public ExecHandler(RunnerConfig config, RunnerWorkspace workspace, Consumer<Map<String, Object>> sender,
+                       Map<String, String> scanToolPaths) {
         this.config = config;
         this.workspace = workspace;
         this.sender = sender;
+        this.scanToolPaths = scanToolPaths == null ? Map.of() : scanToolPaths;
         this.permits = new Semaphore(Math.max(1, config.maxConcurrent()));
     }
 
@@ -202,6 +210,23 @@ public class ExecHandler {
                 ProcessBuilder pb = new ProcessBuilder(config.execShell(), tmp.toAbsolutePath().toString());
                 pb.directory(cwd.toFile());
                 env.forEach((k, v) -> pb.environment().put(k, v == null ? "" : v));
+                // CAP-66：扫描步骤（env 带 DEVMIND_SCAN_ENGINE）→ 引擎工具目录 prepend PATH。
+                // 配置/探测都落空即失败，错误文案引导补 agent.properties 的 scan.<engine>.path
+                String scanEngine = env.get(ScanToolResolver.ENV_ENGINE);
+                if (scanEngine != null && !scanEngine.isBlank()) {
+                    String binDir = ScanToolResolver.resolveBinDir(scanToolPaths, scanEngine.strip());
+                    if (binDir == null) {
+                        throw new IllegalStateException("扫描引擎 " + scanEngine + " 的工具不可用："
+                                + "agent.properties 未配置 scan." + scanEngine.strip() + ".path，且 PATH 探测不到 "
+                                + ScanToolResolver.binaryName(scanEngine.strip())
+                                + "（安装后配置路径或加入 PATH，再重启 runner）");
+                    }
+                    pb.environment().compute("PATH",
+                            (k, old) -> old == null || old.isBlank() ? binDir
+                                    : binDir + java.io.File.pathSeparator + old);
+                    emit(execId, "stdout", "[runner] 扫描引擎 " + scanEngine.strip()
+                            + " 工具目录已注入 PATH: " + binDir, token);
+                }
                 // CAP-43：节点代理命中 exec scope → exec 脚本进程走代理（脚本内 curl/git 等
                 // 外网流量）。大小写四件全注入；帧 env 已有同名键不覆盖（帧 env 优先）
                 String execProxy = com.devmind.common.agent.exec.NodeProxy.urlFor("exec");

@@ -126,7 +126,13 @@ public class AgentRunnerMain {
         ClaudeStateSupport.ensureRetention(claudeConfigDir, config.worktreeGcDays());
         log.info("claude 配置目录: {}", claudeConfigDir);
         // CAP-36：exec 帧 handler（构建/部署/测试/发版下发执行；execAllowlist 空 = 全部拒绝）
-        ExecHandler execHandler = new ExecHandler(config, workspace, frame -> connRef[0].send(frame));
+        // CAP-66：scan.<engine>.path 随 exec handler 注入（扫描步骤 env 命中时 prepend PATH）
+        Map<String, String> scanToolPaths = ScanToolResolver.load(configFile);
+        if (!scanToolPaths.isEmpty()) {
+            log.info("扫描引擎工具路径: {}", scanToolPaths);
+        }
+        ExecHandler execHandler = new ExecHandler(config, workspace, frame -> connRef[0].send(frame),
+                scanToolPaths);
         // CAP-73：verify_* 帧 handler（需求验证链 PUSHING/BUILDING/PATCHING 三段 runner 侧执行）
         VerifyHandler verifyHandler = new VerifyHandler(config, workspace, frame -> connRef[0].send(frame));
         // CAP-57：proc/pkg 帧 handler（分类服务实例进程管控 + 安装包分发）。

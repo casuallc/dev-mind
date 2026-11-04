@@ -75,6 +75,11 @@ import java.util.Properties;
  *                            # 可指可执行文件或其所在 bin 目录；探测优先于 PATH（版本解析正则不变），
  *                            # 失败回落 PATH；探测成功覆盖 PATH 结果
  * toolchainRefreshMinutes=10 # CAP-106 FR-03：周期重探测间隔（分钟），有变化才随下次心跳上报；0=关闭
+ * scan.&lt;engine&gt;.path=/path/to/dir   # CAP-66：扫描引擎工具路径（engine ∈ sca/sast/secrets，
+ *                            # 对应二进制 dependency-check/semgrep/gitleaks），可指二进制或其所在目录；
+ *                            # 由 ScanToolResolver 独立解析（不进本 record）。exec 帧 env 带
+ *                            # DEVMIND_SCAN_ENGINE 时 prepend PATH；未配置按 where/which 探测，
+ *                            # 探测不到该引擎步骤失败。改后须重启 runner 生效
  * </pre>
  */
 public record RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
