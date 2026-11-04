@@ -256,6 +256,20 @@ public final class ApiPermissionCatalog {
             rule("POST", "/api/releases/*/rollback", "project.releases.action.rollback"),
             rule("DELETE", "/api/releases/*", "project.releases.action.delete"),
 
+            // ---------- 安全扫描（CAP-66） ----------
+            // 报告上行 /api/security/scans/*/reports 不登记：permitAll 一次性 token 端点，
+            // 登记了反而对未认证 runner 请求无意义（过滤器对未认证放行，安全链 permitAll 放行）
+            rule("POST", "/api/security/scans", "project.security.action.scan"),
+            rule("POST", "/api/security/scans/*/cancel", "project.security.action.scan"),
+            rule("GET", "/api/security/scans/*/export", "project.security.action.export"),
+            rule("POST", "/api/security/suppressions", "project.security.action.suppress"),
+            rule("DELETE", "/api/security/suppressions/*", "project.security.action.suppress"),
+            rule("POST", "/api/security/cve-suppressions", "project.security.action.suppress"),
+            rule("DELETE", "/api/security/cve-suppressions/*", "project.security.action.suppress"),
+            rule("POST", "/api/security/findings/*/review", "project.security.action.ai"),
+            rule("POST", "/api/security/findings/*/fix", "project.security.action.ai"),
+            rule("PUT", "/api/security/projects/*/config", "project.security.action.config"),
+
             // ---------- 需求流程 ----------
             rule("POST", "/api/projects/*/requirements", "project.requirements.action.create"),
             rule("PUT", "/api/projects/*/requirements/*", "project.requirements.action.manage"),
