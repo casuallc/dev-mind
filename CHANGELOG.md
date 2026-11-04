@@ -11,6 +11,22 @@
 
 <!-- 可选：在此人工起草下一版公告，打包时优先转正并清空；留空则按提交记录自动生成。 -->
 
+## [0.1.0-20261104+c1f4da7] - 2026-11-04
+
+- 提交：c1f4da7
+- 关联：CAP-62, CAP-66
+
+### 新增
+
+- **frontend**：CAP-66 路由与导航注册——/security 入项目上下文路由、子导航前缀与菜单选中态（3735c89）
+- **frontend**：CAP-66 安全扫描中心——扫描任务/发现列表/抑制管理/扫描配置四视图，发起扫描弹窗、扫描详情抽屉（WS 实时日志+引擎子状态+报告附件+导出）、发现详情抽屉（引入链/EPSS·KEV/修复建议/历史/AI 复核修复/行内抑制）（916e740）
+- **auth**：CAP-66 权限与访问规则——project.security菜单+5操作入目录、写接口权限登记、报告上行permitAll（X-Scan-Token）、工具自检仅ADMIN（d9f2dc0）
+- **agent-runner**：CAP-66 扫描工具路径注入——scan.<engine>.path独立解析（未知引擎fail-fast），exec帧带DEVMIND_SCAN_ENGINE时prepend PATH，探测不到即失败引导补配置（987d9fb）
+- **security**：CAP-66 M3 AI复核与修复——security-review/fix场景种子、直依赖devmind-session发起会话、session.completed事件异步回写复核结论与修复摘要（1dab81c）
+- **security**：CAP-66 M2 误报治理——fingerprint抑制（过期自动复现）+CVE抑制库（平台/项目双轨·整组通配·应用层查重）+内部构件白名单（段边界前缀）+EPSS/KEV定时同步与富化+NVD区间修复指导（不编造版本号）（b5539e7）
+- **security**：CAP-66 M1 扫描主链路——统一发现模型/三引擎适配（dependency-check·semgrep·gitleaks）/SARIF与依赖树解析/归一化+基线diff（NEW·EXISTING·FIXED）/扫描编排与一次性令牌报告上行/执行日志WS/节点工具自检（5b5104d）
+- **common**：CAP-66 项目可见性 SPI ProjectAccessChecker——CAP-62 落地前的探测点，ObjectProvider 缺省放行、落地自动收紧（426eeef）
+
 ## [0.1.0-20261104+2ef98a8] - 2026-11-04
 
 - 提交：2ef98a8
