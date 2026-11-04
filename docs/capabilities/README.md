@@ -83,7 +83,7 @@
 | [CAP-63](CAP-63-multi-tenant.md) | 多租户隔离 | 平台层 | 定稿未实施 | 共享库共享表 + tenant_id 判别列，M1 租户登记/M2 业务表铺 tenant_code |
 | [CAP-64](CAP-64-bookmark-favorites.md) | 收藏夹 | 组装层 | 已实现 | 绑定到人的网址收藏：分组树/标签/可用性探测/关联账号速查/只读分享 |
 | [CAP-65](CAP-65-agent-node-file-browser.md) | Agent 节点文件浏览器 | 底座 | 已实现 | 节点根目录白名单下文件浏览/编辑/上传下载，大文件走 HTTP 中转 |
-| [CAP-66](CAP-66-security-scan.md) | 安全漏洞扫描 | 执行器 | 定稿未实施 | 多引擎（SCA/SAST/密钥）统一扫描底座 + 统一发现模型 + 误报漏斗 |
+| [CAP-66](CAP-66-security-scan.md) | 安全漏洞扫描 | 执行器 | 已实现 | 多引擎（SCA/SAST/密钥）统一扫描底座 + 统一发现模型 + 误报漏斗 |
 | [CAP-67](CAP-67-usage-statistics.md) | 用量统计 | 组装层 | 已实现 | 会话+问答 token/成本只读聚合，四维分组+每日趋势+成本 Top |
 | [CAP-68](CAP-68-session-attachments.md) | 会话附件注入与附件生命周期 | 底座 | 已实现 | 附件标签/到期硬删/批量删除，会话链路图片与文件注入 |
 | [CAP-69](CAP-69-script-test-suite.md) | 脚本测试套件 | 执行器 | 已实现 | kind=script 套件自带 git 源+命令整包跑，JUnit XML 回收解析 |
