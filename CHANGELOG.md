@@ -11,6 +11,19 @@
 
 <!-- 可选：在此人工起草下一版公告，打包时优先转正并清空；留空则按提交记录自动生成。 -->
 
+## [0.1.0-20261104+2ef98a8] - 2026-11-04
+
+- 提交：2ef98a8
+- 关联：CAP-62, CAP-108
+
+### 新增
+
+- **frontend**：CAP-108 M1 AI 扩展按钮按 ACTION 门控——无 project.requirements.action.generate-draft 授权不渲染（后端同 key 强校验）（57b546d）
+- **copilot**：CAP-108 M1 AI 来源授权闭环——工具线程建立 ExecutionContext（BOT/COPILOT_WEB+actionId 透传）+ 确认凭据校验器（EXECUTING 在途单防伪造复用）（4842dbf）
+- **worklog**：CAP-108 M1 工作日志授权——OWNER_ONLY 资源策略（ADMIN 不扩展）+ worklog.entry.create 写边界接入核心授权（51aa6ff）
+- **project**：CAP-108 M1 项目资源策略与 Service 授权边界——CAP-62 可见性/成员落地、project/requirement/work_item/AI 扩展六操作接入核心授权、内部自动建单走 system 上下文（b620e93）
+- **auth**：CAP-108 核心授权引擎 M1——统一业务操作目录+判定链+审计落库（0000af1）
+
 ## [0.1.0-20261103+b21304a] - 2026-11-03
 
 - 提交：b21304a
