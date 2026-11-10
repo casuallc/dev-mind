@@ -13,6 +13,7 @@ import com.devmind.worklog.model.WorklogEntryEntity;
 import com.devmind.worklog.model.WorklogGoalEntity;
 import com.devmind.worklog.model.WorklogPlanItemEntity;
 import com.devmind.worklog.model.WorklogQuarterlyReportEntity;
+import com.devmind.worklog.repo.DailyReportRepository;
 import com.devmind.worklog.repo.WeeklyReportRepository;
 import com.devmind.worklog.repo.WorklogEntryRepository;
 import com.devmind.worklog.repo.WorklogGoalRepository;
@@ -276,6 +277,97 @@ class ReportServiceTest {
         var empty = service.nextPlanPreview("alice", mon);
         assertEquals(0, empty.itemCount());
         assertEquals("", empty.markdown());
+    }
+
+    // ---------------- 素材去重：已同步为条目的 git 提交不重复进 prompt ----------------
+
+    @Test
+    void 日报素材不再重复收录已同步为条目的git提交() {
+        LocalDate date = LocalDate.of(2026, 11, 9);
+        DailyReportRepository dailyRepo = mock(DailyReportRepository.class);
+        WorklogEntryRepository entryRepo = mock(WorklogEntryRepository.class);
+        WorklogPlanItemRepository planRepo = mock(WorklogPlanItemRepository.class);
+        GitLogScanner gitScanner = mock(GitLogScanner.class);
+        WorklogEntryService entryService = mock(WorklogEntryService.class);
+        WorklogWorkspaceService workspaceService = mock(WorklogWorkspaceService.class);
+        SessionManagerService sessionManager = mock(SessionManagerService.class);
+
+        when(dailyRepo.existsByUserIdAndWorkDate("alice", date)).thenReturn(false);
+        when(gitScanner.scan("alice", date)).thenReturn(List.of(
+                gitCommit("已同步为条目的提交", true),
+                gitCommit("未同步为条目的提交", false)));
+        when(entryService.listDayEntries("alice", date)).thenReturn(List.of());
+        when(entryRepo.findByUserIdAndWorkDateAndStatusInOrderByCreatedAtAsc(
+                "alice", date, WorklogEntryService.UNFINISHED)).thenReturn(List.of());
+        when(planRepo.findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(
+                "alice", "WEEK", date)).thenReturn(List.of());
+        when(workspaceService.ensureFor("alice"))
+                .thenReturn(new com.devmind.worklog.dto.WorkspaceView(true, "p-wl", null, null));
+        ArgumentCaptor<CreateSessionRequest> reqCap = ArgumentCaptor.forClass(CreateSessionRequest.class);
+        SessionView created = mock(SessionView.class);
+        when(created.id()).thenReturn("s-daily");
+        when(sessionManager.create(reqCap.capture())).thenReturn(created);
+
+        ReportService service = new ReportService(entryService, gitScanner,
+                mock(WorklogSettingsService.class), workspaceService,
+                sessionManager, dailyRepo, null, planRepo, entryRepo, null, null, null, null);
+        service.generateDaily("alice", date, false, null);
+
+        String prompt = reqCap.getValue().taskSpec();
+        assertFalse(prompt.contains("已同步为条目的提交"), "已导入条目承载的提交不应再进素材: " + prompt);
+        assertTrue(prompt.contains("未同步为条目的提交"), "未导入提交须保留（未开自动导入/署名未解析仓库）: " + prompt);
+    }
+
+    @Test
+    void 周报素材同样剔除已同步为条目的git提交() {
+        LocalDate mon = LocalDate.of(2026, 11, 2);
+        DailyReportRepository dailyRepo = mock(DailyReportRepository.class);
+        WeeklyReportRepository weeklyRepo = mock(WeeklyReportRepository.class);
+        WorklogPlanItemRepository planRepo = mock(WorklogPlanItemRepository.class);
+        GitLogScanner gitScanner = mock(GitLogScanner.class);
+        WorklogWorkspaceService workspaceService = mock(WorklogWorkspaceService.class);
+        SessionManagerService sessionManager = mock(SessionManagerService.class);
+
+        com.devmind.worklog.model.DailyReportEntity daily =
+                new com.devmind.worklog.model.DailyReportEntity();
+        daily.setWorkDate(mon.plusDays(1));
+        daily.setContentMd("- 完成登录改造");
+        when(weeklyRepo.existsByUserIdAndWeekStart("alice", mon)).thenReturn(false);
+        when(dailyRepo.findByUserIdAndWorkDateBetweenOrderByWorkDateAsc(
+                "alice", mon, mon.plusDays(6))).thenReturn(List.of(daily));
+        when(gitScanner.scanDetailed("alice", mon, mon.plusDays(6)))
+                .thenReturn(new com.devmind.worklog.dto.GitPreviewResponse(List.of(
+                        gitCommit("已同步为条目的提交", true),
+                        gitCommit("未同步为条目的提交", false)), List.of()));
+        when(planRepo.findByUserIdAndPlanDateBetweenOrderByPlanDateAscSortOrderAscIdAsc(
+                "alice", mon.minusWeeks(1), mon.minusWeeks(1).plusDays(6))).thenReturn(List.of());
+        when(weeklyRepo.findByUserIdAndWeekStart("alice", mon.minusWeeks(1)))
+                .thenReturn(Optional.empty());
+        when(planRepo.findByUserIdAndPlanDateBetweenOrderByPlanDateAscSortOrderAscIdAsc(
+                "alice", mon, mon.plusDays(6))).thenReturn(List.of());
+        when(planRepo.findByUserIdAndScopeAndPlanDateOrderBySortOrderAscIdAsc(
+                "alice", "WEEK", mon.plusWeeks(1))).thenReturn(List.of());
+        when(workspaceService.ensureFor("alice"))
+                .thenReturn(new com.devmind.worklog.dto.WorkspaceView(true, "p-wl", null, null));
+        ArgumentCaptor<CreateSessionRequest> reqCap = ArgumentCaptor.forClass(CreateSessionRequest.class);
+        SessionView created = mock(SessionView.class);
+        when(created.id()).thenReturn("s-weekly");
+        when(sessionManager.create(reqCap.capture())).thenReturn(created);
+
+        ReportService service = new ReportService(null, gitScanner,
+                mock(WorklogSettingsService.class), workspaceService,
+                sessionManager, dailyRepo, weeklyRepo, planRepo, null, null, null, null, null);
+        service.generateWeekly("alice", mon, false, null);
+
+        String prompt = reqCap.getValue().taskSpec();
+        assertFalse(prompt.contains("已同步为条目的提交"), "已导入条目承载的提交不应再进素材: " + prompt);
+        assertTrue(prompt.contains("未同步为条目的提交"), "未导入提交须保留: " + prompt);
+        assertTrue(prompt.contains("- 完成登录改造"), "日报素材丢失: " + prompt);
+    }
+
+    private static com.devmind.worklog.dto.GitCommitView gitCommit(String subject, boolean imported) {
+        return new com.devmind.worklog.dto.GitCommitView(1L, "dev-mind", "sha-" + subject, "n", "n@x",
+                java.time.Instant.parse("2026-11-09T02:00:00Z"), subject, "", 1, 1, 0, imported);
     }
 
     private static WorklogPlanItemEntity wipItem(long id, String status) {

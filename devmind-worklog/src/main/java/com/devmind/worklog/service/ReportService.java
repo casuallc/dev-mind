@@ -168,7 +168,7 @@ public class ReportService {
             return new ReportLaunch(null, true);
         }
 
-        List<GitCommitView> commits = gitScanner.scan(username, date);
+        List<GitCommitView> commits = unimportedCommits(gitScanner.scan(username, date));
         List<WorklogEntryService.DatedEntry> entries = entryService.listDayEntries(username, date)
                 .stream().map(e -> new WorklogEntryService.DatedEntry(date, e)).toList();
         if (commits.isEmpty() && entries.isEmpty()) {
@@ -180,6 +180,17 @@ public class ReportService {
                 settingsService.templateOf(username, true), WorklogTemplates.DEFAULT_DAILY);
         return launch(username, WorklogScenarios.DAILY,
                 ReportPrompts.daily(date, commits, entries, dayPlanBlock(username, date), template, hint));
+    }
+
+    /**
+     * 提交素材去重：已导入为工作条目的提交不再重复进 prompt（判定来自扫描侧
+     * {@link GitCommitView#alreadyImported()}，即 {@code repoId:sha} 已落库为条目）——
+     * 条目详情已合成提交正文与改动规模，再单列一份只会让模型重复计数。
+     * <p>未导入的提交照旧保留：自动导入是 opt-in（未开启），且署名未解析的仓库会被
+     * 整仓跳过，这部分提交没有条目承载，删掉就丢素材。</p>
+     */
+    private static List<GitCommitView> unimportedCommits(List<GitCommitView> commits) {
+        return commits.stream().filter(c -> !c.alreadyImported()).toList();
     }
 
     /**
@@ -266,7 +277,8 @@ public class ReportService {
 
     /**
      * 生成周报：创建 worklog 会话（场景 worklog-weekly）。素材 = 该周日报全文（草稿区无历史文件
-     * 可回读，prompt 携带的日报全文是唯一素材口径；无日报回退该周原始条目）+ 该周 git 提交。
+     * 可回读，prompt 携带的日报全文是唯一素材口径；无日报回退该周原始条目）+ 该周未进条目的
+     * git 提交（已同步为条目的提交由日报/条目承载，见 {@link #unimportedCommits}）。
      */
     public ReportLaunch generateWeekly(String username, LocalDate weekStart, boolean force, String hint) {
         boolean exists = weeklyRepo.existsByUserIdAndWeekStart(username, weekStart);
@@ -289,7 +301,8 @@ public class ReportService {
             log.info("周报无素材，跳过: user={} weekStart={}", username, weekStart);
             return new ReportLaunch(null, exists);
         }
-        List<GitCommitView> commits = gitScanner.scanDetailed(username, weekStart, weekEnd).commits();
+        List<GitCommitView> commits = unimportedCommits(
+                gitScanner.scanDetailed(username, weekStart, weekEnd).commits());
 
         String template = WorklogTemplates.orDefault(
                 settingsService.templateOf(username, false), WorklogTemplates.DEFAULT_WEEKLY);
