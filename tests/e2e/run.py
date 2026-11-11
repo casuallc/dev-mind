@@ -47,9 +47,11 @@ def catalog():
     return entries
 
 
-def select_entries(entries, suite):
+def select_entries(entries, suite, case=None):
     selected = [e for e in entries if e["suite"] == suite
                 or (suite == "regression" and e["suite"] == "smoke")]
+    if case:
+        selected = [e for e in selected if case in e["id"] or case in e["test"]]
     if not selected:
         raise ValueError("selected suite contains no cases")
     return selected
@@ -183,6 +185,7 @@ def main():
     parser.add_argument("--base", default=os.environ.get("E2E_BASE"))
     parser.add_argument("--insecure", action="store_true", help="explicitly allow a self-signed HTTPS certificate")
     parser.add_argument("--check", action="store_true", help="validate case registration and legacy inventory")
+    parser.add_argument("--case", help="substring filter on case id/test (e.g. intel)")
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--junit", default="tmp/e2e/junit.xml")
     args = parser.parse_args()
@@ -195,7 +198,7 @@ def main():
         return 0
     records = []
     try:
-        entries = select_entries(catalog(), args.suite)
+        entries = select_entries(catalog(), args.suite, args.case)
         if args.suite == "regression" and not args.isolated:
             raise ValueError("regression requires --isolated; shared targets are smoke-only")
         if args.isolated and args.base:
