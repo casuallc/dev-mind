@@ -46,6 +46,27 @@ html, body, #root {
   vertical-align: middle;
 }
 
+/* 细滚动条：窄侧栏/弹层等场景弱化 Windows 原生宽滚动条，
+   平时半透明显色、hover 加深，滚动区域无轨道底色 */
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
+}
+.thin-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 3px;
+}
+.thin-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.22);
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 /* ScrollRow 通用横向滚动行（shared/components/ScrollRow）：
    children 超宽时容器内横向滑动，箭头 + 渐变遮罩提示可滚方向，滚动条隐藏 */
 .scroll-row {
