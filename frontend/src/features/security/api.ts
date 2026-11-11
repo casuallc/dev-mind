@@ -166,3 +166,9 @@ export const deleteIntel = (cve: string) =>
 export const syncIntelEpss = () => api.post<{ started: boolean }>('/security/intel/sync-epss')
 
 export const syncIntelKev = () => api.post<{ started: boolean }>('/security/intel/sync-kev')
+
+export const syncIntelNvd = () => api.post<{ started: boolean }>('/security/intel/sync-nvd')
+
+/** 按需从 NVD 补拉单条 CVE 元数据（描述/发布/修改/CVSS），404=NVD 查无此 CVE */
+export const enrichIntel = (cve: string) =>
+  api.post<VulnIntel>(`/security/intel/${encodeURIComponent(cve)}/enrich`)

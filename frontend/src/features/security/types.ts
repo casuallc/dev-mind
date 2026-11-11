@@ -176,6 +176,15 @@ export interface VulnIntel {
   epssPercentile: number | null
   kev: boolean
   kevDueDate: string | null
+  /** CVE 描述（NVD en 摘要 / KEV 简述兜底） */
+  description: string | null
+  /** NVD 发布时间 */
+  publishedAt: string | null
+  /** NVD 最后修改时间 */
+  lastModifiedAt: string | null
+  cvssScore: number | null
+  /** CRITICAL/HIGH/MEDIUM/LOW/NONE */
+  cvssSeverity: string | null
   updatedAt: string | null
 }
 
@@ -185,4 +194,5 @@ export interface VulnIntelStats {
   lastUpdatedAt: string | null
   epssSyncRunning: boolean
   kevSyncRunning: boolean
+  nvdSyncRunning: boolean
 }

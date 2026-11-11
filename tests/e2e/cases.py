@@ -1472,10 +1472,15 @@ exit 1
         self.assertFalse(updated["kev"])
         self.api.request("PUT", "/security/intel/CVE-2099-NOPE", {"kev": False}, expected=404)
 
-        # 统计
+        # 统计（含 NVD 同步 running 标志，FR-10-5）
         stats = self.api.request("GET", "/security/intel/stats")
         self.assertGreaterEqual(stats["total"], 1)
         self.assertIn("epssSyncRunning", stats)
+        self.assertIn("nvdSyncRunning", stats)
+
+        # FR-10-5：隔离环境 intel-enabled=false，NVD 同步/补拉一律 409（外网依赖不落 E2E）
+        self.api.request("POST", "/security/intel/sync-nvd", expected=409)
+        self.api.request("POST", f"/security/intel/{cve}/enrich", expected=409)
 
         # 删除 → 再删 404
         self.api.request("DELETE", f"/security/intel/{cve}")

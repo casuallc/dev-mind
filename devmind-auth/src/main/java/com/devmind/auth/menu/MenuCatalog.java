@@ -214,7 +214,7 @@ public final class MenuCatalog {
             action("admin.agent-nodes", "manage-egress", "管理出口规则", 50, true),
             action("admin.agent-nodes", "write-files", "写入/上传/重命名/删除节点文件", 60, true),
             action("admin.vuln-intel", "manage", "新增/编辑/删除情报记录", 10, true),
-            action("admin.vuln-intel", "sync", "手动同步 EPSS/KEV 情报", 20, true),
+            action("admin.vuln-intel", "sync", "手动同步 EPSS/KEV/NVD 情报", 20, true),
             tab("admin.knowledge", "active", "启用中知识库", 10),
             tab("admin.knowledge", "archived", "已归档知识库", 20),
             tab("admin.knowledge", "entries", "文档", 30),

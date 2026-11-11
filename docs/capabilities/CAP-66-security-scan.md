@@ -45,6 +45,13 @@
 > **修复推荐是启发式不是承诺**（附 NVD 区间原文，推导不出明示「需人工查证」，不在服务端模拟
 > 依赖求解；可信验证 = AI 修复会话里跑一次编译）；
 > **单仓库粒度**（多库项目逐库建任务，fingerprint 与基线 diff 都依赖「仓库相对路径」稳定）。
+>
+> **增补（2026-11-11，FR-10-5 漏洞情报元数据）**：漏洞情报后台原来只有 EPSS 分数 + KEV 标记，
+> 看一条 CVE 还得跳 NVD 官网。vuln_intel 增加 NVD 元数据列（描述/发布时间/最后修改/CVSS 基础分），
+> 三段式填充：①KEV JSON 自带的 shortDescription 零成本兜底；②NVD API 2.0 每日增量窗口同步
+> （最近 36h 发布/修改的 CVE，幂等 upsert 无需持久水位）+ 高分缺描述行限速回灌（默认 100 条/日）；
+> ③后台页展开行按需单条补拉。不做 NVD 全量回填（30 万行 × 无 key 5 req/30s 限流 ≈ 17 天，
+> 且 95% 长尾 CVE 无人看——见否决方案）。
 
 ## 1. 目的
 
@@ -210,6 +217,19 @@ test/provided scope 噪声、「CVE 真实存在但与本项目无关」。单�
    归一化时按 CVE 回填 detail_json（epss 分/百分位、kev 标记/修复截止日）；发现列表支持
    「KEV 在榜优先 / EPSS ≥ 阈值」排序过滤——误报绝对数降不完时，用真实威胁情报决定先看
    哪几条。数据源不可达降级为字段 null，不阻塞扫描。
+5. **情报元数据（NVD，2026-11-11 增补）**：`vuln_intel` 增列 `description`（varchar 2048，
+   非 Lob 保模糊查询）/`published_at`/`last_modified_at`/`cvss_score`/`cvss_severity`，
+   后台情报页免跳转看 CVE 详情。三段式填充：
+   - **KEV 兜底**：KEV JSON 自带 `vulnerabilityName`/`shortDescription`，同步时描述为空才填
+     （NVD 描述信息量更大，不被 KEV 一句话覆写）；
+   - **NVD 增量窗口**（每日 05:00，`devmind.security.intel.nvd-cron` 可配）：拉最近
+     `devmind.security.nvd-window-hours`（默认 36h）内发布/修改的 CVE 分页 upsert，重叠幂等、
+     无持久水位；随后对「尚无描述、EPSS 百分位最高」的行限速逐个回灌
+     （`devmind.security.nvd-backfill-batch` 默认 100，0 关）；
+   - **按需补拉**：后台页展开行描述为空时自动调 `POST /{cve}/enrich` 单条补拉并缓存落库。
+   NVD 限流：无 key 5 req/30s（请求间 sleep 6.5s）、配 `devmind.security.nvd-api-key` 后
+   50 req/30s；key 属密钥只写 application-local.yml。EPSS 增量覆写时无条件保留已有元数据列
+   （否则每日同步把 NVD 数据冲掉）。
 
 AI 复核（FR-08）是漏斗之上的兜底：人工对拿不准的条目发起复核，claude 读真实代码与
 CPE 证据链（detail_json 已透传）给真/误报判定，判定结果一键转 FR-05/FR-10-3 抑制。
@@ -263,6 +283,7 @@ CPE 证据链（detail_json 已透传）给真/误报判定，判定结果一键
 | 扫描结果直接挂构建/发版门禁 | 门禁编排属流程层（CAP-17/DecisionGate），本能力只做数据生产；留 SecurityGateQuery 草约供消费 |
 | 引擎原生 suppression file 为主治理手段 | 单点扛不住三类误报来源；且引擎层抑制分散在各仓各节点，不可运营。平台层抑制为唯一权威 |
 | EPSS/KEV 情报当过滤器 | 情报解决「先看哪条」而非「这条是不是真的」，会误杀暂无 exploit 情报的真漏洞；只用于排序 |
+| NVD 全量回填元数据（2026-11-11） | 30 万 CVE × 无 key 5 req/30s ≈ 17 天且 DB 增几百 MB；长尾无人看。增量窗口 + 高分回灌 + 展开按需补拉，覆盖率自愈收敛 |
 | 统一抑制抽象合并 CVE 抑制与 fingerprint 抑制 | 两者粒度（构件×漏洞 vs 代码位置）、过期语义、复用范围（跨项目 vs 单仓库）都不同，硬合并两头别扭 |
 | exec 帧扩展产物回传通道 | 协议改动重（帧模型 + runner + 版本门控）；CAP-104 FR-24 上传 token + HTTP 上行已验证可行，复用 |
 | 服务端模拟 Maven/Gradle 依赖求解给修复版 | 重建 resolver 不可靠；启发式推荐 + 附区间原文 + AI 修复会话真跑编译验证 |
@@ -278,7 +299,7 @@ devmind-security
 ├── model/      SecurityScan/SecurityFinding/SecuritySuppression/SecurityCveSuppression/
 │               VulnIntel/SecurityProjectConfig/SecurityScanReport/SecurityUploadToken 实体
 ├── service/    SecurityScanService（触发+异步编排）/ FindingService（归一化+diff）/
-│               SuppressionService / CveSuppressionService / VulnIntelService（EPSS·KEV 同步）/
+│               SuppressionService / CveSuppressionService / VulnIntelService（EPSS·KEV·NVD 同步）/
 │               ExportService（CSV/SARIF）/ RemediationAdvisor / SecurityAiService（FR-08/11-4）
 └── controller/ SecurityScanController / SecurityFindingController / SecuritySuppressionController /
                 SecurityCveSuppressionController / SecurityReportUploadController（token 鉴权）/
@@ -349,9 +370,13 @@ security_scan_reports（原始报告 → 附件映射）
 security_upload_tokens（一次性上传凭据）
   id, scan_id, engine VARCHAR(16), token_hash VARCHAR(64), expires_at, created_at
 
-vuln_intel（EPSS/KEV 情报快照，服务端定时同步，CVE 主键 upsert）
+vuln_intel（EPSS/KEV/NVD 情报快照，服务端定时同步，CVE 主键 upsert）
   cve VARCHAR(32) PK, epss_score DOUBLE?, epss_percentile DOUBLE?,
-  kev BOOLEAN（实体初始值 false，禁 @ColumnDefault）, kev_due_date VARCHAR(16)?, updated_at
+  kev BOOLEAN（实体初始值 false，禁 @ColumnDefault）, kev_due_date VARCHAR(16)?,
+  description VARCHAR(2048)?（NVD en 摘要 / KEV 简述兜底；varchar 非 Lob 保模糊查询）,
+  published_at?, last_modified_at?（NVD 生命周期时间，与 updated_at 同步时间区分）,
+  cvss_score DOUBLE?, cvss_severity VARCHAR(16)?（v3.1 > v3.0 > v2 优先序）,
+  updated_at
 
 附件（CAP-32）：每任务 N 条原始报告（security_scan_reports 关联）+ SCA 依赖树输出 + 导出文件。
 ```
@@ -386,15 +411,19 @@ POST   /api/security/scans/{id}/reports          报告上行（X-Scan-Token 头
 GET/PUT /api/security/projects/{projectId}/config 项目级扫描配置（内部构件白名单追加）
 
 # 漏洞情报后台（2026-11-11 增补，/admin/security/intel，菜单「项目与资源 → 漏洞情报」）
-GET    /api/security/intel                    情报分页浏览（keyword/cve 模糊、kev、epssMin 过滤；
-                                              sort 白名单 cve/epssScore/epssPercentile/updatedAt/kev）
-GET    /api/security/intel/stats              总览（总量/KEV 在榜量/最近更新/两路同步 running 标志）
+GET    /api/security/intel                    情报分页浏览（keyword 模糊 CVE+描述、kev、epssMin 过滤；
+                                              sort 白名单 cve/epssScore/epssPercentile/updatedAt/kev/
+                                              publishedAt/lastModifiedAt/cvssScore）
+GET    /api/security/intel/stats              总览（总量/KEV 在榜量/最近更新/三路同步 running 标志）
 POST   /api/security/intel                    手工新增（cve 归一化大写，重复 409）
-PUT    /api/security/intel/{cve}              编辑（不存在 404；分数/百分位限 0~1）
+PUT    /api/security/intel/{cve}              编辑（不存在 404；分数/百分位限 0~1；NVD 元数据列保留不动）
 DELETE /api/security/intel/{cve}              删除（下次同步若在榜会回填）
 POST   /api/security/intel/sync-epss          手动触发 EPSS 同步（异步，已在跑/已关闭 409）
 POST   /api/security/intel/sync-kev           手动触发 KEV 同步（同上）
-注：手工增改仅当日有效——EPSS 全量覆盖分数、KEV 退榜清标记，次日 04:00/04:30 同步覆写。
+POST   /api/security/intel/sync-nvd           手动触发 NVD 增量同步+回灌（同上）
+POST   /api/security/intel/{cve}/enrich       按需补拉单条 NVD 元数据（NVD 查无 404，不可达 503）
+注：手工增改的 EPSS/KEV 字段仅当日有效——次日 04:00/04:30 同步覆写；NVD 元数据列
+（描述/发布/修改/CVSS）由 05:00 增量同步与按需补拉维护，EPSS/KEV 覆写均不动。
 ```
 
 权限：菜单/页签/按钮权限码走 CAP-103（MenuCatalog + ApiPermissionCatalog 登记）；
@@ -449,6 +478,9 @@ POST   /api/security/intel/sync-kev           手动触发 KEV 同步（同上�
 - **首次 SCA 扫描慢**（NVD 拉库数十分钟）：文档与 UI 明示预期；节点本地缓存摊薄后续扫描。
 - **EPSS/KEV 数据源可用性**：外网不可达环境必须可关（`intel.enabled=false`），同步失败仅
   日志告警不阻塞扫描；内网部署可配镜像地址。
+- **NVD 限流与密钥（FR-10-5）**：NVD API 2.0 无 key 5 req/30s——回灌批量默认 100 条/日
+  （约 10 分钟），配 `devmind.security.nvd-api-key`（只写 application-local.yml，禁入库禁提交）
+  后提速 10 倍；NVD 不可达时元数据列维持 null/旧值，不阻塞扫描与情报浏览。
 - **fingerprint 漂移**：SAST 规则升级/代码大范围位移会使旧 finding 批量 FIXED + 新批量 NEW，
   diff 摘要会出现「假修复」峰——接受为语义使然（比对层口径），不引入模糊匹配。
 - **报告上传窗口**：token 过期前未上传（引擎跑超 2h）→ 该引擎 FAILED 并提示调大

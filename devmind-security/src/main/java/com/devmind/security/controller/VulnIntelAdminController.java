@@ -41,7 +41,8 @@ import java.util.Set;
 public class VulnIntelAdminController {
 
     /** 排序字段白名单（防 Sort 注入到实体属性外） */
-    private static final Set<String> SORTABLE = Set.of("cve", "epssScore", "epssPercentile", "updatedAt", "kev");
+    private static final Set<String> SORTABLE = Set.of("cve", "epssScore", "epssPercentile", "updatedAt", "kev",
+            "publishedAt", "lastModifiedAt", "cvssScore");
     private static final int MAX_SIZE = 200;
 
     private final VulnIntelRepository repo;
@@ -56,9 +57,9 @@ public class VulnIntelAdminController {
                                          Boolean kev, String kevDueDate) {
     }
 
-    /** 总览统计：总量 / KEV 在榜量 / 最近更新时间 / 两路同步是否正在跑（前端轮询用） */
+    /** 总览统计：总量 / KEV 在榜量 / 最近更新时间 / 三路同步是否正在跑（前端轮询用） */
     public record IntelStats(long total, long kevCount, Instant lastUpdatedAt,
-                             boolean epssSyncRunning, boolean kevSyncRunning) {
+                             boolean epssSyncRunning, boolean kevSyncRunning, boolean nvdSyncRunning) {
     }
 
     @GetMapping
@@ -72,8 +73,10 @@ public class VulnIntelAdminController {
         Specification<VulnIntelEntity> spec = (root, q, cb) -> {
             List<Predicate> ps = new ArrayList<>();
             if (StringUtils.hasText(keyword)) {
-                ps.add(cb.like(cb.lower(root.get("cve")),
-                        "%" + keyword.trim().toLowerCase(Locale.ROOT) + "%"));
+                // description 是 varchar 非 Lob，可安全 lower()（Lob 须 cast，红线）
+                String kw = "%" + keyword.trim().toLowerCase(Locale.ROOT) + "%";
+                ps.add(cb.or(cb.like(cb.lower(root.get("cve")), kw),
+                        cb.like(cb.lower(root.get("description")), kw)));
             }
             if (kev != null) {
                 ps.add(kev ? cb.isTrue(root.get("kev")) : cb.isFalse(root.get("kev")));
@@ -95,7 +98,7 @@ public class VulnIntelAdminController {
     public IntelStats stats() {
         return new IntelStats(repo.count(), repo.countByKevTrue(),
                 repo.findTopByOrderByUpdatedAtDesc().map(VulnIntelEntity::getUpdatedAt).orElse(null),
-                intelService.isEpssSyncRunning(), intelService.isKevSyncRunning());
+                intelService.isEpssSyncRunning(), intelService.isKevSyncRunning(), intelService.isNvdSyncRunning());
     }
 
     @PostMapping
@@ -136,6 +139,33 @@ public class VulnIntelAdminController {
             throw new DevMindException(ErrorCode.CONFLICT, "KEV 同步已在进行或情报同步已关闭");
         }
         return Map.of("started", true);
+    }
+
+    @PostMapping("/sync-nvd")
+    public Map<String, Object> syncNvd() {
+        if (!intelService.triggerSyncNvd()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "NVD 同步已在进行或情报同步已关闭");
+        }
+        return Map.of("started", true);
+    }
+
+    /**
+     * 按需从 NVD 补拉单条 CVE 元数据（描述/发布/修改/CVSS；展开详情自动触发）。
+     * NVD 查无此 CVE → 404；NVD 不可达 → 503。
+     */
+    @PostMapping("/{cve}/enrich")
+    public VulnIntelEntity enrich(@PathVariable String cve) {
+        try {
+            return intelService.enrich(cve.trim().toUpperCase(Locale.ROOT))
+                    .orElseThrow(() -> new DevMindException(ErrorCode.NOT_FOUND, "NVD 查无此 CVE: " + cve));
+        } catch (DevMindException de) {
+            throw de; // 409 关闭/404 查无此 CVE 原样抛出，别被兜底包成 503
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new DevMindException(ErrorCode.SERVICE_UNAVAILABLE, "NVD 补拉被中断");
+        } catch (Exception e) {
+            throw new DevMindException(ErrorCode.SERVICE_UNAVAILABLE, "NVD 数据源不可达: " + e.getMessage());
+        }
     }
 
     private static VulnIntelEntity apply(VulnIntelEntity e, String cve, VulnIntelUpsertRequest req) {

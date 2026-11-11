@@ -1,10 +1,12 @@
-// 漏洞情报后台页（/admin/security/intel）：vuln_intel 全表浏览（CVE 关键字/KEV/EPSS 过滤 + 服务端分页排序）
-// + 手工增删改 + 手动触发 EPSS/KEV 同步（异步跑，轮询 stats 的 running 标志判完成）。
+// 漏洞情报后台页（/admin/security/intel）：vuln_intel 全表浏览（CVE/描述关键字、KEV、EPSS 过滤 + 服务端分页排序）
+// + 手工增删改 + 手动触发 EPSS/KEV/NVD 同步（异步跑，轮询 stats 的 running 标志判完成）。
+// 元数据（描述/发布时间/最后修改/CVSS）来自 NVD 每日增量 + 展开行按需补拉（FR-10-5）。
 // 布局遵循 docs/core/前端内容区布局约定.md：Card + extra 按钮 + FitTable 撑满。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Button,
   Card,
+  Descriptions,
   Drawer,
   Form,
   Input,
@@ -23,10 +25,12 @@ import type { ColumnsType } from 'antd/es/table'
 import {
   createIntel,
   deleteIntel,
+  enrichIntel,
   intelStats,
   listIntel,
   syncIntelEpss,
   syncIntelKev,
+  syncIntelNvd,
   updateIntel,
 } from '../api'
 import type { IntelUpsertInput } from '../api'
@@ -39,12 +43,32 @@ import { usePermissions } from '../../auth/usePermissions'
 
 const SORT_OPTIONS = [
   { value: 'updatedAt', label: '最近更新' },
+  { value: 'publishedAt', label: '发布时间' },
   { value: 'epssScore', label: 'EPSS 分数' },
   { value: 'epssPercentile', label: 'EPSS 百分位' },
+  { value: 'cvssScore', label: 'CVSS 分数' },
   { value: 'cve', label: 'CVE 编号' },
 ]
 
 const pct = (v: number | null) => (v == null ? '—' : `${(v * 100).toFixed(1)}%`)
+
+const CVSS_COLORS: Record<string, string> = {
+  CRITICAL: 'red',
+  HIGH: 'volcano',
+  MEDIUM: 'gold',
+  LOW: 'green',
+}
+
+const cvssTag = (score: number | null, severity: string | null) => {
+  if (score == null) return '—'
+  const sev = (severity || '').toUpperCase()
+  return (
+    <Space size={4}>
+      <span>{score.toFixed(1)}</span>
+      {sev && <Tag color={CVSS_COLORS[sev] ?? 'default'}>{sev}</Tag>}
+    </Space>
+  )
+}
 
 export default function VulnIntelAdminPage() {
   const { canAction } = usePermissions()
@@ -61,6 +85,9 @@ export default function VulnIntelAdminPage() {
   const [sort, setSort] = useState('updatedAt')
   const [loading, setLoading] = useState(false)
   const [stats, setStats] = useState<VulnIntelStats | null>(null)
+  /** 正在按需补拉 NVD 元数据的 CVE 集（展开行自动触发 + 手动「从 NVD 刷新」共用；ref 做重入闸门） */
+  const [enriching, setEnriching] = useState<ReadonlySet<string>>(new Set())
+  const enrichingRef = useRef<Set<string>>(new Set())
   /** undefined=关闭；null=新增；否则编辑该行 */
   const [editing, setEditing] = useState<VulnIntel | null | undefined>(undefined)
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -89,16 +116,18 @@ export default function VulnIntelAdminPage() {
   useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current) }, [])
 
   /** 手动同步：启动后轮询 stats 的 running 标志，翻回 false 即完成 → 刷新列表与统计 */
-  const startSync = async (kind: 'epss' | 'kev') => {
+  const startSync = async (kind: 'epss' | 'kev' | 'nvd') => {
     try {
       if (kind === 'epss') await syncIntelEpss()
-      else await syncIntelKev()
-      message.success(`${kind === 'epss' ? 'EPSS' : 'KEV'} 同步已启动（全量下载需分钟级，完成后自动刷新）`)
+      else if (kind === 'kev') await syncIntelKev()
+      else await syncIntelNvd()
+      const label = kind.toUpperCase()
+      message.success(`${label} 同步已启动（需分钟级，完成后自动刷新）`)
       const poll = async () => {
         try {
           const s = await intelStats()
           setStats(s)
-          if (s.epssSyncRunning || s.kevSyncRunning) {
+          if (s.epssSyncRunning || s.kevSyncRunning || s.nvdSyncRunning) {
             pollTimer.current = setTimeout(poll, 5000)
           } else {
             message.success('情报同步完成')
@@ -114,10 +143,27 @@ export default function VulnIntelAdminPage() {
     }
   }
 
+  /** 按需补拉/刷新单条 NVD 元数据；silent=展开行自动触发时静默失败（404=NVD 查无此 CVE） */
+  const doEnrich = useCallback(async (r: VulnIntel, silent: boolean) => {
+    if (enrichingRef.current.has(r.cve)) return
+    enrichingRef.current.add(r.cve)
+    setEnriching(new Set(enrichingRef.current))
+    try {
+      const updated = await enrichIntel(r.cve)
+      setRows((prev) => prev.map((x) => (x.cve === updated.cve ? updated : x)))
+      if (!silent) message.success(`已刷新 ${r.cve} 的 NVD 元数据`)
+    } catch (e) {
+      if (!silent) message.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      enrichingRef.current.delete(r.cve)
+      setEnriching(new Set(enrichingRef.current))
+    }
+  }, [])
+
   const onDelete = (r: VulnIntel) => {
     Modal.confirm({
       title: '删除情报记录',
-      content: `删除 ${r.cve}？下次 EPSS 同步若该 CVE 仍在榜会被重新写入（KEV 标记同理）。`,
+      content: `删除 ${r.cve}？下次 EPSS 同步若该 CVE 仍在榜会被重新写入（KEV 标记同理，NVD 元数据随回灌补齐）。`,
       okText: '删除',
       okButtonProps: { danger: true },
       cancelText: '再想想',
@@ -134,7 +180,7 @@ export default function VulnIntelAdminPage() {
     {
       title: 'CVE',
       dataIndex: 'cve',
-      width: 190,
+      width: 170,
       render: (v: string) =>
         v.startsWith('CVE-') ? (
           <Typography.Link href={`https://nvd.nist.gov/vuln/detail/${v}`} target="_blank">
@@ -144,12 +190,33 @@ export default function VulnIntelAdminPage() {
           v
         ),
     },
-    { title: 'EPSS 分数', dataIndex: 'epssScore', width: 110, render: pct },
-    { title: 'EPSS 百分位', dataIndex: 'epssPercentile', width: 110, render: pct },
+    {
+      title: '描述',
+      dataIndex: 'description',
+      ellipsis: { showTitle: false },
+      render: (v: string | null, r) =>
+        v ? (
+          <Typography.Text ellipsis={{ tooltip: v }} style={{ maxWidth: '100%' }}>
+            {v}
+          </Typography.Text>
+        ) : enriching.has(r.cve) ? (
+          <Typography.Text type="secondary">NVD 拉取中…</Typography.Text>
+        ) : (
+          '—'
+        ),
+    },
+    { title: 'EPSS 分数', dataIndex: 'epssScore', width: 100, render: pct },
+    { title: 'EPSS 百分位', dataIndex: 'epssPercentile', width: 100, render: pct },
+    {
+      title: 'CVSS',
+      dataIndex: 'cvssScore',
+      width: 110,
+      render: (v: number | null, r) => cvssTag(v, r.cvssSeverity),
+    },
     {
       title: 'KEV',
       dataIndex: 'kev',
-      width: 190,
+      width: 170,
       render: (k: boolean, r) =>
         k ? (
           <Space size={4}>
@@ -166,7 +233,8 @@ export default function VulnIntelAdminPage() {
           '—'
         ),
     },
-    { title: '更新时间', dataIndex: 'updatedAt', width: 170, render: (t) => (t ? fmtTime(t) : '—') },
+    { title: '发布时间', dataIndex: 'publishedAt', width: 160, render: (t) => (t ? fmtTime(t) : '—') },
+    { title: '同步时间', dataIndex: 'updatedAt', width: 160, render: (t) => (t ? fmtTime(t) : '—') },
     ...(canManage
       ? [
           {
@@ -196,6 +264,13 @@ export default function VulnIntelAdminPage() {
           {canSync && (
             <>
               <Button
+                icon={<SyncOutlined spin={stats?.nvdSyncRunning} />}
+                loading={stats?.nvdSyncRunning}
+                onClick={() => startSync('nvd')}
+              >
+                同步 NVD
+              </Button>
+              <Button
                 icon={<SyncOutlined spin={stats?.kevSyncRunning} />}
                 loading={stats?.kevSyncRunning}
                 onClick={() => startSync('kev')}
@@ -223,21 +298,23 @@ export default function VulnIntelAdminPage() {
       }
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-        EPSS（FIRST.org 每日全量快照）与 CISA KEV 在野利用目录的落库情报，供安全扫描富化（KEV 标/EPSS 分数/修复期限）。
+        EPSS（FIRST.org 每日全量快照）、CISA KEV 在野利用目录与 NVD 元数据（描述/发布时间/最后修改/CVSS）
+        的落库情报，供安全扫描富化（KEV 标/EPSS 分数/修复期限）。
         {stats && (
           <>
             {' '}当前共 <b>{stats.total}</b> 条，KEV 在榜 <b>{stats.kevCount}</b> 条
             {stats.lastUpdatedAt && <>，最近更新 {fmtTime(stats.lastUpdatedAt)}</>}。
           </>
         )}
-        {' '}EPSS 每天 04:00、KEV 每天 04:30 自动同步（分数变化超阈值才落库），手工增改仅当日有效、会被次日同步覆写。
+        {' '}EPSS 每天 04:00、KEV 每天 04:30、NVD 每天 05:00 自动同步（NVD 走增量窗口 + 高分缺描述行回灌；
+        展开行可按需即时补拉），手工增改的 EPSS/KEV 字段仅当日有效、会被次日同步覆写。
       </Typography.Paragraph>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
         <Space wrap>
           <Input.Search
             allowClear
-            placeholder="CVE 编号关键字"
-            style={{ width: 220 }}
+            placeholder="CVE 编号 / 描述关键字"
+            style={{ width: 240 }}
             onSearch={(v) => { setKeyword(v || undefined); setPage(0) }}
           />
           <Select
@@ -272,6 +349,20 @@ export default function VulnIntelAdminPage() {
           loading={loading}
           columns={columns}
           dataSource={rows}
+          expandable={{
+            expandedRowRender: (r) => (
+              <IntelDetail
+                row={r}
+                enriching={enriching.has(r.cve)}
+                canSync={canSync}
+                onEnrich={() => doEnrich(r, false)}
+              />
+            ),
+            onExpand: (open, r) => {
+              if (open && !r.description) void doEnrich(r, true)
+            },
+            rowExpandable: () => true,
+          }}
           pagination={{
             current: page + 1,
             pageSize: size,
@@ -284,7 +375,7 @@ export default function VulnIntelAdminPage() {
             },
           }}
           locale={{
-            emptyText: '情报表为空。点右上「同步 EPSS」/「同步 KEV」立即拉取，或等每日凌晨自动同步。',
+            emptyText: '情报表为空。点右上「同步 EPSS」/「同步 KEV」/「同步 NVD」立即拉取，或等每日凌晨自动同步。',
           }}
         />
       </div>
@@ -299,6 +390,63 @@ export default function VulnIntelAdminPage() {
         }}
       />
     </Card>
+  )
+}
+
+/** 展开行详情：描述全文 + NVD 生命周期时间 + CVSS + 外链；描述缺失时可手动补拉 */
+function IntelDetail({
+  row,
+  enriching,
+  canSync,
+  onEnrich,
+}: {
+  row: VulnIntel
+  enriching: boolean
+  canSync: boolean
+  onEnrich: () => void
+}) {
+  return (
+    <div style={{ padding: '4px 8px', maxWidth: 1100 }}>
+      <Typography.Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 8 }}>
+        {row.description ?? (enriching ? '正在从 NVD 拉取元数据…' : '暂无描述。')}
+      </Typography.Paragraph>
+      <Descriptions
+        size="small"
+        column={4}
+        items={[
+          { key: 'pub', label: '发布时间', children: row.publishedAt ? fmtTime(row.publishedAt) : '—' },
+          { key: 'mod', label: '最后修改', children: row.lastModifiedAt ? fmtTime(row.lastModifiedAt) : '—' },
+          { key: 'cvss', label: 'CVSS', children: cvssTag(row.cvssScore, row.cvssSeverity) },
+          {
+            key: 'links',
+            label: '外链',
+            children: (
+              <Space size={12} wrap>
+                <Typography.Link href={`https://nvd.nist.gov/vuln/detail/${row.cve}`} target="_blank">
+                  NVD
+                </Typography.Link>
+                <Typography.Link href={`https://www.cve.org/CVERecord?id=${row.cve}`} target="_blank">
+                  CVE.org
+                </Typography.Link>
+                {row.kev && (
+                  <Typography.Link
+                    href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog"
+                    target="_blank"
+                  >
+                    CISA KEV
+                  </Typography.Link>
+                )}
+                {canSync && (
+                  <Typography.Link disabled={enriching} onClick={onEnrich}>
+                    {enriching ? '拉取中…' : '从 NVD 刷新元数据'}
+                  </Typography.Link>
+                )}
+              </Space>
+            ),
+          },
+        ]}
+      />
+    </div>
   )
 }
 
@@ -357,6 +505,7 @@ function IntelEditDrawer({
     >
       <Typography.Paragraph type="secondary">
         手工维护的记录会在次日自动同步时被覆写（EPSS 全量覆盖分数、KEV 退榜清标记），仅适合当日临时补录。
+        NVD 元数据（描述/发布时间/CVSS）不由手工维护，展开行可即时补拉。
       </Typography.Paragraph>
       <Form
         form={form}

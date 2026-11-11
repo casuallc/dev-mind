@@ -32,6 +32,24 @@ public class SecurityProperties {
     /** CISA KEV 目录 JSON 数据源 */
     private String kevUrl = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
 
+    /** NVD API 2.0 数据源（CVE 元数据：发布时间/修改时间/描述/CVSS；内网可换镜像） */
+    private String nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0";
+
+    /**
+     * NVD API key（可选，配了限流 50 req/30s、否则 5 req/30s）。
+     * 属密钥——只写 application-local.yml（已 gitignore），禁入库禁提交。
+     */
+    private String nvdApiKey = "";
+
+    /** NVD 增量同步回看窗口（小时）：每次拉「该窗口内发布/修改过」的 CVE，重叠幂等 upsert */
+    private long nvdWindowHours = 36;
+
+    /**
+     * NVD 元数据回灌批量：每日增量同步后，对「EPSS 百分位最高且尚无描述」的行逐个补拉
+     * （单 CVE 查询限速，无 key 约 5 req/30s，100 条约 10 分钟）。0 = 关闭回灌。
+     */
+    private int nvdBackfillBatch = 100;
+
     /**
      * EPSS 增量写库阈值（score/percentile 任一绝对变化量超过它才更新该行）：
      * 40 万行里每天真变化的极少，全量覆写在小机器上会把堆与 DB 都压垮（2026-11-11 194 OOM 事故）。
@@ -61,6 +79,14 @@ public class SecurityProperties {
     public void setEpssUrl(String epssUrl) { this.epssUrl = epssUrl; }
     public String getKevUrl() { return kevUrl; }
     public void setKevUrl(String kevUrl) { this.kevUrl = kevUrl; }
+    public String getNvdUrl() { return nvdUrl; }
+    public void setNvdUrl(String nvdUrl) { this.nvdUrl = nvdUrl; }
+    public String getNvdApiKey() { return nvdApiKey; }
+    public void setNvdApiKey(String nvdApiKey) { this.nvdApiKey = nvdApiKey; }
+    public long getNvdWindowHours() { return nvdWindowHours; }
+    public void setNvdWindowHours(long nvdWindowHours) { this.nvdWindowHours = nvdWindowHours; }
+    public int getNvdBackfillBatch() { return nvdBackfillBatch; }
+    public void setNvdBackfillBatch(int nvdBackfillBatch) { this.nvdBackfillBatch = nvdBackfillBatch; }
     public double getEpssChangeThreshold() { return epssChangeThreshold; }
     public void setEpssChangeThreshold(double epssChangeThreshold) { this.epssChangeThreshold = epssChangeThreshold; }
     public long getUploadTokenTtlMinutes() { return uploadTokenTtlMinutes; }

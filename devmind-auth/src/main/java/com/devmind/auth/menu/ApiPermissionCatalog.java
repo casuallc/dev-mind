@@ -272,6 +272,8 @@ public final class ApiPermissionCatalog {
             // 漏洞情报后台（vuln_intel 全表浏览/手工维护/手动同步）：sync 规则必须先于 /* 通配
             rule("POST", "/api/security/intel/sync-epss", "admin.vuln-intel.action.sync"),
             rule("POST", "/api/security/intel/sync-kev", "admin.vuln-intel.action.sync"),
+            rule("POST", "/api/security/intel/sync-nvd", "admin.vuln-intel.action.sync"),
+            rule("POST", "/api/security/intel/*/enrich", "admin.vuln-intel.action.sync"),
             rule("POST", "/api/security/intel", "admin.vuln-intel.action.manage"),
             rule("PUT", "/api/security/intel/*", "admin.vuln-intel.action.manage"),
             rule("DELETE", "/api/security/intel/*", "admin.vuln-intel.action.manage"),
