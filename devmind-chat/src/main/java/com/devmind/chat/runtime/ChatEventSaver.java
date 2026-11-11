@@ -25,6 +25,9 @@ import java.util.concurrent.LinkedBlockingQueue;
  * <p>CAP-49：队列<b>有界</b>（10k）。原来的无界队列让"队列已满"分支成了死代码——DB 故障或
  * 慢库叠加流式会话就是内存无界增长，一个进程能把整台机器拖垮。丢事件比 OOM 好，且丢弃要计数告警，
  * 不能静默（事件是问答的全部证据，chat_events 少了一段用户是看得见的）。</p>
+ *
+ * <p>2026-11-11 加固（session 侧同款事故）：flusher 循环 catch Throwable——OOM 是 Error，
+ * 原 catch(Exception) 兜不住会把线程打死，事件此后静默全丢；{@link #offer} 检测线程死亡自动重启。</p>
  */
 @Component
 public class ChatEventSaver implements RuntimeEventSink {
@@ -60,8 +63,9 @@ public class ChatEventSaver implements RuntimeEventSink {
                     Thread.sleep(props.getEventFlushMs());
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                } catch (Exception e) {
-                    log.warn("问答事件批量落库异常", e);
+                } catch (Throwable e) {
+                    // Error（典型是 OOM）也要兜住：线程一死，offer 仍在静默进队，事件全丢且无告警
+                    log.error("问答事件批量落库异常（线程保持存活）", e);
                 }
             }
             // 关闭前排空
@@ -69,8 +73,18 @@ public class ChatEventSaver implements RuntimeEventSink {
         });
     }
 
+    /** 落库线程被 OOM 等 Error 打死后自愈：重启线程并 error 告警。 */
+    private synchronized void ensureFlusherAlive() {
+        if (running && (flusher == null || !flusher.isAlive())) {
+            log.error("问答事件落库线程已死亡，自动重启（此前应有 OOM/Error 日志）: 队列积压 {}", queue.size());
+            flusher = null;
+            start();
+        }
+    }
+
     @Override
     public void offer(String sessionId, SessionEvent ev) {
+        ensureFlusherAlive();
         ChatEventEntity e = new ChatEventEntity();
         e.setChatId(sessionId);
         e.setSeq(ev.seq());
