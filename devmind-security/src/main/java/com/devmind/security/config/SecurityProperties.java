@@ -32,6 +32,13 @@ public class SecurityProperties {
     /** CISA KEV 目录 JSON 数据源 */
     private String kevUrl = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
 
+    /**
+     * EPSS 增量写库阈值（score/percentile 任一绝对变化量超过它才更新该行）：
+     * 40 万行里每天真变化的极少，全量覆写在小机器上会把堆与 DB 都压垮（2026-11-11 194 OOM 事故）。
+     * 0 = 退化为全量覆写。
+     */
+    private double epssChangeThreshold = 0.001;
+
     /** 报告上传 token 有效期（分钟），引擎跑超时未上传即失效 → 该引擎 FAILED */
     private long uploadTokenTtlMinutes = 120;
 
@@ -54,6 +61,8 @@ public class SecurityProperties {
     public void setEpssUrl(String epssUrl) { this.epssUrl = epssUrl; }
     public String getKevUrl() { return kevUrl; }
     public void setKevUrl(String kevUrl) { this.kevUrl = kevUrl; }
+    public double getEpssChangeThreshold() { return epssChangeThreshold; }
+    public void setEpssChangeThreshold(double epssChangeThreshold) { this.epssChangeThreshold = epssChangeThreshold; }
     public long getUploadTokenTtlMinutes() { return uploadTokenTtlMinutes; }
     public void setUploadTokenTtlMinutes(long uploadTokenTtlMinutes) { this.uploadTokenTtlMinutes = uploadTokenTtlMinutes; }
     public long getUploadMaxBytes() { return uploadMaxBytes; }

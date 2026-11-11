@@ -104,6 +104,7 @@ public class VulnIntelService {
         }
         Instant now = Instant.now();
         int total = 0;
+        int written = 0;
         List<VulnIntelEntity> batch = new ArrayList<>(CHUNK);
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(
                 new GZIPInputStream(resp.body()), StandardCharsets.UTF_8))) {
@@ -123,30 +124,60 @@ public class VulnIntelService {
                 e.setUpdatedAt(now);
                 batch.add(e);
                 if (batch.size() >= CHUNK) {
-                    upsertEpssChunk(batch);
+                    written += upsertEpssChunk(batch);
                     total += batch.size();
                     batch.clear();
                 }
             }
         }
         if (!batch.isEmpty()) {
-            upsertEpssChunk(batch);
+            written += upsertEpssChunk(batch);
             total += batch.size();
         }
+        log.info("EPSS 增量落库：扫描 {} 条，写入 {} 条（变化阈值 {}）", total, written, props.getEpssChangeThreshold());
         return total;
     }
 
-    /** EPSS 列合并：保留已有行的 KEV 标记（两数据源各自维护自己字段） */
-    private void upsertEpssChunk(List<VulnIntelEntity> batch) {
+    /**
+     * EPSS 分块合并：新 CVE 直接插；已有行仅当 score/percentile 绝对变化超过
+     * {@link SecurityProperties#getEpssChangeThreshold()} 才写——40 万行每天全量覆写既压堆
+     * 又压 DB（2026-11-11 194 OOM 事故根因之一），而每日分数有实质变化的 CVE 只占极少数。
+     * 已有行的 KEV 标记无条件保留（KEV 由 {@link #doSyncKev} 维护）。
+     *
+     * @return 实际写库条数
+     */
+    int upsertEpssChunk(List<VulnIntelEntity> batch) {
         Map<String, VulnIntelEntity> existing = existingOf(batch);
+        List<VulnIntelEntity> dirty = new ArrayList<>(batch.size());
         for (VulnIntelEntity e : batch) {
             VulnIntelEntity old = existing.get(e.getCve());
-            if (old != null) {
-                e.setKev(old.isKev());
-                e.setKevDueDate(old.getKevDueDate());
+            if (old == null) {
+                dirty.add(e);
+                continue;
+            }
+            e.setKev(old.isKev());
+            e.setKevDueDate(old.getKevDueDate());
+            if (deltaBeyond(old.getEpssScore(), e.getEpssScore())
+                    || deltaBeyond(old.getEpssPercentile(), e.getEpssPercentile())) {
+                dirty.add(e);
             }
         }
-        repo.saveAll(batch);
+        if (!dirty.isEmpty()) {
+            repo.saveAll(dirty);
+        }
+        return dirty.size();
+    }
+
+    /** 绝对变化量判定：旧值为 null（KEV-only 行首次拿到 EPSS）视为变化；双侧 null 视为不变。 */
+    private boolean deltaBeyond(Double oldV, Double newV) {
+        double threshold = props.getEpssChangeThreshold();
+        if (threshold <= 0) {
+            return true; // 阈值 0 = 全量覆写（旧行为）
+        }
+        if (oldV == null || newV == null) {
+            return oldV != newV;
+        }
+        return Math.abs(oldV - newV) > threshold;
     }
 
     /** KEV JSON：vulnerabilities[]{cveID, dueDate,...}；退榜条目清 kev 标记 */
