@@ -4,12 +4,15 @@ import type {
   CveSuppression,
   FindingDetail,
   PageResult,
+  PageViewResult,
   ScanDetail,
   SecurityConfig,
   SecurityFinding,
   SecurityScan,
   Suppression,
   ToolcheckItem,
+  VulnIntel,
+  VulnIntelStats,
 } from './types'
 
 const SCANS = '/security/scans'
@@ -119,3 +122,47 @@ export const saveSecurityConfig = (projectId: string, internalGroupPrefixes: str
 /** 节点工具自检（ADMIN） */
 export const toolcheck = (nodeId: number) =>
   api.post<ToolcheckItem[]>(`/security/nodes/${nodeId}/toolcheck`)
+
+// ---------- 漏洞情报后台（vuln_intel 全表，挂 /admin/security/intel） ----------
+
+export interface IntelQuery {
+  keyword?: string
+  kev?: boolean
+  epssMin?: number
+  page: number
+  size: number
+  sort?: string
+  dir?: 'asc' | 'desc'
+}
+
+export function listIntel(q: IntelQuery): Promise<PageViewResult<VulnIntel>> {
+  const p = new URLSearchParams({ page: String(q.page), size: String(q.size) })
+  if (q.keyword) p.set('keyword', q.keyword)
+  if (q.kev !== undefined) p.set('kev', String(q.kev))
+  if (q.epssMin !== undefined) p.set('epssMin', String(q.epssMin))
+  if (q.sort) p.set('sort', q.sort)
+  if (q.dir) p.set('dir', q.dir)
+  return api.get<PageViewResult<VulnIntel>>(`/security/intel?${p}`)
+}
+
+export const intelStats = () => api.get<VulnIntelStats>('/security/intel/stats')
+
+export interface IntelUpsertInput {
+  cve: string
+  epssScore?: number | null
+  epssPercentile?: number | null
+  kev: boolean
+  kevDueDate?: string | null
+}
+
+export const createIntel = (input: IntelUpsertInput) => api.post<VulnIntel>('/security/intel', input)
+
+export const updateIntel = (cve: string, input: IntelUpsertInput) =>
+  api.put<VulnIntel>(`/security/intel/${encodeURIComponent(cve)}`, input)
+
+export const deleteIntel = (cve: string) =>
+  api.del(`/security/intel/${encodeURIComponent(cve)}`)
+
+export const syncIntelEpss = () => api.post<{ started: boolean }>('/security/intel/sync-epss')
+
+export const syncIntelKev = () => api.post<{ started: boolean }>('/security/intel/sync-kev')

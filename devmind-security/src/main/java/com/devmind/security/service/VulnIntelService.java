@@ -28,6 +28,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
@@ -52,6 +53,9 @@ public class VulnIntelService {
             .connectTimeout(Duration.ofSeconds(20))
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
+    /** 同步互斥旗标：定时任务与后台手动触发共用，避免两路并发把 40 万行处理压上堆（OOM 事故教训） */
+    private final AtomicBoolean epssRunning = new AtomicBoolean();
+    private final AtomicBoolean kevRunning = new AtomicBoolean();
 
     public VulnIntelService(VulnIntelRepository repo, SecurityProperties props, ObjectMapper mapper) {
         this.repo = repo;
@@ -70,20 +74,22 @@ public class VulnIntelService {
 
     @Scheduled(cron = "${devmind.security.intel.epss-cron:0 0 4 * * *}")
     public void syncEpss() {
-        if (!props.isIntelEnabled()) {
-            return;
+        if (!props.isIntelEnabled() || !epssRunning.compareAndSet(false, true)) {
+            return; // 已关闭或已有同步在跑（含手动触发）
         }
         try {
             int n = doSyncEpss();
             log.info("EPSS 情报同步完成，共 {} 条", n);
         } catch (Exception e) {
             log.warn("EPSS 情报同步失败（数据源不可达则降级为空表，不阻塞扫描）: {}", e.toString());
+        } finally {
+            epssRunning.set(false);
         }
     }
 
     @Scheduled(cron = "${devmind.security.intel.kev-cron:0 30 4 * * *}")
     public void syncKev() {
-        if (!props.isIntelEnabled()) {
+        if (!props.isIntelEnabled() || !kevRunning.compareAndSet(false, true)) {
             return;
         }
         try {
@@ -91,7 +97,38 @@ public class VulnIntelService {
             log.info("KEV 情报同步完成，在榜 {} 条", n);
         } catch (Exception e) {
             log.warn("KEV 情报同步失败（数据源不可达则降级为空表，不阻塞扫描）: {}", e.toString());
+        } finally {
+            kevRunning.set(false);
         }
+    }
+
+    /**
+     * 后台漏洞情报页手动触发：异步跑（EPSS 全量下载+增量落库可达分钟级，不同步占 HTTP 连接）。
+     *
+     * @return false = 情报同步已关闭或上一轮还在跑（调用方据此回 409）
+     */
+    public boolean triggerSyncEpss() {
+        if (!props.isIntelEnabled() || epssRunning.get()) {
+            return false;
+        }
+        Thread.ofVirtual().start(this::syncEpss);
+        return true;
+    }
+
+    public boolean triggerSyncKev() {
+        if (!props.isIntelEnabled() || kevRunning.get()) {
+            return false;
+        }
+        Thread.ofVirtual().start(this::syncKev);
+        return true;
+    }
+
+    public boolean isEpssSyncRunning() {
+        return epssRunning.get();
+    }
+
+    public boolean isKevSyncRunning() {
+        return kevRunning.get();
     }
 
     /** EPSS CSV.gz：首行以 # 起头（含模型版本注释），表头 cve,epss,percentile */

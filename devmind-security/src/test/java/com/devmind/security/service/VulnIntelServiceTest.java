@@ -142,4 +142,14 @@ class VulnIntelServiceTest {
         assertEquals(0, written);
         assertTrue(saveCalls.isEmpty(), "无变化不应调 saveAll");
     }
+
+    @Test
+    void 情报关闭时手动同步拒绝触发() {
+        props.setIntelEnabled(false);
+
+        assertFalse(service.triggerSyncEpss());
+        assertFalse(service.triggerSyncKev());
+        assertFalse(service.isEpssSyncRunning());
+        assertFalse(service.isKevSyncRunning());
+    }
 }

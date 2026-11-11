@@ -21,6 +21,7 @@ import JiraSyncPage from '../features/projects/pages/admin/JiraSyncPage'
 import LockPage from '../features/projects/pages/admin/LockPage'
 import BuildsPage from '../features/build/pages/BuildsPage'
 import SecurityPage from '../features/security/pages/SecurityPage'
+import VulnIntelAdminPage from '../features/security/pages/VulnIntelAdminPage'
 import DeploymentsPage from '../features/deploy/pages/DeploymentsPage'
 import ReleasesPage from '../features/deploy/pages/ReleasesPage'
 import TestsPage from '../features/test/pages/TestsPage'
@@ -306,6 +307,8 @@ export default function App() {
           <Route path="/admin/docs/:id" element={<DocEditorPage />} />
           {/* CAP-32 附件管理（图床+文件统一库；/attachments 旧路径重定向） */}
           <Route path="/admin/attachments" element={<AttachmentsPage />} />
+          {/* CAP-66 漏洞情报（EPSS/KEV 落库全表浏览 + 手工维护 + 手动同步） */}
+          <Route path="/admin/security/intel" element={<VulnIntelAdminPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

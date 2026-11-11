@@ -269,6 +269,12 @@ public final class ApiPermissionCatalog {
             rule("POST", "/api/security/findings/*/review", "project.security.action.ai"),
             rule("POST", "/api/security/findings/*/fix", "project.security.action.ai"),
             rule("PUT", "/api/security/projects/*/config", "project.security.action.config"),
+            // 漏洞情报后台（vuln_intel 全表浏览/手工维护/手动同步）：sync 规则必须先于 /* 通配
+            rule("POST", "/api/security/intel/sync-epss", "admin.vuln-intel.action.sync"),
+            rule("POST", "/api/security/intel/sync-kev", "admin.vuln-intel.action.sync"),
+            rule("POST", "/api/security/intel", "admin.vuln-intel.action.manage"),
+            rule("PUT", "/api/security/intel/*", "admin.vuln-intel.action.manage"),
+            rule("DELETE", "/api/security/intel/*", "admin.vuln-intel.action.manage"),
 
             // ---------- 需求流程 ----------
             rule("POST", "/api/projects/*/requirements", "project.requirements.action.create"),

@@ -1432,6 +1432,55 @@ exit 1
         self.assertIn("CVE-2021-44228", csv_text)
         self.assertNotIn(secret, csv_text)
 
+    def test_security_intel_admin(self):
+        # 漏洞情报后台（/api/security/intel）：手工增改查删 + 过滤分页 + 统计。
+        # 不触发真实 EPSS/KEV 同步（外网依赖），sync 端点只验冲突分支由单测覆盖。
+        cve = "CVE-2099-" + uuid.uuid4().hex[:6].upper()
+        created = self.api.request("POST", "/security/intel",
+                                   {"cve": cve.lower(), "epssScore": 0.42,
+                                    "epssPercentile": 0.9, "kev": True,
+                                    "kevDueDate": "2026-12-01"})
+        self.assertEqual(cve, created["cve"], "cve 未归一化为大写")
+        self.assertTrue(created["kev"])
+
+        def _cleanup_intel():
+            try:
+                self.api.request("DELETE", f"/security/intel/{cve}")
+            except AssertionError:
+                pass  # 用例末段已删除
+        self.addCleanup(_cleanup_intel)
+
+        # 重复建 → 409；非法分数 → 400
+        self.api.request("POST", "/security/intel", {"cve": cve, "kev": False}, expected=409)
+        self.api.request("POST", "/security/intel",
+                         {"cve": cve + "X", "epssScore": 1.5}, expected=400)
+
+        # 过滤：关键字 + KEV + EPSS 下限
+        page = self.api.request("GET", "/security/intel?keyword="
+                                + cve[8:].lower() + "&kev=true&epssMin=0.1")
+        self.assertEqual([cve], [r["cve"] for r in page["items"]])
+        self.assertGreaterEqual(page["total"], 1)
+        empty = self.api.request("GET", f"/security/intel?keyword={cve}&epssMin=0.9")
+        self.assertEqual(0, empty["total"])
+        not_kev = self.api.request("GET", f"/security/intel?keyword={cve}&kev=false")
+        self.assertEqual(0, not_kev["total"])
+
+        # 编辑：分数改 0.5、KEV 撤标
+        updated = self.api.request("PUT", f"/security/intel/{cve}",
+                                   {"epssScore": 0.5, "epssPercentile": 0.95, "kev": False})
+        self.assertEqual(0.5, updated["epssScore"])
+        self.assertFalse(updated["kev"])
+        self.api.request("PUT", "/security/intel/CVE-2099-NOPE", {"kev": False}, expected=404)
+
+        # 统计
+        stats = self.api.request("GET", "/security/intel/stats")
+        self.assertGreaterEqual(stats["total"], 1)
+        self.assertIn("epssSyncRunning", stats)
+
+        # 删除 → 再删 404
+        self.api.request("DELETE", f"/security/intel/{cve}")
+        self.api.request("DELETE", f"/security/intel/{cve}", expected=404)
+
 
 class CopilotContract(unittest.TestCase):
     """Migrated from cap76_tools_contract.py; GET-only, requires admin."""

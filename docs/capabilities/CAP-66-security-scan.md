@@ -384,6 +384,17 @@ POST   /api/security/nodes/{id}/toolcheck        节点工具自检（ADMIN，�
 POST   /api/security/scans/{id}/reports          报告上行（X-Scan-Token 头鉴权，runner 侧脚本 curl；
                                                  token 绑 scanId+engine+过期，一次性语义）
 GET/PUT /api/security/projects/{projectId}/config 项目级扫描配置（内部构件白名单追加）
+
+# 漏洞情报后台（2026-11-11 增补，/admin/security/intel，菜单「项目与资源 → 漏洞情报」）
+GET    /api/security/intel                    情报分页浏览（keyword/cve 模糊、kev、epssMin 过滤；
+                                              sort 白名单 cve/epssScore/epssPercentile/updatedAt/kev）
+GET    /api/security/intel/stats              总览（总量/KEV 在榜量/最近更新/两路同步 running 标志）
+POST   /api/security/intel                    手工新增（cve 归一化大写，重复 409）
+PUT    /api/security/intel/{cve}              编辑（不存在 404；分数/百分位限 0~1）
+DELETE /api/security/intel/{cve}              删除（下次同步若在榜会回填）
+POST   /api/security/intel/sync-epss          手动触发 EPSS 同步（异步，已在跑/已关闭 409）
+POST   /api/security/intel/sync-kev           手动触发 KEV 同步（同上）
+注：手工增改仅当日有效——EPSS 全量覆盖分数、KEV 退榜清标记，次日 04:00/04:30 同步覆写。
 ```
 
 权限：菜单/页签/按钮权限码走 CAP-103（MenuCatalog + ApiPermissionCatalog 登记）；

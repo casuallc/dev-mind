@@ -143,6 +143,13 @@
       "suite": "regression",
       "owner": "security",
       "cap": "CAP-66"
+    },
+    {
+      "id": "regression.security-intel-admin",
+      "test": "Regression.test_security_intel_admin",
+      "suite": "regression",
+      "owner": "security",
+      "cap": "CAP-66"
     }
   ]
 }

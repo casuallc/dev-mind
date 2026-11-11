@@ -4,6 +4,7 @@ import {
   ApiOutlined,
   BarChartOutlined,
   BellOutlined,
+  BugOutlined,
   CommentOutlined,
   DashboardOutlined,
   ExperimentOutlined,
@@ -53,6 +54,7 @@ const ICONS: Record<string, ReactNode> = {
   key: <KeyOutlined />,
   'safety-certificate': <SafetyCertificateOutlined />,
   bell: <BellOutlined />,
+  bug: <BugOutlined />,
   menu: <MenuOutlined />,
 }
 

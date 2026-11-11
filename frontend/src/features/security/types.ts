@@ -160,3 +160,29 @@ export interface PageResult<T> {
   number: number
   size: number
 }
+
+/** 后端 PageView JSON（items/total/page/size，page 从 0 起） */
+export interface PageViewResult<T> {
+  items: T[]
+  total: number
+  page: number
+  size: number
+}
+
+/** vuln_intel 行（后台漏洞情报页） */
+export interface VulnIntel {
+  cve: string
+  epssScore: number | null
+  epssPercentile: number | null
+  kev: boolean
+  kevDueDate: string | null
+  updatedAt: string | null
+}
+
+export interface VulnIntelStats {
+  total: number
+  kevCount: number
+  lastUpdatedAt: string | null
+  epssSyncRunning: boolean
+  kevSyncRunning: boolean
+}
