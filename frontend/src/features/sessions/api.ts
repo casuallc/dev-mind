@@ -3,6 +3,7 @@ import { api } from '../../shared/api/client'
 import type { FinalizeAck, RepoDiffView, SessionSummary, SessionEvent } from './types'
 import type {
   CollectOutputsResult,
+  FinalizeDetail,
   PublishOutputRequest,
   PublishOutputResult,
   SessionOutputContent,
@@ -138,6 +139,11 @@ export function sessionDiff(id: string): Promise<RepoDiffView[]> {
 
 export function removeWorktree(id: string): Promise<void> {
   return api.del(`/sessions/${id}/worktree`)
+}
+
+/** 收口留痕：收口明细（并入基线的提交清单 + 变更统计）；detail 空 = 无收口记录。 */
+export function getFinalizeDetail(id: string): Promise<FinalizeDetail> {
+  return api.get<FinalizeDetail>(`/sessions/${id}/finalize-detail`)
 }
 
 export function deleteSession(id: string): Promise<void> {

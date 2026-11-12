@@ -111,6 +111,19 @@ public class SessionEntity {
     @Column(name = "attachment_ids", length = 1024)
     private String attachmentIds;
 
+    /**
+     * 收口留痕：收口成功时 runner 回传的明细（逐库合并摘要 + 并入基线的提交清单 + 变更统计）。
+     * 只落收口目标会话一行（需求级收口的兄弟会话查代表行）。null = 未收口过/老 runner 未回传。
+     */
+    @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @Column(name = "finalize_detail", length = 16_777_216)
+    private String finalizeDetail;
+
+    /** 最近一次收口成功时间（与 finalizeDetail 同写）。 */
+    @Column(name = "finalized_at")
+    private Instant finalizedAt;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -184,6 +197,10 @@ public class SessionEntity {
     public void setContextManifestJson(String contextManifestJson) { this.contextManifestJson = contextManifestJson; }
     public String getAttachmentIds() { return attachmentIds; }
     public void setAttachmentIds(String attachmentIds) { this.attachmentIds = attachmentIds; }
+    public String getFinalizeDetail() { return finalizeDetail; }
+    public void setFinalizeDetail(String finalizeDetail) { this.finalizeDetail = finalizeDetail; }
+    public Instant getFinalizedAt() { return finalizedAt; }
+    public void setFinalizedAt(Instant finalizedAt) { this.finalizedAt = finalizedAt; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Double getCostUsd() { return costUsd; }

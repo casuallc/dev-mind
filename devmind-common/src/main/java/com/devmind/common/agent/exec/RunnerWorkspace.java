@@ -730,6 +730,11 @@ public class RunnerWorkspace {
         } catch (IllegalStateException e) {
             return e.getMessage();
         }
+        // 收口留痕：fetch 之后、合并之前采集「将并入基线的提交清单 + 变更统计」（best-effort，
+        // 失败不挡收口）。此刻 FETCH_HEAD=刚拉到的基线 tip、会话分支仍在本地，是唯一拿得到全貌
+        // 的时点——收口后远端分支可能随 deleteRemoteBranch 删除，事后只剩基线 tip 那条 merge
+        // 提交说明，看不出到底并了什么。摘要随 FinalizeResult.detail 回传服务端落库供事后查看。
+        appendMergeManifest(cacheDir, spec, label, summary);
         // 合并放临时 detached worktree（userRoot/.finalize-tmp[-<key>][-<name>]），不动 main 缓存检出分支
         Path tmp = userRoot.resolve(".finalize-tmp"
                 + (key != null ? "-" + key : "")
@@ -818,6 +823,57 @@ public class RunnerWorkspace {
         run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "branch", "-D", spec.branch());
         summary.append(label).append("已删除固定 worktree 与本地分支 ").append(spec.branch()).append('\n');
         return null;
+    }
+
+    /** 收口留痕提交清单最多列出的个数（防长历史刷爆摘要；总数照常报）。 */
+    private static final int MANIFEST_MAX_COMMITS = 30;
+
+    /**
+     * 收口留痕（best-effort，调用方在 fetch 后、合并前调用，持有 cacheLock）：
+     * 「FETCH_HEAD..分支」提交清单（hash/作者/时间/主题，超 {@link #MANIFEST_MAX_COMMITS} 截断）
+     * 与「FETCH_HEAD...分支」变更统计（三点 = 从 merge-base 算，只含分支侧改动）追加进摘要。
+     * 任何一步失败都跳过不挡收口——留痕是增强，不是闸门。
+     */
+    private void appendMergeManifest(Path cacheDir, RepoSpec spec, String label, StringBuilder summary) {
+        try {
+            Result count = run(cacheDir, OP_TIMEOUT_SEC, spec.token(),
+                    "rev-list", "--count", "FETCH_HEAD.." + spec.branch());
+            int total = -1;
+            if (count.exit() == 0) {
+                try {
+                    total = Integer.parseInt(count.output().trim());
+                } catch (NumberFormatException ignored) {
+                    // total 保持 -1（未知），清单照常列
+                }
+            }
+            if (total == 0) {
+                summary.append(label).append("并入基线提交 0 个（基线已包含会话分支全部提交）\n");
+                return;
+            }
+            Result logR = run(cacheDir, OP_TIMEOUT_SEC, spec.token(),
+                    "log", "--no-decorate", "--format=%h%x09%an%x09%ad%x09%s",
+                    "--date=format-local:%Y-%m-%d %H:%M:%S",
+                    "-n", String.valueOf(MANIFEST_MAX_COMMITS), "FETCH_HEAD.." + spec.branch());
+            if (logR.exit() == 0 && !logR.output().isBlank()) {
+                summary.append(label).append("并入基线提交 ")
+                        .append(total > 0 ? String.valueOf(total) : "若干").append(" 个：\n");
+                for (String line : logR.output().lines().toList()) {
+                    if (!line.isBlank()) {
+                        summary.append("  ").append(line.strip()).append('\n');
+                    }
+                }
+                if (total > MANIFEST_MAX_COMMITS) {
+                    summary.append("  … 其余 ").append(total - MANIFEST_MAX_COMMITS).append(" 个省略\n");
+                }
+            }
+            Result stat = run(cacheDir, OP_TIMEOUT_SEC, spec.token(),
+                    "diff", "--shortstat", "FETCH_HEAD..." + spec.branch());
+            if (stat.exit() == 0 && !stat.output().isBlank()) {
+                summary.append(label).append("变更统计：").append(stat.output().strip()).append('\n');
+            }
+        } catch (Exception e) {
+            log.debug("收口留痕采集失败（不挡收口）: branch={} err={}", spec.branch(), e.toString());
+        }
     }
 
     /**

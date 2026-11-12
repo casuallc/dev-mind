@@ -896,8 +896,38 @@ public class SessionManagerService {
             throw new DevMindException(ErrorCode.CONFLICT,
                     "收口失败（工作区已保留，可处理后重试）: " + result.error());
         }
+        // 收口留痕：明细（含并入基线的提交清单与变更统计，runner 采集）落目标会话行供事后查看。
+        // 需求级收口的兄弟会话只置状态不落明细——查看时任意会话都能定位到代表行的明细。
+        Instant finalizedAt = Instant.now();
+        ent.setFinalizeDetail(result.detail());
+        ent.setFinalizedAt(finalizedAt);
+        ent.setUpdatedAt(finalizedAt);
+        sessionRepo.save(ent);
         markRequirementWorkspaceFinalized(ent);
         return result;
+    }
+
+    /**
+     * 收口记录查看（收口留痕）：无明细（未收口过/老 runner 未回传）返回 detail=null 的视图，
+     * 由前端提示「无收口记录」，不抛 404（管理页批量探测友好）。
+     */
+    public com.devmind.session.dto.FinalizeDetailView finalizeDetail(String id) {
+        SessionEntity ent = requireEntity(id);
+        String detail = ent.getFinalizeDetail();
+        // 需求级收口：明细只落收口目标会话行；兄弟会话（无明细）回退查同需求最近一条有明细的
+        if ((detail == null || detail.isBlank()) && ent.getRequirementId() != null
+                && !ent.getRequirementId().isBlank()) {
+            SessionEntity ref = sessionRepo
+                    .findByRequirementIdOrderByCreatedAtDesc(ent.getRequirementId()).stream()
+                    .filter(s -> s.getFinalizeDetail() != null && !s.getFinalizeDetail().isBlank())
+                    .findFirst().orElse(null);
+            if (ref != null) {
+                return new com.devmind.session.dto.FinalizeDetailView(
+                        ref.getWorkspaceState(), ref.getFinalizeDetail(), ref.getFinalizedAt());
+            }
+        }
+        return new com.devmind.session.dto.FinalizeDetailView(
+                ent.getWorkspaceState(), detail, ent.getFinalizedAt());
     }
 
     /**

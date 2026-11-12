@@ -44,6 +44,13 @@ export interface FinalizeAck {
   error?: string
 }
 
+/** 收口留痕（GET /sessions/{id}/finalize-detail；detail 空 = 未收口过或老 runner 未回传） */
+export interface FinalizeDetail {
+  workspaceState?: string | null
+  detail?: string | null
+  finalizedAt?: string | null
+}
+
 /** CAP-31：单仓库 diff 摘要（GET /sessions/{id}/diff 按库返回列表；单库失败只填 error） */
 export interface RepoDiffView {
   repoName: string

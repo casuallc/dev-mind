@@ -1,15 +1,16 @@
 // CAP-39：会话「更多」操作（原会话详情页迁入工作台）：已注入上下文 / 沉淀经验 / 清理 worktree。
-// CAP-42：收口合并到基线（固定工作区手动收口：合并+push+删 worktree）。
+// CAP-42：收口合并到基线（固定工作区手动收口：合并+push+删 worktree）；收口留痕（明细落库可查）。
 import { useState } from 'react'
 import { Button, Checkbox, Descriptions, Drawer, Dropdown, message, Modal, Space, Table, Tag, Typography } from 'antd'
 import {
   BulbOutlined,
   DeleteOutlined,
   FileSearchOutlined,
+  FileTextOutlined,
   MergeOutlined,
   MoreOutlined,
 } from '@ant-design/icons'
-import { finalizeSession, removeWorktree } from '../api'
+import { finalizeSession, getFinalizeDetail, removeWorktree } from '../api'
 import type { SessionSummary } from '../types'
 import { getSessionContext } from '../../scenarios/api'
 import type { ContextSnapshot } from '../../scenarios/types'
@@ -19,6 +20,7 @@ import { usePermissions } from '../../auth/usePermissions'
 import { fmtTime } from '../../../shared/utils/format'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import { showError } from '../../../shared/utils/showError'
+import { showFinalizeDetailModal } from './FinalizeDetailModal'
 
 export default function SessionMoreActions({
   session,
@@ -70,16 +72,35 @@ export default function SessionMoreActions({
     setFinalizing(true)
     try {
       const ack = await finalizeSession(session.id, discard, deleteBranch)
-      message.success(ack.detail ? `收口完成：${ack.detail}` : '收口完成：已合并到基线并推送')
       setFinalizeOpen(false)
       setDiscard(false)
       setDeleteBranch(true)
+      // 收口留痕：明细（并入基线的提交清单 + 变更统计）弹窗展示，不再一闪而过
+      if (ack.detail) {
+        showFinalizeDetailModal(ack.detail)
+      } else {
+        message.success('收口完成：已合并到基线并推送')
+      }
       onChanged()
     } catch (e) {
       // 失败（冲突/脏工作区/push 失败）透传 runner 脱敏错误，工作区保留可重试
       showError(e, '收口失败（工作区已保留，可处理后重试）')
     } finally {
       setFinalizing(false)
+    }
+  }
+
+  // 收口记录：已收口会话随时回看明细（detail 空 = 老 runner 收口无留痕）
+  const onShowFinalizeDetail = async () => {
+    try {
+      const r = await getFinalizeDetail(session.id)
+      if (!r.detail) {
+        message.info('无收口记录（未收口过，或收口时 runner 版本过低未回传明细）')
+        return
+      }
+      showFinalizeDetailModal(r.detail, r.finalizedAt)
+    } catch (e) {
+      showError(e, '收口记录查询失败')
     }
   }
 
@@ -120,6 +141,15 @@ export default function SessionMoreActions({
                 ]
               : []),
             { key: 'context', icon: <FileSearchOutlined />, label: '已注入上下文' },
+            ...(session.workspaceState === 'FINALIZED'
+              ? [
+                  {
+                    key: 'finalize-detail',
+                    icon: <FileTextOutlined />,
+                    label: '收口记录',
+                  },
+                ]
+              : []),
             ...(canSediment
               ? [{ key: 'sediment', icon: <BulbOutlined />, label: '沉淀经验' }]
               : []),
@@ -139,6 +169,7 @@ export default function SessionMoreActions({
             if (key === 'finalize') setFinalizeOpen(true)
             else if (key === 'context') openContext()
             else if (key === 'sediment') setSedimentOpen(true)
+            else if (key === 'finalize-detail') void onShowFinalizeDetail()
             else if (key === 'worktree') onRemoveWorktree()
           },
         }}

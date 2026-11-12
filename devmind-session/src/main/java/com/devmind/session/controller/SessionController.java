@@ -225,6 +225,12 @@ public class SessionController {
         service.removeWorktree(id);
     }
 
+    /** 收口留痕：收口明细（并入基线的提交清单 + 变更统计）与收口时间；detail 空 = 未收口过。 */
+    @GetMapping("/{id}/finalize-detail")
+    public com.devmind.session.dto.FinalizeDetailView finalizeDetail(@PathVariable String id) {
+        return service.finalizeDetail(id);
+    }
+
     /** CAP-33 FR-07：已注入上下文清单（装配快照：场景/知识/skills/docs + 来源标注）。 */
     @GetMapping(value = "/{id}/context", produces = "application/json")
     public String context(@PathVariable String id) {
