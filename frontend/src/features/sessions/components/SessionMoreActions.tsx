@@ -1,4 +1,4 @@
-// CAP-39：会话「更多」操作（原会话详情页迁入工作台）：已注入上下文 / 沉淀经验 / 清理 worktree。
+// CAP-39：会话「更多」操作（原会话详情页迁入工作台）：已注入上下文 / 沉淀经验 / 清理工作区。
 // CAP-42：收口合并到基线（固定工作区手动收口：合并+push+删 worktree）；收口留痕（明细落库可查）。
 import { useState } from 'react'
 import { Button, Checkbox, Descriptions, Drawer, Dropdown, message, Modal, Space, Table, Tag, Typography } from 'antd'
@@ -10,7 +10,7 @@ import {
   MergeOutlined,
   MoreOutlined,
 } from '@ant-design/icons'
-import { finalizeSession, getFinalizeDetail, removeWorktree } from '../api'
+import { finalizeSession, getFinalizeDetail, releaseWorkspace, removeWorktree } from '../api'
 import type { SessionSummary } from '../types'
 import { getSessionContext } from '../../scenarios/api'
 import type { ContextSnapshot } from '../../scenarios/types'
@@ -104,6 +104,45 @@ export default function SessionMoreActions({
     }
   }
 
+  // 清理工作区：CAP-34 远程会话走 runner 释放（丢弃语义）；旧本机布局才走 worktreePath
+  const canReleaseWorkspace =
+    canFinalizeAction &&
+    !!session.agentNodeId &&
+    !!session.workspaceState &&
+    session.workspaceState !== 'RELEASED' &&
+    !canSuspend &&
+    (!!me && (session.createdBy === me.username || isAdmin()))
+
+  const onReleaseWorkspace = () => {
+    Modal.confirm({
+      centered: true,
+      title: '清理节点工作区？',
+      content: (
+        <Space direction="vertical" size={4}>
+          <Typography.Text>
+            将删除执行节点上的工作区（worktree + 本地分支），<Typography.Text strong>不合并到基线</Typography.Text>
+            ——未收口的改动会丢弃（远端 feature 分支不受影响，可在「工作区」页签另行删除）。
+          </Typography.Text>
+          <Typography.Text type="warning">
+            需求级工作区被同需求多个会话共享，清理会一并回收。如需保留改动请先「收口合并到基线」。
+          </Typography.Text>
+        </Space>
+      ),
+      okText: '清理',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const ack = await releaseWorkspace(session.id)
+          message.success(ack.detail ? `工作区已清理：${ack.detail}` : '工作区已清理')
+          onChanged()
+        } catch (e) {
+          showError(e, '清理失败（工作区已保留，可处理后重试）')
+        }
+      },
+    })
+  }
+
   const onRemoveWorktree = () => {
     Modal.confirm({
       centered: true,
@@ -153,23 +192,35 @@ export default function SessionMoreActions({
             ...(canSediment
               ? [{ key: 'sediment', icon: <BulbOutlined />, label: '沉淀经验' }]
               : []),
-            ...(canManageSession
+            // CAP-34 远程会话：清理走 runner 释放（丢弃语义）；旧本机布局才走 worktreePath
+            ...(canFinalizeAction && !!session.agentNodeId && !!session.workspaceState
               ? [
                   {
-                    key: 'worktree',
+                    key: 'release-workspace',
                     icon: <DeleteOutlined />,
-                    label: '清理 worktree',
-                    disabled: !session.worktreePath || canSuspend,
+                    label: '清理工作区',
+                    disabled: !canReleaseWorkspace,
                     danger: true,
                   },
                 ]
-              : []),
+              : canManageSession && !!session.worktreePath
+                ? [
+                    {
+                      key: 'worktree',
+                      icon: <DeleteOutlined />,
+                      label: '清理 worktree',
+                      disabled: canSuspend,
+                      danger: true,
+                    },
+                  ]
+                : []),
           ],
           onClick: ({ key }) => {
             if (key === 'finalize') setFinalizeOpen(true)
             else if (key === 'context') openContext()
             else if (key === 'sediment') setSedimentOpen(true)
             else if (key === 'finalize-detail') void onShowFinalizeDetail()
+            else if (key === 'release-workspace') onReleaseWorkspace()
             else if (key === 'worktree') onRemoveWorktree()
           },
         }}

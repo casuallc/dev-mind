@@ -415,6 +415,22 @@ public class RequirementService {
     }
 
     /**
+     * 需求工作区被手动清理（释放，丢弃语义）：状态回到「未开启」（null = 初始口径）——
+     * 工作区在节点上已不存在，后续再开会话会重建。与 markWorkspaceOpen 的自然衔接：
+     * 下次 launch 会重新置 OPEN。
+     */
+    public void markWorkspaceReleased(String requirementId) {
+        requirementRepo.findById(requirementId).ifPresent(e -> {
+            if (e.getWorkspaceState() == null || e.getWorkspaceState().isBlank()) {
+                return;
+            }
+            e.setWorkspaceState(null);
+            e.setUpdatedAt(Instant.now());
+            requirementRepo.save(e);
+        });
+    }
+
+    /**
      * 派生状态重算（rollup）：Work Item 状态变化后调用。
      * 人工终态 CANCELLED 不覆盖；DONE 在工作单元重新活跃时回滚（→ DESIGNING/IN_PROGRESS），
      * 全终态时保持 DONE 不回退 ACCEPTANCE；无 Work Item 时保持现值（DRAFT/ANALYZING 由人工或分析会话推进）。

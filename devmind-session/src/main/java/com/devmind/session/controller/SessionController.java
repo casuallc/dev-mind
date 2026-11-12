@@ -231,6 +231,13 @@ public class SessionController {
         return service.finalizeDetail(id);
     }
 
+    /** 手动清理节点固定工作区（丢弃语义：不合并不 push；需求级共享工作区整块回收）。
+     *  鉴权=创建者或 admin；进行中会话/同需求有进行中会话 → 409。 */
+    @DeleteMapping("/{id}/workspace")
+    public com.devmind.common.agent.WorkspaceReleaseResult releaseWorkspace(@PathVariable String id) {
+        return service.releaseWorkspace(id);
+    }
+
     /** CAP-33 FR-07：已注入上下文清单（装配快照：场景/知识/skills/docs + 来源标注）。 */
     @GetMapping(value = "/{id}/context", produces = "application/json")
     public String context(@PathVariable String id) {

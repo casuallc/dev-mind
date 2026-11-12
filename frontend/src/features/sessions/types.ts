@@ -51,6 +51,13 @@ export interface FinalizeDetail {
   finalizedAt?: string | null
 }
 
+/** 手动清理工作区结果（DELETE /sessions/{id}/workspace，丢弃语义不合并） */
+export interface WorkspaceReleaseAck {
+  ok: boolean
+  detail?: string
+  error?: string
+}
+
 /** CAP-31：单仓库 diff 摘要（GET /sessions/{id}/diff 按库返回列表；单库失败只填 error） */
 export interface RepoDiffView {
   repoName: string

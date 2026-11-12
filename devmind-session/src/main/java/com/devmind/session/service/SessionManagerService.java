@@ -831,6 +831,9 @@ public class SessionManagerService {
         if (SessionEntity.WORKSPACE_FINALIZED.equals(ent.getWorkspaceState())) {
             throw new DevMindException(ErrorCode.CONFLICT, "工作区已收口，无需重复操作");
         }
+        if (SessionEntity.WORKSPACE_RELEASED.equals(ent.getWorkspaceState())) {
+            throw new DevMindException(ErrorCode.CONFLICT, "工作区已清理（丢弃未合并），无可收口内容");
+        }
         return doFinalizeWorkspace(ent, discardChanges, deleteRemoteBranch);
     }
 
@@ -1162,6 +1165,87 @@ public class SessionManagerService {
         cleanupWorkspace(ent);
         ent.setWorktreePath(null);
         ent.setUpdatedAt(Instant.now());
+        sessionRepo.save(ent);
+    }
+
+    /**
+     * 手动清理节点固定工作区（页面「清理工作区」/ 工作区管理 tab，<b>禁 @Transactional</b>——
+     * 内含 WS 阻塞等 ack）：校验（归属/状态/协议版本）→ 按 session_repos 快照重建 specs →
+     * 下发 workspace_release 帧（丢弃语义：不合并不 push，runner 删 worktree + 本地分支）→
+     * 成功落 RELEASED（需求级：同需求全部会话行 + 需求行回到「未开启」口径）。
+     *
+     * <p>与删除会话时的 {@link #releaseFixedWorkspace} 差别：那条只服务非需求会话且是删除前置；
+     * 这条面向<b>需求级共享工作区</b>的手动清理（CAP-51 收口<b>保留</b>工作树、删除会话不回收
+     * 需求工作树，此前无任何手动回收入口）。需求级释放会连带清理同需求其它会话共用的事实，
+     * 有进行中会话占用时 409 挡住。</p>
+     */
+    public WorkspaceReleaseResult releaseWorkspace(String id) {
+        SessionEntity ent = requireEntity(id);
+        String actor = identityService.currentActor();
+        if (ent.getCreatedBy() != null && !ent.getCreatedBy().equals(actor) && !isAdmin()) {
+            throw new DevMindException(ErrorCode.FORBIDDEN, "只有会话创建者或管理员可以清理工作区");
+        }
+        if (ent.getWorkspaceState() == null || ent.getWorkspaceState().isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "该会话无固定工作区（旧布局或非代码会话），无需清理");
+        }
+        if (SessionEntity.WORKSPACE_RELEASED.equals(ent.getWorkspaceState())) {
+            throw new DevMindException(ErrorCode.CONFLICT, "工作区已清理，无需重复操作");
+        }
+        if (SessionState.valueOf(ent.getStatus()).isActive() || runtimes.containsKey(id)) {
+            throw new DevMindException(ErrorCode.CONFLICT, "会话仍在运行中，请先结束会话再清理工作区");
+        }
+        if (ent.getAgentNodeId() == null || ent.getAgentNodeId().isBlank()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "历史本机会话（无执行节点）不可远程清理");
+        }
+        // 需求级共享防护：同需求其它会话进行中（被排除的自身已在上一步判过）→ 409
+        if (isRequirementScoped(ent)) {
+            precheckRequirementOccupancy(ent.getRequirementId(), id);
+        }
+        AgentNodeConnector connector = requireConnector();
+        requireWorkspaceProtocol(connector, ent.getAgentNodeId(), ent.getWorkspaceKey());
+        Project proj = resolveProject(ent.getProjectId());
+        List<AgentLaunchCommand.RepoSpec> specs = buildRepoSpecs(proj,
+                sessionRepoRepo.findBySessionIdOrderBySortOrderAscIdAsc(id), ent.getBaseBranch(),
+                worktreeManager.branchFor(ent.getRequirementId(), id), ent.getCreatedBy());
+        if (specs.isEmpty()) {
+            throw new DevMindException(ErrorCode.CONFLICT, "会话无仓库快照，无法清理（非代码会话）");
+        }
+        String wsOwner = requireWorkspaceOwner(ent.getWorkspaceOwner() != null
+                && !ent.getWorkspaceOwner().isBlank() ? ent.getWorkspaceOwner() : ent.getCreatedBy());
+        // 不动远端分支（删除远端走工作区管理 tab 的分支删除入口，语义分离）
+        WorkspaceReleaseResult result = connector.releaseWorkspace(ent.getAgentNodeId(), id,
+                ent.getProjectId(), wsOwner, specs, ent.getWorkspaceKey(), false);
+        if (!result.ok()) {
+            throw new DevMindException(ErrorCode.CONFLICT,
+                    "清理失败（工作区已保留，可处理后重试）: " + result.error());
+        }
+        markRequirementWorkspaceReleased(ent);
+        return result;
+    }
+
+    /**
+     * 需求级清理成功后的落库（镜像 {@link #markRequirementWorkspaceFinalized}）：
+     * req- 键会话 → 同需求全部非 RELEASED 会话行置 RELEASED、需求行回「未开启」（工作区已不存在，
+     * 再开会话会重建）；旧布局会话只置本行。
+     */
+    private void markRequirementWorkspaceReleased(SessionEntity ent) {
+        Instant now = Instant.now();
+        if (isRequirementScoped(ent) && ent.getRequirementId() != null
+                && !ent.getRequirementId().isBlank()) {
+            requirementService.markWorkspaceReleased(ent.getRequirementId());
+            for (SessionEntity s : sessionRepo.findByRequirementIdOrderByCreatedAtDesc(ent.getRequirementId())) {
+                if (s.getWorkspaceState() != null
+                        && !SessionEntity.WORKSPACE_RELEASED.equals(s.getWorkspaceState())) {
+                    s.setWorkspaceState(SessionEntity.WORKSPACE_RELEASED);
+                    s.setUpdatedAt(now);
+                    sessionRepo.save(s);
+                }
+            }
+            return;
+        }
+        ent.setWorkspaceState(SessionEntity.WORKSPACE_RELEASED);
+        ent.setUpdatedAt(now);
         sessionRepo.save(ent);
     }
 

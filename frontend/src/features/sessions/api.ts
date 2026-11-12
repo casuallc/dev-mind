@@ -8,6 +8,7 @@ import type {
   PublishOutputResult,
   SessionOutputContent,
   SessionOutputFile,
+  WorkspaceReleaseAck,
 } from './types'
 
 // CAP-31：会话归属当前项目——projectId 为首参（工作台在 ProjectContextGate 内，必有当前项目）
@@ -144,6 +145,11 @@ export function removeWorktree(id: string): Promise<void> {
 /** 收口留痕：收口明细（并入基线的提交清单 + 变更统计）；detail 空 = 无收口记录。 */
 export function getFinalizeDetail(id: string): Promise<FinalizeDetail> {
   return api.get<FinalizeDetail>(`/sessions/${id}/finalize-detail`)
+}
+
+/** 手动清理节点固定工作区（丢弃语义：不合并不 push；需求级共享工作区整块回收）。 */
+export function releaseWorkspace(id: string): Promise<WorkspaceReleaseAck> {
+  return api.del<WorkspaceReleaseAck>(`/sessions/${id}/workspace`)
 }
 
 export function deleteSession(id: string): Promise<void> {

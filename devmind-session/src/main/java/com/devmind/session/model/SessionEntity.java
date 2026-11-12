@@ -75,11 +75,12 @@ public class SessionEntity {
     private String workspaceOwner;
 
     /**
-     * CAP-42：固定工作区收口状态（OPEN=占用中 / FINALIZED=已手动收口合并基线并删 worktree）。
-     * null = 旧会话或非 repo 会话（不参与收口）。可空无默认值（规避 @ColumnDefault 红线）。
+     * CAP-42：固定工作区收口状态（OPEN=占用中 / FINALIZED=已手动收口合并基线 / RELEASED=已手动
+     * 清理（丢弃语义，不合并））。null = 旧会话或非 repo 会话（不参与收口）。可空无默认值（规避 @ColumnDefault 红线）。
      */
     public static final String WORKSPACE_OPEN = "OPEN";
     public static final String WORKSPACE_FINALIZED = "FINALIZED";
+    public static final String WORKSPACE_RELEASED = "RELEASED";
 
     @Column(name = "workspace_state", length = 16)
     private String workspaceState;
