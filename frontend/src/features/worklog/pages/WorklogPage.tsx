@@ -289,6 +289,18 @@ export default function WorklogPage() {
 
   useEffect(reload, [reload])
 
+  // 周日条接口（/daily/week）的 contentMd 只有前 1000 字预览（供周日选择条用），
+  // 选中天后必须补拉 getDaily 全文——否则编辑器展示的是截断版，且点保存会把截断内容写回库。
+  // 生成轮询期间跳过（onGenerate 自己用 getDaily 回填全文，避免竞态回填旧稿）。
+  useEffect(() => {
+    if (view !== 'daily' || generating) return
+    getDaily(dayStr)
+      .then((r) => {
+        if (r?.exists) setDailyWeek((m) => ({ ...m, [dayStr]: r }))
+      })
+      .catch(() => {})
+  }, [view, dayStr, generating])
+
   // 周导航：±7 天整体平移（选中日保持星期几不变），已处于当前周时禁止再向后切未来周
   const shiftWeek = (n: number) => {
     if (n > 0 && isCurrentWeek) return
