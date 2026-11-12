@@ -78,6 +78,7 @@ public final class MenuCatalog {
             menu("project.security", "安全", "/security", MenuItemEntity.ZONE_PROJECT, null, null, 90),
             tab("project.sessions", "chat", "对话", 10),
             tab("project.sessions", "list", "会话列表", 20),
+            tab("project.sessions", "workspace", "工作区", 30),
             action("project.sessions", "create", "新建会话", 10, true),
             action("project.sessions", "manage", "管理会话（结束/挂起/恢复/删除）", 20, true),
             action("project.sessions", "outputs", "收集/推送产出", 30, true),

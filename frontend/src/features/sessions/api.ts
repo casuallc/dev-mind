@@ -6,9 +6,11 @@ import type {
   FinalizeDetail,
   PublishOutputRequest,
   PublishOutputResult,
+  RemoteBranchList,
   SessionOutputContent,
   SessionOutputFile,
   WorkspaceReleaseAck,
+  WorkspaceRow,
 } from './types'
 
 // CAP-31：会话归属当前项目——projectId 为首参（工作台在 ProjectContextGate 内，必有当前项目）
@@ -150,6 +152,21 @@ export function getFinalizeDetail(id: string): Promise<FinalizeDetail> {
 /** 手动清理节点固定工作区（丢弃语义：不合并不 push；需求级共享工作区整块回收）。 */
 export function releaseWorkspace(id: string): Promise<WorkspaceReleaseAck> {
   return api.del<WorkspaceReleaseAck>(`/sessions/${id}/workspace`)
+}
+
+// ---------------- 工作区管理 tab（会话页「工作区」视图） ----------------
+
+export function listProjectWorkspaces(projectId: string): Promise<WorkspaceRow[]> {
+  return api.get<WorkspaceRow[]>(`/projects/${projectId}/workspaces`)
+}
+
+export function listRemoteBranches(projectId: string): Promise<RemoteBranchList> {
+  return api.get<RemoteBranchList>(`/projects/${projectId}/workspaces/remote-branches`)
+}
+
+/** 删除远端 feature 分支（仅 feature/ 前缀；幂等）。 */
+export function deleteRemoteBranch(projectId: string, repoName: string, branch: string): Promise<void> {
+  return api.post(`/projects/${projectId}/workspaces/remote-branches/delete`, { repoName, branch })
 }
 
 export function deleteSession(id: string): Promise<void> {

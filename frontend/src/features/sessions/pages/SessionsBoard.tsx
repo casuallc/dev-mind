@@ -27,6 +27,7 @@ import NewSessionDraft from '../components/NewSessionDraft'
 import SessionDiffDrawer from '../components/SessionDiffDrawer'
 import SessionOutputsModal from '../components/SessionOutputsModal'
 import SessionMoreActions from '../components/SessionMoreActions'
+import WorkspaceAdminPane from '../components/WorkspaceAdminPane'
 import { listAgentNodes } from '../../agent/api'
 import type { AgentNode } from '../../agent/types'
 import { syncSessionReports } from '../../worklog/api'
@@ -37,13 +38,14 @@ import { showError } from '../../../shared/utils/showError'
 import { LIST_PAGINATION } from '../../../shared/utils/table'
 import { usePermissions, usePermittedView } from '../../auth/usePermissions'
 
-const SESSION_BOARD_VIEWS = ['chat', 'list'] as const
+const SESSION_BOARD_VIEWS = ['chat', 'list', 'workspace'] as const
 type SessionBoardView = (typeof SESSION_BOARD_VIEWS)[number]
 const SESSION_BOARD_VIEW_PERMISSIONS: Record<SessionBoardView, string> = {
   chat: 'project.sessions.tab.chat',
   list: 'project.sessions.tab.list',
+  workspace: 'project.sessions.tab.workspace',
 }
-const SESSION_BOARD_VIEW_LABELS: Record<SessionBoardView, string> = { chat: '对话', list: '列表' }
+const SESSION_BOARD_VIEW_LABELS: Record<SessionBoardView, string> = { chat: '对话', list: '列表', workspace: '工作区' }
 
 // 活跃在前 + 创建时间倒序（与 SessionListPane 一致，用于自动选中第一个）
 function sortForBoard(list: SessionSummary[]): SessionSummary[] {
@@ -423,9 +425,12 @@ export default function SessionsBoard({
         )
       }
       extra={
-        <Button icon={<ReloadOutlined />} onClick={() => load()}>
-          刷新
-        </Button>
+        // 工作区视图数据由 WorkspaceAdminPane 自取自刷（面板内有独立刷新按钮）
+        view !== 'workspace' ? (
+          <Button icon={<ReloadOutlined />} onClick={() => load()}>
+            刷新
+          </Button>
+        ) : undefined
       }
       style={pageCardStyle}
       styles={{ body: pageCardBodyFlexStyle }}
@@ -576,6 +581,13 @@ export default function SessionsBoard({
             )}
           </div>
         </div>
+      ) : view === 'workspace' ? (
+        // 工作区管理（节点 worktree + 远端 feature 分支）；数据由 pane 自取，不走上方会话列表
+        projectId ? (
+          <WorkspaceAdminPane projectId={projectId} />
+        ) : (
+          <Empty description="请先选择项目" style={{ marginTop: 80 }} />
+        )
       ) : (
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
           <Space style={{ marginBottom: 12 }} wrap>

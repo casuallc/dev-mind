@@ -58,6 +58,39 @@ export interface WorkspaceReleaseAck {
   error?: string
 }
 
+/** 工作区管理 tab 行（GET /projects/{pid}/workspaces）：一行 = 节点上一块工作区 */
+export interface WorkspaceRow {
+  workspaceKey: string
+  owner: string
+  requirementId?: string
+  requirementTitle?: string
+  branch?: string
+  repoNames: string[]
+  agentNodeId: string
+  /** OPEN=占用中 / FINALIZED=已收口（工作树保留） / RELEASED=已清理 */
+  state: string
+  /** 收口/清理动作目标会话（优先 OPEN 成员） */
+  actionSessionId: string
+  /** 收口明细所在会话（空 = 从未收口成功过） */
+  detailSessionId?: string
+  sessionCount: number
+  finalizedAt?: string
+  updatedAt?: string
+}
+
+/** 远端 feature 分支行（GET /projects/{pid}/workspaces/remote-branches） */
+export interface RemoteBranchRow {
+  repoName: string
+  branch: string
+  sha: string
+}
+
+export interface RemoteBranchList {
+  branches: RemoteBranchRow[]
+  /** 逐库列举失败原因（页面 warning 展示，不阻断） */
+  errors: string[]
+}
+
 /** CAP-31：单仓库 diff 摘要（GET /sessions/{id}/diff 按库返回列表；单库失败只填 error） */
 export interface RepoDiffView {
   repoName: string
