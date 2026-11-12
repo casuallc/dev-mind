@@ -1,19 +1,29 @@
 package com.devmind.agent.runner;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpsServer;
 import java.io.IOException;
+import java.lang.reflect.Proxy;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.WebSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyStore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import org.junit.jupiter.api.AfterEach;
@@ -106,8 +116,88 @@ class RunnerHttpTest {
         assertEquals("pong", out.trim(), out);
     }
 
-    /** 子 JVM 入口：全新 JVM 里经 {@link RunnerHttp#newClient(boolean)} 构造 insecure 客户端 GET。 */
-    public static final class ChildMain {
+    /**
+     * {@link RunnerHttp#connectWebSocket} 黑洞实证：对端 accept 后永不回升级响应
+     * （服务端重启窗口/中间设备丢半开连接的现场复刻），裸 join 会永久挂死、
+     * 保活循环未启动盖不到 → 必须在超时处快速失败走重连退避（2026-11-12 事故回归网）。
+     */
+    @Test
+    void connectWebSocketTimesOutOnBlackHole() throws Exception {
+        AtomicReference<Socket> held = new AtomicReference<>();
+        try (ServerSocket ss = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
+            Thread accepter = Thread.ofVirtual().start(() -> {
+                try {
+                    held.set(ss.accept()); // accept 后握住不回一字节：升级响应永远不来
+                } catch (IOException ignored) {
+                }
+            });
+            long t0 = System.currentTimeMillis();
+            IOException ex = assertThrows(IOException.class, () ->
+                    RunnerHttp.connectWebSocket(HttpClient.newHttpClient(),
+                            URI.create("ws://127.0.0.1:" + ss.getLocalPort() + "/ws"),
+                            new WebSocket.Listener() { }, 500));
+            long elapsed = System.currentTimeMillis() - t0;
+            assertTrue(ex.getMessage() != null && ex.getMessage().contains("超时"), ex.toString());
+            assertTrue(elapsed < 10_000, "应在超时附近快速失败，实际 " + elapsed + "ms");
+            accepter.join(5_000);
+        } finally {
+            Socket s = held.get();
+            if (s != null) {
+                s.close();
+            }
+        }
+    }
+
+    /** 迟到完成的守门：abandon 后首个回调必须 abort 且不delegate业务 listener（防幽灵连接驱动业务帧）。 */
+    @Test
+    void abandonGuardAbortsLateCompletion() {
+        AtomicBoolean delegated = new AtomicBoolean();
+        AtomicBoolean aborted = new AtomicBoolean();
+        WebSocket fake = fakeWebSocket(aborted);
+        RunnerHttp.AbandonGuard guard = new RunnerHttp.AbandonGuard(new WebSocket.Listener() {
+            @Override
+            public void onOpen(WebSocket webSocket) {
+                delegated.set(true);
+            }
+        });
+        guard.abandon();
+        guard.onOpen(fake);
+        guard.onText(fake, "x", true);
+        guard.onBinary(fake, java.nio.ByteBuffer.allocate(0), true);
+        assertFalse(delegated.get(), "放弃后业务 listener 不应收到任何回调");
+        assertTrue(aborted.get(), "放弃后首个回调必须 abort 幽灵连接");
+    }
+
+    /** 未放弃时正常透传（守门不能误伤健康连接）。 */
+    @Test
+    void abandonGuardDelegatesWhenNotAbandoned() {
+        AtomicBoolean delegated = new AtomicBoolean();
+        WebSocket fake = fakeWebSocket(new AtomicBoolean());
+        RunnerHttp.AbandonGuard guard = new RunnerHttp.AbandonGuard(new WebSocket.Listener() {
+            @Override
+            public void onOpen(WebSocket webSocket) {
+                delegated.set(true);
+            }
+        });
+        guard.onOpen(fake);
+        assertTrue(delegated.get());
+    }
+
+    private static WebSocket fakeWebSocket(AtomicBoolean aborted) {
+        return (WebSocket) Proxy.newProxyInstance(RunnerHttpTest.class.getClassLoader(),
+                new Class<?>[] {WebSocket.class}, (proxy, method, args) -> {
+                    if ("abort".equals(method.getName())) {
+                        aborted.set(true);
+                    }
+                    return switch (method.getReturnType().getName()) {
+                        case "boolean" -> false;
+                        case "int" -> 0;
+                        default -> null;
+                    };
+                });
+    }
+
+    /** 子 JVM 入口：全新 JVM 里经 {@link RunnerHttp#newClient(boolean)} 构造 insecure 客户端 GET。 */    public static final class ChildMain {
         public static void main(String[] args) throws Exception {
             HttpRequest req = HttpRequest.newBuilder(URI.create(args[0])).GET().build();
             HttpResponse<String> resp = RunnerHttp.newClient(true).send(req,

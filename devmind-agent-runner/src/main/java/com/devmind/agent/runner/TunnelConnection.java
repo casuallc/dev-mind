@@ -104,9 +104,10 @@ public class TunnelConnection {
             try {
                 URI uri = URI.create(tunnelUrl(config.serverUrl()) + "?token=" + config.token());
                 log.info("连接出口隧道: {}", tunnelUrl(config.serverUrl()));
-                WebSocket ws = RunnerHttp.newClient(config).newWebSocketBuilder()
-                        .buildAsync(uri, listener)
-                        .join();
+                // 建连全程带超时（RunnerHttp.connectWebSocket）：裸 join 会在服务端重启窗口
+                // 永久挂死且保活未启动盖不到，隧道永不自愈（2026-11-12 实锤）
+                WebSocket ws = RunnerHttp.connectWebSocket(RunnerHttp.newClient(config), uri, listener,
+                        RunnerHttp.WS_CONNECT_TIMEOUT_MS);
                 long connectedAt = System.currentTimeMillis();
                 current.set(ws);
                 lastInboundAt.set(connectedAt);

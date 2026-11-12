@@ -1,9 +1,17 @@
 package com.devmind.agent.runner;
 
+import java.io.IOException;
+import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.WebSocket;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
@@ -18,7 +26,108 @@ import javax.net.ssl.X509TrustManager;
  */
 public final class RunnerHttp {
 
+    /** WS 建连（TCP + 升级响应全程）超时：跨网段握手正常 1 秒内，15s 足够宽容 */
+    public static final long WS_CONNECT_TIMEOUT_MS = 15_000;
+
     private RunnerHttp() {
+    }
+
+    /**
+     * 带超时的 WS 建连。裸 {@code buildAsync().join()} 无超时——服务端重启窗口内 TCP 已
+     * accept 但升级响应永远不来（或半开连接被中间设备黑洞）时永久挂死，此时保活循环尚未
+     * 启动盖不到，通道永不自愈（2026-11-12 实锤：194 重启后隧道建连挂死，主通道在线、
+     * 隧道离线 10 分钟+，只能重启 runner 恢复）。本方法对建连全程兜底，超时抛
+     * {@link IOException} 让调用方走常规断线重连退避。
+     *
+     * <p>超时后给 listener 打放弃标并 cancel 未来：JDK 的 cancel 不保证中止在飞的升级
+     * 交换，若其迟到完成，{@link AbandonGuard} 会在首个回调处 abort，杜绝幽灵连接驱动
+     * 业务帧（隧道 OPEN 拨号、launch 指令等）。</p>
+     */
+    public static WebSocket connectWebSocket(HttpClient client, URI uri, WebSocket.Listener listener,
+                                             long timeoutMs) throws Exception {
+        AbandonGuard guard = new AbandonGuard(listener);
+        CompletableFuture<WebSocket> pending = client.newWebSocketBuilder().buildAsync(uri, guard);
+        try {
+            return pending.get(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            guard.abandon();
+            pending.cancel(true);
+            throw new IOException("WS 建连超时（" + timeoutMs + "ms）: " + uri);
+        } catch (ExecutionException e) {
+            // 拆包保持与旧 join() 时代一致的失败日志口径（直接呈现根因类型）
+            throw e.getCause() instanceof Exception ex ? ex : e;
+        }
+    }
+
+    /**
+     * 放弃守门：被超时放弃的建连若迟到完成，首个回调即 abort 且不delegate业务 listener。
+     * 包内可见供测试直驱。
+     */
+    static final class AbandonGuard implements WebSocket.Listener {
+        private final WebSocket.Listener delegate;
+        private volatile boolean abandoned;
+
+        AbandonGuard(WebSocket.Listener delegate) {
+            this.delegate = delegate;
+        }
+
+        void abandon() {
+            abandoned = true;
+        }
+
+        @Override
+        public void onOpen(WebSocket webSocket) {
+            if (abandoned) {
+                webSocket.abort();
+                return;
+            }
+            delegate.onOpen(webSocket);
+        }
+
+        @Override
+        public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+            if (abandoned) {
+                webSocket.abort();
+                return null;
+            }
+            return delegate.onText(webSocket, data, last);
+        }
+
+        @Override
+        public CompletionStage<?> onBinary(WebSocket webSocket, java.nio.ByteBuffer data, boolean last) {
+            if (abandoned) {
+                webSocket.abort();
+                return null;
+            }
+            return delegate.onBinary(webSocket, data, last);
+        }
+
+        @Override
+        public CompletionStage<?> onPing(WebSocket webSocket, java.nio.ByteBuffer message) {
+            if (abandoned) {
+                webSocket.abort();
+                return null;
+            }
+            return delegate.onPing(webSocket, message);
+        }
+
+        @Override
+        public CompletionStage<?> onPong(WebSocket webSocket, java.nio.ByteBuffer message) {
+            return abandoned ? null : delegate.onPong(webSocket, message);
+        }
+
+        @Override
+        public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
+            // 连接本就在关闭，无需 abort；也不惊动已放弃attempt的业务 latch
+            return abandoned ? null : delegate.onClose(webSocket, statusCode, reason);
+        }
+
+        @Override
+        public void onError(WebSocket webSocket, Throwable error) {
+            if (!abandoned) {
+                delegate.onError(webSocket, error);
+            }
+        }
     }
 
     /** 按 runner 配置构造；insecure=false 时等同 {@code HttpClient.newHttpClient()}。 */

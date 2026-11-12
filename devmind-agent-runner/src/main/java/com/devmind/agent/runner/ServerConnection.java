@@ -91,9 +91,9 @@ public class ServerConnection {
                 URI uri = URI.create(config.serverUrl() + "?token=" + config.token());
                 log.info("连接服务端: {}", config.serverUrl());
                 HttpClient client = RunnerHttp.newClient(config);
-                WebSocket ws = client.newWebSocketBuilder()
-                        .buildAsync(uri, listener)
-                        .join();
+                // 建连全程带超时（同 TunnelConnection，裸 join 挂死即永不自愈）
+                WebSocket ws = RunnerHttp.connectWebSocket(client, uri, listener,
+                        RunnerHttp.WS_CONNECT_TIMEOUT_MS);
                 long connectedAt = System.currentTimeMillis();
                 current.set(ws);
                 onOpen.run();
