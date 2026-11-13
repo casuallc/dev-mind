@@ -75,6 +75,8 @@
 | v18 | CAP-65 | file/file_ack（节点文件浏览器，**门控**——roots 全量随帧下发，大文件走 HTTP 中转 `files-transfer`） |
 | v19 | CAP-42 补丁 | workspace_finalize 携带 deleteRemoteBranch（可选，不门控——老 runner 忽略 = 维持 push 分支供 diff 的现状） |
 | v23 | CAP-41 M3 补丁 | worklog_push 携带 gitAuthorName/gitAuthorEmail（可选，不门控；随 v6 帧于 CAP-74 M3 一并下线，CURRENT 仍为 23 不回退） |
+| v24 | CAP-104 M1.5 | exec 帧 `bundle.kind="test-program"` 程序型用例（**门控**） |
+| v25 | 2026-11-13 | launch 两段式受理（**语义澄清不门控**）：`launched{ok:true}` = 「已受理」（纯帧校验通过即回），不再等进程拉起；准备失败/被终止改经 system 事件 + exit 帧异步回报。帧格式不变，老服务端兼容 |
 
 ## 4. 下行帧（server → runner）
 
@@ -101,7 +103,19 @@
 | workspaceKey | string | - | `req-<需求id>` / `sid-<会话id>` → `worktrees/<key>`；**缺席 = 旧布局 work/**（v10+，字段非空才门控） |
 | proxy | object | - | `{url, scopes[]}`；v8+ 恒带（显式空 url = 清空 runner holder） |
 
-ack `launched`：`{sessionId, ok, error?}`。runner 侧任一失败（目录/拉包/起进程）回 ok:false。
+ack `launched`：`{sessionId, ok, error?}`。
+
+**v25 起 ack 语义 = 「已受理」**：runner 同步段只做纯帧校验（并发上限/必填字段/重复受理），
+失败才回 ok:false（服务端创建即时报错）；通过即登记受理并回 ok:true，工作区准备
+（clone/fetch ≤30min）/上下文拉取/起进程挪到虚拟线程异步执行。异步段结果回报：
+
+- 准备失败 → system 事件（`[runner] 会话准备失败: …`，会话流可见）+ exit 帧（code=2，服务端会话收 FAILED）；
+- 准备窗口内被 kill/suspend → 步骤边界中止，system 事件 + exit 帧（code=-1；服务端已自行 TERMINATED，帧幂等无害）；
+- 准备窗口内的 input/authorize/finish 由 runner 缓冲，进程拉起后按序补写。
+
+> 历史：v24 及以前 runner 在 WS listener 线程同步准备完全部步骤才回 ack，大库首克隆必超
+> 服务端 15s `launchAckTimeoutMs` → 「等待 runner 确认超时/异常： null」（TimeoutException 无 message）。
+> v25 只改 runner 侧编排，线格式/帧类型不变，老服务端无需改动。
 
 ### 4.2 会话控制（fire-and-forget，无 ack）
 | type | 字段 | 语义 |

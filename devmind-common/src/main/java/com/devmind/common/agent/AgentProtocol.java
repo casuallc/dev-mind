@@ -73,12 +73,18 @@ package com.devmind.common.agent;
      * v24 = CAP-104 M1.5 程序型用例（exec 帧 {@code bundle.kind="test-program"}：runner
      * 从 {@code /api/agent/test-program/assets/{id}/bundle} 拉预构建程序 ZIP，树形解包、
      * 注入 DEVMIND_INPUT/RESULT/ARTIFACTS 并回收 result.json/artifacts；老 runner 会按
-     * CAP-56 平铺解包并找 bundle.json，必然失败，故属「必须认识」需门控）。</p>
+     * CAP-56 平铺解包并找 bundle.json，必然失败，故属「必须认识」需门控）。
+     * v25 = launch 两段式受理（修复 runner 在 WS listener 线程同步准备——clone ≤30min /
+     * fetch ≤5min + 拉上下文超服务端 15s launchAckTimeoutMs 报「等待 runner 确认超时」）：
+     * {@code launched{ok:true}} 语义从「进程已拉起」变为「已受理」——纯帧校验通过即回，
+     * 准备失败/被终止改经 system 事件 + exit 帧异步回报；线格式与帧类型不变，
+     * <b>语义澄清不门控</b>（老服务端兼容：exit/system 帧自始就有，handleExit 对零事件
+     * 会话同样成立；老 runner 配新服务端只是回 ack 慢，仍可能超时，属旧缺陷未放大）。</p>
  */
 public final class AgentProtocol {
 
     /** 当前 runner 协议版本 */
-    public static final int CURRENT = 24;
+    public static final int CURRENT = 25;
 
     /** CAP-36 exec 帧（构建/部署/测试/发版下发 runner）所需最低版本 */
     public static final int EXEC_FRAMES = 3;

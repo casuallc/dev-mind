@@ -89,6 +89,9 @@ public class AgentRunnerMain {
 
         ServerConnection[] connRef = new ServerConnection[1];
         RunnerSessionRegistry sessions = new RunnerSessionRegistry(parser, frame -> connRef[0].send(frame));
+        // launch 异步化受理登记：校验通过即回 launched{ok:true}，准备/拉起在虚拟线程
+        // （防大库首克隆超服务端 15s ack 超时）；窗口内 stdin 缓冲/kill 标记/对账并入都靠它
+        PendingLaunchRegistry pendingLaunches = new PendingLaunchRegistry();
         // CAP-74 修订：worklog 持久草稿区跨会话共享，产出回传按会话过滤——launch 时记截止
         // 时刻（含 10min 宽限防预写/时钟偏差，误纳由服务端镜像闸兜底），exit/collect 只回传
         // 本会话产出的文件；exit 后移除防泄漏
@@ -210,8 +213,8 @@ public class AgentRunnerMain {
         ServerConnection conn = new ServerConnection(config, mapper,
                 frame -> handleFrame(frame, config, configFile, protocol, executor, sessions, workspace,
                         execHandler, verifyHandler, procHandler, pkgHandler, watcher, queryHandler,
-                        terminalHandler, fileHandler, worklogOutputCutoff, connRef[0]),
-                () -> connRef[0].send(helloFrame(sessions, version, workspaceBytes.get(),
+                        terminalHandler, fileHandler, worklogOutputCutoff, pendingLaunches, connRef[0]),
+                () -> connRef[0].send(helloFrame(sessions, pendingLaunches, version, workspaceBytes.get(),
                         config.labels(), toolchain.get())));
         connRef[0] = conn;
         // CAP-70：出口隧道通道（独立于控制通道的专用 WS，二进制流帧；隧道 URL 由 serverUrl 换尾段推导）。
@@ -235,7 +238,8 @@ public class AgentRunnerMain {
         });
         gcTimer.scheduleWithFixedDelay(() -> {
             try {
-                java.util.Set<String> active = java.util.Set.copyOf(sessions.activeSessionIds());
+                java.util.Set<String> active = new java.util.HashSet<>(sessions.activeSessionIds());
+                active.addAll(pendingLaunches.ids()); // 准备中会话的工作区半成品同样不可 GC
                 gc.run(config.gcDays(), active);
                 // CAP-51：需求粒度工作树（worktrees/<key>）保留窗口更长，独立清理
                 gc.sweepWorktrees(config.worktreeGcDays(), active);
@@ -279,14 +283,19 @@ public class AgentRunnerMain {
         conn.run(); // 阻塞：断线重连循环
     }
 
-    private static Map<String, Object> helloFrame(RunnerSessionRegistry sessions, String version, long workspaceBytes,
+    private static Map<String, Object> helloFrame(RunnerSessionRegistry sessions,
+                                                  PendingLaunchRegistry pendingLaunches,
+                                                  String version, long workspaceBytes,
                                                   List<String> labels, Map<String, String> toolchain) {
         Map<String, Object> hello = new LinkedHashMap<>();
         hello.put("type", "hello");
         hello.put("os", System.getProperty("os.name") + " / " + System.getProperty("os.arch"));
         hello.put("capabilities", "claude");
         hello.put("version", version);
-        hello.put("activeSessions", sessions.activeSessionIds());
+        // 存活清单 = 已拉起 + 准备中（受理未拉起）：准备中的会话若缺席，服务端 hello 对账会误判 FAILED
+        List<String> active = new ArrayList<>(sessions.activeSessionIds());
+        active.addAll(pendingLaunches.ids());
+        hello.put("activeSessions", active);
         // FR-08：协议版本协商——服务端据此门控「必须认识」的新下行帧（本轮仅落库/展示，FR-06 才消费）
         hello.put("protocolVersion", com.devmind.common.agent.AgentProtocol.CURRENT);
         // FR-07：配置标签（非空时服务端覆盖 DB 值，空则保留服务端编辑值）+ 探测到的工具链
@@ -328,6 +337,7 @@ public class AgentRunnerMain {
                                     WorkspaceQueryHandler queryHandler, TerminalHandler terminalHandler,
                                     FileHandler fileHandler,
                                     java.util.Map<String, java.time.Instant> worklogOutputCutoff,
+                                    PendingLaunchRegistry pendingLaunches,
                                     ServerConnection conn) {
         // CAP-43：帧携带 proxy{url,scopes}（协议 v8+，节点配了外网代理才带）→ 刷新进程级
         // NodeProxy holder，git/claude/exec 三 scope 消费点直接读 holder；帧无此字段不动 holder
@@ -337,21 +347,36 @@ public class AgentRunnerMain {
         String sessionId = frame.path("sessionId").asText("");
         switch (type) {
             case "launch" -> handleLaunch(frame, sessionId, config, executor, sessions, workspace,
-                    watcher, worklogOutputCutoff, conn);
+                    watcher, worklogOutputCutoff, pendingLaunches, conn);
             case "exec" -> execHandler.handle(frame); // CAP-36：构建/部署/测试/发版下发执行
             case "verify_push" -> verifyHandler.handlePush(frame); // CAP-73：验证链 PUSHING（需求分支推远端）
             case "verify_pack" -> verifyHandler.handlePack(frame); // CAP-73：验证链 BUILDING（构建+产物包上传）
             case "verify_patch" -> verifyHandler.handlePatch(frame); // CAP-73：验证链 PATCHING（环境增量补丁）
             case "proc" -> procHandler.handle(frame); // CAP-57：服务实例进程管控（起停/状态）
             case "pkg" -> pkgHandler.handle(frame); // CAP-57：安装包分发（拉取+校验+解包）
-            case "input" -> handleInput(frame, sessionId, protocol, sessions);
-            case "authorize" -> sessions.writeStdin(sessionId, protocol.buildPermissionResult(
-                    frame.path("requestId").asText("unknown"),
-                    frame.path("accepted").asBoolean(false),
-                    frame.path("scope").asText("once")));
-            case "finish" -> sessions.closeStdin(sessionId);
-            case "kill", "suspend" -> sessions.kill(sessionId);
-            case "upgrade" -> handleUpgrade(frame, config, configFile, sessions, conn);
+            case "input" -> handleInput(frame, sessionId, protocol, sessions, pendingLaunches);
+            case "authorize" -> {
+                // launch 异步化：准备中会话的授权结果先缓冲（拉起后按序补写），防丢授权
+                String line = protocol.buildPermissionResult(
+                        frame.path("requestId").asText("unknown"),
+                        frame.path("accepted").asBoolean(false),
+                        frame.path("scope").asText("once"));
+                if (!pendingLaunches.bufferStdin(sessionId, line)) {
+                    sessions.writeStdin(sessionId, line);
+                }
+            }
+            case "finish" -> {
+                // 准备中：标记拉起后补 EOF；已拉起：直接关 stdin（两个调用各自幂等，双发无害）
+                pendingLaunches.markCloseOnStart(sessionId);
+                sessions.closeStdin(sessionId);
+            }
+            case "kill", "suspend" -> {
+                // 准备中：标记中止（准备线程步骤边界检查）；已拉起：直杀进程。
+                // 双通道齐发盖注册窗口（进程已起未 drain 时单走任一通道都会漏杀成孤儿）
+                pendingLaunches.cancel(sessionId);
+                sessions.kill(sessionId);
+            }
+            case "upgrade" -> handleUpgrade(frame, config, configFile, sessions, pendingLaunches, conn);
             case "collect_output" -> handleCollectOutput(sessionId, config, sessions, worklogOutputCutoff, conn);
             case "worklog_push" -> handleWorklogPush(frame, conn);
             case "workspace_finalize" -> handleWorkspaceFinalize(frame, config, sessions, workspace, conn);
@@ -386,11 +411,15 @@ public class AgentRunnerMain {
      * 提示追加到消息尾部——agent 用 Read 自取，不占 CLI 协议的图片通道。
      */
     private static void handleInput(JsonNode frame, String sessionId, CliProcessLauncher protocol,
-                                    RunnerSessionRegistry sessions) {
+                                    RunnerSessionRegistry sessions, PendingLaunchRegistry pendingLaunches) {
         String text = frame.path("text").asText("");
         String note = materializeInputFiles(sessionId, frame, sessions);
         String merged = text.isBlank() ? note.stripLeading() : text + note;
-        sessions.writeStdin(sessionId, protocol.buildUserMessage(merged, parseImages(frame)));
+        String line = protocol.buildUserMessage(merged, parseImages(frame));
+        // launch 异步化：准备中（含已注册未 drain 的窗口）先缓冲，拉起后按序补写，保序不丢
+        if (!pendingLaunches.bufferStdin(sessionId, line)) {
+            sessions.writeStdin(sessionId, line);
+        }
     }
 
     /**
@@ -477,9 +506,11 @@ public class AgentRunnerMain {
      * 本进程退出后完成。
      */
     private static void handleUpgrade(JsonNode frame, RunnerConfig config, Path configFile,
-                                      RunnerSessionRegistry sessions, ServerConnection conn) {
+                                      RunnerSessionRegistry sessions, PendingLaunchRegistry pendingLaunches,
+                                      ServerConnection conn) {
         boolean force = frame.path("force").asBoolean(false); // 旧服务端不带该字段 → 非强制
-        int active = sessions.size();
+        // 准备中的会话同样占坑（进程未起 sessions 表看不到；升级退出会把准备线程拍死）
+        int active = sessions.size() + pendingLaunches.size();
         if (active > 0 && !force) {
             log.info("有 {} 个活跃会话，推迟升级", active);
             conn.send(Map.of("type", "upgrade_ack", "ok", false,
@@ -520,15 +551,81 @@ public class AgentRunnerMain {
         System.exit(RunnerUpgrader.isServiceMode() ? 42 : 0); // shutdown hook: killAll（空）+ conn.shutdown()
     }
 
+    /**
+     * launch 两段式（修复同步准备超服务端 15s launchAckTimeoutMs——「等待 runner 确认超时/异常： null」；
+     * 协议 v25）：
+     *
+     * <p><b>同步段（WS listener 线程，毫秒级）</b>：纯帧校验——并发上限（含准备中占坑）、
+     * 必填字段（worklogOwner/projectId/workspaceOwner）、重复受理。失败即回
+     * {@code launched{ok:false}}（服务端创建即时报错，行为同旧）；通过则登记
+     * {@link PendingLaunchRegistry} 并立即回 {@code launched{ok:true}}——ack 语义从
+     * 「进程已拉起」变为「已受理」。</p>
+     *
+     * <p><b>异步段（虚拟线程，见 {@link #prepareAndLaunch}）</b>：工作区准备
+     * （clone ≤30min / fetch ≤5min）→ 上下文拉取 → 拉起 claude → 注册 + 补写缓冲 stdin。
+     * 准备失败/被终止经 system 事件 + exit 帧异步回报（线格式不变，老服务端兼容——
+     * exit/system 帧自始就有，服务端 handleExit 对零事件会话同样成立）。</p>
+     */
     private static void handleLaunch(JsonNode frame, String sessionId, RunnerConfig config,
                                      SessionExecutor executor, RunnerSessionRegistry sessions,
                                      RunnerWorkspace workspace, WorkspaceWatcher watcher,
                                      java.util.Map<String, java.time.Instant> worklogOutputCutoff,
+                                     PendingLaunchRegistry pendingLaunches,
                                      ServerConnection conn) {
+        // ---- 同步段：纯帧校验（不碰磁盘/网络），服务端 15s ack 窗口只覆盖这一段 ----
         try {
-            if (sessions.size() >= config.maxConcurrent()) {
+            if (sessions.size() + pendingLaunches.size() >= config.maxConcurrent()) {
                 throw new IllegalStateException("runner 并发会话已达上限 " + config.maxConcurrent());
             }
+            String kind = frame.path("kind").asText("");
+            String projectId = frame.path("projectId").asText(null);
+            JsonNode repoNode = frame.path("repo");
+            JsonNode reposNode = frame.path("repos");
+            boolean multi = reposNode.isArray() && reposNode.size() > 1;
+            boolean singleRepo = !multi && repoNode.isObject()
+                    && !repoNode.path("remoteUrl").asText("").isBlank();
+            if ("worklog".equals(kind) && frame.path("worklogOwner").asText("").isBlank()) {
+                throw new IllegalStateException("worklog 会话缺少 worklogOwner（服务端组帧缺失）");
+            }
+            if ((multi || singleRepo) && (projectId == null || projectId.isBlank())) {
+                throw new IllegalStateException("带 repo/repos 块的 launch 必须携带 projectId");
+            }
+            if ((multi || singleRepo) && frame.path("workspaceOwner").asText("").isBlank()) {
+                throw new IllegalStateException(
+                        "repo 会话缺少 workspaceOwner（服务端版本过旧，runner 协议 v7+ 要求服务端同步升级）");
+            }
+            pendingLaunches.begin(sessionId); // 缺 sessionId/重复受理在此拒绝
+        } catch (Exception e) {
+            log.warn("launch 校验失败: session={} err={}", sessionId, e.getMessage());
+            conn.send(Map.of("type", "launched", "sessionId", sessionId,
+                    "ok", false, "error", String.valueOf(e.getMessage())));
+            return;
+        }
+        conn.send(Map.of("type", "launched", "sessionId", sessionId, "ok", true));
+        // ---- 异步段：慢 IO 全部移出 WS listener；该虚拟线程独占此 sessionId 的准备过程 ----
+        Thread.ofVirtual().name("launch-prepare-" + sessionId).start(() ->
+                prepareAndLaunch(frame, sessionId, config, executor, sessions, workspace, watcher,
+                        worklogOutputCutoff, pendingLaunches, conn));
+    }
+
+    /** launch 异步段被 kill/suspend 中止的标记异常（与真故障分支区分用）。 */
+    private static final class LaunchCancelledException extends RuntimeException {
+    }
+
+    /**
+     * launch 异步段（虚拟线程）：工作区准备 → 上下文拉取物化 → transcript 随迁 → 拉起 claude
+     * → 注册 + 补写准备窗口的缓冲 stdin。步骤边界检查 cancelled（长 git 操作无法中断，只能在
+     * 边界中止）。失败/中止都必须上行 exit 帧——漏了服务端会话会卡 RUNNING 直到重连对账，
+     * 故 catch Throwable（catch(Exception) 兜不住 Error，见 flusher OOM 事故）。
+     */
+    private static void prepareAndLaunch(JsonNode frame, String sessionId, RunnerConfig config,
+                                         SessionExecutor executor, RunnerSessionRegistry sessions,
+                                         RunnerWorkspace workspace, WorkspaceWatcher watcher,
+                                         java.util.Map<String, java.time.Instant> worklogOutputCutoff,
+                                         PendingLaunchRegistry pendingLaunches,
+                                         ServerConnection conn) {
+        boolean registered = false;
+        try {
             String projectId = frame.path("projectId").asText(null);
             String taskSpec = frame.path("taskSpec").asText("");
             String model = frame.path("model").asText("");
@@ -551,6 +648,13 @@ public class AgentRunnerMain {
             String workspaceKey = frame.path("workspaceKey").asText("");
             JsonNode repoNode = frame.path("repo");
             JsonNode reposNode = frame.path("repos");
+            boolean repoKind = (reposNode.isArray() && reposNode.size() > 1)
+                    || (repoNode.isObject() && !repoNode.path("remoteUrl").asText("").isBlank());
+            if (repoKind) {
+                // 首克隆可能分钟级——先发进展事件，否则会话页长时间空白像卡死
+                sessions.reportSystem(sessionId,
+                        "[runner] 已受理，正在准备工作区（大库首次克隆可能需要几分钟）…");
+            }
             if ("chat".equals(kind)) {
                 workDir = workspace.prepareChat(sessionId);
                 sessionDir = workDir;
@@ -633,6 +737,7 @@ public class AgentRunnerMain {
                     log.info("兜底工作目录不存在已创建: {}", workDir);
                 }
             }
+            throwIfCancelled(pendingLaunches, sessionId);
             log.info("拉起会话: session={} project={} cwd={} resume={}", sessionId, projectId, workDir,
                     resumeSessionId.isBlank() ? "-" : resumeSessionId);
 
@@ -652,6 +757,7 @@ public class AgentRunnerMain {
                 ContextPuller.pullAndMaterialize(config, sessionId, manifestNode, workDir,
                         codeDirRel != null ? sessionDir : null);
             }
+            throwIfCancelled(pendingLaunches, sessionId);
 
             // CAP-53 FR-04：cwd 上抬后存量会话的 transcript 仍在旧 slug（工作树路径）下，
             // resume 前 best-effort 随迁（非 repo 会话 sessionDir==cwd 或为 null → 方法内 no-op）
@@ -691,15 +797,46 @@ public class AgentRunnerMain {
             }
             Process proc = executor.launch(new SessionExecutor.LaunchContext(
                     sessionId, workDir, taskSpec, model, permissionMode, env, resumeSessionId));
+            // 注册后即刻出清受理登记并补写缓冲 stdin（保序）；注册窗口（已 register 未 drain）
+            // 内到达的 kill 由 handleFrame 双通道（cancel 标记 + sessions.kill 直杀）覆盖
             sessions.register(sessionId, proc, finalizer, sessionDir);
-            conn.send(Map.of("type", "launched", "sessionId", sessionId, "ok", true));
+            registered = true;
+            PendingLaunchRegistry.Outcome outcome =
+                    pendingLaunches.drain(sessionId, line -> sessions.writeStdin(sessionId, line));
+            if (outcome != null && outcome.cancelled()) {
+                // kill 帧先于注册到达：进程刚起即杀（exit 帧随 readLoop 收口上行，服务端已 TERMINATED）
+                sessions.kill(sessionId);
+            } else if (outcome != null && outcome.closeOnStart()) {
+                sessions.closeStdin(sessionId);
+            }
             // CAP-54：launch 后尽快推初始快照（面板可见「干净工作区」基线）
             watcher.onLaunch(sessionId);
-        } catch (Exception e) {
+        } catch (LaunchCancelledException c) {
+            pendingLaunches.remove(sessionId);
+            worklogOutputCutoff.remove(sessionId);
+            log.info("会话准备阶段被终止: session={}", sessionId);
+            sessions.reportSystem(sessionId,
+                    "[runner] 会话在准备阶段被终止，未拉起进程（工作区半成品由节点 GC 回收）");
+            conn.send(Map.of("type", "exit", "sessionId", sessionId, "code", -1));
+        } catch (Throwable e) {
             worklogOutputCutoff.remove(sessionId); // 未注册不会有 exit 钩子，防泄漏
-            log.warn("拉起会话失败: session={} err={}", sessionId, e.getMessage());
-            conn.send(Map.of("type", "launched", "sessionId", sessionId,
-                    "ok", false, "error", String.valueOf(e.getMessage())));
+            if (registered) {
+                // 进程已注册：readLoop 收口会自行上行 exit 帧，这里只补原因事件
+                log.warn("拉起后收尾异常: session={} err={}", sessionId, e.getMessage(), e);
+                sessions.reportSystem(sessionId, "[runner] 拉起后收尾异常: " + e.getMessage());
+            } else {
+                pendingLaunches.remove(sessionId);
+                log.warn("拉起会话失败: session={} err={}", sessionId, e.getMessage(), e);
+                sessions.reportSystem(sessionId, "[runner] 会话准备失败: " + e.getMessage());
+                conn.send(Map.of("type", "exit", "sessionId", sessionId, "code", 2));
+            }
+        }
+    }
+
+    /** 准备线程步骤边界的取消检查（长 git 操作无法中断，只能在边界中止）。 */
+    private static void throwIfCancelled(PendingLaunchRegistry pendingLaunches, String sessionId) {
+        if (pendingLaunches.isCancelled(sessionId)) {
+            throw new LaunchCancelledException();
         }
     }
 
