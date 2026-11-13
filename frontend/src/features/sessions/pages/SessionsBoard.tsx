@@ -187,13 +187,13 @@ export default function SessionsBoard({
     setSearchParams(searchParams, { replace: true })
   }, [searchParams, loading, setSearchParams])
 
-  // 首次加载后自动选中：有会话选排序第一个，否则直接进入新对话草稿态
-  // （?sid= 深链由上方专用 effect 选中，这里须让路，否则会回退覆盖成第一个会话）
+  // 首次加载后默认进入新对话草稿态（空白会话），不自动选中最新会话；无创建权限时退回选中第一个
+  // （?sid= 深链由上方专用 effect 选中，这里须让路，否则会被覆盖成草稿/第一个会话）
   useEffect(() => {
     if (autoPickedRef.current || loading || searchParams.get('sid')) return
     autoPickedRef.current = true
-    if (sessions.length > 0) setSelectedId(sortForBoard(sessions)[0].id)
-    else if (canCreate) setDraft(true)
+    if (canCreate) setDraft(true)
+    else if (sessions.length > 0) setSelectedId(sortForBoard(sessions)[0].id)
   }, [sessions, loading, searchParams, canCreate])
 
   // 草稿创建成功后：先等列表刷新拿到新会话行，再选中——否则「消失兜底」effect 会误清新 id
@@ -436,7 +436,7 @@ export default function SessionsBoard({
       styles={{ body: pageCardBodyFlexStyle }}
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12, flexShrink: 0 }}>
-        左侧选会话、右侧直接对话；「新对话」输入任务说明即创建 agent。列表视图可按状态筛选、搜索全部会话。
+        默认进入新对话（空白会话），输入任务说明即创建 agent；左侧列表点选可切回历史会话。列表视图可按状态筛选、搜索全部会话。
       </Typography.Paragraph>
 
       {view === 'chat' ? (
