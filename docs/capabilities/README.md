@@ -126,6 +126,7 @@
 | [CAP-106](CAP-106-node-env-toolchain-refresh.md) | 节点环境变量与工具链探测刷新 | 底座 | 定稿未实施 | 节点 env 界面化随帧合并 + runner 周期重探测随心跳刷新 + 显式工具链路径回落 + 预检 env 联动（2026-11-03 节点 6 java 误杀事故立项） |
 | [CAP-107](CAP-107-unified-ai-assistant.md) | 统一 AI 助手与受控能力接入 | 组装层 | 定稿未实施 | 全局会话复用 CAP-76，消费 CAP-108 授权底座；内置工具调用应用 Service，外部助手走 Open API，写必确认 |
 | [CAP-108](CAP-108-core-authorization.md) | 核心授权收敛 | 底座/管理 | M1 已交付（2026-11-04），M2/M3 定稿未实施 | 业务操作目录与 Service 最终授权统一身份、ACTION、资源范围和凭证约束；M1 落地授权引擎+首批六操作（项目/需求/工作单元/工作日志/AI 草稿）+CAP-62 项目可见性与成员模型+确认绑定；M2 执行域迁移、M3 外部主体 |
+| [CAP-109](CAP-109-admin-projects-repos-enhancement.md) | 后台项目管理与代码库增强 | 管理 | 定稿未实施 | 项目/代码库列表关键字搜索（DB lower like），代码库提交历史查看 + 分支切换/抓取 |
 
 ## 持续助手实施主线（规划，均未实施）
 
