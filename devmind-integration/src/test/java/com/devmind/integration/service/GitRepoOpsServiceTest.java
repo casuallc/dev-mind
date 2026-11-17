@@ -205,6 +205,35 @@ class GitRepoOpsServiceTest {
         assertEquals("main-1", mainRows.get(0).subject());
     }
 
+    @Test
+    void listCommitsFallsBackToOriginRefWhenLocalBranchMissing() {
+        // CLONE 克隆：dev 只以 origin/dev 远端引用存在（本地未 checkout 过），
+        // git log dev 会报 unknown revision —— 须回退 origin/dev（E2E 实炸点）
+        Path origin = tmp.resolve("origin2.git");
+        git(tmp, "init", "--bare", "-b", "main", origin.toString());
+        Path seed = tmp.resolve("seed2");
+        git(tmp, "clone", "-q", origin.toString(), seed.toString());
+        emptyCommit(seed, "main-1");
+        git(seed, "push", "-q", "origin", "main");
+        git(seed, "checkout", "-q", "-b", "dev");
+        emptyCommit(seed, "dev-only");
+        git(seed, "push", "-q", "origin", "dev");
+
+        Path clone = tmp.resolve("clone2");
+        git(tmp, "clone", "-q", origin.toString(), clone.toString());
+        // 克隆只有本地 main，dev 在 origin/dev
+        GitRepositoryEntity repo = addRepo(GitRepositoryEntity.SOURCE_CLONE,
+                GitRepositoryEntity.CLONE_READY, clone, "main", "main\ndev");
+
+        List<RepoCommitView> devRows = service.listCommits(repo.getId(), "dev", null);
+        assertEquals(2, devRows.size());
+        assertEquals("dev-only", devRows.get(0).subject());
+
+        List<RepoCommitView> mainRows = service.listCommits(repo.getId(), null, null);
+        assertEquals(1, mainRows.size());
+        assertEquals("main-1", mainRows.get(0).subject());
+    }
+
     // ---------------- FR-05 分支切换 ----------------
 
     @Test

@@ -48,18 +48,38 @@ public class GitRepoOpsService {
         GitRepositoryEntity repo = requireRepo(id);
         Path path = requireGitDir(repo);
         String ref = resolveBranch(repo, branch);
+        String logRef = ref == null ? null : resolveExistingRef(path, ref);
         int n = limit == null || limit <= 0 ? DEFAULT_LIMIT : Math.min(limit, MAX_LIMIT);
         List<String> args = new ArrayList<>(List.of("git", "log"));
-        if (ref != null) {
-            args.add(ref);
+        if (logRef != null) {
+            args.add(logRef);
         }
         args.add("--format=%H%x1f%an%x1f%ae%x1f%ad%x1f%s");
         args.add("--date=format:%Y-%m-%d %H:%M:%S");
         args.add("-n");
         args.add(String.valueOf(n));
         GitCli.Result r = GitCli.run(path, GIT_TIMEOUT_SEC, args.toArray(new String[0]));
-        GitCli.requireOk(r, List.of("git", "log", ref == null ? "HEAD" : ref));
+        GitCli.requireOk(r, List.of("git", "log", logRef == null ? "HEAD" : logRef));
         return parseCommits(r.out());
+    }
+
+    /**
+     * 解析出实际存在的 ref：CLONE 克隆的远端分支只在 origin/&lt;branch&gt; 有引用
+     * （本地未 checkout 过时没有本地分支），先验本地名再退 origin/ 前缀。
+     */
+    private static String resolveExistingRef(Path path, String ref) {
+        GitCli.Result local = GitCli.run(path, GIT_TIMEOUT_SEC,
+                "git", "rev-parse", "--verify", "--quiet", ref);
+        if (local.exitCode() == 0) {
+            return ref;
+        }
+        GitCli.Result remote = GitCli.run(path, GIT_TIMEOUT_SEC,
+                "git", "rev-parse", "--verify", "--quiet", "origin/" + ref);
+        if (remote.exitCode() == 0) {
+            return "origin/" + ref;
+        }
+        throw new DevMindException(ErrorCode.BAD_REQUEST,
+                "分支在本地克隆中不存在: " + ref + "（请先抓取刷新）");
     }
 
     /** %x1f 分隔五段：sha / 作者名 / 作者邮箱 / 时间 / 主题；空输出 = 空列表。 */
