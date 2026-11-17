@@ -18,11 +18,13 @@ import type {
 /**
  * 项目列表。kind 缺省 = 后端排除 WORKLOG 空间（工作日志是会话调度载体，不进项目列表/切换语义）；
  * 传 'ALL' 返回全部（后台管理、切换器 currentId 校验用）。
+ * CAP-109：keyword 匹配名称/摘要/仓库路径（后端 DB lower like）。
  */
-export function listProjects(status?: string, kind?: string): Promise<Project[]> {
+export function listProjects(status?: string, kind?: string, keyword?: string): Promise<Project[]> {
   const params = new URLSearchParams()
   if (status && status !== 'ALL') params.set('status', status)
   if (kind) params.set('kind', kind)
+  if (keyword) params.set('keyword', keyword)
   const q = params.toString()
   return api.get<Project[]>(`/projects${q ? `?${q}` : ''}`)
 }

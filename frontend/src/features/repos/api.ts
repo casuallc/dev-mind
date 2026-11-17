@@ -2,7 +2,14 @@
 import { api } from '../../shared/api/client'
 import type { GitRepo, GitRepoPayload } from './types'
 
-export const listRepos = () => api.get<GitRepo[]>('/repos')
+/** CAP-109：keyword 匹配名称/远端/本地路径（后端 DB lower like）；status 可选 ACTIVE/DISABLED */
+export const listRepos = (keyword?: string, status?: string) => {
+  const params = new URLSearchParams()
+  if (keyword) params.set('keyword', keyword)
+  if (status) params.set('status', status)
+  const q = params.toString()
+  return api.get<GitRepo[]>(`/repos${q ? `?${q}` : ''}`)
+}
 export const createRepo = (body: GitRepoPayload) => api.post<GitRepo>('/repos', body)
 export const updateRepo = (id: number, body: Partial<GitRepoPayload>) =>
   api.put<GitRepo>(`/repos/${id}`, body)

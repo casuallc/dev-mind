@@ -1,7 +1,7 @@
 // CAP-02 项目列表（业务视图，全角色只读）：表格 + 状态筛选 + 「进入」= 切换为当前项目并回概览。
 // 入口已移出侧边栏，仅从项目切换器底部「查看全部项目」进入；增删改在后台 /admin/projects。
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Card, Select, Space, Tag, Typography } from 'antd'
+import { Button, Card, Input, Select, Space, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -24,17 +24,18 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('ALL')
+  const [keyword, setKeyword] = useState('')
 
-  const load = useCallback(async (st?: string) => {
+  const load = useCallback(async (st?: string, kw?: string) => {
     setLoading(true)
     try {
-      setProjects(await listProjects(st ?? status))
+      setProjects(await listProjects(st ?? status, undefined, kw ?? keyword))
     } catch (e) {
       showError(e, '加载项目失败')
     } finally {
       setLoading(false)
     }
-  }, [status])
+  }, [status, keyword])
 
   useEffect(() => {
     load()
@@ -104,7 +105,16 @@ export default function ProjectsPage() {
       styles={{ body: pageCardBodyFlexStyle }}
       title="项目"
       extra={
-        <Space>
+        <Space wrap>
+          <Input.Search
+            allowClear
+            placeholder="搜索名称/摘要/仓库路径"
+            style={{ width: 240 }}
+            onSearch={(v) => {
+              setKeyword(v)
+              load(undefined, v)
+            }}
+          />
           <Select
             value={status}
             onChange={(v) => {
