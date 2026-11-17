@@ -1017,7 +1017,7 @@ printf '%s' '{"contractVersion":"1","status":"pass","message":"e2e program pass"
         self.api.request("POST", "/projects/ghost-nope/requirements/ai-expand",
                          {"points": "x"}, expected=404)
 
-    # ---------------- CAP-109 全局活跃会话页 ----------------
+    # ---------------- CAP-110 全局活跃会话页 ----------------
 
     def _cap109_project(self, tag):
         # 会话要建 worktree，空仓库（无提交）起不了——与 _cap104_project 的差别就是先落一个初始提交

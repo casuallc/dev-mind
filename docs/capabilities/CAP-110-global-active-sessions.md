@@ -1,6 +1,6 @@
-# CAP-109 全局活跃会话页
+# CAP-110 全局活跃会话页
 
-> 能力 ID：CAP-109 ｜ 分类：会话 ｜ 状态：已实现（2026-11-17）｜ 日期：2026-11-17
+> 能力 ID：CAP-110 ｜ 分类：会话 ｜ 状态：已实现（2026-11-17）｜ 日期：2026-11-17
 >
 > 决策记录：
 > - 全局列表走 `GET /api/sessions` 新增 `statuses`（CSV 多值）过滤，不为全局页新开专用端点——会话清单的唯一出口收敛在 SessionController，ETag 指纹逻辑原样复用。
@@ -37,7 +37,7 @@
 
 | 层 | 位置 | 内容 |
 |----|------|------|
-| 后端 | devmind-session | `SessionController.list` 透传 `statuses`；`SessionManagerService.list` 多状态分支；`SessionRepository.findByStatusInOrderByCreatedAtDesc` |
+| 后端 | devmind-session | `SessionController.list` 透传 `statuses`；`SessionManagerService.listPage`/`list` 多状态分支；`SessionRepository.findByStatusInOrderByCreatedAtDesc` |
 | 后端 | devmind-auth | `MenuCatalog` 注册 `top.sessions` 菜单 + `manage` 动作（seedFromKeys 派生默认授权）；`ApiPermissionCatalog` 会话操作规则追加 `top.sessions.action.manage` |
 | 前端 | features/sessions | `api.ts` 增 `statuses` 参数；新页面 `pages/ActiveSessionsPage.tsx`（自包含） |
 | 前端 | src/app | `App.tsx` 注册路由（ProjectContextGate 外）；`menuSelectedKey.ts` 选中态前缀 |
@@ -51,7 +51,7 @@
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/sessions?statuses=RUNNING,WAITING_INPUT` | 新增可选 `statuses`（CSV）；与 status/projectId/keyword 的组合规则见 FR-02；ETag 语义不变 |
+| GET | `/api/sessions?statuses=RUNNING,WAITING_INPUT` | 新增可选 `statuses`（CSV）；与 status/projectId/keyword 的组合规则见 FR-02；ETag 语义不变。合并 REQ-23 后响应为分页结构 `{items, hasMore}`（statuses 分支命中集合小，服务端手工分页），全局页只取第一页 |
 
 会话操作接口（input/authorize/finish/suspend/resume/kill/terminal/DELETE）路径不变，仅 OR 权限集合追加 `top.sessions.action.manage`。
 
@@ -76,5 +76,5 @@
 ## 10. 风险与开放问题
 
 - 全局列表不做需求/工作单元引用解析，标签退化为原始 id——若后续需要，另立跨项目引用批量解析接口。
-- 「全部」分段在多项目大盘下可能返回较长清单，暂无分页（与项目会话页同口径，依赖 ETag 304 控制传输量）。
+- 「全部」分段在多项目大盘下首页之外的历史会话需要「加载更多」式翻页，当前前端只展示第一页（与 REQ-23 条件轮询只覆盖首页同口径，依赖 ETag 304 控制传输量）。
 - 数据权限（CAP-62）生效后，全局列表的项目可见性过滤需在 `SessionManagerService.list` 多状态分支同步收口，属后续授权收敛工作。

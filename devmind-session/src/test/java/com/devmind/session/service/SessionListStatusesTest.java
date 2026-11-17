@@ -21,7 +21,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * CAP-109 全局活跃会话页：GET /api/sessions?statuses= 多状态过滤。
+ * CAP-110 全局活跃会话页：GET /api/sessions?statuses= 多状态过滤。
  * 覆盖：多状态命中两个会话且排除终结态；statuses+keyword 组合（search 后内存过滤）；
  * statuses 与单值 status 并存时 statuses 优先。仅构造 list 路径用得到的依赖，其余传 null。
  */

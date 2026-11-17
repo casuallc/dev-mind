@@ -38,7 +38,7 @@ export function menuSelectedKey(pathname: string): string {
 // 工作台顶部一级导航选中态：项目上下文各页与项目列表统一高亮「项目」（key=/overview）。
 const TOPNAV_PREFIXES: Array<[string, string]> = [
   ['/home', '/home'],
-  ['/active-sessions', '/active-sessions'], // CAP-109 全局活跃会话（顶栏一级导航）
+  ['/active-sessions', '/active-sessions'], // CAP-110 全局活跃会话（顶栏一级导航）
   ['/chats', '/chats'],
   ['/bookmarks', '/bookmarks'],
   ['/worklog', '/worklog'],

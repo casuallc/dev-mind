@@ -307,7 +307,7 @@ public final class ApiPermissionCatalog {
             // ---------- 会话 / 问答 / 工作日志 / 收藏夹 / 设置 ----------
             rule("POST", "/api/sessions",
                     "project.sessions.action.create", "top.worklog.action.create-session"),
-            // CAP-109：会话操作规则追加 top.sessions.action.manage（全局活跃会话页就地操作）；
+            // CAP-110：会话操作规则追加 top.sessions.action.manage（全局活跃会话页就地操作）；
             // 创建/产出/收口/工作区规则不追加，维持项目内口径
             rule("POST", "/api/sessions/*/finish",
                     "project.sessions.action.manage", "top.worklog.action.manage-session",

@@ -1,4 +1,4 @@
-// CAP-109 全局活跃会话页：跨项目聚合活跃会话（左列表 + 右侧对话/操作条），就地对话与生命周期操作。
+// CAP-110 全局活跃会话页：跨项目聚合活跃会话（左列表 + 右侧对话/操作条），就地对话与生命周期操作。
 // 与项目会话页的差异：不进项目上下文（路由在 ProjectContextGate 外）、数据走 statuses 多状态过滤、
 // 行内多一个所属项目标签；不做跨项目需求/工作单元引用解析（useSessionRefs 是单项目的），
 // 引用标签退化为原始 id，完整上下文由「在项目工作台打开」跳转收口。
@@ -76,8 +76,9 @@ export default function ActiveSessionsPage() {
 
   const load = useCallback(async () => {
     try {
-      const fresh = await listSessionsConditional(undefined, undefined, etagRef, SCOPE_STATUSES[scope])
-      if (fresh) setSessions(fresh) // null = 304 未变化
+      // REQ-23 后响应为 {items, hasMore} 分页：全局活跃页只关注第一页（条件拉取也只覆盖首页）
+      const fresh = await listSessionsConditional(undefined, undefined, undefined, etagRef, undefined, SCOPE_STATUSES[scope])
+      if (fresh) setSessions(fresh.items) // null = 304 未变化
     } catch (e) {
       showError(e, '加载会话失败')
     } finally {

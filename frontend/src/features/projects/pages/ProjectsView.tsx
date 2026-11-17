@@ -39,6 +39,7 @@ export default function ProjectsView({
   const [agentNodes, setAgentNodes] = useState<AgentNode[]>([])
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('ALL')
+  const [keyword, setKeyword] = useState('')
   const [editOpen, setEditOpen] = useState(false)
   const [editing, setEditing] = useState<Project | null>(null)
   // CAP-20 AI 智能接入
@@ -46,17 +47,17 @@ export default function ProjectsView({
   const [onboardDesc, setOnboardDesc] = useState('')
   const [onboarding, setOnboarding] = useState(false)
 
-  const load = useCallback(async (st?: string) => {
+  const load = useCallback(async (st?: string, kw?: string) => {
     setLoading(true)
     try {
       // kind=ALL：后台管理需看到 WORKLOG 空间行（亲和节点等信息），缺省过滤只面向普通用户视图
-      setProjects(await listProjects(st ?? status, 'ALL'))
+      setProjects(await listProjects(st ?? status, 'ALL', kw ?? keyword))
     } catch (e) {
       showError(e, '加载项目失败')
     } finally {
       setLoading(false)
     }
-  }, [status])
+  }, [status, keyword])
 
   useEffect(() => {
     listAgentNodes()
@@ -221,7 +222,16 @@ export default function ProjectsView({
   return (
     <>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
-        <div>
+        <Space wrap>
+          <Input.Search
+            allowClear
+            placeholder="搜索名称/摘要/仓库路径"
+            style={{ width: 240 }}
+            onSearch={(v) => {
+              setKeyword(v)
+              load(undefined, v)
+            }}
+          />
           <Select
             value={status}
             onChange={(v) => {
@@ -231,7 +241,7 @@ export default function ProjectsView({
             options={[{ value: 'ALL', label: '全部' }, ...STATUS_OPTIONS.map((o) => ({ value: o.value, label: o.label }))]}
             style={{ width: 130 }}
           />
-        </div>
+        </Space>
         <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
           注册本地 git 仓库作为项目，作为会话/构建/发版/测试能力的挂载点。worktree 约定在
           <Typography.Text code>path/.devmind/worktrees/&lt;sessionId&gt;</Typography.Text>。

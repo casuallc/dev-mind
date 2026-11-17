@@ -175,7 +175,7 @@ export default function App() {
           <Route path="/worklog" element={<WorklogPage />} />
           {/* CAP-30 通用问答（个人级，不进项目上下文） */}
           <Route path="/chats" element={<ChatsBoard />} />
-          {/* CAP-109 全局活跃会话（跨项目聚合，不进项目上下文） */}
+          {/* CAP-110 全局活跃会话（跨项目聚合，不进项目上下文） */}
           <Route path="/active-sessions" element={<ActiveSessionsPage />} />
           {/* CAP-64 收藏夹（个人级 owner 隔离，不进项目上下文） */}
           <Route path="/bookmarks" element={<BookmarksPage />} />

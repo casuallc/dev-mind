@@ -38,3 +38,12 @@ export const CLONE_STATUS_COLOR: Record<string, string> = {
   READY: 'success',
   FAILED: 'error',
 }
+
+/** CAP-109 FR-04 提交历史行（对应后端 RepoCommitView；time 已是 'yyyy-MM-dd HH:mm:ss' 字符串） */
+export interface RepoCommitView {
+  sha: string
+  authorName: string
+  authorEmail: string
+  time: string
+  subject: string
+}

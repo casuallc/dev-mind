@@ -1,6 +1,7 @@
 package com.devmind.session.repo;
 
 import com.devmind.session.model.SessionEntity;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -14,10 +15,19 @@ public interface SessionRepository extends JpaRepository<SessionEntity, String> 
 
     List<SessionEntity> findByStatusOrderByCreatedAtDesc(String status);
 
-    /** CAP-109：全局活跃会话页——按多状态过滤（跨项目，创建时间倒序） */
+    /** REQ-23：分页重载（列表页）；原全量方法保留给 finalize/占用预检等内部逻辑 */
+    List<SessionEntity> findByStatusOrderByCreatedAtDesc(String status, Pageable pageable);
+
+    /** REQ-23 活跃合并（RUNNING/WAITING_INPUT/WAITING_AUTH 恒在列表结果内） / CAP-110 全局活跃会话页多状态过滤（跨项目，创建时间倒序） */
     List<SessionEntity> findByStatusInOrderByCreatedAtDesc(java.util.Collection<String> statuses);
 
     List<SessionEntity> findByProjectIdOrderByCreatedAtDesc(String projectId);
+
+    /** REQ-23：分页重载 */
+    List<SessionEntity> findByProjectIdOrderByCreatedAtDesc(String projectId, Pageable pageable);
+
+    /** REQ-23：分页重载（项目 + 状态过滤服务端化） */
+    List<SessionEntity> findByProjectIdAndStatusOrderByCreatedAtDesc(String projectId, String status, Pageable pageable);
 
     /**
      * 看板关键字搜索（服务端化：列表 taskSpec/summary 已截断为预览，前端本地搜会漏）。
@@ -32,11 +42,26 @@ public interface SessionRepository extends JpaRepository<SessionEntity, String> 
             + "order by s.createdAt desc")
     List<SessionEntity> search(@Param("projectId") String projectId, @Param("kw") String kw);
 
+    /** REQ-23：分页重载（关键词搜索结果服务端分页，不做活跃合并） */
+    @Query("select s from SessionEntity s where "
+            + "(cast(:projectId as string) is null or s.projectId = :projectId) "
+            + "and (s.id like concat('%', cast(:kw as string), '%') "
+            + "or lower(cast(s.taskSpec as string)) like lower(concat('%', cast(:kw as string), '%')) "
+            + "or lower(cast(s.summary as string)) like lower(concat('%', cast(:kw as string), '%'))) "
+            + "order by s.createdAt desc")
+    List<SessionEntity> search(@Param("projectId") String projectId, @Param("kw") String kw, Pageable pageable);
+
     /** CAP-13：按工作单元聚合会话（需求主线视图） */
     List<SessionEntity> findByWorkItemIdOrderByCreatedAtDesc(String workItemId);
 
+    /** REQ-23：分页重载 */
+    List<SessionEntity> findByWorkItemIdOrderByCreatedAtDesc(String workItemId, Pageable pageable);
+
     /** CAP-13：按需求聚合会话（含分析型会话） */
     List<SessionEntity> findByRequirementIdOrderByCreatedAtDesc(String requirementId);
+
+    /** REQ-23：分页重载 */
+    List<SessionEntity> findByRequirementIdOrderByCreatedAtDesc(String requirementId, Pageable pageable);
 
     /** CAP-27：批量按需求聚合（AI 实际耗时汇总用，避免列表 N+1） */
     List<SessionEntity> findByRequirementIdIn(java.util.Collection<String> requirementIds);

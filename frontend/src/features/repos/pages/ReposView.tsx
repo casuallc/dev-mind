@@ -19,6 +19,7 @@ import {
 import { createRepo, deleteRepo, fetchRepo, listRepos, recloneRepo, updateRepo } from '../api'
 import type { GitRepo } from '../types'
 import { CLONE_STATUS_COLOR } from '../types'
+import RepoCommitsDrawer from '../components/RepoCommitsDrawer'
 // 集成实例列表为平台设施（projects feature 同样直接引用 integrations/api）
 import { listIntegrations } from '../../integrations/api'
 import { fmtTime } from '../../../shared/utils/format'
@@ -38,15 +39,20 @@ export default function ReposView({
   const canManage = canAction('admin.projects.action.manage-repo')
   const [rows, setRows] = useState<GitRepo[]>([])
   const [loading, setLoading] = useState(false)
+  const [keyword, setKeyword] = useState('')
+  const [status, setStatus] = useState('ALL')
   const [editTarget, setEditTarget] = useState<GitRepo | null>(null)
   const [editOpen, setEditOpen] = useState(false)
+  // CAP-109 提交历史抽屉
+  const [commitsTarget, setCommitsTarget] = useState<GitRepo | null>(null)
+  const [commitsOpen, setCommitsOpen] = useState(false)
   const [integrationOptions, setIntegrationOptions] = useState<{ value: number; label: string }[]>([])
   const [form] = Form.useForm()
   const sourceType = Form.useWatch('sourceType', form)
 
-  const reload = () => {
+  const reload = (kw = keyword, st = status) => {
     setLoading(true)
-    listRepos()
+    listRepos(kw || undefined, st === 'ALL' ? undefined : st)
       .then(setRows)
       .catch((e) => showError(e, '加载仓库失败'))
       .finally(() => setLoading(false))
@@ -77,9 +83,10 @@ export default function ReposView({
   const polling = rows.some((r) => r.cloneStatus === 'CLONING')
   useEffect(() => {
     if (!polling) return
-    const t = setInterval(reload, 3000)
+    const t = setInterval(() => reload(), 3000)
     return () => clearInterval(t)
-  }, [polling])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [polling, keyword, status])
 
   const openCreate = () => {
     setEditTarget(null)
@@ -143,6 +150,30 @@ export default function ReposView({
         平台级全局仓库：项目添加仓库时按远端地址自动关联到此处（不复制）；工时日志的 git 扫描也读取这里的服务端克隆。
         CLONE 行由服务端定时抓取（默认 30 分钟），也可手动「立即抓取」。
       </Typography.Paragraph>
+      <Space wrap style={{ marginBottom: 12 }}>
+        <Input.Search
+          allowClear
+          placeholder="搜索名称/远端/本地路径"
+          style={{ width: 240 }}
+          onSearch={(v) => {
+            setKeyword(v)
+            reload(v)
+          }}
+        />
+        <Select
+          value={status}
+          onChange={(v) => {
+            setStatus(v)
+            reload(undefined, v)
+          }}
+          options={[
+            { value: 'ALL', label: '全部' },
+            { value: 'ACTIVE', label: '启用' },
+            { value: 'DISABLED', label: '停用' },
+          ]}
+          style={{ width: 110 }}
+        />
+      </Space>
       <FitTable
         rowKey="id"
         loading={loading}
@@ -233,9 +264,19 @@ export default function ReposView({
           },
           {
             title: '操作',
-            width: 230,
+            width: 280,
             render: (_, r) => (
               <Space>
+                {/* CAP-109：提交历史查看（全认证用户可读，后端 GET 无 ADMIN 约束） */}
+                <Button
+                  size="small"
+                  onClick={() => {
+                    setCommitsTarget(r)
+                    setCommitsOpen(true)
+                  }}
+                >
+                  提交
+                </Button>
                 {canManage && r.sourceType === 'CLONE' && r.cloneStatus === 'READY' && (
                   <Button size="small" onClick={() => onFetch(r)}>
                     立即抓取
@@ -279,6 +320,13 @@ export default function ReposView({
             ),
           },
         ]}
+      />
+
+      <RepoCommitsDrawer
+        open={commitsOpen}
+        repo={commitsTarget}
+        onCancel={() => setCommitsOpen(false)}
+        onFetched={() => setTimeout(reload, 1500)}
       />
 
       <Modal

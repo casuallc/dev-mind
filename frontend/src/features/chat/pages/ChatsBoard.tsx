@@ -13,7 +13,7 @@ import {
   ReloadOutlined,
   StopOutlined,
 } from '@ant-design/icons'
-import { deleteChat, finishChat, killChat, listChatEvents, listChats, resumeChat, suspendChat } from '../api'
+import { deleteChat, finishChat, getChat, killChat, listChatEvents, listChats, resumeChat, suspendChat } from '../api'
 import type { ChatSummary } from '../types'
 import { stateColor, ACTIVE_STATES, STATE_OPTIONS } from '../../../shared/chat/stateMeta'
 import ChatPanel from '../../../shared/chat/ChatPanel'
@@ -44,6 +44,8 @@ function sortForBoard(list: ChatSummary[]): ChatSummary[] {
 }
 
 const CHAT_VIEWS = ['chat', 'list'] as const
+// REQ-23：列表分页页大小（默认最近 10 条，「加载更多」按 offset 翻页）
+const PAGE_SIZE = 10
 type ChatView = (typeof CHAT_VIEWS)[number]
 const CHAT_VIEW_PERMISSIONS: Record<ChatView, string> = {
   chat: 'top.chats.tab.chat',
@@ -66,6 +68,8 @@ export default function ChatsBoard() {
   )
   const [status, setStatus] = useState('ALL')
   const [keyword, setKeyword] = useState('')
+  // REQ-23：防抖后的搜索词，实际下发服务端（窗口化后客户端过滤会漏数据）
+  const [kw, setKw] = useState('')
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
   const [draft, setDraft] = useState(false)
   const [draftKbId, setDraftKbId] = useState<number | undefined>(undefined)
@@ -83,20 +87,71 @@ export default function ChatsBoard() {
   const [savingSolution, setSavingSolution] = useState(false)
   const autoPickedRef = useRef(false)
   const [searchParams, setSearchParams] = useSearchParams()
+  // REQ-23 分页：hasMore/loadingMore 驱动「加载更多」；offsetRef 记录下一页的 offset（每次翻页 +PAGE_SIZE）；
+  // filterKeyRef 识别过滤条件变化——变化后第一页整列替换，否则轮询只合并首页、保留已加载的历史页（R4）
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const offsetRef = useRef(0)
+  const filterKeyRef = useRef('')
   const { canAction } = usePermissions()
   const canCreate = canAction('top.chats.action.create')
   const canManage = canAction('top.chats.action.manage')
   const canSaveSolution = canAction('top.chats.action.save-solution')
 
+  // 输入停 300ms 才发服务端搜索，逐键打请求会把轮询通道挤满
+  useEffect(() => {
+    const t = window.setTimeout(() => setKw(keyword.trim()), 300)
+    return () => window.clearTimeout(t)
+  }, [keyword])
+
+  // 状态/搜索词变了，旧分页游标对应另一份数据，必须作废重新拉第一页
+  useEffect(() => {
+    offsetRef.current = 0
+    setHasMore(false)
+  }, [status, kw])
+
   const load = useCallback(async () => {
+    const filterKey = `${status}|${kw}`
     try {
-      setChats(await listChats())
+      const fresh = await listChats(status, kw || undefined, PAGE_SIZE, 0)
+      if (filterKeyRef.current !== filterKey) {
+        // 过滤条件变化后的第一页：整列替换并重置分页游标
+        filterKeyRef.current = filterKey
+        offsetRef.current = PAGE_SIZE
+        setChats(fresh.items)
+        setHasMore(fresh.hasMore)
+      } else {
+        // 轮询只刷新第一页（R4）：替换首页行、保留已「加载更多」的历史行；已从首页消失的旧活跃行按终态移除
+        setChats((prev) => {
+          const freshIds = new Set(fresh.items.map((c) => c.id))
+          return [...fresh.items, ...prev.filter((c) => !freshIds.has(c.id) && !ACTIVE_STATES.includes(c.state))]
+        })
+        if (offsetRef.current <= PAGE_SIZE) setHasMore(fresh.hasMore)
+      }
     } catch (e) {
       showError(e, '加载问答失败')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [status, kw])
+
+  // 「加载更多」：取下一页（offset 累加），按 id 去重追加（翻页间有新问答插入时可能重复一行）
+  const loadMore = useCallback(async () => {
+    setLoadingMore(true)
+    try {
+      const page = await listChats(status, kw || undefined, PAGE_SIZE, offsetRef.current)
+      offsetRef.current += PAGE_SIZE
+      setChats((prev) => {
+        const seen = new Set(prev.map((c) => c.id))
+        return [...prev, ...page.items.filter((c) => !seen.has(c.id))]
+      })
+      setHasMore(page.hasMore)
+    } catch (e) {
+      showError(e, '加载更多失败')
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [status, kw])
 
   // 轮询刷新状态；对话内容由 ChatPanel 的 WS 实时流负责，这里只刷状态标签/摘要
   useEffect(() => {
@@ -161,10 +216,23 @@ export default function ChatsBoard() {
     [load],
   )
 
-  // 选中的问答被删除/消失时兜底退出选中态
+  // REQ-23：选中项不在已加载窗口时先按 id 单取注入（分页后老问答/?cid= 深链目标可能不在第一页），
+  // 取不到（已删除）才清选中态——原先「消失即清选中」会让指向窗口外问答的深链打开一片空白
   const current = useMemo(() => chats.find((c) => c.id === selectedId), [chats, selectedId])
   useEffect(() => {
-    if (selectedId && !loading && !current) setSelectedId(undefined)
+    if (!selectedId || loading || current) return
+    let cancelled = false
+    getChat(selectedId)
+      .then((c) => {
+        if (cancelled) return
+        setChats((prev) => (prev.some((x) => x.id === c.id) ? prev : [c, ...prev]))
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedId(undefined)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [selectedId, current, loading])
 
   // 切换问答：清工作区快照，避免旧问答变更数徽标带到新问答
@@ -391,17 +459,8 @@ export default function ChatsBoard() {
     },
   ]
 
-  const listFiltered = useMemo(() => {
-    const kw = keyword.trim().toLowerCase()
-    const list = status === 'ALL' ? chats : chats.filter((c) => c.state === status)
-    if (!kw) return list
-    return list.filter(
-      (c) =>
-        c.id.toLowerCase().includes(kw) ||
-        c.title.toLowerCase().includes(kw) ||
-        (c.summary ?? '').toLowerCase().includes(kw),
-    )
-  }, [chats, status, keyword])
+  // REQ-23：关键词/状态过滤都已服务端化（窗口化后客户端再滤会漏数据），表格直接用已加载数据
+  const listFiltered = chats
 
   return (
     <Card
@@ -441,6 +500,9 @@ export default function ChatsBoard() {
           onStatusChange={setStatus}
           keyword={keyword}
           onKeywordChange={setKeyword}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
+          onLoadMore={loadMore}
         />
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           {draft ? (
