@@ -14,6 +14,7 @@ const SELECT_PREFIXES: Array<[string, string]> = [
   ['/projects/', '/requirements'], // /projects/:id/requirements/:rid → 需求
   ['/context', '/context'],
   ['/chats', '/chats'],
+  ['/active-sessions', '/active-sessions'],
   ['/bookmarks', '/bookmarks'],
   ['/worklog', '/worklog'],
   ['/settings', '/settings'], // 一级导航「设置」（旧 /me/settings 已重定向）
@@ -37,6 +38,7 @@ export function menuSelectedKey(pathname: string): string {
 // 工作台顶部一级导航选中态：项目上下文各页与项目列表统一高亮「项目」（key=/overview）。
 const TOPNAV_PREFIXES: Array<[string, string]> = [
   ['/home', '/home'],
+  ['/active-sessions', '/active-sessions'], // CAP-109 全局活跃会话（顶栏一级导航）
   ['/chats', '/chats'],
   ['/bookmarks', '/bookmarks'],
   ['/worklog', '/worklog'],

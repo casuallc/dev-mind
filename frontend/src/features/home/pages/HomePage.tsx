@@ -157,7 +157,7 @@ export default function HomePage() {
                   </Space>
                 }
                 extra={
-                  <Typography.Link onClick={() => navigate('/sessions')}>
+                  <Typography.Link onClick={() => navigate('/active-sessions')}>
                     全部 <ArrowRightOutlined />
                   </Typography.Link>
                 }
@@ -179,7 +179,7 @@ export default function HomePage() {
                       <Typography.Text
                         ellipsis
                         style={{ flex: 1, minWidth: 0, fontSize: 13, cursor: 'pointer' }}
-                        onClick={() => navigate('/sessions')}
+                        onClick={() => navigate(`/active-sessions?sid=${s.id}`)}
                       >
                         {s.taskSpec || s.id}
                       </Typography.Text>

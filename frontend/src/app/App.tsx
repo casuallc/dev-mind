@@ -4,6 +4,7 @@ import AppLayout from './AppLayout'
 import AdminLayout from './AdminLayout'
 // 各能力 feature 在此注册路由（积木式组装点）
 import SessionsBoard from '../features/sessions/pages/SessionsBoard'
+import ActiveSessionsPage from '../features/sessions/pages/ActiveSessionsPage'
 import ProjectContextPage from '../features/scenarios/pages/ProjectContextPage'
 import ProjectsPage from '../features/projects/pages/ProjectsPage'
 import ProjectOverviewPage from '../features/projects/pages/ProjectOverviewPage'
@@ -174,6 +175,8 @@ export default function App() {
           <Route path="/worklog" element={<WorklogPage />} />
           {/* CAP-30 通用问答（个人级，不进项目上下文） */}
           <Route path="/chats" element={<ChatsBoard />} />
+          {/* CAP-109 全局活跃会话（跨项目聚合，不进项目上下文） */}
+          <Route path="/active-sessions" element={<ActiveSessionsPage />} />
           {/* CAP-64 收藏夹（个人级 owner 隔离，不进项目上下文） */}
           <Route path="/bookmarks" element={<BookmarksPage />} />
           {/* CAP-67 用量统计已并入工作台页内视图（/home?view=usage），旧 /usage 兼容跳转 */}

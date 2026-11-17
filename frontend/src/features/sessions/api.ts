@@ -20,6 +20,8 @@ export function listSessions(
   workItemId?: string,
   requirementId?: string,
   keyword?: string,
+  /** CAP-109：多状态过滤（CSV 元素数组，全局活跃会话页）；与单值 status 并存时优先生效 */
+  statuses?: string[],
 ): Promise<SessionSummary[]> {
   const params = new URLSearchParams()
   if (projectId) params.set('projectId', projectId)
@@ -27,6 +29,7 @@ export function listSessions(
   if (workItemId) params.set('workItemId', workItemId)
   if (requirementId) params.set('requirementId', requirementId)
   if (keyword) params.set('keyword', keyword)
+  if (statuses && statuses.length > 0) params.set('statuses', statuses.join(','))
   const q = params.toString()
   return api.get<SessionSummary[]>(`/sessions${q ? `?${q}` : ''}`)
 }
@@ -39,10 +42,13 @@ export async function listSessionsConditional(
   projectId: string | undefined,
   keyword: string | undefined,
   etagRef: { current: string | undefined },
+  /** CAP-109：多状态过滤（全局活跃会话页轮询用） */
+  statuses?: string[],
 ): Promise<SessionSummary[] | null> {
   const params = new URLSearchParams()
   if (projectId) params.set('projectId', projectId)
   if (keyword) params.set('keyword', keyword)
+  if (statuses && statuses.length > 0) params.set('statuses', statuses.join(','))
   const q = params.toString()
   const res = await api.getConditional<SessionSummary[]>(`/sessions${q ? `?${q}` : ''}`, etagRef.current)
   if (res.notModified) return null
