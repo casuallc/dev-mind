@@ -3,6 +3,7 @@ package com.devmind.chat.service;
 import com.devmind.auth.IdentityService;
 import com.devmind.auth.model.UserEntity;
 import com.devmind.chat.config.ChatProperties;
+import com.devmind.chat.dto.ChatPageView;
 import com.devmind.chat.dto.ChatView;
 import com.devmind.chat.dto.CreateChatRequest;
 import com.devmind.chat.dto.ImageRef;
@@ -105,6 +106,10 @@ public class ChatManagerService {
     static final int DEFAULT_EVENT_LIMIT = 2000;
     /** 事件补拉硬上限：调用方传超大 limit 也不能变成整表拉取。 */
     static final int MAX_EVENT_LIMIT = 20_000;
+
+    /** REQ-23：列表「活跃恒在」合并的状态集（与前端 shared/chat/stateMeta 的 ACTIVE_STATES 对齐） */
+    private static final List<String> ACTIVE_LIST_STATUSES = List.of(
+            SessionState.RUNNING.name(), SessionState.WAITING_INPUT.name(), SessionState.WAITING_AUTH.name());
 
     private final IdentityService identityService;
     private final NotificationPublisher notificationPublisher;
@@ -425,12 +430,55 @@ public class ChatManagerService {
         return toView(ent, liveState(ent));
     }
 
-    /** 个人问答列表：当前用户 + 时间倒序，可选状态过滤。 */
-    public List<ChatView> list(String status) {
-        return chatRepo.findByCreatedByOrderByCreatedAtDesc(identityService.currentActor()).stream()
-                .filter(e -> status == null || status.isBlank() || status.equals(e.getStatus()))
-                .map(e -> toView(e, liveState(e)))
-                .toList();
+    /**
+     * REQ-23：个人问答列表分页加载（GET /api/chats）。数据范围限当前用户（createdBy 隔离），
+     * 只取 createdAt desc 的一页（头部查询 [0, off+size+1] 多取一行判 hasMore，避免 count 查询）。
+     *
+     * <p>状态过滤与关键词搜索均服务端化（窗口化后客户端过滤会漏数据）。
+     * <b>活跃恒在</b>（R1）：无 keyword 时当前用户的活跃问答（RUNNING/WAITING_INPUT/WAITING_AUTH）
+     * 不受 limit 约束，恒与当页窗口按 id 去重合并（活跃在前）；带 keyword 时是显式搜索意图，
+     * 直接对搜索结果分页、不做合并。</p>
+     */
+    public ChatPageView listPage(String status, String keyword, int limit, int offset) {
+        int size = Math.max(1, limit);
+        int off = Math.max(0, offset);
+        String actor = identityService.currentActor();
+        String kw = keyword == null || keyword.isBlank() ? null : keyword.trim();
+        String st = status == null || status.isBlank() ? null : status;
+
+        List<ChatSessionEntity> fetched;
+        if (kw != null) {
+            // 关键词搜索：直接分页搜索结果，不做活跃合并（status 在窗口内内存过滤——搜索无 status 条件）
+            fetched = chatRepo.search(actor, kw, PageRequest.of(0, off + size + 1));
+        } else if (st != null) {
+            fetched = chatRepo.findByCreatedByAndStatusOrderByCreatedAtDesc(actor, st,
+                    PageRequest.of(0, off + size + 1));
+        } else {
+            fetched = chatRepo.findByCreatedByOrderByCreatedAtDesc(actor, PageRequest.of(0, off + size + 1));
+        }
+
+        boolean hasMore = fetched.size() > off + size;
+        List<ChatSessionEntity> window = fetched.stream().skip(off).limit(size).toList();
+        if (kw != null && st != null) {
+            window = window.stream().filter(e -> st.equals(e.getStatus())).toList();
+        }
+
+        List<ChatSessionEntity> items = window;
+        if (kw == null) {
+            // 活跃合并：当前用户活跃问答恒在（显式 status 过滤时活跃也受限于该状态），按 id 去重，活跃在前
+            Set<String> seen = new LinkedHashSet<>();
+            List<ChatSessionEntity> merged = new ArrayList<>();
+            for (ChatSessionEntity e : chatRepo.findByCreatedByAndStatusInOrderByCreatedAtDesc(
+                    actor, ACTIVE_LIST_STATUSES)) {
+                if (st != null && !st.equals(e.getStatus())) continue;
+                if (seen.add(e.getId())) merged.add(e);
+            }
+            for (ChatSessionEntity e : window) {
+                if (seen.add(e.getId())) merged.add(e);
+            }
+            items = merged;
+        }
+        return new ChatPageView(items.stream().map(e -> toView(e, liveState(e))).toList(), hasMore);
     }
 
     public ChatView get(String id) {

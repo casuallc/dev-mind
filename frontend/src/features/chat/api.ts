@@ -1,7 +1,7 @@
 // 通用问答（CAP-30）REST 封装，对应后端 /api/chats
 import { api } from '../../shared/api/client'
 import type { ChatEvent } from '../../shared/chat/types'
-import type { ChatExecutor, ChatKnowledgeOptions, ChatSummary } from './types'
+import type { ChatExecutor, ChatKnowledgeOptions, ChatPage, ChatSummary } from './types'
 
 export interface CreateChatPayload {
   /** 首条提问（即开场消息，发送即创建问答） */
@@ -28,8 +28,17 @@ export interface CreateChatPayload {
 
 export const createChat = (p: CreateChatPayload) => api.post<ChatSummary>('/chats', p)
 
-export const listChats = (status?: string) =>
-  api.get<ChatSummary[]>(`/chats${status && status !== 'ALL' ? `?status=${encodeURIComponent(status)}` : ''}`)
+// REQ-23：服务端分页（limit 默认 10 / offset）+ 状态/关键词过滤服务端化（窗口化后客户端再滤会漏数据）；
+// 响应 {items, hasMore}：items = 当前用户全部活跃问答 + 最近一页终态（id 不重复），hasMore = 终态还有更早数据
+export const listChats = (status?: string, keyword?: string, limit?: number, offset?: number) => {
+  const params = new URLSearchParams()
+  if (status && status !== 'ALL') params.set('status', status)
+  if (keyword) params.set('keyword', keyword)
+  if (limit != null) params.set('limit', String(limit))
+  if (offset != null && offset > 0) params.set('offset', String(offset))
+  const q = params.toString()
+  return api.get<ChatPage>(`/chats${q ? `?${q}` : ''}`)
+}
 
 export const getChat = (id: string) => api.get<ChatSummary>(`/chats/${id}`)
 

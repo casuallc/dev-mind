@@ -2,6 +2,7 @@ package com.devmind.chat.repo;
 
 import com.devmind.chat.model.ChatSessionEntity;
 import java.time.Instant;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -14,6 +15,29 @@ public interface ChatSessionRepository extends JpaRepository<ChatSessionEntity, 
 
     /** 个人问答列表：按创建人 + 时间倒序 */
     List<ChatSessionEntity> findByCreatedByOrderByCreatedAtDesc(String createdBy);
+
+    /** REQ-23：分页重载（列表页只取最近一页） */
+    List<ChatSessionEntity> findByCreatedByOrderByCreatedAtDesc(String createdBy, Pageable pageable);
+
+    /** REQ-23：分页重载（状态过滤服务端化——窗口化后客户端再滤会漏数据） */
+    List<ChatSessionEntity> findByCreatedByAndStatusOrderByCreatedAtDesc(String createdBy, String status,
+                                                                         Pageable pageable);
+
+    /** REQ-23：活跃合并——当前用户的 RUNNING/WAITING_INPUT/WAITING_AUTH 恒在列表结果内 */
+    List<ChatSessionEntity> findByCreatedByAndStatusInOrderByCreatedAtDesc(String createdBy,
+                                                                           java.util.Collection<String> statuses);
+
+    /**
+     * REQ-23：关键词搜索服务端化（字段 id/title/summary；窗口化后前端本地搜会漏）。
+     * summary 是 @Lob，lower 前必须 cast 成 string（红线，同 SessionRepository.search 的既有写法）；
+     * title 是普通 VARCHAR，直接 lower 即可。
+     */
+    @Query("select s from ChatSessionEntity s where s.createdBy = :createdBy "
+            + "and (s.id like concat('%', cast(:kw as string), '%') "
+            + "or lower(s.title) like lower(concat('%', cast(:kw as string), '%')) "
+            + "or lower(cast(s.summary as string)) like lower(concat('%', cast(:kw as string), '%'))) "
+            + "order by s.createdAt desc")
+    List<ChatSessionEntity> search(@Param("createdBy") String createdBy, @Param("kw") String kw, Pageable pageable);
 
     /** CAP-34 FR-04：hello 对账 DB 兜底——按节点 + 活动状态查存量远程问答（服务端重启后内存 runtime 已丢失） */
     List<ChatSessionEntity> findByAgentNodeIdAndStatusIn(String agentNodeId, java.util.Collection<String> statuses);

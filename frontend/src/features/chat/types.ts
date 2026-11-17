@@ -56,3 +56,9 @@ export interface ChatSummary {
   /** 已入账回合数 */
   turnCount?: number | null
 }
+
+/** REQ-23：列表分页响应（items = 活跃全量 + 最近一页终态，id 不重复；hasMore = 终态还有更早数据） */
+export interface ChatPage {
+  items: ChatSummary[]
+  hasMore: boolean
+}
