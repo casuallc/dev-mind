@@ -93,8 +93,18 @@ public class GitRepoService implements GitRepoCatalog {
     // 平台红线：异步触发靠 save 自身事务即时提交）。update/delete 无异步触发，保留事务。
 
     public List<GitRepoView> list() {
-        return repoRepo.findAll(Sort.by(Sort.Direction.DESC, "createdAt")).stream()
-                .map(GitRepoView::of).toList();
+        return list(null, null);
+    }
+
+    /** CAP-109 FR-02：keyword 匹配 name/remoteUrl/localPath（DB 小写 like）；status 可选等值过滤。 */
+    public List<GitRepoView> list(String keyword, String status) {
+        String kw = keyword == null || keyword.isBlank() ? null : keyword.strip();
+        String st = status == null || status.isBlank() ? null : status.strip().toUpperCase();
+        if (kw == null && st == null) {
+            return repoRepo.findAll(Sort.by(Sort.Direction.DESC, "createdAt")).stream()
+                    .map(GitRepoView::of).toList();
+        }
+        return repoRepo.search(st, kw).stream().map(GitRepoView::of).toList();
     }
 
     public GitRepositoryEntity require(Long id) {
