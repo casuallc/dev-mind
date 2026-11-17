@@ -150,6 +150,13 @@
       "suite": "regression",
       "owner": "security",
       "cap": "CAP-66"
+    },
+    {
+      "id": "regression.session-global-active-sessions",
+      "test": "Regression.test_global_active_sessions_statuses_filter",
+      "suite": "regression",
+      "owner": "session",
+      "cap": "CAP-109"
     }
   ]
 }

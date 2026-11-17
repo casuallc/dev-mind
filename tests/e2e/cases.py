@@ -1017,6 +1017,81 @@ printf '%s' '{"contractVersion":"1","status":"pass","message":"e2e program pass"
         self.api.request("POST", "/projects/ghost-nope/requirements/ai-expand",
                          {"points": "x"}, expected=404)
 
+    # ---------------- CAP-109 全局活跃会话页 ----------------
+
+    def _cap109_project(self, tag):
+        # 会话要建 worktree，空仓库（无提交）起不了——与 _cap104_project 的差别就是先落一个初始提交
+        path = self.workspace / ("project-" + uuid.uuid4().hex)
+        path.mkdir()
+        env = dict(os.environ, GIT_AUTHOR_NAME="e2e", GIT_AUTHOR_EMAIL="e2e@t",
+                   GIT_COMMITTER_NAME="e2e", GIT_COMMITTER_EMAIL="e2e@t")
+        subprocess.run(["git", "init", "--initial-branch=master", str(path)],
+                       check=True, capture_output=True)
+        (path / "README.md").write_text("# e2e " + tag + "\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=path, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=path, check=True,
+                       capture_output=True, env=env)
+        project = self.api.request("POST", "/projects", {
+            "name": "e2e-active-" + tag, "path": path.as_posix(),
+            "defaultBranch": "master", "tags": ["e2e"], "status": "ACTIVE"})
+        self.addCleanup(self.api.request, "DELETE", "/projects/" + project["id"])
+        return project["id"]
+
+    def _cap109_wait_status(self, session_id, expected, timeout=90):
+        deadline = time.monotonic() + timeout
+        while True:
+            session = self.api.request("GET", "/sessions/" + session_id)
+            if session["status"] in expected:
+                return session
+            self.assertLess(time.monotonic(), deadline,
+                            f"session {session_id} stuck at {session['status']}, expect {expected}")
+            time.sleep(1)
+
+    def _cap109_active_ids(self):
+        listed = self.api.request(
+            "GET", "/sessions?statuses=RUNNING,WAITING_INPUT,WAITING_AUTH")
+        for item in listed:
+            self.assertIn(item["status"], ("RUNNING", "WAITING_INPUT", "WAITING_AUTH"),
+                          "statuses 过滤混入非活跃会话")
+        return {item["id"] for item in listed}
+
+    def test_global_active_sessions_statuses_filter(self):
+        # 两个项目各建一个会话（fake runner 显式指定节点），全局多状态清单同时命中两者；
+        # suspend → 从活跃清单消失，resume → 回来，kill → 终结态不再出现。
+        project_a = self._cap109_project("a")
+        project_b = self._cap109_project("b")
+        node_id = self._cap104_start_runner("e2e-active-" + uuid.uuid4().hex[:8])
+
+        def create(project_id, tag):
+            session = self.api.request("POST", "/sessions", {
+                "taskSpec": f"e2e-global-active-{tag}", "projectId": project_id,
+                "agentNodeId": str(node_id)})
+            self.addCleanup(self.api.request, "DELETE", "/sessions/" + session["id"])
+            return session["id"]
+
+        session_a = create(project_a, "a")
+        session_b = create(project_b, "b")
+        self._cap109_wait_status(session_a, ("RUNNING", "WAITING_INPUT", "WAITING_AUTH"))
+        self._cap109_wait_status(session_b, ("RUNNING", "WAITING_INPUT", "WAITING_AUTH"))
+
+        ids = self._cap109_active_ids()
+        self.assertIn(session_a, ids)
+        self.assertIn(session_b, ids)
+
+        self.api.request("POST", f"/sessions/{session_a}/suspend")
+        self._cap109_wait_status(session_a, ("SUSPENDED",))
+        ids = self._cap109_active_ids()
+        self.assertNotIn(session_a, ids)
+        self.assertIn(session_b, ids)
+
+        self.api.request("POST", f"/sessions/{session_a}/resume")
+        self._cap109_wait_status(session_a, ("RUNNING", "WAITING_INPUT", "WAITING_AUTH"))
+        self.assertIn(session_a, self._cap109_active_ids())
+
+        self.api.request("POST", f"/sessions/{session_a}/kill")
+        self._cap109_wait_status(session_a, ("TERMINATED",))
+        self.assertNotIn(session_a, self._cap109_active_ids())
+
     def test_core_authorization_boundaries(self):
         # CAP-108 M1：应用 Service 边界统一授权——ACTION 表达式 / VIEWER 只读底线 /
         # 项目成员写范围（CAP-62）/ OWNER_ONLY 在引擎一处判定，不再各自为政
