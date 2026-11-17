@@ -486,9 +486,34 @@ public class SessionManagerService {
 
     public List<SessionView> list(String status, String projectId, String workItemId, String requirementId,
                                   String keyword) {
+        return list(status, projectId, workItemId, requirementId, keyword, null);
+    }
+
+    /**
+     * CAP-109：statuses（多状态集合）服务于全局活跃会话页。非空且未指定工作单元/需求时优先生效
+     * （压过单值 status）：指定项目走项目清单内存过滤，否则带关键字走 search(null, kw) 内存过滤，
+     * 否则直接 findByStatusInOrderByCreatedAtDesc。
+     */
+    public List<SessionView> list(String status, String projectId, String workItemId, String requirementId,
+                                  String keyword, List<String> statuses) {
         List<SessionEntity> entities;
         String kw = keyword == null || keyword.isBlank() ? null : keyword.trim();
-        if (kw != null) {
+        List<String> sts = statuses == null ? List.of()
+                : statuses.stream().filter(s -> s != null && !s.isBlank()).map(String::trim).distinct().toList();
+        boolean noLineFilter = (workItemId == null || workItemId.isBlank())
+                && (requirementId == null || requirementId.isBlank());
+        if (!sts.isEmpty() && noLineFilter) {
+            if (projectId != null && !projectId.isBlank()) {
+                entities = filterStatus(sessionRepo.findByProjectIdOrderByCreatedAtDesc(projectId), sts);
+                if (kw != null) {
+                    entities = filterKeyword(entities, kw);
+                }
+            } else if (kw != null) {
+                entities = filterStatus(sessionRepo.search(null, kw), sts);
+            } else {
+                entities = sessionRepo.findByStatusInOrderByCreatedAtDesc(sts);
+            }
+        } else if (kw != null) {
             // 关键字优先走服务端 LIKE（列表字段已截断，前端本地搜会漏）；工作单元/需求分支集合小，内存过滤
             if (workItemId != null && !workItemId.isBlank()) {
                 entities = filterKeyword(sessionRepo.findByWorkItemIdOrderByCreatedAtDesc(workItemId), kw);
@@ -520,6 +545,10 @@ public class SessionManagerService {
         return entities.stream()
                 .map(e -> toView(e, liveState(e), namesBySession.getOrDefault(e.getId(), List.of())))
                 .toList();
+    }
+
+    private List<SessionEntity> filterStatus(List<SessionEntity> entities, List<String> statuses) {
+        return entities.stream().filter(e -> statuses.contains(e.getStatus())).toList();
     }
 
     private List<SessionEntity> filterKeyword(List<SessionEntity> entities, String kw) {

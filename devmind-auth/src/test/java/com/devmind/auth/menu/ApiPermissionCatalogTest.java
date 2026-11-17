@@ -44,7 +44,8 @@ class ApiPermissionCatalogTest {
     void 共享接口登记OR权限集合() {
         assertEquals(Set.of("project.sessions.action.create", "top.worklog.action.create-session"),
                 match("POST", "/api/sessions"));
-        assertEquals(Set.of("project.sessions.action.manage", "top.worklog.action.manage-session"),
+        assertEquals(Set.of("project.sessions.action.manage", "top.worklog.action.manage-session",
+                        "top.sessions.action.manage"),
                 match("POST", "/api/sessions/9/finish"));
         assertEquals(Set.of("admin.projects.action.sediment-proposal", "project.sessions.action.sediment"),
                 match("POST", "/api/knowledge/proposals"));

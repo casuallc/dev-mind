@@ -62,9 +62,14 @@ public class SessionController {
                                                   @RequestParam(required = false) String workItemId,
                                                   @RequestParam(required = false) String requirementId,
                                                   @RequestParam(required = false) String keyword,
+                                                  @RequestParam(required = false) String statuses,
                                                   @RequestHeader(value = "If-None-Match", required = false)
                                                   String ifNoneMatch) {
-        List<SessionView> views = service.list(status, projectId, workItemId, requirementId, keyword)
+        // CAP-109：statuses 为 CSV 多状态（全局活跃会话页），与单值 status 并存时 statuses 优先
+        List<String> statusList = statuses == null || statuses.isBlank() ? null
+                : java.util.Arrays.stream(statuses.split(",")).map(String::trim)
+                        .filter(s -> !s.isEmpty()).toList();
+        List<SessionView> views = service.list(status, projectId, workItemId, requirementId, keyword, statusList)
                 .stream().map(v -> v.withPreview(LIST_PREVIEW_CHARS)).toList();
         String etag = "\"" + Integer.toHexString(fingerprint(views)) + "\"";
         if (etag.equals(ifNoneMatch)) {

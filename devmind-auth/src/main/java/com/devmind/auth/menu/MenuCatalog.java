@@ -23,6 +23,10 @@ public final class MenuCatalog {
             // ---------- 工作台顶部导航 ----------
             menu("top.home", "工作台", "/home", MenuItemEntity.ZONE_TOP, null, "home", 10),
             menu("top.projects", "项目", "/overview", MenuItemEntity.ZONE_TOP, null, "folder", 20),
+            // CAP-109：全局活跃会话页（跨项目）；manage 动作默认授权派生自项目内会话管理
+            menu("top.sessions", "活跃会话", "/active-sessions", MenuItemEntity.ZONE_TOP, null, "robot", 25),
+            action("top.sessions", "manage", "管理会话（对话/结束/挂起/恢复/终止/删除）", 10, true,
+                    List.of("project.sessions.action.manage")),
             menu("top.chats", "AI 问答", "/chats", MenuItemEntity.ZONE_TOP, null, "comment", 30),
             menu("top.bookmarks", "收藏夹", "/bookmarks", MenuItemEntity.ZONE_TOP, null, "star", 40),
             menu("top.worklog", "工作日志", "/worklog", MenuItemEntity.ZONE_TOP, null, "field-time", 50),

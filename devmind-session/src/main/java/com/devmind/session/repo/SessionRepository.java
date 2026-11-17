@@ -14,6 +14,9 @@ public interface SessionRepository extends JpaRepository<SessionEntity, String> 
 
     List<SessionEntity> findByStatusOrderByCreatedAtDesc(String status);
 
+    /** CAP-109：全局活跃会话页——按多状态过滤（跨项目，创建时间倒序） */
+    List<SessionEntity> findByStatusInOrderByCreatedAtDesc(java.util.Collection<String> statuses);
+
     List<SessionEntity> findByProjectIdOrderByCreatedAtDesc(String projectId);
 
     /**
