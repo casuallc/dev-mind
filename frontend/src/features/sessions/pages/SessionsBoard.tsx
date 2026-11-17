@@ -13,7 +13,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
-import { collectSessionOutputs, deleteSession, getSession, listSessionsConditional } from '../api'
+import { collectSessionOutputs, deleteSession, getSession, listSessions, listSessionsConditional } from '../api'
 import type { SessionSummary } from '../types'
 import { stateColor, ACTIVE_STATES, STATE_OPTIONS } from '../stateMeta'
 import { useSessionActions } from '../hooks/useSessionActions'
@@ -46,6 +46,9 @@ const SESSION_BOARD_VIEW_PERMISSIONS: Record<SessionBoardView, string> = {
   workspace: 'project.sessions.tab.workspace',
 }
 const SESSION_BOARD_VIEW_LABELS: Record<SessionBoardView, string> = { chat: '对话', list: '列表', workspace: '工作区' }
+
+// REQ-23：每页条数（服务端默认 10，这里显式传，「加载更多」按同尺寸翻页）
+const PAGE_SIZE = 10
 
 // 活跃在前 + 创建时间倒序（与 SessionListPane 一致，用于自动选中第一个）
 function sortForBoard(list: SessionSummary[]): SessionSummary[] {
@@ -115,6 +118,12 @@ export default function SessionsBoard({
   const autoPickedRef = useRef(false)
   // 条件拉取的 ETag：数据没变服务端回 304，省掉每轮几百 KB 的传输与 JSON 解析
   const etagRef = useRef<string | undefined>(undefined)
+  // REQ-23 分页：hasMore/loadingMore 驱动「加载更多」；offsetRef 记录下一页的 offset（每次翻页 +PAGE_SIZE）；
+  // filterKeyRef 识别过滤条件变化——变化后第一页整列替换，否则轮询只合并首页、保留已加载的历史页（R4）
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const offsetRef = useRef(0)
+  const filterKeyRef = useRef('')
 
   // 输入停 300ms 才发服务端搜索，逐键打请求会把轮询通道挤满
   useEffect(() => {
@@ -122,21 +131,64 @@ export default function SessionsBoard({
     return () => window.clearTimeout(t)
   }, [keyword])
 
-  // projectId/搜索词变了，旧 ETag 对应另一份数据，必须作废重新全量拉
+  // projectId/状态/搜索词变了，旧 ETag 与分页游标对应另一份数据，必须作废重新拉第一页
   useEffect(() => {
     etagRef.current = undefined
-  }, [projectId, kw])
+    offsetRef.current = 0
+    setHasMore(false)
+  }, [projectId, kw, status])
 
   const load = useCallback(async () => {
+    const filterKey = `${projectId}|${status}|${kw}`
     try {
-      const fresh = await listSessionsConditional(projectId ?? undefined, kw || undefined, etagRef)
-      if (fresh) setSessions(fresh) // null = 304 未变化，沿用现有列表
+      const fresh = await listSessionsConditional(projectId ?? undefined, kw || undefined, status, etagRef, PAGE_SIZE)
+      if (!fresh) return // null = 304 未变化，沿用现有列表
+      if (filterKeyRef.current !== filterKey) {
+        // 过滤条件变化后的第一页：整列替换并重置分页游标
+        filterKeyRef.current = filterKey
+        offsetRef.current = PAGE_SIZE
+        setSessions(fresh.items)
+        setHasMore(fresh.hasMore)
+      } else {
+        // 轮询只刷新第一页（R4）：替换首页行、保留已「加载更多」的历史行；已从首页消失的旧活跃行按终态移除
+        setSessions((prev) => {
+          const freshIds = new Set(fresh.items.map((s) => s.id))
+          return [...fresh.items, ...prev.filter((s) => !freshIds.has(s.id) && !ACTIVE_STATES.includes(s.state))]
+        })
+        if (offsetRef.current <= PAGE_SIZE) setHasMore(fresh.hasMore)
+      }
     } catch (e) {
       showError(e, '加载会话失败')
     } finally {
       setLoading(false)
     }
-  }, [projectId, kw])
+  }, [projectId, kw, status])
+
+  // 「加载更多」：非条件请求取下一页（offset 累加），按 id 去重追加（R6：翻页间有新会话插入时可能重复一行）
+  const loadMore = useCallback(async () => {
+    setLoadingMore(true)
+    try {
+      const page = await listSessions(
+        projectId ?? undefined,
+        status,
+        undefined,
+        undefined,
+        kw || undefined,
+        PAGE_SIZE,
+        offsetRef.current,
+      )
+      offsetRef.current += PAGE_SIZE
+      setSessions((prev) => {
+        const seen = new Set(prev.map((s) => s.id))
+        return [...prev, ...page.items.filter((s) => !seen.has(s.id))]
+      })
+      setHasMore(page.hasMore)
+    } catch (e) {
+      showError(e, '加载更多失败')
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [projectId, kw, status])
 
   // 切换当前项目：清选中态与自动选中标记，避免选中到上一个项目的会话
   useEffect(() => {
@@ -177,7 +229,7 @@ export default function SessionsBoard({
       .catch(() => undefined)
   }, [])
 
-  // 深链 ?sid=：列表加载后选中目标会话并清参数（防粘性选中；跨项目会话不在列表时由消失兜底清选中态）
+  // 深链 ?sid=：列表加载后选中目标会话并清参数（防粘性选中；目标不在已加载窗口时由下方注入兜底处理）
   useEffect(() => {
     const sid = searchParams.get('sid')
     if (!sid || loading) return
@@ -206,10 +258,23 @@ export default function SessionsBoard({
     [load],
   )
 
-  // 选中的会话被删除/消失时兜底退出选中态
+  // REQ-23（R2）：选中项不在已加载窗口时先按 id 单取注入（分页后老会话/?sid= 深链目标可能不在第一页），
+  // 取不到（已删除）才清选中态——原先「消失即清选中」会让指向窗口外会话的深链打开一片空白
   const current = useMemo(() => sessions.find((s) => s.id === selectedId), [sessions, selectedId])
   useEffect(() => {
-    if (selectedId && !loading && !current) setSelectedId(undefined)
+    if (!selectedId || loading || current) return
+    let cancelled = false
+    getSession(selectedId)
+      .then((s) => {
+        if (cancelled) return
+        setSessions((prev) => (prev.some((x) => x.id === s.id) ? prev : [s, ...prev]))
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedId(undefined)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [selectedId, current, loading])
 
   // 列表行 taskSpec/summary 是 200 字预览（列表瘦身），对话气泡的任务说明要全文
@@ -402,10 +467,8 @@ export default function SessionsBoard({
     },
   ]
 
-  // 关键词过滤在服务端（预览截断后客户端再滤会漏全文命中）；状态筛选仍客户端做
-  const listFiltered = useMemo(() => {
-    return status === 'ALL' ? sessions : sessions.filter((s) => s.state === status)
-  }, [sessions, status])
+  // REQ-23：关键词/状态过滤都已服务端化（窗口化后客户端再滤会漏数据），表格直接用已加载数据
+  const listFiltered = sessions
 
   return (
     <Card
@@ -453,6 +516,9 @@ export default function SessionsBoard({
             onKeywordChange={setKeyword}
             refs={refs}
             canCreate={canCreate}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onLoadMore={loadMore}
           />
           {/* overflow:auto 是兜底：右侧「操作条 + 摘要卡 + 输入区」的固定高度在矮视口（≤1366x768）会超过卡片高度，
               不兜底就顶破内容区（实测 1280x720 溢 50px）；空间够时不会出现滚动条，行为与原先一致 */}

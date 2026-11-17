@@ -8,6 +8,7 @@ import com.devmind.session.dto.InputRequest;
 import com.devmind.session.dto.OutputContentView;
 import com.devmind.session.dto.OutputFileView;
 import com.devmind.session.dto.RepoDiffView;
+import com.devmind.session.dto.SessionPageView;
 import com.devmind.session.dto.SessionView;
 import com.devmind.common.agent.SessionEvent;
 import com.devmind.session.service.SessionManagerService;
@@ -51,26 +52,37 @@ public class SessionController {
     }
 
     /**
-     * 会话列表。taskSpec/summary 只回预览（全文走 /{id}——看板轮询不需要全文）；
+     * 会话列表（REQ-23 分页：默认只回最近 limit 条终态 + scope 内全部活跃会话，「加载更多」用 offset 翻页）。
+     * taskSpec/summary 只回预览（全文走 /{id}——看板轮询不需要全文）；
      * keyword 服务端 LIKE 搜索（字段截断后前端本地搜会漏）。
      * 带 ETag 条件请求：看板 3s 轮询无变化时回 304 空体，带宽≈0
      * （Cache-Control: no-cache 强制每次回源校验；显式设置也避免安全头默认 no-store 吃掉浏览器缓存）。
+     * ETag/304 只覆盖第一页（offset=0，最新+活跃正是轮询关注的）；「加载更多」的旧页不参与条件刷新（R4）。
      */
     @GetMapping
-    public ResponseEntity<List<SessionView>> list(@RequestParam(required = false) String status,
-                                                  @RequestParam(required = false) String projectId,
-                                                  @RequestParam(required = false) String workItemId,
-                                                  @RequestParam(required = false) String requirementId,
-                                                  @RequestParam(required = false) String keyword,
-                                                  @RequestHeader(value = "If-None-Match", required = false)
-                                                  String ifNoneMatch) {
-        List<SessionView> views = service.list(status, projectId, workItemId, requirementId, keyword)
-                .stream().map(v -> v.withPreview(LIST_PREVIEW_CHARS)).toList();
+    public ResponseEntity<SessionPageView> list(@RequestParam(required = false) String status,
+                                                @RequestParam(required = false) String projectId,
+                                                @RequestParam(required = false) String workItemId,
+                                                @RequestParam(required = false) String requirementId,
+                                                @RequestParam(required = false) String keyword,
+                                                @RequestParam(defaultValue = "10") int limit,
+                                                @RequestParam(defaultValue = "0") int offset,
+                                                @RequestHeader(value = "If-None-Match", required = false)
+                                                String ifNoneMatch) {
+        int size = Math.max(1, Math.min(limit, 100));
+        int off = Math.max(0, offset);
+        SessionPageView page = service.listPage(status, projectId, workItemId, requirementId, keyword, size, off);
+        List<SessionView> views = page.items().stream().map(v -> v.withPreview(LIST_PREVIEW_CHARS)).toList();
+        SessionPageView body = new SessionPageView(views, page.hasMore());
+        if (off > 0) {
+            // 加载更多页不走 ETag：指纹只对第一页计算，旧页变化由翻页自然取新
+            return ResponseEntity.ok().cacheControl(CacheControl.noCache()).body(body);
+        }
         String etag = "\"" + Integer.toHexString(fingerprint(views)) + "\"";
         if (etag.equals(ifNoneMatch)) {
             return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(etag).build();
         }
-        return ResponseEntity.ok().cacheControl(CacheControl.noCache()).eTag(etag).body(views);
+        return ResponseEntity.ok().cacheControl(CacheControl.noCache()).eTag(etag).body(body);
     }
 
     /** 轮询变更指纹：只看 UI 展示的字段，任一变化即换 ETag（列表内容本身已是最新快照，无需另查库） */

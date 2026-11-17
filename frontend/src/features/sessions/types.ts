@@ -37,6 +37,12 @@ export interface SessionSummary {
   finishedAt?: string
 }
 
+/** REQ-23：列表分页响应（items = 活跃全量 + 最近一页终态，id 不重复；hasMore = 终态还有更早数据） */
+export interface SessionPage {
+  items: SessionSummary[]
+  hasMore: boolean
+}
+
 /** CAP-42：手动收口结果（POST /sessions/{id}/finalize；失败走 409 错误透传） */
 export interface FinalizeAck {
   ok: boolean

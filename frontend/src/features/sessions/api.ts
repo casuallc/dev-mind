@@ -1,6 +1,6 @@
 // 会话能力（CAP-05）的接口封装：页面只依赖本文件，不直接碰 shared client
 import { api } from '../../shared/api/client'
-import type { FinalizeAck, RepoDiffView, SessionSummary, SessionEvent } from './types'
+import type { FinalizeAck, RepoDiffView, SessionPage, SessionSummary, SessionEvent } from './types'
 import type {
   CollectOutputsResult,
   FinalizeDetail,
@@ -14,40 +14,51 @@ import type {
 } from './types'
 
 // CAP-31：会话归属当前项目——projectId 为首参（工作台在 ProjectContextGate 内，必有当前项目）
+// REQ-23：服务端分页（limit 默认 10 / offset），响应 {items, hasMore}；
+// items = scope 内全部活跃会话 + 最近一页终态（id 不重复），hasMore = 终态还有更早数据
 export function listSessions(
   projectId?: string,
   status?: string,
   workItemId?: string,
   requirementId?: string,
   keyword?: string,
-): Promise<SessionSummary[]> {
+  limit?: number,
+  offset?: number,
+): Promise<SessionPage> {
   const params = new URLSearchParams()
   if (projectId) params.set('projectId', projectId)
   if (status && status !== 'ALL') params.set('status', status)
   if (workItemId) params.set('workItemId', workItemId)
   if (requirementId) params.set('requirementId', requirementId)
   if (keyword) params.set('keyword', keyword)
+  if (limit != null) params.set('limit', String(limit))
+  if (offset != null && offset > 0) params.set('offset', String(offset))
   const q = params.toString()
-  return api.get<SessionSummary[]>(`/sessions${q ? `?${q}` : ''}`)
+  return api.get<SessionPage>(`/sessions${q ? `?${q}` : ''}`)
 }
 
 /**
  * 轮询专用条件拉取：服务端对列表算 ETag，未变回 304（省每轮传输与解析）。
- * 返回 null = 未变化；否则为新列表，并把新 ETag 写入 etagRef。
+ * 返回 null = 未变化；否则为新首页数据，并把新 ETag 写入 etagRef。
+ * REQ-23：条件轮询只覆盖第一页（offset=0，最新 + 活跃），「加载更多」的旧页不参与（R4）。
  */
 export async function listSessionsConditional(
   projectId: string | undefined,
   keyword: string | undefined,
+  status: string | undefined,
   etagRef: { current: string | undefined },
-): Promise<SessionSummary[] | null> {
+  limit?: number,
+): Promise<SessionPage | null> {
   const params = new URLSearchParams()
   if (projectId) params.set('projectId', projectId)
   if (keyword) params.set('keyword', keyword)
+  if (status && status !== 'ALL') params.set('status', status)
+  if (limit != null) params.set('limit', String(limit))
   const q = params.toString()
-  const res = await api.getConditional<SessionSummary[]>(`/sessions${q ? `?${q}` : ''}`, etagRef.current)
+  const res = await api.getConditional<SessionPage>(`/sessions${q ? `?${q}` : ''}`, etagRef.current)
   if (res.notModified) return null
   etagRef.current = res.etag
-  return res.data ?? []
+  return res.data ?? { items: [], hasMore: false }
 }
 
 export function getSession(id: string): Promise<SessionSummary> {

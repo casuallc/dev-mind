@@ -61,9 +61,11 @@ export default function HomePage() {
   useEffect(() => {
     if (view !== 'overview') return
     // 各卡独立取数，任一失败不影响其他卡
+    // REQ-23：listSessions 改分页返回 {items, hasMore}（活跃恒在 + 最近 10 条终态），
+    // 首页不再触发全表加载；「活跃恒在」保证这里的 ACTIVE_STATES 过滤语义不变
     listSessions()
-      .then((list) =>
-        setActiveSessions(list.filter((s) => ACTIVE_STATES.includes(s.state)).slice(0, 5)),
+      .then((page) =>
+        setActiveSessions(page.items.filter((s) => ACTIVE_STATES.includes(s.state)).slice(0, 5)),
       )
       .catch(() => setActiveSessions([]))
 
