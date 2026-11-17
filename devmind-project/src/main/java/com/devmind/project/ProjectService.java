@@ -243,9 +243,29 @@ public class ProjectService {
      * CAP-108 M1：存在可信执行上下文时按可见性过滤（软边界——无上下文的内部异步调用保持原样，M2 迁移）。
      */
     public List<ProjectView> list(String status, String kind) {
-        List<ProjectEntity> entities = (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status))
-                ? projectRepo.findAllByOrderByCreatedAtDesc()
-                : projectRepo.findByStatusOrderByCreatedAtDesc(status.toUpperCase());
+        return filterAndMap(fetchEntities(status, null), kind);
+    }
+
+    /**
+     * CAP-109 FR-01：带关键字的列表。keyword 下推 DB（name/description/path 小写 like），
+     * kind 过滤与可读范围过滤沿用内存逻辑；保持全量 List 返回，不引入分页。
+     */
+    public List<ProjectView> list(String status, String kind, String keyword) {
+        return filterAndMap(fetchEntities(status, keyword), kind);
+    }
+
+    private List<ProjectEntity> fetchEntities(String status, String keyword) {
+        String st = (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status))
+                ? null : status.toUpperCase();
+        String kw = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
+        if (kw == null) {
+            return st == null ? projectRepo.findAllByOrderByCreatedAtDesc()
+                    : projectRepo.findByStatusOrderByCreatedAtDesc(st);
+        }
+        return projectRepo.search(st, kw);
+    }
+
+    private List<ProjectView> filterAndMap(List<ProjectEntity> entities, String kind) {
         Set<String> readable = readableScopeForCurrent();
         return entities.stream().filter(e -> kindMatches(e, kind))
                 .filter(e -> readable == null || readable.contains(e.getId()))

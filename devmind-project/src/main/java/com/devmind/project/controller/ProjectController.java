@@ -44,8 +44,9 @@ public class ProjectController {
 
     @GetMapping
     public List<ProjectView> list(@RequestParam(required = false) String status,
-                                  @RequestParam(required = false) String kind) {
-        return service.list(status, kind);
+                                  @RequestParam(required = false) String kind,
+                                  @RequestParam(required = false) String keyword) {
+        return service.list(status, kind, keyword);
     }
 
     @PostMapping

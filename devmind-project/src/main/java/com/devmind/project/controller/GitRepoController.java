@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -30,8 +31,9 @@ public class GitRepoController {
     }
 
     @GetMapping
-    public List<GitRepoView> list() {
-        return service.list();
+    public List<GitRepoView> list(@RequestParam(required = false) String keyword,
+                                  @RequestParam(required = false) String status) {
+        return service.list(keyword, status);
     }
 
     @GetMapping("/{id}")
