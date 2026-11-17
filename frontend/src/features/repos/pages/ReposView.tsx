@@ -19,6 +19,7 @@ import {
 import { createRepo, deleteRepo, fetchRepo, listRepos, recloneRepo, updateRepo } from '../api'
 import type { GitRepo } from '../types'
 import { CLONE_STATUS_COLOR } from '../types'
+import RepoCommitsDrawer from '../components/RepoCommitsDrawer'
 // 集成实例列表为平台设施（projects feature 同样直接引用 integrations/api）
 import { listIntegrations } from '../../integrations/api'
 import { fmtTime } from '../../../shared/utils/format'
@@ -42,6 +43,9 @@ export default function ReposView({
   const [status, setStatus] = useState('ALL')
   const [editTarget, setEditTarget] = useState<GitRepo | null>(null)
   const [editOpen, setEditOpen] = useState(false)
+  // CAP-109 提交历史抽屉
+  const [commitsTarget, setCommitsTarget] = useState<GitRepo | null>(null)
+  const [commitsOpen, setCommitsOpen] = useState(false)
   const [integrationOptions, setIntegrationOptions] = useState<{ value: number; label: string }[]>([])
   const [form] = Form.useForm()
   const sourceType = Form.useWatch('sourceType', form)
@@ -260,9 +264,19 @@ export default function ReposView({
           },
           {
             title: '操作',
-            width: 230,
+            width: 280,
             render: (_, r) => (
               <Space>
+                {/* CAP-109：提交历史查看（全认证用户可读，后端 GET 无 ADMIN 约束） */}
+                <Button
+                  size="small"
+                  onClick={() => {
+                    setCommitsTarget(r)
+                    setCommitsOpen(true)
+                  }}
+                >
+                  提交
+                </Button>
                 {canManage && r.sourceType === 'CLONE' && r.cloneStatus === 'READY' && (
                   <Button size="small" onClick={() => onFetch(r)}>
                     立即抓取
@@ -306,6 +320,13 @@ export default function ReposView({
             ),
           },
         ]}
+      />
+
+      <RepoCommitsDrawer
+        open={commitsOpen}
+        repo={commitsTarget}
+        onCancel={() => setCommitsOpen(false)}
+        onFetched={() => setTimeout(reload, 1500)}
       />
 
       <Modal
