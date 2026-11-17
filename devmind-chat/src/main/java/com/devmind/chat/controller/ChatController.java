@@ -2,6 +2,7 @@ package com.devmind.chat.controller;
 
 import com.devmind.chat.dto.ChatAuthorizeRequest;
 import com.devmind.chat.dto.ChatInputRequest;
+import com.devmind.chat.dto.ChatPageView;
 import com.devmind.chat.dto.ChatView;
 import com.devmind.chat.dto.CreateChatRequest;
 import com.devmind.chat.dto.KnowledgeFeedbackView;
@@ -41,9 +42,17 @@ public class ChatController {
         return service.create(req);
     }
 
+    /**
+     * REQ-23 分页：默认只回最近 limit 条终态 + 当前用户全部活跃问答，「加载更多」用 offset 翻页；
+     * 状态过滤与关键词搜索服务端化（窗口化后客户端过滤会漏数据）。
+     */
     @GetMapping
-    public List<ChatView> list(@RequestParam(required = false) String status) {
-        return service.list(status);
+    public ChatPageView list(@RequestParam(required = false) String status,
+                             @RequestParam(required = false) String keyword,
+                             @RequestParam(defaultValue = "10") int limit,
+                             @RequestParam(defaultValue = "0") int offset) {
+        int size = Math.max(1, Math.min(limit, 100));
+        return service.listPage(status, keyword, size, Math.max(0, offset));
     }
 
     @GetMapping("/{id}")

@@ -43,6 +43,7 @@ import com.devmind.session.dto.CollectResultView;
 import com.devmind.session.dto.OutputContentView;
 import com.devmind.session.dto.OutputFileView;
 import com.devmind.session.dto.RepoDiffView;
+import com.devmind.session.dto.SessionPageView;
 import com.devmind.session.dto.SessionView;
 import com.devmind.session.model.SessionEntity;
 import com.devmind.common.agent.SessionEvent;
@@ -55,6 +56,8 @@ import com.devmind.session.repo.SessionEventRepository;
 import com.devmind.session.repo.SessionRepoRepository;
 import com.devmind.session.repo.SessionRepository;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -102,6 +105,10 @@ public class SessionManagerService {
     /** CAP-68：单条消息文件附件上限（图片不限个数——附件模块本身已限单文件 20MB） */
     static final int MAX_INPUT_FILES = 5;
     static final int MAX_EVENT_LIMIT = 20_000;
+
+    /** REQ-23：列表「活跃恒在」合并的状态集（与前端 shared/chat/stateMeta 的 ACTIVE_STATES 对齐） */
+    private static final List<String> ACTIVE_LIST_STATUSES = List.of(
+            SessionState.RUNNING.name(), SessionState.WAITING_INPUT.name(), SessionState.WAITING_AUTH.name());
 
     private final IdentityService identityService;
     private final ProjectService projectService;
@@ -509,7 +516,109 @@ public class SessionManagerService {
             entities = new ArrayList<>(sessionRepo.findAll());
             entities.sort(Comparator.comparing(SessionEntity::getCreatedAt).reversed());
         }
-        // repo 名一次批量取（逐会话单查在几百个会话时是 N+1 次往返，列表轮询 3s 一次放大明显）
+        return toViews(entities);
+    }
+
+    /**
+     * REQ-23：列表分页加载（GET /api/sessions）。只取 createdAt desc 的一页（[offset, offset+limit) 窗口，
+     * 头部查询 [0, off+size+1] 多取一行判 hasMore，避免 count 查询；数据量百/千级，远好于原全量加载）。
+     *
+     * <p><b>活跃恒在</b>（R1）：无 keyword 时，scope 内的活跃会话（RUNNING/WAITING_INPUT/WAITING_AUTH）
+     * 不受 limit 约束，恒与当页窗口按 id 去重合并（活跃在前）——较老但仍在运行的会话不会被「最近 N 条」
+     * 窗口挤出轮询视野。带 keyword 时是显式搜索意图，直接对搜索结果分页、不做合并。</p>
+     *
+     * <p>status 过滤能下推 SQL 的分支（project/status 维度）走派生查询；workItem/requirement 维度
+     * 沿用既有全量查询的语义在窗口内内存过滤（offset 基于未过滤行推进，跨页完整覆盖、不重复）。</p>
+     *
+     * <p>原 {@link #list} 全量签名保留（SessionTools/finalize 预检等内部调用，R7）。</p>
+     */
+    public SessionPageView listPage(String status, String projectId, String workItemId, String requirementId,
+                                    String keyword, int limit, int offset) {
+        int size = Math.max(1, limit);
+        int off = Math.max(0, offset);
+        String kw = keyword == null || keyword.isBlank() ? null : keyword.trim();
+        String st = status == null || status.isBlank() ? null : status;
+
+        boolean statusInMemory; // status 条件未能下推到 SQL 的分支（窗口内内存过滤）
+        List<SessionEntity> fetched;
+        if (kw != null) {
+            // 关键词搜索不做活跃合并；工作单元/需求分支集合小，沿用 list(...) 的全量+内存过滤后手工分页
+            if (workItemId != null && !workItemId.isBlank()) {
+                return keywordPage(filterKeyword(sessionRepo.findByWorkItemIdOrderByCreatedAtDesc(workItemId), kw),
+                        st, off, size);
+            }
+            if (requirementId != null && !requirementId.isBlank()) {
+                return keywordPage(filterKeyword(sessionRepo.findByRequirementIdOrderByCreatedAtDesc(requirementId), kw),
+                        st, off, size);
+            }
+            fetched = sessionRepo.search(projectId == null || projectId.isBlank() ? null : projectId, kw,
+                    PageRequest.of(0, off + size + 1));
+            statusInMemory = true;
+        } else if (workItemId != null && !workItemId.isBlank()) {
+            fetched = sessionRepo.findByWorkItemIdOrderByCreatedAtDesc(workItemId, PageRequest.of(0, off + size + 1));
+            statusInMemory = true;
+        } else if (requirementId != null && !requirementId.isBlank()) {
+            fetched = sessionRepo.findByRequirementIdOrderByCreatedAtDesc(requirementId, PageRequest.of(0, off + size + 1));
+            statusInMemory = true;
+        } else if (projectId != null && !projectId.isBlank()) {
+            fetched = st != null
+                    ? sessionRepo.findByProjectIdAndStatusOrderByCreatedAtDesc(projectId, st,
+                            PageRequest.of(0, off + size + 1))
+                    : sessionRepo.findByProjectIdOrderByCreatedAtDesc(projectId, PageRequest.of(0, off + size + 1));
+            statusInMemory = false;
+        } else if (st != null) {
+            fetched = sessionRepo.findByStatusOrderByCreatedAtDesc(st, PageRequest.of(0, off + size + 1));
+            statusInMemory = false;
+        } else {
+            fetched = sessionRepo.findAll(PageRequest.of(0, off + size + 1,
+                    Sort.by(Sort.Direction.DESC, "createdAt"))).getContent();
+            statusInMemory = false;
+        }
+
+        // hasMore 基于未过滤的头部查询行数：窗口之后还有更早数据即 true
+        boolean hasMore = fetched.size() > off + size;
+        List<SessionEntity> window = fetched.stream().skip(off).limit(size).toList();
+        if (statusInMemory && st != null) {
+            window = window.stream().filter(e -> st.equals(e.getStatus())).toList();
+        }
+
+        List<SessionEntity> items = window;
+        if (kw == null) {
+            // 活跃合并：scope 内活跃会话恒在（status 过滤显式给定时活跃也受限于该状态），按 id 去重，活跃在前
+            Set<String> seen = new HashSet<>();
+            List<SessionEntity> merged = new ArrayList<>();
+            for (SessionEntity e : sessionRepo.findByStatusInOrderByCreatedAtDesc(ACTIVE_LIST_STATUSES)) {
+                if (!inListScope(e, projectId, workItemId, requirementId)) continue;
+                if (st != null && !st.equals(e.getStatus())) continue;
+                if (seen.add(e.getId())) merged.add(e);
+            }
+            for (SessionEntity e : window) {
+                if (seen.add(e.getId())) merged.add(e);
+            }
+            items = merged;
+        }
+        return new SessionPageView(toViews(items), hasMore);
+    }
+
+    /** 关键词 + 工作单元/需求分支：集合小，全量命中后 status 内存过滤再手工分页（与 list(...) 同语义） */
+    private SessionPageView keywordPage(List<SessionEntity> hits, String status, int off, int size) {
+        List<SessionEntity> filtered = hits;
+        if (status != null) {
+            filtered = hits.stream().filter(e -> status.equals(e.getStatus())).toList();
+        }
+        boolean hasMore = filtered.size() > off + size;
+        return new SessionPageView(toViews(filtered.stream().skip(off).limit(size).toList()), hasMore);
+    }
+
+    /** 活跃会话是否落在当前列表 scope 内（workItem/requirement/project 均以非空参数为准） */
+    private static boolean inListScope(SessionEntity e, String projectId, String workItemId, String requirementId) {
+        if (workItemId != null && !workItemId.isBlank() && !workItemId.equals(e.getWorkItemId())) return false;
+        if (requirementId != null && !requirementId.isBlank() && !requirementId.equals(e.getRequirementId())) return false;
+        return projectId == null || projectId.isBlank() || projectId.equals(e.getProjectId());
+    }
+
+    /** 实体批量转视图：repo 名一次批量取（逐会话单查在几百个会话时是 N+1 次往返，列表轮询 3s 一次放大明显） */
+    private List<SessionView> toViews(List<SessionEntity> entities) {
         Map<String, List<String>> namesBySession = new HashMap<>();
         if (!entities.isEmpty()) {
             List<String> ids = entities.stream().map(SessionEntity::getId).toList();

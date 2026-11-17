@@ -1,5 +1,6 @@
 // 会话列表侧栏（对话视图左栏）：新对话入口 + 搜索 + 状态筛选 + 会话列表。
-// 过滤逻辑内聚在此，外部只传原始 sessions；排序 = 活跃在前 + 创建时间倒序。
+// REQ-23：状态/关键词过滤均已服务端化（窗口化后客户端再滤会漏数据），这里只剩排序 + 「加载更多」；
+// 排序 = 活跃在前 + 创建时间倒序。
 import { useMemo } from 'react'
 import { Button, Empty, Input, List, Select, Tag, Typography, theme } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
@@ -21,6 +22,9 @@ export default function SessionListPane({
   onKeywordChange,
   refs,
   canCreate = true,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
 }: {
   sessions: SessionSummary[]
   loading: boolean
@@ -35,19 +39,21 @@ export default function SessionListPane({
   refs: SessionRefs
   /** 是否显示「新对话」入口（CAP-103 按钮权限） */
   canCreate?: boolean
+  /** REQ-23：服务端分页——终态部分还有更早数据时显示「加载更多」 */
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: () => void
 }) {
   const { token } = theme.useToken()
 
-  // 关键词过滤已下沉服务端（列表 taskSpec/summary 是截断预览，客户端再滤一遍会误杀
-  // 服务端命中但预览里没有的行）；这里只剩状态筛选 + 排序
+  // 关键词/状态过滤都已下沉服务端；这里只排序（活跃在前 + 创建时间倒序）
   const filtered = useMemo(() => {
-    const list = status === 'ALL' ? sessions : sessions.filter((s) => s.state === status)
-    return [...list].sort((a, b) => {
+    return [...sessions].sort((a, b) => {
       const aa = ACTIVE_STATES.includes(a.state) ? 0 : 1
       const bb = ACTIVE_STATES.includes(b.state) ? 0 : 1
       return aa - bb || +new Date(b.createdAt) - +new Date(a.createdAt)
     })
-  }, [sessions, status])
+  }, [sessions])
 
   return (
     <div
@@ -147,6 +153,12 @@ export default function SessionListPane({
           </div>
         )}
       />
+      {/* REQ-23：加载更多（loading 防重复点击；仅终态还有更早数据时出现） */}
+      {hasMore && onLoadMore && (
+        <Button block size="small" loading={loadingMore} onClick={onLoadMore}>
+          加载更多
+        </Button>
+      )}
     </div>
   )
 }
