@@ -1157,6 +1157,7 @@ public class RunnerWorkspace {
 
     /** 克隆缓存就位：已有 .git 直接复用；否则 clone（token 内嵌）+ 立即清 origin URL 残留 */private void ensureClone(Path cacheDir, RepoSpec spec) {
         if (Files.isDirectory(cacheDir.resolve(".git"))) {
+            ensureLongPaths(cacheDir, spec.token());
             return;
         }
         if (Files.isDirectory(cacheDir)) {
@@ -1179,9 +1180,24 @@ public class RunnerWorkspace {
         if (clone.exit() != 0) {
             throw new IllegalStateException("git clone 失败: " + tail(clone.output()));
         }
+        ensureLongPaths(cacheDir, spec.token());
         if (spec.token() != null && !spec.token().isBlank()) {
             // 防 token 残留 .git/config（CAP-23 同款）；后续 fetch/push 显式注入，不依赖 origin 凭据
             run(cacheDir, OP_TIMEOUT_SEC, spec.token(), "remote", "set-url", "origin", spec.remoteUrl());
+        }
+    }
+
+    /**
+     * 长路径兜底：缓存库统一开启 {@code core.longpaths}。Windows 上仓库存在超长路径
+     * （如 Artemis 的 lockmanager 测试文件，worktree 路径叠加后超 260）时，git 检出到
+     * 末尾报 "fatal: Could not reset index file to revision 'HEAD'"。幂等、best-effort，
+     * 非 Windows 平台 git 忽略此配置。
+     */
+    private void ensureLongPaths(Path cacheDir, String token) {
+        Result r = run(cacheDir, OP_TIMEOUT_SEC, token, "config", "core.longpaths", "true");
+        if (r.exit() != 0) {
+            log.warn("设置 core.longpaths 失败（含超长路径的仓库检出会失败）: dir={} err={}",
+                    cacheDir, tail(r.output()));
         }
     }
 

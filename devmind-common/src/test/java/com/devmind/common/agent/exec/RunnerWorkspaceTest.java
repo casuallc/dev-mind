@@ -99,6 +99,27 @@ class RunnerWorkspaceTest {
     }
 
     @Test
+    void cloneCacheEnablesLongPathsOnCloneAndRepair() throws Exception {
+        // Windows 长路径兜底：缓存库必开 core.longpaths，否则含超长路径的仓库
+        // （如 Artemis lockmanager 测试文件）worktree add 末尾报
+        // "fatal: Could not reset index file to revision 'HEAD'"
+        Path origin = tmp.resolve("origin.git");
+        seedOrigin(origin, "README.md");
+        RunnerWorkspace ws = new RunnerWorkspace(tmp.resolve("workspaces"));
+        RunnerWorkspace.RepoSpec spec = new RunnerWorkspace.RepoSpec(
+                origin.toUri().toString(), "main", "feature/s1", "");
+        RunnerWorkspace.RepoCtx ctx = ws.prepare("s1", "proj1", "alice", spec);
+        assertEquals("true", gitOut(ctx.cacheDir(), "config", "--get", "core.longpaths"),
+                "首次 clone 后必开 core.longpaths");
+
+        // 存量缓存修复路径：缓存复用时补开（覆盖修复前已克隆的存量工作区）
+        git(ctx.cacheDir(), "config", "--unset", "core.longpaths");
+        ws.prepare("s1", "proj1", "alice", spec);
+        assertEquals("true", gitOut(ctx.cacheDir(), "config", "--get", "core.longpaths"),
+                "缓存复用时补开 core.longpaths");
+    }
+
+    @Test
     void materializedPlatformFilesInvisibleToGitAndFinalizeSucceeds() throws Exception {
         // CAP-42 事故回归：平台物化产物（注入块/settings/skills/docs）落进会话 worktree 后
         // 必须对 git 完全不可见——否则挂了场景/知识的会话恒脏，零提交也收不了口
