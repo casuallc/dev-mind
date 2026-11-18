@@ -17,6 +17,7 @@ import com.devmind.integration.connector.IntegrationConnector.PriorityRef;
 import com.devmind.integration.dto.JiraAssignableUserView;
 import com.devmind.integration.dto.JiraCreateFieldView;
 import com.devmind.integration.dto.JiraCreateFieldsView;
+import com.devmind.integration.dto.JiraLinkRequest;
 import com.devmind.integration.dto.JiraOptionView;
 import com.devmind.integration.dto.JiraPushOptionsView;
 import com.devmind.integration.dto.JiraPushRequest;
@@ -73,9 +74,15 @@ public class JiraPushService {
     static final String ACTION_CREATE_ISSUE = "create_issue";
     /** integration_calls.action：按 issue 手动刷新（CAP-47 FR-05） */
     static final String ACTION_REFRESH = "jira_refresh";
+    /** integration_calls.action：手动关联已有 issue（CAP-112） */
+    static final String ACTION_LINK = "jira_link";
 
     /** 无可用写身份（个人账号与机器人凭证皆无） */
     static final String IDENTITY_NONE = "NONE";
+
+    /** CAP-112：Jira issue key 形态（项目 key-数字，如 PROJ-123；项目段允许字母/数字/下划线） */
+    private static final java.util.regex.Pattern ISSUE_KEY_PATTERN =
+            java.util.regex.Pattern.compile("^[A-Z][A-Z0-9_]*-\\d+$");
 
     private static final int MAX_SUMMARY = 255;
     private static final int MAX_BACKLINK = 512;
@@ -610,6 +617,140 @@ public class JiraPushService {
         // FR-04：只转托管，不套用托管字段（见类注释）
         requirementService.markPushedToJira(projectId, requirement.getId(), ref.key());
         return new PushOutcome(ref, issue, readbackError);
+    }
+
+    // ---------------- CAP-112 手动关联已有 issue ----------------
+
+    /**
+     * CAP-112：把 LOCAL 需求关联到**已存在**的 Jira issue。终态与推送完全一致
+     * （一条 REQUIREMENT↔ISSUE link + 需求转 Jira 托管），与 {@link #push} 共用同一组守卫与并发边界
+     * （{@code synchronized} 挡需求级并发，{@link JiraWriteGuard} 挡与同步导入的竞态）。
+     *
+     * <p>差别只有「issue 不是本次创建的」，因此多两道处理：
+     * <ol>
+     *   <li>关联前回读 issue——不存在/不可读直接透原始错误（key 打错是最常见的失败，fail-visible）；</li>
+     *   <li>关联即托管：立即套用托管字段（{@code syncFromJira} 一步置 source=JIRA + externalKey +
+     *       刷新标题/描述/类型/优先级等）——用户选的就是 Jira 上已有的 issue，其字段值才是权威
+     *       （弹窗已显著警示本地字段将被覆盖）。</li>
+     * </ol>
+     */
+    public synchronized JiraPushResultView link(String projectId, String requirementId, JiraLinkRequest req) {
+        RequirementEntity requirement = requirementService.requireEntity(projectId, requirementId);
+        // 幂等检查先于来源守卫（与 push 同口径：重复点击要看到既有 key，而不是「已是 JIRA 来源」）
+        Optional<ExternalLinkEntity> linked = linkRepo
+                .findFirstByProjectIdAndInternalTypeAndInternalIdAndExternalTypeOrderByIdDesc(
+                        projectId, ExternalLinkEntity.INTERNAL_REQUIREMENT, requirementId,
+                        ExternalLinkEntity.EXTERNAL_ISSUE);
+        if (linked.isPresent() || requirement.getExternalKey() != null) {
+            String key = linked.map(ExternalLinkEntity::getExternalKey).orElse(requirement.getExternalKey());
+            throw new DevMindException(ErrorCode.CONFLICT, "需求已关联 Jira issue: " + key);
+        }
+        if (!RequirementEntity.SOURCE_LOCAL.equals(requirement.getSource())) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "需求已是 " + requirement.getSource() + " 来源（Jira 托管），无需关联: " + requirementId);
+        }
+        IntegrationEntity integration = requireJira(req.integrationId());
+        String issueKey = normalizeIssueKey(req.issueKey());
+        // CAP-35 身份链（与推送同通道）：个人账号 → 机器人凭证 → 400 引导绑定
+        IntegrationService.WriteIdentity identity =
+                integrationService.resolveWriteIdentity(identityService.currentActor(), integration);
+        String token = identity.secret();
+        JiraIssue issue;
+        try {
+            issue = connector().getIssue(integration, token, issueKey, JiraSyncService.ISSUE_FIELDS);
+        } catch (RuntimeException e) {
+            integrationService.recordCall(integration.getId(), ACTION_LINK,
+                    ExternalLinkEntity.INTERNAL_REQUIREMENT, requirementId, false, e.getMessage());
+            throw e;
+        }
+        if (issue == null || blank(issue.key())) {
+            String msg = "Jira issue 不存在或不可读: " + issueKey;
+            integrationService.recordCall(integration.getId(), ACTION_LINK,
+                    ExternalLinkEntity.INTERNAL_REQUIREMENT, requirementId, false, msg);
+            throw new DevMindException(ErrorCode.NOT_FOUND, msg);
+        }
+        try {
+            writeGuard.call(() -> {
+                linkExisting(projectId, requirement, integration, issue);
+                return null;
+            });
+        } catch (RuntimeException e) {
+            integrationService.recordCall(integration.getId(), ACTION_LINK,
+                    ExternalLinkEntity.INTERNAL_REQUIREMENT, requirementId, false, e.getMessage());
+            throw e;
+        }
+        integrationService.recordCall(integration.getId(), ACTION_LINK,
+                ExternalLinkEntity.INTERNAL_REQUIREMENT, requirementId, true, null);
+        auditService.record("integration", ACTION_LINK, identityService.currentActor(), projectId, true,
+                "[#" + integration.getId() + "] " + issue.key() + " 关联到需求 " + requirementId
+                        + "（身份 " + identity.source() + "）");
+        eventPublisher.publish(SimpleDomainEvent.of("integration.jira.linked", projectId, null,
+                identityService.currentActor(),
+                "需求 " + code(requirement.getSeq()) + " 已关联 Jira issue " + issue.key(),
+                "REQUIREMENT", requirementId, true));
+        log.info("需求已关联 Jira issue: requirement={} code={} key={} identity={}",
+                requirementId, code(requirement.getSeq()), issue.key(), identity.source());
+        return new JiraPushResultView(issue.key(), JiraSyncService.browseUrl(integration, issue.key()),
+                issue.status(), issue.issueType(),
+                syncCovered(projectId, integration.getId(), projectKeyOf(issue.key()), issue.key()));
+    }
+
+    /**
+     * 持锁段：跨需求去重 → 登记 link → 转托管并套用托管字段。
+     * 同 key 已关联到**已删除**需求的残留 link（删除时清理漏网/历史脏数据）就地清掉再继续——
+     * 与同步导入侧的自愈（{@link JiraSyncService#upsertIssue}）同口径；指向存活需求则 409。
+     */
+    private void linkExisting(String projectId, RequirementEntity requirement,
+                              IntegrationEntity integration, JiraIssue issue) {
+        Optional<ExternalLinkEntity> occupied = linkRepo
+                .findFirstByIntegrationIdAndExternalTypeAndExternalKeyOrderByIdDesc(
+                        integration.getId(), ExternalLinkEntity.EXTERNAL_ISSUE, issue.key());
+        if (occupied.isPresent()) {
+            ExternalLinkEntity existing = occupied.get();
+            boolean alive = true;
+            try {
+                requirementService.requireById(existing.getInternalId());
+            } catch (DevMindException e) {
+                if (e.getErrorCode() != ErrorCode.NOT_FOUND) {
+                    throw e;
+                }
+                alive = false;
+            }
+            if (alive) {
+                throw new DevMindException(ErrorCode.CONFLICT,
+                        "Jira issue " + issue.key() + " 已关联需求 " + existing.getInternalId());
+            }
+            log.info("Jira issue {} 的残留 link（指向已删需求 {}）已清理，继续关联",
+                    issue.key(), existing.getInternalId());
+            linkRepo.delete(existing);
+        }
+        ExternalLinkEntity link = new ExternalLinkEntity();
+        link.setProjectId(projectId);
+        link.setIntegrationId(integration.getId());
+        link.setInternalType(ExternalLinkEntity.INTERNAL_REQUIREMENT);
+        link.setInternalId(requirement.getId());
+        link.setExternalType(ExternalLinkEntity.EXTERNAL_ISSUE);
+        link.setExternalKey(issue.key());
+        link.setExternalUrl(JiraSyncService.browseUrl(integration, issue.key()));
+        link.setStatus(issue.status());
+        link.setCreatedAt(Instant.now());
+        linkRepo.save(link);
+        // 关联即托管：source=JIRA + externalKey + 托管字段立即以 Jira 值刷新（一步完成）
+        requirementService.syncFromJira(projectId, requirement.getId(), JiraSyncService.managedFields(issue));
+    }
+
+    /** issueKey 归一化与形态校验（trim + 大写）；非法格式 400 并给出示例 */
+    static String normalizeIssueKey(String raw) {
+        String key = trimToNull(raw);
+        if (key == null) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "issueKey 不能为空（Jira issue key，如 PROJ-123）");
+        }
+        key = key.toUpperCase(Locale.ROOT);
+        if (!ISSUE_KEY_PATTERN.matcher(key).matches()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "非法 Jira issue key: " + raw + "（格式为 项目key-数字，如 PROJ-123）");
+        }
+        return key;
     }
 
     // ---------------- FR-05 按 issue 手动刷新 ----------------

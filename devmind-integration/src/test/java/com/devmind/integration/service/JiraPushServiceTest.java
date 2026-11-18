@@ -24,6 +24,7 @@ import com.devmind.integration.connector.IntegrationConnector.UserRef;
 import com.devmind.integration.dto.JiraAssignableUserView;
 import com.devmind.integration.dto.JiraCreateFieldView;
 import com.devmind.integration.dto.JiraCreateFieldsView;
+import com.devmind.integration.dto.JiraLinkRequest;
 import com.devmind.integration.dto.JiraOptionView;
 import com.devmind.integration.dto.JiraPushOptionsView;
 import com.devmind.integration.dto.JiraPushRequest;
@@ -213,7 +214,18 @@ class JiraPushServiceTest {
             syncedFields.add(f);
             e.setSource(RequirementEntity.SOURCE_JIRA);
             e.setTitle(f.title());
+            e.setExternalKey(f.externalKey());
             return null;
+        }
+
+        /** CAP-112 跨需求去重的存活探针：只按 id 查，不存在即 NOT_FOUND（与真实实现同口径） */
+        @Override
+        public RequirementEntity requireById(String requirementId) {
+            RequirementEntity e = store.get(requirementId);
+            if (e == null) {
+                throw new DevMindException(ErrorCode.NOT_FOUND, "需求不存在: " + requirementId);
+            }
+            return e;
         }
     }
 
@@ -305,6 +317,10 @@ class JiraPushServiceTest {
                 }
                 linkStore.put(link.getExternalKey(), link);
                 yield link;
+            }
+            case "delete" -> {
+                linkStore.values().removeIf(l -> l.getId().equals(((ExternalLinkEntity) args[0]).getId()));
+                yield null;
             }
             default -> throw new UnsupportedOperationException(m.getName());
         });
@@ -797,6 +813,134 @@ class JiraPushServiceTest {
 
         assertEquals("Open", linkStore.get("PROJ-123").getStatus());
         assertEquals(List.of("jira_refresh:false"), integrationService.calls);
+    }
+
+    // ---------------- CAP-112 手动关联已有 issue ----------------
+
+    @Test
+    void 关联成功登记link并转托管套用托管字段() {
+        JiraPushResultView result = service.link("p1", "req-local", new JiraLinkRequest(7L, " proj-123 "));
+
+        // key 归一化（trim + 大写），回读的权威 key 落库
+        assertEquals("PROJ-123", result.externalKey());
+        assertEquals("http://jira.local/browse/PROJ-123", result.externalUrl());
+        assertEquals("待处理", result.remoteStatus());
+        assertEquals("需求", result.issueType());
+        assertFalse(result.syncCovered());
+
+        ExternalLinkEntity link = linkStore.get("PROJ-123");
+        assertNotNull(link);
+        assertEquals("req-local", link.getInternalId());
+        assertEquals("http://jira.local/browse/PROJ-123", link.getExternalUrl());
+        assertEquals("待处理", link.getStatus());
+
+        // 关联即托管：source=JIRA + externalKey + 托管字段立即以 Jira 值刷新（与推送不同，标题被覆盖）
+        RequirementEntity stored = requirementService.store.get("req-local");
+        assertEquals(RequirementEntity.SOURCE_JIRA, stored.getSource());
+        assertEquals("PROJ-123", stored.getExternalKey());
+        assertEquals("支持导出对账单", stored.getTitle());
+        assertEquals(1, requirementService.syncedFields.size());
+
+        assertEquals(List.of("jira_link:true"), integrationService.calls);
+        assertEquals("integration.jira.linked", eventPublisher.events.get(0).type());
+        assertTrue(((SimpleDomainEvent) eventPublisher.events.get(0)).success());
+    }
+
+    @Test
+    void 已关联issue时重复关联409且不写任何状态() {
+        link("p1", "req-local", "PROJ-123");
+        requirementService.store.get("req-local").setExternalKey("PROJ-123");
+
+        DevMindException e = assertThrows(DevMindException.class,
+                () -> service.link("p1", "req-local", new JiraLinkRequest(7L, "PROJ-456")));
+
+        assertEquals(ErrorCode.CONFLICT, e.getErrorCode());
+        assertTrue(e.getMessage().contains("PROJ-123"));   // 报既有 key（幂等口径同推送）
+        assertEquals(1, linkStore.size());
+        assertTrue(integrationService.calls.isEmpty());
+        assertTrue(eventPublisher.events.isEmpty());
+    }
+
+    @Test
+    void 非自建需求拒绝关联() {
+        DevMindException e = assertThrows(DevMindException.class,
+                () -> service.link("p1", "req-jira", new JiraLinkRequest(7L, "PROJ-123")));
+
+        assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
+        assertTrue(linkStore.isEmpty());
+    }
+
+    @Test
+    void 非法issueKey直接400带格式示例() {
+        for (String bad : new String[]{null, " ", "abc", "123-4", "PROJ-", "PROJ-abc"}) {
+            DevMindException e = assertThrows(DevMindException.class,
+                    () -> service.link("p1", "req-local", new JiraLinkRequest(7L, bad)));
+            assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
+        }
+        assertTrue(linkStore.isEmpty());
+        assertTrue(integrationService.calls.isEmpty());   // 没碰远端，不上报调用
+    }
+
+    @Test
+    void issue不存在报404且不落本地状态() {
+        connector.readback = null;
+
+        DevMindException e = assertThrows(DevMindException.class,
+                () -> service.link("p1", "req-local", new JiraLinkRequest(7L, "PROJ-999")));
+
+        assertEquals(ErrorCode.NOT_FOUND, e.getErrorCode());
+        assertTrue(e.getMessage().contains("PROJ-999"));
+        assertTrue(linkStore.isEmpty());
+        RequirementEntity stored = requirementService.store.get("req-local");
+        assertEquals(RequirementEntity.SOURCE_LOCAL, stored.getSource());
+        assertNull(stored.getExternalKey());
+        assertEquals(List.of("jira_link:false"), integrationService.calls);
+    }
+
+    @Test
+    void 回读抛错原样透出且不写任何状态() {
+        connector.readbackFails = true;
+
+        DevMindException e = assertThrows(DevMindException.class,
+                () -> service.link("p1", "req-local", new JiraLinkRequest(7L, "PROJ-123")));
+
+        assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());   // 原始错误原样透传（fail-visible）
+        assertTrue(e.getMessage().contains("HTTP 500"));
+        assertTrue(linkStore.isEmpty());
+        assertEquals(List.of("jira_link:false"), integrationService.calls);
+    }
+
+    @Test
+    void 同一key已关联其他存活需求时409() {
+        requirementService.add("req-other", "p1", RequirementEntity.SOURCE_JIRA, 3);
+        link("p1", "req-other", "PROJ-123");
+
+        DevMindException e = assertThrows(DevMindException.class,
+                () -> service.link("p1", "req-local", new JiraLinkRequest(7L, "PROJ-123")));
+
+        assertEquals(ErrorCode.CONFLICT, e.getErrorCode());
+        assertTrue(e.getMessage().contains("req-other"));
+        // 既有 link 未被改写，目标需求未转托管
+        assertEquals("req-other", linkStore.get("PROJ-123").getInternalId());
+        RequirementEntity stored = requirementService.store.get("req-local");
+        assertEquals(RequirementEntity.SOURCE_LOCAL, stored.getSource());
+        assertNull(stored.getExternalKey());
+        assertEquals(List.of("jira_link:false"), integrationService.calls);
+    }
+
+    @Test
+    void 残留link指向已删需求时清理后关联成功() {
+        // 历史脏数据：需求已删但 link 残留（删除时清理漏网）——就地清掉继续关联
+        ExternalLinkEntity stale = link("p1", "req-deleted", "PROJ-123");
+
+        JiraPushResultView result = service.link("p1", "req-local", new JiraLinkRequest(7L, "PROJ-123"));
+
+        assertEquals("PROJ-123", result.externalKey());
+        ExternalLinkEntity link = linkStore.get("PROJ-123");
+        assertNotNull(link);
+        assertEquals("req-local", link.getInternalId());
+        assertFalse(link.getId().equals(stale.getId()));   // 旧 link 已删，登记的是新行
+        assertEquals(RequirementEntity.SOURCE_JIRA, requirementService.store.get("req-local").getSource());
     }
 
     // ---------------- FR-08 动态必填字段 ----------------
