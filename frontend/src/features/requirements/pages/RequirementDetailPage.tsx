@@ -33,6 +33,7 @@ import {
   CloudUploadOutlined,
   DownOutlined,
   EditOutlined,
+  LinkOutlined,
   LockOutlined,
   PlayCircleOutlined,
   ProfileOutlined,
@@ -55,6 +56,7 @@ import {
 } from '../api'
 import JiraActions from '../components/JiraActions'
 import JiraDescription from '../components/JiraDescription'
+import JiraLinkModal from '../components/JiraLinkModal'
 import JiraPushDrawer from '../components/JiraPushDrawer'
 import RequirementAttachmentPanel from '../components/RequirementAttachmentPanel'
 import AnalysisTab from '../components/flow/AnalysisTab'
@@ -170,6 +172,7 @@ export default function RequirementDetailPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [propsOpen, setPropsOpen] = useState(false)
   const [pushOpen, setPushOpen] = useState(false)
+  const [linkOpen, setLinkOpen] = useState(false)
   const [refreshingJira, setRefreshingJira] = useState(false)
   const [designs, setDesigns] = useState<Design[]>([])
   // 附件 Tab 计数（面板加载/增删后回调上抛；null=未加载过，标签不显示计数）
@@ -551,17 +554,30 @@ export default function RequirementDetailPage() {
             )}
             <Button icon={<ProfileOutlined />} onClick={() => setPropsOpen(true)}>属性</Button>
             {!isJira && canPushJira && (
-              <Tooltip title={terminal ? '需求已完结（DONE/CANCELLED），不可推送' : undefined}>
-                <span>
-                  <Button
-                    icon={<CloudUploadOutlined />}
-                    disabled={terminal}
-                    onClick={() => setPushOpen(true)}
-                  >
-                    推送到 Jira
-                  </Button>
-                </span>
-              </Tooltip>
+              <>
+                <Tooltip title={terminal ? '需求已完结（DONE/CANCELLED），不可推送' : undefined}>
+                  <span>
+                    <Button
+                      icon={<CloudUploadOutlined />}
+                      disabled={terminal}
+                      onClick={() => setPushOpen(true)}
+                    >
+                      推送到 Jira
+                    </Button>
+                  </span>
+                </Tooltip>
+                <Tooltip title={terminal ? '需求已完结（DONE/CANCELLED），不可关联' : undefined}>
+                  <span>
+                    <Button
+                      icon={<LinkOutlined />}
+                      disabled={terminal}
+                      onClick={() => setLinkOpen(true)}
+                    >
+                      关联 Jira
+                    </Button>
+                  </span>
+                </Tooltip>
+              </>
             )}
             {isJira && <JiraActions requirement={r} onChanged={reloadOverview} />}
             <Button icon={<ReloadOutlined />} onClick={reloadOverview}>刷新</Button>
@@ -768,6 +784,16 @@ export default function RequirementDetailPage() {
           open={pushOpen}
           onClose={() => setPushOpen(false)}
           onPushed={reloadAll}
+        />
+      )}
+
+      {/* CAP-112：关联已有 Jira issue（成功后同样转 JIRA 托管，入口由「Jira 操作」接管） */}
+      {!isJira && (
+        <JiraLinkModal
+          requirement={r}
+          open={linkOpen}
+          onClose={() => setLinkOpen(false)}
+          onLinked={reloadAll}
         />
       )}
 
