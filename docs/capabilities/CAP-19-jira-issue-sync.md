@@ -97,6 +97,12 @@ JiraSyncService ──→ Requirement（DRAFT，标题 [PROJ-123] summary）
 - **全量重拉而非增量水印**（2026-09 口径调整）：过滤条件就是配置里看得见的
   project + 附加 JQL，行为可预期、可用预览试算；幂等由 external_links 兜住，
   单轮限页防爆量。
+- **删除 ≠ 屏蔽（REQ-27，2026-11 口径）**：Jira 来源需求被删除后，其 issue 仍在
+  JQL 匹配集内——下一轮同步会**重新导入**为新需求。配套两处保证：
+  删除时监听 `RequirementDeletedEvent` 清掉该需求的 external_links（不再产生残留）；
+  同步侧 upsert 命中残留 link（删除清理漏网/历史脏数据）时探活发现需求已删，
+  即清残留并按无 link 路径重新导入（计 IMPORTED）。要**停同步**某 issue，
+  调整同步配置的附加 JQL 把它排除，而不是删需求。
 - **自动开发触发 = 人工确认**（本期口径）：导入的 DRAFT 需求与手工创建的需求在流程上
   完全同构，FlowActions 链路零改动。后续可加"满足条件（如 label=auto-fix 的 Bug）
   自动进分析"的策略开关。
@@ -114,6 +120,7 @@ JiraSyncService ──→ Requirement（DRAFT，标题 [PROJ-123] summary）
 | 测试连接 401/403 | 凭据失效或权限不足。Jira Server 8.14+ 用 Bearer PAT；**8.13 及更早无 PAT**，认证方式选「用户名 + 密码」（Basic Auth，均非 Cloud 的 email+token） |
 | 同步 0 条但 Jira 有 issue | 检查附加 JQL 是否过严（表单内预览可实时试算命中数）；单轮限 20 页，量大时多跑几轮 |
 | 重复导入 | 不应发生：幂等键 = (integration_id, ISSUE, issue key)；查 external_links |
+| 删掉的需求又被同步导回来 | 设计口径（REQ-27）：删除 ≠ 屏蔽，issue 仍在 JQL 匹配集内就会重新导入；要停同步，在同步配置的附加 JQL 里排除该 issue |
 | 需求没被 Jira 更新刷新 | 看配置 lastError 与链接 status；托管字段每轮无条件刷新 |
 | 轮询没跑 | 配置 enabled=false / 间隔未到（看 lastSyncAt + pollIntervalSec）/ lastError |
 | 详情页没有「Jira 操作」按钮 | 非 Jira 来源 / 未关联 issue（查 external_links）/ 集成禁用 / 无可用转换或权限不足（静默降级，查集成调用审计 jira_transition） |
