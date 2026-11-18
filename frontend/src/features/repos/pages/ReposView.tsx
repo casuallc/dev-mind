@@ -43,7 +43,7 @@ export default function ReposView({
   const [status, setStatus] = useState('ALL')
   const [editTarget, setEditTarget] = useState<GitRepo | null>(null)
   const [editOpen, setEditOpen] = useState(false)
-  // CAP-109 提交历史抽屉
+  // CAP-111 提交日志抽屉
   const [commitsTarget, setCommitsTarget] = useState<GitRepo | null>(null)
   const [commitsOpen, setCommitsOpen] = useState(false)
   const [integrationOptions, setIntegrationOptions] = useState<{ value: number; label: string }[]>([])
@@ -267,7 +267,7 @@ export default function ReposView({
             width: 280,
             render: (_, r) => (
               <Space>
-                {/* CAP-109：提交历史查看（全认证用户可读，后端 GET 无 ADMIN 约束） */}
+                {/* CAP-111：提交日志查看（全认证用户可读，后端 GET 无 ADMIN 约束） */}
                 <Button
                   size="small"
                   onClick={() => {
@@ -275,7 +275,7 @@ export default function ReposView({
                     setCommitsOpen(true)
                   }}
                 >
-                  提交
+                  提交日志
                 </Button>
                 {canManage && r.sourceType === 'CLONE' && r.cloneStatus === 'READY' && (
                   <Button size="small" onClick={() => onFetch(r)}>
