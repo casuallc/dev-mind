@@ -3,6 +3,8 @@ import io
 import os
 import shutil
 import signal
+import socket
+import sys
 import unittest
 import urllib.parse
 import uuid
@@ -1560,6 +1562,145 @@ exit 1
         # 删除 → 再删 404
         self.api.request("DELETE", f"/security/intel/{cve}")
         self.api.request("DELETE", f"/security/intel/{cve}", expected=404)
+
+    # ---------------- CAP-112 Jira 手动关联 + REQ-27 同步自愈（jira-mock） ----------------
+
+    def _start_jira_mock(self):
+        """起 fixtures/jira-mock.py（随机空端口），就绪后轮候返回其 Api 客户端；随用例清理杀进程树。"""
+        from support import Api
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        log = (self.workspace / "jira-mock.log").open("w", encoding="utf-8")
+        proc = subprocess.Popen([sys.executable, str(ROOT / "tests" / "fixtures" / "jira-mock.py"),
+                                 str(port)], stdout=log, stderr=subprocess.STDOUT,
+                                start_new_session=os.name != "nt")
+
+        def stop():
+            try:
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
+                else:
+                    try:
+                        os.killpg(proc.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            finally:
+                log.close()
+
+        self.addCleanup(stop)
+        client = Api(f"http://127.0.0.1:{port}")
+        deadline = time.monotonic() + 30
+        while True:
+            self.assertIsNone(proc.poll(), "jira-mock exited before ready; see jira-mock.log")
+            try:
+                client.request("GET", "/rest/api/2/myself")
+                return client
+            except (OSError, AssertionError):
+                self.assertLess(time.monotonic(), deadline, "jira-mock not ready in 30s")
+                time.sleep(0.2)
+
+    @staticmethod
+    def _jira_create_issue(mock, summary, description="", priority=None):
+        fields = {"project": {"key": "PROJ"}, "issuetype": {"id": "10001"},
+                  "summary": summary, "description": description}
+        if priority:
+            fields["priority"] = {"name": priority}
+        return mock.request("POST", "/rest/api/2/issue", {"fields": fields}, expected=201)["key"]
+
+    def test_jira_manual_link_and_sync_reimport(self):
+        # CAP-112 M1：LOCAL 需求手动关联已有 Jira issue——关联即托管（标题/描述等被 Jira 值
+        # 覆盖、source 翻 JIRA），与推送/同步终态一致；幂等 409 / 非法 key 400 / issue 不存在 404 /
+        # 跨需求同 key 409。REQ-27：删除 Jira 来源需求后下一轮同步经残留清理重新导入为新需求
+        # （删除 ≠ 屏蔽）；enabled=False 的配置不进调度 tick，手动 run 不受其影响。
+        mock = self._start_jira_mock()
+        project_id = self._cap104_project()
+        integration = self.api.request("POST", "/integrations", {
+            "type": "JIRA", "name": "e2e-jira-" + uuid.uuid4().hex[:8],
+            "baseUrl": mock.base, "authType": "PAT", "token": "e2e-jira-token"})
+        integration_id = integration["id"]
+
+        summary = "e2e 关联目标：对账单导出"
+        key = self._jira_create_issue(mock, summary, "Jira 原文描述", "High")
+        self.assertEqual("PROJ-101", key, "jira-mock 序号从 101 起")
+
+        def new_requirement(title):
+            return self.api.request("POST", f"/projects/{project_id}/requirements",
+                                    {"title": title, "description": "本地描述"})["id"]
+
+        rid_a, rid_b, rid_c = (new_requirement("e2e 待关联 " + tag) for tag in "ABC")
+
+        def link(rid, issue_key, expected=200):
+            return self.api.request(
+                "POST", f"/projects/{project_id}/requirements/{rid}/jira/link",
+                {"integrationId": integration_id, "issueKey": issue_key}, expected=expected)
+
+        # 关联成功：issueKey 归一化（小写 + 空白）、登记 link、转 Jira 托管并立即套用托管字段
+        linked = link(rid_a, " proj-1 ")
+        self.assertEqual(key, linked["externalKey"])
+        view = self.api.request("GET", f"/projects/{project_id}/requirements/{rid_a}")
+        self.assertEqual("JIRA", view["source"])
+        self.assertEqual(key, view["externalKey"])
+        self.assertEqual(summary, view["title"], "关联即托管：标题应被 Jira summary 覆盖")
+        self.assertEqual("Jira 原文描述", view["description"])
+        self.assertTrue(view["externalUrl"].endswith("/browse/" + key))
+        self.assertEqual("To Do", view["remoteStatus"])
+
+        # 详情页「Jira 操作」入口的数据源（关联后可用）
+        transitions = self.api.request(
+            "GET", f"/projects/{project_id}/requirements/{rid_a}/jira/transitions")
+        self.assertIsInstance(transitions, list)
+        self.assertTrue(transitions, "已关联 issue 的可用转换不应为空")
+
+        # 护栏：重复关联 409；同一 key 已挂其他存活需求 409；非法 key 400（不发起远端调用）；
+        # issue 不存在 → 连接器统一包装 BAD_REQUEST 透出 Jira 原文（含 HTTP 404），失败均不落本地状态
+        link(rid_a, key, expected=409)
+        link(rid_b, key, expected=409)
+        link(rid_b, "abc", expected=400)
+        link(rid_c, "PROJ-999", expected=400)
+        for rid in (rid_b, rid_c):
+            untouched = self.api.request("GET", f"/projects/{project_id}/requirements/{rid}")
+            self.assertEqual("LOCAL", untouched["source"])
+            self.assertFalse(untouched.get("externalKey"))
+
+        # 同步：已关联的 issue 不重复建需求（updated=1）；新 issue 导入为新需求（imported=1）
+        cfg = self.api.request("POST", f"/projects/{project_id}/jira-sync", {
+            "integrationId": integration_id, "jiraProjectKey": "PROJ",
+            "enabled": False, "pollIntervalSec": 300})
+        cfg_path = f"/projects/{project_id}/jira-sync/{cfg['id']}"
+        self.addCleanup(self.api.request, "DELETE", cfg_path)
+        run1 = self.api.request("POST", cfg_path + "/run")
+        self.assertFalse(run1.get("error"))
+        self.assertEqual(0, run1["imported"], run1)
+        self.assertEqual(1, run1["updated"], run1)
+
+        key2 = self._jira_create_issue(mock, "e2e 同步导入的需求", "由同步导入", "Medium")
+        run2 = self.api.request("POST", cfg_path + "/run")
+        self.assertEqual(1, run2["imported"], run2)
+
+        def linked_ids(external_key):
+            links = self.api.request(
+                "GET", f"/projects/{project_id}/external-links?internalType=REQUIREMENT")
+            return [row["internalId"] for row in links if row.get("externalKey") == external_key]
+
+        imported_ids = linked_ids(key2)
+        self.assertEqual(1, len(imported_ids), "同步导入应登记 REQUIREMENT↔ISSUE link")
+        imported_view = self.api.request(
+            "GET", f"/projects/{project_id}/requirements/{imported_ids[0]}")
+        self.assertEqual("JIRA", imported_view["source"])
+        self.assertEqual("e2e 同步导入的需求", imported_view["title"])
+
+        # REQ-27：删除该需求 → 下轮同步自愈重新导入为新需求（新 id，删除 ≠ 屏蔽）
+        self.api.request("DELETE", f"/projects/{project_id}/requirements/{imported_ids[0]}")
+        self.assertEqual([], linked_ids(key2), "删除需求应连带清掉其 external_links")
+        run3 = self.api.request("POST", cfg_path + "/run")
+        self.assertEqual(1, run3["imported"], run3)
+        reimported_ids = linked_ids(key2)
+        self.assertEqual(1, len(reimported_ids))
+        self.assertNotEqual(imported_ids[0], reimported_ids[0])
 
 
 class CopilotContract(unittest.TestCase):
