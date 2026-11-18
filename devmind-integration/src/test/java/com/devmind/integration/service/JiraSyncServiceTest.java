@@ -91,6 +91,8 @@ class JiraSyncServiceTest {
     static class FakeRequirementService extends RequirementService {
         final Map<String, RequirementEntity> store = new HashMap<>();
         private int seq = 0;
+        /** REQ-27：探活失败钩子（非 NOT_FOUND 异常路径用，如可用性抖动） */
+        DevMindException requireByIdFailure;
 
         FakeRequirementService() {
             super(null, null, null, null, null, null, null, null, null, null, null);
@@ -141,6 +143,19 @@ class JiraSyncServiceTest {
         public RequirementEntity requireEntity(String projectId, String requirementId) {
             RequirementEntity e = store.get(requirementId);
             if (e == null || !projectId.equals(e.getProjectId())) {
+                throw new DevMindException(ErrorCode.NOT_FOUND, "需求不存在: " + requirementId);
+            }
+            return e;
+        }
+
+        /** REQ-27 自愈探针：只按 id 查，不存在即 NOT_FOUND（与真实实现同口径）；可注入其他异常 */
+        @Override
+        public RequirementEntity requireById(String requirementId) {
+            if (requireByIdFailure != null) {
+                throw requireByIdFailure;
+            }
+            RequirementEntity e = store.get(requirementId);
+            if (e == null) {
                 throw new DevMindException(ErrorCode.NOT_FOUND, "需求不存在: " + requirementId);
             }
             return e;
@@ -236,6 +251,10 @@ class JiraSyncServiceTest {
                         }
                         linkStore.put(link.getExternalKey(), link);
                         yield link;
+                    }
+                    case "delete" -> {
+                        linkStore.values().removeIf(l -> l.getId().equals(((ExternalLinkEntity) args[0]).getId()));
+                        yield null;
                     }
                     default -> throw new UnsupportedOperationException(m.getName());
                 });
@@ -437,5 +456,54 @@ class JiraSyncServiceTest {
         connector.pages.add(page(0, 1, issue("PROJ-9", "长".repeat(300), T1)));
         service.doSync(1L);
         assertEquals(240, requirementService.store.get("req-1").getTitle().length());
+    }
+
+    // ---------------- REQ-27 残留 link 自愈（需求已删 → 重新导入） ----------------
+
+    /** 造一条指向不存在需求的残留 link（删除时清理漏网/历史脏数据） */
+    private ExternalLinkEntity staleLink(String internalId, String key) {
+        ExternalLinkEntity link = new ExternalLinkEntity();
+        link.setId(99L);
+        link.setProjectId("p1");
+        link.setIntegrationId(7L);
+        link.setInternalType(ExternalLinkEntity.INTERNAL_REQUIREMENT);
+        link.setInternalId(internalId);
+        link.setExternalType(ExternalLinkEntity.EXTERNAL_ISSUE);
+        link.setExternalKey(key);
+        linkStore.put(key, link);
+        return link;
+    }
+
+    @Test
+    void 残留link指向已删需求时清理并重新导入() {
+        staleLink("req-deleted", "PROJ-1");
+        connector.pages.add(page(0, 1, issue("PROJ-1", "登录页报错", T1)));
+
+        JiraSyncRunView result = service.doSync(1L);
+
+        assertEquals(1, result.imported());     // 不是 SKIPPED——重新导入为新需求
+        assertEquals(0, result.skipped());
+        ExternalLinkEntity link = linkStore.get("PROJ-1");
+        assertNotNull(link);
+        assertEquals("req-1", link.getInternalId());   // 新 link 指向新需求
+        assertEquals(1L, link.getId());                // 旧残留行(id=99)已删，登记的是新行
+        assertEquals("PROJ-1", requirementService.store.get("req-1").getExternalKey());
+    }
+
+    @Test
+    void 探活非NOT_FOUND异常仍SKIPPED且link保留() {
+        connector.pages.add(page(0, 1, issue("PROJ-1", "登录页报错", T1)));
+        service.doSync(1L);   // 首轮正常导入 req-1
+        // 第二轮探活撞可用性抖动（非 NOT_FOUND）：维持原语义——保留 link 追溯，不重建
+        requirementService.requireByIdFailure = new DevMindException(ErrorCode.INTERNAL, "数据库抖动");
+        connector.pages.add(page(0, 1, issue("PROJ-1", "登录页报错", T1)));
+
+        JiraSyncRunView result = service.doSync(1L);
+
+        assertEquals(0, result.imported());
+        assertEquals(0, result.updated());
+        assertEquals(1, result.skipped());
+        assertEquals("req-1", linkStore.get("PROJ-1").getInternalId());   // link 未被删
+        assertEquals(1, requirementService.store.size());                 // 没有重复建需求
     }
 }

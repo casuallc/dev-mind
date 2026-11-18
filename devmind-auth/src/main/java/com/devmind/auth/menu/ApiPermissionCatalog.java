@@ -300,6 +300,7 @@ public final class ApiPermissionCatalog {
             rule("POST", "/api/projects/*/requirements/*/jira/resolve", "project.requirements.action.push-jira"),
             rule("POST", "/api/projects/*/requirements/*/jira/push", "project.requirements.action.push-jira"),
             rule("POST", "/api/projects/*/requirements/*/jira/refresh", "project.requirements.action.push-jira"),
+            rule("POST", "/api/projects/*/requirements/*/jira/link", "project.requirements.action.push-jira"),
             rule("POST", "/api/projects/*/requirements/*/verify", "project.requirements.action.verify"),
             rule("POST", "/api/projects/*/relations", "project.requirements.action.manage"),
             rule("DELETE", "/api/projects/*/relations/*", "project.requirements.action.manage"),

@@ -228,6 +228,18 @@ export function refreshRequirementFromJira(
   )
 }
 
+/** CAP-112：把 LOCAL 需求关联到已存在的 Jira issue（登记 link + 转 Jira 托管并立即套用托管字段，不可撤销） */
+export function linkJiraIssue(
+  projectId: string,
+  requirementId: string,
+  input: { integrationId: number; issueKey: string },
+): Promise<JiraPushResult> {
+  return api.post<JiraPushResult>(
+    `/projects/${projectId}/requirements/${requirementId}/jira/link`,
+    input,
+  )
+}
+
 // ---- CAP-73 需求开发中验证 ----
 
 /** 人工触发「立即验证」；force=true 跳过无新提交判定（修复环境后重试用） */

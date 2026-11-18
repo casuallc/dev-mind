@@ -3,6 +3,7 @@ package com.devmind.integration.controller;
 import com.devmind.integration.connector.IntegrationConnector;
 import com.devmind.integration.dto.JiraAssignableUserView;
 import com.devmind.integration.dto.JiraCreateFieldsView;
+import com.devmind.integration.dto.JiraLinkRequest;
 import com.devmind.integration.dto.JiraPushOptionsView;
 import com.devmind.integration.dto.JiraPushRequest;
 import com.devmind.integration.dto.JiraPushResultView;
@@ -127,6 +128,13 @@ public class ProjectJiraIssueController {
     @PostMapping("/refresh")
     public JiraPushResultView refresh(@PathVariable String pid, @PathVariable String rid) {
         return pushService.refresh(pid, rid);
+    }
+
+    /** CAP-112：关联已有 Jira issue（登记 link + 转 Jira 托管并立即套用托管字段），幂等冲突报 409 */
+    @PostMapping("/link")
+    public JiraPushResultView link(@PathVariable String pid, @PathVariable String rid,
+                                   @RequestBody JiraLinkRequest req) {
+        return pushService.link(pid, rid, req);
     }
 
     /**
