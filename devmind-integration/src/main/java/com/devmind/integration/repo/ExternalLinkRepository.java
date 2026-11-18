@@ -28,4 +28,8 @@ public interface ExternalLinkRepository extends JpaRepository<ExternalLinkEntity
 
     /** 项目内某类内部实体的全部外部链接（如项目所有 REQUIREMENT ↔ ISSUE 映射） */
     List<ExternalLinkEntity> findByProjectIdAndInternalType(String projectId, String internalType);
+
+    /** 删除时清理：某内部实体的全部外部关联（REQ-27，需求删除事件监听用；派生 delete 需事务上下文，
+     *  RequirementService.delete 是 @Transactional 且事件同步发布于提交前，监听器复用调用方事务） */
+    void deleteByInternalTypeAndInternalId(String internalType, String internalId);
 }

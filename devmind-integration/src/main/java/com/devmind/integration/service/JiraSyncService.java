@@ -307,34 +307,54 @@ public class JiraSyncService {
                 .findFirstByIntegrationIdAndExternalTypeAndExternalKeyOrderByIdDesc(
                         integration.getId(), ExternalLinkEntity.EXTERNAL_ISSUE, issue.key());
         if (existing.isEmpty()) {
-            RequirementView req = requirementService.createFromJira(cfg.getProjectId(), managedFields(issue));
-            ExternalLinkEntity link = new ExternalLinkEntity();
-            link.setProjectId(cfg.getProjectId());
-            link.setIntegrationId(integration.getId());
-            link.setInternalType(ExternalLinkEntity.INTERNAL_REQUIREMENT);
-            link.setInternalId(req.id());
-            link.setExternalType(ExternalLinkEntity.EXTERNAL_ISSUE);
-            link.setExternalKey(issue.key());
-            link.setExternalUrl(browseUrl(integration, issue.key()));
-            link.setStatus(issue.status());
-            link.setCreatedAt(Instant.now());
-            linkRepo.save(link);
-            return UpsertOutcome.IMPORTED;
+            return importNew(cfg, integration, issue);
         }
         ExternalLinkEntity link = existing.get();
         link.setStatus(issue.status());
         linkRepo.save(link);
         // Jira 托管字段始终随同步刷新（本地只读无冲突）；本地字段 status/ownerId/docId 不动
         if (ExternalLinkEntity.INTERNAL_REQUIREMENT.equals(link.getInternalType())) {
+            // REQ-27 自愈：link 指向的需求可能已被删除（删除时清理漏网/历史脏数据）——
+            // 「残留 link 命中幂等 → syncFromJira 抛 NOT_FOUND → 永远 SKIPPED」是已实锤的死角。
+            // 探活命中已删即清残留、按无 link 路径重新导入（删除 ≠ 屏蔽；要停同步调附加 JQL）。
+            try {
+                requirementService.requireById(link.getInternalId());
+            } catch (DevMindException e) {
+                if (e.getErrorCode() == ErrorCode.NOT_FOUND) {
+                    log.info("Jira issue {} 的残留 link（指向已删需求 {}）已清理，重新导入",
+                            issue.key(), link.getInternalId());
+                    linkRepo.delete(link);
+                    return importNew(cfg, integration, issue);
+                }
+                // 其他异常（可用性抖动等）：保留 link 追溯，维持原 SKIPPED 语义
+                log.info("Jira issue {} 对应需求不可用（{}），跳过刷新", issue.key(), e.getMessage());
+                return UpsertOutcome.SKIPPED;
+            }
             try {
                 requirementService.syncFromJira(cfg.getProjectId(), link.getInternalId(), managedFields(issue));
                 return UpsertOutcome.UPDATED;
             } catch (DevMindException e) {
-                // 需求已删除等：保留 link 追溯，不再重建
                 log.info("Jira issue {} 对应需求不可用（{}），跳过刷新", issue.key(), e.getMessage());
             }
         }
         return UpsertOutcome.SKIPPED;
+    }
+
+    /** 无 link 路径：建需求 + 登记 link（REQ-27 自愈重导入与首次导入共用） */
+    private UpsertOutcome importNew(JiraSyncConfigEntity cfg, IntegrationEntity integration, JiraIssue issue) {
+        RequirementView req = requirementService.createFromJira(cfg.getProjectId(), managedFields(issue));
+        ExternalLinkEntity link = new ExternalLinkEntity();
+        link.setProjectId(cfg.getProjectId());
+        link.setIntegrationId(integration.getId());
+        link.setInternalType(ExternalLinkEntity.INTERNAL_REQUIREMENT);
+        link.setInternalId(req.id());
+        link.setExternalType(ExternalLinkEntity.EXTERNAL_ISSUE);
+        link.setExternalKey(issue.key());
+        link.setExternalUrl(browseUrl(integration, issue.key()));
+        link.setStatus(issue.status());
+        link.setCreatedAt(Instant.now());
+        linkRepo.save(link);
+        return UpsertOutcome.IMPORTED;
     }
 
     /** issue → 托管字段包（标题=summary 原文、描述=Jira 原文，无前缀无尾注——元信息全部进列；
