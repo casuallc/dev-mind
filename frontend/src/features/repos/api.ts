@@ -1,6 +1,12 @@
 // CAP-29 全局代码仓库登记 API（/api/repos，写操作仅 ADMIN）
 import { api } from '../../shared/api/client'
-import type { GitRepo, GitRepoPayload, RepoCommitView } from './types'
+import type {
+  GitRepo,
+  GitRepoPayload,
+  PageViewResult,
+  RepoCommitDetail,
+  RepoCommitView,
+} from './types'
 
 /** CAP-109：keyword 匹配名称/远端/本地路径（后端 DB lower like）；status 可选 ACTIVE/DISABLED */
 export const listRepos = (keyword?: string, status?: string) => {
@@ -19,16 +25,24 @@ export const fetchRepo = (id: number) => api.post(`/repos/${id}/fetch`)
 /** 克隆失败重试 / 强制重新克隆（CLONE 行） */
 export const recloneRepo = (id: number) => api.post(`/repos/${id}/clone`)
 
-// ---------------- CAP-109 提交历史 / 分支切换 ----------------
+// ---------------- CAP-111 提交日志（搜索 / 详情 / 服务端分页） ----------------
 
-/** 分支提交历史：branch 缺省 = 仓库默认分支；limit 缺省 30（后端硬上限 200） */
-export const listRepoCommits = (id: number, branch?: string, limit?: number) => {
+/**
+ * 分支提交日志：branch 缺省 = 仓库默认分支；keyword 匹配提交信息（包含）或提交哈希（前缀）；
+ * page 从 0 起，size 默认 20（后端硬上限 100）。
+ */
+export const listRepoCommits = (
+  id: number,
+  opts: { branch?: string; keyword?: string; page?: number; size?: number } = {},
+) => {
   const params = new URLSearchParams()
-  if (branch) params.set('branch', branch)
-  if (limit) params.set('limit', String(limit))
+  if (opts.branch) params.set('branch', opts.branch)
+  if (opts.keyword) params.set('keyword', opts.keyword)
+  if (opts.page != null) params.set('page', String(opts.page))
+  if (opts.size != null) params.set('size', String(opts.size))
   const q = params.toString()
-  return api.get<RepoCommitView[]>(`/repos/${id}/commits${q ? `?${q}` : ''}`)
+  return api.get<PageViewResult<RepoCommitView>>(`/repos/${id}/commits${q ? `?${q}` : ''}`)
 }
-/** 切换服务端克隆的本地检出分支（仅 CLONE + READY） */
-export const checkoutRepo = (id: number, branch: string) =>
-  api.post(`/repos/${id}/checkout`, { branch })
+/** 提交详情：完整提交信息 + 变更文件清单 */
+export const getRepoCommit = (id: number, sha: string) =>
+  api.get<RepoCommitDetail>(`/repos/${id}/commits/${sha}`)

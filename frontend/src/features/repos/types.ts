@@ -47,3 +47,29 @@ export interface RepoCommitView {
   time: string
   subject: string
 }
+
+/** CAP-111 FR-05 分页视图（对应后端 common PageView；page 从 0 起） */
+export interface PageViewResult<T> {
+  items: T[]
+  total: number
+  page: number
+  size: number
+}
+
+/** CAP-111 FR-04 变更文件（status 为 git name-status 原始值 A/M/D/R100/C…） */
+export interface RepoCommitFile {
+  status: string
+  path: string
+  oldPath?: string | null
+}
+
+/** CAP-111 FR-04 提交详情（对应后端 RepoCommitDetailView） */
+export interface RepoCommitDetail {
+  sha: string
+  authorName: string
+  authorEmail: string
+  time: string
+  subject: string
+  body: string
+  files: RepoCommitFile[]
+}

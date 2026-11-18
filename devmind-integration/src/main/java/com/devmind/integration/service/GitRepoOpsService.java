@@ -1,8 +1,10 @@
 package com.devmind.integration.service;
 
+import com.devmind.common.dto.PageView;
 import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.util.GitCli;
+import com.devmind.integration.dto.RepoCommitDetailView;
 import com.devmind.integration.dto.RepoCommitView;
 import com.devmind.project.model.GitRepositoryEntity;
 import com.devmind.project.repo.GitRepositoryRepository;
@@ -12,25 +14,31 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.regex.Pattern;
 
 /**
- * CAP-109 FR-04/05 代码库 git 只读操作与分支切换：
+ * CAP-111 代码库提交日志只读操作（CAP-109 FR-04 演进；FR-05 分支切换已下线）：
  * <ul>
- *   <li>提交历史：git log（%x1f 字段分隔，同 GitLogScanner 口径），branch 走实体分支白名单
- *       防注入，limit 默认 30 硬上限 200；</li>
- *   <li>分支切换：仅 CLONE 且 READY 行，{@code checkout -B <branch> origin/<branch>} 对齐远端。
- *       <b>副作用提示（CAP-109 R1）</b>：该克隆目录被会话 diff / 工时扫描共用，切分支会改变
- *       工作区内容，相关消费方读到的是切换后的分支代码；LOCAL 行不替用户动本地工作区（400）。</li>
+ *   <li>提交日志：git log（%x1f 字段分隔，同 GitLogScanner 口径），branch 走实体分支白名单
+ *       防注入；服务端分页（page 从 0 起，size 默认 20 硬上限 100）——无关键字时
+ *       {@code rev-list --count} 求总数 + {@code --skip/-n} 取页；有关键字时全量拉取内存
+ *       过滤（subject 忽略大小写包含 / sha 忽略大小写前缀），因 git --grep 盖不住哈希维度；</li>
+ *   <li>提交详情：{@code git show --no-patch} 取元信息+正文，{@code git show --name-status -z
+ *       --first-parent} 取变更文件（NUL 分隔机读，merge 提交按第一父 diff）；sha 参数
+ *       走 ^[0-9a-fA-F]{4,40}$ 白名单防注入。</li>
  * </ul>
  */
 @Service
 public class GitRepoOpsService {
 
-    private static final int DEFAULT_LIMIT = 30;
-    private static final int MAX_LIMIT = 200;
+    private static final int DEFAULT_SIZE = 20;
+    private static final int MAX_SIZE = 100;
     private static final int GIT_TIMEOUT_SEC = 30;
     /** git log %x1f 字段分隔符（0x1f 单元分隔符） */
     private static final String FIELD_SEP = String.valueOf((char) 0x1f);
+    /** 提交哈希白名单（完整或前缀，防 git 参数注入） */
+    private static final Pattern SHA_PATTERN = Pattern.compile("^[0-9a-fA-F]{4,40}$");
 
     private final GitRepositoryRepository gitRepoRepo;
 
@@ -38,29 +46,117 @@ public class GitRepoOpsService {
         this.gitRepoRepo = gitRepoRepo;
     }
 
-    // ---------------- 提交历史 ----------------
+    // ---------------- 提交日志 ----------------
 
     /**
-     * 分支提交历史：branch 缺省用实体默认分支（再缺省 HEAD）；显式传入必须在实体
-     * 分支列表白名单内（防 git 参数注入），否则 400。
+     * 分支提交日志分页：branch 缺省用实体默认分支（再缺省 HEAD）；显式传入必须在实体
+     * 分支列表白名单内（防 git 参数注入），否则 400。keyword 匹配提交信息（忽略大小写
+     * 包含）或提交哈希（忽略大小写前缀）。
      */
-    public List<RepoCommitView> listCommits(Long id, String branch, Integer limit) {
+    public PageView<RepoCommitView> listCommits(Long id, String branch, String keyword,
+                                                Integer page, Integer size) {
         GitRepositoryEntity repo = requireRepo(id);
         Path path = requireGitDir(repo);
         String ref = resolveBranch(repo, branch);
         String logRef = ref == null ? null : resolveExistingRef(path, ref);
-        int n = limit == null || limit <= 0 ? DEFAULT_LIMIT : Math.min(limit, MAX_LIMIT);
+        int p = page == null || page < 0 ? 0 : page;
+        int s = size == null || size <= 0 ? DEFAULT_SIZE : Math.min(size, MAX_SIZE);
+        String kw = keyword == null ? "" : keyword.strip().toLowerCase(Locale.ROOT);
+        if (kw.isEmpty()) {
+            long total = countCommits(path, logRef);
+            List<String> args = logArgs(logRef);
+            args.add("--skip=" + ((long) p * s));
+            args.add("-n");
+            args.add(String.valueOf(s));
+            GitCli.Result r = GitCli.run(path, GIT_TIMEOUT_SEC, args.toArray(new String[0]));
+            GitCli.requireOk(r, List.of("git", "log", logRef == null ? "HEAD" : logRef));
+            return new PageView<>(parseCommits(r.out()), total, p, s);
+        }
+        // 关键字过滤：全量 log 内存过滤后切片（--grep 只匹配提交信息，盖不住 sha 维度）
+        GitCli.Result r = GitCli.run(path, GIT_TIMEOUT_SEC,
+                logArgs(logRef).toArray(new String[0]));
+        GitCli.requireOk(r, List.of("git", "log", logRef == null ? "HEAD" : logRef));
+        List<RepoCommitView> matched = parseCommits(r.out()).stream()
+                .filter(c -> c.subject().toLowerCase(Locale.ROOT).contains(kw)
+                        || c.sha().toLowerCase(Locale.ROOT).startsWith(kw))
+                .toList();
+        int from = Math.min((int) Math.min((long) p * s, Integer.MAX_VALUE), matched.size());
+        int to = Math.min(from + s, matched.size());
+        return new PageView<>(matched.subList(from, to), matched.size(), p, s);
+    }
+
+    /** git log 公共参数：ref（可空=HEAD）+ %x1f 五段格式 + 统一时间格式。 */
+    private static List<String> logArgs(String logRef) {
         List<String> args = new ArrayList<>(List.of("git", "log"));
         if (logRef != null) {
             args.add(logRef);
         }
         args.add("--format=%H%x1f%an%x1f%ae%x1f%ad%x1f%s");
         args.add("--date=format:%Y-%m-%d %H:%M:%S");
-        args.add("-n");
-        args.add(String.valueOf(n));
+        return args;
+    }
+
+    /** 分支提交总数（无关键字分页用）：git rev-list --count <ref|HEAD>。 */
+    private static long countCommits(Path path, String logRef) {
+        List<String> args = List.of("git", "rev-list", "--count", logRef == null ? "HEAD" : logRef);
         GitCli.Result r = GitCli.run(path, GIT_TIMEOUT_SEC, args.toArray(new String[0]));
-        GitCli.requireOk(r, List.of("git", "log", logRef == null ? "HEAD" : logRef));
-        return parseCommits(r.out());
+        GitCli.requireOk(r, args);
+        return Long.parseLong(r.out().strip());
+    }
+
+    // ---------------- 提交详情 ----------------
+
+    /** 提交详情：完整元信息+正文+变更文件；sha 白名单校验，不存在/无法解析 400。 */
+    public RepoCommitDetailView commitDetail(Long id, String sha) {
+        GitRepositoryEntity repo = requireRepo(id);
+        Path path = requireGitDir(repo);
+        String s = sha == null ? "" : sha.strip();
+        if (!SHA_PATTERN.matcher(s).matches()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "非法提交哈希: " + s);
+        }
+        GitCli.Result meta = GitCli.run(path, GIT_TIMEOUT_SEC,
+                "git", "show", "--no-patch", "--date=format:%Y-%m-%d %H:%M:%S",
+                "--format=%H%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%b", s);
+        GitCli.requireOk(meta, List.of("git", "show", s));
+        String[] f = meta.out().split(FIELD_SEP, 6);
+        if (f.length < 6) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "提交不存在或无法解析: " + s);
+        }
+        GitCli.Result files = GitCli.run(path, GIT_TIMEOUT_SEC,
+                "git", "show", "--format=", "--name-status", "-z", "--first-parent", s);
+        GitCli.requireOk(files, List.of("git", "show", s));
+        return new RepoCommitDetailView(f[0], f[1], f[2], f[3], f[4], f[5].strip(),
+                parseNameStatus(files.out()));
+    }
+
+    /**
+     * name-status -z 输出机读解析：普通状态「M\0path\0」，改名/复制「R100\0old\0new\0」。
+     * Java split 默认丢弃尾部空串，故末个 NUL 后无残留空 token。
+     */
+    private static List<RepoCommitDetailView.FileChange> parseNameStatus(String out) {
+        List<RepoCommitDetailView.FileChange> rows = new ArrayList<>();
+        String[] tokens = out.split("\0");
+        for (int i = 0; i < tokens.length; i++) {
+            String status = tokens[i];
+            if (status.isBlank()) {
+                continue;
+            }
+            char kind = status.charAt(0);
+            if (kind == 'R' || kind == 'C') {
+                if (i + 2 >= tokens.length) {
+                    break;
+                }
+                rows.add(new RepoCommitDetailView.FileChange(status, tokens[i + 2], tokens[i + 1]));
+                i += 2;
+            } else {
+                if (i + 1 >= tokens.length) {
+                    break;
+                }
+                rows.add(new RepoCommitDetailView.FileChange(status, tokens[i + 1], null));
+                i += 1;
+            }
+        }
+        return rows;
     }
 
     /**
@@ -96,36 +192,6 @@ public class GitRepoOpsService {
             rows.add(new RepoCommitView(f[0], f[1], f[2], f[3], f[4]));
         }
         return rows;
-    }
-
-    // ---------------- 分支切换 ----------------
-
-    /**
-     * 切换服务端克隆的本地检出分支并对齐远端：仅 CLONE + READY；branch 必填且须在
-     * 实体分支白名单内。克隆目录被会话 diff / 工时扫描共用，切分支是全局可见副作用。
-     */
-    public void checkout(Long id, String branch) {
-        GitRepositoryEntity repo = requireRepo(id);
-        if (!GitRepositoryEntity.SOURCE_CLONE.equals(repo.getSourceType())) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST,
-                    "本地路径仓库不支持平台切换分支（平台不替用户改本地工作区）: " + id);
-        }
-        if (!GitRepositoryEntity.CLONE_READY.equals(repo.getCloneStatus())) {
-            throw new DevMindException(ErrorCode.CONFLICT,
-                    "仓库克隆未就绪（" + repo.getCloneStatus() + "），请先克隆成功: " + id);
-        }
-        String b = branch == null ? "" : branch.strip();
-        if (b.isEmpty()) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "branch 不能为空");
-        }
-        if (!branchesOf(repo).contains(b)) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST,
-                    "分支不在仓库分支列表中（请先抓取刷新分支）: " + b);
-        }
-        Path path = requireGitDir(repo);
-        GitCli.Result r = GitCli.run(path, GIT_TIMEOUT_SEC,
-                "git", "checkout", "-B", b, "origin/" + b);
-        GitCli.requireOk(r, List.of("git", "checkout", b));
     }
 
     // ---------------- 内部 ----------------
