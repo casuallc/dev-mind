@@ -865,7 +865,18 @@ public class RequirementFlowService {
         }
     }
 
-    /** 解析 wi-plan.json（容忍 ```json 代码围栏包裹）；解析失败返回空列表。 */
+    /**
+     * 解析 wi-plan.json（容忍 ```json 代码围栏包裹）。
+     *
+     * <p>支持两种结构：
+     * <ul>
+     *   <li>标准数组：{@code [{"type":"...","title":"...","spec":"...","dependsOn":[0]}]}</li>
+     *   <li>对象封装：{@code {"workUnits":[ {"id":"WI-92-01","title":"...","description":"...",
+     *       "scope":{...},"tasks":[],"acceptance":[],"dependencies":["WI-92-01"]} ]}}
+     *       （常见于外部模型生成的工作单元清单）</li>
+     * </ul>
+     * 解析失败返回空列表。
+     */
     private List<SplitDraftItem> parseWiPlan(String json) {
         if (json == null) {
             return List.of();
@@ -875,30 +886,137 @@ public class RequirementFlowService {
             if (json.startsWith("```")) {
                 json = json.replaceAll("^```(json)?\\s*", "").replaceAll("```\\s*$", "").trim();
             }
-            JsonNode arr = mapper.readTree(json);
-            if (!arr.isArray()) {
+            JsonNode root = mapper.readTree(json);
+            JsonNode arr = root.isArray() ? root : root.get("workUnits");
+            if (arr == null || !arr.isArray()) {
                 return List.of();
             }
-            List<SplitDraftItem> items = new ArrayList<>();
-            for (JsonNode n : arr) {
-                List<Integer> deps = new ArrayList<>();
-                JsonNode dn = n.get("dependsOn");
-                if (dn != null && dn.isArray()) {
-                    for (JsonNode d : dn) {
-                        deps.add(d.asInt());
-                    }
+            List<PlanNode> nodes = new ArrayList<>();
+            for (int i = 0; i < arr.size(); i++) {
+                nodes.add(parsePlanNode(arr.get(i)));
+            }
+            Map<String, Integer> indexOf = new HashMap<>();
+            for (int i = 0; i < nodes.size(); i++) {
+                String id = nodes.get(i).id();
+                if (id != null && !id.isBlank()) {
+                    indexOf.putIfAbsent(id, i);
                 }
-                items.add(new SplitDraftItem(
-                        n.hasNonNull("type") ? n.get("type").asText() : WorkItemEntity.TYPE_DEVELOPMENT,
-                        n.hasNonNull("title") ? n.get("title").asText() : "",
-                        n.hasNonNull("spec") ? n.get("spec").asText() : "",
-                        deps));
+            }
+            List<SplitDraftItem> items = new ArrayList<>();
+            for (int i = 0; i < nodes.size(); i++) {
+                PlanNode n = nodes.get(i);
+                items.add(new SplitDraftItem(n.type(), n.title(), n.spec(),
+                        resolveDependencies(n.dependencies(), i, indexOf)));
             }
             return items;
+        } catch (DevMindException e) {
+            // 业务错误（如依赖 id 不存在）需要透传，让调用方拿到明确文案
+            throw e;
         } catch (Exception e) {
             log.warn("解析拆分草稿失败: err={}", e.getMessage());
             return List.of();
         }
+    }
+
+    /** 单个清单节点的中间表示（兼容标准数组与对象封装两种字段集）。 */
+    private record PlanNode(String id, String type, String title, String spec,
+                            List<Object> dependencies) {
+    }
+
+    private PlanNode parsePlanNode(JsonNode n) {
+        String id = text(n, "id", null);
+        String title = text(n, "title", "");
+        String type = text(n, "type", WorkItemEntity.TYPE_DEVELOPMENT);
+        String spec = text(n, "spec", null);
+        if (spec == null) {
+            spec = buildSpecFromWorkUnit(n);
+        }
+        List<Object> deps = new ArrayList<>();
+        JsonNode dn = n.get("dependsOn");
+        if (dn == null) {
+            dn = n.get("dependencies");
+        }
+        if (dn != null && dn.isArray()) {
+            for (JsonNode d : dn) {
+                if (d.isInt()) {
+                    deps.add(d.asInt());
+                } else {
+                    deps.add(d.asText());
+                }
+            }
+        }
+        return new PlanNode(id, type, title, spec, deps);
+    }
+
+    private String text(JsonNode n, String field, String fallback) {
+        return n.hasNonNull(field) ? n.get(field).asText() : fallback;
+    }
+
+    /** 从对象封装格式的 description/scope/tasks/acceptance 组合成 spec。 */
+    private String buildSpecFromWorkUnit(JsonNode n) {
+        StringBuilder sb = new StringBuilder();
+        String description = text(n, "description", null);
+        if (description != null && !description.isBlank()) {
+            sb.append(description.trim()).append("\n\n");
+        }
+        JsonNode scope = n.get("scope");
+        if (scope != null && !scope.isEmpty()) {
+            sb.append("## 范围\n\n");
+            if (scope.hasNonNull("modules") && scope.get("modules").isArray()) {
+                sb.append("模块：");
+                List<String> modules = new ArrayList<>();
+                for (JsonNode m : scope.get("modules")) modules.add(m.asText());
+                sb.append(String.join("、", modules)).append("\n\n");
+            }
+            if (scope.hasNonNull("files") && scope.get("files").isArray()) {
+                sb.append("涉及文件：\n");
+                for (JsonNode f : scope.get("files")) sb.append("- ").append(f.asText()).append("\n");
+                sb.append("\n");
+            }
+        }
+        JsonNode tasks = n.get("tasks");
+        if (tasks != null && tasks.isArray() && tasks.size() > 0) {
+            sb.append("## 任务\n\n");
+            for (JsonNode t : tasks) sb.append("- ").append(t.asText()).append("\n");
+            sb.append("\n");
+        }
+        JsonNode acceptance = n.get("acceptance");
+        if (acceptance != null && acceptance.isArray() && acceptance.size() > 0) {
+            sb.append("## 验收标准\n\n");
+            for (JsonNode a : acceptance) sb.append("- ").append(a.asText()).append("\n");
+            sb.append("\n");
+        }
+        JsonNode notes = n.get("notes");
+        if (notes != null && notes.isArray() && notes.size() > 0) {
+            sb.append("## 备注\n\n");
+            for (JsonNode note : notes) sb.append("- ").append(note.asText()).append("\n");
+        }
+        return sb.toString().trim();
+    }
+
+    /**
+     * 把依赖声明解析为清单内下标：整数直接作为下标；字符串 id 通过 indexOf 映射；
+     * 未找到 id 时抛出 BAD_REQUEST（让调用方拿到明确错误）。
+     */
+    private List<Integer> resolveDependencies(List<Object> deps, int selfIndex,
+                                                  Map<String, Integer> indexOf) {
+        if (deps == null || deps.isEmpty()) {
+            return List.of();
+        }
+        List<Integer> out = new ArrayList<>();
+        for (Object d : deps) {
+            if (d instanceof Integer idx) {
+                out.add(idx);
+            } else if (d instanceof String s) {
+                Integer idx = indexOf.get(s);
+                if (idx == null) {
+                    throw new DevMindException(ErrorCode.BAD_REQUEST,
+                            "依赖 id \"" + s + "\" 不在本清单内");
+                }
+                out.add(idx);
+            }
+        }
+        return out;
     }
 
     private void notify(NotificationLevel level, String type, String title, String body,
