@@ -1037,11 +1037,58 @@ class RequirementFlowServiceTest {
     }
 
     @Test
-    void 导入wiPlan_空清单报400() {
+    void 导入wiPlan_支持对象封装格式含scope与tasks() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+
+        var result = service.importWiPlan("p1", "r1", """
+                {
+                  "version": "1.0",
+                  "requirement": "REQ-92 集群支持滚动升级和回滚",
+                  "workUnits": [
+                    {
+                      "id": "WI-92-01",
+                      "title": "滚动升级/回滚公共后端框架",
+                      "description": "搭建集群滚动升级与回滚的通用能力。",
+                      "scope": {"modules": ["admq-core-deploy"], "files": ["a.java"]},
+                      "tasks": ["扩展枚举", "实现 Service"],
+                      "acceptance": ["单测通过"],
+                      "dependencies": []
+                    },
+                    {
+                      "id": "WI-92-02",
+                      "title": "Kafka 滚动升级与回滚实现",
+                      "description": "实现 Kafka 升级。",
+                      "tasks": ["实现 KafkaDeployer"],
+                      "acceptance": ["集成测试通过"],
+                      "dependencies": ["WI-92-01"]
+                    }
+                  ]
+                }
+                """);
+
+        assertEquals(2, result.count());
+        List<WorkItemView> items = workItemService.list("p1", "r1");
+        assertEquals("滚动升级/回滚公共后端框架", items.get(0).title());
+        assertEquals("Kafka 滚动升级与回滚实现", items.get(1).title());
+        // spec 由 description/scope/tasks/acceptance 组装
+        assertTrue(items.get(0).spec().contains("## 范围"));
+        assertTrue(items.get(0).spec().contains("扩展枚举"));
+        assertTrue(items.get(0).spec().contains("单测通过"));
+        // 字符串 id 依赖映射为下标
+        assertEquals(1, relationService.created.size());
+        assertEquals(items.get(1).id(), relationService.created.get(0).fromId());
+        assertEquals(items.get(0).id(), relationService.created.get(0).toId());
+    }
+
+    @Test
+    void 导入wiPlan_对象封装中依赖id不存在报400() {
         requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
 
         DevMindException e = assertThrows(DevMindException.class,
-                () -> service.importWiPlan("p1", "r1", "[]"));
+                () -> service.importWiPlan("p1", "r1", """
+                        {"workUnits":[{"id":"WI-1","title":"A","description":"a","dependencies":["WI-NOT-EXIST"]}]}
+                        """));
         assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
+        assertTrue(e.getMessage().contains("WI-NOT-EXIST"));
     }
 }
