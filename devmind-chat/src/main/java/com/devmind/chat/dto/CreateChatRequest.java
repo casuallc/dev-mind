@@ -22,19 +22,30 @@ import java.util.List;
  * @param knowledgeBaseIds CAP-84 FR-16：多库绑定（最多 5 个）；非空即知识会话，仅支持 MODEL 执行体
  * @param knowledgeMode   CAP-84 FR-17：ANSWER（默认）| SOLUTION；仅知识会话有效
  * @param knowledgeOptions CAP-84 FR-16：检索过滤与引用要求（可空）
+ * @param images          CAP-32 FR-10：首条消息携带的图片附件引用（可空）；仅 AGENT 执行体
+ *                        支持——首条改经 input 帧下发（launch 帧无图片通道，runner 启动准备
+ *                        窗口缓冲 stdin、拉起后按序补写），MODEL 执行体传入即 400
  */
 public record CreateChatRequest(@NotBlank(message = "首条消息不能为空") String message,
                                 String model, String permissionMode, String agentNodeId,
                                 String scenarioCode, Long knowledgeBaseId,
                                 String executor, Long modelEndpointId,
                                 List<Long> knowledgeBaseIds, String knowledgeMode,
-                                KnowledgeOptions knowledgeOptions) {
+                                KnowledgeOptions knowledgeOptions, List<ImageRef> images) {
+
+    /** 兼容构造器：CAP-84 调用点（知识会话全维度，无图片）。 */
+    public CreateChatRequest(String message, String model, String permissionMode, String agentNodeId,
+                             String scenarioCode, Long knowledgeBaseId, String executor, Long modelEndpointId,
+                             List<Long> knowledgeBaseIds, String knowledgeMode, KnowledgeOptions knowledgeOptions) {
+        this(message, model, permissionMode, agentNodeId, scenarioCode, knowledgeBaseId,
+                executor, modelEndpointId, knowledgeBaseIds, knowledgeMode, knowledgeOptions, null);
+    }
 
     /** 兼容构造器：CAP-49 调用点（单库兼容字段，无执行体维度 = AGENT）。 */
     public CreateChatRequest(String message, String model, String permissionMode, String agentNodeId,
                              String scenarioCode, Long knowledgeBaseId, String executor, Long modelEndpointId) {
         this(message, model, permissionMode, agentNodeId, scenarioCode, knowledgeBaseId,
-                executor, modelEndpointId, null, null, null);
+                executor, modelEndpointId, null, null, null, null);
     }
 
     /** 兼容构造器：CAP-33/46 调用点（无执行体维度 = AGENT）。 */

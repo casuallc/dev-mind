@@ -681,6 +681,55 @@ class ChatManagerServiceTest {
     }
 
     @Test
+    void 首条带图问答_空taskSpec_launch_首条经input帧下发_事件带附件引用() throws Exception {
+        // CAP-32 FR-10：换上装配了附件解析的服务（att-1 → 任意字节即视为图片内容）
+        com.devmind.common.attachment.AttachmentContentResolver resolver = attachmentId ->
+                "att-1".equals(attachmentId)
+                        ? Optional.of(new com.devmind.common.attachment.AttachmentContentResolver.ResolvedAttachment(
+                                "att-1", "image/png", new byte[]{1, 2, 3}, "a.png"))
+                        : Optional.empty();
+        service.shutdown();
+        service = new ChatManagerService(fakeIdentity(), (NotificationEvent e) -> { },
+                chats.jpa(), events.jpa(), saver, props, JsonMapper.builder().build(),
+                objectProviderOf(runner), objectProviderOf(resolver), emptyObjectProvider(),
+                emptyObjectProvider(), objectProviderOf(endpoints), emptyObjectProvider(),
+                refService, feedbackService);
+
+        ChatView v = service.create(new CreateChatRequest("首条带图提问", null, null, NODE, null, null,
+                null, null, null, null, null, List.of(new ImageRef("att-1", "a.png", "image/png"))));
+        assertEquals(SessionState.RUNNING.name(), v.status());
+        // launch 帧没有图片通道：带图首条以空 taskSpec launch，图文合一经 input 帧下发
+        assertEquals("", runner.lastLaunch.taskSpec());
+        await("首条经 input 帧到达 fake-agent", () -> events.store.stream()
+                .anyMatch(e -> e.getContent() != null && e.getContent().contains("收到：首条带图提问")));
+        // 开场气泡 = 用户原始输入，payload 带附件引用（不含 base64）
+        await("user 事件落库", () -> events.store.stream().anyMatch(e ->
+                "user".equals(e.getType()) && "首条带图提问".equals(e.getContent())));
+        ChatEventEntity userEv = events.store.stream()
+                .filter(e -> "user".equals(e.getType()) && "首条带图提问".equals(e.getContent()))
+                .findFirst().orElseThrow();
+        assertTrue(userEv.getPayload() != null && userEv.getPayload().contains("att-1"),
+                "user 事件 payload 应带附件引用");
+        service.kill(v.id());
+    }
+
+    @Test
+    void 首条带图但附件模块未装配时报错不建会话() {
+        assertThrows(com.devmind.common.exception.DevMindException.class,
+                () -> service.create(new CreateChatRequest("看图", null, null, NODE, null, null,
+                        null, null, null, null, null, List.of(new ImageRef("att-x", "a.png", "image/png")))));
+        assertTrue(chats.store.isEmpty(), "带图创建失败不应落库");
+        assertNull(runner.lastLaunch, "带图创建失败不应 launch");
+    }
+
+    @Test
+    void 模型执行体带图创建报400() {
+        assertThrows(com.devmind.common.exception.DevMindException.class,
+                () -> service.create(new CreateChatRequest("x", null, null, null, null, null,
+                        "MODEL", null, null, null, null, List.of(new ImageRef("att-1", "a.png", "image/png")))));
+    }
+
+    @Test
     void 强杀标记终止并清沙箱() throws Exception {
         ChatView v = service.create(new CreateChatRequest("测试 kill", "", "", NODE));
         Path sandbox = sandboxRoot.resolve(v.id());

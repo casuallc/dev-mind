@@ -344,12 +344,16 @@ public class ChatManagerService {
         }
 
         RemoteSessionRuntime remoteRt = new RemoteSessionRuntime(id, agentNodeId, connector, eventSaver, listener, settings);
+        // CAP-32 FR-10：首条带图——launch 帧无图片通道，先解析附件（失败即创建失败，不留半拉子
+        // 运行时），再以空 taskSpec launch、首条经 input 帧下发（runner 启动窗口缓冲 stdin 保序）
+        List<InputImage> initialImages = resolveImages(req.images());
+        boolean firstTurnImages = !initialImages.isEmpty();
         // 先注册再 launch：ack 之后 runner 事件即刻上行，注册晚于 ack 会丢开头事件
         runtimes.put(id, remoteRt);
         try {
             // kind="chat"：runner 用 <workspaceRoot>/_chat/<sid> 沙箱，无 clone/push 语义
             connector.launch(agentNodeId, new AgentLaunchCommand(
-                    id, null, launchPrompt, model, pm, Map.of(), null, "chat", null, manifest));
+                    id, null, firstTurnImages ? "" : launchPrompt, model, pm, Map.of(), null, "chat", null, manifest));
         } catch (Exception e) {
             runtimes.remove(id);
             if (e instanceof DevMindException de) {
@@ -378,8 +382,14 @@ public class ChatManagerService {
         ent.setUpdatedAt(now);
         chatRepo.save(ent);
 
-        // 首条提问随 launch 作初始 prompt 下发、agent 回显被解析器跳过——补记 user 事件，开场气泡可见
-        ((AbstractSessionRuntime) remoteRt).noteUserMessage(req.message());
+        // 首条提问随 launch 作初始 prompt 下发、agent 回显被解析器跳过——补记 user 事件，开场气泡可见。
+        // 带图时首条改经 input 帧下发（空 taskSpec launch）：气泡仍只记用户原始输入，
+        // 线路文本（场景骨架/知识前缀包装后的 launchPrompt）随图片一并送达 claude
+        if (firstTurnImages) {
+            remoteRt.injectInitialInput(req.message(), launchPrompt, initialImages);
+        } else {
+            ((AbstractSessionRuntime) remoteRt).noteUserMessage(req.message());
+        }
 
         notificationPublisher.publish(NotificationEvent.of("CHAT_STARTED", id, "问答已启动",
                 preview(req.message(), 80)));
@@ -1506,6 +1516,10 @@ public class ChatManagerService {
         if (notBlank(req.model())) {
             throw new DevMindException(ErrorCode.BAD_REQUEST,
                     "模型执行体的模型名来自所选端点：请清空 model（指定 CLI 模型请用 Agent 执行体）");
+        }
+        if (req.images() != null && !req.images().isEmpty()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "模型执行体不支持图片输入：请去掉图片，或改用智能体（Agent）执行体");
         }
     }
 

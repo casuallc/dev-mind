@@ -245,7 +245,16 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
     }
 
     private long injectInputInternal(String text, List<InputImage> images, List<InputFile> files) {
-        boolean hasText = text != null && !text.isBlank();
+        return injectInputInternal(text, text, images, files);
+    }
+
+    /**
+     * 展示文本与线路文本分离的注入：气泡/事件流记 displayText（用户原始输入），
+     * 发给 agent 的是 wireText（可能含场景骨架/知识前缀等包装）。
+     */
+    private long injectInputInternal(String displayText, String wireText,
+                                     List<InputImage> images, List<InputFile> files) {
+        boolean hasText = wireText != null && !wireText.isBlank();
         boolean hasImages = images != null && !images.isEmpty();
         boolean hasFiles = files != null && !files.isEmpty();
         if ((!hasText && !hasImages && !hasFiles) || !alive()) {
@@ -254,15 +263,26 @@ public abstract class AbstractSessionRuntime implements SessionHandle {
         touchActivity();
         List<InputImage> imgs = hasImages ? images : List.of();
         List<InputFile> fs = hasFiles ? files : List.of();
-        sendUserMessage(hasText ? text : "", imgs, fs);
+        sendUserMessage(hasText ? wireText : "", imgs, fs);
+        boolean hasDisplay = displayText != null && !displayText.isBlank();
         long userSeq = nextSeq();
         publish(SessionEvent.of(userSeq, "user",
-                hasText ? text : (!fs.isEmpty() ? "[文件]" : "[图片]"), "system",
+                hasDisplay ? displayText : (!fs.isEmpty() ? "[文件]" : "[图片]"), "system",
                 attachmentPayload(imgs, fs)));
         if (state == SessionState.WAITING_INPUT) {
             transition(SessionState.RUNNING, "收到用户输入，继续执行");
         }
         return userSeq;
+    }
+
+    /**
+     * 首条消息带图片的创建路径：launch 帧没有图片通道，首条改走本方法（input 帧）下发——
+     * 调用方须以空 taskSpec launch，runner 启动准备窗口会缓冲 stdin、拉起后按序补写，
+     * 图片与文本合为同一条 user message 到达 claude，不会出现「先答文本、后轮才看到图」。
+     * 气泡只显示用户原始输入（displayText），线路文本（wireText，含场景/知识前缀）不下屏。
+     */
+    public long injectInitialInput(String displayText, String wireText, List<InputImage> images) {
+        return injectInputInternal(displayText, wireText, images, List.of());
     }
 
     /** user 事件 payload：附件引用（只放 id/name/contentType，不放 base64）。 */
