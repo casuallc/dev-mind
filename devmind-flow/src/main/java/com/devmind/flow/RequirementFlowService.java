@@ -12,6 +12,7 @@ import com.devmind.docs.DocumentService;
 import com.devmind.docs.dto.DocDetail;
 import com.devmind.docs.dto.DocRequest;
 import com.devmind.docs.dto.SaveVersionRequest;
+import com.devmind.flow.dto.ImportWiPlanResult;
 import com.devmind.flow.dto.PublishOutputRequest;
 import com.devmind.flow.dto.PublishOutputResult;
 import com.devmind.flow.dto.SplitDraftItem;
@@ -365,11 +366,16 @@ public class RequirementFlowService {
     /** 固化拆分清单：批量建 Work Item（触发既有 rollup）+ 按 dependsOn 下标建 depends_on 边，返回创建数。
      *  CAP-108 M1：flow 线程无用户上下文时以系统任务身份执行（work_item.create 硬边界，M2 换操作者委托身份）。 */
     private int applySplitPlan(RequirementEntity req, List<SplitDraftItem> items) {
+        return applySplitPlanWithIds(req, items).size();
+    }
+
+    /** 固化拆分清单并返回新创建工作单元 id 列表（顺序与清单一致）。 */
+    private List<String> applySplitPlanWithIds(RequirementEntity req, List<SplitDraftItem> items) {
         return ExecutionContextHolder.withSystemIfAbsent("requirement-flow-split",
                 () -> applySplitPlan0(req, items));
     }
 
-    private int applySplitPlan0(RequirementEntity req, List<SplitDraftItem> items) {
+    private List<String> applySplitPlan0(RequirementEntity req, List<SplitDraftItem> items) {
         String projectId = req.getProjectId();
         String requirementId = req.getId();
         String designId = designService.list(projectId, requirementId).stream()
@@ -395,7 +401,29 @@ public class RequirementFlowService {
         eventPublisher.publish(SimpleDomainEvent.of("flow.split.confirmed", projectId, null,
                 identityService.currentActor(), "需求拆分已固化，工作单元 " + wiIds.size() + " 个",
                 "REQUIREMENT", requirementId, null));
-        return wiIds.size();
+        return wiIds;
+    }
+
+    /**
+     * 手工导入 wi-plan.json 创建工作单元（CAP-52 补救措施）。
+     *
+     * <p>当规划会话产出不完整（如 wi-plan.json 未成功回传或被拒绝）时，允许用户把已生成的
+     * wi-plan.json 内容直接贴入平台，按与自动固化完全一致的规则创建 WI 与依赖边。</p>
+     */
+    public ImportWiPlanResult importWiPlan(String projectId, String requirementId, String content) {
+        RequirementEntity req = requirementService.requireEntity(projectId, requirementId);
+        requireNotTerminal(req, "导入工作单元");
+        List<SplitDraftItem> items = parseWiPlan(content);
+        String invalid = validatePlan(items);
+        if (invalid != null) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, invalid);
+        }
+        List<String> wiIds = applySplitPlanWithIds(req, items);
+        notify(NotificationLevel.P1, "flow.plan.import",
+                "REQ-" + req.getSeq() + " 已导入 " + wiIds.size() + " 个工作单元",
+                "wi-plan.json 已手工导入并固化，请前往「工作单元」Tab 查看",
+                req.getProjectId(), req.getId());
+        return new ImportWiPlanResult(wiIds.size(), wiIds);
     }
 
     // ---------------- 会话完成分流 ----------------

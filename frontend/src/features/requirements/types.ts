@@ -278,6 +278,12 @@ export interface Design {
   updatedAt: string
 }
 
+/** CAP-52 补救措施：手工导入 wi-plan.json 的结果 */
+export interface ImportWiPlanResult {
+  count: number
+  workItemIds: string[]
+}
+
 // ---- CAP-14 需求流程 ----
 
 /** 流程阶段动作返回的会话（只关心 id/status，用于提示与跳转） */

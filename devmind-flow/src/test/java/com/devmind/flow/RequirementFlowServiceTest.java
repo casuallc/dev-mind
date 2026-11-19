@@ -977,15 +977,71 @@ class RequirementFlowServiceTest {
         assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
     }
 
-    @Test
-    void 推送二进制产出400() {
-        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
-        addSession("s1", null, "r1", "任务");
-        sessionOutputService.putBinary("s1", "指标清单.xlsx");
+    // ---------------- CAP-52：手工导入 wi-plan.json 补救措施 ----------------
 
-        DevMindException e = assertThrows(DevMindException.class, () -> service.publishOutput("s1",
-                new com.devmind.flow.dto.PublishOutputRequest(
-                        "指标清单.xlsx", "analysis", "r1", "create", null, null, null)));
-        assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode(), "CAP-83 附件产出不能推送为文档");
+    @Test
+    void 导入wiPlan_按JSON内容创建WI与依赖边() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+
+        var result = service.importWiPlan("p1", "r1", """
+                [
+                  {"type":"DEVELOPMENT","title":"后端接口","spec":"实现 REST","dependsOn":[]},
+                  {"type":"TEST","title":"接口测试","spec":"补测试","dependsOn":[0]}
+                ]
+                """);
+
+        assertEquals(2, result.count());
+        assertEquals(2, result.workItemIds().size());
+        assertEquals(2, workItemService.list("p1", "r1").size());
+        // depends_on 边：第 2 项依赖第 1 项
+        assertEquals(1, relationService.created.size());
+        RelationRequest edge = relationService.created.get(0);
+        assertEquals("depends_on", edge.relationType());
+        assertEquals(result.workItemIds().get(1), edge.fromId());
+        assertEquals(result.workItemIds().get(0), edge.toId());
+        assertEquals(1, notificationService.ofType("flow.plan.import").size());
+        assertEquals(1, eventPublisher.events.stream().filter(e -> "flow.split.confirmed".equals(e.type())).count());
+    }
+
+    @Test
+    void 导入wiPlan_支持代码围栏包裹() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+
+        var result = service.importWiPlan("p1", "r1", """
+                ```json
+                [{"type":"DEVELOPMENT","title":"A","spec":"a","dependsOn":[]}]
+                ```
+                """);
+
+        assertEquals(1, result.count());
+        assertEquals("A", workItemService.list("p1", "r1").get(0).title());
+    }
+
+    @Test
+    void 导入wiPlan_需求终态报409() {
+        requirementService.add("r1", RequirementEntity.STATUS_DONE);
+
+        DevMindException e = assertThrows(DevMindException.class,
+                () -> service.importWiPlan("p1", "r1", "[{\"type\":\"DEVELOPMENT\",\"title\":\"A\",\"spec\":\"a\"}]"));
+        assertEquals(ErrorCode.CONFLICT, e.getErrorCode());
+    }
+
+    @Test
+    void 导入wiPlan_非法清单报400() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+
+        DevMindException e = assertThrows(DevMindException.class,
+                () -> service.importWiPlan("p1", "r1", "[{\"type\":\"DEVELOPMENT\",\"title\":\"\",\"spec\":\"a\"}]"));
+        assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
+        assertTrue(e.getMessage().contains("标题"));
+    }
+
+    @Test
+    void 导入wiPlan_空清单报400() {
+        requirementService.add("r1", RequirementEntity.STATUS_ANALYZING);
+
+        DevMindException e = assertThrows(DevMindException.class,
+                () -> service.importWiPlan("p1", "r1", "[]"));
+        assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
     }
 }

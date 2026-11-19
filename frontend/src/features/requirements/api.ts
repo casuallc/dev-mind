@@ -3,6 +3,7 @@ import { api } from '../../shared/api/client'
 import type {
   Design,
   FlowSession,
+  ImportWiPlanResult,
   JiraAssignableUser,
   JiraCreateFields,
   JiraPushInput,
@@ -340,7 +341,18 @@ export function deleteDesign(projectId: string, requirementId: string, designId:
   return api.del(`/projects/${projectId}/requirements/${requirementId}/designs/${designId}`)
 }
 
-// ---- CAP-14/52 需求流程 ----
+/** CAP-52 补救措施：手工导入 wi-plan.json 创建工作单元 */
+export function importWiPlan(
+  projectId: string,
+  requirementId: string,
+  content: string,
+): Promise<ImportWiPlanResult> {
+  return api.post<ImportWiPlanResult>(
+    `/projects/${projectId}/requirements/${requirementId}/work-items/import-plan`,
+    { content },
+  )
+}
+
 
 /** CAP-52 开启 AI 规划：一个会话产出 分析 + 方案 + 工作单元，三份齐备后自动起开发会话。
  *  REQ-16：userSuggestion 可空——trim 后非空才带 body（服务端清洗后拼入规划 taskSpec 末尾），
