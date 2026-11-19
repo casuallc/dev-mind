@@ -1,7 +1,10 @@
 package com.devmind.flow;
 
 import com.devmind.flow.dto.FlowPlanRequest;
+import com.devmind.flow.dto.ImportWiPlanRequest;
+import com.devmind.flow.dto.ImportWiPlanResult;
 import com.devmind.session.dto.SessionView;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -41,5 +44,15 @@ public class RequirementFlowController {
     @PostMapping("/work-items/{workItemId}/start-session")
     public SessionView startSession(@PathVariable String projectId, @PathVariable String workItemId) {
         return service.startWorkItemSession(projectId, workItemId);
+    }
+
+    /**
+     * CAP-52 补救措施：规划会话 wi-plan.json 未成功固化时，允许手工导入 JSON 内容创建工作单元。
+     * 解析、校验、建 WI 与依赖边的规则与自动固化完全一致。
+     */
+    @PostMapping("/requirements/{requirementId}/work-items/import-plan")
+    public ImportWiPlanResult importPlan(@PathVariable String projectId, @PathVariable String requirementId,
+                                         @Valid @RequestBody ImportWiPlanRequest body) {
+        return service.importWiPlan(projectId, requirementId, body.content());
     }
 }
