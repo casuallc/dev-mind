@@ -14,6 +14,7 @@ import { CloseOutlined, FileOutlined, PaperClipOutlined, SendOutlined, StopOutli
 import { api } from '../api/client'
 import { uploadAttachment, type AttachmentView } from '../attachments/api'
 import { attachmentRawUrl } from '../attachments/url'
+import { clipboardFiles } from '../attachments/paste'
 import type { ChatApiBase, ChatEvent, ChatFileAttachment, ChatImageAttachment, ChatSummaryBase, StreamMeta, WorkspaceSnapshot } from './types'
 import { useChatStream } from './useChatStream'
 import { ACTIVE_STATES } from './stateMeta'
@@ -183,10 +184,12 @@ export default function ChatPanel({
     [isModel, allowFiles, allowImages, pendingFiles.length],
   )
 
+  // 粘贴挂在输入区容器上（不只 TextArea）：焦点在缩略图/按钮区时 Ctrl+V 同样生效。
+  // 截图占位名由 clipboardFiles 统一改名（pasted-yyyyMMdd-HHmmss-seq.ext）
   const onPaste = useCallback(
     (e: React.ClipboardEvent) => {
       if ((!allowImages && !allowFiles) || isModel) return
-      const files = Array.from(e.clipboardData?.files ?? [])
+      const files = clipboardFiles(e)
       if (files.length > 0) {
         e.preventDefault()
         addAttachmentFiles(files)
@@ -331,6 +334,7 @@ export default function ChatPanel({
       />
       <div
         style={{ borderTop: '1px solid #f0f0f0', marginTop: 8, paddingTop: 12, flexShrink: 0 }}
+        onPaste={allowAttach && canInput ? onPaste : undefined}
         onDragOver={allowAttach ? (e) => e.preventDefault() : undefined}
         onDrop={
           allowAttach
@@ -398,7 +402,6 @@ export default function ChatPanel({
                   : '会话已结束，无法输入'
             }
             onChange={(e) => setInputText(e.target.value)}
-            onPaste={onPaste}
             onPressEnter={(e) => {
               if (!e.shiftKey) {
                 e.preventDefault()
