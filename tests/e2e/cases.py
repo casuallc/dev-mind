@@ -1,4 +1,5 @@
 """Official cases: independent fixtures, explicit assertions, cleanup registered first."""
+import base64
 import io
 import os
 import shutil
@@ -1018,6 +1019,52 @@ printf '%s' '{"contractVersion":"1","status":"pass","message":"e2e program pass"
                          {"points": "   "}, expected=400)
         self.api.request("POST", "/projects/ghost-nope/requirements/ai-expand",
                          {"points": "x"}, expected=404)
+
+    def test_chat_first_message_images(self):
+        # CAP-32 FR-10：问答首条消息带图——launch 帧无图片通道，后端先解析附件（失败即创建
+        # 失败）、以空 taskSpec launch、首条经 input 帧下发（runner 启动窗口缓冲 stdin 保序，
+        # 图文合成同一条 user message）；fake runner 回显正文即证明 input 帧到达。
+        png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+        att = self.api.upload("/attachments", "e2e-first-image.png", png, content_type="image/png")
+        self.assertTrue(att["image"], "png 应识别为图片附件")
+        self.addCleanup(self.api.request, "DELETE", "/attachments/" + att["attachmentId"])
+        ref = {"attachmentId": att["attachmentId"], "name": "e2e-first-image.png",
+               "contentType": "image/png"}
+
+        node_id = self._cap104_start_runner("e2e-chatimg-" + uuid.uuid4().hex[:8])
+
+        # MODEL 执行体带图 → 400（不静默丢图；拒绝先于端点解析，无需登记端点）
+        self.api.request("POST", "/chats",
+                         {"message": "x", "executor": "MODEL", "images": [ref]}, expected=400)
+
+        chat = self.api.request("POST", "/chats", {
+            "message": "首条带图提问", "agentNodeId": node_id, "images": [ref]})
+        chat_id = chat["id"]
+
+        def cleanup_chat():
+            for method, path in (("POST", f"/chats/{chat_id}/kill"),
+                                 ("DELETE", f"/chats/{chat_id}")):
+                try:
+                    self.api.request(method, path)
+                except AssertionError:
+                    pass  # 已终态/已删：清理尽力而为
+        self.addCleanup(cleanup_chat)
+
+        deadline = time.monotonic() + 60
+        while True:
+            events = self.api.request("GET", f"/chats/{chat_id}/events?afterSeq=-1")
+            seen_user = any(
+                ev["type"] == "user" and ev.get("content") == "首条带图提问"
+                and any(a.get("attachmentId") == att["attachmentId"]
+                        for a in (ev.get("payload") or {}).get("attachments") or [])
+                for ev in events)
+            seen_echo = any("收到：首条带图提问" in (ev.get("content") or "") for ev in events)
+            if seen_user and seen_echo:
+                break
+            self.assertLess(time.monotonic(), deadline,
+                            "首条带图：user 事件附件引用 / fake 回显 60s 内未出现")
+            time.sleep(1)
 
     # ---------------- CAP-110 全局活跃会话页 ----------------
 

@@ -131,6 +131,13 @@
       "cap": "CAP-105"
     },
     {
+      "id": "regression.chat-first-message-images",
+      "test": "Regression.test_chat_first_message_images",
+      "suite": "regression",
+      "owner": "chat",
+      "cap": "CAP-32"
+    },
+    {
       "id": "regression.core-authorization-boundaries",
       "test": "Regression.test_core_authorization_boundaries",
       "suite": "regression",
