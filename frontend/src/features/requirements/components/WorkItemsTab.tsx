@@ -6,11 +6,12 @@
 import { useState } from 'react'
 import { Button, Drawer, Dropdown, Empty, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { CheckCircleOutlined, DownOutlined, PlusOutlined } from '@ant-design/icons'
+import { CheckCircleOutlined, DownOutlined, ImportOutlined, PlusOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import {
   createWorkItem,
   deleteWorkItem,
+  importWiPlan,
   startWorkItemSession,
   updateWorkItem,
   updateWorkItemStatus,
@@ -49,12 +50,34 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
   const [editOpen, setEditOpen] = useState(false)
   const [editing, setEditing] = useState<WorkItem | null>(null)
   const [finishing, setFinishing] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   const [form] = Form.useForm<WorkItemInput>()
+  const [importForm] = Form.useForm<{ content: string }>()
 
   const openEdit = (w: WorkItem | null) => {
     setEditing(w)
     form.setFieldsValue(w ?? { type: 'DEVELOPMENT', title: '', spec: '', ownerId: '', branchSlug: '' })
     setEditOpen(true)
+  }
+
+  const openImport = () => {
+    importForm.resetFields()
+    setImportOpen(true)
+  }
+
+  const onImport = async (v: { content: string }) => {
+    setImporting(true)
+    try {
+      const res = await importWiPlan(projectId, requirementId, v.content)
+      setImportOpen(false)
+      message.success(`已导入 ${res.count} 个工作单元`)
+      await onChanged()
+    } catch (e) {
+      showError(e, '导入失败')
+    } finally {
+      setImporting(false)
+    }
   }
 
   const onSave = async (v: WorkItemInput) => {
@@ -248,6 +271,9 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
           <Button size="small" type="primary" ghost icon={<PlusOutlined />} onClick={() => openEdit(null)}>
             新建工作单元
           </Button>
+          <Button size="small" icon={<ImportOutlined />} onClick={openImport}>
+            导入 wi-plan.json
+          </Button>
           <Tooltip title={pendingItems.length === 0 ? '没有未完结的工作单元' : undefined}>
             <span>
               <Button
@@ -314,6 +340,29 @@ export default function WorkItemsTab({ projectId, requirementId, workItems, sess
           </Form.Item>
         </Form>
       </Drawer>
+
+      <Modal
+        title="导入 wi-plan.json"
+        open={importOpen}
+        onCancel={() => setImportOpen(false)}
+        onOk={() => importForm.submit()}
+        confirmLoading={importing}
+        destroyOnClose
+        centered
+      >
+        <Form form={importForm} layout="vertical" onFinish={onImport} preserve={false}>
+          <Form.Item
+            name="content"
+            rules={[{ required: true, message: '请粘贴 wi-plan.json 内容' }]}
+            extra="支持 ```json 代码围栏包裹；解析规则与 AI 规划自动固化完全一致"
+          >
+            <Input.TextArea
+              rows={12}
+              placeholder={`[\n  {"type":"DEVELOPMENT","title":"...","spec":"...","dependsOn":[]}\n]`}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Space>
   )
 }
