@@ -1,6 +1,6 @@
 // 会话能力（CAP-05）的类型定义，与后端 devmind-session 模块对齐。
 // 对话事件/状态/WS 帧等通用类型已上移 src/shared/chat（CAP-30），此处仅 re-export 兼容既有引用。
-import type { SessionState } from '../../shared/chat/types'
+import type { ChatImageAttachment, SessionState } from '../../shared/chat/types'
 
 export type { SessionState, ChatEvent as SessionEvent, WsServerFrame } from '../../shared/chat/types'
 
@@ -32,6 +32,8 @@ export interface SessionSummary {
   cacheCreationTokens?: number | null
   /** 已入账回合数 */
   turnCount?: number | null
+  /** CAP-68：创建时附带附件（开场任务气泡展示；已被删除的附件后端不下发） */
+  attachments?: ChatImageAttachment[]
   createdAt: string
   updatedAt: string
   finishedAt?: string

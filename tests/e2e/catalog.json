@@ -138,6 +138,13 @@
       "cap": "CAP-32"
     },
     {
+      "id": "regression.session-create-attachments-in-view",
+      "test": "Regression.test_session_create_attachments_in_view",
+      "suite": "regression",
+      "owner": "session",
+      "cap": "CAP-68"
+    },
+    {
       "id": "regression.core-authorization-boundaries",
       "test": "Regression.test_core_authorization_boundaries",
       "suite": "regression",

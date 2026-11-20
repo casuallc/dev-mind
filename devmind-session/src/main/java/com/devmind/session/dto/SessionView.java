@@ -12,6 +12,8 @@ import java.util.List;
  * @param createdBy      创建者用户名（CAP-42 收口鉴权：本人或 admin）
  * @param workspaceState CAP-42 固定工作区收口状态（OPEN/FINALIZED；null = 旧会话或非 repo 会话）
  * @param costUsd        用量账本：累计成本（null = 历史会话或老 runner 无上报，下同）
+ * @param attachments    CAP-68 创建时附带附件（id/name/contentType 引用，开场气泡展示用；
+ *                       附件已被生命周期删除的条目不下发）
  */
 public record SessionView(
         String id,
@@ -37,7 +39,8 @@ public record SessionView(
         Long outputTokens,
         Long cacheReadTokens,
         Long cacheCreationTokens,
-        Integer turnCount) {
+        Integer turnCount,
+        List<AttachmentRef> attachments) {
 
     /**
      * 列表预览版：taskSpec/summary 全文是 @Lob 大字段，看板 3s 轮询全量回传会把带宽打满。
@@ -47,7 +50,8 @@ public record SessionView(
         return new SessionView(id, projectId, workItemId, requirementId, previewOf(taskSpec, max),
                 status, state, worktreePath, pid, model, previewOf(summary, max), agentNodeId,
                 repoNames, createdBy, workspaceState, createdAt, updatedAt, finishedAt,
-                costUsd, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, turnCount);
+                costUsd, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, turnCount,
+                attachments);
     }
 
     private static String previewOf(String s, int max) {

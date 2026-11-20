@@ -334,7 +334,7 @@ class FlowToolsTest {
             return new SessionView("sess-fake-" + (++seq) + "abcdefgh", "p1", null, requirementId,
                     "[flow:plan] 任务", "RUNNING", null, null, null, null, null, "node-1",
                     null, "alice", "OPEN", Instant.now(), Instant.now(), null,
-                    null, null, null, null, null, null);
+                    null, null, null, null, null, null, null);
         }
     }
 }

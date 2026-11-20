@@ -322,6 +322,7 @@ export default function ChatPanel({
       <ChatStream
         events={history}
         taskSpec={summary.topic}
+        taskAttachments={summary.attachments}
         model={summary.model}
         speaker={isModel ? (summary.modelEndpointName || '模型') : 'Claude'}
         maxHeight={maxHeight}

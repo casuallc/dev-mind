@@ -2392,7 +2392,35 @@ public class SessionManagerService {
                 ent.getCreatedBy(), ent.getWorkspaceState(),
                 ent.getCreatedAt(), ent.getUpdatedAt(), ent.getFinishedAt(),
                 ent.getCostUsd(), ent.getInputTokens(), ent.getOutputTokens(),
-                ent.getCacheReadTokens(), ent.getCacheCreationTokens(), ent.getTurnCount());
+                ent.getCacheReadTokens(), ent.getCacheCreationTokens(), ent.getTurnCount(),
+                attachmentRefsOf(ent));
+    }
+
+    /**
+     * CAP-68：创建附带附件（sessions.attachment_ids CSV）→ 展示引用（开场气泡用）。
+     * 只取元数据不读字节；附件已被生命周期硬删的条目跳过（raw 链接必 404，展示无意义），
+     * 附件模块未装配时按裸 id 兜底（内容投送同样依赖该模块，此分支仅防御）。
+     */
+    private List<AttachmentRef> attachmentRefsOf(SessionEntity ent) {
+        String csv = ent.getAttachmentIds();
+        if (csv == null || csv.isBlank()) {
+            return List.of();
+        }
+        AttachmentContentResolver resolver = attachmentResolverProvider.getIfAvailable();
+        List<AttachmentRef> out = new ArrayList<>();
+        for (String seg : csv.split("[,，]")) {
+            String attachmentId = seg.trim();
+            if (attachmentId.isEmpty()) {
+                continue;
+            }
+            if (resolver == null) {
+                out.add(new AttachmentRef(attachmentId, null, null));
+                continue;
+            }
+            resolver.meta(attachmentId).ifPresent(m ->
+                    out.add(new AttachmentRef(m.attachmentId(), m.originalName(), m.contentType())));
+        }
+        return out;
     }
 
     private void updateStatus(String id, SessionState st, String summary) {
