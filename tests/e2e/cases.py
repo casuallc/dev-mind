@@ -1066,6 +1066,37 @@ printf '%s' '{"contractVersion":"1","status":"pass","message":"e2e program pass"
                             "首条带图：user 事件附件引用 / fake 回显 60s 内未出现")
             time.sleep(1)
 
+    def test_session_create_attachments_in_view(self):
+        # CAP-68 FR-07 补充：创建附带附件要随 SessionView 回显（开场任务气泡的数据源），
+        # 列表预览版同样下发；已删附件的条目不出现在视图里（raw 链接必 404，展示无意义）。
+        png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+        att = self.api.upload("/attachments", "e2e-session-image.png", png,
+                              content_type="image/png")
+        self.assertTrue(att["image"], "png 应识别为图片附件")
+        self.addCleanup(self.api.request, "DELETE", "/attachments/" + att["attachmentId"])
+
+        project = self._cap109_project("att")
+        node_id = self._cap104_start_runner("e2e-sessatt-" + uuid.uuid4().hex[:8])
+        session = self.api.request("POST", "/sessions", {
+            "taskSpec": "e2e-session-create-attachments", "projectId": project,
+            "agentNodeId": str(node_id), "attachmentIds": [att["attachmentId"]]})
+        session_id = session["id"]
+        self.addCleanup(self.api.request, "DELETE", "/sessions/" + session_id)
+
+        def assert_view(view, where):
+            refs = view.get("attachments") or []
+            hit = [a for a in refs if a.get("attachmentId") == att["attachmentId"]]
+            self.assertTrue(hit, f"{where} 未回显创建附件: {refs}")
+            self.assertEqual(hit[0].get("name"), "e2e-session-image.png")
+            self.assertEqual(hit[0].get("contentType"), "image/png")
+
+        assert_view(session, "创建响应")
+        assert_view(self.api.request("GET", "/sessions/" + session_id), "详情视图")
+        listed = self.api.request(
+            "GET", "/sessions?statuses=RUNNING,WAITING_INPUT,WAITING_AUTH")
+        assert_view(next(s for s in listed["items"] if s["id"] == session_id), "列表预览")
+
     # ---------------- CAP-110 全局活跃会话页 ----------------
 
     def _cap109_project(self, tag):
@@ -1099,10 +1130,10 @@ printf '%s' '{"contractVersion":"1","status":"pass","message":"e2e program pass"
     def _cap109_active_ids(self):
         listed = self.api.request(
             "GET", "/sessions?statuses=RUNNING,WAITING_INPUT,WAITING_AUTH")
-        for item in listed:
+        for item in listed["items"]:
             self.assertIn(item["status"], ("RUNNING", "WAITING_INPUT", "WAITING_AUTH"),
                           "statuses 过滤混入非活跃会话")
-        return {item["id"] for item in listed}
+        return {item["id"] for item in listed["items"]}
 
     def test_global_active_sessions_statuses_filter(self):
         # 两个项目各建一个会话（fake runner 显式指定节点），全局多状态清单同时命中两者；
