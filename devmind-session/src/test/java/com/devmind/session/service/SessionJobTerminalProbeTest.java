@@ -24,7 +24,7 @@ class SessionJobTerminalProbeTest {
         return new SessionView(id, "p1", null, null, "任务", state == null ? null : state.name(),
                 state, null, null, "fake", summary, "node-1", null, "tester", null,
                 createdAt, finishedAt, finishedAt, null,
-                inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, 3);
+                inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, 3, null);
     }
 
     private static SessionManagerService stub(SessionView view) {

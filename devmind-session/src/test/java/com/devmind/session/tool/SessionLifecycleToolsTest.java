@@ -325,7 +325,7 @@ class SessionLifecycleToolsTest {
         public SessionView get(String id) {
             return new SessionView(id, "p1", null, "r1", "任务", "DONE", null, null, null, null,
                     null, "node-1", List.of("demo-repo"), "alice", "OPEN",
-                    Instant.now(), Instant.now(), null, null, null, null, null, null, null);
+                    Instant.now(), Instant.now(), null, null, null, null, null, null, null, null);
         }
     }
 }
