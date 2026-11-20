@@ -58,6 +58,11 @@ CAP-32 建了公共附件底座，但消费方只有问答图片消息与 docs �
   补充（CAP-32 FR-10 同期）：新建会话草稿输入区支持 Ctrl+V 直接粘贴图片/文件（与回形针
   上传同一条入队链路，截图占位名自动改名）；图片附件在草稿里以缩略图横条展示，非图片
   仍是 chips。
+  补充（开场气泡展示）：创建附带的附件此前只物化给 agent，对话流的开场任务气泡不回显，
+  用户看着像「图片没进会话」。`SessionView` 加 `attachments`（按落库 `attachment_ids`
+  经 `AttachmentContentResolver.meta` 取引用，已删条目不下发），前端 ChatStream 任务
+  气泡按 user 气泡同构渲染缩略图/下载 chips（会话中消息的 payload.attachments 渲染
+  逻辑复用，不新增展示形态）。
 
 ### 前端
 
