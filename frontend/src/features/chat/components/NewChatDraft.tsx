@@ -1,9 +1,11 @@
 // 新问答草稿态：输入框直接开问——首条消息即开场提问，发送即创建问答。
 // 高级选项：知识库（CAP-46 单库 / CAP-84 模型执行体多库 + 知识模式与过滤）/场景（CAP-33）/
 // 执行节点/模型/权限模式（无项目/仓库，与项目会话完全分开），收进 Popover。
+// CAP-32 FR-10：输入区支持 Ctrl+V 粘贴图片（入队即上传附件库，首条消息随创建带图，
+// 仅智能体执行体；模型执行体不支持图片输入）。
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Badge, Button, Empty, Form, Input, InputNumber, Popover, Select, Space, Switch, message } from 'antd'
-import { SendOutlined, SettingOutlined } from '@ant-design/icons'
+import { Alert, Badge, Button, Empty, Form, Image, Input, InputNumber, Popover, Select, Space, Switch, message } from 'antd'
+import { CloseOutlined, SendOutlined, SettingOutlined } from '@ant-design/icons'
 import { createChat } from '../api'
 import type { ChatKnowledgeOptions, ChatSummary } from '../types'
 import { listAgentNodes } from '../../agent/api'
@@ -16,6 +18,9 @@ import { DOC_TYPE_OPTIONS } from '../../knowledge/types'
 import { listModelEndpoints } from '../../model/api'
 import type { ModelEndpoint } from '../../model/types'
 import ModelEndpointSelect from './ModelEndpointSelect'
+import { uploadAttachment, type AttachmentView } from '../../../shared/attachments/api'
+import { attachmentRawUrl } from '../../../shared/attachments/url'
+import { clipboardFiles } from '../../../shared/attachments/paste'
 import { showError } from '../../../shared/utils/showError'
 
 const DEFAULTS = { permissionMode: 'acceptEdits', executor: 'AGENT', knowledgeMode: 'ANSWER' }
@@ -47,6 +52,9 @@ export default function NewChatDraft({
   const [text, setText] = useState('')
   const [creating, setCreating] = useState(false)
   const [optionsOpen, setOptionsOpen] = useState(false)
+  // CAP-32 FR-10：待发送图片（入队即上传附件库，创建时只带引用）
+  const [pendingImages, setPendingImages] = useState<AttachmentView[]>([])
+  const [uploading, setUploading] = useState(0)
   // preserve:true 必带：高级选项的 Form 住在 destroyOnHidden 的 Popover 里，弹层一关字段就卸载，
   // 默认口径（只取已注册字段）会看着像"什么都没选"——徽标点会灭、条件字段会闪回默认视图
   const values = Form.useWatch([], { form, preserve: true }) ?? {}
@@ -133,9 +141,40 @@ export default function NewChatDraft({
     [values],
   )
 
+  // 带图后切到模型执行体：模型链路不支持图片，清掉待发送图片并提示（免得发送时被静默丢掉）
+  useEffect(() => {
+    if (isModel && pendingImages.length > 0) {
+      setPendingImages([])
+      message.warning('模型执行体不支持图片输入，已移除待发送图片')
+    }
+  }, [isModel, pendingImages.length])
+
+  // CAP-32 FR-10：Ctrl+V 粘贴图片（截图占位名自动改名）。问答链路只支持图片附件——
+  // 粘贴板里的非图片文件直接忽略；模型执行体不支持图片输入，提前提示不白传
+  const onPaste = (e: React.ClipboardEvent) => {
+    const files = clipboardFiles(e)
+    if (files.length === 0) return
+    e.preventDefault()
+    if (isModel) {
+      message.warning('模型执行体不支持图片输入：需要读图请改用智能体（Agent）执行体')
+      return
+    }
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) {
+        message.warning(`问答首条仅支持图片，已忽略：${file.name}`)
+        continue
+      }
+      setUploading((n) => n + 1)
+      uploadAttachment(file, file.name)
+        .then((v) => setPendingImages((prev) => [...prev, v]))
+        .catch((err) => showError(err, '图片上传失败'))
+        .finally(() => setUploading((n) => n - 1))
+    }
+  }
+
   const onSend = async () => {
     const t = text.trim()
-    if (!t || creating) return
+    if (!t || creating || uploading > 0) return
     // 模型执行体下 Agent 专有字段一个都不发：后端对这些字段是"有值即 400"（不静默忽略），
     // 界面上也藏起来了——别让隐藏字段把创建打回
     if (isModel && chatEndpoints.length === 0) {
@@ -175,9 +214,19 @@ export default function NewChatDraft({
         knowledgeBaseIds: kbIds.length > 0 ? kbIds : undefined,
         knowledgeMode,
         knowledgeOptions: Object.keys(options).length > 0 ? options : undefined,
+        // CAP-32 FR-10：首条带图（仅 AGENT；模型执行体粘贴入口已拦，这里双保险不下发）
+        images:
+          !model && pendingImages.length > 0
+            ? pendingImages.map((v) => ({
+                attachmentId: v.attachmentId,
+                name: v.originalName,
+                contentType: v.contentType,
+              }))
+            : undefined,
       })
       message.success(`问答已创建：${c.id}`)
       setText('')
+      setPendingImages([])
       form.resetFields()
       onCreated(c)
     } catch (e) {
@@ -424,12 +473,41 @@ export default function NewChatDraft({
           }
         />
       </div>
-      <div style={{ border: '1px solid #d9d9d9', borderRadius: 8, padding: 12 }}>
+      <div style={{ border: '1px solid #d9d9d9', borderRadius: 8, padding: 12 }} onPaste={onPaste}>
+        {/* CAP-32 FR-10：待发送图片缩略图横条（与对话内输入区同款） */}
+        {pendingImages.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+            {pendingImages.map((img) => (
+              <div key={img.attachmentId} style={{ position: 'relative' }}>
+                <Image
+                  src={attachmentRawUrl(img.attachmentId)}
+                  alt={img.originalName}
+                  width={56}
+                  height={56}
+                  style={{ objectFit: 'cover', borderRadius: 6, border: '1px solid #f0f0f0' }}
+                />
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<CloseOutlined />}
+                  style={{ position: 'absolute', top: -6, right: -6, background: '#fff', boxShadow: '0 0 2px rgba(0,0,0,0.2)' }}
+                  onClick={() =>
+                    setPendingImages((prev) => prev.filter((p) => p.attachmentId !== img.attachmentId))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        )}
         <Input.TextArea
           autoSize={{ minRows: 3, maxRows: 8 }}
           variant="borderless"
           value={text}
-          placeholder="例如：解释一下 Spring 虚拟线程的调度模型。Enter 发送 / Shift+Enter 换行…"
+          placeholder={
+            isModel
+              ? '例如：解释一下 Spring 虚拟线程的调度模型。Enter 发送 / Shift+Enter 换行…'
+              : '例如：解释一下 Spring 虚拟线程的调度模型。Enter 发送 / Shift+Enter 换行，可 Ctrl+V 粘贴图片…'
+          }
           onChange={(e) => setText(e.target.value)}
           onPressEnter={(e) => {
             if (!e.shiftKey) {
@@ -464,7 +542,7 @@ export default function NewChatDraft({
             type="primary"
             icon={<SendOutlined />}
             loading={creating}
-            disabled={!text.trim()}
+            disabled={!text.trim() || uploading > 0}
             onClick={onSend}
           >
             发送

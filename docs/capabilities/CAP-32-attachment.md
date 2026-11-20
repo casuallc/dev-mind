@@ -43,6 +43,16 @@ skill zip、服务器文件上传），chat 输入框与 docs 编辑器都是纯
   `/attachments` 重定向）：上传（弹窗内选文件 + 描述信息 + 逐文件进度条）、列表
   （缩略图/文件名/描述/类型/大小/scope/上传者/时间）、复制 id / 复制 URL、预览或下载、
   切 scope、删除。
+- **FR-10 首条消息带图 + 草稿框粘贴**：AI 问答新建草稿（NewChatDraft）与项目会话新建
+  草稿（NewSessionDraft）输入区支持 Ctrl+V 直接粘贴图片（会话草稿还支持粘贴任意文件，
+  走 CAP-68 附件链路）；截图产生的通用占位名（`image.png`/空名）统一改名
+  `pasted-yyyyMMdd-HHmmss-<seq>.<ext>`。问答首条带图的后端通道：`CreateChatRequest`
+  新增 `images` 引用列表——launch 帧没有图片通道，故附件先解析（失败即创建失败，不留
+  半拉子运行时），再以空 taskSpec launch、首条经 input 帧下发（runner 启动准备窗口缓冲
+  stdin、拉起后按序补写，图文合成同一条 user message 到达 claude）；开场气泡只记用户
+  原始输入，线路文本（场景骨架/知识前缀包装）不下屏。仅 AGENT 执行体支持，MODEL 传入
+  即 400。对话内输入区（ChatPanel）的粘贴监听上移到输入区容器，焦点在缩略图/按钮区时
+  Ctrl+V 同样生效。
 
 ## 3. 插件化接口
 

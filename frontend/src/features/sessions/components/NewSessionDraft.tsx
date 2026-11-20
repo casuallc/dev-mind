@@ -3,14 +3,18 @@
 // 高级选项（仓库多选/节点/需求/工作单元/模板/模型/权限模式）收进 Popover，有非默认值时 Badge 点缀。
 // CAP-68：附件区（回形针上传任意文件，chips 横条可移除）——创建即带附件，随上下文包
 // inputs 物化到工作区 .devmind/input/attachments/，agent 起手即可 Read。
+// CAP-68 FR-07 补充：输入区支持 Ctrl+V 直接粘贴图片/文件（截图占位名自动改名）；
+// 图片附件以缩略图横条展示，非图片仍是 chips。
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Badge, Button, Empty, Form, Input, Popover, Select, Space, Tag, message } from 'antd'
-import { FileOutlined, PaperClipOutlined, SendOutlined, SettingOutlined } from '@ant-design/icons'
+import { Badge, Button, Empty, Form, Image, Input, Popover, Select, Space, Tag, message } from 'antd'
+import { CloseOutlined, FileOutlined, PaperClipOutlined, SendOutlined, SettingOutlined } from '@ant-design/icons'
 import { createSession } from '../api'
 import type { SessionSummary } from '../types'
 import { useSessionOptionData } from '../hooks/useSessionOptionData'
 import { useCurrentProject } from '../../../app/useCurrentProject'
-import { uploadAttachment, type AttachmentView } from '../../../shared/attachments/api'
+import { isImageAttachment, uploadAttachment, type AttachmentView } from '../../../shared/attachments/api'
+import { attachmentRawUrl } from '../../../shared/attachments/url'
+import { clipboardFiles } from '../../../shared/attachments/paste'
 import { showError } from '../../../shared/utils/showError'
 
 const DEFAULTS = { permissionMode: 'acceptEdits' }
@@ -234,32 +238,64 @@ export default function NewSessionDraft({
           }
         />
       </div>
-      <div style={{ border: '1px solid #d9d9d9', borderRadius: 8, padding: 12 }}>
-        {/* CAP-68：待带附件 chips（创建即带，物化 .devmind/input/attachments/ 由 agent Read） */}
+      <div
+        style={{ border: '1px solid #d9d9d9', borderRadius: 8, padding: 12 }}
+        onPaste={(e) => {
+          // Ctrl+V 粘贴图片/文件 = 走附件同一条上传链路（截图占位名自动改名）
+          const files = clipboardFiles(e)
+          if (files.length > 0) {
+            e.preventDefault()
+            addAttachments(files)
+          }
+        }}
+      >
+        {/* CAP-68：待带附件（创建即带，物化 .devmind/input/attachments/ 由 agent Read）。
+            图片显示缩略图（与对话内一致），非图片显示 chips */}
         {pendingAttachments.length > 0 && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-            {pendingAttachments.map((a) => (
-              <Tag
-                key={a.attachmentId}
-                icon={<FileOutlined />}
-                closable
-                onClose={(e) => {
-                  e.preventDefault()
-                  setPendingAttachments((prev) => prev.filter((p) => p.attachmentId !== a.attachmentId))
-                }}
-                style={{ marginInlineEnd: 0, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }}
-                title={a.originalName}
-              >
-                {a.originalName}
-              </Tag>
-            ))}
+            {pendingAttachments.map((a) =>
+              isImageAttachment(a.contentType) ? (
+                <div key={a.attachmentId} style={{ position: 'relative' }}>
+                  <Image
+                    src={attachmentRawUrl(a.attachmentId)}
+                    alt={a.originalName}
+                    width={56}
+                    height={56}
+                    style={{ objectFit: 'cover', borderRadius: 6, border: '1px solid #f0f0f0' }}
+                  />
+                  <Button
+                    size="small"
+                    type="text"
+                    icon={<CloseOutlined />}
+                    style={{ position: 'absolute', top: -6, right: -6, background: '#fff', boxShadow: '0 0 2px rgba(0,0,0,0.2)' }}
+                    onClick={() =>
+                      setPendingAttachments((prev) => prev.filter((p) => p.attachmentId !== a.attachmentId))
+                    }
+                  />
+                </div>
+              ) : (
+                <Tag
+                  key={a.attachmentId}
+                  icon={<FileOutlined />}
+                  closable
+                  onClose={(e) => {
+                    e.preventDefault()
+                    setPendingAttachments((prev) => prev.filter((p) => p.attachmentId !== a.attachmentId))
+                  }}
+                  style={{ marginInlineEnd: 0, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                  title={a.originalName}
+                >
+                  {a.originalName}
+                </Tag>
+              ),
+            )}
           </div>
         )}
         <Input.TextArea
           autoSize={{ minRows: 3, maxRows: 8 }}
           variant="borderless"
           value={text}
-          placeholder="例如：为主库添加用户登录功能，编写测试并通过。Enter 发送 / Shift+Enter 换行…"
+          placeholder="例如：为主库添加用户登录功能，编写测试并通过。Enter 发送 / Shift+Enter 换行，可 Ctrl+V 粘贴图片/文件…"
           onChange={(e) => setText(e.target.value)}
           onPressEnter={(e) => {
             if (!e.shiftKey) {

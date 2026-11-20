@@ -28,7 +28,8 @@ class Api:
             raise AssertionError(f"{method} {path}: HTTP {status}, expected {expected}")
         return json.loads(raw.decode("utf-8")) if raw else None
 
-    def upload(self, path, filename, content, fields=None, expected=200):
+    def upload(self, path, filename, content, fields=None, expected=200,
+               content_type="application/octet-stream"):
         """Multipart POST（测试资产上传）；错误信息同样不携带响应体。"""
         boundary = "----devmind-e2e-" + uuid.uuid4().hex
         parts = []
@@ -36,7 +37,7 @@ class Api:
             parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n"
                          f"{value}\r\n".encode("utf-8"))
         parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
-                     f"filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+                     f"filename=\"{filename}\"\r\nContent-Type: {content_type}\r\n\r\n"
                      .encode("utf-8") + content + b"\r\n")
         parts.append(f"--{boundary}--\r\n".encode("utf-8"))
         headers = {"Content-Type": "multipart/form-data; boundary=" + boundary}

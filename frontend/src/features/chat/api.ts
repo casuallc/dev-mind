@@ -1,6 +1,6 @@
 // 通用问答（CAP-30）REST 封装，对应后端 /api/chats
 import { api } from '../../shared/api/client'
-import type { ChatEvent } from '../../shared/chat/types'
+import type { ChatEvent, ChatImageAttachment } from '../../shared/chat/types'
 import type { ChatExecutor, ChatKnowledgeOptions, ChatPage, ChatSummary } from './types'
 
 export interface CreateChatPayload {
@@ -24,6 +24,8 @@ export interface CreateChatPayload {
   executor?: ChatExecutor
   /** CAP-49：MODEL 时钉住的对话端点 id；缺省走平台默认 CHAT 端点，都没有则创建失败 */
   modelEndpointId?: number
+  /** CAP-32 FR-10：首条消息携带的图片附件（仅 AGENT 执行体；MODEL 传入后端 400） */
+  images?: ChatImageAttachment[]
 }
 
 export const createChat = (p: CreateChatPayload) => api.post<ChatSummary>('/chats', p)
