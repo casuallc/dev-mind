@@ -103,6 +103,8 @@ export interface ChatSummaryBase {
   id: string
   state: SessionState
   topic?: string
+  /** CAP-68：项目会话创建时附带的附件（渲染在开场任务气泡上；问答无此维度） */
+  attachments?: ChatImageAttachment[]
   model?: string
   /** CAP-49：缺省视作 AGENT（项目会话不走这条维度） */
   executor?: ChatExecutor

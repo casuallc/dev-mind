@@ -151,9 +151,20 @@ class ChatBuilder {
   private seenLastSeq = -1
   private snapshot: { items: ChatItem[]; logs: ChatEvent[] } | null = null
 
-  constructor(readonly taskSpec?: string) {
+  constructor(
+    readonly taskSpec?: string,
+    readonly taskAttachments?: ChatImageAttachment[],
+  ) {
     if (taskSpec && taskSpec.trim()) {
-      this.items.push({ kind: 'user', key: 'task', text: taskSpec, isTask: true })
+      this.items.push(this.taskItem())
+    }
+  }
+
+  /** 开场任务气泡（含 CAP-68 创建附件，与会话中消息的用户气泡同构展示） */
+  private taskItem(): ChatItem {
+    return {
+      kind: 'user', key: 'task', text: this.taskSpec ?? '', isTask: true,
+      attachments: this.taskAttachments?.length ? this.taskAttachments : undefined,
     }
   }
 
@@ -164,7 +175,7 @@ class ChatBuilder {
     if (!appendOnly) {
       this.items =
         this.taskSpec && this.taskSpec.trim()
-          ? [{ kind: 'user', key: 'task', text: this.taskSpec, isTask: true }]
+          ? [this.taskItem()]
           : []
       this.logs = []
       this.toolsById.clear()
@@ -377,6 +388,7 @@ class ChatBuilder {
 export default function ChatStream({
   events,
   taskSpec,
+  taskAttachments,
   model,
   speaker = 'Claude',
   maxHeight = 560,
@@ -389,6 +401,8 @@ export default function ChatStream({
 }: {
   events: ChatEvent[]
   taskSpec?: string
+  /** CAP-68：创建会话时附带的附件（渲染在开场任务气泡；项目会话专用） */
+  taskAttachments?: ChatImageAttachment[]
   model?: string
   /** 回答方名称：Agent 执行体是 Claude，模型执行体是端点名（CAP-49） */
   speaker?: string
@@ -405,10 +419,14 @@ export default function ChatStream({
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
-  // 增量构建器驻留 ref：taskSpec 变了（换了会话）才重建；apply 幂等，重复渲染不重复消费
+  // 增量构建器驻留 ref：taskSpec/附件变了（换了会话）才重建；apply 幂等，重复渲染不重复消费
   const builderRef = useRef<ChatBuilder | null>(null)
-  if (!builderRef.current || builderRef.current.taskSpec !== taskSpec) {
-    builderRef.current = new ChatBuilder(taskSpec)
+  if (
+    !builderRef.current ||
+    builderRef.current.taskSpec !== taskSpec ||
+    builderRef.current.taskAttachments !== taskAttachments
+  ) {
+    builderRef.current = new ChatBuilder(taskSpec, taskAttachments)
   }
   const { items, logs } = builderRef.current.apply(events)
 
