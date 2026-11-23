@@ -197,6 +197,13 @@ public class WorkspaceCleanupService {
                 continue;
             }
             boolean requirementScoped = s.getWorkspaceKey() != null && s.getWorkspaceKey().startsWith("req-");
+            // CAP-115 M3：term- 键是终端工作区登记的键（terminal_workspaces 表自治，
+            // 闲置由 TerminalWorkspaceReminderJob 提醒、收口/释放走专用端点）——
+            // 会话行自动清理不得触碰，否则会把别人正在用的终端工作区释放掉
+            boolean terminalScoped = s.getWorkspaceKey() != null && s.getWorkspaceKey().startsWith("term-");
+            if (terminalScoped) {
+                continue;
+            }
             if (requirementScoped && !scopeRequirement) {
                 continue;
             }

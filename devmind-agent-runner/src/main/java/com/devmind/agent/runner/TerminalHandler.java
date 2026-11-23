@@ -69,6 +69,28 @@ public class TerminalHandler {
             "ls", "dir", "pwd", "cat", "type", "head", "tail", "find", "grep", "echo",
             "wc", "du", "df", "tree", "which", "where", "git");
 
+    /**
+     * CAP-115 M2 内置写档（terminalWriteAllowlist 未配置时，term- 终端工作区会话生效）：
+     * 只读档全量 + git 全子命令（push 服务端另有危险命令二次确认）+ 写类命令
+     * （cp/mv/mkdir/touch/tee/sed -i）+ 常见构建/包管理。写档会话同时放开 >/>> 重定向。
+     */
+    static final List<String> DEFAULT_WRITE_ALLOWLIST = List.of(
+            "ls", "dir", "pwd", "cat", "type", "head", "tail", "find", "grep", "echo",
+            "wc", "du", "df", "tree", "which", "where", "git:*",
+            "cp", "mv", "mkdir", "touch", "tee", "sed", "ln", "chmod",
+            "mvn", "./mvnw", "mvnw.cmd", "npm", "npx", "node", "yarn", "pnpm",
+            "gradle", "./gradlew", "gradlew.bat", "javac", "java", "tar", "zip", "unzip");
+
+    /** CAP-115 M2 硬阻断（任何白名单档都不可放行）：rm 递归毁灭根/HOME 的目标写法。 */
+    private static final Set<String> HARD_RM_TARGETS = Set.of(
+            "/", "/*", "~", "~/", "\"~\"", "'~'", "$HOME", "${HOME}");
+
+    /** CAP-115 M2 硬阻断：fork 炸弹特征。 */
+    private static final String HARD_FORK_BOMB = ":(){";
+
+    /** CAP-115 M2 硬阻断：平台物化配置路径（CAP-42 FR-10 info/exclude）禁终端改写。 */
+    private static final String HARD_EXCLUDE_PATH = "info/exclude";
+
     /** git 默认放行的只读子命令 */
     static final Set<String> GIT_READONLY_SUBCOMMANDS = Set.of(
             "status", "diff", "log", "show", "branch", "remote", "rev-parse", "ls-files",
@@ -181,7 +203,15 @@ public class TerminalHandler {
         try {
             Path base = sessions.knownDirOf(sessionId).orElseThrow(() ->
                     new IllegalStateException("会话不在本节点运行或工作区已释放（runner 重启后终态会话目录不可定位）"));
-            checkAllowlist(config.terminalAllowlist(), config.terminalAllowRedirect(), command);
+            // CAP-115 M2：term- 终端工作区会话走写档（写白名单 + 放开重定向），普通会话维持只读档；
+            // 硬阻断（rm -rf /、fork 炸弹、info/exclude 改写）两档通吃、先于白名单判定
+            checkHardBlocks(command);
+            boolean terminalBound = sessions.isTerminalBound(sessionId);
+            List<String> allowlist = terminalBound
+                    ? (config.terminalWriteAllowlist() != null
+                            ? config.terminalWriteAllowlist() : DEFAULT_WRITE_ALLOWLIST)
+                    : config.terminalAllowlist();
+            checkAllowlist(allowlist, terminalBound || config.terminalAllowRedirect(), command);
             ShellSlot slot = slots.computeIfAbsent(sessionId,
                     k -> new ShellSlot(new PersistentShell(config.execShell(), base)));
             // 同会话命令串行（单 stdin）；cancel 不经此锁（只杀进程，即时生效）
@@ -448,6 +478,53 @@ public class TerminalHandler {
         if (!offenders.isEmpty()) {
             throw new IllegalStateException("命令不在 terminalAllowlist 白名单: " + String.join(", ", offenders)
                     + "（允许前缀: " + String.join(", ", allowed) + "）");
+        }
+    }
+
+    /**
+     * CAP-115 M2 硬阻断（纯函数，可单测）：任何白名单档都不可放行的毁灭性命令——
+     * rm 递归删根/HOME、fork 炸弹、mkfs、平台物化配置（info/exclude，CAP-42 FR-10）改写。
+     * 与白名单正交：管理员把 rm 配进 terminalWriteAllowlist 也放不过这些写法。
+     */
+    static void checkHardBlocks(String command) {
+        if (command == null || command.isBlank()) {
+            return; // 空命令由 checkAllowlist 统一报错
+        }
+        for (String seg : SEGMENTS.split(command)) {
+            String s = seg.strip();
+            if (s.isEmpty() || s.startsWith("#")) {
+                continue;
+            }
+            if (s.contains(HARD_FORK_BOMB)) {
+                throw new IllegalStateException("硬阻断：疑似 fork 炸弹（:(){...}），任何配置都不放行");
+            }
+            String[] tokens = s.split("\\s+");
+            String first = tokens[0].toLowerCase();
+            if (first.equals("mkfs") || first.startsWith("mkfs.")) {
+                throw new IllegalStateException("硬阻断：mkfs 格式化命令，任何配置都不放行");
+            }
+            if ("rm".equals(first)) {
+                boolean recursive = java.util.Arrays.stream(tokens).skip(1)
+                        .anyMatch(t -> t.startsWith("-") && !t.equals("--")
+                                && t.toLowerCase().contains("r"));
+                if (recursive) {
+                    for (String t : tokens) {
+                        if (HARD_RM_TARGETS.contains(t)) {
+                            throw new IllegalStateException(
+                                    "硬阻断：rm 递归删除根目录/HOME（" + t + "），任何配置都不放行");
+                        }
+                    }
+                }
+            }
+            // 平台物化配置保护：写类命令（rm/mv/cp/tee/sed -i）或重定向触及 info/exclude 即拒
+            if (s.contains(HARD_EXCLUDE_PATH)
+                    && ("rm".equals(first) || "mv".equals(first) || "cp".equals(first)
+                            || "tee".equals(first)
+                            || ("sed".equals(first) && s.contains("-i"))
+                            || REDIRECT.matcher(s).find())) {
+                throw new IllegalStateException(
+                        "硬阻断：平台物化配置（info/exclude）不允许终端改写（CAP-42 FR-10）");
+            }
         }
     }
 

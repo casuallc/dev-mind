@@ -134,9 +134,7 @@ public class RunnerWorkspace {
         requireSafeId(projectId, "projectId");
         String owner = requireOwner(workspaceOwner);
         String key = requireKey(workspaceKey);
-        if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
-            throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
-        }
+        requireSessionBranch(spec.branch());
         Path userRoot = userRoot(projectId, owner);
         Path cacheDir = userRoot.resolve("main").normalize();
         Path workDir = worktreeRoot(userRoot, key);
@@ -190,9 +188,7 @@ public class RunnerWorkspace {
         try {
             for (RepoSpec spec : specs) {
                 requireRepoName(spec.name(), true);
-                if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
-                    throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
-                }
+                requireSessionBranch(spec.branch());
                 Path cacheDir = userRoot.resolve(spec.name()).resolve("main").normalize();
                 Path workDir = aggRoot.resolve(spec.name()).normalize();
                 if (!cacheDir.startsWith(workspaceRoot) || !workDir.startsWith(aggRoot)) {
@@ -318,6 +314,27 @@ public class RunnerWorkspace {
 
     private Path userRoot(String projectId, String owner) {
         return workspaceRoot.resolve(projectId).resolve(owner).normalize();
+    }
+
+    /**
+     * CAP-115 布局判定：终端工作区（terminal_ws_prepare 恒走 prepareMulti）<b>单库</b>也是
+     * 多库布局——worktree 在 {@code worktrees/<key>/<repoName>}、缓存在
+     * {@code <userRoot>/<repoName>/main}；而单库会话工作区是 {@code worktrees/<key>} 直接挂
+     * worktree + 缓存 {@code <userRoot>/main}。帧里无布局字段，按实物证据区分：worktree 落在
+     * {@code <key>/<repoName>}（.git 存在）→ 多库；worktree 已不在（幂等重试/重收）退化为缓存
+     * 证据——{@code main} 缓存缺失而 {@code <repoName>/main} 存在 → 多库。
+     * 同名缓存两边都存在的极端场景（同归属同项目既有会话单库缓存又有终端多库缓存）以 worktree
+     * 实物为准；worktree 已不在时可能判错缓存，但此时该库本就只能走幂等跳过，无实际损害。
+     */
+    private static boolean isMultiRepoLayout(Path userRoot, Path aggRoot, RepoSpec spec) {
+        if (spec.name() == null || spec.name().isBlank()) {
+            return false;
+        }
+        if (Files.exists(aggRoot.resolve(spec.name()).resolve(".git"))) {
+            return true;
+        }
+        return !Files.exists(aggRoot.resolve(".git"))
+                && Files.isDirectory(userRoot.resolve(spec.name()).resolve("main").resolve(".git"));
     }
 
     /**
@@ -625,20 +642,22 @@ public class RunnerWorkspace {
             throw new IllegalStateException("收口缺少仓库描述（repos 为空）");
         }
         boolean multi = specs.size() > 1;
+        boolean anyMulti = multi;
         Path userRoot = userRoot(projectId, owner);
         Path aggRoot = worktreeRoot(userRoot, key);
         StringBuilder summary = new StringBuilder();
         boolean allOk = true;
         for (RepoSpec spec : specs) {
             String label = spec.name() != null && !spec.name().isBlank() ? "[" + spec.name() + "] " : "";
-            requireRepoName(spec.name(), multi);
-            if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
-                throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
-            }
-            Path cacheDir = multi
+            // CAP-115：终端工作区单库也是多库布局（见 isMultiRepoLayout），按实物证据逐库判定
+            boolean repoMulti = multi || isMultiRepoLayout(userRoot, aggRoot, spec);
+            anyMulti |= repoMulti;
+            requireRepoName(spec.name(), repoMulti);
+            requireSessionBranch(spec.branch());
+            Path cacheDir = repoMulti
                     ? userRoot.resolve(spec.name()).resolve("main").normalize()
                     : userRoot.resolve("main").normalize();
-            Path workDir = multi ? aggRoot.resolve(spec.name()).normalize() : aggRoot;
+            Path workDir = repoMulti ? aggRoot.resolve(spec.name()).normalize() : aggRoot;
             var lock = lockOf(cacheDir);
             lock.lock();
             try {
@@ -655,7 +674,7 @@ public class RunnerWorkspace {
         }
         // 多库全部收口成功：聚合根 work/ 已空则一并删除（单库的 work/ 本身就是 worktree 已被移除）。
         // CAP-51 keyed：聚合根是 worktrees/<key>，收口保留工作树，绝不清目录。
-        if (allOk && multi && key == null && Files.isDirectory(aggRoot)) {
+        if (allOk && anyMulti && key == null && Files.isDirectory(aggRoot)) {
             try (var s = Files.list(aggRoot)) {
                 if (s.findAny().isEmpty()) {
                     Files.deleteIfExists(aggRoot);
@@ -948,20 +967,22 @@ public class RunnerWorkspace {
             throw new IllegalStateException("释放工作区缺少仓库描述（repos 为空）");
         }
         boolean multi = specs.size() > 1;
+        boolean anyMulti = multi;
         Path userRoot = userRoot(projectId, owner);
         Path aggRoot = worktreeRoot(userRoot, key);
         StringBuilder summary = new StringBuilder();
         boolean allOk = true;
         for (RepoSpec spec : specs) {
             String label = spec.name() != null && !spec.name().isBlank() ? "[" + spec.name() + "] " : "";
-            requireRepoName(spec.name(), multi);
-            if (spec.branch() == null || !spec.branch().startsWith("feature/")) {
-                throw new IllegalStateException("非法会话分支（必须 feature/ 前缀）: " + spec.branch());
-            }
-            Path cacheDir = multi
+            // CAP-115：终端工作区单库也是多库布局（见 isMultiRepoLayout），按实物证据逐库判定
+            boolean repoMulti = multi || isMultiRepoLayout(userRoot, aggRoot, spec);
+            anyMulti |= repoMulti;
+            requireRepoName(spec.name(), repoMulti);
+            requireSessionBranch(spec.branch());
+            Path cacheDir = repoMulti
                     ? userRoot.resolve(spec.name()).resolve("main").normalize()
                     : userRoot.resolve("main").normalize();
-            Path workDir = multi ? aggRoot.resolve(spec.name()).normalize() : aggRoot;
+            Path workDir = repoMulti ? aggRoot.resolve(spec.name()).normalize() : aggRoot;
             var lock = lockOf(cacheDir);
             lock.lock();
             try {
@@ -985,7 +1006,7 @@ public class RunnerWorkspace {
         }
         // 多库全部释放成功：聚合根 work/ 已空则一并删除（单库的 work/ 本身就是 worktree 已被移除）。
         // CAP-51 keyed：多库释放后 worktrees/<key> 也是空壳，删掉（释放是整块回收语义）。
-        if (allOk && multi && Files.isDirectory(aggRoot)) {
+        if (allOk && anyMulti && Files.isDirectory(aggRoot)) {
             try (var s = Files.list(aggRoot)) {
                 if (s.findAny().isEmpty()) {
                     Files.deleteIfExists(aggRoot);
@@ -1332,10 +1353,25 @@ public class RunnerWorkspace {
         }
     }
 
-    /** 占用分支名 → 占用会话 id（feature/&lt;sid&gt; 约定；无法识别时原样返回） */
+    /** 占用分支名 → 占用会话 id（feature/&lt;sid&gt; / CAP-115 terminal/&lt;短id&gt; 约定；无法识别时原样返回） */
     private static String occupantOf(String branch) {
-        return branch != null && branch.startsWith("feature/") && branch.length() > "feature/".length()
-                ? branch.substring("feature/".length()) : String.valueOf(branch);
+        if (branch != null && branch.startsWith("feature/") && branch.length() > "feature/".length()) {
+            return branch.substring("feature/".length());
+        }
+        if (branch != null && branch.startsWith("terminal/") && branch.length() > "terminal/".length()) {
+            return "term-" + branch.substring("terminal/".length());
+        }
+        return String.valueOf(branch);
+    }
+
+    /**
+     * CAP-115：会话分支白名单校验——feature/（编码会话）与 terminal/（终端工作区）并列放行，
+     * 不做任意放行（防帧被仿造检出任意分支）。
+     */
+    private static void requireSessionBranch(String branch) {
+        if (branch == null || !(branch.startsWith("feature/") || branch.startsWith("terminal/"))) {
+            throw new IllegalStateException("非法会话分支（必须 feature/ 或 terminal/ 前缀）: " + branch);
+        }
     }
 
     /**

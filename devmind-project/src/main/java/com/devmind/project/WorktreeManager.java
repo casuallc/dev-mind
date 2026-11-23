@@ -73,6 +73,23 @@ public class WorktreeManager {
                 : "req-" + requirementId;
     }
 
+    /**
+     * CAP-115 终端工作区键：{@code term-<8位小写短id>}（服务端唯一生成点，与 req-/sid- 前缀隔离；
+     * 短 id 由调用方生成——终端工作区实体主键去掉横线后的前 8 位小写，天然落在
+     * runner 侧 SAFE_ID 白名单 {@code [a-zA-Z0-9._-]}）。
+     */
+    public String workspaceKeyForTerminal(String shortId) {
+        return "term-" + shortId;
+    }
+
+    /**
+     * CAP-115 终端工作区分支名：{@code terminal/<同短id>}（与键共用短 id 保证一一对应；
+     * runner 侧 {@code RunnerWorkspace.requireSessionBranch} 白名单并列放行 terminal/ 前缀）。
+     */
+    public String branchForTerminal(String workspaceKey) {
+        return "terminal/" + workspaceKey.substring("term-".length());
+    }
+
     /** 工作单元分支名（CAP-13 约定）：wi/<seq>-<slug>，每个 repo 一条 */
     public String branchForWorkItem(long seq, String slug) {
         return "wi/" + seq + (slug == null || slug.isBlank() ? "" : "-" + slug);

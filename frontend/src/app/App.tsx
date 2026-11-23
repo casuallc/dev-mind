@@ -56,6 +56,8 @@ import HomePage from '../features/home/pages/HomePage'
 import WorklogPage from '../features/worklog/pages/WorklogPage'
 import BookmarksPage from '../features/bookmarks/pages/BookmarksPage'
 import ChatsBoard from '../features/chat/pages/ChatsBoard'
+import WorktreeListPage from '../features/terminal-workspace/pages/WorktreeListPage'
+import TerminalWorkspacePage from '../features/terminal-workspace/pages/TerminalWorkspacePage'
 import AttachmentsPage from '../features/attachments/pages/AttachmentsPage'
 import LoginPage from '../features/auth/pages/LoginPage'
 import UserManagementPage from '../features/auth/pages/UserManagementPage'
@@ -189,6 +191,9 @@ export default function App() {
             <Route path="/context" element={<ProjectContextPage />} />
             {/* CAP-05 会话（CAP-31 起归属当前项目；通用问答走个人 /chats） */}
             <Route path="/sessions" element={<SessionsBoard />} />
+            {/* CAP-115 终端工作区（直接进 git worktree 用 bash 轻量改动） */}
+            <Route path="/terminal-workspaces" element={<WorktreeListPage />} />
+            <Route path="/terminal-workspaces/:id" element={<TerminalWorkspacePage />} />
             <Route path="/builds" element={<BuildsPage />} />
             <Route path="/deployments" element={<DeploymentsPage />} />
             <Route path="/releases" element={<ReleasesPage />} />

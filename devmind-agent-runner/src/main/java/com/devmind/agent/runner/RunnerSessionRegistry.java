@@ -64,6 +64,14 @@ public class RunnerSessionRegistry {
                     return size() > 200;
                 }
             });
+    /**
+     * CAP-115：term-<id> 伪会话目录绑定（终端工作区无进程，终端命令/文件查询全靠此表定位聚合根）。
+     * 与 recentDirs 的区别：<b>持久化</b>（JSON 落盘，runner 重启不失忆——终端工作区生命周期
+     * 以天计，远超 runner 进程）。
+     */
+    private final Map<String, java.nio.file.Path> terminalBindings = new ConcurrentHashMap<>();
+    /** CAP-115：绑定存储文件（workDir/terminal-bindings.json）；null = 未装配（纯内存）。 */
+    private volatile java.nio.file.Path bindingStore;
 
     public RunnerSessionRegistry(CliEventParser parser, FrameSender sender) {
         this.parser = parser;
@@ -137,10 +145,81 @@ public class RunnerSessionRegistry {
     /**
      * CAP-54：运行中或刚结束会话的工作目录（workspace_query 定位用——CAP-51 收口保留工作树，
      * 终态会话仍可浏览）。运行中优先，其次 recentDirs；都不认识返回 empty。
+     * CAP-115：term- 伪会话再回落 terminalBindings（持久化绑定）。
      */
     public java.util.Optional<java.nio.file.Path> knownDirOf(String sessionId) {
         var dir = sessionDirOf(sessionId);
-        return dir.isPresent() ? dir : java.util.Optional.ofNullable(recentDirs.get(sessionId));
+        if (dir.isPresent()) {
+            return dir;
+        }
+        java.nio.file.Path recent = recentDirs.get(sessionId);
+        return recent != null ? java.util.Optional.of(recent)
+                : java.util.Optional.ofNullable(terminalBindings.get(sessionId));
+    }
+
+    /**
+     * CAP-115：装配 term- 伪会话绑定存储文件并加载存量绑定（目录已消失的陈旧条目跳过——
+     * 工作区被释放后绑定自然失效，查询走「不在本节点」兜底话术）。
+     */
+    public synchronized void setBindingStore(java.nio.file.Path store) {
+        this.bindingStore = store;
+        if (store == null || !java.nio.file.Files.exists(store)) {
+            return;
+        }
+        try {
+            tools.jackson.databind.JsonNode root = new tools.jackson.databind.ObjectMapper()
+                    .readTree(store.toFile());
+            root.properties().forEach(e -> {
+                java.nio.file.Path dir = java.nio.file.Path.of(e.getValue().asText(""));
+                if (java.nio.file.Files.isDirectory(dir)) {
+                    terminalBindings.put(e.getKey(), dir);
+                }
+            });
+            log.info("终端工作区绑定加载: {} 条（store={}）", terminalBindings.size(), store);
+        } catch (Exception e) {
+            log.warn("终端工作区绑定加载失败（忽略，按无绑定启动）: {} err={}", store, e.getMessage());
+        }
+    }
+
+    /** CAP-115：登记/刷新终端工作区目录绑定（term-<id> → 聚合根），内存 + 落盘双写。 */
+    public void registerTerminalBinding(String key, java.nio.file.Path dir) {
+        terminalBindings.put(key, dir);
+        persistTerminalBindings();
+    }
+
+    /** CAP-115：摘除终端工作区目录绑定（工作区释放后调用，防陈旧定位）。 */
+    public void removeTerminalBinding(String key) {
+        if (terminalBindings.remove(key) != null) {
+            persistTerminalBindings();
+        }
+    }
+
+    /**
+     * CAP-115 M2：sessionId 是否绑定终端工作区（term-<id> 伪会话）——终端会话的命令
+     * 放行写档白名单（terminalWriteAllowlist），普通会话仍走只读档 terminalAllowlist。
+     */
+    public boolean isTerminalBound(String sessionId) {
+        return terminalBindings.containsKey(sessionId);
+    }
+
+    /** CAP-115：绑定全量落盘（量小——同时活跃的终端工作区以个位数计，整写最简单可靠）。 */
+    private synchronized void persistTerminalBindings() {
+        java.nio.file.Path store = bindingStore;
+        if (store == null) {
+            return;
+        }
+        try {
+            java.nio.file.Files.createDirectories(store.getParent());
+            Map<String, String> data = new java.util.TreeMap<>();
+            terminalBindings.forEach((k, v) -> data.put(k, v.toString()));
+            java.nio.file.Path tmp = store.resolveSibling(store.getFileName() + ".tmp");
+            new tools.jackson.databind.ObjectMapper().writerWithDefaultPrettyPrinter()
+                    .writeValue(tmp.toFile(), data);
+            java.nio.file.Files.move(tmp, store,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } catch (Exception e) {
+            log.warn("终端工作区绑定落盘失败（内存仍有效）: err={}", e.getMessage());
+        }
     }
 
     /** 写一行 JSON 到会话 stdin（调用方已按 CLI 协议拼装）。 */

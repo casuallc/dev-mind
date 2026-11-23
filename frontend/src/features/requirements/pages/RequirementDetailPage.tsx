@@ -21,6 +21,7 @@ import {
   Modal,
   Space,
   Spin,
+  Table,
   Tabs,
   Tag,
   Tooltip,
@@ -69,6 +70,8 @@ import VerifyTab from '../components/VerifyTab'
 import WorkItemsTab from '../components/WorkItemsTab'
 import { ACTIVE_SESSION_STATES, latestFlowSession } from '../components/flow/flowSessions'
 import { getCurrentProjectId, setCurrentProject } from '../../../app/currentProjectStore'
+import { listTerminalWorkspaces } from '../../terminal-workspace/api'
+import type { TerminalWorkspaceView } from '../../terminal-workspace/types'
 import { fmtDuration, fmtTime } from '../../../shared/utils/format'
 import Markdown from '../../../shared/components/Markdown'
 import { pageRootScrollStyle } from '../../../shared/utils/pageLayout'
@@ -175,6 +178,8 @@ export default function RequirementDetailPage() {
   const [linkOpen, setLinkOpen] = useState(false)
   const [refreshingJira, setRefreshingJira] = useState(false)
   const [designs, setDesigns] = useState<Design[]>([])
+  // CAP-115 本需求关联的终端工作区（「工作区」卡）
+  const [termWorkspaces, setTermWorkspaces] = useState<TerminalWorkspaceView[]>([])
   // 附件 Tab 计数（面板加载/增删后回调上抛；null=未加载过，标签不显示计数）
   const [attachCount, setAttachCount] = useState<number | null>(null)
   // CAP-52 流程动作互斥：同一时刻只允许一个在飞（规划 / 开发）
@@ -226,6 +231,16 @@ export default function RequirementDetailPage() {
   }, [projectId, rid])
 
   useEffect(loadDesigns, [loadDesigns])
+
+  // CAP-115：本需求关联的终端工作区（项目列表按 requirementId 过滤；键 req-<rid> 的挂接行也归入）
+  useEffect(() => {
+    if (!projectId || !rid) return
+    listTerminalWorkspaces(projectId)
+      .then((all) =>
+        setTermWorkspaces(all.filter((w) => w.requirementId === rid || w.workspaceKey === `req-${rid}`)),
+      )
+      .catch(() => {})
+  }, [projectId, rid])
 
   // 流程动作/验收触发的刷新：overview 与 designs 一起重取
   const reloadAll = useCallback(() => {
@@ -687,6 +702,71 @@ export default function RequirementDetailPage() {
           ].filter((item) => permittedTabs.includes(item.key as RequirementTab))}
         />
       </Card>
+
+      {/* CAP-115 工作区卡：本需求关联的终端工作区（直接 bash 改代码的轻量工作区） */}
+      {termWorkspaces.length > 0 && (
+        <Card
+          size="small"
+          title="工作区"
+          extra={
+            <Button size="small" onClick={() => navigate('/terminal-workspaces')}>
+              工作区终端
+            </Button>
+          }
+        >
+          <Table<TerminalWorkspaceView>
+            rowKey="id"
+            size="small"
+            pagination={false}
+            dataSource={termWorkspaces}
+            columns={[
+              {
+                title: '工作区键',
+                dataIndex: 'workspaceKey',
+                render: (k: string) => <Typography.Text code>{k}</Typography.Text>,
+              },
+              { title: '分支', dataIndex: 'branch', render: (b?: string) => b ?? '—' },
+              { title: '节点', dataIndex: 'agentNodeId', width: 130 },
+              { title: '归属', dataIndex: 'owner', width: 110 },
+              {
+                title: '状态',
+                dataIndex: 'state',
+                width: 150,
+                render: (s: string, w) => (
+                  <Space size={4}>
+                    <Tag
+                      color={s === 'OPEN' ? 'blue' : s === 'FINALIZED' ? 'green' : 'default'}
+                      style={{ marginInlineEnd: 0 }}
+                    >
+                      {s === 'OPEN' ? '使用中' : s === 'FINALIZED' ? '已收口' : '已释放'}
+                    </Tag>
+                    {w.lockOwner && (
+                      <Tag color="orange" style={{ marginInlineEnd: 0 }}>占用：{w.lockOwner}</Tag>
+                    )}
+                  </Space>
+                ),
+              },
+              {
+                title: '最近活跃',
+                dataIndex: 'lastActiveAt',
+                width: 160,
+                render: (t?: string | null) => fmtTime(t ?? undefined),
+              },
+              {
+                title: '操作',
+                key: 'action',
+                width: 80,
+                render: (_, w) =>
+                  w.state === 'OPEN' ? (
+                    <Button size="small" onClick={() => navigate(`/terminal-workspaces/${w.id}`)}>
+                      打开
+                    </Button>
+                  ) : null,
+              },
+            ]}
+          />
+        </Card>
+      )}
 
       <Drawer
         title={`属性 · ${r.code}`}

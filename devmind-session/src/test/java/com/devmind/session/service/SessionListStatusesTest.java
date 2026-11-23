@@ -68,8 +68,8 @@ class SessionListStatusesTest {
         SessionEventSaver saver = new SessionEventSaver(eventRepo, props, JsonMapper.builder().build());
         return new SessionManagerService(null, null, null, null, null, null, null,
                 e -> { }, new DomainEventPublisher(e -> { }),
-                repo, eventRepo, null, repoRepo, saver, props, JsonMapper.builder().build(),
-                null, null, null, null, null, null, null, null);
+                repo, eventRepo, null, repoRepo, null, saver, props, JsonMapper.builder().build(),
+                null, null, null, null, null, null, null, null, null);
     }
 
     private static Map<String, SessionEntity> fixture() {

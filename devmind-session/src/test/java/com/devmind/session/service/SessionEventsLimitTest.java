@@ -99,8 +99,8 @@ class SessionEventsLimitTest {
                 proxy(ObjectProvider.class, (p, m, args) -> null);
         return new SessionManagerService(null, null, null, null, null, null, null,
                 e -> { }, new DomainEventPublisher(e -> { }),
-                repo, eventRepo, null, null, saver, props, JsonMapper.builder().build(),
-                connectorProvider, null, null, null, null, null, null, null);
+                repo, eventRepo, null, null, null, saver, props, JsonMapper.builder().build(),
+                connectorProvider, null, null, null, null, null, null, null, null);
     }
 
     @Test

@@ -73,8 +73,8 @@ class SessionManagerResumeTest {
                 (p, m, args) -> "getIfAvailable".equals(m.getName()) ? connector : null);
         return new SessionManagerService(null, null, null, null, null, null, null,
                 e -> { }, new DomainEventPublisher(new ArrayList<>()::add),
-                repo, eventRepo, null, null, saver, props, JsonMapper.builder().build(),
-                connectorProvider, null, null, null, null, null, null, null);
+                repo, eventRepo, null, null, null, saver, props, JsonMapper.builder().build(),
+                connectorProvider, null, null, null, null, null, null, null, null);
     }
 
     @Test

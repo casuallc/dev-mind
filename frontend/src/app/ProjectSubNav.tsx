@@ -16,6 +16,7 @@ const PROJECT_PAGE_PREFIXES = [
   '/sessions',
   '/requirements',
   '/context',
+  '/terminal-workspaces',
   '/builds',
   '/deployments',
   '/tests',
