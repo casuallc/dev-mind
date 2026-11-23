@@ -151,3 +151,19 @@ export interface PublishOutputResult {
   versionNo: number
   designId?: string
 }
+
+/** CAP-114：工作区定时清理策略（GET/PUT /sessions/workspace-cleanup/config）。
+ *  enabled 默认关；lastRunAt/lastReport = 最近一轮执行时间与 JSON 报告（空 = 从未执行）。 */
+export interface WorkspaceCleanupConfig {
+  enabled: boolean
+  /** 保留天数：会话超 N 天未更新且终态才清（1~365） */
+  retentionDays: number
+  /** 每天执行小时（0~23，服务器本地时区） */
+  runHour: number
+  /** 清理范围：需求级共享工作区（req-* 键） */
+  scopeRequirement: boolean
+  /** 清理范围：会话级工作区 */
+  scopeSession: boolean
+  lastRunAt?: string | null
+  lastReport?: string | null
+}

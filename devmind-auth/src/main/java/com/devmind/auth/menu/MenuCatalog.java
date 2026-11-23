@@ -65,10 +65,15 @@ public final class MenuCatalog {
             tab("top.settings", "accounts", "第三方账号", 20),
             tab("top.settings", "jira-templates", "Jira 推送模板", 30),
             tab("top.settings", "worklog", "工作日志", 40),
+            // CAP-114：工作区定时清理策略为平台级配置，tab 默认授权 seed 自 admin 区（普通用户默认不可见）
+            tab("top.settings", "workspace-cleanup", "工作区清理", 50,
+                    List.of("admin.notifications.tab.channels")),
             action("top.settings", "change-password", "修改密码", 10, true),
             action("top.settings", "manage-account", "绑定/解绑第三方账号", 20, true),
             action("top.settings", "manage-jira-template", "管理 Jira 推送模板", 30, true),
             action("top.settings", "save-worklog-settings", "保存工作日志偏好", 40, true),
+            action("top.settings", "manage-workspace-cleanup", "管理工作区清理策略", 50, true,
+                    List.of("admin.notifications.tab.channels")),
 
             // ---------- 项目二级页签 ----------
             menu("project.overview", "概览", "/overview", MenuItemEntity.ZONE_PROJECT, null, null, 10),
@@ -307,6 +312,12 @@ public final class MenuCatalog {
     private static Item tab(String parent, String name, String title, int sortNo) {
         return new Item(parent + ".tab." + name, title, "", "",
                 null, null, sortNo, MenuItemEntity.TYPE_TAB, parent, false, List.of());
+    }
+
+    /** CAP-114：默认授权从指定兄弟节点并集派生的 TAB（如平台级设置项沿用 admin 区授权）。 */
+    private static Item tab(String parent, String name, String title, int sortNo, List<String> seedFromKeys) {
+        return new Item(parent + ".tab." + name, title, "", "",
+                null, null, sortNo, MenuItemEntity.TYPE_TAB, parent, false, seedFromKeys);
     }
 
     private static Item action(String parent, String name, String title, int sortNo, boolean writeAction) {

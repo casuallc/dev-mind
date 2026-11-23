@@ -2,7 +2,7 @@
 // 布局对齐工作日志（布局约定第 1/2/3 条）：Card 头部 =「页面名 + Segmented 页内视图」，
 // 操作按钮一律随视图进 Card extra，各视图只管 body（说明文字 + 表格/表单）。
 import { Button, Card, Space } from 'antd'
-import { PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons'
+import { PlayCircleOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons'
 import { useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import PlatformAccountsPanel, { type PlatformAccountsPanelHandle } from '../components/PlatformAccountsPanel'
@@ -13,6 +13,9 @@ import JiraPushTemplatesPanel, {
 import WorklogSettingsPanel, {
   type WorklogSettingsPanelHandle,
 } from '../../worklog/components/WorklogSettingsPanel'
+import WorkspaceCleanupPanel, {
+  type WorkspaceCleanupPanelHandle,
+} from '../../sessions/components/WorkspaceCleanupPanel'
 import SettingsViewSwitch, {
   SETTINGS_TAB_KEYS,
   SETTINGS_TAB_PERMISSIONS,
@@ -33,10 +36,14 @@ export default function SettingsPage() {
   const accountsRef = useRef<PlatformAccountsPanelHandle>(null)
   const templatesRef = useRef<JiraPushTemplatesPanelHandle>(null)
   const worklogRef = useRef<WorklogSettingsPanelHandle>(null)
+  const cleanupRef = useRef<WorkspaceCleanupPanelHandle>(null)
   const [savingWorklog, setSavingWorklog] = useState(false)
+  const [savingCleanup, setSavingCleanup] = useState(false)
+  const [runningCleanup, setRunningCleanup] = useState(false)
   const { canAction } = usePermissions()
   const canManageTemplate = canAction('top.settings.action.manage-jira-template')
   const canSaveWorklog = canAction('top.settings.action.save-worklog-settings')
+  const canManageCleanup = canAction('top.settings.action.manage-workspace-cleanup')
 
   const onSaveWorklog = async () => {
     setSavingWorklog(true)
@@ -44,6 +51,24 @@ export default function SettingsPage() {
       await worklogRef.current?.save()
     } finally {
       setSavingWorklog(false)
+    }
+  }
+
+  const onSaveCleanup = async () => {
+    setSavingCleanup(true)
+    try {
+      await cleanupRef.current?.save()
+    } finally {
+      setSavingCleanup(false)
+    }
+  }
+
+  const onRunCleanup = async () => {
+    setRunningCleanup(true)
+    try {
+      await cleanupRef.current?.runNow()
+    } finally {
+      setRunningCleanup(false)
     }
   }
 
@@ -77,6 +102,23 @@ export default function SettingsPage() {
         )}
       </>
     ),
+    'workspace-cleanup': (
+      <>
+        <Button icon={<ReloadOutlined />} onClick={() => cleanupRef.current?.reload()}>
+          刷新
+        </Button>
+        {canManageCleanup && (
+          <>
+            <Button icon={<PlayCircleOutlined />} loading={runningCleanup} onClick={onRunCleanup}>
+              立即执行一次
+            </Button>
+            <Button type="primary" icon={<SaveOutlined />} loading={savingCleanup} onClick={onSaveCleanup}>
+              保存
+            </Button>
+          </>
+        )}
+      </>
+    ),
   }
 
   return (
@@ -90,6 +132,7 @@ export default function SettingsPage() {
       {view === 'accounts' && <PlatformAccountsPanel ref={accountsRef} />}
       {view === 'jira-templates' && <JiraPushTemplatesPanel ref={templatesRef} />}
       {view === 'worklog' && <WorklogSettingsPanel ref={worklogRef} />}
+      {view === 'workspace-cleanup' && <WorkspaceCleanupPanel ref={cleanupRef} />}
     </Card>
   )
 }

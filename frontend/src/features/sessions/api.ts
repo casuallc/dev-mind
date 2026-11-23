@@ -9,6 +9,7 @@ import type {
   RemoteBranchList,
   SessionOutputContent,
   SessionOutputFile,
+  WorkspaceCleanupConfig,
   WorkspaceReleaseAck,
   WorkspaceRow,
 } from './types'
@@ -208,4 +209,19 @@ export function collectSessionOutputs(id: string): Promise<CollectOutputsResult>
 /** 推送产出为关联需求文档（create 新建 / update 目标文档新版本；design 同步落 Design 记录）。 */
 export function publishSessionOutput(id: string, body: PublishOutputRequest): Promise<PublishOutputResult> {
   return api.post<PublishOutputResult>(`/sessions/${id}/outputs/publish`, body)
+}
+
+// ---------------- CAP-114 工作区定时清理（设置页「工作区清理」tab） ----------------
+
+export function getWorkspaceCleanupConfig(): Promise<WorkspaceCleanupConfig> {
+  return api.get<WorkspaceCleanupConfig>('/sessions/workspace-cleanup/config')
+}
+
+export function saveWorkspaceCleanupConfig(body: WorkspaceCleanupConfig): Promise<WorkspaceCleanupConfig> {
+  return api.put<WorkspaceCleanupConfig>('/sessions/workspace-cleanup/config', body)
+}
+
+/** 手动触发一轮清理（异步；started=false = 上一轮未结束，本次被忽略）。 */
+export function runWorkspaceCleanup(): Promise<{ started: boolean }> {
+  return api.post<{ started: boolean }>('/sessions/workspace-cleanup/run')
 }

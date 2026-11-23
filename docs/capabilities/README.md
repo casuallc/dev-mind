@@ -131,6 +131,7 @@
 | [CAP-111](CAP-111-repo-commit-log-viewer.md) | 代码库提交日志查看器 | 管理 | 已实现（2026-11-18） | 提交日志搜索（文本/哈希）+ 提交详情 + 服务端分页，下线分支切换 |
 | [CAP-112](CAP-112-requirement-jira-manual-link.md) | 需求手动关联已有 Jira issue | 集成（需求主线） | 已交付（2026-11-18） | 平台需求一键挂到既有 Jira issue 并转 Jira 托管，清理删除残留关联 + 同步自愈 |
 | [CAP-113](CAP-113-repo-commit-file-diff.md) | 代码库提交文件 Diff 与原文查看 | 管理 | 已实现（2026-11-23） | 提交详情点击变更文件看逐行 diff（着色+行号+增删统计）与提交时完整原文（落地 CAP-111 O1） |
+| [CAP-114](CAP-114-workspace-scheduled-cleanup.md) | 会话工作区定时清理 | 会话 | 已实现（2026-11-23） | 平台级定时清理超龄终态会话工作区（复用 workspace_release 丢弃式释放链路），策略在设置页「工作区清理」tab 可视化配置 + 立即执行 + 结果通知 |
 
 ## 持续助手实施主线（规划，均未实施）
 

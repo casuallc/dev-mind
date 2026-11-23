@@ -10,8 +10,10 @@ import com.devmind.session.dto.OutputFileView;
 import com.devmind.session.dto.RepoDiffView;
 import com.devmind.session.dto.SessionPageView;
 import com.devmind.session.dto.SessionView;
+import com.devmind.session.dto.WorkspaceCleanupConfigView;
 import com.devmind.common.agent.SessionEvent;
 import com.devmind.session.service.SessionManagerService;
+import com.devmind.session.service.WorkspaceCleanupService;
 import jakarta.validation.Valid;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -38,12 +41,14 @@ import java.util.Objects;
 public class SessionController {
 
     private final SessionManagerService service;
+    private final WorkspaceCleanupService cleanupService;
 
     /** 列表 taskSpec/summary 预览长度（列表 UI 只展示前 40 字；留 200 余量给 tooltip） */
     private static final int LIST_PREVIEW_CHARS = 200;
 
-    public SessionController(SessionManagerService service) {
+    public SessionController(SessionManagerService service, WorkspaceCleanupService cleanupService) {
         this.service = service;
+        this.cleanupService = cleanupService;
     }
 
     @PostMapping
@@ -254,6 +259,24 @@ public class SessionController {
     @DeleteMapping("/{id}/workspace")
     public com.devmind.common.agent.WorkspaceReleaseResult releaseWorkspace(@PathVariable String id) {
         return service.releaseWorkspace(id);
+    }
+
+    /** CAP-114：工作区定时清理策略读（无配置行返回默认值）。 */
+    @GetMapping("/workspace-cleanup/config")
+    public WorkspaceCleanupConfigView workspaceCleanupConfig() {
+        return cleanupService.getConfig();
+    }
+
+    /** CAP-114：工作区定时清理策略写（upsert 单行）。 */
+    @PutMapping("/workspace-cleanup/config")
+    public WorkspaceCleanupConfigView saveWorkspaceCleanupConfig(@RequestBody WorkspaceCleanupConfigView req) {
+        return cleanupService.saveConfig(req);
+    }
+
+    /** CAP-114：立即执行一轮清理（异步；结果经 lastReport 与站内通知透出）。已在跑返回 started=false。 */
+    @PostMapping("/workspace-cleanup/run")
+    public Map<String, Boolean> runWorkspaceCleanup() {
+        return Map.of("started", cleanupService.triggerManual());
     }
 
     /** CAP-33 FR-07：已注入上下文清单（装配快照：场景/知识/skills/docs + 来源标注）。 */
