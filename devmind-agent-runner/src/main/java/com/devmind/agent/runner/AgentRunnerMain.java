@@ -383,6 +383,7 @@ public class AgentRunnerMain {
             case "worklog_push" -> handleWorklogPush(frame, conn);
             case "workspace_finalize" -> handleWorkspaceFinalize(frame, config, sessions, workspace, conn);
             case "terminal_ws_prepare" -> handleTerminalWsPrepare(frame, sessions, workspace, conn);
+            case "workspace_file_write" -> handleWorkspaceFileWrite(frame, sessions, conn); // CAP-115 M2：终端工作区文件直写
             case "workspace_release" -> handleWorkspaceRelease(frame, sessions, workspace, conn);
             case "workspace_query" -> queryHandler.handle(frame); // CAP-54：工作区只读查询
             case "terminal_exec" -> terminalHandler.handle(frame); // CAP-58/59：终端单条命令执行（持久 shell）
@@ -942,6 +943,118 @@ public class AgentRunnerMain {
             }
             conn.send(ack);
         });
+    }
+
+    /**
+     * CAP-115 M2：终端工作区单文件直写——对 term-/req-/sid- 伪会话绑定的工作区聚合根做
+     * 「resolveConfined 形态+startsWith 校验 → 最近存在祖先 toRealPath 符号链接校验 →
+     * expectedSha 乐观锁（不符不写，ack conflict=true 并回当前 sha）→ 全文写盘」。
+     * 内容经 base64 入帧，解码后上限 {@value #FILE_WRITE_CAP_BYTES} 字节（WS 文本帧缓冲约束）；
+     * .git/ 内部一律拒写（worktree 的 .git 是指向真 gitdir 的指针文件，改写即越权）。
+     * 虚拟线程异步执行，不阻塞 WS listener。
+     */
+    private static void handleWorkspaceFileWrite(JsonNode frame, RunnerSessionRegistry sessions,
+                                                 ServerConnection conn) {
+        String requestId = frame.path("requestId").asText("");
+        String workspaceKey = frame.path("workspaceKey").asText("");
+        String sessionId = frame.path("sessionId").asText("");
+        String rel = frame.path("path").asText("");
+        String contentBase64 = frame.path("contentBase64").asText("");
+        String expectedSha = frame.path("expectedSha").asText("");
+        String locateKey = !workspaceKey.isBlank() ? workspaceKey : sessionId;
+        Thread.ofVirtual().name("ws-file-write-" + requestId).start(() -> {
+            Map<String, Object> ack = doWorkspaceFileWrite(sessions, locateKey, rel,
+                    contentBase64, expectedSha);
+            ack.put("type", "workspace_file_write_ack");
+            ack.put("requestId", requestId);
+            conn.send(ack);
+        });
+    }
+
+    /**
+     * 文件直写核心（package-private 可单测）：缺字段/越界/.git 写入/超限/base64 非法 →
+     * ack ok=false + error；expectedSha 不符 → ok=false + conflict=true + 当前 sha；
+     * 成功 → ok=true + path + sha。
+     */
+    static Map<String, Object> doWorkspaceFileWrite(RunnerSessionRegistry sessions,
+                                                    String locateKey, String rel,
+                                                    String contentBase64, String expectedSha) {
+        Map<String, Object> ack = new java.util.LinkedHashMap<>();
+        try {
+            if (locateKey == null || locateKey.isBlank() || rel == null || rel.isBlank()
+                    || contentBase64 == null || contentBase64.isEmpty()) {
+                throw new IllegalStateException(
+                        "workspace_file_write 帧缺字段（workspaceKey/path/contentBase64 必填）");
+            }
+            String cleanRel = rel.replace('\\', '/');
+            if (cleanRel.equals(".git") || cleanRel.startsWith(".git/")) {
+                throw new IllegalStateException(".git/ 内部不允许文件直写");
+            }
+            Path base = sessions.knownDirOf(locateKey).orElseThrow(() ->
+                    new IllegalStateException("工作区不在本节点或绑定已失效（runner 重启后需重新 open）"));
+            byte[] content;
+            try {
+                content = java.util.Base64.getDecoder().decode(contentBase64);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalStateException("contentBase64 不是合法 base64");
+            }
+            if (content.length > FILE_WRITE_CAP_BYTES) {
+                throw new IllegalStateException("文件超过直写上限 " + FILE_WRITE_CAP_BYTES / 1024
+                        + "KB（更大文件请走终端命令）");
+            }
+            // 双约束：形态+startsWith（resolveConfined realPath=false 允许目标不存在）
+            Path target = WorkspaceQueryHandler.resolveConfined(base, cleanRel, false);
+            // 符号链接逃逸防护：对最近存在的祖先做 toRealPath 校验（目标/父目录可能尚不存在）
+            Path realBase = base.toAbsolutePath().normalize().toRealPath();
+            Path anchor = target;
+            while (anchor != null && !Files.exists(anchor)) {
+                anchor = anchor.getParent();
+            }
+            if (anchor == null || !anchor.toRealPath().startsWith(realBase)) {
+                throw new IllegalStateException("路径越界（符号链接逃逸防护）: " + cleanRel);
+            }
+            if (expectedSha != null && !expectedSha.isBlank()) {
+                if (!Files.isRegularFile(target)) {
+                    ack.put("ok", false);
+                    ack.put("conflict", true);
+                    ack.put("sha", "");
+                    ack.put("error", "文件不存在，无法按 expectedSha 写入（可能已被删除）");
+                    return ack;
+                }
+                String current = sha256Hex(Files.readAllBytes(target));
+                if (!current.equalsIgnoreCase(expectedSha)) {
+                    ack.put("ok", false);
+                    ack.put("conflict", true);
+                    ack.put("sha", current);
+                    ack.put("error", "文件已被他人/其他途径修改，请刷新后重试");
+                    return ack;
+                }
+            }
+            if (target.getParent() != null) {
+                Files.createDirectories(target.getParent());
+            }
+            Files.write(target, content);
+            ack.put("ok", true);
+            ack.put("path", realBase.relativize(target.toRealPath()).toString().replace('\\', '/'));
+            ack.put("sha", sha256Hex(content));
+            log.info("终端工作区文件直写: key={} path={} bytes={}", locateKey, cleanRel, content.length);
+        } catch (Exception e) {
+            log.warn("终端工作区文件直写失败: key={} path={} err={}", locateKey, rel, e.getMessage());
+            ack.put("ok", false);
+            ack.put("error", String.valueOf(e.getMessage()));
+        }
+        return ack;
+    }
+
+    private static final int FILE_WRITE_CAP_BYTES = 256 * 1024;
+
+    private static String sha256Hex(byte[] data) throws Exception {
+        byte[] d = java.security.MessageDigest.getInstance("SHA-256").digest(data);
+        StringBuilder sb = new StringBuilder(d.length * 2);
+        for (byte b : d) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16)).append(Character.forDigit(b & 0xF, 16));
+        }
+        return sb.toString();
     }
 
     /**

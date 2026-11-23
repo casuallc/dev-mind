@@ -59,6 +59,11 @@ import java.util.Properties;
  *                            # 条目 git:&lt;sub&gt;（如 git:fetch）与只读集取并集放行该子命令）。
  *                            # 缺省（不配该项）= 内置只读档（ls/cat/head/tail/grep/find/git 只读等）；
  *                            # 显式配置（含空串）= 全覆盖（空串 = 拒绝一切终端命令）
+ * terminalWriteAllowlist=    # CAP-115 M2：终端工作区（term- 伪会话）写档白名单（CSV 前缀，
+ *                            # 语义同 terminalAllowlist 但替代之——普通会话不受影响）。缺省
+ *                            # （不配该项）= 内置写档（只读档全量 + git:* + cp/mv/mkdir/touch/tee/sed
+ *                            # + 常见构建/包管理命令，且放开 &gt;/&gt;&gt; 重定向）；显式配置全覆盖。
+ *                            # 硬阻断（rm -rf /、fork 炸弹、info/exclude 改写）不随白名单放开
  * terminalTimeoutSec=60      # CAP-58：单条终端命令超时（秒），超时整树杀
  * terminalAllowRedirect=false# CAP-58：是否放开 &gt;/&gt;&gt; 重定向写入（默认拒绝）
  * terminalShellIdleMin=30    # CAP-59：持久 shell 空闲回收阈值（分钟），无命令超过即整树杀，
@@ -92,7 +97,28 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                            int terminalTimeoutSec, boolean terminalAllowRedirect,
                            int terminalShellIdleMin, boolean insecure,
                            boolean gitProxyEnabled, int gitProxyPort,
-                           Map<String, String> toolchainPaths, int toolchainRefreshMinutes) {
+                           Map<String, String> toolchainPaths, int toolchainRefreshMinutes,
+                           java.util.List<String> terminalWriteAllowlist) {
+
+    /** 兼容构造（CAP-115 M2 前的 29 参签名）：终端写档白名单缺省（null = 内置写档）。 */
+    public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
+                        Path workDir, Map<String, Path> projectPaths, int maxConcurrent,
+                        String executor, Path workspaceRoot, int gcDays, int gcIntervalMinutes,
+                        int gcInitialDelayMinutes, java.util.List<String> labels,
+                        java.util.List<String> execAllowlist, String execShell, int buildGcHours,
+                        String claudeConfigDir, String worklogRoot, boolean partialMessages,
+                        int worktreeGcDays, java.util.List<String> terminalAllowlist,
+                        int terminalTimeoutSec, boolean terminalAllowRedirect,
+                        int terminalShellIdleMin, boolean insecure,
+                        boolean gitProxyEnabled, int gitProxyPort,
+                        Map<String, String> toolchainPaths, int toolchainRefreshMinutes) {
+        this(serverUrl, token, claudePath, permissionMode, workDir, projectPaths, maxConcurrent,
+                executor, workspaceRoot, gcDays, gcIntervalMinutes, gcInitialDelayMinutes, labels,
+                execAllowlist, execShell, buildGcHours, claudeConfigDir, worklogRoot, partialMessages,
+                worktreeGcDays, terminalAllowlist, terminalTimeoutSec, terminalAllowRedirect,
+                terminalShellIdleMin, insecure, gitProxyEnabled, gitProxyPort, toolchainPaths,
+                toolchainRefreshMinutes, null);
+    }
 
     /** 兼容构造（CAP-106 前的 27 参签名）：无显式工具链路径、周期重探测 10 分钟。 */
     public RunnerConfig(String serverUrl, String token, String claudePath, String permissionMode,
@@ -277,7 +303,10 @@ public record RunnerConfig(String serverUrl, String token, String claudePath, St
                 !"false".equalsIgnoreCase(p.getProperty("gitProxyEnabled", "true").strip()),
                 Integer.parseInt(p.getProperty("gitProxyPort", "18377").strip()),
                 toolchainPaths,
-                Integer.parseInt(p.getProperty("toolchainRefreshMinutes", "10").strip()));
+                Integer.parseInt(p.getProperty("toolchainRefreshMinutes", "10").strip()),
+                // CAP-115 M2：缺省（属性缺席）= null → TerminalHandler 用内置写档；显式配置全覆盖
+                p.getProperty("terminalWriteAllowlist") == null ? null
+                        : parseLabels(p.getProperty("terminalWriteAllowlist")));
     }
 
     /** CAP-41：worklog 持久工作区根目录——配置优先，空 = {user.home}/worklog。 */

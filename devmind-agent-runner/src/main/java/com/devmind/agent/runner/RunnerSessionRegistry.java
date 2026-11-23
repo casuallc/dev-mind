@@ -194,6 +194,14 @@ public class RunnerSessionRegistry {
         }
     }
 
+    /**
+     * CAP-115 M2：sessionId 是否绑定终端工作区（term-<id> 伪会话）——终端会话的命令
+     * 放行写档白名单（terminalWriteAllowlist），普通会话仍走只读档 terminalAllowlist。
+     */
+    public boolean isTerminalBound(String sessionId) {
+        return terminalBindings.containsKey(sessionId);
+    }
+
     /** CAP-115：绑定全量落盘（量小——同时活跃的终端工作区以个位数计，整写最简单可靠）。 */
     private synchronized void persistTerminalBindings() {
         java.nio.file.Path store = bindingStore;
