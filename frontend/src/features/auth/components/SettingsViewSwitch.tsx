@@ -5,7 +5,7 @@ import ScrollRow from '../../../shared/components/ScrollRow'
 import { usePermissions } from '../usePermissions'
 
 /** 页内视图 = 路由 /settings/:tab 的 tab 段（可分享/可收藏），未知值回落 profile */
-export const SETTINGS_TAB_KEYS = ['profile', 'accounts', 'jira-templates', 'worklog'] as const
+export const SETTINGS_TAB_KEYS = ['profile', 'accounts', 'jira-templates', 'worklog', 'workspace-cleanup'] as const
 export type SettingsTab = (typeof SETTINGS_TAB_KEYS)[number]
 
 /** CAP-103 设置页各视图的权限节点（与后端权限目录一致） */
@@ -14,6 +14,7 @@ export const SETTINGS_TAB_PERMISSIONS: Record<SettingsTab, string> = {
   accounts: 'top.settings.tab.accounts',
   'jira-templates': 'top.settings.tab.jira-templates',
   worklog: 'top.settings.tab.worklog',
+  'workspace-cleanup': 'top.settings.tab.workspace-cleanup',
 }
 
 const TAB_LABELS: Record<SettingsTab, string> = {
@@ -24,6 +25,8 @@ const TAB_LABELS: Record<SettingsTab, string> = {
   'jira-templates': 'Jira 推送模板',
   // CAP-28/41：工作日志偏好（原工作日志页「工时设置」Modal）
   worklog: '工作日志',
+  // CAP-114：会话工作区定时清理策略（平台级，默认仅管理员可见）
+  'workspace-cleanup': '工作区清理',
   // CAP-06 通知设置已迁入后台「系统」组（/admin/notifications）：通道为平台级全局配置
 }
 
