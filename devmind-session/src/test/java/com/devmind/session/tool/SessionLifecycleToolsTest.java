@@ -281,7 +281,7 @@ class SessionLifecycleToolsTest {
         FakeSessionManager() {
             super(null, null, null, null, null, null, null, null, null, null,
                     null, null, null, null, null, null, null, null, null, null,
-                    null, null, null, null);
+                    null, null, null, null, null);
         }
 
         @Override

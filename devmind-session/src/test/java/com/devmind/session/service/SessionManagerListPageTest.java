@@ -116,7 +116,7 @@ class SessionManagerListPageTest {
                 (p, m, args) -> null);
         return new SessionManagerService(null, null, null, null, null, null, null,
                 e -> { }, new DomainEventPublisher(msg -> { }),
-                repo, eventRepo, null, sessionRepoRepo, saver, props, JsonMapper.builder().build(),
+                repo, eventRepo, null, sessionRepoRepo, null, saver, props, JsonMapper.builder().build(),
                 connectorProvider, null, null, null, null, null, null, null);
     }
 

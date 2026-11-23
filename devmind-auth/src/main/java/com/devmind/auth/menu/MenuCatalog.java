@@ -85,6 +85,11 @@ public final class MenuCatalog {
             menu("project.tests", "测试", "/tests", MenuItemEntity.ZONE_PROJECT, null, null, 70),
             menu("project.releases", "发版", "/releases", MenuItemEntity.ZONE_PROJECT, null, null, 80),
             menu("project.security", "安全", "/security", MenuItemEntity.ZONE_PROJECT, null, null, 90),
+            // CAP-115：终端工作区（直接进 git worktree 用 bash 轻量改动，无 claude 会话）
+            menu("project.terminal", "工作区终端", "/terminal-workspaces", MenuItemEntity.ZONE_PROJECT, null, null, 95),
+            tab("project.terminal", "list", "终端工作区列表", 10),
+            action("project.terminal", "manage", "管理终端工作区（新建/挂接/打开/加锁）", 20, true),
+            action("project.terminal", "finalize", "收口/释放终端工作区", 30, true),
             tab("project.sessions", "chat", "对话", 10),
             tab("project.sessions", "list", "会话列表", 20),
             tab("project.sessions", "workspace", "工作区", 30),

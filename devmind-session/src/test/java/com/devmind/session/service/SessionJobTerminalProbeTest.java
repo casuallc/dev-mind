@@ -30,7 +30,7 @@ class SessionJobTerminalProbeTest {
     private static SessionManagerService stub(SessionView view) {
         return new SessionManagerService(null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null) {
+                null, null, null) {
             @Override
             public SessionView get(String id) {
                 if (view == null) {

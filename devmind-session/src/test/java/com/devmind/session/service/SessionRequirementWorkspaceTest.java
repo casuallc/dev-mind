@@ -308,7 +308,7 @@ class SessionRequirementWorkspaceTest {
         service = new SessionManagerService(identity, new FakeProjectService(), null, requirementService,
                 new WorktreeManager(new WorktreeProperties(), null), null, null,
                 e -> { }, new DomainEventPublisher(ev -> { }),
-                repo, eventRepo, null, repoRowRepo, saver, props, JsonMapper.builder().build(),
+                repo, eventRepo, null, repoRowRepo, null, saver, props, JsonMapper.builder().build(),
                 connectorProvider, null, gatewayProvider, null, TX, null, null, null);
         return service;
     }

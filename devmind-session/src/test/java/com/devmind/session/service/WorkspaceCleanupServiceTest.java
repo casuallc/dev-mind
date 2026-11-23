@@ -107,7 +107,7 @@ class WorkspaceCleanupServiceTest {
 
         StubSessionManager() {
             super(null, null, null, null, null, null, null, null, null, null, null, null,
-                    null, null, null, null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         @Override

@@ -52,6 +52,7 @@ import com.devmind.session.model.SessionEventEntity;
 import com.devmind.common.agent.runtime.SessionState;
 import com.devmind.session.model.SessionRepoEntity;
 import com.devmind.session.model.SessionScenarioEntity;
+import com.devmind.session.model.TerminalWorkspaceEntity;
 import com.devmind.session.repo.SessionEventRepository;
 import com.devmind.session.repo.SessionRepoRepository;
 import com.devmind.session.repo.SessionRepository;
@@ -126,6 +127,8 @@ public class SessionManagerService {
     private final ScenarioService scenarioService;
     /** CAP-31：会话仓库快照（session_repos，创建时从 project_repos 拷值） */
     private final SessionRepoRepository sessionRepoRepo;
+    /** CAP-115：终端工作区登记（create 反向占用预检用） */
+    private final com.devmind.session.repo.TerminalWorkspaceRepository terminalWorkspaceRepo;
     private final SessionEventSaver eventSaver;
     private final SessionProperties props;
     private final ObjectMapper mapper;
@@ -162,6 +165,7 @@ public class SessionManagerService {
                                  SessionEventRepository eventRepo,
                                  ScenarioService scenarioService,
                                  SessionRepoRepository sessionRepoRepo,
+                                 com.devmind.session.repo.TerminalWorkspaceRepository terminalWorkspaceRepo,
                                  SessionEventSaver eventSaver,
                                  SessionProperties props,
                                  ObjectMapper mapper,
@@ -186,6 +190,7 @@ public class SessionManagerService {
         this.eventRepo = eventRepo;
         this.scenarioService = scenarioService;
         this.sessionRepoRepo = sessionRepoRepo;
+        this.terminalWorkspaceRepo = terminalWorkspaceRepo;
         this.eventSaver = eventSaver;
         this.props = props;
         this.mapper = mapper;
@@ -394,6 +399,8 @@ public class SessionManagerService {
                 // 的分支比对仍是磁盘残留的最终防线）：同需求已有进行中的会话 → 409。
                 // 无需求会话不预检——sid- 键天生独占（FR-07）。
                 precheckRequirementOccupancy(requirementIdOfSession, null);
+                // CAP-115：反向占用预检——目标键已被 OPEN 终端工作区登记（挂接 req- 键场景）→ 409
+                precheckTerminalWorkspaceOccupancy(workspaceKey);
                 workspaceBound = true;
             }
             // CAP-34 FR-03：上下文包清单随帧下发，runner 凭 manifest 拉包物化
@@ -2005,6 +2012,24 @@ public class SessionManagerService {
                 : "无满足标签的在线节点: " + requiredLabelsRaw);
     }
 
+    /**
+     * CAP-115 反向占用预检：会话 create 的目标工作区键已被 OPEN 终端工作区登记 → 409 带占用方
+     * （挂接 req- 键的终端工作区与该需求的编码会话互斥，双向防写冲突）。
+     * package-private 供单测直接驱动。
+     */
+    void precheckTerminalWorkspaceOccupancy(String workspaceKey) {
+        if (workspaceKey == null || workspaceKey.isBlank()) {
+            return;
+        }
+        for (TerminalWorkspaceEntity tw : terminalWorkspaceRepo.findByWorkspaceKey(workspaceKey)) {
+            if (TerminalWorkspaceService.STATE_OPEN.equals(tw.getState())) {
+                throw new DevMindException(ErrorCode.CONFLICT,
+                        "工作区 " + workspaceKey + " 已被终端工作区占用（创建人 "
+                                + tw.getCreatedBy() + "），请先收口或释放该终端工作区再开新会话");
+            }
+        }
+    }
+
     // ---------------- CAP-42/CAP-51：固定工作区（归属用户 / 需求级互斥 / 释放） ----------------
 
     /** runner 工作区目录名白名单（与 RunnerWorkspace.SAFE_ID 同口径） */
@@ -2106,8 +2131,9 @@ public class SessionManagerService {
         return actor;
     }
 
-    /** CAP-42 FR-07：归属用户名白名单 + 保留名校验（存量非法用户名在此 fail-visible） */
-    private static String requireWorkspaceOwner(String owner) {
+    /** CAP-42 FR-07：归属用户名白名单 + 保留名校验（存量非法用户名在此 fail-visible）；
+     * package-private 供 CAP-115 终端工作区复用同口径校验 */
+    static String requireWorkspaceOwner(String owner) {
         if (owner == null || !WS_OWNER_ID.matcher(owner).matches() || WS_RESERVED_DIRS.contains(owner)) {
             throw new DevMindException(ErrorCode.CONFLICT,
                     "用户名「" + owner + "」不能作为 runner 工作区目录名"
