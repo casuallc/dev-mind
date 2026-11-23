@@ -409,6 +409,8 @@ public final class ApiPermissionCatalog {
             rule("POST", "/api/worklog/reports/sync", "top.worklog.action.manage-report"),
             rule("PUT", "/api/worklog/repos/*/subscription", "top.worklog.action.manage-subscription"),
             rule("PUT", "/api/worklog/settings", "top.settings.action.save-worklog-settings"),
+            rule("PUT", "/api/sessions/workspace-cleanup/config", "top.settings.action.manage-workspace-cleanup"),
+            rule("POST", "/api/sessions/workspace-cleanup/run", "top.settings.action.manage-workspace-cleanup"),
             rule("POST", "/api/auth/change-password", "top.settings.action.change-password"),
             rule("PUT", "/api/me/platform-accounts/*", "top.settings.action.manage-account"),
             rule("DELETE", "/api/me/platform-accounts/*", "top.settings.action.manage-account"),

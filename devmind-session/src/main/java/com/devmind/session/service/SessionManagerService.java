@@ -1352,6 +1352,15 @@ public class SessionManagerService {
         if (ent.getCreatedBy() != null && !ent.getCreatedBy().equals(actor) && !isAdmin()) {
             throw new DevMindException(ErrorCode.FORBIDDEN, "只有会话创建者或管理员可以清理工作区");
         }
+        return releaseWorkspaceInternal(ent);
+    }
+
+    /**
+     * CAP-114：去 actor 校验的内部释放入口（定时清理任务无登录态可调）——
+     * 除归属校验外，状态/占用/协议门控与原 {@link #releaseWorkspace} 完全一致。
+     */
+    public WorkspaceReleaseResult releaseWorkspaceInternal(SessionEntity ent) {
+        String id = ent.getId();
         if (ent.getWorkspaceState() == null || ent.getWorkspaceState().isBlank()) {
             throw new DevMindException(ErrorCode.CONFLICT,
                     "该会话无固定工作区（旧布局或非代码会话），无需清理");

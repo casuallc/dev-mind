@@ -81,6 +81,9 @@ public interface SessionRepository extends JpaRepository<SessionEntity, String> 
                                                                           String workspaceOwner,
                                                                           String workspaceState);
 
+    /** CAP-114：定时清理候选扫描——某工作区状态的全部会话（活跃/超龄/scope 过滤在内存做） */
+    List<SessionEntity> findByWorkspaceStateOrderByUpdatedAtAsc(String workspaceState);
+
     /**
      * 用量账本入账：回合 result 的用量累加进会话累计列。
      *
