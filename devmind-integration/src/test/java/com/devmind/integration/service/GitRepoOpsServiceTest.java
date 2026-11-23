@@ -5,6 +5,8 @@ import com.devmind.common.exception.DevMindException;
 import com.devmind.common.exception.ErrorCode;
 import com.devmind.integration.dto.RepoCommitDetailView;
 import com.devmind.integration.dto.RepoCommitView;
+import com.devmind.integration.dto.RepoFileContentView;
+import com.devmind.integration.dto.RepoFileDiffView;
 import com.devmind.project.model.GitRepositoryEntity;
 import com.devmind.project.repo.GitRepositoryRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +25,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -359,5 +362,152 @@ class GitRepoOpsServiceTest {
         DevMindException e2 = assertThrows(DevMindException.class,
                 () -> service.commitDetail(repo.getId(), "deadbeef"));
         assertEquals(ErrorCode.BAD_REQUEST, e2.getErrorCode());
+    }
+
+    // ---------------- CAP-113 单文件 diff ----------------
+
+    @Test
+    void fileDiffReturnsPatchAndNumstat() throws Exception {
+        Path dir = initRepo("d1");
+        Files.writeString(dir.resolve("a.txt"), "l1\nl2\nl3\n", StandardCharsets.UTF_8);
+        git(dir, "add", "a.txt");
+        git(dir, "commit", "-q", "-m", "init");
+        // 改 1 行删 1 行加 2 行
+        Files.writeString(dir.resolve("a.txt"), "l1\nl2x\nl4\n", StandardCharsets.UTF_8);
+        git(dir, "add", "a.txt");
+        git(dir, "commit", "-q", "-m", "modify a");
+
+        GitRepositoryEntity repo = addRepo(GitRepositoryEntity.SOURCE_LOCAL, null, dir, "main", "main");
+        String head = service.listCommits(repo.getId(), null, null, null, null).items().get(0).sha();
+
+        RepoFileDiffView d = service.fileDiff(repo.getId(), head, "a.txt", null);
+        assertEquals("a.txt", d.path());
+        assertEquals(Integer.valueOf(2), d.additions());
+        assertEquals(Integer.valueOf(2), d.deletions());
+        assertFalse(d.binary());
+        assertFalse(d.truncated());
+        assertTrue(d.patch().contains("diff --git a/a.txt b/a.txt"), () -> d.patch());
+        assertTrue(d.patch().contains("-l2"), () -> d.patch());
+        assertTrue(d.patch().contains("+l2x"), () -> d.patch());
+        assertTrue(d.patch().contains("@@"), () -> d.patch());
+
+        // 根提交：新增文件全 add
+        String root = service.listCommits(repo.getId(), null, null, 1, 1).items().get(0).sha();
+        RepoFileDiffView rootDiff = service.fileDiff(repo.getId(), root, "a.txt", null);
+        assertEquals(Integer.valueOf(3), rootDiff.additions());
+        assertEquals(Integer.valueOf(0), rootDiff.deletions());
+        assertTrue(rootDiff.patch().contains("new file mode"), () -> rootDiff.patch());
+
+        // 未变更文件 → 400 可读
+        DevMindException e = assertThrows(DevMindException.class,
+                () -> service.fileDiff(repo.getId(), head, "b.txt", null));
+        assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
+        assertTrue(e.getMessage().contains("变更清单"), () -> e.getMessage());
+    }
+
+    @Test
+    void fileDiffMatchesRenameByNewPath() throws Exception {
+        Path dir = initRepo("d2");
+        Files.writeString(dir.resolve("old.txt"), "x\n", StandardCharsets.UTF_8);
+        git(dir, "add", "old.txt");
+        git(dir, "commit", "-q", "-m", "init");
+        git(dir, "mv", "old.txt", "new.txt");
+        git(dir, "commit", "-q", "-m", "rename");
+
+        GitRepositoryEntity repo = addRepo(GitRepositoryEntity.SOURCE_LOCAL, null, dir, "main", "main");
+        String head = service.listCommits(repo.getId(), null, null, null, null).items().get(0).sha();
+
+        // 按新路径过滤改名条目：numstat 与 patch 都能命中
+        RepoFileDiffView d = service.fileDiff(repo.getId(), head, "new.txt", "old.txt");
+        assertEquals("new.txt", d.path());
+        assertTrue(d.patch().contains("rename from old.txt"), () -> d.patch());
+        assertTrue(d.patch().contains("rename to new.txt"), () -> d.patch());
+    }
+
+    @Test
+    void fileDiffFlagsBinaryAndRejectsBadParams() throws Exception {
+        Path dir = initRepo("d3");
+        Files.write(dir.resolve("bin.dat"), new byte[]{0x00, 0x01, 0x02, 0x00, 0x03});
+        git(dir, "add", "bin.dat");
+        git(dir, "commit", "-q", "-m", "add binary");
+
+        GitRepositoryEntity repo = addRepo(GitRepositoryEntity.SOURCE_LOCAL, null, dir, "main", "main");
+        String head = service.listCommits(repo.getId(), null, null, null, null).items().get(0).sha();
+
+        RepoFileDiffView d = service.fileDiff(repo.getId(), head, "bin.dat", null);
+        assertTrue(d.binary());
+        assertNull(d.additions());
+        assertNull(d.deletions());
+        assertTrue(d.patch().contains("Binary files"), () -> d.patch());
+
+        // 非法 sha / 非法路径 → 400
+        DevMindException e = assertThrows(DevMindException.class,
+                () -> service.fileDiff(repo.getId(), "--help", "bin.dat", null));
+        assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
+        DevMindException e2 = assertThrows(DevMindException.class,
+                () -> service.fileDiff(repo.getId(), head, "  ", null));
+        assertEquals(ErrorCode.BAD_REQUEST, e2.getErrorCode());
+        assertTrue(e2.getMessage().contains("非法文件路径"), () -> e2.getMessage());
+    }
+
+    // ---------------- CAP-113 单文件原文 ----------------
+
+    @Test
+    void fileContentReturnsFullTextAndSize() throws Exception {
+        Path dir = initRepo("c1");
+        Files.writeString(dir.resolve("a.txt"), "你好 v1\n", StandardCharsets.UTF_8);
+        git(dir, "add", "a.txt");
+        git(dir, "commit", "-q", "-m", "init");
+        Files.writeString(dir.resolve("a.txt"), "你好 v2\n第二行\n", StandardCharsets.UTF_8);
+        git(dir, "add", "a.txt");
+        git(dir, "commit", "-q", "-m", "update");
+
+        GitRepositoryEntity repo = addRepo(GitRepositoryEntity.SOURCE_LOCAL, null, dir, "main", "main");
+        String head = service.listCommits(repo.getId(), null, null, null, null).items().get(0).sha();
+
+        RepoFileContentView c = service.fileContent(repo.getId(), head, "a.txt", false);
+        assertEquals("a.txt", c.path());
+        assertEquals(head, c.ref());
+        assertFalse(c.binary());
+        assertFalse(c.truncated());
+        assertEquals("你好 v2\n第二行\n", c.content());
+        assertEquals(c.content().getBytes(StandardCharsets.UTF_8).length, c.size());
+
+        // parent=true 取父提交版本
+        RepoFileContentView p = service.fileContent(repo.getId(), head, "a.txt", true);
+        assertEquals(head + "^", p.ref());
+        assertEquals("你好 v1\n", p.content());
+
+        // 文件在该提交不存在 → 400 可读
+        DevMindException e = assertThrows(DevMindException.class,
+                () -> service.fileContent(repo.getId(), head, "gone.txt", false));
+        assertEquals(ErrorCode.BAD_REQUEST, e.getErrorCode());
+        assertTrue(e.getMessage().contains("不存在"), () -> e.getMessage());
+    }
+
+    @Test
+    void fileContentFlagsBinaryAndTruncatesHuge() throws Exception {
+        Path dir = initRepo("c2");
+        Files.write(dir.resolve("bin.dat"), new byte[]{0x01, 0x00, 0x02, 0x03});
+        // 600KB 文本 → 超 512KB 上限截断
+        StringBuilder big = new StringBuilder();
+        for (int i = 0; i < 40_000; i++) {
+            big.append("0123456789abcdef\n");
+        }
+        Files.writeString(dir.resolve("big.txt"), big.toString(), StandardCharsets.UTF_8);
+        git(dir, "add", "bin.dat", "big.txt");
+        git(dir, "commit", "-q", "-m", "files");
+
+        GitRepositoryEntity repo = addRepo(GitRepositoryEntity.SOURCE_LOCAL, null, dir, "main", "main");
+        String head = service.listCommits(repo.getId(), null, null, null, null).items().get(0).sha();
+
+        RepoFileContentView bin = service.fileContent(repo.getId(), head, "bin.dat", false);
+        assertTrue(bin.binary());
+        assertEquals("", bin.content());
+
+        RepoFileContentView huge = service.fileContent(repo.getId(), head, "big.txt", false);
+        assertTrue(huge.truncated());
+        assertEquals("", huge.content());
+        assertTrue(huge.size() > 512 * 1024);
     }
 }

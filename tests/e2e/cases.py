@@ -1780,6 +1780,71 @@ exit 1
         self.assertEqual(1, len(reimported_ids))
         self.assertNotEqual(imported_ids[0], reimported_ids[0])
 
+    # ---------------- CAP-113 代码库提交文件 diff 与原文 ----------------
+
+    def test_repo_commit_file_diff_and_content(self):
+        path = self.workspace / ("repo-" + uuid.uuid4().hex[:8])
+        path.mkdir()
+        env = dict(os.environ)
+        for key in [k for k in env if k.startswith("GIT_AUTHOR") or k.startswith("GIT_COMMITTER")]:
+            del env[key]
+        env.update({"GIT_AUTHOR_NAME": "e2e", "GIT_AUTHOR_EMAIL": "e2e@devmind.local",
+                    "GIT_COMMITTER_NAME": "e2e", "GIT_COMMITTER_EMAIL": "e2e@devmind.local"})
+
+        def git(*args):
+            subprocess.run(["git", *args], cwd=path, check=True, capture_output=True, env=env)
+
+        git("init", "--initial-branch=main")
+        (path / "a.txt").write_text("l1\nl2\nl3\n", encoding="utf-8")
+        (path / "gone.txt").write_text("bye\n", encoding="utf-8")
+        git("add", ".")
+        git("commit", "-q", "-m", "init")
+        (path / "a.txt").write_text("l1\nl2x\nl4\n", encoding="utf-8")
+        git("rm", "-q", "gone.txt")
+        git("add", "a.txt")
+        git("commit", "-q", "-m", "modify a delete gone")
+
+        repo = self.api.request("POST", "/repos", {
+            "name": "e2e-repo-" + uuid.uuid4().hex[:8], "sourceType": "LOCAL",
+            "localPath": path.as_posix(), "defaultBranch": "main"})
+        repo_id = str(repo["id"])
+        self.addCleanup(self.api.request, "DELETE", "/repos/" + repo_id)
+
+        page = self.api.request("GET", f"/repos/{repo_id}/commits")
+        self.assertEqual(2, page["total"])
+        head = page["items"][0]["sha"]
+        detail = self.api.request("GET", f"/repos/{repo_id}/commits/{head}")
+        files = {f["path"]: f for f in detail["files"]}
+        self.assertEqual("M", files["a.txt"]["status"])
+        self.assertEqual("D", files["gone.txt"]["status"])
+
+        # 单文件 diff：patch 含增删行，numstat 统计正确
+        diff = self.api.request("GET", f"/repos/{repo_id}/commits/{head}/file-diff?path=a.txt")
+        self.assertEqual(2, diff["additions"])
+        self.assertEqual(2, diff["deletions"])
+        self.assertFalse(diff["binary"])
+        self.assertFalse(diff["truncated"])
+        self.assertIn("+l2x", diff["patch"])
+        self.assertIn("-l2", diff["patch"])
+        deleted_diff = self.api.request(
+            "GET", f"/repos/{repo_id}/commits/{head}/file-diff?path=gone.txt")
+        self.assertEqual(1, deleted_diff["deletions"])
+
+        # 原文：当前提交全文；删除文件 parent=true 取父提交版本
+        content = self.api.request(
+            "GET", f"/repos/{repo_id}/commits/{head}/file-content?path=a.txt")
+        self.assertEqual("l1\nl2x\nl4\n", content["content"])
+        self.assertFalse(content["binary"])
+        self.assertFalse(content["truncated"])
+        gone = self.api.request(
+            "GET", f"/repos/{repo_id}/commits/{head}/file-content?path=gone.txt&parent=true")
+        self.assertEqual("bye\n", gone["content"])
+        # 已删除文件不带 parent → 400；非法 sha → 400
+        self.api.request("GET", f"/repos/{repo_id}/commits/{head}/file-content?path=gone.txt",
+                         expected=400)
+        self.api.request("GET", f"/repos/{repo_id}/commits/--help/file-diff?path=a.txt",
+                         expected=400)
+
 
 class CopilotContract(unittest.TestCase):
     """Migrated from cap76_tools_contract.py; GET-only, requires admin."""

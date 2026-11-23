@@ -6,6 +6,8 @@ import com.devmind.common.exception.ErrorCode;
 import com.devmind.common.util.GitCli;
 import com.devmind.integration.dto.RepoCommitDetailView;
 import com.devmind.integration.dto.RepoCommitView;
+import com.devmind.integration.dto.RepoFileContentView;
+import com.devmind.integration.dto.RepoFileDiffView;
 import com.devmind.project.model.GitRepositoryEntity;
 import com.devmind.project.repo.GitRepositoryRepository;
 import org.springframework.stereotype.Service;
@@ -27,6 +29,10 @@ import java.util.regex.Pattern;
  *   <li>提交详情：{@code git show --no-patch} 取元信息+正文，{@code git show --name-status -z
  *       --first-parent} 取变更文件（NUL 分隔机读，merge 提交按第一父 diff）；sha 参数
  *       走 ^[0-9a-fA-F]{4,40}$ 白名单防注入。</li>
+ *   <li>CAP-113 单文件 diff/原文：{@code git show -m --first-parent --patch <sha> -- <path>}
+ *       取 patch（与文件清单同第一父口径）、{@code --numstat} 取增删行数（二进制输出 "-"），
+ *       原文先 {@code git cat-file -s} 取体积超限即截断、再 {@code git show <ref>:<path>}；
+ *       path 拒空白/NUL/控制字符，经 -- 分隔不过 shell。</li>
  * </ul>
  */
 @Service
@@ -35,6 +41,12 @@ public class GitRepoOpsService {
     private static final int DEFAULT_SIZE = 20;
     private static final int MAX_SIZE = 100;
     private static final int GIT_TIMEOUT_SEC = 30;
+    /** CAP-113：patch 行数上限（超出截断，防大文件撑爆响应） */
+    private static final int MAX_PATCH_LINES = 2000;
+    /** CAP-113：原文字节上限（超出不拉内容） */
+    private static final long MAX_CONTENT_BYTES = 512 * 1024;
+    /** CAP-113：二进制嗅探窗口（前 8K 字符含 NUL 即二进制） */
+    private static final int BINARY_SNIFF_CHARS = 8192;
     /** git log %x1f 字段分隔符（0x1f 单元分隔符） */
     private static final String FIELD_SEP = String.valueOf((char) 0x1f);
     /** 提交哈希白名单（完整或前缀，防 git 参数注入） */
@@ -110,10 +122,7 @@ public class GitRepoOpsService {
     public RepoCommitDetailView commitDetail(Long id, String sha) {
         GitRepositoryEntity repo = requireRepo(id);
         Path path = requireGitDir(repo);
-        String s = sha == null ? "" : sha.strip();
-        if (!SHA_PATTERN.matcher(s).matches()) {
-            throw new DevMindException(ErrorCode.BAD_REQUEST, "非法提交哈希: " + s);
-        }
+        String s = requireValidSha(sha);
         GitCli.Result meta = GitCli.run(path, GIT_TIMEOUT_SEC,
                 "git", "show", "--no-patch", "--date=format:%Y-%m-%d %H:%M:%S",
                 "--format=%H%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%b", s);
@@ -129,12 +138,131 @@ public class GitRepoOpsService {
                 parseNameStatus(files.out()));
     }
 
+    // ---------------- CAP-113 单文件 diff / 原文 ----------------
+
+    /**
+     * 单文件 diff：patch 为 unified diff 原文（-m --first-parent 与文件清单同口径），
+     * 增删行数取 numstat（二进制行输出 "-" → binary=true）；patch 超 MAX_PATCH_LINES
+     * 行截断。改名/复制须同时传 oldPath——pathspec 只含新路径会让 rename 检测配不上对
+     * 而落为「新文件」假相（E2E 实炸点）。文件不在该提交变更中（numstat/patch 均空）
+     * → 400 可读提示。
+     */
+    public RepoFileDiffView fileDiff(Long id, String sha, String path, String oldPath) {
+        GitRepositoryEntity repo = requireRepo(id);
+        Path dir = requireGitDir(repo);
+        String s = requireValidSha(sha);
+        String p = requireValidPath(path);
+        List<String> pathspec = new ArrayList<>(List.of("--", p));
+        if (oldPath != null && !oldPath.isBlank()) {
+            pathspec.add(requireValidPath(oldPath));
+        }
+        GitCli.Result stat = GitCli.run(dir, GIT_TIMEOUT_SEC, concat(
+                List.of("git", "show", "--format=", "--numstat", "--first-parent", s), pathspec));
+        GitCli.requireOk(stat, List.of("git", "show", "--numstat", s));
+        GitCli.Result patchR = GitCli.run(dir, GIT_TIMEOUT_SEC, concat(
+                List.of("git", "show", "-m", "--first-parent", "--format=", "--patch", s), pathspec));
+        GitCli.requireOk(patchR, List.of("git", "show", s));
+        String[] statFields = firstLine(stat.out()).split("\t", -1);
+        if (statFields.length < 3) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "文件不在该提交的变更清单中: " + p);
+        }
+        boolean binary = "-".equals(statFields[0]);
+        Integer adds = binary ? null : Integer.valueOf(statFields[0]);
+        Integer dels = binary ? null : Integer.valueOf(statFields[1]);
+        String patch = patchR.out();
+        boolean truncated = false;
+        String[] lines = patch.split("\\R", -1);
+        if (lines.length > MAX_PATCH_LINES) {
+            truncated = true;
+            patch = String.join("\n", List.of(lines).subList(0, MAX_PATCH_LINES));
+        }
+        return new RepoFileDiffView(p, adds, dels, binary, truncated, patch);
+    }
+
+    /**
+     * 单文件原文：ref=sha（parent=true 时 sha^，删除文件看删除前内容）；先 cat-file -s
+     * 取体积，超 MAX_CONTENT_BYTES 直接截断不拉内容；前 8K 字符含 NUL 判 binary。
+     */
+    public RepoFileContentView fileContent(Long id, String sha, String path, boolean parent) {
+        GitRepositoryEntity repo = requireRepo(id);
+        Path dir = requireGitDir(repo);
+        String s = requireValidSha(sha);
+        String p = requireValidPath(path);
+        String ref = parent ? s + "^" : s;
+        String spec = ref + ":" + p;
+        GitCli.Result sizeR = GitCli.run(dir, GIT_TIMEOUT_SEC, "git", "cat-file", "-s", spec);
+        if (sizeR.exitCode() != 0) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST,
+                    "文件在该提交不存在（parent=true 时根提交无父提交）: " + p);
+        }
+        long size = Long.parseLong(sizeR.out().strip());
+        if (size > MAX_CONTENT_BYTES) {
+            return new RepoFileContentView(p, ref, size, false, true, "");
+        }
+        GitCli.Result contentR = GitCli.run(dir, GIT_TIMEOUT_SEC, "git", "show", spec);
+        GitCli.requireOk(contentR, List.of("git", "show", spec));
+        String content = contentR.out();
+        if (isBinary(content)) {
+            return new RepoFileContentView(p, ref, size, true, false, "");
+        }
+        return new RepoFileContentView(p, ref, size, false, false, content);
+    }
+
+    /** 二进制嗅探：前 BINARY_SNIFF_CHARS 字符含 NUL（UTF-8 解码后仍保留 \0）。 */
+    private static boolean isBinary(String content) {
+        int n = Math.min(content.length(), BINARY_SNIFF_CHARS);
+        for (int i = 0; i < n; i++) {
+            if (content.charAt(i) == '\0') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String[] concat(List<String> head, List<String> tail) {
+        List<String> all = new ArrayList<>(head);
+        all.addAll(tail);
+        return all.toArray(new String[0]);
+    }
+
+    private static String firstLine(String out) {
+        for (String line : out.split("\\R")) {
+            if (!line.isBlank()) {
+                return line;
+            }
+        }
+        return "";
+    }
+
+    /** sha 白名单（完整或前缀，防 git 参数注入）。 */
+    private static String requireValidSha(String sha) {
+        String s = sha == null ? "" : sha.strip();
+        if (!SHA_PATTERN.matcher(s).matches()) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "非法提交哈希: " + s);
+        }
+        return s;
+    }
+
+    /** 路径校验：拒空白/超长/NUL 与控制字符（git rev:path 只解析树内路径，越界由 git 报错）。 */
+    private static String requireValidPath(String path) {
+        String p = path == null ? "" : path.strip();
+        if (p.isEmpty() || p.length() > 512) {
+            throw new DevMindException(ErrorCode.BAD_REQUEST, "非法文件路径（空或超长）");
+        }
+        for (int i = 0; i < p.length(); i++) {
+            if (p.charAt(i) < 0x20) {
+                throw new DevMindException(ErrorCode.BAD_REQUEST, "非法文件路径（含控制字符）");
+            }
+        }
+        return p;
+    }
+
     /**
      * name-status -z 输出机读解析：普通状态「M\0path\0」，改名/复制「R100\0old\0new\0」。
      * Java split 默认丢弃尾部空串，故末个 NUL 后无残留空 token。
      */
-    private static List<RepoCommitDetailView.FileChange> parseNameStatus(String out) {
-        List<RepoCommitDetailView.FileChange> rows = new ArrayList<>();
+    private static List<RepoCommitDetailView.FileChange> parseNameStatus(String out) {        List<RepoCommitDetailView.FileChange> rows = new ArrayList<>();
         String[] tokens = out.split("\0");
         for (int i = 0; i < tokens.length; i++) {
             String status = tokens[i];

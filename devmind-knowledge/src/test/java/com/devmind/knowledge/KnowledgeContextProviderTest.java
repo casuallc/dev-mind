@@ -11,9 +11,13 @@ import com.devmind.knowledge.config.KnowledgeProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -156,5 +160,29 @@ class KnowledgeContextProviderTest {
 
         assertTrue(c.claudeMdSections().isEmpty());
         assertNotNull(c.settingsLocalJson());
+    }
+
+    @Test
+    void settingsWhitelistCoversCommonDevToolchains() {
+        ContextContribution c = provider.contribute(req(List.of(), "任意任务", false));
+
+        JsonNode allow = new ObjectMapper().readTree(c.settingsLocalJson())
+                .path("permissions").path("allow");
+        assertTrue(allow.isArray(), "settingsLocalJson 必须是合法 JSON 且含 permissions.allow 数组");
+        Set<String> entries = new HashSet<>();
+        for (JsonNode e : allow) {
+            entries.add(e.asText());
+        }
+        // 钉死白名单内容防误删：git / JVM(mvn·java·gradle) / Node(npm·node·npx)
+        // / Python(python·python3·py·pip·pip3·pytest·uv) + Edit/Write/Read
+        List<String> expected = List.of(
+                "Bash(git:*)", "Bash(mvn:*)", "Bash(java:*)", "Bash(gradle:*)",
+                "Bash(npm:*)", "Bash(node:*)", "Bash(npx:*)",
+                "Bash(python:*)", "Bash(python3:*)", "Bash(py:*)",
+                "Bash(pip:*)", "Bash(pip3:*)", "Bash(pytest:*)", "Bash(uv:*)",
+                "Edit", "Write", "Read");
+        for (String entry : expected) {
+            assertTrue(entries.contains(entry), "permissions.allow 缺少条目: " + entry);
+        }
     }
 }
