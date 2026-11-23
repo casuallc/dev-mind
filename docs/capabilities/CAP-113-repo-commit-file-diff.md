@@ -22,8 +22,9 @@ CAP-111 提交日志查看器已支持展开提交看变更文件清单，但点
 ### 文件 Diff 与原文查看（M1）
 
 - **FR-01 单文件 diff 端点**：新增 `GET /api/repos/{id}/commits/{sha}/file-diff?path=`，
-  返回 `RepoFileDiffView{path, oldPath?, status, additions, deletions, binary,
-  truncated, patch}`。patch 为 `git show -m --first-parent --format= --patch
+  返回 `RepoFileDiffView{path, additions, deletions, binary, truncated, patch}`
+  （oldPath/status 前端从变更清单 FileChange 已知，不重复返回）。
+  patch 为 `git show -m --first-parent --format= --patch
   <sha> -- <path>` 的 unified diff 原文（含 diff --git/index/---/+++ 头与 @@ hunk）；
   additions/deletions 取自 `git show --numstat`（同 pathspec 过滤），二进制文件
   numstat 输出 `- -` → binary=true 且 patch 可能只有 "Binary files differ" 提示行；
