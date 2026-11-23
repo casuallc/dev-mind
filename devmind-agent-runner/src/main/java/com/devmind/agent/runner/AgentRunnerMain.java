@@ -912,10 +912,12 @@ public class AgentRunnerMain {
             ack.put("type", "terminal_ws_prepare_ack");
             ack.put("requestId", requestId);
             try {
-                if (workspaceKey.isBlank() || !workspaceKey.startsWith("term-")
+                if (workspaceKey.isBlank()
+                        || !(workspaceKey.startsWith("term-") || workspaceKey.startsWith("req-")
+                                || workspaceKey.startsWith("sid-"))
                         || projectId.isBlank() || owner.isBlank() || specs.isEmpty()) {
                     throw new IllegalStateException(
-                            "terminal_ws_prepare 帧缺字段（workspaceKey(term- 前缀)/projectId/workspaceOwner/repos 必填）");
+                            "terminal_ws_prepare 帧缺字段（workspaceKey(term-/req-/sid- 前缀)/projectId/workspaceOwner/repos 必填）");
                 }
                 RunnerWorkspace.MultiCtx ctx = workspace.prepareMulti(workspaceKey, projectId, owner,
                         workspaceKey, specs);
