@@ -1,13 +1,15 @@
 # CAP-115 Worktree 终端（基于 bash 直接操作 git worktree 的轻量改动入口）
 
-> 能力 ID：CAP-115 ｜ 分类：组装层 ｜ 状态：设计定稿 ｜ 日期：2026-11-23
+> 能力 ID：CAP-115 ｜ 分类：组装层 ｜ 状态：**已完成（M1/M2/M3 全部落地并 E2E 通过）** ｜ 日期：2026-11-23
 > 决策记录：终端工作区登记**不依赖 coding 会话**——新建 `terminal_workspaces` 表作为
 > worktree 的独立登记载体（对齐 session_repos 的 repos_json 快照语义）；runner 侧目录
 > 物化复用 `RunnerWorkspace.ensureUserWorktree` 幂等语义（目录存在且分支匹配即复用），
 > 新增 `terminal_ws_prepare` 帧（协议 v26）只做「物化 + 绑定登记」；命令执行**复用既有
 > terminal exec 链路**（协议 v16/17 的 PersistentShell），sessionId 用 `term-<id>` 伪 id；
-> 收口抽取 `WorkspaceFinalizeCore` 内核供会话/需求/终端三入口共用，runner 侧
-> `RunnerWorkspace.finalize` 零改动；写锁、危险命令二次确认（428 + 短码）、心跳/挂起
+> 收口抽取 `WorkspaceFinalizeCore` 内核供会话/需求/终端三入口共用；runner 侧
+> `RunnerWorkspace.finalize/release` 的布局判定由 `specs.size()>1` 改为按 worktree/缓存
+> 实物证据逐库识别（终端工作区单库也走 prepareMulti 多库布局，size 判据必误判，
+> M3 E2E 暴露后修复）；写锁、危险命令二次确认（428 + 短码）、心跳/挂起
 > 语义均在服务端落地，runner 白名单强制校验红线不变。
 
 ## 1. 目的
