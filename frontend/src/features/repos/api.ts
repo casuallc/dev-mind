@@ -6,6 +6,8 @@ import type {
   PageViewResult,
   RepoCommitDetail,
   RepoCommitView,
+  RepoFileContent,
+  RepoFileDiff,
 } from './types'
 
 /** CAP-109：keyword 匹配名称/远端/本地路径（后端 DB lower like）；status 可选 ACTIVE/DISABLED */
@@ -46,3 +48,25 @@ export const listRepoCommits = (
 /** 提交详情：完整提交信息 + 变更文件清单 */
 export const getRepoCommit = (id: number, sha: string) =>
   api.get<RepoCommitDetail>(`/repos/${id}/commits/${sha}`)
+
+// ---------------- CAP-113 单文件 diff / 原文 ----------------
+
+/** 单文件 diff：unified patch + 增删行数；改名须带 oldPath（pathspec 配对 rename 检测） */
+export const getRepoFileDiff = (id: number, sha: string, path: string, oldPath?: string | null) => {
+  const params = new URLSearchParams()
+  params.set('path', path)
+  if (oldPath) params.set('oldPath', oldPath)
+  return api.get<RepoFileDiff>(`/repos/${id}/commits/${sha}/file-diff?${params}`)
+}
+/** 单文件原文：parent=true 取父提交版本（删除文件看删除前内容） */
+export const getRepoFileContent = (
+  id: number,
+  sha: string,
+  path: string,
+  parent?: boolean,
+) => {
+  const params = new URLSearchParams()
+  params.set('path', path)
+  if (parent) params.set('parent', 'true')
+  return api.get<RepoFileContent>(`/repos/${id}/commits/${sha}/file-content?${params}`)
+}

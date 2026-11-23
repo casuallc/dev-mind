@@ -4,11 +4,12 @@ import { useEffect, useState } from 'react'
 import { Button, Drawer, Input, Select, Space, Spin, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { fetchRepo, getRepoCommit, listRepoCommits } from '../api'
-import type { GitRepo, RepoCommitDetail, RepoCommitView } from '../types'
+import type { GitRepo, RepoCommitDetail, RepoCommitFile, RepoCommitView } from '../types'
 import { fmtTime } from '../../../shared/utils/format'
 import { showError } from '../../../shared/utils/showError'
 import { DRAWER_DEFAULT } from '../../../shared/utils/overlay'
 import { usePermissions } from '../../auth/usePermissions'
+import RepoFileViewDrawer from './RepoFileViewDrawer'
 
 interface Props {
   open: boolean
@@ -18,8 +19,8 @@ interface Props {
   onFetched?: () => void
 }
 
-/** git name-status 首字符 → 标签（status 可能是 R100 这类带分数值） */
-const FILE_STATUS: Record<string, { color: string; label: string }> = {
+/** git name-status 首字符 → 标签（status 可能是 R100 这类带分数值）；CAP-113 文件查看抽屉共用 */
+export const FILE_STATUS: Record<string, { color: string; label: string }> = {
   A: { color: 'green', label: '新增' },
   M: { color: 'blue', label: '修改' },
   D: { color: 'red', label: '删除' },
@@ -42,6 +43,8 @@ export default function RepoCommitsDrawer({ open, repo, onCancel, onFetched }: P
   // 展开行详情缓存：sha → 详情（undefined = 加载中）
   const [expandedKeys, setExpandedKeys] = useState<string[]>([])
   const [details, setDetails] = useState<Record<string, RepoCommitDetail | undefined>>({})
+  // CAP-113 文件查看抽屉（diff / 原文）
+  const [fileView, setFileView] = useState<{ sha: string; file: RepoCommitFile } | null>(null)
 
   const cloneReady = repo?.sourceType === 'CLONE' && repo?.cloneStatus === 'READY'
 
@@ -70,6 +73,7 @@ export default function RepoCommitsDrawer({ open, repo, onCancel, onFetched }: P
       setTotal(0)
       setExpandedKeys([])
       setDetails({})
+      setFileView(null)
       setLoading(true)
       listRepoCommits(repo.id, { branch: repo.defaultBranch || undefined, page: 0, size: 20 })
         .then((r) => {
@@ -151,9 +155,13 @@ export default function RepoCommitsDrawer({ open, repo, onCancel, onFetched }: P
               title: `文件（${d.files.length}）`,
               dataIndex: 'path',
               render: (p: string, f) => (
-                <Typography.Text style={{ fontFamily: 'monospace' }}>
+                // CAP-113：点击路径打开文件查看抽屉（变更对比 / 查看原文）
+                <Typography.Link
+                  style={{ fontFamily: 'monospace' }}
+                  onClick={() => setFileView({ sha: d.sha, file: f })}
+                >
                   {f.oldPath ? `${f.oldPath} → ${p}` : p}
-                </Typography.Text>
+                </Typography.Link>
               ),
             },
           ]}
@@ -253,6 +261,13 @@ export default function RepoCommitsDrawer({ open, repo, onCancel, onFetched }: P
           },
         }}
         locale={{ emptyText: keyword ? '无匹配提交' : '该分支暂无提交' }}
+      />
+      <RepoFileViewDrawer
+        open={fileView != null}
+        repoId={repo?.id ?? null}
+        sha={fileView?.sha ?? null}
+        file={fileView?.file ?? null}
+        onClose={() => setFileView(null)}
       />
     </Drawer>
   )
