@@ -73,3 +73,23 @@ export interface RepoCommitDetail {
   body: string
   files: RepoCommitFile[]
 }
+
+/** CAP-113 FR-01 单文件 diff（对应后端 RepoFileDiffView；patch 为 unified diff 原文） */
+export interface RepoFileDiff {
+  path: string
+  additions?: number | null
+  deletions?: number | null
+  binary: boolean
+  truncated: boolean
+  patch: string
+}
+
+/** CAP-113 FR-02 单文件原文（对应后端 RepoFileContentView） */
+export interface RepoFileContent {
+  path: string
+  ref: string
+  size: number
+  binary: boolean
+  truncated: boolean
+  content: string
+}

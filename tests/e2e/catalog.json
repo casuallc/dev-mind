@@ -173,6 +173,13 @@
       "cap": "CAP-110"
     },
     {
+      "id": "regression.repo-commit-file-diff",
+      "test": "Regression.test_repo_commit_file_diff_and_content",
+      "suite": "regression",
+      "owner": "integration",
+      "cap": "CAP-113"
+    },
+    {
       "id": "regression.jira-manual-link-sync-reimport",
       "test": "Regression.test_jira_manual_link_and_sync_reimport",
       "suite": "regression",
