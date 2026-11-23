@@ -26,7 +26,11 @@ import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -236,10 +240,19 @@ public class TerminalSessionService {
         return queryPayload(ent, "tree", path);
     }
 
-    /** 文件内容（复用 CAP-54 workspace_query file 只读帧；无需持锁）。 */
+    /**
+     * 文件内容（复用 CAP-54 workspace_query file 只读帧；无需持锁）。
+     * 附算 sha（UTF-8 内容的 sha256，与 runner 侧字节级口径一致——合法 UTF-8 文件完全相等）：
+     * 前端编辑器据此回传 expectedSha 做乐观锁。
+     */
     public Map<String, Object> fileRead(String workspaceId, String path) {
         TerminalWorkspaceEntity ent = workspaceService.require(workspaceId);
-        return queryPayload(ent, "file", path);
+        Map<String, Object> payload = new HashMap<>(queryPayload(ent, "file", path));
+        Object content = payload.get("content");
+        if (content instanceof String s) {
+            payload.put("sha", sha256Hex(s.getBytes(StandardCharsets.UTF_8)));
+        }
+        return payload;
     }
 
     /**
@@ -405,6 +418,20 @@ public class TerminalSessionService {
 
     private static Long asLong(Object v) {
         return v instanceof Number n ? n.longValue() : null;
+    }
+
+    /** 与 runner 侧 AgentRunnerMain.sha256Hex 同口径（小写 hex） */
+    private static String sha256Hex(byte[] data) {
+        try {
+            byte[] d = MessageDigest.getInstance("SHA-256").digest(data);
+            StringBuilder sb = new StringBuilder(d.length * 2);
+            for (byte b : d) {
+                sb.append(Character.forDigit((b >> 4) & 0xF, 16)).append(Character.forDigit(b & 0xF, 16));
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private AgentNodeConnector requireConnector() {

@@ -383,6 +383,10 @@ class TerminalSessionServiceTest {
         assertTrue(tree.containsKey("entries"));
         Map<String, Object> file = h.service.fileRead(e.getId(), "a.txt");
         assertTrue(file.containsKey("entries"));
+        // file 附算 content 的 sha（乐观锁 expectedSha 回传用）；无 content 不附
+        h.queryPayload.set(0, Map.of("content", "foo"));
+        assertEquals("2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+                h.service.fileRead(e.getId(), "b.txt").get("sha"), "content=foo 的 sha256");
     }
 
     @Test
