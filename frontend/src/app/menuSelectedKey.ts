@@ -13,6 +13,7 @@ const SELECT_PREFIXES: Array<[string, string]> = [
   ['/admin/knowledge', '/admin/knowledge'], // 库列表 + 库详情（/admin/knowledge/bases/:id 高亮知识库）
   ['/projects/', '/requirements'], // /projects/:id/requirements/:rid → 需求
   ['/context', '/context'],
+  ['/terminal-workspaces', '/terminal-workspaces'],
   ['/chats', '/chats'],
   ['/active-sessions', '/active-sessions'],
   ['/bookmarks', '/bookmarks'],
@@ -45,6 +46,7 @@ const TOPNAV_PREFIXES: Array<[string, string]> = [
   ['/settings', '/settings'], // 一级导航「设置」
   ['/overview', '/overview'],
   ['/sessions', '/overview'],
+  ['/terminal-workspaces', '/overview'],
   ['/requirements', '/overview'],
   ['/context', '/overview'],
   ['/builds', '/overview'],
