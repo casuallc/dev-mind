@@ -37,10 +37,17 @@ public class KnowledgeContextProvider implements ContextProvider {
     /** 检索 query 截断上限：任务说明可能很长，取尾部（通常是真正的任务描述）。 */
     private static final int QUERY_MAX = 1000;
 
-    /** 注入会话工作区的权限白名单（服务端策略，物化由 runner 完成）。 */
+    /**
+     * 注入会话工作区的权限白名单（服务端策略，物化由 runner 完成）。
+     * 覆盖 git / JVM（mvn·java·gradle）/ Node（npm·node·npx）/ Python（python·py·pip·pytest·uv）
+     * 常用开发工具链；claude 权限规则按命令名前缀匹配，每个命令名单独列出。
+     */
     public static final String SETTINGS_LOCAL_JSON = "{\n" +
             "  \"permissions\": {\n" +
-            "    \"allow\": [\"Bash(npm:*)\", \"Bash(mvn:*)\", \"Bash(git:*)\", \"Edit\", \"Write\", \"Read\"]\n" +
+            "    \"allow\": [\"Bash(git:*)\", \"Bash(mvn:*)\", \"Bash(java:*)\", \"Bash(gradle:*)\", " +
+            "\"Bash(npm:*)\", \"Bash(node:*)\", \"Bash(npx:*)\", \"Bash(python:*)\", \"Bash(python3:*)\", " +
+            "\"Bash(py:*)\", \"Bash(pip:*)\", \"Bash(pip3:*)\", \"Bash(pytest:*)\", \"Bash(uv:*)\", " +
+            "\"Edit\", \"Write\", \"Read\"]\n" +
             "  }\n" +
             "}\n";
 
