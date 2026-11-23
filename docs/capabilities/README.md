@@ -132,6 +132,7 @@
 | [CAP-112](CAP-112-requirement-jira-manual-link.md) | 需求手动关联已有 Jira issue | 集成（需求主线） | 已交付（2026-11-18） | 平台需求一键挂到既有 Jira issue 并转 Jira 托管，清理删除残留关联 + 同步自愈 |
 | [CAP-113](CAP-113-repo-commit-file-diff.md) | 代码库提交文件 Diff 与原文查看 | 管理 | 已实现（2026-11-23） | 提交详情点击变更文件看逐行 diff（着色+行号+增删统计）与提交时完整原文（落地 CAP-111 O1） |
 | [CAP-114](CAP-114-workspace-scheduled-cleanup.md) | 会话工作区定时清理 | 会话 | 已实现（2026-11-23） | 平台级定时清理超龄终态会话工作区（复用 workspace_release 丢弃式释放链路），策略在设置页「工作区清理」tab 可视化配置 + 立即执行 + 结果通知 |
+| [CAP-115](CAP-115-worktree-terminal.md) | Worktree 终端 | 会话 | 设计定稿（2026-11-23） | 基于 bash 直接操作 git worktree 的轻量改动入口：terminal_workspaces 独立登记载体 + terminal_ws_prepare 物化帧（协议 v26）+ 写锁/占用预检，bash 终端通道（写 Profile/危险命令二次确认/文件最小读写）+ worktree 列表页与终端面板，收口复用抽取的 finalize 内核（文本短码确认）+ 定期提醒与清理纳入 |
 
 ## 持续助手实施主线（规划，均未实施）
 
